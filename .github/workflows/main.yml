@@ -1,0 +1,16 @@
+name: Build APK
+
+on:
+workflow_dispatch:
+
+jobs:
+build:
+runs-on: ubuntu-latest
+steps:
+- name: Download project ZIP
+uses: actions/checkout@v4
+
+  - name: Extract project
+    run: |
+      unzip -o large-pami-android-project.zip -d project
+      find project -maxdepth 4 -type f | head -100
