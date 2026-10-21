@@ -14,7 +14,7 @@ steps:
   - name: Extract project ZIP
     run: |
       unzip -o large-pami-android-project.zip -d project
-      find project -type f | head -100
+      find project -maxdepth 4 -type f | head -100
 
   - name: Upload project files for inspection
     uses: actions/upload-artifact@v4
