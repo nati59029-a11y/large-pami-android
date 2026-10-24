@@ -11,17 +11,49 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
       - name: Extract project ZIP
+        run: unzip -o large-pami-android-project-1.zip -d project
+
+      - name: Install dependencies
+        working-directory: project/android-app
+        run: npm install
+
+      - name: Prepare project
+        working-directory: project/android-app
+        run: node scripts/prepare.js
+
+      - name: Add Android platform
+        working-directory: project/android-app
+        run: npx cap add android
+
+      - name: Patch Android
+        working-directory: project/android-app
+        run: bash scripts/patch-android.sh
+
+      - name: Sync Android
+        working-directory: project/android-app
+        run: npx cap sync android
+
+      - name: Prepare debug keystore
+        working-directory: project/android-app
         run: |
-          unzip -o large-pami-android-project-1.zip -d project
-          cd project
-          npm install
-          npm run build
-          npx cap sync android
+          mkdir -p ~/.android
+          cp keystore/debug.keystore ~/.android/debug.keystore
 
       - name: Build Android APK
+        working-directory: project/android-app/android
         run: |
-          cd project/android
           chmod +x gradlew
           ./gradlew assembleDebug
 
@@ -29,4 +61,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: large-pami-apk
-          path: project/android/app/build/outputs/apk/debug/app-debug.apk
+          path: project/android-app/android/app/build/outputs/apk/debug/app-debug.apk
