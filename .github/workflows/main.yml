@@ -1,20 +1,32 @@
 name: Build Large Pami APK
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Extract project ZIP
-        run: unzip -o large-pami-android-project-1.zip -d project
+        run: |
+          unzip -o large-pami-android-project-1.zip -d project
+          cd project
+          npm install
+          npm run build
+          npx cap sync android
 
-      - name: Upload project files for inspection
+      - name: Build Android APK
+        run: |
+          cd project/android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: extracted-project
-          path: project/
+          name: large-pami-apk
+          path: project/android/app/build/outputs/apk/debug/app-debug.apk
