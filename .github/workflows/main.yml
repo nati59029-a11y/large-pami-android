@@ -22,7 +22,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - run: unzip -o large-pami-android-project-2.zip -d project
+      - run: unzip -o large-pami-android-project.zip -d project
 
       - name: Install dependencies
         working-directory: project/android-app
