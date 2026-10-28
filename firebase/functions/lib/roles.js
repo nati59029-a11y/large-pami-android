@@ -13,6 +13,8 @@ async function requireStaff(request) {
   const [admin, staff] = await Promise.all([db.doc('admins/' + uid).get(), db.doc('staff/' + uid).get()]);
   if (admin.exists) return { uid, role: 'manager', staff };
   if (staff.exists && staff.get('active') === true) return { uid, role: 'employee', staff };
+  // עובד מושבת מקבל סיבה נפרדת (על עצמו בלבד), כדי שהאפליקציה תוכל להציג "המשתמש הושבת".
+  if (staff.exists) throw new HttpsError('permission-denied', 'המשתמש הושבת. פנו למנהל.', { reason: 'staff-disabled' });
   throw new HttpsError('permission-denied', 'אין לך הרשאה לאפליקציה', { reason: 'not-staff' });
 }
 

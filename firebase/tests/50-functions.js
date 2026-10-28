@@ -17,8 +17,10 @@ const FN = ['scanDocument', 'registerPushToken', 'reportBackupStatus', 'getBacku
 const ROLE_EXPECT = { guest: 'UNAUTHENTICATED', signedIn: 'PERMISSION_DENIED', disabledEmployee: 'PERMISSION_DENIED', employee: 'OK', manager: 'OK' };
 const RESULTS = [];
 
+// כתובת אמולטור הפונקציות – מתוך firebase.json (האמולטור לא מפרסם אותה במשתנה סביבה)
+const FN_EMU = JSON.parse(fs.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).emulators.functions;
 function fnUrl(name) {
-  const host = process.env.FUNCTIONS_EMULATOR_HOST || '127.0.0.1:5001';
+  const host = process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`;
   return `http://${host}/${H.PROJECT_ID}/us-central1/${name}`;
 }
 async function call(name, uid, data) {
@@ -77,6 +79,8 @@ describe('פונקציות שרת (שלב 3)', () => {
       it(`${fn} × ${role}: ${ROLE_EXPECT[role] === 'OK' ? 'מצליח' : 'נדחה (' + ROLE_EXPECT[role] + ')'}`, async () => {
         const r = await call(fn, H.UID[role], VALID[fn]());
         assert.equal(r.status, ROLE_EXPECT[role], JSON.stringify(r.json));
+        if (role === 'signedIn') assert.equal(r.error.details.reason, 'not-staff');
+        if (role === 'disabledEmployee') assert.equal(r.error.details.reason, 'staff-disabled');
         if (ROLE_EXPECT[role] !== 'OK') {
           // אין תופעות לוואי לנדחה: לא נספר זיהוי, לא נרשם טלפון, לא עודכן גיבוי, ולא הגיעה בקשה ל-Gemini
           if (H.UID[role]) assert.equal(await usageOf(env, H.UID[role]), null);
