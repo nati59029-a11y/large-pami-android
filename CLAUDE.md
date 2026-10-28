@@ -15,9 +15,11 @@
 - בסיום כל שינוי יש למסור לבעל הפרויקט: שם הענף, קישור להרצת הבנייה / ל-APK, ורשימת דברים לבדוק בטלפון.
 
 ## מבנה הבנייה (חשוב)
-- ה-workflow `.github/workflows/main.yml` **בונה מתוך `large-pami-android-project.zip`** ולא מהקבצים שבשורש המאגר.
-  שינוי בקוד חייב להיכנס ל-zip הזה (לחלץ, לערוך, ולדחוס מחדש עם אותו מבנה תיקיות), אחרת הוא לא ייכנס ל-APK.
+- ה-workflow `.github/workflows/main.yml` **בונה מתוך התיקייה `app-source/`** (מעתיק אותה ל-`app/`), ולא מהקבצים שבשורש המאגר.
+  - הסבר: עד שלב 0 הבנייה פרסה את `large-pami-android-project.zip`. הקוד חולץ ל-`app-source/` כדי שיהיה אפשר לראות מה השתנה בין גרסאות, וה-zip נשאר במאגר כעותק זהה.
+  - **בתקופת המעבר `app-source/` וה-zip חייבים להיות זהים.** הבנייה מתחילה ב-`scripts/verify-source-matches-zip.py` ונעצרת אם יש הבדל. שינוי בקוד נעשה ב-`app-source/`, ואחריו דוחסים מחדש את ה-zip מתוך התיקייה (`cd app-source && zip -qr -X ../large-pami-android-project.zip .`, כולל קבצים נסתרים כמו `.github`). מריצים את הסקריפט לפני commit.
   - הקבצים שבשורש (`index.html`, `prepare.js`, `patch-android.sh` וכו') ושאר קובצי ה-zip הם עותקים ישנים/עזר.
+- **פרסום לטלפונים** (ה-release `latest`) קורה רק בדחיפה ל-`main` (כלומר מיזוג, שמותר רק אחרי אישור בעל הפרויקט בטלפון), או בהפעלה ידנית מ-`main` עם הסימון "publish". דחיפה לכל ענף אחר רק בונה APK (להורדה מ-Artifacts של ההרצה) ולא מפרסמת. אסור לשנות את שם הקובץ `main.yml`: מספר הגרסה הוא `1000 + GITHUB_RUN_NUMBER`.
 - שלבי הבנייה (בתוך התיקייה המחולצת): `npm install` ← `node scripts/prepare.js` ← `npx cap add android` ← `bash scripts/patch-android.sh` ← `npx cap sync android` ← `cd android && ./gradlew assembleDebug`.
 - הבנייה דורשת Node 20 ו-Java 17 (temurin) ו-Android SDK.
 

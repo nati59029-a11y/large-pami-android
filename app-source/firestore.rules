@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function isAdmin() {
+      return exists(/databases/$(db)/documents/admins/$(request.auth.uid));
+    }
+    match /admins/{u} {
+      allow read: if request.auth != null && request.auth.uid == u;
+    }
+    match /cfg/{d} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+    match /shelf/{d} {
+      allow read, write: if request.auth != null;
+    }
+    match /fb/{id} {
+      allow create: if request.auth != null
+        && request.resource.data.owner == request.auth.uid
+        && (request.resource.data.st == 'new' || isAdmin());
+      allow read: if isAdmin()
+        || (request.auth != null && resource.data.st == 'ok');
+      allow update, delete: if isAdmin();
+    }
+    match /bk/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /chunks/{cid} {
+      allow create: if request.auth != null && request.resource.data.owner == request.auth.uid;
+      allow read: if request.auth != null && (resource.data.owner == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+    match /inbox/{id} {
+      allow create: if request.auth != null
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.status == 'new'
+        && exists(/databases/$(db)/documents/chunks/$(id + '_0'));
+      allow read: if request.auth != null
+        && (resource.data.owner == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+  }
+}
