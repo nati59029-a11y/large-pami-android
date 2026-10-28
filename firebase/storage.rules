@@ -10,13 +10,11 @@ service firebase.storage {
   match /b/{bucket}/o {
 
     function isManager() {
-      return request.auth != null
-        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+      return request.auth != null && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
     }
 
     function isActiveEmployee() {
-      return request.auth != null
-        && firestore.exists(/databases/(default)/documents/staff/$(request.auth.uid))
+      return request.auth != null && firestore.exists(/databases/(default)/documents/staff/$(request.auth.uid))
         && firestore.get(/databases/(default)/documents/staff/$(request.auth.uid)).data.active == true;
     }
 

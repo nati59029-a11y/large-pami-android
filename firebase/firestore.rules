@@ -13,13 +13,11 @@ service cloud.firestore {
 
     // ---------- פונקציות עזר ----------
     function isManager() {
-      return request.auth != null
-        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
     function isActiveEmployee() {
-      return request.auth != null
-        && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+      return request.auth != null && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
         && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.active == true;
     }
 
