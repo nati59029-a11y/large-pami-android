@@ -68,9 +68,17 @@ service cloud.firestore {
 
     // chunks: יצירה בשמו – עובד פעיל (בטבלה למנהל אין יצירה; גם באפליקציה רק מכשיר עובד שולח).
     // קריאה – של עצמו, או מנהל. מחיקה – מנהל.
+    // הקשחה (שלב 3, לפי הערת הבודק בשלב 2): רק השדות owner ו-data, data עד 700,000 תווים
+    // (CH=700000 באפליקציה), וחלק 1 ומעלה ({id}_1, {id}_2…) רק אם חלק 0 של אותו פריט שייך לאותו עובד.
     match /chunks/{docId} {
       allow create: if isActiveEmployee() && !isManager()
-        && request.resource.data.owner == request.auth.uid;
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.keys().hasOnly(['owner', 'data'])
+        && request.resource.data.data is string
+        && request.resource.data.data.size() <= 700000
+        && (docId.matches('^.+_0$')
+            || (docId.matches('^.+_[1-9][0-9]*$')
+                && get(/databases/$(database)/documents/chunks/$(docId.replace('_[0-9]+$', '_0'))).data.owner == request.auth.uid));
       allow read: if isManager()
         || (isActiveEmployee() && resource.data.owner == request.auth.uid);
       allow delete: if isManager();
@@ -80,11 +88,13 @@ service cloud.firestore {
     // inbox: יצירה בשמו – עובד פעיל, בסטטוס 'new', ורק אחרי שהחלק הראשון של הצילום כבר ב-chunks (כמו היום).
     // (בטבלה למנהל אין יצירה; גם באפליקציה רק מכשיר עובד שולח.)
     // קריאה – של עצמו, או מנהל. עדכון ומחיקה – מנהל.
+    // הקשחה (שלב 3): החלק הראשון של הצילום שייך לאותו עובד, ורק השדות שהאפליקציה כותבת (pushItem).
     match /inbox/{docId} {
       allow create: if isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.status == 'new'
-        && exists(/databases/$(database)/documents/chunks/$(docId + '_0'));
+        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts'])
+        && get(/databases/$(database)/documents/chunks/$(docId + '_0')).data.owner == request.auth.uid;
       allow read: if isManager()
         || (isActiveEmployee() && resource.data.owner == request.auth.uid);
       allow update, delete: if isManager();
