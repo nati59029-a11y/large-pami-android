@@ -11,11 +11,37 @@ const PROMPTS = require('./prompts');
 // invoice  = ocrAI  (חשבונית / תעודת משלוח), עד 4 עמודים, temperature 0
 // product  = shAI   (צילום מוצר למדף), תמונה אחת, temperature 0.1
 // feedback = fbAI   (טופס משוב לקוחות), תמונה אחת או 4 (דף מלא + 3 הגדלות), temperature 0.1, מודל "pro", עד 150 שניות
-const KINDS = {
-  invoice: { minFiles: 1, maxFiles: 4, temperature: 0, pro: false, timeoutMs: 30000 },
-  product: { minFiles: 1, maxFiles: 1, temperature: 0.1, pro: false, timeoutMs: 30000 },
-  feedback: { allowedCounts: [1, 4], minFiles: 1, maxFiles: 4, temperature: 0.1, pro: true, timeoutMs: 150000 },
-};
+// timeoutMs = זמן מרבי למודל אחד (כמו באפליקציה היום).
+// budgetMs  = תקציב זמן כולל לכל הקריאה בשרת (כל המודלים, ההמתנות והניסיון החוזר יחד).
+//             תמיד קצר מהזמן שהטלפון מחכה (PHONE_WAIT_MS), כדי שהשרת יסיים ויחזיר תשובה לפני שהטלפון מוותר.
+const KINDS = Object.freeze({
+  invoice: { minFiles: 1, maxFiles: 4, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
+  product: { minFiles: 1, maxFiles: 1, temperature: 0.1, pro: false, timeoutMs: 30000, budgetMs: 100000 },
+  feedback: { allowedCounts: [1, 4], minFiles: 1, maxFiles: 4, temperature: 0.1, pro: true, timeoutMs: 150000, budgetMs: 135000 },
+});
+// בדיקת סוג הזיהוי מול רשימה קבועה בלבד. Object.hasOwn ולא KINDS[kind], כי KINDS[kind] "מוצא" גם שמות
+// שכל אובייקט ב-JavaScript מכיר מעצמו (__proto__, constructor, toString…) – פרצה שהבודק מצא בסבב 1.
+const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback']);
+function isKind(kind) {
+  return typeof kind === 'string' && KIND_NAMES.includes(kind) && Object.hasOwn(KINDS, kind) && Object.hasOwn(PROMPTS, kind);
+}
+function kindCfg(kind) {
+  if (!isKind(kind)) throw bad('סוג זיהוי לא מוכר', 'bad-kind', { allowed: KIND_NAMES.slice() });
+  return KINDS[kind];
+}
+// כמה זמן הטלפון מחכה לתשובה מ-scanDocument (לפי קוד האפליקציה בשלב 4, כפי שהועבר מהמתאם): חשבונית ומוצר 120 שניות, משוב 150.
+const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000 };
+
+// באמולטור בלבד: אפשר לקצר את כל הזמנים באותו יחס (SCAN_TIME_SCALE), כדי שבדיקות התקציב לא יחכו 100 שניות.
+// מחוץ לאמולטור היחס תמיד 1.
+function timeScale() {
+  const v = Number(process.env.SCAN_TIME_SCALE);
+  return process.env.FUNCTIONS_EMULATOR === 'true' && v > 0 && v <= 1 ? v : 1;
+}
+function timesFor(kind) {
+  const k = timeScale(), c = kindCfg(kind);
+  return { timeoutMs: Math.round(c.timeoutMs * k), budgetMs: Math.round(c.budgetMs * k) };
+}
 
 // ---------- סוג הקובץ: תמונה או PDF, לפי התוכן עצמו ולא רק לפי מה שהלקוח הצהיר ----------
 const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'];
@@ -39,8 +65,7 @@ function bad(message, reason, extra) {
 // מחזיר { kind, cfg, files: [{ mimeType, data(base64), bytes }] } או זורק שגיאה ברורה בעברית.
 function validateScanInput(data, maxFileBytes) {
   const kind = data.kind;
-  const cfg = KINDS[kind];
-  if (!cfg) throw bad('סוג זיהוי לא מוכר', 'bad-kind', { allowed: Object.keys(KINDS) });
+  const cfg = kindCfg(kind);
   const files = data.files;
   if (!Array.isArray(files) || files.length < cfg.minFiles || files.length > cfg.maxFiles
     || (cfg.allowedCounts && !cfg.allowedCounts.includes(files.length))) {
@@ -69,6 +94,7 @@ function validateScanInput(data, maxFileBytes) {
 
 // הבקשה ל-Gemini – בדיוק כמו באפליקציה.
 function buildGeminiBody(kind, files) {
+  const cfg = kindCfg(kind); // שוב, ליתר ביטחון: רק אחד משלושת הסוגים
   const img = (f) => ({ inline_data: { mime_type: f.mimeType, data: f.data } });
   let parts;
   if (kind === 'feedback') {
@@ -76,9 +102,9 @@ function buildGeminiBody(kind, files) {
     parts = [{ text: PROMPTS.feedback }];
     files.forEach((f, i) => { parts.push({ text: PROMPTS.feedbackCaptions[i] }, img(f)); });
   } else {
-    parts = [{ text: PROMPTS[kind] }].concat(files.map(img));
+    parts = [{ text: PROMPTS[kind] }].concat(files.map(img)); // kind כבר נבדק ב-kindCfg למעלה
   }
-  return { contents: [{ parts }], generationConfig: { responseMimeType: 'application/json', temperature: KINDS[kind].temperature } };
+  return { contents: [{ parts }], generationConfig: { responseMimeType: 'application/json', temperature: cfg.temperature } };
 }
 
 // ---------- מגבלה יומית לכל משתמש (מונה בשרת, בטרנזקציה) ----------
@@ -129,13 +155,15 @@ function assertSafeBase(base) {
   }
 }
 
-async function listModels(base, key, pro) {
+async function listModels(base, key, pro, deadline) {
   const cc = modelCache[pro];
   if (cc) return cc.slice();
   const out = [];
   if (lastGood[pro]) out.push(lastGood[pro]);
+  // גם בקשת רשימת המודלים מוגבלת בזמן: עד 10 שניות, ולא יותר ממה שנשאר מהתקציב
+  const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), Math.max(0, Math.min(10000 * timeScale(), deadline - Date.now())));
   try {
-    const r = await fetch(`${base}/v1beta/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
+    const r = await fetch(`${base}/v1beta/models?pageSize=200`, { headers: { 'x-goog-api-key': key }, signal: ctl.signal });
     if (r.ok) {
       const j = await r.json();
       const L = (j.models || []).filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') && /gemini/.test(m.name)
@@ -147,7 +175,7 @@ async function listModels(base, key, pro) {
         .sort((x, y) => x.t - y.t || y.v - x.v || y.pv - x.pv || y.lt - x.lt);
       L.slice(0, 6).forEach((m) => { if (!out.includes(m.n)) out.push(m.n); });
     }
-  } catch (e) { /* כמו באפליקציה: בלי רשימה – ממשיכים עם ברירת המחדל */ }
+  } catch (e) { /* כמו באפליקציה: בלי רשימה – ממשיכים עם ברירת המחדל */ } finally { clearTimeout(tm); }
   FALLBACK_MODELS.forEach((m) => { if (!out.includes(m)) out.push(m); });
   if (out.length > 2) modelCache[pro] = out.slice();
   return out;
@@ -156,14 +184,29 @@ async function listModels(base, key, pro) {
 const sleep = (ms) => new Promise((z) => setTimeout(z, ms));
 const RETRY_WAIT_MS = Number(process.env.SCAN_RETRY_WAIT_MS || 1200);
 
-async function callGemini(base, key, body, timeoutMs, pro, isRetry) {
+// השגיאה כשנגמר תקציב הזמן הכולל. scanDocument מחזירה את הזיהוי למכסה (refundScan), כמו בכל כישלון של Gemini.
+const budgetError = () => new HttpsError('deadline-exceeded',
+  'הזיהוי החכם לקח יותר מדי זמן ולא הושלם. אפשר למלא ידנית או לנסות שוב.', { reason: 'time-budget' });
+const MIN_TRY_MS = 50; // פחות מזה לא שווה לנסות מודל נוסף
+
+// deadline = רגע (במילישניות) שאחריו השרת לא מנסה יותר, ומחזיר שגיאה. ברירת מחדל: עכשיו + 100 שניות.
+async function callGemini(base, key, body, timeoutMs, pro, opts) {
   assertSafeBase(base);
+  const o = opts || {};
+  // o.stats.sent = כמה בקשות זיהוי באמת יצאו ל-Gemini. scanDocument סופרת במגבלה היומית כל קריאה שבה יצאה בקשה אחת לפחות.
+  const stats = o.stats || { sent: 0 };
+  const deadline = o.deadline || (Date.now() + 100000);
+  const left = () => deadline - Date.now();
+  if (left() < MIN_TRY_MS) throw budgetError();
   let err = null;
   const nf = [], qt = [];
-  const ms = await listModels(base, key, pro);
+  const ms = await listModels(base, key, pro, deadline);
   for (const m of ms) {
+    if (left() < MIN_TRY_MS) throw budgetError();
     let r;
-    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), timeoutMs);
+    // הזמן למודל הזה נחתך כך שלא יעבור את מה שנשאר מהתקציב
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), Math.min(timeoutMs, left()));
+    stats.sent++;
     try {
       r = await fetch(`${base}/v1beta/models/${m}:generateContent`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body), signal: ctl.signal,
@@ -171,31 +214,35 @@ async function callGemini(base, key, body, timeoutMs, pro, isRetry) {
     } catch (e) {
       clearTimeout(tm);
       if (e.name === 'AbortError') {
+        if (left() < MIN_TRY_MS) throw budgetError();
         err = new HttpsError('deadline-exceeded', 'המודל ' + m + ' לא הגיב בזמן', { reason: 'timeout' });
         if (lastGood[pro] === m) lastGood[pro] = '';
         modelCache[pro] = null;
         continue;
       }
+      stats.sent--; // שגיאת רשת (לא בוטלה בגלל זמן) – הבקשה לא הגיעה לשירות
       throw new HttpsError('unavailable', 'שירות הזיהוי החכם לא זמין כרגע. אפשר למלא ידנית.', { reason: 'network' });
     }
     clearTimeout(tm);
+    // אחרי שהתקבלה תשובה, גם קריאת הגוף שלה מוגבלת בזמן שנשאר
+    const readJson = () => Promise.race([r.json(), sleep(Math.max(0, left())).then(() => { throw budgetError(); })]);
     if (r.status === 404) { nf.push(m); err = new HttpsError('unavailable', 'המודל ' + m + ' לא קיים', { reason: 'model-not-found' }); if (lastGood[pro] === m) lastGood[pro] = ''; continue; }
-    if ([500, 502, 503, 504].includes(r.status)) { err = new HttpsError('unavailable', 'המודל ' + m + ' עמוס כרגע', { reason: 'overloaded' }); await sleep(RETRY_WAIT_MS); continue; }
+    if ([500, 502, 503, 504].includes(r.status)) { err = new HttpsError('unavailable', 'המודל ' + m + ' עמוס כרגע', { reason: 'overloaded' }); await sleep(Math.max(0, Math.min(RETRY_WAIT_MS, left()))); continue; }
     if (r.status === 429) { qt.push(m); err = new HttpsError('resource-exhausted', 'המודל ' + m + ' חרג מהמכסה', { reason: 'gemini-quota' }); continue; }
     if (!r.ok) {
       const t = await r.text().catch(() => '');
       if ((r.status === 400 && /API key/i.test(t)) || r.status === 403) throw new HttpsError('failed-precondition', 'מפתח הזיהוי החכם בשרת לא תקין או חסום', { reason: 'key-invalid' });
       throw new HttpsError('internal', 'שגיאה ' + r.status + ' משירות הזיהוי', { reason: 'gemini-error', status: r.status });
     }
-    const j = await r.json();
+    const j = await readJson();
     const pt = (((j.candidates || [])[0] || {}).content || {}).parts;
     if (!pt) throw new HttpsError('internal', 'אין תשובה מהמודל' + (j.promptFeedback && j.promptFeedback.blockReason ? ' (' + j.promptFeedback.blockReason + ')' : ''), { reason: 'no-answer' });
     lastGood[pro] = m;
     return { text: pt.map((p) => p.text || '').join(''), model: m };
   }
-  if (!isRetry && err && err.details && err.details.reason === 'overloaded') {
-    await sleep(RETRY_WAIT_MS * 2.5);
-    return callGemini(base, key, body, timeoutMs, pro, true);
+  if (!o.isRetry && err && err.details && err.details.reason === 'overloaded') {
+    await sleep(Math.max(0, Math.min(RETRY_WAIT_MS * 2.5, left())));
+    return callGemini(base, key, body, timeoutMs, pro, { deadline, isRetry: true, stats });
   }
   if (qt.length && qt.length + nf.length === ms.length) {
     throw new HttpsError('resource-exhausted', 'עברת את מגבלת השימוש היומית של המפתח החינמי בכל המודלים. המכסה מתאפסת בערך ב-10:00 בבוקר, או אפשר להפעיל חיוב ב-AI Studio', { reason: 'gemini-quota' });
@@ -217,6 +264,6 @@ function parseLikeApp(text) {
 function _resetCacheForTests() { modelCache.false = null; modelCache.true = null; lastGood.false = ''; lastGood.true = ''; }
 
 module.exports = {
-  KINDS, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan,
+  KINDS, KIND_NAMES, isKind, PHONE_WAIT_MS, timesFor, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan,
   callGemini, parseLikeApp, USAGE, _resetCacheForTests,
 };

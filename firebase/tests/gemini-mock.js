@@ -20,8 +20,9 @@ const ANSWERS = {
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
 };
 
-const state = { mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false };
-function reset() { state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; }
+// delayMs: כמה זמן שרת הדמה "חושב" לפני שהוא עונה לבקשת זיהוי (לבדיקת תקציב הזמן)
+const state = { mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0 };
+function reset() { state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
@@ -48,14 +49,17 @@ function start() {
     req.on('data', (c) => { raw += c; });
     req.on('end', () => {
       const key = req.headers['x-goog-api-key'] || '';
-      const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
-      if (req.method === 'GET' && req.url.startsWith('/v1beta/models')) { state.listCalls++; return send(200, { models: MODELS }); }
+      res.on('error', () => { /* הלקוח ויתר וסגר את החיבור */ });
+      const send0 = (code, obj) => { if (res.destroyed || res.writableEnded) return; res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      let send = send0;
+      if (req.method === 'GET' && req.url.startsWith('/v1beta/models')) { state.listCalls++; return state.listDelayMs ? setTimeout(() => send0(200, { models: MODELS }), state.listDelayMs) : send(200, { models: MODELS }); }
       const m = /^\/v1beta\/models\/([^:]+):generateContent$/.exec(req.url);
       if (req.method !== 'POST' || !m) return send(404, { error: { message: 'not found' } });
       let body = {};
       try { body = JSON.parse(raw); } catch (e) { /* */ }
       const kind = kindOf(body);
-      state.requests.push({ model: m[1], key, body, kind });
+      state.requests.push({ model: m[1], key, body, kind, at: Date.now() });
+      if (state.delayMs) { const d = state.delayMs; send = (code, obj) => setTimeout(() => send0(code, obj), d); }
       if (state.mode === 'badkey') return send(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
       if (state.mode === 'quota') return send(429, { error: { message: 'quota' } });
       if (state.mode === 'overloaded') return send(503, { error: { message: 'overloaded' } });

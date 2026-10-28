@@ -51,13 +51,19 @@ exports.scanDocument = onCall(
     const key = GEMINI_API_KEY.value();
     if (!key) throw new HttpsError('failed-precondition', 'אין מפתח לזיהוי חכם בשרת', { reason: 'no-key' });
     const limit = SCAN_DAILY_LIMIT.value();
+    // תקציב הזמן מתחיל עכשיו: 100 שניות לחשבונית ולמוצר, 135 למשוב – תמיד פחות ממה שהטלפון מחכה
+    const t = scan.timesFor(kind);
+    const deadline = Date.now() + t.budgetMs;
     const usage = await scan.reserveScan(who.uid, limit);
+    const stats = { sent: 0 };
     try {
       const body = scan.buildGeminiBody(kind, files);
-      const r = await scan.callGemini(GEMINI_API_BASE.value().replace(/\/+$/, ''), key, body, cfg.timeoutMs, cfg.pro);
+      const r = await scan.callGemini(GEMINI_API_BASE.value().replace(/\/+$/, ''), key, body, t.timeoutMs, cfg.pro, { deadline, stats });
       return { text: r.text, data: scan.parseLikeApp(r.text), model: r.model, usage: { day: usage.day, used: usage.used, limit } };
     } catch (e) {
-      await scan.refundScan(who.uid, usage.day);
+      // נספר במגבלה היומית כל ניסיון שבו יצאה בקשה ל-Gemini (גם אם נגמר הזמן או לא הגיעה תשובה – ייתכן שמשלמים עליו).
+      // מוחזר למונה רק ניסיון שבו שום בקשה לא יצאה (למשל: התקציב נגמר עוד לפני, או שגיאת רשת).
+      if (stats.sent === 0) await scan.refundScan(who.uid, usage.day);
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', 'שגיאה בזיהוי', { reason: 'internal' });
     }

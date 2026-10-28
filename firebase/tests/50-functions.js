@@ -187,7 +187,29 @@ describe('פונקציות שרת (שלב 3)', () => {
       assert.equal(tomorrow.result.usage.used, 1);
     });
 
-    it('זיהוי שנכשל בצד של Gemini (מפתח לא תקין, מכסה, עומס) לא נספר במגבלה היומית', async () => {
+    it('סוג זיהוי שהוא שם מובנה של JavaScript (__proto__, constructor, toString, hasOwnProperty) נדחה לפני Gemini ולא נספר', async () => {
+      const many = Array.from({ length: 12 }, () => jpgFile());
+      for (const kind of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'valueOf', 'prototype']) {
+        for (const files of [[jpgFile()], many]) {
+          const r = await call('scanDocument', 'u_emp', { kind, files });
+          assert.equal(r.status, 'INVALID_ARGUMENT', `${kind}: ${JSON.stringify(r.json).slice(0, 200)}`);
+          assert.equal(r.error.details.reason, 'bad-kind', kind);
+        }
+      }
+      // גם סוג שאינו מחרוזת
+      for (const kind of [null, 1, ['invoice'], { invoice: 1 }]) assert.equal((await call('scanDocument', 'u_emp', { kind, files: [jpgFile()] })).status, 'INVALID_ARGUMENT');
+      assert.equal(M.state.requests.length, 0, 'שום בקשה לא הגיעה ל-Gemini');
+      assert.equal(M.state.listCalls, 0);
+      assert.equal(await usageOf(env, 'u_emp'), null, 'המונה לא נוצר ולא השתנה');
+      // וגם בתוך קוד השרת עצמו: בניית הבקשה מסרבת לסוג כזה
+      const scan = require('../functions/lib/scan');
+      for (const kind of ['__proto__', 'constructor', 'toString']) {
+        assert.equal(scan.isKind(kind), false);
+        assert.throws(() => scan.buildGeminiBody(kind, [jpgFile()]), (e) => e.details && e.details.reason === 'bad-kind');
+      }
+    });
+
+    it('ניסיון שבו הבקשה יצאה ל-Gemini נספר במגבלה היומית גם כשהוא נכשל (מפתח לא תקין, מכסה, עומס)', async () => {
       M.state.mode = 'badkey';
       const r1 = await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile()] });
       assert.equal(r1.status, 'FAILED_PRECONDITION');
@@ -199,7 +221,82 @@ describe('פונקציות שרת (שלב 3)', () => {
       M.state.mode = 'overloaded';
       const r3 = await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile()] });
       assert.equal(r3.status, 'UNAVAILABLE');
-      assert.equal((await usageOf(env, 'u_emp')).count, 0);
+      assert.ok(M.state.requests.length >= 3);
+      assert.equal((await usageOf(env, 'u_emp')).count, 3, 'כל אחד משלושת הניסיונות נספר פעם אחת');
+    });
+
+    // ---- תקציב זמן כולל (תיקון אחרי בדיקת שלב 4) ----
+    // באמולטור כל הזמנים מוכפלים ב-SCAN_TIME_SCALE (functions/.env.demo-largpeami), כדי שהבדיקה לא תחכה 100 שניות.
+    const SCALE = Number((fs.readFileSync(path.join(H.ROOT, 'functions', '.env.demo-largpeami'), 'utf8').match(/^SCAN_TIME_SCALE=(.+)$/m) || [])[1]);
+
+    it('תקציב הזמן בשרת: 100 שניות לחשבונית ולמוצר, 135 למשוב – תמיד פחות ממה שהטלפון מחכה (120 / 150)', () => {
+      const scan = require('../functions/lib/scan');
+      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000 });
+      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000 });
+      for (const k of Object.keys(scan.KINDS)) assert.ok(scan.KINDS[k].budgetMs < scan.PHONE_WAIT_MS[k], k);
+      // מחוץ לאמולטור אין קיצור זמנים, גם אם מישהו הגדיר SCAN_TIME_SCALE
+      const prevE = process.env.FUNCTIONS_EMULATOR, prevS = process.env.SCAN_TIME_SCALE;
+      process.env.SCAN_TIME_SCALE = '0.01'; delete process.env.FUNCTIONS_EMULATOR;
+      try { assert.deepEqual(scan.timesFor('feedback'), { timeoutMs: 150000, budgetMs: 135000 }); }
+      finally { if (prevE !== undefined) process.env.FUNCTIONS_EMULATOR = prevE; if (prevS === undefined) delete process.env.SCAN_TIME_SCALE; else process.env.SCAN_TIME_SCALE = prevS; }
+      assert.ok(SCALE > 0 && SCALE < 1, 'SCAN_TIME_SCALE באמולטור');
+    });
+
+    it('כש-Gemini איטי: השרת עוצר בסוף התקציב ומחזיר שגיאה ברורה; הקריאה נספרת פעם אחת, כי בקשות יצאו (חשבונית)', async () => {
+      const budget = 100000 * SCALE, perModel = 30000 * SCALE;
+      M.state.delayMs = perModel * 2; // כל מודל "חושב" יותר מהזמן שמוקצב לו
+      const t0 = Date.now();
+      const r = await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile()] });
+      const took = Date.now() - t0;
+      assert.equal(r.status, 'DEADLINE_EXCEEDED', JSON.stringify(r.json));
+      assert.equal(r.error.details.reason, 'time-budget');
+      assert.match(r.error.message, /לקח יותר מדי זמן/);
+      assert.ok(took >= budget - 300 && took <= budget + 1500, `נמשך ${took}ms, תקציב ${budget}ms`);
+      assert.ok(M.state.requests.length >= 3, 'ניסה כמה מודלים בתוך התקציב: ' + M.state.requests.length);
+      // אף מודל לא התחיל אחרי סוף התקציב
+      for (const q of M.state.requests) assert.ok(q.at - t0 <= budget + 200, 'בקשה שהתחילה אחרי סוף התקציב');
+      assert.equal((await usageOf(env, 'u_emp')).count, 1, 'קריאה אחת = ספירה אחת, גם אם נוסו כמה מודלים');
+      // ואחרי ש-Gemini חוזר לענות מהר – הזיהוי עובד, והוא השני היום
+      M.reset();
+      const ok = await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile()] });
+      assert.equal(ok.status, 'OK');
+      assert.equal(ok.result.usage.used, 2);
+    });
+
+    it('הזמן לכל מודל נחתך לפי מה שנשאר מהתקציב: במשוב (150 שניות למודל, תקציב 135) השרת לא מחכה מעבר לתקציב', async () => {
+      const budget = 135000 * SCALE;
+      M.state.delayMs = 150000 * SCALE * 2;
+      const t0 = Date.now();
+      const r = await call('scanDocument', 'u_mgr', { kind: 'feedback', files: [jpgFile()] });
+      const took = Date.now() - t0;
+      assert.equal(r.status, 'DEADLINE_EXCEEDED', JSON.stringify(r.json));
+      assert.equal(r.error.details.reason, 'time-budget');
+      assert.ok(took >= budget - 300 && took <= budget + 1500, `נמשך ${took}ms, תקציב ${budget}ms (בלי חיתוך היה מחכה ${150000 * SCALE}ms למודל הראשון)`);
+      // המודל הראשון קיבל רק את מה שנשאר מהתקציב, ולכן לא נשאר זמן למודל שני
+      assert.equal(M.state.requests.length, 1);
+      assert.equal((await usageOf(env, 'u_mgr')).count, 1);
+    });
+
+    it('אם התקציב נגמר לפני שיצאה בקשה כלשהי ל-Gemini – הקריאה לא נספרת', async () => {
+      // רשימת המודלים איטית יותר מכל התקציב, ולכן אף בקשת זיהוי לא יוצאת
+      const scan = require('../functions/lib/scan');
+      scan._resetCacheForTests();
+      M.state.listDelayMs = 100000 * SCALE * 2;
+      const stats = { sent: 0 };
+      await assert.rejects(scan.callGemini(`http://127.0.0.1:${M.PORT}`, 'k', {}, 30000 * SCALE, false, { deadline: Date.now() + 200, stats }), (e) => e.details && e.details.reason === 'time-budget');
+      assert.equal(stats.sent, 0);
+      assert.equal(M.state.requests.length, 0);
+      // וב-index.js: הקריאה מוחזרת למונה רק כש-stats.sent === 0
+      const src = fs.readFileSync(path.join(H.ROOT, 'functions', 'index.js'), 'utf8');
+      assert.match(src, /if \(stats\.sent === 0\) await scan\.refundScan\(who\.uid, usage\.day\);/);
+    });
+
+    it('תשובה שמגיעה בתוך התקציב מתקבלת כרגיל, גם כשהיא איטית', async () => {
+      M.state.delayMs = 30000 * SCALE * 0.5;
+      const r = await call('scanDocument', 'u_emp', { kind: 'product', files: [jpgFile()] });
+      assert.equal(r.status, 'OK');
+      assert.deepEqual(r.result.data, M.ANSWERS.product);
+      assert.equal(M.state.requests.length, 1);
     });
 
     it('הבקשה ל-Gemini זהה לזו שהאפליקציה שולחת היום: אותה הנחיה, אותן הגדרות, אותו סדר חלקים; המפתח מהכספת', async () => {
