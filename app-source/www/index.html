@@ -2444,7 +2444,7 @@ const ABK_K='lp-abk',ABK_KEEP=30,ABK_MIN_GAP=15*60e3,ABK_TRY_GAP=30*60e3,ABK_DAY
 /* שם ה-bucket של Storage בפרויקט (לא מאומת: צריך לבדוק בלוח הבקרה של Firebase ← Storage). באמולטור: demo-largpeami */
 const ABK_BUCKET=()=>EMU?FB.projectId:'largpeami.appspot.com';
 const STB=()=>(EMU?`http://${EMU}:9199`:'https://firebasestorage.googleapis.com')+'/v0/b/'+encodeURIComponent(ABK_BUCKET())+'/o';
-let ABK={key:null,uid:'',run:0};
+let ABK={key:null,uid:'',run:0,max:50*1024*1024};/* max: הגודל המרבי לקובץ, זהה למגבלה בכללי Storage (request.resource.size <= 50 * 1024 * 1024) */
 function abkGet(){try{return JSON.parse(localStorage.getItem(ABK_K))||{}}catch(e){return{}}}
 function abkPut(o){try{localStorage.setItem(ABK_K,JSON.stringify(Object.assign(abkGet(),o)))}catch(e){}}
 const abkSig=()=>{try{return S.tx.length+':'+((S.tx[S.tx.length-1]||{}).id||'')}catch(e){return''}};
@@ -2474,20 +2474,22 @@ const abkWhen=n=>{const m=/bk-(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)/.exec(n||''
 async function abkRun(why){if(!isA()||ABK.run)return false;ABK.run=1;abkPut({tryAt:Date.now()});
  try{if(!S.tx.length)throw new Error('אין עדיין נתונים לגבות');
   const sig=abkSig(),enc=await abkEnc(await mkBackup()),d=new Date(),nm='bk-'+d.toISOString().replace(/[-:]/g,'')+'-'+Math.random().toString(36).slice(2,6)+'.lpb';
+  if(enc.length>ABK.max){const x=new Error('הגיבוי גדול מדי לענן ('+(enc.length/1048576).toFixed(1)+' MB). שמרו גיבוי במכשיר');x.big=sig;throw x}/* קובץ גדול מהמגבלה: לא מעלים, ולא מנסים שוב עד תנועה חדשה או יום חדש (abkTick) */
   await abkSt('?uploadType=media&name='+encodeURIComponent(abkDir()+nm),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:enc});
   try{await abkCall('reportBackupStatus',{file:nm,device:abkDev()})}catch(e){}
   try{const L=await abkList();for(const n of L.slice(0,Math.max(0,L.length-ABK_KEEP))){try{await abkSt('/'+encodeURIComponent(n),{method:'DELETE'})}catch(e){}}}catch(e){}
-  abkPut({last:d.toISOString(),sig,err:'',size:enc.length,why:why||''});if(cur().v==='data')rerender();return true}
- catch(e){abkPut({err:e&&e.offline?'אין חיבור לאינטרנט':(e&&e.message||String(e))});if(cur().v==='data')rerender();return false}
+  abkPut({last:d.toISOString(),sig,err:'',big:'',size:enc.length,why:why||''});if(cur().v==='data')rerender();return true}
+ catch(e){abkPut({err:e&&e.offline?'אין חיבור לאינטרנט':(e&&e.message||String(e)),big:e&&e.big||''});if(cur().v==='data')rerender();return false}
  finally{ABK.run=0}}
 /* מתי מגבים: פעם ביום, ואחרי הוספת תנועה כספית. לא יותר מגיבוי אחד ב-15 דקות, ואחרי כישלון – ניסיון חוזר אחרי 30 דקות */
 function abkTick(){try{if(!isA()||ABK.run||!navigator.onLine||!S||!S.tx||!S.tx.length)return;const a=abkGet(),now=Date.now(),last=a.last?Date.parse(a.last):0;
  if(a.tryAt&&now-a.tryAt<(a.err?ABK_TRY_GAP:ABK_MIN_GAP))return;
+ if(a.big&&a.big===abkSig()&&dayOf(a.tryAt)===today())return;
  const daily=dayOf(a.last)!==today(),chg=a.sig!==abkSig()&&now-last>=ABK_MIN_GAP;if(daily||chg)abkRun(daily?'daily':'change')}catch(e){}}
 setInterval(abkTick,60e3);document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(abkTick,5000)});setTimeout(abkTick,12000);
 /* השורה "גיבוי אחרון" בראש מסך הנתונים. מעל 24 שעות (או אם אין גיבוי): באדום, עם "גבו עכשיו" */
 function abkRow(){if(!(typeof isA==='function'&&isA()))return'';const a=abkGet(),last=a.last?Date.parse(a.last):0,old=!last||Date.now()-last>ABK_DAY;
- return `<div class="card" id="abkrow" style="margin-bottom:10px;${old?'border:2px solid var(--bad)':''}"><p style="margin:0;font-weight:800;${old?'color:var(--bad)':''}">גיבוי אחרון: ${last?abkFmt(a.last):'עדיין אין'}</p>${old?`<p class="note" style="margin:6px 0 8px;color:var(--bad)">${last?'עברו יותר מ-24 שעות מהגיבוי האחרון.':'עוד לא נוצר גיבוי מוצפן בענן.'}</p><button class="btn w" data-a="abkNow">${ABK.run?'מגבה…':'גבו עכשיו'}</button>`:''}${a.err?`<p class="note" style="margin:6px 0 0">הניסיון האחרון לא הצליח (${esc(a.err)}). ננסה שוב אוטומטית.</p>`:''}</div>`}
+ return `<div class="card" id="abkrow" style="margin-bottom:10px;${old?'border:2px solid var(--bad)':''}"><p style="margin:0;font-weight:800;${old?'color:var(--bad)':''}">גיבוי אחרון: ${last?abkFmt(a.last):'עדיין אין'}</p>${old?`<p class="note" style="margin:6px 0 8px;color:var(--bad)">${last?'עברו יותר מ-24 שעות מהגיבוי האחרון.':'עוד לא נוצר גיבוי מוצפן בענן.'}</p><button class="btn w" data-a="abkNow">${ABK.run?'מגבה…':'גבו עכשיו'}</button>`:''}${a.err?(a.big?`<p class="note" style="margin:6px 0 0;color:var(--bad)">${esc(a.err)}</p>`:`<p class="note" style="margin:6px 0 0">הניסיון האחרון לא הצליח (${esc(a.err)}). ננסה שוב אוטומטית.</p>`):''}</div>`}
 ACT.abkNow=async()=>{if(ABK.run)return;toast('מגבה…');const ok=await abkRun('manual');toast(ok?'✓ הגיבוי המוצפן נשמר בענן':'הגיבוי לא הצליח: '+(abkGet().err||''))};
 /* התקנה חדשה: אחרי כניסה של מנהל, כשאין נתונים במכשיר – מציעים לשחזר את הגיבוי האחרון */
 async function abkOffer(){try{if(!isA()||S.tx.length)return;const L=await abkList();if(!L.length||S.tx.length)return;const n=L[L.length-1],w=abkWhen(n);
