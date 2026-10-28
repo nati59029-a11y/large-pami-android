@@ -2,9 +2,11 @@
   "name": "large-pami-firebase",
   "version": "1.0.0",
   "private": true,
-  "description": "כללי הרשאות ל-Firestore ול-Storage ובדיקות באמולטור (שלב 0). לא מפורסם מכאן.",
+  "description": "כללי הרשאות ל-Firestore ול-Storage, פונקציות שרת, ובדיקות באמולטור (שלב 0). לא מפורסם מכאן.",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore,storage --project demo-largpeami \"node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./tests/summary-reporter.mjs --test-reporter-destination=stdout tests/all.test.js\""
+    "postinstall": "npm --prefix functions install --no-audit --no-fund",
+    "pretest": "node scripts/ensure-emulator-secrets.js",
+    "test": "firebase emulators:exec --only auth,firestore,storage,functions --project demo-largpeami \"node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./tests/summary-reporter.mjs --test-reporter-destination=stdout tests/all.test.js\""
   },
   "engines": {
     "node": ">=20"
