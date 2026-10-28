@@ -1516,15 +1516,15 @@ async function checkUpdate(man){
  if(!navigator.onLine){if(man)toast('אין חיבור לאינטרנט');return}
  try{const r=await fetch(`https://api.github.com/repos/${APP_REPO}/releases/tags/latest`);if(!r.ok){if(man)toast('לא נמצאה גרסה חדשה');return}const j=await r.json();
   const m=/versionCode:\s*(\d+)/.exec(j.body||'');const asset=(j.assets||[]).find(a=>/\.apk$/.test(a.name));
-  if(!m||!asset||+m[1]<=+APP_VC){if(man)toast('האפליקציה מעודכנת ✓');return}
+  if(!m||!asset||+m[1]<=+APP_VC){if(man)toast('האפליקציה מעודכנת ✓ (גרסה '+APP_VC+')');return}
   window.__upd=asset.browser_download_url;
   dlg(`<h3>יש גרסה חדשה</h3><p>אפשר לעדכן עכשיו. ההורדה נפתחת בדפדפן; אחרי שהיא מסתיימת פותחים את הקובץ ומאשרים התקנה. הנתונים נשמרים.</p><div class="row"><button class="btn grow" data-a="updGo">הורד ועדכן</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`)}catch(e){}}
-ACT.updChk=()=>{toast('בודק עדכון...');checkUpdate(true)};
+ACT.updChk=()=>{toast('בודק עדכון...');checkUpdate(true);luCheck(true)};
 ACT.updGo=async()=>{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.AppUpdate;
  if(!P){closeDlg();window.open(window.__upd,'_system');return}
  dlg('<h3>מוריד עדכון...</h3><div style="height:10px;background:var(--line,#ddd);border-radius:6px;overflow:hidden;margin:14px 0"><div id="updBar" style="height:100%;width:0;background:var(--pri,#2a6)"></div></div><p class="note" id="updTx">0%</p>');
- try{const h=await P.addListener('progress',e=>{const b=document.getElementById('updBar'),t=document.getElementById('updTx');if(b)b.style.width=e.pct+'%';if(t)t.textContent=e.pct+'%'});
-  await P.install({url:window.__upd});closeDlg();try{h.remove()}catch(e){}}
+ try{const h=await P.addListener('progress',e=>{const b=document.getElementById('updBar'),t=document.getElementById('updTx');if(b)b.style.width=e.pct+'%';if(t)t.textContent=e.pct<100?e.pct+'%':'מתקין… האפליקציה עשויה להיסגר לרגע ולהתעדכן. הנתונים נשמרים.'});
+  const r=P.installSession?await P.installSession({url:window.__upd}):await P.install({url:window.__upd});closeDlg();try{h.remove()}catch(e){};updDone(r)}
  catch(e){const m=String(e&&e.message||e);
   if(/permission/.test(m))dlg('<h3>נדרשת הרשאה</h3><p>אנדרואיד פתח מסך הגדרות. אפשר לאפליקציה "להתקין אפליקציות לא ידועות", חזור לכאן ולחץ שוב על "בדוק עדכון".</p><button class="btn grow" data-a="closeDlg">הבנתי</button>');
   else dlg('<h3>ההורדה נכשלה</h3><p>אפשר לנסות שוב, או להוריד דרך הדפדפן.</p><div class="row"><button class="btn grow" data-a="updGo">נסה שוב</button><button class="btn g grow" data-a="updWeb">דרך הדפדפן</button></div>')}};
@@ -2529,5 +2529,14 @@ function showGate(msg){
 
 
 boot();
+/* ===== עדכון חי (שלב 6): חבילת מסכים חתומה מ-Firebase Hosting =====
+ הבדיקה, החתימה, טביעות האצבע, הסירוב לגרסה ישנה והחזרה לגרסה הקודמת – בקוד הנייטיב (LiveUpdatePlugin). כאן רק:
+ (1) "עליתי תקין" – רק אם boot() שלמעלה רץ בלי שגיאה; (2) בדיקה ברקע, בכל פתיחה ולכל היותר פעם ב-6 שעות כשחוזרים לאפליקציה. בלי אינטרנט – לא קורה כלום. */
+function luP(){const C=window.Capacitor;return C&&C.Plugins&&C.Plugins.LiveUpdate}
+const LU={t:0};
+async function luCheck(man){const P=luP();if(!P||!navigator.onLine)return;LU.t=Date.now();try{const r=await P.check();LU.r=r&&r.result;if(man&&/^ready/.test(LU.r||''))toast('עדכון מסכים הורד. הוא ייכנס לתוקף בפתיחה הבאה של האפליקציה')}catch(e){}}
+function updDone(r){const s=r&&r.status;if(s==='user'||s==='legacy')dlg('<h3>יש עדכון – לחצו להתקנה</h3><p>במסך של אנדרואיד שנפתח לחצו "התקן". העדכון מותקן מעל הגרסה הקיימת, והנתונים נשמרים.</p><button class="btn grow" data-a="closeDlg">הבנתי</button>')}
+(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&LU.t&&Date.now()-LU.t>216e5)luCheck(false)});
 </script>
 </body></html>

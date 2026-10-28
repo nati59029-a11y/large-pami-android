@@ -6,3 +6,5 @@ RELEASE_KEYSTORE_B64.txt
 RELEASE_KEYSTORE_PASSWORD.txt
 RELEASE_KEY_ALIAS.txt
 SIGNING_LINEAGE_B64.txt
+# Live update signing key (see scripts/create-live-update-key.sh)
+live-update-signing-key.pem

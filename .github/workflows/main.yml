@@ -56,6 +56,27 @@ jobs:
       - name: Stamp version into the app
         run: sed -i "s#__VC__#$((1000 + GITHUB_RUN_NUMBER))#; s#__REPO__#${GITHUB_REPOSITORY}#" www/index.html
       - run: npx cap sync android
+      # Live update (stage 6): the app gets the PUBLIC key and the manifest address only if the
+      # secret LIVE_UPDATE_SIGNING_KEY and the variable LIVE_UPDATE_SITE exist. Otherwise nothing
+      # is added, and live update stays off in this APK (the app works like before).
+      - name: Live update settings in the app (only if the secret and the site are set)
+        env:
+          LIVE_UPDATE_SIGNING_KEY: ${{ secrets.LIVE_UPDATE_SIGNING_KEY }}
+          LIVE_UPDATE_SITE: ${{ vars.LIVE_UPDATE_SITE }}
+        run: |
+          if [ -z "$LIVE_UPDATE_SIGNING_KEY" ] || [ -z "$LIVE_UPDATE_SITE" ]; then
+            echo "::notice::Live update is OFF in this APK: secret LIVE_UPDATE_SIGNING_KEY or variable LIVE_UPDATE_SITE is not set."
+            exit 0
+          fi
+          echo "$LIVE_UPDATE_SITE" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::LIVE_UPDATE_SITE must be a Firebase Hosting site name (a-z, 0-9, -)"; exit 1; }
+          umask 077
+          printf '%s\n' "$LIVE_UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/lu-key.pem"
+          openssl pkey -in "$RUNNER_TEMP/lu-key.pem" -pubout -out "$RUNNER_TEMP/lu-pub.pem"
+          rm -f "$RUNNER_TEMP/lu-key.pem"
+          python3 ../scripts/live-update.py config --pub "$RUNNER_TEMP/lu-pub.pem" \
+            --url "https://$LIVE_UPDATE_SITE.web.app/app-updates/manifest.json" \
+            --native-id "$(python3 ../scripts/live-update.py native-id ../app-source)" \
+            --out android/app/src/main/assets/live-update.properties
       - name: Use the fixed signing key
         run: mkdir -p ~/.android && cp keystore/debug.keystore ~/.android/debug.keystore
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
@@ -76,6 +97,21 @@ jobs:
           $AAPT dump badging $APK | grep -E "^package:" | tee -a $GITHUB_STEP_SUMMARY
       - uses: actions/upload-artifact@v4
         with: { name: large-pami-apk, path: app/android/app/build/outputs/apk/debug/app-debug.apk }
+      # Live update bundle: the same screens that are inside this APK (assets/public), with the same
+      # version number. Built on every run (to check it), NOT signed here. Kept only when publishing.
+      - name: Live update bundle (built every run; signed and uploaded only from main)
+        run: |
+          python3 ../scripts/live-update.py bundle --www android/app/src/main/assets/public \
+            --version $((1000 + GITHUB_RUN_NUMBER)) \
+            --native-id "$(python3 ../scripts/live-update.py native-id ../app-source)" \
+            --out ../live-update-out
+      - uses: actions/upload-artifact@v4
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' ||
+           (github.event_name == 'workflow_dispatch' &&
+            (inputs.publish == true || inputs.publish == 'true')))
+        with: { name: live-update-bundle, path: live-update-out, retention-days: 7 }
 
   publish:
     needs: build
@@ -104,3 +140,68 @@ jobs:
           cp apk/app-debug.apk large-pami.apk
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest large-pami.apk --title "latest" --notes "versionCode: $VC"
+
+  # Live update (stage 6): sign the bundle and upload it to Firebase Hosting. Same condition as
+  # publish (main only), and only after the APK release succeeded. Without the secrets: skipped.
+  live-update:
+    needs: [build, publish]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.publish == true || inputs.publish == 'true')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: live-update
+      cancel-in-progress: false
+    steps:
+      - name: Check the live update secrets
+        id: chk
+        env:
+          HAS_KEY: ${{ secrets.LIVE_UPDATE_SIGNING_KEY != '' }}
+          HAS_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
+          LIVE_UPDATE_SITE: ${{ vars.LIVE_UPDATE_SITE }}
+        run: |
+          if [ "$HAS_KEY" != "true" ] || [ "$HAS_SA" != "true" ] || [ -z "$LIVE_UPDATE_SITE" ]; then
+            MSG="Live update upload skipped (דולג): needs secret LIVE_UPDATE_SIGNING_KEY, secret FIREBASE_SERVICE_ACCOUNT and variable LIVE_UPDATE_SITE."
+            echo "::notice::$MSG"; echo "$MSG" >> "$GITHUB_STEP_SUMMARY"
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.chk.outputs.go == 'yes'
+      - uses: actions/download-artifact@v4
+        if: steps.chk.outputs.go == 'yes'
+        with: { name: live-update-bundle, path: lu }
+      - name: Sign the bundle and check it like the app does
+        if: steps.chk.outputs.go == 'yes'
+        env:
+          LIVE_UPDATE_SIGNING_KEY: ${{ secrets.LIVE_UPDATE_SIGNING_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$LIVE_UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/lu-key.pem"
+          openssl pkey -in "$RUNNER_TEMP/lu-key.pem" -pubout -out "$RUNNER_TEMP/lu-pub.pem"
+          python3 scripts/live-update.py sign --payload lu/payload.txt --key "$RUNNER_TEMP/lu-key.pem" --out lu/public/app-updates/manifest.json
+          rm -f "$RUNNER_TEMP/lu-key.pem"
+          python3 scripts/live-update.py verify --manifest lu/public/app-updates/manifest.json --pub "$RUNNER_TEMP/lu-pub.pem" --root lu/public/app-updates
+      - uses: actions/setup-node@v4
+        if: steps.chk.outputs.go == 'yes'
+        with: { node-version: 20 }
+      - name: Upload to Firebase Hosting (its own site, only app-updates/)
+        if: steps.chk.outputs.go == 'yes'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          LIVE_UPDATE_SITE: ${{ vars.LIVE_UPDATE_SITE }}
+        run: |
+          umask 077
+          echo "$LIVE_UPDATE_SITE" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::bad LIVE_UPDATE_SITE"; exit 1; }
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          PROJECT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$RUNNER_TEMP/sa.json")
+          cd lu
+          printf '{"hosting":{"site":"%s","public":"public","headers":[{"source":"/app-updates/manifest.json","headers":[{"key":"Cache-Control","value":"no-cache, max-age=0"}]}]}}\n' "$LIVE_UPDATE_SITE" > firebase.json
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json" npx --yes firebase-tools@15.34.1 deploy --only hosting --project "$PROJECT" --non-interactive
+          rm -f "$RUNNER_TEMP/sa.json"
+          echo "Live update bundle $((1000 + GITHUB_RUN_NUMBER)) uploaded to https://$LIVE_UPDATE_SITE.web.app/app-updates/manifest.json" >> "$GITHUB_STEP_SUMMARY"

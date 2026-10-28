@@ -18,6 +18,8 @@ GRADLE
 M=android/app/src/main/AndroidManifest.xml
 sed -i 's|<application|<uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application|' $M
 sed -i 's|<application|<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application|' $M
+# Silent self-update (Android 12+): lets the app ask PackageInstaller for USER_ACTION_NOT_REQUIRED
+sed -i 's|<application|<uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />\n    <application|' $M
 grep -q 'fileprovider' $M || echo "::warning::FileProvider not found in manifest"
 mkdir -p android/app/src/main/res/xml
 cat > android/app/src/main/res/xml/file_paths.xml <<'XML'
@@ -35,6 +37,8 @@ J=android/app/src/main/java/com/largepami/finance
 cp android-plugin/SaveFilePlugin.java $J/SaveFilePlugin.java
 cp android-plugin/AppUpdatePlugin.java $J/AppUpdatePlugin.java
 cp android-plugin/PdfPrintPlugin.java $J/PdfPrintPlugin.java
+cp android-plugin/LiveUpdateCore.java $J/LiveUpdateCore.java
+cp android-plugin/LiveUpdatePlugin.java $J/LiveUpdatePlugin.java
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
@@ -47,6 +51,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SaveFilePlugin.class);
         registerPlugin(AppUpdatePlugin.class);
         registerPlugin(PdfPrintPlugin.class);
+        registerPlugin(LiveUpdatePlugin.class);
+        // Live update: choose the version of the screens before Capacitor loads them
+        LiveUpdatePlugin.beforeLoad(this);
         super.onCreate(savedInstanceState);
     }
 }
