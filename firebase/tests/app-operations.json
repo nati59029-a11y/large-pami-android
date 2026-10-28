@@ -498,6 +498,20 @@
     "manager"
    ],
    "note": ""
+  },
+  {
+   "id": "M36",
+   "line": 1348,
+   "snippet": "fsx('/staff/'+SY.uid)",
+   "fn": "syStaff",
+   "collection": "staff",
+   "op": "get",
+   "rest": "GET /staff/{uid}",
+   "condition": "המסמך של המשתמש עצמו",
+   "who": [
+    "employee"
+   ],
+   "note": "שלב 4: בכניסה (כשאין מסמך admins) ובפתיחה של מכשיר עובד. 200 עם active == true = עובד; 403/404 = אין הרשאה."
   }
  ],
  "fsbLine": 1331

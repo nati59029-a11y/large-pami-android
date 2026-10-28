@@ -134,6 +134,7 @@ const REPLAY = {
     return [await put('da_0', '{"app":"large-pami"}'), await put('meta', JSON.stringify({ date: now(), gen: 'a', np: 1, files: {}, counts: {} }))];
   } },
   M29: { run: async (uid) => [await fsx(uid, '/bk/' + encodeURIComponent('meta'), { method: 'DELETE' })] },
+  M36: { run: async (uid) => [await fsx(uid, '/staff/' + uid)] },
   M30: { run: async (uid) => [await fsx(uid, '/bk/meta')] },
   M31: { run: async (uid, env) => { await bypass(env, (db) => db.doc('bk/da_0').set({ data: '{}', owner: 'u_mgr' })); return [await fsx(uid, '/bk/d' + 'a' + '_' + 0)]; } },
   // fbPush (חדש ב-feature/feedback-scan): עובד מעלה צילום משוב ברזולוציה גבוהה ל-chunks, בחלקים
