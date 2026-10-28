@@ -1,0 +1,8 @@
+# Signing secrets must never be committed (see scripts/create-rotation-key.sh)
+*.p12
+*.jks
+lineage.bin
+RELEASE_KEYSTORE_B64.txt
+RELEASE_KEYSTORE_PASSWORD.txt
+RELEASE_KEY_ALIAS.txt
+SIGNING_LINEAGE_B64.txt
