@@ -131,7 +131,9 @@ async function reserveScan(uid, limit) {
   });
 }
 
-// אם הזיהוי נכשל (השירות לא זמין, מפתח לא תקין וכו'), הניסיון לא נספר.
+// מחזירה למונה את הזיהוי שנספר ב-reserveScan. scanDocument קוראת לה רק כשאף בקשת זיהוי לא יצאה ל-Gemini
+// (stats.sent === 0): למשל התקציב נגמר עוד לפני, או שלא נוצר חיבור בכלל (ECONNREFUSED / ENOTFOUND / EAI_AGAIN).
+// כל ניסיון שבו בקשה יצאה – נספר, גם אם נכשל, נגמר לו הזמן או לא הגיעה תשובה (ייתכן שמשלמים עליו).
 async function refundScan(uid, day) {
   const db = getFirestore();
   const ref = db.doc(`${USAGE}/${uid}`);
@@ -184,10 +186,24 @@ async function listModels(base, key, pro, deadline) {
 const sleep = (ms) => new Promise((z) => setTimeout(z, ms));
 const RETRY_WAIT_MS = Number(process.env.SCAN_RETRY_WAIT_MS || 1200);
 
-// השגיאה כשנגמר תקציב הזמן הכולל. scanDocument מחזירה את הזיהוי למכסה (refundScan), כמו בכל כישלון של Gemini.
+// השגיאה כשנגמר תקציב הזמן הכולל. אם עד אז יצאה בקשה ל-Gemini, הקריאה נשארת ספורה במגבלה היומית;
+// רק אם שום בקשה לא יצאה, scanDocument מחזירה אותה למונה (refundScan).
 const budgetError = () => new HttpsError('deadline-exceeded',
   'הזיהוי החכם לקח יותר מדי זמן ולא הושלם. אפשר למלא ידנית או לנסות שוב.', { reason: 'time-budget' });
 const MIN_TRY_MS = 50; // פחות מזה לא שווה לנסות מודל נוסף
+
+// שגיאות רשת שבהן ברור שלא נוצר חיבור לשירות, ולכן הבקשה בוודאות לא הגיעה. כל שגיאת רשת אחרת
+// (למשל חיבור שנקטע אחרי שהבקשה נשלחה) נחשבת כבקשה שיצאה.
+const NO_CONNECTION_CODES = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'];
+function neverConnected(e) {
+  const codes = [];
+  for (const x of [e, e && e.cause]) {
+    if (!x) continue;
+    if (x.code) codes.push(x.code);
+    if (Array.isArray(x.errors)) x.errors.forEach((y) => y && y.code && codes.push(y.code));
+  }
+  return codes.length > 0 && codes.every((c) => NO_CONNECTION_CODES.includes(c));
+}
 
 // deadline = רגע (במילישניות) שאחריו השרת לא מנסה יותר, ומחזיר שגיאה. ברירת מחדל: עכשיו + 100 שניות.
 async function callGemini(base, key, body, timeoutMs, pro, opts) {
@@ -220,17 +236,23 @@ async function callGemini(base, key, body, timeoutMs, pro, opts) {
         modelCache[pro] = null;
         continue;
       }
-      stats.sent--; // שגיאת רשת (לא בוטלה בגלל זמן) – הבקשה לא הגיעה לשירות
+      if (neverConnected(e)) stats.sent--; // לא נוצר חיבור בכלל – הבקשה בוודאות לא הגיעה לשירות
       throw new HttpsError('unavailable', 'שירות הזיהוי החכם לא זמין כרגע. אפשר למלא ידנית.', { reason: 'network' });
     }
     clearTimeout(tm);
-    // אחרי שהתקבלה תשובה, גם קריאת הגוף שלה מוגבלת בזמן שנשאר
-    const readJson = () => Promise.race([r.json(), sleep(Math.max(0, left())).then(() => { throw budgetError(); })]);
+    // אחרי שהתקבלו הכותרות, גם קריאת גוף התשובה – תקינה או שגיאה – מוגבלת בזמן שנשאר מהתקציב.
+    // בסוף הזמן החיבור מבוטל (ctl.abort) ומוחזרת שגיאת תקציב.
+    const within = (p) => {
+      let t;
+      const timer = new Promise((_, no) => { t = setTimeout(() => { ctl.abort(); no(budgetError()); }, Math.max(0, left())); });
+      return Promise.race([p, timer]).finally(() => clearTimeout(t));
+    };
+    const readJson = () => within(r.json());
     if (r.status === 404) { nf.push(m); err = new HttpsError('unavailable', 'המודל ' + m + ' לא קיים', { reason: 'model-not-found' }); if (lastGood[pro] === m) lastGood[pro] = ''; continue; }
     if ([500, 502, 503, 504].includes(r.status)) { err = new HttpsError('unavailable', 'המודל ' + m + ' עמוס כרגע', { reason: 'overloaded' }); await sleep(Math.max(0, Math.min(RETRY_WAIT_MS, left()))); continue; }
     if (r.status === 429) { qt.push(m); err = new HttpsError('resource-exhausted', 'המודל ' + m + ' חרג מהמכסה', { reason: 'gemini-quota' }); continue; }
     if (!r.ok) {
-      const t = await r.text().catch(() => '');
+      const t = await within(r.text().catch(() => ''));
       if ((r.status === 400 && /API key/i.test(t)) || r.status === 403) throw new HttpsError('failed-precondition', 'מפתח הזיהוי החכם בשרת לא תקין או חסום', { reason: 'key-invalid' });
       throw new HttpsError('internal', 'שגיאה ' + r.status + ' משירות הזיהוי', { reason: 'gemini-error', status: r.status });
     }
@@ -264,6 +286,6 @@ function parseLikeApp(text) {
 function _resetCacheForTests() { modelCache.false = null; modelCache.true = null; lastGood.false = ''; lastGood.true = ''; }
 
 module.exports = {
-  KINDS, KIND_NAMES, isKind, PHONE_WAIT_MS, timesFor, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan,
+  KINDS, KIND_NAMES, isKind, neverConnected, NO_CONNECTION_CODES, PHONE_WAIT_MS, timesFor, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan,
   callGemini, parseLikeApp, USAGE, _resetCacheForTests,
 };

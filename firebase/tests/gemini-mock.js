@@ -59,6 +59,14 @@ function start() {
       try { body = JSON.parse(raw); } catch (e) { /* */ }
       const kind = kindOf(body);
       state.requests.push({ model: m[1], key, body, kind, at: Date.now() });
+      // השרת קיבל את כל הבקשה – ואז מנתק את החיבור בלי לענות
+      if (state.mode === 'hangup') { req.socket.destroy(); return; }
+      // שגיאה 400 שהכותרות שלה מגיעות מיד, אבל הגוף שלה מגיע לאט (delayMs)
+      if (state.mode === 'slowErrorBody') {
+        res.writeHead(400, { 'Content-Type': 'application/json' }); res.write('{"error":');
+        setTimeout(() => { if (!res.destroyed && !res.writableEnded) res.end('{"message":"bad request"}}'); }, state.delayMs);
+        return;
+      }
       if (state.delayMs) { const d = state.delayMs; send = (code, obj) => setTimeout(() => send0(code, obj), d); }
       if (state.mode === 'badkey') return send(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
       if (state.mode === 'quota') return send(429, { error: { message: 'quota' } });

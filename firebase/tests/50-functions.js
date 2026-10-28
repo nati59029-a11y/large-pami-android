@@ -291,6 +291,40 @@ describe('פונקציות שרת (שלב 3)', () => {
       assert.match(src, /if \(stats\.sent === 0\) await scan\.refundScan\(who\.uid, usage\.day\);/);
     });
 
+    it('שגיאה מ-Gemini שהגוף שלה מגיע לאט: גם קריאת גוף השגיאה מוגבלת בתקציב, והקריאה נספרת', async () => {
+      const budget = 100000 * SCALE;
+      M.state.mode = 'slowErrorBody';
+      M.state.delayMs = budget * 3;
+      const t0 = Date.now();
+      const r = await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile()] });
+      const took = Date.now() - t0;
+      assert.equal(r.status, 'DEADLINE_EXCEEDED', JSON.stringify(r.json));
+      assert.equal(r.error.details.reason, 'time-budget');
+      assert.ok(took <= budget + 1500, `נמשך ${took}ms, תקציב ${budget}ms (בלי המגבלה היה נמשך ${budget * 3}ms)`);
+      assert.equal(M.state.requests.length, 1);
+      assert.equal((await usageOf(env, 'u_emp')).count, 1);
+    });
+
+    it('חיבור שנקטע אחרי שהבקשה הגיעה ל-Gemini – נספר; רק כשלא נוצר חיבור בכלל (ECONNREFUSED) – לא נספר', async () => {
+      M.state.mode = 'hangup';
+      const r = await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile()] });
+      assert.equal(r.status, 'UNAVAILABLE', JSON.stringify(r.json));
+      assert.equal(r.error.details.reason, 'network');
+      assert.equal(M.state.requests.length, 1, 'הבקשה הגיעה במלואה לשרת הדמה');
+      assert.equal((await usageOf(env, 'u_emp')).count, 1);
+      // אין שרת בכלל בכתובת (פורט 59997 סגור) – החיבור נדחה מיד (ECONNREFUSED), ולכן אף בקשה לא יצאה
+      const scan = require('../functions/lib/scan');
+      scan._resetCacheForTests();
+      const stats = { sent: 0 };
+      await assert.rejects(scan.callGemini('http://127.0.0.1:59997', 'k', {}, 30000, false, { deadline: Date.now() + 5000, stats }), (e) => e.details && e.details.reason === 'network');
+      assert.equal(stats.sent, 0);
+      // וההבחנה עצמה: רק שלושת הקודים האלה נחשבים "לא נוצר חיבור"
+      for (const c of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']) assert.equal(scan.neverConnected({ cause: { code: c } }), true, c);
+      for (const c of ['ECONNRESET', 'UND_ERR_SOCKET', 'EPIPE', 'ETIMEDOUT']) assert.equal(scan.neverConnected({ cause: { code: c } }), false, c);
+      assert.equal(scan.neverConnected(new TypeError('fetch failed')), false, 'שגיאה בלי קוד – נספרת');
+      assert.equal(scan.neverConnected({ cause: { errors: [{ code: 'ECONNREFUSED' }, { code: 'ECONNREFUSED' }] } }), true);
+    });
+
     it('תשובה שמגיעה בתוך התקציב מתקבלת כרגיל, גם כשהיא איטית', async () => {
       M.state.delayMs = 30000 * SCALE * 0.5;
       const r = await call('scanDocument', 'u_emp', { kind: 'product', files: [jpgFile()] });
