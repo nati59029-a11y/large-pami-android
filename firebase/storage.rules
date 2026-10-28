@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// כללי הרשאות ל-Storage (אחסון קבצים) – שלב 0.
+// מקור: פרק 20.3 באפיון (התיקייה app_backups/{uid}/) ופרק 3.3 ("כל השאר: אף אחד").
+// עיקרון: הכול סגור, ופותחים רק את תיקיית הגיבוי של האפליקציה.
+// התפקיד נבדק מול Firestore בכל בקשה (admins/{uid} = מנהל; staff/{uid} עם active == true = עובד).
+// אין בשום מקום תנאי שמסתפק רק בכך שהמשתמש מחובר.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isManager() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+    }
+
+    function isActiveEmployee() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/staff/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/staff/$(request.auth.uid)).data.active == true;
+    }
+
+    function isStaff() {
+      return isManager() || isActiveEmployee();
+    }
+
+    function isSelf(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // גיבוי מוצפן של האפליקציה: כל משתמש בתיקייה של עצמו.
+    // קריאה: המשתמש עצמו (עובד פעיל או מנהל); מנהל – קריאה של כל התיקיות.
+    // כתיבה: רק המשתמש עצמו, רק עובד פעיל או מנהל, רק קובץ בינארי (מוצפן), עד 50MB (הנחה מהאפיון).
+    // הערה: הכלל לא יכול לוודא שהתוכן באמת מוצפן. הוא מוודא רק את סוג הקובץ המוצהר ואת הגודל.
+    match /app_backups/{userId}/{fileName} {
+      allow read: if (isSelf(userId) && isStaff()) || isManager();
+      allow create, update: if isSelf(userId) && isStaff()
+        && request.resource.size <= 50 * 1024 * 1024
+        && request.resource.contentType == 'application/octet-stream';
+      // מחיקה – כדי שהאפליקציה תשמור רק 30 גרסאות אחרונות (שלב 5).
+      allow delete: if isSelf(userId) && isStaff();
+    }
+
+    // הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,120 @@
+rules_version = '2';
+
+// כללי הרשאות ל-Firestore – שלב 0 (תיקוני אבטחה באפליקציה הקיימת).
+// מקור: טבלת ההרשאות (מחייבת) באפיון, פרק 3.3, ופרק 20.3 (app_backup_status).
+// עיקרון: הכול סגור, ופותחים רק מה שבטבלה. הכלל האחרון בקובץ סוגר כל מה שלא הוגדר.
+// "מנהל" = מסמך קיים ב-admins/{uid} (כמו היום).
+// "עובד"  = מסמך staff/{uid} עם active == true. הכללים קוראים אותו בכל בקשה,
+//           ולכן עובד שהושבת נחסם כבר בבקשה הבאה (לא סומכים על נתון בטוקן).
+// אין בשום מקום תנאי שמסתפק רק בכך שהמשתמש מחובר.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- פונקציות עזר ----------
+    function isManager() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isActiveEmployee() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.active == true;
+    }
+
+    // מנהל, או עובד פעיל
+    function isStaff() {
+      return isManager() || isActiveEmployee();
+    }
+
+    function isSelf(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // ---------- 7 האוספים הקיימים (המבנה לא משתנה, רק מי רשאי) ----------
+
+    // admins: כל מחובר קורא רק את המסמך של עצמו (כמו היום; האפליקציה בודקת בכניסה אם הוא מנהל).
+    // כתיבה – רק בלוח הבקרה של Firebase.
+    match /admins/{userId} {
+      allow get: if isSelf(userId);
+      allow list, create, update, delete: if false;
+    }
+
+    // cfg: קריאה – עובד פעיל או מנהל. כתיבה – מנהל.
+    match /cfg/{docId} {
+      allow read: if isStaff();
+      allow write: if isManager();
+    }
+
+    // shelf: קריאה וכתיבה – עובד פעיל או מנהל.
+    match /shelf/{docId} {
+      allow read, write: if isStaff();
+    }
+
+    // fb: יצירה בשמו (עובד – רק בסטטוס 'new'; מנהל – גם מאושר). קריאה: מנהל – הכול; עובד – רק משוב מאושר.
+    // עדכון ומחיקה – מנהל.
+    match /fb/{docId} {
+      allow create: if isStaff()
+        && request.resource.data.owner == request.auth.uid
+        && (request.resource.data.st == 'new' || isManager());
+      allow read: if isManager()
+        || (isActiveEmployee() && resource.data.st == 'ok');
+      allow update, delete: if isManager();
+    }
+
+    // bk: מנהל בלבד (ללא שינוי מהיום).
+    match /bk/{docId} {
+      allow read, write: if isManager();
+    }
+
+    // chunks: יצירה בשמו – עובד פעיל (בטבלה למנהל אין יצירה; גם באפליקציה רק מכשיר עובד שולח).
+    // קריאה – של עצמו, או מנהל. מחיקה – מנהל.
+    match /chunks/{docId} {
+      allow create: if isActiveEmployee() && !isManager()
+        && request.resource.data.owner == request.auth.uid;
+      allow read: if isManager()
+        || (isActiveEmployee() && resource.data.owner == request.auth.uid);
+      allow delete: if isManager();
+      allow update: if false;
+    }
+
+    // inbox: יצירה בשמו – עובד פעיל, בסטטוס 'new', ורק אחרי שהחלק הראשון של הצילום כבר ב-chunks (כמו היום).
+    // (בטבלה למנהל אין יצירה; גם באפליקציה רק מכשיר עובד שולח.)
+    // קריאה – של עצמו, או מנהל. עדכון ומחיקה – מנהל.
+    match /inbox/{docId} {
+      allow create: if isActiveEmployee() && !isManager()
+        && request.resource.data.owner == request.auth.uid
+        && request.resource.data.status == 'new'
+        && exists(/databases/$(database)/documents/chunks/$(docId + '_0'));
+      allow read: if isManager()
+        || (isActiveEmployee() && resource.data.owner == request.auth.uid);
+      allow update, delete: if isManager();
+    }
+
+    // ---------- אוספים חדשים בשלב 0 ----------
+
+    // staff: עובד פעיל קורא רק את המסמך של עצמו. מנהל קורא הכול.
+    // אף אחד לא כותב ישירות – כולל מנהל. כתיבה רק דרך פונקציה בשרת.
+    match /staff/{userId} {
+      allow get: if isManager()
+        || (isSelf(userId) && resource.data.active == true);
+      allow list: if isManager();
+      allow create, update, delete: if false;
+    }
+
+    // app_backup_status: עובד פעיל קורא רק את שלו. מנהל קורא הכול.
+    // אף אחד לא כותב ישירות – רק הפונקציה reportBackupStatus בשרת.
+    match /app_backup_status/{userId} {
+      allow get: if isManager()
+        || (isSelf(userId) && isActiveEmployee());
+      allow list: if isManager();
+      allow create, update, delete: if false;
+    }
+
+    // ---------- הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם ----------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,504 @@
+{
+ "_about": "מיפוי כל פעולה של האפליקציה הקיימת מול Firestore. המקור: www/index.html בתוך large-pami-android-project.zip (מספרי השורות לפי הקובץ הזה). האפליקציה פונה ל-Firestore דרך REST בפונקציה fsx (שורה 1341). כל שורה כאן מכוסה בבדיקת 'מותר' שמשחזרת את הבקשה בדיוק כפי שהיא בקוד (tests/20-app-replay). הבסיס: הענף feature/feedback-scan, קומיט c9bac16 (הגרסה שמותקנת בטלפונים).",
+ "source": "large-pami-android-project.zip!www/index.html",
+ "fsxDefinitionLine": 1341,
+ "rows": [
+  {
+   "id": "M01",
+   "line": 1346,
+   "snippet": "fsx('/admins/'+SY.uid)",
+   "fn": "syLogin",
+   "collection": "admins",
+   "op": "get",
+   "rest": "GET /admins/{uid}",
+   "condition": "המסמך של המשתמש עצמו",
+   "who": [
+    "manager",
+    "employee"
+   ],
+   "note": "בכניסה, לכל משתמש. מנהל מקבל 200; לעובד אין מסמך, והוא מקבל 404 – והאפליקציה מסיקה ממנו 'עובד'."
+  },
+  {
+   "id": "M02",
+   "line": 1358,
+   "snippet": "fsx('/chunks?documentId='",
+   "fn": "pushItem",
+   "collection": "chunks",
+   "op": "create",
+   "rest": "POST /chunks?documentId={id}_{k}",
+   "condition": "owner == המשתמש עצמו; שדות owner, data",
+   "who": [
+    "employee"
+   ],
+   "note": "עובד שולח צילום של הוצאה, בחלקים."
+  },
+  {
+   "id": "M03",
+   "line": 1360,
+   "snippet": "fsx('/inbox?documentId='",
+   "fn": "pushItem",
+   "collection": "inbox",
+   "op": "create",
+   "rest": "POST /inbox?documentId={id}",
+   "condition": "owner == המשתמש עצמו, status == 'new', והחלק {id}_0 כבר קיים ב-chunks",
+   "who": [
+    "employee"
+   ],
+   "note": "עובד שולח הוצאה למנהל."
+  },
+  {
+   "id": "M04",
+   "line": 1365,
+   "snippet": "fsx('/cfg/main',{method:'PATCH'",
+   "fn": "pubCfg",
+   "collection": "cfg",
+   "op": "create+update",
+   "rest": "PATCH /cfg/main (בלי updateMask – יוצר אם אין, מחליף אם יש)",
+   "condition": "המסמך cfg/main; שדה data (JSON עם cats, gk, th, at)",
+   "who": [
+    "manager"
+   ],
+   "note": "מנהל לוחץ 'פרסם קטגוריות וספקים לעובדים'. היום השדה gk (מפתח Gemini) נכתב בתוך data."
+  },
+  {
+   "id": "M05",
+   "line": 1366,
+   "snippet": "fsx('/cfg/main')",
+   "fn": "getCfg",
+   "collection": "cfg",
+   "op": "get",
+   "rest": "GET /cfg/main",
+   "condition": "המסמך cfg/main",
+   "who": [
+    "employee"
+   ],
+   "note": "מכשיר עובד טוען קטגוריות (wkLoad, שורה 1419)."
+  },
+  {
+   "id": "M06",
+   "line": 1369,
+   "snippet": "collectionId:'inbox'",
+   "fn": "runQ('owner',SY.uid)",
+   "collection": "inbox",
+   "op": "list",
+   "rest": "POST :runQuery from inbox where owner == {uid} limit 300",
+   "condition": "owner == המשתמש עצמו",
+   "who": [
+    "employee"
+   ],
+   "note": "עובד רואה 'ההוצאות ששלחתי' (wkLoad, שורה 1420)."
+  },
+  {
+   "id": "M07",
+   "line": 1369,
+   "snippet": "collectionId:'inbox'",
+   "fn": "runQ('status','new')",
+   "collection": "inbox",
+   "op": "list",
+   "rest": "POST :runQuery from inbox where status == 'new' limit 300",
+   "condition": "status == 'new' (של כל העובדים)",
+   "who": [
+    "manager"
+   ],
+   "note": "מנהל מושך הוצאות חדשות (pullInbox2, שורה 1372)."
+  },
+  {
+   "id": "M08",
+   "line": 1375,
+   "snippet": "fsx('/chunks/'+id+'_'+k)",
+   "fn": "pullInbox2",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/{id}_{k}",
+   "condition": "חלק של צילום ששלח עובד",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M09",
+   "line": 1378,
+   "snippet": "fsx('/chunks/'+id+'_'+k,{method:'DELETE'})",
+   "fn": "pullInbox2",
+   "collection": "chunks",
+   "op": "delete",
+   "rest": "DELETE /chunks/{id}_{k}",
+   "condition": "חלק של צילום ששלח עובד",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M10",
+   "line": 1378,
+   "snippet": "updateMask.fieldPaths=status",
+   "fn": "pullInbox2",
+   "collection": "inbox",
+   "op": "update",
+   "rest": "PATCH /inbox/{id}?updateMask.fieldPaths=status",
+   "condition": "status ← 'imported'",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M11",
+   "line": 1601,
+   "snippet": "fsx('/shelf/'+k,{method:'PATCH'",
+   "fn": "shPush",
+   "collection": "shelf",
+   "op": "create+update",
+   "rest": "PATCH /shelf/{k} (בלי updateMask)",
+   "condition": "k אחד מ-price, p8, p2, p1, imp; שדות data, at",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "פתקי מדף."
+  },
+  {
+   "id": "M12",
+   "line": 1604,
+   "snippet": "fsx('/shelf/'+k)",
+   "fn": "shSync",
+   "collection": "shelf",
+   "op": "get",
+   "rest": "GET /shelf/{k}",
+   "condition": "k אחד מ-price, p8, p2, p1, imp",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M13",
+   "line": 1760,
+   "snippet": "fsx('/shelf/bc',{method:'PATCH'",
+   "fn": "shBcPut",
+   "collection": "shelf",
+   "op": "create+update",
+   "rest": "PATCH /shelf/bc (בלי updateMask)",
+   "condition": "זיכרון ברקודים; שדות data, at",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M14",
+   "line": 1761,
+   "snippet": "fsx('/shelf/bc')",
+   "fn": "shBcSync",
+   "collection": "shelf",
+   "op": "get",
+   "rest": "GET /shelf/bc",
+   "condition": "זיכרון ברקודים",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M15",
+   "line": 2047,
+   "snippet": "updateMask.fieldPaths=data&updateMask.fieldPaths=st",
+   "fn": "fbPush (r.upd)",
+   "collection": "fb",
+   "op": "update",
+   "rest": "PATCH /fb/{id}?updateMask.fieldPaths=data&updateMask.fieldPaths=st",
+   "condition": "st ← 'ok' (אישור משוב שעובד שלח)",
+   "who": [
+    "manager"
+   ],
+   "note": "r.upd נוצר רק במסלול של מנהל (שורה 2151)."
+  },
+  {
+   "id": "M33",
+   "line": 2049,
+   "snippet": "fsx('/chunks?documentId='+encodeURIComponent('fbhi_'",
+   "fn": "fbPush (צילום ברזולוציה גבוהה)",
+   "collection": "chunks",
+   "op": "create",
+   "rest": "POST /chunks?documentId=fbhi_{id}_{k}",
+   "condition": "owner == המשתמש עצמו; שדות owner, data; רק ממכשיר עובד (!fbAdmin())",
+   "who": [
+    "employee"
+   ],
+   "note": "חדש בענף feature/feedback-scan: עובד מעלה צילום משוב ברזולוציה גבוהה, עד 6 חלקים."
+  },
+  {
+   "id": "M16",
+   "line": 2050,
+   "snippet": "fsx('/fb/'+r.id,{method:'PATCH'",
+   "fn": "fbPush",
+   "collection": "fb",
+   "op": "create",
+   "rest": "PATCH /fb/{id} (בלי updateMask) – מסמך חדש",
+   "condition": "owner == המשתמש עצמו, st == 'new'; שדות data, img, owner, at, st",
+   "who": [
+    "employee"
+   ],
+   "note": "עובד סורק דף משוב ושולח למנהל."
+  },
+  {
+   "id": "M17",
+   "line": 2050,
+   "snippet": "fsx('/fb/'+r.id,{method:'PATCH'",
+   "fn": "fbPush",
+   "collection": "fb",
+   "op": "create+update",
+   "rest": "PATCH /fb/{id} (בלי updateMask)",
+   "condition": "owner == המשתמש עצמו, st == 'ok'",
+   "who": [
+    "manager"
+   ],
+   "note": "מנהל שומר משוב מאושר (וגם בשחזור מגיבוי, שורה 2436)."
+  },
+  {
+   "id": "M18",
+   "line": 2058,
+   "snippet": "const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
+   "fn": "fbLoad (עובד)",
+   "collection": "fb",
+   "op": "list",
+   "rest": "POST :runQuery from fb where st == 'ok' select data, st limit 3000",
+   "condition": "st == 'ok'",
+   "who": [
+    "employee"
+   ],
+   "note": "עובד רואה 'צפייה במשובים שאושרו'."
+  },
+  {
+   "id": "M19",
+   "line": 2058,
+   "snippet": "const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
+   "fn": "fbLoad (מנהל)",
+   "collection": "fb",
+   "op": "list",
+   "rest": "POST :runQuery from fb select data, st limit 3000 (בלי תנאי)",
+   "condition": "כל המסמכים",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M20",
+   "line": 2062,
+   "snippet": "stringValue:'new'",
+   "fn": "fbInbox",
+   "collection": "fb",
+   "op": "list",
+   "rest": "POST :runQuery from fb where st == 'new' select data limit 300",
+   "condition": "st == 'new'",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M21",
+   "line": 2065,
+   "snippet": "const full=await fsx('/fb/'+id)",
+   "fn": "fbInbox",
+   "collection": "fb",
+   "op": "get",
+   "rest": "GET /fb/{id}",
+   "condition": "משוב חדש (st == 'new') עם תמונה",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M34",
+   "line": 2066,
+   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k)",
+   "fn": "fbInbox",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/fbhi_{id}_{k}",
+   "condition": "חלקי הצילום שעובד העלה",
+   "who": [
+    "manager"
+   ],
+   "note": "חדש בענף feature/feedback-scan."
+  },
+  {
+   "id": "M35",
+   "line": 2066,
+   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'})",
+   "fn": "fbInbox",
+   "collection": "chunks",
+   "op": "delete",
+   "rest": "DELETE /chunks/fbhi_{id}_{k}",
+   "condition": "חלקי הצילום שעובד העלה",
+   "who": [
+    "manager"
+   ],
+   "note": "חדש בענף feature/feedback-scan."
+  },
+  {
+   "id": "M22",
+   "line": 2071,
+   "snippet": "const d=await fsx('/fb/'+id)",
+   "fn": "fbImg",
+   "collection": "fb",
+   "op": "get",
+   "rest": "GET /fb/{id}",
+   "condition": "מנהל – כל משוב; עובד – משוב מאושר (st == 'ok') דרך 'הטופס המקורי' (ACT.fbView, שורה 2179)",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M23",
+   "line": 2148,
+   "snippet": "fsx('/fb/'+id,{method:'DELETE'})",
+   "fn": "fbDrop",
+   "collection": "fb",
+   "op": "delete",
+   "rest": "DELETE /fb/{id}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M24",
+   "line": 2189,
+   "snippet": "updateMask.fieldPaths=data'",
+   "fn": "FRM.fbedit",
+   "collection": "fb",
+   "op": "update",
+   "rest": "PATCH /fb/{id}?updateMask.fieldPaths=data",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M25",
+   "line": 2190,
+   "snippet": "fsx('/fb/'+el.dataset.id,{method:'DELETE'})",
+   "fn": "ACT.fbRm",
+   "collection": "fb",
+   "op": "delete",
+   "rest": "DELETE /fb/{id}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M26",
+   "line": 2393,
+   "snippet": "collectionId:coll||'bk'",
+   "fn": "bkNames()",
+   "collection": "bk",
+   "op": "list",
+   "rest": "POST :runQuery from bk select __name__ limit 20000",
+   "condition": "כל המסמכים",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M27",
+   "line": 2393,
+   "snippet": "collectionId:coll||'bk'",
+   "fn": "bkNames('fb')",
+   "collection": "fb",
+   "op": "list",
+   "rest": "POST :runQuery from fb select __name__ limit 20000",
+   "condition": "כל המסמכים",
+   "who": [
+    "manager"
+   ],
+   "note": "בשחזור מגיבוי (שורה 2435)."
+  },
+  {
+   "id": "M28",
+   "line": 2394,
+   "snippet": "fsx('/bk/'+encodeURIComponent(id),{method:'PATCH'",
+   "fn": "bkPut",
+   "collection": "bk",
+   "op": "create+update",
+   "rest": "PATCH /bk/{id} (בלי updateMask)",
+   "condition": "שדות data, owner",
+   "who": [
+    "manager"
+   ],
+   "note": "גיבוי לענן."
+  },
+  {
+   "id": "M29",
+   "line": 2412,
+   "snippet": "fsx('/bk/'+encodeURIComponent(n),{method:'DELETE'})",
+   "fn": "bkCloud",
+   "collection": "bk",
+   "op": "delete",
+   "rest": "DELETE /bk/{id}",
+   "condition": "חלקי גיבוי ישנים",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M30",
+   "line": 2423,
+   "snippet": "fsx('/bk/meta')",
+   "fn": "bkCloudGet",
+   "collection": "bk",
+   "op": "get",
+   "rest": "GET /bk/meta",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M31",
+   "line": 2424,
+   "snippet": "fsx('/bk/d'+m.gen+'_'+k)",
+   "fn": "bkCloudGet",
+   "collection": "bk",
+   "op": "get",
+   "rest": "GET /bk/d{gen}_{k}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  },
+  {
+   "id": "M32",
+   "line": 2426,
+   "snippet": "fsx('/bk/'+m.files[id].d+'_'+k)",
+   "fn": "bkCloudGet",
+   "collection": "bk",
+   "op": "get",
+   "rest": "GET /bk/f_{id}_{k}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": ""
+  }
+ ],
+ "fsbLine": 1331
+}

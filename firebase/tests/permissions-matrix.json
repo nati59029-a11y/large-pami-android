@@ -1,0 +1,173 @@
+{
+  "_about": "הרשימה 'אוסף × תפקיד × פעולה' – מה מותר ומה אסור, לפי טבלת ההרשאות המחייבת באפיון (פרק 3.3, ופרק 20.3 ל-app_backup_status ול-app_backups). הבדיקה 90-coverage משווה אוטומטית את הרשימה הזו לבדיקות שרצו ועברו. A = מותר, D = אסור.",
+  "roles": ["guest", "signedIn", "disabledEmployee", "employee", "manager"],
+  "roleNames": {
+    "guest": "גולש (לא מחובר)",
+    "signedIn": "מחובר שאינו ב-staff",
+    "disabledEmployee": "עובד מושבת (staff עם active == false)",
+    "employee": "עובד פעיל (staff עם active == true)",
+    "manager": "מנהל (admins/{uid}, וגם staff פעיל עם role: manager)"
+  },
+  "roleToTableColumn": {
+    "guest": "גולש",
+    "signedIn": "פרטי / סיטונאי (כל מחובר שאינו צוות)",
+    "disabledEmployee": "פרטי / סיטונאי – עובד מושבת אינו 'עובד', כי 'עובד' = מסמך פעיל ב-staff (פרק 3.3, 'איך לקרוא')",
+    "employee": "עובד",
+    "manager": "מנהל"
+  },
+  "firestore": {
+    "admins": {
+      "source": "3.3",
+      "tableText": { "guest": "אין", "signedIn": "שלו בלבד (בפועל אין לו מסמך)", "disabledEmployee": "כמו פרטי: שלו בלבד", "employee": "קריאה: שלו בלבד", "manager": "קריאה: שלו בלבד. כתיבה רק בלוח הבקרה" },
+      "ops": {
+        "get-own":   "DAAAA",
+        "get-other": "DDDDD",
+        "list":      "DDDDD",
+        "create":    "DDDDD",
+        "update":    "DDDDD",
+        "delete":    "DDDDD"
+      }
+    },
+    "cfg": {
+      "source": "3.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה", "manager": "קריאה וכתיבה (בלי מפתח Gemini בתוכו)" },
+      "ops": {
+        "get":    "DDDAA",
+        "list":   "DDDAA",
+        "create": "DDDDA",
+        "update": "DDDDA",
+        "delete": "DDDDA"
+      }
+    },
+    "shelf": {
+      "source": "3.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה וכתיבה", "manager": "קריאה וכתיבה" },
+      "ops": {
+        "get":    "DDDAA",
+        "list":   "DDDAA",
+        "create": "DDDAA",
+        "update": "DDDAA",
+        "delete": "DDDAA"
+      }
+    },
+    "fb": {
+      "source": "3.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה בשמו; קריאה רק משוב מאושר", "manager": "הכול" },
+      "ops": {
+        "get-approved":       "DDDAA",
+        "get-new":            "DDDDA",
+        "list-approved":      "DDDAA",
+        "list-all":           "DDDDA",
+        "create-own-new":     "DDDAA",
+        "create-own-approved":"DDDDA",
+        "create-other-owner": "DDDDD",
+        "update":             "DDDDA",
+        "delete":             "DDDDA"
+      }
+    },
+    "bk": {
+      "source": "3.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "קריאה וכתיבה" },
+      "ops": {
+        "get":    "DDDDA",
+        "list":   "DDDDA",
+        "create": "DDDDA",
+        "update": "DDDDA",
+        "delete": "DDDDA"
+      }
+    },
+    "chunks": {
+      "source": "3.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה בשמו; קריאה של שלו", "manager": "קריאה: הכול; מחיקה" },
+      "ops": {
+        "get-own":            "DDDAA",
+        "get-other":          "DDDDA",
+        "list-own":           "DDDAA",
+        "list-all":           "DDDDA",
+        "create-own":         "DDDAD",
+        "create-other-owner": "DDDDD",
+        "update-own":         "DDDDD",
+        "delete-own":         "DDDDA",
+        "delete-other":       "DDDDA"
+      }
+    },
+    "inbox": {
+      "source": "3.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה בשמו (סטטוס 'חדש'); קריאה של שלו", "manager": "קריאה, עדכון ומחיקה" },
+      "ops": {
+        "get-own":              "DDDAA",
+        "get-other":            "DDDDA",
+        "list-own":             "DDDAA",
+        "list-new":             "DDDDA",
+        "list-all":             "DDDDA",
+        "create-own-new":       "DDDAD",
+        "create-own-imported":  "DDDDD",
+        "create-without-chunk": "DDDDD",
+        "create-other-owner":   "DDDDD",
+        "update-other":         "DDDDA",
+        "delete-other":         "DDDDA"
+      }
+    },
+    "staff": {
+      "source": "3.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה: שלו בלבד. רישום הטלפון ל-Push: דרך שרת", "manager": "קריאה: הכול. כתיבה: דרך שרת" },
+      "ops": {
+        "get-own":      "DDDAA",
+        "get-other":    "DDDDA",
+        "list":         "DDDDA",
+        "set-own":      "DDDDD",
+        "update-other": "DDDDD",
+        "delete-other": "DDDDD"
+      }
+    },
+    "app_backup_status": {
+      "source": "20.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה: שלו בלבד. כתיבה: דרך שרת (reportBackupStatus)", "manager": "קריאה: הכול. כתיבה של המסמך שלו: דרך שרת" },
+      "ops": {
+        "get-own":      "DDDAA",
+        "get-other":    "DDDDA",
+        "list":         "DDDDA",
+        "set-own":      "DDDDD",
+        "update-other": "DDDDD",
+        "delete-other": "DDDDD"
+      }
+    },
+    "_not_in_table": {
+      "source": "3.3 – 'ברירת מחדל לכל אוסף שלא מופיע בטבלה: אין גישה לאף אחד'",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
+      "ops": {
+        "get-orders":         "DDDDD",
+        "list-orders":        "DDDDD",
+        "create-orders":      "DDDDD",
+        "create-cfg-subcollection": "DDDDD"
+      }
+    }
+  },
+  "storage": {
+    "app_backups/{uid}/": {
+      "source": "20.3",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה וכתיבה: רק התיקייה של עצמו; רק קובץ מוצפן, עד 50MB", "manager": "קריאה: הכול; כתיבה: רק התיקייה של עצמו" },
+      "ops": {
+        "read-own":             "DDDAA",
+        "read-other":           "DDDDA",
+        "list-own":             "DDDAA",
+        "list-other":           "DDDDA",
+        "create-own":           "DDDAA",
+        "overwrite-own":        "DDDAA",
+        "create-own-too-big":   "DDDDD",
+        "create-own-not-binary":"DDDDD",
+        "create-other":         "DDDDD",
+        "delete-own":           "DDDAA",
+        "delete-other":         "DDDDD"
+      }
+    },
+    "_not_in_table": {
+      "source": "3.3 – Storage: 'כל השאר: אף אחד'",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
+      "ops": {
+        "read-other-path":   "DDDDD",
+        "create-other-path": "DDDDD"
+      }
+    }
+  }
+}
