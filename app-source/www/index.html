@@ -1767,19 +1767,19 @@ const SHAI_P='בתמונה מוצר מחנות לכלי בית, חד פעמי ו
 /* הזיהוי החכם עובר דרך פונקציית השרת scanDocument. המפתח של Gemini נמצא רק בשרת, ואין יותר פנייה ישירה מהמכשיר ל-Gemini */
 const FN_REGION='us-central1';/* האזור של פונקציות השרת. חייב להתאים לאזור שבו הן מפורסמות */
 const FNB=()=>EMU?`http://${EMU}:5001/${FB.projectId}/${FN_REGION}`:`https://${FN_REGION}-${FB.projectId}.cloudfunctions.net`;
-/* kind: invoice = חשבונית, product = מוצר למדף, feedback = טופס משוב. התשובה באותו מבנה של Gemini, ולכן הפענוח במכשיר לא השתנה */
-async function shAIcall(body,k,tmo,pro,kind){const t=await tok(),ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),tmo||60000);let r,j=null;
- try{r=await fetch(FNB()+'/scanDocument',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({data:{kind:kind||'invoice',pro:!!pro,contents:body.contents,generationConfig:body.generationConfig}}),signal:ctl.signal})}
+/* kind: invoice = חשבונית, product = מוצר למדף, feedback = טופס משוב. נשלחות רק התמונות (files); ההנחיות ל-Gemini נמצאות בשרת. התשובה (text) היא אותה מחרוזת ש-Gemini החזיר, ולכן הפענוח במכשיר לא השתנה */
+async function shAIcall(body,k,tmo,pro,kind){const t=await tok(),ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),tmo||120000);let r,j=null;
+ try{r=await fetch(FNB()+'/scanDocument',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({data:{kind:kind||'invoice',files:(((body.contents||[])[0]||{}).parts||[]).filter(p=>p.inline_data).map(p=>({mimeType:p.inline_data.mime_type,data:p.inline_data.data}))}}),signal:ctl.signal})}
  catch(e){throw new Error(e.name==='AbortError'?'השרת של הזיהוי החכם לא הגיב בזמן':'השרת של הזיהוי החכם לא זמין כרגע (אין חיבור לאינטרנט או שהשירות חסום)')}
  finally{clearTimeout(tm)}
  try{j=await r.json()}catch(e){}
- const st=(j&&j.error&&j.error.status)||'';
- if(!r.ok||!j||j.error){
+ const st=(j&&j.error&&j.error.status)||'',sm=(j&&j.error&&j.error.message)||'';
+ if(!r.ok||!j||j.error){if(/[\u0590-\u05FF]/.test(sm))throw new Error(sm);
   if(st==='RESOURCE_EXHAUSTED'||r.status===429)throw new Error('עברת את מגבלת הזיהויים היומית. אפשר למלא ידנית');
   if(st==='PERMISSION_DENIED'||st==='UNAUTHENTICATED'||r.status===401||r.status===403)throw new Error('אין לך הרשאה לזיהוי חכם');
   if(st==='INVALID_ARGUMENT'||r.status===400)throw new Error('הקובץ לא מתאים לזיהוי חכם (רק תמונה או PDF, עד 10MB)');
   throw new Error('השרת של הזיהוי החכם לא זמין כרגע')}
- const x=j.result,pt=x&&typeof x==='object'&&(((x.candidates||[])[0]||{}).content||{}).parts;if(pt)return pt.map(p=>p.text||'').join('');if(typeof x==='string')return x;if(x&&typeof x.text==='string')return x.text;if(x&&typeof x==='object'&&!x.candidates)return JSON.stringify(x);throw new Error('אין תשובה מהשרת')}
+ const x=j.result;if(x&&typeof x.text==='string')return x.text;const pt=x&&typeof x==='object'&&(((x.candidates||[])[0]||{}).content||{}).parts;if(pt)return pt.map(p=>p.text||'').join('');if(typeof x==='string')return x;if(x&&x.data&&typeof x.data==='object')return JSON.stringify(x.data);throw new Error('אין תשובה מהשרת')}
 async function shAI(du){const k=shKey();if(!k)return null;const t=await shAIcall({contents:[{parts:[{text:SHAI_P},{inline_data:{mime_type:'image/jpeg',data:du.split(',')[1]}}]}],generationConfig:{responseMimeType:'application/json',temperature:.1}},k,0,false,'product');
  const o=JSON.parse(String(t).replace(/```json|```/g,'').trim());return{n:String(o.name||'').trim(),d:String(o.details||'').trim()}}
 FRM.shkey=async f=>{const x=fd(f),k=s_(x.k);const b=f.querySelector('button');b.disabled=true;
