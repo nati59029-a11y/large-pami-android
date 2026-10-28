@@ -59,6 +59,15 @@ jobs:
       - name: Use the fixed signing key
         run: mkdir -p ~/.android && cp keystore/debug.keystore ~/.android/debug.keystore
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      # Key rotation (APK Signature Scheme v3). Runs ONLY if the secrets exist.
+      # Without them the APK stays exactly as Gradle signed it (old key, like today).
+      - name: Key rotation signing (only if the secrets are set)
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          SIGNING_LINEAGE_B64: ${{ secrets.SIGNING_LINEAGE_B64 }}
+        run: bash ../scripts/sign-with-rotation.sh android/app/build/outputs/apk/debug/app-debug.apk keystore/debug.keystore
       - name: Show signature and version of the built APK
         run: |
           APK=android/app/build/outputs/apk/debug/app-debug.apk
