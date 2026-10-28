@@ -8,7 +8,8 @@ tools: Read, Grep, Glob, Bash
 קרא את `CLAUDE.md`. ודא שאתה בענף של השינוי (לא `main`).
 
 שלבים:
-1. **בדיקות סטטיות**: חלץ את `large-pami-android-project.zip` לתיקייה זמנית. ודא שהמבנה תקין (`www/index.html`, `scripts/`, `android-plugin/`, `keystore/debug.keystore`, `.github/workflows/`).
+1. **בדיקות סטטיות**: בדוק את התיקייה `app-source/`, והרץ `python3 scripts/verify-source-matches-zip.py` (חייב לדווח OK). ודא שהמבנה תקין (`www/index.html`, `scripts/`, `android-plugin/`, `keystore/debug.keystore`, `.github/workflows/`).
+   - הסבר: מאז שלב 0 הבנייה משתמשת ב-`app-source/`, וה-zip חייב להישאר זהה לו; הסקריפט בודק זאת.
    בדוק תחביר JS של הסקריפטים ב-`www/index.html` (למשל חלץ את תוכן תגי `<script>` והרץ `node --check`), ו-`bash -n` על סקריפטי ה-shell.
    השווה את ה-keystore לגרסה ב-`main` (`sha256sum`) – כל שינוי בו הוא כישלון.
 2. **בדיקות התנהגות** לפי רשימת "מה לבדוק" של המתכנן, ככל שאפשר בלי מכשיר (למשל טעינת הדף ב-Playwright/Chromium והרצת התרחישים, בדיקת שגיאות console).
