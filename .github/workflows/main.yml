@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       site_backend:
-        description: "test = an APK connected to the TEST project (largpeami-test-f4691), live update OFF, never published. Not allowed from main."
+        description: "test = a SEPARATE test app (com.largepami.finance.test) connected to the TEST project (largpeami-test-f4691), live update and APK update OFF, never published. Not allowed from main."
         type: choice
         options: ["off", "test"]
         default: "off"
@@ -47,7 +47,7 @@ jobs:
         working-directory: .
         run: |
           [ "$GITHUB_REF" != "refs/heads/main" ] || { echo "::error::site_backend=test is not allowed from main"; exit 1; }
-          echo "### TEST BUILD: connected to largpeami-test-f4691, live update OFF. Not for the business phone." | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "### TEST BUILD: separate app com.largepami.finance.test, connected to largpeami-test-f4691, live update and APK update OFF. Installs next to the regular app." | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check that app-source matches the project ZIP
         working-directory: .
         run: python3 scripts/verify-source-matches-zip.py large-pami-android-project.zip app-source
@@ -66,6 +66,10 @@ jobs:
       - run: node scripts/prepare.js
       - run: npx cap add android
       - run: bash scripts/patch-android.sh
+      # Test build only: a separate app (com.largepami.finance.test) next to the regular one. A regular build skips this step.
+      - name: Separate test app (only when site_backend=test)
+        if: env.SITE_BACKEND == 'test'
+        run: bash scripts/make-test-app.sh
       - name: Always-increasing versionCode
         run: sed -i "s/versionCode [0-9]*/versionCode $((1000 + GITHUB_RUN_NUMBER))/" android/app/build.gradle && grep -n "versionCode\|versionName" android/app/build.gradle
       - name: Stamp version into the app

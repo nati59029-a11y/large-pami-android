@@ -13,8 +13,16 @@ fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','www/xlsx.full.min.js'
   sub('www/index.html',"const FB={apiKey:'AIzaSyAoYfIJUwFeFDyvJha0GYw0sOtiTrlf2fo',projectId:EMU?'demo-largpeami':'largpeami'};","const FB={apiKey:'"+T.apiKey+"',projectId:EMU?'demo-largpeami':'"+T.projectId+"'};");
   sub('www/index.html',"const ST_BUCKET='largpeami.appspot.com';","const ST_BUCKET='"+T.storageBucket+"';");
   sub('www/orders/backend.js',"const TEST = { projectId: '', apiKey: '', appId: '', storageBucket: '' };","const TEST = "+JSON.stringify(T)+";");
+  // גרסת הבדיקה היא אפליקציה נפרדת (com.largepami.finance.test, ב-patch-android.sh): עדכון ה-APK מתוך האפליקציה כבוי בה,
+  // כדי שלא תציע להוריד ולהתקין את הגרסה הרגילה (GitHub release latest או app_releases/ ב-Storage).
+  sub('www/index.html',"async function checkUpdate(man){\n","async function checkUpdate(man){if(man)toast('גרסת בדיקה: עדכון האפליקציה כבוי');return;\n");
+  sub('www/index.html',"async function updSt(){","async function updSt(){return false;");
   const left=fs.readFileSync('www/index.html','utf8').match(/'largpeami'|largpeami\.appspot\.com/g);
   if(left)throw new Error('SITE_BACKEND=test: index.html still points at largpeami: '+left.join(','));
+  // אף קובץ ב-www לא מפנה לפרויקט האמיתי: לא המפתח שלו, לא ה-bucket שלו ולא המזהה שלו בגרשיים.
+  const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(d,e.name)):[path.join(d,e.name)]);
+  for(const f of walk('www').filter(f=>/\.(html|js|json|css)$/.test(f))){const m=fs.readFileSync(f,'utf8').match(/AIzaSyAoYfIJUwFeFDyvJha0GYw0sOtiTrlf2fo|largpeami\.appspot\.com|largpeami\.firebaseapp\.com|largpeami\.firebasestorage\.app|['"`]largpeami['"`]/g);
+   if(m)throw new Error('SITE_BACKEND=test: '+f+' still points at largpeami: '+m.join(','))}
   console.log('SITE_BACKEND=test: app + tab ->',T.projectId)}}
 // barcode decoder (ZXing)
 try{const zd='node_modules/@zxing/library/umd';const zf=fs.existsSync(zd+'/index.min.js')?'index.min.js':fs.readdirSync(zd).find(f=>/\.min\.js$/.test(f));fs.copyFileSync(zd+'/'+zf,'www/zxing.min.js');console.log('zxing ok',zf)}catch(e){console.log('zxing missing, continuing',e.message)}
