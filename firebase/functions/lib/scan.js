@@ -249,7 +249,7 @@ async function callGemini(base, key, body, timeoutMs, pro, opts) {
     };
     const readJson = () => within(r.json());
     if (r.status === 404) { nf.push(m); err = new HttpsError('unavailable', 'המודל ' + m + ' לא קיים', { reason: 'model-not-found' }); if (lastGood[pro] === m) lastGood[pro] = ''; continue; }
-    if ([500, 502, 503, 504].includes(r.status)) { err = new HttpsError('unavailable', 'המודל ' + m + ' עמוס כרגע', { reason: 'overloaded' }); await sleep(Math.max(0, Math.min(RETRY_WAIT_MS, left()))); continue; }
+    if ([500, 502, 503, 504].includes(r.status)) { err = new HttpsError('unavailable', 'הזיהוי עמוס כרגע, נסו שוב בעוד דקה', { reason: 'overloaded' }); await sleep(Math.max(0, Math.min(RETRY_WAIT_MS, left()))); continue; }
     if (r.status === 429) { qt.push(m); err = new HttpsError('resource-exhausted', 'המודל ' + m + ' חרג מהמכסה', { reason: 'gemini-quota' }); continue; }
     if (!r.ok) {
       const t = await within(r.text().catch(() => ''));

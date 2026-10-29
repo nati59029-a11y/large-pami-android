@@ -116,11 +116,11 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     const matches = [...t.matchAll(/match\s+(\/\S*)\s*\{/g)].map((m) => m[1]);
     assert.equal(matches[matches.length - 1], '/{allPaths=**}');
     assert.match(t, /match\s+\/\{allPaths=\*\*\}\s*\{\s*allow read, write: if false;\s*\}\s*\}\s*\}\s*$/);
-    assert.deepEqual(matches.filter((p) => p.startsWith('/app') || p.startsWith('/{all')), ['/app_backups/{userId}/{fileName}', '/{allPaths=**}']);
+    assert.deepEqual(matches.filter((p) => p.startsWith('/app') || p.startsWith('/{all')), ['/app_backups/{userId}/{fileName}', '/app_releases/{allPaths=**}', '/{allPaths=**}']);
   });
 
   it('המקרים המיוחדים רצו', () => {
-    const need = ['case1-cfg', 'case1-shelf', 'case2-disabled-immediately', 'case2-no-self-reactivate', 'case3-manager-admins-only', 'storage-50mb-boundary', 'anonymous']
+    const need = ['case1-cfg', 'case1-shelf', 'case2-disabled-immediately', 'case2-no-self-reactivate', 'case3-manager-admins-only', 'storage-50mb-boundary', 'storage-app-releases-admins-only-and-disable', 'storage-app-releases-rest', 'anonymous']
       .concat(H.ROLES.map((r) => 'case3-' + r));
     const got = new Set(H.RESULTS.special.map((r) => r.key));
     assert.deepEqual(need.filter((k) => !got.has(k)), []);

@@ -161,6 +161,21 @@
         "delete-other":         "DDDDD"
       }
     },
+    "app_releases/latest/": {
+      "source": "החלטת המשתמש 29.10.2026 (00-בקשה.md): עדכוני APK מ-Storage, רק לעובד או למנהל מחובר",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה בלבד", "manager": "קריאה בלבד" },
+      "ops": {
+        "read-version":         "DDDAA",
+        "download-version":     "DDDAA",
+        "download-apk":         "DDDAA",
+        "list":                 "DDDAA",
+        "create-apk":           "DDDDD",
+        "overwrite-version":    "DDDDD",
+        "overwrite-apk":        "DDDDD",
+        "delete-apk":           "DDDDD",
+        "create-other-folder":  "DDDDD"
+      }
+    },
     "_not_in_table": {
       "source": "3.3 – Storage: 'כל השאר: אף אחד'",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },

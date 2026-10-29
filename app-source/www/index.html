@@ -1513,22 +1513,22 @@ window.addEventListener('online',()=>{if(isW())wkLoad()});
 const APP_VC='__VC__',APP_REPO='__REPO__';
 async function checkUpdate(man){
  if(!/^\d+$/.test(APP_VC)||!/\//.test(APP_REPO)){if(man)toast('בדיקת עדכון עובדת רק באפליקציה המותקנת');return}
- if(!navigator.onLine){if(man)toast('אין חיבור לאינטרנט');return}
+ if(!navigator.onLine){if(man)toast('אין חיבור לאינטרנט');return}if(await updSt())return;
  try{const r=await fetch(`https://api.github.com/repos/${APP_REPO}/releases/tags/latest`);if(!r.ok){if(man)toast('לא נמצאה גרסה חדשה');return}const j=await r.json();
   const m=/versionCode:\s*(\d+)/.exec(j.body||'');const asset=(j.assets||[]).find(a=>/\.apk$/.test(a.name));
   if(!m||!asset||+m[1]<=+APP_VC){if(man)toast('האפליקציה מעודכנת ✓ (גרסה '+APP_VC+')');return}
-  window.__upd=asset.browser_download_url;
+  window.__upd=asset.browser_download_url;window.__updSt=null;
   dlg(`<h3>יש גרסה חדשה</h3><p>אפשר לעדכן עכשיו. ההורדה נפתחת בדפדפן; אחרי שהיא מסתיימת פותחים את הקובץ ומאשרים התקנה. הנתונים נשמרים.</p><div class="row"><button class="btn grow" data-a="updGo">הורד ועדכן</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`)}catch(e){}}
 ACT.updChk=()=>{toast('בודק עדכון...');checkUpdate(true);luCheck(true)};
 ACT.updGo=async()=>{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.AppUpdate;
  if(!P){closeDlg();window.open(window.__upd,'_system');return}
  dlg('<h3>מוריד עדכון...</h3><div style="height:10px;background:var(--line,#ddd);border-radius:6px;overflow:hidden;margin:14px 0"><div id="updBar" style="height:100%;width:0;background:var(--pri,#2a6)"></div></div><p class="note" id="updTx">0%</p>');
  try{const h=await P.addListener('progress',e=>{const b=document.getElementById('updBar'),t=document.getElementById('updTx');if(b)b.style.width=e.pct+'%';if(t)t.textContent=e.pct<100?e.pct+'%':'מתקין… האפליקציה עשויה להיסגר לרגע ולהתעדכן. הנתונים נשמרים.'});
-  const r=P.installSession?await P.installSession({url:window.__upd}):await P.install({url:window.__upd});closeDlg();try{h.remove()}catch(e){};updDone(r)}
+  const S_=window.__updSt,o=S_?{url:window.__upd,auth:'Firebase '+await tok(),sha256:S_.sha256}:{url:window.__upd};const r=P.installSession?await P.installSession(o):await P.install(o);closeDlg();try{h.remove()}catch(e){};updDone(r)}
  catch(e){const m=String(e&&e.message||e);
-  if(/permission/.test(m))dlg('<h3>נדרשת הרשאה</h3><p>אנדרואיד פתח מסך הגדרות. אפשר לאפליקציה "להתקין אפליקציות לא ידועות", חזור לכאן ולחץ שוב על "בדוק עדכון".</p><button class="btn grow" data-a="closeDlg">הבנתי</button>');
+  if(/sha256 mismatch/.test(m))dlg('<h3>העדכון לא הותקן</h3><p>הקובץ שירד לא תואם לקובץ שפורסם, ולכן הוא נמחק ולא הותקן. האפליקציה ממשיכה לעבוד כרגיל. אפשר לנסות שוב מאוחר יותר.</p><button class="btn grow" data-a="closeDlg">הבנתי</button>');else if(/permission/.test(m))dlg('<h3>נדרשת הרשאה</h3><p>אנדרואיד פתח מסך הגדרות. אפשר לאפליקציה "להתקין אפליקציות לא ידועות", חזור לכאן ולחץ שוב על "בדוק עדכון".</p><button class="btn grow" data-a="closeDlg">הבנתי</button>');
   else dlg('<h3>ההורדה נכשלה</h3><p>אפשר לנסות שוב, או להוריד דרך הדפדפן.</p><div class="row"><button class="btn grow" data-a="updGo">נסה שוב</button><button class="btn g grow" data-a="updWeb">דרך הדפדפן</button></div>')}};
-ACT.updWeb=()=>{closeDlg();window.open(window.__upd,'_system')};
+ACT.updWeb=()=>{closeDlg();window.open(window.__updSt?`https://github.com/${APP_REPO}/releases/download/latest/large-pami.apk`:window.__upd,'_system')};
 setTimeout(checkUpdate,3500);
 
 /* ---- שינוי הוצאה לפני אישור ---- */
@@ -2441,9 +2441,26 @@ async function bkRestoreExtras(){
    ההצפנה בטלפון: AES-GCM 256 עם IV אקראי חדש בכל גיבוי, במפתח מ-getBackupKey. המפתח נשמר רק בזיכרון, כמפתח שאי אפשר לייצא.
    הגיבוי הידני ("שמירת גיבוי במכשיר", "שחזור מקובץ גיבוי") והאוסף bk לא משתנים. מצב הגיבוי בשרת: reportBackupStatus */
 const ABK_K='lp-abk',ABK_KEEP=30,ABK_MIN_GAP=15*60e3,ABK_TRY_GAP=30*60e3,ABK_DAY=24*3600e3,ABK_MAGIC=[76,80,66,49];/* "LPB1" */
-/* שם ה-bucket של Storage בפרויקט (לא מאומת: צריך לבדוק בלוח הבקרה של Firebase ← Storage). באמולטור: demo-largpeami */
-const ABK_BUCKET=()=>EMU?FB.projectId:'largpeami.appspot.com';
+/* שם ה-bucket של Storage – המקום היחיד בקוד. משמש גם את הגיבוי לענן (app_backups/) וגם את עדכוני ה-APK (app_releases/).
+   בבנייה ב-GitHub: אם הוגדר המשתנה FIREBASE_STORAGE_BUCKET, הבנייה כותבת אותו כאן במקום ברירת המחדל (main.yml, "Storage bucket name"),
+   ושלב ההעלאה לוקח את השם מכאן, כך שהאפליקציה וההעלאה תמיד משתמשות באותו שם. השורה חייבת להתחיל ב-const ST_BUCKET=.
+   ברירת המחדל לא מאומתת: צריך לבדוק בלוח הבקרה של Firebase ← Storage. באמולטור: demo-largpeami */
+const ST_BUCKET='largpeami.appspot.com';
+const ABK_BUCKET=()=>EMU?FB.projectId:ST_BUCKET;
 const STB=()=>(EMU?`http://${EMU}:9199`:'https://firebasestorage.googleapis.com')+'/v0/b/'+encodeURIComponent(ABK_BUCKET())+'/o';
+/* עדכוני APK מ-Storage (app_releases/latest/): קובץ גרסה (version.json) ו-APK. מותר רק לעובד פעיל או למנהל מחובר (storage.rules).
+   updSt מחזיר true רק כשנמצאה שם גרסה חדשה (ואז מוצג "יש גרסה חדשה"). בכל מקרה אחר – בלי כניסה, בלי התוסף, 403, שגיאה, אין רשת,
+   קובץ גרסה לא תקין, או שאין גרסה חדשה יותר – מחזיר false בשקט, ו-checkUpdate ממשיך לבדיקה הישנה מ-GitHub.
+   ההורדה עצמה: installSession עם הכניסה ועם ה-SHA-256 מקובץ הגרסה. קובץ שלא תואם נמחק ולא מותקן (AppUpdatePlugin.java) */
+const UPD_DIR='app_releases/latest/';
+const updStUrl=n=>STB()+'/'+encodeURIComponent(UPD_DIR+n)+'?alt=media';
+async function updSt(){const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.AppUpdate;if(!P||!P.installSession||!SY.refresh)return false;
+ try{const t=await tok();const r=await fetch(updStUrl('version.json'),{headers:{Authorization:'Firebase '+t},cache:'no-store'});if(!r.ok)return false;const j=await r.json();
+  const vc=String(j&&j.versionCode),sha=String(j&&j.sha256||'').toLowerCase(),file=String(j&&j.file||'');
+  if(!/^\d+$/.test(vc)||!/^[0-9a-f]{64}$/.test(sha)||!/^[A-Za-z0-9._-]+\.apk$/.test(file))return false;
+  if(+vc<=+APP_VC)return false;
+  window.__upd=updStUrl(file);window.__updSt={sha256:sha,vc:+vc};
+  dlg(`<h3>יש גרסה חדשה</h3><p>אפשר לעדכן עכשיו. ההורדה נפתחת בדפדפן; אחרי שהיא מסתיימת פותחים את הקובץ ומאשרים התקנה. הנתונים נשמרים.</p><div class="row"><button class="btn grow" data-a="updGo">הורד ועדכן</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`);return true}catch(e){return false}}
 let ABK={key:null,uid:'',run:0,max:50*1024*1024};/* max: הגודל המרבי לקובץ, זהה למגבלה בכללי Storage (request.resource.size <= 50 * 1024 * 1024) */
 function abkGet(){try{return JSON.parse(localStorage.getItem(ABK_K))||{}}catch(e){return{}}}
 function abkPut(o){try{localStorage.setItem(ABK_K,JSON.stringify(Object.assign(abkGet(),o)))}catch(e){}}

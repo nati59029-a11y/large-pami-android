@@ -27,6 +27,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
 
 /** Downloads the new APK inside the app (with progress) and opens Android's install screen. */
 @CapacitorPlugin(name = "AppUpdate")
@@ -109,6 +110,13 @@ public class AppUpdatePlugin extends Plugin {
     // Below Android 12, or if anything in the session fails, it opens the installer exactly like
     // install() does. An update never removes the app and never deletes data.
     // Result: {status: "silent" | "user" | "legacy", detail}.
+    //
+    // Optional (stage 0, APK updates from Firebase Storage):
+    //   auth   - "Firebase <ID token>" header for the download. Sent only to https://firebasestorage.googleapis.com,
+    //            and then redirects are not followed, so the token never goes anywhere else.
+    //   sha256 - the SHA-256 (64 hex characters) from the version file. The downloaded file must match it,
+    //            or it is deleted and NOT installed ("sha256 mismatch").
+    // Without them it works exactly as before (GitHub Releases).
     // ---------------------------------------------------------------------------------------
 
     static final long SESSION_TIMEOUT_MS = 60000;
@@ -118,6 +126,12 @@ public class AppUpdatePlugin extends Plugin {
         final String url = call.getString("url");
         if (url == null) {
             call.reject("no url");
+            return;
+        }
+        final String auth = call.getString("auth");
+        final String sha256 = call.getString("sha256");
+        if (sha256 != null && !isSha256Hex(sha256)) {
+            call.reject("bad sha256");
             return;
         }
         final Context ctx = getContext();
@@ -137,7 +151,7 @@ public class AppUpdatePlugin extends Plugin {
             public void run() {
                 final File f;
                 try {
-                    f = downloadApk(ctx, url);
+                    f = downloadApk(ctx, url, auth, sha256);
                 } catch (Exception e) {
                     call.reject("download failed: " + e.getMessage());
                     return;
@@ -155,15 +169,60 @@ public class AppUpdatePlugin extends Plugin {
         }).start();
     }
 
-    private File downloadApk(Context ctx, String url) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+    private File downloadApk(Context ctx, String url, String auth, String sha256) throws Exception {
+        File f = new File(ctx.getCacheDir(), "app-update.apk");
+        download(url, auth, sha256, f, new Progress() {
+            @Override
+            public void pct(int pct) {
+                JSObject p = new JSObject();
+                p.put("pct", pct);
+                notifyListeners("progress", p);
+            }
+        });
+        return f;
+    }
+
+    /** Download progress, 0-100. */
+    interface Progress {
+        void pct(int pct);
+    }
+
+    static boolean isSha256Hex(String s) {
+        return s != null && s.matches("[0-9a-fA-F]{64}");
+    }
+
+    /** Only for the tests on a computer (emulator at 127.0.0.1). Never set in the app. */
+    static boolean allowLocalForTests = false;
+
+    /** The token (auth) is sent only to Firebase Storage over https (and in computer tests: to the local emulator). */
+    static boolean authHostOk(URL u) {
+        String h = u.getHost();
+        if ("https".equals(u.getProtocol()) && "firebasestorage.googleapis.com".equals(h) && u.getPort() == -1) return true;
+        return allowLocalForTests && "http".equals(u.getProtocol()) && "127.0.0.1".equals(h);
+    }
+
+    /**
+     * Downloads url to f. With auth: sends "Authorization: auth" and does not follow redirects.
+     * With sha256: the file must have exactly this SHA-256, otherwise it is deleted and an exception
+     * "sha256 mismatch" is thrown. Returns the SHA-256 of the downloaded file (hex).
+     * No Android classes here, so the same code is tested on a computer.
+     */
+    static String download(String url, String auth, String sha256, File f, Progress progress) throws Exception {
+        URL u = new URL(url);
+        HttpURLConnection c = (HttpURLConnection) u.openConnection();
         c.setConnectTimeout(20000);
         c.setReadTimeout(30000);
-        c.setInstanceFollowRedirects(true);
+        if (auth != null) {
+            if (!authHostOk(u)) throw new Exception("auth only for Firebase Storage");
+            c.setRequestProperty("Authorization", auth);
+            c.setInstanceFollowRedirects(false);
+        } else {
+            c.setInstanceFollowRedirects(true);
+        }
         c.connect();
         if (c.getResponseCode() != 200) throw new Exception("http " + c.getResponseCode());
         long total = c.getContentLength(); // getContentLengthLong() needs Android 7; the app supports Android 5.1
-        File f = new File(ctx.getCacheDir(), "app-update.apk");
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
         InputStream in = c.getInputStream();
         FileOutputStream out = new FileOutputStream(f);
         try {
@@ -173,13 +232,12 @@ public class AppUpdatePlugin extends Plugin {
             int n;
             while ((n = in.read(buf)) > 0) {
                 out.write(buf, 0, n);
+                md.update(buf, 0, n);
                 done += n;
                 int pct = total > 0 ? (int) (done * 100 / total) : 0;
                 if (pct != last) {
                     last = pct;
-                    JSObject p = new JSObject();
-                    p.put("pct", pct);
-                    notifyListeners("progress", p);
+                    progress.pct(pct);
                 }
             }
             out.flush();
@@ -187,7 +245,16 @@ public class AppUpdatePlugin extends Plugin {
             out.close();
             in.close();
         }
-        return f;
+        byte[] d = md.digest();
+        StringBuilder hex = new StringBuilder(64);
+        for (byte b : d) hex.append(String.format("%02x", b & 0xff));
+        String got = hex.toString();
+        if (sha256 != null && !got.equalsIgnoreCase(sha256)) {
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+            throw new Exception("sha256 mismatch");
+        }
+        return got;
     }
 
     /** The old way (same as install()): Android's install screen. */

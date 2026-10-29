@@ -221,6 +221,7 @@ describe('פונקציות שרת (שלב 3)', () => {
       M.state.mode = 'overloaded';
       const r3 = await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile()] });
       assert.equal(r3.status, 'UNAVAILABLE');
+      assert.equal(r3.error.message, 'הזיהוי עמוס כרגע, נסו שוב בעוד דקה', 'הודעה פשוטה, בלי שם המודל');
       assert.ok(M.state.requests.length >= 3);
       assert.equal((await usageOf(env, 'u_emp')).count, 3, 'כל אחד משלושת הניסיונות נספר פעם אחת');
     });

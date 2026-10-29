@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      storage_bucket: ${{ steps.bucket.outputs.name }}
     env:
       GH_REPO: ${{ github.repository }}
     defaults:
@@ -55,6 +57,23 @@ jobs:
         run: sed -i "s/versionCode [0-9]*/versionCode $((1000 + GITHUB_RUN_NUMBER))/" android/app/build.gradle && grep -n "versionCode\|versionName" android/app/build.gradle
       - name: Stamp version into the app
         run: sed -i "s#__VC__#$((1000 + GITHUB_RUN_NUMBER))#; s#__REPO__#${GITHUB_REPOSITORY}#" www/index.html
+      # Storage bucket name: written ONCE in the app (www/index.html, the line "const ST_BUCKET='...';").
+      # If the repository variable FIREBASE_STORAGE_BUCKET is set, it replaces that default here.
+      # The backup and the APK updates in the app, and the upload job below, all use this one name.
+      - name: Storage bucket name (default in the app, or the variable FIREBASE_STORAGE_BUCKET)
+        id: bucket
+        env:
+          FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+        run: |
+          N=$(grep -c "^const ST_BUCKET='[^']*';$" www/index.html || true)
+          [ "$N" = 1 ] || { echo "::error::www/index.html must have exactly one line const ST_BUCKET='...'; (found $N)"; exit 1; }
+          if [ -n "$FIREBASE_STORAGE_BUCKET" ]; then
+            echo "$FIREBASE_STORAGE_BUCKET" | grep -Eq '^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$' || { echo "::error::FIREBASE_STORAGE_BUCKET is not a valid bucket name (a-z, 0-9, . _ -)"; exit 1; }
+            sed -i "s#^const ST_BUCKET='[^']*';\$#const ST_BUCKET='$FIREBASE_STORAGE_BUCKET';#" www/index.html
+          fi
+          B=$(sed -n "s#^const ST_BUCKET='\([^']*\)';\$#\1#p" www/index.html)
+          echo "Storage bucket in this APK: $B" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "name=$B" >> "$GITHUB_OUTPUT"
       - run: npx cap sync android
       # Live update (stage 6): the app gets the PUBLIC key and the manifest address only if the
       # secret LIVE_UPDATE_SIGNING_KEY and the variable LIVE_UPDATE_SITE exist. Otherwise nothing
@@ -140,6 +159,60 @@ jobs:
           cp apk/app-debug.apk large-pami.apk
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest large-pami.apk --title "latest" --notes "versionCode: $VC"
+
+  # APK updates from Firebase Storage (app_releases/latest/), for signed-in staff only (storage.rules).
+  # Its own job, next to publish: if this upload fails, the GitHub release is not affected.
+  # Runs the upload ONLY on main (push, or a manual run with "publish" - the same condition as publish),
+  # and only if the secret FIREBASE_SERVICE_ACCOUNT and the variable FIREBASE_STORAGE_BUCKET exist.
+  # In every other case it writes "skipped (דולג)" with the reason.
+  apk-storage:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: apk-storage
+      cancel-in-progress: false
+    steps:
+      - name: Upload the APK to Firebase Storage? (main only, with the secret and the variable)
+        id: chk
+        env:
+          FROM_MAIN: >-
+            ${{ github.ref == 'refs/heads/main' &&
+            (github.event_name == 'push' ||
+             (github.event_name == 'workflow_dispatch' &&
+              (inputs.publish == true || inputs.publish == 'true'))) }}
+          HAS_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
+          HAS_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET != '' }}
+        run: |
+          WHY=""
+          [ "$FROM_MAIN" = "true" ] || WHY="not a publish from main"
+          [ -n "$WHY" ] || [ "$HAS_SA" = "true" ] || WHY="secret FIREBASE_SERVICE_ACCOUNT is not set"
+          [ -n "$WHY" ] || [ "$HAS_BUCKET" = "true" ] || WHY="variable FIREBASE_STORAGE_BUCKET is not set"
+          if [ -n "$WHY" ]; then
+            MSG="APK upload to Firebase Storage skipped (דולג): $WHY."
+            echo "::notice::$MSG"; echo "$MSG" >> "$GITHUB_STEP_SUMMARY"
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.chk.outputs.go == 'yes'
+      - uses: actions/download-artifact@v4
+        if: steps.chk.outputs.go == 'yes'
+        with: { name: large-pami-apk, path: apk }
+      - name: Upload the APK and its version file to Storage (app_releases/latest/)
+        if: steps.chk.outputs.go == 'yes'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          BUCKET: ${{ needs.build.outputs.storage_bucket }}
+        run: |
+          umask 077
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
+          python3 scripts/upload-apk-to-storage.py --apk apk/app-debug.apk \
+            --version-code $((1000 + GITHUB_RUN_NUMBER)) --bucket "$BUCKET" \
+            --sa "$RUNNER_TEMP/sa.json" --summary "$GITHUB_STEP_SUMMARY"
 
   # Live update (stage 6): sign the bundle and upload it to Firebase Hosting. Same condition as
   # publish (main only), and only after the APK release succeeded. Without the secrets: skipped.

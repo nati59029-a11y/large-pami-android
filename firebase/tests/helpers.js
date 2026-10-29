@@ -87,6 +87,9 @@ async function clearStorageAndSeed(env) {
       await st.ref(`app_backups/${uid}/seed.bin`).put(new Uint8Array([1, 2, 3]), { contentType: 'application/octet-stream' });
     }
     await st.ref('products/p1.jpg').put(new Uint8Array([1]), { contentType: 'image/jpeg' });
+    // עדכוני APK (app_releases/latest/): קובץ גרסה ו-APK לדוגמה, כמו שתהליך הבנייה מעלה
+    await st.ref('app_releases/latest/version.json').put(new TextEncoder().encode(JSON.stringify({ versionCode: 1001, size: 2, sha256: '0'.repeat(64), file: 'large-pami.apk' })), { contentType: 'application/json' });
+    await st.ref('app_releases/latest/large-pami.apk').put(new Uint8Array([80, 75]), { contentType: 'application/vnd.android.package-archive' });
   });
 }
 
