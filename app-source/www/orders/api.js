@@ -39,7 +39,8 @@ export function init(be) {
 const HEB = /[֐-׿]/;
 export function hebError(e) {
   const code = String((e && e.code) || '');
-  const msg = String((e && e.message) || '');
+  // בהודעות מסוימות מהשרת מצורף קוד מספרי בסוף (למשל " [429]"). למשתמש מציגים רק את הטקסט.
+  const msg = String((e && e.message) || '').replace(/\s*\[\d{3}\]\s*$/, '');
   const details = e && e.details;
   if (/auth\/(invalid-credential|wrong-password|user-not-found|invalid-email|invalid-login-credentials)/.test(code)) return 'אימייל או סיסמה לא נכונים';
   if (/auth\/too-many-requests/.test(code)) return 'יותר מדי ניסיונות. נסה שוב בעוד כמה דקות';

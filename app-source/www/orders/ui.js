@@ -83,4 +83,6 @@ export async function saveFile(name, bytes, mime) {
 
 // ערך מטופס: טקסט מקוצץ. מספר נשאר טקסט – השרת בודק אותו ומחזיר הודעה בעברית אם הוא לא תקין.
 export const val = (form, name) => { const e = form.elements[name]; if (!e) return undefined; if (e.type === 'checkbox') return e.checked; return String(e.value).trim(); };
-export const numOrText = (v) => (v === '' ? null : (/^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v));
+// פסיק עשרוני שהוקלד בטופס ("24,90" או "12,5") הופך לנקודה. פסיק של אלפים ("1,250") נשאר, והשרת מטפל בו.
+export const normDecimal = (v) => (typeof v === 'string' && /^-?\d+,\d{1,2}$/.test(v.trim()) ? v.trim().replace(',', '.') : v);
+export const numOrText = (v0) => { const v = normDecimal(v0); return v === '' ? null : (/^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v); };

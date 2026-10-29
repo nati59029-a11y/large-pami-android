@@ -25,19 +25,23 @@ async function upload(files, ctx) {
   const res = { ok: 0, bad: [], suggested: 0 };
   up.innerHTML = `<div class="prog"><i id="pg" style="width:0"></i></div><p class="note" id="pt">0 מתוך ${files.length}</p><div id="perr" class="err"></div>`;
   let done = 0;
+  let stopped = null; // מגבלת קצב בשרת: עוצרים את התור ולא מנסים שוב
   const one = async (f, i) => {
+    if (stopped) { res.bad.push(`${f.name}: לא הועלה (${stopped})`); done++; return; }
     try {
       const path = await api.uploadRawPhoto(f, i);
       const r = await api.processProductPhoto(path, f.name);
       res.ok++; if (r.suggestedProductId) res.suggested++;
-    } catch (e) { res.bad.push(`${f.name}: ${e.message}`); }
+    } catch (e) { if (/resource-exhausted/.test(String(e.code)) || (e.details && e.details.reason === 'photo-rate-limit')) stopped = e.message; res.bad.push(`${f.name}: ${e.message}`); }
     done++;
     if ($('#pg')) { $('#pg').style.width = Math.round(done / files.length * 100) + '%'; $('#pt').textContent = `${done} מתוך ${files.length}`; $('#perr').textContent = res.bad.join('\n'); }
   };
   // 3 במקביל – מהיר יותר, בלי להעמיס על הטלפון
   let next = 0;
   await Promise.all([0, 1, 2].map(async () => { while (next < files.length) { const i = next++; await one(files[i], i); } }));
+  res.stopped = stopped;
   window.__lpUpload = res;
+  if (stopped) toast(stopped, true);
   if ($('#pt')) $('#pt').textContent = `הועלו ${res.ok} מתוך ${files.length}. ${res.suggested} עם הצעת שיוך לפי המק"ט.`;
   toast(res.bad.length ? `הועלו ${res.ok}, נכשלו ${res.bad.length}` : `הועלו ${res.ok} צילומים`, !!res.bad.length);
   await drawJobs(ctx);

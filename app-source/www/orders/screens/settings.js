@@ -68,7 +68,11 @@ async function render(root, ctx) {
     if (r && r.bannerPath) { S.banners.push({ imagePath: r.bannerPath, title: null, link: null, active: true, order: S.banners.length + 1 }); drawBanners(); }
   };
   const readKv = (name) => {
-    const o = {}; $$(`[data-kv="${name}"] [data-kvrow]`).forEach((r) => { const k = r.querySelector('[data-kk]').value.trim(); const v = r.querySelector('[data-kvv]').value; if (k || v.trim()) o[k] = v; });
+    // שם הכיתוב: רק אותיות באנגלית, ספרות ו-_ (כמו בשרת). שמות כמו __proto__ נחסמים כבר כאן.
+    const o = {}; $$(`[data-kv="${name}"] [data-kvrow]`).forEach((r) => { const k = r.querySelector('[data-kk]').value.trim(); const v = r.querySelector('[data-kvv]').value;
+      if (!k && !v.trim()) return;
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) || k in Object.prototype) throw new Error(`שם לא תקין: "${k.slice(0, 40)}". השתמש באותיות באנגלית וספרות, למשל heroTitle`);
+      Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true }); });
     return o;
   };
   $('#save').onclick = async (ev) => {
@@ -81,8 +85,9 @@ async function render(root, ctx) {
     if (zones.length || get(pub, 'shipping.zones')) put('shipping.zones', zones, get(pub, 'shipping.zones'));
     const banners = S.banners.map((b) => ({ imagePath: b.imagePath, title: b.title || null, link: b.link || null, active: b.active !== false, order: b.order }));
     put('home.banners', banners, get(pub, 'home.banners') || []);
-    const texts = readKv('home.texts'); put('home.texts', texts, get(pub, 'home.texts') || {});
-    const copy = readKv('copy'); put('copy', copy, pub.copy || {});
+    let texts, copy;
+    try { texts = readKv('home.texts'); copy = readKv('copy'); } catch (e) { toast(e.message, true); return; }
+    put('home.texts', texts, get(pub, 'home.texts') || {}); put('copy', copy, pub.copy || {});
     const vatIn = f.vat.value.trim(); const vatOld = get(priv, 'invoices.vatRate');
     const vatChanged = vatIn !== '' && !same(numOrText(vatIn), vatOld);
     if (!Object.keys(values).length && !vatChanged) { toast('אין שינויים לשמירה'); return; }
