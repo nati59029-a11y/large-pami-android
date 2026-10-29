@@ -45,10 +45,16 @@ try {
   if (C && C.Plugins && C.Plugins.App) C.Plugins.App.addListener('backButton', () => { if (modalOpen()) closeModal(); else if (!ctx.back()) backToApp(); });
 } catch (e) { /* בדפדפן אין תוסף */ }
 
+// המשתמש שמחובר עכשיו באפליקציה הראשית (lp-sync). הלשונית פועלת רק בשמו – כך במכשיר משותף
+// מי שנכנס לאפליקציה אחרי מישהו אחר לא יקבל את הכניסה הקודמת של הלשונית.
+function appUser() {
+  try { const y = JSON.parse(localStorage.getItem('lp-sync')) || {}; return y.refresh && y.uid && (y.role === 'admin' || y.role === 'worker') ? { uid: y.uid, email: y.email || '' } : null; } catch (e) { return null; }
+}
 function loginForm(msg) {
   $('#tabs').hidden = true; $('#out').hidden = true; $('#who').textContent = '';
-  let email = '';
-  try { email = (JSON.parse(localStorage.getItem('lp-sync')) || {}).email || ''; } catch (e) { /* אין */ }
+  NAV.screen = null; NAV.stack = [];
+  const au = appUser();
+  const email = au ? au.email : '';
   main.innerHTML = `<div class="card"><h2>כניסה ללשונית</h2>
     <p class="note">הלשונית מתחברת לשרת של האתר. נכנסים פעם אחת עם אותו אימייל וסיסמה של האפליקציה.</p>
     <form id="lf"><label class="f"><span>אימייל</span><input name="email" type="email" autocomplete="username" required value="${esc(email)}" dir="ltr"></label>
@@ -57,7 +63,12 @@ function loginForm(msg) {
   $('#lf').onsubmit = async (ev) => {
     ev.preventDefault();
     const f = ev.target; const b = $('#lbtn'); b.disabled = true; $('#lerr').textContent = '';
-    try { await api.login(f.email.value.trim(), f.pw.value); await enter(); } catch (e) { $('#lerr').textContent = e.message; } finally { if (b.isConnected) b.disabled = false; }
+    try {
+      await api.login(f.email.value.trim(), f.pw.value);
+      const now = appUser();
+      if (!now || now.uid !== api.currentUser().uid) { await api.logout(); throw new Error(now ? `יש להיכנס עם המשתמש שמחובר עכשיו לאפליקציה (${now.email}).` : 'קודם צריך להתחבר לאפליקציה עצמה, ורק אחר כך ללשונית.'); }
+      await enter();
+    } catch (e) { $('#lerr').textContent = e.message; } finally { if (b.isConnected) b.disabled = false; }
   };
 }
 async function enter() {
@@ -75,5 +86,8 @@ $('#out').onclick = async () => { await api.logout(); toast('התנתקת מהל
   $('#demo').hidden = !be.demo;
   api.init(be);
   const u = await api.waitForUser();
-  if (u) await enter(); else loginForm();
+  const au = appUser();
+  // אין משתמש באפליקציה, או שהוא משתמש אחר: מנתקים את הלשונית ומציגים כניסה. התפקיד נבדק מחדש מהמסד בכל כניסה (enter).
+  if (u && (!au || au.uid !== u.uid)) { await api.logout(); loginForm(au ? '' : 'קודם צריך להתחבר לאפליקציה עצמה, ורק אחר כך ללשונית.'); return; }
+  if (u) await enter(); else loginForm(au ? '' : 'קודם צריך להתחבר לאפליקציה עצמה, ורק אחר כך ללשונית.');
 })();
