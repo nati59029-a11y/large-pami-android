@@ -1,5 +1,8 @@
 const fs=require('fs'),path=require('path');
 fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','www/xlsx.full.min.js');
+// לשונית "הזמנות אתר" (שלב 1): לאיזה שרת היא מחוברת. ברירת המחדל וכל בנייה מ-main: כבויה ('off').
+{const v=process.env.SITE_BACKEND||'',isMain=process.env.GITHUB_REF==='refs/heads/main',sb=!isMain&&['emulator','test'].includes(v)?v:'off';
+ fs.writeFileSync('www/orders/site-backend.js',"/* נכתב בבנייה (scripts/prepare.js). 'off' = הלשונית כבויה */\nwindow.LP_SITE_BACKEND = '"+sb+"';\n");console.log('SITE_BACKEND:',sb)}
 // barcode decoder (ZXing)
 try{const zd='node_modules/@zxing/library/umd';const zf=fs.existsSync(zd+'/index.min.js')?'index.min.js':fs.readdirSync(zd).find(f=>/\.min\.js$/.test(f));fs.copyFileSync(zd+'/'+zf,'www/zxing.min.js');console.log('zxing ok',zf)}catch(e){console.log('zxing missing, continuing',e.message)}
 // OCR engine (Tesseract) -> www/tess

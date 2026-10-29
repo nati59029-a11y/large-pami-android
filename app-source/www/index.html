@@ -180,6 +180,7 @@ body.gate{padding:0;background:#16191b}
 .lw{display:flex;gap:6px;align-items:stretch;margin:0 0 8px}.lw>.li{flex:1;min-width:0;margin:0}.fa{display:flex;gap:4px;align-items:center;flex:none}.fa .ib{width:44px;height:44px;border-radius:12px}.fa .ib svg{width:20px;height:20px}
 </style>
 <script src="xlsx.full.min.js"></script>
+<script src="orders/site-backend.js"></script>
 </head>
 <body>
 <header class="top"><button class="ib" id="bk" data-a="back" aria-label="חזרה" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button><div id="lglogo" role="img" aria-label="לארג׳ פעמי"></div><div class="ttl" id="ttl"></div><button class="ib" data-a="go" data-v="settings" aria-label="הגדרות"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8"/></svg></button></header>
@@ -755,7 +756,7 @@ CHG.lgf=el=>{LG.from=el.value;rerender()};CHG.lgt=el=>{LG.to=el.value;rerender()
 /* ---- עוד ---- */
 V.more=()=>{const pend=S.tx.filter(t=>t.cat==='p_inc'||t.cat==='p_exp').length,fx=fixPending(NOWM()).length;
  const o=(a,v,t,sm,n)=>`<button class="opt" data-a="${a}" data-v="${v||''}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`;
- return{t:'עוד',s:'כלים',h:o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח וחשבוניות בלי מספר',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
+ return{t:'עוד',s:'כלים',h:(ordOn()?o('ordGo','','הזמנות אתר','מוצרים, ייבוא, תמונות והגדרות האתר – גרסת בדיקה'):'')+o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח וחשבוניות בלי מספר',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
 
 ACT.repAll=()=>{RS=scopeOf('all:exp');go('rep')};
 
@@ -1347,6 +1348,7 @@ async function syLogin(email,pw){
  syS()}
 function syOut(){SY={};try{localStorage.removeItem(SK)}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}
 const isW=()=>SY.role==='worker'&&!!SY.refresh,isA=()=>SY.role==='admin'&&!!SY.refresh;
+/* לשונית "הזמנות אתר" (שלב 1, קבצים נפרדים ב-orders/): רק למנהל ולעובד, ורק במצב אמולטור או כשהבנייה הפעילה אותה (orders/site-backend.js) */const ordOn=()=>(isA()||isW())&&(!!EMU||['emulator','test'].includes(window.LP_SITE_BACKEND));ACT.ordGo=()=>{location.href='orders/app.html'+location.search};const ordTile=`<button class="tile" data-a="ordGo" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">🛒<br>הזמנות אתר</button>`;
 /* ---- תור שליחה (עובד) ---- */
 const obGet=()=>{try{return JSON.parse(localStorage.getItem(OB))||[]}catch(e){return[]}};
 const obSet=a=>{try{localStorage.setItem(OB,JSON.stringify(a))}catch(e){toast('אין מקום לשמור במכשיר')}};
@@ -1431,7 +1433,7 @@ V.wk=()=>{const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
  if(WS==='home'){
   const off=`<button class="tile" disabled style="opacity:.45;cursor:default">🚧<br><small>בבנייה</small></button>`;
   return{t:'לארג׳ פעמי',s:esc((SY.email||'').split('@')[0]),h:`${cs.length?'':'<div class="card"><p class="note">עדיין לא התקבלו קטגוריות מהמנהל. בדוק חיבור ולחץ "רענן".</p></div>'}
-  <div class="big2" style="grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 16px"><button class="tile exp" data-a="wkGoExp">${ico('exp')}הוצאה</button>${shTile}${fbTile}${off.repeat(5)}</div>
+  <div class="big2" style="grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 16px"><button class="tile exp" data-a="wkGoExp">${ico('exp')}הוצאה</button>${shTile}${fbTile}${ordOn()?ordTile:''}${off.repeat(ordOn()?4:5)}</div>
   ${sent}<button class="btn g" style="width:100%;margin-top:14px" data-a="updChk">בדוק עדכון והתקן</button><button class="btn g" style="width:100%;margin-top:8px" data-a="syOut">התנתק</button>`}}
  if(WS==='exp'){
   return{t:'הוצאה',s:'סריקה או הכנסה ידנית',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>
