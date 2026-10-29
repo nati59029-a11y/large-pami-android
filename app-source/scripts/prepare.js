@@ -2,7 +2,20 @@ const fs=require('fs'),path=require('path');
 fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','www/xlsx.full.min.js');
 // לשונית "הזמנות אתר" (שלב 1): לאיזה שרת היא מחוברת. ברירת המחדל וכל בנייה מ-main: כבויה ('off').
 {const v=process.env.SITE_BACKEND||'',isMain=process.env.GITHUB_REF==='refs/heads/main',sb=!isMain&&['emulator','test'].includes(v)?v:'off';
- fs.writeFileSync('www/orders/site-backend.js',"/* נכתב בבנייה (scripts/prepare.js). 'off' = הלשונית כבויה */\nwindow.LP_SITE_BACKEND = '"+sb+"';\n");console.log('SITE_BACKEND:',sb)}
+ if(sb==='test'&&/[\\/]app-source$/.test(process.cwd()))throw new Error('SITE_BACKEND=test: run prepare.js in the build copy (app/), not in app-source');
+ fs.writeFileSync('www/orders/site-backend.js',"/* נכתב בבנייה (scripts/prepare.js). 'off' = הלשונית כבויה */\nwindow.LP_SITE_BACKEND = '"+sb+"';\n");console.log('SITE_BACKEND:',sb)
+ // רק בבנייה עם SITE_BACKEND=test (ולעולם לא מ-main): גם האפליקציה וגם הלשונית מחוברות לפרויקט הבדיקה, כדי שתהיה כניסה אחת.
+ // הקוד שבמאגר (app-source/www) לא משתנה: מחליפים כאן, בעותק של הבנייה, שורות שלמות. בכל בנייה אחרת שום דבר לא מוחלף.
+ if(sb==='test'){
+  const T={apiKey:'AIzaSyBHsEw1IvucT5gh1sv5jfSpd5UKqnPwsXU',authDomain:'largpeami-test-f4691.firebaseapp.com',projectId:'largpeami-test-f4691',storageBucket:'largpeami-test-f4691.firebasestorage.app',messagingSenderId:'633529912370',appId:'1:633529912370:web:2ecb51363efd597c19002b'};
+  if(/^largpeami$/i.test(T.projectId))throw new Error('SITE_BACKEND=test: refusing the real project');
+  const sub=(f,from,to)=>{const t=fs.readFileSync(f,'utf8'),n=t.split(from).length-1;if(n!==1)throw new Error('SITE_BACKEND=test: expected 1 match in '+f+', found '+n);fs.writeFileSync(f,t.replace(from,()=>to))};
+  sub('www/index.html',"const FB={apiKey:'AIzaSyAoYfIJUwFeFDyvJha0GYw0sOtiTrlf2fo',projectId:EMU?'demo-largpeami':'largpeami'};","const FB={apiKey:'"+T.apiKey+"',projectId:EMU?'demo-largpeami':'"+T.projectId+"'};");
+  sub('www/index.html',"const ST_BUCKET='largpeami.appspot.com';","const ST_BUCKET='"+T.storageBucket+"';");
+  sub('www/orders/backend.js',"const TEST = { projectId: '', apiKey: '', appId: '', storageBucket: '' };","const TEST = "+JSON.stringify(T)+";");
+  const left=fs.readFileSync('www/index.html','utf8').match(/'largpeami'|largpeami\.appspot\.com/g);
+  if(left)throw new Error('SITE_BACKEND=test: index.html still points at largpeami: '+left.join(','));
+  console.log('SITE_BACKEND=test: app + tab ->',T.projectId)}}
 // barcode decoder (ZXing)
 try{const zd='node_modules/@zxing/library/umd';const zf=fs.existsSync(zd+'/index.min.js')?'index.min.js':fs.readdirSync(zd).find(f=>/\.min\.js$/.test(f));fs.copyFileSync(zd+'/'+zf,'www/zxing.min.js');console.log('zxing ok',zf)}catch(e){console.log('zxing missing, continuing',e.message)}
 // OCR engine (Tesseract) -> www/tess
