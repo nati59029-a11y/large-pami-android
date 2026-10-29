@@ -9,11 +9,12 @@ import { orderView, newOrder, statusText } from './order.js';
 
 async function render(root, ctx) {
   const list = (await api.listWholesaleCustomers()).sort((a, b) => String(a.companyName).localeCompare(String(b.companyName), 'he'));
+  if (!root.isConnected) return;
   root.innerHTML = `<h2>לקוחות סיטונאים <small class="note">(${list.length})</small></h2>
     ${api.isManager() ? '<button class="btn w" id="add" style="margin-bottom:10px">＋ פתיחת סיטונאי</button>' : ''}
     ${list.map((c) => `<button class="li" data-id="${esc(c.id)}"><div class="m"><b>${esc(c.companyName || '')}</b><small>${esc(c.name || '')} · <span dir="ltr">${esc(c.email || '')}</span></small></div>${c.active === false ? '<span class="tag bad">מושבת</span>' : ''}${c.isDemo ? '<span class="tag gold">דמו</span>' : ''}</button>`).join('') || '<p class="note">אין עדיין סיטונאים.</p>'}`;
-  if ($('#add')) $('#add').onclick = () => ctx.open((r) => create(r, ctx));
-  $$('.li[data-id]').forEach((b) => { b.onclick = () => ctx.open((r) => detail(r, ctx, list.find((c) => c.id === b.dataset.id))); });
+  if ($('#add', root)) $('#add', root).onclick = () => ctx.open((r) => create(r, ctx));
+  $$('.li[data-id]', root).forEach((b) => { b.onclick = () => ctx.open((r) => detail(r, ctx, list.find((c) => c.id === b.dataset.id))); });
 }
 
 async function create(root, ctx) {
@@ -55,6 +56,7 @@ async function detail(root, ctx, c) {
   const [orders, invoices] = await Promise.all([api.listCustomerOrders(c.id), api.listCustomerInvoices(c.id)]);
   orders.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const pricing = await Promise.all(orders.slice(0, 60).map((o) => api.getOrderPricing(o.id).catch(() => null)));
+  if (!root.isConnected) return; // המסך התחלף בזמן הטעינה
   root.innerHTML = `<button class="btn g s" id="bk">‹ חזרה</button><h2>${esc(c.companyName || c.name || '')}</h2>
     <div class="card"><p>${esc(c.name || '')} · <span dir="ltr">${esc(c.email || '')}</span>${c.phone ? ' · <span dir="ltr">' + esc(c.phone) + '</span>' : ''}${c.active === false ? ' <span class="tag bad">מושבת</span>' : ''}</p></div>
     <button class="btn w" id="neworder" style="margin-bottom:12px">＋ הזמנה חדשה ללקוח</button>
@@ -63,15 +65,16 @@ async function detail(root, ctx, c) {
     <h3>חשבוניות (${invoices.length})</h3>
     <div class="card" id="invoices">${invoices.length ? `<table><tr><th>מספר</th><th>תאריך</th><th>סכום</th></tr>${invoices.map((v) => `<tr><td>${esc(v.number || v.invoiceNumber || v.id)}</td><td>${esc(String(v.issuedAt || v.date || v.createdAt || '').slice(0, 10))}</td><td>${ils(v.total)}</td></tr>`).join('')}</table>` : '<p class="note">אין עדיין חשבוניות. הפקת החשבוניות תיבנה בשלב 2.</p>'}</div>
     <div id="mgrPart"></div>`;
-  $('#bk').onclick = () => ctx.back();
-  $('#neworder').onclick = () => ctx.open((r) => newOrder(r, ctx, c));
-  $$('#orders [data-oid]').forEach((b) => { b.onclick = () => ctx.open((r) => orderView(r, ctx, b.dataset.oid)); });
-  if (mgr) await managerPart($('#mgrPart'), ctx, c);
+  $('#bk', root).onclick = () => ctx.back();
+  $('#neworder', root).onclick = () => ctx.open((r) => newOrder(r, ctx, c));
+  $$('#orders [data-oid]', root).forEach((b) => { b.onclick = () => ctx.open((r) => orderView(r, ctx, b.dataset.oid)); });
+  if (mgr) await managerPart($('#mgrPart', root), ctx, c);
 }
 
 // רק מנהל: תנאי תשלום ותזכורות, ומחירים אישיים
 async function managerPart(box, ctx, c) {
   const [terms, prices, products] = await Promise.all([api.getTerms(c.id), api.listPersonalPrices(c.id), api.listProducts()]);
+  if (!box.isConnected) return; // המסך התחלף בזמן הטעינה
   const t = terms || {};
   const pn = (id) => { const p = products.find((x) => x.id === id); return p ? `${p.name} · ${p.sku}` : id; };
   const rm = remMode(t.paymentReminders);
@@ -88,20 +91,20 @@ async function managerPart(box, ctx, c) {
     <label class="f"><span>מוצר</span><input id="pq" placeholder="חיפוש לפי שם או מק״ט"><select id="ps"></select></label>
     <label class="f"><span>מחיר אישי לחבילה (בלי מע"מ)</span><input id="pp" inputmode="decimal" dir="ltr"></label>
     <button class="btn w" id="padd">שמור מחיר</button></div>`;
-  const f = $('#tf');
-  f.elements.rmode.onchange = () => { $('#rdl').hidden = f.elements.rmode.value !== 'custom'; };
-  $('#savet').onclick = async (ev) => {
+  const f = $('#tf', box);
+  f.elements.rmode.onchange = () => { $('#rdl', box).hidden = f.elements.rmode.value !== 'custom'; };
+  $('#savet', box).onclick = async (ev) => {
     const mode = f.elements.rmode.value;
     const input = { customerUid: c.id, paymentTerms: f.elements.paymentTerms.value, deferredDays: f.elements.paymentTerms.value === 'deferred' ? numOrText(val(f, 'deferredDays')) : null,
       paymentReminders: mode === 'default' ? null : mode === 'off' ? { enabled: false } : { enabled: true, days: parseDays(val(f, 'rdays')) } };
     const r = await busy(ev.target, () => api.setPaymentTerms(input), (x) => (x.changed ? 'תנאי התשלום נשמרו' : 'לא היה מה לשנות'));
     if (r) ctx.replace((rt) => detail(rt, ctx, c));
   };
-  const opts = (q) => { const s = q.trim().toLowerCase(); $('#ps').innerHTML = '<option value="">בחר מוצר</option>' + products.filter((p) => !s || String(p.name).toLowerCase().includes(s) || String(p.sku).toLowerCase().includes(s)).slice(0, 60).map((p) => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.sku)}</option>`).join(''); };
-  opts(''); $('#pq').oninput = (e) => opts(e.target.value);
-  $('#padd').onclick = async (ev) => {
-    if (!$('#ps').value) { toast('בחר מוצר', true); return; }
-    const r = await busy(ev.target, () => api.setWholesalePrices([{ productId: $('#ps').value, price: numOrText($('#pp').value.trim()) }], c.id), 'המחיר האישי נשמר');
+  const opts = (q) => { const s = q.trim().toLowerCase(); $('#ps', box).innerHTML = '<option value="">בחר מוצר</option>' + products.filter((p) => !s || String(p.name).toLowerCase().includes(s) || String(p.sku).toLowerCase().includes(s)).slice(0, 60).map((p) => `<option value="${esc(p.id)}">${esc(p.name)} · ${esc(p.sku)}</option>`).join(''); };
+  opts(''); $('#pq', box).oninput = (e) => opts(e.target.value);
+  $('#padd', box).onclick = async (ev) => {
+    if (!$('#ps', box).value) { toast('בחר מוצר', true); return; }
+    const r = await busy(ev.target, () => api.setWholesalePrices([{ productId: $('#ps', box).value, price: numOrText($('#pp', box).value.trim()) }], c.id), 'המחיר האישי נשמר');
     if (r) ctx.replace((rt) => detail(rt, ctx, c));
   };
   $$('[data-rm]', box).forEach((b) => { b.onclick = async () => { const r = await busy(b, () => api.setWholesalePrices([{ productId: b.closest('[data-pid]').dataset.pid, price: null }], c.id), 'המחיר האישי הוסר'); if (r) ctx.replace((rt) => detail(rt, ctx, c)); }; });

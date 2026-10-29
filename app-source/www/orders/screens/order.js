@@ -25,9 +25,11 @@ const sameNum = (a, b) => Number(a) === Number(b);
 export async function orderView(root, ctx, id, banner) {
   const mgr = api.isManager();
   const o = await api.getOrder(id);
+  if (!root.isConnected) return; // המסך התחלף בזמן הטעינה
   if (!o) { root.innerHTML = '<button class="btn g s" id="bk">‹ חזרה</button><p class="err">ההזמנה לא נמצאה, או שאין לך הרשאה לראות אותה (עובד רואה רק הזמנות פתוחות).</p>'; $('#bk').onclick = () => ctx.back(); return; }
   // עלות ורווח: רק מנהל, ורק כאן. לעובד – אין קריאה בכלל.
   const costs = mgr ? await api.getOrderCosts(id).catch(() => null) : null;
+  if (!root.isConnected) return;
   const pr = o.pricing || {};
   const ws = o.customerType === 'customer_wholesale';
   const exVat = pr.pricesIncludeVat === false;
@@ -104,6 +106,7 @@ export async function orderView(root, ctx, id, banner) {
 // ---------- הזמנה חדשה בשם לקוח סיטונאי ----------
 export async function newOrder(root, ctx, c) {
   const [products, pub] = await Promise.all([api.listProducts(), api.getSettings('public')]);
+  if (!root.isConnected) return;
   const prods = products.filter((p) => p.active !== false).sort((a, b) => String(a.name).localeCompare(String(b.name), 'he'));
   const zones = ((pub && pub.shipping && pub.shipping.zones) || []).filter((z) => z && z.id && z.pickupOnly !== true);
   const items = []; // { productId, variantId, packs, name, color }

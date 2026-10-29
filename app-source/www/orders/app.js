@@ -28,8 +28,11 @@ const ctx = {
 async function draw() {
   window.scrollTo(0, 0);
   const r = NAV.stack.length ? NAV.stack[NAV.stack.length - 1] : (root) => NAV.screen.render(root, ctx);
-  main.innerHTML = '<p class="note">טוען…</p>';
-  try { await r(main, ctx); } catch (e) { main.innerHTML = `<div class="card"><p class="err">${esc(e.message || e)}</p><button class="btn g" id="retry">נסה שוב</button></div>`; $('#retry').onclick = draw; }
+  // כל ציור מקבל תיבה חדשה. מסך ישן שעוד רץ ברקע (אחרי await) כותב לתיבה שכבר לא במסך (isConnected=false) ולא דורס את המסך החדש
+  const box = document.createElement('div');
+  box.innerHTML = '<p class="note">טוען…</p>';
+  main.replaceChildren(box);
+  try { await r(box, ctx); } catch (e) { if (!box.isConnected) return; main.innerHTML = `<div class="card"><p class="err">${esc(e.message || e)}</p><button class="btn g" id="retry">נסה שוב</button></div>`; $('#retry').onclick = draw; }
 }
 function tabs() {
   const list = SCREENS.filter((s) => s.roles.includes(api.role()));
