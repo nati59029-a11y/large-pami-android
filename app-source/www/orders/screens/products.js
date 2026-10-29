@@ -1,7 +1,7 @@
 /* מסך "מוצרים": רשימה, הוספה ועריכה של כל שדה, צבעים, "אזל" / "המלאי התחדש",
    ומחיר עלות (בלי מע"מ, ולידו הסכום עם מע"מ) ומחיר סיטונאי – רק למנהל. עובד רואה רשימה ופרטים לקריאה בלבד. */
 import * as api from '../api.js';
-import { esc, $, $$, ils, withVat, toast, busy, val, numOrText, confirmBox } from '../ui.js';
+import { esc, $, $$, ils, withVat, toast, busy, val, numOrText, confirmBox, dialog } from '../ui.js';
 
 const FIELDS = [
   // [שדה, תווית, סוג]
@@ -90,7 +90,7 @@ async function edit(root, ctx, id) {
       <div class="vat" id="vatl"></div>
       <label class="f"><span>עדיפות לעוזר (0 עד 3)</span><select id="prio">${[0, 1, 2, 3].map((n) => `<option ${cost && cost.assistantPriority === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       ${cost && cost.marginScore != null ? `<p class="note">ציון רווחיות (מחושב בשרת): ${esc(cost.marginScore)}</p>` : ''}
-      <label class="f"><span>מחיר סיטונאי בסיסי לחבילה (כולל מע"מ, ריק = אין)</span><input id="wsp" inputmode="decimal" value="${esc(ws && ws.price != null ? ws.price : '')}" dir="ltr"></label>
+      <label class="f"><span>מחיר סיטונאי בסיסי לחבילה (בלי מע"מ, ריק = אין)</span><input id="wsp" inputmode="decimal" value="${esc(ws && ws.price != null ? ws.price : '')}" dir="ltr"></label>
     </div>` : ''}
     ${ro ? '' : '<button class="btn w" id="save">שמור</button><p class="err" id="perr" role="alert"></p>'}`;
   $('#bk').onclick = () => ctx.back();
@@ -128,18 +128,49 @@ async function edit(root, ctx, id) {
     if (!Object.keys(out).length && !vs.length && !costChanged && !wsChanged) { toast('אין שינויים לשמירה'); return; }
     $('#perr').textContent = '';
     const b = $('#save'); let created = null;
+    // שינוי כללי של מחיר סיטונאי במוצר קיים – שלב 1: השרת מחזיר את הלקוחות עם מחיר קבוע למוצר, והמנהל מחליט לכל אחד
+    let fixedPrices = [];
+    if (wsChanged && id) {
+      const pv = await busy(b, () => api.previewWholesalePrices([{ productId: id, price: numOrText(wsIn) }]));
+      if (!pv) return;
+      const list = pv.fixedPriceCustomers || [];
+      if (list.length) {
+        const pick = await fixedDecisions(list, ws ? ws.price : null, numOrText(wsIn));
+        if (!pick) { toast('השמירה בוטלה. שום דבר לא נשמר.'); return; }
+        fixedPrices = pick;
+      }
+    }
     const r = await busy(b, async () => {
       let pid = id; const done = [];
       if (Object.keys(out).length || vs.length || !id) { const s = await api.saveProduct(id, out, vs); pid = s.productId; if (!id) created = pid; done.push('פרטי המוצר'); }
       try {
         if (costChanged) { await api.setProductCost(pid, numOrText(costIn), prio); done.push('מחיר העלות'); }
-        if (wsChanged) { await api.setWholesalePrices([{ productId: pid, price: numOrText(wsIn) }]); done.push('המחיר הסיטונאי'); }
+        if (wsChanged) { const w = await api.commitWholesalePrices([{ productId: pid, price: numOrText(wsIn) }], fixedPrices); done.push('המחיר הסיטונאי' + (w && w.fixedChanged ? ` (ו-${w.fixedChanged} מחירים קבועים של לקוחות)` : '')); }
       } catch (e) { e.message = (done.length ? `נשמרו: ${done.join(', ')}. לא נשמר: ` : '') + e.message; throw e; }
       return { pid, done };
     }, (x) => 'נשמר: ' + x.done.join(', '));
     // מוצר חדש שנשמר, גם אם העלות לא נשמרה: עוברים לעריכה שלו, כדי שלחיצה נוספת לא תיצור מוצר כפול
     if (r || created) { CATS = null; ctx.replace((rt) => edit(rt, ctx, r ? r.pid : created)); }
   };
+}
+
+// שלב 2 של שינוי כללי: לכל לקוח עם מחיר קבוע – להשאיר, להעלות באותו אחוז, או לקבוע סכום. מחזיר fixedPrices, או null בביטול.
+async function fixedDecisions(list, oldBase, newBase) {
+  const canPct = Number(oldBase) > 0 && Number(newBase) > 0;
+  const pct = (price) => Math.round((Math.round(price * 100) * Math.round(newBase * 100)) / Math.round(oldBase * 100)) / 100; // כמו בשרת, באגורות
+  const html = `<p><b>ללקוחות האלה יש מחיר קבוע למוצר הזה.</b></p><p class="note">המחיר הבסיסי משתנה מ-${ils(oldBase)} ל-${ils(newBase)} (בלי מע"מ). מה לעשות במחיר הקבוע של כל אחד?</p>
+    ${list.map((f, i) => `<div class="card" data-fx="${i}" style="background:var(--card2)"><b>${esc(f.customerName || f.customerUid)}</b><p class="note">המחיר הקבוע היום: ${ils(f.price)}</p>
+      <label class="ck"><input type="radio" name="fx${i}" value="keep" checked>להשאיר: ${ils(f.price)}</label>
+      <label class="ck"><input type="radio" name="fx${i}" value="same_percent" ${canPct ? '' : 'disabled'}>להעלות באותו אחוז${canPct ? ': ' + ils(pct(f.price)) : ' (אין מחיר ישן או חדש)'}</label>
+      <label class="ck"><input type="radio" name="fx${i}" value="set">לקבוע סכום:</label><input data-set inputmode="decimal" dir="ltr" placeholder="מחיר בלי מע&quot;מ"></div>`).join('')}`;
+  const r = await dialog(html, [[true, 'המשך ושמור']], (box) => list.map((f, i) => {
+    const card = box.querySelector(`[data-fx="${i}"]`);
+    const action = card.querySelector(`input[name=fx${i}]:checked`).value;
+    const o = { customerUid: f.customerUid, productId: f.productId, action };
+    if (action === 'set') o.price = numOrText(card.querySelector('[data-set]').value.trim());
+    return o;
+  }));
+  return r ? r.data : null;
 }
 
 export default { id: 'products', title: 'מוצרים', roles: ['manager', 'employee'], render: list };

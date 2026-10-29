@@ -5,7 +5,7 @@
    אם שם או מבנה של פונקציה בשרת משתנה – מתקנים רק בקובץ הזה.
    הספרייה הרשמית של Firebase ארוזה בתיקייה vendor/ ולא נטענת מהאינטרנט. */
 import { initializeApp } from './vendor/firebase-app.js';
-import { getAuth, connectAuthEmulator, signInWithEmailAndPassword, signOut, onAuthStateChanged } from './vendor/firebase-auth.js';
+import { initializeAuth, connectAuthEmulator, signOut, onAuthStateChanged } from './vendor/firebase-auth.js';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, collection, query, where } from './vendor/firebase-firestore-lite.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from './vendor/firebase-functions.js';
 
@@ -15,17 +15,47 @@ export const FN = {
   setWholesalePrices: 'setWholesalePrices', setVariantSoldOut: 'setVariantSoldOut', importProducts: 'importProducts',
   processProductPhoto: 'processProductPhoto', assignProductPhoto: 'assignProductPhoto',
   updateSiteSettings: 'updateSiteSettings', createWholesaleCustomer: 'createWholesaleCustomer',
+  // שלב 1.10א (מאגר האתר 8bb7dc0, functions/lib/staffOrders.js)
+  setOrderPricing: 'setOrderPricing', createOrderForCustomer: 'createOrderForCustomer', markDeferredPaid: 'markDeferredPaid', setPaymentTerms: 'setPaymentTerms',
 };
+// סטטוסים של הזמנה "פתוחה" – כמו openStatuses() בכללים. עובד קורא רק הזמנות במצבים האלה.
+export const OPEN_STATUSES = ['pending_payment', 'received', 'stock_check', 'awaiting_packing', 'packing', 'ready', 'out_for_delivery', 'delivered'];
+// מתי מותר לשנות מחיר בהזמנה (כמו EDITABLE בשרת): לפני החיוב
+export const EDITABLE_STATUSES = ['pending_payment', 'received', 'stock_check'];
 // הזוויות שהשרת מקבל בשיוך תמונה (functions/lib/photos.js, ANGLES)
 export const ANGLES = [['front', 'מקדימה'], ['side', 'מהצד'], ['top', 'מלמעלה'], ['angle45', 'בזווית'], ['open', 'פתוח'], ['turntable', 'סיבוב'], ['pack', 'חבילה']];
 
 let BE = null; let app = null; let auth = null; let db = null; let fns = null;
 let ROLE = null; // 'manager' | 'employee'
 
-export function init(be) {
+/* כניסה אחת (שלב 1.10ב): הלשונית לא מבקשת סיסמה. היא מקבלת את הכניסה של האפליקציה (lp-sync: uid ו-refresh token)
+   ושמה אותה בזיכרון בלבד – בלי לשמור כלום במכשיר. ספריית Firebase טוענת את המשתמש מהזיכרון הזה, מחדשת את הטוקן מול השרת,
+   ומאמתת אותו (accounts:lookup). אם הטוקן לא תקף – אין משתמש. כל פתיחה של הלשונית מתחילה מאפס, לפי מי שמחובר עכשיו לאפליקציה.
+   (הצורה של המשתמש השמור היא זו של firebase-auth 12.19.0 שארוזה ב-vendor/: uid ו-stsTokenManager.) */
+let SEED = null;
+class AppSessionPersistence {
+  constructor() { this.type = 'NONE'; this.storage = {}; }
+  async _isAvailable() { return true; }
+  async _set(k, v) { this.storage[k] = v; }
+  async _get(k) { if (Object.prototype.hasOwnProperty.call(this.storage, k)) return this.storage[k]; return /^firebase:authUser:/.test(k) ? SEED : null; }
+  async _remove(k) { this.storage[k] = null; SEED = null; }
+  _addListener() {}
+  _removeListener() {}
+}
+AppSessionPersistence.type = 'NONE';
+function seedFrom(au) {
+  if (!au || typeof au.refresh !== 'string' || !au.refresh || typeof au.uid !== 'string' || !au.uid) return null;
+  const fresh = typeof au.idToken === 'string' && au.idToken && Number(au.exp) > Date.now() + 60000;
+  return {
+    uid: au.uid, email: au.email || undefined, emailVerified: false, isAnonymous: false, providerData: [],
+    stsTokenManager: fresh ? { refreshToken: au.refresh, accessToken: au.idToken, expirationTime: Number(au.exp) } : { refreshToken: au.refresh },
+  };
+}
+export function init(be, appSession) {
   BE = be;
+  SEED = seedFrom(appSession);
   app = initializeApp(be.config);
-  auth = getAuth(app);
+  auth = initializeAuth(app, { persistence: AppSessionPersistence });
   db = getFirestore(app);
   fns = getFunctions(app, 'us-central1');
   if (be.emu) {
@@ -62,8 +92,7 @@ export const currentUser = () => auth && auth.currentUser;
 export const role = () => ROLE;
 export const isManager = () => ROLE === 'manager';
 export function waitForUser() { return new Promise((ok) => { const off = onAuthStateChanged(auth, (u) => { off(); ok(u); }); }); }
-export const login = (email, pw) => wrap(() => signInWithEmailAndPassword(auth, email, pw));
-export async function logout() { ROLE = null; await signOut(auth); }
+export async function logout() { ROLE = null; SEED = null; await signOut(auth); }
 // מנהל = מסמך admins/{uid} (כמו באפליקציה). עובד = staff/{uid} עם active == true. אחרת – אין הרשאה, וניתוק.
 export async function detectRole() {
   const uid = auth.currentUser.uid;
@@ -91,7 +120,23 @@ export const listPhotoJobs = () => wrap(async () => {
   if (ROLE === 'manager') return rows(await getDocs(query(collection(db, 'photo_jobs'), where('status', '==', 'ready_for_review'))));
   return rows(await getDocs(query(collection(db, 'photo_jobs'), where('uploadedBy', '==', auth.currentUser.uid))));
 });
-export const listWholesaleCustomers = () => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'customers'), where('type', '==', 'customer_wholesale'))))); };
+// לקוחות סיטונאים: מנהל ועובד פעיל (הכלל מתיר לעובד רק כרטיסי סיטונאי, ולכן השאילתה כוללת type)
+export const listWholesaleCustomers = () => wrap(async () => rows(await getDocs(query(collection(db, 'customers'), where('type', '==', 'customer_wholesale')))));
+export const getCustomer = (uid) => getDocData('customers/' + uid);
+// הזמנות של לקוח. עובד: רק הזמנות פתוחות (הכלל דורש status בתוך openStatuses, ולכן השאילתה מסננת לפיו).
+export const listCustomerOrders = (uid) => wrap(async () => rows(await getDocs(ROLE === 'manager'
+  ? query(collection(db, 'orders'), where('customerUid', '==', uid))
+  : query(collection(db, 'orders'), where('customerUid', '==', uid), where('status', 'in', OPEN_STATUSES)))));
+// חשבוניות של לקוח (רשימה בלבד; החשבוניות עצמן נבנות בשלב 2)
+export const listCustomerInvoices = (uid) => wrap(async () => rows(await getDocs(query(collection(db, 'invoices'), where('buyerUid', '==', uid)))));
+// הזמנה: המסמך, השורות והמחירים. עלות ורווח (order_costs) – רק מנהל, ולעובד לא מבקשים אותם בכלל.
+export const getOrder = (id) => wrap(async () => {
+  const [o, items, pricing] = await Promise.all([getDoc(doc(db, 'orders', id)), getDocs(collection(db, 'orders', id, 'order_items')), getDoc(doc(db, 'orders', id, 'order_pricing', 'main'))]);
+  if (!o.exists()) return null;
+  return Object.assign({ id: o.id }, o.data(), { items: rows(items), pricing: pricing.exists() ? pricing.data() : null });
+});
+export const getOrderPricing = (id) => getDocData(`orders/${id}/order_pricing/main`);
+export const getOrderCosts = (id) => { needManager(); return getDocData(`orders/${id}/order_costs/main`); };
 export const getTerms = (uid) => { needManager(); return getDocData('wholesale_terms/' + uid); };
 export const listPersonalPrices = (uid) => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'wholesale_terms', uid, 'prices')))); };
 
@@ -103,6 +148,13 @@ export const saveProduct = (productId, product, variants) => call(FN.saveProduct
 export const saveCategory = (categoryId, category, imageB64) => call(FN.saveCategory, Object.assign({ category }, categoryId ? { categoryId } : {}, imageB64 ? { image: { data: imageB64 } } : {}));
 export const setProductCost = (productId, cost, assistantPriority) => call(FN.setProductCost, Object.assign({ productId, cost }, assistantPriority === undefined ? {} : { assistantPriority }));
 export const setWholesalePrices = (prices, customerUid) => call(FN.setWholesalePrices, Object.assign({ prices }, customerUid ? { customerUid } : {}));
+// שינוי כללי של מחיר סיטונאי, בשני שלבים: preview מחזיר את הלקוחות עם מחיר קבוע למוצר; commit עם ההחלטה לכל אחד
+export const previewWholesalePrices = (prices) => call(FN.setWholesalePrices, { prices, preview: true });
+export const commitWholesalePrices = (prices, fixedPrices) => call(FN.setWholesalePrices, Object.assign({ prices }, fixedPrices && fixedPrices.length ? { fixedPrices } : {}));
+export const setOrderPricing = (input) => call(FN.setOrderPricing, input);
+export const createOrderForCustomer = (input) => call(FN.createOrderForCustomer, input);
+export const markDeferredPaid = (input) => call(FN.markDeferredPaid, input);
+export const setPaymentTerms = (input) => call(FN.setPaymentTerms, input);
 export const setVariantSoldOut = (productId, variantId, soldOut) => call(FN.setVariantSoldOut, { productId, variantId, soldOut });
 export const importPreview = (rowsIn) => call(FN.importProducts, { mode: 'preview', rows: rowsIn }, 300000);
 export const importCommit = (rowsIn, previewHash) => call(FN.importProducts, { mode: 'commit', rows: rowsIn, previewHash }, 300000);

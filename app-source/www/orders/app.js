@@ -1,8 +1,9 @@
-/* לשונית "הזמנות אתר" (שלב 1.6, גרסת בדיקה): פתיחה, כניסה, תפקיד, וניווט בין המסכים.
-   מנהל רואה את כל המסכים. עובד רואה רק את רשימת המוצרים (בלי מחירי עלות ובלי מחיר סיטונאי) והעלאת צילומים. */
+/* לשונית "הזמנות אתר" (שלב 1.6, גרסת בדיקה; כניסה אחת – שלב 1.10ב): פתיחה, כניסה, תפקיד, וניווט בין המסכים.
+   מנהל רואה את כל המסכים. עובד רואה מוצרים (בלי מחירי עלות ובלי מחיר סיטונאי), העלאת צילומים,
+   ולקוחות סיטונאים (כרטיס, הזמנות פתוחות, חשבוניות והזמנה חדשה) – בלי עלות ובלי רווח בשום מקום. */
 import { backend } from './backend.js';
 import * as api from './api.js';
-import { esc, $, toast, modalOpen, closeModal } from './ui.js';
+import { esc, $, modalOpen, closeModal } from './ui.js';
 import products from './screens/products.js';
 import importer from './screens/import.js';
 import photos from './screens/photos.js';
@@ -45,49 +46,41 @@ try {
   if (C && C.Plugins && C.Plugins.App) C.Plugins.App.addListener('backButton', () => { if (modalOpen()) closeModal(); else if (!ctx.back()) backToApp(); });
 } catch (e) { /* בדפדפן אין תוסף */ }
 
-// המשתמש שמחובר עכשיו באפליקציה הראשית (lp-sync). הלשונית פועלת רק בשמו – כך במכשיר משותף
-// מי שנכנס לאפליקציה אחרי מישהו אחר לא יקבל את הכניסה הקודמת של הלשונית.
-function appUser() {
-  try { const y = JSON.parse(localStorage.getItem('lp-sync')) || {}; return y.refresh && y.uid && (y.role === 'admin' || y.role === 'worker') ? { uid: y.uid, email: y.email || '' } : null; } catch (e) { return null; }
+// כניסה אחת (שלב 1.10ב): הלשונית לא מבקשת סיסמה. היא פועלת רק בשם המשתמש שמחובר עכשיו לאפליקציה הראשית (lp-sync),
+// עם הכניסה שלו. כך במכשיר משותף: מי שנכנס לאפליקציה אחרי מישהו אחר מקבל את הלשונית בשמו שלו בלבד,
+// ואחרי "התנתק" באפליקציה (syOut מוחק את lp-sync) הלשונית לא נפתחת. הלשונית לא שומרת כניסה משלה במכשיר.
+function appSession() {
+  try {
+    const y = JSON.parse(localStorage.getItem('lp-sync')) || {};
+    return y.refresh && y.uid && (y.role === 'admin' || y.role === 'worker') ? { uid: y.uid, email: y.email || '', refresh: y.refresh, idToken: y.idToken, exp: y.exp } : null;
+  } catch (e) { return null; }
 }
-function loginForm(msg) {
-  $('#tabs').hidden = true; $('#out').hidden = true; $('#who').textContent = '';
+const NO_APP = 'קודם צריך להתחבר לאפליקציה עצמה. הלשונית נפתחת עם אותה כניסה, בלי סיסמה נוספת.';
+function blocked(msg) {
+  $('#tabs').hidden = true; $('#who').textContent = '';
   NAV.screen = null; NAV.stack = [];
-  const au = appUser();
-  const email = au ? au.email : '';
-  main.innerHTML = `<div class="card"><h2>כניסה ללשונית</h2>
-    <p class="note">הלשונית מתחברת לשרת של האתר. נכנסים פעם אחת עם אותו אימייל וסיסמה של האפליקציה.</p>
-    <form id="lf"><label class="f"><span>אימייל</span><input name="email" type="email" autocomplete="username" required value="${esc(email)}" dir="ltr"></label>
-    <label class="f"><span>סיסמה</span><input name="pw" type="password" autocomplete="current-password" required dir="ltr"></label>
-    <p class="err" id="lerr" role="alert">${esc(msg || '')}</p><button class="btn w" id="lbtn">כניסה</button></form></div>`;
-  $('#lf').onsubmit = async (ev) => {
-    ev.preventDefault();
-    const f = ev.target; const b = $('#lbtn'); b.disabled = true; $('#lerr').textContent = '';
-    try {
-      await api.login(f.email.value.trim(), f.pw.value);
-      const now = appUser();
-      if (!now || now.uid !== api.currentUser().uid) { await api.logout(); throw new Error(now ? `יש להיכנס עם המשתמש שמחובר עכשיו לאפליקציה (${now.email}).` : 'קודם צריך להתחבר לאפליקציה עצמה, ורק אחר כך ללשונית.'); }
-      await enter();
-    } catch (e) { $('#lerr').textContent = e.message; } finally { if (b.isConnected) b.disabled = false; }
-  };
+  main.innerHTML = `<div class="card" id="gate"><h2>הזמנות אתר</h2><p class="err" id="lerr" role="alert">${esc(msg)}</p>
+    <button class="btn w" id="bk2">חזרה לאפליקציה</button></div>`;
+  $('#bk2').onclick = backToApp;
 }
 async function enter() {
-  try { await api.detectRole(); } catch (e) { loginForm(e.message); return; }
+  try { await api.detectRole(); } catch (e) { blocked(e.message); return; }
   const u = api.currentUser();
   $('#who').textContent = (api.isManager() ? 'מנהל' : 'עובד') + ' · ' + (u.email || '');
-  $('#out').hidden = false;
   go(SCREENS[0]);
 }
-$('#out').onclick = async () => { await api.logout(); toast('התנתקת מהלשונית'); loginForm(); };
 
 (async function boot() {
   const be = backend();
   if (!be.ok) { main.innerHTML = `<div class="card"><p>${esc(be.msg)}</p><button class="btn g" id="bk2">חזרה לאפליקציה</button></div>`; $('#bk2').onclick = backToApp; return; }
   $('#demo').hidden = !be.demo;
-  api.init(be);
+  const au = appSession();
+  if (!au) { blocked(NO_APP); return; }
+  api.init(be, au);
   const u = await api.waitForUser();
-  const au = appUser();
-  // אין משתמש באפליקציה, או שהוא משתמש אחר: מנתקים את הלשונית ומציגים כניסה. התפקיד נבדק מחדש מהמסד בכל כניסה (enter).
-  if (u && (!au || au.uid !== u.uid)) { await api.logout(); loginForm(au ? '' : 'קודם צריך להתחבר לאפליקציה עצמה, ורק אחר כך ללשונית.'); return; }
-  if (u) await enter(); else loginForm(au ? '' : 'קודם צריך להתחבר לאפליקציה עצמה, ורק אחר כך ללשונית.');
+  // הכניסה של האפליקציה לא תקפה (פגה, בוטלה, או משתמש שנמחק): לא נכנסים, ולא מציגים טופס סיסמה
+  if (!u) { blocked('הכניסה לאפליקציה לא בתוקף. חזור לאפליקציה, התנתק והתחבר מחדש.'); return; }
+  // הטוקן שייך למשתמש אחר מזה שהאפליקציה רשמה: לא פותחים כלום
+  if (u.uid !== au.uid) { await api.logout(); blocked('הכניסה לא תואמת למשתמש שמחובר עכשיו לאפליקציה. חזור לאפליקציה, התנתק והתחבר מחדש.'); return; }
+  await enter(); // התפקיד נבדק מחדש מהמסד בכל פתיחה
 })();

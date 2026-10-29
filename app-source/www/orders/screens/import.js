@@ -7,7 +7,7 @@ import { esc, $, toast, busy, saveFile } from '../ui.js';
 export const COLUMNS = [
   ['sku', 'מק"ט', 'חובה. לפיו יודעים איזה מוצר לעדכן'], ['name', 'שם המוצר', 'חובה במוצר חדש'],
   ['categoryId', 'קטגוריה', 'שם הקטגוריה או המזהה שלה. חובה במוצר חדש'], ['pricePrivate', 'מחיר לפרטי', 'כולל מע"מ, לחבילה. חובה במוצר חדש'],
-  ['wholesalePrice', 'מחיר סיטונאי', 'כולל מע"מ, לחבילה'], ['cost', 'מחיר עלות (בלי מע"מ)', 'רק המנהל רואה'],
+  ['wholesalePrice', 'מחיר סיטונאי', 'בלי מע"מ, לחבילה'], ['cost', 'מחיר עלות (בלי מע"מ)', 'רק המנהל רואה'],
   ['unitsPerPack', 'יחידות בחבילה', ''], ['barcode', 'ברקוד', 'ספרות בלבד'], ['description', 'תיאור', ''],
   ['isBakingProduct', 'מוצר אפייה', 'כן / לא'], ['kashrut', 'כשרות', 'חובה במוצר אפייה'], ['allergens', 'אלרגנים', 'מופרדים בפסיק'],
   ['leadTimeHoursOverride', 'זמן הכנה מיוחד (שעות)', ''], ['deliveryAllowed', 'אפשר משלוח', 'כן / לא'], ['inTableEditor', 'בעורך השולחן', 'כן / לא'],
@@ -20,8 +20,11 @@ const BY_HEADER = new Map(COLUMNS.flatMap(([k, h]) => [[norm(h), k], [norm(k), k
 const LABEL = Object.fromEntries(COLUMNS.map(([k, h]) => [k, h]));
 const RES = { added: 'חדש', updated: 'עדכון', unchanged: 'ללא שינוי', error: 'שגיאה' };
 
-// טבלה (מערך של שורות) ← { rows: [{שדה: ערך}], lines: [מספר שורה באקסל], unknown: [כותרות לא מוכרות] }
-export function tableToRows(aoa) {
+// טבלה (מערך של שורות) ← { rows: [{שדה: ערך, excelRow}], lines: [מספר שורה באקסל], unknown: [כותרות לא מוכרות] }
+// firstRow: מספר השורה באקסל של aoa[0] (שורת הכותרות). כל שורה נשלחת עם excelRow – מספר השורה המקורי בגיליון,
+// גם כשמדלגים על שורות ריקות – כדי שמספרי השורות בהודעות של השרת יהיו כמו באקסל (שלב 1.10א/ב).
+export function tableToRows(aoa, firstRow) {
+  const r0 = Number.isInteger(firstRow) && firstRow >= 1 ? firstRow : 1;
   const head = (aoa[0] || []).map((h) => BY_HEADER.get(norm(h)) || null);
   const unknown = (aoa[0] || []).filter((h, i) => String(h).trim() && !head[i]).map(String);
   const rows = []; const lines = [];
@@ -32,7 +35,7 @@ export function tableToRows(aoa) {
       if (v === '' || v == null) return;
       r[k] = typeof v === 'string' ? v.trim() : v; any = true;
     });
-    if (any) { rows.push(r); lines.push(i + 1); }
+    if (any) { r.excelRow = r0 + i; rows.push(r); lines.push(r0 + i); }
   }
   return { rows, lines, unknown, mapped: head.filter(Boolean) };
 }
@@ -59,7 +62,10 @@ async function render(root) {
     let parsed;
     try {
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
-      parsed = tableToRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' }));
+      const sh = wb.Sheets[wb.SheetNames[0]];
+      // sheet_to_json מתחיל מתחילת הטווח של הגיליון. אם הטווח לא מתחיל בשורה 1 – מוסיפים את ההפרש, כדי שהמספור יישאר כמו באקסל
+      const start = sh && sh['!ref'] ? XLSX.utils.decode_range(sh['!ref']).s.r + 1 : 1;
+      parsed = tableToRows(XLSX.utils.sheet_to_json(sh, { header: 1, raw: true, defval: '', blankrows: true }), start);
     } catch (e) { res.innerHTML = '<p class="err">לא הצלחתי לקרוא את הקובץ. ודא שזה קובץ אקסל או CSV תקין.</p>'; return; }
     T.read = performance.now() - T.start;
     if (!parsed.mapped.includes('sku')) { res.innerHTML = '<p class="err">אין בקובץ עמודת מק"ט. הורד את הקובץ לדוגמה וראה את שמות העמודות.</p>'; return; }
@@ -84,10 +90,10 @@ function showPreview(res, fileName, parsed, pv, T) {
   const toWrite = (c.added || 0) + (c.updated || 0);
   const errs = pv.rows.filter((r) => r.result === 'error');
   const chg = pv.rows.filter((r) => r.result !== 'error');
-  // מספור השורות כמו בהודעות של השרת: שורת נתונים 1 = השורה הראשונה אחרי הכותרות (שורות ריקות לא נספרות)
+  // מספר השורה כמו באקסל: השרת מחזיר ב-row את excelRow ששלחנו
   const line = (r) => r.row;
   const LIM = 200;
-  const table = (arr, cols) => `<div style="overflow-x:auto"><table><tr><th>שורה*</th><th>מק"ט</th>${cols}</tr>${arr.slice(0, LIM).map((r) => `<tr><td>${line(r)}</td><td dir="ltr">${esc(r.sku || '—')}</td>${r.result === 'error' ? `<td class="err">${esc((r.errors || []).join('\n'))}</td>` : `<td>${RES[r.result]}</td><td>${changeText(r.changes)}</td>`}</tr>`).join('')}</table></div><p class="note">* מספר שורת הנתונים: 1 = השורה הראשונה אחרי שורת הכותרות (באקסל זו שורה 2). שורות ריקות לא נספרות.</p>${arr.length > LIM ? `<p class="note">מוצגות ${LIM} מתוך ${arr.length}.</p>` : ''}`;
+  const table = (arr, cols) => `<div style="overflow-x:auto"><table><tr><th>שורה*</th><th>מק"ט</th>${cols}</tr>${arr.slice(0, LIM).map((r) => `<tr><td>${line(r)}</td><td dir="ltr">${esc(r.sku || '—')}</td>${r.result === 'error' ? `<td class="err">${esc((r.errors || []).join('\n'))}</td>` : `<td>${RES[r.result]}</td><td>${changeText(r.changes)}</td>`}</tr>`).join('')}</table></div><p class="note">* מספר השורה בקובץ האקסל (שורת הכותרות היא שורה 1).</p>${arr.length > LIM ? `<p class="note">מוצגות ${LIM} מתוך ${arr.length}.</p>` : ''}`;
   window.__lpImport = { counts: c, total: pv.total, times: T, serverMs: pv.ms };
   res.innerHTML = `<div class="card"><h3>תצוגה מקדימה: ${esc(fileName)}</h3>
     <div class="counts" id="counts"><div><b>${c.added || 0}</b>חדשים</div><div><b>${c.updated || 0}</b>עדכונים</div><div><b>${c.unchanged || 0}</b>ללא שינוי</div><div><b>${c.error || 0}</b>שגיאות</div></div>

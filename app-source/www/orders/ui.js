@@ -38,6 +38,24 @@ export function confirmBox(text, okLabel) {
   });
 }
 
+// חלון עם תוכן ובחירה בין כמה כפתורים (שלב 1.10ב). buttons: [[ערך, תווית, מחלקה]]. מחזיר { value, data } או null בביטול.
+// collect(box) נקרא לפני הסגירה, כדי לקרוא את מה שמולא בחלון.
+export function dialog(html, buttons, collect) {
+  return new Promise((done) => {
+    const m = document.createElement('div');
+    m.className = 'modal';
+    m.innerHTML = `<div class="box" role="dialog" aria-modal="true">${html}<div class="row" style="margin-top:12px">${buttons.map(([, l, c], i) => `<button class="btn ${c || ''}" data-i="${i}">${esc(l)}</button>`).join('')}<button class="btn g" data-no>ביטול</button></div></div>`;
+    const end = (i) => {
+      const r = i == null ? null : { value: buttons[i][0], data: collect ? collect(m) : undefined };
+      m.remove(); modalClose = null; done(r);
+    };
+    modalClose = () => end(null);
+    m.querySelectorAll('[data-i]').forEach((b) => { b.onclick = () => end(Number(b.dataset.i)); });
+    m.querySelector('[data-no]').onclick = () => end(null);
+    document.body.append(m);
+  });
+}
+
 // מריץ פעולה עם כפתור "עסוק", ומציג שגיאה בעברית אם נכשלה. מחזיר את התוצאה, או undefined אם נכשלה.
 export async function busy(btn, fn, okMsg) {
   if (btn) { btn.disabled = true; btn.dataset.label = btn.dataset.label || btn.textContent; btn.textContent = 'רגע…'; }
