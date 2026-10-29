@@ -15,6 +15,11 @@ on:
         description: "Publish this build to the phones (release 'latest'). Works only when run from main."
         type: boolean
         default: false
+      site_backend:
+        description: "test = an APK connected to the TEST project (largpeami-test-f4691), live update OFF, never published. Not allowed from main."
+        type: choice
+        options: ["off", "test"]
+        default: "off"
 permissions:
   contents: read
 jobs:
@@ -26,6 +31,8 @@ jobs:
       storage_bucket: ${{ steps.bucket.outputs.name }}
     env:
       GH_REPO: ${{ github.repository }}
+      # Only a manual run can ask for a test build. prepare.js ignores it on main; the step below fails it there.
+      SITE_BACKEND: ${{ github.event_name == 'workflow_dispatch' && inputs.site_backend == 'test' && 'test' || '' }}
     defaults:
       run:
         working-directory: app
@@ -35,6 +42,12 @@ jobs:
         with: { node-version: 20 }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
+      - name: Test build is never allowed from main
+        if: env.SITE_BACKEND == 'test'
+        working-directory: .
+        run: |
+          [ "$GITHUB_REF" != "refs/heads/main" ] || { echo "::error::site_backend=test is not allowed from main"; exit 1; }
+          echo "### TEST BUILD: connected to largpeami-test-f4691, live update OFF. Not for the business phone." | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check that app-source matches the project ZIP
         working-directory: .
         run: python3 scripts/verify-source-matches-zip.py large-pami-android-project.zip app-source
@@ -67,7 +80,8 @@ jobs:
         run: |
           N=$(grep -c "^const ST_BUCKET='[^']*';$" www/index.html || true)
           [ "$N" = 1 ] || { echo "::error::www/index.html must have exactly one line const ST_BUCKET='...'; (found $N)"; exit 1; }
-          if [ -n "$FIREBASE_STORAGE_BUCKET" ]; then
+          # A test build keeps the test bucket that prepare.js wrote.
+          if [ -n "$FIREBASE_STORAGE_BUCKET" ] && [ "$SITE_BACKEND" != "test" ]; then
             echo "$FIREBASE_STORAGE_BUCKET" | grep -Eq '^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$' || { echo "::error::FIREBASE_STORAGE_BUCKET is not a valid bucket name (a-z, 0-9, . _ -)"; exit 1; }
             sed -i "s#^const ST_BUCKET='[^']*';\$#const ST_BUCKET='$FIREBASE_STORAGE_BUCKET';#" www/index.html
           fi
@@ -83,6 +97,10 @@ jobs:
           LIVE_UPDATE_SIGNING_KEY: ${{ secrets.LIVE_UPDATE_SIGNING_KEY }}
           LIVE_UPDATE_SITE: ${{ vars.LIVE_UPDATE_SITE }}
         run: |
+          if [ "$SITE_BACKEND" = "test" ]; then
+            echo "::notice::Live update is OFF in this APK: test build."
+            exit 0
+          fi
           if [ -z "$LIVE_UPDATE_SIGNING_KEY" ] || [ -z "$LIVE_UPDATE_SITE" ]; then
             echo "::notice::Live update is OFF in this APK: secret LIVE_UPDATE_SIGNING_KEY or variable LIVE_UPDATE_SITE is not set."
             exit 0
