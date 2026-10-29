@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>הזמנות אתר – דף ניסיון</title>
+<style>
+body{margin:0;padding:16px;background:#14110d;color:#f1e9d6;font:16px/1.5 system-ui,sans-serif}
+h1{color:#d4af37;font-size:20px;margin:0 0 4px}
+.note{color:#b9ae94;font-size:14px;margin-bottom:12px}
+input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #5a4b1f;background:#1f1a12;color:#f1e9d6;margin:4px 0;width:100%;box-sizing:border-box}
+button{background:#d4af37;color:#14110d;font-weight:700;cursor:pointer}
+button:disabled{opacity:.5}
+pre{background:#1f1a12;border:1px solid #5a4b1f;border-radius:8px;padding:10px;white-space:pre-wrap;direction:ltr;text-align:left;font-size:13px}
+</style>
+</head>
+<body>
+<h1>הזמנות אתר – דף ניסיון</h1>
+<div class="note">בדיקת היתכנות פנימית. הדף לא מקושר מהאפליקציה, ופועל רק מול האמולטור של Firebase.</div>
+<input id="email" type="email" placeholder="אימייל" autocomplete="off">
+<input id="pass" type="password" placeholder="סיסמה" autocomplete="off">
+<button id="bLogin">כניסה</button>
+<button id="bRead" disabled>קריאת מסמך (staff)</button>
+<button id="bCall" disabled>קריאה לפונקציה</button>
+<pre id="out">מוכן.</pre>
+<script type="module" src="trial.js"></script>
+</body>
+</html>
