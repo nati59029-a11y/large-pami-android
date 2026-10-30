@@ -27,7 +27,7 @@
     return new Promise((done) => {
       const old = document.getElementById('mfaDlg'); if (old) old.remove();
       const w = document.createElement('div'); w.id = 'mfaDlg'; w.setAttribute('role', 'dialog'); w.setAttribute('aria-modal', 'true'); w.dir = 'rtl';
-      w.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
+      w.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
       const c = document.createElement('div');
       c.style.cssText = 'background:var(--card,#1b2023);color:var(--ink,#ece9e1);border:1px solid var(--acc,#c9a227);border-radius:16px;max-width:420px;width:100%;padding:18px;font-size:1rem;line-height:1.5;box-sizing:border-box';
       const h = document.createElement('h2'); h.style.cssText = 'margin:0 0 8px;font-size:1.2rem;color:var(--acc,#c9a227)'; h.textContent = o.title; c.append(h);
@@ -55,7 +55,8 @@
       const no = document.createElement('button'); no.type = 'button'; no.id = 'mfaCancel'; no.textContent = 'ביטול';
       no.style.cssText = 'flex:1;min-height:48px;border-radius:12px;border:1px solid var(--line,#313a3d);background:transparent;color:inherit;font-size:1rem';
       bs.append(ok); if (o.cancel !== false) bs.append(no); c.append(bs);
-      w.append(c); document.body.append(w);
+      // במסך הכניסה (body.gate) כל מה שאינו #gate מוסתר – לכן החלון נכנס לתוך #gate כשהוא קיים
+      w.append(c); (document.getElementById('gate') || document.body).append(w);
       const close = (v) => { w.remove(); done(v); };
       ok.onclick = () => {
         if (o.code === false) { close(''); return; }
