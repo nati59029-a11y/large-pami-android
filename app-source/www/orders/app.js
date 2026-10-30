@@ -10,8 +10,9 @@ import photos from './screens/photos.js';
 import categories from './screens/categories.js';
 import settings from './screens/settings.js';
 import customers from './screens/customers.js';
+import work from './screens/work.js';
 
-const SCREENS = [products, importer, photos, categories, settings, customers];
+const SCREENS = [products, importer, photos, categories, settings, customers, ...work];
 const main = $('#main');
 const backToApp = () => { location.href = '../index.html' + location.search; };
 $('#toApp').onclick = backToApp;
@@ -70,7 +71,8 @@ async function enter() {
   try { await api.detectRole(); } catch (e) { blocked(e.message); return; }
   const u = api.currentUser();
   $('#who').textContent = (api.isManager() ? 'מנהל' : 'עובד') + ' · ' + (u.email || '');
-  go(SCREENS[0]);
+  go(SCREENS[0]); // מסך הפתיחה לא השתנה (מוצרים). מסכי העובד (שלב 2.6א) נוספו בסוף הרשימה
+  api.registerPush(); // שלב 2.6א: רק אם יש בטלפון תוסף Push; אחרת לא קורה כלום
 }
 
 (async function boot() {
