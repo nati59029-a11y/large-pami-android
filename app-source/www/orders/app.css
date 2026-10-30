@@ -42,3 +42,8 @@ table{width:100%;border-collapse:collapse;font-size:.88rem}th,td{border-bottom:1
 .res{border-radius:12px;padding:10px 12px;margin-bottom:12px;font-weight:700;border:1px solid var(--line)}.res.ok{border-color:var(--ok)}.res.warn{border-color:var(--warn);color:var(--warn)}.res.bad{border-color:var(--bad);color:var(--bad)}
 .sum{display:flex;justify-content:space-between;gap:8px;padding:4px 0}.sum.tot{font-weight:800;color:var(--gold2);border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
 td input{min-height:40px;padding:4px 6px;max-width:110px}
+/* שלב 2.6א: מסכי העובד */
+a.btn{display:inline-flex;align-items:center;text-decoration:none}
+.sum span,.sum b{min-width:0;overflow-wrap:anywhere}
+.modal select[size]{min-height:120px}
+main a{color:var(--gold2)}

@@ -17,6 +17,9 @@ export const FN = {
   updateSiteSettings: 'updateSiteSettings', createWholesaleCustomer: 'createWholesaleCustomer',
   // שלב 1.10א (מאגר האתר 8bb7dc0, functions/lib/staffOrders.js)
   setOrderPricing: 'setOrderPricing', createOrderForCustomer: 'createOrderForCustomer', markDeferredPaid: 'markDeferredPaid', setPaymentTerms: 'setPaymentTerms',
+  // שלב 2.6א – מסכי העובד (מאגר האתר d499b85: functions/lib/orderFlow.js, orderMoney.js, index.js)
+  claimOrder: 'claimOrder', markItem: 'markItem', changeStatus: 'changeStatus', getMyHistory: 'getMyHistory',
+  confirmStock: 'confirmStock', confirmPhoneApproval: 'confirmPhoneApproval', registerPushToken: 'registerPushToken',
 };
 // סטטוסים של הזמנה "פתוחה" – כמו openStatuses() בכללים. עובד קורא רק הזמנות במצבים האלה.
 export const OPEN_STATUSES = ['pending_payment', 'received', 'stock_check', 'awaiting_packing', 'packing', 'ready', 'out_for_delivery', 'delivered'];
@@ -135,6 +138,9 @@ export const getOrder = (id) => wrap(async () => {
   if (!o.exists()) return null;
   return Object.assign({ id: o.id }, o.data(), { items: rows(items), pricing: pricing.exists() ? pricing.data() : null });
 });
+// הזמנות לפי סטטוס (מסכי העובד). עובד: הכלל דורש סטטוס פתוח, ולכן השאילתה תמיד מסננת לפיו.
+export const listOrdersByStatus = (statuses) => wrap(async () => rows(await getDocs(query(collection(db, 'orders'),
+  statuses.length === 1 ? where('status', '==', statuses[0]) : where('status', 'in', statuses)))));
 export const getOrderPricing = (id) => getDocData(`orders/${id}/order_pricing/main`);
 export const getOrderCosts = (id) => { needManager(); return getDocData(`orders/${id}/order_costs/main`); };
 export const getTerms = (uid) => { needManager(); return getDocData('wholesale_terms/' + uid); };
@@ -163,6 +169,27 @@ export const assignProductPhoto = (input) => call(FN.assignProductPhoto, input, 
 export const updateSiteSettings = (docName, values, bannerB64) => call(FN.updateSiteSettings, Object.assign({ doc: docName }, values ? { values } : {}, bannerB64 ? { bannerImage: { data: bannerB64 } } : {}));
 export const createWholesaleCustomer = (input) => call(FN.createWholesaleCustomer, input);
 
+// ---------- שלב 2.6א: פעולות העובד בהזמנה. כל חישוב, חיוב והחלטה – בשרת; כאן רק קריאות ----------
+export const claimOrder = (input) => call(FN.claimOrder, input);
+export const markItem = (input) => call(FN.markItem, input);
+export const changeStatus = (input) => call(FN.changeStatus, input);
+export const confirmStock = (input) => call(FN.confirmStock, input, 120000);
+export const confirmPhoneApproval = (input) => call(FN.confirmPhoneApproval, input);
+export const getMyHistory = (limit) => call(FN.getMyHistory, limit ? { limit } : {});
+/* רישום ל-Push (שלב 2.6א): רק אם בטלפון כבר יש תוסף PushNotifications. לא מוסיפים תוסף חדש (דורש התקנה והחלטה).
+   אין תוסף ← לא קורה כלום והמסכים עובדים כרגיל. הכישלון בשקט – ההתראות הן תוספת ולא תנאי לעבודה. */
+export async function registerPush() {
+  try {
+    const C = window.Capacitor; const P = C && C.Plugins && C.Plugins.PushNotifications;
+    if (!P) return 'no-plugin';
+    const perm = await P.requestPermissions();
+    if (!perm || perm.receive !== 'granted') return 'denied';
+    P.addListener('registration', (t) => { if (t && t.value) call(FN.registerPushToken, { token: t.value }).catch(() => {}); });
+    await P.register();
+    return 'requested';
+  } catch (e) { return 'error'; }
+}
+
 // ---------- Storage (בלי ספרייה נוספת: אותה כתובת REST שהאפליקציה כבר משתמשת בה לגיבוי) ----------
 const objUrl = (path) => `${BE.storageBase}/v0/b/${encodeURIComponent(BE.config.storageBucket)}/o/${encodeURIComponent(path)}`;
 // תמונות ציבוריות (products/, categories/, site/banners/) – הכללים מתירים קריאה לכולם
@@ -181,6 +208,20 @@ export async function uploadRawPhoto(file, n) {
     });
   } catch (e) { throw new Error('אין חיבור לשרת. בדוק את החיבור לאינטרנט ונסה שוב'); }
   if (!r.ok) throw new Error(r.status === 403 ? 'אין הרשאה להעלות את הקובץ (רק תמונה, עד 15MB)' : 'ההעלאה נכשלה (' + r.status + ')');
+  return path;
+}
+// צילום מסירה: orders/{הזמנה}/delivery/{קובץ}. הכללים: צוות בלבד, תמונה, עד 5MB, בלי דריסה. ואז changeStatus עם photoPath.
+export async function uploadDeliveryPhoto(orderId, blob) {
+  if (blob.size > 5 * 1024 * 1024) throw new Error('הצילום גדול מ-5MB');
+  const path = `orders/${orderId}/delivery/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const token = await auth.currentUser.getIdToken();
+  let r;
+  try {
+    r = await fetch(`${BE.storageBase}/v0/b/${encodeURIComponent(BE.config.storageBucket)}/o?name=${encodeURIComponent(path)}&uploadType=media`, {
+      method: 'POST', headers: { Authorization: 'Firebase ' + token, 'Content-Type': 'image/jpeg' }, body: blob,
+    });
+  } catch (e) { throw new Error('אין חיבור לשרת. בדוק את החיבור לאינטרנט ונסה שוב'); }
+  if (!r.ok) throw new Error(r.status === 403 ? 'אין הרשאה להעלות את הצילום (רק תמונה, עד 5MB)' : 'העלאת הצילום נכשלה (' + r.status + ')');
   return path;
 }
 // תמונה פנימית (product_photos_raw/processed/…) – רק צוות קורא, ולכן נטענת עם הזיהוי של המשתמש
