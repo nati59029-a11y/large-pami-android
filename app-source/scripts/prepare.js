@@ -17,6 +17,11 @@ fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','www/xlsx.full.min.js'
   // כדי שלא תציע להוריד ולהתקין את הגרסה הרגילה (GitHub release latest או app_releases/ ב-Storage).
   sub('www/index.html',"async function checkUpdate(man){\n","async function checkUpdate(man){if(man)toast('גרסת בדיקה: עדכון האפליקציה כבוי');return;\n");
   sub('www/index.html',"async function updSt(){","async function updSt(){return false;");
+  // שלב 2.8: אימות דו-שלבי (קוד מתחלף מאפליקציה, TOTP) לצוות – רק בגרסת הבדיקה (ה11). בגרסה הרגילה index.html לא משתנה.
+  fs.copyFileSync('scripts/mfa-login.js','www/mfa-login.js');
+  sub('www/index.html','<script src="orders/site-backend.js"></script>\n','<script src="orders/site-backend.js"></script>\n<script src="mfa-login.js"></script>\n');
+  sub('www/index.html',"const j=await jf(`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:signInWithPassword?key=${FB.apiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw,returnSecureToken:true})});","const j=await LP_MFA.signIn(email,pw);");
+  sub('www/index.html',"enterApp(false);syCheck()}","enterApp(false);syCheck();LP_MFA.check()}");
   const left=fs.readFileSync('www/index.html','utf8').match(/'largpeami'|largpeami\.appspot\.com/g);
   if(left)throw new Error('SITE_BACKEND=test: index.html still points at largpeami: '+left.join(','));
   // אף קובץ ב-www לא מפנה לפרויקט האמיתי: לא המפתח שלו, לא ה-bucket שלו ולא המזהה שלו בגרשיים.
