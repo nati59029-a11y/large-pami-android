@@ -11,8 +11,9 @@ import categories from './screens/categories.js';
 import settings from './screens/settings.js';
 import customers from './screens/customers.js';
 import work from './screens/work.js';
+import admin from './screens/admin.js';
 
-const SCREENS = [products, importer, photos, categories, settings, customers, ...work];
+const SCREENS = [products, importer, photos, categories, settings, customers, ...work, ...admin];
 const main = $('#main');
 const backToApp = () => { location.href = '../index.html' + location.search; };
 $('#toApp').onclick = backToApp;
@@ -42,7 +43,10 @@ function tabs() {
   nav.innerHTML = list.map((s) => `<button data-id="${s.id}" ${NAV.screen === s ? 'aria-current="page"' : ''}>${esc(s.title)}</button>`).join('');
   nav.querySelectorAll('button').forEach((b) => { b.onclick = () => go(list.find((s) => s.id === b.dataset.id)); });
 }
-function go(screen) { NAV.screen = screen; NAV.stack = []; tabs(); draw(); }
+function go(screen) {
+  // ניווט ישיר למסך שאינו של התפקיד נחסם (שלב 2.6ב); בנוסף כל מסך מנהל בודק לבד, והכללים בשרת חוסמים
+  if (!screen || !screen.roles.includes(api.role())) return;
+  NAV.screen = screen; NAV.stack = []; tabs(); draw(); }
 
 // כפתור "חזור" של אנדרואיד: סוגר חלון, חוזר מתת-מסך, ובסוף חוזר לאפליקציה
 try {

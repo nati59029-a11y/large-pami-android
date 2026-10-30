@@ -6,7 +6,7 @@
    הספרייה הרשמית של Firebase ארוזה בתיקייה vendor/ ולא נטענת מהאינטרנט. */
 import { initializeApp } from './vendor/firebase-app.js';
 import { initializeAuth, connectAuthEmulator, signOut, onAuthStateChanged } from './vendor/firebase-auth.js';
-import { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, collection, query, where } from './vendor/firebase-firestore-lite.js';
+import { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, collection, query, where, orderBy, limit } from './vendor/firebase-firestore-lite.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from './vendor/firebase-functions.js';
 
 // שמות הפונקציות בשרת (מאגר האתר, firebase/functions/index.js, שלב 1.4)
@@ -20,6 +20,10 @@ export const FN = {
   // שלב 2.6א – מסכי העובד (מאגר האתר d499b85: functions/lib/orderFlow.js, orderMoney.js, index.js)
   claimOrder: 'claimOrder', markItem: 'markItem', changeStatus: 'changeStatus', getMyHistory: 'getMyHistory',
   confirmStock: 'confirmStock', confirmPhoneApproval: 'confirmPhoneApproval', registerPushToken: 'registerPushToken',
+  // שלב 2.6ב – מסכי המנהל (אותו מאגר, d499b85: orderMoney.js, invoices.js, reports.js, orderFlow.js). addRequestedItemToOrder – ענף 2.7 (עוד לא מוזג)
+  cancelOrder: 'cancelOrder', refundOrder: 'refundOrder', sendPaymentLink: 'sendPaymentLink', setCustomerActive: 'setCustomerActive',
+  setAllocationNumber: 'setAllocationNumber', resendInvoice: 'resendInvoice', exportInvoices: 'exportInvoices', getReports: 'getReports',
+  addRequestedItemToOrder: 'addRequestedItemToOrder',
 };
 // סטטוסים של הזמנה "פתוחה" – כמו openStatuses() בכללים. עובד קורא רק הזמנות במצבים האלה.
 export const OPEN_STATUSES = ['pending_payment', 'received', 'stock_check', 'awaiting_packing', 'packing', 'ready', 'out_for_delivery', 'delivered'];
@@ -146,6 +150,18 @@ export const getOrderCosts = (id) => { needManager(); return getDocData(`orders/
 export const getTerms = (uid) => { needManager(); return getDocData('wholesale_terms/' + uid); };
 export const listPersonalPrices = (uid) => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'wholesale_terms', uid, 'prices')))); };
 
+// ---------- שלב 2.6ב: קריאות של מסכי המנהל (הכללים מתירים אותן רק למנהל; needManager היא שכבה נוספת, לא במקום הכללים) ----------
+const dayAgo = (n) => { const d = new Date(Date.now() - n * 86400000); const p = (x) => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+export const listAllOrders = (n) => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(n || 300))))); };
+export const listOrdersByNumber = (num) => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'orders'), where('orderNumber', '==', num))))); };
+export const listOrderEvents = (id) => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'orders', id, 'order_events')))); };
+export const listAllInvoices = (n) => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'invoices'), orderBy('issuedAt', 'desc'), limit(n || 500))))); };
+export const getInvoice = (id) => { needManager(); return getDocData('invoices/' + id); };
+export const listIncomeDays = (days) => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'site_income_daily'), where('date', '>=', dayAgo(days || 7)))))); };
+export const listAuthorizedPayments = () => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'payments'), where('status', '==', 'authorized'))))); };
+export const listSecurityAlerts = () => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'notifications'), where('kind', '==', 'security_alert'), limit(100))))); };
+export const listProductRequests = () => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'product_requests'), orderBy('createdAt', 'desc'), limit(200))))); };
+
 // ---------- פונקציות השרת ----------
 async function call(name, data, timeoutMs) {
   return wrap(async () => (await httpsCallable(fns, name, { timeout: timeoutMs || 70000 })(data)).data);
@@ -175,6 +191,15 @@ export const markItem = (input) => call(FN.markItem, input);
 export const changeStatus = (input) => call(FN.changeStatus, input);
 export const confirmStock = (input) => call(FN.confirmStock, input, 120000);
 export const confirmPhoneApproval = (input) => call(FN.confirmPhoneApproval, input);
+export const cancelOrder = (input) => call(FN.cancelOrder, input, 120000);
+export const refundOrder = (input) => call(FN.refundOrder, input, 120000);
+export const sendPaymentLink = (input) => call(FN.sendPaymentLink, input);
+export const setCustomerActive = (input) => call(FN.setCustomerActive, input);
+export const setAllocationNumber = (input) => call(FN.setAllocationNumber, input, 120000);
+export const resendInvoice = (input) => call(FN.resendInvoice, input, 120000);
+export const exportInvoices = (input) => call(FN.exportInvoices, input, 300000);
+export const getReports = (input) => call(FN.getReports, input, 120000);
+export const addRequestedItemToOrder = (input) => call(FN.addRequestedItemToOrder, input);
 export const getMyHistory = (limit) => call(FN.getMyHistory, limit ? { limit } : {});
 /* רישום ל-Push (שלב 2.6א): רק אם בטלפון כבר יש תוסף PushNotifications. לא מוסיפים תוסף חדש (דורש התקנה והחלטה).
    אין תוסף ← לא קורה כלום והמסכים עובדים כרגיל. הכישלון בשקט – ההתראות הן תוספת ולא תנאי לעבודה. */

@@ -6,13 +6,15 @@
 import * as api from '../api.js';
 import { esc, $, $$, ils, toast, busy, val, numOrText } from '../ui.js';
 import { orderView, newOrder, statusText } from './order.js';
+import { deferredSection } from './deferred.js';
+import { invNo, stateTag } from './money.js';
 
 async function render(root, ctx) {
   const list = (await api.listWholesaleCustomers()).sort((a, b) => String(a.companyName).localeCompare(String(b.companyName), 'he'));
   if (!root.isConnected) return;
   root.innerHTML = `<h2>לקוחות סיטונאים <small class="note">(${list.length})</small></h2>
     ${api.isManager() ? '<button class="btn w" id="add" style="margin-bottom:10px">＋ פתיחת סיטונאי</button>' : ''}
-    ${list.map((c) => `<button class="li" data-id="${esc(c.id)}"><div class="m"><b>${esc(c.companyName || '')}</b><small>${esc(c.name || '')} · <span dir="ltr">${esc(c.email || '')}</span></small></div>${c.active === false ? '<span class="tag bad">מושבת</span>' : ''}${c.isDemo ? '<span class="tag gold">דמו</span>' : ''}</button>`).join('') || '<p class="note">אין עדיין סיטונאים.</p>'}`;
+    ${list.map((c) => `<button class="li" data-id="${esc(c.id)}"><div class="m"><b>${esc(c.companyName || '')}</b><small>${esc(c.name || '')} · <span dir="ltr">${esc(c.email || '')}</span></small></div>${c.active === false ? '<span class="tag bad">מושבת</span>' : ''}${api.isManager() ? stateTag(c) : ''}${c.isDemo ? '<span class="tag gold">דמו</span>' : ''}</button>`).join('') || '<p class="note">אין עדיין סיטונאים.</p>'}`;
   if ($('#add', root)) $('#add', root).onclick = () => ctx.open((r) => create(r, ctx));
   $$('.li[data-id]', root).forEach((b) => { b.onclick = () => ctx.open((r) => detail(r, ctx, list.find((c) => c.id === b.dataset.id))); });
 }
@@ -63,12 +65,15 @@ async function detail(root, ctx, c) {
     <h3>הזמנות (${orders.length})</h3>${mgr ? '' : '<p class="note">מוצגות רק הזמנות פתוחות.</p>'}
     <div id="orders">${orders.map((o, i) => `<button class="li" data-oid="${esc(o.id)}"><div class="m"><b>${esc(o.orderNumber || o.id)}</b><small>${esc(String(o.createdAt || '').slice(0, 10))} · ${esc(statusText(o.status))}${pricing[i] ? ' · ' + ils(pricing[i].total) : ''}</small></div>${o.paymentTerms === 'deferred' ? `<span class="tag ${o.paymentStatus === 'paid' ? 'ok' : 'gold'}">${o.paymentStatus === 'paid' ? 'שולם' : 'שוטף – לא שולם'}</span>` : ''}${o.source === 'staff' ? '<span class="tag">צוות</span>' : ''}</button>`).join('') || '<p class="note">אין הזמנות.</p>'}</div>
     <h3>חשבוניות (${invoices.length})</h3>
-    <div class="card" id="invoices">${invoices.length ? `<table><tr><th>מספר</th><th>תאריך</th><th>סכום</th></tr>${invoices.map((v) => `<tr><td>${esc(v.number || v.invoiceNumber || v.id)}</td><td>${esc(String(v.issuedAt || v.date || v.createdAt || '').slice(0, 10))}</td><td>${ils(v.total)}</td></tr>`).join('')}</table>` : '<p class="note">אין עדיין חשבוניות. הפקת החשבוניות תיבנה בשלב 2.</p>'}</div>
-    <div id="mgrPart"></div>`;
+    <div class="card" id="invoices">${invoices.length ? `<table><tr><th>מספר</th><th>תאריך</th><th>סכום</th></tr>${invoices.map((v) => `<tr><td>${esc(invNo(v))}</td><td>${esc(String(v.issuedAt || v.date || v.createdAt || '').slice(0, 10))}</td><td>${ils(v.total)}</td></tr>`).join('')}</table>` : '<p class="note">אין עדיין חשבוניות. הפקת החשבוניות תיבנה בשלב 2.</p>'}</div>
+    <div id="dfPart"></div><div id="mgrPart"></div>`;
   $('#bk', root).onclick = () => ctx.back();
   $('#neworder', root).onclick = () => ctx.open((r) => newOrder(r, ctx, c));
   $$('#orders [data-oid]', root).forEach((b) => { b.onclick = () => ctx.open((r) => orderView(r, ctx, b.dataset.oid)); });
-  if (mgr) await managerPart($('#mgrPart', root), ctx, c);
+  if (mgr) {
+    await deferredSection($('#dfPart', root), c, invoices, async () => { const fr = await api.getCustomer(c.id).catch(() => null); ctx.replace((rt) => detail(rt, ctx, fr || c)); });
+    await managerPart($('#mgrPart', root), ctx, c);
+  }
 }
 
 // רק מנהל: תנאי תשלום ותזכורות, ומחירים אישיים
@@ -83,6 +88,7 @@ async function managerPart(box, ctx, c) {
     <form id="tf" onsubmit="return false"><div class="grid2"><label class="f"><span>תנאי תשלום</span><select name="paymentTerms"><option value="card" ${t.paymentTerms !== 'deferred' ? 'selected' : ''}>כרטיס אשראי</option><option value="deferred" ${t.paymentTerms === 'deferred' ? 'selected' : ''}>שוטף</option></select></label>
     <label class="f"><span>ימי שוטף</span><input name="deferredDays" inputmode="numeric" dir="ltr" value="${esc(t.deferredDays == null ? '' : t.deferredDays)}"></label></div>
     <label class="f"><span>תזכורות תשלום (בשוטף)</span><select name="rmode"><option value="default" ${rm === 'default' ? 'selected' : ''}>לפי ההגדרה הכללית</option><option value="off" ${rm === 'off' ? 'selected' : ''}>כבויות ללקוח הזה</option><option value="custom" ${rm === 'custom' ? 'selected' : ''}>זמנים משלו</option></select></label>
+    <label class="f"><span>תקרת חוב בשוטף (₪, ריק = בלי תקרה)</span><input name="creditLimit" inputmode="decimal" dir="ltr" value="${esc(t.creditLimit == null ? '' : t.creditLimit)}"></label>
     <label class="f" id="rdl" ${rm === 'custom' ? '' : 'hidden'}><span>ימים יחסית למועד התשלום (שלילי = לפני), מופרדים בפסיק</span><input name="rdays" dir="ltr" value="${esc(rm === 'custom' ? (t.paymentReminders.days || []).join(', ') : '-3, 0, 7')}"></label>
     <button class="btn w" id="savet">שמור תנאי תשלום</button></form></div>
     <h3>מחירים אישיים (${prices.length})</h3>
@@ -97,6 +103,7 @@ async function managerPart(box, ctx, c) {
     const mode = f.elements.rmode.value;
     const input = { customerUid: c.id, paymentTerms: f.elements.paymentTerms.value, deferredDays: f.elements.paymentTerms.value === 'deferred' ? numOrText(val(f, 'deferredDays')) : null,
       paymentReminders: mode === 'default' ? null : mode === 'off' ? { enabled: false } : { enabled: true, days: parseDays(val(f, 'rdays')) } };
+    if (val(f, 'creditLimit') !== String(t.creditLimit == null ? '' : t.creditLimit)) input.creditLimit = numOrText(val(f, 'creditLimit')); // נשלח רק אם שונה
     const r = await busy(ev.target, () => api.setPaymentTerms(input), (x) => (x.changed ? 'תנאי התשלום נשמרו' : 'לא היה מה לשנות'));
     if (r) ctx.replace((rt) => detail(rt, ctx, c));
   };
