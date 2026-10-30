@@ -1370,7 +1370,7 @@ const cfgLocal=()=>{try{return JSON.parse(localStorage.getItem(CK))||{cats:[]}}c
 /* ---- מנהל: קבלת הוצאות חדשות ---- */
 async function runQ(field,val){const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'inbox'}],where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:val}}},limit:300}})});return(r||[]).filter(x=>x.document).map(x=>x.document)}
 function inbHeal(){const seen=new Set();const L=S.inbox.filter(x=>seen.has(x.id)?false:(seen.add(x.id),true));if(L.length!==S.inbox.length){S.inbox=L;save()}}
-async function pullInbox(){if(!isA())return 0;if(pullInbox.b)return 0;pullInbox.b=1;try{return await pullInbox2()}finally{pullInbox.b=0}}
+async function pullInbox(){if(!isA())return 0;if(pullInbox.b)return 0;pullInbox.b=1;try{const n=await pullInbox2();try{await pullSiteInc()}catch(e){if(!e.offline)toast('מכירות אתר: המשיכה נכשלה – '+e.message)}return n}finally{pullInbox.b=0}}
 async function pullInbox2(){inbHeal();const docs=await runQ('status','new');let n=0;const done=[];
  for(const d of docs){const id=idOf(d);if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id)){done.push(id);continue}
   let data={};try{data=JSON.parse(gv(d,'data'))}catch(e){}
@@ -1379,6 +1379,29 @@ async function pullInbox2(){inbHeal();const docs=await runQ('status','new');let 
  save();
  for(const id of done){const it=S.inbox.find(x=>x.id===id);if(it&&it.np)for(let k=0;k<it.np;k++){try{await fsx('/chunks/'+id+'_'+k,{method:'DELETE'})}catch(e){}}try{await fsx('/inbox/'+id+'?updateMask.fieldPaths=status',{method:'PATCH',body:JSON.stringify({fields:{status:sv('imported')}})})}catch(e){}}
  return n}
+/* ---- שלב 2.6ג: הכנסות מהאתר (site_income_daily) – מנהל בלבד, ורק בגרסת הבדיקה (אמולטור או בנייה עם SITE_BACKEND=test). בגרסה הרגילה כבוי.
+   תנועת הכנסה אחת ליום, בקטגוריה "מכירות אתר", באותו מבנה של תנועת הכנסה רגילה (בלי שדה חדש). המפתח: src='site_income_daily/<תאריך>'.
+   יום שכבר נרשם לא נרשם שוב ולא משתנה. הסכום = total מהשרת (נטו: חיובים ותשלומי שוטף פחות זיכויים; היום לפי שעון ישראל, נקבע בשרת).
+   יום עם נטו 0 או במינוס לא נרשם, כי באפליקציה אין הכנסה במינוס – מוצגת הודעה. */
+const siOn=()=>isA()&&!/^largpeami$/i.test(FB.projectId)&&(!!EMU||window.LP_SITE_BACKEND==='test');
+const siNum=(d,k)=>{const v=d&&d.fields&&d.fields[k];return v?Number(v.integerValue!=null?v.integerValue:v.doubleValue):NaN};
+async function pullSiteInc(){if(!siOn()||pullSiteInc.b)return null;pullSiteInc.b=1;try{
+ const from=ymd(new Date(Date.now()-92*864e5));
+ const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'site_income_daily'}],where:{fieldFilter:{field:{fieldPath:'date'},op:'GREATER_THAN_OR_EQUAL',value:{stringValue:from}}},limit:400}})});
+ const docs=(r||[]).filter(x=>x.document).map(x=>x.document).sort((a,b)=>idOf(a).localeCompare(idOf(b)));const o={n:0,low:[],chg:[]};
+ for(const d of docs){const date=idOf(d),tot=siNum(d,'total');if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||gv(d,'date')!==date||!isFinite(tot))continue;
+  const src='site_income_daily/'+date,amt=rnd(tot),ex=S.tx.find(t=>t.src===src);
+  if(ex){if(rnd(ex.amt)!==amt)o.chg.push(date);continue}
+  if(amt<=0){if(amt<0||siNum(d,'refunds')>0)o.low.push(date);continue}
+  let c=cat('i_site')||S.cats.find(x=>x.kind==='inc'&&!x.hid&&x.name==='מכירות אתר');if(!c){c={id:'i_site',kind:'inc',name:'מכירות אתר',beh:'simple'};S.cats.push(c)}
+  let s=S.subs.find(x=>x.cat===c.id&&!x.off);if(!s){s={id:uid(),cat:c.id,name:'אתר החנות'};S.subs.push(s)}
+  const ch=siNum(d,'charges'),rf=siNum(d,'refunds'),no=siNum(d,'ordersCount');
+  S.tx.push({id:uid(),src,t:'inc',cat:c.id,sub:s.id,date,amt,note:'מכירות אתר (נטו ליום)'+(isFinite(ch)?' · חיובים '+ils(ch):'')+(rf>0?' · זיכויים '+ils(rf):'')+(no>0?' · '+no+' הזמנות':'')+(d.fields.isDemo&&d.fields.isDemo.booleanValue===true?' · נתוני בדיקה (דמה)':''),pays:[]});o.n++}
+ if(o.n)save();
+ if(o.n)toast('מכירות אתר: '+(o.n===1?'נרשם יום אחד':'נרשמו '+o.n+' ימים'));
+ if(o.low.length)toast('מכירות אתר: לא נרשמו ימים שבהם הזיכויים שווים להכנסות או גדולים מהן ('+o.low.map(dfmt).join(', ')+')');
+ if(o.chg.length)toast('מכירות אתר: הסכום באתר השתנה אחרי הרישום ב-'+o.chg.map(dfmt).join(', ')+'. התנועה לא עודכנה – בדוק ידנית');
+ return o}finally{pullSiteInc.b=0}}
 /* ===== מסך סנכרון ===== */
 V.sync=()=>{
  if(!SY.refresh)return{t:'סנכרון',s:'התחברות',h:`<div class="card"><p class="note">התחברות לחשבון שיצרת ב-Firebase. מכשיר מנהל מקבל את ההוצאות מהעובדים, מכשיר עובד מכניס הוצאות בלבד.</p><form data-f="sylogin">${fld('אימייל','email','','email','autocomplete="username" required')}${fld('סיסמה','pw','','password','autocomplete="current-password" required')}<button class="btn" style="width:100%;margin-top:10px">התחבר</button></form></div>`};
