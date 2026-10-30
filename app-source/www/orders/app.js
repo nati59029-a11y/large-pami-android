@@ -12,8 +12,9 @@ import settings from './screens/settings.js';
 import customers from './screens/customers.js';
 import work from './screens/work.js';
 import admin from './screens/admin.js';
+import inspirations from './screens/inspirations.js';
 
-const SCREENS = [products, importer, photos, categories, settings, customers, ...work, ...admin];
+const SCREENS = [products, importer, photos, categories, settings, customers, ...work, ...admin, inspirations];
 const main = $('#main');
 const backToApp = () => { location.href = '../index.html' + location.search; };
 $('#toApp').onclick = backToApp;
