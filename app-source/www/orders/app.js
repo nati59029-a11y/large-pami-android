@@ -46,6 +46,8 @@ function tabs() {
 function go(screen) {
   // ניווט ישיר למסך שאינו של התפקיד נחסם (שלב 2.6ב); בנוסף כל מסך מנהל בודק לבד, והכללים בשרת חוסמים
   if (!screen || !screen.roles.includes(api.role())) return;
+  // שלב 2.11: הודעה קצרה (toast) של המסך הקודם לא נשארת על המסך החדש
+  document.querySelectorAll('.toast').forEach((t) => t.remove());
   NAV.screen = screen; NAV.stack = []; tabs(); draw(); }
 
 // כפתור "חזור" של אנדרואיד: סוגר חלון, חוזר מתת-מסך, ובסוף חוזר לאפליקציה
