@@ -13,8 +13,9 @@ import customers from './screens/customers.js';
 import work from './screens/work.js';
 import admin from './screens/admin.js';
 import inspirations from './screens/inspirations.js';
+import promotions from './screens/promotions.js'; // שלב 5.2
 
-const SCREENS = [products, importer, photos, categories, settings, customers, ...work, ...admin, inspirations];
+const SCREENS = [products, importer, photos, categories, settings, customers, ...work, ...admin, inspirations, promotions];
 const main = $('#main');
 const backToApp = () => { location.href = '../index.html' + location.search; };
 $('#toApp').onclick = backToApp;

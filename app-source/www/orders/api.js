@@ -27,6 +27,9 @@ export const FN = {
   // שלב 3.4 – השראות, סוגי אירועים וכללי כמות (מאגר האתר 43a4e61: functions/lib/inspirations.js, tableSet.js)
   saveInspiration: 'saveInspiration', processInspirationFrames: 'processInspirationFrames', setInspirationHotspots: 'setInspirationHotspots',
   recognizeTableProducts: 'recognizeTableProducts', publishInspiration: 'publishInspiration', saveEventType: 'saveEventType', saveQuantityRule: 'saveQuantityRule',
+  // === שלב 5.2 – התחלה === מבצעים וקופונים (מאגר האתר: functions/lib/promotions.js)
+  savePromotion: 'savePromotion', saveCoupon: 'saveCoupon',
+  // === שלב 5.2 – סוף ===
 };
 // סטטוסים של הזמנה "פתוחה" – כמו openStatuses() בכללים. עובד קורא רק הזמנות במצבים האלה.
 export const OPEN_STATUSES = ['pending_payment', 'received', 'stock_check', 'awaiting_packing', 'packing', 'ready', 'out_for_delivery', 'delivered'];
@@ -288,3 +291,10 @@ export async function uploadInspirationRaw(inspirationId, file, n) {
   if (!r.ok) throw new Error(r.status === 403 ? 'אין הרשאה להעלות את הצילום (רק מנהל, תמונה מסוג JPG, PNG או WebP, עד 15MB)' : 'ההעלאה נכשלה (' + r.status + ')');
   return path;
 }
+
+// === שלב 5.2 – התחלה === מבצעים וקופונים (מנהל בלבד; הכללים והפונקציות בשרת חוסמים כל אחד אחר). קופון: מזהה המסמך הוא הקוד.
+export const listPromotions = () => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'promotions')))); };
+export const listCoupons = () => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'coupons')))); };
+export const savePromotion = (input) => call(FN.savePromotion, input);
+export const saveCoupon = (input) => call(FN.saveCoupon, input);
+// === שלב 5.2 – סוף ===
