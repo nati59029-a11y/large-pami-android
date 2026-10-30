@@ -13,6 +13,7 @@ const ACTION = {
   claim: 'קלטתי', mark_item: 'סימון שורה', item_mark: 'סימון שורה', item_change: 'תחליף / הורדה', confirm_stock: 'יש הכול (חיוב)', approval_request: 'שלחתי ללקוח לאישור',
   approval_phone: 'אישור בטלפון', approval_site: 'אישור הלקוח באתר', start_packing: 'התחלתי אריזה', finish_packing: 'סיימתי אריזה', load: 'הועמס לרכב',
   deliver: 'נמסר', picked_up: 'נאסף', delivery_failed: 'הלקוח לא נמצא', payment_link: 'קישור תשלום נשלח', status: 'עדכון סטטוס',
+  update_estimate: 'שינוי צפי', estimate: 'שינוי צפי', // שלב 2.13
 };
 const fmtTime = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }); };
 const localToday = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
@@ -76,6 +77,35 @@ const lineName = (x) => `${esc(x.nameSnapshot || x.productId || '')}${x.colorSna
 function bindBack(root, ctx) { const b = $('[data-bk]', root); if (b) b.onclick = () => ctx.back(); }
 const itemsHtml = (o) => `<div class="card">${linesOf(o).map((x) => `<div class="sum"><span>${lineName(x)}</span><b>× ${esc(x.packs)}</b></div>`).join('') || '<p class="note">אין שורות</p>'}</div>`;
 const holdBanner = (o) => (o.hold && HOLD[o.hold] ? `<div class="res warn" role="status">${esc(HOLD[o.hold])}${o.hold === 'awaiting_customer_approval' && o.customerApproval && o.customerApproval.deadline ? ' · עד ' + esc(fmtTime(o.customerApproval.deadline)) : ''}</div>` : '');
+
+// =====================================================================================
+// שלב 2.13: "שינוי צפי" אחרי "קלטתי" – צפי אספקה חדש, ובאיסוף גם זמן איסוף (פרק 5.2, טבלה 7.2 שורה 13).
+// כאן רק טופס. השרת (changeStatus, action = update_estimate) בודק סטטוס, תאריך והרשאה, רושם ביומן ושולח ללקוח הודעה ומייל.
+// =====================================================================================
+const ESTIMATE_STATUSES = ['stock_check', 'awaiting_packing', 'packing', 'ready', 'out_for_delivery'];
+const estimateBtn = (o) => (ESTIMATE_STATUSES.includes(o.status) && !['awaiting_customer_approval', 'payment_retry'].includes(o.hold) ? '<button class="btn s g" id="estchg">שינוי צפי</button>' : '');
+function bindEstimate(root, o, id, again) {
+  const b = $('#estchg', root);
+  if (!b) return;
+  b.onclick = async () => {
+    const today = localToday(); const pickup = o.fulfillment === 'pickup'; const s = o.pickupSlot || {};
+    const r = await dialog(`<h3 style="margin-top:0">שינוי צפי</h3>
+      <label class="f"><span>צפי אספקה</span><input type="date" id="ne" min="${today}" value="${esc(o.estimatedDate || '')}" dir="ltr"></label>
+      ${pickup ? `<div class="grid2"><label class="f"><span>יום איסוף</span><input type="date" id="npd" min="${today}" value="${esc(s.date || '')}" dir="ltr"></label><label class="f"><span>שעה</span><input type="time" id="nps" value="${esc(s.start || '')}" dir="ltr"></label></div>` : ''}
+      <p class="note">הלקוח יקבל הודעה באזור האישי ובמייל.</p>`, [['ok', 'שמור']],
+    (m) => ({ e: m.querySelector('#ne').value, d: pickup ? m.querySelector('#npd').value : '', t: pickup ? m.querySelector('#nps').value : '' }));
+    if (!r) return;
+    const input = { orderId: id, action: 'update_estimate' };
+    if (r.data.e && r.data.e !== (o.estimatedDate || '')) input.estimatedDate = r.data.e;
+    if (r.data.d || r.data.t) {
+      if (!r.data.d || !r.data.t) { toast('זמן איסוף: צריך גם יום וגם שעה', true); return; }
+      if (r.data.d !== s.date || r.data.t !== s.start) input.pickupSlot = { date: r.data.d, start: r.data.t };
+    }
+    if (!input.estimatedDate && !input.pickupSlot) { toast('לא שונה דבר', true); return; }
+    const res = await busy(b, () => api.changeStatus(input), 'הצפי עודכן, והלקוח יקבל הודעה');
+    if (res) again();
+  };
+}
 
 // =====================================================================================
 // 1. הזמנות חדשות: "קלטתי" = צפי אספקה (חובה), מחיר משלוח ידני (אזור שמחירו ידני), וזמן איסוף (אופציונלי)
@@ -178,7 +208,7 @@ async function stockView(root, ctx, id, banner) {
   }).join('');
   root.innerHTML = `${back}<h2>הזמנה ${esc(o.orderNumber || o.id)} · בדיקת מלאי</h2>
     ${banner ? `<div class="res ${banner.cls}" id="sres" role="status">${esc(banner.text)}</div>` : ''}${holdBanner(o)}
-    <p class="note">${esc(ful(o))}${o.estimatedDate ? ' · צפי אספקה ' + esc(o.estimatedDate) : ''}${o.paymentTerms === 'deferred' ? ' · בשוטף (בלי חיוב עכשיו)' : ''}</p>
+    <p class="note">${esc(ful(o))}${o.estimatedDate ? ' · צפי אספקה ' + esc(o.estimatedDate) : ''}${o.paymentTerms === 'deferred' ? ' · בשוטף (בלי חיוב עכשיו)' : ''}</p>${estimateBtn(o)}
     ${rows}
     <div class="card" id="mainbox">
       <div class="sum tot"><span>סכום ההזמנה (כפי שהשרת שמר)</span><b id="tot" data-total="${esc(total == null ? '' : total)}">${ils(total)}</b></div>
@@ -190,6 +220,7 @@ async function stockView(root, ctx, id, banner) {
     </div>`;
   bindBack(root, ctx);
   const again = (b) => ctx.replace((r) => stockView(r, ctx, id, b));
+  bindEstimate(root, o, id, () => again()); // שלב 2.13
   $$('[data-mark]', root).forEach((b) => { b.onclick = async () => {
     const itemId = b.closest('[data-item]').dataset.item;
     const r = await busy(b, () => api.markItem({ orderId: id, itemId, mark: b.dataset.mark }));
@@ -235,10 +266,11 @@ function packView(startStatus) {
     if (!o) { root.innerHTML = `${back}<p class="err">ההזמנה לא נמצאה</p>`; bindBack(root, ctx); return; }
     const ok = o.status === startStatus;
     root.innerHTML = `${back}<h2>הזמנה ${esc(o.orderNumber || o.id)} · ${isStart ? 'ממתינה לאריזה' : 'באריזה'}</h2>${holdBanner(o)}
-      <p class="note">${esc(ful(o))}${o.estimatedDate ? ' · צפי אספקה ' + esc(o.estimatedDate) : ''}</p>${itemsHtml(o)}
+      <p class="note">${esc(ful(o))}${o.estimatedDate ? ' · צפי אספקה ' + esc(o.estimatedDate) : ''}</p>${estimateBtn(o)}${itemsHtml(o)}
       <button class="btn w" id="go" ${ok ? '' : 'disabled'}>${isStart ? 'התחלתי אריזה' : 'סיימתי אריזה'}</button>
       ${ok ? '' : '<p class="note">ההזמנה כבר לא במצב הזה (' + esc(statusText(o.status)) + ').</p>'}`;
     bindBack(root, ctx);
+    bindEstimate(root, o, id, () => ctx.replace((r) => view(r, ctx, id))); // שלב 2.13
     $('#go', root).onclick = async (ev) => {
       const r = await busy(ev.target, () => api.changeStatus({ orderId: id, action: isStart ? 'start_packing' : 'finish_packing' }), isStart ? 'האריזה התחילה' : 'ההזמנה מוכנה');
       if (r) ctx.back();
@@ -267,8 +299,10 @@ async function shipView(root, ctx, id) {
       ${delivery && addr ? `<p id="addr">${esc(addr)}${a.notes ? '<br><small class="note">' + esc(a.notes) + '</small>' : ''}</p>
         <a class="btn s" id="waze" href="${esc(wazeUrl(a))}" target="_blank" rel="noopener">ניווט ב-Waze</a>` : ''}
       ${!delivery && o.pickupSlot ? `<p class="note">זמן איסוף: ${esc(o.pickupSlot.date)} ${esc(o.pickupSlot.start)}</p>` : ''}
+      ${o.estimatedDate ? `<p class="note">צפי אספקה: ${esc(o.estimatedDate)}</p>` : ''}${estimateBtn(o)}
     </div>${itemsHtml(o)}${btns || '<p class="note">אין פעולה להזמנה במצב הזה (' + esc(statusText(o.status)) + ').</p>'}`;
   bindBack(root, ctx);
+  bindEstimate(root, o, id, () => ctx.replace((r) => shipView(r, ctx, id))); // שלב 2.13
   const doIt = (b, input, msg) => async () => { const r = await busy(b, () => api.changeStatus(Object.assign({ orderId: id }, input)), msg); if (r) ctx.back(); };
   if ($('#load', root)) $('#load', root).onclick = (e) => doIt(e.currentTarget, { action: 'load' }, 'ההזמנה יצאה למשלוח')();
   if ($('#pick', root)) $('#pick', root).onclick = (e) => doIt(e.currentTarget, { action: 'picked_up' }, 'ההזמנה נמסרה ללקוח')();
