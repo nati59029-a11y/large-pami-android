@@ -24,6 +24,9 @@ export const FN = {
   cancelOrder: 'cancelOrder', refundOrder: 'refundOrder', sendPaymentLink: 'sendPaymentLink', setCustomerActive: 'setCustomerActive',
   setAllocationNumber: 'setAllocationNumber', resendInvoice: 'resendInvoice', exportInvoices: 'exportInvoices', getReports: 'getReports',
   addRequestedItemToOrder: 'addRequestedItemToOrder',
+  // שלב 3.4 – השראות, סוגי אירועים וכללי כמות (מאגר האתר 43a4e61: functions/lib/inspirations.js, tableSet.js)
+  saveInspiration: 'saveInspiration', processInspirationFrames: 'processInspirationFrames', setInspirationHotspots: 'setInspirationHotspots',
+  recognizeTableProducts: 'recognizeTableProducts', publishInspiration: 'publishInspiration', saveEventType: 'saveEventType', saveQuantityRule: 'saveQuantityRule',
 };
 // סטטוסים של הזמנה "פתוחה" – כמו openStatuses() בכללים. עובד קורא רק הזמנות במצבים האלה.
 export const OPEN_STATUSES = ['pending_payment', 'received', 'stock_check', 'awaiting_packing', 'packing', 'ready', 'out_for_delivery', 'delivered'];
@@ -255,4 +258,33 @@ export async function privateImageUrl(path) {
   const r = await fetch(objUrl(path) + '?alt=media', { headers: { Authorization: 'Firebase ' + token } });
   if (!r.ok) throw new Error('התמונה לא נטענה');
   return URL.createObjectURL(await r.blob());
+}
+
+// ---------- שלב 3.4: השראות, סוגי אירועים וכללי כמות (מנהל בלבד; הכללים והפונקציות בשרת חוסמים כל אחד אחר) ----------
+export const listInspirations = () => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'inspirations')))); };
+export const getInspiration = (id) => { needManager(); return getDocData('inspirations/' + id); };
+export const listEventTypes = () => wrap(async () => rows(await getDocs(collection(db, 'event_types'))));
+export const listQuantityRules = () => wrap(async () => rows(await getDocs(collection(db, 'quantity_rules'))));
+export const listRecognitionJobs = (inspirationId, angle) => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'recognition_jobs'), where('inspirationId', '==', inspirationId), where('status', '==', 'pending_review'))))).then((l) => l.filter((j) => j.angle === angle)); };
+export const saveInspiration = (input) => call(FN.saveInspiration, input);
+export const processInspirationFrames = (input) => call(FN.processInspirationFrames, input, 120000);
+export const setInspirationHotspots = (input) => call(FN.setInspirationHotspots, input);
+export const recognizeTableProducts = (input) => call(FN.recognizeTableProducts, input, 60000);
+export const publishInspiration = (input) => call(FN.publishInspiration, input);
+export const saveEventType = (input) => call(FN.saveEventType, input);
+export const saveQuantityRule = (input) => call(FN.saveQuantityRule, input);
+// העלאת צילום מקורי להשראה: inspiration_frames_raw/{מזהה ההשראה}/{זמן}_{מספר}.{סיומת}. הכללים: רק מנהל, רק jpeg/png/webp, עד 15MB, בלי דריסה.
+export async function uploadInspirationRaw(inspirationId, file, n) {
+  const ext = (/\.(jpe?g|png|webp)$/i.exec(file.name || '') || [, 'jpg'])[1].toLowerCase();
+  const path = `inspiration_frames_raw/${inspirationId}/${Date.now()}_${n}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  if (file.size > 15 * 1024 * 1024) throw new Error('הצילום גדול מ-15MB. צלמו באיכות נמוכה יותר ונסו שוב');
+  const token = await auth.currentUser.getIdToken();
+  let r;
+  try {
+    r = await fetch(`${BE.storageBase}/v0/b/${encodeURIComponent(BE.config.storageBucket)}/o?name=${encodeURIComponent(path)}&uploadType=media`, {
+      method: 'POST', headers: { Authorization: 'Firebase ' + token, 'Content-Type': file.type || 'image/jpeg' }, body: file,
+    });
+  } catch (e) { throw new Error('אין חיבור לשרת. בדוק את החיבור לאינטרנט ונסה שוב'); }
+  if (!r.ok) throw new Error(r.status === 403 ? 'אין הרשאה להעלות את הצילום (רק מנהל, תמונה מסוג JPG, PNG או WebP, עד 15MB)' : 'ההעלאה נכשלה (' + r.status + ')');
+  return path;
 }
