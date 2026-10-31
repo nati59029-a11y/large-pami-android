@@ -33,7 +33,9 @@ export const FN = {
   // === שלב 5.3 – התחלה === זיכויים (מאגר האתר: functions/lib/credits.js) – מנהל בלבד
   grantCredit: 'grantCredit', revokeCredit: 'revokeCredit', saveCreditRule: 'saveCreditRule',
   // === שלב 5.3 – סוף ===
-  // === שלב 3.8 – התחלה === עוזר, פריטי השלמה ובסיסי שולחן. saveFaq ו-saveRecipe: השם שמור בחוזה, אבל בשרת (f500103) עדיין לא נבנו
+  // === שלב 3.8 – התחלה === עוזר, פריטי השלמה ובסיסי שולחן.
+  // === שלב 5.6א – התחלה === תיקון הערה: saveFaq ו-saveRecipe קיימות בשרת (מאגר האתר: functions/index.js, exports.saveFaq / exports.saveRecipe ← lib/assistantAdmin.js)
+  // === שלב 5.6א – סוף ===
   saveFaq: 'saveFaq', saveRecipe: 'saveRecipe', saveStagingItem: 'saveStagingItem', saveTableBase: 'saveTableBase', composeTableScene: 'composeTableScene',
   // === שלב 3.8 – סוף ===
 };
