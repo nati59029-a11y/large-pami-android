@@ -30,6 +30,9 @@ export const FN = {
   // === שלב 5.2 – התחלה === מבצעים וקופונים (מאגר האתר: functions/lib/promotions.js)
   savePromotion: 'savePromotion', saveCoupon: 'saveCoupon',
   // === שלב 5.2 – סוף ===
+  // === שלב 5.3 – התחלה === זיכויים (מאגר האתר: functions/lib/credits.js) – מנהל בלבד
+  grantCredit: 'grantCredit', revokeCredit: 'revokeCredit', saveCreditRule: 'saveCreditRule',
+  // === שלב 5.3 – סוף ===
   // === שלב 3.8 – התחלה === עוזר, פריטי השלמה ובסיסי שולחן. saveFaq ו-saveRecipe: השם שמור בחוזה, אבל בשרת (f500103) עדיין לא נבנו
   saveFaq: 'saveFaq', saveRecipe: 'saveRecipe', saveStagingItem: 'saveStagingItem', saveTableBase: 'saveTableBase', composeTableScene: 'composeTableScene',
   // === שלב 3.8 – סוף ===
@@ -316,6 +319,16 @@ export const listCoupons = () => { needManager(); return wrap(async () => rows(a
 export const savePromotion = (input) => call(FN.savePromotion, input);
 export const saveCoupon = (input) => call(FN.saveCoupon, input);
 // === שלב 5.2 – סוף ===
+
+// === שלב 5.3 – התחלה === זיכויים (מנהל בלבד; הכללים: לקוח קורא רק את שלו, עובד – כלום, ואף אחד לא כותב ישירות).
+// כל מתן, ביטול ותבנית – בפונקציות השרת, שבודקות מנהל ורושמות ביומן. אין הענקה אוטומטית.
+export const listCustomerCredits = (uid) => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'credits'), where('customerUid', '==', uid))))); };
+export const listCreditRules = () => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'credit_rules')))); };
+export const findCustomersByEmail = (email) => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'customers'), where('email', '==', String(email || '').trim().toLowerCase()), limit(5))))); };
+export const grantCredit = (input) => call(FN.grantCredit, input);
+export const revokeCredit = (input) => call(FN.revokeCredit, input);
+export const saveCreditRule = (input) => call(FN.saveCreditRule, input);
+// === שלב 5.3 – סוף ===
 
 // === שלב 3.8 – התחלה === עוזר הצ'אט (קריאה: מנהל בלבד) ופריטי השלמה להמחשה. כל כתיבה – בפונקציות שרת (מנהל בלבד).
 // settings/private נקרא רק בשביל assistant.* (הכללים מתירים לצוות). החודש לפי שעון ישראל, כמו בשרת.

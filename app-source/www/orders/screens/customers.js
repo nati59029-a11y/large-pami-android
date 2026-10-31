@@ -8,6 +8,7 @@ import { esc, $, $$, ils, toast, busy, val, numOrText } from '../ui.js';
 import { orderView, newOrder, statusText } from './order.js';
 import { deferredSection } from './deferred.js';
 import { invNo, stateTag } from './money.js';
+import { creditSection } from './credits.js'; // שלב 5.3
 
 async function render(root, ctx) {
   const list = (await api.listWholesaleCustomers()).sort((a, b) => String(a.companyName).localeCompare(String(b.companyName), 'he'));
@@ -66,12 +67,13 @@ async function detail(root, ctx, c) {
     <div id="orders">${orders.map((o, i) => `<button class="li" data-oid="${esc(o.id)}"><div class="m"><b>${esc(o.orderNumber || o.id)}</b><small>${esc(String(o.createdAt || '').slice(0, 10))} · ${esc(statusText(o.status))}${pricing[i] ? ' · ' + ils(pricing[i].total) : ''}</small></div>${o.paymentTerms === 'deferred' ? `<span class="tag ${o.paymentStatus === 'paid' ? 'ok' : 'gold'}">${o.paymentStatus === 'paid' ? 'שולם' : 'שוטף – לא שולם'}</span>` : ''}${o.source === 'staff' ? '<span class="tag">צוות</span>' : ''}</button>`).join('') || '<p class="note">אין הזמנות.</p>'}</div>
     <h3>חשבוניות (${invoices.length})</h3>
     <div class="card" id="invoices">${invoices.length ? `<table><tr><th>מספר</th><th>תאריך</th><th>סכום</th></tr>${invoices.map((v) => `<tr><td>${esc(invNo(v))}</td><td>${esc(String(v.issuedAt || v.date || v.createdAt || '').slice(0, 10))}</td><td>${ils(v.total)}</td></tr>`).join('')}</table>` : '<p class="note">אין עדיין חשבוניות. הפקת החשבוניות תיבנה בשלב 2.</p>'}</div>
-    <div id="dfPart"></div><div id="mgrPart"></div>`;
+    <div id="dfPart"></div><div id="crPart"></div><div id="mgrPart"></div>`; // שלב 5.3: crPart – זיכויים
   $('#bk', root).onclick = () => ctx.back();
   $('#neworder', root).onclick = () => ctx.open((r) => newOrder(r, ctx, c));
   $$('#orders [data-oid]', root).forEach((b) => { b.onclick = () => ctx.open((r) => orderView(r, ctx, b.dataset.oid)); });
   if (mgr) {
     await deferredSection($('#dfPart', root), c, invoices, async () => { const fr = await api.getCustomer(c.id).catch(() => null); ctx.replace((rt) => detail(rt, ctx, fr || c)); });
+    await creditSection($('#crPart', root), ctx, c, () => ctx.replace((rt) => detail(rt, ctx, c))); // שלב 5.3
     await managerPart($('#mgrPart', root), ctx, c);
   }
 }
