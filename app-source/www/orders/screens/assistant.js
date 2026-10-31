@@ -12,8 +12,9 @@ export const hasPrice = (t) => PRICE_RE.test(String(t || ''));
 const warnBox = (show) => `<div class="res warn" id="pw" role="alert" ${show ? '' : 'hidden'}>${esc(PRICE_WARN)}</div>`;
 const when = (t) => { try { const d = new Date(t); return isNaN(d) ? '' : d.toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }); } catch (e) { return ''; } };
 // הפונקציות saveFaq ו-saveRecipe עוד לא קיימות בשרת של הגרסה הזו: שגיאת "לא נמצא" בלי פירוט = הפונקציה חסרה
-const missingFn = (e) => /not-found/.test(String((e && e.code) || '')) && !(e.details && e.details.reason);
-const MISSING = 'השמירה עדיין לא זמינה: הפונקציה בשרת עוד לא נבנתה. הטקסט לא נשמר';
+// (באמולטור ובענן, פונקציה שלא קיימת מחזירה "not-found" או "internal" בלי פירוט)
+const missingFn = (e) => /(not-found|internal)$/.test(String((e && e.code) || '')) && !(e.details && e.details.reason);
+const MISSING = 'השמירה לא הצליחה. ייתכן שהפונקציה בשרת עוד לא נבנתה (בגרסת השרת הזו אין שמירה לשאלות ולמתכונים). הטקסט לא נשמר';
 async function saveVia(btn, fn, okMsg) {
   if (btn) { btn.disabled = true; btn.dataset.label = btn.dataset.label || btn.textContent; btn.textContent = 'רגע…'; }
   try { const r = await fn(); toast(okMsg); return r; } catch (e) { toast(missingFn(e) ? MISSING : (e && e.message) || 'שגיאה', true); return undefined; } finally { if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = btn.dataset.label; } }
