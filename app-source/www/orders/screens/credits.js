@@ -42,16 +42,18 @@ export async function creditSection(box, ctx, c, reload) {
   const f = $('#gf', box);
   const sync = () => {
     const rule = f.how.value === 'rule';
-    $('#gAmt', box).hidden = rule; $('#gRule', box).hidden = !rule;
+    // style.display ולא hidden: לתוויות .f יש display ב-CSS, שגובר על hidden
+    const show = (el, on) => { el.hidden = !on; el.style.display = on ? '' : 'none'; };
+    show($('#gAmt', box), !rule); show($('#gRule', box), rule);
     const opt = f.rule && f.rule.selectedOptions[0];
-    $('#gOrd', box).hidden = !(rule && opt && opt.dataset.kind === 'percent');
+    show($('#gOrd', box), !!(rule && opt && opt.dataset.kind === 'percent'));
   };
   f.how.onchange = sync; if (f.rule) f.rule.onchange = sync; sync();
   $('#grant', box).onclick = async (ev) => {
     const input = { customerUid: c.id, reason: f.reason.value.trim() };
     if (f.how.value === 'rule') {
       input.ruleId = f.rule.value;
-      if (!$('#gOrd', box).hidden) { if (!f.order.value) { toast('בחרו הזמנה', true); return; } input.orderId = f.order.value; }
+      if ($('#gOrd', box).style.display !== 'none') { if (!f.order.value) { toast('בחרו הזמנה', true); return; } input.orderId = f.order.value; }
     } else input.amount = numOrText(f.amount.value.trim());
     if (f.days.value.trim()) input.validityDays = /^\d+$/.test(f.days.value.trim()) ? Number(f.days.value.trim()) : f.days.value.trim();
     if (!input.reason) { toast('כתבו סיבה', true); return; }
