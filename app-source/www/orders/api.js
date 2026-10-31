@@ -30,6 +30,9 @@ export const FN = {
   // === שלב 5.2 – התחלה === מבצעים וקופונים (מאגר האתר: functions/lib/promotions.js)
   savePromotion: 'savePromotion', saveCoupon: 'saveCoupon',
   // === שלב 5.2 – סוף ===
+  // === שלב 3.8 – התחלה === עוזר, פריטי השלמה ובסיסי שולחן. saveFaq ו-saveRecipe: השם שמור בחוזה, אבל בשרת (f500103) עדיין לא נבנו
+  saveFaq: 'saveFaq', saveRecipe: 'saveRecipe', saveStagingItem: 'saveStagingItem', saveTableBase: 'saveTableBase', composeTableScene: 'composeTableScene',
+  // === שלב 3.8 – סוף ===
 };
 // סטטוסים של הזמנה "פתוחה" – כמו openStatuses() בכללים. עובד קורא רק הזמנות במצבים האלה.
 export const OPEN_STATUSES = ['pending_payment', 'received', 'stock_check', 'awaiting_packing', 'packing', 'ready', 'out_for_delivery', 'delivered'];
@@ -298,3 +301,20 @@ export const listCoupons = () => { needManager(); return wrap(async () => rows(a
 export const savePromotion = (input) => call(FN.savePromotion, input);
 export const saveCoupon = (input) => call(FN.saveCoupon, input);
 // === שלב 5.2 – סוף ===
+
+// === שלב 3.8 – התחלה === עוזר הצ'אט (קריאה: מנהל בלבד) ופריטי השלמה להמחשה. כל כתיבה – בפונקציות שרת (מנהל בלבד).
+// settings/private נקרא רק בשביל assistant.* (הכללים מתירים לצוות). החודש לפי שעון ישראל, כמו בשרת.
+export const monthKeyIL = () => { const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).formatToParts(new Date()); const g = (t) => p.find((x) => x.type === t).value; return g('year') + '-' + g('month'); };
+export const getAssistantSettings = async () => { needManager(); const d = await getDocData('settings/private'); return (d && d.assistant) || {}; };
+export const getAssistantUsage = () => { needManager(); return getDocData('ai_usage/' + monthKeyIL()); };
+export const listFaqs = () => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'faqs')))); };
+export const listRecipes = () => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'recipes')))); };
+export const listConversations = (n) => { needManager(); return wrap(async () => rows(await getDocs(query(collection(db, 'ai_conversations'), orderBy('startedAt', 'desc'), limit(n || 30))))); };
+export const listStagingItems = () => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'staging_items')))); };
+export const saveFaq = (input) => call(FN.saveFaq, input);
+export const saveRecipe = (input) => call(FN.saveRecipe, input);
+export const saveStagingItem = (input) => call(FN.saveStagingItem, input, 120000);
+export const saveTableBase = (input) => call(FN.saveTableBase, input, 120000);
+// אילו צורות וזוויות יש להן בסיס פעיל. לבסיס עצמו אין כלל קריאה במסד, ולכן זו הדרך היחידה לדעת מה קיים.
+export const listTableShapes = () => { needManager(); return call(FN.composeTableScene, { listShapes: true }); };
+// === שלב 3.8 – סוף ===

@@ -14,8 +14,10 @@ import work from './screens/work.js';
 import admin from './screens/admin.js';
 import inspirations from './screens/inspirations.js';
 import promotions from './screens/promotions.js'; // שלב 5.2
+import assistant from './screens/assistant.js'; // שלב 3.8
+import staging from './screens/staging.js'; // שלב 3.8
 
-const SCREENS = [products, importer, photos, categories, settings, customers, ...work, ...admin, inspirations, promotions];
+const SCREENS = [products, importer, photos, categories, settings, customers, ...work, ...admin, inspirations, promotions, assistant, staging];
 const main = $('#main');
 const backToApp = () => { location.href = '../index.html' + location.search; };
 $('#toApp').onclick = backToApp;
