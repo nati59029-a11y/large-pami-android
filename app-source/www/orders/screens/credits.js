@@ -40,6 +40,7 @@ export async function creditSection(box, ctx, c, reload) {
     <label class="f"><span>תוקף בימים (ריק = מהתבנית, או ברירת המחדל של ההגדרות – 365)</span><input name="days" inputmode="numeric" dir="ltr"></label>
     </form><button class="btn w" id="grant">תן זיכוי</button></div>`;
   const f = $('#gf', box);
+  const reqId = 'app-' + Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
   const sync = () => {
     const rule = f.how.value === 'rule';
     // style.display ולא hidden: לתוויות .f יש display ב-CSS, שגובר על hidden
@@ -50,7 +51,8 @@ export async function creditSection(box, ctx, c, reload) {
   };
   f.how.onchange = sync; if (f.rule) f.rule.onchange = sync; sync();
   $('#grant', box).onclick = async (ev) => {
-    const input = { customerUid: c.id, reason: f.reason.value.trim() };
+    // מזהה בקשה אחד לטופס (סבב 2): לחיצה כפולה או בקשה שהרשת חזרה עליה ← אותו זיכוי בשרת, ולא שניים
+    const input = { customerUid: c.id, reason: f.reason.value.trim(), requestId: reqId };
     if (f.how.value === 'rule') {
       input.ruleId = f.rule.value;
       if ($('#gOrd', box).style.display !== 'none') { if (!f.order.value) { toast('בחרו הזמנה', true); return; } input.orderId = f.order.value; }
