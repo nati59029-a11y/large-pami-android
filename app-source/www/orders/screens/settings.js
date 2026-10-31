@@ -10,11 +10,12 @@ const SIMPLE = [
   ['support.email', 'מייל לשירות', 'email'], ['support.hours', 'שעות פעילות (טקסט חופשי)', 'area'],
 ];
 const HOURS = [['sunThu', 'ראשון עד חמישי'], ['friWinter', 'שישי (חורף)'], ['friSummer', 'שישי (קיץ)']];
+const CHANNELS = [['channels.whatsappEnabled', 'וואטסאפ'], ['channels.smsEnabled', 'SMS']];
 const same = (a, b) => JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
 
 async function render(root, ctx) {
-  const [pub0, priv0] = await Promise.all([api.getSettings('public'), api.getSettings('private')]);
-  const pub = pub0 || {}; const priv = priv0 || {};
+  const [pub0, priv0, mgr0] = await Promise.all([api.getSettings('public'), api.getSettings('private'), api.getSettings('manager').catch(() => null)]);
+  const pub = pub0 || {}; const priv = priv0 || {}; const mgr = mgr0 || {};
   const S = { zones: JSON.parse(JSON.stringify(get(pub, 'shipping.zones') || [])), banners: JSON.parse(JSON.stringify(get(pub, 'home.banners') || [])) };
   const kv = (name, obj) => Object.entries(obj || {}).map(([k, v]) => kvRow(name, k, v)).join('');
   root.innerHTML = `<h2>הגדרות האתר</h2>
@@ -28,6 +29,9 @@ async function render(root, ctx) {
     <div class="card"><h3 style="margin-top:0">טקסטים בעמוד הבית</h3><p class="note">לכל טקסט יש שם קבוע באנגלית (למשל heroTitle), שלפיו האתר יודע איפה להציג אותו.</p><div data-kv="home.texts">${kv('home.texts', get(pub, 'home.texts'))}</div><button type="button" class="btn g s" data-addkv="home.texts">＋ טקסט</button></div>
     <div class="card"><h3 style="margin-top:0">כיתובים שיווקיים</h3><div data-kv="copy">${kv('copy', pub.copy)}</div><button type="button" class="btn g s" data-addkv="copy">＋ כיתוב</button></div>
     <div class="card cost"><h3 style="margin-top:0">מע"מ</h3><label class="f"><span>אחוז מע"מ (לתצוגת מחיר העלות עם מע"מ)</span><input name="vat" inputmode="decimal" dir="ltr" value="${esc(get(priv, 'invoices.vatRate') != null ? get(priv, 'invoices.vatRate') : '')}"></label></div>
+    <div class="card"><h3 style="margin-top:0">ערוצי הודעות: וואטסאפ ו-SMS</h3>
+      <p class="note">כבוי – דורש ספק בתשלום. עד שיחובר ספק, גם כשהמתג דלוק שום הודעה לא נשלחת (היא רק נרשמת כ"מוחזקת"). הקישורים הרגילים לוואטסאפ באתר לא מושפעים.</p>
+      ${CHANNELS.map(([p, l]) => `<label class="ck"><input type="checkbox" name="${p}" ${get(mgr, p) === true ? 'checked' : ''}>${l} <span class="tag" data-chtag="${p}"></span></label>`).join('')}</div>
     </form><button class="btn w" id="save">שמור הגדרות</button><p class="err" id="serr" role="alert"></p>`;
 
   const drawZones = () => {
@@ -57,6 +61,8 @@ async function render(root, ctx) {
     S.banners.forEach((b, i) => { b.order = i + 1; });
   };
   drawZones(); drawBanners();
+  const drawChannels = () => CHANNELS.forEach(([p]) => { const on = $('#sf').elements[p].checked; const t = $(`[data-chtag="${p}"]`); t.textContent = on ? 'דלוק – אין ספק מחובר, שום הודעה לא נשלחת' : 'כבוי – דורש ספק בתשלום'; t.className = 'tag' + (on ? ' gold' : ''); });
+  CHANNELS.forEach(([p]) => { $('#sf').elements[p].onchange = drawChannels; }); drawChannels();
   $('#addz').onclick = () => { readZones(); S.zones.push({ id: '', name: '', fee: null, freeFrom: null, manualFee: false, pickupOnly: false }); drawZones(); };
   $$('[data-addkv]').forEach((b) => { b.onclick = () => { $(`[data-kv="${b.dataset.addkv}"]`).insertAdjacentHTML('beforeend', kvRow(b.dataset.addkv, '', '')); bindKv(); }; });
   const bindKv = () => $$('[data-rmkv]').forEach((b) => { b.onclick = () => b.closest('[data-kvrow]').remove(); });
@@ -90,12 +96,15 @@ async function render(root, ctx) {
     put('home.texts', texts, get(pub, 'home.texts') || {}); put('copy', copy, pub.copy || {});
     const vatIn = f.vat.value.trim(); const vatOld = get(priv, 'invoices.vatRate');
     const vatChanged = vatIn !== '' && !same(numOrText(vatIn), vatOld);
-    if (!Object.keys(values).length && !vatChanged) { toast('אין שינויים לשמירה'); return; }
+    const chVals = {};
+    for (const [p] of CHANNELS) { const v = f.elements[p].checked; if (v !== (get(mgr, p) === true)) chVals[p] = v; }
+    if (!Object.keys(values).length && !vatChanged && !Object.keys(chVals).length) { toast('אין שינויים לשמירה'); return; }
     $('#serr').textContent = '';
     const r = await busy(ev.target, async () => {
       let n = 0;
       if (Object.keys(values).length) n += (await api.updateSiteSettings('public', values)).changed;
       if (vatChanged) n += (await api.updateSiteSettings('private', { 'invoices.vatRate': numOrText(vatIn) })).changed;
+      if (Object.keys(chVals).length) n += (await api.updateSiteSettings('manager', chVals)).changed;
       return n;
     }, (n) => `ההגדרות נשמרו (${n} שינויים)`);
     if (r !== undefined) ctx.refresh();
