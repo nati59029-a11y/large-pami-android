@@ -40,14 +40,72 @@ async function render(root, ctx) {
     ${row('שמירת שיחות (ימים)', st.retentionDays || 30)}
     ${row('הצעות מוצרים בתשובה', st.maxSuggestions || 6)}
     ${row('ביטויים חסומים נוספים', (st.blockedPhrases || []).length)}
-    <p class="note">כרגע אפשר רק לראות את ההגדרות. שינוי שלהן (כיבוי ידני, תקרות) עדיין לא נתמך בשרת, ולכן אין כאן כפתור שמירה. התקרה הכללית לאתר בשעה: ${esc(st.maxMessagesSitePerHour || 100)}.</p></div>
+    <p class="note">התקרה הכללית לאתר בשעה: ${esc(st.maxMessagesSitePerHour || 100)}.</p>
+    <button class="btn w" id="cfg">עריכת הגדרות העוזר</button></div>
     <div class="row" style="margin:10px 0"><button class="btn grow" id="faq">שאלות ותשובות (${faqs.length})</button><button class="btn g grow" id="rec">מתכונים (${recipes.length})</button></div>
     <div class="row"><button class="btn g grow" id="prio">עדיפות מוצרים</button><button class="btn g grow" id="cv">שיחות אחרונות</button></div>
     <p class="note">העוזר עונה רק ממה שכתוב כאן ומהמוצרים באתר. מחיר מוצג תמיד בכרטיס המוצר, ולא מתוך טקסט.</p>`;
+  $('#cfg').onclick = () => ctx.open((r) => settingsForm(r, ctx));
   $('#faq').onclick = () => ctx.open((r) => faqList(r, ctx));
   $('#rec').onclick = () => ctx.open((r) => recipeList(r, ctx));
   $('#prio').onclick = () => ctx.open((r) => priority(r, ctx));
   $('#cv').onclick = () => ctx.open((r) => conversations(r, ctx));
+}
+
+// ---------- עריכת הגדרות העוזר (שלב 3.8ג) ----------
+// השדות והגבולות זהים לרשימה המותרת בשרת (lib/settings.js, מסמך private): מחוץ לטווח השרת דוחה.
+// נשלחים רק שדות ששונו. הטופס נבנה ב-DOM עם textContent (בלי innerHTML).
+export const ASSISTANT_FIELDS = [
+  { k: 'monthlyBudgetIls', label: 'תקרה חודשית (₪)', min: 0, max: 100000, money: true, def: 50 },
+  { k: 'budgetAlertPercent', label: 'התראה בהגעה לאחוז מהתקרה', min: 1, max: 100, def: 80 },
+  { k: 'maxMessagesPerVisitorPerHour', label: 'הודעות למבקר בשעה', min: 1, max: 10000, def: 15 },
+  { k: 'maxMessagesPerVisitorPerDay', label: 'הודעות למבקר ביום', min: 1, max: 100000, def: 40 },
+  { k: 'maxMessagesSitePerHour', label: 'הודעות לכל האתר בשעה', min: 1, max: 100000, def: 100 },
+  { k: 'maxMessagesPerConversation', label: 'הודעות בשיחה אחת', min: 1, max: 200, def: 20 },
+  { k: 'maxMessageChars', label: 'אורך הודעה מרבי (תווים)', min: 20, max: 2000, def: 500 },
+  { k: 'retentionDays', label: 'שמירת שיחות (ימים)', min: 1, max: 365, def: 30 },
+];
+// בדיקת ערך שהוקלד: מחזיר { v } או { err }
+export function parseAssistantField(f, raw) {
+  const t = String(raw == null ? '' : raw).trim();
+  if (!t) return { err: f.label + ': חסר ערך' };
+  if (!/^\d+(\.\d+)?$/.test(t)) return { err: f.label + ': צריך להיות מספר' };
+  const n = Number(t);
+  if (f.money) { if (!/^\d+(\.\d{1,2})?$/.test(t)) return { err: f.label + ': עד 2 ספרות אחרי הנקודה' }; } else if (!Number.isInteger(n)) return { err: f.label + ': מספר שלם' };
+  if (n < f.min || n > f.max) return { err: f.label + ': בין ' + f.min + ' ל-' + f.max };
+  return { v: n };
+}
+function mk(tag, props, text) { const e = document.createElement(tag); if (props) Object.assign(e, props); if (text != null) e.textContent = text; return e; }
+async function settingsForm(root, ctx) {
+  if (!needMgr(root)) return;
+  const st = await api.getAssistantSettings();
+  root.textContent = '';
+  const bk = mk('button', { className: 'btn g s', id: 'bk' }, '‹ חזרה'); bk.onclick = () => ctx.back();
+  root.append(bk, mk('h2', null, 'הגדרות העוזר'));
+  const card = mk('form', { className: 'card', id: 'f' }); card.onsubmit = () => false;
+  const ckLabel = mk('label', { className: 'ck' }); const ck = mk('input', { type: 'checkbox', name: 'enabled', checked: st.enabled !== false });
+  ckLabel.append(ck, document.createTextNode('העוזר פעיל באתר')); card.append(ckLabel);
+  const inputs = {};
+  ASSISTANT_FIELDS.forEach((f) => {
+    const cur = typeof st[f.k] === 'number' ? st[f.k] : f.def;
+    const lab = mk('label', { className: 'f' }); const inp = mk('input', { name: f.k, value: String(cur), dir: 'ltr' });
+    inp.setAttribute('inputmode', f.money ? 'decimal' : 'numeric'); inputs[f.k] = { f, inp, cur };
+    lab.append(mk('span', null, f.label + ' (' + f.min + ' עד ' + f.max + ')'), inp); card.append(lab);
+  });
+  const save = mk('button', { className: 'btn w', id: 'save', type: 'button' }, 'שמור הגדרות');
+  root.append(card, save, mk('p', { className: 'note' }, 'ערך שלא השתנה לא נשלח. הגדרות שלא מופיעות כאן (מודל, ביטויים חסומים) אינן ניתנות לשינוי מהאפליקציה.'));
+  save.onclick = async () => {
+    const values = {};
+    if (ck.checked !== (st.enabled !== false)) values['assistant.enabled'] = ck.checked;
+    for (const k of Object.keys(inputs)) {
+      const { f, inp, cur } = inputs[k]; const r = parseAssistantField(f, inp.value);
+      if (r.err) { toast(r.err, true); inp.focus(); return; }
+      if (r.v !== cur) values['assistant.' + k] = r.v;
+    }
+    if (!Object.keys(values).length) { toast('לא שונה כלום'); return; }
+    const r = await saveVia(save, () => api.updateSiteSettings('private', values), 'ההגדרות נשמרו');
+    if (r) ctx.back();
+  };
 }
 
 // ---------- שאלות ותשובות ----------
@@ -125,6 +183,7 @@ async function recipeEdit(root, ctx, rc) {
     if (ing.length > 25 || steps.length > 25) { toast('עד 25 מרכיבים ועד 25 שלבים', true); return; }
     if (rel.length > 5) { toast('אפשר לקשור עד 5 מוצרים', true); return; }
     if (sv && !/^\d{1,3}$/.test(sv)) { toast('מספר המנות צריך להיות מספר שלם', true); return; }
+    if (sv && Number(sv) <= 0) { toast('מספר המנות חייב להיות 1 או יותר. 0 מנות אינו תקין', true); return; }
     const recipe = { title, ingredients: ing, steps, relatedProductIds: rel, active: fm.active.checked }; if (sv) recipe.servings = Number(sv);
     const r = await saveVia(ev.target, () => api.saveRecipe(Object.assign({ recipe }, rc ? { recipeId: rc.id } : {})), 'נשמר');
     if (r) ctx.back();
