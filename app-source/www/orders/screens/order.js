@@ -21,6 +21,25 @@ const RESULT = {
 const today = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 const sameNum = (a, b) => Number(a) === Number(b);
 
+// ---------- שלב 4.7: העיצוב שהצטרף להזמנה (תמונה + שורת סידור מקום). אם אין עיצוב – לא מוסיפים כלום ----------
+// הטקסט נכנס רק דרך textContent. תמונה חסרה (או שלא נטענה) – רק שורת סידור המקום, בלי שגיאה.
+export async function showOrderDesign(root, orderId, after) {
+  let d = null;
+  try { d = await api.getOrderDesign(orderId); } catch (e) { d = null; }
+  if (!d || !root.isConnected || (!d.text && !d.url)) { if (d && d.url) URL.revokeObjectURL(d.url); return; }
+  const card = document.createElement('div'); card.className = 'card'; card.id = 'odesign';
+  const h = document.createElement('h3'); h.style.marginTop = '0'; h.textContent = 'עיצוב השולחן'; card.appendChild(h);
+  if (d.text) { const p = document.createElement('p'); p.id = 'odesign-text'; p.textContent = d.text; card.appendChild(p); }
+  if (d.url) {
+    const img = document.createElement('img'); img.id = 'odesign-img'; img.alt = 'תמונת העיצוב'; img.style.cssText = 'max-width:100%;height:auto;border-radius:12px;display:block';
+    img.onerror = () => img.remove();
+    img.onload = () => URL.revokeObjectURL(d.url);
+    img.src = d.url; card.appendChild(img);
+  }
+  const ref = after && root.contains(after) ? after : null;
+  if (ref) ref.insertAdjacentElement('afterend', card); else root.appendChild(card);
+}
+
 // ---------- צפייה ושינוי מחיר ----------
 export async function orderView(root, ctx, id, banner) {
   const mgr = api.isManager();
@@ -66,6 +85,7 @@ export async function orderView(root, ctx, id, banner) {
       <button class="btn w" id="paid">סמן כשולם</button></div>` : ''}
     ${deferred && o.paymentStatus === 'paid' ? `<p class="note">שולם${o.paidAt ? ' ב-' + esc(o.paidAt) : ''}${o.paidMethod ? ' · ' + esc((PAID_METHODS.find((m) => m[0] === o.paidMethod) || [, o.paidMethod])[1]) : ''}</p>` : ''}`;
   $('#bk').onclick = () => ctx.back();
+  showOrderDesign(root, id, $('#olines').closest('.card'));
   if (editable) $('#savep').onclick = async (ev) => {
     const changed = [];
     $$('#olines [data-item]').forEach((tr) => {

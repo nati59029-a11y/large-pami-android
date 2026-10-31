@@ -266,6 +266,21 @@ export async function privateImageUrl(path) {
   return URL.createObjectURL(await r.blob());
 }
 
+// ---------- שלב 4.7: העיצוב שהצטרף להזמנה (תמונה + שורת סידור מקום). קריאה בלבד ----------
+// המסמך: orders/{id}/attachments/design. התמונה: orders/{id}/design/design.png, נקראת עם הזיהוי של המשתמש (כמו getBytes),
+// ולא דרך קישור הורדה עם מפתח (שהיה ממשיך לעבוד אחרי שההזמנה נסגרה). אין תמונה / אין הרשאה / שגיאה – מחזירים בלי תמונה.
+export async function getOrderDesign(orderId) {
+  let d = null;
+  try { d = await getDocData('orders/' + orderId + '/attachments/design'); } catch (e) { return null; }
+  if (!d || d.kind !== 'design') return null;
+  const text = typeof d.placeSettingText === 'string' ? d.placeSettingText : '';
+  let url = null;
+  if (d.imagePath === 'orders/' + orderId + '/design/design.png' && d.imagePending !== true) {
+    try { url = await privateImageUrl(d.imagePath); } catch (e) { url = null; }
+  }
+  return { text, url };
+}
+
 // ---------- שלב 3.4: השראות, סוגי אירועים וכללי כמות (מנהל בלבד; הכללים והפונקציות בשרת חוסמים כל אחד אחר) ----------
 export const listInspirations = () => { needManager(); return wrap(async () => rows(await getDocs(collection(db, 'inspirations')))); };
 export const getInspiration = (id) => { needManager(); return getDocData('inspirations/' + id); };

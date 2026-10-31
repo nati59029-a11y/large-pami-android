@@ -5,7 +5,7 @@
    - הכפתור הראשי בבדיקת מלאי משתנה לפי מצב ההזמנה, אבל השרת הוא שמחליט מה קורה בלחיצה (חיוב, שליחה לאישור או קישור תשלום). */
 import * as api from '../api.js';
 import { esc, $, $$, ils, toast, busy, dialog, confirmBox, imageToB64 } from '../ui.js';
-import { statusText } from './order.js';
+import { statusText, showOrderDesign } from './order.js';
 
 const POLL_MS = 8000;
 const HOLD = { awaiting_customer_approval: 'ממתינה לאישור הלקוח', payment_retry: 'ממתינה לתשלום הלקוח', pickup_overdue: 'איסוף באיחור' };
@@ -271,6 +271,7 @@ function packView(startStatus) {
       ${ok ? '' : '<p class="note">ההזמנה כבר לא במצב הזה (' + esc(statusText(o.status)) + ').</p>'}`;
     bindBack(root, ctx);
     bindEstimate(root, o, id, () => ctx.replace((r) => view(r, ctx, id))); // שלב 2.13
+    showOrderDesign(root, id, $('.card', root)); // שלב 4.7
     $('#go', root).onclick = async (ev) => {
       const r = await busy(ev.target, () => api.changeStatus({ orderId: id, action: isStart ? 'start_packing' : 'finish_packing' }), isStart ? 'האריזה התחילה' : 'ההזמנה מוכנה');
       if (r) ctx.back();
