@@ -27,6 +27,7 @@ export async function showOrderDesign(root, orderId, after) {
   let d = null;
   try { d = await api.getOrderDesign(orderId); } catch (e) { d = null; }
   if (!d || !root.isConnected || (!d.text && !d.url)) { if (d && d.url) URL.revokeObjectURL(d.url); return; }
+  const old = root.querySelector('#odesign'); if (old) old.remove(); // בלי כפילות ברענון
   const card = document.createElement('div'); card.className = 'card'; card.id = 'odesign';
   const h = document.createElement('h3'); h.style.marginTop = '0'; h.textContent = 'עיצוב השולחן'; card.appendChild(h);
   if (d.text) { const p = document.createElement('p'); p.id = 'odesign-text'; p.textContent = d.text; card.appendChild(p); }

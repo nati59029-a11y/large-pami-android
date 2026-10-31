@@ -221,6 +221,7 @@ async function stockView(root, ctx, id, banner) {
   bindBack(root, ctx);
   const again = (b) => ctx.replace((r) => stockView(r, ctx, id, b));
   bindEstimate(root, o, id, () => again()); // שלב 2.13
+  showOrderDesign(root, id, $('#mainbox', root).previousElementSibling); // שלב 4.7
   $$('[data-mark]', root).forEach((b) => { b.onclick = async () => {
     const itemId = b.closest('[data-item]').dataset.item;
     const r = await busy(b, () => api.markItem({ orderId: id, itemId, mark: b.dataset.mark }));
