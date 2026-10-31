@@ -16,8 +16,14 @@ import inspirations from './screens/inspirations.js';
 import promotions from './screens/promotions.js'; // שלב 5.2
 import assistant from './screens/assistant.js'; // שלב 3.8
 import staging from './screens/staging.js'; // שלב 3.8
+// === שלב 5.3 – התחלה ===
+import credits from './screens/credits.js';
+// === שלב 5.3 – סוף ===
 
 const SCREENS = [products, importer, photos, categories, settings, customers, ...work, ...admin, inspirations, promotions, assistant, staging];
+// === שלב 5.3 – התחלה === מסך "זיכויים" (מנהל בלבד): תבניות, וחיפוש לקוח לפי מייל (גם לקוח פרטי, שאין לו כרטיס ברשימת הסיטונאים)
+SCREENS.push(credits);
+// === שלב 5.3 – סוף ===
 const main = $('#main');
 const backToApp = () => { location.href = '../index.html' + location.search; };
 $('#toApp').onclick = backToApp;
