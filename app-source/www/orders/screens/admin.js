@@ -7,6 +7,7 @@ import * as api from '../api.js';
 import { esc, $, $$, ils, toast, busy, dialog, confirmBox, saveFile } from '../ui.js';
 import { statusText, orderView } from './order.js';
 import { invNo, invNoById, DOC_LABEL, PAY_LABEL, fmtTime, fmtDate, waLink } from './money.js';
+import { mountAdvancedReports } from './reports-adv.js'; // שלב 5.4
 
 const DENY = '<div class="card"><p class="err" role="alert">המסך הזה למנהל בלבד.</p></div>';
 const mgrOnly = (fn) => async (root, ctx, ...a) => { if (!api.isManager()) { root.innerHTML = DENY; return undefined; } return fn(root, ctx, ...a); };
@@ -208,6 +209,7 @@ const reports = mgrOnly(async (root) => {
     const r = await busy(ev.target, () => api.getReports(input('csv')), 'הקובץ נשמר');
     if (r && r.csv != null) await saveFile(r.filename || 'report.csv', new TextEncoder().encode(r.csv), 'text/csv');
   };
+  mountAdvancedReports(root); // שלב 5.4 – לשוניות הדוחות המתקדמים, מתחת לדוחות הקיימים
 });
 
 // ---------- בקשות למוצרים ----------
