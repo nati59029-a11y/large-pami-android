@@ -1345,7 +1345,7 @@ async function syLogin(email,pw){
  SY={idToken:j.idToken,refresh:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1000,uid:j.localId,email};
  try{await fsx('/admins/'+SY.uid);SY.role='admin'}catch(e){if(e.code===404||e.code===403)SY.role='worker';else throw e}
  syS()}
-function syOut(){SY={};try{localStorage.removeItem(SK)}catch(e){}}
+function syOut(){SY={};try{localStorage.removeItem(SK);localStorage.removeItem('lp-tasks')}catch(e){}try{TK={L:[]}}catch(e){}}
 const isW=()=>SY.role==='worker'&&!!SY.refresh,isA=()=>SY.role==='admin'&&!!SY.refresh;
 /* ---- תור שליחה (עובד) ---- */
 const obGet=()=>{try{return JSON.parse(localStorage.getItem(OB))||[]}catch(e){return[]}};
@@ -2230,7 +2230,7 @@ async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields
 async function tkLoad(){if(!fbRole())return;let L;if(fbAdmin())L=await tkQ();else{const a=await tkQ('open'),b=await tkQ('late'),m={};a.concat(b).forEach(t=>m[t.id]=t);L=Object.values(m)}
  TK.L=L.map(t=>Object.assign(t,{due:t.cr?tkDue(t.cr):t.due}));TK.at=Date.now();tkSave();tkRe();return L.length}
 /* בונים מחדש רק כשאין טופס פתוח עם נתונים שהוקלדו */
-function tkRe(){const ta=document.querySelector('form[data-f=tkAdd] textarea');if(ta&&ta.value.trim())return;if(document.querySelector('#dlg[open] form'))return;if(cur().v==='tk'||(isW()&&cur().v==='wk'&&typeof WS!=='undefined'&&WS==='home'))rerender()}
+function tkRe(){if(document.querySelector('#dlg[open] form'))return;const ta=document.querySelector('form[data-f=tkAdd] textarea'),v=ta?ta.value:'',fo=ta&&document.activeElement===ta;if(cur().v==='tk'||(isW()&&cur().v==='wk'&&typeof WS!=='undefined'&&WS==='home')){rerender();const n=document.querySelector('form[data-f=tkAdd] textarea');if(n&&v){n.value=v;if(fo)n.focus()}}}
 async function tkPatch(id,o){const fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
  await fsx('/tasks/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
 async function tkDo(fn,msg){try{await fn();if(msg)toast(msg)}catch(e){toast(tkErr(e))}try{await tkLoad()}catch(e){}tkRe()}
