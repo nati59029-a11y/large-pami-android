@@ -1,0 +1,14 @@
+{
+  "name": "large-pami-functions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "פונקציות שרת של שלב 0: scanDocument, registerPushToken, reportBackupStatus, getBackupKey. לא מפורסם מכאן.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "14.5.0",
+    "firebase-functions": "7.4.0"
+  }
+}

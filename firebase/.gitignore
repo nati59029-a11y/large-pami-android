@@ -1,0 +1,13 @@
+# תלויות שמותקנות מקומית (npm install)
+node_modules/
+# יומנים שהאמולטור כותב בכל הרצה
+*-debug.log
+firebase-debug*.log
+ui-debug.log
+# תוצאות ביניים של הבדיקות
+tests/.results/
+# קובצי סודות מקומיים של האמולטור (לשלב 3) – לא נכנסים למאגר
+.secret.local
+.env.local
+functions/.secret.local
+functions/.env.local
