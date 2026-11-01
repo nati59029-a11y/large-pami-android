@@ -2222,16 +2222,18 @@ const tkOf=d=>({id:idOf(d),owner:gv(d,'owner'),by:gv(d,'by'),role:gv(d,'role'),t
 let TK=(()=>{try{return JSON.parse(localStorage.getItem('lp-tasks'))||{L:[]}}catch(e){return{L:[]}}})();
 const tkSave=()=>{try{localStorage.setItem('lp-tasks',JSON.stringify(TK))}catch(e){}};
 const tkLateNow=t=>t.st==='open'&&Date.now()>t.due;
-const tkIsLate=t=>tkLateNow(t)||t.late==='1'||(t.st==='wait'&&t.sub>t.due);
+const tkIsLate=t=>tkLateNow(t)||t.late==='1'||((t.st==='wait'||t.st==='done')&&t.sub>t.due);
 const tkOverN=()=>(TK.L||[]).filter(tkLateNow).length;
 const tkErr=e=>e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה (ייתכן שחוקי Firebase של המשימות עוד לא פורסמו)':'שגיאה: '+((e&&e.message)||e));
 async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields:TKF.map(f=>({fieldPath:f}))},limit:1000};if(where)sq.where={fieldFilter:{field:{fieldPath:where},op:'EQUAL',value:{stringValue:'1'}}};
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>tkOf(x.document))}
 async function tkLoad(){if(!fbRole())return;let L;if(fbAdmin())L=await tkQ();else{const a=await tkQ('open'),b=await tkQ('late'),m={};a.concat(b).forEach(t=>m[t.id]=t);L=Object.values(m)}
- TK.L=L;TK.at=Date.now();tkSave();if(cur().v==='tk'||(isW()&&cur().v==='wk'))rerender();return L.length}
+ TK.L=L.map(t=>Object.assign(t,{due:t.cr?tkDue(t.cr):t.due}));TK.at=Date.now();tkSave();tkRe();return L.length}
+/* בונים מחדש רק כשאין טופס פתוח עם נתונים שהוקלדו */
+function tkRe(){const ta=document.querySelector('form[data-f=tkAdd] textarea');if(ta&&ta.value.trim())return;if(document.querySelector('#dlg[open] form'))return;if(cur().v==='tk'||(isW()&&cur().v==='wk'&&typeof WS!=='undefined'&&WS==='home'))rerender()}
 async function tkPatch(id,o){const fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
  await fsx('/tasks/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
-async function tkDo(fn,msg){try{await fn();if(msg)toast(msg)}catch(e){toast(tkErr(e))}try{await tkLoad()}catch(e){}rerender()}
+async function tkDo(fn,msg){try{await fn();if(msg)toast(msg)}catch(e){toast(tkErr(e))}try{await tkLoad()}catch(e){}tkRe()}
 function tkTile(){const n=tkOverN();return `<button class="tile" data-a="go" data-v="tk" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:34px;height:34px;display:block;margin:0 auto 6px"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>משימות${n?`<small style="display:block;color:var(--bad);font-weight:700">${n} באיחור</small>`:''}</button>`}
 const tkDT=ms=>ms?new Date(ms).toLocaleString('he-IL',{weekday:'short',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
 let TKT='open';
@@ -2275,7 +2277,7 @@ FRM.tkRej=f=>{const id=f.dataset.id,note=String(fd(f).note||'').trim().slice(0,3
 ACT.tkDel=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('למחוק את המשימה לצמיתות?',()=>tkDo(()=>fsx('/tasks/'+t.id,{method:'DELETE'}),'המשימה נמחקה'),'מחק')};
 ACT.tkImg=async el=>{try{const d=await fsx('/tasks/'+el.dataset.id),u=gv(d,'img');if(!u)return toast('אין תמונה');dlg(`<div style="max-height:75vh;overflow:auto;border-radius:8px"><img src="${esc(u)}" alt="תמונת ביצוע" style="width:100%;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)}catch(e){toast(tkErr(e))}};
 CHG.tkimg=async el=>{const id=el.dataset.id,f=el.files&&el.files[0];el.value='';const t=tkGet(id);if(!f||!t)return;toast('מעלה תמונה…');
- tkDo(async()=>{const du=await fbShrink(await rdU(f));await tkPatch(id,{st:'wait',img:du,sub:Date.now(),doneBy:fbBy()})},'✓ התמונה נשלחה לאישור המנהל')};
+ tkDo(async()=>{const du=await fbShrink(await rdU(f));if(du.length>880000)throw new Error('התמונה גדולה מדי. צלם שוב ממרחק קצת יותר גדול');await tkPatch(id,{st:'wait',img:du,sub:Date.now(),doneBy:fbBy()})},'✓ התמונה נשלחה לאישור המנהל')};
 /* התראה על משימות באיחור בכל כניסה לאפליקציה */
 let TKA=0;
 async function tkAlert(){if(!fbRole())return;try{await tkLoad()}catch(e){}const n=tkOverN();if(!n||Date.now()-TKA<600000)return;const d=$('#dlg');if(d&&d.open)return;TKA=Date.now();

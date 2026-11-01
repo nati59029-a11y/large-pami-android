@@ -25,7 +25,7 @@ service cloud.firestore {
     match /tasks/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
-      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 600000; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       // עובד: מסמן בוצע (בלי דרישת תמונה) או מצרף תמונה (כשנדרשת). לא סוגר משימה שנדרשת בה תמונה.
       function workerUpd() {
         return od().st == 'open'
@@ -34,15 +34,17 @@ service cloud.firestore {
           && (
             (od().pr == '1' && nw().st == 'wait' && nw().open == '1'
               && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
+              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*')
               && nw().late == od().late && nw().ok == od().ok)
             || (od().pr != '1' && nw().st == 'done' && nw().open == ''
               && nw().img == od().img && nw().ok == nw().sub
-              && (nw().late == '1') == (nw().sub > od().due))
+              && (nw().late == '1') == (request.time.toMillis() > od().due))
           );
       }
       allow read: if isAdmin()
         || (request.auth != null && (resource.data.open == '1' || resource.data.late == '1'));
       allow create: if request.auth != null
+        && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
         && nw().owner == request.auth.uid
         && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
         && nw().sub == 0 && nw().ok == 0 && nw().note == ''
@@ -50,7 +52,7 @@ service cloud.firestore {
         && (nw().role == 'w' || isAdmin())
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
         && nowOk(nw().cr)
-        && nw().due is int && nw().due > nw().cr && nw().due <= nw().cr + 2592000000;
+        && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000;
       allow update: if isAdmin() || (request.auth != null && workerUpd());
       allow delete: if isAdmin();
     }
