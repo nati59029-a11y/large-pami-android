@@ -2058,13 +2058,19 @@ async function fbLoad(){if(!fbRole())return 0;
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});
  const L=[];(r||[]).forEach(x=>{const d=x.document;if(!d||gv(d,'st')==='new')return;try{const j=JSON.parse(gv(d,'data'));L.push({id:idOf(d),f:Object.assign(fbEmpty(j.at),j.f),by:j.by||'',at:j.at||0,hi:j.hi})}catch(e){}});
  const loc=FBL.out.filter(o=>!L.find(z=>z.id===o.id));FBL.cache=L.concat(loc.map(o=>({id:o.id,f:o.f,by:o.by,at:o.at,hi:o.hi})));fbSave();return L.length}
-async function fbInbox(){if(!fbAdmin())return 0;let n=0;
+/* מניעת כפילויות: בדיקת דפים חדשים רצה פעם אחת בכל רגע, וכפילויות קיימות (אותו מזהה) מוסרות */
+function fbDedup(){const best={},sc=p=>(p.st==='ok'?4:0)+(p.ed&&p.ed.length?2:0)+(p.st==='ai'?1:0);let n=0;
+ FBL.pend.forEach(p=>{const b=best[p.id];if(!b||sc(p)>sc(b))best[p.id]=p});
+ FBL.pend=FBL.pend.filter(p=>{if(best[p.id]===p){best[p.id]=null;return true}n++;return false});
+ const so={};FBL.out=FBL.out.filter(o=>{if(so[o.id])return false;so[o.id]=1;return true});if(n)fbSave();return n}
+async function fbInbox(){if(!fbAdmin()||fbInbox.b)return 0;fbInbox.b=1;try{return await fbInbox0()}finally{fbInbox.b=0;fbDedup()}}
+async function fbInbox0(){let n=0;
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'fb'}],where:{fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:'new'}}},select:{fields:[{fieldPath:'data'}]},limit:300}})});
  for(const x of(r||[])){const d=x.document;if(!d)continue;const id=idOf(d);if(FBL.pend.find(p=>p.id===id)||FBL.out.find(o=>o.id===id))continue;
   let j;try{j=JSON.parse(gv(d,'data'))}catch(e){continue}
   try{if(j.hi){const full=await fsx('/fb/'+id),img=gv(full,'img');if(img)await fput('fb:'+id,img)}}catch(e){if(e.offline)break;continue}
   if(j.hp){try{let hu='';for(let k=0;k<j.hp;k++){const c=await fsx('/chunks/fbhi_'+id+'_'+k);hu+=gv(c,'data')}if(hu)await fput('fbhi:'+id,hu);for(let k=0;k<j.hp;k++)fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'}).catch(()=>{})}catch(e){}}
-  FBL.pend.push(j.man?{id,st:'ok',f:Object.assign(fbEmpty(j.at),j.f),ts:j.at||Date.now(),err:'',cloud:1,by:j.by,hi:j.hi,man:1}:{id,st:'q',f:fbEmpty(j.at),ts:j.at||Date.now(),err:'',cloud:1,by:j.by,hi:1,wq:j.wq?1:0});n++}
+  if(FBL.pend.find(p=>p.id===id)||FBL.out.find(o=>o.id===id))continue;FBL.pend.push(j.man?{id,st:'ok',f:Object.assign(fbEmpty(j.at),j.f),ts:j.at||Date.now(),err:'',cloud:1,by:j.by,hi:j.hi,man:1}:{id,st:'q',f:fbEmpty(j.at),ts:j.at||Date.now(),err:'',cloud:1,by:j.by,hi:1,wq:j.wq?1:0});n++}
  if(n){fbSave();fbRun();if(['fb','fbRev'].includes(cur().v)&&cur().v==='fb')rerender()}return n}
 const FBI={};
 async function fbImgHi(id){try{const u=await fget('fbhi:'+id);if(u)return u}catch(e){}return fbImg(id)}
@@ -2205,6 +2211,7 @@ ACT.fbXls=()=>{const rows=fbRows(),H=['שם','טלפון','כתובת','מספר
  const aoa=[H].concat(rows.map(r=>{const f=r.f,d=r.at?new Date(r.at):null;return[f.name,f.phone,f.addr,f.inv,f.amt===''?'':+f.amt||f.amt,...f.r.map(n=>n||''),f.love,f.imp,f.dt||(d?fbIso(r.at):''),heb(f.dt||fbIso(r.at)),f.pr||'',r.by||'']}));
  xlsOrCsv('feedback-'+stamp().slice(0,10),{'משוב לקוחות':aoa})};
 /* ---- אתחול ---- */
+try{if(fbDedup()&&['fb','fbRev'].includes(cur().v))rerender()}catch(e){}
 setTimeout(()=>{if(fbRole()){fbPush().catch(()=>{});fbRun();fbInbox().catch(()=>{})}},3000);
 setInterval(()=>{if(fbAdmin()&&!document.hidden){fbInbox().catch(()=>{});fbRun()}},90000);
 /* ===== משימות (מנהל ועובדים) ===== */
