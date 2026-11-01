@@ -1909,7 +1909,7 @@ V.shDrafts=()=>{const live=['price','p8','p2','p1'].map(k=>`<div class="card"><b
 ACT.shOpen=el=>go('shDraft',el.dataset.k);
 V.shDraft=k=>{const live=k!=='imp',L=live?SH[k].items:SH.imp.items;setTimeout(()=>shFillPrev(k),0);
  const n=k==='imp'?Math.min(3,Math.ceil(L.length/20)):1;
- const rows=live?L.map((it,i)=>it?`<div class="li" style="cursor:default"><div class="m"><b>${i+1}. ${esc(it.n)}</b><small>${esc(it.kind==='A'?it.k+' ב-'+shN(it.tot)+' ₪':it.kind==='B'?'ב-'+shN(it.now)+' ₪ (רגיל '+shN(it.reg)+')':'₪ '+it.p)}${it.d?' · '+esc(it.d):''}</small></div><button class="btn s g" data-a="shEdit" data-k="${k}" data-i="${i}">עריכה</button><button class="btn s r" data-a="shDel" data-k="${k}" data-i="${i}">מחק</button></div>`:'').join(''):`<p class="note">${L.length} מוצרים. לשינוי: ייבוא קובץ חדש.</p>`;
+ const rows=live?L.map((it,i)=>it?`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${i+1}. ${esc(it.n)}</b><small>${esc(it.kind==='A'?it.k+' ב-'+shN(it.tot)+' ₪':it.kind==='B'?'ב-'+shN(it.now)+' ₪ (רגיל '+shN(it.reg)+')':'₪ '+it.p)}${it.d?' · '+esc(it.d):''}</small></div><button class="btn s g" data-a="shEdit" data-k="${k}" data-i="${i}">עריכה</button><button class="btn s r" data-a="shDel" data-k="${k}" data-i="${i}">מחק</button>${window.ymBtn?ymBtn(k,i):''}</div>`:'').join(''):`<p class="note">${L.length} מוצרים. לשינוי: ייבוא קובץ חדש.</p>`;
  return{t:shName(k),s:live?shCount(k)+' מתוך '+SHC[k].cap:L.length+' מוצרים',h:`${shAct(k).replace(/<button class="btn s g" data-a="shOpen"[^>]*>פתח<\/button>/,'')}
  <div id="shPv" style="margin:12px 0">${Array.from({length:n},(_,i)=>`<img data-pg="${i}" alt="עמוד ${i+1}" style="width:100%;background:#fff;border:1px solid var(--line);border-radius:6px;margin-bottom:10px;min-height:120px">`).join('')}${k==='imp'&&L.length>60?'<p class="note">מוצגים 3 העמודים הראשונים. כל הדפים נכללים בהדפסה וב-PDF.</p>':''}</div>${rows}`}};
 async function shFillPrev(k){const imgs=await shJpegs(k,3.4,.8,3);document.querySelectorAll('#shPv img[data-pg]').forEach(im=>{const u=imgs[+im.dataset.pg];if(u)im.src=u})}
@@ -2580,5 +2580,5 @@ async function luCheck(man){const P=luP();if(!P||!navigator.onLine)return;LU.t=D
 function updDone(r){const s=r&&r.status;if(s==='user'||s==='legacy')dlg('<h3>יש עדכון – לחצו להתקנה</h3><p>במסך של אנדרואיד שנפתח לחצו "התקן". העדכון מותקן מעל הגרסה הקיימת, והנתונים נשמרים.</p><button class="btn grow" data-a="closeDlg">הבנתי</button>')}
 (async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&LU.t&&Date.now()-LU.t>216e5)luCheck(false)});
-</script>
+</script><script src="yemot-promo.js"></script>
 </body></html>

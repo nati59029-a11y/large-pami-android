@@ -4,6 +4,7 @@
 //   registerPushToken  – רישום הטלפון להתראות: staff/{uid}.pushTokens.
 //   reportBackupStatus – עדכון מצב הגיבוי: app_backup_status/{uid} של השולח בלבד.
 //   getBackupKey       – מפתח הצפנה קבוע לכל משתמש, נגזר מ-BACKUP_MASTER_KEY ומהמזהה שלו.
+//   sendPromoToLine (עובד/מנהל), expirePromosOnLine (מתוזמנת, לא נקראת ממשתמש) – מבצע לקו ימות והורדתו (yemot.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
@@ -132,3 +133,6 @@ exports.getBackupKey = onCall({ secrets: [BACKUP_MASTER_KEY] }, async (request) 
   const key = deriveBackupKey(BACKUP_MASTER_KEY.value(), who.uid);
   return { key: key.toString('base64'), alg: 'AES-GCM', bits: 256, version: KEY_VERSION };
 });
+
+// שליחת מבצעים לקו ימות המשיח (שלוחה 2): sendPromoToLine, expirePromosOnLine
+Object.assign(exports, require('./yemot'));

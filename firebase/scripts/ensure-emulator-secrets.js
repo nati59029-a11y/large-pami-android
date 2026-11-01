@@ -15,3 +15,5 @@ if (!fs.existsSync(f)) {
   ].join('\n'));
   console.log('נוצר functions/.secret.local עם ערכי דמה לאמולטור');
 }
+// מפתח דמה לימות המשיח (60-yemot.js) – מתווסף גם לקובץ קיים, בלי לדרוס ערכים אחרים
+if (!/^YEMOT_API_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nYEMOT_API_KEY=DUMMY-SECRET-yemot-7f3a\n');
