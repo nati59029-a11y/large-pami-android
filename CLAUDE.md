@@ -17,10 +17,11 @@
 ## מבנה הבנייה (חשוב)
 - ה-workflow `.github/workflows/main.yml` **בונה מתוך התיקייה `app-source/`** (מעתיק אותה ל-`app/`), ולא מהקבצים שבשורש המאגר.
   - הסבר: עד שלב 0 הבנייה פרסה את `large-pami-android-project.zip`. הקוד חולץ ל-`app-source/` כדי שיהיה אפשר לראות מה השתנה בין גרסאות, וה-zip נשאר במאגר כעותק זהה.
-  - **בתקופת המעבר `app-source/` וה-zip חייבים להיות זהים.** הבנייה מתחילה ב-`scripts/verify-source-matches-zip.py` ונעצרת אם יש הבדל. שינוי בקוד נעשה ב-`app-source/`, ואחריו דוחסים מחדש את ה-zip מתוך התיקייה (`cd app-source && zip -qr -X ../large-pami-android-project.zip .`, כולל קבצים נסתרים כמו `.github`). מריצים את הסקריפט לפני commit.
+  - **בתקופת המעבר `app-source/` וה-zip חייבים להיות זהים.** הבנייה מתחילה ב-`scripts/verify-source-matches-zip.py` ונעצרת אם יש הבדל. שינוי בקוד נעשה ב-`app-source/`, ואחריו דוחסים מחדש את ה-zip מתוך התיקייה (`rm -f large-pami-android-project.zip && cd app-source && zip -qr -X ../large-pami-android-project.zip .`, כולל קבצים נסתרים כמו `.github`). מריצים את הסקריפט לפני commit.
   - הקבצים שבשורש (`index.html`, `prepare.js`, `patch-android.sh` וכו') ושאר קובצי ה-zip הם עותקים ישנים/עזר.
-- **פרסום לטלפונים** (ה-release `latest`) קורה רק בדחיפה ל-`main` (כלומר מיזוג, שמותר רק אחרי אישור בעל הפרויקט בטלפון), או בהפעלה ידנית מ-`main` עם הסימון "publish". דחיפה לכל ענף אחר רק בונה APK (להורדה מ-Artifacts של ההרצה) ולא מפרסמת. אסור לשנות את שם הקובץ `main.yml`: מספר הגרסה הוא `1000 + GITHUB_RUN_NUMBER`.
-- שלבי הבנייה (בתוך התיקייה המחולצת): `npm install` ← `node scripts/prepare.js` ← `npx cap add android` ← `bash scripts/patch-android.sh` ← `npx cap sync android` ← `cd android && ./gradlew assembleDebug`.
+- **פרסום לטלפונים** (ה-release `latest`) קורה רק בדחיפה ל-`main` (כלומר מיזוג, שמותר רק אחרי אישור בעל הפרויקט בטלפון), או בהפעלה ידנית מ-`main` עם הסימון "publish". דחיפה לענף אחר **שכבר כולל את התהליך החדש** רק בונה APK (להורדה מ-Artifacts של ההרצה) ולא מפרסמת. ענף שנוצר מקומיט ישן (עם התהליך הישן) כן מפרסם – ראו האזהרה הבאה. אסור לשנות את שם הקובץ `main.yml`: מספר הגרסה הוא `1000 + GITHUB_RUN_NUMBER`.
+- **⚠️ עד המיזוג של `stage0-build-safety` ל-`main` – לא ליצור ענף מ-`main` ולא להפעיל ידנית מענף ישן.** GitHub מריץ את קובץ התהליך שבקומיט שנדחף, וב-`main` (וגם ב-`feature/feedback-scan` וב-`ccr-4334222d-e68hpi`) עדיין יש התהליך הישן, שמפרסם לטלפונים בכל דחיפה ובכל הפעלה ידנית. עד אז ענף חדש נוצר רק מ-`stage0-build-safety` (או מענף שמבוסס עליו): `git checkout -b feature/<תיאור> origin/stage0-build-safety`.
+- שלבי הבנייה (בתוך `app/`, העותק של `app-source/`): `npm install` ← `node scripts/prepare.js` ← `npx cap add android` ← `bash scripts/patch-android.sh` ← `npx cap sync android` ← `cd android && ./gradlew assembleDebug`.
 - הבנייה דורשת Node 20 ו-Java 17 (temurin) ו-Android SDK.
 
 ## אסור לשנות
