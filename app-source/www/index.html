@@ -2044,7 +2044,7 @@ async function fbAddPages(list){let n=0;for(const it of list){try{const pr=typeo
 /* ---- שליחה לענן ---- */
 const fbRecJ=r=>JSON.stringify({f:r.f,by:r.by,at:r.at,hi:r.hi?1:0,man:r.man?1:0,hp:r.hp||0,wq:r.wq?1:0});
 async function fbPush(){if(!fbRole())return;if(fbPush.b)return;fbPush.b=1;let sent=0;
- try{for(const r of FBL.out.slice()){try{if(r.upd)await fsx('/fb/'+r.id+'?updateMask.fieldPaths=data&updateMask.fieldPaths=st',{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),st:sv('ok')}})});
+ try{for(const r of FBL.out.slice()){try{if(r.upd){try{await fsx('/fb/'+r.id+'?updateMask.fieldPaths=data&updateMask.fieldPaths=st',{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),st:sv('ok')}})})}catch(e){if(e.code!==403)throw e;/* הדף כבר לא קיים בענן: יוצרים אותו מחדש עם כל השדות */let img='';try{img=(await fget('fb:'+r.id))||''}catch(z){}await fsx('/fb/'+r.id,{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),img:sv(img),owner:sv(SY.uid),at:sv(r.at),st:sv('ok')}})})}}
   else{const img=r.hi?(await fget('fb:'+r.id))||'':'';
   if(r.hi&&!fbAdmin()&&!r.hp){let hu='';try{hu=await fget('fbhi:'+r.id)||''}catch(e){}const n=Math.ceil(hu.length/CH);if(n&&n<=6){for(let k=0;k<n;k++){try{await fsx('/chunks?documentId='+encodeURIComponent('fbhi_'+r.id+'_'+k),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),data:sv(hu.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}r.hp=n}}
   await fsx('/fb/'+r.id,{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),img:sv(img),owner:sv(SY.uid),at:sv(r.at),st:sv(r.st||'ok')}})})}
