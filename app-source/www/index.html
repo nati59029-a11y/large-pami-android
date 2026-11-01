@@ -472,7 +472,7 @@ function sheetDraw(){
  const title={type:'מה מוסיפים?',scan:'חשבונית ספק',cat:'באיזו קטגוריה?',sub:c?'איזה '+(subWord(c)||'פריט')+'?':'',det:'פרטים'}[A.step];
  let body='';
  if(A.step==='type'){
-  body=`<div class="big2"><button class="tile inc" data-a="pick" data-k="type" data-v="inc">${ico('inc')}הכנסה</button><button class="tile exp" data-a="pick" data-k="type" data-v="exp">${ico('exp')}הוצאה</button></div>${typeof isA==='function'&&isA()?`<div class="big2" style="margin-top:10px"><button class="tile" data-a="addGo" data-v="shelf" style="font-size:1rem">🏷️<br>מחירים ומבצעים למדף</button><button class="tile" data-a="addGo" data-v="fb" style="font-size:1rem">📝<br>משוב לקוחות</button></div>`:''}`}
+  body=`<div class="big2"><button class="tile inc" data-a="pick" data-k="type" data-v="inc">${ico('inc')}הכנסה</button><button class="tile exp" data-a="pick" data-k="type" data-v="exp">${ico('exp')}הוצאה</button></div>${typeof isA==='function'&&isA()?`<div class="big2" style="margin-top:10px"><button class="tile" data-a="addGo" data-v="shelf" style="font-size:1rem">🏷️<br>מחירים ומבצעים למדף</button><button class="tile" data-a="addGo" data-v="fb" style="font-size:1rem">📝<br>משוב לקוחות</button></div><button class="tile" data-a="addGo" data-v="tk" style="font-size:1rem;width:100%;margin-top:10px">✅ משימה חדשה</button>`:''}`}
  else if(A.step==='cat'){
   body=catsOf(A.type).map(x=>`<button class="opt" data-a="pick" data-k="cat" data-v="${x.id}"><span>${esc(x.name)}</span>${ico('chev')}</button>`).join('')+`<button class="opt add" data-a="newCatFromSheet"><span>＋ קטגוריה חדשה</span></button>`}
  else if(A.step==='scan'){
@@ -755,7 +755,7 @@ CHG.lgf=el=>{LG.from=el.value;rerender()};CHG.lgt=el=>{LG.to=el.value;rerender()
 /* ---- עוד ---- */
 V.more=()=>{const pend=S.tx.filter(t=>t.cat==='p_inc'||t.cat==='p_exp').length,fx=fixPending(NOWM()).length;
  const o=(a,v,t,sm,n)=>`<button class="opt" data-a="${a}" data-v="${v||''}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`;
- return{t:'עוד',s:'כלים',h:o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח וחשבוניות בלי מספר',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
+ return{t:'עוד',s:'כלים',h:o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+o('go','tk','משימות','משימות לעובדים, אישור תמונות ואיחורים',typeof tkOverN==='function'?(tkOverN()||''):'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח וחשבוניות בלי מספר',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
 
 ACT.repAll=()=>{RS=scopeOf('all:exp');go('rep')};
 
@@ -1431,7 +1431,7 @@ V.wk=()=>{const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
  if(WS==='home'){
   const off=`<button class="tile" disabled style="opacity:.45;cursor:default">🚧<br><small>בבנייה</small></button>`;
   return{t:'לארג׳ פעמי',s:esc((SY.email||'').split('@')[0]),h:`${cs.length?'':'<div class="card"><p class="note">עדיין לא התקבלו קטגוריות מהמנהל. בדוק חיבור ולחץ "רענן".</p></div>'}
-  <div class="big2" style="grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 16px"><button class="tile exp" data-a="wkGoExp">${ico('exp')}הוצאה</button>${shTile}${fbTile}${off.repeat(5)}</div>
+  <div class="big2" style="grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 16px"><button class="tile exp" data-a="wkGoExp">${ico('exp')}הוצאה</button>${shTile}${fbTile}${tkTile()}${off.repeat(4)}</div>
   ${sent}<button class="btn g" style="width:100%;margin-top:14px" data-a="updChk">בדוק עדכון והתקן</button><button class="btn g" style="width:100%;margin-top:8px" data-a="syOut">התנתק</button>`}}
  if(WS==='exp'){
   return{t:'הוצאה',s:'סריקה או הכנסה ידנית',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>
@@ -2207,6 +2207,83 @@ ACT.fbXls=()=>{const rows=fbRows(),H=['שם','טלפון','כתובת','מספר
 /* ---- אתחול ---- */
 setTimeout(()=>{if(fbRole()){fbPush().catch(()=>{});fbRun();fbInbox().catch(()=>{})}},3000);
 setInterval(()=>{if(fbAdmin()&&!document.hidden){fbInbox().catch(()=>{});fbRun()}},90000);
+/* ===== משימות (מנהל ועובדים) ===== */
+const TK_OFF={Elul:[29],Tishri:[1,2,9,10,14,15,16,17,18,19,20,21,22],Nisan:[14,15,16,17,18,19,20,21],Sivan:[5,6]};
+const TKHF=new Intl.DateTimeFormat('en-u-ca-hebrew',{day:'numeric',month:'long'}),TKBC={};
+function tkBiz(d){const k=d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate();if(k in TKBC)return TKBC[k];let b=d.getDay()<=4;
+ if(b){try{const p=TKHF.formatToParts(new Date(d.getFullYear(),d.getMonth(),d.getDate(),12)),m=(p.find(x=>x.type==='month')||{}).value,dd=+((p.find(x=>x.type==='day')||{}).value);if((TK_OFF[m]||[]).includes(dd))b=false}catch(e){}}
+ return TKBC[k]=b}
+/* 72 שעות של ימי עסקים (ראשון–חמישי, בלי יום טוב, חול המועד וערבי חג) מרגע הכתיבה */
+function tkDue(t){let rem=72*36e5,x=t;for(let i=0;i<400;i++){const d=new Date(x),nx=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1).getTime();if(tkBiz(d)){const k=Math.min(rem,nx-x);rem-=k;if(rem<=0)return x+k}x=nx}return x}
+const iv=v=>({integerValue:String(Math.round(+v||0))});
+const gi=(d,k)=>{const f=d&&d.fields&&d.fields[k];return f?+(f.integerValue||f.doubleValue||0):0};
+const TKF=['owner','by','role','txt','cr','due','st','open','pr','sub','doneBy','note','ok','late'];
+const tkOf=d=>({id:idOf(d),owner:gv(d,'owner'),by:gv(d,'by'),role:gv(d,'role'),txt:gv(d,'txt'),cr:gi(d,'cr'),due:gi(d,'due'),st:gv(d,'st'),pr:gv(d,'pr'),sub:gi(d,'sub'),doneBy:gv(d,'doneBy'),note:gv(d,'note'),ok:gi(d,'ok'),late:gv(d,'late')});
+let TK=(()=>{try{return JSON.parse(localStorage.getItem('lp-tasks'))||{L:[]}}catch(e){return{L:[]}}})();
+const tkSave=()=>{try{localStorage.setItem('lp-tasks',JSON.stringify(TK))}catch(e){}};
+const tkLateNow=t=>t.st==='open'&&Date.now()>t.due;
+const tkIsLate=t=>tkLateNow(t)||t.late==='1'||(t.st==='wait'&&t.sub>t.due);
+const tkOverN=()=>(TK.L||[]).filter(tkLateNow).length;
+const tkErr=e=>e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה (ייתכן שחוקי Firebase של המשימות עוד לא פורסמו)':'שגיאה: '+((e&&e.message)||e));
+async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields:TKF.map(f=>({fieldPath:f}))},limit:1000};if(where)sq.where={fieldFilter:{field:{fieldPath:where},op:'EQUAL',value:{stringValue:'1'}}};
+ const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>tkOf(x.document))}
+async function tkLoad(){if(!fbRole())return;let L;if(fbAdmin())L=await tkQ();else{const a=await tkQ('open'),b=await tkQ('late'),m={};a.concat(b).forEach(t=>m[t.id]=t);L=Object.values(m)}
+ TK.L=L;TK.at=Date.now();tkSave();if(cur().v==='tk'||(isW()&&cur().v==='wk'))rerender();return L.length}
+async function tkPatch(id,o){const fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
+ await fsx('/tasks/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
+async function tkDo(fn,msg){try{await fn();if(msg)toast(msg)}catch(e){toast(tkErr(e))}try{await tkLoad()}catch(e){}rerender()}
+function tkTile(){const n=tkOverN();return `<button class="tile" data-a="go" data-v="tk" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:34px;height:34px;display:block;margin:0 auto 6px"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>משימות${n?`<small style="display:block;color:var(--bad);font-weight:700">${n} באיחור</small>`:''}</button>`}
+const tkDT=ms=>ms?new Date(ms).toLocaleString('he-IL',{weekday:'short',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+let TKT='open';
+V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbAdmin(),L=(TK.L||[]).slice();
+ const tabs=[['open','פתוחות',L.filter(t=>t.st!=='done').length],['late','באיחור',L.filter(tkIsLate).length]].concat(adm?[['done','בוצעו',L.filter(t=>t.st==='done').length]]:[]);
+ if(!tabs.find(x=>x[0]===TKT))TKT='open';
+ let S0=TKT==='open'?L.filter(t=>t.st!=='done'):TKT==='late'?L.filter(tkIsLate):L.filter(t=>t.st==='done');
+ S0.sort((a,b)=>TKT==='done'?(b.ok-a.ok):(a.due-b.due));
+ const card=t=>{const lt=tkIsLate(t),mine=t.owner===SY.uid;
+  const tags=(lt?'<span class="tag t4">באיחור</span> ':'')+(t.st==='wait'?'<span class="tag t1">ממתין לאישור תמונה</span> ':'')+(t.st==='open'&&t.pr==='1'?'<span class="tag t2">נדרשת תמונה</span> ':'')+(t.st==='done'?'<span class="tag t3">בוצע</span>':'');
+  let act='';
+  if(t.st==='open'){
+   if(t.pr==='1'){act+=`<label class="btn" style="cursor:pointer">📷 צלם תמונה<input type="file" accept="image/*" capture="environment" data-c="tkimg" data-id="${esc(t.id)}" hidden></label><label class="btn g" style="cursor:pointer">🖼 מהגלריה<input type="file" accept="image/*" data-c="tkimg" data-id="${esc(t.id)}" hidden></label>`;if(adm)act+=`<button class="btn g" data-a="tkDone" data-id="${esc(t.id)}">סגור בלי תמונה</button>`}
+   else{act+=`<button class="btn" data-a="tkDone" data-id="${esc(t.id)}">✓ בוצע</button>`;if(adm)act+=`<button class="btn g" data-a="tkReq" data-id="${esc(t.id)}">📷 בקש תמונה</button>`}}
+  if(t.st==='wait'){act+=`<button class="btn g" data-a="tkImg" data-id="${esc(t.id)}">הצג תמונה</button>`;if(adm)act+=`<button class="btn" data-a="tkOk" data-id="${esc(t.id)}">✓ אשר</button><button class="btn r" data-a="tkRej" data-id="${esc(t.id)}">דחה</button>`;else act+='<span class="note">ממתין לאישור המנהל</span>'}
+  if(t.st==='done'&&t.pr==='1'&&adm)act+=`<button class="btn g" data-a="tkImg" data-id="${esc(t.id)}">הצג תמונה</button>`;
+  if(adm)act+=`<button class="btn g" data-a="tkDel" data-id="${esc(t.id)}" aria-label="מחק משימה">🗑</button>`;
+  return `<div class="card" style="${lt?'border-color:var(--bad)':''}"><div style="white-space:pre-wrap;font-weight:700">${esc(t.txt)}</div><div style="margin:6px 0">${tags}</div>
+  <p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${mine?' (אני)':''}<br>יעד לביצוע: ${tkDT(t.due)}${t.sub?`<br>בוצעה בפועל: ${tkDT(t.sub)}${t.doneBy?' · '+esc(t.doneBy):''}`:''}${t.st==='done'&&t.ok&&t.ok!==t.sub?`<br>אושרה: ${tkDT(t.ok)}`:''}</p>
+  ${t.note&&t.st==='open'?`<p class="note" style="color:var(--bad);margin:6px 0 0">התמונה לא אושרה: ${esc(t.note)}</p>`:''}
+  ${act?`<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">${act}</div>`:''}</div>`};
+ return{t:'משימות',s:adm?'לעובדים':'שלי ושל הצוות',h:`<form class="card" data-f="tkAdd"><label class="f"><span>משימה חדשה</span><textarea name="txt" maxlength="500" required placeholder="מה צריך לעשות?"></textarea></label>
+  ${adm?'<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" name="pr" value="1"> לבקש תמונה שהמשימה בוצעה</label>':''}
+  <p class="note" style="margin:4px 0 8px">יעד לביצוע: 3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד וערבי חג).</p><button class="btn w">הוסף משימה</button></form>
+  <div class="chips" style="margin:12px 0">${tabs.map(x=>`<button class="chip ${x[0]===TKT?'on':''}" data-a="tkTab" data-v="${x[0]}">${x[1]}${x[2]?' ('+x[2]+')':''}</button>`).join('')}</div>
+  ${S0.length?S0.map(card).join(''):`<p class="note">${TKT==='open'?'אין משימות פתוחות.':TKT==='late'?'אין משימות באיחור.':'עוד אין משימות שבוצעו.'}</p>`}
+  <button class="btn g w" data-a="tkRefresh" style="margin-top:8px">רענן</button>`}};
+ACT.tkTab=el=>{TKT=el.dataset.v;rerender()};
+ACT.tkRefresh=()=>tkDo(()=>Promise.resolve(),'');
+const tkGet=id=>(TK.L||[]).find(t=>t.id===id);
+FRM.tkAdd=async f=>{const x=fd(f),txt=String(x.txt||'').trim().slice(0,500);if(!txt)return toast('כתוב מה צריך לעשות');const b=f.querySelector('button');if(b)b.disabled=true;
+ const now=Date.now(),id=uid(),adm=fbAdmin();
+ const fields={owner:sv(SY.uid),by:sv(fbBy()),role:sv(adm?'a':'w'),txt:sv(txt),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),open:sv('1'),pr:sv(adm&&x.pr?'1':''),img:sv(''),sub:iv(0),doneBy:sv(''),note:sv(''),ok:iv(0),late:sv('')};
+ try{await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})});toast('✓ המשימה נוספה');f.reset();TKT='open'}catch(e){toast(tkErr(e))}finally{if(b)b.disabled=false}
+ try{await tkLoad()}catch(e){}rerender()};
+ACT.tkDone=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('לסמן שהמשימה בוצעה?',()=>tkDo(()=>{const now=Date.now();return tkPatch(t.id,{st:'done',open:'',sub:now,ok:now,doneBy:fbBy(),late:now>t.due?'1':''})},'✓ סומן כבוצע'),'כן, בוצע')};
+ACT.tkReq=el=>{const t=tkGet(el.dataset.id);if(t)tkDo(()=>tkPatch(t.id,{pr:'1'}),'העובד יתבקש לצרף תמונה')};
+ACT.tkOk=el=>{const t=tkGet(el.dataset.id);if(!t)return;tkDo(()=>tkPatch(t.id,{st:'done',open:'',ok:Date.now(),late:t.sub>t.due?'1':'',note:''}),'✓ אושר')};
+ACT.tkRej=el=>{const t=tkGet(el.dataset.id);if(!t)return;dlg(`<h3>למה התמונה לא מאושרת?</h3><form data-f="tkRej" data-id="${esc(t.id)}"><label class="f"><span>הערה לעובד</span><textarea name="note" maxlength="300" required></textarea></label><div class="row"><button class="btn r grow">החזר לעובד</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.tkRej=f=>{const id=f.dataset.id,note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');closeDlg();tkDo(()=>tkPatch(id,{st:'open',img:'',sub:0,doneBy:'',note}),'המשימה הוחזרה לעובד')};
+ACT.tkDel=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('למחוק את המשימה לצמיתות?',()=>tkDo(()=>fsx('/tasks/'+t.id,{method:'DELETE'}),'המשימה נמחקה'),'מחק')};
+ACT.tkImg=async el=>{try{const d=await fsx('/tasks/'+el.dataset.id),u=gv(d,'img');if(!u)return toast('אין תמונה');dlg(`<div style="max-height:75vh;overflow:auto;border-radius:8px"><img src="${esc(u)}" alt="תמונת ביצוע" style="width:100%;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)}catch(e){toast(tkErr(e))}};
+CHG.tkimg=async el=>{const id=el.dataset.id,f=el.files&&el.files[0];el.value='';const t=tkGet(id);if(!f||!t)return;toast('מעלה תמונה…');
+ tkDo(async()=>{const du=await fbShrink(await rdU(f));await tkPatch(id,{st:'wait',img:du,sub:Date.now(),doneBy:fbBy()})},'✓ התמונה נשלחה לאישור המנהל')};
+/* התראה על משימות באיחור בכל כניסה לאפליקציה */
+let TKA=0;
+async function tkAlert(){if(!fbRole())return;try{await tkLoad()}catch(e){}const n=tkOverN();if(!n||Date.now()-TKA<600000)return;const d=$('#dlg');if(d&&d.open)return;TKA=Date.now();
+ dlg(`<h3>⚠️ ${n>1?n+' משימות באיחור':'משימה אחת באיחור'}</h3><p class="note">${n>1?'יש משימות שלא טופלו':'יש משימה שלא טופלה'} תוך 3 ימי עסקים.</p><div class="row"><button class="btn grow" data-a="tkGoAl">לצפייה</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`)}
+ACT.tkGoAl=()=>{closeDlg();TKT='late';go('tk')};
+setTimeout(tkAlert,3500);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(tkAlert,1500)});
+
 
 CHG.fbdt=el=>{const f=el.closest('form'),h=document.getElementById('fbhd');if(h)h.textContent=el.value?heb(el.value):'';const p=f&&f.querySelector('input[name=pr]');if(p&&el.value)p.value=prOfDate(el.value)};
 
