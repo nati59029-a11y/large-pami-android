@@ -132,6 +132,37 @@
         "delete-other": "DDDDD"
       }
     },
+    "tasks": {
+      "source": "משימות – הכללים שפעילים היום, עם isStaff במקום 'מחובר'",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה: משימות פתוחות או באיחור. יצירה בשמו (יעד 72 שעות עד 17 יום). סימון בוצע / צירוף תמונה. סימון תגובה (cAt/cBy)", "manager": "הכול" },
+      "ops": {
+        "get-open":            "DDDAA",
+        "get-done":            "DDDDA",
+        "get-done-late":       "DDDAA",
+        "list-open":           "DDDAA",
+        "list-all":            "DDDDA",
+        "create-own":          "DDDAA",
+        "create-other-owner":  "DDDDD",
+        "update-mark-done":    "DDDAA",
+        "update-other-fields": "DDDDA",
+        "update-comment-mark": "DDDAA",
+        "delete":              "DDDDA"
+      }
+    },
+    "tasks_c": {
+      "source": "תגובות במשימה – tasks/{id}/c/{cid}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה ויצירה בשמו, במשימה שהוא רשאי לקרוא. בלי עדכון ומחיקה", "manager": "קריאה, יצירה בשמו ומחיקה. בלי עדכון" },
+      "ops": {
+        "get-on-open-task":    "DDDAA",
+        "get-on-done-task":    "DDDDA",
+        "list-on-open-task":   "DDDAA",
+        "create-own":          "DDDAA",
+        "create-other-uid":    "DDDDD",
+        "create-on-done-task": "DDDDA",
+        "update":              "DDDDD",
+        "delete":              "DDDDA"
+      }
+    },
     "_not_in_table": {
       "source": "3.3 – 'ברירת מחדל לכל אוסף שלא מופיע בטבלה: אין גישה לאף אחד'",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },

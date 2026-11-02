@@ -13,6 +13,20 @@ let seq = 0;
 const fresh = (p) => `${p}${Date.now()}x${++seq}`;
 const now = () => new Date().toISOString();
 const bypass = (env, fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
+const iv = (v) => ({ integerValue: String(Math.round(+v || 0)) });
+const TKF = ['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'sub', 'doneBy', 'note', 'ok', 'late', 'cAt', 'cBy'];
+// tkQ(where) באפליקציה
+const tkRunQ = (uid, where) => {
+  const sq = { from: [{ collectionId: 'tasks' }], select: { fields: TKF.map((f) => ({ fieldPath: f })) }, limit: 1000 };
+  if (where) sq.where = { fieldFilter: { field: { fieldPath: where }, op: 'EQUAL', value: { stringValue: '1' } } };
+  return fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: sq }) });
+};
+// tkPatch(id, o) באפליקציה
+const tkPatch = (uid, id, o) => {
+  const fields = {}; const mask = [];
+  for (const k in o) { fields[k] = typeof o[k] === 'number' ? iv(o[k]) : sv(o[k]); mask.push('updateMask.fieldPaths=' + k); }
+  return fsx(uid, '/tasks/' + id + '?' + mask.join('&') + '&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields }) });
+};
 
 // כל פונקציה מחזירה רשימת תשובות (status). A = הסטטוסים שנחשבים "הצליח" לתפקיד מורשה.
 const REPLAY = {
@@ -147,6 +161,61 @@ const REPLAY = {
   M34: { run: async (uid, env) => { await bypass(env, (db) => db.doc('chunks/fbhi_fb_new_0').set({ owner: H.OTHER, data: 'AAAA' })); return [await fsx(uid, '/chunks/fbhi_' + 'fb_new' + '_' + 0)]; } },
   M35: { run: async (uid, env) => { await bypass(env, (db) => db.doc('chunks/fbhi_fb_new_0').set({ owner: H.OTHER, data: 'AAAA' })); return [await fsx(uid, '/chunks/fbhi_' + 'fb_new' + '_' + 0, { method: 'DELETE' })]; } },
   M32: { run: async (uid, env) => { await bypass(env, (db) => db.doc('bk/f_x_0').set({ data: 'AAAA', owner: 'u_mgr' })); return [await fsx(uid, '/bk/' + 'f_x' + '_' + 0)]; } },
+
+  // ---- משימות ותגובות (www/index.html, מודול המשימות) ----
+  // tkQ('open') + tkQ('late') – עובד
+  M37: { run: async (uid) => {
+    const out = [];
+    for (const w of ['open', 'late']) {
+      const r = await tkRunQ(uid, w);
+      if (r.status === 200) {
+        const ids = (r.json || []).filter((x) => x.document).map((x) => x.document.name.split('/').pop());
+        assert.ok(ids.length >= 1, 'העובד צריך לראות משימות (' + w + ')');
+        assert.ok(!ids.includes('t_done'), 'עובד קיבל משימה שבוצעה בזמן');
+      }
+      out.push(r);
+    }
+    return out;
+  } },
+  // tkQ() – מנהל, כל המשימות
+  M38: { run: async (uid) => {
+    const r = await tkRunQ(uid, '');
+    if (r.status === 200) assert.ok((r.json || []).some((x) => x.document && x.document.name.endsWith('/t_done')), 'המנהל צריך לראות גם משימות שבוצעו');
+    return [r];
+  } },
+  // ACT.tkDone: סימון בוצע (משימה שלא נדרשת בה תמונה)
+  M39: { run: async (uid) => { const n = Date.now(); return [await tkPatch(uid, 't_open', { st: 'done', open: '', sub: n, ok: n, doneBy: uid, late: '' })]; } },
+  // CHG.tkimg: צירוף תמונה למשימה שנדרשת בה תמונה
+  M40: { run: async (uid) => [await tkPatch(uid, 't_pr', { st: 'wait', img: 'data:image/jpeg;base64,' + 'A'.repeat(500), sub: Date.now(), doneBy: uid })] },
+  // מנהל: בקשת תמונה, אישור, דחייה
+  M41: { run: async (uid) => [
+    await tkPatch(uid, 't_open', { pr: '1' }),
+    await tkPatch(uid, 't_wait', { st: 'done', open: '', ok: Date.now(), late: '', note: '' }),
+    await tkPatch(uid, 't_pr', { st: 'open', img: '', sub: 0, doneBy: '', note: 'לא ברור' }),
+  ] },
+  // FRM.tkCm: סימון "תגובה חדשה" על המשימה
+  M42: { run: async (uid) => [await tkPatch(uid, 't_open', { cAt: Date.now(), cBy: uid })] },
+  // FRM.tkAdd: משימה חדשה, בדיוק השדות של האפליקציה
+  M43: { run: async (uid, env, role) => {
+    const now = Date.now(); const adm = role === 'manager' || role === 'managerAdminsOnly';
+    const fields = { owner: sv(uid), by: sv(uid), role: sv(adm ? 'a' : 'w'), txt: sv('לנקות את המחסן'), cr: iv(now), due: iv(now + 4 * 86400000), st: sv('open'), open: sv('1'),
+      pr: sv(adm ? '1' : ''), img: sv(''), sub: iv(0), doneBy: sv(''), note: sv(''), ok: iv(0), late: sv('') };
+    return [await fsx(uid, '/tasks?documentId=' + encodeURIComponent(fresh('t')), { method: 'POST', body: JSON.stringify({ fields }) })];
+  } },
+  M44: { run: async (uid) => [await fsx(uid, '/tasks/' + 't_open', { method: 'DELETE' })] },
+  M45: { run: async (uid) => [await fsx(uid, '/tasks/' + 't_wait')] },
+  // tkCmLoad: שרשור התגובות
+  M46: { run: async (uid) => {
+    const r = await fsx(uid, '/tasks/' + 't_open' + '/c?pageSize=300');
+    if (r.status === 200) assert.ok(((r.json && r.json.documents) || []).length >= 1, 'השרשור צריך לכלול את התגובה הקיימת');
+    return [r];
+  } },
+  // FRM.tkCm: תגובה חדשה
+  M47: { run: async (uid) => {
+    const fields = { uid: sv(uid), by: sv(uid), txt: sv('סיימתי חצי'), t: iv(Date.now()) };
+    return [await fsx(uid, '/tasks/' + 't_open' + '/c?documentId=' + encodeURIComponent(fresh('c')), { method: 'POST', body: JSON.stringify({ fields }) })];
+  } },
+  M48: { run: async (uid) => [await fsx(uid, '/tasks/' + 't_open' + '/c/' + 'c1', { method: 'DELETE' })] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,

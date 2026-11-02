@@ -1,5 +1,7 @@
 rules_version = '2';
 
+// המקור היחיד של הכללים: firebase/firestore.rules. הקובץ app-source/firestore.rules הוא עותק זהה תו-בתו – לא עורכים אותו ישירות.
+
 // כללי הרשאות ל-Firestore – שלב 0 (תיקוני אבטחה באפליקציה הקיימת).
 // מקור: טבלת ההרשאות (מחייבת) באפיון, פרק 3.3, ופרק 20.3 (app_backup_status).
 // עיקרון: הכול סגור, ופותחים רק מה שבטבלה. הכלל האחרון בקובץ סוגר כל מה שלא הוגדר.
@@ -28,6 +30,13 @@ service cloud.firestore {
 
     function isSelf(userId) {
       return request.auth != null && request.auth.uid == userId;
+    }
+
+    // שם שהאפליקציה כותבת (fbBy(): מה שלפני ה-@ באימייל שהוקלד בכניסה) חייב להיות של המשתמש עצמו,
+    // לפי האימייל שבטוקן, בלי הבדל אותיות גדולות/קטנות. בלי אימייל בטוקן – נחסם.
+    function isMyName(n) {
+      return request.auth.token.email is string
+        && n is string && n.lower() == request.auth.token.email.lower().split('@')[0];
     }
 
     // ---------- 7 האוספים הקיימים (המבנה לא משתנה, רק מי רשאי) ----------
@@ -118,6 +127,75 @@ service cloud.firestore {
         || (isSelf(userId) && isActiveEmployee());
       allow list: if isManager();
       allow create, update, delete: if false;
+    }
+
+    // ---------- משימות (tasks) ----------
+    // הלוגיקה הועתקה כמו שהיא מהכללים שפעילים היום (app-source/firestore.rules הישן),
+    // רק "מחובר" הוחלף ב-isStaff() ו-isAdmin() ב-isManager(), ונוספה בדיקה שהשם (by, doneBy) הוא של הכותב (isMyName).
+    // תוספת: תגובות (תת-אוסף c) והשדות cAt/cBy על המשימה ("תגובה חדשה"). משימות ישנות בלי השדות ממשיכות לעבוד.
+    match /tasks/{id} {
+      function nw() { return request.resource.data; }
+      function od() { return resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      // עובד: מסמן בוצע (בלי דרישת תמונה) או מצרף תמונה (כשנדרשת). לא סוגר משימה שנדרשת בה תמונה.
+      function workerUpd() {
+        return od().st == 'open'
+          && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
+          && nowOk(nw().sub)
+          && isMyName(nw().doneBy)
+          && (
+            (od().pr == '1' && nw().st == 'wait' && nw().open == '1'
+              && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
+              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*')
+              && nw().late == od().late && nw().ok == od().ok)
+            || (od().pr != '1' && nw().st == 'done' && nw().open == ''
+              && nw().img == od().img && nw().ok == nw().sub
+              && (nw().late == '1') == (request.time.toMillis() > od().due))
+          );
+      }
+      // סימון "תגובה חדשה": רק cAt (זמן התגובה האחרונה, לפי שעון השרת) ו-cBy (המגיב עצמו),
+      // ורק במשימה שהמגיב רשאי לקרוא.
+      function commentMark() {
+        return nw().diff(od()).affectedKeys().hasOnly(['cAt', 'cBy'])
+          && nw().cBy == request.auth.uid
+          && nowOk(nw().cAt)
+          && (isManager() || od().open == '1' || od().late == '1');
+      }
+      allow read: if isManager()
+        || (isStaff() && (resource.data.open == '1' || resource.data.late == '1'));
+      allow create: if isStaff()
+        && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
+        && nw().owner == request.auth.uid
+        && isMyName(nw().by)
+        && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
+        && nw().sub == 0 && nw().ok == 0 && nw().note == ''
+        && (nw().pr == '' || isManager())
+        && (nw().role == 'w' || isManager())
+        && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+        && nowOk(nw().cr)
+        && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000;
+      allow update: if isManager() || (isStaff() && (workerUpd() || commentMark()));
+      allow delete: if isManager();
+
+      // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
+      match /c/{cid} {
+        function task() { return get(/databases/$(database)/documents/tasks/$(id)).data; }
+        function canReadTask() {
+          return exists(/databases/$(database)/documents/tasks/$(id))
+            && (isManager() || (isStaff() && (task().open == '1' || task().late == '1')));
+        }
+        allow read: if canReadTask();
+        allow create: if isStaff() && canReadTask()
+          && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
+          && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+          && nowOk(nw().t);
+        allow update: if false;
+        allow delete: if isManager();
+      }
     }
 
     // ---------- הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם ----------

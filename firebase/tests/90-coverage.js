@@ -41,8 +41,8 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     assert.deepEqual(missing, [], 'תאים בלי בדיקה שעברה');
     assert.deepEqual(extra, [], 'בדיקות שלא מופיעות ברשימה');
 
-    // כל 9 האוספים ו-5 התפקידים מופיעים
-    const nine = ['admins', 'cfg', 'shelf', 'fb', 'bk', 'chunks', 'inbox', 'staff', 'app_backup_status'];
+    // כל האוספים (9 שבטבלה + משימות ותגובות במשימה) ו-5 התפקידים מופיעים
+    const nine = ['admins', 'cfg', 'shelf', 'fb', 'bk', 'chunks', 'inbox', 'staff', 'app_backup_status', 'tasks', 'tasks_c'];
     for (const c of nine) for (const r of H.ROLES) assert.ok(cells.some((x) => x.coll === c && x.role === r), `${c} × ${r} חסר`);
 
     const denyCells = cells.filter((c) => c.expected === 'deny');
@@ -78,8 +78,10 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     const callLines = calls.filter((n) => n !== ops.fsxDefinitionLine);
     assert.ok(lines[ops.fsxDefinitionLine - 1].includes('async function fsx('), 'שורת ההגדרה של fsx זזה');
     // כל שורה עם קריאה – יש לה שורת מיפוי; כל שורת מיפוי – הקטע שלה באמת נמצא בשורה הזו
-    for (const n of new Set(callLines)) assert.ok(ops.rows.some((r) => r.line === n), `שורה ${n}: קריאה ל-fsx בלי שורה בטבלת המיפוי`);
-    for (const r of ops.rows) assert.ok(lines[r.line - 1].includes(r.snippet), `${r.id}: הקטע "${r.snippet}" לא נמצא בשורה ${r.line}`);
+    // excluded: קריאות שבכוונה אין להן כלל בקובץ הזה (עם סיבה כתובה), למשל קוד שרץ רק מול פרויקט הבדיקות
+    const excluded = ops.excluded || [];
+    for (const n of new Set(callLines)) assert.ok(ops.rows.some((r) => r.line === n) || excluded.some((r) => r.line === n), `שורה ${n}: קריאה ל-fsx בלי שורה בטבלת המיפוי`);
+    for (const r of ops.rows.concat(excluded)) assert.ok(lines[r.line - 1].includes(r.snippet), `${r.id}: הקטע "${r.snippet}" לא נמצא בשורה ${r.line}`);
     // אין פנייה ל-Firestore שלא דרך fsx
     const direct = lines.map((l, i) => [i + 1, l]).filter(([, l]) => /firestore\.googleapis\.com/.test(l));
     assert.deepEqual(direct.map(([n]) => n), [ops.fsbLine], 'פנייה ישירה ל-Firestore מחוץ ל-FSB');
@@ -101,14 +103,21 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     });
   }
 
+  it('app-source/firestore.rules הוא עותק זהה תו-בתו של firebase/firestore.rules', () => {
+    const a = fs.readFileSync(path.join(H.ROOT, 'firestore.rules'), 'utf8');
+    const b = fs.readFileSync(path.join(H.ROOT, '..', 'app-source', 'firestore.rules'), 'utf8');
+    assert.ok(a === b, 'app-source/firestore.rules שונה מ-firebase/firestore.rules – העתק אותו מחדש');
+  });
+
   it('firestore.rules: הכלל האחרון סוגר את כל מה שלא הוגדר', () => {
     const t = rulesText('firestore.rules');
     const matches = [...t.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
     assert.equal(matches[matches.length - 1], '/{document=**}');
     assert.match(t, /match\s+\/\{document=\*\*\}\s*\{\s*allow read, write: if false;\s*\}\s*\}\s*\}\s*$/);
-    // אין אוספים נוספים מעבר ל-9 שבטבלה
+    // אין אוספים נוספים מעבר ל-9 שבטבלה, משימות (tasks), ותגובות (c – מקונן בתוך tasks/{id})
     const colls = matches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'bk', 'cfg', 'chunks', 'fb', 'inbox', 'shelf', 'staff']);
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'bk', 'c', 'cfg', 'chunks', 'fb', 'inbox', 'shelf', 'staff', 'tasks']);
+    assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
   });
 
   it('storage.rules: הכלל האחרון סוגר את כל מה שלא הוגדר', () => {

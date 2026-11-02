@@ -1346,7 +1346,7 @@ async function syLogin(email,pw){
  SY={idToken:j.idToken,refresh:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1000,uid:j.localId,email};
  try{await fsx('/admins/'+SY.uid);SY.role='admin'}catch(e){if(e.code===404||e.code===403)SY.role=await syStaff();else throw e}
  syS()}
-function syOut(){SY={};try{localStorage.removeItem(SK);localStorage.removeItem('lp-tasks')}catch(e){}try{TK={L:[]}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}
+function syOut(){SY={};try{localStorage.removeItem(SK);localStorage.removeItem('lp-tasks');localStorage.removeItem('lp-tk-c')}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}
 const isW=()=>SY.role==='worker'&&!!SY.refresh,isA=()=>SY.role==='admin'&&!!SY.refresh;
 /* לשונית "הזמנות אתר" (שלב 1, קבצים נפרדים ב-orders/): רק למנהל ולעובד, ורק במצב אמולטור או כשהבנייה הפעילה אותה (orders/site-backend.js) */const ordOn=()=>(isA()||isW())&&(!!EMU||['emulator','test'].includes(window.LP_SITE_BACKEND));ACT.ordGo=()=>{location.href='orders/app.html'+location.search};const ordTile=`<button class="tile" data-a="ordGo" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">🛒<br>הזמנות אתר</button>`;
 /* ---- תור שליחה (עובד) ---- */
@@ -2249,10 +2249,14 @@ function tkBiz(d){const k=d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate();if(k 
 function tkDue(t){let rem=72*36e5,x=t;for(let i=0;i<400;i++){const d=new Date(x),nx=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1).getTime();if(tkBiz(d)){const k=Math.min(rem,nx-x);rem-=k;if(rem<=0)return x+k}x=nx}return x}
 const iv=v=>({integerValue:String(Math.round(+v||0))});
 const gi=(d,k)=>{const f=d&&d.fields&&d.fields[k];return f?+(f.integerValue||f.doubleValue||0):0};
-const TKF=['owner','by','role','txt','cr','due','st','open','pr','sub','doneBy','note','ok','late'];
-const tkOf=d=>({id:idOf(d),owner:gv(d,'owner'),by:gv(d,'by'),role:gv(d,'role'),txt:gv(d,'txt'),cr:gi(d,'cr'),due:gi(d,'due'),st:gv(d,'st'),pr:gv(d,'pr'),sub:gi(d,'sub'),doneBy:gv(d,'doneBy'),note:gv(d,'note'),ok:gi(d,'ok'),late:gv(d,'late')});
+const TKF=['owner','by','role','txt','cr','due','st','open','pr','sub','doneBy','note','ok','late','cAt','cBy'];
+const tkOf=d=>({id:idOf(d),owner:gv(d,'owner'),by:gv(d,'by'),role:gv(d,'role'),txt:gv(d,'txt'),cr:gi(d,'cr'),due:gi(d,'due'),st:gv(d,'st'),pr:gv(d,'pr'),sub:gi(d,'sub'),doneBy:gv(d,'doneBy'),note:gv(d,'note'),ok:gi(d,'ok'),late:gv(d,'late'),cAt:gi(d,'cAt'),cBy:gv(d,'cBy')});
 let TK=(()=>{try{return JSON.parse(localStorage.getItem('lp-tasks'))||{L:[]}}catch(e){return{L:[]}}})();
 const tkSave=()=>{try{localStorage.setItem('lp-tasks',JSON.stringify(TK))}catch(e){}};
+/* תגובות במשימות: במכשיר נשמר לכל משימה מתי נצפה השרשור לאחרונה (s) וכמה תגובות היו (n). "תגובה חדשה" = cAt של המשימה חדש מהצפייה, ומישהו אחר כתב */
+let TKC=(()=>{try{return JSON.parse(localStorage.getItem('lp-tk-c'))||{}}catch(e){return{}}})();
+const tkcSave=()=>{try{localStorage.setItem('lp-tk-c',JSON.stringify(TKC))}catch(e){}};
+const tkCNew=t=>!!(t.cAt&&t.cBy&&t.cBy!==SY.uid&&t.cAt>((TKC[t.id]||{}).s||0));
 const tkLateNow=t=>t.st==='open'&&Date.now()>t.due;
 const tkIsLate=t=>tkLateNow(t)||t.late==='1'||((t.st==='wait'||t.st==='done')&&t.sub>t.due);
 const tkOverN=()=>(TK.L||[]).filter(tkLateNow).length;
@@ -2275,13 +2279,15 @@ V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbA
  let S0=TKT==='open'?L.filter(t=>t.st!=='done'):TKT==='late'?L.filter(tkIsLate):L.filter(t=>t.st==='done');
  S0.sort((a,b)=>TKT==='done'?(b.ok-a.ok):(a.due-b.due));
  const card=t=>{const lt=tkIsLate(t),mine=t.owner===SY.uid;
-  const tags=(lt?'<span class="tag t4">באיחור</span> ':'')+(t.st==='wait'?'<span class="tag t1">ממתין לאישור תמונה</span> ':'')+(t.st==='open'&&t.pr==='1'?'<span class="tag t2">נדרשת תמונה</span> ':'')+(t.st==='done'?'<span class="tag t3">בוצע</span>':'');
+  const cn=tkCNew(t),cc=TKC[t.id]&&!cn?TKC[t.id].n:null;
+  const tags=(cn?'<span class="tag t2">💬 תגובה חדשה</span> ':'')+(lt?'<span class="tag t4">באיחור</span> ':'')+(t.st==='wait'?'<span class="tag t1">ממתין לאישור תמונה</span> ':'')+(t.st==='open'&&t.pr==='1'?'<span class="tag t2">נדרשת תמונה</span> ':'')+(t.st==='done'?'<span class="tag t3">בוצע</span>':'');
   let act='';
   if(t.st==='open'){
    if(t.pr==='1'){act+=`<label class="btn" style="cursor:pointer">📷 צלם תמונה<input type="file" accept="image/*" capture="environment" data-c="tkimg" data-id="${esc(t.id)}" hidden></label><label class="btn g" style="cursor:pointer">🖼 מהגלריה<input type="file" accept="image/*" data-c="tkimg" data-id="${esc(t.id)}" hidden></label>`;if(adm)act+=`<button class="btn g" data-a="tkDone" data-id="${esc(t.id)}">סגור בלי תמונה</button>`}
    else{act+=`<button class="btn" data-a="tkDone" data-id="${esc(t.id)}">✓ בוצע</button>`;if(adm)act+=`<button class="btn g" data-a="tkReq" data-id="${esc(t.id)}">📷 בקש תמונה</button>`}}
   if(t.st==='wait'){act+=`<button class="btn g" data-a="tkImg" data-id="${esc(t.id)}">הצג תמונה</button>`;if(adm)act+=`<button class="btn" data-a="tkOk" data-id="${esc(t.id)}">✓ אשר</button><button class="btn r" data-a="tkRej" data-id="${esc(t.id)}">דחה</button>`;else act+='<span class="note">ממתין לאישור המנהל</span>'}
   if(t.st==='done'&&t.pr==='1'&&adm)act+=`<button class="btn g" data-a="tkImg" data-id="${esc(t.id)}">הצג תמונה</button>`;
+  act+=`<button class="btn g" data-a="tkCm" data-id="${esc(t.id)}" style="${cn?'border-color:var(--acc);color:var(--acc)':''}">💬 תגובות${cc!=null?' ('+cc+')':''}</button>`;
   if(adm)act+=`<button class="btn g" data-a="tkDel" data-id="${esc(t.id)}" aria-label="מחק משימה">🗑</button>`;
   return `<div class="card" style="${lt?'border-color:var(--bad)':''}"><div style="white-space:pre-wrap;font-weight:700">${esc(t.txt)}</div><div style="margin:6px 0">${tags}</div>
   <p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${mine?' (אני)':''}<br>יעד לביצוע: ${tkDT(t.due)}${t.sub?`<br>בוצעה בפועל: ${tkDT(t.sub)}${t.doneBy?' · '+esc(t.doneBy):''}`:''}${t.st==='done'&&t.ok&&t.ok!==t.sub?`<br>אושרה: ${tkDT(t.ok)}`:''}</p>
@@ -2308,6 +2314,21 @@ ACT.tkRej=el=>{const t=tkGet(el.dataset.id);if(!t)return;dlg(`<h3>למה התמ�
 FRM.tkRej=f=>{const id=f.dataset.id,note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');closeDlg();tkDo(()=>tkPatch(id,{st:'open',img:'',sub:0,doneBy:'',note}),'המשימה הוחזרה לעובד')};
 ACT.tkDel=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('למחוק את המשימה לצמיתות?',()=>tkDo(()=>fsx('/tasks/'+t.id,{method:'DELETE'}),'המשימה נמחקה'),'מחק')};
 ACT.tkImg=async el=>{try{const d=await fsx('/tasks/'+el.dataset.id),u=gv(d,'img');if(!u)return toast('אין תמונה');dlg(`<div style="max-height:75vh;overflow:auto;border-radius:8px"><img src="${esc(u)}" alt="תמונת ביצוע" style="width:100%;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)}catch(e){toast(tkErr(e))}};
+/* תגובות: השרשור נטען רק כשפותחים אותו. בחלון (dlg) – ולכן tkRe לא בונה את המסך מחדש בזמן שמקלידים */
+async function tkCmLoad(id){const L=[];let pt='';do{const r=await fsx('/tasks/'+id+'/c?pageSize=300'+(pt?'&pageToken='+encodeURIComponent(pt):''));((r&&r.documents)||[]).forEach(d=>L.push({id:idOf(d),uid:gv(d,'uid'),by:gv(d,'by'),txt:gv(d,'txt'),t:gi(d,'t')}));pt=(r&&r.nextPageToken)||''}while(pt);return L.sort((a,b)=>a.t-b.t)}
+function tkCmView(t,L){const adm=fbAdmin();return `<h3>💬 תגובות</h3><p class="note" style="white-space:pre-wrap;margin:0 0 8px;max-height:4.5em;overflow:hidden">${esc(t.txt)}</p>
+ <div class="tkcm" style="max-height:45vh;overflow:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px">${L.length?L.map(c=>`<div class="card" style="margin:0;padding:8px 10px;${c.uid===SY.uid?'border-color:var(--acc)':''}"><div class="row" style="justify-content:space-between;align-items:center;gap:6px"><span class="note" style="margin:0">${esc(c.by||'—')}${c.uid===SY.uid?' (אני)':''} · ${tkDT(c.t)}</span>${adm?`<button class="btn g" data-a="tkCmDel" data-id="${esc(t.id)}" data-cid="${esc(c.id)}" aria-label="מחק תגובה" style="padding:2px 8px;min-height:0">🗑</button>`:''}</div><div style="white-space:pre-wrap;margin-top:4px">${esc(c.txt)}</div></div>`).join(''):'<p class="note">עוד אין תגובות.</p>'}</div>
+ <form data-f="tkCm" data-id="${esc(t.id)}"><label class="f"><span>תגובה</span><textarea name="txt" maxlength="500" required placeholder="כתוב תגובה…"></textarea></label><div class="row"><button class="btn grow">שלח</button><button type="button" class="btn g grow" data-a="closeDlg">סגור</button></div></form>`}
+async function tkCmOpen(id){const t=tkGet(id);if(!t)return;dlg('<h3>💬 תגובות</h3><p class="note">טוען…</p>');let L;
+ try{L=await tkCmLoad(id)}catch(e){dlg(`<h3>💬 תגובות</h3><p class="note" style="color:var(--bad)">${esc(tkErr(e))}</p><button class="btn g w" data-a="closeDlg">סגור</button>`);return}
+ TKC[id]={s:Math.max(Date.now(),t.cAt||0,L.length?L[L.length-1].t:0),n:L.length};tkcSave();tkRe();dlg(tkCmView(t,L));const b=document.querySelector('#dlg .tkcm');if(b)b.scrollTop=b.scrollHeight}
+ACT.tkCm=el=>tkCmOpen(el.dataset.id);
+FRM.tkCm=async f=>{const id=f.dataset.id,txt=String(fd(f).txt||'').trim().slice(0,500);if(!txt)return toast('כתוב תגובה');const b=f.querySelector('button');if(b)b.disabled=true;
+ const now=Date.now(),fields={uid:sv(SY.uid),by:sv(fbBy()),txt:sv(txt),t:iv(now)};
+ try{await fsx('/tasks/'+id+'/c?documentId='+encodeURIComponent(uid()),{method:'POST',body:JSON.stringify({fields})})}catch(e){toast(tkErr(e));if(b)b.disabled=false;return}
+ try{await tkPatch(id,{cAt:now,cBy:SY.uid});const t=tkGet(id);if(t){t.cAt=now;t.cBy=SY.uid;tkSave()}}catch(e){}
+ toast('✓ התגובה נשלחה');await tkCmOpen(id)};
+ACT.tkCmDel=el=>{const id=el.dataset.id,cid=el.dataset.cid;ask('למחוק את התגובה?',async()=>{try{await fsx('/tasks/'+id+'/c/'+cid,{method:'DELETE'});toast('התגובה נמחקה')}catch(e){toast(tkErr(e))}tkCmOpen(id)},'מחק')};
 CHG.tkimg=async el=>{const id=el.dataset.id,f=el.files&&el.files[0];el.value='';const t=tkGet(id);if(!f||!t)return;toast('מעלה תמונה…');
  tkDo(async()=>{const du=await fbShrink(await rdU(f));if(du.length>880000)throw new Error('התמונה גדולה מדי. צלם שוב ממרחק קצת יותר גדול');await tkPatch(id,{st:'wait',img:du,sub:Date.now(),doneBy:fbBy()})},'✓ התמונה נשלחה לאישור המנהל')};
 /* התראה על משימות באיחור בכל כניסה לאפליקציה */
