@@ -125,7 +125,7 @@ describe('תגובות במשימה (tasks/{id}/c) ושדות הסימון cAt/c
   let env, emp, emp2, mgr;
   const db = (role) => H.ctxFor(env, role).firestore();
   before(async () => { env = await H.getEnv(); });
-  beforeEach(async () => { await H.seed(env); emp = db('employee'); mgr = db('manager'); emp2 = env.authenticatedContext(H.OTHER).firestore(); });
+  beforeEach(async () => { await H.seed(env); emp = db('employee'); mgr = db('manager'); emp2 = env.authenticatedContext(H.OTHER, { email: H.OTHER + '@example.invalid' }).firestore(); });
 
   it('עובד ומנהל מגיבים זה לזה בלי הגבלת כמות', async () => {
     for (let k = 0; k < 5; k++) {
@@ -141,6 +141,21 @@ describe('תגובות במשימה (tasks/{id}/c) ושדות הסימון cAt/c
   it('עובד לא כותב תגובה בשם אחר', async () => {
     await assertFails(emp.doc('tasks/t_open/c/' + fresh('c')).set(comment(H.OTHER)));
     await assertFails(emp.doc('tasks/t_open/c/' + fresh('c')).set(comment('u_mgr')));
+  });
+
+  it('השם (by) בתגובה חייב להתאים לאימייל של הכותב: עובד לא מציג שם של מנהל, ומנהל לא מציג שם של עובד', async () => {
+    const c = (d, uid, by) => d.doc('tasks/t_open/c/' + fresh('c')).set(comment(uid, { by }));
+    await assertFails(c(emp, 'u_emp', 'u_mgr'));
+    await assertFails(c(emp, 'u_emp', 'boss'));
+    await assertFails(c(emp, 'u_emp', ''));
+    await assertFails(c(mgr, 'u_mgr', 'u_emp'));
+    await assertFails(c(mgr, 'u_mgr', H.OTHER));
+    await assertSucceeds(c(emp, 'u_emp', 'u_emp'));
+    await assertSucceeds(c(emp, 'u_emp', 'U_Emp')); // האימייל הוקלד באותיות גדולות – עדיין אותו אדם
+    await assertSucceeds(c(mgr, 'u_mgr', 'u_mgr'));
+    // טוקן בלי אימייל – נחסם
+    const noMail = env.authenticatedContext('u_emp').firestore();
+    await assertFails(noMail.doc('tasks/t_open/c/' + fresh('c')).set(comment('u_emp')));
   });
 
   it('עובד לא מעדכן תגובה (גם לא שלו) ולא מוחק; מנהל מוחק אבל לא מעדכן', async () => {
