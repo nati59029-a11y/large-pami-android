@@ -9,6 +9,8 @@ const H = require('./helpers');
 
 let seq = 0;
 const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
+const newTask = (owner) => { const cr = Date.now(); return { owner, by: owner, role: 'w', txt: 'משימה', cr, due: cr + 4 * 86400000,
+  st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }; };
 
 // איך מבצעים כל פעולה. db = Firestore של המשתמש; me = המזהה שלו ('nobody' לגולש).
 const OPS = {
@@ -104,6 +106,30 @@ const OPS = {
     'set-own':      (db, me) => db.doc('app_backup_status/' + me).set({ lastBackupAt: 'x', size: 1, device: 'd' }),
     'update-other': (db) => db.doc('app_backup_status/' + H.OTHER).update({ size: 2 }),
     'delete-other': (db) => db.doc('app_backup_status/' + H.OTHER).delete(),
+  },
+  // משימות. משימה חדשה תקינה: יעד 4 ימים מעכשיו (בין 72 שעות ל-17 יום), כמו באפליקציה.
+  tasks: {
+    'get-open':            (db) => db.doc('tasks/t_open').get(),
+    'get-done':            (db) => db.doc('tasks/t_done').get(),
+    'get-done-late':       (db) => db.doc('tasks/t_done_late').get(),
+    'list-open':           (db) => db.collection('tasks').where('open', '==', '1').get(),
+    'list-all':            (db) => db.collection('tasks').get(),
+    'create-own':          (db, me) => db.doc('tasks/' + fresh('t')).set(newTask(me)),
+    'create-other-owner':  (db) => db.doc('tasks/' + fresh('t')).set(newTask(H.OTHER)),
+    'update-mark-done':    (db, me) => { const n = Date.now(); return db.doc('tasks/t_open').update({ st: 'done', open: '', sub: n, ok: n, doneBy: me, late: '' }); },
+    'update-other-fields': (db) => db.doc('tasks/t_open').update({ txt: 'שונה' }),
+    'update-comment-mark': (db, me) => db.doc('tasks/t_open').update({ cAt: Date.now(), cBy: me }),
+    'delete':              (db) => db.doc('tasks/t_open').delete(),
+  },
+  tasks_c: {
+    'get-on-open-task':    (db) => db.doc('tasks/t_open/c/c1').get(),
+    'get-on-done-task':    (db) => db.doc('tasks/t_done/c/c1').get(),
+    'list-on-open-task':   (db) => db.collection('tasks/t_open/c').get(),
+    'create-own':          (db, me) => db.doc('tasks/t_open/c/' + fresh('c')).set({ uid: me, by: me, txt: 'שלום', t: Date.now() }),
+    'create-other-uid':    (db) => db.doc('tasks/t_open/c/' + fresh('c')).set({ uid: H.OTHER, by: H.OTHER, txt: 'שלום', t: Date.now() }),
+    'create-on-done-task': (db, me) => db.doc('tasks/t_done/c/' + fresh('c')).set({ uid: me, by: me, txt: 'שלום', t: Date.now() }),
+    'update':              (db) => db.doc('tasks/t_open/c/c1').update({ txt: 'שונה' }),
+    'delete':              (db) => db.doc('tasks/t_open/c/c1').delete(),
   },
   _not_in_table: {
     'get-orders':    (db) => db.doc('orders/o1').get(),
