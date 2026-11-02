@@ -337,7 +337,9 @@ async function sendPromo(request, key, base) {
       await testFault(db, 'after-upload');
       // הצינתוק הקודם שייך לנוסח הקודם
       await promoRef.update({ status: 'live', text: v.text, spoken, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp() });
-      if (stale && stale !== path) {
+      // הגנה כפולה: מוחקים רק קובץ ממוספר 001-999 בשלוחת המבצעים (כמו runExpiry)
+      const staleOk = stale && /^ivr2:[0-9]+\/(\d{3})\.[A-Za-z0-9]+$/.test(stale) && Number(/(\d{3})\.[A-Za-z0-9]+$/.exec(stale)[1]) >= 1 && stale.startsWith(`ivr2:${cfg.ext}/`);
+      if (staleOk && stale !== path) {
         try { await deleteFiles(ctx, [stale]); } catch (e) { logger.warn('yemot: old file left', { reason: 'stale-file', code: e instanceof YemotError ? e.code : 'internal', requestId: v.requestId }); }
       }
     }
@@ -445,11 +447,18 @@ async function runExpiry(opts) {
   return out;
 }
 
-exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await runExpiry(); });
+// כל לילה: קודם המבצעים (בלי שינוי), ואחר כך הודעות זמניות בשלוחה 4 (yemot-line.js). כשל באחד לא עוצר את השני.
+async function nightly(opts) {
+  const out = {};
+  try { out.promos = await runExpiry(opts); } catch (e) { logger.error('yemot: expiry failed', { reason: 'internal', name: e && e.name }); out.promos = { error: 'internal' }; }
+  try { out.line = await require('./yemot-line').runLineExpiry(opts); } catch (e) { logger.error('yemot: line expiry failed', { reason: 'internal', name: e && e.name }); out.line = { error: 'internal' }; }
+  return out;
+}
+exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await nightly(); });
 
 // לבדיקות בלבד. לא נספרים (enumerable: false), ולכן Object.assign ב-index.js מעתיק רק את שתי הפונקציות.
 Object.defineProperty(exports, 'runExpiry', { enumerable: false, value: runExpiry });
 Object.defineProperty(exports, '_test', { enumerable: false, value: { israelDay, addDays, cleanText, validDay } });
 // משותף ל-yemot-line.js, ולבדיקות שקוראות לליבה בתוך התהליך (לא נספרים כפונקציות)
-Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, loadLexicon, testFault, LOCK_MS } });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo } });
+Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, addDays, validDay, loadLexicon, testFault, LOCK_MS } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo, nightly } });

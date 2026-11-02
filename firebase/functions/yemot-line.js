@@ -1,9 +1,11 @@
 'use strict';
 // תוכן שלוחות הקו (ימות המשיח) מתוך האפליקציה – חוזה 5.2-5.4, 5.9, 5.12 (משימה 2026-11-02).
 //   publishLineItem – העלאת תוכן: recipes (שלוחה 1, עובד ומנהל), updates (שלוחה 3, עובד ומנהל, טקסט או הקלטה),
-//                     hours (שלוחה 4, מנהל), opening (הודעת הפתיחה ivr2:/M1000.<סיומת>, מנהל).
-//   removeLineItem  – הורדת פריט שהשרת העלה (מנהל בלבד).
+//                     hours (שלוחה 4, מנהל; קבועה, או זמנית עם until), opening (הודעת הפתיחה ivr2:/M1000.<סיומת>, מנהל).
+//   removeLineItem  – הורדת פריט שהשרת העלה (מנהל בלבד), או – בשלוחה 4 בלבד – כל קובץ תוכן לפי שם (כולל הקובץ הוותיק 000).
+//   listLineFiles   – רשימת קובצי התוכן בשלוחה 4, כפי שהם בקו (מנהל בלבד).
 //   getLineState    – הרשימות, המילון והמגבלות לאפליקציה (עובד ומנהל). בלי פנייה לימות.
+//   runLineExpiry   – (לא מ-index.js) נקראת מ-expirePromosOnLine כל לילה: מוחקת הודעות זמניות בשלוחה 4 שפג תוקפן.
 // עקרונות:
 //   * התפקיד נקבע בשרת (requireStaff: admins/staff במסד), לעולם לא משדה שהטלפון שולח.
 //   * כל העלאה עוברת: ניקוי ← מילון הגייה ← lib/voice.js. רק voice.js מכיר את סוג הקובץ.
@@ -21,12 +23,13 @@ const { requireStaff, inputObject } = require('./lib/roles');
 const { YemotError, apiBase, listDir, deleteFiles } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { applyLexicon } = require('./lib/lexicon');
-const { cleanText, loadLexicon, testFault, LOCK_MS } = require('./yemot').shared;
+const { cleanText, israelDay, addDays, validDay, loadLexicon, testFault, LOCK_MS } = require('./yemot').shared;
 
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
 const YEMOT_TIMEOUT_MS = defineInt('YEMOT_TIMEOUT_MS', { default: 15000, description: 'זמן המתנה מרבי לכל קריאה לימות' });
 const YEMOT_RECIPE_MAX = defineInt('YEMOT_RECIPE_MAX', { default: 2500, description: 'אורך מרבי למתכון (תווים, הערכה)' });
+const YEMOT_TEMP_MAX_DAYS = defineInt('YEMOT_TEMP_MAX_DAYS', { default: 60, description: 'הודעה זמנית בשלוחה 4: עד כמה ימים קדימה' });
 const YEMOT_REC_MAX_SEC = defineInt('YEMOT_REC_MAX_SEC', { default: 120, description: 'אורך מרבי להקלטה בשלוחת העדכונים (שניות, הערכה)' });
 
 const ITEMS = 'yemot_items';
@@ -40,16 +43,18 @@ const ON_LINE = ['live', 'remove-failed'];
 const SLOTS = Object.freeze({
   recipes: { ext: '1', name: 'המתכונים', mode: 'history', managerOnly: false, max: () => YEMOT_RECIPE_MAX.value(), state: 'yemot_state/ext-1' },
   updates: { ext: '3', name: 'העדכונים', mode: 'history', managerOnly: false, max: () => 800, state: 'yemot_state/ext-3', audio: true },
-  hours: { ext: '4', name: 'השעות והכתובת', mode: 'replace', managerOnly: true, max: () => 600, state: 'yemot_state/ext-4' },
+  // שלוחה 4 (סבב 3): היסטוריה – כל הודעה בקובץ חדש. המנהל מוחק ישנות בעצמו. הודעה זמנית (until) נמחקת בלילה שאחרי.
+  hours: { ext: '4', name: 'השעות והכתובת', mode: 'history', managerOnly: true, max: () => 600, state: 'yemot_state/ext-4', temporary: true },
   opening: { ext: '', name: 'הודעת הפתיחה', mode: 'replace', managerOnly: true, max: () => 600, state: 'yemot_state/structure', fixedName: 'M1000' },
 });
 const SLOT_NAMES = Object.keys(SLOTS);
 const isSlot = (s) => typeof s === 'string' && SLOT_NAMES.includes(s) && Object.hasOwn(SLOTS, s);
 
-// נתיב שהשרת רשאי למחוק: קובץ ממוספר 001-999 בשלוחות 1/3/4, או קובץ הפתיחה M1000 בשורש. אף פעם לא 000.
+// נתיב שהשרת רשאי למחוק: קובץ ממוספר 001-999 בשלוחות 1/3, 000-999 בשלוחה 4 (גם הקובץ הוותיק 000), או קובץ הפתיחה M1000 בשורש.
+// תמיד קובץ אחד בנתיב מדויק – אף פעם לא תיקייה.
 function safePath(p) {
   const m = /^ivr2:([134])\/(\d{3})\.[A-Za-z0-9]+$/.exec(String(p || ''));
-  if (m) return Number(m[2]) >= 1;
+  if (m) return m[1] === '4' || Number(m[2]) >= 1;
   return /^ivr2:\/M1000\.[A-Za-z0-9]+$/.test(String(p || ''));
 }
 
@@ -102,13 +107,22 @@ function validateItem(input) {
     return { requestId, slot, S, kind: 'audio', source, buf, durationSec, text: null, title: 'הקלטה ' + israelStamp() };
   }
   if (!['typed', 'scan'].includes(source)) throw bad('bad-input', 'קלט לא תקין');
+  let until = null;
+  if (input.until !== undefined && input.until !== null) {
+    if (!S.temporary) throw bad('bad-input', 'קלט לא תקין');
+    const today = israelDay(), maxDays = YEMOT_TEMP_MAX_DAYS.value();
+    if (!validDay(input.until)) throw bad('bad-date', 'תאריך ההורדה לא תקין.');
+    if (input.until < today) throw bad('date-past', 'תאריך ההורדה כבר עבר.');
+    if (input.until > addDays(today, maxDays)) throw bad('date-too-far', `אפשר להשאיר הודעה זמנית עד ${maxDays} ימים.`, { max: maxDays });
+    until = input.until;
+  }
   if (typeof text !== 'string') throw bad('empty-text', 'הנוסח ריק. כתבו מה יוקרא בקו.');
   const clean = cleanText(text);
   if (!clean) throw bad('empty-text', 'הנוסח ריק. כתבו מה יוקרא בקו.');
   const max = S.max();
   if (clean.length > max) throw bad('text-too-long', `הנוסח ארוך מדי (עד ${max} תווים).`, { max });
   const first = cleanText(text.split(/\r?\n/).find((l) => cleanText(l)) || clean);
-  return { requestId, slot, S, kind: 'text', source, text: clean, title: first.slice(0, 60) };
+  return { requestId, slot, S, kind: 'text', source, text: clean, title: first.slice(0, 60), until };
 }
 
 function context(key, base) {
@@ -143,7 +157,7 @@ async function allocate(db, ctx, S, itemRef, rendered) {
 const DONE_MSG = {
   recipes: 'המתכון עלה לקו (שלוחה 1), ויושמע ראשון.',
   updates: 'העדכון עלה לקו (שלוחה 3), ויושמע ראשון.',
-  hours: 'השעות והכתובת עודכנו בקו (שלוחה 4).',
+  hours: 'ההודעה עלתה לשלוחה 4, ותושמע ראשונה.',
   opening: 'הודעת הפתיחה עודכנה בקו.',
 };
 
@@ -184,6 +198,7 @@ async function publishItem(request, key, base) {
     const rec = {
       slot: v.slot, ext: S.ext, kind: v.kind, source: v.source, title: v.title, text: v.text, spoken,
       durationSec: v.kind === 'audio' ? v.durationSec : null, status: 'uploading', error: null,
+      until: v.until || null, temporary: !!v.until,
       uncertain: keepPath ? !!x.uncertain : false, byUid: who.uid, byRole: who.role, updatedAt: now, lockAt: now, lockReq: v.requestId,
     };
     if (!keepPath) { rec.file = null; rec.path = null; }
@@ -260,7 +275,7 @@ async function publishItem(request, key, base) {
       }
       await unlockSlot();
     }
-    const message = DONE_MSG[v.slot] + (warnings.length ? ' התוכן הקודם עוד לא הוסר מהקו – הוא יוסר בעדכון הבא.' : '');
+    const message = DONE_MSG[v.slot] + (v.until ? ` היא תרד מהקו אחרי ${v.until.split('-').reverse().join('/')}.` : '') + (warnings.length ? ' התוכן הקודם עוד לא הוסר מהקו – הוא יוסר בעדכון הבא.' : '');
     return reply({ file, path, kind: v.kind, spoken }, { replaced, warnings, message });
   } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -277,6 +292,7 @@ async function removeItem(request, key, base) {
   if (who.role !== 'manager') throw new HttpsError('permission-denied', 'הפעולה הזו מותרת למנהל בלבד.', { reason: 'manager-only' });
   if (typeof input.requestId !== 'string' || !ID_RE.test(input.requestId)) throw bad('bad-request-id', 'הבקשה לא תקינה. נסו שוב.');
   const notFound = () => new HttpsError('not-found', 'הפריט לא נמצא (ייתכן שכבר הוסר).', { reason: 'item-not-found' });
+  if (input.file !== undefined) return removeFile(who, input, key, base);
   if (typeof input.id !== 'string' || !ID_RE.test(input.id)) throw notFound();
   const ctx = context(key, base);
   const db = getFirestore();
@@ -319,6 +335,106 @@ async function removeItem(request, key, base) {
   }
 }
 
+// ---------------- מחיקה לפי שם קובץ – שלוחה 4 בלבד (סבב 3) ----------------
+// קלט: { requestId, ext:'4', file:'NNN.<סיומת>' }. קובץ אחד בנתיב מדויק (FileAction delete), אף פעם לא תיקייה.
+// גם הקובץ הוותיק 000. פריט של השרת באותו נתיב מסומן removed. ניסיון חוזר אחרי הצלחה: "כבר לא בקו".
+const FILE_RE = /^\d{3}\.[A-Za-z0-9]{1,5}$/;
+async function removeFile(who, input, key, base) {
+  if (input.ext !== '4' || typeof input.file !== 'string' || !FILE_RE.test(input.file)) throw bad('bad-file', 'אפשר למחוק מהאפליקציה רק קובצי תוכן בשלוחה 4.');
+  const path = `ivr2:4/${input.file}`;
+  if (!safePath(path)) throw bad('bad-file', 'אפשר למחוק מהאפליקציה רק קובצי תוכן בשלוחה 4.');
+  const ctx = context(key, base);
+  const db = getFirestore();
+  const lockRef = db.doc(SLOTS.hours.state);
+  await db.runTransaction(async (tx) => {
+    const l = await tx.get(lockRef);
+    if (l.exists && isLocked(l.data(), Date.now()) && l.get('lockReq') !== input.requestId) throw busy();
+    tx.set(lockRef, { lockAt: new Date().toISOString(), lockReq: input.requestId, updatedAt: new Date().toISOString() }, { merge: true });
+  });
+  const unlock = () => lockRef.set({ lockAt: null, lockReq: null, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+  try {
+    let names;
+    try { names = await listDir(ctx, '4'); } catch (e) {
+      logger.warn('yemot-line: remove file failed', { reason: 'yemot-remove-failed', code: e.code });
+      throw new HttpsError('unavailable', 'ההסרה מהקו נכשלה. נסו שוב.', { reason: 'yemot-remove-failed' });
+    }
+    const items = (await db.collection(ITEMS).where('path', '==', path).get()).docs.filter((d) => ON_LINE.includes(d.get('status')));
+    const mark = (extra) => Promise.all(items.map((d) => d.ref.update(Object.assign({ status: 'removed', removedAt: new Date().toISOString(), removedBy: who.uid, uncertain: false, lockAt: null, lockReq: null, updatedAt: new Date().toISOString() }, extra))));
+    if (!names.includes(input.file)) { await mark({ error: 'already-missing' }); return { ok: true, file: input.file, removed: true, duplicate: true, message: 'הקובץ כבר לא בקו.' }; }
+    try { await deleteFiles(ctx, [path]); } catch (e) {
+      await Promise.all(items.map((d) => d.ref.update({ status: 'remove-failed', error: 'delete-' + (e.code || 'internal'), updatedAt: new Date().toISOString() })));
+      logger.warn('yemot-line: remove file failed', { reason: 'yemot-remove-failed', code: e.code });
+      throw new HttpsError('unavailable', 'ההסרה מהקו נכשלה. נסו שוב.', { reason: 'yemot-remove-failed' });
+    }
+    await mark({ error: null });
+    return { ok: true, file: input.file, removed: true, duplicate: false, message: 'הקובץ הוסר מהקו.' };
+  } finally { await unlock(); }
+}
+
+// ---------------- listLineFiles – הקבצים בשלוחה 4 כפי שהם בקו (מנהל, סבב 3) ----------------
+// קלט { ext:'4' }. פלט: קובצי תוכן בלבד (NNN.<סיומת>), מהגבוה לנמוך – סדר ההשמעה. ext.ini וקובצי M* לא מוצגים.
+async function listFiles(request, key, base) {
+  const who = await requireStaff(request);
+  const input = inputObject(request);
+  if (who.role !== 'manager') throw new HttpsError('permission-denied', 'הפעולה הזו מותרת למנהל בלבד.', { reason: 'manager-only' });
+  if (input.ext !== '4') throw bad('bad-slot', 'השלוחה לא מוכרת.');
+  const ctx = context(key, base);
+  const db = getFirestore();
+  let names;
+  try { names = await listDir(ctx, '4'); } catch (e) {
+    logger.warn('yemot-line: list failed', { reason: 'yemot-list-failed', code: e.code });
+    throw new HttpsError('unavailable', 'לא הצלחנו לקרוא את השלוחה מהקו. נסו שוב.', { reason: 'yemot-list-failed' });
+  }
+  const items = new Map();
+  for (const d of (await db.collection(ITEMS).where('slot', '==', 'hours').get()).docs) if (ON_LINE.includes(d.get('status'))) items.set(d.get('file'), d);
+  const files = names.filter((n) => FILE_RE.test(n)).sort().reverse().map((name) => {
+    const d = items.get(name);
+    return { name, legacy: !d, item: d ? { id: d.id, title: d.get('title') || '', until: d.get('until') || null, temporary: !!d.get('temporary'), createdAt: d.get('createdAt') || null } : null };
+  });
+  return { ok: true, ext: '4', files };
+}
+
+// ---------------- runLineExpiry – הודעות זמניות בשלוחה 4 (נקראת מ-expirePromosOnLine) ----------------
+// until = היום האחרון שבו ההודעה מושמעת (כמו במבצעים). נמחקת בריצה הראשונה שאחריו (00:15 שעון ישראל).
+// מוחקת רק פריט זמני של השרת בשלוחה 4, בנתיב ivr2:4/NNN (001-999). קובץ שכבר נעלם – removed. כשל – remove-failed, וניסיון בלילה הבא.
+async function runLineExpiry(opts) {
+  const o = opts || {};
+  const db = getFirestore();
+  const today = israelDay(o.now);
+  const out = { today, checked: 0, removed: 0, missing: 0, failed: 0, skipped: 0 };
+  const key = o.key !== undefined ? o.key : YEMOT_API_KEY.value();
+  if (!key) { logger.error('yemot-line: expiry without key', { reason: 'no-key' }); return Object.assign(out, { error: 'no-key' }); }
+  const ctx = { key, base: apiBase(o.base !== undefined ? o.base : YEMOT_API_BASE.value()), timeoutMs: o.timeoutMs || YEMOT_TIMEOUT_MS.value() };
+  const nowMs = Date.now();
+  const holds = (x) => ON_LINE.includes(x.status) || (x.status === 'failed' && x.uncertain) || (x.status === 'uploading' && !isLocked(x, nowMs));
+  const due = (await db.collection(ITEMS).where('slot', '==', 'hours').get()).docs
+    .filter((d) => { const x = d.data(); return x.temporary === true && typeof x.until === 'string' && x.until < today && holds(x) && !isLocked(x, nowMs); });
+  out.checked = due.length;
+  if (!due.length) return out;
+  let names;
+  try { names = await listDir(ctx, '4'); } catch (e) { logger.error('yemot-line: expiry dir failed', { reason: 'dir-failed', code: e.code }); return Object.assign(out, { error: 'dir-failed' }); }
+  for (const d of due) {
+    const x = d.data();
+    const now = new Date().toISOString();
+    const m = /^ivr2:4\/(\d{3})\.[A-Za-z0-9]+$/.exec(String(x.path || ''));
+    if (!m || Number(m[1]) < 1) { out.skipped++; continue; } // רק קובץ ממוספר שהשרת העלה, אף פעם לא 000
+    if (!names.includes(x.path.split('/').pop())) {
+      await d.ref.update({ status: x.status === 'failed' || x.status === 'uploading' ? 'failed' : 'removed', removedAt: now, updatedAt: now, uncertain: false, error: 'expired-missing' });
+      out.missing++; continue;
+    }
+    try {
+      await deleteFiles(ctx, [x.path]);
+      await d.ref.update({ status: 'removed', removedAt: now, removedBy: 'expiry', updatedAt: now, uncertain: false, error: null });
+      out.removed++;
+    } catch (e) {
+      await d.ref.update({ status: 'remove-failed', error: 'delete-' + (e.code || 'internal'), updatedAt: now });
+      out.failed++;
+    }
+  }
+  logger.info('yemot-line: expiry done', out);
+  return out;
+}
+
 // ---------------- getLineState (עובד ומנהל, בלי פנייה לימות) ----------------
 async function lineState(request) {
   const who = await requireStaff(request);
@@ -337,7 +453,7 @@ async function lineState(request) {
       .filter((d) => !['removed', 'replaced'].includes(d.get('status')))
       .sort((a, b) => String(b.get('createdAt')).localeCompare(String(a.get('createdAt'))))
       .slice(0, 50);
-    const list = docs.map((d) => ({ id: d.id, title: d.get('title') || '', file: d.get('file') || null, status: d.get('status'), createdAt: d.get('createdAt') || null, byRole: d.get('byRole') || null }));
+    const list = docs.map((d) => ({ id: d.id, title: d.get('title') || '', file: d.get('file') || null, status: d.get('status'), createdAt: d.get('createdAt') || null, byRole: d.get('byRole') || null, until: d.get('until') || null }));
     if (slot === 'opening') {
       const cur = docs.find((d) => d.get('status') === 'live');
       slots.opening = { mode: 'file', current: cur ? { id: cur.id, text: cur.get('text') || '', createdAt: cur.get('createdAt') || null } : null, items: list };
@@ -346,7 +462,7 @@ async function lineState(request) {
   const lx = await db.doc(LEXICON_DOC).get();
   return {
     ok: true, role: who.role, slots, lexicon: lx.exists && typeof lx.get('text') === 'string' ? lx.get('text') : '',
-    limits: { recipes: YEMOT_RECIPE_MAX.value(), updates: 800, hours: 600, opening: 600, recordSec: YEMOT_REC_MAX_SEC.value(), recordBytes: REC_MAX_BYTES },
+    limits: { recipes: YEMOT_RECIPE_MAX.value(), updates: 800, hours: 600, opening: 600, recordSec: YEMOT_REC_MAX_SEC.value(), recordBytes: REC_MAX_BYTES, tempMaxDays: YEMOT_TEMP_MAX_DAYS.value() },
     preview: 'phone', structure: 'off',
   };
 }
@@ -363,6 +479,9 @@ const wrap = (name, fn) => async (request) => {
 exports.publishLineItem = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('publish', (r) => publishItem(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 exports.removeLineItem = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('remove', (r) => removeItem(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 exports.getLineState = onCall(wrap('state', (r) => lineState(r)));
+exports.listLineFiles = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('list', (r) => listFiles(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
+// נקראת מ-expirePromosOnLine (yemot.js). לא נספרת כפונקציה.
+Object.defineProperty(exports, 'runLineExpiry', { enumerable: false, value: runLineExpiry });
 
 // לבדיקות בלבד (לא נספרים כפונקציות): הליבה, כדי לקרוא לה בתוך תהליך הבדיקה עם voice.js מוחלף או פסק זמן קצר.
-Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, parseWav, safePath, SLOTS } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, runLineExpiry, parseWav, safePath, SLOTS } });

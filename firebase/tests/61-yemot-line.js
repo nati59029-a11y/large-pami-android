@@ -116,11 +116,12 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
   // ---------------- 0. ייצוא ----------------
   it('index.js מייצא את הפונקציות החדשות (publishLineItem, removeLineItem, getLineState), ולא את uploadPreview (פ1=טלפון) ולא את tzintukJoin (מושבת)', () => {
     const ex = require('../functions/index.js');
-    for (const n of ['publishLineItem', 'removeLineItem', 'getLineState', 'sendPromoToLine', 'expirePromosOnLine']) assert.equal(typeof ex[n], 'function', n + ' לא מיוצא');
+    for (const n of ['publishLineItem', 'removeLineItem', 'getLineState', 'listLineFiles', 'sendPromoToLine', 'expirePromosOnLine']) assert.equal(typeof ex[n], 'function', n + ' לא מיוצא');
     assert.equal(ex.uploadPreview, undefined);
     assert.equal(ex.tzintukJoin, undefined, 'tzintukJoin מושבת (אין פעולת הוספה מתועדת) ואסור שיפורסם');
     assert.equal(ex._core, undefined); assert.equal(ex.shared, undefined);
-    assert.equal(Object.keys(ex).length, 9, Object.keys(ex).join(','));
+    assert.equal(Object.keys(ex).length, 10, Object.keys(ex).join(','));
+    assert.equal(ex.runLineExpiry, undefined);
   });
 
   // ---------------- 1. תפקידים ----------------
@@ -347,18 +348,18 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.deepEqual(names('1'), ['000.tts', rec.file]);
   });
 
-  it('העלאה – נעילה: פריט בטיפול ← busy; החלפה אחרת בשלוחה 4 בטיפול ← busy; בלי פנייה לימות', async () => {
+  it('העלאה – נעילה: פריט בטיפול ← busy; החלפת פתיחה אחרת בטיפול ← busy; בלי פנייה לימות', async () => {
     const it1 = item('recipes');
     await writeDoc(env, 'yemot_items/' + it1.requestId, { slot: 'recipes', byUid: 'u_emp', status: 'uploading', lockAt: new Date().toISOString(), lockReq: it1.requestId, path: null });
     const r = await call('publishLineItem', 'u_emp', it1);
     assert.equal(r.status, 'ABORTED'); assert.equal(r.error.details.reason, 'busy'); assert.match(r.error.message, HEB);
-    await writeDoc(env, 'yemot_state/ext-4', { lockAt: new Date().toISOString(), lockReq: 'someone_else_1' });
-    const h = await call('publishLineItem', 'u_mgr', item('hours'));
+    await writeDoc(env, 'yemot_state/structure', { lockAt: new Date().toISOString(), lockReq: 'someone_else_1' });
+    const h = await call('publishLineItem', 'u_mgr', item('opening'));
     assert.equal(h.error.details.reason, 'busy');
     assert.equal(M.state.requests.length, 0);
     // נעילה ישנה (מעל 120 שניות) – ממשיכים
-    await writeDoc(env, 'yemot_state/ext-4', { lockAt: new Date(Date.now() - 200000).toISOString(), lockReq: 'someone_else_1' });
-    assert.equal((await call('publishLineItem', 'u_mgr', item('hours'))).status, 'OK');
+    await writeDoc(env, 'yemot_state/structure', { lockAt: new Date(Date.now() - 200000).toISOString(), lockReq: 'someone_else_1' });
+    assert.equal((await call('publishLineItem', 'u_mgr', item('opening'))).status, 'OK');
   });
 
   it('קלט לא תקין נדחה בעברית, בלי פנייה לימות', async () => {
@@ -412,38 +413,143 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
   });
 
   // ---------------- 8. טבלת המצבים: החלפה (שלוחה 4 והפתיחה) ----------------
-  it('החלפה (שלוחה 4): החדש עולה, ורק אחרי זה הקודם נמחק; 000.tts לא נוגעים', async () => {
-    const a = await call('publishLineItem', 'u_mgr', item('hours', { text: 'שעות א' }));
-    assert.equal(a.result.file, '001.tts');
-    const b = await call('publishLineItem', 'u_mgr', item('hours', { text: 'שעות ב' }));
-    assert.equal(b.status, 'OK', b.text); assert.equal(b.result.file, '002.tts'); assert.equal(b.result.replaced, '001.tts');
-    const cmds = M.state.requests.map((q) => q.cmd);
-    assert.ok(cmds.lastIndexOf('UploadTextFile') < cmds.lastIndexOf('FileAction'), cmds.join(','));
-    assert.deepEqual(M.calls('FileAction').map((q) => q.body), [{ action: 'delete', what: 'ivr2:4/001.tts' }]);
-    assert.deepEqual(names('4'), ['000.tts', '002.tts']);
-    const ra = await readDoc(env, 'yemot_items/' + a.result.id);
-    assert.equal(ra.status, 'replaced'); assert.equal(ra.replacedBy, b.result.id);
-    assert.equal((await readDoc(env, 'yemot_state/ext-4')).lockAt, null);
+  // ---------------- 8. החלפה (הפתיחה) ----------------
+  it('החלפה (פתיחה) – כשל בהעלאה: הקודמת נשארת live ובקו; אחרי החלפת מנוע קול – החדשה עולה ורק אחר כך הקודמת נמחקת', async () => {
+    const a = await call('publishLineItem', 'u_mgr', item('opening', { text: 'א' }));
+    M.setMode('upload', 'error');
+    assert.equal((await call('publishLineItem', 'u_mgr', item('opening', { text: 'ב' }))).status, 'UNAVAILABLE');
+    assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).status, 'live');
+    assert.equal(dir('').get('M1000.tts'), 'א');
+    M.setMode('upload', 'ok');
+    const voice = require('../functions/lib/voice');
+    voice._test.setTextExt('xyz');
+    try {
+      M.setMode('delete', 'error');
+      const b = await core(LINE, 'publishItem', 'u_mgr', item('opening', { text: 'ג' }));
+      assert.equal(b.status, 'OK', b.text); assert.deepEqual(b.result.warnings, ['yemot-remove-failed']);
+      assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).status, 'remove-failed');
+      M.setMode('delete', 'ok');
+      const c = await core(LINE, 'publishItem', 'u_mgr', item('opening', { text: 'ד' }));
+      assert.equal(c.status, 'OK', c.text);
+      const cmds = M.state.requests.map((q) => q.cmd);
+      assert.ok(cmds.lastIndexOf('UploadTextFile') < cmds.lastIndexOf('FileAction'), cmds.join(','));
+    } finally { voice._test.setTextExt('tts'); }
+    assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).status, 'replaced');
+    assert.ok(!dir('').has('M1000.tts')); assert.equal(dir('').get('M1000.xyz'), 'ד');
+    assert.equal(dir('').get('M1000.wav'), 'פתיחה מוקלטת');
   });
 
-  it('החלפה – כשל בהעלאה: הקודם נשאר live ובקו; כשל במחיקת הקודם: החדש live, הקודם remove-failed ונמחק בהחלפה הבאה', async () => {
-    const a = await call('publishLineItem', 'u_mgr', item('hours', { text: 'א' }));
-    M.setMode('upload', 'error');
-    const f = await call('publishLineItem', 'u_mgr', item('hours', { text: 'ב' }));
-    assert.equal(f.status, 'UNAVAILABLE');
+  // ---------------- סבב 3: שלוחה 4 ----------------
+  it('שלוחה 4: כל הודעה קבועה בקובץ חדש וגבוה יותר (מושמעת ראשונה); הקודמות ו-000.tts נשארות עד שהמנהל מוחק', async () => {
+    const a = await call('publishLineItem', 'u_mgr', item('hours', { text: 'שעות א' }));
+    const b = await call('publishLineItem', 'u_mgr', item('hours', { text: 'שעות ב' }));
+    assert.equal(a.result.file, '001.tts'); assert.equal(b.result.file, '002.tts'); assert.equal(b.result.replaced, null);
+    assert.deepEqual(names('4'), ['000.tts', '001.tts', '002.tts']);
+    assert.equal(M.calls('FileAction').length, 0);
     assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).status, 'live');
-    assert.deepEqual(names('4'), ['000.tts', '001.tts']);
-    M.setMode('upload', 'ok'); M.setMode('delete', 'error');
-    const b = await call('publishLineItem', 'u_mgr', item('hours', { text: 'ג' }));
-    assert.equal(b.status, 'OK', b.text);
-    assert.deepEqual(b.result.warnings, ['yemot-remove-failed']); assert.match(b.result.message, /עוד לא הוסר/);
-    assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).status, 'remove-failed');
+    assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).temporary, false);
+  });
+
+  it('שלוחה 4: רשימת הקבצים מהקו (מנהל) – מהגבוה לנמוך, כולל 000.tts הוותיק, בלי ext.ini; עובד נדחה', async () => {
+    dir('4').set('ext.ini', 'type=playfile'); dir('4').set('M0000.tts', 'x');
+    const a = await call('publishLineItem', 'u_mgr', item('hours', { text: 'זמני', until: addDays(israelDay(), 3) }));
+    const r = await call('listLineFiles', 'u_mgr', { ext: '4' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual(r.result.files.map((f) => [f.name, f.legacy]), [['001.tts', false], ['000.tts', true]]);
+    assert.equal(r.result.files[0].item.id, a.result.id); assert.equal(r.result.files[0].item.until, addDays(israelDay(), 3)); assert.equal(r.result.files[0].item.temporary, true);
+    const e = await call('listLineFiles', 'u_emp', { ext: '4' });
+    assert.equal(e.error.details.reason, 'manager-only'); assert.match(e.error.message, HEB);
+    assert.equal((await call('listLineFiles', 'u_mgr', { ext: '1' })).error.details.reason, 'bad-slot');
+    M.setMode('dir', 'error');
+    const f = await call('listLineFiles', 'u_mgr', { ext: '4' });
+    assert.equal(f.error.details.reason, 'yemot-list-failed'); assert.ok(!f.text.includes(SECRET));
+  });
+
+  it('שלוחה 4: מנהל מוחק קובץ לפי שם – גם 000.tts הוותיק – קובץ אחד בנתיב מדויק; פריט של השרת מסומן removed', async () => {
+    const a = await call('publishLineItem', 'u_mgr', item('hours'));
+    M.state.requests = [];
+    const r0 = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file: '000.tts' });
+    assert.equal(r0.status, 'OK', r0.text); assert.equal(r0.result.removed, true);
+    assert.deepEqual(M.calls('FileAction').map((q) => q.body), [{ action: 'delete', what: 'ivr2:4/000.tts' }]);
+    const r1 = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file: a.result.file });
+    assert.equal(r1.status, 'OK');
+    assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).status, 'removed');
+    assert.deepEqual(names('4'), []);
+    const again = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file: '000.tts' });
+    assert.equal(again.result.duplicate, true); assert.equal(M.calls('FileAction').length, 2);
+    assert.equal((await readDoc(env, 'yemot_state/ext-4')).lockAt, null);
+    // כשל במחיקה
+    dir('4').set('005.tts', 'x'); M.setMode('delete', 'error');
+    const f = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file: '005.tts' });
+    assert.equal(f.error.details.reason, 'yemot-remove-failed'); assert.ok(dir('4').has('005.tts')); assert.ok(!f.text.includes(SECRET));
+  });
+
+  it('שלוחה 4: עובד לא מוחק ולא מוסיף; מחיקה מחוץ לשמות המותרים של שלוחה 4 נדחית בלי פנייה לימות', async () => {
+    const w = await call('removeLineItem', 'u_emp', { requestId: rid(), ext: '4', file: '000.tts' });
+    assert.equal(w.error.details.reason, 'manager-only'); assert.match(w.error.message, HEB);
+    const wa = await call('publishLineItem', 'u_emp', item('hours', { until: addDays(israelDay(), 2) }));
+    assert.equal(wa.error.details.reason, 'slot-manager-only');
+    for (const [ext, file] of [['1', '000.tts'], ['2', '001.tts'], ['3', '001.tts'], ['', 'M1000.tts'], ['4', 'ext.ini'], ['4', 'M0000.tts'], ['4', '../5/ext.ini'],
+      ['4', '1/000.tts'], ['4', '0000.tts'], ['4', '000'], ['4', ''], ['4', '000.tts/'], [undefined, '000.tts'], ['4', 5]]) {
+      const r = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext, file });
+      assert.equal(r.error && r.error.details.reason, 'bad-file', JSON.stringify([ext, file])); assert.match(r.error.message, HEB);
+    }
+    assert.equal(M.state.requests.length, 0);
+    assert.equal(dir('4').get('000.tts'), 'שעות ותיקות');
+    const { safePath } = require(LINE)._core;
+    assert.deepEqual(['ivr2:4/000.tts', 'ivr2:1/000.tts', 'ivr2:3/000.wav', 'ivr2:4/', 'ivr2:4', 'ivr2:4/00.tts'].map(safePath), [true, false, false, false, false, false]);
+  });
+
+  it('שלוחה 4: הודעה זמנית – תאריך חובה תקין (היום עד 60 יום), רק בשלוחה 4', async () => {
+    const today = israelDay();
+    for (const [until, reason] of [[addDays(today, -1), 'date-past'], [addDays(today, 61), 'date-too-far'], ['2026-02-30', 'bad-date'], ['1.12.2026', 'bad-date'], [5, 'bad-date']]) {
+      const r = await call('publishLineItem', 'u_mgr', item('hours', { until }));
+      assert.equal(r.error && r.error.details.reason, reason, String(until)); assert.match(r.error.message, HEB);
+    }
+    for (const slot of ['recipes', 'updates', 'opening']) assert.equal((await call('publishLineItem', 'u_mgr', item(slot, { until: today }))).error.details.reason, 'bad-input', slot);
+    assert.equal(M.state.requests.length, 0);
+    for (const until of [today, addDays(today, 60)]) {
+      const r = await call('publishLineItem', 'u_mgr', item('hours', { until }));
+      assert.equal(r.status, 'OK', r.text); assert.match(r.result.message, /תרד מהקו אחרי/);
+      const rec = await readDoc(env, 'yemot_items/' + r.result.id);
+      assert.equal(rec.until, until); assert.equal(rec.temporary, true);
+    }
+  });
+
+  it('לילה (expirePromosOnLine): מוחק רק הודעות זמניות שפג תוקפן בשלוחה 4 ומבצעים שפג תוקפם – שום דבר אחר', async () => {
+    const today = israelDay();
+    const tOld = await call('publishLineItem', 'u_mgr', item('hours', { text: 'זמני ישן', until: today }));
+    const tNew = await call('publishLineItem', 'u_mgr', item('hours', { text: 'זמני בתוקף', until: addDays(today, 5) }));
+    const perm = await call('publishLineItem', 'u_mgr', item('hours', { text: 'קבוע' }));
+    const rec = await call('publishLineItem', 'u_emp', item('recipes'));
+    const pOld = await call('sendPromoToLine', 'u_mgr', promo({ until: today }));
+    const pNew = await call('sendPromoToLine', 'u_mgr', promo({ until: addDays(today, 5) }));
+    // רשומות "זרות": מתכון שסומן זמני, ופריט זמני שמצביע על 000.tts – אסור למחוק
+    dir('1').set('009.tts', 'מתכון'); dir('4').set('009.tts', 'אחר');
+    await writeDoc(env, 'yemot_items/evil_rec_1', { slot: 'recipes', status: 'live', temporary: true, until: addDays(today, -3), path: 'ivr2:1/009.tts', file: '009.tts' });
+    await writeDoc(env, 'yemot_items/evil_000_1', { slot: 'hours', status: 'live', temporary: true, until: addDays(today, -3), path: 'ivr2:4/000.tts', file: '000.tts' });
+    await writeDoc(env, 'yemot_items/evil_ext_1', { slot: 'hours', status: 'live', temporary: true, until: addDays(today, -3), path: 'ivr2:1/009.tts', file: '009.tts' });
+    M.state.requests = [];
+    const out = await require('../functions/yemot.js')._core.nightly({ now: new Date(Date.now() + 2 * 86400000), key: SECRET, base: BASE, ext: '2', timeoutMs: 5000 });
+    assert.equal(out.promos.removed, 1, JSON.stringify(out)); assert.equal(out.line.removed, 1, JSON.stringify(out));
+    assert.equal(out.line.skipped, 2);
+    assert.deepEqual(M.calls('FileAction').map((q) => q.body.what).sort(), ['ivr2:2/' + pOld.result.file, tOld.result.path].sort());
+    assert.ok(!dir('4').has(tOld.result.file));
+    for (const f of [tNew.result.file, perm.result.file, '000.tts', '009.tts']) assert.ok(dir('4').has(f), f);
+    assert.ok(dir('1').has(rec.result.file) && dir('1').has('009.tts'));
+    assert.ok(M.state.files.has(pNew.result.file));
+    assert.equal((await readDoc(env, 'yemot_items/' + tOld.result.id)).status, 'removed');
+    assert.equal((await readDoc(env, 'yemot_items/' + tNew.result.id)).status, 'live');
+    // מחיקה שנכשלה – remove-failed וניסיון בלילה הבא; ריצה חוזרת לא מוחקת שוב
+    M.state.requests = [];
+    const out2 = await require('../functions/yemot.js')._core.nightly({ now: new Date(Date.now() + 2 * 86400000), key: SECRET, base: BASE, ext: '2', timeoutMs: 5000 });
+    assert.equal(out2.line.removed, 0); assert.equal(M.calls('FileAction').length, 0);
+    const t3 = await call('publishLineItem', 'u_mgr', item('hours', { until: today }));
+    M.setMode('delete', 'error');
+    const o3 = await require('../functions/yemot-line.js').runLineExpiry({ now: new Date(Date.now() + 2 * 86400000), key: SECRET, base: BASE, timeoutMs: 5000 });
+    assert.equal(o3.failed, 1); assert.equal((await readDoc(env, 'yemot_items/' + t3.result.id)).status, 'remove-failed');
     M.setMode('delete', 'ok');
-    const c = await call('publishLineItem', 'u_mgr', item('hours', { text: 'ד' }));
-    assert.equal(c.status, 'OK');
-    assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).status, 'replaced');
-    assert.equal((await readDoc(env, 'yemot_items/' + b.result.id)).status, 'replaced');
-    assert.deepEqual(names('4'), ['000.tts', c.result.file]);
+    assert.equal((await require('../functions/yemot-line.js').runLineExpiry({ now: new Date(Date.now() + 2 * 86400000), key: SECRET, base: BASE, timeoutMs: 5000 })).removed, 1);
   });
 
   it('פתיחה (פ2=קובץ-תוכן): כותבת רק ivr2:/M1000.tts, דורסת אותו בעדכון הבא; M1000.wav ו-ext.ini לא נוגעים', async () => {

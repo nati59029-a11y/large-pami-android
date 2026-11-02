@@ -5,7 +5,7 @@
 //   reportBackupStatus – עדכון מצב הגיבוי: app_backup_status/{uid} של השולח בלבד.
 //   getBackupKey       – מפתח הצפנה קבוע לכל משתמש, נגזר מ-BACKUP_MASTER_KEY ומהמזהה שלו.
 //   sendPromoToLine (עובד/מנהל), expirePromosOnLine (מתוזמנת, לא נקראת ממשתמש) – מבצע לקו ימות והורדתו (yemot.js).
-//   publishLineItem, getLineState (עובד/מנהל), removeLineItem (מנהל) – תוכן שלוחות הקו (yemot-line.js).
+//   publishLineItem, getLineState (עובד/מנהל), removeLineItem, listLineFiles (מנהל) – תוכן שלוחות הקו (yemot-line.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');

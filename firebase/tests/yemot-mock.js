@@ -6,15 +6,14 @@
 const http = require('node:http');
 
 // dirs: תיקייה → (שם קובץ → תוכן). state.files = שלוחה 2 (כמו קודם). '' = השורש.
-const state = { requests: [], files: new Map(), dirs: {}, lists: {}, modes: {} };
+const state = { requests: [], files: new Map(), dirs: {}, modes: {} };
 const DEFAULT_DIRS = { '1': { '000.tts': 'מתכון ותיק' }, '3': { '000.tts': 'עדכון ותיק' }, '4': { '000.tts': 'שעות ותיקות' }, '': { 'M1000.wav': 'פתיחה מוקלטת', 'ext.ini': 'type=menu' } };
 function reset(files, dirs) {
   state.requests = [];
-  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', list: 'ok' };
+  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok' };
   state.files = new Map(Object.entries(files || { '000.tts': 'פתיח' }));
   state.dirs = { '2': state.files };
   for (const [d, f] of Object.entries(Object.assign({}, DEFAULT_DIRS, dirs || {}))) state.dirs[d] = new Map(Object.entries(f));
-  state.lists = {};
 }
 // 'ivr2:1/004.tts' → { dir:'1', name:'004.tts' }; 'ivr2:/M1000.tts' → { dir:'', name:'M1000.tts' }
 function parseWhat(w) { const m = /^ivr2:(\d*)\/([^/]+)$/.exec(String(w || '')); return m && state.dirs[m[1]] ? { dir: m[1], name: m[2] } : null; }
@@ -48,7 +47,7 @@ function start(port) {
       } else { try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch (e) { /* */ } }
       const auth = req.headers.authorization || '';
       state.requests.push({ cmd, auth, url: req.url, body, at: Date.now() });
-      const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', TzintukimListManagement: 'list' }[cmd];
+      const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete' }[cmd];
       if (!key) return reply(res, 404, { responseStatus: 'ERROR', message: 'unknown command' });
       const mode = state.modes[key];
       if (mode === 'hang') return; // לא עונה אף פעם (לבדיקת פסק זמן)
@@ -72,11 +71,6 @@ function start(port) {
         if (!w || !upload) return reply(res, 200, { responseStatus: 'ERROR', message: 'bad upload' });
         state.dirs[w.dir].set(w.name, upload);
         return reply(res, 200, OK({ path: body.path }));
-      }
-      if (cmd === 'TzintukimListManagement') {
-        if (body.action !== 'add') return reply(res, 200, { responseStatus: 'ERROR', message: 'only add in mock' });
-        (state.lists[body.list] = state.lists[body.list] || []).push(body.phone);
-        return reply(res, 200, OK());
       }
       if (cmd === 'FileAction') {
         const w = parseWhat(body.what);
