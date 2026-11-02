@@ -9,6 +9,7 @@ const H = require('./helpers');
 
 let seq = 0;
 const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
+const newSup = () => ({ c: 'bak', n: 'ספק', d: '2026-11-01', at: '2026-11-01', a: '10', inv: '2', by: 'מנהל', pend: '', src: '', m: '2026-11', np: '0', h: 'a', fh: 'b' });
 const newTask = (owner) => { const cr = Date.now(); return { owner, by: owner, role: 'w', txt: 'משימה', cr, due: cr + 4 * 86400000,
   st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }; };
 
@@ -130,6 +131,22 @@ const OPS = {
     'create-on-done-task': (db, me) => db.doc('tasks/t_done/c/' + fresh('c')).set({ uid: me, by: me, txt: 'שלום', t: Date.now() }),
     'update':              (db) => db.doc('tasks/t_open/c/c1').update({ txt: 'שונה' }),
     'delete':              (db) => db.doc('tasks/t_open/c/c1').delete(),
+  },
+  // חשבוניות ספקים לעובד (supSync במכשיר המנהל, supLoad במכשיר העובד)
+  supinv: {
+    'get':                (db) => db.doc('supinv/s1').get(),
+    'list-month':         (db) => db.collection('supinv').where('m', '==', '2026-11').get(),
+    'create':             (db) => db.doc('supinv/' + fresh('s')).set(newSup()),
+    'create-extra-field': (db) => db.doc('supinv/' + fresh('s')).set(Object.assign(newSup(), { amt_all: '999' })),
+    'update':             (db) => db.doc('supinv/s1').set(Object.assign(newSup(), { a: '-50' })),
+    'delete':             (db) => db.doc('supinv/s1').delete(),
+  },
+  supinv_p: {
+    'get':            (db) => db.doc('supinv/s1/p/0').get(),
+    'create':         (db) => db.doc('supinv/s1/p/1').set({ data: 'AAAA' }),
+    'create-too-big': (db) => db.doc('supinv/s1/p/1').set({ data: 'A'.repeat(700001) }),
+    'update':         (db) => db.doc('supinv/s1/p/0').set({ data: 'BBBB' }),
+    'delete':         (db) => db.doc('supinv/s1/p/0').delete(),
   },
   _not_in_table: {
     'get-orders':    (db) => db.doc('orders/o1').get(),

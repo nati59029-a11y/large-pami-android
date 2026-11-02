@@ -198,6 +198,26 @@ service cloud.firestore {
       }
     }
 
+    // ---------- חשבוניות ספקים לעובד (supinv) ----------
+    // טלפון המנהל משקף לכאן רק חשבוניות "ספקים" ו"ספקים אפייה" של החודש הנוכחי (כולל ממתינות לאישור), בלי שום נתון כספי אחר.
+    // קריאה: עובד פעיל או מנהל. כתיבה ומחיקה: מנהל בלבד, ורק השדות שהאפליקציה כותבת (supSync).
+    // התמונה בחלקים בתת-האוסף p (כמו chunks): רק השדה data, עד 700,000 תווים.
+    match /supinv/{id} {
+      allow read: if isStaff();
+      allow create, update: if isManager()
+        && request.resource.data.keys().hasOnly(['c', 'n', 'd', 'at', 'a', 'inv', 'by', 'pend', 'src', 'm', 'np', 'h', 'fh']);
+      allow delete: if isManager();
+
+      match /p/{k} {
+        allow read: if isStaff();
+        allow create, update: if isManager()
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow delete: if isManager();
+      }
+    }
+
     // ---------- הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם ----------
     match /{document=**} {
       allow read, write: if false;
