@@ -722,8 +722,8 @@
    "fn": "tkSumLoad (עובד)",
    "collection": "tasks",
    "op": "list",
-   "rest": "POST :runQuery from tasks where doneBy == fbBy(), select TKSF (cr,due,st,sub,late,doneBy), limit 10000",
-   "condition": "doneBy == השם של העובד (isMyName)",
+   "rest": "POST :runQuery from tasks where doneBy IN [fbBy(), fbBy().toLowerCase()] (בלי כפילות), select TKSF (cr,due,st,sub,late,doneBy), limit 10000",
+   "condition": "doneBy הוא השם של העובד, בלי הבדל אותיות (isMyName)",
    "who": [
     "employee"
    ],

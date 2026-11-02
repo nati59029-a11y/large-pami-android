@@ -2307,7 +2307,7 @@ async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields
 async function tkLoad(){if(!fbRole())return;let L;if(fbAdmin())L=await tkQ();else{const a=await tkQ('open'),b=await tkQ('late'),m={};a.concat(b).forEach(t=>m[t.id]=t);L=Object.values(m)}
  TK.L=L.map(t=>Object.assign(t,{due:t.cr?tkDue(t.cr):t.due}));TK.at=Date.now();tkSave();tkRe();return L.length}
 /* בונים מחדש רק כשאין טופס פתוח עם נתונים שהוקלדו */
-function tkRe(){if(document.querySelector('#dlg[open] form'))return;const ta=document.querySelector('form[data-f=tkAdd] textarea'),v=ta?ta.value:'',fo=ta&&document.activeElement===ta;if(cur().v==='tk'||(isW()&&cur().v==='wk'&&typeof WS!=='undefined'&&WS==='home')){rerender();const n=document.querySelector('form[data-f=tkAdd] textarea');if(n&&v){n.value=v;if(fo)n.focus()}}}
+function tkRe(){if(document.querySelector('#dlg[open] form'))return;const ta=document.querySelector('form[data-f=tkAdd] textarea'),v=ta?ta.value:'',fo=ta&&document.activeElement===ta,cb=document.querySelector('form[data-f=tkAdd] input[name=pr]'),pr=!!(cb&&cb.checked);if(cur().v==='tk'||(isW()&&cur().v==='wk'&&typeof WS!=='undefined'&&WS==='home')){rerender();const n=document.querySelector('form[data-f=tkAdd] textarea');if(n&&v){n.value=v;if(fo)n.focus()}const c=document.querySelector('form[data-f=tkAdd] input[name=pr]');if(c&&pr)c.checked=true}}
 async function tkPatch(id,o){const fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
  await fsx('/tasks/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
 async function tkDo(fn,msg){try{await fn();if(msg)toast(msg)}catch(e){toast(tkErr(e))}try{await tkLoad()}catch(e){}tkRe()}
@@ -2363,10 +2363,10 @@ async function tkSumLoad(){const r=tkSumRange(),adm=fbAdmin(),me=fbBy(),k=TKS.u+
  /* מנהל: רק טווח התאריכים (אינדקס רגיל). עובד: רק משימות שהוא ביצע (doneBy == השם שלו – זה מה שהכללים מתירים), והטווח מסונן כאן,
     כי שילוב של doneBy עם טווח על cr דורש אינדקס מורכב בשרת */
  if(adm)sq.where={compositeFilter:{op:'AND',filters:[{fieldFilter:{field:{fieldPath:'cr'},op:'GREATER_THAN_OR_EQUAL',value:iv(r.from)}},{fieldFilter:{field:{fieldPath:'cr'},op:'LESS_THAN',value:iv(r.to)}}]}};
- else sq.where={fieldFilter:{field:{fieldPath:'doneBy'},op:'EQUAL',value:{stringValue:me}}};
+ else sq.where={fieldFilter:{field:{fieldPath:'doneBy'},op:'IN',value:{arrayValue:{values:[...new Set([me,me.toLowerCase()])].map(v=>({stringValue:v}))}}}};
  try{if(!adm&&!me)throw new Error('לא ידוע שם המשתמש. התנתק והתחבר מחדש');
   const x=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;
-  TKS.L=(x||[]).filter(d=>d.document).map(d=>{const o=d.document,t={id:idOf(o),cr:gi(o,'cr'),due:gi(o,'due'),st:gv(o,'st'),sub:gi(o,'sub'),late:gv(o,'late'),doneBy:gv(o,'doneBy')};if(t.cr)t.due=tkDue(t.cr);return t}).filter(t=>t.cr>=r.from&&t.cr<r.to)}
+  TKS.L=(x||[]).filter(d=>d.document).map(d=>{const o=d.document,t={id:idOf(o),cr:gi(o,'cr'),due:gi(o,'due'),st:gv(o,'st'),sub:gi(o,'sub'),late:gv(o,'late'),doneBy:gv(o,'doneBy')};if(t.cr)t.due=tkDue(t.cr);return t}).filter(t=>t.cr>=r.from&&t.cr<r.to&&(adm||t.doneBy.toLowerCase()===me.toLowerCase()))}
  catch(e){if(TKS.k!==k)return;TKS.err=tkErr(e)}
  tkRe()}
 function tkSumView(){if(!TKS.y){const t=tkIL.today();TKS.y=t[0];TKS.m=t[1];TKS.d=t[2]}
@@ -2384,7 +2384,7 @@ function tkSumView(){if(!TKS.y){const t=tkIL.today();TKS.y=t[0];TKS.m=t[1];TKS.d
   <div class="row" style="align-items:center;gap:8px"><button class="btn g" data-a="tkSmNav" data-v="-1" aria-label="התקופה הקודמת">›</button><div class="grow" style="text-align:center;font-weight:700" data-tksum-ttl="1">${ttl}</div><button class="btn g" data-a="tkSmNav" data-v="1" aria-label="התקופה הבאה">‹</button></div>
   ${s.err?`<p class="note" style="color:var(--bad)">${esc(s.err)} <button class="btn g" data-a="tkSmRetry">נסה שוב</button></p>`:''}
   <div class="kg" style="grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px"><div class="k pos" data-n="on"><small>בוצעו בזמן</small><b>${n(D.length-late)}</b></div><div class="k" data-n="late"><small>בוצעו באיחור</small><b style="color:var(--bad)">${n(late)}</b></div><div class="k" data-n="tot"><small>סה"כ בוצעו</small><b>${n(D.length)}</b></div></div>
-  <p class="note" style="margin:8px 0 0">לפי תאריך הכתיבה של המשימה. נספרות רק משימות שבוצעו (לא כולל ממתינות לאישור תמונה).</p></div>`}
+  <p class="note" style="margin:8px 0 0">לפי תאריך הכתיבה של המשימה. נספרות רק משימות שבוצעו (לא כולל ממתינות לאישור תמונה).${adm?'':' משימה שנרשמה בשם שלך בצורת כתיבה אחרת (אותיות גדולות וקטנות בערבוב) עלולה לא להיספר.'}</p></div>`}
 ACT.tkSmU=el=>{TKS.u=el.dataset.v;tkRe()};
 ACT.tkSmNav=el=>{const n=+el.dataset.v,s=TKS;let x;
  if(s.u==='d'||s.u==='w')x=tkYMD(s.y,s.m,s.d+(s.u==='w'?7:1)*n);

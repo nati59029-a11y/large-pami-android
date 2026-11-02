@@ -228,21 +228,31 @@ const REPLAY = {
     return [await fsx(uid, '/tasks/' + 't_open' + '/c?documentId=' + encodeURIComponent(fresh('c')), { method: 'POST', body: JSON.stringify({ fields }) })];
   } },
   M48: { run: async (uid) => [await fsx(uid, '/tasks/' + 't_open' + '/c/' + 'c1', { method: 'DELETE' })] },
-  // tkSumLoad – עובד: משימות שהוא ביצע (where doneBy == fbBy()), רק השדות של הסיכום
+  // tkSumLoad – עובד: משימות שהוא ביצע (where doneBy IN [fbBy(), fbBy().toLowerCase()], בלי כפילות), רק השדות של הסיכום.
+  // פעמיים: כמו שהוקלד באותיות קטנות (ערך אחד), וכמו שהוקלד באותיות גדולות (שני ערכים)
   M51: { run: async (uid, env) => {
     const T = Date.now();
-    await bypass(env, (db) => db.doc('tasks/t_sum_' + uid).set({ owner: H.OTHER, by: H.OTHER, role: 'w', txt: 'סיכום', cr: T - 3600000, due: T + 86400000,
-      st: 'done', open: '', pr: '', img: 'data:image/jpeg;base64,AAAA', sub: T - 1000, doneBy: uid, note: '', ok: T - 1000, late: '' }));
-    const sq = { from: [{ collectionId: 'tasks' }], select: { fields: TKSF.map((f) => ({ fieldPath: f })) }, limit: 10000,
-      where: { fieldFilter: { field: { fieldPath: 'doneBy' }, op: 'EQUAL', value: { stringValue: uid } } } };
-    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: sq }) });
-    if (r.status === 200) {
-      const docs = (r.json || []).filter((x) => x.document);
-      assert.ok(docs.some((x) => x.document.name.endsWith('/t_sum_' + uid)), 'העובד צריך לראות משימה שהוא ביצע בזמן');
-      assert.ok(docs.every((x) => x.document.fields.doneBy.stringValue === uid), 'חזרה משימה שמישהו אחר ביצע');
-      assert.ok(docs.every((x) => !x.document.fields.img), 'השדה img לא אמור לחזור');
+    const task = (id, doneBy) => bypass(env, (db) => db.doc('tasks/' + id).set({ owner: H.OTHER, by: H.OTHER, role: 'w', txt: 'סיכום', cr: T - 3600000, due: T + 86400000,
+      st: 'done', open: '', pr: '', img: 'data:image/jpeg;base64,AAAA', sub: T - 1000, doneBy, note: '', ok: T - 1000, late: '' }));
+    await task('t_sum_' + uid, uid);
+    await task('t_sumU_' + uid, uid.toUpperCase());
+    const out = [];
+    for (const me of [uid, uid.toUpperCase()]) {
+      const vals = [...new Set([me, me.toLowerCase()])];
+      const sq = { from: [{ collectionId: 'tasks' }], select: { fields: TKSF.map((f) => ({ fieldPath: f })) }, limit: 10000,
+        where: { fieldFilter: { field: { fieldPath: 'doneBy' }, op: 'IN', value: { arrayValue: { values: vals.map((v) => ({ stringValue: v })) } } } } };
+      const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: sq }) });
+      if (r.status === 200) {
+        const docs = (r.json || []).filter((x) => x.document);
+        const ids = docs.map((x) => x.document.name.split('/').pop());
+        assert.ok(ids.includes('t_sum_' + uid), 'העובד צריך לראות משימה שהוא ביצע בזמן (' + me + ')');
+        if (vals.length > 1) assert.ok(ids.includes('t_sumU_' + uid), 'עם שני ערכים: גם המשימה שנרשמה באותיות גדולות');
+        assert.ok(docs.every((x) => vals.includes(x.document.fields.doneBy.stringValue)), 'חזרה משימה שמישהו אחר ביצע');
+        assert.ok(docs.every((x) => !x.document.fields.img), 'השדה img לא אמור לחזור');
+      }
+      out.push(r);
     }
-    return [r];
+    return out;
   } },
   // tkSumLoad – מנהל: כל המשימות שנכתבו בטווח (cr >= from AND cr < to)
   M52: { run: async (uid) => {
