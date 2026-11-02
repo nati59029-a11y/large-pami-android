@@ -1001,7 +1001,7 @@
   },
   {
    "id": "M71",
-   "line": 3003,
+   "line": 3004,
    "snippet": "collectionId:'closings'}]",
    "fn": "zcPull",
    "collection": "closings",
@@ -1015,7 +1015,7 @@
   },
   {
    "id": "M72",
-   "line": 3014,
+   "line": 3018,
    "snippet": "fsx('/closings/'+id+'?'+mask.join('&')",
    "fn": "zcMark",
    "collection": "closings",
@@ -1029,7 +1029,7 @@
   },
   {
    "id": "M73",
-   "line": 3094,
+   "line": 3099,
    "snippet": "fsx('/closings?documentId='",
    "fn": "FRM.zcSend",
    "collection": "closings",
@@ -1044,7 +1044,7 @@
   },
   {
    "id": "M74",
-   "line": 3096,
+   "line": 3101,
    "snippet": "fsx('/closings/'+id+'/p?documentId='",
    "fn": "FRM.zcSend",
    "collection": "closings_p",
@@ -1059,7 +1059,7 @@
   },
   {
    "id": "M75",
-   "line": 3100,
+   "line": 3105,
    "snippet": "fsx('/closings/'+x.id+'/p/'+k),'data')",
    "fn": "ACT.zcImg",
    "collection": "closings_p",
@@ -1070,6 +1070,20 @@
     "manager"
    ],
    "note": "הצגת הצילומים של סגירה שמחכה לאישור – רק בלחיצה."
+  },
+  {
+   "id": "M76",
+   "line": 3016,
+   "snippet": "fsx('/closings/'+id+'/p/'+k+'?mask.fieldPaths=x')",
+   "fn": "zcHasPics (zcPull)",
+   "collection": "closings_p",
+   "op": "get",
+   "rest": "GET /closings/{id}/p/{k}?mask.fieldPaths=x",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "לפני הכנסה אוטומטית: בדיקה שכל חלקי הצילומים עלו, בלי להוריד את התוכן."
   }
  ],
  "fsbLine": 1332,

@@ -385,6 +385,8 @@ const REPLAY = {
   } },
   // ACT.zcImg
   M75: { run: async (uid) => [await fsx(uid, '/closings/' + 'z1' + '/p/' + 0)] },
+  // zcHasPics: קיום חלק צילום בלי התוכן (mask)
+  M76: { run: async (uid) => { const r = await fsx(uid, '/closings/' + 'z1' + '/p/' + 0 + '?mask.fieldPaths=x'); if (r.status === 200) assert.ok(!r.json.fields || !r.json.fields.data, 'mask: התוכן לא צריך לרדת'); return [r]; } },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,

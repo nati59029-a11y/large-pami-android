@@ -83,6 +83,11 @@ describe('סגירת קופה (closings)', () => {
     await assertFails(c({ reg: 'e_sup' }));
     await assertFails(c({ d: '20/10/2026' }));
     await assertFails(c({ d: 20261020 }));
+    await assertFails(c({ d: '2026-13-01' }));
+    await assertFails(c({ d: '2026-00-10' }));
+    await assertFails(c({ d: '2026-10-32' }));
+    await assertFails(c({ d: '2026-10-00' }));
+    await assertSucceeds(c({ d: '2026-12-31' }));
     await assertFails(c({ t: Date.now() - 10 * MIN }));
     await assertFails(c({ t: Date.now() + 10 * MIN }));
     await assertFails(c({ np: 0 }));

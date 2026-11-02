@@ -283,7 +283,7 @@ function ensure(d){
  d=d||{};['cats','subs','tx','fixTpl','loans','ccx','inbox'].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[]});
  if(!d.fixOk||typeof d.fixOk!=='object'||Array.isArray(d.fixOk))d.fixOk={};
  if(d.pmOff==null)d.pmOff=2;if(!d.theme)d.theme='paper';if(!d.fs)d.fs=1;d.v=3;
- ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});/* סגירת קופה (11.2026): S.zc = הסגירות שהוכנסו; תתי-קטגוריות "שובר קניה", "שובר זיכוי", "הנפקת שובר זיכוי" בשתי הקופות – רק אם חסרות (לפי שם). לא משנים ולא מוחקים קיים */if(!Array.isArray(d.zc))d.zc=[];['i_yh','i_nl'].forEach(c=>{if(d.cats.find(x=>x.id===c))['שובר קניה','שובר זיכוי','הנפקת שובר זיכוי'].forEach(n=>{if(!d.subs.some(x=>x.cat===c&&heKey(x.name)===heKey(n)))d.subs.push({id:uid(),cat:c,name:n})})});
+ ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});/* סגירת קופה (11.2026): S.zc = הסגירות שהוכנסו; תתי-קטגוריות "שובר קניה", "שובר זיכוי", "הנפקת שובר זיכוי" בשתי הקופות – רק אם חסרות (לפי שם). לא משנים ולא מוחקים קיים */if(!Array.isArray(d.zc))d.zc=[];if(!(d.zcMig>=1)){['i_yh','i_nl'].forEach(c=>{if(d.cats.find(x=>x.id===c))['שובר קניה','שובר זיכוי','הנפקת שובר זיכוי'].forEach(n=>{if(!d.subs.some(x=>x.cat===c&&heKey(x.name)===heKey(n)))d.subs.push({id:uid(),cat:c,name:n})})});d.zcMig=1}/* רצה פעם אחת: תת-קטגוריה שנמחקה אחר כך לא חוזרת */
  return d}
 function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
 function load(){try{const r=localStorage.getItem(KEY);if(r){S=ensure(JSON.parse(r));return true}}catch(e){}return false}
@@ -2960,7 +2960,7 @@ function zcRe(){const v=cur().v;if(['more','zc','home'].includes(v)&&!document.q
 /* מספר מתוך שדה: '' או לא מספר → null */
 function zcN(v){const s=String(v==null?'':v).replace(/\s+/g,'');if(!s)return null;const n=pNum(s);return n==null||!isFinite(n)?null:n}
 function zcV(v){if(v==null||v==='')return '';const n=typeof v==='number'?v:pNum(String(v).replace(/\s+/g,''));return n==null||!isFinite(n)?'':String(rnd(n))}
-const zcDate=v=>{v=String(v||'').trim();let m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v);if(m)return v;m=/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})$/.exec(v);if(m){const y=m[3].length===2?'20'+m[3]:m[3];return y+'-'+p2(+m[2])+'-'+p2(+m[1])}return ''};
+const zcDate=v=>{v=String(v||'').trim();let m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v);if(m)return mk(m[1],m[2],m[3])||'';m=/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})$/.exec(v);if(m){const y=m[3].length===2?'20'+m[3]:m[3];return mk(y,m[2],m[1])||''}return ''};
 const zcTime=v=>{const m=/^(\d{1,2}):(\d{2})/.exec(String(v||'').trim());return m?p2(+m[1])+':'+m[2]:''};
 function zcEmpty(){const f={};ZFK.forEach(k=>f[k]='');return f}
 /* שורת טקסט מהענן: רק מחרוזת קצרה */
@@ -2970,15 +2970,16 @@ function zcRegOne(no,name){no=String(no||'').replace(/\D/g,'');for(const k in ZR
 function zcRegOf(f){const a=zcRegOne(f.zReg,f.zStore),b=zcRegOne(f.oReg,f.oStore);if(a&&b&&a!==b)return{reg:'',bad:1};return{reg:a||b,bad:0}}
 /* החישוב: שורות ההכנסה, בדיקת סכום, והפרש המזומן מול הפתיחה. lvl: 0 תקין, 1 עד 10% (העובד מאשר), 2 מעל 10% (מנהל) */
 function zcCalc(f,reg){const rows=[];let P=0;
- ZPAY.forEach(([k,sub])=>{const v=zcN(f[k]);if(v!=null){P+=v;if(k!=='cash'&&Math.abs(v)>=0.005)rows.push({k,sub,amt:rnd(v)})}});
+ ZPAY.forEach(([k,sub])=>{let v=zcN(f[k]);if(v!=null&&k==='vissue')v=-Math.abs(v);/* הנפקת שובר זיכוי: תמיד במינוס, גם אם הוקלד או זוהה בלי מינוס */if(v!=null){P+=v;if(k!=='cash'&&Math.abs(v)>=0.005)rows.push({k,sub,amt:rnd(v)})}});
  const rd=zcN(f.round)||0,cash=rnd((zcN(f.cash)||0)+rd);if(Math.abs(cash)>=0.005)rows.splice(Math.min(1,rows.length),0,{k:'cash',sub:'מזומן',amt:cash});
  P=rnd(P);const tot=zcN(f.total),inc=rnd(sum(rows,r=>r.amt));
  const sumOk=tot!=null&&(Math.abs(P-tot)<0.015||Math.abs(rnd(P+rd)-tot)<0.015);
  const c=zcN(f.drawer),o=zcN(f.oTot);let a=null,p=null,lvl=null;
- if(c!=null&&o!=null){a=rnd(Math.abs(c-o));p=c>0?rnd(a/c*100):(a>0?100:0);lvl=a<0.005?0:p<=10?1:2}
+ if(c!=null&&o!=null){const x=Math.abs(c-o);a=rnd(x);p=c>0?rnd(x/c*100):(x>=0.005?100:0);/* הרמה לפי הערך המדויק; p מעוגל רק לתצוגה */lvl=x<0.005?0:c>0&&x<=c*0.1+1e-9?1:2}
  const dateWarn=!!(f.oD&&f.d&&f.oD!==f.d);
  return{rows,P,tot,inc,sumOk,c,o,a,p,lvl,dateWarn,reg}}
-const zcDup=(reg,d,no,id)=>((S&&S.zc)||[]).find(x=>x.reg===reg&&x.d===d&&String(x.no)===String(no)&&x.id!==id);
+const zcNo=v=>s_(v).replace(/^0+(?=.)/,'');/* מספר דוח להשוואה: בלי אפסים בהתחלה */
+const zcDup=(reg,d,no,id)=>((S&&S.zc)||[]).find(x=>x.reg===reg&&x.d===d&&zcNo(x.no)===zcNo(no)&&x.id!==id);
 /* מה דורש אישור מנהל בסגירה שהגיעה מעובד – מחושב מחדש מהשדות, לא לפי מה שהשולח סימן */
 function zcNeed(it){const c=it.c,f=it.f,m=[];
  if(!zcRegOk(it.reg)||!cat(it.reg))m.push('הקטגוריה של הקופה לא קיימת במכשיר');
@@ -3005,11 +3006,14 @@ async function zcPull(){if(!ZQ||!isA()||zcPull.b)return 0;zcPull.b=1;ZQ.at=Date.
  for(const x of(r||[]).filter(x=>x.document).sort((a,b)=>gi(a.document,'t')-gi(b.document,'t'))){const d=x.document;const id=idOf(d);if(!idOk(id))continue;const it=zcParse(d,id);if(!it)continue;
   if(S.zc.some(z=>z.id===id)||S.tx.some(t=>t.src==='zc:'+id)){try{await zcMark(id,'ok','')}catch(e){}continue}
   const ap=it.c.lvl===1?'w':'';
+  if(!it.need.length&&!(await zcHasPics(id,it.np)))it.need.push('הצילומים של הסגירה לא עלו במלואם');
   if(!it.need.length&&zcIns(it,ap)){n++;try{await zcMark(id,'ok','')}catch(e){}continue}
   L.push(it)}
  ZQ.L=L.sort((a,b)=>a.t-b.t);ZQ.err='';if(n)toast('סגירת קופה: '+(n===1?'סגירה אחת נרשמה':n+' סגירות נרשמו')+' בהכנסות')}
  catch(e){ZQ.err=e.offline?e.message:(e.code===403?'אין הרשאה לסגירות הקופה (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message)}
  finally{zcPull.b=0}return n}
+/* לפני הכנסה אוטומטית: כל חלקי הצילומים קיימים בענן (בלי להוריד את התוכן – mask) */
+async function zcHasPics(id,np){if(!(np>=1))return false;try{for(let k=0;k<np;k++)await fsx('/closings/'+id+'/p/'+k+'?mask.fieldPaths=x');return true}catch(e){return false}}
 async function zcMark(id,st,note){const o={st,stBy:fbBy(),stAt:Date.now(),note:note||''},fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
  await fsx('/closings/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
 /* ---- תצוגה ---- */
@@ -3030,6 +3034,7 @@ function zcSlot(k,src,t,hint){return `<div class="row" style="gap:10px;align-ite
  <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><label class="btn ${src?'g':''} s" style="cursor:pointer">📷 ${src?'צלם שוב':'צלם'}<input type="file" accept="image/*" capture="environment" data-c="zcPick" data-k="${k}" hidden></label><label class="btn g s" style="cursor:pointer">🖼 גלריה<input type="file" accept="image/*" data-c="zcPick" data-k="${k}" hidden></label></div></div></div>`}
 function zcChkH(){if(!ZC||!ZC.f)return '';const c=zcCalc(ZC.f,ZC.reg),adm=isA(),w=[];
  if(c.tot==null)w.push('חסר "סה״כ תקבולים"');else if(!c.sumOk)w.push('סכום השורות ('+ils(c.P)+') לא שווה ל"סה״כ תקבולים" ('+ils(c.tot)+'). בדוק את הסכומים'+(adm?'':' – הסגירה תעבור לאישור המנהל'));
+ if((zcN(ZC.f.vissue)||0)>0)w.push('"הנפקת שובר זיכוי" נרשמת תמיד במינוס ('+ils(-zcN(ZC.f.vissue))+')');
  if(c.dateWarn)w.push('תאריך דף הפתיחה ('+dfmt(ZC.f.oD)+') שונה מתאריך הסגירה ('+dfmt(ZC.f.d)+')');
  if(adm&&ZC.reg&&zcDup(ZC.reg,ZC.f.d,s_(ZC.f.no)))w.push('כפילות: כבר נרשמה סגירה של הקופה הזו מאותו תאריך עם דוח '+s_(ZC.f.no));
  let ck='';if(c.lvl===1||(adm&&c.lvl===2))ck=`<label class="row" style="gap:8px;align-items:center;margin-top:8px;cursor:pointer"><input type="checkbox" name="ack" data-c="zcAck" ${ZC.ack?'checked':''} style="width:22px;height:22px"><b>אני מאשר את ההפרש</b></label>`;
@@ -3072,7 +3077,7 @@ ACT.zcScan=async()=>{if(!ZC||ZC.busy)return;if(!ZC.z.every(Boolean)||!ZC.o)retur
  const [a,b]=await Promise.allSettled([one('zreport',ZR_P,ZC.z),one('opening',OPN_P,[ZC.o])]);if(!ZC)return;
  const f=ZC.f||zcEmpty(),z=a.status==='fulfilled'?a.value:null,o=b.status==='fulfilled'?b.value:null,str=v=>v==null?'':String(v).slice(0,60);
  if(z){f.zReg=str(z.register).replace(/\D/g,'').slice(0,20);f.zStore=str(z.store);f.d=zcDate(z.date)||f.d;f.tm=zcTime(z.time)||f.tm;f.no=str(z.report_no).replace(/\D/g,'').slice(0,20)||f.no;
-  [['credit','credit'],['cash','cash'],['checks','checks'],['vbuy','voucher_buy'],['vcred','voucher_credit'],['vissue','voucher_issue'],['house','house'],['round','rounding'],['total','total'],['float','open_float'],['csales','cash_sales'],['cout','cash_out'],['drawer','cash_in_drawer']].forEach(([x,y])=>{f[x]=zcV(z[y])})}
+  [['credit','credit'],['cash','cash'],['checks','checks'],['vbuy','voucher_buy'],['vcred','voucher_credit'],['vissue','voucher_issue'],['house','house'],['round','rounding'],['total','total'],['float','open_float'],['csales','cash_sales'],['cout','cash_out'],['drawer','cash_in_drawer']].forEach(([x,y])=>{f[x]=zcV(z[y])});if(zcN(f.vissue))f.vissue=String(-Math.abs(zcN(f.vissue)))}
  if(o){f.oReg=str(o.register).replace(/\D/g,'').slice(0,20);f.oStore=str(o.store);f.oD=zcDate(o.date)||f.oD;f.oTm=zcTime(o.time);f.oTot=zcV(o.total)}
  if(!f.d)f.d=today();ZC.f=f;ZC.ai={z:z?1:0,o:o?1:0};const r=zcRegOf(f);if(r.reg){ZC.reg=r.reg;ZC.rs='auto'}else if(z||o){ZC.reg='';ZC.rs=''}
  ZC.busy=0;if(cur().v==='zc')rerender();
