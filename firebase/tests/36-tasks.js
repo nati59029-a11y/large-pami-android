@@ -29,6 +29,27 @@ describe('משימות (tasks)', () => {
     await assertFails(emp.doc('tasks/' + fresh('t')).set(newTask('u_mgr')));
   });
 
+  it('השם (by) במשימה חדשה חייב להיות של הכותב: לא בשם המנהל ולא בשם עובד אחר', async () => {
+    const t = (d, owner, by) => d.doc('tasks/' + fresh('t')).set(newTask(owner, { by }));
+    await assertFails(t(emp, 'u_emp', 'u_mgr'));
+    await assertFails(t(emp, 'u_emp', H.OTHER));
+    await assertFails(t(emp, 'u_emp', ''));
+    await assertFails(t(mgr, 'u_mgr', 'u_emp'));
+    await assertSucceeds(t(emp, 'u_emp', 'U_EMP')); // אותו שם באותיות שונות
+    await assertSucceeds(t(mgr, 'u_mgr', 'U_Mgr'));
+    await assertFails(env.authenticatedContext('u_emp').firestore().doc('tasks/' + fresh('t')).set(newTask('u_emp'))); // בלי אימייל בטוקן
+  });
+
+  it('עובד לא מסמן בוצע או מצרף תמונה בשם אחר (doneBy)', async () => {
+    let n = Date.now();
+    await assertFails(emp.doc('tasks/t_open').update({ st: 'done', open: '', sub: n, ok: n, doneBy: 'u_mgr', late: '' }));
+    await assertFails(emp.doc('tasks/t_open').update({ st: 'done', open: '', sub: n, ok: n, doneBy: H.OTHER, late: '' }));
+    await assertFails(emp.doc('tasks/t_pr').update({ st: 'wait', img: IMG, sub: n, doneBy: 'u_mgr' }));
+    await assertSucceeds(emp.doc('tasks/t_pr').update({ st: 'wait', img: IMG, sub: n, doneBy: 'U_Emp' }));
+    n = Date.now();
+    await assertSucceeds(emp.doc('tasks/t_open').update({ st: 'done', open: '', sub: n, ok: n, doneBy: 'U_EMP', late: '' }));
+  });
+
   it('עובד לא קובע יעד מעל 17 יום או פחות מ-72 שעות (הגבולות עצמם מותרים)', async () => {
     const cr = Date.now();
     await assertFails(emp.doc('tasks/' + fresh('t')).set(newTask('u_emp', { cr, due: cr + 17 * D1 + MIN })));

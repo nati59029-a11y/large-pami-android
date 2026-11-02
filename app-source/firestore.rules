@@ -32,6 +32,13 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    // שם שהאפליקציה כותבת (fbBy(): מה שלפני ה-@ באימייל שהוקלד בכניסה) חייב להיות של המשתמש עצמו,
+    // לפי האימייל שבטוקן, בלי הבדל אותיות גדולות/קטנות. בלי אימייל בטוקן – נחסם.
+    function isMyName(n) {
+      return request.auth.token.email is string
+        && n is string && n.lower() == request.auth.token.email.lower().split('@')[0];
+    }
+
     // ---------- 7 האוספים הקיימים (המבנה לא משתנה, רק מי רשאי) ----------
 
     // admins: כל מחובר קורא רק את המסמך של עצמו (כמו היום; האפליקציה בודקת בכניסה אם הוא מנהל).
@@ -124,7 +131,7 @@ service cloud.firestore {
 
     // ---------- משימות (tasks) ----------
     // הלוגיקה הועתקה כמו שהיא מהכללים שפעילים היום (app-source/firestore.rules הישן),
-    // רק "מחובר" הוחלף ב-isStaff() ו-isAdmin() ב-isManager().
+    // רק "מחובר" הוחלף ב-isStaff() ו-isAdmin() ב-isManager(), ונוספה בדיקה שהשם (by, doneBy) הוא של הכותב (isMyName).
     // תוספת: תגובות (תת-אוסף c) והשדות cAt/cBy על המשימה ("תגובה חדשה"). משימות ישנות בלי השדות ממשיכות לעבוד.
     match /tasks/{id} {
       function nw() { return request.resource.data; }
@@ -135,6 +142,7 @@ service cloud.firestore {
         return od().st == 'open'
           && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
           && nowOk(nw().sub)
+          && isMyName(nw().doneBy)
           && (
             (od().pr == '1' && nw().st == 'wait' && nw().open == '1'
               && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
@@ -158,6 +166,7 @@ service cloud.firestore {
       allow create: if isStaff()
         && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
         && nw().owner == request.auth.uid
+        && isMyName(nw().by)
         && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
         && nw().sub == 0 && nw().ok == 0 && nw().note == ''
         && (nw().pr == '' || isManager())
@@ -180,11 +189,8 @@ service cloud.firestore {
           && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
           && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
           && nw().uid == request.auth.uid
-          // by = השם שהאפליקציה שולחת (fbBy(): מה שלפני ה-@ באימייל שהוקלד בכניסה). חייב להתאים לאימייל
-          // שבטוקן (בלי הבדל אותיות גדולות/קטנות). בלי אימייל בטוקן – נחסם.
-          && request.auth.token.email is string
           && nw().by is string && nw().by.size() <= 100
-          && nw().by.lower() == request.auth.token.email.lower().split('@')[0]
+          && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
           && nowOk(nw().t);
         allow update: if false;
