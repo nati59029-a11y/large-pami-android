@@ -105,10 +105,21 @@ const REPLAY = {
 
   // fbPush (r.upd) – מנהל מאשר משוב שעובד שלח
   M15: { run: async (uid) => [await fsx(uid, '/fb/fb_new?updateMask.fieldPaths=data&updateMask.fieldPaths=st', { method: 'PATCH', body: JSON.stringify({ fields: { data: sv('{"f":{}}'), st: sv('ok') } }) })] },
-  // fbPush – עובד שולח משוב חדש (st: 'new')
-  M16: { run: async (uid) => {
+  // fbPush – עובד שולח משוב חדש (st: 'new'), רק כמסמך חדש (currentDocument.exists=false).
+  // ניסיון חוזר על אותו דף (התשובה הראשונה אבדה): 409 = "כבר נשלח" – האפליקציה מחשיבה אותו כהצלחה, ולא 403.
+  M16: { allowed: () => [200, 409], run: async (uid) => {
     const id = fresh('fb');
-    return [await fsx(uid, '/fb/' + id, { method: 'PATCH', body: JSON.stringify({ fields: { data: sv('{"f":{}}'), img: sv('data:image/jpeg;base64,AAAA'), owner: sv(uid), at: sv(Date.now()), st: sv('new') } }) })];
+    const body = () => JSON.stringify({ fields: { data: sv('{"f":{},"by":"dani","at":1,"hi":1,"man":0,"hp":0,"wq":0}'), img: sv('data:image/jpeg;base64,AAAA'), owner: sv(uid), at: sv(Date.now()), st: sv('new') } });
+    const p = '/fb/' + id + '?currentDocument.exists=false';
+    return [await fsx(uid, p, { method: 'PATCH', body: body() }), await fsx(uid, p, { method: 'PATCH', body: body() })];
+  }, check: (role, res) => { assert.equal(res[0].status, 200, 'שליחה ראשונה'); assert.equal(res[1].status, 409, 'ניסיון חוזר: צריך 409 (כבר קיים), לא 403'); } },
+  // fbWSent – עובד בודק שהוא עדיין פעיל (אחרי 403 בשליחה)
+  M49: { run: async (uid) => [await fsx(uid, '/staff/' + uid)] },
+  // fbPush – חלק צילום שכבר הועלה: העובד קורא את החלק של עצמו
+  M50: { run: async (uid) => {
+    const id = 'fbhi_' + fresh('fb') + '_0';
+    const c = await fsx(uid, '/chunks?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ fields: { owner: sv(uid), data: sv('AAAA') } }) });
+    return [c, await fsx(uid, '/chunks/' + id)];
   } },
   // fbPush – מנהל שומר משוב מאושר (st: 'ok'), פעם ראשונה ופעם שנייה
   M17: { run: async (uid) => {

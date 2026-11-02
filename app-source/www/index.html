@@ -115,7 +115,7 @@ html[data-th=night] .toast,html[data-th=contrast] .toast{background:#eee;color:#
 
 body.wk .bar,body.wk header [aria-label="הגדרות"]{display:none!important}body.wk main{padding-bottom:30px}
 
-#viewer{position:fixed;inset:0;z-index:99;background:#111;display:flex;flex-direction:column}#viewer[hidden]{display:none!important}#viewer .vbar{display:flex;gap:10px;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top))}#viewer .vbar .btn{flex:1}#viewer .vimg{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;touch-action:pinch-zoom pan-x pan-y}#viewer img{max-width:100%;max-height:100%;object-fit:contain}
+#viewer{position:fixed;inset:0;z-index:99;background:#111;display:flex;flex-direction:column}#viewer[hidden]{display:none!important}#fbburst{position:fixed;inset:0;z-index:99;background:#000;display:flex;flex-direction:column;color:#fff}#fbburst video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}#fbburst .fbbtop{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));font-size:1.1rem}#fbburst .fbbtop b{color:#fff}#fbburst .fbbbar .btn.g{color:#fff;border-color:rgba(255,255,255,.7);background:transparent}#fbburst .fbbbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}#fbburst .fbbbar .btn{flex:1;min-width:0}#fbburst .fbbsh{flex:0 0 76px;width:76px;height:76px;border-radius:50%;border:5px solid var(--acc);background:#fff;cursor:pointer}#fbburst .fbbsh:active{transform:scale(.92)}#fbburst .fbbfl{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none}#fbburst .fbbfl.on{animation:fbbfl .25s ease-out}@keyframes fbbfl{from{opacity:.7}to{opacity:0}}#viewer .vbar{display:flex;gap:10px;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top))}#viewer .vbar .btn{flex:1}#viewer .vimg{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;touch-action:pinch-zoom pan-x pan-y}#viewer img{max-width:100%;max-height:100%;object-fit:contain}
 
 /* ===== מסך כניסה ===== */
 body.gate>*:not(#gate){display:none!important}
@@ -402,7 +402,7 @@ let NAV=[{v:'home'}],A=null,V={};
 const cur=()=>NAV[NAV.length-1];
 function go(v,a){NAV.push({v,a});P.open=false;render(1)}
 function tab(v){NAV=[{v}];P.open=false;render(0)}
-function goBack(){const vw=document.getElementById('viewer');if(vw&&!vw.hidden){vwClose();return true}if(A){sheetBack();return true}const d=$('#dlg');if(d.open){d.close();return true}if(typeof isW==='function'&&isW()&&typeof WS!=='undefined'&&WS!=='home'){WS=WS==='manual'?'exp':'home';rerender();return true}if(NAV.length>1){NAV.pop();render(-1);return true}return false}
+function goBack(){if(typeof fbbBack==='function'&&fbbBack())return true;const vw=document.getElementById('viewer');if(vw&&!vw.hidden){vwClose();return true}if(A){sheetBack();return true}const d=$('#dlg');if(d.open){d.close();return true}if(typeof isW==='function'&&isW()&&typeof WS!=='undefined'&&WS!=='home'){WS=WS==='manual'?'exp':'home';rerender();return true}if(NAV.length>1){NAV.pop();render(-1);return true}return false}
 ACT.back=()=>goBack();
 ACT.go=el=>{let a=el.dataset.arg;try{a=a&&a[0]==='{'?JSON.parse(a):a}catch(e){}go(el.dataset.v,a)};
 ACT.tab=el=>tab(el.dataset.v);
@@ -2052,7 +2052,7 @@ async function fbAI(p){const k=shKey();if(!k)throw new Error('אין מפתח ז
 function fbMig(){if((FBL.v||0)>=2)return;FBL.pend.forEach(p=>{if(p.man)return;if(!fbIsEmpty(p.f))p.prev=JSON.parse(JSON.stringify(p.f));p.st='q';p.err='';p.tries=0;p.nx=0;p.ed=p.ed||[]});FBL.v=2;fbSave()}
 let FBRUN=false,FBT=null;
 const fbIsEmpty=f=>!(f.inv||f.amt||f.love||f.imp||f.name||f.phone||f.addr||f.r.some(Boolean));
-async function fbRun(){if(FBRUN)return;FBRUN=true;fbMig();
+async function fbRun(){if(FBRUN||!fbAdmin())return;FBRUN=true;fbMig();
  try{for(;;){const now=Date.now(),p=FBL.pend.find(x=>x.st==='q'&&(!x.nx||x.nx<=now));if(!p)break;p.st='ai';fbSave();if(['fb','fbRev'].includes(cur().v))fbRef();
   try{const r=await fbAI(p),here=cur().v==='fbRev'&&cur().a===p.id;if(here)fbKeep();const ed=p.ed||[],chk=r.chk.filter(x=>!ed.includes(x));
    FBK7.forEach(k=>{if(ed.includes(k))return;if(r[k])p.f[k]=r[k];else if(p.f[k]&&!chk.includes(k))chk.push(k)});for(let i=0;i<6;i++)if(!ed.includes('r'+i)&&r.r[i])p.f.r[i]=r.r[i];p.f.chk=chk;p.st='ok';p.err='';p.tries=0;p.nx=0}
@@ -2068,13 +2068,27 @@ async function fbAddPages(list){let n=0;for(const it of list){try{const pr=typeo
  fbSave();if(fbAdmin())fbRun();else fbPush().catch(()=>{});return n}
 /* ---- שליחה לענן ---- */
 const fbRecJ=r=>JSON.stringify({f:r.f,by:r.by,at:r.at,hi:r.hi?1:0,man:r.man?1:0,hp:r.hp||0,wq:r.wq?1:0});
-async function fbPush(){if(!fbRole())return;if(fbPush.b)return;fbPush.b=1;let sent=0;
+/* עובד: אין שלב בדיקה. דפים שנשארו אצלו לבדיקה (מגרסה קודמת) עוברים לתור השליחה, וכל רשומה שלו נשלחת תמיד כמסמך חדש ב-st:'new'
+   (רק המנהל מעדכן או מאשר). טיוטת הקלדה ידנית ריקה נמחקת; טיוטה עם תוכן נשארת עד שהעובד שולח אותה */
+function fbWFix(){if(fbAdmin())return;let ch=0;
+ FBL.pend.slice().forEach(p=>{if(p.man&&!p.cloud){if(!p.f||fbIsEmpty(p.f)){FBL.pend.splice(FBL.pend.indexOf(p),1);ch=1}return}
+  FBL.pend.splice(FBL.pend.indexOf(p),1);ch=1;if(!FBL.out.find(o=>o.id===p.id))FBL.out.push({id:p.id,f:p.f||fbEmpty(p.ts),by:p.by||fbBy(),at:p.ts||Date.now(),hi:p.man?(p.hi?1:0):1,man:p.man?1:0,st:'new',wq:p.wq?1:0})});
+ FBL.out.forEach(r=>{if(r.st!=='new'||r.upd){r.st='new';delete r.upd;ch=1}});if(ch)fbSave()}
+/* הודעת שגיאה ברורה לשליחה שנכשלה */
+const fbErrMsg=e=>e.code===403?(fbAdmin()?'אין הרשאה לשמור בענן. ודא שאתה מחובר כמנהל.':'השרת לא קיבל את הדף (אין הרשאה). הדף שמור בטלפון וינסה שוב. אם זה חוזר, פנה למנהל.'):(e.message||'שגיאה');
+/* עובד: הדף כבר בענן מניסיון קודם (התשובה אבדה או שהאפליקציה נסגרה) – זו הצלחה, לא כישלון.
+   409 = המסמך קיים. 403 בניסיון חוזר של עובד פעיל = אותו מצב: לפי החוקים יצירה בשמו עם st:'new' תמיד מותרת לעובד פעיל, ורק עדכון אסור */
+async function fbWSent(e,r){if(e.code===409)return true;if(e.code!==403)return false;let a=null;
+ try{const d=await fsx('/staff/'+SY.uid);a=!!(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)}catch(z){if(z.code===403||z.code===404)a=false}
+ if(a===false){const x=new Error('אין הרשאה: המשתמש שלך לא מוגדר כעובד פעיל. פנה למנהל.');x.code=403;x.msg=1;throw x}return a===true&&(r.tr||0)>1}
+async function fbPush(){if(!fbRole())return;fbWFix();if(fbPush.b)return;fbPush.b=1;let sent=0;
  try{for(const r of FBL.out.slice()){try{if(r.upd){try{await fsx('/fb/'+r.id+'?updateMask.fieldPaths=data&updateMask.fieldPaths=st',{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),st:sv('ok')}})})}catch(e){if(e.code!==403)throw e;/* הדף כבר לא קיים בענן: יוצרים אותו מחדש עם כל השדות */let img='';try{img=(await fget('fb:'+r.id))||''}catch(z){}await fsx('/fb/'+r.id,{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),img:sv(img),owner:sv(SY.uid),at:sv(r.at),st:sv('ok')}})})}}
   else{const img=r.hi?(await fget('fb:'+r.id))||'':'';
-  if(r.hi&&!fbAdmin()&&!r.hp){let hu='';try{hu=await fget('fbhi:'+r.id)||''}catch(e){}const n=Math.ceil(hu.length/CH);if(n&&n<=6){for(let k=0;k<n;k++){try{await fsx('/chunks?documentId='+encodeURIComponent('fbhi_'+r.id+'_'+k),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),data:sv(hu.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}r.hp=n}}
-  await fsx('/fb/'+r.id,{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),img:sv(img),owner:sv(SY.uid),at:sv(r.at),st:sv(r.st||'ok')}})})}
+  if(r.hi&&!fbAdmin()&&!r.hp){let hu='';try{hu=await fget('fbhi:'+r.id)||''}catch(e){}const n=Math.ceil(hu.length/CH);if(n&&n<=6){for(let k=0;k<n;k++){try{await fsx('/chunks?documentId='+encodeURIComponent('fbhi_'+r.id+'_'+k),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),data:sv(hu.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code===403){let c=null;try{c=await fsx('/chunks/fbhi_'+r.id+'_'+k)}catch(z){}if(c&&gv(c,'owner')===SY.uid)continue}if(e.code!==409)throw e}}r.hp=n}}
+  if(fbAdmin())await fsx('/fb/'+r.id,{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),img:sv(img),owner:sv(SY.uid),at:sv(r.at),st:sv(r.st||'ok')}})});
+  else{r.tr=(r.tr||0)+1;fbSave();try{await fsx('/fb/'+r.id+'?currentDocument.exists=false',{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),img:sv(img),owner:sv(SY.uid),at:sv(r.at),st:sv('new')}})})}catch(e){if(!(await fbWSent(e,r)))throw e}}}
   FBL.out=FBL.out.filter(x=>x.id!==r.id);r.err='';if(fbAdmin()&&(r.st||'ok')==='ok'){FBL.cache=FBL.cache.filter(x=>x.id!==r.id);FBL.cache.push({id:r.id,f:r.f,by:r.by,at:r.at,hi:r.hi})}if(!r.upd)fbDel(r.id);sent++;fbSave()}
-  catch(e){r.err=e.offline?'':(e.code===403?'אין הרשאה: יש לפרסם את חוקי Firebase החדשים':(e.message||'שגיאה'));fbSave();if(e.offline)break}}}
+  catch(e){r.err=e.offline?'':(e.msg?e.message:fbErrMsg(e));fbSave();if(e.offline)break}}}
  finally{fbPush.b=0}
  if(sent&&['fb','fbTab'].includes(cur().v))rerender();return sent}
 window.addEventListener('online',()=>{fbPush()});
@@ -2106,15 +2120,17 @@ const fbPendN=()=>FBL.pend.length;
 V.fb=()=>{fbPush().catch(()=>{});fbRun();fbInbox().catch(()=>{});const P=FBL.pend,qn=P.filter(x=>x.st==='q'||x.st==='ai').length,tot=P.length;
  const stt={q:'ממתין לזיהוי (ינסה שוב אוטומטית)',ai:'מזהה…',ok:'מוכן לבדיקה',fail:'לא זוהה, ימולא ידנית'};
  return{t:'משוב לקוחות',s:'קליטת טפסים',h:`
- ${tot?`<div class="card"><b>${tot} ${tot>1?'דפים ממתינים':'דף ממתין'} לבדיקה</b>${qn?`<p class="note">זוהו ${tot-qn} מתוך ${tot}. הזיהוי ממשיך ברקע.</p>`:''}
+ ${tot&&!fbAdmin()?`<div class="card"><b>${tot>1?tot+' טפסים שהתחלת להקליד':'טופס שהתחלת להקליד'}</b><p class="note">עוד לא נשלחו. השלם ולחץ "אישור ושליחה".</p><button class="btn w" data-a="fbRev" data-id="${esc(P[0].id)}" style="margin-top:8px">המשך הקלדה</button></div>`:''}
+ ${tot&&fbAdmin()?`<div class="card"><b>${tot} ${tot>1?'דפים ממתינים':'דף ממתין'} לבדיקה</b>${qn?`<p class="note">זוהו ${tot-qn} מתוך ${tot}. הזיהוי ממשיך ברקע.</p>`:''}
  <button class="btn w" data-a="fbRev" data-id="${esc(P[0].id)}" style="margin-top:8px">עבור על הדפים אחד אחד</button>
  <div style="margin-top:8px">${P.slice(0,12).map((p,i)=>`<div class="li" style="cursor:default;min-height:44px;padding:8px 12px"><div class="m"><b>דף ${i+1}${p.f&&p.f.name?' · '+esc(p.f.name):''}</b><small>${stt[p.st]||''}${p.err&&p.st!=='ok'?' · '+esc(p.err.slice(0,70)):''}</small></div></div>`).join('')}${tot>12?`<p class="note">ועוד ${tot-12}…</p>`:''}</div></div>`:''}
  ${FBL.out.length?`<div class="card"><b>ממתינים לשליחה: ${FBL.out.length}</b><p class="note">${esc(FBL.out.find(x=>x.err)?FBL.out.find(x=>x.err).err:'יישלחו כשיהיה חיבור לאינטרנט.')}</p><button class="btn g" data-a="fbSend">נסה לשלוח עכשיו</button></div>`:''}
  ${fbAdmin()?'':'<p class="note" style="margin:0 0 8px">מצלמים או מעלים את הדפים, והם נשלחים למנהל לבדיקה ולאישור. אין צורך למלא כלום.</p>'}<button class="btn w" data-a="go" data-v="fbcap" style="margin:6px 0">📷 סרוק דפים במצלמה</button>
+ <button class="btn g w" data-a="fbBurst" style="margin:6px 0">📸 צילום רציף – הרבה דפים ברצף</button>
  <label class="btn g w" style="cursor:pointer;width:100%;margin:8px 0">🖼 העלה תמונות מהגלריה<input type="file" accept="image/*" multiple data-c="fbgal" hidden></label>
  <button class="btn g w" data-a="fbManual" style="margin:0 0 8px">✍️ הקלדה ידנית</button>
  <button class="btn g w" data-a="go" data-v="fbTab">${fbAdmin()?'📊 טבלת משובים, גרף וייצוא':'📋 צפייה במשובים שאושרו'}</button>`}};
-ACT.fbSend=async()=>{try{const n=await fbPush();toast(n?'נשלחו '+n:FBL.out.length?'לא נשלח':'הכול נשלח')}catch(e){toast('לא נשלח')}rerender()};
+ACT.fbSend=async()=>{try{const n=await fbPush(),e=FBL.out.find(x=>x.err);toast(n?'נשלחו '+n:FBL.out.length?'לא נשלח'+(e?': '+e.err:''):'הכול נשלח')}catch(e){toast('לא נשלח')}rerender()};
 CHG.fbgal=async el=>{const fs=[...el.files];el.value='';if(!fs.length)return;toast('קולט '+fs.length+' תמונות…');const dus=[];for(const f of fs){try{dus.push(await fbRead(f))}catch(e){}}const n=await fbAddPages(dus);toast(fbAdmin()?'נקלטו '+n+' דפים':'נשלחו '+n+' דפים למנהל');rerender()};
 ACT.fbManual=()=>{const id=uid();FBL.pend.push({id,st:'ok',f:fbEmpty(),ts:Date.now(),err:'',man:1});fbSave();go('fbRev',id)};
 /* ---- צילום מרובה ---- */
@@ -2122,11 +2138,36 @@ let FBC=[];
 V.fbcap=()=>({t:'צילום דפים',s:FBC.length?FBC.length+' צולמו':'צלם דף אחרי דף',h:`
  <p class="note" style="margin:0 0 8px">צלם כל דף בנפרד. אחרי כל צילום חוזרים לכאן. בסוף לחץ "סיימתי".</p>
  <label class="btn w" style="cursor:pointer;width:100%;margin:6px 0">📷 ${FBC.length?'צלם עוד דף':'צלם דף'}<input type="file" accept="image/*" capture="environment" data-c="fbcam" hidden></label>
+ <button class="btn g w" data-a="fbBurst" style="margin:6px 0">📸 צילום רציף – המצלמה נשארת פתוחה</button>
  ${FBC.length?`<div class="card" style="margin:8px 0"><b>${FBC.length} ${FBC.length>1?'דפים צולמו':'דף צולם'}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${FBC.map((u,i)=>`<div style="text-align:center"><img src="${u.u}" alt="דף ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="fbcapDel" data-i="${i}">מחק</button></div>`).join('')}</div></div>
  <button class="btn w" data-a="fbcapDone" style="margin-top:8px">סיימתי (${FBC.length})</button>`:''}`});
 CHG.fbcam=async el=>{const f=el.files[0];el.value='';if(!f)return;try{toast('מעבד את הצילום…');FBC.push(await fbPrepHi(await fbRead(f)));rerender()}catch(e){toast('התמונה לא נקלטה')}};
 ACT.fbcapDel=el=>{FBC.splice(+el.dataset.i,1);rerender()};
 ACT.fbcapDone=async()=>{if(!FBC.length)return;const d=FBC.slice();FBC=[];const n=await fbAddPages(d);toast(fbAdmin()?'נקלטו '+n+' דפים':'נשלחו '+n+' דפים למנהל');NAV.pop();if(!fbAdmin()){render(0);return}const first=FBL.pend.find(x=>x.st==='q'||x.st==='ai'||x.st==='ok'||x.st==='fail');if(first)go('fbRev',first.id);else render(0)};
+/* ---- צילום רציף: המצלמה נפתחת בתוך האפליקציה ונשארת פתוחה; כל לחיצה מצלמת דף, ו"סיום" מכניס את כולם לתור ---- */
+let FBB=null;
+const fbbN=()=>FBB?FBC.length+FBB.q:FBC.length;
+function fbbUpd(){const B=FBB;if(!B)return;const n=fbbN(),a=B.d.querySelector('#fbbn'),b=B.d.querySelector('#fbbp'),c=B.d.querySelector('[data-a=fbbDone]');
+ if(a)a.textContent=n?'צולמו '+n:'כוון את הדף ולחץ על העיגול';if(b)b.textContent=B.q?'מעבד '+B.q+'…':'';if(c)c.textContent='סיום ('+n+')'}
+function fbbStop(){const B=FBB;if(!B)return null;FBB=null;try{B.s.getTracks().forEach(t=>t.stop())}catch(e){}B.d.remove();return B}
+function fbbBack(){if(!FBB)return false;ACT.fbbClose();return true}
+ACT.fbBurst=async()=>{if(FBB)return;if(cur().v!=='fbcap')go('fbcap');const md=navigator.mediaDevices;
+ if(!md||!md.getUserMedia)return toast('אין צילום רציף בטלפון הזה. צלם דף אחרי דף בכפתור "צלם דף"');
+ let s;try{s=await md.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:2560},height:{ideal:1920}}})}
+ catch(e){return toast(/NotAllowed|Security|Permission/i.test(String(e&&e.name))?'אין הרשאה למצלמה. אשר מצלמה לאפליקציה בהגדרות הטלפון, או צלם דף אחרי דף':'המצלמה לא נפתחה. צלם דף אחרי דף בכפתור "צלם דף"')}
+ const d=document.createElement('div');d.id='fbburst';d.setAttribute('role','dialog');d.setAttribute('aria-label','צילום רציף');
+ d.innerHTML=`<div class="fbbtop"><b id="fbbn"></b><small id="fbbp"></small></div><video playsinline muted autoplay></video><div class="fbbfl"></div>
+ <div class="fbbbar"><button type="button" class="btn g" data-a="fbbClose">סגור</button><button type="button" class="fbbsh" data-a="fbbShot" aria-label="צלם דף"></button><button type="button" class="btn" data-a="fbbDone"></button></div>`;
+ document.body.appendChild(d);const v=d.querySelector('video');v.srcObject=s;try{await v.play()}catch(e){}
+ FBB={s,d,v,q:0,busy:Promise.resolve(),ic:null};try{if(window.ImageCapture)FBB.ic=new ImageCapture(s.getVideoTracks()[0])}catch(e){}fbbUpd()};
+ACT.fbbShot=async()=>{const B=FBB;if(!B||B.sh)return;B.sh=1;let du='';
+ try{if(B.ic&&!B.noIc){const bl=await Promise.race([B.ic.takePhoto(),new Promise((z,no)=>setTimeout(()=>no(new Error('timeout')),5000))]);du=await fbRead(bl)}}catch(e){B.noIc=1;du=''}
+ if(!du&&B.v.videoWidth){try{const c=cvOf(B.v.videoWidth,B.v.videoHeight);c.getContext('2d').drawImage(B.v,0,0);du=c.toDataURL('image/jpeg',.92)}catch(e){}}
+ B.sh=0;if(FBB!==B)return;if(!du)return toast('הצילום לא הצליח, נסה שוב');
+ try{navigator.vibrate&&navigator.vibrate(30)}catch(e){}const fl=B.d.querySelector('.fbbfl');if(fl){fl.classList.remove('on');void fl.offsetWidth;fl.classList.add('on')}
+ B.q++;fbbUpd();B.busy=B.busy.then(async()=>{try{FBC.push(await fbPrepHi(du))}catch(e){toast('דף לא נקלט')}B.q--;fbbUpd()})};
+ACT.fbbClose=async()=>{const B=fbbStop();if(!B)return;await B.busy;if(cur().v==='fbcap')rerender()};
+ACT.fbbDone=async()=>{const B=fbbStop();if(!B)return;if(B.q)toast('מעבד את הדפים…');await B.busy;if(cur().v!=='fbcap')go('fbcap');if(FBC.length)await ACT.fbcapDone();else rerender()};
 /* ---- טופס (בדיקה / עריכה) ---- */
 function fbForm(f,fm,chk,prev){prev=prev||{};const w=n=>chk.includes(n)||false,st=(n,v)=>w(n)||(v===''||v==null)?' style="border-color:var(--warn)"':'';
  const pv=(n,v)=>prev[n]&&prev[n]!==v?`<small class="fbprev">בסריקה הקודמת: ${esc(prev[n])}<button type="button" class="chip" data-a="fbPrev" data-n="${n}" data-v="${esc(prev[n])}">החזר</button></small>`:'';
@@ -2159,7 +2200,7 @@ function fbPZ(img){const box=img.parentElement,P=new Map(),iw=img.naturalWidth,i
 V.fbRev=id=>{const P=FBL.pend,i=P.findIndex(x=>x.id===id);
  if(i<0)return{t:'בדיקת דף',h:`<p class="note">אין דפים לבדיקה.</p><button class="btn w" data-a="back">חזרה</button>`};
  const p=P[i],busy=p.st==='q'||p.st==='ai';if(!p.man)fbLoadImg(p.id);
- return{t:'בדיקת דף',s:`דף ${i+1} מתוך ${P.length}`,h:`
+ return{t:fbAdmin()?'בדיקת דף':'הקלדה ידנית',s:`דף ${i+1} מתוך ${P.length}`,h:`
  <div class="row" style="justify-content:space-between;margin-bottom:8px"><button class="btn g s" data-a="fbNav" data-d="-1" ${i?'':'disabled'}>‹ הקודם</button><button class="btn g s" data-a="fbNav" data-d="1" ${i<P.length-1?'':'disabled'}>הבא ›</button></div>
  ${busy?`<div class="card"><p class="note">${p.st==='ai'?'הדף בזיהוי…':'הדף ממתין לזיהוי, ינסה שוב אוטומטית'+(p.err?' ('+esc(p.err.slice(0,60))+')':'')+'.'} אפשר למלא ידנית או לחכות.</p><button class="btn g s" data-a="fbRef">רענן</button></div>`:''}
  ${p.st==='fail'?`<div class="card"><p class="note" style="color:var(--bad)">הדף לא זוהה${p.err?': '+esc(p.err):''}. מלא ידנית מול התמונה.</p><button class="btn g s" data-a="fbRetry" data-id="${esc(p.id)}">נסה לזהות שוב</button></div>`:''}
