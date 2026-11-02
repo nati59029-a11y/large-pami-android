@@ -391,9 +391,9 @@ const REPLAY = {
   // FRM.zcSend: הסגירה (עובד – 'new', מנהל – 'ok'), ואחריה חלקי הצילומים
   // zcCommit: הסגירה ו-zlast באותו commit (קדימה בזמן)
   M73: { run: async (uid, env, role) => {
-    const id = fresh('z'); const fields = Object.assign(zcFields(uid, role, 1), { tm: sv('09:02') });
+    const id = fresh('z'); const fields = Object.assign(zcFields(uid, role, 1), { tm: sv('09:02'), od: sv('2026-10-20'), otm: sv('09:11') });
     const writes = [{ update: { name: docName('closings/' + id), fields }, currentDocument: { exists: false } },
-      { update: { name: docName('zlast/i_yh'), fields: { d: sv('2026-10-20'), tm: sv('09:02'), id: sv(id), uid: sv(uid), t: iv(Date.now()) } } }];
+      { update: { name: docName('zlast/i_yh'), fields: { d: sv('2026-10-20'), tm: sv('09:02'), od: sv('2026-10-20'), otm: sv('09:11'), id: sv(id), uid: sv(uid), t: iv(Date.now()) } } }];
     return [await fsx(uid, ':commit', { method: 'POST', body: JSON.stringify({ writes }) })];
   } },
   M74: { run: async (uid, env, role) => {
@@ -466,7 +466,7 @@ const REPLAY = {
   M98: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl')] },
   M99: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl')] },
   M100: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl', { method: 'DELETE' })] },
-  M101: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl', { method: 'PATCH', body: JSON.stringify({ fields: { d: sv('2026-10-19'), tm: sv(''), id: sv('z0'), uid: sv(uid), t: iv(Date.now()) } }) })] },
+  M101: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl', { method: 'PATCH', body: JSON.stringify({ fields: { d: sv('2026-10-19'), tm: sv(''), od: sv(''), otm: sv(''), id: sv('z0'), uid: sv(uid), t: iv(Date.now()) } }) })] },
   M95: { run: async (uid) => [await fsx(uid, '/deposits/' + 'dp1' + '/p/' + 0, { method: 'DELETE' })] },
   // ---- שלב 3: סיכום סגירות קופה (zsLoad, ACT.zsImg) ----
   M102: { run: async (uid) => {

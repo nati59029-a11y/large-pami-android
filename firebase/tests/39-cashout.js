@@ -266,6 +266,13 @@ describe('הוצאות מקופה (cashout) ואישורי הפקדה (deposits)
     await assertFails(emp.doc('zlast/i_nl').set(clean(Object.assign({ id: 'z1' }, zl({ d: '2026-12-01' })))));   // בלי סגירה באותו batch
     await assertFails(B(cl('u_emp', { d: '2026-12-02' }), zl({ d: '2026-12-02', uid: H.OTHER })));               // בשם אחר
     await assertFails(B(cl('u_emp', { d: '2026-12-03' }), zl({ d: '2026-12-03', tm: '9:00' })));
+    // od/otm (הפתיחה שצורפה – תחילת החלון של הבאה): חייבים להיות כמו בסגירה, ובפורמט תקין
+    await assertSucceeds(B(cl('u_emp', { d: '2026-12-04', od: '2026-12-04', otm: '09:11' }), zl({ d: '2026-12-04', od: '2026-12-04', otm: '09:11' })));
+    await assertFails(B(cl('u_emp', { d: '2026-12-05', od: '2026-12-05', otm: '09:11' }), zl({ d: '2026-12-05', od: '2026-12-05', otm: '23:59' })));  // שעת פתיחה שונה מהסגירה
+    await assertFails(B(cl('u_emp', { d: '2026-12-06' }), zl({ d: '2026-12-06', od: '2026-12-06', otm: '09:11' })));                                   // בסגירה אין פתיחה
+    await assertFails(emp.doc('closings/' + fresh('z')).set(cl('u_emp', { od: '2026-13-01' })));
+    await assertFails(emp.doc('closings/' + fresh('z')).set(cl('u_emp', { otm: '9:11' })));
+    await assertFails(mgr.doc('zlast/i_nl').set({ d: '2026-10-01', tm: '', od: '1.1.2026', otm: '', id: 'z0', uid: 'u_mgr', t: Date.now() }));
     await assertFails(emp.doc('zlast/i_nl').delete());
     await assertFails(emp.doc('zlast/e_sup').set({ d: '2026-12-01', tm: '', id: 'z1', uid: 'u_emp', t: Date.now() }));
     // מנהל: גם אחורה, ומחיקה
