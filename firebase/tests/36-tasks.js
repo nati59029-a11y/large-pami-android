@@ -200,8 +200,9 @@ describe('תגובות במשימה (tasks/{id}/c) ושדות הסימון cAt/c
     }
     const all = await assertSucceeds(emp.collection('tasks/t_open/c').get());
     if (all.size < 11) throw new Error('ציפינו ל-11 תגובות לפחות, התקבלו ' + all.size);
-    // מגיב גם על משימה שבוצעה באיחור (הוא רשאי לקרוא אותה)
-    await assertSucceeds(emp.doc('tasks/t_done_late/c/' + fresh('c')).set(comment('u_emp')));
+    // משימה שבוצעה (גם באיחור, שהוא רשאי לקרוא) – עובד כבר לא מגיב; מנהל כן
+    await assertFails(emp.doc('tasks/t_done_late/c/' + fresh('c')).set(comment('u_emp')));
+    await assertSucceeds(mgr.doc('tasks/t_done_late/c/' + fresh('c')).set(comment('u_mgr')));
   });
 
   it('עובד לא כותב תגובה בשם אחר', async () => {
@@ -369,6 +370,25 @@ describe('הערות במשימות: nc (הערת עובד) והחזרה לעו�
     // עובד לא מחזיר משימה שהוא עצמו העביר להמתנה
     await assertSucceeds(emp.doc('tasks/t_nc').update({ st: 'wait', sub: Date.now(), doneBy: 'u_emp' }));
     await assertFails(emp.doc('tasks/t_nc').update({ st: 'open', sub: 0, doneBy: '' }));
+  });
+
+  it('אחרי "בוצע" עובד לא מוסיף הערה: done ו-wait נחסמים; פתוחה ומשימה שהוחזרה מותרות; מנהל מגיב תמיד', async () => {
+    await env.withSecurityRulesDisabled((c) => Promise.all(['t_wait', 't_done_late', 't_done'].map((id) => c.firestore().doc('tasks/' + id).update({ nc: '1' }))));
+    // done (שבוצעה באיחור – העובד רשאי לקרוא אותה) ו-wait – נחסם, גם סימון nc
+    await assertFails(emp.doc('tasks/t_done_late/c/' + fresh('c')).set(comment('u_emp')));
+    await assertFails(emp.doc('tasks/t_wait/c/' + fresh('c')).set(comment('u_emp')));
+    await assertFails(emp.doc('tasks/t_wait').update({ nc: '1' }));
+    await assertFails(env.authenticatedContext(H.OTHER, { email: H.OTHER + '@example.invalid' }).firestore().doc('tasks/t_wait/c/' + fresh('c')).set(comment(H.OTHER)));
+    // עובד שהעביר משימה להמתנה – כבר לא מגיב עליה
+    await assertSucceeds(emp.doc('tasks/t_nc/c/' + fresh('c')).set(comment('u_emp')));
+    await assertSucceeds(emp.doc('tasks/t_nc').update({ st: 'wait', sub: Date.now(), doneBy: 'u_emp' }));
+    await assertFails(emp.doc('tasks/t_nc/c/' + fresh('c')).set(comment('u_emp')));
+    // מנהל מגיב על done ועל wait
+    await assertSucceeds(mgr.doc('tasks/t_done/c/' + fresh('c')).set(comment('u_mgr')));
+    await assertSucceeds(mgr.doc('tasks/t_wait/c/' + fresh('c')).set(comment('u_mgr')));
+    // המנהל מחזיר את t_done → פתוחה → העובד מגיב שוב
+    await assertSucceeds(mgr.doc('tasks/t_done').update({ st: 'open', open: '1', img: '', sub: 0, doneBy: '', ok: 0, late: '', note: 'לא גמור', rt: '1' }));
+    await assertSucceeds(emp.doc('tasks/t_done/c/' + fresh('c')).set(comment('u_emp')));
   });
 
   for (const role of ['signedIn', 'disabledEmployee']) {

@@ -200,7 +200,7 @@ body.gate{padding:0;background:#16191b}
 const KEY='large-pami-v2',OLDKEY='large-pami-v1',PREV='large-pami-v2-prev';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const s_=v=>String(v??'').trim(),p2=n=>String(n).padStart(2,'0');
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));/* תמונה שמוכנסת ל-src: רק data:image (jpeg/png/webp/gif) ב-base64 נקי. כל דבר אחר (גם מהענן, שמשתמש אחר כתב) לא מוצג */const imgOk=u=>typeof u==='string'&&/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(u);
 const num=v=>parseFloat(v)||0,uid=()=>Math.random().toString(36).slice(2,6)+Date.now().toString(36).slice(-4)+Math.random().toString(36).slice(2,4);
 const rnd=n=>Math.round((n+Number.EPSILON)*100)/100,sum=(a,f)=>a.reduce((t,x)=>t+f(x),0);
 const ymd=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
@@ -1373,7 +1373,7 @@ function inbHeal(){const seen=new Set();const L=S.inbox.filter(x=>seen.has(x.id)
 async function pullInbox(){if(!isA())return 0;if(pullInbox.b)return 0;pullInbox.b=1;try{const n=await pullInbox2();try{await pullSiteInc()}catch(e){if(!e.offline)toast('מכירות אתר: המשיכה נכשלה – '+e.message)}return n}finally{pullInbox.b=0}}
 async function pullInbox2(){inbHeal();const docs=await runQ('status','new');let n=0;const done=[];
  for(const d of docs){const id=idOf(d);if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id)){done.push(id);continue}
-  let data={};try{data=JSON.parse(gv(d,'data'))}catch(e){}
+  let data={};try{data=JSON.parse(gv(d,'data'))}catch(e){}if(!data||typeof data!=='object')data={};if(data.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(data.date)))data.date='';
   let f='';const np=+gv(d,'parts')||0;if(np){try{for(let k=0;k<np;k++){const c=await fsx('/chunks/'+id+'_'+k);f+=gv(c,'data')}}catch(e){continue}}else f=gv(d,'file');if(f){try{await fput('i'+id,f)}catch(e){continue}}
   S.inbox.push({id,by:gv(d,'by'),at:gv(d,'created'),d:data,file:f?'i'+id:'',np});n++;done.push(id)}
  save();
@@ -1424,11 +1424,11 @@ const inbName=it=>{const c=cat(it.d.cat);if(it.d.reg&&!c)return 'דף הוצאה
 V.inbox=()=>{inbHeal();const L=S.inbox.slice().sort((a,b)=>(b.at||'').localeCompare(a.at||''));
  return{t:'הוצאות מעובדים',s:L.length+' ממתינות',h:L.length?L.map(it=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(inbName(it))}</b><b>${ils(num(it.d.amt))}</b></div><small>${esc(it.by)} · ${esc(it.d.date||'')}${it.d.plan?' · לתשלום '+esc(mfmt(it.d.plan)):''}${it.d.inv?' · חשבונית '+esc(it.d.inv):''}${it.d.dn?' · תעודת משלוח':''}${it.d.note?' · '+esc(it.d.note):''}</small>
  ${(()=>{const mm=dupMsg(dupInbox(it));return mm.map(m=>`<div class="note" style="color:var(--neg,#b3261e);font-weight:700">⚠ ${esc(m)}</div>`).join('')})()}
- <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${it.id}">צפה בצילום</button>`:''}<button class="btn g grow" data-a="inbEdit" data-id="${it.id}">שינוי</button><button class="btn grow" data-a="inbOk" data-id="${it.id}">אשר</button><button class="btn g grow" data-a="inbNo" data-id="${it.id}">דחה</button></div></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
+ <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${esc(it.id)}">צפה בצילום</button>`:''}<button class="btn g grow" data-a="inbEdit" data-id="${esc(it.id)}">שינוי</button><button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">אשר</button><button class="btn g grow" data-a="inbNo" data-id="${esc(it.id)}">דחה</button></div></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
 ACT.inbOk=async el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)return;const d=it.d,c=cat(d.cat);
  if(d.reg&&!c)return toast('דף הוצאה מקופה: לחץ "שינוי", בחר קטגוריה לפי ההערה, ואז אשר');
  let cid=c?c.id:'p_exp',sid=c&&d.sub&&subById(d.sub)?d.sub:null;const a=pNum(d.amt);if(a==null)return toast('סכום לא תקין');
- const date=d.date||today(),b=c?c.beh:'simple';
+ const date=/^\d{4}-\d{2}-\d{2}$/.test(String(d.date||''))?d.date:today(),b=c?c.beh:'simple';
  if(b==='emp'&&!d.m)return toast('בחר מזומן או העברה בשינוי, ואז אשר');
  if(b==='sup'&&!s_(d.inv)&&!d.dn)return toast('חסר מספר חשבונית. לחץ "שינוי" והוסף, או סמן תעודת משלוח');
  if(b==='sup'&&!el.dataset.ok){const mm=dupMsg(dupInbox(it));if(mm.length)return ask('נראה שההוצאה כבר קיימת: '+mm.join('; ')+'. לאשר בכל זאת?',()=>{ACT.inbOk({dataset:{id:it.id,ok:'1'}})},'אשר בכל זאת')}
@@ -1580,10 +1580,12 @@ FRM.inbsave=f=>{const x=fd(f),it=S.inbox.find(z=>z.id===x.id);if(!it)return;cons
 /* ---- צפייה בצילום עם חזרה ושיתוף ---- */
 let VW=null;
 async function viewImg(fid,name,du0){let du=du0;if(!du)try{du=await fget(fid)}catch(e){}if(!du)return toast('הקובץ לא נמצא במכשיר');
- let pgs=null;if(du.startsWith('PAGES:')){try{pgs=JSON.parse(du.slice(6))}catch(e){}}else if(/^data:image\//.test(du))pgs=[du];
- if(!pgs){const u=URL.createObjectURL(du2b(du));if(!window.open(u,'_blank')){const a=document.createElement('a');a.href=u;a.download=name||'file';a.click()}return}
+ /* הגנה מהזרקת קוד: מציגים רק תמונות תקינות (imgOk). קובץ שאינו תמונה נפתח רק אם הוא PDF; אחרת רק הורדה (לא נפתח כדף) */
+ if(typeof du!=='string')return toast('הקובץ לא תקין ולא יוצג');let pgs=null;if(du.startsWith('PAGES:')){try{const a=JSON.parse(du.slice(6));pgs=Array.isArray(a)?a:[]}catch(e){pgs=[]}}else if(/^data:image\//.test(du))pgs=[du];
+ if(pgs){pgs=pgs.filter(imgOk);if(!pgs.length)return toast('התמונה לא תקינה ולא תוצג')}
+ if(!pgs){const m=/^data:([\w.+-]+\/[\w.+-]+);base64,[A-Za-z0-9+/=]*$/.exec(du);if(!m)return toast('הקובץ לא תקין ולא יוצג');const pdf=m[1]==='application/pdf',bl=du2b(du),u=URL.createObjectURL(pdf?bl:new Blob([bl],{type:'application/octet-stream'}));if(!pdf||!window.open(u,'_blank')){const a=document.createElement('a');a.href=u;a.download=name||'file';a.click()}return}
  VW={pgs,name:name||'invoice'};{const o=document.getElementById('viewer');if(o)o.remove()}const host=$('#dlg').open?$('#dlg'):document.body;const v=document.createElement('div');v.id='viewer';host.append(v);
- v.innerHTML=`<div class="vbar"><button class="btn" data-a="vwClose">חזרה</button><button class="btn g" data-a="vwShare">${pgs.length>1?'שיתוף כקובץ אחד (PDF)':'שיתוף'}</button></div><div class="vimg" style="${pgs.length>1?'display:block;text-align:center':''}">${pgs.map((u,i)=>`<img alt="עמוד ${i+1}" src="${u}" style="${pgs.length>1?'display:block;margin:0 auto 10px;max-width:100%':''}">`).join('')}</div>`;v.hidden=false}
+ v.innerHTML=`<div class="vbar"><button class="btn" data-a="vwClose">חזרה</button><button class="btn g" data-a="vwShare">${pgs.length>1?'שיתוף כקובץ אחד (PDF)':'שיתוף'}</button></div><div class="vimg" style="${pgs.length>1?'display:block;text-align:center':''}">${pgs.map((u,i)=>`<img alt="עמוד ${i+1}" src="${esc(u)}" style="${pgs.length>1?'display:block;margin:0 auto 10px;max-width:100%':''}">`).join('')}</div>`;v.hidden=false}
 function vwClose(){const v=document.getElementById('viewer');if(v)v.remove();VW=null}
 ACT.vwClose=vwClose;
 ACT.vwShare=async()=>{if(!VW)return;try{if(VW.pgs.length===1)saveFile(VW.name+'.jpg',du2b(VW.pgs[0]),'image/jpeg');else saveFile(VW.name+'.pdf',await mkScanPdf(VW.pgs),'application/pdf')}catch(e){toast('היצירה נכשלה: '+(e.message||e))}};
@@ -1998,7 +2000,7 @@ const fbSave=()=>{try{localStorage.setItem(FBK,JSON.stringify(FBL))}catch(e){toa
 const fbRole=()=>(typeof isW==='function'&&isW())||(typeof isA==='function'&&isA());
 const fbAdmin=()=>typeof isA==='function'&&isA();
 const fbIso=t=>{const d=new Date(t||Date.now());return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
-const fbEmpty=t=>{const dt=fbIso(t);return{inv:'',amt:'',love:'',imp:'',name:'',phone:'',addr:'',r:[0,0,0,0,0,0],chk:[],dt,pr:prOfDate(dt)}};
+const fbEmpty=t=>{const dt=fbIso(t);return{inv:'',amt:'',love:'',imp:'',name:'',phone:'',addr:'',r:[0,0,0,0,0,0],chk:[],dt,pr:prOfDate(dt)}};/* משוב שהגיע מהענן (עובד כתב): הציונים רק מספרים 0–10, והתאריך רק YYYY-MM-DD */const fbFix=f=>{f.r=[0,1,2,3,4,5].map(i=>{const n=Math.round(+((f.r||[])[i])||0);return n>=1&&n<=10?n:0});if(!/^\d{4}-\d{2}-\d{2}$/.test(f.dt||''))f.dt=fbEmpty().dt;return f};
 const fbDelHi=async id=>{try{const d=await idb();await new Promise(z=>{const t=d.transaction('f','readwrite');t.objectStore('f').delete('fbhi:'+id);t.oncomplete=z;t.onerror=z})}catch(e){}};
 const fbDel=async id=>{try{const d=await idb();await new Promise(z=>{const t=d.transaction('f','readwrite');t.objectStore('f').delete('fb:'+id);t.objectStore('f').delete('fbhi:'+id);t.oncomplete=z;t.onerror=z})}catch(e){}};
 /* ---- תמונות ---- */
@@ -2095,7 +2097,7 @@ window.addEventListener('online',()=>{fbPush()});
 async function fbLoad(){if(!fbRole())return 0;
  const sq={from:[{collectionId:'fb'}],select:{fields:[{fieldPath:'data'},{fieldPath:'st'}]},limit:3000};if(!fbAdmin())sq.where={fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:'ok'}}};
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});
- const L=[];(r||[]).forEach(x=>{const d=x.document;if(!d||gv(d,'st')==='new')return;try{const j=JSON.parse(gv(d,'data'));L.push({id:idOf(d),f:Object.assign(fbEmpty(j.at),j.f),by:j.by||'',at:j.at||0,hi:j.hi})}catch(e){}});
+ const L=[];(r||[]).forEach(x=>{const d=x.document;if(!d||gv(d,'st')==='new')return;try{const j=JSON.parse(gv(d,'data'));L.push({id:idOf(d),f:fbFix(Object.assign(fbEmpty(j.at),j.f)),by:j.by||'',at:j.at||0,hi:j.hi})}catch(e){}});
  const loc=FBL.out.filter(o=>!L.find(z=>z.id===o.id));FBL.cache=L.concat(loc.map(o=>({id:o.id,f:o.f,by:o.by,at:o.at,hi:o.hi})));fbSave();return L.length}
 /* מניעת כפילויות: בדיקת דפים חדשים רצה פעם אחת בכל רגע, וכפילויות קיימות (אותו מזהה) מוסרות */
 function fbDedup(){const best={},sc=p=>(p.st==='ok'?4:0)+(p.ed&&p.ed.length?2:0)+(p.st==='ai'?1:0);let n=0;
@@ -2109,7 +2111,7 @@ async function fbInbox0(){let n=0;
   let j;try{j=JSON.parse(gv(d,'data'))}catch(e){continue}
   try{if(j.hi){const full=await fsx('/fb/'+id),img=gv(full,'img');if(img)await fput('fb:'+id,img)}}catch(e){if(e.offline)break;continue}
   if(j.hp){try{let hu='';for(let k=0;k<j.hp;k++){const c=await fsx('/chunks/fbhi_'+id+'_'+k);hu+=gv(c,'data')}if(hu)await fput('fbhi:'+id,hu);for(let k=0;k<j.hp;k++)fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'}).catch(()=>{})}catch(e){}}
-  if(FBL.pend.find(p=>p.id===id)||FBL.out.find(o=>o.id===id))continue;FBL.pend.push(j.man?{id,st:'ok',f:Object.assign(fbEmpty(j.at),j.f),ts:j.at||Date.now(),err:'',cloud:1,by:j.by,hi:j.hi,man:1}:{id,st:'q',f:fbEmpty(j.at),ts:j.at||Date.now(),err:'',cloud:1,by:j.by,hi:1,wq:j.wq?1:0});n++}
+  if(FBL.pend.find(p=>p.id===id)||FBL.out.find(o=>o.id===id))continue;FBL.pend.push(j.man?{id,st:'ok',f:fbFix(Object.assign(fbEmpty(j.at),j.f)),ts:j.at||Date.now(),err:'',cloud:1,by:j.by,hi:j.hi,man:1}:{id,st:'q',f:fbEmpty(j.at),ts:j.at||Date.now(),err:'',cloud:1,by:j.by,hi:1,wq:j.wq?1:0});n++}
  if(n){fbSave();fbRun();if(['fb','fbRev'].includes(cur().v)&&cur().v==='fb')rerender()}return n}
 const FBI={};
 async function fbImgHi(id){try{const u=await fget('fbhi:'+id);if(u)return u}catch(e){}return fbImg(id)}
@@ -2180,7 +2182,7 @@ function fbForm(f,fm,chk,prev){prev=prev||{};const w=n=>chk.includes(n)||false,s
 const fbParse=x=>({dt:/^\d{4}-\d{2}-\d{2}$/.test(x.dt||'')?x.dt:fbIso(),pr:s_(x.pr||''),inv:s_(x.inv||''),amt:String(x.amt||'').replace(/[^\d.,]/g,'').replace(',','.'),love:s_(x.love||''),imp:s_(x.imp||''),name:s_(x.name||''),phone:String(x.phone||'').replace(/\D/g,''),addr:s_(x.addr||''),r:[0,1,2,3,4,5].map(i=>+x['r'+i]||0),chk:[]});
 const fbPane=()=>`<div class="fbimgw"><div class="fbzb"><p id="fbimL" class="note" style="padding:10px;color:#ddd">טוען תמונה…</p><img id="fbim" alt="הדף הסרוק" hidden draggable="false"><div class="fbzc"><button type="button" class="ib" data-z="in" aria-label="הגדלה">＋</button><button type="button" class="ib" data-z="out" aria-label="הקטנה">－</button><button type="button" class="ib" data-z="fit" aria-label="התאמה למסגרת">⤢</button></div></div></div>`;
 function fbLoadImg(id){setTimeout(async()=>{const e=document.getElementById('fbim');if(!e)return;const L=()=>document.getElementById('fbimL');
- try{const u=await fbImgHi(id);if(document.getElementById('fbim')!==e)return;if(u){e.onload=()=>{const l=L();if(l)l.remove();e.hidden=false;fbPZ(e)};e.src=u}else if(L())L().textContent='אין תמונה לדף הזה'}catch(x){if(L())L().textContent='התמונה לא נטענה'}},0)}
+ try{let u=await fbImgHi(id);if(document.getElementById('fbim')!==e)return;if(u&&!imgOk(u)){if(L())L().textContent='התמונה לא תקינה ולא תוצג';return}if(u){e.onload=()=>{const l=L();if(l)l.remove();e.hidden=false;fbPZ(e)};e.src=u}else if(L())L().textContent='אין תמונה לדף הזה'}catch(x){if(L())L().textContent='התמונה לא נטענה'}},0)}
 /* הגדלה והזזה בתוך המשבצת: צביטה, גרירה, גלגלת, הקשה כפולה וכפתורים */
 function fbPZ(img){const box=img.parentElement,P=new Map(),iw=img.naturalWidth,ih=img.naturalHeight;let s=1,x=0,y=0,s0=1,pd=0,pm=null,lt=0,down=null,moved=false;
  const ap=()=>{const bw=box.clientWidth,bh=box.clientHeight,W=iw*s,H=ih*s;x=W<=bw?(bw-W)/2:Math.min(0,Math.max(bw-W,x));y=H<=bh?(bh-H)/2:Math.min(0,Math.max(bh-H,y));img.style.transform=`translate(${x}px,${y}px) scale(${s})`};
@@ -2215,7 +2217,7 @@ ACT.fbNav=el=>{const P=FBL.pend,c=cur(),i=P.findIndex(x=>x.id===c.a),j=i+(+el.da
 function fbKeep(){const f=document.querySelector('form[data-f=fbsave]');if(!f)return;const p=FBL.pend.find(x=>x.id===f.dataset.id);if(p){const k=p.f.chk,o=p.f,v=fbParse(fd(f)),ed=p.ed||(p.ed=[]);FBK7.forEach(x=>{if(v[x]!==(o[x]||'')&&!ed.includes(x))ed.push(x)});v.r.forEach((n,i)=>{if(n!==((o.r||[])[i]||0)&&!ed.includes('r'+i))ed.push('r'+i)});p.f=v;p.f.chk=k;fbSave()}}
 ACT.fbPrev=el=>{const f=el.closest('form'),i=f&&f.elements[el.dataset.n];if(i)i.value=el.dataset.v;const b=el.closest('.fbprev');if(b)b.remove()};
 ACT.fbSkip=()=>{const P=FBL.pend,c=cur(),i=P.findIndex(x=>x.id===c.a);fbKeep();if(P[i+1]){c.a=P[i+1].id;render(0)}else{NAV.pop();render(0)}};
-ACT.fbZoom=el=>{const u=FBI[el.dataset.id];if(!u)return;dlg(`<div style="max-height:80vh;overflow:auto;border-radius:8px"><img id="fbz" src="${u}" alt="הדף המקורי" data-a="fbZ2" style="width:100%;cursor:zoom-in;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)};
+ACT.fbZoom=el=>{const u=FBI[el.dataset.id];if(!u)return;if(!imgOk(u))return toast('התמונה לא תקינה ולא תוצג');dlg(`<div style="max-height:80vh;overflow:auto;border-radius:8px"><img id="fbz" src="${esc(u)}" alt="הדף המקורי" data-a="fbZ2" style="width:100%;cursor:zoom-in;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)};
 ACT.fbZ2=el=>{const big=el.style.width!=='100%';el.style.width=big?'100%':'230%';el.style.cursor=big?'zoom-in':'zoom-out'};
 ACT.fbDrop=el=>ask(FBL.pend.find(x=>x.id===el.dataset.id&&x.cloud)?'למחוק את הדף הזה גם מהענן?':'למחוק את הדף הזה?',async()=>{const id=el.dataset.id,P=FBL.pend,i=P.findIndex(x=>x.id===id);if(i<0)return;if(P[i].cloud){try{await fsx('/fb/'+id,{method:'DELETE'})}catch(e){return toast(e.offline?'אין חיבור לאינטרנט':'המחיקה נכשלה')}}P.splice(i,1);fbDel(id);fbSave();const n=P[i]||P[i-1];if(n)cur().a=n.id;else NAV.pop();render(0)},'מחק');
 FRM.fbsave=f=>{const id=f.dataset.id,P=FBL.pend,i=P.findIndex(x=>x.id===id);if(i<0)return;const p=P[i],v=fbParse(fd(f));
@@ -2231,7 +2233,7 @@ const fbAvg=(rows,i)=>{const a=rows.map(r=>r.f.r[i]).filter(Boolean);return a.le
 function fbTable(){const rows=fbRows(),dup={};FBL.cache.forEach(r=>{const k=String(r.f.inv||'').trim();if(k)dup[k]=(dup[k]||0)+1});
  const th=(n,l,t)=>`<th${t?` title="${esc(t)}"`:''}><small>${n}</small> ${l}</th>`;
  return `<table class="fbt"><thead><tr>${th(5,'שם')}${th(6,'טלפון')}${th(7,'כתובת')}${th(1,'חשבונית')}${th(2,'סכום')}${FBCATS.map(([t,s],i)=>th(8+i,s,t)).join('')}${th(3,'אהבו')}${th(4,'לשפר')}<th>תאריך עברי</th><th>פרשה</th><th>טופס</th></tr></thead><tbody>
- ${rows.map(r=>{const f=r.f,d=fbAdmin()&&dup[String(f.inv||'').trim()]>1&&f.inv;return `<tr data-a="fbEdit" data-id="${esc(r.id)}"><td class="nm">${esc(f.name)||'<i>ללא שם</i>'}</td><td>${esc(f.phone)}</td><td>${esc(f.addr)}</td><td>${d?'<span title="מספר חשבונית כפול" style="color:var(--warn)">⚠ </span>':''}${esc(f.inv)}</td><td>${esc(f.amt)}</td>${f.r.map(n=>`<td class="c">${n||''}</td>`).join('')}<td class="tx">${esc(f.love)}</td><td class="tx">${esc(f.imp)}</td><td style="white-space:nowrap">${esc(heb(f.dt||fbIso(r.at)))}</td><td style="white-space:nowrap">${esc(f.pr)}</td><td>${r.hi?`<button class="chip" style="min-height:34px;padding:0 10px" data-a="fbView" data-id="${esc(r.id)}">טופס</button>`:''}</td></tr>`}).join('')||`<tr><td colspan="16" class="note">אין רשומות מתאימות.</td></tr>`}</tbody>
+ ${rows.map(r=>{const f=r.f,d=fbAdmin()&&dup[String(f.inv||'').trim()]>1&&f.inv;return `<tr data-a="fbEdit" data-id="${esc(r.id)}"><td class="nm">${esc(f.name)||'<i>ללא שם</i>'}</td><td>${esc(f.phone)}</td><td>${esc(f.addr)}</td><td>${d?'<span title="מספר חשבונית כפול" style="color:var(--warn)">⚠ </span>':''}${esc(f.inv)}</td><td>${esc(f.amt)}</td>${f.r.map(n=>`<td class="c">${esc(n||'')}</td>`).join('')}<td class="tx">${esc(f.love)}</td><td class="tx">${esc(f.imp)}</td><td style="white-space:nowrap">${esc(heb(f.dt||fbIso(r.at)))}</td><td style="white-space:nowrap">${esc(f.pr)}</td><td>${r.hi?`<button class="chip" style="min-height:34px;padding:0 10px" data-a="fbView" data-id="${esc(r.id)}">טופס</button>`:''}</td></tr>`}).join('')||`<tr><td colspan="16" class="note">אין רשומות מתאימות.</td></tr>`}</tbody>
  <tfoot><tr><td class="nm">ממוצע (${rows.length})</td><td></td><td></td><td></td><td></td>${[0,1,2,3,4,5].map(i=>`<td class="c"><b>${fbAvg(rows,i)}</b></td>`).join('')}<td></td><td></td><td></td><td></td><td></td></tr></tfoot></table>`}
 const fbSel=(l,k)=>`<label class="f" style="margin:0;flex:1;min-width:120px"><span>${l}</span><select data-c="fbfl" data-k="${k}">${[['','הכול'],['y','רק מי שמילא'],['n','רק מי שלא מילא']].map(([v,t])=>`<option value="${v}"${FBF[k]===v?' selected':''}>${t}</option>`).join('')}</select></label>`;
 V.fbTab=()=>{if(!fbRole())return{t:'משוב לקוחות',h:'<p class="note">צריך להתחבר.</p>'};
@@ -2249,7 +2251,7 @@ CHG.fbfl=el=>{FBF[el.dataset.k]=el.value;fbRedraw()};
 ACT.fbClr=()=>{FBF.q='';FBF.love=FBF.imp=FBF.addr='';rerender()};
 ACT.fbRefresh=async()=>{try{const n=await fbLoad();toast('נטענו '+n);rerender()}catch(e){toast(e.offline?'אין חיבור':'שגיאה: '+(e.message||e))}};
 ACT.fbView=async(el,ev)=>{if(ev)ev.stopPropagation();const id=el.dataset.id;dlg('<h3>הטופס המקורי</h3><p class="note" id="fbvl">טוען…</p><div id="fbvw" style="max-height:75vh;overflow:auto;border-radius:8px"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>');
- try{const u=await fbImg(id);const w=document.getElementById('fbvw');if(!w)return;if(!u){document.getElementById('fbvl').textContent='אין תמונה לרשומה הזו';return}document.getElementById('fbvl').remove();w.innerHTML=`<img src="${u}" alt="הדף המקורי" data-a="fbZ2" style="width:100%;cursor:zoom-in;display:block">`}catch(e){const l=document.getElementById('fbvl');if(l)l.textContent=e.offline?'אין חיבור לאינטרנט':'התמונה לא נטענה'}};
+ try{const u=await fbImg(id);const w=document.getElementById('fbvw');if(!w)return;if(!u){document.getElementById('fbvl').textContent='אין תמונה לרשומה הזו';return}if(!imgOk(u)){document.getElementById('fbvl').textContent='התמונה לא תקינה ולא תוצג';return}document.getElementById('fbvl').remove();w.innerHTML=`<img src="${esc(u)}" alt="הדף המקורי" data-a="fbZ2" style="width:100%;cursor:zoom-in;display:block">`}catch(e){const l=document.getElementById('fbvl');if(l)l.textContent=e.offline?'אין חיבור לאינטרנט':'התמונה לא נטענה'}};
 /* עריכה (מנהל) */
 V.fbEdit=id=>{const r=FBL.cache.find(x=>x.id===id);if(!r||!fbAdmin())return{t:'עריכה',h:'<p class="note">הרשומה לא נמצאה.</p>'};fbLoadImg(id);
  return{t:'עריכת משוב',s:esc(r.f.name||''),h:`<div class="fbsplit${r.hi?'':' one'}">
@@ -2415,19 +2417,20 @@ ACT.tkOk=el=>{const t=tkGet(el.dataset.id);if(!t)return;tkDo(()=>tkPatch(t.id,{s
 ACT.tkRej=el=>{const t=tkGet(el.dataset.id);if(!t)return;dlg(`<h3>${t.pr==='1'?'למה התמונה לא מאושרת?':'למה מחזירים את המשימה?'}</h3><form data-f="tkRej" data-id="${esc(t.id)}"><label class="f"><span>הערה לעובד</span><textarea name="note" maxlength="300" required></textarea></label><div class="row"><button class="btn r grow">החזר לעובד</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.tkRej=f=>{const id=f.dataset.id,t=tkGet(id),note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');closeDlg();tkDo(()=>tkPatch(id,{st:'open',img:'',sub:0,doneBy:'',note,rt:t&&t.pr!=='1'?'1':''}),'המשימה הוחזרה לעובד')};
 ACT.tkDel=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('למחוק את המשימה לצמיתות?',()=>tkDo(()=>fsx('/tasks/'+t.id,{method:'DELETE'}),'המשימה נמחקה'),'מחק')};
-ACT.tkImg=async el=>{try{const d=await fsx('/tasks/'+el.dataset.id),u=gv(d,'img');if(!u)return toast('אין תמונה');dlg(`<div style="max-height:75vh;overflow:auto;border-radius:8px"><img src="${esc(u)}" alt="תמונת ביצוע" style="width:100%;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)}catch(e){toast(tkErr(e))}};
+ACT.tkImg=async el=>{try{const d=await fsx('/tasks/'+el.dataset.id),u=gv(d,'img');if(!u)return toast('אין תמונה');if(!imgOk(u))return toast('התמונה לא תקינה ולא תוצג');dlg(`<div style="max-height:75vh;overflow:auto;border-radius:8px"><img src="${esc(u)}" alt="תמונת ביצוע" style="width:100%;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)}catch(e){toast(tkErr(e))}};
 /* תגובות: השרשור נטען רק כשפותחים אותו. בחלון (dlg) – ולכן tkRe לא בונה את המסך מחדש בזמן שמקלידים */
 async function tkCmLoad(id){const L=[];let pt='';do{const r=await fsx('/tasks/'+id+'/c?pageSize=300'+(pt?'&pageToken='+encodeURIComponent(pt):''));((r&&r.documents)||[]).forEach(d=>L.push({id:idOf(d),uid:gv(d,'uid'),by:gv(d,'by'),txt:gv(d,'txt'),t:gi(d,'t')}));pt=(r&&r.nextPageToken)||''}while(pt);return L.sort((a,b)=>a.t-b.t)}
 function tkCmView(t,L){const adm=fbAdmin();return `<h3>💬 תגובות</h3><p class="note" style="white-space:pre-wrap;margin:0 0 8px;max-height:4.5em;overflow:hidden">${esc(t.txt)}</p>
  <div class="tkcm" style="max-height:45vh;overflow:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px">${L.length?L.map(c=>`<div class="card" style="margin:0;padding:8px 10px;${c.uid===SY.uid?'border-color:var(--acc)':''}"><div class="row" style="justify-content:space-between;align-items:center;gap:6px"><span class="note" style="margin:0">${esc(c.by||'—')}${c.uid===SY.uid?' (אני)':''} · ${tkDT(c.t)}</span>${adm?`<button class="btn g" data-a="tkCmDel" data-id="${esc(t.id)}" data-cid="${esc(c.id)}" aria-label="מחק תגובה" style="padding:2px 8px;min-height:0">🗑</button>`:''}</div><div style="white-space:pre-wrap;margin-top:4px">${esc(c.txt)}</div></div>`).join(''):'<p class="note">עוד אין תגובות.</p>'}</div>
- <form data-f="tkCm" data-id="${esc(t.id)}"><label class="f"><span>תגובה</span><textarea name="txt" maxlength="500" required placeholder="כתוב תגובה…"></textarea></label>
- ${adm&&(t.st==='done'||t.st==='wait')?'<label style="display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" name="back" value="1" checked> להחזיר לעובד (המשימה תיפתח שוב אצלו)</label>':''}${!adm&&t.st==='open'&&t.pr!=='1'&&t.nc!=='1'?'<p class="note" style="margin:0 0 8px">שים לב: אחרי שתכתוב הערה, "בוצע" במשימה הזו יעבור לאישור המנהל.</p>':''}<div class="row"><button class="btn grow">שלח</button><button type="button" class="btn g grow" data-a="closeDlg">סגור</button></div></form>`}
+ ${!adm&&t.st!=='open'?'<p class="note" style="margin:0 0 8px">המשימה נסגרה, אי אפשר להוסיף הערה.</p><button type="button" class="btn g w" data-a="closeDlg">סגור</button>':`<form data-f="tkCm" data-id="${esc(t.id)}"><label class="f"><span>תגובה</span><textarea name="txt" maxlength="500" required placeholder="כתוב תגובה…"></textarea></label>
+ ${adm&&(t.st==='done'||t.st==='wait')?'<label style="display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" name="back" value="1" checked> להחזיר לעובד (המשימה תיפתח שוב אצלו)</label>':''}${!adm&&t.st==='open'&&t.pr!=='1'&&t.nc!=='1'?'<p class="note" style="margin:0 0 8px">שים לב: אחרי שתכתוב הערה, "בוצע" במשימה הזו יעבור לאישור המנהל.</p>':''}<div class="row"><button class="btn grow">שלח</button><button type="button" class="btn g grow" data-a="closeDlg">סגור</button></div></form>`}`}
 async function tkCmOpen(id){const t=tkGet(id);if(!t)return;dlg('<h3>💬 תגובות</h3><p class="note">טוען…</p>');let L;
  try{L=await tkCmLoad(id)}catch(e){dlg(`<h3>💬 תגובות</h3><p class="note" style="color:var(--bad)">${esc(tkErr(e))}</p><button class="btn g w" data-a="closeDlg">סגור</button>`);return}
  TKC[id]={s:Math.max(Date.now(),t.cAt||0,L.length?L[L.length-1].t:0),n:L.length};tkcSave();tkRe();dlg(tkCmView(t,L));const b=document.querySelector('#dlg .tkcm');if(b)b.scrollTop=b.scrollHeight}
 ACT.tkCm=el=>tkCmOpen(el.dataset.id);
 FRM.tkCm=async f=>{const id=f.dataset.id,x=fd(f),txt=String(x.txt||'').trim().slice(0,500);if(!txt)return toast('כתוב תגובה');const b=f.querySelector('button');if(b)b.disabled=true;
  const adm=fbAdmin(),t=tkGet(id),back=adm&&!!x.back&&!!t&&(t.st==='done'||t.st==='wait');
+ if(!adm&&t&&t.st!=='open'){if(b)b.disabled=false;return toast('המשימה נסגרה, אי אפשר להוסיף הערה')}
  /* עובד: קודם מסמנים במשימה "יש הערת עובד" (nc) – בלי הסימון הכללים לא מקבלים את התגובה. מעכשיו "בוצע" שלו עובר לאישור המנהל */
  if(!adm&&!(t&&t.nc==='1')){try{await tkPatch(id,{nc:'1'});if(t){t.nc='1';tkSave()}}catch(e){toast(tkErr(e));if(b)b.disabled=false;return}}
  const now=Date.now(),fields={uid:sv(SY.uid),by:sv(fbBy()),txt:sv(txt),t:iv(now)};
@@ -2918,7 +2921,7 @@ FRM.arAdd=async f=>{if(AR.busy)return;const txt=String(fd(f).txt||'').trim().sli
  AR.busy=0;toast(bad?'הבקשה נשלחה, אבל התמונות לא עלו':'✓ הבקשה נשלחה');AR.f='';if(cur().v==='ar')rerender();arLoad().catch(()=>{})};
 ACT.arImg=async el=>{const x=(AR.L||[]).find(z=>z.id===el.dataset.id);if(!x||!x.np)return;toast('טוען תמונות…');let du='';
  try{for(let k=0;k<x.np;k++)du+=gv(await fsx('/appreq/'+x.id+'/p/'+k),'data')}catch(e){return toast(e.offline?e.message:(e.code===404?'התמונות של הבקשה הזו לא עלו במלואן':'טעינת התמונות נכשלה'))}
- let ok=false;try{ok=du.startsWith('PAGES:')&&JSON.parse(du.slice(6)).length>0}catch(e){}if(!ok)return toast('התמונות של הבקשה הזו לא עלו במלואן');
+ let P=null;try{P=du.startsWith('PAGES:')?JSON.parse(du.slice(6)):null}catch(e){}if(!Array.isArray(P)||!P.length)return toast('התמונות של הבקשה הזו לא עלו במלואן');if(!P.every(imgOk))return toast('התמונה לא תקינה ולא תוצג');
  viewImg('','LargePami_request_'+x.id,du)};
 ACT.arSt=el=>{const x=(AR.L||[]).find(z=>z.id===el.dataset.id);if(!x)return;
  dlg(`<h3>סטטוס הבקשה</h3><p class="note" style="white-space:pre-wrap;max-height:4.5em;overflow:hidden;margin:0 0 8px">${esc(x.txt)}</p><form data-f="arSt" data-id="${esc(x.id)}">

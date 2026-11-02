@@ -161,11 +161,12 @@ service cloud.firestore {
               && nw().img == od().img && nw().late == od().late && nw().ok == od().ok)
           );
       }
-      // סימון "יש הערת עובד": רק השדה nc, רק לערך '1' (אי אפשר להסיר), ורק במשימה שהעובד רשאי לקרוא.
+      // סימון "יש הערת עובד": רק השדה nc, רק לערך '1' (אי אפשר להסיר), ורק במשימה פתוחה (st 'open').
+      // אחרי "בוצע" (done או wait) העובד כבר לא מוסיף הערה (החלטת בעל העסק 2.11.2026).
       function ncMark() {
         return nw().diff(od()).affectedKeys().hasOnly(['nc'])
           && nw().get('nc', '') == '1'
-          && (od().open == '1' || od().late == '1');
+          && od().st == 'open' && od().open == '1';
       }
       // סימון "תגובה חדשה": רק cAt (זמן התגובה האחרונה, לפי שעון השרת) ו-cBy (המגיב עצמו),
       // ורק במשימה שהמגיב רשאי לקרוא.
@@ -194,7 +195,8 @@ service cloud.firestore {
       allow delete: if isManager();
 
       // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
-      // עובד מגיב רק אחרי שהמשימה סומנה nc == '1' (ncMark) – כך לכל הערת עובד חדשה יש סימון על המשימה.
+      // עובד מגיב רק במשימה פתוחה (st 'open', כולל משימה שהמנהל החזיר), ורק אחרי שהיא סומנה nc == '1' (ncMark) –
+      // כך לכל הערת עובד חדשה יש סימון על המשימה. מנהל מגיב תמיד.
       match /c/{cid} {
         function task() { return get(/databases/$(database)/documents/tasks/$(id)).data; }
         function canReadTask() {
@@ -210,7 +212,7 @@ service cloud.firestore {
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
           && nowOk(nw().t)
-          && (isManager() || task().get('nc', '') == '1');
+          && (isManager() || (task().get('nc', '') == '1' && task().st == 'open'));
         allow update: if false;
         allow delete: if isManager();
       }
