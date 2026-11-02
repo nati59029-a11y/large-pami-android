@@ -22,7 +22,8 @@ const MSG={ // הודעות לפי reason מהשרת (גיבוי, אם ההוד�
  'no-key':'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.','bad-request-id':'הבקשה לא תקינה. נסו שוב.','bad-promo-key':'הבקשה לא תקינה. נסו שוב.','bad-input':'הקלט לא תקין.',
  'bad-date':'תאריך ההורדה לא תקין.','date-past':'תאריך ההורדה כבר עבר.','date-too-far':'תאריך ההורדה רחוק מדי.','daily-limit':'כבר שלחת היום צינתוק לנרשמים.',
  'not-signed-in':'צריך להתחבר לאפליקציה.','not-staff':'אין לך הרשאה לשלוח לקו.','staff-disabled':'המשתמש שלך מושבת. פנו למנהל.',
- 'opening-verify-failed':'הפתיחה לא עודכנה כמו שצריך ושוחזרה. נסו שוב.','opening-unexpected':'הגדרת הפתיחה בקו לא במבנה הצפוי, ולכן לא שונתה. פנו לתמיכה.','backup-failed':'לא הצלחנו לגבות את מבנה הקו, ולכן לא שינינו כלום. נסו שוב.','internal':'שגיאה בפעולה מול הקו.'};
+ 'opening-verify-failed':'הפתיחה לא עודכנה כמו שצריך ושוחזרה. נסו שוב.','opening-unexpected':'הגדרת הפתיחה בקו לא במבנה הצפוי, ולכן לא שונתה. פנו לתמיכה.','backup-failed':'לא הצלחנו לגבות את מבנה הקו, ולכן לא שינינו כלום. נסו שוב.','internal':'שגיאה בפעולה מול הקו.',
+ 'voice-unavailable':'הקול האנושי לא זמין כרגע. אפשר לשלוח בקול הממוחשב, או לנסות שוב מאוחר יותר.','voice-quota':'הגענו לתקרת הקול האנושי לחודש הזה.','opening-legacy-file':'בקו יש הקלטת פתיחה ישנה שלא הועלתה מהאפליקציה, ולכן הפתיחה לא הוחלפה. פנו לתמיכה.'};
 const STATUS={UNAUTHENTICATED:'צריך להתחבר לאפליקציה מחדש.',PERMISSION_DENIED:'אין לך הרשאה לפעולה הזו.',UNAVAILABLE:'השרת לא זמין כרגע. נסו שוב מאוחר יותר.',DEADLINE_EXCEEDED:'השרת לא הגיב בזמן. נסו שוב.'};
 const he=s=>typeof s==='string'&&/[֐-׿]/.test(s);
 const rand=()=>(crypto.randomUUID?crypto.randomUUID().replace(/-/g,''):Date.now().toString(36)+Math.random().toString(36).slice(2,12)+Math.random().toString(36).slice(2,12)).slice(0,24);
@@ -85,7 +86,7 @@ V.yl=a=>{a=a||'';
  getD();setTimeout(()=>ylLoad(a),0);
  return({'':vMain,'1':vRecipes,'2':vPromos,'3':vUpdates,'4':vHours,open:vOpen,lex:vLex}[a]||vMain)()};
 function vMain(){const m=isA();
- return{t:'שלוחות הקו',s:m?'מנהל':'עובד',h:`<p class="note" style="margin:0 0 12px">בוחרים שלוחה, כותבים או מקליטים, שומעים איך זה ייראה, ורק אחרי אישור זה עולה לקו.</p>
+ return{t:'שלוחות הקו',s:m?'מנהל':'עובד',h:`<p class="note" style="margin:0 0 12px">בוחרים שלוחה, כותבים או מקליטים, שומעים איך זה ייראה, ורק אחרי אישור זה עולה לקו.</p>${m?'<div id="ylVoice"></div>':''}
  ${opt('1','שלוחה 1 · מתכונים','כתיבה או סריקה מצילום · החדש מושמע ראשון')}
  ${opt('2','שלוחה 2 · מבצעים','בחירת מבצע מהמדף, תיקון נוסח ושליחה')}
  ${opt('3','שלוחה 3 · עדכונים','הקלדה או הקלטה · החדש מושמע ראשון')}
@@ -94,8 +95,14 @@ function listHtml(slot){
  const L=Y.st&&Y.st.r&&Y.st.r.slots&&Y.st.r.slots[slot];if(!L)return'<p class="note">טוען…</p>';
  if(!L.length)return'<p class="note">עוד לא נשלחו פריטים דרך האפליקציה. קבצים שהיו בקו לפני כן נשארים כמו שהם.</p>';
  return L.map((x,i)=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.title||x.file||'ללא שם')}</b><small>${esc(fdt(x.createdAt))}${x.byRole?' · '+(x.byRole==='manager'?'מנהל':'עובד'):''}${i===0?' · מושמע ראשון':''}${x.status==='remove-failed'?' · ההסרה נכשלה':''}</small></div>${isA()?`<button class="btn s r" data-a="ylRm" data-id="${esc(x.id)}">הסר</button>`:''}</div>`).join('')}
+// הודעה למנהל כשהקול האנושי קרוב לתקרה החודשית או עבר אותה (מ-getLineState)
+function paintVoice(v){const el=document.getElementById('ylVoice'),q=v&&v.quota;if(!el)return;
+ if(!q||!(q.near||q.capHitAt)){el.innerHTML='';return}
+ const over=q.used>=q.limit||!!q.capHitAt;
+ el.innerHTML=`<div class="card" style="border-color:var(--warn)"><b style="color:var(--warn)">${over?'הקול האנושי הגיע לתקרה החודשית':'הקול האנושי קרוב לתקרה החודשית'}</b><p class="note" style="margin:4px 0 0">נוצלו ${(+q.used).toLocaleString('he-IL')} מתוך ${(+q.limit).toLocaleString('he-IL')} תווים החודש. ${over?'שליחה שלא נכנסת בתקרה תציע לשלוח בקול הממוחשב.':'כשהתקרה תיגמר, שליחה תציע לשלוח בקול הממוחשב.'} התקרה מתחדשת ב-1 לחודש.</p></div>`}
 function paintList(slot){const el=document.getElementById('ylList');if(el)el.innerHTML=listHtml(slot)}
 async function ylLoad(a,force){
+ if(a===''&&isA()){try{const s=await state(force);if(here(''))paintVoice(s.r&&s.r.voice)}catch(e){}return} // מנהל: מצב התקרה של הקול האנושי
  if(!here(a)||!['1','3','4','open','lex'].includes(a))return;
  const el=document.getElementById('ylList'),fail=e=>{if(here(a)&&el)el.innerHTML=`<p class="note" style="color:var(--bad)">לא הצלחנו לטעון: ${esc(errMsg(e))}</p>`};
  try{
@@ -282,23 +289,36 @@ ACT.ylDays=el=>{const c=Y.c;if(!c||c.busy)return;c.until=addDays(isoDay(new Date
  if(c.untilField){getD()[c.untilField]=c.until;save()}if(c.manual){getD().mu=c.until;save()}cRetext();cDraw()};
 ACT.ylCCancel=()=>{if(Y.c&&Y.c.busy)return;Y.c=null;try{window.ypStop&&ypStop()}catch(e){}closeDlg()};
 function cReq(c){ // אותו תוכן = אותו requestId בניסיון חוזר (השרת לא מעלה פעמיים); תוכן אחר = חדש
- const sig=JSON.stringify([c.kind,c.slot,c.text,c.until,c.withTz,c.b64?c.b64.length:0]);
+ const sig=JSON.stringify([c.kind,c.slot,c.text,c.until,c.withTz,c.b64?c.b64.length:0,c.engine||'']);
  if(!c.rid||c.sig!==sig){c.rid='yl'+rand();c.sig=sig}
  const text=String(c.text||'').trim();
  if(c.kind==='audio')return['publishLineItem',{requestId:c.rid,slot:'updates',audio:{mimeType:'audio/wav',data:c.b64},source:'recording'}];
  if(c.kind==='promo'){const p={requestId:c.rid,promoKey:c.manual?c.key:c.promo.key,text,until:c.until,withTzintuk:c.withTz===true,origin:'builder'};
-  if(c.manual)p.manual=true;else p.source={size:c.promo.k,index:c.promo.i,name:c.promo.name};return['sendPromoToLine',p]}
- const p={requestId:c.rid,slot:c.slot,text,source:c.source};if(c.untilReq&&c.slot==='hours')p.until=c.until;return['publishLineItem',p]}
-ACT.ylCOk=async el=>{
- const c=Y.c;if(!c||c.busy||Y.sending||cBad(c))return; // נעילה סינכרונית: לחיצה כפולה לא עוברת
- c.busy=true;Y.sending=true;c.withTz=el.dataset.tz==='1'&&isA();cDraw();
- try{const [fn,p]=cReq(c),res=await call(fn,p,75000);
+  if(c.manual)p.manual=true;else p.source={size:c.promo.k,index:c.promo.i,name:c.promo.name};if(c.engine)p.engine=c.engine;return['sendPromoToLine',p]}
+ const p={requestId:c.rid,slot:c.slot,text,source:c.source};if(c.untilReq&&c.slot==='hours')p.until=c.until;if(c.engine)p.engine=c.engine;return['publishLineItem',p]}
+// שליחה אחת (גם שליחה חוזרת בקול הממוחשב). זמן המתנה: ההקראה בקול המשוכפל + ההעלאה לימות (השרת: עד 120 שניות)
+async function cSend(c){
+ const [fn,p]=cReq(c),res=await call(fn,p,130000);
   Y.c=null;try{window.ypStop&&ypStop()}catch(e){}closeDlg();
   let m=c.kind==='promo'?(res&&he(res.message)?res.message:res&&res.duplicate?'המבצע הזה כבר נשלח.':c.withTz&&res&&res.tzintuk==='failed'?'ההודעה עלתה לקו, אבל הצינתוק לא נשלח.':c.withTz?'✓ המבצע נשלח לקו, ונשלח צינתוק לנרשמים.':'✓ המבצע הועלה לקו, בלי צינתוק.')
    :(res&&he(res.message)?res.message:'✓ עלה לקו');
   if(res&&res.warnings&&res.warnings.includes('yemot-remove-failed'))m+=' (הסרת הקודם נכשלה)';
   if(c.clear)c.clear();Y.st=null;Y.files=null;toast(m);
   if(cur().v==='yl')redraw()}
- catch(e){c.busy=false;const w=document.getElementById('ylCWhy'),m=errMsg(e);cDraw();if(w){w.textContent=m;w.style.display=''}toast(m)}
+ACT.ylCOk=async el=>{
+ const c=Y.c;if(!c||c.busy||Y.sending||cBad(c))return; // נעילה סינכרונית: לחיצה כפולה לא עוברת
+ c.busy=true;Y.sending=true;c.withTz=el.dataset.tz==='1'&&isA();cDraw();
+ try{await cSend(c)}
+ catch(e){c.busy=false;
+  // הקול האנושי לא זמין / תקרה: לא עוברים לבד לקול הממוחשב – המשתמש בוחר. הטיוטה נשמרת בכל מקרה
+  if(window.ypIsVoiceErr&&ypIsVoiceErr(e)&&window.ypChoice){Y.st=null;cVoiceChoice(c,e);return}
+  const w=document.getElementById('ylCWhy'),m=errMsg(e);cDraw();if(w){w.textContent=m;w.style.display=''}toast(m)}
  finally{Y.sending=false}};
+function cVoiceChoice(c,e){
+ ypChoice(e,{
+  onTts:async()=>{if(Y.c!==c)throw Object.assign(new Error('gone'),{userMsg:'החלון נסגר. הטיוטה נשמרה – פתחו ושלחו שוב.'});
+   if(Y.sending)throw Object.assign(new Error('busy'),{userMsg:MSG.busy});
+   c.engine='tts';c.busy=true;Y.sending=true;
+   try{await cSend(c)}catch(err){c.busy=false;c.engine=null;err.userMsg=errMsg(err);throw err}finally{Y.sending=false}},
+  onLater:()=>{if(Y.c===c)Y.c=null}})}
 })();

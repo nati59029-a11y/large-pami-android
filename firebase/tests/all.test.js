@@ -10,6 +10,7 @@ require('./40-storage-matrix');
 require('./50-functions');
 require('./60-yemot');
 require('./61-yemot-line');
+require('./62-voice');
 require('./90-coverage');
 const H = require('./helpers');
 after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* האמולטור כבר נסגר */ } });

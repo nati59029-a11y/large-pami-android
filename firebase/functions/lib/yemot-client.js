@@ -58,11 +58,12 @@ async function uploadText(ctx, what, contents) {
 
 // קובץ שמע: UploadFile (multipart). מתועד ב-api-55: convertAudio=1 ממיר לפורמט הטלפוני, ו-path חייב להסתיים ב-.wav.
 // (לא מאומת): שם שדה הקובץ בהעלאה רגילה – qqfile מופיע בתיעוד רק בהעלאה בחלקים.
-async function uploadBinary(ctx, path, buf, mime) {
+// srcName: שם הקובץ המקורי (למשל 004.mp3 – לפי הפורמט האמיתי). בלי – שם היעד.
+async function uploadBinary(ctx, path, buf, mime, srcName) {
   const form = new FormData();
   form.append('path', path);
   form.append('convertAudio', '1');
-  form.append('qqfile', new Blob([buf], { type: mime }), String(path).split('/').pop());
+  form.append('qqfile', new Blob([buf], { type: mime }), srcName || String(path).split('/').pop());
   let r;
   try {
     r = await fetch(ctx.base + 'UploadFile', { method: 'POST', headers: { authorization: ctx.key }, body: form, signal: AbortSignal.timeout(ctx.timeoutMs) });
