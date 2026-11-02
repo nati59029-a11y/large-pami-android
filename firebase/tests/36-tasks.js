@@ -110,6 +110,49 @@ describe('משימות (tasks)', () => {
     await assertFails(emp.collection('tasks').where('st', '==', 'done').get());
   });
 
+  // סיכום משימות: עובד פעיל קורא גם משימה שהוא עצמו ביצע (doneBy בשמו), כולל משימה שבוצעה בזמן
+  describe('סיכום משימות – משימה שהעובד ביצע', () => {
+    const mineDone = (uid) => newTask(H.OTHER, { st: 'done', open: '', sub: Date.now() - 2000, ok: Date.now() - 2000, doneBy: uid, late: '' });
+    beforeEach(async () => {
+      await env.withSecurityRulesDisabled(async (c) => {
+        const d = c.firestore();
+        await d.doc('tasks/t_emp_done').set(mineDone('u_emp'));
+        await d.doc('tasks/t_emp_done_uc').set(mineDone('U_Emp'));
+        await d.doc('tasks/t_off_done').set(mineDone('u_off'));
+        await d.doc('tasks/t_out_done').set(mineDone('u_out'));
+      });
+    });
+
+    it('עובד פעיל קורא משימה שהוא ביצע (גם כשהשם נשמר באותיות גדולות), ושאילתה לפי doneBy בשמו', async () => {
+      await assertSucceeds(emp.doc('tasks/t_emp_done').get());
+      await assertSucceeds(emp.doc('tasks/t_emp_done_uc').get());
+      const q = await assertSucceeds(emp.collection('tasks').where('doneBy', '==', 'u_emp').get());
+      if (!q.docs.some((x) => x.id === 't_emp_done')) throw new Error('השאילתה לא החזירה את המשימה של העובד');
+      await assertSucceeds(emp.collection('tasks').where('doneBy', '==', 'U_Emp').get());
+    });
+
+    it('עובד לא קורא משימה שעובד אחר (או המנהל) ביצע, ולא שואל בלי סינון לפי שמו', async () => {
+      await assertFails(emp.doc('tasks/t_done').get());
+      await assertFails(emp.doc('tasks/t_off_done').get());
+      await assertFails(emp.collection('tasks').where('doneBy', '==', H.OTHER).get());
+      await assertFails(emp.collection('tasks').where('doneBy', '==', 'u_mgr').get());
+      await assertFails(emp.collection('tasks').where('doneBy', '==', '').get());
+      await assertFails(emp.collection('tasks').where('st', '==', 'done').get());
+      await assertFails(emp.collection('tasks').where('cr', '>=', 0).get());
+      await assertFails(emp.collection('tasks').get());
+      // טוקן בלי אימייל – נחסם
+      await assertFails(env.authenticatedContext('u_emp').firestore().doc('tasks/t_emp_done').get());
+    });
+
+    it('עובד מושבת ומחובר שאינו ב-staff לא קוראים משימה שהם ביצעו', async () => {
+      const off = db('disabledEmployee'), out = db('signedIn');
+      await assertFails(off.doc('tasks/t_off_done').get());
+      await assertFails(off.collection('tasks').where('doneBy', '==', 'u_off').get());
+      await assertFails(out.doc('tasks/t_out_done').get());
+      await assertFails(out.collection('tasks').where('doneBy', '==', 'u_out').get());
+    });
+  });
+
   for (const role of ['signedIn', 'disabledEmployee', 'guest']) {
     it(`${role}: נחסם בכל פעולה על משימות ותגובות`, async () => {
       const d = db(role); const me = H.UID[role] || 'nobody'; const n = Date.now();

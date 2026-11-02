@@ -161,8 +161,10 @@ service cloud.firestore {
           && nowOk(nw().cAt)
           && (isManager() || od().open == '1' || od().late == '1');
       }
+      // סיכום משימות: עובד פעיל קורא גם משימה שהוא עצמו ביצע (doneBy בשמו), כולל כזו שבוצעה בזמן.
       allow read: if isManager()
-        || (isStaff() && (resource.data.open == '1' || resource.data.late == '1'));
+        || (isStaff() && (resource.data.open == '1' || resource.data.late == '1'))
+        || (isActiveEmployee() && isMyName(resource.data.doneBy));
       allow create: if isStaff()
         && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
         && nw().owner == request.auth.uid

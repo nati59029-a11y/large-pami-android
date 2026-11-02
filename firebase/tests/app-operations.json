@@ -431,7 +431,7 @@
   },
   {
    "id": "M26",
-   "line": 2566,
+   "line": 2620,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames()",
    "collection": "bk",
@@ -445,7 +445,7 @@
   },
   {
    "id": "M27",
-   "line": 2566,
+   "line": 2620,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames('fb')",
    "collection": "fb",
@@ -459,7 +459,7 @@
   },
   {
    "id": "M28",
-   "line": 2567,
+   "line": 2621,
    "snippet": "fsx('/bk/'+encodeURIComponent(id),{method:'PATCH'",
    "fn": "bkPut",
    "collection": "bk",
@@ -473,7 +473,7 @@
   },
   {
    "id": "M29",
-   "line": 2585,
+   "line": 2639,
    "snippet": "fsx('/bk/'+encodeURIComponent(n),{method:'DELETE'})",
    "fn": "bkCloud",
    "collection": "bk",
@@ -487,7 +487,7 @@
   },
   {
    "id": "M30",
-   "line": 2596,
+   "line": 2650,
    "snippet": "fsx('/bk/meta')",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -501,7 +501,7 @@
   },
   {
    "id": "M31",
-   "line": 2597,
+   "line": 2651,
    "snippet": "fsx('/bk/d'+m.gen+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -515,7 +515,7 @@
   },
   {
    "id": "M32",
-   "line": 2599,
+   "line": 2653,
    "snippet": "fsx('/bk/'+m.files[id].d+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -629,7 +629,7 @@
   },
   {
    "id": "M43",
-   "line": 2349,
+   "line": 2403,
    "snippet": "fsx('/tasks?documentId='",
    "fn": "FRM.tkAdd",
    "collection": "tasks",
@@ -644,7 +644,7 @@
   },
   {
    "id": "M44",
-   "line": 2356,
+   "line": 2410,
    "snippet": "fsx('/tasks/'+t.id,{method:'DELETE'})",
    "fn": "ACT.tkDel",
    "collection": "tasks",
@@ -658,7 +658,7 @@
   },
   {
    "id": "M45",
-   "line": 2357,
+   "line": 2411,
    "snippet": "fsx('/tasks/'+el.dataset.id)",
    "fn": "ACT.tkImg",
    "collection": "tasks",
@@ -673,7 +673,7 @@
   },
   {
    "id": "M46",
-   "line": 2359,
+   "line": 2413,
    "snippet": "fsx('/tasks/'+id+'/c?pageSize=300'",
    "fn": "tkCmLoad",
    "collection": "tasks_c",
@@ -688,7 +688,7 @@
   },
   {
    "id": "M47",
-   "line": 2369,
+   "line": 2423,
    "snippet": "fsx('/tasks/'+id+'/c?documentId='",
    "fn": "FRM.tkCm",
    "collection": "tasks_c",
@@ -703,7 +703,7 @@
   },
   {
    "id": "M48",
-   "line": 2372,
+   "line": 2426,
    "snippet": "fsx('/tasks/'+id+'/c/'+cid,{method:'DELETE'})",
    "fn": "ACT.tkCmDel",
    "collection": "tasks_c",
@@ -714,6 +714,34 @@
     "manager"
    ],
    "note": "מחיקת תגובה."
+  },
+  {
+   "id": "M51",
+   "line": 2368,
+   "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;",
+   "fn": "tkSumLoad (עובד)",
+   "collection": "tasks",
+   "op": "list",
+   "rest": "POST :runQuery from tasks where doneBy == fbBy(), select TKSF (cr,due,st,sub,late,doneBy), limit 10000",
+   "condition": "doneBy == השם של העובד (isMyName)",
+   "who": [
+    "employee"
+   ],
+   "note": "סיכום משימות: העובד טוען את המשימות שהוא עצמו ביצע (בלי img). הטווח מסונן באפליקציה."
+  },
+  {
+   "id": "M52",
+   "line": 2368,
+   "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;",
+   "fn": "tkSumLoad (מנהל)",
+   "collection": "tasks",
+   "op": "list",
+   "rest": "POST :runQuery from tasks where cr >= from AND cr < to, select TKSF, limit 10000",
+   "condition": "כל המשימות בטווח התאריכים",
+   "who": [
+    "manager"
+   ],
+   "note": "סיכום משימות: המנהל טוען את כל המשימות שנכתבו בתקופה (בלי img)."
   }
  ],
  "fsbLine": 1332,

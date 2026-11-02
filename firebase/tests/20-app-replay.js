@@ -15,6 +15,7 @@ const now = () => new Date().toISOString();
 const bypass = (env, fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
 const iv = (v) => ({ integerValue: String(Math.round(+v || 0)) });
 const TKF = ['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'sub', 'doneBy', 'note', 'ok', 'late', 'cAt', 'cBy'];
+const TKSF = ['cr', 'due', 'st', 'sub', 'late', 'doneBy']; // סיכום המשימות באפליקציה
 // tkQ(where) באפליקציה
 const tkRunQ = (uid, where) => {
   const sq = { from: [{ collectionId: 'tasks' }], select: { fields: TKF.map((f) => ({ fieldPath: f })) }, limit: 1000 };
@@ -227,6 +228,35 @@ const REPLAY = {
     return [await fsx(uid, '/tasks/' + 't_open' + '/c?documentId=' + encodeURIComponent(fresh('c')), { method: 'POST', body: JSON.stringify({ fields }) })];
   } },
   M48: { run: async (uid) => [await fsx(uid, '/tasks/' + 't_open' + '/c/' + 'c1', { method: 'DELETE' })] },
+  // tkSumLoad – עובד: משימות שהוא ביצע (where doneBy == fbBy()), רק השדות של הסיכום
+  M51: { run: async (uid, env) => {
+    const T = Date.now();
+    await bypass(env, (db) => db.doc('tasks/t_sum_' + uid).set({ owner: H.OTHER, by: H.OTHER, role: 'w', txt: 'סיכום', cr: T - 3600000, due: T + 86400000,
+      st: 'done', open: '', pr: '', img: 'data:image/jpeg;base64,AAAA', sub: T - 1000, doneBy: uid, note: '', ok: T - 1000, late: '' }));
+    const sq = { from: [{ collectionId: 'tasks' }], select: { fields: TKSF.map((f) => ({ fieldPath: f })) }, limit: 10000,
+      where: { fieldFilter: { field: { fieldPath: 'doneBy' }, op: 'EQUAL', value: { stringValue: uid } } } };
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: sq }) });
+    if (r.status === 200) {
+      const docs = (r.json || []).filter((x) => x.document);
+      assert.ok(docs.some((x) => x.document.name.endsWith('/t_sum_' + uid)), 'העובד צריך לראות משימה שהוא ביצע בזמן');
+      assert.ok(docs.every((x) => x.document.fields.doneBy.stringValue === uid), 'חזרה משימה שמישהו אחר ביצע');
+      assert.ok(docs.every((x) => !x.document.fields.img), 'השדה img לא אמור לחזור');
+    }
+    return [r];
+  } },
+  // tkSumLoad – מנהל: כל המשימות שנכתבו בטווח (cr >= from AND cr < to)
+  M52: { run: async (uid) => {
+    const T = Date.now();
+    const f = (op, v) => ({ fieldFilter: { field: { fieldPath: 'cr' }, op, value: iv(v) } });
+    const sq = { from: [{ collectionId: 'tasks' }], select: { fields: TKSF.map((x) => ({ fieldPath: x })) }, limit: 10000,
+      where: { compositeFilter: { op: 'AND', filters: [f('GREATER_THAN_OR_EQUAL', T - 2 * 86400000), f('LESS_THAN', T + 86400000)] } } };
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: sq }) });
+    if (r.status === 200) {
+      const ids = (r.json || []).filter((x) => x.document).map((x) => x.document.name.split('/').pop());
+      assert.ok(ids.includes('t_done') && !ids.includes('t_done_late'), 'המנהל צריך לקבל בדיוק את המשימות שנכתבו בטווח');
+    }
+    return [r];
+  } },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,

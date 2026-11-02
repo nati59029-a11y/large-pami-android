@@ -2315,7 +2315,7 @@ function tkTile(){const n=tkOverN();return `<button class="tile" data-a="go" dat
 const tkDT=ms=>ms?new Date(ms).toLocaleString('he-IL',{weekday:'short',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
 let TKT='open';
 V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbAdmin(),L=(TK.L||[]).slice();
- const tabs=[['open','פתוחות',L.filter(t=>t.st!=='done').length],['late','באיחור',L.filter(tkIsLate).length]].concat(adm?[['done','בוצעו',L.filter(t=>t.st==='done').length]]:[]);
+ const tabs=[['open','פתוחות',L.filter(t=>t.st!=='done').length],['late','באיחור',L.filter(tkIsLate).length]].concat(adm?[['done','בוצעו',L.filter(t=>t.st==='done').length]]:[]).concat([['sum','📊 סיכום',0]]);
  if(!tabs.find(x=>x[0]===TKT))TKT='open';
  let S0=TKT==='open'?L.filter(t=>t.st!=='done'):TKT==='late'?L.filter(tkIsLate):L.filter(t=>t.st==='done');
  S0.sort((a,b)=>TKT==='done'?(b.ok-a.ok):(a.due-b.due));
@@ -2338,10 +2338,64 @@ V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbA
   ${adm?'<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" name="pr" value="1"> לבקש תמונה שהמשימה בוצעה</label>':''}
   <p class="note" style="margin:4px 0 8px">יעד לביצוע: 3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p><button class="btn w">הוסף משימה</button></form>
   <div class="chips" style="margin:12px 0">${tabs.map(x=>`<button class="chip ${x[0]===TKT?'on':''}" data-a="tkTab" data-v="${x[0]}">${x[1]}${x[2]?' ('+x[2]+')':''}</button>`).join('')}</div>
-  ${S0.length?S0.map(card).join(''):`<p class="note">${TKT==='open'?'אין משימות פתוחות.':TKT==='late'?'אין משימות באיחור.':'עוד אין משימות שבוצעו.'}</p>`}
+  ${TKT==='sum'?tkSumView():S0.length?S0.map(card).join(''):`<p class="note">${TKT==='open'?'אין משימות פתוחות.':TKT==='late'?'אין משימות באיחור.':'עוד אין משימות שבוצעו.'}</p>`}
   <button class="btn g w" data-a="tkRefresh" style="margin-top:8px">רענן</button>`}};
-ACT.tkTab=el=>{TKT=el.dataset.v;rerender()};
-ACT.tkRefresh=()=>tkDo(()=>Promise.resolve(),'');
+ACT.tkTab=el=>{TKT=el.dataset.v;if(TKT==='sum')TKS.k='';rerender()};
+ACT.tkRefresh=()=>{if(TKT==='sum')TKS.k='';tkDo(()=>Promise.resolve(),'')};
+/* סיכום משימות: בוצעו בזמן / באיחור / סה"כ, לפי תאריך הכתיבה (cr), ליום / שבוע (ראשון–שבת) / חודש / שנה, לפי שעון ישראל.
+   נטען רק כשפותחים את הסיכום ובכל החלפת תקופה, ורק השדות הנדרשים (בלי התמונה). עובד – רק מה שהוא ביצע (doneBy בשמו, כמו fbBy);
+   מנהל – כל העסק בטווח התאריכים, עם סינון אופציונלי לפי עובד. "באיחור" = tkIsLate, "בזמן" = בוצעה ולא באיחור */
+const TKSF=['cr','due','st','sub','late','doneBy'],TKMN=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
+let TKS={u:'m',y:0,m:0,d:1,who:'',k:'',L:null,err:''};
+const tkIL=(()=>{let F=null;try{F=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric'})}catch(e){}
+ const off=t=>{if(!F)return -new Date(t).getTimezoneOffset()*6e4;const p={};F.formatToParts(new Date(t)).forEach(x=>p[x.type]=+x.value);return Date.UTC(p.year,p.month-1,p.day,p.hour%24,p.minute,p.second)-Math.floor(t/1000)*1000};
+ return{at:(y,m,d)=>{const g=Date.UTC(y,m,d);return g-off(g-off(g))},today:()=>{const x=new Date(Date.now()+off(Date.now()));return[x.getUTCFullYear(),x.getUTCMonth(),x.getUTCDate()]}}})();
+const tkYMD=(y,m,d)=>{const x=new Date(Date.UTC(y,m,d));return[x.getUTCFullYear(),x.getUTCMonth(),x.getUTCDate()]};
+const tk2=n=>String(n).padStart(2,'0'),tkDMY=p=>tk2(p[2])+'/'+tk2(p[1]+1)+'/'+p[0];
+function tkSumRange(){const s=TKS;let a,b;
+ if(s.u==='d'){a=[s.y,s.m,s.d];b=tkYMD(s.y,s.m,s.d+1)}
+ else if(s.u==='w'){a=tkYMD(s.y,s.m,s.d-new Date(Date.UTC(s.y,s.m,s.d)).getUTCDay());b=tkYMD(a[0],a[1],a[2]+7)}
+ else if(s.u==='m'){a=[s.y,s.m,1];b=tkYMD(s.y,s.m+1,1)}
+ else{a=[s.y,0,1];b=[s.y+1,0,1]}
+ return{a,b,last:tkYMD(b[0],b[1],b[2]-1),from:tkIL.at(a[0],a[1],a[2]),to:tkIL.at(b[0],b[1],b[2])}}
+async function tkSumLoad(){const r=tkSumRange(),adm=fbAdmin(),me=fbBy(),k=TKS.u+'|'+r.from+'|'+(adm?'a':'w:'+me);if(TKS.k===k)return;TKS.k=k;TKS.L=null;TKS.err='';
+ const sq={from:[{collectionId:'tasks'}],select:{fields:TKSF.map(f=>({fieldPath:f}))},limit:10000};
+ /* מנהל: רק טווח התאריכים (אינדקס רגיל). עובד: רק משימות שהוא ביצע (doneBy == השם שלו – זה מה שהכללים מתירים), והטווח מסונן כאן,
+    כי שילוב של doneBy עם טווח על cr דורש אינדקס מורכב בשרת */
+ if(adm)sq.where={compositeFilter:{op:'AND',filters:[{fieldFilter:{field:{fieldPath:'cr'},op:'GREATER_THAN_OR_EQUAL',value:iv(r.from)}},{fieldFilter:{field:{fieldPath:'cr'},op:'LESS_THAN',value:iv(r.to)}}]}};
+ else sq.where={fieldFilter:{field:{fieldPath:'doneBy'},op:'EQUAL',value:{stringValue:me}}};
+ try{if(!adm&&!me)throw new Error('לא ידוע שם המשתמש. התנתק והתחבר מחדש');
+  const x=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;
+  TKS.L=(x||[]).filter(d=>d.document).map(d=>{const o=d.document,t={id:idOf(o),cr:gi(o,'cr'),due:gi(o,'due'),st:gv(o,'st'),sub:gi(o,'sub'),late:gv(o,'late'),doneBy:gv(o,'doneBy')};if(t.cr)t.due=tkDue(t.cr);return t}).filter(t=>t.cr>=r.from&&t.cr<r.to)}
+ catch(e){if(TKS.k!==k)return;TKS.err=tkErr(e)}
+ tkRe()}
+function tkSumView(){if(!TKS.y){const t=tkIL.today();TKS.y=t[0];TKS.m=t[1];TKS.d=t[2]}
+ tkSumLoad().catch(()=>{});const s=TKS,r=tkSumRange(),adm=fbAdmin(),L=s.L||[];
+ const names=[...new Set(L.filter(t=>t.st==='done'&&t.doneBy).map(t=>t.doneBy.toLowerCase()))];if(s.who&&!names.includes(s.who))names.push(s.who);names.sort();
+ const D=L.filter(t=>t.st==='done'&&(!adm||!s.who||(t.doneBy||'').toLowerCase()===s.who)),late=D.filter(tkIsLate).length,n=v=>s.L?v:'…';
+ const iso=tkYMD(s.y,s.m,s.d),dv=iso[0]+'-'+tk2(iso[1]+1)+'-'+tk2(iso[2]),ty=tkIL.today()[0],yrs=[];for(let y=Math.min(2024,s.y);y<=Math.max(ty+1,s.y);y++)yrs.push(y);
+ const pick=s.u==='d'||s.u==='w'?`<label class="f"><span>${s.u==='w'?'יום כלשהו בשבוע':'תאריך'}</span><input type="date" data-c="tkSmD" value="${dv}"></label>`
+  :s.u==='m'?`<label class="f"><span>חודש</span><input type="month" data-c="tkSmM" value="${s.y}-${tk2(s.m+1)}"></label>`
+  :`<label class="f"><span>שנה</span><select data-c="tkSmY">${yrs.map(y=>`<option value="${y}" ${y===s.y?'selected':''}>${y}</option>`).join('')}</select></label>`;
+ const rg=tkDMY(r.a)+' – '+tkDMY(r.last),ttl=s.u==='d'?tkDMY(r.a):s.u==='w'?rg:(s.u==='m'?TKMN[s.m]+' '+s.y:'שנת '+s.y)+`<small style="display:block;font-weight:400">${rg}</small>`;
+ return `<div class="card" data-tksum="1"><div style="font-weight:700;margin-bottom:8px">📊 סיכום משימות שבוצעו ${adm?'':'(שלי)'}</div>
+  <div class="chips" style="margin:0 0 10px">${[['d','יום'],['w','שבוע'],['m','חודש'],['y','שנה']].map(x=>`<button class="chip ${x[0]===s.u?'on':''}" data-a="tkSmU" data-v="${x[0]}">${x[1]}</button>`).join('')}</div>
+  ${pick}${adm?`<label class="f"><span>עובד</span><select data-c="tkSmW"><option value="">כולם</option>${names.map(x=>`<option value="${esc(x)}" ${x===s.who?'selected':''}>${esc(x)}</option>`).join('')}</select></label>`:''}
+  <div class="row" style="align-items:center;gap:8px"><button class="btn g" data-a="tkSmNav" data-v="-1" aria-label="התקופה הקודמת">›</button><div class="grow" style="text-align:center;font-weight:700" data-tksum-ttl="1">${ttl}</div><button class="btn g" data-a="tkSmNav" data-v="1" aria-label="התקופה הבאה">‹</button></div>
+  ${s.err?`<p class="note" style="color:var(--bad)">${esc(s.err)} <button class="btn g" data-a="tkSmRetry">נסה שוב</button></p>`:''}
+  <div class="kg" style="grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px"><div class="k pos" data-n="on"><small>בוצעו בזמן</small><b>${n(D.length-late)}</b></div><div class="k" data-n="late"><small>בוצעו באיחור</small><b style="color:var(--bad)">${n(late)}</b></div><div class="k" data-n="tot"><small>סה"כ בוצעו</small><b>${n(D.length)}</b></div></div>
+  <p class="note" style="margin:8px 0 0">לפי תאריך הכתיבה של המשימה. נספרות רק משימות שבוצעו (לא כולל ממתינות לאישור תמונה).</p></div>`}
+ACT.tkSmU=el=>{TKS.u=el.dataset.v;tkRe()};
+ACT.tkSmNav=el=>{const n=+el.dataset.v,s=TKS;let x;
+ if(s.u==='d'||s.u==='w')x=tkYMD(s.y,s.m,s.d+(s.u==='w'?7:1)*n);
+ else if(s.u==='m'){const a=tkYMD(s.y,s.m+n,1);x=[a[0],a[1],Math.min(s.d,new Date(Date.UTC(a[0],a[1]+1,0)).getUTCDate())]}
+ else x=[s.y+n,s.m,Math.min(s.d,new Date(Date.UTC(s.y+n,s.m+1,0)).getUTCDate())];
+ s.y=x[0];s.m=x[1];s.d=x[2];tkRe()};
+ACT.tkSmRetry=()=>{TKS.k='';tkRe()};
+CHG.tkSmD=el=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(el.value||'');if(!m)return;TKS.y=+m[1];TKS.m=+m[2]-1;TKS.d=+m[3];tkRe()};
+CHG.tkSmM=el=>{const m=/^(\d{4})-(\d{2})$/.exec(el.value||'');if(!m)return;TKS.y=+m[1];TKS.m=+m[2]-1;TKS.d=Math.min(TKS.d,new Date(Date.UTC(TKS.y,TKS.m+1,0)).getUTCDate());tkRe()};
+CHG.tkSmY=el=>{const y=+el.value;if(!y)return;TKS.y=y;TKS.d=Math.min(TKS.d,new Date(Date.UTC(y,TKS.m+1,0)).getUTCDate());tkRe()};
+CHG.tkSmW=el=>{TKS.who=String(el.value||'').toLowerCase();tkRe()};
 const tkGet=id=>(TK.L||[]).find(t=>t.id===id);
 FRM.tkAdd=async f=>{const x=fd(f),txt=String(x.txt||'').trim().slice(0,500);if(!txt)return toast('כתוב מה צריך לעשות');const b=f.querySelector('button');if(b)b.disabled=true;
  const now=Date.now(),id=uid(),adm=fbAdmin();
