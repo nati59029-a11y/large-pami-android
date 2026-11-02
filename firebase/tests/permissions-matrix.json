@@ -218,6 +218,34 @@
         "delete":                 "DDDDA"
       }
     },
+    "closings": {
+      "source": "סגירת קופה – בקשת בעל העסק 2.11.2026 (שלב 1): עובד שולח דוח Z והצהרת פתיחה; הנתונים הכספיים רק אצל המנהל",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה בשמו בלבד, בסטטוס 'new'. בלי קריאה (גם לא של עצמו), בלי עדכון ומחיקה", "manager": "קריאה, יצירה בשמו (גם בסטטוס 'ok'), שינוי סטטוס (רק שדות הסטטוס) ומחיקה" },
+      "ops": {
+        "get":                "DDDDA",
+        "get-own":            "DDDDA",
+        "list":               "DDDDA",
+        "create-own":         "DDDAA",
+        "create-other-uid":   "DDDDD",
+        "create-other-name":  "DDDDD",
+        "create-status-ok":   "DDDDA",
+        "update-status":      "DDDDA",
+        "update-amounts":     "DDDDD",
+        "delete":             "DDDDA"
+      }
+    },
+    "closings_p": {
+      "source": "חלקי הצילומים של סגירת קופה – closings/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה רק בסגירה שלו, ב-15 הדקות שאחרי השליחה. בלי קריאה, עדכון ומחיקה", "manager": "קריאה, יצירה בסגירה שלו (כמו עובד) ומחיקה. בלי עדכון" },
+      "ops": {
+        "get":                     "DDDDA",
+        "create-own-closing":      "DDDAA",
+        "create-on-other-closing": "DDDDD",
+        "create-too-big":          "DDDDD",
+        "update":                  "DDDDD",
+        "delete":                  "DDDDA"
+      }
+    },
     "_not_in_table": {
       "source": "3.3 – 'ברירת מחדל לכל אוסף שלא מופיע בטבלה: אין גישה לאף אחד'",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },

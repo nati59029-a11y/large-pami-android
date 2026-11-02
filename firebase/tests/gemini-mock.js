@@ -17,6 +17,9 @@ const MODELS = [
 const ANSWERS = {
   invoice: { document_type: 'invoice', supplier: 'ספק דמה בע"מ', number: '123456', date: '2026-10-28', total_before_vat: 100, vat_amount: 18, total_with_vat: 118 },
   product: { name: 'כוסות קרטון', details: 'תבניכל, 50 יחידות' },
+  // סגירת קופה – הערכים מדוח Z של יהודה הנשיא ומהצהרת הפתיחה של נחל לכיש (הצילומים לדוגמה מ-20.10.2026)
+  zreport: { register: '6346053', store: 'לארג\' פעמי-יהודה הנשיא', date: '2026-10-20', time: '09:02', report_no: '777', credit: 4313.95, cash: 3260, checks: null, voucher_buy: null, voucher_credit: null, voucher_issue: -169.8, house: null, rounding: -0.02, total: 7404.15, open_float: 8919, cash_sales: 3260, cash_out: -10615, cash_in_drawer: 1564 },
+  opening: { register: '6328947', store: 'לארג\' פעמי-נחל לכיש', date: '2026-10-20', time: '09:11', total: 970.3 },
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
 };
 
@@ -27,6 +30,8 @@ function reset() { state.mode = 'ok'; state.requests = []; state.listCalls = 0; 
 function kindOf(body) {
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
+  if (s.includes('דוח Z')) return 'zreport';
+  if (s.includes('הצהרת פתיחת קופה')) return 'opening';
   if (s.includes('חשבונית מס')) return 'invoice';
   if (s.includes('טופס משוב לקוחות')) return 'feedback';
   if (s.includes('בתמונה מוצר')) return 'product';

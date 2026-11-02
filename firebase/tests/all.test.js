@@ -7,6 +7,7 @@ require('./30-special-cases');
 require('./35-hardening');
 require('./36-tasks');
 require('./37-appreq');
+require('./38-closings');
 require('./40-storage-matrix');
 require('./50-functions');
 require('./60-yemot');

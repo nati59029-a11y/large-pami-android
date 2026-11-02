@@ -282,6 +282,55 @@ service cloud.firestore {
       }
     }
 
+    // ---------- סגירת קופה (closings) ----------
+    // בקשת בעל העסק 2.11.2026 (שלב 1): עובד או מנהל שולח סגירת קופה (דוח Z והצהרת פתיחה) עם הסכומים שזוהו.
+    // הנתונים הכספיים נשמרים רק בטלפון המנהל, ולכן: קריאה – מנהל בלבד. העובד לא רואה כלום אחרי השליחה (גם לא את שלו).
+    // יצירה: עובד פעיל או מנהל, בשמו, בזמן אמת. עובד – רק בסטטוס 'new'. מנהל – גם 'ok' (סגירה שהכניס בעצמו להכנסות).
+    // עדכון: מנהל בלבד, ורק שדות הסטטוס (הסכומים לא משתנים בענן). מחיקה: מנהל בלבד.
+    // data = JSON של שדות הטופס (עד 20,000 תווים); np = מספר חלקי הצילומים (1 עד 8).
+    match /closings/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      allow read: if isManager();
+      allow create: if isStaff()
+        && nw().keys().hasAll(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100
+        && isMyName(nw().by)
+        && nowOk(nw().t)
+        && (nw().st == 'new' || (nw().st == 'ok' && isManager()))
+        && nw().np is int && nw().np >= 1 && nw().np <= 8
+        && nw().reg in ['i_yh', 'i_nl']
+        && nw().d is string && nw().d.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && nw().no is string && nw().no.size() <= 30
+        && nw().data is string && nw().data.size() <= 20000;
+      allow update: if isManager()
+        && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+        && nw().st in ['new', 'ok', 'rej']
+        && isMyName(nw().get('stBy', ''))
+        && nowOk(nw().get('stAt', 0))
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
+      allow delete: if isManager();
+
+      // חלקי הצילומים: closings/{id}/p/{k} (כמו appreq): רק השדה data, עד 700,000 תווים.
+      // כותב רק מי ששלח את הסגירה, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. קריאה – מנהל בלבד. אין עדכון.
+      match /p/{k} {
+        function cl() { return get(/databases/$(database)/documents/closings/$(id)).data; }
+        allow read: if isManager();
+        allow create: if isStaff()
+          && exists(/databases/$(database)/documents/closings/$(id))
+          && cl().uid == request.auth.uid
+          && k.matches('^[0-7]$') && int(k) < cl().np
+          && request.time.toMillis() - cl().t < 900000
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow update: if false;
+        allow delete: if isManager();
+      }
+    }
+
     // ---------- הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם ----------
     match /{document=**} {
       allow read, write: if false;

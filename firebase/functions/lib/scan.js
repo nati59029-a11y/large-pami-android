@@ -11,6 +11,8 @@ const PROMPTS = require('./prompts');
 // invoice  = ocrAI  (חשבונית / תעודת משלוח), עד 4 עמודים, temperature 0
 // product  = shAI   (צילום מוצר למדף), תמונה אחת, temperature 0.1
 // feedback = fbAI   (טופס משוב לקוחות), תמונה אחת או 4 (דף מלא + 3 הגדלות), temperature 0.1, מודל "pro", עד 150 שניות
+// zreport  = zcAI   (סגירת קופה: דוח Z), בדיוק 3 תמונות (חלק עליון, אמצעי ותחתון), temperature 0
+// opening  = zcAI   (הצהרת פתיחת קופה), תמונה אחת, temperature 0
 // timeoutMs = זמן מרבי למודל אחד (כמו באפליקציה היום).
 // budgetMs  = תקציב זמן כולל לכל הקריאה בשרת (כל המודלים, ההמתנות והניסיון החוזר יחד).
 //             תמיד קצר מהזמן שהטלפון מחכה (PHONE_WAIT_MS), כדי שהשרת יסיים ויחזיר תשובה לפני שהטלפון מוותר.
@@ -18,10 +20,12 @@ const KINDS = Object.freeze({
   invoice: { minFiles: 1, maxFiles: 4, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
   product: { minFiles: 1, maxFiles: 1, temperature: 0.1, pro: false, timeoutMs: 30000, budgetMs: 100000 },
   feedback: { allowedCounts: [1, 4], minFiles: 1, maxFiles: 4, temperature: 0.1, pro: true, timeoutMs: 150000, budgetMs: 135000 },
+  zreport: { allowedCounts: [3], minFiles: 3, maxFiles: 3, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
+  opening: { minFiles: 1, maxFiles: 1, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
 });
 // בדיקת סוג הזיהוי מול רשימה קבועה בלבד. Object.hasOwn ולא KINDS[kind], כי KINDS[kind] "מוצא" גם שמות
 // שכל אובייקט ב-JavaScript מכיר מעצמו (__proto__, constructor, toString…) – פרצה שהבודק מצא בסבב 1.
-const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback']);
+const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening']);
 function isKind(kind) {
   return typeof kind === 'string' && KIND_NAMES.includes(kind) && Object.hasOwn(KINDS, kind) && Object.hasOwn(PROMPTS, kind);
 }
@@ -30,7 +34,8 @@ function kindCfg(kind) {
   return KINDS[kind];
 }
 // כמה זמן הטלפון מחכה לתשובה מ-scanDocument (לפי קוד האפליקציה בשלב 4, כפי שהועבר מהמתאם): חשבונית ומוצר 120 שניות, משוב 150.
-const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000 };
+// סגירת קופה (zreport, opening): 120 שניות (zcAI באפליקציה).
+const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000 };
 
 // באמולטור בלבד: אפשר לקצר את כל הזמנים באותו יחס (SCAN_TIME_SCALE), כדי שבדיקות התקציב לא יחכו 100 שניות.
 // מחוץ לאמולטור היחס תמיד 1.
@@ -94,7 +99,7 @@ function validateScanInput(data, maxFileBytes) {
 
 // הבקשה ל-Gemini – בדיוק כמו באפליקציה.
 function buildGeminiBody(kind, files) {
-  const cfg = kindCfg(kind); // שוב, ליתר ביטחון: רק אחד משלושת הסוגים
+  const cfg = kindCfg(kind); // שוב, ליתר ביטחון: רק אחד מהסוגים המוכרים
   const img = (f) => ({ inline_data: { mime_type: f.mimeType, data: f.data } });
   let parts;
   if (kind === 'feedback') {

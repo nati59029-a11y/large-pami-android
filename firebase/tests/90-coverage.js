@@ -42,7 +42,7 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     assert.deepEqual(extra, [], 'בדיקות שלא מופיעות ברשימה');
 
     // כל האוספים (9 שבטבלה + משימות ותגובות במשימה) ו-5 התפקידים מופיעים
-    const nine = ['admins', 'cfg', 'shelf', 'fb', 'bk', 'chunks', 'inbox', 'staff', 'app_backup_status', 'tasks', 'tasks_c', 'supinv', 'supinv_p', 'appreq', 'appreq_p'];
+    const nine = ['admins', 'cfg', 'shelf', 'fb', 'bk', 'chunks', 'inbox', 'staff', 'app_backup_status', 'tasks', 'tasks_c', 'supinv', 'supinv_p', 'appreq', 'appreq_p', 'closings', 'closings_p'];
     for (const c of nine) for (const r of H.ROLES) assert.ok(cells.some((x) => x.coll === c && x.role === r), `${c} × ${r} חסר`);
 
     const denyCells = cells.filter((c) => c.expected === 'deny');
@@ -117,11 +117,13 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     // אין אוספים נוספים מעבר ל-9 שבטבלה, משימות (tasks), תגובות (c – מקונן בתוך tasks/{id}),
     // חשבוניות ספקים לעובד (supinv, וחלקי התמונה p – מקונן בתוך supinv/{id}),
     // ובקשות לעדכון האפליקציה (appreq, וחלקי התמונות p – מקונן בתוך appreq/{id})
+    // וסגירת קופה (closings, וחלקי הצילומים p – מקונן בתוך closings/{id})
     const colls = matches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cfg', 'chunks', 'fb', 'inbox', 'p', 'p', 'shelf', 'staff', 'supinv', 'tasks']);
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cfg', 'chunks', 'closings', 'fb', 'inbox', 'p', 'p', 'p', 'shelf', 'staff', 'supinv', 'tasks']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/supinv\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך supinv');
     assert.match(t, /match \/appreq\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך appreq');
+    assert.match(t, /match \/closings\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך closings');
   });
 
   it('storage.rules: הכלל האחרון סוגר את כל מה שלא הוגדר', () => {

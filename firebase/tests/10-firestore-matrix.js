@@ -11,6 +11,7 @@ let seq = 0;
 const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
 const newSup = () => ({ c: 'bak', n: 'ספק', d: '2026-11-01', at: '2026-11-01', a: '10', inv: '2', by: 'מנהל', pend: '', src: '', m: '2026-11', np: '0', h: 'a', fh: 'b' });
 const newReq = (uid, np) => ({ uid, by: uid, txt: 'בקשה', t: Date.now(), st: 'new', np: np || 0 });
+const newCl = (uid, o) => Object.assign({ uid, by: uid, t: Date.now(), st: 'new', np: 1, reg: 'i_yh', d: '2026-10-20', no: '777', data: '{"v":1,"f":{}}' }, o);
 const newTask = (owner) => { const cr = Date.now(); return { owner, by: owner, role: 'w', txt: 'משימה', cr, due: cr + 4 * 86400000,
   st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }; };
 
@@ -173,6 +174,27 @@ const OPS = {
     'create-too-big':          async (db, me) => { const id = fresh('r'); try { await db.doc('appreq/' + id).set(newReq(me, 1)); } catch (e) { /* תפקיד שלא יוצר – נחסם ממילא */ } return db.doc('appreq/' + id + '/p/0').set({ data: 'A'.repeat(700001) }); },
     'update':                  (db) => db.doc('appreq/r1/p/0').set({ data: 'BBBB' }),
     'delete':                  (db) => db.doc('appreq/r1/p/0').delete(),
+  },
+  // סגירת קופה (FRM.zcSend / zcPull / zcMark / ACT.zcImg)
+  closings: {
+    'get':               (db) => db.doc('closings/z1').get(),
+    'get-own':           async (db, me) => { const id = fresh('z'); try { await db.doc('closings/' + id).set(newCl(me)); } catch (e) { /* תפקיד שלא יוצר */ } return db.doc('closings/' + id).get(); },
+    'list':              (db) => db.collection('closings').where('st', '==', 'new').get(),
+    'create-own':        (db, me) => db.doc('closings/' + fresh('z')).set(newCl(me)),
+    'create-other-uid':  (db, me) => db.doc('closings/' + fresh('z')).set(newCl(me, { uid: H.OTHER })),
+    'create-other-name': (db, me) => db.doc('closings/' + fresh('z')).set(newCl(me, { by: H.OTHER })),
+    'create-status-ok':  (db, me) => db.doc('closings/' + fresh('z')).set(newCl(me, { st: 'ok' })),
+    'update-status':     (db, me) => db.doc('closings/z1').update({ st: 'ok', stBy: me, stAt: Date.now(), note: '' }),
+    'update-amounts':    (db) => db.doc('closings/z1').update({ data: '{"v":1,"f":{"cash":"99999"}}' }),
+    'delete':            (db) => db.doc('closings/z1').delete(),
+  },
+  closings_p: {
+    'get':                     (db) => db.doc('closings/z1/p/0').get(),
+    'create-own-closing':      async (db, me) => { const id = fresh('z'); await db.doc('closings/' + id).set(newCl(me)); return db.doc('closings/' + id + '/p/0').set({ data: 'AAAA' }); },
+    'create-on-other-closing': (db) => db.doc('closings/z1/p/1').set({ data: 'AAAA' }),
+    'create-too-big':          async (db, me) => { const id = fresh('z'); try { await db.doc('closings/' + id).set(newCl(me)); } catch (e) { /* תפקיד שלא יוצר – נחסם ממילא */ } return db.doc('closings/' + id + '/p/0').set({ data: 'A'.repeat(700001) }); },
+    'update':                  (db) => db.doc('closings/z1/p/0').set({ data: 'BBBB' }),
+    'delete':                  (db) => db.doc('closings/z1/p/0').delete(),
   },
   _not_in_table: {
     'get-orders':    (db) => db.doc('orders/o1').get(),

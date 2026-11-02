@@ -998,6 +998,78 @@
     "manager"
    ],
    "note": "מחיקת בקשה."
+  },
+  {
+   "id": "M71",
+   "line": 3003,
+   "snippet": "collectionId:'closings'}]",
+   "fn": "zcPull",
+   "collection": "closings",
+   "op": "list",
+   "rest": "POST :runQuery from closings where st == 'new' limit 300",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "משיכת סגירות קופה חדשות (בפתיחה עם התחברות, ב'בדוק עכשיו', במסך 'סגירת קופה' ובמונה של 'עוד')."
+  },
+  {
+   "id": "M72",
+   "line": 3014,
+   "snippet": "fsx('/closings/'+id+'?'+mask.join('&')",
+   "fn": "zcMark",
+   "collection": "closings",
+   "op": "update",
+   "rest": "PATCH /closings/{id}?updateMask st,stBy,stAt,note&currentDocument.exists=true",
+   "condition": "מנהל בלבד; רק שדות הסטטוס",
+   "who": [
+    "manager"
+   ],
+   "note": "אחרי הכנסה להכנסות (st 'ok') או דחייה עם הערה (st 'rej')."
+  },
+  {
+   "id": "M73",
+   "line": 3094,
+   "snippet": "fsx('/closings?documentId='",
+   "fn": "FRM.zcSend",
+   "collection": "closings",
+   "op": "create",
+   "rest": "POST /closings?documentId={id}",
+   "condition": "uid וה-by של הכותב; t עכשיו; עובד – st 'new', מנהל – st 'ok'; reg i_yh/i_nl; d תאריך; np 1–8; data עד 20,000",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "שליחת סגירת קופה (עובד) או שמירת סגירה שהמנהל הכניס בעצמו."
+  },
+  {
+   "id": "M74",
+   "line": 3096,
+   "snippet": "fsx('/closings/'+id+'/p?documentId='",
+   "fn": "FRM.zcSend",
+   "collection": "closings_p",
+   "op": "create",
+   "rest": "POST /closings/{id}/p?documentId={k}",
+   "condition": "רק בסגירה של הכותב, k < np, עד 15 דקות מהשליחה; data עד 700,000 תווים",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "העלאת חלקי הצילומים (3 של דוח Z ואחד של הפתיחה) אחרי הסגירה."
+  },
+  {
+   "id": "M75",
+   "line": 3100,
+   "snippet": "fsx('/closings/'+x.id+'/p/'+k),'data')",
+   "fn": "ACT.zcImg",
+   "collection": "closings_p",
+   "op": "get",
+   "rest": "GET /closings/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "הצגת הצילומים של סגירה שמחכה לאישור – רק בלחיצה."
   }
  ],
  "fsbLine": 1332,

@@ -1,5 +1,5 @@
 'use strict';
-// קורא את שלוש ההנחיות (prompts) ל-Gemini מתוך קוד האפליקציה המקורי (www/index.html שבתוך
+// קורא את ההנחיות (prompts) ל-Gemini מתוך קוד האפליקציה המקורי (www/index.html שבתוך
 // large-pami-android-project.zip – הגרסה שבטלפונים, c9bac16). הקובץ הזה משמש גם ליצירת
 // functions/lib/prompts.js וגם לבדיקה שההנחיות בשרת זהות תו-בתו לאלה שבאפליקציה.
 // שימוש: node scripts/app-prompts.js --write   (כותב מחדש את functions/lib/prompts.js)
@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { appSourceLines } = require('../tests/helpers');
 
-const NAMES = { invoice: 'OCAI_P', product: 'SHAI_P', feedback: 'FB_P' };
+const NAMES = { invoice: 'OCAI_P', product: 'SHAI_P', feedback: 'FB_P', zreport: 'ZR_P', opening: 'OPN_P' };
 
 function extract(lines, name) {
   const start = lines.findIndex((l) => l.startsWith(`const ${name}=`));

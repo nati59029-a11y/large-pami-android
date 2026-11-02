@@ -93,6 +93,9 @@ async function seed(env) {
     // בקשות לעדכון האפליקציה (appreq): בקשה של עובד אחר עם תמונה בחלק אחד
     b.set(db.doc('appreq/r1'), { uid: OTHER, by: OTHER, txt: 'בקשה', t: T - 5000, st: 'new', np: 1 });
     b.set(db.doc('appreq/r1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
+    // סגירת קופה (closings): סגירה של עובד אחר, בסטטוס 'new', עם צילומים בחלק אחד
+    b.set(db.doc('closings/z1'), { uid: OTHER, by: OTHER, t: T - 5000, st: 'new', np: 1, reg: 'i_nl', d: '2026-10-20', no: '555', data: JSON.stringify({ v: 1, f: { d: '2026-10-20', no: '555', credit: '594.72', cash: '60.10', total: '654.82', drawer: '982.70', oTot: '970.30' }, ack: 1 }) });
+    b.set(db.doc('closings/z1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
     await b.commit();
   });
 }

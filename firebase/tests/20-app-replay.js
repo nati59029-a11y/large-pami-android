@@ -29,6 +29,9 @@ const tkPatch = (uid, id, o) => {
   return fsx(uid, '/tasks/' + id + '?' + mask.join('&') + '&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields }) });
 };
 
+// FRM.zcSend: שדות הסגירה כמו באפליקציה (data = JSON של שדות הטופס)
+const zcFields = (uid, role, np) => ({ uid: sv(uid), by: sv(uid), t: iv(Date.now()), st: sv(role === 'manager' || role === 'managerAdminsOnly' ? 'ok' : 'new'), np: iv(np), reg: sv('i_yh'), d: sv('2026-10-20'), no: sv('777'),
+  data: sv(JSON.stringify({ v: 1, f: { d: '2026-10-20', tm: '09:02', no: '777', credit: '4313.95', cash: '3260', vissue: '-169.8', round: '-0.02', total: '7404.15', drawer: '1564', oD: '2026-10-20', oTot: '1560' }, rs: 'auto', ack: 1, why: '', ai: { z: 1, o: 1 } })) });
 // כל פונקציה מחזירה רשימת תשובות (status). A = הסטטוסים שנחשבים "הצליח" לתפקיד מורשה.
 const REPLAY = {
   // syLogin: GET /admins/{uid}. מנהל – 200; עובד – 404 (אין מסמך), והאפליקציה מסיקה "עובד".
@@ -355,6 +358,33 @@ const REPLAY = {
   // ACT.arDel: החלקים ואז הבקשה
   M69: { run: async (uid) => [await fsx(uid, '/appreq/' + 'r1' + '/p/' + 0, { method: 'DELETE' })] },
   M70: { run: async (uid) => [await fsx(uid, '/appreq/' + 'r1', { method: 'DELETE' })] },
+
+  // ---- סגירת קופה (closings) ----
+  // zcPull: סגירות חדשות (st == 'new'), בדיוק כמו באפליקציה
+  M71: { run: async (uid) => {
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'closings' }], where: { fieldFilter: { field: { fieldPath: 'st' }, op: 'EQUAL', value: { stringValue: 'new' } } }, limit: 300 } }) });
+    if (r.status === 200) assert.ok((r.json || []).some((x) => x.document && x.document.name.endsWith('/closings/z1')), 'המנהל צריך לראות סגירה חדשה של עובד');
+    return [r];
+  } },
+  // zcMark: שינוי סטטוס (רק שדות הסטטוס, updateMask)
+  M72: { run: async (uid) => {
+    const o = { st: 'ok', stBy: uid, stAt: Date.now(), note: '' }; const fields = {}; const mask = [];
+    for (const k in o) { fields[k] = typeof o[k] === 'number' ? iv(o[k]) : sv(o[k]); mask.push('updateMask.fieldPaths=' + k); }
+    return [await fsx(uid, '/closings/' + 'z1' + '?' + mask.join('&') + '&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields }) })];
+  } },
+  // FRM.zcSend: הסגירה (עובד – 'new', מנהל – 'ok'), ואחריה חלקי הצילומים
+  M73: { run: async (uid, env, role) => {
+    const fields = zcFields(uid, role, 1);
+    return [await fsx(uid, '/closings?documentId=' + encodeURIComponent(fresh('z')), { method: 'POST', body: JSON.stringify({ fields }) })];
+  } },
+  M74: { run: async (uid, env, role) => {
+    const id = fresh('z'); const all = 'PAGES:' + JSON.stringify(['data:image/jpeg;base64,' + 'A'.repeat(900000), 'data:image/jpeg;base64,AAAA']); const CH = 700000; const np = Math.ceil(all.length / CH);
+    const out = [await fsx(uid, '/closings?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ fields: zcFields(uid, role, np) }) })];
+    for (let k = 0; k < np; k++) out.push(await fsx(uid, '/closings/' + id + '/p?documentId=' + k, { method: 'POST', body: JSON.stringify({ fields: { data: sv(all.slice(k * CH, (k + 1) * CH)) } }) }));
+    return out;
+  } },
+  // ACT.zcImg
+  M75: { run: async (uid) => [await fsx(uid, '/closings/' + 'z1' + '/p/' + 0)] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,
