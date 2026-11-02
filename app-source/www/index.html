@@ -1895,7 +1895,7 @@ V.shPromo=()=>{if(!SHP)SHP=shpNew();const q=SHP,sizes=[['p8','8 בעמוד'],['p
  <div style="display:flex;gap:8px;align-items:flex-end">${fld('ברקוד (לזכירת המוצר)','bc',SHP.bc||'','text','data-i="shp" inputmode="numeric" autocomplete="off"')}<label class="btn g" style="cursor:pointer;margin-bottom:12px;white-space:nowrap">סרוק<input type="file" accept="image/*" capture="environment" data-c="shbcf" data-kind="promo" hidden></label></div>${offer}${fld('בתוקף עד (אופציונלי)','vf',q.vf,'date','data-i="shp"')}</div>
  <div class="sec"><h3>כך ייראה הפתק</h3></div><img id="shPrev" alt="תצוגה מקדימה" style="width:100%;border-radius:6px;background:#fff;border:1px solid var(--line)">
  <p class="note" style="text-align:center;margin:10px 0">${q.edit>=0?'עדכון':'יתווסף כמבצע'} ${pos} מתוך ${SHC[q.size].cap}</p>
- <div class="row"><button class="btn grow">${q.edit>=0?'שמירה':'אישור והוספה'}</button><button type="button" class="btn g grow" data-a="shCancel">ביטול</button></div></form>`}};
+ <div class="row"><button class="btn grow">${q.edit>=0?'שמירה':'אישור והוספה'}</button><button type="button" class="btn g grow" data-a="shCancel">ביטול</button></div>${window.ymSaveBtns?ymSaveBtns():''}</form>`}};
 ACT.shPManual=()=>{SHP.mode='form';SHP.bc=shSl('promo').code||'';SHS.promo={};rerender()};
 FRM.shpromo=()=>{const q=SHP,it=shpItem();if(!it.n)return toast('חסר שם מוצר');
  if(it.kind==='A'){if(!(it.k>=2))return toast('הכמות צריכה להיות 2 ומעלה');if(!(it.tot>0))return toast('הקלד מחיר כולל')}else{if(!(it.now>0))return toast('הקלד מחיר מבצע');if(!(it.reg>0))return toast('הקלד מחיר רגיל');if(it.reg<=it.now)return toast('המחיר הרגיל צריך להיות גבוה ממחיר המבצע')}
