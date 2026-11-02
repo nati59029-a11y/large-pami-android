@@ -206,7 +206,7 @@
   },
   {
    "id": "M15",
-   "line": 2072,
+   "line": 2085,
    "snippet": "updateMask.fieldPaths=data&updateMask.fieldPaths=st",
    "fn": "fbPush (r.upd)",
    "collection": "fb",
@@ -220,7 +220,7 @@
   },
   {
    "id": "M33",
-   "line": 2074,
+   "line": 2087,
    "snippet": "fsx('/chunks?documentId='+encodeURIComponent('fbhi_'",
    "fn": "fbPush (צילום ברזולוציה גבוהה)",
    "collection": "chunks",
@@ -234,21 +234,49 @@
   },
   {
    "id": "M16",
-   "line": 2075,
-   "snippet": "fsx('/fb/'+r.id,{method:'PATCH'",
+   "line": 2089,
+   "snippet": "fsx('/fb/'+r.id+'?currentDocument.exists=false'",
    "fn": "fbPush",
    "collection": "fb",
    "op": "create",
-   "rest": "PATCH /fb/{id} (בלי updateMask) – מסמך חדש",
+   "rest": "PATCH /fb/{id}?currentDocument.exists=false – מסמך חדש בלבד (409 = כבר נשלח)",
    "condition": "owner == המשתמש עצמו, st == 'new'; שדות data, img, owner, at, st",
    "who": [
     "employee"
    ],
-   "note": "עובד סורק דף משוב ושולח למנהל."
+   "note": "עובד סורק דף משוב ושולח למנהל. ניסיון חוזר על דף שכבר בענן מחזיר 409 והאפליקציה מחשיבה אותו כנשלח (תיקון fix/worker-feedback; קודם PATCH בלי תנאי הפך בניסיון חוזר לעדכון ונחסם ב-403)."
+  },
+  {
+   "id": "M49",
+   "line": 2082,
+   "snippet": "fsx('/staff/'+SY.uid)",
+   "fn": "fbWSent (עובד, אחרי 403 בשליחת משוב)",
+   "collection": "staff",
+   "op": "get",
+   "rest": "GET /staff/{uid}",
+   "condition": "המסמך של המשתמש עצמו",
+   "who": [
+    "employee"
+   ],
+   "note": "fix/worker-feedback: עובד פעיל שקיבל 403 בניסיון חוזר = הדף כבר בענן; עובד לא פעיל = הודעה ברורה."
+  },
+  {
+   "id": "M50",
+   "line": 2087,
+   "snippet": "fsx('/chunks/fbhi_'+r.id+'_'+k)",
+   "fn": "fbPush (עובד, חלק צילום שכבר קיים)",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/fbhi_{id}_{k}",
+   "condition": "owner == המשתמש עצמו",
+   "who": [
+    "employee"
+   ],
+   "note": "fix/worker-feedback: אם יצירת חלק נחסמה, בודקים שהחלק כבר קיים ושייך לעובד – ואז ממשיכים."
   },
   {
    "id": "M17",
-   "line": 2075,
+   "line": 2088,
    "snippet": "fsx('/fb/'+r.id,{method:'PATCH'",
    "fn": "fbPush",
    "collection": "fb",
@@ -258,11 +286,11 @@
    "who": [
     "manager"
    ],
-   "note": "מנהל שומר משוב מאושר (וגם בשחזור מגיבוי, שורה 2436)."
+   "note": "מנהל שומר משוב מאושר (וגם בשחזור מגיבוי, שורה 2436). מאז fix/worker-feedback רק המנהל שולח בדרך הזו."
   },
   {
    "id": "M18",
-   "line": 2083,
+   "line": 2097,
    "snippet": "const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
    "fn": "fbLoad (עובד)",
    "collection": "fb",
@@ -276,7 +304,7 @@
   },
   {
    "id": "M19",
-   "line": 2083,
+   "line": 2097,
    "snippet": "const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
    "fn": "fbLoad (מנהל)",
    "collection": "fb",
@@ -290,7 +318,7 @@
   },
   {
    "id": "M20",
-   "line": 2093,
+   "line": 2107,
    "snippet": "stringValue:'new'",
    "fn": "fbInbox",
    "collection": "fb",
@@ -304,7 +332,7 @@
   },
   {
    "id": "M21",
-   "line": 2096,
+   "line": 2110,
    "snippet": "const full=await fsx('/fb/'+id)",
    "fn": "fbInbox",
    "collection": "fb",
@@ -318,7 +346,7 @@
   },
   {
    "id": "M34",
-   "line": 2097,
+   "line": 2111,
    "snippet": "fsx('/chunks/fbhi_'+id+'_'+k)",
    "fn": "fbInbox",
    "collection": "chunks",
@@ -332,7 +360,7 @@
   },
   {
    "id": "M35",
-   "line": 2097,
+   "line": 2111,
    "snippet": "fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'})",
    "fn": "fbInbox",
    "collection": "chunks",
@@ -346,7 +374,7 @@
   },
   {
    "id": "M22",
-   "line": 2102,
+   "line": 2116,
    "snippet": "const d=await fsx('/fb/'+id)",
    "fn": "fbImg",
    "collection": "fb",
@@ -361,7 +389,7 @@
   },
   {
    "id": "M23",
-   "line": 2179,
+   "line": 2220,
    "snippet": "fsx('/fb/'+id,{method:'DELETE'})",
    "fn": "fbDrop",
    "collection": "fb",
@@ -375,7 +403,7 @@
   },
   {
    "id": "M24",
-   "line": 2220,
+   "line": 2261,
    "snippet": "updateMask.fieldPaths=data'",
    "fn": "FRM.fbedit",
    "collection": "fb",
@@ -389,7 +417,7 @@
   },
   {
    "id": "M25",
-   "line": 2221,
+   "line": 2262,
    "snippet": "fsx('/fb/'+el.dataset.id,{method:'DELETE'})",
    "fn": "ACT.fbRm",
    "collection": "fb",
@@ -403,7 +431,7 @@
   },
   {
    "id": "M26",
-   "line": 2525,
+   "line": 2566,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames()",
    "collection": "bk",
@@ -417,7 +445,7 @@
   },
   {
    "id": "M27",
-   "line": 2525,
+   "line": 2566,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames('fb')",
    "collection": "fb",
@@ -431,7 +459,7 @@
   },
   {
    "id": "M28",
-   "line": 2526,
+   "line": 2567,
    "snippet": "fsx('/bk/'+encodeURIComponent(id),{method:'PATCH'",
    "fn": "bkPut",
    "collection": "bk",
@@ -445,7 +473,7 @@
   },
   {
    "id": "M29",
-   "line": 2544,
+   "line": 2585,
    "snippet": "fsx('/bk/'+encodeURIComponent(n),{method:'DELETE'})",
    "fn": "bkCloud",
    "collection": "bk",
@@ -459,7 +487,7 @@
   },
   {
    "id": "M30",
-   "line": 2555,
+   "line": 2596,
    "snippet": "fsx('/bk/meta')",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -473,7 +501,7 @@
   },
   {
    "id": "M31",
-   "line": 2556,
+   "line": 2597,
    "snippet": "fsx('/bk/d'+m.gen+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -487,7 +515,7 @@
   },
   {
    "id": "M32",
-   "line": 2558,
+   "line": 2599,
    "snippet": "fsx('/bk/'+m.files[id].d+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -515,7 +543,7 @@
   },
   {
    "id": "M37",
-   "line": 2265,
+   "line": 2306,
    "snippet": "map(x=>tkOf(x.document))",
    "fn": "tkLoad → tkQ('open') + tkQ('late') (עובד)",
    "collection": "tasks",
@@ -529,7 +557,7 @@
   },
   {
    "id": "M38",
-   "line": 2265,
+   "line": 2306,
    "snippet": "map(x=>tkOf(x.document))",
    "fn": "tkLoad → tkQ() (מנהל)",
    "collection": "tasks",
@@ -543,7 +571,7 @@
   },
   {
    "id": "M39",
-   "line": 2271,
+   "line": 2312,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "ACT.tkDone → tkPatch",
    "collection": "tasks",
@@ -558,7 +586,7 @@
   },
   {
    "id": "M40",
-   "line": 2271,
+   "line": 2312,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "CHG.tkimg → tkPatch",
    "collection": "tasks",
@@ -572,7 +600,7 @@
   },
   {
    "id": "M41",
-   "line": 2271,
+   "line": 2312,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "ACT.tkReq / tkOk / FRM.tkRej → tkPatch",
    "collection": "tasks",
@@ -586,7 +614,7 @@
   },
   {
    "id": "M42",
-   "line": 2271,
+   "line": 2312,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "FRM.tkCm → tkPatch({cAt,cBy})",
    "collection": "tasks",
@@ -601,7 +629,7 @@
   },
   {
    "id": "M43",
-   "line": 2308,
+   "line": 2349,
    "snippet": "fsx('/tasks?documentId='",
    "fn": "FRM.tkAdd",
    "collection": "tasks",
@@ -616,7 +644,7 @@
   },
   {
    "id": "M44",
-   "line": 2315,
+   "line": 2356,
    "snippet": "fsx('/tasks/'+t.id,{method:'DELETE'})",
    "fn": "ACT.tkDel",
    "collection": "tasks",
@@ -630,7 +658,7 @@
   },
   {
    "id": "M45",
-   "line": 2316,
+   "line": 2357,
    "snippet": "fsx('/tasks/'+el.dataset.id)",
    "fn": "ACT.tkImg",
    "collection": "tasks",
@@ -645,7 +673,7 @@
   },
   {
    "id": "M46",
-   "line": 2318,
+   "line": 2359,
    "snippet": "fsx('/tasks/'+id+'/c?pageSize=300'",
    "fn": "tkCmLoad",
    "collection": "tasks_c",
@@ -660,7 +688,7 @@
   },
   {
    "id": "M47",
-   "line": 2328,
+   "line": 2369,
    "snippet": "fsx('/tasks/'+id+'/c?documentId='",
    "fn": "FRM.tkCm",
    "collection": "tasks_c",
@@ -675,7 +703,7 @@
   },
   {
    "id": "M48",
-   "line": 2331,
+   "line": 2372,
    "snippet": "fsx('/tasks/'+id+'/c/'+cid,{method:'DELETE'})",
    "fn": "ACT.tkCmDel",
    "collection": "tasks_c",

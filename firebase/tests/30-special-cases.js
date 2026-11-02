@@ -98,6 +98,30 @@ describe('מקרים מיוחדים', () => {
     H.record('special', { key: 'case3-manager-admins-only' });
   });
 
+  // ---- משוב לקוחות: שליחה של עובד וניסיון חוזר (fix/worker-feedback) ----
+  it('משוב: עובד – ניסיון חוזר על דף שכבר בענן. הדרך הישנה (PATCH בלי תנאי) נחסמת ב-403; הדרך החדשה מחזירה 409 = כבר נשלח', async () => {
+    const uid = H.UID.employee; const id = 'fbw' + Date.now();
+    const body = (st) => JSON.stringify({ fields: { data: sv('{"f":{}}'), img: sv('data:image/jpeg;base64,AAAA'), owner: sv(uid), at: sv(1), st: sv(st) } });
+    // הסיבה לתקלה: הניסיון הראשון נשמר בענן, והניסיון החוזר באותה דרך הוא "עדכון" – מותר רק למנהל
+    assert.equal((await fsx(uid, '/fb/' + id, { method: 'PATCH', body: body('new') })).status, 200);
+    assert.equal((await fsx(uid, '/fb/' + id, { method: 'PATCH', body: body('new') })).status, 403);
+    // התיקון: יצירה בלבד. קיים = 409, והמסמך לא השתנה
+    assert.equal((await fsx(uid, '/fb/' + id + '?currentDocument.exists=false', { method: 'PATCH', body: body('new') })).status, 409);
+    // רשומה של עובד עם st:'ok' (גרסה ישנה / שחזור) נחסמת – לכן האפליקציה שולחת אצל עובד תמיד st:'new'
+    assert.equal((await fsx(uid, '/fb/' + id + 'b?currentDocument.exists=false', { method: 'PATCH', body: body('ok') })).status, 403);
+    assert.equal((await fsx(uid, '/fb/' + id + 'c?currentDocument.exists=false', { method: 'PATCH', body: body('new') })).status, 200);
+    // המנהל רואה את הדפים החדשים בתור (st == 'new')
+    const q = await fsx(H.UID.manager, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'fb' }], where: { fieldFilter: { field: { fieldPath: 'st' }, op: 'EQUAL', value: { stringValue: 'new' } } }, select: { fields: [{ fieldPath: 'data' }] }, limit: 300 } }) });
+    const names = (q.json || []).filter((x) => x.document).map((x) => x.document.name.split('/').pop());
+    assert.ok(names.includes(id) && names.includes(id + 'c'), 'המנהל צריך לקבל את שני הדפים');
+    // עובד אחר לא "מסתיר" דף של עובד: גם אצלו יצירה על מזהה קיים לא משנה את המסמך
+    const other = await fsx(H.OTHER, '/fb/' + id + '?currentDocument.exists=false', { method: 'PATCH', body: JSON.stringify({ fields: { data: sv('{}'), img: sv(''), owner: sv(H.OTHER), at: sv(2), st: sv('new') } }) });
+    assert.ok([403, 409].includes(other.status));
+    const doc = await fsx(H.UID.manager, '/fb/' + id);
+    assert.equal(doc.json.fields.owner.stringValue, uid);
+    H.record('special', { key: 'fb-worker-retry' });
+  });
+
   // ---- נוסף: כתובת אנונימית / חשבון אנונימי לא פותח כלום ----
   it('נוסף: חשבון "אנונימי" של Firebase (מחובר בלי מייל) לא מקבל גישה לשום אוסף', async () => {
     const db = env.authenticatedContext('anon1', { firebase: { sign_in_provider: 'anonymous' } }).firestore();
