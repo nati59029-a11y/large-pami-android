@@ -1,35 +1,33 @@
 'use strict';
-// שלוחה 5 – הצטרפות ישירה לרשימת הצינתוקים (בקשת המשתמש 02.11.2026).
-// שלוחה 5 בקו תהיה type=api ותפנה לכתובת הזו. השרת מוסיף את המתקשר לרשימה mivtzaim, ומחזיר לימות פקודות
-// של מודול API: הודעה קצרה (tts) וחזרה לתפריט הראשי.
-//   tzintukJoin (onRequest) – לא נקראת מהאפליקציה. כל בקשה בלי הסוד המשותף (YEMOT_HOOK_SECRET) נדחית ב-403,
-//                             בלי שום פנייה לימות. הסוד נשלח מ-ext.ini של שלוחה 5 (api_add_N=key=...).
-// (לא מאומת – מתיעוד ימות שלא נקרא בסביבה הזו): שמות הפרמטרים שימות שולח (ApiPhone, ApiCallId, hangup),
-// פורמט התשובה (id_list_message=t-...&go_to_folder=/), והפקודה להוספה לרשימה (lib/yemot-client.js, TZ_ADD).
+// ⛔ מושבת (BLOCKED) – "אין פעולת הוספה מתועדת".
+// שלוחה 5 – הצטרפות ישירה לרשימת הצינתוקים. לפי תיעוד ימות (api-55, נבדק ע"י המתאם 02.11.2026), הפקודה
+// TzintukimListManagement מכירה רק getlists / getlistEnteres / getLogList / resetList – אין פעולת "הוספה".
+// לכן הקובץ הזה לא מיובא מ-index.js (לא מתפרסם), ואין בו שום פנייה לימות: אין מפתח, אין לקוח ימות.
+// מה שנשאר (ונבדק בתוך תהליך הבדיקה): סוד משותף, זיהוי מספר, הגבלת קצב, ותשובה בפורמט מודול API.
+// אם תימצא דרך מתועדת להוספה – מוסיפים אותה במקום אחד (addCaller למטה), אחרי אישור. אסור אי פעם resetList.
+// עובדות מתועדות (api-56, לפי המתאם): פרמטרים ApiPhone/ApiDID/ApiCallId/ApiExtension/ApiTime; פרמטר קבוע דרך
+// api_add_0=key=value; כותרת User-Agent: yemot-core-api/1.0; תשובה בטקסט רגיל id_list_message=t-<טקסט>&go_to_folder=/;
+// בטקסט t- אסורים '.' ו-'-'; ימות רושם כל בקשה כולל הפרמטרים ב-Log/LogApi.ymgr, אלא אם api_log=no.
 // פרטיות: מספר הטלפון לא נשמר במסד. מונה הניסיונות נשמר לפי גיבוב (sha256) של המספר.
 
 const crypto = require('node:crypto');
 const { onRequest } = require('firebase-functions/v2/https');
-const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
+const { defineSecret, defineInt } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');
-const { YemotError, apiBase, addToTzintukList } = require('./lib/yemot-client');
 const { israelDay } = require('./yemot').shared;
 
-const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_HOOK_SECRET = defineSecret('YEMOT_HOOK_SECRET');
-const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
-const YEMOT_TZINTUK_LIST = defineString('YEMOT_TZINTUK_LIST', { default: 'mivtzaim', description: 'רשימת הצינתוקים של המבצעים' });
-const YEMOT_TIMEOUT_MS = defineInt('YEMOT_TIMEOUT_MS', { default: 15000, description: 'זמן המתנה מרבי לכל קריאה לימות' });
 const YEMOT_JOIN_DAILY = defineInt('YEMOT_JOIN_DAILY', { default: 3, description: 'כמה פעמים ביום מותר לאותו מספר להצטרף (הגנה מהצפה)' });
 
 const USAGE = 'yemot_hook_usage';
-// ההודעות לא מכילות נקודה, מקף, & או = (ימות מפריד ביניהם בין קבצים ופקודות – לא מאומת)
+// ההודעות לא מכילות נקודה ומקף (אסורים בטקסט t- לפי api-56), וגם לא & או =
 const MSG = {
   ok: 'נוספתם בהצלחה לרשימת הצינתוקים',
   hidden: 'מספר לא מזוהה ולכן לא ניתן להוסיף אתכם לרשימה',
   limit: 'הבקשה כבר התקבלה היום',
   error: 'לא הצלחנו להוסיף אתכם כרגע נסו שוב מאוחר יותר',
+  blocked: 'ההצטרפות דרך השלוחה הזו עוד לא פעילה',
 };
 const answer = (msg) => `id_list_message=t-${msg}&go_to_folder=/`;
 
@@ -54,7 +52,7 @@ const param = (req, name) => {
   return typeof b === 'string' ? b : undefined;
 };
 
-// opts (לבדיקות בתוך התהליך): { secret, key, base, list, daily, timeoutMs }
+// opts (לבדיקות בתוך התהליך): { secret, daily }
 async function handleJoin(req, res, opts) {
   const o = opts || {};
   const send = (code, body) => { res.status(code).set('Content-Type', 'text/plain; charset=utf-8').set('Cache-Control', 'no-store').send(body); };
@@ -81,25 +79,21 @@ async function handleJoin(req, res, opts) {
     return true;
   });
   if (!allowed) { logger.info('yemot-hook: rate limited', { reason: 'rate-limited' }); return send(200, answer(MSG.limit)); }
-  // 4. הוספה לרשימה (רק הוספה)
-  const key = o.key !== undefined ? o.key : YEMOT_API_KEY.value();
-  try {
-    if (!key) throw new YemotError('no-key', false);
-    const ctx = { key, base: apiBase(o.base !== undefined ? o.base : YEMOT_API_BASE.value()), timeoutMs: o.timeoutMs || YEMOT_TIMEOUT_MS.value() };
-    await addToTzintukList(ctx, o.list || YEMOT_TZINTUK_LIST.value(), phone);
-  } catch (e) {
-    logger.warn('yemot-hook: add failed', { reason: 'yemot-add-failed', code: e instanceof YemotError ? e.code : 'internal' });
-    return send(200, answer(MSG.error));
-  }
-  logger.info('yemot-hook: joined', { reason: 'ok' });
-  return send(200, answer(MSG.ok));
+  // 4. הוספה לרשימה – מושבת: אין פעולת הוספה מתועדת. אין שום פנייה לימות.
+  const r = await addCaller(phone);
+  logger.info('yemot-hook: join not available', { reason: r });
+  return send(200, answer(r === 'ok' ? MSG.ok : MSG.blocked));
 }
 
-exports.tzintukJoin = onRequest({ secrets: [YEMOT_API_KEY, YEMOT_HOOK_SECRET], timeoutSeconds: 30, maxInstances: 2 }, async (req, res) => {
+// נקודת ההוספה היחידה. היום: תמיד 'blocked'. אסור להשתמש כאן ב-TzintukimListManagement (אין בו הוספה, ויש בו resetList).
+async function addCaller(phone) { void phone; return 'blocked'; }
+
+// לא מיובא מ-index.js (מושבת). נשאר כאן כדי שההפעלה בעתיד תהיה שורת חיבור אחת, אחרי אישור.
+exports.tzintukJoin = onRequest({ secrets: [YEMOT_HOOK_SECRET], timeoutSeconds: 30, maxInstances: 2 }, async (req, res) => {
   try { await handleJoin(req, res); } catch (e) {
     logger.error('yemot-hook: failed', { reason: 'internal', name: e && e.name });
     if (!res.headersSent) res.status(200).set('Content-Type', 'text/plain; charset=utf-8').send(answer(MSG.error));
   }
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handleJoin, israeliPhone, sameSecret, answer, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handleJoin, israeliPhone, sameSecret, answer, MSG, BLOCKED: true } });

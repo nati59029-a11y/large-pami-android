@@ -43,7 +43,7 @@ async function call(name, uid, data) {
 
 // ---- ליבה בתוך התהליך, עם הגדרות קבועות ויומן שנאסף (לחיפוש הסוד) ----
 const LOGS = [];
-const CORE_ENV = { YEMOT_EXT: '2', YEMOT_TZINTUK_LIST: 'mivtzaim', YEMOT_EMPLOYEE_DAILY: '0', YEMOT_MAX_DAYS: '60', YEMOT_TEXT_MAX: '400',
+const CORE_ENV = { YEMOT_EXT: '2', YEMOT_TZINTUK_LIST: 'mivtzaim', YEMOT_EMPLOYEE_DAILY: '1', YEMOT_MAX_DAYS: '60', YEMOT_TEXT_MAX: '400',
   YEMOT_TIMEOUT_MS: '15000', YEMOT_RECIPE_MAX: '2500', YEMOT_REC_MAX_SEC: '120', FUNCTIONS_EMULATOR: 'true' };
 async function core(mod, fn, uid, data, envPatch) {
   const env = Object.assign({}, CORE_ENV, envPatch || {});
@@ -99,15 +99,6 @@ async function allDocs(env, cols) {
 }
 const YCOLS = ['yemot_items', 'yemot_promos', 'yemot_state', 'yemot_usage', 'yemot_hook_usage', 'yemot_lexicon'];
 
-async function hook(params, method) {
-  const qs = new URLSearchParams(params).toString();
-  const r = method === 'POST'
-    ? await fetch(fnUrl('tzintukJoin'), { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: qs })
-    : await fetch(fnUrl('tzintukJoin') + '?' + qs);
-  const text = await r.text(); SEEN.push(text);
-  return { code: r.status, text };
-}
-
 describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון, עובד בלי צינתוק, שלוחה 5', () => {
   let env;
   before(async () => {
@@ -123,12 +114,13 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
   beforeEach(async () => { await H.seed(env); M.reset(); });
 
   // ---------------- 0. ייצוא ----------------
-  it('index.js מייצא את הפונקציות החדשות (publishLineItem, removeLineItem, getLineState, tzintukJoin), ולא את uploadPreview (פ1=טלפון)', () => {
+  it('index.js מייצא את הפונקציות החדשות (publishLineItem, removeLineItem, getLineState), ולא את uploadPreview (פ1=טלפון) ולא את tzintukJoin (מושבת)', () => {
     const ex = require('../functions/index.js');
-    for (const n of ['publishLineItem', 'removeLineItem', 'getLineState', 'tzintukJoin', 'sendPromoToLine', 'expirePromosOnLine']) assert.equal(typeof ex[n], 'function', n + ' לא מיוצא');
+    for (const n of ['publishLineItem', 'removeLineItem', 'getLineState', 'sendPromoToLine', 'expirePromosOnLine']) assert.equal(typeof ex[n], 'function', n + ' לא מיוצא');
     assert.equal(ex.uploadPreview, undefined);
+    assert.equal(ex.tzintukJoin, undefined, 'tzintukJoin מושבת (אין פעולת הוספה מתועדת) ואסור שיפורסם');
     assert.equal(ex._core, undefined); assert.equal(ex.shared, undefined);
-    assert.equal(Object.keys(ex).length, 10, Object.keys(ex).join(','));
+    assert.equal(Object.keys(ex).length, 9, Object.keys(ex).join(','));
   });
 
   // ---------------- 1. תפקידים ----------------
@@ -144,24 +136,34 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
   }
 
   // ---------------- 2. עובד ← אף פעם לא צינתוק (קריטריון 1) ----------------
-  it('עובד ששולח עם בקשת צינתוק: נדחה (tzintuk-manager-only) בעברית, ושרת הדמה לא קיבל אף קריאה – גם לא צינתוק', async () => {
-    const r = await call('sendPromoToLine', 'u_emp', promo({ withTzintuk: true }));
+  it('עובד ששולח עם בקשת צינתוק מהמסך החדש (origin=builder): נדחה (tzintuk-manager-only) בעברית, ושרת הדמה לא קיבל אף קריאה – גם לא צינתוק', async () => {
+    const r = await call('sendPromoToLine', 'u_emp', promo({ withTzintuk: true, origin: 'builder' }));
     assert.equal(r.status, 'PERMISSION_DENIED', r.text);
     assert.equal(r.error.details.reason, 'tzintuk-manager-only');
     assert.match(r.error.message, /רק מנהל יכול לשלוח צינתוק/);
     assert.equal(M.calls('RunTzintuk').length, 0);
     assert.equal(M.state.requests.length, 0);
-    assert.deepEqual(await allDocs(env, ['yemot_promos', 'yemot_usage']), []);
-    const st = await call('sendPromoToLine', 'u_emp', { statusOnly: true });
-    assert.equal(st.result.tzintukToday.allowed, false); assert.equal(st.result.tzintukToday.limit, 0);
-    // אותו עובד בלי צינתוק – עולה לקו, בלי RunTzintuk
-    const ok = await call('sendPromoToLine', 'u_emp', promo());
+    assert.deepEqual(await allDocs(env, ['yemot_promos', 'yemot_usage']), [], 'נוצרה רשומה או נתפסה מכסה');
+    // אותו עובד מהמסך החדש בלי צינתוק – עולה לקו, בלי RunTzintuk
+    const ok = await call('sendPromoToLine', 'u_emp', promo({ origin: 'builder' }));
     assert.equal(ok.status, 'OK', ok.text);
     assert.equal(ok.result.tzintuk, 'skipped');
     assert.deepEqual(M.state.requests.map((q) => q.cmd), ['GetIVR2Dir', 'UploadTextFile']);
-    // מנהל עם צינתוק – כן
-    const m = await call('sendPromoToLine', 'u_mgr', promo({ withTzintuk: true }));
+    // מנהל מהמסך החדש עם צינתוק – כן
+    const m = await call('sendPromoToLine', 'u_mgr', promo({ withTzintuk: true, origin: 'builder' }));
     assert.equal(m.result.tzintuk, 'sent');
+    assert.equal(M.calls('RunTzintuk').length, 1);
+    // ערך origin לא מוכר – נדחה
+    assert.equal((await call('sendPromoToLine', 'u_mgr', promo({ origin: 'old' }))).error.details.reason, 'bad-input');
+  });
+
+  it('פ5=לא: מסך המבצעים הקיים (בלי origin) – בלי שינוי: עובד מצנתק פעם ביום', async () => {
+    const st = await call('sendPromoToLine', 'u_emp', { statusOnly: true });
+    assert.deepEqual(st.result.tzintukToday, { day: israelDay(), used: 0, limit: 1, allowed: true });
+    const r = await call('sendPromoToLine', 'u_emp', promo({ withTzintuk: true }));
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.tzintuk, 'sent');
+    const r2 = await call('sendPromoToLine', 'u_emp', promo({ withTzintuk: true }));
+    assert.equal(r2.error.details.reason, 'daily-limit');
     assert.equal(M.calls('RunTzintuk').length, 1);
   });
 
@@ -553,67 +555,65 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     }
   });
 
-  // ---------------- 13. שלוחה 5 – tzintukJoin ----------------
-  it('tzintukJoin: בלי סוד או עם סוד שגוי ← 403, בלי שום פנייה לימות ובלי רשומה', async () => {
-    for (const p of [{ ApiPhone: '0541234567' }, { ApiPhone: '0541234567', key: 'wrong' }, { ApiPhone: '0541234567', key: HOOK + 'x' }, { ApiPhone: '0541234567', key: '' }]) {
-      const r = await hook(p);
-      assert.equal(r.code, 403, JSON.stringify(p));
+  // ---------------- 13. שלוחה 5 – tzintukJoin (מושבת: אין פעולת הוספה מתועדת) ----------------
+  // הפונקציה לא מיובאת מ-index.js, ולכן נבדקת בתוך תהליך הבדיקה (הליבה handleJoin).
+  const JK = 'k-test-hook-1';
+  async function join(query, method) {
+    const out = { code: 0, text: null };
+    const res = { status(c) { out.code = c; return this; }, set() { return this; }, send(b) { out.text = b; } };
+    const req = method === 'POST' ? { method, query: {}, body: query } : { method: 'GET', query, body: {} };
+    await require('../functions/yemot-hook.js')._core.handleJoin(req, res, { secret: JK, daily: 3 });
+    SEEN.push(String(out.text)); return out;
+  }
+
+  it('tzintukJoin מושבת: אין בקוד שום קריאה ל-TzintukimListManagement או ל-resetList, והקובץ לא מיובא', () => {
+    const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    const root = path.join(H.ROOT, 'functions');
+    const files = fs.readdirSync(root).filter((f) => f.endsWith('.js')).concat(fs.readdirSync(path.join(root, 'lib')).filter((f) => f.endsWith('.js')).map((f) => 'lib/' + f));
+    assert.deepEqual(files.filter((f) => /TzintukimListManagement|resetList/.test(strip(fs.readFileSync(path.join(root, f), 'utf8')))), []);
+    assert.ok(!/yemot-hook/.test(strip(fs.readFileSync(path.join(root, 'index.js'), 'utf8'))), 'index.js מייבא את yemot-hook');
+    assert.equal(require('../functions/yemot-hook.js')._core.BLOCKED, true);
+  });
+
+  it('tzintukJoin: בלי סוד או עם סוד שגוי ← 403, בלי פנייה לימות ובלי רשומה; בלי סוד בשרת – תמיד 403', async () => {
+    for (const p of [{ ApiPhone: '0541234567' }, { ApiPhone: '0541234567', key: 'wrong' }, { ApiPhone: '0541234567', key: JK + 'x' }, { ApiPhone: '0541234567', key: '' }]) {
+      assert.equal((await join(p)).code, 403, JSON.stringify(p));
     }
-    const post = await hook({ ApiPhone: '0541234567', key: 'wrong' }, 'POST');
-    assert.equal(post.code, 403);
+    assert.equal((await join({ ApiPhone: '0541234567', key: 'wrong' }, 'POST')).code, 403);
+    const out = { code: 0 }; const res = { status(c) { out.code = c; return this; }, set() { return this; }, send() {} };
+    await require('../functions/yemot-hook.js')._core.handleJoin({ method: 'GET', query: { ApiPhone: '0541234567', key: '' }, body: {} }, res, { secret: '' });
+    assert.equal(out.code, 403);
     assert.equal(M.state.requests.length, 0);
     assert.deepEqual(await allDocs(env, ['yemot_hook_usage']), []);
   });
 
-  it('tzintukJoin: מספר מזוהה ← הוספה לרשימה mivtzaim (רק add) והודעה "נוספתם בהצלחה" וחזרה לתפריט; גם ב-POST ו-972', async () => {
-    const r = await hook({ ApiPhone: '0541234567', ApiDID: '023131165', ApiCallId: 'abc', key: HOOK });
-    assert.equal(r.code, 200, r.text);
-    assert.equal(r.text, 'id_list_message=t-נוספתם בהצלחה לרשימת הצינתוקים&go_to_folder=/');
-    const p = await hook({ ApiPhone: '972521234567', key: HOOK }, 'POST');
-    assert.match(p.text, /נוספתם בהצלחה/);
-    assert.deepEqual(M.state.lists.mivtzaim, ['0541234567', '0521234567']);
-    const lc = M.calls('TzintukimListManagement');
-    assert.equal(lc.length, 2); assert.ok(lc.every((q) => q.body.action === 'add' && q.auth === SECRET));
-    assert.equal(M.state.requests.length, 2, 'פקודה אחרת מלבד הוספה');
+  it('tzintukJoin: מספר מזוהה ← הודעה שהשירות עוד לא פעיל, בפורמט מודול API, בלי שום פנייה לימות (גם ב-POST ו-972)', async () => {
+    const r = await join({ ApiPhone: '0541234567', ApiDID: '023131165', ApiCallId: 'abc', key: JK });
+    assert.equal(r.code, 200);
+    assert.equal(r.text, 'id_list_message=t-ההצטרפות דרך השלוחה הזו עוד לא פעילה&go_to_folder=/');
+    assert.match((await join({ ApiPhone: '972521234567', key: JK }, 'POST')).text, /עוד לא פעילה/);
+    assert.equal(M.state.requests.length, 0);
     const docs = JSON.stringify(await allDocs(env, ['yemot_hook_usage']));
     assert.ok(!docs.includes('0541234567') && !docs.includes('541234567'), 'מספר הטלפון נשמר במסד');
+    // אף הודעה לא מכילה תו אסור בטקסט t- (נקודה, מקף) או מפריד (& =)
+    for (const m of Object.values(require('../functions/yemot-hook.js')._core.MSG)) assert.ok(!/[.\-&=]/.test(m), m);
   });
 
-  it('tzintukJoin: מספר חסוי / לא ישראלי ← "מספר לא מזוהה", בלי פנייה לימות; ניתוק (hangup) ← תשובה ריקה', async () => {
+  it('tzintukJoin: מספר חסוי / לא ישראלי ← "מספר לא מזוהה"; ניתוק (hangup) ← תשובה ריקה', async () => {
     for (const ph of ['', 'anonymous', 'Restricted', '123', '+14155550100', '0000000000', '05412345678']) {
-      const r = await hook({ ApiPhone: ph, key: HOOK });
+      const r = await join({ ApiPhone: ph, key: JK });
       assert.equal(r.code, 200); assert.match(r.text, /^id_list_message=t-מספר לא מזוהה[^.&=-]*&go_to_folder=\/$/, ph);
     }
-    assert.equal((await hook({ key: HOOK })).text.includes('מספר לא מזוהה'), true);
-    const h = await hook({ ApiPhone: '0541234567', key: HOOK, hangup: 'yes' });
-    assert.equal(h.text, '');
+    assert.match((await join({ key: JK })).text, /מספר לא מזוהה/);
+    assert.equal((await join({ ApiPhone: '0541234567', key: JK, hangup: 'yes' })).text, '');
     assert.equal(M.state.requests.length, 0);
   });
 
   it('tzintukJoin: הגבלת קצב – עד 3 פעמים ביום לאותו מספר; מספר אחר לא מושפע', async () => {
-    for (let i = 0; i < 3; i++) assert.match((await hook({ ApiPhone: '0501112222', key: HOOK })).text, /נוספתם/);
-    const r = await hook({ ApiPhone: '0501112222', key: HOOK });
-    assert.match(r.text, /הבקשה כבר התקבלה היום/);
-    assert.equal(M.calls('TzintukimListManagement').length, 3);
-    assert.match((await hook({ ApiPhone: '0503334444', key: HOOK })).text, /נוספתם/);
-  });
-
-  it('tzintukJoin: שגיאה בימות ← המתקשר שומע הודעה מנומסת, והסוד לא דולף', async () => {
-    for (const mode of ['error', 'exception', 'http500']) {
-      M.reset(); M.setMode('list', mode);
-      const r = await hook({ ApiPhone: '0547778888', key: HOOK });
-      assert.equal(r.code, 200); assert.equal(r.text, 'id_list_message=t-לא הצלחנו להוסיף אתכם כרגע נסו שוב מאוחר יותר&go_to_folder=/');
-      assert.ok(!r.text.includes(SECRET));
-    }
-    // פסק זמן (בתוך התהליך, זמן קצר)
-    M.reset(); M.setMode('list', 'hang');
-    const { handleJoin } = require('../functions/yemot-hook.js')._core;
-    let out = null; const res = { status(c) { out = { c }; return this; }, set() { return this; }, send(b) { out.b = b; } };
-    await handleJoin({ method: 'GET', query: { ApiPhone: '0549990000', key: 'k1' }, body: {} }, res, { secret: 'k1', key: SECRET, base: BASE, list: 'mivtzaim', daily: 3, timeoutMs: 500 });
-    assert.equal(out.c, 200); assert.match(out.b, /לא הצלחנו/);
-    // בלי סוד בשרת – תמיד 403 (סגור כברירת מחדל)
-    await handleJoin({ method: 'GET', query: { ApiPhone: '0549990000', key: '' }, body: {} }, res, { secret: '', key: SECRET, base: BASE });
-    assert.equal(out.c, 403);
+    for (let i = 0; i < 3; i++) assert.match((await join({ ApiPhone: '0501112222', key: JK })).text, /עוד לא פעילה/);
+    assert.match((await join({ ApiPhone: '0501112222', key: JK })).text, /הבקשה כבר התקבלה היום/);
+    assert.match((await join({ ApiPhone: '0503334444', key: JK })).text, /עוד לא פעילה/);
+    assert.equal(M.state.requests.length, 0);
   });
 
   // ---------------- 14. הסוד ----------------

@@ -56,7 +56,8 @@ async function uploadText(ctx, what, contents) {
   await yemotCall(ctx, 'UploadTextFile', { what, contents: String(contents) });
 }
 
-// קובץ שמע. (לא מאומת – לבדיקה ראשונה בקו): הפקודה UploadFile, השדות path / convertAudio / qqfile.
+// קובץ שמע: UploadFile (multipart). מתועד ב-api-55: convertAudio=1 ממיר לפורמט הטלפוני, ו-path חייב להסתיים ב-.wav.
+// (לא מאומת): שם שדה הקובץ בהעלאה רגילה – qqfile מופיע בתיעוד רק בהעלאה בחלקים.
 async function uploadBinary(ctx, path, buf, mime) {
   const form = new FormData();
   form.append('path', path);
@@ -77,11 +78,4 @@ async function deleteFiles(ctx, whats) {
   }
 }
 
-// הוספת מספר אחד לרשימת צינתוקים (שלוחה 5, tzintukJoin). רק הוספה – אין כאן מחיקה או איפוס של רשימה.
-// (לא מאומת – לבדוק בתיעוד api-55 לפני פרסום): שם הפקודה, ערך action ושמות השדות.
-const TZ_ADD = { command: 'TzintukimListManagement', params: (list, phone) => ({ action: 'add', list, phone }) };
-async function addToTzintukList(ctx, list, phone) {
-  await yemotCall(ctx, TZ_ADD.command, TZ_ADD.params(list, phone));
-}
-
-module.exports = { YemotError, apiBase, yemotCall, listDir, uploadText, uploadBinary, deleteFiles, addToTzintukList, TZ_ADD };
+module.exports = { YemotError, apiBase, yemotCall, listDir, uploadText, uploadBinary, deleteFiles };

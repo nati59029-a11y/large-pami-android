@@ -1,8 +1,8 @@
 'use strict';
 // שליחת מבצע לקו הטלפוני (ימות המשיח), שלוחה 2 "מבצעים".
 //   sendPromoToLine    – עובד פעיל או מנהל. מעלה קובץ חדש לשלוחה (דרך lib/voice.js, אחרי מילון ההגייה), ובאופן רשות שולח צינתוק לרשימה mivtzaim.
-//                        עם צינתוק: מנהל – בלי הגבלה. עובד – נדחה (tzintuk-manager-only), כי YEMOT_EMPLOYEE_DAILY=0 (החלטת המשתמש 02.11).
-//                        אם מגדירים YEMOT_EMPLOYEE_DAILY=1 ומעלה – חוזרת ההתנהגות הקודמת: עובד, פעם ביום (שעון ישראל, נספר רק צינתוק שהצליח).
+//                        עם צינתוק: עובד – פעם ביום (שעון ישראל, נספר רק צינתוק שהצליח); מנהל – בלי הגבלה. (מסך המבצעים הקיים – בלי שינוי, פ5=לא)
+//                        origin:'builder' (המסך החדש "שמור ושלח לקו"): עובד עם צינתוק נדחה (tzintuk-manager-only). בלי origin – ההתנהגות הקיימת.
 //                        manual:true – מבצע ידני (מנהל בלבד, בלי source, promoKey שמתחיל ב-man_).
 //                        בלי צינתוק: בלי הגבלה לאף אחד.
 //                        { statusOnly: true } – רק מחזיר אם המשתמש עוד יכול לשלוח צינתוק היום (בלי שום פנייה לימות).
@@ -27,7 +27,7 @@ const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
 const YEMOT_EXT = defineString('YEMOT_EXT', { default: '2', description: 'שלוחת המבצעים בקו' });
 const YEMOT_TZINTUK_LIST = defineString('YEMOT_TZINTUK_LIST', { default: 'mivtzaim', description: 'רשימת הצינתוקים של המבצעים' });
-const YEMOT_EMPLOYEE_DAILY = defineInt('YEMOT_EMPLOYEE_DAILY', { default: 0, description: 'שליחות עם צינתוק ביום לעובד. 0 = עובד לא שולח צינתוק בכלל (ברירת המחדל). למנהל אין הגבלה' });
+const YEMOT_EMPLOYEE_DAILY = defineInt('YEMOT_EMPLOYEE_DAILY', { default: 1, description: 'שליחות עם צינתוק ביום לעובד (למנהל אין הגבלה)' });
 const YEMOT_MAX_DAYS = defineInt('YEMOT_MAX_DAYS', { default: 60, description: 'כמה ימים קדימה מותר תאריך הורדה' });
 const YEMOT_TEXT_MAX = defineInt('YEMOT_TEXT_MAX', { default: 400, description: 'אורך מרבי לנוסח (תווים)' });
 const YEMOT_TIMEOUT_MS = defineInt('YEMOT_TIMEOUT_MS', { default: 15000, description: 'זמן המתנה מרבי לכל קריאה לימות' });
@@ -208,8 +208,10 @@ async function sendPromo(request, key, base) {
     if (v.source) throw bad('bad-input', 'קלט לא תקין');
     if (!v.promoKey.startsWith('man_')) throw bad('bad-promo-key', 'הבקשה לא תקינה. נסו שוב.');
   }
-  // עובד לא שולח צינתוק (YEMOT_EMPLOYEE_DAILY=0). נדחה – לא מוחלף בשקט – לפני כל פנייה לימות.
-  if (isEmp && v.withTzintuk && cfg.daily < 1) throw new HttpsError('permission-denied', 'רק מנהל יכול לשלוח צינתוק. אפשר לשלוח לקו בלי צינתוק.', { reason: 'tzintuk-manager-only' });
+  // origin: מאיזה מסך (רשות). 'builder' = "שמור ושלח לקו" במסך בניית מבצע – שם עובד לא מצנתק (נדחה, לא מוחלף בשקט, לפני כל פנייה לימות).
+  // בלי origin (מסך המבצעים הקיים, וגרסאות ישנות) – בלי שינוי: עובד, פעם ביום. השדה נשלח מהטלפון, ולכן הוא רק מגביל ולא מרחיב.
+  if (input.origin !== undefined && input.origin !== 'builder') throw bad('bad-input', 'קלט לא תקין');
+  if (isEmp && v.withTzintuk && input.origin === 'builder') throw new HttpsError('permission-denied', 'רק מנהל יכול לשלוח צינתוק. אפשר לשלוח לקו בלי צינתוק.', { reason: 'tzintuk-manager-only' });
   if (v.warnings.length) logger.warn('yemot: request warning', { warnings: v.warnings, requestId: v.requestId });
   if (!key) throw new HttpsError('failed-precondition', 'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.', { reason: 'no-key' });
   let ctx;
