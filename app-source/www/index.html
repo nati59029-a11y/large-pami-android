@@ -2301,7 +2301,7 @@ const tkCNew=t=>!!(t.cAt&&t.cBy&&t.cBy!==SY.uid&&t.cAt>((TKC[t.id]||{}).s||0));
 const tkLateNow=t=>t.st==='open'&&Date.now()>t.due;
 const tkIsLate=t=>tkLateNow(t)||t.late==='1'||((t.st==='wait'||t.st==='done')&&t.sub>t.due);
 const tkOverN=()=>(TK.L||[]).filter(tkLateNow).length;
-const tkErr=e=>e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה (ייתכן שחוקי Firebase של המשימות עוד לא פורסמו)':'שגיאה: '+((e&&e.message)||e));
+const tkErr=e=>e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה לפעולה הזו. אם זה חוזר, בדוק שהשעה בטלפון מדויקת, או פנה למנהל':'שגיאה: '+((e&&e.message)||e));
 async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields:TKF.map(f=>({fieldPath:f}))},limit:1000};if(where)sq.where={fieldFilter:{field:{fieldPath:where},op:'EQUAL',value:{stringValue:'1'}}};
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>tkOf(x.document))}
 async function tkLoad(){if(!fbRole())return;let L;if(fbAdmin())L=await tkQ();else{const a=await tkQ('open'),b=await tkQ('late'),m={};a.concat(b).forEach(t=>m[t.id]=t);L=Object.values(m)}
@@ -2586,7 +2586,7 @@ async function bkCloud(manual){if(!isA()){if(manual)toast('גיבוי לענן �
   S.bkGen=gen;S.lastCloudBackup=new Date().toISOString();S.bkCounts=counts;S.bkErr='';save();
   bkSet('✓ הגיבוי הושלם: '+counts.tx+' תנועות, '+counts.files+' קבצים'+(up?' ('+up+' חדשים)':' (ללא חדשים)'));if(manual)toast('✓ הגיבוי לענן הושלם');
   if(cur().v==='data')rerender();return true
- }catch(e){const m=e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה: יש לפרסם את חוקי Firebase החדשים':(e&&e.message||String(e)));S.bkErr=m;save();bkSet('הגיבוי נכשל: '+m);if(manual)toast('הגיבוי נכשל: '+m);return false}
+ }catch(e){const m=e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה לגיבוי בענן. הגיבוי מותר רק למנהל, ודא שאתה מחובר כמנהל':(e&&e.message||String(e)));S.bkErr=m;save();bkSet('הגיבוי נכשל: '+m);if(manual)toast('הגיבוי נכשל: '+m);return false}
  finally{BKS.run=0}}
 const dayOf=iso=>iso?ymdL(new Date(iso)):'';
 function bkAuto(){try{if(!isA()||S.autoBk===false||BKS.run||!navigator.onLine)return;if(dayOf(S.lastCloudBackup)===today())return;if(S.bkTry&&Date.now()-S.bkTry<3*3600e3)return;bkCloud(false)}catch(e){}}
