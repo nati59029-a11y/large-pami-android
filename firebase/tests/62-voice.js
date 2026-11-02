@@ -306,7 +306,11 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
     assert.equal(r.status, 'OK', r.text);
     assert.equal(E.state.requests[0].body.text, 'במבָּה של Large פעמי ושל Large פעמי ושל הגייה של המנהל', 'הצורה שכבר הייתה במילון לא נדרסה');
     const lx = await readDoc(env, 'yemot_lexicon/main');
-    assert.deepEqual(lx.text.split('\n'), ['# שם החנות בקול המשוכפל (נוסף אוטומטית פעם אחת)', "לארג' פעמי=Large פעמי", 'לארג’ פעמי=Large פעמי', 'במבה=במבָּה', 'לארג׳ פעמי=הגייה של המנהל']);
+    assert.deepEqual(lx.text.split('\n'), ['# שם החנות בקול המשוכפל (נוסף אוטומטית פעם אחת)',
+      "לארג' פעמי=Large פעמי", "לארדז' פעמי=Large פעמי", "בלארג'=ב Large",
+      'לארדז׳ פעמי=Large פעמי', 'בלארג׳=ב Large', // "לארג׳ פעמי" כבר היה במילון – לא נוסף ולא נדרס
+      'לארג’ פעמי=Large פעמי', 'לארדז’ פעמי=Large פעמי', 'בלארג’=ב Large',
+      'במבה=במבָּה', 'לארג׳ פעמי=הגייה של המנהל']);
     assert.deepEqual(Object.keys(lx).sort(), ['text', 'updatedAt', 'updatedBy'], 'רק שלושת השדות שהכללים מתירים');
     // המנהל מחק את הרשומה – היא לא חוזרת (גם אחרי טעינה מחדש של השרת)
     await writeDoc(env, 'yemot_lexicon/main', { text: 'במבה=במבָּה', updatedAt: 2, updatedBy: 'u_mgr' });
@@ -318,6 +322,28 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
     seed._resetSeed();
     const s = await core(LINE, 'lineState', 'u_mgr', {}, on);
     assert.equal(s.result.lexicon.split('\n')[1], "לארג' פעמי=Large פעמי");
+    seed._resetSeed();
+  });
+
+  it('מילון: שם החנות תמיד "Large פעמי" – בנוסח האוטומטי של מבצע ("בלארג\'" ← "ב Large"), בפתיחה ("לארדז\' פעמי") ובכל צורות הגרש', async () => {
+    const seed = require(PROMO).shared;
+    seed._resetSeed();
+    const on = { LEXICON_SEED: 'on' };
+    // הנוסח האוטומטי באפליקציה עדיין מתחיל ב"מבצע בלארג'" (אם ישתנה – הרשומה צריכה להשתנות איתו)
+    const app = fs.readFileSync(path.join(H.ROOT, '..', 'app-source', 'www', 'yemot-promo.js'), 'utf8');
+    assert.ok(app.includes(`const p=["מבצע בלארג'"]`), 'ymText השתנה – לבדוק את רשומת "בלארג\'" במילון');
+    const auto = "מבצע בלארג'. במבה. 80 גרם. 3 ב-10 שקלים. המבצע בתוקף עד 9.11.";
+    const a = await core(PROMO, 'sendPromo', 'u_emp', promo({ text: auto, origin: 'builder' }), on);
+    assert.equal(a.status, 'OK', a.text);
+    assert.equal(E.state.requests[0].body.text, 'מבצע ב Large. במבה. 80 גרם. 3 ב-10 שקלים. המבצע בתוקף עד 9.11.');
+    assert.equal((await readDoc(env, 'yemot_promos/' + a.result.promoKey)).text, auto, 'ברשומה נשמר הנוסח המקורי');
+    dir('').delete('M1000.wav'); dir('').set('BACKUP_M1000.wav', 'פתיחה מוקלטת');
+    const o = await core(LINE, 'publishItem', 'u_mgr', item('opening', { text: "שלום וברכה, הגעתם לקו המבצעים והעדכונים של לארדז' פעמי. למתכון שבועי הקישו 1." }), on);
+    assert.equal(o.status, 'OK', o.text);
+    assert.equal(E.state.requests[1].body.text, 'שלום וברכה, הגעתם לקו המבצעים והעדכונים של Large פעמי. למתכון שבועי הקישו 1.');
+    const v = await core(LINE, 'publishItem', 'u_emp', item('recipes', { text: "בלארג׳ ובלארג’ ושל לארדז׳ פעמי ושל לארדז’ פעמי ושל לארג׳ פעמי" }), on);
+    assert.equal(v.status, 'OK', v.text);
+    assert.equal(E.state.requests[2].body.text, 'ב Large וב Large ושל Large פעמי ושל Large פעמי ושל Large פעמי');
     seed._resetSeed();
   });
 

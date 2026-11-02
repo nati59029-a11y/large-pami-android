@@ -182,11 +182,14 @@ async function testFault(db, at) {
   if (f.exists && f.get('at') === at) throw new Error('test fault ' + at);
 }
 
-// רשומה ראשונה במילון (seed חד-פעמי, החלטת המשתמש 02.11): שם החנות בקול המשוכפל, בשלוש צורות הגרש.
+// רשומות ראשונות במילון (seed חד-פעמי, החלטת המשתמש 02.11): שם החנות תמיד "Large פעמי" בקול המשוכפל, בשלוש צורות הגרש.
 // פעם אחת בלבד (סימון ב-yemot_state/lexicon-seed-1). לא דורס: צורה שכבר קיימת במילון (בכל הגייה) לא נוספת, ושאר המילון נשאר כמו שהוא.
 // אם המנהל ימחק את הרשומה אחר כך – היא לא תחזור. LEXICON_SEED=off מכבה (בבדיקות האמולטור הקיימות).
 const LEXICON_SEED = defineString('LEXICON_SEED', { default: 'on', description: 'הוספה חד-פעמית של "לארג\' פעמי=Large פעמי" למילון ההגייה (on/off)' });
-const SEED_LINES = ["לארג' פעמי=Large פעמי", 'לארג׳ פעמי=Large פעמי', 'לארג’ פעמי=Large פעמי'];
+// שלוש צורות גרש לכל רשומה: ' (גרש רגיל), ׳ (גרש עברי), ’ (גרש מעוקל).
+//   "לארג' פעמי" – שם החנות. "לארדז' פעמי" – הכתיב בנוסח הפתיחה. "בלארג'" – הנוסח האוטומטי של מבצע ("מבצע בלארג'", ymText ב-yemot-promo.js).
+const SEED_LINES = [];
+for (const g of ["'", '׳', '’']) SEED_LINES.push(`לארג${g} פעמי=Large פעמי`, `לארדז${g} פעמי=Large פעמי`, `בלארג${g}=ב Large`);
 const SEED_MARK = 'yemot_state/lexicon-seed-1';
 let seedDone = false;
 async function ensureLexiconSeed(db) {
