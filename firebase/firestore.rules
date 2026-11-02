@@ -133,11 +133,17 @@ service cloud.firestore {
     // הלוגיקה הועתקה כמו שהיא מהכללים שפעילים היום (app-source/firestore.rules הישן),
     // רק "מחובר" הוחלף ב-isStaff() ו-isAdmin() ב-isManager(), ונוספה בדיקה שהשם (by, doneBy) הוא של הכותב (isMyName).
     // תוספת: תגובות (תת-אוסף c) והשדות cAt/cBy על המשימה ("תגובה חדשה"). משימות ישנות בלי השדות ממשיכות לעבוד.
+    // תוספת (בקשת בעל העסק 2.11.2026): nc == '1' = "יש במשימה הערה של עובד". עובד מסמן אותו לפני שהוא מגיב,
+    // ומשימה עם nc לא נסגרת אצל עובד ב"בוצע" – היא עוברת להמתנה לאישור מנהל (st 'wait'). עובד לא מסיר את nc.
+    // rt == '1' = "המנהל החזיר את המשימה" (רק מנהל כותב). משימה ישנה בלי nc – כמו היום.
     match /tasks/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function hasNc() { return od().get('nc', '') == '1'; }
       // עובד: מסמן בוצע (בלי דרישת תמונה) או מצרף תמונה (כשנדרשת). לא סוגר משימה שנדרשת בה תמונה.
+      // במשימה עם הערת עובד (nc): "בוצע" = st 'wait' (open נשאר '1'), בלי תמונה, ו-late/ok לא משתנים – המנהל מאשר או מחזיר.
+      // עובד לא מחזיר משימה ל-open בעצמו: כל עדכון של עובד מתחיל ממשימה פתוחה (st 'open').
       function workerUpd() {
         return od().st == 'open'
           && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
@@ -148,10 +154,18 @@ service cloud.firestore {
               && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
               && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*')
               && nw().late == od().late && nw().ok == od().ok)
-            || (od().pr != '1' && nw().st == 'done' && nw().open == ''
+            || (od().pr != '1' && !hasNc() && nw().st == 'done' && nw().open == ''
               && nw().img == od().img && nw().ok == nw().sub
               && (nw().late == '1') == (request.time.toMillis() > od().due))
+            || (od().pr != '1' && hasNc() && nw().st == 'wait' && nw().open == '1'
+              && nw().img == od().img && nw().late == od().late && nw().ok == od().ok)
           );
+      }
+      // סימון "יש הערת עובד": רק השדה nc, רק לערך '1' (אי אפשר להסיר), ורק במשימה שהעובד רשאי לקרוא.
+      function ncMark() {
+        return nw().diff(od()).affectedKeys().hasOnly(['nc'])
+          && nw().get('nc', '') == '1'
+          && (od().open == '1' || od().late == '1');
       }
       // סימון "תגובה חדשה": רק cAt (זמן התגובה האחרונה, לפי שעון השרת) ו-cBy (המגיב עצמו),
       // ורק במשימה שהמגיב רשאי לקרוא.
@@ -176,10 +190,11 @@ service cloud.firestore {
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
         && nowOk(nw().cr)
         && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000;
-      allow update: if isManager() || (isStaff() && (workerUpd() || commentMark()));
+      allow update: if isManager() || (isStaff() && (workerUpd() || commentMark() || ncMark()));
       allow delete: if isManager();
 
       // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
+      // עובד מגיב רק אחרי שהמשימה סומנה nc == '1' (ncMark) – כך לכל הערת עובד חדשה יש סימון על המשימה.
       match /c/{cid} {
         function task() { return get(/databases/$(database)/documents/tasks/$(id)).data; }
         function canReadTask() {
@@ -194,7 +209,8 @@ service cloud.firestore {
           && nw().by is string && nw().by.size() <= 100
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
-          && nowOk(nw().t);
+          && nowOk(nw().t)
+          && (isManager() || task().get('nc', '') == '1');
         allow update: if false;
         allow delete: if isManager();
       }
@@ -216,6 +232,50 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['data'])
           && request.resource.data.data is string
           && request.resource.data.data.size() <= 700000;
+        allow delete: if isManager();
+      }
+    }
+
+    // ---------- בקשות לעדכון האפליקציה (appreq) ----------
+    // בקשת בעל העסק 2.11.2026: עובד או מנהל כותב מה צריך לתקן, עם צילומי מסך (לא חובה). כל הצוות רואה את כל הבקשות.
+    // יצירה: בשמו, בסטטוס 'new', בלי שדות סטטוס. העובד לא עורך ולא מוחק. רק מנהל משנה סטטוס (ורק שדות הסטטוס) ומוחק.
+    // np = מספר חלקי התמונות (0 = בלי תמונות, עד 8).
+    match /appreq/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && nw().keys().hasAll(['uid', 'by', 'txt', 't', 'st', 'np'])
+        && nw().keys().hasOnly(['uid', 'by', 'txt', 't', 'st', 'np'])
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100
+        && isMyName(nw().by)
+        && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 2000
+        && nowOk(nw().t)
+        && nw().st == 'new'
+        && nw().np is int && nw().np >= 0 && nw().np <= 8;
+      allow update: if isManager()
+        && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+        && nw().st in ['new', 'doing', 'done', 'rej']
+        && isMyName(nw().get('stBy', ''))
+        && nowOk(nw().get('stAt', 0))
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
+      allow delete: if isManager();
+
+      // חלקי התמונות: appreq/{id}/p/{k} (כמו supinv): רק השדה data, עד 700,000 תווים.
+      // כותב רק מי שיצר את הבקשה, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. אין עדכון (אין עריכה אחרי השליחה).
+      match /p/{k} {
+        function req() { return get(/databases/$(database)/documents/appreq/$(id)).data; }
+        allow read: if isStaff();
+        allow create: if isStaff()
+          && exists(/databases/$(database)/documents/appreq/$(id))
+          && req().uid == request.auth.uid
+          && k.matches('^[0-7]$') && int(k) < req().np
+          && request.time.toMillis() - req().t < 900000
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow update: if false;
         allow delete: if isManager();
       }
     }

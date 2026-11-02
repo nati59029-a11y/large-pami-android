@@ -431,7 +431,7 @@
   },
   {
    "id": "M26",
-   "line": 2620,
+   "line": 2635,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames()",
    "collection": "bk",
@@ -445,7 +445,7 @@
   },
   {
    "id": "M27",
-   "line": 2620,
+   "line": 2635,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames('fb')",
    "collection": "fb",
@@ -459,7 +459,7 @@
   },
   {
    "id": "M28",
-   "line": 2621,
+   "line": 2636,
    "snippet": "fsx('/bk/'+encodeURIComponent(id),{method:'PATCH'",
    "fn": "bkPut",
    "collection": "bk",
@@ -473,7 +473,7 @@
   },
   {
    "id": "M29",
-   "line": 2639,
+   "line": 2654,
    "snippet": "fsx('/bk/'+encodeURIComponent(n),{method:'DELETE'})",
    "fn": "bkCloud",
    "collection": "bk",
@@ -487,7 +487,7 @@
   },
   {
    "id": "M30",
-   "line": 2650,
+   "line": 2665,
    "snippet": "fsx('/bk/meta')",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -501,7 +501,7 @@
   },
   {
    "id": "M31",
-   "line": 2651,
+   "line": 2666,
    "snippet": "fsx('/bk/d'+m.gen+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -515,7 +515,7 @@
   },
   {
    "id": "M32",
-   "line": 2653,
+   "line": 2668,
    "snippet": "fsx('/bk/'+m.files[id].d+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -543,7 +543,7 @@
   },
   {
    "id": "M37",
-   "line": 2306,
+   "line": 2307,
    "snippet": "map(x=>tkOf(x.document))",
    "fn": "tkLoad → tkQ('open') + tkQ('late') (עובד)",
    "collection": "tasks",
@@ -557,7 +557,7 @@
   },
   {
    "id": "M38",
-   "line": 2306,
+   "line": 2307,
    "snippet": "map(x=>tkOf(x.document))",
    "fn": "tkLoad → tkQ() (מנהל)",
    "collection": "tasks",
@@ -571,7 +571,7 @@
   },
   {
    "id": "M39",
-   "line": 2312,
+   "line": 2313,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "ACT.tkDone → tkPatch",
    "collection": "tasks",
@@ -586,7 +586,7 @@
   },
   {
    "id": "M40",
-   "line": 2312,
+   "line": 2313,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "CHG.tkimg → tkPatch",
    "collection": "tasks",
@@ -600,7 +600,7 @@
   },
   {
    "id": "M41",
-   "line": 2312,
+   "line": 2313,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "ACT.tkReq / tkOk / FRM.tkRej → tkPatch",
    "collection": "tasks",
@@ -614,7 +614,7 @@
   },
   {
    "id": "M42",
-   "line": 2312,
+   "line": 2313,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "FRM.tkCm → tkPatch({cAt,cBy})",
    "collection": "tasks",
@@ -629,7 +629,7 @@
   },
   {
    "id": "M43",
-   "line": 2403,
+   "line": 2405,
    "snippet": "fsx('/tasks?documentId='",
    "fn": "FRM.tkAdd",
    "collection": "tasks",
@@ -644,7 +644,7 @@
   },
   {
    "id": "M44",
-   "line": 2410,
+   "line": 2417,
    "snippet": "fsx('/tasks/'+t.id,{method:'DELETE'})",
    "fn": "ACT.tkDel",
    "collection": "tasks",
@@ -658,7 +658,7 @@
   },
   {
    "id": "M45",
-   "line": 2411,
+   "line": 2418,
    "snippet": "fsx('/tasks/'+el.dataset.id)",
    "fn": "ACT.tkImg",
    "collection": "tasks",
@@ -673,7 +673,7 @@
   },
   {
    "id": "M46",
-   "line": 2413,
+   "line": 2420,
    "snippet": "fsx('/tasks/'+id+'/c?pageSize=300'",
    "fn": "tkCmLoad",
    "collection": "tasks_c",
@@ -688,7 +688,7 @@
   },
   {
    "id": "M47",
-   "line": 2423,
+   "line": 2434,
    "snippet": "fsx('/tasks/'+id+'/c?documentId='",
    "fn": "FRM.tkCm",
    "collection": "tasks_c",
@@ -703,7 +703,7 @@
   },
   {
    "id": "M48",
-   "line": 2426,
+   "line": 2441,
    "snippet": "fsx('/tasks/'+id+'/c/'+cid,{method:'DELETE'})",
    "fn": "ACT.tkCmDel",
    "collection": "tasks_c",
@@ -717,7 +717,7 @@
   },
   {
    "id": "M51",
-   "line": 2368,
+   "line": 2370,
    "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;",
    "fn": "tkSumLoad (עובד)",
    "collection": "tasks",
@@ -731,7 +731,7 @@
   },
   {
    "id": "M52",
-   "line": 2368,
+   "line": 2370,
    "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;",
    "fn": "tkSumLoad (מנהל)",
    "collection": "tasks",
@@ -745,7 +745,7 @@
   },
   {
    "id": "M53",
-   "line": 2809,
+   "line": 2824,
    "snippet": "collectionId:'supinv'}],select",
    "fn": "supSync",
    "collection": "supinv",
@@ -759,7 +759,7 @@
   },
   {
    "id": "M54",
-   "line": 2816,
+   "line": 2831,
    "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'PATCH'",
    "fn": "supSync",
    "collection": "supinv_p",
@@ -773,7 +773,7 @@
   },
   {
    "id": "M55",
-   "line": 2819,
+   "line": 2834,
    "snippet": "await fsx('/supinv/'+id,{method:'PATCH'",
    "fn": "supSync",
    "collection": "supinv",
@@ -787,7 +787,7 @@
   },
   {
    "id": "M56",
-   "line": 2822,
+   "line": 2837,
    "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'DELETE'})",
    "fn": "supDel",
    "collection": "supinv_p",
@@ -801,7 +801,7 @@
   },
   {
    "id": "M57",
-   "line": 2823,
+   "line": 2838,
    "snippet": "await fsx('/supinv/'+id,{method:'DELETE'})",
    "fn": "supDel",
    "collection": "supinv",
@@ -815,7 +815,7 @@
   },
   {
    "id": "M58",
-   "line": 2831,
+   "line": 2846,
    "snippet": "collectionId:'supinv'}],where",
    "fn": "supLoad",
    "collection": "supinv",
@@ -829,7 +829,7 @@
   },
   {
    "id": "M59",
-   "line": 2842,
+   "line": 2857,
    "snippet": "fsx('/chunks/'+x.id+'_'+k)",
    "fn": "supImg",
    "collection": "chunks",
@@ -843,7 +843,7 @@
   },
   {
    "id": "M60",
-   "line": 2842,
+   "line": 2857,
    "snippet": "fsx('/supinv/'+x.id+'/p/'+k)",
    "fn": "supImg",
    "collection": "supinv_p",
@@ -854,6 +854,150 @@
     "employee"
    ],
    "note": "העובד לוחץ 'תמונה'."
+  },
+  {
+   "id": "M61",
+   "line": 2313,
+   "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
+   "fn": "FRM.tkCm → tkPatch({nc:'1'}) (עובד, לפני התגובה)",
+   "collection": "tasks",
+   "op": "update",
+   "rest": "PATCH /tasks/{id}?updateMask nc",
+   "condition": "רק השדה nc, רק לערך '1' (אי אפשר להסיר), במשימה שהוא רשאי לקרוא",
+   "who": [
+    "employee"
+   ],
+   "note": "עובד מסמן 'יש הערת עובד' לפני שהוא שולח תגובה. בלי הסימון הכללים חוסמים את התגובה."
+  },
+  {
+   "id": "M62",
+   "line": 2313,
+   "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
+   "fn": "ACT.tkDone → tkPatch (עובד, משימה עם nc)",
+   "collection": "tasks",
+   "op": "update",
+   "rest": "PATCH /tasks/{id}?updateMask st,sub,doneBy",
+   "condition": "עובד: משימה פתוחה עם nc == '1' ובלי דרישת תמונה → st 'wait' (open נשאר '1'), sub עכשיו, doneBy בשמו",
+   "who": [
+    "employee"
+   ],
+   "note": "'בוצע' במשימה שיש בה הערת עובד – ממתינה לאישור המנהל."
+  },
+  {
+   "id": "M63",
+   "line": 2313,
+   "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
+   "fn": "FRM.tkCm → tkPatch (מנהל, 'להחזיר לעובד')",
+   "collection": "tasks",
+   "op": "update",
+   "rest": "PATCH /tasks/{id}?updateMask cAt,cBy,st,open,img,sub,doneBy,ok,late,note,rt",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מנהל מגיב עם 'להחזיר לעובד' על משימה שבוצעה או ממתינה: חוזרת ל-open, היעד נשמר."
+  },
+  {
+   "id": "M64",
+   "line": 2882,
+   "snippet": "collectionId:'appreq'}],select",
+   "fn": "arLoad",
+   "collection": "appreq",
+   "op": "list",
+   "rest": "POST :runQuery from appreq select (uid,by,txt,t,st,stBy,stAt,note,np) limit 1000",
+   "condition": "כל הבקשות (בלי תמונות)",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "מסך 'בקשות לעדכון האפליקציה', ומונה 'חדש' אצל המנהל."
+  },
+  {
+   "id": "M65",
+   "line": 2914,
+   "snippet": "fsx('/appreq?documentId='",
+   "fn": "FRM.arAdd",
+   "collection": "appreq",
+   "op": "create",
+   "rest": "POST /appreq?documentId={id}",
+   "condition": "uid וה-by של הכותב; st 'new'; txt 1–2000; t עכשיו; np 0–8; בלי שדות סטטוס",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "שליחת בקשה חדשה."
+  },
+  {
+   "id": "M66",
+   "line": 2917,
+   "snippet": "fsx('/appreq/'+id+'/p?documentId='",
+   "fn": "FRM.arAdd",
+   "collection": "appreq_p",
+   "op": "create",
+   "rest": "POST /appreq/{id}/p?documentId={k}",
+   "condition": "רק בבקשה של הכותב, k < np, עד 15 דקות מהשליחה; data עד 700,000 תווים",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "העלאת חלקי התמונות אחרי הבקשה."
+  },
+  {
+   "id": "M67",
+   "line": 2920,
+   "snippet": "fsx('/appreq/'+x.id+'/p/'+k),'data')",
+   "fn": "ACT.arImg",
+   "collection": "appreq_p",
+   "op": "get",
+   "rest": "GET /appreq/{id}/p/{k}",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "הצגת התמונות של בקשה – רק בלחיצה."
+  },
+  {
+   "id": "M68",
+   "line": 2930,
+   "snippet": "fsx('/appreq/'+id+'?'+mask.join('&')",
+   "fn": "FRM.arSt",
+   "collection": "appreq",
+   "op": "update",
+   "rest": "PATCH /appreq/{id}?updateMask st,stBy,stAt,note&currentDocument.exists=true",
+   "condition": "מנהל בלבד; רק שדות הסטטוס",
+   "who": [
+    "manager"
+   ],
+   "note": "שינוי סטטוס (חדש / בטיפול / טופל / נדחה) והערה."
+  },
+  {
+   "id": "M69",
+   "line": 2933,
+   "snippet": "fsx('/appreq/'+x.id+'/p/'+k,{method:'DELETE'})",
+   "fn": "ACT.arDel",
+   "collection": "appreq_p",
+   "op": "delete",
+   "rest": "DELETE /appreq/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת חלקי התמונות של בקשה."
+  },
+  {
+   "id": "M70",
+   "line": 2933,
+   "snippet": "fsx('/appreq/'+x.id,{method:'DELETE'})",
+   "fn": "ACT.arDel",
+   "collection": "appreq",
+   "op": "delete",
+   "rest": "DELETE /appreq/{id}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת בקשה."
   }
  ],
  "fsbLine": 1332,

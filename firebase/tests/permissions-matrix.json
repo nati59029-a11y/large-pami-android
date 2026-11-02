@@ -146,6 +146,11 @@
         "update-mark-done":    "DDDAA",
         "update-other-fields": "DDDDA",
         "update-comment-mark": "DDDAA",
+        "update-nc-mark":      "DDDAA",
+        "update-remove-nc":    "DDDDA",
+        "update-done-with-nc": "DDDDA",
+        "update-wait-with-nc": "DDDAA",
+        "update-return-to-open": "DDDDA",
         "delete":              "DDDDA"
       }
     },
@@ -157,6 +162,7 @@
         "get-on-done-task":    "DDDDA",
         "list-on-open-task":   "DDDAA",
         "create-own":          "DDDAA",
+        "create-own-without-nc-mark": "DDDDA",
         "create-other-uid":    "DDDDD",
         "create-on-done-task": "DDDDA",
         "update":              "DDDDD",
@@ -184,6 +190,32 @@
         "create-too-big":   "DDDDD",
         "update":           "DDDDA",
         "delete":           "DDDDA"
+      }
+    },
+    "appreq": {
+      "source": "בקשות לעדכון האפליקציה – בקשת בעל העסק 2.11.2026: עובד ומנהל כותבים בקשה, וכל הצוות רואה את כל הבקשות",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה (כל הבקשות) ויצירה בשמו, בסטטוס 'new'. בלי עדכון ומחיקה", "manager": "קריאה, יצירה בשמו, שינוי סטטוס (רק שדות הסטטוס) ומחיקה" },
+      "ops": {
+        "get":               "DDDAA",
+        "list":              "DDDAA",
+        "create-own":        "DDDAA",
+        "create-other-uid":  "DDDDD",
+        "create-with-status": "DDDDD",
+        "update-status":     "DDDDA",
+        "update-text":       "DDDDD",
+        "delete":            "DDDDA"
+      }
+    },
+    "appreq_p": {
+      "source": "חלקי התמונות של בקשה – appreq/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. יצירה רק בבקשה שלו, ב-15 הדקות שאחרי השליחה. בלי עדכון ומחיקה", "manager": "קריאה, יצירה בבקשה שלו (כמו עובד) ומחיקה. בלי עדכון" },
+      "ops": {
+        "get":                    "DDDAA",
+        "create-own-request":     "DDDAA",
+        "create-on-other-request": "DDDDD",
+        "create-too-big":         "DDDDD",
+        "update":                 "DDDDD",
+        "delete":                 "DDDDA"
       }
     },
     "_not_in_table": {

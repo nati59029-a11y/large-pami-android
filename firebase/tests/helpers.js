@@ -82,6 +82,7 @@ async function seed(env) {
     const task = (id, o) => b.set(db.doc('tasks/' + id), Object.assign({ owner: OTHER, by: OTHER, role: 'w', txt: 'משימה ' + id,
       cr: T - H1, due: T + 4 * D1, st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }, o));
     task('t_open', {});
+    task('t_nc', { nc: '1' }); // משימה פתוחה שיש בה הערת עובד – "בוצע" של עובד עובר לאישור מנהל
     task('t_pr', { pr: '1' });
     task('t_wait', { pr: '1', st: 'wait', img: 'data:image/jpeg;base64,' + 'A'.repeat(200), sub: T - 1000, doneBy: OTHER });
     task('t_overdue', { cr: T - 6 * D1, due: T - D1 });
@@ -89,6 +90,9 @@ async function seed(env) {
     task('t_done_late', { st: 'done', open: '', sub: T - 2000, ok: T - 2000, doneBy: OTHER, late: '1', cr: T - 9 * D1, due: T - 5 * D1 });
     b.set(db.doc('tasks/t_open/c/c1'), { uid: OTHER, by: OTHER, txt: 'תגובה', t: T - 5000 });
     b.set(db.doc('tasks/t_done/c/c1'), { uid: 'u_mgr', by: 'u_mgr', txt: 'תגובה', t: T - 5000 });
+    // בקשות לעדכון האפליקציה (appreq): בקשה של עובד אחר עם תמונה בחלק אחד
+    b.set(db.doc('appreq/r1'), { uid: OTHER, by: OTHER, txt: 'בקשה', t: T - 5000, st: 'new', np: 1 });
+    b.set(db.doc('appreq/r1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
     await b.commit();
   });
 }

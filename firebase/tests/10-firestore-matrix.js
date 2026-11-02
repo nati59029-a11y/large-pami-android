@@ -10,6 +10,7 @@ const H = require('./helpers');
 let seq = 0;
 const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
 const newSup = () => ({ c: 'bak', n: 'ספק', d: '2026-11-01', at: '2026-11-01', a: '10', inv: '2', by: 'מנהל', pend: '', src: '', m: '2026-11', np: '0', h: 'a', fh: 'b' });
+const newReq = (uid, np) => ({ uid, by: uid, txt: 'בקשה', t: Date.now(), st: 'new', np: np || 0 });
 const newTask = (owner) => { const cr = Date.now(); return { owner, by: owner, role: 'w', txt: 'משימה', cr, due: cr + 4 * 86400000,
   st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }; };
 
@@ -120,13 +121,19 @@ const OPS = {
     'update-mark-done':    (db, me) => { const n = Date.now(); return db.doc('tasks/t_open').update({ st: 'done', open: '', sub: n, ok: n, doneBy: me, late: '' }); },
     'update-other-fields': (db) => db.doc('tasks/t_open').update({ txt: 'שונה' }),
     'update-comment-mark': (db, me) => db.doc('tasks/t_open').update({ cAt: Date.now(), cBy: me }),
+    'update-nc-mark':      (db) => db.doc('tasks/t_open').update({ nc: '1' }),
+    'update-remove-nc':    (db) => db.doc('tasks/t_nc').update({ nc: '' }),
+    'update-done-with-nc': (db, me) => { const n = Date.now(); return db.doc('tasks/t_nc').update({ st: 'done', open: '', sub: n, ok: n, doneBy: me, late: '' }); },
+    'update-wait-with-nc': (db, me) => db.doc('tasks/t_nc').update({ st: 'wait', sub: Date.now(), doneBy: me }),
+    'update-return-to-open': (db) => db.doc('tasks/t_done').update({ st: 'open', open: '1', img: '', sub: 0, doneBy: '', ok: 0, late: '', note: 'לא גמור', rt: '1' }),
     'delete':              (db) => db.doc('tasks/t_open').delete(),
   },
   tasks_c: {
     'get-on-open-task':    (db) => db.doc('tasks/t_open/c/c1').get(),
     'get-on-done-task':    (db) => db.doc('tasks/t_done/c/c1').get(),
     'list-on-open-task':   (db) => db.collection('tasks/t_open/c').get(),
-    'create-own':          (db, me) => db.doc('tasks/t_open/c/' + fresh('c')).set({ uid: me, by: me, txt: 'שלום', t: Date.now() }),
+    'create-own':          (db, me) => db.doc('tasks/t_nc/c/' + fresh('c')).set({ uid: me, by: me, txt: 'שלום', t: Date.now() }),
+    'create-own-without-nc-mark': (db, me) => db.doc('tasks/t_open/c/' + fresh('c')).set({ uid: me, by: me, txt: 'שלום', t: Date.now() }),
     'create-other-uid':    (db) => db.doc('tasks/t_open/c/' + fresh('c')).set({ uid: H.OTHER, by: H.OTHER, txt: 'שלום', t: Date.now() }),
     'create-on-done-task': (db, me) => db.doc('tasks/t_done/c/' + fresh('c')).set({ uid: me, by: me, txt: 'שלום', t: Date.now() }),
     'update':              (db) => db.doc('tasks/t_open/c/c1').update({ txt: 'שונה' }),
@@ -147,6 +154,25 @@ const OPS = {
     'create-too-big': (db) => db.doc('supinv/s1/p/1').set({ data: 'A'.repeat(700001) }),
     'update':         (db) => db.doc('supinv/s1/p/0').set({ data: 'BBBB' }),
     'delete':         (db) => db.doc('supinv/s1/p/0').delete(),
+  },
+  // בקשות לעדכון האפליקציה (arLoad / FRM.arAdd / FRM.arSt / ACT.arDel)
+  appreq: {
+    'get':                (db) => db.doc('appreq/r1').get(),
+    'list':               (db) => db.collection('appreq').get(),
+    'create-own':         (db, me) => db.doc('appreq/' + fresh('r')).set(newReq(me)),
+    'create-other-uid':   (db) => db.doc('appreq/' + fresh('r')).set(newReq(H.OTHER)),
+    'create-with-status': (db, me) => db.doc('appreq/' + fresh('r')).set(Object.assign(newReq(me), { st: 'done' })),
+    'update-status':      (db, me) => db.doc('appreq/r1').update({ st: 'doing', stBy: me, stAt: Date.now(), note: 'בטיפול' }),
+    'update-text':        (db) => db.doc('appreq/r1').update({ txt: 'שונה' }),
+    'delete':             (db) => db.doc('appreq/r1').delete(),
+  },
+  appreq_p: {
+    'get':                     (db) => db.doc('appreq/r1/p/0').get(),
+    'create-own-request':      async (db, me) => { const id = fresh('r'); await db.doc('appreq/' + id).set(newReq(me, 1)); return db.doc('appreq/' + id + '/p/0').set({ data: 'AAAA' }); },
+    'create-on-other-request': (db) => db.doc('appreq/r1/p/1').set({ data: 'AAAA' }),
+    'create-too-big':          async (db, me) => { const id = fresh('r'); try { await db.doc('appreq/' + id).set(newReq(me, 1)); } catch (e) { /* תפקיד שלא יוצר – נחסם ממילא */ } return db.doc('appreq/' + id + '/p/0').set({ data: 'A'.repeat(700001) }); },
+    'update':                  (db) => db.doc('appreq/r1/p/0').set({ data: 'BBBB' }),
+    'delete':                  (db) => db.doc('appreq/r1/p/0').delete(),
   },
   _not_in_table: {
     'get-orders':    (db) => db.doc('orders/o1').get(),

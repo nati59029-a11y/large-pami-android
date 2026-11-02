@@ -14,7 +14,7 @@ const fresh = (p) => `${p}${Date.now()}x${++seq}`;
 const now = () => new Date().toISOString();
 const bypass = (env, fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
 const iv = (v) => ({ integerValue: String(Math.round(+v || 0)) });
-const TKF = ['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'sub', 'doneBy', 'note', 'ok', 'late', 'cAt', 'cBy'];
+const TKF = ['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'sub', 'doneBy', 'note', 'ok', 'late', 'cAt', 'cBy', 'nc', 'rt'];
 const TKSF = ['cr', 'due', 'st', 'sub', 'late', 'doneBy']; // סיכום המשימות באפליקציה
 // tkQ(where) באפליקציה
 const tkRunQ = (uid, where) => {
@@ -222,10 +222,13 @@ const REPLAY = {
     if (r.status === 200) assert.ok(((r.json && r.json.documents) || []).length >= 1, 'השרשור צריך לכלול את התגובה הקיימת');
     return [r];
   } },
-  // FRM.tkCm: תגובה חדשה
-  M47: { run: async (uid) => {
+  // FRM.tkCm: תגובה חדשה. עובד – קודם tkPatch({nc:'1'}) (M61), כמו באפליקציה; מנהל – בלי
+  M47: { run: async (uid, env, role) => {
+    const out = [];
+    if (role === 'employee' || role === 'signedIn' || role === 'disabledEmployee') out.push(await tkPatch(uid, 't_open', { nc: '1' }));
     const fields = { uid: sv(uid), by: sv(uid), txt: sv('סיימתי חצי'), t: iv(Date.now()) };
-    return [await fsx(uid, '/tasks/' + 't_open' + '/c?documentId=' + encodeURIComponent(fresh('c')), { method: 'POST', body: JSON.stringify({ fields }) })];
+    out.push(await fsx(uid, '/tasks/' + 't_open' + '/c?documentId=' + encodeURIComponent(fresh('c')), { method: 'POST', body: JSON.stringify({ fields }) }));
+    return out;
   } },
   M48: { run: async (uid) => [await fsx(uid, '/tasks/' + 't_open' + '/c/' + 'c1', { method: 'DELETE' })] },
   // tkSumLoad – עובד: משימות שהוא ביצע (where doneBy IN [fbBy(), fbBy().toLowerCase()], בלי כפילות), רק השדות של הסיכום.
@@ -304,6 +307,54 @@ const REPLAY = {
   M59: { run: async (uid) => [await fsx(uid, '/chunks/' + `c_${uid}` + '_' + 0)] },
   // supImg: צילום מהענן
   M60: { run: async (uid) => [await fsx(uid, '/supinv/' + 's1' + '/p/' + 0)] },
+
+  // ---- הערות במשימות (nc) והחזרה לעובד ----
+  // FRM.tkCm (עובד): סימון "יש הערת עובד" לפני התגובה
+  M61: { run: async (uid) => [await tkPatch(uid, 't_open', { nc: '1' })] },
+  // ACT.tkDone (עובד, משימה עם nc): ממתינה לאישור המנהל
+  M62: { run: async (uid) => [await tkPatch(uid, 't_nc', { st: 'wait', sub: Date.now(), doneBy: uid })] },
+  // FRM.tkCm (מנהל, "להחזיר לעובד"): משימה שבוצעה חוזרת ל-open
+  M63: { run: async (uid) => {
+    const now = Date.now();
+    const r = await tkPatch(uid, 't_done', { cAt: now, cBy: uid, st: 'open', open: '1', img: '', sub: 0, doneBy: '', ok: 0, late: '', note: 'חסר עוד מדף', rt: '1' });
+    if (r.status === 200) { assert.equal(r.json.fields.st.stringValue, 'open'); assert.ok(r.json.fields.due && +r.json.fields.due.integerValue > 0, 'היעד (due) חייב להישמר'); }
+    return [r];
+  } },
+
+  // ---- בקשות לעדכון האפליקציה (appreq) ----
+  // arLoad: כל הבקשות, בלי תמונות
+  M64: { run: async (uid) => {
+    const F = ['uid', 'by', 'txt', 't', 'st', 'stBy', 'stAt', 'note', 'np'];
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'appreq' }], select: { fields: F.map((f) => ({ fieldPath: f })) }, limit: 1000 } }) });
+    if (r.status === 200) {
+      const docs = (r.json || []).filter((x) => x.document);
+      assert.ok(docs.some((x) => x.document.name.endsWith('/appreq/r1')), 'הצוות צריך לראות גם בקשה של עובד אחר');
+    }
+    return [r];
+  } },
+  // FRM.arAdd: הבקשה, ואחריה חלקי התמונות (POST עם documentId, כמו באפליקציה)
+  M65: { run: async (uid) => {
+    const fields = { uid: sv(uid), by: sv(uid), txt: sv('בדוח החודשי חסר סינון לפי ספק'), t: iv(Date.now()), st: sv('new'), np: iv(0) };
+    return [await fsx(uid, '/appreq?documentId=' + encodeURIComponent(fresh('r')), { method: 'POST', body: JSON.stringify({ fields }) })];
+  } },
+  M66: { run: async (uid) => {
+    const id = fresh('r'); const all = 'PAGES:' + JSON.stringify(['data:image/jpeg;base64,' + 'A'.repeat(900000)]); const CH = 700000; const np = Math.ceil(all.length / CH);
+    const fields = { uid: sv(uid), by: sv(uid), txt: sv('צילום מסך מצורף'), t: iv(Date.now()), st: sv('new'), np: iv(np) };
+    const out = [await fsx(uid, '/appreq?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ fields }) })];
+    for (let k = 0; k < np; k++) out.push(await fsx(uid, '/appreq/' + id + '/p?documentId=' + k, { method: 'POST', body: JSON.stringify({ fields: { data: sv(all.slice(k * CH, (k + 1) * CH)) } }) }));
+    return out;
+  } },
+  // ACT.arImg
+  M67: { run: async (uid) => [await fsx(uid, '/appreq/' + 'r1' + '/p/' + 0)] },
+  // FRM.arSt: שינוי סטטוס (רק שדות הסטטוס, updateMask)
+  M68: { run: async (uid) => {
+    const o = { st: 'done', stBy: uid, stAt: Date.now(), note: 'תוקן בגרסה הבאה' }; const fields = {}; const mask = [];
+    for (const k in o) { fields[k] = typeof o[k] === 'number' ? iv(o[k]) : sv(o[k]); mask.push('updateMask.fieldPaths=' + k); }
+    return [await fsx(uid, '/appreq/' + 'r1' + '?' + mask.join('&') + '&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields }) })];
+  } },
+  // ACT.arDel: החלקים ואז הבקשה
+  M69: { run: async (uid) => [await fsx(uid, '/appreq/' + 'r1' + '/p/' + 0, { method: 'DELETE' })] },
+  M70: { run: async (uid) => [await fsx(uid, '/appreq/' + 'r1', { method: 'DELETE' })] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,
