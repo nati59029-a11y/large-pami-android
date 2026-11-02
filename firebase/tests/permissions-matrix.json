@@ -246,6 +246,50 @@
         "delete":                  "DDDDA"
       }
     },
+    "cashout": {
+      "source": "הוצאות מקופה – סגירת קופה שלב 2 (2.11.2026): מראה לכל הוצאה מקופה, קריא לכל הצוות",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. יצירה בשמו רק להוצאה שלו ב-inbox (zc ו-dp ריקים). עדכון: רק dp, מריק, להפקדה שלו שכוללת את ההוצאה. בלי מחיקה", "manager": "קריאה, יצירה בשמו (מראה מהטלפון), עדכון zc ו-dp בלבד, ומחיקה" },
+      "ops": {
+        "get":                      "DDDAA",
+        "list":                     "DDDAA",
+        "create-own":               "DDDAA",
+        "create-without-inbox":     "DDDDA",
+        "create-other-name":        "DDDDD",
+        "create-dep-mismatch":      "DDDDD",
+        "create-bad-amount":        "DDDDD",
+        "update-zc":                "DDDDA",
+        "update-amount":            "DDDDD",
+        "mark-dp-own-deposit":      "DDDAA",
+        "mark-dp-to-other-deposit": "DDDDA",
+        "delete":                   "DDDDA"
+      }
+    },
+    "deposits": {
+      "source": "אישורי הפקדה – סגירת קופה שלב 2 (2.11.2026): קריא לכל הצוות; המנהל מאשר, דוחה ומוחק",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. יצירה בשמו בסטטוס 'new'. בלי עדכון ומחיקה", "manager": "קריאה, יצירה בשמו בסטטוס 'new', שינוי סטטוס (רק שדות הסטטוס) ומחיקה" },
+      "ops": {
+        "get":              "DDDAA",
+        "list":             "DDDAA",
+        "create-own":       "DDDAA",
+        "create-other-uid": "DDDDD",
+        "create-status-ok": "DDDDD",
+        "update-status":    "DDDDA",
+        "update-amount":    "DDDDD",
+        "delete":           "DDDDA"
+      }
+    },
+    "deposits_p": {
+      "source": "חלקי הצילומים של אישור הפקדה – deposits/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה רק באישור שלו, ב-15 הדקות שאחרי השליחה. בלי קריאה, עדכון ומחיקה", "manager": "קריאה, יצירה באישור שלו (כמו עובד) ומחיקה. בלי עדכון" },
+      "ops": {
+        "get":                     "DDDDA",
+        "create-own-deposit":      "DDDAA",
+        "create-on-other-deposit": "DDDDD",
+        "create-too-big":          "DDDDD",
+        "update":                  "DDDDD",
+        "delete":                  "DDDDA"
+      }
+    },
     "_not_in_table": {
       "source": "3.3 – 'ברירת מחדל לכל אוסף שלא מופיע בטבלה: אין גישה לאף אחד'",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },

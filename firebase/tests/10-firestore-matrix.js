@@ -12,6 +12,12 @@ const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
 const newSup = () => ({ c: 'bak', n: 'ספק', d: '2026-11-01', at: '2026-11-01', a: '10', inv: '2', by: 'מנהל', pend: '', src: '', m: '2026-11', np: '0', h: 'a', fh: 'b' });
 const newReq = (uid, np) => ({ uid, by: uid, txt: 'בקשה', t: Date.now(), st: 'new', np: np || 0 });
 const newCl = (uid, o) => Object.assign({ uid, by: uid, t: Date.now(), st: 'new', np: 1, reg: 'i_yh', d: '2026-10-20', no: '777', data: '{"v":1,"f":{}}' }, o);
+// הוצאה מקופה (cashout): המזהה = מזהה ההוצאה ב-inbox של הכותב (src). inbox ו-chunks נוצרים בלי כללים, כאילו pushItem כבר שלח.
+const newCo = (uid, id, o) => Object.assign({ uid, by: uid, t: Date.now(), reg: 'i_yh', d: '2026-10-20', a: 12.5, why: 'קניתי לחם', dep: '', src: id, zc: '', dp: '' }, o);
+const withInbox = async (env, me, id) => env.withSecurityRulesDisabled((c) => c.firestore().doc('inbox/' + id).set({ owner: me, by: me, status: 'new', created: 'x', data: '{}', parts: '1' }));
+const newDep = (uid, items, o) => Object.assign({ uid, by: uid, t: Date.now(), d: '2026-10-21', items, a: 1000, st: 'new', why: '', np: 1 }, o);
+// עובד/מנהל שולח הפקדה ומסמן את co2 (batch אחד, כמו commit באפליקציה)
+const depBatch = (db, me, id, items, coId) => { const b = db.batch(); b.set(db.doc('deposits/' + id), newDep(me, items)); b.update(db.doc('cashout/' + coId), { dp: id }); return b.commit(); };
 const newTask = (owner) => { const cr = Date.now(); return { owner, by: owner, role: 'w', txt: 'משימה', cr, due: cr + 4 * 86400000,
   st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }; };
 
@@ -195,6 +201,39 @@ const OPS = {
     'create-too-big':          async (db, me) => { const id = fresh('z'); try { await db.doc('closings/' + id).set(newCl(me)); } catch (e) { /* תפקיד שלא יוצר – נחסם ממילא */ } return db.doc('closings/' + id + '/p/0').set({ data: 'A'.repeat(700001) }); },
     'update':                  (db) => db.doc('closings/z1/p/0').set({ data: 'BBBB' }),
     'delete':                  (db) => db.doc('closings/z1/p/0').delete(),
+  },
+  // הוצאות מקופה (coPush / coSync / coLoad / dpLoad / coAssign / FRM.dpSend)
+  cashout: {
+    'get':                      (db) => db.doc('cashout/co1').get(),
+    'list':                     (db) => db.collection('cashout').where('zc', '==', '').get(),
+    'create-own':               async (db, me, env) => { const id = fresh('w'); await withInbox(env, me, id); return db.doc('cashout/' + id).set(newCo(me, id)); },
+    'create-without-inbox':     (db, me) => { const id = fresh('m'); return db.doc('cashout/' + id).set(newCo(me, 'tx1', { zc: 'z1' })); },
+    'create-other-name':        async (db, me, env) => { const id = fresh('w'); await withInbox(env, me, id); return db.doc('cashout/' + id).set(newCo(me, id, { by: H.OTHER })); },
+    'create-dep-mismatch':      async (db, me, env) => { const id = fresh('w'); await withInbox(env, me, id); return db.doc('cashout/' + id).set(newCo(me, id, { why: 'להפקדה', dep: '' })); },
+    'create-bad-amount':        async (db, me, env) => { const id = fresh('w'); await withInbox(env, me, id); return db.doc('cashout/' + id).set(newCo(me, id, { a: '12.5' })); },
+    'update-zc':                (db) => db.doc('cashout/co1').update({ zc: 'z1' }),
+    'update-amount':            (db) => db.doc('cashout/co1').update({ a: 1 }),
+    'mark-dp-own-deposit':      (db, me) => depBatch(db, me, fresh('d'), ['co2'], 'co2'),
+    'mark-dp-to-other-deposit': (db) => db.doc('cashout/co2').update({ dp: 'dp1' }),
+    'delete':                   (db) => db.doc('cashout/co1').delete(),
+  },
+  deposits: {
+    'get':              (db) => db.doc('deposits/dp1').get(),
+    'list':             (db) => db.collection('deposits').where('st', '==', 'new').get(),
+    'create-own':       (db, me) => db.doc('deposits/' + fresh('d')).set(newDep(me, ['co2'])),
+    'create-other-uid': (db) => db.doc('deposits/' + fresh('d')).set(newDep(H.OTHER, ['co2'])),
+    'create-status-ok': (db, me) => db.doc('deposits/' + fresh('d')).set(newDep(me, ['co2'], { st: 'ok' })),
+    'update-status':    (db, me) => db.doc('deposits/dp1').update({ st: 'ok', stBy: me, stAt: Date.now(), note: '' }),
+    'update-amount':    (db) => db.doc('deposits/dp1').update({ a: 1 }),
+    'delete':           (db) => db.doc('deposits/dp1').delete(),
+  },
+  deposits_p: {
+    'get':                     (db) => db.doc('deposits/dp1/p/0').get(),
+    'create-own-deposit':      async (db, me) => { const id = fresh('d'); await db.doc('deposits/' + id).set(newDep(me, ['co2'])); return db.doc('deposits/' + id + '/p/0').set({ data: 'AAAA' }); },
+    'create-on-other-deposit': (db) => db.doc('deposits/dp1/p/1').set({ data: 'AAAA' }),
+    'create-too-big':          async (db, me) => { const id = fresh('d'); try { await db.doc('deposits/' + id).set(newDep(me, ['co2'])); } catch (e) { /* תפקיד שלא יוצר */ } return db.doc('deposits/' + id + '/p/0').set({ data: 'A'.repeat(700001) }); },
+    'update':                  (db) => db.doc('deposits/dp1/p/0').set({ data: 'BBBB' }),
+    'delete':                  (db) => db.doc('deposits/dp1/p/0').delete(),
   },
   _not_in_table: {
     'get-orders':    (db) => db.doc('orders/o1').get(),

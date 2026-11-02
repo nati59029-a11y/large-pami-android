@@ -96,6 +96,14 @@ async function seed(env) {
     // סגירת קופה (closings): סגירה של עובד אחר, בסטטוס 'new', עם צילומים בחלק אחד
     b.set(db.doc('closings/z1'), { uid: OTHER, by: OTHER, t: T - 5000, st: 'new', np: 1, reg: 'i_nl', d: '2026-10-20', no: '555', data: JSON.stringify({ v: 1, f: { d: '2026-10-20', no: '555', credit: '594.72', cash: '60.10', total: '654.82', drawer: '982.70', oTot: '970.30' }, ack: 1 }) });
     b.set(db.doc('closings/z1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
+    // הוצאות מקופה (cashout) והפקדות (deposits) – שלב 2: של עובד אחר.
+    // co1 רגילה; co2 "להפקדה" שעוד לא הופקדה; co3 "להפקדה" שכבר בהפקדה dp1 (ממתינה, עם צילום בחלק אחד)
+    const co = (id, o) => b.set(db.doc('cashout/' + id), Object.assign({ uid: OTHER, by: OTHER, t: T - 5000, reg: 'i_nl', d: '2026-10-20', a: 50.5, why: 'קניתי חלב', dep: '', src: id, zc: '', dp: '' }, o));
+    co('co1', {});
+    co('co2', { a: 1000, why: 'להפקדה בבנק', dep: '1' });
+    co('co3', { a: 300, why: 'הופקד', dep: '1', dp: 'dp1' });
+    b.set(db.doc('deposits/dp1'), { uid: OTHER, by: OTHER, t: T - 5000, d: '2026-10-21', items: ['co3'], a: 300, st: 'new', why: '', np: 1 });
+    b.set(db.doc('deposits/dp1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
     await b.commit();
   });
 }

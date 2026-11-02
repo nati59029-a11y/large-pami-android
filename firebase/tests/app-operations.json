@@ -1001,7 +1001,7 @@
   },
   {
    "id": "M71",
-   "line": 3004,
+   "line": 3006,
    "snippet": "collectionId:'closings'}]",
    "fn": "zcPull",
    "collection": "closings",
@@ -1015,7 +1015,7 @@
   },
   {
    "id": "M72",
-   "line": 3018,
+   "line": 3020,
    "snippet": "fsx('/closings/'+id+'?'+mask.join('&')",
    "fn": "zcMark",
    "collection": "closings",
@@ -1029,7 +1029,7 @@
   },
   {
    "id": "M73",
-   "line": 3099,
+   "line": 3105,
    "snippet": "fsx('/closings?documentId='",
    "fn": "FRM.zcSend",
    "collection": "closings",
@@ -1044,7 +1044,7 @@
   },
   {
    "id": "M74",
-   "line": 3101,
+   "line": 3107,
    "snippet": "fsx('/closings/'+id+'/p?documentId='",
    "fn": "FRM.zcSend",
    "collection": "closings_p",
@@ -1059,7 +1059,7 @@
   },
   {
    "id": "M75",
-   "line": 3105,
+   "line": 3111,
    "snippet": "fsx('/closings/'+x.id+'/p/'+k),'data')",
    "fn": "ACT.zcImg",
    "collection": "closings_p",
@@ -1073,7 +1073,7 @@
   },
   {
    "id": "M76",
-   "line": 3016,
+   "line": 3018,
    "snippet": "fsx('/closings/'+id+'/p/'+k+'?mask.fieldPaths=x')",
    "fn": "zcHasPics (zcPull)",
    "collection": "closings_p",
@@ -1084,6 +1084,276 @@
     "manager"
    ],
    "note": "לפני הכנסה אוטומטית: בדיקה שכל חלקי הצילומים עלו, בלי להוריד את התוכן."
+  },
+  {
+   "id": "M77",
+   "line": 3149,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "coLoad (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where zc == '' limit 500",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "בדיקת הסגירה: כל ההוצאות מקופה שעוד לא שויכו לסגירה (של כל הצוות)."
+  },
+  {
+   "id": "M78",
+   "line": 3149,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "coSync (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where uid == {uid} limit 2000",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "מראה המנהל: פעם אחת בכל הפעלה – אילו הוצאות מקופה שלו כבר בענן."
+  },
+  {
+   "id": "M79",
+   "line": 3149,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "dpLoad (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where dep == '1' AND dp == '' limit 500",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "תזכורת 'הפקדות שלא הועלו' ומסך העלאת אישור הפקדה."
+  },
+  {
+   "id": "M80",
+   "line": 3149,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "dqPull (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where dp == {deposit} limit 50",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "המנהל מחשב מחדש הפקדה: אילו הוצאות סומנו בה ומה הסכום."
+  },
+  {
+   "id": "M81",
+   "line": 3165,
+   "snippet": "fsx('/cashout?documentId='+encodeURIComponent(it.id)",
+   "fn": "coPush (pushItem)",
+   "collection": "cashout",
+   "op": "create",
+   "rest": "POST /cashout?documentId={inbox id}",
+   "condition": "בשמו, t עכשיו, zc ו-dp ריקים, המזהה = ההוצאה שלו ב-inbox; dep לפי הסיבה",
+   "who": [
+    "employee"
+   ],
+   "note": "מיד אחרי שליחת 'הוצאה מקופה' (גם מחלון הסגירה)."
+  },
+  {
+   "id": "M82",
+   "line": 3174,
+   "snippet": "if(!W[id]){try{await fsx('/cashout/'+id,{method:'DELETE'})",
+   "fn": "coSync",
+   "collection": "cashout",
+   "op": "delete",
+   "rest": "DELETE /cashout/{id}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "תנועה עם t.co שנמחקה או שכבר אינה הוצאה מקופה."
+  },
+  {
+   "id": "M83",
+   "line": 3176,
+   "snippet": "const d=await fsx('/cashout/'+id)",
+   "fn": "coSync",
+   "collection": "cashout",
+   "op": "get",
+   "rest": "GET /cashout/{id}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "תנועה שהשתנתה: קריאת zc ו-dp לפני יצירה מחדש."
+  },
+  {
+   "id": "M84",
+   "line": 3176,
+   "snippet": "zc=gv(d,'zc');dp=gv(d,'dp')}catch(e){if(e.code!==404)throw e}try{await fsx('/cashout/'+id,{method:'DELETE'})",
+   "fn": "coSync",
+   "collection": "cashout",
+   "op": "delete",
+   "rest": "DELETE /cashout/{id}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "תנועה שהשתנתה: מחיקה לפני יצירה מחדש."
+  },
+  {
+   "id": "M85",
+   "line": 3178,
+   "snippet": "fsx('/cashout?documentId='+encodeURIComponent(id)",
+   "fn": "coSync",
+   "collection": "cashout",
+   "op": "create",
+   "rest": "POST /cashout?documentId=m{tx id}",
+   "condition": "מנהל: בשמו, t עכשיו, dep לפי הסיבה; zc/dp – הקיימים",
+   "who": [
+    "manager"
+   ],
+   "note": "מראה של הוצאה מקופה שהמנהל רשם בטלפון (טופס ההוצאה או חלון הסגירה)."
+  },
+  {
+   "id": "M86",
+   "line": 3214,
+   "snippet": "fsx('/cashout/'+cid+'?updateMask.fieldPaths=zc&currentDocument.exists=true'",
+   "fn": "coAssign",
+   "collection": "cashout",
+   "op": "update",
+   "rest": "PATCH /cashout/{id}?updateMask zc&currentDocument.exists=true",
+   "condition": "מנהל בלבד; רק zc",
+   "who": [
+    "manager"
+   ],
+   "note": "שיוך ההוצאות לסגירה שנכנסה להכנסות."
+  },
+  {
+   "id": "M87",
+   "line": 3282,
+   "snippet": "await fsx(':commit',{method:'POST',body:JSON.stringify({writes})})",
+   "fn": "FRM.dpSend",
+   "collection": "deposits + cashout",
+   "op": "commit",
+   "rest": "POST :commit [create deposits/{id} (exists=false), update cashout/{id} dp (mask dp, exists=true) × n]",
+   "condition": "בשמו, st 'new', 1–30 הוצאות; עובד מסמן dp רק מריק, להפקדה שלו שכוללת את ההוצאה",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "שליחת אישור הפקדה וסימון ההוצאות – הכול או כלום."
+  },
+  {
+   "id": "M88",
+   "line": 3284,
+   "snippet": "fsx('/deposits/'+id+'/p?documentId='",
+   "fn": "FRM.dpSend",
+   "collection": "deposits_p",
+   "op": "create",
+   "rest": "POST /deposits/{id}/p?documentId={k}",
+   "condition": "רק באישור של הכותב, k < np, עד 15 דקות מהשליחה",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "העלאת חלקי הצילומים אחרי האישור."
+  },
+  {
+   "id": "M89",
+   "line": 3290,
+   "snippet": "fsx('/deposits/'+id+'/p/'+k+'?mask.fieldPaths=x')",
+   "fn": "dpHasPics (dqPull)",
+   "collection": "deposits_p",
+   "op": "get",
+   "rest": "GET /deposits/{id}/p/{k}?mask.fieldPaths=x",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "לפני אישור אוטומטי: כל חלקי הצילומים עלו."
+  },
+  {
+   "id": "M90",
+   "line": 3292,
+   "snippet": "fsx('/deposits/'+id+'?'+mask.join('&')",
+   "fn": "dpMark",
+   "collection": "deposits",
+   "op": "update",
+   "rest": "PATCH /deposits/{id}?updateMask st,stBy,stAt,note&currentDocument.exists=true",
+   "condition": "מנהל בלבד; רק שדות הסטטוס",
+   "who": [
+    "manager"
+   ],
+   "note": "אישור (אוטומטי כשתואם, או ידני)."
+  },
+  {
+   "id": "M91",
+   "line": 3294,
+   "snippet": "collectionId:'deposits'}]",
+   "fn": "dqPull",
+   "collection": "deposits",
+   "op": "list",
+   "rest": "POST :runQuery from deposits where st == 'new' limit 300",
+   "condition": "מנהל (הכלל מתיר לכל הצוות)",
+   "who": [
+    "manager"
+   ],
+   "note": "משיכת אישורי הפקדה חדשים."
+  },
+  {
+   "id": "M92",
+   "line": 3317,
+   "snippet": "fsx('/deposits/'+x.id+'/p/'+k),'data')",
+   "fn": "ACT.dqImg",
+   "collection": "deposits_p",
+   "op": "get",
+   "rest": "GET /deposits/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "הצגת צילומי האישור – רק בלחיצה."
+  },
+  {
+   "id": "M93",
+   "line": 3329,
+   "snippet": "writes:[{update:{name:docName('deposits/'+it.id),fields},updateMask",
+   "fn": "FRM.dqNo",
+   "collection": "deposits + cashout",
+   "op": "commit",
+   "rest": "POST :commit [update deposits/{id} st 'rej' (mask), update cashout dp '' × n]",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "דחייה: ההוצאות חוזרות ל'לא הופקד'."
+  },
+  {
+   "id": "M94",
+   "line": 3332,
+   "snippet": "writes:[{delete:docName('deposits/'+it.id)}]",
+   "fn": "ACT.dqDel",
+   "collection": "deposits + cashout",
+   "op": "commit",
+   "rest": "POST :commit [delete deposits/{id}, update cashout dp '' × n]",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקה: ההוצאות חוזרות ל'לא הופקד'."
+  },
+  {
+   "id": "M95",
+   "line": 3333,
+   "snippet": "fsx('/deposits/'+it.id+'/p/'+k,{method:'DELETE'})",
+   "fn": "ACT.dqDel",
+   "collection": "deposits_p",
+   "op": "delete",
+   "rest": "DELETE /deposits/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת חלקי הצילומים."
   }
  ],
  "fsbLine": 1332,

@@ -331,6 +331,106 @@ service cloud.firestore {
       }
     }
 
+    // ---------- הוצאות מקופה (cashout) ----------
+    // סגירת קופה – שלב 2 (בקשת בעל העסק 2.11.2026): מראה לכל הוצאה מקופה, כדי שכל הצוות יראה אותן בבדיקת הסגירה ובתזכורת ההפקדות.
+    // קריאה: עובד פעיל או מנהל (גם של אחרים – החלטת בעל העסק).
+    // יצירה: בשמו, בזמן אמת, עם קופה מוכרת, תאריך תקין, סכום חיובי עד 1,000,000 וסיבה (1–300 תווים).
+    //   dep חייב להתאים לסיבה: '1' אם יש בה מילה מהשורש פ-ק-ד (כמו ZDEP באפליקציה), אחרת ''.
+    //   עובד: zc ו-dp ריקים, והמזהה = מזהה ההוצאה שלו ב-inbox (src), שכבר נשלחה. מנהל: מראה מהטלפון שלו (גם עם zc/dp קיימים, כשתנועה השתנתה).
+    // עדכון: מנהל – רק zc ו-dp. עובד – רק dp, רק מריק, רק בהוצאה שצריכה הפקדה, ורק למזהה של הפקדה שהוא עצמו יוצר
+    //   באותו commit (או ב-15 הדקות שלפני), בסטטוס 'new', שכוללת את ההוצאה הזו (getAfter). עובד לא משנה סכום, סיבה או שיוך לסגירה.
+    // מחיקה: מנהל בלבד.
+    match /cashout/{id} {
+      function nw() { return request.resource.data; }
+      function od() { return resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function idStr(v) { return v is string && (v == '' || v.matches('^[A-Za-z0-9_-]{1,120}$')); }
+      function amtOk(a) { return (a is int || a is float) && a > 0 && a <= 1000000; }
+      function depRe() {
+        return '(?s).*(^|[^א-ת])[ובלשהכמ]{0,3}(הפקיד(ה|ו|ים)?|הפקד(ה|ות|ת|תי|נו|תם|ו)?|הופקד(ה|ו)?|מופקד(ת|ים|ות)?|מפקיד(ה|ים|ות)?|[אינ]פקיד(ו|ה)?|יופקד(ו)?|תופקד)([^א-ת]|$).*';
+      }
+      function depOk(did) {
+        let dd = getAfter(/databases/$(database)/documents/deposits/$(did)).data;
+        return dd.uid == request.auth.uid && dd.st == 'new' && id in dd.items
+          && request.time.toMillis() - dd.t < 900000;
+      }
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && nw().keys().hasAll(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100
+        && isMyName(nw().by)
+        && nowOk(nw().t)
+        && nw().reg in ['i_yh', 'i_nl']
+        && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && amtOk(nw().a)
+        && nw().why is string && nw().why.size() > 0 && nw().why.size() <= 300
+        && nw().dep in ['', '1'] && (nw().dep == '1') == nw().why.matches(depRe())
+        && idStr(nw().src) && nw().src != ''
+        && idStr(nw().zc) && idStr(nw().dp)
+        && (isManager()
+            || (nw().zc == '' && nw().dp == '' && nw().src == id
+                && get(/databases/$(database)/documents/inbox/$(id)).data.owner == request.auth.uid));
+      allow update: if (isManager()
+          && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp'])
+          && idStr(nw().zc) && idStr(nw().dp))
+        || (isActiveEmployee()
+          && nw().diff(od()).affectedKeys().hasOnly(['dp'])
+          && od().dp == '' && od().dep == '1'
+          && nw().dp is string && nw().dp.matches('^[A-Za-z0-9_-]{1,120}$')
+          && depOk(nw().dp));
+      allow delete: if isManager();
+    }
+
+    // ---------- אישורי הפקדה (deposits) ----------
+    // שלב 2: עובד או מנהל מעלה אישור הפקדה (צילום אחד או כמה) ומסמן אילו הוצאות "להפקדה" הוא מכסה (items, 1–30).
+    // קריאה: עובד פעיל או מנהל – כולם צריכים לדעת מה כבר הופקד. יצירה: בשמו, בזמן אמת, בסטטוס 'new' בלבד;
+    // a = סכום האישורים (חיובי, עד 1,000,000); d = תאריך האישור; why = סיבה כשהסכום לא תואם (עד 500); np = חלקי הצילומים (1–8).
+    // המנהל מאשר או דוחה (רק שדות הסטטוס) ומוחק. העובד לא משנה ולא מוחק.
+    match /deposits/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && nw().keys().hasAll(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np'])
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100
+        && isMyName(nw().by)
+        && nowOk(nw().t)
+        && nw().st == 'new'
+        && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && nw().items is list && nw().items.size() >= 1 && nw().items.size() <= 30
+        && (nw().a is int || nw().a is float) && nw().a > 0 && nw().a <= 1000000
+        && nw().why is string && nw().why.size() <= 500
+        && nw().np is int && nw().np >= 1 && nw().np <= 8;
+      allow update: if isManager()
+        && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+        && nw().st in ['new', 'ok', 'rej']
+        && isMyName(nw().get('stBy', ''))
+        && nowOk(nw().get('stAt', 0))
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
+      allow delete: if isManager();
+
+      // חלקי הצילומים: deposits/{id}/p/{k} (כמו closings): רק השדה data, עד 700,000 תווים.
+      // כותב רק מי ששלח את האישור, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. קריאה – מנהל בלבד. אין עדכון.
+      match /p/{k} {
+        function dp() { return get(/databases/$(database)/documents/deposits/$(id)).data; }
+        allow read: if isManager();
+        allow create: if isStaff()
+          && exists(/databases/$(database)/documents/deposits/$(id))
+          && dp().uid == request.auth.uid
+          && k.matches('^[0-7]$') && int(k) < dp().np
+          && request.time.toMillis() - dp().t < 900000
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow update: if false;
+        allow delete: if isManager();
+      }
+    }
+
     // ---------- הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם ----------
     match /{document=**} {
       allow read, write: if false;

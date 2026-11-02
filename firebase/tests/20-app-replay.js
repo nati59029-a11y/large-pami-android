@@ -32,6 +32,22 @@ const tkPatch = (uid, id, o) => {
 // FRM.zcSend: שדות הסגירה כמו באפליקציה (data = JSON של שדות הטופס)
 const zcFields = (uid, role, np) => ({ uid: sv(uid), by: sv(uid), t: iv(Date.now()), st: sv(role === 'manager' || role === 'managerAdminsOnly' ? 'ok' : 'new'), np: iv(np), reg: sv('i_yh'), d: sv('2026-10-20'), no: sv('777'),
   data: sv(JSON.stringify({ v: 1, f: { d: '2026-10-20', tm: '09:02', no: '777', credit: '4313.95', cash: '3260', vissue: '-169.8', round: '-0.02', total: '7404.15', drawer: '1564', oD: '2026-10-20', oTot: '1560' }, rs: 'auto', ack: 1, why: '', ai: { z: 1, o: 1 } })) });
+// ---- שלב 2: הוצאות מקופה והפקדות – כמו באפליקציה ----
+const dv = (v) => ({ doubleValue: +v });
+const docName = (p) => 'projects/' + H.PROJECT_ID + '/databases/(default)/documents/' + p;
+const coEq = (k, v) => ({ fieldFilter: { field: { fieldPath: k }, op: 'EQUAL', value: { stringValue: v } } });
+const coRunQ = (uid, where, limit) => fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'cashout' }], where, limit } }) });
+// coPush / coSync: השדות של המראה
+const coFields = (uid, src, o) => { o = Object.assign({ why: 'קניתי חלב', dep: '', zc: '', dp: '' }, o);
+  return { uid: sv(uid), by: sv(uid), t: iv(Date.now()), reg: sv('i_yh'), d: sv('2026-10-20'), a: dv(120), why: sv(o.why), dep: sv(o.dep), src: sv(src), zc: sv(o.zc), dp: sv(o.dp) }; };
+const dpResetW = (c) => ({ update: { name: docName('cashout/' + c), fields: { dp: sv('') } }, updateMask: { fieldPaths: ['dp'] }, currentDocument: { exists: true } });
+// FRM.dpSend: commit אחד – ההפקדה (exists=false) וסימון dp בכל הוצאה (mask dp, exists=true)
+const depCommit = (uid, id, items, np) => {
+  const fields = { uid: sv(uid), by: sv(uid), t: iv(Date.now()), d: sv('2026-10-21'), items: { arrayValue: { values: items.map(sv) } }, a: dv(1000), st: sv('new'), why: sv(''), np: iv(np || 1) };
+  const writes = [{ update: { name: docName('deposits/' + id), fields }, currentDocument: { exists: false } }]
+    .concat(items.map((c) => ({ update: { name: docName('cashout/' + c), fields: { dp: sv(id) } }, updateMask: { fieldPaths: ['dp'] }, currentDocument: { exists: true } })));
+  return fsx(uid, ':commit', { method: 'POST', body: JSON.stringify({ writes }) });
+};
 // כל פונקציה מחזירה רשימת תשובות (status). A = הסטטוסים שנחשבים "הצליח" לתפקיד מורשה.
 const REPLAY = {
   // syLogin: GET /admins/{uid}. מנהל – 200; עובד – 404 (אין מסמך), והאפליקציה מסיקה "עובד".
@@ -387,6 +403,59 @@ const REPLAY = {
   M75: { run: async (uid) => [await fsx(uid, '/closings/' + 'z1' + '/p/' + 0)] },
   // zcHasPics: קיום חלק צילום בלי התוכן (mask)
   M76: { run: async (uid) => { const r = await fsx(uid, '/closings/' + 'z1' + '/p/' + 0 + '?mask.fieldPaths=x'); if (r.status === 200) assert.ok(!r.json.fields || !r.json.fields.data, 'mask: התוכן לא צריך לרדת'); return [r]; } },
+
+  // ---- הוצאות מקופה (cashout) והפקדות (deposits) – שלב 2 ----
+  // coQ(where, limit): אותה שאילתה לארבעה שימושים
+  M77: { run: async (uid) => { const r = await coRunQ(uid, coEq('zc', ''), 500); if (r.status === 200) assert.ok(r.json.some((x) => x.document && x.document.name.endsWith('/cashout/co1')), 'צריך לראות הוצאה מקופה של עובד אחר'); return [r]; } },
+  M78: { run: async (uid) => [await coRunQ(uid, coEq('uid', uid), 2000)] },
+  M79: { run: async (uid) => { const r = await coRunQ(uid, { compositeFilter: { op: 'AND', filters: [coEq('dep', '1'), coEq('dp', '')] } }, 500); if (r.status === 200) { const n = r.json.filter((x) => x.document).map((x) => x.document.name.split('/').pop()); assert.deepEqual(n, ['co2'], 'רק co2 פתוחה להפקדה: ' + n); } return [r]; } },
+  M80: { run: async (uid) => { const r = await coRunQ(uid, coEq('dp', 'dp1'), 50); if (r.status === 200) assert.deepEqual(r.json.filter((x) => x.document).map((x) => x.document.name.split('/').pop()), ['co3']); return [r]; } },
+  // pushItem → coPush: חלק הצילום, ההוצאה ב-inbox, ואז המראה באותו מזהה
+  M81: { run: async (uid) => {
+    const id = fresh('w');
+    const c = await fsx(uid, '/chunks?documentId=' + encodeURIComponent(id + '_0'), { method: 'POST', body: JSON.stringify({ fields: { owner: sv(uid), data: sv('') } }) });
+    const body = { fields: { owner: sv(uid), by: sv(uid), status: sv('new'), created: sv(now()), data: sv(JSON.stringify({ amt: 120, date: '2026-10-20', note: 'להפקדה', reg: true, creg: 'i_yh' })), parts: sv(1) } };
+    const i = await fsx(uid, '/inbox?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify(body) });
+    const co = await fsx(uid, '/cashout?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ fields: coFields(uid, id, { why: 'להפקדה', dep: '1' }) }) });
+    return [c, i, co];
+  } },
+  M82: { run: async (uid) => [await fsx(uid, '/cashout/' + 'co1', { method: 'DELETE' })] },
+  M83: { run: async (uid) => [await fsx(uid, '/cashout/' + 'co1')] },
+  M84: { run: async (uid) => [await fsx(uid, '/cashout/' + 'co1', { method: 'DELETE' })] },
+  // coSync: יצירה (חדשה, וגם יצירה מחדש עם zc/dp שנשמרו)
+  M85: { run: async (uid) => [
+    await fsx(uid, '/cashout?documentId=' + encodeURIComponent('m' + fresh('t')), { method: 'POST', body: JSON.stringify({ fields: coFields(uid, 'tx1') }) }),
+    await fsx(uid, '/cashout?documentId=' + encodeURIComponent('m' + fresh('t')), { method: 'POST', body: JSON.stringify({ fields: coFields(uid, 'tx2', { zc: 'z1', dp: 'dp1' }) }) }),
+  ] },
+  M86: { run: async (uid) => [await fsx(uid, '/cashout/' + 'co1' + '?updateMask.fieldPaths=zc&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { zc: sv('z1') } }) })] },
+  // FRM.dpSend: הפקדה + סימון dp ב-commit אחד, ואחריו חלקי הצילומים
+  M87: { run: async (uid) => [await depCommit(uid, fresh('d'), ['co2'])] },
+  M88: { run: async (uid) => {
+    const id = fresh('d'); const all = 'PAGES:' + JSON.stringify(['data:image/jpeg;base64,' + 'A'.repeat(900000)]); const CH = 700000; const np = Math.ceil(all.length / CH);
+    const out = [await depCommit(uid, id, ['co2'], np)];
+    for (let k = 0; k < np; k++) out.push(await fsx(uid, '/deposits/' + id + '/p?documentId=' + k, { method: 'POST', body: JSON.stringify({ fields: { data: sv(all.slice(k * CH, (k + 1) * CH)) } }) }));
+    return out;
+  } },
+  M89: { run: async (uid) => { const r = await fsx(uid, '/deposits/' + 'dp1' + '/p/' + 0 + '?mask.fieldPaths=x'); if (r.status === 200) assert.ok(!r.json.fields || !r.json.fields.data); return [r]; } },
+  M90: { run: async (uid) => {
+    const o = { st: 'ok', stBy: uid, stAt: Date.now(), note: '' }; const fields = {}; const mask = [];
+    for (const k in o) { fields[k] = typeof o[k] === 'number' ? iv(o[k]) : sv(o[k]); mask.push('updateMask.fieldPaths=' + k); }
+    return [await fsx(uid, '/deposits/' + 'dp1' + '?' + mask.join('&') + '&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields }) })];
+  } },
+  M91: { run: async (uid) => {
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'deposits' }], where: { fieldFilter: { field: { fieldPath: 'st' }, op: 'EQUAL', value: { stringValue: 'new' } } }, limit: 300 } }) });
+    if (r.status === 200) assert.ok(r.json.some((x) => x.document && x.document.name.endsWith('/deposits/dp1')));
+    return [r];
+  } },
+  M92: { run: async (uid) => [await fsx(uid, '/deposits/' + 'dp1' + '/p/' + 0)] },
+  // FRM.dqNo: דחייה + dp חוזר לריק
+  M93: { run: async (uid) => {
+    const fields = { st: sv('rej'), stBy: sv(uid), stAt: iv(Date.now()), note: sv('לא תואם') };
+    return [await fsx(uid, ':commit', { method: 'POST', body: JSON.stringify({ writes: [{ update: { name: docName('deposits/dp1'), fields }, updateMask: { fieldPaths: Object.keys(fields) }, currentDocument: { exists: true } }, dpResetW('co3')] }) })];
+  } },
+  // ACT.dqDel: מחיקה + dp חוזר לריק, ואז חלקי הצילומים
+  M94: { run: async (uid) => [await fsx(uid, ':commit', { method: 'POST', body: JSON.stringify({ writes: [{ delete: docName('deposits/dp1') }, dpResetW('co3')] }) })] },
+  M95: { run: async (uid) => [await fsx(uid, '/deposits/' + 'dp1' + '/p/' + 0, { method: 'DELETE' })] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,
