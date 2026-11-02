@@ -11,7 +11,7 @@ fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','www/xlsx.full.min.js'
   if(/^largpeami$/i.test(T.projectId))throw new Error('SITE_BACKEND=test: refusing the real project');
   const sub=(f,from,to)=>{const t=fs.readFileSync(f,'utf8'),n=t.split(from).length-1;if(n!==1)throw new Error('SITE_BACKEND=test: expected 1 match in '+f+', found '+n);fs.writeFileSync(f,t.replace(from,()=>to))};
   sub('www/index.html',"const FB={apiKey:'AIzaSyAoYfIJUwFeFDyvJha0GYw0sOtiTrlf2fo',projectId:EMU?'demo-largpeami':'largpeami'};","const FB={apiKey:'"+T.apiKey+"',projectId:EMU?'demo-largpeami':'"+T.projectId+"'};");
-  sub('www/index.html',"const ST_BUCKET='largpeami.appspot.com';","const ST_BUCKET='"+T.storageBucket+"';");
+  sub('www/index.html',"const ST_BUCKET='largpeami.firebasestorage.app';","const ST_BUCKET='"+T.storageBucket+"';");
   sub('www/orders/backend.js',"const TEST = { projectId: '', apiKey: '', appId: '', storageBucket: '' };","const TEST = "+JSON.stringify(T)+";");
   // גרסת הבדיקה היא אפליקציה נפרדת (com.largepami.finance.test, ב-patch-android.sh): עדכון ה-APK מתוך האפליקציה כבוי בה,
   // כדי שלא תציע להוריד ולהתקין את הגרסה הרגילה (GitHub release latest או app_releases/ ב-Storage).
@@ -22,7 +22,7 @@ fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','www/xlsx.full.min.js'
   sub('www/index.html','<script src="orders/site-backend.js"></script>\n','<script src="orders/site-backend.js"></script>\n<script src="mfa-login.js"></script>\n');
   sub('www/index.html',"const j=await jf(`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:signInWithPassword?key=${FB.apiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw,returnSecureToken:true})});","const j=await LP_MFA.signIn(email,pw);");
   sub('www/index.html',"enterApp(false);syCheck()}","enterApp(false);syCheck();LP_MFA.check()}");
-  const left=fs.readFileSync('www/index.html','utf8').match(/'largpeami'|largpeami\.appspot\.com/g);
+  const left=fs.readFileSync('www/index.html','utf8').match(/'largpeami'|largpeami\.appspot\.com|largpeami\.firebasestorage\.app/g);
   if(left)throw new Error('SITE_BACKEND=test: index.html still points at largpeami: '+left.join(','));
   // אף קובץ ב-www לא מפנה לפרויקט האמיתי: לא המפתח שלו, לא ה-bucket שלו ולא המזהה שלו בגרשיים.
   const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(d,e.name)):[path.join(d,e.name)]);

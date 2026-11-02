@@ -47,7 +47,9 @@ async function yemotCall(ctx, command, params) {
 
 // שמות הקבצים בתיקייה (בלי תיקיות משנה). path: '1', '2', '' (השורש).
 async function listDir(ctx, path) {
-  const j = await yemotCall(ctx, 'GetIVR2Dir', { path: String(path) });
+  // השורש: ימות מחזיר EXCEPTION על path ריק (נצפה ביומן 02.11.2026), ולכן שולחים '/'
+  const p = String(path);
+  const j = await yemotCall(ctx, 'GetIVR2Dir', { path: p === '' ? '/' : p });
   return (Array.isArray(j.files) ? j.files : []).map((f) => String((f && f.name) || '')).filter(Boolean);
 }
 
