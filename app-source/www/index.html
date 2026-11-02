@@ -200,7 +200,7 @@ body.gate{padding:0;background:#16191b}
 const KEY='large-pami-v2',OLDKEY='large-pami-v1',PREV='large-pami-v2-prev';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const s_=v=>String(v??'').trim(),p2=n=>String(n).padStart(2,'0');
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));/* תמונה שמוכנסת ל-src: רק data:image (jpeg/png/webp/gif) ב-base64 נקי. כל דבר אחר (גם מהענן, שמשתמש אחר כתב) לא מוצג */const imgOk=u=>typeof u==='string'&&/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(u);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));/* תמונה שמוכנסת ל-src: רק data:image של תמונת רסטר (כולל jpg/bmp/heic שנשמרו כמו שהם מהגלריה כשהקטנה נכשלה; בלי svg) ב-base64 נקי. כל דבר אחר (גם מהענן, שמשתמש אחר כתב) לא מוצג */const imgOk=u=>typeof u==='string'&&/^data:image\/(jpeg|jpg|pjpeg|png|webp|gif|bmp|x-ms-bmp|heic|heif|avif);base64,[A-Za-z0-9+/=]+$/.test(u);/* מזהה מסמך שהגיע מהענן (נקבע במכשיר של מי שכתב): רק אותיות לטיניות, ספרות, _ ו-- (uid() באפליקציה) */const idOk=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(s);
 const num=v=>parseFloat(v)||0,uid=()=>Math.random().toString(36).slice(2,6)+Date.now().toString(36).slice(-4)+Math.random().toString(36).slice(2,4);
 const rnd=n=>Math.round((n+Number.EPSILON)*100)/100,sum=(a,f)=>a.reduce((t,x)=>t+f(x),0);
 const ymd=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
@@ -1372,7 +1372,7 @@ async function runQ(field,val){const r=await fsx(':runQuery',{method:'POST',body
 function inbHeal(){const seen=new Set();const L=S.inbox.filter(x=>seen.has(x.id)?false:(seen.add(x.id),true));if(L.length!==S.inbox.length){S.inbox=L;save()}}
 async function pullInbox(){if(!isA())return 0;if(pullInbox.b)return 0;pullInbox.b=1;try{const n=await pullInbox2();try{await pullSiteInc()}catch(e){if(!e.offline)toast('מכירות אתר: המשיכה נכשלה – '+e.message)}return n}finally{pullInbox.b=0}}
 async function pullInbox2(){inbHeal();const docs=await runQ('status','new');let n=0;const done=[];
- for(const d of docs){const id=idOf(d);if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id)){done.push(id);continue}
+ for(const d of docs){const id=idOf(d);if(!idOk(id))continue;if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id)){done.push(id);continue}
   let data={};try{data=JSON.parse(gv(d,'data'))}catch(e){}if(!data||typeof data!=='object')data={};if(data.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(data.date)))data.date='';
   let f='';const np=+gv(d,'parts')||0;if(np){try{for(let k=0;k<np;k++){const c=await fsx('/chunks/'+id+'_'+k);f+=gv(c,'data')}}catch(e){continue}}else f=gv(d,'file');if(f){try{await fput('i'+id,f)}catch(e){continue}}
   S.inbox.push({id,by:gv(d,'by'),at:gv(d,'created'),d:data,file:f?'i'+id:'',np});n++;done.push(id)}
@@ -1559,7 +1559,7 @@ setTimeout(checkUpdate,3500);
 /* ---- שינוי הוצאה לפני אישור ---- */
 let IE=null;
 function inbDlg(){const it=S.inbox.find(x=>x.id===IE.id);if(!it)return closeDlg();const cs=S.cats.filter(c=>c.kind==='exp'&&!c.hid&&!c.off),c=cat(IE.cat),subs=c?subsOf(c.id):[];
- dlg(`<h3>שינוי הוצאה · ${esc(it.by)}</h3><form data-f="inbsave"><input type="hidden" name="id" value="${it.id}">
+ dlg(`<h3>שינוי הוצאה · ${esc(it.by)}</h3><form data-f="inbsave"><input type="hidden" name="id" value="${esc(it.id)}">
  ${selO('קטגוריה','cat',cs.map(x=>[x.id,x.name]),IE.cat).replace('<select','<select data-c="inbf"')}
  ${subs.length?selO('ספק / פירוט','sub',subs.map(x=>[x.id,x.name]),IE.sub).replace('<select','<select data-c="inbf"'):''}
  ${amtF('amt',IE.amt,true)}${dateF('תאריך החשבונית','date',IE.date)}
@@ -2097,7 +2097,7 @@ window.addEventListener('online',()=>{fbPush()});
 async function fbLoad(){if(!fbRole())return 0;
  const sq={from:[{collectionId:'fb'}],select:{fields:[{fieldPath:'data'},{fieldPath:'st'}]},limit:3000};if(!fbAdmin())sq.where={fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:'ok'}}};
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});
- const L=[];(r||[]).forEach(x=>{const d=x.document;if(!d||gv(d,'st')==='new')return;try{const j=JSON.parse(gv(d,'data'));L.push({id:idOf(d),f:fbFix(Object.assign(fbEmpty(j.at),j.f)),by:j.by||'',at:j.at||0,hi:j.hi})}catch(e){}});
+ const L=[];(r||[]).forEach(x=>{const d=x.document;if(!d||gv(d,'st')==='new'||!idOk(idOf(d)))return;try{const j=JSON.parse(gv(d,'data'));L.push({id:idOf(d),f:fbFix(Object.assign(fbEmpty(j.at),j.f)),by:j.by||'',at:j.at||0,hi:j.hi})}catch(e){}});
  const loc=FBL.out.filter(o=>!L.find(z=>z.id===o.id));FBL.cache=L.concat(loc.map(o=>({id:o.id,f:o.f,by:o.by,at:o.at,hi:o.hi})));fbSave();return L.length}
 /* מניעת כפילויות: בדיקת דפים חדשים רצה פעם אחת בכל רגע, וכפילויות קיימות (אותו מזהה) מוסרות */
 function fbDedup(){const best={},sc=p=>(p.st==='ok'?4:0)+(p.ed&&p.ed.length?2:0)+(p.st==='ai'?1:0);let n=0;
@@ -2107,7 +2107,7 @@ function fbDedup(){const best={},sc=p=>(p.st==='ok'?4:0)+(p.ed&&p.ed.length?2:0)
 async function fbInbox(){if(!fbAdmin()||fbInbox.b)return 0;fbInbox.b=1;try{return await fbInbox0()}finally{fbInbox.b=0;fbDedup()}}
 async function fbInbox0(){let n=0;
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'fb'}],where:{fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:'new'}}},select:{fields:[{fieldPath:'data'}]},limit:300}})});
- for(const x of(r||[])){const d=x.document;if(!d)continue;const id=idOf(d);if(FBL.pend.find(p=>p.id===id)||FBL.out.find(o=>o.id===id))continue;
+ for(const x of(r||[])){const d=x.document;if(!d)continue;const id=idOf(d);if(!idOk(id))continue;if(FBL.pend.find(p=>p.id===id)||FBL.out.find(o=>o.id===id))continue;
   let j;try{j=JSON.parse(gv(d,'data'))}catch(e){continue}
   try{if(j.hi){const full=await fsx('/fb/'+id),img=gv(full,'img');if(img)await fput('fb:'+id,img)}}catch(e){if(e.offline)break;continue}
   if(j.hp){try{let hu='';for(let k=0;k<j.hp;k++){const c=await fsx('/chunks/fbhi_'+id+'_'+k);hu+=gv(c,'data')}if(hu)await fput('fbhi:'+id,hu);for(let k=0;k<j.hp;k++)fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'}).catch(()=>{})}catch(e){}}
@@ -2306,7 +2306,7 @@ const tkIsLate=t=>tkLateNow(t)||t.late==='1'||((t.st==='wait'||t.st==='done')&&t
 const tkOverN=()=>(TK.L||[]).filter(tkLateNow).length;
 const tkErr=e=>e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה לפעולה הזו. אם זה חוזר, בדוק שהשעה בטלפון מדויקת, או פנה למנהל':'שגיאה: '+((e&&e.message)||e));
 async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields:TKF.map(f=>({fieldPath:f}))},limit:1000};if(where)sq.where={fieldFilter:{field:{fieldPath:where},op:'EQUAL',value:{stringValue:'1'}}};
- const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>tkOf(x.document))}
+ const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document&&idOk(idOf(x.document))).map(x=>tkOf(x.document))}
 async function tkLoad(){if(!fbRole())return;let L;if(fbAdmin())L=await tkQ();else{const a=await tkQ('open'),b=await tkQ('late'),m={};a.concat(b).forEach(t=>m[t.id]=t);L=Object.values(m)}
  TK.L=L.map(t=>Object.assign(t,{due:t.cr?tkDue(t.cr):t.due}));TK.at=Date.now();tkSave();tkRe();return L.length}
 /* בונים מחדש רק כשאין טופס פתוח עם נתונים שהוקלדו */
@@ -2847,10 +2847,10 @@ ACT.supGo=()=>{WS='sinv';SUPW={L:null,b:0,err:''};rerender();supLoad()};
 ACT.supRefresh=()=>{supLoad()};
 async function supLoad(){if(SUPW.b)return;SUPW.b=1;SUPW.err='';rerender();try{const M=ilMonth();
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'supinv'}],where:{fieldFilter:{field:{fieldPath:'m'},op:'EQUAL',value:{stringValue:M}}},select:{fields:['c','n','d','at','a','inv','by','pend','src','np'].map(f=>({fieldPath:f}))},limit:2000}})});
- const L=(r||[]).filter(x=>x.document).map(x=>{const d=x.document;return{id:idOf(d),c:gv(d,'c'),n:gv(d,'n'),d:gv(d,'d'),at:gv(d,'at'),a:num(gv(d,'a')),inv:gv(d,'inv'),by:gv(d,'by'),pend:gv(d,'pend')==='1',src:gv(d,'src'),np:+gv(d,'np')||0}});
+ const L=(r||[]).filter(x=>x.document&&/^[A-Za-z0-9_-]{1,120}$/.test(idOf(x.document))).map(x=>{const d=x.document;return{id:idOf(d),c:gv(d,'c'),n:gv(d,'n'),d:gv(d,'d'),at:gv(d,'at'),a:num(gv(d,'a')),inv:gv(d,'inv'),by:gv(d,'by'),pend:gv(d,'pend')==='1',src:gv(d,'src'),np:+gv(d,'np')||0}});
  /* מה שהעובד עצמו שלח והמנהל עוד לא קיבל: מהרשימה שלו (inbox, רק שלו) */
  const srcs=new Set(L.map(x=>x.src).filter(Boolean));let mine=[];try{mine=await runQ('owner',SY.uid)}catch(e){}
- for(const d of mine){const id=idOf(d);if(gv(d,'status')!=='new'||srcs.has(id))continue;let x={};try{x=JSON.parse(gv(d,'data'))}catch(e){}if(!SUPC[x.cat])continue;
+ for(const d of mine){const id=idOf(d);if(!idOk(id)||gv(d,'status')!=='new'||srcs.has(id))continue;let x={};try{x=JSON.parse(gv(d,'data'))}catch(e){}if(!SUPC[x.cat])continue;
   const dd=supDate(x.date),at=ilDay(gv(d,'created'));if((dd||at).slice(0,7)!==M)continue;
   L.push({id,own:1,c:SUPC[x.cat],n:x.subName||'',d:dd,at,a:num(x.amt),inv:x.inv||(x.dn?'תעודת משלוח':''),by:gv(d,'by'),pend:true,np:+gv(d,'parts')||0})}
  L.sort((a,b)=>((b.d||b.at)||'').localeCompare((a.d||a.at)||'')||(b.at||'').localeCompare(a.at||''));SUPW.L=L}
@@ -2883,7 +2883,7 @@ function arCnt(){if(!AR)return 0;if(fbAdmin()&&!AR.b&&Date.now()-AR.at>60000)arL
 function arTile(){return `<button class="tile" data-a="go" data-v="ar" style="border-color:var(--acc);color:var(--acc);font-size:1.05rem;text-align:center"><span style="display:block;font-size:30px;line-height:1;margin-bottom:6px" aria-hidden="true">🛠️</span>בקשות לעדכון האפליקציה</button>`}
 async function arLoad(){if(AR.b)return;AR.at=Date.now();if(!fbRole()){AR.err='כדי לשלוח ולראות בקשות צריך להתחבר (מסך "סנכרון ועובדים").';arRe();return}AR.b=1;AR.err='';try{
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'appreq'}],select:{fields:ARF.map(f=>({fieldPath:f}))},limit:1000}})});
- AR.L=(r||[]).filter(x=>x.document).map(x=>{const d=x.document;return{id:idOf(d),uid:gv(d,'uid'),by:gv(d,'by'),txt:gv(d,'txt'),t:gi(d,'t'),st:ARS[gv(d,'st')]?gv(d,'st'):'new',stBy:gv(d,'stBy'),stAt:gi(d,'stAt'),note:gv(d,'note'),np:gi(d,'np')}}).sort((a,b)=>b.t-a.t)}
+ AR.L=(r||[]).filter(x=>x.document&&idOk(idOf(x.document))).map(x=>{const d=x.document;return{id:idOf(d),uid:gv(d,'uid'),by:gv(d,'by'),txt:gv(d,'txt'),t:gi(d,'t'),st:ARS[gv(d,'st')]?gv(d,'st'):'new',stBy:gv(d,'stBy'),stAt:gi(d,'stAt'),note:gv(d,'note'),np:gi(d,'np')}}).sort((a,b)=>b.t-a.t)}
  catch(e){AR.err=e.offline?e.message:(e.code===403?'אין הרשאה לצפות בבקשות (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message)}
  finally{AR.b=0}arRe()}
 /* רענון בלי לבנות מחדש את הטופס (כדי לא לאבד הקלדה): במסך הבקשות – רק הרשימה; ב"עוד" – המסך כולו */
