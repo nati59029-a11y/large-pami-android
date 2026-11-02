@@ -39,11 +39,11 @@ const coEq = (k, v) => ({ fieldFilter: { field: { fieldPath: k }, op: 'EQUAL', v
 const coRunQ = (uid, where, limit) => fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'cashout' }], where, limit } }) });
 // coPush / coSync: השדות של המראה
 const coFields = (uid, src, o) => { o = Object.assign({ why: 'קניתי חלב', dep: '', zc: '', dp: '' }, o);
-  return { uid: sv(uid), by: sv(uid), t: iv(Date.now()), reg: sv('i_yh'), d: sv('2026-10-20'), a: dv(120), why: sv(o.why), dep: sv(o.dep), src: sv(src), zc: sv(o.zc), dp: sv(o.dp) }; };
+  return { uid: sv(uid), by: sv(uid), t: iv(Date.now()), src: sv(src), zc: sv(o.zc), dp: sv(o.dp), reg: sv('i_yh'), d: sv('2026-10-20'), a: dv(120), why: sv(o.why), dep: sv(o.dep) }; };
 const dpResetW = (c) => ({ update: { name: docName('cashout/' + c), fields: { dp: sv('') } }, updateMask: { fieldPaths: ['dp'] }, currentDocument: { exists: true } });
 // FRM.dpSend: commit אחד – ההפקדה (exists=false) וסימון dp בכל הוצאה (mask dp, exists=true)
 const depCommit = (uid, id, items, np) => {
-  const fields = { uid: sv(uid), by: sv(uid), t: iv(Date.now()), d: sv('2026-10-21'), items: { arrayValue: { values: items.map(sv) } }, a: dv(1000), st: sv('new'), why: sv(''), np: iv(np || 1) };
+  const fields = { uid: sv(uid), by: sv(uid), t: iv(Date.now()), d: sv('2026-10-21'), items: { arrayValue: { values: items.map(sv) } }, a: dv(1000), st: sv('new'), why: sv(''), np: iv(np || 1), data: sv(JSON.stringify({ v: 1, rows: [{ d: '2026-10-21', a: 1000, ai: { d: '2026-10-21', a: 1000 } }] })) };
   const writes = [{ update: { name: docName('deposits/' + id), fields }, currentDocument: { exists: false } }]
     .concat(items.map((c) => ({ update: { name: docName('cashout/' + c), fields: { dp: sv(id) } }, updateMask: { fieldPaths: ['dp'] }, currentDocument: { exists: true } })));
   return fsx(uid, ':commit', { method: 'POST', body: JSON.stringify({ writes }) });
@@ -64,7 +64,7 @@ const REPLAY = {
   M03: { run: async (uid) => {
     const id = fresh('w');
     const c = await fsx(uid, '/chunks?documentId=' + encodeURIComponent(id + '_0'), { method: 'POST', body: JSON.stringify({ fields: { owner: sv(uid), data: sv('AAAA') } }) });
-    const body = { fields: { owner: sv(uid), by: sv(uid), status: sv('new'), created: sv(now()), data: sv(JSON.stringify({ amt: '10', cat: 'c1' })), parts: sv(1) } };
+    const body = { fields: { owner: sv(uid), by: sv(uid), status: sv('new'), created: sv(now()), data: sv(JSON.stringify({ amt: '10', cat: 'c1' })), parts: sv(1), t: iv(Date.now()) } };
     const i = await fsx(uid, '/inbox?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify(body) });
     return [c, i];
   } },
@@ -389,9 +389,12 @@ const REPLAY = {
     return [await fsx(uid, '/closings/' + 'z1' + '?' + mask.join('&') + '&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields }) })];
   } },
   // FRM.zcSend: הסגירה (עובד – 'new', מנהל – 'ok'), ואחריה חלקי הצילומים
+  // zcCommit: הסגירה ו-zlast באותו commit (קדימה בזמן)
   M73: { run: async (uid, env, role) => {
-    const fields = zcFields(uid, role, 1);
-    return [await fsx(uid, '/closings?documentId=' + encodeURIComponent(fresh('z')), { method: 'POST', body: JSON.stringify({ fields }) })];
+    const id = fresh('z'); const fields = Object.assign(zcFields(uid, role, 1), { tm: sv('09:02') });
+    const writes = [{ update: { name: docName('closings/' + id), fields }, currentDocument: { exists: false } },
+      { update: { name: docName('zlast/i_yh'), fields: { d: sv('2026-10-20'), tm: sv('09:02'), id: sv(id), uid: sv(uid), t: iv(Date.now()) } } }];
+    return [await fsx(uid, ':commit', { method: 'POST', body: JSON.stringify({ writes }) })];
   } },
   M74: { run: async (uid, env, role) => {
     const id = fresh('z'); const all = 'PAGES:' + JSON.stringify(['data:image/jpeg;base64,' + 'A'.repeat(900000), 'data:image/jpeg;base64,AAAA']); const CH = 700000; const np = Math.ceil(all.length / CH);
@@ -414,18 +417,21 @@ const REPLAY = {
   M81: { run: async (uid) => {
     const id = fresh('w');
     const c = await fsx(uid, '/chunks?documentId=' + encodeURIComponent(id + '_0'), { method: 'POST', body: JSON.stringify({ fields: { owner: sv(uid), data: sv('') } }) });
-    const body = { fields: { owner: sv(uid), by: sv(uid), status: sv('new'), created: sv(now()), data: sv(JSON.stringify({ amt: 120, date: '2026-10-20', note: 'להפקדה', reg: true, creg: 'i_yh' })), parts: sv(1) } };
+    const body = { fields: { owner: sv(uid), by: sv(uid), status: sv('new'), created: sv(now()), data: sv(JSON.stringify({ amt: 120, date: '2026-10-20', note: 'להפקדה', reg: true, creg: 'i_yh' })), parts: sv(1), t: iv(Date.now()) } };
     const i = await fsx(uid, '/inbox?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify(body) });
     const co = await fsx(uid, '/cashout?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ fields: coFields(uid, id, { why: 'להפקדה', dep: '1' }) }) });
     return [c, i, co];
   } },
   M82: { run: async (uid) => [await fsx(uid, '/cashout/' + 'co1', { method: 'DELETE' })] },
   M83: { run: async (uid) => [await fsx(uid, '/cashout/' + 'co1')] },
-  M84: { run: async (uid) => [await fsx(uid, '/cashout/' + 'co1', { method: 'DELETE' })] },
+  // coSync: עדכון במקום (zc/dp לא בשדות)
+  M84: { run: async (uid) => { const fields = { reg: sv('i_nl'), d: sv('2026-10-21'), a: dv(61), why: sv('להפקדה'), dep: sv('1') };
+    const r = await fsx(uid, '/cashout/' + 'co3' + '?' + Object.keys(fields).map((k) => 'updateMask.fieldPaths=' + k).join('&') + '&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields }) });
+    if (r.status === 200) assert.equal(r.json.fields.dp.stringValue, 'dp1', 'dp נשמר');
+    return [r]; } },
   // coSync: יצירה (חדשה, וגם יצירה מחדש עם zc/dp שנשמרו)
   M85: { run: async (uid) => [
     await fsx(uid, '/cashout?documentId=' + encodeURIComponent('m' + fresh('t')), { method: 'POST', body: JSON.stringify({ fields: coFields(uid, 'tx1') }) }),
-    await fsx(uid, '/cashout?documentId=' + encodeURIComponent('m' + fresh('t')), { method: 'POST', body: JSON.stringify({ fields: coFields(uid, 'tx2', { zc: 'z1', dp: 'dp1' }) }) }),
   ] },
   M86: { run: async (uid) => [await fsx(uid, '/cashout/' + 'co1' + '?updateMask.fieldPaths=zc&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { zc: sv('z1') } }) })] },
   // FRM.dpSend: הפקדה + סימון dp ב-commit אחד, ואחריו חלקי הצילומים
@@ -455,6 +461,12 @@ const REPLAY = {
   } },
   // ACT.dqDel: מחיקה + dp חוזר לריק, ואז חלקי הצילומים
   M94: { run: async (uid) => [await fsx(uid, ':commit', { method: 'POST', body: JSON.stringify({ writes: [{ delete: docName('deposits/dp1') }, dpResetW('co3')] }) })] },
+  M96: { run: async (uid) => [await coRunQ(uid, { fieldFilter: { field: { fieldPath: 'd' }, op: 'GREATER_THAN_OR_EQUAL', value: { stringValue: '2026-09-01' } } }, 1000)] },
+  M97: { run: async (uid) => { const r = await fsx(uid, '/zlast/' + 'i_nl'); if (r.status === 200) assert.equal(r.json.fields.id.stringValue, 'z1'); return [r]; } },
+  M98: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl')] },
+  M99: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl')] },
+  M100: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl', { method: 'DELETE' })] },
+  M101: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl', { method: 'PATCH', body: JSON.stringify({ fields: { d: sv('2026-10-19'), tm: sv(''), id: sv('z0'), uid: sv(uid), t: iv(Date.now()) } }) })] },
   M95: { run: async (uid) => [await fsx(uid, '/deposits/' + 'dp1' + '/p/' + 0, { method: 'DELETE' })] },
 };
 

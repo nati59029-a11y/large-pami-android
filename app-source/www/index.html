@@ -1358,7 +1358,7 @@ async function pushItem(it){let file='';if(it.fileId){try{file=await fget(it.fil
  if(!file&&!it.nopic)throw new Error('הצילום חסר');
  const n=Math.max(1,Math.ceil(file.length/CH));if(n>12)throw new Error('הצילומים גדולים מדי');
  for(let k=0;k<n;k++){try{await fsx('/chunks?documentId='+encodeURIComponent(it.id+'_'+k),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),data:sv(file.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}
- const body={fields:{owner:sv(SY.uid),by:sv((SY.email||'').split('@')[0]),status:sv('new'),created:sv(it.created),data:sv(JSON.stringify(it.data)),parts:sv(n)}};
+ const body={fields:{owner:sv(SY.uid),by:sv((SY.email||'').split('@')[0]),status:sv('new'),created:sv(it.created),data:sv(JSON.stringify(it.data)),parts:sv(n),t:iv(Date.now())}};
  try{await fsx('/inbox?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify(body)})}catch(e){if(e.code!==409)throw e}await coPush(it)}
 async function flush(){if(flush.b||!isW())return;flush.b=1;SY.err='';
  try{for(const it of obGet()){try{await pushItem(it)}catch(e){SY.err=e.offline?'':e.message;break}obSet(obGet().filter(x=>x.id!==it.id))}}finally{flush.b=0;syS()}}
@@ -1432,12 +1432,12 @@ ACT.inbOk=async el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)retur
  if(b==='emp'&&!d.m)return toast('בחר מזומן או העברה בשינוי, ואז אשר');
  if(b==='sup'&&!s_(d.inv)&&!d.dn)return toast('חסר מספר חשבונית. לחץ "שינוי" והוסף, או סמן תעודת משלוח');
  if(b==='sup'&&!el.dataset.ok){const mm=dupMsg(dupInbox(it));if(mm.length)return ask('נראה שההוצאה כבר קיימת: '+mm.join('; ')+'. לאשר בכל זאת?',()=>{ACT.inbOk({dataset:{id:it.id,ok:'1'}})},'אשר בכל זאת')}
- const t={id:uid(),src:it.id,t:'exp',cat:cid,sub:sid,date,amt:rnd(a),plan:pMonth(d.plan)||(b==='sup'?payDef(sid,date):date.slice(0,7)),inv:s_(d.inv),note:('הוכנס על ידי '+it.by+(d.note&&b!=='free'?' · '+d.note:'')),desc:b==='free'?(s_(d.note)||inbName(it)):(cid==='p_exp'?inbName(it):''),kind:a<0?'credit':'inv',pays:[],file:it.file||''};
+ const t={id:uid(),src:it.id,t:'exp',cat:cid,sub:sid,date,amt:rnd(a),plan:pMonth(d.plan)||(b==='sup'?payDef(sid,date):date.slice(0,7)),inv:s_(d.inv),note:('הוכנס על ידי '+it.by+(d.note&&b!=='free'?' · '+d.note:'')),desc:b==='free'?(s_(d.note)||inbName(it)):(cid==='p_exp'?inbName(it):''),kind:a<0?'credit':'inv',pays:[],file:it.file||''};if(d.reg&&zcRegOk(d.creg)){t.creg=d.creg;t.cowhy=s_(d.note).slice(0,300);t.ctm=zcTime(d.ctm)}
  if(b==='emp')t.pays=[{id:uid(),d:date,a:t.amt,m:d.m}];
  if(b==='sup'&&d.dn&&!t.inv)t.dn=true;
  S.tx.push(t);
  S.inbox=S.inbox.filter(x=>x.id!==it.id);save();rerender();toast(cid==='p_exp'?'נשמר ב"ממתין לסיווג"':'ההוצאה נרשמה')};
-ACT.inbNo=el=>ask('לדחות את ההוצאה? היא תימחק מהרשימה ולא תירשם.',()=>{S.inbox=S.inbox.filter(x=>x.id!==el.dataset.id);save();rerender()});
+ACT.inbNo=el=>ask('לדחות את ההוצאה? היא תימחק מהרשימה ולא תירשם.',()=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(it&&it.d&&it.d.reg)coDelQ(it.id);S.inbox=S.inbox.filter(x=>x.id!==el.dataset.id);save();rerender()});
 /* ===== מצב עובד ===== */
 let WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[]},WKL=[];
 function wkStart(){document.body.classList.add('wk');NAV=[{v:'wk'}];render(0);wkLoad()}
@@ -1467,7 +1467,7 @@ V.wk=()=>{if(WS==='sinv')return supView();const cf=cfgLocal(),cs=cf.cats||[],ob=
  const c=cs.find(x=>x.id===WK.cat),subs=c?c.subs:[];if(subs.length&&WK.sub&&!subs.find(s=>s.id===WK.sub))WK.sub='';if(!subs.length)WK.sub='';
  const sel=(l,n,list,v,ph)=>`<label class="f"><span>${l}</span><select name="${n}" data-c="wkf"><option value="">${ph}</option>${list.map(([k,t])=>`<option value="${esc(k)}"${k===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label>`;
  return{t:'הכנסה ידנית',s:'הוצאה',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkBackExp">‹ חזרה</button>
- <form data-f="wksave" class="card"><label class="cb"><input type="checkbox" name="reg" value="1" data-c="wkf" ${WK.reg?'checked':''}> הוצאה מקופה (מזומן שהוצא מהקופה)</label>${WK.reg?coRegH(WK.creg,'wkf'):sel('קטגוריה','cat',cs.map(x=>[x.id,x.name]),WK.cat,'בחר קטגוריה')+(subs.length?sel('ספק / פירוט','sub',subs.map(x=>[x.id,x.name]),WK.sub,'בחר'):'')}
+ <form data-f="wksave" class="card"><label class="cb"><input type="checkbox" name="reg" value="1" data-c="wkf" ${WK.reg?'checked':''}> הוצאה מקופה (מזומן שהוצא מהקופה)</label>${WK.reg?coRegH(WK.creg,'wkf')+`<label class="f"><span>שעה בפתק (לא חובה)</span><input type="time" name="ctm" value="${esc(WK.ctm||'')}" data-c="wkf"></label>`:sel('קטגוריה','cat',cs.map(x=>[x.id,x.name]),WK.cat,'בחר קטגוריה')+(subs.length?sel('ספק / פירוט','sub',subs.map(x=>[x.id,x.name]),WK.sub,'בחר'):'')}
  <label class="f"><span>סכום (₪)</span><input class="amt" name="amt" inputmode="decimal" autocomplete="off" value="${esc(WK.amt)}" required placeholder="0.00" data-c="wkf"></label>
  ${!WK.reg&&c&&c.beh==='sup'?`<label class="f"><span>מספר חשבונית</span><input name="inv" value="${esc(WK.inv||'')}" autocomplete="off" ${WK.dn?'':'required'} data-c="wkf"></label>${WK.dn?`<label class="cb"><input type="checkbox" name="dn" value="1" data-c="wkf" checked> זוהתה תעודת משלוח (חסרה חשבונית)</label>`:''}`:''}
  <label class="f"><span>תאריך</span><input name="date" type="date" value="${esc(WK.date)}" required data-c="wkf"></label>
@@ -1476,7 +1476,7 @@ V.wk=()=>{if(WS==='sinv')return supView();const cf=cfgLocal(),cs=cf.cats||[],ob=
  <button class="btn" style="width:100%">שלח</button></form>`}};
 CHG.wkf=el=>{WK[el.name]=el.type==='checkbox'?el.checked:el.value;if(el.name==='cat'){WK.sub='';WK.dn=false}if(el.name==='reg'){wkSnap();WK.reg=el.checked}if(el.name==='cat'||el.name==='dn'||el.name==='reg')rerender();else if(el.name==='note'&&WK.reg){wkSnap();rerender()}};
 let WKP={o:'',mode:'scan',rot:0,u:'',busy:0};
-function wkSnap(){const f=document.querySelector('form[data-f=wksave]');if(!f)return;const x=fd(f);Object.assign(WK,{amt:x.amt??WK.amt,date:x.date||WK.date,note:x.note??WK.note,inv:x.inv??WK.inv,dn:x.inv!==undefined?!!x.dn:WK.dn,creg:x.creg??WK.creg})}
+function wkSnap(){const f=document.querySelector('form[data-f=wksave]');if(!f)return;const x=fd(f);Object.assign(WK,{amt:x.amt??WK.amt,date:x.date||WK.date,note:x.note??WK.note,inv:x.inv??WK.inv,dn:x.inv!==undefined?!!x.dn:WK.dn,creg:x.creg??WK.creg,ctm:x.ctm??WK.ctm})}
 CHG.wkfile=async el=>{wkSnap();const f=el.files[0];el.value='';if(!f)return;try{WKP={o:await rdU(f),mode:'scan',rot:0,u:'',busy:0};wkPrev()}catch(e){toast('קריאת הצילום נכשלה')}};
 async function wkPrev(){const P_=WKP;P_.busy=1;wkPrevDraw();try{const r=await scanDoc(P_.o,P_.mode,P_.rot);if(WKP!==P_)return;P_.u=r.u;P_.found=r.found}catch(e){P_.u='';toast('העיבוד נכשל')}P_.busy=0;wkPrevDraw()}
 function wkPrevDraw(){const P_=WKP;dlg(`<h3>בדוק שהכיתוב ברור</h3><div style="text-align:center;min-height:120px">${P_.busy?'<p class="note">מעבד...</p>':P_.u?`<img src="${P_.u}" alt="תצוגה מקדימה" style="max-width:100%;max-height:48vh;border:1px solid var(--bd,#ccc);border-radius:8px">`:''}</div>
@@ -1489,11 +1489,11 @@ ACT.wkRot=()=>{WKP.rot=(WKP.rot+1)%4;wkPrev()};
 ACT.wkOk=async()=>{let u=WKP.u;if(!u)return;try{if(u.length>900000)u=await shrinkMore(u)}catch(e){return toast('הצילום גדול מדי, צלם שוב')}if(WK.pages.length>=12)return toast('אפשר לצרף עד 12 עמודים');WK.pages.push(u);try{WK.hi=WK.hi||[];WK.hi[WK.pages.length-1]=(await scanDoc(WKP.o,WKP.mode,WKP.rot,true)).u}catch(e){}closeDlg();rerender();toast('העמוד צורף')};
 ACT.wkRefresh=()=>{wkLoad();toast('מרענן...')};
 FRM.wksave=async f=>{if(FRM.wksave.b)return;FRM.wksave.b=1;try{await wkSave(f)}finally{FRM.wksave.b=0}};
-async function wkSave(f){const x=fd(f);Object.assign(WK,{amt:x.amt,date:x.date,note:x.note,cat:x.reg?WK.cat:x.cat,sub:x.reg?WK.sub:(x.sub||''),inv:x.inv??WK.inv,dn:!!x.dn,reg:!!x.reg,creg:x.creg||''});return wkSubmit({cat:x.cat,sub:x.sub||'',amt:x.amt,date:x.date,note:x.note,inv:x.inv,dn:!!x.dn,reg:!!x.reg,creg:x.creg||''})}
+async function wkSave(f){const x=fd(f);Object.assign(WK,{amt:x.amt,date:x.date,note:x.note,cat:x.reg?WK.cat:x.cat,sub:x.reg?WK.sub:(x.sub||''),inv:x.inv??WK.inv,dn:!!x.dn,reg:!!x.reg,creg:x.creg||'',ctm:x.ctm||''});return wkSubmit({cat:x.cat,sub:x.sub||'',amt:x.amt,date:x.date,note:x.note,inv:x.inv,dn:!!x.dn,reg:!!x.reg,creg:x.creg||'',ctm:x.ctm||''})}
 async function wkSubmit(x){
  const a=pNum(x.amt);if(a==null||a===0)return toast('סכום לא תקין');if(!x.date)return toast('חסר תאריך');if(!WK.pages.length)return toast('חובה לצרף צילום של החשבונית או של דף ההוצאה');
  let data;
- if(x.reg){if(!zcRegOk(x.creg))return toast('בחר מאיזו קופה הוצא המזומן');if(!(a>0))return toast('הוצאה מקופה: הסכום צריך להיות חיובי');if(!s_(x.note))return toast('כתוב סיבה – עבור מה הוצא המזומן');data={cat:'',catName:'',sub:'',subName:'',amt:rnd(a),date:x.date,note:s_(x.note).slice(0,300),inv:'',dn:false,reg:true,creg:x.creg}}
+ if(x.reg){if(!zcRegOk(x.creg))return toast('בחר מאיזו קופה הוצא המזומן');if(!(a>0))return toast('הוצאה מקופה: הסכום צריך להיות חיובי');if(!s_(x.note))return toast('כתוב סיבה – עבור מה הוצא המזומן');data={cat:'',catName:'',sub:'',subName:'',amt:rnd(a),date:x.date,note:s_(x.note).slice(0,300),inv:'',dn:false,reg:true,creg:x.creg,ctm:zcTime(x.ctm)}}
  else{const cs=cfgLocal().cats||[],c=cs.find(z=>z.id===x.cat);if(!c)return toast('בחר קטגוריה');
   if((c.subs||[]).length&&!x.sub)return toast('בחר ספק / פירוט');
   if(c.beh==='sup'&&!s_(x.inv)&&!x.dn)return toast('חסר מספר חשבונית');
@@ -1520,7 +1520,7 @@ function wkScanDraw(){const o=OC,v=o.v,r=o.res,cs=cfgLocal().cats||[],c=cs.find(
  <div style="flex:1 1 220px;min-width:0"><img src="${o.img0}" alt="הצילום" data-a="wkScView" style="width:100%;max-height:55vh;object-fit:contain;border:1px solid #bbb;border-radius:8px;cursor:zoom-in"><div class="note" style="text-align:center">${o.npg>1?o.npg+' עמודים · ':''}לחיצה על התמונה לפתיחה מלאה</div></div>
  <form data-f="wkscok" style="flex:1 1 240px;min-width:0">
  <label class="cb"><input type="checkbox" name="reg" value="1" data-c="wksc" ${v.reg?'checked':''}> זה דף הוצאה מקופה (לא חשבונית)</label>
- ${v.reg?coRegH(v.creg,'wksc')+'<p class="note">זוהה רק הסכום. כתוב סיבה – עבור מה הוצא המזומן. המנהל ישייך לקטגוריה.</p>':`
+ ${v.reg?coRegH(v.creg,'wksc')+`<label class="f"><span>שעה בפתק (לא חובה)</span><input type="time" name="ctm" value="${esc(v.ctm||'')}" data-c="wksc"></label>`+'<p class="note">זוהה רק הסכום. כתוב סיבה – עבור מה הוצא המזומן. המנהל ישייך לקטגוריה.</p>':`
  <label class="f"><span>קטגוריה</span><select name="cat" data-c="wksc">${opt(cs.map(x=>[x.id,x.name]),v.cat,'בחר קטגוריה')}</select></label>
  ${subs.length?`<label class="f"><span>ספק / פירוט</span><select name="sub" data-c="wksc">${opt(subs.map(x=>[x.id,x.name]),v.sub,'בחר')}</select></label>`:''}
  ${c&&c.beh==='sup'?`${v.dn?'<p class="note" style="font-weight:700">זוהתה תעודת משלוח. היא תישלח כתעודת משלוח וחסרה לה חשבונית.</p>':''}<label class="f"><span>מספר חשבונית</span><input name="inv" value="${esc(v.inv)}" autocomplete="off" ${v.dn?'':'required'} data-c="wksc"></label>${v.dn?`<label class="cb"><input type="checkbox" name="dn" value="1" data-c="wksc" checked> תעודת משלוח (חסרה חשבונית)</label>`:''}`:''}`}
@@ -1529,10 +1529,10 @@ function wkScanDraw(){const o=OC,v=o.v,r=o.res,cs=cfgLocal().cats||[],c=cs.find(
  <label class="f"><span>תאריך</span><input name="date" type="date" value="${esc(v.date)}" required data-c="wksc"></label>
  <label class="f"><span>${v.reg?'סיבה (חובה) – עבור מה הוצא המזומן':'הערות'}</span><input name="note" value="${esc(v.note)}" autocomplete="off" maxlength="${v.reg?300:500}" ${v.reg?'required':''} data-c="wksc"></label>${v.reg?coDepHint(v.note):''}
  <div class="row" style="margin-top:8px"><button class="btn grow">שליחה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form></div>${ocrRaw()}`)}
-function wkScanSnap(){const f=document.querySelector('form[data-f=wkscok]');if(!f)return;const x=fd(f),v=OC.v;v.reg=!!x.reg;if(!v.reg){if(x.cat!==undefined)v.cat=x.cat;if(x.sub!==undefined)v.sub=x.sub;if(x.inv!==undefined)v.inv=x.inv;v.dn=x.inv!==undefined?!!x.dn:v.dn}v.amt=x.amt??v.amt;v.date=x.date??v.date;v.note=x.note??v.note;v.creg=x.creg??v.creg}
+function wkScanSnap(){const f=document.querySelector('form[data-f=wkscok]');if(!f)return;const x=fd(f),v=OC.v;v.reg=!!x.reg;if(!v.reg){if(x.cat!==undefined)v.cat=x.cat;if(x.sub!==undefined)v.sub=x.sub;if(x.inv!==undefined)v.inv=x.inv;v.dn=x.inv!==undefined?!!x.dn:v.dn}v.amt=x.amt??v.amt;v.date=x.date??v.date;v.note=x.note??v.note;v.creg=x.creg??v.creg;v.ctm=x.ctm??v.ctm}
 CHG.wksc=el=>{const prevCat=OC.v.cat;wkScanSnap();if(el.name==='cat'&&OC.v.cat!==prevCat)OC.v.sub='';if(el.name==='cat'||el.name==='sub'||el.name==='reg'||el.name==='dn'||(el.name==='note'&&OC.v.reg))wkScanDraw()};
 ACT.wkScView=()=>{if(OC&&OC.img0){const o=OC;VW={pgs:WK.pages.slice(),name:'invoice'};const host=$('#dlg');const old=document.getElementById('viewer');if(old)old.remove();const v=document.createElement('div');v.id='viewer';host.append(v);v.innerHTML=`<div class="vbar"><button class="btn" data-a="vwClose">חזרה</button></div><div class="vimg" style="display:block;text-align:center">${WK.pages.map((u,i)=>`<img alt="עמוד ${i+1}" src="${u}" style="display:block;margin:0 auto 10px;max-width:100%">`).join('')}</div>`}};
-FRM.wkscok=async f=>{if(FRM.wkscok.b)return;FRM.wkscok.b=1;try{wkScanSnap();const v=OC.v;await wkSubmit({cat:v.cat,sub:v.sub,amt:v.amt,date:v.date,note:v.note,inv:v.inv,dn:v.dn,reg:v.reg,creg:v.creg||''})}finally{FRM.wkscok.b=0}};
+FRM.wkscok=async f=>{if(FRM.wkscok.b)return;FRM.wkscok.b=1;try{wkScanSnap();const v=OC.v;await wkSubmit({cat:v.cat,sub:v.sub,amt:v.amt,date:v.date,note:v.note,inv:v.inv,dn:v.dn,reg:v.reg,creg:v.creg||'',ctm:v.ctm||''})}finally{FRM.wkscok.b=0}};
 window.addEventListener('online',()=>{if(isW())wkLoad()});
 /* ===== עדכון אוטומטי של האפליקציה (APK מ-GitHub Releases) ===== */
 const APP_VC='__VC__',APP_REPO='__REPO__';
@@ -2996,18 +2996,19 @@ function zcSub(reg,name){let s=S.subs.find(x=>x.cat===reg&&!x.off&&heKey(x.name)
 function zcIns(it,ap){const f=it.f,c=it.c;if(!cat(it.reg)||!f.d||!c.rows.length)return false;if(S.zc.some(x=>x.id===it.id)||S.tx.some(t=>t.src==='zc:'+it.id))return true;
  const ids=[],note='סגירת קופה · דוח Z '+s_(f.no)+(it.by?' · '+it.by:'');
  c.rows.forEach(r=>{const s=zcSub(it.reg,r.sub),t={id:uid(),src:'zc:'+it.id,t:'inc',cat:it.reg,sub:s.id,date:f.d,amt:r.amt,note,pays:[]};S.tx.push(t);ids.push(t.id)});
- S.zc.push({id:it.id,reg:it.reg,d:f.d,no:s_(f.no),by:it.by||'',at:Date.now(),tx:ids,cash:{c:c.c,o:c.o,a:c.a,p:c.p},ap:ap||'',co:it.co&&it.co.L?{z:it.co.z,s:it.co.s,ids:it.co.L.map(x=>x.id),ok:it.co.ok?1:0,done:0}:undefined});save();return true}
+ S.zc.push({id:it.id,reg:it.reg,d:f.d,tm:zcTime(f.tm),no:s_(f.no),by:it.by||'',at:Date.now(),tx:ids,cash:{c:c.c,o:c.o,a:c.a,p:c.p},ap:ap||'',co:it.co&&it.co.L?{z:it.co.z,s:it.co.s,ids:it.co.L.map(x=>x.id),ok:it.co.ok?1:0,done:0}:undefined});save();return true}
 /* ---- מנהל: משיכת סגירות חדשות מהענן (כמו pullInbox) ---- */
 function zcParse(d,id){const reg=gv(d,'reg');if(!zcRegOk(reg))return null;let j={};try{j=JSON.parse(gv(d,'data'))}catch(e){}if(!j||typeof j!=='object')j={};
- const f=zcClean(j.f),it={id,reg,by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),np:Math.max(0,Math.min(8,gi(d,'np'))),f,ack:j.ack===1||j.ack===true,why:typeof j.why==='string'?j.why.slice(0,500):'',cw:typeof j.cw==='string'?j.cw.slice(0,500):'',dw:typeof j.dw==='string'?j.dw.slice(0,500):'',rs:j.rs==='auto'?'auto':'manual'};
+ const f=zcClean(j.f),it={id,reg,by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),np:Math.max(0,Math.min(8,gi(d,'np'))),f,ack:j.ack===1||j.ack===true,why:typeof j.why==='string'?j.why.slice(0,500):'',cw:typeof j.cw==='string'?j.cw.slice(0,500):'',dw:typeof j.dw==='string'?j.dw.slice(0,500):'',inc:(j.co&&Array.isArray(j.co.inc)?j.co.inc:[]).filter(idOk).slice(0,50),rs:j.rs==='auto'?'auto':'manual'};
  it.c=zcCalc(f,reg);it.need=zcNeed(it);return it}
 async function zcPull(){if(!ZQ||!isA()||zcPull.b)return 0;zcPull.b=1;ZQ.at=Date.now();let n=0;try{
- await coAssignPending();try{await coLoad(1)}catch(e){}
+ /* לבדיקת ההוצאות מקופה: גם הוצאות מעובדים שעוד לא נקלטו (קריאה בלבד, בלי לקלוט ובלי לשמור). מתוך pullInbox הן כבר נקלטו */COIN=[];if(!pullInbox.b){try{COIN=(await runQ('status','new')).map(d=>{let x={};try{x=JSON.parse(gv(d,'data'))}catch(e){}return{id:idOf(d),owner:gv(d,'owner'),d:x&&typeof x==='object'?x:{}}})}catch(e){}}
+ await coAssignPending();try{await coSync()}catch(e){}try{await coLoad(1)}catch(e){}
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'closings'}],where:{fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:'new'}}},limit:300}})});
- const L=[];
+ const L=[];ZQP=(r||[]).filter(x=>x.document&&idOk(idOf(x.document))).map(x=>zcParse(x.document,idOf(x.document))).filter(Boolean).map(it=>({id:it.id,reg:it.reg,d:it.f.d,tm:zcTime(it.f.tm)}));
  for(const x of(r||[]).filter(x=>x.document).sort((a,b)=>gi(a.document,'t')-gi(b.document,'t'))){const d=x.document;const id=idOf(d);if(!idOk(id))continue;const it=zcParse(d,id);if(!it)continue;
   if(S.zc.some(z=>z.id===id)||S.tx.some(t=>t.src==='zc:'+id)){try{await zcMark(id,'ok','')}catch(e){}continue}
-  const ap=it.c.lvl===1?'w':'';it.co=coChk(it.reg,it.f.d,it.f.cout);if(!it.co.ok)it.need.push(coMsg(it.co));
+  const ap=it.c.lvl===1?'w':'';it.co=coChk(it.reg,it.f.d,it.f.tm,it.f.cout,{id,inc:it.inc});if(!it.co.ok)it.need.push(...coMsgs(it.co));
   if(!it.need.length&&!(await zcHasPics(id,it.np)))it.need.push('הצילומים של הסגירה לא עלו במלואם');
   if(!it.need.length&&zcIns(it,ap)){n++;await coAssign(id);try{await zcMark(id,'ok','')}catch(e){}continue}
   L.push(it)}
@@ -3091,18 +3092,19 @@ FRM.zcSend=async fm=>{if(!ZC||ZC.busy)return;const f=ZC.f,adm=isA();if(!f)return
  const bad=ZFK.filter(k=>!['d','tm','no','zReg','zStore','oD','oTm','oReg','oStore'].includes(k)&&s_(f[k])&&zcN(f[k])==null);if(bad.length)return toast('יש סכום לא תקין. בדוק את השדות');
  const c=zcCalc(f,ZC.reg);if(!c.rows.length)return toast('אין סכומים להכנסה');if(c.tot==null)return toast('חסר "סה״כ תקבולים"');if(c.lvl==null)return toast('חסר סכום המזומן בסגירה או בפתיחה');
  if((c.lvl===1||(adm&&c.lvl===2))&&!ZC.ack)return toast('סמן "אני מאשר את ההפרש"');if(!adm&&c.lvl===2&&!s_(ZC.why))return toast('כתוב הסבר להפרש');
- if(c.dateWarn&&!s_(ZC.dw))return toast('תאריך הפתיחה שונה מתאריך הסגירה – תקן את התאריך או כתוב הסבר');
+ /* הסבר חובה רק אצל עובד (החלטת בעל העסק 2.11.2026): המנהל רואה את התיבה, אבל לא חייב */if(!adm&&c.dateWarn&&!s_(ZC.dw))return toast('תאריך הפתיחה שונה מתאריך הסגירה – תקן את התאריך או כתוב הסבר');
  if(!COQ.L){try{await coLoad(1)}catch(e){}if(!COQ.L)return toast('לא הצלחתי לטעון את ההוצאות מקופה. בדוק חיבור ונסה שוב')}
- const co=coChk(ZC.reg,f.d,f.cout);if(!co.ok&&!s_(ZC.cw)){zcChkR();return toast('הוצאת המזומן לא תואמת להוצאות מקופה: הוסף הוצאה, או כתוב איפה ההפרש ולמה')}
+ const co=coChk(ZC.reg,f.d,f.tm,f.cout,{id:ZC.id,inc:zcIncIds()});if(!adm&&!co.ok&&!s_(ZC.cw)){zcChkR();return toast('הוצאת המזומן לא תואמת להוצאות מקופה: הוסף הוצאה, או כתוב איפה ההפרש ולמה')}
  if(adm&&!fm._dupOk){const dp=zcDup(ZC.reg,f.d,s_(f.no));if(dp)return ask('כבר נרשמה סגירה של '+ZREG[ZC.reg].n+' מתאריך '+dfmt(f.d)+' עם דוח '+s_(f.no)+'. להכניס בכל זאת?',()=>{fm._dupOk=1;FRM.zcSend(fm)},'הכנס בכל זאת')}
  if(adm&&!cat(ZC.reg))return toast('הקטגוריה של הקופה לא קיימת');
  let pics;try{pics=[];for(const p of ZC.z.concat([ZC.o]))pics.push(await fbShrink(p))}catch(e){return toast('הקטנת הצילומים נכשלה')}
  const all='PAGES:'+JSON.stringify(pics),np=Math.ceil(all.length/CH);if(np>8)return toast('הצילומים גדולים מדי. צלם שוב');
- const id=ZC.id||(ZC.id=uid()),ff=zcClean(f),data=JSON.stringify({v:1,f:ff,rs:ZC.rs==='auto'?'auto':'manual',ack:ZC.ack?1:0,why:c.lvl===2&&!adm?s_(ZC.why).slice(0,500):'',ai:ZC.ai||{},dw:c.dateWarn?s_(ZC.dw).slice(0,500):'',cw:co.ok?'':s_(ZC.cw).slice(0,500),co:{z:co.z,s:co.s,n:co.L.length}});
- const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),st:sv(adm?'ok':'new'),np:iv(np),reg:sv(ZC.reg),d:sv(ff.d),no:sv(s_(ff.no).slice(0,30)),data:sv(data)};
+ const id=ZC.id||(ZC.id=uid()),ff=zcClean(f),data=JSON.stringify({v:1,f:ff,rs:ZC.rs==='auto'?'auto':'manual',ack:ZC.ack?1:0,why:c.lvl===2&&!adm?s_(ZC.why).slice(0,500):'',ai:ZC.ai||{},dw:c.dateWarn?s_(ZC.dw).slice(0,500):'',cw:co.ok?'':s_(ZC.cw).slice(0,500),co:{z:co.z,s:co.s,n:co.L.length,inc:co.inc}});
+ const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),st:sv(adm?'ok':'new'),np:iv(np),reg:sv(ZC.reg),d:sv(ff.d),tm:sv(zcTime(ff.tm)),no:sv(s_(ff.no).slice(0,30)),data:sv(data)};
  if(adm){const it={id,reg:ZC.reg,by:fbBy(),f:ff,c,ack:1,co};if(!zcIns(it,c.lvl||!co.ok||c.dateWarn?'self':''))return toast('ההכנסה נכשלה');coAssign(id).catch(()=>{})}
  ZC.busy=1;rerender();let up=1;
- try{await fsx('/closings?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e.code!==409){ZC.busy=0;if(adm){ZC=zcNew();rerender();return toast('✓ נרשם בהכנסות. השמירה בענן נכשלה ('+tkErr(e)+')')}rerender();return toast(tkErr(e))}}
+ /* הסגירה, ויחד איתה (commit אחד) "הסגירה האחרונה" של הקופה – רק אם היא מתקדמת בזמן (הכללים לא מתירים לעובד להחזיר אחורה) */
+ try{await zcCommit(id,fields,ZC.reg,ff.d,zcTime(ff.tm))}catch(e){if(!e.sent){ZC.busy=0;if(adm){ZC=zcNew();rerender();return toast('✓ נרשם בהכנסות. השמירה בענן נכשלה ('+tkErr(e)+')')}rerender();return toast(tkErr(e))}}
  /* חלקי הצילומים – אחרי הסגירה (הכללים בודקים שהסגירה של הכותב). 409 = החלק כבר עלה */
  for(let k=0;k<np;k++){try{await fsx('/closings/'+id+'/p?documentId='+k,{method:'POST',body:JSON.stringify({fields:{data:sv(all.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code!==409){up=0;break}}}
  if(!up&&!adm){ZC.busy=0;rerender();return toast('הסגירה נשלחה, אבל הצילומים לא עלו. לחץ שוב "שלח למנהל"')}
@@ -3111,18 +3113,20 @@ ACT.zcImg=async el=>{const x=((ZQ&&ZQ.L)||[]).find(z=>z.id===el.dataset.id);if(!
  try{for(let k=0;k<x.np;k++)du+=gv(await fsx('/closings/'+x.id+'/p/'+k),'data')}catch(e){return toast(e.offline?e.message:(e.code===404?'הצילומים של הסגירה הזו לא עלו במלואם':'טעינת התמונות נכשלה'))}
  let P=null;try{P=du.startsWith('PAGES:')?JSON.parse(du.slice(6)):null}catch(e){}if(!Array.isArray(P)||!P.length)return toast('הצילומים של הסגירה הזו לא עלו במלואם');if(!P.every(imgOk))return toast('התמונה לא תקינה ולא תוצג');
  viewImg('','LargePami_closing_'+x.id,du)};
-ACT.zcOk=el=>{const it=((ZQ&&ZQ.L)||[]).find(z=>z.id===el.dataset.id);if(!it)return;
+ACT.zcOk=async el=>{const it=((ZQ&&ZQ.L)||[]).find(z=>z.id===el.dataset.id);if(!it)return;
  if(!cat(it.reg))return toast('הקטגוריה של הקופה לא קיימת');if(!it.f.d||!it.c.rows.length)return toast('חסרים תאריך או סכומים – אי אפשר להכניס');
- if(COQ.L)it.co=coChk(it.reg,it.f.d,it.f.cout);
- ask('לאשר ולהכניס להכנסות '+ils(it.c.inc)+' ('+ZREG[it.reg].n+', '+dfmt(it.f.d)+')?'+(it.need.length?' שים לב: '+it.need.join('; '):''),async()=>{
+ const old=it.co?coMsg(it.co):'';try{await coLoad()}catch(e){}
+ /* חישוב מחדש עכשיו: ההוצאות מקופה ששויכו או נוספו מאז הטעינה. ההודעה שהמנהל מאשר – המעודכנת */
+ it.co=coChk(it.reg,it.f.d,it.f.tm,it.f.cout,{id:it.id,inc:it.inc});const pics=it.need.filter(m=>/הצילומים/.test(m));it.need=zcNeed(it).concat(it.co.ok?[]:coMsgs(it.co),pics);const now=it.co.ok?'':coMsg(it.co),chg=now!==old;if(cur().v==='zc')zcRe();
+ ask((chg?'ההשוואה של ההוצאות מקופה השתנתה מאז הטעינה'+(now?': '+now:' – עכשיו תואם ('+ils(it.co.s)+')')+'. ':'')+'לאשר ולהכניס להכנסות '+ils(it.c.inc)+' ('+ZREG[it.reg].n+', '+dfmt(it.f.d)+')?'+(it.need.length?' שים לב: '+it.need.join('; '):'')+(it.co.known?' ההוצאות מקופה שישויכו: '+it.co.L.length+' ('+ils(it.co.s)+').':''),async()=>{
   if(!zcIns(it,'m'))return toast('ההכנסה נכשלה');ZQ.L=ZQ.L.filter(z=>z.id!==it.id);rerender();await coAssign(it.id);
   try{await zcMark(it.id,'ok','');toast('✓ הסגירה נרשמה בהכנסות')}catch(e){toast('נרשם בהכנסות. עדכון הסטטוס בענן נכשל – יעודכן בבדיקה הבאה')}},'אשר והכנס')};
 ACT.zcNo=el=>{const it=((ZQ&&ZQ.L)||[]).find(z=>z.id===el.dataset.id);if(!it)return;
  dlg(`<h3>דחיית סגירה</h3><p class="note">${esc(ZREG[it.reg].n)} · ${esc(dfmt(it.f.d))} · ${esc(it.by)}</p><form data-f="zcNo" data-id="${esc(it.id)}"><label class="f"><span>הערה (חובה)</span><textarea name="note" maxlength="300" required></textarea></label>
  <div class="row"><button class="btn r grow">דחה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.zcNo=async f=>{const id=f.dataset.id,note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');const b=f.querySelector('button');if(b)b.disabled=true;
- try{await zcMark(id,'rej',note)}catch(e){if(b)b.disabled=false;return toast(tkErr(e))}
- ZQ.L=(ZQ.L||[]).filter(z=>z.id!==id);closeDlg();toast('הסגירה נדחתה');rerender()};
+ const rj=((ZQ&&ZQ.L)||[]).find(z=>z.id===id);try{await zcMark(id,'rej',note)}catch(e){if(b)b.disabled=false;return toast(tkErr(e))}
+ ZQ.L=(ZQ.L||[]).filter(z=>z.id!==id);ZQP=(ZQP||[]).filter(z=>z.id!==id);if(rj)zlRewind(rj.reg,id).catch(()=>{});closeDlg();toast('הסגירה נדחתה');rerender()};
 /* ===== סגירת קופה – שלב 2 (בקשת בעל העסק 2.11.2026): הוצאות מקופה (cashout) והפקדות (deposits) =====
  cashout/{id}: מראה בענן לכל הוצאה מקופה, כדי שכל הצוות יראה אותן בבדיקת הסגירה ובתזכורת ההפקדות.
   uid, by, t, reg (i_yh | i_nl), d (תאריך ההוצאה), a (סכום, מספר חיובי), why (סיבה – חובה), dep ('1' = בסיבה מילה מהשורש פ-ק-ד, צריך אישור הפקדה; הכללים בודקים התאמה),
@@ -3136,7 +3140,7 @@ FRM.zcNo=async f=>{const id=f.dataset.id,note=String(fd(f).note||'').trim().slic
 const ZDEP=/(^|[^א-ת])[ובלשהכמ]{0,3}(הפקיד(ה|ו|ים)?|הפקד(ה|ות|ת|תי|נו|תם|ו)?|הופקד(ה|ו)?|מופקד(ת|ים|ות)?|מפקיד(ה|ים|ות)?|[אינ]פקיד(ו|ה)?|יופקד(ו)?|תופקד)([^א-ת]|$)/;
 const coDep=w=>ZDEP.test(String(w||''))?'1':'';
 const DEP_P='בתמונה אישור הפקדת מזומן לחשבון בנק בישראל (קבלה ממכונת הפקדה, מכספומט או מהבנק). הקבלה יכולה להיות מצולמת הפוכה או מסובבת. החזר JSON בלבד בצורה: {"date":"תאריך ההפקדה בפורמט YYYY-MM-DD","time":"שעת ההפקדה בפורמט HH:MM","amount":מספר או null,"bank":"שם הבנק כפי שמודפס","account":"מספר החשבון, ספרות בלבד"}. amount = הסכום הכולל שהופקד לחשבון (בדרך כלל בסיכום, ליד "סכום ההפקדה", "סה"כ הופקד" או "סכום שהופקד"), מספר חיובי בשקלים. אם בקבלה כמה סכומים – קח את סכום ההפקדה הכולל, לא עמלה, דמי שירות או מספר קטן שמופיע בשורת הכותרת. אל תיקח יתרה ("יתרה", "יתרה לפני", "יתרה אחרי") או פירוט שטרות ומטבעות. התאריך מודפס בסדר יום/חודש/שנה: DD/MM/YY או DD/MM/YYYY, והשנה היא תמיד המספר האחרון (למשל 17/10/26 = 2026-10-17, ושנה של שתי ספרות = 20YY). שדה שלא נראה בבירור: null. אל תנחש.';
-var COQ={L:null,at:0,b:0,err:''},DPQ={L:null,at:0,b:0,err:''},DQ={L:null,at:0,err:''},DP=null,CO1=null,COS={t:0,b:0,again:0,full:0,off:0};
+var COIN=[],ZL={},ZQP=[],COQ={L:null,at:0,b:0,err:''},DPQ={L:null,at:0,b:0,err:''},DQ={L:null,at:0,err:''},DP=null,CO1=null,COS={t:0,b:0,again:0,full:0,off:0};
 const dv=v=>({doubleValue:+v});
 const gn=(d,k)=>{const f=d&&d.fields&&d.fields[k];if(!f)return NaN;return f.doubleValue!=null?+f.doubleValue:f.integerValue!=null?+f.integerValue:NaN};
 const docName=p=>'projects/'+FB.projectId+'/databases/(default)/documents/'+p;
@@ -3144,67 +3148,128 @@ const coDate=v=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v||''));return 
 const coEq=(k,v)=>({fieldFilter:{field:{fieldPath:k},op:'EQUAL',value:{stringValue:v}}});
 /* מסמך מהענן → אובייקט נקי. מסמך לא תקין (מזהה, קופה, סכום) – מדולג */
 function coParse(d){const id=idOf(d);if(!idOk(id))return null;const reg=gv(d,'reg'),a=gn(d,'a');if(!zcRegOk(reg)||!(a>0&&a<=1e6))return null;
- const x={id,uid:gv(d,'uid'),by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),reg,d:coDate(gv(d,'d')),a:rnd(a),why:gv(d,'why').slice(0,300),dep:gv(d,'dep')==='1'?'1':'',src:gv(d,'src').slice(0,120),zc:gv(d,'zc'),dp:gv(d,'dp')};
+ const x={id,uid:gv(d,'uid'),by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),reg,d:coDate(gv(d,'d')),tm:zcTime(gv(d,'tm')),a:rnd(a),why:gv(d,'why').slice(0,300),dep:gv(d,'dep')==='1'?'1':'',src:gv(d,'src').slice(0,120),zc:gv(d,'zc'),dp:gv(d,'dp')};
  if(x.zc&&!idOk(x.zc))x.zc='?';if(x.dp&&!idOk(x.dp))x.dp='?';return x}
 async function coQ(where,lim){const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cashout'}],where,limit:lim||500}})});return(r||[]).filter(x=>x.document).map(x=>coParse(x.document)).filter(Boolean)}
 const coErrT=e=>e.offline?e.message:(e.code===403?'אין הרשאה להוצאות מקופה (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message);
 /* הוצאות מקופה שעוד לא שויכו לסגירה (לבדיקת הסגירה – של כל הצוות) */
-function coLoad(){if(COQ.b)return COQ.b;COQ.b=(async()=>{try{COQ.L=await coQ(coEq('zc',''));COQ.err=''}catch(e){COQ.err=coErrT(e);throw e}finally{COQ.at=Date.now();COQ.b=0}})();return COQ.b}
+/* הוצאות מקופה לבדיקת הסגירה: כל מה שמ-62 הימים האחרונים (חלון התאריכים), ועוד כל מה שעוד לא שויך (לסגירה הראשונה, כשאין "סגירה אחרונה").
+ וגם zlast/{reg} – זמן הסגירה האחרונה של כל קופה (קריא לעובד, שלא קורא closings) */
+function coLoad(){if(COQ.b)return COQ.b;COQ.b=(async()=>{try{const cut=ymd(new Date(Date.now()-62*864e5)),M={};
+  (await coQ(coEq('zc',''))).concat(await coQ({fieldFilter:{field:{fieldPath:'d'},op:'GREATER_THAN_OR_EQUAL',value:{stringValue:cut}}},1000)).forEach(x=>M[x.id]=x);
+  for(const r of Object.keys(ZREG)){try{ZL[r]=zlParse(await fsx('/zlast/'+r))}catch(e){if(e.code===404)ZL[r]=null;else throw e}}
+  COQ.L=Object.values(M);COQ.err=''}catch(e){COQ.err=coErrT(e);throw e}finally{COQ.at=Date.now();COQ.b=0}})();return COQ.b}
 /* ---- טפסים: קופה וסיבה ---- */
 function coRegH(sel,cname,req){return `<label class="f"><span>מאיזו קופה הוצא המזומן (חובה)</span><select name="creg" ${cname?`data-c="${cname}"`:''} ${req===0?'':'required'}><option value="">בחר קופה</option>${Object.keys(ZREG).map(k=>`<option value="${k}" ${k===sel?'selected':''}>${esc(ZREG[k].n)}</option>`).join('')}</select></label>`}
 const coDepHint=w=>coDep(w)?'<p class="note" style="color:var(--warn);font-weight:700;margin:-4px 0 8px">🏦 בסיבה יש הפקדה – אחר כך תצטרך להעלות את אישור ההפקדה מהבנק.</p>':'';
 /* מנהל: "שולם במזומן מהקופה" בטופס ההוצאה הרגיל */
-function coF(c,t){if(!c||c.kind!=='exp')return '';const on=!!(t&&t.co);
- return `<label class="cb"><input type="checkbox" name="co" value="1" data-c="coTg" ${on?'checked':''}> שולם במזומן מהקופה (הוצאה מקופה)</label><div data-cog ${on?'':'hidden'}>${coRegH(on?t.co.reg:'','',0)}<label class="f"><span>סיבה (חובה)</span><input name="cowhy" maxlength="300" autocomplete="off" value="${esc(on?t.co.why:'')}"></label></div>`}
+function coF(c,t){if(!c||c.kind!=='exp')return '';if(t&&t.creg)return `<p class="note">💵 הוצאה מקופה של עובד (${esc((ZREG[t.creg]||{}).n||'')}) – כבר רשומה בבדיקת הסגירה. שינוי בסכום או בתאריך מתעדכן שם.</p>`;const on=!!(t&&t.co);
+ return `<label class="cb"><input type="checkbox" name="co" value="1" data-c="coTg" ${on?'checked':''}> שולם במזומן מהקופה (הוצאה מקופה)</label><div data-cog ${on?'':'hidden'}>${coRegH(on?t.co.reg:'','',0)}<label class="f"><span>סיבה (חובה)</span><input name="cowhy" maxlength="300" autocomplete="off" value="${esc(on?t.co.why:'')}"></label><label class="f"><span>שעה בפתק (לא חובה)</span><input type="time" name="cotm" value="${esc(on?t.co.tm||'':'')}"></label></div>`}
 CHG.coTg=el=>{const g=el.form&&el.form.querySelector('[data-cog]');if(g)g.hidden=!el.checked};
 function coErr(f,c,amt,errs){if(!f.co)return;if(!c||c.kind!=='exp'){errs.push('הוצאה מקופה – רק בהוצאות');return}if(!zcRegOk(f.creg))errs.push('בחר מאיזו קופה הוצא המזומן');if(!s_(f.cowhy))errs.push('כתוב סיבה להוצאה מהקופה');if(amt!=null&&!(amt>0))errs.push('הוצאה מקופה – הסכום צריך להיות חיובי')}
-function coSet(t,f,c){if(f.co&&c&&c.kind==='exp'&&zcRegOk(f.creg))t.co={reg:f.creg,why:s_(f.cowhy).slice(0,300)};else delete t.co}
+function coSet(t,f,c){if(t.creg){delete t.co;return}if(f.co&&c&&c.kind==='exp'&&zcRegOk(f.creg))t.co={reg:f.creg,why:s_(f.cowhy).slice(0,300),tm:zcTime(f.cotm)};else delete t.co}
 /* ---- עובד: יצירת המראה אחרי שההוצאה נשלחה (מתוך pushItem). 409 = כבר קיים. שגיאת רשת – ננסה שוב עם ההוצאה; סירוב – לא חוסם את תור השליחה ---- */
 async function coPush(it){const x=it&&it.data;if(!x||!x.reg||!zcRegOk(x.creg))return;const a=rnd(Math.abs(num(x.amt))),why=s_(x.note).slice(0,300);if(!(a>0)||a>1e6||!why||!coDate(x.date))return;
- const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),reg:sv(x.creg),d:sv(x.date),a:dv(a),why:sv(why),dep:sv(coDep(why)),src:sv(it.id),zc:sv(''),dp:sv('')};
+ const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),reg:sv(x.creg),d:sv(x.date),tm:sv(zcTime(x.ctm)),a:dv(a),why:sv(why),dep:sv(coDep(why)),src:sv(it.id),zc:sv(''),dp:sv('')};
  try{await fsx('/cashout?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e.code===409)return;if(e.offline||!e.code||e.code>=500)throw e;try{console.warn('cashout',e.message)}catch(z){}}}
 /* ---- מנהל: מראה של ההוצאות מקופה מהטלפון (כמו supSync). שינוי בתנועה = מחיקה ויצירה מחדש (zc ו-dp נשמרים) ---- */
-const COK='lp-co-m',coH=f=>supHash([f.reg,f.d,f.a,f.why,f.src].join('|'));
-function coWant(){const o={};for(const t of S.tx){if(!t||t.t!=='exp'||!t.co||!zcRegOk(t.co.reg))continue;const id='m'+t.id,d=coDate(t.date),a=rnd(Math.abs(num(t.amt))),why=s_(t.co.why).slice(0,300);if(!idOk(id)||!d||!(a>0)||a>1e6||!why)continue;const f={reg:t.co.reg,d,a,why,src:String(t.id)};o[id]={f,h:coH(f)}}return o}
+const COK='lp-co-m',coH=f=>supHash([f.reg,f.d,f.a,f.why,f.src].join('|')+(f.tm?'|'+f.tm:''));
+/* מה צריך להיות בענן: (1) הוצאות מקופה של המנהל עצמו (t.co) – 'm'+מזהה התנועה, נוצר אם חסר;
+ (2) הוצאות מקופה של עובדים (ממתינות ב-S.inbox, או שנקלטו – t.creg) – המסמך של העובד, רק מתעדכן (סכום, תאריך, סיבה, dep) כשהמנהל שינה */
+function coWant(){const o={},ok=(id,f)=>idOk(id)&&f.d&&f.a>0&&f.a<=1e6&&f.why;
+ for(const t of S.tx){if(!t||t.t!=='exp')continue;const a=rnd(Math.abs(num(t.amt))),d=coDate(t.date);
+  if(t.creg&&zcRegOk(t.creg)){const f={reg:t.creg,d,tm:zcTime(t.ctm),a,why:s_(t.cowhy).slice(0,300)||'—',src:String(t.src||'')};if(ok(f.src,f))o[f.src]={f,h:coH(f),w:1};continue}
+  if(!t.co||!zcRegOk(t.co.reg))continue;const id='m'+t.id,f={reg:t.co.reg,d,tm:zcTime(t.co.tm),a,why:s_(t.co.why).slice(0,300),src:String(t.id)};if(ok(id,f))o[id]={f,h:coH(f)}}
+ for(const it of S.inbox||[]){const x=it&&it.d;if(!x||!x.reg||!zcRegOk(x.creg)||o[it.id])continue;const f={reg:x.creg,d:coDate(x.date),tm:zcTime(x.ctm),a:rnd(Math.abs(num(x.amt))),why:s_(x.note).slice(0,300),src:String(it.id)};if(ok(it.id,f))o[it.id]={f,h:coH(f),w:1}}
+ return o}
+const CODQ='lp-co-del',coDelL=()=>{try{return JSON.parse(localStorage.getItem(CODQ))||[]}catch(e){return[]}};
+function coDelQ(id){if(!idOk(id))return;const q=coDelL();if(!q.includes(id))q.push(id);try{localStorage.setItem(CODQ,JSON.stringify(q))}catch(e){}}
 function coSched(){if(typeof COS==='undefined'||!COS||!isA())return;clearTimeout(COS.t);COS.t=setTimeout(()=>{coSync().catch(e=>{try{console.warn('cashout',e&&e.message)}catch(z){}})},3000)}
+const coWarn=d=>{const zc=gv(d,'zc'),dp=gv(d,'dp');if(zc||dp)toast('שים לב: ההוצאה מקופה כבר '+(zc?'שויכה לסגירת קופה':'')+(zc&&dp?' ו':'')+(dp?'הופקדה':'')+'. השיוך נשמר – בדוק את הסגירה או ההפקדה');return !!(zc||dp)};
+/* מחיקה מהענן: רק אם לא שויכה לסגירה ולא הופקדה (אחרת נשארת, עם אזהרה) */
+async function coDrop(id){let d;try{d=await fsx('/cashout/'+id)}catch(e){if(e.code===404)return;throw e}if(coWarn(d))return;
+ try{await fsx('/cashout/'+id,{method:'DELETE'})}catch(e){if(e.code!==404)throw e}}
 async function coSync(){if(!isA()||Date.now()<(COS.off||0))return;if(COS.b){COS.again=1;return}COS.b=1;try{
  let C={};try{C=JSON.parse(localStorage.getItem(COK))||{}}catch(e){}const keep=()=>{try{localStorage.setItem(COK,JSON.stringify(C))}catch(e){}};
- if(!COS.full){const L=await coQ(coEq('uid',SY.uid),2000);C={};L.forEach(x=>{if(x.id[0]==='m')C[x.id]={h:coH(x)}});COS.full=1;keep()}
+ if(!COS.full){const L=await coQ(coEq('uid',SY.uid),2000);const C2={};L.forEach(x=>{if(x.id[0]==='m')C2[x.id]={h:coH(x)}});for(const k in C)if(C[k]&&C[k].w)C2[k]=C[k];C=C2;COS.full=1;keep()}
+ for(const id of coDelL()){await coDrop(id);delete C[id];keep();try{localStorage.setItem(CODQ,JSON.stringify(coDelL().filter(x=>x!==id)))}catch(e){}}
  const W=coWant();
- for(const id of Object.keys(C))if(!W[id]){try{await fsx('/cashout/'+id,{method:'DELETE'})}catch(e){if(e.code!==404)throw e}delete C[id];keep()}
- for(const id of Object.keys(W)){const w=W[id];if(C[id]&&C[id].h===w.h)continue;let zc='',dp='';
-  if(C[id]){try{const d=await fsx('/cashout/'+id);zc=gv(d,'zc');dp=gv(d,'dp')}catch(e){if(e.code!==404)throw e}try{await fsx('/cashout/'+id,{method:'DELETE'})}catch(e){if(e.code!==404)throw e}}
-  const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),reg:sv(w.f.reg),d:sv(w.f.d),a:dv(w.f.a),why:sv(w.f.why),dep:sv(coDep(w.f.why)),src:sv(w.f.src),zc:sv(idOk(zc)?zc:''),dp:sv(idOk(dp)?dp:'')};
-  try{await fsx('/cashout?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e.code!==409)throw e}
-  C[id]={h:w.h};keep()}
+ for(const id of Object.keys(C))if(!W[id]){if(!C[id].miss)await coDrop(id);delete C[id];keep()}
+ for(const id of Object.keys(W)){const w=W[id],c=C[id];if(c&&c.h===w.h)continue;
+  /* עדכון במקום (PATCH עם updateMask): zc, dp, uid, by ו-t לא נוגעים */
+  /* מסמך שלא קיים: הכללים דוחים PATCH (403) – לכן: ידוע במטמון → PATCH; לא ידוע (של המנהל) → POST, ואם כבר קיים (409) → PATCH */
+  const fields={reg:sv(w.f.reg),d:sv(w.f.d),tm:sv(w.f.tm||''),a:dv(w.f.a),why:sv(w.f.why),dep:sv(coDep(w.f.why))};
+  const patch=async()=>{try{return await fsx('/cashout/'+id+'?'+Object.keys(fields).map(k=>'updateMask.fieldPaths='+k).join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}catch(e){if(e.code===404||e.code===403)return null;throw e}};
+  const post=async()=>{const nf=Object.assign({uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),src:sv(w.f.src),zc:sv(''),dp:sv('')},fields);try{await fsx('/cashout?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields:nf})});return 1}catch(e){if(e.code===409)return 0;throw e}};
+  if(w.w){const d=await patch();if(!d){C[id]={h:w.h,w:1,miss:1};keep();continue}if(c)coWarn(d)}
+  else if(c&&!c.miss){const d=await patch();if(d)coWarn(d);else await post()}
+  else if(!(await post())){const d=await patch();if(d)coWarn(d)}
+  C[id]=Object.assign({h:w.h},w.w?{w:1}:{});keep()}
  }catch(e){if(e.code===403)COS.off=Date.now()+6e5;throw e}finally{COS.b=0;if(COS.again){COS.again=0;coSched()}}}
 /* ---- בדיקת הסגירה ---- */
 const coHeld=()=>{const o=new Set();((S&&S.zc)||[]).forEach(z=>{if(z&&z.co&&!z.co.done)(z.co.ids||[]).forEach(i=>o.add(i))});return o};
-function coChk(reg,d,cout){const z=rnd(Math.abs(zcN(cout)||0));if(!COQ.L)return{z,s:0,L:[],ok:false,known:0,diff:z};
- const H=isA()?coHeld():new Set(),L=COQ.L.filter(x=>x.reg===reg&&!x.zc&&x.d&&d&&x.d<=d&&!H.has(x.id)).sort((a,b)=>a.d.localeCompare(b.d)||a.t-b.t);
- const s=rnd(sum(L,x=>x.a)),diff=rnd(Math.abs(z-s));return{z,s,L,ok:diff<0.01,known:1,diff}}
-const coMsg=co=>co.known?'הוצאת המזומן מהקופה לא תואמת: בדוח Z '+ils(co.z)+', הוצאות מקופה שנרשמו '+ils(co.s)+' (הפרש '+ils(co.diff)+')':'לא ניתן היה לבדוק את ההוצאות מקופה (הטעינה נכשלה)';
-function coListH(co){if(!co||!co.known)return '';return `<div style="margin:6px 0">${co.L.map(x=>`<div class="row" style="justify-content:space-between;gap:8px;font-size:.9rem;align-items:flex-start"><span style="min-width:0;overflow-wrap:anywhere">${esc(dfmt(x.d))} · ${esc(x.by||'—')} · ${esc(x.why)}</span><b dir="ltr" style="flex:none">${ils(x.a)}</b></div>`).join('')||'<p class="note" style="margin:0">לא נרשמו הוצאות מקופה.</p>'}</div>`}
+/* מנהל: הוצאה מקופה נספרת רק אם יש מאחוריה הוצאה שהמנהל באמת קיבל (ממתינה ב-S.inbox או שנקלטה ל-S.tx), באותה קופה ובאותו סכום.
+ של המנהל עצמו: תנועה עם t.co. עובד לא רואה את הנתונים האלה – אצלו נספר הכול */
+function coVer(x){if(!isA())return true;const eq=v=>Math.abs(rnd(Math.abs(num(v)))-x.a)<0.005;
+ if(x.id[0]==='m'){const t=S.tx.find(t=>'m'+t.id===x.id);return !!(t&&t.co&&t.co.reg===x.reg&&eq(t.amt))}
+ if(x.src!==x.id)return false;const i=(S.inbox||[]).find(i=>i.id===x.src);if(i)return !!(i.d&&i.d.reg&&i.d.creg===x.reg&&eq(i.d.amt)&&(!i.by||i.by===x.by));
+ const n=(COIN||[]).find(i=>i.id===x.src);if(n)return !!(n.owner===x.uid&&n.d.reg&&n.d.creg===x.reg&&eq(n.d.amt));
+ const t=S.tx.find(t=>t.src===x.src&&t.t==='exp');return !!(t&&t.creg===x.reg&&eq(t.amt))}
+/* "הסגירה האחרונה" של קופה: {d, tm, id}. עובד – מ-zlast; מנהל – מהסגירות שהוא רשם (S.zc) ומהממתינות (ZQP), בלי לסמוך על zlast */
+const zlKey=x=>(x.d||'')+' '+(x.tm||'');
+function zlParse(d){const x={d:coDate(gv(d,'d')),tm:zcTime(gv(d,'tm')),id:gv(d,'id')};return x.d&&idOk(x.id)?x:null}
+function zcPrev(reg,d,tm,id){const k=zlKey({d,tm});
+ if(isA()){let b=null;((S&&S.zc)||[]).concat(ZQP||[]).forEach(x=>{if(!x||x.reg!==reg||x.id===id||!x.d)return;const y={d:x.d,tm:zcTime(x.tm),id:x.id};if(zlKey(y)<k&&(!b||zlKey(y)>zlKey(b)))b=y});return b}
+ const z=ZL[reg];return z&&z.id!==id&&zlKey(z)<k?z:null}
+/* מקום ההוצאה בחלון: 'in' בין הסגירה הקודמת (לא כולל) לנוכחית (כולל); 'unc' – מאותו יום של הסגירה הקודמת בלי שעה (לא ברור); 'out'.
+ בלי סגירה קודמת (התחלה): כל מה שעוד לא שויך, עד תאריך הסגירה */
+function coIn(x,prev,d,tm){if(!x.d||!d||x.d>d)return 'out';if(x.d===d&&x.tm&&tm&&x.tm>tm)return 'out';
+ if(!prev)return x.zc?'out':'in';if(x.d<prev.d)return 'out';if(x.d>prev.d)return 'in';
+ if(x.tm&&prev.tm)return x.tm>prev.tm?'in':'out';return 'unc'}
+function coChk(reg,d,tm,cout,cur){cur=cur||{};const z=rnd(Math.abs(zcN(cout)||0));tm=zcTime(tm);if(!COQ.L)return{z,s:0,L:[],U:[],bad:[],inc:[],ok:false,known:0,diff:z,prev:null};
+ const prev=zcPrev(reg,d,tm,cur.id),inc=new Set(cur.inc||[]),srt=(a,b)=>a.d.localeCompare(b.d)||(a.tm||'').localeCompare(b.tm||'')||a.t-b.t;
+ const R=COQ.L.filter(x=>x.reg===reg),A=R.filter(x=>coIn(x,prev,d,tm)==='in'),U=R.filter(x=>coIn(x,prev,d,tm)==='unc'&&(!x.zc||x.zc===cur.id)).sort(srt);
+ const C=A.concat(U.filter(x=>inc.has(x.id))).sort(srt),L=C.filter(coVer),bad=C.filter(x=>!coVer(x));
+ const s=rnd(sum(L,x=>x.a)),diff=rnd(Math.abs(z-s));return{z,s,L,U,bad,inc:U.filter(x=>inc.has(x.id)).map(x=>x.id),ok:diff<0.01&&!bad.length,known:1,diff,prev}}
+const zcIncIds=()=>Object.keys((ZC&&ZC.inc)||{}).filter(k=>ZC.inc[k]);
+/* שליחת סגירה + zlast באותו commit. סגירה ישנה (לא מתקדמת בזמן) – בלי zlast. כבר נשלחה (409) – e.sent */
+async function zcCommit(id,fields,reg,d,tm){const cw={update:{name:docName('closings/'+id),fields},currentDocument:{exists:false}};
+ let fwd=1;try{const z=zlParse(await fsx('/zlast/'+reg));if(z&&zlKey(z)>=zlKey({d,tm}))fwd=0}catch(e){if(e.code!==404)fwd=0}
+ const zw={update:{name:docName('zlast/'+reg),fields:{d:sv(d),tm:sv(tm||''),id:sv(id),uid:sv(SY.uid),t:iv(Date.now())}}};
+ const go=async w=>{try{await fsx(':commit',{method:'POST',body:JSON.stringify({writes:w})})}catch(e){if(e.code===409||(e.code===400&&/exist/i.test(e.message||''))){e.sent=1}throw e}};
+ try{await go(fwd?[cw,zw]:[cw]);if(fwd)ZL[reg]={d,tm:tm||'',id}}catch(e){if(e.sent)throw e;if(fwd&&e.code===403)return go([cw]);throw e}}
+/* מנהל דחה סגירה: אם היא "הסגירה האחרונה" – חוזרים לקודמת שנשארה (או מוחקים) */
+async function zlRewind(reg,id){let z=null;try{z=zlParse(await fsx('/zlast/'+reg))}catch(e){if(e.code===404)return;throw e}if(!z||z.id!==id)return;
+ const p=zcPrev(reg,'9999-12-31','',id);
+ if(!p){await fsx('/zlast/'+reg,{method:'DELETE'});ZL[reg]=null;return}
+ await fsx('/zlast/'+reg,{method:'PATCH',body:JSON.stringify({fields:{d:sv(p.d),tm:sv(p.tm||''),id:sv(p.id),uid:sv(SY.uid),t:iv(Date.now())}})});ZL[reg]=p}
+const coMsgs=co=>{if(!co.known)return['לא ניתן היה לבדוק את ההוצאות מקופה (הטעינה נכשלה)'];const m=[];
+ if(co.diff>=0.01)m.push('הוצאת המזומן מהקופה לא תואמת: בדוח Z '+ils(co.z)+', הוצאות מקופה שנרשמו '+ils(co.s)+' (הפרש '+ils(co.diff)+')');
+ if(co.bad&&co.bad.length)m.push(co.bad.length+' הוצאות מקופה בענן ('+ils(sum(co.bad,x=>x.a))+') בלי הוצאה תואמת שהתקבלה אצלך – לא נספרו');return m};
+const coMsg=co=>coMsgs(co).join('; ');
+function coListH(co){if(!co||!co.known)return '';return `<div style="margin:6px 0">${co.prev?`<p class="note" style="margin:0 0 4px">מאז הסגירה הקודמת: ${esc(dfmt(co.prev.d))}${co.prev.tm?' '+esc(co.prev.tm):''}</p>`:(co.L?'<p class="note" style="margin:0 0 4px">אין סגירה קודמת – כל מה שעוד לא שויך</p>':'')}${(co.bad||[]).map(x=>`<div class="row" style="justify-content:space-between;gap:8px;font-size:.9rem;align-items:flex-start;color:var(--bad)"><span style="min-width:0;overflow-wrap:anywhere">⚠ לא נספרה: ${esc(dfmt(x.d))} · ${esc(x.by||'—')} · ${esc(x.why)}</span><b dir="ltr" style="flex:none">${ils(x.a)}</b></div>`).join('')}${co.L.map(x=>`<div class="row" style="justify-content:space-between;gap:8px;font-size:.9rem;align-items:flex-start"><span style="min-width:0;overflow-wrap:anywhere">${esc(dfmt(x.d))}${x.tm?' '+esc(x.tm):''} · ${esc(x.by||'—')} · ${esc(x.why)}</span><b dir="ltr" style="flex:none">${ils(x.a)}</b></div>`).join('')||'<p class="note" style="margin:0">לא נרשמו הוצאות מקופה.</p>'}</div>`}
 function zcCoH(){if(!ZC||!ZC.f||!zcRegOk(ZC.reg))return '';
  if(!COQ.L)return `<div class="card" style="margin:10px 0"><b>הוצאת מזומן מהקופה</b><p class="note" style="margin:4px 0 0;${COQ.err?'color:var(--bad)':''}">${esc(COQ.err||'טוען הוצאות מקופה…')}</p>${COQ.err?'<button type="button" class="btn g s" data-a="coReload">נסה שוב</button>':''}</div>`;
- const co=coChk(ZC.reg,ZC.f.d,ZC.f.cout),pend=isW()?obGet().filter(x=>x.data&&x.data.reg&&x.data.creg===ZC.reg).length:0;
+ const co=coChk(ZC.reg,ZC.f.d,ZC.f.tm,ZC.f.cout,{id:ZC.id,inc:zcIncIds()}),pend=isW()?obGet().filter(x=>x.data&&x.data.reg&&x.data.creg===ZC.reg).length:0;
  return `<div class="card" style="margin:10px 0" id="zcCo"><b>הוצאת מזומן מהקופה</b>
- <p class="note" style="margin:4px 0">בדוח Z: <b>${ils(co.z)}</b> · הוצאות מקופה שנרשמו עד ${esc(dfmt(ZC.f.d))} ועוד לא שויכו לסגירה: <b>${ils(co.s)}</b> <span class="tag ${co.ok?'t3':'t4'}">${co.ok?'תואם':'לא תואם · הפרש '+ils(co.diff)}</span></p>${coListH(co)}
+ <p class="note" style="margin:4px 0">בדוח Z: <b>${ils(co.z)}</b> · הוצאות מקופה ${co.prev?'מאז הסגירה הקודמת ('+esc(dfmt(co.prev.d))+(co.prev.tm?' '+esc(co.prev.tm):'')+')':'שעוד לא שויכו'} ועד הסגירה הזו: <b>${ils(co.s)}</b> <span class="tag ${co.ok?'t3':'t4'}">${co.ok?'תואם':'לא תואם · הפרש '+ils(co.diff)}</span></p>${coListH(co)}
+ ${co.U.length?`<div style="margin:6px 0"><b style="font-size:.95rem">לא ברור לאיזו סגירה (מיום הסגירה הקודמת, בלי שעה)</b>${co.U.map(x=>`<label class="row" style="gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer"><input type="checkbox" data-c="zcInc" data-id="${esc(x.id)}" ${ZC.inc&&ZC.inc[x.id]?'checked':''} style="width:22px;height:22px;flex:none"><span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(dfmt(x.d))} · ${esc(x.by||'—')} · ${esc(x.why)}</span><b dir="ltr" style="flex:none">${ils(x.a)}</b></label>`).join('')}<p class="note" style="margin:0">סמן אם הפתק שייך לסגירה הזו.</p></div>`:''}
  ${pend?`<p class="note" style="color:var(--bad)">${pend} הוצאות מקופה עוד לא נשלחו (אין חיבור). הן ייכנסו לבדיקה אחרי השליחה.</p>`:''}
- ${co.ok?'':`<button type="button" class="btn g" style="margin:6px 0;width:100%" data-a="coAdd">＋ הוספת הוצאה מקופה</button><label class="f"><span>אין פתק – איפה ההפרש ולמה (חובה אם לא מוסיפים הוצאה)</span><textarea name="cw" maxlength="500" data-i="zcCw">${esc(ZC.cw)}</textarea></label>${isA()?'':'<p class="note" style="margin:0">עם ההסבר הסגירה תעבור לאישור המנהל.</p>'}`}</div>`}
+ ${co.ok?'':`<button type="button" class="btn g" style="margin:6px 0;width:100%" data-a="coAdd">＋ הוספת הוצאה מקופה</button><label class="f"><span>אין פתק – איפה ההפרש ולמה (חובה אם לא מוסיפים הוצאה)</span><textarea name="cw" maxlength="500" data-i="zcCw">${esc(ZC.cw)}</textarea></label>${isA()?'<p class="note" style="margin:0">ההסבר לא חובה למנהל.</p>':'<p class="note" style="margin:0">עם ההסבר הסגירה תעבור לאישור המנהל.</p>'}`}</div>`}
+CHG.zcInc=el=>{if(!ZC)return;ZC.inc=ZC.inc||{};ZC.inc[el.dataset.id]=el.checked;zcChkR()};
 ACT.coReload=()=>{COQ.err='';coLoad().then(zcChkR).catch(zcChkR);zcChkR()};
 /* הוספת הוצאה מקופה מתוך חלון הסגירה: עובד – כמו הוצאה רגילה (תור השליחה, צילום לא חובה); מנהל – תנועה ב"ממתין לסיווג" עם t.co */
 function coPicH(){return `${CO1&&CO1.pic&&imgOk(CO1.pic)?`<img src="${CO1.pic}" alt="צילום הפתק" style="width:64px;height:86px;object-fit:cover;border:1px solid var(--line);border-radius:6px;display:block;margin:6px 0">`:''}<div class="row" style="gap:6px;flex-wrap:wrap"><label class="btn g s" style="cursor:pointer">📷 ${CO1&&CO1.pic?'צלם שוב':'צילום הפתק (לא חובה)'}<input type="file" accept="image/*" capture="environment" data-c="coPic" hidden></label><label class="btn g s" style="cursor:pointer">🖼 גלריה<input type="file" accept="image/*" data-c="coPic" hidden></label></div>`}
-ACT.coAdd=()=>{if(!ZC||!ZC.f||!zcRegOk(ZC.reg))return;const co=coChk(ZC.reg,ZC.f.d,ZC.f.cout),def=co.known&&co.z>co.s?String(rnd(co.z-co.s)):'';CO1={pic:'',busy:0};
- dlg(`<h3>הוצאה מקופה – ${esc(ZREG[ZC.reg].n)}</h3><p class="note">נרשמת כמו "הוצאה מקופה" רגילה, בתאריך ${esc(dfmt(zcDate(ZC.f.d)||today()))}.</p><form data-f="coAdd"><label class="f"><span>סכום (₪)</span><input name="a" inputmode="decimal" dir="ltr" autocomplete="off" required value="${esc(def)}"></label><label class="f"><span>סיבה (חובה)</span><input name="why" maxlength="300" required autocomplete="off" data-c="coWhy"></label><div id="coHint"></div><div id="coPic">${coPicH()}</div><div class="row" style="margin-top:10px"><button class="btn grow">הוסף</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+ACT.coAdd=()=>{if(!ZC||!ZC.f||!zcRegOk(ZC.reg))return;const co=coChk(ZC.reg,ZC.f.d,ZC.f.tm,ZC.f.cout,{id:ZC.id,inc:zcIncIds()}),def=co.known&&co.z>co.s?String(rnd(co.z-co.s)):'';CO1={pic:'',busy:0};
+ dlg(`<h3>הוצאה מקופה – ${esc(ZREG[ZC.reg].n)}</h3><p class="note">נרשמת כמו "הוצאה מקופה" רגילה, בתאריך ${esc(dfmt(zcDate(ZC.f.d)||today()))}.</p><form data-f="coAdd"><label class="f"><span>סכום (₪)</span><input name="a" inputmode="decimal" dir="ltr" autocomplete="off" required value="${esc(def)}"></label><label class="f"><span>סיבה (חובה)</span><input name="why" maxlength="300" required autocomplete="off" data-c="coWhy"></label><label class="f"><span>שעה בפתק</span><input type="time" name="tm" value="${esc(zcTime(ZC.f.tm))}"></label><div id="coHint"></div><div id="coPic">${coPicH()}</div><div class="row" style="margin-top:10px"><button class="btn grow">הוסף</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 CHG.coWhy=el=>{const h=document.getElementById('coHint');if(h)h.innerHTML=coDepHint(el.value)};
 CHG.coPic=async el=>{const fl=(el.files||[])[0];el.value='';if(!fl||!CO1)return;try{const du=await ocrDown(await rdU(fl),1600);if(!imgOk(du))throw 0;CO1.pic=du;const b=document.getElementById('coPic');if(b)b.innerHTML=coPicH()}catch(e){toast('תמונה לא תקינה')}};
-FRM.coAdd=async f=>{if(!ZC||!ZC.f||!zcRegOk(ZC.reg)||!CO1||CO1.busy)return;const x=fd(f),a=pNum(s_(x.a).replace(/\s+/g,'')),why=s_(x.why).slice(0,300),reg=ZC.reg,d=zcDate(ZC.f.d)||today();
+FRM.coAdd=async f=>{if(!ZC||!ZC.f||!zcRegOk(ZC.reg)||!CO1||CO1.busy)return;const x=fd(f),a=pNum(s_(x.a).replace(/\s+/g,'')),why=s_(x.why).slice(0,300),reg=ZC.reg,d=zcDate(ZC.f.d)||today(),tm=zcTime(x.tm);
  if(a==null||!(a>0)||a>1e6)return toast('סכום לא תקין');if(!why)return toast('כתוב סיבה');CO1.busy=1;const b=f.querySelector('button');if(b)b.disabled=true;
- try{if(isA()){const t={id:uid(),t:'exp',cat:'p_exp',sub:null,date:d,amt:rnd(a),plan:d.slice(0,7),inv:'',note:'',desc:why,kind:'inv',pays:[],file:'',co:{reg,why}};
+ try{if(isA()){const t={id:uid(),t:'exp',cat:'p_exp',sub:null,date:d,amt:rnd(a),plan:d.slice(0,7),inv:'',note:'',desc:why,kind:'inv',pays:[],file:'',co:{reg,why,tm}};
    if(CO1.pic){const fid='z'+uid();try{await fput(fid,CO1.pic);t.file=fid}catch(e){}}
    S.tx.push(t);save();closeDlg();try{await coSync()}catch(e){toast('נרשם במכשיר. השמירה בענן נכשלה ('+tkErr(e)+')')}}
-  else{const id='w'+uid(),it={id,created:new Date().toISOString(),data:{cat:'',catName:'',sub:'',subName:'',amt:rnd(a),date:d,note:why,inv:'',dn:false,reg:true,creg:reg}};
+  else{const id='w'+uid(),it={id,created:new Date().toISOString(),data:{cat:'',catName:'',sub:'',subName:'',amt:rnd(a),date:d,note:why,inv:'',dn:false,reg:true,creg:reg,ctm:tm}};
    if(CO1.pic){const fid='o'+id;try{await fput(fid,packPages([CO1.pic]));it.fileId=fid}catch(e){if(b)b.disabled=false;return toast('שמירת הצילום נכשלה')}}else it.nopic=1;
    const q=obGet();q.push(it);obSet(q);closeDlg();await flush();if(obGet().some(z=>z.id===id))toast('נשמר במכשיר. יישלח כשיהיה חיבור')}
   try{await coLoad()}catch(e){}if(cur().v==='zc')zcChkR();toast('✓ ההוצאה מקופה נוספה');DPQ.at=0}
@@ -3234,9 +3299,14 @@ function dpAuto(total,date,L){const T=Math.round(total*100);if(!(T>0))return nul
   return go(0,0)?pick.map(i=>C[i].id):null};
  return(date?one(recent.filter(x=>x.d&&x.d<=date)):null)||one(recent)}
 function dpAutoSel(){const tot=dpTot(),d=DP.rows.map(r=>zcDate(r.d)).filter(Boolean).sort().pop()||'',ids=dpAuto(tot,d,dpOpen());DP.sel={};if(ids){ids.forEach(i=>DP.sel[i]=true);DP.auto='auto'}else DP.auto='none'}
+/* האם הסכום שהוקלד הוא מה שזוהה בכל הצילומים, והתאריך שזוהה לא מוקדם מתאריכי ההוצאות. אחרת – לאישור המנהל */
+function dpAiChk(rows,a,items){const m=[];if(!rows.length||rows.some(r=>!r.ai||!(r.ai.a>0)))m.push('לא בוצע זיהוי מהצילום לכל האישורים – הסכום הוקלד ידנית');
+ else{const ai=rnd(sum(rows,r=>r.ai.a));if(Math.abs(ai-a)>=0.01)m.push('הסכום שהוקלד ('+ils(a)+') שונה ממה שזוהה בצילום ('+ils(ai)+')');
+  const last=items.map(x=>x.d).filter(Boolean).sort().pop()||'',first=rows.map(r=>r.ai.d||'').sort()[0];if(!first)m.push('לא זוהה תאריך באישור');else if(last&&first<last)m.push('תאריך האישור שזוהה ('+dfmt(first)+') מוקדם מתאריך ההוצאה ('+dfmt(last)+')')}
+ return m}
 function dpSumH(){if(!DP)return '';const ids=dpSelIds(),tot=dpTot(),s=dpSelSum(),ok=ids.length&&tot>0&&Math.abs(tot-s)<0.01;
  return `<p class="note" style="margin:4px 0">סכום האישורים: <b>${ils(tot)}</b> · ההוצאות המסומנות (${ids.length}): <b>${ils(s)}</b> ${ids.length&&tot>0?`<span class="tag ${ok?'t3':'t4'}">${ok?'תואם':'לא תואם'}</span>`:''}</p>
- ${ids.length&&tot>0&&!ok?`<label class="f"><span>הסכום לא תואם – סיבה (חובה). האישור יעבור לאישור המנהל</span><textarea name="why" maxlength="500" data-i="dpWhy">${esc(DP.why)}</textarea></label>`:''}`}
+ ${ids.length&&tot>0&&!ok?`<label class="f"><span>הסכום לא תואם – סיבה (חובה). האישור יעבור לאישור המנהל</span><textarea name="why" maxlength="500" data-i="dpWhy">${esc(DP.why)}</textarea></label>`:''}${ok?dpAiChk(DP.rows.map(r=>({ai:r.ai})),tot,dpOpen().filter(x=>ids.includes(x.id))).map(m=>`<p class="note" style="color:var(--warn);margin:2px 0">⚠ ${esc(m)} – האישור יעבור לאישור המנהל.</p>`).join(''):''}`}
 const dpSumR=()=>{const el=document.getElementById('dpSum');if(el)el.innerHTML=dpSumH()};
 V.dp=()=>{const T='העלאת אישור הפקדה';if(!fbRole())return{t:T,s:'',h:'<div class="card"><p class="note">כדי להעלות אישור הפקדה צריך להתחבר (מסך "סנכרון ועובדים").</p></div>'};if(!DP)DP=dpNew();const adm=isA();
  if(!DPQ.b&&(!DPQ.L&&!DPQ.err||Date.now()-DPQ.at>30000))dpLoad().then(dpRe).catch(dpRe);
@@ -3257,8 +3327,8 @@ V.dp=()=>{const T='העלאת אישור הפקדה';if(!fbRole())return{t:T,s:'
 CHG.dpSel=el=>{if(!DP)return;DP.sel[el.dataset.id]=el.checked;DP.auto='';const m=document.getElementById('dpAutoMsg');if(m)m.remove();dpSumR()};
 INP.dpRow=el=>{if(!DP)return;const r=DP.rows[+el.dataset.k];if(!r||!['d','a'].includes(el.name))return;r[el.name]=String(el.value).slice(0,30);dpSumR()};
 INP.dpWhy=el=>{if(DP)DP.why=String(el.value).slice(0,500)};
-CHG.dpPick=async el=>{const fs=[...(el.files||[])];el.value='';if(!fs.length||!DP)return;
- for(const fl of fs){if(DP.pics.length>=6){toast('אפשר לצרף עד 6 אישורים');break}try{const du=await ocrDown(await rdU(fl),2000);if(!imgOk(du))throw 0;DP.pics.push(du);DP.rows.push({d:'',a:''})}catch(e){toast('תמונה לא תקינה')}}
+CHG.dpPick=async el=>{/* צילום חדש: בלי זיהוי עד שלוחצים שוב "זהה" (ai=null) */const fs=[...(el.files||[])];el.value='';if(!fs.length||!DP)return;
+ for(const fl of fs){if(DP.pics.length>=6){toast('אפשר לצרף עד 6 אישורים');break}try{const du=await ocrDown(await rdU(fl),2000);if(!imgOk(du))throw 0;DP.pics.push(du);DP.rows.push({d:'',a:'',ai:null})}catch(e){toast('תמונה לא תקינה')}}
  DP.sent=0;if(cur().v==='dp')rerender()};
 ACT.dpDelPic=el=>{if(!DP)return;const i=+el.dataset.i;DP.pics.splice(i,1);DP.rows.splice(i,1);rerender()};
 ACT.dpReset=()=>ask('לנקות את הצילומים ואת הבחירה?',()=>{DP=dpNew();rerender()},'נקה');
@@ -3267,26 +3337,28 @@ ACT.dpScan=async()=>{if(!DP||DP.busy||!DP.pics.length)return;const k=shKey();if(
  DP.busy='scan';rerender();const D=DP;
  const one=async p=>{const t=await shAIcall({contents:[{parts:[{text:DEP_P},{inline_data:{mime_type:'image/jpeg',data:p.split(',')[1]}}]}],generationConfig:{responseMimeType:'application/json',temperature:0}},k,0,false,'deposit');const o=JSON.parse(String(t).replace(/```json|```/g,'').trim());return o&&typeof o==='object'?o:{}};
  const R=await Promise.allSettled(D.pics.map(one));if(DP!==D)return;let bad=0;
- R.forEach((r,i)=>{if(r.status!=='fulfilled'){bad++;return}const o=r.value,row=D.rows[i];if(!row)return;row.d=zcDate(o.date)||row.d;const a=zcV(o.amount);row.a=a&&zcN(a)>0?a:row.a});
+ R.forEach((r,i)=>{const row=D.rows[i];if(!row)return;if(r.status!=='fulfilled'){bad++;row.ai=null;return}const o=r.value,a=zcV(o.amount),d=zcDate(o.date);row.ai=a&&zcN(a)>0?{d,a:zcN(a)}:null;row.d=d||row.d;row.a=row.ai?a:row.a});
  if(!D.pics.length||!DPQ.L){try{await dpLoad()}catch(e){}}
  dpAutoSel();D.ai=1;D.busy=0;if(cur().v==='dp')rerender();toast(bad?'זיהוי '+bad+' מהאישורים נכשל. אפשר למלא ידנית':'✓ התאריך והסכום זוהו. בדוק לפני השליחה')};
 FRM.dpSend=async()=>{if(!DP||DP.busy)return;const ids=DP.cm?DP.ids:dpSelIds();
  if(!ids.length)return toast('סמן אילו הוצאות האישור מכסה');if(ids.length>30)return toast('אפשר לסמן עד 30 הוצאות באישור אחד');if(!DP.pics.length)return toast('צרף צילום של אישור ההפקדה');
- const rows=DP.rows.map(r=>({d:zcDate(r.d),a:zcN(r.a)}));if(rows.some(r=>!r.d))return toast('חסר תאריך באחד האישורים');if(rows.some(r=>r.a==null||!(r.a>0)))return toast('חסר סכום באחד האישורים');
+ const rows=DP.rows.map(r=>({d:zcDate(r.d),a:zcN(r.a),ai:r.ai&&r.ai.a>0?{d:zcDate(r.ai.d),a:rnd(r.ai.a)}:null}));if(rows.some(r=>!r.d))return toast('חסר תאריך באחד האישורים');if(rows.some(r=>r.a==null||!(r.a>0)))return toast('חסר סכום באחד האישורים');
  const a=rnd(sum(rows,r=>r.a)),s=DP.cm?DP.s:dpSelSum(),ok=Math.abs(a-s)<0.01;if(a>1e6)return toast('סכום לא תקין');
  if(!ok&&!s_(DP.why))return toast('הסכום לא תואם – כתוב סיבה (האישור יעבור לאישור המנהל)');
  if(!DP.all){let pics;try{pics=[];for(const p of DP.pics)pics.push(await fbShrink(p))}catch(e){return toast('הקטנת הצילומים נכשלה')}const all='PAGES:'+JSON.stringify(pics);if(Math.ceil(all.length/CH)>8)return toast('הצילומים גדולים מדי. צלם שוב');DP.all=all}
  const all=DP.all,np=Math.ceil(all.length/CH),id=DP.id||(DP.id=uid()),d=rows.map(r=>r.d).sort().pop();DP.busy=1;rerender();
- if(!DP.cm){const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),d:sv(d),items:{arrayValue:{values:ids.map(sv)}},a:dv(a),st:sv('new'),why:sv(ok?'':s_(DP.why).slice(0,500)),np:iv(np)};
+ if(!DP.cm){const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),d:sv(d),items:{arrayValue:{values:ids.map(sv)}},a:dv(a),st:sv('new'),why:sv(ok?'':s_(DP.why).slice(0,500)),np:iv(np),data:sv(JSON.stringify({v:1,rows:rows.map(r=>({d:r.d,a:rnd(r.a),ai:r.ai}))}))};
   const writes=[{update:{name:docName('deposits/'+id),fields},currentDocument:{exists:false}}].concat(ids.map(c=>({update:{name:docName('cashout/'+c),fields:{dp:sv(id)}},updateMask:{fieldPaths:['dp']},currentDocument:{exists:true}})));
   try{await fsx(':commit',{method:'POST',body:JSON.stringify({writes})});DP.cm=1;DP.ids=ids;DP.s=s}catch(e){DP.busy=0;DP.id='';rerender();DPQ.at=0;return toast(e.offline?e.message:e.code===403||e.code===400||e.code===409?'השליחה נדחתה – ייתכן שאחת ההוצאות כבר סומנה בהפקדה אחרת. רענן ונסה שוב':tkErr(e))}}
  /* חלקי הצילומים – אחרי ההפקדה (הכללים בודקים שההפקדה של הכותב). 409 = החלק כבר עלה */
  let up=1;for(let k=0;k<np;k++){try{await fsx('/deposits/'+id+'/p?documentId='+k,{method:'POST',body:JSON.stringify({fields:{data:sv(all.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code!==409){up=0;break}}}
  if(!up){DP.busy=0;rerender();return toast('האישור נשלח, אבל הצילומים לא עלו. לחץ שוב "שלח"')}
- DPQ.L=(DPQ.L||[]).filter(x=>!ids.includes(x.id));DP=dpNew();DP.sent=ok?1:2;dpLoad().then(dpRe).catch(()=>{});if(isA()){DQ.at=0;dqPull().then(dpRe).catch(()=>{})}if(cur().v==='dp')rerender();toast(ok?'✓ אישור ההפקדה נשלח':'✓ נשלח – עבר לאישור המנהל')};
+ const auto=ok&&!dpAiChk(rows,a,(DPQ.L||[]).filter(x=>ids.includes(x.id))).length;DPQ.L=(DPQ.L||[]).filter(x=>!ids.includes(x.id));DP=dpNew();DP.sent=auto?1:2;dpLoad().then(dpRe).catch(()=>{});if(isA()){DQ.at=0;dqPull().then(dpRe).catch(()=>{})}if(cur().v==='dp')rerender();toast(auto?'✓ אישור ההפקדה נשלח':'✓ נשלח – עבר לאישור המנהל')};
 /* ---- מנהל: הפקדות חדשות. מחושב מחדש אצלו: ההוצאות שסומנו (dp == מזהה ההפקדה) מול items, והסכום מול a ---- */
+function dpRows(s){let j=null;try{j=JSON.parse(s)}catch(e){}const R=j&&Array.isArray(j.rows)?j.rows.slice(0,8):[];
+ return R.filter(r=>r&&typeof r==='object').map(r=>{const ai=r.ai&&typeof r.ai==='object'&&+r.ai.a>0&&+r.ai.a<=1e6?{d:coDate(r.ai.d),a:rnd(+r.ai.a)}:null;return{d:coDate(r.d),a:+r.a>0?rnd(+r.a):0,ai}})}
 function dpParse(d){const id=idOf(d);if(!idOk(id))return null;const f=d.fields||{},vs=((f.items||{}).arrayValue||{}).values||[];const items=vs.map(v=>v&&v.stringValue).filter(idOk).slice(0,30),a=gn(d,'a');if(!items.length||!(a>0))return null;
- return{id,uid:gv(d,'uid'),by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),d:coDate(gv(d,'d')),items,a:rnd(a),why:gv(d,'why').slice(0,500),np:Math.max(0,Math.min(8,gi(d,'np')))}}
+ return{id,uid:gv(d,'uid'),by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),d:coDate(gv(d,'d')),items,a:rnd(a),why:gv(d,'why').slice(0,500),np:Math.max(0,Math.min(8,gi(d,'np'))),rows:dpRows(gv(d,'data'))}}
 async function dpHasPics(id,np){if(!(np>=1))return false;try{for(let k=0;k<np;k++)await fsx('/deposits/'+id+'/p/'+k+'?mask.fieldPaths=x');return true}catch(e){return false}}
 async function dpMark(id,st,note){const o={st,stBy:fbBy(),stAt:Date.now(),note:note||''},fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
  await fsx('/deposits/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
@@ -3298,6 +3370,7 @@ async function dqPull(){if(!isA()||dqPull.b)return 0;dqPull.b=1;DQ.at=Date.now()
   const miss=it.items.filter(c=>!got.has(c)).length;if(miss)it.need.push(miss+' מההוצאות שבאישור לא סומנו כמופקדות');
   if(Math.abs(it.a-it.s)>=0.01)it.need.push('סכום האישורים ('+ils(it.a)+') לא שווה לסכום ההוצאות ('+ils(it.s)+')');
   if(!it.d)it.need.push('תאריך האישור לא תקין');
+  it.need.push(...dpAiChk(it.rows,it.a,it.L));
   if(!it.need.length&&!(await dpHasPics(it.id,it.np)))it.need.push('הצילומים של האישור לא עלו במלואם');
   if(!it.need.length){try{await dpMark(it.id,'ok','');n++;continue}catch(e){it.need.push('האישור האוטומטי נכשל: '+tkErr(e))}}
   Q.push(it)}
@@ -3309,6 +3382,7 @@ function dqH(){if(!isA())return '';const L=DQ.L;
  if(!L)return DQ.err?`<div class="card"><p class="note" style="color:var(--bad)">${esc(DQ.err)}</p><button class="btn g" data-a="dqRefresh">נסה שוב</button></div>`:'<p class="note" style="padding:8px">טוען הפקדות…</p>';
  const card=it=>`<div class="card" style="border-color:var(--acc)"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><b>${ils(it.a)} · ${esc(dfmt(it.d)||'—')}</b><span class="note" style="margin:0">${esc(it.by||'—')}</span></div>
  ${it.need.map(m=>`<div class="note" style="color:var(--bad);font-weight:700">⚠ ${esc(m)}</div>`).join('')}${coListH({known:1,L:it.L})}
+ ${it.rows.length?`<p class="note" style="margin:2px 0">${it.rows.map((r,i)=>`אישור ${i+1}: ${esc(dfmt(r.d))} ${ils(r.a)}${r.ai?` (זוהה: ${esc(dfmt(r.ai.d))} ${ils(r.ai.a)})`:' (בלי זיהוי)'}`).join(' · ')}</p>`:''}
  ${it.why?`<p class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">סיבת העובד: ${esc(it.why)}</p>`:''}
  <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">${it.np?`<button class="btn g" data-a="dqImg" data-id="${esc(it.id)}">🖼 תמונות</button>`:''}<button class="btn grow" data-a="dqOk" data-id="${esc(it.id)}">אשר</button><button class="btn g grow" data-a="dqNo" data-id="${esc(it.id)}">דחה עם הערה</button><button class="btn g" data-a="dqDel" data-id="${esc(it.id)}">מחק</button></div></div>`;
  return `<div class="sec"><h3>הפקדות לאישור (${L.length})</h3><button class="btn s g" data-a="dqRefresh" ${dqPull.b?'disabled':''}>רענן</button></div>${DQ.err?`<p class="note" style="color:var(--bad)">${esc(DQ.err)}</p>`:''}${L.length?L.map(card).join(''):'<p class="note">אין הפקדות שמחכות לאישור.</p>'}`}

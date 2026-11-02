@@ -14,9 +14,11 @@ const newReq = (uid, np) => ({ uid, by: uid, txt: 'בקשה', t: Date.now(), st:
 const newCl = (uid, o) => Object.assign({ uid, by: uid, t: Date.now(), st: 'new', np: 1, reg: 'i_yh', d: '2026-10-20', no: '777', data: '{"v":1,"f":{}}' }, o);
 // הוצאה מקופה (cashout): המזהה = מזהה ההוצאה ב-inbox של הכותב (src). inbox ו-chunks נוצרים בלי כללים, כאילו pushItem כבר שלח.
 const newCo = (uid, id, o) => Object.assign({ uid, by: uid, t: Date.now(), reg: 'i_yh', d: '2026-10-20', a: 12.5, why: 'קניתי לחם', dep: '', src: id, zc: '', dp: '' }, o);
-const withInbox = async (env, me, id) => env.withSecurityRulesDisabled((c) => c.firestore().doc('inbox/' + id).set({ owner: me, by: me, status: 'new', created: 'x', data: '{}', parts: '1' }));
-const newDep = (uid, items, o) => Object.assign({ uid, by: uid, t: Date.now(), d: '2026-10-21', items, a: 1000, st: 'new', why: '', np: 1 }, o);
+const withInbox = async (env, me, id) => env.withSecurityRulesDisabled((c) => c.firestore().doc('inbox/' + id).set({ owner: me, by: me, status: 'new', created: 'x', data: '{}', parts: '1', t: Date.now() }));
+const newDep = (uid, items, o) => Object.assign({ uid, by: uid, t: Date.now(), d: '2026-10-21', items, a: 1000, st: 'new', why: '', np: 1, data: '{"v":1,"rows":[]}' }, o);
 // עובד/מנהל שולח הפקדה ומסמן את co2 (batch אחד, כמו commit באפליקציה)
+// סגירה של הכותב + zlast/i_nl באותו batch (כמו zcCommit)
+const zlBatch = (db, me, d, tm) => { const id = fresh('z'), b = db.batch(); b.set(db.doc('closings/' + id), newCl(me, { reg: 'i_nl', d, tm })); b.set(db.doc('zlast/i_nl'), { d, tm, id, uid: me, t: Date.now() }); return b.commit(); };
 const depBatch = (db, me, id, items, coId) => { const b = db.batch(); b.set(db.doc('deposits/' + id), newDep(me, items)); b.update(db.doc('cashout/' + coId), { dp: id }); return b.commit(); };
 const newTask = (owner) => { const cr = Date.now(); return { owner, by: owner, role: 'w', txt: 'משימה', cr, due: cr + 4 * 86400000,
   st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }; };
@@ -213,6 +215,7 @@ const OPS = {
     'create-bad-amount':        async (db, me, env) => { const id = fresh('w'); await withInbox(env, me, id); return db.doc('cashout/' + id).set(newCo(me, id, { a: '12.5' })); },
     'update-zc':                (db) => db.doc('cashout/co1').update({ zc: 'z1' }),
     'update-amount':            (db) => db.doc('cashout/co1').update({ a: 1 }),
+    'update-owner':             (db) => db.doc('cashout/co1').update({ uid: 'u_emp', by: 'u_emp' }),
     'mark-dp-own-deposit':      (db, me) => depBatch(db, me, fresh('d'), ['co2'], 'co2'),
     'mark-dp-to-other-deposit': (db) => db.doc('cashout/co2').update({ dp: 'dp1' }),
     'delete':                   (db) => db.doc('cashout/co1').delete(),
@@ -234,6 +237,14 @@ const OPS = {
     'create-too-big':          async (db, me) => { const id = fresh('d'); try { await db.doc('deposits/' + id).set(newDep(me, ['co2'])); } catch (e) { /* תפקיד שלא יוצר */ } return db.doc('deposits/' + id + '/p/0').set({ data: 'A'.repeat(700001) }); },
     'update':                  (db) => db.doc('deposits/dp1/p/0').set({ data: 'BBBB' }),
     'delete':                  (db) => db.doc('deposits/dp1/p/0').delete(),
+  },
+  // הסגירה האחרונה של כל קופה (zcCommit / coLoad / zlRewind)
+  zlast: {
+    'get':                     (db) => db.doc('zlast/i_nl').get(),
+    'write-with-own-closing':  (db, me) => zlBatch(db, me, '2026-10-21', '08:00'),
+    'write-backwards':         (db, me) => zlBatch(db, me, '2026-10-19', '08:00'),
+    'write-alone':             (db, me) => db.doc('zlast/i_nl').set({ d: '2026-10-22', tm: '', id: 'z1', uid: me, t: Date.now() }),
+    'delete':                  (db) => db.doc('zlast/i_nl').delete(),
   },
   _not_in_table: {
     'get-orders':    (db) => db.doc('orders/o1').get(),

@@ -219,20 +219,6 @@
    "note": "r.upd נוצר רק במסלול של מנהל (שורה 2151)."
   },
   {
-   "id": "M33",
-   "line": 2089,
-   "snippet": "fsx('/chunks?documentId='+encodeURIComponent('fbhi_'",
-   "fn": "fbPush (צילום ברזולוציה גבוהה)",
-   "collection": "chunks",
-   "op": "create",
-   "rest": "POST /chunks?documentId=fbhi_{id}_{k}",
-   "condition": "owner == המשתמש עצמו; שדות owner, data; רק ממכשיר עובד (!fbAdmin())",
-   "who": [
-    "employee"
-   ],
-   "note": "חדש בענף feature/feedback-scan: עובד מעלה צילום משוב ברזולוציה גבוהה, עד 6 חלקים."
-  },
-  {
    "id": "M16",
    "line": 2091,
    "snippet": "fsx('/fb/'+r.id+'?currentDocument.exists=false'",
@@ -245,34 +231,6 @@
     "employee"
    ],
    "note": "עובד סורק דף משוב ושולח למנהל. ניסיון חוזר על דף שכבר בענן מחזיר 409 והאפליקציה מחשיבה אותו כנשלח (תיקון fix/worker-feedback; קודם PATCH בלי תנאי הפך בניסיון חוזר לעדכון ונחסם ב-403)."
-  },
-  {
-   "id": "M49",
-   "line": 2084,
-   "snippet": "fsx('/staff/'+SY.uid)",
-   "fn": "fbWSent (עובד, אחרי 403 בשליחת משוב)",
-   "collection": "staff",
-   "op": "get",
-   "rest": "GET /staff/{uid}",
-   "condition": "המסמך של המשתמש עצמו",
-   "who": [
-    "employee"
-   ],
-   "note": "fix/worker-feedback: עובד פעיל שקיבל 403 בניסיון חוזר = הדף כבר בענן; עובד לא פעיל = הודעה ברורה."
-  },
-  {
-   "id": "M50",
-   "line": 2089,
-   "snippet": "fsx('/chunks/fbhi_'+r.id+'_'+k)",
-   "fn": "fbPush (עובד, חלק צילום שכבר קיים)",
-   "collection": "chunks",
-   "op": "get",
-   "rest": "GET /chunks/fbhi_{id}_{k}",
-   "condition": "owner == המשתמש עצמו",
-   "who": [
-    "employee"
-   ],
-   "note": "fix/worker-feedback: אם יצירת חלק נחסמה, בודקים שהחלק כבר קיים ושייך לעובד – ואז ממשיכים."
   },
   {
    "id": "M17",
@@ -343,34 +301,6 @@
     "manager"
    ],
    "note": ""
-  },
-  {
-   "id": "M34",
-   "line": 2113,
-   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k)",
-   "fn": "fbInbox",
-   "collection": "chunks",
-   "op": "get",
-   "rest": "GET /chunks/fbhi_{id}_{k}",
-   "condition": "חלקי הצילום שעובד העלה",
-   "who": [
-    "manager"
-   ],
-   "note": "חדש בענף feature/feedback-scan."
-  },
-  {
-   "id": "M35",
-   "line": 2113,
-   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'})",
-   "fn": "fbInbox",
-   "collection": "chunks",
-   "op": "delete",
-   "rest": "DELETE /chunks/fbhi_{id}_{k}",
-   "condition": "חלקי הצילום שעובד העלה",
-   "who": [
-    "manager"
-   ],
-   "note": "חדש בענף feature/feedback-scan."
   },
   {
    "id": "M22",
@@ -526,6 +456,48 @@
     "manager"
    ],
    "note": ""
+  },
+  {
+   "id": "M33",
+   "line": 2089,
+   "snippet": "fsx('/chunks?documentId='+encodeURIComponent('fbhi_'",
+   "fn": "fbPush (צילום ברזולוציה גבוהה)",
+   "collection": "chunks",
+   "op": "create",
+   "rest": "POST /chunks?documentId=fbhi_{id}_{k}",
+   "condition": "owner == המשתמש עצמו; שדות owner, data; רק ממכשיר עובד (!fbAdmin())",
+   "who": [
+    "employee"
+   ],
+   "note": "חדש בענף feature/feedback-scan: עובד מעלה צילום משוב ברזולוציה גבוהה, עד 6 חלקים."
+  },
+  {
+   "id": "M34",
+   "line": 2113,
+   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k)",
+   "fn": "fbInbox",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/fbhi_{id}_{k}",
+   "condition": "חלקי הצילום שעובד העלה",
+   "who": [
+    "manager"
+   ],
+   "note": "חדש בענף feature/feedback-scan."
+  },
+  {
+   "id": "M35",
+   "line": 2113,
+   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'})",
+   "fn": "fbInbox",
+   "collection": "chunks",
+   "op": "delete",
+   "rest": "DELETE /chunks/fbhi_{id}_{k}",
+   "condition": "חלקי הצילום שעובד העלה",
+   "who": [
+    "manager"
+   ],
+   "note": "חדש בענף feature/feedback-scan."
   },
   {
    "id": "M36",
@@ -714,6 +686,34 @@
     "manager"
    ],
    "note": "מחיקת תגובה."
+  },
+  {
+   "id": "M49",
+   "line": 2084,
+   "snippet": "fsx('/staff/'+SY.uid)",
+   "fn": "fbWSent (עובד, אחרי 403 בשליחת משוב)",
+   "collection": "staff",
+   "op": "get",
+   "rest": "GET /staff/{uid}",
+   "condition": "המסמך של המשתמש עצמו",
+   "who": [
+    "employee"
+   ],
+   "note": "fix/worker-feedback: עובד פעיל שקיבל 403 בניסיון חוזר = הדף כבר בענן; עובד לא פעיל = הודעה ברורה."
+  },
+  {
+   "id": "M50",
+   "line": 2089,
+   "snippet": "fsx('/chunks/fbhi_'+r.id+'_'+k)",
+   "fn": "fbPush (עובד, חלק צילום שכבר קיים)",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/fbhi_{id}_{k}",
+   "condition": "owner == המשתמש עצמו",
+   "who": [
+    "employee"
+   ],
+   "note": "fix/worker-feedback: אם יצירת חלק נחסמה, בודקים שהחלק כבר קיים ושייך לעובד – ואז ממשיכים."
   },
   {
    "id": "M51",
@@ -1001,7 +1001,7 @@
   },
   {
    "id": "M71",
-   "line": 3006,
+   "line": 3007,
    "snippet": "collectionId:'closings'}]",
    "fn": "zcPull",
    "collection": "closings",
@@ -1015,7 +1015,7 @@
   },
   {
    "id": "M72",
-   "line": 3020,
+   "line": 3021,
    "snippet": "fsx('/closings/'+id+'?'+mask.join('&')",
    "fn": "zcMark",
    "collection": "closings",
@@ -1028,23 +1028,8 @@
    "note": "אחרי הכנסה להכנסות (st 'ok') או דחייה עם הערה (st 'rej')."
   },
   {
-   "id": "M73",
-   "line": 3105,
-   "snippet": "fsx('/closings?documentId='",
-   "fn": "FRM.zcSend",
-   "collection": "closings",
-   "op": "create",
-   "rest": "POST /closings?documentId={id}",
-   "condition": "uid וה-by של הכותב; t עכשיו; עובד – st 'new', מנהל – st 'ok'; reg i_yh/i_nl; d תאריך; np 1–8; data עד 20,000",
-   "who": [
-    "employee",
-    "manager"
-   ],
-   "note": "שליחת סגירת קופה (עובד) או שמירת סגירה שהמנהל הכניס בעצמו."
-  },
-  {
    "id": "M74",
-   "line": 3107,
+   "line": 3109,
    "snippet": "fsx('/closings/'+id+'/p?documentId='",
    "fn": "FRM.zcSend",
    "collection": "closings_p",
@@ -1059,7 +1044,7 @@
   },
   {
    "id": "M75",
-   "line": 3111,
+   "line": 3113,
    "snippet": "fsx('/closings/'+x.id+'/p/'+k),'data')",
    "fn": "ACT.zcImg",
    "collection": "closings_p",
@@ -1073,7 +1058,7 @@
   },
   {
    "id": "M76",
-   "line": 3018,
+   "line": 3019,
    "snippet": "fsx('/closings/'+id+'/p/'+k+'?mask.fieldPaths=x')",
    "fn": "zcHasPics (zcPull)",
    "collection": "closings_p",
@@ -1086,8 +1071,110 @@
    "note": "לפני הכנסה אוטומטית: בדיקה שכל חלקי הצילומים עלו, בלי להוריד את התוכן."
   },
   {
+   "id": "M73",
+   "line": 3239,
+   "snippet": "await fsx(':commit',{method:'POST',body:JSON.stringify({writes:w})})",
+   "fn": "zcCommit (FRM.zcSend)",
+   "collection": "closings + zlast",
+   "op": "commit",
+   "rest": "POST :commit [create closings/{id} (exists=false), update zlast/{reg}]",
+   "condition": "סגירה: כמו קודם (uid/by של הכותב, t עכשיו, עובד – 'new', מנהל – 'ok'); zlast – רק קדימה בזמן, ועובד רק עם הסגירה שלו באותו commit",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "שליחת סגירת קופה וזמן הסגירה האחרונה של הקופה, יחד. סגירה ישנה – בלי zlast."
+  },
+  {
+   "id": "M96",
+   "line": 3153,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "coLoad (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where d >= {לפני 62 יום} limit 1000",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "חלון ההוצאות מקופה בין הסגירה הקודמת לנוכחית."
+  },
+  {
+   "id": "M97",
+   "line": 3160,
+   "snippet": "ZL[r]=zlParse(await fsx('/zlast/'+r))",
+   "fn": "coLoad",
+   "collection": "zlast",
+   "op": "get",
+   "rest": "GET /zlast/{reg}",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "זמן הסגירה האחרונה של כל קופה (תחילת החלון)."
+  },
+  {
+   "id": "M98",
+   "line": 3237,
+   "snippet": "let fwd=1;try{const z=zlParse(await fsx('/zlast/'+reg))",
+   "fn": "zcCommit",
+   "collection": "zlast",
+   "op": "get",
+   "rest": "GET /zlast/{reg}",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "לפני שליחה: האם הסגירה מתקדמת בזמן."
+  },
+  {
+   "id": "M99",
+   "line": 3242,
+   "snippet": "async function zlRewind(reg,id){let z=null;try{z=zlParse(await fsx('/zlast/'+reg))",
+   "fn": "zlRewind (FRM.zcNo)",
+   "collection": "zlast",
+   "op": "get",
+   "rest": "GET /zlast/{reg}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "דחיית סגירה: האם היא הסגירה האחרונה."
+  },
+  {
+   "id": "M100",
+   "line": 3244,
+   "snippet": "fsx('/zlast/'+reg,{method:'DELETE'})",
+   "fn": "zlRewind",
+   "collection": "zlast",
+   "op": "delete",
+   "rest": "DELETE /zlast/{reg}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "נדחתה הסגירה היחידה של הקופה."
+  },
+  {
+   "id": "M101",
+   "line": 3245,
+   "snippet": "fsx('/zlast/'+reg,{method:'PATCH'",
+   "fn": "zlRewind",
+   "collection": "zlast",
+   "op": "update",
+   "rest": "PATCH /zlast/{reg}",
+   "condition": "מנהל בלבד (גם אחורה בזמן)",
+   "who": [
+    "manager"
+   ],
+   "note": "נדחתה הסגירה האחרונה: חוזרים לקודמת."
+  },
+  {
    "id": "M77",
-   "line": 3149,
+   "line": 3153,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "coLoad (coQ)",
    "collection": "cashout",
@@ -1102,7 +1189,7 @@
   },
   {
    "id": "M78",
-   "line": 3149,
+   "line": 3153,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "coSync (coQ)",
    "collection": "cashout",
@@ -1116,7 +1203,7 @@
   },
   {
    "id": "M79",
-   "line": 3149,
+   "line": 3153,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "dpLoad (coQ)",
    "collection": "cashout",
@@ -1131,7 +1218,7 @@
   },
   {
    "id": "M80",
-   "line": 3149,
+   "line": 3153,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "dqPull (coQ)",
    "collection": "cashout",
@@ -1145,7 +1232,7 @@
   },
   {
    "id": "M81",
-   "line": 3165,
+   "line": 3174,
    "snippet": "fsx('/cashout?documentId='+encodeURIComponent(it.id)",
    "fn": "coPush (pushItem)",
    "collection": "cashout",
@@ -1159,23 +1246,23 @@
   },
   {
    "id": "M82",
-   "line": 3174,
-   "snippet": "if(!W[id]){try{await fsx('/cashout/'+id,{method:'DELETE'})",
-   "fn": "coSync",
+   "line": 3191,
+   "snippet": "try{await fsx('/cashout/'+id,{method:'DELETE'})}catch(e){if(e.code!==404)throw e}}",
+   "fn": "coDrop (coSync)",
    "collection": "cashout",
    "op": "delete",
    "rest": "DELETE /cashout/{id}",
-   "condition": "מנהל בלבד",
+   "condition": "מנהל בלבד; רק אם zc ו-dp ריקים",
    "who": [
     "manager"
    ],
-   "note": "תנועה עם t.co שנמחקה או שכבר אינה הוצאה מקופה."
+   "note": "הוצאה מקופה שנמחקה או נדחתה אצל המנהל (גם של עובד)."
   },
   {
    "id": "M83",
-   "line": 3176,
-   "snippet": "const d=await fsx('/cashout/'+id)",
-   "fn": "coSync",
+   "line": 3190,
+   "snippet": "async function coDrop(id){let d;try{d=await fsx('/cashout/'+id)}",
+   "fn": "coDrop (coSync)",
    "collection": "cashout",
    "op": "get",
    "rest": "GET /cashout/{id}",
@@ -1183,39 +1270,39 @@
    "who": [
     "manager"
    ],
-   "note": "תנועה שהשתנתה: קריאת zc ו-dp לפני יצירה מחדש."
+   "note": "לפני מחיקה: בודקים שלא שויכה לסגירה ולא הופקדה."
   },
   {
    "id": "M84",
-   "line": 3176,
-   "snippet": "zc=gv(d,'zc');dp=gv(d,'dp')}catch(e){if(e.code!==404)throw e}try{await fsx('/cashout/'+id,{method:'DELETE'})",
+   "line": 3202,
+   "snippet": "return await fsx('/cashout/'+id+'?'+Object.keys(fields)",
    "fn": "coSync",
    "collection": "cashout",
-   "op": "delete",
-   "rest": "DELETE /cashout/{id}",
-   "condition": "מנהל בלבד",
+   "op": "update",
+   "rest": "PATCH /cashout/{id}?updateMask reg,d,a,why,dep&currentDocument.exists=true",
+   "condition": "מנהל בלבד; תוכן ההוצאה באותם תנאים כמו ביצירה; zc/dp לא משתנים",
    "who": [
     "manager"
    ],
-   "note": "תנועה שהשתנתה: מחיקה לפני יצירה מחדש."
+   "note": "עדכון במקום כשהמנהל שינה הוצאה מקופה (שלו או של עובד)."
   },
   {
    "id": "M85",
-   "line": 3178,
+   "line": 3203,
    "snippet": "fsx('/cashout?documentId='+encodeURIComponent(id)",
    "fn": "coSync",
    "collection": "cashout",
    "op": "create",
    "rest": "POST /cashout?documentId=m{tx id}",
-   "condition": "מנהל: בשמו, t עכשיו, dep לפי הסיבה; zc/dp – הקיימים",
+   "condition": "מנהל: בשמו, t עכשיו, dep לפי הסיבה, zc ו-dp ריקים",
    "who": [
     "manager"
    ],
-   "note": "מראה של הוצאה מקופה שהמנהל רשם בטלפון (טופס ההוצאה או חלון הסגירה)."
+   "note": "מראה של הוצאה מקופה שהמנהל רשם בטלפון, כשעוד אין מסמך."
   },
   {
    "id": "M86",
-   "line": 3214,
+   "line": 3279,
    "snippet": "fsx('/cashout/'+cid+'?updateMask.fieldPaths=zc&currentDocument.exists=true'",
    "fn": "coAssign",
    "collection": "cashout",
@@ -1229,7 +1316,7 @@
   },
   {
    "id": "M87",
-   "line": 3282,
+   "line": 3352,
    "snippet": "await fsx(':commit',{method:'POST',body:JSON.stringify({writes})})",
    "fn": "FRM.dpSend",
    "collection": "deposits + cashout",
@@ -1244,7 +1331,7 @@
   },
   {
    "id": "M88",
-   "line": 3284,
+   "line": 3354,
    "snippet": "fsx('/deposits/'+id+'/p?documentId='",
    "fn": "FRM.dpSend",
    "collection": "deposits_p",
@@ -1259,7 +1346,7 @@
   },
   {
    "id": "M89",
-   "line": 3290,
+   "line": 3362,
    "snippet": "fsx('/deposits/'+id+'/p/'+k+'?mask.fieldPaths=x')",
    "fn": "dpHasPics (dqPull)",
    "collection": "deposits_p",
@@ -1273,7 +1360,7 @@
   },
   {
    "id": "M90",
-   "line": 3292,
+   "line": 3364,
    "snippet": "fsx('/deposits/'+id+'?'+mask.join('&')",
    "fn": "dpMark",
    "collection": "deposits",
@@ -1287,7 +1374,7 @@
   },
   {
    "id": "M91",
-   "line": 3294,
+   "line": 3366,
    "snippet": "collectionId:'deposits'}]",
    "fn": "dqPull",
    "collection": "deposits",
@@ -1301,7 +1388,7 @@
   },
   {
    "id": "M92",
-   "line": 3317,
+   "line": 3391,
    "snippet": "fsx('/deposits/'+x.id+'/p/'+k),'data')",
    "fn": "ACT.dqImg",
    "collection": "deposits_p",
@@ -1315,7 +1402,7 @@
   },
   {
    "id": "M93",
-   "line": 3329,
+   "line": 3403,
    "snippet": "writes:[{update:{name:docName('deposits/'+it.id),fields},updateMask",
    "fn": "FRM.dqNo",
    "collection": "deposits + cashout",
@@ -1329,7 +1416,7 @@
   },
   {
    "id": "M94",
-   "line": 3332,
+   "line": 3406,
    "snippet": "writes:[{delete:docName('deposits/'+it.id)}]",
    "fn": "ACT.dqDel",
    "collection": "deposits + cashout",
@@ -1343,7 +1430,7 @@
   },
   {
    "id": "M95",
-   "line": 3333,
+   "line": 3407,
    "snippet": "fsx('/deposits/'+it.id+'/p/'+k,{method:'DELETE'})",
    "fn": "ACT.dqDel",
    "collection": "deposits_p",

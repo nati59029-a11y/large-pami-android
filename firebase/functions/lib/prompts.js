@@ -6,7 +6,7 @@
 // feedback: FB_P, שורות 2011-2029
 // zreport: ZR_P, שורות 2951-2951
 // opening: OPN_P, שורות 2952-2952
-// deposit: DEP_P, שורות 3138-3138
+// deposit: DEP_P, שורות 3142-3142
 // feedbackCaptions: fbAI im(...), שורות 2044-2045
 module.exports = {
   "invoice": "בתמונות עמודים של חשבונית מס או תעודת משלוח של ספק בישראל. החזר JSON בלבד בצורה: {\"document_type\":\"invoice\" או \"delivery_note\",\"supplier\":\"שם הספק או העסק שהנפיק את המסמך (לא הלקוח)\",\"number\":\"מספר החשבונית או תעודת המשלוח, ספרות בלבד אם אפשר\",\"date\":\"תאריך המסמך בפורמט YYYY-MM-DD\",\"total_before_vat\":מספר או null,\"vat_amount\":מספר או null,\"total_with_vat\":מספר או null}. total_with_vat הוא הסכום הסופי לתשלום כולל מע\"מ, בדרך כלל בסוף המסמך. אם רשום מחיר אחרי הנחה, זה total_before_vat. התעלם מכתב יד, חתימות וקשקושים. שדה שלא נראה בבירור: null. אל תנחש.",

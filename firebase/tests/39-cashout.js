@@ -11,7 +11,7 @@ const MIN = 60000;
 let seq = 0;
 const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
 const co = (uid, id, o) => Object.assign({ uid, by: uid, t: Date.now(), reg: 'i_nl', d: '2026-10-20', a: 80, why: 'קניתי ביצים', dep: '', src: id, zc: '', dp: '' }, o);
-const dep = (uid, items, o) => Object.assign({ uid, by: uid, t: Date.now(), d: '2026-10-21', items, a: 1000, st: 'new', why: '', np: 1 }, o);
+const dep = (uid, items, o) => Object.assign({ uid, by: uid, t: Date.now(), d: '2026-10-21', items, a: 1000, st: 'new', why: '', np: 1, data: '{"v":1,"rows":[]}' }, o);
 
 // מילים לבדיקת הזיהוי "צריך אישור הפקדה" (השורש פ-ק-ד במובן הפקדה), זהה באפליקציה (ZDEP) ובכללים (depRe)
 const DEP_YES = ['להפקיד', 'הפקדה', 'הופקד', 'מופקד', 'הפקדות', 'הפקיד', 'הפקידה', 'הפקידו', 'הפקדתי', 'הפקדנו', 'הפקדת', 'הופקדה', 'הופקדו', 'מופקדת', 'מופקדים',
@@ -30,7 +30,7 @@ function appZdep() {
 describe('הוצאות מקופה (cashout) ואישורי הפקדה (deposits)', () => {
   let env, emp, emp2, mgr, out, off;
   const db = (role) => H.ctxFor(env, role).firestore();
-  const inbox = (owner, id) => env.withSecurityRulesDisabled((c) => c.firestore().doc('inbox/' + id).set({ owner, by: owner, status: 'new', created: 'x', data: '{}', parts: '1' }));
+  const inbox = (owner, id, o) => env.withSecurityRulesDisabled((c) => c.firestore().doc('inbox/' + id).set(Object.assign({ owner, by: owner, status: 'new', created: 'x', data: '{}', parts: '1', t: Date.now() }, o)));
   before(async () => { env = await H.getEnv(); });
   beforeEach(async () => {
     await H.seed(env); emp = db('employee'); mgr = db('manager'); out = db('signedIn'); off = db('disabledEmployee');
@@ -70,6 +70,26 @@ describe('הוצאות מקופה (cashout) ואישורי הפקדה (deposits)
     await assertSucceeds(emp.doc('cashout/' + i2).set(co('u_emp', i2)));
     // יצירה חוזרת = עדכון – נחסם
     await assertFails(emp.doc('cashout/' + i2).set(co('u_emp', i2, { a: 1 })));
+  });
+
+  it('ליקוי 1: עובד לא יוצר מראה על הוצאה שכבר נקלטה, על הוצאה ישנה, או על inbox בלי זמן שליחה', async () => {
+    for (const o of [{ status: 'imported' }, { t: Date.now() - 16 * MIN }, { t: '1' }, { t: undefined }]) {
+      const id = fresh('w'); const x = Object.assign({}, o); if ('t' in x && x.t === undefined) { await env.withSecurityRulesDisabled((c) => c.firestore().doc('inbox/' + id).set({ owner: 'u_emp', by: 'u_emp', status: 'new', created: 'x', data: '{}', parts: '1' })); }
+      else await inbox('u_emp', id, x);
+      await assertFails(emp.doc('cashout/' + id).set(co('u_emp', id)), JSON.stringify(o));
+    }
+    // ההוצאות הקיימות בנתוני הדמו (i_u_emp, בלי t) – לא
+    await assertFails(emp.doc('cashout/i_u_emp').set(co('u_emp', 'i_u_emp')));
+    // inbox: t אופציונלי, ואם נשלח – מספר, בזמן אמת
+    await assertSucceeds(emp.doc('chunks/n1_0').set({ owner: 'u_emp', data: 'x' }));
+    await assertSucceeds(emp.doc('inbox/n1').set({ owner: 'u_emp', by: 'u_emp', status: 'new', created: 'x', data: '{}', parts: '1', t: Date.now() }));
+    await assertSucceeds(emp.doc('chunks/n2_0').set({ owner: 'u_emp', data: 'x' }));
+    await assertSucceeds(emp.doc('inbox/n2').set({ owner: 'u_emp', by: 'u_emp', status: 'new', created: 'x', data: '{}', parts: '1' }));
+    await assertSucceeds(emp.doc('chunks/n3_0').set({ owner: 'u_emp', data: 'x' }));
+    await assertFails(emp.doc('inbox/n3').set({ owner: 'u_emp', by: 'u_emp', status: 'new', created: 'x', data: '{}', parts: '1', t: Date.now() - 10 * MIN }));
+    await assertFails(emp.doc('inbox/n3').set({ owner: 'u_emp', by: 'u_emp', status: 'new', created: 'x', data: '{}', parts: '1', t: String(Date.now()) }));
+    await assertSucceeds(emp.doc('cashout/n1').set(co('u_emp', 'n1')));
+    await assertFails(emp.doc('cashout/n2').set(co('u_emp', 'n2')));
   });
 
   it('חסימה: כתיבה בשם אחר (uid או by), וטוקן בלי אימייל', async () => {
@@ -156,10 +176,16 @@ describe('הוצאות מקופה (cashout) ואישורי הפקדה (deposits)
     await assertFails(b5.commit());
   });
 
-  it('מנהל: מעדכן רק zc ו-dp (כולל החזרה לריק), מוחק; לא משנה סכום', async () => {
+  it('מנהל: מעדכן zc ו-dp (כולל החזרה לריק), ותוכן ההוצאה במקום באותם תנאים כמו ביצירה; לא משנה uid/by/src/t; מוחק', async () => {
     await assertSucceeds(mgr.doc('cashout/co1').update({ zc: 'z1' }));
     await assertSucceeds(mgr.doc('cashout/co3').update({ dp: '' }));
-    await assertFails(mgr.doc('cashout/co1').update({ a: 1 }));
+    await assertSucceeds(mgr.doc('cashout/co3').update({ a: 1, why: 'להפקדה', dep: '1', d: '2026-10-22' }));
+    await assertSucceeds(mgr.doc('cashout/co2').update({ why: 'קניתי חלב', dep: '' }));
+    await assertFails(mgr.doc('cashout/co1').update({ why: 'להפקדה' })); // dep לא חושב מחדש
+    await assertFails(mgr.doc('cashout/co1').update({ a: 0 }));
+    await assertFails(mgr.doc('cashout/co1').update({ a: '5' }));
+    await assertFails(mgr.doc('cashout/co1').update({ reg: 'e_sup' }));
+    for (const o of [{ uid: 'u_mgr' }, { by: 'u_mgr' }, { src: 'x' }, { t: 1 }]) await assertFails(mgr.doc('cashout/co1').update(o));
     await assertFails(mgr.doc('cashout/co1').update({ zc: '../x' }));
     await assertSucceeds(mgr.doc('cashout/co1').delete());
   });
@@ -191,6 +217,9 @@ describe('הוצאות מקופה (cashout) ואישורי הפקדה (deposits)
     await assertFails(c({ np: 0 }));
     await assertFails(c({ np: 9 }));
     await assertFails(c({ why: 'א'.repeat(501) }));
+    await assertFails(c({ data: 'א'.repeat(5001) }));
+    await assertFails(c({ data: 5 }));
+    { const x = dep('u_emp', ['co2']); delete x.data; await assertFails(emp.doc('deposits/' + fresh('d')).set(x)); }
     await assertFails(c({ t: Date.now() + 10 * MIN }));
     await assertFails(c({ stBy: 'u_emp' }));
     await assertFails(emp.doc('deposits/dp1').update({ st: 'ok' }));
@@ -220,6 +249,37 @@ describe('הוצאות מקופה (cashout) ואישורי הפקדה (deposits)
     await assertFails(emp.doc('deposits/' + old + '/p/0').set({ data: 'AAAA' }));
     await assertSucceeds(mgr.doc('deposits/' + id + '/p/0').get());
     await assertSucceeds(mgr.doc('deposits/' + id + '/p/0').delete());
+  });
+
+  it('zlast: עובד כותב רק עם הסגירה שלו באותו batch, אותה קופה/תאריך/שעה, ורק קדימה בזמן; מנהל גם אחורה; tm בהוצאה', async () => {
+    const cl = (uid, o) => Object.assign({ uid, by: uid, t: Date.now(), st: 'new', np: 1, reg: 'i_nl', d: '2026-10-21', tm: '09:00', no: '1', data: '{}' }, o);
+    const zl = (o) => Object.assign({ d: '2026-10-21', tm: '09:00', uid: 'u_emp', t: Date.now() }, o);
+    const clean = (o) => { const x = Object.assign({}, o); delete x.reg; return x; };
+    const B = (c, z, db) => { db = db || emp; const id = fresh('z'), b = db.batch(); b.set(db.doc('closings/' + id), c); b.set(db.doc('zlast/' + (z.reg || 'i_nl')), clean(Object.assign({ id }, z))); return b.commit(); };
+    await assertSucceeds(B(cl('u_emp'), zl()));                                  // קדימה מ-20.10 09:02
+    await assertFails(B(cl('u_emp', { d: '2026-10-20', tm: '09:00' }), zl({ d: '2026-10-20', tm: '09:00' }))); // אחורה
+    await assertFails(B(cl('u_emp'), zl()));                                     // אותו זמן – לא קדימה
+    await assertSucceeds(B(cl('u_emp', { tm: '10:00' }), zl({ tm: '10:00' })));  // אותו יום, שעה מאוחרת
+    await assertFails(B(cl('u_emp', { d: '2026-10-22' }), zl({ d: '2026-10-23' })));             // תאריך שונה מהסגירה
+    await assertFails(B(cl('u_emp', { d: '2026-10-22', tm: '' }), zl({ d: '2026-10-22', tm: '08:00' }))); // שעה שונה
+    await assertFails(B(cl('u_emp', { d: '2026-10-22', reg: 'i_yh' }), zl({ d: '2026-10-22' })));   // קופה אחרת
+    await assertFails(emp.doc('zlast/i_nl').set(clean(Object.assign({ id: 'z1' }, zl({ d: '2026-12-01' })))));   // בלי סגירה באותו batch
+    await assertFails(B(cl('u_emp', { d: '2026-12-02' }), zl({ d: '2026-12-02', uid: H.OTHER })));               // בשם אחר
+    await assertFails(B(cl('u_emp', { d: '2026-12-03' }), zl({ d: '2026-12-03', tm: '9:00' })));
+    await assertFails(emp.doc('zlast/i_nl').delete());
+    await assertFails(emp.doc('zlast/e_sup').set({ d: '2026-12-01', tm: '', id: 'z1', uid: 'u_emp', t: Date.now() }));
+    // מנהל: גם אחורה, ומחיקה
+    await assertSucceeds(mgr.doc('zlast/i_nl').set({ d: '2026-10-01', tm: '', id: 'z0', uid: 'u_mgr', t: Date.now() }));
+    await assertFails(mgr.doc('zlast/i_nl').set({ d: '2026-10-01', tm: '', id: 'z0', uid: 'u_emp', t: Date.now() }));
+    await assertSucceeds(mgr.doc('zlast/i_nl').delete());
+    await assertSucceeds(emp.doc('zlast/i_yh').get());
+    for (const x of [out, off]) await assertFails(x.doc('zlast/i_nl').get());
+    // סגירה עם tm לא תקין נחסמת; הוצאה מקופה עם tm
+    await assertFails(emp.doc('closings/' + fresh('z')).set(cl('u_emp', { tm: '25:00' })));
+    const id = fresh('w'); await inbox('u_emp', id);
+    await assertFails(emp.doc('cashout/' + id).set(co('u_emp', id, { tm: '9:5' })));
+    await assertSucceeds(emp.doc('cashout/' + id).set(co('u_emp', id, { tm: '09:05' })));
+    await assertSucceeds(mgr.doc('cashout/' + id).update({ tm: '10:00' }));
   });
 
   it('חסימה: מחובר שאינו ב-staff ועובד מושבת – לא קוראים, לא יוצרים, לא מסמנים', async () => {

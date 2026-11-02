@@ -248,7 +248,7 @@
     },
     "cashout": {
       "source": "הוצאות מקופה – סגירת קופה שלב 2 (2.11.2026): מראה לכל הוצאה מקופה, קריא לכל הצוות",
-      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. יצירה בשמו רק להוצאה שלו ב-inbox (zc ו-dp ריקים). עדכון: רק dp, מריק, להפקדה שלו שכוללת את ההוצאה. בלי מחיקה", "manager": "קריאה, יצירה בשמו (מראה מהטלפון), עדכון zc ו-dp בלבד, ומחיקה" },
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. יצירה בשמו רק להוצאה שלו ב-inbox שעוד לא נקלטה, ב-15 דקות (zc ו-dp ריקים). עדכון: רק dp, מריק, להפקדה שלו שכוללת את ההוצאה. בלי מחיקה", "manager": "קריאה, יצירה בשמו (מראה מהטלפון), עדכון zc ו-dp ותוכן ההוצאה (באותם תנאים כמו ביצירה), ומחיקה. לא משנה uid/by/src" },
       "ops": {
         "get":                      "DDDAA",
         "list":                     "DDDAA",
@@ -258,7 +258,8 @@
         "create-dep-mismatch":      "DDDDD",
         "create-bad-amount":        "DDDDD",
         "update-zc":                "DDDDA",
-        "update-amount":            "DDDDD",
+        "update-amount":            "DDDDA",
+        "update-owner":             "DDDDD",
         "mark-dp-own-deposit":      "DDDAA",
         "mark-dp-to-other-deposit": "DDDDA",
         "delete":                   "DDDDA"
@@ -288,6 +289,17 @@
         "create-too-big":          "DDDDD",
         "update":                  "DDDDD",
         "delete":                  "DDDDA"
+      }
+    },
+    "zlast": {
+      "source": "זמן הסגירה האחרונה של כל קופה – שלב 2 (2.11.2026), לחלון ההוצאות מקופה",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. כתיבה רק יחד עם הסגירה שלו באותו commit, ורק קדימה בזמן. בלי מחיקה", "manager": "קריאה, כתיבה (גם אחורה, כשהוא דוחה סגירה) ומחיקה" },
+      "ops": {
+        "get":                    "DDDAA",
+        "write-with-own-closing": "DDDAA",
+        "write-backwards":        "DDDDA",
+        "write-alone":            "DDDDA",
+        "delete":                 "DDDDA"
       }
     },
     "_not_in_table": {

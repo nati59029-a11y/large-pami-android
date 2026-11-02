@@ -102,7 +102,9 @@ async function seed(env) {
     co('co1', {});
     co('co2', { a: 1000, why: 'להפקדה בבנק', dep: '1' });
     co('co3', { a: 300, why: 'הופקד', dep: '1', dp: 'dp1' });
-    b.set(db.doc('deposits/dp1'), { uid: OTHER, by: OTHER, t: T - 5000, d: '2026-10-21', items: ['co3'], a: 300, st: 'new', why: '', np: 1 });
+    b.set(db.doc('deposits/dp1'), { uid: OTHER, by: OTHER, t: T - 5000, d: '2026-10-21', items: ['co3'], a: 300, st: 'new', why: '', np: 1, data: '{"v":1,"rows":[{"d":"2026-10-21","a":300,"ai":{"d":"2026-10-21","a":300}}]}' });
+    // הסגירה האחרונה של נחל לכיש (zlast) – z1 של עובד אחר
+    b.set(db.doc('zlast/i_nl'), { d: '2026-10-20', tm: '09:02', id: 'z1', uid: OTHER, t: T - 5000 });
     b.set(db.doc('deposits/dp1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
     await b.commit();
   });
