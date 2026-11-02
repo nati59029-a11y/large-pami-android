@@ -1346,7 +1346,7 @@ async function syLogin(email,pw){
  SY={idToken:j.idToken,refresh:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1000,uid:j.localId,email};
  try{await fsx('/admins/'+SY.uid);SY.role='admin'}catch(e){if(e.code===404||e.code===403)SY.role=await syStaff();else throw e}
  syS()}
-function syOut(){SY={};try{localStorage.removeItem(SK);localStorage.removeItem('lp-tasks');localStorage.removeItem('lp-tk-c')}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}
+function syOut(){SY={};try{localStorage.removeItem(SK);localStorage.removeItem('lp-tasks');localStorage.removeItem('lp-tk-c');localStorage.removeItem('lp-supinv')}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}
 const isW=()=>SY.role==='worker'&&!!SY.refresh,isA=()=>SY.role==='admin'&&!!SY.refresh;
 /* לשונית "הזמנות אתר" (שלב 1, קבצים נפרדים ב-orders/): רק למנהל ולעובד, ורק במצב אמולטור או כשהבנייה הפעילה אותה (orders/site-backend.js) */const ordOn=()=>(isA()||isW())&&(!!EMU||['emulator','test'].includes(window.LP_SITE_BACKEND));ACT.ordGo=()=>{location.href='orders/app.html'+location.search};const ordTile=`<button class="tile" data-a="ordGo" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">🛒<br>הזמנות אתר</button>`;
 /* ---- תור שליחה (עובד) ---- */
@@ -2735,20 +2735,22 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
  supinv/{id}: שדות קצרים בלי תמונה. התמונה בחלקים: supinv/{id}/p/{k} (עד CH תווים לחלק, כמו chunks).
  הסנכרון: אוטומטי אחרי כל שמירה אצל המנהל (save), בחזרה לאפליקציה ובחזרת אינטרנט. רק מה שהשתנה נשלח (טביעה h, ולתמונה fh).
  העובד טוען רק כשהוא פותח את המסך, ואת התמונה רק בלחיצה. */
-function ilMonth(){try{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit'}).formatToParts(new Date()),g=t=>(p.find(x=>x.type===t)||{}).value;return g('year')+'-'+g('month')}catch(e){return ym(new Date())}}
+/* יום (YYYY-MM-DD) בשעון ישראל, מחותמת זמן (ISO) או מ-Date. חותמת ריקה או לא תקינה – '' */
+function ilDay(v){const d=v instanceof Date?v:new Date(v||'');if(isNaN(d))return '';try{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d),g=t=>(p.find(x=>x.type===t)||{}).value;return g('year')+'-'+g('month')+'-'+g('day')}catch(e){return ymd(d)}}
+function ilMonth(){return(ilDay(new Date())||ymd(new Date())).slice(0,7)}
 var SUPC={e_sup:'sup',e_bak:'bak'},SUPN={sup:'ספקים',bak:'ספקים אפייה'},SUPK='lp-supinv',SUPS={t:0,b:0,again:0,full:0},SUPW={L:null,b:0,err:''};
 function supHash(s){let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;return(h>>>0).toString(36)}
 const supDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'')?v:'';
 function supWant(){const M=ilMonth(),o={},ok=id=>/^[A-Za-z0-9_-]{1,120}$/.test(id);
- for(const t of S.tx){if(t.t!=='exp'||!SUPC[t.cat]||!ok(String(t.id)))continue;const d=supDate(t.date),at=String(t.ts||'').slice(0,10);if((d||at).slice(0,7)!==M)continue;
+ for(const t of S.tx){if(t.t!=='exp'||!SUPC[t.cat]||t.kind==='refund'||!ok(String(t.id)))continue;const d=supDate(t.date),at=ilDay(t.ts);if((d||at).slice(0,7)!==M)continue;
   const s=subById(t.sub),m=/^הוכנס על ידי ([^·]+)/.exec(t.note||'');
-  o[t.id]={f:{c:SUPC[t.cat],n:(s&&s.name)||t.desc||'',d,at,a:String(rnd(t.kind==='refund'?0:num(t.amt))),inv:t.inv||(t.dn?'תעודת משלוח':''),by:m?s_(m[1]):'מנהל',pend:'',src:String(t.src||''),m:M},fk:t.file||''}}
- for(const it of S.inbox){const x=it.d||{};if(!SUPC[x.cat]||!ok('p'+it.id))continue;const d=supDate(x.date),at=String(it.at||'').slice(0,10);if((d||at).slice(0,7)!==M)continue;
+  o[t.id]={f:{c:SUPC[t.cat],n:(s&&s.name)||t.desc||'',d,at,a:String(rnd(num(t.amt))),inv:t.inv||(t.dn?'תעודת משלוח':''),by:m?s_(m[1]):'מנהל',pend:'',src:String(t.src||''),m:M},fk:t.file||''}}
+ for(const it of S.inbox){const x=it.d||{};if(!SUPC[x.cat]||!ok('p'+it.id))continue;const d=supDate(x.date),at=ilDay(it.at);if((d||at).slice(0,7)!==M)continue;
   o['p'+it.id]={f:{c:SUPC[x.cat],n:x.subName||'',d,at,a:String(rnd(num(x.amt))),inv:x.inv||(x.dn?'תעודת משלוח':''),by:it.by||'',pend:'1',src:String(it.id),m:M},fk:it.file||''}}
  for(const k in o){o[k].fh=supHash(o[k].fk);o[k].h=supHash(JSON.stringify(o[k].f)+'|'+o[k].fh)}return o}
 const supSave=C=>{try{localStorage.setItem(SUPK,JSON.stringify(C))}catch(e){}};
 function supSched(){if(!SUPS||!isA())return;clearTimeout(SUPS.t);SUPS.t=setTimeout(()=>{supSync().catch(e=>{try{console.warn('supinv',e&&e.message)}catch(z){}})},3000)}
-async function supSync(){if(!isA())return;if(SUPS.b){SUPS.again=1;return}SUPS.b=1;try{
+async function supSync(){if(!isA()||Date.now()<(SUPS.off||0))return;if(SUPS.b){SUPS.again=1;return}SUPS.b=1;try{
  let C={};try{C=JSON.parse(localStorage.getItem(SUPK))||{}}catch(e){}
  if(!SUPS.full){const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'supinv'}],select:{fields:[{fieldPath:'h'},{fieldPath:'fh'},{fieldPath:'np'}]},limit:5000}})});
   C={};(r||[]).filter(x=>x.document).forEach(x=>{C[idOf(x.document)]={h:gv(x.document,'h'),fh:gv(x.document,'fh'),np:+gv(x.document,'np')||0}});SUPS.full=1;supSave(C)}
@@ -2761,7 +2763,7 @@ async function supSync(){if(!isA())return;if(SUPS.b){SUPS.again=1;return}SUPS.b=
    if(c&&c.np>np)await supDel(id,np,c.np,1)}
   const fields={};for(const k in w.f)fields[k]=sv(w.f[k]);Object.assign(fields,{np:sv(np),h:sv(w.h),fh:sv(w.fh)});
   await fsx('/supinv/'+id,{method:'PATCH',body:JSON.stringify({fields})});C[id]={h:w.h,fh:w.fh,np};supSave(C)}
- }finally{SUPS.b=0;if(SUPS.again){SUPS.again=0;supSched()}}}
+ }catch(e){if(e.code===403)SUPS.off=Date.now()+6e5;throw e}finally{SUPS.b=0;if(SUPS.again){SUPS.again=0;supSched()}}}
 /* מחיקה: חלקי התמונה מ-from עד to, ואז המסמך עצמו (אלא אם partsOnly) */
 async function supDel(id,from,to,partsOnly){for(let k=from;k<to;k++)await fsx('/supinv/'+id+'/p/'+k,{method:'DELETE'});
  if(!partsOnly)await fsx('/supinv/'+id,{method:'DELETE'})}
@@ -2777,7 +2779,7 @@ async function supLoad(){if(SUPW.b)return;SUPW.b=1;SUPW.err='';rerender();try{co
  /* מה שהעובד עצמו שלח והמנהל עוד לא קיבל: מהרשימה שלו (inbox, רק שלו) */
  const srcs=new Set(L.map(x=>x.src).filter(Boolean));let mine=[];try{mine=await runQ('owner',SY.uid)}catch(e){}
  for(const d of mine){const id=idOf(d);if(gv(d,'status')!=='new'||srcs.has(id))continue;let x={};try{x=JSON.parse(gv(d,'data'))}catch(e){}if(!SUPC[x.cat])continue;
-  const dd=supDate(x.date),at=gv(d,'created').slice(0,10);if((dd||at).slice(0,7)!==M)continue;
+  const dd=supDate(x.date),at=ilDay(gv(d,'created'));if((dd||at).slice(0,7)!==M)continue;
   L.push({id,own:1,c:SUPC[x.cat],n:x.subName||'',d:dd,at,a:num(x.amt),inv:x.inv||(x.dn?'תעודת משלוח':''),by:gv(d,'by'),pend:true,np:+gv(d,'parts')||0})}
  L.sort((a,b)=>((b.d||b.at)||'').localeCompare((a.d||a.at)||'')||(b.at||'').localeCompare(a.at||''));SUPW.L=L}
  catch(e){SUPW.err=e.offline?e.message:(e.code===403?'אין הרשאה לצפות בחשבוניות (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message)}

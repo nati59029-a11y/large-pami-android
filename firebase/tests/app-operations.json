@@ -717,7 +717,7 @@
   },
   {
    "id": "M51",
-   "line": 2753,
+   "line": 2755,
    "snippet": "collectionId:'supinv'}],select",
    "fn": "supSync",
    "collection": "supinv",
@@ -731,7 +731,7 @@
   },
   {
    "id": "M52",
-   "line": 2760,
+   "line": 2762,
    "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'PATCH'",
    "fn": "supSync",
    "collection": "supinv_p",
@@ -745,7 +745,7 @@
   },
   {
    "id": "M53",
-   "line": 2763,
+   "line": 2765,
    "snippet": "await fsx('/supinv/'+id,{method:'PATCH'",
    "fn": "supSync",
    "collection": "supinv",
@@ -759,7 +759,7 @@
   },
   {
    "id": "M54",
-   "line": 2766,
+   "line": 2768,
    "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'DELETE'})",
    "fn": "supDel",
    "collection": "supinv_p",
@@ -773,7 +773,7 @@
   },
   {
    "id": "M55",
-   "line": 2767,
+   "line": 2769,
    "snippet": "await fsx('/supinv/'+id,{method:'DELETE'})",
    "fn": "supDel",
    "collection": "supinv",
@@ -787,7 +787,7 @@
   },
   {
    "id": "M56",
-   "line": 2775,
+   "line": 2777,
    "snippet": "collectionId:'supinv'}],where",
    "fn": "supLoad",
    "collection": "supinv",
@@ -801,7 +801,7 @@
   },
   {
    "id": "M57",
-   "line": 2786,
+   "line": 2788,
    "snippet": "fsx('/chunks/'+x.id+'_'+k)",
    "fn": "supImg",
    "collection": "chunks",
@@ -815,7 +815,7 @@
   },
   {
    "id": "M58",
-   "line": 2786,
+   "line": 2788,
    "snippet": "fsx('/supinv/'+x.id+'/p/'+k)",
    "fn": "supImg",
    "collection": "supinv_p",
