@@ -337,8 +337,10 @@ async function sendPromo(request, key, base) {
       await testFault(db, 'after-upload');
       // הצינתוק הקודם שייך לנוסח הקודם
       await promoRef.update({ status: 'live', text: v.text, spoken, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp() });
-      // הגנה כפולה: מוחקים רק קובץ ממוספר 001-999 בשלוחת המבצעים (כמו runExpiry)
-      const staleOk = stale && /^ivr2:[0-9]+\/(\d{3})\.[A-Za-z0-9]+$/.test(stale) && Number(/(\d{3})\.[A-Za-z0-9]+$/.exec(stale)[1]) >= 1 && stale.startsWith(`ivr2:${cfg.ext}/`);
+      // הגנה כפולה: מוחקים רק קובץ ממוספר 001-999 בשלוחת המבצעים (כמו runExpiry).
+      // התבנית נבנית מ-YEMOT_EXT, כך שגם שלוחה מקוננת (למשל '2/1') נתמכת, כמו ב-runExpiry. שלוחה אחרת – לא נמחק.
+      const staleM = stale ? staleRe(cfg.ext).exec(stale) : null;
+      const staleOk = !!staleM && Number(staleM[1]) >= 1;
       if (staleOk && stale !== path) {
         try { await deleteFiles(ctx, [stale]); } catch (e) { logger.warn('yemot: old file left', { reason: 'stale-file', code: e instanceof YemotError ? e.code : 'internal', requestId: v.requestId }); }
       }
@@ -391,6 +393,9 @@ exports.sendPromoToLine = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 
     throw new HttpsError('internal', 'שגיאה בשליחה לקו.', { reason: 'internal' });
   }
 });
+
+// קובץ ממוספר בשלוחת המבצעים: ivr2:<ext>/NNN.<סיומת>. ext יכולה להיות מקוננת ('2/1'). תווים אחרים מוסרים (כמו ב-runExpiry).
+function staleRe(ext) { return new RegExp(`^ivr2:${String(ext).replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.[A-Za-z0-9]+$`); }
 
 // ---------------- הורדת מבצעים שפג תוקפם ----------------
 // מוחקת רק path שרשום ב-yemot_promos, בפורמט ivr2:<שלוחה>/NNN.<סיומת> עם NNN בין 001 ל-999, שתוקפו (until) לפני היום.
@@ -461,4 +466,4 @@ Object.defineProperty(exports, 'runExpiry', { enumerable: false, value: runExpir
 Object.defineProperty(exports, '_test', { enumerable: false, value: { israelDay, addDays, cleanText, validDay } });
 // משותף ל-yemot-line.js, ולבדיקות שקוראות לליבה בתוך התהליך (לא נספרים כפונקציות)
 Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, addDays, validDay, loadLexicon, testFault, LOCK_MS } });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo, nightly } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo, nightly, staleRe } });

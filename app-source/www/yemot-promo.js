@@ -125,5 +125,6 @@ if(typeof FRM!=='undefined'&&FRM.shpromo){const f0=FRM.shpromo;FRM.shpromo=funct
  YB=v==='ym'||(v==='ymtz'&&ymIsAdmin())?{withTz:v==='ymtz',at:Date.now()}:null;
  const r=f0.apply(this,arguments);const d=document.getElementById('dlg');if(!(d&&d.open))YB=null; // אם לא נפתח חלון אישור-החלפה, אין מה להשאיר
  return r}}
+window.ymText=ymText; // נוסח המבצע האוטומטי – משותף גם למשבצת "שלוחות הקו" (yemot-line.js)
 window.ymBtn=(k,i)=>k==='price'?'':`<button class="btn s g" style="flex:0 0 100%" data-a="ymSend" data-k="${esc(k)}" data-i="${+i}">שלח לקו</button>`;
 })();

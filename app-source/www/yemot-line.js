@@ -4,7 +4,7 @@
    ההרשאות נאכפות בשרת ובכללי המסד. כאן רק נוחות: מה מוצג למי.
    בכל מקום שנשלח טקסט: חלון אישור עם "שמע קודם" (yemot-preview.js). מנעול ריצה: לחיצה כפולה = בקשה אחת.
    טיוטות הטקסט נשמרות בזיכרון ובמכשיר עד שליחה מוצלחת, ורענון אוטומטי לא בונה מחדש מסך שיש בו טקסט.
-   משתמש רק ב: V, ACT, INP, CHG, go, cur, render, ask, dlg, closeDlg, toast, esc, ico, isA, tok, fsx, FNB, SY, SH, shTouch, shN, shImg, shAIcall, ypButton, ypLexicon. */
+   משתמש רק ב: V, ACT, INP, CHG, go, cur, render, ask, dlg, closeDlg, toast, esc, ico, isA, tok, fsx, FNB, SY, SH, shTouch, shN, shImg, shAIcall, ypButton, ypLexicon, ymText (מ-yemot-promo.js). */
 (function(){
 'use strict';
 if(typeof V==='undefined'||typeof ACT==='undefined')return;
@@ -145,15 +145,7 @@ ACT.ylPromo=el=>{const k=el.dataset.k,i=+el.dataset.i,it=SH&&SH[k]&&SH[k].items&
  const today=isoDay(new Date());let until=it.vf||'';if(until&&until<today)until='';
  cOpen({kind:'promo',slot:'promos',heading:'שליחת מבצע לקו',note:'המבצע יעלה לשלוחת המבצעים (2). תקנו את הנוסח אם צריך, שמעו ואשרו.'+(isA()?'':' השליחה היא בלי צינתוק.'),promo:{k,i,key:it.ym,name:String(it.n||'').slice(0,80)},it,
   text:promoText(it,until),max:lim().promo,untilReq:true,until,maxDays:lim().promoMaxDays,untilLabel:'מתי להוריד את המבצע מהקו?',retext:true,tzChoice:isA()})};
-function promoText(it,until){ // נוסח אוטומטי, אותו אלגוריתם כמו yemot-promo.js (כפילות מכוונת, כי הקובץ ההוא לא נוגעים בו בשלב הזה; לאחד בשלב 6)
- const p=["מבצע בלארג'"];p.push(String(it.n||'').trim());if(it.d)p.push(String(it.d).trim());
- let o='';
- if(it.kind==='A')o=`${it.k} ב-${shN(it.tot)} שקלים`;
- else if(it.kind==='B')o=`רק ${shN(it.now)} שקלים`+(it.reg?` במקום ${shN(it.reg)}`:'');
- else if(it.p)o=`${shN(it.p)} שקלים`;
- let t=p.filter(Boolean).join('. ')+(o?'. '+o:'')+'.';
- if(until)t+=` המבצע בתוקף עד ${heDate(until)}.`;
- return t}
+function promoText(it,until){return window.ymText(it,until)} // נוסח אוטומטי: אותה פונקציה בדיוק כמו בחלון "שלח לקו" (yemot-promo.js), כדי שלא יהיו שני נוסחים
 // שלוחה 3 – עדכונים
 function vUpdates(){const rec=Y.mode3==='rec',L=lim();
  const chips=[['type','הקלדה'],['rec','הקלטה']].map(([v,t])=>`<button type="button" class="chip ${Y.mode3===v?'on':''}" role="radio" aria-checked="${Y.mode3===v}" data-a="ylMode" data-v="${v}">${t}</button>`).join('');
@@ -215,7 +207,7 @@ function vHours(){const d=getD(),tmp=!!d.ht;
 ACT.ylTemp=el=>{getD().ht=el.dataset.v==='1';save();redraw()};
 ACT.ylReload=()=>{Y.files=null;const el=document.getElementById('ylList');if(el)el.innerHTML='<p class="note">טוען…</p>';ylLoad('4',true)};
 function filesHtml(){const F=Y.files;if(!F)return'<p class="note">טוען…</p>';if(!F.length)return'<p class="note">אין קבצי תוכן בשלוחה.</p>';
- return F.map((x,i)=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b dir="ltr" style="text-align:right">${esc(x.name)}</b><small>${x.legacy?'קובץ ותיק (לא הועלה מהאפליקציה)':esc((x.item&&x.item.title)||'')}${x.item&&x.item.temporary?' · זמנית עד '+esc(heDate(x.item.until)):''}${i===0?' · מושמע ראשון':''}</small></div><button class="btn s r" data-a="ylRmF" data-n="${esc(x.name)}" data-l="${x.legacy?1:0}">מחק</button></div>`).join('')}
+ return F.map((x,i)=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b dir="ltr" style="text-align:right">${esc(x.name)}</b><small>${x.legacy?'קובץ ותיק (לא הועלה מהאפליקציה)':esc((x.item&&x.item.title)||'')}${x.item&&x.item.temporary?' · זמנית עד '+esc(heDate(x.item.until)):''}${i===0?' · מושמע ראשון':''}</small></div>${x.deletable===false?'<small class="note">לא ניתן למחוק מהאפליקציה</small>':`<button class="btn s r" data-a="ylRmF" data-n="${esc(x.name)}" data-l="${x.legacy?1:0}">מחק</button>`}</div>`).join('')}
 function paintFiles(){const el=document.getElementById('ylList');if(el)el.innerHTML=filesHtml()}
 ACT.ylRmF=el=>{const n=el.dataset.n,leg=el.dataset.l==='1';
  ask(leg?`למחוק את ${n}? זה הקובץ הוותיק של השלוחה, והוא לא יושמע יותר. אי אפשר לשחזר.`:`למחוק את ${n} מהשלוחה? ההודעה לא תושמע יותר, ואי אפשר לשחזר.`,

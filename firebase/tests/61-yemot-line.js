@@ -500,6 +500,62 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.deepEqual(['ivr2:4/000.tts', 'ivr2:1/000.tts', 'ivr2:3/000.wav', 'ivr2:4/', 'ivr2:4', 'ivr2:4/00.tts'].map(safePath), [true, false, false, false, false, false]);
   });
 
+  // ---------------- שלב 6: הערות לא מכשילות מבדיקת שרת סבב 2 ----------------
+  it('שלב 6 – מחיקה בשלוחה 4: רשימה סגורה של סיומות קול (tts/wav); סיומת אחרת נדחית בלי פנייה לימות, והרשימה מסמנת אותה "לא למחיקה"', async () => {
+    for (const [f, c] of [['001.ini', 'x'], ['002.mp3', 'x'], ['003.wav', 'x'], ['004.ymgr', 'x']]) dir('4').set(f, c);
+    M.state.requests = [];
+    for (const file of ['001.ini', '002.mp3', '004.ymgr']) {
+      const r = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file });
+      assert.equal(r.error && r.error.details.reason, 'bad-file', file); assert.match(r.error.message, HEB);
+    }
+    assert.equal(M.state.requests.length, 0);
+    const l = await call('listLineFiles', 'u_mgr', { ext: '4' });
+    assert.equal(l.status, 'OK', l.text);
+    assert.deepEqual(l.result.files.map((x) => [x.name, x.deletable]), [['004.ymgr', false], ['003.wav', true], ['002.mp3', false], ['001.ini', false], ['000.tts', true]]);
+    const w = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file: '003.wav' });
+    assert.equal(w.status, 'OK', w.text);
+    assert.deepEqual(M.calls('FileAction').map((q) => q.body.what), ['ivr2:4/003.wav']);
+    for (const f of ['001.ini', '002.mp3', '004.ymgr', '000.tts']) assert.ok(dir('4').has(f), f);
+    const voice = require('../functions/lib/voice');
+    assert.deepEqual(['000.tts', '001.WAV', '001.wav', '001.mp3', '001.ini', 'M1000.tts', '01.tts', '001.tts\n', 5].map(voice.isDeletableContent), [true, true, true, false, false, false, false, false, false]);
+  });
+
+  it('שלב 6 – לילה בשלוחה 4: הודעה זמנית שפג תוקפה לא נמחקת אם רשומה אחרת (בתוקף) מחזיקה את אותו נתיב (path-reused, כמו במבצעים)', async () => {
+    const today = israelDay();
+    const t = await call('publishLineItem', 'u_mgr', item('hours', { text: 'זמני ישן', until: today }));
+    assert.equal(t.status, 'OK', t.text);
+    await writeDoc(env, 'yemot_items/reuse_hours_1', { slot: 'hours', status: 'live', temporary: false, path: t.result.path, file: t.result.file, title: 'קבוע חדש' });
+    M.state.requests = [];
+    const out = await require('../functions/yemot-line.js').runLineExpiry({ now: new Date(Date.now() + 2 * 86400000), key: SECRET, base: BASE, timeoutMs: 5000 });
+    assert.equal(out.removed, 0, JSON.stringify(out)); assert.equal(out.skipped, 1, JSON.stringify(out));
+    assert.equal(M.calls('FileAction').length, 0);
+    assert.ok(dir('4').has(t.result.file));
+    const rec = await readDoc(env, 'yemot_items/' + t.result.id);
+    assert.equal(rec.status, 'removed'); assert.equal(rec.error, 'path-reused');
+    assert.equal((await readDoc(env, 'yemot_items/reuse_hours_1')).status, 'live');
+  });
+
+  it('שלב 6 – מבצעים: מחיקת הקובץ הישן אחרי החלפת מנוע קול עובדת גם בשלוחה מקוננת (YEMOT_EXT=2/1), ולא נוגעת בשלוחה אחרת', async () => {
+    const { staleRe } = require(PROMO)._core;
+    assert.deepEqual(['ivr2:2/1/005.tts', 'ivr2:2/005.tts', 'ivr2:2/1/5/005.tts', 'ivr2:3/1/005.tts', 'ivr2:2/1/ext.ini'].map((p) => staleRe('2/1').test(p)), [true, false, false, false, false]);
+    assert.deepEqual(['ivr2:2/005.tts', 'ivr2:2/1/005.tts', 'ivr2:3/005.tts'].map((p) => staleRe('2').test(p)), [true, false, false]);
+    M.state.dirs['2/1'] = new Map([['000.tts', 'פתיח מקונן']]);
+    const key = 'pk_nested_' + rid();
+    const a = await core(PROMO, 'sendPromo', 'u_mgr', promo({ promoKey: key, text: 'מבצע מקונן א' }), { YEMOT_EXT: '2/1' });
+    assert.equal(a.status, 'OK', a.text); assert.equal(a.result.file, '001.tts');
+    assert.ok(dir('2/1').has('001.tts'));
+    const voice = require('../functions/lib/voice');
+    voice._test.setTextExt('xyz');
+    try {
+      M.state.requests = [];
+      const b = await core(PROMO, 'sendPromo', 'u_mgr', promo({ promoKey: key, text: 'מבצע מקונן ב' }), { YEMOT_EXT: '2/1' });
+      assert.equal(b.status, 'OK', b.text); assert.match(b.result.file, /\.xyz$/);
+      assert.deepEqual(M.calls('FileAction').map((q) => q.body.what), ['ivr2:2/1/001.tts']);
+    } finally { voice._test.setTextExt('tts'); }
+    assert.ok(!dir('2/1').has('001.tts')); assert.equal(dir('2/1').get('000.tts'), 'פתיח מקונן');
+    assert.equal(M.state.files.size, 1, 'שלוחה 2 עצמה לא נגעה');
+  });
+
   it('שלוחה 4: הודעה זמנית – תאריך חובה תקין (היום עד 60 יום), רק בשלוחה 4', async () => {
     const today = israelDay();
     for (const [until, reason] of [[addDays(today, -1), 'date-past'], [addDays(today, 61), 'date-too-far'], ['2026-02-30', 'bad-date'], ['1.12.2026', 'bad-date'], [5, 'bad-date']]) {

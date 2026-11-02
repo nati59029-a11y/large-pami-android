@@ -340,7 +340,8 @@ async function removeItem(request, key, base) {
 // גם הקובץ הוותיק 000. פריט של השרת באותו נתיב מסומן removed. ניסיון חוזר אחרי הצלחה: "כבר לא בקו".
 const FILE_RE = /^\d{3}\.[A-Za-z0-9]{1,5}$/;
 async function removeFile(who, input, key, base) {
-  if (input.ext !== '4' || typeof input.file !== 'string' || !FILE_RE.test(input.file)) throw bad('bad-file', 'אפשר למחוק מהאפליקציה רק קובצי תוכן בשלוחה 4.');
+  // FILE_RE – צורת השם; voice.isDeletableContent – רשימה סגורה של סיומות קול (tts/wav). שם אחר (למשל 001.ini) נדחה בלי פנייה לימות.
+  if (input.ext !== '4' || typeof input.file !== 'string' || !FILE_RE.test(input.file) || !voice.isDeletableContent(input.file)) throw bad('bad-file', 'אפשר למחוק מהאפליקציה רק קובצי תוכן בשלוחה 4.');
   const path = `ivr2:4/${input.file}`;
   if (!safePath(path)) throw bad('bad-file', 'אפשר למחוק מהאפליקציה רק קובצי תוכן בשלוחה 4.');
   const ctx = context(key, base);
@@ -389,7 +390,7 @@ async function listFiles(request, key, base) {
   for (const d of (await db.collection(ITEMS).where('slot', '==', 'hours').get()).docs) if (ON_LINE.includes(d.get('status'))) items.set(d.get('file'), d);
   const files = names.filter((n) => FILE_RE.test(n)).sort().reverse().map((name) => {
     const d = items.get(name);
-    return { name, legacy: !d, item: d ? { id: d.id, title: d.get('title') || '', until: d.get('until') || null, temporary: !!d.get('temporary'), createdAt: d.get('createdAt') || null } : null };
+    return { name, legacy: !d, deletable: voice.isDeletableContent(name), item: d ? { id: d.id, title: d.get('title') || '', until: d.get('until') || null, temporary: !!d.get('temporary'), createdAt: d.get('createdAt') || null } : null };
   });
   return { ok: true, ext: '4', files };
 }
@@ -407,8 +408,11 @@ async function runLineExpiry(opts) {
   const ctx = { key, base: apiBase(o.base !== undefined ? o.base : YEMOT_API_BASE.value()), timeoutMs: o.timeoutMs || YEMOT_TIMEOUT_MS.value() };
   const nowMs = Date.now();
   const holds = (x) => ON_LINE.includes(x.status) || (x.status === 'failed' && x.uncertain) || (x.status === 'uploading' && !isLocked(x, nowMs));
-  const due = (await db.collection(ITEMS).where('slot', '==', 'hours').get()).docs
-    .filter((d) => { const x = d.data(); return x.temporary === true && typeof x.until === 'string' && x.until < today && holds(x) && !isLocked(x, nowMs); });
+  const all = (await db.collection(ITEMS).where('slot', '==', 'hours').get()).docs;
+  const isDue = (x) => x.temporary === true && typeof x.until === 'string' && x.until < today && holds(x) && !isLocked(x, nowMs);
+  const due = all.filter((d) => isDue(d.data()));
+  // נתיב שרשומה אחרת (שלא יורדת עכשיו) מחזיקה – לא מוחקים, כדי לא למחוק הודעה חדשה שקיבלה את אותו מספר (כמו runExpiry במבצעים)
+  const keep = new Set(all.filter((d) => { const x = d.data(); return x.path && !isDue(x) && (holds(x) || isLocked(x, nowMs)); }).map((d) => d.get('path')));
   out.checked = due.length;
   if (!due.length) return out;
   let names;
@@ -418,6 +422,7 @@ async function runLineExpiry(opts) {
     const now = new Date().toISOString();
     const m = /^ivr2:4\/(\d{3})\.[A-Za-z0-9]+$/.exec(String(x.path || ''));
     if (!m || Number(m[1]) < 1) { out.skipped++; continue; } // רק קובץ ממוספר שהשרת העלה, אף פעם לא 000
+    if (keep.has(x.path)) { await d.ref.update({ status: x.status === 'failed' || x.status === 'uploading' ? 'failed' : 'removed', removedAt: now, updatedAt: now, uncertain: false, error: 'path-reused' }); out.skipped++; continue; }
     if (!names.includes(x.path.split('/').pop())) {
       await d.ref.update({ status: x.status === 'failed' || x.status === 'uploading' ? 'failed' : 'removed', removedAt: now, updatedAt: now, uncertain: false, error: 'expired-missing' });
       out.missing++; continue;

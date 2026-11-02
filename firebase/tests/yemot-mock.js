@@ -15,8 +15,9 @@ function reset(files, dirs) {
   state.dirs = { '2': state.files };
   for (const [d, f] of Object.entries(Object.assign({}, DEFAULT_DIRS, dirs || {}))) state.dirs[d] = new Map(Object.entries(f));
 }
-// 'ivr2:1/004.tts' → { dir:'1', name:'004.tts' }; 'ivr2:/M1000.tts' → { dir:'', name:'M1000.tts' }
-function parseWhat(w) { const m = /^ivr2:(\d*)\/([^/]+)$/.exec(String(w || '')); return m && state.dirs[m[1]] ? { dir: m[1], name: m[2] } : null; }
+// 'ivr2:1/004.tts' → { dir:'1', name:'004.tts' }; 'ivr2:/M1000.tts' → { dir:'', name:'M1000.tts' };
+// שלוחה מקוננת: 'ivr2:2/1/004.tts' → { dir:'2/1' } (רק אם התיקייה קיימת ב-state.dirs)
+function parseWhat(w) { const m = /^ivr2:((?:\d+(?:\/\d+)*)?)\/([^/]+)$/.exec(String(w || '')); return m && state.dirs[m[1]] ? { dir: m[1], name: m[2] } : null; }
 reset();
 // mode: 'ok' | 'error' (ERROR + הודעה שמכילה את המפתח שהתקבל – כדי לבדוק שהוא לא דולף) | 'exception' | 'http500' | 'hang'
 function setMode(cmd, mode) { state.modes[cmd] = mode; }
