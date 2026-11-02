@@ -468,6 +468,24 @@ const REPLAY = {
   M100: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl', { method: 'DELETE' })] },
   M101: { run: async (uid) => [await fsx(uid, '/zlast/' + 'i_nl', { method: 'PATCH', body: JSON.stringify({ fields: { d: sv('2026-10-19'), tm: sv(''), id: sv('z0'), uid: sv(uid), t: iv(Date.now()) } }) })] },
   M95: { run: async (uid) => [await fsx(uid, '/deposits/' + 'dp1' + '/p/' + 0, { method: 'DELETE' })] },
+  // ---- שלב 3: סיכום סגירות קופה (zsLoad, ACT.zsImg) ----
+  M102: { run: async (uid) => {
+    const f = (op, v) => ({ fieldFilter: { field: { fieldPath: 'd' }, op, value: sv(v) } });
+    const fields = ['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'tm', 'no', 'data', 'stBy', 'stAt', 'note'].map((x) => ({ fieldPath: x }));
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'closings' }], select: { fields }, where: { compositeFilter: { op: 'AND', filters: [f('GREATER_THAN_OR_EQUAL', '2026-10-01'), f('LESS_THAN_OR_EQUAL', '2026-10-31')] } }, limit: 1000 } }) });
+    if (r.status === 200) assert.deepEqual(r.json.filter((x) => x.document).map((x) => x.document.name.split('/').pop()), ['z1']);
+    return [r];
+  } },
+  M103: { run: async (uid) => {
+    const fields = ['uid', 'by', 't', 'reg', 'd', 'tm', 'a', 'why', 'dep', 'src', 'zc', 'dp'].map((x) => ({ fieldPath: x }));
+    return [await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'cashout' }], select: { fields }, where: { fieldFilter: { field: { fieldPath: 'zc' }, op: 'IN', value: { arrayValue: { values: ['z1', 'z2'].map(sv) } } } }, limit: 1000 } }) })];
+  } },
+  M104: { run: async (uid) => {
+    const r = await fsx(uid, ':batchGet', { method: 'POST', body: JSON.stringify({ documents: [docName('deposits/dp1')], mask: { fieldPaths: ['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data', 'stBy', 'stAt', 'note'] } }) });
+    if (r.status === 200) assert.ok(r.json.some((x) => x.found && x.found.name.endsWith('/deposits/dp1')));
+    return [r];
+  } },
+  M105: { run: async (uid) => [await fsx(uid, '/closings/' + 'z1' + '/p/' + 0), await fsx(uid, '/deposits/' + 'dp1' + '/p/' + 0)] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,

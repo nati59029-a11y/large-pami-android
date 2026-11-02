@@ -756,7 +756,7 @@ CHG.lgf=el=>{LG.from=el.value;rerender()};CHG.lgt=el=>{LG.to=el.value;rerender()
 /* ---- עוד ---- */
 V.more=()=>{const pend=S.tx.filter(t=>t.cat==='p_inc'||t.cat==='p_exp').length,fx=fixPending(NOWM()).length;
  const o=(a,v,t,sm,n)=>`<button class="opt" data-a="${a}" data-v="${v||''}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`;
- return{t:'עוד',s:'כלים',h:(ordOn()?o('ordGo','','הזמנות אתר','מוצרים, ייבוא, תמונות והגדרות האתר – גרסת בדיקה'):'')+o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+o('go','tk','משימות','משימות לעובדים, אישור תמונות ואיחורים',typeof tkOverN==='function'?(tkOverN()||''):'')+o('go','ar','🛠️ בקשות לעדכון האפליקציה','תיקונים ושיפורים שהצוות ביקש',typeof arCnt==='function'?(arCnt()||''):'')+o('go','zc','💵 סגירת קופה','דוח Z ופתיחת קופה, הכנסה להכנסות וסגירות לאישור',zcCnt()||'')+o('go','dp','🏦 העלאת אישור הפקדה','הוצאות מקופה להפקדה, ואישורי הפקדה לאישור',dqN()||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח וחשבוניות בלי מספר',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
+ return{t:'עוד',s:'כלים',h:(ordOn()?o('ordGo','','הזמנות אתר','מוצרים, ייבוא, תמונות והגדרות האתר – גרסת בדיקה'):'')+o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+o('go','tk','משימות','משימות לעובדים, אישור תמונות ואיחורים',typeof tkOverN==='function'?(tkOverN()||''):'')+o('go','ar','🛠️ בקשות לעדכון האפליקציה','תיקונים ושיפורים שהצוות ביקש',typeof arCnt==='function'?(arCnt()||''):'')+o('go','zc','💵 סגירת קופה','דוח Z ופתיחת קופה, הכנסה להכנסות וסגירות לאישור',zcCnt()||'')+o('go','zs','📊 סיכום סגירות קופה','כל הסגירות, הוצאות מקופה, הפקדות וההפרשים שאישרת')+o('go','dp','🏦 העלאת אישור הפקדה','הוצאות מקופה להפקדה, ואישורי הפקדה לאישור',dqN()||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח וחשבוניות בלי מספר',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
 
 ACT.repAll=()=>{RS=scopeOf('all:exp');go('rep')};
 
@@ -3006,9 +3006,10 @@ async function zcPull(){if(!ZQ||!isA()||zcPull.b)return 0;zcPull.b=1;ZQ.at=Date.
  await coAssignPending();try{await coSync()}catch(e){}try{await coLoad(1)}catch(e){}
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'closings'}],where:{fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:'new'}}},limit:300}})});
  const L=[];ZQP=(r||[]).filter(x=>x.document&&idOk(idOf(x.document))).map(x=>zcParse(x.document,idOf(x.document))).filter(Boolean).map(it=>({id:it.id,reg:it.reg,d:it.f.d,tm:zcTime(it.f.tm)}));
- for(const x of(r||[]).filter(x=>x.document).sort((a,b)=>gi(a.document,'t')-gi(b.document,'t'))){const d=x.document;const id=idOf(d);if(!idOk(id))continue;const it=zcParse(d,id);if(!it)continue;
+ /* לפי סדר התאריכים, כדי שסגירה מוקדמת תיבדק לפני המאוחרת ממנה */
+ for(const x of(r||[]).filter(x=>x.document).sort((a,b)=>zcDk(a.document).localeCompare(zcDk(b.document))||gi(a.document,'t')-gi(b.document,'t'))){const d=x.document;const id=idOf(d);if(!idOk(id))continue;const it=zcParse(d,id);if(!it)continue;
   if(S.zc.some(z=>z.id===id)||S.tx.some(t=>t.src==='zc:'+id)){try{await zcMark(id,'ok','')}catch(e){}continue}
-  const ap=it.c.lvl===1?'w':'';it.co=coChk(it.reg,it.f.d,it.f.tm,it.f.cout,{id,inc:it.inc});if(!it.co.ok)it.need.push(...coMsgs(it.co));
+  const ap=it.c.lvl===1?'w':'';it.co=coChk(it.reg,it.f.d,it.f.tm,it.f.cout,{id,inc:it.inc});if(!it.co.ok)it.need.push(...coMsgs(it.co));if(zcPendBefore(it))it.need.push(ZPB);
   if(!it.need.length&&!(await zcHasPics(id,it.np)))it.need.push('הצילומים של הסגירה לא עלו במלואם');
   if(!it.need.length&&zcIns(it,ap)){n++;await coAssign(id);try{await zcMark(id,'ok','')}catch(e){}continue}
   L.push(it)}
@@ -3019,6 +3020,15 @@ async function zcPull(){if(!ZQ||!isA()||zcPull.b)return 0;zcPull.b=1;ZQ.at=Date.
 async function zcHasPics(id,np){if(!(np>=1))return false;try{for(let k=0;k<np;k++)await fsx('/closings/'+id+'/p/'+k+'?mask.fieldPaths=x');return true}catch(e){return false}}
 async function zcMark(id,st,note){const o={st,stBy:fbBy(),stAt:Date.now(),note:note||''},fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
  await fsx('/closings/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
+/* תיקון אחרי בדיקת שלב 2 (סבב 2): סגירה ממתינה קובעת את תחילת החלון של הבאה (zcPrev), ולכן:
+ (א) סגירה לא נכנסת אוטומטית כשיש סגירה ממתינה מוקדמת יותר של אותה קופה (שעוד לא נרשמה); (ב) בדחייה – בדיקה מחדש של המאוחרות (zcPull) ואזהרה על הוצאות שלא נבדקו (coLost) */
+const ZPB='יש סגירה קודמת של הקופה שממתינה לאישור',zcDk=d=>zlKey({d:gv(d,'d'),tm:zcTime(gv(d,'tm'))});
+function zcPendBefore(it){const k=zlKey({d:it.f.d,tm:zcTime(it.f.tm)}),Z=(S&&S.zc)||[];return(ZQP||[]).some(p=>p&&p.d&&p.reg===it.reg&&p.id!==it.id&&zlKey(p)<k&&!Z.some(z=>z.id===p.id))}
+/* הוצאות מקופה שלא נבדקו בשום סגירה: לא שויכו (וגם לא ממתינות לשיוך), מוקדמות מסגירה שכבר נרשמה של אותה קופה (S.zc), ולא בחלון של סגירה ממתינה */
+function coLost(L){const Z=((S&&S.zc)||[]).filter(z=>z&&z.d&&zcRegOk(z.reg)),H=coHeld(),Z2=new Set(Z.map(z=>z.id)),P=(ZQP||[]).filter(p=>p&&!Z2.has(p.id));
+ return(L||[]).filter(x=>{if(x.zc||H.has(x.id)||!x.d)return false;const tm=zcTime(x.tm);
+  if(!Z.some(z=>z.reg===x.reg&&(x.d<z.d||(x.d===z.d&&!(tm&&z.tm&&tm>z.tm)))))return false;
+  return !P.some(p=>p.reg===x.reg&&coIn(x,zcPrev(p.reg,p.d,p.tm,p.id),p.d,p.tm)!=='out')})}
 /* ---- תצוגה ---- */
 function zcSumH(c){const lv=c.lvl==null?['חסר סכום','t4']:[['תקין','t3'],['הפרש עד 10%','t1'],['הפרש מעל 10%','t4']][c.lvl];
  return `<div style="margin:8px 0">${c.rows.map(r=>`<div class="row" style="justify-content:space-between;gap:8px"><span>${esc(r.sub)}</span><b class="${r.amt<0?'neg':''}" dir="ltr">${ils(r.amt)}</b></div>`).join('')}
@@ -3031,7 +3041,7 @@ function zcQH(){if(!isA())return '';const L=ZQ.L;
  ${it.need.map(m=>`<div class="note" style="color:var(--bad);font-weight:700">⚠ ${esc(m)}</div>`).join('')}${it.co?coListH(it.co):''}
  ${it.why?`<p class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">הסבר העובד: ${esc(it.why)}</p>`:''}${it.dw?`<p class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">הסבר לתאריך השונה: ${esc(it.dw)}</p>`:''}${it.cw?`<p class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">הוצאה מקופה – אין פתק: ${esc(it.cw)}</p>`:''}
  <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">${it.np?`<button class="btn g" data-a="zcImg" data-id="${esc(it.id)}">🖼 תמונות</button>`:''}<button class="btn grow" data-a="zcOk" data-id="${esc(it.id)}">אשר והכנס</button><button class="btn g grow" data-a="zcNo" data-id="${esc(it.id)}">דחה עם הערה</button></div></div>`;
- return `<div class="sec"><h3>סגירות לאישור (${L.length})</h3><button class="btn s g" data-a="zcRefresh" ${zcPull.b?'disabled':''}>רענן</button></div>${ZQ.err?`<p class="note" style="color:var(--bad)">${esc(ZQ.err)}</p>`:''}${L.length?L.map(card).join(''):'<p class="note">אין סגירות שמחכות לאישור.</p>'}`}
+ return `<button class="btn g w" style="margin:4px 0 8px" data-a="go" data-v="zs">📊 סיכום סגירות קופה</button><div class="sec"><h3>סגירות לאישור (${L.length})</h3><button class="btn s g" data-a="zcRefresh" ${zcPull.b?'disabled':''}>רענן</button></div>${ZQ.err?`<p class="note" style="color:var(--bad)">${esc(ZQ.err)}</p>`:''}${L.length?L.map(card).join(''):'<p class="note">אין סגירות שמחכות לאישור.</p>'}`}
 function zcShot(src,alt,k){return src&&imgOk(src)?`<img src="${src}" alt="${esc(alt)}" style="width:64px;height:86px;object-fit:cover;border:1px solid var(--line);border-radius:6px;flex:none">`:`<span style="width:64px;height:86px;border:1px dashed var(--line);border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center" aria-hidden="true">📷</span>`}
 function zcSlot(k,src,t,hint){return `<div class="row" style="gap:10px;align-items:center;margin:8px 0">${zcShot(src,t)}<div style="flex:1;min-width:0"><b>${esc(t)}</b>${src?' <span class="tag t3">✓</span>':''}<br><small class="note" style="margin:0">${esc(hint)}</small>
  <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><label class="btn ${src?'g':''} s" style="cursor:pointer">📷 ${src?'צלם שוב':'צלם'}<input type="file" accept="image/*" capture="environment" data-c="zcPick" data-k="${k}" hidden></label><label class="btn g s" style="cursor:pointer">🖼 גלריה<input type="file" accept="image/*" data-c="zcPick" data-k="${k}" hidden></label></div></div></div>`}
@@ -3117,7 +3127,7 @@ ACT.zcOk=async el=>{const it=((ZQ&&ZQ.L)||[]).find(z=>z.id===el.dataset.id);if(!
  if(!cat(it.reg))return toast('הקטגוריה של הקופה לא קיימת');if(!it.f.d||!it.c.rows.length)return toast('חסרים תאריך או סכומים – אי אפשר להכניס');
  const old=it.co?coMsg(it.co):'';try{await coLoad()}catch(e){}
  /* חישוב מחדש עכשיו: ההוצאות מקופה ששויכו או נוספו מאז הטעינה. ההודעה שהמנהל מאשר – המעודכנת */
- it.co=coChk(it.reg,it.f.d,it.f.tm,it.f.cout,{id:it.id,inc:it.inc});const pics=it.need.filter(m=>/הצילומים/.test(m));it.need=zcNeed(it).concat(it.co.ok?[]:coMsgs(it.co),pics);const now=it.co.ok?'':coMsg(it.co),chg=now!==old;if(cur().v==='zc')zcRe();
+ it.co=coChk(it.reg,it.f.d,it.f.tm,it.f.cout,{id:it.id,inc:it.inc});const pics=it.need.filter(m=>/הצילומים/.test(m));it.need=zcNeed(it).concat(it.co.ok?[]:coMsgs(it.co),pics,zcPendBefore(it)?[ZPB]:[]);const now=it.co.ok?'':coMsg(it.co),chg=now!==old;if(cur().v==='zc')zcRe();
  ask((chg?'ההשוואה של ההוצאות מקופה השתנתה מאז הטעינה'+(now?': '+now:' – עכשיו תואם ('+ils(it.co.s)+')')+'. ':'')+'לאשר ולהכניס להכנסות '+ils(it.c.inc)+' ('+ZREG[it.reg].n+', '+dfmt(it.f.d)+')?'+(it.need.length?' שים לב: '+it.need.join('; '):'')+(it.co.known?' ההוצאות מקופה שישויכו: '+it.co.L.length+' ('+ils(it.co.s)+').':''),async()=>{
   if(!zcIns(it,'m'))return toast('ההכנסה נכשלה');ZQ.L=ZQ.L.filter(z=>z.id!==it.id);rerender();await coAssign(it.id);
   try{await zcMark(it.id,'ok','');toast('✓ הסגירה נרשמה בהכנסות')}catch(e){toast('נרשם בהכנסות. עדכון הסטטוס בענן נכשל – יעודכן בבדיקה הבאה')}},'אשר והכנס')};
@@ -3126,7 +3136,12 @@ ACT.zcNo=el=>{const it=((ZQ&&ZQ.L)||[]).find(z=>z.id===el.dataset.id);if(!it)ret
  <div class="row"><button class="btn r grow">דחה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.zcNo=async f=>{const id=f.dataset.id,note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');const b=f.querySelector('button');if(b)b.disabled=true;
  const rj=((ZQ&&ZQ.L)||[]).find(z=>z.id===id);try{await zcMark(id,'rej',note)}catch(e){if(b)b.disabled=false;return toast(tkErr(e))}
- ZQ.L=(ZQ.L||[]).filter(z=>z.id!==id);ZQP=(ZQP||[]).filter(z=>z.id!==id);if(rj)zlRewind(rj.reg,id).catch(()=>{});closeDlg();toast('הסגירה נדחתה');rerender()};
+ ZQ.L=(ZQ.L||[]).filter(z=>z.id!==id);ZQP=(ZQP||[]).filter(z=>z.id!==id);if(rj)zlRewind(rj.reg,id).catch(()=>{});closeDlg();toast('הסגירה נדחתה');rerender();
+ /* הסגירות המאוחרות של הקופה נבדקות מחדש (החלון שלהן מתחיל עכשיו מהסגירה שלפני הנדחית). הוצאות מהחלון של הנדחית שאף סגירה לא תבדוק – אזהרה */
+ if(!rj)return;try{await coLoad()}catch(e){}ZQ.at=0;try{await zcPull()}catch(e){}zcRe();if(!COQ.L)return;
+ const tm=zcTime(rj.f.tm),pv=zcPrev(rj.reg,rj.f.d,tm,id),lost=coLost(COQ.L).filter(x=>x.reg===rj.reg&&coIn(x,pv,rj.f.d,tm)!=='out');if(lost.length)zcLostDlg(lost)};
+function zcLostDlg(L){dlg(`<h3>⚠ הוצאות מקופה שלא נבדקו</h3><p class="note">אחרי הדחייה, ${L.length===1?'ההוצאה הזו לא נבדקת':'ההוצאות האלה לא נבדקות'} בשום סגירה, כי סגירה מאוחרת יותר של הקופה כבר נרשמה. ${L.length===1?'היא מסומנת':'הן מסומנות'} ב"סיכום סגירות קופה".</p>${coListH({known:1,L})}<div class="row" style="margin-top:10px"><button class="btn grow" data-a="zcLostGo">לסיכום הסגירות</button><button type="button" class="btn g grow" data-a="closeDlg">סגור</button></div>`)}
+ACT.zcLostGo=()=>{closeDlg();go('zs')};
 /* ===== סגירת קופה – שלב 2 (בקשת בעל העסק 2.11.2026): הוצאות מקופה (cashout) והפקדות (deposits) =====
  cashout/{id}: מראה בענן לכל הוצאה מקופה, כדי שכל הצוות יראה אותן בבדיקת הסגירה ובתזכורת ההפקדות.
   uid, by, t, reg (i_yh | i_nl), d (תאריך ההוצאה), a (סכום, מספר חיובי), why (סיבה – חובה), dep ('1' = בסיבה מילה מהשורש פ-ק-ד, צריך אישור הפקדה; הכללים בודקים התאמה),
@@ -3406,6 +3421,108 @@ ACT.dqDel=el=>{const it=((DQ&&DQ.L)||[]).find(z=>z.id===el.dataset.id);if(!it)re
  try{await fsx(':commit',{method:'POST',body:JSON.stringify({writes:[{delete:docName('deposits/'+it.id)}].concat(dqReset(it))})})}catch(e){return toast(tkErr(e))}
  for(let k=0;k<it.np;k++){try{await fsx('/deposits/'+it.id+'/p/'+k,{method:'DELETE'})}catch(e){}}
  DQ.L=DQ.L.filter(z=>z.id!==it.id);DPQ.at=0;toast('האישור נמחק');dpLoad().then(dpRe).catch(()=>{});rerender()},'מחק')};
+/* ===== סגירת קופה – שלב 3 (בקשת בעל העסק 2.11.2026): סיכום סגירות קופה למנהל =====
+ מנהל בלבד. נטען רק בכניסה למסך, ורק לחודש שנבחר (לפי תאריך הדוח), עם select של השדות:
+  closings בחודש; cashout ששויכו לסגירות שנרשמו (zc IN, עד 30 בשאילתה); deposits של ההוצאות האלה (batchGet עם mask).
+  סגירות של המנהל שהשמירה שלהן בענן נכשלה – מ-S.zc ("נשמר רק במכשיר"). צילום פתק של הוצאה מקופה – מהמכשיר (S.inbox / S.tx), אם יש.
+ התמונות של הסגירה ושל ההפקדה נטענות רק בלחיצה. סגירה שהמנהל רשם בעצמו: st 'ok' בלי stAt.
+ הפקדה "אושרה אוטומטית" = אושרה, בלי סיבת עובד, הסכום תואם להוצאות והזיהוי מהצילום תואם (כמו ב-dqPull). הסכום שזוהה (ai) נשלח מהטלפון של העובד – לכן הצילומים מוצגים תמיד. */
+var ZS={m:'',reg:'',D:{},b:0,open:''};
+const ZSF=['uid','by','t','st','np','reg','d','tm','no','data','stBy','stAt','note'],ZSC=['uid','by','t','reg','d','tm','a','why','dep','src','zc','dp'],ZSD=['uid','by','t','d','items','a','st','why','np','data','stBy','stAt','note'];
+const zsFp=L=>({fields:L.map(f=>({fieldPath:f}))}),zsAt=ms=>ms>0?dfmt(ymd(new Date(ms)))+' '+p2(new Date(ms).getHours())+':'+p2(new Date(ms).getMinutes()):'';
+const zsNum=v=>typeof v==='number'&&isFinite(v)&&Math.abs(v)<=1e7?rnd(Math.abs(v)):null;
+function zsParse(d){const id=idOf(d),it=zcParse(d,id);if(!it)return null;let j={};try{j=JSON.parse(gv(d,'data'))}catch(e){}const co=j&&j.co&&typeof j.co==='object'?j.co:null,st=gv(d,'st');
+ it.st=st==='ok'||st==='rej'?st:'new';it.stBy=s_(gv(d,'stBy')).slice(0,100);it.stAt=gi(d,'stAt');it.note=s_(gv(d,'note')).slice(0,300);it.tm=zcTime(gv(d,'tm'))||zcTime(it.f.tm);
+ it.cz=co&&zsNum(co.z)!=null?zsNum(co.z):rnd(Math.abs(zcN(it.f.cout)||0));it.cs=co?zsNum(co.s):null;it.self=it.st==='ok'&&!it.stAt;return it}
+function zsDep(d){const it=dpParse(d);if(!it)return null;const st=gv(d,'st');it.st=st==='ok'||st==='rej'?st:'new';it.stBy=s_(gv(d,'stBy')).slice(0,100);it.stAt=gi(d,'stAt');it.note=s_(gv(d,'note')).slice(0,300);return it}
+/* טעינת חודש: הסגירות, ההוצאות ששויכו להן וההפקדות שלהן */
+function zsLoad(m){if(!isA())return Promise.resolve();if(ZS.b)return ZS.b;ZS.b=(async()=>{const D={L:null,C:[],P:{},err:'',at:Date.now()};try{
+ const f=(op,v)=>({fieldFilter:{field:{fieldPath:'d'},op,value:sv(v)}});
+ const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'closings'}],select:zsFp(ZSF),where:{compositeFilter:{op:'AND',filters:[f('GREATER_THAN_OR_EQUAL',m+'-01'),f('LESS_THAN_OR_EQUAL',m+'-31')]}},limit:1000}})});
+ const L=(r||[]).filter(x=>x.document&&idOk(idOf(x.document))).map(x=>zsParse(x.document)).filter(Boolean),ids=L.filter(z=>z.st==='ok').map(z=>z.id);
+ for(let i=0;i<ids.length;i+=30){const q=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cashout'}],select:zsFp(ZSC),where:{fieldFilter:{field:{fieldPath:'zc'},op:'IN',value:{arrayValue:{values:ids.slice(i,i+30).map(sv)}}}},limit:1000}})});
+  (q||[]).filter(x=>x.document).forEach(x=>{const c=coParse(x.document);if(c&&ids.includes(c.zc))D.C.push(c)})}
+ const dids=[...new Set(D.C.map(c=>c.dp).filter(idOk))];
+ for(let i=0;i<dids.length;i+=100){const q=await fsx(':batchGet',{method:'POST',body:JSON.stringify({documents:dids.slice(i,i+100).map(id=>docName('deposits/'+id)),mask:{fieldPaths:ZSD}})});
+  (q||[]).forEach(x=>{const p=x&&x.found?zsDep(x.found):null;if(p&&dids.includes(p.id))D.P[p.id]=p})}
+ /* סגירות של המנהל שנשמרו רק במכשיר */
+ ((S&&S.zc)||[]).forEach(x=>{if(!x||!x.d||x.d.slice(0,7)!==m||L.some(z=>z.id===x.id)||!zcRegOk(x.reg))return;const T=S.tx.filter(t=>(x.tx||[]).includes(t.id)),cs=x.cash||{};
+  L.push({id:x.id,reg:x.reg,by:x.by||'',t:x.at||0,np:0,f:Object.assign(zcEmpty(),{d:x.d,no:x.no||''}),c:{tot:null,inc:rnd(sum(T,t=>num(t.amt))),c:cs.c,o:cs.o,a:cs.a,p:cs.p,lvl:null,sumOk:true,dateWarn:false},st:'ok',tm:x.tm||'',cz:x.co?zsNum(x.co.z):null,cs:x.co?zsNum(x.co.s):null,self:1,local:1,why:'',dw:'',cw:'',stBy:'',stAt:0,note:''})});
+ D.L=L.sort((a,b)=>b.f.d.localeCompare(a.f.d)||(b.tm||'').localeCompare(a.tm||'')||b.t-a.t)}
+ catch(e){D.err=e.offline?e.message:(e.code===403?'אין הרשאה לסגירות הקופה (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message)}
+ finally{ZS.D[m]=D;ZS.b=0}})();return ZS.b}
+/* חישובים לסגירה אחת */
+function zsDepAuto(p,C){const L=C.filter(c=>c.dp===p.id);return p.st==='ok'&&!p.why&&L.length===p.items.length&&Math.abs(p.a-rnd(sum(L,c=>c.a)))<0.01&&!dpAiChk(p.rows,p.a,L).length}
+function zsOf(z,D){const C=D.C.filter(c=>c.zc===z.id),P=[...new Set(C.map(c=>c.dp).filter(Boolean))].map(id=>D.P[id]||{id,miss:1}),c=z.c;
+ const coS=C.length?rnd(sum(C,x=>x.a)):(z.cs!=null?z.cs:0),coD=z.cz!=null?rnd(Math.abs(z.cz-coS)):null,coBad=!!z.cw||(coD!=null&&coD>=0.01&&!z.local);
+ const dep=rnd(sum(C.filter(x=>x.dp),x=>x.a)),wait=C.filter(x=>x.dep==='1'&&!x.dp),loc=((S&&S.zc)||[]).find(x=>x.id===z.id);
+ const man=z.st==='ok',mg=z.self?{by:z.by,at:z.t}:{by:z.stBy,at:z.stAt},A=[];
+ if(c.lvl===1&&z.ack)A.push({k:'מזומן',t:'הפרש '+ils(c.a)+' ('+c.p+'%)',by:z.by,at:z.t,w:!z.self});
+ if(man){if(c.lvl===2)A.push(Object.assign({k:'מזומן',t:'הפרש '+ils(c.a)+' ('+c.p+'%) – מעל 10%'},mg));
+  if(!c.sumOk)A.push(Object.assign({k:'סכום שורות',t:'סכום השורות לא שווה ל"סה״כ תקבולים" ('+ils(c.tot)+')'},mg));
+  if(coBad)A.push(Object.assign({k:'הוצאה מקופה',t:'בדוח '+ils(z.cz)+' מול פתקים '+ils(coS)+(coD!=null?' (הפרש '+ils(coD)+')':'')},mg));
+  if(c.dateWarn)A.push(Object.assign({k:'תאריך',t:'פתיחה '+dfmt(z.f.oD)+' מול סגירה '+dfmt(z.f.d)},mg));
+  if(!A.some(a=>!a.w)&&loc&&loc.ap==='m')A.push(Object.assign({k:'סגירה',t:'אושרה ידנית'},mg))}
+ P.forEach(p=>{if(p.miss||p.st!=='ok'||zsDepAuto(p,D.C))return;const L=C.filter(x=>x.dp===p.id);A.push({k:'הפקדה',t:ils(p.a)+' מול הוצאות '+ils(sum(L,x=>x.a))+(p.why?' – '+p.why:''),by:p.stBy,at:p.stAt})});
+ return{C,P,coS,coD,coBad,dep,wait,A,mgr:man&&A.some(a=>!a.w),tot:c.tot!=null?c.tot:c.inc}}
+const zsTag=(t,cl)=>`<span class="tag ${cl}" style="white-space:normal;margin:2px 4px 2px 0">${esc(t)}</span>`;
+function zsRowH(z,D){const c=z.c,o=zsOf(z,D),open=ZS.open===z.id,stT=z.st==='ok'?['נרשם','t3']:z.st==='rej'?['נדחה','t4']:['ממתין','t1'];
+ const tags=[];if(z.local)tags.push(zsTag('נשמר רק במכשיר – לא בענן','t4'));if(c.lvl===1&&z.ack&&!z.self)tags.push(zsTag('אושר על ידי העובד','t3'));if(z.self)tags.push(zsTag('סגירה של המנהל','t2'));else if(o.mgr)tags.push(zsTag('אושר על ידי המנהל','t2'));
+ if(c.dateWarn)tags.push(zsTag(z.dw?'תאריך פתיחה שונה – הוסבר':'תאריך פתיחה שונה','t1'));if(!c.sumOk)tags.push(zsTag('סכום שורות לא תואם','t4'));if(z.cw)tags.push(zsTag('חסרים פתקים – הוסבר','t1'));if(o.wait.length)tags.push(zsTag(o.wait.length+' ממתינות להפקדה','t4'));
+ const ln=(l,v)=>`<span style="display:block;font-size:.9rem;margin-top:3px">${l}${v}</span>`;
+ return `<div class="card" style="padding:10px 12px${z.st==='rej'?';opacity:.75':''}"><button type="button" data-a="zsOpen" data-id="${esc(z.id)}" aria-expanded="${open}" style="all:unset;display:block;width:100%;cursor:pointer;box-sizing:border-box">
+ <span class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><b>${esc(dfmt(z.f.d))}${z.tm?' '+esc(z.tm):''} · ${esc(ZREG[z.reg].n)}</b><span class="tag ${stT[1]}">${stT[0]}</span></span>
+ <small class="note" style="display:block;margin:2px 0 0">${esc(z.by||'—')} · דוח ${esc(z.f.no||'—')}</small>
+ ${ln('תקבולים: ',`<b dir="ltr">${ils(o.tot)}</b>`)}
+ ${ln('מזומן בסגירה ',`<b dir="ltr">${c.c==null?'—':ils(c.c)}</b> מול פתיחה <b dir="ltr">${c.o==null?'—':ils(c.o)}</b>${c.a!=null?` · הפרש <b dir="ltr">${ils(c.a)}</b> (${c.p}%)`:''}`)}
+ ${ln('הוצאה מקופה: בדוח ',`<b dir="ltr">${z.cz==null?'—':ils(z.cz)}</b> מול פתקים <b dir="ltr">${ils(o.coS)}</b>${o.coD!=null?` · הפרש <b dir="ltr" class="${o.coD>=0.01?'neg':''}">${ils(o.coD)}</b>`:''}`)}
+ ${tags.length?`<span style="display:flex;flex-wrap:wrap;margin-top:6px">${tags.join('')}</span>`:''}${o.mgr&&!z.self&&(z.note||z.why||z.cw||z.dw)?`<small class="note" style="display:block;margin:4px 0 0;overflow-wrap:anywhere">${esc([z.note?'הערתך: '+z.note.slice(0,80):'',[z.why,z.cw,z.dw].some(Boolean)?('הסבר העובד: '+[z.why,z.cw,z.dw].filter(Boolean).join(' / ')).slice(0,120):''].filter(Boolean).join(' · '))}</small>`:''}<small class="note" style="display:block;margin:4px 0 0;color:var(--acc)">${open?'▲ סגור פירוט':'▼ פירוט ותמונות'}</small></button>${open?zsDetH(z,D,o):''}</div>`}
+function zsDetH(z,D,o){const sub=t=>`<h4 style="margin:12px 0 4px">${t}</h4>`,nt=(l,v)=>v?`<p class="note" style="white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0">${l}${esc(v)}</p>`:'';
+ const coPic=x=>zsCoFile(x)?`<button class="btn g s" data-a="zsCoPic" data-id="${esc(x.id)}">🖼 פתק</button>`:'';
+ const coRow=x=>`<div style="border-top:1px solid var(--line);padding:6px 0"><div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><span style="min-width:0;overflow-wrap:anywhere">${esc(x.why)}<br><small class="note" style="margin:0">${esc(x.by||'—')} · ${esc(dfmt(x.d))}${x.tm?' '+esc(x.tm):''}</small></span><b dir="ltr" style="flex:none">${ils(x.a)}</b></div>
+  <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">${x.dep==='1'?(x.dp?zsTag('הופקד','t3'):zsTag('ממתין להפקדה','t4')):''}${coPic(x)}</div></div>`;
+ const depH=p=>{if(p.miss)return `<div class="card" style="margin:6px 0;padding:8px"><p class="note" style="margin:0">הפקדה ${esc(p.id)} – לא נמצאה</p></div>`;
+  const L=o.C.filter(x=>x.dp===p.id),s=rnd(sum(L,x=>x.a)),ai=p.rows.length&&p.rows.every(r=>r.ai)?rnd(sum(p.rows,r=>r.ai.a)):null,df=rnd(p.a-s),auto=zsDepAuto(p,D.C),stT=p.st==='ok'?['אושר','t3']:p.st==='rej'?['נדחה','t4']:['ממתין לאישור','t1'];
+  return `<div class="card" style="margin:6px 0;padding:8px 10px"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><b>${esc(dfmt(p.d)||'—')} · ${esc(p.by||'—')}</b><span class="tag ${stT[1]}">${stT[0]}</span></div>
+  <p class="note" style="margin:4px 0">הוקלד: <b dir="ltr">${ils(p.a)}</b> · זוהה בצילום: <b dir="ltr">${ai==null?'—':ils(ai)}</b>${L.length<p.items.length?` · מכסה גם ${p.items.length-L.length} הוצאות מסגירות אחרות`:` · הוצאות: <b dir="ltr">${ils(s)}</b>${Math.abs(df)>=0.01?` · הפרש <b dir="ltr" class="neg">${ils(df)}</b>`:''}`}</p>
+  ${auto?zsTag('אושר אוטומטית – כדאי לבדוק את הצילום','t1'):''}${nt('הסבר העובד: ',p.why)}${nt('הערת המנהל: ',p.note)}${p.st!=='new'&&p.stBy&&!auto?`<p class="note" style="margin:2px 0">${p.st==='ok'?'אושר':'נדחה'} על ידי ${esc(p.stBy)}${p.stAt?' · '+esc(zsAt(p.stAt)):''}</p>`:''}
+  ${p.np?`<button class="btn g s" style="margin-top:4px" data-a="zsImg" data-k="d" data-id="${esc(p.id)}">🖼 צילומי ההפקדה</button>`:'<p class="note" style="margin:2px 0;color:var(--bad)">אין צילומים</p>'}</div>`};
+ return `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px">
+ ${z.np?`<button class="btn g w" data-a="zsImg" data-k="z" data-id="${esc(z.id)}">🖼 צילומי הסגירה (3 חלקי Z ודף הפתיחה)</button>`:`<p class="note">${z.local?'הצילומים לא נשמרו בענן.':'אין צילומים.'}</p>`}
+ ${nt('הסבר העובד להפרש: ',z.why)}${nt('הסבר לתאריך השונה: ',z.dw)}${nt('הוצאה מקופה – אין פתק: ',z.cw)}${z.st!=='new'&&!z.self&&z.stBy?`<p class="note" style="margin:4px 0">${z.st==='ok'?'נרשם':'נדחה'} על ידי ${esc(z.stBy)}${z.stAt?' · '+esc(zsAt(z.stAt)):''}</p>`:''}${nt('הערת המנהל: ',z.note)}
+ ${z.st==='new'?'<p class="note" style="color:var(--warn)">הסגירה ממתינה לאישור. ההוצאות מקופה ישויכו אליה כשתאשר אותה.</p><button class="btn g s" data-a="go" data-v="zc">לסגירות לאישור</button>':''}
+ ${z.st==='ok'?sub('הוצאות מקופה ששויכו ('+o.C.length+')')+(o.C.length?o.C.map(coRow).join(''):'<p class="note" style="margin:0">לא שויכו הוצאות מקופה.</p>'):''}
+ ${o.P.length?sub('הפקדות ('+o.P.length+')')+o.P.map(depH).join(''):''}
+ ${sub('הפרשים שאישרת')}${o.A.filter(a=>!a.w).length?o.A.filter(a=>!a.w).map(a=>`<div class="note" style="margin:3px 0;overflow-wrap:anywhere">✓ <b>${esc(a.k)}:</b> ${esc(a.t)}<br><small>${esc(a.by||'—')}${a.at?' · '+esc(zsAt(a.at)):''}</small></div>`).join(''):'<p class="note" style="margin:0">אין.</p>'}
+ ${o.A.some(a=>a.w)?`<p class="note" style="margin:6px 0 0">${o.A.filter(a=>a.w).map(a=>'אושר על ידי העובד ('+esc(a.by||'—')+'): '+esc(a.k)+' – '+esc(a.t)).join('<br>')}</p>`:''}</div>`}
+/* צילום הפתק של הוצאה מקופה – רק מהמכשיר של המנהל (ההוצאה שהתקבלה או שלו) */
+function zsCoFile(x){let fid='';if(x.id[0]==='m'){const t=S.tx.find(t=>'m'+t.id===x.id);fid=t&&t.file}else{const i=(S.inbox||[]).find(i=>i.id===x.src);if(i)fid=i.file;else{const t=S.tx.find(t=>t.src===x.src&&t.t==='exp');fid=t&&t.file}}return fid||''}
+function zsSumH(L,D){let tot=0,co=0,dep=0,wait=0,ap=0;L.filter(z=>z.st!=='rej').forEach(z=>{const o=zsOf(z,D);tot+=o.tot||0;co+=o.coS;dep+=o.dep;wait+=sum(o.wait,x=>x.a);ap+=o.A.length});
+ const k=(l,v,cl)=>`<div class="k" style="border:1px solid var(--line);border-radius:12px;background:var(--card);padding:8px 10px"><small>${l}</small><b class="${cl||''}" dir="ltr" style="display:block">${v}</b></div>`;
+ return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 12px">${k('סך תקבולים',ils(tot))}${k('סך הוצאה מקופה',ils(co))}${k('סך הפקדות',ils(dep))}${k('לא הופקדו עדיין',ils(wait),wait>0?'neg':'')}${k('הפרשים שאושרו',String(ap))}${k('סגירות',String(L.length))}</div>`}
+V.zs=()=>{const T='סיכום סגירות קופה';if(!isA())return{t:T,s:'',h:'<div class="card"><p class="note">המסך הזה למנהל בלבד.</p></div>'};
+ if(!ZS.m)ZS.m=NOWM();const m=ZS.m,D=ZS.D[m];if(!D&&!ZS.b)zsLoad(m).then(zsRe).catch(zsRe);
+ const L=D&&D.L?D.L.filter(z=>!ZS.reg||z.reg===ZS.reg):null;
+ /* הוצאות שלא נבדקו בשום סגירה – מכל החודשים (צריך את ההוצאות שלא שויכו ואת הסגירות הממתינות) */
+ if(!COQ.L&&!COQ.b&&!COQ.err)coLoad().then(zsRe).catch(zsRe);if(!ZQ.L&&!zcPull.b&&!ZQ.err)zcPull().then(zsRe).catch(()=>{});
+ const LO=COQ.L&&ZQ.L?coLost(COQ.L).filter(x=>!ZS.reg||x.reg===ZS.reg).sort((a,b)=>b.d.localeCompare(a.d)):[];
+ const loH=LO.length?`<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">⚠ הוצאות שלא נבדקו בשום סגירה (${LO.length}, ${ils(sum(LO,x=>x.a))})</b><p class="note" style="margin:4px 0">לא שויכו לסגירה, ומוקדמות מסגירה שכבר נרשמה (למשל אחרי דחיית סגירה, פתק "לא ברור" שלא צורף, או הוצאה שלא נספרה).</p>${LO.map(x=>`<div style="border-top:1px solid var(--line);padding:6px 0"><div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><span style="min-width:0;overflow-wrap:anywhere">${esc(ZREG[x.reg].n)} · ${esc(x.why)}<br><small class="note" style="margin:0">${esc(x.by||'—')} · ${esc(dfmt(x.d))}${x.tm?' '+esc(x.tm):''}</small></span><b dir="ltr" style="flex:none">${ils(x.a)}</b></div><div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">${zsTag('לא נבדקה','t4')}${zsCoFile(x)?`<button class="btn g s" data-a="zsCoPic" data-id="${esc(x.id)}">🖼 פתק</button>`:''}</div></div>`).join('')}</div>`:'';
+ const h=`<div class="row" style="justify-content:space-between;align-items:center;gap:6px;margin:4px 0 8px"><button class="ib" data-a="zsM" data-d="-1" aria-label="חודש קודם">${ico('chev')}</button><b style="font-size:1.05rem">${esc(mfmt(m))}</b><button class="ib" style="transform:scaleX(-1)" data-a="zsM" data-d="1" aria-label="חודש הבא" ${m>=NOWM()?'disabled':''}>${ico('chev')}</button></div>
+ <div class="row" style="gap:8px;align-items:flex-end"><label class="f grow" style="margin:0"><span>קופה</span><select data-c="zsReg"><option value="">שתי הקופות</option>${Object.keys(ZREG).map(k=>`<option value="${k}" ${k===ZS.reg?'selected':''}>${esc(ZREG[k].n)}</option>`).join('')}</select></label><button class="btn g s" data-a="zsRefresh" ${ZS.b?'disabled':''}>רענן</button></div>
+ ${D&&D.err?`<p class="note" style="color:var(--bad)">${esc(D.err)}</p>`:''}${!L?(D&&D.err?'':'<p class="note" style="padding:8px">טוען סגירות…</p>'):zsSumH(L,D)+loH+(L.length?L.map(z=>zsRowH(z,D)).join(''):'<p class="note">אין סגירות בחודש הזה.</p>')}`;
+ return{t:T,s:'מנהל',h}};
+function zsRe(){if(cur().v==='zs'&&!document.querySelector('#dlg[open] form'))rerender()}
+ACT.zsM=el=>{const m=addMon(ZS.m||NOWM(),+el.dataset.d);if(m>NOWM())return;ZS.m=m;ZS.open='';rerender()};
+CHG.zsReg=el=>{ZS.reg=zcRegOk(el.value)?el.value:'';rerender()};
+ACT.zsRefresh=()=>{if(ZS.b)return;delete ZS.D[ZS.m];rerender()};
+ACT.zsOpen=el=>{ZS.open=ZS.open===el.dataset.id?'':el.dataset.id;rerender()};
+ACT.zsCoPic=el=>{const D=ZS.D[ZS.m],id=el.dataset.id,x=(D&&D.C.find(c=>c.id===id))||(COQ.L||[]).find(c=>c.id===id),fid=x&&zsCoFile(x);if(!fid)return toast('הצילום לא נמצא במכשיר');viewImg(fid,'LargePami_cashout_'+x.id)};
+/* צילומי הסגירה (closings) או ההפקדה (deposits) – רק בלחיצה */
+ACT.zsImg=async el=>{const D=ZS.D[ZS.m];if(!D||!D.L)return;const dk=el.dataset.k==='d',id=el.dataset.id,x=dk?D.P[id]:D.L.find(z=>z.id===id);if(!x||!x.np||!idOk(id))return;
+ const coll=dk?'deposits':'closings';toast('טוען תמונות…');let du='';
+ try{for(let k=0;k<x.np;k++)du+=gv(await fsx('/'+coll+'/'+id+'/p/'+k),'data')}catch(e){return toast(e.offline?e.message:(e.code===404?'הצילומים לא עלו במלואם':'טעינת התמונות נכשלה'))}
+ let P=null;try{P=du.startsWith('PAGES:')?JSON.parse(du.slice(6)):null}catch(e){}if(!Array.isArray(P)||!P.length)return toast('הצילומים לא עלו במלואם');if(!P.every(imgOk))return toast('התמונה לא תקינה ולא תוצג');
+ viewImg('','LargePami_'+(dk?'deposit_':'closing_')+id,du)};
 try{coSched()}catch(e){}
 </script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script>
 </body></html>
