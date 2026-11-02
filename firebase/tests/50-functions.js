@@ -232,8 +232,8 @@ describe('פונקציות שרת (שלב 3)', () => {
 
     it('תקציב הזמן בשרת: 100 שניות לחשבונית ולמוצר, 135 למשוב – תמיד פחות ממה שהטלפון מחכה (120 / 150)', () => {
       const scan = require('../functions/lib/scan');
-      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000 });
-      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000 });
+      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, recipe: 135000 });
+      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, recipe: 150000 });
       for (const k of Object.keys(scan.KINDS)) assert.ok(scan.KINDS[k].budgetMs < scan.PHONE_WAIT_MS[k], k);
       // מחוץ לאמולטור אין קיצור זמנים, גם אם מישהו הגדיר SCAN_TIME_SCALE
       const prevE = process.env.FUNCTIONS_EMULATOR, prevS = process.env.SCAN_TIME_SCALE;
@@ -363,7 +363,7 @@ describe('פונקציות שרת (שלב 3)', () => {
     it('מבנה התשובה: text זהה למה ש-shAIcall מחזירה היום, ו-data זהה ל-JSON.parse שהאפליקציה עושה', async () => {
       for (const [split, fenced] of [[false, false], [true, false], [false, true]]) {
         M.reset(); M.state.split = split; M.state.fenced = fenced;
-        for (const kind of ['invoice', 'product', 'feedback']) {
+        for (const kind of ['invoice', 'product', 'feedback', 'recipe']) {
           const r = await call('scanDocument', 'u_emp', { kind, files: [jpgFile()] });
           assert.equal(r.status, 'OK');
           const raw = M.rawAnswer(kind);
@@ -507,7 +507,7 @@ describe('פונקציות שרת (שלב 3)', () => {
 
   // ---------------- 6. כיסוי ----------------
   it('כיסוי: 4 הפונקציות קיימות בשמות המדויקים, וכל אחת נבדקה מול 5 התפקידים עם התוצאה הצפויה', () => {
-    const exported = Object.keys(require('../functions/index.js')).filter((n) => !['sendPromoToLine', 'expirePromosOnLine'].includes(n)).sort(); // פונקציות ימות נבדקות ב-60-yemot.js
+    const exported = Object.keys(require('../functions/index.js')).filter((n) => !['sendPromoToLine', 'expirePromosOnLine', 'publishLineItem', 'removeLineItem', 'getLineState', 'tzintukJoin'].includes(n)).sort(); // פונקציות ימות נבדקות ב-60-yemot.js וב-61-yemot-line.js
     assert.deepEqual(exported, [...FN].sort());
     const missing = [];
     for (const fn of FN) for (const role of H.ROLES) if (!RESULTS.find((r) => r.fn === fn && r.role === role && r.status === ROLE_EXPECT[role])) missing.push(`${fn}/${role}`);

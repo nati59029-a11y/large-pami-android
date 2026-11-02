@@ -198,6 +198,30 @@ service cloud.firestore {
       }
     }
 
+    // ---------- ימות: תוכן שלוחות הקו (חוזה 5.3, משימה 2026-11-02) ----------
+    // רק השרת (Admin SDK) כותב וקורא את yemot_items ואת yemot_line_backups. כתוב במפורש, גם אם הכלל האחרון סוגר.
+    match /yemot_items/{id} {
+      allow read, write: if false;
+    }
+    match /yemot_line_backups/{id} {
+      allow read, write: if false;
+    }
+    // מונה הצטרפויות לשלוחה 5 (tzintukJoin) – רק השרת
+    match /yemot_hook_usage/{id} {
+      allow read, write: if false;
+    }
+    // מילון ההגייה: מסמך אחד (main). רק מנהל קורא וכותב, בשלושה שדות בלבד. השרת קורא אותו לפני כל העלאה.
+    // updatedAt = זמן במילישניות (כמו במשימות), עד 2 דקות מהשעון של השרת. updatedBy = המשתמש עצמו. אין מחיקה.
+    match /yemot_lexicon/{docId} {
+      allow read: if docId == 'main' && isManager();
+      allow create, update: if docId == 'main' && isManager()
+        && request.resource.data.keys().hasOnly(['text', 'updatedAt', 'updatedBy'])
+        && request.resource.data.text is string && request.resource.data.text.size() <= 8000
+        && request.resource.data.updatedAt is int && math.abs(request.resource.data.updatedAt - request.time.toMillis()) < 120000
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if false;
+    }
+
     // ---------- הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם ----------
     match /{document=**} {
       allow read, write: if false;

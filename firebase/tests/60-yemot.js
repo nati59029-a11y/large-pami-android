@@ -40,6 +40,26 @@ async function call(uid, data) {
   return { status, result: json && json.result, error: json && json.error, text };
 }
 
+// מצב ישן (YEMOT_EMPLOYEE_DAILY=1: עובד מצנתק פעם ביום). ברירת המחדל היום היא 0 (עובד לא מצנתק, 61-yemot-line.js),
+// ולכן הבדיקות של המכסה היומית רצות על הליבה (sendPromo) בתוך תהליך הבדיקה, עם ההגדרה 1. אותו שרת דמה, אותו מסד.
+const LEGACY_ENV = { YEMOT_EXT: '2', YEMOT_TZINTUK_LIST: 'mivtzaim', YEMOT_EMPLOYEE_DAILY: '1', YEMOT_MAX_DAYS: '60', YEMOT_TEXT_MAX: '400', YEMOT_TIMEOUT_MS: '15000', FUNCTIONS_EMULATOR: 'true' };
+let legacyDepth = 0; let legacySaved = null;
+async function callQ(uid, data) {
+  if (legacyDepth++ === 0) { legacySaved = {}; for (const [k, v] of Object.entries(LEGACY_ENV)) { legacySaved[k] = process.env[k]; process.env[k] = v; } }
+  try {
+    const result = await require('../functions/yemot.js')._core.sendPromo({ auth: uid ? { uid } : undefined, data }, SECRET, BASE);
+    const text = JSON.stringify({ result }); SEEN.push(text);
+    return { status: 'OK', result, text };
+  } catch (e) {
+    const http = e && e.httpErrorCode; // HttpsError
+    const error = http ? { status: String(e.code).toUpperCase().replace(/-/g, '_'), message: e.message, details: e.details } : { status: 'INTERNAL', message: 'שגיאה בשליחה לקו.', details: { reason: 'internal' } };
+    const text = JSON.stringify({ error }); SEEN.push(text);
+    return { status: error.status, error, text };
+  } finally {
+    if (--legacyDepth === 0) for (const [k, v] of Object.entries(legacySaved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  }
+}
+
 const israelDay = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d || new Date());
 const addDays = (day, n) => { const [y, m, d] = day.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
 const HEB = /[֐-׿]/;
@@ -102,11 +122,11 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
   }
 
   // ---------------- 2. עובד: פעם ביום עם צינתוק ----------------
-  it('עובד: שליחה ראשונה עם צינתוק מצליחה – העלאה לשלוחה 2 (לא 000.tts) ואחריה צינתוק ל-mivtzaim', async () => {
-    const before0 = await call('u_emp', { statusOnly: true });
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] עובד: שליחה ראשונה עם צינתוק מצליחה – העלאה לשלוחה 2 (לא 000.tts) ואחריה צינתוק ל-mivtzaim', async () => {
+    const before0 = await callQ('u_emp', { statusOnly: true });
     assert.equal(before0.status, 'OK');
     assert.deepEqual(before0.result.tzintukToday, { day: israelDay(), used: 0, limit: 1, allowed: true });
-    const r = await call('u_emp', promo());
+    const r = await callQ('u_emp', promo());
     assert.equal(r.status, 'OK', r.text);
     assert.equal(r.result.ok, true);
     assert.equal(r.result.tzintuk, 'sent');
@@ -125,18 +145,18 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
     assert.equal(rec.status, 'live'); assert.equal(rec.tzintuk, 'sent'); assert.equal(rec.path, 'ivr2:2/001.tts'); assert.equal(rec.byRole, 'employee');
   });
 
-  it('עובד: שליחה שנייה עם צינתוק באותו יום נדחית בעברית, בלי פנייה לימות; בלי צינתוק – עובר בלי הגבלה ובלי RunTzintuk', async () => {
-    assert.equal((await call('u_emp', promo())).status, 'OK');
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] עובד: שליחה שנייה עם צינתוק באותו יום נדחית בעברית, בלי פנייה לימות; בלי צינתוק – עובר בלי הגבלה ובלי RunTzintuk', async () => {
+    assert.equal((await callQ('u_emp', promo())).status, 'OK');
     M.reset();
-    const r2 = await call('u_emp', promo());
+    const r2 = await callQ('u_emp', promo());
     assert.equal(r2.status, 'RESOURCE_EXHAUSTED');
     assert.equal(r2.error.details.reason, 'daily-limit');
     assert.match(r2.error.message, /כבר שלחת היום/);
     assert.equal(M.state.requests.length, 0);
-    const st = await call('u_emp', { statusOnly: true });
+    const st = await callQ('u_emp', { statusOnly: true });
     assert.equal(st.result.tzintukToday.allowed, false);
     for (let i = 0; i < 3; i++) {
-      const r = await call('u_emp', promo({ withTzintuk: false }));
+      const r = await callQ('u_emp', promo({ withTzintuk: false }));
       assert.equal(r.status, 'OK', r.text);
       assert.equal(r.result.tzintuk, 'skipped');
       assert.equal(r.result.withTzintuk, false);
@@ -147,10 +167,10 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
     assert.equal((await readDoc(env, 'yemot_usage/u_emp')).count, 1); // שליחות בלי צינתוק לא נספרות
   });
 
-  it('עובד: למחרת (לפי שעון ישראל) אפשר שוב לשלוח עם צינתוק', async () => {
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] עובד: למחרת (לפי שעון ישראל) אפשר שוב לשלוח עם צינתוק', async () => {
     // המונה של אתמול: day = אתמול, count = 1. השרת משווה ליום של היום בשעון ישראל.
     await writeDoc(env, 'yemot_usage/u_emp', { day: addDays(israelDay(), -1), count: 1, updatedAt: 'x' });
-    const r = await call('u_emp', promo());
+    const r = await callQ('u_emp', promo());
     assert.equal(r.status, 'OK', r.text);
     assert.equal(r.result.tzintuk, 'sent');
     assert.deepEqual(await readDoc(env, 'yemot_usage/u_emp').then((u) => [u.day, u.count]), [israelDay(), 1]);
@@ -181,8 +201,8 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
   });
 
   // ---------------- 4. מקביליות ----------------
-  it('שתי שליחות של אותו עובד בו-זמנית (עם צינתוק) – רק אחת עוברת', async () => {
-    const rs = await Promise.all([call('u_emp', promo()), call('u_emp', promo())]);
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] שתי שליחות של אותו עובד בו-זמנית (עם צינתוק) – רק אחת עוברת', async () => {
+    const rs = await Promise.all([callQ('u_emp', promo()), callQ('u_emp', promo())]);
     const st = rs.map((r) => r.status).sort();
     assert.deepEqual(st, ['OK', 'RESOURCE_EXHAUSTED'], JSON.stringify(rs.map((r) => r.text)));
     assert.equal(M.calls('UploadTextFile').length, 1);
@@ -214,9 +234,9 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
   });
 
   // ---------------- 5. כשלים בימות ----------------
-  it('שגיאה בהעלאה: אין צינתוק, המכסה משתחררת, הודעה בעברית, והסוד לא דולף (שרת הדמה מחזיר אותו בהודעה)', async () => {
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] שגיאה בהעלאה: אין צינתוק, המכסה משתחררת, הודעה בעברית, והסוד לא דולף (שרת הדמה מחזיר אותו בהודעה)', async () => {
     M.setMode('upload', 'error');
-    const r = await call('u_emp', promo());
+    const r = await callQ('u_emp', promo());
     assert.equal(r.status, 'UNAVAILABLE');
     assert.equal(r.error.details.reason, 'yemot-upload-failed');
     assert.match(r.error.message, /נכשלה/);
@@ -224,32 +244,32 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
     assert.ok(!r.text.includes('incorrect'), 'טקסט מימות הועבר לטלפון');
     assert.equal(M.calls('RunTzintuk').length, 0);
     assert.equal((await readDoc(env, 'yemot_usage/u_emp')).count, 0);
-    assert.equal((await call('u_emp', { statusOnly: true })).result.tzintukToday.allowed, true);
+    assert.equal((await callQ('u_emp', { statusOnly: true })).result.tzintukToday.allowed, true);
     for (const mode of ['exception', 'http500']) {
       M.setMode('upload', mode);
-      const x = await call('u_emp', promo());
+      const x = await callQ('u_emp', promo());
       assert.equal(x.status, 'UNAVAILABLE'); assert.ok(!x.text.includes(SECRET));
     }
     M.setMode('upload', 'ok');
-    const ok = await call('u_emp', promo());
+    const ok = await callQ('u_emp', promo());
     assert.equal(ok.status, 'OK', ok.text); // המכסה באמת שוחררה
     const docs = JSON.stringify(await allYemotDocs(env));
     assert.ok(!docs.includes(SECRET));
     assert.ok(docs.includes('"status":"failed"'));
   });
 
-  it('שגיאה ברשימת הקבצים (GetIVR2Dir): אין העלאה ואין צינתוק, המכסה משתחררת', async () => {
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] שגיאה ברשימת הקבצים (GetIVR2Dir): אין העלאה ואין צינתוק, המכסה משתחררת', async () => {
     M.setMode('dir', 'error');
-    const r = await call('u_emp', promo());
+    const r = await callQ('u_emp', promo());
     assert.equal(r.status, 'UNAVAILABLE');
     assert.equal(M.calls('UploadTextFile').length, 0);
     assert.equal(M.calls('RunTzintuk').length, 0);
     assert.equal((await readDoc(env, 'yemot_usage/u_emp')).count, 0);
   });
 
-  it('שגיאה בצינתוק אחרי העלאה מוצלחת: ההודעה נשארת בקו, tzintuk=failed, והמכסה של העובד לא נספרת', async () => {
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] שגיאה בצינתוק אחרי העלאה מוצלחת: ההודעה נשארת בקו, tzintuk=failed, והמכסה של העובד לא נספרת', async () => {
     M.setMode('tzintuk', 'error');
-    const r = await call('u_emp', promo());
+    const r = await callQ('u_emp', promo());
     assert.equal(r.status, 'OK', r.text);
     assert.equal(r.result.tzintuk, 'failed');
     assert.match(r.result.message, /הצינתוק לנרשמים לא נשלח/);
@@ -380,16 +400,16 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
     }
   });
   // ---------------- 11. מבצע אחד = קובץ אחד (promoKey) ----------------
-  it('ניסיון חוזר אחרי צינתוק שנכשל: רק צינתוק, בלי העלאה נוספת; המכסה נספרת רק כשהצינתוק הצליח', async () => {
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] ניסיון חוזר אחרי צינתוק שנכשל: רק צינתוק, בלי העלאה נוספת; המכסה נספרת רק כשהצינתוק הצליח', async () => {
     const key = 'pk_retry_' + rid();
     M.setMode('tzintuk', 'error');
-    const r1 = await call('u_emp', promo({ promoKey: key }));
+    const r1 = await callQ('u_emp', promo({ promoKey: key }));
     assert.equal(r1.status, 'OK', r1.text);
     assert.equal(r1.result.action, 'uploaded'); assert.equal(r1.result.tzintuk, 'failed');
     assert.match(r1.result.message, /לא יועלה פעמיים/);
     assert.equal((await readDoc(env, 'yemot_usage/u_emp')).count, 0);
     M.setMode('tzintuk', 'ok');
-    const r2 = await call('u_emp', promo({ promoKey: key }));
+    const r2 = await callQ('u_emp', promo({ promoKey: key }));
     assert.equal(r2.status, 'OK', r2.text);
     assert.equal(r2.result.action, 'tzintuk-only'); assert.equal(r2.result.tzintuk, 'sent');
     assert.equal(r2.result.file, r1.result.file);
@@ -399,7 +419,7 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
     assert.equal(r2.result.tzintukToday.allowed, false);
     // ניסיון שלישי, אותו נוסח: שום פנייה לימות, גם לא נחסם במכסה
     M.state.requests = [];
-    const r3 = await call('u_emp', promo({ promoKey: key, until: addDays(israelDay(), 5) }));
+    const r3 = await callQ('u_emp', promo({ promoKey: key, until: addDays(israelDay(), 5) }));
     assert.equal(r3.status, 'OK', r3.text);
     assert.equal(r3.result.action, 'none');
     assert.match(r3.result.message, /תאריך ההורדה עודכן/);
@@ -471,20 +491,20 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
     assert.equal(M.state.files.get(r.result.file), 'בדיקה: חדש');
   });
 
-  it('ליקוי 1ב: אותו requestId אחרי צינתוק שנכשל – שולח את הצינתוק, בלי העלאה נוספת', async () => {
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] ליקוי 1ב: אותו requestId אחרי צינתוק שנכשל – שולח את הצינתוק, בלי העלאה נוספת', async () => {
     const p = promo({ promoKey: 'pk_d1b_' + rid() });
     M.setMode('tzintuk', 'error');
-    const r1 = await call('u_emp', p);
+    const r1 = await callQ('u_emp', p);
     assert.equal(r1.result.tzintuk, 'failed');
     M.setMode('tzintuk', 'ok');
-    const r2 = await call('u_emp', p);
+    const r2 = await callQ('u_emp', p);
     assert.equal(r2.status, 'OK', r2.text);
     assert.equal(r2.result.duplicate, false);
     assert.equal(r2.result.tzintuk, 'sent');
     assert.equal(M.calls('UploadTextFile').length, 1);
     assert.equal(M.calls('RunTzintuk').length, 2);
     assert.equal((await readDoc(env, 'yemot_usage/u_emp')).count, 1);
-    const r3 = await call('u_emp', p); // עכשיו באמת הצליח – כפילות אמיתית
+    const r3 = await callQ('u_emp', p); // עכשיו באמת הצליח – כפילות אמיתית
     assert.equal(r3.result.duplicate, true);
     assert.equal(M.calls('RunTzintuk').length, 2);
   });
@@ -533,10 +553,10 @@ describe('ימות: שליחת מבצע לקו (sendPromoToLine) והורדה (r
     assert.deepEqual([...M.state.files.keys()].sort(), ['000.tts', '005.tts']);
   });
 
-  it('ליקוי 3ג: חריגה פנימית אחרי ההעלאה – המכסה מוחזרת, הנעילה משתחררת, והקובץ נשאר בר-הורדה', async () => {
+  it('[מצב ישן, YEMOT_EMPLOYEE_DAILY=1] ליקוי 3ג: חריגה פנימית אחרי ההעלאה – המכסה מוחזרת, הנעילה משתחררת, והקובץ נשאר בר-הורדה', async () => {
     const key = 'pk_d3c_' + rid();
     await writeDoc(env, 'yemot_test/fault', { at: 'after-upload' }); // הזרקת תקלה – פעילה רק באמולטור
-    const r = await call('u_emp', promo({ promoKey: key, until: israelDay() }));
+    const r = await callQ('u_emp', promo({ promoKey: key, until: israelDay() }));
     await env.withSecurityRulesDisabled(async (c) => { await c.firestore().doc('yemot_test/fault').delete(); });
     assert.equal(r.status, 'INTERNAL', r.text);
     assert.equal(M.calls('UploadTextFile').length, 1);
