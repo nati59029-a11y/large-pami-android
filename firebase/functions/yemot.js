@@ -273,7 +273,10 @@ async function sendPromo(request, key, base) {
     if (x && x.lastRequestId === v.requestId && x.lastResult === 'done') return { kind: 'duplicate', x };
     const onLine = holdsPath(x, nowMs);
     // אותו נוסח = אותו טקסט וגם אותה הגייה (שינוי במילון מעלה מחדש). ברשומה ישנה בלי spoken – ההגייה הייתה הטקסט עצמו.
-    const sameText = onLine && ACTIVE.includes(x.status) && x.text === v.text && (x.spoken == null ? x.text : x.spoken) === spoken;
+    // וגם אותו קול: קובץ שבקו בקול אחר (למשל ממוחשב, אחרי "שלח בקול הממוחשב" או מלפני הפרסום) מוקרא מחדש בקול המבוקש.
+    // הקול נקבע לפי סוג הקובץ שבקו (עובד גם לרשומות ישנות בלי שדה engine).
+    const sameText = onLine && ACTIVE.includes(x.status) && x.text === v.text && (x.spoken == null ? x.text : x.spoken) === spoken
+      && voice.extOf(x.path) === voice.extFor(engine);
     const upload = !sameText;
     const doTz = v.withTzintuk && !(sameText && x.tzintuk === 'sent');
     const now = new Date(nowMs).toISOString();

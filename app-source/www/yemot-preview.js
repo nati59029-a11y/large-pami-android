@@ -96,7 +96,7 @@ ACT.ypPlay=async el=>{
   catch(e){window.ypStop()} // ההשמעה בטלפון נכשלה – ממשיכים לקול הטלפון
  }
  // 2. נפילה לקול הטלפון (קירוב). voice-off = הקול האמיתי לא מופעל בשרת – בלי הודעה מיוחדת
- const why=v.ok||v.reason==='voice-off'?'':'הקול האמיתי לא זמין כרגע'+(v.reason==='preview-limit'?' (הגעתם למספר ההשמעות להיום)':'')+', ולכן זו השמעה בקול הטלפון. ';
+ const why=v.ok||v.reason==='voice-off'?'':'הקול האמיתי לא זמין כרגע'+(v.reason==='preview-limit'?' (הגעתם למכסת ההשמעות בקול האמיתי)':'')+', ולכן זו השמעה בקול הטלפון. ';
  const ok=await window.ypLoad(); // המילון חייב להיטען לפני ההקראה, אחרת ההגייה שונה מהקו
  const r=await window.ypSpeak(box.value,{onEnd:idle});
  el.disabled=false;

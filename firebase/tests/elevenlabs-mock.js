@@ -1,7 +1,7 @@
 'use strict';
 // שרת דמה מקומי שמחליף את ElevenLabs בבדיקות. אין שום פנייה החוצה.
 // רושם כל בקשה (נתיב, שאילתה, כותרת xi-api-key, גוף), ומחזיר "שמע" מזויף: כותרת ID3 + hash של הטקסט (כדי לזהות מה נשלח).
-// mode: 'ok' | 'network' (ניתוק החיבור) | 'http401' | 'http429' | 'http500' | 'hang' (לא עונה) | 'json' (תשובה לא שמע) | 'leak' (401 עם המפתח בגוף)
+// mode: 'ok' | 'network' (ניתוק החיבור אחרי שהבקשה הגיעה) | 'http401' | 'http403' | 'http429' | 'http500' | 'hang' (לא עונה) | 'json' (תשובה לא שמע) | 'leak' (401 עם המפתח בגוף)
 
 const http = require('node:http');
 const crypto = require('node:crypto');
@@ -28,6 +28,7 @@ function start(port) {
       if (m === 'network') { req.socket.destroy(); return; }
       const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
       if (m === 'http401') return json(401, { detail: { status: 'invalid_api_key', message: 'Invalid API key' } });
+      if (m === 'http403') return json(403, { detail: { status: 'missing_permissions' } });
       if (m === 'leak') return json(401, { detail: { status: 'invalid_api_key', message: 'key ' + (req.headers['xi-api-key'] || '') + ' is invalid' } });
       if (m === 'http429') return json(429, { detail: { status: 'too_many_concurrent_requests' } });
       if (m === 'http500') return json(500, { detail: 'error' });

@@ -163,8 +163,10 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
   });
 
   // ---------------- כשלים: אין מעבר אוטומטי ----------------
-  for (const [mode, label] of [['network', 'כשל רשת'], ['http401', '401 (מפתח שגוי)'], ['http500', '500'], ['json', 'תשובה שאינה שמע']]) {
-    it(`${label}: voice-unavailable בעברית, שום דבר לא עולה לימות, התווים מוחזרים למונה; "שלח בקול הממוחשב" עובד`, async () => {
+  // refunded: האם התווים חוזרים למונה. רק כשהבקשה בוודאות לא חויבה (401/403, או שהחיבור לא נוצר – בדיקה נפרדת למטה).
+  // ניתוק אחרי שהבקשה הגיעה, 500, ותשובה שאינה שמע – ייתכן שחויבו, ולכן לא מחזירים.
+  for (const [mode, label, refunded] of [['network', 'ניתוק אחרי שהבקשה הגיעה', false], ['http401', '401 (מפתח שגוי)', true], ['http403', '403 (הרשאה)', true], ['http500', '500', false], ['json', 'תשובה שאינה שמע', false]]) {
+    it(`${label}: voice-unavailable בעברית, שום דבר לא עולה לימות, התווים ${refunded ? 'מוחזרים' : 'לא מוחזרים'}; "שלח בקול הממוחשב" עובד`, async () => {
       E.setMode(mode);
       const req = item('recipes');
       const r = await core(LINE, 'publishItem', 'u_emp', req);
@@ -172,13 +174,21 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
       assert.match(r.error.message, /הקול האנושי לא זמין/);
       assert.equal(ups().length + texts().length, 0, 'אין מעבר אוטומטי – לא עלה כלום');
       assert.equal((await readDoc(env, 'yemot_items/' + req.requestId)).status, 'failed');
-      assert.equal((await readDoc(env, `voice_usage/m-${MONTH()}`)).chars, 0);
+      assert.equal((await readDoc(env, `voice_usage/m-${MONTH()}`)).chars, refunded ? 0 : req.text.length);
       // הבחירה של המשתמש: שליחה חוזרת עם engine:'tts' (אותו requestId – הרשומה שנכשלה)
       const t = await core(LINE, 'publishItem', 'u_emp', Object.assign({}, req, { engine: 'tts' }));
       assert.equal(t.status, 'OK', t.text); assert.equal(t.result.file, '001.tts'); assert.equal(t.result.engine, 'yemot-tts');
       assert.equal(texts().length, 1); assert.equal(E.state.requests.length, 1);
     });
   }
+
+  it('החיבור לא נוצר (השרת סירב): voice-unavailable, והתווים מוחזרים – הבקשה בוודאות לא הגיעה', async () => {
+    const r = await core(LINE, 'publishItem', 'u_emp', item('recipes', { text: 'שלום' }), { ELEVENLABS_API_BASE: 'http://127.0.0.1:9795' });
+    assert.equal(r.error.details.reason, 'voice-unavailable', r.text);
+    assert.equal((await readDoc(env, `voice_usage/m-${MONTH()}`)).chars, 0);
+    assert.equal(E.state.requests.length, 0); assert.equal(ups().length, 0);
+    assert.ok(LOGS.some((l) => l.includes('no-connect')));
+  });
 
   it('פסק זמן: voice-unavailable, ולא מחזירים את התווים (ייתכן שהשירות חייב)', async () => {
     E.setMode('hang');
@@ -285,6 +295,71 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
     const tooLong = await core(LINE, 'previewItem', 'u_emp', { text: 'א'.repeat(2501) });
     assert.equal(tooLong.error.details.reason, 'text-too-long');
     assert.equal(M.state.requests.length, 0, 'שמע קודם לא פונה לימות');
+  });
+
+  it('שמע קודם: מגבלה יומית לפי תווים לכל משתמש; לא נספרת כשנדחתה בתקרה או כשהבקשה לא הגיעה לשירות', async () => {
+    const lim = { VOICE_PREVIEW_DAILY_CHARS: '20' };
+    const t10 = () => 'א'.repeat(6) + rid().slice(-4); // 10 תווים, שונה בכל פעם
+    assert.equal((await core(LINE, 'previewItem', 'u_emp', { text: t10() }, lim)).status, 'OK');
+    assert.equal((await core(LINE, 'previewItem', 'u_emp', { text: t10() }, lim)).status, 'OK'); // 20 – בדיוק בגבול
+    const over = await core(LINE, 'previewItem', 'u_emp', { text: 'ב' }, lim);
+    assert.equal(over.error.details.reason, 'preview-limit', over.text);
+    const day = await readDoc(env, 'voice_usage/p-u_emp');
+    assert.deepEqual([day.count, day.chars], [2, 20]);
+    assert.equal(E.state.requests.length, 2);
+    // משתמש אחר: נדחה בתקרה הכוללת – לא נספר ביום שלו ולא בתת-התקרה
+    await writeDoc(env, `voice_usage/m-${MONTH()}`, { month: MONTH(), chars: 99, previewChars: 0, limit: 100 });
+    const cap = await core(LINE, 'previewItem', 'u_mgr', { text: 'שלום' }, { ELEVENLABS_MONTHLY_CHARS: '100' });
+    assert.equal(cap.error.details.reason, 'voice-quota', cap.text);
+    assert.equal(await readDoc(env, 'voice_usage/p-u_mgr'), null);
+    assert.equal((await readDoc(env, `voice_usage/m-${MONTH()}`)).previewChars, 0);
+    // החיבור לא נוצר: נספר ואז הוחזר (יום + חודש)
+    await writeDoc(env, `voice_usage/m-${MONTH()}`, { month: MONTH(), chars: 0, previewChars: 0, limit: 36000 });
+    const nc = await core(LINE, 'previewItem', 'u_mgr', { text: 'שלום' }, { ELEVENLABS_API_BASE: 'http://127.0.0.1:9795' });
+    assert.equal(nc.error.details.reason, 'voice-unavailable', nc.text);
+    const d2 = await readDoc(env, 'voice_usage/p-u_mgr');
+    assert.deepEqual([d2.count, d2.chars], [0, 0]);
+    assert.deepEqual([(await readDoc(env, `voice_usage/m-${MONTH()}`)).chars, (await readDoc(env, `voice_usage/m-${MONTH()}`)).previewChars], [0, 0]);
+    // 500 – הגיע לשירות, נספר
+    E.setMode('http500');
+    await core(LINE, 'previewItem', 'u_mgr', { text: 'שלום' });
+    assert.deepEqual([(await readDoc(env, 'voice_usage/p-u_mgr')).chars, (await readDoc(env, `voice_usage/m-${MONTH()}`)).previewChars], [4, 4]);
+  });
+
+  it('שמע קודם: תת-תקרה חודשית להשמעות – ההשמעות נעצרות, והשליחות ממשיכות מהמכסה שנשארה', async () => {
+    const env2 = { VOICE_PREVIEW_MONTHLY_CHARS: '30', ELEVENLABS_MONTHLY_CHARS: '100' };
+    await writeDoc(env, `voice_usage/m-${MONTH()}`, { month: MONTH(), chars: 28, previewChars: 28, limit: 100 });
+    const p = await core(LINE, 'previewItem', 'u_emp', { text: 'שלום' }, env2);
+    assert.equal(p.error.details.reason, 'preview-limit', p.text);
+    assert.equal(await readDoc(env, 'voice_usage/p-u_emp'), null, 'נדחה – לא נספר ביום של המשתמש');
+    const s = await core(LINE, 'publishItem', 'u_emp', item('recipes', { text: 'שלום' }), env2);
+    assert.equal(s.status, 'OK', s.text);
+    const m = await readDoc(env, `voice_usage/m-${MONTH()}`);
+    assert.deepEqual([m.chars, m.previewChars], [32, 28]);
+    assert.equal(E.state.requests.length, 1);
+    // ברירות המחדל: 3000 ביום, 10000 בחודש להשמעות, 36000 בסך הכול
+    const st = require('../functions/lib/voice')._test.settings();
+    assert.deepEqual([st.previewDailyChars, st.previewMonthly, st.monthly], [3000, 10000, 36000]);
+    const q = await core(LINE, 'lineState', 'u_mgr', {}, env2);
+    assert.deepEqual([q.result.voice.quota.previewUsed, q.result.voice.quota.previewLimit], [28, 30]);
+  });
+
+  it('אותו נוסח בקול אחר: מבצע שבקו בקול הממוחשב מוקרא מחדש בקול המשוכפל; אותו נוסח באותו קול – בלי פנייה', async () => {
+    const key = 'pk_eng_' + rid(), text = 'מבצע זהה ' + rid();
+    const t = await core(PROMO, 'sendPromo', 'u_mgr', promo({ promoKey: key, text, engine: 'tts' }));
+    assert.equal(t.status, 'OK', t.text); assert.equal(t.result.file, '001.tts');
+    const w = await core(PROMO, 'sendPromo', 'u_mgr', promo({ promoKey: key, text }));
+    assert.equal(w.status, 'OK', w.text); assert.equal(w.result.action, 'replaced'); assert.equal(w.result.file, '002.wav');
+    assert.equal(E.state.requests.length, 1); assert.ok(!dir('2').has('001.tts'));
+    const again = await core(PROMO, 'sendPromo', 'u_mgr', promo({ promoKey: key, text }));
+    assert.equal(again.result.action, 'none', again.text); assert.equal(E.state.requests.length, 1);
+    // רשומה ישנה בלי שדה engine (מלפני הפרסום): הקול לפי סוג הקובץ
+    const k2 = 'pk_old_' + rid(), t2 = 'מבצע ישן ' + rid();
+    dir('2').set('050.tts', t2);
+    await writeDoc(env, 'yemot_promos/' + k2, { text: t2, spoken: t2, status: 'live', file: '050.tts', path: 'ivr2:2/050.tts', until: addDays(israelDay(), 3), tzintuk: 'skipped', byUid: 'u_mgr', lockAt: null });
+    const o = await core(PROMO, 'sendPromo', 'u_mgr', promo({ promoKey: k2, text: t2 }));
+    assert.equal(o.status, 'OK', o.text); assert.equal(o.result.action, 'replaced'); assert.match(o.result.file, /\.wav$/);
+    assert.ok(!dir('2').has('050.tts')); assert.equal(E.state.requests.length, 2);
   });
 
   it('previewVoice דרך האמולטור (הקול הממוחשב מוגדר שם): voice-off, ולאורח – נדחה', async () => {

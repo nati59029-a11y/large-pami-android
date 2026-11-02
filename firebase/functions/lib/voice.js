@@ -29,6 +29,8 @@ const P = {
   monthly: defineInt('ELEVENLABS_MONTHLY_CHARS', { default: 36000, description: 'תקרת תווים חודשית (שעון ישראל). מתחת למכסת המסלול' }),
   timeoutMs: defineInt('ELEVENLABS_TIMEOUT_MS', { default: 45000, description: 'זמן המתנה מרבי לבקשה ל-ElevenLabs' }),
   previewDaily: defineInt('VOICE_PREVIEW_DAILY', { default: 30, description: '"שמע קודם" בקול האמיתי: פניות ל-ElevenLabs ביום לכל משתמש' }),
+  previewDailyChars: defineInt('VOICE_PREVIEW_DAILY_CHARS', { default: 3000, description: '"שמע קודם" בקול האמיתי: תווים ביום לכל משתמש' }),
+  previewMonthly: defineInt('VOICE_PREVIEW_MONTHLY_CHARS', { default: 10000, description: '"שמע קודם": תקרת תווים חודשית לכל ההשמעות (חלק מהתקרה הכוללת, כדי שההשמעות לא יגמרו את המכסה של השליחות)' }),
   cacheHours: defineInt('VOICE_CACHE_HOURS', { default: 48, description: 'כמה שעות נשמר שמע במטמון (תצוגה מקדימה ← שליחה)' }),
   cacheBucket: defineString('VOICE_CACHE_BUCKET', { default: '', description: 'bucket למטמון השמע. ריק = ברירת המחדל של הפרויקט' }),
 };
@@ -55,6 +57,7 @@ function settings() {
     // (לא מאומת) הטווח המותר של speed. ערך מחוץ ל-0.7–1.2 נחתך, כדי שהבקשה לא תידחה.
     speed: Number.isFinite(sp) ? Math.min(1.2, Math.max(0.7, sp)) : 0.9,
     format: str(P.format, 'mp3_44100_64'), timeoutMs: int(P.timeoutMs, 45000), monthly: int(P.monthly, 36000),
+    previewDaily: int(P.previewDaily, 30), previewDailyChars: int(P.previewDailyChars, 3000), previewMonthly: int(P.previewMonthly, 10000),
   };
 }
 // המנוע המוגדר בשרת
@@ -131,52 +134,67 @@ async function cleanCache() {
 // ---------------- גבול חודשי ומגבלה יומית ----------------
 function db() { return require('firebase-admin/firestore').getFirestore(); }
 // שומר מקום ל-n תווים בחודש הנוכחי. חריגה (גם "כמעט": אין מקום לטקסט הזה) = VoiceError('quota'), בלי פנייה לשירות.
-async function reserve(n, s) {
-  const month = monthKey();
-  const ref = db().doc(`${USAGE}/m-${month}`);
-  return db().runTransaction(async (tx) => {
-    const d = await tx.get(ref);
-    const used = (d.exists && Number(d.get('chars'))) || 0;
+// שומר מקום ל-n תווים, בטרנזקציה אחת, לפני הפנייה לשירות:
+//   * תקרה כוללת (חודש, שעון ישראל). חריגה ("אין מקום לטקסט הזה") = VoiceError('quota').
+//   * "שמע קודם" בלבד: תת-תקרה חודשית להשמעות (previewChars), ומגבלה יומית לכל משתמש – מספר השמעות ותווים.
+//     חריגה = VoiceError('preview-limit'). כך ההשמעות לא יכולות לגמור את המכסה של השליחות.
+// בקשה שנדחתה – לא נספרת בשום מונה (חוץ מסימון capHitAt).
+const num = (d, f) => (d && d.exists && Number(d.get(f))) || 0;
+async function reserve(n, s, o) {
+  const month = monthKey(), day = ymd();
+  const mref = db().doc(`${USAGE}/m-${month}`);
+  const pref = o && o.preview ? db().doc(`${USAGE}/p-${o.uid}`) : null;
+  const r = await db().runTransaction(async (tx) => {
+    const d = await tx.get(mref);
+    const p = pref ? await tx.get(pref) : null;
+    const used = num(d, 'chars'), pUsed = num(d, 'previewChars');
     const now = new Date().toISOString();
-    if (used + n > s.monthly) {
-      tx.set(ref, { month, chars: used, limit: s.monthly, capHitAt: now, updatedAt: now }, { merge: true });
-      return { ok: false, used, limit: s.monthly, month };
+    let cnt = 0, dch = 0;
+    if (pref) {
+      const sameDay = p.exists && p.get('day') === day;
+      cnt = sameDay ? num(p, 'count') : 0; dch = sameDay ? num(p, 'chars') : 0;
+      if (cnt >= s.previewDaily || dch + n > s.previewDailyChars) return { fail: 'preview-limit', why: 'preview-daily', limit: s.previewDailyChars };
+      if (pUsed + n > s.previewMonthly) return { fail: 'preview-limit', why: 'preview-monthly', limit: s.previewMonthly };
     }
-    tx.set(ref, { month, chars: used + n, limit: s.monthly, requests: ((d.exists && Number(d.get('requests'))) || 0) + 1, updatedAt: now }, { merge: true });
-    return { ok: true, used: used + n, limit: s.monthly, month };
-  }).then((r) => { if (!r.ok) throw new VoiceError('quota', 'monthly-cap', { used: r.used, limit: r.limit, month: r.month }); return r; });
+    if (used + n > s.monthly) {
+      tx.set(mref, { month, chars: used, limit: s.monthly, capHitAt: now, updatedAt: now }, { merge: true });
+      return { fail: 'quota', used, limit: s.monthly };
+    }
+    const upd = { month, chars: used + n, limit: s.monthly, requests: num(d, 'requests') + 1, updatedAt: now };
+    if (pref) upd.previewChars = pUsed + n;
+    tx.set(mref, upd, { merge: true });
+    if (pref) tx.set(pref, { day, count: cnt + 1, chars: dch + n, updatedAt: now });
+    return { ok: true, month, day };
+  });
+  if (r.fail === 'quota') throw new VoiceError('quota', 'monthly-cap', { used: r.used, limit: r.limit, month });
+  if (r.fail) throw new VoiceError('preview-limit', r.why, { limit: r.limit });
+  return r;
 }
-async function refund(n, month) {
-  const ref = db().doc(`${USAGE}/m-${month}`);
+// החזרה – רק כשהבקשה בוודאות לא חויבה (ראו refundable)
+async function refund(n, q, o) {
+  const mref = db().doc(`${USAGE}/m-${q.month}`);
+  const pref = o && o.preview ? db().doc(`${USAGE}/p-${o.uid}`) : null;
+  const now = new Date().toISOString();
   try {
     await db().runTransaction(async (tx) => {
-      const d = await tx.get(ref);
-      if (d.exists) tx.update(ref, { chars: Math.max(0, (Number(d.get('chars')) || 0) - n), updatedAt: new Date().toISOString() });
+      const d = await tx.get(mref);
+      const p = pref ? await tx.get(pref) : null;
+      if (d.exists) tx.update(mref, Object.assign({ chars: Math.max(0, num(d, 'chars') - n), updatedAt: now }, pref ? { previewChars: Math.max(0, num(d, 'previewChars') - n) } : {}));
+      if (p && p.exists && p.get('day') === q.day) tx.update(pref, { count: Math.max(0, num(p, 'count') - 1), chars: Math.max(0, num(p, 'chars') - n), updatedAt: now });
     });
   } catch (e) { logger.error('voice: refund failed', { reason: 'refund-failed' }); }
-}
-async function previewSlot(uid) {
-  const day = ymd();
-  const limit = int(P.previewDaily, 30);
-  const ref = db().doc(`${USAGE}/p-${uid}`);
-  const ok = await db().runTransaction(async (tx) => {
-    const d = await tx.get(ref);
-    const used = d.exists && d.get('day') === day ? (Number(d.get('count')) || 0) : 0;
-    if (used >= limit) return false;
-    tx.set(ref, { day, count: used + 1, updatedAt: new Date().toISOString() });
-    return true;
-  });
-  if (!ok) throw new VoiceError('preview-limit', 'preview-daily', { limit });
 }
 // מצב הגבול החודשי (למנהל, ב-getLineState)
 async function quotaView() {
   const s = settings(), month = monthKey();
   const d = await db().doc(`${USAGE}/m-${month}`).get();
   const used = (d.exists && Number(d.get('chars'))) || 0;
-  return { month, used, limit: s.monthly, near: used >= s.monthly * 0.9, capHitAt: (d.exists && d.get('capHitAt')) || null };
+  return { month, used, limit: s.monthly, near: used >= s.monthly * 0.9, capHitAt: (d.exists && d.get('capHitAt')) || null,
+    previewUsed: num(d, 'previewChars'), previewLimit: s.previewMonthly };
 }
 
 // ---------------- ElevenLabs ----------------
+const NO_CONNECT = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH'];
 async function callEleven(key, base, s, text) {
   const url = `${base}v1/text-to-speech/${encodeURIComponent(s.voiceId)}?output_format=${encodeURIComponent(s.format)}`;
   let r, buf;
@@ -188,19 +206,24 @@ async function callEleven(key, base, s, text) {
       body: JSON.stringify({ text, model_id: s.model, language_code: s.lang, voice_settings: { speed: s.speed } }),
       signal: AbortSignal.timeout(s.timeoutMs),
     });
-    if (!r.ok) { try { await r.arrayBuffer(); } catch (e) { /* */ } throw new VoiceError('unavailable', 'http-' + r.status); }
+    // 401/403 (מפתח או הרשאה) – השירות דחה לפני ביצוע, ולכן לא חייב. שאר הקודים – לא ודאי, לא מחזירים.
+    if (!r.ok) { try { await r.arrayBuffer(); } catch (e) { /* */ } throw new VoiceError('unavailable', 'http-' + r.status, { refundable: r.status === 401 || r.status === 403 }); }
     buf = Buffer.from(await r.arrayBuffer());
   } catch (e) {
     if (e instanceof VoiceError) throw e;
     const timeout = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
-    throw new VoiceError('unavailable', timeout ? 'timeout' : 'network');
+    if (timeout) throw new VoiceError('unavailable', 'timeout');
+    // החיבור לא נוצר בכלל (השרת לא נמצא / סירב) – הבקשה בוודאות לא הגיעה לשירות
+    const c = e && e.cause, code = (c && (c.code || (Array.isArray(c.errors) && c.errors[0] && c.errors[0].code))) || '';
+    if (NO_CONNECT.includes(code)) throw new VoiceError('unavailable', 'no-connect', { refundable: true });
+    throw new VoiceError('unavailable', 'network'); // ייתכן שהבקשה הגיעה (למשל ניתוק באמצע) – לא מחזירים
   }
   const ct = String(r.headers.get('content-type') || '');
   if (buf.length < 64 || !/^audio\//i.test(ct)) throw new VoiceError('unavailable', 'bad-audio');
   return buf;
 }
 
-// שמע בקול המשוכפל: מטמון ← (תצוגה: מגבלה יומית) ← גבול חודשי ← ElevenLabs ← מטמון.
+// שמע בקול המשוכפל: מטמון ← מונים (תקרה כוללת; בתצוגה גם תת-תקרה ומגבלה יומית) ← ElevenLabs ← מטמון.
 async function synth(text, opts) {
   const o = opts || {};
   const s = settings();
@@ -210,16 +233,15 @@ async function synth(text, opts) {
   const key = ELEVENLABS_API_KEY.value();
   if (!key) throw new VoiceError('unavailable', 'no-key');
   const base = elevenBase(P.base.value() || 'https://api.elevenlabs.io');
-  if (o.preview) await previewSlot(o.uid);
   const n = text.length;
-  const q = await reserve(n, s);
+  const q = await reserve(n, s, o);
   try {
     const buf = await callEleven(key, base, s, text);
     await cachePut(name, buf);
     return { buf, cached: false, chars: n };
   } catch (e) {
-    // פסק זמן: ייתכן שהשירות כבר חייב – לא מחזירים את התווים למונה (שמרני)
-    if (!(e instanceof VoiceError && e.detail === 'timeout')) await refund(n, q.month);
+    // מחזירים רק כשהבקשה בוודאות לא חויבה: החיבור לא נוצר, או 401/403. פסק זמן, 5xx, תשובה שאינה שמע – ייתכן שחויבה, לא מחזירים.
+    if (e instanceof VoiceError && e.refundable) await refund(n, q, o);
     throw e;
   }
 }
@@ -248,7 +270,7 @@ function toHttps(e, isManager) {
       + (isManager ? ` (נוצלו ${e.used} מתוך ${e.limit} תווים. התקרה נקבעת בהגדרה ELEVENLABS_MONTHLY_CHARS.)` : ''),
     Object.assign({ reason: 'voice-quota' }, isManager ? { used: e.used, limit: e.limit, month: e.month } : {}));
   }
-  if (e.code === 'preview-limit') return new HttpsError('resource-exhausted', 'הגעתם למספר ההשמעות בקול האמיתי להיום. ההשמעה תהיה בקול של הטלפון.', { reason: 'preview-limit', limit: e.limit });
+  if (e.code === 'preview-limit') return new HttpsError('resource-exhausted', 'הגעתם למכסת ההשמעות בקול האמיתי (להיום או לחודש). ההשמעה תהיה בקול של הטלפון.', { reason: 'preview-limit', limit: e.limit });
   if (e.code === 'off') return new HttpsError('failed-precondition', 'הקול האנושי לא מופעל בשרת.', { reason: 'voice-off' });
   return new HttpsError('unavailable', 'הקול האנושי לא זמין כרגע. אפשר לשלוח בקול הממוחשב, או לנסות שוב מאוחר יותר.', { reason: 'voice-unavailable' });
 }
