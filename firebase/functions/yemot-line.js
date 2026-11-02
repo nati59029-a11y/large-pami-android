@@ -4,7 +4,8 @@
 //                     hours (שלוחה 4, מנהל; קבועה, או זמנית עם until), opening (הודעת הפתיחה ivr2:/M1000.<סיומת>, מנהל).
 //   removeLineItem  – הורדת פריט שהשרת העלה (מנהל בלבד), או – בשלוחה 4 בלבד – כל קובץ תוכן לפי שם (כולל הקובץ הוותיק 000).
 //   listLineFiles   – רשימת קובצי התוכן בשלוחה 4, כפי שהם בקו (מנהל בלבד).
-//   getLineState    – הרשימות, המילון והמגבלות לאפליקציה (עובד ומנהל). בלי פנייה לימות.
+//   getLineState    – הרשימות, המילון והמגבלות לאפליקציה (עובד ומנהל). בלי פנייה לימות. כולל voice (מנוע, ולמנהל – הגבול החודשי).
+//   previewVoice    – "שמע קודם" בקול המשוכפל (עובד ומנהל): מחזיר שמע mp3 (base64). נשמר במטמון לשליחה של אותו נוסח.
 //   runLineExpiry   – (לא מ-index.js) נקראת מ-expirePromosOnLine כל לילה: מוחקת הודעות זמניות בשלוחה 4 שפג תוקפן.
 // עקרונות:
 //   * התפקיד נקבע בשרת (requireStaff: admins/staff במסד), לעולם לא משדה שהטלפון שולח.
@@ -23,7 +24,7 @@ const { requireStaff, inputObject } = require('./lib/roles');
 const { YemotError, apiBase, listDir, deleteFiles } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { applyLexicon } = require('./lib/lexicon');
-const { cleanText, israelDay, addDays, validDay, loadLexicon, testFault, LOCK_MS } = require('./yemot').shared;
+const { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS } = require('./yemot').shared;
 
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
@@ -170,13 +171,16 @@ async function publishItem(request, key, base) {
   if (S.managerOnly && who.role !== 'manager') {
     throw new HttpsError('permission-denied', `רק מנהל יכול לשנות את ${S.name}.`, { reason: 'slot-manager-only' });
   }
+  // מנוע הקול: בלי engine = המוגדר בשרת (הקול המשוכפל); engine=tts = המשתמש בחר "שלח בקול הממוחשב". הקלטה – תמיד כמו שהיא.
+  const engine = voice.pickEngine(input.engine);
+  if (!engine) throw bad('bad-input', 'קלט לא תקין');
   const ctx = context(key, base);
   const db = getFirestore();
-  let spoken = null, rendered;
-  if (v.kind === 'text') {
-    spoken = applyLexicon(v.text, await loadLexicon(db));
-    rendered = await voice.render(spoken);
-  } else rendered = voice.fromRecording(v.buf);
+  // ההקראה עצמה (שעולה כסף בקול המשוכפל) נוצרת רק אחרי בדיקת הכפילות והנעילה – שלב 2 למטה
+  let spoken = null, rendered = null;
+  if (v.kind === 'text') spoken = applyLexicon(v.text, await loadLexicon(db));
+  else rendered = voice.fromRecording(v.buf);
+  const ext = rendered ? rendered.ext : voice.extFor(engine);
 
   const itemRef = db.doc(`${ITEMS}/${v.requestId}`);
   const slotRef = S.mode === 'replace' ? db.doc(S.state) : null; // החלפה אחת בכל רגע בשלוחה
@@ -194,10 +198,10 @@ async function publishItem(request, key, base) {
     if (l && l.exists && isLocked(l.data(), nowMs) && l.get('lockReq') !== v.requestId) throw busy();
     const now = new Date(nowMs).toISOString();
     // ניסיון חוזר אחרי כשל: אותו נתיב (גם אם ייתכן שהקובץ כבר עלה), כל עוד הסיומת לא השתנתה
-    const keepPath = !!(x && x.path && voice.extOf(x.path) === rendered.ext);
+    const keepPath = !!(x && x.path && voice.extOf(x.path) === ext);
     const rec = {
       slot: v.slot, ext: S.ext, kind: v.kind, source: v.source, title: v.title, text: v.text, spoken,
-      durationSec: v.kind === 'audio' ? v.durationSec : null, status: 'uploading', error: null,
+      durationSec: v.kind === 'audio' ? v.durationSec : null, engine: v.kind === 'audio' ? 'recording' : engine, status: 'uploading', error: null,
       until: v.until || null, temporary: !!v.until,
       uncertain: keepPath ? !!x.uncertain : false, byUid: who.uid, byRole: who.role, updatedAt: now, lockAt: now, lockReq: v.requestId,
     };
@@ -222,7 +226,32 @@ async function publishItem(request, key, base) {
   };
 
   try {
-    // 2. נתיב: הפתיחה – שם קבוע. אחרת – הנתיב הקודם (ניסיון חוזר) או מספר חדש.
+    // 2א. הפתיחה בקובץ שמע: לא דורסים הקלטת פתיחה ישנה (M1000.wav) שלא הועלתה מהאפליקציה. בודקים לפני ההקראה, כדי לא לשלם לחינם.
+    if (S.fixedName && !plan.keepPath && ext === 'wav') {
+      const target = voice.fileName(S.fixedName, { ext });
+      let names;
+      try { names = await listDir(ctx, S.ext); } catch (e) {
+        await fail(e instanceof YemotError ? 'dir-' + e.code : 'internal', false);
+        logger.warn('yemot-line: dir failed', { reason: 'yemot-upload-failed', code: e.code, requestId: v.requestId });
+        throw new HttpsError('unavailable', 'ההעלאה לקו נכשלה. נסו שוב מאוחר יותר.', { reason: 'yemot-upload-failed' });
+      }
+      if (names.includes(target)) {
+        const ours = (await db.collection(ITEMS).where('path', '==', voice.pathOf(S.ext, target)).get()).docs.some((d) => d.id !== v.requestId && ON_LINE.includes(d.get('status')));
+        if (!ours) {
+          await fail('opening-legacy-file', false);
+          throw new HttpsError('failed-precondition', `בקו יש הקלטת פתיחה ישנה (${target}) שלא הועלתה מהאפליקציה. כדי לא למחוק אותה, הפתיחה לא הוחלפה. צריך קודם להעביר אותה לגיבוי (BACKUP_M1000.wav).`, { reason: 'opening-legacy-file' });
+        }
+      }
+    }
+    // 2ב. ההקראה (דרך voice.js). כשל או תקרה בקול המשוכפל – שגיאה מסודרת, בלי מעבר אוטומטי לקול הממוחשב.
+    if (!rendered) {
+      try { rendered = await voice.render(spoken, { engine }); } catch (e) {
+        if (!(e instanceof voice.VoiceError)) throw e;
+        await fail('voice-' + e.code, false);
+        throw voice.toHttps(e, who.role === 'manager');
+      }
+    }
+    // 2ג. נתיב: הפתיחה – שם קבוע. אחרת – הנתיב הקודם (ניסיון חוזר) או מספר חדש.
     let file = plan.keepPath ? plan.x.file : null;
     let path = plan.keepPath ? plan.x.path : null;
     try {
@@ -276,7 +305,7 @@ async function publishItem(request, key, base) {
       await unlockSlot();
     }
     const message = DONE_MSG[v.slot] + (v.until ? ` היא תרד מהקו אחרי ${v.until.split('-').reverse().join('/')}.` : '') + (warnings.length ? ' התוכן הקודם עוד לא הוסר מהקו – הוא יוסר בעדכון הבא.' : '');
-    return reply({ file, path, kind: v.kind, spoken }, { replaced, warnings, message });
+    return reply({ file, path, kind: v.kind, spoken }, { replaced, warnings, message, engine: rendered.engine });
   } catch (e) {
     if (e instanceof HttpsError) throw e;
     // חריגה פנימית: משחררים נעילות ומסמנים "לא ודאי" (ייתכן שהקובץ עלה). ניסיון חוזר ישתמש באותו נתיב.
@@ -464,12 +493,39 @@ async function lineState(request) {
       slots.opening = { mode: 'file', current: cur ? { id: cur.id, text: cur.get('text') || '', createdAt: cur.get('createdAt') || null } : null, items: list };
     } else slots[slot] = list;
   }
+  await ensureLexiconSeed(db);
   const lx = await db.doc(LEXICON_DOC).get();
+  // הקול: איזה מנוע מוגדר, ול"שמע קודם" – האם יש קול אמיתי. למנהל גם מצב הגבול החודשי (כדי להתריע לפני שנגמר).
+  const engine = voice.configuredEngine();
+  const vInfo = { engine, preview: engine === 'elevenlabs' ? 'voice' : 'phone' };
+  if (mgr && engine === 'elevenlabs') { try { vInfo.quota = await voice.quotaView(); } catch (e) { vInfo.quota = null; } }
   return {
+    voice: vInfo,
     ok: true, role: who.role, slots, lexicon: lx.exists && typeof lx.get('text') === 'string' ? lx.get('text') : '',
     limits: { recipes: YEMOT_RECIPE_MAX.value(), updates: 800, hours: 600, opening: 600, recordSec: YEMOT_REC_MAX_SEC.value(), recordBytes: REC_MAX_BYTES, tempMaxDays: YEMOT_TEMP_MAX_DAYS.value() },
     preview: 'phone', structure: 'off',
   };
+}
+
+// ---------------- previewVoice – "שמע קודם" בקול האמיתי (עובד ומנהל) ----------------
+// קלט { text }. אותו עיבוד בדיוק כמו בשליחה (ניקוי ← מילון), ולכן אותו hash: שליחה של אותו נוסח משתמשת בשמע מהמטמון
+// בלי פנייה נוספת ל-ElevenLabs. מגבלה יומית לכל משתמש (VOICE_PREVIEW_DAILY). כשל = האפליקציה משמיעה בקול הטלפון.
+async function previewItem(request) {
+  const who = await requireStaff(request);
+  const input = inputObject(request);
+  if (typeof input.text !== 'string') throw bad('empty-text', 'אין נוסח להשמעה.');
+  const clean = cleanText(input.text);
+  if (!clean) throw bad('empty-text', 'אין נוסח להשמעה.');
+  const max = YEMOT_RECIPE_MAX.value() || 2500;
+  if (clean.length > max) throw bad('text-too-long', `הנוסח ארוך מדי (עד ${max} תווים).`, { max });
+  const spoken = applyLexicon(clean, await loadLexicon(getFirestore()));
+  try {
+    const r = await voice.preview(spoken, who.uid);
+    return { ok: true, mime: r.mime, data: r.data, cached: r.cached, spoken };
+  } catch (e) {
+    if (e instanceof voice.VoiceError) throw voice.toHttps(e, who.role === 'manager');
+    throw e;
+  }
 }
 
 // עטיפה: כל שגיאה שאינה HttpsError → "internal" בעברית, בלי פרטים (אולי מכילים טקסט מימות)
@@ -481,12 +537,13 @@ const wrap = (name, fn) => async (request) => {
   }
 };
 
-exports.publishLineItem = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('publish', (r) => publishItem(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
+exports.publishLineItem = onCall({ secrets: [YEMOT_API_KEY, voice.ELEVENLABS_API_KEY], timeoutSeconds: 120 }, wrap('publish', (r) => publishItem(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 exports.removeLineItem = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('remove', (r) => removeItem(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 exports.getLineState = onCall(wrap('state', (r) => lineState(r)));
+exports.previewVoice = onCall({ secrets: [voice.ELEVENLABS_API_KEY], timeoutSeconds: 120 }, wrap('preview', (r) => previewItem(r)));
 exports.listLineFiles = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('list', (r) => listFiles(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 // נקראת מ-expirePromosOnLine (yemot.js). לא נספרת כפונקציה.
 Object.defineProperty(exports, 'runLineExpiry', { enumerable: false, value: runLineExpiry });
 
 // לבדיקות בלבד (לא נספרים כפונקציות): הליבה, כדי לקרוא לה בתוך תהליך הבדיקה עם voice.js מוחלף או פסק זמן קצר.
-Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, runLineExpiry, parseWav, safePath, SLOTS } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, previewItem, runLineExpiry, parseWav, safePath, SLOTS } });

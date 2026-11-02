@@ -44,7 +44,8 @@ async function call(name, uid, data) {
 // ---- ליבה בתוך התהליך, עם הגדרות קבועות ויומן שנאסף (לחיפוש הסוד) ----
 const LOGS = [];
 const CORE_ENV = { YEMOT_EXT: '2', YEMOT_TZINTUK_LIST: 'mivtzaim', YEMOT_EMPLOYEE_DAILY: '1', YEMOT_MAX_DAYS: '60', YEMOT_TEXT_MAX: '400',
-  YEMOT_TIMEOUT_MS: '15000', YEMOT_RECIPE_MAX: '2500', YEMOT_REC_MAX_SEC: '120', FUNCTIONS_EMULATOR: 'true' };
+  YEMOT_TIMEOUT_MS: '15000', YEMOT_RECIPE_MAX: '2500', YEMOT_REC_MAX_SEC: '120', FUNCTIONS_EMULATOR: 'true',
+  VOICE_ENGINE: 'yemot-tts', LEXICON_SEED: 'off' }; // שלב 9: בבדיקות האלה – הקול הממוחשב, כמו קודם (הקול המשוכפל: 62-voice.js)
 async function core(mod, fn, uid, data, envPatch) {
   const env = Object.assign({}, CORE_ENV, envPatch || {});
   const saved = {}; for (const [k, v] of Object.entries(env)) { saved[k] = process.env[k]; process.env[k] = v; }
@@ -120,7 +121,7 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.equal(ex.uploadPreview, undefined);
     assert.equal(ex.tzintukJoin, undefined, 'tzintukJoin מושבת (אין פעולת הוספה מתועדת) ואסור שיפורסם');
     assert.equal(ex._core, undefined); assert.equal(ex.shared, undefined);
-    assert.equal(Object.keys(ex).length, 10, Object.keys(ex).join(','));
+    assert.equal(Object.keys(ex).length, 11, Object.keys(ex).join(',')); // 11 = כולל previewVoice (שלב 9, 62-voice.js)
     assert.equal(ex.runLineExpiry, undefined);
   });
 
