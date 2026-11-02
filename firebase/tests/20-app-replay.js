@@ -478,7 +478,10 @@ const REPLAY = {
   } },
   M103: { run: async (uid) => {
     const fields = ['uid', 'by', 't', 'reg', 'd', 'tm', 'a', 'why', 'dep', 'src', 'zc', 'dp'].map((x) => ({ fieldPath: x }));
-    return [await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'cashout' }], select: { fields }, where: { fieldFilter: { field: { fieldPath: 'zc' }, op: 'IN', value: { arrayValue: { values: ['z1', 'z2'].map(sv) } } } }, limit: 1000 } }) })];
+    const q = (k, ids) => fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'cashout' }], select: { fields }, where: { fieldFilter: { field: { fieldPath: k }, op: 'IN', value: { arrayValue: { values: ids.map(sv) } } } }, limit: 1000 } }) });
+    const byDp = await q('dp', ['dp1']);
+    if (byDp.status === 200) assert.deepEqual(byDp.json.filter((x) => x.document).map((x) => x.document.name.split('/').pop()), ['co3']);
+    return [await q('zc', ['z1', 'z2']), byDp];
   } },
   M104: { run: async (uid) => {
     const r = await fsx(uid, ':batchGet', { method: 'POST', body: JSON.stringify({ documents: [docName('deposits/dp1')], mask: { fieldPaths: ['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data', 'stBy', 'stAt', 'note'] } }) });
