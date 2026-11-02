@@ -75,6 +75,8 @@ async function seed(env) {
       b.set(db.doc(`inbox/i_${uid}`), { owner: uid, by: uid, status: 'new', created: now, data: '{}', parts: '1' });
     }
     b.set(db.doc('orders/o1'), { x: 1 });
+    b.set(db.doc('supinv/s1'), { c: 'sup', n: 'ספק', d: '2026-11-02', at: '2026-11-02', a: '100', inv: '1', by: 'מנהל', pend: '', src: '', m: '2026-11', np: '1', h: 'x', fh: 'y' });
+    b.set(db.doc('supinv/s1/p/0'), { data: 'data:image/jpeg;base64,AAAA' });
     // משימות (tasks) ותגובות (tasks/{id}/c). זמנים יחסית לעכשיו, כי הכללים בודקים מול שעון השרת.
     const T = Date.now(), H1 = 3600000, D1 = 86400000;
     const task = (id, o) => b.set(db.doc('tasks/' + id), Object.assign({ owner: OTHER, by: OTHER, role: 'w', txt: 'משימה ' + id,

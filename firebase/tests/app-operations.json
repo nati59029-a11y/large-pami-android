@@ -742,6 +742,118 @@
     "manager"
    ],
    "note": "סיכום משימות: המנהל טוען את כל המשימות שנכתבו בתקופה (בלי img)."
+  },
+  {
+   "id": "M53",
+   "line": 2809,
+   "snippet": "collectionId:'supinv'}],select",
+   "fn": "supSync",
+   "collection": "supinv",
+   "op": "list",
+   "rest": "POST :runQuery from supinv select h, fh, np",
+   "condition": "כל המסמכים (רק טביעות ומספר חלקים, בלי תמונה)",
+   "who": [
+    "manager"
+   ],
+   "note": "פעם אחת בכל פתיחה של האפליקציה במכשיר המנהל, כדי לדעת מה כבר בענן."
+  },
+  {
+   "id": "M54",
+   "line": 2816,
+   "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'PATCH'",
+   "fn": "supSync",
+   "collection": "supinv_p",
+   "op": "create+update",
+   "rest": "PATCH /supinv/{id}/p/{k} (בלי updateMask)",
+   "condition": "שדה data בלבד, עד 700,000 תווים",
+   "who": [
+    "manager"
+   ],
+   "note": "המנהל מעלה את צילום החשבונית בחלקים."
+  },
+  {
+   "id": "M55",
+   "line": 2819,
+   "snippet": "await fsx('/supinv/'+id,{method:'PATCH'",
+   "fn": "supSync",
+   "collection": "supinv",
+   "op": "create+update",
+   "rest": "PATCH /supinv/{id} (בלי updateMask)",
+   "condition": "רק השדות c,n,d,at,a,inv,by,pend,src,m,np,h,fh",
+   "who": [
+    "manager"
+   ],
+   "note": "המנהל משקף חשבונית ספקים / ספקים אפייה של החודש."
+  },
+  {
+   "id": "M56",
+   "line": 2822,
+   "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'DELETE'})",
+   "fn": "supDel",
+   "collection": "supinv_p",
+   "op": "delete",
+   "rest": "DELETE /supinv/{id}/p/{k}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת חלקי צילום (חשבונית שנמחקה, נדחתה, מחודש קודם, או צילום שהתקצר)."
+  },
+  {
+   "id": "M57",
+   "line": 2823,
+   "snippet": "await fsx('/supinv/'+id,{method:'DELETE'})",
+   "fn": "supDel",
+   "collection": "supinv",
+   "op": "delete",
+   "rest": "DELETE /supinv/{id}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת החשבונית מהענן."
+  },
+  {
+   "id": "M58",
+   "line": 2831,
+   "snippet": "collectionId:'supinv'}],where",
+   "fn": "supLoad",
+   "collection": "supinv",
+   "op": "list",
+   "rest": "POST :runQuery from supinv where m == {חודש} select (בלי תמונה) limit 2000",
+   "condition": "החודש הנוכחי (שעון ישראל)",
+   "who": [
+    "employee"
+   ],
+   "note": "העובד פותח את המסך 'חשבוניות ספקים החודש'."
+  },
+  {
+   "id": "M59",
+   "line": 2842,
+   "snippet": "fsx('/chunks/'+x.id+'_'+k)",
+   "fn": "supImg",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/{id}_{k}",
+   "condition": "חלק צילום של העובד עצמו (הוצאה ששלח והמנהל עוד לא קיבל)",
+   "who": [
+    "employee"
+   ],
+   "note": "העובד לוחץ 'תמונה' על חשבונית שלו שממתינה."
+  },
+  {
+   "id": "M60",
+   "line": 2842,
+   "snippet": "fsx('/supinv/'+x.id+'/p/'+k)",
+   "fn": "supImg",
+   "collection": "supinv_p",
+   "op": "get",
+   "rest": "GET /supinv/{id}/p/{k}",
+   "condition": "",
+   "who": [
+    "employee"
+   ],
+   "note": "העובד לוחץ 'תמונה'."
   }
  ],
  "fsbLine": 1332,

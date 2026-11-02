@@ -163,6 +163,29 @@
         "delete":              "DDDDA"
       }
     },
+    "supinv": {
+      "source": "חשבוניות ספקים לעובד – בקשת בעל העסק 2.11.2026: העובד רואה את כל חשבוניות הספקים והספקים אפייה של החודש",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה בלבד", "manager": "קריאה, כתיבה (רק השדות של האפליקציה) ומחיקה" },
+      "ops": {
+        "get":              "DDDAA",
+        "list-month":       "DDDAA",
+        "create":           "DDDDA",
+        "create-extra-field": "DDDDD",
+        "update":           "DDDDA",
+        "delete":           "DDDDA"
+      }
+    },
+    "supinv_p": {
+      "source": "חלקי תמונת החשבונית – supinv/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה בלבד", "manager": "קריאה, כתיבה (data עד 700,000 תווים) ומחיקה" },
+      "ops": {
+        "get":              "DDDAA",
+        "create":           "DDDDA",
+        "create-too-big":   "DDDDD",
+        "update":           "DDDDA",
+        "delete":           "DDDDA"
+      }
+    },
     "_not_in_table": {
       "source": "3.3 – 'ברירת מחדל לכל אוסף שלא מופיע בטבלה: אין גישה לאף אחד'",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },

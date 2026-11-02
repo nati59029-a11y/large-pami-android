@@ -285,7 +285,7 @@ function ensure(d){
  if(d.pmOff==null)d.pmOff=2;if(!d.theme)d.theme='paper';if(!d.fs)d.fs=1;d.v=3;
  ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});
  return d}
-function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}}
+function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
 function load(){try{const r=localStorage.getItem(KEY);if(r){S=ensure(JSON.parse(r));return true}}catch(e){}return false}
 
 /* ===== המרה מהאפליקציה הישנה ===== */
@@ -1346,7 +1346,7 @@ async function syLogin(email,pw){
  SY={idToken:j.idToken,refresh:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1000,uid:j.localId,email};
  try{await fsx('/admins/'+SY.uid);SY.role='admin'}catch(e){if(e.code===404||e.code===403)SY.role=await syStaff();else throw e}
  syS()}
-function syOut(){SY={};try{localStorage.removeItem(SK);localStorage.removeItem('lp-tasks');localStorage.removeItem('lp-tk-c')}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}
+function syOut(){SY={};try{localStorage.removeItem(SK);localStorage.removeItem('lp-tasks');localStorage.removeItem('lp-tk-c');localStorage.removeItem('lp-supinv')}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}
 const isW=()=>SY.role==='worker'&&!!SY.refresh,isA=()=>SY.role==='admin'&&!!SY.refresh;
 /* לשונית "הזמנות אתר" (שלב 1, קבצים נפרדים ב-orders/): רק למנהל ולעובד, ורק במצב אמולטור או כשהבנייה הפעילה אותה (orders/site-backend.js) */const ordOn=()=>(isA()||isW())&&(!!EMU||['emulator','test'].includes(window.LP_SITE_BACKEND));ACT.ordGo=()=>{location.href='orders/app.html'+location.search};const ordTile=`<button class="tile" data-a="ordGo" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">🛒<br>הזמנות אתר</button>`;
 /* ---- תור שליחה (עובד) ---- */
@@ -1449,7 +1449,7 @@ const wkSubsAll=()=>{const o=[];(cfgLocal().cats||[]).filter(c=>c.beh==='sup').f
 const wkThumbs=()=>WK.pages.length?`<div class="card" style="margin:8px 0"><b>${WK.pages.length} ${WK.pages.length>1?'עמודים מצורפים':'עמוד מצורף'}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${WK.pages.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="wkDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div></div>`:'';
 const wkPickBtns=()=>`<label class="btn ${WK.pages.length?'g':''}" style="cursor:pointer;width:100%;margin:8px 0">📷 ${WK.pages.length?'צלם עמוד נוסף':'צלם'}<input type="file" accept="image/*" capture="environment" data-c="wkpick" hidden></label>
  <label class="btn g" style="cursor:pointer;width:100%;margin:0 0 8px">🖼 ${WK.pages.length?'הוסף עמודים מהגלריה':'העלה מהגלריה'}<input type="file" accept="image/*" multiple data-c="wkpick" hidden></label>`;
-V.wk=()=>{const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
+V.wk=()=>{if(WS==='sinv')return supView();const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
  const sent=`${ob.length?`<div class="card"><b>ממתינות לשליחה: ${ob.length}</b><p class="note">${SY.err?esc(SY.err):'ישלחו כשיהיה חיבור לאינטרנט.'}</p><button class="btn g" data-a="wkRefresh">נסה לשלוח עכשיו</button></div>`:''}
  <div class="sec"><h3>ההוצאות ששלחתי</h3><button class="btn s g" data-a="wkRefresh">רענן</button></div>
  ${WKL.length?WKL.map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${ils(num(x.d.amt))} · ${esc(x.d.reg?'דף הוצאה מקופה':(x.d.catName||''))}${x.d.subName?' · '+esc(x.d.subName):''}</b><small>${esc(x.d.date||'')}${x.d.note?' · '+esc(x.d.note):''}</small></div><span class="tag ${x.st==='new'?'t1':''}">${x.st==='new'?'נשלח':'התקבל'}</span></div>`).join(''):'<p class="note">עוד לא שלחת הוצאות.</p>'}`;
@@ -1462,7 +1462,7 @@ V.wk=()=>{const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
   return{t:'הוצאה',s:'סריקה או הכנסה ידנית',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>
   <p class="note" style="margin:4px 0 8px">סרוק או העלה את החשבונית (או דף ההוצאה מהקופה). חשבונית של כמה עמודים: הוסף את כל העמודים ואז לחץ "זהה".</p>
   ${wkThumbs()}${WK.pages.length?`<button class="btn w" style="margin-bottom:10px" data-a="wkGo">זהה פרטים מ-${WK.pages.length} ${WK.pages.length>1?'עמודים':'עמוד'}</button>`:''}
-  ${wkPickBtns()}<button class="btn g w" data-a="wkManual">הכנסה ידנית</button>`}}
+  ${wkPickBtns()}<button class="btn g w" data-a="wkManual">הכנסה ידנית</button><button class="btn g w" style="margin-top:8px" data-a="supGo">🧾 חשבוניות ספקים החודש</button>`}}
  /* ידני */
  const c=cs.find(x=>x.id===WK.cat),subs=c?c.subs:[];if(subs.length&&WK.sub&&!subs.find(s=>s.id===WK.sub))WK.sub='';if(!subs.length)WK.sub='';
  const sel=(l,n,list,v,ph)=>`<label class="f"><span>${l}</span><select name="${n}" data-c="wkf"><option value="">${ph}</option>${list.map(([k,t])=>`<option value="${esc(k)}"${k===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label>`;
@@ -1579,7 +1579,7 @@ FRM.inbsave=f=>{const x=fd(f),it=S.inbox.find(z=>z.id===x.id);if(!it)return;cons
  save();closeDlg();rerender();toast('השינויים נשמרו')};
 /* ---- צפייה בצילום עם חזרה ושיתוף ---- */
 let VW=null;
-async function viewImg(fid,name){let du;try{du=await fget(fid)}catch(e){}if(!du)return toast('הקובץ לא נמצא במכשיר');
+async function viewImg(fid,name,du0){let du=du0;if(!du)try{du=await fget(fid)}catch(e){}if(!du)return toast('הקובץ לא נמצא במכשיר');
  let pgs=null;if(du.startsWith('PAGES:')){try{pgs=JSON.parse(du.slice(6))}catch(e){}}else if(/^data:image\//.test(du))pgs=[du];
  if(!pgs){const u=URL.createObjectURL(du2b(du));if(!window.open(u,'_blank')){const a=document.createElement('a');a.href=u;a.download=name||'file';a.click()}return}
  VW={pgs,name:name||'invoice'};{const o=document.getElementById('viewer');if(o)o.remove()}const host=$('#dlg').open?$('#dlg'):document.body;const v=document.createElement('div');v.id='viewer';host.append(v);
@@ -2782,5 +2782,74 @@ async function luCheck(man){const P=luP();if(!P||!navigator.onLine)return;LU.t=D
 function updDone(r){const s=r&&r.status;if(s==='user'||s==='legacy')dlg('<h3>יש עדכון – לחצו להתקנה</h3><p>במסך של אנדרואיד שנפתח לחצו "התקן". העדכון מותקן מעל הגרסה הקיימת, והנתונים נשמרים.</p><button class="btn grow" data-a="closeDlg">הבנתי</button>')}
 (async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&LU.t&&Date.now()-LU.t>216e5)luCheck(false)});
+/* ===== חשבוניות ספקים לעובד (האוסף supinv) =====
+ טלפון המנהל משקף לענן רק חשבוניות "ספקים" (e_sup) ו"ספקים אפייה" (e_bak) של החודש הנוכחי (לפי תאריך החשבונית, שעון ישראל),
+ כולל הוצאות מעובדים שהמנהל כבר קיבל ועוד לא אישר (pend='1'). שום נתון כספי אחר לא יוצא מהטלפון.
+ חשבונית מחודש אחר (וכל מה שנמחק או נדחה אצל המנהל) נמחקת מהענן בסנכרון הבא – כך שבענן יש לכל היותר חודש אחד.
+ supinv/{id}: שדות קצרים בלי תמונה. התמונה בחלקים: supinv/{id}/p/{k} (עד CH תווים לחלק, כמו chunks).
+ הסנכרון: אוטומטי אחרי כל שמירה אצל המנהל (save), בחזרה לאפליקציה ובחזרת אינטרנט. רק מה שהשתנה נשלח (טביעה h, ולתמונה fh).
+ העובד טוען רק כשהוא פותח את המסך, ואת התמונה רק בלחיצה. */
+/* יום (YYYY-MM-DD) בשעון ישראל, מחותמת זמן (ISO) או מ-Date. חותמת ריקה או לא תקינה – '' */
+function ilDay(v){const d=v instanceof Date?v:new Date(v||'');if(isNaN(d))return '';try{const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d),g=t=>(p.find(x=>x.type===t)||{}).value;return g('year')+'-'+g('month')+'-'+g('day')}catch(e){return ymd(d)}}
+function ilMonth(){return(ilDay(new Date())||ymd(new Date())).slice(0,7)}
+var SUPC={e_sup:'sup',e_bak:'bak'},SUPN={sup:'ספקים',bak:'ספקים אפייה'},SUPK='lp-supinv',SUPS={t:0,b:0,again:0,full:0},SUPW={L:null,b:0,err:''};
+function supHash(s){let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;return(h>>>0).toString(36)}
+const supDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'')?v:'';
+function supWant(){const M=ilMonth(),o={},ok=id=>/^[A-Za-z0-9_-]{1,120}$/.test(id);
+ for(const t of S.tx){if(t.t!=='exp'||!SUPC[t.cat]||t.kind==='refund'||!ok(String(t.id)))continue;const d=supDate(t.date),at=ilDay(t.ts);if((d||at).slice(0,7)!==M)continue;
+  const s=subById(t.sub),m=/^הוכנס על ידי ([^·]+)/.exec(t.note||'');
+  o[t.id]={f:{c:SUPC[t.cat],n:(s&&s.name)||t.desc||'',d,at,a:String(rnd(num(t.amt))),inv:t.inv||(t.dn?'תעודת משלוח':''),by:m?s_(m[1]):'מנהל',pend:'',src:String(t.src||''),m:M},fk:t.file||''}}
+ for(const it of S.inbox){const x=it.d||{};if(!SUPC[x.cat]||!ok('p'+it.id))continue;const d=supDate(x.date),at=ilDay(it.at);if((d||at).slice(0,7)!==M)continue;
+  o['p'+it.id]={f:{c:SUPC[x.cat],n:x.subName||'',d,at,a:String(rnd(num(x.amt))),inv:x.inv||(x.dn?'תעודת משלוח':''),by:it.by||'',pend:'1',src:String(it.id),m:M},fk:it.file||''}}
+ for(const k in o){o[k].fh=supHash(o[k].fk);o[k].h=supHash(JSON.stringify(o[k].f)+'|'+o[k].fh)}return o}
+const supSave=C=>{try{localStorage.setItem(SUPK,JSON.stringify(C))}catch(e){}};
+function supSched(){if(!SUPS||!isA())return;clearTimeout(SUPS.t);SUPS.t=setTimeout(()=>{supSync().catch(e=>{try{console.warn('supinv',e&&e.message)}catch(z){}})},3000)}
+async function supSync(){if(!isA()||Date.now()<(SUPS.off||0))return;if(SUPS.b){SUPS.again=1;return}SUPS.b=1;try{
+ let C={};try{C=JSON.parse(localStorage.getItem(SUPK))||{}}catch(e){}
+ if(!SUPS.full){const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'supinv'}],select:{fields:[{fieldPath:'h'},{fieldPath:'fh'},{fieldPath:'np'}]},limit:5000}})});
+  C={};(r||[]).filter(x=>x.document).forEach(x=>{C[idOf(x.document)]={h:gv(x.document,'h'),fh:gv(x.document,'fh'),np:+gv(x.document,'np')||0}});SUPS.full=1;supSave(C)}
+ const W=supWant();
+ for(const id of Object.keys(C))if(!W[id]){await supDel(id,0,C[id].np);delete C[id];supSave(C)}
+ for(const id of Object.keys(W)){const w=W[id],c=C[id];if(c&&c.h===w.h)continue;
+  let np=c&&c.fh===w.fh?c.np:0;
+  if(!c||c.fh!==w.fh){let file='';if(w.fk){try{file=await fget(w.fk)||''}catch(e){}}np=Math.ceil(file.length/CH);if(np>12)np=0;
+   for(let k=0;k<np;k++)await fsx('/supinv/'+id+'/p/'+k,{method:'PATCH',body:JSON.stringify({fields:{data:sv(file.slice(k*CH,(k+1)*CH))}})});
+   if(c&&c.np>np)await supDel(id,np,c.np,1)}
+  const fields={};for(const k in w.f)fields[k]=sv(w.f[k]);Object.assign(fields,{np:sv(np),h:sv(w.h),fh:sv(w.fh)});
+  await fsx('/supinv/'+id,{method:'PATCH',body:JSON.stringify({fields})});C[id]={h:w.h,fh:w.fh,np};supSave(C)}
+ }catch(e){if(e.code===403)SUPS.off=Date.now()+6e5;throw e}finally{SUPS.b=0;if(SUPS.again){SUPS.again=0;supSched()}}}
+/* מחיקה: חלקי התמונה מ-from עד to, ואז המסמך עצמו (אלא אם partsOnly) */
+async function supDel(id,from,to,partsOnly){for(let k=from;k<to;k++)await fsx('/supinv/'+id+'/p/'+k,{method:'DELETE'});
+ if(!partsOnly)await fsx('/supinv/'+id,{method:'DELETE'})}
+window.addEventListener('online',()=>{try{supSched()}catch(e){}});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')try{supSched()}catch(e){}});
+try{supSched()}catch(e){}
+/* ---- מסך העובד: חשבוניות ספקים של החודש ---- */
+ACT.supGo=()=>{WS='sinv';SUPW={L:null,b:0,err:''};rerender();supLoad()};
+ACT.supRefresh=()=>{supLoad()};
+async function supLoad(){if(SUPW.b)return;SUPW.b=1;SUPW.err='';rerender();try{const M=ilMonth();
+ const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'supinv'}],where:{fieldFilter:{field:{fieldPath:'m'},op:'EQUAL',value:{stringValue:M}}},select:{fields:['c','n','d','at','a','inv','by','pend','src','np'].map(f=>({fieldPath:f}))},limit:2000}})});
+ const L=(r||[]).filter(x=>x.document).map(x=>{const d=x.document;return{id:idOf(d),c:gv(d,'c'),n:gv(d,'n'),d:gv(d,'d'),at:gv(d,'at'),a:num(gv(d,'a')),inv:gv(d,'inv'),by:gv(d,'by'),pend:gv(d,'pend')==='1',src:gv(d,'src'),np:+gv(d,'np')||0}});
+ /* מה שהעובד עצמו שלח והמנהל עוד לא קיבל: מהרשימה שלו (inbox, רק שלו) */
+ const srcs=new Set(L.map(x=>x.src).filter(Boolean));let mine=[];try{mine=await runQ('owner',SY.uid)}catch(e){}
+ for(const d of mine){const id=idOf(d);if(gv(d,'status')!=='new'||srcs.has(id))continue;let x={};try{x=JSON.parse(gv(d,'data'))}catch(e){}if(!SUPC[x.cat])continue;
+  const dd=supDate(x.date),at=ilDay(gv(d,'created'));if((dd||at).slice(0,7)!==M)continue;
+  L.push({id,own:1,c:SUPC[x.cat],n:x.subName||'',d:dd,at,a:num(x.amt),inv:x.inv||(x.dn?'תעודת משלוח':''),by:gv(d,'by'),pend:true,np:+gv(d,'parts')||0})}
+ L.sort((a,b)=>((b.d||b.at)||'').localeCompare((a.d||a.at)||'')||(b.at||'').localeCompare(a.at||''));SUPW.L=L}
+ catch(e){SUPW.err=e.offline?e.message:(e.code===403?'אין הרשאה לצפות בחשבוניות (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message)}
+ finally{SUPW.b=0}if(WS==='sinv'&&cur().v==='wk')rerender()}
+ACT.supImg=async el=>{const x=(SUPW.L||[]).find(z=>z.id===el.dataset.id);if(!x||!x.np)return;toast('טוען צילום...');let du='';
+ try{for(let k=0;k<x.np;k++){const c=x.own?await fsx('/chunks/'+x.id+'_'+k):await fsx('/supinv/'+x.id+'/p/'+k);du+=gv(c,'data')}}catch(e){return toast(e.offline?e.message:'טעינת הצילום נכשלה')}
+ viewImg('','LargePami_'+x.id,du)};
+function supView(){const L=SUPW.L,M=ilMonth(),T=c=>rnd(sum((L||[]).filter(x=>!c||x.c===c),x=>x.a));
+ const head=`<button class="btn g" style="margin-bottom:10px" data-a="wkGoExp">‹ חזרה</button>`;
+ if(!L)return{t:'חשבוניות ספקים',s:mfmt(M),h:head+(SUPW.err?`<div class="card"><p class="note">${esc(SUPW.err)}</p><button class="btn g" data-a="supRefresh">נסה שוב</button></div>`:'<p class="note" style="padding:16px">טוען...</p>')};
+ const row=(l,v,b)=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0${b?';border-top:1px solid var(--line);margin-top:4px;padding-top:8px':''}"><span>${l}</span><b>${ils(v)}</b></div>`;
+ return{t:'חשבוניות ספקים',s:mfmt(M)+' · '+L.length+' חשבוניות',h:head+`<div class="card">${row('סה"כ ספקים',T('sup'))}${row('סה"כ ספקים אפייה',T('bak'))}${row('סה"כ',T(''),1)}
+ <p class="note" style="margin-top:6px">לפי תאריך החשבונית, החודש הנוכחי בלבד. בתחילת כל חודש הרשימה מתחילה מחדש.${L.some(x=>x.pend)?' כולל חשבוניות שממתינות לאישור המנהל.':''}</p></div>
+ ${SUPW.err?`<p class="note">${esc(SUPW.err)}</p>`:''}<div class="sec"><h3>החשבוניות</h3><button class="btn s g" data-a="supRefresh" ${SUPW.b?'disabled':''}>${SUPW.b?'טוען...':'רענן'}</button></div>
+ ${L.length?L.map(x=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.n||'ספק')}</b><small>${esc(SUPN[x.c]||'')} · ${x.d?esc(dfmt(x.d)):esc(dfmt(x.at))+' (אין תאריך חשבונית – לפי תאריך ההכנסה)'}${x.inv?' · <span style="white-space:nowrap">מס׳ '+esc(x.inv)+'</span>':''}</small><small>הכניס: ${esc(x.by||'')}</small>
+ <div style="margin-top:4px">${x.pend?'<span class="tag t1">ממתין לאישור</span>':''}${x.a<0?'<span class="tag t2">זיכוי</span>':''}</div></div>
+ <div class="a">${ils(x.a)}${x.np?`<button class="btn s g" style="display:block;margin-top:6px" data-a="supImg" data-id="${esc(x.id)}">תמונה</button>`:''}</div></div>`).join(''):'<p class="note">אין חשבוניות ספקים בחודש הזה.</p>'}`}}
 </script><script src="yemot-promo.js"></script>
 </body></html>

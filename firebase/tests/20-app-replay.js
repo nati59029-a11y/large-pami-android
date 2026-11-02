@@ -267,6 +267,43 @@ const REPLAY = {
     }
     return [r];
   } },
+
+  // ---- חשבוניות ספקים לעובד (supinv) ----
+  // supSync: המנהל קורא מה כבר בענן (רק טביעות, בלי תמונה)
+  M53: { run: async (uid) => {
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'supinv' }], select: { fields: [{ fieldPath: 'h' }, { fieldPath: 'fh' }, { fieldPath: 'np' }] }, limit: 5000 } }) });
+    if (r.status === 200) assert.ok((r.json || []).some((x) => x.document && x.document.name.endsWith('/supinv/s1')));
+    return [r];
+  } },
+  // supSync: חלק צילום – פעם ראשונה ופעם שנייה
+  M54: { run: async (uid) => {
+    const put = () => fsx(uid, '/supinv/' + 's1' + '/p/' + 1, { method: 'PATCH', body: JSON.stringify({ fields: { data: sv('data:image/jpeg;base64,' + 'A'.repeat(1000)) } }) });
+    return [await put(), await put()];
+  } },
+  // supSync: המסמך עצמו, בדיוק השדות של האפליקציה – חדש ועדכון
+  M55: { run: async (uid) => {
+    const f = { c: 'sup', n: 'אריזות פלוס', d: '2026-11-02', at: '2026-11-02', a: '-300', inv: '77', by: 'dani', pend: '1', src: 'w123', m: '2026-11', np: '1', h: 'abc', fh: 'def' };
+    const fields = {}; for (const k in f) fields[k] = sv(f[k]);
+    const id = fresh('s');
+    return [await fsx(uid, '/supinv/' + id, { method: 'PATCH', body: JSON.stringify({ fields }) }), await fsx(uid, '/supinv/' + id, { method: 'PATCH', body: JSON.stringify({ fields }) })];
+  } },
+  M56: { run: async (uid) => [await fsx(uid, '/supinv/' + 's1' + '/p/' + 0, { method: 'DELETE' })] },
+  M57: { run: async (uid) => [await fsx(uid, '/supinv/' + 's1', { method: 'DELETE' })] },
+  // supLoad: העובד – החודש, בלי תמונה
+  M58: { run: async (uid) => {
+    const F = ['c', 'n', 'd', 'at', 'a', 'inv', 'by', 'pend', 'src', 'np'];
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'supinv' }], where: { fieldFilter: { field: { fieldPath: 'm' }, op: 'EQUAL', value: { stringValue: '2026-11' } } }, select: { fields: F.map((f) => ({ fieldPath: f })) }, limit: 2000 } }) });
+    if (r.status === 200) {
+      const docs = (r.json || []).filter((x) => x.document);
+      assert.equal(docs.length, 1, 'העובד צריך לראות את החשבונית של החודש');
+      assert.ok(!('h' in docs[0].document.fields) && !('data' in docs[0].document.fields), 'חזרו שדות שלא ביקשנו');
+    }
+    return [r];
+  } },
+  // supImg: צילום של הוצאה שהעובד עצמו שלח
+  M59: { run: async (uid) => [await fsx(uid, '/chunks/' + `c_${uid}` + '_' + 0)] },
+  // supImg: צילום מהענן
+  M60: { run: async (uid) => [await fsx(uid, '/supinv/' + 's1' + '/p/' + 0)] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,
