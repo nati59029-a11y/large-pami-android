@@ -2618,7 +2618,7 @@ const ABK_K='lp-abk',ABK_KEEP=30,ABK_MIN_GAP=15*60e3,ABK_TRY_GAP=30*60e3,ABK_DAY
    בבנייה ב-GitHub: אם הוגדר המשתנה FIREBASE_STORAGE_BUCKET, הבנייה כותבת אותו כאן במקום ברירת המחדל (main.yml, "Storage bucket name"),
    ושלב ההעלאה לוקח את השם מכאן, כך שהאפליקציה וההעלאה תמיד משתמשות באותו שם. השורה חייבת להתחיל ב-const ST_BUCKET=.
    ברירת המחדל לא מאומתת: צריך לבדוק בלוח הבקרה של Firebase ← Storage. באמולטור: demo-largpeami */
-const ST_BUCKET='largpeami.appspot.com';
+const ST_BUCKET='largpeami.firebasestorage.app';
 const ABK_BUCKET=()=>EMU?FB.projectId:ST_BUCKET;
 const STB=()=>(EMU?`http://${EMU}:9199`:'https://firebasestorage.googleapis.com')+'/v0/b/'+encodeURIComponent(ABK_BUCKET())+'/o';
 /* עדכוני APK מ-Storage (app_releases/latest/): קובץ גרסה (version.json) ו-APK. מותר רק לעובד פעיל או למנהל מחובר (storage.rules).

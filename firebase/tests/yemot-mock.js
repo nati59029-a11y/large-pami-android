@@ -56,7 +56,9 @@ function start(port) {
       if (mode === 'exception') return reply(res, 200, { responseStatus: 'EXCEPTION', exceptionClass: 'IllegalArgumentException', exceptionMessage: 'bad token ' + auth });
       if (mode === 'error') return reply(res, 200, { yemotAPIVersion: 7, responseStatus: 'ERROR', message: 'token ' + auth + ' is incorrect', messageCode: 1 });
       if (cmd === 'GetIVR2Dir') {
-        const dir = state.dirs[String(body.path)];
+        // כמו ימות האמיתי (נצפה 02.11.2026): path ריק מחזיר EXCEPTION. השורש = '/'
+        if (String(body.path) === '') return reply(res, 200, { responseStatus: 'EXCEPTION', exceptionClass: 'IllegalArgumentException' });
+        const dir = state.dirs[String(body.path) === '/' ? '' : String(body.path)];
         if (!dir) return reply(res, 200, { responseStatus: 'ERROR', message: 'no dir' });
         const files = [...dir.keys()].sort().map((name) => ({ exists: true, name, what: `ivr2:${body.path}/${name}`, fileType: 'tts', size: 10 }));
         return reply(res, 200, OK({ thisPath: String(body.path), files, ini: [], dirs: [] }));
