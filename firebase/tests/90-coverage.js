@@ -114,9 +114,9 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     const matches = [...t.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
     assert.equal(matches[matches.length - 1], '/{document=**}');
     assert.match(t, /match\s+\/\{document=\*\*\}\s*\{\s*allow read, write: if false;\s*\}\s*\}\s*\}\s*$/);
-    // אין אוספים נוספים מעבר ל-9 שבטבלה, משימות (tasks), ותגובות (c – מקונן בתוך tasks/{id})
+    // אין אוספים נוספים מעבר ל-9 שבטבלה, משימות (tasks), תגובות (c – מקונן בתוך tasks/{id}), ואוספי ימות החדשים (משימה 2026-11-02)
     const colls = matches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'bk', 'c', 'cfg', 'chunks', 'fb', 'inbox', 'shelf', 'staff', 'tasks']);
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'bk', 'c', 'cfg', 'chunks', 'fb', 'inbox', 'shelf', 'staff', 'tasks', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
   });
 

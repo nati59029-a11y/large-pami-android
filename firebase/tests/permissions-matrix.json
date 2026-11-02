@@ -163,6 +163,55 @@
         "delete":              "DDDDA"
       }
     },
+    "yemot_lexicon": {
+      "source": "חוזה 5.3, משימה 2026-11-02",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין (מקבל את המילון דרך getLineState)", "manager": "קריאה (get) וכתיבה של main בלבד: text עד 8000, updatedAt, updatedBy. בלי רשימה ובלי מחיקה" },
+      "ops": {
+        "get":                "DDDDA",
+        "list":               "DDDDD",
+        "create-main":        "DDDDA",
+        "update-main":        "DDDDA",
+        "create-other-id":    "DDDDD",
+        "create-extra-field": "DDDDD",
+        "create-too-long":    "DDDDD",
+        "create-other-uid":   "DDDDD",
+        "create-stale-time":  "DDDDD",
+        "delete":             "DDDDD"
+      }
+    },
+    "yemot_items": {
+      "source": "חוזה 5.3, משימה 2026-11-02 (רק השרת)",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
+      "ops": {
+        "get":    "DDDDD",
+        "list":   "DDDDD",
+        "create": "DDDDD",
+        "update": "DDDDD",
+        "delete": "DDDDD"
+      }
+    },
+    "yemot_line_backups": {
+      "source": "חוזה 5.3, משימה 2026-11-02 (רק השרת)",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
+      "ops": {
+        "get":    "DDDDD",
+        "list":   "DDDDD",
+        "create": "DDDDD",
+        "update": "DDDDD",
+        "delete": "DDDDD"
+      }
+    },
+    "yemot_hook_usage": {
+      "source": "חוזה 5.3, משימה 2026-11-02 (רק השרת)",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
+      "ops": {
+        "get":    "DDDDD",
+        "list":   "DDDDD",
+        "create": "DDDDD",
+        "update": "DDDDD",
+        "delete": "DDDDD"
+      }
+    },
     "_not_in_table": {
       "source": "3.3 – 'ברירת מחדל לכל אוסף שלא מופיע בטבלה: אין גישה לאף אחד'",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
