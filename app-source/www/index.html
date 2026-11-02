@@ -473,7 +473,7 @@ function sheetDraw(){
  const title={type:'מה מוסיפים?',scan:'חשבונית ספק',cat:'באיזו קטגוריה?',sub:c?'איזה '+(subWord(c)||'פריט')+'?':'',det:'פרטים'}[A.step];
  let body='';
  if(A.step==='type'){
-  body=`<div class="big2"><button class="tile inc" data-a="pick" data-k="type" data-v="inc">${ico('inc')}הכנסה</button><button class="tile exp" data-a="pick" data-k="type" data-v="exp">${ico('exp')}הוצאה</button></div>${typeof isA==='function'&&isA()?`<div class="big2" style="margin-top:10px"><button class="tile" data-a="addGo" data-v="shelf" style="font-size:1rem">🏷️<br>מחירים ומבצעים למדף</button><button class="tile" data-a="addGo" data-v="fb" style="font-size:1rem">📝<br>משוב לקוחות</button></div><button class="tile" data-a="addGo" data-v="tk" style="font-size:1rem;width:100%;margin-top:10px">✅ משימה חדשה</button>`:''}`}
+  body=`<div class="big2"><button class="tile inc" data-a="pick" data-k="type" data-v="inc">${ico('inc')}הכנסה</button><button class="tile exp" data-a="pick" data-k="type" data-v="exp">${ico('exp')}הוצאה</button></div>${typeof isA==='function'&&isA()?`<div class="big2" style="margin-top:10px"><button class="tile" data-a="addGo" data-v="shelf" style="font-size:1rem">🏷️<br>מחירים ומבצעים למדף</button><button class="tile" data-a="addGo" data-v="fb" style="font-size:1rem">📝<br>משוב לקוחות</button></div><button class="tile" data-a="addGo" data-v="tk" style="font-size:1rem;width:100%;margin-top:10px">✅ משימה חדשה</button>${window.ylTile?'<button class="tile" data-a="addGo" data-v="yl" style="font-size:1rem;width:100%;margin-top:10px">📞<br>שלוחות הקו</button>':''}`:''}`}
  else if(A.step==='cat'){
   body=catsOf(A.type).map(x=>`<button class="opt" data-a="pick" data-k="cat" data-v="${x.id}"><span>${esc(x.name)}</span>${ico('chev')}</button>`).join('')+`<button class="opt add" data-a="newCatFromSheet"><span>＋ קטגוריה חדשה</span></button>`}
  else if(A.step==='scan'){
@@ -1456,7 +1456,7 @@ V.wk=()=>{if(WS==='sinv')return supView();const cf=cfgLocal(),cs=cf.cats||[],ob=
  if(WS==='home'){
   const off=`<button class="tile" disabled style="opacity:.45;cursor:default">🚧<br><small>בבנייה</small></button>`;
   return{t:'לארג׳ פעמי',s:esc((SY.email||'').split('@')[0]),h:`${cs.length?'':'<div class="card"><p class="note">עדיין לא התקבלו קטגוריות מהמנהל. בדוק חיבור ולחץ "רענן".</p></div>'}
-  ${dpBan()}<div class="big2" style="grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 16px"><button class="tile exp" data-a="wkGoExp">${ico('exp')}הוצאה</button>${shTile}${fbTile}${tkTile()}${ordOn()?ordTile:''}${arTile()}${zcTile()}${dpTile()}${off.repeat(ordOn()?0:1)}</div>
+  ${dpBan()}<div class="big2" style="grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 16px"><button class="tile exp" data-a="wkGoExp">${ico('exp')}הוצאה</button>${shTile}${fbTile}${tkTile()}${window.ylTile?ylTile():''}${ordOn()?ordTile:''}${arTile()}${zcTile()}${dpTile()}${off.repeat((1+(window.ylTile?1:0)+(ordOn()?1:0))%2)}</div>
   ${sent}<button class="btn g" style="width:100%;margin-top:14px" data-a="updChk">בדוק עדכון והתקן</button><button class="btn g" style="width:100%;margin-top:8px" data-a="syOut">התנתק</button>`}}
  if(WS==='exp'){
   return{t:'הוצאה',s:'סריקה או הכנסה ידנית',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>${dpBan()}
@@ -1897,7 +1897,7 @@ V.shPromo=()=>{if(!SHP)SHP=shpNew();const q=SHP,sizes=[['p8','8 בעמוד'],['p
  <div style="display:flex;gap:8px;align-items:flex-end">${fld('ברקוד (לזכירת המוצר)','bc',SHP.bc||'','text','data-i="shp" inputmode="numeric" autocomplete="off"')}<label class="btn g" style="cursor:pointer;margin-bottom:12px;white-space:nowrap">סרוק<input type="file" accept="image/*" capture="environment" data-c="shbcf" data-kind="promo" hidden></label></div>${offer}${fld('בתוקף עד (אופציונלי)','vf',q.vf,'date','data-i="shp"')}</div>
  <div class="sec"><h3>כך ייראה הפתק</h3></div><img id="shPrev" alt="תצוגה מקדימה" style="width:100%;border-radius:6px;background:#fff;border:1px solid var(--line)">
  <p class="note" style="text-align:center;margin:10px 0">${q.edit>=0?'עדכון':'יתווסף כמבצע'} ${pos} מתוך ${SHC[q.size].cap}</p>
- <div class="row"><button class="btn grow">${q.edit>=0?'שמירה':'אישור והוספה'}</button><button type="button" class="btn g grow" data-a="shCancel">ביטול</button></div></form>`}};
+ <div class="row"><button class="btn grow">${q.edit>=0?'שמירה':'אישור והוספה'}</button><button type="button" class="btn g grow" data-a="shCancel">ביטול</button></div>${window.ymSaveBtns?ymSaveBtns():''}</form>`}};
 ACT.shPManual=()=>{SHP.mode='form';SHP.bc=shSl('promo').code||'';SHS.promo={};rerender()};
 FRM.shpromo=()=>{const q=SHP,it=shpItem();if(!it.n)return toast('חסר שם מוצר');
  if(it.kind==='A'){if(!(it.k>=2))return toast('הכמות צריכה להיות 2 ומעלה');if(!(it.tot>0))return toast('הקלד מחיר כולל')}else{if(!(it.now>0))return toast('הקלד מחיר מבצע');if(!(it.reg>0))return toast('הקלד מחיר רגיל');if(it.reg<=it.now)return toast('המחיר הרגיל צריך להיות גבוה ממחיר המבצע')}
@@ -2690,7 +2690,7 @@ const ABK_K='lp-abk',ABK_KEEP=30,ABK_MIN_GAP=15*60e3,ABK_TRY_GAP=30*60e3,ABK_DAY
    בבנייה ב-GitHub: אם הוגדר המשתנה FIREBASE_STORAGE_BUCKET, הבנייה כותבת אותו כאן במקום ברירת המחדל (main.yml, "Storage bucket name"),
    ושלב ההעלאה לוקח את השם מכאן, כך שהאפליקציה וההעלאה תמיד משתמשות באותו שם. השורה חייבת להתחיל ב-const ST_BUCKET=.
    ברירת המחדל לא מאומתת: צריך לבדוק בלוח הבקרה של Firebase ← Storage. באמולטור: demo-largpeami */
-const ST_BUCKET='largpeami.appspot.com';
+const ST_BUCKET='largpeami.firebasestorage.app';
 const ABK_BUCKET=()=>EMU?FB.projectId:ST_BUCKET;
 const STB=()=>(EMU?`http://${EMU}:9199`:'https://firebasestorage.googleapis.com')+'/v0/b/'+encodeURIComponent(ABK_BUCKET())+'/o';
 /* עדכוני APK מ-Storage (app_releases/latest/): קובץ גרסה (version.json) ו-APK. מותר רק לעובד פעיל או למנהל מחובר (storage.rules).
@@ -3407,5 +3407,5 @@ ACT.dqDel=el=>{const it=((DQ&&DQ.L)||[]).find(z=>z.id===el.dataset.id);if(!it)re
  for(let k=0;k<it.np;k++){try{await fsx('/deposits/'+it.id+'/p/'+k,{method:'DELETE'})}catch(e){}}
  DQ.L=DQ.L.filter(z=>z.id!==it.id);DPQ.at=0;toast('האישור נמחק');dpLoad().then(dpRe).catch(()=>{});rerender()},'מחק')};
 try{coSched()}catch(e){}
-</script><script src="yemot-promo.js"></script>
+</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script>
 </body></html>

@@ -5,7 +5,8 @@
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore } = require('firebase-admin/firestore');
-const PROMPTS = require('./prompts');
+// prompts.js נוצר אוטומטית מהאפליקציה; ההנחיה של recipe קיימת רק בשרת (prompts-recipe.js)
+const PROMPTS = Object.assign({}, require('./prompts'), require('./prompts-recipe'));
 
 // ---------- סוגי זיהוי (מה האפליקציה מזהה היום) ----------
 // invoice  = ocrAI  (חשבונית / תעודת משלוח), עד 4 עמודים, temperature 0
@@ -24,10 +25,12 @@ const KINDS = Object.freeze({
   zreport: { allowedCounts: [3], minFiles: 3, maxFiles: 3, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
   opening: { minFiles: 1, maxFiles: 1, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
   deposit: { minFiles: 1, maxFiles: 1, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
+  // recipe = מתכון מצילום (שלוחה 1), גם כתב יד: תמונה אחת או שתיים, מודל "pro", כמו משוב
+  recipe: { minFiles: 1, maxFiles: 2, temperature: 0.1, pro: true, timeoutMs: 150000, budgetMs: 135000 },
 });
 // בדיקת סוג הזיהוי מול רשימה קבועה בלבד. Object.hasOwn ולא KINDS[kind], כי KINDS[kind] "מוצא" גם שמות
 // שכל אובייקט ב-JavaScript מכיר מעצמו (__proto__, constructor, toString…) – פרצה שהבודק מצא בסבב 1.
-const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening', 'deposit']);
+const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening', 'deposit', 'recipe']);
 function isKind(kind) {
   return typeof kind === 'string' && KIND_NAMES.includes(kind) && Object.hasOwn(KINDS, kind) && Object.hasOwn(PROMPTS, kind);
 }
@@ -36,8 +39,8 @@ function kindCfg(kind) {
   return KINDS[kind];
 }
 // כמה זמן הטלפון מחכה לתשובה מ-scanDocument (לפי קוד האפליקציה בשלב 4, כפי שהועבר מהמתאם): חשבונית ומוצר 120 שניות, משוב 150.
-// סגירת קופה (zreport, opening): 120 שניות (zcAI באפליקציה). אישור הפקדה (deposit): 120 שניות (dpScan).
-const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000 };
+// סגירת קופה (zreport, opening): 120 שניות (zcAI באפליקציה). אישור הפקדה (deposit): 120 שניות (dpScan). מתכון (recipe): 150.
+const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, recipe: 150000 };
 
 // באמולטור בלבד: אפשר לקצר את כל הזמנים באותו יחס (SCAN_TIME_SCALE), כדי שבדיקות התקציב לא יחכו 100 שניות.
 // מחוץ לאמולטור היחס תמיד 1.

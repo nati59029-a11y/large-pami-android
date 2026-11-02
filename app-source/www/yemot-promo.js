@@ -7,6 +7,7 @@
 const YM_DEFAULT_DAYS=7,YM_MAX_DAYS=60,YM_TEXT_MAX=400; // לפי חוזה השמות (שלב 1)
 const YM_BASE=()=>(typeof EMU!=='undefined'&&EMU)?`http://${EMU}:5001/${FB.projectId}/us-central1`:`https://us-central1-${FB.projectId}.cloudfunctions.net`;
 const YM_MSG={ // הודעות לפי reason מהחוזה; כולן בעברית
+ 'voice-unavailable':'הקול האנושי לא זמין כרגע. אפשר לשלוח בקול הממוחשב, או לנסות שוב מאוחר יותר.','voice-quota':'הגענו לתקרת הקול האנושי לחודש הזה.',
  'daily-limit':'כבר שלחת היום צינתוק לנרשמים. סימנו "בלי צינתוק": אפשר לשלוח כך עכשיו, לשלוח עם צינתוק מחר, או לבקש ממנהל.',
  'line-full':'אין מקום לעוד מבצעים בשלוחה. פנו למנהל.',
  'yemot-upload-failed':q=>'העלאת ההודעה לקו נכשלה'+(q&&q.withTz?', ולא נשלח צינתוק':'')+'. נסו שוב מאוחר יותר.',
@@ -53,18 +54,20 @@ function ymDraw(){
  if(cn)cn.disabled=Q.busy;
  if(w){w.textContent=Q.busy?'':bad;w.style.display=bad?'':'none'}
  if(c)c.textContent=Q.text.trim().length+' / '+YM_TEXT_MAX}
-function ymOpen(k,i){
+function ymOpen(k,i,opts){
+ opts=opts||{}; // opts.builder: נפתח מ"שמור ושלח לקו" במסך בניית מבצע (בלי בחירת צינתוק בחלון; opts.withTz נקבע בכפתור)
  const it=SH&&SH[k]&&SH[k].items&&SH[k].items[i];if(!it){toast('המבצע לא נמצא');return}
  const today=isoDay(new Date());let until=it.vf||'',note='';
  if(until&&until<today){until='';note='תאריך התוקף של המבצע כבר עבר. בחרו תאריך הורדה חדש.'}
  if(!YM_ID.test(it.ym||'')){it.ym='pk'+ymRand();shTouch(k)} // promoKey נוצר פעם אחת לכל מבצע ונשמר (גם בסנכרון)
- Q={k,i,it,key:it.ym,until,fromVf:!!(it.vf&&until),edited:false,busy:false,withTz:typeof SY!=='undefined'&&!!SY&&SY.role==='admin',tzBlocked:false,rid:null,sig:null,note,text:''};
+ Q={k,i,it,key:it.ym,until,fromVf:!!(it.vf&&until),edited:false,busy:false,builder:!!opts.builder,withTz:opts.builder?(opts.withTz===true&&typeof SY!=='undefined'&&!!SY&&SY.role==='admin'):typeof SY!=='undefined'&&!!SY&&SY.role==='admin',tzBlocked:false,rid:null,sig:null,note,text:''};
  Q.text=ymText(it,until);
  const chips=[7,14,30].map(n=>`<button type="button" class="chip" data-a="ymDays" data-v="${n}">${n===YM_DEFAULT_DAYS?n+' ימים (מומלץ)':n+' ימים'}</button>`).join('');
  dlg(`<h3>שליחת מבצע לקו</h3><form data-f="ymform" onsubmit="return false">
- <p class="note" style="margin:0 0 12px">המבצע יעלה לשלוחת המבצעים. בחרו אם לשלוח גם צינתוק לנרשמים, ובדקו את הנוסח לפני האישור.</p>
+ <p class="note" style="margin:0 0 12px">${Q.builder?'המבצע נשמר במכשיר. בדקו את הנוסח, ואשרו כדי להעלות אותו לשלוחת המבצעים.':'המבצע יעלה לשלוחת המבצעים. בחרו אם לשלוח גם צינתוק לנרשמים, ובדקו את הנוסח לפני האישור.'}</p>
  <label class="f"><span>הנוסח שיוקרא בקו</span><textarea id="ymTxt" name="text" rows="5">${esc(Q.text)}</textarea><span class="note" dir="ltr" id="ymCnt" style="text-align:left;margin:4px 0 0"></span></label>
- <label class="f"><span>מה לעשות</span><div class="chips" id="ymMode"></div><span class="note" id="ymCost" style="display:block;margin:4px 0 0">צינתוק מהאפליקציה עולה יחידות לכל נרשם. צינתוק חינמי – מהטלפון בשלוחת הניהול.</span><span class="note" id="ymTzNote" style="color:var(--warn);display:none"></span></label>
+ ${Q.builder&&window.ypButton?`<div style="margin:0 0 12px">${ypButton('ymTxt')}</div>`:''}
+ ${Q.builder?`<p class="note" id="ymBMode" style="margin:0 0 12px;font-weight:700">${Q.withTz?'יעלה לקו, ויישלח צינתוק לנרשמים (עולה יחידות).':'יעלה לקו, בלי צינתוק.'}</p>`:`<label class="f"><span>מה לעשות</span><div class="chips" id="ymMode"></div><span class="note" id="ymCost" style="display:block;margin:4px 0 0">צינתוק מהאפליקציה עולה יחידות לכל נרשם. צינתוק חינמי – מהטלפון בשלוחת הניהול.</span><span class="note" id="ymTzNote" style="color:var(--warn);display:none"></span></label>`}
  <label class="f"><span>${it.vf&&Q.until?'תאריך הורדה (לפי תוקף המבצע)':'מתי להוריד את המבצע מהקו?'}</span><input id="ymDate" name="until" type="date" value="${esc(Q.until)}" min="${today}" max="${addDays(today,YM_MAX_DAYS)}"></label>
  <div class="chips" style="margin:0 0 12px">${chips}</div>
  ${note?`<p class="note" style="color:var(--warn);font-weight:700;margin:6px 0">${esc(note)}</p>`:''}
@@ -76,7 +79,8 @@ function ymOpen(k,i){
  d.addEventListener('cancel',e=>{if(Q&&Q.busy)e.preventDefault()},{once:true});
  d.addEventListener('close',()=>{if(Q&&!Q.busy)Q=null},{once:true});
  ymDraw();ymStatus(Q)}
-async function ymStatus(q){ // האם העובד עוד יכול לצנתק היום (בלי פנייה לימות). כשל = לא משנים כלום, השרת אוכף ממילא
+async function ymStatus(q){
+ if(q&&q.builder)return; // במסך החדש אין בחירת צינתוק לעובד, ואין צורך לשאול // האם העובד עוד יכול לצנתק היום (בלי פנייה לימות). כשל = לא משנים כלום, השרת אוכף ממילא
  if(typeof SY!=='undefined'&&SY&&SY.role==='admin')return; // מנהל: אין מגבלה, לא צריך לשאול
  try{const r=await ymCall({statusOnly:true});const t=r&&r.tzintukToday;
   if(Q!==q||q.busy||!t)return;
@@ -96,9 +100,9 @@ async function ymCall(data){
  if(!r.ok||!j||j.error){const er=(j&&j.error)||{};const x=new Error('send');x.reason=er.details&&er.details.reason;x.status=er.status;x.msg=er.message;throw x}
  return j.result}
 function ymSend(q){
- const text=q.text.trim(),sig=JSON.stringify([text,q.until,q.withTz]);
+ const text=q.text.trim(),sig=JSON.stringify([text,q.until,q.withTz,q.engine||'']);
  if(!q.rid||q.sig!==sig){q.rid='ym'+ymRand();q.sig=sig} // אותו תוכן = אותו requestId בניסיון חוזר; תוכן אחר = חדש
- return ymCall({requestId:q.rid,promoKey:q.key,text,until:q.until,withTzintuk:q.withTz===true,source:{size:q.k,index:q.i,name:String(q.it.n||'').slice(0,80)}})}
+ return ymCall({requestId:q.rid,promoKey:q.key,text,until:q.until,withTzintuk:q.withTz===true,...(q.builder?{origin:'builder'}:{}),...(q.engine?{engine:q.engine}:{}),source:{size:q.k,index:q.i,name:String(q.it.n||'').slice(0,80)}})}
 const ymDone=(res,wt)=>res&&typeof res.message==='string'&&/[֐-׿]/.test(res.message)?res.message:res&&res.duplicate?'המבצע הזה כבר נשלח.':wt&&res&&res.tzintuk==='failed'?'ההודעה עלתה לקו, אבל הצינתוק לנרשמים לא נשלח.':wt?'✓ המבצע נשלח לקו, ונשלח צינתוק לנרשמים.':'✓ המבצע הועלה לקו, בלי צינתוק.';
 ACT.ymSend=el=>ymOpen(el.dataset.k,+el.dataset.i);
 ACT.ymCancel=()=>{if(Q&&Q.busy)return;Q=null;closeDlg()};
@@ -108,8 +112,30 @@ ACT.ymConfirm=async()=>{
  if(!Q||Q.busy||ymValid())return; // נעילה סינכרונית: לחיצה כפולה לא עוברת
  Q.busy=true;ymDraw();const q=Q;
  try{const res=await ymSend(q);if(res&&res.warnings&&res.warnings.length)console.warn('yemot warnings',res.warnings);Q=null;closeDlg();toast(ymDone(res,q.withTz))}
- catch(e){q.busy=false;if(e&&e.reason==='daily-limit'){q.tzBlocked=true;q.withTz=false}ymDraw();const w=document.getElementById('ymWhy');const m=ymErrMsg(e,q);if(w){w.textContent=m;w.style.display=''}toast(m)}};
+ catch(e){q.busy=false;
+  // הקול האנושי לא זמין / תקרה: לא עוברים לבד לקול הממוחשב – המשתמש בוחר (שני המסכים)
+  if(window.ypIsVoiceErr&&ypIsVoiceErr(e)&&window.ypChoice){ymVoiceChoice(q,e);return}
+  if(e&&e.reason==='daily-limit'){q.tzBlocked=true;q.withTz=false}ymDraw();const w=document.getElementById('ymWhy');const m=ymErrMsg(e,q);if(w){w.textContent=m;w.style.display=''}toast(m)}};
+function ymVoiceChoice(q,e){
+ ypChoice(e,{
+  onTts:async()=>{if(Q!==q)throw Object.assign(new Error('gone'),{userMsg:'החלון נסגר. פתחו את המבצע ושלחו שוב.'});
+   q.engine='tts';q.busy=true;
+   try{const res=await ymSend(q);Q=null;closeDlg();toast(ymDone(res,q.withTz))}
+   catch(err){q.busy=false;q.engine=null;err.userMsg=ymErrMsg(err,q);throw err}},
+  onLater:()=>{if(Q===q)Q=null}})}
 // עריכת מבצע (shAdd עם מקום קיים) יוצרת פריט חדש; שומרים עליו את promoKey, כדי שהשרת יחליף את הקובץ בקו ולא יוסיף עוד אחד
 if(typeof shAdd==='function'){const shAdd0=shAdd;window.shAdd=function(k,it,idx){try{const o=idx!=null&&idx>=0&&SH[k]&&SH[k].items&&SH[k].items[idx];if(o&&o.ym&&it&&!it.ym)it=Object.assign({},it,{ym:o.ym})}catch(e){}return shAdd0.call(this,k,it,idx)}}
+/* "שמור ושלח לקו" בטופס "מבצע למדף". לא משנים את FRM.shpromo: עוטפים אותו, והחלון נפתח אחרי ש-shAdd שמר את המבצע במכשיר.
+   כפתור "שמור, שלח לקו וצנתק" מוצג למנהל בלבד (הנוחות במסך; האכיפה בשרת). שמירה רגילה ("אישור והוספה") לא משתנה. */
+let YB=null; // {withTz, at}: נקבע בכל שליחת טופס (גם null בשמירה רגילה), כך שאין מצב תקוע
+const ymIsAdmin=()=>typeof SY!=='undefined'&&!!SY&&SY.role==='admin';
+window.ymSaveBtns=()=>`<div class="row" style="margin-top:8px"><button class="btn g grow" name="go" value="ym">שמור ושלח לקו</button>${ymIsAdmin()?'<button class="btn g grow" name="go" value="ymtz">שמור, שלח לקו וצנתק</button>':''}</div>`;
+if(typeof shAdd==='function'){const shAdd1=window.shAdd;window.shAdd=function(k,it,idx){const r=shAdd1.call(this,k,it,idx);
+ if(YB&&Date.now()-YB.at<60000&&k!=='price'&&typeof r==='number'){const b=YB;YB=null;setTimeout(()=>ymOpen(k,r,{builder:true,withTz:b.withTz}),0)}return r}}
+if(typeof FRM!=='undefined'&&FRM.shpromo){const f0=FRM.shpromo;FRM.shpromo=function(f,e){const v=e&&e.submitter&&e.submitter.value;
+ YB=v==='ym'||(v==='ymtz'&&ymIsAdmin())?{withTz:v==='ymtz',at:Date.now()}:null;
+ const r=f0.apply(this,arguments);const d=document.getElementById('dlg');if(!(d&&d.open))YB=null; // אם לא נפתח חלון אישור-החלפה, אין מה להשאיר
+ return r}}
+window.ymText=ymText; // נוסח המבצע האוטומטי – משותף גם למשבצת "שלוחות הקו" (yemot-line.js)
 window.ymBtn=(k,i)=>k==='price'?'':`<button class="btn s g" style="flex:0 0 100%" data-a="ymSend" data-k="${esc(k)}" data-i="${+i}">שלח לקו</button>`;
 })();

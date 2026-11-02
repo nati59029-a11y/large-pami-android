@@ -23,6 +23,15 @@ const depBatch = (db, me, id, items, coId) => { const b = db.batch(); b.set(db.d
 const newTask = (owner) => { const cr = Date.now(); return { owner, by: owner, role: 'w', txt: 'משימה', cr, due: cr + 4 * 86400000,
   st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }; };
 
+// אוסף שרק השרת כותב וקורא: כל פעולה של האפליקציה נחסמת (המסמך s1 נזרע בבדיקה עצמה, בלי כללים)
+const serverOnly = (c) => ({
+  'get':    async (db, me, env) => { await env.withSecurityRulesDisabled((x) => x.firestore().doc(c + '/s1').set({ status: 'live' })); return db.doc(c + '/s1').get(); },
+  'list':   (db) => db.collection(c).get(),
+  'create': (db) => db.doc(c + '/' + fresh('n')).set({ status: 'live' }),
+  'update': async (db, me, env) => { await env.withSecurityRulesDisabled((x) => x.firestore().doc(c + '/s1').set({ status: 'live' })); return db.doc(c + '/s1').update({ status: 'removed' }); },
+  'delete': async (db, me, env) => { await env.withSecurityRulesDisabled((x) => x.firestore().doc(c + '/s1').set({ status: 'live' })); return db.doc(c + '/s1').delete(); },
+});
+
 // איך מבצעים כל פעולה. db = Firestore של המשתמש; me = המזהה שלו ('nobody' לגולש).
 const OPS = {
   admins: {
@@ -246,6 +255,22 @@ const OPS = {
     'write-alone':             (db, me) => db.doc('zlast/i_nl').set({ d: '2026-10-22', tm: '', id: 'z1', uid: me, t: Date.now() }),
     'delete':                  (db) => db.doc('zlast/i_nl').delete(),
   },
+  // מילון ההגייה (מנהל בלבד, מסמך main). updatedAt במילישניות, כמו במשימות.
+  yemot_lexicon: {
+    'get':                async (db, me, env) => { await env.withSecurityRulesDisabled((x) => x.firestore().doc('yemot_lexicon/main').set({ text: 'א=ב', updatedAt: 1, updatedBy: 'u_mgr' })); return db.doc('yemot_lexicon/main').get(); },
+    'list':               (db) => db.collection('yemot_lexicon').get(),
+    'create-main':        (db, me) => db.doc('yemot_lexicon/main').set({ text: "לארג'=לארדז'", updatedAt: Date.now(), updatedBy: me }),
+    'update-main':        async (db, me, env) => { await env.withSecurityRulesDisabled((x) => x.firestore().doc('yemot_lexicon/main').set({ text: 'ישן', updatedAt: 1, updatedBy: 'u_mgr' })); return db.doc('yemot_lexicon/main').update({ text: 'א=ב', updatedAt: Date.now(), updatedBy: me }); },
+    'create-other-id':    (db, me) => db.doc('yemot_lexicon/other').set({ text: 'א=ב', updatedAt: Date.now(), updatedBy: me }),
+    'create-extra-field': (db, me) => db.doc('yemot_lexicon/main').set({ text: 'א=ב', updatedAt: Date.now(), updatedBy: me, role: 'manager' }),
+    'create-too-long':    (db, me) => db.doc('yemot_lexicon/main').set({ text: 'א'.repeat(8001), updatedAt: Date.now(), updatedBy: me }),
+    'create-other-uid':   (db) => db.doc('yemot_lexicon/main').set({ text: 'א=ב', updatedAt: Date.now(), updatedBy: H.OTHER }),
+    'create-stale-time':  (db, me) => db.doc('yemot_lexicon/main').set({ text: 'א=ב', updatedAt: Date.now() - 600000, updatedBy: me }),
+    'delete':             async (db, me, env) => { await env.withSecurityRulesDisabled((x) => x.firestore().doc('yemot_lexicon/main').set({ text: 'א=ב', updatedAt: 1, updatedBy: 'u_mgr' })); return db.doc('yemot_lexicon/main').delete(); },
+  },
+  yemot_items: serverOnly('yemot_items'),
+  yemot_line_backups: serverOnly('yemot_line_backups'),
+  yemot_hook_usage: serverOnly('yemot_hook_usage'),
   _not_in_table: {
     'get-orders':    (db) => db.doc('orders/o1').get(),
     'list-orders':   (db) => db.collection('orders').get(),

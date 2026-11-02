@@ -17,3 +17,7 @@ if (!fs.existsSync(f)) {
 }
 // מפתח דמה לימות המשיח (60-yemot.js) – מתווסף גם לקובץ קיים, בלי לדרוס ערכים אחרים
 if (!/^YEMOT_API_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nYEMOT_API_KEY=DUMMY-SECRET-yemot-7f3a\n');
+// סוד דמה לשלוחה 5 (tzintukJoin, 61-yemot-line.js) – באותה שיטה
+if (!/^YEMOT_HOOK_SECRET=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nYEMOT_HOOK_SECRET=DUMMY-HOOK-5b1e\n');
+// מפתח דמה ל-ElevenLabs (הקול המשוכפל, 61-yemot-line.js) – באותה שיטה
+if (!/^ELEVENLABS_API_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nELEVENLABS_API_KEY=DUMMY-ELEVEN-9c2d\n');

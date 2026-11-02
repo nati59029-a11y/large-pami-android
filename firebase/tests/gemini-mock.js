@@ -22,6 +22,7 @@ const ANSWERS = {
   opening: { register: '6328947', store: 'לארג\' פעמי-נחל לכיש', date: '2026-10-20', time: '09:11', total: 970.3 },
   // אישור הפקדה מהבנק (הצילום לדוגמה מ-17.10.2026)
   deposit: { date: '2026-10-17', time: '22:26', amount: 25000, bank: 'דיסקונט', account: '611131' },
+  recipe: { title: 'עוגת שמרים', text: 'עוגת שמרים. המצרכים: שתי כוסות קמח. אופן ההכנה: לערבב ולאפות.' },
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
 };
 
@@ -38,6 +39,7 @@ function kindOf(body) {
   if (s.includes('חשבונית מס')) return 'invoice';
   if (s.includes('טופס משוב לקוחות')) return 'feedback';
   if (s.includes('בתמונה מוצר')) return 'product';
+  if (s.includes('בתמונה מתכון')) return 'recipe';
   return 'unknown';
 }
 

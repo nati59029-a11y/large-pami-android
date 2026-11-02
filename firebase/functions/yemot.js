@@ -1,12 +1,15 @@
 'use strict';
 // שליחת מבצע לקו הטלפוני (ימות המשיח), שלוחה 2 "מבצעים".
-//   sendPromoToLine    – עובד פעיל או מנהל. מעלה קובץ tts חדש לשלוחה, ובאופן רשות שולח צינתוק לרשימה mivtzaim.
-//                        עם צינתוק: עובד – פעם ביום (שעון ישראל, נספר רק צינתוק שהצליח); מנהל – בלי הגבלה.
+//   sendPromoToLine    – עובד פעיל או מנהל. מעלה קובץ חדש לשלוחה (דרך lib/voice.js, אחרי מילון ההגייה), ובאופן רשות שולח צינתוק לרשימה mivtzaim.
+//                        עם צינתוק: עובד – פעם ביום (שעון ישראל, נספר רק צינתוק שהצליח); מנהל – בלי הגבלה. (מסך המבצעים הקיים – בלי שינוי, פ5=לא)
+//                        origin:'builder' (המסך החדש "שמור ושלח לקו"): עובד עם צינתוק נדחה (tzintuk-manager-only). בלי origin – ההתנהגות הקיימת.
+//                        manual:true – מבצע ידני (מנהל בלבד, בלי source, promoKey שמתחיל ב-man_).
 //                        בלי צינתוק: בלי הגבלה לאף אחד.
 //                        { statusOnly: true } – רק מחזיר אם המשתמש עוד יכול לשלוח צינתוק היום (בלי שום פנייה לימות).
 //                        promoKey – מזהה קבוע של המבצע: קובץ אחד לכל מבצע; ניסיון חוזר לא מעלה קובץ נוסף (פירוט למטה).
 //   expirePromosOnLine – כל לילה 00:15 שעון ישראל: מוחקת מהקו מבצעים שפג תוקפם. מוחקת רק קבצים שהיא עצמה העלתה.
 //   runExpiry(opts)    – הלב של ההורדה, מיוצא לבדיקות (לא מ-index.js).
+// הקול: דרך lib/voice.js – הקול המשוכפל (ElevenLabs) כברירת מחדל; engine=tts בבקשה = הקול הממוחשב של ימות (בחירת המשתמש אחרי כשל/תקרה).
 // המפתח של ימות נמצא רק בכספת של השרת (YEMOT_API_KEY). הוא נשלח לימות בכותרת authorization בלבד,
 // ולעולם לא נכתב ליומן, לרשומה או להודעת שגיאה. גם טקסט שחוזר מימות לא מועבר לטלפון.
 
@@ -16,6 +19,9 @@ const { defineSecret, defineInt, defineString } = require('firebase-functions/pa
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');
 const { requireStaff, inputObject } = require('./lib/roles');
+const { YemotError, apiBase, yemotCall, deleteFiles } = require('./lib/yemot-client');
+const voice = require('./lib/voice');
+const { parseLexicon, applyLexicon } = require('./lib/lexicon');
 
 const TZ = 'Asia/Jerusalem';
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
@@ -89,41 +95,7 @@ function validateSend(input, today, cfg) {
   return { requestId, promoKey, text: clean, until, withTzintuk, source: src, warnings };
 }
 
-// ---------------- לקוח ימות ----------------
-class YemotError extends Error {
-  constructor(code, sent) { super('yemot:' + code); this.code = code; this.sent = !!sent; }
-}
-
-function apiBase(raw) {
-  const base = String(raw || '').replace(/\/+$/, '') + '/';
-  let u; try { u = new URL(base); } catch (e) { throw new YemotError('bad-base', false); }
-  // הגנה: באמולטור מותר לפנות רק לשרת דמה מקומי, אף פעם לא לימות האמיתי.
-  if (process.env.FUNCTIONS_EMULATOR === 'true' && !['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)) throw new YemotError('emulator-non-local', false);
-  if (u.protocol !== 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)) throw new YemotError('insecure-base', false);
-  return base;
-}
-
-// קריאה אחת ל-API. המפתח רק בכותרת. כל responseStatus שאינו OK = כשל. לא מחזירים את טקסט השגיאה של ימות.
-async function yemotCall(ctx, command, params) {
-  let r;
-  try {
-    r = await fetch(ctx.base + command, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', authorization: ctx.key },
-      body: JSON.stringify(params),
-      signal: AbortSignal.timeout(ctx.timeoutMs),
-    });
-  } catch (e) {
-    const timeout = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
-    // בפסק זמן ייתכן שהבקשה כבר הגיעה לימות ובוצעה – "לא ודאי"
-    throw new YemotError(timeout ? 'timeout' : 'network', timeout);
-  }
-  let j = null;
-  try { j = await r.json(); } catch (e) { throw new YemotError('bad-json', true); }
-  if (!r.ok) throw new YemotError('http-' + r.status, true);
-  if (!j || j.responseStatus !== 'OK') throw new YemotError('status-' + String((j && j.responseStatus) || 'none').slice(0, 20), true);
-  return j;
-}
+// לקוח ימות (YemotError, apiBase, yemotCall): lib/yemot-client.js
 
 function readCfg() {
   return {
@@ -161,7 +133,7 @@ async function refundUsage(db, uid, day) {
 // ---------------- בחירת מספר קובץ (בטרנזקציה, בלי התנגשות בין מקבילים) ----------------
 // n = max(nextNum, 1 + המספר הגבוה בשלוחה). מעל 999: המספר הפנוי הקטן ביותר מ-001. לעולם לא 000.
 // recent = 20 המספרים האחרונים שהוקצו, כדי ששני מקבילים לא יבחרו אותו מספר פנוי גם כשהשלוחה כמעט מלאה.
-async function allocateNumber(db, onLine, promoRef, ext) {
+async function allocateNumber(db, onLine, promoRef, ext, rendered) {
   const stateRef = db.doc(STATE);
   return db.runTransaction(async (tx) => {
     const s = await tx.get(stateRef);
@@ -174,10 +146,10 @@ async function allocateNumber(db, onLine, promoRef, ext) {
       for (let c = 1; c <= 999; c++) if (!onLine.has(c) && !recent.includes(c)) { n = c; break; }
       if (!n) throw new HttpsError('resource-exhausted', 'אין מקום לעוד מבצעים בשלוחה. פנו למנהל.', { reason: 'line-full' });
     }
-    const file = String(n).padStart(3, '0') + '.tts';
+    const file = voice.fileName(n, rendered);
     const now = new Date().toISOString();
     tx.set(stateRef, { nextNum: n + 1, recent: recent.concat(n).slice(-20), updatedAt: now });
-    tx.update(promoRef, { file, path: `ivr2:${ext}/${file}`, updatedAt: now });
+    tx.update(promoRef, { file, path: voice.pathOf(ext, file), updatedAt: now });
     return file;
   });
 }
@@ -210,6 +182,43 @@ async function testFault(db, at) {
   if (f.exists && f.get('at') === at) throw new Error('test fault ' + at);
 }
 
+// רשומות ראשונות במילון (seed חד-פעמי, החלטת המשתמש 02.11): שם החנות תמיד "Large פעמי" בקול המשוכפל, בשלוש צורות הגרש.
+// פעם אחת בלבד (סימון ב-yemot_state/lexicon-seed-1). לא דורס: צורה שכבר קיימת במילון (בכל הגייה) לא נוספת, ושאר המילון נשאר כמו שהוא.
+// אם המנהל ימחק את הרשומה אחר כך – היא לא תחזור. LEXICON_SEED=off מכבה (בבדיקות האמולטור הקיימות).
+const LEXICON_SEED = defineString('LEXICON_SEED', { default: 'on', description: 'הוספה חד-פעמית של "לארג\' פעמי=Large פעמי" למילון ההגייה (on/off)' });
+// שלוש צורות גרש לכל רשומה: ' (גרש רגיל), ׳ (גרש עברי), ’ (גרש מעוקל).
+//   "לארג' פעמי" – שם החנות. "לארדז' פעמי" – הכתיב בנוסח הפתיחה. "בלארג'" – הנוסח האוטומטי של מבצע ("מבצע בלארג'", ymText ב-yemot-promo.js).
+const SEED_LINES = [];
+for (const g of ["'", '׳', '’']) SEED_LINES.push(`לארג${g} פעמי=Large פעמי`, `לארדז${g} פעמי=Large פעמי`, `בלארג${g}=ב Large`);
+const SEED_MARK = 'yemot_state/lexicon-seed-1';
+let seedDone = false;
+async function ensureLexiconSeed(db) {
+  if (seedDone || LEXICON_SEED.value() === 'off') return;
+  try {
+    await db.runTransaction(async (tx) => {
+      const markRef = db.doc(SEED_MARK), ref = db.doc('yemot_lexicon/main');
+      const m = await tx.get(markRef);
+      if (m.exists) return;
+      const s = await tx.get(ref);
+      const text = s.exists && typeof s.get('text') === 'string' ? s.get('text') : '';
+      const have = new Set(parseLexicon(text).entries.map((e) => e.from.toLowerCase()));
+      const add = SEED_LINES.filter((l) => !have.has(l.split('=')[0].toLowerCase()));
+      const next = ['# שם החנות בקול המשוכפל (נוסף אוטומטית פעם אחת)'].concat(add).join('\n') + (text ? '\n' + text : '');
+      const ok = add.length > 0 && next.length <= 8000;
+      if (ok) tx.set(ref, { text: next, updatedAt: Date.now(), updatedBy: 'seed' });
+      tx.set(markRef, { at: new Date().toISOString(), added: ok ? add.length : 0 });
+    });
+    seedDone = true;
+  } catch (e) { logger.warn('yemot: lexicon seed failed', { reason: 'seed-failed' }); }
+}
+
+// מילון ההגייה (yemot_lexicon/main, המנהל כותב). אין מסמך = אין החלפות.
+async function loadLexicon(db) {
+  await ensureLexiconSeed(db);
+  const s = await db.doc('yemot_lexicon/main').get();
+  return s.exists ? parseLexicon(s.get('text')).entries : [];
+}
+
 async function sendPromo(request, key, base) {
   const who = await requireStaff(request);
   const input = inputObject(request);
@@ -224,6 +233,20 @@ async function sendPromo(request, key, base) {
   if (input.statusOnly === true) return { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
 
   const v = validateSend(input, today, cfg);
+  if (input.manual !== undefined && typeof input.manual !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
+  const manual = input.manual === true;
+  if (manual) {
+    if (isEmp) throw new HttpsError('permission-denied', 'רק מנהל יכול להוסיף מבצע ידני.', { reason: 'manual-manager-only' });
+    if (v.source) throw bad('bad-input', 'קלט לא תקין');
+    if (!v.promoKey.startsWith('man_')) throw bad('bad-promo-key', 'הבקשה לא תקינה. נסו שוב.');
+  }
+  // origin: מאיזה מסך (רשות). 'builder' = "שמור ושלח לקו" במסך בניית מבצע – שם עובד לא מצנתק (נדחה, לא מוחלף בשקט, לפני כל פנייה לימות).
+  // בלי origin (מסך המבצעים הקיים, וגרסאות ישנות) – בלי שינוי: עובד, פעם ביום. השדה נשלח מהטלפון, ולכן הוא רק מגביל ולא מרחיב.
+  if (input.origin !== undefined && input.origin !== 'builder') throw bad('bad-input', 'קלט לא תקין');
+  if (isEmp && v.withTzintuk && input.origin === 'builder') throw new HttpsError('permission-denied', 'רק מנהל יכול לשלוח צינתוק. אפשר לשלוח לקו בלי צינתוק.', { reason: 'tzintuk-manager-only' });
+  // מנוע הקול: בלי engine = המוגדר בשרת (הקול המשוכפל); engine=tts = המשתמש בחר "שלח בקול הממוחשב" אחרי כשל/תקרה
+  const engine = voice.pickEngine(input.engine);
+  if (!engine) throw bad('bad-input', 'קלט לא תקין');
   if (v.warnings.length) logger.warn('yemot: request warning', { warnings: v.warnings, requestId: v.requestId });
   if (!key) throw new HttpsError('failed-precondition', 'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.', { reason: 'no-key' });
   let ctx;
@@ -232,6 +255,10 @@ async function sendPromo(request, key, base) {
     throw new HttpsError('failed-precondition', 'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.', { reason: 'no-key' });
   }
   const promoRef = db.doc(`${PROMOS}/${v.promoKey}`);
+  // הנוסח שיוקרא: אחרי מילון ההגייה. ברשומה נשמר הנוסח לפני המילון (text) וגם אחריו (spoken).
+  const spoken = applyLexicon(v.text, await loadLexicon(db));
+  // ההקראה עצמה (שעולה כסף בקול המשוכפל) נוצרת רק כשבאמת מעלים – שלב 2 למטה. אותו נוסח שכבר בקו = בלי הקראה חדשה.
+  let rendered = null;
 
   // 1. טרנזקציה: נעילת המבצע, החלטה מה לעשות, ו(לעובד, אם יישלח צינתוק) תפיסת המכסה היומית.
   // הרשומה מתארת את מה שבאמת בקו: text/until/tzintuk משתנים רק אחרי שהפעולה בימות הצליחה.
@@ -245,12 +272,17 @@ async function sendPromo(request, key, base) {
     // כפילות רק אם אותה בקשה כבר הסתיימה בהצלחה מלאה. בקשה שנכשלה (גם חלקית) – מנסים שוב את מה שנכשל.
     if (x && x.lastRequestId === v.requestId && x.lastResult === 'done') return { kind: 'duplicate', x };
     const onLine = holdsPath(x, nowMs);
-    const sameText = onLine && ACTIVE.includes(x.status) && x.text === v.text;
+    // אותו נוסח = אותו טקסט וגם אותה הגייה (שינוי במילון מעלה מחדש). ברשומה ישנה בלי spoken – ההגייה הייתה הטקסט עצמו.
+    // וגם אותו קול: קובץ שבקו בקול אחר (למשל ממוחשב, אחרי "שלח בקול הממוחשב" או מלפני הפרסום) מוקרא מחדש בקול המבוקש.
+    // הקול נקבע לפי סוג הקובץ שבקו (עובד גם לרשומות ישנות בלי שדה engine).
+    const sameText = onLine && ACTIVE.includes(x.status) && x.text === v.text && (x.spoken == null ? x.text : x.spoken) === spoken
+      && voice.extOf(x.path) === voice.extFor(engine);
     const upload = !sameText;
     const doTz = v.withTzintuk && !(sameText && x.tzintuk === 'sent');
     const now = new Date(nowMs).toISOString();
     const who2 = { withTzintuk: v.withTzintuk, byUid: who.uid, byRole: who.role, day: today, updatedAt: now };
     if (v.source) who2.source = v.source;
+    if (manual) who2.manual = true;
     if (!upload && !doTz) {
       tx.update(promoRef, Object.assign(who2, { until: v.until, lastRequestId: v.requestId, lastResult: 'done' },
         x.status === 'remove-failed' && v.until >= today ? { status: 'live', error: null } : {}));
@@ -298,6 +330,7 @@ async function sendPromo(request, key, base) {
   let action = 'tzintuk-only';
   let tzSent = false;
   let uploaded = !plan.upload;
+  let stale = null; // קובץ ישן של המבצע בסיומת אחרת (אחרי החלפת מנוע הקול) – יימחק אחרי שההעלאה החדשה הצליחה
 
   try {
     // 2. העלאה: לנתיב הקיים של המבצע (החלפה / השלמה של העלאה שנתקעה), או למספר פנוי חדש
@@ -314,7 +347,16 @@ async function sendPromo(request, key, base) {
         logger.warn('yemot: upload failed', { reason: 'yemot-upload-failed', code, requestId: v.requestId });
         return new HttpsError('unavailable', 'העלאת ההודעה לקו נכשלה' + (v.withTzintuk ? ', ולא נשלח צינתוק' : '') + '. נסו שוב מאוחר יותר.', { reason: 'yemot-upload-failed' });
       };
+      // ההקראה (דרך voice.js). כשל או תקרה בקול המשוכפל: שגיאה מסודרת, המכסה מוחזרת, ולא נשלח כלום (גם לא צינתוק).
+      try { rendered = await voice.render(spoken, { engine }); } catch (e) {
+        if (!(e instanceof voice.VoiceError)) throw e;
+        if (usageDay) await refundUsage(db, who.uid, usageDay);
+        // כמו כשל ודאי בהעלאה: לא נשלח כלום לימות, ולכן מה שבקו (אם יש) לא השתנה
+        await finish('failed', Object.assign({ pending: null, error: 'voice-' + e.code }, plan.replacing ? {} : { status: 'failed', uncertain: !!(plan.onLine && plan.x.uncertain) || (plan.onLine && plan.x.status === 'uploading') }));
+        throw voice.toHttps(e, !isEmp);
+      }
       try {
+        if (path && voice.extOf(path) !== rendered.ext) { stale = path; path = null; file = null; }
         if (path) {
           // הגנה: אם רשומה אחרת "מחזיקה" את אותו נתיב (למשל מספר שהוקצה מחדש) – לא דורסים, מקצים מספר חדש
           const other = await db.collection(PROMOS).where('path', '==', path).get();
@@ -322,8 +364,8 @@ async function sendPromo(request, key, base) {
         }
         if (!path) {
           const nums = await lineNumbers(ctx, cfg.ext);
-          file = await allocateNumber(db, nums, promoRef, cfg.ext);
-          path = `ivr2:${cfg.ext}/${file}`;
+          file = await allocateNumber(db, nums, promoRef, cfg.ext, rendered);
+          path = voice.pathOf(cfg.ext, file);
         }
       } catch (e) {
         if (e instanceof HttpsError) {
@@ -334,14 +376,21 @@ async function sendPromo(request, key, base) {
         throw await failUpload(e instanceof YemotError ? 'dir-' + e.code : 'internal', false);
       }
       try {
-        await yemotCall(ctx, 'UploadTextFile', { what: path, contents: v.text });
+        await voice.upload(ctx, cfg.ext, file.split('.')[0], rendered);
       } catch (e) {
         throw await failUpload(e instanceof YemotError ? 'upload-' + e.code : 'internal', e instanceof YemotError && e.sent && e.code === 'timeout');
       }
       uploaded = true;
       await testFault(db, 'after-upload');
       // הצינתוק הקודם שייך לנוסח הקודם
-      await promoRef.update({ status: 'live', text: v.text, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp() });
+      await promoRef.update({ status: 'live', text: v.text, spoken, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp() });
+      // הגנה כפולה: מוחקים רק קובץ ממוספר 001-999 בשלוחת המבצעים (כמו runExpiry).
+      // התבנית נבנית מ-YEMOT_EXT, כך שגם שלוחה מקוננת (למשל '2/1') נתמכת, כמו ב-runExpiry. שלוחה אחרת – לא נמחק.
+      const staleM = stale ? staleRe(cfg.ext).exec(stale) : null;
+      const staleOk = !!staleM && Number(staleM[1]) >= 1;
+      if (staleOk && stale !== path) {
+        try { await deleteFiles(ctx, [stale]); } catch (e) { logger.warn('yemot: old file left', { reason: 'stale-file', code: e instanceof YemotError ? e.code : 'internal', requestId: v.requestId }); }
+      }
     }
 
     // 3. צינתוק. כשל: ההודעה נשארת בקו, והמכסה של העובד מוחזרת (נספר רק צינתוק שהצליח). ניסיון חוזר = רק צינתוק.
@@ -367,6 +416,7 @@ async function sendPromo(request, key, base) {
     return {
       ok: true, id: v.promoKey, promoKey: v.promoKey, requestId: v.requestId, action, file, until: v.until, withTzintuk: v.withTzintuk, tzintuk: tz,
       role: who.role, usage: isEmp && plan.doTz ? tToday : null, tzintukToday: tToday, duplicate: false, warnings: v.warnings, message: `${head}${tzPart} ${end}`,
+      engine: rendered ? rendered.engine : null,
     };
   } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -382,7 +432,7 @@ async function sendPromo(request, key, base) {
   }
 }
 
-exports.sendPromoToLine = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, async (request) => {
+exports.sendPromoToLine = onCall({ secrets: [YEMOT_API_KEY, voice.ELEVENLABS_API_KEY], timeoutSeconds: 120 }, async (request) => {
   try {
     return await sendPromo(request, YEMOT_API_KEY.value(), YEMOT_API_BASE.value());
   } catch (e) {
@@ -392,8 +442,11 @@ exports.sendPromoToLine = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 
   }
 });
 
+// קובץ ממוספר בשלוחת המבצעים: ivr2:<ext>/NNN.<סיומת>. ext יכולה להיות מקוננת ('2/1'). תווים אחרים מוסרים (כמו ב-runExpiry).
+function staleRe(ext) { return new RegExp(`^ivr2:${String(ext).replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.[A-Za-z0-9]+$`); }
+
 // ---------------- הורדת מבצעים שפג תוקפם ----------------
-// מוחקת רק path שרשום ב-yemot_promos, בפורמט ivr2:<שלוחה>/NNN.tts עם NNN בין 001 ל-999, שתוקפו (until) לפני היום.
+// מוחקת רק path שרשום ב-yemot_promos, בפורמט ivr2:<שלוחה>/NNN.<סיומת> עם NNN בין 001 ל-999, שתוקפו (until) לפני היום.
 // קובץ שכבר לא קיים בשלוחה – מסומן removed בלי מחיקה. מחיקה שנכשלה – remove-failed, וניסיון חוזר בריצה הבאה.
 async function runExpiry(opts) {
   const o = opts || {};
@@ -420,7 +473,7 @@ async function runExpiry(opts) {
     logger.error('yemot: expiry dir failed', { reason: 'dir-failed', code: e.code });
     return Object.assign(out, { error: 'dir-failed' });
   }
-  const re = new RegExp(`^ivr2:${ext.replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.tts$`);
+  const re = new RegExp(`^ivr2:${ext.replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.[A-Za-z0-9]+$`);
   for (const d of due) {
     const x = d.data();
     const m = re.exec(String(x.path || ''));
@@ -447,8 +500,20 @@ async function runExpiry(opts) {
   return out;
 }
 
-exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await runExpiry(); });
+// כל לילה: קודם המבצעים (בלי שינוי), ואחר כך הודעות זמניות בשלוחה 4 (yemot-line.js). כשל באחד לא עוצר את השני.
+async function nightly(opts) {
+  const out = {};
+  try { out.promos = await runExpiry(opts); } catch (e) { logger.error('yemot: expiry failed', { reason: 'internal', name: e && e.name }); out.promos = { error: 'internal' }; }
+  try { out.line = await require('./yemot-line').runLineExpiry(opts); } catch (e) { logger.error('yemot: line expiry failed', { reason: 'internal', name: e && e.name }); out.line = { error: 'internal' }; }
+  // מטמון השמע של הקול המשוכפל: מחיקת קבצים ישנים (VOICE_CACHE_HOURS). לא נוגע בקו.
+  if (!(opts && opts.skipCache)) out.voiceCache = await voice.cleanCache();
+  return out;
+}
+exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await nightly(); });
 
 // לבדיקות בלבד. לא נספרים (enumerable: false), ולכן Object.assign ב-index.js מעתיק רק את שתי הפונקציות.
 Object.defineProperty(exports, 'runExpiry', { enumerable: false, value: runExpiry });
 Object.defineProperty(exports, '_test', { enumerable: false, value: { israelDay, addDays, cleanText, validDay } });
+// משותף ל-yemot-line.js, ולבדיקות שקוראות לליבה בתוך התהליך (לא נספרים כפונקציות)
+Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS, _resetSeed() { seedDone = false; } } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo, nightly, staleRe } });

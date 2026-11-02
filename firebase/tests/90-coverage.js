@@ -118,9 +118,10 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     // חשבוניות ספקים לעובד (supinv, וחלקי התמונה p – מקונן בתוך supinv/{id}),
     // ובקשות לעדכון האפליקציה (appreq, וחלקי התמונות p – מקונן בתוך appreq/{id})
     // וסגירת קופה (closings, וחלקי הצילומים p – מקונן בתוך closings/{id})
-    // והוצאות מקופה (cashout) ואישורי הפקדה (deposits, וחלקי הצילומים p – מקונן בתוך deposits/{id}) – שלב 2
+    // והוצאות מקופה (cashout) ואישורי הפקדה (deposits, וחלקי הצילומים p – מקונן בתוך deposits/{id}) – שלב 2, וזמן הסגירה האחרונה (zlast)
+    // ואוספי ימות (yemot_items, yemot_line_backups, yemot_hook_usage, yemot_lexicon – משימה 2026-11-02)
     const colls = matches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cashout', 'cfg', 'chunks', 'closings', 'deposits', 'fb', 'inbox', 'p', 'p', 'p', 'p', 'shelf', 'staff', 'supinv', 'tasks', 'zlast']);
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cashout', 'cfg', 'chunks', 'closings', 'deposits', 'fb', 'inbox', 'p', 'p', 'p', 'p', 'shelf', 'staff', 'supinv', 'tasks', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/supinv\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך supinv');
     assert.match(t, /match \/appreq\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך appreq');
