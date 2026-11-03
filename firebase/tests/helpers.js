@@ -75,11 +75,14 @@ async function seed(env) {
       b.set(db.doc(`inbox/i_${uid}`), { owner: uid, by: uid, status: 'new', created: now, data: '{}', parts: '1' });
     }
     b.set(db.doc('orders/o1'), { x: 1 });
+    b.set(db.doc('supinv/s1'), { c: 'sup', n: 'ספק', d: '2026-11-02', at: '2026-11-02', a: '100', inv: '1', by: 'מנהל', pend: '', src: '', m: '2026-11', np: '1', h: 'x', fh: 'y' });
+    b.set(db.doc('supinv/s1/p/0'), { data: 'data:image/jpeg;base64,AAAA' });
     // משימות (tasks) ותגובות (tasks/{id}/c). זמנים יחסית לעכשיו, כי הכללים בודקים מול שעון השרת.
     const T = Date.now(), H1 = 3600000, D1 = 86400000;
     const task = (id, o) => b.set(db.doc('tasks/' + id), Object.assign({ owner: OTHER, by: OTHER, role: 'w', txt: 'משימה ' + id,
       cr: T - H1, due: T + 4 * D1, st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }, o));
     task('t_open', {});
+    task('t_nc', { nc: '1' }); // משימה פתוחה שיש בה הערת עובד – "בוצע" של עובד עובר לאישור מנהל
     task('t_pr', { pr: '1' });
     task('t_wait', { pr: '1', st: 'wait', img: 'data:image/jpeg;base64,' + 'A'.repeat(200), sub: T - 1000, doneBy: OTHER });
     task('t_overdue', { cr: T - 6 * D1, due: T - D1 });
@@ -87,6 +90,22 @@ async function seed(env) {
     task('t_done_late', { st: 'done', open: '', sub: T - 2000, ok: T - 2000, doneBy: OTHER, late: '1', cr: T - 9 * D1, due: T - 5 * D1 });
     b.set(db.doc('tasks/t_open/c/c1'), { uid: OTHER, by: OTHER, txt: 'תגובה', t: T - 5000 });
     b.set(db.doc('tasks/t_done/c/c1'), { uid: 'u_mgr', by: 'u_mgr', txt: 'תגובה', t: T - 5000 });
+    // בקשות לעדכון האפליקציה (appreq): בקשה של עובד אחר עם תמונה בחלק אחד
+    b.set(db.doc('appreq/r1'), { uid: OTHER, by: OTHER, txt: 'בקשה', t: T - 5000, st: 'new', np: 1 });
+    b.set(db.doc('appreq/r1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
+    // סגירת קופה (closings): סגירה של עובד אחר, בסטטוס 'new', עם צילומים בחלק אחד
+    b.set(db.doc('closings/z1'), { uid: OTHER, by: OTHER, t: T - 5000, st: 'new', np: 1, reg: 'i_nl', d: '2026-10-20', no: '555', data: JSON.stringify({ v: 1, f: { d: '2026-10-20', no: '555', credit: '594.72', cash: '60.10', total: '654.82', drawer: '982.70', oTot: '970.30' }, ack: 1 }) });
+    b.set(db.doc('closings/z1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
+    // הוצאות מקופה (cashout) והפקדות (deposits) – שלב 2: של עובד אחר.
+    // co1 רגילה; co2 "להפקדה" שעוד לא הופקדה; co3 "להפקדה" שכבר בהפקדה dp1 (ממתינה, עם צילום בחלק אחד)
+    const co = (id, o) => b.set(db.doc('cashout/' + id), Object.assign({ uid: OTHER, by: OTHER, t: T - 5000, reg: 'i_nl', d: '2026-10-20', a: 50.5, why: 'קניתי חלב', dep: '', src: id, zc: '', dp: '' }, o));
+    co('co1', {});
+    co('co2', { a: 1000, why: 'להפקדה בבנק', dep: '1' });
+    co('co3', { a: 300, why: 'הופקד', dep: '1', dp: 'dp1' });
+    b.set(db.doc('deposits/dp1'), { uid: OTHER, by: OTHER, t: T - 5000, d: '2026-10-21', items: ['co3'], a: 300, st: 'new', why: '', np: 1, data: '{"v":1,"rows":[{"d":"2026-10-21","a":300,"ai":{"d":"2026-10-21","a":300}}]}' });
+    // הסגירה האחרונה של נחל לכיש (zlast) – z1 של עובד אחר
+    b.set(db.doc('zlast/i_nl'), { d: '2026-10-20', tm: '09:02', id: 'z1', uid: OTHER, t: T - 5000 });
+    b.set(db.doc('deposits/dp1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
     await b.commit();
   });
 }

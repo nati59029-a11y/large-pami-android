@@ -158,6 +158,15 @@ describe('פונקציות שרת (שלב 3)', () => {
         { kind: 'invoice', files: [jpgFile(), jpgFile(), jpgFile(), jpgFile(), jpgFile()] },
         { kind: 'product', files: [jpgFile(), jpgFile()] },
         { kind: 'feedback', files: [jpgFile(), jpgFile()] },
+        { kind: 'zreport', files: [jpgFile()] },
+        { kind: 'zreport', files: [jpgFile(), jpgFile()] },
+        { kind: 'zreport', files: [jpgFile(), jpgFile(), jpgFile(), jpgFile()] },
+        { kind: 'opening', files: [] },
+        { kind: 'opening', files: [jpgFile(), jpgFile()] },
+        { kind: 'deposit', files: [] },
+        { kind: 'deposit', files: [jpgFile(), jpgFile()] },
+        { kind: 'cashout', files: [] },
+        { kind: 'cashout', files: [jpgFile(), jpgFile()] },
         'טקסט במקום אובייקט',
       ];
       for (const d of bads) assert.equal((await call('scanDocument', 'u_emp', d)).status, 'INVALID_ARGUMENT', JSON.stringify(d).slice(0, 80));
@@ -230,10 +239,10 @@ describe('פונקציות שרת (שלב 3)', () => {
     // באמולטור כל הזמנים מוכפלים ב-SCAN_TIME_SCALE (functions/.env.demo-largpeami), כדי שהבדיקה לא תחכה 100 שניות.
     const SCALE = Number((fs.readFileSync(path.join(H.ROOT, 'functions', '.env.demo-largpeami'), 'utf8').match(/^SCAN_TIME_SCALE=(.+)$/m) || [])[1]);
 
-    it('תקציב הזמן בשרת: 100 שניות לחשבונית ולמוצר, 135 למשוב – תמיד פחות ממה שהטלפון מחכה (120 / 150)', () => {
+    it('תקציב הזמן בשרת: 100 שניות לחשבונית, למוצר ולסגירת קופה, 135 למשוב – תמיד פחות ממה שהטלפון מחכה (120 / 150)', () => {
       const scan = require('../functions/lib/scan');
-      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, recipe: 135000 });
-      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, recipe: 150000 });
+      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, zreport: 100000, opening: 100000, deposit: 100000, cashout: 100000, recipe: 135000 });
+      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, recipe: 150000 });
       for (const k of Object.keys(scan.KINDS)) assert.ok(scan.KINDS[k].budgetMs < scan.PHONE_WAIT_MS[k], k);
       // מחוץ לאמולטור אין קיצור זמנים, גם אם מישהו הגדיר SCAN_TIME_SCALE
       const prevE = process.env.FUNCTIONS_EMULATOR, prevS = process.env.SCAN_TIME_SCALE;
@@ -386,6 +395,68 @@ describe('פונקציות שרת (שלב 3)', () => {
       assert.equal(SERVER_PROMPTS.product, P.product.value);
       assert.equal(SERVER_PROMPTS.feedback, P.feedback.value);
       assert.deepEqual(SERVER_PROMPTS.feedbackCaptions, P.feedbackCaptions.value);
+      assert.equal(SERVER_PROMPTS.zreport, P.zreport.value);
+      assert.equal(SERVER_PROMPTS.opening, P.opening.value);
+      assert.equal(SERVER_PROMPTS.deposit, P.deposit.value);
+      assert.equal(SERVER_PROMPTS.cashout, P.cashout.value);
+    });
+
+    it('סגירת קופה: דוח Z – בדיוק 3 צילומים בבקשה אחת, ודף פתיחה – צילום אחד; ההנחיה מהאפליקציה, temperature 0, התשובה מפוענחת', async () => {
+      const P = appPrompts();
+      const z3 = [jpgFile(301), jpgFile(302), jpgFile(303)], op = jpgFile(304);
+      const rz = await call('scanDocument', 'u_emp', { kind: 'zreport', files: z3 });
+      const ro = await call('scanDocument', 'u_mgr', { kind: 'opening', files: [op] });
+      assert.equal(rz.status, 'OK', JSON.stringify(rz.json).slice(0, 200));
+      assert.equal(ro.status, 'OK', JSON.stringify(ro.json).slice(0, 200));
+      const [qz, qo] = M.state.requests;
+      const img = (f) => ({ inline_data: { mime_type: f.mimeType, data: f.data } });
+      // zcAI: parts=[{text:ZR_P}, תמונה 1 (עליון), 2 (אמצעי), 3 (תחתון)] – בסדר שהעובד צילם
+      assert.deepEqual(qz.body, { contents: [{ parts: [{ text: P.zreport.value }, ...z3.map(img)] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } });
+      assert.deepEqual(qo.body, { contents: [{ parts: [{ text: P.opening.value }, img(op)] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } });
+      assert.equal(qz.kind, 'zreport'); assert.equal(qo.kind, 'opening');
+      assert.deepEqual(rz.result.data, M.ANSWERS.zreport);
+      assert.deepEqual(ro.result.data, M.ANSWERS.opening);
+      // כל אחת נספרת פעם אחת במגבלה היומית (3 הצילומים של דוח Z = זיהוי אחד)
+      assert.equal((await usageOf(env, 'u_emp')).count, 1);
+      // ההנחיות מבקשות את כל השדות שהאפליקציה קוראת
+      for (const k of ['register', 'store', 'date', 'time', 'report_no', 'credit', 'cash', 'checks', 'voucher_buy', 'voucher_credit', 'voucher_issue', 'house', 'rounding', 'total', 'open_float', 'cash_sales', 'cash_out', 'cash_in_drawer']) assert.ok(P.zreport.value.includes('"' + k + '"'), k);
+      for (const k of ['register', 'store', 'date', 'time', 'total']) assert.ok(P.opening.value.includes('"' + k + '"'), k);
+    });
+
+    it('אישור הפקדה (deposit): צילום אחד בכל קריאה, ההנחיה מהאפליקציה, temperature 0, מחזיר תאריך וסכום', async () => {
+      const P = appPrompts();
+      const f = jpgFile(401);
+      const r = await call('scanDocument', 'u_emp', { kind: 'deposit', files: [f] });
+      assert.equal(r.status, 'OK', JSON.stringify(r.json).slice(0, 200));
+      const [q] = M.state.requests;
+      assert.deepEqual(q.body, { contents: [{ parts: [{ text: P.deposit.value }, { inline_data: { mime_type: f.mimeType, data: f.data } }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } });
+      assert.equal(q.kind, 'deposit');
+      assert.deepEqual(r.result.data, M.ANSWERS.deposit);
+      assert.equal((await usageOf(env, 'u_emp')).count, 1);
+      for (const k of ['date', 'amount']) assert.ok(P.deposit.value.includes('"' + k + '"'), k);
+      assert.ok(P.deposit.value.includes('יתרה'), 'ההנחיה אומרת לא לקחת יתרה');
+      // משתמש שאינו בצוות – נחסם לפני Gemini
+      const before = M.state.requests.length;
+      assert.notEqual((await call('scanDocument', 'u_out', { kind: 'deposit', files: [jpgFile(402)] })).status, 'OK');
+      assert.equal(M.state.requests.length, before);
+    });
+
+    it('פתק הוצאה מקופה (cashout): צילום אחד, ההנחיה מהאפליקציה, temperature 0, מחזיר קופה, תאריך, שעה וסכום', async () => {
+      const P = appPrompts();
+      const f = jpgFile(403);
+      const r = await call('scanDocument', 'u_emp', { kind: 'cashout', files: [f] });
+      assert.equal(r.status, 'OK', JSON.stringify(r.json).slice(0, 200));
+      const [q] = M.state.requests;
+      assert.deepEqual(q.body, { contents: [{ parts: [{ text: P.cashout.value }, { inline_data: { mime_type: f.mimeType, data: f.data } }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } });
+      assert.equal(q.kind, 'cashout');
+      assert.deepEqual(r.result.data, M.ANSWERS.cashout);
+      for (const k of ['register', 'store', 'date', 'time', 'amount']) assert.ok(P.cashout.value.includes('"' + k + '"'), k);
+      assert.ok(P.cashout.value.includes('מזומן שהוצא מהקופה'), 'ההנחיה מצביעה על שורת הסכום');
+      // גם המנהל; ומשתמש שאינו בצוות – נחסם לפני Gemini
+      assert.equal((await call('scanDocument', 'u_mgr', { kind: 'cashout', files: [jpgFile(404)] })).status, 'OK');
+      const before = M.state.requests.length;
+      assert.notEqual((await call('scanDocument', 'u_out', { kind: 'cashout', files: [jpgFile(405)] })).status, 'OK');
+      assert.equal(M.state.requests.length, before);
     });
 
     it('אין פנייה החוצה: באמולטור הקוד מסרב לפנות לכתובת שאינה מקומית', async () => {

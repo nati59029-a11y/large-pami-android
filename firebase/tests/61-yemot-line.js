@@ -703,7 +703,9 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     const body = scan.buildGeminiBody('recipe', [jpg, jpg]);
     assert.match(body.contents[0].parts[0].text, /מתכון[\s\S]*כתב יד[\s\S]*"title"[\s\S]*"text"/);
     assert.equal(body.contents[0].parts.length, 3); assert.equal(body.generationConfig.temperature, 0.1);
-    assert.deepEqual(Object.keys(require('../functions/lib/prompts')).sort(), ['feedback', 'feedbackCaptions', 'invoice', 'product'], 'prompts.js (נוצר אוטומטית) לא השתנה');
+    // אחרי המיזוג עם סגירת הקופה: גם zreport, opening ו-deposit (מהאפליקציה). recipe רק בשרת – לא בקובץ שנוצר אוטומטית
+    assert.deepEqual(Object.keys(require('../functions/lib/prompts')).sort(), ['cashout', 'deposit', 'feedback', 'feedbackCaptions', 'invoice', 'opening', 'product', 'zreport'], 'prompts.js (נוצר אוטומטית) לא השתנה');
+    assert.ok(!Object.hasOwn(require('../functions/lib/prompts'), 'recipe'));
   });
 
   // ---------------- 12. כללים ----------------

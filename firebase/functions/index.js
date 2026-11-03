@@ -1,6 +1,6 @@
 'use strict';
 // פונקציות שרת של שלב 0 (מוכנות לפרסום, אבל לא מפורסמות מכאן):
-//   scanDocument       – זיהוי חשבונית, מוצר או טופס משוב דרך Gemini, עם המפתח בכספת של השרת.
+//   scanDocument       – זיהוי חשבונית, מוצר, טופס משוב, דוח Z או הצהרת פתיחת קופה דרך Gemini, עם המפתח בכספת של השרת.
 //   registerPushToken  – רישום הטלפון להתראות: staff/{uid}.pushTokens.
 //   reportBackupStatus – עדכון מצב הגיבוי: app_backup_status/{uid} של השולח בלבד.
 //   getBackupKey       – מפתח הצפנה קבוע לכל משתמש, נגזר מ-BACKUP_MASTER_KEY ומהמזהה שלו.

@@ -146,6 +146,11 @@
         "update-mark-done":    "DDDAA",
         "update-other-fields": "DDDDA",
         "update-comment-mark": "DDDAA",
+        "update-nc-mark":      "DDDAA",
+        "update-remove-nc":    "DDDDA",
+        "update-done-with-nc": "DDDDA",
+        "update-wait-with-nc": "DDDAA",
+        "update-return-to-open": "DDDDA",
         "delete":              "DDDDA"
       }
     },
@@ -157,10 +162,144 @@
         "get-on-done-task":    "DDDDA",
         "list-on-open-task":   "DDDAA",
         "create-own":          "DDDAA",
+        "create-own-without-nc-mark": "DDDDA",
         "create-other-uid":    "DDDDD",
         "create-on-done-task": "DDDDA",
         "update":              "DDDDD",
         "delete":              "DDDDA"
+      }
+    },
+    "supinv": {
+      "source": "חשבוניות ספקים לעובד – בקשת בעל העסק 2.11.2026: העובד רואה את כל חשבוניות הספקים והספקים אפייה של החודש",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה בלבד", "manager": "קריאה, כתיבה (רק השדות של האפליקציה) ומחיקה" },
+      "ops": {
+        "get":              "DDDAA",
+        "list-month":       "DDDAA",
+        "create":           "DDDDA",
+        "create-extra-field": "DDDDD",
+        "update":           "DDDDA",
+        "delete":           "DDDDA"
+      }
+    },
+    "supinv_p": {
+      "source": "חלקי תמונת החשבונית – supinv/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה בלבד", "manager": "קריאה, כתיבה (data עד 700,000 תווים) ומחיקה" },
+      "ops": {
+        "get":              "DDDAA",
+        "create":           "DDDDA",
+        "create-too-big":   "DDDDD",
+        "update":           "DDDDA",
+        "delete":           "DDDDA"
+      }
+    },
+    "appreq": {
+      "source": "בקשות לעדכון האפליקציה – בקשת בעל העסק 2.11.2026: עובד ומנהל כותבים בקשה, וכל הצוות רואה את כל הבקשות",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה (כל הבקשות) ויצירה בשמו, בסטטוס 'new'. בלי עדכון ומחיקה", "manager": "קריאה, יצירה בשמו, שינוי סטטוס (רק שדות הסטטוס) ומחיקה" },
+      "ops": {
+        "get":               "DDDAA",
+        "list":              "DDDAA",
+        "create-own":        "DDDAA",
+        "create-other-uid":  "DDDDD",
+        "create-with-status": "DDDDD",
+        "update-status":     "DDDDA",
+        "update-text":       "DDDDD",
+        "delete":            "DDDDA"
+      }
+    },
+    "appreq_p": {
+      "source": "חלקי התמונות של בקשה – appreq/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. יצירה רק בבקשה שלו, ב-15 הדקות שאחרי השליחה. בלי עדכון ומחיקה", "manager": "קריאה, יצירה בבקשה שלו (כמו עובד) ומחיקה. בלי עדכון" },
+      "ops": {
+        "get":                    "DDDAA",
+        "create-own-request":     "DDDAA",
+        "create-on-other-request": "DDDDD",
+        "create-too-big":         "DDDDD",
+        "update":                 "DDDDD",
+        "delete":                 "DDDDA"
+      }
+    },
+    "closings": {
+      "source": "סגירת קופה – בקשת בעל העסק 2.11.2026 (שלב 1): עובד שולח דוח Z והצהרת פתיחה; הנתונים הכספיים רק אצל המנהל",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה בשמו בלבד, בסטטוס 'new'. בלי קריאה (גם לא של עצמו), בלי עדכון ומחיקה", "manager": "קריאה, יצירה בשמו (גם בסטטוס 'ok'), שינוי סטטוס (רק שדות הסטטוס) ומחיקה" },
+      "ops": {
+        "get":                "DDDDA",
+        "get-own":            "DDDDA",
+        "list":               "DDDDA",
+        "create-own":         "DDDAA",
+        "create-other-uid":   "DDDDD",
+        "create-other-name":  "DDDDD",
+        "create-status-ok":   "DDDDA",
+        "update-status":      "DDDDA",
+        "update-amounts":     "DDDDD",
+        "delete":             "DDDDA"
+      }
+    },
+    "closings_p": {
+      "source": "חלקי הצילומים של סגירת קופה – closings/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה רק בסגירה שלו, ב-15 הדקות שאחרי השליחה. בלי קריאה, עדכון ומחיקה", "manager": "קריאה, יצירה בסגירה שלו (כמו עובד) ומחיקה. בלי עדכון" },
+      "ops": {
+        "get":                     "DDDDA",
+        "create-own-closing":      "DDDAA",
+        "create-on-other-closing": "DDDDD",
+        "create-too-big":          "DDDDD",
+        "update":                  "DDDDD",
+        "delete":                  "DDDDA"
+      }
+    },
+    "cashout": {
+      "source": "הוצאות מקופה – סגירת קופה שלב 2 (2.11.2026): מראה לכל הוצאה מקופה, קריא לכל הצוות",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. יצירה בשמו רק להוצאה שלו ב-inbox שעוד לא נקלטה, ב-15 דקות (zc ו-dp ריקים). עדכון: רק dp, מריק, להפקדה שלו שכוללת את ההוצאה. בלי מחיקה", "manager": "קריאה, יצירה בשמו (מראה מהטלפון), עדכון zc ו-dp ותוכן ההוצאה (באותם תנאים כמו ביצירה), ומחיקה. לא משנה uid/by/src" },
+      "ops": {
+        "get":                      "DDDAA",
+        "list":                     "DDDAA",
+        "create-own":               "DDDAA",
+        "create-without-inbox":     "DDDDA",
+        "create-other-name":        "DDDDD",
+        "create-dep-mismatch":      "DDDDD",
+        "create-bad-amount":        "DDDDD",
+        "update-zc":                "DDDDA",
+        "update-amount":            "DDDDA",
+        "update-owner":             "DDDDD",
+        "mark-dp-own-deposit":      "DDDAA",
+        "mark-dp-to-other-deposit": "DDDDA",
+        "delete":                   "DDDDA"
+      }
+    },
+    "deposits": {
+      "source": "אישורי הפקדה – סגירת קופה שלב 2 (2.11.2026): קריא לכל הצוות; המנהל מאשר, דוחה ומוחק",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. יצירה בשמו בסטטוס 'new'. בלי עדכון ומחיקה", "manager": "קריאה, יצירה בשמו בסטטוס 'new', שינוי סטטוס (רק שדות הסטטוס) ומחיקה" },
+      "ops": {
+        "get":              "DDDAA",
+        "list":             "DDDAA",
+        "create-own":       "DDDAA",
+        "create-other-uid": "DDDDD",
+        "create-status-ok": "DDDDD",
+        "update-status":    "DDDDA",
+        "update-amount":    "DDDDD",
+        "delete":           "DDDDA"
+      }
+    },
+    "deposits_p": {
+      "source": "חלקי הצילומים של אישור הפקדה – deposits/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה רק באישור שלו, ב-15 הדקות שאחרי השליחה. בלי קריאה, עדכון ומחיקה", "manager": "קריאה, יצירה באישור שלו (כמו עובד) ומחיקה. בלי עדכון" },
+      "ops": {
+        "get":                     "DDDDA",
+        "create-own-deposit":      "DDDAA",
+        "create-on-other-deposit": "DDDDD",
+        "create-too-big":          "DDDDD",
+        "update":                  "DDDDD",
+        "delete":                  "DDDDA"
+      }
+    },
+    "zlast": {
+      "source": "זמן הסגירה האחרונה של כל קופה – שלב 2 (2.11.2026), לחלון ההוצאות מקופה",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה. כתיבה רק יחד עם הסגירה שלו באותו commit, ורק קדימה בזמן. בלי מחיקה", "manager": "קריאה, כתיבה (גם אחורה, כשהוא דוחה סגירה) ומחיקה" },
+      "ops": {
+        "get":                    "DDDAA",
+        "write-with-own-closing": "DDDAA",
+        "write-backwards":        "DDDDA",
+        "write-alone":            "DDDDA",
+        "delete":                 "DDDDA"
       }
     },
     "yemot_lexicon": {

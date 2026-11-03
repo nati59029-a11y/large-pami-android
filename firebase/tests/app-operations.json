@@ -146,7 +146,7 @@
   },
   {
    "id": "M11",
-   "line": 1626,
+   "line": 1633,
    "snippet": "fsx('/shelf/'+k,{method:'PATCH'",
    "fn": "shPush",
    "collection": "shelf",
@@ -161,7 +161,7 @@
   },
   {
    "id": "M12",
-   "line": 1629,
+   "line": 1636,
    "snippet": "fsx('/shelf/'+k)",
    "fn": "shSync",
    "collection": "shelf",
@@ -176,7 +176,7 @@
   },
   {
    "id": "M13",
-   "line": 1785,
+   "line": 1792,
    "snippet": "fsx('/shelf/bc',{method:'PATCH'",
    "fn": "shBcPut",
    "collection": "shelf",
@@ -191,7 +191,7 @@
   },
   {
    "id": "M14",
-   "line": 1786,
+   "line": 1793,
    "snippet": "fsx('/shelf/bc')",
    "fn": "shBcSync",
    "collection": "shelf",
@@ -206,7 +206,7 @@
   },
   {
    "id": "M15",
-   "line": 2085,
+   "line": 2092,
    "snippet": "updateMask.fieldPaths=data&updateMask.fieldPaths=st",
    "fn": "fbPush (r.upd)",
    "collection": "fb",
@@ -219,22 +219,8 @@
    "note": "r.upd נוצר רק במסלול של מנהל (שורה 2151)."
   },
   {
-   "id": "M33",
-   "line": 2087,
-   "snippet": "fsx('/chunks?documentId='+encodeURIComponent('fbhi_'",
-   "fn": "fbPush (צילום ברזולוציה גבוהה)",
-   "collection": "chunks",
-   "op": "create",
-   "rest": "POST /chunks?documentId=fbhi_{id}_{k}",
-   "condition": "owner == המשתמש עצמו; שדות owner, data; רק ממכשיר עובד (!fbAdmin())",
-   "who": [
-    "employee"
-   ],
-   "note": "חדש בענף feature/feedback-scan: עובד מעלה צילום משוב ברזולוציה גבוהה, עד 6 חלקים."
-  },
-  {
    "id": "M16",
-   "line": 2089,
+   "line": 2096,
    "snippet": "fsx('/fb/'+r.id+'?currentDocument.exists=false'",
    "fn": "fbPush",
    "collection": "fb",
@@ -247,36 +233,8 @@
    "note": "עובד סורק דף משוב ושולח למנהל. ניסיון חוזר על דף שכבר בענן מחזיר 409 והאפליקציה מחשיבה אותו כנשלח (תיקון fix/worker-feedback; קודם PATCH בלי תנאי הפך בניסיון חוזר לעדכון ונחסם ב-403)."
   },
   {
-   "id": "M49",
-   "line": 2082,
-   "snippet": "fsx('/staff/'+SY.uid)",
-   "fn": "fbWSent (עובד, אחרי 403 בשליחת משוב)",
-   "collection": "staff",
-   "op": "get",
-   "rest": "GET /staff/{uid}",
-   "condition": "המסמך של המשתמש עצמו",
-   "who": [
-    "employee"
-   ],
-   "note": "fix/worker-feedback: עובד פעיל שקיבל 403 בניסיון חוזר = הדף כבר בענן; עובד לא פעיל = הודעה ברורה."
-  },
-  {
-   "id": "M50",
-   "line": 2087,
-   "snippet": "fsx('/chunks/fbhi_'+r.id+'_'+k)",
-   "fn": "fbPush (עובד, חלק צילום שכבר קיים)",
-   "collection": "chunks",
-   "op": "get",
-   "rest": "GET /chunks/fbhi_{id}_{k}",
-   "condition": "owner == המשתמש עצמו",
-   "who": [
-    "employee"
-   ],
-   "note": "fix/worker-feedback: אם יצירת חלק נחסמה, בודקים שהחלק כבר קיים ושייך לעובד – ואז ממשיכים."
-  },
-  {
    "id": "M17",
-   "line": 2088,
+   "line": 2095,
    "snippet": "fsx('/fb/'+r.id,{method:'PATCH'",
    "fn": "fbPush",
    "collection": "fb",
@@ -290,7 +248,7 @@
   },
   {
    "id": "M18",
-   "line": 2097,
+   "line": 2104,
    "snippet": "const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
    "fn": "fbLoad (עובד)",
    "collection": "fb",
@@ -304,7 +262,7 @@
   },
   {
    "id": "M19",
-   "line": 2097,
+   "line": 2104,
    "snippet": "const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
    "fn": "fbLoad (מנהל)",
    "collection": "fb",
@@ -318,7 +276,7 @@
   },
   {
    "id": "M20",
-   "line": 2107,
+   "line": 2114,
    "snippet": "stringValue:'new'",
    "fn": "fbInbox",
    "collection": "fb",
@@ -332,7 +290,7 @@
   },
   {
    "id": "M21",
-   "line": 2110,
+   "line": 2117,
    "snippet": "const full=await fsx('/fb/'+id)",
    "fn": "fbInbox",
    "collection": "fb",
@@ -345,36 +303,8 @@
    "note": ""
   },
   {
-   "id": "M34",
-   "line": 2111,
-   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k)",
-   "fn": "fbInbox",
-   "collection": "chunks",
-   "op": "get",
-   "rest": "GET /chunks/fbhi_{id}_{k}",
-   "condition": "חלקי הצילום שעובד העלה",
-   "who": [
-    "manager"
-   ],
-   "note": "חדש בענף feature/feedback-scan."
-  },
-  {
-   "id": "M35",
-   "line": 2111,
-   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'})",
-   "fn": "fbInbox",
-   "collection": "chunks",
-   "op": "delete",
-   "rest": "DELETE /chunks/fbhi_{id}_{k}",
-   "condition": "חלקי הצילום שעובד העלה",
-   "who": [
-    "manager"
-   ],
-   "note": "חדש בענף feature/feedback-scan."
-  },
-  {
    "id": "M22",
-   "line": 2116,
+   "line": 2123,
    "snippet": "const d=await fsx('/fb/'+id)",
    "fn": "fbImg",
    "collection": "fb",
@@ -389,7 +319,7 @@
   },
   {
    "id": "M23",
-   "line": 2220,
+   "line": 2227,
    "snippet": "fsx('/fb/'+id,{method:'DELETE'})",
    "fn": "fbDrop",
    "collection": "fb",
@@ -403,7 +333,7 @@
   },
   {
    "id": "M24",
-   "line": 2261,
+   "line": 2268,
    "snippet": "updateMask.fieldPaths=data'",
    "fn": "FRM.fbedit",
    "collection": "fb",
@@ -417,7 +347,7 @@
   },
   {
    "id": "M25",
-   "line": 2262,
+   "line": 2269,
    "snippet": "fsx('/fb/'+el.dataset.id,{method:'DELETE'})",
    "fn": "ACT.fbRm",
    "collection": "fb",
@@ -431,7 +361,7 @@
   },
   {
    "id": "M26",
-   "line": 2566,
+   "line": 2643,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames()",
    "collection": "bk",
@@ -445,7 +375,7 @@
   },
   {
    "id": "M27",
-   "line": 2566,
+   "line": 2643,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames('fb')",
    "collection": "fb",
@@ -459,7 +389,7 @@
   },
   {
    "id": "M28",
-   "line": 2567,
+   "line": 2644,
    "snippet": "fsx('/bk/'+encodeURIComponent(id),{method:'PATCH'",
    "fn": "bkPut",
    "collection": "bk",
@@ -473,7 +403,7 @@
   },
   {
    "id": "M29",
-   "line": 2585,
+   "line": 2662,
    "snippet": "fsx('/bk/'+encodeURIComponent(n),{method:'DELETE'})",
    "fn": "bkCloud",
    "collection": "bk",
@@ -487,7 +417,7 @@
   },
   {
    "id": "M30",
-   "line": 2596,
+   "line": 2673,
    "snippet": "fsx('/bk/meta')",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -501,7 +431,7 @@
   },
   {
    "id": "M31",
-   "line": 2597,
+   "line": 2674,
    "snippet": "fsx('/bk/d'+m.gen+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -515,7 +445,7 @@
   },
   {
    "id": "M32",
-   "line": 2599,
+   "line": 2676,
    "snippet": "fsx('/bk/'+m.files[id].d+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -526,6 +456,48 @@
     "manager"
    ],
    "note": ""
+  },
+  {
+   "id": "M33",
+   "line": 2094,
+   "snippet": "fsx('/chunks?documentId='+encodeURIComponent('fbhi_'",
+   "fn": "fbPush (צילום ברזולוציה גבוהה)",
+   "collection": "chunks",
+   "op": "create",
+   "rest": "POST /chunks?documentId=fbhi_{id}_{k}",
+   "condition": "owner == המשתמש עצמו; שדות owner, data; רק ממכשיר עובד (!fbAdmin())",
+   "who": [
+    "employee"
+   ],
+   "note": "חדש בענף feature/feedback-scan: עובד מעלה צילום משוב ברזולוציה גבוהה, עד 6 חלקים."
+  },
+  {
+   "id": "M34",
+   "line": 2118,
+   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k)",
+   "fn": "fbInbox",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/fbhi_{id}_{k}",
+   "condition": "חלקי הצילום שעובד העלה",
+   "who": [
+    "manager"
+   ],
+   "note": "חדש בענף feature/feedback-scan."
+  },
+  {
+   "id": "M35",
+   "line": 2118,
+   "snippet": "fsx('/chunks/fbhi_'+id+'_'+k,{method:'DELETE'})",
+   "fn": "fbInbox",
+   "collection": "chunks",
+   "op": "delete",
+   "rest": "DELETE /chunks/fbhi_{id}_{k}",
+   "condition": "חלקי הצילום שעובד העלה",
+   "who": [
+    "manager"
+   ],
+   "note": "חדש בענף feature/feedback-scan."
   },
   {
    "id": "M36",
@@ -543,7 +515,7 @@
   },
   {
    "id": "M37",
-   "line": 2306,
+   "line": 2314,
    "snippet": "map(x=>tkOf(x.document))",
    "fn": "tkLoad → tkQ('open') + tkQ('late') (עובד)",
    "collection": "tasks",
@@ -557,7 +529,7 @@
   },
   {
    "id": "M38",
-   "line": 2306,
+   "line": 2314,
    "snippet": "map(x=>tkOf(x.document))",
    "fn": "tkLoad → tkQ() (מנהל)",
    "collection": "tasks",
@@ -571,7 +543,7 @@
   },
   {
    "id": "M39",
-   "line": 2312,
+   "line": 2320,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "ACT.tkDone → tkPatch",
    "collection": "tasks",
@@ -586,7 +558,7 @@
   },
   {
    "id": "M40",
-   "line": 2312,
+   "line": 2320,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "CHG.tkimg → tkPatch",
    "collection": "tasks",
@@ -600,7 +572,7 @@
   },
   {
    "id": "M41",
-   "line": 2312,
+   "line": 2320,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "ACT.tkReq / tkOk / FRM.tkRej → tkPatch",
    "collection": "tasks",
@@ -614,7 +586,7 @@
   },
   {
    "id": "M42",
-   "line": 2312,
+   "line": 2320,
    "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
    "fn": "FRM.tkCm → tkPatch({cAt,cBy})",
    "collection": "tasks",
@@ -629,7 +601,7 @@
   },
   {
    "id": "M43",
-   "line": 2349,
+   "line": 2412,
    "snippet": "fsx('/tasks?documentId='",
    "fn": "FRM.tkAdd",
    "collection": "tasks",
@@ -644,7 +616,7 @@
   },
   {
    "id": "M44",
-   "line": 2356,
+   "line": 2424,
    "snippet": "fsx('/tasks/'+t.id,{method:'DELETE'})",
    "fn": "ACT.tkDel",
    "collection": "tasks",
@@ -658,7 +630,7 @@
   },
   {
    "id": "M45",
-   "line": 2357,
+   "line": 2425,
    "snippet": "fsx('/tasks/'+el.dataset.id)",
    "fn": "ACT.tkImg",
    "collection": "tasks",
@@ -673,7 +645,7 @@
   },
   {
    "id": "M46",
-   "line": 2359,
+   "line": 2427,
    "snippet": "fsx('/tasks/'+id+'/c?pageSize=300'",
    "fn": "tkCmLoad",
    "collection": "tasks_c",
@@ -688,7 +660,7 @@
   },
   {
    "id": "M47",
-   "line": 2369,
+   "line": 2442,
    "snippet": "fsx('/tasks/'+id+'/c?documentId='",
    "fn": "FRM.tkCm",
    "collection": "tasks_c",
@@ -703,7 +675,7 @@
   },
   {
    "id": "M48",
-   "line": 2372,
+   "line": 2449,
    "snippet": "fsx('/tasks/'+id+'/c/'+cid,{method:'DELETE'})",
    "fn": "ACT.tkCmDel",
    "collection": "tasks_c",
@@ -714,6 +686,817 @@
     "manager"
    ],
    "note": "מחיקת תגובה."
+  },
+  {
+   "id": "M49",
+   "line": 2089,
+   "snippet": "fsx('/staff/'+SY.uid)",
+   "fn": "fbWSent (עובד, אחרי 403 בשליחת משוב)",
+   "collection": "staff",
+   "op": "get",
+   "rest": "GET /staff/{uid}",
+   "condition": "המסמך של המשתמש עצמו",
+   "who": [
+    "employee"
+   ],
+   "note": "fix/worker-feedback: עובד פעיל שקיבל 403 בניסיון חוזר = הדף כבר בענן; עובד לא פעיל = הודעה ברורה."
+  },
+  {
+   "id": "M50",
+   "line": 2094,
+   "snippet": "fsx('/chunks/fbhi_'+r.id+'_'+k)",
+   "fn": "fbPush (עובד, חלק צילום שכבר קיים)",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/fbhi_{id}_{k}",
+   "condition": "owner == המשתמש עצמו",
+   "who": [
+    "employee"
+   ],
+   "note": "fix/worker-feedback: אם יצירת חלק נחסמה, בודקים שהחלק כבר קיים ושייך לעובד – ואז ממשיכים."
+  },
+  {
+   "id": "M51",
+   "line": 2377,
+   "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;",
+   "fn": "tkSumLoad (עובד)",
+   "collection": "tasks",
+   "op": "list",
+   "rest": "POST :runQuery from tasks where doneBy IN [fbBy(), fbBy().toLowerCase()] (בלי כפילות), select TKSF (cr,due,st,sub,late,doneBy), limit 10000",
+   "condition": "doneBy הוא השם של העובד, בלי הבדל אותיות (isMyName)",
+   "who": [
+    "employee"
+   ],
+   "note": "סיכום משימות: העובד טוען את המשימות שהוא עצמו ביצע (בלי img). הטווח מסונן באפליקציה."
+  },
+  {
+   "id": "M52",
+   "line": 2377,
+   "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;",
+   "fn": "tkSumLoad (מנהל)",
+   "collection": "tasks",
+   "op": "list",
+   "rest": "POST :runQuery from tasks where cr >= from AND cr < to, select TKSF, limit 10000",
+   "condition": "כל המשימות בטווח התאריכים",
+   "who": [
+    "manager"
+   ],
+   "note": "סיכום משימות: המנהל טוען את כל המשימות שנכתבו בתקופה (בלי img)."
+  },
+  {
+   "id": "M53",
+   "line": 2832,
+   "snippet": "collectionId:'supinv'}],select",
+   "fn": "supSync",
+   "collection": "supinv",
+   "op": "list",
+   "rest": "POST :runQuery from supinv select h, fh, np",
+   "condition": "כל המסמכים (רק טביעות ומספר חלקים, בלי תמונה)",
+   "who": [
+    "manager"
+   ],
+   "note": "פעם אחת בכל פתיחה של האפליקציה במכשיר המנהל, כדי לדעת מה כבר בענן."
+  },
+  {
+   "id": "M54",
+   "line": 2839,
+   "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'PATCH'",
+   "fn": "supSync",
+   "collection": "supinv_p",
+   "op": "create+update",
+   "rest": "PATCH /supinv/{id}/p/{k} (בלי updateMask)",
+   "condition": "שדה data בלבד, עד 700,000 תווים",
+   "who": [
+    "manager"
+   ],
+   "note": "המנהל מעלה את צילום החשבונית בחלקים."
+  },
+  {
+   "id": "M55",
+   "line": 2842,
+   "snippet": "await fsx('/supinv/'+id,{method:'PATCH'",
+   "fn": "supSync",
+   "collection": "supinv",
+   "op": "create+update",
+   "rest": "PATCH /supinv/{id} (בלי updateMask)",
+   "condition": "רק השדות c,n,d,at,a,inv,by,pend,src,m,np,h,fh",
+   "who": [
+    "manager"
+   ],
+   "note": "המנהל משקף חשבונית ספקים / ספקים אפייה של החודש."
+  },
+  {
+   "id": "M56",
+   "line": 2845,
+   "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'DELETE'})",
+   "fn": "supDel",
+   "collection": "supinv_p",
+   "op": "delete",
+   "rest": "DELETE /supinv/{id}/p/{k}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת חלקי צילום (חשבונית שנמחקה, נדחתה, מחודש קודם, או צילום שהתקצר)."
+  },
+  {
+   "id": "M57",
+   "line": 2846,
+   "snippet": "await fsx('/supinv/'+id,{method:'DELETE'})",
+   "fn": "supDel",
+   "collection": "supinv",
+   "op": "delete",
+   "rest": "DELETE /supinv/{id}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת החשבונית מהענן."
+  },
+  {
+   "id": "M58",
+   "line": 2854,
+   "snippet": "collectionId:'supinv'}],where",
+   "fn": "supLoad",
+   "collection": "supinv",
+   "op": "list",
+   "rest": "POST :runQuery from supinv where m == {חודש} select (בלי תמונה) limit 2000",
+   "condition": "החודש הנוכחי (שעון ישראל)",
+   "who": [
+    "employee"
+   ],
+   "note": "העובד פותח את המסך 'חשבוניות ספקים החודש'."
+  },
+  {
+   "id": "M59",
+   "line": 2865,
+   "snippet": "fsx('/chunks/'+x.id+'_'+k)",
+   "fn": "supImg",
+   "collection": "chunks",
+   "op": "get",
+   "rest": "GET /chunks/{id}_{k}",
+   "condition": "חלק צילום של העובד עצמו (הוצאה ששלח והמנהל עוד לא קיבל)",
+   "who": [
+    "employee"
+   ],
+   "note": "העובד לוחץ 'תמונה' על חשבונית שלו שממתינה."
+  },
+  {
+   "id": "M60",
+   "line": 2865,
+   "snippet": "fsx('/supinv/'+x.id+'/p/'+k)",
+   "fn": "supImg",
+   "collection": "supinv_p",
+   "op": "get",
+   "rest": "GET /supinv/{id}/p/{k}",
+   "condition": "",
+   "who": [
+    "employee"
+   ],
+   "note": "העובד לוחץ 'תמונה'."
+  },
+  {
+   "id": "M61",
+   "line": 2320,
+   "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
+   "fn": "FRM.tkCm → tkPatch({nc:'1'}) (עובד, לפני התגובה)",
+   "collection": "tasks",
+   "op": "update",
+   "rest": "PATCH /tasks/{id}?updateMask nc",
+   "condition": "רק השדה nc, רק לערך '1' (אי אפשר להסיר), במשימה שהוא רשאי לקרוא",
+   "who": [
+    "employee"
+   ],
+   "note": "עובד מסמן 'יש הערת עובד' לפני שהוא שולח תגובה. בלי הסימון הכללים חוסמים את התגובה."
+  },
+  {
+   "id": "M62",
+   "line": 2320,
+   "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
+   "fn": "ACT.tkDone → tkPatch (עובד, משימה עם nc)",
+   "collection": "tasks",
+   "op": "update",
+   "rest": "PATCH /tasks/{id}?updateMask st,sub,doneBy",
+   "condition": "עובד: משימה פתוחה עם nc == '1' ובלי דרישת תמונה → st 'wait' (open נשאר '1'), sub עכשיו, doneBy בשמו",
+   "who": [
+    "employee"
+   ],
+   "note": "'בוצע' במשימה שיש בה הערת עובד – ממתינה לאישור המנהל."
+  },
+  {
+   "id": "M63",
+   "line": 2320,
+   "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
+   "fn": "FRM.tkCm → tkPatch (מנהל, 'להחזיר לעובד')",
+   "collection": "tasks",
+   "op": "update",
+   "rest": "PATCH /tasks/{id}?updateMask cAt,cBy,st,open,img,sub,doneBy,ok,late,note,rt",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מנהל מגיב עם 'להחזיר לעובד' על משימה שבוצעה או ממתינה: חוזרת ל-open, היעד נשמר."
+  },
+  {
+   "id": "M64",
+   "line": 2890,
+   "snippet": "collectionId:'appreq'}],select",
+   "fn": "arLoad",
+   "collection": "appreq",
+   "op": "list",
+   "rest": "POST :runQuery from appreq select (uid,by,txt,t,st,stBy,stAt,note,np) limit 1000",
+   "condition": "כל הבקשות (בלי תמונות)",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "מסך 'בקשות לעדכון האפליקציה', ומונה 'חדש' אצל המנהל."
+  },
+  {
+   "id": "M65",
+   "line": 2922,
+   "snippet": "fsx('/appreq?documentId='",
+   "fn": "FRM.arAdd",
+   "collection": "appreq",
+   "op": "create",
+   "rest": "POST /appreq?documentId={id}",
+   "condition": "uid וה-by של הכותב; st 'new'; txt 1–2000; t עכשיו; np 0–8; בלי שדות סטטוס",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "שליחת בקשה חדשה."
+  },
+  {
+   "id": "M66",
+   "line": 2925,
+   "snippet": "fsx('/appreq/'+id+'/p?documentId='",
+   "fn": "FRM.arAdd",
+   "collection": "appreq_p",
+   "op": "create",
+   "rest": "POST /appreq/{id}/p?documentId={k}",
+   "condition": "רק בבקשה של הכותב, k < np, עד 15 דקות מהשליחה; data עד 700,000 תווים",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "העלאת חלקי התמונות אחרי הבקשה."
+  },
+  {
+   "id": "M67",
+   "line": 2928,
+   "snippet": "fsx('/appreq/'+x.id+'/p/'+k),'data')",
+   "fn": "ACT.arImg",
+   "collection": "appreq_p",
+   "op": "get",
+   "rest": "GET /appreq/{id}/p/{k}",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "הצגת התמונות של בקשה – רק בלחיצה."
+  },
+  {
+   "id": "M68",
+   "line": 2938,
+   "snippet": "fsx('/appreq/'+id+'?'+mask.join('&')",
+   "fn": "FRM.arSt",
+   "collection": "appreq",
+   "op": "update",
+   "rest": "PATCH /appreq/{id}?updateMask st,stBy,stAt,note&currentDocument.exists=true",
+   "condition": "מנהל בלבד; רק שדות הסטטוס",
+   "who": [
+    "manager"
+   ],
+   "note": "שינוי סטטוס (חדש / בטיפול / טופל / נדחה) והערה."
+  },
+  {
+   "id": "M69",
+   "line": 2941,
+   "snippet": "fsx('/appreq/'+x.id+'/p/'+k,{method:'DELETE'})",
+   "fn": "ACT.arDel",
+   "collection": "appreq_p",
+   "op": "delete",
+   "rest": "DELETE /appreq/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת חלקי התמונות של בקשה."
+  },
+  {
+   "id": "M70",
+   "line": 2941,
+   "snippet": "fsx('/appreq/'+x.id,{method:'DELETE'})",
+   "fn": "ACT.arDel",
+   "collection": "appreq",
+   "op": "delete",
+   "rest": "DELETE /appreq/{id}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת בקשה."
+  },
+  {
+   "id": "M71",
+   "line": 3012,
+   "snippet": "collectionId:'closings'}]",
+   "fn": "zcPull",
+   "collection": "closings",
+   "op": "list",
+   "rest": "POST :runQuery from closings where st == 'new' limit 300",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "משיכת סגירות קופה חדשות (בפתיחה עם התחברות, ב'בדוק עכשיו', במסך 'סגירת קופה' ובמונה של 'עוד')."
+  },
+  {
+   "id": "M72",
+   "line": 3027,
+   "snippet": "fsx('/closings/'+id+'?'+mask.join('&')",
+   "fn": "zcMark",
+   "collection": "closings",
+   "op": "update",
+   "rest": "PATCH /closings/{id}?updateMask st,stBy,stAt,note&currentDocument.exists=true",
+   "condition": "מנהל בלבד; רק שדות הסטטוס",
+   "who": [
+    "manager"
+   ],
+   "note": "אחרי הכנסה להכנסות (st 'ok') או דחייה עם הערה (st 'rej')."
+  },
+  {
+   "id": "M74",
+   "line": 3124,
+   "snippet": "fsx('/closings/'+id+'/p?documentId='",
+   "fn": "FRM.zcSend",
+   "collection": "closings_p",
+   "op": "create",
+   "rest": "POST /closings/{id}/p?documentId={k}",
+   "condition": "רק בסגירה של הכותב, k < np, עד 15 דקות מהשליחה; data עד 700,000 תווים",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "העלאת חלקי הצילומים (3 של דוח Z ואחד של הפתיחה) אחרי הסגירה."
+  },
+  {
+   "id": "M75",
+   "line": 3128,
+   "snippet": "fsx('/closings/'+x.id+'/p/'+k),'data')",
+   "fn": "ACT.zcImg",
+   "collection": "closings_p",
+   "op": "get",
+   "rest": "GET /closings/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "הצגת הצילומים של סגירה שמחכה לאישור – רק בלחיצה."
+  },
+  {
+   "id": "M76",
+   "line": 3025,
+   "snippet": "fsx('/closings/'+id+'/p/'+k+'?mask.fieldPaths=x')",
+   "fn": "zcHasPics (zcPull)",
+   "collection": "closings_p",
+   "op": "get",
+   "rest": "GET /closings/{id}/p/{k}?mask.fieldPaths=x",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "לפני הכנסה אוטומטית: בדיקה שכל חלקי הצילומים עלו, בלי להוריד את התוכן."
+  },
+  {
+   "id": "M73",
+   "line": 3285,
+   "snippet": "await fsx(':commit',{method:'POST',body:JSON.stringify({writes:w})})",
+   "fn": "zcCommit (FRM.zcSend)",
+   "collection": "closings + zlast",
+   "op": "commit",
+   "rest": "POST :commit [create closings/{id} (exists=false), update zlast/{reg}]",
+   "condition": "סגירה: כמו קודם (uid/by של הכותב, t עכשיו, עובד – 'new', מנהל – 'ok'); zlast – רק קדימה בזמן, ועובד רק עם הסגירה שלו באותו commit",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "שליחת סגירת קופה וזמן הסגירה האחרונה של הקופה, יחד. סגירה ישנה – בלי zlast."
+  },
+  {
+   "id": "M96",
+   "line": 3188,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "coLoad (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where d >= {לפני 62 יום} limit 1000",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "חלון ההוצאות מקופה בין הסגירה הקודמת לנוכחית."
+  },
+  {
+   "id": "M97",
+   "line": 3195,
+   "snippet": "ZL[r]=zlParse(await fsx('/zlast/'+r))",
+   "fn": "coLoad",
+   "collection": "zlast",
+   "op": "get",
+   "rest": "GET /zlast/{reg}",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "זמן הסגירה האחרונה של כל קופה (תחילת החלון)."
+  },
+  {
+   "id": "M98",
+   "line": 3283,
+   "snippet": "let fwd=1;try{const z=zlParse(await fsx('/zlast/'+reg))",
+   "fn": "zcCommit",
+   "collection": "zlast",
+   "op": "get",
+   "rest": "GET /zlast/{reg}",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "לפני שליחה: האם הסגירה מתקדמת בזמן."
+  },
+  {
+   "id": "M99",
+   "line": 3288,
+   "snippet": "async function zlRewind(reg,id){let z=null;try{z=zlParse(await fsx('/zlast/'+reg))",
+   "fn": "zlRewind (FRM.zcNo)",
+   "collection": "zlast",
+   "op": "get",
+   "rest": "GET /zlast/{reg}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "דחיית סגירה: האם היא הסגירה האחרונה."
+  },
+  {
+   "id": "M100",
+   "line": 3290,
+   "snippet": "fsx('/zlast/'+reg,{method:'DELETE'})",
+   "fn": "zlRewind",
+   "collection": "zlast",
+   "op": "delete",
+   "rest": "DELETE /zlast/{reg}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "נדחתה הסגירה היחידה של הקופה."
+  },
+  {
+   "id": "M101",
+   "line": 3291,
+   "snippet": "fsx('/zlast/'+reg,{method:'PATCH'",
+   "fn": "zlRewind",
+   "collection": "zlast",
+   "op": "update",
+   "rest": "PATCH /zlast/{reg}",
+   "condition": "מנהל בלבד (גם אחורה בזמן)",
+   "who": [
+    "manager"
+   ],
+   "note": "נדחתה הסגירה האחרונה: חוזרים לקודמת."
+  },
+  {
+   "id": "M77",
+   "line": 3188,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "coLoad (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where zc == '' limit 500",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "בדיקת הסגירה: כל ההוצאות מקופה שעוד לא שויכו לסגירה (של כל הצוות)."
+  },
+  {
+   "id": "M78",
+   "line": 3188,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "coSync (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where uid == {uid} limit 2000",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "מראה המנהל: פעם אחת בכל הפעלה – אילו הוצאות מקופה שלו כבר בענן."
+  },
+  {
+   "id": "M79",
+   "line": 3188,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "dpLoad (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where dep == '1' AND dp == '' limit 500",
+   "condition": "",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "תזכורת 'הפקדות שלא הועלו' ומסך העלאת אישור הפקדה."
+  },
+  {
+   "id": "M80",
+   "line": 3188,
+   "snippet": "collectionId:'cashout'}],where",
+   "fn": "dqPull (coQ)",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout where dp == {deposit} limit 50",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "המנהל מחשב מחדש הפקדה: אילו הוצאות סומנו בה ומה הסכום."
+  },
+  {
+   "id": "M81",
+   "line": 3215,
+   "snippet": "fsx('/cashout?documentId='+encodeURIComponent(it.id)",
+   "fn": "coPush (pushItem)",
+   "collection": "cashout",
+   "op": "create",
+   "rest": "POST /cashout?documentId={inbox id}",
+   "condition": "בשמו, t עכשיו, zc ו-dp ריקים, המזהה = ההוצאה שלו ב-inbox; dep לפי הסיבה",
+   "who": [
+    "employee"
+   ],
+   "note": "מיד אחרי שליחת 'הוצאה מקופה' (גם מחלון הסגירה)."
+  },
+  {
+   "id": "M82",
+   "line": 3232,
+   "snippet": "try{await fsx('/cashout/'+id,{method:'DELETE'})}catch(e){if(e.code!==404)throw e}}",
+   "fn": "coDrop (coSync)",
+   "collection": "cashout",
+   "op": "delete",
+   "rest": "DELETE /cashout/{id}",
+   "condition": "מנהל בלבד; רק אם zc ו-dp ריקים",
+   "who": [
+    "manager"
+   ],
+   "note": "הוצאה מקופה שנמחקה או נדחתה אצל המנהל (גם של עובד)."
+  },
+  {
+   "id": "M83",
+   "line": 3231,
+   "snippet": "async function coDrop(id){let d;try{d=await fsx('/cashout/'+id)}",
+   "fn": "coDrop (coSync)",
+   "collection": "cashout",
+   "op": "get",
+   "rest": "GET /cashout/{id}",
+   "condition": "",
+   "who": [
+    "manager"
+   ],
+   "note": "לפני מחיקה: בודקים שלא שויכה לסגירה ולא הופקדה."
+  },
+  {
+   "id": "M84",
+   "line": 3243,
+   "snippet": "return await fsx('/cashout/'+id+'?'+Object.keys(fields)",
+   "fn": "coSync",
+   "collection": "cashout",
+   "op": "update",
+   "rest": "PATCH /cashout/{id}?updateMask reg,d,a,why,dep&currentDocument.exists=true",
+   "condition": "מנהל בלבד; תוכן ההוצאה באותם תנאים כמו ביצירה; zc/dp לא משתנים",
+   "who": [
+    "manager"
+   ],
+   "note": "עדכון במקום כשהמנהל שינה הוצאה מקופה (שלו או של עובד)."
+  },
+  {
+   "id": "M85",
+   "line": 3244,
+   "snippet": "fsx('/cashout?documentId='+encodeURIComponent(id)",
+   "fn": "coSync",
+   "collection": "cashout",
+   "op": "create",
+   "rest": "POST /cashout?documentId=m{tx id}",
+   "condition": "מנהל: בשמו, t עכשיו, dep לפי הסיבה, zc ו-dp ריקים",
+   "who": [
+    "manager"
+   ],
+   "note": "מראה של הוצאה מקופה שהמנהל רשם בטלפון, כשעוד אין מסמך."
+  },
+  {
+   "id": "M86",
+   "line": 3329,
+   "snippet": "fsx('/cashout/'+cid+'?updateMask.fieldPaths=zc&currentDocument.exists=true'",
+   "fn": "coAssign",
+   "collection": "cashout",
+   "op": "update",
+   "rest": "PATCH /cashout/{id}?updateMask zc&currentDocument.exists=true",
+   "condition": "מנהל בלבד; רק zc",
+   "who": [
+    "manager"
+   ],
+   "note": "שיוך ההוצאות לסגירה שנכנסה להכנסות."
+  },
+  {
+   "id": "M87",
+   "line": 3402,
+   "snippet": "await fsx(':commit',{method:'POST',body:JSON.stringify({writes})})",
+   "fn": "FRM.dpSend",
+   "collection": "deposits + cashout",
+   "op": "commit",
+   "rest": "POST :commit [create deposits/{id} (exists=false), update cashout/{id} dp (mask dp, exists=true) × n]",
+   "condition": "בשמו, st 'new', 1–30 הוצאות; עובד מסמן dp רק מריק, להפקדה שלו שכוללת את ההוצאה",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "שליחת אישור הפקדה וסימון ההוצאות – הכול או כלום."
+  },
+  {
+   "id": "M88",
+   "line": 3404,
+   "snippet": "fsx('/deposits/'+id+'/p?documentId='",
+   "fn": "FRM.dpSend",
+   "collection": "deposits_p",
+   "op": "create",
+   "rest": "POST /deposits/{id}/p?documentId={k}",
+   "condition": "רק באישור של הכותב, k < np, עד 15 דקות מהשליחה",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "העלאת חלקי הצילומים אחרי האישור."
+  },
+  {
+   "id": "M89",
+   "line": 3412,
+   "snippet": "fsx('/deposits/'+id+'/p/'+k+'?mask.fieldPaths=x')",
+   "fn": "dpHasPics (dqPull)",
+   "collection": "deposits_p",
+   "op": "get",
+   "rest": "GET /deposits/{id}/p/{k}?mask.fieldPaths=x",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "לפני אישור אוטומטי: כל חלקי הצילומים עלו."
+  },
+  {
+   "id": "M90",
+   "line": 3414,
+   "snippet": "fsx('/deposits/'+id+'?'+mask.join('&')",
+   "fn": "dpMark",
+   "collection": "deposits",
+   "op": "update",
+   "rest": "PATCH /deposits/{id}?updateMask st,stBy,stAt,note&currentDocument.exists=true",
+   "condition": "מנהל בלבד; רק שדות הסטטוס",
+   "who": [
+    "manager"
+   ],
+   "note": "אישור (אוטומטי כשתואם, או ידני)."
+  },
+  {
+   "id": "M91",
+   "line": 3416,
+   "snippet": "collectionId:'deposits'}]",
+   "fn": "dqPull",
+   "collection": "deposits",
+   "op": "list",
+   "rest": "POST :runQuery from deposits where st == 'new' limit 300",
+   "condition": "מנהל (הכלל מתיר לכל הצוות)",
+   "who": [
+    "manager"
+   ],
+   "note": "משיכת אישורי הפקדה חדשים."
+  },
+  {
+   "id": "M92",
+   "line": 3441,
+   "snippet": "fsx('/deposits/'+x.id+'/p/'+k),'data')",
+   "fn": "ACT.dqImg",
+   "collection": "deposits_p",
+   "op": "get",
+   "rest": "GET /deposits/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "הצגת צילומי האישור – רק בלחיצה."
+  },
+  {
+   "id": "M93",
+   "line": 3453,
+   "snippet": "writes:[{update:{name:docName('deposits/'+it.id),fields},updateMask",
+   "fn": "FRM.dqNo",
+   "collection": "deposits + cashout",
+   "op": "commit",
+   "rest": "POST :commit [update deposits/{id} st 'rej' (mask), update cashout dp '' × n]",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "דחייה: ההוצאות חוזרות ל'לא הופקד'."
+  },
+  {
+   "id": "M94",
+   "line": 3456,
+   "snippet": "writes:[{delete:docName('deposits/'+it.id)}]",
+   "fn": "ACT.dqDel",
+   "collection": "deposits + cashout",
+   "op": "commit",
+   "rest": "POST :commit [delete deposits/{id}, update cashout dp '' × n]",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקה: ההוצאות חוזרות ל'לא הופקד'."
+  },
+  {
+   "id": "M95",
+   "line": 3457,
+   "snippet": "fsx('/deposits/'+it.id+'/p/'+k,{method:'DELETE'})",
+   "fn": "ACT.dqDel",
+   "collection": "deposits_p",
+   "op": "delete",
+   "rest": "DELETE /deposits/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "מחיקת חלקי הצילומים."
+  },
+  {
+   "id": "M102",
+   "line": 3479,
+   "snippet": "collectionId:'closings'}],select:zsFp(ZSF)",
+   "fn": "zsLoad",
+   "collection": "closings",
+   "op": "list",
+   "rest": "POST :runQuery from closings select (ZSF) where d >= 'YYYY-MM-01' AND d <= 'YYYY-MM-31' limit 1000",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "סיכום סגירות קופה (שלב 3): הסגירות של החודש שנבחר."
+  },
+  {
+   "id": "M103",
+   "line": 3475,
+   "snippet": "collectionId:'cashout'}],select:zsFp(ZSC)",
+   "fn": "zsCoIn",
+   "collection": "cashout",
+   "op": "list",
+   "rest": "POST :runQuery from cashout select (ZSC) where zc IN [עד 30 מזהי סגירות] / dp IN [עד 30 מזהי הפקדות] limit 1000",
+   "condition": "מנהל (הכלל מתיר לכל הצוות)",
+   "who": [
+    "manager"
+   ],
+   "note": "סיכום סגירות קופה: ההוצאות מקופה ששויכו לסגירות של החודש, וכל ההוצאות של ההפקדות שלהן (לזיהוי הפקדה שאושרה אוטומטית)."
+  },
+  {
+   "id": "M104",
+   "line": 3483,
+   "snippet": "fsx(':batchGet'",
+   "fn": "zsLoad",
+   "collection": "deposits",
+   "op": "get",
+   "rest": "POST :batchGet deposits/{id} × n, mask (ZSD)",
+   "condition": "מנהל (הכלל מתיר לכל הצוות)",
+   "who": [
+    "manager"
+   ],
+   "note": "סיכום סגירות קופה: ההפקדות של ההוצאות האלה."
+  },
+  {
+   "id": "M105",
+   "line": 3566,
+   "snippet": "fsx('/'+coll+'/'+id+'/p/'+k)",
+   "fn": "ACT.zsImg",
+   "collection": "closings_p + deposits_p",
+   "op": "get",
+   "rest": "GET /closings/{id}/p/{k} או /deposits/{id}/p/{k}",
+   "condition": "מנהל בלבד",
+   "who": [
+    "manager"
+   ],
+   "note": "סיכום סגירות קופה: צילומי הסגירה או ההפקדה – רק בלחיצה."
   }
  ],
  "fsbLine": 1332,

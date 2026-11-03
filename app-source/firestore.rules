@@ -102,7 +102,10 @@ service cloud.firestore {
       allow create: if isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.status == 'new'
-        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts'])
+        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't'])
+        // t (שלב 2 של סגירת קופה, לא חובה – גרסאות ישנות לא שולחות): זמן השליחה, לפי שעון השרת. cashout בודק לפיו שההוצאה חדשה.
+        && (!request.resource.data.keys().hasAny(['t'])
+            || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))
         && get(/databases/$(database)/documents/chunks/$(docId + '_0')).data.owner == request.auth.uid;
       allow read: if isManager()
         || (isActiveEmployee() && resource.data.owner == request.auth.uid);
@@ -133,11 +136,17 @@ service cloud.firestore {
     // הלוגיקה הועתקה כמו שהיא מהכללים שפעילים היום (app-source/firestore.rules הישן),
     // רק "מחובר" הוחלף ב-isStaff() ו-isAdmin() ב-isManager(), ונוספה בדיקה שהשם (by, doneBy) הוא של הכותב (isMyName).
     // תוספת: תגובות (תת-אוסף c) והשדות cAt/cBy על המשימה ("תגובה חדשה"). משימות ישנות בלי השדות ממשיכות לעבוד.
+    // תוספת (בקשת בעל העסק 2.11.2026): nc == '1' = "יש במשימה הערה של עובד". עובד מסמן אותו לפני שהוא מגיב,
+    // ומשימה עם nc לא נסגרת אצל עובד ב"בוצע" – היא עוברת להמתנה לאישור מנהל (st 'wait'). עובד לא מסיר את nc.
+    // rt == '1' = "המנהל החזיר את המשימה" (רק מנהל כותב). משימה ישנה בלי nc – כמו היום.
     match /tasks/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function hasNc() { return od().get('nc', '') == '1'; }
       // עובד: מסמן בוצע (בלי דרישת תמונה) או מצרף תמונה (כשנדרשת). לא סוגר משימה שנדרשת בה תמונה.
+      // במשימה עם הערת עובד (nc): "בוצע" = st 'wait' (open נשאר '1'), בלי תמונה, ו-late/ok לא משתנים – המנהל מאשר או מחזיר.
+      // עובד לא מחזיר משימה ל-open בעצמו: כל עדכון של עובד מתחיל ממשימה פתוחה (st 'open').
       function workerUpd() {
         return od().st == 'open'
           && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
@@ -148,10 +157,19 @@ service cloud.firestore {
               && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
               && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*')
               && nw().late == od().late && nw().ok == od().ok)
-            || (od().pr != '1' && nw().st == 'done' && nw().open == ''
+            || (od().pr != '1' && !hasNc() && nw().st == 'done' && nw().open == ''
               && nw().img == od().img && nw().ok == nw().sub
               && (nw().late == '1') == (request.time.toMillis() > od().due))
+            || (od().pr != '1' && hasNc() && nw().st == 'wait' && nw().open == '1'
+              && nw().img == od().img && nw().late == od().late && nw().ok == od().ok)
           );
+      }
+      // סימון "יש הערת עובד": רק השדה nc, רק לערך '1' (אי אפשר להסיר), ורק במשימה פתוחה (st 'open').
+      // אחרי "בוצע" (done או wait) העובד כבר לא מוסיף הערה (החלטת בעל העסק 2.11.2026).
+      function ncMark() {
+        return nw().diff(od()).affectedKeys().hasOnly(['nc'])
+          && nw().get('nc', '') == '1'
+          && od().st == 'open' && od().open == '1';
       }
       // סימון "תגובה חדשה": רק cAt (זמן התגובה האחרונה, לפי שעון השרת) ו-cBy (המגיב עצמו),
       // ורק במשימה שהמגיב רשאי לקרוא.
@@ -161,8 +179,10 @@ service cloud.firestore {
           && nowOk(nw().cAt)
           && (isManager() || od().open == '1' || od().late == '1');
       }
+      // סיכום משימות: עובד פעיל קורא גם משימה שהוא עצמו ביצע (doneBy בשמו), כולל כזו שבוצעה בזמן.
       allow read: if isManager()
-        || (isStaff() && (resource.data.open == '1' || resource.data.late == '1'));
+        || (isStaff() && (resource.data.open == '1' || resource.data.late == '1'))
+        || (isActiveEmployee() && isMyName(resource.data.doneBy));
       allow create: if isStaff()
         && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
         && nw().owner == request.auth.uid
@@ -174,10 +194,12 @@ service cloud.firestore {
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
         && nowOk(nw().cr)
         && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000;
-      allow update: if isManager() || (isStaff() && (workerUpd() || commentMark()));
+      allow update: if isManager() || (isStaff() && (workerUpd() || commentMark() || ncMark()));
       allow delete: if isManager();
 
       // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
+      // עובד מגיב רק במשימה פתוחה (st 'open', כולל משימה שהמנהל החזיר), ורק אחרי שהיא סומנה nc == '1' (ncMark) –
+      // כך לכל הערת עובד חדשה יש סימון על המשימה. מנהל מגיב תמיד.
       match /c/{cid} {
         function task() { return get(/databases/$(database)/documents/tasks/$(id)).data; }
         function canReadTask() {
@@ -192,10 +214,274 @@ service cloud.firestore {
           && nw().by is string && nw().by.size() <= 100
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
-          && nowOk(nw().t);
+          && nowOk(nw().t)
+          && (isManager() || (task().get('nc', '') == '1' && task().st == 'open'));
         allow update: if false;
         allow delete: if isManager();
       }
+    }
+
+    // ---------- חשבוניות ספקים לעובד (supinv) ----------
+    // טלפון המנהל משקף לכאן רק חשבוניות "ספקים" ו"ספקים אפייה" של החודש הנוכחי (כולל ממתינות לאישור), בלי שום נתון כספי אחר.
+    // קריאה: עובד פעיל או מנהל. כתיבה ומחיקה: מנהל בלבד, ורק השדות שהאפליקציה כותבת (supSync).
+    // התמונה בחלקים בתת-האוסף p (כמו chunks): רק השדה data, עד 700,000 תווים.
+    match /supinv/{id} {
+      allow read: if isStaff();
+      allow create, update: if isManager()
+        && request.resource.data.keys().hasOnly(['c', 'n', 'd', 'at', 'a', 'inv', 'by', 'pend', 'src', 'm', 'np', 'h', 'fh']);
+      allow delete: if isManager();
+
+      match /p/{k} {
+        allow read: if isStaff();
+        allow create, update: if isManager()
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow delete: if isManager();
+      }
+    }
+
+    // ---------- בקשות לעדכון האפליקציה (appreq) ----------
+    // בקשת בעל העסק 2.11.2026: עובד או מנהל כותב מה צריך לתקן, עם צילומי מסך (לא חובה). כל הצוות רואה את כל הבקשות.
+    // יצירה: בשמו, בסטטוס 'new', בלי שדות סטטוס. העובד לא עורך ולא מוחק. רק מנהל משנה סטטוס (ורק שדות הסטטוס) ומוחק.
+    // np = מספר חלקי התמונות (0 = בלי תמונות, עד 8).
+    match /appreq/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && nw().keys().hasAll(['uid', 'by', 'txt', 't', 'st', 'np'])
+        && nw().keys().hasOnly(['uid', 'by', 'txt', 't', 'st', 'np'])
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100
+        && isMyName(nw().by)
+        && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 2000
+        && nowOk(nw().t)
+        && nw().st == 'new'
+        && nw().np is int && nw().np >= 0 && nw().np <= 8;
+      allow update: if isManager()
+        && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+        && nw().st in ['new', 'doing', 'done', 'rej']
+        && isMyName(nw().get('stBy', ''))
+        && nowOk(nw().get('stAt', 0))
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
+      allow delete: if isManager();
+
+      // חלקי התמונות: appreq/{id}/p/{k} (כמו supinv): רק השדה data, עד 700,000 תווים.
+      // כותב רק מי שיצר את הבקשה, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. אין עדכון (אין עריכה אחרי השליחה).
+      match /p/{k} {
+        function req() { return get(/databases/$(database)/documents/appreq/$(id)).data; }
+        allow read: if isStaff();
+        allow create: if isStaff()
+          && exists(/databases/$(database)/documents/appreq/$(id))
+          && req().uid == request.auth.uid
+          && k.matches('^[0-7]$') && int(k) < req().np
+          && request.time.toMillis() - req().t < 900000
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow update: if false;
+        allow delete: if isManager();
+      }
+    }
+
+    // ---------- סגירת קופה (closings) ----------
+    // בקשת בעל העסק 2.11.2026 (שלב 1): עובד או מנהל שולח סגירת קופה (דוח Z והצהרת פתיחה) עם הסכומים שזוהו.
+    // הנתונים הכספיים נשמרים רק בטלפון המנהל, ולכן: קריאה – מנהל בלבד. העובד לא רואה כלום אחרי השליחה (גם לא את שלו).
+    // יצירה: עובד פעיל או מנהל, בשמו, בזמן אמת. עובד – רק בסטטוס 'new'. מנהל – גם 'ok' (סגירה שהכניס בעצמו להכנסות).
+    // עדכון: מנהל בלבד, ורק שדות הסטטוס (הסכומים לא משתנים בענן). מחיקה: מנהל בלבד.
+    // data = JSON של שדות הטופס (עד 20,000 תווים); np = מספר חלקי הצילומים (1 עד 8).
+    match /closings/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      allow read: if isManager();
+      allow create: if isStaff()
+        && nw().keys().hasAll(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data', 'tm', 'od', 'otm'])
+        // tm (שלב 2, לא חובה): שעת הדוח HH:MM או ריק – לחלון ההוצאות מקופה ול-zlast
+        && (!nw().keys().hasAny(['tm']) || (nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+        // od, otm (לא חובה): תאריך ושעת דף הפתיחה שצורף – תחילת החלון של הסגירה הבאה (החלטת בעל העסק). תאריך / HH:MM או ריק
+        && (!nw().keys().hasAny(['od']) || (nw().od is string && (nw().od == '' || nw().od.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'))))
+        && (!nw().keys().hasAny(['otm']) || (nw().otm is string && (nw().otm == '' || nw().otm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100
+        && isMyName(nw().by)
+        && nowOk(nw().t)
+        && (nw().st == 'new' || (nw().st == 'ok' && isManager()))
+        && nw().np is int && nw().np >= 1 && nw().np <= 8
+        && nw().reg in ['i_yh', 'i_nl']
+        && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && nw().no is string && nw().no.size() <= 30
+        && nw().data is string && nw().data.size() <= 20000;
+      allow update: if isManager()
+        && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+        && nw().st in ['new', 'ok', 'rej']
+        && isMyName(nw().get('stBy', ''))
+        && nowOk(nw().get('stAt', 0))
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
+      allow delete: if isManager();
+
+      // חלקי הצילומים: closings/{id}/p/{k} (כמו appreq): רק השדה data, עד 700,000 תווים.
+      // כותב רק מי ששלח את הסגירה, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. קריאה – מנהל בלבד. אין עדכון.
+      match /p/{k} {
+        function cl() { return get(/databases/$(database)/documents/closings/$(id)).data; }
+        allow read: if isManager();
+        allow create: if isStaff()
+          && exists(/databases/$(database)/documents/closings/$(id))
+          && cl().uid == request.auth.uid
+          && k.matches('^[0-7]$') && int(k) < cl().np
+          && request.time.toMillis() - cl().t < 900000
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow update: if false;
+        allow delete: if isManager();
+      }
+    }
+
+    // ---------- הוצאות מקופה (cashout) ----------
+    // סגירת קופה – שלב 2 (בקשת בעל העסק 2.11.2026): מראה לכל הוצאה מקופה, כדי שכל הצוות יראה אותן בבדיקת הסגירה ובתזכורת ההפקדות.
+    // קריאה: עובד פעיל או מנהל (גם של אחרים – החלטת בעל העסק).
+    // יצירה: בשמו, בזמן אמת, עם קופה מוכרת, תאריך תקין, סכום חיובי עד 1,000,000 וסיבה (1–300 תווים).
+    //   dep חייב להתאים לסיבה: '1' אם יש בה מילה מהשורש פ-ק-ד (כמו ZDEP באפליקציה), אחרת ''.
+    //   עובד: zc ו-dp ריקים, והמזהה = מזהה ההוצאה שלו ב-inbox (src), שעוד לא נקלטה (status 'new') ונשלחה ב-15 הדקות האחרונות (inbox.t).
+    //   מנהל: מראה מהטלפון שלו.
+    // עדכון: מנהל – zc ו-dp, ותוכן ההוצאה (קופה, תאריך, סכום, סיבה ו-dep, באותם תנאים כמו ביצירה) כשהוא עורך אותה – עדכון במקום, בלי מחיקה. עובד – רק dp, רק מריק, רק בהוצאה שצריכה הפקדה, ורק למזהה של הפקדה שהוא עצמו יוצר
+    //   באותו commit (או ב-15 הדקות שלפני), בסטטוס 'new', שכוללת את ההוצאה הזו (getAfter). עובד לא משנה סכום, סיבה או שיוך לסגירה.
+    // מחיקה: מנהל בלבד.
+    match /cashout/{id} {
+      function nw() { return request.resource.data; }
+      function od() { return resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function idStr(v) { return v is string && (v == '' || v.matches('^[A-Za-z0-9_-]{1,120}$')); }
+      function amtOk(a) { return (a is int || a is float) && a > 0 && a <= 1000000; }
+      function depRe() {
+        return '(?s).*(^|[^א-ת])[ובלשהכמ]{0,3}(הפקיד(ה|ו|ים)?|הפקד(ה|ות|ת|תי|נו|תם|ו)?|הופקד(ה|ו)?|מופקד(ת|ים|ות)?|מפקיד(ה|ים|ות)?|[אינ]פקיד(ו|ה)?|יופקד(ו)?|תופקד)([^א-ת]|$).*';
+      }
+      function inbOk() {
+        let ib = get(/databases/$(database)/documents/inbox/$(id)).data;
+        return ib.owner == request.auth.uid && ib.status == 'new'
+          && ib.get('t', 0) is int && request.time.toMillis() - ib.get('t', 0) < 900000;
+      }
+      function bodyOk() {
+        return nw().reg in ['i_yh', 'i_nl']
+          && (!nw().keys().hasAny(['tm']) || (nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+          && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+          && amtOk(nw().a)
+          && nw().why is string && nw().why.size() > 0 && nw().why.size() <= 300
+          && nw().dep in ['', '1'] && (nw().dep == '1') == nw().why.matches(depRe());
+      }
+      function depOk(did) {
+        let dd = getAfter(/databases/$(database)/documents/deposits/$(did)).data;
+        return dd.uid == request.auth.uid && dd.st == 'new' && id in dd.items
+          && request.time.toMillis() - dd.t < 900000;
+      }
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && nw().keys().hasAll(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'reg', 'd', 'tm', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100
+        && isMyName(nw().by)
+        && nowOk(nw().t)
+        && bodyOk()
+        && idStr(nw().src) && nw().src != ''
+        && idStr(nw().zc) && idStr(nw().dp)
+        && (isManager() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk()));
+      allow update: if (isManager()
+          && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp', 'reg', 'd', 'tm', 'a', 'why', 'dep'])
+          && idStr(nw().zc) && idStr(nw().dp) && bodyOk())
+        || (isActiveEmployee()
+          && nw().diff(od()).affectedKeys().hasOnly(['dp'])
+          && od().dp == '' && od().dep == '1'
+          && nw().dp is string && nw().dp.matches('^[A-Za-z0-9_-]{1,120}$')
+          && depOk(nw().dp));
+      allow delete: if isManager();
+    }
+
+    // ---------- אישורי הפקדה (deposits) ----------
+    // שלב 2: עובד או מנהל מעלה אישור הפקדה (צילום אחד או כמה) ומסמן אילו הוצאות "להפקדה" הוא מכסה (items, 1–30).
+    // קריאה: עובד פעיל או מנהל – כולם צריכים לדעת מה כבר הופקד. יצירה: בשמו, בזמן אמת, בסטטוס 'new' בלבד;
+    // a = סכום האישורים (חיובי, עד 1,000,000); d = תאריך האישור; why = סיבה כשהסכום לא תואם (עד 500); np = חלקי הצילומים (1–8);
+    // data = JSON {v, rows:[{d, a, ai:{d, a}|null}]} – מה שהוקלד ומה שזוהה מכל צילום (עד 5,000 תווים). המנהל מאשר אוטומטית רק כשמה שזוהה תואם.
+    // המנהל מאשר או דוחה (רק שדות הסטטוס) ומוחק. העובד לא משנה ולא מוחק.
+    match /deposits/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && nw().keys().hasAll(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
+        && nw().data is string && nw().data.size() <= 5000
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100
+        && isMyName(nw().by)
+        && nowOk(nw().t)
+        && nw().st == 'new'
+        && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && nw().items is list && nw().items.size() >= 1 && nw().items.size() <= 30
+        && (nw().a is int || nw().a is float) && nw().a > 0 && nw().a <= 1000000
+        && nw().why is string && nw().why.size() <= 500
+        && nw().np is int && nw().np >= 1 && nw().np <= 8;
+      allow update: if isManager()
+        && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+        && nw().st in ['new', 'ok', 'rej']
+        && isMyName(nw().get('stBy', ''))
+        && nowOk(nw().get('stAt', 0))
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
+      allow delete: if isManager();
+
+      // חלקי הצילומים: deposits/{id}/p/{k} (כמו closings): רק השדה data, עד 700,000 תווים.
+      // כותב רק מי ששלח את האישור, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. קריאה – מנהל בלבד. אין עדכון.
+      match /p/{k} {
+        function dp() { return get(/databases/$(database)/documents/deposits/$(id)).data; }
+        allow read: if isManager();
+        allow create: if isStaff()
+          && exists(/databases/$(database)/documents/deposits/$(id))
+          && dp().uid == request.auth.uid
+          && k.matches('^[0-7]$') && int(k) < dp().np
+          && request.time.toMillis() - dp().t < 900000
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow update: if false;
+        allow delete: if isManager();
+      }
+    }
+
+    // ---------- הסגירה האחרונה של כל קופה (zlast) ----------
+    // שלב 2 (2.11.2026): השוואת ההוצאות מקופה היא בחלון שבין הסגירה הקודמת של הקופה לנוכחית. עובד לא קורא closings,
+    // ולכן זמן הסגירה האחרונה נשמר כאן: zlast/{reg} = {d, tm, id, uid, t, od, otm} (od/otm – הפתיחה שצורפה לסגירה). קריאה: עובד פעיל או מנהל.
+    // עובד כותב רק יחד עם יצירת הסגירה שלו (אותו commit: הסגירה עוד לא הייתה קיימת לפני, ו-getAfter מראה אותה – שלו,
+    // באותה קופה, אותו תאריך ושעה, נוצרה עכשיו), ורק קדימה בזמן. מנהל – כל ערך (גם אחורה, כשהוא דוחה סגירה), ומחיקה.
+    match /zlast/{reg} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function cl() { return getAfter(/databases/$(database)/documents/closings/$(nw().id)).data; }
+      function fwd() {
+        return resource == null || nw().d > resource.data.d
+          || (nw().d == resource.data.d && nw().tm > resource.data.get('tm', ''));
+      }
+      allow read: if isStaff();
+      allow create, update: if isStaff()
+        && reg in ['i_yh', 'i_nl']
+        && nw().keys().hasAll(['d', 'tm', 'id', 'uid', 't'])
+        && nw().keys().hasOnly(['d', 'tm', 'id', 'uid', 't', 'od', 'otm'])
+        // od, otm (לא חובה): הפתיחה שצורפה לסגירה – תחילת החלון של הסגירה הבאה. אצל עובד – כמו בסגירה
+        && (!nw().keys().hasAny(['od']) || (nw().od is string && (nw().od == '' || nw().od.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'))))
+        && (!nw().keys().hasAny(['otm']) || (nw().otm is string && (nw().otm == '' || nw().otm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+        && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
+        && nw().id is string && nw().id.matches('^[A-Za-z0-9_-]{1,120}$')
+        && nw().uid == request.auth.uid
+        && nowOk(nw().t)
+        && (isManager()
+            || (!exists(/databases/$(database)/documents/closings/$(nw().id))
+                && cl().uid == request.auth.uid && cl().reg == reg && cl().d == nw().d
+                && cl().get('tm', '') == nw().tm && nowOk(cl().t)
+                && cl().get('od', '') == nw().get('od', '') && cl().get('otm', '') == nw().get('otm', '')
+                && fwd()));
+      allow delete: if isManager();
     }
 
     // ---------- ימות: תוכן שלוחות הקו (חוזה 5.3, משימה 2026-11-02) ----------
