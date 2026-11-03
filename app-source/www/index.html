@@ -2795,7 +2795,7 @@ function showGate(msg){
  setTimeout(()=>{try{f.email.focus()}catch(e){}},50)}
 
 
-boot();
+/* boot() מופעל בסוף הסקריפט, אחרי שכל הקוד מוגדר */
 /* ===== עדכון חי (שלב 6): חבילת מסכים חתומה מ-Firebase Hosting =====
  הבדיקה, החתימה, טביעות האצבע, הסירוב לגרסה ישנה והחזרה לגרסה הקודמת – בקוד הנייטיב (LiveUpdatePlugin). כאן רק:
  (1) "עליתי תקין" – רק אם boot() שלמעלה רץ בלי שגיאה; (2) בדיקה ברקע, בכל פתיחה ולכל היותר פעם ב-6 שעות כשחוזרים לאפליקציה. בלי אינטרנט – לא קורה כלום. */
@@ -2803,7 +2803,7 @@ function luP(){const C=window.Capacitor;return C&&C.Plugins&&C.Plugins.LiveUpdat
 const LU={t:0};
 async function luCheck(man){const P=luP();if(!P||!navigator.onLine)return;LU.t=Date.now();try{const r=await P.check();LU.r=r&&r.result;if(man&&/^ready/.test(LU.r||''))toast('עדכון מסכים הורד. הוא ייכנס לתוקף בפתיחה הבאה של האפליקציה')}catch(e){}}
 function updDone(r){const s=r&&r.status;if(s==='user'||s==='legacy')dlg('<h3>יש עדכון – לחצו להתקנה</h3><p>במסך של אנדרואיד שנפתח לחצו "התקן". העדכון מותקן מעל הגרסה הקיימת, והנתונים נשמרים.</p><button class="btn grow" data-a="closeDlg">הבנתי</button>')}
-(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();
+/* האישור 'עליתי תקין' (P.ready) מופעל בסוף הסקריפט, רק אחרי ש-boot() הצליח */
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&LU.t&&Date.now()-LU.t>216e5)luCheck(false)});
 /* ===== חשבוניות ספקים לעובד (האוסף supinv) =====
  טלפון המנהל משקף לענן רק חשבוניות "ספקים" (e_sup) ו"ספקים אפייה" (e_bak) של החודש הנוכחי (לפי תאריך החשבונית, שעון ישראל),
@@ -3567,5 +3567,5 @@ ACT.zsImg=async el=>{const D=ZS.D[ZS.m];if(!D||!D.L)return;const dk=el.dataset.k
  let P=null;try{P=du.startsWith('PAGES:')?JSON.parse(du.slice(6)):null}catch(e){}if(!Array.isArray(P)||!P.length)return toast('הצילומים לא עלו במלואם');if(!P.every(imgOk))return toast('התמונה לא תקינה ולא תוצג');
  viewImg('','LargePami_'+(dk?'deposit_':'closing_')+id,du)};
 try{coSched()}catch(e){}
-</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script>
+boot();(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script>
 </body></html>
