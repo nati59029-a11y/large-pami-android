@@ -56,5 +56,15 @@ jobs:
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
           trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
           PROJECT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$RUNNER_TEMP/sa.json")
+          # Non-interactive deploy needs a value for every param. Params that have no value in .env /
+          # .env.<project> get the default written in the code (the same as accepting the default when
+          # deploying by hand). Only on this runner; nothing is committed. Secrets are not touched.
+          (cd functions && node -e "
+            const fs=require('fs');require('./index.js');
+            const P=require('firebase-functions/params').declaredParams||[];
+            const have=new Set();for(const f of ['.env','.env.'+process.argv[1]]){if(fs.existsSync(f))for(const l of fs.readFileSync(f,'utf8').split(/\\r?\\n/)){const m=l.match(/^\\s*([A-Z0-9_]+)\\s*=/);if(m)have.add(m[1])}}
+            const add=[];for(const x of P){if(x.constructor.name==='SecretParam'||have.has(x.name))continue;const d=(x.options||{}).default;if(d===undefined){console.error('::error::No value and no default for '+x.name);process.exit(1)}if(typeof d==='object'){console.error('::error::Param '+x.name+' has a non-literal default');process.exit(1)}add.push(x.name+'='+String(d))}
+            if(add.length){fs.appendFileSync('.env.'+process.argv[1],'\\n'+add.join('\\n')+'\\n');console.log('Defaults used for: '+add.map(a=>a.split('=')[0]).join(', '))}
+          " "$PROJECT")
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json" npx --yes firebase-tools@15.34.1 deploy --only "$ONLY" --project "$PROJECT" --non-interactive
           echo "Deployed $ONLY to $PROJECT" >> "$GITHUB_STEP_SUMMARY"
