@@ -96,10 +96,10 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
     await bucket().deleteFiles({ prefix: 'voice_cache/' });
   });
 
-  it('index.js מייצא את previewVoice (11 פונקציות)', () => {
+  it('index.js מייצא את previewVoice (15 פונקציות, כולל שלב 5 של משימה 2026-11-04)', () => {
     const ex = require('../functions/index.js');
     assert.equal(typeof ex.previewVoice, 'function');
-    assert.equal(Object.keys(ex).length, 11);
+    assert.equal(Object.keys(ex).length, 15);
   });
 
   // ---------------- הצלחה ----------------
@@ -477,5 +477,43 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
     }
     const v = fs.readFileSync(path.join(root, 'lib/voice.js'), 'utf8');
     assert.match(v, /defineSecret\('ELEVENLABS_API_KEY'\)/);
+  });
+
+  // ---------------- משימה 2026-11-04, סבב תיקון 1 (הבהרת המתאם): פתיחה בקול המשוכפל שדורסת M1000.wav של האפליקציה ----------------
+  const riff = (n) => { const b = Buffer.alloc(n, 7); b.write('RIFF', 0, 'latin1'); return b; };
+  async function oldOpening(content, extra) {
+    const id = 'oldopen_' + rid();
+    dir('').set('M1000.wav', content);
+    await writeDoc(env, 'yemot_items/' + id, Object.assign({ slot: 'opening', ext: '', kind: 'text', text: 'פתיחה קודמת', spoken: 'פתיחה קודמת', engine: 'elevenlabs', status: 'live', file: 'M1000.wav', path: 'ivr2:/M1000.wav', createdAt: '2026-11-03T10:00:00.000Z', byUid: 'u_mgr', byRole: 'manager' }, extra || {}));
+    return id;
+  }
+  it('פתיחה בקול המשוכפל דורסת M1000.wav של האפליקציה: הורדה הצליחה ← עותק שמע נשמר; הורדה נכשלה ← ממשיכים עם הנוסח בלבד ומסמנים audioError', async () => {
+    await bucket().deleteFiles({ prefix: 'line_audio/' });
+    const prevAudio = riff(300);
+    const a = await oldOpening(prevAudio);
+    const ok = await core(LINE, 'publishItem', 'u_mgr', item('opening'));
+    assert.equal(ok.status, 'OK', ok.text); assert.deepEqual(ok.result.backedUp, [a]); assert.deepEqual(ok.result.warnings, []);
+    assert.equal(M.calls('DownloadFile').length, 1);
+    const pa = await readDoc(env, 'yemot_items/' + a);
+    assert.equal(pa.status, 'replaced'); assert.equal(pa.audioPath, `line_audio/items/${a}.wav`);
+    const [saved] = await bucket().file(pa.audioPath).download(); assert.ok(saved.equals(prevAudio));
+    // הורדה נכשלה (404): לא נחסם – הנוסח בלבד
+    await H.seed(env); M.reset(); E.reset();
+    const b = await oldOpening(riff(300));
+    M.setMode('download', '404');
+    const t = await core(LINE, 'publishItem', 'u_mgr', item('opening'));
+    assert.equal(t.status, 'OK', t.text); assert.deepEqual(t.result.backedUp, []);
+    assert.deepEqual(t.result.warnings, ['opening-backup-text-only']); assert.match(t.result.message, /הקראה מחדש/);
+    assert.ok(Buffer.compare(dir('').get('M1000.wav'), riff(300)) !== 0, 'הפתיחה החדשה עלתה');
+    const pb = await readDoc(env, 'yemot_items/' + b);
+    assert.equal(pb.status, 'replaced'); assert.equal(pb.audioError, 'backup-failed'); assert.equal(pb.audioPath, undefined); assert.equal(pb.text, 'פתיחה קודמת');
+  });
+  it('פתיחה בקול המשוכפל – חובת גיבוי נשארת כשלקודמת אין נוסח (הקלטה), וגם בהקלטת פתיחה', async () => {
+    const a = await oldOpening(riff(300), { kind: 'audio', text: null, spoken: null, engine: 'recording' });
+    M.setMode('download', '404');
+    const t = await core(LINE, 'publishItem', 'u_mgr', item('opening'));
+    assert.equal(t.error && t.error.details.reason, 'backup-failed', t.text);
+    assert.equal(E.state.requests.length, 0, 'בלי פנייה ל-ElevenLabs'); assert.equal(ups().length, 0);
+    assert.equal((await readDoc(env, 'yemot_items/' + a)).status, 'live');
   });
 });

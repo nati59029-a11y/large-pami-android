@@ -1,0 +1,60 @@
+# Deploy Cloud Functions to Firebase (project from the service account).
+# Manual only (Actions -> "Deploy Firebase Functions" -> Run workflow), and only from main.
+# Deploys only the functions named in the input; never rules, data or hosting.
+# Needs the secret FIREBASE_SERVICE_ACCOUNT with permission to deploy functions.
+name: Deploy Firebase Functions
+
+on:
+  workflow_dispatch:
+    inputs:
+      functions:
+        description: "Function names, separated by commas (for example: scanDocument)"
+        required: true
+        default: "scanDocument"
+
+concurrency:
+  group: deploy-functions
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only from main
+        run: |
+          [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "::error::Deploying functions is allowed only from main"; exit 1; }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Check the function names
+        id: names
+        env:
+          IN: ${{ inputs.functions }}
+        run: |
+          LIST=""
+          for f in $(echo "$IN" | tr ',' ' '); do
+            echo "$f" | grep -Eq '^[A-Za-z][A-Za-z0-9_]{0,62}$' || { echo "::error::Bad function name: $f"; exit 1; }
+            LIST="${LIST:+$LIST,}functions:$f"
+          done
+          [ -n "$LIST" ] || { echo "::error::No function name given"; exit 1; }
+          echo "only=$LIST" >> "$GITHUB_OUTPUT"
+      - name: Install and load the functions code
+        working-directory: firebase/functions
+        run: |
+          npm ci
+          node -e "const m=require('./index.js');const want=process.argv[1].split(',').map(s=>s.replace('functions:',''));const miss=want.filter(n=>!m[n]);if(miss.length){console.error('::error::Not exported by index.js: '+miss.join(', '));process.exit(1)}" "${{ steps.names.outputs.only }}"
+      - name: Deploy
+        working-directory: firebase
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ONLY: ${{ steps.names.outputs.only }}
+        run: |
+          umask 077
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
+          PROJECT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$RUNNER_TEMP/sa.json")
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json" npx --yes firebase-tools@15.34.1 deploy --only "$ONLY" --project "$PROJECT" --non-interactive
+          echo "Deployed $ONLY to $PROJECT" >> "$GITHUB_STEP_SUMMARY"

@@ -45,7 +45,7 @@ async function call(name, uid, data) {
 const LOGS = [];
 const CORE_ENV = { YEMOT_EXT: '2', YEMOT_TZINTUK_LIST: 'mivtzaim', YEMOT_EMPLOYEE_DAILY: '1', YEMOT_MAX_DAYS: '60', YEMOT_TEXT_MAX: '400',
   YEMOT_TIMEOUT_MS: '15000', YEMOT_RECIPE_MAX: '2500', YEMOT_REC_MAX_SEC: '120', FUNCTIONS_EMULATOR: 'true',
-  VOICE_ENGINE: 'yemot-tts', LEXICON_SEED: 'off' }; // שלב 9: בבדיקות האלה – הקול הממוחשב, כמו קודם (הקול המשוכפל: 62-voice.js)
+  VOICE_ENGINE: 'yemot-tts', LEXICON_SEED: 'off', VOICE_CACHE_BUCKET: H.PROJECT_ID }; // bucket: שמע שמור (line_audio/, משימה 2026-11-04) // שלב 9: בבדיקות האלה – הקול הממוחשב, כמו קודם (הקול המשוכפל: 62-voice.js)
 async function core(mod, fn, uid, data, envPatch) {
   const env = Object.assign({}, CORE_ENV, envPatch || {});
   const saved = {}; for (const [k, v] of Object.entries(env)) { saved[k] = process.env[k]; process.env[k] = v; }
@@ -98,6 +98,9 @@ async function allDocs(env, cols) {
   await env.withSecurityRulesDisabled(async (c) => { for (const col of cols) (await c.firestore().collection(col).get()).forEach((d) => out.push({ col, id: d.id, data: d.data() })); });
   return out;
 }
+// firebase-admin מותקן בתיקיית הפונקציות (אותו מופע שהקוד משתמש בו) – לשמע השמור line_audio/ (משימה 2026-11-04)
+const bucket = () => require(require.resolve('firebase-admin/storage', { paths: [path.join(H.ROOT, 'functions')] })).getStorage().bucket(H.PROJECT_ID);
+async function stored(p) { const f = bucket().file(p); const [ok] = await f.exists(); if (!ok) return null; return (await f.download())[0]; }
 const YCOLS = ['yemot_items', 'yemot_promos', 'yemot_state', 'yemot_usage', 'yemot_hook_usage', 'yemot_lexicon'];
 
 describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון, עובד בלי צינתוק, שלוחה 5', () => {
@@ -117,12 +120,12 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
   // ---------------- 0. ייצוא ----------------
   it('index.js מייצא את הפונקציות החדשות (publishLineItem, removeLineItem, getLineState), ולא את uploadPreview (פ1=טלפון) ולא את tzintukJoin (מושבת)', () => {
     const ex = require('../functions/index.js');
-    for (const n of ['publishLineItem', 'removeLineItem', 'getLineState', 'listLineFiles', 'sendPromoToLine', 'expirePromosOnLine']) assert.equal(typeof ex[n], 'function', n + ' לא מיוצא');
+    for (const n of ['publishLineItem', 'removeLineItem', 'getLineState', 'listLineFiles', 'sendPromoToLine', 'expirePromosOnLine', 'getLineBoard', 'getLineAudio', 'extendLineItem', 'restoreLineItem']) assert.equal(typeof ex[n], 'function', n + ' לא מיוצא');
     assert.equal(ex.uploadPreview, undefined);
     assert.equal(ex.tzintukJoin, undefined, 'tzintukJoin מושבת (אין פעולת הוספה מתועדת) ואסור שיפורסם');
     assert.equal(ex._core, undefined); assert.equal(ex.shared, undefined);
-    assert.equal(Object.keys(ex).length, 11, Object.keys(ex).join(',')); // 11 = כולל previewVoice (שלב 9, 62-voice.js)
-    assert.equal(ex.runLineExpiry, undefined);
+    assert.equal(Object.keys(ex).length, 15, Object.keys(ex).join(',')); // 15 = כולל previewVoice (שלב 9, 62-voice.js) ו-4 הפונקציות של שלב 5 (משימה 2026-11-04)
+    assert.equal(ex.runLineExpiry, undefined); assert.equal(ex.cleanLineAudio, undefined);
   });
 
   // ---------------- 1. תפקידים ----------------
@@ -383,7 +386,7 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
   });
 
   // ---------------- 7. הקלטה (שלוחה 3) ----------------
-  it('הקלטה: WAV תקין עולה לשלוחה 3 דרך UploadFile (convertAudio=1); פורמט אחר / ארוך מדי / שלוחה אחרת – נדחה', async () => {
+  it('הקלטה: WAV תקין עולה לשלוחה 3 דרך UploadFile (convertAudio=1); פורמט אחר / ארוך מדי – נדחה; מתכונים – מותר (משימה 2026-11-04)', async () => {
     const b = wav(1.5);
     const r = await call('publishLineItem', 'u_emp', { requestId: rid(), slot: 'updates', audio: audio(b), source: 'recording' });
     assert.equal(r.status, 'OK', r.text);
@@ -406,8 +409,8 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
       assert.equal(x.error && x.error.details.reason, reason, JSON.stringify(patch).slice(0, 60)); assert.match(x.error.message, HEB);
     }
     const na = await call('publishLineItem', 'u_emp', { requestId: rid(), slot: 'recipes', audio: audio(wav(1)), source: 'recording' });
-    assert.equal(na.error.details.reason, 'audio-not-allowed');
-    assert.equal(M.calls('UploadFile').length, 1);
+    assert.equal(na.status, 'OK', na.text); assert.equal(na.result.path, 'ivr2:1/001.wav'); // משימה 2026-11-04: הקלטה בכל השלוחות
+    assert.equal(M.calls('UploadFile').length, 2);
     // שלוחה 3 = היסטוריה (פ4): הקלדה אחרי הקלטה – קובץ חדש, הקודם נשאר
     const t = await call('publishLineItem', 'u_emp', item('updates'));
     assert.equal(t.result.file, '002.tts'); assert.deepEqual(names('3'), ['000.tts', '001.wav', '002.tts']);
@@ -490,7 +493,8 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.equal(w.error.details.reason, 'manager-only'); assert.match(w.error.message, HEB);
     const wa = await call('publishLineItem', 'u_emp', item('hours', { until: addDays(israelDay(), 2) }));
     assert.equal(wa.error.details.reason, 'slot-manager-only');
-    for (const [ext, file] of [['1', '000.tts'], ['2', '001.tts'], ['3', '001.tts'], ['', 'M1000.tts'], ['4', 'ext.ini'], ['4', 'M0000.tts'], ['4', '../5/ext.ini'],
+    // שלב 5 (משימה 2026-11-04): מחיקה לפי שם הורחבה לשלוחות 1–3 (עם גיבוי) – הן כבר לא כאן. שלוחה 5, שורש ושמות לא חוקיים – עדיין נדחים.
+    for (const [ext, file] of [['5', '000.tts'], ['0', '001.tts'], ['2/1', '001.tts'], ['', 'M1000.tts'], ['4', 'ext.ini'], ['4', 'M0000.tts'], ['4', '../5/ext.ini'],
       ['4', '1/000.tts'], ['4', '0000.tts'], ['4', '000'], ['4', ''], ['4', '000.tts/'], [undefined, '000.tts'], ['4', 5]]) {
       const r = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext, file });
       assert.equal(r.error && r.error.details.reason, 'bad-file', JSON.stringify([ext, file])); assert.match(r.error.message, HEB);
@@ -503,7 +507,8 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
 
   // ---------------- שלב 6: הערות לא מכשילות מבדיקת שרת סבב 2 ----------------
   it('שלב 6 – מחיקה בשלוחה 4: רשימה סגורה של סיומות קול (tts/wav); סיומת אחרת נדחית בלי פנייה לימות, והרשימה מסמנת אותה "לא למחיקה"', async () => {
-    for (const [f, c] of [['001.ini', 'x'], ['002.mp3', 'x'], ['003.wav', 'x'], ['004.ymgr', 'x']]) dir('4').set(f, c);
+    // שלב 5 (משימה 2026-11-04): קובץ ותיק נמחק רק אחרי גיבוי – לכן 003.wav הוא WAV אמיתי (קודם: 'x')
+    for (const [f, c] of [['001.ini', 'x'], ['002.mp3', 'x'], ['003.wav', wav(1)], ['004.ymgr', 'x']]) dir('4').set(f, c);
     M.state.requests = [];
     for (const file of ['001.ini', '002.mp3', '004.ymgr']) {
       const r = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file });
@@ -794,6 +799,921 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.ok(!JSON.stringify(await allDocs(env, YCOLS)).includes(SECRET));
     assert.deepEqual(SEEN.filter((t) => t.includes(SECRET) || (HOOK && t.includes(HOOK))), []);
     assert.ok(LOGS.length > 0, 'לא נאספו יומנים');
+    assert.deepEqual(LOGS.filter((t) => t.includes(SECRET)), []);
+  });
+
+  // ================= משימה 2026-11-04, שלב 4: הקלטה בכל השלוחות, מבצע מוקלט, גיבוי הפתיחה =================
+  const recItem = (slot, sec, extra) => Object.assign({ requestId: rid(), slot, audio: audio(wav(sec)), source: 'recording' }, extra || {});
+  const recPromo = (sec, extra) => Object.assign({ requestId: rid(), promoKey: 'rec_' + rid(), audio: audio(wav(sec)), until: addDays(israelDay(), 3), withTzintuk: false }, extra || {});
+  const noLegacyOpening = () => { dir('').delete('M1000.wav'); dir('').set('BACKUP_M1000.wav', 'פתיחה מוקלטת'); };
+  // מצב הייצור (הנחה, החלטה 6): פתיחה של האפליקציה בקובץ שמע, ברשומה ישנה בלי שדות השמע החדשים
+  async function oldAppOpening(content) {
+    const id = 'oldopen_' + rid();
+    dir('').set('M1000.wav', content || wav(2));
+    await writeDoc(env, 'yemot_items/' + id, { slot: 'opening', ext: '', kind: 'text', text: 'פתיחה קודמת', spoken: 'פתיחה קודמת', engine: 'elevenlabs', status: 'live', file: 'M1000.wav', path: 'ivr2:/M1000.wav', createdAt: '2026-11-03T10:00:00.000Z', byUid: 'u_mgr', byRole: 'manager' });
+    return id;
+  }
+  const failingStore = { async put() { throw new Error('storage down'); }, async size() { throw new Error('storage down'); } };
+
+  it('ש4 הרשאות × שלוחה: עובד מקליט ב-1, 2, 3; נדחה (slot-manager-only) ב-4 ובפתיחה בלי פנייה לימות; מנהל מקליט בכולן', async () => {
+    await bucket().deleteFiles({ prefix: 'line_audio/' });
+    noLegacyOpening();
+    for (const slot of ['recipes', 'updates']) { const r = await call('publishLineItem', 'u_emp', recItem(slot, 1)); assert.equal(r.status, 'OK', slot + r.text); assert.equal(r.result.kind, 'audio'); }
+    const ep = await call('sendPromoToLine', 'u_emp', recPromo(1)); assert.equal(ep.status, 'OK', ep.text);
+    const before = M.state.requests.length;
+    for (const slot of ['hours', 'opening']) {
+      const r = await call('publishLineItem', 'u_emp', recItem(slot, 1));
+      assert.equal(r.status, 'PERMISSION_DENIED', slot); assert.equal(r.error.details.reason, 'slot-manager-only'); assert.match(r.error.message, HEB);
+    }
+    assert.equal(M.state.requests.length, before, 'עובד שנדחה – בלי פנייה לימות');
+    for (const role of ['guest', 'disabledEmployee']) {
+      assert.notEqual((await call('publishLineItem', H.UID[role], recItem('recipes', 1))).status, 'OK');
+      assert.notEqual((await call('sendPromoToLine', H.UID[role], recPromo(1))).status, 'OK');
+    }
+    assert.equal(M.state.requests.length, before);
+    const today = israelDay();
+    const out = {};
+    for (const [slot, extra] of [['recipes'], ['updates'], ['hours'], ['hours', { until: addDays(today, 2) }], ['opening']]) {
+      const r = await call('publishLineItem', 'u_mgr', recItem(slot, 1, extra));
+      assert.equal(r.status, 'OK', slot + r.text); out[slot + (extra ? '-temp' : '')] = r.result;
+    }
+    assert.equal(out.opening.path, 'ivr2:/M1000.wav'); assert.match(out.hours.path, /^ivr2:4\/\d{3}\.wav$/);
+    const tmp = await readDoc(env, 'yemot_items/' + out['hours-temp'].id);
+    assert.equal(tmp.temporary, true); assert.equal(tmp.until, addDays(today, 2)); assert.equal(tmp.kind, 'audio');
+    assert.equal((await readDoc(env, 'yemot_items/' + out.hours.id)).temporary, false);
+    const mp = await call('sendPromoToLine', 'u_mgr', recPromo(1)); assert.equal(mp.status, 'OK', mp.text);
+    assert.equal(M.calls('RunTzintuk').length, 0, 'אין צינתוק בשום הקלטה');
+  });
+
+  it('ש4 צינתוק עם הקלטה: נדחה לעובד ולמנהל (tzintuk-not-with-recording), בלי פנייה לימות ובלי מכסה', async () => {
+    for (const uid of ['u_emp', 'u_mgr']) {
+      for (const origin of [undefined, 'builder']) {
+        const r = await call('sendPromoToLine', uid, recPromo(1, { withTzintuk: true, origin }));
+        assert.equal(r.status, 'INVALID_ARGUMENT', uid); assert.equal(r.error.details.reason, 'tzintuk-not-with-recording'); assert.match(r.error.message, HEB);
+      }
+    }
+    assert.equal(M.state.requests.length, 0);
+    assert.equal(await readDoc(env, 'yemot_usage/u_emp'), null);
+  });
+
+  it('ש4 אורך: מעל 120 שניות נדחה בכל שלוחה ובמבצע; בפתיחה – מעל 60 נדחה ו-60 עובר', async () => {
+    noLegacyOpening();
+    for (const slot of ['recipes', 'updates', 'hours']) {
+      const r = await call('publishLineItem', 'u_mgr', recItem(slot, 120.5));
+      assert.equal(r.error.details.reason, 'audio-too-long', slot); assert.equal(r.error.details.max, 120); assert.match(r.error.message, /120/);
+    }
+    const p = await call('sendPromoToLine', 'u_mgr', recPromo(121));
+    assert.equal(p.error.details.reason, 'audio-too-long'); assert.equal(p.error.details.max, 120);
+    const o = await call('publishLineItem', 'u_mgr', recItem('opening', 61));
+    assert.equal(o.error.details.reason, 'audio-too-long'); assert.equal(o.error.details.max, 60); assert.match(o.error.message, /60 שניות/);
+    assert.equal(M.state.requests.length, 0);
+    const ok = await call('publishLineItem', 'u_mgr', recItem('opening', 60));
+    assert.equal(ok.status, 'OK', ok.text);
+    assert.equal((await readDoc(env, 'yemot_items/' + ok.result.id)).durationSec, 60);
+  });
+
+  it('ש4 מבצע מוקלט – קלט: בלי תאריך ← date-required; תאריך לא תקין/עבר/רחוק; מפתח בלי rec_; עם נוסח/מקור/ידני/מנוע – נדחה בלי פנייה לימות', async () => {
+    const today = israelDay();
+    const cases = [
+      [{ until: undefined }, 'date-required'], [{ until: null }, 'date-required'], [{ until: '' }, 'date-required'],
+      [{ until: '2026-13-01' }, 'bad-date'], [{ until: addDays(today, -1) }, 'date-past'], [{ until: addDays(today, 61) }, 'date-too-far'],
+      [{ promoKey: 'pk_' + rid() }, 'bad-promo-key'], [{ promoKey: 'man_' + rid() }, 'bad-promo-key'],
+      [{ text: 'נוסח' }, 'bad-input'], [{ source: { size: 'p8', index: 1 } }, 'bad-input'], [{ manual: true }, 'bad-input'], [{ engine: 'tts' }, 'bad-input'],
+      [{ withTzintuk: 'no' }, 'bad-input'], [{ audio: { mimeType: 'audio/webm', data: 'AAAA' } }, 'bad-audio'], [{ audio: audio(wav(1, { rate: 44100 })) }, 'bad-audio'],
+    ];
+    for (const uid of ['u_emp', 'u_mgr']) {
+      for (const [patch, reason] of cases) {
+        const r = await call('sendPromoToLine', uid, Object.assign(recPromo(1), patch));
+        assert.equal(r.error && r.error.details.reason, reason, uid + ' ' + JSON.stringify(patch).slice(0, 50)); assert.match(r.error.message, HEB);
+      }
+    }
+    assert.equal(M.state.requests.length, 0);
+    // מבצע טקסט בלי תאריך – בלי שינוי (bad-date, כמו קודם)
+    assert.equal((await call('sendPromoToLine', 'u_mgr', promo({ until: undefined }))).error.details.reason, 'bad-date');
+  });
+
+  it('ש4 מבצע מוקלט: אותו מספור (גבוה מהקיים), live, בלי צינתוק, שמע שמור; לחיצה כפולה ← duplicate; מפתח בשימוש ← bad-promo-key; ריצת הלילה מורידה אחרי התאריך', async () => {
+    await bucket().deleteFiles({ prefix: 'line_audio/' });
+    const today = israelDay();
+    const t = await call('sendPromoToLine', 'u_mgr', promo());
+    assert.equal(t.result.file, '001.tts');
+    const b = wav(2);
+    const req = recPromo(2, { audio: audio(b), until: today });
+    const r = await call('sendPromoToLine', 'u_emp', req);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.file, '002.wav'); assert.equal(r.result.tzintuk, 'skipped'); assert.equal(r.result.kind, 'audio'); assert.equal(r.result.audioSaved, true);
+    assert.match(r.result.message, /בלי צינתוק/);
+    assert.ok(M.state.files.get('002.wav').equals(b));
+    const up = M.calls('UploadFile')[0].body; assert.equal(up.path, 'ivr2:2/002.wav'); assert.equal(up.convertAudio, '1');
+    const rec = await readDoc(env, 'yemot_promos/' + req.promoKey);
+    assert.equal(rec.status, 'live'); assert.equal(rec.kind, 'audio'); assert.equal(rec.engine, 'recording'); assert.equal(rec.durationSec, 2);
+    assert.equal(rec.text, null); assert.equal(rec.until, today); assert.equal(rec.withTzintuk, false); assert.match(rec.title, /^הקלטה \d\d\/\d\d \d\d:\d\d$/);
+    assert.equal(rec.audioPath, `line_audio/promos/${req.promoKey}.wav`); assert.equal(rec.audioBytes, b.length);
+    assert.ok((await stored(rec.audioPath)).equals(b), 'העותק השמור = מה שעלה');
+    assert.equal(M.calls('RunTzintuk').length, 0);
+    // לחיצה כפולה (אותו requestId): בלי העלאה נוספת
+    const d = await call('sendPromoToLine', 'u_emp', req);
+    assert.equal(d.status, 'OK'); assert.equal(d.result.duplicate, true); assert.equal(M.calls('UploadFile').length, 1);
+    // אותו מפתח, בקשה אחרת: לא מחליפים הקלטה בהקלטה
+    const other = await call('sendPromoToLine', 'u_emp', Object.assign({}, req, { requestId: rid() }));
+    assert.equal(other.error.details.reason, 'bad-promo-key'); assert.equal(M.calls('UploadFile').length, 1);
+    // ריצת הלילה: אותו מנגנון כמו מבצע רגיל
+    const out = await require('../functions/yemot.js').runExpiry({ now: new Date(Date.now() + 2 * 86400000), key: SECRET, base: BASE, ext: '2', timeoutMs: 5000 });
+    assert.equal(out.removed, 1, JSON.stringify(out)); // רק המוקלט (התאריך עבר); מבצע הטקסט עוד בתוקף
+    assert.ok(M.state.files.has('001.tts'));
+    assert.ok(!M.state.files.has('002.wav'));
+    assert.equal((await readDoc(env, 'yemot_promos/' + req.promoKey)).status, 'removed');
+  });
+
+  it('ש4 מבצע מוקלט – מצבים: כשל ודאי ← failed + ניסיון חוזר באותו requestId לאותו נתיב; פסק זמן ← uncertain; עומס (נעילה) ← busy', async () => {
+    const req = recPromo(1);
+    M.setMode('upload', 'error');
+    const f = await call('sendPromoToLine', 'u_mgr', req);
+    assert.equal(f.error.details.reason, 'yemot-upload-failed');
+    const x = await readDoc(env, 'yemot_promos/' + req.promoKey);
+    assert.equal(x.status, 'failed'); assert.equal(x.lastResult, 'failed');
+    M.setMode('upload', 'ok');
+    const ok = await call('sendPromoToLine', 'u_mgr', req);
+    assert.equal(ok.status, 'OK', ok.text); assert.match(ok.result.file, /^\d{3}\.wav$/);
+    assert.equal(M.calls('UploadFile').length, 2); assert.equal([...M.state.files.keys()].filter((n) => n.endsWith('.wav')).length, 1);
+    M.setMode('upload', 'hang');
+    const req2 = recPromo(1);
+    const h = await core(PROMO, 'sendPromo', 'u_mgr', req2, { YEMOT_TIMEOUT_MS: '300' });
+    assert.equal(h.error.details.reason, 'yemot-upload-failed');
+    assert.equal((await readDoc(env, 'yemot_promos/' + req2.promoKey)).uncertain, true);
+    M.setMode('upload', 'ok');
+    const req3 = recPromo(1);
+    await writeDoc(env, 'yemot_promos/' + req3.promoKey, { status: 'uploading', lockAt: new Date().toISOString(), lockReq: req3.requestId });
+    const bz = await call('sendPromoToLine', 'u_mgr', req3);
+    assert.equal(bz.error.details.reason, 'busy');
+  });
+
+  it('ש4 הקלטה לא נוגעת במונה התווים ולא פונה ל-ElevenLabs (גם כשהקול המשוכפל מוגדר), בכל השלוחות ובמבצע', async () => {
+    noLegacyOpening();
+    const el = { VOICE_ENGINE: 'elevenlabs', ELEVENLABS_API_BASE: 'http://127.0.0.1:9', ELEVENLABS_API_KEY: 'DUMMY-ELEVEN-x' }; // כתובת שלא קיימת: פנייה = כשל
+    for (const slot of ['recipes', 'updates', 'hours', 'opening']) {
+      const r = await core(LINE, 'publishItem', 'u_mgr', recItem(slot, 1), el);
+      assert.equal(r.status, 'OK', slot + r.text); assert.equal(r.result.engine, 'recording');
+    }
+    const p = await core(PROMO, 'sendPromo', 'u_mgr', recPromo(1), el);
+    assert.equal(p.status, 'OK', p.text); assert.equal(p.result.engine, 'recording');
+    assert.deepEqual((await allDocs(env, ['voice_usage'])).map((d) => d.id), [], 'מונה התווים לא נוצר ולא השתנה');
+  });
+
+  it('ש4 שמע שמור: הקלטה ← line_audio/items/<id>.wav זהה; כשל Storage ← ההעלאה מצליחה עם אזהרה audio-not-saved ו-audioError', async () => {
+    await bucket().deleteFiles({ prefix: 'line_audio/' });
+    const b = wav(1.2);
+    const r = await core(LINE, 'publishItem', 'u_emp', recItem('recipes', 1.2, { audio: audio(b) }));
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.audioSaved, true); assert.deepEqual(r.result.warnings, []);
+    const rec = await readDoc(env, 'yemot_items/' + r.result.id);
+    assert.equal(rec.audioPath, `line_audio/items/${r.result.id}.wav`); assert.equal(rec.audioMime, 'audio/wav'); assert.equal(rec.audioBytes, b.length); assert.ok(rec.audioSavedAt);
+    assert.ok((await stored(rec.audioPath)).equals(b));
+    // טקסט בקול הממוחשב – אין שמע לשמור
+    const t = await core(LINE, 'publishItem', 'u_emp', item('recipes'));
+    assert.equal(t.result.audioSaved, false); assert.equal((await readDoc(env, 'yemot_items/' + t.result.id)).audioPath, undefined);
+    const voice = require('../functions/lib/voice');
+    voice._test.setLineStore(failingStore);
+    try {
+      const f = await core(LINE, 'publishItem', 'u_emp', recItem('updates', 1));
+      assert.equal(f.status, 'OK', f.text); assert.deepEqual(f.result.warnings, ['audio-not-saved']); assert.equal(f.result.audioSaved, false);
+      const fr = await readDoc(env, 'yemot_items/' + f.result.id); assert.equal(fr.status, 'live'); assert.equal(fr.audioError, 'save-failed');
+      const pf = await core(PROMO, 'sendPromo', 'u_emp', recPromo(1));
+      assert.equal(pf.status, 'OK', pf.text); assert.ok(pf.result.warnings.includes('audio-not-saved'));
+    } finally { voice._test.setLineStore(null); }
+  });
+
+  it('ש4 הקלטה – מצבים בשלוחות: כשל ודאי ← failed; פסק זמן ← uncertain, ניסיון חוזר לאותו נתיב; לחיצה כפולה ← duplicate בלי העלאה', async () => {
+    const req = recItem('hours', 1);
+    M.setMode('upload', 'error');
+    const f = await call('publishLineItem', 'u_mgr', req);
+    assert.equal(f.error.details.reason, 'yemot-upload-failed'); assert.equal((await readDoc(env, 'yemot_items/' + req.requestId)).status, 'failed');
+    M.setMode('upload', 'hang');
+    const h = await core(LINE, 'publishItem', 'u_mgr', req, { YEMOT_TIMEOUT_MS: '300' });
+    assert.equal(h.error.details.reason, 'yemot-uncertain');
+    const x = await readDoc(env, 'yemot_items/' + req.requestId); assert.equal(x.uncertain, true);
+    M.setMode('upload', 'ok');
+    const ok = await call('publishLineItem', 'u_mgr', req);
+    assert.equal(ok.status, 'OK', ok.text); assert.equal(ok.result.path, x.path, 'ניסיון חוזר – אותו נתיב');
+    const n = M.calls('UploadFile').length;
+    const d = await call('publishLineItem', 'u_mgr', req);
+    assert.equal(d.result.duplicate, true); assert.equal(M.calls('UploadFile').length, n);
+    assert.equal(names('4').filter((q) => q.endsWith('.wav')).length, 1);
+  });
+
+  it('ש4 getLineState: אורך הקלטה לכל שלוחה (פתיחה 60) ו-canRecord לפי תפקיד', async () => {
+    const e = await call('getLineState', 'u_emp', {});
+    assert.deepEqual(e.result.limits.recordSecBySlot, { recipes: 120, promos: 120, updates: 120, hours: 120, opening: 60 });
+    assert.deepEqual(e.result.limits.canRecord, { recipes: true, promos: true, updates: true, hours: false, opening: false });
+    const m = await call('getLineState', 'u_mgr', {});
+    assert.deepEqual(m.result.limits.canRecord, { recipes: true, promos: true, updates: true, hours: true, opening: true });
+    assert.equal(M.state.requests.length, 0);
+  });
+
+  it('ש4 פתיחה – גיבוי לפני החלפה: רשומה ישנה בלי שמע שמור ← DownloadFile ← Storage ← רק אז העלאה; הקודמת replaced עם removedAt ו-audioPath', async () => {
+    await bucket().deleteFiles({ prefix: 'line_audio/' });
+    const prevAudio = wav(2);
+    const prevId = await oldAppOpening(prevAudio);
+    const b = wav(3);
+    const r = await core(LINE, 'publishItem', 'u_mgr', recItem('opening', 3, { audio: audio(b) }));
+    assert.equal(r.status, 'OK', r.text); assert.deepEqual(r.result.backedUp, [prevId]); assert.equal(r.result.replaced, 'M1000.wav');
+    const cmds = M.state.requests.map((q) => q.cmd);
+    assert.ok(cmds.indexOf('DownloadFile') >= 0 && cmds.indexOf('DownloadFile') < cmds.indexOf('UploadFile'), cmds.join(','));
+    const dl = M.calls('DownloadFile')[0];
+    assert.equal(dl.body.path, 'ivr2:/M1000.wav'); assert.equal(dl.auth, SECRET); assert.ok(!dl.url.includes(SECRET)); assert.ok(!JSON.stringify(dl.body).includes(SECRET));
+    const prev = await readDoc(env, 'yemot_items/' + prevId);
+    assert.equal(prev.status, 'replaced'); assert.ok(prev.removedAt); assert.equal(prev.audioPath, `line_audio/items/${prevId}.wav`); assert.equal(prev.audioBytes, prevAudio.length);
+    assert.equal(prev.text, 'פתיחה קודמת', 'הרשומה הקודמת לא נמחקה ולא שינתה תוכן');
+    assert.ok((await stored(prev.audioPath)).equals(prevAudio), 'הגיבוי = הקובץ שהיה בקו');
+    assert.ok(dir('').get('M1000.wav').equals(b)); assert.equal(dir('').get('ext.ini'), 'type=menu');
+    // החלפה נוספת: לפתיחה הנוכחית כבר יש שמע שמור ← בלי הורדה מהקו
+    M.state.requests = [];
+    const again = await core(LINE, 'publishItem', 'u_mgr', recItem('opening', 1));
+    assert.equal(again.status, 'OK', again.text); assert.deepEqual(again.result.backedUp, []); assert.equal(M.calls('DownloadFile').length, 0);
+  });
+
+  it('ש4 פתיחה – אין גיבוי אפשרי ← backup-failed, שום דבר לא הוחלף (404, ריק, JSON, גודל לא תואם, לא WAV, פסק זמן, כשל Storage); ניסיון חוזר מצליח', async () => {
+    const voice = require('../functions/lib/voice');
+    const scenarios = [
+      ['404', {}], ['empty', {}], ['json', {}], ['short', {}], ['http500', {}], ['hang', { YEMOT_TIMEOUT_MS: '300' }], ['not-wav', {}], ['store', {}],
+    ];
+    for (const [mode, envPatch] of scenarios) {
+      M.reset();
+      const prevAudio = mode === 'not-wav' ? Buffer.from('<html>error</html>') : wav(2);
+      const prevId = await oldAppOpening(prevAudio);
+      if (!['not-wav', 'store'].includes(mode)) M.setMode('download', mode);
+      if (mode === 'store') voice._test.setLineStore(failingStore);
+      const req = recItem('opening', 1);
+      let r;
+      try { r = await core(LINE, 'publishItem', 'u_mgr', req, envPatch); } finally { voice._test.setLineStore(null); }
+      assert.equal(r.error && r.error.details.reason, 'backup-failed', mode + ' ' + r.text); assert.equal(r.status, 'UNAVAILABLE');
+      assert.match(r.error.message, /שום דבר לא נמחק ולא הוחלף/);
+      assert.ok(dir('').get('M1000.wav').equals(prevAudio), mode + ': הפתיחה בקו לא השתנתה');
+      assert.equal(M.calls('UploadFile').length + M.calls('UploadTextFile').length + M.calls('FileAction').length, 0, mode);
+      const prev = await readDoc(env, 'yemot_items/' + prevId);
+      assert.equal(prev.status, 'live', mode); assert.equal(prev.audioPath, undefined, mode);
+      const mine = await readDoc(env, 'yemot_items/' + req.requestId);
+      assert.equal(mine.status, 'failed'); assert.equal(mine.error, 'backup-failed'); assert.equal(mine.lockAt, null);
+      assert.equal((await readDoc(env, 'yemot_state/structure')).lockAt, null, 'נעילת הפתיחה שוחררה');
+      await writeDoc(env, 'yemot_items/' + prevId, Object.assign(prev, { status: 'replaced' })); // ניקוי לתרחיש הבא
+    }
+    // ניסיון חוזר באותו requestId אחרי שההורדה חזרה לעבוד
+    M.reset();
+    const prevId = await oldAppOpening(wav(2));
+    M.setMode('download', '404');
+    const req = recItem('opening', 1);
+    assert.equal((await core(LINE, 'publishItem', 'u_mgr', req)).error.details.reason, 'backup-failed');
+    M.setMode('download', 'ok');
+    const ok = await core(LINE, 'publishItem', 'u_mgr', req);
+    assert.equal(ok.status, 'OK', ok.text); assert.deepEqual(ok.result.backedUp, [prevId]);
+  });
+
+  it('ש4 פתיחה – החלפה בטקסט לנתיב אחר (קול ממוחשב) מתנהגת כמו היום: בלי הורדה ובלי חסימה; פתיחה קודמת בטקסט – בלי הורדה; קובץ ותיק בלי רשומה – opening-legacy-file כמו קודם', async () => {
+    const prevId = await oldAppOpening(wav(2));
+    M.setMode('download', '404'); // גם אם ההורדה לא עובדת – החלפה בטקסט לא נחסמת (סבב תיקון 1, ליקוי 3)
+    const t = await call('publishLineItem', 'u_mgr', item('opening', { text: 'פתיחה חדשה בטקסט' }));
+    assert.equal(t.status, 'OK', t.text); assert.deepEqual(t.result.backedUp, []);
+    assert.equal(M.calls('DownloadFile').length, 0, 'בלי הורדה מהקו');
+    assert.ok(!dir('').has('M1000.wav'), 'כמו היום: הקודמת (שלנו) נמחקת אחרי ההעלאה'); assert.ok(dir('').has('M1000.tts'));
+    assert.equal((await readDoc(env, 'yemot_items/' + prevId)).status, 'replaced');
+    // עכשיו הפתיחה בטקסט: הקלטה חדשה לא צריכה הורדה
+    M.state.requests = [];
+    const r = await call('publishLineItem', 'u_mgr', recItem('opening', 1));
+    assert.equal(r.status, 'OK', r.text); assert.equal(M.calls('DownloadFile').length, 0); assert.ok(!dir('').has('M1000.tts'));
+    // קובץ ותיק בלי רשומה: ההגנה הקיימת
+    await H.seed(env); M.reset();
+    const l = await call('publishLineItem', 'u_mgr', recItem('opening', 1));
+    assert.equal(l.error.details.reason, 'opening-legacy-file'); assert.equal(dir('').get('M1000.wav'), 'פתיחה מוקלטת');
+    assert.equal(M.calls('DownloadFile').length, 0); assert.equal(M.calls('UploadFile').length, 0);
+  });
+
+  it('ש4 פתיחה – כשל העלאה אחרי גיבוי מוצלח: yemot-upload-failed, הקודמת נשארת בקו (live) עם הגיבוי; ניסיון חוזר מצליח בלי הורדה נוספת', async () => {
+    await bucket().deleteFiles({ prefix: 'line_audio/' });
+    const prevAudio = wav(2);
+    const prevId = await oldAppOpening(prevAudio);
+    for (const mode of ['error', 'http500']) {
+      M.setMode('upload', mode);
+      M.state.requests = [];
+      const req = recItem('opening', 1);
+      const f = await core(LINE, 'publishItem', 'u_mgr', req);
+      assert.equal(f.error && f.error.details.reason, 'yemot-upload-failed', mode + ' ' + f.text);
+      assert.ok(dir('').get('M1000.wav').equals(prevAudio), mode + ': הפתיחה בקו לא השתנתה');
+      assert.equal(M.calls('FileAction').length, 0);
+      const prev = await readDoc(env, 'yemot_items/' + prevId);
+      assert.equal(prev.status, 'live'); assert.equal(prev.audioPath, `line_audio/items/${prevId}.wav`);
+      assert.ok((await stored(prev.audioPath)).equals(prevAudio), 'הגיבוי = הקובץ שבקו');
+      assert.equal(M.calls('DownloadFile').length, mode === 'error' ? 1 : 0, 'בפעם השנייה כבר יש עותק – בלי הורדה');
+      assert.equal((await readDoc(env, 'yemot_items/' + req.requestId)).status, 'failed');
+      assert.equal((await readDoc(env, 'yemot_state/structure')).lockAt, null);
+      if (mode === 'http500') {
+        M.setMode('upload', 'ok'); M.state.requests = [];
+        const ok = await core(LINE, 'publishItem', 'u_mgr', req);
+        assert.equal(ok.status, 'OK', ok.text); assert.equal(M.calls('DownloadFile').length, 0); assert.deepEqual(ok.result.backedUp, []);
+        assert.equal((await readDoc(env, 'yemot_items/' + prevId)).status, 'replaced');
+      }
+    }
+  });
+
+  it('ש4 מבצע – מפתחות rec_/rst_ שמורים: נוסח טקסט אליהם נדחה (bad-promo-key) בלי פנייה לימות; העלאה חדשה מאפסת שדות שמע ישנים', async () => {
+    const r = await call('sendPromoToLine', 'u_emp', recPromo(1));
+    assert.equal(r.status, 'OK', r.text);
+    M.state.requests = [];
+    for (const key of [r.result.promoKey, 'rec_' + rid(), 'rst_' + rid()]) {
+      for (const uid of ['u_emp', 'u_mgr']) {
+        const t = await call('sendPromoToLine', uid, promo({ promoKey: key }));
+        assert.equal(t.error && t.error.details.reason, 'bad-promo-key', key);
+      }
+    }
+    assert.equal(M.state.requests.length, 0);
+    const rec = await readDoc(env, 'yemot_promos/' + r.result.promoKey);
+    assert.equal(rec.kind, 'audio'); assert.equal(rec.status, 'live');
+    // מבצע טקסט עם עותק שמע ישן (למשל מקול משוכפל קודם): נוסח חדש בקול הממוחשב – העותק הישן מתאפס
+    const p = promo();
+    assert.equal((await call('sendPromoToLine', 'u_mgr', p)).status, 'OK');
+    const ref = 'yemot_promos/' + p.promoKey;
+    await writeDoc(env, ref, Object.assign(await readDoc(env, ref), { kind: 'audio', audioPath: `line_audio/promos/${p.promoKey}.mp3`, audioMime: 'audio/mpeg', audioBytes: 123, audioSavedAt: '2026-11-01T00:00:00.000Z', audioError: 'save-failed' }));
+    const p2 = await call('sendPromoToLine', 'u_mgr', Object.assign({}, p, { requestId: rid(), text: 'נוסח אחר לגמרי' }));
+    assert.equal(p2.status, 'OK', p2.text); assert.equal(p2.result.action, 'replaced');
+    const after = await readDoc(env, ref);
+    for (const f of ['kind', 'audioPath', 'audioMime', 'audioBytes', 'audioSavedAt', 'audioError']) assert.equal(after[f], null, f);
+    assert.equal(after.text, 'נוסח אחר לגמרי');
+  });
+
+  // ================= משימה 2026-11-04, שלב 5: רשימת הקו, האזנה, הורדה, הארכה, החזרה, שמירת שמע =================
+  const BOARD = '../functions/yemot-board.js';
+  const dayAt = (day, hhmmZ) => `${day}T${hhmmZ || '10:00'}:00.000Z`; // 10:00Z = 12:00/13:00 בישראל – אותו יום
+  const yemotCalls = () => M.state.requests.length;
+  // רשומה של האפליקציה ישירות במסד (מצב "בקו" או "ירד")
+  async function itemDoc(slot, extra) {
+    const id = 'it5_' + rid();
+    const ext = { recipes: '1', updates: '3', hours: '4', opening: '' }[slot];
+    await writeDoc(env, 'yemot_items/' + id, Object.assign({ slot, ext, kind: 'text', text: 'נוסח ' + slot, spoken: 'נוסח ' + slot, title: 'כותרת ' + slot, engine: 'yemot-tts', status: 'live',
+      file: null, path: null, createdAt: dayAt(israelDay()), updatedAt: dayAt(israelDay()), byUid: 'u_mgr', byRole: 'manager', temporary: false, until: null }, extra || {}));
+    return id;
+  }
+  async function promoDoc(extra) {
+    const id = 'pk_' + rid();
+    await writeDoc(env, 'yemot_promos/' + id, Object.assign({ status: 'live', text: 'מבצע ישן', spoken: 'מבצע ישן', until: addDays(israelDay(), 3), file: null, path: null, withTzintuk: false, tzintuk: 'skipped',
+      byUid: 'u_mgr', byRole: 'manager', createdAt: dayAt(israelDay()), updatedAt: dayAt(israelDay()) }, extra || {}));
+    return id;
+  }
+  const B = () => require(BOARD)._core;
+
+  it('ש5 מטריצת הרשאות: עובד נדחה בכל הורדה/הארכה/החזרה, ברשימה ובהאזנה של שלוחה 4 ופתיחה – בלי שום פנייה לימות; אורח/מושבת נדחים בכל הפונקציות', async () => {
+    const hid = await itemDoc('hours', { file: '001.tts', path: 'ivr2:4/001.tts' });
+    const oid = await itemDoc('opening', { file: 'M1000.tts', path: 'ivr2:/M1000.tts' });
+    const rid0 = await itemDoc('recipes', { status: 'removed', removedAt: dayAt(israelDay()), file: '001.tts', path: 'ivr2:1/001.tts' });
+    const pk = await promoDoc({ file: '001.tts', path: 'ivr2:2/001.tts' });
+    const denied = [
+      ['getLineBoard', { slot: 'hours' }, 'slot-manager-only'], ['getLineBoard', { slot: 'opening' }, 'slot-manager-only'],
+      ['getLineAudio', { ref: { kind: 'item', id: hid } }, 'slot-manager-only'], ['getLineAudio', { ref: { kind: 'item', id: oid } }, 'slot-manager-only'],
+      ['getLineAudio', { ref: { kind: 'file', ext: '4', file: '000.tts' } }, 'slot-manager-only'], ['getLineAudio', { ref: { kind: 'file', ext: '', file: 'M1000.wav' } }, 'slot-manager-only'],
+    ];
+    for (const ext of ['1', '2', '3', '4']) denied.push(['removeLineItem', { requestId: rid(), ext, file: '000.tts' }, 'manager-only']);
+    denied.push(['removeLineItem', { requestId: rid(), promoKey: pk }, 'manager-only'], ['removeLineItem', { requestId: rid(), id: hid }, 'manager-only'], ['removeLineItem', { requestId: rid(), id: oid }, 'manager-only']);
+    for (const [kind, id] of [['promo', pk], ['item', hid], ['item', oid], ['item', rid0]]) denied.push(['extendLineItem', { requestId: rid(), kind, id, until: addDays(israelDay(), 5) }, 'manager-only']);
+    for (const [kind, id, until] of [['item', rid0], ['promo', pk, addDays(israelDay(), 2)], ['item', hid], ['item', oid], ['backup', '20261104-101010-abcdef']]) denied.push(['restoreLineItem', { requestId: rid(), kind, id, until }, 'manager-only']);
+    for (const [fn, data, reason] of denied) {
+      const r = await call(fn, 'u_emp', data);
+      assert.equal(r.status, 'PERMISSION_DENIED', fn + JSON.stringify(data) + r.text); assert.equal(r.error.details.reason, reason, fn); assert.match(r.error.message, HEB);
+    }
+    assert.equal(yemotCalls(), 0, 'עובד שנדחה – בלי פנייה לימות');
+    for (const role of ['guest', 'signedIn', 'disabledEmployee']) {
+      for (const [fn, data] of [['getLineBoard', { slot: 'recipes' }], ['getLineAudio', { ref: { kind: 'item', id: rid0 } }], ['extendLineItem', { requestId: rid(), kind: 'promo', id: pk, until: addDays(israelDay(), 5) }], ['restoreLineItem', { requestId: rid(), kind: 'item', id: rid0 }]]) {
+        const r = await call(fn, H.UID[role], data);
+        assert.equal(r.status, role === 'guest' ? 'UNAUTHENTICATED' : 'PERMISSION_DENIED', role + fn); assert.match(r.error.message, HEB);
+      }
+    }
+    assert.equal(yemotCalls(), 0);
+    // מה שמותר לעובד: רשימות 1–3 והאזנה בהן (בלי כפתורי ניהול)
+    for (const slot of ['recipes', 'promos', 'updates']) {
+      const r = await call('getLineBoard', 'u_emp', { slot });
+      assert.equal(r.status, 'OK', slot + r.text); assert.equal(r.result.canManage, false);
+      for (const e of r.result.onLine) assert.deepEqual(e.actions, { remove: false, extend: false });
+      for (const e of r.result.recent) assert.equal(e.restore.allowed, false);
+    }
+    const a = await call('getLineAudio', 'u_emp', { ref: { kind: 'item', id: rid0 } });
+    assert.equal(a.status, 'OK', a.text); assert.equal(a.result.mode, 'text');
+    assert.equal(await readDoc(env, 'yemot_promos/' + pk).then((x) => x.status), 'live', 'שום דבר לא השתנה');
+  });
+
+  it('ש5 getLineBoard: מה שבקו בפועל (מהגבוה לנמוך), "מהאפליקציה"/"קובץ ותיק", בלי ext.ini, M* ותיקיות; פתיחה – רק M1000.*; missing; ירדו ב-7 ימים (שעון ישראל), רשומה ישנה = אין שמע שמור', async () => {
+    const today = israelDay();
+    dir('1').set('ext.ini', 'type=playfile'); dir('1').set('M0001.wav', 'x'); dir('1').set('001.tts', 'מתכון א'); dir('1').set('002.wav', wav(1));
+    const a = await itemDoc('recipes', { file: '001.tts', path: 'ivr2:1/001.tts' });
+    const gone = await itemDoc('recipes', { file: '005.tts', path: 'ivr2:1/005.tts' }); // בקו לפי המסד, אבל לא בתיקייה
+    const d6 = await itemDoc('recipes', { status: 'removed', removedAt: dayAt(addDays(today, -6)), removedBy: 'u_mgr' }); // יום 6 אחורה – כן
+    const d7 = await itemDoc('recipes', { status: 'removed', removedAt: dayAt(addDays(today, -7)) }); // יום 7 אחורה – לא
+    const rep = await itemDoc('recipes', { status: 'replaced', updatedAt: dayAt(addDays(today, -1)) }); // ישנה: replaced בלי removedAt ← updatedAt
+    const m = await call('getLineBoard', 'u_mgr', { slot: 'recipes' });
+    assert.equal(m.status, 'OK', m.text);
+    assert.deepEqual(m.result.onLine.map((e) => [e.file, e.origin]), [['002.wav', 'legacy'], ['001.tts', 'app'], ['000.tts', 'legacy']]);
+    const [w, t, l] = m.result.onLine;
+    assert.equal(t.ref.kind, 'item'); assert.equal(t.ref.id, a); assert.equal(t.listen, 'text'); assert.deepEqual(t.actions, { remove: true, extend: false });
+    assert.equal(w.listen, 'line'); assert.equal(w.kind, 'audio'); assert.deepEqual(w.ref, { kind: 'file', ext: '1', file: '002.wav' }); assert.equal(l.listen, 'text'); assert.equal(l.actions.remove, true);
+    assert.deepEqual(m.result.missing.map((x) => x.ref.id), [gone]);
+    assert.deepEqual(m.result.recent.map((x) => x.ref.id).sort(), [d6, rep].sort(), 'יום 7 אחורה לא מופיע');
+    const r6 = m.result.recent.find((x) => x.ref.id === d6);
+    assert.equal(r6.hasSavedAudio, false); assert.equal(r6.downReason, 'removed'); assert.deepEqual(r6.restore, { allowed: true, needsUntil: false, costNote: false });
+    assert.equal(m.result.recent.find((x) => x.ref.id === rep).downReason, 'replaced');
+    assert.ok(!m.result.recent.some((x) => x.ref.id === d7));
+    assert.deepEqual(M.calls('GetIVR2Dir').map((q) => q.body.path), ['1']);
+    // פתיחה: רק M1000.* מהשורש (לא ext.ini, לא BACKUP_*)
+    dir('').set('BACKUP_M1000.wav', 'x');
+    const o = await call('getLineBoard', 'u_mgr', { slot: 'opening' });
+    assert.deepEqual(o.result.onLine.map((e) => [e.file, e.origin, e.actions.remove]), [['M1000.wav', 'legacy', false]]);
+    assert.equal(M.calls('GetIVR2Dir')[1].body.path, '/');
+    // מבצעים: ירד מהאפליקציה / בלילה; קובץ 001 ותיק
+    const pr = await promoDoc({ status: 'removed', removedAt: dayAt(addDays(today, -2)), removedVia: 'app' });
+    const pe = await promoDoc({ status: 'removed', removedAt: dayAt(today), kind: null });
+    const p = await call('getLineBoard', 'u_mgr', { slot: 'promos' });
+    assert.equal(p.status, 'OK', p.text);
+    assert.deepEqual(p.result.onLine.map((e) => [e.file, e.origin]), [['000.tts', 'legacy']]);
+    assert.deepEqual(p.result.recent.map((x) => [x.ref.id, x.downReason, x.kind, x.restore.needsUntil]), [[pe, 'expired', 'text', true], [pr, 'removed', 'text', true]]);
+  });
+
+  it('ש5 getLineBoard – מטמון: קריאה שנייה בלי פנייה לימות; שינוי במסד (העלאה) ← קריאה מחדש; רענון לא יותר מפעם ב-15 שניות; כשל עם מטמון ← stale, בלי מטמון ← yemot-list-failed בלי המפתח', async () => {
+    const r1 = await call('getLineBoard', 'u_emp', { slot: 'updates' });
+    assert.equal(r1.status, 'OK'); assert.equal(r1.result.cached, false);
+    const r2 = await call('getLineBoard', 'u_emp', { slot: 'updates' });
+    assert.equal(r2.result.cached, true); assert.equal(M.calls('GetIVR2Dir').length, 1);
+    const r3 = await call('getLineBoard', 'u_emp', { slot: 'updates', refresh: true });
+    assert.equal(r3.result.cached, true, 'רענון מיד אחרי קריאה – מהמטמון'); assert.equal(M.calls('GetIVR2Dir').length, 1);
+    const up = await call('publishLineItem', 'u_emp', item('updates'));
+    assert.equal(up.status, 'OK');
+    const n = M.calls('GetIVR2Dir').length;
+    const r4 = await call('getLineBoard', 'u_emp', { slot: 'updates' });
+    assert.equal(r4.result.cached, false); assert.equal(M.calls('GetIVR2Dir').length, n + 1);
+    assert.ok(r4.result.onLine.some((e) => e.ref.id === up.result.id), 'ההודעה החדשה ברשימה');
+    // מטמון ישן מ-3 דקות + כשל בקו ← מחזירים את הישן עם stale
+    const c = await readDoc(env, 'yemot_state/board-updates');
+    await writeDoc(env, 'yemot_state/board-updates', Object.assign(c, { fetchedAt: new Date(Date.now() - 180000).toISOString() }));
+    M.setMode('dir', 'error');
+    const r5 = await call('getLineBoard', 'u_emp', { slot: 'updates' });
+    assert.equal(r5.status, 'OK', r5.text); assert.equal(r5.result.stale, true); assert.equal(r5.result.cached, true);
+    const r6 = await call('getLineBoard', 'u_mgr', { slot: 'hours' });
+    assert.equal(r6.error.details.reason, 'yemot-list-failed'); assert.match(r6.error.message, HEB); assert.ok(!r6.text.includes(SECRET));
+    for (const bad of [{ slot: 'x' }, { slot: 'constructor' }, {}, { slot: 'recipes', refresh: 'yes' }]) {
+      const r = await call('getLineBoard', 'u_mgr', bad); assert.ok(['bad-slot', 'bad-input'].includes(r.error.details.reason), JSON.stringify(bad));
+    }
+  });
+
+  it('ש5 getLineAudio: שמע שמור ← מ-Storage; נוסח ← הקראה בטלפון (קירוב); הקלטה ותיקה ← מהקו (נספר, מכסה 60 ביום); tts ותיק ← GetTextFile; כשל ← listen-unavailable; Storage נופל ← נוסח', async () => {
+    const b = wav(1.5);
+    const rec = await call('publishLineItem', 'u_emp', recItem('recipes', 1.5, { audio: audio(b) }));
+    const s = await call('getLineAudio', 'u_emp', { ref: { kind: 'item', id: rec.result.id } });
+    assert.equal(s.status, 'OK', s.text); assert.equal(s.result.mode, 'audio'); assert.equal(s.result.source, 'saved'); assert.ok(Buffer.from(s.result.data, 'base64').equals(b));
+    const tx = await itemDoc('updates', { text: 'עדכון‏ חשוב' });
+    const t = await call('getLineAudio', 'u_emp', { ref: { kind: 'item', id: tx } });
+    assert.deepEqual(t.result, { ok: true, mode: 'text', text: 'עדכון חשוב', approx: true });
+    M.state.requests = [];
+    const lw = wav(1); dir('3').set('007.wav', lw);
+    const l = await call('getLineAudio', 'u_emp', { ref: { kind: 'file', ext: '3', file: '007.wav' } });
+    assert.equal(l.result.source, 'line'); assert.ok(Buffer.from(l.result.data, 'base64').equals(lw));
+    assert.equal(M.calls('DownloadFile')[0].auth, SECRET); assert.ok(!l.text.includes(SECRET));
+    const lt = await call('getLineAudio', 'u_emp', { ref: { kind: 'file', ext: '1', file: '000.tts' } });
+    assert.equal(lt.result.mode, 'text'); assert.equal(lt.result.text, 'מתכון ותיק');
+    assert.equal((await readDoc(env, 'yemot_state/listen-u_emp')).count, 2);
+    // הקלטה ישנה בלי עותק, שעדיין בקו ← מהקו
+    dir('3').set('008.wav', wav(1));
+    const old = await itemDoc('updates', { kind: 'audio', text: null, engine: 'recording', file: '008.wav', path: 'ivr2:3/008.wav' });
+    assert.equal((await call('getLineAudio', 'u_mgr', { ref: { kind: 'item', id: old } })).result.source, 'line');
+    // אותה הקלטה אחרי שירדה ← לא מורידים מהקו (הנתיב אולי שייך עכשיו למשהו אחר)
+    const oldDown = await itemDoc('updates', { kind: 'audio', text: null, engine: 'recording', file: '008.wav', path: 'ivr2:3/008.wav', status: 'removed', removedAt: dayAt(israelDay()) });
+    const n = M.calls('DownloadFile').length;
+    assert.equal((await call('getLineAudio', 'u_mgr', { ref: { kind: 'item', id: oldDown } })).error.details.reason, 'listen-unavailable'); assert.equal(M.calls('DownloadFile').length, n);
+    // מכסה יומית
+    await writeDoc(env, 'yemot_state/listen-u_emp', { day: israelDay(), count: 60 });
+    const lim = await call('getLineAudio', 'u_emp', { ref: { kind: 'file', ext: '3', file: '007.wav' } });
+    assert.equal(lim.error.details.reason, 'listen-limit'); assert.match(lim.error.message, HEB);
+    assert.equal((await call('getLineAudio', 'u_emp', { ref: { kind: 'item', id: rec.result.id } })).status, 'OK', 'שמע שמור – בלי מכסה');
+    M.setMode('download', '404');
+    const f = await call('getLineAudio', 'u_mgr', { ref: { kind: 'file', ext: '3', file: '007.wav' } });
+    assert.equal(f.error.details.reason, 'listen-unavailable'); assert.match(f.error.message, HEB);
+    for (const ref of [{ kind: 'file', ext: '4', file: 'ext.ini' }, { kind: 'file', ext: '', file: 'M1001.wav' }, { kind: 'file', ext: '5', file: '000.tts' }, { kind: 'file', ext: '1', file: '../x.wav' }]) {
+      assert.equal((await call('getLineAudio', 'u_mgr', { ref })).error.details.reason, 'bad-file', JSON.stringify(ref));
+    }
+    assert.equal((await call('getLineAudio', 'u_mgr', { ref: { kind: 'item', id: 'nope_nope_1' } })).error.details.reason, 'item-not-found');
+    // Storage נופל: פריט עם נוסח ועותק ← נוסח
+    const voice = require('../functions/lib/voice');
+    const both = await itemDoc('recipes', { audioPath: `line_audio/items/x${rid()}.mp3`, audioMime: 'audio/mpeg' });
+    voice._test.setLineStore({ async get() { throw new Error('down'); } });
+    try { const r = await core(BOARD, 'listen', 'u_mgr', { ref: { kind: 'item', id: both } }); assert.equal(r.result.mode, 'text', r.text); } finally { voice._test.setLineStore(null); }
+  });
+
+  it('ש5 הורדת מבצע באמצע (מנהל): מחיקה בנתיב שלו בלבד, removed + removedVia/removedBy, הרשומה נשמרת; כפולה ← duplicate; נעול ← busy; pending ← item-uncertain; כשל ← remove-failed וניסיון חוזר; path-reused לא נמחק', async () => {
+    const s = await call('sendPromoToLine', 'u_mgr', promo());
+    assert.equal(s.result.file, '001.tts');
+    M.state.requests = [];
+    const req = { requestId: rid(), promoKey: s.result.promoKey };
+    const r = await call('removeLineItem', 'u_mgr', req);
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.removed, true); assert.match(r.result.message, HEB);
+    assert.deepEqual(M.calls('FileAction').map((q) => q.body), [{ action: 'delete', what: 'ivr2:2/001.tts' }]);
+    assert.deepEqual(names('2'), ['000.tts'], '001.tts הוותיק לא נגע');
+    const x = await readDoc(env, 'yemot_promos/' + s.result.promoKey);
+    assert.equal(x.status, 'removed'); assert.equal(x.removedVia, 'app'); assert.equal(x.removedBy, 'u_mgr'); assert.ok(x.removedAt); assert.equal(x.text, 'בדיקה: מבצע דמה ב-10 שקלים'); assert.equal(x.lockAt, null);
+    const d = await call('removeLineItem', 'u_mgr', req);
+    assert.equal(d.result.duplicate, true); assert.equal(M.calls('FileAction').length, 1);
+    // נעול / pending
+    const pk1 = await promoDoc({ file: '003.tts', path: 'ivr2:2/003.tts', lockAt: new Date().toISOString(), lockReq: 'other_req_1' });
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), promoKey: pk1 })).error.details.reason, 'busy');
+    const pk2 = await promoDoc({ file: '004.tts', path: 'ivr2:2/004.tts', pending: { text: 'x', until: israelDay(), at: new Date().toISOString() } });
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), promoKey: pk2 })).error.details.reason, 'item-uncertain');
+    // נתיב לא בטוח (000 / שלוחה אחרת) – לא נמחק
+    const pk3 = await promoDoc({ file: '000.tts', path: 'ivr2:2/000.tts' });
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), promoKey: pk3 })).error.details.reason, 'item-not-found');
+    assert.ok(dir('2').has('000.tts'));
+    // כשל במחיקה ← remove-failed; ניסיון חוזר מצליח
+    dir('2').set('006.tts', 'מבצע'); const pk4 = await promoDoc({ file: '006.tts', path: 'ivr2:2/006.tts' });
+    M.setMode('delete', 'error');
+    const f = await call('removeLineItem', 'u_mgr', { requestId: rid(), promoKey: pk4 });
+    assert.equal(f.error.details.reason, 'yemot-remove-failed'); assert.ok(!f.text.includes(SECRET));
+    assert.equal((await readDoc(env, 'yemot_promos/' + pk4)).status, 'remove-failed'); assert.ok(dir('2').has('006.tts'));
+    M.setMode('delete', 'ok');
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), promoKey: pk4 })).status, 'OK'); assert.ok(!dir('2').has('006.tts'));
+    // path-reused: מבצע אחר (בתוקף) מחזיק את אותו נתיב ← הקובץ נשאר
+    dir('2').set('009.tts', 'חדש'); const pOld = await promoDoc({ file: '009.tts', path: 'ivr2:2/009.tts' }); const pNew = await promoDoc({ file: '009.tts', path: 'ivr2:2/009.tts' });
+    const pr = await call('removeLineItem', 'u_mgr', { requestId: rid(), promoKey: pOld });
+    assert.equal(pr.status, 'OK'); assert.ok(dir('2').has('009.tts')); assert.equal((await readDoc(env, 'yemot_promos/' + pOld)).error, 'path-reused');
+    assert.equal((await readDoc(env, 'yemot_promos/' + pNew)).status, 'live');
+  });
+
+  it('ש5 הורדת קובץ ותיק בשלוחות 1–4: גיבוי חובה (טקסט / שמע) ← yemot_line_backups complete ← רק אז מחיקה (applied); כשל גיבוי ← backup-failed ושום דבר לא נמחק; ניסיון חוזר משתמש באותו גיבוי', async () => {
+    for (const ext of ['1', '2', '3', '4']) {
+      M.state.requests = [];
+      const before = dir(ext).get('000.tts');
+      const r = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext, file: '000.tts' });
+      assert.equal(r.status, 'OK', ext + r.text); assert.match(r.result.backupId, /^\d{8}-\d{6}-[A-Za-z0-9]{1,6}$/);
+      const cmds = M.state.requests.map((q) => q.cmd);
+      assert.ok(cmds.indexOf('GetTextFile') >= 0 && cmds.indexOf('GetTextFile') < cmds.indexOf('FileAction'), cmds.join(','));
+      assert.deepEqual(M.calls('FileAction').map((q) => q.body.what), [`ivr2:${ext}/000.tts`]);
+      const bk = await readDoc(env, 'yemot_line_backups/' + r.result.backupId);
+      assert.equal(bk.status, 'complete'); assert.equal(bk.result, 'applied'); assert.equal(bk.text, before); assert.equal(bk.kind, 'text'); assert.equal(bk.path, `ivr2:${ext}/000.tts`); assert.equal(bk.reason, 'file');
+      assert.ok(!dir(ext).has('000.tts'));
+    }
+    // ב"ירדו בשבוע האחרון"
+    const b1 = await call('getLineBoard', 'u_mgr', { slot: 'recipes' });
+    assert.equal(b1.result.recent[0].ref.kind, 'backup'); assert.equal(b1.result.recent[0].downReason, 'legacy-removed'); assert.equal(b1.result.recent[0].restore.allowed, true);
+    // שמע ותיק ← עותק ב-Storage, זהה
+    const lw = wav(1); dir('3').set('000.wav', lw);
+    const w = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '3', file: '000.wav' });
+    assert.equal(w.status, 'OK', w.text);
+    const wb = await readDoc(env, 'yemot_line_backups/' + w.result.backupId);
+    assert.equal(wb.storagePath, `line_audio/backups/${w.result.backupId}.wav`); assert.ok((await stored(wb.storagePath)).equals(lw));
+    // כשלי גיבוי: לא נמחק כלום
+    const cases = [['download', '404', '010.wav', wav(1)], ['download', 'short', '011.wav', wav(1)], ['download', 'ok', '012.wav', Buffer.from('<html>err</html>')]];
+    for (const [cmd, mode, file, content] of cases) {
+      M.reset(); dir('4').set(file, content); M.setMode(cmd, mode);
+      const f = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file });
+      assert.equal(f.error && f.error.details.reason, 'backup-failed', mode + f.text); assert.equal(f.status, 'UNAVAILABLE'); assert.match(f.error.message, /שום דבר לא נמחק/);
+      assert.equal(M.calls('FileAction').length, 0); assert.ok(dir('4').has(file));
+    }
+    M.reset(); M.setMode('text', 'error'); M.setMode('download', '404');
+    const ft = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '1', file: '000.tts' });
+    assert.equal(ft.error.details.reason, 'backup-failed'); assert.equal(M.calls('FileAction').length, 0); assert.ok(dir('1').has('000.tts'));
+    // GetTextFile לא עובד, אבל DownloadFile כן ← גיבוי מהורדה
+    M.reset(); M.setMode('text', 'nocontents');
+    const fb = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '1', file: '000.tts' });
+    assert.equal(fb.status, 'OK', fb.text); assert.equal((await readDoc(env, 'yemot_line_backups/' + fb.result.backupId)).text, 'מתכון ותיק');
+    // כשל במחיקה אחרי גיבוי ← not-applied; ניסיון חוזר באותו requestId – אותו גיבוי, בלי הורדה נוספת
+    M.reset(); M.setMode('delete', 'error');
+    const req = { requestId: rid(), ext: '3', file: '000.tts' };
+    const df = await call('removeLineItem', 'u_mgr', req);
+    assert.equal(df.error.details.reason, 'yemot-remove-failed');
+    const bks = (await allDocs(env, ['yemot_line_backups'])).filter((q) => q.data.opId === req.requestId);
+    assert.equal(bks.length, 1); assert.equal(bks[0].data.result, 'not-applied');
+    M.setMode('delete', 'ok'); M.state.requests = [];
+    const ok = await call('removeLineItem', 'u_mgr', req);
+    assert.equal(ok.status, 'OK', ok.text); assert.equal(ok.result.backupId, bks[0].id); assert.equal(M.calls('GetTextFile').length, 0);
+    assert.equal((await readDoc(env, 'yemot_line_backups/' + bks[0].id)).result, 'applied');
+  });
+
+  it('ש5 בטיחות נתיב: מחיקה לפי שם רק ivr2:<1-4>/NNN.tts|wav – אף פעם ext.ini, M*, שורש, תיקייה או שלוחה 5 (בלי פנייה לימות); safePath הקיים בלי שינוי', async () => {
+    for (const [ext, file] of [['1', 'ext.ini'], ['2', 'M1000.wav'], ['3', 'M0001.tts'], ['', 'M1000.wav'], ['', 'ext.ini'], ['1', ''], ['1', '1'], ['1', '001.tts/'], ['1', '../4/000.tts'], ['1', '001.ini'],
+      ['5', '000.tts'], ['1/2', '000.tts'], [1, '000.tts'], ['4', '000.TTS\n'], ['4', '0001.tts']]) {
+      const r = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext, file });
+      assert.equal(r.error && r.error.details.reason, 'bad-file', JSON.stringify([ext, file]));
+    }
+    assert.equal(yemotCalls(), 0);
+    const { safeFilePath, safePath } = require(LINE)._core;
+    assert.deepEqual(['ivr2:1/000.tts', 'ivr2:2/001.wav', 'ivr2:4/999.tts', 'ivr2:1/ext.ini', 'ivr2:/M1000.wav', 'ivr2:5/000.tts', 'ivr2:1/', 'ivr2:1/000.mp3', 'ivr2:1/2/000.tts', 'ivr2:1/000.tts\n'].map(safeFilePath),
+      [true, true, true, false, false, false, false, false, false, false]);
+    assert.deepEqual(['ivr2:4/000.tts', 'ivr2:1/000.tts', 'ivr2:1/001.tts', 'ivr2:/M1000.wav', 'ivr2:/M1001.wav'].map(safePath), [true, false, true, true, false]);
+    // רשומה מזויפת של מבצע / פריט שמצביעה על ext.ini או על M1000 – לא נמחקת
+    const pk = await promoDoc({ file: 'ext.ini', path: 'ivr2:2/ext.ini' });
+    const it = await itemDoc('updates', { file: 'ext.ini', path: 'ivr2:3/ext.ini' });
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), promoKey: pk })).error.details.reason, 'item-not-found');
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), id: it })).error.details.reason, 'item-not-found');
+    // העלאה לא ודאית באותו נתיב ← לא נמחק "כקובץ ותיק"
+    dir('3').set('006.tts', 'אולי שלנו');
+    await itemDoc('updates', { status: 'failed', uncertain: true, file: '006.tts', path: 'ivr2:3/006.tts' });
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '3', file: '006.tts' })).error.details.reason, 'item-uncertain');
+    assert.equal(M.calls('FileAction').length, 0); assert.ok(dir('3').has('006.tts'));
+  });
+
+  it('ש5 הורדת הקלטה בלי עותק שמור: קודם עותק מהקו; אין עותק ← no-backup-confirm (לא נמחק), ורק עם confirmNoBackup:true – נמחקת', async () => {
+    const lw = wav(1); dir('3').set('004.wav', lw);
+    const id = await itemDoc('updates', { kind: 'audio', text: null, engine: 'recording', file: '004.wav', path: 'ivr2:3/004.wav' });
+    const r = await call('removeLineItem', 'u_mgr', { requestId: rid(), id });
+    assert.equal(r.status, 'OK', r.text);
+    const x = await readDoc(env, 'yemot_items/' + id);
+    assert.equal(x.status, 'removed'); assert.equal(x.audioPath, `line_audio/items/${id}.wav`); assert.ok((await stored(x.audioPath)).equals(lw));
+    dir('3').set('005.wav', wav(1));
+    const id2 = await itemDoc('updates', { kind: 'audio', text: null, engine: 'recording', file: '005.wav', path: 'ivr2:3/005.wav' });
+    M.setMode('download', '404'); M.state.requests = [];
+    const c = await call('removeLineItem', 'u_mgr', { requestId: rid(), id: id2 });
+    assert.equal(c.error.details.reason, 'no-backup-confirm'); assert.match(c.error.message, /לאשר/); assert.ok(dir('3').has('005.wav'));
+    assert.equal(M.calls('FileAction').length, 0);
+    const y = await readDoc(env, 'yemot_items/' + id2); assert.equal(y.status, 'live'); assert.equal(y.lockAt, null);
+    const ok = await call('removeLineItem', 'u_mgr', { requestId: rid(), id: id2, confirmNoBackup: true });
+    assert.equal(ok.status, 'OK', ok.text); assert.ok(!dir('3').has('005.wav'));
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), id: id2, confirmNoBackup: 'yes' })).error.details.reason, 'bad-input');
+  });
+
+  it('ש5 extendLineItem: מבצע ושלוחה 4 זמנית בלבד; שינוי ברשומה בלבד (אפס פניות לימות); כפולה ← duplicate; untilHistory; בלי תוקף ← no-expiry; לא בקו ← item-not-live; תאריכים', async () => {
+    const today = israelDay();
+    const pk = await promoDoc({ file: '001.tts', path: 'ivr2:2/001.tts', until: today });
+    const req = { requestId: rid(), kind: 'promo', id: pk, until: addDays(today, 10) };
+    const r = await call('extendLineItem', 'u_mgr', req);
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.previousUntil, today); assert.equal(r.result.until, addDays(today, 10));
+    assert.match(r.result.message, new RegExp(addDays(today, 10).split('-').reverse().join('/')));
+    const x = await readDoc(env, 'yemot_promos/' + pk);
+    assert.equal(x.until, addDays(today, 10)); assert.equal(x.extendedBy, 'u_mgr'); assert.equal(x.extendReq, req.requestId);
+    assert.deepEqual(x.untilHistory.map((h) => h.until), [today]); assert.equal(x.text, 'מבצע ישן'); assert.equal(x.status, 'live');
+    const d = await call('extendLineItem', 'u_mgr', req);
+    assert.equal(d.result.duplicate, true); assert.equal((await readDoc(env, 'yemot_promos/' + pk)).untilHistory.length, 1);
+    const short = await call('extendLineItem', 'u_mgr', { requestId: rid(), kind: 'promo', id: pk, until: addDays(today, 1) });
+    assert.equal(short.status, 'OK', 'מותר גם לקצר');
+    const h = await itemDoc('hours', { file: '001.tts', path: 'ivr2:4/001.tts', temporary: true, until: today });
+    assert.equal((await call('extendLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: h, until: addDays(today, 5) })).status, 'OK');
+    for (const [slot, extra] of [['recipes', {}], ['updates', {}], ['opening', {}], ['hours', { temporary: false }]]) {
+      const id = await itemDoc(slot, extra);
+      const e = await call('extendLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id, until: addDays(today, 5) });
+      assert.equal(e.error.details.reason, 'no-expiry', slot); assert.match(e.error.message, HEB);
+    }
+    const gone = await promoDoc({ status: 'removed', removedAt: dayAt(today) });
+    assert.equal((await call('extendLineItem', 'u_mgr', { requestId: rid(), kind: 'promo', id: gone, until: addDays(today, 5) })).error.details.reason, 'item-not-live');
+    for (const [until, reason] of [[addDays(today, -1), 'date-past'], [addDays(today, 61), 'date-too-far'], ['2026-02-30', 'bad-date'], [undefined, 'bad-date']]) {
+      assert.equal((await call('extendLineItem', 'u_mgr', { requestId: rid(), kind: 'promo', id: pk, until })).error.details.reason, reason, String(until));
+    }
+    assert.equal((await call('extendLineItem', 'u_mgr', { requestId: 'x', kind: 'promo', id: pk, until: today })).error.details.reason, 'bad-request-id');
+    assert.equal(yemotCalls(), 0, 'הארכה לא פונה לימות');
+  });
+
+  it('ש5 ריצת הלילה לא מורידה פריט שהוארך (מבצע ושלוחה 4), ומורידה אותו אחרי התאריך החדש', async () => {
+    const today = israelDay();
+    const s = await call('sendPromoToLine', 'u_mgr', promo({ until: today }));
+    const h = await call('publishLineItem', 'u_mgr', item('hours', { until: today }));
+    assert.equal(h.status, 'OK', h.text);
+    assert.equal((await call('extendLineItem', 'u_mgr', { requestId: rid(), kind: 'promo', id: s.result.promoKey, until: addDays(today, 3) })).status, 'OK');
+    assert.equal((await call('extendLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: h.result.id, until: addDays(today, 3) })).status, 'OK');
+    const night = (days) => require('../functions/yemot.js')._core.nightly({ now: new Date(Date.now() + days * 86400000), key: SECRET, base: BASE, ext: '2', timeoutMs: 5000, skipCache: true });
+    const o1 = await night(1);
+    assert.equal(o1.promos.checked, 0, JSON.stringify(o1)); assert.equal(o1.line.checked, 0);
+    assert.ok(M.state.files.has(s.result.file)); assert.ok(dir('4').has(h.result.file));
+    const o2 = await night(4);
+    assert.equal(o2.promos.removed, 1); assert.equal(o2.line.removed, 1);
+    assert.ok(!M.state.files.has(s.result.file)); assert.ok(!dir('4').has(h.result.file));
+  });
+
+  it('ש5 restoreLineItem – הקלטה שירדה: העלאה חדשה במספר חדש (מושמעת ראשונה), אותו שמע, restoredFrom; המקורית לא השתנתה; כפולה ← duplicate; בקשה אחרת ← already-on-line; אין מחיקה ואין דריסה', async () => {
+    const b = wav(2);
+    const p = await call('publishLineItem', 'u_emp', recItem('recipes', 2, { audio: audio(b) }));
+    assert.equal(p.result.file, '001.wav');
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), id: p.result.id })).status, 'OK');
+    dir('1').set('003.tts', 'מתכון אחר'); // קובץ אחר בשלוחה
+    const orig = await readDoc(env, 'yemot_items/' + p.result.id);
+    const snapshot = new Map([...dir('1').entries()]);
+    M.state.requests = [];
+    const req = { requestId: rid(), kind: 'item', id: p.result.id };
+    const r = await call('restoreLineItem', 'u_mgr', req);
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.file, '004.wav', 'מספר חדש, גבוה מכל מה שבשלוחה'); assert.deepEqual(r.result.restoredFrom, { kind: 'item', id: p.result.id });
+    assert.equal(r.result.usedCost, false); assert.match(r.result.message, HEB);
+    assert.ok(dir('1').get('004.wav').equals(b), 'אותו שמע');
+    for (const [k, v] of snapshot) assert.ok(dir('1').get(k) === v || (Buffer.isBuffer(v) && dir('1').get(k).equals(v)), 'לא נדרס: ' + k);
+    assert.equal(M.calls('FileAction').length + M.calls('RunTzintuk').length, 0, 'בלי מחיקה ובלי צינתוק');
+    assert.deepEqual(await readDoc(env, 'yemot_items/' + p.result.id), orig, 'הרשומה המקורית לא השתנתה');
+    const nr = await readDoc(env, 'yemot_items/' + r.result.id);
+    assert.equal(nr.status, 'live'); assert.deepEqual(nr.restoredFrom, { kind: 'item', id: p.result.id }); assert.equal(nr.byUid, 'u_mgr'); assert.equal(nr.kind, 'audio');
+    assert.equal(nr.audioPath, `line_audio/items/${r.result.id}.wav`, 'להחזרה יש עותק משלה');
+    const d = await call('restoreLineItem', 'u_mgr', req);
+    assert.equal(d.result.duplicate, true); assert.equal(M.calls('UploadFile').length, 1);
+    const again = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: p.result.id });
+    assert.equal(again.error.details.reason, 'already-on-line'); assert.match(again.error.message, HEB);
+    const bd = await call('getLineBoard', 'u_mgr', { slot: 'recipes' });
+    const rr = bd.result.recent.find((x) => x.ref.id === p.result.id); assert.equal(rr.restore.allowed, false); assert.equal(rr.alreadyRestored, true);
+    // עדיין בקו ← restore-not-down
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: r.result.id })).error.details.reason, 'restore-not-down');
+  });
+
+  it('ש5 restoreLineItem – חלון 7 ימים (שעון ישראל): יום 6 אחורה ← מותר, יום 7 ← restore-too-old; תאריך: חובה במבצע ובשלוחה 4 זמנית, אסור ב-1/3/פתיחה; בלי תוכן ← no-saved-content', async () => {
+    const today = israelDay();
+    const ok6 = await itemDoc('updates', { status: 'removed', removedAt: dayAt(addDays(today, -6), '21:30') }); // 23:30/00:30 בישראל – לפי שעון ישראל
+    const old7 = await itemDoc('updates', { status: 'removed', removedAt: dayAt(addDays(today, -7)) });
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: old7 })).error.details.reason, 'restore-too-old');
+    const day6 = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(dayAt(addDays(today, -6), '21:30')));
+    const r6 = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: ok6 });
+    if (day6 >= addDays(today, -6)) assert.equal(r6.status, 'OK', r6.text); else assert.equal(r6.error.details.reason, 'restore-too-old');
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: old7, until: today })).error.details.reason, 'restore-too-old');
+    const rc = await itemDoc('recipes', { status: 'removed', removedAt: dayAt(today) });
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: rc, until: addDays(today, 2) })).error.details.reason, 'bad-input');
+    const ht = await itemDoc('hours', { status: 'removed', removedAt: dayAt(today), temporary: true, until: addDays(today, -1) });
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: ht })).error.details.reason, 'date-required');
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: ht, until: addDays(today, -1) })).error.details.reason, 'date-past');
+    const hr = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: ht, until: addDays(today, 2) });
+    assert.equal(hr.status, 'OK', hr.text); const hn = await readDoc(env, 'yemot_items/' + hr.result.id); assert.equal(hn.temporary, true); assert.equal(hn.until, addDays(today, 2));
+    const pk = await promoDoc({ status: 'removed', removedAt: dayAt(today), file: '005.tts', path: 'ivr2:2/005.tts' });
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'promo', id: pk })).error.details.reason, 'date-required');
+    const empty = await itemDoc('updates', { status: 'removed', removedAt: dayAt(today), kind: 'audio', text: null, engine: 'recording' });
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: empty })).error.details.reason, 'no-saved-content');
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: 'r'.repeat(57), kind: 'item', id: rc })).error.details.reason, 'bad-request-id', 'requestId עד 56');
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: 'nope_nope_1' })).error.details.reason, 'item-not-found');
+  });
+
+  it('ש5 restoreLineItem – מבצע: promoKey rst_, מספר חדש, בלי צינתוק, תאריך חדש; ריצת הלילה מורידה אותו בתאריך החדש; המקורי לא השתנה', async () => {
+    const today = israelDay();
+    const s = await call('sendPromoToLine', 'u_mgr', promo({ until: today }));
+    assert.equal((await call('removeLineItem', 'u_mgr', { requestId: rid(), promoKey: s.result.promoKey })).status, 'OK');
+    const orig = await readDoc(env, 'yemot_promos/' + s.result.promoKey);
+    const req = { requestId: rid(), kind: 'promo', id: s.result.promoKey, until: addDays(today, 2) };
+    const r = await call('restoreLineItem', 'u_mgr', req);
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.id, 'rst_' + req.requestId); assert.equal(r.result.file, '002.tts'); assert.equal(r.result.until, addDays(today, 2));
+    assert.equal(M.calls('RunTzintuk').length, 0);
+    const n = await readDoc(env, 'yemot_promos/rst_' + req.requestId);
+    assert.equal(n.status, 'live'); assert.equal(n.withTzintuk, false); assert.deepEqual(n.restoredFrom, { kind: 'promo', id: s.result.promoKey }); assert.equal(n.text, orig.text);
+    assert.deepEqual(await readDoc(env, 'yemot_promos/' + s.result.promoKey), orig);
+    assert.equal((await call('restoreLineItem', 'u_mgr', req)).result.duplicate, true);
+    const out = await require('../functions/yemot.js').runExpiry({ now: new Date(Date.now() + 3 * 86400000), key: SECRET, base: BASE, ext: '2', timeoutMs: 5000 });
+    assert.equal(out.removed, 1); assert.ok(!M.state.files.has('002.tts'));
+  });
+
+  it('ש5 restoreLineItem – נוסח בלי שמע שמור בקול המשוכפל ← cost-confirm-needed עם מספר תווים (בלי פנייה לימות/ElevenLabs); engine:tts ← בלי עלות; מקור בקול הממוחשב ← בלי אישור', async () => {
+    const el = { VOICE_ENGINE: 'elevenlabs', ELEVENLABS_API_BASE: 'http://127.0.0.1:9', ELEVENLABS_API_KEY: 'DUMMY-ELEVEN-x' };
+    const id = await itemDoc('recipes', { status: 'removed', removedAt: dayAt(israelDay()), engine: 'elevenlabs', text: 'מתכון בקול האנושי', path: 'ivr2:1/002.wav', file: '002.wav' });
+    const c = await core(BOARD, 'restore', 'u_mgr', { requestId: rid(), kind: 'item', id }, el);
+    assert.equal(c.error.details.reason, 'cost-confirm-needed', c.text); assert.equal(c.error.details.chars, 'מתכון בקול האנושי'.length); assert.match(c.error.message, /תווים/);
+    assert.equal(yemotCalls(), 0); assert.deepEqual((await allDocs(env, ['voice_usage'])).map((d) => d.id), []);
+    const t = await core(BOARD, 'restore', 'u_mgr', { requestId: rid(), kind: 'item', id, engine: 'tts' }, el);
+    assert.equal(t.status, 'OK', t.text); assert.match(t.result.file, /\.tts$/); assert.equal(t.result.usedCost, false);
+    const bd = await core(BOARD, 'board', 'u_mgr', { slot: 'recipes' }, el);
+    assert.equal(bd.status, 'OK', bd.text);
+    const tid = await itemDoc('updates', { status: 'removed', removedAt: dayAt(israelDay()), engine: 'yemot-tts', path: 'ivr2:3/002.tts', file: '002.tts' });
+    const tt = await core(BOARD, 'restore', 'u_mgr', { requestId: rid(), kind: 'item', id: tid }, el);
+    assert.equal(tt.status, 'OK', tt.text); assert.equal(tt.result.usedCost, false);
+  });
+
+  it('ש5 restoreLineItem – קובץ ותיק שירד: חוזר לשמו המקורי מהגיבוי; שם תפוס ← name-taken (לא דורסים); פעם שנייה ← already-on-line', async () => {
+    const r = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '4', file: '000.tts' });
+    assert.equal(r.status, 'OK', r.text);
+    dir('4').set('000.tts', 'מישהו העלה ידנית');
+    const taken = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: r.result.backupId });
+    assert.equal(taken.error.details.reason, 'name-taken'); assert.equal(dir('4').get('000.tts'), 'מישהו העלה ידנית');
+    dir('4').delete('000.tts');
+    const ok = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: r.result.backupId });
+    assert.equal(ok.status, 'OK', ok.text); assert.equal(dir('4').get('000.tts'), 'שעות ותיקות');
+    assert.equal(M.calls('UploadTextFile').slice(-1)[0].body.what, 'ivr2:4/000.tts');
+    const again = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: r.result.backupId });
+    assert.equal(again.error.details.reason, 'already-on-line');
+    const b = await call('getLineBoard', 'u_mgr', { slot: 'hours' });
+    assert.ok(b.result.onLine.some((e) => e.file === '000.tts' && e.origin === 'legacy'));
+  });
+
+  it('ש5 cleanLineAudio: רק line_audio/, רק אחרי 8 ימים מיום הירידה (שעון ישראל, גם במעבר שעון); פריט בקו – לעולם לא; בלי רשומה – אחרי יומיים; voice_cache ושמות אחרים – לא נוגעים', async () => {
+    await bucket().deleteFiles({ prefix: 'line_audio/' });
+    const put = (p, createdAt) => bucket().file(p).save(Buffer.from('RIFFxxxx'), { resumable: false, contentType: 'audio/wav', metadata: { metadata: { createdAt } } });
+    // ירד ב-25.10.2026 00:30 שעון ישראל (21:30Z ב-24.10, לפני סוף שעון הקיץ) ← נמחק החל מ-02.11 00:00 שעון ישראל
+    const downId = 'down_item_1', liveId = 'live_item_1', promoKey = 'pk_down_promo1';
+    await writeDoc(env, 'yemot_items/' + downId, { slot: 'recipes', status: 'removed', removedAt: '2026-10-24T21:30:00.000Z', audioPath: `line_audio/items/${downId}.wav`, text: null });
+    await writeDoc(env, 'yemot_items/' + liveId, { slot: 'recipes', status: 'live', createdAt: '2026-01-01T00:00:00.000Z', audioPath: `line_audio/items/${liveId}.wav` });
+    await writeDoc(env, 'yemot_promos/' + promoKey, { status: 'removed', removedAt: '2026-10-24T21:30:00.000Z', audioPath: `line_audio/promos/${promoKey}.mp3` });
+    await writeDoc(env, 'yemot_line_backups/20261024-120000-abcdef', { reason: 'file', status: 'complete', result: 'applied', ext: '1', file: '000.tts', kind: 'text', text: 'גיבוי', createdAt: '2026-10-24T21:00:00.000Z', finishedAt: '2026-10-24T21:30:00.000Z' });
+    const old = '2026-01-01T00:00:00.000Z';
+    for (const p of [`line_audio/items/${downId}.wav`, `line_audio/items/${liveId}.wav`, `line_audio/promos/${promoKey}.mp3`, 'line_audio/items/orphan_old_1.wav', 'line_audio/items/short.wav', 'line_audio/other/x_x_x_x_1.wav', 'line_audio/items/odd_name_1.txt', 'voice_cache/old_cache_1.mp3']) await put(p, old);
+    await put('line_audio/items/orphan_new_1.wav', '2026-11-01T20:00:00.000Z');
+    // בתהליך הבדיקה: אותו bucket כמו בשמירה (VOICE_CACHE_BUCKET, כמו ב-CORE_ENV)
+    const withBucket = async (fn) => { const s0 = process.env.VOICE_CACHE_BUCKET; process.env.VOICE_CACHE_BUCKET = H.PROJECT_ID; try { return await fn(); } finally { if (s0 === undefined) delete process.env.VOICE_CACHE_BUCKET; else process.env.VOICE_CACHE_BUCKET = s0; } };
+    const clean = (iso) => withBucket(() => require(BOARD).cleanLineAudio({ now: new Date(iso) }));
+    const o1 = await clean('2026-11-01T21:59:00.000Z'); // 01.11 23:59 שעון ישראל – יום 7 ← נשאר
+    assert.ok(await stored(`line_audio/items/${downId}.wav`), 'יום 7 – נשאר'); assert.ok(await stored(`line_audio/promos/${promoKey}.mp3`));
+    assert.equal(await stored('line_audio/items/orphan_old_1.wav'), null, 'בלי רשומה, ישן – נמחק'); assert.ok(await stored('line_audio/items/orphan_new_1.wav'), 'בלי רשומה, חדש – נשאר');
+    assert.equal((await readDoc(env, 'yemot_line_backups/20261024-120000-abcdef')).text, 'גיבוי');
+    assert.equal(o1.removed, 1, JSON.stringify(o1));
+    const o2 = await clean('2026-11-01T22:01:00.000Z'); // 02.11 00:01 שעון ישראל – יום 8 ← נמחק
+    assert.equal(await stored(`line_audio/items/${downId}.wav`), null); assert.equal(await stored(`line_audio/promos/${promoKey}.mp3`), null);
+    const dx = await readDoc(env, 'yemot_items/' + downId); assert.equal(dx.audioPath, undefined); assert.ok(dx.audioPurgedAt); assert.equal(dx.status, 'removed');
+    assert.ok((await readDoc(env, 'yemot_promos/' + promoKey)).audioPurgedAt);
+    const bk = await readDoc(env, 'yemot_line_backups/20261024-120000-abcdef'); assert.equal(bk.text, undefined); assert.ok(bk.purgedAt);
+    assert.equal(o2.texts, 1);
+    // לעולם לא: פריט בקו, שמות שלא תואמים, תיקיות אחרות
+    const o3 = await clean('2027-06-01T00:00:00.000Z');
+    for (const p of [`line_audio/items/${liveId}.wav`, 'line_audio/items/short.wav', 'line_audio/other/x_x_x_x_1.wav', 'line_audio/items/odd_name_1.txt', 'voice_cache/old_cache_1.mp3']) assert.ok(await stored(p), 'לא נמחק: ' + p);
+    assert.ok(o3.skipped >= 3, JSON.stringify(o3));
+    const voice = require('../functions/lib/voice');
+    for (const p of ['voice_cache/a_a_a_a_1.mp3', 'line_audio/items/short.wav', 'line_audio/x/aaaaaaaaa.wav', 'app_backups/u/aaaaaaaa.wav']) await assert.rejects(voice.deleteLineAudio(p), p);
+    // ריצת הלילה קוראת לניקוי
+    const n = await withBucket(() => require('../functions/yemot.js')._core.nightly({ key: SECRET, base: BASE, ext: '2', timeoutMs: 5000, skipCache: true }));
+    assert.ok(n.lineAudio && n.lineAudio.checked >= 4, JSON.stringify(n));
+  });
+
+  it('ש5 כללים: line_audio/ ב-Storage סגור לטלפון (גם למנהל); yemot_state/listen-* ו-board-* סגורים', async () => {
+    await bucket().file('line_audio/items/rules_test_1.wav').save(Buffer.from('RIFF'), { resumable: false });
+    await writeDoc(env, 'yemot_state/listen-u_emp', { day: '2026-11-04', count: 1 });
+    for (const role of ['guest', 'employee', 'manager']) {
+      const st = H.ctxFor(env, role).storage();
+      await assertFails(st.ref('line_audio/items/rules_test_1.wav').getDownloadURL());
+      await assertFails(st.ref('line_audio/items/new_file_1.wav').put(new Uint8Array([1]), { contentType: 'audio/wav' }));
+      const db = H.ctxFor(env, role).firestore();
+      for (const p of ['yemot_state/listen-u_emp', 'yemot_state/board-recipes', 'yemot_state/restore-x']) { await assertFails(db.doc(p).get()); await assertFails(db.doc(p).set({ x: 1 })); }
+    }
+  });
+
+  it('ש5 פתיחה (מנהל): רשימה והאזנה; החזרת פתיחה שירדה = החלפה רגילה של הנוכחית (הנוכחית replaced, ext.ini ו-M* אחרים לא נוגעים)', async () => {
+    noLegacyOpening();
+    const a = await call('publishLineItem', 'u_mgr', item('opening', { text: 'פתיחה א' }));
+    const b = await call('publishLineItem', 'u_mgr', item('opening', { text: 'פתיחה ב' }));
+    assert.equal(b.status, 'OK', b.text);
+    assert.equal((await readDoc(env, 'yemot_items/' + a.result.id)).status, 'replaced');
+    const l = await call('getLineAudio', 'u_mgr', { ref: { kind: 'item', id: b.result.id } });
+    assert.equal(l.result.mode, 'text'); assert.equal(l.result.text, 'פתיחה ב');
+    const bd = await call('getLineBoard', 'u_mgr', { slot: 'opening' });
+    assert.deepEqual(bd.result.onLine.map((e) => [e.file, e.origin, e.ref.id]), [['M1000.tts', 'app', b.result.id]]);
+    assert.equal(bd.result.recent[0].ref.id, a.result.id); assert.equal(bd.result.recent[0].downReason, 'replaced');
+    const r = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'item', id: a.result.id });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.path, 'ivr2:/M1000.tts');
+    assert.equal(dir('').get('M1000.tts'), 'פתיחה א');
+    assert.equal((await readDoc(env, 'yemot_items/' + b.result.id)).status, 'replaced');
+    assert.equal(dir('').get('ext.ini'), 'type=menu'); assert.equal(dir('').get('BACKUP_M1000.wav'), 'פתיחה מוקלטת');
+    assert.equal(M.calls('RunTzintuk').length, 0);
+  });
+
+  it('ש5 תיקון סבב 1: פסק זמן במחיקת קובץ ותיק (ימות מחקה בפועל) ← גיבוי uncertain שמופיע ב"ירדו" וניתן להחזרה; ניסיון חוזר ← applied; אחרי החזרה – "כבר הוחזר" רק כל עוד הקובץ בקו', async () => {
+    M.setMode('delete', 'hangafter');
+    const req = { requestId: rid(), ext: '3', file: '000.tts' };
+    const r = await core(LINE, 'removeItem', 'u_mgr', req, { YEMOT_TIMEOUT_MS: '300' });
+    assert.equal(r.error && r.error.details.reason, 'yemot-remove-failed', r.text);
+    assert.ok(!dir('3').has('000.tts'), 'ימות מחקה בפועל');
+    const bk = (await allDocs(env, ['yemot_line_backups'])).find((q) => q.data.opId === req.requestId);
+    assert.equal(bk.data.result, 'uncertain'); assert.equal(bk.data.status, 'complete');
+    M.setMode('delete', 'ok');
+    const b1 = await call('getLineBoard', 'u_mgr', { slot: 'updates' });
+    const e1 = b1.result.recent.find((x) => x.ref.id === bk.id);
+    assert.ok(e1, 'מופיע ב"ירדו בשבוע האחרון" עוד לפני הניסיון החוזר'); assert.equal(e1.restore.allowed, true);
+    const again = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '3', file: '000.tts' });
+    assert.equal(again.status, 'OK', again.text); assert.equal(again.result.duplicate, true); assert.equal(again.result.backupId, bk.id);
+    assert.equal((await readDoc(env, 'yemot_line_backups/' + bk.id)).result, 'applied');
+    assert.equal(M.calls('FileAction').length, 1, 'הניסיון החוזר לא מחק שוב');
+    const rs = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: bk.id });
+    assert.equal(rs.status, 'OK', rs.text); assert.equal(dir('3').get('000.tts'), 'עדכון ותיק');
+    const e2 = (await call('getLineBoard', 'u_mgr', { slot: 'updates' })).result.recent.find((x) => x.ref.id === bk.id);
+    assert.equal(e2.alreadyRestored, true); assert.equal(e2.restore.allowed, false, 'אחרי החזרה – בלי כפתור "החזר"');
+    // הקובץ שהוחזר ירד שוב (מחוץ לאפליקציה) ← אפשר להחזיר שוב
+    dir('3').delete('000.tts');
+    await writeDoc(env, 'yemot_state/board-updates', { stale: true });
+    const e3 = (await call('getLineBoard', 'u_mgr', { slot: 'updates' })).result.recent.find((x) => x.ref.id === bk.id);
+    assert.equal(e3.alreadyRestored, false); assert.equal(e3.restore.allowed, true);
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: bk.id })).status, 'OK');
+    // פסק זמן שבו ימות לא מחקה ← הגיבוי uncertain לא מוצג כ"ירד", והחזרה ← restore-not-down
+    M.setMode('delete', 'hang');
+    const req2 = { requestId: rid(), ext: '1', file: '000.tts' };
+    assert.equal((await core(LINE, 'removeItem', 'u_mgr', req2, { YEMOT_TIMEOUT_MS: '300' })).error.details.reason, 'yemot-remove-failed');
+    assert.ok(dir('1').has('000.tts'));
+    const bk2 = (await allDocs(env, ['yemot_line_backups'])).find((q) => q.data.opId === req2.requestId);
+    assert.equal(bk2.data.result, 'uncertain');
+    M.setMode('delete', 'ok');
+    assert.ok(!(await call('getLineBoard', 'u_mgr', { slot: 'recipes' })).result.recent.some((x) => x.ref.id === bk2.id));
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: bk2.id })).error.details.reason, 'restore-not-down');
+    assert.equal(dir('1').get('000.tts'), 'מתכון ותיק');
+  });
+
+  it('ש5 תיקון סבב 1: requestId בלי אות/ספרה נדחה בהורדה לפי שם (בלי פנייה לימות); האזנה מהקו שנכשלה לא נספרת במכסה', async () => {
+    for (const requestId of ['________', '--------', '_-_-_-_-_-']) {
+      const r = await call('removeLineItem', 'u_mgr', { requestId, ext: '4', file: '000.tts' });
+      assert.equal(r.error && r.error.details.reason, 'bad-request-id', requestId);
+    }
+    assert.equal(yemotCalls(), 0); assert.ok(dir('4').has('000.tts'));
+    dir('3').set('007.wav', wav(1));
+    M.setMode('download', '404'); M.setMode('text', 'error');
+    for (const file of ['007.wav', '000.tts']) assert.equal((await call('getLineAudio', 'u_emp', { ref: { kind: 'file', ext: '3', file } })).error.details.reason, 'listen-unavailable', file);
+    const c = await readDoc(env, 'yemot_state/listen-u_emp');
+    assert.equal(c ? c.count : 0, 0, 'כשל לא נספר');
+    M.setMode('download', 'ok');
+    assert.equal((await call('getLineAudio', 'u_emp', { ref: { kind: 'file', ext: '3', file: '007.wav' } })).status, 'OK');
+    assert.equal((await readDoc(env, 'yemot_state/listen-u_emp')).count, 1, 'הצלחה נספרת');
+  });
+
+  it('ש5 הסוד של ימות לא דולף: לא באף תשובה ולא ביומן (כולל כל בדיקות שלב 5, וגם כששרת הדמה מחזיר אותו בשגיאה)', async () => {
+    M.setMode('dir', 'error'); M.setMode('download', 'error'); M.setMode('text', 'exception');
+    await core(BOARD, 'board', 'u_mgr', { slot: 'hours' });
+    await core(BOARD, 'listen', 'u_mgr', { ref: { kind: 'file', ext: '4', file: '000.tts' } });
+    await core(LINE, 'removeItem', 'u_mgr', { requestId: rid(), ext: '4', file: '000.tts' });
+    dir('4').set('009.wav', wav(1)); M.setMode('dir', 'ok');
+    await core(BOARD, 'listen', 'u_mgr', { ref: { kind: 'file', ext: '4', file: '009.wav' } }); // הורדה נכשלת (השגיאה מכילה את המפתח)
+    await core(LINE, 'removeItem', 'u_mgr', { requestId: rid(), ext: '4', file: '009.wav' }); // גיבוי נכשל
+    M.setMode('upload', 'error');
+    const it = await itemDoc('updates', { status: 'removed', removedAt: dayAt(israelDay()) });
+    await core(BOARD, 'restore', 'u_mgr', { requestId: rid(), kind: 'item', id: it }); // העלאה נכשלת
+    assert.ok(LOGS.some((t) => t.includes('listen-unavailable')) && LOGS.some((t) => t.includes('backup-failed')), 'היומנים של שלב 5 נאספו');
+    assert.ok(SEEN.length > 50);
+    assert.deepEqual(SEEN.filter((t) => t.includes(SECRET)), []);
     assert.deepEqual(LOGS.filter((t) => t.includes(SECRET)), []);
   });
 });

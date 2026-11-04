@@ -66,7 +66,7 @@ function ymOpen(k,i,opts){
  dlg(`<h3>שליחת מבצע לקו</h3><form data-f="ymform" onsubmit="return false">
  <p class="note" style="margin:0 0 12px">${Q.builder?'המבצע נשמר במכשיר. בדקו את הנוסח, ואשרו כדי להעלות אותו לשלוחת המבצעים.':'המבצע יעלה לשלוחת המבצעים. בחרו אם לשלוח גם צינתוק לנרשמים, ובדקו את הנוסח לפני האישור.'}</p>
  <label class="f"><span>הנוסח שיוקרא בקו</span><textarea id="ymTxt" name="text" rows="5">${esc(Q.text)}</textarea><span class="note" dir="ltr" id="ymCnt" style="text-align:left;margin:4px 0 0"></span></label>
- ${Q.builder&&window.ypButton?`<div style="margin:0 0 12px">${ypButton('ymTxt')}</div>`:''}
+ ${window.ypButton?`<div style="margin:0 0 12px">${ypButton('ymTxt')}</div>`:''}
  ${Q.builder?`<p class="note" id="ymBMode" style="margin:0 0 12px;font-weight:700">${Q.withTz?'יעלה לקו, ויישלח צינתוק לנרשמים (עולה יחידות).':'יעלה לקו, בלי צינתוק.'}</p>`:`<label class="f"><span>מה לעשות</span><div class="chips" id="ymMode"></div><span class="note" id="ymCost" style="display:block;margin:4px 0 0">צינתוק מהאפליקציה עולה יחידות לכל נרשם. צינתוק חינמי – מהטלפון בשלוחת הניהול.</span><span class="note" id="ymTzNote" style="color:var(--warn);display:none"></span></label>`}
  <label class="f"><span>${it.vf&&Q.until?'תאריך הורדה (לפי תוקף המבצע)':'מתי להוריד את המבצע מהקו?'}</span><input id="ymDate" name="until" type="date" value="${esc(Q.until)}" min="${today}" max="${addDays(today,YM_MAX_DAYS)}"></label>
  <div class="chips" style="margin:0 0 12px">${chips}</div>
