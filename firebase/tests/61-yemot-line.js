@@ -1065,16 +1065,14 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.equal(ok.status, 'OK', ok.text); assert.deepEqual(ok.result.backedUp, [prevId]);
   });
 
-  it('ש4 פתיחה – גם החלפה בטקסט (קובץ טקסט בנתיב אחר) מגבה קודם פתיחה בשמע; פתיחה קודמת בטקסט – בלי הורדה; קובץ ותיק בלי רשומה – opening-legacy-file כמו קודם', async () => {
+  it('ש4 פתיחה – החלפה בטקסט לנתיב אחר (קול ממוחשב) מתנהגת כמו היום: בלי הורדה ובלי חסימה; פתיחה קודמת בטקסט – בלי הורדה; קובץ ותיק בלי רשומה – opening-legacy-file כמו קודם', async () => {
     const prevId = await oldAppOpening(wav(2));
-    M.setMode('download', '404');
+    M.setMode('download', '404'); // גם אם ההורדה לא עובדת – החלפה בטקסט לא נחסמת (סבב תיקון 1, ליקוי 3)
     const t = await call('publishLineItem', 'u_mgr', item('opening', { text: 'פתיחה חדשה בטקסט' }));
-    assert.equal(t.error.details.reason, 'backup-failed', t.text);
-    assert.ok(dir('').has('M1000.wav')); assert.ok(!dir('').has('M1000.tts'));
-    M.setMode('download', 'ok');
-    const t2 = await call('publishLineItem', 'u_mgr', item('opening', { text: 'פתיחה חדשה בטקסט' }));
-    assert.equal(t2.status, 'OK', t2.text); assert.deepEqual(t2.result.backedUp, [prevId]);
-    assert.ok(!dir('').has('M1000.wav'), 'הקודמת (שלנו, עם גיבוי) נמחקה אחרי ההעלאה'); assert.ok(dir('').has('M1000.tts'));
+    assert.equal(t.status, 'OK', t.text); assert.deepEqual(t.result.backedUp, []);
+    assert.equal(M.calls('DownloadFile').length, 0, 'בלי הורדה מהקו');
+    assert.ok(!dir('').has('M1000.wav'), 'כמו היום: הקודמת (שלנו) נמחקת אחרי ההעלאה'); assert.ok(dir('').has('M1000.tts'));
+    assert.equal((await readDoc(env, 'yemot_items/' + prevId)).status, 'replaced');
     // עכשיו הפתיחה בטקסט: הקלטה חדשה לא צריכה הורדה
     M.state.requests = [];
     const r = await call('publishLineItem', 'u_mgr', recItem('opening', 1));
@@ -1084,5 +1082,57 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     const l = await call('publishLineItem', 'u_mgr', recItem('opening', 1));
     assert.equal(l.error.details.reason, 'opening-legacy-file'); assert.equal(dir('').get('M1000.wav'), 'פתיחה מוקלטת');
     assert.equal(M.calls('DownloadFile').length, 0); assert.equal(M.calls('UploadFile').length, 0);
+  });
+
+  it('ש4 פתיחה – כשל העלאה אחרי גיבוי מוצלח: yemot-upload-failed, הקודמת נשארת בקו (live) עם הגיבוי; ניסיון חוזר מצליח בלי הורדה נוספת', async () => {
+    await bucket().deleteFiles({ prefix: 'line_audio/' });
+    const prevAudio = wav(2);
+    const prevId = await oldAppOpening(prevAudio);
+    for (const mode of ['error', 'http500']) {
+      M.setMode('upload', mode);
+      M.state.requests = [];
+      const req = recItem('opening', 1);
+      const f = await core(LINE, 'publishItem', 'u_mgr', req);
+      assert.equal(f.error && f.error.details.reason, 'yemot-upload-failed', mode + ' ' + f.text);
+      assert.ok(dir('').get('M1000.wav').equals(prevAudio), mode + ': הפתיחה בקו לא השתנתה');
+      assert.equal(M.calls('FileAction').length, 0);
+      const prev = await readDoc(env, 'yemot_items/' + prevId);
+      assert.equal(prev.status, 'live'); assert.equal(prev.audioPath, `line_audio/items/${prevId}.wav`);
+      assert.ok((await stored(prev.audioPath)).equals(prevAudio), 'הגיבוי = הקובץ שבקו');
+      assert.equal(M.calls('DownloadFile').length, mode === 'error' ? 1 : 0, 'בפעם השנייה כבר יש עותק – בלי הורדה');
+      assert.equal((await readDoc(env, 'yemot_items/' + req.requestId)).status, 'failed');
+      assert.equal((await readDoc(env, 'yemot_state/structure')).lockAt, null);
+      if (mode === 'http500') {
+        M.setMode('upload', 'ok'); M.state.requests = [];
+        const ok = await core(LINE, 'publishItem', 'u_mgr', req);
+        assert.equal(ok.status, 'OK', ok.text); assert.equal(M.calls('DownloadFile').length, 0); assert.deepEqual(ok.result.backedUp, []);
+        assert.equal((await readDoc(env, 'yemot_items/' + prevId)).status, 'replaced');
+      }
+    }
+  });
+
+  it('ש4 מבצע – מפתחות rec_/rst_ שמורים: נוסח טקסט אליהם נדחה (bad-promo-key) בלי פנייה לימות; העלאה חדשה מאפסת שדות שמע ישנים', async () => {
+    const r = await call('sendPromoToLine', 'u_emp', recPromo(1));
+    assert.equal(r.status, 'OK', r.text);
+    M.state.requests = [];
+    for (const key of [r.result.promoKey, 'rec_' + rid(), 'rst_' + rid()]) {
+      for (const uid of ['u_emp', 'u_mgr']) {
+        const t = await call('sendPromoToLine', uid, promo({ promoKey: key }));
+        assert.equal(t.error && t.error.details.reason, 'bad-promo-key', key);
+      }
+    }
+    assert.equal(M.state.requests.length, 0);
+    const rec = await readDoc(env, 'yemot_promos/' + r.result.promoKey);
+    assert.equal(rec.kind, 'audio'); assert.equal(rec.status, 'live');
+    // מבצע טקסט עם עותק שמע ישן (למשל מקול משוכפל קודם): נוסח חדש בקול הממוחשב – העותק הישן מתאפס
+    const p = promo();
+    assert.equal((await call('sendPromoToLine', 'u_mgr', p)).status, 'OK');
+    const ref = 'yemot_promos/' + p.promoKey;
+    await writeDoc(env, ref, Object.assign(await readDoc(env, ref), { kind: 'audio', audioPath: `line_audio/promos/${p.promoKey}.mp3`, audioMime: 'audio/mpeg', audioBytes: 123, audioSavedAt: '2026-11-01T00:00:00.000Z', audioError: 'save-failed' }));
+    const p2 = await call('sendPromoToLine', 'u_mgr', Object.assign({}, p, { requestId: rid(), text: 'נוסח אחר לגמרי' }));
+    assert.equal(p2.status, 'OK', p2.text); assert.equal(p2.result.action, 'replaced');
+    const after = await readDoc(env, ref);
+    for (const f of ['kind', 'audioPath', 'audioMime', 'audioBytes', 'audioSavedAt', 'audioError']) assert.equal(after[f], null, f);
+    assert.equal(after.text, 'נוסח אחר לגמרי');
   });
 });

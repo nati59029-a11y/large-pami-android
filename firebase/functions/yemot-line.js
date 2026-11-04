@@ -164,15 +164,16 @@ async function keepAudio(ref, relBase, rendered, warnings, requestId) {
 }
 
 class BackupError extends Error { constructor(code) { super('backup:' + code); this.code = code; } }
-// החלטת המתאם (04.11, "דורש החלטה" 1 בחוזה): אפשרות ב' – פתיחה קודמת בקובץ שמע מוחלפת רק אם יש לה עותק שמע אמיתי:
+// החלטת המתאם (04.11, "דורש החלטה" 1 בחוזה): אפשרות ב' – פתיחה קודמת בקובץ שמע שנדרסת באותו שם רק אם יש לה עותק שמע אמיתי:
 // שמע שמור ב-Storage, או הורדה מוצלחת מהקו (DownloadFile) ← בדיקה ← שמירה. אחרת – BackupError, והפתיחה לא מוחלפת.
 // פתיחה קודמת בקובץ טקסט: הטקסט ברשומה הוא עותק מלא – אין מה להוריד. פתיחה קודמת שכבר לא בקו – אין מה לאבד.
 // אם המשתמש יבחר באפשרות א' (גיבוי של הנוסח בלבד, אחרי אישור): השינוי הוא רק במקום המסומן "אפשרות א'" למטה –
 //   כשההורדה נכשלת, ולרשומה הקודמת יש text, ובבקשה acceptTextBackup===true – לסמן ברשומה הקודמת backupKind:'text' ולהמשיך (continue) במקום לזרוק.
-// הפתיחות הקודמות של האפליקציה (בקו) שהן קובץ שמע – רק מהמסד, בלי פנייה לימות
-async function audioOpenings(db, v) {
+// הפתיחות הקודמות של האפליקציה (בקו) בקובץ שמע שההעלאה החדשה **תדרוס באותו שם** (target) – רק מהמסד, בלי פנייה לימות.
+// סבב תיקון 1 (החלטת המתאם, לפי חוזה 5.5.1): גיבוי חובה רק בדריסה באותו נתיב. החלפה לנתיב אחר (למשל פתיחה בקול הממוחשב) – כמו היום.
+async function audioOpenings(db, v, target) {
   return (await db.collection(ITEMS).where('slot', '==', 'opening').get()).docs
-    .filter((d) => d.id !== v.requestId && ON_LINE.includes(d.get('status')) && d.get('path') && voice.isAudioFile(d.get('path')));
+    .filter((d) => d.id !== v.requestId && ON_LINE.includes(d.get('status')) && d.get('path') === target && voice.isAudioFile(target));
 }
 async function backupOpening(ctx, prev, files) {
   const done = [];
@@ -271,7 +272,7 @@ async function publishItem(request, key, base) {
     //   (1) לא דורסים הקלטת פתיחה ישנה (M1000.wav) שלא הועלתה מהאפליקציה (opening-legacy-file, בלי שינוי);
     //   (2) פתיחה קודמת של האפליקציה בקובץ שמע, בלי שמע שמור – קודם גיבוי מהקו ל-Storage (backupOpening). אין גיבוי ← לא מחליפים.
     let backedUp = [];
-    const prevAudio = S.fixedName ? await audioOpenings(db, v) : [];
+    const prevAudio = S.fixedName ? await audioOpenings(db, v, voice.pathOf(S.ext, voice.fileName(S.fixedName, { ext }))) : [];
     // קריאת התיקייה רק כשצריך (כמו קודם: פתיחה בשמע; ובנוסף – כשיש פתיחה קודמת בשמע לגבות)
     if (S.fixedName && ((!plan.keepPath && ext === 'wav') || prevAudio.length)) {
       let files;

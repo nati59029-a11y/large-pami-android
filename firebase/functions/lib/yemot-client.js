@@ -79,9 +79,19 @@ async function downloadFile(ctx, path, maxBytes) {
   if (/json/i.test(r.headers.get('content-type') || '')) { drop(); throw new YemotError('bad-reply', false); }
   const len = Number(r.headers.get('content-length'));
   if (Number.isFinite(len) && len > maxBytes) { drop(); throw new YemotError('too-big', false); }
-  let buf;
-  try { buf = Buffer.from(await r.arrayBuffer()); } catch (e) { throw new YemotError(netError(e).code, false); }
-  if (buf.length > maxBytes) throw new YemotError('too-big', false);
+  // קריאה בחלקים: עוצרים ברגע שעוברים את maxBytes (גם כשאין content-length)
+  const parts = []; let total = 0;
+  try {
+    const reader = r.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > maxBytes) { try { await reader.cancel(); } catch (e) { /* */ } throw new YemotError('too-big', false); }
+      parts.push(Buffer.from(value));
+    }
+  } catch (e) { if (e instanceof YemotError) throw e; throw new YemotError(netError(e).code, false); }
+  const buf = Buffer.concat(parts);
   if (!buf.length) throw new YemotError('empty', false);
   if (buf[0] === 0x7b) { try { if (JSON.parse(buf.toString('utf8')).responseStatus) throw new YemotError('bad-reply', false); } catch (e) { if (e instanceof YemotError) throw e; } }
   return buf;

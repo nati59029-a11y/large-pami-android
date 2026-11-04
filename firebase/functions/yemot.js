@@ -81,6 +81,8 @@ function validateSend(input, today, cfg) {
   let promoKey = input.promoKey;
   if (promoKey === undefined) { promoKey = requestId; warnings.push('promo-key-missing'); }
   if (typeof promoKey !== 'string' || !ID_RE.test(promoKey)) throw bad('bad-promo-key', 'הבקשה לא תקינה. נסו שוב.');
+  // rec_ (מבצע מוקלט) ו-rst_ (מבצע שהוחזר) – שמורים לשרת; נוסח טקסט לא נכנס אליהם (משימה 2026-11-04, סבב תיקון 1)
+  if (/^(rec|rst)_/.test(promoKey)) throw bad('bad-promo-key', 'הבקשה לא תקינה. נסו שוב.');
   if (typeof text !== 'string') throw bad('empty-text', 'הנוסח ריק. כתבו מה יוקרא בקו.');
   const clean = cleanText(text);
   if (!clean) throw bad('empty-text', 'הנוסח ריק. כתבו מה יוקרא בקו.');
@@ -416,7 +418,9 @@ async function sendPromo(request, key, base) {
       uploaded = true;
       await testFault(db, 'after-upload');
       // הצינתוק הקודם שייך לנוסח הקודם
-      await promoRef.update({ status: 'live', text: v.text, spoken, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp() });
+      // שדות השמע מתאפסים בכל העלאה חדשה (עותק ישן לא יתאר תוכן אחר ממה שבקו), ואחר כך – עותק חדש אם יש
+      await promoRef.update({ status: 'live', text: v.text, spoken, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp(),
+        kind: isRec ? 'audio' : null, audioPath: null, audioMime: null, audioBytes: null, audioSavedAt: null, audioError: null });
       // עותק של השמע שעלה (הקלטה / קול משוכפל) ב-line_audio/promos/<promoKey>. כשל = אזהרה בלבד (משימה 2026-11-04).
       const a = voice.savedAudioOf(rendered);
       if (a) {
