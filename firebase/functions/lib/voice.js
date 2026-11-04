@@ -131,6 +131,77 @@ async function cleanCache() {
   try { return { removed: await cache().clean(int(P.cacheHours, 48) * 3600000) }; } catch (e) { logger.warn('voice: cache clean failed', { reason: 'cache-clean' }); return { error: 'cache-clean' }; }
 }
 
+// ---------------- הקלטה מהטלפון: WAV PCM 16 ביט, מונו, 8000Hz (משימה 2026-11-02 חוזה 5.7; הועבר לכאן מ-yemot-line.js) ----------------
+// משותף להקלטה בשלוחות (publishLineItem) ולמבצע מוקלט (sendPromoToLine). האורך מחושב מגודל הנתונים בקובץ, לא משדה שהטלפון שולח.
+const badRec = (reason, message, extra) => new HttpsError('invalid-argument', message, Object.assign({ reason }, extra || {}));
+const badAudio = () => badRec('bad-audio', 'ההקלטה לא בפורמט הנכון. הקליטו שוב.');
+const tooLong = (maxSec) => badRec('audio-too-long', `ההקלטה ארוכה מדי (עד ${maxSec} שניות).`, { max: maxSec });
+function parseWav(buf, maxSec) {
+  if (buf.length < 44 || buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WAVE') throw badAudio();
+  let off = 12, fmt = null, dataSize = -1;
+  while (off + 8 <= buf.length) {
+    const id = buf.toString('latin1', off, off + 4), size = buf.readUInt32LE(off + 4), body = off + 8;
+    if (body + size > buf.length) throw badAudio();
+    if (id === 'fmt ' && size >= 16) fmt = { format: buf.readUInt16LE(body), channels: buf.readUInt16LE(body + 2), rate: buf.readUInt32LE(body + 4), bits: buf.readUInt16LE(body + 14) };
+    if (id === 'data') { dataSize = size; break; }
+    off = body + size + (size % 2);
+  }
+  if (!fmt || fmt.format !== 1 || fmt.channels !== 1 || fmt.rate !== 8000 || fmt.bits !== 16 || dataSize <= 0) throw badAudio();
+  const sec = dataSize / 16000;
+  if (sec > maxSec) throw tooLong(maxSec);
+  return Math.round(sec * 10) / 10;
+}
+// audio = { mimeType:'audio/wav', data:<base64> } מהטלפון. מחזיר { buf, durationSec } או זורק שגיאה בעברית (invalid-argument).
+function readRecording(audio, maxSec, maxBytes) {
+  if (!audio || typeof audio !== 'object' || Array.isArray(audio) || audio.mimeType !== 'audio/wav' || typeof audio.data !== 'string') throw badAudio();
+  if (audio.data.length > Math.ceil(maxBytes / 3) * 4) throw tooLong(maxSec);
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(audio.data)) throw badAudio();
+  const buf = Buffer.from(audio.data, 'base64');
+  return { buf, durationSec: parseWav(buf, maxSec) };
+}
+
+// ---------------- שמע שמור של הודעות בקו (Storage: line_audio/, רק השרת) – משימה 2026-11-04, חוזה 5.3 ----------------
+// עותק של מה שעלה לקו (הקלטה = ה-WAV; קול משוכפל = ה-mp3), או גיבוי שהורד מהקו לפני החלפה.
+// אותו bucket כמו המטמון. כללי Storage לא משתנים (הכלל האחרון סוגר הכול לטלפון). לא נוגע ב-voice_cache/.
+const LINE_PREFIX = 'line_audio/';
+const LINE_REL_RE = /^(items|promos|backups)\/[A-Za-z0-9_-]{1,80}\.(wav|mp3)$/;
+let lineStore = null; // לבדיקות אפשר להחליף (_test.setLineStore)
+function defaultLineStore() {
+  const { getStorage } = require('firebase-admin/storage');
+  const bucket = () => { const n = str(P.cacheBucket, ''); return n ? getStorage().bucket(n) : getStorage().bucket(); };
+  return {
+    async put(full, buf, mime, meta) { await bucket().file(full).save(buf, { resumable: false, contentType: mime, metadata: { metadata: meta } }); },
+    async size(full) {
+      const f = bucket().file(full);
+      const [ok] = await f.exists();
+      if (!ok) return null;
+      const [m] = await f.getMetadata();
+      return Number(m.size);
+    },
+  };
+}
+const lineAudio = () => lineStore || (lineStore = defaultLineStore());
+// מה נשמר מתוך מה שעלה לקו: הקלטה ← wav; קול משוכפל ← mp3; קול ממוחשב (קובץ טקסט) ← כלום (הטקסט ברשומה).
+function savedAudioOf(rendered) {
+  if (!rendered || rendered.kind !== 'audio' || !Buffer.isBuffer(rendered.body) || !rendered.body.length) return null;
+  return rendered.mime === 'audio/mpeg' ? { ext: 'mp3', mime: 'audio/mpeg', buf: rendered.body } : { ext: 'wav', mime: 'audio/wav', buf: rendered.body };
+}
+// rel: 'items/<id>.wav' וכו'. מחזיר את השדות לרשומה. כשל = זורק (המתקשר מחליט: אזהרה, או "אין גיבוי – לא מחליפים").
+async function saveLineAudio(rel, buf, mime, ref) {
+  if (!LINE_REL_RE.test(String(rel)) || !Buffer.isBuffer(buf) || !buf.length) throw new Error('voice: bad line audio');
+  const full = LINE_PREFIX + rel;
+  const at = new Date().toISOString();
+  await lineAudio().put(full, buf, mime, { ref: ref || rel.replace(/\.[a-z0-9]+$/, ''), createdAt: at });
+  return { audioPath: full, audioMime: mime, audioBytes: buf.length, audioSavedAt: at, audioError: null };
+}
+// גודל הקובץ השמור (בתים), או null אם אינו קיים. רק בתוך line_audio/.
+async function lineAudioSize(full) {
+  if (typeof full !== 'string' || !full.startsWith(LINE_PREFIX) || !LINE_REL_RE.test(full.slice(LINE_PREFIX.length))) return null;
+  return lineAudio().size(full);
+}
+// קובץ שמע בקו (ולא קובץ טקסט שימות מקריא): לפי הסיומת.
+const isAudioFile = (file) => ['wav', 'mp3'].includes(extOf(file).toLowerCase());
+
 // ---------------- גבול חודשי ומגבלה יומית ----------------
 function db() { return require('firebase-admin/firestore').getFirestore(); }
 // שומר מקום ל-n תווים בחודש הנוכחי. חריגה (גם "כמעט": אין מקום לטקסט הזה) = VoiceError('quota'), בלי פנייה לשירות.
@@ -305,9 +376,10 @@ async function upload(ctx, dir, num, rendered) {
 module.exports = {
   VOICE_ENGINE, ELEVENLABS_API_KEY, VoiceError, render, preview, fromRecording, fileName, pathOf, extOf, upload, isDeletableContent, DELETABLE_EXTS,
   pickEngine, extFor, configuredEngine, quotaView, toHttps, cleanCache,
+  parseWav, readRecording, savedAudioOf, saveLineAudio, lineAudioSize, isAudioFile,
 };
 // לבדיקות בלבד
 Object.defineProperty(module.exports, '_test', {
   enumerable: false,
-  value: { setTextExt(e) { textExt = e; }, setStore(s) { store = s; }, cacheKey, settings, monthKey },
+  value: { setTextExt(e) { textExt = e; }, setStore(s) { store = s; }, setLineStore(s) { lineStore = s; }, cacheKey, settings, monthKey },
 });

@@ -1,6 +1,6 @@
 'use strict';
 // תוכן שלוחות הקו (ימות המשיח) מתוך האפליקציה – חוזה 5.2-5.4, 5.9, 5.12 (משימה 2026-11-02).
-//   publishLineItem – העלאת תוכן: recipes (שלוחה 1, עובד ומנהל), updates (שלוחה 3, עובד ומנהל, טקסט או הקלטה),
+//   publishLineItem – העלאת תוכן (טקסט או הקלטה בכל השלוחות – משימה 2026-11-04): recipes (שלוחה 1, עובד ומנהל), updates (שלוחה 3, עובד ומנהל),
 //                     hours (שלוחה 4, מנהל; קבועה, או זמנית עם until), opening (הודעת הפתיחה ivr2:/M1000.<סיומת>, מנהל).
 //   removeLineItem  – הורדת פריט שהשרת העלה (מנהל בלבד), או – בשלוחה 4 בלבד – כל קובץ תוכן לפי שם (כולל הקובץ הוותיק 000).
 //   listLineFiles   – רשימת קובצי התוכן בשלוחה 4, כפי שהם בקו (מנהל בלבד).
@@ -21,7 +21,7 @@ const { defineSecret, defineInt, defineString } = require('firebase-functions/pa
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');
 const { requireStaff, inputObject } = require('./lib/roles');
-const { YemotError, apiBase, listDir, deleteFiles } = require('./lib/yemot-client');
+const { YemotError, apiBase, listDir, listDirInfo, downloadFile, deleteFiles } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { applyLexicon } = require('./lib/lexicon');
 const { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS } = require('./yemot').shared;
@@ -37,16 +37,21 @@ const ITEMS = 'yemot_items';
 const LEXICON_DOC = 'yemot_lexicon/main';
 const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const REC_MAX_BYTES = 2000000;
+// הקלטת פתיחה: עד דקה (החלטת המשתמש 04.11). שאר השלוחות: YEMOT_REC_MAX_SEC (120).
+const YEMOT_OPENING_REC_MAX_SEC = 60;
+// גיבוי שמע שמורד מהקו לפני החלפת פתיחה: עד הגודל הזה (חוזה 5.1, LISTEN_MAX_BYTES)
+const LISTEN_MAX_BYTES = 3000000;
 const ON_LINE = ['live', 'remove-failed'];
 
 // slot → שלוחה. history = כל פריט נשמר (פ4=היסטוריה בשלוחה 3). replace = פריט פעיל אחד.
 // state = מונה המספרים בשלוחה (ונעילת ההחלפה). אין שלוחה 2 כאן: מבצעים עוברים דרך sendPromoToLine.
+// audio = מותר לשלוח הקלטה (משימה 2026-11-04: בכל השלוחות). recMaxSec = אורך מרבי מיוחד (פתיחה).
 const SLOTS = Object.freeze({
-  recipes: { ext: '1', name: 'המתכונים', mode: 'history', managerOnly: false, max: () => YEMOT_RECIPE_MAX.value(), state: 'yemot_state/ext-1' },
+  recipes: { ext: '1', name: 'המתכונים', mode: 'history', managerOnly: false, max: () => YEMOT_RECIPE_MAX.value(), state: 'yemot_state/ext-1', audio: true },
   updates: { ext: '3', name: 'העדכונים', mode: 'history', managerOnly: false, max: () => 800, state: 'yemot_state/ext-3', audio: true },
   // שלוחה 4 (סבב 3): היסטוריה – כל הודעה בקובץ חדש. המנהל מוחק ישנות בעצמו. הודעה זמנית (until) נמחקת בלילה שאחרי.
-  hours: { ext: '4', name: 'השעות והכתובת', mode: 'history', managerOnly: true, max: () => 600, state: 'yemot_state/ext-4', temporary: true },
-  opening: { ext: '', name: 'הודעת הפתיחה', mode: 'replace', managerOnly: true, max: () => 600, state: 'yemot_state/structure', fixedName: 'M1000' },
+  hours: { ext: '4', name: 'השעות והכתובת', mode: 'history', managerOnly: true, max: () => 600, state: 'yemot_state/ext-4', temporary: true, audio: true },
+  opening: { ext: '', name: 'הודעת הפתיחה', mode: 'replace', managerOnly: true, max: () => 600, state: 'yemot_state/structure', fixedName: 'M1000', audio: true, recMaxSec: YEMOT_OPENING_REC_MAX_SEC },
 });
 const SLOT_NAMES = Object.keys(SLOTS);
 const isSlot = (s) => typeof s === 'string' && SLOT_NAMES.includes(s) && Object.hasOwn(SLOTS, s);
@@ -70,24 +75,8 @@ function israelStamp(d) {
   return `${p.day}/${p.month} ${p.hour}:${p.minute}`;
 }
 
-// ---------------- הקלטה: WAV PCM 16 ביט, מונו, 8000Hz (חוזה 5.7) ----------------
-// האורך מחושב מגודל הנתונים בקובץ, לא משדה שהטלפון שולח.
-function parseWav(buf, maxSec) {
-  const badAudio = () => bad('bad-audio', 'ההקלטה לא בפורמט הנכון. הקליטו שוב.');
-  if (buf.length < 44 || buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WAVE') throw badAudio();
-  let off = 12, fmt = null, dataSize = -1;
-  while (off + 8 <= buf.length) {
-    const id = buf.toString('latin1', off, off + 4), size = buf.readUInt32LE(off + 4), body = off + 8;
-    if (body + size > buf.length) throw badAudio();
-    if (id === 'fmt ' && size >= 16) fmt = { format: buf.readUInt16LE(body), channels: buf.readUInt16LE(body + 2), rate: buf.readUInt32LE(body + 4), bits: buf.readUInt16LE(body + 14) };
-    if (id === 'data') { dataSize = size; break; }
-    off = body + size + (size % 2);
-  }
-  if (!fmt || fmt.format !== 1 || fmt.channels !== 1 || fmt.rate !== 8000 || fmt.bits !== 16 || dataSize <= 0) throw badAudio();
-  const sec = dataSize / 16000;
-  if (sec > maxSec) throw bad('audio-too-long', `ההקלטה ארוכה מדי (עד ${maxSec} שניות).`, { max: maxSec });
-  return Math.round(sec * 10) / 10;
-}
+// ---------------- הקלטה: WAV PCM 16 ביט, מונו, 8000Hz – הבדיקה עצמה ב-lib/voice.js (readRecording / parseWav) ----------------
+const recMaxSec = (S) => Math.min(S.recMaxSec || Infinity, YEMOT_REC_MAX_SEC.value());
 
 function validateItem(input) {
   const { requestId, slot, text, audio, source } = input;
@@ -96,18 +85,10 @@ function validateItem(input) {
   const S = SLOTS[slot];
   const hasText = text !== undefined && text !== null, hasAudio = audio !== undefined && audio !== null;
   if (hasText === hasAudio) throw bad('bad-input', 'קלט לא תקין');
-  if (hasAudio) {
-    if (!S.audio) throw bad('audio-not-allowed', 'אפשר לשלוח הקלטה רק לשלוחת העדכונים.');
-    if (source !== 'recording') throw bad('bad-input', 'קלט לא תקין');
-    const maxSec = YEMOT_REC_MAX_SEC.value();
-    if (typeof audio !== 'object' || Array.isArray(audio) || audio.mimeType !== 'audio/wav' || typeof audio.data !== 'string') throw bad('bad-audio', 'ההקלטה לא בפורמט הנכון. הקליטו שוב.');
-    if (audio.data.length > Math.ceil(REC_MAX_BYTES / 3) * 4) throw bad('audio-too-long', `ההקלטה ארוכה מדי (עד ${maxSec} שניות).`, { max: maxSec });
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(audio.data)) throw bad('bad-audio', 'ההקלטה לא בפורמט הנכון. הקליטו שוב.');
-    const buf = Buffer.from(audio.data, 'base64');
-    const durationSec = parseWav(buf, maxSec);
-    return { requestId, slot, S, kind: 'audio', source, buf, durationSec, text: null, title: 'הקלטה ' + israelStamp() };
-  }
-  if (!['typed', 'scan'].includes(source)) throw bad('bad-input', 'קלט לא תקין');
+  if (hasAudio && !S.audio) throw bad('audio-not-allowed', 'אי אפשר לשלוח הקלטה לשלוחה הזו.');
+  if (hasAudio && source !== 'recording') throw bad('bad-input', 'קלט לא תקין');
+  if (!hasAudio && !['typed', 'scan'].includes(source)) throw bad('bad-input', 'קלט לא תקין');
+  // הודעה זמנית (until): רק בשלוחה 4 – גם לטקסט וגם להקלטה (משימה 2026-11-04)
   let until = null;
   if (input.until !== undefined && input.until !== null) {
     if (!S.temporary) throw bad('bad-input', 'קלט לא תקין');
@@ -116,6 +97,10 @@ function validateItem(input) {
     if (input.until < today) throw bad('date-past', 'תאריך ההורדה כבר עבר.');
     if (input.until > addDays(today, maxDays)) throw bad('date-too-far', `אפשר להשאיר הודעה זמנית עד ${maxDays} ימים.`, { max: maxDays });
     until = input.until;
+  }
+  if (hasAudio) {
+    const { buf, durationSec } = voice.readRecording(audio, recMaxSec(S), REC_MAX_BYTES);
+    return { requestId, slot, S, kind: 'audio', source, buf, durationSec, text: null, title: 'הקלטה ' + israelStamp(), until };
   }
   if (typeof text !== 'string') throw bad('empty-text', 'הנוסח ריק. כתבו מה יוקרא בקו.');
   const clean = cleanText(text);
@@ -161,6 +146,62 @@ const DONE_MSG = {
   hours: 'ההודעה עלתה לשלוחה 4, ותושמע ראשונה.',
   opening: 'הודעת הפתיחה עודכנה בקו.',
 };
+
+// ---------------- שמע שמור וגיבוי הפתיחה (משימה 2026-11-04, חוזה 5.3, 5.5.1) ----------------
+// עותק של השמע שעלה לקו. כשל – audioError:'save-failed' ואזהרה 'audio-not-saved' (לא נכשלים בגללו).
+async function keepAudio(ref, relBase, rendered, warnings, requestId) {
+  const a = voice.savedAudioOf(rendered);
+  if (!a) return false;
+  try {
+    await ref.update(await voice.saveLineAudio(`${relBase}.${a.ext}`, a.buf, a.mime));
+    return true;
+  } catch (e) {
+    logger.warn('yemot-line: audio not saved', { reason: 'audio-not-saved', requestId });
+    try { await ref.update({ audioError: 'save-failed' }); } catch (e2) { /* */ }
+    if (!warnings.includes('audio-not-saved')) warnings.push('audio-not-saved');
+    return false;
+  }
+}
+
+class BackupError extends Error { constructor(code) { super('backup:' + code); this.code = code; } }
+// החלטת המתאם (04.11, "דורש החלטה" 1 בחוזה): אפשרות ב' – פתיחה קודמת בקובץ שמע מוחלפת רק אם יש לה עותק שמע אמיתי:
+// שמע שמור ב-Storage, או הורדה מוצלחת מהקו (DownloadFile) ← בדיקה ← שמירה. אחרת – BackupError, והפתיחה לא מוחלפת.
+// פתיחה קודמת בקובץ טקסט: הטקסט ברשומה הוא עותק מלא – אין מה להוריד. פתיחה קודמת שכבר לא בקו – אין מה לאבד.
+// אם המשתמש יבחר באפשרות א' (גיבוי של הנוסח בלבד, אחרי אישור): השינוי הוא רק במקום המסומן "אפשרות א'" למטה –
+//   כשההורדה נכשלת, ולרשומה הקודמת יש text, ובבקשה acceptTextBackup===true – לסמן ברשומה הקודמת backupKind:'text' ולהמשיך (continue) במקום לזרוק.
+// הפתיחות הקודמות של האפליקציה (בקו) שהן קובץ שמע – רק מהמסד, בלי פנייה לימות
+async function audioOpenings(db, v) {
+  return (await db.collection(ITEMS).where('slot', '==', 'opening').get()).docs
+    .filter((d) => d.id !== v.requestId && ON_LINE.includes(d.get('status')) && d.get('path') && voice.isAudioFile(d.get('path')));
+}
+async function backupOpening(ctx, prev, files) {
+  const done = [];
+  for (const d of prev) {
+    const p = d.get('path');
+    const onLine = files.find((f) => f.name === p.split('/').pop());
+    if (!onLine) continue;
+    if (d.get('audioPath')) {
+      let size = null;
+      try { size = await voice.lineAudioSize(d.get('audioPath')); } catch (e) { size = null; }
+      if (size > 0) continue; // יש כבר עותק שמור
+    }
+    if (!safePath(p)) throw new BackupError('unsafe-path');
+    let buf;
+    try {
+      buf = await downloadFile(ctx, p, LISTEN_MAX_BYTES);
+      if (buf.length < 44 || buf.toString('latin1', 0, 4) !== 'RIFF') throw new BackupError('not-wav');
+      if (onLine.size !== null && onLine.size !== buf.length) throw new BackupError('size-mismatch');
+    } catch (e) {
+      // אפשרות א' (לא פעילה): כאן – גיבוי של הנוסח בלבד, רק אחרי אישור מפורש של המשתמש בבקשה.
+      throw e instanceof BackupError ? e : new BackupError(e instanceof YemotError ? 'download-' + e.code : 'download-internal');
+    }
+    let saved;
+    try { saved = await voice.saveLineAudio(`items/${d.id}.wav`, buf, 'audio/wav'); } catch (e) { throw new BackupError('save-failed'); }
+    await d.ref.update(Object.assign(saved, { updatedAt: new Date().toISOString() }));
+    done.push(d.id);
+  }
+  return done;
+}
 
 // ---------------- publishLineItem ----------------
 async function publishItem(request, key, base) {
@@ -226,21 +267,32 @@ async function publishItem(request, key, base) {
   };
 
   try {
-    // 2א. הפתיחה בקובץ שמע: לא דורסים הקלטת פתיחה ישנה (M1000.wav) שלא הועלתה מהאפליקציה. בודקים לפני ההקראה, כדי לא לשלם לחינם.
-    if (S.fixedName && !plan.keepPath && ext === 'wav') {
-      const target = voice.fileName(S.fixedName, { ext });
-      let names;
-      try { names = await listDir(ctx, S.ext); } catch (e) {
+    // 2א. הפתיחה – לפני ההקראה (כדי לא לשלם לחינם) ולפני ההעלאה (ההחלפה דורסת באותו נתיב):
+    //   (1) לא דורסים הקלטת פתיחה ישנה (M1000.wav) שלא הועלתה מהאפליקציה (opening-legacy-file, בלי שינוי);
+    //   (2) פתיחה קודמת של האפליקציה בקובץ שמע, בלי שמע שמור – קודם גיבוי מהקו ל-Storage (backupOpening). אין גיבוי ← לא מחליפים.
+    let backedUp = [];
+    const prevAudio = S.fixedName ? await audioOpenings(db, v) : [];
+    // קריאת התיקייה רק כשצריך (כמו קודם: פתיחה בשמע; ובנוסף – כשיש פתיחה קודמת בשמע לגבות)
+    if (S.fixedName && ((!plan.keepPath && ext === 'wav') || prevAudio.length)) {
+      let files;
+      try { files = await listDirInfo(ctx, S.ext); } catch (e) {
         await fail(e instanceof YemotError ? 'dir-' + e.code : 'internal', false);
         logger.warn('yemot-line: dir failed', { reason: 'yemot-upload-failed', code: e.code, requestId: v.requestId });
         throw new HttpsError('unavailable', 'ההעלאה לקו נכשלה. נסו שוב מאוחר יותר.', { reason: 'yemot-upload-failed' });
       }
-      if (names.includes(target)) {
+      const target = voice.fileName(S.fixedName, { ext });
+      if (!plan.keepPath && ext === 'wav' && files.some((f) => f.name === target)) {
         const ours = (await db.collection(ITEMS).where('path', '==', voice.pathOf(S.ext, target)).get()).docs.some((d) => d.id !== v.requestId && ON_LINE.includes(d.get('status')));
         if (!ours) {
           await fail('opening-legacy-file', false);
           throw new HttpsError('failed-precondition', `בקו יש הקלטת פתיחה ישנה (${target}) שלא הועלתה מהאפליקציה. כדי לא למחוק אותה, הפתיחה לא הוחלפה. צריך קודם להעביר אותה לגיבוי (BACKUP_M1000.wav).`, { reason: 'opening-legacy-file' });
         }
+      }
+      try { backedUp = await backupOpening(ctx, prevAudio, files); } catch (e) {
+        if (!(e instanceof BackupError)) throw e;
+        await fail('backup-failed', false);
+        logger.warn('yemot-line: opening backup failed', { reason: 'backup-failed', code: e.code, requestId: v.requestId });
+        throw new HttpsError('unavailable', 'לא הצלחנו לשמור עותק של מה שבקו, ולכן שום דבר לא נמחק ולא הוחלף. נסו שוב מאוחר יותר.', { reason: 'backup-failed' });
       }
     }
     // 2ב. ההקראה (דרך voice.js). כשל או תקרה בקול המשוכפל – שגיאה מסודרת, בלי מעבר אוטומטי לקול הממוחשב.
@@ -281,16 +333,20 @@ async function publishItem(request, key, base) {
     }
     await testFault(db, 'line-after-upload');
     await itemRef.update({ status: 'live', uncertain: false, error: null, lockAt: null, lockReq: null, updatedAt: stamp() });
+    const warnings = [];
+
+    // 3א. עותק של השמע שעלה (הקלטה / קול משוכפל) ב-line_audio/items/<id>. כשל = אזהרה בלבד; ההעלאה הצליחה.
+    const audioSaved = await keepAudio(itemRef, `items/${v.requestId}`, rendered, warnings, v.requestId);
 
     // 4. החלפה: רק אחרי שהחדש בקו – הקודם יוצא. מחיקה רק של נתיב שרשום אצלנו, ורק אם הוא שונה מהחדש.
-    let replaced = null; const warnings = [];
+    let replaced = null;
     if (S.mode === 'replace') {
       const prev = (await db.collection(ITEMS).where('slot', '==', v.slot).get()).docs
         .filter((d) => d.id !== v.requestId && ON_LINE.includes(d.get('status')));
       for (const d of prev) {
         const p = d.get('path');
         const now = stamp();
-        if (!p || p === path) { await d.ref.update({ status: 'replaced', replacedBy: v.requestId, updatedAt: now }); replaced = replaced || d.get('file'); continue; }
+        if (!p || p === path) { await d.ref.update({ status: 'replaced', replacedBy: v.requestId, removedAt: now, updatedAt: now }); replaced = replaced || d.get('file'); continue; }
         if (!safePath(p)) { logger.error('yemot-line: unsafe path skipped', { reason: 'unsafe-path', id: d.id }); continue; }
         try {
           await deleteFiles(ctx, [p]);
@@ -305,7 +361,7 @@ async function publishItem(request, key, base) {
       await unlockSlot();
     }
     const message = DONE_MSG[v.slot] + (v.until ? ` היא תרד מהקו אחרי ${v.until.split('-').reverse().join('/')}.` : '') + (warnings.length ? ' התוכן הקודם עוד לא הוסר מהקו – הוא יוסר בעדכון הבא.' : '');
-    return reply({ file, path, kind: v.kind, spoken }, { replaced, warnings, message, engine: rendered.engine });
+    return reply({ file, path, kind: v.kind, spoken }, { replaced, warnings, message, engine: rendered.engine, audioSaved, backedUp });
   } catch (e) {
     if (e instanceof HttpsError) throw e;
     // חריגה פנימית: משחררים נעילות ומסמנים "לא ודאי" (ייתכן שהקובץ עלה). ניסיון חוזר ישתמש באותו נתיב.
@@ -502,7 +558,12 @@ async function lineState(request) {
   return {
     voice: vInfo,
     ok: true, role: who.role, slots, lexicon: lx.exists && typeof lx.get('text') === 'string' ? lx.get('text') : '',
-    limits: { recipes: YEMOT_RECIPE_MAX.value(), updates: 800, hours: 600, opening: 600, recordSec: YEMOT_REC_MAX_SEC.value(), recordBytes: REC_MAX_BYTES, tempMaxDays: YEMOT_TEMP_MAX_DAYS.value() },
+    limits: {
+      recipes: YEMOT_RECIPE_MAX.value(), updates: 800, hours: 600, opening: 600, recordSec: YEMOT_REC_MAX_SEC.value(), recordBytes: REC_MAX_BYTES, tempMaxDays: YEMOT_TEMP_MAX_DAYS.value(),
+      // משימה 2026-11-04 (חוזה 5.5.9): אורך הקלטה לכל שלוחה, ומה מותר למשתמש הזה להקליט (התצוגה בלבד – האכיפה בשרת)
+      recordSecBySlot: { recipes: recMaxSec(SLOTS.recipes), promos: YEMOT_REC_MAX_SEC.value(), updates: recMaxSec(SLOTS.updates), hours: recMaxSec(SLOTS.hours), opening: recMaxSec(SLOTS.opening) },
+      canRecord: { recipes: true, promos: true, updates: true, hours: mgr, opening: mgr },
+    },
     preview: 'phone', structure: 'off',
   };
 }
@@ -546,4 +607,4 @@ exports.listLineFiles = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 },
 Object.defineProperty(exports, 'runLineExpiry', { enumerable: false, value: runLineExpiry });
 
 // לבדיקות בלבד (לא נספרים כפונקציות): הליבה, כדי לקרוא לה בתוך תהליך הבדיקה עם voice.js מוחלף או פסק זמן קצר.
-Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, previewItem, runLineExpiry, parseWav, safePath, SLOTS } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, previewItem, runLineExpiry, parseWav: voice.parseWav, safePath, SLOTS, backupOpening } });

@@ -10,7 +10,7 @@ const state = { requests: [], files: new Map(), dirs: {}, modes: {} };
 const DEFAULT_DIRS = { '1': { '000.tts': 'מתכון ותיק' }, '3': { '000.tts': 'עדכון ותיק' }, '4': { '000.tts': 'שעות ותיקות' }, '': { 'M1000.wav': 'פתיחה מוקלטת', 'ext.ini': 'type=menu' } };
 function reset(files, dirs) {
   state.requests = [];
-  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok' };
+  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok' };
   state.files = new Map(Object.entries(files || { '000.tts': 'פתיח' }));
   state.dirs = { '2': state.files };
   for (const [d, f] of Object.entries(Object.assign({}, DEFAULT_DIRS, dirs || {}))) state.dirs[d] = new Map(Object.entries(f));
@@ -48,19 +48,32 @@ function start(port) {
       } else { try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch (e) { /* */ } }
       const auth = req.headers.authorization || '';
       state.requests.push({ cmd, auth, url: req.url, body, at: Date.now() });
-      const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete' }[cmd];
+      const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', DownloadFile: 'download' }[cmd];
       if (!key) return reply(res, 404, { responseStatus: 'ERROR', message: 'unknown command' });
       const mode = state.modes[key];
       if (mode === 'hang') return; // לא עונה אף פעם (לבדיקת פסק זמן)
       if (mode === 'http500') return reply(res, 500, { responseStatus: 'EXCEPTION' });
       if (mode === 'exception') return reply(res, 200, { responseStatus: 'EXCEPTION', exceptionClass: 'IllegalArgumentException', exceptionMessage: 'bad token ' + auth });
       if (mode === 'error') return reply(res, 200, { yemotAPIVersion: 7, responseStatus: 'ERROR', message: 'token ' + auth + ' is incorrect', messageCode: 1 });
+      // DownloadFile (post/32032): תוכן הקובץ, לא JSON. לא קיים או שגיאה – HTTP 404.
+      // מצבי תקלה נוספים (רק להורדה): '404', 'empty' (תשובה ריקה), 'json' (שגיאה בפורמט JSON), 'short' (חסר בית אחד – גודל לא תואם)
+      if (cmd === 'DownloadFile') {
+        if (mode === '404') { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not Found'); }
+        if (mode === 'json') return reply(res, 200, { responseStatus: 'ERROR', message: 'no permission' });
+        const w = parseWhat(body.path);
+        const c = w && state.dirs[w.dir].get(w.name);
+        if (c === undefined || c === null) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not Found'); }
+        let out = Buffer.isBuffer(c) ? c : Buffer.from(String(c), 'utf8');
+        if (mode === 'empty') out = Buffer.alloc(0);
+        if (mode === 'short') out = out.subarray(0, Math.max(0, out.length - 1));
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' }); return res.end(out);
+      }
       if (cmd === 'GetIVR2Dir') {
         // כמו ימות האמיתי (נצפה 02.11.2026): path ריק מחזיר EXCEPTION. השורש = '/'
         if (String(body.path) === '') return reply(res, 200, { responseStatus: 'EXCEPTION', exceptionClass: 'IllegalArgumentException' });
         const dir = state.dirs[String(body.path) === '/' ? '' : String(body.path)];
         if (!dir) return reply(res, 200, { responseStatus: 'ERROR', message: 'no dir' });
-        const files = [...dir.keys()].sort().map((name) => ({ exists: true, name, what: `ivr2:${body.path}/${name}`, fileType: 'tts', size: 10 }));
+        const files = [...dir.keys()].sort().map((name) => { const c = dir.get(name); return { exists: true, name, what: `ivr2:${body.path}/${name}`, fileType: 'tts', size: Buffer.isBuffer(c) ? c.length : Buffer.byteLength(String(c)) }; });
         return reply(res, 200, OK({ thisPath: String(body.path), files, ini: [], dirs: [] }));
       }
       if (cmd === 'UploadTextFile') {
