@@ -29,25 +29,27 @@ const errT=e=>{const r=e&&e.reason;if(e&&e.msg&&A.he(e.msg))return e.msg;if(r&&M
 const keyOf=(ref)=>ref?[ref.kind,ref.id||'',ref.ext||'',ref.file||''].join('|'):'';
 const refAttr=ref=>esc(JSON.stringify(ref));
 // ---------- תצוגה ----------
+const tag=(c,t)=>`<span class="tag ${c}">${t}</span>`; // תגית סטנדרטית של האפליקציה
 function row(slot,x,mgr){
  const legacy=x.origin==='legacy',ttl=x.title||x.file||'ללא שם',k=keyOf(x.ref);
- const meta=[x.file?`<span dir="ltr">${esc(x.file)}</span>`:'',legacy?'קובץ ותיק':'מהאפליקציה',x.kind==='audio'?'הקלטה':'',x.createdAt?esc(fdt(x.createdAt)):'',
-  x.byRole?(x.byRole==='manager'?'מנהל':'עובד'):'',x.until?'יורד אחרי '+esc(heDay(x.until)):(slot==='hours'||slot==='promos'?'':''),x.temporary&&!x.until?'זמנית':'',x.uncertain?'<b style="color:var(--warn)">לא ודאי</b>':''].filter(Boolean).join(' · ');
+ const tags=[legacy?tag('t1','קובץ ותיק'):tag('t2','מהאפליקציה'),x.kind==='audio'?tag('t3','הקלטה'):'',x.uncertain?tag('t4','לא ודאי'):''].join('');
+ const meta=[legacy&&x.file?`<span dir="ltr">${esc(x.file)}</span>`:'',x.createdAt?esc(fdt(x.createdAt)):'',x.byRole?(x.byRole==='manager'?'מנהל':'עובד'):'',x.until?'יורד אחרי '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
  const a=x.actions||{};
  const btns=[x.listen&&x.listen!=='none'?`<button class="btn s g" data-a="ybListen" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}">האזן</button>`:''];
  if(mgr){ // הסתרה היא נוחות בלבד; השרת דוחה עובד
-  if(a.extend)btns.push(`<button class="btn s" data-a="ybExtend" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-u="${esc(x.until||'')}">האריך תוקף</button>`);
-  if(a.remove)btns.push(`<button class="btn s r" data-a="ybRemove" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-l="${legacy?1:0}">הורד</button>`)}
- return`<div class="li" style="cursor:default;flex-wrap:wrap" data-k="${esc(k)}"><div class="m" style="flex:1 1 100%"><b>${esc(ttl)}</b><small>${meta}</small></div><div style="display:flex;gap:6px;flex-wrap:wrap">${btns.join('')}</div></div>`}
+  if(a.extend)btns.push(`<button class="btn s g" data-a="ybExtend" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-u="${esc(x.until||'')}">האריך תוקף</button>`);
+  if(a.remove)btns.push(`<button class="btn s g" data-a="ybRemove" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-l="${legacy?1:0}">הורד</button>`)}
+ return`<div class="li${legacy?'':' inc'}" style="cursor:default" data-k="${esc(k)}"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
 function rec(slot,x,mgr){
  const ttl=x.title||'ללא שם',rs=x.restore||{};
- const meta=[WHY[x.downReason]||'ירדה',x.downAt?esc(fdt(x.downAt)):'',x.kind==='audio'?'הקלטה':'',x.hasSavedAudio?'':'ללא שמע שמור',x.until?'היה עד '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
+ const tags=[tag('t1',WHY[x.downReason]||'ירדה'),x.kind==='audio'?tag('t3','הקלטה'):'',x.hasSavedAudio?'':tag('t4','ללא שמע שמור')].join('');
+ const meta=[x.downAt?esc(fdt(x.downAt)):'',x.until?'היה עד '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
  const btns=[`<button class="btn s g" data-a="ybListen" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}">האזן</button>`];
- if(mgr&&rs.allowed)btns.push(`<button class="btn s" data-a="ybRestore" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-nu="${rs.needsUntil?1:0}" data-c="${rs.costNote?1:0}">החזר לקו</button>`);
- return`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m" style="flex:1 1 100%"><b>${esc(ttl)}</b><small>${meta}</small></div><div style="display:flex;gap:6px;flex-wrap:wrap">${btns.join('')}</div></div>`}
+ if(mgr&&rs.allowed)btns.push(`<button class="btn s g" data-a="ybRestore" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-nu="${rs.needsUntil?1:0}" data-c="${rs.costNote?1:0}">החזר לקו</button>`);
+ return`<div class="li exp" style="cursor:default"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
 function playerHtml(){if(!P)return'';
  const body=P.mode==='audio'?`<audio controls ${P.fresh?'autoplay ':''}src="${P.url}" style="width:100%"></audio>`:`<p class="note" style="margin:6px 0 0">${esc(P.text||'')}</p><p class="note" style="margin:4px 0 0">הקראה בטלפון בלבד (קירוב): זה לא השמע של הקו.</p>`;
- return`<div class="card" style="border-color:var(--acc)" id="ybPlayer"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>${esc(P.title)}</b><button class="btn s g" data-a="ybStop">סגור</button></div>${body}</div>`}
+ return`<div class="card" id="ybPlayer"><div class="sec" style="margin:0 0 8px"><h3>${esc(P.title)}</h3><button class="btn s g" data-a="ybStop">סגור</button></div>${body}</div>`}
 function html(slot){
  const S=B[slot],mgr=A.isMgr();
  if(!S||(!S.r&&!S.err))return`<p class="note">טוען…</p>`;
