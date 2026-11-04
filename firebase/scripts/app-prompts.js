@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { appSourceLines } = require('../tests/helpers');
 
-const NAMES = { invoice: 'OCAI_P', product: 'SHAI_P', feedback: 'FB_P', zreport: 'ZR_P', opening: 'OPN_P', deposit: 'DEP_P', cashout: 'COUT_P' };
+const NAMES = { invoice: 'OCAI_P', product: 'SHAI_P', feedback: 'FB_P', zreport: 'ZR_P', opening: 'OPN_P', deposit: 'DEP_P', cashout: 'COUT_P', transfer: 'TRF_P' };
 
 function extract(lines, name) {
   const start = lines.findIndex((l) => l.startsWith(`const ${name}=`));

@@ -51,6 +51,8 @@ exports.scanDocument = onCall(
     const input = inputObject(request);
     const maxBytes = SCAN_MAX_FILE_MB.value() * 1024 * 1024;
     const { kind, cfg, files } = scan.validateScanInput(input, maxBytes);
+    // צילום העברה בנקאית – מנהל בלבד (החלטת המשתמש). נבדק לפני הספירה במכסה היומית ולפני Gemini
+    if (kind === 'transfer' && who.role !== 'manager') throw new HttpsError('permission-denied', 'צילום העברה מותר למנהל בלבד.', { reason: 'manager-only' });
     const key = GEMINI_API_KEY.value();
     if (!key) throw new HttpsError('failed-precondition', 'אין מפתח לזיהוי חכם בשרת', { reason: 'no-key' });
     const limit = SCAN_DAILY_LIMIT.value();

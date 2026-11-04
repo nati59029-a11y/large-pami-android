@@ -241,8 +241,8 @@ describe('פונקציות שרת (שלב 3)', () => {
 
     it('תקציב הזמן בשרת: 100 שניות לחשבונית, למוצר ולסגירת קופה, 135 למשוב – תמיד פחות ממה שהטלפון מחכה (120 / 150)', () => {
       const scan = require('../functions/lib/scan');
-      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, zreport: 100000, opening: 100000, deposit: 100000, cashout: 100000, recipe: 135000 });
-      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, recipe: 150000 });
+      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, zreport: 100000, opening: 100000, deposit: 100000, cashout: 100000, transfer: 100000, recipe: 135000 });
+      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000 });
       for (const k of Object.keys(scan.KINDS)) assert.ok(scan.KINDS[k].budgetMs < scan.PHONE_WAIT_MS[k], k);
       // מחוץ לאמולטור אין קיצור זמנים, גם אם מישהו הגדיר SCAN_TIME_SCALE
       const prevE = process.env.FUNCTIONS_EMULATOR, prevS = process.env.SCAN_TIME_SCALE;
@@ -399,6 +399,7 @@ describe('פונקציות שרת (שלב 3)', () => {
       assert.equal(SERVER_PROMPTS.opening, P.opening.value);
       assert.equal(SERVER_PROMPTS.deposit, P.deposit.value);
       assert.equal(SERVER_PROMPTS.cashout, P.cashout.value);
+      assert.equal(SERVER_PROMPTS.transfer, P.transfer.value);
     });
 
     it('סגירת קופה: דוח Z – בדיוק 3 צילומים בבקשה אחת, ודף פתיחה – צילום אחד; ההנחיה מהאפליקציה, temperature 0, התשובה מפוענחת', async () => {
@@ -457,6 +458,30 @@ describe('פונקציות שרת (שלב 3)', () => {
       const before = M.state.requests.length;
       assert.notEqual((await call('scanDocument', 'u_out', { kind: 'cashout', files: [jpgFile(405)] })).status, 'OK');
       assert.equal(M.state.requests.length, before);
+    });
+
+    it('צילום העברה (transfer): מנהל בלבד – מנהל עובר; עובד נחסם לפני Gemini ובלי ירידה במכסה', async () => {
+      const P = appPrompts();
+      const f = jpgFile(406);
+      const r = await call('scanDocument', 'u_mgr', { kind: 'transfer', files: [f] });
+      assert.equal(r.status, 'OK', JSON.stringify(r.json).slice(0, 200));
+      const [q] = M.state.requests;
+      assert.deepEqual(q.body, { contents: [{ parts: [{ text: P.transfer.value }, { inline_data: { mime_type: f.mimeType, data: f.data } }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } });
+      assert.equal(q.kind, 'transfer');
+      assert.deepEqual(r.result.data, M.ANSWERS.transfer);
+      assert.equal((await usageOf(env, 'u_mgr')).count, 1);
+      // גם מנהל "ישן" (רק admins, בלי staff)
+      assert.equal((await call('scanDocument', H.MANAGER_ONLY_ADMINS, { kind: 'transfer', files: [jpgFile(407)] })).status, 'OK');
+      // עובד פעיל: permission-denied, בלי פנייה ל-Gemini ובלי ספירה במכסה
+      const before = M.state.requests.length, u0 = await usageOf(env, 'u_emp');
+      const e = await call('scanDocument', 'u_emp', { kind: 'transfer', files: [jpgFile(408)] });
+      assert.equal(e.status, 'PERMISSION_DENIED');
+      assert.equal(e.error.message, 'צילום העברה מותר למנהל בלבד.');
+      assert.equal(e.error.details.reason, 'manager-only');
+      assert.equal(M.state.requests.length, before);
+      assert.deepEqual(await usageOf(env, 'u_emp'), u0, 'מכסת העובד לא השתנתה');
+      // שאר הסוגים לא השתנו: אותו עובד עדיין יכול לזהות חשבונית
+      assert.equal((await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile(409)] })).status, 'OK');
     });
 
     it('אין פנייה החוצה: באמולטור הקוד מסרב לפנות לכתובת שאינה מקומית', async () => {
