@@ -329,7 +329,7 @@ async function cSend(c){
   let m=c.kind==='promo'||(c.kind==='audio'&&c.slot==='promos')?(res&&he(res.message)?res.message:res&&res.duplicate?'המבצע הזה כבר נשלח.':c.withTz&&res&&res.tzintuk==='failed'?'ההודעה עלתה לקו, אבל הצינתוק לא נשלח.':c.withTz?'✓ המבצע נשלח לקו, ונשלח צינתוק לנרשמים.':'✓ המבצע הועלה לקו, בלי צינתוק.')
    :(res&&he(res.message)?res.message:'✓ עלה לקו');
   if(res&&res.warnings&&res.warnings.includes('yemot-remove-failed'))m+=' (הסרת הקודם נכשלה)';
-  if(c.clear)c.clear();Y.st=null;Y.files=null;toast(m);
+  if(c.clear)c.clear();Y.st=null;Y.files=null;if(window.ylBoard&&ylBoard.invalidate)ylBoard.invalidate();toast(m);
   if(cur().v==='yl')redraw()}
 ACT.ylCOk=async el=>{
  const c=Y.c;if(!c||c.busy||Y.sending||cBad(c))return; // נעילה סינכרונית: לחיצה כפולה לא עוברת

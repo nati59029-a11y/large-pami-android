@@ -146,5 +146,6 @@ ACT.ybRestore=el=>{const ref=parse(el),slot=el.dataset.s,ttl=el.dataset.t,nu=el.
   msg:`${NAME[slot]}: «${ttl}» תעלה לקו כהודעה חדשה ותושמע ראשונה. בלי צינתוק. ההודעה המקורית לא משתנה.`+(slot==='opening'?' היא תחליף את הפתיחה הנוכחית, שנשמרת קודם.':''),cost,
   req:d=>{if(!d.rid||d.sig!==d.dateVal){d.rid='yb'+A.rand();d.sig=d.dateVal}
    const p={requestId:d.rid,kind:ref.kind,id:ref.id};if(nu)p.until=d.dateVal;if(d.cost||cost)p.confirmCost=true;return['restoreLineItem',p]}})};
-window.ylBoard={html,load,slots:SLOTS,stop:stopPlayer};
+const invalidate=()=>{for(const k in B)B[k].at=0}; // אחרי שליחה מהמסך (yemot-line.js): הטעינה הבאה מביאה רשימה עדכנית, ולא מהמטמון המקומי
+window.ylBoard={html,load,slots:SLOTS,stop:stopPlayer,invalidate};
 })();
