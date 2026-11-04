@@ -217,22 +217,26 @@ async function backupOpening(ctx, prev, files, isRecording, warnings) {
 }
 
 // ---------------- publishLineItem ----------------
-async function publishItem(request, key, base) {
+// pre (שלב 5, רק מ-restoreLineItem בתוך השרת – לא מהטלפון): { v, engine?, rendered?, recEngine?, restoredFrom }.
+// התוכן כבר נבדק ונטען מהרשומה המקורית. כל השאר (הרשאה, נעילה, מספור חדש, גיבוי פתיחה, כפילות) – אותו מסלול בדיוק.
+async function publishItem(request, key, base, pre) {
   const who = await requireStaff(request);
   const input = inputObject(request);
-  const v = validateItem(input);
+  const v = pre ? pre.v : validateItem(input);
   const S = v.S;
   if (S.managerOnly && who.role !== 'manager') {
     throw new HttpsError('permission-denied', `רק מנהל יכול לשנות את ${S.name}.`, { reason: 'slot-manager-only' });
   }
   // מנוע הקול: בלי engine = המוגדר בשרת (הקול המשוכפל); engine=tts = המשתמש בחר "שלח בקול הממוחשב". הקלטה – תמיד כמו שהיא.
-  const engine = voice.pickEngine(input.engine);
+  const engine = pre && pre.engine ? pre.engine : voice.pickEngine(input.engine);
   if (!engine) throw bad('bad-input', 'קלט לא תקין');
   const ctx = context(key, base);
   const db = getFirestore();
   // ההקראה עצמה (שעולה כסף בקול המשוכפל) נוצרת רק אחרי בדיקת הכפילות והנעילה – שלב 2 למטה
   let spoken = null, rendered = null;
-  if (v.kind === 'text') spoken = applyLexicon(v.text, await loadLexicon(db));
+  // החזרה (שלב 5) עם שמע שמור: מעלים את אותו שמע בדיוק, בלי הקראה (ובלי עלות). הנוסח ברשומה נשאר כמו במקור.
+  if (pre && pre.rendered) { rendered = pre.rendered; spoken = v.kind === 'text' ? (pre.spoken || null) : null; }
+  else if (v.kind === 'text') spoken = applyLexicon(v.text, await loadLexicon(db));
   else rendered = voice.fromRecording(v.buf);
   const ext = rendered ? rendered.ext : voice.extFor(engine);
 
@@ -255,12 +259,13 @@ async function publishItem(request, key, base) {
     const keepPath = !!(x && x.path && voice.extOf(x.path) === ext);
     const rec = {
       slot: v.slot, ext: S.ext, kind: v.kind, source: v.source, title: v.title, text: v.text, spoken,
-      durationSec: v.kind === 'audio' ? v.durationSec : null, engine: v.kind === 'audio' ? 'recording' : engine, status: 'uploading', error: null,
+      durationSec: v.kind === 'audio' ? v.durationSec : null, engine: v.kind === 'audio' ? (pre && pre.recEngine) || 'recording' : engine, status: 'uploading', error: null,
       until: v.until || null, temporary: !!v.until,
       uncertain: keepPath ? !!x.uncertain : false, byUid: who.uid, byRole: who.role, updatedAt: now, lockAt: now, lockReq: v.requestId,
     };
     if (!keepPath) { rec.file = null; rec.path = null; }
     if (!x) Object.assign(rec, { createdAt: now, replacedBy: null, removedAt: null, removedBy: null });
+    if (pre && pre.restoredFrom) rec.restoredFrom = pre.restoredFrom;
     tx.set(itemRef, rec, { merge: true });
     if (slotRef) tx.set(slotRef, { lockAt: now, lockReq: v.requestId, updatedAt: now }, { merge: true });
     return { kind: 'work', keepPath, x };
@@ -385,12 +390,15 @@ async function publishItem(request, key, base) {
 }
 
 // ---------------- removeLineItem (מנהל) ----------------
-async function removeItem(request, key, base) {
-  const who = await requireStaff(request);
+async function removeItem(request, key, base, whoKnown) {
+  const who = whoKnown || await requireStaff(request);
   const input = inputObject(request);
   if (who.role !== 'manager') throw new HttpsError('permission-denied', 'הפעולה הזו מותרת למנהל בלבד.', { reason: 'manager-only' });
   if (typeof input.requestId !== 'string' || !ID_RE.test(input.requestId)) throw bad('bad-request-id', 'הבקשה לא תקינה. נסו שוב.');
   const notFound = () => new HttpsError('not-found', 'הפריט לא נמצא (ייתכן שכבר הוסר).', { reason: 'item-not-found' });
+  if (input.confirmNoBackup !== undefined && typeof input.confirmNoBackup !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
+  // שלב 5 (חוזה 5.5.5): מבצע (promoKey) – yemot-board.js. קובץ לפי שם (ext+file) – שלוחות 1–4.
+  if (input.promoKey !== undefined) return require('./yemot-board')._core.removePromo(who, input, key, base);
   if (input.file !== undefined) return removeFile(who, input, key, base);
   if (typeof input.id !== 'string' || !ID_RE.test(input.id)) throw notFound();
   const ctx = context(key, base);
@@ -419,9 +427,18 @@ async function removeItem(request, key, base) {
     return new HttpsError('unavailable', 'ההסרה מהקו נכשלה. נסו שוב.', { reason: 'yemot-remove-failed' });
   };
   try {
-    let names;
-    try { names = await listDir(ctx, x.ext); } catch (e) { throw await failed(e); }
+    let infos;
+    try { infos = await listDirInfo(ctx, x.ext); } catch (e) { throw await failed(e); }
+    const names = infos.map((f) => f.name);
     const file = x.path.split('/').pop();
+    // שלב 5: הקלטה בלי עותק שמור (ובלי נוסח) – קודם מנסים לשמור עותק מהקו. אין עותק ← no-backup-confirm, עד שהמנהל מאשר (confirmNoBackup).
+    if (names.includes(file)) {
+      const ok = await require('./yemot-board')._core.keepBeforeRemove(ctx, ref, x, `items/${input.id}.wav`, infos.find((f) => f.name === file));
+      if (!ok && input.confirmNoBackup !== true) {
+        await ref.update({ lockAt: null, lockReq: null, updatedAt: stamp() });
+        throw new HttpsError('failed-precondition', 'אין עותק שמור של ההקלטה הזו. אחרי ההורדה לא יהיה אפשר להחזיר אותה. לאשר?', { reason: 'no-backup-confirm' });
+      }
+    }
     if (names.includes(file)) {
       try { await deleteFiles(ctx, [x.path]); } catch (e) { throw await failed(e); }
     }
@@ -434,18 +451,37 @@ async function removeItem(request, key, base) {
   }
 }
 
-// ---------------- מחיקה לפי שם קובץ – שלוחה 4 בלבד (סבב 3) ----------------
-// קלט: { requestId, ext:'4', file:'NNN.<סיומת>' }. קובץ אחד בנתיב מדויק (FileAction delete), אף פעם לא תיקייה.
-// גם הקובץ הוותיק 000. פריט של השרת באותו נתיב מסומן removed. ניסיון חוזר אחרי הצלחה: "כבר לא בקו".
+// ---------------- מחיקה לפי שם קובץ – שלוחות 1–4 (סבב 3; הורחב בשלב 5 של משימה 2026-11-04, חוזה 5.5.5) ----------------
+// קלט: { requestId, ext:'1'..'4', file:'NNN.<סיומת קול>' }. קובץ אחד בנתיב מדויק (FileAction delete), אף פעם לא תיקייה, ext.ini או M*.
+// קובץ שיש לו רשומה של האפליקציה ← אותו מסלול כמו הורדת פריט (id) או מבצע (promoKey).
+// קובץ ותיק (בלי רשומה, למשל 000 בקול הממוחשב) ← גיבוי חובה (yemot_line_backups + Storage) לפני המחיקה. אין גיבוי ← backup-failed, לא נמחק כלום.
+// (שינוי מכוון לפי החלטה 1: עד עכשיו הקובץ הוותיק 000 בשלוחה 4 נמחק בלי גיבוי.) ניסיון חוזר אחרי הצלחה: "כבר לא בקו".
 const FILE_RE = /^\d{3}\.[A-Za-z0-9]{1,5}$/;
+const FILE_EXTS = ['1', '2', '3', '4'];
+// הנתיב היחיד שמותר למחוק לפי שם: voice.isSafeFilePath (ivr2:<1-4>/NNN.<סיומת קול מהרשימה הסגורה>, כולל 000). safePath הקיים – בלי שינוי.
+const safeFilePath = (p) => voice.isSafeFilePath(p);
+const BAD_FILE_MSG = 'אפשר למחוק מהאפליקציה רק קובצי תוכן (tts/wav) בשלוחות 1–4.';
 async function removeFile(who, input, key, base) {
   // FILE_RE – צורת השם; voice.isDeletableContent – רשימה סגורה של סיומות קול (tts/wav). שם אחר (למשל 001.ini) נדחה בלי פנייה לימות.
-  if (input.ext !== '4' || typeof input.file !== 'string' || !FILE_RE.test(input.file) || !voice.isDeletableContent(input.file)) throw bad('bad-file', 'אפשר למחוק מהאפליקציה רק קובצי תוכן בשלוחה 4.');
-  const path = `ivr2:4/${input.file}`;
-  if (!safePath(path)) throw bad('bad-file', 'אפשר למחוק מהאפליקציה רק קובצי תוכן בשלוחה 4.');
+  if (typeof input.ext !== 'string' || !FILE_EXTS.includes(input.ext) || typeof input.file !== 'string' || !FILE_RE.test(input.file) || !voice.isDeletableContent(input.file)) throw bad('bad-file', BAD_FILE_MSG);
+  const ext = input.ext;
+  const path = `ivr2:${ext}/${input.file}`;
+  if (!safeFilePath(path)) throw bad('bad-file', BAD_FILE_MSG);
   const ctx = context(key, base);
   const db = getFirestore();
-  const lockRef = db.doc(SLOTS.hours.state);
+  const B = require('./yemot-board')._core;
+  // פריט של האפליקציה בנתיב הזה ← המסלול הרגיל שלו (עם הנעילה, הסימון והגיבוי שלו)
+  const atPath = (await db.collection(ITEMS).where('path', '==', path).get()).docs;
+  const items = atPath.filter((d) => ON_LINE.includes(d.get('status')));
+  // העלאה שמצבה לא ודאי באותו נתיב – לא מוחקים "כקובץ ותיק" (ייתכן שזה הקובץ שלה)
+  if (!items.length && atPath.some((d) => d.get('status') === 'uploading' || (d.get('status') === 'failed' && d.get('uncertain')))) {
+    throw new HttpsError('aborted', 'מצב הפריט בקו עוד לא ברור. רעננו ונסו שוב בעוד דקה.', { reason: 'item-uncertain' });
+  }
+  if (items.length) return removeItem({ auth: { uid: who.uid }, data: Object.assign({}, input, { id: items[0].id, file: undefined, ext: undefined }) }, key, base, who);
+  const promo = await B.promoAt(db, path);
+  if (promo === 'uncertain') throw new HttpsError('aborted', 'מצב הפריט בקו עוד לא ברור. רעננו ונסו שוב בעוד דקה.', { reason: 'item-uncertain' });
+  if (promo) return B.removePromo(who, Object.assign({}, input, { promoKey: promo, file: undefined, ext: undefined }), key, base);
+  const lockRef = db.doc(`yemot_state/ext-${ext}`); // בשלוחה 2: מסמך נפרד (yemot_state/line נכתב בלי merge בהקצאת מספר)
   await db.runTransaction(async (tx) => {
     const l = await tx.get(lockRef);
     if (l.exists && isLocked(l.data(), Date.now()) && l.get('lockReq') !== input.requestId) throw busy();
@@ -453,21 +489,22 @@ async function removeFile(who, input, key, base) {
   });
   const unlock = () => lockRef.set({ lockAt: null, lockReq: null, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
   try {
-    let names;
-    try { names = await listDir(ctx, '4'); } catch (e) {
+    let infos;
+    try { infos = await listDirInfo(ctx, ext); } catch (e) {
       logger.warn('yemot-line: remove file failed', { reason: 'yemot-remove-failed', code: e.code });
       throw new HttpsError('unavailable', 'ההסרה מהקו נכשלה. נסו שוב.', { reason: 'yemot-remove-failed' });
     }
-    const items = (await db.collection(ITEMS).where('path', '==', path).get()).docs.filter((d) => ON_LINE.includes(d.get('status')));
-    const mark = (extra) => Promise.all(items.map((d) => d.ref.update(Object.assign({ status: 'removed', removedAt: new Date().toISOString(), removedBy: who.uid, uncertain: false, lockAt: null, lockReq: null, updatedAt: new Date().toISOString() }, extra))));
-    if (!names.includes(input.file)) { await mark({ error: 'already-missing' }); return { ok: true, file: input.file, removed: true, duplicate: true, message: 'הקובץ כבר לא בקו.' }; }
+    const info = infos.find((f) => f.name === input.file);
+    if (!info) return { ok: true, file: input.file, removed: true, duplicate: true, backupId: null, message: 'הקובץ כבר לא בקו.' };
+    // גיבוי חובה לפני מחיקה (זורק backup-failed אם אי אפשר). ניסיון חוזר באותו requestId משתמש בגיבוי שכבר נשמר.
+    const backupId = await B.backupLegacy(ctx, db, who, input.requestId, ext, input.file, info);
     try { await deleteFiles(ctx, [path]); } catch (e) {
-      await Promise.all(items.map((d) => d.ref.update({ status: 'remove-failed', error: 'delete-' + (e.code || 'internal'), updatedAt: new Date().toISOString() })));
+      await B.backupResult(db, backupId, 'not-applied', 'delete-' + (e.code || 'internal'));
       logger.warn('yemot-line: remove file failed', { reason: 'yemot-remove-failed', code: e.code });
       throw new HttpsError('unavailable', 'ההסרה מהקו נכשלה. נסו שוב.', { reason: 'yemot-remove-failed' });
     }
-    await mark({ error: null });
-    return { ok: true, file: input.file, removed: true, duplicate: false, message: 'הקובץ הוסר מהקו.' };
+    await B.backupResult(db, backupId, 'applied', null);
+    return { ok: true, file: input.file, removed: true, duplicate: false, backupId, message: 'הקובץ הוסר מהקו. עותק שלו נשמר, ואפשר להחזיר אותו בשבוע הקרוב.' };
   } finally { await unlock(); }
 }
 
@@ -621,4 +658,4 @@ exports.listLineFiles = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 },
 Object.defineProperty(exports, 'runLineExpiry', { enumerable: false, value: runLineExpiry });
 
 // לבדיקות בלבד (לא נספרים כפונקציות): הליבה, כדי לקרוא לה בתוך תהליך הבדיקה עם voice.js מוחלף או פסק זמן קצר.
-Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, previewItem, runLineExpiry, parseWav: voice.parseWav, safePath, SLOTS, backupOpening } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, previewItem, runLineExpiry, parseWav: voice.parseWav, safePath, safeFilePath, SLOTS, backupOpening, FILE_RE, ON_LINE, context, wrap, ID_RE, YEMOT_TEMP_MAX_DAYS, LISTEN_MAX_BYTES } });

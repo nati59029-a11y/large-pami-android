@@ -178,6 +178,25 @@ function defaultLineStore() {
       const [m] = await f.getMetadata();
       return Number(m.size);
     },
+    // שלב 5: קריאה (האזנה / החזרה), רשימה ומחיקה (ניקוי לילי) – רק בתוך line_audio/ (הבדיקה בפונקציות שלמטה)
+    async get(full) {
+      const f = bucket().file(full);
+      const [ok] = await f.exists();
+      if (!ok) return null;
+      return (await f.download())[0];
+    },
+    async list() {
+      const [files] = await bucket().getFiles({ prefix: LINE_PREFIX });
+      const out = [];
+      for (const f of files) {
+        // createdAt שלנו (metadata), ואם הרשימה לא החזירה אותו – קריאה של הפרטים (באמולטור הרשימה לא כוללת metadata)
+        let m = f.metadata || {};
+        if (!(m.metadata && m.metadata.createdAt)) { try { [m] = await f.getMetadata(); } catch (e) { /* */ } }
+        out.push({ name: f.name, createdAt: (m.metadata && m.metadata.createdAt) || m.timeCreated || null });
+      }
+      return out;
+    },
+    async del(full) { await bucket().file(full).delete({ ignoreNotFound: true }); },
   };
 }
 const lineAudio = () => lineStore || (lineStore = defaultLineStore());
@@ -199,8 +218,38 @@ async function lineAudioSize(full) {
   if (typeof full !== 'string' || !full.startsWith(LINE_PREFIX) || !LINE_REL_RE.test(full.slice(LINE_PREFIX.length))) return null;
   return lineAudio().size(full);
 }
+// שלב 5 (חוזה 5.5.4, 5.5.7, 5.5.8): קריאה, רשימה ומחיקה – רק נתיב מלא בתוך line_audio/ שעובר את LINE_REL_RE. אחר ← null / לא נמחק.
+const lineOk = (full) => typeof full === 'string' && full.startsWith(LINE_PREFIX) && LINE_REL_RE.test(full.slice(LINE_PREFIX.length));
+async function readLineAudio(full) { return lineOk(full) ? lineAudio().get(full) : null; }
+async function listLineAudio() { return (await lineAudio().list()).filter((f) => f && typeof f.name === 'string' && f.name.startsWith(LINE_PREFIX)); }
+// מחיקה: רק שם שתואם בדיוק את התבנית של הניקוי (חוזה 5.5.8: מזהה של 8-80 תווים). אחר – זורק, ולא נמחק כלום.
+const PURGE_RE = /^line_audio\/(items|promos|backups)\/[A-Za-z0-9_-]{8,80}\.(wav|mp3)$/;
+async function deleteLineAudio(full) {
+  if (!PURGE_RE.test(String(full))) throw new Error('voice: refuse delete outside line_audio');
+  await lineAudio().del(full);
+}
+
 // קובץ שמע בקו (ולא קובץ טקסט שימות מקריא): לפי הסיומת.
 const isAudioFile = (file) => ['wav', 'mp3'].includes(extOf(file).toLowerCase());
+// שלב 5: קובץ טקסט שימות מקריא (הסיומת של הקול הממוחשב)
+const isTextFile = (file) => extOf(file).toLowerCase() === textExt;
+// שלב 5: קובץ תוכן שאפשר להשמיע באפליקציה (שמע, או טקסט להקראה): NNN.<wav|mp3|הטקסט> או M1000.<wav|הטקסט>
+function isListenable(file) {
+  const f = typeof file === 'string' ? file : '';
+  if (!/^(\d{3}|M1000)\.[A-Za-z0-9]{1,5}$/.test(f)) return false;
+  const e = extOf(f).toLowerCase();
+  return f.startsWith('M1000.') ? ['wav', textExt].includes(e) : ['wav', 'mp3', textExt].includes(e);
+}
+// שלב 5 (חוזה 5.5.5): הנתיב היחיד שמותר למחוק לפי שם – ivr2:<1-4>/NNN.<סיומת מהרשימה הסגורה> (כולל 000). אף פעם לא תיקייה, ext.ini, M* או שורש.
+function isSafeFilePath(p) {
+  const m = /^ivr2:([1-4])\/(\d{3}\.[A-Za-z0-9]{1,5})$/.exec(typeof p === 'string' ? p : '');
+  return !!m && isDeletableContent(m[2]);
+}
+// שלב 5: התוכן להחזרת קובץ ותיק לשמו המקורי (voice.upload) – טקסט או שמע, לפי הסיומת המקורית
+function legacyRendered(file, content) {
+  if (isTextFile(file)) return { ext: extOf(file), kind: 'text', body: String(content) };
+  return { ext: extOf(file), kind: 'audio', body: content, mime: 'audio/wav' };
+}
 
 // ---------------- גבול חודשי ומגבלה יומית ----------------
 function db() { return require('firebase-admin/firestore').getFirestore(); }
@@ -376,7 +425,8 @@ async function upload(ctx, dir, num, rendered) {
 module.exports = {
   VOICE_ENGINE, ELEVENLABS_API_KEY, VoiceError, render, preview, fromRecording, fileName, pathOf, extOf, upload, isDeletableContent, DELETABLE_EXTS,
   pickEngine, extFor, configuredEngine, quotaView, toHttps, cleanCache,
-  parseWav, readRecording, savedAudioOf, saveLineAudio, lineAudioSize, isAudioFile,
+  parseWav, readRecording, savedAudioOf, saveLineAudio, lineAudioSize, isAudioFile, readLineAudio, listLineAudio, deleteLineAudio, PURGE_RE,
+  isTextFile, isListenable, isSafeFilePath, legacyRendered,
 };
 // לבדיקות בלבד
 Object.defineProperty(module.exports, '_test', {

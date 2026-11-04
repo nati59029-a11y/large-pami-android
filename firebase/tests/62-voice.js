@@ -96,10 +96,10 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
     await bucket().deleteFiles({ prefix: 'voice_cache/' });
   });
 
-  it('index.js מייצא את previewVoice (11 פונקציות)', () => {
+  it('index.js מייצא את previewVoice (15 פונקציות, כולל שלב 5 של משימה 2026-11-04)', () => {
     const ex = require('../functions/index.js');
     assert.equal(typeof ex.previewVoice, 'function');
-    assert.equal(Object.keys(ex).length, 11);
+    assert.equal(Object.keys(ex).length, 15);
   });
 
   // ---------------- הצלחה ----------------

@@ -10,7 +10,7 @@ const state = { requests: [], files: new Map(), dirs: {}, modes: {} };
 const DEFAULT_DIRS = { '1': { '000.tts': 'מתכון ותיק' }, '3': { '000.tts': 'עדכון ותיק' }, '4': { '000.tts': 'שעות ותיקות' }, '': { 'M1000.wav': 'פתיחה מוקלטת', 'ext.ini': 'type=menu' } };
 function reset(files, dirs) {
   state.requests = [];
-  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok' };
+  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok', text: 'ok' };
   state.files = new Map(Object.entries(files || { '000.tts': 'פתיח' }));
   state.dirs = { '2': state.files };
   for (const [d, f] of Object.entries(Object.assign({}, DEFAULT_DIRS, dirs || {}))) state.dirs[d] = new Map(Object.entries(f));
@@ -48,7 +48,7 @@ function start(port) {
       } else { try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch (e) { /* */ } }
       const auth = req.headers.authorization || '';
       state.requests.push({ cmd, auth, url: req.url, body, at: Date.now() });
-      const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', DownloadFile: 'download' }[cmd];
+      const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', DownloadFile: 'download', GetTextFile: 'text' }[cmd];
       if (!key) return reply(res, 404, { responseStatus: 'ERROR', message: 'unknown command' });
       const mode = state.modes[key];
       if (mode === 'hang') return; // לא עונה אף פעם (לבדיקת פסק זמן)
@@ -67,6 +67,14 @@ function start(port) {
         if (mode === 'empty') out = Buffer.alloc(0);
         if (mode === 'short') out = out.subarray(0, Math.max(0, out.length - 1));
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' }); return res.end(out);
+      }
+      // GetTextFile (post/32055): { what } ← contents. קובץ שלא קיים – ERROR (לא מאומת איך ימות עונה). 'nocontents' – תשובה בלי contents.
+      if (cmd === 'GetTextFile') {
+        const w = parseWhat(body.what);
+        const c = w && state.dirs[w.dir].get(w.name);
+        if (c === undefined || c === null) return reply(res, 200, { responseStatus: 'ERROR', message: 'file not found' });
+        if (mode === 'nocontents') return reply(res, 200, OK({}));
+        return reply(res, 200, OK({ contents: Buffer.isBuffer(c) ? c.toString('utf8') : String(c) }));
       }
       if (cmd === 'GetIVR2Dir') {
         // כמו ימות האמיתי (נצפה 02.11.2026): path ריק מחזיר EXCEPTION. השורש = '/'

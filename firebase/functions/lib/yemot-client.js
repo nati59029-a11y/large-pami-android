@@ -97,6 +97,14 @@ async function downloadFile(ctx, path, maxBytes) {
   return buf;
 }
 
+// תוכן קובץ טקסט מהקו (GetTextFile, post/32055): { what } ← contents. (לא מאומת על קובצי tts – הדוגמה בתיעוד היא ext.ini.)
+// משימה 2026-11-04, חוזה 5.4: לגיבוי ולהאזנה של קובץ tts ותיק. חסר contents ← no-contents.
+async function readText(ctx, what) {
+  const j = await yemotCall(ctx, 'GetTextFile', { what });
+  if (typeof j.contents !== 'string') throw new YemotError('no-contents', true);
+  return j.contents;
+}
+
 // קובץ טקסט (למשל tts). דורס קובץ קיים באותו שם (post/32056).
 async function uploadText(ctx, what, contents) {
   await yemotCall(ctx, 'UploadTextFile', { what, contents: String(contents) });
@@ -125,4 +133,4 @@ async function deleteFiles(ctx, whats) {
   }
 }
 
-module.exports = { YemotError, apiBase, yemotCall, listDir, listDirInfo, downloadFile, uploadText, uploadBinary, deleteFiles };
+module.exports = { YemotError, apiBase, yemotCall, listDir, listDirInfo, downloadFile, readText, uploadText, uploadBinary, deleteFiles };

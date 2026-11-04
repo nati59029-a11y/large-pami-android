@@ -247,7 +247,9 @@ async function loadLexicon(db) {
   return s.exists ? parseLexicon(s.get('text')).entries : [];
 }
 
-async function sendPromo(request, key, base) {
+// pre (שלב 5, רק מ-restoreLineItem בתוך השרת – לא מהטלפון): { v, kind, engine, rendered?, restoredFrom, title? }.
+// התוכן כבר נבדק ונטען מהרשומה המקורית; promoKey = 'rst_'+requestId. כל השאר (נעילה, מספור, כפילות, בלי צינתוק) – אותו מסלול בדיוק.
+async function sendPromo(request, key, base, pre) {
   const who = await requireStaff(request);
   const input = inputObject(request);
   const cfg = readCfg();
@@ -258,11 +260,11 @@ async function sendPromo(request, key, base) {
   const todayView = async () => (isEmp ? usageView(await usageRef.get(), today, cfg.daily) : { day: today, used: null, limit: null, allowed: true });
 
   // מצב בלבד: האם אפשר עוד לשלוח צינתוק היום. בלי פנייה לימות.
-  if (input.statusOnly === true) return { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
+  if (input.statusOnly === true && !pre) return { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
 
   // מבצע מוקלט: יש audio. אחרת – הנוסח (ההתנהגות הקיימת, בלי שינוי)
-  const isRec = input.audio !== undefined && input.audio !== null;
-  const v = isRec ? validateRecording(input, today, cfg) : validateSend(input, today, cfg);
+  const isRec = pre ? pre.kind === 'audio' : input.audio !== undefined && input.audio !== null;
+  const v = pre ? pre.v : isRec ? validateRecording(input, today, cfg) : validateSend(input, today, cfg);
   if (input.manual !== undefined && typeof input.manual !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
   const manual = input.manual === true;
   if (manual) {
@@ -275,7 +277,7 @@ async function sendPromo(request, key, base) {
   if (input.origin !== undefined && input.origin !== 'builder') throw bad('bad-input', 'קלט לא תקין');
   if (isEmp && v.withTzintuk && input.origin === 'builder') throw new HttpsError('permission-denied', 'רק מנהל יכול לשלוח צינתוק. אפשר לשלוח לקו בלי צינתוק.', { reason: 'tzintuk-manager-only' });
   // מנוע הקול: בלי engine = המוגדר בשרת (הקול המשוכפל); engine=tts = המשתמש בחר "שלח בקול הממוחשב" אחרי כשל/תקרה
-  const engine = isRec ? 'recording' : voice.pickEngine(input.engine);
+  const engine = pre ? pre.engine : isRec ? 'recording' : voice.pickEngine(input.engine);
   if (!engine) throw bad('bad-input', 'קלט לא תקין');
   if (v.warnings.length) logger.warn('yemot: request warning', { warnings: v.warnings, requestId: v.requestId });
   if (!key) throw new HttpsError('failed-precondition', 'הקו הטלפוני עוד לא מחובר בשרת. פנו למנהל.', { reason: 'no-key' });
@@ -286,7 +288,8 @@ async function sendPromo(request, key, base) {
   }
   const promoRef = db.doc(`${PROMOS}/${v.promoKey}`);
   // הנוסח שיוקרא: אחרי מילון ההגייה. ברשומה נשמר הנוסח לפני המילון (text) וגם אחריו (spoken).
-  const spoken = isRec ? null : applyLexicon(v.text, await loadLexicon(db));
+  // החזרה (שלב 5) עם שמע שמור של נוסח: אותו שמע בדיוק, בלי הקראה ובלי מילון (spoken כמו במקור)
+  const spoken = isRec ? null : pre && pre.rendered ? pre.spoken || null : applyLexicon(v.text, await loadLexicon(db));
   // ההקראה עצמה (שעולה כסף בקול המשוכפל) נוצרת רק כשבאמת מעלים – שלב 2 למטה. אותו נוסח שכבר בקו = בלי הקראה חדשה.
   let rendered = null;
 
@@ -315,7 +318,8 @@ async function sendPromo(request, key, base) {
     const who2 = { withTzintuk: v.withTzintuk, byUid: who.uid, byRole: who.role, day: today, updatedAt: now };
     if (v.source) who2.source = v.source;
     if (manual) who2.manual = true;
-    if (isRec) Object.assign(who2, { kind: 'audio', title: v.title, durationSec: v.durationSec, engine: 'recording' });
+    if (isRec) Object.assign(who2, { kind: 'audio', title: v.title, durationSec: v.durationSec, engine: pre ? pre.engine : 'recording' });
+    if (pre) Object.assign(who2, { restoredFrom: pre.restoredFrom }, pre.title ? { title: pre.title } : {});
     if (!upload && !doTz) {
       tx.update(promoRef, Object.assign(who2, { until: v.until, lastRequestId: v.requestId, lastResult: 'done' },
         x.status === 'remove-failed' && v.until >= today ? { status: 'live', error: null } : {}));
@@ -382,7 +386,8 @@ async function sendPromo(request, key, base) {
         return new HttpsError('unavailable', 'העלאת ההודעה לקו נכשלה' + (v.withTzintuk ? ', ולא נשלח צינתוק' : '') + '. נסו שוב מאוחר יותר.', { reason: 'yemot-upload-failed' });
       };
       // ההקראה (דרך voice.js). כשל או תקרה בקול המשוכפל: שגיאה מסודרת, המכסה מוחזרת, ולא נשלח כלום (גם לא צינתוק).
-      if (isRec) rendered = voice.fromRecording(v.buf);
+      if (pre && pre.rendered) rendered = pre.rendered;
+      else if (isRec) rendered = voice.fromRecording(v.buf);
       else try { rendered = await voice.render(spoken, { engine }); } catch (e) {
         if (!(e instanceof voice.VoiceError)) throw e;
         if (usageDay) await refundUsage(db, who.uid, usageDay);
@@ -553,6 +558,8 @@ async function nightly(opts) {
   try { out.line = await require('./yemot-line').runLineExpiry(opts); } catch (e) { logger.error('yemot: line expiry failed', { reason: 'internal', name: e && e.name }); out.line = { error: 'internal' }; }
   // מטמון השמע של הקול המשוכפל: מחיקת קבצים ישנים (VOICE_CACHE_HOURS). לא נוגע בקו.
   if (!(opts && opts.skipCache)) out.voiceCache = await voice.cleanCache();
+  // שמע שמור של הודעות בקו (line_audio/): מחיקה 8 ימים אחרי הירידה (משימה 2026-11-04, חוזה 5.5.8). לא נוגע בקו ולא ב-voice_cache/.
+  try { out.lineAudio = await require('./yemot-board').cleanLineAudio(opts); } catch (e) { logger.error('yemot: line audio clean failed', { reason: 'internal', name: e && e.name }); out.lineAudio = { error: 'internal' }; }
   return out;
 }
 exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await nightly(); });
@@ -561,5 +568,5 @@ exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone:
 Object.defineProperty(exports, 'runExpiry', { enumerable: false, value: runExpiry });
 Object.defineProperty(exports, '_test', { enumerable: false, value: { israelDay, addDays, cleanText, validDay } });
 // משותף ל-yemot-line.js, ולבדיקות שקוראות לליבה בתוך התהליך (לא נספרים כפונקציות)
-Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS, _resetSeed() { seedDone = false; } } });
+Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS, staleRe, holdsPath, effectiveUntil, isLocked, readCfg, heDate, _resetSeed() { seedDone = false; } } });
 Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo, nightly, staleRe } });
