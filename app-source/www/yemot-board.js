@@ -32,21 +32,21 @@ const refAttr=ref=>esc(JSON.stringify(ref));
 const tag=(c,t)=>`<span class="tag ${c}">${t}</span>`; // תגית סטנדרטית של האפליקציה
 function row(slot,x,mgr){
  const legacy=x.origin==='legacy',ttl=x.title||x.file||'ללא שם',k=keyOf(x.ref);
- const tags=[legacy?tag('t1','קובץ ותיק'):tag('t2','מהאפליקציה'),x.kind==='audio'?tag('t3','הקלטה'):'',x.uncertain?tag('t4','לא ודאי'):''].join('');
+ const tags=[legacy?tag('','קובץ ותיק'):tag('t2','מהאפליקציה'),x.kind==='audio'?tag('t2','הקלטה'):'',x.uncertain?tag('t1','לא ודאי'):''].join('');
  const meta=[legacy&&x.file?`<span dir="ltr">${esc(x.file)}</span>`:'',x.createdAt?esc(fdt(x.createdAt)):'',x.byRole?(x.byRole==='manager'?'מנהל':'עובד'):'',x.until?'יורד אחרי '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
  const a=x.actions||{};
  const btns=[x.listen&&x.listen!=='none'?`<button class="btn s g" data-a="ybListen" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}">האזן</button>`:''];
  if(mgr){ // הסתרה היא נוחות בלבד; השרת דוחה עובד
   if(a.extend)btns.push(`<button class="btn s g" data-a="ybExtend" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-u="${esc(x.until||'')}">האריך תוקף</button>`);
   if(a.remove)btns.push(`<button class="btn s g" data-a="ybRemove" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-l="${legacy?1:0}">הורד</button>`)}
- return`<div class="li${legacy?'':' inc'}" style="cursor:default" data-k="${esc(k)}"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
+ return`<div class="li" style="cursor:default" data-k="${esc(k)}"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
 function rec(slot,x,mgr){
  const ttl=x.title||'ללא שם',rs=x.restore||{};
- const tags=[tag('t1',WHY[x.downReason]||'ירדה'),x.kind==='audio'?tag('t3','הקלטה'):'',x.hasSavedAudio?'':tag('t4','ללא שמע שמור')].join('');
+ const tags=[tag('',WHY[x.downReason]||'ירדה'),x.kind==='audio'?tag('t2','הקלטה'):'',x.hasSavedAudio?'':tag('t1','ללא שמע שמור')].join('');
  const meta=[x.downAt?esc(fdt(x.downAt)):'',x.until?'היה עד '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
  const btns=[`<button class="btn s g" data-a="ybListen" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}">האזן</button>`];
  if(mgr&&rs.allowed)btns.push(`<button class="btn s g" data-a="ybRestore" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-nu="${rs.needsUntil?1:0}" data-c="${rs.costNote?1:0}">החזר לקו</button>`);
- return`<div class="li exp" style="cursor:default"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
+ return`<div class="li" style="cursor:default"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
 function playerHtml(){if(!P)return'';
  const body=P.mode==='audio'?`<audio controls ${P.fresh?'autoplay ':''}src="${P.url}" style="width:100%"></audio>`:`<p class="note" style="margin:6px 0 0">${esc(P.text||'')}</p><p class="note" style="margin:4px 0 0">הקראה בטלפון בלבד (קירוב): זה לא השמע של הקו.</p>`;
  return`<div class="card" id="ybPlayer"><div class="sec" style="margin:0 0 8px"><h3>${esc(P.title)}</h3><button class="btn s g" data-a="ybStop">סגור</button></div>${body}</div>`}
