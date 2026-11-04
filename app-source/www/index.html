@@ -1459,7 +1459,7 @@ async function rqFlush(){const q=rqL();if(!q.length)return;rqSet([]);for(const i
 ACT.inbRe=el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)return;dlg(`<h3>בקשת צילום חדש</h3><p class="note">העובד יראה את הבקשה ברשימת ההוצאות שלו. כשישלח צילום, הוא יחליף את הצילום הנוכחי של ההוצאה הזו. הסכום והפרטים לא משתנים.</p><form data-f="inbReF"><input type="hidden" name="id" value="${esc(it.id)}">${fld('מה לבקש מהעובד','n',(it.rq&&it.rq.n)||'הצילום חתוך או לא ברור. צלם שוב את כל הדף.','text','maxlength="200" autocomplete="off"')}<div class="row"><button class="btn grow">שלח בקשה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.inbReF=async f=>{const x=fd(f),it=S.inbox.find(z=>z.id===x.id);if(!it)return closeDlg();if(FRM.inbReF.b)return;FRM.inbReF.b=1;const n=s_(x.n).slice(0,200);
  let r;try{r=await inbSt(it.id,'rephoto',n)}catch(e){toast(e.offline?e.message:'הבקשה לא נשלחה: '+e.message);return}finally{FRM.inbReF.b=0}
- const ow=gv(r,'owner');if(ow)it.ow=ow;if(!it.ow){toast('לא נמצא מי שלח את ההוצאה בענן. הצילום החדש לא יתקבל');}
+ rqSet(rqL().filter(z=>z!==it.id));/* בקשה חדשה גוברת על סגירה ישנה שממתינה בתור */const ow=gv(r,'owner');if(ow)it.ow=ow;if(!it.ow){toast('לא נמצא מי שלח את ההוצאה בענן. הצילום החדש לא יתקבל');}
  it.rq={n,at:new Date().toISOString()};delete it.rph;save();closeDlg();rerender();toast('הבקשה נשלחה לעובד')};
 ACT.inbOk=async el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)return;const d=it.d,c=cat(d.cat);
  if(it.rq&&!el.dataset.rq)return ask('ביקשת מהעובד צילום חדש, והוא עוד לא הגיע. לאשר עם הצילום הנוכחי?',()=>{ACT.inbOk({dataset:{id:it.id,rq:'1',ok:el.dataset.ok||''}})},'אשר בכל זאת');
