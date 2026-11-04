@@ -141,3 +141,6 @@ Object.assign(exports, require('./yemot'));
 
 // תוכן שלוחות הקו (שלוחות 1, 3, 4 והפתיחה): publishLineItem, removeLineItem, getLineState
 Object.assign(exports, require('./yemot-line'));
+
+// "ההודעות שבקו" (משימה 2026-11-04, שלב 5): getLineBoard, getLineAudio (עובד/מנהל), extendLineItem, restoreLineItem (מנהל)
+Object.assign(exports, require('./yemot-board'));

@@ -53,6 +53,58 @@ async function listDir(ctx, path) {
   return (Array.isArray(j.files) ? j.files : []).map((f) => String((f && f.name) || '')).filter(Boolean);
 }
 
+// כמו listDir, אבל עם פרטי הקובץ (משימה 2026-11-04, חוזה 5.4): { name, size, duration, date }. שדה שחסר = null.
+// (לא מאומת) היחידה של size בקו האמיתי – לפי התיעוד (post/32052) מוחזר size; ההנחה: בתים.
+async function listDirInfo(ctx, path) {
+  const p = String(path);
+  const j = await yemotCall(ctx, 'GetIVR2Dir', { path: p === '' ? '/' : p });
+  const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
+  return (Array.isArray(j.files) ? j.files : []).map((f) => ({
+    name: String((f && f.name) || ''), size: num(f && f.size), duration: num(f && f.duration), date: f && typeof f.date === 'string' ? f.date : null,
+  })).filter((f) => f.name);
+}
+
+// הורדת קובץ מהקו (DownloadFile, post/32032): התגובה היא תוכן הקובץ (לא JSON). 404 = "לא קיים או שגיאה" – אי אפשר להבחין, ולכן המתקשר עוצר.
+// המפתח רק בכותרת. תשובת JSON (שגיאה של ימות) ← bad-reply. מעל maxBytes ← too-big. ריק ← empty. (לא מאומת בקו: POST עם JSON והפורמט שחוזר.)
+async function downloadFile(ctx, path, maxBytes) {
+  let r;
+  try {
+    r = await fetch(ctx.base + 'DownloadFile', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', authorization: ctx.key }, body: JSON.stringify({ path }), signal: AbortSignal.timeout(ctx.timeoutMs),
+    });
+  } catch (e) { throw new YemotError(netError(e).code, false); }
+  const drop = () => { try { r.body && r.body.cancel(); } catch (e) { /* */ } };
+  if (r.status === 404) { drop(); throw new YemotError('not-found-or-error', false); }
+  if (!r.ok) { drop(); throw new YemotError('http-' + r.status, false); }
+  if (/json/i.test(r.headers.get('content-type') || '')) { drop(); throw new YemotError('bad-reply', false); }
+  const len = Number(r.headers.get('content-length'));
+  if (Number.isFinite(len) && len > maxBytes) { drop(); throw new YemotError('too-big', false); }
+  // קריאה בחלקים: עוצרים ברגע שעוברים את maxBytes (גם כשאין content-length)
+  const parts = []; let total = 0;
+  try {
+    const reader = r.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > maxBytes) { try { await reader.cancel(); } catch (e) { /* */ } throw new YemotError('too-big', false); }
+      parts.push(Buffer.from(value));
+    }
+  } catch (e) { if (e instanceof YemotError) throw e; throw new YemotError(netError(e).code, false); }
+  const buf = Buffer.concat(parts);
+  if (!buf.length) throw new YemotError('empty', false);
+  if (buf[0] === 0x7b) { try { if (JSON.parse(buf.toString('utf8')).responseStatus) throw new YemotError('bad-reply', false); } catch (e) { if (e instanceof YemotError) throw e; } }
+  return buf;
+}
+
+// תוכן קובץ טקסט מהקו (GetTextFile, post/32055): { what } ← contents. (לא מאומת על קובצי tts – הדוגמה בתיעוד היא ext.ini.)
+// משימה 2026-11-04, חוזה 5.4: לגיבוי ולהאזנה של קובץ tts ותיק. חסר contents ← no-contents.
+async function readText(ctx, what) {
+  const j = await yemotCall(ctx, 'GetTextFile', { what });
+  if (typeof j.contents !== 'string') throw new YemotError('no-contents', true);
+  return j.contents;
+}
+
 // קובץ טקסט (למשל tts). דורס קובץ קיים באותו שם (post/32056).
 async function uploadText(ctx, what, contents) {
   await yemotCall(ctx, 'UploadTextFile', { what, contents: String(contents) });
@@ -81,4 +133,4 @@ async function deleteFiles(ctx, whats) {
   }
 }
 
-module.exports = { YemotError, apiBase, yemotCall, listDir, uploadText, uploadBinary, deleteFiles };
+module.exports = { YemotError, apiBase, yemotCall, listDir, listDirInfo, downloadFile, readText, uploadText, uploadBinary, deleteFiles };
