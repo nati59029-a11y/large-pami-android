@@ -92,6 +92,7 @@ function vMain(){const m=isA();
  ${opt('3','שלוחה 3 · עדכונים','הקלדה או הקלטה · החדש מושמע ראשון')}
  ${m?`${opt('4','שלוחה 4 · שעות וכתובת','הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}`:''}`}}
 function listHtml(slot){
+ if(window.ylBoard)return ylBoard.html(slot); // yemot-board.js: "בקו עכשיו" + "ירדו בשבוע האחרון"
  const L=Y.st&&Y.st.r&&Y.st.r.slots&&Y.st.r.slots[slot];if(!L)return'<p class="note">טוען…</p>';
  if(!L.length)return'<p class="note">עוד לא נשלחו פריטים דרך האפליקציה. קבצים שהיו בקו לפני כן נשארים כמו שהם.</p>';
  return L.map((x,i)=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.title||x.file||'ללא שם')}</b><small>${esc(fdt(x.createdAt))}${x.byRole?' · '+(x.byRole==='manager'?'מנהל':'עובד'):''}${i===0?' · מושמע ראשון':''}${x.status==='remove-failed'?' · ההסרה נכשלה':''}</small></div>${isA()?`<button class="btn s r" data-a="ylRm" data-id="${esc(x.id)}">הסר</button>`:''}</div>`).join('')}
@@ -103,10 +104,12 @@ function paintVoice(v){const el=document.getElementById('ylVoice'),q=v&&v.quota;
 function paintList(slot){const el=document.getElementById('ylList');if(el)el.innerHTML=listHtml(slot)}
 async function ylLoad(a,force){
  if(a===''&&isA()){try{const s=await state(force);if(here(''))paintVoice(s.r&&s.r.voice)}catch(e){}return} // מנהל: מצב התקרה של הקול האנושי
- if(!here(a)||!['1','3','4','open','lex'].includes(a))return;
+ if(!here(a)||!['1','2','3','4','open','lex'].includes(a))return;
  const el=document.getElementById('ylList'),fail=e=>{if(here(a)&&el)el.innerHTML=`<p class="note" style="color:var(--bad)">לא הצלחנו לטעון: ${esc(errMsg(e))}</p>`};
  try{
-  if(a==='4'){const r=await call('listLineFiles',{ext:'4'});Y.files=r&&r.files||[];if(here(a))paintFiles();return}
+  if(window.ylBoard&&ylBoard.slots[a])ylBoard.load(a,force); // yemot-board.js טוען רק כשפותחים את השלוחה
+  if(a==='2')return;
+  if(a==='4'&&!window.ylBoard){const r=await call('listLineFiles',{ext:'4'});Y.files=r&&r.files||[];if(here(a))paintFiles();return}
   const s=await state(force);if(!here(a))return;
   if(a==='1')paintList('recipes');
   if(a==='3')paintList('updates');
@@ -146,7 +149,8 @@ function vPromos(){const rows=promoRows(),m=isA();
  return{t:'מבצעים',s:'שלוחה 2',h:`<div class="card"><p class="note" style="margin:0">בוחרים מבצע מהמדף, מתקנים את הנוסח, שומעים ושולחים. ${m?'מנהל יכול לבחור גם צינתוק.':'השליחה היא בלי צינתוק.'}</p></div>
  <div class="sec"><h3>המבצעים במדף</h3></div>
  ${rows.length?rows.map(x=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.it.n)}</b><small>${esc(offerTxt(x.it))}${x.it.d?' · '+esc(x.it.d):''}</small></div><button class="btn s" data-a="ylPromo" data-k="${x.k}" data-i="${x.i}">שלח לקו…</button></div>`).join(''):'<p class="note">אין עדיין מבצעים במדף. בונים אותם במסך "מחירים ומבצעים למדף", "מבצע למדף".</p>'}
- ${m?`<div class="sec"><h3>מבצע ידני</h3></div><div class="card"><p class="note" style="margin:0 0 8px">מבצע בלי בסיס במדף. כתבו את הנוסח שיוקרא.</p>${field('m','הנוסח',4)}${sendBtn('m','manual')}</div>`:''}`}}
+ ${m?`<div class="sec"><h3>מבצע ידני</h3></div><div class="card"><p class="note" style="margin:0 0 8px">מבצע בלי בסיס במדף. כתבו את הנוסח שיוקרא.</p>${field('m','הנוסח',4)}${sendBtn('m','manual')}</div>`:''}
+ <div id="ylList">${window.ylBoard?ylBoard.html('promos'):''}</div>`}}
 ACT.ylPromo=el=>{const k=el.dataset.k,i=+el.dataset.i,it=SH&&SH[k]&&SH[k].items&&SH[k].items[i];if(!it){toast('המבצע לא נמצא');return}
  if(!ID.test(it.ym||'')){it.ym='pk'+rand();shTouch(k)} // promoKey קבוע לכל מבצע (כמו בחלון "שלח לקו" הקיים), כך שהקובץ בקו מוחלף ולא מתווסף
  const today=isoDay(new Date());let until=it.vf||'';if(until&&until<today)until='';
@@ -213,7 +217,7 @@ function vHours(){const d=getD(),tmp=!!d.ht;
  <div class="sec"><h3>הקבצים בשלוחה 4</h3><button class="btn s g" data-a="ylReload">רענן</button></div><div id="ylList">${filesHtml()}</div>`}}
 ACT.ylTemp=el=>{getD().ht=el.dataset.v==='1';save();redraw()};
 ACT.ylReload=()=>{Y.files=null;const el=document.getElementById('ylList');if(el)el.innerHTML='<p class="note">טוען…</p>';ylLoad('4',true)};
-function filesHtml(){const F=Y.files;if(!F)return'<p class="note">טוען…</p>';if(!F.length)return'<p class="note">אין קבצי תוכן בשלוחה.</p>';
+function filesHtml(){if(window.ylBoard)return ylBoard.html('hours');const F=Y.files;if(!F)return'<p class="note">טוען…</p>';if(!F.length)return'<p class="note">אין קבצי תוכן בשלוחה.</p>';
  return F.map((x,i)=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b dir="ltr" style="text-align:right">${esc(x.name)}</b><small>${x.legacy?'קובץ ותיק (לא הועלה מהאפליקציה)':esc((x.item&&x.item.title)||'')}${x.item&&x.item.temporary?' · זמנית עד '+esc(heDate(x.item.until)):''}${i===0?' · מושמע ראשון':''}</small></div>${x.deletable===false?'<small class="note">לא ניתן למחוק מהאפליקציה</small>':`<button class="btn s r" data-a="ylRmF" data-n="${esc(x.name)}" data-l="${x.legacy?1:0}">מחק</button>`}</div>`).join('')}
 function paintFiles(){const el=document.getElementById('ylList');if(el)el.innerHTML=filesHtml()}
 ACT.ylRmF=el=>{const n=el.dataset.n,leg=el.dataset.l==='1';
@@ -229,7 +233,7 @@ async function doRemove(p,a){
 // הודעת פתיחה (מנהל)
 function vOpen(){return{t:'הודעת פתיחה',s:'מנהל',h:`<div class="card"><p class="note" style="margin:0 0 6px" id="ylOpenNote">טוען את הנוסח הנוכחי…</p>
  <p class="note" style="margin:0 0 10px;color:var(--warn);font-weight:700">זו ההודעה שנשמעת בכניסה לקו. כתבו אותה במלואה, כולל הוראות התפריט (איזה מקש לאיזו שלוחה).</p>
- ${field('o','נוסח הפתיחה',7)}${sendBtn('o','opening','החלף את הפתיחה…')}</div><div id="ylList"></div>`}}
+ ${field('o','נוסח הפתיחה',7)}${sendBtn('o','opening','החלף את הפתיחה…')}</div><div id="ylList">${window.ylBoard?ylBoard.html('opening'):''}</div>`}}
 // מילון הגייה (מנהל)
 function vLex(){return{t:'מילון הגייה',s:'מנהל',h:`<div class="card"><p class="note" style="margin:0 0 10px">כל שורה: <b dir="ltr">מילה=הגייה</b>. שורה שמתחילה ב-# היא הערה. למשל: <span dir="ltr">במבה=במבָּה</span>. המילון חל על כל מה שנשלח לקו, וגם על "שמע קודם".</p>
  ${field('x','המילון',10)}<p class="note" id="ylLexInfo" style="margin:0 0 10px"></p>
@@ -321,4 +325,5 @@ function cVoiceChoice(c,e){
    c.engine='tts';c.busy=true;Y.sending=true;
    try{await cSend(c)}catch(err){c.busy=false;c.engine=null;err.userMsg=errMsg(err);throw err}finally{Y.sending=false}},
   onLater:()=>{if(Y.c===c)Y.c=null}})}
+window.ylApi={call,errMsg,rand,isoDay,addDays,he,here,toast:m=>toast(m),isMgr:()=>isA()}; // לשימוש yemot-board.js
 })();
