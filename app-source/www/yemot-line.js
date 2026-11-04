@@ -15,7 +15,7 @@ const MSG={ // הודעות לפי reason מהשרת (גיבוי, אם ההוד�
  'tzintuk-manager-only':'רק מנהל יכול לשלוח צינתוק. אפשר לשלוח לקו בלי צינתוק.','manual-manager-only':'רק מנהל יכול להוסיף מבצע ידני.',
  'slot-manager-only':'רק מנהל יכול לשנות את השלוחה הזו.','manager-only':'הפעולה הזו מותרת למנהל בלבד.','bad-slot':'השלוחה לא מוכרת.',
  'empty-text':'הנוסח ריק. כתבו מה יוקרא בקו.','text-too-long':'הנוסח ארוך מדי.','bad-audio':'ההקלטה לא בפורמט הנכון. הקליטו שוב.','audio-too-long':'ההקלטה ארוכה מדי.',
- 'audio-not-allowed':'אפשר לשלוח הקלטה רק לשלוחת העדכונים.','item-not-found':'הפריט לא נמצא (ייתכן שכבר הוסר).','busy':'פעולה אחרת על הקו בטיפול. נסו שוב בעוד רגע.',
+ 'audio-not-allowed':'אי אפשר לשלוח הקלטה לשלוחה הזו.','date-required':'חובה לבחור תאריך הורדה.','tzintuk-not-with-recording':'אי אפשר לשלוח צינתוק עם הקלטה.','item-not-found':'הפריט לא נמצא (ייתכן שכבר הוסר).','busy':'פעולה אחרת על הקו בטיפול. נסו שוב בעוד רגע.',
  'line-full':'אין מקום לעוד קבצים בשלוחה. פנו למנהל.','yemot-upload-failed':'ההעלאה לקו נכשלה. נסו שוב מאוחר יותר.',
  'yemot-uncertain':'לא בטוח שההעלאה הצליחה. בדקו ברשימה בעוד דקה לפני שליחה חוזרת.','yemot-remove-failed':'ההסרה מהקו נכשלה. נסו שוב.',
  'yemot-list-failed':'לא הצלחנו לקרוא את השלוחה מהקו. נסו שוב.','bad-file':'אפשר למחוק מהאפליקציה רק קובצי תוכן בשלוחה 4.',
@@ -32,10 +32,15 @@ const addDays=(iso,n)=>{const d=new Date(iso+'T12:00:00Z');d.setUTCDate(d.getUTC
 const heDate=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(iso||'');return m?`${+m[3]}.${+m[2]}`:''};
 const fdt=iso=>{const d=new Date(iso);return isNaN(d)?'':d.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})};
 const fsec=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
-const Y={d:{},uid:null,st:null,files:null,mode3:'type',rec:null,c:null,sending:false,force:false,scanning:false};
+const Y={d:{},uid:null,st:null,files:null,modes:{},rec:null,recBusy:false,c:null,sending:false,force:false,scanning:false};
 function getD(){const u=(SY&&SY.uid)||'';if(Y.uid===u)return Y.d;Y.uid=u;try{const o=JSON.parse(localStorage.getItem(DK)||'null');Y.d=o&&o.uid===u&&o.d&&typeof o.d==='object'?o.d:{}}catch(e){Y.d={}}return Y.d}
 function save(){try{localStorage.setItem(DK,JSON.stringify({uid:Y.uid,d:Y.d}))}catch(e){}}
 const lim=()=>Object.assign({},DEF,(Y.st&&Y.st.r&&Y.st.r.limits)||{});
+const SLACT={recipes:'1',promos:'2',updates:'3',hours:'4',opening:'open'}; // שלוחה (שם בשרת) ← מסך באפליקציה
+const recMax=slot=>{const m=lim().recordSecBySlot;return(m&&+m[slot])||(slot==='opening'?60:lim().recordSec)};
+const canRec=slot=>{const c=lim().canRecord;if(c&&c[slot]===false)return false;return isA()||['recipes','promos','updates'].includes(slot)}; // נוחות בלבד: ההרשאה נאכפת בשרת
+const modeOf=slot=>Y.modes[slot]||'type';
+const modeChips=slot=>canRec(slot)?`<div class="chips" role="radiogroup" style="margin-bottom:12px">${[['type','הקלדה'],['rec','הקלטה']].map(([v,t])=>`<button type="button" class="chip ${modeOf(slot)===v?'on':''}" role="radio" aria-checked="${modeOf(slot)===v}" data-a="ylMode" data-s="${slot}" data-v="${v}">${t}</button>`).join('')}</div>`:'';
 // ---------- שרת ----------
 async function call(name,data,ms){
  const t=await tok(),ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),ms||75000);let r,j=null;
@@ -81,7 +86,7 @@ window.ylTile=()=>`<button class="tile" data-a="go" data-v="yl" style="border-co
 ACT.ylGo=el=>go('yl',el.dataset.v);
 // ---------- המסכים ----------
 V.yl=a=>{a=a||'';
- if(Y.rec&&Y.rec.on&&a!=='3')recDiscard();
+ if(Y.rec&&Y.rec.on&&a!==Y.rec.act)recDiscard();
  if(MG.includes(a)&&!isA())return{t:'שלוחות הקו',h:'<div class="empty">הפעולה הזו מותרת למנהל בלבד.</div>'};
  getD();setTimeout(()=>ylLoad(a),0);
  return({'':vMain,'1':vRecipes,'2':vPromos,'3':vUpdates,'4':vHours,open:vOpen,lex:vLex}[a]||vMain)()};
@@ -103,10 +108,11 @@ function paintVoice(v){const el=document.getElementById('ylVoice'),q=v&&v.quota;
 function paintList(slot){const el=document.getElementById('ylList');if(el)el.innerHTML=listHtml(slot)}
 async function ylLoad(a,force){
  if(a===''&&isA()){try{const s=await state(force);if(here(''))paintVoice(s.r&&s.r.voice)}catch(e){}return} // מנהל: מצב התקרה של הקול האנושי
- if(!here(a)||!['1','3','4','open','lex'].includes(a))return;
+ if(!here(a)||!['1','2','3','4','open','lex'].includes(a))return;
  const el=document.getElementById('ylList'),fail=e=>{if(here(a)&&el)el.innerHTML=`<p class="note" style="color:var(--bad)">לא הצלחנו לטעון: ${esc(errMsg(e))}</p>`};
  try{
-  if(a==='4'){const r=await call('listLineFiles',{ext:'4'});Y.files=r&&r.files||[];if(here(a))paintFiles();return}
+  if(a==='4'){state(force).catch(()=>{}); // מגבלות ההקלטה מהשרת
+   const r=await call('listLineFiles',{ext:'4'});Y.files=r&&r.files||[];if(here(a))paintFiles();return}
   const s=await state(force);if(!here(a))return;
   if(a==='1')paintList('recipes');
   if(a==='3')paintList('updates');
@@ -117,9 +123,9 @@ async function ylLoad(a,force){
 // שלוחה 1 – מתכונים
 function vRecipes(){
  return{t:'מתכונים',s:'שלוחה 1',h:`<div class="card"><p class="note" style="margin:0 0 10px">כותבים את המתכון, או סורקים אותו מצילום (גם כתב יד). אפשר לתקן לפני השליחה. המתכון החדש יושמע ראשון.</p>
- <label class="btn g w" style="cursor:pointer;margin-bottom:6px">סרוק מתכון מצילום<input type="file" accept="image/*" multiple data-c="ylscan" hidden></label>
+ ${modeChips('recipes')}${modeOf('recipes')==='rec'&&canRec('recipes')?recHtml('recipes'):`<label class="btn g w" style="cursor:pointer;margin-bottom:6px">סרוק מתכון מצילום<input type="file" accept="image/*" multiple data-c="ylscan" hidden></label>
  <p class="note" id="ylScanMsg" aria-live="polite" style="margin:0 0 10px">${getD().rs==='scan'&&getD().r?'המתכון נסרק מצילום. בדקו ותקנו לפני השליחה.':'אפשר לבחור עד 2 תמונות (למשל שני עמודים).'}</p>
- ${field('r','נוסח המתכון (שם, מצרכים, אופן ההכנה)',9)}${sendBtn('r','recipes')}</div>
+ ${field('r','נוסח המתכון (שם, מצרכים, אופן ההכנה)',9)}${sendBtn('r','recipes')}`}</div>
  <div class="sec"><h3>המתכונים שבקו</h3></div><div id="ylList">${listHtml('recipes')}</div>`}}
 const scanImgs=async fs=>{const o=[];for(const f of fs){const du=await shImg(f,1800);o.push({inline_data:{mime_type:'image/jpeg',data:du.split(',')[1]}})}return o};
 CHG.ylscan=el=>{const all=[...el.files];el.value='';if(!all.length||Y.scanning)return;const fs=all.slice(0,2);
@@ -144,6 +150,7 @@ const offerTxt=it=>it.kind==='A'?`${it.k} ב-${shN(it.tot)} ₪`:it.kind==='B'?`
 function vPromos(){const rows=promoRows(),m=isA();
  if(typeof shSync==='function'&&typeof shOn==='function'){try{if(shOn())shSync().then(ch=>{if(ch&&here('2')&&!typing())redraw()}).catch(()=>{})}catch(e){}}
  return{t:'מבצעים',s:'שלוחה 2',h:`<div class="card"><p class="note" style="margin:0">בוחרים מבצע מהמדף, מתקנים את הנוסח, שומעים ושולחים. ${m?'מנהל יכול לבחור גם צינתוק.':'השליחה היא בלי צינתוק.'}</p></div>
+ <div class="sec"><h3>מבצע מוקלט</h3></div><div class="card"><p class="note" style="margin:0 0 10px">הקלטה בקול שלכם, בלי צינתוק. בשליחה בוחרים מתי להוריד אותה מהקו.</p>${recHtml('promos')}</div>
  <div class="sec"><h3>המבצעים במדף</h3></div>
  ${rows.length?rows.map(x=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.it.n)}</b><small>${esc(offerTxt(x.it))}${x.it.d?' · '+esc(x.it.d):''}</small></div><button class="btn s" data-a="ylPromo" data-k="${x.k}" data-i="${x.i}">שלח לקו…</button></div>`).join(''):'<p class="note">אין עדיין מבצעים במדף. בונים אותם במסך "מחירים ומבצעים למדף", "מבצע למדף".</p>'}
  ${m?`<div class="sec"><h3>מבצע ידני</h3></div><div class="card"><p class="note" style="margin:0 0 8px">מבצע בלי בסיס במדף. כתבו את הנוסח שיוקרא.</p>${field('m','הנוסח',4)}${sendBtn('m','manual')}</div>`:''}`}}
@@ -154,43 +161,48 @@ ACT.ylPromo=el=>{const k=el.dataset.k,i=+el.dataset.i,it=SH&&SH[k]&&SH[k].items&
   text:promoText(it,until),max:lim().promo,untilReq:true,until,maxDays:lim().promoMaxDays,untilLabel:'מתי להוריד את המבצע מהקו?',retext:true,tzChoice:isA()})};
 function promoText(it,until){return window.ymText(it,until)} // נוסח אוטומטי: אותה פונקציה בדיוק כמו בחלון "שלח לקו" (yemot-promo.js), כדי שלא יהיו שני נוסחים
 // שלוחה 3 – עדכונים
-function vUpdates(){const rec=Y.mode3==='rec',L=lim();
- const chips=[['type','הקלדה'],['rec','הקלטה']].map(([v,t])=>`<button type="button" class="chip ${Y.mode3===v?'on':''}" role="radio" aria-checked="${Y.mode3===v}" data-a="ylMode" data-v="${v}">${t}</button>`).join('');
+function vUpdates(){const rec=modeOf('updates')==='rec';
  return{t:'עדכונים',s:'שלוחה 3',h:`<div class="card"><p class="note" style="margin:0 0 10px">כל העדכונים נשמרים בקו, והחדש מושמע ראשון. הקלדה נשמעת בקול הממוחשב של הקו. הקלטה נשמעת בקול שלכם.</p>
- <div class="chips" role="radiogroup" style="margin-bottom:12px">${chips}</div>
- ${rec?recHtml():`${field('u','נוסח העדכון',5)}${sendBtn('u','updates')}`}</div>
+ ${modeChips('updates')}
+ ${rec&&canRec('updates')?recHtml('updates'):`${field('u','נוסח העדכון',5)}${sendBtn('u','updates')}`}</div>
  <div class="sec"><h3>העדכונים שבקו</h3></div><div id="ylList">${listHtml('updates')}</div>`}}
-ACT.ylMode=el=>{if(Y.rec&&Y.rec.on)recDiscard();Y.mode3=el.dataset.v;redraw()};
-function recHtml(){const R=Y.rec,L=lim();
- if(R&&R.on)return`<p style="font-weight:800;color:var(--bad);margin:0 0 8px">● מקליט… <span id="ylRecT" dir="ltr">0:00 / ${fsec(L.recordSec)}</span></p><button class="btn w" data-a="ylRecStop">עצור הקלטה</button>`;
- if(R&&R.url)return`<p class="note" style="margin:0 0 6px">ההקלטה מוכנה (${fsec(R.sec)}). אפשר להאזין לפני השליחה:</p><audio controls src="${R.url}" style="width:100%;margin-bottom:10px"></audio><div class="row"><button class="btn grow" data-a="ylRecSend">שלח לקו…</button><button class="btn g grow" data-a="ylRecStart">הקלט מחדש</button></div>`;
- return`<p class="note" style="margin:0 0 10px">עד ${fsec(L.recordSec)} דקות. בלחיצה הראשונה הטלפון ישאל אם לאפשר גישה למיקרופון.</p>${R&&R.err?`<p class="note" style="color:var(--bad);font-weight:700;margin:0 0 10px">${esc(R.err)}</p>`:''}<button class="btn w" data-a="ylRecStart">התחל הקלטה</button>`}
+ACT.ylMode=el=>{if(Y.rec&&Y.rec.on)recDiscard();Y.modes[el.dataset.s||'updates']=el.dataset.v;redraw()};
+function recHtml(slot){slot=slot||'updates';const R=Y.rec&&Y.rec.slot===slot?Y.rec:null,max=recMax(slot),da=`data-s="${slot}"`;
+ if(!canRec(slot))return'';
+ if(R&&R.on)return`<p style="font-weight:800;color:var(--bad);margin:0 0 8px">● מקליט… <span id="ylRecT" dir="ltr">0:00 / ${fsec(max)}</span></p><button class="btn w" data-a="ylRecStop" ${da}>עצור הקלטה</button>`;
+ if(R&&R.url)return`<p class="note" style="margin:0 0 6px">ההקלטה מוכנה (${fsec(R.sec)}). אפשר להאזין לפני השליחה:</p><audio controls src="${R.url}" style="width:100%;margin-bottom:10px"></audio><div class="row"><button class="btn grow" data-a="ylRecSend" ${da}>שלח לקו…</button><button class="btn g grow" data-a="ylRecStart" ${da}>הקלט מחדש</button></div>`;
+ return`<p class="note" style="margin:0 0 10px">עד ${fsec(max)} דקות. בלחיצה הראשונה הטלפון ישאל אם לאפשר גישה למיקרופון.</p>${R&&R.err?`<p class="note" style="color:var(--bad);font-weight:700;margin:0 0 10px">${esc(R.err)}</p>`:''}<button class="btn w" data-a="ylRecStart" ${da}>התחל הקלטה</button>`}
 function recDiscard(){const R=Y.rec;if(!R)return;R.discard=true;clearInterval(R.tm);try{if(R.mr&&R.mr.state!=='inactive')R.mr.stop()}catch(e){}try{R.stream&&R.stream.getTracks().forEach(t=>t.stop())}catch(e){}if(R.url)URL.revokeObjectURL(R.url);Y.rec=null}
 const micErr=e=>{const n=e&&e.name;
  if(n==='NotAllowedError'||n==='SecurityError'||n==='PermissionDeniedError')return'אין הרשאה למיקרופון. אפשרו לאפליקציה גישה למיקרופון בהגדרות הטלפון ונסו שוב.';
  if(n==='NotFoundError'||n==='DevicesNotFoundError')return'לא נמצא מיקרופון במכשיר.';
  if(n==='NotReadableError')return'המיקרופון תפוס על ידי אפליקציה אחרת.';
  return'לא הצלחנו להפעיל את המיקרופון.'};
-ACT.ylRecStart=async()=>{
- if(Y.rec&&Y.rec.on)return;
- const keep=Y.rec&&Y.rec.url;if(Y.rec)recDiscard();
- const fail=m=>{Y.rec={err:m};if(here('3'))redraw()};
- if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined'||!(window.AudioContext||window.webkitAudioContext))return fail('ההקלטה לא נתמכת במכשיר הזה. אפשר להקליד את העדכון.');
+ACT.ylRecStart=async el=>{
+ const slot=(el&&el.dataset&&el.dataset.s)||'updates',act=SLACT[slot];
+ if((Y.rec&&Y.rec.on)||Y.recBusy||!act||!canRec(slot))return; // לחיצה כפולה: הקלטה אחת
+ Y.recBusy=true;
+ try{
+ if(Y.rec)recDiscard();
+ const fail=m=>{Y.rec={err:m,slot,act};if(here(act))redraw()},typed=slot==='updates'?'את העדכון':slot==='recipes'?'את המתכון':'את ההודעה';
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined'||!(window.AudioContext||window.webkitAudioContext))return fail('ההקלטה לא נתמכת במכשיר הזה. אפשר להקליד '+typed+'.');
  let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){return fail(micErr(e))}
- if(!here('3')||Y.mode3!=='rec'){stream.getTracks().forEach(t=>t.stop());return}
+ if(!here(act)||(slot!=='promos'&&modeOf(slot)!=='rec')){stream.getTracks().forEach(t=>t.stop());return}
  const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(m=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))||'';
- let mr;try{mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined)}catch(e){stream.getTracks().forEach(t=>t.stop());return fail('ההקלטה לא נתמכת במכשיר הזה. אפשר להקליד את העדכון.')}
- const chunks=[],R=Y.rec={on:true,t0:Date.now(),mr,stream,tm:null},max=lim().recordSec;
+ let mr;try{mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined)}catch(e){stream.getTracks().forEach(t=>t.stop());return fail('ההקלטה לא נתמכת במכשיר הזה. אפשר להקליד '+typed+'.')}
+ const chunks=[],R=Y.rec={on:true,t0:Date.now(),mr,stream,tm:null,slot,act},max=recMax(slot);
  mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
  mr.onstop=async()=>{clearInterval(R.tm);stream.getTracks().forEach(t=>t.stop());if(R.discard)return;R.on=false;
   try{const w=await toWav(new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'}),max);
    if(w.sec<0.5)throw new Error('short');
    if(Y.rec!==R)return;R.sec=w.sec;R.b64=w.b64;R.url=URL.createObjectURL(w.blob)}
-  catch(e){if(Y.rec!==R)return;Y.rec={err:e&&e.message==='short'?'ההקלטה קצרה מדי. הקליטו שוב.':'לא הצלחנו לעבד את ההקלטה. הקליטו שוב, או הקלידו את העדכון.'}}
-  if(here('3'))redraw()};
+  catch(e){if(Y.rec!==R)return;Y.rec={slot,act,err:e&&e.message==='short'?'ההקלטה קצרה מדי. הקליטו שוב.':'לא הצלחנו לעבד את ההקלטה. הקליטו שוב, או הקלידו '+typed+'.'}}
+  if(here(act))redraw()};
+ stream.getTracks().forEach(t=>{t.onended=()=>ACT.ylRecStop()}); // המיקרופון נלקח (למשל שיחה נכנסת): עוצרים ושומרים מה שהוקלט
  mr.start();
  R.tm=setInterval(()=>{if(cur().v!=='yl'){recDiscard();return}const s=(Date.now()-R.t0)/1000,t=document.getElementById('ylRecT');if(t)t.textContent=fsec(s)+' / '+fsec(max);if(s>=max)ACT.ylRecStop()},250);
- redraw()};
+ redraw()
+ }finally{Y.recBusy=false}};
 ACT.ylRecStop=()=>{const R=Y.rec;if(R&&R.on&&R.mr&&R.mr.state!=='inactive'){clearInterval(R.tm);R.mr.stop()}};
 async function toWav(blob,maxSec){ // מפענח, ממיר ל-WAV PCM 16 ביט, מונו, 8000Hz (חוזה 5.7), וחותך לאורך המרבי
  const AC=window.AudioContext||window.webkitAudioContext,ac=new AC();let buf;
@@ -203,13 +215,20 @@ async function toWav(blob,maxSec){ // מפענח, ממיר ל-WAV PCM 16 ביט,
  for(let i=0;i<n;i++){const s=Math.max(-1,Math.min(1,f[i]));dv.setInt16(44+i*2,s<0?s*32768:s*32767,true)}
  let bin='';for(let i=0;i<bytes.length;i+=8192)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
  return{sec:n/8000,b64:btoa(bin),blob:new Blob([bytes],{type:'audio/wav'})}}
-ACT.ylRecSend=()=>{const R=Y.rec;if(!R||!R.url||!R.b64)return;
- cOpen({kind:'audio',slot:'updates',heading:'שליחת הקלטה לקו',note:'ההקלטה תעלה לשלוחת העדכונים (3) ותושמע ראשונה.',url:R.url,b64:R.b64,sec:R.sec,clear:()=>recDiscard()})};
+ACT.ylRecSend=el=>{const slot=(el&&el.dataset&&el.dataset.s)||'updates',R=Y.rec;if(!R||R.slot!==slot||!R.url||!R.b64)return;
+ const d=getD(),td=isoDay(new Date()),c={kind:'audio',slot,url:R.url,b64:R.b64,sec:R.sec,clear:()=>{recDiscard();if(slot==='promos')d.ru='';save()}};
+ if(slot==='updates')Object.assign(c,{heading:'שליחת הקלטה לקו',note:'ההקלטה תעלה לשלוחת העדכונים (3) ותושמע ראשונה.'});
+ else if(slot==='recipes')Object.assign(c,{heading:'שליחת הקלטת מתכון לקו',note:'ההקלטה תעלה לשלוחת המתכונים (1) ותושמע ראשונה.'});
+ else if(slot==='promos')Object.assign(c,{heading:'שליחת מבצע מוקלט לקו',note:'ההקלטה תעלה לשלוחת המבצעים (2), בלי צינתוק. בחרו מתי להוריד אותה מהקו.',untilReq:true,until:d.ru&&d.ru>=td?d.ru:'',untilField:'ru',maxDays:lim().promoMaxDays,untilLabel:'מתי להוריד את המבצע מהקו?'});
+ else if(slot==='hours'){const tmp=!!d.ht;Object.assign(c,{heading:'שליחת הקלטה לשלוחה 4',note:tmp?'ההקלטה תושמע עד התאריך שתבחרו (כולל), ותימחק אוטומטית בלילה שאחריו.':'ההקלטה תעלה כקובץ חדש ותושמע ראשונה. ההודעות הקודמות נשארות עד שתמחקו אותן.',untilReq:tmp,until:d.hu&&d.hu>=td?d.hu:'',untilField:'hu',maxDays:lim().tempMaxDays,untilLabel:'עד איזה תאריך להשמיע (כולל)?'})}
+ else if(slot==='opening')Object.assign(c,{heading:'החלפת הפתיחה בהקלטה',note:'ההקלטה תחליף את הפתיחה של הקו, וכל מי שיתקשר ישמע אותה. הפתיחה הקודמת תישמר לפני ההחלפה; אם אי אפשר לשמור אותה, כלום לא ישתנה.'});
+ else return;
+ cOpen(c)};
 // שלוחה 4 – שעות וכתובת (מנהל)
 function vHours(){const d=getD(),tmp=!!d.ht;
  const chips=[[0,'קבועה'],[1,'זמנית, עם תאריך תפוגה']].map(([v,t])=>`<button type="button" class="chip ${!!v===tmp?'on':''}" role="radio" aria-checked="${!!v===tmp}" data-a="ylTemp" data-v="${v}">${t}</button>`).join('');
  return{t:'שעות וכתובת',s:'שלוחה 4 · מנהל',h:`<div class="card"><p class="note" style="margin:0 0 10px">כל הודעה חדשה עולה כקובץ חדש ומושמעת ראשונה. הקודמות נשארות עד שמוחקים אותן. הודעה זמנית נמחקת אוטומטית בלילה שאחרי התאריך.</p>
- <div class="chips" role="radiogroup" style="margin-bottom:12px">${chips}</div>${field('h','נוסח ההודעה',5)}${sendBtn('h','hours')}</div>
+ <div class="chips" role="radiogroup" style="margin-bottom:12px">${chips}</div>${modeChips('hours')}${modeOf('hours')==='rec'?recHtml('hours'):`${field('h','נוסח ההודעה',5)}${sendBtn('h','hours')}`}</div>
  <div class="sec"><h3>הקבצים בשלוחה 4</h3><button class="btn s g" data-a="ylReload">רענן</button></div><div id="ylList">${filesHtml()}</div>`}}
 ACT.ylTemp=el=>{getD().ht=el.dataset.v==='1';save();redraw()};
 ACT.ylReload=()=>{Y.files=null;const el=document.getElementById('ylList');if(el)el.innerHTML='<p class="note">טוען…</p>';ylLoad('4',true)};
@@ -229,7 +248,7 @@ async function doRemove(p,a){
 // הודעת פתיחה (מנהל)
 function vOpen(){return{t:'הודעת פתיחה',s:'מנהל',h:`<div class="card"><p class="note" style="margin:0 0 6px" id="ylOpenNote">טוען את הנוסח הנוכחי…</p>
  <p class="note" style="margin:0 0 10px;color:var(--warn);font-weight:700">זו ההודעה שנשמעת בכניסה לקו. כתבו אותה במלואה, כולל הוראות התפריט (איזה מקש לאיזו שלוחה).</p>
- ${field('o','נוסח הפתיחה',7)}${sendBtn('o','opening','החלף את הפתיחה…')}</div><div id="ylList"></div>`}}
+ ${modeChips('opening')}${modeOf('opening')==='rec'?recHtml('opening'):`${field('o','נוסח הפתיחה',7)}${sendBtn('o','opening','החלף את הפתיחה…')}`}</div><div id="ylList"></div>`}}
 // מילון הגייה (מנהל)
 function vLex(){return{t:'מילון הגייה',s:'מנהל',h:`<div class="card"><p class="note" style="margin:0 0 10px">כל שורה: <b dir="ltr">מילה=הגייה</b>. שורה שמתחילה ב-# היא הערה. למשל: <span dir="ltr">במבה=במבָּה</span>. המילון חל על כל מה שנשלח לקו, וגם על "שמע קודם".</p>
  ${field('x','המילון',10)}<p class="note" id="ylLexInfo" style="margin:0 0 10px"></p>
@@ -258,8 +277,8 @@ ACT.ylSend=el=>{const s=el.dataset.s,f=FIELD[s],d=getD(),bx=box(f),text=String(b
  const lb=LABELS[s];
  cOpen({kind:'item',slot:s,heading:lb[0],note:lb[1],text,field:f,max:L[s],source:s==='recipes'?(d.rs==='scan'?'scan':'typed'):'typed',clear:()=>{if(s==='opening')d.o=null;else d[f]='';if(s==='recipes')d.rs='typed';save()}})};
 function cBad(c){
- if(c.kind==='audio')return c.b64?'':'אין הקלטה';
- const t=c.text.trim();if(!t)return'הנוסח ריק';if(t.length>c.max)return`הנוסח ארוך מדי (עד ${c.max} תווים)`;
+ if(c.kind==='audio'){if(!c.b64)return'אין הקלטה'}
+ else{const t=c.text.trim();if(!t)return'הנוסח ריק';if(t.length>c.max)return`הנוסח ארוך מדי (עד ${c.max} תווים)`}
  if(c.untilReq){const today=isoDay(new Date());
   if(!/^\d{4}-\d{2}-\d{2}$/.test(c.until||''))return'יש לבחור תאריך';if(c.until<today)return'התאריך כבר עבר';if(c.until>addDays(today,c.maxDays))return`אפשר עד ${c.maxDays} ימים קדימה`}
  return''}
@@ -289,10 +308,12 @@ ACT.ylDays=el=>{const c=Y.c;if(!c||c.busy)return;c.until=addDays(isoDay(new Date
  if(c.untilField){getD()[c.untilField]=c.until;save()}if(c.manual){getD().mu=c.until;save()}cRetext();cDraw()};
 ACT.ylCCancel=()=>{if(Y.c&&Y.c.busy)return;Y.c=null;try{window.ypStop&&ypStop()}catch(e){}closeDlg()};
 function cReq(c){ // אותו תוכן = אותו requestId בניסיון חוזר (השרת לא מעלה פעמיים); תוכן אחר = חדש
- const sig=JSON.stringify([c.kind,c.slot,c.text,c.until,c.withTz,c.b64?c.b64.length:0,c.engine||'']);
+ const sig=JSON.stringify([c.kind,c.slot,c.text,c.until,c.withTz,c.b64?c.b64.length:0,c.engine||'',c.url||'']);
  if(!c.rid||c.sig!==sig){c.rid='yl'+rand();c.sig=sig}
  const text=String(c.text||'').trim();
- if(c.kind==='audio')return['publishLineItem',{requestId:c.rid,slot:'updates',audio:{mimeType:'audio/wav',data:c.b64},source:'recording'}];
+ if(c.kind==='audio'){const au={mimeType:'audio/wav',data:c.b64};
+  if(c.slot==='promos')return['sendPromoToLine',{requestId:c.rid,promoKey:'rec_'+c.rid,audio:au,until:c.until,withTzintuk:false}]; // מבצע מוקלט: תאריך חובה, בלי צינתוק
+  const p={requestId:c.rid,slot:c.slot,audio:au,source:'recording'};if(c.untilReq&&c.slot==='hours')p.until=c.until;return['publishLineItem',p]}
  if(c.kind==='promo'){const p={requestId:c.rid,promoKey:c.manual?c.key:c.promo.key,text,until:c.until,withTzintuk:c.withTz===true,origin:'builder'};
   if(c.manual)p.manual=true;else p.source={size:c.promo.k,index:c.promo.i,name:c.promo.name};if(c.engine)p.engine=c.engine;return['sendPromoToLine',p]}
  const p={requestId:c.rid,slot:c.slot,text,source:c.source};if(c.untilReq&&c.slot==='hours')p.until=c.until;if(c.engine)p.engine=c.engine;return['publishLineItem',p]}
@@ -300,7 +321,7 @@ function cReq(c){ // אותו תוכן = אותו requestId בניסיון חו�
 async function cSend(c){
  const [fn,p]=cReq(c),res=await call(fn,p,130000);
   Y.c=null;try{window.ypStop&&ypStop()}catch(e){}closeDlg();
-  let m=c.kind==='promo'?(res&&he(res.message)?res.message:res&&res.duplicate?'המבצע הזה כבר נשלח.':c.withTz&&res&&res.tzintuk==='failed'?'ההודעה עלתה לקו, אבל הצינתוק לא נשלח.':c.withTz?'✓ המבצע נשלח לקו, ונשלח צינתוק לנרשמים.':'✓ המבצע הועלה לקו, בלי צינתוק.')
+  let m=c.kind==='promo'||(c.kind==='audio'&&c.slot==='promos')?(res&&he(res.message)?res.message:res&&res.duplicate?'המבצע הזה כבר נשלח.':c.withTz&&res&&res.tzintuk==='failed'?'ההודעה עלתה לקו, אבל הצינתוק לא נשלח.':c.withTz?'✓ המבצע נשלח לקו, ונשלח צינתוק לנרשמים.':'✓ המבצע הועלה לקו, בלי צינתוק.')
    :(res&&he(res.message)?res.message:'✓ עלה לקו');
   if(res&&res.warnings&&res.warnings.includes('yemot-remove-failed'))m+=' (הסרת הקודם נכשלה)';
   if(c.clear)c.clear();Y.st=null;Y.files=null;toast(m);
