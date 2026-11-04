@@ -110,7 +110,8 @@ function paintList(slot){const el=document.getElementById('ylList');if(el)el.inn
 async function ylLoad(a,force){
  if(a===''&&isA()){try{const s=await state(force);if(here(''))paintVoice(s.r&&s.r.voice)}catch(e){}return} // מנהל: מצב התקרה של הקול האנושי
  if(!here(a)||!['1','2','3','4','open','lex'].includes(a))return;
- const el=document.getElementById('ylList'),fail=e=>{if(here(a)&&el)el.innerHTML=`<p class="note" style="color:var(--bad)">לא הצלחנו לטעון: ${esc(errMsg(e))}</p>`};
+ const el=document.getElementById('ylList'),fail=e=>{if(!here(a))return;if(window.ylBoard&&ylBoard.slots[a]){toast(errMsg(e));return} // הרשימה של yemot-board.js נשארת במסך
+  if(el)el.innerHTML=`<p class="note" style="color:var(--bad)">לא הצלחנו לטעון: ${esc(errMsg(e))}</p>`};
  try{
   if(window.ylBoard&&ylBoard.slots[a])ylBoard.load(a,force); // yemot-board.js טוען רק כשפותחים את השלוחה
   if(a==='2'){state(force).catch(()=>{});return} // מגבלות ההקלטה מהשרת (ברקע, כדי לא לדרוס את הרשימה)
