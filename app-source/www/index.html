@@ -1139,10 +1139,16 @@ function srcCanvas(img,rot,maxS){const rw=rot%2?img.height:img.width,rh=rot%2?im
  x.translate(c.width/2,c.height/2);x.rotate(rot*Math.PI/2);const dw=img.width*k,dh=img.height*k;x.drawImage(img,-dw/2,-dh/2,dw,dh);return c}
 function otsu(g){const h=new Uint32Array(256);for(let i=0;i<g.length;i++)h[g[i]]++;let tot=g.length,sum=0;for(let i=0;i<256;i++)sum+=i*h[i];let sb=0,wb=0,mx=0,th=127;
  for(let i=0;i<256;i++){wb+=h[i];if(!wb)continue;const wf=tot-wb;if(!wf)break;sb+=i*h[i];const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>mx){mx=v;th=i}}return th}
+/* מרחיב (dil=1) או מכווץ (dil=0) מסכה בינארית בריבוע ברדיוס r */
+function mBox(m,W,H,r,dil){const t=new Uint8Array(W*H),o=new Uint8Array(W*H);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){let v=dil?0:1;for(let d=-r;d<=r;d++){const xx=x+d<0?0:x+d>=W?W-1:x+d,b=m[y*W+xx];if(dil?b:!b){v=dil;break}}t[y*W+x]=v}
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){let v=dil?0:1;for(let d=-r;d<=r;d++){const yy=y+d<0?0:y+d>=H?H-1:y+d,b=t[yy*W+x];if(dil?b:!b){v=dil;break}}o[y*W+x]=v}return o}
 /* מוצא את ארבע פינות הדף (הרכיב הבהיר הגדול ביותר) */
 function findQuad(c){const sw=Math.min(360,c.width),k=sw/c.width,sh=Math.round(c.height*k),s=cvOf(sw,sh),sx=s.getContext('2d');sx.drawImage(c,0,0,s.width,s.height);
  const d=sx.getImageData(0,0,s.width,s.height).data,W=s.width,H=s.height,g=new Uint8Array(W*H);for(let i=0;i<W*H;i++)g[i]=(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11)|0;
- const t=otsu(g),m=new Uint8Array(W*H);for(let i=0;i<W*H;i++)m[i]=g[i]>t?1:0;
+ const t=otsu(g);let m=new Uint8Array(W*H);for(let i=0;i<W*H;i++)m[i]=g[i]>t?1:0;
+ /* סגירה: ממלאת טקסט וקווים דקים בתוך הדף, כדי שקווי טבלה ומסגרות לא יפצלו את הדף לכמה חלקים */
+ m=mBox(mBox(m,W,H,2,1),W,H,2,0);
  const lab=new Int32Array(W*H);let best=0,bestN=0,id=0,stack=[];const pts=[];
  for(let i=0;i<W*H;i++){if(!m[i]||lab[i])continue;id++;let n=0;stack.length=0;stack.push(i);lab[i]=id;while(stack.length){const p=stack.pop();n++;const x=p%W,y=(p/W)|0;
   if(x>0&&m[p-1]&&!lab[p-1]){lab[p-1]=id;stack.push(p-1)}if(x<W-1&&m[p+1]&&!lab[p+1]){lab[p+1]=id;stack.push(p+1)}if(y>0&&m[p-W]&&!lab[p-W]){lab[p-W]=id;stack.push(p-W)}if(y<H-1&&m[p+W]&&!lab[p+W]){lab[p+W]=id;stack.push(p+W)}}
@@ -1151,9 +1157,18 @@ function findQuad(c){const sw=Math.min(360,c.width),k=sw/c.width,sh=Math.round(c
  let a=[1e9,0,0],b=[-1e9,0,0],cc=[-1e9,0,0],dd=[1e9,0,0];
  for(let i=0;i<W*H;i++){if(lab[i]!==best)continue;const x=i%W,y=(i/W)|0,sm=x+y,df=x-y;
   if(sm<a[0])a=[sm,x,y];if(sm>b[0])b=[sm,x,y];if(df>cc[0])cc=[df,x,y];if(df<dd[0])dd=[df,x,y]}
+ /* כל צלע חייבת להיות גבול אמיתי של הדף: לבן מבפנים וכהה מבחוץ (קו טבלה עבה או משטח בהיר לא עוברים) */
+ const qs=[a,cc,b,dd].map(p=>[p[1],p[2]]),mx=(qs[0][0]+qs[1][0]+qs[2][0]+qs[3][0])/4,my=(qs[0][1]+qs[1][1]+qs[2][1]+qs[3][1])/4,at=(x,y)=>{x=Math.round(x);y=Math.round(y);return x<0||y<0||x>=W||y>=H?-1:m[y*W+x]};
+ for(let e=0;e<4;e++){const p=qs[e],n=qs[(e+1)%4],ex=n[0]-p[0],ey=n[1]-p[1],L=Math.hypot(ex,ey)||1;let nx=ey/L,ny=-ex/L;const hx=(p[0]+n[0])/2,hy=(p[1]+n[1])/2;if(nx*(hx-mx)+ny*(hy-my)<0){nx=-nx;ny=-ny}
+  let ins=0,out=0;const N=40;for(let j=0;j<N;j++){const t=.1+.8*j/(N-1),x=p[0]+ex*t,y=p[1]+ey*t;if(at(x-nx*3,y-ny*3)===1)ins++;if(at(x+nx*8,y+ny*8)!==1)out++}
+  if(ins<N*.8||out<N*.7)return null}
  const q=[a,cc,b,dd].map(p=>[p[1]/k,p[2]/k]);/* TL,TR,BR,BL */
  const area=Math.abs(q.reduce((t,p,i)=>{const n=q[(i+1)%4];return t+(p[0]*n[1]-n[0]*p[1])},0))/2;
- if(area<c.width*c.height*.2)return null;if(area>c.width*c.height*.94)return null;const cx=(q[0][0]+q[1][0]+q[2][0]+q[3][0])/4,cy=(q[0][1]+q[1][1]+q[2][1]+q[3][1])/4;return q.map(p=>[p[0]+(cx-p[0])*.012,p[1]+(cy-p[1])*.012])}
+ if(area<c.width*c.height*.2)return null;if(area>c.width*c.height*.94)return null;
+ /* בדיקות בטיחות: אם הצורה לא נראית כמו דף, לא חותכים בכלל (עדיף תמונה מלאה מדף חתוך) */
+ if(bestN<area*k*k*.82)return null;/* האזור הבהיר לא ממלא את המרובע: כנראה משטח בהיר שהתחבר לדף */
+ for(let i=0;i<4;i++){const p=q[(i+3)%4],o=q[i],n=q[(i+1)%4],v1=[p[0]-o[0],p[1]-o[1]],v2=[n[0]-o[0],n[1]-o[1]],l=Math.hypot(...v1)*Math.hypot(...v2);if(!l)return null;const cs=(v1[0]*v2[0]+v1[1]*v2[1])/l;if(Math.abs(cs)>.5)return null}/* כל זווית בין 60 ל-120 מעלות */
+ const cx=(q[0][0]+q[1][0]+q[2][0]+q[3][0])/4,cy=(q[0][1]+q[1][1]+q[2][1]+q[3][1])/4;return q.map(p=>[p[0]+(cx-p[0])*.012,p[1]+(cy-p[1])*.012])}
 const dist=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1]);
 function warp(c,q,maxS){const w=Math.round((dist(q[0],q[1])+dist(q[3],q[2]))/2),h=Math.round((dist(q[0],q[3])+dist(q[1],q[2]))/2),k=Math.min(1,maxS/Math.max(w,h)),ow=Math.round(w*k),oh=Math.round(h*k),o=cvOf(ow,oh);
  const sd=c.getContext('2d').getImageData(0,0,c.width,c.height),S=sd.data,SW=c.width,SH=c.height,od=o.getContext('2d').createImageData(ow,oh),O=od.data;
