@@ -58,13 +58,19 @@ public class ShareInPlugin extends Plugin {
     private final List<JSObject> pending = new ArrayList<>();
     private final List<JSObject> rejected = new ArrayList<>();
     private int over = 0;
+    /**
+     * true when MainActivity is re-created (savedInstanceState != null: rotation without configChanges,
+     * "don't keep activities", process restored). Android then hands over the SAME launch intent again,
+     * so it is not taken a second time. Set by MainActivity before super.onCreate().
+     */
+    static volatile boolean recreated = false;
     /** id -> temporary file. Only ids created here can be read; a path never comes from JS. */
     private final Map<String, File> files = new LinkedHashMap<>();
 
     @Override
     public void load() {
         final File dir = shareDir();
-        final Intent first = getActivity() != null ? getActivity().getIntent() : null;
+        final Intent first = getActivity() != null && !recreated ? getActivity().getIntent() : null;
         worker.execute(() -> {
             // Left-overs from an earlier run (the app was closed before the screens read them)
             File[] old = dir.listFiles();
@@ -157,7 +163,17 @@ public class ShareInPlugin extends Plugin {
         List<JSObject> got = new ArrayList<>();
         List<JSObject> bad = new ArrayList<>();
         File dir = shareDir();
+        String own = getContext().getPackageName();
         for (Uri u : uris) {
+            String au = u.getAuthority();
+            if (au == null || au.startsWith(own)) {
+                // Our own FileProvider (cache + external storage): another app must not make us import our own files
+                JSObject b = new JSObject();
+                b.put("name", cleanName(u.getLastPathSegment()));
+                b.put("why", "own");
+                bad.add(b);
+                continue;
+            }
             String name = displayName(u);
             try {
                 JSObject it = copyOne(u, name, dir);
@@ -255,6 +271,16 @@ public class ShareInPlugin extends Plugin {
         return null;
     }
 
+    /** HEIC / HEIF (ISO-BMFF "ftyp" box): the WebView cannot show it, so it gets its own clear message. */
+    static boolean isHeic(byte[] h, int n) {
+        if (n < 12 || h[4] != 'f' || h[5] != 't' || h[6] != 'y' || h[7] != 'p') {
+            return false;
+        }
+        String brand = new String(h, 8, 4, java.nio.charset.StandardCharsets.US_ASCII);
+        return brand.equals("heic") || brand.equals("heix") || brand.equals("hevc") || brand.equals("hevx")
+                || brand.equals("heim") || brand.equals("heis") || brand.equals("mif1") || brand.equals("msf1");
+    }
+
     static String ext(String mime) {
         switch (mime) {
             case "application/pdf":
@@ -294,7 +320,7 @@ public class ShareInPlugin extends Plugin {
             }
             mime = sniff(head, hn);
             if (mime == null) {
-                throw new Reject("type");
+                throw new Reject(isHeic(head, hn) ? "heic" : "type");
             }
             try (OutputStream out = new FileOutputStream(tmp)) {
                 out.write(head, 0, hn);
@@ -416,6 +442,9 @@ public class ShareInPlugin extends Plugin {
                 r.put("size", b.length);
                 r.put("dataURL", "data:" + mime + ";base64," + Base64.encodeToString(b, Base64.NO_WRAP));
                 call.resolve(r);
+            } catch (OutOfMemoryError e) {
+                // a 15MB file becomes ~20 million characters for the screens; a weak phone may not have the memory
+                call.reject("הקובץ גדול מדי לטלפון הזה");
             } catch (Exception e) {
                 call.reject("read failed");
             } finally {

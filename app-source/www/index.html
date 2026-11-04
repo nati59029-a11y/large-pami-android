@@ -2885,6 +2885,7 @@ const bqTh=(it,a)=>it.pdf?`<button class="ib" type="button" data-a="bqView" data
 function bqInit(it,r){const sel=r.sup?r.sup.id:'';if(it.anyCat&&r.sup&&r.sup.cat)it.cat=r.sup.cat;
  it.res=r;it.f={sub:sel,newname:'',inv:(r.dn?'':r.inv)||'',date:r.date||'',amt:r.amt?String(r.amt.v):'',plan:payDef(sel,r.date||today()),pt:0,dn:r.dn?1:0,note:r.dn&&r.inv?'ת. משלוח '+r.inv:'',dnum:r.dn?(r.inv||''):''}}
 async function bqOne(it){const subs=bqSubs(it);let ai=null,err='';
+ if(it.big){bqInit(it,{inv:null,date:null,amt:null,sup:null,dn:!!it.dnHint});it.st='fail';it.aiErr=SI_BIG;return}
  for(let k=0;k<3&&!ai;k++){try{ai=await ocrAI(it.hi.slice(0,4),subs,it.pdf?it.du:null);if(!ai&&!(typeof shKey==='function'&&shKey())){err='אין מפתח לזיהוי חכם';break}break}catch(e){err=e&&e.message||String(e);if(/מפתח|key/i.test(err))break;await new Promise(r=>setTimeout(r,k?12000:4000))}}
  if(ai){bqInit(it,ai.res);it.st='ok';return}
  if(it.pdf){bqInit(it,{inv:null,date:null,amt:null,sup:null,dn:!!it.dnHint});it.st='fail';it.aiErr=err;return}
@@ -2932,6 +2933,8 @@ ACT.bqView=el=>{const it=BQ.find(x=>x.id===el.dataset.id);if(it)viewImg(it.fid,'
 ACT.bqDup=el=>{const it=BQ.find(x=>x.id===el.dataset.id);if(!it)return;it.dupok=1;it.err='';bqSaveOne(it)&&(BQ=BQ.filter(x=>x!==it));save();bqDraw();rerender()};
 function bqSaveOne(it){const c=cat(it.cat),f={...it.f};let sid=f.sub;
  if(!sid){it.err='בחר ספק';return false}
+ /* אותו קובץ כבר מקושר לרשומה (למשל נשמר כהעברה): לא נשמר אוטומטית, גם לא ב"אישור הכול" */
+ if(!it.dupok&&it.fid&&typeof siUsed==='function'&&siUsed(it.fid)){it.err='הקובץ הזה כבר נשמר ברשומה אחרת – כנראה אותו מסמך. לשמור בכל זאת?';it.dupok=0;return false}
  if(f.dn&&!s_(f.inv))f.note=s_(f.note)||('ת. משלוח '+s_(f.dnum));
  let nsub=null;
  if(sid==='__new'){const nm=s_(f.newname);if(!nm){it.err='כתוב שם לספק';return false}nsub=nm}
@@ -2953,8 +2956,10 @@ ACT.bqAll=()=>{let ok=0,bad=0;const keep=[];
  משתמש לא מחובר: רק רשימה בזיכרון (SIM) – הקבצים נשארים בתיקייה הזמנית ונקראים רק אחרי כניסה. שום דבר לא נשמר בנתונים.
  התור: רשימה קטנה ב-localStorage (lp-shin, לפי המשתמש) והקבצים ב-IndexedDB במפתח 'shin:'+hash. שום רשומה לא נוצרת לפני אישור.
  כפילות: hash של התוכן (כמו 'ft'+hash בצילום העברה) – מול התור ומול קבצים שכבר נשמרו בנתונים. */
-const SI_K='lp-shin',SI_MAX=20,SI_MB=15,SIT={bank_transfer:'העברה',invoice:'חשבונית',delivery_note:'תעודת משלוח',other:'לא ברור'},SIW={big:'גדול מ-15MB',type:'רק תמונה או PDF',read:'הקובץ לא נקרא'};
-let SI={L:null,u:''},SIM=[],SIMx={over:0,bad:[]},SIact=0;const SIU={};
+const SI_K='lp-shin',SI_MAX=20,SI_MB=15,SIT={bank_transfer:'העברה',invoice:'חשבונית',delivery_note:'תעודת משלוח',other:'לא ברור'},SIW={big:'גדול מ-15MB',type:'רק תמונה או PDF',read:'הקובץ לא נקרא',heic:'תמונת HEIC לא נתמכת – שמרו כ-JPG או שתפו צילום מסך',own:'קובץ פנימי של האפליקציה – לא נקלט'},SI_AI_MB=10,SI_BIG='גדול מדי לזיהוי אוטומטי – בחרו סוג ידנית';
+let SI={L:null,u:''},SIM=[],SIMx={over:0,bad:[]},SIact=0,SIing=0;const SIU={},SIWR={};
+/* SI.L משתנה רק במקום (splice/push) – קליטה שרצה ברקע תמיד מוסיפה לאותה רשימה */
+const siSplice=pred=>{const L=SI.L||[];for(let i=L.length-1;i>=0;i--)if(pred(L[i]))L.splice(i,1)};
 const siName=n=>String(n==null?'':n).replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g,'').trim().slice(0,80)||'קובץ';/* תווית בלבד – אף פעם לא נתיב */
 const siIn_=()=>(typeof isA==='function'&&isA())||(typeof isW==='function'&&isW());
 const siKey=x=>'shin:'+x.h;
@@ -2962,41 +2967,49 @@ async function fdelK(id){try{const d=await idb();await new Promise(res=>{const t
 function siLoad(){if(SI.L&&SI.u===SY.uid)return SI.L;let o=null;try{o=JSON.parse(localStorage.getItem(SI_K))}catch(e){}
  const ok=x=>x&&typeof x==='object'&&typeof x.id==='string'&&typeof x.h==='string'&&/^[0-9a-z]{8,40}$/.test(x.h);
  SI={u:SY.uid,L:o&&o.u===SY.uid&&Array.isArray(o.L)?o.L.filter(ok).slice(0,200):[]};
- SI.L.forEach(x=>{x.name=siName(x.name);if(x.st==='run')x.st='q';if(x.type&&!SIT[x.type])x.type=null});
+ SI.L.forEach(x=>{x.name=siName(x.name);if(x.st==='run')x.st='q';delete x.wr;if(x.type&&!SIT[x.type])x.type=null});
  setTimeout(siGc,3000);return SI.L}
 function siSave(){try{localStorage.setItem(SI_K,JSON.stringify({u:SY.uid,L:SI.L||[]}))}catch(e){toast('אין מקום לשמור את תור המסמכים במכשיר')}}
 /* קבצים של התור שכבר לא ברשימה (נמחקו, טופלו או של משתמש קודם) */
-async function siGc(){try{const keep=new Set((SI.L||[]).map(siKey)),d=await idb();await new Promise(res=>{const t=d.transaction('f','readwrite'),st=t.objectStore('f'),rq=st.openKeyCursor(IDBKeyRange.bound('shin:','shin:￿'));rq.onsuccess=()=>{const c=rq.result;if(!c)return;if(!keep.has(c.key))st.delete(c.key);c.continue()};t.oncomplete=res;t.onerror=res})}catch(e){}}
+/* לא רץ בזמן קליטה; לא מוחק מפתח שברשימה (נבדק ברגע המחיקה) או שנכתב ב-10 הדקות האחרונות */
+async function siGc(){if(SIing){setTimeout(siGc,5000);return}try{const d=await idb(),now=Date.now();await new Promise(res=>{const t=d.transaction('f','readwrite'),st=t.objectStore('f'),rq=st.openKeyCursor(IDBKeyRange.bound('shin:','shin:\uffff'));rq.onsuccess=()=>{const c=rq.result;if(!c)return;const k=String(c.key);if(!SIing&&!(SIWR[k]&&now-SIWR[k]<600000)&&!(SI.L||[]).some(x=>siKey(x)===k))st.delete(k);c.continue()};t.oncomplete=res;t.onerror=res})}catch(e){}}
 /* מסמך שהקובץ שלו כבר שמור בנתונים (העברה או חשבונית נשמרו) – טופל, יוצא מהתור */
 function siPrune(){if(!isA()||!SI.L||!SI.L.length)return;const used=new Set(bkFileIds()),gone=SI.L.filter(x=>used.has('ft'+x.h));if(!gone.length)return;
- SI.L=SI.L.filter(x=>!gone.includes(x));gone.forEach(x=>{fdelK(siKey(x));delete SIU[x.id]});siSave()}
+ siSplice(x=>gone.includes(x));gone.forEach(x=>{fdelK(siKey(x));delete SIU[x.id]});siSave()}
 const siL=()=>siIn_()?siLoad():[];
 const siN=()=>{if(!isA())return 0;siPrune();return siL().length};
 /* קבלת קבצים: מהתוסף, או (בבדיקות) ישירות. files: [{name, du}] */
 async function siIn(files,meta){meta=meta||{};files=Array.isArray(files)?files:[];
  const bad0=(Array.isArray(meta.rejected)?meta.rejected:[]).map(r=>({name:siName(r&&r.name),why:SIW[r&&r.why]||'הקובץ לא התקבל'}));
  if(!siIn_()||!S){SIM.push(...files);SIMx.over+=+meta.over||0;SIMx.bad.push(...bad0);return}
- const L=siLoad(),rep={ok:0,dup:[],bad:bad0,over:+meta.over||0};let fs=files;
+ SIing++;try{siLoad();const rep={ok:0,dup:[],dupQ:[],bad:bad0,over:+meta.over||0};let fs=files;
  if(fs.length>SI_MAX){rep.over+=fs.length-SI_MAX;fs=fs.slice(0,SI_MAX)}
  const used=isA()?new Set(bkFileIds()):new Set();
  for(const f of fs){const name=siName(f&&f.name);try{
   const raw=String(f&&(f.du||(f.load?await f.load():''))||''),m=/^data:([\w.+-]+\/[\w.+-]+);base64,/.exec(raw),mime=m?m[1].toLowerCase():'';
   const pdf=mime==='application/pdf';
+  if(/^image\/(heic|heif)$/.test(mime)){rep.bad.push({name,why:SIW.heic});continue}
   if(!pdf&&!/^image\/(jpeg|jpg|png|webp|gif)$/.test(mime)){rep.bad.push({name,why:SIW.type});continue}
   if(pdf&&!raw.startsWith('data:application/pdf;base64,JVBERi0')){rep.bad.push({name,why:SIW.type});continue}
   if((raw.length-m[0].length)*3/4>SI_MB*1048576){rep.bad.push({name,why:SIW.big});continue}
   const du=pdf?raw:await shrinkDU(du2b(raw));if(!pdf&&!imgOk(du)){rep.bad.push({name,why:SIW.type});continue}
   const h=trHash(du);
-  if(L.some(x=>x.h===h)||used.has('ft'+h)){rep.dup.push(name);continue}
-  await fput('shin:'+h,du);
-  const it={id:uid(),h,name,mime:pdf?'application/pdf':(du.match(/^data:([^;,]+)/)||[])[1],size:Math.round((du.length-du.indexOf(',')-1)*3/4),at:Date.now(),st:isA()?'q':'w',type:null,man:0,err:''};
-  L.push(it);if(!pdf)SIU[it.id]=du;rep.ok++}
+  const L=siLoad();/* הרשימה הנוכחית (אחרי מחיקות שקרו בזמן הקליטה) */
+  if(used.has('ft'+h)){rep.dup.push(name);continue}if(L.some(x=>x.h===h)){rep.dupQ.push(name);continue}
+  const size=Math.round((du.length-du.indexOf(',')-1)*3/4),it={id:uid(),h,name,mime:pdf?'application/pdf':(du.match(/^data:([^;,]+)/)||[])[1],size,at:Date.now(),st:isA()?'q':'w',type:null,man:0,err:'',wr:1};
+  if(size>SI_AI_MB*1048576)it.big=1;
+  /* קודם ברשימה (נשמרת), ורק אז הכתיבה – כך הניקוי לא מוחק קובץ בכתיבה */
+  L.push(it);siSave();SIWR['shin:'+h]=Date.now();
+  try{await fput('shin:'+h,du)}catch(e){siSplice(y=>y===it);siSave();throw e}
+  delete it.wr;if(!(SI.L||[]).includes(it))fdelK('shin:'+h);else{if(!pdf)SIU[it.id]=du;rep.ok++}siSave()}
   catch(e){rep.bad.push({name,why:SIW.read})}}
- siSave();if(isA())siPump();siShow(rep)}
-function siShow(rep){const issues=rep.dup.length||rep.bad.length||rep.over;
+ siSave();if(isA())siPump();siShow(rep)}finally{SIing--}}
+function siShow(rep){rep.dupQ=rep.dupQ||[];const issues=rep.dup.length||rep.bad.length||rep.over;
  if(isA()){if(!A&&!$('#dlg').open&&cur().v!=='todo')go('todo');else rerender()}else if(isW()){if(WS==='home'&&cur().v==='wk')rerender()}
  const head=rep.ok?rep.ok+(rep.ok>1?' מסמכים התקבלו':' מסמך התקבל')+' ונכנסו לתור "מסמכים שהתקבלו"':'לא נוסף מסמך חדש לתור';
- if(!issues){if(rep.ok)toast(head);return}
+ /* אותו קובץ שכבר מחכה בתור (למשל אותו שיתוף שהגיע שוב): הודעה קצרה בלבד */
+ if(!issues){if(rep.ok||rep.dupQ.length)toast(rep.ok?head+(rep.dupQ.length?' · '+rep.dupQ.length+' כבר בתור':''):rep.dupQ.length+(rep.dupQ.length>1?' מסמכים כבר בתור':' מסמך כבר בתור')+' "מסמכים שהתקבלו"');return}
+ rep.dup=rep.dup.concat(rep.dupQ);
  if($('#dlg').open){toast(head+(rep.dup.length?' · '+rep.dup.length+' כבר התקבלו':'')+(rep.over?' · '+rep.over+' מעבר למגבלה':''));return}
  dlg(`<h3>מסמכים ששותפו</h3><p>${head}.</p>${rep.over?`<p class="note neg">שותפו יותר מ-${SI_MAX} קבצים בבת אחת. התקבלו ${SI_MAX} הראשונים, ו-${rep.over} לא התקבלו. שתפו אותם שוב, בחלק נוסף.</p>`:''}${rep.dup.length?`<p><b>כבר התקבל</b> (לא נשמר שוב):</p><ul>${rep.dup.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}${rep.bad.length?`<p><b>לא התקבלו:</b></p><ul>${rep.bad.map(b=>`<li>${esc(b.name)} – ${esc(b.why)}</li>`).join('')}</ul>`:''}<button class="btn w" data-a="closeDlg">הבנתי</button>`)}
 /* אחרי כניסה: הקבצים שחיכו בזיכרון נכנסים לתור; זיהוי ממשיך מאיפה שנעצר */
@@ -3013,7 +3026,7 @@ async function siPull(){const P=siP();if(!P)return;if(siPull.b){siPull.again=1;r
   if(items.length||bad.length||(r&&(r.over||(r.rejected||[]).length)))await siIn(got,{over:(+(r&&r.over)||0)+Math.max(0,items.length-SI_MAX),rejected:[...((r&&r.rejected)||[]),...bad]})}while(siPull.again)}
  finally{siPull.b=0}}
 /* זיהוי (מנהל): השרת מסוג transfer מחזיר document_type, ובהעברה גם את פרטי ההעברות – נשמרים כדי לא לזהות שוב */
-function siPump(){if(!isA())return;const L=siLoad();while(SIact<2){const x=L.find(y=>y.st==='q');if(!x)break;SIact++;x.st='run';siUI();siOne(x).finally(()=>{SIact--;siSave();siUI();siPump()})}}
+function siPump(){if(!isA())return;const L=siLoad();while(SIact<2){const x=L.find(y=>y.st==='q'&&!y.wr);if(!x)break;if(x.big){x.st='fail';x.err=SI_BIG;siSave();siUI();continue}SIact++;x.st='run';siUI();siOne(x).finally(()=>{SIact--;siSave();siUI();siPump()})}}
 async function siOne(x){try{const du=await fget(siKey(x));if(!du)throw new Error('הקובץ לא נמצא במכשיר');const o=await trAI({du,pdf:x.mime==='application/pdf'});
   x.st='ok';x.err='';x.tr=o.type==='bank_transfer'?o.transfers:[];if(!x.man)x.type=o.type}
  catch(e){x.st='fail';x.err=String(e&&e.message||e).slice(0,200)}}
@@ -3027,34 +3040,45 @@ function siCard(x){const busy=x.st==='q'||x.st==='run',k=siKind(x),fid='ft'+x.h,
  let h=`<div class="card" data-si="${x.id}"><div class="row" style="align-items:flex-start">${siThumb(x)}<div class="grow" style="min-width:0"><div style="overflow-wrap:anywhere;font-weight:700">${esc(x.name)}</div><div class="note">${siSize(x.size||0)}${x.mime==='application/pdf'?' · PDF (כל העמודים = מסמך אחד)':''}</div>
  <div data-sity>זוהה כ: ${busy&&!x.man?'<span class="tag t1">מזהה…</span>':x.type&&x.type!=='other'?`<b>${SIT[x.type]}</b>`:'<span class="tag t1">לא ברור</span>'}</div></div><button class="btn s g" data-a="siDel" data-id="${x.id}">מחק</button></div>`;
  h+=`<label class="f" style="margin:8px 0 0"><span>שינוי הסוג</span><select data-c="siTy" data-id="${x.id}"><option value="" ${x.type&&x.type!=='other'?'':'selected'}>${busy&&!x.man?'מזהה…':'לא ברור – בחרו'}</option>${['bank_transfer','invoice','delivery_note'].map(t=>`<option value="${t}" ${t===x.type?'selected':''}>${SIT[t]}</option>`).join('')}</select></label>`;
- if(x.st==='fail'&&!x.man)h+=`<p class="note" style="color:var(--bad);font-weight:700;margin:6px 0 0">הזיהוי לא עבד: ${esc(x.err)}</p>`;
+ if(x.big)h+=`<p class="note" style="font-weight:700;margin:6px 0 0">${SI_BIG}.</p>`;else if(x.st==='fail'&&!x.man)h+=`<p class="note" style="color:var(--bad);font-weight:700;margin:6px 0 0">הזיהוי לא עבד: ${esc(x.err)}</p>`;
  if(k==='unk'&&!(busy&&!x.man))h+=`<div class="row" style="margin-top:8px"><button class="btn grow" data-a="siSet" data-k="bank_transfer" data-id="${x.id}">זו העברה</button><button class="btn g grow" data-a="siSet" data-k="invoice" data-id="${x.id}">זו חשבונית</button></div>`;
  if(k==='tr')h+=`<button class="btn w" style="margin-top:8px" data-a="siTr" data-id="${x.id}">${inTR?'המשך במסך צילום העברה':'📸 פתיחה בצילום העברה'}</button>`;
  if(k==='inv')h+=inBQ?`<p class="note" style="margin:8px 0 0">בתור החשבוניות (סריקה מרובה).</p><button class="btn g w" data-a="bqReview">בדיקה ואישור של החשבוניות</button>`:`<button class="btn w" style="margin-top:8px" data-a="siBq" data-id="${x.id}">🧾 לתור החשבוניות</button>`;
- if(x.st==='fail')h+=`<button class="btn g w" style="margin-top:8px" data-a="siRe" data-id="${x.id}">נסה לזהות שוב</button>`;
+ if(x.st==='fail'&&!x.big)h+=`<button class="btn g w" style="margin-top:8px" data-a="siRe" data-id="${x.id}">נסה לזהות שוב</button>`;
  return h+'</div>'}
 function siSec(){const L=siL();if(!L.length)return BQ.length?adSec('🧾 תור החשבוניות')+bqBanner():'';siThumbs();
  const inv=L.filter(x=>siKind(x)==='inv'&&!BQ.some(b=>b.fid==='ft'+x.h));
  return adSec('📥 מסמכים שהתקבלו ('+L.length+')')+`<p class="note" style="margin:0 0 8px">מסמכים ששותפו לאפליקציה. שום דבר לא נשמר עד שמאשרים כל מסמך במסך שלו.</p>`+L.map(siCard).join('')+(inv.length>1?`<button class="btn w" style="margin-bottom:10px" data-a="siBqAll">כל ${inv.length} החשבוניות לתור החשבוניות</button>`:'')+bqBanner()}
-function siSetType(x,k){if(!x||!['bank_transfer','invoice','delivery_note','other'].includes(k))return;x.type=k;x.man=1;siSave()}
+/* מסמך משותף נמצא בתור אחד בלבד: תור החשבוניות (BQ) או צילום העברה (TR). אם כבר נשמר – לא מחליפים */
+const siUsed=fid=>S.tx.some(t=>t.file===fid||(t.pays||[]).some(p=>p&&p.file===fid));
+const siTrIt=x=>TR.items.find(t=>t.fid==='ft'+x.h);
+const SI_SAVED='המסמך הזה כבר נשמר באפליקציה, ולכן אי אפשר לרשום אותו שוב בסוג אחר. אם צריך – בטלו קודם את הרישום הקיים';
+function siMove(x,to){const fid='ft'+x.h;if(siUsed(fid)){toast(SI_SAVED);return false}
+ const t=siTrIt(x);if(t&&to!=='tr'){if(t.rows.some(r=>r.done)){toast(SI_SAVED);return false}TR.items=TR.items.filter(y=>y!==t);TR.i=Math.max(0,Math.min(TR.i,TR.items.length-1))}
+ if(to!=='inv'&&BQ.some(b=>b.fid===fid)){BQ=BQ.filter(b=>b.fid!==fid);toast('המסמך הוצא מתור החשבוניות')}
+ return true}
+function siSetType(x,k){if(!x||!['bank_transfer','invoice','delivery_note','other'].includes(k))return false;if(!siMove(x,siKind({type:k})))return false;x.type=k;x.man=1;siSave();return true}
 ACT.siSet=el=>{if(!isA())return;siSetType(siFind(el),el.dataset.k);rerender()};
-CHG.siTy=el=>{if(!isA())return;const x=siFind(el);if(!x)return;if(!el.value){x.type=null;x.man=1;siSave()}else siSetType(x,el.value);rerender()};
+CHG.siTy=el=>{if(!isA())return;const x=siFind(el);if(!x)return;if(!el.value){if(siMove(x,'unk')){x.type=null;x.man=1;siSave()}}else siSetType(x,el.value);rerender()};
 ACT.siRe=el=>{if(!isA())return;const x=siFind(el);if(!x)return;x.st='q';x.err='';x.man=0;siSave();siPump();rerender()};
-function siDrop(id){const x=(SI.L||[]).find(y=>y.id===id);if(!x)return;SI.L=SI.L.filter(y=>y!==x);BQ=BQ.filter(b=>!(b.si===id&&b.fid==='ft'+x.h));fdelK(siKey(x));delete SIU[id];siSave()}
+function siDrop(id){const x=(SI.L||[]).find(y=>y.id===id);if(!x)return;siSplice(y=>y===x);BQ=BQ.filter(b=>!(b.si===id&&b.fid==='ft'+x.h));fdelK(siKey(x));delete SIU[id];siSave()}
 ACT.siDel=el=>{const id=el.dataset.id;ask('למחוק את המסמך מהתור? הוא לא יישמר באפליקציה.',()=>{siDrop(id);rerender();toast('המסמך נמחק מהתור')},'מחק')};
 const siSupCat=()=>{const c=cat('e_sup');return c&&!c.hid&&!c.off?c:catsOf('exp').find(x=>x.beh==='sup')};
 /* העברה ← זרימת צילום העברה (סבב 2) עם הקובץ ותוצאת הזיהוי, בלי זיהוי נוסף */
 ACT.siTr=async el=>{if(!trOk())return toast('צילום העברה – למנהל בלבד');const x=siFind(el);if(!x)return;const fid='ft'+x.h;
  let i=TR.items.findIndex(t=>t.fid===fid);
+ if(i<0){if(siUsed(fid))return toast(SI_SAVED);if(BQ.some(b=>b.fid===fid)){BQ=BQ.filter(b=>b.fid!==fid);toast('המסמך הוצא מתור החשבוניות ונפתח כהעברה')}}
  if(i<0){let du;try{du=await fget(siKey(x))}catch(e){}if(!du)return toast('הקובץ לא נמצא במכשיר');
   if(!TR.items.length)TR={items:[],i:0,sub:''};const s0=TR.sub;TR.sub='';
   const it={id:uid(),du,pdf:x.mime==='application/pdf',fid,st:'ok',type:'bank_transfer',man:1,rows:[],grps:[],used:new Set(bkFileIds()).has(fid),twin:false,si:x.id};
   it.rows=(Array.isArray(x.tr)&&x.tr.length?x.tr:[{}]).map(trRow);TR.sub=s0;TR.items.push(it);i=TR.items.length-1}
- if(x.type!=='bank_transfer')siSetType(x,'bank_transfer');TR.i=i;if(cur().v==='tr')render(0);else go('tr')};
+ if(x.type!=='bank_transfer'){x.type='bank_transfer';x.man=1;siSave()}TR.i=i;if(cur().v==='tr')render(0);else go('tr')};
 /* חשבונית / תעודת משלוח ← תור הסריקה הקיים (BQ). תוצאת הזיהוי מסוג transfer לא כוללת ספק, מספר וסכום – לכן זיהוי חשבונית רגיל, פעם אחת */
 async function siToBq(x){const c=siSupCat();if(!c){toast('אין קטגוריית ספקים');return false}const fid='ft'+x.h;if(BQ.some(b=>b.fid===fid))return true;
+ if(siUsed(fid)){toast(SI_SAVED);return false}
+ {const t=siTrIt(x);if(t){if(t.rows.some(r=>r.done)){toast(SI_SAVED);return false}TR.items=TR.items.filter(y=>y!==t);TR.i=Math.max(0,Math.min(TR.i,TR.items.length-1))}}
  const du=await fget(siKey(x));if(!du){toast('הקובץ לא נמצא במכשיר');return false}
- const base={id:uid(),cat:c.id,fid,st:'q',anyCat:1,si:x.id,dnHint:x.type==='delivery_note'};
+ const base={id:uid(),cat:c.id,fid,st:'q',anyCat:1,si:x.id,dnHint:x.type==='delivery_note',big:x.big?1:0};
  if(x.mime==='application/pdf'){await fput(fid,du);BQ.push(Object.assign(base,{pg:[],hi:[],pdf:1,du}))}
  else{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true),pg=[r.u||du];await fput(fid,packPages(pg));BQ.push(Object.assign(base,{pg,hi:[hi.u||r.u||du]}))}
  return true}

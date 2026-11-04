@@ -96,6 +96,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PdfPrintPlugin.class);
         registerPlugin(LiveUpdatePlugin.class);
         registerPlugin(ShareInPlugin.class);
+        // Share menu: a re-created screen gets the same share intent again - do not take it twice
+        ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them
         LiveUpdatePlugin.beforeLoad(this);
         super.onCreate(savedInstanceState);
