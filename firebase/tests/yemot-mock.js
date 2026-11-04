@@ -99,6 +99,7 @@ function start(port) {
       if (cmd === 'FileAction') {
         const w = parseWhat(body.what);
         const ok = body.action === 'delete' && w && state.dirs[w.dir].delete(w.name);
+        if (mode === 'hangafter') return; // מוחק בפועל ולא עונה (פסק זמן אחרי שהפעולה בוצעה)
         return reply(res, 200, OK({ success: !!ok, action: body.action, reports: [{ what: body.what, success: !!ok }] }));
       }
       // RunTzintuk

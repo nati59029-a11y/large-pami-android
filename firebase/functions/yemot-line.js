@@ -463,6 +463,8 @@ const safeFilePath = (p) => voice.isSafeFilePath(p);
 const BAD_FILE_MSG = 'אפשר למחוק מהאפליקציה רק קובצי תוכן (tts/wav) בשלוחות 1–4.';
 async function removeFile(who, input, key, base) {
   // FILE_RE – צורת השם; voice.isDeletableContent – רשימה סגורה של סיומות קול (tts/wav). שם אחר (למשל 001.ini) נדחה בלי פנייה לימות.
+  // requestId בלי אף אות/ספרה (רק _ ו--) ← מזהה הגיבוי לא היה תקין (סבב תיקון 1, הערה 3)
+  if (!/[A-Za-z0-9]/.test(input.requestId)) throw bad('bad-request-id', 'הבקשה לא תקינה. נסו שוב.');
   if (typeof input.ext !== 'string' || !FILE_EXTS.includes(input.ext) || typeof input.file !== 'string' || !FILE_RE.test(input.file) || !voice.isDeletableContent(input.file)) throw bad('bad-file', BAD_FILE_MSG);
   const ext = input.ext;
   const path = `ivr2:${ext}/${input.file}`;
@@ -495,11 +497,16 @@ async function removeFile(who, input, key, base) {
       throw new HttpsError('unavailable', 'ההסרה מהקו נכשלה. נסו שוב.', { reason: 'yemot-remove-failed' });
     }
     const info = infos.find((f) => f.name === input.file);
-    if (!info) return { ok: true, file: input.file, removed: true, duplicate: true, backupId: null, message: 'הקובץ כבר לא בקו.' };
+    // הקובץ כבר לא בקו: אם יש גיבוי שלו ממחיקה שלא הסתיימה בוודאות (פסק זמן) – זו הייתה המחיקה שלנו ← הגיבוי applied, ויופיע ב"ירדו" (סבב תיקון 1)
+    if (!info) {
+      const backupId = await B.settleBackup(db, path);
+      return { ok: true, file: input.file, removed: true, duplicate: true, backupId, message: 'הקובץ כבר לא בקו.' };
+    }
     // גיבוי חובה לפני מחיקה (זורק backup-failed אם אי אפשר). ניסיון חוזר באותו requestId משתמש בגיבוי שכבר נשמר.
     const backupId = await B.backupLegacy(ctx, db, who, input.requestId, ext, input.file, info);
     try { await deleteFiles(ctx, [path]); } catch (e) {
-      await B.backupResult(db, backupId, 'not-applied', 'delete-' + (e.code || 'internal'));
+      // פסק זמן: ייתכן שימות מחקה בפועל ← uncertain (מופיע ב"ירדו" כשהקובץ לא בתיקייה). כשל ודאי ← not-applied
+      await B.backupResult(db, backupId, e instanceof YemotError && e.code === 'timeout' ? 'uncertain' : 'not-applied', 'delete-' + (e.code || 'internal'));
       logger.warn('yemot-line: remove file failed', { reason: 'yemot-remove-failed', code: e.code });
       throw new HttpsError('unavailable', 'ההסרה מהקו נכשלה. נסו שוב.', { reason: 'yemot-remove-failed' });
     }

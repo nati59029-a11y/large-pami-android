@@ -1645,6 +1645,61 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.equal(M.calls('RunTzintuk').length, 0);
   });
 
+  it('ש5 תיקון סבב 1: פסק זמן במחיקת קובץ ותיק (ימות מחקה בפועל) ← גיבוי uncertain שמופיע ב"ירדו" וניתן להחזרה; ניסיון חוזר ← applied; אחרי החזרה – "כבר הוחזר" רק כל עוד הקובץ בקו', async () => {
+    M.setMode('delete', 'hangafter');
+    const req = { requestId: rid(), ext: '3', file: '000.tts' };
+    const r = await core(LINE, 'removeItem', 'u_mgr', req, { YEMOT_TIMEOUT_MS: '300' });
+    assert.equal(r.error && r.error.details.reason, 'yemot-remove-failed', r.text);
+    assert.ok(!dir('3').has('000.tts'), 'ימות מחקה בפועל');
+    const bk = (await allDocs(env, ['yemot_line_backups'])).find((q) => q.data.opId === req.requestId);
+    assert.equal(bk.data.result, 'uncertain'); assert.equal(bk.data.status, 'complete');
+    M.setMode('delete', 'ok');
+    const b1 = await call('getLineBoard', 'u_mgr', { slot: 'updates' });
+    const e1 = b1.result.recent.find((x) => x.ref.id === bk.id);
+    assert.ok(e1, 'מופיע ב"ירדו בשבוע האחרון" עוד לפני הניסיון החוזר'); assert.equal(e1.restore.allowed, true);
+    const again = await call('removeLineItem', 'u_mgr', { requestId: rid(), ext: '3', file: '000.tts' });
+    assert.equal(again.status, 'OK', again.text); assert.equal(again.result.duplicate, true); assert.equal(again.result.backupId, bk.id);
+    assert.equal((await readDoc(env, 'yemot_line_backups/' + bk.id)).result, 'applied');
+    assert.equal(M.calls('FileAction').length, 1, 'הניסיון החוזר לא מחק שוב');
+    const rs = await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: bk.id });
+    assert.equal(rs.status, 'OK', rs.text); assert.equal(dir('3').get('000.tts'), 'עדכון ותיק');
+    const e2 = (await call('getLineBoard', 'u_mgr', { slot: 'updates' })).result.recent.find((x) => x.ref.id === bk.id);
+    assert.equal(e2.alreadyRestored, true); assert.equal(e2.restore.allowed, false, 'אחרי החזרה – בלי כפתור "החזר"');
+    // הקובץ שהוחזר ירד שוב (מחוץ לאפליקציה) ← אפשר להחזיר שוב
+    dir('3').delete('000.tts');
+    await writeDoc(env, 'yemot_state/board-updates', { stale: true });
+    const e3 = (await call('getLineBoard', 'u_mgr', { slot: 'updates' })).result.recent.find((x) => x.ref.id === bk.id);
+    assert.equal(e3.alreadyRestored, false); assert.equal(e3.restore.allowed, true);
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: bk.id })).status, 'OK');
+    // פסק זמן שבו ימות לא מחקה ← הגיבוי uncertain לא מוצג כ"ירד", והחזרה ← restore-not-down
+    M.setMode('delete', 'hang');
+    const req2 = { requestId: rid(), ext: '1', file: '000.tts' };
+    assert.equal((await core(LINE, 'removeItem', 'u_mgr', req2, { YEMOT_TIMEOUT_MS: '300' })).error.details.reason, 'yemot-remove-failed');
+    assert.ok(dir('1').has('000.tts'));
+    const bk2 = (await allDocs(env, ['yemot_line_backups'])).find((q) => q.data.opId === req2.requestId);
+    assert.equal(bk2.data.result, 'uncertain');
+    M.setMode('delete', 'ok');
+    assert.ok(!(await call('getLineBoard', 'u_mgr', { slot: 'recipes' })).result.recent.some((x) => x.ref.id === bk2.id));
+    assert.equal((await call('restoreLineItem', 'u_mgr', { requestId: rid(), kind: 'backup', id: bk2.id })).error.details.reason, 'restore-not-down');
+    assert.equal(dir('1').get('000.tts'), 'מתכון ותיק');
+  });
+
+  it('ש5 תיקון סבב 1: requestId בלי אות/ספרה נדחה בהורדה לפי שם (בלי פנייה לימות); האזנה מהקו שנכשלה לא נספרת במכסה', async () => {
+    for (const requestId of ['________', '--------', '_-_-_-_-_-']) {
+      const r = await call('removeLineItem', 'u_mgr', { requestId, ext: '4', file: '000.tts' });
+      assert.equal(r.error && r.error.details.reason, 'bad-request-id', requestId);
+    }
+    assert.equal(yemotCalls(), 0); assert.ok(dir('4').has('000.tts'));
+    dir('3').set('007.wav', wav(1));
+    M.setMode('download', '404'); M.setMode('text', 'error');
+    for (const file of ['007.wav', '000.tts']) assert.equal((await call('getLineAudio', 'u_emp', { ref: { kind: 'file', ext: '3', file } })).error.details.reason, 'listen-unavailable', file);
+    const c = await readDoc(env, 'yemot_state/listen-u_emp');
+    assert.equal(c ? c.count : 0, 0, 'כשל לא נספר');
+    M.setMode('download', 'ok');
+    assert.equal((await call('getLineAudio', 'u_emp', { ref: { kind: 'file', ext: '3', file: '007.wav' } })).status, 'OK');
+    assert.equal((await readDoc(env, 'yemot_state/listen-u_emp')).count, 1, 'הצלחה נספרת');
+  });
+
   it('ש5 הסוד של ימות לא דולף: לא באף תשובה ולא ביומן (כולל כל בדיקות שלב 5, וגם כששרת הדמה מחזיר אותו בשגיאה)', async () => {
     M.setMode('dir', 'error'); M.setMode('download', 'error'); M.setMode('text', 'exception');
     await core(BOARD, 'board', 'u_mgr', { slot: 'hours' });

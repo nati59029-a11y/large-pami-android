@@ -115,7 +115,7 @@ async function loadRecords(db, slot, ext) {
     }
   }
   if (ext !== '') {
-    for (const d of (await db.collection(BACKUPS).where('ext', '==', ext).get()).docs) { const x = d.data(); seen(x); if (x.status === 'complete' && x.result === 'applied') down.push({ kind: 'backup', doc: d }); }
+    for (const d of (await db.collection(BACKUPS).where('ext', '==', ext).get()).docs) { const x = d.data(); seen(x); if (x.status === 'complete' && ['applied', 'uncertain'].includes(x.result)) down.push({ kind: 'backup', doc: d }); }
   }
   return { online, certain, down, changedAt };
 }
@@ -162,6 +162,12 @@ async function board(request, key, base) {
   const restoredLive = new Set();
   for (const e of recs.online.values()) { const r = e.doc.get('restoredFrom'); if (r && r.id) restoredLive.add(`${r.kind}:${r.id}`); }
   const names = new Set(files.map((f) => f.name));
+  // קובץ ותיק שהוחזר (yemot_state/restore-*): "כבר הוחזר" רק כל עוד הקובץ שהוחזר עדיין בתיקייה (סבב תיקון 1, הערה 1)
+  if (ext !== '') {
+    for (const d of (await db.collection('yemot_state').where('restoredFrom.kind', '==', 'backup').get()).docs) {
+      if (d.get('status') === 'live' && d.get('ext') === ext && names.has(d.get('file'))) restoredLive.add(`backup:${d.get('restoredFrom.id')}`);
+    }
+  }
   const onLine = files.slice().sort((a, b) => (a.name < b.name ? 1 : -1)).map((f) => {
     const e = recs.online.get(voice.pathOf(ext, f.name));
     if (!e) {
@@ -197,6 +203,8 @@ async function board(request, key, base) {
     const x = e.doc.data();
     const downAt = e.kind === 'backup' ? x.finishedAt || x.createdAt : x.removedAt || (x.status === 'replaced' ? x.updatedAt : null);
     if (!inRestoreWindow(dayOf(downAt), today)) continue;
+    // גיבוי שהמחיקה שלו לא ודאית: "ירד" רק אם הקובץ באמת לא בתיקייה
+    if (e.kind === 'backup' && x.result === 'uncertain' && names.has(x.file)) continue;
     const saved = e.kind === 'backup' ? (x.storagePath && !x.purgedAt ? x.storagePath : null) : savedPath(x);
     const txt = e.kind === 'backup' ? typeof x.text === 'string' && x.text !== '' && !x.purgedAt : hasText(x);
     const downReason = e.kind === 'backup' ? 'legacy-removed' : x.status === 'replaced' ? 'replaced' : (e.kind === 'promo' ? x.removedVia === 'app' : x.removedBy !== 'expiry') ? 'removed' : 'expired';
@@ -231,6 +239,16 @@ async function takeListen(db, uid) {
     if (used >= LISTEN_LINE_DAILY) throw new HttpsError('resource-exhausted', 'הגעתם למכסת ההאזנות מהקו להיום. נסו שוב מחר.', { reason: 'listen-limit', limit: LISTEN_LINE_DAILY });
     tx.set(ref, { day, count: used + 1, updatedAt: stamp() });
   });
+}
+async function giveBackListen(db, uid) {
+  const ref = db.doc(`yemot_state/listen-${uid}`);
+  const day = israelDay();
+  try {
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      if (s.exists && s.get('day') === day && Number(s.get('count')) > 0) tx.update(ref, { count: Number(s.get('count')) - 1, updatedAt: stamp() });
+    });
+  } catch (e) { logger.warn('yemot-board: listen refund failed', { reason: 'listen-refund' }); }
 }
 const listenUnavailable = () => new HttpsError('unavailable', 'לא הצלחנו להביא את ההקלטה מהקו. נסו שוב.', { reason: 'listen-unavailable' });
 const textReply = (t) => ({ ok: true, mode: 'text', text: cleanText(t).slice(0, TEXT_OUT_MAX), approx: true });
@@ -302,12 +320,13 @@ async function listen(request, key, base) {
   const ctx = ctxOf(key, base);
   await takeListen(db, who.uid);
   if (voice.isTextFile(linePath)) {
-    try { return textReply(await readText(ctx, linePath)); } catch (e) { logger.warn('yemot-board: listen text failed', { reason: 'listen-unavailable', code: e && e.code }); throw listenUnavailable(); }
+    try { return textReply(await readText(ctx, linePath)); } catch (e) { await giveBackListen(db, who.uid); logger.warn('yemot-board: listen text failed', { reason: 'listen-unavailable', code: e && e.code }); throw listenUnavailable(); }
   }
   try {
     const buf = await downloadFile(ctx, linePath, LISTEN_MAX_BYTES);
     return { ok: true, mode: 'audio', mime: 'audio/wav', data: buf.toString('base64'), durationSec: null, source: 'line' };
   } catch (e) {
+    await giveBackListen(db, who.uid); // האזנה שנכשלה לא נספרת (סבב תיקון 1, הערה 4)
     if (e instanceof YemotError && e.code === 'too-big') throw pre('audio-too-big', 'הקובץ גדול מדי להשמעה באפליקציה.');
     logger.warn('yemot-board: listen failed', { reason: 'listen-unavailable', code: e && e.code });
     throw listenUnavailable();
@@ -349,7 +368,7 @@ async function backupLegacy(ctx, db, who, requestId, ext, file, info) {
   const t = new Date();
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
     .formatToParts(t).map((q) => [q.type, q.value]));
-  const backupId = `${p.year}${p.month}${p.day}-${p.hour}${p.minute}${p.second}-${requestId.replace(/[^A-Za-z0-9]/g, '').slice(-6)}`;
+  const backupId = `${p.year}${p.month}${p.day}-${p.hour}${p.minute}${p.second}-${requestId.replace(/[^A-Za-z0-9]/g, '').slice(-6) || 'x'}`;
   const ref = db.doc(`${BACKUPS}/${backupId}`);
   const kind = voice.isTextFile(file) ? 'text' : 'audio';
   const base = { reason: 'file', opId: requestId, ext, file, path, kind, lineSize: info ? info.size : null, itemRef: null, byUid: who.uid, createdAt: t.toISOString() };
@@ -377,6 +396,16 @@ async function backupLegacy(ctx, db, who, requestId, ext, file, info) {
     try { await ref.create(Object.assign({}, base, { status: 'failed', result: 'not-applied', error: String((e && e.code) || 'internal').slice(0, 40), finishedAt: stamp() })); } catch (e2) { /* */ }
     throw backupFailed();
   }
+}
+// הקובץ כבר לא בקו: גיבוי complete של אותו נתיב (מהחלון האחרון) שהמחיקה שלו לא ודאית / לא הושלמה ← applied. מחזיר את המזהה או null.
+async function settleBackup(db, path) {
+  const cutoff = new Date(Date.now() - (RESTORE_DAYS + 1) * 86400000).toISOString();
+  const ds = (await db.collection(BACKUPS).where('path', '==', path).get()).docs
+    .filter((d) => d.get('status') === 'complete' && ['uncertain', 'not-applied', 'pending'].includes(d.get('result')) && String(d.get('createdAt') || '') >= cutoff)
+    .sort((a, b) => (String(a.get('createdAt')) < String(b.get('createdAt')) ? 1 : -1));
+  if (!ds.length) return null;
+  await backupResult(db, ds[0].id, 'applied', null);
+  return ds[0].id;
 }
 async function backupResult(db, backupId, result, error) {
   await db.doc(`${BACKUPS}/${backupId}`).update({ result, error: error || null, finishedAt: stamp() });
@@ -519,7 +548,7 @@ async function restore(request, key, base) {
     else throw notFound();
   } else {
     slot = x.ext === String(cfg.ext) ? 'promos' : EXT_SLOT[x.ext];
-    if (!slot || x.status !== 'complete' || x.result !== 'applied') throw notFound();
+    if (!slot || x.status !== 'complete' || !['applied', 'uncertain'].includes(x.result)) throw notFound();
     downAt = x.finishedAt || x.createdAt;
   }
   if (!inRestoreWindow(dayOf(downAt), today)) throw pre('restore-too-old', 'אפשר להחזיר רק הודעות שירדו בשבוע האחרון.');
@@ -538,7 +567,7 @@ async function restore(request, key, base) {
 
   // 3. כבר הוחזר? (העתק "בקו" עם אותו restoredFrom, שאינו הבקשה הזו)
   const targetId = input.kind === 'promo' ? 'rst_' + input.requestId : input.kind === 'item' ? input.requestId : 'restore-' + input.requestId;
-  for (const c of [ITEMS, PROMOS, 'yemot_state']) {
+  for (const c of input.kind === 'backup' ? [] : [ITEMS, PROMOS]) { // קובץ ותיק – נבדק ב-restoreBackup מול התיקייה
     const ds = (await db.collection(c).where('restoredFrom.id', '==', input.id).get()).docs;
     if (ds.some((d) => d.id !== targetId && d.get('restoredFrom.kind') === input.kind && (c === ITEMS ? ON_LINE.includes(d.get('status')) || d.get('status') === 'uploading' : c === PROMOS ? holdsPath(d.data()) : d.get('status') === 'live'))) {
       throw pre('already-on-line', 'ההודעה הזו כבר הוחזרה לקו.');
@@ -618,6 +647,10 @@ async function restoreBackup(who, input, b, from, key, base) {
     if (infos.some((f) => f.name === file)) {
       // ניסיון קודם של אותה בקשה שאולי הצליח (פסק זמן) – הקובץ בשם הזה הוא שלנו
       if (op.exists && op.get('status') === 'uncertain') { await opRef.update({ status: 'live', updatedAt: stamp() }); return reply(false); }
+      if (b.result === 'uncertain') throw pre('restore-not-down', 'ההודעה הזו עדיין בקו.'); // המחיקה הלא ודאית לא קרתה בפועל
+      const live = (await db.collection('yemot_state').where('restoredFrom.id', '==', from.id).get()).docs
+        .some((d) => d.id !== opRef.id && d.get('restoredFrom.kind') === 'backup' && d.get('status') === 'live');
+      if (live) throw pre('already-on-line', 'ההודעה הזו כבר הוחזרה לקו.');
       throw pre('name-taken', 'בשלוחה כבר יש קובץ בשם הזה. כדי לא לדרוס אותו, הקובץ לא הוחזר.');
     }
     await opRef.set({ restoredFrom: from, path, ext, file, status: 'uploading', byUid: who.uid, createdAt: stamp(), updatedAt: stamp() });
@@ -698,4 +731,4 @@ exports.extendLineItem = onCall(wrap('extend', (r) => extend(r)));
 exports.restoreLineItem = onCall({ secrets: [YEMOT_API_KEY, voice.ELEVENLABS_API_KEY], timeoutSeconds: 120 }, wrap('restore', (r) => restore(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 // נקראת מריצת הלילה (yemot.js). לא נספרת כפונקציה.
 Object.defineProperty(exports, 'cleanLineAudio', { enumerable: false, value: cleanLineAudio });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { board, listen, extend, restore, removePromo, backupLegacy, backupResult, keepBeforeRemove, promoAt, cleanLineAudio, RESTORE_DAYS, AUDIO_KEEP_DAYS, LOCK_MS } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { board, listen, extend, restore, removePromo, backupLegacy, backupResult, settleBackup, keepBeforeRemove, promoAt, cleanLineAudio, RESTORE_DAYS, AUDIO_KEEP_DAYS, LOCK_MS } });
