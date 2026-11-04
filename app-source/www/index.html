@@ -1060,7 +1060,7 @@ function awMsg(r){if(r.ex)dlg(`<h3>החשבונית חוברה לתשלום</h3>
 let AWP=null;
 function awOffer(t,fid,onNew,onDone,fx){const L=awFor(t.sub,!!fx).sort((a,b)=>(Math.abs(a.amt-t.amt)<0.005?0:1)-(Math.abs(b.amt-t.amt)<0.005?0:1)||(a.date||'').localeCompare(b.date||''));AWP={t,fid,onNew,onDone,fx};
  dlg(`<h3>יש תשלום שממתין לחשבונית</h3><p class="note">ל${esc(subName(t))} כבר שולם בהעברה, והחשבונית עוד לא חוברה. כדי שההוצאה לא תיספר פעמיים, חברו את החשבונית (${ils(t.amt)}) לתשלום:</p>${L.map(e=>`<button class="li exp" data-a="awJoin" data-e="${e.id}"><div class="m"><b>לחבר לתשלום שממתין</b><small>שולם ${dfmt(((e.pays||[])[0]||{}).d||e.date)}${e.fx?' · '+mfmt(pmon(e)):''} · ${esc(e.note||'')}</small></div><div class="a">${ils(cashPaid(e))}</div></button>`).join('')}<button class="btn g w" style="margin-top:8px" data-a="awNew">זו הוצאה אחרת – צור הוצאה חדשה</button><button class="btn g w" style="margin-top:8px" data-a="closeDlg">ביטול</button>`)}
-ACT.awJoin=el=>{const o=AWP,e=S.tx.find(x=>x.id===el.dataset.e);if(!o||!e||!e.await){AWP=null;return closeDlg()}AWP=null;const r=awJoin(e,o.t,o.fid,o.fx);save();closeDlg();if(o.onDone)o.onDone();rerender();awMsg(r)};
+ACT.awJoin=el=>{const o=AWP,e=S.tx.find(x=>x.id===el.dataset.e);if(!o||!e||!e.await){AWP=null;return closeDlg()}AWP=null;const r=awJoin(e,o.t,o.fid,o.fx);if(o.onDone)o.onDone(e);save();closeDlg();rerender();awMsg(r)};
 ACT.awNew=()=>{const o=AWP;AWP=null;closeDlg();if(o&&o.onNew)o.onNew()};
 /* חיבור ישיר מפרטי התנועה */
 ACT.awAtt=el=>{const e=S.tx.find(x=>x.id===el.dataset.id);if(!e||!e.await)return;closeDlg();const sup=beh(e)==='sup';
@@ -1384,15 +1384,15 @@ function impEval(){
   if(t){t._cat=c;const k=key(t);cur[k]=(cur[k]||0)+1;let fl=null;if(!(cur[k]<=(have[k]||0))&&t.inv&&t.sub){const L=(noInv[key2(t)]||[]).filter(z=>!claimed.has(z.id));if(L.length)fl=L[0]}
    if(fl){claimed.add(fl.id);x.st='fill';x.fill=fl.id;x.t=t;warns.push('הוצאה קיימת בלי מספר חשבונית: יתווסף המספר '+t.inv)}
    else if(cur[k]<=(have[k]||0)){x.st='dup';warns.push('כבר קיימת')}else{x.t=t;if(cur[k]>1)warns.push('שורה זהה לשורה קודמת בקובץ – יובאה בכל זאת')}}
-  if(x.t&&x.st==='ok'&&x.t.sub&&(x.t.kind||'inv')==='inv'&&x.t.amt>0&&['sup','fixed'].includes((cat(x.t.cat)||{}).beh)&&awFor(x.t.sub).length){x.st='aw';x.t=null;warns.push('לכרטיס יש תשלום ששולם וממתין לחשבונית – השורה לא יובאה. הוסיפו את החשבונית ידנית, והאפליקציה תציע לחבר אותה לתשלום')}
+  if(x.t&&x.st==='ok'&&x.t.sub&&(x.t.kind||'inv')==='inv'&&x.t.amt>0&&!(x.t.pays||[]).length&&['sup','fixed'].includes((cat(x.t.cat)||{}).beh)){const AW=awFor(x.t.sub),aw0=AW.map(e=>e.date||'').filter(Boolean).sort()[0]||'';if(AW.length&&(!aw0||!x.t.date||x.t.date>=addDays(aw0,-31))){x.st='aw';x.t=null;warns.push('לכרטיס יש תשלום ששולם וממתין לחשבונית – השורה לא יובאה, כדי שלא תיספר פעמיים. הוסיפו אותה ידנית בלי לסמן ששולמה (ידני או סריקה), והאפליקציה תציע לחבר אותה לתשלום')}}
   x.msg=errs.concat(warns);R.push(x)});
  IMPS.rows=R;IMPS.newSubs=[...newSubs];IMPS.simCats=simCats}
-ACT.impGo=()=>{const R=IMPS.rows.filter(r=>r.st==='ok'),FL=IMPS.rows.filter(r=>r.st==='fill'),snap=JSON.stringify(S);try{localStorage.setItem(PREV,snap)}catch(e){}
+ACT.impGo=()=>{const R=IMPS.rows.filter(r=>r.st==='ok'),FL=IMPS.rows.filter(r=>r.st==='fill'),awN=IMPS.rows.filter(r=>r.st==='aw').length,snap=JSON.stringify(S);try{localStorage.setItem(PREV,snap)}catch(e){}
  const ids=[],ns=[],nc=[];
  Object.values(IMPS.simCats||{}).forEach(c=>{if(R.some(r=>r.t._cat===c)){const cc={id:c.id,kind:c.kind,name:c.name,beh:c.beh};S.cats.push(cc);nc.push(cc.id)}});
  R.forEach(r=>{const t=r.t,c=cat(t.cat);if(!t.sub&&c.beh!=='free'){let sb=S.subs.find(z=>z.cat===c.id&&nrm(z.name)===nrm(t._subName));if(!sb){sb={id:uid(),cat:c.id,name:t._subName};S.subs.push(sb);ns.push(sb.id)}t.sub=sb.id}delete t._subName;delete t._cat;S.tx.push(t);ids.push(t.id)});
  const fills=[];FL.forEach(r=>{const tx=S.tx.find(z=>z.id===r.fill);if(tx&&!tx.inv){tx.inv=r.t.inv;fills.push(tx.id)}});
- S.imp={ids,subs:ns,cats:nc,fills,date:new Date().toISOString()};save();const n=ids.length;IMPS=null;rerender();toast('יובאו '+n+' תנועות'+(fills.length?`, עודכנו ${fills.length} מספרי חשבונית`:'')+(ns.length?` ונוצרו ${ns.length} כרטיסים`:''))};
+ S.imp={ids,subs:ns,cats:nc,fills,date:new Date().toISOString()};save();const n=ids.length;IMPS=null;rerender();toast('יובאו '+n+' תנועות'+(fills.length?`, עודכנו ${fills.length} מספרי חשבונית`:'')+(ns.length?` ונוצרו ${ns.length} כרטיסים`:'')+(awN?` · ${awN} שורות לא יובאו (ממתינות לחיבור לתשלום)`:''))};
 ACT.impUndo=()=>ask('לבטל את כל התנועות שיובאו בפעם האחרונה?',()=>{const I=S.imp;S.tx=S.tx.filter(t=>!I.ids.includes(t.id));S.tx.forEach(t=>{if((I.fills||[]).includes(t.id))t.inv=''});S.subs=S.subs.filter(s=>!(I.subs||[]).includes(s.id)||S.tx.some(t=>t.sub===s.id));S.cats=S.cats.filter(c=>!(I.cats||[]).includes(c.id)||S.tx.some(t=>t.cat===c.id));S.imp=null;save();rerender();toast('הייבוא בוטל')},'בטל ייבוא');
 
 /* ===== סריקת חשבוניות והשוואות ===== */
@@ -1698,7 +1698,7 @@ async function runQ(field,val){const r=await fsx(':runQuery',{method:'POST',body
 function inbHeal(){const seen=new Set();const L=S.inbox.filter(x=>seen.has(x.id)?false:(seen.add(x.id),true));if(L.length!==S.inbox.length){S.inbox=L;save()}}
 async function pullInbox(){if(!isA())return 0;if(pullInbox.b)return 0;pullInbox.b=1;try{const n=await pullInbox2();try{await pullSiteInc()}catch(e){if(!e.offline)toast('מכירות אתר: המשיכה נכשלה – '+e.message)}try{await zcPull()}catch(e){}try{await dqPull()}catch(e){}return n}finally{pullInbox.b=0}}
 async function pullInbox2(){inbHeal();const docs=await runQ('status','new');let n=0;const done=[];
- for(const d of docs){const id=idOf(d);if(!idOk(id))continue;if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id)){done.push(id);continue}
+ for(const d of docs){const id=idOf(d);if(!idOk(id))continue;if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id||(x.srcs||[]).includes(id))){done.push(id);continue}
   let data={};try{data=JSON.parse(gv(d,'data'))}catch(e){}if(!data||typeof data!=='object')data={};if(data.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(data.date)))data.date='';
   let f='';const np=+gv(d,'parts')||0;if(np){try{for(let k=0;k<np;k++){const c=await fsx('/chunks/'+id+'_'+k);f+=gv(c,'data')}}catch(e){continue}}else f=gv(d,'file');if(f){try{await fput('i'+id,f)}catch(e){continue}}
   S.inbox.push({id,by:gv(d,'by'),at:gv(d,'created'),d:data,file:f?'i'+id:'',np});n++;done.push(id)}
@@ -1761,7 +1761,7 @@ ACT.inbOk=async el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)retur
  const t={id:uid(),src:it.id,t:'exp',cat:cid,sub:sid,date,amt:rnd(a),plan:pMonth(d.plan)||(b==='sup'?payDef(sid,date):date.slice(0,7)),inv:s_(d.inv),note:('הוכנס על ידי '+it.by+(d.note&&b!=='free'?' · '+d.note:'')),desc:b==='free'?(s_(d.note)||inbName(it)):(cid==='p_exp'?inbName(it):''),kind:a<0?'credit':'inv',pays:[],file:it.file||''};if(d.reg&&zcRegOk(d.creg)){t.creg=d.creg;t.cowhy=s_(d.note).slice(0,300);t.ctm=zcTime(d.ctm)}
  if(b==='emp')t.pays=[{id:uid(),d:date,a:t.amt,m:d.m}];
  if(b==='sup'&&d.dn&&!t.inv)t.dn=true;
- if(!el.dataset.aw&&(b==='sup'||b==='fixed')&&sid&&t.kind==='inv'&&!t.dn&&t.amt>0&&awFor(sid).length)return awOffer(t,t.file||null,()=>ACT.inbOk({dataset:{id:it.id,ok:'1',aw:'1'}}),()=>{S.inbox=S.inbox.filter(x=>x.id!==it.id)});
+ if(!el.dataset.aw&&(b==='sup'||b==='fixed')&&sid&&t.kind==='inv'&&!t.dn&&t.amt>0&&awFor(sid).length)return awOffer(t,t.file||null,()=>ACT.inbOk({dataset:{id:it.id,ok:'1',aw:'1'}}),e=>{if(e){if(!e.src)e.src=it.id;else if(e.src!==it.id){e.srcs=e.srcs||[];if(!e.srcs.includes(it.id))e.srcs.push(it.id)}}S.inbox=S.inbox.filter(x=>x.id!==it.id)});
  S.tx.push(t);
  S.inbox=S.inbox.filter(x=>x.id!==it.id);save();rerender();toast(cid==='p_exp'?'נשמר ב"ממתין לסיווג"':'ההוצאה נרשמה')};
 ACT.inbNo=el=>ask('לדחות את ההוצאה? היא תימחק מהרשימה ולא תירשם.',()=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(it&&it.d&&it.d.reg)coDelQ(it.id);S.inbox=S.inbox.filter(x=>x.id!==el.dataset.id);save();rerender()});
