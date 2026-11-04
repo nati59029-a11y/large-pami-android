@@ -175,7 +175,10 @@ async function audioOpenings(db, v, target) {
   return (await db.collection(ITEMS).where('slot', '==', 'opening').get()).docs
     .filter((d) => d.id !== v.requestId && ON_LINE.includes(d.get('status')) && d.get('path') === target && voice.isAudioFile(target));
 }
-async function backupOpening(ctx, prev, files) {
+// required (הבהרת המתאם, סבב תיקון 1): גיבוי חובה רק בהקלטת פתיחה, או כשלקודמת אין נוסח ברשומה.
+// נוסח (קול משוכפל) שדורס פתיחה קודמת שיש לה נוסח: מנסים לשמור עותק שמע; אם נכשל – ממשיכים עם הנוסח בלבד
+// (ההחזרה = הקראה מחדש, החלטה 4), מסמנים ברשומה הקודמת audioError:'backup-failed', ומחזירים אזהרה 'opening-backup-text-only'.
+async function backupOpening(ctx, prev, files, isRecording, warnings) {
   const done = [];
   for (const d of prev) {
     const p = d.get('path');
@@ -187,17 +190,26 @@ async function backupOpening(ctx, prev, files) {
       if (size > 0) continue; // יש כבר עותק שמור
     }
     if (!safePath(p)) throw new BackupError('unsafe-path');
-    let buf;
-    try {
-      buf = await downloadFile(ctx, p, LISTEN_MAX_BYTES);
-      if (buf.length < 44 || buf.toString('latin1', 0, 4) !== 'RIFF') throw new BackupError('not-wav');
-      if (onLine.size !== null && onLine.size !== buf.length) throw new BackupError('size-mismatch');
-    } catch (e) {
-      // אפשרות א' (לא פעילה): כאן – גיבוי של הנוסח בלבד, רק אחרי אישור מפורש של המשתמש בבקשה.
-      throw e instanceof BackupError ? e : new BackupError(e instanceof YemotError ? 'download-' + e.code : 'download-internal');
-    }
+    const textOnly = !isRecording && typeof d.get('text') === 'string' && d.get('text').trim() !== '';
     let saved;
-    try { saved = await voice.saveLineAudio(`items/${d.id}.wav`, buf, 'audio/wav'); } catch (e) { throw new BackupError('save-failed'); }
+    try {
+      let buf;
+      try {
+        buf = await downloadFile(ctx, p, LISTEN_MAX_BYTES);
+        if (buf.length < 44 || buf.toString('latin1', 0, 4) !== 'RIFF') throw new BackupError('not-wav');
+        if (onLine.size !== null && onLine.size !== buf.length) throw new BackupError('size-mismatch');
+      } catch (e) {
+        // אפשרות א' (לא פעילה): כאן – גיבוי של הנוסח בלבד גם בהקלטת פתיחה, רק אחרי אישור מפורש של המשתמש בבקשה.
+        throw e instanceof BackupError ? e : new BackupError(e instanceof YemotError ? 'download-' + e.code : 'download-internal');
+      }
+      try { saved = await voice.saveLineAudio(`items/${d.id}.wav`, buf, 'audio/wav'); } catch (e) { throw new BackupError('save-failed'); }
+    } catch (e) {
+      if (!textOnly) throw e;
+      logger.warn('yemot-line: opening backup text only', { reason: 'opening-backup-text-only', code: e.code, id: d.id });
+      await d.ref.update({ audioError: 'backup-failed', updatedAt: new Date().toISOString() });
+      if (!warnings.includes('opening-backup-text-only')) warnings.push('opening-backup-text-only');
+      continue;
+    }
     await d.ref.update(Object.assign(saved, { updatedAt: new Date().toISOString() }));
     done.push(d.id);
   }
@@ -272,6 +284,7 @@ async function publishItem(request, key, base) {
     //   (1) לא דורסים הקלטת פתיחה ישנה (M1000.wav) שלא הועלתה מהאפליקציה (opening-legacy-file, בלי שינוי);
     //   (2) פתיחה קודמת של האפליקציה בקובץ שמע, בלי שמע שמור – קודם גיבוי מהקו ל-Storage (backupOpening). אין גיבוי ← לא מחליפים.
     let backedUp = [];
+    const warnings = [];
     const prevAudio = S.fixedName ? await audioOpenings(db, v, voice.pathOf(S.ext, voice.fileName(S.fixedName, { ext }))) : [];
     // קריאת התיקייה רק כשצריך (כמו קודם: פתיחה בשמע; ובנוסף – כשיש פתיחה קודמת בשמע לגבות)
     if (S.fixedName && ((!plan.keepPath && ext === 'wav') || prevAudio.length)) {
@@ -289,7 +302,7 @@ async function publishItem(request, key, base) {
           throw new HttpsError('failed-precondition', `בקו יש הקלטת פתיחה ישנה (${target}) שלא הועלתה מהאפליקציה. כדי לא למחוק אותה, הפתיחה לא הוחלפה. צריך קודם להעביר אותה לגיבוי (BACKUP_M1000.wav).`, { reason: 'opening-legacy-file' });
         }
       }
-      try { backedUp = await backupOpening(ctx, prevAudio, files); } catch (e) {
+      try { backedUp = await backupOpening(ctx, prevAudio, files, v.kind === 'audio', warnings); } catch (e) {
         if (!(e instanceof BackupError)) throw e;
         await fail('backup-failed', false);
         logger.warn('yemot-line: opening backup failed', { reason: 'backup-failed', code: e.code, requestId: v.requestId });
@@ -334,7 +347,6 @@ async function publishItem(request, key, base) {
     }
     await testFault(db, 'line-after-upload');
     await itemRef.update({ status: 'live', uncertain: false, error: null, lockAt: null, lockReq: null, updatedAt: stamp() });
-    const warnings = [];
 
     // 3א. עותק של השמע שעלה (הקלטה / קול משוכפל) ב-line_audio/items/<id>. כשל = אזהרה בלבד; ההעלאה הצליחה.
     const audioSaved = await keepAudio(itemRef, `items/${v.requestId}`, rendered, warnings, v.requestId);
@@ -361,7 +373,8 @@ async function publishItem(request, key, base) {
       }
       await unlockSlot();
     }
-    const message = DONE_MSG[v.slot] + (v.until ? ` היא תרד מהקו אחרי ${v.until.split('-').reverse().join('/')}.` : '') + (warnings.length ? ' התוכן הקודם עוד לא הוסר מהקו – הוא יוסר בעדכון הבא.' : '');
+    const message = DONE_MSG[v.slot] + (v.until ? ` היא תרד מהקו אחרי ${v.until.split('-').reverse().join('/')}.` : '') + (warnings.includes('yemot-remove-failed') ? ' התוכן הקודם עוד לא הוסר מהקו – הוא יוסר בעדכון הבא.' : '')
+      + (warnings.includes('opening-backup-text-only') ? ' לא נשמר עותק שמע של הפתיחה הקודמת – אפשר להחזיר אותה רק בהקראה מחדש של הנוסח.' : '');
     return reply({ file, path, kind: v.kind, spoken }, { replaced, warnings, message, engine: rendered.engine, audioSaved, backedUp });
   } catch (e) {
     if (e instanceof HttpsError) throw e;
