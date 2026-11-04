@@ -40,7 +40,7 @@ const SLACT={recipes:'1',promos:'2',updates:'3',hours:'4',opening:'open'}; // ש
 const recMax=slot=>{const m=lim().recordSecBySlot;return(m&&+m[slot])||(slot==='opening'?60:lim().recordSec)};
 const canRec=slot=>{const c=lim().canRecord;if(c&&c[slot]===false)return false;return isA()||['recipes','promos','updates'].includes(slot)}; // נוחות בלבד: ההרשאה נאכפת בשרת
 const modeOf=slot=>Y.modes[slot]||'type';
-const modeChips=slot=>canRec(slot)?`<div class="chips" role="radiogroup" style="margin-bottom:12px">${[['type','הקלדה'],['rec','הקלטה']].map(([v,t])=>`<button type="button" class="chip ${modeOf(slot)===v?'on':''}" role="radio" aria-checked="${modeOf(slot)===v}" data-a="ylMode" data-s="${slot}" data-v="${v}">${t}</button>`).join('')}</div>`:'';
+const modeChips=slot=>canRec(slot)?`<div class="chips" role="radiogroup">${[['type','הקלדה'],['rec','הקלטה']].map(([v,t])=>`<button type="button" class="chip ${modeOf(slot)===v?'on':''}" role="radio" aria-checked="${modeOf(slot)===v}" data-a="ylMode" data-s="${slot}" data-v="${v}">${t}</button>`).join('')}</div>`:'';
 // ---------- שרת ----------
 async function call(name,data,ms){
  const t=await tok(),ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),ms||75000);let r,j=null;
@@ -150,7 +150,7 @@ const offerTxt=it=>it.kind==='A'?`${it.k} ב-${shN(it.tot)} ₪`:it.kind==='B'?`
 function vPromos(){const rows=promoRows(),m=isA();
  if(typeof shSync==='function'&&typeof shOn==='function'){try{if(shOn())shSync().then(ch=>{if(ch&&here('2')&&!typing())redraw()}).catch(()=>{})}catch(e){}}
  return{t:'מבצעים',s:'שלוחה 2',h:`<div class="card"><p class="note" style="margin:0">בוחרים מבצע מהמדף, מתקנים את הנוסח, שומעים ושולחים. ${m?'מנהל יכול לבחור גם צינתוק.':'השליחה היא בלי צינתוק.'}</p></div>
- <div class="sec"><h3>מבצע מוקלט</h3></div><div class="card"><p class="note" style="margin:0 0 10px">הקלטה בקול שלכם, בלי צינתוק. בשליחה בוחרים מתי להוריד אותה מהקו.</p>${recHtml('promos')}</div>
+ <div class="sec"><h3>מבצע מוקלט</h3></div><div class="card"><p class="note">הקלטה בקול שלכם, בלי צינתוק. בשליחה בוחרים מתי להוריד אותה מהקו.</p>${recHtml('promos')}</div>
  <div class="sec"><h3>המבצעים במדף</h3></div>
  ${rows.length?rows.map(x=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.it.n)}</b><small>${esc(offerTxt(x.it))}${x.it.d?' · '+esc(x.it.d):''}</small></div><button class="btn s" data-a="ylPromo" data-k="${x.k}" data-i="${x.i}">שלח לקו…</button></div>`).join(''):'<p class="note">אין עדיין מבצעים במדף. בונים אותם במסך "מחירים ומבצעים למדף", "מבצע למדף".</p>'}
  ${m?`<div class="sec"><h3>מבצע ידני</h3></div><div class="card"><p class="note" style="margin:0 0 8px">מבצע בלי בסיס במדף. כתבו את הנוסח שיוקרא.</p>${field('m','הנוסח',4)}${sendBtn('m','manual')}</div>`:''}`}}
@@ -167,11 +167,12 @@ function vUpdates(){const rec=modeOf('updates')==='rec';
  ${rec&&canRec('updates')?recHtml('updates'):`${field('u','נוסח העדכון',5)}${sendBtn('u','updates')}`}</div>
  <div class="sec"><h3>העדכונים שבקו</h3></div><div id="ylList">${listHtml('updates')}</div>`}}
 ACT.ylMode=el=>{if(Y.rec&&Y.rec.on)recDiscard();Y.modes[el.dataset.s||'updates']=el.dataset.v;redraw()};
+const fdur=s=>fsec(Math.floor(s)); // מוצג כמו בנגן (עיגול כלפי מטה), כדי ש-0:03 לא יופיע ליד 0:02
 function recHtml(slot){slot=slot||'updates';const R=Y.rec&&Y.rec.slot===slot?Y.rec:null,max=recMax(slot),da=`data-s="${slot}"`;
  if(!canRec(slot))return'';
- if(R&&R.on)return`<p style="font-weight:800;color:var(--bad);margin:0 0 8px">● מקליט… <span id="ylRecT" dir="ltr">0:00 / ${fsec(max)}</span></p><button class="btn w" data-a="ylRecStop" ${da}>עצור הקלטה</button>`;
- if(R&&R.url)return`<p class="note" style="margin:0 0 6px">ההקלטה מוכנה (${fsec(R.sec)}). אפשר להאזין לפני השליחה:</p><audio controls src="${R.url}" style="width:100%;margin-bottom:10px"></audio><div class="row"><button class="btn grow" data-a="ylRecSend" ${da}>שלח לקו…</button><button class="btn g grow" data-a="ylRecStart" ${da}>הקלט מחדש</button></div>`;
- return`<p class="note" style="margin:0 0 10px">עד ${fsec(max)} דקות. בלחיצה הראשונה הטלפון ישאל אם לאפשר גישה למיקרופון.</p>${R&&R.err?`<p class="note" style="color:var(--bad);font-weight:700;margin:0 0 10px">${esc(R.err)}</p>`:''}<button class="btn w" data-a="ylRecStart" ${da}>התחל הקלטה</button>`}
+ if(R&&R.on)return`<p><span class="tag t4">● מקליט</span> <span id="ylRecT" dir="ltr">0:00 / ${fsec(max)}</span></p><div class="row"><button class="btn s g" data-a="ylRecStop" ${da}>עצור הקלטה</button></div>`;
+ if(R&&R.url)return`<p class="note">ההקלטה מוכנה (${fdur(R.sec)}). אפשר להאזין לפני השליחה:</p><audio controls src="${R.url}"></audio><div class="row"><button class="btn s g" data-a="ylRecSend" ${da}>שלח לקו…</button><button class="btn s g" data-a="ylRecStart" ${da}>הקלט מחדש</button></div>`;
+ return`<p class="note">עד ${fsec(max)} דקות. בלחיצה הראשונה הטלפון ישאל אם לאפשר גישה למיקרופון.</p>${R&&R.err?`<p class="note"><span class="tag t4">שגיאה</span> ${esc(R.err)}</p>`:''}<div class="row"><button class="btn s g" data-a="ylRecStart" ${da}>התחל הקלטה</button></div>`}
 function recDiscard(){const R=Y.rec;if(!R)return;R.discard=true;clearInterval(R.tm);try{if(R.mr&&R.mr.state!=='inactive')R.mr.stop()}catch(e){}try{R.stream&&R.stream.getTracks().forEach(t=>t.stop())}catch(e){}if(R.url)URL.revokeObjectURL(R.url);Y.rec=null}
 const micErr=e=>{const n=e&&e.name;
  if(n==='NotAllowedError'||n==='SecurityError'||n==='PermissionDeniedError')return'אין הרשאה למיקרופון. אפשרו לאפליקציה גישה למיקרופון בהגדרות הטלפון ונסו שוב.';
@@ -284,7 +285,7 @@ function cBad(c){
  return''}
 function cOpen(c){
  c=Y.c=Object.assign({busy:false,rid:null,sig:null,withTz:false,edited:false},c);const today=isoDay(new Date());
- const body=c.kind==='audio'?`<p class="note" style="margin:0 0 8px">כך תישמע ההקלטה בקו (${fsec(c.sec)}):</p><audio controls src="${c.url}" style="width:100%;margin-bottom:12px"></audio>`
+ const body=c.kind==='audio'?`<p class="note" style="margin:0 0 8px">כך תישמע ההקלטה בקו (${fdur(c.sec)}):</p><audio controls src="${c.url}"></audio>`
   :`<label class="f"><span>הנוסח שיוקרא בקו</span><textarea id="ylCTxt" rows="6" dir="auto" data-i="ylctxt">${esc(c.text)}</textarea><span class="note" dir="ltr" id="ylCCnt" style="text-align:left;margin:4px 0 0"></span></label>${window.ypButton?`<div style="margin:0 0 12px">${ypButton('ylCTxt')}</div>`:''}`;
  const until=c.untilReq?`<label class="f"><span>${esc(c.untilLabel)}</span><input id="ylCDate" type="date" value="${esc(c.until||'')}" min="${today}" max="${addDays(today,c.maxDays)}" data-i="yldate"></label><div class="chips" style="margin:0 0 12px">${[7,14,30].filter(n=>n<=c.maxDays).map(n=>`<button type="button" class="chip" data-a="ylDays" data-v="${n}">${n} ימים</button>`).join('')}</div>`:'';
  dlg(`<h3>${esc(c.heading)}</h3><form data-f="ylform" onsubmit="return false"><p class="note" style="margin:0 0 12px">${esc(c.note)}</p>${body}${until}
