@@ -2703,7 +2703,7 @@ ACT.shqAll=()=>{document.querySelectorAll('.shq [data-k]').forEach(i=>{const it=
  if(shCount('price')+good.length>SHC.price.cap)ask('הדף יתמלא ופתקים ישנים יוחלפו. להמשיך?',go,'המשך');else go()};
 
 /* ===== גיבוי מלא: חשבוניות סרוקות, משוב ומדף + גיבוי יומי ל-Firebase ===== */
-const bkFileIds=()=>{const ids=new Set();S.tx.forEach(t=>{if(t.file)ids.add(t.file)});(FBL.cache||[]).forEach(r=>{if(r.hi)ids.add('fb:'+r.id)});(FBL.pend||[]).forEach(p=>ids.add('fb:'+p.id));(FBL.out||[]).forEach(o=>{if(o.hi)ids.add('fb:'+o.id)});return[...ids]};
+const bkFileIds=()=>{const ids=new Set();S.tx.forEach(t=>{if(t.file)ids.add(t.file);(t.pays||[]).forEach(p=>{if(p&&p.file)ids.add(p.file)})});(FBL.cache||[]).forEach(r=>{if(r.hi)ids.add('fb:'+r.id)});(FBL.pend||[]).forEach(p=>ids.add('fb:'+p.id));(FBL.out||[]).forEach(o=>{if(o.hi)ids.add('fb:'+o.id)});return[...ids]};
 const shClean=()=>{const o={...SH};delete o.dirty;return o};
 async function bkCollect(prog,cloudImgs){const files={},ids=bkFileIds();let i=0;
  for(const id of ids){if(prog)prog(++i,ids.length);let f=null;try{f=await fget(id)}catch(e){}
