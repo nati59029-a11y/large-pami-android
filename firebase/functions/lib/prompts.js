@@ -1,15 +1,15 @@
 'use strict';
 // נוצר אוטומטית על ידי firebase/scripts/app-prompts.js מתוך www/index.html שב-large-pami-android-project.zip.
 // אל תערכו ידנית: הבדיקות מוודאות שהטקסט כאן זהה תו-בתו להנחיות שהאפליקציה שולחת היום ל-Gemini.
-// invoice: OCAI_P, שורות 1633-1633
-// product: SHAI_P, שורות 2120-2120
-// feedback: FB_P, שורות 2338-2356
-// zreport: ZR_P, שורות 3282-3282
-// opening: OPN_P, שורות 3283-3283
-// deposit: DEP_P, שורות 3488-3488
-// cashout: COUT_P, שורות 3489-3489
-// transfer: TRF_P, שורות 866-866
-// feedbackCaptions: fbAI im(...), שורות 2371-2372
+// invoice: OCAI_P, שורות 1637-1637
+// product: SHAI_P, שורות 2125-2125
+// feedback: FB_P, שורות 2343-2361
+// zreport: ZR_P, שורות 3287-3287
+// opening: OPN_P, שורות 3288-3288
+// deposit: DEP_P, שורות 3493-3493
+// cashout: COUT_P, שורות 3494-3494
+// transfer: TRF_P, שורות 867-867
+// feedbackCaptions: fbAI im(...), שורות 2376-2377
 module.exports = {
   "invoice": "בתמונות עמודים של חשבונית מס או תעודת משלוח של ספק בישראל. החזר JSON בלבד בצורה: {\"document_type\":\"invoice\" או \"delivery_note\",\"supplier\":\"שם הספק או העסק שהנפיק את המסמך (לא הלקוח)\",\"number\":\"מספר החשבונית או תעודת המשלוח, ספרות בלבד אם אפשר\",\"date\":\"תאריך המסמך בפורמט YYYY-MM-DD\",\"total_before_vat\":מספר או null,\"vat_amount\":מספר או null,\"total_with_vat\":מספר או null}. total_with_vat הוא הסכום הסופי לתשלום כולל מע\"מ, בדרך כלל בסוף המסמך. אם רשום מחיר אחרי הנחה, זה total_before_vat. התעלם מכתב יד, חתימות וקשקושים. שדה שלא נראה בבירור: null. אל תנחש.",
   "product": "בתמונה מוצר מחנות לכלי בית, חד פעמי ומוצרי אפייה. החזר JSON בלבד בצורה {\"name\":\"...\",\"details\":\"...\"}. name = שם המוצר בעברית כפי שמופיע על האריזה, קצר וברור (למשל: כוסות קרטון, שקיות אשפה, נייר אפייה). details = שם החברה או המותג ואחריו הכמות, הגודל או המשקל (למשל: תבניכל, 50 יחידות, 250 מ\"ל). שדה שלא נראה בתמונה השאר ריק. אל תמציא פרטים.",
