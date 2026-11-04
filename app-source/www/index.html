@@ -402,7 +402,7 @@ let NAV=[{v:'home'}],A=null,V={};
 const cur=()=>NAV[NAV.length-1];
 function go(v,a){NAV.push({v,a});P.open=false;render(1)}
 function tab(v){NAV=[{v}];P.open=false;render(0)}
-function goBack(){if(typeof fbbBack==='function'&&fbbBack())return true;const vw=document.getElementById('viewer');if(vw&&!vw.hidden){vwClose();return true}if(A){sheetBack();return true}const d=$('#dlg');if(d.open){d.close();return true}if(typeof isW==='function'&&isW()&&typeof WS!=='undefined'&&WS!=='home'){WS=WS==='manual'?'exp':'home';rerender();return true}if(NAV.length>1){NAV.pop();render(-1);return true}return false}
+function goBack(){if(typeof fbbBack==='function'&&fbbBack())return true;const vw=document.getElementById('viewer');if(vw&&!vw.hidden){vwClose();return true}if(A){sheetBack();return true}const d=$('#dlg');if(d.open){d.close();return true}if(typeof isW==='function'&&isW()&&typeof WS!=='undefined'&&WS!=='home'){if(WS==='rp'){ACT.wkHome();return true}WS=WS==='manual'?'exp':'home';rerender();return true}if(NAV.length>1){NAV.pop();render(-1);return true}return false}
 ACT.back=()=>goBack();
 ACT.go=el=>{let a=el.dataset.arg;try{a=a&&a[0]==='{'?JSON.parse(a):a}catch(e){}go(el.dataset.v,a)};
 ACT.tab=el=>tab(el.dataset.v);
@@ -1377,7 +1377,7 @@ async function pushItem(it){let file='';if(it.fileId){try{file=await fget(it.fil
  const n=Math.max(1,Math.ceil(file.length/CH));if(n>12)throw new Error('הצילומים גדולים מדי');
  for(let k=0;k<n;k++){try{await fsx('/chunks?documentId='+encodeURIComponent(it.id+'_'+k),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),data:sv(file.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}
  const body={fields:{owner:sv(SY.uid),by:sv((SY.email||'').split('@')[0]),status:sv('new'),created:sv(it.created),data:sv(JSON.stringify(it.data)),parts:sv(n),t:iv(Date.now())}};
- try{await fsx('/inbox?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify(body)})}catch(e){if(e.code!==409)throw e}await coPush(it)}
+ try{await fsx('/inbox?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify(body)})}catch(e){if(e.code!==409)throw e}if(!(it.data&&it.data.repl))await coPush(it)}
 async function flush(){if(flush.b||!isW())return;flush.b=1;SY.err='';
  try{for(const it of obGet()){try{await pushItem(it)}catch(e){SY.err=e.offline?'':e.message;break}obSet(obGet().filter(x=>x.id!==it.id))}}finally{flush.b=0;syS()}}
 /* ---- קונפיג קטגוריות (מנהל מפרסם, עובד מקבל) ---- */
@@ -1389,12 +1389,18 @@ const cfgLocal=()=>{try{return JSON.parse(localStorage.getItem(CK))||{cats:[]}}c
 async function runQ(field,val){const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'inbox'}],where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:val}}},limit:300}})});return(r||[]).filter(x=>x.document).map(x=>x.document)}
 function inbHeal(){const seen=new Set();const L=S.inbox.filter(x=>seen.has(x.id)?false:(seen.add(x.id),true));if(L.length!==S.inbox.length){S.inbox=L;save()}}
 async function pullInbox(){if(!isA())return 0;if(pullInbox.b)return 0;pullInbox.b=1;try{const n=await pullInbox2();try{await pullSiteInc()}catch(e){if(!e.offline)toast('מכירות אתר: המשיכה נכשלה – '+e.message)}try{await zcPull()}catch(e){}try{await dqPull()}catch(e){}return n}finally{pullInbox.b=0}}
-async function pullInbox2(){inbHeal();const docs=await runQ('status','new');let n=0;const done=[];
+let RPL={L:[],miss:0,ok:0};
+async function pullInbox2(){inbHeal();await rqFlush();const docs=await runQ('status','new');let n=0;const done=[];RPL={L:[],miss:0,ok:0};
  for(const d of docs){const id=idOf(d);if(!idOk(id))continue;if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id)){done.push(id);continue}
   let data={};try{data=JSON.parse(gv(d,'data'))}catch(e){}if(!data||typeof data!=='object')data={};if(data.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(data.date)))data.date='';
   let f='';const np=+gv(d,'parts')||0;if(np){try{for(let k=0;k<np;k++){const c=await fsx('/chunks/'+id+'_'+k);f+=gv(c,'data')}}catch(e){continue}}else f=gv(d,'file');if(f){try{await fput('i'+id,f)}catch(e){continue}}
-  S.inbox.push({id,by:gv(d,'by'),at:gv(d,'created'),d:data,file:f?'i'+id:'',np});n++;done.push(id)}
+  /* צילום חדש שהמנהל ביקש: מחליף את הצילום של ההוצאה הממתינה (רק של אותו עובד, ורק אם ביקשת). לא נוצרת הוצאה חדשה */
+  if(data.repl!==undefined){const ro=idOk(String(data.repl))?S.inbox.find(x=>x.id===data.repl):null;if(f&&ro&&ro.rq&&ro.ow&&ro.ow===gv(d,'owner')){ro.file='i'+id;ro.np=np;ro.rph=1;delete ro.rq;RPL.ok++}else if(f)RPL.miss++;RPL.L.push({id,np,o:ro&&ro.rph&&ro.file==='i'+id?ro.id:''});done.push(id);continue}
+  S.inbox.push({id,by:gv(d,'by'),ow:gv(d,'owner'),at:gv(d,'created'),d:data,file:f?'i'+id:'',np});n++;done.push(id)}
  save();
+ for(const r of RPL.L){for(let k=0;k<r.np;k++){try{await fsx('/chunks/'+r.id+'_'+k,{method:'DELETE'})}catch(e){}}if(r.o)await inbClose(r.o)}
+ if(RPL.ok)toast(RPL.ok>1?'התקבלו '+RPL.ok+' צילומים חדשים מהעובדים':'התקבל צילום חדש מהעובד');
+ if(RPL.miss)toast('הגיע צילום חדש להוצאה שכבר אושרה או נדחתה, או שלא ביקשת עבורה צילום. הוא לא נשמר');
  for(const id of done){const it=S.inbox.find(x=>x.id===id);if(it&&it.np)for(let k=0;k<it.np;k++){try{await fsx('/chunks/'+id+'_'+k,{method:'DELETE'})}catch(e){}}try{await fsx('/inbox/'+id+'?updateMask.fieldPaths=status',{method:'PATCH',body:JSON.stringify({fields:{status:sv('imported')}})})}catch(e){}}
  return n}
 /* ---- שלב 2.6ג: הכנסות מהאתר (site_income_daily) – מנהל בלבד, ורק בגרסת הבדיקה (אמולטור או בנייה עם SITE_BACKEND=test). בגרסה הרגילה כבוי.
@@ -1435,42 +1441,55 @@ FRM.sylogin=async f=>{const x=fd(f);const b=f.querySelector('button');b.disabled
  try{await syLogin(s_(x.email),x.pw);toast('התחברת');if(isW()){wkStart()}else{try{await pullInbox()}catch(e){}rerender()}}catch(e){toast(loginMsg(e))}finally{b.disabled=false}};
 ACT.syOut=()=>{ask('להתנתק מהחשבון במכשיר הזה?',()=>{syOut();location.reload()})};
 ACT.syPub=async()=>{try{const n=await pubCfg();toast('פורסמו '+n+' קטגוריות לעובדים')}catch(e){toast(e.offline?e.message:'הפרסום נכשל: '+e.message)}};
-ACT.syPull=async()=>{try{const n=await pullInbox();toast(n?n+' הוצאות חדשות':'אין הוצאות חדשות');rerender()}catch(e){toast(e.offline?e.message:'הבדיקה נכשלה: '+e.message)}};
+ACT.syPull=async()=>{try{const n=await pullInbox();if(n||!RPL.ok)toast(n?n+' הוצאות חדשות':'אין הוצאות חדשות');rerender()}catch(e){toast(e.offline?e.message:'הבדיקה נכשלה: '+e.message)}};
 ACT.syOpen=()=>{sheetClose();NAV=[{v:'sync'}];render(0)};
 /* ---- אישור הוצאות מעובדים (מנהל) ---- */
 const inbName=it=>{const c=cat(it.d.cat);if(it.d.reg&&!c)return 'דף הוצאה מקופה · ללא קטגוריה';return(c?c.name:(it.d.catName||'קטגוריה'))+(it.d.subName?' · '+it.d.subName:'')};
 V.inbox=()=>{inbHeal();const L=S.inbox.slice().sort((a,b)=>(b.at||'').localeCompare(a.at||''));
  return{t:'הוצאות מעובדים',s:L.length+' ממתינות',h:L.length?L.map(it=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(inbName(it))}</b><b>${ils(num(it.d.amt))}</b></div><small>${esc(it.by)} · ${esc(it.d.date||'')}${it.d.plan?' · לתשלום '+esc(mfmt(it.d.plan)):''}${it.d.inv?' · חשבונית '+esc(it.d.inv):''}${it.d.dn?' · תעודת משלוח':''}${it.d.note?' · '+esc(it.d.note):''}</small>
  ${(()=>{const mm=dupMsg(dupInbox(it));return mm.map(m=>`<div class="note" style="color:var(--neg,#b3261e);font-weight:700">⚠ ${esc(m)}</div>`).join('')})()}
- <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${esc(it.id)}">צפה בצילום</button>`:''}<button class="btn g grow" data-a="inbEdit" data-id="${esc(it.id)}">שינוי</button><button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">אשר</button><button class="btn g grow" data-a="inbNo" data-id="${esc(it.id)}">דחה</button></div></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
+ ${it.rq?`<div class="note" style="color:var(--acc);font-weight:700">📷 ביקשת צילום חדש${it.rq.n?': '+esc(it.rq.n):''}. הצילום יוחלף כשהעובד ישלח.</div>`:''}${it.rph?`<div class="note" style="color:var(--pos,#1b7f3b);font-weight:700">✓ התקבל צילום חדש מהעובד</div>`:''}
+ <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${esc(it.id)}">צפה בצילום</button>`:''}<button class="btn g grow" data-a="inbEdit" data-id="${esc(it.id)}">שינוי</button><button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">אשר</button><button class="btn g grow" data-a="inbNo" data-id="${esc(it.id)}">דחה</button></div><button class="btn g" style="width:100%;margin-top:8px" data-a="inbRe" data-id="${esc(it.id)}">📷 ${it.rq?'בקש שוב צילום חדש':'בקש צילום חדש'}</button></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
+/* בקשת צילום חדש: הסטטוס בענן הופך ל-rephoto, והעובד רואה את הבקשה ברשימה שלו */
+async function inbSt(id,st,req){if(!idOk(id))return;const m='?updateMask.fieldPaths=status'+(req!==undefined?'&updateMask.fieldPaths=req':'')+'&currentDocument.exists=true',fl={status:sv(st)};if(req!==undefined)fl.req=sv(req);return await fsx('/inbox/'+id+m,{method:'PATCH',body:JSON.stringify({fields:fl})})}
+/* סגירת בקשה (status ← imported). אם נכשלה (למשל בלי רשת) – נשמרת בתור ונשלחת שוב במשיכה הבאה */
+const RQQ='lp-rqq',rqL=()=>{try{return JSON.parse(localStorage.getItem(RQQ))||[]}catch(e){return[]}},rqSet=a=>{try{localStorage.setItem(RQQ,JSON.stringify(a))}catch(e){}};
+async function inbClose(id){if(!idOk(id))return;try{await inbSt(id,'imported')}catch(e){if(e.code===404||e.code===400)return;const q=rqL();if(!q.includes(id)){q.push(id);rqSet(q)}}}
+async function rqFlush(){const q=rqL();if(!q.length)return;rqSet([]);for(const id of q)await inbClose(id)}
+ACT.inbRe=el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)return;dlg(`<h3>בקשת צילום חדש</h3><p class="note">העובד יראה את הבקשה ברשימת ההוצאות שלו. כשישלח צילום, הוא יחליף את הצילום הנוכחי של ההוצאה הזו. הסכום והפרטים לא משתנים.</p><form data-f="inbReF"><input type="hidden" name="id" value="${esc(it.id)}">${fld('מה לבקש מהעובד','n',(it.rq&&it.rq.n)||'הצילום חתוך או לא ברור. צלם שוב את כל הדף.','text','maxlength="200" autocomplete="off"')}<div class="row"><button class="btn grow">שלח בקשה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.inbReF=async f=>{const x=fd(f),it=S.inbox.find(z=>z.id===x.id);if(!it)return closeDlg();if(FRM.inbReF.b)return;FRM.inbReF.b=1;const n=s_(x.n).slice(0,200);
+ let r;try{r=await inbSt(it.id,'rephoto',n)}catch(e){toast(e.offline?e.message:'הבקשה לא נשלחה: '+e.message);return}finally{FRM.inbReF.b=0}
+ rqSet(rqL().filter(z=>z!==it.id));/* בקשה חדשה גוברת על סגירה ישנה שממתינה בתור */const ow=gv(r,'owner');if(ow)it.ow=ow;if(!it.ow){toast('לא נמצא מי שלח את ההוצאה בענן. הצילום החדש לא יתקבל');}
+ it.rq={n,at:new Date().toISOString()};delete it.rph;save();closeDlg();rerender();toast('הבקשה נשלחה לעובד')};
 ACT.inbOk=async el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)return;const d=it.d,c=cat(d.cat);
+ if(it.rq&&!el.dataset.rq)return ask('ביקשת מהעובד צילום חדש, והוא עוד לא הגיע. לאשר עם הצילום הנוכחי?',()=>{ACT.inbOk({dataset:{id:it.id,rq:'1',ok:el.dataset.ok||''}})},'אשר בכל זאת');
  if(d.reg&&!c)return toast('דף הוצאה מקופה: לחץ "שינוי", בחר קטגוריה לפי ההערה, ואז אשר');
  let cid=c?c.id:'p_exp',sid=c&&d.sub&&subById(d.sub)?d.sub:null;const a=pNum(d.amt);if(a==null)return toast('סכום לא תקין');
  const date=/^\d{4}-\d{2}-\d{2}$/.test(String(d.date||''))?d.date:today(),b=c?c.beh:'simple';
  if(b==='emp'&&!d.m)return toast('בחר מזומן או העברה בשינוי, ואז אשר');
  if(b==='sup'&&!s_(d.inv)&&!d.dn)return toast('חסר מספר חשבונית. לחץ "שינוי" והוסף, או סמן תעודת משלוח');
- if(b==='sup'&&!el.dataset.ok){const mm=dupMsg(dupInbox(it));if(mm.length)return ask('נראה שההוצאה כבר קיימת: '+mm.join('; ')+'. לאשר בכל זאת?',()=>{ACT.inbOk({dataset:{id:it.id,ok:'1'}})},'אשר בכל זאת')}
+ if(b==='sup'&&!el.dataset.ok){const mm=dupMsg(dupInbox(it));if(mm.length)return ask('נראה שההוצאה כבר קיימת: '+mm.join('; ')+'. לאשר בכל זאת?',()=>{ACT.inbOk({dataset:{id:it.id,ok:'1',rq:'1'}})},'אשר בכל זאת')}
  const t={id:uid(),src:it.id,t:'exp',cat:cid,sub:sid,date,amt:rnd(a),plan:pMonth(d.plan)||(b==='sup'?payDef(sid,date):date.slice(0,7)),inv:s_(d.inv),note:('הוכנס על ידי '+it.by+(d.note&&b!=='free'?' · '+d.note:'')),desc:b==='free'?(s_(d.note)||inbName(it)):(cid==='p_exp'?inbName(it):''),kind:a<0?'credit':'inv',pays:[],file:it.file||''};if(d.reg&&zcRegOk(d.creg)){t.creg=d.creg;t.cowhy=s_(d.note).slice(0,300);t.ctm=zcTime(d.ctm)}
  if(b==='emp')t.pays=[{id:uid(),d:date,a:t.amt,m:d.m}];
  if(b==='sup'&&d.dn&&!t.inv)t.dn=true;
  S.tx.push(t);
- S.inbox=S.inbox.filter(x=>x.id!==it.id);save();rerender();toast(cid==='p_exp'?'נשמר ב"ממתין לסיווג"':'ההוצאה נרשמה')};
-ACT.inbNo=el=>ask('לדחות את ההוצאה? היא תימחק מהרשימה ולא תירשם.',()=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(it&&it.d&&it.d.reg)coDelQ(it.id);S.inbox=S.inbox.filter(x=>x.id!==el.dataset.id);save();rerender()});
+ S.inbox=S.inbox.filter(x=>x.id!==it.id);save();rerender();toast(cid==='p_exp'?'נשמר ב"ממתין לסיווג"':'ההוצאה נרשמה');if(it.rq)inbClose(it.id)};
+ACT.inbNo=el=>ask('לדחות את ההוצאה? היא תימחק מהרשימה ולא תירשם.',()=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(it&&it.d&&it.d.reg)coDelQ(it.id);if(it&&it.rq)inbClose(it.id);S.inbox=S.inbox.filter(x=>x.id!==el.dataset.id);save();rerender()});
 /* ===== מצב עובד ===== */
 let WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[]},WKL=[];
 function wkStart(){document.body.classList.add('wk');NAV=[{v:'wk'}];render(0);wkLoad()}
 async function wkLoad(){try{await getCfg()}catch(e){}
- try{await flush();WKL=(await runQ('owner',SY.uid)).map(d=>({id:idOf(d),st:gv(d,'status'),at:gv(d,'created'),d:(()=>{try{return JSON.parse(gv(d,'data'))}catch(e){return{}}})()})).sort((a,b)=>(b.at||'').localeCompare(a.at||'')).slice(0,40)}catch(e){}
+ try{await flush();WKL=(await runQ('owner',SY.uid)).map(d=>({id:idOf(d),st:gv(d,'status'),rq:gv(d,'req'),at:gv(d,'created'),d:(()=>{try{return JSON.parse(gv(d,'data'))}catch(e){return{}}})()})).sort((a,b)=>(b.at||'').localeCompare(a.at||'')).slice(0,40)}catch(e){}
  if(cur().v==='wk')rerender()}
 let WS='home';
 const wkSubsAll=()=>{const o=[];(cfgLocal().cats||[]).filter(c=>c.beh==='sup').forEach(c=>(c.subs||[]).forEach(s=>o.push({id:s.id,name:s.name,cat:c.id})));return o};
 const wkThumbs=()=>WK.pages.length?`<div class="card" style="margin:8px 0"><b>${WK.pages.length} ${WK.pages.length>1?'עמודים מצורפים':'עמוד מצורף'}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${WK.pages.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="wkDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div></div>`:'';
 const wkPickBtns=()=>`<label class="btn ${WK.pages.length?'g':''}" style="cursor:pointer;width:100%;margin:8px 0">📷 ${WK.pages.length?'צלם עמוד נוסף':'צלם'}<input type="file" accept="image/*" capture="environment" data-c="wkpick" hidden></label>
  <label class="btn g" style="cursor:pointer;width:100%;margin:0 0 8px">🖼 ${WK.pages.length?'הוסף עמודים מהגלריה':'העלה מהגלריה'}<input type="file" accept="image/*" multiple data-c="wkpick" hidden></label>`;
-V.wk=()=>{if(WS==='sinv')return supView();const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
+V.wk=()=>{if(WS==='sinv')return supView();if(WS==='rp'&&WK.rp)return wkRpView();const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
  const sent=`${ob.length?`<div class="card"><b>ממתינות לשליחה: ${ob.length}</b><p class="note">${SY.err?esc(SY.err):'ישלחו כשיהיה חיבור לאינטרנט.'}</p><button class="btn g" data-a="wkRefresh">נסה לשלוח עכשיו</button></div>`:''}
  <div class="sec"><h3>ההוצאות ששלחתי</h3><button class="btn s g" data-a="wkRefresh">רענן</button></div>
- ${WKL.length?WKL.map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${ils(num(x.d.amt))} · ${esc(x.d.reg?'דף הוצאה מקופה':(x.d.catName||''))}${x.d.subName?' · '+esc(x.d.subName):''}</b><small>${esc(x.d.date||'')}${x.d.note?' · '+esc(x.d.note):''}</small></div><span class="tag ${x.st==='new'?'t1':''}">${x.st==='new'?'נשלח':'התקבל'}</span></div>`).join(''):'<p class="note">עוד לא שלחת הוצאות.</p>'}`;
+ ${WKL.length?WKL.filter(x=>!x.d.repl).map(x=>`<div class="li" style="cursor:default${x.st==='rephoto'?';flex-wrap:wrap;border:2px solid var(--acc)':''}"><div class="m"><b>${ils(num(x.d.amt))} · ${esc(x.d.reg?'דף הוצאה מקופה':(x.d.catName||''))}${x.d.subName?' · '+esc(x.d.subName):''}</b><small>${esc(x.d.date||'')}${x.d.note?' · '+esc(x.d.note):''}</small></div><span class="tag ${x.st==='new'||x.st==='rephoto'?'t1':''}">${x.st==='new'?'נשלח':x.st==='rephoto'?'צריך צילום חדש':'התקבל'}</span>${x.st==='rephoto'?wkRpRow(x):''}</div>`).join(''):'<p class="note">עוד לא שלחת הוצאות.</p>'}`;
  if(WS==='home'){
   const off=`<button class="tile" disabled style="opacity:.45;cursor:default">🚧<br><small>בבנייה</small></button>`;
   return{t:'לארג׳ פעמי',s:esc((SY.email||'').split('@')[0]),h:`${cs.length?'':'<div class="card"><p class="note">עדיין לא התקבלו קטגוריות מהמנהל. בדוק חיבור ולחץ "רענן".</p></div>'}
@@ -1523,7 +1542,17 @@ async function wkSubmit(x){
 ACT.wkGoExp=()=>{WS='exp';rerender()};
 ACT.wkCoScan=async()=>{if(!WK.pages.length||WK.cs===1)return;wkSnap();const W=WK;W.cs=1;rerender();let r;try{r=await coScan((W.hi&&W.hi[0])||W.pages[0])}catch(e){W.cs=0;if(WK===W)rerender();return toast('זיהוי הפתק נכשל: '+e.message+'. אפשר למלא ידנית')}
  W.cs=2;if(WK!==W)return;wkSnap();const m=coMerge(W,{amt:'',date:today(),ctm:'',creg:''},r,COM);Object.assign(W,m.set);W.csug=m.sug;rerender();toast(coScanMsg(r)+(m.sug.length?' · יש ערכים שונים ממה שהוקלד':''))};
-ACT.wkHome=()=>{WS='home';rerender()};
+ACT.wkHome=()=>{WS='home';if(WK.rp)WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[],inv:'',dn:false};rerender()};
+/* צילום חדש שהמנהל ביקש: נשלח כפריט חדש עם repl = מזהה ההוצאה המקורית. המנהל מחליף בו רק את הצילום */
+const wkRpSent=id=>obGet().some(o=>o.data&&o.data.repl===id)||WKL.some(o=>o.d&&o.d.repl===id&&o.st==='new');
+const wkRpRow=x=>`<div style="flex-basis:100%;margin-top:6px">${x.rq?`<p class="note" style="margin:0 0 6px;font-weight:700">המנהל ביקש: ${esc(x.rq)}</p>`:''}${wkRpSent(x.id)?'<p class="note" style="margin:0">✓ צילום חדש נשלח. ממתין למנהל.</p>':`<button class="btn" style="width:100%" data-a="wkRe" data-id="${esc(x.id)}">📷 צלם מחדש</button>`}</div>`;
+ACT.wkRe=el=>{const x=WKL.find(o=>o.id===el.dataset.id);if(!x)return;if(!el.dataset.ok&&!WK.rp&&(WK.pages.length||s_(WK.amt)||s_(WK.note)))return ask('יש הוצאה שהתחלת למלא ועוד לא שלחת. אם תמשיך, היא תימחק. להמשיך לצילום החדש?',()=>ACT.wkRe({dataset:{id:x.id,ok:'1'}}),'כן, המשך');WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[],inv:'',dn:false,rp:{id:x.id,d:x.d,rq:x.rq}};WS='rp';rerender()};
+function wkRpView(){const r=WK.rp,d=r.d||{};return{t:'צילום חדש',s:'בקשה מהמנהל',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>
+ <div class="card"><b>${ils(num(d.amt))} · ${esc(d.reg?'דף הוצאה מקופה':(d.catName||''))}${d.subName?' · '+esc(d.subName):''}</b><p class="note" style="margin:4px 0 0">${esc(d.date||'')}${d.inv?' · חשבונית '+esc(d.inv):''}</p>${r.rq?`<p style="margin:8px 0 0;font-weight:700">המנהל ביקש: ${esc(r.rq)}</p>`:''}<p class="note" style="margin:8px 0 0">צלם שוב את כל הדף (וכל העמודים, אם יש כמה). הסכום והפרטים לא משתנים, רק הצילום.</p></div>
+ ${wkThumbs()}${WK.pages.length?`<button class="btn w" style="margin-bottom:10px" data-a="wkRpSend">שלח צילום חדש (${WK.pages.length} ${WK.pages.length>1?'עמודים':'עמוד'})</button>`:''}${wkPickBtns()}`}}
+ACT.wkRpSend=async()=>{const r=WK.rp;if(!r||!WK.pages.length)return;if(ACT.wkRpSend.b)return;ACT.wkRpSend.b=1;try{const id='w'+uid(),it={id,created:new Date().toISOString(),data:{repl:r.id,amt:r.d.amt,date:r.d.date||'',catName:r.d.catName||'',subName:r.d.subName||''}};
+ try{await fput('o'+id,packPages(WK.pages));it.fileId='o'+id}catch(e){return toast('שמירת הצילום נכשלה')}
+ const q=obGet();q.push(it);obSet(q);WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[],inv:'',dn:false};WS='home';rerender();toast('נשמר, שולח...');await flush();wkLoad()}finally{ACT.wkRpSend.b=0}};
 ACT.wkManual=()=>{WS='manual';rerender()};
 ACT.wkBackExp=()=>{wkSnap();WS='exp';rerender()};
 CHG.wkpick=async el=>{wkSnap();const fs=[...el.files];el.value='';if(!fs.length)return;

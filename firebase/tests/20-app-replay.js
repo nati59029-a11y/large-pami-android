@@ -489,6 +489,11 @@ const REPLAY = {
     return [r];
   } },
   M105: { run: async (uid) => [await fsx(uid, '/closings/' + 'z1' + '/p/' + 0), await fsx(uid, '/deposits/' + 'dp1' + '/p/' + 0)] },
+  // feature/rephoto-request: מחיקת חלקי הצילום החדש, ובקשת צילום חדש / סגירתה (inbSt)
+  M106: { run: async (uid) => [await fsx(uid, '/chunks/' + `c_${H.OTHER}` + '_' + 0, { method: 'DELETE' })] },
+  M107: { run: async (uid) => [
+    await fsx(uid, '/inbox/' + `i_${H.OTHER}` + '?updateMask.fieldPaths=status&updateMask.fieldPaths=req&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { status: sv('rephoto'), req: sv('הצילום חתוך. צלם שוב את כל הדף.') } }) }),
+    await fsx(uid, '/inbox/' + `i_${H.OTHER}` + '?updateMask.fieldPaths=status&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { status: sv('imported') } }) })] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,
