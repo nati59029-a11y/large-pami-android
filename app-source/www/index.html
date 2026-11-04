@@ -1177,7 +1177,7 @@ function warp(c,q,maxS){const w=Math.round((dist(q[0],q[1])+dist(q[3],q[2]))/2),
  for(let j=0;j<oh;j++){const v=j/(oh-1||1);for(let i=0;i<ow;i++){const u=i/(ow-1||1),z=gg*u+hh*v+1,sx=(a*u+b*v+x0)/z,sy=(d*u+e*v+y0)/z,xi=Math.max(0,Math.min(SW-1.001,sx)),yi=Math.max(0,Math.min(SH-1.001,sy)),ix=xi|0,iy=yi|0,fx=xi-ix,fy=yi-iy,p=(iy*SW+ix)*4,o4=(j*ow+i)*4;
   for(let ch=0;ch<3;ch++){O[o4+ch]=(S[p+ch]*(1-fx)+S[p+4+ch]*fx)*(1-fy)+(S[p+SW*4+ch]*(1-fx)+S[p+SW*4+4+ch]*fx)*fy}O[o4+3]=255}}
  o.getContext('2d').putImageData(od,0,0);return o}
-/* הבהרת רקע וחידוד כיתוב */
+/* הבהרת רקע וחידוד כיתוב, בצבע */
 function enhance(c){const W=c.width,H=c.height,x=c.getContext('2d'),im=x.getImageData(0,0,W,H),D=im.data,g=new Float32Array(W*H);
  for(let i=0;i<W*H;i++)g[i]=D[i*4]*.3+D[i*4+1]*.59+D[i*4+2]*.11;
  const B=Math.max(12,Math.round(Math.min(W,H)/40)),bw=Math.ceil(W/B),bh=Math.ceil(H/B),bm=new Float32Array(bw*bh);
@@ -1185,7 +1185,10 @@ function enhance(c){const W=c.width,H=c.height,x=c.getContext('2d'),im=x.getImag
  /* החלקה של הרקע בין בלוקים */
  const sm=new Float32Array(bw*bh);for(let by=0;by<bh;by++)for(let bx=0;bx<bw;bx++){let s=0,n=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const yy=by+dy,xx=bx+dx;if(yy>=0&&yy<bh&&xx>=0&&xx<bw){s+=bm[yy*bw+xx];n++}}sm[by*bw+bx]=s/n}
  for(let y=0;y<H;y++){const fy=Math.min(bh-1,Math.max(0,y/B-.5)),y0=fy|0,y1=Math.min(bh-1,y0+1),ty=fy-y0;for(let xx=0;xx<W;xx++){const fx=Math.min(bw-1,Math.max(0,xx/B-.5)),x0=fx|0,x1=Math.min(bw-1,x0+1),tx=fx-x0;
-  const bg=(sm[y0*bw+x0]*(1-tx)+sm[y0*bw+x1]*tx)*(1-ty)+(sm[y1*bw+x0]*(1-tx)+sm[y1*bw+x1]*tx)*ty;let v=g[y*W+xx]/Math.max(40,bg);v=(v-.42)/(.9-.42);v=v<0?0:v>1?1:v;v=Math.pow(v,1.15);const o=(y*W+xx)*4,b=(v*255)|0;D[o]=D[o+1]=D[o+2]=b}}
+  const bg=(sm[y0*bw+x0]*(1-tx)+sm[y0*bw+x1]*tx)*(1-ty)+(sm[y1*bw+x0]*(1-tx)+sm[y1*bw+x1]*tx)*ty;let v=g[y*W+xx]/Math.max(40,bg);v=(v-.42)/(.9-.42);v=v<0?0:v>1?1:v;v=Math.pow(v,1.15);const o=(y*W+xx)*4,b=v*255,L=g[y*W+xx];
+  /* סריקה צבעונית: הבהירות מהחישוב למעלה (רקע לבן, כתב חד), ומעליה הצבע המקורי. גוון חלש (נייר צהבהב, אור חדר) נמחק, צבע אמיתי (עט, חותמת, מרקר) נשמר */
+  const cr=D[o]-L,cg=D[o+1]-L,cb=D[o+2]-L,mg=Math.max(Math.abs(cr),Math.abs(cg),Math.abs(cb)),w=mg<30?0:mg>55?1.25:(mg-30)/25*1.25;
+  D[o]=Math.max(0,Math.min(255,b+cr*w));D[o+1]=Math.max(0,Math.min(255,b+cg*w));D[o+2]=Math.max(0,Math.min(255,b+cb*w))}}
  x.putImageData(im,0,0);return c}
 /* ממיר תמונה למסמך סרוק. mode: scan | orig */
 async function scanDoc(du,mode,rot,hi){const img=await ldImg(du);let c=srcCanvas(img,rot||0,hi?3300:2200);
