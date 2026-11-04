@@ -23,6 +23,7 @@ const ANSWERS = {
   // אישור הפקדה מהבנק (הצילום לדוגמה מ-17.10.2026)
   deposit: { date: '2026-10-17', time: '22:26', amount: 25000, bank: 'דיסקונט', account: '611131' },
   // פתק "הוצאת מזומן מהקופה" (הצילום לדוגמה מ-20.10.2026, יהודה הנשיא)
+  transfer: { document_type: 'bank_transfer', transfers: [{ amount: 1234.56, date: '2026-11-02', payee_name: 'ספק דמה בע"מ', payee_account: { bank: '12', branch: '345', account: '67890' }, reference: 'R-1001' }] },
   cashout: { register: '6346053', store: 'לארג\' פעמי-יהודה הנשיא', date: '2026-10-20', time: '09:02', amount: 4650 },
   recipe: { title: 'עוגת שמרים', text: 'עוגת שמרים. המצרכים: שתי כוסות קמח. אופן ההכנה: לערבב ולאפות.' },
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
@@ -35,6 +36,7 @@ function reset() { state.mode = 'ok'; state.requests = []; state.listCalls = 0; 
 function kindOf(body) {
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
+  if (s.includes('אישור על העברה בנקאית')) return 'transfer';
   if (s.includes('אישור הפקדת מזומן')) return 'deposit';
   if (s.includes('פתק "הוצאת מזומן מהקופה"')) return 'cashout';
   if (s.includes('דוח Z')) return 'zreport';

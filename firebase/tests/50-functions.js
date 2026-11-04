@@ -460,6 +460,30 @@ describe('פונקציות שרת (שלב 3)', () => {
       assert.equal(M.state.requests.length, before);
     });
 
+    it('צילום העברה (transfer): מנהל בלבד – מנהל עובר; עובד נחסם לפני Gemini ובלי ירידה במכסה', async () => {
+      const P = appPrompts();
+      const f = jpgFile(406);
+      const r = await call('scanDocument', 'u_mgr', { kind: 'transfer', files: [f] });
+      assert.equal(r.status, 'OK', JSON.stringify(r.json).slice(0, 200));
+      const [q] = M.state.requests;
+      assert.deepEqual(q.body, { contents: [{ parts: [{ text: P.transfer.value }, { inline_data: { mime_type: f.mimeType, data: f.data } }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } });
+      assert.equal(q.kind, 'transfer');
+      assert.deepEqual(r.result.data, M.ANSWERS.transfer);
+      assert.equal((await usageOf(env, 'u_mgr')).count, 1);
+      // גם מנהל "ישן" (רק admins, בלי staff)
+      assert.equal((await call('scanDocument', H.MANAGER_ONLY_ADMINS, { kind: 'transfer', files: [jpgFile(407)] })).status, 'OK');
+      // עובד פעיל: permission-denied, בלי פנייה ל-Gemini ובלי ספירה במכסה
+      const before = M.state.requests.length, u0 = await usageOf(env, 'u_emp');
+      const e = await call('scanDocument', 'u_emp', { kind: 'transfer', files: [jpgFile(408)] });
+      assert.equal(e.status, 'PERMISSION_DENIED');
+      assert.equal(e.error.message, 'צילום העברה מותר למנהל בלבד.');
+      assert.equal(e.error.details.reason, 'manager-only');
+      assert.equal(M.state.requests.length, before);
+      assert.deepEqual(await usageOf(env, 'u_emp'), u0, 'מכסת העובד לא השתנתה');
+      // שאר הסוגים לא השתנו: אותו עובד עדיין יכול לזהות חשבונית
+      assert.equal((await call('scanDocument', 'u_emp', { kind: 'invoice', files: [jpgFile(409)] })).status, 'OK');
+    });
+
     it('אין פנייה החוצה: באמולטור הקוד מסרב לפנות לכתובת שאינה מקומית', async () => {
       const scan = require('../functions/lib/scan');
       const prev = process.env.FUNCTIONS_EMULATOR;
