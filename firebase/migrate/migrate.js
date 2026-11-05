@@ -265,6 +265,24 @@ function assertMigrationTarget(ctx, bizDoc, needLegacy) {
   if (needLegacy && sv('dataRoot') !== 'legacy') throw new Error(`b/${ctx.bizId}.dataRoot הוא "${sv('dataRoot')}", לא legacy. העתקה/השלמה רק לפני המעבר (ראו ROLLBACK.md)`);
 }
 
+// מה צריך להיות ב-users/{uid} לכל חבר, באותו מבנה ש-syncLegacyMember (שרת, business.js) כותב:
+// role: admin למי שב-admins, אחרת worker. active: מנהל = true, עובד = staff.active === true.
+// email: של admins, אחרת של staff, אחרת ''. (bizId, bizStatus ו-createdAt במילישניות נוספים בכתיבה)
+function expectedPeople(src) {
+  const people = new Map();
+  const str = (f, k) => (f && f[k] && typeof f[k].stringValue === 'string' ? f[k].stringValue : '');
+  for (const [r, d] of src) {
+    if (!/^staff\/[^/]+$/.test(r) || d.missing) continue;
+    people.set(r.split('/')[1], { role: 'worker', active: !!(d.fields.active && d.fields.active.booleanValue === true), email: str(d.fields, 'email') });
+  }
+  for (const [r, d] of src) {
+    if (!/^admins\/[^/]+$/.test(r) || d.missing) continue;
+    const uid = r.split('/')[1], prev = people.get(uid);
+    people.set(uid, { role: 'admin', active: true, email: str(d.fields, 'email') || (prev && prev.email) || '' });
+  }
+  return people;
+}
+
 async function plan(ctx, state) {
   const colls = await rootCollections(ctx);
   const copyColls = colls.filter(c => classify(c) === 'copy');
@@ -292,19 +310,7 @@ async function plan(ctx, state) {
   }
   for (const [rel, t] of dst) if (!t.missing && !src.has(rel) && !state.docs[rel]) P.newInTarget.push({ rel });
   // users/{uid} לכל מנהל ועובד
-  const admins = [...src].filter(([r, d]) => /^admins\/[^/]+$/.test(r) && !d.missing);
-  const staff = [...src].filter(([r, d]) => /^staff\/[^/]+$/.test(r) && !d.missing);
-  const people = new Map();
-  const str = (f, k) => (f && f[k] && typeof f[k].stringValue === 'string' ? f[k].stringValue : '');
-  for (const [r, d] of staff) {
-    const uid = r.split('/')[1];
-    people.set(uid, { role: 'worker', active: !!(d.fields.active && d.fields.active.booleanValue === true), email: str(d.fields, 'email') });
-  }
-  for (const [r, d] of admins) {
-    const uid = r.split('/')[1];
-    const prev = people.get(uid);
-    people.set(uid, { role: 'admin', active: true, email: str(d.fields, 'email') || (prev && prev.email) || '' });
-  }
+  const people = expectedPeople(src);
   const U = { create: [], same: [], conflict: [] };
   await pmap([...people.keys()].sort(), 16, async uid => {
     const p = people.get(uid);
@@ -411,10 +417,12 @@ async function cmdCopy(ctx) {
     });
     // users/{uid}: יצירה בלבד
     const nowMs = String(Date.now());
+    // bizStatus = הסטטוס של מסמך העסק (כמו בשרת). מסמך חדש נוצר עם active
+    const bizStatus = (pl.bizDoc && pl.bizDoc.fields.status && pl.bizDoc.fields.status.stringValue) || 'active';
     const uw = U.create.map(p => ({
       path: 'users/' + p.uid, kind: 'create', fields: {
         bizId: { stringValue: ctx.bizId }, role: { stringValue: p.role }, email: { stringValue: p.email },
-        createdAt: { integerValue: nowMs }, active: { booleanValue: p.active }, bizStatus: { stringValue: 'active' },
+        createdAt: { integerValue: nowMs }, active: { booleanValue: p.active }, bizStatus: { stringValue: bizStatus },
       },
     }));
     const ur = await ctx.fsr.writeDocs(uw);
@@ -484,16 +492,30 @@ async function cmdVerify(ctx) {
   }
   printOther(other, ack);
   // users/{uid} לכל מנהל ועובד, ומסמך העסק
-  const people = [...src.keys()].filter(r => /^(admins|staff)\/[^/]+$/.test(r) && !src.get(r).missing).map(r => r.split('/')[1]);
-  const badUsers = [];
-  await pmap([...new Set(people)], 16, async uid => {
-    const u = await ctx.fsr.getDoc('users/' + uid);
-    if (!u || !u.fields.bizId || u.fields.bizId.stringValue !== ctx.bizId) badUsers.push(uid);
-  });
-  if (badUsers.length) problems.push(`users חסר או שייך לעסק אחר: ${badUsers.sort().join(', ')}`);
+  // לכל מסמך ב-admins וב-staff בשורש: users/{uid} תואם (bizId, role, active, bizStatus, createdAt במילישניות)
   const bizDoc = await ctx.fsr.getDoc('b/' + ctx.bizId);
+  const wantStatus = (bizDoc && bizDoc.fields.status && bizDoc.fields.status.stringValue) || 'active';
+  const expect = expectedPeople(src);
+  const badUsers = [];
+  await pmap([...expect.keys()], 16, async uid => {
+    const e = expect.get(uid);
+    const u = await ctx.fsr.getDoc('users/' + uid);
+    const f = (u && u.fields) || {};
+    const why = [];
+    if (!u) why.push('חסר');
+    else {
+      if ((f.bizId || {}).stringValue !== ctx.bizId) why.push('bizId=' + (f.bizId || {}).stringValue);
+      if ((f.role || {}).stringValue !== e.role) why.push('role=' + (f.role || {}).stringValue + ' (צפוי ' + e.role + ')');
+      if ((f.active || {}).booleanValue !== e.active) why.push('active=' + (f.active || {}).booleanValue + ' (צפוי ' + e.active + ')');
+      if ((f.bizStatus || {}).stringValue !== wantStatus) why.push('bizStatus=' + (f.bizStatus || {}).stringValue);
+      if (!f.createdAt || !/^\d+$/.test(String(f.createdAt.integerValue || ''))) why.push('createdAt לא במילישניות');
+    }
+    if (why.length) badUsers.push(uid + ': ' + why.join(', '));
+  });
+  const people = [...expect.keys()];
+  if (badUsers.length) problems.push(`users לא תואם ל-admins/staff: ${badUsers.sort().join('; ')}`);
   if (!bizDoc) problems.push(`מסמך העסק b/${ctx.bizId} לא קיים`);
-  log(`  users: ${people.length - badUsers.length}/${new Set(people).size} תקינים. מסמך העסק: ${bizDoc ? 'קיים, dataRoot=' + ((bizDoc.fields.dataRoot || {}).stringValue) : 'חסר'}`);
+  log(`  users: ${people.length - badUsers.length}/${people.length} תואמים ל-admins/staff. מסמך העסק: ${bizDoc ? 'קיים, dataRoot=' + ((bizDoc.fields.dataRoot || {}).stringValue) : 'חסר'}`);
   for (const p of problems) log('  בעיה: ' + p);
   const ok = !problems.length && !diffs.length && !docDiffs.length && (!storage || !storage.mismatched.length);
   log(ok ? 'אימות: עבר – הספירה והגיבוב של כל אוסף זהים במקור וביעד' : `אימות: נכשל – ${diffs.length} אוספים, ${docDiffs.length} מסמכים שונים, ${problems.length} בעיות`);

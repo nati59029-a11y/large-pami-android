@@ -238,6 +238,16 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     assert.equal((await u('u_mgr2')).role, 'admin');
     assert.equal((await u('u_emp')).role, 'worker');
     assert.equal((await u('u_off')).active, false);
+    // סבב 3 (חוזה 8א): אותו מבנה ש-syncLegacyMember בשרת כותב – בדיוק השדות האלה, createdAt במילישניות (integerValue)
+    for (const id of ['u_mgr', 'u_mgr2', 'u_emp', 'u_emp2', 'u_off']) {
+      const d = await get('users/' + id);
+      assert.deepEqual(Object.keys(d.fields).sort(), ['active', 'bizId', 'bizStatus', 'createdAt', 'email', 'role'], id);
+      assert.match(d.fields.createdAt.integerValue, /^\d{13}$/, id + ': createdAt במילישניות');
+      assert.equal(d.fields.bizStatus.stringValue, 'active');
+    }
+    assert.equal((await u('u_mgr')).role, 'admin', 'u_mgr גם ב-staff וגם ב-admins = admin');
+    assert.equal((await u('u_emp2')).active, true);
+    assert.match(v.out, /users: 5\/5 תואמים ל-admins\/staff/);
     // מסמך העסק
     const b = (await get('b/' + BIZ)).fields;
     assert.equal(b.dataRoot.stringValue, 'legacy');
@@ -276,6 +286,28 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     assert.equal(c.users.create, 0); assert.equal(c.storage.create, 0);
     assert.equal((await get('b/' + BIZ + '/cfg/main')).updateTime, t0);
     assert.equal((await get('users/u_emp')).updateTime, u0);
+  });
+
+  it('6א. (סבב 3) verify בודק שלכל admins/staff בשורש יש users/{uid} תואם', async () => {
+    const orig = { off: (await get('users/u_off')).fields, emp: (await get('users/u_emp')).fields };
+    await put('users/u_off', { ...orig.off, active: B(true) }); // עובד מושבת שמסומן פעיל
+    await put('users/u_emp', { ...orig.emp, role: S('admin') }); // עובד שמסומן מנהל
+    const v = await run(['verify', '--ack-unknown', 'mystery']);
+    show('verify (users לא תואמים)', v);
+    assert.equal(v.code, 1);
+    assert.match(v.out, /u_off: active=true \(צפוי false\)/);
+    assert.match(v.out, /u_emp: role=admin \(צפוי worker\)/);
+    await put('users/u_off', orig.off); await put('users/u_emp', orig.emp); // החזרה (קוד בדיקה)
+    await api('DELETE', BASE + '/users/u_emp2'); // users חסר (מחיקה באמולטור, בקוד הבדיקה בלבד)
+    const v2 = await run(['verify', '--ack-unknown', 'mystery']);
+    assert.equal(v2.code, 1);
+    assert.match(v2.out, /u_emp2: חסר/);
+    // ההשלמה יוצרת אותו מחדש, והאימות עובר
+    const c = await run(['copy', '--mode', 'write', '--state', F('state.json'), '--backup', F('backup1.json'), '--report', F('copy-u.json')]);
+    assert.equal(report(F('copy-u.json')).users.create, 1);
+    const v3 = await run(['verify', '--ack-unknown', 'mystery']);
+    show('verify (אחרי השלמת users)', v3);
+    assert.equal(v3.code, 0, v3.out);
   });
 
   it('7. השלמה: שינוי במקור מועתק; שינוי בשני הצדדים = התנגשות ולא נדרס; שינוי רק ביעד לא נדרס', async () => {
