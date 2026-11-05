@@ -9,8 +9,13 @@
 //  4. מזהה פרויקט שמכיל "test" מחייב אישור נפרד ומפורש: allow_test_project === 'true'.
 //  5. אם ידוע הפרויקט של חשבון השירות (מהסוד), הוא חייב להיות זהה לפרויקט שהוקלד.
 //  6. פרויקט דמו של האמולטור (demo-*) לא מותר כאן: אין לו משמעות מחוץ לאמולטור.
+//  7. אם נמסר bucket של Storage: שם תקין, ששייך לאותו פרויקט (מתחיל ב-"<project>.").
 
 const PROJECT_RE = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+
+function bucketBelongs(bucket, project) {
+  return /^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(bucket || '') && !!project && bucket.startsWith(project + '.');
+}
 
 function checkGuard(i) {
   const errors = [];
@@ -30,6 +35,10 @@ function checkGuard(i) {
   if (i.saProject !== undefined && String(i.saProject).trim() !== project) {
     errors.push('חשבון השירות שייך לפרויקט אחר ("' + i.saProject + '"), לא ל-"' + project + '"');
   }
+  if (i.bucket !== undefined && i.bucket !== '') {
+    const b = String(i.bucket).trim();
+    if (!bucketBelongs(b, project)) errors.push('ה-bucket "' + b + '" לא שייך לפרויקט "' + project + '" (חייב להתחיל ב-"' + project + '.")');
+  }
   return { ok: errors.length === 0, errors, project, mode: errors.length ? 'readonly' : mode };
 }
 
@@ -41,6 +50,7 @@ function fromEnv(env = process.env) {
     writeConfirm: env.MIGRATE_WRITE_CONFIRM,
     allowTest: env.MIGRATE_ALLOW_TEST_PROJECT,
     saProject: env.MIGRATE_SA_PROJECT === undefined ? undefined : env.MIGRATE_SA_PROJECT,
+    bucket: env.MIGRATE_BUCKET,
   };
 }
 
@@ -53,4 +63,4 @@ if (require.main === module) {
   console.log(`שומר: עבר. פרויקט ${r.project}, מצב ${r.mode}`);
 }
 
-module.exports = { checkGuard, fromEnv, PROJECT_RE };
+module.exports = { checkGuard, fromEnv, bucketBelongs, PROJECT_RE };

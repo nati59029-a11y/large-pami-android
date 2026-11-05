@@ -14,8 +14,11 @@ const { execFile, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
 
 const ROOT = path.resolve(__dirname, '..');
-const TOOL = path.join(ROOT, 'migrate', 'migrate.js');
-const GUARD = path.join(ROOT, 'migrate', 'guard.js');
+// MIGRATE_DIR / MIGRATE_WORKFLOW: להרצת אותן בדיקות על גרסה ישנה של הכלי (הוכחה שהבדיקה נכשלת לפני התיקון)
+const MDIR = process.env.MIGRATE_DIR || path.join(ROOT, 'migrate');
+const WF = process.env.MIGRATE_WORKFLOW || path.resolve(ROOT, '..', '.github', 'workflows', 'migrate-largpeami.yml');
+const TOOL = path.join(MDIR, 'migrate.js');
+const GUARD = path.join(MDIR, 'guard.js');
 const P = 'demo-largpeami';
 const BIZ = 'largpeami';
 const EMU = process.env.FIRESTORE_EMULATOR_HOST;
@@ -24,8 +27,8 @@ const NAME = `projects/${P}/databases/(default)/documents`;
 const TMP = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'migrate-test-'));
 const F = n => path.join(TMP, n);
 const rq = createRequire(path.join(ROOT, 'functions', 'package.json'));
-const { hashFields } = require('../migrate/fsrest');
-const { checkGuard } = require('../migrate/guard');
+const { hashFields } = require(path.join(MDIR, 'fsrest'));
+const { checkGuard } = require(path.join(MDIR, 'guard'));
 
 if (!EMU || !process.env.FIREBASE_STORAGE_EMULATOR_HOST) throw new Error('הבדיקות רצות רק בתוך האמולטור');
 
@@ -186,7 +189,7 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     const r = await run(['copy', '--state', F('state.json'), '--backup', F('backup1.json')]);
     assert.notEqual(r.code, 0);
     assert.match(r.out, /copy דורש --mode write/);
-    const { FsRest } = require('../migrate/fsrest');
+    const { FsRest } = require(path.join(MDIR, 'fsrest'));
     const fsr = new FsRest({ project: P, mode: 'write', bizId: BIZ, token: async () => 'owner', emulatorHost: EMU });
     for (const p of ['cfg/main', 'admins/x', 'b/other-biz/cfg/main', 'b', 'staff/u_emp']) {
       await assert.rejects(fsr.writeDocs([{ path: p, kind: 'create', fields: {} }]), /מחוץ ליעד/);
@@ -202,9 +205,15 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     const r = await run(['copy', '--mode', 'write', '--state', F('state.json'), '--backup', F('backup1.json'), '--report', F('copy1.json')]);
     show('copy (ראשונה)', r);
     assert.equal(r.code, 0, r.out);
-    const v = await run(['verify', '--report', F('verify1.json')]);
+    // סבב 2, ליקוי 1: אוסף לא ידוע שלא הועתק מכשיל את האימות, עד החלטה מפורשת (--ack-unknown)
+    const v0 = await run(['verify', '--report', F('verify0.json')]);
+    show('verify (בלי אישור לאוסף הלא ידוע)', v0);
+    assert.equal(v0.code, 1, 'אוסף לא ידוע עם מסמכים מכשיל את האימות');
+    assert.match(v0.out, /mystery/);
+    const v = await run(['verify', '--ack-unknown', 'mystery', '--report', F('verify1.json')]);
     show('verify', v);
     assert.equal(v.code, 0, v.out);
+    assert.match(v.out, /site_income_daily – 1 מסמכים/, 'אוסף נדחה מוצג עם ספירה');
     const vr = report(F('verify1.json'));
     for (const [c, x] of Object.entries(vr.collections)) {
       assert.equal(x.src.count, x.dst.count, c);
@@ -275,10 +284,14 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     await put('fb/f1', { stars: I(4), text: S('מקור') }); // שני הצדדים
     await put('b/' + BIZ + '/fb/f1', { stars: I(3), text: S('יעד') });
     await put('b/' + BIZ + '/tasks/t1', { title: S('שונה באפליקציה'), done: B(true) }); // רק יעד
+    await put('staff/u_new', { name: S('u_new'), email: S('u_new@example.invalid'), role: S('worker'), active: B(true) }); // עובד חדש
+    await put('users/u_new', { bizId: S('acme'), role: S('worker') }); // ...שכבר רשום בעסק אחר
     const r = await run(['copy', '--mode', 'write', '--state', F('state.json'), '--backup', F('backup1.json'), '--report', F('copy3.json')]);
     show('copy (השלמה)', r);
     const c = report(F('copy3.json'));
-    assert.equal(c.docs.update, 1); assert.equal(c.docs.create, 1); assert.equal(c.docs.conflict, 1); assert.equal(c.docs.targetOnlyChanged, 1);
+    assert.equal(c.docs.update, 1); assert.equal(c.docs.create, 2); assert.equal(c.docs.conflict, 1); assert.equal(c.docs.targetOnlyChanged, 1);
+    assert.deepEqual(c.userConflicts.map(u => u.uid), ['u_new'], 'users קיים של עסק אחר – התנגשות');
+    assert.equal((await get('users/u_new')).fields.bizId.stringValue, 'acme', 'users קיים לא נדרס');
     assert.equal(c.conflicts[0].rel, 'fb/f1');
     assert.ok(c.conflicts[0].src && c.conflicts[0].dst && c.conflicts[0].src !== c.conflicts[0].dst, 'שני הגיבובים מדווחים');
     assert.deepEqual((await get('b/' + BIZ + '/shelf/s1')).fields.price, { doubleValue: 13 });
@@ -292,7 +305,7 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     assert.equal(c2.writes, 0); assert.equal(c2.docs.conflict, 1);
     show('copy (אחרי השלמה)', r2);
     // האימות מזהה הבדלים (בדיקת בקרה: הוא לא עובר "תמיד")
-    const v = await run(['verify', '--report', F('verify-diff.json')]);
+    const v = await run(['verify', '--ack-unknown', 'mystery', '--report', F('verify-diff.json')]);
     show('verify (בקרה: אחרי שינויים ביעד)', v);
     assert.equal(v.code, 1);
     assert.deepEqual(report(F('verify-diff.json')).docDiffs.map(d => d.rel).sort(), ['fb/f1', 'tasks/t1']);
@@ -309,18 +322,32 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     show('copy (Storage)', r);
   });
 
-  it('9. מסמך עסק ו-users קיימים לא נדרסים', async () => {
+  it('9. (סבב 2, ליקוי 2) העתקה לעסק אחר, או לעסק שלא נוצר על ידי הכלי, או אחרי מעבר ל-b – נחסמת', async () => {
     await put('b/acme', { name: S('Acme'), status: S('active'), dataRoot: S('b') });
-    await put('users/u_emp2', { bizId: S('acme'), role: S('worker') });
     const r = await run(['copy', '--mode', 'write', '--biz', 'acme', '--state', F('state-acme.json'), '--backup', F('backup1.json'), '--report', F('acme.json'), '--no-storage']);
-    const c = report(F('acme.json'));
-    assert.equal(c.bizDocExists, true);
+    show('copy לעסק אחר (acme) – סירוב', r);
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /רק לעסק ההעברה/);
+    const sub = await api('POST', BASE + '/b/acme:listCollectionIds', {});
+    assert.deepEqual((sub && sub.collectionIds) || [], [], 'לא נכתב דבר ב-b/acme');
+    const sd = await run(['set-dataroot', '--to', 'legacy', '--mode', 'write', '--biz', 'acme']);
+    assert.notEqual(sd.code, 0);
     assert.equal((await get('b/acme')).fields.dataRoot.stringValue, 'b');
-    assert.ok(!(await get('b/acme')).fields.features);
-    assert.ok(c.userConflicts.length >= 1);
-    // u_emp2 שייך ל-acme ולכן תואם; u_mgr וכו' כבר שייכים ל-largpeami – התנגשות, לא נדרסים
-    assert.equal((await get('users/u_mgr')).fields.bizId.stringValue, BIZ);
-    show('copy לעסק אחר (בדיקת אי-דריסה)', r);
+    // מסמך העסק של largpeami בלי סימון יעד ההעברה (כאילו נוצר על ידי מישהו אחר)
+    const orig = (await get('b/' + BIZ)).fields;
+    const { migrationTarget, ...noMark } = orig;
+    assert.ok(migrationTarget && migrationTarget.booleanValue === true, 'הכלי מסמן את מסמך העסק כיעד ההעברה');
+    await put('b/' + BIZ, noMark);
+    const r2 = await run(['copy', '--mode', 'write', '--state', F('state.json'), '--backup', F('backup1.json')]);
+    assert.notEqual(r2.code, 0);
+    assert.match(r2.out, /לא נוצר על ידי כלי ההעברה/);
+    assert.notEqual((await run(['set-dataroot', '--to', 'b', '--mode', 'write'])).code, 0);
+    // אחרי מעבר ל-b: אין העתקה/השלמה
+    await put('b/' + BIZ, { ...orig, dataRoot: S('b') });
+    const r3 = await run(['copy', '--mode', 'write', '--state', F('state.json'), '--backup', F('backup1.json')]);
+    assert.notEqual(r3.code, 0);
+    assert.match(r3.out, /לא legacy/);
+    await put('b/' + BIZ, orig); // החזרה (קוד בדיקה)
   });
 
   it('10. נעילה: שתי העתקות במקביל אסורות', async () => {
@@ -334,7 +361,9 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
   it('11. נסיון חזרה: מעבר ל-b ← כתיבה ב-b ← דוח ← חזרה ל-legacy ← השורש שלם וזהה לגיבוי', async () => {
     const steps = [];
     const st = async (title, args) => { const r = await run(args); steps.push(r); show('חזרה: ' + title, r); return r; };
-    assert.equal((await st('גיבוי לפני המעבר', ['backup', '--out', F('backup-rb.json')])).code, 0);
+    assert.equal((await st('גיבוי לפני המעבר (נשמר ב-bucket)', ['backup', '--out', F('backup-rb.json'), '--upload', '--upload-tag', 'test', '--report', F('rb.json')])).code, 0);
+    const gcs = report(F('rb.json')).uploaded;
+    assert.match(gcs, /^gs:\/\/demo-largpeami\.appspot\.com\/migrate_backups\/.+_test\/backup\.json$/);
     const rootBefore = await snapshotRoot();
     assert.equal((await st('מעבר ל-b', ['set-dataroot', '--to', 'b', '--mode', 'write'])).code, 0);
     assert.equal((await get('b/' + BIZ)).fields.dataRoot.stringValue, 'b');
@@ -348,23 +377,24 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     assert.ok(s.changed.some(x => x.rel === 'cfg/main'));
     assert.equal((await st('חזרה ל-legacy', ['set-dataroot', '--to', 'legacy', '--mode', 'write'])).code, 0);
     assert.equal((await get('b/' + BIZ)).fields.dataRoot.stringValue, 'legacy');
-    const cmp = await st('בדיקה שהשורש שלם', ['compare-backup', '--backup', F('backup-rb.json')]);
+    const cmp = await st('בדיקה שהשורש שלם (מול הגיבוי שב-bucket)', ['compare-backup', '--backup-gcs', gcs]);
     assert.equal(cmp.code, 0);
     assert.deepEqual(await snapshotRoot(), rootBefore);
     fs.writeFileSync(F('rollback-steps.txt'), OUT.join('\n\n'));
   });
 
   it('12. אין בקוד הכלי מחיקה או עדכון של השורש (חיפוש בקוד)', () => {
-    const dir = path.join(ROOT, 'migrate');
+    const dir = MDIR;
     const code = fs.readdirSync(dir).filter(f => f.endsWith('.js')).map(f => [f, fs.readFileSync(path.join(dir, f), 'utf8')]);
     for (const [f, c] of code) {
       const lines = c.split('\n').filter(l => !/^\s*\/\//.test(l));
-      const bad = lines.filter(l => /\.delete\(|DELETE|\bdelete\s*:|deleteDocument|firebase-admin\/firestore|getFirestore|:commit|\.batch\(|\.save\(|createWriteStream|\.move\(|\.rename\(/.test(l) && !/'GET' && method !== 'POST'/.test(l));
+      const bad = lines.filter(l => /\.delete\(|DELETE|\bdelete\s*:|deleteDocument|firebase-admin\/firestore|getFirestore|:commit|\.batch\(|createWriteStream|\.move\(|\.rename\(/.test(l) && !/'GET' && method !== 'POST'/.test(l));
       assert.deepEqual(bad, [], f + ': אין מחיקה, אין כתיבה דרך SDK של Firestore, ואין כתיבת Storage חוץ מ-copy');
     }
     const all = code.map(x => x[1]).join('\n');
     assert.equal((all.match(/:batchWrite/g) || []).length, 1, 'נקודת כתיבה אחת בלבד ל-Firestore');
-    assert.equal((all.match(/\.copy\(/g) || []).length, 1, 'נקודת כתיבה אחת בלבד ל-Storage');
+    assert.equal((all.match(/\.copy\(/g) || []).length, 1, 'העתקה אחת בלבד ל-Storage (אל b/<bizId>/app_backups)');
+    assert.equal((all.match(/\.save\(/g) || []).length, 1, 'שמירה אחת בלבד ל-Storage (קובץ הגיבוי, תחת migrate_backups/)');
   });
 });
 
@@ -387,6 +417,8 @@ describe('בדיקת השומר והתהליך הידני', () => {
     'פרויקט test עם אישור לא מפורש': { project: 'largpeami-test-f4691', confirm: 'largpeami-test-f4691', saProject: 'largpeami-test-f4691', allowTest: 'yes' },
     'חשבון שירות של פרויקט אחר': { saProject: 'largpeami-test-f4691' },
     'פרויקט דמו': { project: 'demo-largpeami', confirm: 'demo-largpeami', saProject: 'demo-largpeami' },
+    'bucket של פרויקט אחר': { bucket: 'largpeami-test-f4691.firebasestorage.app' },
+    'bucket של הייצור לפרויקט הבדיקה': { project: 'largpeami-test-f4691', confirm: 'largpeami-test-f4691', saProject: 'largpeami-test-f4691', allowTest: 'true', bucket: 'largpeami.firebasestorage.app' },
   };
   for (const [name, flip] of Object.entries(flips)) {
     it('הפיכת ההגנה ← השומר נכשל: ' + name, () => {
@@ -394,7 +426,7 @@ describe('בדיקת השומר והתהליך הידני', () => {
       assert.equal(r.ok, false);
       assert.equal(r.mode, 'readonly');
       // גם כתהליך (כמו ב-GitHub): exit 1
-      const env = { ...process.env, MIGRATE_PROJECT: r.project, MIGRATE_PROJECT_CONFIRM: flip.confirm ?? good.confirm, MIGRATE_MODE: flip.mode ?? good.mode, MIGRATE_WRITE_CONFIRM: flip.writeConfirm || '', MIGRATE_ALLOW_TEST_PROJECT: flip.allowTest || '', MIGRATE_SA_PROJECT: flip.saProject ?? good.saProject };
+      const env = { ...process.env, MIGRATE_PROJECT: r.project, MIGRATE_PROJECT_CONFIRM: flip.confirm ?? good.confirm, MIGRATE_MODE: flip.mode ?? good.mode, MIGRATE_WRITE_CONFIRM: flip.writeConfirm || '', MIGRATE_ALLOW_TEST_PROJECT: flip.allowTest || '', MIGRATE_SA_PROJECT: flip.saProject ?? good.saProject, MIGRATE_BUCKET: flip.bucket || '' };
       env.MIGRATE_PROJECT = flip.project ?? good.project;
       assert.equal(spawnSync(process.execPath, [GUARD], { env }).status, 1);
     });
@@ -405,27 +437,119 @@ describe('בדיקת השומר והתהליך הידני', () => {
   it('הכלי עצמו, בלי אמולטור ובלי שומר, מסרב לרוץ (לא יוצא שום בקשה)', () => {
     const env = { ...process.env };
     for (const k of ['FIRESTORE_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST', 'STORAGE_EMULATOR_HOST', 'MIGRATE_PROJECT_CONFIRM']) delete env[k];
-    const r = spawnSync(process.execPath, [TOOL, 'dry-run', '--project', 'largpeami'], { env, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [TOOL, 'dry-run', '--project', 'largpeami', '--bucket', 'largpeami.firebasestorage.app'], { env, encoding: 'utf8' });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /השומר נכשל/);
   });
-  it('קובץ התהליך: ידני בלבד, קלט מזהה פעמיים, ברירת מחדל readonly, שומר לפני הכול, בלי סודות בקובץ', () => {
+  it('קובץ התהליך: ידני בלבד, קלט מזהה פעמיים, ברירת מחדל קריאה בלבד, שומר לפני הכול, בלי סודות בקובץ', () => {
     const yaml = require(require.resolve('js-yaml', { paths: [ROOT] }));
-    const file = path.resolve(ROOT, '..', '.github', 'workflows', 'migrate-largpeami.yml');
-    const txt = fs.readFileSync(file, 'utf8');
+    const txt = fs.readFileSync(WF, 'utf8');
     const y = yaml.load(txt);
     const on = y.on || y[true];
     assert.deepEqual(Object.keys(on), ['workflow_dispatch']);
     const inp = on.workflow_dispatch.inputs;
     assert.equal(inp.project_id.required, true);
     assert.equal(inp.project_id_confirm.required, true);
-    assert.equal(inp.mode.default, 'readonly');
-    assert.deepEqual(inp.mode.options, ['readonly', 'write']);
+    assert.equal(inp.action.default, 'check');
+    const cfg = y.jobs.migrate.steps.find(s => s.id === 'cfg');
+    assert.match(cfg.run, /check\|report-since\|compare-backup\) echo "mode=readonly"/, 'check = קריאה בלבד');
     const steps = y.jobs.migrate.steps;
     const gi = steps.findIndex(s => /guard\.js/.test(s.run || ''));
     const firstSecret = steps.findIndex(s => /secrets\./.test(JSON.stringify(s)));
     assert.ok(gi >= 0 && gi < firstSecret, 'השומר רץ לפני כל שימוש בסוד');
     assert.ok(!/-----BEGIN|private_key"\s*:|AIza[0-9A-Za-z_-]{20,}/.test(txt), 'אין סוד בקובץ');
     assert.ok(y.concurrency && y.concurrency['cancel-in-progress'] === false);
+  });
+});
+
+describe('סבב 2: תיקוני הבדיקה העצמאית', () => {
+  const yaml = () => yaml.m || (yaml.m = require(require.resolve('js-yaml', { paths: [ROOT] })));
+  const wf = () => yaml().load(fs.readFileSync(WF, 'utf8'));
+
+  it('ליקוי 1: verify נכשל על מסד ריק, ועל מסד שיש בו רק אוסף לא ידוע; dry-run מציג אותו', async () => {
+    await clearAll();
+    const v = await run(['verify', '--no-storage']);
+    show('verify על מסד ריק', v);
+    assert.equal(v.code, 1);
+    assert.match(v.out, /0 מסמכים במקור|לא נמצא במקור אף אוסף/);
+    await put('push_tokens/t1', { tok: S('x') });
+    const v2 = await run(['verify', '--no-storage']);
+    show('verify כשבשורש רק אוסף לא ידוע', v2);
+    assert.equal(v2.code, 1);
+    assert.match(v2.out, /push_tokens/);
+    const d = await run(['dry-run', '--no-storage']);
+    assert.match(d.out, /אוסף לא ידוע.*push_tokens – 1 מסמכים/);
+  });
+
+  it('ליקוי 3: במצב אמולטור בלי אמולטור Storage, או עם bucket אמיתי – הכלי מסרב', async () => {
+    // בלי אמולטור Storage. ליתר ביטחון חוסמים כל יציאה לרשת (proxy לא קיים) ובלי הרשאות Google
+    const noSt = { FIREBASE_STORAGE_EMULATOR_HOST: '', STORAGE_EMULATOR_HOST: '', HTTPS_PROXY: 'http://127.0.0.1:9', https_proxy: 'http://127.0.0.1:9', HTTP_PROXY: 'http://127.0.0.1:9', http_proxy: 'http://127.0.0.1:9', NO_PROXY: 'localhost,127.0.0.1', no_proxy: 'localhost,127.0.0.1', GOOGLE_APPLICATION_CREDENTIALS: '/nonexistent/sa.json' };
+    const r = await run(['dry-run'], noSt);
+    show('dry-run בלי FIREBASE_STORAGE_EMULATOR_HOST', r);
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /FIREBASE_STORAGE_EMULATOR_HOST/);
+    const r2 = await run(['copy', '--mode', 'write', '--bucket', 'largpeami.firebasestorage.app', '--state', F('s3.json'), '--backup', F('backup1.json')]);
+    assert.notEqual(r2.code, 0);
+    assert.match(r2.out, /bucket חייב להיות של פרויקט הדמו/);
+    assert.equal((await run(['dry-run', '--no-storage'], noSt)).code, 0, 'עם --no-storage מותר');
+  });
+
+  it('ליקוי 4: ה-bucket בתהליך נקבע לפי הפרויקט שהוקלד (או vars של אותו פרויקט), לא מ-index.html', () => {
+    const txt = fs.readFileSync(WF, 'utf8');
+    assert.ok(!/index\.html|ST_BUCKET/.test(txt), 'לא נלקח מ-index.html');
+    assert.match(txt, /vars\.FIREBASE_STORAGE_BUCKET/);
+    const cfg = wf().jobs.migrate.steps.find(s => s.id === 'cfg');
+    const go = (env) => {
+      const out = F('gh-out-' + Math.random().toString(36).slice(2));
+      fs.writeFileSync(out, '');
+      const r = spawnSync('bash', ['-e', '-c', cfg.run], { env: { PATH: process.env.PATH, GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: '/dev/null', ACTION: 'check', ...env }, encoding: 'utf8' });
+      assert.equal(r.status, 0, r.stderr);
+      return Object.fromEntries(fs.readFileSync(out, 'utf8').trim().split('\n').map(l => l.split('=')));
+    };
+    assert.equal(go({ PROJECT: 'largpeami-test-f4691', VAR_BUCKET: 'largpeami.firebasestorage.app' }).bucket, 'largpeami-test-f4691.firebasestorage.app');
+    assert.equal(go({ PROJECT: 'largpeami', VAR_BUCKET: 'largpeami.appspot.com' }).bucket, 'largpeami.appspot.com');
+    assert.equal(go({ PROJECT: 'largpeami', VAR_BUCKET: '' }).bucket, 'largpeami.firebasestorage.app');
+    assert.equal(go({ PROJECT: 'largpeami', ACTION: 'copy' }).mode, 'write');
+    // השומר מקבל את ה-bucket ובודק שהוא של אותו פרויקט
+    const g = wf().jobs.migrate.steps.find(s => s.run === 'node firebase/migrate/guard.js');
+    assert.equal(g.env.MIGRATE_BUCKET, '${{ steps.cfg.outputs.bucket }}');
+    assert.equal(checkGuard({ project: 'largpeami-test-f4691', confirm: 'largpeami-test-f4691', allowTest: 'true', bucket: 'largpeami.firebasestorage.app' }).ok, false);
+  });
+
+  it('ליקוי 5: הכלי מסרב לכתוב גיבוי/מצב/דוח בתוך מאגר git; .gitignore מחריג אותם', async () => {
+    const inRepo = path.join(ROOT, 'migrate', 'leak-backup.json');
+    const r = await run(['backup', '--out', inRepo, '--no-storage']);
+    show('backup לתוך המאגר – סירוב', r);
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /בתוך מאגר git/);
+    assert.equal(fs.existsSync(inRepo), false);
+    assert.notEqual((await run(['dry-run', '--no-storage', '--report', path.join(ROOT, 'r.json')])).code, 0);
+    for (const f of ['firebase/migrate/x.json', 'lp-migrate/backup.json', 'backup-before-switch.json']) {
+      assert.equal(spawnSync('git', ['-C', path.resolve(ROOT, '..'), 'check-ignore', '-q', f]).status, 0, f + ' מוחרג ב-.gitignore');
+    }
+    for (const doc of ['README.md', 'ROLLBACK.md']) {
+      const t = fs.readFileSync(path.join(MDIR, doc), 'utf8');
+      const rel = [...t.matchAll(/--(?:out|state|report|backup) +([^\s`]+)/g)].map(m => m[1]).filter(p => !p.startsWith('/tmp/') && !p.startsWith('"$O') && !p.startsWith('$O'));
+      assert.deepEqual(rel, [], doc + ': כל נתיב בדוגמאות מחוץ למאגר');
+    }
+  });
+
+  it('ליקוי 6: נוהל החזרה ניתן לביצוע מהתהליך; הגיבוי נשמר כברירת מחדל ב-bucket ולא ב-GitHub', () => {
+    const y = wf();
+    const inp = (y.on || y[true]).workflow_dispatch.inputs;
+    for (const a of ['check', 'copy', 'report-since', 'compare-backup', 'switch-to-b', 'rollback-to-legacy']) assert.ok(inp.action.options.includes(a), a);
+    assert.equal(inp.upload_backup.default, 'true');
+    assert.ok(inp.backup_path && inp.state_run_id);
+    const runStep = y.jobs.migrate.steps.find(s => s.name === 'Run').run;
+    assert.match(runStep, /report-since --state/);
+    assert.match(runStep, /set-dataroot --to legacy --mode write/);
+    assert.match(runStep, /set-dataroot --to b --mode write/);
+    assert.match(runStep, /compare-backup --backup-gcs/);
+    assert.match(runStep, /--upload --upload-tag/);
+    const uploads = y.jobs.migrate.steps.filter(s => /upload-artifact/.test(s.uses || ''));
+    assert.ok(uploads.every(s => !/backup\.json/.test(s.with.path)), 'קובץ הגיבוי לא עולה ל-GitHub');
+    const readme = fs.readFileSync(path.join(MDIR, 'README.md'), 'utf8');
+    for (const v of ['MIGRATE_PROJECT_CONFIRM', 'MIGRATE_WRITE_CONFIRM', 'MIGRATE_ALLOW_TEST_PROJECT', 'MIGRATE_BUCKET', 'GOOGLE_APPLICATION_CREDENTIALS']) assert.match(readme, new RegExp(v), 'README מתעד ' + v);
+    assert.match(fs.readFileSync(path.join(MDIR, 'ROLLBACK.md'), 'utf8'), /migrate_backups\//, 'ROLLBACK כותב איפה נשמר הגיבוי');
   });
 });

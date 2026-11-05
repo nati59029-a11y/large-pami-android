@@ -24,7 +24,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { createRequire } = require('node:module');
 const { FsRest, scanTree, hashFields, MISSING, pmap } = require('./fsrest');
-const { checkGuard, fromEnv } = require('./guard');
+const { checkGuard, fromEnv, bucketBelongs } = require('./guard');
 
 // firebase-admin שכבר מותקן בפונקציות השרת (בלי להוסיף תלות)
 const requireFromFunctions = createRequire(path.join(__dirname, '..', 'functions', 'package.json'));
@@ -47,6 +47,21 @@ const DEFERRED = [
 const NEW_ROOT = ['users', 'superadmins'];
 const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'];
 const STORAGE_PREFIX = 'app_backups/';
+// העסק היחיד שמותר להעתיק אליו (לארג' פעמי). עסק אחר = סירוב, כדי שטעות הקלדה לא תחשוף את הנתונים לעסק זר
+const MIGRATION_BIZ = 'largpeami';
+// גיבוי לפני ההעברה נשמר ב-bucket הפרטי של הפרויקט, בתיקייה הזו בלבד (יצירה בלבד, אף פעם לא דריסה)
+const BACKUP_PREFIX = 'migrate_backups/';
+
+// קבצים שהכלי כותב (גיבוי, מצב, דוח) אסורים בתוך תיקיית מאגר git: הם מכילים נתונים כספיים
+function assertOutsideRepo(file) {
+  let dir = path.dirname(path.resolve(file));
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.git'))) throw new Error('אסור לכתוב את ' + file + ' בתוך מאגר git (' + dir + '). כתבו לתיקייה זמנית מחוץ למאגר, למשל /tmp/lp-migrate/');
+    const up = path.dirname(dir);
+    if (up === dir) return;
+    dir = up;
+  }
+}
 
 // ---- פרמטרים ----
 function parseArgs(argv) {
@@ -78,11 +93,20 @@ function setup(args) {
   if (!/^[a-z0-9-]{3,30}$/.test(bizId)) throw new Error('מזהה עסק לא תקין: ' + bizId);
   if (mode !== 'readonly' && mode !== 'write') throw new Error('מצב לא מוכר: ' + mode);
   const emu = process.env.FIRESTORE_EMULATOR_HOST;
+  const noStorage = !!args['no-storage'];
+  const bucketName = args.bucket || process.env.MIGRATE_BUCKET || (emu && project ? project + '.appspot.com' : '');
+  for (const k of ['out', 'state', 'report']) if (args[k] && args[k] !== 'true') assertOutsideRepo(args[k]);
   if (emu) {
     if (!/^demo-/.test(project || '')) throw new Error('באמולטור מותר רק פרויקט demo-*');
+    // Storage חייב להיות מופנה גם הוא לאמולטור, אחרת firebase-admin היה פונה ל-bucket אמיתי בלי שומר
+    if (!noStorage && !process.env.FIREBASE_STORAGE_EMULATOR_HOST && !process.env.STORAGE_EMULATOR_HOST) {
+      throw new Error('מצב אמולטור בלי FIREBASE_STORAGE_EMULATOR_HOST: Storage היה פונה לענן. הגדירו אותו, או הוסיפו --no-storage');
+    }
+    if (!noStorage && !bucketBelongs(bucketName, project)) throw new Error('באמולטור ה-bucket חייב להיות של פרויקט הדמו (' + project + '.*), לא "' + bucketName + '"');
   } else {
-    // פרויקט אמיתי: השומר חייב לעבור, והמצב שלו חייב להתאים למצב המבוקש
-    const g = checkGuard({ ...fromEnv(), project });
+    // פרויקט אמיתי: השומר חייב לעבור (כולל ה-bucket), והמצב שלו חייב להתאים למצב המבוקש
+    if (!noStorage && !bucketName) throw new Error('חסר --bucket (שם ה-bucket של Storage בפרויקט)');
+    const g = checkGuard({ ...fromEnv(), project, bucket: noStorage ? undefined : bucketName });
     if (!g.ok) throw new Error('השומר נכשל:\n - ' + g.errors.join('\n - '));
     if (mode === 'write' && g.mode !== 'write') throw new Error('מצב כתיבה לא אושר בשומר');
   }
@@ -101,14 +125,15 @@ function setup(args) {
     };
   }
   const fsr = new FsRest({ project, mode, bizId, token: tokenFn, emulatorHost: emu });
-  return { project, bizId, mode, fsr, emu, args };
+  return { project, bizId, mode, fsr, emu, args, bucketName };
 }
 
 let bucketCache = null;
 function bucket(ctx) {
   if (bucketCache) return bucketCache;
-  const name = ctx.args.bucket || (ctx.emu ? ctx.project + '.appspot.com' : null);
-  if (!name) throw new Error('חסר --bucket (שם ה-bucket של Storage)');
+  if (ctx.args['no-storage']) throw new Error('--no-storage: אין גישה ל-Storage');
+  const name = ctx.bucketName;
+  if (!bucketBelongs(name, ctx.project)) throw new Error('bucket לא שייך לפרויקט: ' + name);
   const { initializeApp, getApps } = requireFromFunctions('firebase-admin/app');
   const { getStorage } = requireFromFunctions('firebase-admin/storage');
   const app = getApps().find(a => a.name === 'migrate') || initializeApp({ projectId: ctx.project, storageBucket: name }, 'migrate');
@@ -178,9 +203,23 @@ async function cmdBackup(ctx) {
   log(`גיבוי: ${Object.keys(docs).length} מסמכים ב-${colls.length} אוספים, ${storage.length} קבצי Storage → ${out}`);
   for (const c of colls) log(`  ${c}: ${collections[c].count} (${collections[c].plan}) ${collections[c].hash.slice(0, 16)}`);
   log('בדיקת סיבוב של קובץ הגיבוי: עברה (כל הגיבובים זהים אחרי קריאה חוזרת)');
+  // שמירה ב-bucket הפרטי של הפרויקט (ברירת המחדל בתהליך הידני). יצירה בלבד, בשם ייחודי, אף פעם לא דריסה
+  let uploaded = null;
+  if (ctx.args.upload) {
+    const tag = String(ctx.args['upload-tag'] || 'local').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'local';
+    const dest = BACKUP_PREFIX + takenAt.replace(/[:.]/g, '-') + '_' + tag + '/backup.json';
+    const f = bucket(ctx).file(dest);
+    const [exists] = await f.exists();
+    if (exists) throw new Error('קובץ גיבוי עם אותו שם כבר קיים ב-bucket, לא נדרס: ' + dest);
+    await f.save(fs.readFileSync(out), { contentType: 'application/json', resumable: false, preconditionOpts: { ifGenerationMatch: 0 } });
+    const [m] = await f.getMetadata();
+    if (Number(m.size) !== fs.statSync(out).size) throw new Error('גודל קובץ הגיבוי ב-bucket לא תואם');
+    uploaded = 'gs://' + ctx.bucketName + '/' + dest;
+    log('הגיבוי נשמר ב-bucket הפרטי של הפרויקט: ' + uploaded);
+  }
   const unknown = colls.filter(c => classify(c) === 'unknown');
   if (unknown.length) log('אוספים לא ידועים (מגובים, לא מועתקים, דורש החלטה): ' + unknown.join(', '));
-  return { ok: true, docs: Object.keys(docs).length, collections, unknown };
+  return { ok: true, docs: Object.keys(docs).length, collections, unknown, uploaded };
 }
 
 // ---- 2/3/5. תכנון והעתקה ----
@@ -193,6 +232,37 @@ function loadState(ctx, file, mustExist) {
   const s = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (s.kind !== 'lp-migrate-state' || s.project !== ctx.project || s.bizId !== ctx.bizId) throw new Error('קובץ המצב שייך לפרויקט או לעסק אחר');
   return s;
+}
+
+// אוספים בשורש שלא מועתקים (נדחים / לא ידועים), עם מספר המסמכים בהם (רמה עליונה)
+async function otherColls(ctx, colls) {
+  const out = [];
+  for (const c of colls) {
+    const k = classify(c);
+    if (k !== 'unknown' && k !== 'deferred') continue;
+    const docs = await ctx.fsr.listDocuments(c);
+    out.push({ coll: c, plan: k, count: docs.length });
+  }
+  return out;
+}
+function printOther(list, ack) {
+  for (const o of list) {
+    if (o.plan === 'deferred') log(`  נדחה (מגובה, לא מועתק): ${o.coll} – ${o.count} מסמכים`);
+    else log(`  !!! אוסף לא ידוע (לא מועתק${ack.includes(o.coll) ? ', אושר ב---ack-unknown' : ', דורש החלטה'}): ${o.coll} – ${o.count} מסמכים`);
+  }
+}
+const ackList = ctx => String(ctx.args['ack-unknown'] || '').split(',').map(x => x.trim()).filter(Boolean);
+
+// העתקה ושינוי dataRoot מותרים רק לעסק ההעברה, ורק אם מסמך העסק (אם קיים) נוצר על ידי הכלי ומסומן כיעד ההעברה
+function assertMigrationTarget(ctx, bizDoc, needLegacy) {
+  if (ctx.bizId !== MIGRATION_BIZ) throw new Error(`כתיבה מותרת רק לעסק ההעברה "${MIGRATION_BIZ}", לא ל-"${ctx.bizId}"`);
+  if (!bizDoc) return;
+  const f = bizDoc.fields || {};
+  const sv = k => (f[k] && f[k].stringValue) || '';
+  if (!(f.migrationTarget && f.migrationTarget.booleanValue === true) || sv('createdBy') !== 'migrate') {
+    throw new Error(`מסמך העסק b/${ctx.bizId} קיים ולא נוצר על ידי כלי ההעברה (חסר migrationTarget:true או createdBy:migrate). לא נוגעים בו`);
+  }
+  if (needLegacy && sv('dataRoot') !== 'legacy') throw new Error(`b/${ctx.bizId}.dataRoot הוא "${sv('dataRoot')}", לא legacy. העתקה/השלמה רק לפני המעבר (ראו ROLLBACK.md)`);
 }
 
 async function plan(ctx, state) {
@@ -245,6 +315,7 @@ async function plan(ctx, state) {
     else U.conflict.push({ uid, why: `קיים עם bizId=${cb} role=${cr}, לא נדרס` });
   });
   const bizDoc = await ctx.fsr.getDoc('b/' + ctx.bizId);
+  const other = await otherColls(ctx, colls);
   // Storage
   const S = { create: [], same: [], conflict: [] };
   if (!ctx.args['no-storage']) {
@@ -258,7 +329,7 @@ async function plan(ctx, state) {
       else S.conflict.push({ from: f.name, to, src: f.md5, dst: d.md5, why: 'קובץ היעד שונה, לא נדרס' });
     }
   }
-  return { P, U, S, bizDoc, src, dst, colls, copyColls };
+  return { P, U, S, bizDoc, src, dst, colls, copyColls, other };
 }
 
 function printPlan(pl, ctx, title) {
@@ -275,11 +346,12 @@ function printPlan(pl, ctx, title) {
   for (const c of P.conflict) log(`  התנגשות: ${c.rel} – ${c.why} (מקור ${String(c.src).slice(0, 12)}, יעד ${String(c.dst).slice(0, 12)})`);
   for (const c of U.conflict) log(`  התנגשות users/${c.uid}: ${c.why}`);
   for (const c of S.conflict) log(`  התנגשות Storage ${c.to}: ${c.why}`);
+  printOther(pl.other, ackList(ctx));
 }
 
 function planSummary(pl) {
   const n = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v.length]));
-  return { docs: n(pl.P), users: n(pl.U), storage: n(pl.S), bizDocExists: !!pl.bizDoc, conflicts: pl.P.conflict.map(({ rel, why, src, dst }) => ({ rel, why, src, dst })), userConflicts: pl.U.conflict, storageConflicts: pl.S.conflict, targetOnlyChanged: pl.P.targetOnlyChanged, deletedInSource: pl.P.deletedInSource, newInTarget: pl.P.newInTarget };
+  return { docs: n(pl.P), users: n(pl.U), storage: n(pl.S), bizDocExists: !!pl.bizDoc, conflicts: pl.P.conflict.map(({ rel, why, src, dst }) => ({ rel, why, src, dst })), userConflicts: pl.U.conflict, storageConflicts: pl.S.conflict, other: pl.other, targetOnlyChanged: pl.P.targetOnlyChanged, deletedInSource: pl.P.deletedInSource, newInTarget: pl.P.newInTarget };
 }
 
 async function cmdDryRun(ctx) {
@@ -299,6 +371,7 @@ function bizDocFields(ctx) {
     schemaVersion: { integerValue: '1' },
     createdAt: { timestampValue: now },
     createdBy: { stringValue: 'migrate' },
+    migrationTarget: { booleanValue: true },
     features: { mapValue: { fields: Object.fromEntries(FEATURES.map(k => [k, { booleanValue: true }])) } },
   };
 }
@@ -308,6 +381,7 @@ async function cmdCopy(ctx) {
   if (!ctx.args.backup || !fs.existsSync(ctx.args.backup)) throw new Error('copy דורש --backup עם קובץ גיבוי קיים (מריצים backup קודם)');
   const bk = JSON.parse(fs.readFileSync(ctx.args.backup, 'utf8'));
   if (bk.kind !== 'lp-migrate-backup' || bk.project !== ctx.project) throw new Error('קובץ הגיבוי לא שייך לפרויקט הזה');
+  assertMigrationTarget(ctx, await ctx.fsr.getDoc('b/' + ctx.bizId), true);
   const stateFile = ctx.args.state;
   const state = loadState(ctx, stateFile, false);
   // נעילה: שתי העתקות במקביל אסורות
@@ -319,6 +393,7 @@ async function cmdCopy(ctx) {
   try {
     const startedAt = new Date().toISOString();
     const pl = await plan(ctx, state);
+    assertMigrationTarget(ctx, pl.bizDoc, true);
     printPlan(pl, ctx, 'העתקה');
     const { P, U, S } = pl;
     // מסמכים קיימים שזהים: נרשמים במצב בלי כתיבה
@@ -375,11 +450,19 @@ async function cmdCopy(ctx) {
 
 // ---- 4. אימות ----
 async function cmdVerify(ctx) {
-  const colls = (await rootCollections(ctx)).filter(c => classify(c) === 'copy');
+  const all = await rootCollections(ctx);
+  const colls = all.filter(c => classify(c) === 'copy');
   const src = await scanTree(ctx.fsr, '', colls);
   const dst = await scanTree(ctx.fsr, 'b/' + ctx.bizId, colls);
   const a = collSummary(src, colls), b = collSummary(dst, colls);
   const diffs = [];
+  // אימות שלא בדק כלום = נכשל
+  const problems = [];
+  if (!colls.length) problems.push('לא נמצא במקור אף אוסף מהרשימה להעתקה');
+  if (!src.size) problems.push('נמצאו 0 מסמכים במקור');
+  const other = await otherColls(ctx, all);
+  const ack = ackList(ctx);
+  for (const o of other) if (o.plan === 'unknown' && o.count > 0 && !ack.includes(o.coll)) problems.push(`אוסף לא ידוע עם ${o.count} מסמכים לא הועתק: ${o.coll}`);
   log(`אימות: מקור (שורש) מול יעד (b/${ctx.bizId}), ${colls.length} אוספים`);
   for (const c of colls) {
     const eq = a[c].count === b[c].count && a[c].hash === b[c].hash;
@@ -399,17 +482,44 @@ async function cmdVerify(ctx) {
     storage = { srcCount: s.length, srcBytes: sum(s), dstCount: t.length, dstBytes: sum(t), mismatched: miss.map(f => f.name) };
     log(`  Storage: מקור ${s.length} קבצים / ${sum(s)} בתים | יעד ${t.length} קבצים / ${sum(t)} בתים | שונים/חסרים ${miss.length}`);
   }
-  const ok = !diffs.length && !docDiffs.length && (!storage || !storage.mismatched.length);
-  log(ok ? 'אימות: עבר – הספירה והגיבוב של כל אוסף זהים במקור וביעד' : `אימות: נכשל – ${diffs.length} אוספים, ${docDiffs.length} מסמכים שונים`);
-  return { ok, collections: Object.fromEntries(colls.map(c => [c, { src: a[c], dst: b[c] }])), docDiffs, storage };
+  printOther(other, ack);
+  // users/{uid} לכל מנהל ועובד, ומסמך העסק
+  const people = [...src.keys()].filter(r => /^(admins|staff)\/[^/]+$/.test(r) && !src.get(r).missing).map(r => r.split('/')[1]);
+  const badUsers = [];
+  await pmap([...new Set(people)], 16, async uid => {
+    const u = await ctx.fsr.getDoc('users/' + uid);
+    if (!u || !u.fields.bizId || u.fields.bizId.stringValue !== ctx.bizId) badUsers.push(uid);
+  });
+  if (badUsers.length) problems.push(`users חסר או שייך לעסק אחר: ${badUsers.sort().join(', ')}`);
+  const bizDoc = await ctx.fsr.getDoc('b/' + ctx.bizId);
+  if (!bizDoc) problems.push(`מסמך העסק b/${ctx.bizId} לא קיים`);
+  log(`  users: ${people.length - badUsers.length}/${new Set(people).size} תקינים. מסמך העסק: ${bizDoc ? 'קיים, dataRoot=' + ((bizDoc.fields.dataRoot || {}).stringValue) : 'חסר'}`);
+  for (const p of problems) log('  בעיה: ' + p);
+  const ok = !problems.length && !diffs.length && !docDiffs.length && (!storage || !storage.mismatched.length);
+  log(ok ? 'אימות: עבר – הספירה והגיבוב של כל אוסף זהים במקור וביעד' : `אימות: נכשל – ${diffs.length} אוספים, ${docDiffs.length} מסמכים שונים, ${problems.length} בעיות`);
+  return { ok, collections: Object.fromEntries(colls.map(c => [c, { src: a[c], dst: b[c] }])), docDiffs, storage, problems, other, srcDocs: src.size };
 }
 
 // ---- השוואת המקור לגיבוי ----
+// --backup <קובץ מקומי> או --backup-gcs <נתיב בתוך migrate_backups/ ב-bucket של הפרויקט>
+async function loadBackup(ctx) {
+  let txt;
+  if (ctx.args['backup-gcs']) {
+    const p = String(ctx.args['backup-gcs']).replace(/^gs:\/\/[^/]+\//, '');
+    if (!p.startsWith(BACKUP_PREFIX) || p.includes('..')) throw new Error('--backup-gcs חייב להיות בתוך ' + BACKUP_PREFIX);
+    [txt] = await bucket(ctx).file(p).download();
+    txt = txt.toString('utf8');
+  } else if (ctx.args.backup && fs.existsSync(ctx.args.backup)) txt = fs.readFileSync(ctx.args.backup, 'utf8');
+  else throw new Error('חסר --backup (קובץ קיים) או --backup-gcs');
+  const bk = JSON.parse(txt);
+  if (bk.kind !== 'lp-migrate-backup' || bk.project !== ctx.project) throw new Error('קובץ הגיבוי לא שייך לפרויקט הזה');
+  return bk;
+}
 async function cmdCompareBackup(ctx) {
-  if (!ctx.args.backup) throw new Error('חסר --backup');
-  const bk = JSON.parse(fs.readFileSync(ctx.args.backup, 'utf8'));
-  if (bk.project !== ctx.project) throw new Error('קובץ הגיבוי שייך לפרויקט אחר');
-  const colls = Object.keys(bk.collections);
+  const bk = await loadBackup(ctx);
+  // users ו-superadmins הם אוספים חדשים שהכלי והשרת כותבים אליהם: לא חלק מ"המקור" שמושווה
+  const colls = Object.keys(bk.collections).filter(c => !NEW_ROOT.includes(c));
+  bk.docs = Object.fromEntries(Object.entries(bk.docs).filter(([rel]) => !NEW_ROOT.includes(topColl(rel)))); // סינון בזיכרון בלבד
   const now = await rootCollections(ctx);
   const map = await scanTree(ctx.fsr, '', colls);
   const diffs = [];
@@ -420,7 +530,7 @@ async function cmdCompareBackup(ctx) {
     else if (!d.missing && hashFields(d.fields) !== d.hash) diffs.push({ rel, why: 'קובץ הגיבוי פגום' });
   }
   for (const rel of map.keys()) if (!bk.docs[rel]) diffs.push({ rel, why: 'נוסף אחרי הגיבוי' });
-  const newColls = now.filter(c => !colls.includes(c));
+  const newColls = now.filter(c => !colls.includes(c) && !NEW_ROOT.includes(c));
   log(`השוואה לגיבוי מ-${bk.takenAt}: ${Object.keys(bk.docs).length} מסמכים בגיבוי, ${map.size} עכשיו, הבדלים ${diffs.length}`);
   for (const d of diffs.slice(0, 50)) log(`  ${d.rel}: ${d.why}`);
   if (newColls.length) log('  אוספים חדשים בשורש מאז הגיבוי (לא נכללים בהשוואה): ' + newColls.join(', '));
@@ -461,6 +571,7 @@ async function cmdSetDataRoot(ctx) {
   if (ctx.mode !== 'write') throw new Error('set-dataroot דורש --mode write');
   const cur = await ctx.fsr.getDoc('b/' + ctx.bizId);
   if (!cur) throw new Error('מסמך העסק b/' + ctx.bizId + ' לא קיים');
+  assertMigrationTarget(ctx, cur, false);
   const before = cur.fields.dataRoot && cur.fields.dataRoot.stringValue;
   const [r] = await ctx.fsr.writeDocs([{ path: 'b/' + ctx.bizId, kind: 'setField', fieldPaths: ['dataRoot'], fields: { dataRoot: { stringValue: to } } }]);
   if (!r.ok) throw new Error('הכתיבה נכשלה: ' + r.error);

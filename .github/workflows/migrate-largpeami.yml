@@ -1,9 +1,10 @@
-# העברת הנתונים של לארג' פעמי לעסק הראשון במבנה ריבוי העסקים (b/largpeami).
+# העברת הנתונים של לארג' פעמי לעסק הראשון במבנה ריבוי העסקים (b/largpeami). העסק קבוע: largpeami.
 # ידני בלבד (Actions -> "Migrate largpeami data" -> Run workflow). אין push ואין schedule.
-# ברירת המחדל: קריאה בלבד (גיבוי + ספירה + אימות), בלי שום כתיבה.
-# מצב write (העתקה/השלמה) רק עם קלט אישור נוסף. המקור בשורש לא נמחק ולא מתעדכן לעולם.
-# הוראות מלאות: firebase/migrate/README.md. חזרה: firebase/migrate/ROLLBACK.md.
-# הסוד FIREBASE_SERVICE_ACCOUNT נלקח מ-secrets של GitHub בלבד. לא נכתב לקובץ במאגר.
+# ברירת המחדל (action=check): גיבוי, ספירה ואימות, בלי שום כתיבה לנתוני העסק.
+# פעולות שכותבות (copy, switch-to-b, rollback-to-legacy) רק עם קלט אישור נוסף. המקור בשורש לא נמחק ולא מתעדכן לעולם.
+# הגיבוי שלפני כל פעולה נשמר כברירת מחדל ב-bucket הפרטי של הפרויקט (migrate_backups/), לא ב-GitHub.
+# הוראות: firebase/migrate/README.md. חזרה: firebase/migrate/ROLLBACK.md.
+# סודות: FIREBASE_SERVICE_ACCOUNT (ייצור) ו-FIREBASE_SERVICE_ACCOUNT_TEST (פרויקט שמזהה שלו מכיל test), מ-secrets של GitHub בלבד.
 name: Migrate largpeami data
 
 on:
@@ -17,14 +18,14 @@ on:
         description: "הקלד שוב את מזהה הפרויקט המלא (אישור)"
         required: true
         type: string
-      mode:
-        description: "readonly = גיבוי, ספירה ואימות בלבד. write = העתקה/השלמה ל-b/<bizId>"
+      action:
+        description: "check = גיבוי+ספירה+אימות (קריאה בלבד). copy = העתקה/השלמה. report-since / compare-backup = דוחות. switch-to-b / rollback-to-legacy = שינוי dataRoot"
         required: true
         type: choice
-        options: [readonly, write]
-        default: readonly
+        options: [check, copy, report-since, compare-backup, switch-to-b, rollback-to-legacy]
+        default: check
       write_confirm:
-        description: "רק למצב write: הקלד write-to-<מזהה הפרויקט>"
+        description: "רק לפעולות שכותבות (copy, switch-to-b, rollback-to-legacy): הקלד write-to-<מזהה הפרויקט>"
         required: false
         type: string
         default: ""
@@ -33,21 +34,26 @@ on:
         required: false
         type: string
         default: ""
-      biz_id:
-        description: "מזהה העסק היעד"
+      state_run_id:
+        description: "ל-copy (השלמה) ול-report-since: מספר ההרצה האחרונה עם action=copy (run id). ריק = העתקה ראשונה"
         required: false
         type: string
-        default: largpeami
-      state_run_id:
-        description: "להשלמה: מספר ההרצה הקודמת (run id) שממנה לקחת את קובץ המצב. ריק = העתקה ראשונה"
+        default: ""
+      backup_path:
+        description: "ל-compare-backup ול-rollback-to-legacy: נתיב הגיבוי ב-bucket (migrate_backups/.../backup.json), מתוך סיכום ההרצה שיצרה אותו"
         required: false
         type: string
         default: ""
       upload_backup:
-        description: "להעלות את קובץ הגיבוי (כל הנתונים) כ-artifact? (true/false). ברירת מחדל: לא"
+        description: "לשמור את הגיבוי ב-bucket הפרטי של הפרויקט (migrate_backups/)? true/false. ברירת מחדל: true. אף פעם לא ב-GitHub"
         required: false
         type: string
-        default: "false"
+        default: "true"
+      ack_unknown:
+        description: "אוספים לא ידועים שהוחלט במפורש לא להעביר (מופרדים בפסיק). ריק = אוסף לא ידוע מכשיל את האימות"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: migrate-largpeami
@@ -61,55 +67,64 @@ jobs:
   migrate:
     runs-on: ubuntu-latest
     steps:
-      # 1. השומר – לפני כל דבר אחר, ובלי גישה לסודות
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Guard (project typed twice, read-only by default)
+
+      # 1. מצב ו-bucket: נקבעים מהקלט ומהפרויקט שהוקלד (בלי סודות)
+      - name: Mode and Storage bucket (from the typed project, or vars.FIREBASE_STORAGE_BUCKET)
+        id: cfg
+        env:
+          ACTION: ${{ inputs.action }}
+          PROJECT: ${{ inputs.project_id }}
+          VAR_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+        run: |
+          case "$ACTION" in
+            check|report-since|compare-backup) echo "mode=readonly" >> "$GITHUB_OUTPUT" ;;
+            copy|switch-to-b|rollback-to-legacy) echo "mode=write" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Unknown action"; exit 1 ;;
+          esac
+          # vars.FIREBASE_STORAGE_BUCKET רק אם הוא שייך לפרויקט שהוקלד; אחרת ה-bucket ברירת המחדל של הפרויקט
+          if [ -n "$VAR_BUCKET" ] && [ "${VAR_BUCKET#"$PROJECT".}" != "$VAR_BUCKET" ]; then B="$VAR_BUCKET"; else B="$PROJECT.firebasestorage.app"; fi
+          echo "bucket=$B" >> "$GITHUB_OUTPUT"
+          echo "Storage bucket: $B" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # 2. השומר – לפני כל שימוש בסוד
+      - name: Guard (project typed twice, bucket of the same project, read-only by default)
         env:
           MIGRATE_PROJECT: ${{ inputs.project_id }}
           MIGRATE_PROJECT_CONFIRM: ${{ inputs.project_id_confirm }}
-          MIGRATE_MODE: ${{ inputs.mode }}
+          MIGRATE_MODE: ${{ steps.cfg.outputs.mode }}
           MIGRATE_WRITE_CONFIRM: ${{ inputs.write_confirm }}
           MIGRATE_ALLOW_TEST_PROJECT: ${{ inputs.allow_test_project }}
+          MIGRATE_BUCKET: ${{ steps.cfg.outputs.bucket }}
         run: node firebase/migrate/guard.js
-      - name: Check the business id
-        env:
-          BIZ: ${{ inputs.biz_id }}
-        run: echo "$BIZ" | grep -Eq '^[a-z0-9-]{3,30}$' || { echo "::error::Bad biz_id"; exit 1; }
 
-      # 2. התקנה (firebase-admin של הפונקציות; בלי תלות חדשה)
+      # 3. התקנה (firebase-admin של הפונקציות; בלי תלות חדשה)
       - name: Install firebase-admin (functions dependencies)
         working-directory: firebase/functions
         run: npm ci --no-audit --no-fund
 
-      # 3. חשבון השירות: נכתב לקובץ זמני בלבד, והשומר בודק שהוא של אותו פרויקט
+      # 4. חשבון השירות: נכתב לקובץ זמני בלבד, והשומר בודק שהוא של אותו פרויקט
       - name: Service account (temporary file) and second guard check
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ contains(inputs.project_id, 'test') && secrets.FIREBASE_SERVICE_ACCOUNT_TEST || secrets.FIREBASE_SERVICE_ACCOUNT }}
           MIGRATE_PROJECT: ${{ inputs.project_id }}
           MIGRATE_PROJECT_CONFIRM: ${{ inputs.project_id_confirm }}
-          MIGRATE_MODE: ${{ inputs.mode }}
+          MIGRATE_MODE: ${{ steps.cfg.outputs.mode }}
           MIGRATE_WRITE_CONFIRM: ${{ inputs.write_confirm }}
           MIGRATE_ALLOW_TEST_PROJECT: ${{ inputs.allow_test_project }}
+          MIGRATE_BUCKET: ${{ steps.cfg.outputs.bucket }}
         run: |
           umask 077
-          [ -n "$FIREBASE_SERVICE_ACCOUNT" ] || { echo "::error::Missing secret FIREBASE_SERVICE_ACCOUNT"; exit 1; }
+          [ -n "$FIREBASE_SERVICE_ACCOUNT" ] || { echo "::error::Missing secret (FIREBASE_SERVICE_ACCOUNT, or FIREBASE_SERVICE_ACCOUNT_TEST for a test project)"; exit 1; }
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
           MIGRATE_SA_PROJECT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$RUNNER_TEMP/sa.json") \
             node firebase/migrate/guard.js
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
-      - name: Storage bucket name (from the app, ST_BUCKET)
-        id: bucket
-        run: |
-          B=$(sed -nE "s/^const ST_BUCKET='([a-z0-9._-]+)';.*/\1/p" app-source/www/index.html | head -1)
-          [ -n "$B" ] || { echo "::error::ST_BUCKET not found in app-source/www/index.html"; exit 1; }
-          echo "name=$B" >> "$GITHUB_OUTPUT"
-          echo "Storage bucket: $B" | tee -a "$GITHUB_STEP_SUMMARY"
-
-      # 4. קובץ המצב מההרצה הקודמת (להשלמה)
-      - name: Previous state (for an incremental copy)
+      # 5. קובץ המצב מההרצה האחרונה עם action=copy (להשלמה ול-report-since)
+      - name: Previous state (from the last copy run)
         if: ${{ inputs.state_run_id != '' }}
         uses: actions/download-artifact@v4
         with:
@@ -118,33 +133,57 @@ jobs:
           run-id: ${{ inputs.state_run_id }}
           github-token: ${{ github.token }}
 
-      # 5. ההרצה
-      - name: Run (backup, then dry-run or copy, then verify)
+      # 6. ההרצה (כל הקבצים ב-RUNNER_TEMP, מחוץ לתיקיית המאגר)
+      - name: Run
         env:
           MIGRATE_PROJECT: ${{ inputs.project_id }}
           MIGRATE_PROJECT_CONFIRM: ${{ inputs.project_id_confirm }}
-          MIGRATE_MODE: ${{ inputs.mode }}
+          MIGRATE_MODE: ${{ steps.cfg.outputs.mode }}
           MIGRATE_WRITE_CONFIRM: ${{ inputs.write_confirm }}
           MIGRATE_ALLOW_TEST_PROJECT: ${{ inputs.allow_test_project }}
-          BIZ: ${{ inputs.biz_id }}
-          BUCKET: ${{ steps.bucket.outputs.name }}
+          MIGRATE_BUCKET: ${{ steps.cfg.outputs.bucket }}
+          ACTION: ${{ inputs.action }}
+          UPLOAD: ${{ inputs.upload_backup }}
+          BACKUP_PATH: ${{ inputs.backup_path }}
+          ACK: ${{ inputs.ack_unknown }}
         run: |
           set -o pipefail
           O="$RUNNER_TEMP/out"; mkdir -p "$O"
           [ -f "$RUNNER_TEMP/prev/state.json" ] && cp "$RUNNER_TEMP/prev/state.json" "$O/state.json"
-          T="node firebase/migrate/migrate.js --project $MIGRATE_PROJECT --biz $BIZ --bucket $BUCKET"
-          $T backup --out "$O/backup.json" --report "$O/r-backup.json" | tee "$O/log.txt"
-          if [ "$MIGRATE_MODE" = "write" ]; then
-            $T copy --mode write --state "$O/state.json" --backup "$O/backup.json" --report "$O/r-copy.json" | tee -a "$O/log.txt"
-            $T verify --report "$O/r-verify.json" | tee -a "$O/log.txt"
-            $T compare-backup --backup "$O/backup.json" --report "$O/r-compare.json" | tee -a "$O/log.txt"
-          else
-            $T dry-run --report "$O/r-dry.json" | tee -a "$O/log.txt"
-            $T verify --report "$O/r-verify.json" | tee -a "$O/log.txt" || echo "verify: differences (expected before the first copy)"
-          fi
-          tail -n 40 "$O/log.txt" >> "$GITHUB_STEP_SUMMARY"
+          T=(node firebase/migrate/migrate.js --project "$MIGRATE_PROJECT" --biz largpeami --bucket "$MIGRATE_BUCKET")
+          ACKA=(); [ -n "$ACK" ] && ACKA=(--ack-unknown "$ACK")
+          UP=(); [ "$UPLOAD" = "true" ] && UP=(--upload --upload-tag "run$GITHUB_RUN_ID")
+          need_state() { [ -f "$O/state.json" ] || { echo "::error::state_run_id is required (the run id of the last action=copy run)"; exit 1; }; }
+          need_backup() { [ -n "$BACKUP_PATH" ] || { echo "::error::backup_path is required (migrate_backups/.../backup.json)"; exit 1; }; }
+          backup() { "${T[@]}" backup --out "$O/backup.json" --report "$O/r-backup.json" "${UP[@]}" | tee -a "$O/log.txt"; }
+          case "$ACTION" in
+            check)
+              backup
+              "${T[@]}" dry-run --report "$O/r-dry.json" "${ACKA[@]}" | tee -a "$O/log.txt"
+              "${T[@]}" verify --report "$O/r-verify.json" "${ACKA[@]}" | tee -a "$O/log.txt" || echo "verify: differences (expected before the first copy)" ;;
+            copy)
+              backup
+              "${T[@]}" copy --mode write --state "$O/state.json" --backup "$O/backup.json" --report "$O/r-copy.json" | tee -a "$O/log.txt"
+              "${T[@]}" verify --report "$O/r-verify.json" "${ACKA[@]}" | tee -a "$O/log.txt"
+              "${T[@]}" compare-backup --backup "$O/backup.json" --report "$O/r-compare.json" | tee -a "$O/log.txt" ;;
+            report-since)
+              need_state
+              "${T[@]}" report-since --state "$O/state.json" --report "$O/r-since.json" | tee -a "$O/log.txt" ;;
+            compare-backup)
+              need_backup
+              "${T[@]}" compare-backup --backup-gcs "$BACKUP_PATH" --report "$O/r-compare.json" | tee -a "$O/log.txt" ;;
+            switch-to-b)
+              backup
+              "${T[@]}" set-dataroot --to b --mode write --report "$O/r-dataroot.json" | tee -a "$O/log.txt" ;;
+            rollback-to-legacy)
+              need_backup
+              if [ -f "$O/state.json" ]; then "${T[@]}" report-since --state "$O/state.json" --report "$O/r-since.json" | tee -a "$O/log.txt"; fi
+              "${T[@]}" set-dataroot --to legacy --mode write --report "$O/r-dataroot.json" | tee -a "$O/log.txt"
+              "${T[@]}" compare-backup --backup-gcs "$BACKUP_PATH" --report "$O/r-compare.json" | tee -a "$O/log.txt" ;;
+          esac
+          tail -n 60 "$O/log.txt" >> "$GITHUB_STEP_SUMMARY"
 
-      # 6. תוצאות: מצב (גיבובים בלבד, בלי נתונים) ודוחות. הגיבוב המלא רק אם ביקשו במפורש
+      # 7. תוצאות: קובץ מצב (גיבובים בלבד, בלי נתונים) ודוחות. קובץ הגיבוי עצמו לא עולה ל-GitHub
       - name: Upload state and reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -156,14 +195,6 @@ jobs:
             ${{ runner.temp }}/out/log.txt
           if-no-files-found: ignore
           retention-days: 90
-      - name: Upload the full backup (only when asked)
-        if: ${{ always() && inputs.upload_backup == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: migrate-backup
-          path: ${{ runner.temp }}/out/backup.json
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Remove the service account file
+      - name: Remove the service account file and the local backup
         if: always()
-        run: rm -f "$RUNNER_TEMP/sa.json"
+        run: rm -f "$RUNNER_TEMP/sa.json" "$RUNNER_TEMP/out/backup.json"
