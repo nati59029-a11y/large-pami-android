@@ -252,7 +252,8 @@ function legacyRendered(file, content) {
 }
 
 // ---------------- גבול חודשי ומגבלה יומית ----------------
-function db() { return require('firebase-admin/firestore').getFirestore(); }
+// ריבוי עסקים: מוני הקול בתוך העסק (בשורש ללארג' פעמי במצב legacy)
+function db() { return require('./tenant').tdb(); }
 // שומר מקום ל-n תווים בחודש הנוכחי. חריגה (גם "כמעט": אין מקום לטקסט הזה) = VoiceError('quota'), בלי פנייה לשירות.
 // שומר מקום ל-n תווים, בטרנזקציה אחת, לפני הפנייה לשירות:
 //   * תקרה כוללת (חודש, שעון ישראל). חריגה ("אין מקום לטקסט הזה") = VoiceError('quota').

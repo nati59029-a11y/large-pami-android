@@ -16,6 +16,7 @@ const { defineSecret, defineInt } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');
 const { israelDay } = require('./yemot').shared;
+const T = require('./lib/tenant');
 
 const YEMOT_HOOK_SECRET = defineSecret('YEMOT_HOOK_SECRET');
 const YEMOT_JOIN_DAILY = defineInt('YEMOT_JOIN_DAILY', { default: 3, description: 'כמה פעמים ביום מותר לאותו מספר להצטרף (הגנה מהצפה)' });
@@ -57,16 +58,47 @@ async function handleJoin(req, res, opts) {
   const o = opts || {};
   const send = (code, body) => { res.status(code).set('Content-Type', 'text/plain; charset=utf-8').set('Cache-Control', 'no-store').send(body); };
   if (!['GET', 'POST'].includes(req.method)) return send(405, '');
-  const secret = o.secret !== undefined ? o.secret : YEMOT_HOOK_SECRET.value();
-  // 1. סוד משותף. בלי סוד בשרת – נדחה תמיד (סגור כברירת מחדל).
-  if (!sameSecret(param(req, 'key'), secret)) { logger.warn('yemot-hook: rejected', { reason: 'bad-secret' }); return send(403, 'forbidden'); }
+  // ריבוי עסקים (שלב 5): עם אסימון בכתובת (t=<bizId>.<סוד>) – העסק נקבע לפי האסימון, מול הגיבוב ב-b/{bizId}/private/yemot.
+  // בלי אסימון – רק largpeami, עם הסוד המשותף, בדיוק כמו היום. כל עבודה במסד נעשית בתוך העסק שנקבע (T.runInBiz).
+  const tok = param(req, 't');
+  let biz;
+  if (tok !== undefined) {
+    biz = await bizByToken(tok);
+    if (!biz) { logger.warn('yemot-hook: rejected', { reason: 'bad-token' }); return send(403, 'forbidden'); }
+  } else {
+    const secret = o.secret !== undefined ? o.secret : YEMOT_HOOK_SECRET.value();
+    // 1. סוד משותף. בלי סוד בשרת – נדחה תמיד (סגור כברירת מחדל).
+    if (!sameSecret(param(req, 'key'), secret)) { logger.warn('yemot-hook: rejected', { reason: 'bad-secret' }); return send(403, 'forbidden'); }
+    biz = await T.loadBiz(T.BIZ0);
+  }
+  return T.runInBiz({ bizId: biz.bizId, prefix: T.bizPrefix(biz), biz }, () => joinInBiz(req, res, o, biz, send));
+}
+
+// אסימון: '<bizId>.<24 בתים base64url>'. השוואת גיבוב בזמן קבוע. אסימון לא תקין / עסק לא קיים = null.
+async function bizByToken(tok) {
+  const m = /^([a-z0-9-]{3,30})\.([A-Za-z0-9_-]{20,64})$/.exec(typeof tok === 'string' ? tok : '');
+  if (!m) return null;
+  const s = await getFirestore().doc(`b/${m[1]}/private/yemot`).get();
+  const h = s.exists ? s.get('tokenHash') : '';
+  const mine = crypto.createHash('sha256').update(tok, 'utf8').digest('hex');
+  if (typeof h !== 'string' || h.length !== mine.length || !crypto.timingSafeEqual(Buffer.from(h), Buffer.from(mine))) return null;
+  return T.loadBiz(m[1]);
+}
+
+async function joinInBiz(req, res, o, biz, send) {
+  // עסק שאינו מחובר לקו (היום: כל עסק חוץ מ-largpeami), מושהה, או שהתוספת כבויה – תשובה "לא פעיל", בלי שום קריאה או כתיבה במסד
+  if (!biz || biz.bizId !== T.BIZ0 || biz.status !== 'active' || !biz.features.yemot) {
+    if (param(req, 'hangup') === 'yes') return send(200, '');
+    logger.info('yemot-hook: business not connected', { reason: 'not-connected' });
+    return send(200, answer(MSG.blocked));
+  }
   // ימות מודיע גם על ניתוק השיחה – אין מה לעשות (לא מאומת)
   if (param(req, 'hangup') === 'yes') return send(200, '');
   // 2. מספר מזוהה
   const phone = israeliPhone(param(req, 'ApiPhone'));
   if (!phone) { logger.info('yemot-hook: hidden or foreign number', { reason: 'hidden' }); return send(200, answer(MSG.hidden)); }
   // 3. הגבלת קצב לפי מספר (נספר כל ניסיון שמגיע לכאן, גם אם ימות נכשל)
-  const db = getFirestore();
+  const db = T.tdb();
   const day = israelDay();
   const daily = o.daily !== undefined ? o.daily : YEMOT_JOIN_DAILY.value();
   const id = crypto.createHash('sha256').update('tzjoin:' + phone).digest('hex').slice(0, 32);
@@ -96,4 +128,4 @@ exports.tzintukJoin = onRequest({ secrets: [YEMOT_HOOK_SECRET], timeoutSeconds: 
   }
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handleJoin, israeliPhone, sameSecret, answer, MSG, BLOCKED: true } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handleJoin, bizByToken, israeliPhone, sameSecret, answer, MSG, BLOCKED: true } });

@@ -15,7 +15,12 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
-const { requireStaff, inputObject } = require('./lib/roles');
+const roles = require('./lib/roles');
+const T = require('./lib/tenant');
+const { inputObject } = roles;
+// ריבוי עסקים (שלב 5): פונקציות הקו – רק כשהתוספת yemot מופעלת בעסק, ורק בעסק שמחובר לקו (היום: largpeami בלבד).
+// עסק אחר מקבל yemot-not-connected לפני כל פנייה לימות. הנתונים (T.tdb()) בתוך העסק; בשורש ללארג' פעמי במצב legacy.
+const requireStaff = (request) => roles.requireStaff(request, { feature: 'yemot', yemotLine: true });
 const { YemotError, listDirInfo, downloadFile, readText, deleteFiles } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { applyLexicon } = require('./lib/lexicon');
@@ -129,7 +134,7 @@ async function board(request, key, base) {
   if (typeof slot !== 'string' || !Object.hasOwn(SLOT_EXT, slot)) throw bad('bad-slot', 'השלוחה לא מוכרת.');
   if (!mgr && !EMP_SLOTS.includes(slot)) throw slotManagerOnly();
   if (input.refresh !== undefined && typeof input.refresh !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
-  const db = getFirestore();
+  const db = T.tdb();
   const ext = extOfSlot(slot);
   const recs = await loadRecords(db, slot, ext);
 
@@ -258,7 +263,7 @@ async function listen(request, key, base) {
   const input = inputObject(request);
   const ref = input.ref;
   if (!ref || typeof ref !== 'object' || Array.isArray(ref)) throw bad('bad-input', 'קלט לא תקין');
-  const db = getFirestore();
+  const db = T.tdb();
   const cfg = readCfg();
   const allow = (slot) => { if (!isMgr(who) && !EMP_SLOTS.includes(slot)) throw slotManagerOnly(); };
   let x = null, slot = null, linePath = null, kind = ref.kind;
@@ -434,7 +439,7 @@ async function removePromo(who, input, key, base) {
   if (input.confirmNoBackup !== undefined && typeof input.confirmNoBackup !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
   const cfg = readCfg();
   const ctx = ctxOf(key, base);
-  const db = getFirestore();
+  const db = T.tdb();
   const ref = db.doc(`${PROMOS}/${input.promoKey}`);
   const plan = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
@@ -487,7 +492,7 @@ async function extend(request) {
   if (typeof input.requestId !== 'string' || !ID_RE.test(input.requestId)) throw bad('bad-request-id', 'הבקשה לא תקינה. נסו שוב.');
   if (!['promo', 'item'].includes(input.kind) || typeof input.id !== 'string' || !ID_RE.test(input.id)) throw notFound();
   const cfg = readCfg();
-  const db = getFirestore();
+  const db = T.tdb();
   const ref = db.doc(`${input.kind === 'promo' ? PROMOS : ITEMS}/${input.id}`);
   const today = israelDay();
   const r = await db.runTransaction(async (tx) => {
@@ -524,7 +529,7 @@ async function restore(request, key, base) {
   if (!['item', 'promo', 'backup'].includes(input.kind) || typeof input.id !== 'string' || !(input.kind === 'backup' ? BACKUP_ID_RE : ID_RE).test(input.id)) throw notFound();
   if (input.engine !== undefined && input.engine !== null && !voice.pickEngine(input.engine)) throw bad('bad-input', 'קלט לא תקין');
   if (input.confirmCost !== undefined && typeof input.confirmCost !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
-  const db = getFirestore();
+  const db = T.tdb();
   const cfg = readCfg();
   const col = { item: ITEMS, promo: PROMOS, backup: BACKUPS }[input.kind];
   const s = await db.doc(`${col}/${input.id}`).get();
@@ -620,7 +625,7 @@ async function restoreBackup(who, input, b, from, key, base) {
   const path = voice.pathOf(ext, file);
   if (!L._core.safeFilePath(path) || b.path !== path) throw notFound();
   const ctx = ctxOf(key, base);
-  const db = getFirestore();
+  const db = T.tdb();
   const opRef = db.doc(`yemot_state/restore-${input.requestId}`);
   const op = await opRef.get();
   if (op.exists && (op.get('restoredFrom.id') !== from.id || op.get('byUid') !== who.uid)) throw bad('bad-request-id', 'הבקשה לא תקינה. נסו שוב.');
@@ -683,7 +688,7 @@ async function cleanLineAudio(opts) {
   const o = opts || {};
   const now = o.now instanceof Date ? o.now : new Date();
   const today = israelDay(now);
-  const db = getFirestore();
+  const db = T.tdb();
   const due = (downAt) => { const d = dayOf(downAt); return !!d && today >= addDays(d, AUDIO_KEEP_DAYS); };
   const out = { checked: 0, removed: 0, kept: 0, skipped: 0, texts: 0, failed: 0 };
   const iso = now.toISOString();
@@ -716,13 +721,13 @@ async function cleanLineAudio(opts) {
 }
 
 // עטיפה: כל שגיאה שאינה HttpsError ← "internal" בעברית, בלי פרטים
-const wrap = (name, fn) => async (request) => {
+const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
     logger.error(`yemot-board: ${name} failed`, { reason: 'internal', name: e && e.name });
     throw new HttpsError('internal', 'שגיאה בפעולה מול הקו.', { reason: 'internal' });
   }
-};
+});
 
 exports.getLineBoard = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('board', (r) => board(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 exports.getLineAudio = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('audio', (r) => listen(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));

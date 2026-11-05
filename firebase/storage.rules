@@ -44,39 +44,41 @@ service firebase.storage {
     // כתיבה ומחיקה: אסורות לכולם. ההעלאה נעשית רק בתהליך הבנייה, עם מפתח גישה של חשבון שירות,
     // שעוקף את הכללים.
     match /app_releases/{allPaths=**} {
-      // ריבוי עסקים: גם עובד פעיל או מנהל של כל עסק (לפי users/{uid}.bizId), ומנהל־על.
-      allow read: if isStaff() || bizMemberAny();
+      // ריבוי עסקים: גם חבר פעיל של כל עסק (לפי users/{uid}, גם כשהעסק מושהה – עדכוני אבטחה), ומנהל־על.
+      // הנתיב בשורש, מחוץ ל-b/{bizId} (עדכון חוזה 6). הבדיקה הישנה (isStaff) ראשונה, כדי שמשתמשי השורש לא ישתנו.
+      allow read: if isStaff() || relMember();
       allow write: if false;
     }
 
-    // ---------- ריבוי עסקים (משימה 2026-11-05, שלב 2) ----------
-    // הכללים בשורש (app_backups/, app_releases/) לא השתנו, חוץ מתוספת קריאה של app_releases לחברי עסקים.
-    // תפקיד בתוך עסק: מנהל = b/{bizId}/admins/{uid}; עובד = b/{bizId}/staff/{uid} עם active == true;
-    // מנהל־על = superadmins/{uid} (מנהל מלא בכל עסק, גם מושהה). עסק מושהה: מנהל העסק ועובדיו חסומים.
-    function bActive(bizId) {
-      return firestore.get(/databases/(default)/documents/b/$(bizId)).data.get('status', '') == 'active';
+    // ---------- ריבוי עסקים (משימה 2026-11-05, שלבים 2 ו-5) ----------
+    // הכללים בשורש (app_backups/) לא השתנו. app_releases/ – ראו למעלה.
+    // עדכון חוזה 6: בכל הערכה בתוך b/{bizId} לכל היותר 2 קריאות מסמכים ל-Firestore: users/{uid} ו-superadmins/{uid}.
+    // השרת (שלב 5) שומר ב-users/{uid} עותק מעודכן: bizId, role ('admin'/'worker'), active, bizStatus ('active'/'suspended').
+    // מנהל = role 'admin'; עובד = role 'worker'; שניהם active == true ו-bizStatus == 'active', בעסק של הנתיב.
+    // מנהל־על = superadmins/{uid} (מנהל מלא בכל עסק, גם מושהה). users/{uid} חסר = get נכשל = לא חבר (מנהל־על עדיין עובר).
+    function uDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    function uIn(bizId, role) {
+      return request.auth != null && uDoc().get('bizId', '') == bizId && uDoc().get('role', '') == role
+        && uDoc().get('active', false) == true && uDoc().get('bizStatus', '') == 'active';
     }
     function bSuper() {
       return request.auth != null && firestore.exists(/databases/(default)/documents/superadmins/$(request.auth.uid));
     }
     function bMgr(bizId) {
-      return (request.auth != null && firestore.exists(/databases/(default)/documents/b/$(bizId)/admins/$(request.auth.uid))
-        && bActive(bizId)) || bSuper();
+      return uIn(bizId, 'admin') || bSuper();
     }
     function bEmp(bizId) {
-      return request.auth != null && firestore.exists(/databases/(default)/documents/b/$(bizId)/staff/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/b/$(bizId)/staff/$(request.auth.uid)).data.active == true
-        && bActive(bizId);
+      return uIn(bizId, 'worker');
     }
     function bStaff(bizId) {
-      return bMgr(bizId) || bEmp(bizId);
+      return uIn(bizId, 'admin') || uIn(bizId, 'worker') || bSuper();
     }
-    // חבר פעיל בעסק כלשהו: העסק נקבע לפי users/{uid}.bizId (רק השרת כותב אותו), או מנהל־על.
-    function bizMemberAny() {
+    // חבר פעיל בעסק כלשהו, לעדכוני APK: לא תלוי בסטטוס העסק, כדי שגם עסק מושהה יקבל עדכוני אבטחה (עדכון חוזה 6).
+    function relMember() {
       return request.auth != null
-        && ((firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-             && bStaff(firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.bizId))
-            || bSuper());
+        && ((uDoc().get('active', false) == true && uDoc().get('role', '') in ['admin', 'worker']) || bSuper());
     }
 
     // גיבוי מוצפן של האפליקציה בתוך העסק: אותם תנאים כמו app_backups/ בשורש, עם התפקיד בתוך העסק.

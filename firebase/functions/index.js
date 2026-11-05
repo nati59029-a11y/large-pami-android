@@ -19,6 +19,7 @@ const { getStorage } = require('firebase-admin/storage');
 const { requireStaff, inputObject } = require('./lib/roles');
 const scan = require('./lib/scan');
 const { deriveBackupKey, KEY_VERSION } = require('./lib/backupKey');
+const T = require('./lib/tenant');
 
 initializeApp();
 
@@ -46,8 +47,9 @@ const BACKUP_BUCKET = defineString('BACKUP_BUCKET', { default: '', description: 
 // =====================================================================================
 exports.scanDocument = onCall(
   { secrets: [GEMINI_API_KEY], timeoutSeconds: 300, memory: '512MiB' },
-  async (request) => {
-    const who = await requireStaff(request);
+  T.scoped(async (request) => {
+    // ריבוי עסקים: התוספת "זיהוי חכם" (scan) חייבת להיות מופעלת – נבדק לפני כל דבר אחר, ולכן כבויה = אין שליחה ל-Gemini
+    const who = await requireStaff(request, { feature: 'scan' });
     const input = inputObject(request);
     const maxBytes = SCAN_MAX_FILE_MB.value() * 1024 * 1024;
     const { kind, cfg, files } = scan.validateScanInput(input, maxBytes);
@@ -59,7 +61,9 @@ exports.scanDocument = onCall(
     // תקציב הזמן מתחיל עכשיו: 100 שניות לחשבונית ולמוצר, 135 למשוב – תמיד פחות ממה שהטלפון מחכה
     const t = scan.timesFor(kind);
     const deadline = Date.now() + t.budgetMs;
-    const usage = await scan.reserveScan(who.uid, limit);
+    // מגבלה לפי עסק (תקרה מ-b/{bizId}/private/info.adv.limits) – בנוסף למגבלה לכל משתמש. המונים בתוך העסק.
+    const caps = await scan.bizCaps(who.bizId, limit);
+    const usage = await scan.reserveScan(who.uid, caps.perUser, caps.bizDaily);
     const stats = { sent: 0 };
     try {
       const body = scan.buildGeminiBody(kind, files);
@@ -72,7 +76,7 @@ exports.scanDocument = onCall(
       if (e instanceof HttpsError) throw e;
       throw new HttpsError('internal', 'שגיאה בזיהוי', { reason: 'internal' });
     }
-  },
+  }),
 );
 
 // =====================================================================================
@@ -81,7 +85,7 @@ exports.scanDocument = onCall(
 // פלט: { ok: true, count, removed }
 // =====================================================================================
 const TOKEN_RE = /^[A-Za-z0-9_:.\-]+$/;
-exports.registerPushToken = onCall(async (request) => {
+exports.registerPushToken = onCall(T.scoped(async (request) => {
   const who = await requireStaff(request);
   const input = inputObject(request);
   const token = typeof input.token === 'string' ? input.token.trim() : '';
@@ -89,7 +93,7 @@ exports.registerPushToken = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'מזהה הטלפון להתראות לא תקין', { reason: 'bad-token' });
   }
   const max = MAX_PUSH_TOKENS.value();
-  const db = getFirestore();
+  const db = T.tdb(); // staff/{uid} בתוך העסק (בשורש ללארג' פעמי במצב legacy)
   const ref = db.doc('staff/' + who.uid);
   return db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
@@ -100,7 +104,7 @@ exports.registerPushToken = onCall(async (request) => {
     tx.update(ref, { pushTokens: kept });
     return { ok: true, count: kept.length, removed: all.length - kept.length };
   });
-});
+}));
 
 // =====================================================================================
 // reportBackupStatus
@@ -109,7 +113,7 @@ exports.registerPushToken = onCall(async (request) => {
 // כותב: app_backup_status/{uid} = { lastBackupAt (ISO), size, device }   ←  של השולח בלבד.
 // =====================================================================================
 const FILE_RE = /^[A-Za-z0-9._-]{1,200}$/;
-exports.reportBackupStatus = onCall(async (request) => {
+exports.reportBackupStatus = onCall(T.scoped(async (request) => {
   const who = await requireStaff(request);
   const input = inputObject(request);
   const file = typeof input.file === 'string' ? input.file : '';
@@ -117,26 +121,26 @@ exports.reportBackupStatus = onCall(async (request) => {
   if (input.uid != null && input.uid !== who.uid) throw new HttpsError('permission-denied', 'אפשר לעדכן רק את הגיבוי של עצמך', { reason: 'other-user' });
   const device = typeof input.device === 'string' ? input.device.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 100) : '';
   const bucketName = BACKUP_BUCKET.value();
-  const obj = (bucketName ? getStorage().bucket(bucketName) : getStorage().bucket()).file(`app_backups/${who.uid}/${file}`);
+  const obj = (bucketName ? getStorage().bucket(bucketName) : getStorage().bucket()).file(`${who.prefix}app_backups/${who.uid}/${file}`);
   const [exists] = await obj.exists();
   if (!exists) throw new HttpsError('not-found', 'קובץ הגיבוי לא נמצא בשרת', { reason: 'no-backup-file' });
   const [meta] = await obj.getMetadata();
   const status = { lastBackupAt: new Date().toISOString(), size: Number(meta.size) || 0, device };
-  await getFirestore().doc('app_backup_status/' + who.uid).set(status);
+  await T.tdb().doc('app_backup_status/' + who.uid).set(status);
   return status;
-});
+}));
 
 // =====================================================================================
 // getBackupKey
 // קלט: אין (אם נשלח uid של מישהו אחר – נדחה).  פלט: { key /* base64, 32 בתים */, alg: 'AES-GCM', bits: 256, version }
 // =====================================================================================
-exports.getBackupKey = onCall({ secrets: [BACKUP_MASTER_KEY] }, async (request) => {
+exports.getBackupKey = onCall({ secrets: [BACKUP_MASTER_KEY] }, T.scoped(async (request) => {
   const who = await requireStaff(request);
   const input = inputObject(request);
   if (input.uid != null && input.uid !== who.uid) throw new HttpsError('permission-denied', 'אפשר לקבל רק את המפתח של עצמך', { reason: 'other-user' });
   const key = deriveBackupKey(BACKUP_MASTER_KEY.value(), who.uid);
   return { key: key.toString('base64'), alg: 'AES-GCM', bits: 256, version: KEY_VERSION };
-});
+}));
 
 // שליחת מבצעים לקו ימות המשיח (שלוחה 2): sendPromoToLine, expirePromosOnLine
 Object.assign(exports, require('./yemot'));
@@ -146,3 +150,7 @@ Object.assign(exports, require('./yemot-line'));
 
 // "ההודעות שבקו" (משימה 2026-11-04, שלב 5): getLineBoard, getLineAudio (עובד/מנהל), extendLineItem, restoreLineItem (מנהל)
 Object.assign(exports, require('./yemot-board'));
+
+// ריבוי עסקים (משימה 2026-11-05, שלב 5): פונקציות ניהול – createBusiness, inviteBusinessAdmin, completeInvite,
+// setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken, logBusinessEntry, addStaff, setStaffActive
+Object.assign(exports, require('./business'));
