@@ -53,6 +53,10 @@ firebase emulators:exec --only firestore,storage --project demo-largpeami \
   "node --test tests/migrate-tool.test.js"
 ```
 
+או בקיצור: `npm run test:migrate`.
+
+**חשוב:** את הבדיקות האלה מריצים **בלי** אמולטור הפונקציות. הטריגרים `syncLegacyAdmin` ו-`syncLegacyStaff` יוצרים בעצמם את `users` כשהבדיקה זורעת `admins` ו-`staff`, ואז ספירת "ייווצרו" בבדיקה 2 משתנה (5 הופך ל-1). הכלי עצמו מטפל נכון ב-`users` שכבר קיים ותואם (נספר כ"קיימים ותואמים").
+
 ## הרצה על פרויקט אמיתי דרך GitHub (מומלץ) – רק באישור המשתמש
 Actions ← "Migrate largpeami data" ← Run workflow. העסק קבוע: `largpeami`.
 
