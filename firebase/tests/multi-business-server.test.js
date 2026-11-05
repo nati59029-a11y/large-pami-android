@@ -451,12 +451,48 @@ describe('שלב 5 – פונקציות מתוזמנות: לולאה על עסק
 });
 
 // ---------------------------------------------------------------------------------------------
+describe('שלב 5, סבב 2 – סנכרון users/{uid} לחברי לארג\' פעמי במצב legacy (בשביל כללי Storage של 2 קריאות)', () => {
+  const S5 = () => require('../functions/business.js')._core;
+  const pick = (u) => u && (({ bizId, role, active, bizStatus }) => ({ bizId, role, active, bizStatus }))(u);
+  async function waitFor(fn, ms) { const end = Date.now() + (ms || 15000); for (;;) { const v = await fn(); if (v) return v; if (Date.now() > end) return null; await new Promise((r) => setTimeout(r, 200)); } }
+  it('הטריגר באמולטור: השבתת עובד ב-staff בשורש מעדכנת מיד את users.active; החזרה – מחזירה', async () => {
+    await prep((db) => db.doc('staff/' + R.emp).update({ active: false }));
+    assert.ok(await waitFor(async () => { const u = await getDoc('users/' + R.emp); return u && u.active === false; }), 'users.active לא התעדכן ל-false');
+    assert.deepEqual(pick(await getDoc('users/' + R.emp)), { bizId: L, role: 'worker', active: false, bizStatus: 'active' });
+    await prep((db) => db.doc('staff/' + R.emp).update({ active: true }));
+    assert.ok(await waitFor(async () => { const u = await getDoc('users/' + R.emp); return u && u.active === true; }), 'users.active לא חזר ל-true');
+  });
+  it('ליבה: מנהל (admins) = admin פעיל; עובד מושבת = לא פעיל; לא חבר = לא נוצר; users של עסק אחר – לא נגעים; לארג\' פעמי ב-b – לא מסנכרן', async () => {
+    // מחכים שהטריגרים של הזריעה (seedAll כותב staff/admins בשורש) יסיימו, כדי שלא יתערבבו בבדיקה
+    assert.ok(await waitFor(async () => (await getDoc('users/' + R.mgr)) && (await getDoc('users/' + R.emp)) && (await getDoc('users/' + R.off))));
+    await prep(async (db) => { for (const u of [R.mgr, R.emp, R.off, U.nobiz]) await db.doc('users/' + u).delete(); });
+    assert.equal(await S5().syncLegacyMember(R.mgr), 'active');
+    assert.deepEqual(pick(await getDoc('users/' + R.mgr)), { bizId: L, role: 'admin', active: true, bizStatus: 'active' });
+    assert.ok(Number.isInteger((await getDoc('users/' + R.mgr)).createdAt), 'createdAt במילישניות');
+    assert.equal(await S5().syncLegacyMember(R.off), 'inactive');
+    assert.equal((await getDoc('users/' + R.off)).active, false);
+    assert.equal(await S5().syncLegacyMember(U.nobiz), 'none');
+    assert.equal(await getDoc('users/' + U.nobiz), null);
+    // חבר של עסק א' שמופיע במקרה גם ב-staff בשורש – users שלו לא משתנה
+    await prep((db) => db.doc('staff/' + U[A].emp).set({ name: 'x', role: 'employee', active: false }));
+    assert.equal(await S5().syncLegacyMember(U[A].emp), 'other-biz');
+    assert.deepEqual(pick(await getDoc('users/' + U[A].emp)), { bizId: A, role: 'worker', active: true, bizStatus: 'active' });
+    // לארג' פעמי במצב b: השרת מנהל את users דרך addStaff/setStaffActive, לא מהשורש
+    await prep((db) => db.doc('b/' + L).set(bizDoc(L, { dataRoot: 'b' })));
+    await prep((db) => db.doc('users/' + R.emp).delete());
+    assert.equal(await S5().syncLegacyMember(R.emp), 'not-legacy');
+    assert.equal(await getDoc('users/' + R.emp), null);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 describe('שלב 5 – ייצוא ואין סודות', () => {
   const NEW = ['createBusiness', 'inviteBusinessAdmin', 'completeInvite', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'addStaff', 'setStaffActive'];
-  it('כל הפונקציות החדשות מיוצאות מ-index.js (ורק הן נוספו); עוזרי בדיקה לא מיוצאים', () => {
+  it('כל הפונקציות החדשות מיוצאות מ-index.js (10 ניהול + 2 סנכרון, ורק הן נוספו); עוזרי בדיקה לא מיוצאים', () => {
     const ex = require('../functions/index.js');
     for (const n of NEW) assert.equal(typeof ex[n], 'function', n);
-    assert.equal(Object.keys(ex).length, 25);
+    assert.equal(Object.keys(ex).length, 27);
+    for (const n of ['syncLegacyAdmin', 'syncLegacyStaff']) assert.equal(typeof ex[n], 'function', n);
     for (const n of ['_core', 'resolveMember', 'bizRef', 'tzintukJoin', 'nightlyAll']) assert.equal(ex[n], undefined, n);
     // והן גם נטענו באמולטור (קריאה בלי כניסה מחזירה UNAUTHENTICATED/PERMISSION_DENIED ולא 404)
   });

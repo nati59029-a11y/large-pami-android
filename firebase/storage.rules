@@ -44,14 +44,16 @@ service firebase.storage {
     // כתיבה ומחיקה: אסורות לכולם. ההעלאה נעשית רק בתהליך הבנייה, עם מפתח גישה של חשבון שירות,
     // שעוקף את הכללים.
     match /app_releases/{allPaths=**} {
-      // ריבוי עסקים: גם חבר פעיל של כל עסק (לפי users/{uid}, גם כשהעסק מושהה – עדכוני אבטחה), ומנהל־על.
-      // הנתיב בשורש, מחוץ ל-b/{bizId} (עדכון חוזה 6). הבדיקה הישנה (isStaff) ראשונה, כדי שמשתמשי השורש לא ישתנו.
-      allow read: if isStaff() || relMember();
+      // ריבוי עסקים (שלב 5, סבב 2): לכל היותר 2 מסמכים בכל מסלול – users/{uid} ו-superadmins/{uid} (עדכון חוזה 6).
+      // חבר פעיל בכל עסק, כולל לארג' פעמי במצב legacy (מסמך users שכלי ההעברה יוצר, והשרת מסנכרן מ-admins/staff
+      // בשורש – syncLegacyAdmin / syncLegacyStaff), גם כשהעסק מושהה (עדכוני אבטחה), ומנהל־על.
+      // משתמש שורש בלי מסמך users נחסם, ולכן מפרסמים את הכלל רק אחרי ההעברה והפונקציות (ראו 5-שרת.md).
+      allow read: if relMember();
       allow write: if false;
     }
 
     // ---------- ריבוי עסקים (משימה 2026-11-05, שלבים 2 ו-5) ----------
-    // הכללים בשורש (app_backups/) לא השתנו. app_releases/ – ראו למעלה.
+    // הכללים בשורש (app_backups/) לא השתנו. app_releases/ – ראו למעלה (קורא רק users ו-superadmins).
     // עדכון חוזה 6: בכל הערכה בתוך b/{bizId} לכל היותר 2 קריאות מסמכים ל-Firestore: users/{uid} ו-superadmins/{uid}.
     // השרת (שלב 5) שומר ב-users/{uid} עותק מעודכן: bizId, role ('admin'/'worker'), active, bizStatus ('active'/'suspended').
     // מנהל = role 'admin'; עובד = role 'worker'; שניהם active == true ו-bizStatus == 'active', בעסק של הנתיב.

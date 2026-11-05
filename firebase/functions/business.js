@@ -9,6 +9,7 @@
 
 const crypto = require('node:crypto');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onDocumentWritten } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
@@ -338,6 +339,37 @@ async function setStaffActive(request) {
   return { ok: true, uid, active: input.active };
 }
 
+// ---------- syncLegacyAdmin / syncLegacyStaff: עותק users/{uid} לחברי לארג' פעמי במצב legacy ----------
+// כללי Storage של app_releases/ קוראים רק את users/{uid} ואת superadmins/{uid} (מגבלת 2 הקריאות, עדכון חוזה 6).
+// לכן כל שינוי ב-admins/{uid} או ב-staff/{uid} בשורש (למשל השבתת עובד בלוח הבקרה) מתעדכן מיד בעותק.
+// רק כש-largpeami במצב legacy (אחרי מעבר ל-b, השרת מעדכן את users דרך addStaff / setStaffActive).
+// לא נוגע במשתמש ש-users שלו שייך לעסק אחר. לא יוצר users למי שאינו חבר (ואם יש עותק – מסמן active:false).
+async function syncLegacyMember(uid) {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(String(uid || ''))) return 'bad-uid';
+  const biz = await T.loadBiz(T.BIZ0);
+  if (!biz || biz.dataRoot !== 'legacy') return 'not-legacy';
+  const db = getFirestore();
+  const uRef = db.doc('users/' + uid);
+  return db.runTransaction(async (tx) => {
+    const [a, st, u] = await Promise.all([tx.get(db.doc('admins/' + uid)), tx.get(db.doc('staff/' + uid)), tx.get(uRef)]);
+    if (u.exists && u.get('bizId') !== T.BIZ0) return 'other-biz';
+    const member = a.exists || st.exists;
+    if (!member && !u.exists) return 'none';
+    const role = a.exists ? 'admin' : 'worker';
+    const active = a.exists || (st.exists && st.get('active') === true);
+    const email = (a.exists && a.get('email')) || (st.exists && st.get('email')) || (u.exists && u.get('email')) || '';
+    const upd = { bizId: T.BIZ0, role, active, bizStatus: biz.status, email: typeof email === 'string' ? email : '' };
+    if (!u.exists) upd.createdAt = Date.now();
+    tx.set(uRef, upd, { merge: true });
+    return active ? 'active' : 'inactive';
+  });
+}
+const syncTrigger = (coll) => onDocumentWritten({ document: coll + '/{uid}', maxInstances: 2 }, async (event) => {
+  try { await syncLegacyMember(event.params.uid); } catch (e) { logger.error('business: legacy sync failed', { reason: 'internal', name: e && e.name }); throw e; }
+});
+exports.syncLegacyAdmin = syncTrigger('admins');
+exports.syncLegacyStaff = syncTrigger('staff');
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -359,5 +391,5 @@ exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, completeInvite, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  logBusinessEntry, addStaff, setStaffActive, israeliPhone, cleanAdv, CODE_TTL_MS, CODE_MAX_TRIES, BATCH_MAX, wrap,
+  logBusinessEntry, addStaff, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, CODE_TTL_MS, CODE_MAX_TRIES, BATCH_MAX, wrap,
 } });
