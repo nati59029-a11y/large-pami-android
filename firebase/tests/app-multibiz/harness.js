@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const PORT = 8291; // כתובת מדומה בלבד (לא נפתח שרת), כדי שהאפליקציה תיכנס למצב emu=1
+const PORT = 8491; // כתובת מדומה בלבד (לא נפתח שרת), כדי שהאפליקציה תיכנס למצב emu=1
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const T0 = Date.UTC(2026, 10, 3, 9, 0, 0);
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.png': 'image/png', '.json': 'application/json', '.css': 'text/css', '.webp': 'image/webp' };
@@ -16,7 +16,11 @@ const S = (v) => ({ stringValue: v });
 // cfg: { mode: 'old'|'new', users: {uid: bizId}, biz: {bizId: {dataRoot, status, features}}, admins: {'<prefix>|uid':1}, staff: {...}, sa: {uid:1} }
 function firestoreReply(cfg, method, p, body) {
   const m = p.match(/\/documents(.*)$/); const rest = m ? m[1] : '';
-  if (/:runQuery$/.test(rest)) return [200, [{ readTime: '2026-11-03T09:00:00Z' }]];
+  if (/:runQuery$/.test(rest)) { // cfg.betaDocs: כל שאילתה בעסק beta מחזירה מסמך עם סימון MARKER-BETA (לבדיקת ערבוב)
+    if (cfg.betaDocs && /^\/b\/beta:/.test(rest)) { let c = 'x'; try { c = JSON.parse(body).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
+      const F = { note: S('MARKER-BETA'), txt: S('MARKER-BETA'), text: S('MARKER-BETA'), why: S('MARKER-BETA'), owner: S('sa'), by: S('sa'), role: S('a'), st: S('open'), open: S('1'), d: S('2026-11-03'), reg: S('i_yh'), a: { integerValue: '5' }, t: { integerValue: '1793700000000' }, cr: { integerValue: '1793700000000' }, due: { integerValue: '1793900000000' } };
+      return [200, [{ document: doc('projects/demo-largpeami/databases/(default)/documents/b/beta/' + c + '/mbx1', F), readTime: '2026-11-03T09:00:00Z' }]]; }
+    return [200, [{ readTime: '2026-11-03T09:00:00Z' }]]; }
   if (rest === ':batchGet') return [200, []];
   if (rest === ':commit') return [200, { writeResults: [], commitTime: '2026-11-03T09:00:00Z' }];
   const segs = rest.split('?')[0].split('/').filter(Boolean).map(decodeURIComponent);
@@ -42,7 +46,8 @@ function firestoreReply(cfg, method, p, body) {
 async function newPage(browser, www, cfg, log, label) {
   const ctx = await browser.newContext({ locale: 'he-IL', timezoneId: 'Asia/Jerusalem' });
   const page = await ctx.newPage();
-  page.__errors = [];
+  page.__errors = []; page.__gen = 0;
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) page.__gen++; }); // דור הדף: כל טעינה מחדש = דף חדש
   page.on('pageerror', (e) => page.__errors.push(String(e && e.message || e)));
   if (!cfg.fwd) await page.clock.setFixedTime(T0); // מול האמולטור: זמן אמיתי (החוקים בודקים חותמת זמן)
   await page.addInitScript(() => {
@@ -57,7 +62,7 @@ async function newPage(browser, www, cfg, log, label) {
       return route.fulfill({ status: 404, body: '' });
     }
     const body = req.postData();
-    const rec = { who: label, step: page.__step || 'boot', method, url: u.href, body: body || '' }; log.push(rec);
+    const rec = { who: label, step: page.__step || 'boot', gen: page.__gen, method, url: u.href, body: body || '' }; log.push(rec);
     if (cfg.fwd && cfg.fwd[u.port]) { // העברה לאמולטור האמיתי בפורט של הסוכן הזה
       const t = new URL(u.href); t.port = String(cfg.fwd[u.port]);
       try { const resp = await route.fetch({ url: t.href }); rec.status = resp.status(); return route.fulfill({ response: resp }); } catch (e) { rec.status = 'ERR ' + e.message; return route.abort(); }
@@ -67,8 +72,10 @@ async function newPage(browser, www, cfg, log, label) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ idToken: 'tok-' + uid, refreshToken: 'r-' + uid, expiresIn: '3600', localId: uid, email: j.email }) });
     }
     if (u.port === '9099') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id_token: 'tok-x', refresh_token: 'r-x', expires_in: '3600' }) });
+    if (u.port === '8080' && cfg.delay && cfg.delay.test(u.pathname)) await new Promise((r) => setTimeout(r, cfg.delayMs || 4000)); // תגובה מעוכבת (רשת איטית)
     if (u.port === '8080') { const [st, js] = firestoreReply(cfg, method, u.pathname + u.search, body); return route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify(js) }); }
-    if (u.port === '5001') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: {} }) });
+    if (u.port === '5001') { if (/getBackupKey/.test(u.pathname)) await new Promise((r) => setTimeout(r, cfg.keyDelay || 0));
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: /getBackupKey/.test(u.pathname) ? { key: Buffer.alloc(32, 7).toString('base64') } : {} }) }); }
     return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
   });
   return { ctx, page };

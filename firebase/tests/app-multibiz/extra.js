@@ -64,6 +64,41 @@ const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fai
     await p2.ctx.close();
   }
 
+  // (ד-מרוץ) מעבר עסק כשמסמך העסק החדש מתעכב 4 שניות, ובזמן הזה רץ גיבוי ענן / משיכות רקע (ליקוי מסבב בדיקה 1)
+  for (const kind of ['backup', 'online']) {
+    const cfg = { mode: 'new', users: { sa: 'acme' }, sa: { sa: 1 }, biz: { acme: { dataRoot: 'b' }, beta: { dataRoot: 'b' } }, admins: { 'b/acme/|sa': 1, 'b/beta/|sa': 1 },
+      delay: /\/documents\/b\/beta$/, delayMs: 4000, keyDelay: 1000, betaDocs: 1 };
+    const log = []; const { ctx, page } = await H.newPage(browser, www, cfg, log, 'sa');
+    await H.login(page, 'sa@x.co');
+    const MK = 'MARKER-ACME-777';
+    await page.evaluate((mk) => { if (!S.cats.length) S = ensure(defaults()); const sb = S.subs.find((x) => (S.cats.find((c) => c.id === x.cat) || {}).kind === 'exp'); S.tx.push({ id: 'mk1', t: 'exp', cat: sb.cat, sub: sb.id, date: '2026-11-02', amt: 777, note: mk, pays: [] }); save(); }, MK);
+    await H.settle(page, 500);
+    page.__step = 'race'; const G = page.__gen;
+    await page.evaluate((k) => { if (k === 'backup') abkRun('test'); bzSwitch('beta').catch((e) => { window.__swErr = e.message; }); if (k === 'online') setTimeout(() => window.dispatchEvent(new Event('online')), 300); }, kind);
+    await H.settle(page, 9000);
+    const old = log.filter((r) => r.step === 'race' && r.gen === G);
+    const leak = old.filter((r) => /b(\/|%2F)beta/.test(r.url) || /b\/beta\//.test(r.body || ''));
+    const upBeta = log.filter((r) => r.url.includes(':9199') && r.method === 'POST' && /b%2Fbeta%2Fapp_backups/.test(r.url));
+    const st = await page.evaluate(() => ({ bizId: SY.bizId, dataRoot: SY.biz && SY.biz.dataRoot, BZP, acmeMix: Object.keys(localStorage).filter((k) => k.startsWith('acme:') && (localStorage.getItem(k) || '').includes('MARKER-BETA')), betaHasAcme: Object.keys(localStorage).filter((k) => k.startsWith('beta:') && (localStorage.getItem(k) || '').includes('MARKER-ACME')) }));
+    check(`ד-מרוץ (${kind === 'backup' ? 'גיבוי ענן רץ בזמן המעבר' : 'משיכות רקע בזמן המעבר'}, עיכוב 4 שניות): הדף הישן לא פונה לעסק ב', אין גיבוי של א' בעסק ב', ואין נתון של ב' במפתחות של א'`,
+      leak.length === 0 && upBeta.length === 0 && st.acmeMix.length === 0 && st.betaHasAcme.length === 0 && st.bizId === 'beta' && st.dataRoot === 'b' && st.BZP === 'beta:' && page.__errors.length === 0,
+      { oldPageRequests: old.length, leak: leak.map((r) => r.method + ' ' + r.url.slice(0, 120)), upBeta: upBeta.length, st, errors: page.__errors });
+    await ctx.close();
+  }
+  // (ד-כניסה) כניסה של מנהל עסק אחר במכשיר שיש בו נתוני לארג' פעמי, כשמסמך העסק מתעכב: נתוני לארג' פעמי לא משתנים
+  {
+    const cfg = { mode: 'new', users: { ma: 'acme' }, biz: { acme: { dataRoot: 'b' } }, admins: { 'b/acme/|ma': 1 }, delay: /\/documents\/b\/acme$/, delayMs: 4000 };
+    const log = []; const { ctx, page } = await H.newPage(browser, www, cfg, log, 'ma');
+    await page.addInitScript(() => { if (!localStorage.getItem('large-pami-v2')) { localStorage.setItem('large-pami-v2', JSON.stringify({ v: 2, mark: 'LP-DATA' })); localStorage.setItem('lp-tasks', JSON.stringify({ L: [{ id: 't0', txt: 'LP-TASK' }] })); } });
+    await page.goto(H.ORIGIN + '/?emu=1'); await H.settle(page, 1000);
+    const before = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).filter((k) => !k.includes(':') && k !== 'lp-sync').sort().map((k) => [k, localStorage.getItem(k)])));
+    await H.login(page, 'ma@x.co'); await H.settle(page, 5000);
+    const after = await page.evaluate(() => ({ un: Object.fromEntries(Object.keys(localStorage).filter((k) => !k.includes(':') && k !== 'lp-sync').sort().map((k) => [k, localStorage.getItem(k)])), bizId: SY.bizId, BZP, gate: !!document.getElementById('gate') }));
+    check('ד-כניסה: מפתחות לארג\' פעמי לא השתנו בכניסה של מנהל עסק אחר (עיכוב 4 שניות), והדף עבר לתחילית העסק', JSON.stringify(before) === JSON.stringify(after.un) && after.bizId === 'acme' && after.BZP === 'acme:' && !after.gate && page.__errors.length === 0,
+      { beforeKeys: Object.keys(before), afterKeys: Object.keys(after.un), bizId: after.bizId, BZP: after.BZP, gate: after.gate, errors: page.__errors });
+    await ctx.close();
+  }
+
   // (ה) משתמש בלי עסק ובלי מסמכים בשורש: "אין לך הרשאה", בחוקים ישנים ובחדשים
   for (const cfg of [legacyCfg, { mode: 'new', biz: {} }]) {
     const log = []; const { ctx, page } = await H.newPage(browser, www, cfg, log, 'n');
