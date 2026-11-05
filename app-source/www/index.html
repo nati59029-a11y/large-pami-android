@@ -987,7 +987,7 @@ function trSetType(it,k){if(!['bank_transfer','invoice','delivery_note','other']
 ACT.trType=el=>{const it=trIt(el);if(it){trSetType(it,el.dataset.k);rerender()}};
 CHG.trType=el=>{const it=trIt(el);if(it){trSetType(it,el.value);rerender()}};
 ACT.trAddRow=el=>{const it=trIt(el);if(it){it.rows.push(trRow({}));rerender()}};
-ACT.trDelRow=el=>{const{it,r}=trR(el);if(!it||!r||r.done)return;it.rows=it.rows.filter(x=>x!==r);if(!it.rows.length)it.rows=[trRow({})];rerender()};
+ACT.trDelRow=el=>{const{it,r}=trR(el);if(!it||!r||r.done)return;it.rows=it.rows.filter(x=>x!==r);if(!it.rows.length)it.rows=[trRow({})];if(typeof siTrPart==='function')siTrPart(it);rerender()};
 async function trFile(it){if(!it.saved){await fput(it.fid,it.du);it.saved=1}return it.fid}
 /* חשבונית שזוהתה ← הזרימה הקיימת של סריקת חשבונית ספק */
 ACT.trInv=async el=>{const it=trIt(el);if(!it)return;
@@ -1047,7 +1047,7 @@ async function trSave(it,r,o){if(r.done||r.busy)return;if(!trOk())return toast('
  else if(b==='fixed'){if(st&&st.s==='a'){msApply([st.ex],[],rnd(T-Math.max(0,E)),d,'העברה',ref,fid,grp);if(E>=0.01)awMk(s,E,d,grp,ref,fid,M);txt='נסגרה היתרה של '+mfmt(M)}
   else{const x={id:uid(),t:'exp',cat:c.id,sub:s.id,date:d,amt:T,plan:M,inv:'',note:'',kind:'inv',pays:[P(T)],await:1,tgrp:grp};if(tp){x.fx=tp.id;const k0=S.fixOk[fxKey(tp,M)];if(k0)x.fxp=k0;S.fixOk[fxKey(tp,M)]={e:x.id}}S.tx.push(x);txt=mfmt(M)+' · שולם – ממתין לחשבונית'}}
  else{const x={id:uid(),t:'exp',cat:c.id,sub:b==='free'?null:s.id,pays:[],date:d,amt:T,note:ref?'העברה · אסמכתא '+ref:'העברה',file:fid,tgrp:grp};if(b==='free')x.desc=s_(r.desc);S.tx.push(x);txt='הוצאה רגילה'}
- trLearn(s,r.acct,grp);it.grps.push(grp);r.done=1;r.busy=0;r.grp=grp;r.doneTx=txt;save();toast('נשמר: '+ils(T)+' · '+(s?s.name:c.name));
+ trLearn(s,r.acct,grp);it.grps.push(grp);r.done=1;r.busy=0;r.grp=grp;r.doneTx=txt;save();if(typeof siTrPart==='function')siTrPart(it);toast('נשמר: '+ils(T)+' · '+(s?s.name:c.name));
  if(it.rows.every(x=>x.done)&&TR.items[TR.i]===it){const nx=TR.items.findIndex((x,i)=>i>TR.i&&!(x.type==='bank_transfer'&&x.rows.every(y=>y.done)));if(nx>0)TR.i=nx}rerender()}
 /* ---- "שולם – ממתין לחשבונית": חיבור חשבונית שהגיעה ----
  החשבונית נכנסת לרשומה הקיימת (מספר, תאריך, קובץ), await נמחק, ולא נוצרת הוצאה חדשה – כך היא לא נספרת פעמיים.
@@ -2993,17 +2993,17 @@ const siName=n=>String(n==null?'':n).replace(/[\u0000-\u001f\u007f\u202a-\u202e\
 const siIn_=()=>(typeof isA==='function'&&isA())||(typeof isW==='function'&&isW());
 const siKey=x=>'shin:'+x.h;
 async function fdelK(id){try{const d=await idb();await new Promise(res=>{const t=d.transaction('f','readwrite');t.objectStore('f').delete(id);t.oncomplete=res;t.onerror=res})}catch(e){}}
-function siLoad(){if(SI.L&&SI.u===SY.uid)return SI.L;let o=null;try{o=JSON.parse(localStorage.getItem(SI_K))}catch(e){}
+function siLoad(){if(SI.L&&SI.u===SY.uid)return SI.L;if(!SY.uid)return[];/* בלי משתמש מחובר: לא טוענים, לא שומרים ולא מנקים */let o=null;try{o=JSON.parse(localStorage.getItem(SI_K))}catch(e){}
  const ok=x=>x&&typeof x==='object'&&typeof x.id==='string'&&typeof x.h==='string'&&/^[0-9a-z]{8,40}$/.test(x.h);
  SI={u:SY.uid,L:o&&o.u===SY.uid&&Array.isArray(o.L)?o.L.filter(ok).slice(0,200):[]};
  SI.L.forEach(x=>{x.name=siName(x.name);if(x.st==='run')x.st='q';delete x.wr;if(x.type&&!SIT[x.type])x.type=null});
  setTimeout(siGc,3000);return SI.L}
-function siSave(){try{localStorage.setItem(SI_K,JSON.stringify({u:SY.uid,L:SI.L||[]}))}catch(e){toast('אין מקום לשמור את תור המסמכים במכשיר')}}
+function siSave(){if(!SI.L||!SY.uid||SI.u!==SY.uid)return;try{localStorage.setItem(SI_K,JSON.stringify({u:SY.uid,L:SI.L||[]}))}catch(e){toast('אין מקום לשמור את תור המסמכים במכשיר')}}
 /* קבצים של התור שכבר לא ברשימה (נמחקו, טופלו או של משתמש קודם) */
 /* לא רץ בזמן קליטה; לא מוחק מפתח שברשימה (נבדק ברגע המחיקה) או שנכתב ב-10 הדקות האחרונות */
-async function siGc(){if(SIing){setTimeout(siGc,5000);return}try{const d=await idb(),now=Date.now();await new Promise(res=>{const t=d.transaction('f','readwrite'),st=t.objectStore('f'),rq=st.openKeyCursor(IDBKeyRange.bound('shin:','shin:\uffff'));rq.onsuccess=()=>{const c=rq.result;if(!c)return;const k=String(c.key);if(!SIing&&!(SIWR[k]&&now-SIWR[k]<600000)&&!(SI.L||[]).some(x=>siKey(x)===k))st.delete(k);c.continue()};t.oncomplete=res;t.onerror=res})}catch(e){}}
+async function siGc(){if(!SI.L||!SY.uid||SI.u!==SY.uid)return;if(SIing){setTimeout(siGc,5000);return}try{const d=await idb(),now=Date.now();await new Promise(res=>{const t=d.transaction('f','readwrite'),st=t.objectStore('f'),rq=st.openKeyCursor(IDBKeyRange.bound('shin:','shin:\uffff'));rq.onsuccess=()=>{const c=rq.result;if(!c)return;const k=String(c.key);if(!SIing&&!(SIWR[k]&&now-SIWR[k]<600000)&&!(SI.L||[]).some(x=>siKey(x)===k))st.delete(k);c.continue()};t.oncomplete=res;t.onerror=res})}catch(e){}}
 /* מסמך שהקובץ שלו כבר שמור בנתונים (העברה או חשבונית נשמרו) – טופל, יוצא מהתור */
-function siPrune(){if(!isA()||!SI.L||!SI.L.length)return;const used=new Set(bkFileIds()),gone=SI.L.filter(x=>used.has('ft'+x.h));if(!gone.length)return;
+function siPrune(){if(!isA()||!SI.L||!SI.L.length)return;const used=new Set(bkFileIds()),gone=SI.L.filter(x=>used.has('ft'+x.h)&&!x.part&&!(siTrIt(x)||{rows:[]}).rows.some(r=>!r.done));/* העברה שנשמרה רק בחלקה נשארת עד שכל השורות נשמרו */if(!gone.length)return;
  siSplice(x=>gone.includes(x));gone.forEach(x=>{fdelK(siKey(x));delete SIU[x.id]});siSave()}
 const siL=()=>siIn_()?siLoad():[];
 const siN=()=>{if(!isA())return 0;siPrune();return siL().length};
@@ -3071,7 +3071,7 @@ function siCard(x){const busy=x.st==='q'||x.st==='run',k=siKind(x),fid='ft'+x.h,
  h+=`<label class="f" style="margin:8px 0 0"><span>שינוי הסוג</span><select data-c="siTy" data-id="${x.id}"><option value="" ${x.type&&x.type!=='other'?'':'selected'}>${busy&&!x.man?'מזהה…':'לא ברור – בחרו'}</option>${['bank_transfer','invoice','delivery_note'].map(t=>`<option value="${t}" ${t===x.type?'selected':''}>${SIT[t]}</option>`).join('')}</select></label>`;
  if(x.big)h+=`<p class="note" style="font-weight:700;margin:6px 0 0">${SI_BIG}.</p>`;else if(x.st==='fail'&&!x.man)h+=`<p class="note" style="color:var(--bad);font-weight:700;margin:6px 0 0">הזיהוי לא עבד: ${esc(x.err)}</p>`;
  if(k==='unk'&&!(busy&&!x.man))h+=`<div class="row" style="margin-top:8px"><button class="btn grow" data-a="siSet" data-k="bank_transfer" data-id="${x.id}">זו העברה</button><button class="btn g grow" data-a="siSet" data-k="invoice" data-id="${x.id}">זו חשבונית</button></div>`;
- if(k==='tr')h+=`<button class="btn w" style="margin-top:8px" data-a="siTr" data-id="${x.id}">${inTR?'המשך במסך צילום העברה':'📸 פתיחה בצילום העברה'}</button>`;
+ if(k==='tr')h+=`<button class="btn w" style="margin-top:8px" data-a="siTr" data-id="${x.id}">${inTR||x.part?'המשך במסך צילום העברה':'📸 פתיחה בצילום העברה'}</button>`+(x.part&&!inTR?`<p class="note" style="margin:6px 0 0">חלק מההעברות במסמך כבר נשמרו. נשארו ${(x.tr||[]).length} לשמירה.</p>`:'');
  if(k==='inv')h+=inBQ?`<p class="note" style="margin:8px 0 0">בתור החשבוניות (סריקה מרובה).</p><button class="btn g w" data-a="bqReview">בדיקה ואישור של החשבוניות</button>`:`<button class="btn w" style="margin-top:8px" data-a="siBq" data-id="${x.id}">🧾 לתור החשבוניות</button>`;
  if(x.st==='fail'&&!x.big)h+=`<button class="btn g w" style="margin-top:8px" data-a="siRe" data-id="${x.id}">נסה לזהות שוב</button>`;
  return h+'</div>'}
@@ -3080,7 +3080,7 @@ function siSec(){const L=siL();if(!L.length)return BQ.length?adSec('🧾 תור 
  return adSec('📥 מסמכים שהתקבלו ('+L.length+')')+`<p class="note" style="margin:0 0 8px">מסמכים ששותפו לאפליקציה. שום דבר לא נשמר עד שמאשרים כל מסמך במסך שלו.</p>`+L.map(siCard).join('')+(inv.length>1?`<button class="btn w" style="margin-bottom:10px" data-a="siBqAll">כל ${inv.length} החשבוניות לתור החשבוניות</button>`:'')+bqBanner()}
 /* מסמך משותף נמצא בתור אחד בלבד: תור החשבוניות (BQ) או צילום העברה (TR). אם כבר נשמר – לא מחליפים */
 const siUsed=fid=>S.tx.some(t=>t.file===fid||(t.pays||[]).some(p=>p&&p.file===fid));
-const siTrIt=x=>TR.items.find(t=>t.fid==='ft'+x.h);
+const siTrIt=x=>TR.items.find(t=>t.fid==='ft'+x.h);/* אחרי שמירת שורה בצילום העברה: אם נשארו שורות שלא נשמרו – המסמך נשאר בתור (part) עם השורות שנשארו, גם אחרי טעינה מחדש */function siTrPart(it){const x=it&&it.si&&(SI.L||[]).find(y=>y.id===it.si&&'ft'+y.h===it.fid);if(!x)return;const left=it.rows.filter(r=>!r.done);if(left.length&&left.length<it.rows.length){x.part=1;x.tr=left.map(r=>({amount:pNum(r.amt)||null,date:r.date,payee_name:r.name,payee_account:r.acct,reference:r.ref}));x.grps=it.grps.slice()}else{delete x.part;delete x.grps}siSave()}
 const SI_SAVED='המסמך הזה כבר נשמר באפליקציה, ולכן אי אפשר לרשום אותו שוב בסוג אחר. אם צריך – בטלו קודם את הרישום הקיים';
 function siMove(x,to){const fid='ft'+x.h;if(siUsed(fid)){toast(SI_SAVED);return false}
  const t=siTrIt(x);if(t&&to!=='tr'){if(t.rows.some(r=>r.done)){toast(SI_SAVED);return false}TR.items=TR.items.filter(y=>y!==t);TR.i=Math.max(0,Math.min(TR.i,TR.items.length-1))}
@@ -3096,10 +3096,10 @@ const siSupCat=()=>{const c=cat('e_sup');return c&&!c.hid&&!c.off?c:catsOf('exp'
 /* העברה ← זרימת צילום העברה (סבב 2) עם הקובץ ותוצאת הזיהוי, בלי זיהוי נוסף */
 ACT.siTr=async el=>{if(!trOk())return toast('צילום העברה – למנהל בלבד');const x=siFind(el);if(!x)return;const fid='ft'+x.h;
  let i=TR.items.findIndex(t=>t.fid===fid);
- if(i<0){if(siUsed(fid))return toast(SI_SAVED);if(BQ.some(b=>b.fid===fid)){BQ=BQ.filter(b=>b.fid!==fid);toast('המסמך הוצא מתור החשבוניות ונפתח כהעברה')}}
+ if(i<0){if(siUsed(fid)&&!x.part)return toast(SI_SAVED);if(BQ.some(b=>b.fid===fid)){BQ=BQ.filter(b=>b.fid!==fid);toast('המסמך הוצא מתור החשבוניות ונפתח כהעברה')}}
  if(i<0){let du;try{du=await fget(siKey(x))}catch(e){}if(!du)return toast('הקובץ לא נמצא במכשיר');
   if(!TR.items.length)TR={items:[],i:0,sub:''};const s0=TR.sub;TR.sub='';
-  const it={id:uid(),du,pdf:x.mime==='application/pdf',fid,st:'ok',type:'bank_transfer',man:1,rows:[],grps:[],used:new Set(bkFileIds()).has(fid),twin:false,si:x.id};
+  const it={id:uid(),du,pdf:x.mime==='application/pdf',fid,st:'ok',type:'bank_transfer',man:1,rows:[],grps:x.part&&Array.isArray(x.grps)?x.grps.filter(g=>typeof g==='string'):[],used:!x.part&&new Set(bkFileIds()).has(fid),twin:false,si:x.id};
   it.rows=(Array.isArray(x.tr)&&x.tr.length?x.tr:[{}]).map(trRow);TR.sub=s0;TR.items.push(it);i=TR.items.length-1}
  if(x.type!=='bank_transfer'){x.type='bank_transfer';x.man=1;siSave()}TR.i=i;if(cur().v==='tr')render(0);else go('tr')};
 /* חשבונית / תעודת משלוח ← תור הסריקה הקיים (BQ). תוצאת הזיהוי מסוג transfer לא כוללת ספק, מספר וסכום – לכן זיהוי חשבונית רגיל, פעם אחת */
