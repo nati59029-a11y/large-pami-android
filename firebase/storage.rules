@@ -44,8 +44,57 @@ service firebase.storage {
     // כתיבה ומחיקה: אסורות לכולם. ההעלאה נעשית רק בתהליך הבנייה, עם מפתח גישה של חשבון שירות,
     // שעוקף את הכללים.
     match /app_releases/{allPaths=**} {
-      allow read: if isStaff();
+      // ריבוי עסקים: גם עובד פעיל או מנהל של כל עסק (לפי users/{uid}.bizId), ומנהל־על.
+      allow read: if isStaff() || bizMemberAny();
       allow write: if false;
+    }
+
+    // ---------- ריבוי עסקים (משימה 2026-11-05, שלב 2) ----------
+    // הכללים בשורש (app_backups/, app_releases/) לא השתנו, חוץ מתוספת קריאה של app_releases לחברי עסקים.
+    // תפקיד בתוך עסק: מנהל = b/{bizId}/admins/{uid}; עובד = b/{bizId}/staff/{uid} עם active == true;
+    // מנהל־על = superadmins/{uid} (מנהל מלא בכל עסק, גם מושהה). עסק מושהה: מנהל העסק ועובדיו חסומים.
+    function bActive(bizId) {
+      return firestore.get(/databases/(default)/documents/b/$(bizId)).data.get('status', '') == 'active';
+    }
+    function bSuper() {
+      return request.auth != null && firestore.exists(/databases/(default)/documents/superadmins/$(request.auth.uid));
+    }
+    function bMgr(bizId) {
+      return (request.auth != null && firestore.exists(/databases/(default)/documents/b/$(bizId)/admins/$(request.auth.uid))
+        && bActive(bizId)) || bSuper();
+    }
+    function bEmp(bizId) {
+      return request.auth != null && firestore.exists(/databases/(default)/documents/b/$(bizId)/staff/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/b/$(bizId)/staff/$(request.auth.uid)).data.active == true
+        && bActive(bizId);
+    }
+    function bStaff(bizId) {
+      return bMgr(bizId) || bEmp(bizId);
+    }
+    // חבר פעיל בעסק כלשהו: העסק נקבע לפי users/{uid}.bizId (רק השרת כותב אותו), או מנהל־על.
+    function bizMemberAny() {
+      return request.auth != null
+        && ((firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+             && bStaff(firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.bizId))
+            || bSuper());
+    }
+
+    // גיבוי מוצפן של האפליקציה בתוך העסק: אותם תנאים כמו app_backups/ בשורש, עם התפקיד בתוך העסק.
+    match /b/{bizId}/app_backups/{userId}/{fileName} {
+      allow read: if (isSelf(userId) && bStaff(bizId)) || bMgr(bizId);
+      allow create, update: if isSelf(userId) && bStaff(bizId)
+        && request.resource.size <= 50 * 1024 * 1024
+        && request.resource.contentType == 'application/octet-stream';
+      allow delete: if isSelf(userId) && bStaff(bizId);
+    }
+
+    // לוגו העסק: קריאה – חברי העסק. כתיבה ומחיקה – מנהל העסק (ומנהל־על). png/jpeg/webp עד 1MB.
+    match /b/{bizId}/brand/logo {
+      allow read: if bStaff(bizId);
+      allow create, update: if bMgr(bizId)
+        && request.resource.size <= 1024 * 1024
+        && request.resource.contentType in ['image/png', 'image/jpeg', 'image/webp'];
+      allow delete: if bMgr(bizId);
     }
 
     // הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם.

@@ -1,0 +1,626 @@
+'use strict';
+// ריבוי עסקים (משימה 2026-11-05, שלב 2): בדיקות בידוד בין עסקים, תוספות, השהיה, מסמך העסק ו-Storage.
+// רץ לבד (לא דרך all.test.js, שלא משתנה), מול האמולטור בלבד:
+//   firebase emulators:exec --only auth,firestore,storage --project demo-largpeami "node --test tests/multi-business.test.js"
+// שני עסקים: biz-a ו-biz-b. 7 תפקידים: מנהל א', עובד א', מנהל ב', עובד ב', מנהל־על, עובד מושבת (של העסק הנבדק),
+// ומשתמש מחובר בלי עסק. לכל אוסף × פעולה (get/list/create/update/delete) × תפקיד × כיוון (א'←ב' וב'←א') יש בדיקה.
+// מנהל ועובד של העסק השני – תמיד "נחסם". בתוך העסק עצמו – "מותר" לפי הכללים בשורש (ויש לכל "נחסם" בדיקת "מותר" תואמת).
+
+const { describe, it, before, beforeEach, after } = require('node:test');
+const assert = require('node:assert/strict');
+const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
+const H = require('./helpers');
+
+const A = 'biz-a', B = 'biz-b';
+const ALL_FEATURES = { scan: true, shelf: true, feedback: true, tasks: true, suppliers: true, requests: true, cashClose: true, yemot: true, orders: true };
+const U = {
+  [A]: { mgr: 'a_mgr', emp: 'a_emp', off: 'a_off' },
+  [B]: { mgr: 'b_mgr', emp: 'b_emp', off: 'b_off' },
+  super: 'u_super', nobiz: 'u_nobiz',
+};
+const ROLES7 = ['mgrA', 'empA', 'mgrB', 'empB', 'super', 'off', 'nobiz'];
+const ROLE_NAMES = { mgrA: "מנהל א'", empA: "עובד א'", mgrB: "מנהל ב'", empB: "עובד ב'", super: 'מנהל־על', off: 'עובד מושבת', nobiz: 'מחובר בלי עסק' };
+const other = (biz) => (biz === A ? B : A);
+// התפקיד בפועל מול העסק הנבדק: 'mgr'/'emp' של העסק עצמו, 'foreign' של העסק השני
+function resolve(role, biz) {
+  if (role === 'super') return { uid: U.super, rel: 'super' };
+  if (role === 'nobiz') return { uid: U.nobiz, rel: 'nobiz' };
+  if (role === 'off') return { uid: U[biz].off, rel: 'off' };
+  const b = role.endsWith('A') ? A : B;
+  const k = role.slice(0, 3);
+  return { uid: U[b][k], rel: b === biz ? k : 'foreign' };
+}
+
+let env;
+let seq = 0;
+const fresh = (p) => `${p || 'x'}_${Date.now()}_${++seq}`;
+const now = () => Date.now();
+const fs = (uid) => env.authenticatedContext(uid, { email: uid + '@example.invalid' }).firestore();
+const st = (uid) => env.authenticatedContext(uid, { email: uid + '@example.invalid' }).storage();
+const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
+const prepSt = (fn) => env.withSecurityRulesDisabled((c) => fn(c.storage()));
+const up = (ref, data, meta) => new Promise((res, rej) => ref.put(data, meta).then(res, rej));
+
+function bizDoc(biz, o) {
+  return Object.assign({ name: 'עסק ' + biz, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: U.super, bizId: biz,
+    features: Object.assign({}, ALL_FEATURES), brand: { name: 'עסק', logoPath: '', colors: { acc: '#c9a227' }, base: 'dark-gold', updatedAt: 1, updatedBy: 'x' } }, o);
+}
+
+async function seedAll() {
+  await env.clearFirestore();
+  await prep(async (db) => {
+    const b = db.batch();
+    b.set(db.doc('superadmins/' + U.super), {});
+    for (const biz of [A, B]) {
+      const u = U[biz];
+      b.set(db.doc('b/' + biz), bizDoc(biz));
+      b.set(db.doc(`b/${biz}/admins/${u.mgr}`), { email: u.mgr + '@example.invalid' });
+      b.set(db.doc(`b/${biz}/staff/${u.mgr}`), { name: u.mgr, role: 'manager', active: true });
+      b.set(db.doc(`b/${biz}/staff/${u.emp}`), { name: u.emp, role: 'employee', active: true });
+      b.set(db.doc(`b/${biz}/staff/${u.off}`), { name: u.off, role: 'employee', active: false });
+      for (const k of ['mgr', 'emp', 'off']) b.set(db.doc('users/' + u[k]), { bizId: biz, role: k === 'mgr' ? 'admin' : 'worker', email: u[k] + '@example.invalid', createdAt: 1 });
+    }
+    await b.commit();
+  });
+}
+
+// ---- פעולות לכל אוסף. כל פעולה: { run(db, biz, uid) , allow: [תפקידים בתוך העסק שמותרים] } ----
+// תפקידים בתוך העסק: mgr, emp, super (מנהל־על = מנהל מלא בכל עסק), off, nobiz. foreign תמיד נחסם.
+const P = (biz) => 'b/' + biz;
+const S = ['mgr', 'emp', 'super'];   // צוות (מנהל, עובד פעיל, מנהל־על)
+const M = ['mgr', 'super'];          // מנהל (ומנהל־על)
+const NONE = [];
+
+const simple = (coll, readAllow, writeAllow, body) => ({
+  get: { allow: readAllow, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/${coll}/g1`).set(body())); return db.doc(`${P(biz)}/${coll}/g1`).get(); } },
+  list: { allow: readAllow, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/${coll}/g1`).set(body())); return db.collection(`${P(biz)}/${coll}`).get(); } },
+  create: { allow: writeAllow, run: (db, biz) => db.doc(`${P(biz)}/${coll}/${fresh()}`).set(body()) },
+  update: { allow: writeAllow, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/${coll}/u1`).set(body())); return db.doc(`${P(biz)}/${coll}/u1`).set(body()); } },
+  delete: { allow: writeAllow, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/${coll}/${id}`).set(body())); return db.doc(`${P(biz)}/${coll}/${id}`).delete(); } },
+});
+
+const taskBody = (uid, o) => Object.assign({ owner: uid, by: uid, role: 'w', txt: 'משימה', cr: now(), due: now() + 4 * 86400000, st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }, o);
+const closingBody = (uid, o) => Object.assign({ uid, by: uid, t: now(), st: 'new', np: 1, reg: 'i_nl', d: '2026-11-01', no: '1', data: '{}' }, o);
+const depBody = (uid, o) => Object.assign({ uid, by: uid, t: now(), d: '2026-11-01', items: ['co1'], a: 10, st: 'new', why: '', np: 1, data: '{}' }, o);
+const coBody = (uid, id, o) => Object.assign({ uid, by: uid, t: now(), reg: 'i_nl', d: '2026-11-01', a: 10, why: 'קניתי חלב', dep: '', src: id, zc: '', dp: '' }, o);
+const inboxBody = (uid, o) => Object.assign({ owner: uid, by: uid, status: 'new', created: 'x', data: '{}', parts: '1', t: now() }, o);
+const stUpd = (uid, st) => ({ st, stBy: uid, stAt: now() });
+// תת-אוסף p של מסמך שנוצר על ידי המשתמש עצמו (appreq / closings / deposits)
+const partsOf = (coll, parentBody, readAllow) => ({
+  get: { allow: readAllow, run: async (db, biz, uid) => { await prep(async (a) => { await a.doc(`${P(biz)}/${coll}/q1`).set(parentBody('x')); await a.doc(`${P(biz)}/${coll}/q1/p/0`).set({ data: 'x' }); }); return db.doc(`${P(biz)}/${coll}/q1/p/0`).get(); } },
+  list: { allow: readAllow, run: async (db, biz) => { await prep(async (a) => { await a.doc(`${P(biz)}/${coll}/q1`).set(parentBody('x')); await a.doc(`${P(biz)}/${coll}/q1/p/0`).set({ data: 'x' }); }); return db.collection(`${P(biz)}/${coll}/q1/p`).get(); } },
+  create: { allow: S, run: async (db, biz, uid) => { const id = fresh('q'); await prep((a) => a.doc(`${P(biz)}/${coll}/${id}`).set(parentBody(uid))); return db.doc(`${P(biz)}/${coll}/${id}/p/0`).set({ data: 'x' }); } },
+  update: { allow: NONE, run: async (db, biz, uid) => { const id = fresh('q'); await prep(async (a) => { await a.doc(`${P(biz)}/${coll}/${id}`).set(parentBody(uid)); await a.doc(`${P(biz)}/${coll}/${id}/p/0`).set({ data: 'x' }); }); return db.doc(`${P(biz)}/${coll}/${id}/p/0`).set({ data: 'y' }); } },
+  delete: { allow: M, run: async (db, biz) => { const id = fresh('q'); await prep(async (a) => { await a.doc(`${P(biz)}/${coll}/${id}`).set(parentBody('x')); await a.doc(`${P(biz)}/${coll}/${id}/p/0`).set({ data: 'x' }); }); return db.doc(`${P(biz)}/${coll}/${id}/p/0`).delete(); } },
+});
+
+const OPS = {
+  'מסמך העסק b/{bizId}': {
+    get: { allow: S, run: (db, biz) => db.doc(P(biz)).get() },
+    list: { allow: ['super'], run: (db) => db.collection('b').get() },
+    create: { allow: NONE, run: (db, biz) => db.doc(P(biz) + '-new').set(bizDoc(biz + '-new')) },
+    update: { allow: M, run: (db, biz, uid) => db.doc(P(biz)).update({ brand: { name: 'מותג', colors: { acc: '#112233' }, updatedAt: now(), updatedBy: uid } }) },
+    delete: { allow: NONE, run: (db, biz) => db.doc(P(biz)).delete() },
+  },
+  admins: {
+    get: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/admins/${uid}`).get() },
+    list: { allow: NONE, run: (db, biz) => db.collection(`${P(biz)}/admins`).get() },
+    create: { allow: NONE, run: (db, biz, uid) => db.doc(`${P(biz)}/admins/${uid}`).set({ email: 'x' }) },
+    update: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/admins/zz_victim`).set({ email: 'v' })); return db.doc(`${P(biz)}/admins/zz_victim`).set({ email: 'x' }); } },
+    delete: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/admins/zz_victim`).set({ email: 'v' })); return db.doc(`${P(biz)}/admins/zz_victim`).delete(); } },
+  },
+  staff: {
+    get: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/staff/${uid}`).get() },
+    list: { allow: M, run: (db, biz) => db.collection(`${P(biz)}/staff`).get() },
+    create: { allow: NONE, run: (db, biz, uid) => db.doc(`${P(biz)}/staff/${uid}`).set({ name: uid, role: 'employee', active: true }) },
+    update: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/staff/zz_victim`).set({ active: false })); return db.doc(`${P(biz)}/staff/zz_victim`).update({ active: true }); } },
+    delete: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/staff/zz_victim`).set({ active: false })); return db.doc(`${P(biz)}/staff/zz_victim`).delete(); } },
+  },
+  app_backup_status: {
+    get: { allow: S, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/app_backup_status/${uid}`).set({ size: 1 })); return db.doc(`${P(biz)}/app_backup_status/${uid}`).get(); } },
+    list: { allow: M, run: (db, biz) => db.collection(`${P(biz)}/app_backup_status`).get() },
+    create: { allow: NONE, run: (db, biz) => db.doc(`${P(biz)}/app_backup_status/${fresh()}`).set({ size: 1 }) },
+    update: { allow: NONE, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/app_backup_status/${uid}`).set({ size: 1 })); return db.doc(`${P(biz)}/app_backup_status/${uid}`).set({ size: 2 }); } },
+    delete: { allow: NONE, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/app_backup_status/${uid}`).set({ size: 1 })); return db.doc(`${P(biz)}/app_backup_status/${uid}`).delete(); } },
+  },
+  cfg: simple('cfg', S, M, () => ({ data: '{}' })),
+  bk: simple('bk', M, M, () => ({ data: '{}', owner: 'x' })),
+  shelf: simple('shelf', S, S, () => ({ data: '{}', at: '1' })),
+  fb: {
+    get: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/fb/ok1`).set({ st: 'ok', owner: 'x', data: '{}' })); return db.doc(`${P(biz)}/fb/ok1`).get(); } },
+    list: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/fb/ok1`).set({ st: 'ok', owner: 'x', data: '{}' })); return db.collection(`${P(biz)}/fb`).where('st', '==', 'ok').get(); } },
+    create: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/fb/${fresh()}`).set({ owner: uid, st: 'new', data: '{}' }) },
+    update: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/fb/u1`).set({ st: 'new', owner: 'x', data: '{}' })); return db.doc(`${P(biz)}/fb/u1`).update({ st: 'ok' }); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/fb/${id}`).set({ st: 'new', owner: 'x' })); return db.doc(`${P(biz)}/fb/${id}`).delete(); } },
+  },
+  chunks: {
+    get: { allow: S, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/chunks/own_${uid}_0`).set({ owner: uid, data: 'x' })); return db.doc(`${P(biz)}/chunks/own_${uid}_0`).get(); } },
+    list: { allow: S, run: (db, biz, uid) => db.collection(`${P(biz)}/chunks`).where('owner', '==', uid).get() },
+    create: { allow: ['emp'], run: (db, biz, uid) => db.doc(`${P(biz)}/chunks/${fresh('c')}_0`).set({ owner: uid, data: 'x' }) },
+    update: { allow: NONE, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/chunks/own_${uid}_0`).set({ owner: uid, data: 'x' })); return db.doc(`${P(biz)}/chunks/own_${uid}_0`).set({ owner: uid, data: 'y' }); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh('c') + '_0'; await prep((a) => a.doc(`${P(biz)}/chunks/${id}`).set({ owner: 'x', data: 'x' })); return db.doc(`${P(biz)}/chunks/${id}`).delete(); } },
+  },
+  inbox: {
+    get: { allow: S, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/inbox/own_${uid}`).set(inboxBody(uid))); return db.doc(`${P(biz)}/inbox/own_${uid}`).get(); } },
+    list: { allow: S, run: (db, biz, uid) => db.collection(`${P(biz)}/inbox`).where('owner', '==', uid).get() },
+    create: { allow: ['emp'], run: async (db, biz, uid) => { const id = fresh('i'); await prep((a) => a.doc(`${P(biz)}/chunks/${id}_0`).set({ owner: uid, data: 'x' })); return db.doc(`${P(biz)}/inbox/${id}`).set(inboxBody(uid)); } },
+    update: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/inbox/u1`).set(inboxBody('x'))); return db.doc(`${P(biz)}/inbox/u1`).update({ status: 'done' }); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/inbox/${id}`).set(inboxBody('x'))); return db.doc(`${P(biz)}/inbox/${id}`).delete(); } },
+  },
+  tasks: {
+    get: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x'))); return db.doc(`${P(biz)}/tasks/t1`).get(); } },
+    list: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x'))); return db.collection(`${P(biz)}/tasks`).where('open', '==', '1').get(); } },
+    create: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/tasks/${fresh()}`).set(taskBody(uid)) },
+    update: { allow: S, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/tasks/tu`).set(taskBody('x'))); return db.doc(`${P(biz)}/tasks/tu`).update({ cAt: now(), cBy: uid }); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/tasks/${id}`).set(taskBody('x'))); return db.doc(`${P(biz)}/tasks/${id}`).delete(); } },
+  },
+  'tasks/c': {
+    get: { allow: S, run: async (db, biz) => { await prep(async (a) => { await a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x')); await a.doc(`${P(biz)}/tasks/t1/c/c1`).set({ uid: 'x', by: 'x', txt: 'a', t: 1 }); }); return db.doc(`${P(biz)}/tasks/t1/c/c1`).get(); } },
+    list: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x'))); return db.collection(`${P(biz)}/tasks/t1/c`).get(); } },
+    create: { allow: S, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/tasks/tnc`).set(taskBody('x', { nc: '1' }))); return db.doc(`${P(biz)}/tasks/tnc/c/${fresh()}`).set({ uid, by: uid, txt: 'תגובה', t: now() }); } },
+    update: { allow: NONE, run: async (db, biz, uid) => { await prep(async (a) => { await a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x')); await a.doc(`${P(biz)}/tasks/t1/c/cu`).set({ uid, by: uid, txt: 'a', t: now() }); }); return db.doc(`${P(biz)}/tasks/t1/c/cu`).update({ txt: 'b' }); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep(async (a) => { await a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x')); await a.doc(`${P(biz)}/tasks/t1/c/${id}`).set({ uid: 'x', by: 'x', txt: 'a', t: 1 }); }); return db.doc(`${P(biz)}/tasks/t1/c/${id}`).delete(); } },
+  },
+  supinv: simple('supinv', S, M, () => ({ c: 'ספקים', n: 'ספק', d: '2026-11-01', a: '10', m: '2026-11' })),
+  'supinv/p': {
+    get: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/supinv/s1/p/0`).set({ data: 'x' })); return db.doc(`${P(biz)}/supinv/s1/p/0`).get(); } },
+    list: { allow: S, run: (db, biz) => db.collection(`${P(biz)}/supinv/s1/p`).get() },
+    create: { allow: M, run: (db, biz) => db.doc(`${P(biz)}/supinv/s1/p/${fresh()}`).set({ data: 'x' }) },
+    update: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/supinv/s1/p/1`).set({ data: 'x' })); return db.doc(`${P(biz)}/supinv/s1/p/1`).set({ data: 'y' }); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/supinv/s1/p/${id}`).set({ data: 'x' })); return db.doc(`${P(biz)}/supinv/s1/p/${id}`).delete(); } },
+  },
+  appreq: {
+    get: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/appreq/r1`).set({ uid: 'x', by: 'x', txt: 'a', t: 1, st: 'new', np: 0 })); return db.doc(`${P(biz)}/appreq/r1`).get(); } },
+    list: { allow: S, run: (db, biz) => db.collection(`${P(biz)}/appreq`).get() },
+    create: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/appreq/${fresh()}`).set({ uid, by: uid, txt: 'בקשה', t: now(), st: 'new', np: 0 }) },
+    update: { allow: M, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/appreq/ru`).set({ uid: 'x', by: 'x', txt: 'a', t: 1, st: 'new', np: 0 })); return db.doc(`${P(biz)}/appreq/ru`).update(stUpd(uid, 'doing')); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/appreq/${id}`).set({ uid: 'x', st: 'new' })); return db.doc(`${P(biz)}/appreq/${id}`).delete(); } },
+  },
+  'appreq/p': partsOf('appreq', (uid) => ({ uid, by: uid, txt: 'a', t: now(), st: 'new', np: 1 }), S),
+  closings: {
+    get: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/closings/z1`).set(closingBody('x'))); return db.doc(`${P(biz)}/closings/z1`).get(); } },
+    list: { allow: M, run: (db, biz) => db.collection(`${P(biz)}/closings`).get() },
+    create: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/closings/${fresh()}`).set(closingBody(uid)) },
+    update: { allow: M, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/closings/zu`).set(closingBody('x'))); return db.doc(`${P(biz)}/closings/zu`).update(stUpd(uid, 'ok')); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/closings/${id}`).set(closingBody('x'))); return db.doc(`${P(biz)}/closings/${id}`).delete(); } },
+  },
+  'closings/p': partsOf('closings', (uid) => closingBody(uid), M),
+  cashout: {
+    get: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/cashout/co1`).set(coBody('x', 'co1'))); return db.doc(`${P(biz)}/cashout/co1`).get(); } },
+    list: { allow: S, run: (db, biz) => db.collection(`${P(biz)}/cashout`).get() },
+    create: { allow: S, run: async (db, biz, uid) => { const id = fresh('co'); await prep((a) => a.doc(`${P(biz)}/inbox/${id}`).set(inboxBody(uid))); return db.doc(`${P(biz)}/cashout/${id}`).set(coBody(uid, id)); } },
+    update: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/cashout/cu`).set(coBody('x', 'cu'))); return db.doc(`${P(biz)}/cashout/cu`).update({ zc: 'z9' }); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/cashout/${id}`).set(coBody('x', id))); return db.doc(`${P(biz)}/cashout/${id}`).delete(); } },
+  },
+  deposits: {
+    get: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/deposits/d1`).set(depBody('x'))); return db.doc(`${P(biz)}/deposits/d1`).get(); } },
+    list: { allow: S, run: (db, biz) => db.collection(`${P(biz)}/deposits`).get() },
+    create: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/deposits/${fresh()}`).set(depBody(uid)) },
+    update: { allow: M, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/deposits/du`).set(depBody('x'))); return db.doc(`${P(biz)}/deposits/du`).update(stUpd(uid, 'ok')); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/deposits/${id}`).set(depBody('x'))); return db.doc(`${P(biz)}/deposits/${id}`).delete(); } },
+  },
+  'deposits/p': partsOf('deposits', (uid) => depBody(uid), M),
+  zlast: {
+    get: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/zlast/i_nl`).set({ d: '2026-10-01', tm: '', id: 'z0', uid: 'x', t: 1 })); return db.doc(`${P(biz)}/zlast/i_nl`).get(); } },
+    list: { allow: S, run: (db, biz) => db.collection(`${P(biz)}/zlast`).get() },
+    // עובד כותב zlast רק יחד עם יצירת הסגירה שלו (אותו commit) – כמו באפליקציה
+    create: { allow: S, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/zlast/i_yh`).delete()); const id = fresh('z'); const b = db.batch();
+      b.set(db.doc(`${P(biz)}/closings/${id}`), closingBody(uid, { reg: 'i_yh', tm: '10:00' })); b.set(db.doc(`${P(biz)}/zlast/i_yh`), { d: '2026-11-01', tm: '10:00', id, uid, t: now() }); return b.commit(); } },
+    update: { allow: S, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/zlast/i_yh`).set({ d: '2026-10-01', tm: '', id: 'z0', uid: 'x', t: 1 })); const id = fresh('z'); const b = db.batch();
+      b.set(db.doc(`${P(biz)}/closings/${id}`), closingBody(uid, { reg: 'i_yh', tm: '10:00' })); b.set(db.doc(`${P(biz)}/zlast/i_yh`), { d: '2026-11-01', tm: '10:00', id, uid, t: now() }); return b.commit(); } },
+    delete: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/zlast/i_nl`).set({ d: '2026-10-01', tm: '', id: 'z0', uid: 'x', t: 1 })); return db.doc(`${P(biz)}/zlast/i_nl`).delete(); } },
+  },
+  yemot_lexicon: {
+    get: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/yemot_lexicon/main`).set({ text: '', updatedAt: 1, updatedBy: 'x' })); return db.doc(`${P(biz)}/yemot_lexicon/main`).get(); } },
+    list: { allow: NONE, run: (db, biz) => db.collection(`${P(biz)}/yemot_lexicon`).get() },
+    create: { allow: M, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/yemot_lexicon/main`).delete()); return db.doc(`${P(biz)}/yemot_lexicon/main`).set({ text: 'א', updatedAt: now(), updatedBy: uid }); } },
+    update: { allow: M, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/yemot_lexicon/main`).set({ text: '', updatedAt: 1, updatedBy: 'x' })); return db.doc(`${P(biz)}/yemot_lexicon/main`).set({ text: 'ב', updatedAt: now(), updatedBy: uid }); } },
+    delete: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/yemot_lexicon/main`).set({ text: '', updatedAt: 1, updatedBy: 'x' })); return db.doc(`${P(biz)}/yemot_lexicon/main`).delete(); } },
+  },
+  yemot_items: simple('yemot_items', NONE, NONE, () => ({ x: 1 })),
+  private: simple('private', NONE, NONE, () => ({ tokenHash: 'x' })),
+  audit: {
+    get: { allow: ['super'], run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/audit/a1`).set({ by: 'x', t: 1, act: 'open' })); return db.doc(`${P(biz)}/audit/a1`).get(); } },
+    list: { allow: ['super'], run: (db, biz) => db.collection(`${P(biz)}/audit`).get() },
+    create: { allow: ['super'], run: (db, biz, uid) => db.doc(`${P(biz)}/audit/${fresh()}`).set({ by: uid, t: now(), act: 'enter' }) },
+    update: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/audit/a1`).set({ by: 'x', t: 1, act: 'open' })); return db.doc(`${P(biz)}/audit/a1`).update({ act: 'changed' }); } },
+    delete: { allow: NONE, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/audit/a1`).set({ by: 'x', t: 1, act: 'open' })); return db.doc(`${P(biz)}/audit/a1`).delete(); } },
+  },
+};
+
+// Storage: גיבוי (בתיקייה של המשתמש עצמו) ולוגו. list של הלוגו – לא רלוונטי (קובץ אחד בנתיב קבוע).
+const BIN = { contentType: 'application/octet-stream' };
+const PNG = { contentType: 'image/png' };
+const ST_OPS = {
+  'Storage b/{bizId}/app_backups/{uid}/': {
+    get: { allow: S, run: async (s, biz, uid) => { await prepSt((a) => up(a.ref(`${P(biz)}/app_backups/${uid}/seed.bin`), new Uint8Array([1]), BIN)); return s.ref(`${P(biz)}/app_backups/${uid}/seed.bin`).getMetadata(); } },
+    list: { allow: S, run: (s, biz, uid) => s.ref(`${P(biz)}/app_backups/${uid}`).listAll() },
+    create: { allow: S, run: (s, biz, uid) => up(s.ref(`${P(biz)}/app_backups/${uid}/${fresh()}.bin`), new Uint8Array([1, 2]), BIN) },
+    update: { allow: S, run: async (s, biz, uid) => { await prepSt((a) => up(a.ref(`${P(biz)}/app_backups/${uid}/seed.bin`), new Uint8Array([1]), BIN)); return up(s.ref(`${P(biz)}/app_backups/${uid}/seed.bin`), new Uint8Array([2]), BIN); } },
+    delete: { allow: S, run: async (s, biz, uid) => { const f = fresh() + '.bin'; await prepSt((a) => up(a.ref(`${P(biz)}/app_backups/${uid}/${f}`), new Uint8Array([1]), BIN)); return s.ref(`${P(biz)}/app_backups/${uid}/${f}`).delete(); } },
+  },
+  'Storage b/{bizId}/brand/logo': {
+    get: { allow: S, run: async (s, biz) => { await prepSt((a) => up(a.ref(`${P(biz)}/brand/logo`), new Uint8Array([1]), PNG)); return s.ref(`${P(biz)}/brand/logo`).getMetadata(); } },
+    create: { allow: M, run: async (s, biz) => { await prepSt((a) => a.ref(`${P(biz)}/brand/logo`).delete().catch(() => {})); return up(s.ref(`${P(biz)}/brand/logo`), new Uint8Array(1024), PNG); } },
+    update: { allow: M, run: async (s, biz) => { await prepSt((a) => up(a.ref(`${P(biz)}/brand/logo`), new Uint8Array([1]), PNG)); return up(s.ref(`${P(biz)}/brand/logo`), new Uint8Array(2048), { contentType: 'image/webp' }); } },
+    delete: { allow: M, run: async (s, biz) => { await prepSt((a) => up(a.ref(`${P(biz)}/brand/logo`), new Uint8Array([1]), PNG)); return s.ref(`${P(biz)}/brand/logo`).delete(); } },
+  },
+};
+
+const TALLY = { allow: 0, deny: 0, foreignDeny: 0, cells: 0 };
+const PAIRS = new Map(); // אוסף|פעולה → {deny, allow}
+
+describe('ריבוי עסקים – טבלת בידוד: אוסף × פעולה × 7 תפקידים × שני כיוונים', () => {
+  before(async () => { env = await H.getEnv(); await seedAll(); await env.clearStorage(); });
+  for (const [kind, table] of [['fs', OPS], ['st', ST_OPS]]) {
+    for (const [coll, ops] of Object.entries(table)) {
+      for (const [op, spec] of Object.entries(ops)) {
+        for (const biz of [A, B]) {
+          for (const role of ROLES7) {
+            const { uid, rel } = resolve(role, biz);
+            const expected = rel !== 'foreign' && spec.allow.includes(rel) ? 'allow' : 'deny';
+            it(`${coll} | ${op} | עסק ${biz} | ${ROLE_NAMES[role]} → ${expected === 'allow' ? 'מותר' : 'נחסם'}`, async () => {
+              const ctx = kind === 'fs' ? fs(uid) : st(uid);
+              const p = spec.run(ctx, biz, uid);
+              if (expected === 'allow') await assertSucceeds(p); else await assertFails(p);
+              TALLY.cells++; TALLY[expected]++; if (rel === 'foreign') TALLY.foreignDeny++;
+              const k = coll + '|' + op; const pr = PAIRS.get(k) || { deny: 0, allow: 0 }; pr[expected]++; PAIRS.set(k, pr);
+            });
+          }
+        }
+      }
+    }
+  }
+  it('סיכום הטבלה: לכל "נחסם" יש "מותר" תואם באותו אוסף ופעולה (חוץ מפעולות שסגורות לכולם גם בשורש)', () => {
+    const closed = [...PAIRS].filter(([, v]) => v.allow === 0).map(([k]) => k);
+    console.log('# טבלת בידוד: ' + JSON.stringify(TALLY));
+    console.log('# פעולות שסגורות לכולם (כמו בשורש, או אוספים של השרת בלבד): ' + closed.join(', '));
+    const ok = new Set(['מסמך העסק b/{bizId}|create', 'מסמך העסק b/{bizId}|delete', 'admins|list', 'admins|create', 'admins|update', 'admins|delete',
+      'staff|create', 'staff|update', 'staff|delete', 'app_backup_status|create', 'app_backup_status|update', 'app_backup_status|delete',
+      'chunks|update', 'tasks/c|update', 'appreq/p|update', 'closings/p|update', 'deposits/p|update', 'yemot_lexicon|list', 'yemot_lexicon|delete',
+      'yemot_items|get', 'yemot_items|list', 'yemot_items|create', 'yemot_items|update', 'yemot_items|delete',
+      'private|get', 'private|list', 'private|create', 'private|update', 'private|delete', 'audit|update', 'audit|delete']);
+    assert.deepEqual(closed.filter((k) => !ok.has(k)), [], 'פעולה בלי אף בדיקת "מותר" שלא ברשימת הסגורות-בכוונה');
+    assert.equal(TALLY.foreignDeny, TALLY.cells / 7 * 2, 'בכל תא: מנהל ועובד של העסק השני נחסמו');
+  });
+});
+
+describe('ריבוי עסקים – users, superadmins, ושדות שהמשתמש לא קובע לעצמו', () => {
+  before(async () => { env = await H.getEnv(); });
+  beforeEach(async () => { await seedAll(); });
+
+  it('users/{uid}: קורא רק את שלו; לא יוצר, לא משנה ולא מוחק – גם לא את שלו (bizId, role)', async () => {
+    const a = fs(U[A].mgr);
+    await assertSucceeds(a.doc('users/' + U[A].mgr).get());
+    await assertFails(a.doc('users/' + U[B].mgr).get());
+    await assertFails(a.collection('users').get());
+    await assertFails(a.doc('users/' + U[A].mgr).update({ bizId: B }));
+    await assertFails(a.doc('users/' + U[A].mgr).update({ role: 'admin' }));
+    await assertFails(a.doc('users/' + U[A].mgr).delete());
+    const n = fs(U.nobiz);
+    await assertSucceeds(n.doc('users/' + U.nobiz).get());
+    await assertFails(n.doc('users/' + U.nobiz).set({ bizId: A, role: 'admin', email: 'x', createdAt: 1 }));
+    await assertFails(fs(U.super).doc('users/' + U.super).set({ bizId: A, role: 'admin' }));
+  });
+
+  it('superadmins/{uid}: קורא רק את שלו; אף אחד לא כותב (גם לא מנהל־על)', async () => {
+    await assertSucceeds(fs(U.super).doc('superadmins/' + U.super).get());
+    await assertSucceeds(fs(U[A].mgr).doc('superadmins/' + U[A].mgr).get()); // לא קיים – תשובה ריקה
+    await assertFails(fs(U[A].mgr).doc('superadmins/' + U.super).get());
+    await assertFails(fs(U[A].mgr).doc('superadmins/' + U[A].mgr).set({}));
+    await assertFails(fs(U.super).doc('superadmins/u_new').set({}));
+    await assertFails(fs(U.super).collection('superadmins').get());
+  });
+
+  it('admins / staff: מנהל העסק לא כותב את עצמו ולא אחרים; עובד לא מפעיל את עצמו מחדש', async () => {
+    const m = fs(U[A].mgr);
+    await assertFails(m.doc(`b/${A}/admins/${U[A].emp}`).set({ email: 'x' }));
+    await assertFails(m.doc(`b/${A}/admins/${U[A].mgr}`).update({ email: 'y' }));
+    await assertFails(m.doc(`b/${A}/staff/${U[A].emp}`).update({ active: false }));
+    await assertFails(fs(U[A].off).doc(`b/${A}/staff/${U[A].off}`).update({ active: true }));
+    await assertFails(fs(U[A].emp).doc(`b/${A}/admins/${U[A].emp}`).set({ email: 'x' }));
+    await assertFails(fs(U.super).doc(`b/${A}/admins/u_x`).set({ email: 'x' }));
+    // מותר תואם: קריאה
+    await assertSucceeds(m.doc(`b/${A}/staff/${U[A].emp}`).get());
+  });
+
+  it('מסמך העסק: מנהל העסק לא כותב features, status, dataRoot, bizId, role, name, adv, ownerEmail, ownerPhone', async () => {
+    const m = fs(U[A].mgr);
+    const d = m.doc('b/' + A);
+    for (const [k, v] of Object.entries({ features: { scan: true }, status: 'active', dataRoot: 'legacy', bizId: B, role: 'admin', name: 'שם', adv: { limits: {} },
+      ownerEmail: 'a@b.c', ownerPhone: '050', schemaVersion: 2, createdBy: U[A].mgr })) {
+      await assertFails(d.update({ [k]: v }), k);
+    }
+    await assertFails(d.update({ 'features.scan': true }));
+    // גם יחד עם brand תקין
+    await assertFails(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U[A].mgr }, status: 'suspended' }));
+    // עובד לא כותב גם brand
+    await assertFails(fs(U[A].emp).doc('b/' + A).update({ brand: { name: 'x', updatedAt: now(), updatedBy: U[A].emp } }));
+    // מותר תואם
+    await assertSucceeds(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U[A].mgr } }));
+  });
+
+  it('brand: hasOnly, אורך שם עד 60, צבעים #rrggbb, לוגו רק בתיקיית העסק, updatedBy/updatedAt של הכותב', async () => {
+    const m = fs(U[A].mgr), uid = U[A].mgr, d = m.doc('b/' + A);
+    const br = (o) => ({ brand: Object.assign({ name: 'שם', updatedAt: now(), updatedBy: uid }, o) });
+    await assertSucceeds(d.update(br({ name: 'א'.repeat(60) })));
+    await assertFails(d.update(br({ name: 'א'.repeat(61) })));
+    await assertFails(d.update(br({ name: 5 })));
+    await assertFails(d.update(br({ extra: 'x' })));
+    await assertFails(d.update(br({ features: { scan: true } })));
+    await assertSucceeds(d.update(br({ colors: { acc: '#aabbcc', acc2: '#AABBCC', onacc: '#000000', bg: '#111111', card: '#222222', ink: '#ffffff' } })));
+    for (const bad of ['#abc', 'red', '#gggggg', '#aabbccdd', 'aabbcc', '#aabbc']) await assertFails(d.update(br({ colors: { acc: bad } })), bad);
+    await assertFails(d.update(br({ colors: { acc: '#aabbcc', evil: '#000000' } })));
+    await assertSucceeds(d.update(br({ logoPath: `b/${A}/brand/logo` })));
+    await assertSucceeds(d.update(br({ logoPath: '' })));
+    await assertFails(d.update(br({ logoPath: `b/${B}/brand/logo` })));
+    await assertFails(d.update(br({ logoPath: 'app_backups/x' })));
+    await assertSucceeds(d.update(br({ base: 'dark-gold' })));
+    await assertFails(d.update(br({ base: 'Dark Gold!' })));
+    await assertFails(d.update(br({ updatedBy: U[A].emp })));
+    await assertFails(d.update(br({ updatedAt: now() - 10 * 60000 })));
+    await assertFails(d.update({ brand: { name: 'x' } }));
+    await assertFails(d.update({ brand: 'string' }));
+  });
+
+  it('מנהל־על: כותב status, features, adv, ownerEmail, ownerPhone ו-brand; לא כותב dataRoot, bizId, name, schemaVersion; לא יוצר ולא מוחק עסק', async () => {
+    const s = fs(U.super), d = s.doc('b/' + A);
+    await assertSucceeds(d.update({ status: 'suspended' }));
+    await assertSucceeds(d.update({ status: 'active' }));
+    await assertFails(d.update({ status: 'deleted' }));
+    await assertSucceeds(d.update({ features: { scan: false, shelf: true } }));
+    await assertSucceeds(d.update({ 'features.tasks': true }));
+    await assertFails(d.update({ features: { evil: true } }));
+    await assertFails(d.update({ features: 'all' }));
+    await assertSucceeds(d.update({ adv: { limits: { scanMonthly: 100 }, yemot: {} } }));
+    await assertFails(d.update({ adv: 'x' }));
+    await assertSucceeds(d.update({ ownerEmail: 'owner@example.invalid', ownerPhone: '+972 50-000-0000' }));
+    await assertFails(d.update({ ownerPhone: 'abc' }));
+    await assertSucceeds(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U.super } }));
+    for (const [k, v] of Object.entries({ dataRoot: 'legacy', bizId: B, name: 'x', schemaVersion: 2, createdBy: 'x' })) await assertFails(d.update({ [k]: v }), k);
+    await assertFails(s.doc('b/biz-new').set(bizDoc('biz-new')));
+    await assertFails(d.delete());
+    // מנהל העסק ועובד לא כותבים status / features גם כשמנהל־על כן
+    await assertFails(fs(U[A].mgr).doc('b/' + A).update({ status: 'active' }));
+    await assertFails(fs(U[A].emp).doc('b/' + A).update({ features: ALL_FEATURES }));
+  });
+
+  it('audit: רק מנהל־על קורא ויוצר (בשמו, בזמן אמת, שדות מוגדרים); אין עדכון ואין מחיקה – לאף אחד', async () => {
+    const s = fs(U.super), col = `b/${A}/audit`;
+    await assertSucceeds(s.doc(`${col}/e1`).set({ by: U.super, t: now(), act: 'enter', note: 'כניסה לעסק' }));
+    await assertSucceeds(s.doc(`${col}/e1`).get());
+    await assertFails(s.doc(`${col}/e1`).update({ act: 'x' }));
+    await assertFails(s.doc(`${col}/e1`).delete());
+    await assertFails(s.doc(`${col}/e2`).set({ by: U[A].mgr, t: now(), act: 'enter' }));
+    await assertFails(s.doc(`${col}/e3`).set({ by: U.super, t: now() - 10 * 60000, act: 'enter' }));
+    await assertFails(s.doc(`${col}/e4`).set({ by: U.super, t: now(), act: 'enter', extra: 1 }));
+    await assertFails(fs(U[A].mgr).doc(`${col}/e1`).get());
+    await assertFails(fs(U[A].mgr).doc(`${col}/e5`).set({ by: U[A].mgr, t: now(), act: 'enter' }));
+    await assertFails(fs(U[A].mgr).doc(`${col}/e1`).delete());
+    await assertFails(fs(U[A].mgr).doc(`${col}/e1`).update({ act: 'x' }));
+  });
+});
+
+// אוסף לכל תוספת: פעולת "מותר" אחת למנהל (קריאה), ובשביל chunks גם יצירה של עובד
+const FEATURE_PROBES = {
+  shelf: [['shelf', (db) => db.doc(`b/${A}/shelf/price`).get()]],
+  feedback: [['fb', (db) => db.collection(`b/${A}/fb`).get()], ['chunks fbhi_', (db) => db.doc(`b/${A}/chunks/fbhi_q_0`).get()]],
+  tasks: [['tasks', (db) => db.collection(`b/${A}/tasks`).get()], ['tasks/c', (db) => db.collection(`b/${A}/tasks/t1/c`).get()]],
+  suppliers: [['supinv', (db) => db.collection(`b/${A}/supinv`).get()], ['supinv/p', (db) => db.collection(`b/${A}/supinv/s1/p`).get()]],
+  requests: [['appreq', (db) => db.collection(`b/${A}/appreq`).get()], ['appreq/p', (db) => db.collection(`b/${A}/appreq/r1/p`).get()]],
+  cashClose: [['closings', (db) => db.collection(`b/${A}/closings`).get()], ['closings/p', (db) => db.collection(`b/${A}/closings/z1/p`).get()],
+    ['cashout', (db) => db.collection(`b/${A}/cashout`).get()], ['deposits', (db) => db.collection(`b/${A}/deposits`).get()],
+    ['deposits/p', (db) => db.collection(`b/${A}/deposits/d1/p`).get()], ['zlast', (db) => db.collection(`b/${A}/zlast`).get()]],
+  yemot: [['yemot_lexicon', (db) => db.doc(`b/${A}/yemot_lexicon/main`).get()]],
+};
+
+describe('ריבוי עסקים – תוספות: כבויה = אין גישה לאוסף, מופעלת = יש', () => {
+  before(async () => { env = await H.getEnv(); });
+  beforeEach(async () => { await seedAll(); await prep(async (a) => { await a.doc(`b/${A}/chunks/fbhi_q_0`).set({ owner: 'x', data: 'x' }); await a.doc(`b/${A}/tasks/t1`).set(taskBody('x')); }); });
+  const setFeat = (features) => prep((a) => a.doc('b/' + A).update({ features }));
+
+  for (const [key, probes] of Object.entries(FEATURE_PROBES)) {
+    for (const [name, probe] of probes) {
+      it(`${key} → ${name}: כבויה – נחסם (גם מנהל־על); מופעלת – מותר`, async () => {
+        await setFeat(Object.assign({}, ALL_FEATURES, { [key]: false }));
+        await assertFails(probe(fs(U[A].mgr)));
+        await assertFails(probe(fs(U.super)));
+        await setFeat(Object.assign({}, ALL_FEATURES, { [key]: true }));
+        await assertSucceeds(probe(fs(U[A].mgr)));
+        await assertSucceeds(probe(fs(U.super)));
+      });
+    }
+  }
+
+  it('מסמך עסק בלי השדה features: כל התוספות כבויות, הבסיס עובד', async () => {
+    await prep(async (a) => { const d = bizDoc(A); delete d.features; await a.doc('b/' + A).set(d); });
+    for (const probes of Object.values(FEATURE_PROBES)) for (const [, probe] of probes) await assertFails(probe(fs(U[A].mgr)));
+    await assertSucceeds(fs(U[A].mgr).doc(`b/${A}/cfg/main`).get());
+    await assertSucceeds(fs(U[A].emp).doc(`b/${A}/chunks/${fresh('c')}_0`).set({ owner: U[A].emp, data: 'x' }));
+  });
+
+  it('תוספת "feedback" כבויה: עובד לא יוצר chunks של fbhi_, אבל chunks רגיל (שליחת מסמך – בסיס) ממשיך לעבוד', async () => {
+    await setFeat(Object.assign({}, ALL_FEATURES, { feedback: false }));
+    const e = fs(U[A].emp);
+    await assertFails(e.doc(`b/${A}/chunks/fbhi_${fresh()}_0`).set({ owner: U[A].emp, data: 'x' }));
+    await assertSucceeds(e.doc(`b/${A}/chunks/${fresh('c')}_0`).set({ owner: U[A].emp, data: 'x' }));
+    await setFeat(ALL_FEATURES);
+    await assertSucceeds(e.doc(`b/${A}/chunks/fbhi_${fresh()}_0`).set({ owner: U[A].emp, data: 'x' }));
+  });
+
+  it('תוספת "tasks" כבויה: גם יצירה ועדכון נחסמים; כיבוי בעסק א\' לא משפיע על עסק ב\'', async () => {
+    await setFeat(Object.assign({}, ALL_FEATURES, { tasks: false }));
+    await assertFails(fs(U[A].emp).doc(`b/${A}/tasks/${fresh()}`).set(taskBody(U[A].emp)));
+    await assertSucceeds(fs(U[B].emp).doc(`b/${B}/tasks/${fresh()}`).set(taskBody(U[B].emp)));
+    await setFeat(ALL_FEATURES);
+    await assertSucceeds(fs(U[A].emp).doc(`b/${A}/tasks/${fresh()}`).set(taskBody(U[A].emp)));
+  });
+});
+
+describe('ריבוי עסקים – עסק מושהה', () => {
+  before(async () => { env = await H.getEnv(); });
+  beforeEach(async () => { await seedAll(); await env.clearStorage(); });
+  const suspend = () => prep((a) => a.doc('b/' + A).update({ status: 'suspended' }));
+
+  it('מנהל ועובד של עסק מושהה: רק קריאה של מסמך העסק; כל השאר נחסם. מנהל־על – גישה מלאה', async () => {
+    // לפני ההשהיה: מותר
+    await assertSucceeds(fs(U[A].emp).doc(`b/${A}/cfg/main`).get());
+    await assertSucceeds(fs(U[A].emp).doc(`b/${A}/chunks/${fresh('c')}_0`).set({ owner: U[A].emp, data: 'x' }));
+    await suspend();
+    const m = fs(U[A].mgr), e = fs(U[A].emp), s = fs(U.super);
+    await assertSucceeds(m.doc('b/' + A).get());
+    await assertSucceeds(e.doc('b/' + A).get());
+    await assertFails(e.doc(`b/${A}/cfg/main`).get());
+    await assertFails(e.doc(`b/${A}/chunks/${fresh('c')}_0`).set({ owner: U[A].emp, data: 'x' }));
+    await assertFails(e.collection(`b/${A}/inbox`).where('owner', '==', U[A].emp).get());
+    await assertFails(e.doc(`b/${A}/staff/${U[A].emp}`).get());
+    await assertFails(e.doc(`b/${A}/admins/${U[A].emp}`).get());
+    await assertFails(e.doc(`b/${A}/tasks/${fresh()}`).set(taskBody(U[A].emp)));
+    await assertFails(m.doc(`b/${A}/cfg/main`).get());
+    await assertFails(m.doc(`b/${A}/cfg/main`).set({ data: '{}' }));
+    await assertFails(m.collection(`b/${A}/closings`).get());
+    await assertFails(m.doc(`b/${A}/admins/${U[A].mgr}`).get());
+    await assertFails(m.doc('b/' + A).update({ brand: { name: 'x', updatedAt: now(), updatedBy: U[A].mgr } }));
+    await assertFails(m.doc('b/' + A).update({ status: 'active' }));
+    // מנהל־על: מנהל מלא גם בעסק מושהה
+    await assertSucceeds(s.doc(`b/${A}/cfg/main`).set({ data: '{}' }));
+    await assertSucceeds(s.collection(`b/${A}/closings`).get());
+    await assertSucceeds(s.doc('b/' + A).update({ status: 'active' }));
+    // ואחרי החזרה לפעיל – העובד חוזר לעבוד
+    await assertSucceeds(e.doc(`b/${A}/cfg/main`).get());
+    // עסק ב' לא מושפע מההשהיה של א'
+  });
+
+  it('השהיה של עסק א\' לא משפיעה על עסק ב\'', async () => {
+    await suspend();
+    await assertSucceeds(fs(U[B].emp).doc(`b/${B}/cfg/main`).get());
+    await assertSucceeds(fs(U[B].mgr).doc(`b/${B}/cfg/main`).set({ data: '{}' }));
+  });
+
+  it('Storage בעסק מושהה: עובד ומנהל לא קוראים ולא כותבים גיבוי או לוגו; מנהל־על כן', async () => {
+    await prepSt(async (a) => { await up(a.ref(`b/${A}/app_backups/${U[A].emp}/s.bin`), new Uint8Array([1]), BIN); await up(a.ref(`b/${A}/brand/logo`), new Uint8Array([1]), PNG); });
+    await assertSucceeds(st(U[A].emp).ref(`b/${A}/app_backups/${U[A].emp}/s.bin`).getMetadata());
+    await suspend();
+    await assertFails(st(U[A].emp).ref(`b/${A}/app_backups/${U[A].emp}/s.bin`).getMetadata());
+    await assertFails(up(st(U[A].emp).ref(`b/${A}/app_backups/${U[A].emp}/n.bin`), new Uint8Array([1]), BIN));
+    await assertFails(st(U[A].emp).ref(`b/${A}/brand/logo`).getMetadata());
+    await assertFails(up(st(U[A].mgr).ref(`b/${A}/brand/logo`), new Uint8Array([1]), PNG));
+    await assertFails(st(U[A].mgr).ref(`b/${A}/app_backups/${U[A].emp}/s.bin`).getMetadata());
+    await assertSucceeds(st(U.super).ref(`b/${A}/app_backups/${U[A].emp}/s.bin`).getMetadata());
+    await assertSucceeds(up(st(U.super).ref(`b/${A}/brand/logo`), new Uint8Array([1]), PNG));
+  });
+});
+
+describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני APK', () => {
+  before(async () => { env = await H.getEnv(); await seedAll(); });
+  beforeEach(async () => { await env.clearStorage(); });
+
+  it('לוגו: png/jpeg/webp עד 1MB – מותר; מעל 1MB או סוג אחר – נחסם', async () => {
+    const m = st(U[A].mgr), r = m.ref(`b/${A}/brand/logo`);
+    await assertSucceeds(up(r, new Uint8Array(1024 * 1024), PNG));
+    await assertFails(up(r, new Uint8Array(1024 * 1024 + 1), PNG));
+    await assertSucceeds(up(r, new Uint8Array(10), { contentType: 'image/jpeg' }));
+    await assertSucceeds(up(r, new Uint8Array(10), { contentType: 'image/webp' }));
+    for (const ct of ['image/gif', 'image/svg+xml', 'text/plain', 'application/octet-stream', 'text/html']) await assertFails(up(r, new Uint8Array(10), { contentType: ct }), ct);
+    await assertFails(up(m.ref(`b/${A}/brand/logo2`), new Uint8Array(10), PNG));
+    await assertFails(up(m.ref(`b/${A}/brand/x/logo`), new Uint8Array(10), PNG));
+  });
+
+  it('עובד א\' לא קורא ולא כותב גיבוי או לוגו של עסק ב\' (וגם להפך)', async () => {
+    await prepSt(async (a) => {
+      for (const biz of [A, B]) { await up(a.ref(`b/${biz}/brand/logo`), new Uint8Array([1]), PNG); for (const k of ['emp', 'mgr']) await up(a.ref(`b/${biz}/app_backups/${U[biz][k]}/s.bin`), new Uint8Array([1]), BIN); }
+    });
+    for (const [me, bizMe, bizOther] of [[U[A].emp, A, B], [U[B].emp, B, A]]) {
+      const s = st(me);
+      await assertSucceeds(s.ref(`b/${bizMe}/brand/logo`).getMetadata());
+      await assertSucceeds(s.ref(`b/${bizMe}/app_backups/${me}/s.bin`).getMetadata());
+      await assertFails(s.ref(`b/${bizOther}/brand/logo`).getMetadata());
+      await assertFails(up(s.ref(`b/${bizOther}/brand/logo`), new Uint8Array([1]), PNG));
+      await assertFails(s.ref(`b/${bizOther}/app_backups/${U[bizOther].emp}/s.bin`).getMetadata());
+      await assertFails(s.ref(`b/${bizOther}/app_backups/${me}/s.bin`).getMetadata());
+      await assertFails(up(s.ref(`b/${bizOther}/app_backups/${me}/n.bin`), new Uint8Array([1]), BIN));
+      await assertFails(s.ref(`b/${bizOther}/app_backups/${U[bizOther].mgr}`).listAll());
+      // גם בעסק שלו: לא קורא גיבוי של עובד אחר, ולא כותב לוגו
+      await assertFails(s.ref(`b/${bizMe}/app_backups/${U[bizMe].mgr}/s.bin`).getMetadata());
+      await assertFails(up(s.ref(`b/${bizMe}/brand/logo`), new Uint8Array([1]), PNG));
+    }
+    // מנהל העסק קורא גיבויים של העובדים שלו, לא של עסק אחר
+    await assertSucceeds(st(U[A].mgr).ref(`b/${A}/app_backups/${U[A].emp}/s.bin`).getMetadata());
+    await assertFails(st(U[A].mgr).ref(`b/${B}/app_backups/${U[B].emp}/s.bin`).getMetadata());
+  });
+
+  it('גיבוי בתוך העסק: אותם תנאים כמו בשורש (בינארי בלבד, עד 50MB)', async () => {
+    const s = st(U[A].emp);
+    await assertFails(up(s.ref(`b/${A}/app_backups/${U[A].emp}/t.txt`), new Uint8Array([65]), { contentType: 'text/plain' }));
+    await assertSucceeds(up(s.ref(`b/${A}/app_backups/${U[A].emp}/ok.bin`), new Uint8Array([1]), BIN));
+    await assertFails(up(st(U[A].off).ref(`b/${A}/app_backups/${U[A].off}/ok.bin`), new Uint8Array([1]), BIN));
+    await assertFails(up(st(U.nobiz).ref(`b/${A}/app_backups/${U.nobiz}/ok.bin`), new Uint8Array([1]), BIN));
+  });
+
+  it('app_releases: חבר פעיל בכל עסק (לפי users) ומנהל־על קוראים; מחובר בלי עסק, עובד מושבת ועסק מושהה – נחסמים; כתיבה – לאף אחד', async () => {
+    await prepSt((a) => up(a.ref('app_releases/latest/version.json'), new TextEncoder().encode('{}'), { contentType: 'application/json' }));
+    const v = (uid) => st(uid).ref('app_releases/latest/version.json').getMetadata();
+    for (const uid of [U[A].mgr, U[A].emp, U[B].mgr, U[B].emp, U.super]) await assertSucceeds(v(uid), uid);
+    for (const uid of [U.nobiz, U[A].off]) await assertFails(v(uid), uid);
+    await assertFails(up(st(U[A].mgr).ref('app_releases/latest/x.apk'), new Uint8Array([1]), { contentType: 'application/vnd.android.package-archive' }));
+    await assertFails(up(st(U.super).ref('app_releases/latest/x.apk'), new Uint8Array([1]), { contentType: 'application/vnd.android.package-archive' }));
+    await prep((a) => a.doc('b/' + A).update({ status: 'suspended' }));
+    await assertFails(v(U[A].emp));
+    await assertSucceeds(v(U[B].emp));
+    // users שמצביע על עסק שהמשתמש לא חבר בו – נחסם
+    await prep((a) => a.doc('users/' + U.nobiz).set({ bizId: B, role: 'admin' }));
+    await assertFails(v(U.nobiz));
+  });
+});
+
+describe('ריבוי עסקים – מגבלת קריאות המסמכים (get/exists) בחוקים', () => {
+  before(async () => { env = await H.getEnv(); });
+  beforeEach(async () => { await seedAll(); });
+
+  // הבקשה עם הכי הרבה קריאות: עובד יוצר הפקדה ובאותו commit מעדכן 30 הוצאות מקופה (המקסימום ב-items).
+  // כל עדכון של cashout אצל עובד: admins (exists), superadmins (exists), staff (exists+get), b/{bizId} (get), deposits (getAfter);
+  // ההפקדה עצמה: admins, superadmins, staff, b/{bizId}. מסמכים שונים בכל הבקשה: 5 (הקריאות לאותו מסמך נשמרות במטמון).
+  it('הבקשה הכבדה ביותר של האפליקציה (הפקדה + 30 הוצאות באותו commit, עובד) – עוברת', async () => {
+    const uid = U[A].emp, ids = [];
+    await prep(async (a) => { for (let i = 0; i < 30; i++) { const id = 'co' + i; ids.push(id); await a.doc(`b/${A}/cashout/${id}`).set(coBody('x', id, { dep: '1', why: 'להפקדה' })); } });
+    const db = fs(uid), b = db.batch(), did = fresh('dp');
+    b.set(db.doc(`b/${A}/deposits/${did}`), depBody(uid, { items: ids, a: 300 }));
+    for (const id of ids) b.update(db.doc(`b/${A}/cashout/${id}`), { dp: did });
+    await assertSucceeds(b.commit());
+  });
+
+  it('zlast של עובד (הכלל עם הכי הרבה קריאות שונות במסמך בודד: 6) – עובר; והמגבלה אכן נאכפת באמולטור (ניסוי בקרה)', async () => {
+    const uid = U[A].emp, db = fs(uid), b = db.batch(), id = fresh('z');
+    b.set(db.doc(`b/${A}/closings/${id}`), closingBody(uid, { reg: 'i_yh', tm: '10:00' }));
+    b.set(db.doc(`b/${A}/zlast/i_yh`), { d: '2026-11-01', tm: '10:00', id, uid, t: now() });
+    await assertSucceeds(b.commit());
+    // ניסוי בקרה: commit של 25 חלקי chunks (_1), שכל אחד קורא חלק _0 אחר – 25 מסמכים שונים + תפקידים (מעל 20)
+    const ids = [];
+    await prep(async (a) => { for (let i = 0; i < 25; i++) { ids.push('lim' + i); await a.doc(`b/${A}/chunks/lim${i}_0`).set({ owner: uid, data: 'x' }); } });
+    const b2 = db.batch();
+    for (const i of ids) b2.set(db.doc(`b/${A}/chunks/${i}_1`), { owner: uid, data: 'x' });
+    let res = 'allow';
+    try { await b2.commit(); } catch (e) { res = 'deny: ' + String(e.message).replace(/\s+/g, ' ').slice(0, 400); }
+    console.log('# ניסוי בקרה (25 קריאות שונות ב-commit אחד): ' + res);
+    // ו-commit של 10 חלקים כאלה (10 + 4 = 14 מסמכים שונים) – עובר
+    const b3 = db.batch();
+    for (const i of ids.slice(0, 10)) b3.set(db.doc(`b/${A}/chunks/${i}_2`), { owner: uid, data: 'x' });
+    await assertSucceeds(b3.commit());
+  });
+});
+
+describe('ריבוי עסקים – הקוד הישן מול הכללים החדשים (לארג\' פעמי במצב legacy)', () => {
+  before(async () => { env = await H.getEnv(); });
+  beforeEach(async () => { await H.seed(env); });
+  it('משתמשים של השורש (admins/staff בשורש) עובדים כמו היום, ולא מקבלים גישה ל-b/ בלי חברות', async () => {
+    await assertSucceeds(H.ctxFor(env, 'employee').firestore().doc('cfg/main').get());
+    await assertSucceeds(H.ctxFor(env, 'manager').firestore().doc('cfg/main').set({ data: '{}' }));
+    await prep((a) => a.doc('b/largpeami').set(bizDoc('largpeami', { dataRoot: 'legacy' })));
+    await assertFails(H.ctxFor(env, 'manager').firestore().doc('b/largpeami/cfg/main').get());
+    await assertFails(H.ctxFor(env, 'manager').firestore().doc('b/largpeami').get());
+    await assertFails(H.ctxFor(env, 'employee').firestore().doc('users/u_emp2').get());
+    await assertSucceeds(H.ctxFor(env, 'employee').firestore().doc('users/u_emp').get()); // קריאת זיהוי בכניסה – מותרת (אין מסמך)
+  });
+});
+
+after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* האמולטור כבר נסגר */ } });
