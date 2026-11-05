@@ -369,7 +369,7 @@ describe('ריבוי עסקים – users, superadmins, ושדות שהמשתמ�
     // שלב 5 (עדכון חוזה 6): השינויים האלה עוברים דרך setBusinessStatus / setBusinessFeatures / setBusinessAdv / createBusiness
     await assertFails(d.update({ status: 'suspended' }));
     await assertFails(d.update({ features: { scan: false, shelf: true } }));
-    await assertFails(d.update({ 'features.tasks': true }));
+    await assertFails(d.update({ 'features.tasks': false }));
     await assertFails(d.update({ adv: { limits: { scanDaily: 100 }, yemot: {} } }));
     await assertFails(d.update({ ownerEmail: 'owner@example.invalid', ownerPhone: '+972 50-000-0000' }));
     await assertSucceeds(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U.super } }));
@@ -379,6 +379,16 @@ describe('ריבוי עסקים – users, superadmins, ושדות שהמשתמ�
     await assertFails(d.delete());
     await assertFails(fs(U[A].mgr).doc('b/' + A).update({ status: 'active' }));
     await assertFails(fs(U[A].emp).doc('b/' + A).update({ features: ALL_FEATURES }));
+  });
+
+  it('migrationTarget (עדכון חוזה 7א): מנהל־על כותב (בוליאני בלבד); מנהל העסק, עובד ועסק אחר – לא', async () => {
+    const d = (uid) => fs(uid).doc('b/' + A);
+    await assertSucceeds(d(U.super).update({ migrationTarget: true }));
+    await assertSucceeds(d(U.super).update({ migrationTarget: false }));
+    await assertFails(d(U.super).update({ migrationTarget: 'yes' }));
+    await assertFails(d(U.super).update({ migrationTarget: true, status: 'suspended' }));
+    for (const uid of [U[A].mgr, U[A].emp, U[B].mgr, U.nobiz]) await assertFails(d(uid).update({ migrationTarget: true }), uid);
+    await assertFails(d(U[A].mgr).update({ migrationTarget: true, brand: { name: 'x', updatedAt: now(), updatedBy: U[A].mgr } }));
   });
 
   it('private/info (ownerEmail, ownerPhone, adv): מנהל העסק ומנהל־על קוראים; עובד, מנהל של עסק אחר ומחובר בלי עסק – לא. כתיבה – לאף אחד. שאר private סגור', async () => {
@@ -606,6 +616,19 @@ describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני
     // עובד שהוגדר במסמך users כמנהל (השרת בלבד כותב) מקבל הרשאות מנהל ב-Storage – לכן רק השרת כותב users
     await prep((a) => a.doc('users/' + U[A].emp).update({ role: 'admin' }));
     await assertSucceeds(up(st(U[A].emp).ref(`b/${A}/brand/logo`), new Uint8Array([1]), PNG));
+  });
+
+  it('migrate_backups/ (עדכון חוזה 7א): סגור לגמרי לאפליקציה – גם מנהל־על, מנהל ועובד לא קוראים, לא רושמים ולא כותבים', async () => {
+    await seedAll();
+    await prepSt((a) => up(a.ref('migrate_backups/backup-1.json'), new TextEncoder().encode('{}'), { contentType: 'application/json' }));
+    for (const uid of [U.super, U[A].mgr, U[A].emp, U.nobiz, 'u_mgr']) {
+      const s = st(uid);
+      await assertFails(s.ref('migrate_backups/backup-1.json').getMetadata(), uid);
+      await assertFails(s.ref('migrate_backups/backup-1.json').getDownloadURL(), uid);
+      await assertFails(s.ref('migrate_backups').listAll(), uid);
+      await assertFails(up(s.ref('migrate_backups/x.json'), new TextEncoder().encode('{}'), { contentType: 'application/json' }), uid);
+      await assertFails(s.ref('migrate_backups/backup-1.json').delete(), uid);
+    }
   });
 
   it('מגבלת 2 הקריאות (עדכון חוזה 6): בכללי Storage של b/{bizId} יש קריאה רק ל-users/{uid} ול-superadmins/{uid}', () => {

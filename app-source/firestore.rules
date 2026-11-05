@@ -575,8 +575,11 @@ service cloud.firestore {
       // מנהל־על כותב מהאפליקציה רק brand. status, features, adv, ownerEmail, ownerPhone – רק דרך פונקציות השרת (שלב 5,
       // עדכון חוזה 6): כך כל שינוי נרשם ב-audit, ו-users/{uid}.bizStatus מתעדכן יחד עם status. ownerEmail/ownerPhone/adv
       // נשמרים ב-b/{bizId}/private/info ולא במסמך העסק. name, dataRoot, bizId, schemaVersion וכו' – רק השרת.
+      // עדכון חוזה 7א: migrationTarget (בוליאני, כלי ההעברה כותב אותו) – רק מנהל־על (או השרת). מנהל העסק ועובד – לא.
       function superUpdOk() {
-        return aff().hasOnly(['brand']) && brandOk(request.resource.data.brand);
+        return aff().hasOnly(['brand', 'migrationTarget'])
+          && (!aff().hasAny(['brand']) || brandOk(request.resource.data.brand))
+          && (!aff().hasAny(['migrationTarget']) || request.resource.data.migrationTarget is bool);
       }
 
       // מסמך העסק: קריאה – חברי העסק (גם כשהעסק מושהה, כדי להציג "החשבון מושהה") ומנהל־על. רשימת כל העסקים – רק מנהל־על.
