@@ -54,6 +54,8 @@ async function seedAll() {
     // לארג' פעמי בשורש, כמו היום
     b.set(db.doc('admins/' + R.mgr), { email: 'u_mgr@example.invalid' });
     for (const [uid, role, active] of [[R.mgr, 'manager', true], [R.emp, 'employee', true], [R.off, 'employee', false]]) b.set(db.doc('staff/' + uid), { name: uid, email: uid + '@example.invalid', role, active, pushTokens: [] });
+    // עותק users לחברי השורש, כמו שכלי ההעברה יוצר (באותה אצווה, ולכן הטריגרים syncLegacy* מוצאים אותו תואם ולא כותבים)
+    for (const [uid, role, active] of [[R.mgr, 'admin', true], [R.emp, 'worker', true], [R.off, 'worker', false]]) b.set(db.doc('users/' + uid), { bizId: L, role, active, bizStatus: 'active', email: uid + '@example.invalid', createdAt: 1 });
     for (const biz of [A, B]) {
       const u = U[biz];
       b.set(db.doc('b/' + biz), bizDoc(biz));
@@ -462,14 +464,18 @@ describe('שלב 5, סבב 2 – סנכרון users/{uid} לחברי לארג\' 
     await prep((db) => db.doc('staff/' + R.emp).update({ active: true }));
     assert.ok(await waitFor(async () => { const u = await getDoc('users/' + R.emp); return u && u.active === true; }), 'users.active לא חזר ל-true');
   });
-  it('ליבה: מנהל (admins) = admin פעיל; עובד מושבת = לא פעיל; לא חבר = לא נוצר; users של עסק אחר – לא נגעים; לארג\' פעמי ב-b – לא מסנכרן', async () => {
-    // מחכים שהטריגרים של הזריעה (seedAll כותב staff/admins בשורש) יסיימו, כדי שלא יתערבבו בבדיקה
-    assert.ok(await waitFor(async () => (await getDoc('users/' + R.mgr)) && (await getDoc('users/' + R.emp)) && (await getDoc('users/' + R.off))));
+  it('ליבה: אין שינוי = אין כתיבה; מנהל (admins) = admin פעיל; עובד מושבת = לא פעיל; לא חבר = לא נוצר; users של עסק אחר – לא נגעים; לארג\' פעמי ב-b – לא מסנכרן', async () => {
+    // אין שינוי בפועל = אין כתיבה (גם updateTime לא משתנה)
+    const adb = fa('firebase-admin/firestore').getFirestore();
+    const t0 = (await adb.doc('users/' + R.emp).get()).updateTime;
+    assert.equal(await S5().syncLegacyMember(R.emp), 'unchanged');
+    assert.ok((await adb.doc('users/' + R.emp).get()).updateTime.isEqual(t0), 'לא נכתב כלום');
+    // מכאן: מוחקים את העותק ומסנכרנים. טריגר מאוחר של הזריעה יכול להקדים את הקריאה הישירה – לכן בודקים את התוצאה במסד
     await prep(async (db) => { for (const u of [R.mgr, R.emp, R.off, U.nobiz]) await db.doc('users/' + u).delete(); });
-    assert.equal(await S5().syncLegacyMember(R.mgr), 'active');
+    assert.ok(['active', 'unchanged'].includes(await S5().syncLegacyMember(R.mgr)));
     assert.deepEqual(pick(await getDoc('users/' + R.mgr)), { bizId: L, role: 'admin', active: true, bizStatus: 'active' });
     assert.ok(Number.isInteger((await getDoc('users/' + R.mgr)).createdAt), 'createdAt במילישניות');
-    assert.equal(await S5().syncLegacyMember(R.off), 'inactive');
+    assert.ok(['inactive', 'unchanged'].includes(await S5().syncLegacyMember(R.off)));
     assert.equal((await getDoc('users/' + R.off)).active, false);
     assert.equal(await S5().syncLegacyMember(U.nobiz), 'none');
     assert.equal(await getDoc('users/' + U.nobiz), null);

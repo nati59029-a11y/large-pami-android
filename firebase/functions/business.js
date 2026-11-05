@@ -344,25 +344,33 @@ async function setStaffActive(request) {
 // לכן כל שינוי ב-admins/{uid} או ב-staff/{uid} בשורש (למשל השבתת עובד בלוח הבקרה) מתעדכן מיד בעותק.
 // רק כש-largpeami במצב legacy (אחרי מעבר ל-b, השרת מעדכן את users דרך addStaff / setStaffActive).
 // לא נוגע במשתמש ש-users שלו שייך לעסק אחר. לא יוצר users למי שאינו חבר (ואם יש עותק – מסמן active:false).
-async function syncLegacyMember(uid) {
+async function syncLegacyMember(uid, attempt) {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(String(uid || ''))) return 'bad-uid';
   const biz = await T.loadBiz(T.BIZ0);
   if (!biz || biz.dataRoot !== 'legacy') return 'not-legacy';
   const db = getFirestore();
   const uRef = db.doc('users/' + uid);
-  return db.runTransaction(async (tx) => {
-    const [a, st, u] = await Promise.all([tx.get(db.doc('admins/' + uid)), tx.get(db.doc('staff/' + uid)), tx.get(uRef)]);
-    if (u.exists && u.get('bizId') !== T.BIZ0) return 'other-biz';
-    const member = a.exists || st.exists;
-    if (!member && !u.exists) return 'none';
-    const role = a.exists ? 'admin' : 'worker';
-    const active = a.exists || (st.exists && st.get('active') === true);
-    const email = (a.exists && a.get('email')) || (st.exists && st.get('email')) || (u.exists && u.get('email')) || '';
-    const upd = { bizId: T.BIZ0, role, active, bizStatus: biz.status, email: typeof email === 'string' ? email : '' };
-    if (!u.exists) upd.createdAt = Date.now();
-    tx.set(uRef, upd, { merge: true });
-    return active ? 'active' : 'inactive';
-  });
+  // קריאות רגילות (לא בעסקה): לא נועלות מסמכים, ולכן לא מתנגשות בכתיבות אחרות (למשל ניקוי בבדיקות).
+  const [a, st, u] = await Promise.all([db.doc('admins/' + uid).get(), db.doc('staff/' + uid).get(), uRef.get()]);
+  if (u.exists && u.get('bizId') !== T.BIZ0) return 'other-biz';
+  const member = a.exists || st.exists;
+  if (!member && !u.exists) return 'none';
+  const role = a.exists ? 'admin' : 'worker';
+  const active = a.exists || (st.exists && st.get('active') === true);
+  const want = { bizId: T.BIZ0, role, active, bizStatus: biz.status };
+  // אין שינוי בפועל = אין כתיבה (למשל registerPushToken שכותב ל-staff, או זריעה שכבר כתבה users תואם)
+  if (u.exists && Object.keys(want).every((k) => u.get(k) === want[k])) return 'unchanged';
+  const email = (a.exists && a.get('email')) || (st.exists && st.get('email')) || (u.exists && u.get('email')) || '';
+  try {
+    // כתיבה אופטימית: רק אם users לא השתנה מאז הקריאה (בלי נעילה). אם השתנה – קוראים שוב ומחשבים מחדש.
+    if (u.exists) await uRef.update(want, { lastUpdateTime: u.updateTime });
+    else await uRef.create(Object.assign({}, want, { email: typeof email === 'string' ? email : '', createdAt: Date.now() }));
+  } catch (e) {
+    const code = e && e.code;
+    if ((code === 9 || code === 6 || code === 5) && (attempt || 0) < 3) return syncLegacyMember(uid, (attempt || 0) + 1);
+    throw e;
+  }
+  return active ? 'active' : 'inactive';
 }
 const syncTrigger = (coll) => onDocumentWritten({ document: coll + '/{uid}', maxInstances: 2 }, async (event) => {
   try { await syncLegacyMember(event.params.uid); } catch (e) { logger.error('business: legacy sync failed', { reason: 'internal', name: e && e.name }); throw e; }
