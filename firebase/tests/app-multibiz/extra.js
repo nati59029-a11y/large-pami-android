@@ -108,21 +108,21 @@ const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fai
     await ctx.close();
   }
 
-  // (ו) עסק מושהה (עדכון חוזה 2): עובד/מנהל רואה "החשבון מושהה – פנה לספק"; מנהל־על נכנס
+  // (ו) עסק מושהה (עדכון חוזה 2; מסך מלא #susp משלב 6ב): עובד/מנהל רואה "החשבון מושהה – פנה לספק"; מנהל־על נכנס
   {
     const cfg = { mode: 'new', users: { ma: 'acme', sa: 'acme' }, sa: { sa: 1 }, biz: { acme: { dataRoot: 'b', status: 'suspended' } }, admins: { 'b/acme/|ma': 1, 'b/acme/|sa': 1 } };
     let log = []; let p = await H.newPage(browser, www, cfg, log, 'ma');
     await H.login(p.page, 'ma@x.co');
-    let st = await p.page.evaluate(() => ({ gate: !!document.getElementById('gate'), err: (document.getElementById('gerr') || {}).textContent || '' }));
+    let st = await p.page.evaluate(() => ({ gate: !!document.getElementById('gate'), susp: !!document.getElementById('susp'), err: ((document.getElementById('susp') || {}).innerText || '') }));
     const data = log.filter((r) => r.url.includes(':8080') && !/\/documents\/(users|b|superadmins)\/[^/]+$/.test(r.url.split('?')[0]));
-    check('ו מנהל בעסק מושהה: הודעת השהיה, בלי טעינת נתונים', st.gate && st.err === 'החשבון מושהה – פנה לספק' && data.length === 0, { st, data: data.map((r) => r.url) });
+    check('ו מנהל בעסק מושהה: הודעת השהיה, בלי טעינת נתונים', !st.gate && st.susp && st.err.includes('החשבון מושהה – פנה לספק') && data.length === 0, { st, data: data.map((r) => r.url) });
     await p.ctx.close();
     // משתמש שכבר מחובר (lp-sync שמור) והעסק הושהה
     log = []; p = await H.newPage(browser, www, cfg, log, 'ma');
     await p.page.addInitScript((t) => { if (!localStorage.getItem('lp-sync')) localStorage.setItem('lp-sync', JSON.stringify({ idToken: 'tok-ma', refresh: 'r-ma', exp: t + 3600e3, uid: 'ma', email: 'ma@x.co', role: 'admin', bizId: 'acme', biz: { dataRoot: 'b', status: 'active' } })); }, H.T0);
     await p.page.goto(H.ORIGIN + '/?emu=1'); await H.settle(p.page, 4000);
-    st = await p.page.evaluate(() => ({ gate: !!document.getElementById('gate'), err: (document.getElementById('gerr') || {}).textContent || '' }));
-    check('ו מנהל שכבר מחובר, העסק הושהה: אחרי רענון מסמך העסק מוצגת הודעת השהיה', st.gate && st.err === 'החשבון מושהה – פנה לספק' && p.page.__errors.length === 0, st);
+    st = await p.page.evaluate(() => ({ gate: !!document.getElementById('gate'), susp: !!document.getElementById('susp'), err: ((document.getElementById('susp') || {}).innerText || '') }));
+    check('ו מנהל שכבר מחובר, העסק הושהה: אחרי רענון מסמך העסק מוצגת הודעת השהיה', !st.gate && st.susp && st.err.includes('החשבון מושהה – פנה לספק') && p.page.__errors.length === 0, st);
     await p.ctx.close();
     log = []; p = await H.newPage(browser, www, cfg, log, 'sa');
     await H.login(p.page, 'sa@x.co');
