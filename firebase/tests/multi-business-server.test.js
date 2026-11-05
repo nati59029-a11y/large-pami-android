@@ -256,41 +256,21 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     assert.equal(await getDoc('b/biz-ok'), null);
     assert.equal(await getDoc('b/' + L), null, 'largpeami לא נוצר');
   });
-  it('כניסה ראשונה: קוד חד־פעמי (8 ספרות, נשמר רק מגובב), עד 5 ניסיונות, תוקף; סיסמה רק אחרי קוד; ואז מנהל פעיל בעסק', async () => {
+  it('כניסה ראשונה (שלב 6ג): בלי קוד. החשבון נוצר בלי סיסמה, המנהל רשום מיד, והתשובה מחזירה רק uid ומייל (פירוט: server-auth-invite.test.js)', async () => {
     const r = await call('createBusiness', U.super, { bizId: 'biz-new', name: 'חדש', ownerEmail: 'boss@example.invalid', ownerPhone: '0501234567' });
     assert.equal(r.status, 'OK', r.text);
-    const { uid, devCode, mail } = r.result;
-    assert.match(devCode, /^\d{8}$/); assert.equal(mail, 'simulated');
-    const inv = await getDoc(`b/biz-new/private/invite-${uid}`);
-    assert.ok(!JSON.stringify(inv).includes(devCode), 'הקוד לא נשמר כטקסט');
-    assert.match(inv.codeHash, /^[0-9a-f]{64}$/);
-    // לפני הקוד: users קיים אבל לא פעיל, ואין admins
-    assert.equal((await getDoc('users/' + uid)).active, false);
-    assert.equal(await getDoc(`b/biz-new/admins/${uid}`), null);
-    const wrong = devCode === '00000000' ? '11111111' : '00000000';
-    const c = (code, pw) => call('completeInvite', null, { email: 'boss@example.invalid', code, password: pw || 'Secret-pass-1' });
-    assert.equal((await c(devCode, 'short')).reason, 'weak-password');
-    for (let i = 0; i < 5; i++) assert.equal((await c(wrong)).reason, 'bad-code');
-    assert.equal((await c(devCode)).reason, 'bad-code', 'אחרי 5 ניסיונות גם הקוד הנכון נחסם');
-    // הזמנה חוזרת: קוד חדש; קוד שפג תוקפו – נדחה
-    const r2 = await call('inviteBusinessAdmin', U.super, { bizId: 'biz-new', email: 'boss@example.invalid' });
-    assert.equal(r2.status, 'OK', r2.text);
-    await prep((db) => db.doc(`b/biz-new/private/invite-${uid}`).update({ exp: Date.now() - 1 }));
-    assert.equal((await c(r2.result.devCode)).reason, 'bad-code');
-    const r3 = await call('inviteBusinessAdmin', U.super, { bizId: 'biz-new', email: 'boss@example.invalid' });
-    assert.equal((await c(r3.result.devCode, 'Secret-pass-1')).status, 'OK');
-    assert.equal((await c(r3.result.devCode, 'Secret-pass-2')).reason, 'bad-code', 'קוד משמש פעם אחת');
+    assert.deepEqual(Object.keys(r.result).sort(), ['bizId', 'email', 'ok', 'uid']);
+    const { uid } = r.result;
     assert.ok(await getDoc(`b/biz-new/admins/${uid}`));
     assert.deepEqual((({ bizId, role, active, bizStatus }) => ({ bizId, role, active, bizStatus }))(await getDoc('users/' + uid)), { bizId: 'biz-new', role: 'admin', active: true, bizStatus: 'active' });
-    // הסיסמה נקבעה באמת (כניסה מול אמולטור Auth)
+    assert.deepEqual((await listDocs('b/biz-new/private')).map((d) => d.id), ['info'], 'אין מסמך הזמנה/קוד');
+    // אין סיסמה: אי אפשר להיכנס (מול אמולטור Auth)
     const host = process.env.FIREBASE_AUTH_EMULATOR_HOST;
     const si = await fetch(`http://${host}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=demo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'boss@example.invalid', password: 'Secret-pass-1', returnSecureToken: true }) });
-    assert.equal(si.status, 200);
-    // מייל לא מוכר – אותה תשובה בדיוק (לא חושף אילו מיילים קיימים)
-    const u = await call('completeInvite', null, { email: 'nobody@example.invalid', code: '12345678', password: 'Secret-pass-1' });
-    assert.equal(u.reason, 'bad-code');
+    assert.notEqual(si.status, 200);
+    // completeInvite לא קיימת יותר
+    assert.equal((await call('completeInvite', null, { email: 'boss@example.invalid', code: '12345678', password: 'Secret-pass-1' })).status, 'HTTP_404');
     // המנהל החדש עובד בעסק שלו בלבד
-    await setBiz('biz-new', { 'features.scan': true });
     assert.equal((await call('getBackupKey', uid)).status, 'OK');
     assert.equal((await call('getBackupKey', uid, { bizId: A })).reason, 'foreign-biz');
   });
@@ -302,16 +282,15 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     assert.equal((await call('inviteBusinessAdmin', U.super, { bizId: A, email: 'super@example.invalid' })).reason, 'is-superadmin');
     assert.equal((await call('inviteBusinessAdmin', U.super, { bizId: A, email: 'bmgr@example.invalid' })).reason, 'other-biz');
     assert.equal((await call('inviteBusinessAdmin', U.super, { bizId: A, email: 'root-emp@example.invalid' })).reason, 'other-biz');
-    assert.equal(await getDoc(`b/${A}/private/invite-${U[B].mgr}`), null);
+    assert.equal(await getDoc(`b/${A}/admins/${U[B].mgr}`), null);
   });
-  it('בלי אמולטור (ייצור): הקוד לא מוחזר בתשובה, והמייל מסומן "לא מחובר" (אין שליחה אמיתית)', async () => {
+  it('בלי אמולטור (ייצור): אין קוד ואין שדות מייל/תוקף בתשובה (שלב 6ג: אין מנגנון קוד בכלל)', async () => {
     const B5 = require('../functions/business.js')._core;
     const T = require('../functions/lib/tenant');
     const prev = process.env.FUNCTIONS_EMULATOR; delete process.env.FUNCTIONS_EMULATOR;
     try {
       const r = await T.scoped(B5.inviteBusinessAdmin)({ auth: { uid: U.super }, data: { bizId: A, email: 'prod@example.invalid' } });
-      assert.equal(r.devCode, undefined);
-      assert.equal(r.mail, 'not-configured');
+      assert.deepEqual(Object.keys(r).sort(), ['email', 'ok', 'uid']);
       assert.ok(!JSON.stringify(r).match(/\d{8}/), 'אין קוד בתשובה');
     } finally { if (prev !== undefined) process.env.FUNCTIONS_EMULATOR = prev; }
   });
@@ -493,11 +472,12 @@ describe('שלב 5, סבב 2 – סנכרון users/{uid} לחברי לארג\' 
 
 // ---------------------------------------------------------------------------------------------
 describe('שלב 5 – ייצוא ואין סודות', () => {
-  const NEW = ['createBusiness', 'inviteBusinessAdmin', 'completeInvite', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'addStaff', 'setStaffActive'];
-  it('כל הפונקציות החדשות מיוצאות מ-index.js (10 ניהול + 2 סנכרון, ורק הן נוספו); עוזרי בדיקה לא מיוצאים', () => {
+  const NEW = ['createBusiness', 'inviteBusinessAdmin', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'addStaff', 'setStaffActive'];
+  it('כל הפונקציות החדשות מיוצאות מ-index.js (9 ניהול + 2 סנכרון, ורק הן נוספו; completeInvite הוסרה בשלב 6ג); עוזרי בדיקה לא מיוצאים', () => {
     const ex = require('../functions/index.js');
     for (const n of NEW) assert.equal(typeof ex[n], 'function', n);
-    assert.equal(Object.keys(ex).length, 27);
+    assert.equal(Object.keys(ex).length, 26);
+    assert.equal(ex.completeInvite, undefined);
     for (const n of ['syncLegacyAdmin', 'syncLegacyStaff']) assert.equal(typeof ex[n], 'function', n);
     for (const n of ['_core', 'resolveMember', 'bizRef', 'tzintukJoin', 'nightlyAll']) assert.equal(ex[n], undefined, n);
     // והן גם נטענו באמולטור (קריאה בלי כניסה מחזירה UNAUTHENTICATED/PERMISSION_DENIED ולא 404)
@@ -512,13 +492,12 @@ describe('שלב 5 – ייצוא ואין סודות', () => {
       const src = fs.readFileSync(path.join(dir, f), 'utf8');
       assert.ok(!/AIza[0-9A-Za-z_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY|sk-[A-Za-z0-9]{20,}|DUMMY-|dummy-gemini/.test(src), f);
     }
-    const inv = await call('inviteBusinessAdmin', U.super, { bizId: A, email: 'leak@example.invalid' });
-    const errs = [await call('completeInvite', null, { email: 'leak@example.invalid', code: '00000000', password: 'Secret-pass-1' }),
+    const errs = [await call('inviteBusinessAdmin', U.super, { bizId: A, email: 'super-leak@' }),
       await call('setBusinessAdv', U.super, { bizId: A, adv: { yemot: { apiKey: 'S' } } }), await call('createBusiness', U[A].mgr, {}),
       await call('getLineState', U[B].mgr, {}), await call('scanDocument', U.nobiz, SCAN())];
     for (const e of errs) {
       assert.ok(e.error, e.text);
-      assert.ok(!e.text.includes(inv.result.devCode) && !/codeHash|salt|tokenHash|DUMMY|dummy-gemini/.test(e.text), e.text);
+      assert.ok(!/\d{8}|codeHash|salt|tokenHash|DUMMY|dummy-gemini/.test(e.text), e.text);
     }
   });
 });
