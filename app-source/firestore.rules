@@ -508,6 +508,512 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---------- ריבוי עסקים (משימה 2026-11-05, שלב 2) ----------
+    // כל הכללים שלמעלה (בשורש) נשארו בדיוק כמו שהיו: לארג' פעמי במצב legacy והגרסאות הישנות ממשיכים לעבוד בלי שינוי.
+    // מכאן ועד הכלל האחרון: רק תוספות. הנתונים של כל עסק נמצאים מתחת ל-b/{bizId}, והתפקיד נבדק בתוך העסק בלבד:
+    //   מנהל עסק = b/{bizId}/admins/{uid}; עובד = b/{bizId}/staff/{uid} עם active == true.
+    //   מנהל־על = superadmins/{uid}: מנהל מלא בכל עסק (כולל נתונים כספיים, וגם בעסק מושהה). עדכון חוזה 2.
+    //   עסק מושהה (status != 'active'): מנהל העסק ועובדיו חסומים בכל הנתונים. מותרת להם רק קריאה של מסמך העסק.
+    //   תוספת כבויה (features[key] != true, כולל מסמך בלי features): אין גישה לאוסף שלה, לאף אחד.
+
+    function isSuper() {
+      return request.auth != null && exists(/databases/$(database)/documents/superadmins/$(request.auth.uid));
+    }
+
+    // superadmins: המשתמש קורא רק את המסמך של עצמו. כתיבה – רק בלוח הבקרה.
+    match /superadmins/{userId} {
+      allow get: if isSelf(userId);
+      allow list, create, update, delete: if false;
+    }
+
+    // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
+    match /users/{userId} {
+      allow get: if isSelf(userId);
+      allow list, create, update, delete: if false;
+    }
+
+    match /b/{bizId} {
+      function bizDoc() { return get(/databases/$(database)/documents/b/$(bizId)).data; }
+      function bSuper() { return isSuper(); }
+      function bActive() { return bizDoc().get('status', '') == 'active'; }
+      function bIsAdmin() {
+        return request.auth != null && exists(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid));
+      }
+      function bIsActiveStaff() {
+        return request.auth != null && exists(/databases/$(database)/documents/b/$(bizId)/staff/$(request.auth.uid))
+          && get(/databases/$(database)/documents/b/$(bizId)/staff/$(request.auth.uid)).data.active == true;
+      }
+      // אותם תפקידים כמו בשורש (isManager / isActiveEmployee / isStaff), אבל בתוך העסק
+      function bMgr() { return (bIsAdmin() && bActive()) || bSuper(); }
+      function bEmp() { return bIsActiveStaff() && bActive(); }
+      function bStaff() { return bMgr() || bEmp(); }
+      function feat(k) { return bizDoc().get('features', {}).get(k, false) == true; }
+
+      function nowMs(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function hex(v) { return v is string && v.matches('^#[0-9a-fA-F]{6}$'); }
+      function colorsOk(c) {
+        return c is map && c.keys().hasOnly(['acc', 'acc2', 'onacc', 'bg', 'card', 'ink'])
+          && (!c.keys().hasAny(['acc']) || hex(c.acc))
+          && (!c.keys().hasAny(['acc2']) || hex(c.acc2))
+          && (!c.keys().hasAny(['onacc']) || hex(c.onacc))
+          && (!c.keys().hasAny(['bg']) || hex(c.bg))
+          && (!c.keys().hasAny(['card']) || hex(c.card))
+          && (!c.keys().hasAny(['ink']) || hex(c.ink));
+      }
+      // brand: שם עד 60 תווים, לוגו רק בתיקייה של העסק עצמו, צבעים #rrggbb, ערכת בסיס, ומי ומתי עדכן (חובה)
+      function brandOk(br) {
+        return br is map
+          && br.keys().hasOnly(['name', 'logoPath', 'colors', 'base', 'updatedAt', 'updatedBy'])
+          && (!br.keys().hasAny(['name']) || (br.name is string && br.name.size() <= 60))
+          && (!br.keys().hasAny(['logoPath']) || br.logoPath in ['', 'b/' + bizId + '/brand/logo'])
+          && (!br.keys().hasAny(['colors']) || colorsOk(br.colors))
+          && (!br.keys().hasAny(['base']) || (br.base is string && br.base.matches('^[a-z0-9-]{1,30}$')))
+          && br.get('updatedBy', '') == request.auth.uid
+          && nowMs(br.get('updatedAt', 0));
+      }
+      function aff() { return request.resource.data.diff(resource.data).affectedKeys(); }
+      // מנהל־על: status, features, adv, ownerEmail, ownerPhone (וגם brand). name, dataRoot, bizId, schemaVersion וכו' – רק השרת.
+      function superUpdOk() {
+        let n = request.resource.data;
+        return aff().hasOnly(['status', 'features', 'adv', 'ownerEmail', 'ownerPhone', 'brand'])
+          && (!aff().hasAny(['status']) || n.status in ['active', 'suspended'])
+          && (!aff().hasAny(['features']) || (n.features is map
+              && n.features.keys().hasOnly(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'])))
+          && (!aff().hasAny(['adv']) || n.adv is map)
+          && (!aff().hasAny(['ownerEmail']) || (n.ownerEmail is string && n.ownerEmail.size() <= 200))
+          && (!aff().hasAny(['ownerPhone']) || (n.ownerPhone is string && n.ownerPhone.matches('^[0-9+ -]{0,30}$')))
+          && (!aff().hasAny(['brand']) || brandOk(n.brand));
+      }
+
+      // מסמך העסק: קריאה – חברי העסק (גם כשהעסק מושהה, כדי להציג "החשבון מושהה") ומנהל־על. רשימת כל העסקים – רק מנהל־על.
+      // כתיבה: מנהל העסק – רק brand (בעסק פעיל). מנהל־על – לפי superUpdOk. יצירה ומחיקה – רק השרת.
+      allow get: if bIsAdmin() || bIsActiveStaff() || bSuper();
+      allow list: if isSuper();
+      allow update: if (bIsAdmin() && bActive() && aff().hasOnly(['brand']) && brandOk(request.resource.data.brand))
+        || (bSuper() && superUpdOk());
+      allow create, delete: if false;
+
+      // private: הגדרות שרת של העסק (למשל אסימון ימות) – אף אחד מהאפליקציה.
+      match /private/{docId} {
+        allow read, write: if false;
+      }
+
+      // audit: יומן פעולות של מנהל־על. קריאה ויצירה – מנהל־על בלבד. אין עדכון ואין מחיקה, לאף אחד.
+      match /audit/{id} {
+        allow read: if bSuper();
+        allow create: if bSuper()
+          && request.resource.data.keys().hasAll(['by', 't', 'act'])
+          && request.resource.data.keys().hasOnly(['by', 't', 'act', 'note'])
+          && request.resource.data.by == request.auth.uid
+          && nowMs(request.resource.data.t)
+          && request.resource.data.act is string && request.resource.data.act.size() > 0 && request.resource.data.act.size() <= 60
+          && request.resource.data.get('note', '') is string && request.resource.data.get('note', '').size() <= 500;
+        allow update, delete: if false;
+      }
+
+      // ----- כל האוספים הקיימים, בתוך העסק (העתק של הכללים בשורש; isManager/isActiveEmployee/isStaff ← bMgr/bEmp/bStaff,
+      // וכל get/exists מצביע לתוך b/{bizId}). אוסף של תוספת עטוף ב-feat('<מפתח>'). -----
+      // admins: העתק של הכלל בשורש
+      match /admins/{userId} {
+        allow get: if (isSelf(userId) && bActive() && (bIsAdmin() || bIsActiveStaff())) || bSuper();
+        allow list, create, update, delete: if false;
+      }
+
+      // cfg: העתק של הכלל בשורש
+      match /cfg/{docId} {
+        allow read: if bStaff();
+        allow write: if bMgr();
+      }
+
+      // shelf: העתק של הכלל בשורש (תוספת 'shelf')
+      match /shelf/{docId} {
+        allow read, write: if feat('shelf') && (bStaff());
+      }
+
+      // fb: העתק של הכלל בשורש (תוספת 'feedback')
+      match /fb/{docId} {
+        allow create: if feat('feedback') && (bStaff()
+          && request.resource.data.owner == request.auth.uid
+          && (request.resource.data.st == 'new' || bMgr()));
+        allow read: if feat('feedback') && (bMgr()
+          || (bEmp() && resource.data.st == 'ok'));
+        allow update, delete: if feat('feedback') && (bMgr());
+      }
+
+      // bk: העתק של הכלל בשורש
+      match /bk/{docId} {
+        allow read, write: if bMgr();
+      }
+
+      // chunks: העתק של הכלל בשורש
+      match /chunks/{docId} {
+        // תוספת: מזהים fbhi_* (תמונות משוב באיכות גבוהה) שייכים לתוספת 'feedback'
+        function fbOk() { return feat('feedback') || !docId.matches('^fbhi_.*'); }
+        allow create: if fbOk() && bEmp() && !bMgr()
+          && request.resource.data.owner == request.auth.uid
+          && request.resource.data.keys().hasOnly(['owner', 'data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000
+          && (docId.matches('^.+_0$')
+              || (docId.matches('^.+_[1-9][0-9]*$')
+                  && get(/databases/$(database)/documents/b/$(bizId)/chunks/$(docId.replace('_[0-9]+$', '_0'))).data.owner == request.auth.uid));
+        allow read: if fbOk() && (bMgr()
+          || (bEmp() && resource.data.owner == request.auth.uid));
+        allow delete: if fbOk() && bMgr();
+        allow update: if false;
+      }
+
+      // inbox: העתק של הכלל בשורש
+      match /inbox/{docId} {
+        allow create: if bEmp() && !bMgr()
+          && request.resource.data.owner == request.auth.uid
+          && request.resource.data.status == 'new'
+          && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't'])
+          && (!request.resource.data.keys().hasAny(['t'])
+              || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))
+          && get(/databases/$(database)/documents/b/$(bizId)/chunks/$(docId + '_0')).data.owner == request.auth.uid;
+        allow read: if bMgr()
+          || (bEmp() && resource.data.owner == request.auth.uid);
+        allow update, delete: if bMgr();
+      }
+
+      // staff: העתק של הכלל בשורש
+      match /staff/{userId} {
+        allow get: if bMgr()
+          || (isSelf(userId) && resource.data.active == true && bActive());
+        allow list: if bMgr();
+        allow create, update, delete: if false;
+      }
+
+      // app_backup_status: העתק של הכלל בשורש
+      match /app_backup_status/{userId} {
+        allow get: if bMgr()
+          || (isSelf(userId) && bEmp());
+        allow list: if bMgr();
+        allow create, update, delete: if false;
+      }
+
+      // tasks: העתק של הכלל בשורש (תוספת 'tasks')
+      match /tasks/{id} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function hasNc() { return od().get('nc', '') == '1'; }
+        function workerUpd() {
+          return od().st == 'open'
+            && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
+            && nowOk(nw().sub)
+            && isMyName(nw().doneBy)
+            && (
+              (od().pr == '1' && nw().st == 'wait' && nw().open == '1'
+                && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
+                && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*')
+                && nw().late == od().late && nw().ok == od().ok)
+              || (od().pr != '1' && !hasNc() && nw().st == 'done' && nw().open == ''
+                && nw().img == od().img && nw().ok == nw().sub
+                && (nw().late == '1') == (request.time.toMillis() > od().due))
+              || (od().pr != '1' && hasNc() && nw().st == 'wait' && nw().open == '1'
+                && nw().img == od().img && nw().late == od().late && nw().ok == od().ok)
+            );
+        }
+        function ncMark() {
+          return nw().diff(od()).affectedKeys().hasOnly(['nc'])
+            && nw().get('nc', '') == '1'
+            && od().st == 'open' && od().open == '1';
+        }
+        function commentMark() {
+          return nw().diff(od()).affectedKeys().hasOnly(['cAt', 'cBy'])
+            && nw().cBy == request.auth.uid
+            && nowOk(nw().cAt)
+            && (bMgr() || od().open == '1' || od().late == '1');
+        }
+        allow read: if feat('tasks') && (bMgr()
+          || (bStaff() && (resource.data.open == '1' || resource.data.late == '1'))
+          || (bEmp() && isMyName(resource.data.doneBy)));
+        allow create: if feat('tasks') && (bStaff()
+          && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
+          && nw().owner == request.auth.uid
+          && isMyName(nw().by)
+          && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
+          && nw().sub == 0 && nw().ok == 0 && nw().note == ''
+          && (nw().pr == '' || bMgr())
+          && (nw().role == 'w' || bMgr())
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+          && nowOk(nw().cr)
+          && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000);
+        allow update: if feat('tasks') && (bMgr() || (bStaff() && (workerUpd() || commentMark() || ncMark())));
+        allow delete: if feat('tasks') && (bMgr());
+
+        match /c/{cid} {
+          function task() { return get(/databases/$(database)/documents/b/$(bizId)/tasks/$(id)).data; }
+          function canReadTask() {
+            return exists(/databases/$(database)/documents/b/$(bizId)/tasks/$(id))
+              && (bMgr() || (bStaff() && (task().open == '1' || task().late == '1')));
+          }
+          allow read: if feat('tasks') && (canReadTask());
+          allow create: if feat('tasks') && (bStaff() && canReadTask()
+            && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
+            && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
+            && nw().uid == request.auth.uid
+            && nw().by is string && nw().by.size() <= 100
+            && isMyName(nw().by)
+            && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+            && nowOk(nw().t)
+            && (bMgr() || (task().get('nc', '') == '1' && task().st == 'open')));
+          allow update: if false;
+          allow delete: if feat('tasks') && (bMgr());
+        }
+      }
+
+      // supinv: העתק של הכלל בשורש (תוספת 'suppliers')
+      match /supinv/{id} {
+        allow read: if feat('suppliers') && (bStaff());
+        allow create, update: if feat('suppliers') && (bMgr()
+          && request.resource.data.keys().hasOnly(['c', 'n', 'd', 'at', 'a', 'inv', 'by', 'pend', 'src', 'm', 'np', 'h', 'fh']));
+        allow delete: if feat('suppliers') && (bMgr());
+
+        match /p/{k} {
+          allow read: if feat('suppliers') && (bStaff());
+          allow create, update: if feat('suppliers') && (bMgr()
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000);
+          allow delete: if feat('suppliers') && (bMgr());
+        }
+      }
+
+      // appreq: העתק של הכלל בשורש (תוספת 'requests')
+      match /appreq/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        allow read: if feat('requests') && (bStaff());
+        allow create: if feat('requests') && (bStaff()
+          && nw().keys().hasAll(['uid', 'by', 'txt', 't', 'st', 'np'])
+          && nw().keys().hasOnly(['uid', 'by', 'txt', 't', 'st', 'np'])
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 2000
+          && nowOk(nw().t)
+          && nw().st == 'new'
+          && nw().np is int && nw().np >= 0 && nw().np <= 8);
+        allow update: if feat('requests') && (bMgr()
+          && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+          && nw().st in ['new', 'doing', 'done', 'rej']
+          && isMyName(nw().get('stBy', ''))
+          && nowOk(nw().get('stAt', 0))
+          && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+        allow delete: if feat('requests') && (bMgr());
+
+        match /p/{k} {
+          function req() { return get(/databases/$(database)/documents/b/$(bizId)/appreq/$(id)).data; }
+          allow read: if feat('requests') && (bStaff());
+          allow create: if feat('requests') && (bStaff()
+            && exists(/databases/$(database)/documents/b/$(bizId)/appreq/$(id))
+            && req().uid == request.auth.uid
+            && k.matches('^[0-7]$') && int(k) < req().np
+            && request.time.toMillis() - req().t < 900000
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000);
+          allow update: if false;
+          allow delete: if feat('requests') && (bMgr());
+        }
+      }
+
+      // closings: העתק של הכלל בשורש (תוספת 'cashClose')
+      match /closings/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        allow read: if feat('cashClose') && (bMgr());
+        allow create: if feat('cashClose') && (bStaff()
+          && nw().keys().hasAll(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data', 'tm', 'od', 'otm'])
+          && (!nw().keys().hasAny(['tm']) || (nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+          && (!nw().keys().hasAny(['od']) || (nw().od is string && (nw().od == '' || nw().od.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'))))
+          && (!nw().keys().hasAny(['otm']) || (nw().otm is string && (nw().otm == '' || nw().otm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nowOk(nw().t)
+          && (nw().st == 'new' || (nw().st == 'ok' && bMgr()))
+          && nw().np is int && nw().np >= 1 && nw().np <= 8
+          && nw().reg in ['i_yh', 'i_nl']
+          && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+          && nw().no is string && nw().no.size() <= 30
+          && nw().data is string && nw().data.size() <= 20000);
+        allow update: if feat('cashClose') && (bMgr()
+          && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+          && nw().st in ['new', 'ok', 'rej']
+          && isMyName(nw().get('stBy', ''))
+          && nowOk(nw().get('stAt', 0))
+          && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+        allow delete: if feat('cashClose') && (bMgr());
+
+        match /p/{k} {
+          function cl() { return get(/databases/$(database)/documents/b/$(bizId)/closings/$(id)).data; }
+          allow read: if feat('cashClose') && (bMgr());
+          allow create: if feat('cashClose') && (bStaff()
+            && exists(/databases/$(database)/documents/b/$(bizId)/closings/$(id))
+            && cl().uid == request.auth.uid
+            && k.matches('^[0-7]$') && int(k) < cl().np
+            && request.time.toMillis() - cl().t < 900000
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000);
+          allow update: if false;
+          allow delete: if feat('cashClose') && (bMgr());
+        }
+      }
+
+      // cashout: העתק של הכלל בשורש (תוספת 'cashClose')
+      match /cashout/{id} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function idStr(v) { return v is string && (v == '' || v.matches('^[A-Za-z0-9_-]{1,120}$')); }
+        function amtOk(a) { return (a is int || a is float) && a > 0 && a <= 1000000; }
+        function depRe() {
+          return '(?s).*(^|[^א-ת])[ובלשהכמ]{0,3}(הפקיד(ה|ו|ים)?|הפקד(ה|ות|ת|תי|נו|תם|ו)?|הופקד(ה|ו)?|מופקד(ת|ים|ות)?|מפקיד(ה|ים|ות)?|[אינ]פקיד(ו|ה)?|יופקד(ו)?|תופקד)([^א-ת]|$).*';
+        }
+        function inbOk() {
+          let ib = get(/databases/$(database)/documents/b/$(bizId)/inbox/$(id)).data;
+          return ib.owner == request.auth.uid && ib.status == 'new'
+            && ib.get('t', 0) is int && request.time.toMillis() - ib.get('t', 0) < 900000;
+        }
+        function bodyOk() {
+          return nw().reg in ['i_yh', 'i_nl']
+            && (!nw().keys().hasAny(['tm']) || (nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+            && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+            && amtOk(nw().a)
+            && nw().why is string && nw().why.size() > 0 && nw().why.size() <= 300
+            && nw().dep in ['', '1'] && (nw().dep == '1') == nw().why.matches(depRe());
+        }
+        function depOk(did) {
+          let dd = getAfter(/databases/$(database)/documents/b/$(bizId)/deposits/$(did)).data;
+          return dd.uid == request.auth.uid && dd.st == 'new' && id in dd.items
+            && request.time.toMillis() - dd.t < 900000;
+        }
+        allow read: if feat('cashClose') && (bStaff());
+        allow create: if feat('cashClose') && (bStaff()
+          && nw().keys().hasAll(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'reg', 'd', 'tm', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nowOk(nw().t)
+          && bodyOk()
+          && idStr(nw().src) && nw().src != ''
+          && idStr(nw().zc) && idStr(nw().dp)
+          && (bMgr() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk())));
+        allow update: if feat('cashClose') && ((bMgr()
+            && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp', 'reg', 'd', 'tm', 'a', 'why', 'dep'])
+            && idStr(nw().zc) && idStr(nw().dp) && bodyOk())
+          || (bEmp()
+            && nw().diff(od()).affectedKeys().hasOnly(['dp'])
+            && od().dp == '' && od().dep == '1'
+            && nw().dp is string && nw().dp.matches('^[A-Za-z0-9_-]{1,120}$')
+            && depOk(nw().dp)));
+        allow delete: if feat('cashClose') && (bMgr());
+      }
+
+      // deposits: העתק של הכלל בשורש (תוספת 'cashClose')
+      match /deposits/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        allow read: if feat('cashClose') && (bStaff());
+        allow create: if feat('cashClose') && (bStaff()
+          && nw().keys().hasAll(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
+          && nw().data is string && nw().data.size() <= 5000
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nowOk(nw().t)
+          && nw().st == 'new'
+          && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+          && nw().items is list && nw().items.size() >= 1 && nw().items.size() <= 30
+          && (nw().a is int || nw().a is float) && nw().a > 0 && nw().a <= 1000000
+          && nw().why is string && nw().why.size() <= 500
+          && nw().np is int && nw().np >= 1 && nw().np <= 8);
+        allow update: if feat('cashClose') && (bMgr()
+          && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+          && nw().st in ['new', 'ok', 'rej']
+          && isMyName(nw().get('stBy', ''))
+          && nowOk(nw().get('stAt', 0))
+          && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+        allow delete: if feat('cashClose') && (bMgr());
+
+        match /p/{k} {
+          function dp() { return get(/databases/$(database)/documents/b/$(bizId)/deposits/$(id)).data; }
+          allow read: if feat('cashClose') && (bMgr());
+          allow create: if feat('cashClose') && (bStaff()
+            && exists(/databases/$(database)/documents/b/$(bizId)/deposits/$(id))
+            && dp().uid == request.auth.uid
+            && k.matches('^[0-7]$') && int(k) < dp().np
+            && request.time.toMillis() - dp().t < 900000
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000);
+          allow update: if false;
+          allow delete: if feat('cashClose') && (bMgr());
+        }
+      }
+
+      // zlast: העתק של הכלל בשורש (תוספת 'cashClose')
+      match /zlast/{reg} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function cl() { return getAfter(/databases/$(database)/documents/b/$(bizId)/closings/$(nw().id)).data; }
+        function fwd() {
+          return resource == null || nw().d > resource.data.d
+            || (nw().d == resource.data.d && nw().tm > resource.data.get('tm', ''));
+        }
+        allow read: if feat('cashClose') && (bStaff());
+        allow create, update: if feat('cashClose') && (bStaff()
+          && reg in ['i_yh', 'i_nl']
+          && nw().keys().hasAll(['d', 'tm', 'id', 'uid', 't'])
+          && nw().keys().hasOnly(['d', 'tm', 'id', 'uid', 't', 'od', 'otm'])
+          && (!nw().keys().hasAny(['od']) || (nw().od is string && (nw().od == '' || nw().od.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'))))
+          && (!nw().keys().hasAny(['otm']) || (nw().otm is string && (nw().otm == '' || nw().otm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+          && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+          && nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
+          && nw().id is string && nw().id.matches('^[A-Za-z0-9_-]{1,120}$')
+          && nw().uid == request.auth.uid
+          && nowOk(nw().t)
+          && (bMgr()
+              || (!exists(/databases/$(database)/documents/b/$(bizId)/closings/$(nw().id))
+                  && cl().uid == request.auth.uid && cl().reg == reg && cl().d == nw().d
+                  && cl().get('tm', '') == nw().tm && nowOk(cl().t)
+                  && cl().get('od', '') == nw().get('od', '') && cl().get('otm', '') == nw().get('otm', '')
+                  && fwd())));
+        allow delete: if feat('cashClose') && (bMgr());
+      }
+
+      // yemot_items: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_items/{id} {
+        allow read, write: if false;
+      }
+      // yemot_line_backups: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_line_backups/{id} {
+        allow read, write: if false;
+      }
+      // yemot_hook_usage: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_hook_usage/{id} {
+        allow read, write: if false;
+      }
+      // yemot_lexicon: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_lexicon/{docId} {
+        allow read: if feat('yemot') && (docId == 'main' && bMgr());
+        allow create, update: if feat('yemot') && (docId == 'main' && bMgr()
+          && request.resource.data.keys().hasOnly(['text', 'updatedAt', 'updatedBy'])
+          && request.resource.data.text is string && request.resource.data.text.size() <= 8000
+          && request.resource.data.updatedAt is int && math.abs(request.resource.data.updatedAt - request.time.toMillis()) < 120000
+          && request.resource.data.updatedBy == request.auth.uid);
+        allow delete: if false;
+      }
+    }
+
     // ---------- הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם ----------
     match /{document=**} {
       allow read, write: if false;
