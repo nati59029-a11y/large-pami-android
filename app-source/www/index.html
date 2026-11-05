@@ -108,7 +108,7 @@ html[data-th=night] .toast,html[data-th=contrast] .toast{background:#eee;color:#
 .sw{animation:in .18s ease-out}@keyframes in{from{opacity:.4;transform:translateX(-14px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.sw{animation:none}}
 .sub{font-size:.8rem;color:var(--mut)}
-@media print{.bar,.top,.toast{display:none}}
+@media print{.bar,.top,.toast{display:none}}@media(min-width:901px){main{max-width:980px}.top{padding-inline:max(14px,calc((100vw - 980px)/2 + 14px))}.bar{max-width:980px;margin-inline:auto;border:1px solid var(--line);border-bottom:0;border-radius:20px 20px 0 0}.sheet .bd{max-width:760px}html.bzd [data-a=updChk]{display:none}html.bzd .sec:has(+[data-a=updChk]){display:none}}html[data-bzl] #lglogo{display:block}#susp{position:fixed;inset:0;z-index:60;background:var(--bg);display:grid;place-items:center;padding:20px;overflow:auto}#susp .card{max-width:420px;width:100%;text-align:center}body.susp>*:not(#susp):not(dialog):not(.toast){display:none!important}.brrow{display:flex;align-items:center;gap:8px;margin:8px 0}.brrow span{flex:1}.brrow input[type=color]{width:48px;height:44px;min-height:0;padding:2px;border:1px solid var(--line);border-radius:10px;background:var(--card)}.brrow input[type=text]{width:112px;min-width:0;text-align:left}.brsgs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.brsg{border:2px solid var(--line);border-radius:14px;padding:8px;display:flex;align-items:center;gap:4px;background:var(--bg);cursor:pointer;min-height:48px}.brsg i{width:24px;height:24px;border-radius:50%;display:block}.brsg.on{border-color:var(--acc)}.brpv{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:12px}.brpv .brc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;margin:8px 0}.brpv .brc small{color:var(--mut)}.brpv .btn{min-height:40px;cursor:default}
 
 .ban svg{width:20px;height:20px;flex:none;transform:scaleX(-1)}.ban .tag{flex:none}
 .hero .ib svg{width:22px;height:22px}
@@ -419,7 +419,7 @@ function render(dir,keep){
  const root=NAV[0].v;$$('.bar [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===root));
  if(keep)window.scrollTo(0,y);else window.scrollTo(0,0);
  if(dir){const m=$('#main');m.classList.remove('sw');void m.offsetWidth;m.classList.add('sw')}
- document.documentElement.dataset.th=themeNow();document.documentElement.dataset.fs=S.fs||1;
+ document.documentElement.dataset.th=themeNow();document.documentElement.dataset.fs=S.fs||1;try{bzSkin()}catch(e){}
 }
 const rerender=()=>render(0,true);
 /* החלקה לחזרה: ימין→שמאל */
@@ -476,14 +476,14 @@ function sheetDraw(){
  const title={type:'מה מוסיפים?',scan:'חשבונית ספק',cat:'באיזו קטגוריה?',sub:c?'איזה '+(subWord(c)||'פריט')+'?':'',det:'פרטים'}[A.step];
  let body='';
  if(A.step==='type'){
-  body=`<div class="big2"><button class="tile inc" data-a="pick" data-k="type" data-v="inc">${ico('inc')}הכנסה</button><button class="tile exp" data-a="pick" data-k="type" data-v="exp">${ico('exp')}הוצאה</button></div>${typeof isA==='function'&&isA()?`<div class="big2" style="margin-top:10px"><button class="tile" data-a="addGo" data-v="shelf" style="font-size:1rem">🏷️<br>מחירים ומבצעים למדף</button><button class="tile" data-a="addGo" data-v="fb" style="font-size:1rem">📝<br>משוב לקוחות</button></div><button class="tile" data-a="addGo" data-v="tk" style="font-size:1rem;width:100%;margin-top:10px">✅ משימה חדשה</button>${window.ylTile?'<button class="tile" data-a="addGo" data-v="yl" style="font-size:1rem;width:100%;margin-top:10px">📞<br>שלוחות הקו</button>':''}${adTiles()}`:''}`}
+  body=`<div class="big2"><button class="tile inc" data-a="pick" data-k="type" data-v="inc">${ico('inc')}הכנסה</button><button class="tile exp" data-a="pick" data-k="type" data-v="exp">${ico('exp')}הוצאה</button></div>${typeof isA==='function'&&isA()?`${bzF('shelf')||bzF('feedback')?`<div class="big2" style="margin-top:10px">${bzF('shelf')?`<button class="tile" data-a="addGo" data-v="shelf" style="font-size:1rem">🏷️<br>מחירים ומבצעים למדף</button>`:''}${bzF('feedback')?`<button class="tile" data-a="addGo" data-v="fb" style="font-size:1rem">📝<br>משוב לקוחות</button>`:''}</div>`:''}${bzF('tasks')?`<button class="tile" data-a="addGo" data-v="tk" style="font-size:1rem;width:100%;margin-top:10px">✅ משימה חדשה</button>`:''}${window.ylTile&&bzF('yemot')?'<button class="tile" data-a="addGo" data-v="yl" style="font-size:1rem;width:100%;margin-top:10px">📞<br>שלוחות הקו</button>':''}${adTiles()}`:''}`}
  else if(A.step==='cat'){
   body=catsOf(A.type).map(x=>`<button class="opt" data-a="pick" data-k="cat" data-v="${x.id}"><span>${esc(x.name)}</span>${ico('chev')}</button>`).join('')+`<button class="opt add" data-a="newCatFromSheet"><span>＋ קטגוריה חדשה</span></button>`}
  else if(A.step==='scan'){
   const n=(A.pg||[]).length;
   body=`${typeof bqBanner==='function'?bqBanner():''}<p class="note" style="margin:4px 0 12px">סרוק או העלה את החשבונית, והאפליקציה תזהה את הספק, המספר, התאריך והסכום. חשבונית של כמה עמודים: הוסף את כל העמודים ואז לחץ "זהה". אפשר לבדוק ולתקן לפני השמירה.</p>
-  ${n?`<div class="row" style="flex-wrap:wrap;margin-bottom:10px">${A.pg.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="scanDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div><button class="btn w" style="margin-bottom:10px" data-a="scanGo">זהה פרטים מ-${n} ${n>1?'עמודים':'עמוד'}</button><button class="btn g w" style="margin-bottom:10px" data-a="scanQ">הוסף לתור וצלם חשבונית נוספת</button>`:''}
-  <label class="btn ${n?'g':''} w" style="cursor:pointer;margin-bottom:10px">📷 ${n?'צלם עמוד נוסף':'צלם חשבונית'}<input type="file" accept="image/*" capture="environment" data-c="scanpick" hidden></label><label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 ${n?'הוסף עמודים מהגלריה':'העלה קובץ מהגלריה'}<input type="file" accept="image/*" multiple data-c="scanpick" hidden></label><label class="btn g w" style="cursor:pointer;margin-bottom:10px">🗂 כמה חשבוניות מהגלריה (כל תמונה או PDF היא חשבונית)<input type="file" accept="image/*,application/pdf" multiple data-c="scanmulti" hidden></label><button class="btn g w" data-a="scanManual">המשך ידני</button>`}
+  ${n?`<div class="row" style="flex-wrap:wrap;margin-bottom:10px">${A.pg.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="scanDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div>${bzF('scan')?`<button class="btn w" style="margin-bottom:10px" data-a="scanGo">זהה פרטים מ-${n} ${n>1?'עמודים':'עמוד'}</button><button class="btn g w" style="margin-bottom:10px" data-a="scanQ">הוסף לתור וצלם חשבונית נוספת</button>`:''}`:''}
+  <label class="btn ${n?'g':''} w" style="cursor:pointer;margin-bottom:10px">📷 ${n?'צלם עמוד נוסף':'צלם חשבונית'}<input type="file" accept="image/*" capture="environment" data-c="scanpick" hidden></label><label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 ${n?'הוסף עמודים מהגלריה':'העלה קובץ מהגלריה'}<input type="file" accept="image/*" multiple data-c="scanpick" hidden></label>${bzF('scan')?'<label class="btn g w" style="cursor:pointer;margin-bottom:10px">🗂 כמה חשבוניות מהגלריה (כל תמונה או PDF היא חשבונית)<input type="file" accept="image/*,application/pdf" multiple data-c="scanmulti" hidden></label>':''}<button class="btn g w" data-a="scanManual">המשך ידני</button>`}
  else if(A.step==='sub'){
   const L=subsOf(c.id);
   body=L.map(x=>`<button class="opt" data-a="pick" data-k="sub" data-v="${x.id}"><span>${esc(x.name)}${x.cat&&c.beh==='sup'?(bsum(x.id)?`<small>פתוח לתשלום ${ils(bsum(x.id))}</small>`:''):''}</span>${ico('chev')}</button>`).join('')||`<p class="empty">עדיין אין ${subWord(c)||'פריטים'} בקטגוריה הזאת. הוסף את הראשון:</p>`;
@@ -671,15 +671,15 @@ V.home=()=>{
  if(D.late.length)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="due"><span class="tag t4">באיחור</span><span style="flex:1"><b>${ils(D.lateSum)}</b> ב־${D.late.length} חשבוניות מחודשים קודמים</span>${ico('chev')}</button>`;
  if(fx.length&&m===NOWM())h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="fix"><span class="tag t1">לאישור</span><span style="flex:1"><b>${fx.length}</b> הוצאות קבועות מחכות לאישור חשבונית</span>${ico('chev')}</button>`;
  {const aw=tdnL().aw.length;if(aw)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="tdn"><span class="tag t1">ממתין לחשבונית</span><span style="flex:1"><b>${aw}</b> תשלומים ששולמו מחכים לחשבונית</span>${ico('chev')}</button>`}
- h+=dpBan();if(zcQN())h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="zc"><span class="tag t1">לאישור</span><span style="flex:1"><b>${zcQN()}</b> סגירות קופה מחכות לאישור שלך</span>${ico('chev')}</button>`; if(pend)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="pend"><span class="tag t1">לסיווג</span><span style="flex:1"><b>${pend}</b> תנועות מהמערכת הישנה מחכות לסיווג</span>${ico('chev')}</button>`;
+ h+=dpBan();if(bzF('cashClose')&&zcQN())h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="zc"><span class="tag t1">לאישור</span><span style="flex:1"><b>${zcQN()}</b> סגירות קופה מחכות לאישור שלך</span>${ico('chev')}</button>`; if(pend)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="pend"><span class="tag t1">לסיווג</span><span style="flex:1"><b>${pend}</b> תנועות מהמערכת הישנה מחכות לסיווג</span>${ico('chev')}</button>`;
  const ccp=S.ccx.filter(c=>!c.match&&!c.exp).length;if(ccp)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="cc"><span class="tag t1">אשראי</span><span style="flex:1"><b>${ccp}</b> חיובי אשראי לא הותאמו</span>${ico('chev')}</button>`;
- h+=`<div class="chips scroll-x" style="margin-top:14px">${[['rep0','דוחות'],['imp','ייבוא'],['scan','סריקה'],['cmp','השוואות']].map(([v,l])=>`<button class="chip" data-a="${v==='rep0'?'repAll':'go'}" data-v="${v}">${l}</button>`).join('')}</div>`;
+ h+=`<div class="chips scroll-x" style="margin-top:14px">${[['rep0','דוחות'],['imp','ייבוא'],['scan','סריקה'],['cmp','השוואות']].filter(x=>x[0]!=='scan'||bzF('scan')).map(([v,l])=>`<button class="chip" data-a="${v==='rep0'?'repAll':'go'}" data-v="${v}">${l}</button>`).join('')}</div>`;
  h+=`<div class="sec"><h3>לסגור ב${mfmt(m)}</h3><button class="btn s g" data-a="go" data-v="due">הכול</button></div>`;
  h+=D.open.sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6).map(t=>invRow(t)).join('')||`<div class="empty">${D.due>0?'כל החשבוניות של החודש שולמו ✓':'אין חשבוניות לתשלום החודש'}</div>`;
  const rec=live().slice().sort((a,b)=>(b.date.localeCompare(a.date))).slice(0,5);
  h+=`<div class="sec"><h3>תנועות אחרונות</h3></div>`+rec.map(t=>txRow(t,true)).join('')||'';
  if(!S.tx.length)h+=`<div class="empty">עוד אין תנועות. לחץ על ＋ כדי להוסיף את הראשונה.</div>`;
- return{t:'לארג׳ פעמי',s:'מבט על העסק',h}};
+ return{t:bzNm(),s:'מבט על העסק',h}};
 ACT.hm=el=>{HM=addMon(HM,+el.dataset.d);rerender()};
 function txRow(t,showCat){
  const c=cat(t.cat),b=c.beh,sub=showCat?`${esc(c.name)} › ${esc(subName(t))}`:esc(t.desc&&b==='free'?t.desc:(t.note||''));
@@ -835,8 +835,8 @@ function todoC(){const si=typeof siN==='function'?siN():0,ib=S.inbox||[],sup=ib.
  return{si,exp:ib.length-sup,sup,ar,arD,dn:x.dn.length,no:x.no.length,aw:x.aw.length,n:si+ib.length+ar+x.dn.length+x.no.length+x.aw.length}}
 const cashC=()=>{const zc=zcCnt(),dq=dqN(),zs=typeof zsLostN==='function'?(zsLostN()||0):0;return{zc,dq,zs,n:zc+dq+zs}};
 const adTag=n=>n?`<span class="tag t1">${n}</span>`:'';
-function adTiles(){if(!(typeof isA==='function'&&isA()))return '';const a=todoC(),b=cashC();
- return `<div class="big2" style="margin-top:10px"><button class="tile" data-a="addGo" data-v="todo" style="font-size:1rem">📥<br>לטיפול${adTag(a.n)}</button><button class="tile" data-a="addGo" data-v="cash" style="font-size:1rem">💵<br>סגירת קופה והפקדות${adTag(b.n)}</button></div>`}
+function adTiles(){if(!(typeof isA==='function'&&isA()))return '';const a=todoC(),b=bzF('cashClose')?cashC():{n:0};
+ return `<div class="big2" style="margin-top:10px"><button class="tile" data-a="addGo" data-v="todo" style="font-size:1rem">📥<br>לטיפול${adTag(a.n)}</button>${bzF('cashClose')?`<button class="tile" data-a="addGo" data-v="cash" style="font-size:1rem">💵<br>סגירת קופה והפקדות${adTag(b.n)}</button>`:''}</div>`}
 const adOpt=(v,t,sm,n)=>`<button class="opt" data-a="go" data-v="${v}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${adTag(n)}${ico('chev')}</button>`;
 const adSec=t=>`<div class="sec"><h3>${t}</h3></div>`;
 V.todo=()=>{const T='לטיפול';if(!isA())return{t:T,s:'',h:'<div class="card"><p class="note">המסך הזה למנהל בלבד.</p></div>'};const c=todoC();let h='';
@@ -853,7 +853,7 @@ V.cash=()=>{const T='סגירת קופה והפקדות';if(!isA())return{t:T,s:
  return{t:T,s:c.n?c.n+' ממתינים לאישור':'קופה והפקדות',h:dpBan()+adOpt('zc','💵 סגירת קופה','דוח Z ופתיחת קופה, הכנסה להכנסות וסגירות לאישור',c.zc)+adOpt('zs','📊 סיכום סגירות קופה','כל הסגירות, הוצאות מקופה, הפקדות וההפרשים שאישרת',c.zs)+adOpt('dp','🏦 העלאת אישור הפקדה','הוצאות מקופה להפקדה, ואישורי הפקדה לאישור',c.dq)}};
 /* ---- עוד ---- */
 V.more=()=>{const pend=S.tx.filter(t=>t.cat==='p_inc'||t.cat==='p_exp').length,fx=fixPending(NOWM()).length;
- const o=(a,v,t,sm,n)=>`<button class="opt" data-a="${a}" data-v="${v||''}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`;
+ const o=(a,v,t,sm,n)=>(a==='ordGo'?!bzF('orders'):BZV[v]&&!bzF(BZV[v]))?'':`<button class="opt" data-a="${a}" data-v="${v||''}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`;
  return{t:'עוד',s:'כלים',h:(ordOn()?o('ordGo','','הזמנות אתר','מוצרים, ייבוא, תמונות והגדרות האתר – גרסת בדיקה'):'')+o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+o('go','tk','משימות','משימות לעובדים, אישור תמונות ואיחורים',typeof tkOverN==='function'?(tkOverN()||''):'')+o('go','ar','🛠️ בקשות לעדכון האפליקציה','תיקונים ושיפורים שהצוות ביקש',typeof arCnt==='function'?(arCnt()||''):'')+o('go','zc','💵 סגירת קופה','דוח Z ופתיחת קופה, הכנסה להכנסות וסגירות לאישור',zcCnt()||'')+o('go','zs','📊 סיכום סגירות קופה','כל הסגירות, הוצאות מקופה, הפקדות וההפרשים שאישרת',typeof zsLostN==='function'?(zsLostN()||''):'')+o('go','dp','🏦 העלאת אישור הפקדה','הוצאות מקופה להפקדה, ואישורי הפקדה לאישור',dqN()||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+trOpt()+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח, חשבוניות בלי מספר ותשלומים שממתינים לחשבונית',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
 
 ACT.repAll=()=>{RS=scopeOf('all:exp');go('rep')};
@@ -1195,8 +1195,8 @@ V.settings=()=>{
  <div class="sec"><h3>קטגוריות הכנסה</h3><button class="btn s" data-a="catWiz" data-t="inc">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='inc'&&!c.hid).map(row).join('')}
  <div class="sec"><h3>קטגוריות הוצאה</h3><button class="btn s" data-a="catWiz" data-t="exp">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='exp'&&!c.hid).map(row).join('')}
  <div class="sec"><h3>נתונים</h3></div><button class="opt" data-a="go" data-v="data"><span>גיבוי ושחזור</span>${ico('chev')}</button><button class="opt" data-a="go" data-v="imp"><span>ייבוא מאקסל</span>${ico('chev')}</button>
- ${typeof isA==='function'&&isA()?`<div class="sec"><h3>זיהוי חכם</h3></div>${shKeyCard()}`:''}
- <div class="sec"><h3>עדכון האפליקציה</h3></div><button class="opt" data-a="updChk"><span>בדוק עדכון והתקן</span>${ico('chev')}</button>
+ ${typeof isA==='function'&&isA()&&bzF('scan')?`<div class="sec"><h3>זיהוי חכם</h3></div>${shKeyCard()}`:''}
+ ${admMenu()}<div class="sec"><h3>עדכון האפליקציה</h3></div><button class="opt" data-a="updChk"><span>בדוק עדכון והתקן</span>${ico('chev')}</button>
  ${SY.refresh?`<div class="sec"><h3>חשבון</h3></div><div class="card"><p style="margin:0 0 8px">מחובר: ${esc(SY.email||'')}</p><button class="btn g w" data-a="syOut">התנתק</button></div>`:''}
  <p class="note" style="margin-top:16px">לארג׳ פעמי · גרסה 7.0 · החלקה מימין לשמאל חוזרת למסך הקודם</p>`}};
 ACT.theme=el=>{S.theme=el.dataset.v;save();render(0,true);try{if(isA())pubCfg().catch(()=>{})}catch(e){}};
@@ -1258,12 +1258,12 @@ function showConvert(old){
  s.innerHTML=`<div class="sh"><h2>נמצאו נתונים מהגרסה הישנה</h2></div><div class="bd"><p>האפליקציה החדשה בנויה מחדש. הנתונים הישנים לא נמחקים ולא משתנים; נוצר מהם עותק במבנה החדש.</p>${cmpTable(cmp,cv.rep)}<div class="row" style="margin-top:14px"><button class="btn grow" data-a="convGo" ${cmp.ok?'':'disabled'}>המר והמשך</button><button class="btn g grow" data-a="startBlank">התחל נקי (הישן נשמר)</button></div></div>`}
 ACT.convGo=()=>{S=window.__cv.cv.S;save();sheetClose();NAV=[{v:'home'}];render(0);toast('הנתונים הומרו')};
 ACT.startBlank=()=>{S=ensure(defaults());save();sheetClose();render(0)};
-ACT.startSample=()=>{sample();sheetClose();NAV=[{v:'home'}];render(0)};
-function showWelcome(){const s=$('#sheet');s.hidden=false;s.innerHTML=`<div class="sh"><h2>לארג׳ פעמי</h2></div><div class="bd"><p>ניהול הכנסות והוצאות של העסק. איך מתחילים?</p><button class="opt" data-a="startBlank"><span>התחלה נקייה<small>הקטגוריות מוכנות, בלי נתונים</small></span></button><button class="opt" data-a="syOpen"><span>התחברות לחשבון קיים<small>מכשיר עובד, או מנהל שכבר הגדיר סנכרון</small></span></button><button class="opt" data-a="startSample"><span>נתוני דוגמה<small>כדי להתרשם, אפשר לנקות אחר כך</small></span></button><label class="opt" style="cursor:pointer"><span>שחזור מקובץ גיבוי<small>גם מהאפליקציה הישנה</small></span><input type="file" accept=".json,application/json,text/plain" data-c="bkFile" hidden></label></div>`}
+ACT.startSample=()=>{if(SY.bizId&&SY.bizId!==BZ0)return;sample();sheetClose();NAV=[{v:'home'}];render(0)};
+function showWelcome(){const s=$('#sheet');s.hidden=false;s.innerHTML=`<div class="sh"><h2>לארג׳ פעמי</h2></div><div class="bd"><p>ניהול הכנסות והוצאות של העסק. איך מתחילים?</p><button class="opt" data-a="startBlank"><span>התחלה נקייה<small>הקטגוריות מוכנות, בלי נתונים</small></span></button><button class="opt" data-a="syOpen"><span>התחברות לחשבון קיים<small>מכשיר עובד, או מנהל שכבר הגדיר סנכרון</small></span></button>${SY.bizId&&SY.bizId!==BZ0?'':'<button class="opt" data-a="startSample"><span>נתוני דוגמה<small>כדי להתרשם, אפשר לנקות אחר כך</small></span></button>'}<label class="opt" style="cursor:pointer"><span>שחזור מקובץ גיבוי<small>גם מהאפליקציה הישנה</small></span><input type="file" accept=".json,application/json,text/plain" data-c="bkFile" hidden></label></div>`}
 function boot(){
  hookNative();siHook();try{document.getElementById('lglogo').style.backgroundImage='url('+GATE_LOGO+')'}catch(e){}
  if(!(SY.refresh&&SY.role)){showGate();return}
- if(BZOK(SY.bizId)&&!SY.biz){bzOpen().then(()=>bzBoot(1));return}bzBoot()}/* ריבוי עסקים: אחרי מעבר עסק (biz עוד לא נטען) – קודם מסמך העסק, ורק אז האפליקציה */function bzBoot(o){if(bzSus()){showGate(BZ_SUS);if(!o)bzOpen();return}if(!o)bzOpen();enterApp(false);syCheck()}
+ if(BZOK(SY.bizId)&&!SY.biz){bzOpen().then(()=>bzBoot(1));return}bzBoot()}/* ריבוי עסקים: אחרי מעבר עסק (biz עוד לא נטען) – קודם מסמך העסק, ורק אז האפליקציה */function bzBoot(o){if(bzSus()){showSusp();if(!o)bzOpen();return}if(!o)bzOpen();enterApp(false);syCheck()}
 function enterApp(fresh){
  setTimeout(()=>{try{siReady()}catch(e){}},0);
  if(isW()){S=ensure(defaults());wkStart();return}
@@ -1678,10 +1678,10 @@ async function fsx(path,opt,root){const t=await tok();opt=opt||{};opt.headers=Ob
 const loginMsg=e=>{const m=String(e.message||'');if(e.offline||e.noAccess)return m;if(/INVALID_LOGIN|INVALID_PASSWORD|EMAIL_NOT_FOUND|INVALID_EMAIL/.test(m))return 'אימייל או סיסמה לא נכונים';if(/TOO_MANY/.test(m))return 'יותר מדי ניסיונות, נסה שוב בעוד כמה דקות';if(/USER_DISABLED/.test(m))return 'המשתמש הושבת';return 'שגיאה: '+m};
 async function syLogin(email,pw){
  const j=await jf(`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:signInWithPassword?key=${FB.apiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw,returnSecureToken:true})});
- SY={idToken:j.idToken,refresh:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1000,uid:j.localId,email};await bzWho();if(bzSus()&&!(await bzSA())){SY={};const x=new Error(BZ_SUS);x.noAccess=true;throw x}
+ SY={idToken:j.idToken,refresh:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1000,uid:j.localId,email};await bzWho();if(bzSus()&&!(await bzSA())){const x=new Error(BZ_SUS);x.noAccess=true;x.susp=1;throw x}
  try{await fsx('/admins/'+SY.uid);SY.role='admin'}catch(e){if(e.code===404||e.code===403)SY.role=await syStaff();else throw e}
  syS();await bzGo()}
-function syOut(){SY={};try{localStorage.removeItem(SK);localStorage.removeItem(LK('lp-shin'));localStorage.removeItem(LK('lp-tasks'));localStorage.removeItem(LK('lp-tk-c'));localStorage.removeItem(LK('lp-supinv'));localStorage.removeItem(LK('lp-co-m'))}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}/* ריבוי עסקים (שלב 3): העסק נקבע לפי users/{uid}.bizId (רק השרת כותב). אין מסמך, או כל כשל (חוקים ישנים: 403, רשת) = לארג' פעמי. מסמך העסק b/{bizId} נקרא בכניסה ובפתיחה (dataRoot, status, features, brand – קריאה בלבד). כשל בטעינה: נשאר מה שנשמר, ובלי שמירה – legacy ללארג' פעמי, b לכל עסק אחר. בלי הודעת שגיאה */const BZ_SUS='החשבון מושהה – פנה לספק';const fvj=v=>!v||typeof v!=='object'?null:'stringValue'in v?v.stringValue:'booleanValue'in v?v.booleanValue:'integerValue'in v?+v.integerValue:'doubleValue'in v?v.doubleValue:'timestampValue'in v?v.timestampValue:'mapValue'in v?Object.fromEntries(Object.entries(v.mapValue.fields||{}).map(([k,x])=>[k,fvj(x)])):'arrayValue'in v?(v.arrayValue.values||[]).map(fvj):null;async function bzWho(){let b='';try{const u=await fsx('/users/'+SY.uid,0,1);b=fvj(u&&u.fields&&u.fields.bizId)}catch(e){}SY.bizId=BZOK(b)?b:BZ0;SY.biz=null;await bzLoad()}async function bzLoad(){let d=null;try{d=await fsx('/b/'+SY.bizId,0,1)}catch(e){}const o=SY.biz||{};if(!d||!d.fields){SY.biz={dataRoot:SY.bizId!==BZ0?'b':(o.dataRoot==='b'?'b':'legacy'),status:o.status==='suspended'?'suspended':'active',features:o.features||{},brand:o.brand||null};return}const f=fvj({mapValue:d}),ft={};for(const k in (f.features&&typeof f.features==='object'?f.features:{}))if(f.features[k]===true)ft[k]=true;SY.biz={dataRoot:SY.bizId!==BZ0||f.dataRoot==='b'?'b':'legacy',status:f.status==='suspended'?'suspended':'active',features:ft,brand:f.brand&&typeof f.brand==='object'?f.brand:null}}const bzSus=()=>!!(SY.biz&&SY.biz.status==='suspended'&&!SY.sa);async function bzSA(){try{await fsx('/superadmins/'+SY.uid,0,1);SY.sa=1}catch(e){delete SY.sa}return!!SY.sa}/* התחילית במכשיר נקבעה בטעינת הדף. אם העסק השתנה (כניסה, החלפה) – טוענים את הדף מחדש, כדי שלא יישאר שום נתון בזיכרון או במפתח של עסק אחר */function bzGo(){const p=BZOK(SY.bizId)&&SY.bizId!==BZ0?SY.bizId+':':'';if(p!==BZP){location.reload();return new Promise(()=>{})}}/* בפתיחה (משתמש שכבר מחובר, גם בלי bizId שמור): רענון ברקע. בלי חיבור – ממשיכים לפי מה שנשמר */async function bzOpen(){const s=SY;if(!s.refresh||!s.uid)return;const w=bzSus();try{if(!BZOK(s.bizId))await bzWho();else await bzLoad()}catch(e){}if(SY!==s)return;syS();if(bzSus()!==w){location.reload();return}bzGo()}/* מנהל־על עובר לעסק אחר (מנהל מלא בכל עסק, עדכון חוזה 2): מחליף bizId ואת התחילית במכשיר, בלי התנתקות. המסך לבחירת העסק – שלב 6 */async function bzSwitch(id){if(!BZOK(id))throw new Error('מזהה עסק לא תקין');if(!(await bzSA())){const x=new Error('רק מנהל־על יכול לעבור בין עסקים');x.noAccess=true;throw x}/* לא משנים את SY בזיכרון: הדף הישן ממשיך לעבוד כולו בעסק הקודם עד שהוא נסגר. העסק החדש נכתב רק ל-lp-sync, ומסמך העסק נטען אחרי הטעינה מחדש (bzBoot) */const o=Object.assign({},SY,{bizId:id,biz:null,role:'admin',sa:1});BZX=1;try{localStorage.setItem(SK,JSON.stringify(o))}catch(e){BZX=0;throw new Error('אין מקום לשמור במכשיר')}location.reload()}
+function syOut(){SY={};try{bzSkin()}catch(e){}try{localStorage.removeItem(SK);localStorage.removeItem(LK('lp-shin'));localStorage.removeItem(LK('lp-tasks'));localStorage.removeItem(LK('lp-tk-c'));localStorage.removeItem(LK('lp-supinv'));localStorage.removeItem(LK('lp-co-m'))}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}/* ריבוי עסקים (שלב 3): העסק נקבע לפי users/{uid}.bizId (רק השרת כותב). אין מסמך, או כל כשל (חוקים ישנים: 403, רשת) = לארג' פעמי. מסמך העסק b/{bizId} נקרא בכניסה ובפתיחה (dataRoot, status, features, brand – קריאה בלבד). כשל בטעינה: נשאר מה שנשמר, ובלי שמירה – legacy ללארג' פעמי, b לכל עסק אחר. בלי הודעת שגיאה */const BZ_SUS='החשבון מושהה – פנה לספק';const fvj=v=>!v||typeof v!=='object'?null:'stringValue'in v?v.stringValue:'booleanValue'in v?v.booleanValue:'integerValue'in v?+v.integerValue:'doubleValue'in v?v.doubleValue:'timestampValue'in v?v.timestampValue:'mapValue'in v?Object.fromEntries(Object.entries(v.mapValue.fields||{}).map(([k,x])=>[k,fvj(x)])):'arrayValue'in v?(v.arrayValue.values||[]).map(fvj):null;async function bzWho(){let b='';try{const u=await fsx('/users/'+SY.uid,0,1);b=fvj(u&&u.fields&&u.fields.bizId)}catch(e){}SY.bizId=BZOK(b)?b:BZ0;SY.biz=null;await bzLoad()}async function bzLoad(){let d=null;try{d=await fsx('/b/'+SY.bizId,0,1)}catch(e){}const o=SY.biz||{};if(!d||!d.fields){SY.biz={dataRoot:SY.bizId!==BZ0?'b':(o.dataRoot==='b'?'b':'legacy'),status:o.status==='suspended'?'suspended':'active',features:o.features||{},brand:o.brand||null,fl:o.fl||0};return}const f=fvj({mapValue:d}),ft={};for(const k in (f.features&&typeof f.features==='object'?f.features:{}))if(f.features[k]===true)ft[k]=true;SY.biz={dataRoot:SY.bizId!==BZ0||f.dataRoot==='b'?'b':'legacy',status:f.status==='suspended'?'suspended':'active',features:ft,brand:f.brand&&typeof f.brand==='object'?f.brand:null,fl:f.features&&typeof f.features==='object'?1:0}}const bzSus=()=>!!(SY.biz&&SY.biz.status==='suspended'&&!SY.sa);async function bzSA(){try{await fsx('/superadmins/'+SY.uid,0,1);SY.sa=1}catch(e){delete SY.sa}return!!SY.sa}/* התחילית במכשיר נקבעה בטעינת הדף. אם העסק השתנה (כניסה, החלפה) – טוענים את הדף מחדש, כדי שלא יישאר שום נתון בזיכרון או במפתח של עסק אחר */function bzGo(){const p=BZOK(SY.bizId)&&SY.bizId!==BZ0?SY.bizId+':':'';if(p!==BZP){location.reload();return new Promise(()=>{})}}/* בפתיחה (משתמש שכבר מחובר, גם בלי bizId שמור): רענון ברקע. בלי חיבור – ממשיכים לפי מה שנשמר */async function bzOpen(){const s=SY;if(!s.refresh||!s.uid)return;const w=bzSus();const k0=bzSig();try{if(!BZOK(s.bizId))await bzWho();else await bzLoad()}catch(e){}if(SY!==s)return;syS();if(bzSus()!==w){location.reload();return}bzGo();bzChg(k0)}/* מנהל־על עובר לעסק אחר (מנהל מלא בכל עסק, עדכון חוזה 2): מחליף bizId ואת התחילית במכשיר, בלי התנתקות. המסך לבחירת העסק – שלב 6 */async function bzSwitch(id){if(!BZOK(id))throw new Error('מזהה עסק לא תקין');if(!(await bzSA())){const x=new Error('רק מנהל־על יכול לעבור בין עסקים');x.noAccess=true;throw x}/* לא משנים את SY בזיכרון: הדף הישן ממשיך לעבוד כולו בעסק הקודם עד שהוא נסגר. העסק החדש נכתב רק ל-lp-sync, ומסמך העסק נטען אחרי הטעינה מחדש (bzBoot) */const o=Object.assign({},SY,{bizId:id,biz:null,role:'admin',sa:1});BZX=1;try{localStorage.setItem(SK,JSON.stringify(o))}catch(e){BZX=0;throw new Error('אין מקום לשמור במכשיר')}location.reload()}
 const isW=()=>SY.role==='worker'&&!!SY.refresh,isA=()=>SY.role==='admin'&&!!SY.refresh;
 /* לשונית "הזמנות אתר" (שלב 1, קבצים נפרדים ב-orders/): רק למנהל ולעובד, ורק במצב אמולטור או כשהבנייה הפעילה אותה (orders/site-backend.js) */const ordOn=()=>(isA()||isW())&&(!!EMU||['emulator','test'].includes(window.LP_SITE_BACKEND));ACT.ordGo=()=>{location.href='orders/app.html'+location.search};const ordTile=`<button class="tile" data-a="ordGo" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">🛒<br>הזמנות אתר</button>`;
 /* ---- תור שליחה (עובד) ---- */
@@ -1810,14 +1810,14 @@ V.wk=()=>{if(WS==='sinv')return supView();if(WS==='rp'&&WK.rp)return wkRpView();
  ${WKL.length?WKL.filter(x=>!x.d.repl).map(x=>`<div class="li" style="cursor:default${x.st==='rephoto'?';flex-wrap:wrap;border:2px solid var(--acc)':''}"><div class="m"><b>${ils(num(x.d.amt))} · ${esc(x.d.reg?'דף הוצאה מקופה':(x.d.catName||''))}${x.d.subName?' · '+esc(x.d.subName):''}</b><small>${esc(x.d.date||'')}${x.d.note?' · '+esc(x.d.note):''}</small></div><span class="tag ${x.st==='new'||x.st==='rephoto'?'t1':''}">${x.st==='new'?'נשלח':x.st==='rephoto'?'צריך צילום חדש':'התקבל'}</span>${x.st==='rephoto'?wkRpRow(x):''}</div>`).join(''):'<p class="note">עוד לא שלחת הוצאות.</p>'}`;
  if(WS==='home'){
   const off=`<button class="tile" disabled style="opacity:.45;cursor:default">🚧<br><small>בבנייה</small></button>`;
-  return{t:'לארג׳ פעמי',s:esc((SY.email||'').split('@')[0]),h:`${cs.length?'':'<div class="card"><p class="note">עדיין לא התקבלו קטגוריות מהמנהל. בדוק חיבור ולחץ "רענן".</p></div>'}
-  ${dpBan()}${typeof siWkSec==='function'?siWkSec():''}<div class="big2" style="grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 16px"><button class="tile exp" data-a="wkGoExp">${ico('exp')}הוצאה</button>${shTile}${fbTile}${tkTile()}${window.ylTile?ylTile():''}${ordOn()?ordTile:''}${arTile()}${zcTile()}${dpTile()}${off.repeat((1+(window.ylTile?1:0)+(ordOn()?1:0))%2)}</div>
+  return{t:bzNm(),s:esc((SY.email||'').split('@')[0]),h:`${cs.length?'':'<div class="card"><p class="note">עדיין לא התקבלו קטגוריות מהמנהל. בדוק חיבור ולחץ "רענן".</p></div>'}
+  ${dpBan()}${bzF('orders')&&typeof siWkSec==='function'?siWkSec():''}<div class="big2" style="grid-template-columns:1fr 1fr;gap:10px;margin:8px 0 16px"><button class="tile exp" data-a="wkGoExp">${ico('exp')}הוצאה</button>${bzF('shelf')?shTile:''}${bzF('feedback')?fbTile:''}${bzF('tasks')?tkTile():''}${window.ylTile&&bzF('yemot')?ylTile():''}${ordOn()&&bzF('orders')?ordTile:''}${bzF('requests')?arTile():''}${bzF('cashClose')?zcTile()+dpTile():''}${SY.bizId&&SY.bizId!==BZ0?'':off.repeat((1+(window.ylTile?1:0)+(ordOn()?1:0))%2)}</div>
   ${sent}<button class="btn g" style="width:100%;margin-top:14px" data-a="updChk">בדוק עדכון והתקן</button><button class="btn g" style="width:100%;margin-top:8px" data-a="syOut">התנתק</button>`}}
  if(WS==='exp'){
   return{t:'הוצאה',s:'סריקה או הכנסה ידנית',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>${dpBan()}
   <p class="note" style="margin:4px 0 8px">סרוק או העלה את החשבונית (או דף ההוצאה מהקופה). חשבונית של כמה עמודים: הוסף את כל העמודים ואז לחץ "זהה".</p>
-  ${wkThumbs()}${WK.pages.length?`<button class="btn w" style="margin-bottom:10px" data-a="wkGo">זהה פרטים מ-${WK.pages.length} ${WK.pages.length>1?'עמודים':'עמוד'}</button>`:''}
-  ${wkPickBtns()}<button class="btn g w" data-a="wkManual">הכנסה ידנית</button><button class="btn g w" style="margin-top:8px" data-a="supGo">🧾 חשבוניות ספקים החודש</button>`}}
+  ${wkThumbs()}${WK.pages.length&&bzF('scan')?`<button class="btn w" style="margin-bottom:10px" data-a="wkGo">זהה פרטים מ-${WK.pages.length} ${WK.pages.length>1?'עמודים':'עמוד'}</button>`:''}
+  ${wkPickBtns()}<button class="btn g w" data-a="wkManual">הכנסה ידנית</button>${bzF('suppliers')?'<button class="btn g w" style="margin-top:8px" data-a="supGo">🧾 חשבוניות ספקים החודש</button>':''}`}}
  /* ידני */
  const c=cs.find(x=>x.id===WK.cat),subs=c?c.subs:[];if(subs.length&&WK.sub&&!subs.find(s=>s.id===WK.sub))WK.sub='';if(!subs.length)WK.sub='';
  const sel=(l,n,list,v,ph)=>`<label class="f"><span>${l}</span><select name="${n}" data-c="wkf"><option value="">${ph}</option>${list.map(([k,t])=>`<option value="${esc(k)}"${k===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label>`;
@@ -2453,7 +2453,7 @@ const fbErrMsg=e=>e.code===403?(fbAdmin()?'אין הרשאה לשמור בענן
 async function fbWSent(e,r){if(e.code===409)return true;if(e.code!==403)return false;let a=null;
  try{const d=await fsx('/staff/'+SY.uid);a=!!(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)}catch(z){if(z.code===403||z.code===404)a=false}
  if(a===false){const x=new Error('אין הרשאה: המשתמש שלך לא מוגדר כעובד פעיל. פנה למנהל.');x.code=403;x.msg=1;throw x}return a===true&&(r.tr||0)>1}
-async function fbPush(){if(!fbRole())return;fbWFix();if(fbPush.b)return;fbPush.b=1;let sent=0;
+async function fbPush(){if(!fbRole()||!bzF('feedback'))return;fbWFix();if(fbPush.b)return;fbPush.b=1;let sent=0;
  try{for(const r of FBL.out.slice()){try{if(r.upd){try{await fsx('/fb/'+r.id+'?updateMask.fieldPaths=data&updateMask.fieldPaths=st',{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),st:sv('ok')}})})}catch(e){if(e.code!==403)throw e;/* הדף כבר לא קיים בענן: יוצרים אותו מחדש עם כל השדות */let img='';try{img=(await fget('fb:'+r.id))||''}catch(z){}await fsx('/fb/'+r.id,{method:'PATCH',body:JSON.stringify({fields:{data:sv(fbRecJ(r)),img:sv(img),owner:sv(SY.uid),at:sv(r.at),st:sv('ok')}})})}}
   else{const img=r.hi?(await fget('fb:'+r.id))||'':'';
   if(r.hi&&!fbAdmin()&&!r.hp){let hu='';try{hu=await fget('fbhi:'+r.id)||''}catch(e){}const n=Math.ceil(hu.length/CH);if(n&&n<=6){for(let k=0;k<n;k++){try{await fsx('/chunks?documentId='+encodeURIComponent('fbhi_'+r.id+'_'+k),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),data:sv(hu.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code===403){let c=null;try{c=await fsx('/chunks/fbhi_'+r.id+'_'+k)}catch(z){}if(c&&gv(c,'owner')===SY.uid)continue}if(e.code!==409)throw e}}r.hp=n}}
@@ -2474,7 +2474,7 @@ function fbDedup(){const best={},sc=p=>(p.st==='ok'?4:0)+(p.ed&&p.ed.length?2:0)
  FBL.pend.forEach(p=>{const b=best[p.id];if(!b||sc(p)>sc(b))best[p.id]=p});
  FBL.pend=FBL.pend.filter(p=>{if(best[p.id]===p){best[p.id]=null;return true}n++;return false});
  const so={};FBL.out=FBL.out.filter(o=>{if(so[o.id])return false;so[o.id]=1;return true});if(n)fbSave();return n}
-async function fbInbox(){if(!fbAdmin()||fbInbox.b)return 0;fbInbox.b=1;try{return await fbInbox0()}finally{fbInbox.b=0;fbDedup()}}
+async function fbInbox(){if(!fbAdmin()||fbInbox.b||!bzF('feedback'))return 0;fbInbox.b=1;try{return await fbInbox0()}finally{fbInbox.b=0;fbDedup()}}
 async function fbInbox0(){let n=0;
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'fb'}],where:{fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:'new'}}},select:{fields:[{fieldPath:'data'}]},limit:300}})});
  for(const x of(r||[])){const d=x.document;if(!d)continue;const id=idOf(d);if(!idOk(id))continue;if(FBL.pend.find(p=>p.id===id)||FBL.out.find(o=>o.id===id))continue;
@@ -2677,7 +2677,7 @@ const tkOverN=()=>(TK.L||[]).filter(tkLateNow).length;
 const tkErr=e=>e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה לפעולה הזו. אם זה חוזר, בדוק שהשעה בטלפון מדויקת, או פנה למנהל':'שגיאה: '+((e&&e.message)||e));
 async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields:TKF.map(f=>({fieldPath:f}))},limit:1000};if(where)sq.where={fieldFilter:{field:{fieldPath:where},op:'EQUAL',value:{stringValue:'1'}}};
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document&&idOk(idOf(x.document))).map(x=>tkOf(x.document))}
-async function tkLoad(){if(!fbRole())return;let L;if(fbAdmin())L=await tkQ();else{const a=await tkQ('open'),b=await tkQ('late'),m={};a.concat(b).forEach(t=>m[t.id]=t);L=Object.values(m)}
+async function tkLoad(){if(!fbRole()||!bzF('tasks'))return;let L;if(fbAdmin())L=await tkQ();else{const a=await tkQ('open'),b=await tkQ('late'),m={};a.concat(b).forEach(t=>m[t.id]=t);L=Object.values(m)}
  TK.L=L.map(t=>Object.assign(t,{due:t.cr?tkDue(t.cr):t.due}));TK.at=Date.now();tkSave();tkRe();return L.length}
 /* בונים מחדש רק כשאין טופס פתוח עם נתונים שהוקלדו */
 function tkRe(){if(document.querySelector('#dlg[open] form'))return;const ta=document.querySelector('form[data-f=tkAdd] textarea'),v=ta?ta.value:'',fo=ta&&document.activeElement===ta,cb=document.querySelector('form[data-f=tkAdd] input[name=pr]'),pr=!!(cb&&cb.checked);if(cur().v==='tk'||(isW()&&cur().v==='wk'&&typeof WS!=='undefined'&&WS==='home')){rerender();const n=document.querySelector('form[data-f=tkAdd] textarea');if(n&&v){n.value=v;if(fo)n.focus()}const c=document.querySelector('form[data-f=tkAdd] input[name=pr]');if(c&&pr)c.checked=true}}
@@ -2816,7 +2816,7 @@ CHG.tkimg=async el=>{const id=el.dataset.id,f=el.files&&el.files[0];el.value='';
  tkDo(async()=>{const du=await fbShrink(await rdU(f));if(du.length>880000)throw new Error('התמונה גדולה מדי. צלם שוב ממרחק קצת יותר גדול');await tkPatch(id,{st:'wait',img:du,sub:Date.now(),doneBy:fbBy()})},'✓ התמונה נשלחה לאישור המנהל')};
 /* התראה על משימות באיחור בכל כניסה לאפליקציה */
 let TKA=0;
-async function tkAlert(){if(!fbRole())return;try{await tkLoad()}catch(e){}const n=tkOverN();if(!n||Date.now()-TKA<600000)return;const d=$('#dlg');if(d&&d.open)return;TKA=Date.now();
+async function tkAlert(){if(!fbRole()||!bzF('tasks'))return;try{await tkLoad()}catch(e){}const n=tkOverN();if(!n||Date.now()-TKA<600000)return;const d=$('#dlg');if(d&&d.open)return;TKA=Date.now();
  dlg(`<h3>⚠️ ${n>1?n+' משימות באיחור':'משימה אחת באיחור'}</h3><p class="note">${n>1?'יש משימות שלא טופלו':'יש משימה שלא טופלה'} תוך 3 ימי עסקים.</p><div class="row"><button class="btn grow" data-a="tkGoAl">לצפייה</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`)}
 ACT.tkGoAl=()=>{closeDlg();TKT='late';go('tk')};
 setTimeout(tkAlert,3500);
@@ -3308,7 +3308,7 @@ function showGate(msg){
   if(!em||!p){err.textContent='יש להזין אימייל וסיסמה';return}
   bt.disabled=true;bt.classList.add('ld');bt.firstChild.textContent='מתחבר…';
   try{await syLogin(em,p);g.remove();document.body.classList.remove('gate');enterApp(true)}
-  catch(x){err.textContent=loginMsg(x);bt.disabled=false;bt.classList.remove('ld');bt.firstChild.textContent='כניסה'}};
+  catch(x){if(x.susp){showSusp();return}err.textContent=loginMsg(x);bt.disabled=false;bt.classList.remove('ld');bt.firstChild.textContent='כניסה'}};
  setTimeout(()=>{try{f.email.focus()}catch(e){}},50)}
 
 
@@ -3344,7 +3344,7 @@ function supWant(){const M=ilMonth(),o={},ok=id=>/^[A-Za-z0-9_-]{1,120}$/.test(i
  for(const k in o){o[k].fh=supHash(o[k].fk);o[k].h=supHash(JSON.stringify(o[k].f)+'|'+o[k].fh)}return o}
 const supSave=C=>{try{localStorage.setItem(SUPK,JSON.stringify(C))}catch(e){}};
 function supSched(){try{coSched()}catch(e){}if(!SUPS||!isA())return;clearTimeout(SUPS.t);SUPS.t=setTimeout(()=>{supSync().catch(e=>{try{console.warn('supinv',e&&e.message)}catch(z){}})},3000)}
-async function supSync(){if(!isA()||Date.now()<(SUPS.off||0))return;if(SUPS.b){SUPS.again=1;return}SUPS.b=1;try{
+async function supSync(){if(!isA()||Date.now()<(SUPS.off||0)||!bzF('suppliers'))return;if(SUPS.b){SUPS.again=1;return}SUPS.b=1;try{
  let C={};try{C=JSON.parse(localStorage.getItem(SUPK))||{}}catch(e){}
  if(!SUPS.full){const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'supinv'}],select:{fields:[{fieldPath:'h'},{fieldPath:'fh'},{fieldPath:'np'}]},limit:5000}})});
   C={};(r||[]).filter(x=>x.document).forEach(x=>{C[idOf(x.document)]={h:gv(x.document,'h'),fh:gv(x.document,'fh'),np:+gv(x.document,'np')||0}});SUPS.full=1;supSave(C)}
@@ -3367,7 +3367,7 @@ try{supSched()}catch(e){}
 /* ---- מסך העובד: חשבוניות ספקים של החודש ---- */
 ACT.supGo=()=>{WS='sinv';SUPW={L:null,b:0,err:''};rerender();supLoad()};
 ACT.supRefresh=()=>{supLoad()};
-async function supLoad(){if(SUPW.b)return;SUPW.b=1;SUPW.err='';rerender();try{const M=ilMonth();
+async function supLoad(){if(SUPW.b||!bzF('suppliers'))return;SUPW.b=1;SUPW.err='';rerender();try{const M=ilMonth();
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'supinv'}],where:{fieldFilter:{field:{fieldPath:'m'},op:'EQUAL',value:{stringValue:M}}},select:{fields:['c','n','d','at','a','inv','by','pend','src','np'].map(f=>({fieldPath:f}))},limit:2000}})});
  const L=(r||[]).filter(x=>x.document&&/^[A-Za-z0-9_-]{1,120}$/.test(idOf(x.document))).map(x=>{const d=x.document;return{id:idOf(d),c:gv(d,'c'),n:gv(d,'n'),d:gv(d,'d'),at:gv(d,'at'),a:num(gv(d,'a')),inv:gv(d,'inv'),by:gv(d,'by'),pend:gv(d,'pend')==='1',src:gv(d,'src'),np:+gv(d,'np')||0}});
  /* מה שהעובד עצמו שלח והמנהל עוד לא קיבל: מהרשימה שלו (inbox, רק שלו) */
@@ -3401,7 +3401,7 @@ const ARS={new:['חדש','t2'],doing:['בטיפול','t1'],done:['טופל','t3'
 var AR={L:null,b:0,err:'',at:0,f:'',txt:'',pics:[],busy:0};
 const arNew=()=>((AR&&AR.L)||[]).filter(x=>x.st==='new').length;
 /* מונה "חדש" למנהל (בתפריט "עוד"): נטען לכל היותר פעם בדקה */
-function arCnt(){if(!AR)return 0;if(fbAdmin()&&!AR.b&&Date.now()-AR.at>60000)arLoad().catch(()=>{});return arNew()}
+function arCnt(){if(!AR||!bzF('requests'))return 0;if(fbAdmin()&&!AR.b&&Date.now()-AR.at>60000)arLoad().catch(()=>{});return arNew()}
 function arTile(){return `<button class="tile" data-a="go" data-v="ar" style="border-color:var(--acc);color:var(--acc);font-size:1.05rem;text-align:center"><span style="display:block;font-size:30px;line-height:1;margin-bottom:6px" aria-hidden="true">🛠️</span>בקשות לעדכון האפליקציה</button>`}
 async function arLoad(){if(AR.b)return;AR.at=Date.now();if(!fbRole()){AR.err='כדי לשלוח ולראות בקשות צריך להתחבר (מסך "סנכרון ועובדים").';arRe();return}AR.b=1;AR.err='';try{
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'appreq'}],select:{fields:ARF.map(f=>({fieldPath:f}))},limit:1000}})});
@@ -3477,7 +3477,7 @@ function zcNew(){return{z:[null,null,null],o:null,f:null,reg:'',rs:'',ack:0,why:
 function zcTile(){return `<button class="tile" data-a="go" data-v="zc" style="border-color:var(--acc);color:var(--acc);font-size:1.05rem;text-align:center"><span style="display:block;font-size:30px;line-height:1;margin-bottom:6px" aria-hidden="true">💵</span>סגירת קופה</button>`}
 /* מונה "לאישור" למנהל: בלי טעינה (בדף הבית); ב"עוד" – טעינה לכל היותר פעם בדקה */
 function zcQN(){return isA()&&ZQ&&ZQ.L?ZQ.L.length:0}
-function zcCnt(){if(!ZQ||!isA())return 0;if(!zcPull.b&&Date.now()-ZQ.at>60000)zcPull().then(()=>zcRe()).catch(()=>{});return zcQN()}
+function zcCnt(){if(!ZQ||!isA()||!bzF('cashClose'))return 0;if(!zcPull.b&&Date.now()-ZQ.at>60000)zcPull().then(()=>zcRe()).catch(()=>{});return zcQN()}
 function zcRe(){const v=cur().v;if(['more','zc','home','cash'].includes(v)&&!document.querySelector('#dlg[open] form')){if(v!=='zc'){rerender();return}const el=document.getElementById('zcQ');if(el)el.innerHTML=zcQH()}}
 /* מספר מתוך שדה: '' או לא מספר → null */
 function zcN(v){const s=String(v==null?'':v).replace(/\s+/g,'');if(!s)return null;const n=pNum(s);return n==null||!isFinite(n)?null:n}
@@ -3727,7 +3727,7 @@ CHG.coTg=el=>{const g=el.form&&el.form.querySelector('[data-cog]');if(g)g.hidden
 function coErr(f,c,amt,errs){if(!f.co)return;if(!c||c.kind!=='exp'){errs.push('הוצאה מקופה – רק בהוצאות');return}if(!zcRegOk(f.creg))errs.push('בחר מאיזו קופה הוצא המזומן');if(!s_(f.cowhy))errs.push('כתוב סיבה להוצאה מהקופה');if(amt!=null&&!(amt>0))errs.push('הוצאה מקופה – הסכום צריך להיות חיובי')}
 function coSet(t,f,c){if(t.creg){delete t.co;return}if(f.co&&c&&c.kind==='exp'&&zcRegOk(f.creg))t.co={reg:f.creg,why:s_(f.cowhy).slice(0,300),tm:zcTime(f.cotm)};else delete t.co}
 /* ---- עובד: יצירת המראה אחרי שההוצאה נשלחה (מתוך pushItem). 409 = כבר קיים. שגיאת רשת – ננסה שוב עם ההוצאה; סירוב – לא חוסם את תור השליחה ---- */
-async function coPush(it){const x=it&&it.data;if(!x||!x.reg||!zcRegOk(x.creg))return;const a=rnd(Math.abs(num(x.amt))),why=s_(x.note).slice(0,300);if(!(a>0)||a>1e6||!why||!coDate(x.date))return;
+async function coPush(it){const x=it&&it.data;if(!x||!x.reg||!zcRegOk(x.creg)||!bzF('cashClose'))return;const a=rnd(Math.abs(num(x.amt))),why=s_(x.note).slice(0,300);if(!(a>0)||a>1e6||!why||!coDate(x.date))return;
  const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),reg:sv(x.creg),d:sv(x.date),tm:sv(zcTime(x.ctm)),a:dv(a),why:sv(why),dep:sv(coDep(why)),src:sv(it.id),zc:sv(''),dp:sv('')};
  try{await fsx('/cashout?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e.code===409)return;if(e.offline||!e.code||e.code>=500)throw e;try{console.warn('cashout',e.message)}catch(z){}}}
 /* ---- מנהל: מראה של ההוצאות מקופה מהטלפון (כמו supSync). שינוי בתנועה = מחיקה ויצירה מחדש (zc ו-dp נשמרים) ---- */
@@ -3747,7 +3747,7 @@ const coWarn=d=>{const zc=gv(d,'zc'),dp=gv(d,'dp');if(zc||dp)toast('שים לב:
 /* מחיקה מהענן: רק אם לא שויכה לסגירה ולא הופקדה (אחרת נשארת, עם אזהרה) */
 async function coDrop(id){let d;try{d=await fsx('/cashout/'+id)}catch(e){if(e.code===404)return;throw e}if(coWarn(d))return;
  try{await fsx('/cashout/'+id,{method:'DELETE'})}catch(e){if(e.code!==404)throw e}}
-async function coSync(){if(!isA()||Date.now()<(COS.off||0))return;if(COS.b){COS.again=1;return}COS.b=1;try{
+async function coSync(){if(!isA()||Date.now()<(COS.off||0)||!bzF('cashClose'))return;if(COS.b){COS.again=1;return}COS.b=1;try{
  let C={};try{C=JSON.parse(localStorage.getItem(COK))||{}}catch(e){}const keep=()=>{try{localStorage.setItem(COK,JSON.stringify(C))}catch(e){}};
  if(!COS.full){const L=await coQ(coEq('uid',SY.uid),2000);const C2={};L.forEach(x=>{if(x.id[0]==='m')C2[x.id]={h:coH(x)}});for(const k in C)if(C[k]&&C[k].w)C2[k]=C[k];C=C2;COS.full=1;keep()}
  for(const id of coDelL()){await coDrop(id);delete C[id];keep();try{localStorage.setItem(CODQ,JSON.stringify(coDelL().filter(x=>x!==id)))}catch(e){}}
@@ -3850,7 +3850,7 @@ async function coAssignPending(){for(const z of((S&&S.zc)||[]).filter(x=>x&&x.co
 function dpLoad(){if(DPQ.b)return DPQ.b;DPQ.b=(async()=>{try{DPQ.L=(await coQ({compositeFilter:{op:'AND',filters:[coEq('dep','1'),coEq('dp','')]}})).sort((a,b)=>a.d.localeCompare(b.d)||a.t-b.t);DPQ.err=''}catch(e){DPQ.err=coErrT(e);throw e}finally{DPQ.at=Date.now();DPQ.b=0}})();return DPQ.b}
 const dpOpen=()=>(DPQ.L||[]).filter(x=>!x.dp&&x.dep==='1');
 /* תזכורת קבועה (בית, הוצאות, סגירת קופה): נטען לכל היותר פעם בשתי דקות */
-function dpBan(){if(!fbRole())return '';if(!DPQ.b&&Date.now()-DPQ.at>120000)dpLoad().then(dpRe).catch(()=>{});const L=dpOpen();if(!L.length)return '';const s=rnd(sum(L,x=>x.a));
+function dpBan(){if(!fbRole()||!bzF('cashClose'))return '';if(!DPQ.b&&Date.now()-DPQ.at>120000)dpLoad().then(dpRe).catch(()=>{});const L=dpOpen();if(!L.length)return '';const s=rnd(sum(L,x=>x.a));
  return `<button class="ban" id="dpBan" style="margin:10px 0" data-a="go" data-v="dp"><span class="tag t4">הפקדה</span><span style="flex:1">${L.length===1?'יש הפקדה אחת שלא הועלתה':'יש <b>'+L.length+'</b> הפקדות שלא הועלו'} (${ils(s)})</span>${ico('chev')}</button>`}
 function dpRe(){const v=cur().v;if(document.querySelector('#dlg[open] form')||document.activeElement&&/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName))return;if(v==='wk'&&!['home','exp'].includes(WS))return;if(['home','wk','zc','dp','exp','more','cash'].includes(v))rerender()}
 function dpTile(){return `<button class="tile" data-a="go" data-v="dp" style="font-size:1rem;text-align:center"><span style="display:block;font-size:28px;line-height:1;margin-bottom:6px" aria-hidden="true">🏦</span>אישור הפקדה</button>`}
@@ -3929,7 +3929,7 @@ function dpParse(d){const id=idOf(d);if(!idOk(id))return null;const f=d.fields||
 async function dpHasPics(id,np){if(!(np>=1))return false;try{for(let k=0;k<np;k++)await fsx('/deposits/'+id+'/p/'+k+'?mask.fieldPaths=x');return true}catch(e){return false}}
 async function dpMark(id,st,note){const o={st,stBy:fbBy(),stAt:Date.now(),note:note||''},fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
  await fsx('/deposits/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
-async function dqPull(){if(!isA()||dqPull.b)return 0;dqPull.b=1;DQ.at=Date.now();let n=0;try{
+async function dqPull(){if(!isA()||dqPull.b||!bzF('cashClose'))return 0;dqPull.b=1;DQ.at=Date.now();let n=0;try{
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'deposits'}],where:{fieldFilter:{field:{fieldPath:'st'},op:'EQUAL',value:{stringValue:'new'}}},limit:300}})});
  const Q=[];
  for(const x of(r||[]).filter(x=>x.document).sort((a,b)=>gi(a.document,'t')-gi(b.document,'t'))){const it=dpParse(x.document);if(!it)continue;
@@ -3944,7 +3944,7 @@ async function dqPull(){if(!isA()||dqPull.b)return 0;dqPull.b=1;DQ.at=Date.now()
  DQ.L=Q;DQ.err='';if(n)toast('הפקדות: '+(n===1?'אישור אחד תואם ואושר':n+' אישורים תואמים ואושרו'))}
  catch(e){DQ.err=e.offline?e.message:(e.code===403?'אין הרשאה להפקדות (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message)}
  finally{dqPull.b=0}return n}
-function dqN(){if(!isA())return 0;if(!dqPull.b&&Date.now()-DQ.at>60000)dqPull().then(dpRe).catch(()=>{});return DQ.L?DQ.L.length:0}
+function dqN(){if(!isA()||!bzF('cashClose'))return 0;if(!dqPull.b&&Date.now()-DQ.at>60000)dqPull().then(dpRe).catch(()=>{});return DQ.L?DQ.L.length:0}
 function dqH(){if(!isA())return '';const L=DQ.L;
  if(!L)return DQ.err?`<div class="card"><p class="note" style="color:var(--bad)">${esc(DQ.err)}</p><button class="btn g" data-a="dqRefresh">נסה שוב</button></div>`:'<p class="note" style="padding:8px">טוען הפקדות…</p>';
  const card=it=>`<div class="card" style="border-color:var(--acc)"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><b>${ils(it.a)} · ${esc(dfmt(it.d)||'—')}</b><span class="note" style="margin:0">${esc(it.by||'—')}</span></div>
@@ -4083,6 +4083,196 @@ ACT.zsImg=async el=>{const D=ZS.D[ZS.m];if(!D||!D.L)return;const dk=el.dataset.k
  try{for(let k=0;k<x.np;k++)du+=gv(await fsx('/'+coll+'/'+id+'/p/'+k),'data')}catch(e){return toast(e.offline?e.message:(e.code===404?'הצילומים לא עלו במלואם':'טעינת התמונות נכשלה'))}
  let P=null;try{P=du.startsWith('PAGES:')?JSON.parse(du.slice(6)):null}catch(e){}if(!Array.isArray(P)||!P.length)return toast('הצילומים לא עלו במלואם');if(!P.every(imgOk))return toast('התמונה לא תקינה ולא תוצג');
  viewImg('','LargePami_'+(dk?'deposit_':'closing_')+id,du)};
+/* ===== ריבוי עסקים, שלב 6א: מסכי ניהול – מנהל־על ועובדים. כל שינוי של סטטוס, תוספות, הגדרות מתקדמות, צוות וכניסה לעסק עובר רק דרך פונקציות השרת (לא כתיבה ישירה ל-Firestore). הכפתור לא נוצר ב-DOM למי שאינו מנהל־על, והשרת והחוקים דוחים פעולה ממי שאינו מנהל־על גם אם מכריחים אותו להופיע ===== */
+const ADM={sa:0,chk:0,L:null,err:'',busy:0,info:{},staff:null,staffErr:'',sbusy:0};
+const ADM_FT=[['scan','זיהוי חכם (סריקת מסמכים)','עולה כסף'],['shelf','מחירים ומבצעים למדף'],['feedback','משוב לקוחות'],['tasks','משימות לעובדים'],['suppliers','ספקים וחשבוניות ספק'],['requests','בקשות לעדכון האפליקציה'],['cashClose','סגירת קופה והפקדות'],['yemot','ימות המשיח (קו טלפון)'],['orders','הזמנות אתר']];
+const ADM_ERR={'not-superadmin':'אין לך הרשאת מנהל־על','bad-biz':'מזהה עסק לא תקין','reserved':'המזהה הזה שמור, בחר מזהה אחר','biz-exists':'כבר יש עסק עם המזהה הזה','bad-name':'שם לא תקין (עד 60 תווים)','bad-email':'כתובת המייל לא תקינה','bad-phone':'מספר הטלפון לא תקין (מספר ישראלי)','is-superadmin':'המייל הזה שייך למנהל־על','other-biz':'המייל הזה כבר שייך לעסק אחר','no-biz':'העסק לא נמצא','legacy-biz':'העסק עדיין פועל במצב הקיים, ולכן הפעולה לא זמינה בו','manager-only':'הפעולה מותרת למנהל העסק בלבד','is-admin':'המשתמש הזה הוא מנהל','self':'אי אפשר לשנות את המשתמש שלך','no-staff':'העובד לא נמצא','bad-status':'סטטוס לא תקין','unknown-feature':'תוספת לא מוכרת','bad-features':'רשימת התוספות לא תקינה','bad-adv':'ההגדרות לא תקינות','foreign-biz':'העסק הזה לא שלך','biz-suspended':'העסק מושהה','bad-uid':'המשתמש לא תקין','bad-active':'הערך לא תקין'};
+const admMsg=(er,st)=>{const r=er.details&&er.details.reason;if(r&&ADM_ERR[r])return ADM_ERR[r];if(er.status==='UNAUTHENTICATED'||st===401)return'צריך להתחבר מחדש';if(er.status==='PERMISSION_DENIED'||st===403)return'אין לך הרשאה לפעולה הזו';if(/[֐-׿]/.test(er.message||''))return er.message;return'הפעולה נכשלה, נסה שוב'};
+/* קריאה לפונקציית שרת (callable) – אותו פרוטוקול של shAIcall. תשובת שגיאה מתורגמת לעברית לפי details.reason */
+async function fnCall(name,data){const t=await tok();let r,j=null;try{r=await fetch(FNB()+'/'+name,{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({data:data||{}})})}catch(e){const x=new Error('אין חיבור לאינטרנט');x.offline=true;throw x}
+ try{j=await r.json()}catch(e){}
+ if(!r.ok||!j||j.error){const er=(j&&j.error)||{},x=new Error(admMsg(er,r&&r.status));x.reason=er.details&&er.details.reason||'';throw x}return j.result}
+/* רשימת העסקים נקראת מהשורש (b/), לא מתוך העסק הנוכחי: FSR (root=1), לא FSB */
+async function admLoad(){if(ADM.busy)return;ADM.busy=1;ADM.err='';try{const L=[];let pt='';for(let i=0;i<10;i++){const j=await fsx('/b?pageSize=100'+(pt?'&pageToken='+encodeURIComponent(pt):''),0,1);for(const d of j.documents||[]){const f=fvj({mapValue:d});L.push({id:idOf(d),name:String(f.name||''),status:f.status==='suspended'?'suspended':'active',dataRoot:f.dataRoot==='legacy'?'legacy':'b',features:f.features&&typeof f.features==='object'?f.features:{}})}pt=j.nextPageToken||'';if(!pt)break}
+ if(!L.some(x=>x.id===BZ0))L.push({id:BZ0,name:'לארג׳ פעמי',status:'active',dataRoot:'legacy',features:{},missing:1});
+ L.sort((a,b)=>(a.name||a.id).localeCompare(b.name||b.id,'he'));ADM.L=L}catch(e){ADM.err=e.offline?e.message:'טעינת רשימת העסקים נכשלה'}finally{ADM.busy=0;if(cur().v==='sa'||cur().v==='sab')rerender()}}
+async function admInfo(id){ADM.info[id]={load:1};try{const d=await fsx('/b/'+id+'/private/info',0,1),f=fvj({mapValue:d});ADM.info[id]={email:String(f.ownerEmail||''),phone:String(f.ownerPhone||''),adv:f.adv&&typeof f.adv==='object'?f.adv:{}}}catch(e){ADM.info[id]={err:1,adv:{}}}if(cur().v==='sab'&&cur().a===id)rerender()}
+function admMenu(){if(typeof isA!=='function'||!isA())return'';
+ if(!ADM.chk){ADM.chk=1;bzSA().then(ok=>{ADM.sa=ok?1:0;syS();if(cur().v==='settings')rerender()})}
+ const o=(v,t,s)=>`<button class="opt" data-a="go" data-v="${v}"><span>${t}<small>${s}</small></span>${ico('chev')}</button>`,a=[];
+ if(ADM.sa)a.push(o('sa','עסקים (מנהל־על)','רשימה, פתיחת עסק, תוספות, השהיה והגדרות מתקדמות'));
+ if(admStaffOk())a.push(o('staff','עובדים','הוספה, השבתה והחזרה של עובדים'));if(admStaffOk())a.push(o('brand','מיתוג','שם, לוגו וצבעים של העסק'));
+ return a.length?`<div class="sec"><h3>ניהול</h3></div>`+a.join(''):''}
+const admStaffOk=()=>isA()&&bzB();
+const admTag=b=>`<span class="tag ${b.status==='suspended'?'t4':'t3'}">${b.status==='suspended'?'מושהה':'פעיל'}</span>`;
+V.sa=()=>{const T='מנהל־על';if(!ADM.sa)return{t:T,h:'<div class="empty">אין הרשאה</div>'};if(!ADM.L&&!ADM.err)admLoad();
+ const row=b=>`<button class="li" data-a="go" data-v="sab" data-arg="${esc(b.id)}" data-n="${esc((b.name+' '+b.id).toLowerCase())}"><div class="m"><b>${esc(b.name||b.id)}</b><small>${esc(b.id)} · ${b.dataRoot==='legacy'?'מצב קיים':Object.values(b.features).filter(x=>x===true).length+' תוספות מופעלות'}</small></div>${admTag(b)}</button>`;
+ return{t:T,s:'עסקים',h:`<button class="btn w" data-a="admNew">＋ פתיחת עסק חדש</button><label class="f" style="margin-top:12px"><span>חיפוש לפי שם</span><input type="search" data-i="admQ" autocomplete="off"></label>${ADM.err?`<div class="card"><p>${esc(ADM.err)}</p><button class="btn g" data-a="admReload">נסה שוב</button></div>`:ADM.L?`<div id="admL">${ADM.L.map(row).join('')}</div><p class="note" id="admNo" hidden>לא נמצא עסק בשם הזה</p>`:'<div class="empty">טוען…</div>'}`}};
+INP.admQ=el=>{const q=el.value.trim().toLowerCase();let n=0;$$('#admL .li').forEach(r=>{const h=!!q&&!r.dataset.n.includes(q);r.hidden=h;if(!h)n++});const m=$('#admNo');if(m)m.hidden=!(q&&!n)};
+ACT.admReload=()=>{ADM.L=null;ADM.err='';rerender()};
+ACT.admNew=()=>dlg(`<h3>פתיחת עסק חדש</h3><form data-f="admNew">${fld('מזהה העסק (אותיות לטיניות קטנות, ספרות ומקף, 3 עד 30 תווים)','id','','text','required maxlength="30" pattern="[a-z0-9\\-]{3,30}" dir="ltr" autocomplete="off"')}${fld('שם העסק (עד 60 תווים)','name','','text','required maxlength="60"')}${fld('מייל המנהל','email','','email','required dir="ltr" autocomplete="off"')}${fld('טלפון המנהל','phone','','tel','required dir="ltr" autocomplete="off"')}<div class="row"><button class="btn grow">פתח עסק</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`);
+FRM.admNew=async f=>{const x=fd(f),id=s_(x.id),nm=s_(x.name),em=s_(x.email),ph=s_(x.phone),b=f.querySelector('button');
+ if(!/^[a-z0-9-]{3,30}$/.test(id))return toast('מזהה העסק: אותיות לטיניות קטנות, ספרות ומקף, 3 עד 30 תווים');if(!nm||nm.length>60)return toast('שם העסק: עד 60 תווים');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em))return toast('כתובת המייל לא תקינה');if(!/^[0-9+\-\s()]{7,20}$/.test(ph))return toast('מספר הטלפון לא תקין');
+ b.disabled=true;try{await fnCall('createBusiness',{bizId:id,name:nm,ownerEmail:em,ownerPhone:ph});closeDlg();toast('העסק נפתח');ADM.L=null;ADM.err='';if(cur().v==='sa')rerender()}catch(e){toast(e.message)}finally{b.disabled=false}};
+V.sab=id=>{const T='כרטיס עסק';if(!ADM.sa)return{t:T,h:'<div class="empty">אין הרשאה</div>'};const b=(ADM.L||[]).find(x=>x.id===id);
+ if(!b){if(!ADM.L&&!ADM.busy)admLoad();return{t:T,h:`<div class="empty">${ADM.L?'העסק לא נמצא':'טוען…'}</div>`}}
+ if(!b.missing&&!ADM.info[id])admInfo(id);const I=ADM.info[id]||{},ad=I.adv||{},lm=ad.limits||{},ye=ad.yemot||{},lg=b.dataRoot==='legacy';
+ const top=`<div class="card"><h3 style="margin:0 0 4px">${esc(b.name||b.id)}</h3><p class="note" style="margin:0 0 8px"><bdi dir="ltr">${esc(b.id)}</bdi> ${b.missing?'':admTag(b)}</p>${b.missing?'<p class="note">העסק עדיין לא הועבר למבנה החדש, ולכן אין לו כרטיס לניהול.</p>':`<p style="margin:0">מייל המנהל: ${I.load?'טוען…':I.err?'לא נטען':`<bdi dir="ltr">${esc(I.email||'לא הוזן')}</bdi>`}</p><p style="margin:0">טלפון המנהל: ${I.load?'טוען…':I.err?'לא נטען':`<bdi dir="ltr">${esc(I.phone||'לא הוזן')}</bdi>`}</p>`}</div>`;
+ if(b.missing)return{t:T,s:b.name||b.id,h:top};
+ /* כאן יתווסף בשלב 6ג-2 הכפתור "שלח מייל כניסה" (admMail), אחרי "כניסה כמנהל". כרגע אין שליחה. */
+ const enter=`<button class="btn w" data-a="admEnter" data-id="${esc(id)}">כניסה כמנהל</button><p class="note">הכניסה נרשמת ביומן של העסק. המסך נטען מחדש בתוך העסק.</p>`;
+ if(lg)return{t:T,s:b.name||b.id,h:top+enter+`<p class="note">העסק פועל עדיין במצב הקיים: ההשהיה, התוספות וההגדרות המתקדמות יהיו זמינים אחרי ההעברה למבנה החדש.</p>`};
+ const sus=b.status==='suspended',ft=ADM_FT.map(([k,l,n])=>{const on=b.features[k]===true;return`<div class="li" style="cursor:default"><div class="m"><b>${l}</b>${n?`<small>${n}</small>`:''}</div><button class="chip ${on?'on':''}" data-a="admFeat" data-id="${esc(id)}" data-k="${k}" aria-pressed="${on}">${on?'פעיל':'כבוי'}</button></div>`}).join('');
+ const nf=(l,n,v,ph)=>fld(l,n,v==null?'':v,'number',`min="0" step="1" inputmode="numeric" placeholder="${ph}"`);
+ return{t:T,s:b.name||b.id,h:top+enter+`<div class="sec"><h3>השהיה</h3></div><div class="card"><p class="note" style="margin-top:0">${sus?'העסק מושהה: העובדים והמנהל לא ניגשים לנתונים.':'עסק פעיל. השהיה חוסמת את הגישה של העובדים והמנהל. שום דבר לא נמחק.'}</p><button class="btn ${sus?'':'r'} w" data-a="admSus" data-id="${esc(id)}">${sus?'שחרור מהשהיה':'השהיית העסק'}</button></div>
+ <div class="sec"><h3>תוספות</h3></div>${ft}
+ <div class="sec"><h3>הגדרות מתקדמות</h3></div>${I.load?'<div class="empty">טוען…</div>':I.err?'<div class="card"><p class="note">ההגדרות לא נטענו. חזור למסך הקודם ופתח שוב.</p></div>':`<form class="card" data-f="admAdv" data-id="${esc(id)}"><p class="note" style="margin-top:0">מכסות ביום. שדה ריק = ברירת המחדל.</p>${nf('זיהויים חכמים ביום לעסק','scanDaily',lm.scanDaily,'ברירת מחדל: 50')}${nf('זיהויים חכמים ביום לכל משתמש','scanPerUserDaily',lm.scanPerUserDaily,'ברירת מחדל של השרת')}${nf('פעולות ימות ביום','yemotDaily',lm.yemotDaily,'ברירת מחדל של השרת')}<h4 style="margin:14px 0 4px">קו ימות המשיח</h4><p class="note" style="margin-top:0">תשתית בלבד – הקו לא מחובר.</p>${fld('טלפון','yphone',ye.phone||'','tel','dir="ltr" autocomplete="off"')}${fld('מספר נכנס (DID)','ydid',ye.did||'','tel','dir="ltr" autocomplete="off"')}${fld('שלוחה','yext',ye.ext||'','text','dir="ltr" autocomplete="off" maxlength="20"')}${fld('תיאור','ylabel',ye.label||'','text','maxlength="60"')}<button class="btn w">שמור הגדרות</button></form>
+ <div class="card"><p class="note" style="margin-top:0">אסימון לכתובת של הקו. האסימון מוצג פעם אחת בלבד ולא נשמר במכשיר.</p><button class="btn g w" data-a="admTok" data-id="${esc(id)}">צור אסימון לקו</button></div>`}`}};
+const admBiz=id=>(ADM.L||[]).find(x=>x.id===id);
+/* כניסה כמנהל: קודם רישום ביומן (logBusinessEntry), ורק אם הצליח – מעבר (bzSwitch). אם הרישום נכשל לא נכנסים */
+ACT.admEnter=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('logBusinessEntry',{bizId:id})}catch(e){el.disabled=false;return toast('הכניסה לא נרשמה ולכן לא נכנסנו לעסק: '+e.message)}
+ try{await bzSwitch(id)}catch(e){el.disabled=false;toast(e.message)}};
+ACT.admFeat=async el=>{const id=el.dataset.id,k=el.dataset.k,b=admBiz(id);if(!b)return;el.disabled=true;
+ try{const r=await fnCall('setBusinessFeatures',{bizId:id,features:{[k]:b.features[k]!==true}});b.features=r&&r.features&&typeof r.features==='object'?r.features:b.features;toast('התוספת עודכנה')}catch(e){toast(e.message)}finally{if(cur().v==='sab')rerender()}};
+ACT.admSus=el=>{const id=el.dataset.id,b=admBiz(id);if(!b)return;const s=b.status!=='suspended';
+ ask(s?`להשהות את "${b.name||id}"? העובדים והמנהל לא ייגשו לנתונים. שום דבר לא נמחק, ואפשר לשחרר בכל רגע.`:`לשחרר את "${b.name||id}" מההשהיה?`,async()=>{try{const r=await fnCall('setBusinessStatus',{bizId:id,status:s?'suspended':'active'});b.status=r&&r.status==='suspended'?'suspended':'active';toast(s?'העסק הושהה':'ההשהיה בוטלה')}catch(e){toast(e.message)}finally{if(cur().v==='sab')rerender()}},s?'כן, השהה':'כן, שחרר')};
+FRM.admAdv=async f=>{const id=f.dataset.id,x=fd(f),I=ADM.info[id]||{},adv={},lim={},btn=f.querySelector('button');
+ for(const[k,mx]of[['scanDaily',10000],['scanPerUserDaily',1000],['yemotDaily',1000]]){const v=s_(x[k]);if(v==='')continue;if(!/^\d{1,5}$/.test(v)||+v>mx)return toast('מכסה: מספר שלם בין 0 ל-'+mx);lim[k]=+v}
+ if(Object.keys(lim).length)adv.limits=lim;const y={phone:s_(x.yphone),did:s_(x.ydid),ext:s_(x.yext),label:s_(x.ylabel)};
+ if(!/^[0-9+\-\s()]{0,20}$/.test(y.phone)||!/^[0-9+\-\s()]{0,20}$/.test(y.did))return toast('טלפון: ספרות בלבד');if(!/^[0-9/]{0,20}$/.test(y.ext))return toast('שלוחה: ספרות ונטוי בלבד');
+ if(Object.values(y).some(Boolean)||(I.adv&&I.adv.yemot))adv.yemot=y;
+ btn.disabled=true;try{const r=await fnCall('setBusinessAdv',{bizId:id,adv});I.adv=r&&r.adv&&typeof r.adv==='object'?r.adv:adv;toast('ההגדרות נשמרו');rerender()}catch(e){toast(e.message)}finally{btn.disabled=false}};
+ACT.admTok=el=>{const id=el.dataset.id,b=admBiz(id);ask(`ליצור אסימון חדש לקו של "${b?b.name||id:id}"? אסימון קודם יפסיק לעבוד.`,async()=>{try{const r=await fnCall('setYemotToken',{bizId:id}),t=String(r&&r.token||'');if(!t)throw new Error('לא התקבל אסימון');
+ dlg(`<h3>אסימון לקו</h3><p class="note"><b>האסימון מוצג פעם אחת בלבד</b> ולא יוצג שוב. העתק אותו עכשיו ושמור במקום בטוח. אם הלך לאיבוד – צור אסימון חדש.</p><div class="card" style="word-break:break-all;direction:ltr;text-align:left"><code id="admTok">${esc(t)}</code></div><div class="row"><button class="btn grow" data-a="admCopy">העתק</button><button class="btn g grow" data-a="admTokDone">סגור</button></div>`)}catch(e){toast(e.message)}},'כן, צור')};
+ACT.admCopy=()=>{const e=$('#admTok');if(!e)return;const t=e.textContent;(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('האסימון הועתק'),()=>{try{const r=document.createRange();r.selectNodeContents(e);const s=getSelection();s.removeAllRanges();s.addRange(r);toast('סמן והעתק ידנית')}catch(x){}})};
+ACT.admTokDone=()=>closeDlg();
+$('#dlg').addEventListener('close',()=>{if($('#admTok'))$('#dlg').innerHTML=''});/* האסימון נמחק מהמסך בכל סגירה */
+/* מסך עובדים: למנהל עסק במצב b ולמנהל־על שנכנס לעסק. אצל לארג' פעמי במצב legacy לא מוצג (bzB()=false), וניהול העובדים נשאר כמו היום */
+async function admStaffLoad(){if(ADM.sbusy)return;ADM.sbusy=1;ADM.staffErr='';try{const j=await fsx('/staff?pageSize=300'),L=(j.documents||[]).map(d=>{const f=fvj({mapValue:d});return{uid:idOf(d),name:String(f.name||''),email:String(f.email||''),role:String(f.role||''),active:f.active===true}});L.sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email,'he'));ADM.staff=L}catch(e){ADM.staffErr=e.offline?e.message:'טעינת רשימת העובדים נכשלה'}finally{ADM.sbusy=0;if(cur().v==='staff')rerender()}}
+V.staff=()=>{const T='עובדים';if(!admStaffOk())return{t:T,h:'<div class="empty">המסך הזה זמין בעסקים במבנה החדש בלבד</div>'};if(!ADM.staff&&!ADM.staffErr)admStaffLoad();
+ const row=u=>{const mine=u.role==='manager'||u.uid===SY.uid;return`<div class="li" style="cursor:default"><div class="m"><b>${esc(u.name||u.email||u.uid)}</b><small><bdi dir="ltr">${esc(u.email)}</bdi></small></div><span class="tag ${u.active?'t3':'t4'}">${u.active?'פעיל':'מושבת'}</span>${mine?'':`<button class="btn s g" data-a="admStf" data-uid="${esc(u.uid)}">${u.active?'השבתה':'החזרה'}</button>`}</div>`};
+ return{t:T,s:'צוות העסק',h:`<form class="card" data-f="admStaffAdd"><h3 style="margin-top:0">הוספת עובד</h3>${fld('שם העובד','name','','text','required maxlength="60"')}${fld('מייל העובד','email','','email','required dir="ltr" autocomplete="off"')}<button class="btn w">הוסף עובד</button><p class="note">שליחת מייל כניסה לעובד עדיין לא מחוברת.</p></form>${ADM.staffErr?`<div class="card"><p>${esc(ADM.staffErr)}</p><button class="btn g" data-a="admStfReload">נסה שוב</button></div>`:ADM.staff?(ADM.staff.length?ADM.staff.map(row).join(''):'<div class="empty">אין עובדים עדיין</div>'):'<div class="empty">טוען…</div>'}`}};
+ACT.admStfReload=()=>{ADM.staff=null;ADM.staffErr='';rerender()};
+FRM.admStaffAdd=async f=>{const x=fd(f),nm=s_(x.name),em=s_(x.email),b=f.querySelector('button');if(!nm||nm.length>60)return toast('שם העובד: עד 60 תווים');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em))return toast('כתובת המייל לא תקינה');
+ b.disabled=true;try{await fnCall('addStaff',Object.assign({email:em,name:nm},SY.sa?{bizId:SY.bizId}:{}));toast('העובד נוסף');ADM.staff=null;rerender()}catch(e){toast(e.message)}finally{b.disabled=false}};
+ACT.admStf=el=>{const u=(ADM.staff||[]).find(x=>x.uid===el.dataset.uid);if(!u)return;const a=!u.active;
+ ask(a?`להחזיר את ${u.name||u.email} לפעילות?`:`להשבית את ${u.name||u.email}? הוא לא ייכנס לנתוני העסק עד שתחזיר אותו.`,async()=>{try{const r=await fnCall('setStaffActive',Object.assign({uid:u.uid,active:a},SY.sa?{bizId:SY.bizId}:{}));u.active=r&&typeof r.active==='boolean'?r.active:a;toast(a?'העובד הוחזר':'העובד הושבת')}catch(e){toast(e.message)}finally{if(cur().v==='staff')rerender()}},a?'כן, החזר':'כן, השבת')};
+/* ===== ריבוי עסקים, שלב 6ב: מיתוג, הסתרת תוספות כבויות, מסך "החשבון מושהה", פריסה למסך רחב והעלאת קובץ במחשב.
+ כל הצבעים בקוד הזה מחושבים מנתונים (הלוגו, בחירת המנהל או ערכת הנושא). אין כאן צבע קבוע חדש. ===== */
+var BZC=['acc','acc2','onacc','bg','card','ink'],BZK='',BZU='',BZLG=null,BR=null;
+var BZV={shelf:'shelf',fb:'feedback',tk:'tasks',ar:'requests',zc:'cashClose',zs:'cashClose',dp:'cashClose',yl:'yemot',scan:'scan'};
+const BZHEX=/^#[0-9a-fA-F]{6}$/,bzNorm=h=>BZHEX.test(h||'')?h.toLowerCase():null;
+/* א. תוספות: מוצגת רק תוספת שב-features של העסק היא true. נפילה בטוחה: אצל לארג' פעמי, אם מסמך העסק לא נטען או שאין בו features – הכול מוצג כמו היום. בעסק אחר בלי features – הכול כבוי */
+function bzF(k){const b=SY.biz;if(b&&b.status==='suspended'&&!SY.sa)return false;if((!BZOK(SY.bizId)||SY.bizId===BZ0)&&!(b&&b.fl))return true;return!!(b&&b.features&&b.features[k]===true)}
+const bzNm=()=>{const b=SY.biz&&SY.biz.brand;return SY.bizId&&SY.bizId!==BZ0&&b&&s_(b.name)||'לארג׳ פעמי'};
+const bzSig=()=>JSON.stringify([SY.bizId,SY.biz&&SY.biz.features,SY.biz&&SY.biz.brand,SY.biz&&SY.biz.fl]);
+/* אחרי רענון מסמך העסק ברקע: אם התוספות או המיתוג השתנו – מציירים מחדש (לא כשמקלידים או כשיש חלון פתוח) */
+function bzChg(k0){try{if(bzSig()===k0)return;bzSkin();const e=document.activeElement;if(A||(e&&/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName))||$('#dlg').open||!$('#sheet').hidden||cur().v==='brand')return;rerender()}catch(x){}}
+/* ב. צבעים וניגודיות (נוסחת WCAG: המרה ליניארית של sRGB, יחס (בהיר+0.05)/(כהה+0.05), נדרש 4.5 לפחות) */
+const bzRGB=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)),bzHex=a=>'#'+a.map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+const bzLin=v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)};
+const bzLum=h=>{const[r,g,b]=bzRGB(h);return .2126*bzLin(r)+.7152*bzLin(g)+.0722*bzLin(b)};
+const bzCR=(a,b)=>{const x=bzLum(a),y=bzLum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
+const bzMix=(a,b,t)=>{const p=bzRGB(a),q=bzRGB(b);return bzHex(p.map((v,i)=>v+(q[i]-v)*t))};
+const BZ_K=bzHex([0,0,0]),BZ_W=bzHex([255,255,255]),bzAcc2=(acc,bg)=>bzMix(bg,acc,.16);
+/* הצבעים המשניים (טקסט משני וקווים) נגזרים מהטקסט והרקע, כדי שיתאימו לכל סט צבעים שנבחר */
+const bzMut=c=>bzMix(c.ink,c.bg,.25),bzLine=c=>bzMix(c.ink,c.bg,.8);
+const BZ_PAIRS=[['ink','bg','טקסט על הרקע'],['ink','card','טקסט על כרטיס'],['ink','acc2','טקסט על הדגשה בהירה'],['mut','bg','טקסט משני על הרקע'],['mut','card','טקסט משני על כרטיס'],['acc','bg','צבע ההדגשה כטקסט על הרקע'],['acc','card','צבע ההדגשה כטקסט על כרטיס'],['onacc','acc','טקסט על כפתור הדגשה']];
+function bzChk(c){const d=Object.assign({mut:bzMut(c)},c);return BZ_PAIRS.map(([a,b,t])=>({a,b,t,r:bzCR(d[a],d[b])}))}
+const bzOk=c=>bzChk(c).every(p=>p.r>=4.5);
+function bzPush(h,to,ok){for(let t=0;t<1.04;t+=.04){const x=bzMix(h,to,Math.min(1,t));if(ok(x))return x}return to}
+/* תיקון אוטומטי: מבהיר או מכהה עד שכל הזוגות עוברים 4.5:1. הרקע לא זז (אלא ברשת הביטחון האחרונה) */
+function bzFix(c){let o=Object.assign({},c);const sd=h=>bzLum(h)>.179;
+ for(let k=0;k<4;k++){
+  if(k===3){const lt=sd(o.bg);o.bg=lt?bzMix(o.acc,BZ_W,.94):bzMix(o.acc,BZ_K,.9);o.card=lt?BZ_W:bzMix(o.acc,BZ_K,.8)}
+  if(sd(o.card)!==sd(o.bg))o.card=o.bg;
+  const lt=sd(o.bg),to=lt?BZ_K:BZ_W;
+  o.acc=bzPush(o.acc,to,x=>bzCR(x,o.bg)>=4.5&&bzCR(x,o.card)>=4.5);
+  if(sd(o.acc2)!==lt||k===3)o.acc2=bzAcc2(o.acc,o.bg);
+  if(k&&k<3)o.acc2=bzMix(o.acc2,o.bg,k*.25);
+  o.ink=bzPush(o.ink,to,x=>[o.bg,o.card,o.acc2].every(b=>bzCR(x,b)>=4.5)&&[o.bg,o.card].every(b=>bzCR(bzMix(x,o.bg,.25),b)>=4.5));
+  if(bzCR(o.onacc,o.acc)<4.5)o.onacc=bzCR(BZ_K,o.acc)>=bzCR(BZ_W,o.acc)?BZ_K:BZ_W;
+  if(bzOk(o))break}
+ return o}
+/* ג. הצעות צבע מהלוגו: מקבלים פיקסלים (RGBA) של תמונה מוקטנת. מדלגים על שקיפות ועל לבן/שחור כמעט טהורים, מקבצים לפי גוון (12 קבוצות), ולוקחים עד שני גוונים בולטים */
+function bzHue(r,g,b){const mx=Math.max(r,g,b),d=mx-Math.min(r,g,b);if(!d)return 0;let h=(mx===r?((g-b)/d)%6:mx===g?(b-r)/d+2:(r-g)/d+4)*60;return h<0?h+360:h}
+function bzSuggest(px){const B=Array.from({length:12},()=>({n:0,r:0,g:0,b:0})),Q={};let tot=0;
+ for(let i=0;i+3<px.length;i+=4){if(px[i+3]<128)continue;const r=px[i],g=px[i+1],b=px[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b);tot++;
+  const q=(r>>4)+'.'+(g>>4)+'.'+(b>>4),o=Q[q]||(Q[q]={n:0,r:0,g:0,b:0});o.n++;o.r+=r;o.g+=g;o.b+=b;
+  if(mn>=235||mx<=28)continue;if((mx-mn)/mx<.22||mx<60)continue;
+  const x=B[Math.floor(bzHue(r,g,b)/30)%12];x.n++;x.r+=r;x.g+=g;x.b+=b}
+ if(!tot)return[];
+ const L=B.map((x,k)=>({k,n:x.n,c:[x.r,x.g,x.b].map(v=>v/(x.n||1))})).filter(x=>x.n>=Math.max(3,tot*.02)).sort((a,b)=>b.n-a.n),pick=[];
+ for(const x of L){if(pick.every(p=>{const d=Math.abs(p.k-x.k);return Math.min(d,12-d)>=2}))pick.push(x);if(pick.length===2)break}
+ if(!pick.length){const t=Object.values(Q).sort((a,b)=>b.n-a.n)[0];pick.push({k:0,n:t.n,c:[t.r,t.g,t.b].map(v=>v/t.n)})}
+ const out=[];
+ pick.forEach((p,i)=>{const acc=bzHex(p.c),nm=pick.length>1?' '+(i+1):'';
+  out.push(['בהיר'+nm,{acc,bg:bzMix(acc,BZ_W,.94),card:bzMix(acc,BZ_W,.985),ink:bzMix(acc,BZ_K,.82)}]);
+  out.push(['כהה'+nm,{acc,bg:bzMix(acc,BZ_K,.9),card:bzMix(acc,BZ_K,.8),ink:bzMix(acc,BZ_W,.92)}])});
+ if(out.length<3){const acc=bzMix(bzHex(pick[0].c),BZ_K,.3);out.push(['בהיר, הדגשה עמוקה',{acc,bg:bzMix(acc,BZ_W,.95),card:BZ_W,ink:bzMix(acc,BZ_K,.6)}])}
+ return out.map(([n,c])=>{c.acc2=bzAcc2(c.acc,c.bg);c.onacc=bzCR(BZ_K,c.acc)>=bzCR(BZ_W,c.acc)?BZ_K:BZ_W;return{n,c:bzFix(c)}})}
+async function bzAnalyze(f){const u=URL.createObjectURL(f);try{const im=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>no(new Error('img'));i.src=u});
+ const w0=im.naturalWidth,h0=im.naturalHeight;if(!w0||!h0)throw new Error('img');const sc=Math.min(1,48/Math.max(w0,h0)),w=Math.max(1,Math.round(w0*sc)),h=Math.max(1,Math.round(h0*sc)),cv=document.createElement('canvas');cv.width=w;cv.height=h;
+ const cx=cv.getContext('2d');cx.drawImage(im,0,0,w,h);return bzSuggest(cx.getImageData(0,0,w,h).data)}finally{URL.revokeObjectURL(u)}}
+/* ד. החלת המיתוג: ערכי המשתנים הקיימים של ערכת הנושא (--acc, --acc2, --onacc, --bg, --card, --ink, ועוד --mut ו---line שנגזרים מהם). בלי brand או עם colors ריק: כלום לא נכתב, והמראה זהה לקודם */
+function bzSkin(pv){const b=SY.biz&&SY.biz.brand,c=pv||(b&&b.colors&&typeof b.colors==='object'?b.colors:{}),ok=BZC.filter(k=>BZHEX.test(c[k]||'')),key=ok.map(k=>k+c[k]).join(),st=document.documentElement.style;
+ if(key!==BZK){BZK=key;BZC.forEach(k=>ok.includes(k)?st.setProperty('--'+k,c[k]):st.removeProperty('--'+k));
+  if(ok.length===6){st.setProperty('--mut',bzMut(c));st.setProperty('--line',bzLine(c))}else{st.removeProperty('--mut');st.removeProperty('--line')}}
+ if(!pv)bzLogo()}
+/* לוגו העסק בכותרת: נטען מ-Storage (b/{bizId}/brand/logo) עם הכניסה של המשתמש. נכשל = נשאר הלוגו הרגיל */
+function bzLogo(){const b=SY.biz&&SY.biz.brand,p=b&&typeof b.logoPath==='string'&&SY.bizId&&SY.bizId!==BZ0&&BZOK(SY.bizId)&&SY.refresh&&b.logoPath===('b/'+SY.bizId+'/brand/logo')?b.logoPath:'',key=p?SY.bizId+'|'+(b.updatedAt||''):'';
+ if(key===BZU)return;BZU=key;const el=document.getElementById('lglogo'),h=document.documentElement;
+ if(!p){if(BZLG){URL.revokeObjectURL(BZLG);BZLG=null}h.removeAttribute('data-bzl');try{el.style.backgroundImage='url('+GATE_LOGO+')'}catch(e){}return}
+ abkSt('/'+encodeURIComponent(p)+'?alt=media').then(r=>r.blob()).then(bl=>{if(BZU!==key)return;if(BZLG)URL.revokeObjectURL(BZLG);BZLG=URL.createObjectURL(bl);el.style.backgroundImage='url('+BZLG+')';h.setAttribute('data-bzl','1')}).catch(()=>{})}
+/* ה. מסך "החשבון מושהה – פנה לספק": מסך מלא בלי נתוני העסק. אפשר להתנתק ולבדוק עדכון אפליקציה (app_releases פתוח גם לעסק מושהה) */
+function showSusp(){document.body.classList.remove('gate');const g=document.getElementById('gate');if(g)g.remove();let e=document.getElementById('susp');if(e)e.remove();
+ e=document.createElement('div');e.id='susp';e.setAttribute('role','alert');
+ e.innerHTML=`<div class="card"><h2>${esc(BZ_SUS)}</h2><p class="note">הגישה לנתוני העסק הופסקה זמנית. שום נתון לא נמחק, והגישה תחזור כשהחשבון יחזור לפעילות.</p><p class="note" id="suspM" aria-live="polite"></p><button class="btn g w" data-a="suspUpd">בדיקת עדכון לאפליקציה</button><button class="btn w" style="margin-top:8px" data-a="syOut">התנתק</button></div>`;
+ document.body.classList.add('susp');document.body.append(e);if(isNat())setTimeout(()=>{checkUpdate(false).catch(()=>{})},800)}
+ACT.suspUpd=async()=>{const m=document.getElementById('suspM');if(m)m.textContent='בודק…';try{await checkUpdate(true)}catch(x){}if(m)m.textContent=''};
+/* ו. מחשב (לא באפליקציה, עכבר): "צלם" הופך להעלאת קובץ. בטלפון, גם בדפדפן, המצלמה נשארת */
+function bzDesk(){document.querySelectorAll('input[capture]').forEach(i=>{i.removeAttribute('capture');const l=i.closest('label');if(l)for(const n of l.childNodes)if(n.nodeType===3&&/צלם|📷/.test(n.nodeValue))n.nodeValue=n.nodeValue.replace('📷','📁').replace(/צלם/g,'העלה')})}
+try{if(!isNat()&&matchMedia('(pointer:fine)').matches){document.documentElement.classList.add('bzd');bzDesk();let q=0;new MutationObserver(()=>{if(q)return;q=1;requestAnimationFrame(()=>{q=0;bzDesk()})}).observe(document.body,{childList:true,subtree:true})}}catch(e){}
+/* ז. מסך מיתוג (מנהל עסק, ומנהל־על בתוך עסק): שם, לוגו, הצעות צבע מהלוגו, עריכה ידנית, תצוגה מקדימה, חזרה לברירת המחדל. שמירה: brand בלבד (updateMask), והלוגו ל-Storage */
+const BR_N={acc:'הדגשה (כפתורים וסימונים)',acc2:'הדגשה בהירה (כותרות טבלה)',onacc:'טקסט על ההדגשה',bg:'רקע',card:'כרטיס',ink:'טקסט'},BR_TYPES=['image/png','image/jpeg','image/webp'],BR_MAX=1048576;
+function bzProbe(k){const p=document.createElement('i');p.style.color='var(--'+k+')';document.body.append(p);const m=/(\d+)[, ]+(\d+)[, ]+(\d+)/.exec(getComputedStyle(p).color)||[0,0,0,0];p.remove();return bzHex([+m[1],+m[2],+m[3]])}
+function brInit(){const b=SY.biz&&SY.biz.brand||{},c=b.colors&&typeof b.colors==='object'?b.colors:{},full=BZC.every(k=>BZHEX.test(c[k]||''));return{name:s_(b.name),colors:full?Object.fromEntries(BZC.map(k=>[k,c[k].toLowerCase()])):{},custom:full,file:null,url:'',sugg:[],busy:0}}
+const brEff=()=>Object.fromEntries(BZC.map(k=>[k,BR.colors[k]||bzProbe(k)]));
+const bzVars=c=>BZC.map(k=>'--'+k+':'+c[k]).concat(['--mut:'+bzMut(c),'--line:'+bzLine(c)]).join(';');
+const brLg=()=>BR.url?`<img src="${BR.url}" alt="הלוגו שנבחר" style="max-width:96px;max-height:96px;display:block;margin:6px 0;border-radius:12px;background:var(--card)"><p class="note">${esc(BR.file.name)} · יישמר בלחיצה על "שמירה"</p>`:(BZLG?`<img src="${BZLG}" alt="הלוגו הנוכחי" style="max-width:96px;max-height:96px;display:block;margin:6px 0;border-radius:12px;background:var(--card)">`:'<p class="note">עדיין אין לוגו לעסק.</p>');
+const brSg=()=>BR.sugg.length?`<h3>הצעות צבע מהלוגו</h3><div class="brsgs">${BR.sugg.map((s,i)=>`<button type="button" class="brsg ${BZC.every(k=>BR.colors[k]===s.c[k])?'on':''}" data-a="brPick" data-i="${i}" style="${bzVars(s.c)}" aria-label="הצעה: ${esc(s.n)}"><i style="background:var(--acc)"></i><i style="background:var(--bg);border:1px solid var(--ink)"></i><i style="background:var(--ink)"></i><small style="color:var(--ink)">${esc(s.n)}</small></button>`).join('')}</div>`:'<p class="note">בחירת לוגו תציג כאן 3–4 הצעות צבע.</p>';
+const brPv=()=>`<div class="brpv" style="${bzVars(brEff())}"><div class="brh"><b>${esc(s_(BR.name)||'שם העסק')}</b></div><div class="brc">כרטיס לדוגמה<br><small>טקסט משני</small></div><span class="btn s">כפתור</span> <span class="btn s g">כפתור משני</span></div>`;
+const brWn=()=>{if(!BR.custom)return'';const bad=bzChk(brEff()).filter(p=>p.r<4.5);return bad.length?`<div class="card" style="border-color:var(--bad)" role="alert"><b style="color:var(--bad)">הצבעים לא עומדים בניגודיות מינימלית (4.5:1)</b>${bad.map(p=>`<p class="note" style="margin:4px 0">${esc(p.t)}: ${p.r.toFixed(1)}:1</p>`).join('')}<button type="button" class="btn s w" data-a="brFix">תיקון אוטומטי</button></div>`:''};
+function brDraw(skip){if(cur().v!=='brand')return;const set=(id,h)=>{const e=document.getElementById(id);if(e)e.innerHTML=h};set('brLg',brLg());set('brSg',brSg());set('brPv',brPv());set('brWn',brWn());
+ const c=brEff();document.querySelectorAll('[data-i=brc]').forEach(e=>{if(e!==skip)e.value=c[e.dataset.k]});const sb=document.getElementById('brSaveBtn');if(sb)sb.disabled=!!BR.busy||(BR.custom&&!bzOk(c))}
+V.brand=()=>{if(!admStaffOk())return{t:'מיתוג',h:'<div class="empty">המסך הזה למנהל העסק בלבד</div>'};if(!BR)BR=brInit();const c=brEff();
+ return{t:'מיתוג',s:'שם, לוגו וצבעים',h:`<form data-f="brSave"><div class="card"><label class="f"><span>שם תצוגה (עד 60 תווים)</span><input name="name" maxlength="60" value="${esc(BR.name)}" data-i="brName" autocomplete="off"></label></div>
+ <div class="card"><h3>לוגו</h3><p class="note">png, jpeg או webp, עד 1MB.</p><div id="brLg">${brLg()}</div><label class="btn g w" style="cursor:pointer;margin-top:8px">📁 בחירת לוגו<input type="file" accept="image/png,image/jpeg,image/webp" data-c="brFile" hidden></label></div>
+ <div class="card" id="brSg">${brSg()}</div>
+ <div class="card"><h3>צבעים</h3>${BZC.map(k=>`<div class="brrow"><span>${BR_N[k]}</span><input type="color" data-i="brc" data-k="${k}" value="${c[k]}" aria-label="${BR_N[k]}"><input type="text" data-i="brc" data-k="${k}" value="${c[k]}" dir="ltr" maxlength="7" autocomplete="off" aria-label="${BR_N[k]} (קוד צבע)"></div>`).join('')}</div>
+ <div id="brWn">${brWn()}</div><div class="card"><h3>תצוגה מקדימה</h3><div id="brPv">${brPv()}</div></div>
+ <button class="btn w" id="brSaveBtn">שמירה</button><button type="button" class="btn g w" style="margin-top:8px" data-a="brReset">חזרה לצבעי ברירת המחדל</button></form>`}};
+INP.brName=el=>{BR.name=el.value;const e=document.getElementById('brPv');if(e)e.innerHTML=brPv()};
+INP.brc=el=>{const v=bzNorm(el.value.trim());if(!v){el.setAttribute('aria-invalid','true');return}el.removeAttribute('aria-invalid');if(!BR.custom){BR.colors=brEff();BR.custom=1}BR.colors[el.dataset.k]=v;brDraw(el)};
+CHG.brFile=async el=>{const f=el.files&&el.files[0];el.value='';if(!f||!BR)return;
+ if(!BR_TYPES.includes(f.type))return toast('סוג הקובץ לא נתמך. בחר תמונה מסוג png, jpeg או webp');
+ if(f.size>BR_MAX)return toast('הלוגו גדול מ-1MB. בחר קובץ קטן יותר');
+ let sg;try{sg=await bzAnalyze(f)}catch(e){return toast('לא ניתן לקרוא את התמונה')}
+ if(!BR)return;BR.file=f;if(BR.url)URL.revokeObjectURL(BR.url);BR.url=URL.createObjectURL(f);BR.sugg=sg;brDraw();toast(sg.length?'הלוגו נקלט. אפשר לבחור הצעת צבעים':'הלוגו נקלט (לא נמצאו בו צבעים להצעה)')};
+ACT.brPick=el=>{const s=BR&&BR.sugg[+el.dataset.i];if(!s)return;BR.colors=Object.assign({},s.c);BR.custom=1;brDraw()};
+ACT.brFix=()=>{if(!BR)return;BR.colors=bzFix(brEff());BR.custom=1;brDraw();toast('הצבעים תוקנו לניגודיות תקינה')};
+ACT.brReset=()=>ask('לחזור לצבעי ברירת המחדל של האפליקציה? השינוי יישמר מיד.',()=>{brSave(true)});
+FRM.brSave=()=>{brSave(false)};
+async function brUp(f){const t=await tok();let r;try{r=await fetch(STB()+'?uploadType=media&name='+encodeURIComponent('b/'+SY.bizId+'/brand/logo'),{method:'POST',headers:{Authorization:'Firebase '+t,'Content-Type':f.type},body:f})}catch(e){const x=new Error('אין חיבור לאינטרנט');x.offline=true;throw x}
+ if(!r.ok){const x=new Error(r.status===403?'אין הרשאה להעלות לוגו':'העלאת הלוגו נכשלה ('+r.status+')');x.code=r.status;throw x}}
+async function brSave(reset){if(!admStaffOk()||!BR||BR.busy)return;const nm=s_(BR.name);if(nm.length>60)return toast('שם התצוגה: עד 60 תווים');
+ let colors={};if(!reset&&BR.custom){const c=brEff();if(!BZC.every(k=>BZHEX.test(c[k])))return toast('כל צבע חייב להיות בצורה #rrggbb');if(!bzOk(c))return toast('יש צבעים שלא עומדים בניגודיות. לחץ "תיקון אוטומטי"');colors=c}
+ const old=SY.biz&&SY.biz.brand||{};let lp=typeof old.logoPath==='string'?old.logoPath:'';BR.busy=1;brDraw();
+ try{if(BR.file&&!reset){if(BR.file.size>BR_MAX||!BR_TYPES.includes(BR.file.type))throw new Error('הלוגו לא תקין');await brUp(BR.file);lp='b/'+SY.bizId+'/brand/logo'}
+  const at=Date.now(),base=/^[a-z0-9-]{1,30}$/.test(s_(old.base))?s_(old.base):'dark-gold',B={name:nm,logoPath:lp,colors,base,updatedAt:at,updatedBy:SY.uid};
+  await fsx('/b/'+SY.bizId+'?updateMask.fieldPaths=brand&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:{brand:{mapValue:{fields:{name:sv(nm),logoPath:sv(lp),base:sv(base),colors:{mapValue:{fields:Object.fromEntries(Object.entries(colors).map(([k,v])=>[k,sv(v)]))}},updatedAt:{integerValue:String(at)},updatedBy:sv(SY.uid)}}}}})},1);
+  SY.biz=Object.assign({},SY.biz,{brand:B});syS();if(BR.url)URL.revokeObjectURL(BR.url);BR=null;bzSkin();toast(reset?'חזרנו לצבעי ברירת המחדל':'המיתוג נשמר');rerender()}
+ catch(e){BR.busy=0;toast(e.code===403?'אין הרשאה לשמור מיתוג':e.message||'השמירה נכשלה');brDraw()}}
 try{coSched()}catch(e){}
 boot();(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script><script src="yemot-board.js"></script>
 </body></html>
