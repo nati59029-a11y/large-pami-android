@@ -5,6 +5,7 @@
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore } = require('firebase-admin/firestore');
+const T = require('./tenant');
 // prompts.js נוצר אוטומטית מהאפליקציה; ההנחיה של recipe קיימת רק בשרת (prompts-recipe.js)
 const PROMPTS = Object.assign({}, require('./prompts'), require('./prompts-recipe'));
 
@@ -128,35 +129,69 @@ function israelDay(d) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d || new Date());
 }
 
-async function reserveScan(uid, limit) {
-  const db = getFirestore();
+// ריבוי עסקים (שלב 5): המונים בתוך העסק (T.tdb(): בשורש ללארג' פעמי במצב legacy, אחרת b/{bizId}/scan_usage).
+// בנוסף למונה לכל משתמש יש מונה לכל העסק (המסמך scan_usage/_biz), עם תקרה מ-b/{bizId}/private/info.adv.limits.scanDaily.
+// ללארג' פעמי אין תקרת עסק אלא אם הוגדרה (בדיוק כמו היום). לעסק אחר בלי הגדרה: BIZ_DEFAULT_DAILY (הנחה).
+const BIZ_DOC = '_biz';
+const BIZ_DEFAULT_DAILY = 50;
+async function bizCaps(bizId, perUserDefault) {
+  let lim = {};
+  try {
+    const s = await getFirestore().doc(`b/${bizId}/private/info`).get();
+    const l = s.exists && s.get('adv') && s.get('adv').limits;
+    if (l && typeof l === 'object') lim = l;
+  } catch (e) { /* בלי הגדרות – ברירות המחדל */ }
+  const int = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
+  const perUser = int(lim.scanPerUserDaily) !== null ? Math.min(int(lim.scanPerUserDaily), perUserDefault) : perUserDefault;
+  const bizDaily = int(lim.scanDaily) !== null ? int(lim.scanDaily) : bizId === T.BIZ0 ? null : BIZ_DEFAULT_DAILY;
+  return { perUser, bizDaily };
+}
+
+async function reserveScan(uid, limit, bizDaily) {
+  const db = T.tdb();
   const ref = db.doc(`${USAGE}/${uid}`);
+  const bref = bizDaily == null ? null : db.doc(`${USAGE}/${BIZ_DOC}`);
   const day = israelDay();
-  return db.runTransaction(async (tx) => {
+  const r = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
+    const bs = bref ? await tx.get(bref) : null;
     const used = s.exists && s.get('day') === day ? (s.get('count') || 0) : 0;
     if (used >= limit) {
       throw new HttpsError('resource-exhausted',
         `עברת את מגבלת השימוש היומית: ${limit} זיהויים ביום למשתמש. אפשר למלא ידנית, או לנסות שוב מחר.`,
         { reason: 'daily-limit', limit, used });
     }
+    const bused = bs && bs.exists && bs.get('day') === day ? (bs.get('count') || 0) : 0;
+    if (bref && bused >= bizDaily) {
+      throw new HttpsError('resource-exhausted',
+        `העסק הגיע למגבלת הזיהויים היומית (${bizDaily}). אפשר למלא ידנית, או לנסות שוב מחר.`,
+        { reason: 'biz-daily-limit', limit: bizDaily, used: bused });
+    }
     tx.set(ref, { day, count: used + 1, updatedAt: new Date().toISOString() });
+    if (bref) tx.set(bref, { day, count: bused + 1, updatedAt: new Date().toISOString() });
     return { day, used: used + 1 };
   });
+  // refundScan (באותה קריאה) מחזיר גם את מונה העסק, אם נספר
+  const sc = T.scope();
+  if (sc) sc.scanBiz = !!bref;
+  return r;
 }
 
 // מחזירה למונה את הזיהוי שנספר ב-reserveScan. scanDocument קוראת לה רק כשאף בקשת זיהוי לא יצאה ל-Gemini
 // (stats.sent === 0): למשל התקציב נגמר עוד לפני, או שלא נוצר חיבור בכלל (ECONNREFUSED / ENOTFOUND / EAI_AGAIN).
 // כל ניסיון שבו בקשה יצאה – נספר, גם אם נכשל, נגמר לו הזמן או לא הגיעה תשובה (ייתכן שמשלמים עליו).
 async function refundScan(uid, day) {
-  const db = getFirestore();
-  const ref = db.doc(`${USAGE}/${uid}`);
-  try {
-    await db.runTransaction(async (tx) => {
-      const s = await tx.get(ref);
-      if (s.exists && s.get('day') === day && (s.get('count') || 0) > 0) tx.update(ref, { count: s.get('count') - 1 });
-    });
-  } catch (e) { /* לא קריטי */ }
+  const db = T.tdb();
+  const sc = T.scope();
+  const refs = [db.doc(`${USAGE}/${uid}`)].concat(sc && sc.scanBiz ? [db.doc(`${USAGE}/${BIZ_DOC}`)] : []);
+  for (const ref of refs) {
+    try {
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(ref);
+        if (s.exists && s.get('day') === day && (s.get('count') || 0) > 0) tx.update(ref, { count: s.get('count') - 1 });
+      });
+    } catch (e) { /* לא קריטי */ }
+  }
 }
 
 // ---------- Gemini (העתקה של shModels / shAIcall) ----------
@@ -300,6 +335,6 @@ function parseLikeApp(text) {
 function _resetCacheForTests() { modelCache.false = null; modelCache.true = null; lastGood.false = ''; lastGood.true = ''; }
 
 module.exports = {
-  KINDS, KIND_NAMES, isKind, neverConnected, NO_CONNECTION_CODES, PHONE_WAIT_MS, timesFor, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan,
+  KINDS, KIND_NAMES, isKind, neverConnected, NO_CONNECTION_CODES, PHONE_WAIT_MS, timesFor, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan, bizCaps, BIZ_DEFAULT_DAILY,
   callGemini, parseLikeApp, USAGE, _resetCacheForTests,
 };

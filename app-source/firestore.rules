@@ -572,17 +572,14 @@ service cloud.firestore {
           && nowMs(br.get('updatedAt', 0));
       }
       function aff() { return request.resource.data.diff(resource.data).affectedKeys(); }
-      // מנהל־על: status, features, adv, ownerEmail, ownerPhone (וגם brand). name, dataRoot, bizId, schemaVersion וכו' – רק השרת.
+      // מנהל־על כותב מהאפליקציה רק brand. status, features, adv, ownerEmail, ownerPhone – רק דרך פונקציות השרת (שלב 5,
+      // עדכון חוזה 6): כך כל שינוי נרשם ב-audit, ו-users/{uid}.bizStatus מתעדכן יחד עם status. ownerEmail/ownerPhone/adv
+      // נשמרים ב-b/{bizId}/private/info ולא במסמך העסק. name, dataRoot, bizId, schemaVersion וכו' – רק השרת.
+      // עדכון חוזה 7א: migrationTarget (בוליאני, כלי ההעברה כותב אותו) – רק מנהל־על (או השרת). מנהל העסק ועובד – לא.
       function superUpdOk() {
-        let n = request.resource.data;
-        return aff().hasOnly(['status', 'features', 'adv', 'ownerEmail', 'ownerPhone', 'brand'])
-          && (!aff().hasAny(['status']) || n.status in ['active', 'suspended'])
-          && (!aff().hasAny(['features']) || (n.features is map
-              && n.features.keys().hasOnly(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'])))
-          && (!aff().hasAny(['adv']) || n.adv is map)
-          && (!aff().hasAny(['ownerEmail']) || (n.ownerEmail is string && n.ownerEmail.size() <= 200))
-          && (!aff().hasAny(['ownerPhone']) || (n.ownerPhone is string && n.ownerPhone.matches('^[0-9+ -]{0,30}$')))
-          && (!aff().hasAny(['brand']) || brandOk(n.brand));
+        return aff().hasOnly(['brand', 'migrationTarget'])
+          && (!aff().hasAny(['brand']) || brandOk(request.resource.data.brand))
+          && (!aff().hasAny(['migrationTarget']) || request.resource.data.migrationTarget is bool);
       }
 
       // מסמך העסק: קריאה – חברי העסק (גם כשהעסק מושהה, כדי להציג "החשבון מושהה") ומנהל־על. רשימת כל העסקים – רק מנהל־על.
@@ -593,9 +590,12 @@ service cloud.firestore {
         || (bSuper() && superUpdOk());
       allow create, delete: if false;
 
-      // private: הגדרות שרת של העסק (למשל אסימון ימות) – אף אחד מהאפליקציה.
+      // private: הגדרות שרת של העסק (למשל גיבוב אסימון ימות, קודי הזמנה) – אף אחד מהאפליקציה.
+      // חריג אחד (עדכון חוזה 6): private/info (ownerEmail, ownerPhone, adv) – קריאה למנהל העסק (בעסק פעיל) ולמנהל־על.
+      // עובד לא קורא. כתיבה – רק השרת.
       match /private/{docId} {
-        allow read, write: if false;
+        allow get: if docId == 'info' && ((bIsAdmin() && bActive()) || bSuper());
+        allow list, create, update, delete: if false;
       }
 
       // audit: יומן פעולות של מנהל־על. קריאה ויצירה – מנהל־על בלבד. אין עדכון ואין מחיקה, לאף אחד.

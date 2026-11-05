@@ -19,7 +19,12 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');
-const { requireStaff, inputObject } = require('./lib/roles');
+const roles = require('./lib/roles');
+const T = require('./lib/tenant');
+const { inputObject } = roles;
+// ריבוי עסקים (שלב 5): פונקציות הקו – רק כשהתוספת yemot מופעלת בעסק, ורק בעסק שמחובר לקו (היום: largpeami בלבד).
+// עסק אחר מקבל yemot-not-connected לפני כל פנייה לימות. הנתונים (T.tdb()) בתוך העסק; בשורש ללארג' פעמי במצב legacy.
+const requireStaff = (request) => roles.requireStaff(request, { feature: 'yemot', yemotLine: true });
 const { YemotError, apiBase, yemotCall, deleteFiles } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { parseLexicon, applyLexicon } = require('./lib/lexicon');
@@ -253,7 +258,7 @@ async function sendPromo(request, key, base, pre) {
   const who = await requireStaff(request);
   const input = inputObject(request);
   const cfg = readCfg();
-  const db = getFirestore();
+  const db = T.tdb();
   const today = israelDay();
   const usageRef = db.doc(`${USAGE}/${who.uid}`);
   const isEmp = who.role === 'employee';
@@ -483,7 +488,7 @@ async function sendPromo(request, key, base, pre) {
   }
 }
 
-exports.sendPromoToLine = onCall({ secrets: [YEMOT_API_KEY, voice.ELEVENLABS_API_KEY], timeoutSeconds: 120 }, async (request) => {
+exports.sendPromoToLine = onCall({ secrets: [YEMOT_API_KEY, voice.ELEVENLABS_API_KEY], timeoutSeconds: 120 }, T.scoped(async (request) => {
   try {
     return await sendPromo(request, YEMOT_API_KEY.value(), YEMOT_API_BASE.value());
   } catch (e) {
@@ -491,7 +496,8 @@ exports.sendPromoToLine = onCall({ secrets: [YEMOT_API_KEY, voice.ELEVENLABS_API
     logger.error('yemot: send failed', { reason: 'internal', name: e && e.name });
     throw new HttpsError('internal', 'שגיאה בשליחה לקו.', { reason: 'internal' });
   }
-});
+}));
+
 
 // קובץ ממוספר בשלוחת המבצעים: ivr2:<ext>/NNN.<סיומת>. ext יכולה להיות מקוננת ('2/1'). תווים אחרים מוסרים (כמו ב-runExpiry).
 function staleRe(ext) { return new RegExp(`^ivr2:${String(ext).replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.[A-Za-z0-9]+$`); }
@@ -501,7 +507,7 @@ function staleRe(ext) { return new RegExp(`^ivr2:${String(ext).replace(/[^0-9A-Z
 // קובץ שכבר לא קיים בשלוחה – מסומן removed בלי מחיקה. מחיקה שנכשלה – remove-failed, וניסיון חוזר בריצה הבאה.
 async function runExpiry(opts) {
   const o = opts || {};
-  const db = getFirestore();
+  const db = T.tdb();
   const today = israelDay(o.now);
   const ext = String(o.ext || YEMOT_EXT.value());
   const key = o.key !== undefined ? o.key : YEMOT_API_KEY.value();
@@ -562,11 +568,24 @@ async function nightly(opts) {
   try { out.lineAudio = await require('./yemot-board').cleanLineAudio(opts); } catch (e) { logger.error('yemot: line audio clean failed', { reason: 'internal', name: e && e.name }); out.lineAudio = { error: 'internal' }; }
   return out;
 }
-exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await nightly(); });
+// ריבוי עסקים (שלב 5): לולאה על העסקים שהתוספת yemot מופעלת אצלם. כל עסק עטוף לבד (כשל באחד לא עוצר את האחרים).
+// היום רק largpeami מחובר לקו (מפתח ימות אחד בשרת), ולכן עסק אחר מדולג ("לא מחובר"), בלי שום פנייה לימות.
+async function nightlyAll(opts) {
+  const out = {};
+  for (const biz of await T.bizzesWith('yemot')) {
+    if (biz.bizId !== T.BIZ0) { out[biz.bizId] = { skipped: 'yemot-not-connected' }; continue; }
+    try { out[biz.bizId] = await T.runInBiz({ bizId: biz.bizId, prefix: T.bizPrefix(biz), biz }, () => nightly(opts)); } catch (e) {
+      logger.error('yemot: nightly failed', { reason: 'internal', biz: biz.bizId, name: e && e.name });
+      out[biz.bizId] = { error: 'internal' };
+    }
+  }
+  return out;
+}
+exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await nightlyAll(); });
 
 // לבדיקות בלבד. לא נספרים (enumerable: false), ולכן Object.assign ב-index.js מעתיק רק את שתי הפונקציות.
 Object.defineProperty(exports, 'runExpiry', { enumerable: false, value: runExpiry });
 Object.defineProperty(exports, '_test', { enumerable: false, value: { israelDay, addDays, cleanText, validDay } });
 // משותף ל-yemot-line.js, ולבדיקות שקוראות לליבה בתוך התהליך (לא נספרים כפונקציות)
 Object.defineProperty(exports, 'shared', { enumerable: false, value: { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS, staleRe, holdsPath, effectiveUntil, isLocked, readCfg, heDate, _resetSeed() { seedDone = false; } } });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo, nightly, staleRe } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sendPromo, nightly, nightlyAll, staleRe } });

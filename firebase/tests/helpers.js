@@ -62,6 +62,11 @@ async function seed(env) {
     staff('u_emp', 'employee', true);
     staff('u_emp2', 'employee', true);
     staff('u_off', 'employee', false);
+    // ריבוי עסקים (שלב 5): עותק users/{uid} לכל חבר בשורש – כמו שכלי ההעברה יוצר והשרת מסנכרן (syncLegacyAdmin/Staff).
+    // כללי Storage של app_releases/ קוראים רק אותו (מגבלת 2 הקריאות). u_out (מחובר בלי חברות) – בלי מסמך.
+    for (const [uid, role, active] of [['u_mgr', 'admin', true], [MANAGER_ONLY_ADMINS, 'admin', true], ['u_emp', 'worker', true], ['u_emp2', 'worker', true], ['u_off', 'worker', false]]) {
+      b.set(db.doc('users/' + uid), { bizId: 'largpeami', role, active, bizStatus: 'active', email: uid + '@example.invalid', createdAt: 1 });
+    }
     for (const uid of ['u_mgr', 'u_emp', 'u_emp2', 'u_off', 'u_out']) {
       b.set(db.doc('app_backup_status/' + uid), { lastBackupAt: now, size: 1234, device: 'demo' });
     }

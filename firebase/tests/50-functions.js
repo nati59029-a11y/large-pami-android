@@ -603,7 +603,7 @@ describe('פונקציות שרת (שלב 3)', () => {
 
   // ---------------- 6. כיסוי ----------------
   it('כיסוי: 4 הפונקציות קיימות בשמות המדויקים, וכל אחת נבדקה מול 5 התפקידים עם התוצאה הצפויה', () => {
-    const exported = Object.keys(require('../functions/index.js')).filter((n) => !['sendPromoToLine', 'expirePromosOnLine', 'publishLineItem', 'removeLineItem', 'getLineState', 'tzintukJoin', 'listLineFiles', 'previewVoice', 'getLineBoard', 'getLineAudio', 'extendLineItem', 'restoreLineItem'].includes(n)).sort(); // פונקציות ימות נבדקות ב-60-yemot.js, ב-61-yemot-line.js וב-62-voice.js
+    const exported = Object.keys(require('../functions/index.js')).filter((n) => !['sendPromoToLine', 'expirePromosOnLine', 'publishLineItem', 'removeLineItem', 'getLineState', 'tzintukJoin', 'listLineFiles', 'previewVoice', 'getLineBoard', 'getLineAudio', 'extendLineItem', 'restoreLineItem', 'createBusiness', 'inviteBusinessAdmin', 'completeInvite', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'addStaff', 'setStaffActive', 'syncLegacyAdmin', 'syncLegacyStaff'].includes(n)).sort(); // פונקציות ימות נבדקות ב-60-yemot.js, ב-61-yemot-line.js וב-62-voice.js; פונקציות הניהול של ריבוי עסקים – ב-multi-business-server.test.js
     assert.deepEqual(exported, [...FN].sort());
     const missing = [];
     for (const fn of FN) for (const role of H.ROLES) if (!RESULTS.find((r) => r.fn === fn && r.role === role && r.status === ROLE_EXPECT[role])) missing.push(`${fn}/${role}`);

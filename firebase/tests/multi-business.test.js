@@ -58,7 +58,8 @@ async function seedAll() {
       b.set(db.doc(`b/${biz}/staff/${u.mgr}`), { name: u.mgr, role: 'manager', active: true });
       b.set(db.doc(`b/${biz}/staff/${u.emp}`), { name: u.emp, role: 'employee', active: true });
       b.set(db.doc(`b/${biz}/staff/${u.off}`), { name: u.off, role: 'employee', active: false });
-      for (const k of ['mgr', 'emp', 'off']) b.set(db.doc('users/' + u[k]), { bizId: biz, role: k === 'mgr' ? 'admin' : 'worker', email: u[k] + '@example.invalid', createdAt: 1 });
+      // שלב 5 (עדכון חוזה 6): השרת שומר ב-users/{uid} גם role, active ו-bizStatus (מה שכללי Storage קוראים)
+      for (const k of ['mgr', 'emp', 'off']) b.set(db.doc('users/' + u[k]), { bizId: biz, role: k === 'mgr' ? 'admin' : 'worker', active: k !== 'off', bizStatus: 'active', email: u[k] + '@example.invalid', createdAt: 1 });
     }
     await b.commit();
   });
@@ -363,26 +364,49 @@ describe('ריבוי עסקים – users, superadmins, ושדות שהמשתמ�
     await assertFails(d.update({ brand: 'string' }));
   });
 
-  it('מנהל־על: כותב status, features, adv, ownerEmail, ownerPhone ו-brand; לא כותב dataRoot, bizId, name, schemaVersion; לא יוצר ולא מוחק עסק', async () => {
+  it('מנהל־על: מהאפליקציה כותב רק brand. status, features, adv, ownerEmail, ownerPhone – רק דרך השרת (audit + bizStatus); לא יוצר ולא מוחק עסק', async () => {
     const s = fs(U.super), d = s.doc('b/' + A);
-    await assertSucceeds(d.update({ status: 'suspended' }));
-    await assertSucceeds(d.update({ status: 'active' }));
-    await assertFails(d.update({ status: 'deleted' }));
-    await assertSucceeds(d.update({ features: { scan: false, shelf: true } }));
-    await assertSucceeds(d.update({ 'features.tasks': true }));
-    await assertFails(d.update({ features: { evil: true } }));
-    await assertFails(d.update({ features: 'all' }));
-    await assertSucceeds(d.update({ adv: { limits: { scanMonthly: 100 }, yemot: {} } }));
-    await assertFails(d.update({ adv: 'x' }));
-    await assertSucceeds(d.update({ ownerEmail: 'owner@example.invalid', ownerPhone: '+972 50-000-0000' }));
-    await assertFails(d.update({ ownerPhone: 'abc' }));
+    // שלב 5 (עדכון חוזה 6): השינויים האלה עוברים דרך setBusinessStatus / setBusinessFeatures / setBusinessAdv / createBusiness
+    await assertFails(d.update({ status: 'suspended' }));
+    await assertFails(d.update({ features: { scan: false, shelf: true } }));
+    await assertFails(d.update({ 'features.tasks': false }));
+    await assertFails(d.update({ adv: { limits: { scanDaily: 100 }, yemot: {} } }));
+    await assertFails(d.update({ ownerEmail: 'owner@example.invalid', ownerPhone: '+972 50-000-0000' }));
     await assertSucceeds(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U.super } }));
+    await assertFails(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U.super }, status: 'suspended' }));
     for (const [k, v] of Object.entries({ dataRoot: 'legacy', bizId: B, name: 'x', schemaVersion: 2, createdBy: 'x' })) await assertFails(d.update({ [k]: v }), k);
     await assertFails(s.doc('b/biz-new').set(bizDoc('biz-new')));
     await assertFails(d.delete());
-    // מנהל העסק ועובד לא כותבים status / features גם כשמנהל־על כן
     await assertFails(fs(U[A].mgr).doc('b/' + A).update({ status: 'active' }));
     await assertFails(fs(U[A].emp).doc('b/' + A).update({ features: ALL_FEATURES }));
+  });
+
+  it('migrationTarget (עדכון חוזה 7א): מנהל־על כותב (בוליאני בלבד); מנהל העסק, עובד ועסק אחר – לא', async () => {
+    const d = (uid) => fs(uid).doc('b/' + A);
+    await assertSucceeds(d(U.super).update({ migrationTarget: true }));
+    await assertSucceeds(d(U.super).update({ migrationTarget: false }));
+    await assertFails(d(U.super).update({ migrationTarget: 'yes' }));
+    await assertFails(d(U.super).update({ migrationTarget: true, status: 'suspended' }));
+    for (const uid of [U[A].mgr, U[A].emp, U[B].mgr, U.nobiz]) await assertFails(d(uid).update({ migrationTarget: true }), uid);
+    await assertFails(d(U[A].mgr).update({ migrationTarget: true, brand: { name: 'x', updatedAt: now(), updatedBy: U[A].mgr } }));
+  });
+
+  it('private/info (ownerEmail, ownerPhone, adv): מנהל העסק ומנהל־על קוראים; עובד, מנהל של עסק אחר ומחובר בלי עסק – לא. כתיבה – לאף אחד. שאר private סגור', async () => {
+    await prep(async (a) => { await a.doc(`b/${A}/private/info`).set({ ownerEmail: 'o@example.invalid', ownerPhone: '0501234567', adv: {} }); await a.doc(`b/${A}/private/yemot`).set({ tokenHash: 'x' }); });
+    await assertSucceeds(fs(U[A].mgr).doc(`b/${A}/private/info`).get());
+    await assertSucceeds(fs(U.super).doc(`b/${A}/private/info`).get());
+    for (const uid of [U[A].emp, U[A].off, U[B].mgr, U[B].emp, U.nobiz]) await assertFails(fs(uid).doc(`b/${A}/private/info`).get(), uid);
+    for (const uid of [U[A].mgr, U.super]) {
+      await assertFails(fs(uid).doc(`b/${A}/private/yemot`).get(), uid);
+      await assertFails(fs(uid).collection(`b/${A}/private`).get(), uid);
+      await assertFails(fs(uid).doc(`b/${A}/private/info`).set({ adv: {} }), uid);
+      await assertFails(fs(uid).doc(`b/${A}/private/info`).update({ ownerEmail: 'x@example.invalid' }), uid);
+      await assertFails(fs(uid).doc(`b/${A}/private/info`).delete(), uid);
+    }
+    // עסק מושהה: מנהל העסק כבר לא קורא; מנהל־על כן
+    await prep((a) => a.doc('b/' + A).update({ status: 'suspended' }));
+    await assertFails(fs(U[A].mgr).doc(`b/${A}/private/info`).get());
+    await assertSucceeds(fs(U.super).doc(`b/${A}/private/info`).get());
   });
 
   it('audit: רק מנהל־על קורא ויוצר (בשמו, בזמן אמת, שדות מוגדרים); אין עדכון ואין מחיקה – לאף אחד', async () => {
@@ -460,7 +484,9 @@ describe('ריבוי עסקים – תוספות: כבויה = אין גישה �
 describe('ריבוי עסקים – עסק מושהה', () => {
   before(async () => { env = await H.getEnv(); });
   beforeEach(async () => { await seedAll(); await env.clearStorage(); });
-  const suspend = () => prep((a) => a.doc('b/' + A).update({ status: 'suspended' }));
+  // כמו setBusinessStatus בשרת: מסמך העסק וגם bizStatus בכל users של העסק
+  const setStatus = (status) => prep(async (a) => { await a.doc('b/' + A).update({ status }); for (const k of ['mgr', 'emp', 'off']) await a.doc('users/' + U[A][k]).update({ bizStatus: status }); });
+  const suspend = () => setStatus('suspended');
 
   it('מנהל ועובד של עסק מושהה: רק קריאה של מסמך העסק; כל השאר נחסם. מנהל־על – גישה מלאה', async () => {
     // לפני ההשהיה: מותר
@@ -485,7 +511,8 @@ describe('ריבוי עסקים – עסק מושהה', () => {
     // מנהל־על: מנהל מלא גם בעסק מושהה
     await assertSucceeds(s.doc(`b/${A}/cfg/main`).set({ data: '{}' }));
     await assertSucceeds(s.collection(`b/${A}/closings`).get());
-    await assertSucceeds(s.doc('b/' + A).update({ status: 'active' }));
+    await assertFails(s.doc('b/' + A).update({ status: 'active' })); // רק דרך השרת (setBusinessStatus)
+    await setStatus('active');
     // ואחרי החזרה לפעיל – העובד חוזר לעבוד
     await assertSucceeds(e.doc(`b/${A}/cfg/main`).get());
     // עסק ב' לא מושפע מההשהיה של א'
@@ -557,19 +584,59 @@ describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני
     await assertFails(up(st(U.nobiz).ref(`b/${A}/app_backups/${U.nobiz}/ok.bin`), new Uint8Array([1]), BIN));
   });
 
-  it('app_releases: חבר פעיל בכל עסק (לפי users) ומנהל־על קוראים; מחובר בלי עסק, עובד מושבת ועסק מושהה – נחסמים; כתיבה – לאף אחד', async () => {
+  it('app_releases: חבר פעיל בכל עסק (לפי users) ומנהל־על קוראים – גם בעסק מושהה (עדכוני אבטחה); מחובר בלי עסק ועובד מושבת – נחסמים; כתיבה – לאף אחד', async () => {
     await prepSt((a) => up(a.ref('app_releases/latest/version.json'), new TextEncoder().encode('{}'), { contentType: 'application/json' }));
     const v = (uid) => st(uid).ref('app_releases/latest/version.json').getMetadata();
     for (const uid of [U[A].mgr, U[A].emp, U[B].mgr, U[B].emp, U.super]) await assertSucceeds(v(uid), uid);
     for (const uid of [U.nobiz, U[A].off]) await assertFails(v(uid), uid);
     await assertFails(up(st(U[A].mgr).ref('app_releases/latest/x.apk'), new Uint8Array([1]), { contentType: 'application/vnd.android.package-archive' }));
     await assertFails(up(st(U.super).ref('app_releases/latest/x.apk'), new Uint8Array([1]), { contentType: 'application/vnd.android.package-archive' }));
-    await prep((a) => a.doc('b/' + A).update({ status: 'suspended' }));
-    await assertFails(v(U[A].emp));
+    // עדכון חוזה 6: עסק מושהה עדיין מקבל עדכוני APK (הנתיב מחוץ לעסק, והבדיקה לא תלויה בסטטוס)
+    await prep(async (a) => { await a.doc('b/' + A).update({ status: 'suspended' }); for (const k of ['mgr', 'emp']) await a.doc('users/' + U[A][k]).update({ bizStatus: 'suspended' }); });
+    await assertSucceeds(v(U[A].emp));
+    await assertSucceeds(v(U[A].mgr));
     await assertSucceeds(v(U[B].emp));
-    // users שמצביע על עסק שהמשתמש לא חבר בו – נחסם
+    // users בלי active == true (למשל הזמנה שעוד לא הושלמה) – נחסם
     await prep((a) => a.doc('users/' + U.nobiz).set({ bizId: B, role: 'admin' }));
     await assertFails(v(U.nobiz));
+    await prep((a) => a.doc('users/' + U.nobiz).set({ bizId: B, role: 'admin', active: false, bizStatus: 'active' }));
+    await assertFails(v(U.nobiz));
+  });
+
+  it('Storage של b/{bizId} נקבע רק לפי users/{uid} (role, active, bizStatus) ו-superadmins: עותק שהשרת לא עדכן = לא נפתח, גם כשה-staff פעיל', async () => {
+    await seedAll(); // הבדיקה הקודמת השהתה את עסק א'
+    await prepSt((a) => up(a.ref(`b/${A}/app_backups/${U[A].emp}/s.bin`), new Uint8Array([1]), BIN));
+    const r = () => st(U[A].emp).ref(`b/${A}/app_backups/${U[A].emp}/s.bin`).getMetadata();
+    await assertSucceeds(r());
+    for (const [k, v] of [['active', false], ['bizStatus', 'suspended'], ['bizId', B], ['role', 'guest']]) {
+      await prep((a) => a.doc('users/' + U[A].emp).update({ [k]: v }));
+      await assertFails(r(), k);
+      await seedAll();
+    }
+    // עובד שהוגדר במסמך users כמנהל (השרת בלבד כותב) מקבל הרשאות מנהל ב-Storage – לכן רק השרת כותב users
+    await prep((a) => a.doc('users/' + U[A].emp).update({ role: 'admin' }));
+    await assertSucceeds(up(st(U[A].emp).ref(`b/${A}/brand/logo`), new Uint8Array([1]), PNG));
+  });
+
+  it('migrate_backups/ (עדכון חוזה 7א): סגור לגמרי לאפליקציה – גם מנהל־על, מנהל ועובד לא קוראים, לא רושמים ולא כותבים', async () => {
+    await seedAll();
+    await prepSt((a) => up(a.ref('migrate_backups/backup-1.json'), new TextEncoder().encode('{}'), { contentType: 'application/json' }));
+    for (const uid of [U.super, U[A].mgr, U[A].emp, U.nobiz, 'u_mgr']) {
+      const s = st(uid);
+      await assertFails(s.ref('migrate_backups/backup-1.json').getMetadata(), uid);
+      await assertFails(s.ref('migrate_backups/backup-1.json').getDownloadURL(), uid);
+      await assertFails(s.ref('migrate_backups').listAll(), uid);
+      await assertFails(up(s.ref('migrate_backups/x.json'), new TextEncoder().encode('{}'), { contentType: 'application/json' }), uid);
+      await assertFails(s.ref('migrate_backups/backup-1.json').delete(), uid);
+    }
+  });
+
+  it('מגבלת 2 הקריאות (עדכון חוזה 6): בכללי Storage של b/{bizId} יש קריאה רק ל-users/{uid} ול-superadmins/{uid}', () => {
+    const src = require('node:fs').readFileSync(require('node:path').join(H.ROOT, 'storage.rules'), 'utf8');
+    const block = src.slice(src.indexOf('// ---------- ריבוי עסקים'), src.indexOf('// הכלל האחרון'));
+    const paths = [...block.matchAll(/firestore\.(?:get|exists)\(\/databases\/\(default\)\/documents\/([a-z_]+)\//g)].map((m) => m[1]);
+    assert.deepEqual([...new Set(paths)].sort(), ['superadmins', 'users']);
+    assert.ok(!/documents\/b\//.test(block), 'אין קריאה למסמך העסק או ל-admins/staff של העסק');
   });
 });
 

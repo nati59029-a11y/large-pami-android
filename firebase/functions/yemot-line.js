@@ -20,7 +20,12 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');
-const { requireStaff, inputObject } = require('./lib/roles');
+const roles = require('./lib/roles');
+const T = require('./lib/tenant');
+const { inputObject } = roles;
+// ריבוי עסקים (שלב 5): פונקציות הקו – רק כשהתוספת yemot מופעלת בעסק, ורק בעסק שמחובר לקו (היום: largpeami בלבד).
+// עסק אחר מקבל yemot-not-connected לפני כל פנייה לימות. הנתונים (T.tdb()) בתוך העסק; בשורש ללארג' פעמי במצב legacy.
+const requireStaff = (request) => roles.requireStaff(request, { feature: 'yemot', yemotLine: true });
 const { YemotError, apiBase, listDir, listDirInfo, downloadFile, deleteFiles } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { applyLexicon } = require('./lib/lexicon');
@@ -231,7 +236,7 @@ async function publishItem(request, key, base, pre) {
   const engine = pre && pre.engine ? pre.engine : voice.pickEngine(input.engine);
   if (!engine) throw bad('bad-input', 'קלט לא תקין');
   const ctx = context(key, base);
-  const db = getFirestore();
+  const db = T.tdb();
   // ההקראה עצמה (שעולה כסף בקול המשוכפל) נוצרת רק אחרי בדיקת הכפילות והנעילה – שלב 2 למטה
   let spoken = null, rendered = null;
   // החזרה (שלב 5) עם שמע שמור: מעלים את אותו שמע בדיוק, בלי הקראה (ובלי עלות). הנוסח ברשומה נשאר כמו במקור.
@@ -402,7 +407,7 @@ async function removeItem(request, key, base, whoKnown) {
   if (input.file !== undefined) return removeFile(who, input, key, base);
   if (typeof input.id !== 'string' || !ID_RE.test(input.id)) throw notFound();
   const ctx = context(key, base);
-  const db = getFirestore();
+  const db = T.tdb();
   const ref = db.doc(`${ITEMS}/${input.id}`);
   const plan = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
@@ -470,7 +475,7 @@ async function removeFile(who, input, key, base) {
   const path = `ivr2:${ext}/${input.file}`;
   if (!safeFilePath(path)) throw bad('bad-file', BAD_FILE_MSG);
   const ctx = context(key, base);
-  const db = getFirestore();
+  const db = T.tdb();
   const B = require('./yemot-board')._core;
   // פריט של האפליקציה בנתיב הזה ← המסלול הרגיל שלו (עם הנעילה, הסימון והגיבוי שלו)
   const atPath = (await db.collection(ITEMS).where('path', '==', path).get()).docs;
@@ -523,7 +528,7 @@ async function listFiles(request, key, base) {
   if (who.role !== 'manager') throw new HttpsError('permission-denied', 'הפעולה הזו מותרת למנהל בלבד.', { reason: 'manager-only' });
   if (input.ext !== '4') throw bad('bad-slot', 'השלוחה לא מוכרת.');
   const ctx = context(key, base);
-  const db = getFirestore();
+  const db = T.tdb();
   let names;
   try { names = await listDir(ctx, '4'); } catch (e) {
     logger.warn('yemot-line: list failed', { reason: 'yemot-list-failed', code: e.code });
@@ -543,7 +548,7 @@ async function listFiles(request, key, base) {
 // מוחקת רק פריט זמני של השרת בשלוחה 4, בנתיב ivr2:4/NNN (001-999). קובץ שכבר נעלם – removed. כשל – remove-failed, וניסיון בלילה הבא.
 async function runLineExpiry(opts) {
   const o = opts || {};
-  const db = getFirestore();
+  const db = T.tdb();
   const today = israelDay(o.now);
   const out = { today, checked: 0, removed: 0, missing: 0, failed: 0, skipped: 0 };
   const key = o.key !== undefined ? o.key : YEMOT_API_KEY.value();
@@ -594,7 +599,7 @@ async function lineState(request) {
     if (!Array.isArray(input.slots) || input.slots.length > SLOT_NAMES.length || !input.slots.every(isSlot)) throw bad('bad-input', 'קלט לא תקין');
     want = allowed.filter((s) => input.slots.includes(s)); // עובד שמבקש hours/opening – פשוט לא מקבל
   }
-  const db = getFirestore();
+  const db = T.tdb();
   const slots = {};
   for (const slot of want) {
     const docs = (await db.collection(ITEMS).where('slot', '==', slot).get()).docs
@@ -637,7 +642,7 @@ async function previewItem(request) {
   if (!clean) throw bad('empty-text', 'אין נוסח להשמעה.');
   const max = YEMOT_RECIPE_MAX.value() || 2500;
   if (clean.length > max) throw bad('text-too-long', `הנוסח ארוך מדי (עד ${max} תווים).`, { max });
-  const spoken = applyLexicon(clean, await loadLexicon(getFirestore()));
+  const spoken = applyLexicon(clean, await loadLexicon(T.tdb()));
   try {
     const r = await voice.preview(spoken, who.uid);
     return { ok: true, mime: r.mime, data: r.data, cached: r.cached, spoken };
@@ -648,13 +653,13 @@ async function previewItem(request) {
 }
 
 // עטיפה: כל שגיאה שאינה HttpsError → "internal" בעברית, בלי פרטים (אולי מכילים טקסט מימות)
-const wrap = (name, fn) => async (request) => {
+const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
     logger.error(`yemot-line: ${name} failed`, { reason: 'internal', name: e && e.name });
     throw new HttpsError('internal', 'שגיאה בפעולה מול הקו.', { reason: 'internal' });
   }
-};
+});
 
 exports.publishLineItem = onCall({ secrets: [YEMOT_API_KEY, voice.ELEVENLABS_API_KEY], timeoutSeconds: 120 }, wrap('publish', (r) => publishItem(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 exports.removeLineItem = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('remove', (r) => removeItem(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));

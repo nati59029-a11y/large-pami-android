@@ -92,9 +92,11 @@ describe('Storage – תיקייה × תפקיד × פעולה (טבלה 20.3)',
     await assertSucceeds(restGet(mgrOld, H.MANAGER_ONLY_ADMINS, 'app_releases/latest/large-pami.apk'));
     const emp = H.ctxFor(env, 'employee').storage();
     await assertSucceeds(emp.ref('app_releases/latest/version.json').getMetadata());
-    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('staff/u_emp').update({ active: false }));
+    // ריבוי עסקים (שלב 5): הכלל קורא את העותק users/{uid}, שהשרת מעדכן מיד בכל שינוי ב-staff (syncLegacyStaff).
+    // כאן אין אמולטור פונקציות, ולכן הבדיקה מעדכנת את שניהם כמו שהשרת עושה. הסנכרון עצמו נבדק ב-multi-business-server.test.js.
+    await env.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('staff/u_emp').update({ active: false }); await ctx.firestore().doc('users/u_emp').update({ active: false }); });
     await assertFails(emp.ref('app_releases/latest/version.json').getMetadata());
-    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('staff/u_emp').update({ active: true }));
+    await env.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('staff/u_emp').update({ active: true }); await ctx.firestore().doc('users/u_emp').update({ active: true }); });
     H.record('special', { key: 'storage-app-releases-admins-only-and-disable' });
   });
 
