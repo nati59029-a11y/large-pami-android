@@ -136,7 +136,10 @@ describe('6ה – פונקציות: הוספת עובד, דרגות ומתגים
     assert.equal((await call('setStaffPerms', SUPER, { bizId: A, uid: MGR, perms: {} })).reason, 'is-admin');
     assert.equal((await call('setStaffPerms', SUPER, { bizId: A, uid: 'ghost', perms: {} })).reason, 'no-staff');
     assert.equal((await call('setBusinessRanks', SUPER, { bizId: A, ranks: [{ id: 'a', name: 'x', perms: {} }, { id: 'a', name: 'y', perms: {} }] })).reason, 'bad-ranks');
+    assert.equal((await call('setBusinessRanks', SUPER, { bizId: 'largpeami', ranks: [] })).reason, 'no-biz'); // אין b/largpeami בזריעה (כמו בייצור לפני ההעברה)
+    await prep((d) => d.doc('b/largpeami').set({ name: 'L', status: 'active', dataRoot: 'legacy' }));
     assert.equal((await call('setBusinessRanks', SUPER, { bizId: 'largpeami', ranks: [] })).reason, 'legacy-biz');
+    assert.equal((await call('setStaffPerms', SUPER, { bizId: 'largpeami', uid: OLD, perms: {} })).reason, 'legacy-biz');
   });
   it('זיהוי חכם: צילום העברה – עובד עם מתג "צילום העברות" עובר את בדיקת ההרשאה; בלי "מזין הוצאות" – חשבונית נחסמת', async () => {
     const jpg = () => { const b = Buffer.alloc(200); Buffer.from([0xff, 0xd8, 0xff, 0xe0]).copy(b); return { mimeType: 'image/jpeg', data: b.toString('base64') }; };
