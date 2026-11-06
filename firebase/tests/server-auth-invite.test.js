@@ -123,7 +123,9 @@ describe('6ג – כניסה ראשונה: המייל המובנה של Firebase
   });
 
   it('addStaff: עובד חדש נוצר בלי סיסמה; תשובה בלי קוד; נכנס רק אחרי "קבע סיסמה"', async () => {
-    const r = await call('addStaff', A_MGR, { email: 'worker@example.invalid', name: 'עובד' });
+    // 6ה: רק מנהל־על מוסיף עובדים. מנהל העסק נחסם.
+    assert.equal((await call('addStaff', A_MGR, { email: 'worker@example.invalid', name: 'עובד' })).reason, 'not-superadmin');
+    const r = await call('addStaff', SUPER, { bizId: A, email: 'worker@example.invalid', name: 'עובד' });
     assert.equal(r.status, 'OK', r.text);
     assert.deepEqual(Object.keys(r.result).sort(), ['bizId', 'email', 'ok', 'uid']);
     assert.ok(!EIGHT_DIGITS.test(JSON.stringify(r.result)));

@@ -16,7 +16,7 @@ const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 
-const { requireStaff, inputObject } = require('./lib/roles');
+const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const scan = require('./lib/scan');
 const { deriveBackupKey, KEY_VERSION } = require('./lib/backupKey');
 const T = require('./lib/tenant');
@@ -54,7 +54,11 @@ exports.scanDocument = onCall(
     const maxBytes = SCAN_MAX_FILE_MB.value() * 1024 * 1024;
     const { kind, cfg, files } = scan.validateScanInput(input, maxBytes);
     // צילום העברה בנקאית – מנהל בלבד (החלטת המשתמש). נבדק לפני הספירה במכסה היומית ולפני Gemini
-    if (kind === 'transfer' && who.role !== 'manager') throw new HttpsError('permission-denied', 'צילום העברה מותר למנהל בלבד.', { reason: 'manager-only' });
+    if (kind === 'transfer' && who.role !== 'manager' && !(who.biz && who.biz.dataRoot === 'b' && hasPerm(who, 'trf'))) throw new HttpsError('permission-denied', 'צילום העברה מותר למנהל בלבד.', { reason: 'manager-only' });
+    // 6ה: מתגי עובד (רק בעסק במבנה b; בעסק legacy – כמו היום). חשבונית/הוצאה מקופה = expW; דוח Z/פתיחה/הפקדה = incW
+    if (who.biz && who.biz.dataRoot === 'b' && ((['invoice', 'cashout'].includes(kind) && !hasPerm(who, 'expW')) || (['zreport', 'opening', 'deposit'].includes(kind) && !hasPerm(who, 'incW')))) {
+      throw new HttpsError('permission-denied', 'אין לך הרשאה לפעולה הזו. פנה למנהל.', { reason: 'no-perm' });
+    }
     const key = GEMINI_API_KEY.value();
     if (!key) throw new HttpsError('failed-precondition', 'אין מפתח לזיהוי חכם בשרת', { reason: 'no-key' });
     const limit = SCAN_DAILY_LIMIT.value();

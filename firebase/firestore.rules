@@ -547,6 +547,14 @@ service cloud.firestore {
       function bMgr() { return (bIsAdmin() && bActive()) || bSuper(); }
       function bEmp() { return bIsActiveStaff() && bActive(); }
       function bStaff() { return bMgr() || bEmp(); }
+      // 6ה (עדכון חוזה 15): הרשאות עובד לפי מתגים. staff/{uid}.perms – מפה של מתגים (רק השרת כותב, setStaffPerms, מנהל־על).
+      // אין perms (עובד ישן) = בדיוק ההרשאות שהיו עד היום (dflt). יש perms = רק מתג שערכו true. מנהל / מנהל־על = הכול.
+      // הקריאה ל-staff/{uid} זהה לזו של bIsActiveStaff, ולכן לא נספרת פעמיים.
+      function myStaff() { return get(/databases/$(database)/documents/b/$(bizId)/staff/$(request.auth.uid)).data; }
+      function dflt(k) { return k in ['expR', 'expW', 'incW', 'sup', 'ord']; }
+      function perm(k) {
+        return bMgr() || (bEmp() && (myStaff().get('perms', null) == null ? dflt(k) : myStaff().perms.get(k, false) == true));
+      }
       function feat(k) { return bizDoc().get('features', {}).get(k, false) == true; }
 
       function nowMs(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
@@ -628,7 +636,7 @@ service cloud.firestore {
       match /chunks/{docId} {
         // תוספת: מזהים fbhi_* (תמונות משוב באיכות גבוהה) שייכים לתוספת 'feedback'
         function fbOk() { return feat('feedback') || !docId.matches('^fbhi_.*'); }
-        allow create: if fbOk() && bEmp() && !bMgr()
+        allow create: if fbOk() && bEmp() && !bMgr() && (docId.matches('^fbhi_.*') || perm('expW'))
           && request.resource.data.owner == request.auth.uid
           && request.resource.data.keys().hasOnly(['owner', 'data'])
           && request.resource.data.data is string
@@ -637,14 +645,14 @@ service cloud.firestore {
               || (docId.matches('^.+_[1-9][0-9]*$')
                   && get(/databases/$(database)/documents/b/$(bizId)/chunks/$(docId.replace('_[0-9]+$', '_0'))).data.owner == request.auth.uid));
         allow read: if fbOk() && (bMgr()
-          || (bEmp() && resource.data.owner == request.auth.uid));
+          || (bEmp() && resource.data.owner == request.auth.uid && (docId.matches('^fbhi_.*') || perm('expR'))));
         allow delete: if fbOk() && bMgr();
         allow update: if false;
       }
 
       // inbox: העתק של הכלל בשורש
       match /inbox/{docId} {
-        allow create: if bEmp() && !bMgr()
+        allow create: if bEmp() && !bMgr() && perm('expW')
           && request.resource.data.owner == request.auth.uid
           && request.resource.data.status == 'new'
           && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't'])
@@ -652,7 +660,7 @@ service cloud.firestore {
               || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))
           && get(/databases/$(database)/documents/b/$(bizId)/chunks/$(docId + '_0')).data.owner == request.auth.uid;
         allow read: if bMgr()
-          || (bEmp() && resource.data.owner == request.auth.uid);
+          || (bEmp() && resource.data.owner == request.auth.uid && perm('expR'));
         allow update, delete: if bMgr();
       }
 
@@ -746,13 +754,13 @@ service cloud.firestore {
 
       // supinv: העתק של הכלל בשורש (תוספת 'suppliers')
       match /supinv/{id} {
-        allow read: if feat('suppliers') && (bStaff());
+        allow read: if feat('suppliers') && perm('sup');
         allow create, update: if feat('suppliers') && (bMgr()
           && request.resource.data.keys().hasOnly(['c', 'n', 'd', 'at', 'a', 'inv', 'by', 'pend', 'src', 'm', 'np', 'h', 'fh']));
         allow delete: if feat('suppliers') && (bMgr());
 
         match /p/{k} {
-          allow read: if feat('suppliers') && (bStaff());
+          allow read: if feat('suppliers') && perm('sup');
           allow create, update: if feat('suppliers') && (bMgr()
             && request.resource.data.keys().hasOnly(['data'])
             && request.resource.data.data is string
@@ -805,7 +813,7 @@ service cloud.firestore {
         function nw() { return request.resource.data; }
         function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         allow read: if feat('cashClose') && (bMgr());
-        allow create: if feat('cashClose') && (bStaff()
+        allow create: if feat('cashClose') && (bStaff() && perm('incW')
           && nw().keys().hasAll(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
           && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data', 'tm', 'od', 'otm'])
           && (!nw().keys().hasAny(['tm']) || (nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
@@ -832,7 +840,7 @@ service cloud.firestore {
         match /p/{k} {
           function cl() { return get(/databases/$(database)/documents/b/$(bizId)/closings/$(id)).data; }
           allow read: if feat('cashClose') && (bMgr());
-          allow create: if feat('cashClose') && (bStaff()
+          allow create: if feat('cashClose') && (bStaff() && perm('incW')
             && exists(/databases/$(database)/documents/b/$(bizId)/closings/$(id))
             && cl().uid == request.auth.uid
             && k.matches('^[0-7]$') && int(k) < cl().np
@@ -873,8 +881,8 @@ service cloud.firestore {
           return dd.uid == request.auth.uid && dd.st == 'new' && id in dd.items
             && request.time.toMillis() - dd.t < 900000;
         }
-        allow read: if feat('cashClose') && (bStaff());
-        allow create: if feat('cashClose') && (bStaff()
+        allow read: if feat('cashClose') && perm('expR');
+        allow create: if feat('cashClose') && (bStaff() && perm('expW')
           && nw().keys().hasAll(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
           && nw().keys().hasOnly(['uid', 'by', 't', 'reg', 'd', 'tm', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
           && nw().uid == request.auth.uid
@@ -888,7 +896,7 @@ service cloud.firestore {
         allow update: if feat('cashClose') && ((bMgr()
             && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp', 'reg', 'd', 'tm', 'a', 'why', 'dep'])
             && idStr(nw().zc) && idStr(nw().dp) && bodyOk())
-          || (bEmp()
+          || (bEmp() && perm('incW')
             && nw().diff(od()).affectedKeys().hasOnly(['dp'])
             && od().dp == '' && od().dep == '1'
             && nw().dp is string && nw().dp.matches('^[A-Za-z0-9_-]{1,120}$')
@@ -900,8 +908,8 @@ service cloud.firestore {
       match /deposits/{id} {
         function nw() { return request.resource.data; }
         function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
-        allow read: if feat('cashClose') && (bStaff());
-        allow create: if feat('cashClose') && (bStaff()
+        allow read: if feat('cashClose') && (bMgr() || perm('incW'));
+        allow create: if feat('cashClose') && (bStaff() && perm('incW')
           && nw().keys().hasAll(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
           && nw().keys().hasOnly(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
           && nw().data is string && nw().data.size() <= 5000
@@ -926,7 +934,7 @@ service cloud.firestore {
         match /p/{k} {
           function dp() { return get(/databases/$(database)/documents/b/$(bizId)/deposits/$(id)).data; }
           allow read: if feat('cashClose') && (bMgr());
-          allow create: if feat('cashClose') && (bStaff()
+          allow create: if feat('cashClose') && (bStaff() && perm('incW')
             && exists(/databases/$(database)/documents/b/$(bizId)/deposits/$(id))
             && dp().uid == request.auth.uid
             && k.matches('^[0-7]$') && int(k) < dp().np
@@ -948,8 +956,8 @@ service cloud.firestore {
           return resource == null || nw().d > resource.data.d
             || (nw().d == resource.data.d && nw().tm > resource.data.get('tm', ''));
         }
-        allow read: if feat('cashClose') && (bStaff());
-        allow create, update: if feat('cashClose') && (bStaff()
+        allow read: if feat('cashClose') && (bMgr() || perm('incW'));
+        allow create, update: if feat('cashClose') && (bStaff() && perm('incW')
           && reg in ['i_yh', 'i_nl']
           && nw().keys().hasAll(['d', 'tm', 'id', 'uid', 't'])
           && nw().keys().hasOnly(['d', 'tm', 'id', 'uid', 't', 'od', 'otm'])

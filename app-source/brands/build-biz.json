@@ -1,0 +1,5 @@
+{
+ "_about": "6ה: APK נפרד לכל עסק (build-biz-apks.yml). default = העסק של ה-APK הרגיל ('' = לארג' פעמי, כמו היום). businesses = רשימת העסקים שמקבלים APK משלהם. לכל עסק: תיקייה brands/<bizId>/ עם logo.png (מרובע, לפחות 192 פיקסלים). appName = השם מתחת לסמל בטלפון.",
+ "default": "",
+ "businesses": []
+}
