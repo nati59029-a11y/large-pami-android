@@ -106,6 +106,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('5 פתיחת עסק: createBusiness נקרא, העסק נוצר (פעיל, בלי תוספות) ויש audit', patOk === false && flag && flag.status === 'active' && flag.name === 'חנות הדגל' && flagInfo.ownerEmail === 'owner-flag@x.co' && ca.includes('createBusiness') && t1.includes('העסק נפתח'), { pattern: patOk, flag: flag && { status: flag.status, name: flag.name }, ownerEmail: flagInfo && flagInfo.ownerEmail, audit: ca, toasts: t1 });
   const body5 = log.filter((r) => r.step === 'create' && /createBusiness/.test(r.url)); const resp5 = await page.evaluate(() => document.body.innerText);
   check('6 אחרי פתיחה לא מוצגים devCode, mail או expiresInMin', body5.length === 1 && !/devCode|expiresInMin|\bmail\b/.test(resp5) && !/devCode|expiresInMin/.test(fs.readFileSync(www + '/index.html', 'utf8').split('/* ===== ריבוי עסקים, שלב 6א')[1] || ''), { requests: body5.length });
+  // עדכון חוזה 14: מיד אחרי הפתיחה מוצע מסך המיתוג (לפני שהמנהל נכנס)
+  const offer = await page.evaluate(() => { const b = document.querySelector('#dlg[open] [data-a=admBrNow]'); return b ? b.dataset.id : null; });
+  if (offer) await page.click('#dlg [data-a=admBrNow]'); await wait(page, 2000);
+  const brNow = await page.evaluate(() => ({ v: cur().v, a: cur().a, dlg: document.querySelector('#dlg').open, form: !!document.querySelector('form[data-f=brSave]'), sub: document.querySelector('#main').innerText.slice(0, 120) }));
+  check('6א אחרי "פתיחת עסק" מוצע מיד "למיתוג העסק"; הלחיצה פותחת את מסך המיתוג של העסק החדש', offer === 'flagship' && brNow.v === 'brand' && brNow.a === 'flagship' && !brNow.dlg && brNow.form, { offer, brNow });
   // שגיאה בעברית: מזהה קיים
   await page.evaluate(() => ACT.admNew()); await wait(page, 300);
   await page.fill('#dlg input[name=id]', 'flagship'); await page.fill('#dlg input[name=name]', 'כפול'); await page.fill('#dlg input[name=email]', 'dup@x.co'); await page.fill('#dlg input[name=phone]', '0501234567');
@@ -118,6 +123,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate(() => { NAV = [{ v: 'home' }, { v: 'sa' }]; go('sab', 'flagship'); }); await wait(page, 2200);
   await shot(page, '04-כרטיס-עסק', true);
   const card = await page.evaluate(() => document.body.innerText);
+  const brBtn = await page.evaluate(() => { const b = document.querySelector('[data-a=go][data-v=brand]'); return b ? b.dataset.arg : null; });
+  check('8א כרטיס עסק (מנהל־על): כפתור "מיתוג" שפותח את המיתוג של העסק הזה', brBtn === 'flagship', brBtn);
   check('8 כרטיס עסק: פרטי קשר (קריאה בלבד) מתוך private/info', /owner-flag@x\.co/.test(card) && /0501234567|\+972501234567|972501234567/.test(card.replace(/[-\s]/g, '')) , { card: card.slice(0, 200) });
 
   // תוספת
@@ -251,9 +258,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const log4 = []; ({ ctx, page } = await open('sa@x.co', log4, 'sa2'));
   await settingsOf(page); await page.evaluate(() => go('sa')); await wait(page, 2000);
   await page.evaluate((b) => go('sab', b), BZ0); await wait(page, 1800);
-  const lgc = await page.evaluate(() => ({ enter: !!document.querySelector('[data-a=admEnter]'), sus: !!document.querySelector('[data-a=admSus]'), feat: !!document.querySelector('[data-a=admFeat]'), adv: !!document.querySelector('form[data-f=admAdv]'), tok: !!document.querySelector('[data-a=admTok]'), txt: document.querySelector('#main').innerText.slice(0, 160) }));
+  const lgc = await page.evaluate(() => ({ brand: !!document.querySelector('[data-v=brand]'), enter: !!document.querySelector('[data-a=admEnter]'), sus: !!document.querySelector('[data-a=admSus]'), feat: !!document.querySelector('[data-a=admFeat]'), adv: !!document.querySelector('form[data-f=admAdv]'), tok: !!document.querySelector('[data-a=admTok]'), txt: document.querySelector('#main').innerText.slice(0, 160) }));
   await shot(page, '12-כרטיס-לארג-פעמי', true);
-  check('31 כרטיס לארג\' פעמי (legacy): מוצג עם "כניסה כמנהל" בלבד, בלי פעולות שהשרת דוחה (השהיה, תוספות, adv, אסימון)', lgc.enter && !lgc.sus && !lgc.feat && !lgc.adv && !lgc.tok, lgc);
+  check('31 כרטיס לארג\' פעמי (legacy): מוצג עם "כניסה כמנהל" בלבד, בלי פעולות שהשרת דוחה (השהיה, תוספות, adv, אסימון)', lgc.enter && !lgc.sus && !lgc.feat && !lgc.adv && !lgc.tok && !lgc.brand, lgc);
   check('32 אין שגיאות JS (כרטיס לארג\' פעמי)', page.__errors.length === 0, page.__errors);
   await ctx.close();
   await browser.close();

@@ -222,6 +222,7 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     setBusinessAdv: () => ({ bizId: A, adv: { limits: { scanDaily: 5 } } }),
     setYemotToken: () => ({ bizId: A }),
     logBusinessEntry: () => ({ bizId: A }),
+    setBusinessBrand: () => ({ bizId: A, brand: { name: 'מותג' } }), // עדכון חוזה 14
   };
   for (const [fn, input] of Object.entries(SUPER_FNS)) {
     it(`${fn}: מנהל א', עובד א', מנהל ב', מנהל השורש ומחובר בלי עסק – נחסמים; אורח – לא מחובר; מנהל־על – מצליח ונרשם ב-audit`, async () => {
@@ -303,6 +304,33 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     assert.equal((await call('addStaff', U.super, { bizId: A, email: 'super@example.invalid', name: 'x' })).reason, 'is-superadmin');
     assert.equal((await call('addStaff', U.super, { bizId: A, email: 'bmgr@example.invalid', name: 'x' })).reason, 'other-biz');
   });
+  it('עדכון חוזה 14 – חשבון קיים שלא אומת ואינו חבר: מנהל עסק מקבל not-joinable והחשבון לא נוגע; מנהל־על – החשבון מנוטרל כמו קודם', async () => {
+    const { getAuth } = fa('firebase-admin/auth');
+    const auth = getAuth();
+    await auth.deleteUser('u_pre').catch(() => {});
+    await auth.createUser({ uid: 'u_pre', email: 'pre@example.invalid', emailVerified: false, password: 'Pre-pass-123' });
+    const before = await auth.getUser('u_pre');
+    const r = await call('addStaff', U[A].mgr, { email: 'pre@example.invalid', name: 'עובד' });
+    assert.equal(r.status, 'FAILED_PRECONDITION', r.text);
+    assert.equal(r.reason, 'not-joinable', r.text);
+    assert.equal(JSON.stringify(r.error.details), JSON.stringify({ reason: 'not-joinable' }));
+    const after = await auth.getUser('u_pre');
+    assert.equal(after.disabled, false, 'לא הושבת');
+    assert.equal(after.email, 'pre@example.invalid', 'המייל לא הוחלף');
+    assert.equal(after.tokensValidAfterTime, before.tokensValidAfterTime, 'החיבורים לא בוטלו');
+    assert.equal((await auth.getUserByEmail('pre@example.invalid')).uid, 'u_pre', 'לא נוצר חשבון חדש למייל');
+    assert.equal(await getDoc(`b/${A}/staff/u_pre`), null);
+    assert.equal(await getDoc('users/u_pre'), null);
+    assert.ok(!(await audits(A)).some((x) => x.act === 'addStaff'), 'לא נרשמה הוספה');
+    // מנהל־על (שבחר את העסק): ניטרול כמו היום – החשבון הישן מושבת עם כתובת שלא מקבלת דואר, ונוצר חשבון חדש
+    const s = await call('addStaff', U.super, { bizId: A, email: 'pre@example.invalid', name: 'עובד' });
+    assert.equal(s.status, 'OK', s.text);
+    assert.notEqual(s.result.uid, 'u_pre');
+    const old = await auth.getUser('u_pre');
+    assert.equal(old.disabled, true); assert.match(old.email, /@orphaned\.invalid$/);
+    assert.ok(await getDoc(`b/${A}/staff/${s.result.uid}`));
+    await auth.deleteUser('u_pre').catch(() => {}); await auth.deleteUser(s.result.uid).catch(() => {});
+  });
   it('בלי אמולטור (ייצור): אין קוד ואין שדות מייל/תוקף בתשובה (שלב 6ג: אין מנגנון קוד בכלל)', async () => {
     const B5 = require('../functions/business.js')._core;
     const T = require('../functions/lib/tenant');
@@ -335,6 +363,38 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     assert.equal(r.status, 'OK', r.text);
     const f = (await getDoc('b/' + A)).features;
     assert.equal(f.scan, false); assert.equal(f.tasks, false); assert.equal(f.shelf, true);
+  });
+  it('setBusinessBrand (עדכון חוזה 14): ולידציה; שדה שלא נשלח נשאר; updatedBy/updatedAt של השרת; audit; לא נוגע בשדות אחרים ובעסק ב\'; legacy נדחה', async () => {
+    const b0 = await getDoc('b/' + A), bB = await getDoc('b/' + B);
+    const cols = { acc: '#AABBCC', acc2: '#ddeeff', onacc: '#000000', bg: '#111111', card: '#222222', ink: '#ffffff' };
+    const r = await call('setBusinessBrand', U.super, { bizId: A, brand: { name: '  מאפייה  ', logoPath: `b/${A}/brand/logo`, colors: cols } });
+    assert.equal(r.status, 'OK', r.text);
+    const d = await getDoc('b/' + A);
+    assert.equal(d.brand.name, 'מאפייה'); assert.equal(d.brand.logoPath, `b/${A}/brand/logo`); assert.equal(d.brand.colors.acc, '#aabbcc');
+    assert.equal(d.brand.base, 'dark-gold'); assert.equal(d.brand.updatedBy, U.super); assert.ok(Math.abs(d.brand.updatedAt - Date.now()) < 60000);
+    assert.deepEqual(Object.keys(d.brand).sort(), ['base', 'colors', 'logoPath', 'name', 'updatedAt', 'updatedBy']);
+    for (const k of Object.keys(b0)) if (k !== 'brand') assert.deepEqual(d[k], b0[k], k + ' לא השתנה');
+    assert.deepEqual(r.result.brand, d.brand);
+    // רק colors: השם והלוגו נשארים
+    assert.equal((await call('setBusinessBrand', U.super, { bizId: A, brand: { colors: {} } })).status, 'OK');
+    const d2 = await getDoc('b/' + A);
+    assert.equal(d2.brand.name, 'מאפייה'); assert.equal(d2.brand.logoPath, `b/${A}/brand/logo`); assert.deepEqual(d2.brand.colors, {});
+    const acts = (await audits(A)).filter((x) => x.act === 'setBusinessBrand');
+    assert.equal(acts.length, 2); assert.ok(acts.some((x) => x.note === 'name,logoPath,colors;logo=on'), JSON.stringify(acts));
+    for (const bad of [{}, { evil: 1 }, { name: 'x'.repeat(61) }, { name: 5 }, { logoPath: `b/${B}/brand/logo` }, { logoPath: 'app_backups/x' },
+      { colors: { acc: '#abc' } }, { colors: { acc: 'red' } }, { colors: { evil: '#000000' } }, { colors: [] }, { updatedBy: 'x' }]) {
+      const x = await call('setBusinessBrand', U.super, { bizId: A, brand: bad });
+      assert.equal(x.reason, 'bad-brand', JSON.stringify(bad) + ' ' + x.text);
+    }
+    assert.equal((await call('setBusinessBrand', U.super, { bizId: A, brand: 'x' })).reason, 'bad-brand');
+    assert.equal((await call('setBusinessBrand', U.super, { bizId: 'no-such', brand: { name: 'x' } })).reason, 'no-biz');
+    assert.deepEqual(await getDoc('b/' + B), bB, 'עסק ב\' לא השתנה');
+    await prep((db) => db.doc('b/' + L).set({ name: 'לארג', status: 'active', dataRoot: 'legacy', features: {} }));
+    assert.equal((await call('setBusinessBrand', U.super, { bizId: L, brand: { name: 'x' } })).reason, 'legacy-biz');
+    // מנהל העסק עצמו – נחסם (גם לעסק שלו)
+    const m = await call('setBusinessBrand', U[A].mgr, { bizId: A, brand: { name: 'שלי' } });
+    assert.equal(m.reason, 'not-superadmin');
+    assert.equal((await getDoc('b/' + A)).brand.name, 'מאפייה');
   });
   it('setBusinessAdv: ולידציה (מפתחות מותרים, טיפוסים, טווחים); נכתב ל-private/info, לא למסמך העסק', async () => {
     for (const adv of [{ evil: 1 }, { limits: { scanDaily: -1 } }, { limits: { scanDaily: 1.5 } }, { limits: { other: 1 } }, { yemot: { phone: '12' } }, { yemot: { apiKey: 'x' } }, 'x']) {
@@ -491,11 +551,11 @@ describe('שלב 5, סבב 2 – סנכרון users/{uid} לחברי לארג\' 
 
 // ---------------------------------------------------------------------------------------------
 describe('שלב 5 – ייצוא ואין סודות', () => {
-  const NEW = ['createBusiness', 'inviteBusinessAdmin', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'addStaff', 'setStaffActive'];
-  it('כל הפונקציות החדשות מיוצאות מ-index.js (9 ניהול + 2 סנכרון, ורק הן נוספו; completeInvite הוסרה בשלב 6ג); עוזרי בדיקה לא מיוצאים', () => {
+  const NEW = ['createBusiness', 'inviteBusinessAdmin', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'addStaff', 'setStaffActive'];
+  it('כל הפונקציות החדשות מיוצאות מ-index.js (10 ניהול + 2 סנכרון, ורק הן נוספו; completeInvite הוסרה בשלב 6ג; setBusinessBrand נוספה בעדכון חוזה 14); עוזרי בדיקה לא מיוצאים', () => {
     const ex = require('../functions/index.js');
     for (const n of NEW) assert.equal(typeof ex[n], 'function', n);
-    assert.equal(Object.keys(ex).length, 26);
+    assert.equal(Object.keys(ex).length, 27);
     assert.equal(ex.completeInvite, undefined);
     for (const n of ['syncLegacyAdmin', 'syncLegacyStaff']) assert.equal(typeof ex[n], 'function', n);
     for (const n of ['_core', 'resolveMember', 'bizRef', 'tzintukJoin', 'nightlyAll']) assert.equal(ex[n], undefined, n);
