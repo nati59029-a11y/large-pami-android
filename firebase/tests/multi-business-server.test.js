@@ -162,7 +162,8 @@ describe('שלב 5 – bizId של עסק אחר בקלט: שגיאה, בלי פ�
     const { getAuth } = fa('firebase-admin/auth');
     await getAuth().createUser({ uid: U[A].emp, email: 'a_emp_real@example.invalid' }).catch(() => {});
     const r = await call('addStaff', U[B].mgr, { email: 'a_emp_real@example.invalid', name: 'x' });
-    assert.equal(r.reason, 'not-joinable', r.text);
+    assert.equal(r.reason, 'not-superadmin', r.text); // 6ה: מנהל עסק לא מוסיף עובדים בכלל
+    assert.equal((await call('addStaff', U.super, { bizId: B, email: 'a_emp_real@example.invalid', name: 'x' })).reason, 'other-biz');
     assert.equal(await getDoc(`b/${B}/staff/${U[A].emp}`), null);
   });
   it('מנהל־על בוחר עסק (bizId) ופועל בו כמנהל; עובד/מנהל רגיל לא יכול לבחור', async () => {
@@ -292,12 +293,13 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     await getAuth().createUser({ uid: R.emp, email: 'root-emp@example.invalid' }).catch(() => {});
     const rs = [];
     for (const email of ['super@example.invalid', 'bmgr@example.invalid', 'root-emp@example.invalid']) rs.push(await call('addStaff', U[A].mgr, { email, name: 'x' }));
+    // 6ה: מנהל עסק נחסם לפני כל בדיקה של המייל – אותה תשובה לכל מייל, ולכן גם לא מגלה דבר
     for (const r of rs) {
-      assert.equal(r.status, 'FAILED_PRECONDITION', r.text);
-      assert.equal(r.reason, 'not-joinable', r.text);
+      assert.equal(r.status, 'PERMISSION_DENIED', r.text);
+      assert.equal(r.reason, 'not-superadmin', r.text);
       assert.equal(r.error.message, rs[0].error.message);
-      assert.doesNotMatch(r.error.message, /מנהל המערכת|מנהל־על|עסק אחר/);
-      assert.equal(JSON.stringify(r.error.details), JSON.stringify({ reason: 'not-joinable' }));
+      assert.doesNotMatch(r.error.message, /עסק אחר/);
+      assert.equal(JSON.stringify(r.error.details), JSON.stringify({ reason: 'not-superadmin' }));
     }
     for (const uid of [U.super, U[B].mgr, R.emp]) assert.equal(await getDoc(`b/${A}/staff/${uid}`), null);
     // מנהל־על (שבחר את העסק) עדיין מקבל את הסיבה המפורטת
@@ -311,9 +313,9 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     await auth.createUser({ uid: 'u_pre', email: 'pre@example.invalid', emailVerified: false, password: 'Pre-pass-123' });
     const before = await auth.getUser('u_pre');
     const r = await call('addStaff', U[A].mgr, { email: 'pre@example.invalid', name: 'עובד' });
-    assert.equal(r.status, 'FAILED_PRECONDITION', r.text);
-    assert.equal(r.reason, 'not-joinable', r.text);
-    assert.equal(JSON.stringify(r.error.details), JSON.stringify({ reason: 'not-joinable' }));
+    assert.equal(r.status, 'PERMISSION_DENIED', r.text); // 6ה: מנהל עסק לא מוסיף עובדים
+    assert.equal(r.reason, 'not-superadmin', r.text);
+    assert.equal(JSON.stringify(r.error.details), JSON.stringify({ reason: 'not-superadmin' }));
     const after = await auth.getUser('u_pre');
     assert.equal(after.disabled, false, 'לא הושבת');
     assert.equal(after.email, 'pre@example.invalid', 'המייל לא הוחלף');
@@ -408,13 +410,14 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
   it('addStaff / setStaffActive: מנהל א\' בתוך העסק שלו – staff + users (role, active, bizStatus) + audit; עסק ב\' לא נגע; עובד לא יכול', async () => {
     const snapB = JSON.stringify([await listDocs(`b/${B}/staff`), await listDocs(`b/${B}/audit`)]);
     assert.equal((await call('addStaff', U[A].emp, { email: 'w@example.invalid', name: 'עובד' })).reason, 'manager-only');
-    const r = await call('addStaff', U[A].mgr, { email: 'w@example.invalid', name: 'עובד' });
+    assert.equal((await call('addStaff', U[A].mgr, { email: 'w@example.invalid', name: 'עובד' })).reason, 'not-superadmin'); // 6ה
+    const r = await call('addStaff', U.super, { bizId: A, email: 'w@example.invalid', name: 'עובד' });
     assert.equal(r.status, 'OK', r.text);
     const uid = r.result.uid;
     assert.equal((await getDoc(`b/${A}/staff/${uid}`)).active, true);
     assert.deepEqual((({ bizId, role, active, bizStatus }) => ({ bizId, role, active, bizStatus }))(await getDoc('users/' + uid)), { bizId: A, role: 'worker', active: true, bizStatus: 'active' });
     assert.equal(await getDoc(`staff/${uid}`), null, 'לא בשורש');
-    assert.ok((await audits(A)).find((x) => x.act === 'addStaff' && x.by === U[A].mgr));
+    assert.ok((await audits(A)).find((x) => x.act === 'addStaff' && x.by === U.super));
     // השבתה: staff וגם users מתעדכנים; העובד נחסם מיד
     assert.equal((await call('setStaffActive', U[A].mgr, { uid, active: false })).status, 'OK');
     assert.equal((await getDoc(`b/${A}/staff/${uid}`)).active, false);
@@ -551,11 +554,11 @@ describe('שלב 5, סבב 2 – סנכרון users/{uid} לחברי לארג\' 
 
 // ---------------------------------------------------------------------------------------------
 describe('שלב 5 – ייצוא ואין סודות', () => {
-  const NEW = ['createBusiness', 'inviteBusinessAdmin', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'addStaff', 'setStaffActive'];
+  const NEW = ['createBusiness', 'inviteBusinessAdmin', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'setBusinessRanks', 'setStaffPerms', 'addStaff', 'setStaffActive'];
   it('כל הפונקציות החדשות מיוצאות מ-index.js (10 ניהול + 2 סנכרון, ורק הן נוספו; completeInvite הוסרה בשלב 6ג; setBusinessBrand נוספה בעדכון חוזה 14); עוזרי בדיקה לא מיוצאים', () => {
     const ex = require('../functions/index.js');
     for (const n of NEW) assert.equal(typeof ex[n], 'function', n);
-    assert.equal(Object.keys(ex).length, 27);
+    assert.equal(Object.keys(ex).length, 29); // 6ה: setBusinessRanks, setStaffPerms (עדכון חוזה 15)
     assert.equal(ex.completeInvite, undefined);
     for (const n of ['syncLegacyAdmin', 'syncLegacyStaff']) assert.equal(typeof ex[n], 'function', n);
     for (const n of ['_core', 'resolveMember', 'bizRef', 'tzintukJoin', 'nightlyAll']) assert.equal(ex[n], undefined, n);

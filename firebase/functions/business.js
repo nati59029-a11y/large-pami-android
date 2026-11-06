@@ -2,7 +2,8 @@
 // ריבוי עסקים (משימה 2026-11-05, שלב 5, חלקים ג' ו-ה'): פונקציות ניהול.
 //   מנהל־על בלבד (superadmins/{uid}): createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures,
 //                                     setBusinessAdv, setYemotToken, logBusinessEntry, setBusinessBrand.
-//   מנהל העסק (בתוך העסק שלו בלבד):   addStaff, setStaffActive.
+//                                     setBusinessRanks, setStaffPerms, addStaff (6ה: הוספת עובדים – רק מנהל־על).
+//   מנהל העסק (בתוך העסק שלו בלבד):   setStaffActive (השבתה והחזרה של עובד קיים).
 // כל פעולה נרשמת ב-b/{bizId}/audit (by, t, act, note). bizId של משתמש רגיל נקבע בשרת בלבד (requireStaff).
 // כניסה ראשונה (שלב 6ג, עדכון חוזה 9, החלטת המשתמש "א"): אין קוד חד־פעמי ואין שליחת מייל בשרת.
 //   השרת יוצר חשבון Auth בלי סיסמה ומחזיר את המייל שנשמר. האפליקציה שולחת למייל הזה את המייל המובנה של Firebase
@@ -15,7 +16,8 @@ const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const T = require('./lib/tenant');
-const { requireStaff, inputObject } = require('./lib/roles');
+const R = require('./lib/roles');
+const { requireStaff, inputObject } = R;
 
 const BATCH_MAX = 400;                // מתחת למגבלה של 500 פעולות באצווה
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
@@ -312,7 +314,85 @@ async function setBusinessBrand(request) {
   return { ok: true, bizId, brand };
 }
 
-// ---------- addStaff / setStaffActive: מנהל העסק, בתוך העסק שלו בלבד ----------
+// ---------- 6ה (עדכון חוזה 15): דרגות ומתגי הרשאה לעובדים ----------
+// ranks: b/{bizId}/private/info.ranks = [{ id, name, perms }]. רק מנהל־על כותב (setBusinessRanks). מנהל העסק קורא (private/info).
+// staff/{uid}.perms = מפת מתגים, staff/{uid}.rank = מזהה דרגה ('' = בלי דרגה). רק מנהל־על כותב (setStaffPerms / addStaff).
+// הדרגה היא תבנית התחלתית בלבד: perms של העובד הם הקובעים, וכל מתג אפשר לשנות לבד. בלי perms (עובד ישן) = R.DEFAULT_PERMS.
+const PERM_KEYS = R.PERM_KEYS;
+function cleanPerms(p) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) throw bad('bad-perms', 'ההרשאות לא תקינות');
+  const out = {};
+  for (const [k, v] of Object.entries(p)) {
+    if (!PERM_KEYS.includes(k)) throw bad('bad-perms', 'הרשאה לא מוכרת: ' + String(k).slice(0, 30));
+    if (typeof v !== 'boolean') throw bad('bad-perms', 'ערך הרשאה חייב להיות כן/לא');
+  }
+  for (const k of PERM_KEYS) out[k] = p[k] === true; // תמיד מפה מלאה: מתג שלא נשלח = כבוי
+  return out;
+}
+const RANK_ID_RE = /^[a-z0-9_-]{1,30}$/;
+function cleanRanks(rs) {
+  if (!Array.isArray(rs) || rs.length > 20) throw bad('bad-ranks', 'רשימת הדרגות לא תקינה (עד 20)');
+  const ids = new Set();
+  return rs.map((r) => {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) throw bad('bad-ranks', 'דרגה לא תקינה');
+    for (const k of Object.keys(r)) if (!['id', 'name', 'perms'].includes(k)) throw bad('bad-ranks', 'שדה לא מוכר בדרגה');
+    if (typeof r.id !== 'string' || !RANK_ID_RE.test(r.id) || ids.has(r.id)) throw bad('bad-ranks', 'מזהה דרגה לא תקין או כפול');
+    ids.add(r.id);
+    let name;
+    try { name = cleanName(r.name, 40); } catch (e) { throw bad('bad-ranks', 'שם הדרגה חובה, עד 40 תווים'); }
+    return { id: r.id, name, perms: cleanPerms(r.perms) };
+  });
+}
+async function bizB(bizId) {
+  const biz = await bizOrThrow(bizId);
+  if (biz.dataRoot === 'legacy') throw new HttpsError('failed-precondition', 'בעסק במצב legacy מנהלים עובדים כמו היום', { reason: 'legacy-biz' });
+  return biz;
+}
+async function setBusinessRanks(request) {
+  const by = await requireSuper(request);
+  const input = inputObject(request);
+  const bizId = bizIdOf(input);
+  const ranks = cleanRanks(input.ranks);
+  await bizB(bizId);
+  await getFirestore().doc(`b/${bizId}/private/info`).set({ ranks }, { mergeFields: ['ranks'] });
+  await audit(bizId, by, 'setBusinessRanks', ranks.map((r) => r.id).join(','));
+  return { ok: true, bizId, ranks };
+}
+async function rankOf(bizId, rank) {
+  if (rank === undefined || rank === '') return null;
+  if (typeof rank !== 'string' || !RANK_ID_RE.test(rank)) throw bad('bad-rank', 'דרגה לא תקינה');
+  const info = await getFirestore().doc(`b/${bizId}/private/info`).get();
+  const rs = Array.isArray(info.get('ranks')) ? info.get('ranks') : [];
+  const r = rs.find((x) => x && x.id === rank);
+  if (!r) throw bad('bad-rank', 'הדרגה לא קיימת בעסק');
+  return r;
+}
+// setStaffPerms({bizId, uid, rank?, perms?}): rank בלי perms = המתגים של הדרגה (תבנית). perms = המתגים שנשלחו (גוברים על הדרגה).
+async function setStaffPerms(request) {
+  const by = await requireSuper(request);
+  const input = inputObject(request);
+  const bizId = bizIdOf(input);
+  const uid = typeof input.uid === 'string' ? input.uid : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
+  const biz = await bizB(bizId);
+  const r = await rankOf(bizId, input.rank);
+  if (input.perms === undefined && !r) throw bad('bad-perms', 'צריך לבחור דרגה או הרשאות');
+  const perms = input.perms !== undefined ? cleanPerms(input.perms) : cleanPerms(r.perms);
+  const db = getFirestore();
+  const sRef = db.doc(T.bizRef(biz, 'staff/' + uid));
+  const [s, a] = await Promise.all([sRef.get(), db.doc(T.bizRef(biz, 'admins/' + uid)).get()]);
+  if (!s.exists) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
+  if (a.exists) throw new HttpsError('failed-precondition', 'למנהל העסק יש את כל ההרשאות', { reason: 'is-admin' });
+  const upd = { perms };
+  if (input.rank !== undefined) upd.rank = r ? r.id : '';
+  const b = db.batch();
+  b.update(sRef, upd);
+  b.set(auditRef(bizId), auditData(by, 'setStaffPerms', uid + ':' + PERM_KEYS.filter((k) => perms[k]).join(',')));
+  await b.commit();
+  return { ok: true, uid, perms, rank: upd.rank !== undefined ? upd.rank : (s.get('rank') || '') };
+}
+
+// ---------- addStaff (מנהל־על בלבד, 6ה) / setStaffActive (מנהל העסק או מנהל־על) ----------
 async function requireBizManager(request) {
   const who = await requireStaff(request);
   if (who.role !== 'manager') throw deny('manager-only', 'הפעולה מותרת למנהל העסק בלבד');
@@ -321,7 +401,11 @@ async function requireBizManager(request) {
 }
 async function addStaff(request) {
   const who = await requireBizManager(request);
+  // 6ה, החלטת המשתמש 3: רק מנהל־על מוסיף עובדים. מנהל העסק – לא (גם לא דרך הפונקציה).
+  if (who.superadmin !== true) throw deny('not-superadmin', 'הוספת עובדים מותרת למנהל המערכת בלבד');
   const input = inputObject(request);
+  const r = await rankOf(who.bizId, input.rank);
+  const perms = input.perms !== undefined ? cleanPerms(input.perms) : (r ? cleanPerms(r.perms) : null);
   const email = cleanEmail(input.email);
   const name = cleanName(input.name, 60);
   const db = getFirestore();
@@ -330,7 +414,8 @@ async function addStaff(request) {
   if ((await db.doc(T.bizRef(who.biz, 'admins/' + uid)).get()).exists) throw new HttpsError('failed-precondition', 'המשתמש כבר מנהל בעסק', { reason: 'is-admin' });
   const now = Date.now();
   const b = db.batch();
-  b.set(db.doc(T.bizRef(who.biz, 'staff/' + uid)), { name, email, role: 'employee', active: true, addedAt: new Date(now).toISOString(), addedBy: who.uid, pushTokens: [] }, { merge: true });
+  b.set(db.doc(T.bizRef(who.biz, 'staff/' + uid)), Object.assign({ name, email, role: 'employee', active: true, addedAt: new Date(now).toISOString(), addedBy: who.uid, pushTokens: [] },
+    perms ? { perms, rank: r ? r.id : '' } : {}), { merge: true });
   b.set(db.doc('users/' + uid), { bizId: who.bizId, role: 'worker', active: true, bizStatus: who.biz.status, email, createdAt: now }, { merge: true });
   b.set(auditRef(who.bizId), auditData(who.uid, 'addStaff', email));
   await b.commit();
@@ -412,10 +497,12 @@ exports.setBusinessAdv = onCall(wrap('setBusinessAdv', setBusinessAdv));
 exports.setYemotToken = onCall(wrap('setYemotToken', setYemotToken));
 exports.logBusinessEntry = onCall(wrap('logBusinessEntry', logBusinessEntry));
 exports.setBusinessBrand = onCall(wrap('setBusinessBrand', setBusinessBrand));
+exports.setBusinessRanks = onCall(wrap('setBusinessRanks', setBusinessRanks));
+exports.setStaffPerms = onCall(wrap('setStaffPerms', setStaffPerms));
 exports.addStaff = onCall(wrap('addStaff', addStaff));
 exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  logBusinessEntry, setBusinessBrand, cleanBrand, addStaff, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, BATCH_MAX, wrap,
+  logBusinessEntry, setBusinessBrand, cleanBrand, addStaff, setBusinessRanks, setStaffPerms, cleanPerms, cleanRanks, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, BATCH_MAX, wrap,
 } });
