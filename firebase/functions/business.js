@@ -65,11 +65,15 @@ function auditData(by, act, note) {
 async function audit(bizId, by, act, note) { await auditRef(bizId).set(auditData(by, act, note)); }
 
 // משתמש ששייך לעסק אחר, או מנהל־על – לא מצטרף. כך הזמנה לא יכולה "לגנוב" חשבון קיים.
-async function assertJoinable(uid, bizId) {
+// sup = מי שקורא לפונקציה הוא מנהל־על. רק הוא מקבל את הסיבה המפורטת. כל אחר (מנהל עסק) מקבל הודעה אחת אחידה,
+// כדי שלא יוכל לגלות לפי מייל מי מנהל־העל או מי שייך לעסק אחר.
+const NOT_JOINABLE = 'לא ניתן להוסיף את המייל הזה. אפשר לנסות מייל אחר, או לפנות לספק.';
+async function assertJoinable(uid, bizId, sup) {
   const db = getFirestore();
   const [sa, u, a, s] = await Promise.all([db.doc('superadmins/' + uid).get(), db.doc('users/' + uid).get(), db.doc('admins/' + uid).get(), db.doc('staff/' + uid).get()]);
-  if (sa.exists) throw new HttpsError('failed-precondition', 'המייל שייך למנהל המערכת', { reason: 'is-superadmin' });
   const cur = u.exists ? u.get('bizId') : (a.exists || s.exists ? T.BIZ0 : null);
+  if ((sa.exists || (cur && cur !== bizId)) && !sup) throw new HttpsError('failed-precondition', NOT_JOINABLE, { reason: 'not-joinable' });
+  if (sa.exists) throw new HttpsError('failed-precondition', 'המייל שייך למנהל המערכת', { reason: 'is-superadmin' });
   if (cur && cur !== bizId) throw new HttpsError('failed-precondition', 'המייל כבר שייך לעסק אחר', { reason: 'other-biz' });
   return u;
 }
@@ -80,12 +84,12 @@ async function assertJoinable(uid, bizId) {
 //     החשבון הישן מנוטרל בלי מחיקה (מושבת, המייל שלו מוחלף בכתובת שלא מקבלת דואר, החיבורים שלו מבוטלים), ונוצר חשבון חדש.
 //     הטוקנים הישנים שלו שייכים למזהה אחר, ולכן לא מקבלים את ההרשאות. אפשר לשחזר אותו בלוח הבקרה.
 //   - חשבון שאומת (בעל המייל) או שכבר רשום באותו עסק → אותו חשבון.
-async function accountFor(email, bizId) {
+async function accountFor(email, bizId, sup) {
   const auth = getAuth();
   let rec = null;
   try { rec = await auth.getUserByEmail(email); } catch (e) { if (!e || e.code !== 'auth/user-not-found') throw e; }
   if (!rec) return (await auth.createUser({ email, emailVerified: false, disabled: false })).uid;
-  const u = await assertJoinable(rec.uid, bizId);
+  const u = await assertJoinable(rec.uid, bizId, sup);
   if (u.exists || rec.emailVerified === true) return rec.uid;
   await auth.updateUser(rec.uid, { email: `orphan-${rec.uid.toLowerCase()}@orphaned.invalid`, disabled: true });
   await auth.revokeRefreshTokens(rec.uid);
@@ -124,8 +128,8 @@ async function createBusiness(request) {
 // המנהל נכנס רק אחרי שקבע סיסמה מהמייל המובנה. התשובה: uid והמייל שנשמר – לשם האפליקציה שולחת את הקישור. אין קוד.
 async function inviteAdmin(biz, email, by) {
   if (biz.dataRoot === 'legacy') throw new HttpsError('failed-precondition', 'בעסק במצב legacy מנהלים משתמשים כמו היום', { reason: 'legacy-biz' });
-  const uid = await accountFor(email, biz.bizId);
-  const u = await assertJoinable(uid, biz.bizId);
+  const uid = await accountFor(email, biz.bizId, true); // inviteAdmin: רק מנהל־על (requireSuper)
+  const u = await assertJoinable(uid, biz.bizId, true);
   const db = getFirestore();
   const now = Date.now();
   const b = db.batch();
@@ -260,8 +264,8 @@ async function addStaff(request) {
   const email = cleanEmail(input.email);
   const name = cleanName(input.name, 60);
   const db = getFirestore();
-  const uid = await accountFor(email, who.bizId);
-  await assertJoinable(uid, who.bizId);
+  const uid = await accountFor(email, who.bizId, who.superadmin === true);
+  await assertJoinable(uid, who.bizId, who.superadmin === true);
   if ((await db.doc(T.bizRef(who.biz, 'admins/' + uid)).get()).exists) throw new HttpsError('failed-precondition', 'המשתמש כבר מנהל בעסק', { reason: 'is-admin' });
   const now = Date.now();
   const b = db.batch();

@@ -29,8 +29,8 @@ function fakeNative(o) {
   const [www, outFile, shots] = process.argv.slice(2);
   if (shots) fs.mkdirSync(shots, { recursive: true });
   const browser = await H.launch();
-  const open = async (who, o) => {
-    const { ctx, page } = await H.newPage(browser, www, cfg, [], who);
+  const open = async (who, o, c) => {
+    const { ctx, page } = await H.newPage(browser, www, c || cfg, [], who);
     await page.setViewportSize({ width: 360, height: 740 });
     await page.addInitScript(fakeNative, o);
     return { ctx, page };
@@ -92,6 +92,35 @@ function fakeNative(o) {
   s = await vis(page);
   check('12 בטלפון: התנתקות מההגדרות – אותה שאלה כמו היום, ו-lp-bio נמחק', /^להתנתק מהחשבון במכשיר הזה\?/.test(askTxt) && !s.key && s.secure.includes(false), { askTxt, key: s.key });
   await ctx.close();
+
+  // ---------- מנהל־על: הפעלה ← מעבר לעסק אחר ← התנתקות / כיבוי = ביטול בכל העסקים (6ג, ליקוי 1 מסבב בדיקה 1) ----------
+  const cfgSA = { mode: 'new', users: { sa: 'acme' }, sa: { sa: 1 }, biz: { acme: { dataRoot: 'b' }, beta: { dataRoot: 'b' } }, admins: { 'b/acme/|sa': 1, 'b/beta/|sa': 1 } };
+  const bioKeys = (page) => page.evaluate(() => Object.keys(localStorage).filter((k) => /(^|:)lp-bio$/.test(k)).sort());
+  const toBiz = async (page, id) => { await Promise.all([page.waitForEvent('framenavigated'), page.evaluate((x) => { bzSwitch(x).catch((e) => { window.__swErr = e.message; }); }, id)]); await wait(page, 1500); };
+  for (const how of ['logout', 'toggle']) {
+    ({ ctx, page } = await open('sa', { avail: true }, cfgSA));
+    await H.login(page, 'sa@x.co'); await wait(page, 800); await settings(page);
+    await page.click('[data-a=bioTog]'); await wait(page, 900);
+    const k1 = await bioKeys(page);
+    await toBiz(page, 'beta');
+    const k2 = await bioKeys(page); const inBeta = await page.evaluate(() => ({ biz: SY.bizId, cls: document.documentElement.classList.contains('bzlk'), calls: window.__bio.calls.length }));
+    await wait(page, 600); await settings(page);
+    if (how === 'logout') {
+      await page.click('#main [data-a=syOut]'); await wait(page, 300);
+      await Promise.all([page.waitForEvent('framenavigated'), page.click('#dlg [data-a=yes]')]); await wait(page, 1200);
+    } else { await page.click('[data-a=bioTog]'); await wait(page, 600); }
+    const k3 = await bioKeys(page);
+    // הכניסה הבאה לעסק הראשון (acme): התחברות מחדש, או מעבר חזרה
+    if (how === 'logout') { await H.login(page, 'sa@x.co'); await wait(page, 1500); } else await toBiz(page, 'acme');
+    const back = await page.evaluate(() => ({ biz: SY.bizId, BZP, cls: document.documentElement.classList.contains('bzlk'), lock: !!document.getElementById('bzlk'), calls: window.__bio.calls.length, secure: window.__bio.secure.slice(), mainVis: getComputedStyle(document.getElementById('main')).visibility }));
+    const k4 = await bioKeys(page);
+    const name = how === 'logout' ? '16 מנהל־על: הפעלה בעסק acme ← מעבר ל-beta ← התנתקות' : '17 מנהל־על: הפעלה בעסק acme ← מעבר ל-beta ← כיבוי המתג';
+    check(name + ': לא נשאר שום מפתח lp-bio (בכל העסקים), ובכניסה הבאה ל-acme אין נעילה ואין FLAG_SECURE',
+      k1.join() === 'acme:lp-bio' && k2.join() === 'acme:lp-bio,beta:lp-bio' && inBeta.biz === 'beta' && k3.length === 0 && k4.length === 0
+        && back.biz === 'acme' && back.BZP === 'acme:' && !back.cls && !back.lock && back.calls === 0 && !back.secure.includes(true) && back.mainVis === 'visible' && page.__errors.length === 0,
+      { k1, k2, inBeta, k3, k4, back, errors: page.__errors });
+    await ctx.close();
+  }
 
   // ---------- מפתח בלי חיבור: לא ננעלים ----------
   ({ ctx, page } = await open('m', { avail: true }));

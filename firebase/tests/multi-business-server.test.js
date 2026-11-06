@@ -158,11 +158,11 @@ describe('שלב 5 – bizId של עסק אחר בקלט: שגיאה, בלי פ�
     assert.equal((await call('setStaffActive', U[B].mgr, { uid: U[A].emp, active: false })).reason, 'no-staff');
     assert.equal((await getDoc(`b/${A}/staff/${U[A].emp}`)).active, true);
     assert.equal((await getDoc('users/' + U[A].emp)).active, true);
-    // מנהל ב' מוסיף כעובד את המייל של עובד א' – נדחה (שייך לעסק אחר)
+    // מנהל ב' מוסיף כעובד את המייל של עובד א' – נדחה, בהודעה אחידה שלא מגלה שהמייל שייך לעסק אחר (6ג, ליקוי 2 מסבב בדיקה 1)
     const { getAuth } = fa('firebase-admin/auth');
     await getAuth().createUser({ uid: U[A].emp, email: 'a_emp_real@example.invalid' }).catch(() => {});
     const r = await call('addStaff', U[B].mgr, { email: 'a_emp_real@example.invalid', name: 'x' });
-    assert.equal(r.reason, 'other-biz', r.text);
+    assert.equal(r.reason, 'not-joinable', r.text);
     assert.equal(await getDoc(`b/${B}/staff/${U[A].emp}`), null);
   });
   it('מנהל־על בוחר עסק (bizId) ופועל בו כמנהל; עובד/מנהל רגיל לא יכול לבחור', async () => {
@@ -283,6 +283,25 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     assert.equal((await call('inviteBusinessAdmin', U.super, { bizId: A, email: 'bmgr@example.invalid' })).reason, 'other-biz');
     assert.equal((await call('inviteBusinessAdmin', U.super, { bizId: A, email: 'root-emp@example.invalid' })).reason, 'other-biz');
     assert.equal(await getDoc(`b/${A}/admins/${U[B].mgr}`), null);
+  });
+  it('מנהל עסק (לא מנהל־על) שמוסיף עובד: הודעה אחת אחידה לכל מייל חסום – לא מגלה מי מנהל־העל ומי שייך לעסק אחר', async () => {
+    const { getAuth } = fa('firebase-admin/auth');
+    await getAuth().createUser({ uid: U.super, email: 'super@example.invalid' }).catch(() => {});
+    await getAuth().createUser({ uid: U[B].mgr, email: 'bmgr@example.invalid' }).catch(() => {});
+    await getAuth().createUser({ uid: R.emp, email: 'root-emp@example.invalid' }).catch(() => {});
+    const rs = [];
+    for (const email of ['super@example.invalid', 'bmgr@example.invalid', 'root-emp@example.invalid']) rs.push(await call('addStaff', U[A].mgr, { email, name: 'x' }));
+    for (const r of rs) {
+      assert.equal(r.status, 'FAILED_PRECONDITION', r.text);
+      assert.equal(r.reason, 'not-joinable', r.text);
+      assert.equal(r.error.message, rs[0].error.message);
+      assert.doesNotMatch(r.error.message, /מנהל המערכת|מנהל־על|עסק אחר/);
+      assert.equal(JSON.stringify(r.error.details), JSON.stringify({ reason: 'not-joinable' }));
+    }
+    for (const uid of [U.super, U[B].mgr, R.emp]) assert.equal(await getDoc(`b/${A}/staff/${uid}`), null);
+    // מנהל־על (שבחר את העסק) עדיין מקבל את הסיבה המפורטת
+    assert.equal((await call('addStaff', U.super, { bizId: A, email: 'super@example.invalid', name: 'x' })).reason, 'is-superadmin');
+    assert.equal((await call('addStaff', U.super, { bizId: A, email: 'bmgr@example.invalid', name: 'x' })).reason, 'other-biz');
   });
   it('בלי אמולטור (ייצור): אין קוד ואין שדות מייל/תוקף בתשובה (שלב 6ג: אין מנגנון קוד בכלל)', async () => {
     const B5 = require('../functions/business.js')._core;

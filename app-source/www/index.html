@@ -4349,7 +4349,7 @@ async function bioAuth(why){const P=bioP();if(!P)return{ok:false,reason:'not-ava
 async function bioLock(){if(BIO.busy)return;BIO.lk=1;bioCover(1);const r=await bioAuth('פתיחת האפליקציה');
  if(r.ok){BIO.lk=0;bioCover(0);return}const m=document.getElementById('bzlkM');
  if(m)m.textContent=r.reason==='not-available'?'נעילת המסך במכשיר בוטלה, ולכן אי אפשר לאמת. כדי להמשיך, התנתקו והתחברו שוב עם הסיסמה.':r.reason==='lockout'?'יותר מדי ניסיונות. נסו שוב בעוד כמה דקות, או התנתקו.':'האימות לא הושלם. אפשר לנסות שוב או להתנתק.'}
-function bioOff(){try{localStorage.removeItem(LK('lp-bio'))}catch(e){}BIO.lk=0;bioCover(0);const P=bioP();if(P)try{Promise.resolve(P.setSecureWindow({on:false})).catch(()=>{})}catch(e){}}
+function bioOff(){/* מבטלים בכל העסקים במכשיר (גם מפתח שהועתק במעבר עסק של מנהל־על, bioCarry) */try{const a=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&/(^|:)lp-bio$/.test(k))a.push(k)}a.forEach(k=>localStorage.removeItem(k))}catch(e){}BIO.lk=0;bioCover(0);const P=bioP();if(P)try{Promise.resolve(P.setSecureWindow({on:false})).catch(()=>{})}catch(e){}}
 /* בטעינה: נעילה לפני הכול; האזנה ליציאה מהאפליקציה ולחזרה אליה. חזרה מהירה (למשל מהמצלמה או מבחירת קובץ, עד 30 שניות) לא נועלת מחדש */
 function bioBoot(){const P=bioP();if(!P){if(bioOn())try{localStorage.removeItem(LK('lp-bio'))}catch(e){}bioCover(0);return}
  try{const A=window.Capacitor.Plugins.App;if(A&&!BIO.on){BIO.on=1;
