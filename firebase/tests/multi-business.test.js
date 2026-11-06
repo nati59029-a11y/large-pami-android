@@ -39,6 +39,7 @@ const fs = (uid) => env.authenticatedContext(uid, { email: uid + '@example.inval
 const st = (uid) => env.authenticatedContext(uid, { email: uid + '@example.invalid' }).storage();
 const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
 const prepSt = (fn) => env.withSecurityRulesDisabled((c) => fn(c.storage()));
+async function getDoc(p) { let v = null; await prep(async (db) => { const x = await db.doc(p).get(); v = x.exists ? x.data() : null; }); return v; }
 const up = (ref, data, meta) => new Promise((res, rej) => ref.put(data, meta).then(res, rej));
 
 function bizDoc(biz, o) {
@@ -100,7 +101,9 @@ const OPS = {
     get: { allow: S, run: (db, biz) => db.doc(P(biz)).get() },
     list: { allow: ['super'], run: (db) => db.collection('b').get() },
     create: { allow: NONE, run: (db, biz) => db.doc(P(biz) + '-new').set(bizDoc(biz + '-new')) },
-    update: { allow: M, run: (db, biz, uid) => db.doc(P(biz)).update({ brand: { name: 'מותג', colors: { acc: '#112233' }, updatedAt: now(), updatedBy: uid } }) },
+    // עדכון חוזה 14: brand נכתב רק דרך setBusinessBrand (מנהל־על, audit) – אף אחד לא כותב אותו מהאפליקציה (בדיקה נפרדת למטה).
+    // הכתיבה היחידה מהאפליקציה למסמך העסק: migrationTarget, מנהל־על בלבד (עדכון חוזה 7א).
+    update: { allow: ['super'], run: (db, biz) => db.doc(P(biz)).update({ migrationTarget: false }) },
     delete: { allow: NONE, run: (db, biz) => db.doc(P(biz)).delete() },
   },
   admins: {
@@ -242,9 +245,10 @@ const ST_OPS = {
   },
   'Storage b/{bizId}/brand/logo': {
     get: { allow: S, run: async (s, biz) => { await prepSt((a) => up(a.ref(`${P(biz)}/brand/logo`), new Uint8Array([1]), PNG)); return s.ref(`${P(biz)}/brand/logo`).getMetadata(); } },
-    create: { allow: M, run: async (s, biz) => { await prepSt((a) => a.ref(`${P(biz)}/brand/logo`).delete().catch(() => {})); return up(s.ref(`${P(biz)}/brand/logo`), new Uint8Array(1024), PNG); } },
-    update: { allow: M, run: async (s, biz) => { await prepSt((a) => up(a.ref(`${P(biz)}/brand/logo`), new Uint8Array([1]), PNG)); return up(s.ref(`${P(biz)}/brand/logo`), new Uint8Array(2048), { contentType: 'image/webp' }); } },
-    delete: { allow: M, run: async (s, biz) => { await prepSt((a) => up(a.ref(`${P(biz)}/brand/logo`), new Uint8Array([1]), PNG)); return s.ref(`${P(biz)}/brand/logo`).delete(); } },
+    // עדכון חוזה 14: הלוגו – כתיבה ומחיקה רק למנהל־על
+    create: { allow: ['super'], run: async (s, biz) => { await prepSt((a) => a.ref(`${P(biz)}/brand/logo`).delete().catch(() => {})); return up(s.ref(`${P(biz)}/brand/logo`), new Uint8Array(1024), PNG); } },
+    update: { allow: ['super'], run: async (s, biz) => { await prepSt((a) => up(a.ref(`${P(biz)}/brand/logo`), new Uint8Array([1]), PNG)); return up(s.ref(`${P(biz)}/brand/logo`), new Uint8Array(2048), { contentType: 'image/webp' }); } },
+    delete: { allow: ['super'], run: async (s, biz) => { await prepSt((a) => up(a.ref(`${P(biz)}/brand/logo`), new Uint8Array([1]), PNG)); return s.ref(`${P(biz)}/brand/logo`).delete(); } },
   },
 };
 
@@ -337,34 +341,28 @@ describe('ריבוי עסקים – users, superadmins, ושדות שהמשתמ�
     await assertFails(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U[A].mgr }, status: 'suspended' }));
     // עובד לא כותב גם brand
     await assertFails(fs(U[A].emp).doc('b/' + A).update({ brand: { name: 'x', updatedAt: now(), updatedBy: U[A].emp } }));
-    // מותר תואם
-    await assertSucceeds(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U[A].mgr } }));
+    // עדכון חוזה 14: גם brand תואם לבדו – נדחה (רק מנהל־על, דרך setBusinessBrand)
+    await assertFails(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U[A].mgr } }));
   });
 
-  it('brand: hasOnly, אורך שם עד 60, צבעים #rrggbb, לוגו רק בתיקיית העסק, updatedBy/updatedAt של הכותב', async () => {
-    const m = fs(U[A].mgr), uid = U[A].mgr, d = m.doc('b/' + A);
+  it('brand (עדכון חוזה 14): מנהל העסק לא כותב brand מהאפליקציה – גם לא שם, צבעים או לוגו תקינים, וגם לא כשדה משנה; העסק לא השתנה', async () => {
+    const uid = U[A].mgr, d = fs(uid).doc('b/' + A);
+    const before = (await getDoc('b/' + A)).brand;
     const br = (o) => ({ brand: Object.assign({ name: 'שם', updatedAt: now(), updatedBy: uid }, o) });
-    await assertSucceeds(d.update(br({ name: 'א'.repeat(60) })));
-    await assertFails(d.update(br({ name: 'א'.repeat(61) })));
-    await assertFails(d.update(br({ name: 5 })));
-    await assertFails(d.update(br({ extra: 'x' })));
-    await assertFails(d.update(br({ features: { scan: true } })));
-    await assertSucceeds(d.update(br({ colors: { acc: '#aabbcc', acc2: '#AABBCC', onacc: '#000000', bg: '#111111', card: '#222222', ink: '#ffffff' } })));
-    for (const bad of ['#abc', 'red', '#gggggg', '#aabbccdd', 'aabbcc', '#aabbc']) await assertFails(d.update(br({ colors: { acc: bad } })), bad);
-    await assertFails(d.update(br({ colors: { acc: '#aabbcc', evil: '#000000' } })));
-    await assertSucceeds(d.update(br({ logoPath: `b/${A}/brand/logo` })));
-    await assertSucceeds(d.update(br({ logoPath: '' })));
-    await assertFails(d.update(br({ logoPath: `b/${B}/brand/logo` })));
-    await assertFails(d.update(br({ logoPath: 'app_backups/x' })));
-    await assertSucceeds(d.update(br({ base: 'dark-gold' })));
-    await assertFails(d.update(br({ base: 'Dark Gold!' })));
-    await assertFails(d.update(br({ updatedBy: U[A].emp })));
-    await assertFails(d.update(br({ updatedAt: now() - 10 * 60000 })));
-    await assertFails(d.update({ brand: { name: 'x' } }));
-    await assertFails(d.update({ brand: 'string' }));
+    await assertFails(d.update(br({ name: 'מותג חדש' })));
+    await assertFails(d.update(br({ colors: { acc: '#aabbcc', acc2: '#aabbcc', onacc: '#000000', bg: '#111111', card: '#222222', ink: '#ffffff' } })));
+    await assertFails(d.update(br({ logoPath: `b/${A}/brand/logo` })));
+    await assertFails(d.update(br({ logoPath: '' })));
+    await assertFails(d.update({ 'brand.name': 'x' }));
+    await assertFails(d.update({ 'brand.colors.acc': '#aabbcc' }));
+    await assertFails(d.set({ brand: { name: 'x' } }, { merge: true }));
+    // גם מנהל של עסק ב' ועובד
+    await assertFails(fs(U[B].mgr).doc('b/' + A).update(br({ updatedBy: U[B].mgr })));
+    await assertFails(fs(U[A].emp).doc('b/' + A).update({ 'brand.name': 'x' }));
+    assert.deepEqual((await getDoc('b/' + A)).brand, before, 'brand לא השתנה');
   });
 
-  it('מנהל־על: מהאפליקציה כותב רק brand. status, features, adv, ownerEmail, ownerPhone – רק דרך השרת (audit + bizStatus); לא יוצר ולא מוחק עסק', async () => {
+  it('מנהל־על: מהאפליקציה כותב רק migrationTarget. status, features, adv, brand, ownerEmail, ownerPhone – רק דרך השרת (audit + bizStatus); לא יוצר ולא מוחק עסק', async () => {
     const s = fs(U.super), d = s.doc('b/' + A);
     // שלב 5 (עדכון חוזה 6): השינויים האלה עוברים דרך setBusinessStatus / setBusinessFeatures / setBusinessAdv / createBusiness
     await assertFails(d.update({ status: 'suspended' }));
@@ -372,7 +370,9 @@ describe('ריבוי עסקים – users, superadmins, ושדות שהמשתמ�
     await assertFails(d.update({ 'features.tasks': false }));
     await assertFails(d.update({ adv: { limits: { scanDaily: 100 }, yemot: {} } }));
     await assertFails(d.update({ ownerEmail: 'owner@example.invalid', ownerPhone: '+972 50-000-0000' }));
-    await assertSucceeds(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U.super } }));
+    // עדכון חוזה 14: brand – רק דרך setBusinessBrand (audit), לא בכתיבה ישירה
+    await assertFails(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U.super } }));
+    await assertFails(d.update({ 'brand.name': 'x' }));
     await assertFails(d.update({ brand: { name: 'x', updatedAt: now(), updatedBy: U.super }, status: 'suspended' }));
     for (const [k, v] of Object.entries({ dataRoot: 'legacy', bizId: B, name: 'x', schemaVersion: 2, createdBy: 'x' })) await assertFails(d.update({ [k]: v }), k);
     await assertFails(s.doc('b/biz-new').set(bizDoc('biz-new')));
@@ -542,8 +542,8 @@ describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני
   before(async () => { env = await H.getEnv(); await seedAll(); });
   beforeEach(async () => { await env.clearStorage(); });
 
-  it('לוגו: png/jpeg/webp עד 1MB – מותר; מעל 1MB או סוג אחר – נחסם', async () => {
-    const m = st(U[A].mgr), r = m.ref(`b/${A}/brand/logo`);
+  it('לוגו (מנהל־על): png/jpeg/webp עד 1MB – מותר; מעל 1MB או סוג אחר – נחסם', async () => {
+    const m = st(U.super), r = m.ref(`b/${A}/brand/logo`);
     await assertSucceeds(up(r, new Uint8Array(1024 * 1024), PNG));
     await assertFails(up(r, new Uint8Array(1024 * 1024 + 1), PNG));
     await assertSucceeds(up(r, new Uint8Array(10), { contentType: 'image/jpeg' }));
@@ -551,6 +551,21 @@ describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני
     for (const ct of ['image/gif', 'image/svg+xml', 'text/plain', 'application/octet-stream', 'text/html']) await assertFails(up(r, new Uint8Array(10), { contentType: ct }), ct);
     await assertFails(up(m.ref(`b/${A}/brand/logo2`), new Uint8Array(10), PNG));
     await assertFails(up(m.ref(`b/${A}/brand/x/logo`), new Uint8Array(10), PNG));
+  });
+
+  it('לוגו (עדכון חוזה 14): מנהל העסק, עובד, מנהל של עסק אחר ומחובר בלי עסק – לא מעלים, לא מחליפים ולא מוחקים; הקובץ לא השתנה. קריאה – חברי העסק', async () => {
+    await prepSt((a) => up(a.ref(`b/${A}/brand/logo`), new Uint8Array([7, 7, 7]), PNG));
+    for (const uid of [U[A].mgr, U[A].emp, U[B].mgr, U.nobiz]) {
+      const r = st(uid).ref(`b/${A}/brand/logo`);
+      await assertFails(up(r, new Uint8Array(10), PNG), uid + ' העלאה');
+      await assertFails(up(r, new Uint8Array(10), { contentType: 'image/webp' }), uid + ' החלפה');
+      await assertFails(r.delete(), uid + ' מחיקה');
+    }
+    await assertSucceeds(st(U[A].mgr).ref(`b/${A}/brand/logo`).getMetadata());
+    await assertSucceeds(st(U[A].emp).ref(`b/${A}/brand/logo`).getMetadata());
+    let size = -1; await prepSt(async (a) => { size = (await a.ref(`b/${A}/brand/logo`).getMetadata()).size; });
+    assert.equal(size, 3, 'הקובץ המקורי נשאר');
+    await assertSucceeds(up(st(U.super).ref(`b/${A}/brand/logo`), new Uint8Array(10), PNG));
   });
 
   it('עובד א\' לא קורא ולא כותב גיבוי או לוגו של עסק ב\' (וגם להפך)', async () => {
@@ -615,7 +630,9 @@ describe('ריבוי עסקים – Storage: לוגו, גיבוי ועדכוני
     }
     // עובד שהוגדר במסמך users כמנהל (השרת בלבד כותב) מקבל הרשאות מנהל ב-Storage – לכן רק השרת כותב users
     await prep((a) => a.doc('users/' + U[A].emp).update({ role: 'admin' }));
-    await assertSucceeds(up(st(U[A].emp).ref(`b/${A}/brand/logo`), new Uint8Array([1]), PNG));
+    // (עדכון חוזה 14: הלוגו כבר לא נכתב בידי מנהל, ולכן בודקים הרשאת מנהל אחרת – קריאת גיבוי של משתמש אחר בעסק)
+    await prepSt((a) => up(a.ref(`b/${A}/app_backups/${U[A].mgr}/m.bin`), new Uint8Array([1]), BIN));
+    await assertSucceeds(st(U[A].emp).ref(`b/${A}/app_backups/${U[A].mgr}/m.bin`).getMetadata());
   });
 
   it('migrate_backups/ (עדכון חוזה 7א): סגור לגמרי לאפליקציה – גם מנהל־על, מנהל ועובד לא קוראים, לא רושמים ולא כותבים', async () => {

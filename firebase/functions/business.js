@@ -1,7 +1,7 @@
 'use strict';
 // ריבוי עסקים (משימה 2026-11-05, שלב 5, חלקים ג' ו-ה'): פונקציות ניהול.
 //   מנהל־על בלבד (superadmins/{uid}): createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures,
-//                                     setBusinessAdv, setYemotToken, logBusinessEntry.
+//                                     setBusinessAdv, setYemotToken, logBusinessEntry, setBusinessBrand.
 //   מנהל העסק (בתוך העסק שלו בלבד):   addStaff, setStaffActive.
 // כל פעולה נרשמת ב-b/{bizId}/audit (by, t, act, note). bizId של משתמש רגיל נקבע בשרת בלבד (requireStaff).
 // כניסה ראשונה (שלב 6ג, עדכון חוזה 9, החלטת המשתמש "א"): אין קוד חד־פעמי ואין שליחת מייל בשרת.
@@ -80,8 +80,10 @@ async function assertJoinable(uid, bizId, sup) {
 
 // חשבון Auth למייל, כך שלאף אחד אין סיסמה ידועה לחשבון שמקבל הרשאות:
 //   - אין חשבון → נוצר חשבון חדש בלי סיסמה. נכנסים רק אחרי "קבע סיסמה" מהמייל המובנה של Firebase.
-//   - יש חשבון שלא אומת ושאינו חבר באף עסק (למשל מישהו שנרשם מראש עם המייל של המנהל, ויודע את הסיסמה שלו) →
-//     החשבון הישן מנוטרל בלי מחיקה (מושבת, המייל שלו מוחלף בכתובת שלא מקבלת דואר, החיבורים שלו מבוטלים), ונוצר חשבון חדש.
+//   - יש חשבון שלא אומת ושאינו חבר באף עסק (למשל מישהו שנרשם מראש עם המייל של המנהל, ויודע את הסיסמה שלו):
+//     * הקורא אינו מנהל־על (מנהל עסק ב-addStaff) → לא נוגעים בחשבון; ההודעה האחידה not-joinable (עדכון חוזה 14).
+//       כך מנהל עסק לא יכול לנטרל חשבון של אדם אחר רק לפי המייל שלו.
+//     * הקורא מנהל־על → החשבון הישן מנוטרל בלי מחיקה (מושבת, המייל שלו מוחלף בכתובת שלא מקבלת דואר, החיבורים שלו מבוטלים), ונוצר חשבון חדש.
 //     הטוקנים הישנים שלו שייכים למזהה אחר, ולכן לא מקבלים את ההרשאות. אפשר לשחזר אותו בלוח הבקרה.
 //   - חשבון שאומת (בעל המייל) או שכבר רשום באותו עסק → אותו חשבון.
 async function accountFor(email, bizId, sup) {
@@ -91,6 +93,7 @@ async function accountFor(email, bizId, sup) {
   if (!rec) return (await auth.createUser({ email, emailVerified: false, disabled: false })).uid;
   const u = await assertJoinable(rec.uid, bizId, sup);
   if (u.exists || rec.emailVerified === true) return rec.uid;
+  if (sup !== true) throw new HttpsError('failed-precondition', NOT_JOINABLE, { reason: 'not-joinable' }); // עדכון חוזה 14: רק מנהל־על מנטרל
   await auth.updateUser(rec.uid, { email: `orphan-${rec.uid.toLowerCase()}@orphaned.invalid`, disabled: true });
   await auth.revokeRefreshTokens(rec.uid);
   logger.warn('business: unverified account set aside', { reason: 'unverified-account' });
@@ -251,6 +254,64 @@ async function logBusinessEntry(request) {
   return { ok: true, bizId };
 }
 
+// ---------- setBusinessBrand: מיתוג העסק (שם תצוגה, לוגו, צבעים) – מנהל־על בלבד (עדכון חוזה 14) ----------
+// הלוגו עצמו מועלה מהאפליקציה ל-Storage, לנתיב b/{bizId}/brand/logo שרק מנהל־על כותב (כללי Storage, קריאה אחת: superadmins).
+// כאן נשמר מסמך brand: name (עד 60 תווים), logoPath ('' או נתיב הלוגו של העסק הזה בלבד), colors (#rrggbb, רק 6 המפתחות המוכרים).
+// שדה שלא נשלח – נשאר כמו שהיה. base נשמר כמו שהיה (ברירת מחדל 'dark-gold'). updatedAt/updatedBy – השרת. כל שינוי נרשם ב-audit.
+const BRAND_COLORS = ['acc', 'acc2', 'onacc', 'bg', 'card', 'ink'];
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+function cleanBrand(bizId, br) {
+  if (!br || typeof br !== 'object' || Array.isArray(br)) throw bad('bad-brand', 'המיתוג לא תקין');
+  for (const k of Object.keys(br)) if (!['name', 'logoPath', 'colors'].includes(k)) throw bad('bad-brand', 'שדה לא מוכר במיתוג: ' + String(k).slice(0, 30));
+  const out = {};
+  if (br.name !== undefined) {
+    const n = typeof br.name === 'string' ? br.name.replace(/[\u0000-\u001f\u007f]/g, '').trim() : null;
+    if (n === null || n.length > 60) throw bad('bad-brand', 'שם התצוגה: עד 60 תווים');
+    out.name = n;
+  }
+  if (br.logoPath !== undefined) {
+    if (br.logoPath !== '' && br.logoPath !== `b/${bizId}/brand/logo`) throw bad('bad-brand', 'נתיב הלוגו לא תקין');
+    out.logoPath = br.logoPath;
+  }
+  if (br.colors !== undefined) {
+    const c = br.colors;
+    if (!c || typeof c !== 'object' || Array.isArray(c)) throw bad('bad-brand', 'הצבעים לא תקינים');
+    out.colors = {};
+    for (const [k, v] of Object.entries(c)) {
+      if (!BRAND_COLORS.includes(k)) throw bad('bad-brand', 'צבע לא מוכר: ' + String(k).slice(0, 30));
+      if (typeof v !== 'string' || !HEX_RE.test(v)) throw bad('bad-brand', 'כל צבע חייב להיות בצורה #rrggbb');
+      out.colors[k] = v.toLowerCase();
+    }
+  }
+  if (!Object.keys(out).length) throw bad('bad-brand', 'לא נשלח שום שינוי במיתוג');
+  return out;
+}
+async function setBusinessBrand(request) {
+  const by = await requireSuper(request);
+  const input = inputObject(request);
+  const bizId = bizIdOf(input);
+  const upd = cleanBrand(bizId, input.brand);
+  const biz = await bizOrThrow(bizId);
+  if (biz.dataRoot === 'legacy') throw new HttpsError('failed-precondition', 'בעסק במצב legacy אין מיתוג', { reason: 'legacy-biz' });
+  const db = getFirestore();
+  const ref = db.doc('b/' + bizId);
+  let brand = null;
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    const old = s.get('brand') && typeof s.get('brand') === 'object' ? s.get('brand') : {};
+    const base = typeof old.base === 'string' && /^[a-z0-9-]{1,30}$/.test(old.base) ? old.base : 'dark-gold';
+    brand = {
+      name: upd.name !== undefined ? upd.name : (typeof old.name === 'string' ? old.name : biz.name),
+      logoPath: upd.logoPath !== undefined ? upd.logoPath : (old.logoPath === `b/${bizId}/brand/logo` ? old.logoPath : ''),
+      colors: upd.colors !== undefined ? upd.colors : (old.colors && typeof old.colors === 'object' ? old.colors : {}),
+      base, updatedAt: Date.now(), updatedBy: by,
+    };
+    tx.update(ref, { brand });
+    tx.set(auditRef(bizId), auditData(by, 'setBusinessBrand', Object.keys(upd).join(',') + (upd.logoPath !== undefined ? ';logo=' + (upd.logoPath ? 'on' : 'off') : '')));
+  });
+  return { ok: true, bizId, brand };
+}
+
 // ---------- addStaff / setStaffActive: מנהל העסק, בתוך העסק שלו בלבד ----------
 async function requireBizManager(request) {
   const who = await requireStaff(request);
@@ -350,10 +411,11 @@ exports.setBusinessFeatures = onCall(wrap('setBusinessFeatures', setBusinessFeat
 exports.setBusinessAdv = onCall(wrap('setBusinessAdv', setBusinessAdv));
 exports.setYemotToken = onCall(wrap('setYemotToken', setYemotToken));
 exports.logBusinessEntry = onCall(wrap('logBusinessEntry', logBusinessEntry));
+exports.setBusinessBrand = onCall(wrap('setBusinessBrand', setBusinessBrand));
 exports.addStaff = onCall(wrap('addStaff', addStaff));
 exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  logBusinessEntry, addStaff, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, BATCH_MAX, wrap,
+  logBusinessEntry, setBusinessBrand, cleanBrand, addStaff, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, BATCH_MAX, wrap,
 } });

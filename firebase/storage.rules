@@ -92,13 +92,14 @@ service firebase.storage {
       allow delete: if isSelf(userId) && bStaff(bizId);
     }
 
-    // לוגו העסק: קריאה – חברי העסק. כתיבה ומחיקה – מנהל העסק (ומנהל־על). png/jpeg/webp עד 1MB.
+    // לוגו העסק: קריאה – חברי העסק. כתיבה ומחיקה – מנהל־על בלבד (עדכון חוזה 14; קריאה אחת: superadmins/{uid}).
+    // מנהל העסק ועובד – קריאה בלבד. png/jpeg/webp עד 1MB. מסמך brand עצמו נשמר רק דרך setBusinessBrand (audit).
     match /b/{bizId}/brand/logo {
       allow read: if bStaff(bizId);
-      allow create, update: if bMgr(bizId)
+      allow create, update: if bSuper()
         && request.resource.size <= 1024 * 1024
         && request.resource.contentType in ['image/png', 'image/jpeg', 'image/webp'];
-      allow delete: if bMgr(bizId);
+      allow delete: if bSuper();
     }
 
     // הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם.

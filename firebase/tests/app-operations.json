@@ -1573,17 +1573,10 @@
   },
   {
    "id": "X07",
-   "line": 4151,
+   "line": 4152,
    "snippet": "/staff?pageSize=300",
    "fn": "admStaffLoad",
    "reason": "מסך ניהול חדש (ריבוי עסקים, שלב 6א). רשימת העובדים של העסק הנוכחי (FSB), list. מנהל העסק ומנהל־על; עובד אינו מגיע למסך (isA). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלבים 2 ו-5); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-admin.js. תעבור ל-rows באיחוד (שלב 7)."
-  },
-  {
-   "id": "X08",
-   "line": 4273,
-   "snippet": "fsx('/b/'+SY.bizId+'?updateMask.fieldPaths=brand&currentDocument.exists=true'",
-   "fn": "brSave",
-   "reason": "מסך מיתוג חדש (ריבוי עסקים, שלב 6ב). PATCH למסמך העסק מהשורש (FSR) עם updateMask על brand בלבד: שם, נתיב לוגו, צבעים, ערכת בסיס, מי ומתי עדכן. מנהל העסק (בעסק פעיל) ומנהל־על; הכללים בשלב 2 (hasOnly(['brand']) ו-brandOk). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלב 2); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-brand.js (בדיקות 26–27, 31). תעבור ל-rows באיחוד (שלב 7)."
   }
  ]
 }

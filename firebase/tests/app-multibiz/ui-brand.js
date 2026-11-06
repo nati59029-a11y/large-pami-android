@@ -228,13 +228,37 @@ const dataPath = (u) => decodeURIComponent(new URL(u).pathname).replace(/^.*\/do
     }
   }
 
-  // ---------- (ד) מסך מיתוג: העלאת לוגו, הצעות, ניגודיות, שמירה, החלה ואיפוס ----------
+  // ---------- (ד) מסך מיתוג – מנהל־על בלבד, מכרטיס העסק (עדכון חוזה 14): העלאת לוגו, הצעות, ניגודיות, שמירה דרך setBusinessBrand, איפוס ----------
   {
-    const log = []; const { ctx, page } = await open('ma@x.co', log, 'brand');
+    const audit = async (biz) => { const r = await fetch(DOCS + `b/${biz}/audit?pageSize=300`, { headers: { Authorization: 'Bearer owner' } }); const j = await r.json(); return (j.documents || []).map((d) => Object.fromEntries(Object.entries(d.fields || {}).map(([k, v]) => [k, flat(v)]))); };
+    const objOf = async (p) => { const r = await fetch(`http://${ST}/v0/b/${P}/o/${encodeURIComponent(p)}`, { headers: { Authorization: 'Bearer owner' } }); return r.status === 404 ? null : r.json(); };
+    // מנהל העסק: אין כניסה למסך המיתוג, וגם בכוח – לא שומר
+    {
+      const lm = []; const { ctx, page } = await open('ma@x.co', lm, 'brand-mgr');
+      await show(page, 'settings');
+      const menu = await page.evaluate(() => ({ brand: !!document.querySelector('[data-v="brand"]'), staff: !!document.querySelector('[data-v="staff"]') }));
+      check('18 מנהל עסק (מצב b): אין "מיתוג" בהגדרות (רק "עובדים")', !menu.brand && menu.staff, menu);
+      const forced = await page.evaluate(async () => {
+        go('brand', SY.bizId); const h = document.querySelector('#main').innerText;
+        const fn = await fnCall('setBusinessBrand', { bizId: SY.bizId, brand: { name: 'שלי' } }).then(() => 'OK', (e) => e.reason || e.message);
+        const upl = await brUp(new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }), SY.bizId).then(() => 'OK', (e) => e.code || e.message);
+        const tok = await tok_(); return { h, fn, upl, direct: tok };
+        async function tok_() { try { await fsx('/b/' + SY.bizId + '?updateMask.fieldPaths=brand', { method: 'PATCH', body: JSON.stringify({ fields: { brand: { mapValue: { fields: { name: { stringValue: 'x' } } } } } }) }, 1); return 'OK'; } catch (e) { return e.code || e.message; } }
+      });
+      const acme0 = await getDoc('b/acme');
+      check('18א גם בכוח: מסך המיתוג "למנהל המערכת בלבד"; setBusinessBrand נדחה (not-superadmin); העלאת לוגו ל-Storage נדחית (403); כתיבה ישירה של brand נדחית (403); המסמך והלוגו לא השתנו',
+        /למנהל המערכת בלבד/.test(forced.h) && forced.fn === 'not-superadmin' && forced.upl === 403 && forced.direct === 403 && acme0.brand.name === 'עסק acme' && !(await objOf('b/acme/brand/logo')), forced);
+      await ctx.close();
+    }
+    const log = []; const { ctx, page } = await open('sa@x.co', log, 'brand');
     await show(page, 'settings');
-    const menu = await page.evaluate(() => !!document.querySelector('[data-v="brand"]'));
-    check('18 מנהל עסק (מצב b): "מיתוג" מופיע בהגדרות (סעיף ניהול)', menu, null);
-    await page.evaluate(() => go('brand')); await wait(page, 800);
+    const saMenu = await page.evaluate(() => ({ brand: !!document.querySelector('[data-v="brand"]'), sa: !!document.querySelector('[data-v="sa"]') }));
+    check('18ב מנהל־על: אין "מיתוג" בהגדרות של העסק שבו הוא נמצא; המיתוג רק מכרטיס העסק', !saMenu.brand && saMenu.sa, saMenu);
+    await page.evaluate(() => go('sa')); await wait(page, 2000);
+    await page.evaluate(() => go('sab', 'acme')); await wait(page, 1800);
+    await page.click('[data-a=go][data-v=brand][data-arg=acme]'); await wait(page, 1200);
+    const scr = await page.evaluate(() => ({ v: cur().v, a: cur().a, form: !!document.querySelector('form[data-f=brSave]'), id: BR && BR.id, sub: document.querySelector('#main').innerText.slice(0, 80) }));
+    check('18ג מכרטיס העסק: "מיתוג" פותח את מסך המיתוג של acme (לא של העסק שבו מנהל־העל נמצא)', scr.v === 'brand' && scr.a === 'acme' && scr.form && scr.id === 'acme' && /acme/.test(scr.sub), scr);
     const fileIn = '[data-c=brFile]';
     const bigPng = (() => { const w = 600; const raw = crypto.randomBytes(w * w * 4); return png(w, w, (x, y) => { const o = (y * w + x) * 4; return [raw[o], raw[o + 1], raw[o + 2], 255]; }); })();
     check('19 קובץ הבדיקה הגדול באמת גדול מ-1MB', bigPng.length > 1048576, bigPng.length);
@@ -254,61 +278,69 @@ const dataPath = (u) => decodeURIComponent(new URL(u).pathname).replace(/^.*\/do
     const sg = await page.evaluate(() => ({ n: document.querySelectorAll('.brsg').length, thumb: !!document.querySelector('#brLg img'), sugg: BR.sugg.map((s) => ({ n: s.n, c: s.c })) }));
     check('21 לוגו תקין: מוצג, ומחושבות 3–4 הצעות צבע בדפדפן (canvas), וכולן ≥4.5:1', sg.thumb && sg.n >= 3 && sg.n <= 4 && sg.sugg.every((s) => { const q = ok45(s.c); return q.inkBg >= 4.5 && q.inkCard >= 4.5 && q.onaccAcc >= 4.5; }), sg.sugg.map((s) => s.n + ' ' + s.c.acc));
     await page.fill('input[name=name]', 'מאפיית אקמי'); await page.click('.brsg >> nth=0'); await wait(page, 3200); // ממתינים שההודעה הקופצת תיעלם
-    await shot(page, '01-מסך-מיתוג', true);
+    await shot(page, '01-מסך-מיתוג-מכרטיס-העסק', true);
     const pv = await page.evaluate(() => { const e = document.querySelector('.brpv'); const cs = getComputedStyle(e); return { bg: e.style.getPropertyValue('--bg'), acc: e.style.getPropertyValue('--acc'), name: e.innerText, bgc: cs.backgroundColor, appBg: getComputedStyle(document.body).backgroundColor }; });
-    check('22 תצוגה מקדימה חיה: הצעה שנבחרה משנה את התצוגה המקדימה, ולא את שאר האפליקציה עד לשמירה', pv.bg && pv.acc && /מאפיית אקמי/.test(pv.name) && pv.bgc !== pv.appBg, pv);
+    check('22 תצוגה מקדימה חיה: הצעה שנבחרה משנה את התצוגה המקדימה, ולא את שאר האפליקציה', pv.bg && pv.acc && /מאפיית אקמי/.test(pv.name) && pv.bgc !== pv.appBg, pv);
     // עריכה ידנית שלא עוברת
-    const inkBefore = await page.evaluate(() => BR.colors.ink);
     await page.fill('input[type=text][data-k=ink]', await page.evaluate(() => BR.colors.bg)); await wait(page, 300);
     const w1 = await page.evaluate(() => ({ warn: document.getElementById('brWn').innerText, dis: document.getElementById('brSaveBtn').disabled }));
-    await shot(page, '02-מיתוג-אזהרת-ניגודיות', true);
     check('23 עריכה ידנית שלא עוברת (טקסט בצבע הרקע): מוצגת אזהרה עם היחס, והשמירה חסומה', /4\.5:1/.test(w1.warn) && /1\.0:1/.test(w1.warn) && w1.dis === true, w1);
-    const fb = await page.evaluate(() => { const b = SY.biz.brand; return JSON.stringify(b); });
+    page.__step = 'force';
     await page.evaluate(() => document.querySelector('#brSaveBtn').form.requestSubmit()); await wait(page, 600);
-    const unsaved = JSON.parse(await page.evaluate(() => JSON.stringify(SY.biz.brand)));
-    check('24 ניסיון שמירה בכוח עם צבעים שלא עוברים: לא נשמר דבר (המסמך לא השתנה)', JSON.stringify(unsaved) === fb && (await getDoc('b/acme')).brand.colors && Object.keys((await getDoc('b/acme')).brand.colors).length === 0, null);
+    const forcedReq = log.filter((r) => r.step === 'force' && (/setBusinessBrand/.test(r.url) || new URL(r.url).port === String(port(ST))));
+    check('24 ניסיון שמירה בכוח עם צבעים שלא עוברים: לא נשלח דבר ולא נשמר דבר', forcedReq.length === 0 && Object.keys((await getDoc('b/acme')).brand.colors).length === 0 && !(await objOf('b/acme/brand/logo')), forcedReq.length);
     await page.click('[data-a=brFix]'); await wait(page, 300);
     const w2 = await page.evaluate(() => ({ warn: document.getElementById('brWn').innerText, dis: document.getElementById('brSaveBtn').disabled, c: BR.colors }));
     check('25 "תיקון אוטומטי" מתקן את הצבעים עד שכולם עוברים; השמירה נפתחת', w2.warn === '' && !w2.dis && (() => { const q = ok45(w2.c); return q.inkBg >= 4.5 && q.inkCard >= 4.5 && q.onaccAcc >= 4.5; })(), w2.c);
     // שמירה
     const docBefore = await getDoc('b/acme'); page.__step = 'save';
     const colorsToSave = w2.c;
-    await page.click('#brSaveBtn'); await wait(page, 2500);
+    await page.click('#brSaveBtn'); await wait(page, 3000);
     const docAfter = await getDoc('b/acme');
-    const patch = log.filter((r) => r.step === 'save' && r.method === 'PATCH' && /\/documents\/b\/acme\?/.test(r.url));
-    const objMeta = await (await fetch(`http://${ST}/v0/b/${P}/o/${encodeURIComponent('b/acme/brand/logo')}`, { headers: { Authorization: 'Bearer owner' } })).json();
-    check('26 שמירה: הלוגו הועלה ל-b/acme/brand/logo (png, גודל תקין), ו-brand נשמר עם שם, נתיב לוגו, שישה צבעים #rrggbb שעוברים ניגודיות, ומי ומתי עדכן',
-      objMeta.contentType === 'image/png' && +objMeta.size === good.length && docAfter.brand.name === 'מאפיית אקמי' && docAfter.brand.logoPath === 'b/acme/brand/logo' && Object.keys(docAfter.brand.colors).sort().join() === 'acc,acc2,bg,card,ink,onacc' && Object.values(docAfter.brand.colors).every((v) => /^#[0-9a-f]{6}$/.test(v)) && JSON.stringify(Object.entries(docAfter.brand.colors).sort()) === JSON.stringify(Object.entries(colorsToSave).sort()), { content: objMeta.contentType, size: objMeta.size, brand: docAfter.brand });
+    const objMeta = await objOf('b/acme/brand/logo');
+    check('26 שמירה: הלוגו הועלה ל-b/acme/brand/logo (png, גודל תקין), ו-brand נשמר עם שם, נתיב לוגו ושישה צבעים #rrggbb',
+      objMeta && objMeta.contentType === 'image/png' && +objMeta.size === good.length && docAfter.brand.name === 'מאפיית אקמי' && docAfter.brand.logoPath === 'b/acme/brand/logo' && Object.keys(docAfter.brand.colors).sort().join() === 'acc,acc2,bg,card,ink,onacc' && Object.values(docAfter.brand.colors).every((v) => /^#[0-9a-f]{6}$/.test(v)) && JSON.stringify(Object.entries(docAfter.brand.colors).sort()) === JSON.stringify(Object.entries(colorsToSave).sort()), { content: objMeta && objMeta.contentType, size: objMeta && objMeta.size, brand: docAfter.brand });
     const q = ok45(docAfter.brand.colors);
-    check('26א הצבעים שנשמרו עוברים ניגודיות (חישוב עצמאי), updatedBy הוא המנהל, updatedAt מספר שלם קרוב לעכשיו', q.inkBg >= 4.5 && q.inkCard >= 4.5 && q.onaccAcc >= 4.5 && docAfter.brand.updatedBy === acmeAdmin && Math.abs(docAfter.brand.updatedAt - Date.now()) < 60000, { q, updatedBy: docAfter.brand.updatedBy === acmeAdmin });
-    check('27 הכתיבה היא PATCH אחד עם updateMask על brand בלבד, וכל שאר שדות מסמך העסק לא השתנו', patch.length === 1 && /updateMask\.fieldPaths=brand(&|$)/.test(patch[0].url) && !/updateMask\.fieldPaths=(?!brand)/.test(patch[0].url) && docAfter.status === docBefore.status && docAfter.dataRoot === docBefore.dataRoot && JSON.stringify(docAfter.features) === JSON.stringify(docBefore.features) && docAfter.name === docBefore.name, { url: patch[0] && decodeURIComponent(patch[0].url).replace(/^.*documents/, '') });
-    const ap = await page.evaluate(() => { const cs = (k) => document.documentElement.style.getPropertyValue(k).trim(); return { acc: cs('--acc'), bg: cs('--bg'), ink: cs('--ink'), mut: cs('--mut'), line: cs('--line'), bodyBg: getComputedStyle(document.body).backgroundColor }; });
-    check('28 אחרי השמירה המיתוג מוחל מיד, דרך משתני ערכת הנושא הקיימים (--acc, --bg, --ink, ועוד --mut ו---line נגזרים)', ap.acc === docAfter.brand.colors.acc && ap.bg === docAfter.brand.colors.bg && ap.ink === docAfter.brand.colors.ink && /^#[0-9a-f]{6}$/.test(ap.mut) && /^#[0-9a-f]{6}$/.test(ap.line), ap);
-    // רענון: המיתוג והלוגו נטענים
-    await page.reload(); await wait(page, 3500);
-    const ap2 = await page.evaluate(() => ({ acc: document.documentElement.style.getPropertyValue('--acc').trim(), bzl: document.documentElement.hasAttribute('data-bzl'), logo: document.getElementById('lglogo').style.backgroundImage.slice(0, 20), disp: getComputedStyle(document.getElementById('lglogo')).display }));
-    check('29 אחרי טעינה מחדש: הצבעים מוחלים, ולוגו העסק נטען מ-Storage ומוצג בכותרת', ap2.acc === docAfter.brand.colors.acc && ap2.bzl && /blob:/.test(ap2.logo) && ap2.disp === 'block', ap2);
-    await show(page, 'home'); await shot(page, '06-בית-אחרי-מיתוג');
+    check('26א הצבעים שנשמרו עוברים ניגודיות (חישוב עצמאי); updatedBy = מנהל־העל (נקבע בשרת), updatedAt קרוב לעכשיו', q.inkBg >= 4.5 && q.inkCard >= 4.5 && q.onaccAcc >= 4.5 && docAfter.brand.updatedBy === saUid && Math.abs(docAfter.brand.updatedAt - Date.now()) < 60000, { q, updatedBy: docAfter.brand.updatedBy === saUid });
+    const fnReq = log.filter((r) => r.step === 'save' && r.method === 'POST' && /setBusinessBrand/.test(r.url));
+    const patch = log.filter((r) => r.step === 'save' && r.method === 'PATCH' && /\/documents\/b\//.test(r.url));
+    const aud = (await audit('acme')).filter((a) => a.act === 'setBusinessBrand');
+    check('27 השמירה היא קריאה אחת ל-setBusinessBrand (בלי כתיבה ישירה ל-Firestore), נרשמה שורת audit של מנהל־העל, ושאר שדות מסמך העסק לא השתנו',
+      fnReq.length === 1 && patch.length === 0 && aud.length === 1 && aud[0].by === saUid && /logo=on/.test(aud[0].note) && docAfter.status === docBefore.status && docAfter.dataRoot === docBefore.dataRoot && JSON.stringify(docAfter.features) === JSON.stringify(docBefore.features) && docAfter.name === docBefore.name, { fn: fnReq.length, patch: patch.length, audit: aud.map((a) => a.act + ':' + a.note) });
+    const ap = await page.evaluate(() => ({ acc: document.documentElement.style.getPropertyValue('--acc').trim(), biz: SY.bizId }));
+    check('28 המיתוג של acme לא מוחל על האפליקציה של מנהל־העל (הוא נמצא בעסק אחר)', ap.acc === '' && ap.biz === 'home', ap);
+    // מנהל העסק: אחרי כניסה – הצבעים והלוגו של העסק מוחלים (קריאה בלבד)
+    {
+      const lm2 = []; const { ctx: cm, page: pm } = await open('ma@x.co', lm2, 'brand-mgr2'); await wait(pm, 3000);
+      const ap2 = await pm.evaluate(() => ({ acc: document.documentElement.style.getPropertyValue('--acc').trim(), bzl: document.documentElement.hasAttribute('data-bzl'), logo: document.getElementById('lglogo').style.backgroundImage.slice(0, 20), disp: getComputedStyle(document.getElementById('lglogo')).display }));
+      check('29 מנהל העסק אחרי כניסה: הצבעים מוחלים, ולוגו העסק נטען מ-Storage ומוצג בכותרת', ap2.acc === docAfter.brand.colors.acc && ap2.bzl && /blob:/.test(ap2.logo) && ap2.disp === 'block', ap2);
+      await show(pm, 'home'); await shot(pm, '06-בית-אחרי-מיתוג');
+      check('29א אין שגיאות JS (מנהל העסק עם מיתוג)', pm.__errors.length === 0, pm.__errors);
+      await cm.close();
+    }
+    // פתיחה מחדש של המסך: הנתונים והלוגו הנוכחי נטענים מהעסק הנבחר
+    await page.evaluate(() => { brFree(); go('sab', 'acme'); }); await wait(page, 1200);
+    await page.click('[data-a=go][data-v=brand][data-arg=acme]'); await wait(page, 2000);
+    const re = await page.evaluate(() => ({ name: document.querySelector('input[name=name]').value, img: !!document.querySelector('#brLg img'), acc: document.querySelector('input[type=text][data-k=acc]').value }));
+    check('29ב פתיחה חוזרת מכרטיס העסק: שם, צבעים והלוגו הנוכחי של acme נטענים', re.name === 'מאפיית אקמי' && re.img && re.acc === docAfter.brand.colors.acc, re);
     // שם עד 60
-    await show(page, 'settings'); await page.evaluate(() => go('brand')); await wait(page, 600);
     const long = await page.evaluate(async () => { BR.name = 'א'.repeat(61); await brSave(false); return window.__toasts.slice(-1)[0]; });
     check('30 שם תצוגה מעל 60 תווים נדחה', /עד 60 תווים/.test(long || ''), long);
     // איפוס
-    await page.evaluate(() => { BR = null; render(0); }); await wait(page, 500);
+    await page.evaluate(() => { brFree(); render(0); }); await wait(page, 500);
     await page.click('[data-a=brReset]'); await page.waitForSelector('#dlg[open]'); await page.click('#dlg [data-a=yes]'); await wait(page, 2500);
     const docReset = await getDoc('b/acme');
-    check('31 "חזרה לצבעי ברירת המחדל": colors נשמר ריק ({}), שאר הנתונים נשמרים, והצבעים חוזרים מיד לערכת הנושא', Object.keys(docReset.brand.colors).length === 0 && docReset.brand.name === 'מאפיית אקמי' && docReset.brand.logoPath === 'b/acme/brand/logo' && await page.evaluate(() => document.documentElement.style.getPropertyValue('--acc') === ''), docReset.brand);
+    check('31 "חזרה לצבעי ברירת המחדל": colors נשמר ריק ({}), השם והלוגו נשמרים, ונרשם audit נוסף', Object.keys(docReset.brand.colors).length === 0 && docReset.brand.name === 'מאפיית אקמי' && docReset.brand.logoPath === 'b/acme/brand/logo' && (await audit('acme')).filter((a) => a.act === 'setBusinessBrand').length === 2, docReset.brand);
+    // לארג' פעמי (legacy) ועסק לא קיים: אין מסך מיתוג
+    const lg = await page.evaluate(() => { go('brand', 'larg' + 'peami'); const a = document.querySelector('#main').innerText; go('brand', 'no-such-biz'); return [a, document.querySelector('#main').innerText]; });
+    check('31א לארג\' פעמי ועסק שלא ברשימה: "אין מיתוג לעסק הזה" (בלי טופס)', lg.every((x) => /אין מיתוג לעסק הזה/.test(x)), lg.map((x) => x.slice(0, 40)));
     check('32 אין שגיאות JS (מסך מיתוג)', page.__errors.length === 0, page.__errors);
     await ctx.close();
-    // עובד לא רואה מיתוג; מנהל רגיל לא יכול לכתוב brand לעסק אחר (נבדק גם בחוקים בשלב 2)
+    // עובד לא רואה מיתוג
     const lw = []; const { ctx: c4, page: p4 } = await open('ws@x.co', lw, 'solo-worker2');
-    const wb = await p4.evaluate(() => { try { return typeof V.brand === 'function' ? (V.brand().h || '') : ''; } catch (e) { return 'ERR'; } });
-    check('33 עובד לא רואה את מסך המיתוג (גם בכוח: "למנהל העסק בלבד")', /למנהל העסק בלבד/.test(wb), wb.slice(0, 80));
+    const wb = await p4.evaluate(() => { try { return typeof V.brand === 'function' ? (V.brand('solo').h || '') : ''; } catch (e) { return 'ERR'; } });
+    check('33 עובד לא רואה את מסך המיתוג (גם בכוח: "למנהל המערכת בלבד")', /למנהל המערכת בלבד/.test(wb), wb.slice(0, 80));
     await c4.close();
-    const lx = []; const { ctx: c5, page: p5 } = await open('sa@x.co', lx, 'sa-brand'); await show(p5, 'settings');
-    const sm = await p5.evaluate(() => !!document.querySelector('[data-v="brand"]'));
-    check('33א מנהל־על בתוך עסק (כניסה כמנהל): "מיתוג" מופיע', sm, null);
-    await c5.close();
   }
 
   // ---------- (ו) פריסה לרוחב ----------

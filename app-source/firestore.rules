@@ -550,44 +550,23 @@ service cloud.firestore {
       function feat(k) { return bizDoc().get('features', {}).get(k, false) == true; }
 
       function nowMs(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
-      function hex(v) { return v is string && v.matches('^#[0-9a-fA-F]{6}$'); }
-      function colorsOk(c) {
-        return c is map && c.keys().hasOnly(['acc', 'acc2', 'onacc', 'bg', 'card', 'ink'])
-          && (!c.keys().hasAny(['acc']) || hex(c.acc))
-          && (!c.keys().hasAny(['acc2']) || hex(c.acc2))
-          && (!c.keys().hasAny(['onacc']) || hex(c.onacc))
-          && (!c.keys().hasAny(['bg']) || hex(c.bg))
-          && (!c.keys().hasAny(['card']) || hex(c.card))
-          && (!c.keys().hasAny(['ink']) || hex(c.ink));
-      }
-      // brand: שם עד 60 תווים, לוגו רק בתיקייה של העסק עצמו, צבעים #rrggbb, ערכת בסיס, ומי ומתי עדכן (חובה)
-      function brandOk(br) {
-        return br is map
-          && br.keys().hasOnly(['name', 'logoPath', 'colors', 'base', 'updatedAt', 'updatedBy'])
-          && (!br.keys().hasAny(['name']) || (br.name is string && br.name.size() <= 60))
-          && (!br.keys().hasAny(['logoPath']) || br.logoPath in ['', 'b/' + bizId + '/brand/logo'])
-          && (!br.keys().hasAny(['colors']) || colorsOk(br.colors))
-          && (!br.keys().hasAny(['base']) || (br.base is string && br.base.matches('^[a-z0-9-]{1,30}$')))
-          && br.get('updatedBy', '') == request.auth.uid
-          && nowMs(br.get('updatedAt', 0));
-      }
+      // brand (שם תצוגה, לוגו, צבעים): אף אחד לא כותב מהאפליקציה – רק השרת (setBusinessBrand, מנהל־על בלבד, עם audit).
+      // עדכון חוזה 14: מנהל העסק ועובד – קריאה בלבד (כחלק ממסמך העסק).
       function aff() { return request.resource.data.diff(resource.data).affectedKeys(); }
-      // מנהל־על כותב מהאפליקציה רק brand. status, features, adv, ownerEmail, ownerPhone – רק דרך פונקציות השרת (שלב 5,
+      // מנהל־על כותב מהאפליקציה רק migrationTarget. status, features, adv, brand, ownerEmail, ownerPhone – רק דרך פונקציות השרת (שלב 5,
       // עדכון חוזה 6): כך כל שינוי נרשם ב-audit, ו-users/{uid}.bizStatus מתעדכן יחד עם status. ownerEmail/ownerPhone/adv
       // נשמרים ב-b/{bizId}/private/info ולא במסמך העסק. name, dataRoot, bizId, schemaVersion וכו' – רק השרת.
       // עדכון חוזה 7א: migrationTarget (בוליאני, כלי ההעברה כותב אותו) – רק מנהל־על (או השרת). מנהל העסק ועובד – לא.
       function superUpdOk() {
-        return aff().hasOnly(['brand', 'migrationTarget'])
-          && (!aff().hasAny(['brand']) || brandOk(request.resource.data.brand))
-          && (!aff().hasAny(['migrationTarget']) || request.resource.data.migrationTarget is bool);
+        return aff().hasOnly(['migrationTarget'])
+          && request.resource.data.migrationTarget is bool;
       }
 
       // מסמך העסק: קריאה – חברי העסק (גם כשהעסק מושהה, כדי להציג "החשבון מושהה") ומנהל־על. רשימת כל העסקים – רק מנהל־על.
-      // כתיבה: מנהל העסק – רק brand (בעסק פעיל). מנהל־על – לפי superUpdOk. יצירה ומחיקה – רק השרת.
+      // כתיבה: מנהל העסק – כלום (עדכון חוזה 14: גם לא brand). מנהל־על – לפי superUpdOk. יצירה ומחיקה – רק השרת.
       allow get: if bIsAdmin() || bIsActiveStaff() || bSuper();
       allow list: if isSuper();
-      allow update: if (bIsAdmin() && bActive() && aff().hasOnly(['brand']) && brandOk(request.resource.data.brand))
-        || (bSuper() && superUpdOk());
+      allow update: if bSuper() && superUpdOk();
       allow create, delete: if false;
 
       // private: הגדרות שרת של העסק (למשל גיבוב אסימון ימות, קודי הזמנה) – אף אחד מהאפליקציה.
