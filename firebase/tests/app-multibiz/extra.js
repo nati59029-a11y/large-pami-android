@@ -91,9 +91,9 @@ const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fai
     const log = []; const { ctx, page } = await H.newPage(browser, www, cfg, log, 'ma');
     await page.addInitScript(() => { if (!localStorage.getItem('large-pami-v2')) { localStorage.setItem('large-pami-v2', JSON.stringify({ v: 2, mark: 'LP-DATA' })); localStorage.setItem('lp-tasks', JSON.stringify({ L: [{ id: 't0', txt: 'LP-TASK' }] })); } });
     await page.goto(H.ORIGIN + '/?emu=1'); await H.settle(page, 1000);
-    const before = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).filter((k) => !k.includes(':') && k !== 'lp-sync').sort().map((k) => [k, localStorage.getItem(k)])));
-    await H.login(page, 'ma@x.co'); await H.settle(page, 5000);
-    const after = await page.evaluate(() => ({ un: Object.fromEntries(Object.keys(localStorage).filter((k) => !k.includes(':') && k !== 'lp-sync').sort().map((k) => [k, localStorage.getItem(k)])), bizId: SY.bizId, BZP, gate: !!document.getElementById('gate') }));
+    const before = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).filter((k) => !k.includes(':') && k !== 'lp-sync' && k !== 'lp-trust').sort().map((k) => [k, localStorage.getItem(k)])));
+    await H.login(page, 'ma@x.co'); await H.settle(page, 5000); // lp-trust ("מחשב מוכר", 6ג-2) נכתב בידי H.login ולכן לא נספר כאן
+    const after = await page.evaluate(() => ({ un: Object.fromEntries(Object.keys(localStorage).filter((k) => !k.includes(':') && k !== 'lp-sync' && k !== 'lp-trust').sort().map((k) => [k, localStorage.getItem(k)])), bizId: SY.bizId, BZP, gate: !!document.getElementById('gate') }));
     check('ד-כניסה: מפתחות לארג\' פעמי לא השתנו בכניסה של מנהל עסק אחר (עיכוב 4 שניות), והדף עבר לתחילית העסק', JSON.stringify(before) === JSON.stringify(after.un) && after.bizId === 'acme' && after.BZP === 'acme:' && !after.gate && page.__errors.length === 0,
       { beforeKeys: Object.keys(before), afterKeys: Object.keys(after.un), bizId: after.bizId, BZP: after.BZP, gate: after.gate, errors: page.__errors });
     await ctx.close();
