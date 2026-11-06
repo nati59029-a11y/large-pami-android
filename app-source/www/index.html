@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="he" dir="rtl" data-th="paper">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1c5a49">
-<title>לארג׳ פעמי</title>
-<style>[hidden]{display:none!important}
+<title>לארג׳ פעמי</title><script>/* ריבוי עסקים 6ג-2: נעילה בטביעת אצבע – מכסים את התוכן לפני שהוא מוצג, אם הנעילה הופעלה במכשיר הזה (lp-bio עם תחילית העסק) */try{(function(){var s=JSON.parse(localStorage.getItem('lp-sync')||'{}')||{},b=s.bizId,p=typeof b==='string'&&/^[a-z0-9-]{3,30}$/.test(b)&&b!=='larg'+'peami'?b+':':'';if(s.refresh&&localStorage.getItem(p+'lp-bio')==='1')document.documentElement.classList.add('bzlk')})()}catch(e){}</script>
+<style>[hidden]{display:none!important}html.bzlk body>:not(#bzlk){visibility:hidden!important}#bzlk{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--ink);text-align:center}#gate .glink{font:inherit;color:inherit;letter-spacing:normal;text-transform:none;background:none;border:0;padding:8px;text-decoration:underline;cursor:pointer}#gate .glink:disabled{opacity:.6}
 :root{--bg:#f1ede4;--card:#fffdf8;--ink:#1d2a2c;--mut:#5f6b69;--line:#d9d2c3;--acc:#1c5a49;--acc2:#e1eee9;--onacc:#fff;--inc:#1b6b4a;--exp:#b2452b;--warn:#8a5a00;--bad:#b3261e;--sh:0 1px 0 rgba(0,0,0,.04),0 6px 18px -10px rgba(40,30,10,.35);--fs:16px;color-scheme:light}
 html[data-th=night]{--bg:#121516;--card:#1b2023;--ink:#ece9e1;--mut:#a3aca9;--line:#313a3d;--acc:#69c6a4;--acc2:#1f3a31;--onacc:#06241a;--inc:#69c6a4;--exp:#ee9a82;--warn:#f0c15a;--bad:#ff8c80;--sh:none;color-scheme:dark}
 html[data-th=sea]{--bg:#e9eff5;--card:#fff;--ink:#16222e;--mut:#556575;--line:#cdd8e3;--acc:#1d4e89;--acc2:#dfe9f6;--onacc:#fff;--inc:#17714d;--exp:#b2452b}
@@ -1197,7 +1197,7 @@ V.settings=()=>{
  <div class="sec"><h3>נתונים</h3></div><button class="opt" data-a="go" data-v="data"><span>גיבוי ושחזור</span>${ico('chev')}</button><button class="opt" data-a="go" data-v="imp"><span>ייבוא מאקסל</span>${ico('chev')}</button>
  ${typeof isA==='function'&&isA()&&bzF('scan')?`<div class="sec"><h3>זיהוי חכם</h3></div>${shKeyCard()}`:''}
  ${admMenu()}<div class="sec"><h3>עדכון האפליקציה</h3></div><button class="opt" data-a="updChk"><span>בדוק עדכון והתקן</span>${ico('chev')}</button>
- ${SY.refresh?`<div class="sec"><h3>חשבון</h3></div><div class="card"><p style="margin:0 0 8px">מחובר: ${esc(SY.email||'')}</p><button class="btn g w" data-a="syOut">התנתק</button></div>`:''}
+ ${SY.refresh?`<div class="sec"><h3>חשבון</h3></div><div class="card"><p style="margin:0 0 8px">מחובר: ${esc(SY.email||'')}</p>${bioRow()}<button class="btn g w" data-a="syOut">התנתק</button></div>`:''}
  <p class="note" style="margin-top:16px">לארג׳ פעמי · גרסה 7.0 · החלקה מימין לשמאל חוזרת למסך הקודם</p>`}};
 ACT.theme=el=>{S.theme=el.dataset.v;save();render(0,true);try{if(isA())pubCfg().catch(()=>{})}catch(e){}};
 ACT.fs=el=>{S.fs=+el.dataset.v;save();render(0,true)};
@@ -1261,11 +1261,11 @@ ACT.startBlank=()=>{S=ensure(defaults());save();sheetClose();render(0)};
 ACT.startSample=()=>{if(SY.bizId&&SY.bizId!==BZ0)return;sample();sheetClose();NAV=[{v:'home'}];render(0)};
 function showWelcome(){const s=$('#sheet');s.hidden=false;s.innerHTML=`<div class="sh"><h2>לארג׳ פעמי</h2></div><div class="bd"><p>ניהול הכנסות והוצאות של העסק. איך מתחילים?</p><button class="opt" data-a="startBlank"><span>התחלה נקייה<small>הקטגוריות מוכנות, בלי נתונים</small></span></button><button class="opt" data-a="syOpen"><span>התחברות לחשבון קיים<small>מכשיר עובד, או מנהל שכבר הגדיר סנכרון</small></span></button>${SY.bizId&&SY.bizId!==BZ0?'':'<button class="opt" data-a="startSample"><span>נתוני דוגמה<small>כדי להתרשם, אפשר לנקות אחר כך</small></span></button>'}<label class="opt" style="cursor:pointer"><span>שחזור מקובץ גיבוי<small>גם מהאפליקציה הישנה</small></span><input type="file" accept=".json,application/json,text/plain" data-c="bkFile" hidden></label></div>`}
 function boot(){
- hookNative();siHook();try{document.getElementById('lglogo').style.backgroundImage='url('+GATE_LOGO+')'}catch(e){}
- if(!(SY.refresh&&SY.role)){showGate();return}
+ hookNative();siHook();try{document.getElementById('lglogo').style.backgroundImage='url('+GATE_LOGO+')'}catch(e){}bioBoot();
+ if(dvLink())return;if(!(SY.refresh&&SY.role)){showGate();return}
  if(BZOK(SY.bizId)&&!SY.biz){bzOpen().then(()=>bzBoot(1));return}bzBoot()}/* ריבוי עסקים: אחרי מעבר עסק (biz עוד לא נטען) – קודם מסמך העסק, ורק אז האפליקציה */function bzBoot(o){if(bzSus()){showSusp();if(!o)bzOpen();return}if(!o)bzOpen();enterApp(false);syCheck()}
 function enterApp(fresh){
- setTimeout(()=>{try{siReady()}catch(e){}},0);
+ setTimeout(()=>{try{siReady()}catch(e){}},0);try{bioAv()}catch(e){}
  if(isW()){S=ensure(defaults());wkStart();return}
  if(load()){render(0);if(fresh)pullInbox().then(()=>rerender()).catch(()=>{});setTimeout(()=>{try{bkAuto()}catch(e){}},8000);return}
  let old=null;try{const r=localStorage.getItem(OLDKEY);if(r)old=JSON.parse(r)}catch(e){}
@@ -1676,12 +1676,12 @@ async function tok(){if(SY.idToken&&Date.now()<SY.exp-60000)return SY.idToken;if
  SY.idToken=j.id_token;SY.refresh=j.refresh_token;SY.exp=Date.now()+(+j.expires_in)*1000;syS();return SY.idToken}
 async function fsx(path,opt,root){const t=await tok();opt=opt||{};opt.headers=Object.assign({Authorization:'Bearer '+t,'Content-Type':'application/json'},opt.headers);return jf((root||/^:(commit|batchGet)$/.test(path)?FSR():FSB())+path,opt)}
 const loginMsg=e=>{const m=String(e.message||'');if(e.offline||e.noAccess)return m;if(/INVALID_LOGIN|INVALID_PASSWORD|EMAIL_NOT_FOUND|INVALID_EMAIL/.test(m))return 'אימייל או סיסמה לא נכונים';if(/TOO_MANY/.test(m))return 'יותר מדי ניסיונות, נסה שוב בעוד כמה דקות';if(/USER_DISABLED/.test(m))return 'המשתמש הושבת';return 'שגיאה: '+m};
-async function syLogin(email,pw){
- const j=await jf(`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:signInWithPassword?key=${FB.apiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw,returnSecureToken:true})});
+async function syLogin(email,pw,lk){
+ const j=lk||await jf(`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:signInWithPassword?key=${FB.apiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw,returnSecureToken:true})});
  SY={idToken:j.idToken,refresh:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1000,uid:j.localId,email};await bzWho();if(bzSus()&&!(await bzSA())){const x=new Error(BZ_SUS);x.noAccess=true;x.susp=1;throw x}
  try{await fsx('/admins/'+SY.uid);SY.role='admin'}catch(e){if(e.code===404||e.code===403)SY.role=await syStaff();else throw e}
- syS();await bzGo()}
-function syOut(){SY={};try{bzSkin()}catch(e){}try{localStorage.removeItem(SK);localStorage.removeItem(LK('lp-shin'));localStorage.removeItem(LK('lp-tasks'));localStorage.removeItem(LK('lp-tk-c'));localStorage.removeItem(LK('lp-supinv'));localStorage.removeItem(LK('lp-co-m'))}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}/* ריבוי עסקים (שלב 3): העסק נקבע לפי users/{uid}.bizId (רק השרת כותב). אין מסמך, או כל כשל (חוקים ישנים: 403, רשת) = לארג' פעמי. מסמך העסק b/{bizId} נקרא בכניסה ובפתיחה (dataRoot, status, features, brand – קריאה בלבד). כשל בטעינה: נשאר מה שנשמר, ובלי שמירה – legacy ללארג' פעמי, b לכל עסק אחר. בלי הודעת שגיאה */const BZ_SUS='החשבון מושהה – פנה לספק';const fvj=v=>!v||typeof v!=='object'?null:'stringValue'in v?v.stringValue:'booleanValue'in v?v.booleanValue:'integerValue'in v?+v.integerValue:'doubleValue'in v?v.doubleValue:'timestampValue'in v?v.timestampValue:'mapValue'in v?Object.fromEntries(Object.entries(v.mapValue.fields||{}).map(([k,x])=>[k,fvj(x)])):'arrayValue'in v?(v.arrayValue.values||[]).map(fvj):null;async function bzWho(){let b='';try{const u=await fsx('/users/'+SY.uid,0,1);b=fvj(u&&u.fields&&u.fields.bizId)}catch(e){}SY.bizId=BZOK(b)?b:BZ0;SY.biz=null;await bzLoad()}async function bzLoad(){let d=null;try{d=await fsx('/b/'+SY.bizId,0,1)}catch(e){}const o=SY.biz||{};if(!d||!d.fields){SY.biz={dataRoot:SY.bizId!==BZ0?'b':(o.dataRoot==='b'?'b':'legacy'),status:o.status==='suspended'?'suspended':'active',features:o.features||{},brand:o.brand||null,fl:o.fl||0};return}const f=fvj({mapValue:d}),ft={};for(const k in (f.features&&typeof f.features==='object'?f.features:{}))if(f.features[k]===true)ft[k]=true;SY.biz={dataRoot:SY.bizId!==BZ0||f.dataRoot==='b'?'b':'legacy',status:f.status==='suspended'?'suspended':'active',features:ft,brand:f.brand&&typeof f.brand==='object'?f.brand:null,fl:f.features&&typeof f.features==='object'?1:0}}const bzSus=()=>!!(SY.biz&&SY.biz.status==='suspended'&&!SY.sa);async function bzSA(){try{await fsx('/superadmins/'+SY.uid,0,1);SY.sa=1}catch(e){delete SY.sa}return!!SY.sa}/* התחילית במכשיר נקבעה בטעינת הדף. אם העסק השתנה (כניסה, החלפה) – טוענים את הדף מחדש, כדי שלא יישאר שום נתון בזיכרון או במפתח של עסק אחר */function bzGo(){const p=BZOK(SY.bizId)&&SY.bizId!==BZ0?SY.bizId+':':'';if(p!==BZP){location.reload();return new Promise(()=>{})}}/* בפתיחה (משתמש שכבר מחובר, גם בלי bizId שמור): רענון ברקע. בלי חיבור – ממשיכים לפי מה שנשמר */async function bzOpen(){const s=SY;if(!s.refresh||!s.uid)return;const w=bzSus();const k0=bzSig();try{if(!BZOK(s.bizId))await bzWho();else await bzLoad()}catch(e){}if(SY!==s)return;syS();if(bzSus()!==w){location.reload();return}bzGo();bzChg(k0)}/* מנהל־על עובר לעסק אחר (מנהל מלא בכל עסק, עדכון חוזה 2): מחליף bizId ואת התחילית במכשיר, בלי התנתקות. המסך לבחירת העסק – שלב 6 */async function bzSwitch(id){if(!BZOK(id))throw new Error('מזהה עסק לא תקין');if(!(await bzSA())){const x=new Error('רק מנהל־על יכול לעבור בין עסקים');x.noAccess=true;throw x}/* לא משנים את SY בזיכרון: הדף הישן ממשיך לעבוד כולו בעסק הקודם עד שהוא נסגר. העסק החדש נכתב רק ל-lp-sync, ומסמך העסק נטען אחרי הטעינה מחדש (bzBoot) */const o=Object.assign({},SY,{bizId:id,biz:null,role:'admin',sa:1});BZX=1;try{localStorage.setItem(SK,JSON.stringify(o))}catch(e){BZX=0;throw new Error('אין מקום לשמור במכשיר')}location.reload()}
+ if(lk)dvTrust(SY.uid);else await dvGate(j);syS();await bzGo()}
+function syOut(){bioOff();SY={};try{bzSkin()}catch(e){}try{localStorage.removeItem(SK);localStorage.removeItem(LK('lp-shin'));localStorage.removeItem(LK('lp-tasks'));localStorage.removeItem(LK('lp-tk-c'));localStorage.removeItem(LK('lp-supinv'));localStorage.removeItem(LK('lp-co-m'))}catch(e){}try{TK={L:[]};TKC={}}catch(e){}try{indexedDB.deleteDatabase('firebaseLocalStorageDb')}catch(e){}if(!isNat())dvWipe()}/* עובד = מסמך staff/{uid} עם active == true. אחרת: "אין לך הרשאה", וניתוק */async function syStaff(){let d=null;try{d=await fsx('/staff/'+SY.uid)}catch(e){if(e.code!==404&&e.code!==403)throw e}if(d&&d.fields&&d.fields.active&&d.fields.active.booleanValue===true)return'worker';SY={};const x=new Error('אין לך הרשאה לאפליקציה. פנה למנהל העסק.');x.noAccess=true;throw x}/* בפתיחה, כשיש חיבור: בודקים שהעובד עדיין פעיל. בלי חיבור ממשיכים לפי התפקיד האחרון שנשמר */function syCheck(){if(!isW())return;syStaff().catch(e=>{if(e.noAccess||/USER_DISABLED|USER_NOT_FOUND/.test(e.message||'')){const m=e.noAccess?e.message:'המשתמש הושבת';syOut();document.body.classList.remove('wk');showGate(m)}})}/* ריבוי עסקים (שלב 3): העסק נקבע לפי users/{uid}.bizId (רק השרת כותב). אין מסמך, או כל כשל (חוקים ישנים: 403, רשת) = לארג' פעמי. מסמך העסק b/{bizId} נקרא בכניסה ובפתיחה (dataRoot, status, features, brand – קריאה בלבד). כשל בטעינה: נשאר מה שנשמר, ובלי שמירה – legacy ללארג' פעמי, b לכל עסק אחר. בלי הודעת שגיאה */const BZ_SUS='החשבון מושהה – פנה לספק';const fvj=v=>!v||typeof v!=='object'?null:'stringValue'in v?v.stringValue:'booleanValue'in v?v.booleanValue:'integerValue'in v?+v.integerValue:'doubleValue'in v?v.doubleValue:'timestampValue'in v?v.timestampValue:'mapValue'in v?Object.fromEntries(Object.entries(v.mapValue.fields||{}).map(([k,x])=>[k,fvj(x)])):'arrayValue'in v?(v.arrayValue.values||[]).map(fvj):null;async function bzWho(){let b='';try{const u=await fsx('/users/'+SY.uid,0,1);b=fvj(u&&u.fields&&u.fields.bizId)}catch(e){}SY.bizId=BZOK(b)?b:BZ0;SY.biz=null;await bzLoad()}async function bzLoad(){let d=null;try{d=await fsx('/b/'+SY.bizId,0,1)}catch(e){}const o=SY.biz||{};if(!d||!d.fields){SY.biz={dataRoot:SY.bizId!==BZ0?'b':(o.dataRoot==='b'?'b':'legacy'),status:o.status==='suspended'?'suspended':'active',features:o.features||{},brand:o.brand||null,fl:o.fl||0};return}const f=fvj({mapValue:d}),ft={};for(const k in (f.features&&typeof f.features==='object'?f.features:{}))if(f.features[k]===true)ft[k]=true;SY.biz={dataRoot:SY.bizId!==BZ0||f.dataRoot==='b'?'b':'legacy',status:f.status==='suspended'?'suspended':'active',features:ft,brand:f.brand&&typeof f.brand==='object'?f.brand:null,fl:f.features&&typeof f.features==='object'?1:0}}const bzSus=()=>!!(SY.biz&&SY.biz.status==='suspended'&&!SY.sa);async function bzSA(){try{await fsx('/superadmins/'+SY.uid,0,1);SY.sa=1}catch(e){delete SY.sa}return!!SY.sa}/* התחילית במכשיר נקבעה בטעינת הדף. אם העסק השתנה (כניסה, החלפה) – טוענים את הדף מחדש, כדי שלא יישאר שום נתון בזיכרון או במפתח של עסק אחר */function bzGo(){const p=BZOK(SY.bizId)&&SY.bizId!==BZ0?SY.bizId+':':'';if(p!==BZP){location.reload();return new Promise(()=>{})}}/* בפתיחה (משתמש שכבר מחובר, גם בלי bizId שמור): רענון ברקע. בלי חיבור – ממשיכים לפי מה שנשמר */async function bzOpen(){const s=SY;if(!s.refresh||!s.uid)return;const w=bzSus();const k0=bzSig();try{if(!BZOK(s.bizId))await bzWho();else await bzLoad()}catch(e){}if(SY!==s)return;syS();if(bzSus()!==w){location.reload();return}bzGo();bzChg(k0)}/* מנהל־על עובר לעסק אחר (מנהל מלא בכל עסק, עדכון חוזה 2): מחליף bizId ואת התחילית במכשיר, בלי התנתקות. המסך לבחירת העסק – שלב 6 */async function bzSwitch(id){if(!BZOK(id))throw new Error('מזהה עסק לא תקין');if(!(await bzSA())){const x=new Error('רק מנהל־על יכול לעבור בין עסקים');x.noAccess=true;throw x}/* לא משנים את SY בזיכרון: הדף הישן ממשיך לעבוד כולו בעסק הקודם עד שהוא נסגר. העסק החדש נכתב רק ל-lp-sync, ומסמך העסק נטען אחרי הטעינה מחדש (bzBoot) */const o=Object.assign({},SY,{bizId:id,biz:null,role:'admin',sa:1});BZX=1;try{localStorage.setItem(SK,JSON.stringify(o))}catch(e){BZX=0;throw new Error('אין מקום לשמור במכשיר')}bioCarry(id);location.reload()}
 const isW=()=>SY.role==='worker'&&!!SY.refresh,isA=()=>SY.role==='admin'&&!!SY.refresh;
 /* לשונית "הזמנות אתר" (שלב 1, קבצים נפרדים ב-orders/): רק למנהל ולעובד, ורק במצב אמולטור או כשהבנייה הפעילה אותה (orders/site-backend.js) */const ordOn=()=>(isA()||isW())&&(!!EMU||['emulator','test'].includes(window.LP_SITE_BACKEND));ACT.ordGo=()=>{location.href='orders/app.html'+location.search};const ordTile=`<button class="tile" data-a="ordGo" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center">🛒<br>הזמנות אתר</button>`;
 /* ---- תור שליחה (עובד) ---- */
@@ -1756,7 +1756,7 @@ V.sync=()=>{
 </div>`}};
 FRM.sylogin=async f=>{const x=fd(f);const b=f.querySelector('button');b.disabled=true;
  try{await syLogin(s_(x.email),x.pw);toast('התחברת');if(isW()){wkStart()}else{try{await pullInbox()}catch(e){}rerender()}siReady();}catch(e){toast(loginMsg(e))}finally{b.disabled=false}};
-ACT.syOut=()=>{ask('להתנתק מהחשבון במכשיר הזה?',()=>{syOut();location.reload()})};
+ACT.syOut=()=>{const w=!isNat();ask(w?'להתנתק? כל הנתונים של האפליקציה יימחקו מהמחשב הזה.':'להתנתק מהחשבון במכשיר הזה?',async()=>{if(w&&!(await dvSafe()))return;syOut();if(w)await dvWiped();location.reload()})};
 ACT.syPub=async()=>{try{const n=await pubCfg();toast('פורסמו '+n+' קטגוריות לעובדים')}catch(e){toast(e.offline?e.message:'הפרסום נכשל: '+e.message)}};
 ACT.syPull=async()=>{try{const n=await pullInbox();if(n||!RPL.ok)toast(n?n+' הוצאות חדשות':'אין הוצאות חדשות');rerender()}catch(e){toast(e.offline?e.message:'הבדיקה נכשלה: '+e.message)}};
 ACT.syOpen=()=>{sheetClose();NAV=[{v:'sync'}];render(0)};
@@ -3299,16 +3299,16 @@ function showGate(msg){
    <p class="gerr" id="gerr" role="alert">${msg?esc(msg):''}</p>
    <button class="gbtn" id="gbtn"><span>כניסה</span></button>
   </form>
-  <p class="gfoot">הגישה למורשים בלבד · החשבון נוצר על ידי מנהל המערכת</p>
+  <p class="gk" style="margin:10px 0 0"><button type="button" class="glink" id="gfgt">שכחתי סיסמה / קביעת סיסמה</button></p><p class="gfoot">הגישה למורשים בלבד · החשבון נוצר על ידי מנהל המערכת</p>
  </div></div>`;
  document.body.append(g);
  const f=g.querySelector('#gform'),pw=f.pw,err=g.querySelector('#gerr'),bt=g.querySelector('#gbtn');
- g.querySelector('#geye').onclick=()=>{pw.type=pw.type==='password'?'text':'password'};
+ g.querySelector('#geye').onclick=()=>{pw.type=pw.type==='password'?'text':'password'};g.querySelector('#gfgt').onclick=e=>pwForgot(f.email.value.trim(),err,e.currentTarget);
  f.onsubmit=async e=>{e.preventDefault();const em=f.email.value.trim(),p=pw.value;err.textContent='';
   if(!em||!p){err.textContent='יש להזין אימייל וסיסמה';return}
   bt.disabled=true;bt.classList.add('ld');bt.firstChild.textContent='מתחבר…';
   try{await syLogin(em,p);g.remove();document.body.classList.remove('gate');enterApp(true)}
-  catch(x){if(x.susp){showSusp();return}err.textContent=loginMsg(x);bt.disabled=false;bt.classList.remove('ld');bt.firstChild.textContent='כניסה'}};
+  catch(x){if(x.susp){showSusp();return}if(x.elink){dvWait(g,x.elink);return}err.textContent=loginMsg(x);bt.disabled=false;bt.classList.remove('ld');bt.firstChild.textContent='כניסה'}};
  setTimeout(()=>{try{f.email.focus()}catch(e){}},50)}
 
 
@@ -4113,18 +4113,18 @@ ACT.admReload=()=>{ADM.L=null;ADM.err='';rerender()};
 ACT.admNew=()=>dlg(`<h3>פתיחת עסק חדש</h3><form data-f="admNew">${fld('מזהה העסק (אותיות לטיניות קטנות, ספרות ומקף, 3 עד 30 תווים)','id','','text','required maxlength="30" pattern="[a-z0-9\\-]{3,30}" dir="ltr" autocomplete="off"')}${fld('שם העסק (עד 60 תווים)','name','','text','required maxlength="60"')}${fld('מייל המנהל','email','','email','required dir="ltr" autocomplete="off"')}${fld('טלפון המנהל','phone','','tel','required dir="ltr" autocomplete="off"')}<div class="row"><button class="btn grow">פתח עסק</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`);
 FRM.admNew=async f=>{const x=fd(f),id=s_(x.id),nm=s_(x.name),em=s_(x.email),ph=s_(x.phone),b=f.querySelector('button');
  if(!/^[a-z0-9-]{3,30}$/.test(id))return toast('מזהה העסק: אותיות לטיניות קטנות, ספרות ומקף, 3 עד 30 תווים');if(!nm||nm.length>60)return toast('שם העסק: עד 60 תווים');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em))return toast('כתובת המייל לא תקינה');if(!/^[0-9+\-\s()]{7,20}$/.test(ph))return toast('מספר הטלפון לא תקין');
- b.disabled=true;try{await fnCall('createBusiness',{bizId:id,name:nm,ownerEmail:em,ownerPhone:ph});closeDlg();toast('העסק נפתח');ADM.L=null;ADM.err='';if(cur().v==='sa')rerender()}catch(e){toast(e.message)}finally{b.disabled=false}};
+ b.disabled=true;let r;try{r=await fnCall('createBusiness',{bizId:id,name:nm,ownerEmail:em,ownerPhone:ph});closeDlg();toast('העסק נפתח');ADM.L=null;ADM.err='';if(cur().v==='sa')rerender()}catch(e){b.disabled=false;return toast(e.message)}await admMailSend(r&&r.email,'העסק נפתח');b.disabled=false};
 V.sab=id=>{const T='כרטיס עסק';if(!ADM.sa)return{t:T,h:'<div class="empty">אין הרשאה</div>'};const b=(ADM.L||[]).find(x=>x.id===id);
  if(!b){if(!ADM.L&&!ADM.busy)admLoad();return{t:T,h:`<div class="empty">${ADM.L?'העסק לא נמצא':'טוען…'}</div>`}}
  if(!b.missing&&!ADM.info[id])admInfo(id);const I=ADM.info[id]||{},ad=I.adv||{},lm=ad.limits||{},ye=ad.yemot||{},lg=b.dataRoot==='legacy';
  const top=`<div class="card"><h3 style="margin:0 0 4px">${esc(b.name||b.id)}</h3><p class="note" style="margin:0 0 8px"><bdi dir="ltr">${esc(b.id)}</bdi> ${b.missing?'':admTag(b)}</p>${b.missing?'<p class="note">העסק עדיין לא הועבר למבנה החדש, ולכן אין לו כרטיס לניהול.</p>':`<p style="margin:0">מייל המנהל: ${I.load?'טוען…':I.err?'לא נטען':`<bdi dir="ltr">${esc(I.email||'לא הוזן')}</bdi>`}</p><p style="margin:0">טלפון המנהל: ${I.load?'טוען…':I.err?'לא נטען':`<bdi dir="ltr">${esc(I.phone||'לא הוזן')}</bdi>`}</p>`}</div>`;
  if(b.missing)return{t:T,s:b.name||b.id,h:top};
- /* כאן יתווסף בשלב 6ג-2 הכפתור "שלח מייל כניסה" (admMail), אחרי "כניסה כמנהל". כרגע אין שליחה. */
+ /* 6ג-2: "שלח מייל כניסה" – קישור "קבע סיסמה" המובנה של Firebase, רק לכתובת שנשמרה בשרת (private/info), לא לכתובת שמוקלדת */const mail=I.email?`<button class="btn g w" data-a="admMail" data-id="${esc(id)}">שלח מייל כניסה למנהל</button><p class="note">קישור לקביעת סיסמה יישלח ל-<bdi dir="ltr">${esc(I.email)}</bdi>.</p>`:'';
  const enter=`<button class="btn w" data-a="admEnter" data-id="${esc(id)}">כניסה כמנהל</button><p class="note">הכניסה נרשמת ביומן של העסק. המסך נטען מחדש בתוך העסק.</p>`;
  if(lg)return{t:T,s:b.name||b.id,h:top+enter+`<p class="note">העסק פועל עדיין במצב הקיים: ההשהיה, התוספות וההגדרות המתקדמות יהיו זמינים אחרי ההעברה למבנה החדש.</p>`};
  const sus=b.status==='suspended',ft=ADM_FT.map(([k,l,n])=>{const on=b.features[k]===true;return`<div class="li" style="cursor:default"><div class="m"><b>${l}</b>${n?`<small>${n}</small>`:''}</div><button class="chip ${on?'on':''}" data-a="admFeat" data-id="${esc(id)}" data-k="${k}" aria-pressed="${on}">${on?'פעיל':'כבוי'}</button></div>`}).join('');
  const nf=(l,n,v,ph)=>fld(l,n,v==null?'':v,'number',`min="0" step="1" inputmode="numeric" placeholder="${ph}"`);
- return{t:T,s:b.name||b.id,h:top+enter+`<div class="sec"><h3>השהיה</h3></div><div class="card"><p class="note" style="margin-top:0">${sus?'העסק מושהה: העובדים והמנהל לא ניגשים לנתונים.':'עסק פעיל. השהיה חוסמת את הגישה של העובדים והמנהל. שום דבר לא נמחק.'}</p><button class="btn ${sus?'':'r'} w" data-a="admSus" data-id="${esc(id)}">${sus?'שחרור מהשהיה':'השהיית העסק'}</button></div>
+ return{t:T,s:b.name||b.id,h:top+enter+mail+`<div class="sec"><h3>השהיה</h3></div><div class="card"><p class="note" style="margin-top:0">${sus?'העסק מושהה: העובדים והמנהל לא ניגשים לנתונים.':'עסק פעיל. השהיה חוסמת את הגישה של העובדים והמנהל. שום דבר לא נמחק.'}</p><button class="btn ${sus?'':'r'} w" data-a="admSus" data-id="${esc(id)}">${sus?'שחרור מהשהיה':'השהיית העסק'}</button></div>
  <div class="sec"><h3>תוספות</h3></div>${ft}
  <div class="sec"><h3>הגדרות מתקדמות</h3></div>${I.load?'<div class="empty">טוען…</div>':I.err?'<div class="card"><p class="note">ההגדרות לא נטענו. חזור למסך הקודם ופתח שוב.</p></div>':`<form class="card" data-f="admAdv" data-id="${esc(id)}"><p class="note" style="margin-top:0">מכסות ביום. שדה ריק = ברירת המחדל.</p>${nf('זיהויים חכמים ביום לעסק','scanDaily',lm.scanDaily,'ברירת מחדל: 50')}${nf('זיהויים חכמים ביום לכל משתמש','scanPerUserDaily',lm.scanPerUserDaily,'ברירת מחדל של השרת')}${nf('פעולות ימות ביום','yemotDaily',lm.yemotDaily,'ברירת מחדל של השרת')}<h4 style="margin:14px 0 4px">קו ימות המשיח</h4><p class="note" style="margin-top:0">תשתית בלבד – הקו לא מחובר.</p>${fld('טלפון','yphone',ye.phone||'','tel','dir="ltr" autocomplete="off"')}${fld('מספר נכנס (DID)','ydid',ye.did||'','tel','dir="ltr" autocomplete="off"')}${fld('שלוחה','yext',ye.ext||'','text','dir="ltr" autocomplete="off" maxlength="20"')}${fld('תיאור','ylabel',ye.label||'','text','maxlength="60"')}<button class="btn w">שמור הגדרות</button></form>
  <div class="card"><p class="note" style="margin-top:0">אסימון לכתובת של הקו. האסימון מוצג פעם אחת בלבד ולא נשמר במכשיר.</p><button class="btn g w" data-a="admTok" data-id="${esc(id)}">צור אסימון לקו</button></div>`}`}};
@@ -4151,10 +4151,10 @@ $('#dlg').addEventListener('close',()=>{if($('#admTok'))$('#dlg').innerHTML=''})
 async function admStaffLoad(){if(ADM.sbusy)return;ADM.sbusy=1;ADM.staffErr='';try{const j=await fsx('/staff?pageSize=300'),L=(j.documents||[]).map(d=>{const f=fvj({mapValue:d});return{uid:idOf(d),name:String(f.name||''),email:String(f.email||''),role:String(f.role||''),active:f.active===true}});L.sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email,'he'));ADM.staff=L}catch(e){ADM.staffErr=e.offline?e.message:'טעינת רשימת העובדים נכשלה'}finally{ADM.sbusy=0;if(cur().v==='staff')rerender()}}
 V.staff=()=>{const T='עובדים';if(!admStaffOk())return{t:T,h:'<div class="empty">המסך הזה זמין בעסקים במבנה החדש בלבד</div>'};if(!ADM.staff&&!ADM.staffErr)admStaffLoad();
  const row=u=>{const mine=u.role==='manager'||u.uid===SY.uid;return`<div class="li" style="cursor:default"><div class="m"><b>${esc(u.name||u.email||u.uid)}</b><small><bdi dir="ltr">${esc(u.email)}</bdi></small></div><span class="tag ${u.active?'t3':'t4'}">${u.active?'פעיל':'מושבת'}</span>${mine?'':`<button class="btn s g" data-a="admStf" data-uid="${esc(u.uid)}">${u.active?'השבתה':'החזרה'}</button>`}</div>`};
- return{t:T,s:'צוות העסק',h:`<form class="card" data-f="admStaffAdd"><h3 style="margin-top:0">הוספת עובד</h3>${fld('שם העובד','name','','text','required maxlength="60"')}${fld('מייל העובד','email','','email','required dir="ltr" autocomplete="off"')}<button class="btn w">הוסף עובד</button><p class="note">שליחת מייל כניסה לעובד עדיין לא מחוברת.</p></form>${ADM.staffErr?`<div class="card"><p>${esc(ADM.staffErr)}</p><button class="btn g" data-a="admStfReload">נסה שוב</button></div>`:ADM.staff?(ADM.staff.length?ADM.staff.map(row).join(''):'<div class="empty">אין עובדים עדיין</div>'):'<div class="empty">טוען…</div>'}`}};
+ return{t:T,s:'צוות העסק',h:`<form class="card" data-f="admStaffAdd"><h3 style="margin-top:0">הוספת עובד</h3>${fld('שם העובד','name','','text','required maxlength="60"')}${fld('מייל העובד','email','','email','required dir="ltr" autocomplete="off"')}<button class="btn w">הוסף עובד</button><p class="note">אחרי ההוספה נשלח לעובד מייל לקביעת סיסמה.</p></form>${ADM.staffErr?`<div class="card"><p>${esc(ADM.staffErr)}</p><button class="btn g" data-a="admStfReload">נסה שוב</button></div>`:ADM.staff?(ADM.staff.length?ADM.staff.map(row).join(''):'<div class="empty">אין עובדים עדיין</div>'):'<div class="empty">טוען…</div>'}`}};
 ACT.admStfReload=()=>{ADM.staff=null;ADM.staffErr='';rerender()};
 FRM.admStaffAdd=async f=>{const x=fd(f),nm=s_(x.name),em=s_(x.email),b=f.querySelector('button');if(!nm||nm.length>60)return toast('שם העובד: עד 60 תווים');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em))return toast('כתובת המייל לא תקינה');
- b.disabled=true;try{await fnCall('addStaff',Object.assign({email:em,name:nm},SY.sa?{bizId:SY.bizId}:{}));toast('העובד נוסף');ADM.staff=null;rerender()}catch(e){toast(e.message)}finally{b.disabled=false}};
+ b.disabled=true;let r;try{r=await fnCall('addStaff',Object.assign({email:em,name:nm},SY.sa?{bizId:SY.bizId}:{}));ADM.staff=null;rerender()}catch(e){b.disabled=false;return toast(e.message)}await admMailSend(r&&r.email,'העובד נוסף',1);b.disabled=false};
 ACT.admStf=el=>{const u=(ADM.staff||[]).find(x=>x.uid===el.dataset.uid);if(!u)return;const a=!u.active;
  ask(a?`להחזיר את ${u.name||u.email} לפעילות?`:`להשבית את ${u.name||u.email}? הוא לא ייכנס לנתוני העסק עד שתחזיר אותו.`,async()=>{try{const r=await fnCall('setStaffActive',Object.assign({uid:u.uid,active:a},SY.sa?{bizId:SY.bizId}:{}));u.active=r&&typeof r.active==='boolean'?r.active:a;toast(a?'העובד הוחזר':'העובד הושבת')}catch(e){toast(e.message)}finally{if(cur().v==='staff')rerender()}},a?'כן, החזר':'כן, השבת')};
 /* ===== ריבוי עסקים, שלב 6ב: מיתוג, הסתרת תוספות כבויות, מסך "החשבון מושהה", פריסה למסך רחב והעלאת קובץ במחשב.
@@ -4273,6 +4273,103 @@ async function brSave(reset){if(!admStaffOk()||!BR||BR.busy)return;const nm=s_(B
   await fsx('/b/'+SY.bizId+'?updateMask.fieldPaths=brand&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:{brand:{mapValue:{fields:{name:sv(nm),logoPath:sv(lp),base:sv(base),colors:{mapValue:{fields:Object.fromEntries(Object.entries(colors).map(([k,v])=>[k,sv(v)]))}},updatedAt:{integerValue:String(at)},updatedBy:sv(SY.uid)}}}}})},1);
   SY.biz=Object.assign({},SY.biz,{brand:B});syS();if(BR.url)URL.revokeObjectURL(BR.url);BR=null;bzSkin();toast(reset?'חזרנו לצבעי ברירת המחדל':'המיתוג נשמר');rerender()}
  catch(e){BR.busy=0;toast(e.code===403?'אין הרשאה לשמור מיתוג':e.message||'השמירה נכשלה');brDraw()}}
+/* ===== ריבוי עסקים, שלב 6ג-2: כניסה ואבטחה באפליקציה =====
+ א. כניסה ראשונה: המייל המובנה של Firebase Auth עם קישור "קבע סיסמה" (sendOobCode, PASSWORD_RESET). אין ספק מייל חיצוני ואין קוד בתשובת השרת.
+    המייל נשלח רק לכתובת שהשרת החזיר (createBusiness/addStaff) או שנשמרה בשרת (private/info). "שכחתי סיסמה" במסך הכניסה – הודעה אחידה, שלא מגלה אם המייל קיים.
+ ב. מחשב חדש (רק בדפדפן, רק למנהל ולמנהל־על): אחרי סיסמה נכונה החיבור לא נשמר. נשלח קישור כניסה מובנה (EMAIL_SIGNIN) למייל של החשבון,
+    ורק פתיחת הקישור באותו דפדפן (lp-elink) שומרת את החיבור ומסמנת את המחשב כמוכר ל-30 יום (lp-trust). התנתקות מוחקת הכול.
+    חשוב: זו אכיפה באפליקציה בלבד. מי שיודע את הסיסמה יכול לעקוף אותה דרך REST (החלטת המשתמש, 5.11.2026).
+ ג. נעילה בטביעת אצבע (רק באפליקציה, תוסף BiometricLock): מסך מכסה לפני כל תוכן, בפתיחה ובחזרה לאפליקציה. תמיד יש "נסה שוב" ו"התנתק".
+    הנעילה מקומית למכשיר ולא משנה הרשאות בשרת.
+ ד. התנתקות בדפדפן: מחיקת כל האחסון של האפליקציה במחשב. בטלפון: כמו קודם, ועוד ביטול טביעת האצבע. */
+const DV_TRUST=30*864e5,DV_LINK=60*6e4,DV_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DV_SENT='אם המייל רשום במערכת, נשלח אליו קישור לקביעת סיסמה. כדאי לבדוק גם בתיקיית הספאם.';
+/* X-Firebase-Locale: המייל בעברית (אם הוגדרה תבנית). אם הכותרת נחסמת בדפדפן (CORS – לא מאומת), שולחים שוב בלעדיה */async function oob(o){const u=`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:sendOobCode?key=${FB.apiKey}`,b=JSON.stringify(o);try{return await jf(u,{method:'POST',headers:{'Content-Type':'application/json','X-Firebase-Locale':'he'},body:b})}catch(e){if(!e.offline)throw e;return jf(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b})}}
+const pwMail=em=>oob({requestType:'PASSWORD_RESET',email:em});
+/* אחרי פתיחת עסק / הוספת עובד: מייל "קבע סיסמה" לכתובת שהשרת החזיר */
+async function admMailSend(em,head,quiet){if(!em||!DV_RE.test(em)){dlg(`<h3>${esc(head)}</h3><p>לא התקבלה כתובת מייל מהשרת, ולכן לא נשלח מייל כניסה.</p><button class="btn w" data-a="closeDlg">הבנתי</button>`);return}
+ let ok=1,why='';try{await pwMail(em)}catch(e){ok=0;why=e.offline?'אין חיבור לאינטרנט':'השליחה נכשלה'}
+ if(ok&&quiet)return toast(head+'. נשלח מייל לקביעת סיסמה ל-'+em);/* במסך העובדים: הודעה קצרה שלא חוסמת את הרשימה */dlg(`<h3>${esc(head)}</h3><p>${ok?`נשלח מייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(em)}</bdi>`:`${esc(why)}. המייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(em)}</bdi> לא נשלח. ${quiet?'אפשר':'אפשר לשלוח שוב מכרטיס העסק, או'} ללחוץ "שכחתי סיסמה" במסך הכניסה`}.</p><button class="btn w" data-a="closeDlg">הבנתי</button>`)}
+ACT.admMail=async el=>{const I=ADM.info[el.dataset.id]||{};if(!I.email)return toast('מייל המנהל לא נטען');el.disabled=true;
+ try{await pwMail(I.email);dlg(`<h3>מייל כניסה</h3><p>נשלח מייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(I.email)}</bdi>.</p><button class="btn w" data-a="closeDlg">הבנתי</button>`)}catch(e){toast(e.offline?e.message:'שליחת המייל נכשלה, נסה שוב')}finally{el.disabled=false}};
+/* "שכחתי סיסמה / קביעת סיסמה" במסך הכניסה */
+async function pwForgot(em,out,btn){if(!DV_RE.test(em)){out.textContent='הזינו את כתובת האימייל, ואז לחצו שוב על "שכחתי סיסמה"';return}
+ btn.disabled=true;setTimeout(()=>{btn.disabled=false},30000);
+ try{await pwMail(em);out.textContent=DV_SENT}catch(e){out.textContent=e.offline?e.message:/TOO_MANY|EXCEED/.test(e.message||'')?'יותר מדי בקשות. נסו שוב מאוחר יותר':DV_SENT}}
+/* ---- מחשב חדש ---- */
+const dvGet=k=>{try{return JSON.parse(localStorage.getItem(k))||{}}catch(e){return{}}};
+function dvOk(u){const t=dvGet('lp-trust'),n=Date.now();return!!u&&t.uid===u&&+t.exp>n&&+t.exp-n<=DV_TRUST}
+function dvTrust(u){try{localStorage.setItem('lp-trust',JSON.stringify({uid:u,exp:Date.now()+DV_TRUST}))}catch(e){}}
+const dvUrl=()=>location.origin+location.pathname+(EMU?'?emu=1':'');
+/* נקרא מ-syLogin אחרי סיסמה נכונה ולפני שמירת החיבור. עובד, טלפון ומחשב מוכר – ממשיכים כרגיל */
+async function dvGate(j){if(isNat()||dvOk(SY.uid))return;if(SY.role!=='admin'&&!(await bzSA()))return;
+ const em=s_(j&&j.email||SY.email).toLowerCase(),u=SY.uid;SY={};
+ await oob({requestType:'EMAIL_SIGNIN',email:em,continueUrl:dvUrl(),canHandleCodeInApp:true});
+ try{localStorage.setItem('lp-elink',JSON.stringify({email:em,uid:u,at:Date.now()}))}catch(e){}
+ const x=new Error('כניסה ממחשב חדש: נשלח קישור אישור ל-'+em+'. פתחו אותו במחשב הזה.');x.noAccess=1;x.elink=em;throw x}
+function dvWait(g,em){const f=g.querySelector('#gform');if(!f)return;f.onsubmit=e=>e.preventDefault();
+ f.innerHTML=`<p class="gerr" id="gerr" role="status">כניסה ממחשב חדש: שלחנו קישור אישור ל-<bdi dir="ltr">${esc(em)}</bdi>.<br>פתחו את המייל במחשב הזה ובדפדפן הזה, ולחצו על הקישור. הקישור תקף לזמן מוגבל.</p><button type="button" class="gbtn" id="gback"><span>חזרה למסך הכניסה</span></button>`;
+ f.querySelector('#gback').onclick=()=>showGate()}
+const dvMsg=x=>/INVALID_OOB_CODE|EXPIRED_OOB_CODE|INVALID_EMAIL/.test(x.message||'')?'הקישור לא תקף: פג תוקפו או שכבר נעשה בו שימוש. התחברו שוב עם הסיסמה כדי לקבל קישור חדש.':x.noAccess||x.offline?x.message:loginMsg(x);
+/* בפתיחת הדף מקישור הכניסה (mode=signIn&oobCode=...): הקוד נמחק מיד משורת הכתובת. נכנסים רק אם הקישור נפתח באותו דפדפן, לאותו חשבון שהזין סיסמה */
+function dvLink(){let q;try{q=new URLSearchParams(location.search)}catch(e){return false}const oc=q.get('oobCode');if(q.get('mode')!=='signIn'||!oc)return false;
+ try{history.replaceState(null,'',dvUrl())}catch(e){}
+ if(SY.refresh&&SY.role)return false;
+ showGate('מאמת את הקישור…');
+ dvLinkIn(oc).then(()=>{const g=document.getElementById('gate');if(g)g.remove();document.body.classList.remove('gate');enterApp(true)}).catch(x=>{if(x.susp){showSusp();return}showGate(dvMsg(x))});
+ return true}
+async function dvLinkIn(oc){const e=dvGet('lp-elink');try{localStorage.removeItem('lp-elink')}catch(x){}
+ if(!e.email||!e.uid||!(Date.now()-(+e.at||0)<DV_LINK)){const x=new Error('פתחו את הקישור באותו מחשב ובאותו דפדפן שבהם הזנתם את הסיסמה. אם עברה יותר משעה – התחברו שוב.');x.noAccess=1;throw x}
+ const j=await jf(`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:signInWithEmailLink?key=${FB.apiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e.email,oobCode:oc})});
+ if(!j||j.localId!==e.uid){const x=new Error('הקישור שייך לחשבון אחר. התחברו שוב עם הסיסמה.');x.noAccess=1;throw x}
+ await syLogin(e.email,'',j)}
+/* ---- התנתקות בדפדפן: מחיקת כל האחסון ---- */
+let DVW=null;
+function dvWipe(){try{localStorage.clear()}catch(e){}try{sessionStorage.clear()}catch(e){}
+ const del=n=>new Promise(r=>{try{const q=indexedDB.deleteDatabase(n);q.onsuccess=q.onerror=()=>r()}catch(e){r()}});
+ const L=['lp-files','firebaseLocalStorageDb'];if(BZP)L.push('lp-files:'+BZP.slice(0,-1));
+ DVW=Promise.all(L.map(del).concat([(async()=>{try{if(indexedDB.databases)await Promise.all((await indexedDB.databases()).filter(d=>d&&/^lp-files(:|$)/.test(d.name||'')&&!L.includes(d.name)).map(d=>del(d.name)))}catch(e){}})()]))}
+/* מסד שעדיין פתוח נמחק ברגע שהדף נסגר; לא מחכים לו יותר משנייה */
+const dvWiped=()=>Promise.race([DVW||Promise.resolve(),new Promise(r=>setTimeout(r,1000))]);
+/* לפני מחיקה במחשב: גיבוי מוצפן לענן אם יש שינוי שלא גובה, ואזהרה על פריטים של עובד שעוד לא נשלחו */
+async function dvSafe(){let m='';
+ try{if(isW()&&obGet().length)m='יש '+obGet().length+' פריטים שעוד לא נשלחו למנהל, והם יימחקו מהמחשב.';
+  else if(isA()&&S&&S.tx&&S.tx.length&&abkGet().sig!==abkSig()){toast('מגבה לענן לפני ההתנתקות…');if(!(await abkRun('logout')))m='הגיבוי לענן לא הצליח, ושינויים שלא גובו יימחקו מהמחשב.'}}catch(e){}
+ if(!m)return true;return new Promise(r=>ask(m+' להתנתק בכל זאת?',()=>r(true),'התנתק בכל זאת'))}
+/* ---- נעילה בטביעת אצבע ---- */
+const BIO={av:0,busy:0,t:0,bg:0,lk:0,on:0},BIO_GRACE=30000;
+const bioP=()=>{try{const C=window.Capacitor;return isNat()&&C.Plugins&&C.Plugins.BiometricLock||null}catch(e){return null}};
+function bioOn(){try{return localStorage.getItem(LK('lp-bio'))==='1'}catch(e){return false}}
+function bioCarry(id){try{if(bioOn())localStorage.setItem((id!==BZ0?id+':':'')+'lp-bio','1')}catch(e){}}
+function bioCover(on){const h=document.documentElement;let e=document.getElementById('bzlk');if(!on){h.classList.remove('bzlk');if(e)e.remove();return}
+ h.classList.add('bzlk');if(e)return;e=document.createElement('div');e.id='bzlk';e.setAttribute('role','dialog');e.setAttribute('aria-modal','true');
+ e.innerHTML=`<div class="card" style="max-width:360px;width:100%"><h2>האפליקציה נעולה</h2><p class="note" id="bzlkM" aria-live="polite">כדי להמשיך, אמתו בטביעת אצבע או בנעילת המסך של המכשיר.</p><button class="btn w" data-a="bioTry">פתיחה</button><button class="btn g w" style="margin-top:8px" data-a="bioLkOut">התנתק</button></div>`;document.body.append(e)}
+async function bioAuth(why){const P=bioP();if(!P)return{ok:false,reason:'not-available'};if(BIO.busy)return{ok:false,reason:'busy'};BIO.busy=1;
+ try{const r=await P.authenticate({reason:why});return r&&typeof r==='object'?r:{ok:false,reason:'error'}}catch(e){return{ok:false,reason:'error'}}finally{BIO.busy=0;BIO.t=Date.now()}}
+async function bioLock(){if(BIO.busy)return;BIO.lk=1;bioCover(1);const r=await bioAuth('פתיחת האפליקציה');
+ if(r.ok){BIO.lk=0;bioCover(0);return}const m=document.getElementById('bzlkM');
+ if(m)m.textContent=r.reason==='not-available'?'נעילת המסך במכשיר בוטלה, ולכן אי אפשר לאמת. כדי להמשיך, התנתקו והתחברו שוב עם הסיסמה.':r.reason==='lockout'?'יותר מדי ניסיונות. נסו שוב בעוד כמה דקות, או התנתקו.':'האימות לא הושלם. אפשר לנסות שוב או להתנתק.'}
+function bioOff(){/* מבטלים בכל העסקים במכשיר (גם מפתח שהועתק במעבר עסק של מנהל־על, bioCarry) */try{const a=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&/(^|:)lp-bio$/.test(k))a.push(k)}a.forEach(k=>localStorage.removeItem(k))}catch(e){}BIO.lk=0;bioCover(0);const P=bioP();if(P)try{Promise.resolve(P.setSecureWindow({on:false})).catch(()=>{})}catch(e){}}
+/* בטעינה: נעילה לפני הכול; האזנה ליציאה מהאפליקציה ולחזרה אליה. חזרה מהירה (למשל מהמצלמה או מבחירת קובץ, עד 30 שניות) לא נועלת מחדש */
+function bioBoot(){const P=bioP();if(!P){if(bioOn())try{localStorage.removeItem(LK('lp-bio'))}catch(e){}bioCover(0);return}
+ try{const A=window.Capacitor.Plugins.App;if(A&&!BIO.on){BIO.on=1;
+  A.addListener('pause',()=>{if(BIO.busy)return;BIO.bg=Date.now();if(bioOn())bioCover(1)});
+  A.addListener('resume',()=>{if(!bioOn()){bioCover(0);return}if(BIO.busy||Date.now()-BIO.t<1500)return;if(BIO.lk||Date.now()-BIO.bg>=BIO_GRACE)bioLock();else bioCover(0)})}}catch(e){}
+ if(!SY.refresh&&bioOn())try{localStorage.removeItem(LK('lp-bio'))}catch(e){}
+ try{Promise.resolve(P.setSecureWindow({on:bioOn()})).catch(()=>{})}catch(e){}
+ if(bioOn())bioLock();else bioCover(0)}
+/* בכל כניסה לאפליקציה (פתיחה או התחברות): בודקים אם יש במכשיר נעילת מסך מאובטחת. רק למנהל ולמנהל־על */
+function bioAv(){const P=bioP();if(!P||!(isA()||SY.sa))return;Promise.resolve(P.isAvailable()).then(r=>{const a=r&&r.available===true?1:0;if(a===BIO.av)return;BIO.av=a;if(cur().v==='settings')rerender()}).catch(()=>{})}
+/* המתג בהגדרות: רק באפליקציה, רק למנהל ולמנהל־על, ורק כשיש במכשיר נעילת מסך מאובטחת. אחרת לא נוצר ב-DOM */
+function bioRow(){if(!BIO.av||!bioP()||!(isA()||SY.sa))return'';const on=bioOn();
+ return`<div class="li" style="cursor:default;margin:0 0 8px"><div class="m"><b>כניסה בטביעת אצבע</b><small>נעילה בכל פתיחה. גיבוי: נעילת המסך של המכשיר</small></div><button class="chip ${on?'on':''}" data-a="bioTog" aria-pressed="${on}">${on?'פעיל':'כבוי'}</button></div>`}
+ACT.bioTog=async el=>{const P=bioP();if(!P)return;el.disabled=true;
+ try{if(bioOn()){bioOff();toast('הנעילה בטביעת אצבע בוטלה');return}
+  const r=await bioAuth('אישור הפעלת כניסה בטביעת אצבע');if(!r.ok)return toast(r.reason==='not-available'?'אין במכשיר נעילת מסך מאובטחת':'האימות לא הושלם, והנעילה לא הופעלה');
+  localStorage.setItem(LK('lp-bio'),'1');try{await P.setSecureWindow({on:true})}catch(e){}toast('מעכשיו האפליקציה תינעל בכל פתיחה')}
+ catch(e){toast('ההפעלה נכשלה')}finally{el.disabled=false;if(cur().v==='settings')rerender()}};
+ACT.bioTry=()=>{bioLock()};
+ACT.bioLkOut=()=>{syOut();location.reload()};
 try{coSched()}catch(e){}
 boot();(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script><script src="yemot-board.js"></script>
 </body></html>

@@ -46,7 +46,7 @@ function firestoreReply(cfg, method, p, body) {
 async function newPage(browser, www, cfg, log, label) {
   const ctx = await browser.newContext({ locale: 'he-IL', timezoneId: 'Asia/Jerusalem' });
   const page = await ctx.newPage();
-  page.__errors = []; page.__gen = 0;
+  page.__errors = []; page.__gen = 0; page.__cfg = cfg;
   page.on('framenavigated', (f) => { if (f === page.mainFrame()) page.__gen++; }); // דור הדף: כל טעינה מחדש = דף חדש
   page.on('pageerror', (e) => page.__errors.push(String(e && e.message || e)));
   if (!cfg.fwd) await page.clock.setFixedTime(T0); // מול האמולטור: זמן אמיתי (החוקים בודקים חותמת זמן)
@@ -81,11 +81,19 @@ async function newPage(browser, www, cfg, log, label) {
   return { ctx, page };
 }
 
-async function login(page, email) {
+// 6ג-2: בדפדפן, מנהל ומנהל־על במחשב חדש צריכים גם קישור כניסה במייל. כאן מדמים "מחשב מוכר" (lp-trust עם ה-uid של החשבון),
+// כדי שהבדיקות הקיימות יבדקו את מה שהן בודקות. השלב הנוסף עצמו נבדק ב-ui-e2e.js (opts.trust=false). ב-main המפתח לא בשימוש.
+async function trustUid(page, email) {
+  const fwd = page.__cfg && page.__cfg.fwd;
+  if (!fwd) return email.split('@')[0]; // רשת מדומה: ה-uid הוא החלק שלפני @
+  try { const r = await fetch(`http://127.0.0.1:${fwd[9099]}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: 'pw-123456', returnSecureToken: true }) }); return (await r.json()).localId || ''; } catch (e) { return ''; }
+}
+async function login(page, email, opts) {
   await page.goto(ORIGIN + '/?emu=1');
   await page.waitForSelector('#gform', { timeout: 15000 });
+  if (!(opts && opts.trust === false)) { const u = await trustUid(page, email); if (u) await page.evaluate((x) => localStorage.setItem('lp-trust', JSON.stringify({ uid: x, exp: Date.now() + 864e5 })), u); }
   await page.fill('#gform input[name=email]', email);
-  await page.fill('#gform input[name=pw]', 'pw-123456');
+  await page.fill('#gform input[name=pw]', (opts && opts.pw) || 'pw-123456');
   page.__step = 'login';
   await Promise.all([page.waitForLoadState('load'), page.click('#gbtn')]);
   await settle(page);

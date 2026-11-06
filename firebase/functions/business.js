@@ -3,9 +3,10 @@
 //   מנהל־על בלבד (superadmins/{uid}): createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures,
 //                                     setBusinessAdv, setYemotToken, logBusinessEntry.
 //   מנהל העסק (בתוך העסק שלו בלבד):   addStaff, setStaffActive.
-//   בלי כניסה (משתמש שעוד אין לו סיסמה): completeInvite – קוד חד־פעמי מהמייל + סיסמה חדשה.
 // כל פעולה נרשמת ב-b/{bizId}/audit (by, t, act, note). bizId של משתמש רגיל נקבע בשרת בלבד (requireStaff).
-// אין כאן שליחת מייל אמיתית: lib/mailer.js רק מדמה. קוד חד־פעמי מוחזר בתשובה רק באמולטור.
+// כניסה ראשונה (שלב 6ג, עדכון חוזה 9, החלטת המשתמש "א"): אין קוד חד־פעמי ואין שליחת מייל בשרת.
+//   השרת יוצר חשבון Auth בלי סיסמה ומחזיר את המייל שנשמר. האפליקציה שולחת למייל הזה את המייל המובנה של Firebase
+//   ("קבע סיסמה", accounts:sendOobCode עם PASSWORD_RESET). רק מי שמקבל את המייל יכול לקבוע סיסמה ולהיכנס.
 
 const crypto = require('node:crypto');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
@@ -15,17 +16,13 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const T = require('./lib/tenant');
 const { requireStaff, inputObject } = require('./lib/roles');
-const mailer = require('./lib/mailer');
 
-const CODE_TTL_MS = 30 * 60 * 1000;   // הנחה: 30 דקות
-const CODE_MAX_TRIES = 5;             // הנחה: 5 ניסיונות לכל קוד
 const BATCH_MAX = 400;                // מתחת למגבלה של 500 פעולות באצווה
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
 const RESERVED = new Set([T.BIZ0]);   // לארג' פעמי נוצר רק בכלי ההעברה (שלב 4), לא כאן
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
-const isEmu = () => process.env.FUNCTIONS_EMULATOR === 'true';
 
 // מספר ישראלי: נייד 05X / 07X (10 ספרות), קווי 02/03/04/08/09 (9 ספרות). +972 → 0.
 function israeliPhone(raw) {
@@ -67,41 +64,37 @@ function auditData(by, act, note) {
 }
 async function audit(bizId, by, act, note) { await auditRef(bizId).set(auditData(by, act, note)); }
 
-// ---------- קוד חד־פעמי ----------
-function hashCode(code, salt) { return crypto.createHash('sha256').update(salt + ':' + code, 'utf8').digest('hex'); }
-function newCode() { return String(crypto.randomInt(0, 100000000)).padStart(8, '0'); }
-function sameHash(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
-}
-const inviteRef = (bizId, uid) => getFirestore().doc(`b/${bizId}/private/invite-${uid}`);
-
-// משתמש Auth לפי מייל: קיים – אותו uid; לא קיים – נוצר בלי סיסמה (אי אפשר להיכנס עד קביעת סיסמה עם הקוד).
-async function authUserFor(email) {
-  try { return (await getAuth().getUserByEmail(email)).uid; } catch (e) {
-    if (e && e.code === 'auth/user-not-found') return (await getAuth().createUser({ email, emailVerified: false, disabled: false })).uid;
-    throw e;
-  }
-}
 // משתמש ששייך לעסק אחר, או מנהל־על – לא מצטרף. כך הזמנה לא יכולה "לגנוב" חשבון קיים.
-async function assertJoinable(uid, bizId) {
+// sup = מי שקורא לפונקציה הוא מנהל־על. רק הוא מקבל את הסיבה המפורטת. כל אחר (מנהל עסק) מקבל הודעה אחת אחידה,
+// כדי שלא יוכל לגלות לפי מייל מי מנהל־העל או מי שייך לעסק אחר.
+const NOT_JOINABLE = 'לא ניתן להוסיף את המייל הזה. אפשר לנסות מייל אחר, או לפנות לספק.';
+async function assertJoinable(uid, bizId, sup) {
   const db = getFirestore();
   const [sa, u, a, s] = await Promise.all([db.doc('superadmins/' + uid).get(), db.doc('users/' + uid).get(), db.doc('admins/' + uid).get(), db.doc('staff/' + uid).get()]);
-  if (sa.exists) throw new HttpsError('failed-precondition', 'המייל שייך למנהל המערכת', { reason: 'is-superadmin' });
   const cur = u.exists ? u.get('bizId') : (a.exists || s.exists ? T.BIZ0 : null);
+  if ((sa.exists || (cur && cur !== bizId)) && !sup) throw new HttpsError('failed-precondition', NOT_JOINABLE, { reason: 'not-joinable' });
+  if (sa.exists) throw new HttpsError('failed-precondition', 'המייל שייך למנהל המערכת', { reason: 'is-superadmin' });
   if (cur && cur !== bizId) throw new HttpsError('failed-precondition', 'המייל כבר שייך לעסק אחר', { reason: 'other-biz' });
   return u;
 }
 
-// יוצר קוד חדש (מבטל קוד קודם), "שולח" אותו, ומחזיר את מה שמותר להחזיר.
-async function issueInvite(biz, uid, email, role, by) {
-  const code = newCode();
-  const salt = crypto.randomBytes(16).toString('hex');
-  await inviteRef(biz.bizId, uid).set({ uid, email, role, salt, codeHash: hashCode(code, salt), exp: Date.now() + CODE_TTL_MS, tries: 0, used: false, createdAt: Date.now(), by });
-  const mail = await mailer.sendInviteCode({ to: email, code, bizName: biz.name, role });
-  const out = { uid, mail: mail.status, expiresInMin: CODE_TTL_MS / 60000 };
-  if (isEmu()) out.devCode = code; // רק באמולטור ובבדיקות. בייצור הקוד לא יוצא מהשרת אלא במייל.
-  return out;
+// חשבון Auth למייל, כך שלאף אחד אין סיסמה ידועה לחשבון שמקבל הרשאות:
+//   - אין חשבון → נוצר חשבון חדש בלי סיסמה. נכנסים רק אחרי "קבע סיסמה" מהמייל המובנה של Firebase.
+//   - יש חשבון שלא אומת ושאינו חבר באף עסק (למשל מישהו שנרשם מראש עם המייל של המנהל, ויודע את הסיסמה שלו) →
+//     החשבון הישן מנוטרל בלי מחיקה (מושבת, המייל שלו מוחלף בכתובת שלא מקבלת דואר, החיבורים שלו מבוטלים), ונוצר חשבון חדש.
+//     הטוקנים הישנים שלו שייכים למזהה אחר, ולכן לא מקבלים את ההרשאות. אפשר לשחזר אותו בלוח הבקרה.
+//   - חשבון שאומת (בעל המייל) או שכבר רשום באותו עסק → אותו חשבון.
+async function accountFor(email, bizId, sup) {
+  const auth = getAuth();
+  let rec = null;
+  try { rec = await auth.getUserByEmail(email); } catch (e) { if (!e || e.code !== 'auth/user-not-found') throw e; }
+  if (!rec) return (await auth.createUser({ email, emailVerified: false, disabled: false })).uid;
+  const u = await assertJoinable(rec.uid, bizId, sup);
+  if (u.exists || rec.emailVerified === true) return rec.uid;
+  await auth.updateUser(rec.uid, { email: `orphan-${rec.uid.toLowerCase()}@orphaned.invalid`, disabled: true });
+  await auth.revokeRefreshTokens(rec.uid);
+  logger.warn('business: unverified account set aside', { reason: 'unverified-account' });
+  return (await auth.createUser({ email, emailVerified: false, disabled: false })).uid;
 }
 
 // ---------- createBusiness ----------
@@ -131,61 +124,26 @@ async function createBusiness(request) {
   return Object.assign({ ok: true, bizId }, inv);
 }
 
-// הזמנת מנהל: users/{uid} נוצר כלא פעיל (active:false). החברות עצמה (admins, active:true) נכתבת רק אחרי הקוד.
+// הזמנת מנהל: החשבון בלי סיסמה ידועה (accountFor), ולכן אפשר לרשום את החברות מיד (admins + users פעיל).
+// המנהל נכנס רק אחרי שקבע סיסמה מהמייל המובנה. התשובה: uid והמייל שנשמר – לשם האפליקציה שולחת את הקישור. אין קוד.
 async function inviteAdmin(biz, email, by) {
   if (biz.dataRoot === 'legacy') throw new HttpsError('failed-precondition', 'בעסק במצב legacy מנהלים משתמשים כמו היום', { reason: 'legacy-biz' });
-  const uid = await authUserFor(email);
-  const u = await assertJoinable(uid, biz.bizId);
-  if (!u.exists) await getFirestore().doc('users/' + uid).set({ bizId: biz.bizId, role: 'admin', active: false, bizStatus: biz.status, email, createdAt: Date.now() });
-  const out = await issueInvite(biz, uid, email, 'admin', by);
-  await audit(biz.bizId, by, 'inviteBusinessAdmin', email);
-  return out;
+  const uid = await accountFor(email, biz.bizId, true); // inviteAdmin: רק מנהל־על (requireSuper)
+  const u = await assertJoinable(uid, biz.bizId, true);
+  const db = getFirestore();
+  const now = Date.now();
+  const b = db.batch();
+  b.set(db.doc(T.bizRef(biz, 'admins/' + uid)), { email, addedAt: new Date(now).toISOString(), addedBy: by }, { merge: true });
+  b.set(db.doc('users/' + uid), Object.assign({ bizId: biz.bizId, role: 'admin', active: true, bizStatus: biz.status, email }, u.exists ? {} : { createdAt: now }), { merge: true });
+  b.set(auditRef(biz.bizId), auditData(by, 'inviteBusinessAdmin', email));
+  await b.commit();
+  return { uid, email };
 }
 async function inviteBusinessAdmin(request) {
   const by = await requireSuper(request);
   const input = inputObject(request);
   const biz = await bizOrThrow(bizIdOf(input));
   return Object.assign({ ok: true }, await inviteAdmin(biz, cleanEmail(input.email), by));
-}
-
-// ---------- completeInvite: קוד + סיסמה (בלי כניסה) ----------
-// כל כשל (מייל לא מוכר, קוד שגוי, פג תוקף, נוצל, נחסם) מחזיר את אותה תשובה, כדי לא לחשוף אילו מיילים קיימים.
-async function completeInvite(request) {
-  const input = inputObject(request);
-  const fail = () => new HttpsError('permission-denied', 'הקוד שגוי, פג תוקפו או נחסם. בקשו קוד חדש.', { reason: 'bad-code' });
-  const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
-  const code = typeof input.code === 'string' ? input.code.trim() : '';
-  const password = typeof input.password === 'string' ? input.password : '';
-  if (password.length < 8 || password.length > 128) throw bad('weak-password', 'הסיסמה צריכה להיות באורך 8 עד 128 תווים');
-  if (!EMAIL_RE.test(email) || !/^\d{8}$/.test(code)) throw fail();
-  let uid;
-  try { uid = (await getAuth().getUserByEmail(email)).uid; } catch (e) { throw fail(); }
-  const db = getFirestore();
-  const u = await db.doc('users/' + uid).get();
-  const bizId = u.exists ? u.get('bizId') : null;
-  if (!T.BIZ_RE.test(String(bizId || ''))) throw fail();
-  const ref = inviteRef(bizId, uid);
-  const r = await db.runTransaction(async (tx) => {
-    const s = await tx.get(ref);
-    if (!s.exists) return null;
-    const x = s.data();
-    if (x.used === true || x.email !== email || !(x.exp > Date.now()) || !((x.tries || 0) < CODE_MAX_TRIES)) return null;
-    if (!sameHash(hashCode(code, x.salt), x.codeHash)) { tx.update(ref, { tries: (x.tries || 0) + 1 }); return null; }
-    tx.update(ref, { used: true, usedAt: Date.now(), codeHash: '' });
-    return x;
-  });
-  if (!r) throw fail();
-  await getAuth().updateUser(uid, { password, emailVerified: true });
-  const biz = await bizOrThrow(bizId);
-  const now = Date.now();
-  const b = db.batch();
-  if (r.role === 'admin') {
-    b.set(db.doc(T.bizRef(biz, 'admins/' + uid)), { email, addedAt: new Date(now).toISOString(), addedBy: r.by }, { merge: true });
-    b.set(db.doc('users/' + uid), { bizId, role: 'admin', active: true, bizStatus: biz.status, email }, { merge: true });
-  }
-  b.set(auditRef(bizId), auditData(uid, 'completeInvite', r.role));
-  await b.commit();
-  return { ok: true, bizId, role: r.role };
 }
 
 // ---------- setBusinessStatus: מסמך העסק + bizStatus בכל users של העסק ----------
@@ -306,8 +264,8 @@ async function addStaff(request) {
   const email = cleanEmail(input.email);
   const name = cleanName(input.name, 60);
   const db = getFirestore();
-  const uid = await authUserFor(email);
-  await assertJoinable(uid, who.bizId);
+  const uid = await accountFor(email, who.bizId, who.superadmin === true);
+  await assertJoinable(uid, who.bizId, who.superadmin === true);
   if ((await db.doc(T.bizRef(who.biz, 'admins/' + uid)).get()).exists) throw new HttpsError('failed-precondition', 'המשתמש כבר מנהל בעסק', { reason: 'is-admin' });
   const now = Date.now();
   const b = db.batch();
@@ -315,9 +273,8 @@ async function addStaff(request) {
   b.set(db.doc('users/' + uid), { bizId: who.bizId, role: 'worker', active: true, bizStatus: who.biz.status, email, createdAt: now }, { merge: true });
   b.set(auditRef(who.bizId), auditData(who.uid, 'addStaff', email));
   await b.commit();
-  // סיסמה: אותו מנגנון קוד חד־פעמי. משתמש שכבר יש לו סיסמה יכול להתעלם מהקוד.
-  const inv = await issueInvite(who.biz, uid, email, 'worker', who.uid);
-  return Object.assign({ ok: true, bizId: who.bizId }, inv);
+  // סיסמה: האפליקציה שולחת ל-email את המייל המובנה "קבע סיסמה" (כמו למנהל). אין קוד.
+  return { ok: true, bizId: who.bizId, uid, email };
 }
 async function setStaffActive(request) {
   const who = await requireBizManager(request);
@@ -388,7 +345,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 
 exports.createBusiness = onCall(wrap('createBusiness', createBusiness));
 exports.inviteBusinessAdmin = onCall(wrap('inviteBusinessAdmin', inviteBusinessAdmin));
-exports.completeInvite = onCall({ maxInstances: 2 }, wrap('completeInvite', completeInvite));
 exports.setBusinessStatus = onCall({ timeoutSeconds: 300 }, wrap('setBusinessStatus', setBusinessStatus));
 exports.setBusinessFeatures = onCall(wrap('setBusinessFeatures', setBusinessFeatures));
 exports.setBusinessAdv = onCall(wrap('setBusinessAdv', setBusinessAdv));
@@ -398,6 +354,6 @@ exports.addStaff = onCall(wrap('addStaff', addStaff));
 exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  createBusiness, inviteBusinessAdmin, completeInvite, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  logBusinessEntry, addStaff, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, CODE_TTL_MS, CODE_MAX_TRIES, BATCH_MAX, wrap,
+  createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
+  logBusinessEntry, addStaff, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, BATCH_MAX, wrap,
 } });
