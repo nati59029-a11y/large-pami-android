@@ -141,6 +141,42 @@ jobs:
             require('fs').appendFileSync(process.env.GITHUB_OUTPUT,'only='+want.map(n=>'functions:'+n).join(',')+'\n');
             console.log('פונקציות לפרסום ('+want.length+'): '+want.join(', '));"
 
+      # רק בפרויקט הבדיקה: Firebase דורש שכל סוד (defineSecret) בקוד יהיה קיים ב-Secret Manager, גם כשמפרסמים רק חלק מהפונקציות.
+      # סוד חסר נוצר עם ערך אקראי זמני. פונקציות שמשתמשות בסודות האלה לא יעבדו בפרויקט הבדיקה – זה מקובל.
+      # סוד קיים לא נדרס לעולם, וערכים לא מודפסים.
+      - name: Placeholder secrets (test project only)
+        if: inputs.project == 'largpeami-test-f4691' && inputs.what == 'functions'
+        working-directory: firebase/functions
+        env:
+          P: ${{ inputs.project }}
+        run: |
+          [ "$P" = "largpeami-test-f4691" ] || { echo "::error::סודות זמניים נוצרים רק בפרויקט הבדיקה largpeami-test-f4691 – מסרב"; exit 1; }
+          NAMES=$(grep -rhoE "defineSecret\(['\"][A-Z0-9_]+['\"]" --include=*.js --include=*.ts --exclude-dir=node_modules . | grep -oE "[A-Z0-9_]+" | sort -u)
+          [ -n "$NAMES" ] || { echo "אין סודות בקוד"; exit 0; }
+          TOKEN=$(CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="$GOOGLE_APPLICATION_CREDENTIALS" gcloud auth print-access-token 2>/dev/null) || { echo "::error::לא הצלחתי לקבל אסימון גישה מחשבון השירות"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          API="https://secretmanager.googleapis.com/v1/projects/$P/secrets"
+          NOPERM="::error::לחשבון השירות אין הרשאה ל-Secret Manager בפרויקט $P. יש להוסיף לו את התפקיד roles/secretmanager.admin"
+          for N in $NAMES; do
+            C=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$API/$N")
+            case "$C" in
+              200) echo "$N: קיים – לא נוגעים"; continue ;;
+              404) ;;
+              403) echo "$NOPERM"; exit 1 ;;
+              *) echo "::error::בדיקת הסוד $N נכשלה (HTTP $C)"; exit 1 ;;
+            esac
+            C=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d '{"replication":{"automatic":{}},"labels":{"firebase-managed":"true"}}' "$API?secretId=$N")
+            [ "$C" = "403" ] && { echo "$NOPERM"; exit 1; }
+            [ "$C" = "200" ] || { echo "::error::יצירת הסוד $N נכשלה (HTTP $C)"; exit 1; }
+            # הערך נוצר ונשלח דרך stdin בלבד – לא מודפס ולא נשמר
+            C=$(printf '{"payload":{"data":"%s"}}' "$(head -c 32 /dev/urandom | base64 -w0 | tr -d '=+/' | base64 -w0)" | \
+              curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @- "$API/$N:addVersion")
+            [ "$C" = "403" ] && { echo "$NOPERM"; exit 1; }
+            [ "$C" = "200" ] || { echo "::error::שמירת ערך לסוד $N נכשלה (HTTP $C)"; exit 1; }
+            echo "$N: נוצר עם ערך זמני" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
       - name: Deploy functions
         if: inputs.what == 'functions'
         working-directory: firebase
