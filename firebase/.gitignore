@@ -11,3 +11,4 @@ tests/.results/
 .env.local
 functions/.secret.local
 functions/.env.local
+hosting-public/
