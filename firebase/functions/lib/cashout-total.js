@@ -44,6 +44,9 @@ function where(x, prev, d, tm) {
 const MAX_DOCS = 3000, RL_MAX = 20, RL_MS = 3600000;
 const ilDay = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 // 6ח: סוף החלון = רגע הסגירה (או הפתיחה שצורפה לה, כמו zcB). בלי שעה – סוף היום d (כמו קודם)
+const ilTime = (ms) => { const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms)); const g = (t) => (p.find((x) => x.type === t) || {}).value || '00'; return g('hour') + ':' + g('minute'); };
+// 6ח סבב 2 (בודק, הערה 1): סוף החלון לא יכול להיות אחרי עכשיו (שעון ישראל) – כך אי אפשר לסרוק את העתיד דקה אחר דקה
+const future = (e, now) => !!e.tm && key(e) > key({ d: ilDay(now), tm: ilTime(now) });
 function endOf(d, tm, od, otm) {
   const e = bound({ d, tm, od, otm });
   return e.tm ? e : { d: e.d, tm: '' };
@@ -75,6 +78,7 @@ async function cashoutTotal(request) {
   const opt = (v, f, r) => (v == null || v === '' ? '' : f(v) || bad(r));
   const tm = opt(i.tm, time, 'bad-time'), od = opt(i.od, date, 'bad-date'), otm = opt(i.otm, time, 'bad-time');
   const end = endOf(d, tm, od, otm);
+  if (future(end, now) || (od && od > today)) bad('bad-time');
   let z = null;
   if (i.z != null && i.z !== '') { z = Number(i.z); if (!isFinite(z) || Math.abs(z) > 1e7) bad('bad-z'); z = rnd(Math.abs(z)); }
   const db = T.tdb();
@@ -103,4 +107,4 @@ async function cashoutTotal(request) {
   return out;
 }
 
-module.exports = { cashoutTotal, _t: { bound, where, endOf } };
+module.exports = { cashoutTotal, _t: { bound, where, endOf, future } };

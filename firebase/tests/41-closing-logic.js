@@ -159,6 +159,12 @@ describe('6ח – החלון נגמר ברגע הסגירה, והוצאה מלפ
     assert.equal(T.where({ d: '2026-10-20', tm: '21:00' }, prev, e.d, e.tm), 'in');
     assert.equal(T.where({ d: '2026-10-20', tm: '21:01' }, prev, e.d, e.tm), 'out');
     assert.deepEqual(T.endOf('2026-10-20', '21:00', '2026-10-21', '08:00'), { d: '2026-10-21', tm: '08:00' });
+    assert.deepEqual(T.endOf('2026-10-20', '21:00', '2026-10-22', '08:00'), { d: '2026-10-20', tm: '21:00' }); // פתיחה יותר מיום אחרי – שעת הסגירה
+    const now = Date.parse('2026-10-20T15:00:00Z'); // 18:00 בישראל
+    assert.equal(T.future({ d: '2026-10-20', tm: '18:00' }, now), false);
+    assert.equal(T.future({ d: '2026-10-20', tm: '18:01' }, now), true);
+    assert.equal(T.future({ d: '2026-10-19', tm: '23:59' }, now), false);
+    assert.equal(T.future({ d: '2026-10-20', tm: '' }, now), false);
     const e2 = T.endOf('2026-10-20', '', '', '');
     assert.equal(T.where({ d: '2026-10-20', tm: '23:59' }, prev, e2.d, e2.tm), 'in');
   });
