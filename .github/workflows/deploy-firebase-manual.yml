@@ -1,0 +1,198 @@
+# 6ז: פרסום ידני ל-Firebase – פונקציות, firestore.rules, storage.rules, Hosting לגרסת המחשב.
+# ידני בלבד (Actions -> "Deploy Firebase (manual)" -> Run workflow). אין push, אין schedule.
+# שכבות הגנה:
+#   1. רק מהענפים feature/multi-business או main.
+#   2. בחירה מפורשת של פרויקט (רשימה סגורה) + הקלדת המזהה שוב + הקלדת deploy-<מה>-to-<פרויקט>.
+#   3. GitHub environment לכל פרויקט (firebase-test / firebase-prod) – אפשר לדרוש בו אישור ידני של בעל המאגר לפני הריצה.
+#   4. חשבון השירות חייב להיות של הפרויקט שנבחר (נבדק לפני כל פרסום).
+#   5. הסדר המחייב (עדכון חוזה 8א) נבדק בשרת לפני חוקים: כל הפונקציות פרוסות, users קיים לכל חבר, ולפני storage.rules – firestore.rules הפרוס זהה לענף.
+# סודות: FIREBASE_SERVICE_ACCOUNT (ייצור) / FIREBASE_SERVICE_ACCOUNT_TEST (בדיקה), מ-secrets בלבד. נכתבים לקובץ זמני ונמחקים. שום סוד לא מודפס.
+# הקובץ deploy-functions.yml הישן (רק מ-main) לא השתנה.
+name: Deploy Firebase (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "הפרויקט (בדיקה או ייצור)"
+        required: true
+        type: choice
+        options: [largpeami-test-f4691, largpeami]
+      project_confirm:
+        description: "הקלד שוב את מזהה הפרויקט המלא"
+        required: true
+        type: string
+      what:
+        description: "מה לפרסם (פעם אחת, לפי הסדר: functions -> העברה -> firestore-rules -> storage-rules; hosting בסוף)"
+        required: true
+        type: choice
+        options: [functions, firestore-rules, storage-rules, hosting]
+      functions:
+        description: "רק ל-functions: שמות מופרדים בפסיק, או all = כל הפונקציות שהקוד מייצא"
+        required: false
+        type: string
+        default: "all"
+      confirm:
+        description: "הקלד deploy-<מה>-to-<פרויקט>, למשל deploy-functions-to-largpeami-test-f4691"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-firebase-${{ inputs.project }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.project == 'largpeami' && 'firebase-prod' || 'firebase-test' }}
+    steps:
+      - name: Guard (branch, project typed twice, typed confirmation)
+        env:
+          P: ${{ inputs.project }}
+          PC: ${{ inputs.project_confirm }}
+          W: ${{ inputs.what }}
+          C: ${{ inputs.confirm }}
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/feature/multi-business|refs/heads/main) ;;
+            *) echo "::error::מותר להפעיל רק מ-feature/multi-business או מ-main"; exit 1 ;;
+          esac
+          case "$P" in largpeami|largpeami-test-f4691) ;; *) echo "::error::פרויקט לא מוכר"; exit 1 ;; esac
+          [ "$P" = "$PC" ] || { echo "::error::מזהה הפרויקט שהוקלד שוב לא זהה"; exit 1; }
+          [ "$C" = "deploy-$W-to-$P" ] || { echo "::error::קלט האישור צריך להיות בדיוק deploy-$W-to-$P"; exit 1; }
+          echo "פרסום: $W ל-$P מהענף ${GITHUB_REF#refs/heads/} (קומיט ${GITHUB_SHA::7})" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      - name: Check that app-source matches the project ZIP and the rules copies
+        run: |
+          python3 scripts/verify-source-matches-zip.py large-pami-android-project.zip app-source
+          cmp firebase/firestore.rules app-source/firestore.rules || { echo "::error::firebase/firestore.rules ו-app-source/firestore.rules שונים"; exit 1; }
+
+      - name: Install functions dependencies
+        working-directory: firebase/functions
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # ---------- Hosting: האתר והבנייה – לפני שהסוד נכתב לקובץ ----------
+      - name: Hosting site (variable, never the live-update site)
+        if: inputs.what == 'hosting'
+        id: site
+        env:
+          SITE: ${{ inputs.project == 'largpeami' && vars.DESKTOP_SITE || vars.DESKTOP_SITE_TEST }}
+          LIVE: ${{ vars.LIVE_UPDATE_SITE }}
+          P: ${{ inputs.project }}
+        run: |
+          [ -n "$SITE" ] || { echo "::error::חסר המשתנה DESKTOP_SITE (ייצור) או DESKTOP_SITE_TEST (בדיקה)"; exit 1; }
+          echo "$SITE" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::שם אתר לא תקין"; exit 1; }
+          # fail-closed (סבב 2): גם כש-LIVE_UPDATE_SITE לא מוגדר – השם חייב לכלול desktop, ולא יכול להיות האתר הראשי של הפרויקט
+          case "$SITE" in *desktop*) ;; *) echo "::error::שם אתר גרסת המחשב חייב לכלול desktop (הגנה מפני דריסת אתר אחר)"; exit 1 ;; esac
+          [ "$SITE" != "$P" ] || { echo "::error::אסור לפרסם לאתר הראשי של הפרויקט"; exit 1; }
+          [ -z "$LIVE" ] || [ "$SITE" != "$LIVE" ] || { echo "::error::אסור לפרסם את גרסת המחשב לאתר של העדכון החי"; exit 1; }
+          echo "site=$SITE" >> "$GITHUB_OUTPUT"
+
+      - name: Build the web files (before the service account exists on disk)
+        if: inputs.what == 'hosting'
+        env:
+          SITE_BACKEND: ${{ inputs.project == 'largpeami' && 'off' || 'test' }}
+          P: ${{ inputs.project }}
+        run: |
+          if [ "$P" = "largpeami-test-f4691" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then echo "::error::גרסת מחשב לפרויקט הבדיקה נבנית רק מ-feature/multi-business (prepare.js לא מחליף פרויקט ב-main)"; exit 1; fi
+          rm -rf app && mkdir app && cp -a app-source/. app/
+          # סבב 2: הבנייה רצה לפני שחשבון השירות נכתב לקובץ, ובלי סקריפטי התקנה של חבילות
+          cd app && npm install --ignore-scripts --no-audit --no-fund && node scripts/prepare.js
+          if [ "$P" = "largpeami" ] && grep -q "largpeami-test-f4691" www/index.html; then echo "::error::גרסת הייצור מפנה לפרויקט הבדיקה"; exit 1; fi
+          rm -rf ../firebase/hosting-public && cp -a www ../firebase/hosting-public
+          echo "קבצים לפרסום: $(find ../firebase/hosting-public -type f | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # סבב 2: כל ההתקנות לפני שהסוד נכתב לקובץ (כולל firebase-tools, שלא יורד דרך npx אחרי זה)
+      - name: Install firebase-tools (before the service account exists on disk)
+        run: npm install -g firebase-tools@15.34.1 --no-audit --no-fund && firebase --version
+
+      - name: Service account (temporary file, must belong to the chosen project)
+        env:
+          SA: ${{ inputs.project == 'largpeami' && secrets.FIREBASE_SERVICE_ACCOUNT || secrets.FIREBASE_SERVICE_ACCOUNT_TEST }}
+          P: ${{ inputs.project }}
+        run: |
+          umask 077
+          [ -n "$SA" ] || { echo "::error::חסר הסוד (FIREBASE_SERVICE_ACCOUNT לייצור, FIREBASE_SERVICE_ACCOUNT_TEST לבדיקה)"; exit 1; }
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          SP=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("project_id",""))' "$RUNNER_TEMP/sa.json")
+          [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      # ---------- פונקציות (צעד 1) ----------
+      - name: Function names
+        if: inputs.what == 'functions'
+        id: names
+        working-directory: firebase/functions
+        env:
+          IN: ${{ inputs.functions }}
+        run: |
+          node -e "
+            const ex=Object.keys(require('./index.js'));const raw=String(process.env.IN||'').trim();
+            const want=raw==='all'?ex:raw.split(',').map(s=>s.trim()).filter(Boolean);
+            if(!want.length){console.error('::error::לא נבחרה פונקציה');process.exit(1)}
+            for(const n of want){if(!/^[A-Za-z][A-Za-z0-9_]{0,62}$/.test(n)||!ex.includes(n)){console.error('::error::שם לא מוכר: '+n);process.exit(1)}}
+            require('fs').appendFileSync(process.env.GITHUB_OUTPUT,'only='+want.map(n=>'functions:'+n).join(',')+'\n');
+            console.log('פונקציות לפרסום ('+want.length+'): '+want.join(', '));"
+
+      - name: Deploy functions
+        if: inputs.what == 'functions'
+        working-directory: firebase
+        env:
+          ONLY: ${{ steps.names.outputs.only }}
+          P: ${{ inputs.project }}
+        run: |
+          # ערכי ברירת מחדל לפרמטרים שאין להם ערך (כמו ב-deploy-functions.yml). רק על השרת הזה; לא נשמר במאגר. סודות לא נוגעים.
+          (cd functions && node -e "
+            const fs=require('fs');require('./index.js');
+            const P=require('firebase-functions/params').declaredParams||[];
+            const have=new Set();for(const f of ['.env','.env.'+process.argv[1]]){if(fs.existsSync(f))for(const l of fs.readFileSync(f,'utf8').split(/\\r?\\n/)){const m=l.match(/^\\s*([A-Z0-9_]+)\\s*=/);if(m)have.add(m[1])}}
+            const add=[];for(const x of P){if(x.constructor.name==='SecretParam'||have.has(x.name))continue;const d=(x.options||{}).default;if(d===undefined){console.error('::error::No value and no default for '+x.name);process.exit(1)}if(typeof d==='object'){console.error('::error::Param '+x.name+' has a non-literal default');process.exit(1)}add.push(x.name+'='+String(d))}
+            if(add.length){fs.appendFileSync('.env.'+process.argv[1],'\\n'+add.join('\\n')+'\\n');console.log('Defaults used for: '+add.map(a=>a.split('=')[0]).join(', '))}
+          " "$P")
+          firebase deploy --only "$ONLY" --project "$P" --non-interactive
+          echo "פורסמו פונקציות ל-$P" >> "$GITHUB_STEP_SUMMARY"
+
+      # ---------- חוקים (צעד 3): בדיקת הסדר בשרת, ואז פרסום ----------
+      - name: Required order (functions deployed, users migrated, firestore before storage)
+        if: inputs.what == 'firestore-rules' || inputs.what == 'storage-rules'
+        working-directory: firebase
+        env:
+          P: ${{ inputs.project }}
+          W: ${{ inputs.what }}
+        run: |
+          L=$(firebase functions:list --project "$P" --json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log((j.result||[]).map(f=>f.id||f.entryPoint||'').filter(Boolean).join(','))}catch(e){console.log('')}})")
+          DEPLOYED_FUNCTIONS="$L" node scripts/deploy-order-check.js "$W" "$P"
+
+      - name: Deploy rules
+        if: inputs.what == 'firestore-rules' || inputs.what == 'storage-rules'
+        working-directory: firebase
+        env:
+          P: ${{ inputs.project }}
+          W: ${{ inputs.what }}
+        run: |
+          if [ "$W" = "firestore-rules" ]; then ONLY="firestore:rules"; else ONLY="storage"; fi
+          firebase deploy --only "$ONLY" --project "$P" --non-interactive
+          echo "פורסם $W ל-$P" >> "$GITHUB_STEP_SUMMARY"
+
+      # ---------- Hosting לגרסת המחשב (צעד 5): פרסום הקבצים שנבנו למעלה ----------
+      - name: Deploy hosting
+        if: inputs.what == 'hosting'
+        working-directory: firebase
+        env:
+          P: ${{ inputs.project }}
+          SITE: ${{ steps.site.outputs.site }}
+        run: |
+          node -e "const f='firebase.json',j=JSON.parse(require('fs').readFileSync(f));j.hosting.site=process.argv[1];require('fs').writeFileSync(f,JSON.stringify(j,null,2))" "$SITE"
+          firebase deploy --only hosting --project "$P" --non-interactive
+          echo "פורסמה גרסת המחשב לאתר $SITE ($P): https://$SITE.web.app" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

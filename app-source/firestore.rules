@@ -669,14 +669,22 @@ service cloud.firestore {
       }
 
       // 6ו (עדכון חוזה 16): wv – תצוגות לעובד (הכנסות, משכורות, דוחות), חודש אחד לכל מסמך: {inc|sal|rep}_YYYY-MM.
-      // רק המכשיר של המנהל כותב (המראה של הנתונים שלו). קריאה – לפי המתג: inc = incR, sal = sal, rep = rep. רק קריאה ישירה (get).
+      // רק המכשיר של המנהל כותב (המראה של הנתונים שלו). קריאה – לפי המתג: inc = incR, sal = sal. רק קריאה ישירה (get).
+      // 6ז (עדכון חוזה 17): הדוח מפוצל לפי רמה, כדי שעובד לא יוכל לקרוא נתון שאסור לו גם בבקשה ישירה:
+      //   rpi_ = הכנסות לפי קטגוריה (rep); rpe_ = הוצאות לפי קטגוריה בלי משכורות (rep + expR == true; 'own' / false – לא);
+      //   rps_ = סך המשכורות (rep + sal). המסמך הישן rep_ (6ו, כלל גם הוצאות ומשכורות) – רק למנהל, ולא נכתב יותר.
+      //   (החלטות 7.11, 20:45) rpi_ דורש גם incR. rpo_YYYY-MM_<uid> = ההוצאות שהעובד הזה הזין (לפי eu) – רק הוא קורא (uid במזהה), עם rep ו-expR 'own' או true.
       match /wv/{id} {
         allow get: if (id.matches('^inc_.*') && perm('incR'))
           || (id.matches('^sal_.*') && perm('sal'))
-          || (id.matches('^rep_.*') && perm('rep'));
+          || (id.matches('^rpi_.*') && perm('rep') && perm('incR'))
+          || (id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_.+$') && id == 'rpo_' + id.split('_')[1] + '_' + request.auth.uid && perm('rep') && expOwn())
+          || (id.matches('^rpe_.*') && perm('rep') && perm('expR'))
+          || (id.matches('^rps_.*') && perm('rep') && perm('sal'))
+          || bMgr();
         allow list: if bMgr();
         allow create, update: if bMgr()
-          && id.matches('^(inc|sal|rep)_20[0-9]{2}-(0[1-9]|1[0-2])$')
+          && (id.matches('^(inc|sal|rpi|rpe|rps)_20[0-9]{2}-(0[1-9]|1[0-2])$') || id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_[A-Za-z0-9_-]{1,128}$'))
           && request.resource.data.keys().hasOnly(['data', 'h', 'm', 'at'])
           && request.resource.data.data is string && request.resource.data.data.size() <= 900000
           && request.resource.data.h is string && request.resource.data.h.size() <= 40
