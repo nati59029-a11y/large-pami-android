@@ -18,6 +18,7 @@ const { getStorage } = require('firebase-admin/storage');
 
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const scan = require('./lib/scan');
+const CL = require('./lib/classify');
 const { deriveBackupKey, KEY_VERSION } = require('./lib/backupKey');
 const T = require('./lib/tenant');
 
@@ -53,6 +54,9 @@ exports.scanDocument = onCall(
     const input = inputObject(request);
     const maxBytes = SCAN_MAX_FILE_MB.value() * 1024 * 1024;
     const { kind, cfg, files } = scan.validateScanInput(input, maxBytes);
+    // סריקה אחידה: classify מותר למי שיש לו לפחות סוג מסמך אחד (expW/incW/trf). מה שמוחזר מסונן לפי הסוגים המותרים.
+    const allowed = kind === 'classify' ? CL.allowedTypes(who) : null;
+    if (kind === 'classify' && !allowed.length) throw new HttpsError('permission-denied', 'אין לך הרשאה להכניס מסמכים. פנה למנהל.', { reason: 'no-perm' });
     // צילום העברה בנקאית – מנהל בלבד (החלטת המשתמש). נבדק לפני הספירה במכסה היומית ולפני Gemini
     if (kind === 'transfer' && who.role !== 'manager' && !(who.biz && who.biz.dataRoot === 'b' && hasPerm(who, 'trf'))) throw new HttpsError('permission-denied', 'צילום העברה מותר למנהל בלבד.', { reason: 'manager-only' });
     // 6ה: מתגי עובד (רק בעסק במבנה b; בעסק legacy – כמו היום). חשבונית/הוצאה מקופה = expW; דוח Z/פתיחה/הפקדה = incW
@@ -67,13 +71,22 @@ exports.scanDocument = onCall(
     const deadline = Date.now() + t.budgetMs;
     // מגבלה לפי עסק (תקרה מ-b/{bizId}/private/info.adv.limits) – בנוסף למגבלה לכל משתמש. המונים בתוך העסק.
     const caps = await scan.bizCaps(who.bizId, limit);
-    const usage = await scan.reserveScan(who.uid, caps.perUser, caps.bizDaily);
+    // מונה העסק סופר דפים (מספר הקבצים): דוח Z = 3, חשבונית בת 4 עמודים = 4, classify = 1
+    const usage = await scan.reserveScan(who.uid, caps.perUser, caps.bizDaily, files.length, caps.bizKey, caps.period);
     const stats = { sent: 0 };
     try {
       const body = scan.buildGeminiBody(kind, files);
       const r = await scan.callGemini(GEMINI_API_BASE.value().replace(/\/+$/, ''), key, body, t.timeoutMs, cfg.pro, { deadline, stats });
-      return { text: r.text, data: scan.parseLikeApp(r.text), model: r.model, usage: { day: usage.day, used: usage.used, limit } };
+      const u = { day: usage.day, used: usage.used, limit };
+      if (kind !== 'classify') return { text: r.text, data: scan.parseLikeApp(r.text), model: r.model, usage: u };
+      // classify: בלי text גולמי (כדי שסוג חסום לא ידלוף), רק התשובה המסוננת
+      const raw = scan.parseLikeApp(r.text);
+      if (!raw) throw new HttpsError('internal', 'התשובה מהזיהוי לא נקראה. אפשר למלא ידנית או לנסות שוב.', { reason: 'bad-answer' });
+      return { result: CL.shapeClassify(raw, allowed), model: r.model, usage: Object.assign(u, { pages: files.length, bizUsed: usage.bizUsed, bizLimit: caps.bizDaily, period: caps.period || 'day' }) };
     } catch (e) {
+      // classify (החלטת המשתמש 33): דף שנכשל לא נספר – כל כשל מחזיר את הדף, בטרנזקציה אחת (משתמש + עסק).
+      // שאר הסוגים – כמו היום (מוחזר רק כשאף בקשה לא יצאה).
+      if (kind === 'classify') { await scan.refundScan(who.uid, usage.day); if (e instanceof HttpsError) throw e; throw new HttpsError('internal', 'שגיאה בזיהוי', { reason: 'internal' }); }
       // נספר במגבלה היומית כל ניסיון שבו יצאה בקשה ל-Gemini (גם אם נגמר הזמן או לא הגיעה תשובה – ייתכן שמשלמים עליו).
       // מוחזר למונה רק ניסיון שבו שום בקשה לא יצאה (למשל: התקציב נגמר עוד לפני, או שגיאת רשת).
       if (stats.sent === 0) await scan.refundScan(who.uid, usage.day);

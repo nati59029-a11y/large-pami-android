@@ -7,7 +7,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore } = require('firebase-admin/firestore');
 const T = require('./tenant');
 // prompts.js נוצר אוטומטית מהאפליקציה; ההנחיה של recipe קיימת רק בשרת (prompts-recipe.js)
-const PROMPTS = Object.assign({}, require('./prompts'), require('./prompts-recipe'));
+const PROMPTS = Object.assign({}, require('./prompts'), require('./prompts-recipe'), require('./prompts-classify'));
 
 // ---------- סוגי זיהוי (מה האפליקציה מזהה היום) ----------
 // invoice  = ocrAI  (חשבונית / תעודת משלוח), עד 4 עמודים, temperature 0
@@ -32,10 +32,12 @@ const KINDS = Object.freeze({
   transfer: { minFiles: 1, maxFiles: 1, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
   // recipe = מתכון מצילום (שלוחה 1), גם כתב יד: תמונה אחת או שתיים, מודל "pro", כמו משוב
   recipe: { minFiles: 1, maxFiles: 2, temperature: 0.1, pro: true, timeoutMs: 150000, budgetMs: 135000 },
+  // classify = סריקה אחידה (משימה 2026-11-07): דף אחד – סיווג + נתונים באותה קריאה = דף אחד במכסה
+  classify: { minFiles: 1, maxFiles: 1, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
 });
 // בדיקת סוג הזיהוי מול רשימה קבועה בלבד. Object.hasOwn ולא KINDS[kind], כי KINDS[kind] "מוצא" גם שמות
 // שכל אובייקט ב-JavaScript מכיר מעצמו (__proto__, constructor, toString…) – פרצה שהבודק מצא בסבב 1.
-const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening', 'deposit', 'cashout', 'transfer', 'recipe']);
+const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening', 'deposit', 'cashout', 'transfer', 'recipe', 'classify']);
 function isKind(kind) {
   return typeof kind === 'string' && KIND_NAMES.includes(kind) && Object.hasOwn(KINDS, kind) && Object.hasOwn(PROMPTS, kind);
 }
@@ -45,7 +47,7 @@ function kindCfg(kind) {
 }
 // כמה זמן הטלפון מחכה לתשובה מ-scanDocument (לפי קוד האפליקציה בשלב 4, כפי שהועבר מהמתאם): חשבונית ומוצר 120 שניות, משוב 150.
 // סגירת קופה (zreport, opening): 120 שניות (zcAI באפליקציה). אישור הפקדה (deposit): 120 שניות (dpScan). פתק הוצאה מקופה (cashout): 120 שניות (coScan). מתכון (recipe): 150.
-const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000 };
+const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000, classify: 120000 };
 
 // באמולטור בלבד: אפשר לקצר את כל הזמנים באותו יחס (SCAN_TIME_SCALE), כדי שבדיקות התקציב לא יחכו 100 שניות.
 // מחוץ לאמולטור היחס תמיד 1.
@@ -134,24 +136,54 @@ function israelDay(d) {
 // ללארג' פעמי אין תקרת עסק אלא אם הוגדרה (בדיוק כמו היום). לעסק אחר בלי הגדרה: BIZ_DEFAULT_DAILY (הנחה).
 const BIZ_DOC = '_biz';
 const BIZ_DEFAULT_DAILY = 50;
-async function bizCaps(bizId, perUserDefault) {
-  let lim = {};
+// סריקה אחידה, שלב 2: סוג הגבלה לעסק (מנהל־על בלבד, setScanQuota) ב-b/{bizId}/private/info.scanQuota:
+//   { period: 'day'|'week'|'month'|'total', n }  – N דפים ליום / לשבוע / לחודש / סך הכול בלי איפוס ("קבועה")
+//   { release: { until: ms } }                   – שחרור החסימה עד רגע מסוים (יום/שבוע/חודש), ואחריו חוזרים להגבלה הרגילה
+//   { release: { until: null } }                 – שחרור קבוע (ללא תפוגה)
+// בלי scanQuota – בדיוק כמו היום (adv.limits.scanDaily, או ברירת המחדל). התקרה לכל משתמש נשארת תמיד.
+// מפתח התקופה נשמר בשדה day של המונה _biz: ליום – YYYY-MM-DD (כמו היום), לשבוע – W:<יום ראשון>, לחודש – M:YYYY-MM, קבועה – T.
+function periodKey(period, d) {
+  const day = israelDay(d);
+  if (period === 'week') {
+    const [y, m, dd] = day.split('-').map(Number);
+    const u = new Date(Date.UTC(y, m - 1, dd));
+    u.setUTCDate(u.getUTCDate() - u.getUTCDay());
+    return 'W:' + u.toISOString().slice(0, 10);
+  }
+  if (period === 'month') return 'M:' + day.slice(0, 7);
+  if (period === 'total') return 'T';
+  return day;
+}
+async function bizCaps(bizId, perUserDefault, now) {
+  let lim = {}, q = null;
   try {
     const s = await getFirestore().doc(`b/${bizId}/private/info`).get();
     const l = s.exists && s.get('adv') && s.get('adv').limits;
     if (l && typeof l === 'object') lim = l;
+    const sq = s.exists && s.get('scanQuota');
+    if (sq && typeof sq === 'object' && !Array.isArray(sq)) q = sq;
   } catch (e) { /* בלי הגדרות – ברירות המחדל */ }
   const int = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
   const perUser = int(lim.scanPerUserDaily) !== null ? Math.min(int(lim.scanPerUserDaily), perUserDefault) : perUserDefault;
-  const bizDaily = int(lim.scanDaily) !== null ? int(lim.scanDaily) : bizId === T.BIZ0 ? null : BIZ_DEFAULT_DAILY;
+  let bizDaily = int(lim.scanDaily) !== null ? int(lim.scanDaily) : bizId === T.BIZ0 ? null : BIZ_DEFAULT_DAILY;
+  if (!q) return { perUser, bizDaily };
+  const t = now || Date.now();
+  const rel = q.release && typeof q.release === 'object' ? q.release : null;
+  if (rel && (rel.until === null || (Number.isInteger(rel.until) && rel.until > t))) return { perUser, bizDaily: null, period: 'release', releaseUntil: rel.until };
+  if (QUOTA_PERIODS.includes(q.period) && int(q.n) !== null) return { perUser, bizDaily: int(q.n), period: q.period, bizKey: periodKey(q.period, new Date(t)) };
   return { perUser, bizDaily };
 }
+const QUOTA_PERIODS = ['day', 'week', 'month', 'total'];
 
-async function reserveScan(uid, limit, bizDaily) {
+// pages = כמה דפים נספרים במונה העסק (מספר הקבצים). המונה לכל משתמש סופר קריאות, כמו היום.
+// bizKey/period – מ-bizCaps (סוג הגבלה של מנהל־על). בלי – מפתח יומי, כמו היום.
+async function reserveScan(uid, limit, bizDaily, pages, bizKey, period) {
+  const n = Number.isInteger(pages) && pages > 0 ? pages : 1;
   const db = T.tdb();
   const ref = db.doc(`${USAGE}/${uid}`);
   const bref = bizDaily == null ? null : db.doc(`${USAGE}/${BIZ_DOC}`);
   const day = israelDay();
+  const bkey = bizKey || day;
   const r = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     const bs = bref ? await tx.get(bref) : null;
@@ -161,37 +193,44 @@ async function reserveScan(uid, limit, bizDaily) {
         `עברת את מגבלת השימוש היומית: ${limit} זיהויים ביום למשתמש. אפשר למלא ידנית, או לנסות שוב מחר.`,
         { reason: 'daily-limit', limit, used });
     }
-    const bused = bs && bs.exists && bs.get('day') === day ? (bs.get('count') || 0) : 0;
-    if (bref && bused >= bizDaily) {
+    const bused = bs && bs.exists && bs.get('day') === bkey ? (bs.get('count') || 0) : 0;
+    if (bref && bused + n > bizDaily) {
+      const daily = !period || period === 'day';
+      const word = { week: 'השבועית', month: 'החודשית', total: 'הכוללת' }[period] || 'היומית';
       throw new HttpsError('resource-exhausted',
-        `העסק הגיע למגבלת הזיהויים היומית (${bizDaily}). אפשר למלא ידנית, או לנסות שוב מחר.`,
-        { reason: 'biz-daily-limit', limit: bizDaily, used: bused });
+        `העסק הגיע למגבלת הזיהויים ${word} (${bizDaily} דפים). אפשר למלא ידנית` + (daily ? ', או לנסות שוב מחר.' : '.'),
+        { reason: daily ? 'biz-daily-limit' : 'biz-period-limit', period: period || 'day', limit: bizDaily, used: bused, pages: n });
     }
     tx.set(ref, { day, count: used + 1, updatedAt: new Date().toISOString() });
-    if (bref) tx.set(bref, { day, count: bused + 1, updatedAt: new Date().toISOString() });
-    return { day, used: used + 1 };
+    if (bref) tx.set(bref, { day: bkey, count: bused + n, updatedAt: new Date().toISOString() });
+    return { day, used: used + 1, bizUsed: bref ? bused + n : null };
   });
-  // refundScan (באותה קריאה) מחזיר גם את מונה העסק, אם נספר
+  // refundScan (באותה קריאה) מחזיר גם את מונה העסק, אם נספר – באותו מפתח ובאותו מספר דפים
   const sc = T.scope();
-  if (sc) sc.scanBiz = !!bref;
+  if (sc) Object.assign(sc, { scanBiz: !!bref, scanBizKey: bkey, scanPages: n });
   return r;
 }
 
 // מחזירה למונה את הזיהוי שנספר ב-reserveScan. scanDocument קוראת לה רק כשאף בקשת זיהוי לא יצאה ל-Gemini
 // (stats.sent === 0): למשל התקציב נגמר עוד לפני, או שלא נוצר חיבור בכלל (ECONNREFUSED / ENOTFOUND / EAI_AGAIN).
 // כל ניסיון שבו בקשה יצאה – נספר, גם אם נכשל, נגמר לו הזמן או לא הגיעה תשובה (ייתכן שמשלמים עליו).
+// סריקה אחידה: ההחזר אטומי – המונה של המשתמש ומונה העסק (כל הדפים שנספרו) בטרנזקציה אחת.
 async function refundScan(uid, day) {
   const db = T.tdb();
   const sc = T.scope();
-  const refs = [db.doc(`${USAGE}/${uid}`)].concat(sc && sc.scanBiz ? [db.doc(`${USAGE}/${BIZ_DOC}`)] : []);
-  for (const ref of refs) {
-    try {
-      await db.runTransaction(async (tx) => {
-        const s = await tx.get(ref);
-        if (s.exists && s.get('day') === day && (s.get('count') || 0) > 0) tx.update(ref, { count: s.get('count') - 1 });
-      });
-    } catch (e) { /* לא קריטי */ }
-  }
+  const ref = db.doc(`${USAGE}/${uid}`);
+  const bref = sc && sc.scanBiz ? db.doc(`${USAGE}/${BIZ_DOC}`) : null;
+  const bkey = (sc && sc.scanBizKey) || day;
+  const n = (sc && sc.scanPages) || 1;
+  try {
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      const bs = bref ? await tx.get(bref) : null;
+      if (s.exists && s.get('day') === day && (s.get('count') || 0) > 0) tx.update(ref, { count: s.get('count') - 1 });
+      if (bs && bs.exists && bs.get('day') === bkey && (bs.get('count') || 0) > 0) tx.update(bref, { count: Math.max(0, bs.get('count') - n) });
+    });
+    if (sc) sc.scanBiz = false; // לא להחזיר פעמיים
+  } catch (e) { /* לא קריטי */ }
 }
 
 // ---------- Gemini (העתקה של shModels / shAIcall) ----------
@@ -335,6 +374,6 @@ function parseLikeApp(text) {
 function _resetCacheForTests() { modelCache.false = null; modelCache.true = null; lastGood.false = ''; lastGood.true = ''; }
 
 module.exports = {
-  KINDS, KIND_NAMES, isKind, neverConnected, NO_CONNECTION_CODES, PHONE_WAIT_MS, timesFor, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan, bizCaps, BIZ_DEFAULT_DAILY,
+  KINDS, KIND_NAMES, isKind, neverConnected, NO_CONNECTION_CODES, PHONE_WAIT_MS, timesFor, ALLOWED_MIME, sniff, validateScanInput, buildGeminiBody, israelDay, reserveScan, refundScan, bizCaps, BIZ_DEFAULT_DAILY, periodKey, QUOTA_PERIODS,
   callGemini, parseLikeApp, USAGE, _resetCacheForTests,
 };

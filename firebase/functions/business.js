@@ -102,6 +102,8 @@ async function accountFor(email, bizId, sup) {
   return (await auth.createUser({ email, emailVerified: false, disabled: false })).uid;
 }
 
+const NEW_BIZ_SCAN_DAILY = 20;
+
 // ---------- createBusiness ----------
 async function createBusiness(request) {
   const by = await requireSuper(request);
@@ -118,10 +120,11 @@ async function createBusiness(request) {
   await db.runTransaction(async (tx) => {
     if ((await tx.get(ref)).exists) throw new HttpsError('already-exists', 'כבר יש עסק עם המזהה הזה', { reason: 'biz-exists' });
     tx.create(ref, {
-      name, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: now, createdBy: by, features: {},
+      name, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: now, createdBy: by, features: { scan: true }, // סריקה אחידה, שלב 2: עסק חדש – זיהוי חכם דלוק
       brand: { name, logoPath: '', colors: {}, base: 'dark-gold', updatedAt: now, updatedBy: by },
     });
-    tx.set(db.doc(`b/${bizId}/private/info`), { ownerEmail, ownerPhone, adv: {} });
+    // סריקה אחידה, שלב 2: עסק חדש – 20 דפים ביום (עסקים קיימים בלי הגדרה נשארים על ברירת המחדל הקודמת, 50)
+    tx.set(db.doc(`b/${bizId}/private/info`), { ownerEmail, ownerPhone, adv: { limits: { scanDaily: NEW_BIZ_SCAN_DAILY } } });
     tx.set(auditRef(bizId), auditData(by, 'createBusiness', name));
   });
   const biz = await bizOrThrow(bizId);
@@ -232,6 +235,45 @@ async function setBusinessAdv(request) {
   await getFirestore().doc(`b/${bizId}/private/info`).set({ adv }, { mergeFields: ['adv'] });
   await audit(bizId, by, 'setBusinessAdv', Object.keys(adv).join(','));
   return { ok: true, bizId, adv };
+}
+
+// ---------- setScanQuota (סריקה אחידה, שלב 2): סוג הגבלת הזיהוי לעסק – מנהל־על בלבד ----------
+// קלט: { bizId, mode }
+//   mode 'limit'   + period 'day'|'week'|'month'|'total' + n (0..100000) – N דפים ליום / לשבוע / לחודש / קבוע (סך הכול, בלי איפוס)
+//   mode 'release' + for 'day'|'week'|'month'|'forever' – שחרור החסימה ל-24 שעות / 7 ימים / 30 ימים (ואז חוזר להגבלה הרגילה) / קבוע
+//   mode 'default' – מוחק את ההגדרה: חוזר בדיוק להתנהגות של היום (adv.limits.scanDaily או ברירת המחדל)
+// נשמר ב-b/{bizId}/private/info.scanQuota (הכללים חוסמים כתיבה מהאפליקציה). התקרה לכל משתמש (100) לא מושפעת.
+const RELEASE_MS = { day: 86400000, week: 7 * 86400000, month: 30 * 86400000, forever: null };
+async function setScanQuota(request) {
+  const by = await requireSuper(request);
+  const input = inputObject(request);
+  const bizId = bizIdOf(input);
+  const biz = await T.loadBiz(bizId);
+  if (!biz) throw new HttpsError('not-found', 'העסק לא נמצא', { reason: 'no-biz' });
+  const now = Date.now();
+  let q, note;
+  if (input.mode === 'limit') {
+    if (!['day', 'week', 'month', 'total'].includes(input.period)) throw bad('bad-quota', 'סוג הגבלה לא תקין');
+    if (!Number.isInteger(input.n) || input.n < 0 || input.n > 100000) throw bad('bad-quota', 'מספר הדפים חייב להיות מספר שלם בין 0 ל-100000');
+    q = { period: input.period, n: input.n, setAt: now, by };
+    if (input.period === 'total') q.since = now;
+    note = `limit:${input.period}:${input.n}`;
+  } else if (input.mode === 'release') {
+    if (!Object.hasOwn(RELEASE_MS, input.for)) throw bad('bad-quota', 'משך שחרור לא תקין');
+    q = { release: { until: RELEASE_MS[input.for] === null ? null : now + RELEASE_MS[input.for] }, setAt: now, by };
+    note = `release:${input.for}`;
+  } else if (input.mode === 'default') {
+    q = null; note = 'default';
+  } else throw bad('bad-quota', 'מצב לא תקין');
+  const db = getFirestore();
+  const ref = db.doc(`b/${bizId}/private/info`);
+  // הגבלה קבועה (total) חדשה מתחילה מאפס: המונה _biz מתאפס יחד עם ההגדרה, בטרנזקציה אחת
+  await db.runTransaction(async (tx) => {
+    tx.set(ref, { scanQuota: q === null ? FieldValue.delete() : q }, { merge: true });
+    if (q && q.period === 'total') tx.set(db.doc(T.bizRef(biz, 'scan_usage/_biz')), { day: 'T', count: 0, updatedAt: new Date(now).toISOString() });
+  });
+  await audit(bizId, by, 'setScanQuota', note);
+  return { ok: true, bizId, scanQuota: q };
 }
 
 // ---------- setYemotToken (חלק ה'): אסימון לכתובת של yemot-hook. נשמר רק כגיבוב; מוחזר פעם אחת ----------
@@ -499,6 +541,7 @@ exports.inviteBusinessAdmin = onCall(wrap('inviteBusinessAdmin', inviteBusinessA
 exports.setBusinessStatus = onCall({ timeoutSeconds: 300 }, wrap('setBusinessStatus', setBusinessStatus));
 exports.setBusinessFeatures = onCall(wrap('setBusinessFeatures', setBusinessFeatures));
 exports.setBusinessAdv = onCall(wrap('setBusinessAdv', setBusinessAdv));
+exports.setScanQuota = onCall(wrap('setScanQuota', setScanQuota));
 exports.setYemotToken = onCall(wrap('setYemotToken', setYemotToken));
 exports.logBusinessEntry = onCall(wrap('logBusinessEntry', logBusinessEntry));
 exports.setBusinessBrand = onCall(wrap('setBusinessBrand', setBusinessBrand));
@@ -509,5 +552,5 @@ exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  logBusinessEntry, setBusinessBrand, cleanBrand, addStaff, setBusinessRanks, setStaffPerms, cleanPerms, cleanRanks, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, BATCH_MAX, wrap,
+  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, addStaff, setBusinessRanks, setStaffPerms, cleanPerms, cleanRanks, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, BATCH_MAX, wrap,
 } });
