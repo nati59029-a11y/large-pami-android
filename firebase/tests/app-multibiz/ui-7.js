@@ -63,6 +63,24 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAEAQMAAACTPww9AAAAA1BMVEX/AAAZ4gk3AAA
     check('7 עובד בלי מתג "הזמנות": ACT.ordGo לא פותח את orders/app.html', r.role === 'worker' && r.b && r.stay && !/orders\/app\.html/.test(page.url()), r);
     await ctx.close(); }
 
+  // 9. 6ו: מסכי עובד לפי המתגים (הכנסות, משכורות, דוחות), "רואה רק את שלו", חלון ההרשאות, והזמנות בכתובת ישירה
+  { const { ctx, page } = await H.newPage(browser, www, bcfg, [], 'wv'); await page.setViewportSize({ width: 360, height: 740 }); await H.login(page, 'wa@x.co');
+    const r = await page.evaluate(() => { SY.perms = { incR: true, incW: false, expR: 'own', expW: true, sup: false, sal: false, rep: true, ord: false, trf: false }; WS = 'home'; NAV = [{ v: 'wk' }]; render(0);
+      const ks = [...document.querySelectorAll('[data-a=wvGo]')].map((b) => b.dataset.k); const e = wpE(); ACT.wvGo({ dataset: { k: 'sal' } }); const salWs = WS;
+      return { ks, e, salWs, sent: /ההוצאות ששלחתי/.test(document.body.innerText) }; });
+    check('9 עובד: מוצגים רק המסכים שהמתג שלהם פתוח (הכנסות, דוחות – לא משכורות); "רק שלו" רואה את ההוצאות ששלח', r.ks.join() === 'inc,rep' && r.e === 'own' && r.salWs === 'home' && r.sent, r);
+    await page.evaluate(() => ACT.wvGo({ dataset: { k: 'inc' } })); await H.settle(page, 1200);
+    const v = await page.evaluate(() => ({ ws: WS, t: document.body.innerText.slice(0, 400), ov: document.documentElement.scrollWidth - innerWidth }));
+    await shot(page, '05-עובד-הכנסות');
+    check('9א מסך הכנסות לעובד נפתח (קריאה בלבד), בלי גלילה רוחבית ובלי שגיאות JS', v.ws === 'wv' && /הכנסות/.test(v.t) && /קריאה בלבד/.test(v.t) && v.ov <= 1 && page.__errors.length === 0, { ov: v.ov, err: page.__errors, t: v.t.slice(0, 120) });
+    const pm = await page.evaluate(() => [pmRead({ p_expR: 'own', p_sal: '1' }).expR, pmRead({ p_expR: 'all' }).expR, pmRead({ p_expR: 'none' }).expR, pmRead({ p_expR: 'none', p_sal: '1' }).sal, /<select name="p_expR">/.test(pmBoxes({ expR: 'own' })), /value="own" selected/.test(pmBoxes({ expR: 'own' }))]);
+    check('9ב חלון ההרשאות: "רואה הוצאות" בשלוש אפשרויות בשדה אחד (own / true / false)', pm[0] === 'own' && pm[1] === true && pm[2] === false && pm[3] === true && pm[4] && pm[5], pm);
+    await page.evaluate(() => syS());
+    await page.goto(H.ORIGIN + '/orders/app.html?emu=1'); await H.settle(page, 1500);
+    const ot = await page.evaluate(() => document.body.innerText);
+    check('9ג orders/app.html בכתובת ישירה, עובד בלי מתג "הזמנות": נחסם', /אין לך הרשאה להזמנות/.test(ot), ot.slice(0, 120));
+    await ctx.close(); }
+
   // 8. 5 גדלי מסך: אין גלילה רוחבית במסכים העיקריים של מנהל במצב b
   const SIZES = [[1366, 768], [1920, 1080], [1024, 768], [768, 1024], [360, 740]];
   for (const [w, h] of SIZES) {

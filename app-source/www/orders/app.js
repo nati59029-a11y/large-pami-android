@@ -72,6 +72,8 @@ try {
 function appSession() {
   try {
     const y = JSON.parse(localStorage.getItem('lp-sync')) || {};
+    // 6ו: עובד בעסק במבנה החדש (b) בלי המתג "הזמנות" – הלשונית לא נפתחת, גם בכתובת ישירה. בלי perms = ברירת המחדל (פתוח, כמו היום)
+    if (y.role === 'worker' && y.biz && y.biz.dataRoot === 'b' && y.perms && typeof y.perms === 'object' && y.perms.ord !== true) return 'no-ord';
     return y.refresh && y.uid && (y.role === 'admin' || y.role === 'worker') ? { uid: y.uid, email: y.email || '', refresh: y.refresh, idToken: y.idToken, exp: y.exp } : null;
   } catch (e) { return null; }
 }
@@ -96,6 +98,7 @@ async function enter() {
   if (!be.ok) { main.innerHTML = `<div class="card"><p>${esc(be.msg)}</p><button class="btn g" id="bk2">חזרה לאפליקציה</button></div>`; $('#bk2').onclick = backToApp; return; }
   $('#demo').hidden = !be.demo;
   const au = appSession();
+  if (au === 'no-ord') { blocked('אין לך הרשאה להזמנות. פנה למנהל העסק.'); return; }
   if (!au) { blocked(NO_APP); return; }
   api.init(be, au);
   const u = await api.waitForUser();
