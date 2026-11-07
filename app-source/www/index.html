@@ -3676,6 +3676,7 @@ FRM.zcSend=async fm=>{if(!ZC||ZC.busy)return;const f=ZC.f,adm=isA();if(!f)return
  if((c.lvl===1||(adm&&c.lvl===2))&&!ZC.ack)return toast('סמן "אני מאשר את ההפרש"');if(!adm&&c.lvl===2&&!s_(ZC.why))return toast('כתוב הסבר להפרש');
  /* הסבר חובה רק אצל עובד (החלטת בעל העסק 2.11.2026): המנהל רואה את התיבה, אבל לא חייב */if(!adm&&c.dateWarn&&!s_(ZC.dw))return toast('תאריך הפתיחה שונה מתאריך הסגירה – תקן את התאריך או כתוב הסבר');
  if(!COQ.L){try{await coLoad(1)}catch(e){}if(!COQ.L)return toast('לא הצלחתי לטעון את ההוצאות מקופה. בדוק חיבור ונסה שוב')}
+ if(coSrvOn()){await coSrv(ZC.reg,f.d,f.tm,{id:ZC.id,od:f.oD,otm:f.oTm});if(COT.err)return toast('לא הצלחתי לקבל מהשרת את סכום ההוצאות מקופה: '+COT.err+'. נסה שוב')}
  const co=coChk(ZC.reg,f.d,f.tm,f.cout,{id:ZC.id,inc:zcIncIds(),od:f.oD,otm:f.oTm});if(!adm&&!co.ok&&!s_(ZC.cw)){zcChkR();return toast('הוצאת המזומן לא תואמת להוצאות מקופה: הוסף הוצאה, או כתוב איפה ההפרש ולמה')}
  if(adm&&!fm._dupOk){const dp=zcDup(ZC.reg,f.d,s_(f.no));if(dp)return ask('כבר נרשמה סגירה של '+ZREG[ZC.reg].n+' מתאריך '+dfmt(f.d)+' עם דוח '+s_(f.no)+'. להכניס בכל זאת?',()=>{fm._dupOk=1;FRM.zcSend(fm)},'הכנס בכל זאת')}
  if(adm&&!cat(ZC.reg))return toast('הקטגוריה של הקופה לא קיימת');
@@ -3753,7 +3754,7 @@ function coParse(d){const id=idOf(d);if(!idOk(id))return null;const reg=gv(d,'re
  const x={id,uid:gv(d,'uid'),by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),reg,d:coDate(gv(d,'d')),tm:zcTime(gv(d,'tm')),a:rnd(a),why:gv(d,'why').slice(0,300),dep:gv(d,'dep')==='1'?'1':'',src:gv(d,'src').slice(0,120),zc:gv(d,'zc'),dp:gv(d,'dp')};
  if(x.zc&&!idOk(x.zc))x.zc='?';if(x.dp&&!idOk(x.dp))x.dp='?';return x}
 /* 6ו: עובד עם "רואה רק את שלו" – השאילתה מסוננת לפי uid == שלו (החוקים דורשים זאת), ושאר התנאים נבדקים במכשיר (בלי אינדקס מורכב) */const coMt=(w,x)=>w.compositeFilter?w.compositeFilter.filters.every(f=>coMt(f,x)):(f=>{const y=String(x[f.field.fieldPath]==null?'':x[f.field.fieldPath]),v=f.value.stringValue;return f.op==='EQUAL'?y===v:f.op==='GREATER_THAN_OR_EQUAL'?y>=v:false})(w.fieldFilter);
-async function coQ(where,lim){if(isW()&&wpE()==='own'){const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cashout'}],where:coEq('uid',SY.uid),limit:2000}})});return(r||[]).filter(x=>x.document).map(x=>coParse(x.document)).filter(x=>x&&coMt(where,x)).slice(0,lim||500)}const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cashout'}],where,limit:lim||500}})});return(r||[]).filter(x=>x.document).map(x=>coParse(x.document)).filter(Boolean)}
+async function coQ(where,lim){/* 6ז: "לא רואה" – לא שואלים (החוקים יחסמו); הסכום לסגירה מגיע מהשרת (cashoutTotal) */if(isW()&&wpE()==='none')return[];if(isW()&&wpE()==='own'){const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cashout'}],where:coEq('uid',SY.uid),limit:2000}})});return(r||[]).filter(x=>x.document).map(x=>coParse(x.document)).filter(x=>x&&coMt(where,x)).slice(0,lim||500)}const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cashout'}],where,limit:lim||500}})});return(r||[]).filter(x=>x.document).map(x=>coParse(x.document)).filter(Boolean)}
 const coErrT=e=>e.offline?e.message:(e.code===403?'אין הרשאה להוצאות מקופה (ייתכן שהכללים בשרת עוד לא עודכנו)':'הטעינה נכשלה: '+e.message);
 /* הוצאות מקופה שעוד לא שויכו לסגירה (לבדיקת הסגירה – של כל הצוות) */
 /* הוצאות מקופה לבדיקת הסגירה: כל מה שמ-62 הימים האחרונים (חלון התאריכים), ועוד כל מה שעוד לא שויך (לסגירה הראשונה, כשאין "סגירה אחרונה").
@@ -3839,12 +3840,23 @@ function zcPrev(reg,d,tm,id){const k=zlKey({d,tm});
 function coIn(x,prev,d,tm){if(!x.d||!d||x.d>d)return 'out';if(x.d===d&&x.tm&&tm&&x.tm>tm)return 'out';
  if(!prev)return x.zc?'out':'in';if(x.d<prev.d)return 'out';if(x.d>prev.d)return 'in';
  if(x.tm&&prev.tm)return x.tm>prev.tm?'in':'out';return 'unc'}
+/* 6ז (עדכון חוזה 17): עובד שרואה רק את ההוצאות שלו, או לא רואה – לא יכול לסכום את ההוצאות של אחרים. הסכום של כל ההוצאות מקופה בחלון מגיע מהשרת
+ (cashoutTotal מחזיר רק מספר, בלי רשומות ובלי שמות). לסכום מתווספות רק הוצאות שלו שסימן כ"לא ברור – שייך לסגירה הזו". הרשימה שלו נשארת רק שלו */
+var COT={k:'',s:null,b:'',p:null,err:'',ek:''};
+ACT.coSrvRe=()=>{COT.ek='';if(ZC&&ZC.f)coSrv(ZC.reg,ZC.f.d,ZC.f.tm,{id:ZC.id,od:ZC.f.oD,otm:ZC.f.oTm})};
+const coSrvOn=()=>isW()&&bzB()&&wpE()!=='all';
+const coSrvA=(reg,d,tm,cur)=>({reg,d,tm:zcTime(tm),id:idOk(cur.id)?cur.id:'',od:coDate(cur.od),otm:zcTime(cur.otm)});
+const coSrvK=a=>[a.reg,a.d,a.tm,a.id,a.od,a.otm].join('|');
+function coSrv(reg,d,tm,cur,auto){const a=coSrvA(reg,d,tm,cur||{}),k=coSrvK(a);if(COT.k===k&&COT.s!=null)return Promise.resolve();if(COT.b===k)return COT.p;if(auto&&COT.ek===k)return Promise.resolve();
+ COT.b=k;COT.err='';COT.ek='';COT.p=(async()=>{try{const r=await fnCall('cashoutTotal',a);if(!r||typeof r.s!=='number'||!isFinite(r.s))throw new Error('תשובה לא תקינה מהשרת');COT.k=k;COT.s=r.s}catch(e){COT.err=e.message||'שגיאה';COT.ek=k}finally{COT.b=''}try{zcChkR();zcRe()}catch(e){}})();return COT.p}
 function coChk(reg,d,tm,cout,cur){cur=cur||{};const z=rnd(Math.abs(zcN(cout)||0));tm=zcTime(tm);if(!COQ.L)return{z,s:0,L:[],U:[],bad:[],inc:[],ok:false,known:0,diff:z,prev:null};
  /* החלון (החלטת בעל העסק): מהפתיחה שצורפה לסגירה הקודמת (או מזמן הסגירה הקודמת, כשאין לפתיחה שעה) ועד הפתיחה שצורפה לסגירה הזו (או זמן הסגירה) */
  const prev=zcB(zcPrev(reg,d,tm,cur.id)),E=zcB({d,tm,od:cur.od,otm:cur.otm}),inc=new Set(cur.inc||[]),srt=(a,b)=>a.d.localeCompare(b.d)||(a.tm||'').localeCompare(b.tm||'')||a.t-b.t;
  const R=COQ.L.filter(x=>x.reg===reg),A=R.filter(x=>coIn(x,prev,E.d,E.tm)==='in'),U=R.filter(x=>coIn(x,prev,E.d,E.tm)==='unc'&&(!x.zc||x.zc===cur.id)).sort(srt);
  const C=A.concat(U.filter(x=>inc.has(x.id))).sort(srt),L=C.filter(coVer),bad=C.filter(x=>!coVer(x));
- const s=rnd(sum(L,x=>x.a)),diff=rnd(Math.abs(z-s));return{z,s,L,U,bad,inc:U.filter(x=>inc.has(x.id)).map(x=>x.id),ok:diff<0.01&&!bad.length,known:1,diff,prev,end:E}}
+ let s=rnd(sum(L,x=>x.a)),known=1;
+ if(coSrvOn()&&d){const k=coSrvK(coSrvA(reg,d,tm,cur));if(COT.k===k&&COT.s!=null)s=rnd(COT.s+sum(U.filter(x=>inc.has(x.id)),x=>x.a));else{known=0;coSrv(reg,d,tm,cur,1)}}
+ const diff=rnd(Math.abs(z-s));return{z,s,L,U,bad,inc:U.filter(x=>inc.has(x.id)).map(x=>x.id),ok:known&&diff<0.01&&!bad.length,known,diff,prev,end:E,srv:coSrvOn()}}
 const zcIncIds=()=>Object.keys((ZC&&ZC.inc)||{}).filter(k=>ZC.inc[k]);
 /* שליחת סגירה + zlast באותו commit. סגירה ישנה (לא מתקדמת בזמן) – בלי zlast. כבר נשלחה (409) – e.sent */
 async function zcCommit(id,fields,reg,d,tm,op){op=op||{};const cw={update:{name:docName('closings/'+id),fields},currentDocument:{exists:false}};
@@ -3866,7 +3878,7 @@ function zcCoH(){if(!ZC||!ZC.f||!zcRegOk(ZC.reg))return '';
  if(!COQ.L)return `<div class="card" style="margin:10px 0"><b>הוצאת מזומן מהקופה</b><p class="note" style="margin:4px 0 0;${COQ.err?'color:var(--bad)':''}">${esc(COQ.err||'טוען הוצאות מקופה…')}</p>${COQ.err?'<button type="button" class="btn g s" data-a="coReload">נסה שוב</button>':''}</div>`;
  const co=coChk(ZC.reg,ZC.f.d,ZC.f.tm,ZC.f.cout,{id:ZC.id,inc:zcIncIds(),od:ZC.f.oD,otm:ZC.f.oTm}),pend=isW()?obGet().filter(x=>x.data&&x.data.reg&&x.data.creg===ZC.reg).length:0;
  return `<div class="card" style="margin:10px 0" id="zcCo"><b>הוצאת מזומן מהקופה</b>
- <p class="note" style="margin:4px 0">בדוח Z: <b>${ils(co.z)}</b> · הוצאות מקופה ${co.prev?(co.prev.o?'מאז פתיחת הקופה (':'מאז הסגירה הקודמת (')+esc(dfmt(co.prev.d))+(co.prev.tm?' '+esc(co.prev.tm):'')+')':'שעוד לא שויכו'} ועד ${co.end&&co.end.o?'פתיחת הקופה שאחרי הסגירה הזו ('+esc(dfmt(co.end.d))+' '+esc(co.end.tm)+')':'הסגירה הזו'}: <b>${ils(co.s)}</b> <span class="tag ${co.ok?'t3':'t4'}">${co.ok?'תואם':'לא תואם · הפרש '+ils(co.diff)}</span></p>${coListH(co)}
+ <p class="note" style="margin:4px 0">בדוח Z: <b>${ils(co.z)}</b> · הוצאות מקופה ${co.prev?(co.prev.o?'מאז פתיחת הקופה (':'מאז הסגירה הקודמת (')+esc(dfmt(co.prev.d))+(co.prev.tm?' '+esc(co.prev.tm):'')+')':'שעוד לא שויכו'} ועד ${co.end&&co.end.o?'פתיחת הקופה שאחרי הסגירה הזו ('+esc(dfmt(co.end.d))+' '+esc(co.end.tm)+')':'הסגירה הזו'}: <b>${ils(co.s)}</b> <span class="tag ${co.ok?'t3':'t4'}">${co.srv&&!co.known?(COT.err?'לא התקבל סכום מהשרת':'מחשב בשרת…'):co.ok?'תואם':'לא תואם · הפרש '+ils(co.diff)}</span>${co.srv&&!co.known&&COT.err?' <button type="button" class="btn g s" data-a="coSrvRe">נסה שוב</button>':''}${co.srv?'<br><small>הסכום כולל את כל ההוצאות מהקופה (גם של אחרים), כסכום אחד מהשרת. ברשימה מופיעות רק ההוצאות שלך.</small>':''}</p>${coListH(co)}
  ${co.U.length?`<div style="margin:6px 0"><b style="font-size:.95rem">לא ברור לאיזו סגירה (מיום הסגירה הקודמת, בלי שעה)</b>${co.U.map(x=>`<label class="row" style="gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer"><input type="checkbox" data-c="zcInc" data-id="${esc(x.id)}" ${ZC.inc&&ZC.inc[x.id]?'checked':''} style="width:22px;height:22px;flex:none"><span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(dfmt(x.d))} · ${esc(x.by||'—')} · ${esc(x.why)}</span><b dir="ltr" style="flex:none">${ils(x.a)}</b></label>`).join('')}<p class="note" style="margin:0">סמן אם הפתק שייך לסגירה הזו.</p></div>`:''}
  ${pend?`<p class="note" style="color:var(--bad)">${pend} הוצאות מקופה עוד לא נשלחו (אין חיבור). הן ייכנסו לבדיקה אחרי השליחה.</p>`:''}
  ${co.ok?'':`<button type="button" class="btn g" style="margin:6px 0;width:100%" data-a="coAdd">＋ הוספת הוצאה מקופה</button><label class="f"><span>אין פתק – איפה ההפרש ולמה (חובה אם לא מוסיפים הוצאה)</span><textarea name="cw" maxlength="500" data-i="zcCw">${esc(ZC.cw)}</textarea></label>${isA()?'<p class="note" style="margin:0">ההסבר לא חובה למנהל.</p>':'<p class="note" style="margin:0">עם ההסבר הסגירה תעבור לאישור המנהל.</p>'}`}</div>`}

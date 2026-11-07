@@ -8,6 +8,9 @@
 // רץ מול האמולטור, חלק מ-test:multibiz.
 
 const { describe, it, before, after, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
+const fsm = require('node:fs');
+const path = require('node:path');
 const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
@@ -54,7 +57,7 @@ async function seed() {
 const can = (u, k, z) => assertSucceeds(db(u).doc(`b/${z || A}/wv/${k}_${M}`).get());
 const cannot = (u, k, z) => assertFails(db(u).doc(`b/${z || A}/wv/${k}_${M}`).get());
 
-before(async () => { env = await H.getEnv(); });
+before(async () => { env = await H.getEnv(); require('../functions/index.js'); });
 after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* */ } });
 beforeEach(seed);
 
@@ -138,5 +141,109 @@ describe('6ז – כתיבה של המנהל', () => {
   it('מנהל עסק א לא כותב ולא קורא את הדוח של עסק ב', async () => {
     await assertFails(db(MGR).doc(`b/${B}/wv/rpe_${M}`).get());
     await assertFails(db(MGR).doc(`b/${B}/wv/rpe_${M}`).set(body()));
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// חלק ד (החלטת המשתמש 7.11): cashoutTotal – סכום ההוצאות מקופה לסגירה, מחושב בשרת. מחזיר רק { s, diff? }.
+// ---------------------------------------------------------------------------------------------
+const FN_EMU = JSON.parse(fsm.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).emulators.functions;
+const fnUrl = (name) => `http://${process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`}/${H.PROJECT_ID}/us-central1/${name}`;
+async function call(uid, data) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (uid) headers.Authorization = 'Bearer ' + H.mockToken(uid);
+  const r = await fetch(fnUrl('cashoutTotal'), { method: 'POST', headers, body: JSON.stringify({ data: data === undefined ? {} : data }) });
+  const text = await r.text();
+  let json = null; try { json = JSON.parse(text); } catch (e) { /* */ }
+  return { status: json && json.error ? json.error.status : (r.ok ? 'OK' : 'HTTP_' + r.status), reason: json && json.error && json.error.details && json.error.details.reason, result: json && json.result, text };
+}
+const C_OWN = 'c_own', C_NONE = 'c_none', C_NOINC = 'c_noinc', C_ALL = 'c_all', C_OTHB = 'c_othb', C_OFF = 'c_off';
+const REQ = { reg: 'i_yh', d: '2026-11-05', tm: '21:00', z: 300 };
+// הוצאות מקופה (של עובדים שונים). בחלון של i_yh מ-4.11 20:00 עד 5.11 21:00: 100 (אחר) + 50 (אחר) + 30 (העובד עצמו) = 180
+const CO = [
+  ['k1', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: '2026-11-05', tm: '10:00', a: 100, why: 'סיבה-סודית-1' }],
+  ['k2', { uid: 'other2', by: 'יוסי סודי', reg: 'i_yh', d: '2026-11-04', tm: '22:00', a: 50, why: 'סיבה-סודית-2' }],
+  ['k3', { uid: C_OWN, by: 'אני', reg: 'i_yh', d: '2026-11-05', tm: '', a: 30, why: 'שלי' }],
+  ['k4', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: '2026-11-04', tm: '19:00', a: 1000, why: 'לפני החלון' }],
+  ['k5', { uid: 'someone', by: 'דנה סודית', reg: 'i_nl', d: '2026-11-05', tm: '10:00', a: 2000, why: 'קופה אחרת' }],
+  ['k6', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: '2026-11-05', tm: '22:00', a: 4000, why: 'אחרי הסגירה' }],
+  ['k7', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: '2026-11-04', tm: '', a: 8000, why: 'לא ברור' }],
+];
+async function seedCash() {
+  await prep(async (d) => {
+    const b = d.batch();
+    for (const z of [A, B]) b.set(d.doc('b/' + z), { name: z, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: { cashClose: true } });
+    b.set(d.doc('b/biz-off'), { name: 'off', status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: {} });
+    const emp = (u, perms, z, extra) => {
+      b.set(d.doc(`b/${z || A}/staff/${u}`), Object.assign({ name: u, role: 'employee', active: true, pushTokens: [], rank: '', perms: Object.assign({}, NONE, perms) }, extra || {}));
+      b.set(d.doc('users/' + u), { bizId: z || A, role: 'worker', active: true, bizStatus: 'active', email: u + '@example.invalid', createdAt: 1 });
+    };
+    emp(C_OWN, { expR: 'own', incW: true });
+    emp(C_NONE, { incW: true });
+    emp(C_NOINC, { expR: true });
+    emp(C_ALL, { expR: true, incW: true });
+    emp(C_OTHB, { expR: true, incW: true }, B);
+    emp(C_OFF, { incW: true }, 'biz-off');
+    b.set(d.doc('users/' + MGR), { bizId: A, role: 'admin', active: true, bizStatus: 'active', email: MGR + '@example.invalid', createdAt: 1 });
+    b.set(d.doc(`b/${A}/zlast/i_yh`), { d: '2026-11-04', tm: '20:00', id: 'zprev', uid: MGR, t: 1, od: '', otm: '' });
+    for (const [id, x] of CO) b.set(d.doc(`b/${A}/cashout/${id}`), Object.assign({ t: 1, dep: '', src: id, zc: '', dp: '' }, x));
+    await b.commit();
+  });
+}
+const SECRETS = ['דנה', 'יוסי', 'סודית', 'סודי', 'someone', 'other2', 'k1', 'k2', 'k3', 'סיבה', '10:00', '22:00'];
+
+describe('6ז חלק ד – cashoutTotal: סכום ההוצאות מקופה בשרת', () => {
+  beforeEach(seedCash);
+  it('עובד "רק שלו" מקבל את הסכום של כל ההוצאות בחלון (כולל של אחרים), וההפרש מול Z', async () => {
+    const r = await call(C_OWN, REQ);
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual(r.result, { s: 180, diff: 120 });
+  });
+  it('עובד "לא רואה" מקבל אותו סכום; בלי z – רק s', async () => {
+    const r = await call(C_NONE, { reg: 'i_yh', d: '2026-11-05', tm: '21:00' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual(r.result, { s: 180 });
+  });
+  it('התגובה לא חושפת רשומות, שמות, סיבות, מזהים או שעות – רק המפתחות s ו-diff, ושני מספרים', async () => {
+    const r = await call(C_OWN, REQ);
+    assert.deepEqual(Object.keys(r.result).sort(), ['diff', 's']);
+    for (const v of Object.values(r.result)) assert.equal(typeof v, 'number');
+    for (const w of SECRETS) assert.ok(!r.text.includes(w), 'התגובה מכילה: ' + w);
+  });
+  it('העובד עדיין לא יכול לקרוא את ההוצאות של אחרים ישירות (התצוגה שלו נשמרת)', async () => {
+    await assertFails(db(C_OWN).doc(`b/${A}/cashout/k1`).get());
+    await assertFails(db(C_NONE).doc(`b/${A}/cashout/k3`).get());
+    await assertFails(db(C_OWN).collection(`b/${A}/cashout`).get());
+  });
+  it('מנהל העסק ומנהל־על (עם bizId) – מותר, אותו סכום', async () => {
+    const m = await call(MGR, REQ); assert.equal(m.status, 'OK', m.text); assert.equal(m.result.s, 180);
+    const s = await call(SUPER, Object.assign({ bizId: A }, REQ)); assert.equal(s.status, 'OK', s.text); assert.equal(s.result.s, 180);
+  });
+  it('עקיפה: עובד בלי "מזין הכנסות" (סגירת קופה) – נחסם', async () => {
+    const r = await call(C_NOINC, REQ); assert.equal(r.status, 'PERMISSION_DENIED'); assert.equal(r.reason, 'no-perm');
+  });
+  it('עקיפה: עובד מעסק אחר מבקש את עסק א – נחסם; בלי bizId מקבל רק את העסק שלו (0)', async () => {
+    const r = await call(C_OTHB, Object.assign({ bizId: A }, REQ)); assert.equal(r.status, 'PERMISSION_DENIED'); assert.equal(r.reason, 'foreign-biz');
+    const o = await call(C_OTHB, REQ); assert.equal(o.status, 'OK', o.text); assert.equal(o.result.s, 0);
+  });
+  it('עקיפה: לא מחובר / עובד לא פעיל / עסק מושהה / תוספת כבויה – נחסם', async () => {
+    assert.equal((await call(null, REQ)).status, 'UNAUTHENTICATED');
+    await prep((d) => d.doc(`b/${A}/staff/${C_ALL}`).update({ active: false }));
+    assert.equal((await call(C_ALL, REQ)).status, 'PERMISSION_DENIED');
+    await prep((d) => d.doc('b/' + A).update({ status: 'suspended' }));
+    const s = await call(C_OWN, REQ); assert.equal(s.status, 'PERMISSION_DENIED'); assert.equal(s.reason, 'biz-suspended');
+    const f = await call(C_OFF, REQ); assert.equal(f.status, 'FAILED_PRECONDITION'); assert.equal(f.reason, 'feature-off');
+  });
+  it('קלט לא תקין (קופה, תאריך, שעה, z, מזהה) – נדחה', async () => {
+    for (const [x, why] of [[{ reg: 'x' }, 'bad-reg'], [{ d: '5.11.2026' }, 'bad-date'], [{ tm: '25:00' }, 'bad-time'], [{ z: 'abc' }, 'bad-z'], [{ id: '../x' }, 'bad-id']]) {
+      const r = await call(C_OWN, Object.assign({}, REQ, x));
+      assert.equal(r.status, 'INVALID_ARGUMENT', JSON.stringify(x)); assert.equal(r.reason, why);
+    }
+  });
+  it('בלי סגירה קודמת: כל מה שעוד לא שויך (zc ריק) עד תאריך הסגירה', async () => {
+    await prep((d) => d.doc(`b/${A}/zlast/i_yh`).delete());
+    const r = await call(C_OWN, REQ);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.s, 100 + 50 + 30 + 1000 + 8000); // k4 ו-k7 נכנסים כשאין סגירה קודמת; k5 קופה אחרת; k6 אחרי
   });
 });

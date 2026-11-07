@@ -146,6 +146,9 @@ exports.getBackupKey = onCall({ secrets: [BACKUP_MASTER_KEY] }, T.scoped(async (
   return { key: key.toString('base64'), alg: 'AES-GCM', bits: 256, version: KEY_VERSION };
 }));
 
+// 6ז (עדכון חוזה 17): cashoutTotal – סכום ההוצאות מקופה לסגירה, בשרת (לעובד שלא רואה את כל ההוצאות). מחזיר רק { s, diff? }.
+exports.cashoutTotal = onCall(T.scoped(require('./lib/cashout-total').cashoutTotal));
+
 // שליחת מבצעים לקו ימות המשיח (שלוחה 2): sendPromoToLine, expirePromosOnLine
 Object.assign(exports, require('./yemot'));
 
