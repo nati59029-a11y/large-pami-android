@@ -170,6 +170,50 @@ describe('6ח – החלון נגמר ברגע הסגירה, והוצאה מלפ
   });
 });
 
+// 6ח סבב 2: תור לא מקוון (pushItem/flush) וטופס ההוצאה של המנהל (coOldTx), מתוך index.html, ב-vm
+describe('6ח – תור לא מקוון והטופס של המנהל', () => {
+  const take = (L, p) => { const i = L.findIndex((l) => l.startsWith(p)); if (i < 0) throw new Error('לא נמצא: ' + p); let j = i + 1; while (j < L.length && L[j].startsWith(' ')) j++; return L.slice(i, j).join('\n'); };
+  function loadQ() {
+    const L = appSourceLines();
+    const pre = 'var MEM={},REQ=[],TOASTS=[],p2=n=>String(n).padStart(2,"0"),ZL={},SY={uid:"w",role:"worker",refresh:1,email:"w@x"},S={zc:[]},ZQP=[],OB="ob",ADM=false,BZB=true;' +
+      'const localStorage={getItem:k=>MEM[k]||null,setItem:(k,v)=>{MEM[k]=v}},toast=m=>TOASTS.push(m),syS=()=>{},isW=()=>!ADM,isA=()=>ADM,bzB=()=>BZB,bzF=()=>true,' +
+      'zcRegOk=r=>r==="i_yh"||r==="i_nl",s_=v=>String(v==null?"":v).trim(),dfmt=d=>d,sv=v=>({stringValue:String(v)}),iv=v=>({integerValue:String(v)}),fget=async()=>"",' +
+      'fsx=async(p,o)=>{REQ.push([(o&&o.method)||"GET",p]);if(p.startsWith("/zlast/")){if(!ZLAST){const e=new Error("nf");e.code=404;throw e}return ZLAST}return{}},' +
+      'coPush=async it=>{REQ.push(["COPUSH",it.id])},ymd=d=>d.toISOString().slice(0,10),gv=(d,k)=>(d&&d.f&&d.f[k])||"",idOk=s=>typeof s==="string"&&/^[A-Za-z0-9_-]{1,80}$/.test(s);var ZLAST=null;\n';
+    const parts = ['const zcTime=', 'const coDate=', 'function mk(', 'const zlKey=', 'function zlParse(', 'function zcB(', 'function zcPrev(', 'function coOldX(', 'const coOldMsg=', 'async function coOldB(', 'function coOldTx(', 'async function coOldChk(', 'const obGet=', 'const obSet=', 'const CH=', 'const packPages=', 'async function pushItem(', 'async function flush('];
+    const post = '\n;({SY,MEM,REQ,TOASTS,S,obGet,obSet,flush,coOldTx,setZ:z=>{ZLAST=z},setAdm:v=>{ADM=v}})';
+    return vm.runInNewContext(pre + parts.map((p) => take(L, p)).join('\n') + post, {}, { filename: 'index.html (תור)' });
+  }
+  const Z = { f: { d: '2026-10-20', tm: '20:00', id: 'zprev', od: '', otm: '' } };
+  const item = (id, date, ctm) => ({ id, created: 'x', nopic: 1, data: { amt: 50, date, note: 'חלב', reg: true, creg: 'i_yh', ctm } });
+  it('הוצאה מקופה ישנה בתור: ההוצאה (inbox) נשלחת, הרישום לבדיקת הסגירה מדולג, הודעה, והתור מתרוקן', async () => {
+    const M = loadQ(); M.setZ(Z); M.obSet([item('wold', '2026-10-19', '10:00')]);
+    await M.flush();
+    assert.equal(M.obGet().length, 0, M.SY.err);
+    assert.ok(M.REQ.some(([m, p]) => m === 'POST' && p.startsWith('/inbox?documentId=wold')), 'ההוצאה לא נשלחה');
+    assert.ok(!M.REQ.some(([m]) => m === 'COPUSH'), 'לא היה צריך לרשום לבדיקת הסגירה');
+    assert.ok(M.TOASTS.some((t) => t.includes('לא תיספר בבדיקת הסגירה')), M.TOASTS.join(' | '));
+  });
+  it('הוצאה רגילה בתור: נשלחת ונרשמת לבדיקת הסגירה, בלי הודעה', async () => {
+    const M = loadQ(); M.setZ(Z); M.obSet([item('wnew', '2026-10-21', '09:00')]);
+    await M.flush();
+    assert.equal(M.obGet().length, 0, M.SY.err);
+    assert.ok(M.REQ.some(([m, p]) => m === 'COPUSH' && p === 'wnew'));
+    assert.equal(M.TOASTS.length, 0);
+  });
+  it('מנהל, טופס ההוצאה: חדשה ישנה – שגיאה; עריכה בלי שינוי תאריך/קופה/שעה – מותרת; שינוי תאריך לישן – שגיאה; לא מקופה – מותר', () => {
+    const M = loadQ(); M.setAdm(true); M.S.zc = [{ reg: 'i_yh', id: 'z1', d: '2026-10-20', tm: '20:00' }];
+    const f = (o) => Object.assign({ co: '1', creg: 'i_yh', date: '2026-10-19', cotm: '' }, o);
+    assert.ok(M.coOldTx(f(), null).includes('לפני הפתיחה האחרונה'));
+    assert.equal(M.coOldTx(f({ date: '2026-10-21' }), null), '');
+    const t0 = { date: '2026-10-19', co: { reg: 'i_yh', tm: '' } };
+    assert.equal(M.coOldTx(f(), t0), '');
+    assert.ok(M.coOldTx(f({ date: '2026-10-18' }), t0));
+    assert.ok(M.coOldTx(f(), { date: '2026-10-19', co: { reg: 'i_nl', tm: '' } }));
+    assert.equal(M.coOldTx(f({ co: '' }), null), '');
+  });
+});
+
 // 6ז (החלטת המשתמש 7.11, 20:45): "מי הזין" (t.eu) – save() ו-wvWant (rpo_ לכל עובד), מתוך index.html, ב-vm
 describe('6ז – מי הזין כל הוצאה (eu) והדוח "רק שלו"', () => {
   function loadEu() {

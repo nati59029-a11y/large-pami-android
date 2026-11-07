@@ -381,6 +381,11 @@ describe('6ח – הוצאה מקופה מלפני הפתיחה האחרונה �
     await assertFails(tryCo({ d: DT, tm: '07:59' }));
     await assertSucceeds(tryCo({ d: DT, tm: '08:01' }));
   });
+  it('פתיחה שצורפה יותר מיום אחרי הסגירה – לא נחשבת; הגבול חוזר לזמן הסגירה', async () => {
+    await prep((d) => d.doc(`b/${A}/zlast/i_yh`).set({ d: D2, tm: '20:00', id: 'zprev', uid: MGR, t: 1, od: DT, otm: '08:00' }));
+    await assertSucceeds(tryCo({ d: DY, tm: '09:00' }));
+    await assertFails(tryCo({ d: D2, tm: '19:00' }));
+  });
   it('אין סגירה קודמת לקופה – כל תאריך מותר; קופה אחרת לא מושפעת', async () => {
     await assertSucceeds(tryCo({ d: D2, reg: 'i_nl' }));
     await prep((d) => d.doc(`b/${A}/zlast/i_yh`).delete());

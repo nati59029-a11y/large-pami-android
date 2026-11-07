@@ -534,7 +534,7 @@ function readTx(f,c,sub,t0){
  if(b==='emp'&&!f.m)errs.push('בחר מזומן או העברה');
  if((b==='sup'||b==='fixed')&&!pMonth(f.plan))errs.push('חסר חודש לתשלום');
  if(b==='sup'&&!s_(f.inv)&&!f.dn&&!(t0&&!t0.inv&&!t0.dn))errs.push('חסר מספר חשבונית (או סמן תעודת משלוח)');
- coErr(f,c,amt,errs);if(f.co&&zcRegOk(f.creg)&&(!t0||!t0.co||t0.date!==f.date||t0.co.reg!==f.creg||(t0.co.tm||'')!==zcTime(f.cotm))){const b=zcB(zcPrev(f.creg,'9999-12-31','99:99',''));if(coOldX({d:f.date,tm:zcTime(f.cotm)},b))errs.push(coOldMsg(b))}if(errs.length)return{errs};
+ coErr(f,c,amt,errs);{const m=coOldTx(f,t0);if(m)errs.push(m)}if(errs.length)return{errs};
  const t=t0?{...t0}:{id:uid(),t:c.kind,cat:c.id,sub:sub||null,pays:[]};
  t.date=f.date;t.amt=rnd(amt);t.note=s_(f.note);coSet(t,f,c);
  if(b==='free')t.desc=s_(f.desc);
@@ -1690,16 +1690,16 @@ const obGet=()=>{try{return JSON.parse(localStorage.getItem(OB))||[]}catch(e){re
 const obSet=a=>{try{localStorage.setItem(OB,JSON.stringify(a))}catch(e){toast('אין מקום לשמור במכשיר')}};
 const CH=700000;
 const packPages=a=>a.length===1?a[0]:'PAGES:'+JSON.stringify(a);
-async function pushItem(it){/* 6ח: הוצאה מקופה מלפני הפתיחה האחרונה – לא נשלחת (השרת היה דוחה את המראה, וההוצאה לא הייתה נספרת בשום סגירה) */
- if(it.data&&it.data.reg&&!it.data.repl&&bzF('cashClose')){const m=await coOldChk(it.data.creg,it.data.date,it.data.ctm);if(m){const e=new Error(m);e.old=1;throw e}}
+async function pushItem(it){/* 6ח סבב 2: הוצאה מקופה מלפני הפתיחה האחרונה – ההוצאה והצילום נשלחים למנהל כרגיל; רק הרישום לבדיקת הסגירה (cashout) מדולג, עם הודעה */
+ let old='';if(it.data&&it.data.reg&&!it.data.repl&&bzF('cashClose'))old=await coOldChk(it.data.creg,it.data.date,it.data.ctm);
  let file='';if(it.fileId){try{file=await fget(it.fileId)||''}catch(e){}}
  if(!file&&!it.nopic)throw new Error('הצילום חסר');
  const n=Math.max(1,Math.ceil(file.length/CH));if(n>12)throw new Error('הצילומים גדולים מדי');
  for(let k=0;k<n;k++){try{await fsx('/chunks?documentId='+encodeURIComponent(it.id+'_'+k),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),data:sv(file.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}
  const body={fields:{owner:sv(SY.uid),by:sv((SY.email||'').split('@')[0]),status:sv('new'),created:sv(it.created),data:sv(JSON.stringify(it.data)),parts:sv(n),t:iv(Date.now())}};
- try{await fsx('/inbox?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify(body)})}catch(e){if(e.code!==409)throw e}if(!(it.data&&it.data.repl))await coPush(it)}
+ try{await fsx('/inbox?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify(body)})}catch(e){if(e.code!==409)throw e}if(old){toast(old+' ההוצאה נשלחה למנהל, אבל לא תיספר בבדיקת הסגירה.');return}if(!(it.data&&it.data.repl))await coPush(it)}
 async function flush(){if(flush.b||!isW())return;flush.b=1;SY.err='';
- try{for(const it of obGet()){try{await pushItem(it)}catch(e){if(e.old){obSet(obGet().filter(x=>x.id!==it.id));toast(e.message+' ההוצאה לא נשלחה.');continue}SY.err=e.offline?'':e.message;break}obSet(obGet().filter(x=>x.id!==it.id))}}finally{flush.b=0;syS()}}
+ try{for(const it of obGet()){try{await pushItem(it)}catch(e){SY.err=e.offline?'':e.message;break}obSet(obGet().filter(x=>x.id!==it.id))}}finally{flush.b=0;syS()}}
 /* ---- קונפיג קטגוריות (מנהל מפרסם, עובד מקבל) ---- */
 async function pubCfg(){const cats=S.cats.filter(c=>c.kind==='exp'&&!c.hid&&!c.off).map(c=>({id:c.id,name:c.name,beh:c.beh,subs:subsOf(c.id).map(s=>({id:s.id,name:s.name}))}));
  await fsx('/cfg/main',{method:'PATCH',body:JSON.stringify({fields:{data:sv(JSON.stringify({cats,th:S.theme||'paper',at:new Date().toISOString()}))}})});return cats.length}
@@ -3853,6 +3853,8 @@ const coOldMsg=b=>'אי אפשר לרשום הוצאה מקופה מלפני ה�
 async function coOldB(reg){if(!zcRegOk(reg))return null;if(isA())return zcB(zcPrev(reg,'9999-12-31','99:99',''));
  /* legacy (שורש): בלי קריאה נוספת (רצף הבקשות כמו בגרסה המותקנת) – רק מה שכבר נטען; החוקים בשרת עדיין דוחים */if(!bzB())return ZL[reg]?zcB(ZL[reg]):null;
  try{const z=zlParse(await fsx('/zlast/'+reg));ZL[reg]=z;return zcB(z)}catch(e){if(e.code===404){ZL[reg]=null;return null}return ZL[reg]?zcB(ZL[reg]):null}}
+/* מנהל, טופס ההוצאה: בודקים רק בהוצאה חדשה מקופה, או כשהתאריך / הקופה / השעה השתנו (עריכת סכום בהוצאה ישנה – מותרת) */
+function coOldTx(f,t0){if(!f.co||!zcRegOk(f.creg))return '';if(t0&&t0.co&&t0.date===f.date&&t0.co.reg===f.creg&&(t0.co.tm||'')===zcTime(f.cotm))return '';const b=zcB(zcPrev(f.creg,'9999-12-31','99:99',''));return coOldX({d:f.date,tm:zcTime(f.cotm)},b)?coOldMsg(b):''}
 async function coOldChk(reg,d,tm){const b=await coOldB(reg);return coOldX({d,tm:zcTime(tm)},b)?coOldMsg(b):''}
 /* 6ז (עדכון חוזה 17): עובד שרואה רק את ההוצאות שלו, או לא רואה – לא יכול לסכום את ההוצאות של אחרים. הסכום של כל ההוצאות מקופה בחלון מגיע מהשרת
  (cashoutTotal מחזיר רק מספר, בלי רשומות ובלי שמות). לסכום מתווספות רק הוצאות שלו שסימן כ"לא ברור – שייך לסגירה הזו". הרשימה שלו נשארת רק שלו */
