@@ -35,6 +35,7 @@ const COPY = [
   'shelf', 'fb', 'tasks', 'supinv', 'appreq', 'closings', 'cashout', 'deposits', 'zlast',
   'yemot_items', 'yemot_line_backups', 'yemot_hook_usage', 'yemot_lexicon',
   'yemot_promos', 'yemot_state', 'yemot_usage', 'yemot_test', 'voice_usage', 'scan_usage',
+  'audit_log', 'table_bases', // אוספים שנמצאו בבדיקה 7.11 – הועברו בהחלטת המשתמש
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [
