@@ -12,10 +12,12 @@ const fail = (m) => { console.error('::error::' + m); process.exit(1); };
 if (!['firestore-rules', 'storage-rules'].includes(target) || !/^[a-z0-9-]+$/.test(project || '')) fail('usage');
 
 const fnDir = path.join(__dirname, '..', 'functions');
-const admin = require(path.join(fnDir, 'node_modules', 'firebase-admin'));
+const req = (m) => require(require.resolve(m, { paths: [fnDir] }));
+const { initializeApp, applicationDefault } = req('firebase-admin/app');
+const { getFirestore } = req('firebase-admin/firestore');
 
 async function token() {
-  const t = await admin.credential.applicationDefault().getAccessToken();
+  const t = await applicationDefault().getAccessToken();
   return t.access_token;
 }
 async function deployedRules(release) {
@@ -41,8 +43,9 @@ const norm = (s) => String(s || '').replace(/\r\n/g, '\n').trim();
   console.log(`צעד 1: ${exported.length}/${exported.length} פונקציות פרוסות.`);
 
   // 2. ההעברה יצרה users לכל מנהל ועובד בשורש (צעד 2). ספירה בלבד.
-  admin.initializeApp({ projectId: project });
-  const db = admin.firestore();
+  // אפליקציה בשם נפרד: index.js של הפונקציות כבר יצר את אפליקציית ברירת המחדל
+  const app = initializeApp({ projectId: project }, 'order-check');
+  const db = getFirestore(app);
   const ids = async (c) => (await db.collection(c).select().get()).docs.map((d) => d.id);
   const members = new Set([...(await ids('admins')), ...(await ids('staff'))]);
   const users = new Set(await ids('users'));
