@@ -134,7 +134,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const chip = await page.evaluate(() => document.querySelector('[data-a=admFeat][data-k=tasks]').textContent);
   const aud2 = (await audit('flagship')).filter((a) => a.act === 'setBusinessFeatures');
   check('9 הפעלת תוספת אחת (tasks) דרך setBusinessFeatures: המסך מתעדכן אחרי ok, ויש audit', f1.features.tasks === true && chip === 'פעיל' && aud2.length === 1 && aud2[0].note === 'tasks=on', { features: f1.features, chip, audit: aud2.map((a) => a.act + ':' + a.note) });
-  check('10 תוספות אחרות לא השתנו', Object.entries(f1.features).every(([k, v]) => k === 'tasks' ? v === true : v !== true), f1.features);
+  // סריקה אחידה, שלב 2: עסק חדש נוצר עם scan דלוק – ולכן scan נשאר true
+  check('10 תוספות אחרות לא השתנו', Object.entries(f1.features).every(([k, v]) => k === 'tasks' || k === 'scan' ? v === true : v !== true), f1.features);
   const featReq = log.filter((r) => r.step === 'feat' && /setBusinessFeatures/.test(r.url) && r.method === 'POST');
   check('11 לחיצה אחת = בקשה אחת (הכפתור נוטרל עד תשובה)', featReq.length === 1, { requests: featReq.length });
   await shot(page, '05-תוספות-מופעלות', true);

@@ -89,7 +89,7 @@ const oobReqs = (log, type) => log.filter((r) => /accounts:sendOobCode/.test(r.u
   page.__step = 'feat';
   await page.click('[data-a=admFeat][data-k=tasks]');
   const feat = await until(async () => { const d = await getDoc('b/newco'); const f = d && d.fields.features && d.fields.features.mapValue.fields || {}; return f.tasks && f.tasks.booleanValue === true ? Object.keys(f).filter((k) => f[k].booleanValue === true) : null; }, 15000);
-  check('6 מנהל־על מפעיל תוספת אחת (tasks) דרך setBusinessFeatures', JSON.stringify(feat) === JSON.stringify(['tasks']), feat);
+  check('6 מנהל־על מפעיל תוספת אחת (tasks) דרך setBusinessFeatures', JSON.stringify(feat) === JSON.stringify(['scan', 'tasks']), feat); // scan דלוק מהיצירה (סריקה אחידה, שלב 2)
   const saErr = page.__errors.slice(); await ctx.close();
 
   // ---------- 3. המנהל נכנס ממחשב חדש: קישור כניסה במייל ----------
@@ -119,8 +119,8 @@ const oobReqs = (log, type) => log.filter((r) => /accounts:sendOobCode/.test(r.u
   await blank(page); await wait(page, 500);
   const dom = await page.evaluate(() => { const txt = () => document.getElementById('main').innerText; const r = {}; NAV = [{ v: 'more' }]; render(0); r.more = txt(); NAV = [{ v: 'home' }]; render(0); r.home = txt(); NAV = [{ v: 'settings' }]; render(0); r.settings = txt(); r.bio = !!document.querySelector('[data-a=bioTog]'); openAdd(); r.add = document.getElementById('sheet').innerText; sheetClose(); return r; });
   const must = ['משימות', 'הוצאות קבועות', 'הלוואות', 'כרטיסי אשראי', 'ייבוא מאקסל', 'גיבוי ושחזור', 'חשבוניות לתשלום', 'השוואות', 'הגדרות'];
-  const gone = ['מחירים ומבצעים למדף', 'משוב לקוחות', 'בקשות לעדכון האפליקציה', 'סגירת קופה', 'סיכום סגירות קופה', 'העלאת אישור הפקדה', 'סריקת חשבוניות', 'הזמנות אתר'];
-  check('10 המנהל החדש רואה רק את הבסיס ואת התוספת שהופעלה (משימות)', must.every((t) => dom.more.includes(t)) && gone.every((t) => !dom.more.includes(t)) && !/זיהוי חכם/.test(dom.settings) && /משימה חדשה/.test(dom.add) && !/מחירים ומבצעים|משוב לקוחות|סגירת קופה/.test(dom.add), { missing: must.filter((t) => !dom.more.includes(t)), present: gone.filter((t) => dom.more.includes(t)) });
+  const gone = ['מחירים ומבצעים למדף', 'משוב לקוחות', 'בקשות לעדכון האפליקציה', 'סגירת קופה', 'סיכום סגירות קופה', 'העלאת אישור הפקדה', 'הזמנות אתר']; // 'סריקת חשבוניות' – מופיעה עכשיו: עסק חדש נוצר עם scan דלוק (סריקה אחידה, שלב 2)
+  check('10 המנהל החדש רואה רק את הבסיס ואת התוספת שהופעלה (משימות)', must.every((t) => dom.more.includes(t)) && gone.every((t) => !dom.more.includes(t)) && dom.more.includes('סריקת חשבוניות') && /משימה חדשה/.test(dom.add) && !/מחירים ומבצעים|משוב לקוחות|סגירת קופה/.test(dom.add), { missing: must.filter((t) => !dom.more.includes(t)), present: gone.filter((t) => dom.more.includes(t)) });
   check('11 בדפדפן אין מתג "כניסה בטביעת אצבע" (אין תוסף ואין חומרה)', dom.bio === false && !/טביעת אצבע/.test(dom.settings), { bio: dom.bio });
   await page.evaluate(() => { NAV = [{ v: 'more' }]; render(0); }); await wait(page, 300);
   await shot(page, '04-מנהל-חדש-בסיס-ומשימות', true);
