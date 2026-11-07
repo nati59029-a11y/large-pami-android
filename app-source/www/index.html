@@ -534,7 +534,7 @@ function readTx(f,c,sub,t0){
  if(b==='emp'&&!f.m)errs.push('בחר מזומן או העברה');
  if((b==='sup'||b==='fixed')&&!pMonth(f.plan))errs.push('חסר חודש לתשלום');
  if(b==='sup'&&!s_(f.inv)&&!f.dn&&!(t0&&!t0.inv&&!t0.dn))errs.push('חסר מספר חשבונית (או סמן תעודת משלוח)');
- coErr(f,c,amt,errs);if(errs.length)return{errs};
+ coErr(f,c,amt,errs);{const m=coOldTx(f,t0);if(m)errs.push(m)}if(errs.length)return{errs};
  const t=t0?{...t0}:{id:uid(),t:c.kind,cat:c.id,sub:sub||null,pays:[]};
  t.date=f.date;t.amt=rnd(amt);t.note=s_(f.note);coSet(t,f,c);
  if(b==='free')t.desc=s_(f.desc);
@@ -1690,12 +1690,14 @@ const obGet=()=>{try{return JSON.parse(localStorage.getItem(OB))||[]}catch(e){re
 const obSet=a=>{try{localStorage.setItem(OB,JSON.stringify(a))}catch(e){toast('אין מקום לשמור במכשיר')}};
 const CH=700000;
 const packPages=a=>a.length===1?a[0]:'PAGES:'+JSON.stringify(a);
-async function pushItem(it){let file='';if(it.fileId){try{file=await fget(it.fileId)||''}catch(e){}}
+async function pushItem(it){/* 6ח סבב 2: הוצאה מקופה מלפני הפתיחה האחרונה – ההוצאה והצילום נשלחים למנהל כרגיל; רק הרישום לבדיקת הסגירה (cashout) מדולג, עם הודעה */
+ let old='';if(it.data&&it.data.reg&&!it.data.repl&&bzF('cashClose'))old=await coOldChk(it.data.creg,it.data.date,it.data.ctm);
+ let file='';if(it.fileId){try{file=await fget(it.fileId)||''}catch(e){}}
  if(!file&&!it.nopic)throw new Error('הצילום חסר');
  const n=Math.max(1,Math.ceil(file.length/CH));if(n>12)throw new Error('הצילומים גדולים מדי');
  for(let k=0;k<n;k++){try{await fsx('/chunks?documentId='+encodeURIComponent(it.id+'_'+k),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),data:sv(file.slice(k*CH,(k+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}
  const body={fields:{owner:sv(SY.uid),by:sv((SY.email||'').split('@')[0]),status:sv('new'),created:sv(it.created),data:sv(JSON.stringify(it.data)),parts:sv(n),t:iv(Date.now())}};
- try{await fsx('/inbox?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify(body)})}catch(e){if(e.code!==409)throw e}if(!(it.data&&it.data.repl))await coPush(it)}
+ try{await fsx('/inbox?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify(body)})}catch(e){if(e.code!==409)throw e}if(old){toast(old+' ההוצאה נשלחה למנהל, אבל לא תיספר בבדיקת הסגירה.');return}if(!(it.data&&it.data.repl))await coPush(it)}
 async function flush(){if(flush.b||!isW())return;flush.b=1;SY.err='';
  try{for(const it of obGet()){try{await pushItem(it)}catch(e){SY.err=e.offline?'':e.message;break}obSet(obGet().filter(x=>x.id!==it.id))}}finally{flush.b=0;syS()}}
 /* ---- קונפיג קטגוריות (מנהל מפרסם, עובד מקבל) ---- */
@@ -1850,7 +1852,7 @@ async function wkSave(f){const x=fd(f);Object.assign(WK,{amt:x.amt,date:x.date,n
 async function wkSubmit(x){
  const a=pNum(x.amt);if(a==null||a===0)return toast('סכום לא תקין');if(!x.date)return toast('חסר תאריך');if(!WK.pages.length)return toast('חובה לצרף צילום של החשבונית או של דף ההוצאה');
  let data;
- if(x.reg){if(!zcRegOk(x.creg))return toast('בחר מאיזו קופה הוצא המזומן');if(!(a>0))return toast('הוצאה מקופה: הסכום צריך להיות חיובי');if(!s_(x.note))return toast('כתוב סיבה – עבור מה הוצא המזומן');data={cat:'',catName:'',sub:'',subName:'',amt:rnd(a),date:x.date,note:s_(x.note).slice(0,300),inv:'',dn:false,reg:true,creg:x.creg,ctm:zcTime(x.ctm)}}
+ if(x.reg){if(!zcRegOk(x.creg))return toast('בחר מאיזו קופה הוצא המזומן');if(!(a>0))return toast('הוצאה מקופה: הסכום צריך להיות חיובי');if(!s_(x.note))return toast('כתוב סיבה – עבור מה הוצא המזומן');{const m=await coOldChk(x.creg,x.date,x.ctm);if(m)return toast(m)}data={cat:'',catName:'',sub:'',subName:'',amt:rnd(a),date:x.date,note:s_(x.note).slice(0,300),inv:'',dn:false,reg:true,creg:x.creg,ctm:zcTime(x.ctm)}}
  else{const cs=cfgLocal().cats||[],c=cs.find(z=>z.id===x.cat);if(!c)return toast('בחר קטגוריה');
   if((c.subs||[]).length&&!x.sub)return toast('בחר ספק / פירוט');
   if(c.beh==='sup'&&!s_(x.inv)&&!x.dn)return toast('חסר מספר חשבונית');
@@ -3785,7 +3787,7 @@ function coSet(t,f,c){if(t.creg){delete t.co;return}if(f.co&&c&&c.kind==='exp'&&
 /* ---- עובד: יצירת המראה אחרי שההוצאה נשלחה (מתוך pushItem). 409 = כבר קיים. שגיאת רשת – ננסה שוב עם ההוצאה; סירוב – לא חוסם את תור השליחה ---- */
 async function coPush(it){const x=it&&it.data;if(!x||!x.reg||!zcRegOk(x.creg)||!bzF('cashClose'))return;const a=rnd(Math.abs(num(x.amt))),why=s_(x.note).slice(0,300);if(!(a>0)||a>1e6||!why||!coDate(x.date))return;
  const fields={uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),reg:sv(x.creg),d:sv(x.date),tm:sv(zcTime(x.ctm)),a:dv(a),why:sv(why),dep:sv(coDep(why)),src:sv(it.id),zc:sv(''),dp:sv('')};
- try{await fsx('/cashout?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e.code===409)return;if(e.offline||!e.code||e.code>=500)throw e;try{console.warn('cashout',e.message)}catch(z){}}}
+ try{await fsx('/cashout?documentId='+encodeURIComponent(it.id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e.code===409)return;if(e.offline||!e.code||e.code>=500)throw e;try{console.warn('cashout',e.message)}catch(z){}if(e.code===403)toast('ההוצאה מקופה לא נרשמה בבדיקת הסגירה: ייתכן שהתאריך שלה לפני הפתיחה האחרונה של הקופה. פנה למנהל.')}}
 /* ---- מנהל: מראה של ההוצאות מקופה מהטלפון (כמו supSync). שינוי בתנועה = מחיקה ויצירה מחדש (zc ו-dp נשמרים) ---- */
 const COK=LK('lp-co-m'),coH=f=>supHash([f.reg,f.d,f.a,f.why,f.src].join('|')+(f.tm?'|'+f.tm:''));
 /* מה צריך להיות בענן: (1) הוצאות מקופה של המנהל עצמו (t.co) – 'm'+מזהה התנועה, נוצר אם חסר;
@@ -3844,14 +3846,24 @@ function zcPrev(reg,d,tm,id){const k=zlKey({d,tm});
 function coIn(x,prev,d,tm){if(!x.d||!d||x.d>d)return 'out';if(x.d===d&&x.tm&&tm&&x.tm>tm)return 'out';
  if(!prev)return x.zc?'out':'in';if(x.d<prev.d)return 'out';if(x.d>prev.d)return 'in';
  if(x.tm&&prev.tm)return x.tm>prev.tm?'in':'out';return 'unc'}
+/* 6ח (עדכון חוזה 18, החלטת המשתמש): הוצאה מקופה מתאריך שלפני הפתיחה האחרונה של הקופה נדחית (גם בחוקים בשרת). הגבול כמו zcB.
+ 'unc' (אותו יום כמו הגבול, בלי שעה) – מותר. coOldB: הגבול של הקופה – מנהל מהסגירות שלו, עובד מ-zlast (אם אין הרשאה לקרוא – בלי בדיקה במכשיר; השרת עדיין בודק) */
+function coOldX(x,b){if(!b||!x||!x.d)return false;if(x.d<b.d)return true;return x.d===b.d&&!!x.tm&&!!b.tm&&x.tm<=b.tm}
+const coOldMsg=b=>'אי אפשר לרשום הוצאה מקופה מלפני הפתיחה האחרונה של הקופה ('+dfmt(b.d)+(b.tm?' '+b.tm:'')+'). התקופה הזו כבר נסגרה. בדוק את התאריך והשעה, או פנה למנהל.';
+async function coOldB(reg){if(!zcRegOk(reg))return null;if(isA())return zcB(zcPrev(reg,'9999-12-31','99:99',''));
+ /* legacy (שורש): בלי קריאה נוספת (רצף הבקשות כמו בגרסה המותקנת) – רק מה שכבר נטען; החוקים בשרת עדיין דוחים */if(!bzB())return ZL[reg]?zcB(ZL[reg]):null;
+ try{const z=zlParse(await fsx('/zlast/'+reg));ZL[reg]=z;return zcB(z)}catch(e){if(e.code===404){ZL[reg]=null;return null}return ZL[reg]?zcB(ZL[reg]):null}}
+/* מנהל, טופס ההוצאה: בודקים רק בהוצאה חדשה מקופה, או כשהתאריך / הקופה / השעה השתנו (עריכת סכום בהוצאה ישנה – מותרת) */
+function coOldTx(f,t0){if(!f.co||!zcRegOk(f.creg))return '';if(t0&&t0.co&&t0.date===f.date&&t0.co.reg===f.creg&&(t0.co.tm||'')===zcTime(f.cotm))return '';const b=zcB(zcPrev(f.creg,'9999-12-31','99:99',''));return coOldX({d:f.date,tm:zcTime(f.cotm)},b)?coOldMsg(b):''}
+async function coOldChk(reg,d,tm){const b=await coOldB(reg);return coOldX({d,tm:zcTime(tm)},b)?coOldMsg(b):''}
 /* 6ז (עדכון חוזה 17): עובד שרואה רק את ההוצאות שלו, או לא רואה – לא יכול לסכום את ההוצאות של אחרים. הסכום של כל ההוצאות מקופה בחלון מגיע מהשרת
  (cashoutTotal מחזיר רק מספר, בלי רשומות ובלי שמות). לסכום מתווספות רק הוצאות שלו שסימן כ"לא ברור – שייך לסגירה הזו". הרשימה שלו נשארת רק שלו */
 var COT={k:'',s:null,b:'',p:null,err:'',ek:''};
 ACT.coSrvRe=()=>{COT.ek='';if(ZC&&ZC.f)coSrv(ZC.reg,ZC.f.d,ZC.f.tm,{id:ZC.id,od:ZC.f.oD,otm:ZC.f.oTm})};
 const coSrvOn=()=>isW()&&bzB()&&wpE()!=='all';
-/* סבב 2: השרת קובע את החלון (מהסגירה האחרונה ועד סוף יום הסגירה); שולחים רק קופה ותאריך (היום או אתמול) */
-const coSrvA=(reg,d)=>({reg,d});
-const coSrvK=a=>[a.reg,a.d].join('|');
+/* סבב 2: השרת קובע את תחילת החלון (מהפתיחה האחרונה). 6ח (עדכון חוזה 18): הסוף הוא רגע הסגירה – שולחים גם את שעת הדוח ואת הפתיחה שצורפה (השרת לא סופר אחרי עכשיו) */
+const coSrvA=(reg,d,tm,cur)=>{cur=cur||{};const a={reg,d},t=zcTime(tm),od=coDate(cur.od),otm=zcTime(cur.otm);if(t)a.tm=t;if(od&&otm){a.od=od;a.otm=otm}return a};
+const coSrvK=a=>[a.reg,a.d,a.tm||'',a.od||'',a.otm||''].join('|');
 function coSrv(reg,d,tm,cur,auto){const a=coSrvA(reg,d,tm,cur||{}),k=coSrvK(a);if(COT.k===k&&COT.s!=null)return Promise.resolve();if(COT.b===k)return COT.p;if(auto&&COT.ek===k)return Promise.resolve();
  COT.b=k;COT.err='';COT.ek='';COT.p=(async()=>{try{const r=await fnCall('cashoutTotal',a);if(!r||typeof r.s!=='number'||!isFinite(r.s))throw new Error('תשובה לא תקינה מהשרת');COT.k=k;COT.s=r.s}catch(e){COT.err=e.message||'שגיאה';COT.ek=k}finally{COT.b=''}try{zcChkR();zcRe()}catch(e){}})();return COT.p}
 function coChk(reg,d,tm,cout,cur){cur=cur||{};const z=rnd(Math.abs(zcN(cout)||0));tm=zcTime(tm);if(!COQ.L)return{z,s:0,L:[],U:[],bad:[],inc:[],ok:false,known:0,diff:z,prev:null};
@@ -3900,7 +3912,7 @@ CHG.coPic=async el=>{const fl=(el.files||[])[0];el.value='';if(!fl||!CO1)return;
  const f=document.querySelector('#dlg form[data-f=coAdd]');if(CO1!==C||!f)return;const E=f.elements,cur={a:E.a.value,d:E.d.value,tm:E.tm.value},mg=coMerge(cur,C.def,r,[['a','a','סכום'],['d','d','תאריך'],['tm','tm','שעה']]);for(const n in mg.set)E[n].value=mg.set[n];
  if(m)m.innerHTML=esc(coScanMsg(r)+(r.reg&&ZC&&r.reg!==ZC.reg?' ⚠ הפתק מקופה אחרת ('+ZREG[r.reg].n+')':''))+coSugH(mg.sug)};
 FRM.coAdd=async f=>{if(!ZC||!ZC.f||!zcRegOk(ZC.reg)||!CO1||CO1.busy)return;const x=fd(f),a=pNum(s_(x.a).replace(/\s+/g,'')),why=s_(x.why).slice(0,300),reg=ZC.reg,d=zcDate(x.d)||zcDate(ZC.f.d)||today(),tm=zcTime(x.tm);
- if(a==null||!(a>0)||a>1e6)return toast('סכום לא תקין');if(!why)return toast('כתוב סיבה');CO1.busy=1;const b=f.querySelector('button');if(b)b.disabled=true;
+ if(a==null||!(a>0)||a>1e6)return toast('סכום לא תקין');if(!why)return toast('כתוב סיבה');{const m=await coOldChk(reg,d,tm);if(m)return toast(m)}CO1.busy=1;const b=f.querySelector('button');if(b)b.disabled=true;
  try{if(isA()){const t={id:uid(),t:'exp',cat:'p_exp',sub:null,date:d,amt:rnd(a),plan:d.slice(0,7),inv:'',note:'',desc:why,kind:'inv',pays:[],file:'',co:{reg,why,tm}};
    if(CO1.pic){const fid='z'+uid();try{await fput(fid,CO1.pic);t.file=fid}catch(e){}}
    S.tx.push(t);save();closeDlg();try{await coSync()}catch(e){toast('נרשם במכשיר. השמירה בענן נכשלה ('+tkErr(e)+')')}}

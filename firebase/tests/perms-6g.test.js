@@ -283,10 +283,43 @@ describe('6ז חלק ד – cashoutTotal: סכום ההוצאות מקופה ב�
       assert.equal(r.status, 'INVALID_ARGUMENT', JSON.stringify(x)); assert.equal(r.reason, why);
     }
   });
-  it('עקיפה: הלקוח לא קובע את החלון – שעה, פתיחה ומזהה סגירה מהלקוח לא משנים את הסכום', async () => {
-    for (const x of [{ tm: '09:00' }, { tm: '10:30', od: DT, otm: '11:00' }, { id: 'zprev' }, { tm: '00:01' }]) {
+  it('עקיפה: הלקוח לא קובע את תחילת החלון – מזהה סגירה ופתיחה ישנה מהלקוח לא משנים את הסכום', async () => {
+    for (const x of [{ id: 'zprev' }, { od: DY, otm: '00:01' }, { od: D2, otm: '23:00' }]) {
       const r = await call(C_OWN, Object.assign({}, REQ, x));
       assert.equal(r.status, 'OK', r.text); assert.equal(r.result.s, 180, JSON.stringify(x));
+    }
+  });
+  // 6ח (עדכון חוזה 18): החלון נגמר ברגע הסגירה (tm), לא בסוף היום. הבדיקות על אתמול (DY), כדי שהשעה לא תהיה בעתיד
+  const RY = { reg: 'i_yh', d: DY };
+  it('6ח: הוצאה דקה לפני רגע הסגירה – נספרת; בדיוק ברגע – נספרת; דקה אחרי – לא', async () => {
+    const r1 = await call(C_OWN, Object.assign({}, RY, { tm: '22:01' }));
+    assert.equal(r1.status, 'OK', r1.text); assert.equal(r1.result.s, 50); // k2 (אתמול 22:00)
+    assert.equal((await call(C_OWN, Object.assign({}, RY, { tm: '22:00' }))).result.s, 50);
+    const r3 = await call(C_OWN, Object.assign({}, RY, { tm: '21:59' }));
+    assert.equal(r3.status, 'OK', r3.text); assert.equal(r3.result.s, 0);
+  });
+  it('6ח: סגירה עם פתיחה שצורפה – החלון נגמר בשעת הפתיחה; פתיחה יותר מיום אחרי – הגבול חוזר לשעת הסגירה', async () => {
+    const r = await call(C_OWN, Object.assign({}, RY, { tm: '21:00', od: DY, otm: '23:00' }));
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.s, 50);
+    const r2 = await call(C_OWN, Object.assign({}, RY, { tm: '21:00', od: '2020-01-01', otm: '23:00' }));
+    assert.equal(r2.status, 'OK', r2.text); assert.equal(r2.result.s, 0); // פתיחה לפני הסגירה – לא נחשבת
+  });
+  it('6ח: הוצאה שנרשמה אחרי רגע הסגירה באותו יום – לא נספרת (גם כשהיא של אחר)', async () => {
+    await prep((d) => d.doc(`b/${A}/cashout/late`).set({ uid: 'someone', by: 'x', t: 1, reg: 'i_yh', d: DY, tm: '23:30', a: 7, why: 'x', dep: '', src: 'late', zc: '', dp: '' }));
+    assert.equal((await call(C_OWN, Object.assign({}, RY, { tm: '23:00' }))).result.s, 50);
+    assert.equal((await call(C_OWN, Object.assign({}, RY, { tm: '23:30' }))).result.s, 57);
+  });
+  it('6ח סבב 2: סוף חלון אחרי השעה הנוכחית בישראל – נדחה (אי אפשר לסרוק את העתיד)', async () => {
+    const f = await call(C_OWN, Object.assign({}, REQ, { tm: '00:00', od: DN, otm: '00:01' }));
+    assert.equal(f.status, 'INVALID_ARGUMENT', f.text); assert.equal(f.reason, 'bad-time');
+    const nowT = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+    if (nowT < '23:57') { const g = await call(C_OWN, Object.assign({}, REQ, { tm: '23:59' })); assert.equal(g.status, 'INVALID_ARGUMENT', g.text); assert.equal(g.reason, 'bad-time'); }
+    assert.equal((await call(C_OWN, Object.assign({}, RY, { tm: '23:59' }))).status, 'OK'); // אתמול – כל שעה
+  });
+  it('6ח: שעה או פתיחה לא תקינות – נדחות', async () => {
+    for (const [x, why] of [[{ tm: '25:00' }, 'bad-time'], [{ tm: 'abc' }, 'bad-time'], [{ otm: '9' }, 'bad-time'], [{ od: '7.11.2026' }, 'bad-date']]) {
+      const r = await call(C_OWN, Object.assign({}, REQ, x));
+      assert.equal(r.status, 'INVALID_ARGUMENT', JSON.stringify(x)); assert.equal(r.reason, why);
     }
   });
   it('עקיפה: יותר מ-20 קריאות בשעה לעובד – נחסם (rate-limit); עובד אחר לא מושפע', async () => {
@@ -315,5 +348,50 @@ describe('6ז חלק ד – cashoutTotal: סכום ההוצאות מקופה ב�
     const r = await call(C_OWN, REQ);
     assert.equal(r.status, 'OK', r.text);
     assert.equal(r.result.s, 100 + 50 + 30 + 1000 + 8000); // k4 ו-k7 נכנסים כשאין סגירה קודמת; k5 קופה אחרת; k6 אחרי יום הסגירה
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// 6ח (עדכון חוזה 18, החלטת המשתמש): הוצאה מקופה מתאריך שלפני הפתיחה האחרונה של הקופה – נדחית בחוקים (עובד)
+// ---------------------------------------------------------------------------------------------
+describe('6ח – הוצאה מקופה מלפני הפתיחה האחרונה נדחית', () => {
+  let n = 0; const fresh = (p) => p + Date.now().toString(36) + (n++);
+  beforeEach(async () => { await seedCash(); await prep((d) => d.doc(`b/${A}/staff/${C_ALL}`).update({ 'perms.expW': true })); });
+  const inb = (uid, id) => prep(async (d) => { await d.doc(`b/${A}/chunks/${id}_0`).set({ owner: uid, data: 'x' }); await d.doc(`b/${A}/inbox/${id}`).set({ owner: uid, by: uid, status: 'new', created: 'x', data: '{}', parts: 1, t: Date.now() }); });
+  const body = (uid, id, o) => Object.assign({ uid, by: uid, t: Date.now(), reg: 'i_yh', a: 10, why: 'קניתי חלב', dep: '', src: id, zc: '', dp: '' }, o);
+  const tryCo = async (o) => { const id = fresh('w'); await inb(C_ALL, id); return db(C_ALL).doc(`b/${A}/cashout/${id}`).set(body(C_ALL, id, o)); };
+  // zlast: אתמול 20:00 (בלי פתיחה)
+  it('הוצאה רגילה (אחרי הסגירה האחרונה) – עוברת', async () => {
+    await assertSucceeds(tryCo({ d: DT, tm: '09:00' }));
+    await assertSucceeds(tryCo({ d: DY, tm: '20:01' }));
+    await assertSucceeds(tryCo({ d: DT }));
+  });
+  it('הוצאה מתאריך ישן (לפני הסגירה האחרונה) – נדחית', async () => {
+    await assertFails(tryCo({ d: D2, tm: '12:00' }));
+    await assertFails(tryCo({ d: D2 }));
+    await assertFails(tryCo({ d: DY, tm: '19:59' }));
+    await assertFails(tryCo({ d: DY, tm: '20:00' }));
+  });
+  it('אותו יום כמו הסגירה בלי שעה – מותר ("לא ברור")', async () => {
+    await assertSucceeds(tryCo({ d: DY }));
+  });
+  it('עם פתיחה שצורפה (היום 08:00) – הגבול הוא הפתיחה', async () => {
+    await prep((d) => d.doc(`b/${A}/zlast/i_yh`).set({ d: DY, tm: '20:00', id: 'zprev', uid: MGR, t: 1, od: DT, otm: '08:00' }));
+    await assertFails(tryCo({ d: DY, tm: '22:00' }));
+    await assertFails(tryCo({ d: DT, tm: '07:59' }));
+    await assertSucceeds(tryCo({ d: DT, tm: '08:01' }));
+  });
+  it('פתיחה שצורפה יותר מיום אחרי הסגירה – לא נחשבת; הגבול חוזר לזמן הסגירה', async () => {
+    await prep((d) => d.doc(`b/${A}/zlast/i_yh`).set({ d: D2, tm: '20:00', id: 'zprev', uid: MGR, t: 1, od: DT, otm: '08:00' }));
+    await assertSucceeds(tryCo({ d: DY, tm: '09:00' }));
+    await assertFails(tryCo({ d: D2, tm: '19:00' }));
+  });
+  it('אין סגירה קודמת לקופה – כל תאריך מותר; קופה אחרת לא מושפעת', async () => {
+    await assertSucceeds(tryCo({ d: D2, reg: 'i_nl' }));
+    await prep((d) => d.doc(`b/${A}/zlast/i_yh`).delete());
+    await assertSucceeds(tryCo({ d: '2025-01-01' }));
+  });
+  it('מנהל העסק – לא מוגבל (מראה מהטלפון שלו, גם לתאריך ישן)', async () => {
+    await assertSucceeds(db(MGR).doc(`b/${A}/cashout/mOld`).set(body(MGR, 'tx1', { d: D2 })));
   });
 });
