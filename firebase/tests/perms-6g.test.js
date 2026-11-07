@@ -27,6 +27,9 @@ const db = (uid) => env.authenticatedContext(uid, { email: uid + '@example.inval
 const body = (m, data) => ({ data: data || '[]', h: 'abc', m: m || M, at: Date.now() });
 const KINDS = ['rpi', 'rpe', 'rps', 'rep'];
 const RPO = (u) => `rpo_${M}_${u}`;
+// can/cannot מוסיפים _<חודש> למזהה; למסמכי rpo_ (שהחודש באמצע) – מזהה מלא
+const canId = (u, id, z) => assertSucceeds(db(u).doc(`b/${z || A}/wv/${id}`).get());
+const cannotId = (u, id, z) => assertFails(db(u).doc(`b/${z || A}/wv/${id}`).get());
 
 async function seed() {
   await env.clearFirestore();
@@ -116,7 +119,7 @@ describe('6ז – ניסיונות עקיפה', () => {
   });
   it('עובד מעסק אחר עם כל המתגים – חסום בעסק א, מותר בעסק שלו', async () => {
     for (const k of ['rpi', 'rps']) { await cannot(OTHB, k, A); await can(OTHB, k, B); }
-    await cannot(OTHB, RPO(OTHB), A); await can(OTHB, RPO(OTHB), B);
+    await cannotId(OTHB, RPO(OTHB), A); await canId(OTHB, RPO(OTHB), B);
   });
   it('מזהה דומה שלא תואם בדיוק (למשל "rpex_" או אות גדולה) – חסום לעובד', async () => {
     await prep(async (d) => { await d.doc(`b/${A}/wv/RPE_${M}`).set(body()); await d.doc(`b/${A}/wv/xrpi_${M}`).set(body()); });
@@ -141,23 +144,23 @@ describe('6ז – החלטות 7.11 (20:45): הכנסות דורשות incR; "ר
     await can(R_NOINC, 'rps');
   });
   it('"רק שלו": קורא את rpo_ שלו בלבד', async () => {
-    await can(R_OWN, RPO(R_OWN));
-    await can(R_OWNSAL, RPO(R_OWNSAL));
+    await canId(R_OWN, RPO(R_OWN));
+    await canId(R_OWNSAL, RPO(R_OWNSAL));
   });
   it('עקיפה: "רק שלו" קורא rpo_ של עובד אחר – נחסם', async () => {
-    await cannot(R_OWN, RPO(R_ALL));
-    await cannot(R_OWN, RPO(R_OWNSAL));
+    await cannotId(R_OWN, RPO(R_ALL));
+    await cannotId(R_OWN, RPO(R_OWNSAL));
   });
   it('עקיפה: "לא רואה" / בלי "דוחות" / עובד ישן – לא קורא אפילו את rpo_ של עצמו', async () => {
-    await cannot(R_NONE, RPO(R_NONE));
+    await cannotId(R_NONE, RPO(R_NONE));
     await prep((d) => d.doc(`b/${A}/wv/${RPO(NOREP)}`).set(body()));
-    await cannot(NOREP, RPO(NOREP));
+    await cannotId(NOREP, RPO(NOREP));
     await prep((d) => d.doc(`b/${A}/wv/${RPO(OLD)}`).set(body()));
-    await cannot(OLD, RPO(OLD));
+    await cannotId(OLD, RPO(OLD));
   });
   it('עקיפה: מזהה עם תוספת אחרי ה-uid (rpo_<חודש>_<uid>x) – נחסם', async () => {
     await prep((d) => d.doc(`b/${A}/wv/${RPO(R_OWN)}x`).set(body()));
-    await cannot(R_OWN, RPO(R_OWN) + 'x');
+    await cannotId(R_OWN, RPO(R_OWN) + 'x');
   });
   it('מנהל כותב rpo_ תקין; עובד לא כותב rpo_ (גם לא של עצמו); מזהה לא תקין – נחסם', async () => {
     await assertSucceeds(db(MGR).doc(`b/${A}/wv/rpo_2026-10_${R_OWN}`).set(body('2026-10')));

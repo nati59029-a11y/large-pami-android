@@ -678,7 +678,7 @@ service cloud.firestore {
         allow get: if (id.matches('^inc_.*') && perm('incR'))
           || (id.matches('^sal_.*') && perm('sal'))
           || (id.matches('^rpi_.*') && perm('rep') && perm('incR'))
-          || (request.auth != null && id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_' + request.auth.uid + '$') && perm('rep') && expOwn())
+          || (id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_.+$') && id == 'rpo_' + id.split('_')[1] + '_' + request.auth.uid && perm('rep') && expOwn())
           || (id.matches('^rpe_.*') && perm('rep') && perm('expR'))
           || (id.matches('^rps_.*') && perm('rep') && perm('sal'))
           || bMgr();
