@@ -3856,7 +3856,7 @@ function coChk(reg,d,tm,cout,cur){cur=cur||{};const z=rnd(Math.abs(zcN(cout)||0)
  const C=A.concat(U.filter(x=>inc.has(x.id))).sort(srt),L=C.filter(coVer),bad=C.filter(x=>!coVer(x));
  let s=rnd(sum(L,x=>x.a)),known=1;
  if(coSrvOn()&&d){const k=coSrvK(coSrvA(reg,d,tm,cur));if(COT.k===k&&COT.s!=null)s=rnd(COT.s+sum(U.filter(x=>inc.has(x.id)),x=>x.a));else{known=0;coSrv(reg,d,tm,cur,1)}}
- const diff=rnd(Math.abs(z-s));return{z,s,L,U,bad,inc:U.filter(x=>inc.has(x.id)).map(x=>x.id),ok:known&&diff<0.01&&!bad.length,known,diff,prev,end:E,srv:coSrvOn()}}
+ const diff=rnd(Math.abs(z-s));return{z,s,L,U,bad,inc:U.filter(x=>inc.has(x.id)).map(x=>x.id),ok:!!known&&diff<0.01&&!bad.length,known,diff,prev,end:E,srv:coSrvOn()}}
 const zcIncIds=()=>Object.keys((ZC&&ZC.inc)||{}).filter(k=>ZC.inc[k]);
 /* שליחת סגירה + zlast באותו commit. סגירה ישנה (לא מתקדמת בזמן) – בלי zlast. כבר נשלחה (409) – e.sent */
 async function zcCommit(id,fields,reg,d,tm,op){op=op||{};const cw={update:{name:docName('closings/'+id),fields},currentDocument:{exists:false}};

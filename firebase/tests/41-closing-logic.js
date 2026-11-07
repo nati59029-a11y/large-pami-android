@@ -12,7 +12,7 @@ const { appSourceLines } = require('./helpers');
 // תחילת השורה של כל קטע; נלקחת השורה ואחריה כל שורות ההמשך (שמתחילות ברווח)
 const PARTS = ['const s_=', 'const rnd=', 'const ymd=', 'const dfmt=', 'function mk(', 'function pNum(', 'var ZREG=', 'var ZC=null', 'function zcN(', 'function zcV(',
   'const zcDate=', 'const zcTime=', 'function zcRegOne(', 'const ZPB=', 'function zcPendBefore(', 'function coLost(', 'function coScanParse(', 'const coDate=', 'const coHeld=',
-  'const zlKey=', 'function zcB(', 'function zcPrev(', 'function coIn(', 'function coChk(', 'function dpAiChk(', 'function zsDepAuto(', 'var COIN=', 'const COM=', 'const coSame=', 'function coMerge('];
+  'const zlKey=', 'function zcB(', 'function zcPrev(', 'function coIn(', 'var COT=', 'const coSrvA=', 'const coSrvK=', 'function coSrv(', 'function coChk(', 'function dpAiChk(', 'function zsDepAuto(', 'var COIN=', 'const COM=', 'const coSame=', 'function coMerge('];
 
 function load() {
   const L = appSourceLines();
@@ -22,8 +22,8 @@ function load() {
     let j = i + 1; while (j < L.length && L[j].startsWith(' ')) j++;
     return L.slice(i, j).join('\n');
   });
-  const pre = 'var S={zc:[]},ADM=true;const isA=()=>ADM,coVer=()=>true,gv=()=>"",ils=n=>String(Math.round((n||0)*100)/100);\n';
-  const post = '\n;({S,COQ,setZQP:(v)=>{ZQP=v},setAdm:(v)=>{ADM=v},zcB,coIn,coChk,coLost,zcPendBefore,zsDepAuto,coMerge,COM,zcTime,coScanParse,ZPB})';
+  const pre = 'var S={zc:[]},ADM=true,SRV=false,CALLS=[];const isA=()=>ADM,coVer=()=>true,gv=()=>"",ils=n=>String(Math.round((n||0)*100)/100),coSrvOn=()=>SRV,idOk=s=>typeof s===\'string\'&&/^[A-Za-z0-9_-]{1,80}$/.test(s),fnCall=async(n,a)=>{CALLS.push([n,a]);return{s:777}},zcChkR=()=>{},zcRe=()=>{};\n';
+  const post = '\n;({S,COQ,COT,CALLS,setSrv:(v)=>{SRV=v},setZQP:(v)=>{ZQP=v},setAdm:(v)=>{ADM=v},zcB,coIn,coChk,coLost,zcPendBefore,zsDepAuto,coMerge,COM,zcTime,coScanParse,ZPB})';
   return vm.runInNewContext(pre + chunks.join('\n') + post, {}, { filename: 'index.html (חלקים)' });
 }
 const ids = (L) => L.map((x) => x.id).sort().join(',');
@@ -114,5 +114,18 @@ describe('סגירת קופה – לוגיקה באפליקציה (index.html)',
     assert.equal(f({ register: '6346053', date: '2026-10-20', time: '09:02', amount: 4650 }), '4650|2026-10-20|09:02|i_yh');
     assert.equal(f({ store: 'נחל לכיש', date: '24/10/2026', time: '21:49', amount: '-7,150.00' }), '7150|2026-10-24|21:49|i_nl');
     assert.equal(f({ amount: 1e9, date: '2026-02-30', time: '25:00', register: [1] }), '|||');
+  });
+  it('6ז: עובד שלא רואה את כל ההוצאות – הסכום מהשרת (cashoutTotal) ועוד רק מה שסימן כ"לא ברור"; עד שהשרת עונה – "לא נבדק"', async () => {
+    const M = load(); M.setAdm(false); M.setSrv(true);
+    M.COQ.L = [X('own1', '2026-10-20', '10:00', 5, { reg: 'i_nl' })];
+    const cur = { id: 'z9', inc: [], od: '', otm: '' };
+    const c1 = M.coChk('i_nl', '2026-10-20', '21:00', '800', cur);
+    assert.equal(c1.known, 0); assert.equal(c1.ok, false);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(M.CALLS.length, 1); assert.equal(M.CALLS[0][0], 'cashoutTotal');
+    assert.deepEqual(Object.keys(M.CALLS[0][1]).sort(), ['d', 'id', 'od', 'otm', 'reg', 'tm']);
+    const c2 = M.coChk('i_nl', '2026-10-20', '21:00', '777', cur);
+    assert.equal(c2.known, 1); assert.equal(c2.s, 777); assert.equal(c2.ok, true);
+    assert.equal(M.CALLS.length, 1); // לא שואלים שוב
   });
 });
