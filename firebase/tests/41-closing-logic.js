@@ -12,7 +12,7 @@ const { appSourceLines } = require('./helpers');
 // תחילת השורה של כל קטע; נלקחת השורה ואחריה כל שורות ההמשך (שמתחילות ברווח)
 const PARTS = ['const s_=', 'const rnd=', 'const ymd=', 'const dfmt=', 'function mk(', 'function pNum(', 'var ZREG=', 'var ZC=null', 'function zcN(', 'function zcV(',
   'const zcDate=', 'const zcTime=', 'function zcRegOne(', 'const ZPB=', 'function zcPendBefore(', 'function coLost(', 'function coScanParse(', 'const coDate=', 'const coHeld=',
-  'const zlKey=', 'function zcB(', 'function zcPrev(', 'function coIn(', 'var COT=', 'const coSrvA=', 'const coSrvK=', 'function coSrv(', 'function coChk(', 'function dpAiChk(', 'function zsDepAuto(', 'var COIN=', 'const COM=', 'const coSame=', 'function coMerge('];
+  'const zlKey=', 'function zcB(', 'function zcPrev(', 'function coIn(', 'function coOldX(', 'var COT=', 'const coSrvA=', 'const coSrvK=', 'function coSrv(', 'function coChk(', 'function dpAiChk(', 'function zsDepAuto(', 'var COIN=', 'const COM=', 'const coSame=', 'function coMerge('];
 
 function load() {
   const L = appSourceLines();
@@ -23,7 +23,7 @@ function load() {
     return L.slice(i, j).join('\n');
   });
   const pre = 'var S={zc:[]},ADM=true,SRV=false,CALLS=[];const isA=()=>ADM,coVer=()=>true,gv=()=>"",ils=n=>String(Math.round((n||0)*100)/100),coSrvOn=()=>SRV,idOk=s=>typeof s===\'string\'&&/^[A-Za-z0-9_-]{1,80}$/.test(s),fnCall=async(n,a)=>{CALLS.push([n,a]);return{s:777}},zcChkR=()=>{},zcRe=()=>{};\n';
-  const post = '\n;({S,COQ,COT,CALLS,setSrv:(v)=>{SRV=v},setZQP:(v)=>{ZQP=v},setAdm:(v)=>{ADM=v},zcB,coIn,coChk,coLost,zcPendBefore,zsDepAuto,coMerge,COM,zcTime,coScanParse,ZPB})';
+  const post = '\n;({S,COQ,COT,CALLS,setSrv:(v)=>{SRV=v},setZQP:(v)=>{ZQP=v},setAdm:(v)=>{ADM=v},zcB,coIn,coOldX,coChk,coLost,zcPendBefore,zsDepAuto,coMerge,COM,zcTime,coScanParse,ZPB})';
   return vm.runInNewContext(pre + chunks.join('\n') + post, {}, { filename: 'index.html (חלקים)' });
 }
 const ids = (L) => L.map((x) => x.id).sort().join(',');
@@ -123,10 +123,44 @@ describe('סגירת קופה – לוגיקה באפליקציה (index.html)',
     assert.equal(c1.known, 0); assert.equal(c1.ok, false);
     await new Promise((r) => setTimeout(r, 0));
     assert.equal(M.CALLS.length, 1); assert.equal(M.CALLS[0][0], 'cashoutTotal');
-    assert.deepEqual(Object.keys(M.CALLS[0][1]).sort(), ['d', 'reg']); // סבב 2: רק קופה ותאריך – השרת קובע את החלון
+    assert.deepEqual({ ...M.CALLS[0][1] }, { reg: 'i_nl', d: '2026-10-20', tm: '21:00' }); // 6ח: גם שעת הסגירה – סוף החלון; תחילת החלון בשרת
     const c2 = M.coChk('i_nl', '2026-10-20', '21:00', '777', cur);
     assert.equal(c2.known, 1); assert.equal(c2.s, 777); assert.equal(c2.ok, true);
     assert.equal(M.CALLS.length, 1); // לא שואלים שוב
+  });
+});
+
+describe('6ח – החלון נגמר ברגע הסגירה, והוצאה מלפני הפתיחה האחרונה נדחית', () => {
+  it('coSrvA (דרך coChk): נשלחים קופה, תאריך, שעת הסגירה, והפתיחה שצורפה רק כשיש לה תאריך ושעה', async () => {
+    const M = load(); M.setAdm(false); M.setSrv(true); M.COQ.L = [];
+    M.coChk('i_nl', '2026-10-20', '21:00', '1', { id: 'z9', od: '2026-10-21', otm: '08:00' });
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual({ ...M.CALLS[0][1] }, { reg: 'i_nl', d: '2026-10-20', tm: '21:00', od: '2026-10-21', otm: '08:00' });
+    M.coChk('i_nl', '2026-10-20', '', '1', { id: 'z9', od: '2026-10-21', otm: '' });
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual({ ...M.CALLS[1][1] }, { reg: 'i_nl', d: '2026-10-20' });
+  });
+  it('coOldX: לפני הגבול – ישן; אחרי – לא; אותו יום בלי שעה – לא (לא ברור); אין גבול – לא', () => {
+    const M = load(), b = { d: '2026-10-20', tm: '09:11' };
+    assert.equal(M.coOldX({ d: '2026-10-19', tm: '' }, b), true);
+    assert.equal(M.coOldX({ d: '2026-10-20', tm: '09:00' }, b), true);
+    assert.equal(M.coOldX({ d: '2026-10-20', tm: '09:11' }, b), true);
+    assert.equal(M.coOldX({ d: '2026-10-20', tm: '09:12' }, b), false);
+    assert.equal(M.coOldX({ d: '2026-10-20', tm: '' }, b), false);
+    assert.equal(M.coOldX({ d: '2026-10-21', tm: '' }, b), false);
+    assert.equal(M.coOldX({ d: '2020-01-01', tm: '' }, null), false);
+  });
+  it('השרת (cashout-total endOf/where): הוצאה דקה לפני הסגירה – בפנים; דקה אחרי – בחוץ; בלי שעה – עד סוף היום', () => {
+    const T = require('../functions/lib/cashout-total.js')._t;
+    const prev = { d: '2026-10-19', tm: '20:00' };
+    const e = T.endOf('2026-10-20', '21:00', '', '');
+    assert.deepEqual(e, { d: '2026-10-20', tm: '21:00' });
+    assert.equal(T.where({ d: '2026-10-20', tm: '20:59' }, prev, e.d, e.tm), 'in');
+    assert.equal(T.where({ d: '2026-10-20', tm: '21:00' }, prev, e.d, e.tm), 'in');
+    assert.equal(T.where({ d: '2026-10-20', tm: '21:01' }, prev, e.d, e.tm), 'out');
+    assert.deepEqual(T.endOf('2026-10-20', '21:00', '2026-10-21', '08:00'), { d: '2026-10-21', tm: '08:00' });
+    const e2 = T.endOf('2026-10-20', '', '', '');
+    assert.equal(T.where({ d: '2026-10-20', tm: '23:59' }, prev, e2.d, e2.tm), 'in');
   });
 });
 

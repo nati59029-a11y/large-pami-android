@@ -376,6 +376,19 @@ service cloud.firestore {
         return dd.uid == request.auth.uid && dd.st == 'new' && id in dd.items
           && request.time.toMillis() - dd.t < 900000;
       }
+      // 6ח (עדכון חוזה 18, החלטת המשתמש): עובד לא רושם הוצאה מקופה מתאריך שלפני הפתיחה האחרונה של הקופה (zlast/{reg}).
+      // הגבול כמו zcB באפליקציה ו-bound בשרת: הפתיחה שצורפה (od/otm) אם היא אחרי הסגירה ועד יום אחד אחריה; אחרת זמן הסגירה.
+      // אותו יום כמו הגבול בלי שעה (בהוצאה או בגבול) – מותר ("לא ברור", המנהל מכריע בסגירה). אין zlast – מותר.
+      function dt(s) { return timestamp.date(int(s[0:4]), int(s[5:7]), int(s[8:10])); }
+      function afterB(z) {
+        let cd = z.get('d', ''); let ctm = z.get('tm', ''); let od = z.get('od', ''); let otm = z.get('otm', '');
+        let useO = od != '' && otm != '' && cd != '' && dt(od) <= dt(cd) + duration.value(1, 'd') && (od + ' ' + otm) > (cd + ' ' + ctm);
+        let bd = useO ? od : cd; let bt = useO ? otm : ctm; let xt = nw().get('tm', '');
+        return bd == '' || nw().d > bd || (nw().d == bd && (xt == '' || bt == '' || xt > bt));
+      }
+      function notOld() {
+        return !exists(/databases/$(database)/documents/zlast/$(nw().reg)) || afterB(get(/databases/$(database)/documents/zlast/$(nw().reg)).data);
+      }
       allow read: if isStaff();
       allow create: if isStaff()
         && nw().keys().hasAll(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
@@ -387,7 +400,7 @@ service cloud.firestore {
         && bodyOk()
         && idStr(nw().src) && nw().src != ''
         && idStr(nw().zc) && idStr(nw().dp)
-        && (isManager() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk()));
+        && (isManager() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk() && notOld()));
       allow update: if (isManager()
           && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp', 'reg', 'd', 'tm', 'a', 'why', 'dep'])
           && idStr(nw().zc) && idStr(nw().dp) && bodyOk())
@@ -910,6 +923,19 @@ service cloud.firestore {
           return dd.uid == request.auth.uid && dd.st == 'new' && id in dd.items
             && request.time.toMillis() - dd.t < 900000;
         }
+        // 6ח (עדכון חוזה 18, החלטת המשתמש): עובד לא רושם הוצאה מקופה מתאריך שלפני הפתיחה האחרונה של הקופה (zlast/{reg}).
+        // הגבול כמו zcB באפליקציה ו-bound בשרת: הפתיחה שצורפה (od/otm) אם היא אחרי הסגירה ועד יום אחד אחריה; אחרת זמן הסגירה.
+        // אותו יום כמו הגבול בלי שעה (בהוצאה או בגבול) – מותר ("לא ברור", המנהל מכריע בסגירה). אין zlast – מותר.
+        function dt(s) { return timestamp.date(int(s[0:4]), int(s[5:7]), int(s[8:10])); }
+        function afterB(z) {
+          let cd = z.get('d', ''); let ctm = z.get('tm', ''); let od = z.get('od', ''); let otm = z.get('otm', '');
+          let useO = od != '' && otm != '' && cd != '' && dt(od) <= dt(cd) + duration.value(1, 'd') && (od + ' ' + otm) > (cd + ' ' + ctm);
+          let bd = useO ? od : cd; let bt = useO ? otm : ctm; let xt = nw().get('tm', '');
+          return bd == '' || nw().d > bd || (nw().d == bd && (xt == '' || bt == '' || xt > bt));
+        }
+        function notOld() {
+          return !exists(/databases/$(database)/documents/b/$(bizId)/zlast/$(nw().reg)) || afterB(get(/databases/$(database)/documents/b/$(bizId)/zlast/$(nw().reg)).data);
+        }
         // 6ו: "רואה הכול" – כל ההוצאות מהקופה; "רק שלו" – רק uid == שלו (גם בשאילתה: חייבת לסנן uid == שלו)
         allow read: if feat('cashClose') && (perm('expR') || (expOwn() && resource.data.uid == request.auth.uid));
         allow create: if feat('cashClose') && (bStaff() && perm('expW')
@@ -922,7 +948,7 @@ service cloud.firestore {
           && bodyOk()
           && idStr(nw().src) && nw().src != ''
           && idStr(nw().zc) && idStr(nw().dp)
-          && (bMgr() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk())));
+          && (bMgr() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk() && notOld())));
         allow update: if feat('cashClose') && ((bMgr()
             && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp', 'reg', 'd', 'tm', 'a', 'why', 'dep'])
             && idStr(nw().zc) && idStr(nw().dp) && bodyOk())
