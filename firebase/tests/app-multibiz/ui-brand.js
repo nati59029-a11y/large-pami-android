@@ -160,7 +160,7 @@ const dataPath = (u) => decodeURIComponent(new URL(u).pathname).replace(/^.*\/do
     const lw = []; const { ctx: c3, page: p3 } = await open('ws@x.co', lw, 'solo-worker');
     await wait(p3, 1500);
     const wk = await p3.evaluate(() => { WS = 'home'; render(0); return { tiles: [...document.querySelectorAll('#main .big2 .tile')].map((t) => t.innerText.trim().replace(/\s+/g, ' ')), sinv: document.getElementById('main').innerText.includes('חשבוניות ספקים'), html: document.getElementById('main').innerText }; });
-    check('11 עובד בעסק עם תוספת אחת: במסך הבית רק "הוצאה" ו"משימות", בלי אריחי "בבנייה" ובלי שאר התוספות', wk.tiles.length === 2 && wk.tiles[0].includes('הוצאה') && wk.tiles[1].includes('משימות') && !/בבנייה/.test(wk.html), wk.tiles);
+    check('11 עובד בעסק עם תוספת אחת: במסך הבית רק "סריקה" (במקום "הוצאה", סריקה אחידה שלב 3) ו"משימות", בלי אריחי "בבנייה" ובלי שאר התוספות', wk.tiles.length === 2 && wk.tiles[0].includes('סריקה') && wk.tiles[1].includes('משימות') && !/בבנייה/.test(wk.html), wk.tiles);
     await shot(p3, '04-עובד-עסק-עם-תוספת-אחת');
     const wk2 = await p3.evaluate(() => { WS = 'exp'; render(0); return document.getElementById('main').innerText; });
     check('11א מסך "הוצאה" של העובד: אין כפתור "חשבוניות ספקים" (תוספת suppliers כבויה)', !/חשבוניות ספקים/.test(wk2) && /הכנסה ידנית/.test(wk2), wk2.slice(0, 100));
