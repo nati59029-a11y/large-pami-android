@@ -324,9 +324,11 @@ function cleanPerms(p) {
   const out = {};
   for (const [k, v] of Object.entries(p)) {
     if (!PERM_KEYS.includes(k)) throw bad('bad-perms', 'הרשאה לא מוכרת: ' + String(k).slice(0, 30));
-    if (typeof v !== 'boolean') throw bad('bad-perms', 'ערך הרשאה חייב להיות כן/לא');
+    // 6ו (עדכון חוזה 16): expR = true (כל ההוצאות) | 'own' (רק מה שהזין בעצמו) | false (לא רואה). שאר המתגים – כן/לא
+    if (typeof v !== 'boolean' && !(k === 'expR' && v === 'own')) throw bad('bad-perms', 'ערך הרשאה חייב להיות כן/לא');
   }
   for (const k of PERM_KEYS) out[k] = p[k] === true; // תמיד מפה מלאה: מתג שלא נשלח = כבוי
+  if (p.expR === 'own') out.expR = 'own';
   return out;
 }
 const RANK_ID_RE = /^[a-z0-9_-]{1,30}$/;
@@ -390,7 +392,7 @@ async function setStaffPerms(request) {
   if (input.rank !== undefined) upd.rank = r ? r.id : '';
   const b = db.batch();
   b.update(sRef, upd);
-  b.set(auditRef(bizId), auditData(by, 'setStaffPerms', uid + ':' + PERM_KEYS.filter((k) => perms[k]).join(',')));
+  b.set(auditRef(bizId), auditData(by, 'setStaffPerms', uid + ':' + PERM_KEYS.filter((k) => perms[k]).map((k) => (perms[k] === 'own' ? k + '=own' : k)).join(',')));
   await b.commit();
   return { ok: true, uid, perms, rank: upd.rank !== undefined ? upd.rank : (s.get('rank') || '') };
 }
