@@ -23,3 +23,62 @@ jobs:
       - run: npm test
       - run: npm run test:multibiz
       - run: npm run test:migrate
+  # 7: בדיקות הדפדפן (ui-*, b-emulator, extra, scenario+compare) מול האמולטור, ב-Chromium. לא מפרסם דבר.
+  browser:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firebase
+    env:
+      FUNCTIONS_EMULATOR_HOST: 127.0.0.1:5001
+      EX: npx firebase emulators:exec --only auth,firestore,storage,functions --project demo-largpeami
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm ci || npm install
+      - run: node scripts/ensure-emulator-secrets.js
+      - name: Playwright (global) + Chrome
+        run: |
+          npm install -g playwright@1.48.2
+          echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
+          test -x /usr/bin/google-chrome
+      - name: Short TMPDIR (Chromium socket path)
+        run: mkdir -p /tmp/t && echo "TMPDIR=/tmp/t" >> "$GITHUB_ENV" && mkdir -p ../out
+      - name: b-emulator
+        run: $EX "node tests/app-multibiz/b-emulator.js ../app-source/www ../out/b-emulator.json"
+      - name: ui-admin
+        if: always()
+        run: $EX "node tests/app-multibiz/ui-admin.js ../app-source/www ../out/ui-admin.json ../out/shots-admin"
+      - name: ui-brand
+        if: always()
+        run: $EX "node tests/app-multibiz/ui-brand.js ../app-source/www ../out/ui-brand.json ../out/shots-brand"
+      - name: ui-bio
+        if: always()
+        run: $EX "node tests/app-multibiz/ui-bio.js ../app-source/www ../out/ui-bio.json ../out/shots-bio"
+      - name: ui-e2e
+        if: always()
+        run: $EX "node tests/app-multibiz/ui-e2e.js ../app-source/www ../out/ui-e2e.json ../out/shots-e2e"
+      - name: ui-7 (mocked network)
+        if: always()
+        run: node tests/app-multibiz/ui-7.js ../app-source/www ../out/ui-7.json ../out/shots-7
+      - name: extra (mocked network)
+        if: always()
+        run: node tests/app-multibiz/extra.js ../app-source/www ../out/extra.json
+      - name: scenario + compare (branch vs main)
+        if: always()
+        run: |
+          git -C .. fetch --depth=1 origin main
+          git -C .. worktree add /tmp/t/main FETCH_HEAD
+          for v in legacy-old legacy-new; do
+            node tests/app-multibiz/scenario-all.js ../app-source/www ../out/br-$v.json $v
+            node tests/app-multibiz/scenario-all.js /tmp/t/main/app-source/www ../out/main-$v.json $v
+            node tests/app-multibiz/compare.js legacy ../out/main-$v.json ../out/br-$v.json
+          done
+          node tests/app-multibiz/scenario-all.js ../app-source/www ../out/br-b.json b
+          node tests/app-multibiz/compare.js b ../out/br-b.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: browser-results, path: out, retention-days: 7 }

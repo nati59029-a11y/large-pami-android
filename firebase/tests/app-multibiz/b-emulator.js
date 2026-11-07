@@ -26,8 +26,8 @@ async function step(page, name, fn, arg) { page.__step = name; const r = await p
   for (const b of BIZ) {
     await put('b/' + b, { name: sv(b), status: sv('active'), dataRoot: sv('b'), schemaVersion: { integerValue: '1' }, features: fmap(FEAT) });
     const m = await signUp(`m-${b}@x.co`), w = await signUp(`w-${b}@x.co`); U[b] = { m, w };
-    await put('users/' + m, { bizId: sv(b), role: sv('admin'), email: sv(`m-${b}@x.co`) });
-    await put('users/' + w, { bizId: sv(b), role: sv('worker'), email: sv(`w-${b}@x.co`) });
+    await put('users/' + m, { bizId: sv(b), role: sv('admin'), active: { booleanValue: true }, bizStatus: sv('active'), email: sv(`m-${b}@x.co`) });
+    await put('users/' + w, { bizId: sv(b), role: sv('worker'), active: { booleanValue: true }, bizStatus: sv('active'), email: sv(`w-${b}@x.co`) });
     await put(`b/${b}/admins/${m}`, { email: sv(`m-${b}@x.co`) });
     await put(`b/${b}/staff/${w}`, { active: { booleanValue: true }, email: sv(`w-${b}@x.co`) });
   }
@@ -64,4 +64,7 @@ async function step(page, name, fn, arg) { page.__step = name; const r = await p
   console.log(JSON.stringify({ res, errors, where }, null, 1));
   const bad = log.filter((r) => typeof r.status !== 'number' || (r.status >= 400 && !(r.status === 404 && r.method === 'GET')));
   console.log('בקשות שנכשלו (חוץ מ-404 בקריאה):', bad.length); bad.forEach((r) => console.log(' ', r.status, r.who, r.step, r.method, decodeURIComponent(r.url).replace(/^.*documents/, ''), r.body.slice(0, 160)));
+  // 7: כל דחייה חוץ מ-site_income_daily (ידוע: אין לו כלל, נדחה לסבב ההזמנות) מכשילה את הבדיקה
+  const unexp = bad.filter((r) => !/site_income_daily/.test(r.body || ''));
+  console.log(unexp.length ? `תוצאה: נכשל (${unexp.length} דחיות לא צפויות)` : 'תוצאה: עבר'); if (unexp.length) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });

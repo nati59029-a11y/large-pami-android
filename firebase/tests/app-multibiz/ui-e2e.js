@@ -126,15 +126,28 @@ const oobReqs = (log, type) => log.filter((r) => /accounts:sendOobCode/.test(r.u
   await shot(page, '04-מנהל-חדש-בסיס-ומשימות', true);
 
   // ---------- 4. עובד חדש: מייל "קבע סיסמה", ואז כניסה בלי שלב נוסף ----------
-  page.__step = 'staff';
+  // 7 (6ה, החלטה 3): הוספת עובד – רק מנהל־על. המנהל החדש רואה את הרשימה בלי טופס, ובכוח השרת דוחה
+  page.__step = 'staff-owner';
   await page.evaluate(() => go('staff')); await wait(page, 1500);
-  await page.fill('form[data-f=admStaffAdd] input[name=name]', 'עובד חדש'); await page.fill('form[data-f=admStaffAdd] input[name=email]', WORKER);
-  await page.evaluate(() => { window.__toasts = []; new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => { if (n.classList && n.classList.contains('toast')) window.__toasts.push(n.textContent); }))).observe(document.body, { childList: true }); });
-  await page.click('form[data-f=admStaffAdd] button');
-  const d3 = await until(async () => { const t = (await page.evaluate(() => window.__toasts.join(' | '))) + (await dlgText(page)); return /נשלח מייל|לא נשלח/.test(t) ? t : ''; }, 30000);
-  const pr3 = oobReqs(logM.filter((r) => r.step === 'staff'), 'PASSWORD_RESET');
-  check('12 הוספת עובד: נשלח מייל "קבע סיסמה" לכתובת שהשרת החזיר, והודעה קצרה (שלא חוסמת את הרשימה) מציגה אותה', pr3.length === 1 && pr3[0].email === WORKER && /נשלח מייל לקביעת סיסמה ל-\s*worker-new@x\.co/.test(d3) && /^העובד נוסף\./.test(d3), { sent: pr3, toast: d3 });
-  await shot(page, '05-עובד-נוסף-מייל-נשלח');
+  const own = await page.evaluate(async () => { const r = { form: !!document.querySelector('form[data-f=admStaffAdd]'), txt: /דרך מנהל המערכת/.test(document.getElementById('main').innerText) }; try { await fnCall('addStaff', { email: 'sneak@x.co', name: 'x' }); r.fn = 'OK!'; } catch (e) { r.fn = e.reason || e.message; } return r; });
+  check('11א המנהל החדש: אין טופס "הוספת עובד", ובכוח addStaff נדחה (not-superadmin)', !own.form && own.txt && own.fn === 'not-superadmin' && oobReqs(logM.filter((r) => r.step === 'staff-owner'), 'PASSWORD_RESET').length === 0, own);
+  const lS4 = []; const s4 = await ctxOpen(lS4, 'sa-staff');
+  await H.login(s4.page, 'sa@x.co'); await blank(s4.page);
+  await s4.page.evaluate(() => { NAV = [{ v: 'settings' }]; render(0); }); await until(() => s4.page.evaluate(() => ADM.sa === 1), 15000);
+  await s4.page.evaluate(() => { NAV = [{ v: 'home' }, { v: 'sa' }]; render(0); }); await wait(s4.page, 2000);
+  await s4.page.evaluate(() => go('sab', 'newco')); await until(() => s4.page.evaluate(() => !!document.querySelector('[data-a=admEnter]')), 15000);
+  await s4.page.click('[data-a=admEnter]'); await until(() => s4.page.evaluate(() => SY.bizId === 'newco').catch(() => false), 20000); await wait(s4.page, 2500); await blank(s4.page);
+  s4.page.__step = 'staff';
+  await s4.page.evaluate(() => go('staff')); await wait(s4.page, 1800);
+  await s4.page.fill('form[data-f=admStaffAdd] input[name=name]', 'עובד חדש'); await s4.page.fill('form[data-f=admStaffAdd] input[name=email]', WORKER);
+  await s4.page.evaluate(() => { window.__toasts = []; new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => { if (n.classList && n.classList.contains('toast')) window.__toasts.push(n.textContent); }))).observe(document.body, { childList: true }); });
+  await s4.page.click('form[data-f=admStaffAdd] button');
+  const d3 = await until(async () => { const t = (await s4.page.evaluate(() => window.__toasts.join(' | '))) + (await dlgText(s4.page)); return /נשלח מייל|לא נשלח/.test(t) ? t : ''; }, 30000);
+  const pr3 = oobReqs(lS4.filter((r) => r.step === 'staff'), 'PASSWORD_RESET');
+  check('12 הוספת עובד (מנהל־על): נשלח מייל "קבע סיסמה" לכתובת שהשרת החזיר, והודעה קצרה (שלא חוסמת את הרשימה) מציגה אותה', pr3.length === 1 && pr3[0].email === WORKER && /נשלח מייל לקביעת סיסמה ל-\s*worker-new@x\.co/.test(d3) && /^העובד נוסף\./.test(d3), { sent: pr3, toast: d3 });
+  await shot(s4.page, '05-עובד-נוסף-מייל-נשלח');
+  check('12א אין שגיאות JS אצל מנהל־על במסך העובדים של העסק החדש', s4.page.__errors.length === 0, s4.page.__errors);
+  await s4.ctx.close();
   const wcode = await lastCode(WORKER, 'PASSWORD_RESET');
   const wst = await resetPw(wcode.oobCode, WPW);
   {
