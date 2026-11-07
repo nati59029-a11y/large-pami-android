@@ -354,8 +354,11 @@ async function setBusinessRanks(request) {
   const bizId = bizIdOf(input);
   const ranks = cleanRanks(input.ranks);
   await bizB(bizId);
-  await getFirestore().doc(`b/${bizId}/private/info`).set({ ranks }, { mergeFields: ['ranks'] });
-  await audit(bizId, by, 'setBusinessRanks', ranks.map((r) => r.id).join(','));
+  // 7: הדרגות וה-audit באותה אצווה (כמו setStaffPerms), כדי שלא יישמרו דרגות בלי רישום
+  const wb = getFirestore().batch();
+  wb.set(getFirestore().doc(`b/${bizId}/private/info`), { ranks }, { mergeFields: ['ranks'] });
+  wb.set(auditRef(bizId), auditData(by, 'setBusinessRanks', ranks.map((r) => r.id).join(',')));
+  await wb.commit();
   return { ok: true, bizId, ranks };
 }
 async function rankOf(bizId, rank) {

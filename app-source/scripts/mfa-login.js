@@ -2,7 +2,7 @@
    הקובץ לא נמצא ב-www/ ולא נטען בגרסה הרגילה. scripts/prepare.js מעתיק אותו ל-www/ ומחבר אותו ל-index.html רק בבנייה עם
    SITE_BACKEND=test (ה11). כך index.html של הגרסה הרגילה זהה בית-בבית לקודם.
    החיבור (3 החלפות ב-prepare.js): syLogin קורא ל-LP_MFA.signIn במקום signInWithPassword, ובפתיחה (boot) – LP_MFA.check().
-   משתמש בפונקציות של index.html (jf, GAPI, FB, FSB, SY, syOut, showGate, tok) – הן מוגדרות בסקריפט הראשי, שנטען אחרי הקובץ הזה,
+   משתמש בפונקציות של index.html (jf, GAPI, FB, FSR, FSB, BZ0, bzB, SY, syOut, showGate, tok) – הן מוגדרות בסקריפט הראשי, שנטען אחרי הקובץ הזה,
    ונקראות רק בזמן הכניסה.
    מה קורה:
    - כניסה של מי שכבר רשום לקוד: Firebase מחזיר "צריך גורם שני" ← חלון קוד ← mfaSignIn:finalize ← טוקן עם הגורם השני.
@@ -99,7 +99,11 @@
   // ---- האם צריך להירשם: staff/{uid}.mfaRequired == true (העובד קורא את המסמך של עצמו גם בלי גורם שני) ----
   async function mfaRequired(idToken, uid) {
     let r;
-    try { r = await fetch(FSB() + '/staff/' + encodeURIComponent(uid), { headers: { Authorization: 'Bearer ' + idToken } }); } catch (e) { const x = new Error('אין חיבור לאינטרנט'); x.offline = true; throw x; }
+    // 7 (עדכון חוזה 5): בכניסה SY עוד לא מכיר את העסק, ולכן FSB() היה מחזיר את השורש. כאן נקבע העסק לפי users/{uid}:
+    // עסק במצב b – b/{bizId}/staff/{uid}; לארג' פעמי (legacy) או בלי users – השורש, כמו קודם.
+    let base = FSR();
+    try { const u = await fetch(FSR() + '/users/' + encodeURIComponent(uid), { headers: { Authorization: 'Bearer ' + idToken } }); if (u.ok) { const j = await u.json(); const bz = j && j.fields && j.fields.bizId && j.fields.bizId.stringValue; if (bz && bz !== BZ0 && /^[a-z0-9-]{3,30}$/.test(bz)) base = FSR() + '/b/' + bz; else if (SY && SY.bizId === bz && typeof bzB === 'function' && bzB()) base = FSB(); } } catch (e) { /* בלי חיבור – הבקשה הבאה תיכשל ותדווח */ }
+    try { r = await fetch(base + '/staff/' + encodeURIComponent(uid), { headers: { Authorization: 'Bearer ' + idToken } }); } catch (e) { const x = new Error('אין חיבור לאינטרנט'); x.offline = true; throw x; }
     if (!r.ok) return false; // לא עובד (או מנהל בלי מסמך staff) – ההמשך של syLogin מטפל כמו קודם
     const d = await r.json().catch(() => null);
     return !!(d && d.fields && d.fields.mfaRequired && d.fields.mfaRequired.booleanValue === true);
