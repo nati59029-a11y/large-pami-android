@@ -59,7 +59,7 @@ async function seed() {
       b.set(d.doc(`b/${A}/chunks/in_${u}_0`), { owner: u, data: 'x' });
       b.set(d.doc(`b/${A}/cashout/co_${u}`), { uid: u, by: u, t: 1, reg: 'i_yh', d: '2026-11-01', a: 10, why: 'x', dep: '', src: 'co_' + u, zc: '', dp: '' });
     }
-    for (const k of ['inc', 'sal', 'rep']) for (const z of [A, B]) b.set(d.doc(`b/${z}/wv/${k}_${M}`), wvBody());
+    for (const k of ['inc', 'sal', 'rpi']) for (const z of [A, B]) b.set(d.doc(`b/${z}/wv/${k}_${M}`), wvBody());
     await b.commit();
   });
 }
@@ -117,18 +117,18 @@ describe('6ו – מסכי עובד: הכנסות, משכורות, דוחות (w
   it('כל מתג פותח רק את המסך שלו', async () => {
     await assertSucceeds(db(INC).doc(`b/${A}/wv/inc_${M}`).get());
     await assertSucceeds(db(SAL).doc(`b/${A}/wv/sal_${M}`).get());
-    await assertSucceeds(db(REP).doc(`b/${A}/wv/rep_${M}`).get());
+    await assertSucceeds(db(REP).doc(`b/${A}/wv/rpi_${M}`).get());
   });
   it('עקיפה: עובד בלי "משכורות" קורא משכורות; בלי "הכנסות" קורא הכנסות; בלי "דוחות" קורא דוחות – נחסם', async () => {
     for (const u of [INC, REP, OLD, EALL]) await assertFails(db(u).doc(`b/${A}/wv/sal_${M}`).get());
     for (const u of [SAL, REP, OLD, EALL]) await assertFails(db(u).doc(`b/${A}/wv/inc_${M}`).get());
-    for (const u of [INC, SAL, OLD, EALL]) await assertFails(db(u).doc(`b/${A}/wv/rep_${M}`).get());
+    for (const u of [INC, SAL, OLD, EALL]) await assertFails(db(u).doc(`b/${A}/wv/rpi_${M}`).get());
   });
   it('עובד ישן (בלי perms) – אין לו אף מסך חדש (כמו היום)', async () => {
-    for (const k of ['inc', 'sal', 'rep']) await assertFails(db(OLD).doc(`b/${A}/wv/${k}_${M}`).get());
+    for (const k of ['inc', 'sal', 'rpi']) await assertFails(db(OLD).doc(`b/${A}/wv/${k}_${M}`).get());
   });
   it('עקיפה: עובד מעסק אחר עם כל המתגים קורא את המסכים של עסק א – נחסם; בעסק שלו – מותר', async () => {
-    for (const k of ['inc', 'sal', 'rep']) {
+    for (const k of ['inc', 'sal', 'rpi']) {
       await assertFails(db(OTHB).doc(`b/${A}/wv/${k}_${M}`).get());
       await assertSucceeds(db(OTHB).doc(`b/${B}/wv/${k}_${M}`).get());
     }
@@ -140,7 +140,7 @@ describe('6ו – מסכי עובד: הכנסות, משכורות, דוחות (w
   it('עקיפה: עובד כותב או מוחק במראה – נחסם (גם עם המתג)', async () => {
     await assertFails(db(INC).doc(`b/${A}/wv/inc_${M}`).set(wvBody()));
     await assertFails(db(SAL).doc(`b/${A}/wv/sal_2026-10`).set(wvBody('2026-10')));
-    await assertFails(db(REP).doc(`b/${A}/wv/rep_${M}`).delete());
+    await assertFails(db(REP).doc(`b/${A}/wv/rpi_${M}`).delete());
   });
   it('מנהל העסק כותב מראה תקין; מזהה, חודש או שדות לא תקינים – נחסם', async () => {
     await assertSucceeds(db(MGR).doc(`b/${A}/wv/inc_2026-10`).set(wvBody('2026-10')));

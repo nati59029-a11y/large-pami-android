@@ -3395,7 +3395,7 @@ function supView(){const L=SUPW.L,M=ilMonth(),T=c=>rnd(sum((L||[]).filter(x=>!c|
 /* ===== 6ו (עדכון חוזה 16): מסכי עובד – הכנסות, משכורות, דוחות (האוסף wv, קריאה בלבד) =====
  הנתונים של המנהל נשמרים במכשיר שלו. לכן המכשיר של המנהל (רק במצב b, לא מנהל־על שנכנס לעסק, ורק כשיש בו תנועות) מפרסם מראה:
  wv/{inc|sal|rep}_YYYY-MM לחודש הנוכחי ולחודש הקודם. data = JSON. inc: [{d,c,n,a}] תנועות הכנסה. sal: [{d,n,c,a}] משכורות (קטגוריות beh 'emp', לפי חודש התשלום).
- rep: {i:[[קטגוריה,סכום]],e:[[קטגוריה,סכום]]} – סיכומים בלבד; המשכורות מופיעות כשורה אחת "משכורות (סה״כ)", בלי שמות.
+ דוח (6ז, מפוצל לפי רמה): rpi_ [[קטגוריה,סכום]] הכנסות; rpe_ [[קטגוריה,סכום]] הוצאות בלי משכורות (רק expR = כל העסק); rps_ מספר אחד – סך המשכורות (רק sal). סיכומים בלבד, בלי שמות.
  העובד קורא רק את המסמך שהמתג שלו פותח (החוקים: inc = incR, sal = sal, rep = rep). התצוגה בנויה מאותם רכיבים של מסכי המנהל (hero, טבלה). */
 var WVK=LK('lp-wv'),WVS={t:0,b:0,again:0,off:0},WVW={k:'',m:'',D:null,b:0,err:'',at:0};
 const WVT={inc:['הכנסות','incR','inc'],sal:['משכורות','sal','emp'],rep:['דוחות','rep','doc']};
@@ -3404,8 +3404,10 @@ function wvWant(){const o={},L=live(),cn=t=>(cat(t.cat)||{}).name||'—',emp=t=>
  for(const m of wvMonths()){const inM=t=>(t.date||'').slice(0,7)===m;
   o['inc_'+m]=JSON.stringify(L.filter(t=>t.t==='inc'&&inM(t)).sort(bd).map(t=>({d:t.date||'',c:cn(t),n:subName(t),a:rnd(num(t.amt))})));
   o['sal_'+m]=JSON.stringify(L.filter(t=>t.t==='exp'&&emp(t)&&pmon(t)===m).sort(bd).map(t=>({d:t.date||'',n:subName(t),c:cn(t),a:rnd(num(t.amt))})));
-  const tot=k=>{const r={};L.filter(t=>t.t===k&&inM(t)).forEach(t=>{const n=k==='exp'&&emp(t)?'משכורות (סה״כ)':cn(t);r[n]=rnd((r[n]||0)+num(t.amt))});return Object.entries(r).sort((a,b)=>b[1]-a[1])};
-  o['rep_'+m]=JSON.stringify({i:tot('inc'),e:tot('exp')})}
+  const tot=(k,f)=>{const r={};L.filter(t=>t.t===k&&inM(t)&&(!f||f(t))).forEach(t=>{const n=cn(t);r[n]=rnd((r[n]||0)+num(t.amt))});return Object.entries(r).sort((a,b)=>b[1]-a[1])};
+  /* 6ז: הדוח מפוצל לפי רמה (החוקים): rpi הכנסות (rep), rpe הוצאות בלי משכורות (rep + expR כל העסק), rps סך המשכורות (rep + sal) */
+  o['rpi_'+m]=JSON.stringify(tot('inc'));o['rpe_'+m]=JSON.stringify(tot('exp',t=>!emp(t)));
+  o['rps_'+m]=JSON.stringify(rnd(sum(L.filter(t=>t.t==='exp'&&inM(t)&&emp(t)),t=>num(t.amt))))}
  return o}
 function wvSched(){if(typeof WVS==='undefined'||!WVS||!isA())return;clearTimeout(WVS.t);WVS.t=setTimeout(()=>{wvSync().catch(e=>{try{console.warn('wv',e&&e.message)}catch(z){}})},4000)}
 async function wvSync(){if(!isA()||SY.sa||!bzB()||!S.tx.length||Date.now()<(WVS.off||0))return;if(WVS.b){WVS.again=1;return}WVS.b=1;try{
@@ -3418,9 +3420,13 @@ const wvTiles=()=>Object.keys(WVT).filter(wvOn).map(k=>`<button class="tile${k==
 ACT.wvGo=el=>{const k=el.dataset.k;if(!wvOn(k))return toast('אין לך הרשאה למסך הזה');WS='wv';WVW={k,m:ilMonth(),D:null,b:0,err:'',at:0};rerender();wvLoad()};
 ACT.wvMon=el=>{if(!wvMonths().includes(el.dataset.m)||WVW.b)return;WVW.m=el.dataset.m;WVW.D=null;WVW.at=0;rerender();wvLoad()};
 ACT.wvRefresh=()=>wvLoad();
+async function wvGet(id){try{const d=await fsx('/wv/'+id);return{v:JSON.parse(gv(d,'data')||'null'),at:gi(d,'at')}}catch(e){if(e.code!==404)throw e;return{v:null,at:0}}}
 async function wvLoad(){const k=WVW.k,m=WVW.m;if(WVW.b||!wvOn(k))return;WVW.b=1;WVW.err='';rerender();try{let D=null,at=0;
- try{const d=await fsx('/wv/'+k+'_'+m);D=JSON.parse(gv(d,'data')||'null');at=gi(d,'at')}catch(e){if(e.code!==404)throw e}
- if(WVW.k===k&&WVW.m===m){WVW.D=k==='rep'?(D&&typeof D==='object'&&!Array.isArray(D)?D:{i:[],e:[]}):(Array.isArray(D)?D:[]);WVW.at=at}}
+ if(k==='rep'){/* 6ז: קוראים רק את החלקים שהמתגים פותחים; החוקים חוסמים את השאר גם בבקשה ישירה */
+  const A=a=>Array.isArray(a)?a:[],I=await wvGet('rpi_'+m),E=wp('expR')?await wvGet('rpe_'+m):null,Sl=wp('sal')?await wvGet('rps_'+m):null;
+  D={i:A(I.v),e:E?A(E.v):null,s:Sl?num(Sl.v):null};at=Math.max(I.at||0,E?E.at||0:0,Sl?Sl.at||0:0)}
+ else{const r=await wvGet(k+'_'+m);D=Array.isArray(r.v)?r.v:[];at=r.at}
+ if(WVW.k===k&&WVW.m===m){WVW.D=D;WVW.at=at}}
  catch(e){WVW.err=e.offline?e.message:(e.code===403?'אין לך הרשאה למסך הזה':'הטעינה נכשלה: '+e.message)}
  finally{WVW.b=0}if(WS==='wv'&&cur().v==='wk')rerender()}
 function wvView(){const k=WVW.k,T=WVT[k]?WVT[k][0]:'',head=`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>`;
@@ -3429,9 +3435,9 @@ function wvView(){const k=WVW.k,T=WVT[k]?WVT[k][0]:'',head=`<button class="btn g
  const D=WVW.D;if(!D)return{t:T,s:mfmt(WVW.m),h:head+mb+(WVW.err?`<div class="card"><p class="note">${esc(WVW.err)}</p><button class="btn g" data-a="wvRefresh">נסה שוב</button></div>`:'<p class="note" style="padding:16px">טוען...</p>')};
  const upd=`<p class="note">${WVW.at?'עודכן מהמנהל: '+esc(new Date(WVW.at).toLocaleString('he-IL'))+' · ':'המנהל עוד לא פרסם נתונים לחודש הזה · '}קריאה בלבד</p>`;
  const hero=(l,v,n,bg)=>`<div class="hero" style="background:${bg}"><small>${l} · ${esc(mfmt(WVW.m))}</small><div class="big">${ils(v)}</div>${n==null?'':`<small>${n} תנועות</small>`}</div>`;
- let h;if(k==='rep'){const I=Array.isArray(D.i)?D.i:[],E=Array.isArray(D.e)?D.e:[],ti=rnd(sum(I,x=>num(x[1]))),te=rnd(sum(E,x=>num(x[1])));
+ let h;if(k==='rep'){const I=Array.isArray(D.i)?D.i:[],hasE=Array.isArray(D.e),hasS=D.s!=null,E=(hasE?D.e:[]).concat(hasS&&hasE?[['משכורות (סה״כ)',D.s]]:[]),ti=rnd(sum(I,x=>num(x[1]))),te=rnd(sum(E,x=>num(x[1])));
   const tb=(t,L,tot)=>`<div class="sec"><h3>${t}</h3></div><div class="tw"><table><thead><tr><th>קטגוריה</th><th class="n">סה״כ</th></tr></thead><tbody>${L.map(x=>`<tr><td>${esc(String(x[0]))}</td><td class="n">${ils(num(x[1]))}</td></tr>`).join('')||'<tr><td colspan="2" class="empty">אין תנועות</td></tr>'}</tbody><tfoot><tr><td>סה״כ</td><td class="n">${ils(tot)}</td></tr></tfoot></table></div>`;
-  h=hero('הכנסות פחות הוצאות',rnd(ti-te),null,ti-te>=0?'var(--inc)':'var(--exp)')+tb('הכנסות',I,ti)+tb('הוצאות',E,te)}
+  h=(hasE&&hasS?hero('הכנסות פחות הוצאות',rnd(ti-te),null,ti-te>=0?'var(--inc)':'var(--exp)'):hero('סך ההכנסות',ti,null,'var(--inc)'))+tb('הכנסות',I,ti)+(hasE?tb(hasS?'הוצאות':'הוצאות (בלי משכורות)',E,te):'')+(!hasE&&hasS?tb('משכורות',[['משכורות (סה״כ)',D.s]],rnd(D.s)):'')+(hasE&&hasS?'':`<p class="note">חלק מהנתונים לא מוצג לפי ההרשאות שלך.</p>`)}
  else{const L=D,tot=rnd(sum(L,x=>num(x.a))),inc=k==='inc';
   h=hero(inc?'סך ההכנסות':'סך המשכורות',tot,L.length,inc?'var(--inc)':'var(--exp)')+`<div class="tw"><table><thead><tr><th>תאריך</th><th>${inc?'קטגוריה':'עובד'}</th><th>${inc?'כרטיס':'קטגוריה'}</th><th class="n">סכום</th></tr></thead><tbody>${L.map(x=>`<tr><td>${esc(dfmt(String(x.d||'')))}</td><td>${esc(String((inc?x.c:x.n)||''))}</td><td>${esc(String((inc?x.n:x.c)||''))}</td><td class="n">${ils(num(x.a))}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">אין תנועות בחודש הזה</td></tr>'}</tbody></table></div>`}
  return{t:T,s:mfmt(WVW.m),h:head+mb+upd+h}}
