@@ -19,13 +19,14 @@ const M = '2026-11';
 const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false };
 const MGR = 'g_mgr', SUPER = 'g_super', OLD = 'g_old';
 const R_ALL = 'g_rall', R_OWN = 'g_rown', R_NONE = 'g_rnone', R_SAL = 'g_rsal', R_ALLSAL = 'g_rallsal', R_OWNSAL = 'g_rownsal';
-const NOREP = 'g_norep', OTHB = 'g_othb', INACT = 'g_inact';
+const NOREP = 'g_norep', OTHB = 'g_othb', INACT = 'g_inact', R_NOINC = 'g_rnoinc';
 
 let env;
 const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
 const db = (uid) => env.authenticatedContext(uid, { email: uid + '@example.invalid' }).firestore();
 const body = (m, data) => ({ data: data || '[]', h: 'abc', m: m || M, at: Date.now() });
 const KINDS = ['rpi', 'rpe', 'rps', 'rep'];
+const RPO = (u) => `rpo_${M}_${u}`;
 
 async function seed() {
   await env.clearFirestore();
@@ -35,21 +36,23 @@ async function seed() {
     for (const z of [A, B]) {
       b.set(d.doc('b/' + z), { name: z, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: {} });
       for (const k of KINDS) b.set(d.doc(`b/${z}/wv/${k}_${M}`), body());
+      for (const u of [R_OWN, R_ALL, R_NONE, R_OWNSAL, OTHB]) b.set(d.doc(`b/${z}/wv/${RPO(u)}`), body());
     }
     b.set(d.doc(`b/${A}/admins/${MGR}`), { email: MGR + '@example.invalid' });
     b.set(d.doc(`b/${A}/staff/${MGR}`), { name: MGR, role: 'manager', active: true, pushTokens: [] });
     const emp = (u, perms, z, active) => b.set(d.doc(`b/${z || A}/staff/${u}`),
       Object.assign({ name: u, role: 'employee', active: active !== false, pushTokens: [], rank: '' }, perms ? { perms: Object.assign({}, NONE, perms) } : {}));
     emp(OLD, null);
-    emp(R_ALL, { rep: true, expR: true });
-    emp(R_OWN, { rep: true, expR: 'own' });
-    emp(R_NONE, { rep: true });
-    emp(R_SAL, { rep: true, sal: true });
-    emp(R_ALLSAL, { rep: true, expR: true, sal: true });
-    emp(R_OWNSAL, { rep: true, expR: 'own', sal: true });
+    emp(R_ALL, { rep: true, incR: true, expR: true });
+    emp(R_OWN, { rep: true, incR: true, expR: 'own' });
+    emp(R_NONE, { rep: true, incR: true });
+    emp(R_SAL, { rep: true, incR: true, sal: true });
+    emp(R_ALLSAL, { rep: true, incR: true, expR: true, sal: true });
+    emp(R_OWNSAL, { rep: true, incR: true, expR: 'own', sal: true });
+    emp(R_NOINC, { rep: true, expR: true, sal: true });
     emp(NOREP, { expR: true, sal: true, incR: true });
-    emp(INACT, { rep: true, expR: true, sal: true }, A, false);
-    emp(OTHB, { rep: true, expR: true, sal: true }, B);
+    emp(INACT, { rep: true, incR: true, expR: true, sal: true }, A, false);
+    emp(OTHB, { rep: true, incR: true, expR: 'own', sal: true }, B);
     await b.commit();
   });
 }
@@ -62,7 +65,7 @@ after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* */ } })
 beforeEach(seed);
 
 describe('6ז – דוח העובד: כל חלק לפי המתג שלו', () => {
-  it('"דוחות" לבד: רק הכנסות. אין הוצאות ואין משכורות', async () => {
+  it('"דוחות" + "רואה הכנסות" בלבד: רק הכנסות. אין הוצאות ואין משכורות', async () => {
     await can(R_NONE, 'rpi');
     await cannot(R_NONE, 'rpe');
     await cannot(R_NONE, 'rps');
@@ -112,7 +115,8 @@ describe('6ז – ניסיונות עקיפה', () => {
     for (const k of ['rpi', 'rpe', 'rps']) await cannot(INACT, k);
   });
   it('עובד מעסק אחר עם כל המתגים – חסום בעסק א, מותר בעסק שלו', async () => {
-    for (const k of ['rpi', 'rpe', 'rps']) { await cannot(OTHB, k, A); await can(OTHB, k, B); }
+    for (const k of ['rpi', 'rps']) { await cannot(OTHB, k, A); await can(OTHB, k, B); }
+    await cannot(OTHB, RPO(OTHB), A); await can(OTHB, RPO(OTHB), B);
   });
   it('מזהה דומה שלא תואם בדיוק (למשל "rpex_" או אות גדולה) – חסום לעובד', async () => {
     await prep(async (d) => { await d.doc(`b/${A}/wv/RPE_${M}`).set(body()); await d.doc(`b/${A}/wv/xrpi_${M}`).set(body()); });
@@ -127,6 +131,39 @@ describe('6ז – ניסיונות עקיפה', () => {
   it('עובד "רק שלו" מנסה לשנות לעצמו את המתג ל-true – חסום', async () => {
     await assertFails(db(R_OWN).doc(`b/${A}/staff/${R_OWN}`).update({ 'perms.expR': true }));
     await assertFails(db(R_SAL).doc(`b/${A}/staff/${R_SAL}`).update({ perms: Object.assign({}, NONE, { rep: true, sal: true, expR: true }) }));
+  });
+});
+
+describe('6ז – החלטות 7.11 (20:45): הכנסות דורשות incR; "רק שלו" רואה רק את מה שהזין (rpo_)', () => {
+  it('"דוחות" בלי "רואה הכנסות" – אין הכנסות בדוח, גם בבקשה ישירה; שאר החלקים לפי המתגים', async () => {
+    await cannot(R_NOINC, 'rpi');
+    await can(R_NOINC, 'rpe');
+    await can(R_NOINC, 'rps');
+  });
+  it('"רק שלו": קורא את rpo_ שלו בלבד', async () => {
+    await can(R_OWN, RPO(R_OWN));
+    await can(R_OWNSAL, RPO(R_OWNSAL));
+  });
+  it('עקיפה: "רק שלו" קורא rpo_ של עובד אחר – נחסם', async () => {
+    await cannot(R_OWN, RPO(R_ALL));
+    await cannot(R_OWN, RPO(R_OWNSAL));
+  });
+  it('עקיפה: "לא רואה" / בלי "דוחות" / עובד ישן – לא קורא אפילו את rpo_ של עצמו', async () => {
+    await cannot(R_NONE, RPO(R_NONE));
+    await prep((d) => d.doc(`b/${A}/wv/${RPO(NOREP)}`).set(body()));
+    await cannot(NOREP, RPO(NOREP));
+    await prep((d) => d.doc(`b/${A}/wv/${RPO(OLD)}`).set(body()));
+    await cannot(OLD, RPO(OLD));
+  });
+  it('עקיפה: מזהה עם תוספת אחרי ה-uid (rpo_<חודש>_<uid>x) – נחסם', async () => {
+    await prep((d) => d.doc(`b/${A}/wv/${RPO(R_OWN)}x`).set(body()));
+    await cannot(R_OWN, RPO(R_OWN) + 'x');
+  });
+  it('מנהל כותב rpo_ תקין; עובד לא כותב rpo_ (גם לא של עצמו); מזהה לא תקין – נחסם', async () => {
+    await assertSucceeds(db(MGR).doc(`b/${A}/wv/rpo_2026-10_${R_OWN}`).set(body('2026-10')));
+    await assertFails(db(R_OWN).doc(`b/${A}/wv/${RPO(R_OWN)}`).set(body()));
+    await assertFails(db(MGR).doc(`b/${A}/wv/rpo_2026-10_a.b`).set(body('2026-10')));
+    await assertFails(db(MGR).doc(`b/${A}/wv/rpo_2026-10_${R_OWN}`).set(body('2026-09')));
   });
 });
 
@@ -258,7 +295,19 @@ describe('6ז חלק ד – cashoutTotal: סכום ההוצאות מקופה ב�
     await prep(async (d) => { for (let n = 0; n < 7; n++) { const b = d.batch(); for (let k = 0; k < 430; k++) b.set(d.doc(`b/${A}/cashout/m${n}_${k}`), { uid: 'x', by: 'x', t: 1, reg: 'i_nl', d: DT, tm: '', a: 1, why: 'x', dep: '', src: 'x', zc: '', dp: '' }); await b.commit(); } });
     const r = await call(C_OWN, REQ); assert.equal(r.status, 'FAILED_PRECONDITION'); assert.equal(r.reason, 'too-many');
   });
-  it('בלי סגירה קודמת: כל מה שעוד לא שויך (zc ריק) מ-62 הימים האחרונים ועד סוף יום הסגירה', async () => {
+  it('החלון מתחיל בפתיחה האחרונה (zlast.od/otm): הוצאה שלפני הפתיחה – לא נספרת', async () => {
+    await prep((d) => d.doc(`b/${A}/zlast/i_yh`).set({ d: DY, tm: '20:00', id: 'zprev', uid: MGR, t: 1, od: DT, otm: '08:00' }));
+    const r = await call(C_OWN, REQ);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.s, 100); // k1 (היום 10:00) בלבד; k2 (אתמול 22:00) לפני הפתיחה; k3 (היום בלי שעה) – לא ברור, לא נספר
+  });
+  it('בסגירה הראשונה (אין פתיחה קודמת) – כל מה שלא שויך, גם ישן מאוד (בלי הגבלת ימים)', async () => {
+    await prep(async (d) => { await d.doc(`b/${A}/zlast/i_yh`).delete(); await d.doc(`b/${A}/cashout/old`).set({ uid: 'x', by: 'x', t: 1, reg: 'i_yh', d: '2025-01-01', tm: '', a: 3, why: 'x', dep: '', src: 'old', zc: '', dp: '' }); await d.doc(`b/${A}/cashout/done`).set({ uid: 'x', by: 'x', t: 1, reg: 'i_yh', d: '2025-01-02', tm: '', a: 7, why: 'x', dep: '', src: 'done', zc: 'z1', dp: '' }); });
+    const r = await call(C_OWN, REQ);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.s, 100 + 50 + 30 + 1000 + 8000 + 3); // ישן שלא שויך – נספר; שויך (zc) – לא
+  });
+  it('בלי סגירה קודמת: כל מה שעוד לא שויך (zc ריק) ועד סוף יום הסגירה', async () => {
     await prep((d) => d.doc(`b/${A}/zlast/i_yh`).delete());
     const r = await call(C_OWN, REQ);
     assert.equal(r.status, 'OK', r.text);

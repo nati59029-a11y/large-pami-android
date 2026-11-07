@@ -4,7 +4,8 @@
 // הפונקציה מחזירה רק מספרים: { s } = סכום ההוצאות מקופה בחלון, ו-{ diff } = ההפרש מול Z (אם נשלח z). בלי רשומות, בלי שמות, בלי מזהים.
 // סבב 2 (בודק, הערה 1): **השרת קובע את החלון**, לא הלקוח – מהסגירה האחרונה של הקופה (zlast/{reg}) ועד סוף יום הסגירה d.
 // הלקוח שולח רק קופה ותאריך (היום או אתמול, שעון ישראל). שעות, פתיחה ומזהה סגירה מהלקוח לא משפיעים – כך אי אפשר "לסרוק" דקה אחר דקה.
-// גבולות: חלון של 62 יום לכל היותר, עד 3000 מסמכים (מעל = שגיאה, לא סכום חלקי), ו-20 קריאות בשעה לכל משתמש.
+// החלון מתחיל בפתיחה האחרונה של הקופה (החלטת המשתמש 7.11, 20:45): הפתיחה שצורפה לסגירה האחרונה (zlast.od/otm), ואם אין – זמן הסגירה האחרונה.
+// הוצאה שלפני הגבול לא נספרת. בסגירה הראשונה (אין zlast) – כל מה שלא שויך. בכל מקרה עד 3000 מסמכים (מעל = שגיאה, לא סכום חלקי), ו-20 קריאות בשעה לכל משתמש.
 // הוצאה "לא ברורה" (מיום הסגירה הקודמת, בלי שעה) לא נספרת כאן – כמו באפליקציה כשלא סימנו אותה.
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireStaff, inputObject, hasPerm } = require('./roles');
@@ -37,7 +38,7 @@ function where(x, prev, d, tm) {
   return 'unc';
 }
 
-const MAX_DOCS = 3000, MAX_DAYS = 62, RL_MAX = 20, RL_MS = 3600000;
+const MAX_DOCS = 3000, RL_MAX = 20, RL_MS = 3600000;
 const ilDay = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 
 async function rateLimit(db, uid) {
@@ -73,9 +74,8 @@ async function cashoutTotal(request) {
     const p = { d: date(zl.get('d')), tm: time(zl.get('tm')), od: zl.get('od'), otm: zl.get('otm') };
     if (p.d && p.d <= d) prev = bound(p);
   }
-  const cut = ilDay(now - MAX_DAYS * 86400000);
-  const from = prev && prev.d > cut ? prev.d : cut;
-  const snap = await db.collection('cashout').where('d', '>=', from).limit(MAX_DOCS + 1).get();
+  const q = prev ? db.collection('cashout').where('d', '>=', prev.d) : db.collection('cashout').where('zc', '==', '');
+  const snap = await q.limit(MAX_DOCS + 1).get();
   if (snap.size > MAX_DOCS) throw new HttpsError('failed-precondition', 'יותר מדי הוצאות מקופה לבדיקה. פנה למנהל.', { reason: 'too-many' });
   let s = 0;
   snap.forEach((doc) => {

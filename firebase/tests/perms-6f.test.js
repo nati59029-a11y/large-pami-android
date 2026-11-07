@@ -117,7 +117,7 @@ describe('6ו – מסכי עובד: הכנסות, משכורות, דוחות (w
   it('כל מתג פותח רק את המסך שלו', async () => {
     await assertSucceeds(db(INC).doc(`b/${A}/wv/inc_${M}`).get());
     await assertSucceeds(db(SAL).doc(`b/${A}/wv/sal_${M}`).get());
-    await assertSucceeds(db(REP).doc(`b/${A}/wv/rpi_${M}`).get());
+    await assertFails(db(REP).doc(`b/${A}/wv/rpi_${M}`).get()); // 6ז: הכנסות בדוח דורשות גם incR (החלטת המשתמש 7.11)
   });
   it('עקיפה: עובד בלי "משכורות" קורא משכורות; בלי "הכנסות" קורא הכנסות; בלי "דוחות" קורא דוחות – נחסם', async () => {
     for (const u of [INC, REP, OLD, EALL]) await assertFails(db(u).doc(`b/${A}/wv/sal_${M}`).get());

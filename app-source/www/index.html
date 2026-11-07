@@ -288,7 +288,7 @@ function ensure(d){
  if(d.pmOff==null)d.pmOff=2;if(!d.theme)d.theme='paper';if(!d.fs)d.fs=1;d.v=3;
  ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});/* סגירת קופה (11.2026): S.zc = הסגירות שהוכנסו; תתי-קטגוריות "שובר קניה", "שובר זיכוי", "הנפקת שובר זיכוי" בשתי הקופות – רק אם חסרות (לפי שם). לא משנים ולא מוחקים קיים */if(!Array.isArray(d.zc))d.zc=[];if(!(d.zcMig>=1)){['i_yh','i_nl'].forEach(c=>{if(d.cats.find(x=>x.id===c))['שובר קניה','שובר זיכוי','הנפקת שובר זיכוי'].forEach(n=>{if(!d.subs.some(x=>x.cat===c&&heKey(x.name)===heKey(n)))d.subs.push({id:uid(),cat:c,name:n})})});d.zcMig=1}/* רצה פעם אחת: תת-קטגוריה שנמחקה אחר כך לא חוזרת */
  return d}
-function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
+function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. הוצאה חדשה בלי eu = המנהל שבמכשיר */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=t.t==='exp'&&typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
 function load(){try{const r=localStorage.getItem(KEY);if(r){S=ensure(JSON.parse(r));return true}}catch(e){}return false}
 
 /* ===== המרה מהאפליקציה הישנה ===== */
@@ -1789,6 +1789,7 @@ ACT.inbOk=async el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)retur
  if(b==='sup'&&!el.dataset.ok){const mm=dupMsg(dupInbox(it));if(mm.length)return ask('נראה שההוצאה כבר קיימת: '+mm.join('; ')+'. לאשר בכל זאת?',()=>{ACT.inbOk({dataset:{id:it.id,ok:'1',rq:'1'}})},'אשר בכל זאת')}
  const t={id:uid(),src:it.id,t:'exp',cat:cid,sub:sid,date,amt:rnd(a),plan:pMonth(d.plan)||(b==='sup'?payDef(sid,date):date.slice(0,7)),inv:s_(d.inv),note:('הוכנס על ידי '+it.by+(d.note&&b!=='free'?' · '+d.note:'')),desc:b==='free'?(s_(d.note)||inbName(it)):(cid==='p_exp'?inbName(it):''),kind:a<0?'credit':'inv',pays:[],file:it.file||''};if(d.reg&&zcRegOk(d.creg)){t.creg=d.creg;t.cowhy=s_(d.note).slice(0,300);t.ctm=zcTime(d.ctm)}
  if(b==='emp')t.pays=[{id:uid(),d:date,a:t.amt,m:d.m}];
+ /* 6ז: מי הזין – העובד ששלח (owner של המסמך ב-inbox) */t.eu=typeof it.ow==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(it.ow)?it.ow:'';
  if(b==='sup'&&d.dn&&!t.inv)t.dn=true;
  if(!el.dataset.aw&&(b==='sup'||b==='fixed')&&sid&&t.kind==='inv'&&!t.dn&&t.amt>0&&awFor(sid).length)return awOffer(t,t.file||null,()=>ACT.inbOk({dataset:{id:it.id,ok:'1',aw:'1'}}),e=>{if(e){if(!e.src)e.src=it.id;else if(e.src!==it.id){e.srcs=e.srcs||[];if(!e.srcs.includes(it.id))e.srcs.push(it.id)}}S.inbox=S.inbox.filter(x=>x.id!==it.id)});
  S.tx.push(t);
@@ -3395,7 +3396,7 @@ function supView(){const L=SUPW.L,M=ilMonth(),T=c=>rnd(sum((L||[]).filter(x=>!c|
 /* ===== 6ו (עדכון חוזה 16): מסכי עובד – הכנסות, משכורות, דוחות (האוסף wv, קריאה בלבד) =====
  הנתונים של המנהל נשמרים במכשיר שלו. לכן המכשיר של המנהל (רק במצב b, לא מנהל־על שנכנס לעסק, ורק כשיש בו תנועות) מפרסם מראה:
  wv/{inc|sal|rep}_YYYY-MM לחודש הנוכחי ולחודש הקודם. data = JSON. inc: [{d,c,n,a}] תנועות הכנסה. sal: [{d,n,c,a}] משכורות (קטגוריות beh 'emp', לפי חודש התשלום).
- דוח (6ז, מפוצל לפי רמה): rpi_ [[קטגוריה,סכום]] הכנסות; rpe_ [[קטגוריה,סכום]] הוצאות בלי משכורות (רק expR = כל העסק); rps_ מספר אחד – סך המשכורות (רק sal). סיכומים בלבד, בלי שמות.
+ דוח (6ז, מפוצל לפי רמה): rpi_ [[קטגוריה,סכום]] הכנסות (rep + incR); rpo_<חודש>_<uid> ההוצאות שהעובד הזין (rep + expR 'own', לפי t.eu); rpe_ [[קטגוריה,סכום]] הוצאות בלי משכורות (רק expR = כל העסק); rps_ מספר אחד – סך המשכורות (רק sal). סיכומים בלבד, בלי שמות.
  העובד קורא רק את המסמך שהמתג שלו פותח (החוקים: inc = incR, sal = sal, rep = rep). התצוגה בנויה מאותם רכיבים של מסכי המנהל (hero, טבלה). */
 var WVK=LK('lp-wv'),WVS={t:0,b:0,again:0,off:0},WVW={k:'',m:'',D:null,b:0,err:'',at:0};
 const WVT={inc:['הכנסות','incR','inc'],sal:['משכורות','sal','emp'],rep:['דוחות','rep','doc']};
@@ -3407,7 +3408,10 @@ function wvWant(){const o={},L=live(),cn=t=>(cat(t.cat)||{}).name||'—',emp=t=>
   const tot=(k,f)=>{const r={};L.filter(t=>t.t===k&&inM(t)&&(!f||f(t))).forEach(t=>{const n=cn(t);r[n]=rnd((r[n]||0)+num(t.amt))});return Object.entries(r).sort((a,b)=>b[1]-a[1])};
   /* 6ז: הדוח מפוצל לפי רמה (החוקים): rpi הכנסות (rep), rpe הוצאות בלי משכורות (rep + expR כל העסק), rps סך המשכורות (rep + sal) */
   o['rpi_'+m]=JSON.stringify(tot('inc'));o['rpe_'+m]=JSON.stringify(tot('exp',t=>!emp(t)));
-  o['rps_'+m]=JSON.stringify(rnd(sum(L.filter(t=>t.t==='exp'&&inM(t)&&emp(t)),t=>num(t.amt))))}
+  o['rps_'+m]=JSON.stringify(rnd(sum(L.filter(t=>t.t==='exp'&&inM(t)&&emp(t)),t=>num(t.amt))));
+  /* 6ז: rpo_<חודש>_<uid> – ההוצאות שהעובד עצמו הזין (t.eu), בלי משכורות. רק העובד הזה קורא (החוקים: uid במזהה) */
+  const eus=[...new Set(L.filter(t=>t.t==='exp'&&inM(t)&&!emp(t)&&typeof t.eu==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(t.eu)&&t.eu!==SY.uid).map(t=>t.eu))];
+  for(const u of eus)o['rpo_'+m+'_'+u]=JSON.stringify(tot('exp',t=>!emp(t)&&t.eu===u))}
  return o}
 function wvSched(){if(typeof WVS==='undefined'||!WVS||!isA())return;clearTimeout(WVS.t);WVS.t=setTimeout(()=>{wvSync().catch(e=>{try{console.warn('wv',e&&e.message)}catch(z){}})},4000)}
 async function wvSync(){if(!isA()||SY.sa||!bzB()||!S.tx.length||Date.now()<(WVS.off||0))return;if(WVS.b){WVS.again=1;return}WVS.b=1;try{
@@ -3423,8 +3427,8 @@ ACT.wvRefresh=()=>wvLoad();
 async function wvGet(id){try{const d=await fsx('/wv/'+id);return{v:JSON.parse(gv(d,'data')||'null'),at:gi(d,'at')}}catch(e){if(e.code!==404)throw e;return{v:null,at:0}}}
 async function wvLoad(){const k=WVW.k,m=WVW.m;if(WVW.b||!wvOn(k))return;WVW.b=1;WVW.err='';rerender();try{let D=null,at=0;
  if(k==='rep'){/* 6ז: קוראים רק את החלקים שהמתגים פותחים; החוקים חוסמים את השאר גם בבקשה ישירה */
-  const A=a=>Array.isArray(a)?a:[],I=await wvGet('rpi_'+m),E=wp('expR')?await wvGet('rpe_'+m):null,Sl=wp('sal')?await wvGet('rps_'+m):null;
-  D={i:A(I.v),e:E?A(E.v):null,s:Sl?num(Sl.v):null};at=Math.max(I.at||0,E?E.at||0:0,Sl?Sl.at||0:0)}
+  const A=a=>Array.isArray(a)?a:[],I=wp('incR')?await wvGet('rpi_'+m):null,E=wp('expR')?await wvGet('rpe_'+m):null,Sl=wp('sal')?await wvGet('rps_'+m):null,O=wpE()==='own'&&/^[A-Za-z0-9_-]{1,128}$/.test(SY.uid||'')?await wvGet('rpo_'+m+'_'+SY.uid):null;
+  D={i:I?A(I.v):null,e:E?A(E.v):null,s:Sl?num(Sl.v):null,o:O?A(O.v):null};at=Math.max(I?I.at||0:0,E?E.at||0:0,Sl?Sl.at||0:0,O?O.at||0:0)}
  else{const r=await wvGet(k+'_'+m);D=Array.isArray(r.v)?r.v:[];at=r.at}
  if(WVW.k===k&&WVW.m===m){WVW.D=D;WVW.at=at}}
  catch(e){WVW.err=e.offline?e.message:(e.code===403?'אין לך הרשאה למסך הזה':'הטעינה נכשלה: '+e.message)}
@@ -3435,9 +3439,9 @@ function wvView(){const k=WVW.k,T=WVT[k]?WVT[k][0]:'',head=`<button class="btn g
  const D=WVW.D;if(!D)return{t:T,s:mfmt(WVW.m),h:head+mb+(WVW.err?`<div class="card"><p class="note">${esc(WVW.err)}</p><button class="btn g" data-a="wvRefresh">נסה שוב</button></div>`:'<p class="note" style="padding:16px">טוען...</p>')};
  const upd=`<p class="note">${WVW.at?'עודכן מהמנהל: '+esc(new Date(WVW.at).toLocaleString('he-IL'))+' · ':'המנהל עוד לא פרסם נתונים לחודש הזה · '}קריאה בלבד</p>`;
  const hero=(l,v,n,bg)=>`<div class="hero" style="background:${bg}"><small>${l} · ${esc(mfmt(WVW.m))}</small><div class="big">${ils(v)}</div>${n==null?'':`<small>${n} תנועות</small>`}</div>`;
- let h;if(k==='rep'){const I=Array.isArray(D.i)?D.i:[],hasE=Array.isArray(D.e),hasS=D.s!=null,E=(hasE?D.e:[]).concat(hasS&&hasE?[['משכורות (סה״כ)',D.s]]:[]),ti=rnd(sum(I,x=>num(x[1]))),te=rnd(sum(E,x=>num(x[1])));
+ let h;if(k==='rep'){const hasI=Array.isArray(D.i),I=hasI?D.i:[],hasO=Array.isArray(D.o),hasE=Array.isArray(D.e),hasS=D.s!=null,E=(hasE?D.e:[]).concat(hasS&&hasE?[['משכורות (סה״כ)',D.s]]:[]),ti=rnd(sum(I,x=>num(x[1]))),te=rnd(sum(E,x=>num(x[1])));
   const tb=(t,L,tot)=>`<div class="sec"><h3>${t}</h3></div><div class="tw"><table><thead><tr><th>קטגוריה</th><th class="n">סה״כ</th></tr></thead><tbody>${L.map(x=>`<tr><td>${esc(String(x[0]))}</td><td class="n">${ils(num(x[1]))}</td></tr>`).join('')||'<tr><td colspan="2" class="empty">אין תנועות</td></tr>'}</tbody><tfoot><tr><td>סה״כ</td><td class="n">${ils(tot)}</td></tr></tfoot></table></div>`;
-  h=(hasE&&hasS?hero('הכנסות פחות הוצאות',rnd(ti-te),null,ti-te>=0?'var(--inc)':'var(--exp)'):hero('סך ההכנסות',ti,null,'var(--inc)'))+tb('הכנסות',I,ti)+(hasE?tb(hasS?'הוצאות':'הוצאות (בלי משכורות)',E,te):'')+(!hasE&&hasS?tb('משכורות',[['משכורות (סה״כ)',D.s]],rnd(D.s)):'')+(hasE&&hasS?'':`<p class="note">חלק מהנתונים לא מוצג לפי ההרשאות שלך.</p>`)}
+  h=(hasI&&hasE&&hasS?hero('הכנסות פחות הוצאות',rnd(ti-te),null,ti-te>=0?'var(--inc)':'var(--exp)'):hasI?hero('סך ההכנסות',ti,null,'var(--inc)'):'')+(hasI?tb('הכנסות',I,ti):'')+(hasO?tb('ההוצאות שהזנת',D.o,rnd(sum(D.o,x=>num(x[1])))):'')+(hasE?tb(hasS?'הוצאות':'הוצאות (בלי משכורות)',E,te):'')+(!hasE&&hasS?tb('משכורות',[['משכורות (סה״כ)',D.s]],rnd(D.s)):'')+(hasI&&hasE&&hasS?'':`<p class="note">חלק מהנתונים לא מוצג לפי ההרשאות שלך.</p>`)}
  else{const L=D,tot=rnd(sum(L,x=>num(x.a))),inc=k==='inc';
   h=hero(inc?'סך ההכנסות':'סך המשכורות',tot,L.length,inc?'var(--inc)':'var(--exp)')+`<div class="tw"><table><thead><tr><th>תאריך</th><th>${inc?'קטגוריה':'עובד'}</th><th>${inc?'כרטיס':'קטגוריה'}</th><th class="n">סכום</th></tr></thead><tbody>${L.map(x=>`<tr><td>${esc(dfmt(String(x.d||'')))}</td><td>${esc(String((inc?x.c:x.n)||''))}</td><td>${esc(String((inc?x.n:x.c)||''))}</td><td class="n">${ils(num(x.a))}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">אין תנועות בחודש הזה</td></tr>'}</tbody></table></div>`}
  return{t:T,s:mfmt(WVW.m),h:head+mb+upd+h}}
