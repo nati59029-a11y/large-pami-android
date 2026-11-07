@@ -9,6 +9,9 @@ name: Build Large Pami
 #   (b) a manual run from main with the "publish" box ticked (default: not ticked).
 on:
   push:
+    # A push that changes only workflow files does not build or publish (no empty update to phones).
+    paths-ignore:
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       publish:
