@@ -241,8 +241,8 @@ describe('פונקציות שרת (שלב 3)', () => {
 
     it('תקציב הזמן בשרת: 100 שניות לחשבונית, למוצר ולסגירת קופה, 135 למשוב – תמיד פחות ממה שהטלפון מחכה (120 / 150)', () => {
       const scan = require('../functions/lib/scan');
-      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, zreport: 100000, opening: 100000, deposit: 100000, cashout: 100000, transfer: 100000, recipe: 135000 });
-      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000 });
+      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, zreport: 100000, opening: 100000, deposit: 100000, cashout: 100000, transfer: 100000, recipe: 135000, classify: 100000 });
+      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000, classify: 120000 });
       for (const k of Object.keys(scan.KINDS)) assert.ok(scan.KINDS[k].budgetMs < scan.PHONE_WAIT_MS[k], k);
       // מחוץ לאמולטור אין קיצור זמנים, גם אם מישהו הגדיר SCAN_TIME_SCALE
       const prevE = process.env.FUNCTIONS_EMULATOR, prevS = process.env.SCAN_TIME_SCALE;
@@ -603,7 +603,7 @@ describe('פונקציות שרת (שלב 3)', () => {
 
   // ---------------- 6. כיסוי ----------------
   it('כיסוי: 4 הפונקציות קיימות בשמות המדויקים, וכל אחת נבדקה מול 5 התפקידים עם התוצאה הצפויה', () => {
-    const exported = Object.keys(require('../functions/index.js')).filter((n) => !['sendPromoToLine', 'expirePromosOnLine', 'publishLineItem', 'removeLineItem', 'getLineState', 'tzintukJoin', 'listLineFiles', 'previewVoice', 'getLineBoard', 'getLineAudio', 'extendLineItem', 'restoreLineItem', 'createBusiness', 'inviteBusinessAdmin', 'completeInvite', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'setBusinessRanks', 'setStaffPerms', 'addStaff', 'setStaffActive', 'syncLegacyAdmin', 'syncLegacyStaff', 'cashoutTotal'].includes(n)).sort(); // פונקציות ימות נבדקות ב-60-yemot.js, ב-61-yemot-line.js וב-62-voice.js; פונקציות הניהול של ריבוי עסקים – ב-multi-business-server.test.js; cashoutTotal – ב-perms-6g.test.js
+    const exported = Object.keys(require('../functions/index.js')).filter((n) => !['sendPromoToLine', 'expirePromosOnLine', 'publishLineItem', 'removeLineItem', 'getLineState', 'tzintukJoin', 'listLineFiles', 'previewVoice', 'getLineBoard', 'getLineAudio', 'extendLineItem', 'restoreLineItem', 'createBusiness', 'inviteBusinessAdmin', 'completeInvite', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setScanQuota', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'setBusinessRanks', 'setStaffPerms', 'addStaff', 'setStaffActive', 'syncLegacyAdmin', 'syncLegacyStaff', 'cashoutTotal'].includes(n)).sort(); // פונקציות ימות נבדקות ב-60-yemot.js, ב-61-yemot-line.js וב-62-voice.js; פונקציות הניהול של ריבוי עסקים – ב-multi-business-server.test.js; cashoutTotal – ב-perms-6g.test.js
     assert.deepEqual(exported, [...FN].sort());
     const missing = [];
     for (const fn of FN) for (const role of H.ROLES) if (!RESULTS.find((r) => r.fn === fn && r.role === role && r.status === ROLE_EXPECT[role])) missing.push(`${fn}/${role}`);

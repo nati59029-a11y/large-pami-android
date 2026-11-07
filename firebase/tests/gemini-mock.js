@@ -30,12 +30,26 @@ const ANSWERS = {
 };
 
 // delayMs: כמה זמן שרת הדמה "חושב" לפני שהוא עונה לבקשת זיהוי (לבדיקת תקציב הזמן)
-const state = { mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0 };
-function reset() { state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+// סריקה אחידה: תשובות classify לדוגמה, לכל סוג
+const CLASSIFY = {
+  invoice: { type: 'invoice', type_confidence: 0.95, z_part: null, page_number: 1, page_count: 2, fields: { supplier: 'ספק דמה בע"מ', supplier_id: '512345678', number: '123456', date: '2026-10-28', total_before_vat: 100, vat_amount: 18, total_with_vat: 118 }, confidence: { supplier: 0.9, supplier_id: 0.95, number: 0.99, date: 0.5, total_before_vat: 0.9, vat_amount: 0.9, total_with_vat: 0.95 } },
+  delivery_note: { type: 'delivery_note', type_confidence: 0.9, fields: { supplier: 'ספק', number: '77', date: null, total_with_vat: 50 }, confidence: { number: 0.9 } },
+  receipt: { type: 'receipt', type_confidence: 0.9, fields: { supplier: 'ספק', number: '9', date: '2026-11-01', total_with_vat: 118, related_invoice: '123456' }, confidence: {} },
+  credit_note: { type: 'credit_note', type_confidence: 0.9, fields: { supplier: 'ספק', number: '5', date: '2026-11-01', total_before_vat: 50, vat_amount: '9', total_with_vat: '59.00' }, confidence: {} },
+  cashout: { type: 'cashout', type_confidence: 0.9, fields: { register: '6346053', store: 'יהודה הנשיא', date: '2026-10-20', time: '09:02', amount: 4650 }, confidence: { amount: 0.99 } },
+  deposit: { type: 'deposit', type_confidence: 0.9, fields: { date: '2026-10-17', time: '22:26', amount: 25000, bank: 'דיסקונט', account: '611131' }, confidence: {} },
+  transfer: { type: 'transfer', type_confidence: 0.9, fields: { transfers: [{ amount: 1234.56, date: '2026-11-02', payee_name: 'ספק', payee_account: { bank: '12', branch: '345', account: '67890' }, reference: 'R-1' }] }, confidence: {} },
+  zreport: { type: 'zreport', type_confidence: 0.9, z_part: 'middle', fields: { open_float: 8919, cash_sales: 3260, cash_out: -10615, cash_in_drawer: 1564 }, confidence: {} },
+  opening: { type: 'opening', type_confidence: 0.9, fields: { register: '6328947', store: 'נחל לכיש', date: '2026-10-20', time: '09:11', total: 970.3 }, confidence: {} },
+  unknown: { type: 'unknown', type_confidence: 0.3, fields: {}, confidence: {} },
+};
+const state = { mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, classify: null };
+function reset() { state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
+  if (s.startsWith('סווג את המסמך')) return 'classify'; // סריקה אחידה – לפני כל השאר, כי ההנחיה מזכירה את כל הסוגים
   if (s.includes('אישור על העברה בנקאית')) return 'transfer';
   if (s.includes('אישור הפקדת מזומן')) return 'deposit';
   if (s.includes('פתק "הוצאת מזומן מהקופה"')) return 'cashout';
@@ -49,8 +63,10 @@ function kindOf(body) {
 }
 
 // התשובה הגולמית שהשרת מחזיר לבקשה – נחשפת לבדיקה, כדי להשוות לתוצאה של הפונקציה
+// classify: התשובה נקבעת בבדיקה (state.classify), ובלי – חשבונית רגילה
 function rawAnswer(kind) {
-  let text = JSON.stringify(ANSWERS[kind] || { ok: true });
+  if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
+  let text = JSON.stringify(kind === 'classify' ? (state.classify || CLASSIFY.invoice) : (ANSWERS[kind] || { ok: true }));
   if (state.fenced) text = '```json\n' + text + '\n```';
   const parts = state.split ? [{ text: text.slice(0, 10) }, { text: text.slice(10) }] : [{ text }];
   return { candidates: [{ content: { parts, role: 'model' }, finishReason: 'STOP' }] };
@@ -93,4 +109,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { start, stop, reset, state, rawAnswer, ANSWERS, MODELS, PORT };
+module.exports = { start, stop, reset, state, rawAnswer, ANSWERS, CLASSIFY, MODELS, PORT };
