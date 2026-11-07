@@ -115,8 +115,9 @@ describe('שלב 1 – classify: הרשאות בשרת', () => {
       const x = r.result.result;
       assert.equal(x.allowed, false, k); assert.equal(x.reason, 'no-perm'); assert.equal(x.toManager, true);
       assert.deepEqual(x.fields, {}); assert.deepEqual(x.confidence, {}); assert.equal(x.page, null);
-      for (const v of Object.values(GM.CLASSIFY[k].fields)) if (v != null && String(v).length > 2) assert.ok(!r.text.includes(String(v)), k + ' דלף ' + v);
+      for (const v of Object.values(GM.CLASSIFY[k].fields)) if (v != null && String(v).length > 2) assert.ok(!JSON.stringify(r.result.result).includes(String(v)), k + ' דלף ' + v);
       assert.ok(!r.text.includes('ספק'), k + ': שם הספק דלף');
+      assert.equal(r.result.text, undefined, 'בלי טקסט גולמי'); assert.equal(r.result.data, undefined);
     }
     // אבל Z – מותר לו (incW)
     GM.state.classify = GM.CLASSIFY.zreport;
