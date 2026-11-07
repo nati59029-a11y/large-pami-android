@@ -3851,6 +3851,7 @@ function coIn(x,prev,d,tm){if(!x.d||!d||x.d>d)return 'out';if(x.d===d&&x.tm&&tm&
 function coOldX(x,b){if(!b||!x||!x.d)return false;if(x.d<b.d)return true;return x.d===b.d&&!!x.tm&&!!b.tm&&x.tm<=b.tm}
 const coOldMsg=b=>'אי אפשר לרשום הוצאה מקופה מלפני הפתיחה האחרונה של הקופה ('+dfmt(b.d)+(b.tm?' '+b.tm:'')+'). התקופה הזו כבר נסגרה. בדוק את התאריך והשעה, או פנה למנהל.';
 async function coOldB(reg){if(!zcRegOk(reg))return null;if(isA())return zcB(zcPrev(reg,'9999-12-31','99:99',''));
+ /* legacy (שורש): בלי קריאה נוספת (רצף הבקשות כמו בגרסה המותקנת) – רק מה שכבר נטען; החוקים בשרת עדיין דוחים */if(!bzB())return ZL[reg]?zcB(ZL[reg]):null;
  try{const z=zlParse(await fsx('/zlast/'+reg));ZL[reg]=z;return zcB(z)}catch(e){if(e.code===404){ZL[reg]=null;return null}return ZL[reg]?zcB(ZL[reg]):null}}
 async function coOldChk(reg,d,tm){const b=await coOldB(reg);return coOldX({d,tm:zcTime(tm)},b)?coOldMsg(b):''}
 /* 6ז (עדכון חוזה 17): עובד שרואה רק את ההוצאות שלו, או לא רואה – לא יכול לסכום את ההוצאות של אחרים. הסכום של כל ההוצאות מקופה בחלון מגיע מהשרת
