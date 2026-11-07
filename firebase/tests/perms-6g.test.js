@@ -158,16 +158,19 @@ async function call(uid, data) {
   return { status: json && json.error ? json.error.status : (r.ok ? 'OK' : 'HTTP_' + r.status), reason: json && json.error && json.error.details && json.error.details.reason, result: json && json.result, text };
 }
 const C_OWN = 'c_own', C_NONE = 'c_none', C_NOINC = 'c_noinc', C_ALL = 'c_all', C_OTHB = 'c_othb', C_OFF = 'c_off';
-const REQ = { reg: 'i_yh', d: '2026-11-05', tm: '21:00', z: 300 };
-// הוצאות מקופה (של עובדים שונים). בחלון של i_yh מ-4.11 20:00 עד 5.11 21:00: 100 (אחר) + 50 (אחר) + 30 (העובד עצמו) = 180
+// סבב 2: השרת מקבל רק את היום או אתמול (שעון ישראל), ולכן התאריכים יחסיים להיום
+const ilDay = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+const DT = ilDay(Date.now()), DY = ilDay(Date.now() - 864e5), D2 = ilDay(Date.now() - 2 * 864e5), DN = ilDay(Date.now() + 864e5);
+const REQ = { reg: 'i_yh', d: DT, z: 300 };
+// הוצאות מקופה (של עובדים שונים). הסגירה הקודמת: אתמול 20:00. החלון: עד סוף היום. 100 (אחר) + 50 (אחר) + 30 (העובד עצמו) = 180
 const CO = [
-  ['k1', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: '2026-11-05', tm: '10:00', a: 100, why: 'סיבה-סודית-1' }],
-  ['k2', { uid: 'other2', by: 'יוסי סודי', reg: 'i_yh', d: '2026-11-04', tm: '22:00', a: 50, why: 'סיבה-סודית-2' }],
-  ['k3', { uid: C_OWN, by: 'אני', reg: 'i_yh', d: '2026-11-05', tm: '', a: 30, why: 'שלי' }],
-  ['k4', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: '2026-11-04', tm: '19:00', a: 1000, why: 'לפני החלון' }],
-  ['k5', { uid: 'someone', by: 'דנה סודית', reg: 'i_nl', d: '2026-11-05', tm: '10:00', a: 2000, why: 'קופה אחרת' }],
-  ['k6', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: '2026-11-05', tm: '22:00', a: 4000, why: 'אחרי הסגירה' }],
-  ['k7', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: '2026-11-04', tm: '', a: 8000, why: 'לא ברור' }],
+  ['k1', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: DT, tm: '10:00', a: 100, why: 'סיבה-סודית-1' }],
+  ['k2', { uid: 'other2', by: 'יוסי סודי', reg: 'i_yh', d: DY, tm: '22:00', a: 50, why: 'סיבה-סודית-2' }],
+  ['k3', { uid: C_OWN, by: 'אני', reg: 'i_yh', d: DT, tm: '', a: 30, why: 'שלי' }],
+  ['k4', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: DY, tm: '19:00', a: 1000, why: 'לפני החלון' }],
+  ['k5', { uid: 'someone', by: 'דנה סודית', reg: 'i_nl', d: DT, tm: '10:00', a: 2000, why: 'קופה אחרת' }],
+  ['k6', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: DN, tm: '09:00', a: 4000, why: 'אחרי יום הסגירה' }],
+  ['k7', { uid: 'someone', by: 'דנה סודית', reg: 'i_yh', d: DY, tm: '', a: 8000, why: 'לא ברור' }],
 ];
 async function seedCash() {
   await prep(async (d) => {
@@ -185,7 +188,7 @@ async function seedCash() {
     emp(C_OTHB, { expR: true, incW: true }, B);
     emp(C_OFF, { incW: true }, 'biz-off');
     b.set(d.doc('users/' + MGR), { bizId: A, role: 'admin', active: true, bizStatus: 'active', email: MGR + '@example.invalid', createdAt: 1 });
-    b.set(d.doc(`b/${A}/zlast/i_yh`), { d: '2026-11-04', tm: '20:00', id: 'zprev', uid: MGR, t: 1, od: '', otm: '' });
+    b.set(d.doc(`b/${A}/zlast/i_yh`), { d: DY, tm: '20:00', id: 'zprev', uid: MGR, t: 1, od: '', otm: '' });
     for (const [id, x] of CO) b.set(d.doc(`b/${A}/cashout/${id}`), Object.assign({ t: 1, dep: '', src: id, zc: '', dp: '' }, x));
     await b.commit();
   });
@@ -200,7 +203,7 @@ describe('6ז חלק ד – cashoutTotal: סכום ההוצאות מקופה ב�
     assert.deepEqual(r.result, { s: 180, diff: 120 });
   });
   it('עובד "לא רואה" מקבל אותו סכום; בלי z – רק s', async () => {
-    const r = await call(C_NONE, { reg: 'i_yh', d: '2026-11-05', tm: '21:00' });
+    const r = await call(C_NONE, { reg: 'i_yh', d: DT });
     assert.equal(r.status, 'OK', r.text);
     assert.deepEqual(r.result, { s: 180 });
   });
@@ -234,16 +237,31 @@ describe('6ז חלק ד – cashoutTotal: סכום ההוצאות מקופה ב�
     const s = await call(C_OWN, REQ); assert.equal(s.status, 'PERMISSION_DENIED'); assert.equal(s.reason, 'biz-suspended');
     const f = await call(C_OFF, REQ); assert.equal(f.status, 'FAILED_PRECONDITION'); assert.equal(f.reason, 'feature-off');
   });
-  it('קלט לא תקין (קופה, תאריך, שעה, z, מזהה) – נדחה', async () => {
-    for (const [x, why] of [[{ reg: 'x' }, 'bad-reg'], [{ d: '5.11.2026' }, 'bad-date'], [{ tm: '25:00' }, 'bad-time'], [{ z: 'abc' }, 'bad-z'], [{ id: '../x' }, 'bad-id']]) {
+  it('קלט לא תקין (קופה, תאריך, z) – נדחה; תאריך שאינו היום או אתמול – נדחה', async () => {
+    for (const [x, why] of [[{ reg: 'x' }, 'bad-reg'], [{ d: '5.11.2026' }, 'bad-date'], [{ d: D2 }, 'bad-date'], [{ d: DN }, 'bad-date'], [{ z: 'abc' }, 'bad-z']]) {
       const r = await call(C_OWN, Object.assign({}, REQ, x));
       assert.equal(r.status, 'INVALID_ARGUMENT', JSON.stringify(x)); assert.equal(r.reason, why);
     }
   });
-  it('בלי סגירה קודמת: כל מה שעוד לא שויך (zc ריק) עד תאריך הסגירה', async () => {
+  it('עקיפה: הלקוח לא קובע את החלון – שעה, פתיחה ומזהה סגירה מהלקוח לא משנים את הסכום', async () => {
+    for (const x of [{ tm: '09:00' }, { tm: '10:30', od: DT, otm: '11:00' }, { id: 'zprev' }, { tm: '00:01' }]) {
+      const r = await call(C_OWN, Object.assign({}, REQ, x));
+      assert.equal(r.status, 'OK', r.text); assert.equal(r.result.s, 180, JSON.stringify(x));
+    }
+  });
+  it('עקיפה: יותר מ-20 קריאות בשעה לעובד – נחסם (rate-limit); עובד אחר לא מושפע', async () => {
+    for (let k = 0; k < 20; k++) assert.equal((await call(C_OWN, REQ)).status, 'OK');
+    const r = await call(C_OWN, REQ); assert.equal(r.status, 'RESOURCE_EXHAUSTED'); assert.equal(r.reason, 'rate-limit');
+    assert.equal((await call(C_NONE, REQ)).status, 'OK');
+  });
+  it('יותר מ-3000 הוצאות בחלון – שגיאה (לא סכום חלקי)', async () => {
+    await prep(async (d) => { for (let n = 0; n < 7; n++) { const b = d.batch(); for (let k = 0; k < 430; k++) b.set(d.doc(`b/${A}/cashout/m${n}_${k}`), { uid: 'x', by: 'x', t: 1, reg: 'i_nl', d: DT, tm: '', a: 1, why: 'x', dep: '', src: 'x', zc: '', dp: '' }); await b.commit(); } });
+    const r = await call(C_OWN, REQ); assert.equal(r.status, 'FAILED_PRECONDITION'); assert.equal(r.reason, 'too-many');
+  });
+  it('בלי סגירה קודמת: כל מה שעוד לא שויך (zc ריק) מ-62 הימים האחרונים ועד סוף יום הסגירה', async () => {
     await prep((d) => d.doc(`b/${A}/zlast/i_yh`).delete());
     const r = await call(C_OWN, REQ);
     assert.equal(r.status, 'OK', r.text);
-    assert.equal(r.result.s, 100 + 50 + 30 + 1000 + 8000); // k4 ו-k7 נכנסים כשאין סגירה קודמת; k5 קופה אחרת; k6 אחרי
+    assert.equal(r.result.s, 100 + 50 + 30 + 1000 + 8000); // k4 ו-k7 נכנסים כשאין סגירה קודמת; k5 קופה אחרת; k6 אחרי יום הסגירה
   });
 });

@@ -2,7 +2,9 @@
 // 6ז (עדכון חוזה 17, החלטת המשתמש 7.11): סכום ההוצאות מקופה לסגירת קופה – מחושב בשרת.
 // עובד עם "רואה הוצאות: רק שלו / לא רואה" לא קורא הוצאות של אחרים, אבל הסגירה חייבת את הסכום של כולן.
 // הפונקציה מחזירה רק מספרים: { s } = סכום ההוצאות מקופה בחלון, ו-{ diff } = ההפרש מול Z (אם נשלח z). בלי רשומות, בלי שמות, בלי מזהים.
-// החלון זהה ל-coChk/coIn/zcB באפליקציה (מצד העובד): מהסגירה האחרונה של הקופה (zlast/{reg}) ועד הסגירה הזו.
+// סבב 2 (בודק, הערה 1): **השרת קובע את החלון**, לא הלקוח – מהסגירה האחרונה של הקופה (zlast/{reg}) ועד סוף יום הסגירה d.
+// הלקוח שולח רק קופה ותאריך (היום או אתמול, שעון ישראל). שעות, פתיחה ומזהה סגירה מהלקוח לא משפיעים – כך אי אפשר "לסרוק" דקה אחר דקה.
+// גבולות: חלון של 62 יום לכל היותר, עד 3000 מסמכים (מעל = שגיאה, לא סכום חלקי), ו-20 קריאות בשעה לכל משתמש.
 // הוצאה "לא ברורה" (מיום הסגירה הקודמת, בלי שעה) לא נספרת כאן – כמו באפליקציה כשלא סימנו אותה.
 const { HttpsError } = require('firebase-functions/v2/https');
 const { requireStaff, inputObject, hasPerm } = require('./roles');
@@ -11,7 +13,6 @@ const T = require('./tenant');
 const REGS = ['i_yh', 'i_nl'];
 const D_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
-const ID_RE = /^[A-Za-z0-9_-]{1,120}$/;
 const bad = (r) => { throw new HttpsError('invalid-argument', 'קלט לא תקין', { reason: r }); };
 const date = (v) => (typeof v === 'string' && D_RE.test(v) ? v : '');
 const time = (v) => (typeof v === 'string' && TM_RE.test(v) ? v : '');
@@ -36,6 +37,20 @@ function where(x, prev, d, tm) {
   return 'unc';
 }
 
+const MAX_DOCS = 3000, MAX_DAYS = 62, RL_MAX = 20, RL_MS = 3600000;
+const ilDay = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+
+async function rateLimit(db, uid) {
+  const ref = db.doc('fn_rate/cashoutTotal_' + uid); // לא נגיש מהאפליקציה (אין כלל = חסום)
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref), now = Date.now();
+    const L = (s.exists && Array.isArray(s.get('t')) ? s.get('t') : []).filter((t) => typeof t === 'number' && now - t < RL_MS);
+    if (L.length >= RL_MAX) throw new HttpsError('resource-exhausted', 'יותר מדי בדיקות בשעה האחרונה. נסה שוב מאוחר יותר.', { reason: 'rate-limit' });
+    L.push(now);
+    tx.set(ref, { t: L });
+  });
+}
+
 async function cashoutTotal(request) {
   const who = await requireStaff(request, { feature: 'cashClose' });
   // עובד: רק עם "מזין הכנסות" (סגירת קופה). בעסק legacy – כמו היום (כל עובד פעיל).
@@ -45,31 +60,30 @@ async function cashoutTotal(request) {
   const i = inputObject(request);
   const reg = REGS.includes(i.reg) ? i.reg : bad('bad-reg');
   const d = date(i.d) || bad('bad-date');
-  if (i.tm != null && i.tm !== '' && !time(i.tm)) bad('bad-time');
-  if (i.id != null && i.id !== '' && !(typeof i.id === 'string' && ID_RE.test(i.id))) bad('bad-id');
+  const now = Date.now(), today = ilDay(now), yday = ilDay(now - 86400000);
+  if (d !== today && d !== yday) bad('bad-date');
   let z = null;
   if (i.z != null && i.z !== '') { z = Number(i.z); if (!isFinite(z) || Math.abs(z) > 1e7) bad('bad-z'); z = rnd(Math.abs(z)); }
-  const tm = time(i.tm), id = typeof i.id === 'string' ? i.id : '';
   const db = T.tdb();
-  // הסגירה הקודמת – zlast/{reg}, כמו אצל העובד באפליקציה
+  if (!who.superadmin) await rateLimit(db, who.uid);
+  // הסגירה הקודמת – zlast/{reg} (רק אם היא לפני יום הסגירה, או באותו יום). החלון נגמר בסוף היום d.
   let prev = null;
   const zl = await db.doc('zlast/' + reg).get();
   if (zl.exists) {
-    const p = { d: date(zl.get('d')), tm: time(zl.get('tm')), id: String(zl.get('id') || ''), od: zl.get('od'), otm: zl.get('otm') };
-    if (p.d && p.id !== id && key(p) < key({ d, tm })) prev = bound(p);
+    const p = { d: date(zl.get('d')), tm: time(zl.get('tm')), od: zl.get('od'), otm: zl.get('otm') };
+    if (p.d && p.d <= d) prev = bound(p);
   }
-  const end = bound({ d, tm, od: i.od, otm: i.otm });
-  // שאילתה בשדה אחד (בלי אינדקס מורכב), והסינון כאן
-  const snap = prev
-    ? await db.collection('cashout').where('d', '>=', prev.d).get()
-    : await db.collection('cashout').where('zc', '==', '').get();
+  const cut = ilDay(now - MAX_DAYS * 86400000);
+  const from = prev && prev.d > cut ? prev.d : cut;
+  const snap = await db.collection('cashout').where('d', '>=', from).limit(MAX_DOCS + 1).get();
+  if (snap.size > MAX_DOCS) throw new HttpsError('failed-precondition', 'יותר מדי הוצאות מקופה לבדיקה. פנה למנהל.', { reason: 'too-many' });
   let s = 0;
   snap.forEach((doc) => {
     const g = (k) => doc.get(k);
     const a = Number(g('a'));
     if (g('reg') !== reg || !(a > 0 && a <= 1e6)) return;
     const x = { d: date(g('d')), tm: time(g('tm')), zc: typeof g('zc') === 'string' ? g('zc') : '' };
-    if (where(x, prev, end.d, end.tm) === 'in') s += a;
+    if (where(x, prev, d, '') === 'in') s += a;
   });
   s = rnd(s);
   const out = { s };

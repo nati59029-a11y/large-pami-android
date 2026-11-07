@@ -76,7 +76,42 @@ jobs:
 
       - name: Install functions dependencies
         working-directory: firebase/functions
-        run: npm ci --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # ---------- Hosting: האתר והבנייה – לפני שהסוד נכתב לקובץ ----------
+      - name: Hosting site (variable, never the live-update site)
+        if: inputs.what == 'hosting'
+        id: site
+        env:
+          SITE: ${{ inputs.project == 'largpeami' && vars.DESKTOP_SITE || vars.DESKTOP_SITE_TEST }}
+          LIVE: ${{ vars.LIVE_UPDATE_SITE }}
+          P: ${{ inputs.project }}
+        run: |
+          [ -n "$SITE" ] || { echo "::error::חסר המשתנה DESKTOP_SITE (ייצור) או DESKTOP_SITE_TEST (בדיקה)"; exit 1; }
+          echo "$SITE" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::שם אתר לא תקין"; exit 1; }
+          # fail-closed (סבב 2): גם כש-LIVE_UPDATE_SITE לא מוגדר – השם חייב לכלול desktop, ולא יכול להיות האתר הראשי של הפרויקט
+          case "$SITE" in *desktop*) ;; *) echo "::error::שם אתר גרסת המחשב חייב לכלול desktop (הגנה מפני דריסת אתר אחר)"; exit 1 ;; esac
+          [ "$SITE" != "$P" ] || { echo "::error::אסור לפרסם לאתר הראשי של הפרויקט"; exit 1; }
+          [ -z "$LIVE" ] || [ "$SITE" != "$LIVE" ] || { echo "::error::אסור לפרסם את גרסת המחשב לאתר של העדכון החי"; exit 1; }
+          echo "site=$SITE" >> "$GITHUB_OUTPUT"
+
+      - name: Build the web files (before the service account exists on disk)
+        if: inputs.what == 'hosting'
+        env:
+          SITE_BACKEND: ${{ inputs.project == 'largpeami' && 'off' || 'test' }}
+          P: ${{ inputs.project }}
+        run: |
+          if [ "$P" = "largpeami-test-f4691" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then echo "::error::גרסת מחשב לפרויקט הבדיקה נבנית רק מ-feature/multi-business (prepare.js לא מחליף פרויקט ב-main)"; exit 1; fi
+          rm -rf app && mkdir app && cp -a app-source/. app/
+          # סבב 2: הבנייה רצה לפני שחשבון השירות נכתב לקובץ, ובלי סקריפטי התקנה של חבילות
+          cd app && npm install --ignore-scripts --no-audit --no-fund && node scripts/prepare.js
+          if [ "$P" = "largpeami" ] && grep -q "largpeami-test-f4691" www/index.html; then echo "::error::גרסת הייצור מפנה לפרויקט הבדיקה"; exit 1; fi
+          rm -rf ../firebase/hosting-public && cp -a www ../firebase/hosting-public
+          echo "קבצים לפרסום: $(find ../firebase/hosting-public -type f | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # סבב 2: כל ההתקנות לפני שהסוד נכתב לקובץ (כולל firebase-tools, שלא יורד דרך npx אחרי זה)
+      - name: Install firebase-tools (before the service account exists on disk)
+        run: npm install -g firebase-tools@15.34.1 --no-audit --no-fund && firebase --version
 
       - name: Service account (temporary file, must belong to the chosen project)
         env:
@@ -121,7 +156,7 @@ jobs:
             const add=[];for(const x of P){if(x.constructor.name==='SecretParam'||have.has(x.name))continue;const d=(x.options||{}).default;if(d===undefined){console.error('::error::No value and no default for '+x.name);process.exit(1)}if(typeof d==='object'){console.error('::error::Param '+x.name+' has a non-literal default');process.exit(1)}add.push(x.name+'='+String(d))}
             if(add.length){fs.appendFileSync('.env.'+process.argv[1],'\\n'+add.join('\\n')+'\\n');console.log('Defaults used for: '+add.map(a=>a.split('=')[0]).join(', '))}
           " "$P")
-          npx --yes firebase-tools@15.34.1 deploy --only "$ONLY" --project "$P" --non-interactive
+          firebase deploy --only "$ONLY" --project "$P" --non-interactive
           echo "פורסמו פונקציות ל-$P" >> "$GITHUB_STEP_SUMMARY"
 
       # ---------- חוקים (צעד 3): בדיקת הסדר בשרת, ואז פרסום ----------
@@ -132,7 +167,7 @@ jobs:
           P: ${{ inputs.project }}
           W: ${{ inputs.what }}
         run: |
-          L=$(npx --yes firebase-tools@15.34.1 functions:list --project "$P" --json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log((j.result||[]).map(f=>f.id||f.entryPoint||'').filter(Boolean).join(','))}catch(e){console.log('')}})")
+          L=$(firebase functions:list --project "$P" --json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log((j.result||[]).map(f=>f.id||f.entryPoint||'').filter(Boolean).join(','))}catch(e){console.log('')}})")
           DEPLOYED_FUNCTIONS="$L" node scripts/deploy-order-check.js "$W" "$P"
 
       - name: Deploy rules
@@ -143,35 +178,10 @@ jobs:
           W: ${{ inputs.what }}
         run: |
           if [ "$W" = "firestore-rules" ]; then ONLY="firestore:rules"; else ONLY="storage"; fi
-          npx --yes firebase-tools@15.34.1 deploy --only "$ONLY" --project "$P" --non-interactive
+          firebase deploy --only "$ONLY" --project "$P" --non-interactive
           echo "פורסם $W ל-$P" >> "$GITHUB_STEP_SUMMARY"
 
-      # ---------- Hosting לגרסת המחשב (צעד 5) – אתר נפרד, לעולם לא אתר העדכון החי ----------
-      - name: Hosting site (variable, never the live-update site)
-        if: inputs.what == 'hosting'
-        id: site
-        env:
-          SITE: ${{ inputs.project == 'largpeami' && vars.DESKTOP_SITE || vars.DESKTOP_SITE_TEST }}
-          LIVE: ${{ vars.LIVE_UPDATE_SITE }}
-        run: |
-          [ -n "$SITE" ] || { echo "::error::חסר המשתנה DESKTOP_SITE (ייצור) או DESKTOP_SITE_TEST (בדיקה)"; exit 1; }
-          echo "$SITE" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::שם אתר לא תקין"; exit 1; }
-          [ "$SITE" != "$LIVE" ] || { echo "::error::אסור לפרסם את גרסת המחשב לאתר של העדכון החי"; exit 1; }
-          echo "site=$SITE" >> "$GITHUB_OUTPUT"
-
-      - name: Build the web files (same steps as the APK, without Android)
-        if: inputs.what == 'hosting'
-        env:
-          SITE_BACKEND: ${{ inputs.project == 'largpeami' && 'off' || 'test' }}
-          P: ${{ inputs.project }}
-        run: |
-          if [ "$P" = "largpeami-test-f4691" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then echo "::error::גרסת מחשב לפרויקט הבדיקה נבנית רק מ-feature/multi-business (prepare.js לא מחליף פרויקט ב-main)"; exit 1; fi
-          rm -rf app && mkdir app && cp -a app-source/. app/
-          cd app && npm install --no-audit --no-fund && node scripts/prepare.js
-          if [ "$P" = "largpeami" ] && grep -q "largpeami-test-f4691" www/index.html; then echo "::error::גרסת הייצור מפנה לפרויקט הבדיקה"; exit 1; fi
-          rm -rf ../firebase/hosting-public && cp -a www ../firebase/hosting-public
-          echo "קבצים לפרסום: $(find ../firebase/hosting-public -type f | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
-
+      # ---------- Hosting לגרסת המחשב (צעד 5): פרסום הקבצים שנבנו למעלה ----------
       - name: Deploy hosting
         if: inputs.what == 'hosting'
         working-directory: firebase
@@ -180,7 +190,7 @@ jobs:
           SITE: ${{ steps.site.outputs.site }}
         run: |
           node -e "const f='firebase.json',j=JSON.parse(require('fs').readFileSync(f));j.hosting.site=process.argv[1];require('fs').writeFileSync(f,JSON.stringify(j,null,2))" "$SITE"
-          npx --yes firebase-tools@15.34.1 deploy --only hosting --project "$P" --non-interactive
+          firebase deploy --only hosting --project "$P" --non-interactive
           echo "פורסמה גרסת המחשב לאתר $SITE ($P): https://$SITE.web.app" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the service account file

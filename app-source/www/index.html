@@ -3676,7 +3676,7 @@ FRM.zcSend=async fm=>{if(!ZC||ZC.busy)return;const f=ZC.f,adm=isA();if(!f)return
  if((c.lvl===1||(adm&&c.lvl===2))&&!ZC.ack)return toast('סמן "אני מאשר את ההפרש"');if(!adm&&c.lvl===2&&!s_(ZC.why))return toast('כתוב הסבר להפרש');
  /* הסבר חובה רק אצל עובד (החלטת בעל העסק 2.11.2026): המנהל רואה את התיבה, אבל לא חייב */if(!adm&&c.dateWarn&&!s_(ZC.dw))return toast('תאריך הפתיחה שונה מתאריך הסגירה – תקן את התאריך או כתוב הסבר');
  if(!COQ.L){try{await coLoad(1)}catch(e){}if(!COQ.L)return toast('לא הצלחתי לטעון את ההוצאות מקופה. בדוק חיבור ונסה שוב')}
- if(coSrvOn()){await coSrv(ZC.reg,f.d,f.tm,{id:ZC.id,od:f.oD,otm:f.oTm});if(COT.err)return toast('לא הצלחתי לקבל מהשרת את סכום ההוצאות מקופה: '+COT.err+'. נסה שוב')}
+ /* 6ז: עובד שלא רואה את כל ההוצאות – מחכים לסכום מהשרת. אם נכשל (למשל תאריך ישן) – הבדיקה "לא נבדקה", ונדרש הסבר כמו בהפרש */if(coSrvOn())await coSrv(ZC.reg,f.d,f.tm,{id:ZC.id,od:f.oD,otm:f.oTm});
  const co=coChk(ZC.reg,f.d,f.tm,f.cout,{id:ZC.id,inc:zcIncIds(),od:f.oD,otm:f.oTm});if(!adm&&!co.ok&&!s_(ZC.cw)){zcChkR();return toast('הוצאת המזומן לא תואמת להוצאות מקופה: הוסף הוצאה, או כתוב איפה ההפרש ולמה')}
  if(adm&&!fm._dupOk){const dp=zcDup(ZC.reg,f.d,s_(f.no));if(dp)return ask('כבר נרשמה סגירה של '+ZREG[ZC.reg].n+' מתאריך '+dfmt(f.d)+' עם דוח '+s_(f.no)+'. להכניס בכל זאת?',()=>{fm._dupOk=1;FRM.zcSend(fm)},'הכנס בכל זאת')}
  if(adm&&!cat(ZC.reg))return toast('הקטגוריה של הקופה לא קיימת');
@@ -3845,8 +3845,9 @@ function coIn(x,prev,d,tm){if(!x.d||!d||x.d>d)return 'out';if(x.d===d&&x.tm&&tm&
 var COT={k:'',s:null,b:'',p:null,err:'',ek:''};
 ACT.coSrvRe=()=>{COT.ek='';if(ZC&&ZC.f)coSrv(ZC.reg,ZC.f.d,ZC.f.tm,{id:ZC.id,od:ZC.f.oD,otm:ZC.f.oTm})};
 const coSrvOn=()=>isW()&&bzB()&&wpE()!=='all';
-const coSrvA=(reg,d,tm,cur)=>({reg,d,tm:zcTime(tm),id:idOk(cur.id)?cur.id:'',od:coDate(cur.od),otm:zcTime(cur.otm)});
-const coSrvK=a=>[a.reg,a.d,a.tm,a.id,a.od,a.otm].join('|');
+/* סבב 2: השרת קובע את החלון (מהסגירה האחרונה ועד סוף יום הסגירה); שולחים רק קופה ותאריך (היום או אתמול) */
+const coSrvA=(reg,d)=>({reg,d});
+const coSrvK=a=>[a.reg,a.d].join('|');
 function coSrv(reg,d,tm,cur,auto){const a=coSrvA(reg,d,tm,cur||{}),k=coSrvK(a);if(COT.k===k&&COT.s!=null)return Promise.resolve();if(COT.b===k)return COT.p;if(auto&&COT.ek===k)return Promise.resolve();
  COT.b=k;COT.err='';COT.ek='';COT.p=(async()=>{try{const r=await fnCall('cashoutTotal',a);if(!r||typeof r.s!=='number'||!isFinite(r.s))throw new Error('תשובה לא תקינה מהשרת');COT.k=k;COT.s=r.s}catch(e){COT.err=e.message||'שגיאה';COT.ek=k}finally{COT.b=''}try{zcChkR();zcRe()}catch(e){}})();return COT.p}
 function coChk(reg,d,tm,cout,cur){cur=cur||{};const z=rnd(Math.abs(zcN(cout)||0));tm=zcTime(tm);if(!COQ.L)return{z,s:0,L:[],U:[],bad:[],inc:[],ok:false,known:0,diff:z,prev:null};

@@ -123,7 +123,7 @@ describe('סגירת קופה – לוגיקה באפליקציה (index.html)',
     assert.equal(c1.known, 0); assert.equal(c1.ok, false);
     await new Promise((r) => setTimeout(r, 0));
     assert.equal(M.CALLS.length, 1); assert.equal(M.CALLS[0][0], 'cashoutTotal');
-    assert.deepEqual(Object.keys(M.CALLS[0][1]).sort(), ['d', 'id', 'od', 'otm', 'reg', 'tm']);
+    assert.deepEqual(Object.keys(M.CALLS[0][1]).sort(), ['d', 'reg']); // סבב 2: רק קופה ותאריך – השרת קובע את החלון
     const c2 = M.coChk('i_nl', '2026-10-20', '21:00', '777', cur);
     assert.equal(c2.known, 1); assert.equal(c2.s, 777); assert.equal(c2.ok, true);
     assert.equal(M.CALLS.length, 1); // לא שואלים שוב
