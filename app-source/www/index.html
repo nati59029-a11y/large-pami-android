@@ -290,6 +290,15 @@ function ensure(d){
  return d}
 function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. רשומה חדשה בלי eu = המשתמש שבמכשיר. סריקה אחידה (8.11): לכל סוגי הרשומות, לא רק הוצאות */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
 function load(){try{const r=localStorage.getItem(KEY);if(r){S=ensure(JSON.parse(r));return true}}catch(e){}return false}
+/* ===== סניפים/בנקים: ליבה ===== */
+/* חוזה ל-A2 (שלב stub): brList()→[{id,name}] פעילים; brDef()→id ראשון או ''; txBr(t)=t.br||brDef(); inBr(t,sel) – sel ריק/חסר = הכול; brGuess(t)→{id,sure}; bankGuess(t,pay)→{id,sure}; cardGuess(t,pay)→{id,sure} */
+function brDef(){return''}
+function brList(){return[]}
+function txBr(t){return(t&&t.br)||brDef()}
+function inBr(t,sel){if(!sel||!sel.length)return true;return sel.includes(txBr(t))}
+function brGuess(t){return{id:'',sure:false}}
+function bankGuess(t,pay){return{id:'',sure:false}}
+function cardGuess(t,pay){return{id:'',sure:false}}
 
 /* ===== המרה מהאפליקציה הישנה ===== */
 const IMAP={'מזומן נחל לכיש':['i_nl','מזומן'],'אשראי נחל לכיש':['i_nl','אשראי'],'הקפה נחל לכיש':['i_nl','הקפה'],'מזומן יהודה הנשיא':['i_yh','מזומן'],'אשראי יהודה הנשיא':['i_yh','אשראי']};
