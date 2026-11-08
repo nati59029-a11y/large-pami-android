@@ -790,7 +790,7 @@ const invRow=(t,tag)=>`<div class="lw"><button class="li exp" data-a="payDlg" da
    ספק קיזוז: subs[].offset / offBal0; הכנסה tx.off={sub} = זכות אצל הספק; תשלום m='קיזוז' מתוך הזכות.
    אבטחה: לא נשמר מספר כרטיס/חשבון מלא – כל רצף 8–19 ספרות (גם עם רווחים/מקפים) הופך ל-••••+4 אחרונות. שיוך לפי 4 ספרות בלבד */
 /* function (לא const) – ensure() קורא בטעינה */
-function stlScrub(str){return String(str??'').replace(/\d(?:[ \-]?\d){7,18}/g,m=>{if(/^\d{1,2}[-]\d{1,2}[-]\d{4}$|^\d{4}[-]\d{1,2}[-]\d{1,2}$/.test(m))return m;const d=m.replace(/\D/g,'');return d.length>=8&&d.length<=19?'••••'+d.slice(-4):m})}
+function stlScrub(str){return String(str??'').replace(/\d(?:[\s.\-\/\\_ ‎‏‪-‮]*\d){7,}/g,m=>{if(/^\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}$|^\d{4}[.\-\/]\d{1,2}[.\-\/]\d{1,2}$/.test(m))return m;return '••••'+m.replace(/\D/g,'').slice(-4)})}
 const STL_ST=['open','match','exp','inc','skip'];
 function stlClean(d){try{
  for(const k of['stm','stl'])if(d[k]!=null&&!Array.isArray(d[k]))delete d[k];
@@ -907,7 +907,7 @@ async function usWkAuto(type,fields){const U=US;if(type!=='check'||!U||!isW()||U
   const done=()=>{U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>🖊 זוהה צ׳ק – נשלח למנהל</b><div class="note">המנהל ישייך אותו לחשבונית.</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">📷 סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)};
   if(wckL().includes(id)||obGet().some(o=>o.id===id)){toast('הצ׳ק הזה כבר נשלח למנהל');return done()}
   const a=typeof f.amount==='number'&&f.amount>0?rnd(f.amount):0,low=!!(U.cls&&(U.cls.uncertainType||(U.cls.unsure||[]).length))||!a;
-  const data={kind:'check',cat:'',catName:'',sub:'',subName:'',amt:a,date:usDate(f.date)||today(),note:'',inv:'',dn:false,no:s_(f.number).replace(/\D/g,'').slice(0,20),bank:stlScrub(s_(f.bank)).slice(0,60),cdate:usDate(f.date),payee:s_(f.payee).slice(0,80),fid:key};if(low)data.low=1;
+  const data={kind:'check',cat:'',catName:'',sub:'',subName:'',amt:a,date:usDate(f.date)||today(),note:'',inv:'',dn:false,no:s_(f.number).replace(/\D/g,'').slice(0,20),bank:stlScrub(s_(f.bank)).slice(0,60),cdate:usDate(f.date),payee:stlScrub(s_(f.payee)).slice(0,80),fid:key};if(low)data.low=1;
   {const B=brMulti()?brList():[];if(B.length===1)data.br=B[0].id}
   const it={id,created:new Date().toISOString(),data};try{await fput('o'+id,v);it.fileId='o'+id}catch(e){return toast('שמירת הצילום נכשלה')}
   const q=obGet().filter(z=>z.id!==id);q.push(it);obSet(q);try{localStorage.setItem(WCK,JSON.stringify(wckL().concat(id).slice(-200)))}catch(e){}done();await flush();try{wkLoad()}catch(e){}}
@@ -2164,6 +2164,7 @@ let RPL={L:[],miss:0,ok:0};
 async function pullInbox2(){inbHeal();await rqFlush();const docs=await runQ('status','new');let n=0;const done=[];RPL={L:[],miss:0,ok:0};
  for(const d of docs){const id=idOf(d);if(!idOk(id))continue;if(done.includes(id)||S.inbox.find(x=>x.id===id)||S.tx.find(x=>x.src===id||(x.srcs||[]).includes(id))){done.push(id);continue}
   let data={};try{data=JSON.parse(gv(d,'data'))}catch(e){}if(!data||typeof data!=='object')data={};if(data.date&&!/^\d{4}-\d{2}-\d{2}$/.test(String(data.date)))data.date='';
+  /* k=='check' (עובד בלי expW): רק שדות צ'ק, תמיד kind=check – אף פעם לא הוצאה רגילה */if(gv(d,'k')==='check'){const q=data;data={kind:'check',amt:rnd(Math.max(0,+q.amt||0)),date:cfDt(q.date)?q.date:'',cdate:cfDt(q.cdate)?q.cdate:'',no:s_(q.no).replace(/\D/g,'').slice(0,20),bank:stlScrub(s_(q.bank)).slice(0,60),payee:stlScrub(s_(q.payee)).slice(0,80),fid:s_(q.fid).replace(/[^A-Za-z0-9_-]/g,'').slice(0,40),cat:'',catName:'',sub:'',subName:'',note:'',inv:'',dn:false};if(q.low)data.low=1;if(typeof q.br==='string'&&ORG_ID.test(q.br))data.br=q.br}else if(data.kind==='check')delete data.kind;
   let f='';const np=+gv(d,'parts')||0;if(np){try{for(let k=0;k<np;k++){const c=await fsx('/chunks/'+id+'_'+k);f+=gv(c,'data')}}catch(e){continue}}else f=gv(d,'file');if(f){try{await fput('i'+id,f)}catch(e){continue}}
   /* צילום חדש שהמנהל ביקש: מחליף את הצילום של ההוצאה הממתינה (רק של אותו עובד, ורק אם ביקשת). לא נוצרת הוצאה חדשה */
   if(data.repl!==undefined){const ro=idOk(String(data.repl))?S.inbox.find(x=>x.id===data.repl):null;if(f&&ro&&ro.rq&&ro.ow&&ro.ow===gv(d,'owner')){ro.file='i'+id;ro.np=np;ro.rph=1;delete ro.rq;RPL.ok++}else if(f)RPL.miss++;RPL.L.push({id,np,o:ro&&ro.rph&&ro.file==='i'+id?ro.id:''});done.push(id);continue}

@@ -60,6 +60,14 @@ const CSV_BANK = '﻿תאריך,תיאור פעולה,אסמכתא,חובה,זכ
   const t3 = await mp.evaluate(() => ({ a: stlScrub('4580123412341234'), b: stlScrub('כרטיס 4580-1234-1234-1234 חיוב'), c: stlScrub('חשבון 12-345-678901'), d: stlScrub('סכום 1,234.50 ביום 2026-11-03'), e: stlScrub('אסמכתא 1234567') }));
   check('3 stlScrub: 16 ספרות → ••••1234; עם מקפים/רווחים; תאריך, סכום ו-7 ספרות לא משתנים', t3.a === '••••1234' && t3.b === 'כרטיס ••••1234 חיוב' && t3.c === 'חשבון ••••8901' && t3.d === 'סכום 1,234.50 ביום 2026-11-03' && t3.e === 'אסמכתא 1234567', t3);
 
+  // ---- 3ב. צנזור: כל העקיפות (נקודות, לוכסנים, רווחים כפולים, " - ", nbsp, U+200E, 20+ ספרות) – בלקוח ----
+  const tScrA = await mp.evaluate(() => { const N = '4580', cases = ['4580.1234.1234.1234', '4580/1234/1234/1234', '4580  1234  1234  1234', '4580 - 1234 - 1234 - 1234', '4580 1234 1234 1234', '4580‎1234‎1234‎1234', '4580‪ 1234‬ 1234 1234', '458012341234123456789012', '4580_1234_1234_1234', 'כרטיס 4580.1234 .1234-1234 חיוב'];
+    return { out: cases.map((c) => stlScrub(c)), keep: [stlScrub('15.01.2024'), stlScrub('15/01/2024 ביום'), stlScrub('2026-11-03'), stlScrub('סכום 1,234.50'), stlScrub('אסמכתא 1234567')] }; });
+  check('3ב צנזור בלקוח: כל העקיפות → ••••+4 אחרונות, בלי אף ספרה מהמספר המלא', tScrA.out.every((o) => /^(כרטיס )?••••\d{4}( חיוב)?$/.test(o) && !/4580/.test(o)) && tScrA.out[7] === '••••9012', tScrA);
+  check('3ג צנזור: תאריכים, סכומים ומספר של 7 ספרות לא משתנים', tScrA.keep[0] === '15.01.2024' && tScrA.keep[1] === '15/01/2024 ביום' && tScrA.keep[2] === '2026-11-03' && tScrA.keep[3] === 'סכום 1,234.50' && tScrA.keep[4] === 'אסמכתא 1234567', tScrA.keep);
+  const tScrB = await mp.evaluate((ORG) => { S.orgC = ORG; S.stl = []; S.stm = []; const r = stmParse([['תאריך', 'תיאור', 'סכום'], ['01/11/2026', 'חיוב 4580.1234.1234.9876 בית עסק', '-50']], 'bank'); stmAdd({ kind: 'bank', acc: 'bka', src: 'manual' }, r.ok); return { desc: S.stl.map((l) => l.desc), big: /4580|1234\D*1234/.test(JSON.stringify(S.stl)) }; }, ORG);
+  check('3ד ייבוא שורה עם מספר כרטיס בנקודות: נשמר ••••9876 בלבד', tScrB.desc.length === 1 && /••••9876/.test(tScrB.desc[0]) && !tScrB.big, tScrB);
+
   // ---- 4. זיהוי חשבון לפי 4 ספרות ----
   await seed(mp, ORG);
   const t4 = await mp.evaluate((ORG) => { const r = { c: stmAcc('card', 'כרטיס ····5678'), b: stmAcc('bank', 'חשבון 12-345-1234 לאומי'), none: stmAcc('card', 'בלי מספר'), x: stmAcc('bank', '0000') };
@@ -177,6 +185,19 @@ const CSV_BANK = '﻿תאריך,תיאור פעולה,אסמכתא,חובה,זכ
   await runW('11 עובד (legacy, עם expW):', cfg);
   const cb = { mode: 'new', users: { m: 'acme', w: 'acme' }, biz: { acme: { dataRoot: 'b', features: { scan: true } } }, admins: { 'b/acme/|m': 1 }, staff: { 'b/acme/|w': 1 } };
   await runW('11ג עובד בלי expW (עסק b):', cb, () => { SY.perms = { incW: true, expW: false }; });
+
+  // ---- pullInbox2: פריט k=='check' תמיד צ'ק בלבד (גם אם data.kind='exp'); אישור לא יוצר הוצאה ----
+  await seed(mp);
+  const pi = await mp.evaluate(async () => { S.inbox = []; save(); const f = (v) => ({ stringValue: v });
+    const doc = (id, k, data) => ({ name: 'p/d/inbox/' + id, fields: Object.assign({ data: f(JSON.stringify(data)), by: f('w'), owner: f('w'), created: f('2026-11-03'), status: f('new') }, k ? { k: f(k) } : {}) });
+    const o = runQ; runQ = async () => [doc('kevil1', 'check', { kind: 'exp', cat: 'e_sup', sub: 'sA', amt: 900, date: '2026-11-03', inv: 'X1', evil: 1, payee: 'מוטב 4580.1234.1234.1234', no: '000123' }), doc('nok1', '', { kind: 'check', amt: 5, date: '2026-11-03', cat: 'e_sup', sub: 'sA' })];
+    try { await pullInbox2(); } finally { runQ = o; }
+    const a = S.inbox.find((x) => x.id === 'kevil1'), b = S.inbox.find((x) => x.id === 'nok1'), n0 = S.tx.length; let thrown = '';
+    try { await ACT.inbOk({ dataset: { id: 'kevil1' } }); } catch (e) { thrown = e.message; }
+    return { d: a && a.d, chk: a && inbChk(a), b: b && b.d.kind, dlg: !!document.querySelector('#dlg form[data-f=chkLinkF]'), tx: S.tx.length - n0, thrown }; });
+  check('2 pullInbox2: k:"check" עם data.kind="exp" → kind=check בלבד, בלי cat/sub/inv/שדות זרים, מוטב מצונזר; "אשר" פותח שיוך ולא יוצר הוצאה; בלי k – kind:check נמחק',
+    pi.chk && pi.d.kind === 'check' && pi.d.amt === 900 && !pi.d.sub && !pi.d.cat && !pi.d.inv && !('evil' in pi.d) && /••••1234/.test(pi.d.payee) && !/4580/.test(pi.d.payee) && pi.dlg && pi.tx === 0 && pi.b === undefined, pi);
+  await mp.evaluate(() => { closeDlg(); S.inbox = []; save(); });
 
   // ---- מנהל: הצ'ק בתיבה – "אשר" פותח שיוך, לא יוצר הוצאה; אחרי שיוך יוצא מהתיבה ----
   await seed(mp);

@@ -53,10 +53,10 @@ const intOrNull = (v) => (Number.isInteger(v) && v > 0 && v < 1000 ? v : null);
 // צנזור: כל רצף 8–19 ספרות (גם עם רווחים/מקפים) → ••••+4 אחרונות. כמו stlScrub באפליקציה
 function scrub(v) {
   if (v == null) return v;
-  return String(v).replace(/\d(?:[ \-]?\d){7,18}/g, (m) => {
-    if (/^\d{1,2}-\d{1,2}-\d{4}$|^\d{4}-\d{1,2}-\d{1,2}$/.test(m)) return m;
-    const d = m.replace(/\D/g, '');
-    return d.length >= 8 && d.length <= 19 ? '••••' + d.slice(-4) : m;
+  // כל רצף של 8+ ספרות עם מפרידים כלשהם ביניהן (רווחים, נקודות, לוכסנים, מקפים, קו תחתון, רווח קשיח, סימני כיוון), באורך כלשהו → ••••+4 אחרונות. זהה ל-stlScrub בלקוח
+  return String(v).replace(/\d(?:[\s.\-\/\\_\u00a0\u200e\u200f\u202a-\u202e]*\d){7,}/g, (m) => {
+    if (/^\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}$|^\d{4}[.\-\/]\d{1,2}[.\-\/]\d{1,2}$/.test(m)) return m;
+    return '\u2022\u2022\u2022\u2022' + m.replace(/\D/g, '').slice(-4);
   });
 }
 function cleanLines(a, out) {
@@ -113,6 +113,7 @@ function shapeClassify(raw, allowed, opts) {
   }
   if (type === 'check') {
     if ('account' in out.fields) out.fields.account = last4(out.fields.account); // מספר חשבון – רק 4 אחרונות
+    for (const k of ['payee', 'bank', 'number']) if (k in out.fields) out.fields[k] = scrub(out.fields[k]);
     if (opts && opts.route) out.route = 'mgr';
   }
   if (docType === 'credit_note') {
