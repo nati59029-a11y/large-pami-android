@@ -957,6 +957,36 @@ service cloud.firestore {
         }
       }
 
+      // ----- הזמנות ומלאי (2026-11-08, שלב 1, תוספת 'orders'). כל כתיבה – רק השרת (functions/orders.js). -----
+      // עובד: רק עם מתג ord, ורק סניפים שלו (staff.br; חסר = הכול). שאילתת רשימה של עובד משויך חייבת לסנן לפי br.
+      function ordOk() { return feat('orders') && perm('ord'); }
+      function brOk(br) { return bMgr() || myStaff().get('br', null) == null || br in myStaff().br; }
+      match /ordcfg/{docId} {
+        allow get: if ordOk() && docId in ['main', 'seq'];
+        allow list, create, update, delete: if false;
+      }
+      match /prod/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+        // עלות – מנהל בלבד
+        match /p/{k} {
+          allow read: if feat('orders') && bMgr();
+          allow create, update, delete: if false;
+        }
+      }
+      match /ord/{id} {
+        allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+        match /log/{k} {
+          allow read: if ordOk() && brOk(get(/databases/$(database)/documents/b/$(bizId)/ord/$(id)).data.br);
+          allow create, update, delete: if false;
+        }
+      }
+      match /stockLog/{id} {
+        allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+      }
+
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')
       match /closings/{id} {
         function nw() { return request.resource.data; }
