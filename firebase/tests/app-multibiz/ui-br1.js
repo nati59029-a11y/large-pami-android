@@ -39,7 +39,7 @@ const seed = (p, org) => p.evaluate((o) => {
   const n = (s) => String(parseFloat(String(s).replace(/[^\d.-]/g, '')));
   check('2א טבלה: לכיש הכנסה 1500 הוצאה 600 הפרש 900 (ללא br = סניף ראשון); הנשיא 300/950/-650; סה״כ 1800/1550/250',
     t2.rows.length === 2 && n(t2.rows[0][1]) === '1500' && n(t2.rows[0][2]) === '600' && n(t2.rows[0][3]) === '900' && n(t2.rows[1][1]) === '300' && n(t2.rows[1][2]) === '950' && n(t2.rows[1][3]) === '-650' && n(t2.foot[1]) === '1800' && n(t2.foot[2]) === '1550' && n(t2.foot[3]) === '250', t2);
-  check('2ב "רווחיות החודש" מוצגת עם אחוז (250 מתוך 1800 = 14%)', /רווחיות החודש/.test(tx) && /14%/.test(tx), tx.slice(0, 400));
+  check('2ב רווח החודש מוצג עם אחוז רווחיות (250 מתוך 1800 = 14%)', /רווח החודש/.test(tx) && /רווחיות/.test(tx) && /14%/.test(tx), tx.slice(0, 400));
   // ---- 3. כרטיסי הכנסות/הוצאות לחיצים ----
   await mp.click('[data-a=tab][data-v=inc]'); await H.settle(mp, 300);
   check('3 לחיצה על הכנסות פותחת את מסך ההכנסות', await mp.evaluate(() => cur().v === 'inc' && /סך ההכנסות/.test(document.getElementById('main').innerText)));
@@ -48,7 +48,7 @@ const seed = (p, org) => p.evaluate((o) => {
   // ---- 4. סינון לפי סניף (בחירה אחת / כמה / הכול) ----
   await home(mp); await mp.click('[data-a=brSel][data-id=brb]'); await H.settle(mp, 200);
   const t4 = await mp.evaluate(() => ({ rows: document.querySelectorAll('#brTbl tbody tr').length, txt: document.getElementById('main').innerText.replace(/[\s₪,\u200e\u200f]/g, '') }));
-  check('4 בחירת סניף אחד: בטבלה שורה אחת, והכנסות החודש = 300', t4.rows === 1 && /הכנסותהחודש300/.test(t4.txt), t4.txt.slice(0, 200));
+  check('4 בחירת סניף אחד: בטבלה שורה אחת, והכנסות = 300 (בכרטיס הראשי)', t4.rows === 1 && /הכנסות300/.test(t4.txt), t4.txt.slice(0, 200));
   await mp.click('[data-a=brSel][data-id=bra]'); await H.settle(mp, 200);
   const t4b = await mp.evaluate(() => ({ sel: BRSEL.slice(), on: document.querySelectorAll('[data-a=brSel].on').length }));
   check('4א בחירת שני הסניפים = הכול (BRSEL ריק, "הכול" מסומן)', t4b.sel.length === 0 && t4b.on === 1, t4b);

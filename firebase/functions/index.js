@@ -58,7 +58,9 @@ exports.scanDocument = onCall(
     const allowed = kind === 'classify' ? CL.allowedTypes(who) : null;
     // חלק ג' §5א: צ'ק אצל עובד = route:'mgr' (לא נדחה). הזכאות לסריקה עצמה – לפי הסוגים האחרים, כמו קודם
     const route = kind === 'classify' && who.role !== 'manager';
-    if (kind === 'classify' && !allowed.filter((t) => !(route && t === 'check')).length) throw new HttpsError('permission-denied', 'אין לך הרשאה להכניס מסמכים. פנה למנהל.', { reason: 'no-perm' });
+    // החלטת המשתמש (8.11): גם עובד בלי שום הרשאת הזנה שסורק צ'ק – נשלח למנהל (route:'mgr'). לכן אין דחייה מוקדמת של עובד: כל סוג אחר מוחזר allowed:false בלי שדות
+    // (נוגע בהרשאות: עובד בלי הרשאות יכול לצרוך סריקה אחת במכסה היומית של העסק)
+    if (kind === 'classify' && !route && !allowed.length) throw new HttpsError('permission-denied', 'אין לך הרשאה להכניס מסמכים. פנה למנהל.', { reason: 'no-perm' });
     // צילום העברה בנקאית – מנהל בלבד (החלטת המשתמש). נבדק לפני הספירה במכסה היומית ולפני Gemini
     if (kind === 'transfer' && who.role !== 'manager' && !(who.biz && who.biz.dataRoot === 'b' && hasPerm(who, 'trf'))) throw new HttpsError('permission-denied', 'צילום העברה מותר למנהל בלבד.', { reason: 'manager-only' });
     // 6ה: מתגי עובד (רק בעסק במבנה b; בעסק legacy – כמו היום). חשבונית/הוצאה מקופה = expW; דוח Z/פתיחה/הפקדה = incW

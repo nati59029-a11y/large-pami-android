@@ -133,11 +133,18 @@ describe('שלב 1 – classify: הרשאות בשרת', () => {
     GM.state.classify = GM.CLASSIFY.invoice;
     assert.equal((await call('scanDocument', U.trf, CLS())).result.result.allowed, false);
   });
-  it('עובד בלי אף הרשאה להכניס מסמך: נדחה לפני Gemini ולפני המכסה', async () => {
+  it('עובד בלי אף הרשאה להכניס מסמך (C2, החלטת המשתמש): לא נדחה – חשבונית חוזרת כסוג בלבד בלי שדות; צ\'ק route:mgr', async () => {
+    GM.state.classify = GM.CLASSIFY.invoice;
     const r = await call('scanDocument', U.none, CLS());
-    assert.equal(r.status, 'PERMISSION_DENIED'); assert.equal(r.reason, 'no-perm');
-    assert.equal(GM.state.requests.length, 0);
-    assert.equal(await getDoc(`b/${A}/scan_usage/_biz`), null);
+    assert.equal(r.status, 'OK', r.text); const x = r.result.result;
+    assert.equal(x.allowed, false); assert.equal(x.reason, 'no-perm'); assert.deepEqual(x.fields, {});
+    for (const v of Object.values(GM.CLASSIFY.invoice.fields)) if (v != null && String(v).length > 2) assert.ok(!JSON.stringify(r.result.result).includes(String(v)), 'דלף ' + v);
+    GM.state.classify = GM.CLASSIFY.check;
+    const c = (await call('scanDocument', U.none, CLS())).result.result;
+    assert.equal(c.type, 'check'); assert.equal(c.allowed, true); assert.equal(c.route, 'mgr');
+    GM.state.classify = GM.CLASSIFY.statement || GM.CLASSIFY.invoice;
+    const st = (await call('scanDocument', U.none, CLS())).result.result;
+    assert.equal(st.allowed, false); assert.deepEqual(st.fields, {});
   });
   it('classify מקבל קובץ אחד בדיוק; תוספת scan כבויה = feature-off בלי Gemini', async () => {
     assert.equal((await call('scanDocument', U.mgr, { kind: 'classify', files: [jpg(), jpg()] })).reason, 'bad-file-count');
@@ -361,9 +368,10 @@ describe('חלק ג\' – classify: statement וצ\'ק עובד', () => {
     const m = (await call('scanDocument', U.mgr, CLS())).result.result;
     assert.equal(m.route, undefined); assert.equal(m.allowed, true);
   });
-  it('עובד בלי שום הרשאת הזנה: עדיין נדחה (צ\'ק לבד לא מזכה בסריקה)', async () => {
+  it('עובד בלי שום הרשאת הזנה (C2, נוגע בהרשאות): צ\'ק נשלח – route:mgr', async () => {
     GM.state.classify = GM.CLASSIFY.check;
-    assert.equal((await call('scanDocument', U.none, CLS())).reason, 'no-perm');
+    const x = (await call('scanDocument', U.none, CLS())).result.result;
+    assert.equal(x.type, 'check'); assert.equal(x.allowed, true); assert.equal(x.route, 'mgr');
   });
   it('עובד: חשבונית (סוג אחר) – ללא שינוי, בלי route', async () => {
     GM.state.classify = GM.CLASSIFY.invoice;
