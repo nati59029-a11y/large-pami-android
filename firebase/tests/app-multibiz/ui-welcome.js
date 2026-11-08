@@ -41,9 +41,11 @@ const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ
   check('קביעת סיסמה נשלחה עם הקוד', calls.some((c) => c.oobCode === 'CODE1' && c.newPassword === 'Secret123!'));
   check('אחרי הצלחה – כפתור הורדה', await pg.isVisible('#apk'));
   check('קישור APK של העסק', (await pg.getAttribute('#apk', 'href')).endsWith('/releases/download/biz-biz-a/biz-biz-a.apk'));
+  check('הוראות התקנה עם המייל אחרי קביעת סיסמה', await pg.isVisible('#steps') && (await pg.textContent('#steps')).includes('boss@example.invalid') && (await pg.textContent('#steps')).includes('ממקור'));
   check('מסך טלפון בלי גלילה אופקית', await pg.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await pg.close();
   pg = await open(`?mode=resetPassword&oobCode=OLD&apiKey=K&continueUrl=${cont}`, { expired: true });
+  check('בלי סיסמה – אין הוראות', !(await pg.isVisible('#steps')));
   check('קוד שפג – הודעה ברורה, בלי טופס', (await pg.textContent('#msg')).includes('פג תוקף') && !(await pg.isVisible('#f')));
   check('בלי מיתוג – APK כללי', (await pg.getAttribute('#apk', 'href')).endsWith('/latest/large-pami.apk'));
   await pg.close();
