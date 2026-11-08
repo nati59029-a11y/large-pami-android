@@ -467,13 +467,19 @@ async function markOrderPaid(request) {
   const ref = db.doc('ord/' + id);
   let res = null;
   await db.runTransaction(async (tx) => {
-    const s = await tx.get(ref);
+    const [s, pp] = await tx.getAll(ref, db.doc('private/pay'));
     ordAccess(w, s.exists ? s.data() : null);
     const cur = s.get('status');
     if (cur === 'paid' || cur === 'out' || cur === 'done') { res = { ok: true, dup: true }; return; }
     if (!PAYABLE.includes(cur)) throw pre('bad-status', 'ההזמנה בוטלה');
     const now = Date.now();
     Object.assign(paid, { at: now, by: w.uid, amt: s.get('total') });
+    // 17:47: "שולם" דרך קישור הספק → הכנסה של העסק + זיכוי אצל הספק (רשומת ordpay; מכשיר המנהל קולט אותה ליומן)
+    const sup = paid.method === 'link' && pp.exists && pp.get('mode') === 'link' && pp.get('sup') && typeof pp.get('sup').id === 'string' ? pp.get('sup') : null;
+    if (sup) {
+      paid.sup = { id: sup.id, name: sup.name || '' };
+      tx.set(db.doc('ordpay/' + id), { ord: id, no: s.get('no'), br: s.get('br'), amt: paid.amt, at: now, sup: paid.sup, st: 'paid', upd: now });
+    }
     tx.update(ref, { status: 'paid', paid, upd: now });
     tx.set(logRef(db, id), logData(w, 'paid', `${paid.method} ₪${paid.amt}${paid.last4 ? ' ****' + paid.last4 : ''}${paid.conf ? ' אישור ' + paid.conf : ''}`));
     res = { ok: true, dup: false };
@@ -495,6 +501,7 @@ async function unpayOrder(request) {
     const s = await tx.get(ref);
     ordAccess(w, s.exists ? s.data() : null);
     if (s.get('status') !== 'paid') throw pre('bad-status', 'אפשר לבטל "שולם" רק בהזמנה במצב שולם');
+    if (s.get('paid') && s.get('paid').sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'unpay' }, { merge: true });
     tx.update(ref, { status: 'wait_pay', paid: require('firebase-admin/firestore').FieldValue.delete(), upd: Date.now() });
     tx.set(logRef(db, id), logData(w, 'unpay', reason));
   });
@@ -518,6 +525,7 @@ async function cancelOrder(request) {
     if (d.status === 'cancel') { res = { ok: true, dup: true }; return; }
     if (d.status === 'done') throw pre('bad-status', 'הזמנה שהושלמה לא מבוטלת');
     if (['paid', 'out'].includes(d.status)) mgr(w);
+    if (['paid', 'out'].includes(d.status) && d.paid && d.paid.sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'cancel' }, { merge: true });
     const items = Array.isArray(d.items) ? d.items : [];
     const prods = await loadProds(tx, db, items.filter((x) => x.pid).map((x) => x.pid));
     applyMoves(tx, db, w, prods, invert(moves(d.br, items.filter((x) => !x.pid || prods.has(x.pid)))), { ord: id, no: d.no });
@@ -572,7 +580,7 @@ async function setBusinessPayLink(request) {
   if (!uid) throw new HttpsError('unauthenticated', 'צריך להתחבר לאפליקציה', { reason: 'not-signed-in' });
   if (!(await T.isSuper(uid))) throw deny('not-superadmin', 'הפעולה מותרת למנהל המערכת בלבד');
   const input = inputObject(request);
-  onlyKeys(input, ['bizId', 'mode', 'link']);
+  onlyKeys(input, ['bizId', 'mode', 'link', 'sup']);
   const bizId = input.bizId;
   if (typeof bizId !== 'string' || !T.BIZ_RE.test(bizId)) throw bad('bad-biz', 'מזהה עסק לא תקין');
   const biz = await T.loadBiz(bizId);
@@ -585,15 +593,24 @@ async function setBusinessPayLink(request) {
     try { u = new URL(link); } catch (e) { /* */ }
     if (!u || u.protocol !== 'https:' || !u.hostname.includes('.') || link.length > 500 || /[\s<>"']/.test(link) || u.username || u.password) throw bad('bad-link', 'קישור לא תקין: חייב להתחיל ב-https:// ועד 500 תווים');
   }
+  // 17:47: לאיזה ספק שייך הקישור (ספק קיזוז). { id, name } מתוך רשימת הספקים של העסק (cfg/main). null = בלי ספק
+  let sup = null;
+  if (input.mode === 'link' && input.sup != null) {
+    const x = input.sup;
+    if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad('bad-sup', 'ספק לא תקין');
+    onlyKeys(x, ['id', 'name'], 'ספק');
+    if (typeof x.id !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(x.id)) throw bad('bad-sup', 'ספק לא תקין');
+    sup = { id: x.id, name: txt(x.name, 60, 'bad-sup', 'שם הספק', true) };
+  }
   const db = getFirestore();
   const pfx = T.bizPrefix(biz);
   const now = Date.now();
   const b = db.batch();
-  b.set(db.doc(pfx + 'private/pay'), { mode: input.mode, link, at: now, by: uid });
-  b.set(db.doc(pfx + 'ordcfg/main'), { pay: { mode: input.mode, has: !!link }, upd: now }, { merge: true });
-  b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') });
+  b.set(db.doc(pfx + 'private/pay'), { mode: input.mode, link, sup, at: now, by: uid });
+  b.set(db.doc(pfx + 'ordcfg/main'), { pay: Object.assign({ mode: input.mode, has: !!link }, sup ? { sup } : {}), upd: now }, { merge: true });
+  b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') + (sup ? ' sup=' + sup.id : '') });
   await b.commit();
-  return { ok: true, bizId, mode: input.mode, has: !!link };
+  return { ok: true, bizId, mode: input.mode, has: !!link, sup };
 }
 
 // setOrderCfg({ src: { <br>: 'stock' | <br> } }) – מנהל העסק (או מנהל־על). מקור המלאי לכל סניף (16:42).

@@ -186,6 +186,42 @@ describe('סטטוסים, תשלום, נעילה', () => {
   });
 });
 
+describe('זיכוי אצל ספק הקישור (17:47)', () => {
+  async function mk() { return (await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 2, price: 10 }] })).result.id; }
+  const SUP = { id: 's_samvix', name: 'סמוויקס' };
+  it('שולם בקישור → ordpay paid עם הספק והסכום; שולם במזומן → בלי זיכוי; ביטול שולם → void; תשלום מחדש → paid שוב', async () => {
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup: SUP })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/ordcfg/main`)).pay.sup, SUP);
+    const id = await mk();
+    assert.equal((await call('markOrderPaid', E1, { id, method: 'link', last4: '1111' })).status, 'OK');
+    let c = await get(`b/${A}/ordpay/${id}`);
+    assert.equal(c.st, 'paid'); assert.equal(c.amt, 20); assert.deepEqual(c.sup, SUP);
+    assert.deepEqual((await get(`b/${A}/ord/${id}`)).paid.sup, SUP);
+    // כפילות "שולם" – לא משנה
+    assert.equal((await call('markOrderPaid', E1, { id, method: 'link' })).result.dup, true);
+    assert.equal((await call('unpayOrder', MGR, { id, reason: 'בוטל' })).status, 'OK');
+    assert.equal((await get(`b/${A}/ordpay/${id}`)).st, 'void');
+    assert.equal((await call('markOrderPaid', E1, { id, method: 'link' })).status, 'OK');
+    assert.equal((await get(`b/${A}/ordpay/${id}`)).st, 'paid');
+    assert.equal((await call('cancelOrder', MGR, { id, reason: 'החזר' })).status, 'OK');
+    assert.equal((await get(`b/${A}/ordpay/${id}`)).st, 'void');
+    const id2 = await mk();
+    await call('markOrderPaid', E1, { id: id2, method: 'cash' });
+    assert.equal(await get(`b/${A}/ordpay/${id2}`), null);
+    // חוקים: מנהל קורא, עובד לא; אף אחד לא כותב
+    await assertSucceeds(db(MGR).doc(`b/${A}/ordpay/${id}`).get());
+    await assertFails(db(E1).doc(`b/${A}/ordpay/${id}`).get());
+    for (const u of [MGR, E1, SUPER]) await assertFails(db(u).doc(`b/${A}/ordpay/x`).set({ amt: 1 }));
+  });
+  it('ספק לא תקין נדחה; מצב טלפון – בלי ספק ובלי זיכוי', async () => {
+    for (const sup of [{ id: 'a b', name: 'x' }, { id: 's1' }, { id: 's1', name: 'x', evil: 1 }, 'x']) assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup })).reason, 'bad-sup');
+    await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'phone', sup: SUP });
+    const id = await mk();
+    await call('markOrderPaid', E1, { id, method: 'link' });
+    assert.equal(await get(`b/${A}/ordpay/${id}`), null);
+  });
+});
+
 describe('מלאי', () => {
   it('3 + הכנסת 5 = 8; הזמנה 2 = 6; ביטול = 8; נגמר = 0; סך התנועות = הכמות', async () => {
     await prep((d) => d.doc(`b/${A}/prod/pA`).set({ name: 'עוגה', price: 10, on: true, q: {} }));

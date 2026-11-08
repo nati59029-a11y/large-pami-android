@@ -982,6 +982,11 @@ service cloud.firestore {
           allow create, update, delete: if false;
         }
       }
+      // 17:47: ordpay/{ordId} – הזמנה ששולמה דרך קישור הספק: הכנסה + זיכוי אצל הספק. st: 'paid' | 'void'. מנהל בלבד (יומן הכספים)
+      match /ordpay/{id} {
+        allow read: if feat('orders') && bMgr();
+        allow create, update, delete: if false;
+      }
       match /stockLog/{id} {
         allow read: if ordOk() && brOk(resource.data.br);
         allow create, update, delete: if false;
