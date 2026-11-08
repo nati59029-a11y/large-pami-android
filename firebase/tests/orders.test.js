@@ -186,6 +186,26 @@ describe('סטטוסים, תשלום, נעילה', () => {
   });
 });
 
+describe('החלטות 19:27', () => {
+  it('עובד סניף 1 מוריד מלאי מסניף 2 (לא שלו) – מותר, ונרשם ביומן עם שמו והזמנה', async () => {
+    const r = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pB', qty: 3, price: 7.5, from: 'br2' }] });
+    assert.equal(r.status, 'OK', r.text);
+    const L = (await coll(`b/${A}/stockLog`)).filter((x) => x.ord === r.result.id);
+    const xo = L.find((x) => x.why === 'xout');
+    assert.ok(xo); assert.equal(xo.br, 'br2'); assert.equal(xo.delta, -3); assert.equal(xo.by, E1); assert.equal(xo.to, 'br1'); assert.equal(xo.no, r.result.no);
+    const lg = await coll(`b/${A}/ord/${r.result.id}/log`); assert.ok(lg.some((x) => x.act === 'create' && x.by === E1));
+  });
+  it('ביטול "שולם" בהזמנה שיצאה למשלוח – נדחה גם למנהל; ביטול ההזמנה כולה מחזיר מלאי', async () => {
+    const id = (await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 1, price: 10 }] })).result.id;
+    await call('markOrderPaid', E1, { id, method: 'cash' });
+    await call('setOrderStatus', E1, { id, status: 'out' });
+    assert.equal((await call('unpayOrder', MGR, { id, reason: 'x' })).reason, 'bad-status');
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'out');
+    assert.equal((await call('cancelOrder', E1, { id, reason: 'החזרה' })).status, 'OK');
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 3);
+  });
+});
+
 describe('ביטול הזמנה שיצאה למשלוח (18:56)', () => {
   it('עובד מבטל הזמנה במצב "יצא למשלוח": מלאי חוזר, זיכוי void; "הושלם" – לא', async () => {
     await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup: { id: 's1', name: 'ספק' } });
