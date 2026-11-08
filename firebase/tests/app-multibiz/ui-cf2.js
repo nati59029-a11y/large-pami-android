@@ -59,6 +59,27 @@ const openAdd = (p, sub) => p.evaluate((sub) => { A = { step: 'det', type: 'exp'
   const t4c = await mp.evaluate(() => { ACT.hm({ dataset: { d: '1' } }); const H = homeCards(HM); const r = { m: HM, due: H.due, debit: H.debit, late: H.lateSum, card: document.querySelector('#hcards [data-a=hcCf] b').innerText }; ACT.hm({ dataset: { d: '-1' } }); return r; });
   check('4ג חודש הבא: לתשלום 800, ירידה 800 (צ׳ק 300 + יתרה 500), באיחור לא משתנה', t4c.m === '2026-12' && t4c.due === 800 && t4c.debit === 800 && t4c.late === 1000, t4c);
 
+  // ---- 4ד. מסך הבית: כרטיס ראשי (רווח, הכנסות, הוצאות), בלי כפילויות, הרשאות ----
+  const t4d = await mp.evaluate(() => { const ic = S.cats.find((c) => c.kind === 'inc'); S.tx.push({ id: 'in1', t: 'inc', cat: ic.id, date: '2026-11-01', amt: 1000, note: '', pays: [] }); S.tx.push({ id: 'ex9', t: 'exp', cat: S.cats.find((c) => c.kind === 'exp' && c.beh === 'free').id, date: '2026-11-02', amt: 400, note: '', pays: [] }); save(); render(0);
+    const q = (s) => document.querySelector(s), tx = document.body.innerText, r = {};
+    r.hero = q('#hmain') ? q('#hmain').innerText.replace(/\s+/g, ' ') : ''; r.cnt = (tx.match(/לתשלום החודש/g) || []).length; r.old = /צריך לשלם החודש|נשאר לשלם החודש|שולם מתוכו|רווחיות החודש|הכנסות החודש|הוצאות החודש/.test(tx);
+    r.inHero = !!q('#hmain [data-a=tab][data-v=inc]') && !!q('#hmain [data-a=tab][data-v=exp]'); r.cards = document.querySelectorAll('#hcards > button').length; return r; });
+  check('4ד כרטיס ראשי: רווח 600 (60%), הכנסות/הוצאות בתוכו', /רווח החודש/.test(t4d.hero) && /600/.test(t4d.hero) && /60%/.test(t4d.hero) && /1,000/.test(t4d.hero) && /400/.test(t4d.hero) && t4d.inHero, t4d);
+  check('4ה "לתשלום החודש" פעם אחת, בלי כותרות ישנות כפולות, 3 כרטיסים קטנים', t4d.cnt === 1 && !t4d.old && t4d.cards === 3, t4d);
+  const t4e = await mp.evaluate(() => { const o = { role: SY.role, refresh: SY.refresh, perms: SY.perms, biz: SY.biz }, res = {}; const txt = () => document.querySelector('#hmain').innerText.replace(/\s+/g, ' ');
+    SY.biz = Object.assign({}, SY.biz, { dataRoot: 'b' }); SY.role = 'worker'; SY.refresh = 'x'; res.isW = isW(); res.bzB = bzB();
+    SY.perms = { incR: false, expR: false }; render(0); res.none = { t: txt(), tabs: document.querySelectorAll('#hmain [data-a=tab]').length, has1000: /1,000/.test(document.body.innerText.split('לתשלום החודש')[0]) };
+    SY.perms = { incR: true, expR: 'own' }; render(0); res.inc = { t: txt(), has400: /400/.test(txt()), has1000: /1,000/.test(txt()), profit: /רווח החודש|הפסד החודש/.test(txt()) };
+    SY.perms = { incR: false, expR: true }; render(0); res.exp = { t: txt(), has400: /400/.test(txt()), has1000: /1,000/.test(txt()), profit: /רווח החודש|הפסד החודש/.test(txt()) };
+    SY.perms = { incR: true, expR: true }; render(0); res.both = /רווח החודש/.test(txt());
+    Object.assign(SY, o); render(0); return res; });
+  if (t4e.isW && t4e.bzB) {
+    check('4ו הרשאות: בלי הכנסות והוצאות – אין סכומים ואין קישורים', t4e.none.tabs === 0 && !/17|1,000|400|רווח|הפסד/.test(t4e.none.t.replace(/[א-ת]+ \d{4}/g, '')), t4e.none);
+    check('4ז הרשאות: הוצאות "own" מוסתרות (רק הכנסות, בלי רווח)', t4e.inc.has400 === false && t4e.inc.has1000 && !t4e.inc.profit, t4e.inc);
+    check('4ח הרשאות: רק הוצאות – בלי הכנסות ובלי רווח; הכול – עם רווח', t4e.exp.has400 && !t4e.exp.has1000 && !t4e.exp.profit && t4e.both, t4e);
+  } else check('4ו-ח הרשאות: לא ניתן לדמות עובד בסביבת הבדיקה', false, t4e);
+  await seed(mp);
+
   // ---- 5. V.cf ----
   const t5 = await mp.evaluate(() => { go('cf'); const rows = [...document.querySelectorAll('[data-a=cfM]')]; const r = { n: rows.length, note: !!document.getElementById('cfNote') }; rows[1].click(); r.det = document.querySelector('[data-cfd="2026-12"]').innerText; NAV = [{ v: 'home' }]; render(0); return r; });
   check('5 תזרים: 6 חודשים, הערת מזומן/אשראי, פירוט חודש עם צ׳ק', t5.n === 6 && t5.note && /צ׳ק 5/.test(t5.det) && /10\/12\/2026/.test(t5.det), t5);
