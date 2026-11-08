@@ -16,7 +16,8 @@ const ORD = [doc('ord/o1', { no: N(12), br: S('br1'), status: S('new'), total: N
 const PROD = [doc('prod/pA', { name: S('עוגת שוקולד'), price: N(12), barcode: S('7290001'), on: { booleanValue: true }, q: M({ br1: N(5), br2: N(1) }) }),
   doc('prod/pB', { name: S('לחם מחמצת'), price: N(10.5), on: { booleanValue: true }, q: M({ br1: N(0), br2: N(8) }) })];
 const TZ = '123456782';
-const CUST = [doc('cust/t' + TZ, { name: S('משה כהן'), phone: S('0501234567'), tz: S(TZ), mail: S('moshe@x.co'), addr: S('הרצל 1'), x: M({ xcity: S('אשדוד') }) })];
+const TZL = '222222226', LN = 'א'.repeat(45), LA = 'ב'.repeat(120);
+const CUST = [doc('cust/t' + TZL, { name: S(LN), phone: S('0507777777'), tz: S(TZL), addr: S(LA), mail: S('old@x.co') }), doc('cust/t' + TZ, { name: S('משה כהן'), phone: S('0501234567'), tz: S(TZ), mail: S('moshe@x.co'), addr: S('הרצל 1'), x: M({ xcity: S('אשדוד') }) })];
 const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש'), on: { booleanValue: true } }), M({ id: S('br2'), name: S('יהודה הנשיא'), on: { booleanValue: true } })]) });
 
 (async () => {
@@ -126,12 +127,43 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const ic = calls.find((c) => c.n === 'importCusts'); const all = JSON.stringify(calls) + (await page.evaluate(() => document.body.innerHTML + JSON.stringify(window.__oc) + JSON.stringify(localStorage)));
   check('6 ייבוא: מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 3 && ic.d.rows[2].last4 === '1111' && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[1].phone === '0521112222' && ic.d.rows[1].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234|4111\.1111|5326\/1000/.test(all) && /שורה 6: מספר ארוך/.test(pv) && /\*\*\*\*9012/.test(mapTxt) && /שורה 4/.test(pv) && /נחתכו/.test(pv), { rows: ic && ic.d.rows, leak: /4580\s?1234|4111\.1111|5326\/1000/.test(all), pv: pv.slice(0, 200) });
   // 7. עובד: אין כפתור סיטונאי ואין ייבוא
-  await page.evaluate(() => { SY.role = 'worker'; }); await goV('ocCard', 't' + TZ); await H.settle(page, 300);
+  await page.evaluate(() => { window.__role0 = SY.role; SY.role = 'worker'; }); await goV('ocCard', 't' + TZ); await H.settle(page, 300);
   const emp = await page.innerText('#main'); await goV('ocList'); await H.settle(page, 200); const empL = await page.innerText('#main');
   check('7 עובד: בלי "סמן כסיטונאי", בלי ייבוא ובלי הגדרת שדות', !/סיטונאי/.test(emp.replace('לקוח רגיל', '')) && !/ייבוא/.test(empL) && !/שדות נוספים/.test(empL), { emp: emp.slice(0, 150) });
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   { const L = await page.evaluate(() => { const n = 'א'.repeat(45), a = 'ב'.repeat(120); const D = window.__oc.split({ name: n, addr: a }, {}); const S = window.__oc.split({ name: 'קצר', addr: 'הרצל 1' }, {}); return { D, S }; });
     check('ישן ארוך: שם 45 / כתובת 120 נשארים בשדה המלא, לא נדחסים לשם פרטי/רחוב', L.D.name.length === 45 && L.D.addr.length === 120 && !L.D.fn && !L.D.st && L.S.fn === 'קצר' && L.S.st === 'הרצל 1', L); }
+  { // סבב 3: לקוח ישן עם שם 45 / כתובת 120 (בלי שדה גלוי) ואז החלפת ת"ז – ההזמנה לא יורשת שם/כתובת/טלפון/מייל
+    const fresh = async () => { await page.evaluate(() => { SY.role = window.__role0; const g = document.getElementById('dlg'); if (g && g.open) g.close(); window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300); await page.selectOption('select[data-k=br]', 'br1'); };
+    await fresh(); await page.fill('#octz', TZL); await H.settle(page, 700);
+    const a = await page.evaluate(() => Object.assign({}, window.__ox.draft));
+    await page.fill('#octz', '00000001'); await H.settle(page, 200);
+    const b = await page.evaluate(() => Object.assign({}, window.__ox.draft));
+    await page.fill('#octz', '000000018'); await H.settle(page, 600);
+    const n0 = calls.length; await page.fill('#oxq', 'לחם'); console.log('DBG', await page.evaluate(() => [document.querySelectorAll('#oxq').length, document.getElementById('oxhits')&&document.getElementById('oxhits').innerHTML.slice(0,200), JSON.stringify(window.__ox.draft).slice(0,300)])); await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
+    await page.click('[data-a=oxSave]'); await H.settle(page, 600);
+    const after = calls.slice(n0).map((c) => c.n), vis = await page.evaluate(() => [...document.querySelectorAll('#main input[data-i=oxD]')].map((e) => e.value).join('|'));
+    check('9 לקוח ישן ארוך ואז שינוי ת"ז: name/addr/טלפון/מייל נמחקים, אין שמירה בלי שם', a.name === LN && a.addr === LA && !b.name && !b.addr && !b.phone && !b.mail && !b.custId && !after.includes('createOrder') && !after.includes('saveCust') && !vis.includes('0507777777'), { a: [a.name && a.name.length, a.addr && a.addr.length], b, after });
+    // מחיקת ת"ז לגמרי, ואז החלפה ישירה ללקוח קיים אחר (fillDraft)
+    await fresh(); await page.fill('#octz', TZL); await H.settle(page, 700); await page.fill('#octz', ''); await H.settle(page, 200);
+    const c = await page.evaluate(() => Object.assign({}, window.__ox.draft));
+    await page.fill('#octz', TZL); await H.settle(page, 700); await page.fill('#octz', TZ); await H.settle(page, 700);
+    const d = await page.evaluate(() => Object.assign({}, window.__ox.draft));
+    await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); const n1 = calls.length;
+    await page.click('[data-a=oxSave]'); await H.settle(page, 800);
+    const co = calls.slice(n1).find((x) => x.n === 'createOrder');
+    check('10 מחיקת ת"ז מאפסת; מעבר ישיר ללקוח קיים אחר – רק הפרטים שלו נשלחים', !c.name && !c.addr && !c.phone && d.fn === 'משה כהן' && !d.name.startsWith('א') && d.phone === '0501234567' && d.mail === 'moshe@x.co' && !!co && co.d.cust.name === 'משה כהן' && co.d.cust.st === 'הרצל 1' && co.d.cust.addr === undefined && co.d.cust.tz === TZ, { co: co && co.d.cust, d });
+  }
+  { // סבב 3: עריכת לקוח ישן ארוך – מחיקת כתובת, ושם משפחה בלבד לא דורס שם קיים
+    await goV('ocList'); await H.settle(page, 600);
+    await page.evaluate((id) => { window.__oc.L.find((x) => x.id === id) || window.__oc.L.push({ id, name: 'א'.repeat(45), addr: 'ב'.repeat(120), phone: '0507777777', tz: '222222226' }); }, 't' + TZL);
+    await page.evaluate((id) => ACT.ocEdit({ dataset: { id } }), 't' + TZL); await H.settle(page, 300);
+    await page.fill('#dlg input[name=ln]', 'לוי'); const n2 = calls.length; await page.click('#dlg form button.grow:not(.g)'); await H.settle(page, 400);
+    const blocked = calls.slice(n2).filter((x) => x.n === 'saveCust').length === 0;
+    await page.fill('#dlg input[name=ln]', ''); await page.check('#dlg input[name=odel]'); await page.click('#dlg form button.grow:not(.g)'); await H.settle(page, 600);
+    const sv = calls.slice(n2).filter((x) => x.n === 'saveCust').pop();
+    check('11 עריכה: שם משפחה בלבד עם שם ישן – נחסם עם הודעה; "מחק את הכתובת" שולח addr:"" ושומר את השם הישן', blocked && !!sv && sv.d.cust.addr === '' && sv.d.cust.name === 'א'.repeat(45) && sv.d.cust.fn === undefined, { blocked, sv: sv && sv.d });
+  }
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
   console.log(fail ? `נכשלו ${fail}` : 'הכול עבר'); process.exit(fail ? 1 : 0);

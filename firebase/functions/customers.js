@@ -192,6 +192,8 @@ async function saveCust(request) {
   const o = clean(input.cust, await xKeys(db));
   // עריכה (לא fill): חלק ששדה אחר מקבוצתו נשלח ריק – נמחק, כדי שהשדה הנפרד יתאים לרשור החדש
   if (input.fill !== true) for (const g of [['fn', 'ln'], ['st', 'city', 'fl', 'apt']]) if (g.some((k) => o[k] !== undefined)) for (const k of g) if (o[k] === undefined) o[k] = '';
+  // עריכה: addr:'' בלי אף חלק כתובת = מחיקת הכתובת כולה (גם החלקים). ב-fill מתעלמים
+  if (input.fill !== true && input.cust && input.cust.addr === '' && !['st', 'city', 'fl', 'apt'].some((k) => o[k])) for (const k of ['addr', 'st', 'city', 'fl', 'apt']) o[k] = '';
   let r;
   await db.runTransaction(async (tx) => { r = await upsert(tx, db, w, o, { fill: input.fill === true, wholesale: input.wholesale, src: input.fill === true ? 'order' : 'manual' }); });
   return Object.assign({ ok: true }, r);

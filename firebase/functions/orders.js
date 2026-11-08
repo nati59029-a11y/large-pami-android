@@ -285,10 +285,13 @@ async function stockSet(request) {
 // 00:19: שם פרטי/משפחה ורחוב/עיר/קומה/דירה בנפרד. name ו-addr נשמרים גם כרשור – תצוגה וחיפוש זהים לרשומות ישנות (שם/כתובת בשדה אחד).
 const CPARTS = [['fn', 30, 'שם פרטי'], ['ln', 30, 'שם משפחה'], ['st', 80, 'רחוב ומספר'], ['city', 40, 'עיר'], ['fl', 10, 'קומה'], ['apt', 10, 'דירה']];
 const CPART_KEYS = CPARTS.map((x) => x[0]);
+const NAME_MAX = 60, ADDR_MAX = 150;
+const cap = (v, n) => v.slice(0, n).trim(); // אותה ספירה כמו txt (length)
 function custParts(c, o) {
   for (const [k, max, label] of CPARTS) if (c[k] != null && c[k] !== '') o[k] = txt(c[k], max, 'bad-' + k, label);
-  if (o.fn || o.ln) o.name = [o.fn, o.ln].filter(Boolean).join(' ');
-  if (o.st || o.city || o.fl || o.apt) o.addr = [o.st, o.city, o.fl && 'קומה ' + o.fl, o.apt && 'דירה ' + o.apt].filter(Boolean).join(', ');
+  // הרשור לא עובר את מגבלות השדה המלא (שם 60, כתובת 150): 30+1+30 / 80+40+10+10+מפרידים עלולים לחרוג – נחתך בגבול תו
+  if (o.fn || o.ln) o.name = cap([o.fn, o.ln].filter(Boolean).join(' '), NAME_MAX);
+  if (o.st || o.city || o.fl || o.apt) o.addr = cap([o.st, o.city, o.fl && 'קומה ' + o.fl, o.apt && 'דירה ' + o.apt].filter(Boolean).join(', '), ADDR_MAX);
   return o;
 }
 function cleanCust(c) {
@@ -923,4 +926,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { saveCat, importProducts, transferStock, getWsPrices, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { custParts, CPART_KEYS, digRun, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

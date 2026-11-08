@@ -71,7 +71,7 @@ ACT.oxBr=el=>{OBR=el.dataset.id;rerender()};
 /* ---------- הזמנה חדשה ---------- */
 /* 00:19: שם פרטי/משפחה, רחוב/עיר/קומה/דירה. name/addr = חיבור (תאימות להזמנות ולקוחות ישנים) */
 const CPK=['fn','ln','st','city','fl','apt'];
-function custJoin(D){const t=k=>String(D[k]||'').trim();if(t('fn')||t('ln'))D.name=[t('fn'),t('ln')].filter(Boolean).join(' ');if(t('st')||t('city')||t('fl')||t('apt'))D.addr=[t('st'),t('city'),t('fl')&&'קומה '+t('fl'),t('apt')&&'דירה '+t('apt')].filter(Boolean).join(', ');return D}
+function custJoin(D){const t=k=>String(D[k]||'').trim();const cap=(v,n)=>v.slice(0,n).trim();if(t('fn')||t('ln'))D.name=cap([t('fn'),t('ln')].filter(Boolean).join(' '),60);if(t('st')||t('city')||t('fl')||t('apt'))D.addr=cap([t('st'),t('city'),t('fl')&&'קומה '+t('fl'),t('apt')&&'דירה '+t('apt')].filter(Boolean).join(', '),150);return D}
 window.__custJoin=custJoin;
 function draft(){if(!O.draft){const B=myBr();O.draft={br:B.length===1?B[0].id:'',name:'',fn:'',ln:'',phone:'',tz:'',addr:'',st:'',city:'',fl:'',apt:'',mail:'',note:'',items:[],q:'',req:rid()}}return O.draft}
 const lineH=(it,i,br)=>{const p=it.pid?prod(it.pid):null,src=hasBr()&&br?srcOf(br):null;

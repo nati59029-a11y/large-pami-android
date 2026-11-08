@@ -222,6 +222,17 @@ describe('לקוחות – שדות נפרדים וניודים', () => {
     const o = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: { name: n, addr: ad, phone: '0501234567', tz: TZ }, items: [{ pid: 'pA', qty: 1, price: 10 }] });
     assert.equal(o.status, 'OK', o.text);
   });
+  it('סבב 3: רשור שם/כתובת לא עובר 60/150; עריכה עם addr:"" מוחקת כתובת (גם חלקים), fill מתעלם', async () => {
+    const r = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: { fn: 'א'.repeat(30), ln: 'ב'.repeat(30), st: 'ג'.repeat(80), city: 'ד'.repeat(40), fl: 'ה'.repeat(10), apt: 'ו'.repeat(10), phone: '0529998888' }, items: [{ pid: 'pA', qty: 1, price: 10 }] });
+    assert.equal(r.status, 'OK', r.text);
+    const od = (await coll(`b/${A}/ord`)).pop(); assert.ok(od.cust.name.length <= 60, od.cust.name.length); assert.ok(od.cust.addr.length <= 150, od.cust.addr.length);
+    assert.equal((await call('saveCust', E1, { cust: { tz: TZ, fn: 'א'.repeat(30), ln: 'ב'.repeat(30), st: 'ג'.repeat(80), city: 'ד'.repeat(40), apt: '5', phone: '0501234567' } })).status, 'OK');
+    let d = await get(`b/${A}/cust/t${TZ}`); assert.ok(d.name.length <= 60 && d.addr.length <= 150);
+    assert.equal((await call('saveCust', E1, { cust: { tz: TZ, addr: '' }, fill: true })).status, 'OK');
+    d = await get(`b/${A}/cust/t${TZ}`); assert.ok(d.addr.length > 0);
+    assert.equal((await call('saveCust', E1, { cust: { tz: TZ, addr: '' } })).status, 'OK');
+    d = await get(`b/${A}/cust/t${TZ}`); assert.equal(d.addr, ''); assert.equal(d.st, ''); assert.equal(d.city, ''); assert.equal(d.apt, ''); assert.equal(d.fn, 'א'.repeat(30));
+  });
   it('ports: כבוי (ברירת מחדל) – נדחה; פעיל – נשמר, ייבוא חוזר לא מכפיל, port ישן נשמר', async () => {
     assert.equal((await call('saveCust', E1, { cust: Object.assign({ ports: [{ d: '2025-01-02' }] }, c1) })).reason, 'feature-off');
     await seed(Object.assign({}, ALL, { cellular: true }));

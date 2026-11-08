@@ -51,7 +51,10 @@ async function loadL(force){if(C.busy||(!force&&C.L&&Date.now()-C.at<20000))retu
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 
 /* ---------- הזמנה חדשה: ת"ז ראשונה ---------- */
-function fillDraft(D,c){splitOld(c,D);['phone','mail'].forEach(k=>{if(c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])});D.tz=c.tz||D.tz;D.custId=c.id;D.wholesale=c.wholesale===true;D.cName=c.name||''}
+/* סבב 3: פרטי לקוח שנטענו מהמערכת (כולל שם/כתובת ישנים ארוכים שאין להם שדה גלוי) נמחקים כשמחליפים לקוח – הזמנה ללקוח אחר לא יורשת אותם */
+const LDK=['name','addr'].concat(CPK);
+function dropLoaded(D){const F=D.cFrom||{};LDK.concat(['phone','mail'].filter(k=>F[k]&&String(D[k]||'').trim()===F[k])).forEach(k=>{D[k]='';document.querySelectorAll('#main input[data-i=oxD][data-k='+k+']').forEach(e=>{e.value=''})});D.cName='';D.cFrom=null;D.wholesale=false}
+function fillDraft(D,c){if(D.custId&&D.custId!==c.id)dropLoaded(D);D.name='';D.addr='';splitOld(c,D);['phone','mail'].forEach(k=>{if(c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])});D.cFrom={phone:String(c.phone||''),mail:String(c.mail||'')};D.tz=c.tz||D.tz;D.custId=c.id;D.wholesale=c.wholesale===true;D.cName=c.name||''}
 const custBox=D=>{const st=D.cSt;return st==='found'?`<p class="note" role="status" id="ocst">לקוח קיים: <b>${esc(D.cName)}</b>${D.wholesale?' <span class="tag t1">סיטונאי</span>':''} – הפרטים מולאו</p>`
  :st==='new'?`<p class="note" role="status" id="ocst">לקוח חדש – ממלאים את הפרטים, והלקוח יישמר עם ההזמנה</p>`:st==='bad'?`<p class="note" role="status" id="ocst">ת.ז לא תקינה</p>`:st==='wait'?`<p class="note" role="status" id="ocst">מחפש…</p>`:`<p class="note" role="status" id="ocst"></p>`};
 {const nw=V.oxNew;if(nw)V.oxNew=()=>{const r=nw();if(!r||!r.h||!on())return r;const D=O.draft;if(!D)return r;
@@ -61,7 +64,7 @@ const custBox=D=>{const st=D.cSt;return st==='found'?`<p class="note" role="stat
   <button type="button" class="btn g s w" data-a="ocByPh">חיפוש לקוח לפי הטלפון שהוקלד</button>`;
   h=h.replace('<div class="card">','<div class="card">'+tz);
   r.h=h;r.s='ת.ז, פרטי לקוח ומוצרים';return r}}
-INP.ocTz=el=>{const D=O.draft;if(!D)return;const t=dig(el.value);D.tz=t;if(D.custId){D.custId='';D.wholesale=false;D.cSt=''}
+INP.ocTz=el=>{const D=O.draft;if(!D)return;const t=dig(el.value);D.tz=t;if(D.custId){D.custId='';D.cSt='';dropLoaded(D)}
  if(t.length<9){D.cSt='';paintSt(D);return}const z=t.padStart(9,'0');if(!tzOk(z)){D.cSt='bad';paintSt(D);return}
  D.cSt='wait';paintSt(D);const my=z;byTz(z).then(c=>{if(O.draft!==D||dig(D.tz).padStart(9,'0')!==my)return;if(c){fillDraft(D,c);D.cSt='found';rerender()}else{D.cSt='new';paintSt(D)}}).catch(e=>{D.cSt='';paintSt(D);err(e)})};
 const paintSt=D=>{const s=document.getElementById('ocst');if(s)s.outerHTML=custBox(D)};
@@ -110,20 +113,20 @@ const pRows=()=>(C.pf||[]).map((p,i)=>`<div class="card" style="margin:6px 0"><d
 const pRead=()=>{const f=document.querySelector('#dlg form');if(!f)return;const v=fd(f);C.pf=(C.pf||[]).map((p,i)=>({d:v['pd'+i]||'',phone:v['pp'+i]||'',tz:v['pt'+i]||''}))};
 ACT.ocPAdd=()=>{pRead();if(C.pf.length>=30)return toast('עד 30 ניודים');C.pf.push({});const b=document.getElementById('ocpl');if(b)b.innerHTML=pRows()};
 ACT.ocPDel=el=>{pRead();C.pf.splice(+el.dataset.n,1);const b=document.getElementById('ocpl');if(b)b.innerHTML=pRows()};
-const cForm=c=>{const x=c&&c.x||{},s=splitOld(c||{},{});C.pf=portsOf(c);return `${s.name?`<input type="hidden" name="oname" value="${esc(s.name)}">`:''}${s.addr?`<input type="hidden" name="oaddr" value="${esc(s.addr)}">`:''}<h3>${c?'עריכת לקוח':'לקוח חדש'}</h3><form data-f="ocF">${c?`<input type="hidden" name="id" value="${esc(c.id)}">`:''}
- ${fld('ת.ז','tz',c&&c.tz||'','text','inputmode="numeric" maxlength="9" autocomplete="off"'+(c&&c.tz?' readonly':''))}${(s.name?`<p class="note">שם קיים: ${esc(s.name)} (נשמר כמו שהוא אם לא ממלאים שם פרטי)</p>`:'')+fld('שם פרטי','fn',s.fn||'','text',(s.name?'':'required ')+'maxlength="30"')}${fld('שם משפחה','ln',s.ln||'','text','maxlength="30"')}${fld('טלפון','phone',c&&c.phone||'','tel','inputmode="tel" required'+(c&&!c.tz?' readonly':''))}
- ${fld('מייל','mail',c&&c.mail||'','email','dir="ltr"')}${(s.addr?`<p class="note">כתובת קיימת: ${esc(s.addr)} (נשמרת כמו שהיא אם לא ממלאים רחוב/עיר)</p>`:'')+fld('רחוב ומספר','st',s.st||'','text','maxlength="80"')}${fld('עיר','city',s.city||'','text','maxlength="40"')}<div class="row"><div class="grow">${fld('קומה','fl',s.fl||'','text','maxlength="10"')}</div><div class="grow">${fld('דירה','apt',s.apt||'','text','maxlength="10"')}</div></div>
+const cForm=c=>{const x=c&&c.x||{},s=splitOld(c||{},{});C.pf=portsOf(c);return `<h3>${c?'עריכת לקוח':'לקוח חדש'}</h3><form data-f="ocF">${s.name?`<input type="hidden" name="oname" value="${esc(s.name)}">`:''}${s.addr?`<input type="hidden" name="oaddr" value="${esc(s.addr)}">`:''}${c?`<input type="hidden" name="id" value="${esc(c.id)}">`:''}
+ ${fld('ת.ז','tz',c&&c.tz||'','text','inputmode="numeric" maxlength="9" autocomplete="off"'+(c&&c.tz?' readonly':''))}${(s.name?`<p class="note">שם קיים: ${esc(s.name)} (נשמר כמו שהוא אם משאירים ריקים את השם הפרטי ושם המשפחה)</p>`:'')+fld('שם פרטי','fn',s.fn||'','text',(s.name?'':'required ')+'maxlength="30"')}${fld('שם משפחה','ln',s.ln||'','text','maxlength="30"')}${fld('טלפון','phone',c&&c.phone||'','tel','inputmode="tel" required'+(c&&!c.tz?' readonly':''))}
+ ${fld('מייל','mail',c&&c.mail||'','email','dir="ltr"')}${(s.addr?`<p class="note">כתובת קיימת: ${esc(s.addr)} (נשמרת כמו שהיא אם לא ממלאים רחוב/עיר)</p><label class="row" style="min-height:44px;gap:8px"><input type="checkbox" name="odel" value="1">מחק את הכתובת הקיימת</label>`:'')+fld('רחוב ומספר','st',s.st||'','text','maxlength="80"')}${fld('עיר','city',s.city||'','text','maxlength="40"')}<div class="row"><div class="grow">${fld('קומה','fl',s.fl||'','text','maxlength="10"')}</div><div class="grow">${fld('דירה','apt',s.apt||'','text','maxlength="10"')}</div></div>
  ${fld('4 ספרות אחרונות של כרטיס (רשות)','last4',c&&c.last4||'','text','inputmode="numeric" maxlength="4" autocomplete="off"')}
  ${xKeys().map(k=>fld(esc(k.label),'x_'+k.k,x[k.k]||'','text','maxlength="200"')).join('')}
  ${cell()?`<div class="sec"><h3>ניודים קודמים</h3></div><div id="ocpl">${pRows()}</div><button type="button" class="btn g s w" data-a="ocPAdd">＋ ניוד</button>`:''}
  <p class="note">לא מקלידים מספר כרטיס מלא, תוקף או קוד.</p><div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`};
 ACT.ocNew=async()=>{if(!C.cfg)await cfgLoad();dlg(cForm(null))};
-ACT.ocEdit=async el=>{if(!C.cfg)await cfgLoad();const c=(C.L||[]).find(x=>x.id===el.dataset.id);if(c)dlg(cForm(c))};
+ACT.ocEdit=async el=>{if(!C.cfg)await cfgLoad();const c=(C.L||[]).find(x=>x.id===el.dataset.id);if(c){C.ea=!!(c.addr||AP.some(k=>c[k]));dlg(cForm(c))}};
 FRM.ocF=async f=>{pRead();const v=fd(f),tz=dig(v.tz);if(CPK.concat(['mail']).concat(xKeys().map(k=>'x_'+k.k)).some(n=>CARD8.test(v[n]||'')))return toast('אסור להקליד מספר כרטיס או מספר ארוך. מותר רק 4 ספרות אחרונות.');if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');if(!phN(v.phone))return toast('טלפון לא תקין');
  const k=l4(v.last4);if(k.bad)return toast('4 ספרות בדיוק');
  const P=[];for(const p of C.pf||[]){const o={};if(p.d)o.d=p.d;if(String(p.phone).trim()){o.phone=phN(p.phone);if(!o.phone)return toast('טלפון ניוד לא תקין')}if(dig(p.tz)){const z=tzN(p.tz);if(!z||!tzOk(z))return toast('ת.ז ניוד לא תקינה');o.tz=z}if(Object.keys(o).length)P.push(o)}
- if(!v.fn.trim()&&!v.oname)return toast('חסר שם פרטי');
- const c={phone:phN(v.phone)};if(cell())c.ports=P;if(tz)c.tz=tz;CPK.forEach(n=>c[n]=(v[n]||'').trim());if(!c.fn&&!c.ln){delete c.fn;delete c.ln;if(v.oname)c.name=v.oname}if(!AP.some(n=>c[n])){AP.forEach(n=>delete c[n]);if(v.oaddr)c.addr=v.oaddr}['mail'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;
+ if(!v.fn.trim()&&(!v.oname||v.ln.trim()))return toast(v.oname?'ממלאים שם פרטי, או משאירים את שני שדות השם ריקים כדי לשמור את השם הקיים':'חסר שם פרטי');
+ const c={phone:phN(v.phone)};if(cell())c.ports=P;if(tz)c.tz=tz;CPK.forEach(n=>c[n]=(v[n]||'').trim());if(!c.fn&&!c.ln){delete c.fn;delete c.ln;if(v.oname)c.name=v.oname}if(!AP.some(n=>c[n])){AP.forEach(n=>delete c[n]);const had=f.querySelector('[name=id]')&&(v.oaddr||C.ea);if(v.oaddr&&!v.odel)c.addr=v.oaddr;else if(had)c.addr=''}['mail'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;
  const x={};xKeys().forEach(q=>{const s=(v['x_'+q.k]||'').trim();if(s)x[q.k]=s});if(Object.keys(x).length)c.x=x;
  const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('saveCust',{cust:c});closeDlg();toast('נשמר');await loadL(true);if(cur().v!=='ocCard')go('ocCard',r.id);else rerender()}catch(e){b.disabled=false;err(e)}};
 
