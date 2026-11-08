@@ -288,7 +288,7 @@ function ensure(d){
  if(d.pmOff==null)d.pmOff=2;if(!d.theme)d.theme='paper';if(!d.fs)d.fs=1;d.v=3;
  ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});/* סגירת קופה (11.2026): S.zc = הסגירות שהוכנסו; תתי-קטגוריות "שובר קניה", "שובר זיכוי", "הנפקת שובר זיכוי" בשתי הקופות – רק אם חסרות (לפי שם). לא משנים ולא מוחקים קיים */if(!Array.isArray(d.zc))d.zc=[];if(!(d.zcMig>=1)){['i_yh','i_nl'].forEach(c=>{if(d.cats.find(x=>x.id===c))['שובר קניה','שובר זיכוי','הנפקת שובר זיכוי'].forEach(n=>{if(!d.subs.some(x=>x.cat===c&&heKey(x.name)===heKey(n)))d.subs.push({id:uid(),cat:c,name:n})})});d.zcMig=1}/* רצה פעם אחת: תת-קטגוריה שנמחקה אחר כך לא חוזרת */
  return d}
-function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. הוצאה חדשה בלי eu = המנהל שבמכשיר */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=t.t==='exp'&&typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
+function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. רשומה חדשה בלי eu = המשתמש שבמכשיר. סריקה אחידה (8.11): לכל סוגי הרשומות, לא רק הוצאות */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
 function load(){try{const r=localStorage.getItem(KEY);if(r){S=ensure(JSON.parse(r));return true}}catch(e){}return false}
 
 /* ===== המרה מהאפליקציה הישנה ===== */
@@ -3573,11 +3573,11 @@ function zcSub(reg,name){let s=S.subs.find(x=>x.cat===reg&&!x.off&&heKey(x.name)
 /* הכנסה להכנסות: שורה לכל אמצעי תשלום, בתאריך שעל הדוח. מינוס (הנפקת שובר זיכוי) נרשם כהכנסה שלילית. עיגולים בתוך המזומן */
 function zcIns(it,ap){const f=it.f,c=it.c;if(!cat(it.reg)||!f.d||!c.rows.length)return false;if(S.zc.some(x=>x.id===it.id)||S.tx.some(t=>t.src==='zc:'+it.id))return true;
  const ids=[],note='סגירת קופה · דוח Z '+s_(f.no)+(it.by?' · '+it.by:'');
- c.rows.forEach(r=>{const s=zcSub(it.reg,r.sub),t={id:uid(),src:'zc:'+it.id,t:'inc',cat:it.reg,sub:s.id,date:f.d,amt:r.amt,note,pays:[]};S.tx.push(t);ids.push(t.id)});
+ c.rows.forEach(r=>{const s=zcSub(it.reg,r.sub),t={id:uid(),src:'zc:'+it.id,t:'inc',cat:it.reg,sub:s.id,date:f.d,amt:r.amt,note,pays:[]};/* eu = מי ששלח את הסגירה */if(typeof it.ow==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(it.ow))t.eu=it.ow;S.tx.push(t);ids.push(t.id)});
  S.zc.push({id:it.id,reg:it.reg,d:f.d,tm:zcTime(f.tm),od:f.oD||'',otm:zcTime(f.oTm),no:s_(f.no),by:it.by||'',at:Date.now(),tx:ids,cash:{c:c.c,o:c.o,a:c.a,p:c.p},ap:ap||'',co:it.co&&it.co.L?{z:it.co.z,s:it.co.s,ids:it.co.L.map(x=>x.id),ok:it.co.ok?1:0,done:0}:undefined});save();return true}
 /* ---- מנהל: משיכת סגירות חדשות מהענן (כמו pullInbox) ---- */
 function zcParse(d,id){const reg=gv(d,'reg');if(!zcRegOk(reg))return null;let j={};try{j=JSON.parse(gv(d,'data'))}catch(e){}if(!j||typeof j!=='object')j={};
- const f=zcClean(j.f),it={id,reg,by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),np:Math.max(0,Math.min(8,gi(d,'np'))),f,ack:j.ack===1||j.ack===true,why:typeof j.why==='string'?j.why.slice(0,500):'',cw:typeof j.cw==='string'?j.cw.slice(0,500):'',dw:typeof j.dw==='string'?j.dw.slice(0,500):'',inc:(j.co&&Array.isArray(j.co.inc)?j.co.inc:[]).filter(idOk).slice(0,50),rs:j.rs==='auto'?'auto':'manual'};
+ const f=zcClean(j.f),it={id,reg,by:s_(gv(d,'by')).slice(0,100),t:gi(d,'t'),np:Math.max(0,Math.min(8,gi(d,'np'))),f,ack:j.ack===1||j.ack===true,why:typeof j.why==='string'?j.why.slice(0,500):'',cw:typeof j.cw==='string'?j.cw.slice(0,500):'',dw:typeof j.dw==='string'?j.dw.slice(0,500):'',inc:(j.co&&Array.isArray(j.co.inc)?j.co.inc:[]).filter(idOk).slice(0,50),rs:j.rs==='auto'?'auto':'manual',ow:s_(gv(d,'uid')).slice(0,128)};
  it.c=zcCalc(f,reg);it.need=zcNeed(it);return it}
 async function zcPull(){if(!ZQ||!isA()||zcPull.b)return 0;zcPull.b=1;ZQ.at=Date.now();let n=0;try{
  /* לבדיקת ההוצאות מקופה: גם הוצאות מעובדים שעוד לא נקלטו (קריאה בלבד, בלי לקלוט ובלי לשמור). מתוך pullInbox הן כבר נקלטו */COIN=[];if(!pullInbox.b){try{COIN=(await runQ('status','new')).map(d=>{let x={};try{x=JSON.parse(gv(d,'data'))}catch(e){}return{id:idOf(d),owner:gv(d,'owner'),d:x&&typeof x==='object'?x:{}}})}catch(e){}}
@@ -4514,7 +4514,9 @@ ACT.usBackStart=()=>{if(US)usStart()};
 ACT.usManual=()=>{if(!US)return;US.pg=[];US.i=0;usPane(0);usChooser('הכנסה ידנית: איזה סוג מסמך?','usBackStart')};
 function usChooser(msg,back){if(!US)return;US.step='chooser';US.type='';const ks=usKeys();
  usSheet('איזה מסמך זה?',`${msg?`<p class="note" style="margin:0 0 10px;font-weight:700">${esc(msg)}</p>`:''}${ks.map(k=>`<button class="opt" data-a="usPick" data-k="${k}"><span>${UST[k][1]} ${UST[k][0]}</span>${ico('chev')}</button>`).join('')||'<p class="empty">אין לך הרשאה להזין מסמכים. פנה למנהל.</p>'}`,back);
+ if(US.cls&&US.cls.retry){const s=$('#sheet .bd');if(s)s.insertAdjacentHTML('afterbegin','<button class="btn w" style="margin-bottom:10px" data-a="usRetry">🔄 נסה לזהות שוב</button>')}
  if(US.pane)usPaneDraw()}
+ACT.usRetry=()=>{if(US&&US.pg.length&&!US.busy)usDetect()};
 ACT.usPick=el=>{if(US&&usAllowed(el.dataset.k))usOpenForm(el.dataset.k)};
 CHG.usType=el=>{const k=el.value;if(!US||!k||k===US.type){usPaneDraw();return}
  if(US.step==='form'){const U=US;usPaneDraw();ask('לשנות את סוג המסמך? השדות יוחלפו בטופס של הסוג החדש.',()=>{if(US===U)usOpenForm(k)},'שנה סוג');return}
@@ -4530,8 +4532,9 @@ CHG.uspick=async el=>{const fs=[...el.files];el.value='';if(!US||!fs.length)retu
 async function usDetect(){const U=US;usSheet('מזהה את המסמך…','<div class="empty">רגע, בודק איזה מסמך זה…</div>');let r={kind:'unknown'};
  if(bzF('scan')&&typeof window.USCLS==='function'){try{r=(await window.USCLS(U.pg.map(g=>g.hi||g.u||g.du)))||r}catch(e){toast('הזיהוי לא זמין עכשיו. בחרו סוג ידנית')}}
  if(US!==U)return;U.cls=r;U.unsure=(Array.isArray(r.unsure)?r.unsure:[]).filter(n=>typeof n==='string'&&/^[A-Za-z0-9_]{1,20}$/.test(n)).slice(0,12);
- const k=USK[r.kind];
- if(k&&usAllowed(k)){U.auto=1;usOpenForm(k)}else usChooser(k?'הסוג שזוהה לא זמין לך. בחרו סוג אחר':(bzF('scan')?'לא זוהה אוטומטית. בחרו את סוג המסמך':'הזיהוי החכם כבוי. בחרו את סוג המסמך'))}
+ const k=USK[r.kind];if(r.err)return usChooser(r.err+(r.retry?'':' בחרו את סוג המסמך'));
+ if(r.toMgr)return usChooser('המסמך זוהה כ"'+(k?UST[k][0]:'מסמך')+'" ואין לך הרשאה להזין אותו. הוא צריך לעבור למנהל לטיפול');
+ if(k&&usAllowed(k)){U.auto=1;if(r.uncertainType)toast('הזיהוי לא בטוח בסוג המסמך. אפשר לשנות את הסוג למעלה');usOpenForm(k)}else usChooser(k?'הסוג שזוהה לא זמין לך. בחרו סוג אחר':(bzF('scan')?'לא זוהה אוטומטית. בחרו את סוג המסמך':'הזיהוי החכם כבוי. בחרו את סוג המסמך'))}
 /* שמירת הקובץ כמו בסריקה הקיימת (scanGo): רק כשיש עמודים; נצמד לחשבונית ספק על ידי A.fid */
 async function usFid(){if(!US||!US.pg.length)return '';const pg=US.pg;let v='';if(pg.every(g=>!g.pdf))v=packPages(pg.map(g=>g.u));else if(pg.length===1)v=pg[0].du;else return '';
  try{const id=US.fid||('f'+uid());await fput(id,v);US.fid=id;return id}catch(e){toast('שמירת הקובץ נכשלה');return ''}}
@@ -4539,16 +4542,16 @@ async function usFid(){if(!US||!US.pg.length)return '';const pg=US.pg;let v='';i
 async function usOpenForm(k){if(!US||!usAllowed(k)||US.busy)return;const U=US;U.busy=1;
  try{if(U.view==='scr'){U.view='';if(NAV.length>1)NAV.pop()}if(U.view==='wk'){U.view='';WS='home'}
   U.type=k;U.step='form';sheetClose();U.sh=0;if(U.pane)usPaneDraw();
-  if(k==='exp'||k==='inc'||k==='cashout'){if(isW())return usWk(k);const f=await usFid();if(US!==U)return;openAdd({type:k==='inc'?'inc':'exp',us:1});U.sh=1;if(f)A.fid=f;return}
+  if(k==='exp'||k==='inc'||k==='cashout'){if(isW())return usWk(k);const f=await usFid();if(US!==U)return;openAdd({type:k==='inc'?'inc':'exp',us:1});U.sh=1;if(f)A.fid=f;usFillExp(k);return}
   if(k==='z'||k==='opening'||k==='deposit'){const ims=[];for(const g of U.pg){if(g.pdf)continue;try{const d=await ocrDown(g.hi||g.u,2000);if(imgOk(d))ims.push(d)}catch(e){}}if(US!==U)return;
-   if(k==='deposit'){if(!DP)DP=dpNew();for(const d of ims){if(DP.pics.length<6){DP.pics.push(d);DP.rows.push({d:'',a:'',ai:null})}}DP.sent=0;U.view='scr';U.v='dp';go('dp');return}
+   if(k==='deposit'){if(!DP)DP=dpNew();const F=usF('deposit');for(const d of ims){if(DP.pics.length<6){DP.pics.push(d);DP.rows.push({d:'',a:'',ai:null})}}if(F&&DP.rows.length)usFillDp(DP.rows[DP.rows.length-ims.length]||DP.rows[0],F);DP.sent=0;U.view='scr';U.v='dp';go('dp');return}
    if(!ZC)ZC=zcNew();if(k==='opening'){if(ims[0])ZC.o=ims[0]}else{const pt=U.cls&&Number.isInteger(U.cls.part)?U.cls.part:-1;if(ims.length===1&&pt>=0&&pt<3)ZC.z[pt]=ims[0];else ims.slice(0,3).forEach((d,j)=>{ZC.z[j]=d})}
-   ZC.sent=0;U.view='scr';U.v='zc';go('zc');return}
-  if(k==='transfer'){const fl=U.pg.map((g,j)=>{const du=g.pdf?g.du:(g.hi||g.u),b=du2b(du);return new File([b],'doc'+j+(g.pdf?'.pdf':'.jpg'),{type:b.type})});U.view='scr';U.v='tr';if(fl.length)await CHG.trPick({files:fl,dataset:{sub:''},value:''});else go('tr')}
+   usFillZc(k);ZC.sent=0;U.view='scr';U.v='zc';go('zc');return}
+  if(k==='transfer'){const fl=U.pg.map((g,j)=>{const du=g.pdf?g.du:(g.hi||g.u),b=du2b(du);return new File([b],'doc'+j+(g.pdf?'.pdf':'.jpg'),{type:b.type})});U.view='scr';U.v='tr';if(usF('transfer')&&U.pg.length){usTrOpen();return}if(fl.length)await CHG.trPick({files:fl,dataset:{sub:''},value:''});else go('tr')}
  }finally{U.busy=0}}
 /* עובד: הטופס הקיים של "הכנסה ידנית" (או הוצאה מקופה), עם הצילום שנבחר */
-function usWk(k){const U=US,im=U.pg.filter(g=>!g.pdf);if(U.pg.some(g=>g.pdf))toast('עובד שולח תמונות בלבד. קובץ PDF לא צורף');
- WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:im.map(g=>g.u),hi:im.map(g=>g.hi||g.u),inv:'',dn:false,reg:k==='cashout'};sheetClose();U.sh=0;U.view='wk';WS='manual';rerender()}
+function usWk(k){const U=US,pdf=U.pg.length===1&&U.pg[0].pdf,im=pdf?[{u:U.pg[0].du,hi:U.pg[0].du}]:U.pg.filter(g=>!g.pdf);if(!pdf&&U.pg.some(g=>g.pdf))toast('אפשר לשלוח קובץ PDF אחד לבד, או תמונות. קובץ ה-PDF לא צורף');
+ WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:im.map(g=>g.u),hi:im.map(g=>g.hi||g.u),inv:'',dn:false,reg:k==='cashout'};usFillWk(k);sheetClose();U.sh=0;U.view='wk';WS='manual';rerender()}
 function usAfterSheet(){if(!US||!A||!A.us)return;const s=$('#sheet');usMark(s);
  if(US.type==='cashout'&&A.step==='det'){const cb=s.querySelector('input[name=co]');if(cb&&!cb.checked){cb.checked=true;cb.dispatchEvent(new Event('change',{bubbles:true}))}}}
 /* שדה לא בטוח: צהוב + הערה, רק על מה שהזיהוי סימן. עריכה של השדה מורידה את הסימון */
@@ -4602,6 +4605,86 @@ ACT.usRot=async()=>{const U=US,g=U&&U.pg[U.i];if(!g||g.pdf||U.rb)return;U.rb=1;t
  D.addEventListener('pointermove',e=>{if(drag)usSetF(e.clientX/innerWidth,0)});
  const end=()=>{if(drag){drag=0;usSetF(USFR,1)}};D.addEventListener('pointerup',end);D.addEventListener('pointercancel',end);
  D.addEventListener('keydown',e=>{const k=e.key==='ArrowRight'?.05:e.key==='ArrowLeft'?-.05:0;if(k){e.preventDefault();usSetF(USFR+k,1)}})}
+/* ===== סריקה אחידה, שלב 4: חיבור הזיהוי (scanDocument kind:'classify'), מילוי הטפסים הקיימים, כפילות, קבלה↔חשבונית, שיתוף =====
+   דף אחד בכל קריאה (הדף הראשון; חיבור דפים – שלב 5). כשל שהשרת מחזיר למכסה – עד 3 ניסיונות (החלטה 9), ואז בורר ידני + "נסה שוב".
+   מכסה/תוספת כבויה/אין הרשאה – בלי ניסיון חוזר: הודעה + בורר ידני. ההרשאה האמיתית נבדקת בשרת (allowed=false → בלי נתונים). */
+const US_RETRY=['bad-answer','time-budget','overloaded','gemini-quota','network','internal',''];
+const US_STOP={'feature-off':'הזיהוי החכם כבוי בעסק.','biz-daily-limit':'העסק הגיע למכסת הזיהויים היומית.','biz-period-limit':'העסק הגיע למכסת הזיהויים.','daily-limit':'עברת את מגבלת הזיהויים היומית שלך.','no-perm':'אין לך הרשאה לזיהוי מסמכים.','bad-file-count':'הקובץ לא מתאים לזיהוי.','bad-type':'הקובץ לא מתאים לזיהוי (רק תמונה או PDF).','too-big':'הקובץ גדול מדי לזיהוי (עד 10MB).'};
+const USK2={invoice:'invoice',cashout:'cashout',deposit:'deposit',transfer:'bank_transfer',zreport:'zreport',opening:'opening'};
+const USU={invoice:{total_with_vat:'amt',date:'date',number:'inv'},cashout:{amount:'amt',date:'date'}};
+async function usCall(du){const m=/^data:([^;,]+);base64,(.*)$/.exec(String(du||''));if(!m)throw Object.assign(new Error('קובץ לא תקין'),{reason:'bad-type'});
+ const t=await tok(),ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),120000);let r,j=null;
+ try{r=await fetch(FNB()+'/scanDocument',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({data:{kind:'classify',files:[{mimeType:m[1],data:m[2]}]}}),signal:ctl.signal})}catch(e){throw Object.assign(new Error('אין חיבור לשרת הזיהוי'),{reason:'network'})}finally{clearTimeout(tm)}
+ try{j=await r.json()}catch(e){}
+ if(!r.ok||!j||j.error){const er=(j&&j.error)||{},rs=(er.details&&er.details.reason)||'';throw Object.assign(new Error(/[֐-׿]/.test(er.message||'')?er.message:'הזיהוי נכשל'),{reason:rs})}
+ return j.result||{}}
+/* תשובת השרת → החוזה של המסך (kind, unsure, part) + השדות (f) לטופס */
+function usMap(x){const res=x&&x.result||{},ty=res.type||'unknown',o={kind:ty==='invoice'?(res.docType||'invoice'):(USK2[ty]||'unknown'),conf:res.typeConfidence,uncertainType:!!res.uncertainType,ty,docType:res.docType||null,f:res.fields&&typeof res.fields==='object'?res.fields:{},usage:x&&x.usage||null};
+ if(res.allowed===false){o.toMgr=1;o.f={}}
+ const zp=['top','middle','bottom'].indexOf(res.zPart);if(zp>=0)o.part=zp;
+ const mp=USU[ty]||{};o.unsure=(Array.isArray(res.uncertain)?res.uncertain:[]).map(k=>mp[k]).filter(Boolean);return o}
+window.USCLS=async pages=>{const U=US,du=pages&&pages[0];if(!du)return{kind:'unknown'};let last=null;
+ for(let i=1;i<=3;i++){if(US!==U)return{kind:'unknown'};try{const r=usMap(await usCall(du));if(U)U.tries=i;return r}
+  catch(e){last=e;const rs=e.reason||'';if(US_STOP[rs])return{kind:'unknown',err:US_STOP[rs]+' אפשר למלא ידנית.'};if(!US_RETRY.includes(rs))break;if(i<3)await new Promise(z=>setTimeout(z,600*i))}}
+ return{kind:'unknown',retry:1,err:'הזיהוי לא הצליח אחרי 3 ניסיונות'+(last&&last.message?' ('+last.message+')':'')+'. הניסיונות שנכשלו לא נספרו במכסה. אפשר לבחור סוג ולמלא ידנית, או לנסות שוב.'}};
+const usF=ty=>US&&US.cls&&US.cls.ty===ty&&US.cls.f?US.cls.f:null;
+const usNum=v=>typeof v==='number'&&isFinite(v)?String(v):'';
+const usDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v||''))&&pDate(v)?v:'';
+/* ספק: לפי השם (כמו הזיהוי הקיים). ח.פ לא נשמר היום בכרטיס הספק – לכן לא משמש להתאמה (בלי שינוי מבנה נתונים) */
+function usSup(f,subs){const n=s_(f&&f.supplier);return n?ocrSupplier(n,subs):null}
+const usSupSubs=()=>S.subs.filter(s=>!s.off&&(cat(s.cat)||{}).beh==='sup').map(s=>({id:s.id,name:s.name,cat:s.cat}));
+/* מנהל: חשבונית/הוצאה מקופה. ספק שנמצא → הקטגוריה שלו (הפעם הקודמת) ומיד לפרטים; אחרת בוחרים קטגוריה ו"ספק חדש" מוצע עם השם שזוהה */
+function usFillExp(k){const f=usF('invoice')||usF('cashout');if(!f||!A)return;A.usf=1;
+ if(US.cls.ty==='invoice'){const s=usSup(f,usSupSubs());if(s&&cat(s.cat)){A.cat=s.cat;A.sub=s.id;A.step='det';A.type='exp';sheetDraw()}}}
+function usFillForm(root){if(!US||!US.cls||!A||!A.us||!A.usf||A.usDone)return;const f=US.cls.f||{},E=root.querySelector('form[data-f=addsave]');
+ if(A.step==='sub'&&US.cls.ty==='invoice'){const i=root.querySelector('form[data-f=subnew] input[name=name]');if(i&&!i.value&&s_(f.supplier))i.value=s_(f.supplier).slice(0,80)}
+ if(A.step!=='det'||!E)return;A.usDone=1;const keep=US.unsure.slice(),el=E.elements,set=(n,v)=>{if(el[n]&&v!==''&&v!=null){el[n].value=v;el[n].dispatchEvent(new Event('change',{bubbles:true}))}};
+ if(US.cls.ty==='invoice'){set('amt',usNum(f.total_with_vat));set('date',usDate(f.date));if(US.cls.docType!=='delivery_note'&&US.cls.docType!=='receipt')set('inv',s_(f.number));
+  if(US.cls.docType==='delivery_note'&&el.inv){el.inv.required=false;}if(US.cls.docType==='receipt'&&s_(f.related_invoice))set('inv',s_(f.related_invoice))}
+ else{set('amt',usNum(f.amount));set('date',usDate(f.date));const rg=zcRegOne(f.register,f.store);if(rg)set('creg',rg);if(zcTime(f.time))set('cotm',zcTime(f.time))}
+ /* מילוי השדות שולח change ומוריד את הצהוב – מחזירים את הסימון של הזיהוי */US.unsure=keep;usMark(root)}
+/* עובד: הטופס הקיים, עם הסכום/התאריך/מספר החשבונית והספק שזוהו */
+function usFillWk(k){const f=usF(k==='cashout'?'cashout':'invoice')||usF('invoice')||usF('cashout');if(!f)return;
+ if(US.cls.ty==='invoice'){WK.amt=usNum(f.total_with_vat);WK.date=usDate(f.date)||WK.date;WK.inv=US.cls.docType==='receipt'?s_(f.related_invoice):US.cls.docType==='delivery_note'?'':s_(f.number);WK.dn=US.cls.docType==='delivery_note';
+  const s=usSup(f,wkSubsAll());if(s){WK.cat=s.cat;WK.sub=s.id}}
+ else{WK.amt=usNum(f.amount);WK.date=usDate(f.date)||WK.date;const rg=zcRegOne(f.register,f.store);if(rg)WK.creg=rg;if(zcTime(f.time))WK.ctm=zcTime(f.time)}}
+function usFillDp(row,f){if(!row||!f)return;const a=typeof f.amount==='number'&&f.amount>0?rnd(f.amount):null,d=zcDate(f.date);if(a){row.a=String(a);row.d=d||row.d;row.ai={d,a}}}
+function usFillZc(k){const f=usF(k==='opening'?'opening':'zreport');if(!f||!ZC)return;const F=ZC.f||zcEmpty(),str=v=>v==null?'':String(v).slice(0,60);
+ if(k==='opening'){F.oReg=str(f.register).replace(/\D/g,'').slice(0,20);F.oStore=str(f.store);F.oD=zcDate(f.date)||F.oD;F.oTm=zcTime(f.time)||F.oTm;F.oTot=zcV(f.total);ZC.ai=Object.assign({},ZC.ai||{},{o:1})}
+ else{if(f.register!=null)F.zReg=str(f.register).replace(/\D/g,'').slice(0,20);if(f.store!=null)F.zStore=str(f.store);F.d=zcDate(f.date)||F.d;F.tm=zcTime(f.time)||F.tm;if(f.report_no!=null)F.no=str(f.report_no).replace(/\D/g,'').slice(0,20)||F.no;
+  [['credit','credit'],['cash','cash'],['checks','checks'],['vbuy','voucher_buy'],['vcred','voucher_credit'],['vissue','voucher_issue'],['house','house'],['round','rounding'],['total','total'],['float','open_float'],['csales','cash_sales'],['cout','cash_out'],['drawer','cash_in_drawer']].forEach(([x,y])=>{if(f[y]!=null)F[x]=zcV(f[y])});if(zcN(F.vissue))F.vissue=String(-Math.abs(zcN(F.vissue)));ZC.ai=Object.assign({},ZC.ai||{},{z:1})}
+ if(!F.d)F.d=today();ZC.f=F;const r=zcRegOf(F);if(r.reg){ZC.reg=r.reg;ZC.rs='auto'}}
+/* העברה: תוצאת הזיהוי נכנסת למסך ההעברה הקיים בלי זיהוי נוסף (לא נספר פעמיים במכסה) */
+function usTrOpen(){const U=US,g=U.pg[0],du=g.pdf?g.du:(g.hi||g.u),fid='ft'+trHash(du),f=usF('transfer')||{},L=Array.isArray(f.transfers)?f.transfers:[];
+ const it={id:uid(),du,pdf:!!g.pdf,fid,st:'ok',type:'bank_transfer',man:0,rows:[],grps:[],used:new Set(bkFileIds()).has(fid),twin:false};
+ TR={items:[it],i:0,sub:''};it.rows=(L.length?L:[{}]).map(x=>trRow({amount:x.amount,date:usDate(x.date),payee_name:x.payee_name||'',payee_account:x.payee_account,reference:x.reference||''}));
+ if(cur().v==='tr')render(0);else go('tr')}
+/* קבלה: אם יש חשבונית מתאימה אצל הספק – הצילום מצורף אליה, ולא נרשמת הוצאה שנייה (בלי ספירה כפולה) */
+function usRcpt(t){if(!US||!US.cls||US.cls.docType!=='receipt'||!t.sub)return null;const n=NINV(t.inv);if(!n)return null;return S.tx.find(x=>x.t==='exp'&&x.sub===t.sub&&!x.x&&NINV(x.inv)===n)||null}
+/* כפילות (מספר+ספק): חוסם עד החלטה. הצילום הישן והחדש זה ליד זה. "החלף תמונה" = רשומה אחת עם הקובץ החדש; הקובץ הישן לא נמחק מהמכשיר */
+function usDupDlg(old,nt,fid,onSave){const U=US;USD={old:old.id,fid,onSave};
+ dlg(`<h3>המסמך כבר קיים</h3><p class="note">אצל ${esc(subName(old))} כבר רשומה חשבונית ${esc(old.inv||'')} (${ils(old.amt)}, ${dfmt(old.date)}). החדשה: ${ils(nt.amt)}, ${dfmt(nt.date)}.</p>
+ <div class="row" style="gap:8px;margin:8px 0"><button class="btn g grow" data-a="usDupView" data-w="old" ${old.file?'':'disabled'}>📄 הישן${old.file?'':' (אין קובץ)'}</button><button class="btn g grow" data-a="usDupView" data-w="new" ${fid?'':'disabled'}>📄 החדש</button></div>
+ ${fid?'<button class="btn w" style="margin-bottom:8px" data-a="usDupRep">החלף את התמונה הישנה בחדשה (בלי רשומה חדשה)</button>':''}<button class="btn g w" style="margin-bottom:8px" data-a="usDupSave">זה מסמך אחר – שמור בכל זאת</button><button class="btn g w" data-a="closeDlg">חזרה לתיקון השדות</button>`)}
+let USD=null;
+ACT.usDupView=el=>{if(!USD)return;const o=S.tx.find(x=>x.id===USD.old);const fid=el.dataset.w==='old'?(o&&o.file):USD.fid;if(fid)viewImg(fid,'LargePami_'+el.dataset.w)};
+ACT.usDupRep=()=>{if(!USD)return;const o=S.tx.find(x=>x.id===USD.old);if(!o||!USD.fid)return;o.file=USD.fid;USD=null;save();closeDlg();sheetClose();toast('התמונה הוחלפה ברשומה הקיימת');usDone();rerender()};
+ACT.usDupSave=()=>{if(!USD)return;const f=USD.onSave;USD=null;closeDlg();f()};
+{const o=FRM.addsave;FRM.addsave=(form,ev)=>{const U=US;if(!(U&&A&&A.us&&!A.edit))return o(form,ev);const c=cat(A.cat);
+ if(c&&c.beh==='sup'&&!form.dataset.dupok){const f=fd(form),r=readTx(f,c,A.sub,null);if(!r.errs){
+  const rc=usRcpt(r.t);if(rc){ask('זו קבלה לחשבונית '+rc.inv+' שכבר רשומה. לצרף את הקבלה לחשבונית, בלי הוצאה נוספת?',()=>{if(A&&A.fid&&!rc.file)rc.file=A.fid;else if(A&&A.fid)rc.note=s_((rc.note?rc.note+' · ':'')+'קבלה צורפה');save();sheetClose();toast('הקבלה שויכה לחשבונית');usDone();rerender()},'שייך לחשבונית');return}
+  const dd=dupOf({id:r.t.id,sub:r.t.sub,amt:r.t.amt,date:r.t.date,inv:r.t.inv});if(dd.inv){usDupDlg(dd.inv,r.t,A.fid,()=>{form.dataset.dupok='1';FRM.addsave(form,ev)});return}}}
+ return o(form,ev)}}
+{const o=usAfterSheet;usAfterSheet=function(){o();try{usFillForm($('#sheet'))}catch(e){}}}
+/* "סרוק עוד" אחרי שמירה של מסמך ששותף: הוא יוצא מרשימת "מסמכים שהתקבלו" */
+{const o=usDone;usDone=function(){const si=US&&US.si;o();if(si&&typeof siDrop==='function'){try{siDrop(si)}catch(e){}}}}
+/* שיתוף מוואטסאפ → המסך האחיד */
+ACT.siUs=async el=>{const x=siFind(el);if(!x)return;if(siUsed('ft'+x.h))return toast(SI_SAVED);let du;try{du=await fget(siKey(x))}catch(e){}if(!du)return toast('הקובץ לא נמצא במכשיר');
+ usOpen();US.si=x.id;if(x.mime==='application/pdf')US.pg.push({pdf:1,du});else{try{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true);US.pg.push({u:r.u||du,hi:hi.u||r.u||du})}catch(e){return toast('קריאת הקובץ נכשלה')}}
+ US.i=0;usPane(1);usDetect()};
+{const o=siCard;siCard=function(x){const h=o(x);return h.replace(/<\/div>$/,`<button class="btn w" style="margin-top:8px" data-a="siUs" data-id="${esc(x.id)}">📄 פתיחה במסך הסריקה האחיד</button></div>`)}}
+/* "צילום העברה" (בלי ספק שנבחר מראש) פותח את המסך האחיד (החלטה 7) */
+{const o=ACT.trGo;ACT.trGo=el=>{if(!el.dataset.sub&&usAllowed('transfer')){usOpen();return}o(el)}}
 try{coSched()}catch(e){}
 boot();(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script><script src="yemot-board.js"></script>
 </body></html>

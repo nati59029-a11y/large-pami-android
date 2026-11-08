@@ -64,6 +64,9 @@ jobs:
       - name: ui-7 (mocked network)
         if: always()
         run: node tests/app-multibiz/ui-7.js ../app-source/www ../out/ui-7.json ../out/shots-7
+      - name: ui-us3 + ui-us4 (unified scan, mocked network)
+        if: always()
+        run: node tests/app-multibiz/ui-us3.js ../app-source/www && node tests/app-multibiz/ui-us4.js ../app-source/www
       - name: extra (mocked network)
         if: always()
         run: node tests/app-multibiz/extra.js ../app-source/www ../out/extra.json
