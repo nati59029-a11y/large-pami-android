@@ -1547,7 +1547,7 @@
   {"id": "M113", "line": 5224, "snippet": "fsx('/mq?documentId='+encodeURIComponent(id)", "fn": "mqSend", "collection": "mq", "op": "create", "rest": "POST /mq?documentId={id}", "condition": "uid/by של העובד עצמו, st 'new', k, np – בלי סכומים", "who": ["employee"], "note": "סריקה אחידה שלב 6: עובד שולח למנהל מסמך מסוג שאין לו הרשאה אליו."},
   {"id": "M114", "line": 5227, "snippet": "fsx('/mq/'+id+'/p?documentId='+i", "fn": "mqSend", "collection": "mq_p", "op": "create", "rest": "POST /mq/{id}/p?documentId={k}", "condition": "בפריט שלו, ב-15 דקות", "who": ["employee"], "note": "סריקה אחידה שלב 6: חלקי הצילום."}
  ],
- "fsbLine": 1852,
+ "fsbLine": 1858,
  "excluded": [
   {
    "id": "X01",
