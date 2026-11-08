@@ -1,7 +1,7 @@
 {
  "_about": "מיפוי כל פעולה של האפליקציה הקיימת מול Firestore. המקור: www/index.html בתוך large-pami-android-project.zip (מספרי השורות לפי הקובץ הזה). האפליקציה פונה ל-Firestore דרך REST בפונקציה fsx (שורה 1677). כל שורה כאן מכוסה בבדיקת 'מותר' שמשחזרת את הבקשה בדיוק כפי שהיא בקוד (tests/20-app-replay). הבסיס: הענף feature/feedback-scan, קומיט c9bac16 (הגרסה שמותקנת בטלפונים).",
  "source": "large-pami-android-project.zip!www/index.html",
- "fsxDefinitionLine": 2293,
+ "fsxDefinitionLine": 2310,
  "rows": [
   {
    "id": "M01",
@@ -1547,7 +1547,7 @@
   {"id": "M113", "line": 5699, "snippet": "fsx('/mq?documentId='+encodeURIComponent(id)", "fn": "mqSend", "collection": "mq", "op": "create", "rest": "POST /mq?documentId={id}", "condition": "uid/by של העובד עצמו, st 'new', k, np – בלי סכומים", "who": ["employee"], "note": "סריקה אחידה שלב 6: עובד שולח למנהל מסמך מסוג שאין לו הרשאה אליו."},
   {"id": "M114", "line": 5702, "snippet": "fsx('/mq/'+id+'/p?documentId='+i", "fn": "mqSend", "collection": "mq_p", "op": "create", "rest": "POST /mq/{id}/p?documentId={k}", "condition": "בפריט שלו, ב-15 דקות", "who": ["employee"], "note": "סריקה אחידה שלב 6: חלקי הצילום."}
  ],
- "fsbLine": 2283,
+ "fsbLine": 2300,
  "excluded": [
   {
    "id": "X01",
