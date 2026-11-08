@@ -3,7 +3,7 @@
 // כל הנתיבים תחת b/{bizId}/ (או בשורש ללארג' פעמי במצב legacy – T.tdb()). כל כתיבה רק כאן; מהאפליקציה – קריאה לפי החוקים.
 //
 //   prod/{id}          { name, price, barcode, on, q: { <br>|'_': כמות }, at, by, upd }   – מוצר + כמות לכל סניף ('_' = עסק בלי סניפים)
-//   prod/{id}/p/cost   { cost }                                                     – עלות, מנהל בלבד
+//   prod/{id}/p/cost   { cost }                                                     – עלות: מנהל ועובד עם ord (החלטה 00:12)
 //   prod/{id}/p/ws     { wp }                                                       – מחיר סיטונאי (אחד לעסק). נקרא רק דרך getWsPrices (ראו WS_SHOW)
 //   prod/{id}          + { cat?, sub?, bp?: { <br>: מחיר }, pk?, ct?, home? }       – fb/ord-catalog, תוספתי: מוצר ישן בלי השדות עובד כמו קודם
 //   cat/{id}           { name, parent?, ord, upd }                                  – קטגוריה (parent ריק) / תת־קטגוריה. מנהל, דרך saveCat
@@ -158,7 +158,8 @@ function prodExt(w, input) {
 }
 const noDel = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => !(v && v.constructor && /Delete/.test(v.constructor.name))));
 // saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
-// עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0). עלות – מנהל בלבד.
+// עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0).
+// עלות וסיטונאי – גם עובד עם ord (החלטות 00:12, 00:13).
 async function saveProduct(request) {
   const w = await who(request);
   const input = inputObject(request);
@@ -168,8 +169,8 @@ async function saveProduct(request) {
   const barcode = input.barcode == null || input.barcode === '' ? '' : String(input.barcode).trim();
   if (barcode && !/^[0-9A-Za-z-]{3,30}$/.test(barcode)) throw bad('bad-barcode', 'ברקוד: ספרות/אותיות, 3 עד 30');
   if (input.on !== undefined && typeof input.on !== 'boolean') throw bad('bad-field', 'זמין חייב להיות כן/לא');
-  if (input.cost !== undefined && input.cost !== null) { mgr(w); money(input.cost, 'עלות'); }
-  if (input.wp !== undefined && input.wp !== null) { mgr(w); money(input.wp, 'מחיר סיטונאי'); }
+  if (input.cost !== undefined && input.cost !== null) money(input.cost, 'עלות');
+  if (input.wp !== undefined && input.wp !== null) money(input.wp, 'מחיר סיטונאי');
   const ext = prodExt(w, input);
   const db = T.tdb();
   const now = Date.now();
@@ -735,16 +736,15 @@ async function saveCat(request) {
   return { ok: true, id };
 }
 
-// importProducts({ reqId, br?, addQty: bool, rows:[{ name, price, barcode?, qty?, cat?, sub?, wp?, pk?, ct?, bpx? }] }) – מנהל, או עובד עם ord (סניפים שלו, בלי wp). עד 200 שורות למנה.
+// importProducts({ reqId, br?, addQty: bool, rows:[{ name, price, barcode?, qty?, cat?, sub?, wp?, cost?, pk?, ct?, bpx? }] }) – מנהל, או עובד עם ord (סניפים שלו; גם wp ועלות – 00:12). עד 200 שורות למנה.
 // התאמה: ברקוד, אחר כך שם מדויק → עדכון (לא כפילות). כמות: מוצר חדש – כמות פתיחה; קיים – נוספת רק אם addQty. כל כמות = stockLog why:'in'.
 // cat/sub = שמות; קטגוריה שלא קיימת נוצרת (מזהה קבוע לפי השם – ייבוא חוזר לא משכפל). שורה שגויה – נדחית ומוחזרת ב-bad, השאר נשמרות.
 async function importProducts(request) {
   const w = await who(request);
   const input = inputObject(request);
   onlyKeys(input, ['reqId', 'br', 'addQty', 'rows']);
-  // החלטה 23:19: גם עובד עם ord מייבא – רק לסניף שלו (חובה לבחור סניף כשיש סניפים), ובלי סיטונאי/עלות (עמודה כזו – הקריאה נדחית)
+  // החלטה 23:19: גם עובד עם ord מייבא – רק לסניף שלו (חובה לבחור סניף כשיש סניפים). החלטה 00:12: כולל עלות וסיטונאי
   const staff = w.role !== 'manager';
-  if (staff && Array.isArray(input.rows) && input.rows.some((r) => r && typeof r === 'object' && ((r.wp != null && r.wp !== '') || r.cost != null))) throw deny('manager-only', 'מחיר סיטונאי ועלות – מנהל בלבד. הסירו את העמודה ונסו שוב.');
   if (staff && hasBranches(w) && (input.br == null || input.br === '')) throw bad('bad-br', 'בחרו סניף');
   const reqId = reqIdOf(input);
   if (!Array.isArray(input.rows) || !input.rows.length || input.rows.length > MAX_IMPORT) throw bad('bad-rows', `שורות: 1 עד ${MAX_IMPORT}`);
@@ -755,13 +755,14 @@ async function importProducts(request) {
   input.rows.forEach((r, i) => {
     try {
       if (!r || typeof r !== 'object' || Array.isArray(r)) throw bad('bad-row', 'שורה לא תקינה');
-      onlyKeys(r, ['name', 'price', 'barcode', 'qty', 'cat', 'sub', 'wp', 'pk', 'ct'], 'שורה');
+      onlyKeys(r, ['name', 'price', 'barcode', 'qty', 'cat', 'sub', 'wp', 'cost', 'pk', 'ct'], 'שורה');
       const o = { i, name: txt(r.name, 60, 'bad-name', 'שם המוצר', true), price: money(r.price, 'מחיר') };
       const bc = r.barcode == null ? '' : String(r.barcode).trim();
       if (bc && !/^[0-9A-Za-z-]{3,30}$/.test(bc)) throw bad('bad-barcode', 'ברקוד לא תקין');
       o.barcode = bc;
       o.qty = r.qty == null || r.qty === '' ? 0 : qtyOf(r.qty, true);
       if (r.wp != null && r.wp !== '') o.wp = money(r.wp, 'מחיר סיטונאי');
+      if (r.cost != null && r.cost !== '') o.cost = money(r.cost, 'עלות');
       for (const k of ['pk', 'ct']) if (r[k] != null && r[k] !== '' && r[k] !== 0) { const v = qtyOf(r[k]); if (!Number.isInteger(v)) throw bad('bad-qty', 'מארז/קרטון: מספר שלם'); o[k] = v; }
       if (r.cat != null && r.cat !== '') o.cat = txt(r.cat, 40, 'bad-cat', 'קטגוריה');
       if (r.sub != null && r.sub !== '') { if (!o.cat) throw bad('bad-cat', 'תת־קטגוריה בלי קטגוריה'); o.sub = txt(r.sub, 40, 'bad-cat', 'תת־קטגוריה'); }
@@ -810,6 +811,7 @@ async function importProducts(request) {
         res.added++;
       }
       if (o.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: o.wp, at: now, by: w.uid });
+      if (o.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: o.cost, at: now, by: w.uid });
       if (qty) tx.set(stockRef(db), { prod: id, name: o.name, br, delta: qty, why: 'in', note: 'ייבוא', by: w.uid, at: now });
     }
     tx.set(mark, { t: now, by: w.uid, k: 'importProducts', res: { added: res.added, updated: res.updated } });
@@ -900,8 +902,23 @@ async function getWsPrices(request) {
   return out;
 }
 
-// getProdCost({ pid }) – מנהל בלבד (העובד לא מקבל עלות בשום קריאה)
-// (העלות נקראת גם ישירות מ-prod/{id}/p/cost לפי החוקים – מנהל בלבד)
+// getCosts({ after? }) → { cost: { <pid>: עלות }, next? } – מנהל ועובד עם ord (החלטה 00:12: עובד רואה עלות בכל מקום).
+// עמודים של WS_PAGE מוצרים (כמו getWsPrices למנהל). העלות נקראת גם ישירות מ-prod/{id}/p/cost לפי החוקים.
+async function getCosts(request) {
+  await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['after']);
+  const db = T.tdb();
+  const cost = {};
+  let q = db.collection('prod').orderBy(FieldPath.documentId()).select().limit(WS_PAGE);
+  if (input.after != null) q = q.startAfter(idOf(input.after, 'המשך'));
+  const prods = await q.get();
+  const refs = prods.docs.map((d) => db.doc(`prod/${d.id}/p/cost`));
+  for (let k = 0; k < refs.length; k += 300) (await db.getAll(...refs.slice(k, k + 300))).forEach((s) => { if (s.exists && typeof s.get('cost') === 'number') cost[s.ref.parent.parent.id] = s.get('cost'); });
+  const out = { cost };
+  if (prods.size === WS_PAGE) out.next = prods.docs[prods.size - 1].id;
+  return out;
+}
 
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
@@ -910,6 +927,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { saveCat, importProducts, transferStock, getWsPrices, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
+const FNS = { saveCat, importProducts, transferStock, getWsPrices, getCosts, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
 Object.defineProperty(exports, '_core', { enumerable: false, value: { digRun, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

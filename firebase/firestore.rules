@@ -611,8 +611,9 @@ service cloud.firestore {
     match /prod/{id} {
       allow read: if rOrd();
       allow create, update, delete: if false;
+      // עלות (p/cost) – גם עובד עם הזמנות (החלטה 00:12); סיטונאי (p/ws) – מנהל בלבד
       match /p/{k} {
-        allow read: if rMgr();
+        allow read: if rMgr() || (k == 'cost' && rOrd());
         allow create, update, delete: if false;
       }
     }
@@ -1024,9 +1025,9 @@ service cloud.firestore {
       match /prod/{id} {
         allow read: if ordOk();
         allow create, update, delete: if false;
-        // עלות – מנהל בלבד
+        // עלות (p/cost) – מנהל ועובד עם ord (החלטה 00:12); סיטונאי (p/ws) – מנהל בלבד (עובד דרך getWsPrices)
         match /p/{k} {
-          allow read: if feat('orders') && bMgr();
+          allow read: if feat('orders') && (bMgr() || (k == 'cost' && ordOk()));
           allow create, update, delete: if false;
         }
       }

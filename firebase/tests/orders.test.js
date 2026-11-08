@@ -280,16 +280,18 @@ describe('מלאי', () => {
   it('תיקון כמות / עריכת מוצר / עלות – מנהל בלבד; עובד סניף 2 לא משנה מלאי סניף 1; עובד לא קורא עלות', async () => {
     assert.equal((await call('stockSet', E1, { reqId: rid(), pid: 'pA', br: 'br1', qty: 7 })).reason, 'manager-only');
     assert.equal((await call('stockSet', MGR, { reqId: rid(), pid: 'pA', br: 'br1', qty: 7 })).status, 'OK');
-    // 18:56: עובד עם ord עורך שם/מחיר – נרשם ביומן; עובד בלי ord – לא; עלות – רק מנהל
+    // 18:56: עובד עם ord עורך שם/מחיר – נרשם ביומן; עובד בלי ord – לא; 00:13: גם עלות
     assert.equal((await call('saveProduct', E1, { id: 'pA', name: 'עוגה גדולה', price: 11 })).status, 'OK');
     const pa = await get(`b/${A}/prod/pA`); assert.equal(pa.name, 'עוגה גדולה'); assert.equal(pa.price, 11); assert.equal(pa.q.br1, 7);
     const pl = (await coll(`b/${A}/stockLog`)).filter((x) => x.why === 'prod');
     assert.equal(pl.length, 1); assert.equal(pl[0].delta, 0); assert.match(pl[0].note, /מחיר: ₪10 → ₪11/); assert.equal(pl[0].by, E1);
     assert.equal((await call('saveProduct', NOORD, { id: 'pA', name: 'x', price: 1 })).reason, 'no-perm');
-    assert.equal((await call('saveProduct', E1, { id: 'pA', name: 'x', price: 1, cost: 2 })).reason, 'manager-only');
-    assert.equal((await call('saveProduct', E1, { reqId: rid(), name: 'x', price: 1, cost: 1 })).reason, 'manager-only');
+    assert.equal((await call('saveProduct', E1, { id: 'pA', name: 'עוגה גדולה', price: 11, cost: 2 })).status, 'OK');
+    assert.equal((await get(`b/${A}/prod/pA/p/cost`)).cost, 2);
+    assert.equal((await call('saveProduct', NOORD, { id: 'pA', name: 'x', price: 1, cost: 1 })).reason, 'no-perm');
     assert.equal((await call('stockIn', E2, { reqId: rid(), br: 'br1', lines: [{ pid: 'pA', qty: 1 }] })).reason, 'foreign-br');
-    await assertFails(db(E1).doc(`b/${A}/prod/pA/p/cost`).get());
+    await assertSucceeds(db(E1).doc(`b/${A}/prod/pA/p/cost`).get());
+    await assertFails(db(NOORD).doc(`b/${A}/prod/pA/p/cost`).get());
     await assertSucceeds(db(MGR).doc(`b/${A}/prod/pA/p/cost`).get());
     await assertSucceeds(db(E1).doc(`b/${A}/prod/pA`).get());
     await assertFails(db(NOORD).doc(`b/${A}/prod/pA`).get());
@@ -336,7 +338,7 @@ describe('לארג\' פעמי במצב legacy (שורש)', () => {
     await assertSucceeds(db(LE).doc('ordcfg/main').get());
     await assertSucceeds(db(LE).collection(`ord/${r.result.id}/log`).get());
     await assertSucceeds(db(LE).collection('stockLog').get());
-    await assertFails(db(LE).doc('prod/pA/p/cost').get());
+    await assertSucceeds(db(LE).doc('prod/pA/p/cost').get()); // 00:12: עובד עם ord רואה עלות
     await assertSucceeds(db(LM).doc('prod/pA/p/cost').get());
     await assertFails(db(LE).doc('ordpay/' + r.result.id).get());
     await assertSucceeds(db(LM).doc('ordpay/' + r.result.id).get());

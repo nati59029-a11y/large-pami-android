@@ -35,8 +35,12 @@ async function runQ(coll,where,lim,ord){const sq={from:[{collectionId:coll}],lim
 const brWhere=()=>{const m=mine();return m&&hasBr()?{fieldFilter:{field:{fieldPath:'br'},op:'IN',value:{arrayValue:{values:m.slice(0,30).map(s=>({stringValue:s}))}}}}:null};
 let load=async function(force){if(O.busy||(!force&&O.L&&Date.now()-O.at<20000))return;O.busy=1;O.err='';
  try{const[L,P,c,C]=await Promise.all([runQ('ord',brWhere(),500),runQ('prod',null,2000),fsx('/ordcfg/main').catch(e=>{if(e.code===404)return null;throw e}),runQ('cat',null,500).catch(()=>[])]);O.C=C.sort((a,b)=>(a.ord||0)-(b.ord||0)||String(a.name).localeCompare(String(b.name),'he'));
-  O.L=L.sort((a,b)=>(b.no||0)-(a.no||0));O.P=P.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));O.cfg=c?dec(c):{};O.at=Date.now()}
+  O.L=L.sort((a,b)=>(b.no||0)-(a.no||0));O.P=P.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));O.cfg=c?dec(c):{};O.at=Date.now();costLoad()}
  catch(e){O.err=e.message||'הטעינה נכשלה'}finally{O.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}}
+/* עלות (החלטה 00:12): מנהל ועובד עם ord רואים עלות בכל מקום; נטען ברקע מ-getCosts (בעמודים) */
+async function costLoad(){try{const W={};let a;for(let g=0;g<200;g++){const r=await fnCall('getCosts',a?{after:a}:{});Object.assign(W,r&&r.cost||{});if(!r||!r.next)break;a=r.next}O.cost=W;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}}
+const costOf=id=>O.cost&&typeof O.cost[id]==='number'?O.cost[id]:null;
+const costH=id=>{const c=costOf(id);return c==null?'':' · עלות '+ils(c)};
 // בכל מסך עם הקלדה – רענון לא בונה מחדש כשיש טקסט בתיבה (לקח)
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const prod=id=>(O.P||[]).find(p=>p.id===id);
@@ -71,7 +75,7 @@ ACT.oxBr=el=>{OBR=el.dataset.id;rerender()};
 /* ---------- הזמנה חדשה ---------- */
 function draft(){if(!O.draft){const B=myBr();O.draft={br:B.length===1?B[0].id:'',name:'',phone:'',tz:'',addr:'',mail:'',note:'',items:[],q:'',req:rid()}}return O.draft}
 const lineH=(it,i,br)=>{const p=it.pid?prod(it.pid):null,src=hasBr()&&br?srcOf(br):null;
- let stock='';if(p){const from=it.from||br||NB;stock=`<small class="note">במלאי${hasBr()?' ב'+esc(bn(from)):''}: <b>${n3(q(p,from))}</b>${q(p,from)<it.qty?' – אין מספיק, ההזמנה תישמר והמלאי ירד למינוס':''}</small>`;}
+ let stock='';if(p){const from=it.from||br||NB;stock=`<small class="note">במלאי${hasBr()?' ב'+esc(bn(from)):''}: <b>${n3(q(p,from))}</b>${costH(p.id)}${q(p,from)<it.qty?' – אין מספיק, ההזמנה תישמר והמלאי ירד למינוס':''}</small>`;}
  const sel=p&&hasBr()&&br&&src==='stock'?`<label class="f"><span>הסחורה מסניף</span><select data-i="oxLn" data-k="from" data-n="${i}">${brs().map(b=>`<option value="${esc(b.id)}"${(it.from||br)===b.id?' selected':''}>${esc(b.name)} (${n3(q(p,b.id))})</option>`).join('')}</select></label>`:p&&hasBr()&&br&&src!=='stock'?`<small class="note">יורד ממלאי ${esc(bn(src))} (הגדרת המנהל)</small>`:'';
  return `<div class="card" style="margin:6px 0">${p?`<b>${esc(p.name)}</b>`:`<label class="f"><span>פריט</span><input data-i="oxLn" data-k="n" data-n="${i}" value="${esc(it.n||'')}" maxlength="80"></label>`}
  <div class="row"><label class="f grow"><span>כמות</span><input data-i="oxLn" data-k="qty" data-n="${i}" inputmode="decimal" value="${esc(it.qty)}"></label><label class="f grow"><span>מחיר ליחידה ₪</span><input data-i="oxLn" data-k="price" data-n="${i}" inputmode="decimal" value="${esc(it.price)}"></label></div>
@@ -93,7 +97,7 @@ V.oxNew=()=>{const T='הזמנה חדשה';if(!on())return deny(T);if(!O.P){load
  ${f('הערה (לא להקליד פרטי אשראי)','note','text','maxlength="300"')}
  <div class="card" style="margin:10px 0"><div class="row" style="justify-content:space-between"><b>סה״כ</b><b class="amt" id="oxtot">${ils(tot)}</b></div><p class="note" style="margin:4px 0 0">הסכום הסופי מחושב בשרת.</p></div>
  <button class="btn w" data-a="oxSave">שמור הזמנה</button><button class="btn g w" style="margin-top:8px" data-a="oxDrop">נקה טופס</button>`}};
-const hitsH=(hits,D)=>hits.map(p=>`<button type="button" class="li" data-a="oxAdd" data-id="${esc(p.id)}"><div class="m"><b>${esc(p.name)}</b><small>${hasBr()&&D.br?'במלאי ב'+esc(bn(D.br))+': '+n3(q(p,D.br))+' · ':''}סה״כ במלאי: ${n3(hasBr()?qAll(p):q(p,NB))}</small></div><b class="a">${ils(unitP(p,D.br))}</b></button>`).join('')||(D.q?'<p class="note">לא נמצא מוצר. אפשר להוסיף שורה חופשית או מוצר חדש במסך המלאי.</p>':'');
+const hitsH=(hits,D)=>hits.map(p=>`<button type="button" class="li" data-a="oxAdd" data-id="${esc(p.id)}"><div class="m"><b>${esc(p.name)}</b><small>${hasBr()&&D.br?'במלאי ב'+esc(bn(D.br))+': '+n3(q(p,D.br))+' · ':''}סה״כ במלאי: ${n3(hasBr()?qAll(p):q(p,NB))}${costH(p.id)}</small></div><b class="a">${ils(unitP(p,D.br))}</b></button>`).join('')||(D.q?'<p class="note">לא נמצא מוצר. אפשר להוסיף שורה חופשית או מוצר חדש במסך המלאי.</p>':'');
 INP.oxD=el=>{const D=draft();D[el.dataset.k]=el.value;if(el.dataset.k==='br'){D.items.forEach(it=>{if(it.pid){const p=prod(it.pid);it.from=suggest(p,D.br,+it.qty||0)||'';if(it.auto&&p)it.price=String(unitP(p,D.br))}});redrawLines()}};
 INP.oxQ=el=>{const D=draft();D.q=el.value;const hits=D.q?(O.P||[]).filter(p=>p.on!==false&&(String(p.name).includes(D.q)||(p.barcode&&String(p.barcode)===D.q.trim()))).slice(0,8):[];const h=document.getElementById('oxhits');if(h)h.innerHTML=hitsH(hits,D)};
 INP.oxLn=el=>{const D=draft(),it=D.items[+el.dataset.n];if(!it)return;it[el.dataset.k]=el.value;if(el.dataset.k==='price')it.auto=0;if(el.dataset.k==='from'||el.tagName==='SELECT')redrawLines();else totRedraw()};
@@ -162,7 +166,7 @@ V.oxStock=()=>{const T='מלאי';if(!on())return deny(T);if(!O.P){load();return
  return{t:T,s:hasBr()?bn(br):'כמויות במלאי',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="oxIn">הכנסת מלאי</button><button class="btn g grow" data-a="oxNewP">מוצר חדש</button></div>${catBar()}${bc}
  <label class="f"><span>חיפוש (שם או ברקוד)</span><input data-i="oxSQ" value="${esc(O.sq||'')}" autocomplete="off"></label>
  <div id="oxpl">${plH(L,br)}</div><button class="btn g s w" style="margin-top:8px" data-a="oxHist">היסטוריית תנועות</button>`}};
-const plH=(L,br)=>L.map(p=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">לא זמין</span>':''}</b><small>${ils(unitP(p,br))}${p.barcode?' · '+esc(p.barcode):''}${p.cat?' · '+esc(catNm(p.cat))+(p.sub?' / '+esc(catNm(p.sub)):''):''}${p.pk?' · מארז '+p.pk:''}${p.ct?' · קרטון '+p.ct:''}${hasBr()&&brs().length>1?' · '+brs().map(b=>esc(b.name)+': '+n3(q(p,b.id))).join(' · '):''}</small></div><b class="a${q(p,br)<0?' neg':''}">${n3(q(p,br))}</b>
+const plH=(L,br)=>L.map(p=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">לא זמין</span>':''}</b><small>${ils(unitP(p,br))}${p.barcode?' · '+esc(p.barcode):''}${p.cat?' · '+esc(catNm(p.cat))+(p.sub?' / '+esc(catNm(p.sub)):''):''}${costH(p.id)}${p.pk?' · מארז '+p.pk:''}${p.ct?' · קרטון '+p.ct:''}${hasBr()&&brs().length>1?' · '+brs().map(b=>esc(b.name)+': '+n3(q(p,b.id))).join(' · '):''}</small></div><b class="a${q(p,br)<0?' neg':''}">${n3(q(p,br))}</b>
  <div class="row" style="width:100%"><button class="btn g s grow" data-a="oxZero" data-id="${esc(p.id)}">נגמר במלאי</button>${mgr()?`<button class="btn g s grow" data-a="oxFix" data-id="${esc(p.id)}">תיקון כמות</button>`:''}<button class="btn g s grow" data-a="oxEditP" data-id="${esc(p.id)}">עריכה</button></div></div>`).join('')||'<div class="empty">אין מוצרים. הוסף מוצר חדש.</div>';
 INP.oxSQ=el=>{O.sq=el.value;const br=hasBr()?SBR:NB,L=stockL();const x=document.getElementById('oxpl');if(x)x.innerHTML=plH(L,br)};
 ACT.oxSBr=el=>{SBR=el.dataset.id;rerender()};
@@ -171,12 +175,12 @@ ACT.oxZero=el=>{const p=prod(el.dataset.id);if(!p)return;ask(`לסמן "${p.name
 ACT.oxFix=el=>{const p=prod(el.dataset.id);if(!p)return;dlg(`<h3>תיקון כמות · ${esc(p.name)}</h3><form data-f="oxFixF"><input type="hidden" name="id" value="${esc(p.id)}"><label class="f"><span>הכמות הנכונה${hasBr()?' ב'+esc(bn(SBR)):''}</span><input name="q" inputmode="decimal" value="${n3(q(p,hasBr()?SBR:NB))}" required></label><div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.oxFixF=async f=>{const x=fd(f),v=num(x.q);if(!isFinite(v))return toast('כמות לא תקינה');const b=f.querySelector('button');b.disabled=true;try{await fnCall('stockSet',{reqId:rid(),pid:x.id,br:sbr(),qty:v});closeDlg();toast('עודכן');await load(true)}catch(e){b.disabled=false;err(e)}};
 const pForm=(p)=>`<h3>${p?'עריכת מוצר':'מוצר חדש'}</h3><form data-f="oxPF">${p?`<input type="hidden" name="id" value="${esc(p.id)}">`:`<input type="hidden" name="req" value="${rid()}">`}${fld('שם המוצר','name',p?p.name:'','text','required maxlength="60"')}${fld('מחיר מכירה ₪','price',p?p.price:'','text','required inputmode="decimal"')}${fld('ברקוד (רשות)','barcode',p?p.barcode||'':'','text','inputmode="numeric" maxlength="30" dir="ltr"')}
- ${pExtH(p)}${p?'':fld('כמות פתיחה'+(hasBr()?' ב'+esc(bn(SBR)):'')+' (רשות)','qty','','text','inputmode="decimal"')}${mgr()?fld('עלות ₪ (רק מנהל רואה)','cost','','text','inputmode="decimal"'):''}${p?`<label class="cb" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" name="off"${p.on===false?' checked':''}> לא זמין להזמנה</label>`:''}
+ ${pExtH(p)}${p?'':fld('כמות פתיחה'+(hasBr()?' ב'+esc(bn(SBR)):'')+' (רשות)','qty','','text','inputmode="decimal"')}${fld('עלות ₪ (ריק = לא משתנה)','cost',p&&costOf(p.id)!=null?costOf(p.id):'','text','inputmode="decimal"')}${p?`<label class="cb" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" name="off"${p.on===false?' checked':''}> לא זמין להזמנה</label>`:''}
  <div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`;
 ACT.oxNewP=()=>dlg(pForm(null));
 ACT.oxEditP=el=>{const p=prod(el.dataset.id);if(p)dlg(pForm(p))};
 FRM.oxPF=async f=>{const x=fd(f),price=num(x.price);if(!x.name.trim())return toast('חסר שם');if(!(price>=0))return toast('מחיר לא תקין');const d={name:x.name.trim(),price,barcode:x.barcode.trim()};
- if(x.cost&&x.cost.trim()){const c=num(x.cost);if(!(c>=0))return toast('עלות לא תקינה');d.cost=c}
+ if(x.cost&&x.cost.trim()){const c=num(x.cost);if(!(c>=0))return toast('עלות לא תקינה');if(!x.id||c!==costOf(x.id))d.cost=c}
  if(x.id){d.id=x.id;d.on=!x.off}else{d.reqId=x.req;if(x.qty&&x.qty.trim()){const v=num(x.qty);if(!(v>=0))return toast('כמות לא תקינה');d.qty=v;d.br=sbr()}else if(hasBr())d.br=SBR}
  try{Object.assign(d,pExtRead(f,x,!x.id))}catch(e){return toast(e.message)}
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('saveProduct',d);closeDlg();toast('המוצר נשמר');await load(true)}catch(e){b.disabled=false;err(e)}};
@@ -263,13 +267,13 @@ const catBar=()=>{const T=topC();if(!T.length&&!mgr())return '';return `<div cla
 const stockL=()=>(O.P||[]).filter(p=>(!O.sq||String(p.name).includes(O.sq)||String(p.barcode||'')===O.sq.trim())&&(!O.cf||p.cat===O.cf||p.sub===O.cf));
 CHG.oxCF=el=>{O.cf=el.value;rerender()};
 const wsCan=()=>mgr()||!!(O.draft&&O.draft.custId&&O.draft.wholesale===true);
-// טופס מוצר: קטגוריה/תת, מחיר שונה לסניף (נפתח לפי צורך), סיטונאי (מנהל), מארז, קרטון, סניף בית
+// טופס מוצר: קטגוריה/תת, מחיר שונה לסניף (נפתח לפי צורך), סיטונאי (מנהל ועובד עם ord), מארז, קרטון, סניף בית
 const pExtH=p=>{const T=topC(),c=p&&p.cat||'',B=brs(),bp=p&&p.bp||{};
  const cs=T.length?`<div class="row"><label class="f grow"><span>קטגוריה</span><select name="cat"><option value="">ללא</option>${T.map(x=>`<option value="${esc(x.id)}"${c===x.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label><label class="f grow"><span>תת־קטגוריה</span><select name="sub"><option value="">ללא</option>${T.flatMap(x=>subC(x.id).map(u=>`<option value="${esc(u.id)}"${p&&p.sub===u.id?' selected':''}>${esc(x.name)} / ${esc(u.name)}</option>`)).join('')}</select></label></div>`:'';
  const bh=B.length>1?`<details${Object.keys(bp).length?' open':''}><summary class="note" style="min-height:44px;display:flex;align-items:center">מחיר שונה לסניף (ריק = מחיר המכירה)</summary>${B.map(b=>fld('מחיר ב'+esc(b.name)+' ₪','bp_'+b.id,bp[b.id]!=null?bp[b.id]:'','text','inputmode="decimal"')).join('')}</details>`:'';
  return cs+bh+`<div class="row"><label class="f grow"><span>כמות במארז</span><input name="pk" inputmode="numeric" value="${esc(p&&p.pk||'')}"></label><label class="f grow"><span>כמות בקרטון</span><input name="ct" inputmode="numeric" value="${esc(p&&p.ct||'')}"></label></div>`
  +(B.length>1?`<label class="f"><span>סניף הבית של הפריט</span><select name="home"><option value="">לא נקבע</option>${B.map(b=>`<option value="${esc(b.id)}"${p&&p.home===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:'')
- +(mgr()?fld('מחיר סיטונאי ₪ (ריק = לא משתנה)','wp','','text','inputmode="decimal"'):'')};
+ +fld('מחיר סיטונאי ₪ (ריק = לא משתנה)','wp','','text','inputmode="decimal"')}; // 00:13: גם עובד עם ord
 function pExtRead(f,x,isNew){const d={},T=topC();if(T.length){d.cat=x.cat||null;d.sub=x.sub||null;if(d.sub){const s=(O.C||[]).find(c=>c.id===d.sub);if(s&&!d.cat)d.cat=s.parent;if(s&&d.cat!==s.parent)throw new Error('תת־הקטגוריה לא שייכת לקטגוריה שנבחרה')}}
  const B=brs();if(B.length>1){const bp={};let any=false;for(const b of B){const v=String(x['bp_'+b.id]||'').trim();if(v){const n=num(v);if(!(n>=0))throw new Error('מחיר לסניף לא תקין');bp[b.id]=n;any=true}else if(!isNew)bp[b.id]=''}if(any||!isNew)d.bp=bp;d.home=x.home||null}
  for(const k of['pk','ct']){const v=String(x[k]||'').trim();if(v){const n=num(v);if(!(n>0)||!Number.isInteger(n))throw new Error('מארז/קרטון: מספר שלם');d[k]=n}else if(!isNew)d[k]=null}
@@ -304,9 +308,9 @@ ACT.oxXfNew=()=>{const B=brs(),M=mine(),F=M?B.filter(b=>M.includes(b.id)):B;if(!
 FRM.oxXfF=async f=>{const x=fd(f),v=num(x.qty);if(!x.pid)return toast('בחר מוצר');if(x.from===x.to)return toast('סניף המקור והיעד זהים');if(!(v>0))return toast('כמות לא תקינה');const b=f.querySelector('button');b.disabled=true;
  try{const r=await fnCall('transferStock',{reqId:x.req,pid:x.pid,from:x.from,to:x.to,qty:v,note:x.note||undefined});closeDlg();toast(r&&r.warn?'הועבר. שים לב: בסניף המקור המלאי במינוס':'הועבר');O.xf=undefined;await load(true)}catch(e){b.disabled=false;err(e)}};
 
-/* ייבוא מלאי (מנהל): קובץ ← התאמת עמודות (נזכרת) ← תצוגה מקדימה עם שורות שגויות ← ייבוא במנות של 200 */
-const IMF0=[['name','שם המוצר',1],['price','מחיר מכירה',1],['barcode','ברקוד'],['qty','כמות'],['cat','קטגוריה'],['sub','תת־קטגוריה'],['wp','מחיר סיטונאי'],['pk','כמות במארז'],['ct','כמות בקרטון']];
-const IMF={map:f=>IMF0.filter(x=>mgr()||x[0]!=='wp').map(f),find:f=>IMF0.find(f),[Symbol.iterator]:()=>IMF0.filter(x=>mgr()||x[0]!=='wp')[Symbol.iterator]()}; // עובד (23:19): בלי עמודת סיטונאי
+/* ייבוא מלאי (מנהל, ועובד עם ord – כולל סיטונאי ועלות, 00:12): קובץ ← התאמת עמודות (נזכרת) ← תצוגה מקדימה עם שורות שגויות ← ייבוא במנות של 200 */
+const IMF0=[['name','שם המוצר',1],['price','מחיר מכירה',1],['barcode','ברקוד'],['qty','כמות'],['cat','קטגוריה'],['sub','תת־קטגוריה'],['wp','מחיר סיטונאי'],['cost','מחיר עלות'],['pk','כמות במארז'],['ct','כמות בקרטון']];
+const IMF=IMF0; // 00:12: גם עובד מייבא סיטונאי ועלות
 const IMK='lp-ox-imp-map';
 const imMap0=()=>{try{return JSON.parse(localStorage.getItem(IMK)||'{}')||{}}catch(e){return{}}};
 V.oxImp=()=>{const T='ייבוא מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}const I=O.im;
@@ -330,10 +334,10 @@ function imRows(){const I=O.im,M=I.map,out=[];if(M.name==null||M.price==null)ret
  I.rows.forEach((r,i)=>{const g=k=>M[k]==null?'':r[M[k]];const o={name:String(g('name')).trim()},e=[];if(!o.name)e.push('חסר שם');
   const pr=cellN(g('price'));if(pr==null||isNaN(pr)||pr<0)e.push('מחיר לא תקין');else o.price=pr;
   const bc=String(g('barcode')).trim();if(bc){if(/^[0-9A-Za-z-]{3,30}$/.test(bc))o.barcode=bc;else e.push('ברקוד לא תקין')}
-  for(const k of['qty','wp','pk','ct']){if(M[k]==null||(k==='wp'&&!mgr()))continue;const v=cellN(g(k));if(v==null)continue;if(isNaN(v)||v<0||((k==='pk'||k==='ct')&&!Number.isInteger(v)))e.push(IMF.find(x=>x[0]===k)[1]+' לא תקין');else if(v)o[k]=v}
+  for(const k of['qty','wp','cost','pk','ct']){if(M[k]==null)continue;const v=cellN(g(k));if(v==null)continue;if(isNaN(v)||v<0||((k==='pk'||k==='ct')&&!Number.isInteger(v)))e.push(IMF.find(x=>x[0]===k)[1]+' לא תקין');else if(v||k==='wp'||k==='cost')o[k]=v}
   for(const k of['cat','sub']){const v=String(g(k)).trim();if(v)o[k]=v.slice(0,40)}if(o.sub&&!o.cat)e.push('תת־קטגוריה בלי קטגוריה');
   out.push({n:i+2,o,err:e.join(', ')})});return out}
-ACT.oxImpGo=async el=>{const I=O.im;if(!I)return;const G=imRows().filter(r=>!r.err).map(r=>r.o);if(!G.length)return;if(hasBr()&&!I.br&&(G.some(o=>o.qty)||!mgr()))return toast('בחר סניף');if(!mgr())G.forEach(o=>delete o.wp);el.disabled=true;
+ACT.oxImpGo=async el=>{const I=O.im;if(!I)return;const G=imRows().filter(r=>!r.err).map(r=>r.o);if(!G.length)return;if(hasBr()&&!I.br&&(G.some(o=>o.qty)||!mgr()))return toast('בחר סניף');el.disabled=true;
  let a=0,u=0,b=0;try{for(let k=0;k<G.length;k+=200){el.textContent='מייבא… '+Math.min(k+200,G.length)+'/'+G.length;const r=await fnCall('importProducts',{reqId:(I.req+'_'+(k/200)).slice(0,40),br:hasBr()?I.br:undefined,addQty:I.add,rows:G.slice(k,k+200)});a+=r.added||0;u+=r.updated||0;b+=(r.bad||[]).length}
   O.im=null;toast(`יובא: ${a} חדשים, ${u} עודכנו${b?', '+b+' נדחו':''}`);await load(true);rerender()}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
 window.__ox=O;window.__opSync=opSync;window.__brXfer=brXfer;
