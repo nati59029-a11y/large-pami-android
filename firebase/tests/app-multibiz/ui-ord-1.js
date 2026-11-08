@@ -33,7 +33,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await ctx.route(/:8080\/.*/, async (route) => {
     const req = route.request(); const u = new URL(req.url()); const body = req.postData() || '';
     if (/:runQuery$/.test(u.pathname)) { let c = ''; try { c = JSON.parse(body).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
-      const r = c === 'ord' ? ORD : c === 'prod' ? PROD : c === 'stockLog' ? [doc('stockLog/s1', { name: S('עוגת שוקולד'), br: S('br1'), delta: N(5), why: S('in'), at: N(T1) })] : [{ readTime: '2026-11-03T09:00:00Z' }];
+      const r = c === 'ordpay' ? (globalThis.__OP || []) : c === 'ord' ? ORD : c === 'prod' ? PROD : c === 'stockLog' ? [doc('stockLog/s1', { name: S('עוגת שוקולד'), br: S('br1'), delta: N(5), why: S('in'), at: N(T1) })] : [{ readTime: '2026-11-03T09:00:00Z' }];
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) }); }
     if (/\/ordcfg\/main$/.test(u.pathname)) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name: 'x', fields: { pay: M({ mode: S('link'), has: { booleanValue: true } }), src: M({ br1: S('stock') }) } }) });
     if (/\/ord\/o1\/log/.test(u.pathname)) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ documents: [{ name: 'x/log/l1', fields: { t: N(T1), act: S('create'), note: S('₪34.5') } }] }) });
@@ -120,6 +120,13 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.fill('form[data-f=oxPayF] input[name=link]', LINK); await page.click('form[data-f=oxPayF] button'); await H.settle(page, 400);
   const sp = calls.filter((c) => c.n === 'setBusinessPayLink');
   check('13 מנהל־על: "תשלום בהזמנות" – קישור/טלפון; הקישור הקיים לא מוצג; http נחסם בטופס; https נשלח', /קישור סליקה/.test(pf) && /לא מוצג/.test(pf) && n0 === 0 && sp.length === 1 && sp[0].d.link === LINK && sp[0].d.bizId === 'biz-o', { pf: pf.slice(0, 120), n0, sp: sp.map((x) => x.d) });
+  // 14. הכנסה + זיכוי: ordpay → תנועת הכנסה אחת בסניף ההזמנה עם off.sub; void → מבוטלת; בלי כפילות
+  globalThis.__OP = [doc('ordpay/o2', { ord: S('o2'), no: N(11), br: S('br2'), amt: N(80), at: N(T1), st: S('paid'), sup: M({ id: S('s_sup1'), name: S('סמוויקס') }) })];
+  await page.evaluate(() => { SY.sa = false; });
+  const a1 = await page.evaluate(async () => { await window.__opSync(); await window.__opSync(); const L = S.tx.filter((t) => t.id === 'op_o2'); return L.map((t) => ({ t: t.t, amt: t.amt, br: t.br, off: t.off, x: !!t.x, cat: t.cat })); });
+  globalThis.__OP = [doc('ordpay/o2', { ord: S('o2'), no: N(11), br: S('br2'), amt: N(80), at: N(T1), st: S('void'), sup: M({ id: S('s_sup1'), name: S('סמוויקס') }) })];
+  const a2 = await page.evaluate(async () => { await window.__opSync(); const t = S.tx.find((x) => x.id === 'op_o2'); return { x: !!t.x, n: S.tx.filter((x) => x.id === 'op_o2').length }; });
+  check('14 שולם בקישור הספק → הכנסה אחת (₪80, סניף ההזמנה, זכות אצל הספק); סנכרון כפול לא מכפיל; void → מבוטלת', a1.length === 1 && a1[0].t === 'inc' && a1[0].amt === 80 && a1[0].br === 'br2' && a1[0].off.sub === 's_sup1' && !a1[0].x && a2.x && a2.n === 1, { a1, a2 });
   check('12 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));

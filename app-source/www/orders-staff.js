@@ -33,7 +33,7 @@ const err=e=>toast(e&&e.message||'הפעולה נכשלה');
 async function runQ(coll,where,lim){const sq={from:[{collectionId:coll}],limit:lim||500};if(where)sq.where=where;
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>dec(x.document))}
 const brWhere=()=>{const m=mine();return m&&hasBr()?{fieldFilter:{field:{fieldPath:'br'},op:'IN',value:{arrayValue:{values:m.slice(0,30).map(s=>({stringValue:s}))}}}}:null};
-async function load(force){if(O.busy||(!force&&O.L&&Date.now()-O.at<20000))return;O.busy=1;O.err='';
+let load=async function(force){if(O.busy||(!force&&O.L&&Date.now()-O.at<20000))return;O.busy=1;O.err='';
  try{const[L,P,c]=await Promise.all([runQ('ord',brWhere(),500),runQ('prod',null,2000),fsx('/ordcfg/main').catch(e=>{if(e.code===404)return null;throw e})]);
   O.L=L.sort((a,b)=>(b.no||0)-(a.no||0));O.P=P.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));O.cfg=c?dec(c):{};O.at=Date.now()}
  catch(e){O.err=e.message||'הטעינה נכשלה'}finally{O.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}}
@@ -207,5 +207,29 @@ const PAYC={};
 FRM.oxPayF=async f=>{const id=f.dataset.id,x=fd(f);if(x.mode==='link'&&!/^https:\/\/[^\s]+\.[^\s]+/.test(x.link||''))return toast('קישור חייב להתחיל ב-https://');const b=f.querySelector('button');b.disabled=true;
  try{const P0=PAYC[id]||{},su=x.sup?(P0.sups||[]).find(s=>s.id===x.sup):null;const r=await fnCall('setBusinessPayLink',{bizId:id,mode:x.mode,link:x.mode==='link'?x.link.trim():undefined,sup:x.mode==='link'&&su?{id:su.id,name:su.name}:undefined});PAYC[id]=Object.assign({},P0,{mode:r.mode,has:r.has,sup:r.sup||null});toast('נשמר');rerender()}catch(e){err(e)}finally{b.disabled=false}};
 
-window.__ox=O;
+/* ---------- 17:47–17:59: הזמנה ששולמה דרך קישור הספק → הכנסה בסניף ההזמנה + זיכוי אצל הספק ----------
+   השרת כותב ordpay/{ordId} (st paid/void). היומן נמצא במכשיר המנהל (S), ולכן כאן – רק אצל מנהל – כל רשומה הופכת לתנועת הכנסה אחת:
+   tx.id='op_'+ordId, t:'inc', קטגוריה "הכנסות מהזמנות", br = סניף ההזמנה, off:{sub:ספק} = זכות אצל הספק לקיזוז (המנגנון הקיים offBal/offPay).
+   הזכות עצמה לא נספרת שוב: offBal סופר את ההכנסה הזו כזכות, וחשבונית הספק נרשמת כהוצאה רגילה ומשולמת ב'קיזוז'. void → t.x=1 (מבוטל, לא נמחק). */
+const OPC='c_ordinc';
+function opCat(){let c=S.cats.find(x=>x.id===OPC);if(!c){c={id:OPC,kind:'inc',name:'הכנסות מהזמנות',beh:'simple'};S.cats.push(c)}let u=S.subs.find(x=>x.cat===OPC&&x.name==='תשלום בקישור');if(!u){u={id:'s_ordlink',cat:OPC,name:'תשלום בקישור'};S.subs.push(u)}return u.id}
+const ymd2=t=>{const d=new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+let OPB=0;
+async function opSync(){if(OPB||!isA()||!bzF('orders')||typeof S==='undefined'||!S)return 0;OPB=1;let n=0;
+ try{const L=await runQ('ordpay',null,2000);for(const r of L){if(!r.ord||!(r.amt>=0)||!r.sup||!r.sup.id)continue;const id='op_'+r.ord;let t=S.tx.find(x=>x.id===id);
+   if(r.st==='paid'){const f={t:'inc',cat:OPC,sub:opCat(),date:ymd2(r.at),amt:Math.round(r.amt*100)/100,note:'הזמנה #'+r.no,off:{sub:r.sup.id},ordp:r.ord};if(r.br&&r.br!==NB)f.br=r.br;
+    if(!t){S.tx.push(Object.assign({id},f));n++}else if(t.x||t.amt!==f.amt||t.date!==f.date||t.br!==f.br||!t.off||t.off.sub!==f.off.sub){delete t.x;Object.assign(t,f);n++}}
+   else if(r.st==='void'&&t&&!t.x){t.x=1;n++}}
+  if(n){save();if(!typing())rerender()}}catch(e){}finally{OPB=0}return n}
+{const L0=load;load=async f=>{await L0(f);opSync()}}
+setTimeout(()=>{try{opSync()}catch(e){}},8000);setInterval(()=>{if(!document.hidden)opSync()},120000);
+
+/* 17:51: שיוך ספק לסניף (subs[].br, רשות). בכרטיס הספק – בחירת סניף; חשבונית חדשה של הספק מקבלת אותו כסניף ברירת מחדל (brGuess).
+   חשבוניות קיימות לא משתנות. עסק עם פחות מ-2 סניפים – שום שינוי. */
+{const c0=V.card;if(c0)V.card=id=>{const r=c0(id);try{const u=subById(id),c=u&&cat(u.cat);if(!isA()||!u||!c||c.beh!=='sup'||!r||!r.h||brs().length<2)return r;
+ r.h+=`<div class="sec"><h3>סניף הספק</h3></div><div class="card"><label class="f"><span>חשבוניות של הספק נרשמות כהוצאה בסניף</span><select data-c="oxSupBr" data-id="${esc(u.id)}"><option value="">לא משויך (לפי זיהוי)</option>${brs().map(b=>`<option value="${esc(b.id)}"${u.br===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>${u.offset?'<p class="note" style="margin:0">הזיכויים מהזמנות ששולמו בקישור של הספק מצטברים בכרטיס הקיזוז שלו.</p>':''}</div>`}catch(e){}return r}}
+CHG.oxSupBr=el=>{const u=subById(el.dataset.id);if(!u)return;if(el.value&&brs().some(b=>b.id===el.value))u.br=el.value;else delete u.br;save();toast('נשמר')};
+if(typeof brGuess==='function'){const g0=brGuess;brGuess=function(t){try{const u=t&&t.sub?subById(t.sub):null;if(u&&u.br&&!(t&&t.br)&&brList().some(b=>b.id===u.br))return{id:u.br,sure:true}}catch(e){}return g0(t)}}
+
+window.__ox=O;window.__opSync=opSync;
 })();
