@@ -104,6 +104,8 @@
         "create-own-imported":  "DDDDD",
         "create-without-chunk": "DDDDD",
         "create-other-owner":   "DDDDD",
+        "create-with-br":       "DDDAD",
+        "create-bad-br":        "DDDDD",
         "update-other":         "DDDDA",
         "delete-other":         "DDDDA"
       }
@@ -229,7 +231,7 @@
         "create-own":         "DDDAD",
         "create-other-uid":   "DDDDD",
         "create-with-status": "DDDDD",
-        "create-with-amount": "DDDDD",
+        "create-with-amount": "DDDDD", "create-with-br": "DDDAD", "create-bad-br": "DDDDD",
         "update-handle":      "DDDDA",
         "update-again":       "DDDDD",
         "update-own-kind":    "DDDDD",

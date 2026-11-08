@@ -573,11 +573,11 @@ describe('שלב 5, סבב 2 – סנכרון users/{uid} לחברי לארג\' 
 
 // ---------------------------------------------------------------------------------------------
 describe('שלב 5 – ייצוא ואין סודות', () => {
-  const NEW = ['createBusiness', 'inviteBusinessAdmin', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'setBusinessRanks', 'setStaffPerms', 'addStaff', 'setStaffActive', 'setStaffName'];
+  const NEW = ['createBusiness', 'inviteBusinessAdmin', 'setBusinessStatus', 'setBusinessFeatures', 'setBusinessAdv', 'setYemotToken', 'logBusinessEntry', 'setBusinessBrand', 'setBusinessRanks', 'setStaffPerms', 'addStaff', 'setStaffActive', 'setStaffName', 'setBusinessOrg', 'setStaffBranches'];
   it('כל הפונקציות החדשות מיוצאות מ-index.js (10 ניהול + 2 סנכרון, ורק הן נוספו; completeInvite הוסרה בשלב 6ג; setBusinessBrand נוספה בעדכון חוזה 14); עוזרי בדיקה לא מיוצאים', () => {
     const ex = require('../functions/index.js');
     for (const n of NEW) assert.equal(typeof ex[n], 'function', n);
-    assert.equal(Object.keys(ex).length, 32); // סריקה אחידה שלב 6: setStaffName; סריקה אחידה: setScanQuota; // 6ה: setBusinessRanks, setStaffPerms (עדכון חוזה 15); 6ז: cashoutTotal (עדכון חוזה 17)
+    assert.equal(Object.keys(ex).length, 34); // סניפים 2026-11-08: setBusinessOrg, setStaffBranches; סריקה אחידה שלב 6: setStaffName; סריקה אחידה: setScanQuota; // 6ה: setBusinessRanks, setStaffPerms (עדכון חוזה 15); 6ז: cashoutTotal (עדכון חוזה 17)
     assert.equal(ex.completeInvite, undefined);
     for (const n of ['syncLegacyAdmin', 'syncLegacyStaff']) assert.equal(typeof ex[n], 'function', n);
     for (const n of ['_core', 'resolveMember', 'bizRef', 'tzintukJoin', 'nightlyAll']) assert.equal(ex[n], undefined, n);

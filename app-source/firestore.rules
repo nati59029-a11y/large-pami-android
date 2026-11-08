@@ -39,6 +39,14 @@ service cloud.firestore {
         && n is string && n.lower() == request.auth.token.email.lower().split('@')[0];
     }
 
+    // 2026-11-08 (סניפים): br שהעובד שולח (inbox / mq, לא חובה) חייב להיות אחד מהסניפים שלו (staff/{uid}.br).
+    // אין br לעובד (חסר) = כל הסניפים, ולכן כל מזהה תקין מותר. st = מסמך העובד.
+    function brMine(d, st) {
+      return !d.keys().hasAny(['br'])
+        || (d.br is string && d.br.matches('^[a-z0-9_]{2,20}$')
+            && (st.get('br', null) == null || d.br in st.br));
+    }
+
     // ---------- 7 האוספים הקיימים (המבנה לא משתנה, רק מי רשאי) ----------
 
     // admins: כל מחובר קורא רק את המסמך של עצמו (כמו היום; האפליקציה בודקת בכניסה אם הוא מנהל).
@@ -102,7 +110,8 @@ service cloud.firestore {
       allow create: if isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.status == 'new'
-        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't'])
+        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br'])
+        && brMine(request.resource.data, get(/databases/$(database)/documents/staff/$(request.auth.uid)).data)
         // t (שלב 2 של סגירת קופה, לא חובה – גרסאות ישנות לא שולחות): זמן השליחה, לפי שעון השרת. cashout בודק לפיו שההוצאה חדשה.
         && (!request.resource.data.keys().hasAny(['t'])
             || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))
@@ -296,7 +305,8 @@ service cloud.firestore {
         || (isActiveEmployee() && resource.data.uid == request.auth.uid);
       allow create: if isActiveEmployee() && !isManager()
         && nw().keys().hasAll(['uid', 'by', 't', 'st', 'k', 'np'])
-        && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np', 'br'])
+        && brMine(nw(), get(/databases/$(database)/documents/staff/$(request.auth.uid)).data)
         && nw().uid == request.auth.uid
         && nw().by is string && nw().by.size() <= 100 && isMyName(nw().by)
         && nowOk(nw().t)
@@ -626,6 +636,7 @@ service cloud.firestore {
       // עדכון חוזה 6): כך כל שינוי נרשם ב-audit, ו-users/{uid}.bizStatus מתעדכן יחד עם status. ownerEmail/ownerPhone/adv
       // נשמרים ב-b/{bizId}/private/info ולא במסמך העסק. name, dataRoot, bizId, schemaVersion וכו' – רק השרת.
       // עדכון חוזה 7א: migrationTarget (בוליאני, כלי ההעברה כותב אותו) – רק מנהל־על (או השרת). מנהל העסק ועובד – לא.
+      // 2026-11-08: org (סניפים, בנקים, כרטיסים) – רק השרת (setBusinessOrg, עם audit). לא ברשימה כאן, ולכן נחסם מהאפליקציה.
       function superUpdOk() {
         return aff().hasOnly(['migrationTarget'])
           && request.resource.data.migrationTarget is bool;
@@ -642,7 +653,8 @@ service cloud.firestore {
       // חריג אחד (עדכון חוזה 6): private/info (ownerEmail, ownerPhone, adv) – קריאה למנהל העסק (בעסק פעיל) ולמנהל־על.
       // עובד לא קורא. כתיבה – רק השרת.
       match /private/{docId} {
-        allow get: if docId == 'info' && ((bIsAdmin() && bActive()) || bSuper());
+        // 2026-11-08: גם private/org (מספרי חשבון מלאים של בנקים) – באותו תנאי כמו info. עובד לא קורא.
+        allow get: if docId in ['info', 'org'] && ((bIsAdmin() && bActive()) || bSuper());
         allow list, create, update, delete: if false;
       }
 
@@ -716,7 +728,8 @@ service cloud.firestore {
         allow create: if bEmp() && !bMgr() && perm('expW')
           && request.resource.data.owner == request.auth.uid
           && request.resource.data.status == 'new'
-          && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't'])
+          && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br'])
+          && brMine(request.resource.data, myStaff())
           && (!request.resource.data.keys().hasAny(['t'])
               || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))
           && get(/databases/$(database)/documents/b/$(bizId)/chunks/$(docId + '_0')).data.owner == request.auth.uid;
@@ -905,7 +918,8 @@ service cloud.firestore {
           || (bEmp() && resource.data.uid == request.auth.uid);
         allow create: if bEmp() && !bMgr()
           && nw().keys().hasAll(['uid', 'by', 't', 'st', 'k', 'np'])
-          && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np', 'br'])
+          && brMine(nw(), myStaff())
           && nw().uid == request.auth.uid
           && nw().by is string && nw().by.size() <= 100 && isMyName(nw().by)
           && nowOk(nw().t)

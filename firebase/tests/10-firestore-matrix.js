@@ -104,6 +104,16 @@ const OPS = {
       return db.doc('inbox/' + id).set({ owner: me, by: me, status: 'imported', created: 'x', data: '{}', parts: '1' });
     },
     'create-without-chunk': (db, me) => db.doc('inbox/' + fresh('in')).set({ owner: me, by: me, status: 'new', created: 'x', data: '{}', parts: '1' }),
+    'create-with-br': async (db, me, env) => {
+      const id = fresh('in');
+      await env.withSecurityRulesDisabled((c) => c.firestore().doc(`chunks/${id}_0`).set({ owner: me, data: 'x' }));
+      return db.doc('inbox/' + id).set({ owner: me, by: me, status: 'new', created: 'x', data: '{}', parts: '1', br: 'br1' });
+    },
+    'create-bad-br': async (db, me, env) => {
+      const id = fresh('in');
+      await env.withSecurityRulesDisabled((c) => c.firestore().doc(`chunks/${id}_0`).set({ owner: me, data: 'x' }));
+      return db.doc('inbox/' + id).set({ owner: me, by: me, status: 'new', created: 'x', data: '{}', parts: '1', br: 'Bad Id!' });
+    },
     'create-other-owner': async (db, me, env) => {
       const id = fresh('in');
       await env.withSecurityRulesDisabled((c) => c.firestore().doc(`chunks/${id}_0`).set({ owner: H.OTHER, data: 'x' }));
@@ -187,6 +197,9 @@ const OPS = {
   },
   // תור "נשלח למנהל לטיפול" (שלב 6). מסמך של העובד עצמו נזרע בלי כללים (בשביל get-own / update-own)
   mq: {
+    // סניפים (2026-11-08): br שנשלח – עובד בלי שיוך (u_emp) רשאי כל מזהה תקין; מזהה בצורה לא תקינה נחסם
+    'create-with-br':     (db, me) => db.doc('mq/' + fresh('q')).set(Object.assign(newMq(me), { br: 'br1' })),
+    'create-bad-br':      (db, me) => db.doc('mq/' + fresh('q')).set(Object.assign(newMq(me), { br: 'Bad Id!' })),
     'get-own':            async (db, me, env) => { await env.withSecurityRulesDisabled((c) => c.firestore().doc('mq/q_' + me).set(newMq(me))); return db.doc('mq/q_' + me).get(); },
     'get-other':          (db) => db.doc('mq/q1').get(),
     'list-own':           (db, me) => db.collection('mq').where('uid', '==', me).get(),

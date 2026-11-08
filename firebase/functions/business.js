@@ -3,6 +3,7 @@
 //   מנהל־על בלבד (superadmins/{uid}): createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures,
 //                                     setBusinessAdv, setYemotToken, logBusinessEntry, setBusinessBrand.
 //                                     setBusinessRanks, setStaffPerms, addStaff (6ה: הוספת עובדים – רק מנהל־על).
+//                                     setBusinessOrg, setStaffBranches (סניפים/בנקים/כרטיסים, 2026-11-08).
 //   מנהל העסק (בתוך העסק שלו בלבד):   setStaffActive (השבתה והחזרה של עובד קיים).
 // כל פעולה נרשמת ב-b/{bizId}/audit (by, t, act, note). bizId של משתמש רגיל נקבע בשרת בלבד (requireStaff).
 // כניסה ראשונה (שלב 6ג, עדכון חוזה 9, החלטת המשתמש "א"): אין קוד חד־פעמי ואין שליחת מייל בשרת.
@@ -439,6 +440,120 @@ async function setStaffPerms(request) {
   return { ok: true, uid, perms, rank: upd.rank !== undefined ? upd.rank : (s.get('rank') || '') };
 }
 
+// ---------- סניפים, בנקים וכרטיסי אשראי (2026-11-08, חלק א') – מנהל־על בלבד ----------
+// b/{bizId}.org = {v:1, branches:[{id,name,on,sig}], banks:[{id,name,last4,on,sig}], cards:[{id,name,last4,bank,on,sub?}]}.
+// רק השרת כותב (setBusinessOrg). מזהה קיים אי אפשר להסיר – רק on:false. שדות אחרים במסמך העסק לא משתנים.
+// שיוך לסניפים: staff/{uid}.br / admins/{uid}.br = [ids]. חסר = כל הסניפים (setStaffBranches).
+const ORG_ID_RE = /^[a-z0-9_]{2,20}$/;
+const SIG_KINDS = ['txt', 'sup', 'emp', 'num', 'other'];
+const ORG_MAX = { branches: 20, banks: 20, cards: 30 };
+function orgName(v) {
+  const n = typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
+  if (!n || n.length > 40) throw bad('bad-org', 'שם חובה, עד 40 תווים');
+  return n;
+}
+function orgSig(sig) {
+  if (sig === undefined) return [];
+  if (!Array.isArray(sig) || sig.length > 10) throw bad('bad-org', 'סימני זיהוי: עד 10');
+  return sig.map((g) => {
+    if (!g || typeof g !== 'object' || Array.isArray(g)) throw bad('bad-org', 'סימן זיהוי לא תקין');
+    for (const k of Object.keys(g)) if (!['k', 'v'].includes(k)) throw bad('bad-org', 'שדה לא מוכר בסימן זיהוי');
+    if (!SIG_KINDS.includes(g.k)) throw bad('bad-org', 'סוג סימן זיהוי לא מוכר');
+    const v = typeof g.v === 'string' ? g.v.replace(/[\u0000-\u001f\u007f]/g, '').trim() : '';
+    if (!v || v.length > 60) throw bad('bad-org', 'ערך סימן זיהוי: חובה, עד 60 תווים');
+    return { k: g.k, v };
+  });
+}
+function cleanOrg(org) {
+  if (!org || typeof org !== 'object' || Array.isArray(org)) throw bad('bad-org', 'ההגדרות לא תקינות');
+  for (const k of Object.keys(org)) if (!['v', 'branches', 'banks', 'cards'].includes(k)) throw bad('bad-org', 'שדה לא מוכר: ' + String(k).slice(0, 30));
+  const out = { v: 1 };
+  for (const key of ['branches', 'banks', 'cards']) {
+    const L = org[key] === undefined ? [] : org[key];
+    if (!Array.isArray(L) || L.length > ORG_MAX[key]) throw bad('bad-org', `רשימה לא תקינה (עד ${ORG_MAX[key]})`);
+    const ids = new Set();
+    const allowed = key === 'branches' ? ['id', 'name', 'on', 'sig'] : key === 'banks' ? ['id', 'name', 'last4', 'on', 'sig'] : ['id', 'name', 'last4', 'bank', 'on', 'sub'];
+    out[key] = L.map((x) => {
+      if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad('bad-org', 'פריט לא תקין');
+      for (const k of Object.keys(x)) if (!allowed.includes(k)) throw bad('bad-org', 'שדה לא מוכר: ' + String(k).slice(0, 30));
+      if (typeof x.id !== 'string' || !ORG_ID_RE.test(x.id) || ids.has(x.id)) throw bad('bad-org', 'מזהה לא תקין או כפול');
+      ids.add(x.id);
+      if (x.on !== undefined && typeof x.on !== 'boolean') throw bad('bad-org', 'on חייב להיות כן/לא');
+      const o = { id: x.id, name: orgName(x.name), on: x.on !== false };
+      if (key !== 'branches') {
+        const l4 = x.last4 === undefined ? '' : x.last4;
+        if (typeof l4 !== 'string' || !(l4 === '' || /^\d{4}$/.test(l4))) throw bad('bad-org', '4 ספרות אחרונות: בדיוק 4 ספרות');
+        o.last4 = l4;
+      }
+      if (key !== 'cards') o.sig = orgSig(x.sig);
+      if (key === 'cards') {
+        const bk = x.bank === undefined ? '' : x.bank;
+        if (typeof bk !== 'string' || !(bk === '' || ORG_ID_RE.test(bk))) throw bad('bad-org', 'בנק לא תקין');
+        o.bank = bk;
+        if (x.sub !== undefined) {
+          if (typeof x.sub !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(x.sub)) throw bad('bad-org', 'מזהה כרטיס ישן לא תקין');
+          o.sub = x.sub;
+        }
+      }
+      return o;
+    });
+  }
+  const bankIds = new Set(out.banks.map((b) => b.id));
+  for (const c of out.cards) if (c.bank && !bankIds.has(c.bank)) throw bad('bad-org', 'כרטיס משויך לבנק שלא קיים');
+  return out;
+}
+async function setBusinessOrg(request) {
+  const by = await requireSuper(request);
+  const input = inputObject(request);
+  const bizId = bizIdOf(input);
+  const org = cleanOrg(input.org);
+  await bizOrThrow(bizId);
+  const db = getFirestore();
+  const ref = db.doc('b/' + bizId);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new HttpsError('not-found', 'העסק לא נמצא', { reason: 'no-biz' });
+    const old = s.get('org') && typeof s.get('org') === 'object' ? s.get('org') : {};
+    for (const key of ['branches', 'banks', 'cards']) {
+      const now = new Set(org[key].map((x) => x.id));
+      for (const x of Array.isArray(old[key]) ? old[key] : []) {
+        if (x && typeof x.id === 'string' && !now.has(x.id)) throw new HttpsError('failed-precondition', 'אי אפשר למחוק – אפשר רק להשבית', { reason: 'org-remove' });
+      }
+    }
+    tx.update(ref, { org: Object.assign({}, org, { updatedAt: Date.now(), updatedBy: by }) });
+    tx.set(auditRef(bizId), auditData(by, 'setBusinessOrg', ['branches', 'banks', 'cards'].map((k) => k + '=' + org[k].map((x) => x.id + (x.on ? '' : '-')).join('|')).join(';')));
+  });
+  return { ok: true, bizId, org };
+}
+// setStaffBranches({bizId, uid, br, kind}): br = [ids] (חייבים להתקיים ב-org.branches), או null = כל הסניפים.
+async function setStaffBranches(request) {
+  const by = await requireSuper(request);
+  const input = inputObject(request);
+  const bizId = bizIdOf(input);
+  const uid = typeof input.uid === 'string' ? input.uid : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
+  const kind = input.kind === undefined ? 'staff' : input.kind;
+  if (!['staff', 'admin'].includes(kind)) throw bad('bad-kind', 'סוג לא תקין');
+  let br = input.br;
+  if (br !== null) {
+    if (!Array.isArray(br) || br.length > ORG_MAX.branches || br.some((x) => typeof x !== 'string' || !ORG_ID_RE.test(x))) throw bad('bad-br', 'רשימת סניפים לא תקינה');
+    br = [...new Set(br)];
+  }
+  const biz = await bizOrThrow(bizId);
+  const db = getFirestore();
+  const bdoc = await db.doc('b/' + bizId).get();
+  const branches = bdoc.exists && bdoc.get('org') && Array.isArray(bdoc.get('org').branches) ? bdoc.get('org').branches : [];
+  if (br) for (const id of br) if (!branches.some((b) => b && b.id === id)) throw bad('bad-br', 'סניף לא קיים: ' + id);
+  const ref = db.doc(T.bizRef(biz, (kind === 'admin' ? 'admins/' : 'staff/') + uid));
+  const s = await ref.get();
+  if (!s.exists) throw new HttpsError('not-found', kind === 'admin' ? 'המנהל לא נמצא בעסק' : 'העובד לא נמצא בעסק', { reason: 'no-staff' });
+  const b = db.batch();
+  b.update(ref, { br: br === null ? FieldValue.delete() : br });
+  b.set(auditRef(bizId), auditData(by, 'setStaffBranches', kind + ':' + uid + ':' + (br === null ? '*' : br.join(','))));
+  await b.commit();
+  return { ok: true, uid, kind, br };
+}
+
 // ---------- addStaff (מנהל־על בלבד, 6ה) / setStaffActive (מנהל העסק או מנהל־על) ----------
 async function requireBizManager(request) {
   const who = await requireStaff(request);
@@ -569,8 +684,10 @@ exports.setStaffPerms = onCall(wrap('setStaffPerms', setStaffPerms));
 exports.addStaff = onCall(wrap('addStaff', addStaff));
 exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
 exports.setStaffName = onCall(wrap('setStaffName', setStaffName));
+exports.setBusinessOrg = onCall(wrap('setBusinessOrg', setBusinessOrg));
+exports.setStaffBranches = onCall(wrap('setStaffBranches', setStaffBranches));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, addStaff, setBusinessRanks, setStaffPerms, cleanPerms, cleanRanks, setStaffActive, syncLegacyMember, israeliPhone, cleanAdv, BATCH_MAX, wrap,
+  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, addStaff, setBusinessRanks, setStaffPerms, cleanPerms, cleanRanks, setStaffActive, syncLegacyMember, setBusinessOrg, setStaffBranches, cleanOrg, israeliPhone, cleanAdv, BATCH_MAX, wrap,
 } });
