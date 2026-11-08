@@ -70,7 +70,14 @@ if(!/^[a-z0-9-]{3,30}$/.test(biz))biz='';
 var emu=/^(127\.0\.0\.1|localhost)$/.test(location.hostname)&&q.get('emu');
 var IDT=emu?'http://'+location.hostname+':9099/identitytoolkit.googleapis.com':'https://identitytoolkit.googleapis.com';
 function msg(t,c){var m=$('msg');m.textContent=t;m.className='msg'+(c?' '+c:'')}
-function apk(tag){var t=/^biz-[a-z0-9-]{3,30}$/.test(tag)?tag:'latest';$('apk').href='https://github.com/'+REPO+'/releases/download/'+t+'/'+(t==='latest'?'large-pami':t)+'.apk'}
+// אתר/פרויקט הבדיקה (largpeami-test-f4691): ההזמנה שם שייכת לפרויקט Firebase אחר, ולכן APK הייצור לא יכניס אותה
+// ("אימייל או סיסמה לא נכונים"). מזהים לפי מפתח ה-API של פרויקט הבדיקה (מופיע בקישור שפיירבייס שולח – הוא מזהה את הפרויקט שהנפיק
+// את ההזמנה) או לפי כתובות האתר של הבדיקה. אצל הייצור שום דבר לא משתנה. APK הבדיקה: release קבוע test-latest (נבנה ע"י main.yml עם site_backend=test).
+var TEST_KEY='AIzaSyBHsEw1IvucT5gh1sv5jfSpd5UKqnPwsXU',TEST_HOSTS=['largpeami-test-f4691.web.app','largpeami-test-f4691.firebaseapp.com','largpeami-test-desktop.web.app'];
+var isTest=key===TEST_KEY||TEST_HOSTS.indexOf(location.hostname)>=0;
+function apk(tag){
+  if(isTest){$('apk').href='https://github.com/'+REPO+'/releases/download/test-latest/large-pami-test.apk';return}
+  var t=/^biz-[a-z0-9-]{3,30}$/.test(tag)?tag:'latest';$('apk').href='https://github.com/'+REPO+'/releases/download/'+t+'/'+(t==='latest'?'large-pami':t)+'.apk'}
 apk('latest');
 
 // כל פעולה שאינה קביעת סיסמה (למשל קישור "מחשב חדש"): ממשיכים רק לכתובת מרשימה סגורה – האתר הזה עצמו,
