@@ -4736,10 +4736,10 @@ let PDFJ=null,PV=null;
 function pdfLoad(){if(window.pdfjsLib){try{pdfjsLib.GlobalWorkerOptions.workerSrc='pdfjs/pdf.worker.min.js'}catch(e){}return Promise.resolve(window.pdfjsLib)}
  if(PDFJ)return PDFJ;PDFJ=new Promise((res,rej)=>{const s=document.createElement('script');s.src='pdfjs/pdf.min.js';s.onload=()=>{try{pdfjsLib.GlobalWorkerOptions.workerSrc='pdfjs/pdf.worker.min.js';res(pdfjsLib)}catch(e){rej(e)}};s.onerror=()=>rej(new Error('pdfjs'));document.head.append(s)});PDFJ.catch(()=>{PDFJ=null});return PDFJ}
 /* עמודי PDF כתמונות (data-url): לתצוגה במסך האחיד ולכל מי שצריך עמודים בנפרד (זיהוי PDF בחיבור) */
-async function pdfPages(du,o){o=o||{};const L=await pdfLoad(),doc=await L.getDocument({data:new Uint8Array(await du2b(du).arrayBuffer())}).promise;
+async function pdfDocPages(du,o){o=o||{};const L=await pdfLoad(),doc=await L.getDocument({data:new Uint8Array(await du2b(du).arrayBuffer())}).promise;
  try{const n=Math.min(doc.numPages,o.max||12),out=[];for(let i=1;i<=n;i++){const pg=await doc.getPage(i),v0=pg.getViewport({scale:1}),sc=Math.min(o.scale||2,(o.maxW||1600)/v0.width),v=pg.getViewport({scale:sc}),c=document.createElement('canvas');c.width=Math.round(v.width);c.height=Math.round(v.height);
   await pg.render({canvasContext:c.getContext('2d'),viewport:v}).promise;out.push(c.toDataURL('image/jpeg',.88));c.width=c.height=0}return{pages:out,total:doc.numPages}}finally{try{doc.destroy()}catch(e){}}}
-window.LP_PDF={load:pdfLoad,pages:pdfPages};
+window.LP_PDF={load:pdfLoad,pages:pdfDocPages};
 function pdfDispose(){const V=PV;PV=null;if(V){try{V.io&&V.io.disconnect()}catch(e){}V.items.forEach(it=>{it.tok++;try{it.task&&it.task.cancel()}catch(e){}});try{V.doc.destroy()}catch(e){}}}
 async function pdfView(du,name){let L,doc;try{L=await pdfLoad();doc=await L.getDocument({data:new Uint8Array(await du2b(du).arrayBuffer())}).promise}catch(e){return false}
  try{pdfDispose();{const o=document.getElementById('viewer');if(o)o.remove()}const host=$('#dlg').open?$('#dlg'):document.body,v=document.createElement('div');v.id='viewer';host.append(v);
@@ -4761,7 +4761,7 @@ function pdfPgLbl(){const V=PV,l=document.getElementById('pdfpg');if(!V||!l)retu
 {const o=ACT.vwShare;ACT.vwShare=async()=>{if(VW&&VW.pdf){try{await dxShareDU(VW.du,VW.name||'LargePami_document')}catch(e){toast('השיתוף נכשל: '+(e&&e.message||e))}return}return o()}}
 /* במסך האחיד: PDF מוצג בחלונית עצמה (עמוד אחד־אחד, עם אותה הגדלה ומסך מלא), במקום כפתור "פתיחה" בלבד */
 function usPdfPrep(){const g=US&&US.pane&&US.pg[US.i];if(!g||!g.pdf||g.pv||g.pvb||g.pve)return;g.pvb=1;const U=US;
- pdfPages(g.du,{max:12,scale:1.8,maxW:1400}).then(r=>{g.pv=r.pages;g.pvn=r.total;g.pi=g.pi||0}).catch(()=>{g.pve=1}).finally(()=>{g.pvb=0;if(US===U&&U.pg.includes(g))usPaneDraw()})}
+ pdfDocPages(g.du,{max:12,scale:1.8,maxW:1400}).then(r=>{g.pv=r.pages;g.pvn=r.total;g.pi=g.pi||0}).catch(()=>{g.pve=1}).finally(()=>{g.pvb=0;if(US===U&&U.pg.includes(g))usPaneDraw()})}
 ACT.usPg=el=>{const g=US&&US.pg[US.i];if(!g||!g.pv)return;g.pi=Math.max(0,Math.min(g.pv.length-1,(g.pi||0)+ +el.dataset.d));UZ={s:1,x:0,y:0};usPaneDraw()};
 const usPdfH=(g,n)=>g.pv&&g.pv.length&&imgOk(g.pv[g.pi||0])?`<img id="usimg" src="${g.pv[g.pi||0]}" alt="עמוד ${(g.pi||0)+1} מתוך ${g.pv.length} של קובץ PDF">${g.pv.length>1?`<div class="uspn"><button type="button" class="usb" data-a="usPg" data-d="-1" ${(g.pi||0)?'':'disabled'} aria-label="עמוד קודם ב-PDF">${ico('chev')}</button><span>${(g.pi||0)+1}/${g.pv.length}${g.pvn>g.pv.length?' (מתוך '+g.pvn+')':''}</span><button type="button" class="usb" style="transform:scaleX(-1)" data-a="usPg" data-d="1" ${(g.pi||0)<g.pv.length-1?'':'disabled'} aria-label="עמוד הבא ב-PDF">${ico('chev')}</button></div>`:''}`:`<div class="uspdf">📄 קובץ PDF<br>${g.pve?'<small>התצוגה לא נטענה</small>':'<small>טוען תצוגה…</small>'}<br><button type="button" class="btn s" data-a="usPdf">פתיחה</button></div>`;
 /* ---- מנהל־על: סוג מכסת הזיהוי לעסק (setScanQuota). רק ממשק – הקריאה לפונקציה הקיימת, והשרת בודק שרק מנהל־על רשאי ---- */
