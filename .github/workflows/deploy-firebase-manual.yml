@@ -177,6 +177,40 @@ jobs:
             echo "$N: נוצר עם ערך זמני" | tee -a "$GITHUB_STEP_SUMMARY"
           done
 
+      # מייל הזמנה עצמי (2026-11-08): אם הוגדרו סודות GitHub MAIL_USER ו-MAIL_APP_PASSWORD – נכתבים ל-Secret Manager של הפרויקט
+      # (גרסה חדשה, דרך stdin בלבד – לא מודפסים). אם חסרים – ממשיכים: הסוד הקיים (או הזמני) נשאר, והאפליקציה נופלת למייל של Firebase.
+      # INVITE_SITE = אתר גרסת המחשב (שם welcome.html), מהמשתנים DESKTOP_SITE / DESKTOP_SITE_TEST.
+      - name: Mail secrets and invite site
+        if: inputs.what == 'functions'
+        working-directory: firebase
+        env:
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+          SITE: ${{ inputs.project == 'largpeami' && vars.DESKTOP_SITE || vars.DESKTOP_SITE_TEST }}
+          P: ${{ inputs.project }}
+        run: |
+          set +x
+          if [ -n "$MAIL_USER" ] && [ -n "$MAIL_APP_PASSWORD" ]; then
+            echo "::add-mask::$MAIL_USER"; echo "::add-mask::$MAIL_APP_PASSWORD"
+            printf '%s' "$MAIL_USER" | firebase functions:secrets:set MAIL_USER --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 || { echo "::error::שמירת הסוד MAIL_USER נכשלה"; exit 1; }
+            printf '%s' "$MAIL_APP_PASSWORD" | firebase functions:secrets:set MAIL_APP_PASSWORD --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 || { echo "::error::שמירת הסוד MAIL_APP_PASSWORD נכשלה"; exit 1; }
+            echo "סודות המייל עודכנו ב-$P" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "אין סודות GitHub MAIL_USER/MAIL_APP_PASSWORD – ממשיכים בלי (מייל ההזמנה יישלח דרך Firebase)" | tee -a "$GITHUB_STEP_SUMMARY"
+            # Firebase דורש שכל defineSecret יהיה קיים. סוד חסר נוצר עם הערך "unset" (לא תקין → הפונקציה נופלת למייל של Firebase). סוד קיים לא נדרס.
+            for N in MAIL_USER MAIL_APP_PASSWORD; do
+              if ! firebase functions:secrets:get "$N" --project "$P" --non-interactive >/dev/null 2>&1; then
+                printf 'unset' | firebase functions:secrets:set "$N" --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 || { echo "::error::יצירת הסוד $N נכשלה"; exit 1; }
+                echo "$N: נוצר עם ערך זמני (unset)" | tee -a "$GITHUB_STEP_SUMMARY"
+              fi
+            done
+          fi
+          if [ -n "$SITE" ] && echo "$SITE" | grep -Eq '^[a-z0-9-]+$'; then
+            printf '\nINVITE_SITE=%s\n' "$SITE" >> "functions/.env.$P"
+          else
+            echo "::warning::חסר DESKTOP_SITE(_TEST) – מייל עצמי לא יופעל (fallback למייל של Firebase)"
+          fi
+
       - name: Deploy functions
         if: inputs.what == 'functions'
         working-directory: firebase
