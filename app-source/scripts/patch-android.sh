@@ -1,4 +1,7 @@
 set -e
+# הורדת Gradle: זמן המתנה 2 דקות במקום 10 שניות (תקלות רשת זמניות הכשילו בנייה)
+W=android/gradle/wrapper/gradle-wrapper.properties
+if [ -f "$W" ]; then if grep -q '^networkTimeout=' "$W"; then sed -i 's/^networkTimeout=.*/networkTimeout=120000/' "$W"; else echo 'networkTimeout=120000' >> "$W"; fi; fi
 sed -i "s/versionCode 1/versionCode 4/;s/versionName \"1.0\"/versionName \"2.0\"/" android/app/build.gradle
 # Force the committed signing key (Gradle was generating a random debug key on every build)
 test -f keystore/debug.keystore || { echo "::error::keystore missing"; exit 1; }

@@ -790,7 +790,7 @@ const invRow=(t,tag)=>`<div class="lw"><button class="li exp" data-a="payDlg" da
    ספק קיזוז: subs[].offset / offBal0; הכנסה tx.off={sub} = זכות אצל הספק; תשלום m='קיזוז' מתוך הזכות.
    אבטחה: לא נשמר מספר כרטיס/חשבון מלא – כל רצף 8–19 ספרות (גם עם רווחים/מקפים) הופך ל-••••+4 אחרונות. שיוך לפי 4 ספרות בלבד */
 /* function (לא const) – ensure() קורא בטעינה */
-function stlScrub(str){return String(str??'').replace(/\d(?:[\s.\-\/\\_ ‎‏‪-‮]*\d){7,}/g,m=>{if(/^\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}$|^\d{4}[.\-\/]\d{1,2}[.\-\/]\d{1,2}$/.test(m))return m;return '••••'+m.replace(/\D/g,'').slice(-4)})}
+function stlScrub(str){let s=String(str??'');const K=[];s=s.replace(/(?<!\d[.\-\/ ]?)(?:(?:0?[1-9]|[12]\d|3[01])[.\-\/](?:0?[1-9]|1[0-2])[.\-\/](?:\d{4}|\d{2})|(?:19|20)\d{2}[.\-\/](?:0?[1-9]|1[0-2])[.\-\/](?:0?[1-9]|[12]\d|3[01])(?![.\-\/]\d))(?:\s?[\-–—]\s?(?:(?:0?[1-9]|[12]\d|3[01])[.\-\/](?:0?[1-9]|1[0-2])[.\-\/](?:\d{4}|\d{2})|(?:19|20)\d{2}[.\-\/](?:0?[1-9]|1[0-2])[.\-\/](?:0?[1-9]|[12]\d|3[01])(?![.\-\/]\d)))?(?!\d)/g,m=>{K.push(m);return '\uE000'+(K.length-1)+'\uE001'});s=s.replace(/\d(?:[\s.\-\/\\_ ​‍‎‏‪-‮⁦-⁩–—]*\d){7,}/g,m=>'\u2022\u2022\u2022\u2022'+m.replace(/\D/g,'').slice(-4));return s.replace(/\uE000(\d+)\uE001/g,(_,i)=>K[+i])}
 const STL_ST=['open','match','exp','inc','skip'];
 function stlClean(d){try{
  for(const k of['stm','stl'])if(d[k]!=null&&!Array.isArray(d[k]))delete d[k];
@@ -4869,10 +4869,10 @@ async function brUp(f,id){const t=await tok();let r;try{r=await fetch(STB()+'?up
 async function brSave(reset){if(!ADM.sa||!BR||BR.busy)return;const id=BR.id,bz=brBiz(id);if(!bz)return toast('אין מיתוג לעסק הזה');const nm=s_(BR.name);if(nm.length>60)return toast('שם התצוגה: עד 60 תווים');
  let colors={};if(!reset&&BR.custom){const c=brEff();if(!BZC.every(k=>BZHEX.test(c[k])))return toast('כל צבע חייב להיות בצורה #rrggbb');if(!bzOk(c))return toast('יש צבעים שלא עומדים בניגודיות. לחץ "תיקון אוטומטי"');colors=c}
  const old=bz.brand||{},lp0='b/'+id+'/brand/logo';let lp=old.logoPath===lp0?lp0:'';BR.busy=1;brDraw();
- try{if(BR.file&&!reset){if(BR.file.size>BR_MAX||!BR_TYPES.includes(BR.file.type))throw new Error('הלוגו לא תקין');await brUp(BR.file,id);lp=lp0}
+ try{if(BR.file&&!reset){if(BR.file.size>BR_MAX||!BR_TYPES.includes(BR.file.type))throw new Error('הלוגו לא תקין');try{await brUp(BR.file,id)}catch(x){x.logo=1;throw x}lp=lp0}
   const r=await fnCall('setBusinessBrand',{bizId:id,brand:{name:nm,logoPath:lp,colors}}),B=r&&r.brand&&typeof r.brand==='object'?r.brand:{name:nm,logoPath:lp,colors};
   bz.brand=B;if(id===SY.bizId){SY.biz=Object.assign({},SY.biz,{brand:B});syS();bzSkin()}brFree();toast(reset?'חזרנו לצבעי ברירת המחדל':'המיתוג נשמר');rerender()}
- catch(e){if(BR){BR.busy=0;brDraw()}toast(e.code===403?'אין הרשאה לשמור מיתוג':e.message||'השמירה נכשלה')}}
+ catch(e){if(BR){BR.busy=0;brDraw()}toast(e.logo?(e.message||'העלאת הלוגו נכשלה')+'. המיתוג לא נשמר':e.code===403?'אין הרשאה לשמור מיתוג':e.message||'השמירה נכשלה')}}
 /* ===== ריבוי עסקים, שלב 6ג-2: כניסה ואבטחה באפליקציה =====
  א. כניסה ראשונה: המייל המובנה של Firebase Auth עם קישור "קבע סיסמה" (sendOobCode, PASSWORD_RESET). אין ספק מייל חיצוני ואין קוד בתשובת השרת.
     המייל נשלח רק לכתובת שהשרת החזיר (createBusiness/addStaff) או שנשמרה בשרת (private/info). "שכחתי סיסמה" במסך הכניסה – הודעה אחידה, שלא מגלה אם המייל קיים.
@@ -4885,16 +4885,17 @@ async function brSave(reset){if(!ADM.sa||!BR||BR.busy)return;const id=BR.id,bz=b
 const DV_TRUST=30*864e5,DV_LINK=60*6e4,DV_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DV_SENT='אם המייל רשום במערכת, נשלח אליו קישור לקביעת סיסמה. כדאי לבדוק גם בתיקיית הספאם.';
 /* X-Firebase-Locale: המייל בעברית (אם הוגדרה תבנית). אם הכותרת נחסמת בדפדפן (CORS – לא מאומת), שולחים שוב בלעדיה */async function oob(o){const u=`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:sendOobCode?key=${FB.apiKey}`,b=JSON.stringify(o);try{return await jf(u,{method:'POST',headers:{'Content-Type':'application/json','X-Firebase-Locale':'he'},body:b})}catch(e){if(!e.offline)throw e;return jf(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b})}}
-const pwMail=em=>oob({requestType:'PASSWORD_RESET',email:em});
+/* דף פתיחה (2026-11-08): continueUrl בדומיין firebaseapp.com של הפרויקט (מורשה תמיד) עם biz – דף welcome.html (Action URL מותאם בקונסול) קורא ממנו את העסק. אם השליחה עם continueUrl נדחית – שולחים בלעדיו */
+const pwMail=async(em,bz)=>{if(!BZOK(bz)||EMU)return oob({requestType:'PASSWORD_RESET',email:em});try{return await oob({requestType:'PASSWORD_RESET',email:em,continueUrl:`https://${FB.projectId}.firebaseapp.com/?biz=${bz}`})}catch(e){if(e.offline||!/CONTINUE_URI|UNAUTHORIZED_DOMAIN|DOMAIN/.test(e.message||''))throw e;return oob({requestType:'PASSWORD_RESET',email:em})}};
 /* אחרי פתיחת עסק / הוספת עובד: מייל "קבע סיסמה" לכתובת שהשרת החזיר */
 /* nb = עסק שנפתח עכשיו: מציעים מיד את מסך המיתוג (עדכון חוזה 14), לפני שהמנהל נכנס */
 const brOffer=nb=>nb?`<p class="note">אפשר לקבוע עכשיו לוגו, צבעים ושם תצוגה, עוד לפני שהמנהל נכנס.</p><div class="row"><button class="btn grow" data-a="admBrNow" data-id="${esc(nb)}">למיתוג העסק</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`:'';
 ACT.admBrNow=el=>{const id=el.dataset.id;closeDlg();if(BZOK(id))go('brand',id)};
 async function admMailSend(em,head,quiet,nb){const fin=nb?brOffer(nb):'<button class="btn w" data-a="closeDlg">הבנתי</button>';if(!em||!DV_RE.test(em)){dlg(`<h3>${esc(head)}</h3><p>לא התקבלה כתובת מייל מהשרת, ולכן לא נשלח מייל כניסה.</p>${fin}`);return}
- let ok=1,why='';try{await pwMail(em)}catch(e){ok=0;why=e.offline?'אין חיבור לאינטרנט':'השליחה נכשלה'}
+ let ok=1,why='';try{await pwMail(em,nb||SY.bizId)}catch(e){ok=0;why=e.offline?'אין חיבור לאינטרנט':'השליחה נכשלה'}
  if(ok&&quiet)return toast(head+'. נשלח מייל לקביעת סיסמה ל-'+em);/* במסך העובדים: הודעה קצרה שלא חוסמת את הרשימה */dlg(`<h3>${esc(head)}</h3><p>${ok?`נשלח מייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(em)}</bdi>`:`${esc(why)}. המייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(em)}</bdi> לא נשלח. ${quiet?'אפשר':'אפשר לשלוח שוב מכרטיס העסק, או'} ללחוץ "שכחתי סיסמה" במסך הכניסה`}.</p>${fin}`)}
 ACT.admMail=async el=>{const I=ADM.info[el.dataset.id]||{};if(!I.email)return toast('מייל המנהל לא נטען');el.disabled=true;
- try{await pwMail(I.email);dlg(`<h3>מייל כניסה</h3><p>נשלח מייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(I.email)}</bdi>.</p><button class="btn w" data-a="closeDlg">הבנתי</button>`)}catch(e){toast(e.offline?e.message:'שליחת המייל נכשלה, נסה שוב')}finally{el.disabled=false}};
+ try{await pwMail(I.email,el.dataset.id);dlg(`<h3>מייל כניסה</h3><p>נשלח מייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(I.email)}</bdi>.</p><button class="btn w" data-a="closeDlg">הבנתי</button>`)}catch(e){toast(e.offline?e.message:'שליחת המייל נכשלה, נסה שוב')}finally{el.disabled=false}};
 /* "שכחתי סיסמה / קביעת סיסמה" במסך הכניסה */
 async function pwForgot(em,out,btn){if(!DV_RE.test(em)){out.textContent='הזינו את כתובת האימייל, ואז לחצו שוב על "שכחתי סיסמה"';return}
  btn.disabled=true;setTimeout(()=>{btn.disabled=false},30000);
