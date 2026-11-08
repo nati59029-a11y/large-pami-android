@@ -1,0 +1,31 @@
+name: Ops - test scan IAM (test project only)
+on:
+  push:
+    branches: [ops/test-scan-iam]
+jobs:
+  iam:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auth (test project only)
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TEST }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          P=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$RUNNER_TEMP/sa.json")
+          [ "$P" = "largpeami-test-f4691" ] || { echo "::error::not test project"; exit 1; }
+          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/sa.json" -q
+          gcloud config set project "$P" -q
+      - name: Show invoker policy (read only)
+        run: |
+          set +e
+          for f in scanDocument stockIn createOrder; do
+            echo "== $f"
+            gcloud run services get-iam-policy "$(echo $f | tr 'A-Z' 'a-z')" --region us-central1 --format=json
+          done
+      - name: Grant public invoker on scanDocument (test only)
+        run: |
+          gcloud run services add-iam-policy-binding scandocument --region us-central1 --member=allUsers --role=roles/run.invoker -q
+          gcloud run services get-iam-policy scandocument --region us-central1 --format=json
+      - name: Cleanup
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
