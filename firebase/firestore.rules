@@ -632,6 +632,15 @@ service cloud.firestore {
       allow read: if rOrd() && rBrOk(resource.data.br);
       allow create, update, delete: if false;
     }
+    // fb/ord-catalog: קטגוריות (כולם עם הזמנות קוראים) והעברות פנימיות (לפי סניף המקור או היעד). כתיבה – רק השרת.
+    match /cat/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+    }
+    match /xfer/{id} {
+      allow read: if rOrd() && (rBrOk(resource.data.from) || rBrOk(resource.data.to));
+      allow create, update, delete: if false;
+    }
 
     // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
     match /users/{userId} {
@@ -1027,6 +1036,15 @@ service cloud.firestore {
       }
       match /stockLog/{id} {
         allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+      }
+      // fb/ord-catalog: קטגוריות והעברות פנימיות. מחיר סיטונאי (prod/{id}/p/ws) – תחת p/{k}, מנהל בלבד; עובד מקבל דרך getWsPrices.
+      match /cat/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+      }
+      match /xfer/{id} {
+        allow read: if ordOk() && (brOk(resource.data.from) || brOk(resource.data.to));
         allow create, update, delete: if false;
       }
 

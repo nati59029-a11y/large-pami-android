@@ -13,7 +13,7 @@ const ST={new:'חדשה',work:'בטיפול',wait_pay:'ממתין לתשלום',
 const NEXT={new:['work','wait_pay'],work:['wait_pay','new'],wait_pay:['work'],paid:['out','done'],out:['done'],done:[],cancel:[]};
 const PM=[['link','אשראי בקישור'],['phone','אשראי בטלפון'],['cash','מזומן'],['transfer','העברה'],['other','אחר']];
 const WHY={in:'הכנסת מלאי',set:'תיקון כמות',zero:'נגמר במלאי',order:'הזמנה',xout:'הועבר לסניף אחר',xin:'העברה נכנסת',cancel:'ביטול הזמנה',edit:'עריכת הזמנה',prod:'עריכת מוצר'};
-const O={L:null,P:null,cfg:null,err:'',busy:0,at:0,st:'open',log:{},sl:null,draft:null};
+const O={L:null,P:null,C:[],cf:'',cfg:null,err:'',busy:0,at:0,st:'open',log:{},sl:null,draft:null};
 const on=()=>(isA()||isW()||!!(SY&&SY.sa))&&bzF('orders')&&wp('ord');
 const mgr=()=>isA()||!!(SY&&SY.sa);
 const brs=()=>brAll().filter(b=>b.on);
@@ -34,7 +34,7 @@ async function runQ(coll,where,lim,ord){const sq={from:[{collectionId:coll}],lim
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>dec(x.document))}
 const brWhere=()=>{const m=mine();return m&&hasBr()?{fieldFilter:{field:{fieldPath:'br'},op:'IN',value:{arrayValue:{values:m.slice(0,30).map(s=>({stringValue:s}))}}}}:null};
 let load=async function(force){if(O.busy||(!force&&O.L&&Date.now()-O.at<20000))return;O.busy=1;O.err='';
- try{const[L,P,c]=await Promise.all([runQ('ord',brWhere(),500),runQ('prod',null,2000),fsx('/ordcfg/main').catch(e=>{if(e.code===404)return null;throw e})]);
+ try{const[L,P,c,C]=await Promise.all([runQ('ord',brWhere(),500),runQ('prod',null,2000),fsx('/ordcfg/main').catch(e=>{if(e.code===404)return null;throw e}),runQ('cat',null,500).catch(()=>[])]);O.C=C.sort((a,b)=>(a.ord||0)-(b.ord||0)||String(a.name).localeCompare(String(b.name),'he'));
   O.L=L.sort((a,b)=>(b.no||0)-(a.no||0));O.P=P.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));O.cfg=c?dec(c):{};O.at=Date.now()}
  catch(e){O.err=e.message||'הטעינה נכשלה'}finally{O.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}}
 // בכל מסך עם הקלדה – רענון לא בונה מחדש כשיש טקסט בתיבה (לקח)
@@ -93,13 +93,13 @@ V.oxNew=()=>{const T='הזמנה חדשה';if(!on())return deny(T);if(!O.P){load
  ${f('הערה (לא להקליד פרטי אשראי)','note','text','maxlength="300"')}
  <div class="card" style="margin:10px 0"><div class="row" style="justify-content:space-between"><b>סה״כ</b><b class="amt" id="oxtot">${ils(tot)}</b></div><p class="note" style="margin:4px 0 0">הסכום הסופי מחושב בשרת.</p></div>
  <button class="btn w" data-a="oxSave">שמור הזמנה</button><button class="btn g w" style="margin-top:8px" data-a="oxDrop">נקה טופס</button>`}};
-const hitsH=(hits,D)=>hits.map(p=>`<button type="button" class="li" data-a="oxAdd" data-id="${esc(p.id)}"><div class="m"><b>${esc(p.name)}</b><small>${hasBr()&&D.br?'במלאי ב'+esc(bn(D.br))+': '+n3(q(p,D.br))+' · ':''}סה״כ במלאי: ${n3(hasBr()?qAll(p):q(p,NB))}</small></div><b class="a">${ils(p.price)}</b></button>`).join('')||(D.q?'<p class="note">לא נמצא מוצר. אפשר להוסיף שורה חופשית או מוצר חדש במסך המלאי.</p>':'');
-INP.oxD=el=>{const D=draft();D[el.dataset.k]=el.value;if(el.dataset.k==='br'){D.items.forEach(it=>{if(it.pid)it.from=suggest(prod(it.pid),D.br,+it.qty||0)||''});redrawLines()}};
+const hitsH=(hits,D)=>hits.map(p=>`<button type="button" class="li" data-a="oxAdd" data-id="${esc(p.id)}"><div class="m"><b>${esc(p.name)}</b><small>${hasBr()&&D.br?'במלאי ב'+esc(bn(D.br))+': '+n3(q(p,D.br))+' · ':''}סה״כ במלאי: ${n3(hasBr()?qAll(p):q(p,NB))}</small></div><b class="a">${ils(unitP(p,D.br))}</b></button>`).join('')||(D.q?'<p class="note">לא נמצא מוצר. אפשר להוסיף שורה חופשית או מוצר חדש במסך המלאי.</p>':'');
+INP.oxD=el=>{const D=draft();D[el.dataset.k]=el.value;if(el.dataset.k==='br'){D.items.forEach(it=>{if(it.pid){const p=prod(it.pid);it.from=suggest(p,D.br,+it.qty||0)||'';if(it.auto&&p)it.price=String(unitP(p,D.br))}});redrawLines()}};
 INP.oxQ=el=>{const D=draft();D.q=el.value;const hits=D.q?(O.P||[]).filter(p=>p.on!==false&&(String(p.name).includes(D.q)||(p.barcode&&String(p.barcode)===D.q.trim()))).slice(0,8):[];const h=document.getElementById('oxhits');if(h)h.innerHTML=hitsH(hits,D)};
-INP.oxLn=el=>{const D=draft(),it=D.items[+el.dataset.n];if(!it)return;it[el.dataset.k]=el.value;if(el.dataset.k==='from'||el.tagName==='SELECT')redrawLines();else totRedraw()};
+INP.oxLn=el=>{const D=draft(),it=D.items[+el.dataset.n];if(!it)return;it[el.dataset.k]=el.value;if(el.dataset.k==='price')it.auto=0;if(el.dataset.k==='from'||el.tagName==='SELECT')redrawLines();else totRedraw()};
 function totRedraw(){const D=draft(),t=document.getElementById('oxtot');if(t)t.textContent=ils(D.items.reduce((s,it)=>s+Math.round((+it.qty||0)*(+it.price||0)*100),0)/100)}
 function redrawLines(){const D=draft(),l=document.getElementById('oxlines');if(l)l.innerHTML=D.items.map((it,i)=>lineH(it,i,D.br)).join('');totRedraw()}
-ACT.oxAdd=el=>{const D=draft(),p=prod(el.dataset.id);if(!p)return;const ex=D.items.find(it=>it.pid===p.id);if(ex)ex.qty=String((+ex.qty||0)+1);else D.items.push({pid:p.id,qty:'1',price:String(p.price),from:suggest(p,D.br,1)});D.q='';rerender()};
+ACT.oxAdd=el=>{const D=draft(),p=prod(el.dataset.id);if(!p)return;const ex=D.items.find(it=>it.pid===p.id);if(ex)ex.qty=String((+ex.qty||0)+1);else D.items.push({pid:p.id,qty:'1',price:String(unitP(p,D.br)),auto:1,from:suggest(p,D.br,1)});D.q='';rerender()};
 ACT.oxFree=()=>{draft().items.push({n:'',qty:'1',price:''});rerender()};
 ACT.oxLnDel=el=>{draft().items.splice(+el.dataset.n,1);rerender()};
 ACT.oxDrop=()=>ask('לנקות את הטופס?',()=>{O.draft=null;rerender()},'כן, נקה');
@@ -157,26 +157,27 @@ FRM.oxEdF=async f=>{const x=fd(f),E=O.ed;const L=E.items.map((it,i)=>Object.assi
 let SBR='';
 V.oxStock=()=>{const T='מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}const B=myBr();if(hasBr()&&!SBR&&B.length)SBR=B[0].id;const br=hasBr()?SBR:NB;
  const bc=B.length>1?`<div class="chips scroll-x" role="group" aria-label="סניף" style="margin:8px 0">${B.map(b=>`<button class="chip ${SBR===b.id?'on':''}" data-a="oxSBr" data-id="${esc(b.id)}" aria-pressed="${SBR===b.id}">${esc(b.name)}</button>`).join('')}</div>`:B.length===1?`<p class="note">סניף: ${esc(B[0].name)}</p>`:'';
- const L=(O.P||[]).filter(p=>!O.sq||String(p.name).includes(O.sq)||String(p.barcode||'')===O.sq.trim());
- return{t:T,s:hasBr()?bn(br):'כמויות במלאי',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="oxIn">הכנסת מלאי</button><button class="btn g grow" data-a="oxNewP">מוצר חדש</button></div>${bc}
+ const L=stockL();
+ return{t:T,s:hasBr()?bn(br):'כמויות במלאי',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="oxIn">הכנסת מלאי</button><button class="btn g grow" data-a="oxNewP">מוצר חדש</button></div>${catBar()}${bc}
  <label class="f"><span>חיפוש (שם או ברקוד)</span><input data-i="oxSQ" value="${esc(O.sq||'')}" autocomplete="off"></label>
  <div id="oxpl">${plH(L,br)}</div><button class="btn g s w" style="margin-top:8px" data-a="oxHist">היסטוריית תנועות</button>`}};
-const plH=(L,br)=>L.map(p=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">לא זמין</span>':''}</b><small>${ils(p.price)}${p.barcode?' · '+esc(p.barcode):''}${hasBr()&&brs().length>1?' · '+brs().map(b=>esc(b.name)+': '+n3(q(p,b.id))).join(' · '):''}</small></div><b class="a${q(p,br)<0?' neg':''}">${n3(q(p,br))}</b>
+const plH=(L,br)=>L.map(p=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">לא זמין</span>':''}</b><small>${ils(unitP(p,br))}${p.barcode?' · '+esc(p.barcode):''}${p.cat?' · '+esc(catNm(p.cat))+(p.sub?' / '+esc(catNm(p.sub)):''):''}${p.pk?' · מארז '+p.pk:''}${p.ct?' · קרטון '+p.ct:''}${hasBr()&&brs().length>1?' · '+brs().map(b=>esc(b.name)+': '+n3(q(p,b.id))).join(' · '):''}</small></div><b class="a${q(p,br)<0?' neg':''}">${n3(q(p,br))}</b>
  <div class="row" style="width:100%"><button class="btn g s grow" data-a="oxZero" data-id="${esc(p.id)}">נגמר במלאי</button>${mgr()?`<button class="btn g s grow" data-a="oxFix" data-id="${esc(p.id)}">תיקון כמות</button>`:''}<button class="btn g s grow" data-a="oxEditP" data-id="${esc(p.id)}">עריכה</button></div></div>`).join('')||'<div class="empty">אין מוצרים. הוסף מוצר חדש.</div>';
-INP.oxSQ=el=>{O.sq=el.value;const br=hasBr()?SBR:NB,L=(O.P||[]).filter(p=>!O.sq||String(p.name).includes(O.sq)||String(p.barcode||'')===O.sq.trim());const x=document.getElementById('oxpl');if(x)x.innerHTML=plH(L,br)};
+INP.oxSQ=el=>{O.sq=el.value;const br=hasBr()?SBR:NB,L=stockL();const x=document.getElementById('oxpl');if(x)x.innerHTML=plH(L,br)};
 ACT.oxSBr=el=>{SBR=el.dataset.id;rerender()};
 const sbr=()=>hasBr()?SBR:undefined;
 ACT.oxZero=el=>{const p=prod(el.dataset.id);if(!p)return;ask(`לסמן "${p.name}" כנגמר במלאי${hasBr()?' ב'+bn(SBR):''}? הכמות תתאפס.`,async()=>{try{await fnCall('stockSet',{reqId:rid(),pid:p.id,br:sbr(),qty:0});toast('עודכן');await load(true)}catch(e){err(e)}},'כן, נגמר')};
 ACT.oxFix=el=>{const p=prod(el.dataset.id);if(!p)return;dlg(`<h3>תיקון כמות · ${esc(p.name)}</h3><form data-f="oxFixF"><input type="hidden" name="id" value="${esc(p.id)}"><label class="f"><span>הכמות הנכונה${hasBr()?' ב'+esc(bn(SBR)):''}</span><input name="q" inputmode="decimal" value="${n3(q(p,hasBr()?SBR:NB))}" required></label><div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.oxFixF=async f=>{const x=fd(f),v=num(x.q);if(!isFinite(v))return toast('כמות לא תקינה');const b=f.querySelector('button');b.disabled=true;try{await fnCall('stockSet',{reqId:rid(),pid:x.id,br:sbr(),qty:v});closeDlg();toast('עודכן');await load(true)}catch(e){b.disabled=false;err(e)}};
 const pForm=(p)=>`<h3>${p?'עריכת מוצר':'מוצר חדש'}</h3><form data-f="oxPF">${p?`<input type="hidden" name="id" value="${esc(p.id)}">`:`<input type="hidden" name="req" value="${rid()}">`}${fld('שם המוצר','name',p?p.name:'','text','required maxlength="60"')}${fld('מחיר מכירה ₪','price',p?p.price:'','text','required inputmode="decimal"')}${fld('ברקוד (רשות)','barcode',p?p.barcode||'':'','text','inputmode="numeric" maxlength="30" dir="ltr"')}
- ${p?'':fld('כמות פתיחה'+(hasBr()?' ב'+esc(bn(SBR)):'')+' (רשות)','qty','','text','inputmode="decimal"')}${mgr()?fld('עלות ₪ (רק מנהל רואה)','cost','','text','inputmode="decimal"'):''}${p?`<label class="cb" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" name="off"${p.on===false?' checked':''}> לא זמין להזמנה</label>`:''}
+ ${pExtH(p)}${p?'':fld('כמות פתיחה'+(hasBr()?' ב'+esc(bn(SBR)):'')+' (רשות)','qty','','text','inputmode="decimal"')}${mgr()?fld('עלות ₪ (רק מנהל רואה)','cost','','text','inputmode="decimal"'):''}${p?`<label class="cb" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" name="off"${p.on===false?' checked':''}> לא זמין להזמנה</label>`:''}
  <div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`;
 ACT.oxNewP=()=>dlg(pForm(null));
 ACT.oxEditP=el=>{const p=prod(el.dataset.id);if(p)dlg(pForm(p))};
 FRM.oxPF=async f=>{const x=fd(f),price=num(x.price);if(!x.name.trim())return toast('חסר שם');if(!(price>=0))return toast('מחיר לא תקין');const d={name:x.name.trim(),price,barcode:x.barcode.trim()};
  if(x.cost&&x.cost.trim()){const c=num(x.cost);if(!(c>=0))return toast('עלות לא תקינה');d.cost=c}
  if(x.id){d.id=x.id;d.on=!x.off}else{d.reqId=x.req;if(x.qty&&x.qty.trim()){const v=num(x.qty);if(!(v>=0))return toast('כמות לא תקינה');d.qty=v;d.br=sbr()}else if(hasBr())d.br=SBR}
+ try{Object.assign(d,pExtRead(f,x,!x.id))}catch(e){return toast(e.message)}
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('saveProduct',d);closeDlg();toast('המוצר נשמר');await load(true)}catch(e){b.disabled=false;err(e)}};
 // הכנסת מלאי – כמה שורות בבת אחת
 ACT.oxIn=()=>{O.inL=[{pid:'',qty:''}];O.inReq=rid();dlg(inH())};
@@ -248,5 +249,87 @@ if(typeof brTable==='function'){const bt0=brTable;brTable=function(m){const h=bt
   const v=b=>X[b.id]||0,tot=rnd(rows.reduce((s,b)=>s+v(b),0));
   return h+`<div class="tw" style="margin-top:6px"><table id="brXfer"><thead><tr><th>העברה פנימית</th><th class="n">סכום</th></tr></thead><tbody>${rows.map(b=>`<tr><td>${esc(b.name)}</td><td class="n ${v(b)>=0?'pos':'neg'}"><bdi dir="ltr">${v(b)>0?'+':''}</bdi>${ils(v(b))}</td></tr>`).join('')}</tbody><tfoot><tr><th>סה״כ לעסק</th><th class="n">${ils(tot)}</th></tr></tfoot></table></div><p class="note">זכות אצל ספק קיזוז שנוצלה לחשבונית בסניף אחר. מתקזז לאפס ברמת העסק; לא נכלל בהכנסות ובהוצאות.</p>`}catch(e){return h}}}
 
+/* ---------- fb/ord-catalog: קטגוריות, מחיר לסניף, סיטונאי, מארז/קרטון, סניף בית, ייבוא מלאי, העברות ----------
+   מחיר בפועל: bp[סניף] ?? price (מוצר ישן בלי bp – כמו קודם). מחיר סיטונאי לא נמצא על מסמך המוצר: נטען דרך getWsPrices.
+   מי רואה סיטונאי – נקבע בשרת (WS_SHOW ב-orders.js); כאן wsCan() רק מסתיר כפתור, ושתי הנקודות צריכות להשתנות יחד.
+   ללקוח בהזמנה: draft().custId + draft().wholesale – ממולאים ע"י מסך הלקוחות (fb/ord-cust); כאן רק נקראים. */
+const unitP=(p,br)=>{const v=p&&p.bp&&typeof p.bp==='object'?p.bp[br]:undefined;return typeof v==='number'?v:(+(p&&p.price)||0)};
+const catNm=id=>{const c=(O.C||[]).find(x=>x.id===id);return c?c.name:''};
+const topC=()=>(O.C||[]).filter(c=>!c.parent);
+const subC=id=>(O.C||[]).filter(c=>c.parent===id);
+const catBar=()=>{const T=topC();if(!T.length&&!mgr())return '';return `<div class="row" style="margin:8px 0">${T.length?`<label class="f grow" style="margin:0"><span>קטגוריה</span><select data-c="oxCF"><option value="">הכול</option>${T.map(c=>`<option value="${esc(c.id)}"${O.cf===c.id?' selected':''}>${esc(c.name)}</option>${subC(c.id).map(u=>`<option value="${esc(u.id)}"${O.cf===u.id?' selected':''}>– ${esc(u.name)}</option>`).join('')}`).join('')}</select></label>`:''}</div>
+ <div class="row" style="margin-bottom:8px">${mgr()?'<button class="btn g s grow" data-a="oxCats">קטגוריות</button><button class="btn g s grow" data-a="go" data-v="oxImp">ייבוא מלאי</button>':''}${hasBr()&&brs().length>1?'<button class="btn g s grow" data-a="go" data-v="oxXfer">העברות</button>':''}</div>`};
+const stockL=()=>(O.P||[]).filter(p=>(!O.sq||String(p.name).includes(O.sq)||String(p.barcode||'')===O.sq.trim())&&(!O.cf||p.cat===O.cf||p.sub===O.cf));
+CHG.oxCF=el=>{O.cf=el.value;rerender()};
+const wsCan=()=>mgr()||!!(O.draft&&O.draft.custId&&O.draft.wholesale===true);
+// טופס מוצר: קטגוריה/תת, מחיר שונה לסניף (נפתח לפי צורך), סיטונאי (מנהל), מארז, קרטון, סניף בית
+const pExtH=p=>{const T=topC(),c=p&&p.cat||'',B=brs(),bp=p&&p.bp||{};
+ const cs=T.length?`<div class="row"><label class="f grow"><span>קטגוריה</span><select name="cat"><option value="">ללא</option>${T.map(x=>`<option value="${esc(x.id)}"${c===x.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label><label class="f grow"><span>תת־קטגוריה</span><select name="sub"><option value="">ללא</option>${T.flatMap(x=>subC(x.id).map(u=>`<option value="${esc(u.id)}"${p&&p.sub===u.id?' selected':''}>${esc(x.name)} / ${esc(u.name)}</option>`)).join('')}</select></label></div>`:'';
+ const bh=B.length>1?`<details${Object.keys(bp).length?' open':''}><summary class="note" style="min-height:44px;display:flex;align-items:center">מחיר שונה לסניף (ריק = מחיר המכירה)</summary>${B.map(b=>fld('מחיר ב'+esc(b.name)+' ₪','bp_'+b.id,bp[b.id]!=null?bp[b.id]:'','text','inputmode="decimal"')).join('')}</details>`:'';
+ return cs+bh+`<div class="row"><label class="f grow"><span>כמות במארז</span><input name="pk" inputmode="numeric" value="${esc(p&&p.pk||'')}"></label><label class="f grow"><span>כמות בקרטון</span><input name="ct" inputmode="numeric" value="${esc(p&&p.ct||'')}"></label></div>`
+ +(B.length>1?`<label class="f"><span>סניף הבית של הפריט</span><select name="home"><option value="">לא נקבע</option>${B.map(b=>`<option value="${esc(b.id)}"${p&&p.home===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:'')
+ +(mgr()?fld('מחיר סיטונאי ₪ (ריק = לא משתנה)','wp','','text','inputmode="decimal"'):'')};
+function pExtRead(f,x,isNew){const d={},T=topC();if(T.length){d.cat=x.cat||null;d.sub=x.sub||null;if(d.sub){const s=(O.C||[]).find(c=>c.id===d.sub);if(s&&!d.cat)d.cat=s.parent;if(s&&d.cat!==s.parent)throw new Error('תת־הקטגוריה לא שייכת לקטגוריה שנבחרה')}}
+ const B=brs();if(B.length>1){const bp={};let any=false;for(const b of B){const v=String(x['bp_'+b.id]||'').trim();if(v){const n=num(v);if(!(n>=0))throw new Error('מחיר לסניף לא תקין');bp[b.id]=n;any=true}else if(!isNew)bp[b.id]=''}if(any||!isNew)d.bp=bp;d.home=x.home||null}
+ for(const k of['pk','ct']){const v=String(x[k]||'').trim();if(v){const n=num(v);if(!(n>0)||!Number.isInteger(n))throw new Error('מארז/קרטון: מספר שלם');d[k]=n}else if(!isNew)d[k]=null}
+ if(x.wp&&x.wp.trim()){const n=num(x.wp);if(!(n>=0))throw new Error('מחיר סיטונאי לא תקין');d.wp=n}return d}
+
+/* קטגוריות (מנהל) */
+ACT.oxCats=()=>dlg(catsH());
+const catsH=()=>`<h3>קטגוריות</h3><div style="max-height:45vh;overflow:auto">${topC().map(c=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(c.name)}</b><small>${subC(c.id).map(u=>esc(u.name)).join(' · ')||'אין תת־קטגוריות'}</small></div></div>`).join('')||'<p class="note">עדיין אין קטגוריות</p>'}</div>
+ <form data-f="oxCatF"><label class="f"><span>שם</span><input name="name" required maxlength="40"></label><label class="f"><span>תחת קטגוריה (לתת־קטגוריה)</span><select name="parent"><option value="">קטגוריה ראשית</option>${topC().map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label><div class="row"><button class="btn grow">הוסף</button><button type="button" class="btn g grow" data-a="closeDlg">סגור</button></div></form>`;
+FRM.oxCatF=async f=>{const x=fd(f),b=f.querySelector('button');if(!x.name.trim())return;b.disabled=true;try{await fnCall('saveCat',{name:x.name.trim(),parent:x.parent||undefined});O.C=await runQ('cat',null,500).catch(()=>O.C);toast('נשמר');dlg(catsH())}catch(e){b.disabled=false;err(e)}};
+
+/* מחיר סיטונאי בהזמנה: כפתור רק כשמותר (wsCan); המחירים נטענים מהשרת ומוחלים על שורות המוצרים */
+{const n0=V.oxNew;V.oxNew=()=>{const r=n0();try{if(r&&r.h&&O.P&&wsCan())r.h=r.h.replace('<div class="sec"><h3>מוצרים</h3></div>',`<div class="sec"><h3>מוצרים</h3><button class="btn s g" data-a="oxWs">החל מחיר סיטונאי</button></div>`)}catch(e){}return r}}
+ACT.oxWs=async el=>{const D=draft();el.disabled=true;try{const r=await fnCall('getWsPrices',D.custId?{custId:D.custId}:{});const W=r&&r.wp||{};let k=0;D.items.forEach(it=>{if(it.pid&&typeof W[it.pid]==='number'){it.price=String(W[it.pid]);it.auto=0;k++}});O.wsP=W;toast(k?'הוחל מחיר סיטונאי על '+k+' שורות':'אין מחיר סיטונאי למוצרים שבהזמנה');rerender()}catch(e){err(e)}finally{el.disabled=false}};
+
+/* העברות בין סניפים: רשימה + העברה ידנית */
+V.oxXfer=()=>{const T='העברות בין סניפים';if(!on())return deny(T);if(!O.P){load();return loading(T)}if(O.xf===undefined){O.xf=null;xfLoad()}
+ const XW={order:'הזמנה',cancel:'ביטול הזמנה',edit:'עריכת הזמנה',manual:'ידנית'};
+ return{t:T,s:'סחורה שעברה מסניף לסניף',h:`<button class="btn w" data-a="oxXfNew">העברה ידנית</button><div class="sec"><h3>אחרונות</h3></div>${O.xf?O.xf.map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(x.name)}</b><small>${tm(x.at)} · ${esc(bn(x.from))} ← ${esc(bn(x.to))} · ${XW[x.why]||esc(x.why)}${x.no?' · הזמנה #'+x.no:''}${x.note?' · '+esc(x.note):''}</small></div><b class="a">${n3(x.qty)}</b></div>`).join('')||'<div class="empty">אין העברות</div>':'<p class="note">טוען…</p>'}`}};
+async function xfLoad(){try{const m=mine()&&hasBr()?mine().slice(0,30):null;
+ /* עובד עם סניפים מוגבלים: שתי שאילתות (מקור / יעד בסניפים שלו) – כך החוקים מאשרים את הרשימה */
+ const inF=f=>({fieldFilter:{field:{fieldPath:f},op:'IN',value:{arrayValue:{values:m.map(x=>({stringValue:x}))}}}});
+ const L0=m?[].concat(...await Promise.all([runQ('xfer',inF('from'),300),runQ('xfer',inF('to'),300)])):await runQ('xfer',null,300);
+ const L=[...new Map(L0.map(x=>[x.id,x])).values()];O.xf=L.sort((a,b)=>b.at-a.at).slice(0,150)}catch(e){O.xf=[]}if(cur().v==='oxXfer'&&!typing())rerender()}
+ACT.oxXfNew=()=>{const B=brs(),M=mine(),F=M?B.filter(b=>M.includes(b.id)):B;if(!F.length)return toast('אין סניף מקור שמשויך אליך');
+ dlg(`<h3>העברה ידנית</h3><form data-f="oxXfF"><input type="hidden" name="req" value="${rid()}"><label class="f"><span>מוצר</span><select name="pid" required><option value="">בחר</option>${(O.P||[]).map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
+ <div class="row"><label class="f grow"><span>מסניף</span><select name="from">${F.map(b=>`<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select></label><label class="f grow"><span>לסניף</span><select name="to">${B.map((b,i)=>`<option value="${esc(b.id)}"${i===1?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label></div>
+ <label class="f"><span>כמות</span><input name="qty" inputmode="decimal" required></label><label class="f"><span>הערה (רשות)</span><input name="note" maxlength="200"></label><div class="row"><button class="btn grow">העבר</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.oxXfF=async f=>{const x=fd(f),v=num(x.qty);if(!x.pid)return toast('בחר מוצר');if(x.from===x.to)return toast('סניף המקור והיעד זהים');if(!(v>0))return toast('כמות לא תקינה');const b=f.querySelector('button');b.disabled=true;
+ try{const r=await fnCall('transferStock',{reqId:x.req,pid:x.pid,from:x.from,to:x.to,qty:v,note:x.note||undefined});closeDlg();toast(r&&r.warn?'הועבר. שים לב: בסניף המקור המלאי במינוס':'הועבר');O.xf=undefined;await load(true)}catch(e){b.disabled=false;err(e)}};
+
+/* ייבוא מלאי (מנהל): קובץ ← התאמת עמודות (נזכרת) ← תצוגה מקדימה עם שורות שגויות ← ייבוא במנות של 200 */
+const IMF=[['name','שם המוצר',1],['price','מחיר מכירה',1],['barcode','ברקוד'],['qty','כמות'],['cat','קטגוריה'],['sub','תת־קטגוריה'],['wp','מחיר סיטונאי'],['pk','כמות במארז'],['ct','כמות בקרטון']];
+const IMK='lp-ox-imp-map';
+const imMap0=()=>{try{return JSON.parse(localStorage.getItem(IMK)||'{}')||{}}catch(e){return{}}};
+V.oxImp=()=>{const T='ייבוא מלאי';if(!on()||!mgr())return deny(T);if(!O.P){load();return loading(T)}const I=O.im;
+ if(!I)return{t:T,s:'Excel או CSV',h:`<div class="card"><p class="note" style="margin-top:0">שורה ראשונה = כותרות. אחרי בחירת הקובץ בוחרים איזו עמודה היא איזה שדה. מוצר קיים (לפי ברקוד, ואם אין – לפי שם מדויק) מתעדכן ולא נוצר פעמיים.</p><label class="btn w" style="display:flex;align-items:center;justify-content:center">בחר קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="oxImpFile" style="position:absolute;opacity:0;width:1px;height:1px"></label></div>`};
+ const opt=(k)=>`<option value="">— לא לייבא —</option>${I.head.map((h,i)=>`<option value="${i}"${String(I.map[k])===String(i)?' selected':''}>${esc(String(h||'עמודה '+(i+1)))}</option>`).join('')}`;
+ const pv=imRows(),bad=pv.filter(r=>r.err),good=pv.length-bad.length;
+ return{t:T,s:esc(I.file),h:`<div class="card"><b>התאמת עמודות</b>${IMF.map(([k,l,req])=>`<label class="f"><span>${l}${req?' (חובה)':''}</span><select data-c="oxImpMap" data-k="${k}">${opt(k)}</select></label>`).join('')}</div>
+ ${hasBr()?`<label class="f"><span>הכמות נכנסת לסניף</span><select data-c="oxImpBr">${myBr().map(b=>`<option value="${esc(b.id)}"${I.br===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:''}
+ <label class="cb" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" data-c="oxImpAdd"${I.add?' checked':''}> הוסף כמות גם למוצרים קיימים (בלי סימון – מוצר קיים מתעדכן בשם/מחיר בלבד)</label>
+ <div class="card"><b>${good} שורות תקינות</b>${bad.length?` · <span class="neg">${bad.length} שגויות (לא ייובאו)</span>`:''}<div style="max-height:40vh;overflow:auto;margin-top:6px">${pv.slice(0,60).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line)${r.err?';color:var(--neg,#e66)':''}">${r.n}. ${esc(r.o.name||'')} · ${esc(String(r.o.price!=null?r.o.price:''))}${r.o.qty?' · כמות '+esc(String(r.o.qty)):''}${r.err?' – '+esc(r.err):''}</div>`).join('')}${pv.length>60?`<p class="note">ועוד ${pv.length-60} שורות…</p>`:''}</div></div>
+ <button class="btn w" data-a="oxImpGo"${good?'':' disabled'}>ייבא ${good} שורות</button><button class="btn g w" style="margin-top:8px" data-a="oxImpX">קובץ אחר</button>`}};
+CHG.oxImpFile=async el=>{const f=el.files&&el.files[0];if(!f)return;try{if(/\.pdf$/i.test(f.name))throw new Error('ייבוא מלאי – רק Excel או CSV');const T=await readTable(f);const rows=(T||[]).filter(r=>Array.isArray(r)&&r.some(c=>String(c).trim()));if(rows.length<2)throw new Error('בקובץ אין שורות מתחת לכותרות');
+ const head=rows[0].map(c=>String(c==null?'':c).trim()),M0=imMap0(),map={};for(const[k]of IMF){const v=M0[k];const i=v?head.indexOf(v):-1;if(i>-1)map[k]=i}
+ O.im={file:f.name,head,rows:rows.slice(1),map,br:hasBr()?(SBR||(myBr()[0]||{}).id||''):'',add:false,req:rid()};rerender()}catch(e){err(e)}};
+CHG.oxImpMap=el=>{const I=O.im;if(!I)return;if(el.value==='')delete I.map[el.dataset.k];else I.map[el.dataset.k]=+el.value;I.req=rid();const m={};for(const[k,i]of Object.entries(I.map))m[k]=I.head[i];try{localStorage.setItem(IMK,JSON.stringify(m))}catch(e){}rerender()};
+CHG.oxImpBr=el=>{if(O.im){O.im.br=el.value;O.im.req=rid()}};
+CHG.oxImpAdd=el=>{if(O.im){O.im.add=el.checked;O.im.req=rid()}};
+ACT.oxImpX=()=>{O.im=null;rerender()};
+const cellN=v=>{if(typeof v==='number')return v;const s=String(v==null?'':v).replace(/[₪\s,]/g,'');if(s==='')return null;return /^-?\d+(\.\d+)?$/.test(s)?+s:NaN};
+function imRows(){const I=O.im,M=I.map,out=[];if(M.name==null||M.price==null)return I.rows.map((r,i)=>({n:i+2,o:{},err:'יש לבחור עמודות לשם ולמחיר'}));
+ I.rows.forEach((r,i)=>{const g=k=>M[k]==null?'':r[M[k]];const o={name:String(g('name')).trim()},e=[];if(!o.name)e.push('חסר שם');
+  const pr=cellN(g('price'));if(pr==null||isNaN(pr)||pr<0)e.push('מחיר לא תקין');else o.price=pr;
+  const bc=String(g('barcode')).trim();if(bc){if(/^[0-9A-Za-z-]{3,30}$/.test(bc))o.barcode=bc;else e.push('ברקוד לא תקין')}
+  for(const k of['qty','wp','pk','ct']){if(M[k]==null)continue;const v=cellN(g(k));if(v==null)continue;if(isNaN(v)||v<0||((k==='pk'||k==='ct')&&!Number.isInteger(v)))e.push(IMF.find(x=>x[0]===k)[1]+' לא תקין');else if(v)o[k]=v}
+  for(const k of['cat','sub']){const v=String(g(k)).trim();if(v)o[k]=v.slice(0,40)}if(o.sub&&!o.cat)e.push('תת־קטגוריה בלי קטגוריה');
+  out.push({n:i+2,o,err:e.join(', ')})});return out}
+ACT.oxImpGo=async el=>{const I=O.im;if(!I)return;const G=imRows().filter(r=>!r.err).map(r=>r.o);if(!G.length)return;if(hasBr()&&!I.br&&G.some(o=>o.qty))return toast('בחר סניף לכמות');el.disabled=true;
+ let a=0,u=0,b=0;try{for(let k=0;k<G.length;k+=200){el.textContent='מייבא… '+Math.min(k+200,G.length)+'/'+G.length;const r=await fnCall('importProducts',{reqId:(I.req+'_'+(k/200)).slice(0,40),br:hasBr()?I.br:undefined,addQty:I.add,rows:G.slice(k,k+200)});a+=r.added||0;u+=r.updated||0;b+=(r.bad||[]).length}
+  O.im=null;toast(`יובא: ${a} חדשים, ${u} עודכנו${b?', '+b+' נדחו':''}`);await load(true);rerender()}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
 window.__ox=O;window.__opSync=opSync;window.__brXfer=brXfer;
 })();

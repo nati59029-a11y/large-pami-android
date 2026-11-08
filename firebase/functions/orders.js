@@ -4,6 +4,10 @@
 //
 //   prod/{id}          { name, price, barcode, on, q: { <br>|'_': כמות }, at, by, upd }   – מוצר + כמות לכל סניף ('_' = עסק בלי סניפים)
 //   prod/{id}/p/cost   { cost }                                                     – עלות, מנהל בלבד
+//   prod/{id}/p/ws     { wp }                                                       – מחיר סיטונאי (אחד לעסק). נקרא רק דרך getWsPrices (ראו WS_SHOW)
+//   prod/{id}          + { cat?, sub?, bp?: { <br>: מחיר }, pk?, ct?, home? }       – fb/ord-catalog, תוספתי: מוצר ישן בלי השדות עובד כמו קודם
+//   cat/{id}           { name, parent?, ord, upd }                                  – קטגוריה (parent ריק) / תת־קטגוריה. מנהל, דרך saveCat
+//   xfer/{id}          { prod, name, from, to, qty, why:'order'|'cancel'|'edit'|'manual', ord?, no?, by, at, reqId }  – העברה פנימית בין סניפים
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
 //   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
 //   ord/{id}/log/{k}   { t, by, act, note }
@@ -35,6 +39,10 @@ const NEXT = { new: ['work', 'wait_pay'], work: ['wait_pay', 'new'], wait_pay: [
 const PAYABLE = ['new', 'work', 'wait_pay'];
 const PAY_METHODS = ['link', 'phone', 'cash', 'transfer', 'other'];
 const MAX_ITEMS = 50;
+const MAX_IMPORT = 200;
+// מי רואה מחיר סיטונאי (החלטת המשתמש 22:07): 'wsCust' = מנהל תמיד; עובד עם ord – רק ללקוח שמסומן wholesale.
+// אפשרויות נוספות לשינוי מהיר: 'mgr' (מנהל בלבד), 'ord' (כל עובד עם הרשאת הזמנות).
+const WS_SHOW = 'wsCust';
 
 // ---------- ניקוי קלט ----------
 function txt(v, max, reason, label, required) {
@@ -113,18 +121,54 @@ const qOf = (p, br) => { const q = p && p.q && typeof p.q === 'object' ? p.q[br]
 // =====================================================================================
 // מוצרים ומלאי
 // =====================================================================================
+// שדות הקטלוג (fb/ord-catalog). רק מה שנשלח נכתב; '' / null בשדה טקסט = מחיקה מהמוצר (FieldValue.delete בעדכון).
+const FV = () => require('firebase-admin/firestore').FieldValue;
+function prodExt(w, input) {
+  const o = {};
+  for (const k of ['cat', 'sub']) {
+    if (input[k] === undefined) continue;
+    if (input[k] === null || input[k] === '') o[k] = FV().delete();
+    else o[k] = idOf(input[k], 'קטגוריה');
+  }
+  if (input.bp !== undefined) {
+    const bp = input.bp;
+    if (bp !== null && (typeof bp !== 'object' || Array.isArray(bp))) throw bad('bad-bp', 'מחיר לסניף לא תקין');
+    const m = {};
+    for (const [br, v] of Object.entries(bp || {})) {
+      if (!w.branches.some((b) => b.id === br)) throw bad('bad-bp', 'מחיר לסניף: סניף לא קיים');
+      if (v === null || v === '') continue;
+      m[br] = money(v, 'מחיר לסניף');
+    }
+    o.bp = m;
+  }
+  for (const [k, l] of [['pk', 'כמות במארז'], ['ct', 'כמות בקרטון']]) {
+    if (input[k] === undefined) continue;
+    if (input[k] === null || input[k] === '' || input[k] === 0) { o[k] = FV().delete(); continue; }
+    o[k] = qtyOf(input[k]);
+    if (!Number.isInteger(o[k])) throw bad('bad-qty', l + ': מספר שלם');
+  }
+  if (input.home !== undefined) {
+    if (input.home === null || input.home === '') o.home = FV().delete();
+    else if (typeof input.home !== 'string' || !w.branches.some((b) => b.id === input.home)) throw bad('bad-br', 'סניף בית לא קיים');
+    else o.home = input.home;
+  }
+  return o;
+}
+const noDel = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => !(v && v.constructor && /Delete/.test(v.constructor.name))));
 // saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
 // עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0). עלות – מנהל בלבד.
 async function saveProduct(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId']);
+  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'home']);
   const name = txt(input.name, 60, 'bad-name', 'שם המוצר', true);
   const price = money(input.price, 'מחיר');
   const barcode = input.barcode == null || input.barcode === '' ? '' : String(input.barcode).trim();
   if (barcode && !/^[0-9A-Za-z-]{3,30}$/.test(barcode)) throw bad('bad-barcode', 'ברקוד: ספרות/אותיות, 3 עד 30');
   if (input.on !== undefined && typeof input.on !== 'boolean') throw bad('bad-field', 'זמין חייב להיות כן/לא');
   if (input.cost !== undefined && input.cost !== null) { mgr(w); money(input.cost, 'עלות'); }
+  if (input.wp !== undefined && input.wp !== null) { mgr(w); money(input.wp, 'מחיר סיטונאי'); }
+  const ext = prodExt(w, input);
   const db = T.tdb();
   const now = Date.now();
   if (input.id != null) {
@@ -139,7 +183,9 @@ async function saveProduct(request) {
       if (o.price !== price) ch.push(`מחיר: ₪${o.price} → ₪${price}`);
       if ((o.barcode || '') !== barcode) ch.push('ברקוד');
       if ((o.on !== false) !== (input.on !== false)) ch.push(input.on === false ? 'לא זמין' : 'זמין');
-      tx.update(ref, { name, price, barcode, on: input.on !== false, upd: now });
+      if (ext.bp && JSON.stringify(ext.bp) !== JSON.stringify(o.bp || {})) ch.push('מחיר לסניף');
+      tx.update(ref, Object.assign({ name, price, barcode, on: input.on !== false, upd: now }, ext));
+      if (input.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: money(input.wp, 'מחיר סיטונאי'), at: now, by: w.uid });
       if (ch.length) tx.set(stockRef(db), { prod: id, name, br: NB, delta: 0, why: 'prod', note: ch.join('; ').slice(0, 300), by: w.uid, at: now });
       if (input.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: money(input.cost, 'עלות'), at: now, by: w.uid });
     });
@@ -156,7 +202,8 @@ async function saveProduct(request) {
     if (s.exists) { dup = true; return; }
     const q = {};
     if (br && qty) q[br] = qty;
-    tx.set(ref, { name, price, barcode, on: input.on !== false, q, at: now, by: w.uid, upd: now });
+    tx.set(ref, Object.assign({ name, price, barcode, on: input.on !== false, q, at: now, by: w.uid, upd: now }, noDel(ext)));
+    if (input.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: money(input.wp, 'מחיר סיטונאי'), at: now, by: w.uid });
     if (input.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: money(input.cost, 'עלות'), at: now, by: w.uid });
     if (br && qty) tx.set(stockRef(db), { prod: id, name, br, delta: qty, why: 'in', by: w.uid, at: now });
   });
@@ -257,9 +304,11 @@ function rawItems(items) {
   return items.map((it) => {
     if (!it || typeof it !== 'object' || Array.isArray(it)) throw bad('bad-items', 'פריט לא תקין');
     onlyKeys(it, ['pid', 'n', 'qty', 'price', 'from'], 'פריט');
-    const o = { qty: qtyOf(it.qty), price: money(it.price, 'מחיר') };
+    const o = { qty: qtyOf(it.qty) };
     if (it.pid != null && it.pid !== '') o.pid = idOf(it.pid, 'מוצר');
     else o.n = txt(it.n, 80, 'bad-items', 'שם הפריט', true);
+    // מחיר: מה שהעובד שלח (רשאי לשנות, תשובה 4). בשורת מוצר בלי מחיר – השרת לוקח את מחיר הסניף (bp[br] ?? price)
+    if (it.price != null || !o.pid) o.price = money(it.price, 'מחיר');
     if (it.from != null && it.from !== '') {
       if (typeof it.from !== 'string' || !BR_RE.test(it.from)) throw bad('bad-from', 'סניף מקור לא תקין');
       o.from = it.from;
@@ -267,6 +316,8 @@ function rawItems(items) {
     return o;
   });
 }
+// מחיר המוצר בסניף: bp[br] אם הוגדר, אחרת מחיר הבסיס (מוצר ישן בלי bp – בדיוק כמו קודם)
+const brPrice = (p, br) => (p && p.bp && typeof p.bp === 'object' && typeof p.bp[br] === 'number' ? p.bp[br] : (typeof (p && p.price) === 'number' ? p.price : 0));
 const totalOf = (items) => items.reduce((s, it) => s + Math.round(it.qty * it.price * 100), 0) / 100;
 
 // קובע את סניף המקור לכל שורת מוצר ומחזיר את השורות הסופיות + שינויי המלאי.
@@ -276,6 +327,7 @@ function resolveItems(w, br, raw, prods, cfgSrc) {
   const warn = [];
   const items = raw.map((it) => {
     if (!it.pid) { const o = { n: it.n, qty: it.qty, price: it.price }; return o; }
+    if (!prods.get(it.pid)) throw new HttpsError('not-found', 'מוצר לא נמצא', { reason: 'no-prod' });
     const p = prods.get(it.pid);
     if (!p) throw new HttpsError('not-found', 'מוצר לא נמצא', { reason: 'no-prod' });
     let from = br;
@@ -290,7 +342,7 @@ function resolveItems(w, br, raw, prods, cfgSrc) {
         from = cand.length ? cand[0] : w.activeBr.reduce((a, b) => (qOf(p, b) > qOf(p, a) ? b : a), br);
       }
     }
-    const o = { pid: it.pid, n: String(p.name || '').slice(0, 80), qty: it.qty, price: it.price };
+    const o = { pid: it.pid, n: String(p.name || '').slice(0, 80), qty: it.qty, price: it.price != null ? it.price : brPrice(p, br) };
     if (from !== br) o.from = from;
     return o;
   });
@@ -320,6 +372,12 @@ function applyMoves(tx, db, w, prodSnaps, mv, extra, warnings) {
     if (x.to) rec.to = x.to;
     if (x.fromBr) rec.from = x.fromBr;
     tx.set(stockRef(db), Object.assign(rec, extra));
+    // העברה פנימית: רשומת xfer אחת לכל שורה מסניף אחר (צד המקור). בהיפוך (ביטול/עריכה) הכיוון מתהפך.
+    if (x.to) {
+      const back = x.delta > 0;
+      tx.set(db.collection('xfer').doc(), Object.assign({ prod: x.pid, name: rec.name, from: back ? x.to : x.br, to: back ? x.br : x.to, qty: r3(Math.abs(x.delta)),
+        why: x.why === 'xout' ? 'order' : x.why, by: w.uid, at: now }, extra.ord ? { ord: extra.ord, no: extra.no } : {}));
+    }
   }
   for (const [pid, q] of cur) {
     const s = prodSnaps.get(pid);
@@ -641,6 +699,170 @@ async function setOrderCfg(request) {
   return { ok: true, src: out };
 }
 
+// =====================================================================================
+// קטלוג (fb/ord-catalog): קטגוריות, ייבוא מוצרים, העברה ידנית, מחיר סיטונאי
+// =====================================================================================
+const crypto = require('crypto');
+const catIdOf = (name, parent) => (parent ? 's_' : 'c_') + crypto.createHash('sha1').update((parent || '') + '|' + name).digest('hex').slice(0, 16);
+
+// saveCat({ id?, name, parent?, ord? }) – מנהל. parent ריק = קטגוריה; מלא = תת־קטגוריה של קטגוריה קיימת.
+async function saveCat(request) {
+  const w = await who(request);
+  mgr(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['id', 'name', 'parent', 'ord']);
+  const name = txt(input.name, 40, 'bad-name', 'שם הקטגוריה', true);
+  const db = T.tdb();
+  let parent = '';
+  if (input.parent != null && input.parent !== '') {
+    parent = idOf(input.parent, 'קטגוריה ראשית');
+    const ps = await db.doc('cat/' + parent).get();
+    if (!ps.exists || ps.get('parent')) throw bad('bad-parent', 'קטגוריה ראשית לא קיימת');
+  }
+  const ord = input.ord == null ? 0 : Math.max(0, Math.min(9999, Math.round(Number(input.ord) || 0)));
+  const id = input.id != null ? idOf(input.id, 'קטגוריה') : catIdOf(name, parent);
+  if (input.id != null && !(await db.doc('cat/' + id).get()).exists) throw new HttpsError('not-found', 'הקטגוריה לא נמצאה', { reason: 'no-cat' });
+  const doc = { name, ord, upd: Date.now() };
+  if (parent) doc.parent = parent;
+  await db.doc('cat/' + id).set(doc, { merge: true });
+  return { ok: true, id };
+}
+
+// importProducts({ reqId, br?, addQty: bool, rows:[{ name, price, barcode?, qty?, cat?, sub?, wp?, pk?, ct?, bpx? }] }) – מנהל. עד 200 שורות למנה.
+// התאמה: ברקוד, אחר כך שם מדויק → עדכון (לא כפילות). כמות: מוצר חדש – כמות פתיחה; קיים – נוספת רק אם addQty. כל כמות = stockLog why:'in'.
+// cat/sub = שמות; קטגוריה שלא קיימת נוצרת (מזהה קבוע לפי השם – ייבוא חוזר לא משכפל). שורה שגויה – נדחית ומוחזרת ב-bad, השאר נשמרות.
+async function importProducts(request) {
+  const w = await who(request);
+  mgr(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId', 'br', 'addQty', 'rows']);
+  const reqId = reqIdOf(input);
+  if (!Array.isArray(input.rows) || !input.rows.length || input.rows.length > MAX_IMPORT) throw bad('bad-rows', `שורות: 1 עד ${MAX_IMPORT}`);
+  const anyQty = input.rows.some((r) => r && r.qty != null && r.qty !== '' && r.qty !== 0);
+  const br = anyQty ? brOf(w, input.br) : (hasBranches(w) && input.br ? brOf(w, input.br) : (hasBranches(w) ? null : NB));
+  const addQty = input.addQty === true;
+  const ok = []; const badRows = [];
+  input.rows.forEach((r, i) => {
+    try {
+      if (!r || typeof r !== 'object' || Array.isArray(r)) throw bad('bad-row', 'שורה לא תקינה');
+      onlyKeys(r, ['name', 'price', 'barcode', 'qty', 'cat', 'sub', 'wp', 'pk', 'ct'], 'שורה');
+      const o = { i, name: txt(r.name, 60, 'bad-name', 'שם המוצר', true), price: money(r.price, 'מחיר') };
+      const bc = r.barcode == null ? '' : String(r.barcode).trim();
+      if (bc && !/^[0-9A-Za-z-]{3,30}$/.test(bc)) throw bad('bad-barcode', 'ברקוד לא תקין');
+      o.barcode = bc;
+      o.qty = r.qty == null || r.qty === '' ? 0 : qtyOf(r.qty, true);
+      if (r.wp != null && r.wp !== '') o.wp = money(r.wp, 'מחיר סיטונאי');
+      for (const k of ['pk', 'ct']) if (r[k] != null && r[k] !== '' && r[k] !== 0) { const v = qtyOf(r[k]); if (!Number.isInteger(v)) throw bad('bad-qty', 'מארז/קרטון: מספר שלם'); o[k] = v; }
+      if (r.cat != null && r.cat !== '') o.cat = txt(r.cat, 40, 'bad-cat', 'קטגוריה');
+      if (r.sub != null && r.sub !== '') { if (!o.cat) throw bad('bad-cat', 'תת־קטגוריה בלי קטגוריה'); o.sub = txt(r.sub, 40, 'bad-cat', 'תת־קטגוריה'); }
+      ok.push(o);
+    } catch (e) { badRows.push({ i, reason: (e.details && e.details.reason) || 'bad-row', msg: String(e.message || '').slice(0, 120) }); }
+  });
+  const db = T.tdb();
+  const mark = db.doc('ordcfg/req_' + reqId);
+  const res = { ok: true, dup: false, added: 0, updated: 0, bad: badRows };
+  if (!ok.length) return res;
+  await db.runTransaction(async (tx) => {
+    const m = await tx.get(mark);
+    if (m.exists) { Object.assign(res, m.get('res') || {}, { dup: true }); return; }
+    const byBc = new Map(); const byName = new Map();
+    const bcs = [...new Set(ok.map((o) => o.barcode).filter(Boolean))];
+    const names = [...new Set(ok.map((o) => o.name))];
+    for (let k = 0; k < bcs.length; k += 30) (await tx.get(db.collection('prod').where('barcode', 'in', bcs.slice(k, k + 30)))).forEach((s) => { if (!byBc.has(s.get('barcode'))) byBc.set(s.get('barcode'), s); });
+    for (let k = 0; k < names.length; k += 30) (await tx.get(db.collection('prod').where('name', 'in', names.slice(k, k + 30)))).forEach((s) => { if (!byName.has(s.get('name'))) byName.set(s.get('name'), s); });
+    const cats = new Map();
+    for (const o of ok) if (o.cat) { cats.set(catIdOf(o.cat, ''), { name: o.cat }); if (o.sub) cats.set(catIdOf(o.sub, catIdOf(o.cat, '')), { name: o.sub, parent: catIdOf(o.cat, '') }); }
+    const catSnaps = cats.size ? await tx.getAll(...[...cats.keys()].map((id) => db.doc('cat/' + id))) : [];
+    const now = Date.now();
+    catSnaps.forEach((s) => { if (!s.exists) tx.set(s.ref, Object.assign({ ord: 0, upd: now }, cats.get(s.id))); });
+    const seen = new Map(); // מוצר חדש שכבר נוצר במנה הזו (שורה כפולה בקובץ)
+    for (const o of ok) {
+      const ex = (o.barcode && byBc.get(o.barcode)) || byName.get(o.name) || seen.get(o.barcode || ('n:' + o.name)) || null;
+      const ext = { upd: now };
+      if (o.cat) { ext.cat = catIdOf(o.cat, ''); if (o.sub) ext.sub = catIdOf(o.sub, ext.cat); }
+      if (o.pk) ext.pk = o.pk;
+      if (o.ct) ext.ct = o.ct;
+      let id; let qty = 0;
+      if (ex && ex.ref) {
+        id = ex.id;
+        const upd = Object.assign({ name: o.name, price: o.price }, o.barcode ? { barcode: o.barcode } : {}, ext);
+        if (br && addQty && o.qty) { qty = o.qty; upd[`q.${br}`] = FV().increment(qty); }
+        tx.update(ex.ref, upd);
+        res.updated++;
+      } else if (ex && ex.newId) {
+        id = ex.newId; // שורה כפולה בקובץ – רק מצטרפת לכמות אם addQty
+        if (br && addQty && o.qty) { qty = o.qty; ex.q = r3(ex.q + qty); tx.set(db.doc('prod/' + id), { q: { [br]: ex.q } }, { merge: true }); }
+      } else {
+        id = 'p' + crypto.createHash('sha1').update(reqId + '|' + o.i).digest('hex').slice(0, 24); // מזהה קבוע לכל מנה+שורה
+        qty = br && o.qty ? o.qty : 0;
+        tx.set(db.doc('prod/' + id), Object.assign({ name: o.name, price: o.price, barcode: o.barcode, on: true, q: qty ? { [br]: qty } : {}, at: now, by: w.uid, src: 'import' }, ext));
+        seen.set(o.barcode || ('n:' + o.name), { newId: id, q: qty });
+        res.added++;
+      }
+      if (o.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: o.wp, at: now, by: w.uid });
+      if (qty) tx.set(stockRef(db), { prod: id, name: o.name, br, delta: qty, why: 'in', note: 'ייבוא', by: w.uid, at: now });
+    }
+    tx.set(mark, { t: now, by: w.uid, k: 'importProducts', res: { added: res.added, updated: res.updated } });
+  });
+  return res;
+}
+
+// transferStock({ pid, from, to, qty, reqId, note? }) – העברה ידנית. מנהל, או עובד עם ord שמשויך לסניף המקור (לא מעביר מסניף זר).
+async function transferStock(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['pid', 'from', 'to', 'qty', 'reqId', 'note']);
+  if (!hasBranches(w)) throw pre('no-branches', 'בעסק אין סניפים');
+  const reqId = reqIdOf(input);
+  const pid = idOf(input.pid, 'מוצר');
+  const from = brOf(w, input.from, 'סניף מקור');
+  if (typeof input.to !== 'string' || !w.activeBr.includes(input.to)) throw bad('bad-br', 'סניף יעד: בחרו סניף פעיל');
+  const to = input.to;
+  if (from === to) throw bad('bad-br', 'סניף המקור והיעד זהים');
+  const qty = qtyOf(input.qty);
+  const note = input.note == null ? '' : txt(input.note, 200, 'bad-note', 'הערה');
+  const db = T.tdb();
+  const mark = db.doc('ordcfg/req_' + reqId);
+  const ref = db.doc('prod/' + pid);
+  let res = null;
+  await db.runTransaction(async (tx) => {
+    const [m, s] = await tx.getAll(mark, ref);
+    if (m.exists) { res = { ok: true, dup: true }; return; }
+    if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
+    const now = Date.now(); const name = (s.get('name') || '').slice(0, 80);
+    const qf = r3(qOf(s.data(), from) - qty), qt = r3(qOf(s.data(), to) + qty);
+    tx.update(ref, new FieldPath('q', from), qf, new FieldPath('q', to), qt, 'upd', now);
+    tx.set(stockRef(db), { prod: pid, name, br: from, delta: -qty, why: 'xout', to, by: w.uid, at: now });
+    tx.set(stockRef(db), { prod: pid, name, br: to, delta: qty, why: 'xin', from, by: w.uid, at: now });
+    const x = { prod: pid, name, from, to, qty, why: 'manual', by: w.uid, at: now, reqId };
+    if (note) x.note = note;
+    tx.set(db.doc('xfer/x' + reqId), x);
+    tx.set(mark, { t: now, by: w.uid, k: 'transferStock' });
+    res = { ok: true, dup: false, q: { [from]: qf, [to]: qt }, warn: qf < 0 };
+  });
+  return res;
+}
+
+// getWsPrices({ custId? }) → { wp: { <pid>: מחיר } }. מנהל – תמיד. עובד עם ord – לפי WS_SHOW (ברירת מחדל: רק ללקוח cust/{custId}.wholesale === true).
+async function getWsPrices(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId']);
+  const db = T.tdb();
+  if (w.role !== 'manager' && WS_SHOW !== 'ord') {
+    if (WS_SHOW === 'mgr') throw deny('manager-only', 'מחיר סיטונאי – מנהל בלבד');
+    const cid = idOf(input.custId, 'לקוח');
+    const c = await db.doc('cust/' + cid).get();
+    if (!c.exists || c.get('wholesale') !== true) throw deny('not-wholesale', 'הלקוח לא מסומן כסיטונאי');
+  }
+  const wp = {};
+  // קוראים לפי רשימת המוצרים של העסק (עד 2000) – לא collectionGroup, שאינו מוגבל לעסק
+  const prods = await db.collection('prod').select().limit(2000).get();
+  const refs = prods.docs.map((d) => db.doc(`prod/${d.id}/p/ws`));
+  for (let k = 0; k < refs.length; k += 300) (await db.getAll(...refs.slice(k, k + 300))).forEach((s) => { if (s.exists && typeof s.get('wp') === 'number') wp[s.ref.parent.parent.id] = s.get('wp'); });
+  return { wp };
+}
+
 // getProdCost({ pid }) – מנהל בלבד (העובד לא מקבל עלות בשום קריאה)
 // (העלות נקראת גם ישירות מ-prod/{id}/p/cost לפי החוקים – מנהל בלבד)
 
@@ -651,6 +873,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
+const FNS = { saveCat, importProducts, transferStock, getWsPrices, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { NEXT, STATUSES, PAY_METHODS, txt, totalOf, moves, invert, resolveItems } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
