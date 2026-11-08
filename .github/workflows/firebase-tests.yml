@@ -42,7 +42,7 @@ jobs:
       - run: node scripts/ensure-emulator-secrets.js
       - name: Playwright (global) + Chrome
         run: |
-          npm install -g playwright@1.48.2
+          npm install -g playwright@1.48.2 pdf-lib@1.17.1
           echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
           test -x /usr/bin/google-chrome
       - name: Short TMPDIR (Chromium socket path)
