@@ -586,7 +586,7 @@ describe('שלב 5 – ייצוא ואין סודות', () => {
   it('כל הפונקציות החדשות מיוצאות מ-index.js (10 ניהול + 2 סנכרון, ורק הן נוספו; completeInvite הוסרה בשלב 6ג; setBusinessBrand נוספה בעדכון חוזה 14); עוזרי בדיקה לא מיוצאים', () => {
     const ex = require('../functions/index.js');
     for (const n of NEW) assert.equal(typeof ex[n], 'function', n);
-    assert.equal(Object.keys(ex).length, 49); // +13 הזמנות שלב 1; מייל עצמי: sendInviteMail; דף פתיחה: publicBrand; סניפים 2026-11-08: setBusinessOrg, setStaffBranches; סריקה אחידה שלב 6: setStaffName; סריקה אחידה: setScanQuota; // 6ה: setBusinessRanks, setStaffPerms (עדכון חוזה 15); 6ז: cashoutTotal (עדכון חוזה 17)
+    assert.equal(Object.keys(ex).length, 53); // +4 קטלוג (orders-catalog.test.js); +13 הזמנות שלב 1; מייל עצמי: sendInviteMail; דף פתיחה: publicBrand; סניפים 2026-11-08: setBusinessOrg, setStaffBranches; סריקה אחידה שלב 6: setStaffName; סריקה אחידה: setScanQuota; // 6ה: setBusinessRanks, setStaffPerms (עדכון חוזה 15); 6ז: cashoutTotal (עדכון חוזה 17)
     assert.equal(ex.completeInvite, undefined);
     for (const n of ['syncLegacyAdmin', 'syncLegacyStaff']) assert.equal(typeof ex[n], 'function', n);
     for (const n of ['_core', 'resolveMember', 'bizRef', 'tzintukJoin', 'nightlyAll']) assert.equal(ex[n], undefined, n);
