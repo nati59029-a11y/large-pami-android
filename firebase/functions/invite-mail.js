@@ -133,15 +133,21 @@ function buildMail({ to, from, brand, link }) {
 }
 
 // ---------- בדיקות הרשאה, שייכות, קצב ----------
+// השוואה בלי תלות באותיות גדולות/קטנות בשני הצדדים. קודם שאילתה מדויקת (מהירה); אם אין – מעבר על עד 500 מסמכים (רשימות קטנות).
 async function belongs(biz, email) {
   const db = getFirestore();
+  const want = String(email || '').trim().toLowerCase();
+  if (!want) return false;
+  const same = (v) => typeof v === 'string' && v.trim().toLowerCase() === want;
   if (biz.exists) {
     const info = await db.doc(`b/${biz.bizId}/private/info`).get();
-    if (info.exists && String(info.get('ownerEmail') || '').toLowerCase() === email) return true;
+    if (info.exists && same(info.get('ownerEmail'))) return true;
   }
   for (const c of ['admins', 'staff']) {
-    const s = await db.collection(T.bizRef(biz, c)).where('email', '==', email).limit(1).get();
-    if (!s.empty) return true;
+    const col = db.collection(T.bizRef(biz, c));
+    if (!(await col.where('email', '==', want).limit(1).get()).empty) return true;
+    const all = await col.select('email').limit(500).get();
+    if (all.docs.some((d) => same(d.get('email')))) return true;
   }
   return false;
 }

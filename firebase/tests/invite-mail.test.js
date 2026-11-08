@@ -40,6 +40,9 @@ beforeEach(async () => {
     await db.doc('b/im-a/private/info').set({ ownerEmail: 'owner@example.invalid' });
     await db.doc('b/im-a/staff/w1').set({ email: 'worker@example.invalid', active: true });
     await db.doc('b/im-a/admins/a_mgr').set({ email: 'mgr@example.invalid' });
+    await db.doc('b/im-a/staff/w2').set({ email: 'Mixed.Case@Example.invalid', active: true });
+    await db.doc('b/im-b').set({ name: 'ב', status: 'active', dataRoot: 'b', brand: {} });
+    await db.doc('b/im-b/private/info').set({ ownerEmail: 'Big.Owner@Example.INVALID' });
     await db.doc('users/a_mgr').set({ bizId: 'im-a', role: 'admin', active: true, bizStatus: 'active' });
   });
 });
@@ -113,6 +116,10 @@ describe('sendInvite – הרשאות, שייכות, נפילה, קצב', () => 
   });
   it('עובד שנוסף (staff) – גם נשלח', async () => {
     assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'worker@example.invalid' }), fake().deps)).status, 'sent');
+  });
+  it('השוואת מייל בלי תלות באותיות: מייל שנשמר באותיות גדולות (staff ו-ownerEmail) – נשלח', async () => {
+    assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'mixed.case@example.invalid' }), fake().deps)).status, 'sent');
+    assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-b', email: 'BIG.owner@example.invalid' }), fake().deps)).status, 'sent');
   });
   it('לא מנהל־על (מנהל עסק / לא מחובר) – נדחה ולא נשלח', async () => {
     const f = fake();

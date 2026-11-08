@@ -211,10 +211,12 @@ jobs:
           # שרת שליחה גמיש (אופציונלי): MAIL_HOST (ברירת מחדל smtp.gmail.com), MAIL_PORT (465), MAIL_FROM (ברירת מחדל MAIL_USER).
           # ערך לא תקין לא נכתב (הפונקציה משתמשת בברירת המחדל). הערכים לא מודפסים.
           ENVF="functions/.env.$P"
-          if [ -n "$M_HOST" ]; then echo "$M_HOST" | grep -Eq '^[a-z0-9.-]{3,253}$' && printf '\nMAIL_HOST=%s\n' "$M_HOST" >> "$ENVF" || echo "::warning::MAIL_HOST לא תקין – לא נכתב"; fi
-          if [ -n "$M_PORT" ]; then echo "$M_PORT" | grep -Eq '^(465|587|2465|2587)$' && printf '\nMAIL_PORT=%s\n' "$M_PORT" >> "$ENVF" || echo "::warning::MAIL_PORT לא תקין – לא נכתב"; fi
-          if [ -n "$M_FROM" ]; then echo "::add-mask::$M_FROM"; echo "$M_FROM" | grep -Eq '^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$' && printf '\nMAIL_FROM=%s\n' "$M_FROM" >> "$ENVF" || echo "::warning::MAIL_FROM לא תקין – לא נכתב"; fi
-          if [ -n "$SITE" ] && echo "$SITE" | grep -Eq '^[a-z0-9-]+$'; then
+          # כל ערך נבדק בשלמותו (bash =~, לא grep לפי שורה): ירידת שורה או CR – נדחה
+          oneline() { case "$1" in *$'\n'*|*$'\r'*) return 1 ;; esac; return 0; }
+          if [ -n "$M_HOST" ]; then if oneline "$M_HOST" && [[ "$M_HOST" =~ ^[a-z0-9.-]{3,253}$ ]]; then printf '\nMAIL_HOST=%s\n' "$M_HOST" >> "$ENVF"; else echo "::warning::MAIL_HOST לא תקין – לא נכתב"; fi; fi
+          if [ -n "$M_PORT" ]; then if oneline "$M_PORT" && [[ "$M_PORT" =~ ^(465|587|2465|2587)$ ]]; then printf '\nMAIL_PORT=%s\n' "$M_PORT" >> "$ENVF"; else echo "::warning::MAIL_PORT לא תקין – לא נכתב"; fi; fi
+          if [ -n "$M_FROM" ]; then if oneline "$M_FROM"; then echo "::add-mask::$M_FROM"; fi; if oneline "$M_FROM" && [[ "$M_FROM" =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$ ]]; then printf '\nMAIL_FROM=%s\n' "$M_FROM" >> "$ENVF"; else echo "::warning::MAIL_FROM לא תקין – לא נכתב"; fi; fi
+          if [ -n "$SITE" ] && oneline "$SITE" && [[ "$SITE" =~ ^[a-z0-9-]+$ ]]; then
             printf '\nINVITE_SITE=%s\n' "$SITE" >> "functions/.env.$P"
           else
             echo "::warning::חסר DESKTOP_SITE(_TEST) – מייל עצמי לא יופעל (fallback למייל של Firebase)"
