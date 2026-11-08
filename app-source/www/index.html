@@ -737,9 +737,9 @@ function cfDebits(m,sel){const E=sel===undefined?brFil():sel,chk=[],tr=[],paid=[
    if(p.m===METHODS[1]){const c=chkOf(p),d=c?c.date:p.d;if(typeof d==='string'&&d.startsWith(m))chk.push({t,p,a:rnd(p.a),date:d});return}
    if(typeof p.d==='string'&&p.d.startsWith(m))paid.push({t,p,a:rnd(p.a)})});
   if(hasPay(t)){const b=bal(t),d=dueOf(t);if(b>0.004&&d.startsWith(m))tr.push({t,a:b,date:d})}});
- const cc=(!E||!E.length)&&typeof ccBills==='function'?ccBills(m):[],scc=rnd(sum(cc,x=>x.a));
+ const cc=(!E||!E.length)&&typeof ccBills==='function'?ccBills(m):[],scc=rnd(sum(cc,x=>x.a)),sccr=rnd(sum(cc,x=>x.cr||0));
  const sc=rnd(sum(chk,x=>x.a)),st=rnd(sum(tr,x=>x.a)),sumPaid=rnd(sum(paid,x=>x.a)),sumExp=rnd(sc+st+scc);
- return{chk,tr,paid,cc,sum:rnd(sumExp+sumPaid),sumPaid,sumExp,sumChk:sc,sumTr:st,sumCc:scc}}
+ return{chk,tr,paid,cc,sum:rnd(sumExp+sumPaid),sumPaid,sumExp,sumChk:sc,sumTr:st,sumCc:scc,sumCcCr:sccr}}
 function cfMonths(from,n,sel){const out=[];for(let i=0;i<(n||6);i++){const m=addMon(from||NOWM(),i);out.push(Object.assign({m},cfDebits(m,sel)))}return out}
 /* שלושת כרטיסי הבית: לתשלום בחודש m (= "צריך לשלם החודש"), ירידה מהחשבון בחודש m, באיחור נכון להיום */
 function homeCards(m){const D=dueStats(m),E=brFil(),td=today(),late=inv().filter(t=>inBr(t,E)&&isLate(t,td));
@@ -971,8 +971,8 @@ ACT.hcDue=()=>go('due',HM);ACT.hcCf=()=>go('cf',HM);ACT.hcLate=()=>go('due',{m:N
 let CFM='';
 const cfBar=(v,mx)=>`<div class="pbar" style="margin-top:6px" role="img" aria-label="${Math.round(v/mx*100)} אחוז"><i style="width:${Math.min(100,Math.round(v/mx*100))}%"></i></div>`;
 function cfRow(x,mx,open){const it=(n,d,a,s2)=>`<div class="li" style="cursor:default;min-height:48px"><div class="m"><b>${esc(n)}</b><small>${s2}</small></div><div class="a">${ils(a)}<small>${dfmt(d)}</small></div></div>`;
- let h=`<button class="li" data-a="cfM" data-m="${x.m}" aria-expanded="${open}" style="display:block"><div class="row" style="justify-content:space-between"><b>${mfmt(x.m)}</b><b>${ils(x.sum)}</b></div><small>צ׳קים ${ils(x.sumChk)} · העברות ${ils(x.sumTr)}${x.sumCc?' · אשראי '+ils(x.sumCc):''}${x.sumPaid>0.004?' · ירד בפועל '+ils(x.sumPaid):''}</small>${cfBar(x.sum,mx)}</button>`;
- if(open)h+=`<div data-cfd="${x.m}" style="margin:0 0 12px">${x.chk.map(c=>it(subName(c.t),c.date,c.a,'צ׳ק'+(chkOf(c.p)&&chkOf(c.p).no?' '+esc(chkOf(c.p).no):'')+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.tr.map(c=>it(subName(c.t),c.date,c.a,'העברה פתוחה'+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.paid.map(c=>it(subName(c.t),c.p.d,c.a,'ירד בפועל · '+esc(c.p.m||''))).join('')}${(x.cc||[]).map(c=>`<div data-cfcc>${it(c.name+(c.last4?' ····'+c.last4:''),c.date,c.a,'חיוב אשראי צפוי · '+c.n+' עסקאות')}</div>`).join('')}${!x.chk.length&&!x.tr.length&&!x.paid.length&&!(x.cc||[]).length?'<div class="empty">אין ירידות בחודש הזה</div>':''}</div>`;
+ let h=`<button class="li" data-a="cfM" data-m="${x.m}" aria-expanded="${open}" style="display:block"><div class="row" style="justify-content:space-between"><b>${mfmt(x.m)}</b><b>${ils(x.sum)}</b></div><small>צ׳קים ${ils(x.sumChk)} · העברות ${ils(x.sumTr)}${x.sumCc?' · אשראי '+ils(x.sumCc):''}${x.sumCcCr?' · זיכוי אשראי '+ils(x.sumCcCr)+' (לא מקטין)':''}${x.sumPaid>0.004?' · ירד בפועל '+ils(x.sumPaid):''}</small>${cfBar(x.sum,mx)}</button>`;
+ if(open)h+=`<div data-cfd="${x.m}" style="margin:0 0 12px">${x.chk.map(c=>it(subName(c.t),c.date,c.a,'צ׳ק'+(chkOf(c.p)&&chkOf(c.p).no?' '+esc(chkOf(c.p).no):'')+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.tr.map(c=>it(subName(c.t),c.date,c.a,'העברה פתוחה'+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.paid.map(c=>it(subName(c.t),c.p.d,c.a,'ירד בפועל · '+esc(c.p.m||''))).join('')}${(x.cc||[]).map(c=>`<div data-cfcc>${it(c.name+(c.last4?' ····'+c.last4:''),c.date,c.cr?c.cr:c.a,(c.cr?'זיכוי אשראי צפוי (לא מקטין את הירידה)':'חיוב אשראי צפוי')+' · '+c.n+' עסקאות')}</div>`).join('')}${!x.chk.length&&!x.tr.length&&!x.paid.length&&!(x.cc||[]).length?'<div class="empty">אין ירידות בחודש הזה</div>':''}</div>`;
  return h}
 ACT.cfM=el=>{CFM=CFM===el.dataset.m?'':el.dataset.m;rerender()};
 /* תיקון 2 (חלק ג'): החודש הפתוח נקבע מהארגומנט בכל כניסה חדשה למסך (לא נשאר מכניסה קודמת); ההתחלה קבועה (החודש הנוכחי + 5). חודש מחוץ לטווח מתווסף כשורה נוספת במקומו ההגיוני */
@@ -1591,7 +1591,7 @@ ACT.lnUndo=el=>{const L=S.loans.find(x=>x.id===el.dataset.id),p=(L.paid||{})[el.
 const C3_ID=/^lc_[a-z0-9]{3,17}$/;
 function c3Clean(d){try{
  if(d.ccc!=null&&!Array.isArray(d.ccc))delete d.ccc;
- if(Array.isArray(d.ccc))d.ccc=d.ccc.filter(x=>x&&typeof x==='object'&&typeof x.id==='string'&&C3_ID.test(x.id)).map(x=>({id:x.id,name:String(x.name||'כרטיס').slice(0,40),last4:/^\d{4}$/.test(String(x.last4||''))?String(x.last4):'',on:x.on!==false}));
+ if(Array.isArray(d.ccc))d.ccc=d.ccc.filter(x=>x&&typeof x==='object'&&typeof x.id==='string'&&C3_ID.test(x.id)).map(x=>Object.assign({id:x.id,name:String(x.name||'כרטיס').slice(0,40),last4:/^\d{4}$/.test(String(x.last4||''))?String(x.last4):'',on:x.on!==false},typeof x.sub==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(x.sub)?{sub:x.sub}:{}));
  for(const k of['ccMeta','impMap','mLearn'])if(d[k]!=null&&(typeof d[k]!=='object'||Array.isArray(d[k])))delete d[k];
  if(d.ccMeta)Object.keys(d.ccMeta).forEach(k=>{const m=d.ccMeta[k];if(!m||typeof m!=='object'||Array.isArray(m)){delete d.ccMeta[k];return}const n=+m.day;if(n>=1&&n<=31)m.day=Math.round(n);else delete m.day;if(m.bank!=null&&typeof m.bank!=='string')delete m.bank});
 }catch(e){}}
@@ -1601,13 +1601,16 @@ function ccNewLocal(l4,name){if(!/^\d{4}$/.test(String(l4||'')))l4='';if(!Array.
 /* ---- יום חיוב ---- */
 const ccDay=id=>{const m=S&&S.ccMeta&&S.ccMeta[id];return m&&m.day>=1&&m.day<=31?m.day:0};
 /* עסקה לפני יום החיוב → החיוב של אותו חודש; ביום החיוב ואחריו → החיוב של החודש הבא. יום שלא קיים בחודש (31 בפברואר) = היום האחרון */
-function ccBillDate(id,d){const D=ccDay(id);if(!D||!cfDt(d))return '';const m=d.slice(0,7),bm=+d.slice(8,10)<D?m:addMon(m,1),last=+mEnd(bm).slice(8,10);return bm+'-'+p2(Math.min(D,last))}
+/* החלטת המשתמש 16:18: עסקה לפני (יום החיוב − 1) = החיוב של אותו חודש; מיום החיוב − 1 ואילך = החודש הבא. יום שלא קיים בחודש = היום האחרון, והסף יום לפניו */
+function ccBillDate(id,d){const D=ccDay(id);if(!D||!cfDt(d))return '';const m=d.slice(0,7),Dm=Math.min(D,+mEnd(m).slice(8,10)),bm=+d.slice(8,10)<Dm-1?m:addMon(m,1),last=+mEnd(bm).slice(8,10);return bm+'-'+p2(Math.min(D,last))}
 /* חיובי אשראי צפויים שיורדים בחודש m: שורות דף הכרטיס (חיוב +, זיכוי −) + תשלומי אשראי באפליקציה שלא הותאמו לשורה. רק כרטיס עם יום חיוב */
+/* תיקונים (סבב 1): שורות "התעלם" לא נספרות; תשלום אפליקציה בתאריך שדף של אותו כרטיס כבר מכסה – לא נספר (השורה בדף היא אותה עסקה); a = חיוב (לא פחות מ-0), cr = זיכוי שנשאר כשהזיכויים גדולים מהחיובים */
 function ccBills(m){const cards=ccAllCards().filter(c=>ccDay(c.id));if(!cards.length)return[];const ids=new Set(cards.map(c=>c.id)),G={};
+ const cov=(acc,d)=>(S.stm||[]).some(x=>x.acc===acc&&x.src!=='manual'&&cfDt(x.from)&&cfDt(x.to)&&d>=x.from&&d<=x.to);
  const add=(acc,d,a)=>{const bd=ccBillDate(acc,d);if(!bd||!bd.startsWith(m))return;const k=acc+'|'+bd;const g=G[k]||(G[k]={card:acc,name:(cards.find(c=>c.id===acc)||{}).name||'',last4:(cards.find(c=>c.id===acc)||{}).last4||'',date:bd,a:0,n:0});g.a=rnd(g.a+a);g.n++};
- (S.stl||[]).forEach(l=>{if(!ids.has(l.acc)||!(l.amt>0))return;add(l.acc,l.date,l.dir==='in'?-l.amt:l.amt)});
- live().forEach(t=>{if(t.t!=='exp')return;(Array.isArray(t.pays)?t.pays:[]).forEach(p=>{if(p&&p.m===METHODS[3]&&ids.has(p.card)&&!p.stl&&!p.crof&&p.a>0)add(p.card,p.d,p.a)})});
- return Object.values(G).sort((a,b)=>a.date.localeCompare(b.date))}
+ (S.stl||[]).forEach(l=>{if(!ids.has(l.acc)||!(l.amt>0)||l.st==='skip')return;add(l.acc,l.date,l.dir==='in'?-l.amt:l.amt)});
+ live().forEach(t=>{if(t.t!=='exp')return;(Array.isArray(t.pays)?t.pays:[]).forEach(p=>{if(p&&p.m===METHODS[3]&&ids.has(p.card)&&!p.stl&&!p.crof&&p.a>0&&!cov(p.card,p.d))add(p.card,p.d,p.a)})});
+ return Object.values(G).map(g=>Object.assign(g,g.a<0?{cr:rnd(-g.a),a:0}:{cr:0})).sort((a,b)=>a.date.localeCompare(b.date))}
 /* ---- PDF → טבלה (pdf.js מקומי). שורה = פריטי טקסט באותו גובה; תאים מימין לשמאל. יש כותרת = יישור לפי מיקום העמודות; אין = [תאריך, תיאור, מספרים…] ---- */
 async function pdfTable(f){const lib=await pdfLoad(),doc=await lib.getDocument({data:new Uint8Array(await f.arrayBuffer())}).promise,lines=[];
  for(let p=1;p<=Math.min(doc.numPages,40);p++){const pg=await doc.getPage(p),tc=await pg.getTextContent(),L=[];
@@ -1644,7 +1647,9 @@ function impDetect(rows,kind,acc){const M=S.impMap||{};
  const h=impHead(rows);if(h&&h.sure)return h;const c=h?null:impContent(rows),a=acc&&M['a:'+acc];
  if(a&&a.ix){const r=h||c;if(r)return Object.assign({},r,{ix:Object.assign({},a.ix),sure:false,by:'acc'})}return h||c}
 /* ---- 4 ספרות: עמודת כרטיס, שורת כותרת של כרטיס ("כרטיס … 1234", "••••1234"), שם הקובץ. שנים (19xx/20xx) לא נחשבות בלי הקשר */
-function cardL4(t){const s=stlScrub(s_(t));let m=s.match(/(?:כרטיס|card|ויזה|visa|מאסטרקארד|מסטרקארד|mastercard|ישראכרט|isracard|אמריקן|amex|דיינרס|diners|מקס|max|כאל|cal|המסתיים|מסתיים|ספרות)[^\d\n]{0,30}?(?:[•*xX·.]{2,}\s?)?(\d{4})(?!\d)/i)||s.match(/(?:[•*xX·]{2,}|\.{3,})\s?(\d{4})(?!\d)/);return m?m[1]:''}
+/* תיקון סבב 1: 4 ספרות רק בהקשר של כרטיס – אחרי ····/xxxx, או אחרי "המסתיים ב"/"ספרות", או אחרי שם כרטיס כשהמספר לא שנה (19xx/20xx) ולא חלק מסכום (2345.00) */
+function cardL4(t){const s=stlScrub(s_(t)),E='(?![\\d]|[.,]\\d)';let m=s.match(new RegExp('(?:[•*xX·]{2,}|\\.{3,})\\s?(\\d{4})'+E))||s.match(new RegExp('(?:המסתיים|מסתיים|ספרות|ending|ends)[^\\d\\n]{0,12}?(\\d{4})'+E,'i'));if(m)return m[1];
+ const re=new RegExp('(?:כרטיס|card|ויזה|visa|מאסטרקארד|מסטרקארד|mastercard|ישראכרט|isracard|אמריקן|amex|דיינרס|diners|מקס|\\bmax\\b|כאל|\\bcal\\b)[^\\d\\n]{0,20}?(?<![\\d.,])(\\d{4})'+E,'gi');let x;while((x=re.exec(s))){if(!/^(19|20)\d\d$/.test(x[1]))return x[1]}return ''}
 function fileL4(nm){const b=s_(nm).replace(/\.[a-z0-9]{2,4}$/i,''),k=cardL4(b);if(k)return k;const L=(b.match(/(?<!\d)\d{4}(?!\d)/g)||[]).filter(x=>!/^(19|20)\d\d$/.test(x));return L.length===1?L[0]:''}
 function impParse(rows,kind,c,fname){const ix=c.ix,ok=[];let bad=0,sec='';const g=fileL4(fname);
  const isRow=r=>{const d=pDate(r[ix.date]);if(!d)return false;const vs=[ix.amt,ix.dr,ix.cr].filter(j=>j!=null).map(j=>pNum(r[j]));return vs.some(v=>v!=null)};
@@ -1679,7 +1684,8 @@ FRM.impMap=f=>{const I=IMP;if(!I)return closeDlg();const x=fd(f),ix={};IMP_R.for
 /* פיצול לפי כרטיס: 4 ספרות קיימות → הכרטיס; לא קיים → כרטיס חדש ("כרטיס חדש ····1234"). שורות בלי ספרות: הכרטיס שנבחר / קבוצה יחידה / כרטיס יחיד / שאלה */
 let CCA=null;
 function ccSplit(lines,bad,acc0){const G={};lines.forEach(l=>{(G[l.l4||'']=G[l.l4||'']||[]).push(l)});const ks=Object.keys(G).filter(k=>k),nw=[],out=[];
- const find=l4=>{const L=ccAllCards().filter(c=>c.on&&c.last4===l4);return L.find(c=>c.id===acc0)||L.find(c=>!c.loc)||L[0]||null};
+ const find=l4=>{const L=ccAllCards().filter(c=>c.on&&c.last4===l4);const r=L.find(c=>c.id===acc0)||L.find(c=>!c.loc)||L[0]||null;if(r)return r;
+  /* תיקון סבב 1: כרטיס ישן מקטגוריית אשראי עם אותן 4 ספרות – כרטיס אחד בשמו ומקושר אליו (sub), לא "כרטיס חדש" */const o=subsOf('e_cc').find(s=>(s.ext||{}).last4===l4);if(!o)return null;const c=ccNewLocal(l4,o.name);c.sub=o.id;return c};
  ks.forEach(k=>{let c=find(k);if(!c){c=ccNewLocal(k);nw.push(c)}out.push({acc:c.id,lines:G[k]})});
  const fin=()=>{let n=0,dup=0,mt=0;const ms=[];out.forEach(o=>{const m=stmAdd({kind:'card',acc:o.acc,src:'file'},o.lines.map(l=>{const x=Object.assign({},l);delete x.l4;return x}));if(!m)return;dup+=m.dup||0;if(m.n){n+=m.n;ms.push(m);mt+=stlAuto(m.id).match}});save();closeDlg();
   toast('יובאו '+n+' שורות'+(out.length>1?' ב-'+out.length+' כרטיסים':'')+(dup?' ('+dup+' כפולות)':'')+(bad?' · '+bad+' לא תקינות':'')+' · הותאמו '+mt+(nw.length?' · נוצר כרטיס חדש '+nw.map(c=>'····'+c.last4).join(', ')+' (אפשר לתת כינוי)':''));

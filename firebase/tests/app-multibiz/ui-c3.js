@@ -5,6 +5,7 @@
 const H = require('./harness');
 const BZ0 = ['larg', 'peami'].join('');
 const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'].map((k) => [k, true]));
+const rnd2 = (x) => Math.round(x * 100) / 100;
 let fail = 0; const check = (n, ok, info) => { if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + n + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 500) : '')); };
 const ORG = { v: 1, branches: [{ id: 'bra', name: 'נחל לכיש', on: true, sig: [] }], banks: [{ id: 'bka', name: 'לאומי', last4: '1234', on: true, sig: [] }],
   cards: [{ id: 'cv', name: 'ויזה עסקי', last4: '5678', bank: 'bka', on: true, sig: [] }] };
@@ -70,17 +71,35 @@ const seed = (p) => p.evaluate((org) => {
   const s2 = await mp.evaluate((id) => ({ c: S.ccc.find((x) => x.id === id), meta: S.ccMeta, txt: document.querySelector('main').innerText }), nid);
   check('2א הגדרות כרטיס: כינוי ויום חיוב נשמרו; כרטיס מהארגון – בלי שינוי שם (רק יום חיוב)', s2.c.name === 'כרטיס של דוד' && s2.meta[nid].day === 10 && s2.meta[nid].bank === 'bka' && s2.meta.cv.day === 2 && !cvHasName && /יום חיוב: 10 לחודש/.test(s2.txt), s2);
   // ---- 3. יום חיוב: חישוב תאריך החיוב ותזרים ----
-  const s3 = await mp.evaluate((id) => ({ a: ccBillDate(id, '2026-11-02'), b: ccBillDate(id, '2026-11-10'), c: ccBillDate(id, '2026-11-25'), feb: (S.ccMeta.x = { day: 31 }, ccBillDate('x', '2027-02-05')), cv: ccBillDate('cv', '2026-11-01'), cv2: ccBillDate('cv', '2026-11-02'),
+  const s3 = await mp.evaluate((id) => ({ a: ccBillDate(id, '2026-11-02'), b: ccBillDate(id, '2026-11-10'), c: ccBillDate(id, '2026-11-25'), d8: ccBillDate(id, '2026-11-08'), d9: ccBillDate(id, '2026-11-09'), feb: (S.ccMeta.x = { day: 31 }, ccBillDate('x', '2027-02-05')), feb27: ccBillDate('x', '2027-02-27'), feb26: ccBillDate('x', '2027-02-26'), cv: ccBillDate('cv', '2026-11-01'), cv0: ccBillDate('cv', '2026-10-31'),
     nov: cfDebits('2026-11', []), dec: cfDebits('2026-12', []), home: homeCards('2026-11').debit, homeD: homeCards('2026-12').debit }), nid);
-  check('3 תאריך חיוב: לפני יום החיוב → אותו חודש; ביום ואחריו → הבא; 31 בפברואר → 28', s3.a === '2026-11-10' && s3.b === '2026-12-10' && s3.c === '2026-12-10' && s3.feb === '2027-02-28' && s3.cv === '2026-11-02' && s3.cv2 === '2026-12-02', s3);
+  check('3 תאריך חיוב (החלטה 16:18): לפני יום החיוב−1 → אותו חודש; מיום החיוב−1 → הבא; 31 בפברואר → 28 והסף 27', s3.a === '2026-11-10' && s3.d8 === '2026-11-10' && s3.d9 === '2026-12-10' && s3.b === '2026-12-10' && s3.c === '2026-12-10' && s3.feb === '2027-02-28' && s3.feb26 === '2027-02-28' && s3.feb27 === '2027-03-31' && s3.cv === '2026-12-02' && s3.cv0 === '2026-11-02', s3);
   // דוד: 80 (2.11) - 20 (3.11) → חיוב 10.11 = 60. ויזה: 150 (1.11) → 2.11 (נובמבר); 1000 (2.11) → 2.12 (דצמבר) – אם לא הותאם... השורות פתוחות או מותאמות, תמיד נספרות
-  check('3א ירידה מהחשבון ותזרים: נובמבר כולל 60 (דוד) + 150 (ויזה); דצמבר 1000', s3.nov.sumCc === 210 && s3.dec.sumCc === 1000 && s3.home === s3.nov.sum && s3.homeD === s3.dec.sum, { nov: s3.nov.sumCc, dec: s3.dec.sumCc, cc: s3.nov.cc });
+  check('3א ירידה מהחשבון ותזרים: נובמבר 60 (דוד); דצמבר 150+1000 (ויזה, מ-1.11 = יום לפני יום החיוב 2)', s3.nov.sumCc === 60 && s3.dec.sumCc === 1150 && s3.home === s3.nov.sum && s3.homeD === s3.dec.sum, { nov: s3.nov.sumCc, dec: s3.dec.sumCc, cc: s3.nov.cc });
   await mp.evaluate(() => { delete S.ccMeta.x; save(); go('cf', '2026-11'); }); await H.settle(mp, 300);
   const cf = await mp.evaluate(() => document.querySelector('main').innerText);
   check('3ב מסך תזרים: "אשראי ₪…" בשורת החודש ו"חיוב אשראי צפוי" בפירוט', /אשראי/.test(cf) && /חיוב אשראי צפוי/.test(cf) && /כרטיס של דוד/.test(cf), cf.slice(0, 500));
   const bf = await mp.evaluate(() => { S.orgC.branches.push({ id: 'brb', name: 'ב', on: true, sig: [] }); const r = cfDebits('2026-11', ['bra']).sumCc; S.orgC.branches.pop(); return r; });
   check('3ג בסינון סניף – חיובי אשראי לא נספרים (הכרטיס לא שייך לסניף)', bf === 0, bf);
 
+  // ---- 3ד–3ז תיקוני סבב 1 ----
+  const f3 = await mp.evaluate((id) => {
+    const base = cfDebits('2026-11', []).sumCc;
+    // תשלום אשראי באפליקציה (80, 2.11) לכרטיס של דוד – הדף מכסה 2.11–3.11 → לא נספר שוב
+    S.tx.push({ id: 'pz', t: 'exp', cat: 'e_sup', sub: 'sA', date: '2026-11-02', amt: 80, kind: 'inv', plan: '2026-11', inv: 'Z1', pays: [{ id: 'pp', d: '2026-11-02', a: 80, m: 'אשראי', card: id }] });
+    const dup = cfDebits('2026-11', []).sumCc;
+    // תשלום מחוץ לטווח הדף (5.11) → נספר
+    S.tx.find((t) => t.id === 'pz').pays[0].d = '2026-11-05'; const out = cfDebits('2026-11', []).sumCc;
+    S.tx = S.tx.filter((t) => t.id !== 'pz');
+    // התעלם: שורת 80 → לא נספרת
+    const l = S.stl.find((x) => x.acc === id && x.amt === 80); l.st = 'skip'; const sk = cfDebits('2026-11', []); l.st = 'open';
+    // זיכוי גדול מהחיובים → a=0, cr בנפרד, לא מקטין
+    const z = { id: 'zz', stm: l.stm, acc: id, date: '2026-11-03', desc: 'זיכוי גדול', amt: 500, dir: 'in', st: 'open' }; S.stl.push(z); const neg = cfDebits('2026-11', []); S.stl = S.stl.filter((x) => x.id !== 'zz');
+    save(); return { base, dup, out, sk: sk.sumCc, skCr: sk.sumCcCr, neg: { a: neg.sumCc, cr: neg.sumCcCr, sum: neg.sum } };
+  }, nid);
+  check('3ד אין ספירה כפולה: תשלום אשראי באפליקציה בתוך טווח הדף לא נספר שוב; מחוץ לטווח – נספר', f3.dup === f3.base && f3.out === rnd2(f3.base + 80), f3);
+  check('3ה שורת "התעלם" לא נספרת בחיוב הצפוי', f3.sk === 0 && f3.skCr === 20, f3);
+  check('3ו זיכוי גדול מהחיובים: הירידה לא יורדת מתחת ל-0, הזיכוי מוצג בנפרד', f3.neg.a === 0 && f3.neg.cr === 440 && f3.neg.sum >= 0, f3);
   // ---- 4. הצעת שיוך לפי בית עסק + למידה + ממתינות לחשבונית ----
   const ms = await mp.evaluate(() => { const L = S.stl.filter((l) => l.st === 'open'); return L.map((l) => ({ d: l.desc, g: mSuggest(l) })); });
   const paz = ms.find((x) => x.d === 'פז אילת');
@@ -160,6 +179,18 @@ const seed = (p) => p.evaluate((org) => {
   const pm = await mp.evaluate(() => pmX(METHODS, METHODS[3], {}));
   void pm;
   check('7ב כרטיס שנוצר בייבוא מופיע בבחירת כרטיס בטופס תשלום', /אמקס/.test(pm) && /3333/.test(pm), '');
+  // ---- 7ג–7ה תיקוני סבב 1: cardL4 ושורת סיכום; כרטיס ישן מקטגוריית אשראי ----
+  const l4 = await mp.evaluate(() => ({ y: cardL4('פירוט עסקאות כרטיס ויזה לחודש נובמבר 2026'), f: fileL4('cal_2026_11.xlsx'), sum: cardL4('סה"כ לחיוב בכרטיס 2345.00'), sum2: cardL4('סה"כ לחיוב בכרטיס 2,345'),
+    ok1: cardL4('כרטיס ויזה ····4321'), ok2: cardL4('כרטיס המסתיים ב-8765'), ok3: cardL4('Card ending 1111'), ok4: cardL4('ויזה 5566 לחודש נובמבר 2026'), ok5: fileL4('max_8765.xlsx'),
+    p: impParse([['פירוט עסקאות כרטיס ויזה לחודש נובמבר 2026'], ['תאריך', 'בית עסק', 'סכום חיוב'], ['01/11/2026', 'א', '10'], ['סה"כ לחיוב בכרטיס 2345.00', '', ''], ['02/11/2026', 'ב', '20']], 'card', impHead([['פירוט עסקאות כרטיס ויזה לחודש נובמבר 2026'], ['תאריך', 'בית עסק', 'סכום חיוב']]), 'cal_2026_11.xlsx').ok.map((x) => x.l4) }));
+  check('7ג שנה (2026) בכותרת/שם קובץ ושורת סיכום (2345.00) לא נחשבות 4 ספרות של כרטיס', l4.y === '' && l4.f === '' && l4.sum === '' && l4.sum2 === '' && l4.p.join() === ',', l4);
+  check('7ד 4 ספרות בהקשר כרטיס כן מזוהות (····, "המסתיים ב", ending, שם כרטיס, שם קובץ)', l4.ok1 === '4321' && l4.ok2 === '8765' && l4.ok3 === '1111' && l4.ok4 === '5566' && l4.ok5 === '8765', l4);
+  const oc = await mp.evaluate(async () => { S.subs.push({ id: 'oldcc', cat: 'e_cc', name: 'ישראכרט ישן', ext: { last4: '7777' } }); save(); const n0 = (S.ccc || []).length;
+    const rows = [['תאריך', 'בית עסק', 'סכום חיוב', 'כרטיס'], ['09/11/2026', 'חנות', '30', '7777'], ['10/11/2026', 'חנות2', '40', '7777']];
+    impGo({ rows, kind: 'card', acc: '', fname: 'x.csv' }); await new Promise((r) => setTimeout(r, 200));
+    impGo({ rows: [['תאריך', 'בית עסק', 'סכום חיוב', 'כרטיס'], ['11/11/2026', 'חנות3', '50', '7777']], kind: 'card', acc: '', fname: 'y.csv' }); await new Promise((r) => setTimeout(r, 200));
+    const L = (S.ccc || []).filter((c) => c.last4 === '7777'); return { n: (S.ccc || []).length - n0, L, lines: L[0] ? S.stl.filter((l) => l.acc === L[0].id).length : 0, g: L[0] ? cardGuess({ sub: 'oldcc' }, {}).id === L[0].id : false }; });
+  check('7ה כרטיס ישן (קטגוריית אשראי, 7777): נוצר כרטיס אחד בשמו ומקושר; ייבוא שני לא יוצר כפול', oc.n === 1 && oc.L.length === 1 && oc.L[0].name === 'ישראכרט ישן' && oc.L[0].sub === 'oldcc' && oc.lines === 3 && oc.g, oc);
   // ---- 8. אין מספר מלא בשום מקום חדש ----
   const s8 = await mp.evaluate(() => JSON.stringify({ stl: S.stl, ccc: S.ccc, impMap: S.impMap, mLearn: S.mLearn, ccMeta: S.ccMeta }));
   check('8 אין רצף של 8+ ספרות בנתונים החדשים', !/\d{8,}/.test(s8.replace(/\d{4}-\d{2}-\d{2}/g, '')), '');
