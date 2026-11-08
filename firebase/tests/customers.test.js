@@ -198,3 +198,32 @@ describe('לקוחות – setCustCfg וחוקים', () => {
     assert.equal(await get(`b/${B2}/cust/t${TZ}`), null);
   });
 });
+
+// 00:19 / 00:21 / 00:24 (fb/ord-custfields): שדות שם/כתובת נפרדים, ניודים קודמים (ports), מתג cellular
+describe('לקוחות – שדות נפרדים וניודים', () => {
+  it('שם פרטי/משפחה ורחוב/עיר/קומה/דירה נשמרים, name/addr מחוברים; לקוח ישן לא משתנה בלי שמירה', async () => {
+    await prep((d) => d.doc(`b/${A}/cust/p0507777777`).set({ name: 'ישן מאוד', phone: '0507777777', addr: 'הרצל 9 ת"א', at: 1, upd: 1, x: {} }));
+    const r = await call('saveCust', E1, { cust: { fn: 'דנה', ln: 'כהן', st: 'הרצל 5', city: 'אשדוד', fl: '2', apt: '7', phone: '0501234567', tz: TZ } });
+    assert.equal(r.status, 'OK', r.text);
+    const d = await get(`b/${A}/cust/t${TZ}`);
+    assert.equal(d.name, 'דנה כהן'); assert.equal(d.addr, 'הרצל 5, אשדוד, קומה 2, דירה 7'); assert.equal(d.fn, 'דנה'); assert.equal(d.apt, '7');
+    const old = await get(`b/${A}/cust/p0507777777`); assert.equal(old.name, 'ישן מאוד'); assert.equal(old.fn, undefined);
+    assert.equal((await call('saveCust', E1, { cust: { fn: 'x 4580 1234 5678 9012', phone: '0501234567' } })).reason, 'card-like');
+    assert.equal((await call('saveCust', E1, { cust: { apt: '45801234', phone: '0501234567' } })).reason, 'card-like');
+    const o = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: { fn: 'רות', ln: 'לוי', city: 'חולון', phone: '0529998888' }, items: [{ pid: 'pA', qty: 1, price: 10 }] });
+    assert.equal(o.status, 'OK', o.text);
+    const od = (await coll(`b/${A}/ord`))[0]; assert.equal(od.cust.name, 'רות לוי'); assert.equal(od.cust.addr, 'חולון'); assert.equal(od.cust.city, 'חולון');
+  });
+  it('ports: כבוי (ברירת מחדל) – נדחה; פעיל – נשמר, ייבוא חוזר לא מכפיל, port ישן נשמר', async () => {
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({ ports: [{ d: '2025-01-02' }] }, c1) })).reason, 'feature-off');
+    await seed(Object.assign({}, ALL, { cellular: true }));
+    await prep((d) => d.doc(`b/${A}/cust/t${TZ}`).set({ name: 'דנה', phone: '0501234567', tz: TZ, port: '2024-05-05', at: 1, upd: 1, x: {} }));
+    const row = { tz: TZ, ports: [{ d: '2025-01-02', phone: '0521234567', tz: TZ2 }] };
+    for (let i = 0; i < 2; i++) assert.equal((await call('importCusts', MGR, { reqId: rid(), rows: [row] })).status, 'OK');
+    let d = await get(`b/${A}/cust/t${TZ}`);
+    assert.equal(d.port, '2024-05-05'); assert.deepEqual(d.ports, [{ d: '2024-05-05' }, { d: '2025-01-02', phone: '0521234567', tz: TZ2 }]);
+    assert.equal((await call('saveCust', E1, { cust: { tz: TZ, ports: [{ phone: '4580123456789012' }] } })).reason, 'bad-phone');
+    assert.equal((await call('saveCust', E1, { cust: { tz: TZ, ports: [{ d: '2025-01-02' }] } })).status, 'OK'); // עריכה: הרשימה מחליפה
+    d = await get(`b/${A}/cust/t${TZ}`); assert.deepEqual(d.ports, [{ d: '2025-01-02' }]); assert.equal(d.port, '2024-05-05');
+  });
+});

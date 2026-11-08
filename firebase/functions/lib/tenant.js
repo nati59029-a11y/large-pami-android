@@ -16,8 +16,9 @@ const { getFirestore } = require('firebase-admin/firestore');
 const BIZ0 = 'largpeami';
 const BIZ_RE = /^[a-z0-9-]{3,30}$/;
 // מפתחות התוספות (חוזה, סעיף ו)
-const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'];
-const ALL_ON = Object.freeze(Object.fromEntries(FEATURES.map((k) => [k, true])));
+const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cellular'];
+// cellular (00:24, ניודים בלקוח) – ברירת מחדל כבוי גם בעסק הישן; רק מנהל־על מפעיל
+const ALL_ON = Object.freeze(Object.fromEntries(FEATURES.map((k) => [k, k !== 'cellular'])));
 
 const als = new AsyncLocalStorage();
 

@@ -94,14 +94,14 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.selectOption('select[data-k=br]', 'br1');
   await page.fill('#octz', TZ); await H.settle(page, 700);
   const D = await page.evaluate(() => Object.assign({}, window.__ox.draft));
-  check('2 ת"ז קיימת ממלאת שם/טלפון/מייל/כתובת, לקוח רגיל', D.name === 'משה כהן' && D.phone === '0501234567' && D.mail === 'moshe@x.co' && D.addr === 'הרצל 1' && D.wholesale === false && /^[tp]\w+$/.test(D.custId || '') && /לקוח קיים/.test(await page.innerText('#main')), D);
+  check('2 ת"ז קיימת ממלאת שם (ישן→שם פרטי)/טלפון/מייל/כתובת (ישנה→רחוב), לקוח רגיל', D.fn === 'משה כהן' && D.phone === '0501234567' && D.mail === 'moshe@x.co' && D.st === 'הרצל 1' && D.wholesale === false && /^[tp]\w+$/.test(D.custId || '') && /לקוח קיים/.test(await page.innerText('#main')), D);
   // 3. ת"ז לא קיימת → לקוח חדש; ת"ז שגויה
   await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
   await page.fill('#octz', '123456789'); await H.settle(page, 200); const bad = await page.innerText('#ocst');
   await page.fill('#octz', '000000018'); await H.settle(page, 600); const nu = await page.innerText('#ocst');
   check('3 ת"ז שגויה מסומנת; ת"ז תקינה שלא קיימת → "לקוח חדש"', /לא תקינה/.test(bad) && /לקוח חדש/.test(nu), { bad, nu });
   // 4. שמירה → saveCust עם fill ובלי wholesale
-  await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=name]', 'רות'); await page.fill('input[data-k=phone]', '0529998888'); await page.fill('input[data-k=mail]', 'r@x.co');
+  await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0529998888'); await page.fill('input[data-k=mail]', 'r@x.co');
   await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
   await page.click('[data-a=oxSave]'); await H.settle(page, 800);
   const sc = calls.find((c) => c.n === 'saveCust'), co = calls.find((c) => c.n === 'createOrder');

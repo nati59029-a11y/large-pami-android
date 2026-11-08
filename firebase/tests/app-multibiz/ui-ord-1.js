@@ -77,7 +77,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const nw = await screen('הזמנה-חדשה', async () => { await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 200);
     await page.evaluate(() => { const D = window.__ox.draft || {}; }); await page.selectOption('select[data-k=br]', 'br1'); await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); });
   check('2 הזמנה חדשה: סניף, שם/טלפון, חיפוש מוצר, "הסחורה מסניף" עם הצעה לסניף שיש בו (יהודה הנשיא), מגע/ניגודיות/גלילה', okAll(nw) && /הסחורה מסניף/.test(nw.a.text) && (await page.evaluate(() => document.querySelector('select[data-k=from]').value)) === 'br2', sum(nw));
-  await page.fill('input[data-k=name]', 'משה'); await page.fill('input[data-k=phone]', '0501234567');
+  await page.fill('input[data-k=fn]', 'משה'); await page.fill('input[data-k=phone]', '0501234567');
   await page.click('[data-a=oxSave]'); await H.settle(page, 600);
   const co = calls.find((c) => c.n === 'createOrder');
   check('3 שמירה: createOrder עם br1, פריט pB מסניף br2, reqId, בלי total', !!co && co.d.br === 'br1' && co.d.items[0].pid === 'pB' && co.d.items[0].from === 'br2' && /^r[0-9a-z]{8,}/.test(co.d.reqId) && co.d.total === undefined, co && co.d);

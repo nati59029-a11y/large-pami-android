@@ -282,16 +282,27 @@ async function stockSet(request) {
 // =====================================================================================
 // הזמנות
 // =====================================================================================
+// 00:19: שם פרטי/משפחה ורחוב/עיר/קומה/דירה בנפרד. name ו-addr נשמרים גם כרשור – תצוגה וחיפוש זהים לרשומות ישנות (שם/כתובת בשדה אחד).
+const CPARTS = [['fn', 30, 'שם פרטי'], ['ln', 30, 'שם משפחה'], ['st', 80, 'רחוב ומספר'], ['city', 40, 'עיר'], ['fl', 10, 'קומה'], ['apt', 10, 'דירה']];
+const CPART_KEYS = CPARTS.map((x) => x[0]);
+function custParts(c, o) {
+  for (const [k, max, label] of CPARTS) if (c[k] != null && c[k] !== '') o[k] = txt(c[k], max, 'bad-' + k, label);
+  if (o.fn || o.ln) o.name = [o.fn, o.ln].filter(Boolean).join(' ');
+  if (o.st || o.city || o.fl || o.apt) o.addr = [o.st, o.city, o.fl && 'קומה ' + o.fl, o.apt && 'דירה ' + o.apt].filter(Boolean).join(', ');
+  return o;
+}
 function cleanCust(c) {
   if (!c || typeof c !== 'object' || Array.isArray(c)) throw bad('bad-cust', 'פרטי לקוח חסרים');
-  onlyKeys(c, ['name', 'phone', 'tz', 'addr', 'mail'], 'פרטי לקוח');
-  const o = { name: txt(c.name, 60, 'bad-name', 'שם הלקוח', true), phone: phone(c.phone) };
+  onlyKeys(c, ['name', 'phone', 'tz', 'addr', 'mail'].concat(CPART_KEYS), 'פרטי לקוח');
+  const o = custParts(c, {});
+  if (!o.name) o.name = txt(c.name, 60, 'bad-name', 'שם הלקוח', true);
+  o.phone = phone(c.phone);
   if (c.tz != null && c.tz !== '') {
     const tz = String(c.tz).replace(/\D/g, '');
     if (!/^\d{5,9}$/.test(tz)) throw bad('bad-tz', 'ת.ז: 5 עד 9 ספרות');
     o.tz = tz.padStart(9, '0');
   }
-  if (c.addr != null && c.addr !== '') o.addr = txt(c.addr, 150, 'bad-addr', 'כתובת');
+  if (!o.addr && c.addr != null && c.addr !== '') o.addr = txt(c.addr, 150, 'bad-addr', 'כתובת');
   if (c.mail != null && c.mail !== '') {
     const m = String(c.mail).trim().toLowerCase();
     if (m.length > 254 || !/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(m)) throw bad('bad-email', 'כתובת המייל לא תקינה');
@@ -912,4 +923,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { saveCat, importProducts, transferStock, getWsPrices, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { digRun, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { custParts, CPART_KEYS, digRun, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
