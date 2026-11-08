@@ -191,6 +191,46 @@ const seed = (p) => p.evaluate((org) => {
     impGo({ rows: [['תאריך', 'בית עסק', 'סכום חיוב', 'כרטיס'], ['11/11/2026', 'חנות3', '50', '7777']], kind: 'card', acc: '', fname: 'y.csv' }); await new Promise((r) => setTimeout(r, 200));
     const L = (S.ccc || []).filter((c) => c.last4 === '7777'); return { n: (S.ccc || []).length - n0, L, lines: L[0] ? S.stl.filter((l) => l.acc === L[0].id).length : 0, g: L[0] ? cardGuess({ sub: 'oldcc' }, {}).id === L[0].id : false }; });
   check('7ה כרטיס ישן (קטגוריית אשראי, 7777): נוצר כרטיס אחד בשמו ומקושר; ייבוא שני לא יוצר כפול', oc.n === 1 && oc.L.length === 1 && oc.L[0].name === 'ישראכרט ישן' && oc.L[0].sub === 'oldcc' && oc.lines === 3 && oc.g, oc);
+  // ---- 9. עסקאות בתשלומים (תשובות 17:37) ----
+  const i9 = await mp.evaluate(() => ({ a: insOf('תשלום 2 מתוך 3'), b: insOf('3 מתוך 12'), c: insOf('סכום 100'), d: insOf('5 מתוך 3'), sp: insSplit(100, 3), sp2: insSplit(1000, 36).slice(0, 2) }));
+  check('9 זיהוי "X מתוך Y"; חלוקה שווה, אגורות לראשון', JSON.stringify(i9.a) === '{"n":2,"of":3}' && i9.b.of === 12 && i9.c === null && i9.d === null && i9.sp.join() === '33.34,33.33,33.33' && i9.sp2.join() === '28.05,27.77', i9);
+  const cid = await mp.evaluate(() => { const c = ccNewLocal('2468', 'תשלומים'); S.ccMeta[c.id] = { day: 10 }; save(); return c.id; });
+  await mp.evaluate(() => go('rec')); await H.settle(mp, 200);
+  const CSV9 = '﻿תאריך עסקה,שם בית העסק,סכום עסקה,סכום חיוב,פירוט\n01/11/2026,רהיטי כתר,300.00,100.00,תשלום 1 מתוך 3\n';
+  await up(`[data-c=recfile][data-acc=${cid}]`, 'ins.csv', Buffer.from(CSV9, 'utf8'));
+  const s9 = await mp.evaluate((cid) => { const l = S.stl.find((x) => x.acc === cid && x.desc === 'רהיטי כתר'); return { ins: l && l.ins, tot: l && l.tot, nov: (cfDebits('2026-11', []).cc.find((c) => c.card === cid) || {}).a, dec: (cfDebits('2026-12', []).cc.find((c) => c.card === cid) || {}).a, jan: (cfDebits('2027-01', []).cc.find((c) => c.card === cid) || {}).a, feb: (cfDebits('2027-02', []).cc.find((c) => c.card === cid) || {}).a }; }, cid);
+  check('9א שורת תשלום מהדף: ins 1/3, סכום עסקה 300; תזרים: 100 בנובמבר (מהדף), 100 צפוי בדצמבר ובינואר, כלום בפברואר', s9.ins && s9.ins.n === 1 && s9.ins.of === 3 && s9.tot === 300 && s9.nov === 100 && s9.dec === 100 && s9.jan === 100 && !s9.feb, s9);
+  // הוצאה אחת
+  const lid9 = await mp.evaluate((cid) => S.stl.find((x) => x.acc === cid && x.desc === 'רהיטי כתר').id, cid);
+  const e9 = await mp.evaluate((lid) => { const t = stlNewExp(lid, { cat: 'e_sup', sub: 'sA' }); return { amt: t.amt, n: S.tx.filter((x) => x.note === 'רהיטי כתר').length, ins: t.ins }; }, lid9);
+  check('9ב הוצאה אחת בסכום העסקה (300), לא הוצאה לכל תשלום', e9.amt === 300 && e9.n === 1 && e9.ins === 3, e9);
+  // הדף הבא: תשלום 2 מתוך 3 בסכום חיוב בפועל 101 → גובר; משויך לאותה הוצאה; בלי כפילות
+  const CSV9b = '﻿תאריך עסקה,שם בית העסק,סכום עסקה,סכום חיוב,פירוט\n01/11/2026,רהיטי כתר,300.00,101.00,תשלום 2 מתוך 3\n';
+  await mp.evaluate(() => go('rec')); await H.settle(mp, 200);
+  await up(`[data-c=recfile][data-acc=${cid}]`, 'ins2.csv', Buffer.from(CSV9b, 'utf8'));
+  const s9b = await mp.evaluate((cid) => { const L = S.stl.filter((x) => x.acc === cid && x.desc === 'רהיטי כתר'); const l2 = L.find((x) => x.ins.n === 2); const t1 = S.tx.find((x) => x.id === L.find((x) => x.ins.n === 1).tx); return { n: L.length, st: l2.st, same: l2.tx === t1.id, auto: l2.auto, exps: S.tx.filter((x) => x.note === 'רהיטי כתר').length, dec: (cfDebits('2026-12', []).cc.find((c) => c.card === cid) || {}).a, jan: (cfDebits('2027-01', []).cc.find((c) => c.card === cid) || {}).a }; }, cid);
+  check('9ג דף הבא: תשלום 2 משויך אוטומטית לאותה הוצאה ("לבדוק"), סכום בפועל 101 גובר בדצמבר, ינואר נשאר צפוי 100, בלי כפילות', s9b.n === 2 && s9b.st === 'match' && s9b.same && s9b.auto === 1 && s9b.exps === 1 && s9b.dec === 101 && s9b.jan === 100, s9b);
+  await mp.evaluate(() => go('rec')); await H.settle(mp, 200);
+  await up(`[data-c=recfile][data-acc=${cid}]`, 'ins2.csv', Buffer.from(CSV9b, 'utf8'));
+  check('9ד ייבוא חוזר של אותו דף: אין שורה כפולה', (await mp.evaluate((cid) => S.stl.filter((x) => x.acc === cid && x.desc === 'רהיטי כתר').length, cid)) === 2);
+  // ביטול: זיכוי באותו בית עסק → הצעה ושאלה, בלי מחיקה לבד
+  const CSV9c = '﻿תאריך עסקה,שם בית העסק,סכום חיוב\n05/11/2026,ביטול רהיטי כתר,-200.00\n';
+  await mp.evaluate(() => go('rec')); await H.settle(mp, 200);
+  await up(`[data-c=recfile][data-acc=${cid}]`, 'cx.csv', Buffer.from(CSV9c, 'utf8'));
+  const c9 = await mp.evaluate((cid) => { const l = S.stl.find((x) => x.acc === cid && x.dir === 'in'); RECT = 'n'; go('recStm', l.stm); const el = document.querySelector(`[data-lid="${l.id}"]`); return { txt: el && el.innerText, btn: !!(el && el.querySelector('[data-a=insX]')), jan: (cfDebits('2027-01', []).cc.find((c) => c.card === cid) || {}).a, x: S.insX }; }, cid);
+  check('9ה זיכוי/ביטול: מוצע "לבטל את התשלומים הצפויים?" – ושום דבר לא בוטל לבד', c9.btn && /בוטלה/.test(c9.txt) && c9.jan === 100 && !c9.x, c9);
+  await mp.click('[data-insc] [data-a=insX]'); await H.settle(mp, 200);
+  const askd = await mp.evaluate(() => ({ open: document.getElementById('dlg').open, t: document.getElementById('dlg').innerText }));
+  check('9ו לחיצה → שאלה לפני ביטול', askd.open && /לבטל את התשלומים הצפויים/.test(askd.t), askd);
+  await mp.click('#dlg [data-a=yes]'); await H.settle(mp, 300);
+  const c9b = await mp.evaluate((cid) => ({ jan: (cfDebits('2027-01', []).cc.find((c) => c.card === cid) || {}).a || 0, dec: (cfDebits('2026-12', []).cc.find((c) => c.card === cid) || {}).a }), cid);
+  check('9ז אחרי אישור: הצפוי בינואר בוטל; מה שכבר ירד לפי הדף (דצמבר 101) נשאר', c9b.jan === 0 && c9b.dec === 101, c9b);
+  // הזנה ידנית: שדה מספר תשלומים, פיצול
+  const m9 = await mp.evaluate((cid) => { const h = pmX(METHODS, METHODS[3], {}); const p = pyX({ id: 'q', d: '2026-11-01', a: 100, m: METHODS[3] }, { card: cid, ins: '3' }); const p1 = pyX({ id: 'q1', d: '2026-11-01', a: 50, m: METHODS[3] }, { card: cid, ins: '40' }); const pb = pyX({ id: 'q2', d: '2026-11-01', a: 50, m: METHODS[0] }, { ins: '3' });
+    S.tx.push({ id: 'mi', t: 'exp', cat: 'e_sup', sub: 'sA', date: '2026-11-01', amt: 100, kind: 'inv', plan: '2026-11', inv: 'MI', pays: [Object.assign(p, { d: '2027-03-01' })] }); save();
+    const v = (m) => (cfDebits(m, []).cc.find((c) => c.card === cid) || {}).a || 0; const r = { field: /name="ins"/.test(h) && /max="36"/.test(h), ins: p.ins, bad: p1.ins, bank: pb.ins, mar: v('2027-03'), apr: v('2027-04'), may: v('2027-05'), jun: v('2027-06'), exps: S.tx.filter((x) => x.id === 'mi').length };
+    S.tx = S.tx.filter((x) => x.id !== 'mi'); save(); return r; }, cid);
+  check('9ח הזנה ידנית: שדה "מספר תשלומים" 1–36 באשראי בלבד; 3 תשלומים → 33.34/33.33/33.33 בחודשי החיוב; הוצאה אחת', m9.field && m9.ins === 3 && m9.bad === undefined && m9.bank === undefined && m9.mar === 33.34 && m9.apr === 33.33 && m9.may === 33.33 && m9.jun === 0 && m9.exps === 1, m9);
   // ---- 8. אין מספר מלא בשום מקום חדש ----
   const s8 = await mp.evaluate(() => JSON.stringify({ stl: S.stl, ccc: S.ccc, impMap: S.impMap, mLearn: S.mLearn, ccMeta: S.ccMeta }));
   check('8 אין רצף של 8+ ספרות בנתונים החדשים', !/\d{8,}/.test(s8.replace(/\d{4}-\d{2}-\d{2}/g, '')), '');

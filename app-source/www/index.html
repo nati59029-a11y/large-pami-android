@@ -439,14 +439,14 @@ ACT.negFlip=el=>{const i=el.closest('label').querySelector('input');const v=pNum
 const pmF=(n,list,v,req,t0)=>`<div class="f"><div style="font-weight:700;margin-bottom:6px;font-size:.92rem">${n==='m'?'אמצעי תשלום':n}</div><div class="pm" role="radiogroup">${list.map((m,i)=>`<label class="chip ${m===v?'on':''}" style="cursor:pointer"><input type="radio" name="${n}" value="${m}" ${m===v?'checked':''} ${i===0&&req!==false?'required':''} style="position:absolute;opacity:0;width:1px;height:1px" data-c="pmr">${m}</label>`).join('')}</div></div>${n==='m'?pmX(list,v,t0):''}`;
 CHG.pmr=el=>{el.closest('.pm').querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.contains(el)));const f=el.form;if(f)f.querySelectorAll('[data-pmx]').forEach(x=>{x.style.display=pmShow(x.dataset.pmx,el.value)?'':'none'});if(f)f.querySelectorAll('[data-pmc]').forEach(x=>{x.style.display=el.value===METHODS[1]?'':'none'})};
 /* בנק / כרטיס לתשלום (סניפים 2026-11-08): העברה/צ׳ק → בנק, אשראי → כרטיס. לא חובה; הניחוש מ-bankGuess/cardGuess (A1). בלי בנקים/כרטיסים מוגדרים – כלום לא מוצג */
-const pmShow=(k,m)=>k==='bank'?(m===METHODS[0]||m===METHODS[1]):m===METHODS[3];
+const pmShow=(k,m)=>k==='ins'?m===METHODS[3]:k==='bank'?(m===METHODS[0]||m===METHODS[1]):m===METHODS[3];
 function pmX(list,v,t0){const o=orgNow(),bk=o.banks.filter(b=>b.on),cd=ccAllCards().filter(c=>c.on),t=t0||{};let h='';
  const mk=(k,lbl,L,g)=>`<label class="f" data-pmx="${k}" style="display:${pmShow(k,v)?'':'none'}"><span>${lbl} (לא חובה)</span><select name="${k}"><option value="">לא שויך</option>${L.map(x=>`<option value="${esc(x.id)}"${g.sure&&g.id===x.id?' selected':''}>${esc(x.name)}${x.last4?' ····'+esc(x.last4):''}</option>`).join('')}</select></label>`;
  if(bk.length&&(list.includes(METHODS[0])||list.includes(METHODS[1])))h+=mk('bank','בנק',bk,bankGuess(t,{m:METHODS[0]}));
- if(cd.length&&list.includes(METHODS[3]))h+=mk('card','כרטיס אשראי',cd,cardGuess(t,{m:METHODS[3]}));
+ if(cd.length&&list.includes(METHODS[3]))h+=mk('card','כרטיס אשראי',cd,cardGuess(t,{m:METHODS[3]}))+`<label class="f" data-pmx="ins" style="display:${pmShow('ins',v)?'':'none'}"><span>מספר תשלומים (1–36)</span><input name="ins" type="number" min="1" max="36" step="1" inputmode="numeric" value="1"><div class="hd">חלוקה שווה; האגורות שנשארות בתשלום הראשון. כל תשלום נכנס לתזרים בחודש החיוב שלו.</div></label>`;
  if(list.includes(METHODS[1]))h+=chkF(v);
  return h}
-const pyX=(p,f)=>{if(f&&f.bank&&(p.m===METHODS[0]||p.m===METHODS[1]))p.bank=f.bank;if(f&&f.card&&p.m===METHODS[3])p.card=f.card;return chkPay(p,f)};
+const pyX=(p,f)=>{if(f&&f.bank&&(p.m===METHODS[0]||p.m===METHODS[1]))p.bank=f.bank;if(f&&f.card&&p.m===METHODS[3])p.card=f.card;if(f&&p.m===METHODS[3]){const n=+f.ins;if(Number.isInteger(n)&&n>=2&&n<=36)p.ins=n}return chkPay(p,f)};
 /* ניווט */
 const themeNow=()=>{try{if(isW())return cfgLocal().th||'paper'}catch(e){}return S.theme||'paper'};
 let NAV=[{v:'home'}],A=null;
@@ -811,7 +811,7 @@ function stmAcc(kind,text){const L=stmList(kind);if(!L.length)return{id:'',sure:
 function stmCols(rows){for(let i=0;i<Math.min(rows.length,15);i++){const h=(rows[i]||[]).map(x=>String(x??'').trim()),m={};
   h.forEach((t,j)=>{if(!t)return;if(/יתרה|balance/i.test(t))return;if(m.date==null&&/תאריך|date/i.test(t))m.date=j;else if(m.cr==null&&/זכות|credit|זיכוי/i.test(t))m.cr=j;else if(m.dr==null&&/חובה|debit/i.test(t))m.dr=j;else if(m.ref==null&&/אסמכתא|אסמ|reference|^ref/i.test(t))m.ref=j;else if(m.amt==null&&/סכום|חיוב|amount/i.test(t))m.amt=j;else if(m.desc==null&&/בית עסק|תיאור|פירוט|שם|עסק|פעולה|description/i.test(t))m.desc=j});
   if(m.date!=null&&m.desc!=null&&(m.amt!=null||m.dr!=null||m.cr!=null))return{hi:i,ix:m}}return null}
-const stlKey=l=>l.acc+'|'+l.date+'|'+rnd(l.amt)+'|'+l.dir+'|'+s_(l.desc);
+const stlKey=l=>l.acc+'|'+l.date+'|'+rnd(l.amt)+'|'+l.dir+'|'+s_(l.desc)+(l.ins&&l.ins.n?'|i'+l.ins.n+'/'+l.ins.of:'');
 /* בנק: סכום חתום שלילי = יצא; אשראי: חיובי = חיוב (יצא), שלילי = זיכוי. acc (לא חובה) – כפולים מול S.stl */
 function stmParse(rows,kind,acc){const c=stmCols(rows||[]);if(!c)throw new Error('לא זוהו עמודות תאריך, תיאור וסכום (או חובה/זכות) בשורת הכותרת');const ix=c.ix,ok=[];let bad=0,dup=0;
  rows.slice(c.hi+1).forEach(r=>{if(!r||!r.some(x=>String(x??'').trim()))return;const d=pDate(r[ix.date]),desc=stlScrub(String(r[ix.desc]??'').trim()).slice(0,200);let a=null,dir='';
@@ -825,7 +825,7 @@ const STL_CC=/כרטיס|ויזה|visa|ישראכרט|isracard|מקס|max|כאל
 /* meta={kind,acc,src,fid?,from?,to?}. בלי acc תקין – לא נשמר (null). מחזיר את הדף (n = שורות שנוספו, dup = כפולות). 0 חדשות = לא נוצר דף */
 function stmAdd(meta,lines){meta=meta||{};const kind=meta.kind==='card'?'card':'bank',acc=s_(meta.acc);if(!acc||stmKind(acc)!==kind)return null;
  if(!Array.isArray(S.stm))S.stm=[];if(!Array.isArray(S.stl))S.stl=[];
- const L=(lines||[]).filter(l=>l&&cfDt(l.date)&&+l.amt>0).map(l=>{const x={id:uid(),acc,date:l.date,desc:stlScrub(s_(l.desc)).slice(0,200)||'—',amt:rnd(Math.abs(+l.amt)),dir:l.dir==='in'?'in':'out',st:'open'};const rf=stlScrub(s_(l.ref)).slice(0,40);if(rf)x.ref=rf;return x});
+ const L=(lines||[]).filter(l=>l&&cfDt(l.date)&&+l.amt>0).map(l=>{const x={id:uid(),acc,date:l.date,desc:stlScrub(s_(l.desc)).slice(0,200)||'—',amt:rnd(Math.abs(+l.amt)),dir:l.dir==='in'?'in':'out',st:'open'};/* תשלומים (17:37): ins={n,of}, tot = סכום העסקה המקורי */if(l.ins&&l.ins.n>=1&&l.ins.of>=2&&l.ins.n<=l.ins.of&&l.ins.of<=99)x.ins={n:+l.ins.n,of:+l.ins.of};if(x.ins&&+l.tot>0)x.tot=rnd(Math.abs(+l.tot));const rf=stlScrub(s_(l.ref)).slice(0,40);if(rf)x.ref=rf;return x});
  const D=stlDedup(acc,L),ds=D.ok.map(l=>l.date).sort();
  const stm={id:'m'+uid(),kind,acc,src:['scan','file','manual'].includes(meta.src)?meta.src:'file',from:cfDt(meta.from)?meta.from:(ds[0]||''),to:cfDt(meta.to)?meta.to:(ds[ds.length-1]||''),at:new Date().toISOString(),by:(SY&&SY.uid)||'',n:D.ok.length,dup:D.dup};if(meta.fid&&idOk(meta.fid))stm.fid=meta.fid;
  if(!D.ok.length)return stm;
@@ -848,7 +848,7 @@ function stlCands(l){if(!l)return[];const kind=stmKind(l.acc),out=[],A=rnd(l.amt
  else live().forEach(t=>{if(t.t!=='inc'||t.stl||Math.abs(t.amt-A)>0.01)return;let s=3,why=['סכום'];if(near(t.date)){s+=2;why.push('תאריך')}out.push({t,s,why:why.join(' · ')})});
  return out.sort((a,b)=>b.s-a.s||String(b.t.date).localeCompare(String(a.t.date))).slice(0,20)}
 /* אוטומטי: רק מועמד יחיד עם s>=5 (השני חלש). מסומן auto=1 ("לבדוק") */
-function stlAuto(stmId){let match=0,open=0;(S.stl||[]).filter(l=>l.stm===stmId&&l.st==='open').forEach(l=>{const C=stlCands(l),st=C.filter(c=>c.s>=5);
+function stlAuto(stmId){let match=0,open=0;(S.stl||[]).filter(l=>l.stm===stmId&&l.st==='open').forEach(l=>{if(typeof insAuto==='function'&&insAuto(l)){match++;return}const C=stlCands(l),st=C.filter(c=>c.s>=5);
   if(st.length===1&&stlLink(l.id,st[0].t.id,{pay:st[0].p&&st[0].p.id,ids:st[0].ids,auto:1})===true)match++;else open++});save();return{match,open}}
 const stlBx=l=>stmKind(l.acc)==='card'?{card:l.acc}:{bank:l.acc},stlM=l=>stmKind(l.acc)==='card'?METHODS[3]:METHODS[0];
 /* true = הותאם; מחרוזת = שגיאה. pay = תשלום קיים (היתרה לא משתנה); חשבונית = תשלום חדש בסכום השורה (auto); ids = צירוף */
@@ -861,8 +861,8 @@ function stlLink(lid,tid,o){o=o||{};const l=(S.stl||[]).find(x=>x.id===lid);if(!
  if(t.stl)return'הרשומה כבר הותאמה';if(Math.abs((+t.amt||0)-l.amt)>0.01)return'הסכום לא תואם';if((l.dir==='in')!==(t.t==='inc'))return'כיוון לא תואם';t.stl=lid;return fin()}
 /* הקמת הוצאה ששולמה מהשורה. ספק/קבועה = חשבונית + תשלום (auto); אחר = רשומה פשוטה */
 function stlNewExp(lid,o){o=o||{};const l=(S.stl||[]).find(x=>x.id===lid);if(!l||l.st!=='open'||l.dir!=='out')return null;const c=cat(o.cat);if(!c||c.kind!=='exp')return null;
- const t={id:uid(),t:'exp',cat:c.id,sub:o.sub&&subById(o.sub)?o.sub:null,date:l.date,amt:rnd(l.amt),note:l.desc,stl:lid,stlNew:1};if(o.br&&ORG_ID.test(o.br))t.br=o.br;/* C3: noInv = אין חשבונית עדיין → "שולם – ממתין לחשבונית" */if(o.noInv){t.await=1;t.inv=''}
- if(['sup','fixed'].includes(c.beh)){Object.assign(t,{kind:'inv',plan:l.date.slice(0,7),pays:[Object.assign({id:uid(),d:l.date,a:rnd(l.amt),m:stlM(l),stl:lid,auto:1},stlBx(l))]})}
+ const A=l.ins?rnd(l.tot||l.amt*l.ins.of):rnd(l.amt);/* תשלומים: הוצאה אחת בסכום העסקה כולה */const t={id:uid(),t:'exp',cat:c.id,sub:o.sub&&subById(o.sub)?o.sub:null,date:l.date,amt:A,note:l.desc,stl:lid,stlNew:1};if(l.ins)t.ins=l.ins.of;if(o.br&&ORG_ID.test(o.br))t.br=o.br;/* C3: noInv = אין חשבונית עדיין → "שולם – ממתין לחשבונית" */if(o.noInv){t.await=1;t.inv=''}
+ if(['sup','fixed'].includes(c.beh)){Object.assign(t,{kind:'inv',plan:l.date.slice(0,7),pays:[Object.assign({id:uid(),d:l.date,a:A,m:stlM(l),stl:lid,auto:1},stlBx(l),l.ins?{ins:l.ins.of,insS:1}:{})]})}
  S.tx.push(t);l.st='exp';l.tx=t.id;delete l.auto;save();return t}
 function stlNewInc(lid,o){o=o||{};const l=(S.stl||[]).find(x=>x.id===lid);if(!l||l.st!=='open'||l.dir!=='in')return null;const c=cat(o.cat);if(!c||c.kind!=='inc')return null;
  const t={id:uid(),t:'inc',cat:c.id,sub:o.sub&&subById(o.sub)?o.sub:null,date:l.date,amt:rnd(l.amt),note:l.desc,stl:lid,stlNew:1};if(o.br&&ORG_ID.test(o.br))t.br=o.br;S.tx.push(t);l.st='inc';l.tx=t.id;delete l.auto;save();return t}
@@ -1054,6 +1054,7 @@ function recRow(l){const o=l.dir==='in',t=l.tx?S.tx.find(x=>x.id===l.tx):null;le
   const g=s?null:mSuggest(l);
   ln=s?`<div class="note" data-sug>הצעה: ${recCandNm(s)}<br>${esc(s.why)}${C.length>1?' · עוד '+(C.length-1)+' מועמדים':''}</div>`:g?`<div class="note" data-msug>הצעה: ${o?'הכנסה':'הוצאה'} ל${mSugNm(g)}<br>${esc(g.why)}</div>`:'<div class="note">לא נמצאה הצעה</div>';
   bt=`${s?`<button class="btn s grow" data-a="recLink" data-id="${esc(l.id)}">שייך</button>`:g?`<button class="btn s grow" data-a="recQuick" data-id="${esc(l.id)}">שייך</button>`:''}<button class="btn s g grow" data-a="recPick" data-id="${esc(l.id)}">בחר אחר</button><button class="btn s g grow" data-a="recNew" data-id="${esc(l.id)}">${o?'הקם הכנסה':'הקם הוצאה'}</button><button class="btn s g grow" data-a="recSkip" data-id="${esc(l.id)}">התעלם</button>`}
+ const IC=typeof insCancelCands==='function'?insCancelCands(l):[];if(l.ins)tg+=` <span class="tag t2" data-ins>תשלום ${l.ins.n} מתוך ${l.ins.of}</span>`;if(IC.length)ln+=IC.map(g=>`<div class="note" data-insc>ייתכן שהעסקה בתשלומים "${esc(g.desc)}" (${dfmt(g.od)}) בוטלה. <button class="btn s g" data-a="insX" data-k="${esc(g.k)}">לבטל את התשלומים הצפויים?</button></div>`).join('');
  return `<div class="card" data-lid="${esc(l.id)}"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px"><b style="min-width:0;overflow-wrap:anywhere">${esc(l.desc)}</b><b style="white-space:nowrap" class="${o?'pos':''}">${o?'+':'−'}${ils(l.amt)}</b></div><div class="note">${dfmt(l.date)}${l.ref?' · אסמכתא '+esc(l.ref):''} ${tg}</div>${ln}<div class="row" style="margin-top:8px;flex-wrap:wrap">${bt}</div></div>`}
 const recCandNm=c=>{const t=c.t;return (c.ids&&c.ids.length>1?'צירוף '+c.ids.length+' חשבוניות · ':c.p?'תשלום קיים · ':'')+recTxNm(t)+(c.p?' · '+dfmt(c.p.d):' · '+(t.t==='exp'&&hasPay(t)?'יתרה '+ils(bal(t)):dfmt(t.date)))};
 const recLn=id=>(S.stl||[]).find(x=>x.id===id);
@@ -1604,12 +1605,26 @@ const ccDay=id=>{const m=S&&S.ccMeta&&S.ccMeta[id];return m&&m.day>=1&&m.day<=31
 /* החלטת המשתמש 16:18: עסקה לפני (יום החיוב − 1) = החיוב של אותו חודש; מיום החיוב − 1 ואילך = החודש הבא. יום שלא קיים בחודש = היום האחרון, והסף יום לפניו */
 function ccBillDate(id,d){const D=ccDay(id);if(!D||!cfDt(d))return '';const m=d.slice(0,7),Dm=Math.min(D,+mEnd(m).slice(8,10)),bm=+d.slice(8,10)<Dm-1?m:addMon(m,1),last=+mEnd(bm).slice(8,10);return bm+'-'+p2(Math.min(D,last))}
 /* חיובי אשראי צפויים שיורדים בחודש m: שורות דף הכרטיס (חיוב +, זיכוי −) + תשלומי אשראי באפליקציה שלא הותאמו לשורה. רק כרטיס עם יום חיוב */
+/* ---- עסקאות בתשלומים (תשובות המשתמש 17:37) ---- */
+function insOf(t){const m=s_(t).match(/(?:תשלום|תש'?)?\s*(\d{1,2})\s*(?:מתוך|of)\s*(\d{1,2})(?!\d)/i);if(!m)return null;const n=+m[1],of=+m[2];return n>=1&&of>=2&&n<=of?{n,of}:null}
+const insKey=l=>l.acc+'|'+mKey(l.desc)+'|'+l.date+'|'+l.ins.of;
+function insSplit(tot,N){const c=Math.round(tot*100),b=Math.floor(c/N),r=c-b*N,o=[];for(let i=0;i<N;i++)o.push((b+(i===0?r:0))/100);return o}
+function ccBillN(acc,od,n){const b=ccBillDate(acc,od);if(!b)return '';const bm=addMon(b.slice(0,7),n-1),D=ccDay(acc),last=+mEnd(bm).slice(8,10);return bm+'-'+p2(Math.min(D,last))}
+/* שורת תשלום 2+ מאותה עסקה (בית עסק + תאריך מקורי + מספר תשלומים) שכבר שויכה → אותה הוצאה (הוצאה אחת). מסומן "לבדוק" */
+function insAuto(l){if(!l||!l.ins||l.ins.n<2||l.st!=='open'||l.dir!=='out')return false;const k=insKey(l),p=(S.stl||[]).find(x=>x.id!==l.id&&x.ins&&x.dir==='out'&&x.tx&&['match','exp'].includes(x.st)&&insKey(x)===k);if(!p)return false;const t=S.tx.find(x=>x.id===p.tx&&!x.x);if(!t)return false;l.st='match';l.tx=t.id;l.auto=1;l.insT=1;return true}
+/* ביטול/זיכוי: לא מוחקים לבד. שורת זיכוי (או "ביטול") של אותו בית עסק כשיש עסקה בתשלומים עם צפויים → הצעה, ושאלה לפני ביטול */
+function insCancelCands(l){if(!l||!(l.dir==='in'||/ביטול|בוטל|cancel/i.test(l.desc)))return[];const mk=mKey(l.desc).replace(/\b(ביטול|בוטל|זיכוי|cancel)\b/g,' ').replace(/\s+/g,' ').trim();if(mk.length<2)return[];const o={};(S.stl||[]).forEach(x=>{if(x.acc!==l.acc||!x.ins||x.dir!=='out')return;const k=insKey(x);if(S.insX&&S.insX[k])return;const xm=mKey(x.desc);if(!(xm.includes(mk)||mk.includes(xm)))return;const g=o[k]||(o[k]={k,desc:x.desc,od:x.date,of:x.ins.of,max:0});g.max=Math.max(g.max,x.ins.n)});return Object.values(o).filter(g=>g.max<g.of)}
+ACT.insX=el=>{const k=el.dataset.k;ask('לבטל את התשלומים הצפויים של העסקה הזו? (התשלומים שכבר ירדו לא משתנים)',()=>{if(!S.insX||typeof S.insX!=='object')S.insX={};S.insX[k]=1;save();rerender();toast('התשלומים הצפויים בוטלו')},'כן, לבטל צפויים')};
+ACT.insXp=el=>{const t=S.tx.find(x=>x.id===el.dataset.t),p=t&&(t.pays||[]).find(y=>y.id===el.dataset.p);if(!p)return;ask('לבטל את התשלומים הצפויים של התשלום הזה באשראי?',()=>{p.insX=1;save();rerender();toast('התשלומים הצפויים בוטלו')},'כן, לבטל צפויים')};
 /* תיקונים (סבב 1): שורות "התעלם" לא נספרות; תשלום אפליקציה בתאריך שדף של אותו כרטיס כבר מכסה – לא נספר (השורה בדף היא אותה עסקה); a = חיוב (לא פחות מ-0), cr = זיכוי שנשאר כשהזיכויים גדולים מהחיובים */
 function ccBills(m){const cards=ccAllCards().filter(c=>ccDay(c.id));if(!cards.length)return[];const ids=new Set(cards.map(c=>c.id)),G={};
  const cov=(acc,d)=>(S.stm||[]).some(x=>x.acc===acc&&x.src!=='manual'&&cfDt(x.from)&&cfDt(x.to)&&d>=x.from&&d<=x.to);
  const add=(acc,d,a)=>{const bd=ccBillDate(acc,d);if(!bd||!bd.startsWith(m))return;const k=acc+'|'+bd;const g=G[k]||(G[k]={card:acc,name:(cards.find(c=>c.id===acc)||{}).name||'',last4:(cards.find(c=>c.id===acc)||{}).last4||'',date:bd,a:0,n:0});g.a=rnd(g.a+a);g.n++};
- (S.stl||[]).forEach(l=>{if(!ids.has(l.acc)||!(l.amt>0)||l.st==='skip')return;add(l.acc,l.date,l.dir==='in'?-l.amt:l.amt)});
- live().forEach(t=>{if(t.t!=='exp')return;(Array.isArray(t.pays)?t.pays:[]).forEach(p=>{if(p&&p.m===METHODS[3]&&ids.has(p.card)&&!p.stl&&!p.crof&&p.a>0&&!cov(p.card,p.d))add(p.card,p.d,p.a)})});
+ /* עסקה בתשלומים: תשלום k יורד בחיוב k−1 חודשים אחרי החיוב הראשון שאחרי תאריך העסקה. סכום חיוב בפועל מהדף גובר; תשלומים שעוד לא בדף = צפויים (חלוקה שווה, אגורות לראשון). קבוצה שבוטלה (S.insX) – בלי צפויים */
+ const addAt=(acc,bd,a)=>{if(!bd||!bd.startsWith(m))return;const k=acc+'|'+bd;const g=G[k]||(G[k]={card:acc,name:(cards.find(c=>c.id===acc)||{}).name||'',last4:(cards.find(c=>c.id===acc)||{}).last4||'',date:bd,a:0,n:0});g.a=rnd(g.a+a);g.n++};
+ const IG={};(S.stl||[]).forEach(l=>{if(!ids.has(l.acc)||!(l.amt>0)||l.st==='skip')return;if(l.ins&&l.dir==='out'){const k=insKey(l);(IG[k]=IG[k]||{acc:l.acc,od:l.date,of:l.ins.of,tot:0,amt:l.amt,have:{}}).have[l.ins.n]=l.amt;if(l.tot)IG[k].tot=l.tot;return}add(l.acc,l.date,l.dir==='in'?-l.amt:l.amt)});
+ Object.keys(IG).forEach(k=>{const g=IG[k],X=S.insX&&S.insX[k],sp=insSplit(g.tot||rnd(g.amt*g.of),g.of);for(let n=1;n<=g.of;n++){if(g.have[n]!=null){addAt(g.acc,ccBillN(g.acc,g.od,n),g.have[n]);continue}if(X)continue;if(n<Math.min(...Object.keys(g.have).map(Number)))continue;addAt(g.acc,ccBillN(g.acc,g.od,n),sp[n-1])}});
+ live().forEach(t=>{if(t.t!=='exp')return;(Array.isArray(t.pays)?t.pays:[]).forEach(p=>{if(!(p&&p.m===METHODS[3]&&ids.has(p.card)&&!p.stl&&!p.crof&&p.a>0&&!cov(p.card,p.d)))return;const N=p.ins>=2&&p.ins<=36?p.ins:1;if(N===1)return add(p.card,p.d,p.a);const sp=insSplit(p.a,N);for(let n=1;n<=N;n++){if(p.insX&&n>1)break;addAt(p.card,ccBillN(p.card,p.d,n),sp[n-1])}})});
  return Object.values(G).map(g=>Object.assign(g,g.a<0?{cr:rnd(-g.a),a:0}:{cr:0})).sort((a,b)=>a.date.localeCompare(b.date))}
 /* ---- PDF → טבלה (pdf.js מקומי). שורה = פריטי טקסט באותו גובה; תאים מימין לשמאל. יש כותרת = יישור לפי מיקום העמודות; אין = [תאריך, תיאור, מספרים…] ---- */
 async function pdfTable(f){const lib=await pdfLoad(),doc=await lib.getDocument({data:new Uint8Array(await f.arrayBuffer())}).promise,lines=[];
@@ -1632,7 +1647,7 @@ function impHead(rows){for(let i=0;i<Math.min(rows.length,25);i++){const h=(rows
    if(/סכום|amount|חיוב|₪|ש"ח/i.test(t)&&!/מטבע|currency/i.test(t)){amts.push({j,p:/חיוב|charge|ש"ח|₪/i.test(t)&&!/מקור|עסקה/.test(t)?2:/מקור|original/i.test(t)?0:1});return}
    if(m.desc==null&&!/סוג|קטגוריה|הערות|מטבע/.test(t)&&/בית עסק|בית העסק|תיאור|פירוט|שם|עסק|פעולה|description|merchant/i.test(t))m.desc=j});
   if(m.date==null&&dCh!=null)m.date=dCh;
-  let sure=true;if(amts.length){const best=amts.slice().sort((a,b)=>b.p-a.p);m.amt=best[0].j;if(best.length>1&&best[0].p===best[1].p&&m.dr==null&&m.cr==null)sure=false}
+  let sure=true;if(amts.length){const best=amts.slice().sort((a,b)=>b.p-a.p);m.amt=best[0].j;if(best.length>1&&best[0].p===best[1].p&&m.dr==null&&m.cr==null)sure=false;if(best.length>1&&best[0].p===2&&best[1].p<2)m.tot=best[1].j}
   if(m.date!=null&&m.desc!=null&&(m.amt!=null||m.dr!=null||m.cr!=null))return{hi:i,ix:m,sure,by:'head'}}return null}
 /* תוכן (בלי כותרת מוכרת): עמודת תאריכים, עמודת טקסט, עמודות מספרים. עמודת מספרים אחת = בטוח */
 function impContent(rows){const isD=v=>!!pDate(v),isN=v=>{const s=s_(v);return typeof v==='number'||(/\d/.test(s)&&pNum(v)!=null)},isC=v=>/^(?:[•*xX·.]{2,}\s?)?\d{4}$/.test(s_(v));
@@ -1660,6 +1675,7 @@ function impParse(rows,kind,c,fname){const ix=c.ix,ok=[];let bad=0,sec='';const 
   if(ix.dr!=null||ix.cr!=null){const dr=ix.dr!=null?pNum(r[ix.dr]):null,cr=ix.cr!=null?pNum(r[ix.cr]):null;if(dr)({a,dir}={a:Math.abs(dr),dir:dr>0?'out':'in'});else if(cr)({a,dir}={a:Math.abs(cr),dir:cr>0?'in':'out'});else if(ix.amt!=null){const v=pNum(r[ix.amt]);if(v)({a,dir}=sg(v))}}
   else{const v=pNum(r[ix.amt]);if(v)({a,dir}=sg(v))}
   if(!d||!a||!desc){bad++;return}const l={date:d,desc,amt:rnd(a),dir};const rf=ix.ref!=null?stlScrub(s_(r[ix.ref])).slice(0,40):'';if(rf)l.ref=rf;
+  const ins=insOf(r.filter((_,j)=>j!==ix.date&&j!==ix.amt&&j!==ix.tot&&j!==ix.dr&&j!==ix.cr).join(' '));if(ins){l.ins=ins;const tv=ix.tot!=null?pNum(r[ix.tot]):null;if(tv)l.tot=Math.abs(tv)}
   let l4='';if(ix.card!=null){const dg=s_(r[ix.card]).replace(/\D/g,'');if(dg.length>=4)l4=dg.slice(-4)}l.l4=l4||sec||g;ok.push(l)});
  return{ok,bad}}
 /* ---- זרימת ייבוא ---- */
