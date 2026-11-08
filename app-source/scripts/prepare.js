@@ -42,9 +42,11 @@ core.forEach(f=>fs.copyFileSync(path.join(cd,f),path.join('www/tess',f)));
 (async()=>{
   for(const l of ['heb','eng']){
     const repo=l==='heb'?'tessdata_best':'tessdata_fast';
-    const r=await fetch('https://github.com/tesseract-ocr/'+repo+'/raw/main/'+l+'.traineddata');
-    if(!r.ok)throw new Error('language data '+l+' http '+r.status);
-    const b=Buffer.from(await r.arrayBuffer());
+    /* כמה מקורות + ניסיונות חוזרים: תקלה זמנית ב-GitHub (504) לא עוצרת את הבנייה */
+    const urls=['https://github.com/tesseract-ocr/'+repo+'/raw/main/'+l+'.traineddata','https://raw.githubusercontent.com/tesseract-ocr/'+repo+'/main/'+l+'.traineddata','https://cdn.jsdelivr.net/gh/tesseract-ocr/'+repo+'@main/'+l+'.traineddata'];
+    let b=null,last='';
+    for(let t=0;t<3&&!b;t++){for(const u of urls){try{const r=await fetch(u);if(!r.ok){last=u+' http '+r.status;continue}const x=Buffer.from(await r.arrayBuffer());if(x.length<500000){last=u+' too small: '+x.length;continue}b=x;break}catch(e){last=u+' '+e.message}}if(!b)await new Promise(z=>setTimeout(z,5000*(t+1)))}
+    if(!b)throw new Error('language data '+l+': '+last);
     if(b.length<500000)throw new Error('language data '+l+' too small: '+b.length);
     fs.writeFileSync('www/tess/'+l+'.traineddata',b);
   }
