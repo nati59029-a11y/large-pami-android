@@ -100,7 +100,7 @@ const openAdd = (p, sub) => p.evaluate((sub) => { A = { step: 'det', type: 'exp'
 
   // ---- 7. הגדרות: ברירת מחדל לעסק ----
   const t7 = await mp.evaluate(() => { delete S.orgC; save(); go('settings'); const f = document.querySelector('form[data-f=pmoff]'); const rb = [...f.querySelectorAll('input[name=tmode]')].find((x) => x.value === 'inv'); rb.checked = true; f.td.value = '30'; FRM.pmoff(f); const r = { t: S.terms, pm: S.pmOff }; delete S.terms; save(); NAV = [{ v: 'home' }]; render(0); return r; });
-  check('7 הגדרות: "30 ימים מהחשבונית" נשמר כברירת מחדל, pmOff נשאר', t7.t && t7.t.b === 'inv' && t7.t.d === 30 && t7.pm === 2, t7);
+  check('7 הגדרות: "30 ימים מהחשבונית" נשמר כברירת מחדל, תיקון 4 (C2): pmOff נמחק', t7.t && t7.t.b === 'inv' && t7.t.d === 30 && t7.pm === undefined, t7);
 
   check('8 אין שגיאות JS (מנהל)', !mp.__errors.length, mp.__errors);
   await browser.close();

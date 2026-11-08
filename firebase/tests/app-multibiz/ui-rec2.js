@@ -81,6 +81,7 @@ const SHOTS = process.env.SHOTS || '';
   check('4ב באנר הבית: "3 שורות … לא הותאמו", ישר מתחת לכרטיסים הקטנים, שורה קטנה (עד 56px)', b1.txt && /3/.test(b1.txt) && /לא הותאמו/.test(b1.txt) && b1.after && b1.h <= 56, b1);
   await mp.click('#recBan'); await H.settle(mp, 300);
   check('4ג לחיצה על הבאנר → V.rec', (await view()) === 'rec', await view());
+  await shot('rec-after');
 
   // ---- לשונית 2: שייך / בחר אחר / הקם הוצאה / התעלם ----
   await mp.evaluate(() => { go('recStm', S.stm[0].id); RECT = 'n'; rerender(); }); await H.settle(mp, 300);
