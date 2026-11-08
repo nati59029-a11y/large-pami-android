@@ -549,7 +549,7 @@ FRM.subnew=f=>{const name=s_(f.name.value),c=cat(A.cat);if(!name)return;
  if(c.beh==='loan'){sheetClose();loanForm(null,name);return}
  if(!ex){ex={id:uid(),cat:c.id,name};S.subs.push(ex);save();toast('נוצר כרטיס חדש: '+name)}else if(ex.off){ex.off=false;save()}
  A.sub=ex.id;A.step='det';sheetDraw()};
-CHG.hd=el=>{const d=el.parentElement.querySelector('[data-hd]');if(d)d.textContent=el.value?heb(el.value):'';const f=el.form,pl=f&&f.elements.plan;if(pl&&el.name==='date'&&pl.dataset.t!=='1'&&el.value)pl.value=pl.dataset.sup?payDef(pl.dataset.ps,el.value):el.value.slice(0,7)};
+CHG.hd=el=>{const d=el.parentElement.querySelector('[data-hd]');if(d)d.textContent=el.value?heb(el.value):'';const f=el.form,pl=f&&f.elements.plan;if(pl&&el.name==='date'&&pl.dataset.t!=='1'&&el.value)pl.value=pl.dataset.sup?payDef(pl.dataset.ps,el.value):el.value.slice(0,7);if(el.name==='date')dueRe(f,el.value)};
 document.addEventListener('input',e=>{if(e.target.name==='plan')e.target.dataset.t='1'});
 CHG.dn=el=>{const i=el.form.elements.inv;if(i)i.required=!el.checked};
 CHG.paynow=el=>{const g=el.form.querySelector('[data-pg]');g.hidden=!el.checked;g.querySelectorAll('input').forEach(i=>{if(i.type==='radio')i.required=el.checked&&i.value===METHODS[0]})};
@@ -558,7 +558,7 @@ function detHtml(c,t){
  if(b==='free')h+=fld('מה זה בדיוק? (נכתב מחדש בכל פעם)','desc',t?.desc,'text','required autocomplete="off"');
  h+=amtF('amt',t?(t.kind==='refund'?t.rf:t.amt):'',b==='sup');
  h+=dateF(b==='sup'||b==='fixed'?'תאריך החשבונית':b==='emp'?'תאריך התשלום':'תאריך','date',d);
- if(b==='sup'){const sid=(A&&A.sub)||(t&&t.sub)||'',need=!(t&&!t.inv&&!t.dn)&&!(t&&t.dn);h+=fld('חודש לתשלום','plan',t?pmon(t):payDef(sid,d),'month','required data-sup="1" data-ps="'+esc(sid)+'"')+fld('מספר חשבונית','inv',t?.inv,'text','autocomplete="off" '+(need?'required':''))+(t&&t.dn?`<label class="cb"><input type="checkbox" name="dn" value="1" data-c="dn" checked> זו תעודת משלוח (עדיין אין חשבונית)</label>`:'')}
+ if(b==='sup'){const sid=(A&&A.sub)||(t&&t.sub)||'',need=!(t&&!t.inv&&!t.dn)&&!(t&&t.dn);h+=(dueF(sid,d,t)||fld('חודש לתשלום','plan',t?pmon(t):payDef(sid,d),'month','required data-sup="1" data-ps="'+esc(sid)+'"'))+fld('מספר חשבונית','inv',t?.inv,'text','autocomplete="off" '+(need?'required':''))+(t&&t.dn?`<label class="cb"><input type="checkbox" name="dn" value="1" data-c="dn" checked> זו תעודת משלוח (עדיין אין חשבונית)</label>`:'')}
  else if(b==='fixed')h+=fld('חודש לתשלום','plan',t?pmon(t):d.slice(0,7),'month','required')+fld('מספר חשבונית (לא חובה)','inv',t?.inv,'text','autocomplete="off"');
  if(b==='emp')h+=fld('עבור איזה חודש המשכורת','plan',t?pmon(t):d.slice(0,7),'month','required')+pmF('m',SAL_METHODS,t&&t.pays&&t.pays[0]?t.pays[0].m:'',undefined,t||{sub:A&&A.sub});
  if(b==='cc'&&!t){const L=S.tx.filter(x=>hasPay(x)&&bal(x)>0.004).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,60);
@@ -576,6 +576,7 @@ function readTx(f,c,sub,t0){
  if(f.br!==undefined&&!f.br&&brMulti())errs.push('בחר סניף');
  if(b==='free'&&!s_(f.desc))errs.push('כתוב מה זה בדיוק');
  if(b==='emp'&&!f.m)errs.push('בחר מזומן או העברה');
+ if(b==='sup'&&f.due!==undefined){if(cfDt(f.due))f.plan=f.due.slice(0,7);else errs.push('חסר תאריך תשלום')}
  if((b==='sup'||b==='fixed')&&!pMonth(f.plan))errs.push('חסר חודש לתשלום');
  if(b==='sup'&&!s_(f.inv)&&!f.dn&&!(t0&&!t0.inv&&!t0.dn))errs.push('חסר מספר חשבונית (או סמן תעודת משלוח)');
  coErr(f,c,amt,errs);{const m=coOldTx(f,t0);if(m)errs.push(m)}if(errs.length)return{errs};
@@ -583,7 +584,7 @@ function readTx(f,c,sub,t0){
  t.date=f.date;t.amt=rnd(amt);t.note=s_(f.note);coSet(t,f,c);
  if(f.br&&brMulti()&&brAll().some(x=>x.id===f.br)&&(!t0||t0.br||f.br!==txBr(t0)))t.br=f.br;
  if(b==='free')t.desc=s_(f.desc);
- if(b==='sup'||b==='fixed'){t.plan=f.plan;t.inv=s_(f.inv);if(b==='sup'){if(f.dn&&!t.inv)t.dn=true;else delete t.dn}t.kind=amt<0?'credit':'inv';if(t0&&t0.kind==='refund'){t.kind='refund';t.amt=0;t.rf=Math.abs(amt)}}
+ if(b==='sup'||b==='fixed'){t.plan=f.plan;t.inv=s_(f.inv);if(b==='sup'){if(f.dn&&!t.inv)t.dn=true;else delete t.dn;/* due (B2): נכתב רק בחדשה, אם כבר היה, או אם השתנה */if(cfDt(f.due)&&(!t0||cfDt(t0.due)||f.due!==dueOf(t0)))t.due=f.due}t.kind=amt<0?'credit':'inv';if(t0&&t0.kind==='refund'){t.kind='refund';t.amt=0;t.rf=Math.abs(amt)}}
  if(b==='emp'){t.plan=f.plan;t.pays=[pyX({id:(t.pays[0]||{}).id||uid(),d:f.date,a:t.amt,m:f.m},f)]}
  if((b==='sup'||b==='fixed')&&!t0&&f.paynow){const pa=f.pa?pNum(f.pa):t.amt;if(pa==null||pa<=0||pa>t.amt+0.004)return{errs:['סכום ששולם לא תקין']};if(!f.m)return{errs:['בחר אמצעי תשלום']};if(!f.pd)return{errs:['חסר תאריך תשלום']};t.pays=[pyX({id:uid(),d:f.pd,a:rnd(pa),m:f.m},f)]}
  if(b==='cc'&&!t0&&f.link){const inv=S.tx.find(x=>x.id===f.link);if(inv){if(t.amt>bal(inv)+0.004)return{errs:['החיוב גדול מיתרת החשבונית ('+ils(bal(inv))+')']};inv.pays=inv.pays||[];inv.pays.push({id:uid(),d:t.date,a:t.amt,m:'אשראי',cc:t.id});t.x=1;t.link=inv.id}}
@@ -802,6 +803,40 @@ function wkBrF(cur,sub,c){if(!brMulti())return '';const L=brList();if(L.length<2
  return `<label class="f"><span>סניף (חובה)</span><select name="br" required data-c="${c}"><option value=""${v?'':' selected'}>בחר סניף</option>${L.map(b=>`<option value="${esc(b.id)}"${b.id===v?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`}
 /* בסריקה: הספק יכול להשתנות – מעדכנים את הניחוש אם המשתמש עוד לא נגע בסניף */
 function brRe(form,sub){const w=form&&form.querySelector('[data-brf]');if(!w)return;const s=w.querySelector('select');if(!s||s.dataset.u==='1'||s.type==='hidden')return;const g=brGuess({sub});if(g.sure&&g.id&&[...s.options].some(o=>o.value===g.id)){s.value=g.id;const n=w.querySelector('[data-brn]');if(n)n.textContent=brNm(g.id)}}
+/* ===== תזרים: תצוגה ===== */
+/* 2026-11-08 חלק ב' (B2): כרטיסי בית, מסך תזרים (V.cf), תאריך תשלום בחשבונית (dueF), תנאי תשלום (termsF), תגית סניף (brTag). על הליבה של B1 */
+const dDot=v=>{if(!cfDt(v))return '';const[y,m,d]=v.split('-');return +d+'.'+(+m)+'.'+y};
+const termsTxt=T=>T?(T.b==='eom'?'שוטף+'+T.d:T.d+' ימים מהחשבונית'):'';
+const brTag=t=>brMulti()?`<span class="tag t2" data-brtag>${esc(brNm(txBr(t)))}</span>`:'';
+/* בורר תנאי תשלום: "מספר חודשים (כמו היום)" / "שוטף + N" / "N ימים מהחשבונית". def = מסך ההגדרות (ברירת מחדל לעסק) */
+function termsF(T,pm,def){const md=T?T.b:'pm',r=(v,l)=>`<label class="chip ${md===v?'on':''}" style="cursor:pointer"><input type="radio" name="tmode" value="${v}" ${md===v?'checked':''} data-c="tmode" style="position:absolute;opacity:0;width:1px;height:1px">${l}</label>`;
+ return `<div class="f" data-terms><div style="font-weight:700;margin-bottom:6px;font-size:.92rem">תנאי תשלום</div><div class="pm" role="radiogroup">${r('pm','מספר חודשים (כמו היום)')}${r('eom','שוטף + ימים')}${r('inv','ימים מהחשבונית')}</div>
+ <label class="f" data-tm="pm" style="display:${md==='pm'?'':'none'}"><span>${def?'תשלום אחרי כמה חודשים מחודש החשבונית (למשל 2: חשבונית ביוני, תשלום באוגוסט)':'כמה חודשים אחרי חודש החשבונית (ריק = ברירת המחדל, '+S.pmOff+')'}</span><input name="pm" type="number" min="0" max="12" inputmode="numeric" value="${esc(pm??'')}"></label>
+ <label class="f" data-tm="d" style="display:${md==='pm'?'none':''}"><span>כמה ימים (0–180). שוטף+60 = סוף החודש שאחרי הבא</span><input name="td" type="number" min="0" max="180" inputmode="numeric" value="${T?T.d:''}"></label></div>`}
+CHG.tmode=el=>{el.closest('.pm').querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.contains(el)));const w=el.closest('[data-terms]'),p=el.value==='pm';w.querySelector('[data-tm=pm]').style.display=p?'':'none';w.querySelector('[data-tm=d]').style.display=p?'none':''};
+/* null = לפי חודשים (כמו היום); false = מספר ימים לא תקין */
+function termsRd(f){if(!f||!f.tmode||f.tmode==='pm')return null;const d=Math.round(+f.td);if(s_(f.td)===''||!(d>=0&&d<=180))return false;return{b:f.tmode,d}}
+/* תאריך תשלום בחשבונית ספק: רק לספק עם terms (או רשומה שכבר יש לה due). אחרת '' – והטופס מציג "חודש לתשלום" כמו היום */
+const dueHint=(sid,v)=>{const T=termsOf(sid);return(T?termsTxt(T)+' → ':'')+dDot(v)};
+function dueF(sid,date,t){if(!termsOf(sid)&&!(t&&cfDt(t.due)))return '';const v=t?dueOf(t):dueCalc(sid,date);
+ return `<label class="f"><span>תאריך תשלום</span><input name="due" type="date" required value="${esc(v)}" data-c="dueC" data-ps="${esc(sid||'')}"><div class="hd" data-hd>${esc(dueHint(sid,v))}</div></label>`}
+CHG.dueC=el=>{el.dataset.t='1';const d=el.parentElement.querySelector('[data-hd]');if(d)d.textContent=dueHint(el.dataset.ps,el.value)};
+/* שינוי תאריך החשבונית מחשב מחדש את תאריך התשלום (אם המשתמש לא שינה אותו ידנית) */
+function dueRe(f,date){const du=f&&f.elements&&f.elements.due;if(!du||du.dataset.t==='1'||!cfDt(date))return;du.value=dueCalc(du.dataset.ps,date);const d=du.parentElement.querySelector('[data-hd]');if(d)d.textContent=dueHint(du.dataset.ps,du.value)}
+/* שלושת כרטיסי הבית (חודש HM): לתשלום החודש → חשבוניות לתשלום; ירידה מהחשבון → תזרים; באיחור (נכון להיום) → קטע באיחור */
+function homeCardsH(m){const H=homeCards(m),bs='text-align:start;font:inherit;color:inherit;cursor:pointer;width:100%;min-width:0';
+ return `<div class="kg" id="hcards" style="grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 10px"><button class="k" style="${bs}" data-a="hcDue"><small>לתשלום החודש</small><b>${ils(H.due)}</b></button><button class="k" style="${bs}" data-a="hcCf"><small>ירידה מהחשבון</small><b>${ils(H.debit)}</b></button><button class="k ${H.lateN?'neg':''}" style="${bs}" data-a="hcLate"><small>באיחור${H.lateN?' ('+H.lateN+')':''}</small><b>${ils(H.lateSum)}</b></button></div>`}
+ACT.hcDue=()=>go('due',HM);ACT.hcCf=()=>go('cf',HM);ACT.hcLate=()=>go('due',{m:NOWM(),late:1});
+/* מסך תזרים: 6 חודשים מ-NOWM (או מחודש קודם שנפתח מהבית). שורה לחיצה = פירוט */
+let CFM='';
+const cfBar=(v,mx)=>`<div class="pbar" style="margin-top:6px" role="img" aria-label="${Math.round(v/mx*100)} אחוז"><i style="width:${Math.min(100,Math.round(v/mx*100))}%"></i></div>`;
+function cfRow(x,mx,open){const it=(n,d,a,s2)=>`<div class="li" style="cursor:default;min-height:48px"><div class="m"><b>${esc(n)}</b><small>${s2}</small></div><div class="a">${ils(a)}<small>${dfmt(d)}</small></div></div>`;
+ let h=`<button class="li" data-a="cfM" data-m="${x.m}" aria-expanded="${open}" style="display:block"><div class="row" style="justify-content:space-between"><b>${mfmt(x.m)}</b><b>${ils(x.sum)}</b></div><small>צ׳קים ${ils(x.sumChk)} · העברות ${ils(x.sumTr)}${x.sumPaid>0.004?' · ירד בפועל '+ils(x.sumPaid):''}</small>${cfBar(x.sum,mx)}</button>`;
+ if(open)h+=`<div data-cfd="${x.m}" style="margin:0 0 12px">${x.chk.map(c=>it(subName(c.t),c.date,c.a,'צ׳ק'+(chkOf(c.p)&&chkOf(c.p).no?' '+esc(chkOf(c.p).no):'')+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.tr.map(c=>it(subName(c.t),c.date,c.a,'העברה פתוחה'+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.paid.map(c=>it(subName(c.t),c.p.d,c.a,'ירד בפועל · '+esc(c.p.m||''))).join('')}${!x.chk.length&&!x.tr.length&&!x.paid.length?'<div class="empty">אין ירידות בחודש הזה</div>':''}</div>`;
+ return h}
+ACT.cfM=el=>{CFM=CFM===el.dataset.m?'':el.dataset.m;rerender()};
+V.cf=a=>{const nw=NOWM(),am=pMonth(a),from=am&&am<nw?am:nw,M=cfMonths(from,6,brFil()),mx=Math.max(1,...M.map(x=>x.sum));if(am&&!CFM)CFM=am;
+ return{t:'תזרים',s:'מה יורד מהחשבון',h:brChips()+`<p class="note" id="cfNote">מזומן, אשראי וקיזוז לא נכללים. צ׳קים לפי תאריך הפירעון, העברות פתוחות לפי תאריך התשלום.</p>`+M.map(x=>cfRow(x,mx,x.m===CFM)).join('')}};
 V.home=()=>{
  const m=HM,D=dueStats(m),inc=monthIncome(m),ex=monthExpense(m),pend=S.tx.filter(t=>t.cat==='p_inc'||t.cat==='p_exp').length,fx=fixPending(NOWM());
  const pct=D.due>0?Math.min(100,Math.round(D.pd/D.due*100)):0;
@@ -809,11 +844,12 @@ V.home=()=>{
  <small>נשאר לשלם החודש</small><div class="big">${ils(Math.max(0,D.rem))}</div><div class="pbar" style="background:rgba(255,255,255,.25)" role="img" aria-label="שולם ${pct} אחוז"><i style="width:${pct}%;background:currentColor"></i></div>
  <div class="two"><div><small>צריך לשלם החודש</small><b>${ils(D.due)}</b></div><div><small>שולם מתוכו</small><b>${ils(D.pd)}</b></div></div></div>`;
  const bs='text-align:start;font:inherit;color:inherit;cursor:pointer;width:100%';
+ h+=homeCardsH(m);
  h+=`<div class="kg"><button class="k pos" style="${bs}" data-a="tab" data-v="inc"><small>הכנסות החודש</small><b>${ils(inc)}</b></button><button class="k neg" style="${bs}" data-a="tab" data-v="exp"><small>הוצאות החודש</small><b>${ils(ex)}</b></button></div>`;
  {const df=rnd(inc-ex),pc=inc>0.004?Math.round(df/inc*100)+'%':'—';
  h+=`<div class="k" id="profit" style="margin-top:10px;border:1px solid var(--line);border-radius:14px;background:var(--card);padding:11px 12px;display:flex;justify-content:space-between;align-items:center"><small style="margin:0">רווחיות החודש</small><span><b class="${df>=0?'pos':'neg'}">${ils(df)}</b> <small style="display:inline;margin:0">(<bdi dir="ltr">${pc}</bdi>)</small></span></div>`}
  h+=brChips()+brTable(m);
- if(D.late.length)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="due"><span class="tag t4">באיחור</span><span style="flex:1"><b>${ils(D.lateSum)}</b> ב־${D.late.length} חשבוניות מחודשים קודמים</span>${ico('chev')}</button>`;
+ /* באיחור – בכרטיס הבית (B2), לא בבאנר */
  if(fx.length&&m===NOWM())h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="fix"><span class="tag t1">לאישור</span><span style="flex:1"><b>${fx.length}</b> הוצאות קבועות מחכות לאישור חשבונית</span>${ico('chev')}</button>`;
  {const aw=tdnL().aw.length;if(aw)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="tdn"><span class="tag t1">ממתין לחשבונית</span><span style="flex:1"><b>${aw}</b> תשלומים ששולמו מחכים לחשבונית</span>${ico('chev')}</button>`}
  h+=dpBan();if(bzF('cashClose')&&zcQN())h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="zc"><span class="tag t1">לאישור</span><span style="flex:1"><b>${zcQN()}</b> סגירות קופה מחכות לאישור שלך</span>${ico('chev')}</button>`; if(pend)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="pend"><span class="tag t1">לסיווג</span><span style="flex:1"><b>${pend}</b> תנועות מהמערכת הישנה מחכות לסיווג</span>${ico('chev')}</button>`;
@@ -828,12 +864,15 @@ V.home=()=>{
 ACT.hm=el=>{HM=addMon(HM,+el.dataset.d);rerender()};
 function txRow(t,showCat){
  const c=cat(t.cat),b=c.beh,sub=showCat?`${esc(c.name)} › ${esc(subName(t))}`:esc(t.desc&&b==='free'?t.desc:(t.note||''));
- const extra=b==='emp'?`משכורת ל־${mfmt(pmon(t))} · ${esc((t.pays[0]||{}).m||'לא צוין')}`:(b==='sup'||b==='fixed')?`לתשלום ${mfmt(pmon(t))}${invS(t)}`:(showCat?esc(t.note||''):'');
- return dxRow(t,`<button class="li ${t.t}" data-a="tx" data-id="${t.id}"><div class="m"><b>${showCat?esc(subName(t)):dfmt(t.date)}</b><small>${showCat?esc(c.name)+' · '+dfmt(t.date):sub}${extra&&!showCat?' · '+extra:''}</small>${hasPay(t)||t.kind==='credit'||t.kind==='refund'?statusTag(t):''}${dxWhoSm(t)}</div><div class="a ${t.t==='inc'?'pos':''}">${t.t==='inc'?'+':''}${ils(t.kind==='refund'?t.rf:t.amt)}<small>${hasPay(t)&&bal(t)>0?'יתרה '+ils(bal(t)):''}</small></div></button>`)}
+ const extra=b==='emp'?`משכורת ל־${mfmt(pmon(t))} · ${esc((t.pays[0]||{}).m||'לא צוין')}`:(b==='sup'||b==='fixed')?`לתשלום ${cfDt(t.due)?dfmt(t.due):mfmt(pmon(t))}${invS(t)}`:(showCat?esc(t.note||''):'');
+ return dxRow(t,`<button class="li ${t.t}" data-a="tx" data-id="${t.id}"><div class="m"><b>${showCat?esc(subName(t)):dfmt(t.date)}</b><small>${showCat?esc(c.name)+' · '+dfmt(t.date):sub}${extra&&!showCat?' · '+extra:''}</small>${hasPay(t)||t.kind==='credit'||t.kind==='refund'?statusTag(t):''}${brTag(t)}${dxWhoSm(t)}</div><div class="a ${t.t==='inc'?'pos':''}">${t.t==='inc'?'+':''}${ils(t.kind==='refund'?t.rf:t.amt)}<small>${hasPay(t)&&bal(t)>0?'יתרה '+ils(bal(t)):''}</small></div></button>`)}
 /* ---- חשבוניות לתשלום ---- */
-V.due=()=>{const m=NOWM(),D=dueStats(m),fut=inv().filter(t=>pmon(t)>m&&bal(t)>0.004&&inBr(t,brFil())).sort((a,b)=>pmon(a).localeCompare(pmon(b)));msSync(D.late.concat(D.open,fut),[],'');
+V.due=a=>{const o=a&&typeof a==='object'?a:{m:a},m=pMonth(o.m)||NOWM(),E=brFil(),td=today(),ok=t=>bal(t)>0.004&&inBr(t,E);
+ /* באיחור – נכון להיום, לפי dueOf (B2) */const late=inv().filter(t=>ok(t)&&isLate(t,td)).sort((x,y)=>dueOf(x).localeCompare(dueOf(y))),lid=new Set(late.map(t=>t.id));
+ const open=inv().filter(t=>ok(t)&&!lid.has(t.id)&&pmon(t)<=m).sort((x,y)=>(x.date||'').localeCompare(y.date||'')),fut=inv().filter(t=>ok(t)&&!lid.has(t.id)&&pmon(t)>m).sort((x,y)=>pmon(x).localeCompare(pmon(y)));msSync(late.concat(open,fut),[],'');
  const sec=(t,L,tag)=>L.length?msHd(t,L)+L.map(x=>MS.on?msRow(x,tag):invRow(x,tag)).join(''):'';
- return{t:'חשבוניות לתשלום',s:'כל הספקים',h:`<div class="kg"><div class="k"><small>לתשלום החודש</small><b>${ils(sum(D.open,bal))}</b></div><div class="k neg"><small>באיחור</small><b>${ils(D.lateSum)}</b></div></div>`+brChips()+msTop()+sec('באיחור',D.late.sort((a,b)=>pmon(a).localeCompare(pmon(b))),'באיחור')+sec('לסגור החודש',D.open,mfmt(m))+sec('חודשים הבאים',fut)+(!D.late.length&&!D.open.length&&!fut.length?'<div class="empty">אין חשבוניות פתוחות ✓</div>':'')+msFoot()}};
+ if(o.late)setTimeout(()=>{const e=document.getElementById('dueLate');if(e&&e.scrollIntoView)e.scrollIntoView({block:'start'})},60);
+ return{t:'חשבוניות לתשלום',s:'כל הספקים',h:`<div class="kg"><div class="k"><small>לתשלום ב${mfmt(m)}</small><b>${ils(sum(open,bal))}</b></div><div class="k neg"><small>באיחור</small><b>${ils(sum(late,bal))}</b></div></div>`+brChips()+msTop()+`<div id="dueLate">${sec('באיחור',late,'באיחור')}</div>`+sec('לסגור ב'+mfmt(m),open,mfmt(m))+sec('חודשים הבאים',fut)+(!late.length&&!open.length&&!fut.length?'<div class="empty">אין חשבוניות פתוחות ✓</div>':'')+msFoot()}};
 /* ---- הכנסות / הוצאות ---- */
 const catTotal=(c,list)=>rnd(sum(list.filter(t=>t.cat===c.id&&inP(t.date)&&inBr(t,brFil())),t=>t.amt));
 function overview(kind){
@@ -887,9 +926,9 @@ V.card=id=>{const s=subById(id);if(!s)return{t:'?',h:'<div class="empty">הכר�
  h+=Object.keys(groups).sort().reverse().map(m=>`<div class="mh"><span>${mfmt(m)}</span><span>${ils(sum(groups[m],t=>t.amt))}</span></div>`+groups[m].map(t=>txRow(t,false)).join('')).join('')||'<div class="empty">אין תנועות בתקופה שנבחרה</div>';
  return{t:s.name,s:c.name,h}};
 ACT.subMenu=el=>{const s=subById(el.dataset.id),c=cat(s.cat),b=c.beh,n=txOfSub(s.id).length;
- dlg(`<h3>הגדרות כרטיס · ${esc(s.name)}</h3><form data-f="subsave"><input type="hidden" name="id" value="${s.id}">${fld('שם','name',s.name,'text','required')}${b==='emp'?fld('תפקיד','role',(s.ext||{}).role)+fld('טלפון','phone',(s.ext||{}).phone,'tel')+fld('תחילת עבודה','start',(s.ext||{}).start,'date')+fld('הערות','notes',(s.ext||{}).notes):''}${b==='cc'?fld('4 ספרות אחרונות','last4',(s.ext||{}).last4):''}${b==='sup'?fld('תנאי תשלום: כמה חודשים אחרי חודש החשבונית (ריק = ברירת המחדל, '+S.pmOff+')','pm',s.pm!=null?s.pm:'','number','min="0" max="12" inputmode="numeric"'):''}<button class="btn w">שמור</button></form>
+ dlg(`<h3>הגדרות כרטיס · ${esc(s.name)}</h3><form data-f="subsave"><input type="hidden" name="id" value="${s.id}">${fld('שם','name',s.name,'text','required')}${b==='emp'?fld('תפקיד','role',(s.ext||{}).role)+fld('טלפון','phone',(s.ext||{}).phone,'tel')+fld('תחילת עבודה','start',(s.ext||{}).start,'date')+fld('הערות','notes',(s.ext||{}).notes):''}${b==='cc'?fld('4 ספרות אחרונות','last4',(s.ext||{}).last4):''}${b==='sup'?termsF(cfTermsOk(s.terms)?s.terms:null,s.pm!=null?s.pm:''):''}<button class="btn w">שמור</button></form>
  <div class="row" style="margin-top:10px"><button class="btn g grow" data-a="subHide" data-id="${s.id}">${s.off?'החזרת הכרטיס':'הסתרת הכרטיס'}</button>${n===0?`<button class="btn r grow" data-a="subDel" data-id="${s.id}">מחיקה</button>`:''}</div><p class="note">הסתרה לא מוחקת תנועות. מחיקה אפשרית רק לכרטיס בלי תנועות.</p>`)};
-FRM.subsave=form=>{const f=fd(form),s=subById(f.id),nm=s_(f.name);if(!nm)return;if(S.subs.find(x=>x.cat===s.cat&&x.name===nm&&x.id!==s.id))return toast('כבר יש כרטיס בשם הזה');if(f.pm!==undefined){if(f.pm==='')delete s.pm;else s.pm=Math.max(0,Math.min(12,Math.round(+f.pm)||0))}s.name=nm;s.ext=Object.assign(s.ext||{},{role:f.role,phone:f.phone,start:f.start,notes:f.notes,last4:f.last4});save();closeDlg();rerender();toast('נשמר')};
+FRM.subsave=form=>{const f=fd(form),s=subById(f.id),nm=s_(f.name);if(!nm)return;if(S.subs.find(x=>x.cat===s.cat&&x.name===nm&&x.id!==s.id))return toast('כבר יש כרטיס בשם הזה');if(f.tmode!==undefined){const T=termsRd(f);if(T===false)return toast('מספר ימים לא תקין (0–180)');if(T)s.terms=T;else delete s.terms}if(f.pm!==undefined){if(f.pm==='')delete s.pm;else s.pm=Math.max(0,Math.min(12,Math.round(+f.pm)||0))}s.name=nm;s.ext=Object.assign(s.ext||{},{role:f.role,phone:f.phone,start:f.start,notes:f.notes,last4:f.last4});save();closeDlg();rerender();toast('נשמר')};
 ACT.subHide=el=>{const s=subById(el.dataset.id);s.off=!s.off;save();closeDlg();if(s.off&&NAV.length>1)NAV.pop();render(0);toast(s.off?'הכרטיס הוסתר':'הכרטיס הוחזר')};
 ACT.subDel=el=>{ask('למחוק את הכרטיס?',()=>{S.subs=S.subs.filter(x=>x.id!==el.dataset.id);save();if(NAV.length>1)NAV.pop();render(0);toast('נמחק')},'מחק')};
 /* ---- כרטסת ---- */
@@ -1337,7 +1376,7 @@ const thChips=l=>l.map(([k,t])=>`<button class="chip ${S.theme===k?'on':''}" dat
 V.settings=()=>{
  const row=c=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(c.name)}</b><small>${BEH[c.beh]}${S.tx.filter(t=>t.cat===c.id).length?' · '+S.tx.filter(t=>t.cat===c.id).length+' תנועות':''}${c.off?' · מוסתרת':''}</small></div><button class="btn s g" data-a="catEdit" data-id="${c.id}">עריכה</button></div>`;
  return{t:'הגדרות',s:'מראה וקטגוריות',h:`<div class="sec"><h3>מראה</h3></div><div class="card"><h3>ערכות העסק (עם הלוגו, גם אצל העובדים)</h3><div class="chips" role="radiogroup" aria-label="ערכות העסק" style="margin:8px 0 14px">${thChips(THEMES2)}</div><h3>ערכות קלאסיות</h3><div class="chips" role="radiogroup" aria-label="ערכת צבעים" style="margin-top:8px">${thChips(THEMES)}</div><h3 style="margin-top:14px">גודל כתב</h3><div class="chips">${[[1,'רגיל'],[2,'גדול'],[3,'גדול מאוד']].map(([k,l])=>`<button class="chip ${S.fs==k?'on':''}" data-a="fs" data-v="${k}" aria-pressed="${S.fs==k}">${l}</button>`).join('')}</div></div>
- <div class="sec"><h3>תנאי תשלום לספקים</h3></div><div class="card"><form data-f="pmoff">${fld('ברירת מחדל: תשלום אחרי כמה חודשים מחודש החשבונית (למשל 2: חשבונית ביוני, תשלום באוגוסט)','pm',S.pmOff,'number','min="0" max="12" required inputmode="numeric"')}<button class="btn w">שמור</button></form><p class="note">אפשר לשנות לכל ספק בנפרד: בכרטיס הספק ← הגדרות כרטיס.</p></div>
+ <div class="sec"><h3>תנאי תשלום לספקים</h3></div><div class="card"><form data-f="pmoff">${termsF(cfTermsOk(S.terms)?S.terms:null,S.pmOff,1)}<button class="btn w">שמור</button></form><p class="note">אפשר לשנות לכל ספק בנפרד: בכרטיס הספק ← הגדרות כרטיס.</p></div>
  <div class="sec"><h3>קטגוריות הכנסה</h3><button class="btn s" data-a="catWiz" data-t="inc">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='inc'&&!c.hid).map(row).join('')}
  <div class="sec"><h3>קטגוריות הוצאה</h3><button class="btn s" data-a="catWiz" data-t="exp">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='exp'&&!c.hid).map(row).join('')}
  <div class="sec"><h3>נתונים</h3></div><button class="opt" data-a="go" data-v="data"><span>גיבוי ושחזור</span>${ico('chev')}</button><button class="opt" data-a="go" data-v="imp"><span>ייבוא מאקסל</span>${ico('chev')}</button>
@@ -1419,7 +1458,7 @@ function enterApp(fresh){
  if(old&&Array.isArray(old.inc)&&Array.isArray(old.exp)){try{showConvert(old);render(0);return}catch(e){console.error(e)}}
  showWelcome();render(0);abkOffer()}
 
-FRM.pmoff=f=>{const v=Math.max(0,Math.min(12,Math.round(+f.pm.value)));S.pmOff=isNaN(v)?2:v;save();toast('נשמר');rerender()};
+FRM.pmoff=f=>{const T=termsRd(fd(f));if(T===false)return toast('מספר ימים לא תקין (0–180)');if(T)S.terms=T;else delete S.terms;const v=Math.max(0,Math.min(12,Math.round(+f.pm.value)));S.pmOff=isNaN(v)?2:v;save();toast('נשמר');rerender()};
 
 /* ===== PDF (טקסט מצויר כתמונה) ===== */
 function pdfPages(sp){const W=1754,H=1240,M=60,RH=40,F='"Heebo","Noto Sans Hebrew","Segoe UI",Arial,sans-serif',pages=[],cols=sp.cols,sc=(W-2*M)/cols.reduce((a,c)=>a+c.w,0);
@@ -1936,7 +1975,8 @@ ACT.inbOk=async el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)retur
  if(b==='sup'&&!s_(d.inv)&&!d.dn)return toast('חסר מספר חשבונית. לחץ "שינוי" והוסף, או סמן תעודת משלוח');
  if(b==='sup'&&!el.dataset.ok){const mm=dupMsg(dupInbox(it));if(mm.length)return ask('נראה שההוצאה כבר קיימת: '+mm.join('; ')+'. לאשר בכל זאת?',()=>{ACT.inbOk({dataset:{id:it.id,ok:'1',rq:'1'}})},'אשר בכל זאת')}
  const t={id:uid(),src:it.id,t:'exp',cat:cid,sub:sid,date,amt:rnd(a),plan:pMonth(d.plan)||(b==='sup'?payDef(sid,date):date.slice(0,7)),inv:s_(d.inv),note:('הוכנס על ידי '+it.by+(d.note&&b!=='free'?' · '+d.note:'')),desc:b==='free'?(s_(d.note)||inbName(it)):(cid==='p_exp'?inbName(it):''),kind:a<0?'credit':'inv',pays:[],file:it.file||''};if(d.reg&&zcRegOk(d.creg)){t.creg=d.creg;t.cowhy=s_(d.note).slice(0,300);t.ctm=zcTime(d.ctm)}
- if(b==='emp')t.pays=[{id:uid(),d:date,a:t.amt,m:d.m}];
+ if(b==='emp')t.pays=[pyX({id:uid(),d:date,a:t.amt,m:d.m},{bank:typeof d.bank==='string'?d.bank:''})];
+ /* B2: תאריך תשלום – מהשינוי, או מתנאי התשלום של הספק (חשבונית חדשה) */if(b==='sup'){const du=cfDt(d.due)?d.due:(termsOf(sid)?dueCalc(sid,date):'');if(du){t.due=du;t.plan=du.slice(0,7)}}
  if(typeof d.br==='string'&&brAll().some(x=>x.id===d.br))t.br=d.br;
  /* 6ז: מי הזין – העובד ששלח (owner של המסמך ב-inbox) */t.eu=typeof it.ow==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(it.ow)?it.ow:'';
  if(b==='sup'&&d.dn&&!t.inv)t.dn=true;
@@ -2085,19 +2125,23 @@ function inbDlg(){const it=S.inbox.find(x=>x.id===IE.id);if(!it)return closeDlg(
  ${selO('קטגוריה','cat',cs.map(x=>[x.id,x.name]),IE.cat).replace('<select','<select data-c="inbf"')}
  ${subs.length?selO('ספק / פירוט','sub',subs.map(x=>[x.id,x.name]),IE.sub).replace('<select','<select data-c="inbf"'):''}
  ${amtF('amt',IE.amt,true)}${dateF('תאריך החשבונית','date',IE.date)}
- ${c&&c.beh==='sup'?fld('חודש תשלום','plan',IE.plan,'month','required data-sup="1" data-ps="'+esc(IE.sub)+'"')+fld('מספר חשבונית','inv',IE.inv,'text','autocomplete="off" '+(IE.dn?'':'required'))+`${IE.dn?'<label class="cb"><input type="checkbox" name="dn" value="1" data-c="dn" checked> תעודת משלוח (עדיין אין חשבונית)</label>':''}`:c&&c.beh==='fixed'?fld('חודש תשלום','plan',IE.plan,'month','required'):''}
+ ${inbBrF()}${c&&c.beh==='sup'?(dueF(IE.sub,IE.date,IE.due?{due:IE.due,plan:IE.plan,date:IE.date}:null)||fld('חודש תשלום','plan',IE.plan,'month','required data-sup="1" data-ps="'+esc(IE.sub)+'"'))+fld('מספר חשבונית','inv',IE.inv,'text','autocomplete="off" '+(IE.dn?'':'required'))+`${IE.dn?'<label class="cb"><input type="checkbox" name="dn" value="1" data-c="dn" checked> תעודת משלוח (עדיין אין חשבונית)</label>':''}`:c&&c.beh==='fixed'?fld('חודש תשלום','plan',IE.plan,'month','required'):''}
  ${c&&c.beh==='emp'?pmF('m',SAL_METHODS,IE.m||'',true)+fld('חודש משכורת','plan',IE.plan,'month','required'):''}
  ${fld('הערה','note',IE.note)}
- <div class="row" style="margin-top:12px"><button class="btn grow">שמור שינויים</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)}
+ <div class="row" style="margin-top:12px"><button class="btn grow">שמור שינויים</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`);{const k=$('#dlg select[name=bank]');if(k&&IE.bank&&[...k.options].some(o=>o.value===IE.bank))k.value=IE.bank}}
+/* סניף בשינוי הוצאה מהתור (B2, פער א'): רק ב-2+ סניפים; ברירת מחדל = מה שהעובד שלח, אחרת ניחוש */
+function inbBrF(){if(!brMulti())return '';const L=brAll().filter(b=>b.on),g=IE.br||(()=>{const x=brGuess({sub:IE.sub});return x.sure?x.id:''})();
+ return `<label class="f"><span>סניף (חובה)</span><select name="br" required data-c="inbf"><option value=""${g?'':' selected'}>בחר סניף</option>${L.map(b=>`<option value="${esc(b.id)}"${b.id===g?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`}
 ACT.inbEdit=el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(!it)return;const d=it.d,c=cat(d.cat)||(d.reg&&S.cats.find(x=>x.kind==='exp'&&!x.hid&&x.beh==='free'))||S.cats.find(x=>x.kind==='exp'&&!x.hid);
- IE={id:it.id,cat:c.id,sub:d.sub&&subById(d.sub)?d.sub:'',amt:d.amt,date:d.date||today(),plan:d.plan||'',note:d.note||'',m:d.m||'',inv:d.inv||'',dn:!!d.dn};
+ IE={id:it.id,cat:c.id,sub:d.sub&&subById(d.sub)?d.sub:'',amt:d.amt,date:d.date||today(),plan:d.plan||'',note:d.note||'',m:d.m||'',inv:d.inv||'',dn:!!d.dn,br:typeof d.br==='string'?d.br:'',bank:typeof d.bank==='string'?d.bank:'',due:cfDt(d.due)?d.due:''};
  const subs=subsOf(IE.cat);if(subs.length&&!subs.find(x=>x.id===IE.sub))IE.sub=subs[0].id;if(!IE.plan)IE.plan=c.beh==='sup'?payDef(IE.sub,IE.date):IE.date.slice(0,7);inbDlg()};
-CHG.inbf=el=>{const f=el.closest('form'),x=fd(f);Object.assign(IE,{amt:x.amt,date:x.date,plan:x.plan||IE.plan,note:x.note,cat:x.cat,m:x.m||IE.m,inv:x.inv??IE.inv,dn:!!x.dn});
+CHG.inbf=el=>{const f=el.closest('form'),x=fd(f);Object.assign(IE,{amt:x.amt,date:x.date,plan:x.plan||IE.plan,note:x.note,cat:x.cat,m:x.m||IE.m,inv:x.inv??IE.inv,dn:!!x.dn,br:x.br??IE.br,bank:x.bank??IE.bank,due:el.name==='cat'||el.name==='sub'?'':(x.due||IE.due)});
  if(el.name==='cat'){const subs=subsOf(IE.cat);IE.sub=subs[0]?subs[0].id:''}else IE.sub=x.sub||'';const c2=cat(IE.cat);if((el.name==='cat'||el.name==='sub')&&c2&&c2.beh==='sup')IE.plan=payDef(IE.sub,IE.date);inbDlg()};
 FRM.inbsave=f=>{const x=fd(f),it=S.inbox.find(z=>z.id===x.id);if(!it)return;const a=pNum(x.amt);if(a==null||a===0)return toast('סכום לא תקין');
- const c=cat(x.cat);if(c&&(c.beh==='sup'||c.beh==='fixed'||c.beh==='emp')&&!pMonth(x.plan))return toast('חסר חודש');if(c&&c.beh==='emp'&&!x.m)return toast('בחר מזומן או העברה');if(c&&c.beh==='sup'&&!s_(x.inv)&&!x.dn)return toast('חסר מספר חשבונית (או סמן תעודת משלוח)');
+ const c=cat(x.cat);if(x.br!==undefined&&!x.br&&brMulti())return toast('בחר סניף');if(c&&c.beh==='sup'&&x.due!==undefined){if(!cfDt(x.due))return toast('חסר תאריך תשלום');x.plan=x.due.slice(0,7)}if(c&&(c.beh==='sup'||c.beh==='fixed'||c.beh==='emp')&&!pMonth(x.plan))return toast('חסר חודש');if(c&&c.beh==='emp'&&!x.m)return toast('בחר מזומן או העברה');if(c&&c.beh==='sup'&&!s_(x.inv)&&!x.dn)return toast('חסר מספר חשבונית (או סמן תעודת משלוח)');
  const sb=x.sub?subById(x.sub):null;
  Object.assign(it.d,{cat:x.cat,catName:c?c.name:'',sub:x.sub||'',subName:sb?sb.name:'',amt:rnd(a),date:x.date,plan:c&&(c.beh==='sup'||c.beh==='fixed'||c.beh==='emp')?pMonth(x.plan):'',m:c&&c.beh==='emp'?(x.m||''):'',inv:c&&c.beh==='sup'?s_(x.inv):'',dn:c&&c.beh==='sup'&&!!x.dn&&!s_(x.inv),note:s_(x.note)});
+ /* B2: סניף, בנק (משכורת בהעברה), תאריך תשלום – נשמרים ב-it.d רק כשיש ערך */if(x.br&&brAll().some(b=>b.id===x.br))it.d.br=x.br;if(c&&c.beh==='emp'&&x.bank&&(x.m===METHODS[0]||x.m===METHODS[1]))it.d.bank=x.bank;else delete it.d.bank;if(c&&c.beh==='sup'&&cfDt(x.due))it.d.due=x.due;else delete it.d.due;
  save();closeDlg();rerender();toast('השינויים נשמרו')};
 /* ---- צפייה בצילום עם חזרה ושיתוף ---- */
 let VW=null;
