@@ -174,3 +174,6 @@ Object.assign(exports, require('./yemot-board'));
 // ריבוי עסקים (משימה 2026-11-05, שלב 5): פונקציות ניהול – createBusiness, inviteBusinessAdmin,
 // setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken, logBusinessEntry, addStaff, setStaffActive (completeInvite הוסרה בשלב 6ג: כניסה ראשונה במייל המובנה של Firebase)
 Object.assign(exports, require('./business'));
+
+// דף הפתיחה להזמנה (2026-11-08): publicBrand – שם תצוגה, לוגו וצבעים בלבד, ציבורי, עם הגבלת קצב
+Object.assign(exports, require('./public-brand'));
