@@ -700,6 +700,17 @@ function dueStats(m){
  const E=brFil(),L=live().filter(t=>t.t==='exp'&&['sup','fixed'].includes(beh(t))&&pmon(t)===m&&(t.kind||'inv')!=='refund'&&inBr(t,E));
  const due=rnd(sum(L,t=>t.amt)),pd=rnd(sum(L,cashPaid)),open=inv().filter(t=>pmon(t)===m&&bal(t)>0.004&&inBr(t,E)),late=inv().filter(t=>pmon(t)<m&&bal(t)>0.004&&inBr(t,E));
  return{L,due,pd,rem:rnd(due-pd),open,late,lateSum:rnd(sum(late,bal))}}
+/* ===== תזרים/צ'קים: ליבה ===== */
+/* 2026-11-08 חלק ב' (B1). חוזה ל-B2: termsOf, dueCalc, dueOf, isLate, chkOf, cfDebits, cfMonths, homeCards, chkMatch. stubs – מימוש בקומיט הבא */
+function termsOf(subId){return null}
+function dueCalc(subId,date){return addMon((date||today()).slice(0,7),0)+'-28'}
+function dueOf(t){return pmon(t)+'-28'}
+function isLate(t,td){return false}
+function chkOf(p){return null}
+function cfDebits(m,sel){return{chk:[],tr:[],paid:[],sum:0,sumPaid:0,sumExp:0}}
+function cfMonths(from,n,sel){return[]}
+function homeCards(m){return{due:0,debit:0,lateSum:0,lateN:0,open:[]}}
+function chkMatch(subId,amt){return[]}
 const monthIncome=m=>rnd(sum(live().filter(t=>t.t==='inc'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
 const monthExpense=m=>rnd(sum(live().filter(t=>t.t==='exp'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
 const invIn=(t,tag)=>`<div class="m"><b>${esc(subName(t))}</b><small>חשבונית ${dfmt(t.date)}${invS(t)} · ${esc(cat(t.cat).name)}</small>${paid(t)>0?`<small>שולם ${ils(paid(t))} מתוך ${ils(t.amt)}</small>`:''}${dxWhoSm(t)}</div><div class="a">${ils(bal(t))}<small>${tag||mfmt(pmon(t))}</small></div>`;
