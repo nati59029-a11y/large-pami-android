@@ -56,6 +56,11 @@ main{padding:14px;max-width:760px;margin:0 auto}
 .hero .two{display:flex;gap:12px;margin-top:10px}.hero .two>div{flex:1;background:rgba(255,255,255,.14);border-radius:12px;padding:8px 10px}
 html[data-th=night] .hero .two>div,html[data-th=contrast] .hero .two>div{background:rgba(0,0,0,.2)}
 .hero .two b{display:block;font-size:1.15rem}
+.hero .two>button{flex:1;min-width:0;min-height:48px;text-align:start;font:inherit;color:inherit;cursor:pointer;border:0;background:rgba(255,255,255,.14);border-radius:12px;padding:8px 10px}
+html[data-th=night] .hero .two>button,html[data-th=contrast] .hero .two>button{background:rgba(0,0,0,.2)}
+.hero .pill{display:inline-block;margin-inline-start:8px;padding:1px 9px;border-radius:99px;background:rgba(255,255,255,.2);font-weight:700;font-size:.85rem}
+html[data-th=night] .hero .pill,html[data-th=contrast] .hero .pill{background:rgba(0,0,0,.25)}
+#hcards .k{padding:10px 8px}#hcards .k b{font-size:.92rem;white-space:nowrap}#hcards .k .pbar{height:6px;margin-top:6px}
 .kg{display:grid;grid-template-columns:1fr 1fr;gap:10px}.kg .k{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:11px 12px}
 .k small{display:block;color:var(--mut);font-weight:600;font-size:.82rem}.k b{font-size:1.25rem}.k.pos b{color:var(--inc)}.k.neg b{color:var(--exp)}
 /* list items */
@@ -824,8 +829,8 @@ CHG.dueC=el=>{el.dataset.t='1';const d=el.parentElement.querySelector('[data-hd]
 /* שינוי תאריך החשבונית מחשב מחדש את תאריך התשלום (אם המשתמש לא שינה אותו ידנית) */
 function dueRe(f,date){const du=f&&f.elements&&f.elements.due;if(!du||du.dataset.t==='1'||!cfDt(date))return;du.value=dueCalc(du.dataset.ps,date);const d=du.parentElement.querySelector('[data-hd]');if(d)d.textContent=dueHint(du.dataset.ps,du.value)}
 /* שלושת כרטיסי הבית (חודש HM): לתשלום החודש → חשבוניות לתשלום; ירידה מהחשבון → תזרים; באיחור (נכון להיום) → קטע באיחור */
-function homeCardsH(m){const H=homeCards(m),bs='text-align:start;font:inherit;color:inherit;cursor:pointer;width:100%;min-width:0';
- return `<div class="kg" id="hcards" style="grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 10px"><button class="k" style="${bs}" data-a="hcDue"><small>לתשלום החודש</small><b>${ils(H.due)}</b></button><button class="k" style="${bs}" data-a="hcCf"><small>ירידה מהחשבון</small><b>${ils(H.debit)}</b></button><button class="k ${H.lateN?'neg':''}" style="${bs}" data-a="hcLate"><small>באיחור${H.lateN?' ('+H.lateN+')':''}</small><b>${ils(H.lateSum)}</b></button></div>`}
+function homeCardsH(m){const H=homeCards(m),pc=H.due>0?Math.min(100,Math.max(0,Math.round((H.due-H.rem)/H.due*100))):0,bs='text-align:start;font:inherit;color:inherit;cursor:pointer;width:100%;min-width:0';
+ return `<div class="kg" id="hcards" style="grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 10px"><button class="k" style="${bs}" data-a="hcDue"><small>לתשלום החודש</small><b>${ils(H.due)}</b>${H.due>0.004?`<div class="pbar" role="img" aria-label="שולם ${pc} אחוז"><i style="width:${pc}%"></i></div><small style="white-space:nowrap;margin-top:3px">נשאר ${ils(Math.max(0,H.rem))}</small>`:''}</button><button class="k" style="${bs}" data-a="hcCf"><small>ירידה מהחשבון</small><b>${ils(H.debit)}</b></button><button class="k ${H.lateN?'neg':''}" style="${bs}" data-a="hcLate"><small>באיחור${H.lateN?' ('+H.lateN+')':''}</small><b>${ils(H.lateSum)}</b></button></div>`}
 ACT.hcDue=()=>go('due',HM);ACT.hcCf=()=>go('cf',HM);ACT.hcLate=()=>go('due',{m:NOWM(),late:1});
 /* מסך תזרים: 6 חודשים מ-NOWM (או מחודש קודם שנפתח מהבית). שורה לחיצה = פירוט */
 let CFM='';
@@ -839,15 +844,16 @@ V.cf=a=>{const nw=NOWM(),am=pMonth(a),from=am&&am<nw?am:nw,M=cfMonths(from,6,brF
  return{t:'תזרים',s:'מה יורד מהחשבון',h:brChips()+`<p class="note" id="cfNote">מזומן, אשראי וקיזוז לא נכללים. צ׳קים לפי תאריך הפירעון, העברות פתוחות לפי תאריך התשלום.</p>`+M.map(x=>cfRow(x,mx,x.m===CFM)).join('')}};
 V.home=()=>{
  const m=HM,D=dueStats(m),inc=monthIncome(m),ex=monthExpense(m),pend=S.tx.filter(t=>t.cat==='p_inc'||t.cat==='p_exp').length,fx=fixPending(NOWM());
- const pct=D.due>0?Math.min(100,Math.round(D.pd/D.due*100)):0;
- let h=`<div class="hero"><div class="row" style="justify-content:space-between"><button class="ib" style="background:rgba(255,255,255,.18);color:inherit;border-color:transparent" data-a="hm" data-d="-1" aria-label="חודש קודם">${ico('chev')}</button><div style="text-align:center"><small>${heb(today())}</small><br><b style="font-size:1.15rem">${mfmt(m)}</b></div><button class="ib" style="background:rgba(255,255,255,.18);color:inherit;border-color:transparent;transform:scaleX(-1)" data-a="hm" data-d="1" aria-label="חודש הבא">${ico('chev')}</button></div>
- <small>נשאר לשלם החודש</small><div class="big">${ils(Math.max(0,D.rem))}</div><div class="pbar" style="background:rgba(255,255,255,.25)" role="img" aria-label="שולם ${pct} אחוז"><i style="width:${pct}%;background:currentColor"></i></div>
- <div class="two"><div><small>צריך לשלם החודש</small><b>${ils(D.due)}</b></div><div><small>שולם מתוכו</small><b>${ils(D.pd)}</b></div></div></div>`;
- const bs='text-align:start;font:inherit;color:inherit;cursor:pointer;width:100%';
+ /* כרטיס ראשי: רווח/הפסד + הכנסות והוצאות החודש. הרשאות: עובד בלי "רואה הכנסות" לא רואה הכנסות; הוצאות רק ב-expR=true ('own'/false מוסתר כי הסכום הוא של כל העסק); רווח רק כשרואים את שניהם */
+ const cI=!isW()||wp('incR'),cE=!isW()||wpE()==='all',df=rnd(inc-ex),pc=inc>0.004?Math.round(df/inc*100)+'%':'—';
+ const mb=(a,l,v)=>`<button data-a="tab" data-v="${a}"><small>${l}</small><b>${ils(v)}</b></button>`;
+ let h=`<div class="hero" id="hmain"><div class="row" style="justify-content:space-between"><button class="ib" style="background:rgba(255,255,255,.18);color:inherit;border-color:transparent" data-a="hm" data-d="-1" aria-label="חודש קודם">${ico('chev')}</button><div style="text-align:center"><small>${heb(today())}</small><br><b style="font-size:1.15rem">${mfmt(m)}</b></div><button class="ib" style="background:rgba(255,255,255,.18);color:inherit;border-color:transparent;transform:scaleX(-1)" data-a="hm" data-d="1" aria-label="חודש הבא">${ico('chev')}</button></div>`;
+ if(cI&&cE)h+=`<small id="profit">${df<0?'הפסד החודש':'רווח החודש'}</small><span class="pill" title="רווחיות"><bdi dir="ltr">${pc}</bdi> רווחיות</span><div class="big">${ils(df)}</div>`;
+ else if(cI)h+=`<small>הכנסות החודש</small><div class="big">${ils(inc)}</div>`;
+ else if(cE)h+=`<small>הוצאות החודש</small><div class="big">${ils(ex)}</div>`;
+ if(cI&&cE)h+=`<div class="two">${mb('inc','הכנסות',inc)}${mb('exp','הוצאות',ex)}</div>`;
+ h+=`</div>`;
  h+=homeCardsH(m);
- h+=`<div class="kg"><button class="k pos" style="${bs}" data-a="tab" data-v="inc"><small>הכנסות החודש</small><b>${ils(inc)}</b></button><button class="k neg" style="${bs}" data-a="tab" data-v="exp"><small>הוצאות החודש</small><b>${ils(ex)}</b></button></div>`;
- {const df=rnd(inc-ex),pc=inc>0.004?Math.round(df/inc*100)+'%':'—';
- h+=`<div class="k" id="profit" style="margin-top:10px;border:1px solid var(--line);border-radius:14px;background:var(--card);padding:11px 12px;display:flex;justify-content:space-between;align-items:center"><small style="margin:0">רווחיות החודש</small><span><b class="${df>=0?'pos':'neg'}">${ils(df)}</b> <small style="display:inline;margin:0">(<bdi dir="ltr">${pc}</bdi>)</small></span></div>`}
  h+=brChips()+brTable(m);
  /* באיחור – בכרטיס הבית (B2), לא בבאנר */
  if(fx.length&&m===NOWM())h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="fix"><span class="tag t1">לאישור</span><span style="flex:1"><b>${fx.length}</b> הוצאות קבועות מחכות לאישור חשבונית</span>${ico('chev')}</button>`;
