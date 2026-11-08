@@ -40,7 +40,7 @@ html[data-ds=a]{--bg:#222427;--card:#2c2f33;--ink:#eef0f2;--acc:#f0764c;--acc2:#
  --metal:repeating-linear-gradient(90deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px);--hl:rgba(255,255,255,.09);
  --elev-1:inset 0 1px 0 var(--hl),0 1px 0 rgba(0,0,0,.5),0 6px 14px -8px rgba(0,0,0,.7);--elev-2:inset 0 1px 0 var(--hl),0 2px 0 rgba(0,0,0,.45),0 14px 28px -14px rgba(0,0,0,.8);--elev-3:inset 0 1px 0 var(--hl),0 22px 44px -18px rgba(0,0,0,.85);
  --inset:inset 0 2px 4px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.25);--press:0 3px 0 rgba(0,0,0,.5);--sh:var(--elev-1);color-scheme:dark}
-html[data-ds=b]{--bg:#f3f1ee;--card:#fbfaf8;--ink:#2f2f31;--acc:#c2441d;--acc2:#ebd5cd;--onacc:#ffffff;--mut:#5d5b58;--line:#e2ddd6;--inc:#2f6f55;--exp:#a93d1b;
+html[data-ds=b]{--bg:#f3f1ee;--card:#fbfaf8;--ink:#2f2f31;--acc:#b23c17;--acc2:#ebd5cd;--onacc:#ffffff;--mut:#5d5b58;--line:#e2ddd6;--inc:#2f6f55;--exp:#a93d1b;
  --r-s:12px;--r-m:18px;--r-l:26px;--font-ui:Assistant,"Noto Sans Hebrew",Arial,sans-serif;--font-num:Rubik,Assistant,sans-serif;
  --srf-0:#e9e6e1;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#ffffff;--glass:rgba(243,241,238,.8);--blur:12px;--metal:none;--hl:rgba(255,255,255,.95);--lo:rgba(140,124,106,.30);
  --elev-1:5px 5px 12px var(--lo),-5px -5px 12px var(--hl);--elev-2:8px 9px 18px var(--lo),-7px -7px 16px var(--hl);--elev-3:12px 14px 28px var(--lo),-10px -10px 24px var(--hl);
@@ -219,35 +219,8 @@ body.wk .bar,body.wk header [aria-label="הגדרות"]{display:none!important}b
 
 /* ===== מסך כניסה ===== */
 body.gate>*:not(#gate){display:none!important}
-body.gate{padding:0;background:#16191b}
-#gate{position:fixed;inset:0;z-index:9999;overflow:auto;background:#16191b;color:#1d2a2c;font-family:Heebo,Assistant,Rubik,"Segoe UI",Roboto,"Noto Sans Hebrew",Arial,sans-serif;-webkit-overflow-scrolling:touch}
-#gate .gbg{position:fixed;inset:0;overflow:hidden;pointer-events:none}
-#gate .gbg i{position:absolute;border-radius:50%;border:1.5px solid rgba(255,255,255,.07)}
-#gate .gbg i:nth-child(1){width:560px;height:560px;left:-220px;top:-200px;border-color:rgba(214,82,48,.35)}
-#gate .gbg i:nth-child(2){width:360px;height:360px;left:-120px;top:-100px}
-#gate .gbg i:nth-child(3){width:620px;height:620px;right:-300px;bottom:-280px;border-color:rgba(214,82,48,.22)}
-#gate .gwrap{position:relative;min-height:100%;display:flex;align-items:center;justify-content:center;padding:calc(72px + env(safe-area-inset-top)) 18px calc(28px + env(safe-area-inset-bottom))}
-#gate .gcard{position:relative;width:100%;max-width:430px;background:#fbf8f2;border-radius:28px;padding:84px 26px 22px;box-shadow:0 30px 60px -20px rgba(0,0,0,.6);border-top:5px solid #c9442a}
-#gate .glogo{position:absolute;top:-62px;left:50%;transform:translateX(-50%);width:124px;height:124px;background:#fff;border-radius:34px;display:grid;place-items:center;box-shadow:0 14px 30px -10px rgba(0,0,0,.55);border:5px solid #16191b}
-#gate .glogo img{width:112px;height:112px;border-radius:26px;display:block}
-#gate .gk{margin:0 0 4px;text-align:center;font-size:.82rem;font-weight:700;letter-spacing:.14em;color:#c9442a;text-transform:uppercase}
-#gate .gh{margin:0 0 22px;text-align:center;font-size:1.5rem;font-weight:500;line-height:1.3;color:#1d2a2c}
-#gate .gh b{font-weight:900;font-size:1.7rem}
-#gate .gf{display:block;margin:0 0 14px;position:relative}
-#gate .gf span{display:block;font-size:.8rem;font-weight:700;color:#5f6b69;margin:0 4px 5px}
-#gate .gf input{width:100%;height:54px;border:1.5px solid #d9d2c3;border-radius:14px;background:#fff;padding:0 16px;font-size:1.05rem;text-align:right;outline:none;transition:border-color .15s,box-shadow .15s}
-#gate .gf input:focus{border-color:#c9442a;box-shadow:0 0 0 4px rgba(201,68,42,.14)}
-#gate .geye{position:absolute;left:6px;bottom:5px;width:44px;height:44px;border:0;background:transparent;color:#5f6b69;display:grid;place-items:center;cursor:pointer;border-radius:12px}
-#gate .geye svg{width:22px;height:22px}
-#gate .gf:has(.geye) input{padding-left:52px}
-#gate .gerr{min-height:1.4em;margin:0 2px 8px;color:#b3261e;font-weight:700;font-size:.9rem;text-align:center}#gate .gerr.ginfo{color:#1d5b3a}
-#gate .gbtn{width:100%;height:56px;border:0;border-radius:16px;background:#c9442a;color:#fff;font-size:1.1rem;font-weight:800;letter-spacing:.02em;cursor:pointer;box-shadow:0 10px 20px -10px rgba(201,68,42,.9);transition:transform .1s,opacity .15s}
-#gate .gbtn:active{transform:scale(.985)}
-#gate .gbtn:disabled{opacity:.7}
-#gate .gbtn.ld span::after{content:"";display:inline-block;width:14px;height:14px;margin-right:10px;vertical-align:-2px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:gsp .8s linear infinite}
+body.gate{padding:0;background:var(--bg)}
 @keyframes gsp{to{transform:rotate(360deg)}}
-#gate .gfoot{margin:18px 0 0;text-align:center;font-size:.76rem;color:#7a8583}
-@media(max-height:620px){#gate .gwrap{align-items:flex-start}}
 
 .fbsplit{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:start}
 .fbsplit.one{display:block}
@@ -279,6 +252,75 @@ body.gate{padding:0;background:#16191b}
 
 .lw{display:flex;gap:6px;align-items:stretch;margin:0 0 8px}.lw>.li{flex:1;min-width:0;margin:0}.fa{display:flex;gap:4px;align-items:center;flex:none}.fa .ib{width:44px;height:44px;border-radius:12px}.fa .ib svg{width:20px;height:20px}
 .msbar{position:fixed;left:8px;right:8px;bottom:calc(104px + env(safe-area-inset-bottom));z-index:25;max-width:560px;margin:0 auto;background:var(--card);border:2px solid var(--acc);border-radius:16px;padding:10px 12px;box-shadow:0 8px 24px -10px rgba(0,0,0,.5)}.msbar .note{margin:6px 0 0}.mscb{font-size:1.5rem;line-height:1;flex:none;color:var(--acc)}
+/* DS:D2 – כניסה, בית, כותרת, ניווט, עוד, נעילה ביומטרית, השהיה. רק מראה; כל הצבעים מה-tokens */
+#gate{position:fixed;inset:0;z-index:9999;overflow:auto;background:var(--metal),var(--bg);color:var(--ink);font-family:var(--font-ui);-webkit-overflow-scrolling:touch}
+#gate .gbg{display:none}
+#gate .gwrap{position:relative;min-height:100%;display:flex;align-items:center;justify-content:center;padding:calc(76px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom))}
+#gate .gcard{position:relative;width:100%;max-width:430px;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--acc);border-radius:var(--r-l);padding:76px 22px 20px;box-shadow:var(--elev-3)}
+#gate .glogo{position:absolute;top:-62px;left:50%;transform:translateX(-50%);width:120px;height:120px;background:#fff;border-radius:32px;display:grid;place-items:center;border:4px solid var(--bg);box-shadow:var(--elev-3)}
+#gate .glogo img{width:108px;height:108px;border-radius:24px;display:block}
+#gate .gk{margin:0 0 4px;text-align:center;font-size:.84rem;font-weight:700;letter-spacing:.04em;color:var(--acc)}
+#gate .gh{margin:0 0 20px;text-align:center;font-size:1.4rem;font-weight:600;line-height:1.3;color:var(--ink)}
+#gate .gh b{font-weight:700;font-size:1.75rem;display:block;margin-top:2px}
+#gate .gf{display:block;margin:0 0 14px;position:relative}
+#gate .gf span{display:block;font-size:.84rem;font-weight:600;color:var(--mut);margin:0 4px 6px}
+#gate .gf input{width:100%;height:54px;border:1px solid var(--line);border-radius:var(--r-m);background:var(--srf-0);box-shadow:var(--inset);color:var(--ink);padding:0 16px;font-size:1.05rem;text-align:right;outline:none;transition:border-color var(--dur),box-shadow var(--dur)}
+#gate .gf input:focus{border-color:var(--acc);box-shadow:var(--inset),0 0 0 3px var(--acc2)}
+#gate .geye{position:absolute;left:5px;bottom:5px;width:44px;height:44px;border:0;background:transparent;color:var(--mut);display:grid;place-items:center;cursor:pointer;border-radius:var(--r-s)}
+#gate .geye svg{width:22px;height:22px}
+#gate .gf:has(.geye) input{padding-left:54px}
+#gate .gerr{min-height:1.4em;margin:0 2px 8px;color:var(--bad);font-weight:700;font-size:.9rem;text-align:center}#gate .gerr.ginfo{color:var(--inc)}
+#gate .gbtn{width:100%;min-height:56px;border:0;border-radius:var(--r-m);background:var(--acc);color:var(--onacc);font-size:1.1rem;font-weight:700;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),var(--press);transition:transform var(--dur),opacity var(--dur)}
+#gate .gbtn:active{transform:translateY(2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+#gate .gbtn:disabled{opacity:.7}
+#gate .gbtn.ld span::after{content:"";display:inline-block;width:14px;height:14px;margin-right:10px;vertical-align:-2px;border:2.5px solid rgba(127,127,127,.45);border-top-color:currentColor;border-radius:50%;animation:gsp .8s linear infinite}
+#gate .gfoot{margin:14px 0 0;text-align:center;font-size:.78rem;color:var(--mut)}
+#gate .glink{min-height:44px;color:var(--acc)}
+@media(max-height:620px){#gate .gwrap{align-items:flex-start}}
+/* נעילה ביומטרית והשהיית עסק */
+#bzlk,#susp{background:var(--metal),var(--bg);font-family:var(--font-ui)}
+#bzlk .card,#susp .card{border-radius:var(--r-l);border-top:3px solid var(--acc);box-shadow:var(--elev-3);padding:26px 20px 20px}
+#susp .card{border-top-color:var(--warn)}
+#bzlk .card img{box-shadow:var(--elev-2);border:3px solid var(--card);outline:1px solid var(--line)}
+#bzlk h2,#susp h2{margin:0 0 6px;font-weight:700}
+/* כותרת */
+html[data-ds] .top .ttl{font-size:1.25rem;font-weight:700;line-height:1.15}
+html[data-ds] .top .ttl small{font-size:.76rem;font-weight:600;color:var(--mut)}
+html[data-ds] .top #lglogo{box-shadow:var(--elev-1)}
+/* בית: כרטיס רווח */
+html[data-ds] #hmain{position:relative;overflow:hidden;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-l);box-shadow:var(--elev-3);padding:14px 14px 14px}
+html[data-ds] #hmain::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--acc)}
+html[data-ds] #hmain small{color:var(--mut);opacity:1;font-weight:600}
+html[data-ds] #hmain .hnv{width:44px;height:44px;background:var(--srf-0);color:var(--ink);border:1px solid var(--line);box-shadow:var(--elev-1)}
+html[data-ds] #hmain .big{font-size:2.6rem;font-weight:700;line-height:1.05;margin:6px 0 2px;letter-spacing:-.02em;color:var(--ink)}
+html[data-ds] #hmain .big.pos{color:var(--inc)}html[data-ds] #hmain .big.neg{color:var(--exp)}
+html[data-ds] #hmain .pill{background:var(--acc2);color:var(--ink);font-weight:600}
+html[data-ds] #hmain .two{gap:10px;margin-top:12px}
+html[data-ds] #hmain .two>button{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--inset);padding:10px 12px;min-height:56px;transition:transform var(--dur)}
+html[data-ds] #hmain .two>button:active{transform:translateY(1px)}
+html[data-ds] #hmain .two>button b{font-size:1.3rem;font-weight:700;margin-top:2px}
+html[data-ds] #hmain .two>[data-v=inc] b{color:var(--inc)}html[data-ds] #hmain .two>[data-v=exp] b{color:var(--exp)}
+html[data-ds] #hcards{gap:8px}
+html[data-ds] #hcards .k{padding:10px 9px;min-width:0}
+html[data-ds] #hcards .k small{font-size:.76rem;line-height:1.2}
+html[data-ds] #hcards .k b{font-size:clamp(.78rem,3.7vw,.95rem);overflow:hidden;text-overflow:ellipsis}
+/* פעולות מהירות: רשימה מדורגת */
+html[data-ds] .hacts{display:flex;flex-direction:column;flex-wrap:nowrap;gap:0;border:1px solid var(--line);border-radius:var(--r-l);background:var(--card);box-shadow:var(--elev-1);overflow:hidden}
+html[data-ds] .hacts .chip{width:100%;min-height:52px;padding:0 16px;border:0;border-radius:0;box-shadow:none;background:transparent;justify-content:space-between;font-size:1rem;font-weight:600;text-align:right}
+html[data-ds] .hacts .chip+.chip{border-top:1px solid var(--line)}
+html[data-ds] .hacts .chip::after{content:"";width:8px;height:8px;border-left:2px solid var(--mut);border-bottom:2px solid var(--mut);transform:rotate(45deg);margin-inline-end:4px;flex:none}
+html[data-ds] .hacts .chip:active{background:var(--srf-0)}
+/* ניווט תחתון */
+html[data-ds] .bar button{min-height:56px}
+html[data-ds] .bar button:not(.fab):active{background:var(--srf-0)}
+html[data-ds] .bar button.on svg{stroke-width:2.4}
+html[data-ds] .bar button.on::after{height:3px;width:20px}
+/* עוד: רשימה מדורגת */
+html[data-ds] .mlist{border:1px solid var(--line);border-radius:var(--r-l);background:var(--card);box-shadow:var(--elev-1);overflow:hidden}
+html[data-ds] .mlist .opt{margin:0;border:0;border-radius:0;box-shadow:none;background:transparent;min-height:64px;padding:8px 16px}
+html[data-ds] .mlist .opt+.opt{border-top:1px solid var(--line)}
+html[data-ds] .mlist .opt:active{background:var(--srf-0)}
+html[data-ds] .mlist .opt small{font-size:.82rem;font-weight:400}
 </style>
 <script src="xlsx.full.min.js"></script>
 <script src="orders/site-backend.js"></script>
@@ -1193,10 +1235,10 @@ V.home=()=>{
  /* כרטיס ראשי: רווח/הפסד + הכנסות והוצאות החודש. הרשאות: עובד בלי "רואה הכנסות" לא רואה הכנסות; הוצאות רק ב-expR=true ('own'/false מוסתר כי הסכום הוא של כל העסק); רווח רק כשרואים את שניהם */
  const cI=!isW()||wp('incR'),cE=!isW()||wpE()==='all',df=rnd(inc-ex),pc=inc>0.004?Math.round(df/inc*100)+'%':'—';
  const mb=(a,l,v)=>`<button data-a="tab" data-v="${a}"><small>${l}</small><b>${ils(v)}</b></button>`;
- let h=`<div class="hero" id="hmain"><div class="row" style="justify-content:space-between"><button class="ib" style="background:rgba(255,255,255,.18);color:inherit;border-color:transparent" data-a="hm" data-d="-1" aria-label="חודש קודם">${ico('chev')}</button><div style="text-align:center"><small>${heb(today())}</small><br><b style="font-size:1.15rem">${mfmt(m)}</b></div><button class="ib" style="background:rgba(255,255,255,.18);color:inherit;border-color:transparent;transform:scaleX(-1)" data-a="hm" data-d="1" aria-label="חודש הבא">${ico('chev')}</button></div>`;
- if(cI&&cE)h+=`<small id="profit">${df<0?'הפסד החודש':'רווח החודש'}</small><span class="pill" title="רווחיות"><bdi dir="ltr">${pc}</bdi> רווחיות</span><div class="big">${ils(df)}</div>`;
- else if(cI)h+=`<small>הכנסות החודש</small><div class="big">${ils(inc)}</div>`;
- else if(cE)h+=`<small>הוצאות החודש</small><div class="big">${ils(ex)}</div>`;
+ let h=`<div class="hero" id="hmain"><div class="row" style="justify-content:space-between"><button class="ib hnv" data-a="hm" data-d="-1" aria-label="חודש קודם">${ico('chev')}</button><div style="text-align:center"><small>${heb(today())}</small><br><b style="font-size:1.15rem">${mfmt(m)}</b></div><button class="ib hnv" style="transform:scaleX(-1)" data-a="hm" data-d="1" aria-label="חודש הבא">${ico('chev')}</button></div>`;
+ if(cI&&cE)h+=`<small id="profit">${df<0?'הפסד החודש':'רווח החודש'}</small><span class="pill" title="רווחיות"><bdi dir="ltr">${pc}</bdi> רווחיות</span><div class="big ${df<0?'neg':'pos'}">${ils(df)}</div>`;
+ else if(cI)h+=`<small>הכנסות החודש</small><div class="big pos">${ils(inc)}</div>`;
+ else if(cE)h+=`<small>הוצאות החודש</small><div class="big neg">${ils(ex)}</div>`;
  if(cI&&cE)h+=`<div class="two">${mb('inc','הכנסות',inc)}${mb('exp','הוצאות',ex)}</div>`;
  h+=`</div>`;
  h+=homeCardsH(m);
@@ -1207,7 +1249,7 @@ V.home=()=>{
  {const aw=tdnL().aw.length;if(aw)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="tdn"><span class="tag t1">ממתין לחשבונית</span><span style="flex:1"><b>${aw}</b> תשלומים ששולמו מחכים לחשבונית</span>${ico('chev')}</button>`}
  h+=dpBan();if(bzF('cashClose')&&zcQN())h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="zc"><span class="tag t1">לאישור</span><span style="flex:1"><b>${zcQN()}</b> סגירות קופה מחכות לאישור שלך</span>${ico('chev')}</button>`; if(pend)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="pend"><span class="tag t1">לסיווג</span><span style="flex:1"><b>${pend}</b> תנועות מהמערכת הישנה מחכות לסיווג</span>${ico('chev')}</button>`;
  const ccp=S.ccx.filter(c=>!c.match&&!c.exp).length;if(ccp)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="cc"><span class="tag t1">אשראי</span><span style="flex:1"><b>${ccp}</b> חיובי אשראי לא הותאמו</span>${ico('chev')}</button>`;
- h+=`<div class="chips scroll-x" style="margin-top:14px">${[['rep0','דוחות'],['imp','ייבוא'],['scan','סריקה'],['cmp','השוואות']].filter(x=>x[0]!=='scan'||bzF('scan')).map(([v,l])=>`<button class="chip" data-a="${v==='rep0'?'repAll':'go'}" data-v="${v}">${l}</button>`).join('')}</div>`;
+ h+=`<div class="chips hacts" style="margin-top:14px">${[['rep0','דוחות'],['imp','ייבוא'],['scan','סריקה'],['cmp','השוואות']].filter(x=>x[0]!=='scan'||bzF('scan')).map(([v,l])=>`<button class="chip" data-a="${v==='rep0'?'repAll':'go'}" data-v="${v}">${l}</button>`).join('')}</div>`;
  h+=`<div class="sec"><h3>לסגור ב${mfmt(m)}</h3><button class="btn s g" data-a="go" data-v="due">הכול</button></div>`;
  h+=D.open.sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6).map(t=>invRow(t)).join('')||`<div class="empty">${D.due>0?'כל החשבוניות של החודש שולמו ✓':'אין חשבוניות לתשלום החודש'}</div>`;
  const rec=live().filter(t=>inBr(t,brFil())).sort((a,b)=>(b.date.localeCompare(a.date))).slice(0,5);
@@ -1394,7 +1436,7 @@ V.cash=()=>{const T='סגירת קופה והפקדות';if(!isA())return{t:T,s:
 /* ---- עוד ---- */
 V.more=()=>{const pend=S.tx.filter(t=>t.cat==='p_inc'||t.cat==='p_exp').length,fx=fixPending(NOWM()).length;
  const o=(a,v,t,sm,n)=>(a==='ordGo'?!bzF('orders'):BZV[v]&&!bzF(BZV[v]))?'':`<button class="opt" data-a="${a}" data-v="${v||''}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`;
- return{t:'עוד',s:'כלים',h:(ordOn()?o('ordGo','','הזמנות אתר','מוצרים, ייבוא, תמונות והגדרות האתר – גרסת בדיקה'):'')+o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+o('go','tk','משימות','משימות לעובדים, אישור תמונות ואיחורים',typeof tkOverN==='function'?(tkOverN()||''):'')+o('go','ar','🛠️ בקשות לעדכון האפליקציה','תיקונים ושיפורים שהצוות ביקש',typeof arCnt==='function'?(arCnt()||''):'')+o('go','zc','💵 סגירת קופה','דוח Z ופתיחת קופה, הכנסה להכנסות וסגירות לאישור',zcCnt()||'')+o('go','zs','📊 סיכום סגירות קופה','כל הסגירות, הוצאות מקופה, הפקדות וההפרשים שאישרת',typeof zsLostN==='function'?(zsLostN()||''):'')+o('go','dp','🏦 העלאת אישור הפקדה','הוצאות מקופה להפקדה, ואישורי הפקדה לאישור',dqN()||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+trOpt()+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח, חשבוניות בלי מספר ותשלומים שממתינים לחשבונית',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
+ return{t:'עוד',s:'כלים',h:'<div class="mlist">'+(ordOn()?o('ordGo','','הזמנות אתר','מוצרים, ייבוא, תמונות והגדרות האתר – גרסת בדיקה'):'')+o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+o('go','tk','משימות','משימות לעובדים, אישור תמונות ואיחורים',typeof tkOverN==='function'?(tkOverN()||''):'')+o('go','ar','בקשות לעדכון האפליקציה','תיקונים ושיפורים שהצוות ביקש',typeof arCnt==='function'?(arCnt()||''):'')+o('go','zc','סגירת קופה','דוח Z ופתיחת קופה, הכנסה להכנסות וסגירות לאישור',zcCnt()||'')+o('go','zs','סיכום סגירות קופה','כל הסגירות, הוצאות מקופה, הפקדות וההפרשים שאישרת',typeof zsLostN==='function'?(zsLostN()||''):'')+o('go','dp','העלאת אישור הפקדה','הוצאות מקופה להפקדה, ואישורי הפקדה לאישור',dqN()||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+trOpt()+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח, חשבוניות בלי מספר ותשלומים שממתינים לחשבונית',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')+'</div>'}};
 
 ACT.repAll=()=>{RS=scopeOf('all:exp');go('rep')};
 
@@ -1471,7 +1513,7 @@ CHG.trPick=async el=>{const fs=[...el.files],sub=el.dataset.sub||'';el.value='';
 /* שדה בחירת הקבצים קבוע בגוף הדף (לא בתוך המסך), כדי שרענון של המסך בזמן שחלון הבחירה פתוח לא יאבד את הבחירה */
 ACT.trGo=el=>{if(!trOk())return toast('צילום העברה – למנהל בלבד');let i=document.getElementById('trIn');if(!i){i=document.createElement('input');i.type='file';i.id='trIn';i.accept='image/*,application/pdf';i.multiple=true;i.hidden=true;i.dataset.c='trPick';document.body.append(i)}i.dataset.sub=el.dataset.sub||'';i.value='';i.click()};
 const trBtn=(sub,cls)=>trOk()?`<button class="btn ${cls||''} w" style="margin-bottom:10px" data-a="trGo" data-sub="${esc(sub||'')}">📸 צילום העברה</button>`:'';
-const trOpt=()=>trOk()?`<button class="opt" data-a="trGo"><span>📸 צילום העברה<small>העברה בנקאית: חשבוניות ספק, משכורת או הוצאה קבועה</small></span>${ico('chev')}</button>`:'';
+const trOpt=()=>trOk()?`<button class="opt" data-a="trGo"><span>צילום העברה<small>העברה בנקאית: חשבוניות ספק, משכורת או הוצאה קבועה</small></span>${ico('chev')}</button>`:'';
 const trIt=el=>trOk()?TR.items.find(x=>x.id===el.dataset.it):null;
 const trR=el=>{const it=trIt(el);return{it,r:it&&it.rows.find(x=>x.id===el.dataset.r)}};
 const trLive=g=>!!g&&(grpOf(g).length>0||S.tx.some(t=>t.tgrp===g));
@@ -1736,7 +1778,7 @@ const THEMES2=[['logo','לוגו'],['logod','לוגו כהה'],['bake','מאפי
 const thChips=l=>l.map(([k,t])=>`<button class="chip ${S.theme===k?'on':''}" data-a="theme" data-v="${k}" aria-pressed="${S.theme===k}">${t}</button>`).join('');
 V.settings=()=>{
  const row=c=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(c.name)}</b><small>${BEH[c.beh]}${S.tx.filter(t=>t.cat===c.id).length?' · '+S.tx.filter(t=>t.cat===c.id).length+' תנועות':''}${c.off?' · מוסתרת':''}</small></div><button class="btn s g" data-a="catEdit" data-id="${c.id}">עריכה</button></div>`;
- return{t:'הגדרות',s:'מראה וקטגוריות',h:`<div class="sec"><h3>מראה</h3></div><div class="card"><h3>ערכות העסק (עם הלוגו, גם אצל העובדים)</h3><div class="chips" role="radiogroup" aria-label="ערכות העסק" style="margin:8px 0 14px">${thChips(THEMES2)}</div><h3>ערכות קלאסיות</h3><div class="chips" role="radiogroup" aria-label="ערכת צבעים" style="margin-top:8px">${thChips(THEMES)}</div>${dsRow()}<h3 style="margin-top:14px">גודל כתב</h3><div class="chips">${[[1,'רגיל'],[2,'גדול'],[3,'גדול מאוד']].map(([k,l])=>`<button class="chip ${S.fs==k?'on':''}" data-a="fs" data-v="${k}" aria-pressed="${S.fs==k}">${l}</button>`).join('')}</div></div>
+ return{t:'הגדרות',s:'מראה וקטגוריות',h:`<div class="sec"><h3>מראה</h3></div><div class="card">${dsRow()}<h3 style="margin-top:14px">גודל כתב</h3><div class="chips">${[[1,'רגיל'],[2,'גדול'],[3,'גדול מאוד']].map(([k,l])=>`<button class="chip ${S.fs==k?'on':''}" data-a="fs" data-v="${k}" aria-pressed="${S.fs==k}">${l}</button>`).join('')}</div></div>
  <div class="sec"><h3>תנאי תשלום לספקים</h3></div><div class="card"><form data-f="pmoff">${termsF(cfTermsOk(S.terms)?S.terms:null,S.pmOff,1)}<button class="btn w">שמור</button></form><p class="note">אפשר לשנות לכל ספק בנפרד: בכרטיס הספק ← הגדרות כרטיס. ספק עם תנאי תשלום משלו גובר על ברירת המחדל הזו.</p></div>
  <div class="sec"><h3>קטגוריות הכנסה</h3><button class="btn s" data-a="catWiz" data-t="inc">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='inc'&&!c.hid).map(row).join('')}
  <div class="sec"><h3>קטגוריות הוצאה</h3><button class="btn s" data-a="catWiz" data-t="exp">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='exp'&&!c.hid).map(row).join('')}
@@ -4918,7 +4960,7 @@ function dsDerive(t,acc){const[bg,card,ink,m1,m2]=DS_BASE[dsOk(t)?t:'a'],a=bzNor
  const c={acc:a,bg:bzMix(bg,a,m1),card:bzMix(card,a,m2),ink:bzMix(ink,a,.04)};c.acc2=bzAcc2(c.acc,c.bg);c.onacc=bzCR(BZ_K,c.acc)>=bzCR(BZ_W,c.acc)?BZ_K:BZ_W;return bzFix(c)}
 function dsApply(t){try{document.documentElement.dataset.ds=dsOk(t)?t:dsTheme()}catch(e){}}
 const dsPick=(cur,act,def,acc)=>`<div class="dsp" role="radiogroup" aria-label="ערכת עיצוב">${def?`<button type="button" role="radio" aria-checked="${!cur}" data-a="${act}" data-v=""><span class="mini" style="background:var(--srf-0)"><i></i><b></b></span>${esc(def)}</button>`:''}${DS_T.map(t=>`<button type="button" role="radio" aria-checked="${cur===t}" data-a="${act}" data-v="${t}"><span class="mini" style="${bzVars(dsDerive(t,acc||DS_ACC()))}"><i></i><b></b></span>${DS_N[t]}</button>`).join('')}</div>`;
-const DS_ACC=()=>{const b=SY.biz&&SY.biz.brand,c=b&&b.colors;return c&&BZHEX.test(c.acc||'')?c.acc:(t=>t==='a'?'#f0764c':'#c2441d')(dsBiz())};
+const DS_ACC=()=>{const b=SY.biz&&SY.biz.brand,c=b&&b.colors;return c&&BZHEX.test(c.acc||'')?c.acc:(t=>t==='a'?'#f0764c':t==='b'?'#b23c17':'#b5401b')(dsBiz())};
 const dsRow=()=>typeof isA==='function'&&isA()?`<h3>ערכת עיצוב</h3><p class="note" style="margin:2px 0 0">רק במכשיר הזה ורק לך. העובדים רואים את ברירת המחדל של העסק (${DS_N[dsBiz()]}).</p>${dsPick(dsMine(),'dsMine','ברירת המחדל של העסק')}`:'';
 ACT.dsMine=el=>{const v=el.dataset.v,k=dsKey();if(!k)return;try{if(dsOk(v))localStorage.setItem(k,v);else localStorage.removeItem(k)}catch(e){}BZK='~';rerender()};
 /* לוגו העסק בכותרת: נטען מ-Storage (b/{bizId}/brand/logo) עם הכניסה של המשתמש. נכשל = נשאר הלוגו הרגיל */
