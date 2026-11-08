@@ -322,7 +322,7 @@ function brGuess(t){const L=brList();if(!L.length)return{id:'',sure:true};if(L.l
  if(t&&t.br&&L.some(b=>b.id===t.br))return{id:t.br,sure:true};const ok=new Set(L.map(b=>b.id)),r=orgMatch(brAll().filter(b=>ok.has(b.id)),t||{},null);return r||{id:'',sure:false}}
 function bankGuess(t,pay){const L=orgNow().banks.filter(b=>b.on);if(!L.length)return{id:'',sure:false};if(pay&&pay.bank&&L.some(b=>b.id===pay.bank))return{id:pay.bank,sure:true};
  const tx=orgDig(orgTxt(t,pay)),l4=L.filter(b=>b.last4&&tx.includes(b.last4));if(l4.length===1)return{id:l4[0].id,sure:true};const r=orgMatch(L,t||{},pay);if(r)return r;return L.length===1?{id:L[0].id,sure:true}:{id:'',sure:false}}
-function cardGuess(t,pay){const L=ccAllCards().filter(c=>c.on);if(!L.length)return{id:'',sure:false};if(pay&&pay.card&&L.some(c=>c.id===pay.card))return{id:pay.card,sure:true};
+function cardGuess(t,pay){const L=(typeof ccAllCards==='function'?ccAllCards():orgNow().cards).filter(c=>c.on);if(!L.length)return{id:'',sure:false};if(pay&&pay.card&&L.some(c=>c.id===pay.card))return{id:pay.card,sure:true};
  const bySub=L.filter(c=>c.sub&&t&&t.sub===c.sub);if(bySub.length===1)return{id:bySub[0].id,sure:true};
  const tx=orgDig(orgTxt(t,pay)),l4=L.filter(c=>c.last4&&tx.includes(c.last4));if(l4.length===1)return{id:l4[0].id,sure:true};return L.length===1?{id:L[0].id,sure:true}:{id:'',sure:false}}
 /* bzLoad: מסמך העסק נקרא – מעדכנים את העותק המקומי (בלי שמירה כשאין שינוי) */
