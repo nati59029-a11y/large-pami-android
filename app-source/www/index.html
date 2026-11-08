@@ -1334,7 +1334,7 @@ function ledSpec(id){const s=subById(id),L=ledgerOf(id,LG.from,LG.to),t=k=>ils(r
  cols:[{h:'תאריך',w:9},{h:'תאריך עברי',w:16},{h:'סוג',w:8},{h:'מס׳ / אמצעי',w:13},{h:'חשבונית',w:10,a:'l'},{h:'זיכוי',w:10,a:'l'},{h:'תשלום',w:10,a:'l'},{h:'החזר',w:9,a:'l'},{h:'יתרה',w:11,a:'l'}],
  rows:L.rows.map(x=>[dfmt(x.d),heb(x.d),x.t,x.n||x.desc||'',x.inv!=null?ils(x.inv):'',x.cr!=null?ils(x.cr):'',x.pay!=null?ils(x.pay):'',x.rf!=null?ils(x.rf):'',ils(x.bal)]),
  sum:[['סה״כ חשבוניות',t('inv')],['סה״כ זיכויים',t('cr')],['סה״כ תשלומים',t('pay')],['סה״כ החזרים',t('rf')],['יתרת סגירה',ils(L.close)+(L.close<0?' (יתרת זכות לעסק)':'')]]}}
-ACT.ledPdf=el=>{try{const s=subById(el.dataset.id);saveFile('Ledger_'+s.name.replace(/[^\w֐-׿]+/g,'_')+'_'+stamp()+'.pdf',mkPdf(pdfPages(ledSpec(el.dataset.id))),'application/pdf')}catch(e){toast('יצירת ה־PDF נכשלה: '+(e.message||e))}};
+ACT.ledPdf=el=>{try{const s=subById(el.dataset.id);saveFile('Ledger_'+((isNat()?s.name.replace(/[^\w֐-׿]+/g,'_'):s.name.replace(/[^\w]+/g,'_').replace(/^_+|_+$/g,''))||s.id)+'_'+stamp()+'.pdf',mkPdf(pdfPages(ledSpec(el.dataset.id))),'application/pdf')}catch(e){toast('יצירת ה־PDF נכשלה: '+(e.message||e))}};
 ACT.ledXls=el=>{const s=subById(el.dataset.id),L=ledgerOf(el.dataset.id,LG.from,LG.to);xlsOrCsv('Ledger_'+stamp(),{'כרטסת':[['תאריך','סוג','חשבונית/אמצעי','חיוב','זכות','יתרה'],['','יתרת פתיחה','','','',L.open],...L.rows.map(r=>[r.d,r.t,r.n||r.desc||'',r.inv||r.rf||'',r.cr||r.pay||'',r.bal]),['','יתרת סגירה','','','',L.close]]})};
 ACT.loanXls=el=>{const L=S.loans.find(x=>x.id===el.dataset.id);xlsOrCsv('Loan_'+stamp(),{'לוח סילוקין':[['#','תאריך','תשלום','קרן','ריבית','יתרה','שולם'],...sched(L).map(r=>[r.k,r.date,r.pay,r.prin,r.int,r.bal,(L.paid||{})[r.k]?'כן':''])]})};
 /* ===== ייבוא אקסל אחד ===== */
@@ -3083,7 +3083,7 @@ function siSec(){const L=siL();if(!L.length)return BQ.length?adSec('🧾 תור 
  const inv=L.filter(x=>siKind(x)==='inv'&&!BQ.some(b=>b.fid==='ft'+x.h));
  return adSec('📥 מסמכים שהתקבלו ('+L.length+')')+`<p class="note" style="margin:0 0 8px">מסמכים ששותפו לאפליקציה. שום דבר לא נשמר עד שמאשרים כל מסמך במסך שלו.</p>`+L.map(siCard).join('')+(inv.length>1?`<button class="btn w" style="margin-bottom:10px" data-a="siBqAll">כל ${inv.length} החשבוניות לתור החשבוניות</button>`:'')+bqBanner()}
 /* מסמך משותף נמצא בתור אחד בלבד: תור החשבוניות (BQ) או צילום העברה (TR). אם כבר נשמר – לא מחליפים */
-const siUsed=fid=>S.tx.some(t=>t.file===fid||(t.pays||[]).some(p=>p&&p.file===fid));
+const siUsed=fid=>S.tx.some(t=>t.file===fid||t.rcf===fid||(t.pays||[]).some(p=>p&&p.file===fid));
 const siTrIt=x=>TR.items.find(t=>t.fid==='ft'+x.h);/* תור החשבוניות (BQ) וצילום העברה (TR) נשמרים רק בזיכרון. מסמך משותף שנכנס לאחד מהם מסומן ברשימה השמורה (bq / trq), עם תוצאת הזיהוי והשדות, וכך הוא חוזר לתור אחרי טעינה מחדש – בלי זיהוי נוסף */function siTrNew(x,du){if(!TR.items.length)TR={items:[],i:0,sub:''};const s0=TR.sub;TR.sub='';const fid='ft'+x.h,it={id:uid(),du,pdf:x.mime==='application/pdf',fid,st:'ok',type:x.type&&SIT[x.type]?x.type:'bank_transfer',man:1,rows:[],grps:x.part&&Array.isArray(x.grps)?x.grps.filter(g=>typeof g==='string'):[],used:!x.part&&new Set(bkFileIds()).has(fid),twin:false,si:x.id};it.rows=(Array.isArray(x.tr)&&x.tr.length?x.tr:[{}]).map(trRow);TR.sub=s0;return it}const siOf=it=>it&&it.si?(SI.L||[]).find(y=>y.id===it.si&&'ft'+y.h===it.fid):null;function siBqKeep(it){const x=siOf(it);if(!x||!BQ.includes(it))return;x.bq={st:it.st,cat:it.cat,f:it.f?Object.assign({},it.f):null,sup:!!(it.res&&it.res.sup),aiErr:String(it.aiErr||'').slice(0,200)};delete x.trq;siSave()}function siQOff(it){const x=siOf(it);if(!x)return;delete x.bq;delete x.trq;siSave();siFtGc(x)}/* הקובץ ft+hash שתור החשבוניות כתב: נמחק כשהמסמך יצא מהתור בלי שנשמר – רק אם אין רשומה שמקושרת אליו, הוא לא בתור החשבוניות, וצילום העברה לא שמר אותו */function siFtGc(x){const fid='ft'+x.h;if(!siUsed(fid)&&!BQ.some(b=>b.fid===fid)&&!TR.items.some(t=>t.fid===fid&&t.saved))fdelK(fid)}const SI_BQF={sub:'',newname:'',inv:'',date:'',amt:'',plan:'',pt:0,dn:0,note:'',dnum:''};async function siRestore(){if(!isA()||siRestore.b)return;siRestore.b=1;try{const L=siLoad();let nb=0,nt=0;for(const x of L.slice()){const fid='ft'+x.h;if(x.bq&&!BQ.some(b=>b.fid===fid)&&!siTrIt(x)&&!siUsed(fid)){const c=siSupCat();if(!c)continue;let du=null;try{du=await fget(fid)}catch(e){}if(!L.includes(x)||BQ.some(b=>b.fid===fid)||siTrIt(x))continue;const pdf=x.mime==='application/pdf';let pg=[];if(!pdf&&typeof du==='string'){if(du.startsWith('PAGES:')){try{pg=JSON.parse(du.slice(6)).filter(imgOk)}catch(e){}}else if(imgOk(du))pg=[du]}if(!du||(pdf?!du.startsWith('data:application/pdf'):!pg.length)){delete x.bq;siSave();continue}const o=x.bq,ready=(o.st==='ok'||o.st==='fail')&&o.f&&typeof o.f==='object',b={id:uid(),cat:typeof o.cat==='string'&&cat(o.cat)?o.cat:c.id,fid,st:ready?o.st:'q',anyCat:1,si:x.id,dnHint:x.type==='delivery_note',big:x.big?1:0,pg,hi:pg.slice()};if(pdf){b.pdf=1;b.du=du}if(ready){b.f={};for(const k in SI_BQF){const v=o.f[k];b.f[k]=typeof SI_BQF[k]==='number'?(+v||0):(v==null?'':String(v))}b.res={sup:o.sup?1:null};if(o.aiErr)b.aiErr=String(o.aiErr)}BQ.push(b);nb++}else if(x.trq&&!siTrIt(x)&&!BQ.some(b=>b.fid===fid)&&!(siUsed(fid)&&!x.part)){let du=null;try{du=await fget(siKey(x))}catch(e){}if(!du||!L.includes(x)||siTrIt(x)||BQ.some(b=>b.fid===fid))continue;const it=siTrNew(x,du);TR.items.push(it);nt++}}if(nb)bqPump();if(nb||nt){siUI();if(cur().v==='tr')trUI()}}finally{siRestore.b=0}}/* אחרי שמירת שורה בצילום העברה: אם נשארו שורות שלא נשמרו – המסמך נשאר בתור (part) עם השורות שנשארו, גם אחרי טעינה מחדש */function siTrPart(it){const x=it&&it.si&&(SI.L||[]).find(y=>y.id===it.si&&'ft'+y.h===it.fid);if(!x)return;const left=it.rows.filter(r=>!r.done);/* השורות שעוד לא נשמרו – בכל שינוי (שמירה, מחיקה, הוספה, עריכה), כדי ששורה שנמחקה לא תחזור אחרי טעינה */if(left.length)x.tr=left.map(r=>({amount:pNum(r.amt)||null,date:r.date,payee_name:r.name,payee_account:r.acct,reference:r.ref}));if(left.length&&left.length<it.rows.length){x.part=1;x.grps=it.grps.slice()}else{delete x.part;delete x.grps}siSave()}
 const SI_SAVED='המסמך הזה כבר נשמר באפליקציה, ולכן אי אפשר לרשום אותו שוב בסוג אחר. אם צריך – בטלו קודם את הרישום הקיים';
 function siMove(x,to){const fid='ft'+x.h;if(siUsed(fid)){toast(SI_SAVED);return false}
@@ -3147,7 +3147,7 @@ ACT.shqAll=()=>{document.querySelectorAll('.shq [data-k]').forEach(i=>{const it=
  if(shCount('price')+good.length>SHC.price.cap)ask('הדף יתמלא ופתקים ישנים יוחלפו. להמשיך?',go,'המשך');else go()};
 
 /* ===== גיבוי מלא: חשבוניות סרוקות, משוב ומדף + גיבוי יומי ל-Firebase ===== */
-const bkFileIds=()=>{const ids=new Set();S.tx.forEach(t=>{if(t.file)ids.add(t.file);(t.pays||[]).forEach(p=>{if(p&&p.file)ids.add(p.file)})});(FBL.cache||[]).forEach(r=>{if(r.hi)ids.add('fb:'+r.id)});(FBL.pend||[]).forEach(p=>ids.add('fb:'+p.id));(FBL.out||[]).forEach(o=>{if(o.hi)ids.add('fb:'+o.id)});return[...ids]};
+const bkFileIds=()=>{const ids=new Set();S.tx.forEach(t=>{if(t.file)ids.add(t.file);if(t.rcf)ids.add(t.rcf);(t.pays||[]).forEach(p=>{if(p&&p.file)ids.add(p.file)})});(FBL.cache||[]).forEach(r=>{if(r.hi)ids.add('fb:'+r.id)});(FBL.pend||[]).forEach(p=>ids.add('fb:'+p.id));(FBL.out||[]).forEach(o=>{if(o.hi)ids.add('fb:'+o.id)});return[...ids]};
 const shClean=()=>{const o={...SH};delete o.dirty;return o};
 async function bkCollect(prog,cloudImgs){const files={},ids=bkFileIds();let i=0;
  for(const id of ids){if(prog)prog(++i,ids.length);let f=null;try{f=await fget(id)}catch(e){}
@@ -4523,7 +4523,7 @@ CHG.usType=el=>{const k=el.value;if(!US||!k||k===US.type){usPaneDraw();return}
  usOpenForm(k)};
 /* ---- בחירת קבצים והוספת עמודים ---- */
 CHG.uspick=async el=>{const fs=[...el.files];el.value='';if(!US||!fs.length)return;const U=US;
- for(const f of fs){if(U.pg.length>=12){toast('אפשר עד 12 דפים');break}
+ for(const f of fs){if(U.pg.length>=US_MAXP){toast('אפשר עד '+US_MAXP+' דפים בסריקה אחת (חשבונית עד 12)');break}
   try{toast('מעבד קובץ…');const du=await rdU(f);if(f.type==='application/pdf'||/^data:application\/pdf/.test(du)){U.pg.push({pdf:1,du});continue}
    const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true),u=r.u||du;if(!imgOk(u))throw 0;U.pg.push({u,hi:hi.u||u})}catch(e){toast('קריאת הקובץ נכשלה')}}
  if(US!==U||!U.pg.length)return;
@@ -4632,7 +4632,7 @@ const usNum=v=>typeof v==='number'&&isFinite(v)?String(v):'';
 const usDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v||''))&&pDate(v)?v:'';
 /* ספק: לפי השם (כמו הזיהוי הקיים). ח.פ לא נשמר היום בכרטיס הספק – לכן לא משמש להתאמה (בלי שינוי מבנה נתונים) */
 function usSup(f,subs){const n=s_(f&&f.supplier);return n?ocrSupplier(n,subs):null}
-const usSupSubs=()=>S.subs.filter(s=>!s.off&&(cat(s.cat)||{}).beh==='sup').map(s=>({id:s.id,name:s.name,cat:s.cat}));
+const usSupSubs=()=>S.subs.filter(s=>!s.off&&(cat(s.cat)||{}).beh==='sup').map(s=>({id:s.id,name:s.name,cat:s.cat,hp:s.hp||''}));
 /* מנהל: חשבונית/הוצאה מקופה. ספק שנמצא → הקטגוריה שלו (הפעם הקודמת) ומיד לפרטים; אחרת בוחרים קטגוריה ו"ספק חדש" מוצע עם השם שזוהה */
 function usFillExp(k){const f=usF('invoice')||usF('cashout');if(!f||!A)return;A.usf=1;
  if(US.cls.ty==='invoice'){const s=usSup(f,usSupSubs());if(s&&cat(s.cat)){A.cat=s.cat;A.sub=s.id;A.step='det';A.type='exp';sheetDraw()}}}
@@ -4672,7 +4672,7 @@ ACT.usDupRep=()=>{if(!USD)return;const o=S.tx.find(x=>x.id===USD.old);if(!o||!US
 ACT.usDupSave=()=>{if(!USD)return;const f=USD.onSave;USD=null;closeDlg();f()};
 {const o=FRM.addsave;FRM.addsave=(form,ev)=>{const U=US;if(!(U&&A&&A.us&&!A.edit))return o(form,ev);const c=cat(A.cat);
  if(c&&c.beh==='sup'&&!form.dataset.dupok){const f=fd(form),r=readTx(f,c,A.sub,null);if(!r.errs){
-  const rc=usRcpt(r.t);if(rc){ask('זו קבלה לחשבונית '+rc.inv+' שכבר רשומה. לצרף את הקבלה לחשבונית, בלי הוצאה נוספת?',()=>{if(A&&A.fid&&!rc.file)rc.file=A.fid;else if(A&&A.fid)rc.note=s_((rc.note?rc.note+' · ':'')+'קבלה צורפה');save();sheetClose();toast('הקבלה שויכה לחשבונית');usDone();rerender()},'שייך לחשבונית');return}
+  const rc=usRcpt(r.t);if(rc){ask('זו קבלה לחשבונית '+rc.inv+' שכבר רשומה. לצרף את הקבלה לחשבונית, בלי הוצאה נוספת?',()=>{if(A&&A.fid&&!rc.file)rc.file=A.fid;else if(A&&A.fid&&A.fid!==rc.file){if(rc.rcf&&rc.rcf!==A.fid)rc.note=s_((rc.note?rc.note+' · ':'')+'קבלה נוספת צורפה');rc.rcf=A.fid}/* שלב 5: לחשבונית כבר יש קובץ – הקבלה נשמרת לידו (rcf), ושניהם נצפים מהשורה */save();sheetClose();toast('הקבלה שויכה לחשבונית');usDone();rerender()},'שייך לחשבונית');return}
   const dd=dupOf({id:r.t.id,sub:r.t.sub,amt:r.t.amt,date:r.t.date,inv:r.t.inv});if(dd.inv){usDupDlg(dd.inv,r.t,A.fid,()=>{form.dataset.dupok='1';FRM.addsave(form,ev)});return}}}
  return o(form,ev)}}
 {const o=usAfterSheet;usAfterSheet=function(){o();try{usFillForm($('#sheet'))}catch(e){}}}
@@ -4685,6 +4685,173 @@ ACT.siUs=async el=>{const x=siFind(el);if(!x)return;if(siUsed('ft'+x.h))return t
 {const o=siCard;siCard=function(x){const h=o(x);return h.replace(/<\/div>$/,`<button class="btn w" style="margin-top:8px" data-a="siUs" data-id="${esc(x.id)}">📄 פתיחה במסך הסריקה האחיד</button></div>`)}}
 /* "צילום העברה" (בלי ספק שנבחר מראש) פותח את המסך האחיד (החלטה 7) */
 {const o=ACT.trGo;ACT.trGo=el=>{if(!el.dataset.sub&&usAllowed('transfer')){usOpen();return}o(el)}}
+/* ===== סריקה אחידה, שלב 5: חיבור דפים. כל דף מזוהה לבד (דף = 1 במכסה), והאפליקציה מחברת: Z בשלושה חלקים (עליון/אמצעי/תחתון, בסדר הנכון), חשבונית עד 12 דפים (לפי מספר+ספק),
+   הפרדה בין מסמכים שונים ברצף, דף כפול, דף המשך ביום אחר / בלי מספר (שאלה), הצהרת פתיחה שמתחברת לסגירה. לפני שמירה – מסך "חיבור דפים" לתיקון ידני (פיצול, צירוף, סדר, מחיקה).
+   כל מסמך נשמר בשמירה הקיימת שלו, אחד אחרי השני. התור (הדפים + הזיהוי + החלוקה) נשמר במכשיר (IndexedDB, מפתח usq:<uid>) אחרי כל שינוי, כך שסגירת האפליקציה באמצע לא מוחקת דפים.
+   + שדה ח.פ בכרטיס ספק (s.hp, תוספת שדה בלבד) וזיהוי ספק לפי ח.פ ואם אין – לפי שם; קבלה לחשבונית שכבר יש לה קובץ – הקבלה נשמרת בשדה t.rcf, ושני הקבצים נצפים מהשורה. */
+const US_MAXP=24,US_INVP=12,USZN=['עליון','אמצעי','תחתון'];
+try{document.head.insertAdjacentHTML('beforeend','<style>.usrg{border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:0 0 10px;background:var(--card)}.usrg.done{opacity:.6}.usrh{display:flex;justify-content:space-between;gap:6px;align-items:center;font-weight:800}.usrp{display:flex;align-items:center;gap:6px;margin:6px 0}.usrb{display:flex;align-items:center;gap:8px;background:none;border:0;color:var(--ink);cursor:pointer;flex:1;min-width:0;text-align:start;padding:0;font:inherit}.usrt{width:40px;height:52px;object-fit:cover;border:1px solid var(--line);border-radius:6px;display:inline-grid;place-items:center;font-size:.7rem;flex:none;background:var(--bg)}.usra{display:flex;gap:2px;flex:none}.usra .usb{min-width:32px;min-height:34px;padding:0 4px;font-size:.85rem}.usrq{border:1px solid var(--warn);border-radius:10px;padding:6px 8px;margin:6px 0}.usrq .row{gap:6px;margin-top:6px}.usrd{display:flex;gap:8px;margin-top:6px}.usrd img{width:50%;max-height:160px;object-fit:contain;border:1px solid var(--line);border-radius:6px;background:var(--bg)}</style>')}catch(e){}
+const hpN=v=>String(v??'').replace(/\D/g,'');
+const hpOk=h=>/^\d{7,9}$/.test(h);
+const usPart=g=>{const c=g&&g.cls||{};return c.kind==='opening'?'o':(Number.isInteger(c.part)&&c.part>=0&&c.part<3?c.part:-1)};
+const usSpK=f=>{const h=hpN(f&&f.supplier_id);return hpOk(h)?'h'+h:(s_(f&&f.supplier)?'n'+ocrNorm(f.supplier).replace(/[^0-9a-zא-ת]/g,''):'')};
+/* ספק: קודם לפי ח.פ (אם נשמר בכרטיס), ואם אין התאמה – לפי השם (כמו קודם) */
+{const o=usSup;usSup=function(f,subs){const h=hpN(f&&f.supplier_id);if(hpOk(h)){const s=(subs||[]).find(x=>x&&x.hp&&hpN(x.hp)===h);if(s)return s}return o(f,subs)}}
+/* מספר הדף בחשבונית ("עמוד X מתוך Y") – לסדר ולזיהוי דף כפול */
+{const o=usMap;usMap=function(x){const r=o(x),res=x&&x.result||{};r.page=Number.isInteger(res.page)?res.page:null;r.pages=Number.isInteger(res.pages)?res.pages:null;return r}}
+/* החלוקה האוטומטית לקבוצות (מסמכים). פונקציה טהורה: מקבלת את הדפים (עם cls) ומחזירה [{k, ix:[אינדקסים], ask:[שאלות], n, sp, d}] */
+function usGroup(all){const G=[],seen={};let last=null;
+ all.forEach((g,i)=>{const c=g.cls||{},k=c.toMgr?'':(USK[c.kind]||''),f=c.f||{},h=g.h;
+  if(h&&seen[h]!=null){const g0=G.find(x=>x.ix.includes(seen[h]));if(g0){g0.ix.push(i);g0.ask.push({t:'dup',i,o:seen[h]});return}}if(h)seen[h]=i;
+  if(g.pdf){const gr={k,ix:[i],ask:[]};G.push(gr);last=null;return}
+  if(k==='exp'&&c.ty==='invoice'){const n=NINV(f.number),sp=usSpK(f),d=usDate(f.date);
+   let gr=n?G.find(x=>x.k==='exp'&&x.n===n&&!x.pdf&&(!sp||!x.sp||x.sp===sp)&&x.ix.length<US_INVP):null;
+   if(!gr&&!n&&c.docType!=='receipt'&&last&&last.k==='exp'&&last.ix.length<US_INVP){gr=last;gr.ask.push({t:'nonum',i})}
+   if(gr){const pn=c.page,o=pn?gr.ix.find(j=>(all[j].cls||{}).page===pn):undefined;if(o!==undefined)gr.ask.push({t:'dup',i,o});
+    if(d&&gr.d&&d!==gr.d)gr.ask.push({t:'date',i});gr.ix.push(i);if(!gr.sp)gr.sp=sp;if(!gr.d)gr.d=d}
+   else{gr={k:'exp',n,sp,d,ix:[i],ask:[]};G.push(gr)}
+   last=gr;return}
+  if(k==='z'||k==='opening'){const p=usPart(g);
+   let gr=G.find(x=>x.k==='z'&&(p==='o'?!x.ix.some(j=>usPart(all[j])==='o'):(x.ix.filter(j=>usPart(all[j])!=='o').length<3&&(p===-1||!x.ix.some(j=>usPart(all[j])===p)))));
+   if(!gr){gr={k:'z',ix:[],ask:[]};G.push(gr)}gr.ix.push(i);last=gr;return}
+  const gr={k,ix:[i],ask:[]};G.push(gr);last=gr});
+ const ord=p=>p==='o'?-1:p===-1?9:p;
+ G.forEach(gr=>{if(gr.k==='z'){gr.ix.sort((a,b)=>ord(usPart(all[a]))-ord(usPart(all[b]))||a-b);if(!gr.ix.some(j=>usPart(all[j])!=='o'))gr.k='opening'}
+  if(gr.k==='exp'&&gr.ix.length>1&&gr.ix.every(j=>(all[j].cls||{}).page))gr.ix.sort((a,b)=>all[a].cls.page-all[b].cls.page||a-b);gr.done=0});
+ return G}
+/* השדות של מסמך מכמה דפים: כל שדה מהדף הראשון שיש בו ערך; סכומים – מהדף האחרון שיש בו סכום (הסכום הכולל מודפס בסוף). לא מחברים סכומים של דפים – כך אין ספירה כפולה */
+function usGcls(L){L=L.filter(Boolean);if(!L.length)return{kind:'unknown',f:{},unsure:[]};if(L.length===1)return L[0];
+ const b=Object.assign({},L.find(c=>c.kind&&c.kind!=='unknown')||L[0]),f={},T=['total_with_vat','total_before_vat','vat_amount'];
+ L.forEach(c=>{const x=c.f||{};for(const k in x){if(x[k]==null||x[k]==='')continue;if(T.includes(k))f[k]=x[k];else if(f[k]==null)f[k]=x[k]}});
+ b.f=f;b.unsure=[...new Set(L.flatMap(c=>Array.isArray(c.unsure)?c.unsure:[]))];delete b.part;if(L.some(c=>c.toMgr))b.toMgr=1;return b}
+/* ---- התור במכשיר ---- */
+const usqK=()=>'usq:'+((typeof SY!=='undefined'&&SY&&SY.uid)||'x');
+async function usqSave(U){U=U||US;if(!U)return;const all=U.all||U.pg;if(!all||!all.length)return usqDel();
+ const q={v:1,at:Date.now(),all:all.map(g=>({u:g.pdf?'':g.u||'',hi:!g.pdf&&g.hi&&g.hi!==g.u?g.hi:'',du:g.pdf?g.du:'',pdf:g.pdf?1:0,cls:g.cls||null,h:g.h||''})),grp:U.grp||null};
+ try{await fput(usqK(),JSON.stringify(q))}catch(e){}}
+function usqDel(){try{fdelK(usqK())}catch(e){}}
+async function usqGet(){let s=null;try{s=await fget(usqK())}catch(e){}if(typeof s!=='string')return null;let q=null;try{q=JSON.parse(s)}catch(e){return null}
+ if(!q||!Array.isArray(q.all))return null;const all=q.all.map(g=>g&&g.pdf?(/^data:application\/pdf;base64,/.test(g.du||'')?{pdf:1,du:g.du,cls:g.cls||null,h:g.h||''}:null):(g&&imgOk(g.u)?{u:g.u,hi:imgOk(g.hi)?g.hi:g.u,cls:g.cls||null,h:g.h||''}:null));
+ if(!all.length||all.some(x=>!x))return null;const grp=Array.isArray(q.grp)?q.grp.filter(gr=>gr&&Array.isArray(gr.ix)&&gr.ix.every(j=>Number.isInteger(j)&&j>=0&&j<all.length)).map(gr=>Object.assign({ask:[]},gr,{ask:Array.isArray(gr.ask)?gr.ask:[]})):null;
+ return{at:+q.at||0,all,grp:grp&&grp.length?grp:null}}
+{const o=CHG.uspick;CHG.uspick=async el=>{const U=US;await o(el);if(U&&US===U&&!U.grp)usqSave(U)}}
+{const o=ACT.usDel;ACT.usDel=()=>{const U=US;if(U&&U.grp&&U.step==='review'){const j=U.i,gi=U.grp.findIndex(g=>!g.done&&g.ix.includes(j));if(gi<0)return toast('הדף הזה כבר נשמר');ask('למחוק את דף '+(j+1)+' מהסריקה?',()=>{const gr=U.grp[gi];if(US!==U||!gr)return;usRvOut(gr,j);usRvDone()},'מחק');return}o();if(U&&US===U&&!U.grp&&U.step!=='form')usqSave(U)}}
+/* "＋ עמוד" במסך חיבור הדפים: כל דף חדש = מסמך חדש בתור (מזוהה לבד), ואפשר לצרף אותו ידנית */
+{const o=CHG.uspick;CHG.uspick=async el=>{const U=US;if(!U||!U.grp||U.step!=='review')return o(el);const n0=U.all.length;if(n0>=US_MAXP){el.value='';return toast('אפשר עד '+US_MAXP+' דפים בסריקה אחת')}await o(el);if(US!==U)return;U.pg=U.all;
+ for(let j=n0;j<U.all.length;j++){const g=U.all[j];g.h=trHash(g.pdf?g.du:g.u);g.cls={kind:'unknown'};if(bzF('scan')&&typeof window.USCLS==='function'){usSheet('מזהה את הדף…','<div class="empty">רגע…</div>');try{const r=await window.USCLS([g.pdf?g.du:(g.hi||g.u)]);if(r&&!r.err)g.cls=r}catch(e){}if(US!==U)return}
+  U.grp.push({k:usKof(j),ix:[j],ask:[],done:0})}usRvDone()}}
+/* פתיחת המסך: אם יש דפים שצולמו ולא נשמרו – הצעה להמשיך */
+{const o=usStart;usStart=function(){o();const U=US;usqGet().then(q=>{if(!q||US!==U||U.step!=='start'||U.pg.length)return;const b=$('#sheet .bd');if(!b||b.querySelector('.usqc'))return;U.q=q;
+ b.insertAdjacentHTML('afterbegin',`<div class="card usqc" style="border-color:var(--acc)"><b>יש ${q.all.length===1?'דף אחד':q.all.length+' דפים'} שצולמו ולא נשמרו</b><div class="note">מ-${esc(new Date(q.at||Date.now()).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}))}. הזיהוי שכבר נעשה לא ייספר שוב.</div><div class="row" style="gap:8px;margin-top:8px"><button class="btn grow" data-a="usqGo">המשך מהמקום שעצרתי</button><button class="btn g grow" data-a="usqDrop">מחיקה</button></div></div>`)}).catch(()=>{})}}
+ACT.usqGo=()=>{const U=US;if(!U||!U.q)return;const q=U.q;delete U.q;U.all=q.all;U.pg=q.all;U.i=0;
+ if(q.grp){U.grp=q.grp;usPane(1);usReview();return}
+ if(q.all.length>1){usPane(1);usMulti();return}usPane(1);usDetect()};
+ACT.usqDrop=()=>ask('למחוק את הדפים שצולמו ולא נשמרו?',()=>{usqDel();if(US){delete US.q;usStart()}},'מחק');
+/* ---- זיהוי: כמה דפים → כל דף לבד, ואז חלוקה ומסך "חיבור דפים". דף אחד – בדיוק כמו בשלב 4 ---- */
+{const o=window.USCLS;if(typeof o==='function')window.USCLS=async pages=>{const U=US,r=await o(pages);if(U&&US===U&&U.pg.length===1&&r&&!r.err&&!U.grp)U.pg[0].cls=r;return r}}
+{const o=usDetect;usDetect=async function(){const U=US;if(!U)return;
+ if(U.grp)return usReview();
+ if(U.pg.length>1&&bzF('scan')&&typeof window.USCLS==='function')return usMulti();
+ const g=U.pg.length===1&&U.pg[0];if(g&&g.cls&&!g.cls.err){const sv=window.USCLS;window.USCLS=async()=>g.cls;try{await o()}finally{window.USCLS=sv}}else await o();
+ if(US===U&&!U.grp)usqSave(U)}}
+async function usMulti(){const U=US;if(!U||U.busy)return;U.step='multi';U.all=U.pg.slice();U.pg=U.all;let stop='';
+ for(let i=0;i<U.all.length;i++){const g=U.all[i];if(!g.h)g.h=trHash(g.pdf?g.du:g.u);if(g.cls&&!g.cls.err)continue;if(US!==U)return;
+  if(stop){g.cls={kind:'unknown'};continue}
+  usSheet('מזהה את הדפים…',`<div class="empty">דף ${i+1} מתוך ${U.all.length}…</div>`);
+  let r={kind:'unknown'};try{r=(await window.USCLS([g.pdf?g.du:(g.hi||g.u)]))||r}catch(e){}if(US!==U)return;
+  if(r.err&&!r.retry)stop=r.err;g.cls=r.err?{kind:'unknown'}:r}
+ if(stop)toast(stop);
+ U.grp=usGroup(U.all);usqSave(U);usReview()}
+/* ---- מסך "חיבור דפים" ---- */
+function usGrpName(gr){const U=US,c=gr.ix.length?(U.all[gr.ix[0]].cls||{}):{};const t=gr.k&&UST[gr.k]?UST[gr.k][1]+' '+(gr.k==='exp'&&c.docType==='delivery_note'?'תעודת משלוח':gr.k==='exp'&&c.docType==='receipt'?'קבלה':gr.k==='exp'&&c.docType==='credit_note'?'חשבונית זיכוי':gr.k==='z'&&gr.ix.some(j=>usPart(U.all[j])==='o')?'דוח Z + הצהרת פתיחה':UST[gr.k][0]):'❔ לא זוהה';
+ const f=usGcls(gr.ix.map(j=>U.all[j].cls)).f||{};return t+(gr.k==='exp'&&s_(f.number)?' '+s_(f.number):'')+(gr.k==='exp'&&s_(f.supplier)?' · '+s_(f.supplier).slice(0,30):'')}
+function usPgLbl(j){const g=US.all[j],c=g.cls||{},p=usPart(g);if(c.kind==='opening')return' · הצהרת פתיחה';if(USK[c.kind]==='z')return p>=0?' · חלק '+USZN[p]:' · חלק לא ידוע';if(c.page)return' · עמוד '+c.page+(c.pages?'/'+c.pages:'');return g.pdf?' · PDF':''}
+const usTh=j=>{const g=US.all[j],src=g.pdf?(g.pv&&g.pv[0]):g.u;return src&&imgOk(src)?`<img src="${src}" alt="" class="usrt">`:'<span class="usrt">PDF</span>'};
+const usZMiss=(gr)=>{if(gr.k!=='z')return[];const ps=gr.ix.map(j=>usPart(US.all[j])).filter(p=>p!=='o'),n=ps.length;if(n>=3)return[];const kn=[0,1,2].filter(p=>!ps.includes(p));return ps.includes(-1)?['חלק נוסף']:kn.map(p=>USZN[p])};
+function usAskH(gi,a){const j=a.i,lb='דף '+(j+1);
+ if(a.t==='dup')return`<div class="usrq"><b>⚠ דף כפול:</b> ${lb} נראה כמו דף ${a.o+1}.<div class="usrd">${[a.o,j].map(x=>{const g=US.all[x],s=g.pdf?(g.pv&&g.pv[0]):g.u;return s&&imgOk(s)?`<img src="${s}" alt="דף ${x+1}">`:'<span class="usrt">PDF</span>'}).join('')}</div><div class="row"><button class="btn r grow" data-a="usRvAsk" data-g="${gi}" data-i="${j}" data-v="del">מחק את הכפול (${lb})</button><button class="btn g grow" data-a="usRvAsk" data-g="${gi}" data-i="${j}" data-v="keep">השאר את שניהם</button></div></div>`;
+ const q=a.t==='date'?lb+' שייך לאותה חשבונית, אבל מתאריך אחר. לחבר אותו לחשבונית?':lb+' בלי מספר חשבונית, ולפי הרצף הוא המשך של החשבונית. לחבר?';
+ return`<div class="usrq"><b>❓</b> ${esc(q)}<div class="row"><button class="btn grow" data-a="usRvAsk" data-g="${gi}" data-i="${j}" data-v="join">חבר</button><button class="btn g grow" data-a="usRvAsk" data-g="${gi}" data-i="${j}" data-v="sep">מסמך נפרד</button></div></div>`}
+function usReview(){const U=US;if(!U||!U.grp)return;U.grp=U.grp.filter(g=>g.ix.length);U.step='review';U.type='';U.pg=U.all;U.i=Math.max(0,Math.min(U.i||0,U.all.length-1));if(!U.pane)usPane(1);else usPaneDraw();
+ const G=U.grp,tot=G.length,dn=G.filter(g=>g.done).length,nx=G.findIndex(g=>!g.done),pend=G.some(g=>!g.done&&g.ask.length);
+ const card=(gr,gi)=>{const mz=usZMiss(gr),pv=G[gi-1];
+  return`<div class="usrg${gr.done?' done':''}"><div class="usrh"><span>${gi+1}. ${esc(usGrpName(gr))}</span><small>${gr.done?'✓ טופל':gr.ix.length===1?'דף אחד':gr.ix.length+' דפים'}</small></div>
+  ${gr.ix.map((j,p)=>`<div class="usrp"><button type="button" class="usrb" data-a="usRvSee" data-j="${j}" aria-label="הצגת דף ${j+1}">${usTh(j)}<small>דף ${j+1}${esc(usPgLbl(j))}</small></button>${gr.done?'':`<span class="usra"><button type="button" class="usb" data-a="usRvMv" data-g="${gi}" data-p="${p}" data-d="-1" ${p?'':'disabled'} aria-label="הזזת דף ${j+1} למעלה">▲</button><button type="button" class="usb" data-a="usRvMv" data-g="${gi}" data-p="${p}" data-d="1" ${p<gr.ix.length-1?'':'disabled'} aria-label="הזזת דף ${j+1} למטה">▼</button><button type="button" class="usb" data-a="usRvSplit" data-g="${gi}" data-p="${p}" ${gr.ix.length>1?'':'disabled'} aria-label="פיצול דף ${j+1} למסמך נפרד" title="מסמך נפרד">✂</button><button type="button" class="usb" data-a="usRvJoin" data-g="${gi}" data-p="${p}" ${pv&&!pv.done?'':'disabled'} aria-label="צירוף דף ${j+1} למסמך הקודם" title="צירוף למסמך הקודם">⤒</button><button type="button" class="usb" data-a="usRvDel" data-g="${gi}" data-p="${p}" aria-label="מחיקת דף ${j+1}">🗑</button></span>`}</div>`).join('')}
+  ${gr.done?'':gr.ask.map(a=>usAskH(gi,a)).join('')}
+  ${!gr.done&&mz.length?`<div class="usrq"><b>⚠ חסר בדוח Z:</b> ${esc(mz.join(', '))}. צלמו את החלק החסר.<label class="btn g w" style="cursor:pointer;margin-top:6px">📷 הוספת החלק החסר<input type="file" accept="image/*" data-c="usRvAdd" data-g="${gi}" hidden></label></div>`:''}</div>`};
+ usSheet('חיבור דפים',`<p class="note" style="margin:0 0 10px">${U.all.length} דפים · ${tot===1?'מסמך אחד':tot+' מסמכים'}${dn?' · '+dn+' נשמרו':''}. בדקו את החלוקה לפני השמירה: אפשר להזיז דף, לפצל למסמך נפרד (✂), לצרף למסמך הקודם (⤒) או למחוק.</p>
+  ${G.map(card).join('')}
+  ${nx>=0?`<button class="btn w" style="margin-bottom:8px" data-a="usGo" ${pend?'disabled':''}>${pend?'יש שאלות פתוחות למעלה':'המשך: מסמך '+(nx+1)+' מתוך '+tot}</button>`:''}
+  <button class="btn g w" data-a="usExit">סגירה (הדפים נשארים שמורים במכשיר)</button>`)}
+const usRvG=el=>{const U=US;if(!U||!U.grp)return null;const gr=U.grp[+el.dataset.g];return gr&&!gr.done?gr:null};
+const usRvDone=()=>{usqSave();usReview()};
+ACT.usRvSee=el=>{if(!US)return;US.i=+el.dataset.j||0;UZ={s:1,x:0,y:0};usPaneDraw()};
+ACT.usRvMv=el=>{const gr=usRvG(el);if(!gr)return;const p=+el.dataset.p,q=p+ +el.dataset.d;if(q<0||q>=gr.ix.length)return;[gr.ix[p],gr.ix[q]]=[gr.ix[q],gr.ix[p]];usRvDone()};
+function usRvOut(gr,j){gr.ix=gr.ix.filter(x=>x!==j);gr.ask=gr.ask.filter(a=>a.i!==j&&a.o!==j)}
+const usKof=j=>{const c=US.all[j].cls||{};return c.toMgr?'':(USK[c.kind]==='opening'?'z':USK[c.kind]||'')};
+function usRvNew(gi,j){const U=US,k=usKof(j);U.grp.splice(gi+1,0,{k:k==='z'&&usPart(U.all[j])==='o'?'opening':k,ix:[j],ask:[],done:0})}
+ACT.usRvSplit=el=>{const gr=usRvG(el);if(!gr||gr.ix.length<2)return;const j=gr.ix[+el.dataset.p];usRvOut(gr,j);usRvNew(+el.dataset.g,j);usRvDone()};
+ACT.usRvJoin=el=>{const gr=usRvG(el),gi=+el.dataset.g,pv=US&&US.grp[gi-1];if(!gr||!pv||pv.done)return;const j=gr.ix[+el.dataset.p];
+ if(pv.k==='exp'&&pv.ix.length>=US_INVP)return toast('אפשר עד '+US_INVP+' דפים בחשבונית');if((pv.k==='z'||pv.k==='opening')&&usPart(US.all[j])!=='o'&&pv.ix.filter(x=>usPart(US.all[x])!=='o').length>=3)return toast('לדוח Z יש כבר 3 חלקים');
+ if(US.all[j].pdf||pv.ix.some(x=>US.all[x].pdf))return toast('קובץ PDF נשמר כמסמך נפרד');
+ usRvOut(gr,j);pv.ix.push(j);if(pv.k==='opening'&&usKof(j)==='z')pv.k='z';usRvDone()};
+ACT.usRvDel=el=>{const gr=usRvG(el);if(!gr)return;const j=gr.ix[+el.dataset.p];ask('למחוק את דף '+(j+1)+' מהסריקה?',()=>{usRvOut(gr,j);usRvDone()},'מחק')};
+ACT.usRvAsk=el=>{const gr=usRvG(el);if(!gr)return;const j=+el.dataset.i,v=el.dataset.v,a=gr.ask.find(x=>x.i===j);if(!a)return;
+ if(v==='del')usRvOut(gr,j);else if(v==='sep'){usRvOut(gr,j);usRvNew(+el.dataset.g,j)}else gr.ask=gr.ask.filter(x=>x!==a);usRvDone()};
+CHG.usRvAdd=async el=>{const f=el.files&&el.files[0],gi=+el.dataset.g;el.value='';const U=US,gr=usRvG(el);if(!f||!gr)return;
+ if(U.all.length>=US_MAXP)return toast('אפשר עד '+US_MAXP+' דפים בסריקה אחת');let g;
+ try{toast('מעבד קובץ…');const du=await rdU(f),r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true),u=r.u||du;if(!imgOk(u))throw 0;g={u,hi:hi.u||u}}catch(e){return toast('קריאת הקובץ נכשלה')}
+ if(US!==U)return;g.h=trHash(g.u);U.all.push(g);const j=U.all.length-1;gr.ix.push(j);usqSave(U);
+ if(bzF('scan')&&typeof window.USCLS==='function'){usSheet('מזהה את הדף…','<div class="empty">רגע…</div>');let r={kind:'unknown'};try{r=(await window.USCLS([g.hi||g.u]))||r}catch(e){}if(US!==U)return;g.cls=r.err?{kind:'unknown'}:r}
+ const ord=p=>p==='o'?-1:p===-1?9:p;if(gr.k==='z')gr.ix.sort((a,b)=>ord(usPart(U.all[a]))-ord(usPart(U.all[b]))||a-b);U.i=j;usRvDone()};
+/* ---- פתיחת מסמך מהתור: הדפים שלו בחלונית, הזיהוי המאוחד שלו, והטופס הקיים של הסוג ---- */
+ACT.usGo=()=>{const U=US;if(!U||!U.grp)return;const gi=U.grp.findIndex(g=>!g.done);if(gi<0)return;const gr=U.grp[gi];if(gr.ask.length)return toast('ענו קודם על השאלות');
+ const mz=usZMiss(gr);if(mz.length)return ask('בדוח Z חסר: '+mz.join(', ')+'. להמשיך בלי החלק החסר?',()=>usGrpOpen(gi),'המשך');usGrpOpen(gi)};
+function usGrpOpen(gi){const U=US,gr=U&&U.grp&&U.grp[gi];if(!gr)return;U.gi=gi;
+ const op=gr.ix.find(j=>usPart(U.all[j])==='o'),zs=gr.ix.filter(j=>usPart(U.all[j])!=='o');
+ let ix=gr.ix,k=gr.k;if(k==='z'&&zs.length){ix=zs;U.gop=op!=null?U.all[op]:null}else U.gop=null;if(k==='opening'||(k==='z'&&!zs.length)){k='opening';ix=[op!=null?op:gr.ix[0]]}
+ U.n0=S.tx.length;U.pg=ix.map(j=>U.all[j]);U.i=0;U.zparts=k==='z'?U.pg.map(usPart):null;U.cls=usGcls(U.pg.map(g=>g.cls));U.unsure=(U.cls.unsure||[]).slice();U.fid='';U.type='';U.auto=1;U.view='';UZ={s:1,x:0,y:0};usPane(1);
+ if(U.cls.toMgr)return usChooser('המסמך זוהה כ"'+(k&&UST[k]?UST[k][0]:'מסמך')+'" ואין לך הרשאה להזין אותו. הוא צריך לעבור למנהל לטיפול');
+ if(k&&usAllowed(k)){if(U.cls.uncertainType)toast('הזיהוי לא בטוח בסוג המסמך. אפשר לשנות את הסוג למעלה');usOpenForm(k)}else usChooser(k?'הסוג שזוהה לא זמין לך. בחרו סוג אחר':'המסמך לא זוהה. בחרו את סוג המסמך')}
+/* Z מכמה דפים: כל צילום במקום של החלק שלו (עליון/אמצעי/תחתון), והצהרת הפתיחה מתחברת לאותה סגירה */
+{const o=usOpenForm;usOpenForm=async function(k){const U=US;await o(k);if(!U||US!==U||k!=='z'||!ZC)return;
+ if(U.zparts&&U.zparts.length>1&&U.zparts.every(p=>p>=0)){const z=ZC.z.slice(0,U.zparts.length);if(z.every(Boolean)){ZC.z=[null,null,null];z.forEach((d,j)=>{ZC.z[U.zparts[j]]=d})}}
+ if(U.gop){const g=U.gop;try{const d=await ocrDown(g.hi||g.u,2000);if(imgOk(d))ZC.o=d}catch(e){}if(US!==U||!ZC)return;const sv=U.cls;U.cls=Object.assign({},g.cls||{},{ty:'opening'});try{usFillZc('opening')}catch(e){}U.cls=sv}
+ if(cur().v==='zc')render(0)}}
+/* אחרי שמירה: אם נשארו מסמכים בתור – חזרה למסך "חיבור דפים"; אחרי האחרון – "סרוק עוד" והתור נמחק */
+{const o=usDone;usDone=function(){const U=US;if(U&&U.grp){const gr=U.grp[U.gi];if(gr)gr.done=1;if(U.grp.some(g=>!g.done&&g.ix.length)){U.fid='';U.view='';U.zparts=null;U.gop=null;usqSave(U);toast('המסמך נשמר. ממשיכים למסמך הבא');usReview();return}U.grp=null;U.all=null}if(U)usqDel();o()}}
+/* יציאה ממסך של סוג (Z/הפקדה/העברה) כשיש עוד מסמכים בתור: המסמך הזה נחשב טופל, והמסך "חיבור דפים" חוזר. סגירה במפורש – הדפים נשארים במכשיר */
+{const o=usReset;usReset=function(){const U=US;o();if(!U)return;if(!U.grp){usqDel();return}
+ if(U.quit){usqSave(U);return}/* נחשב טופל רק אם נשמר: נוספה רשומה, או שהסגירה/ההפקדה נשלחה. יציאה בלי שמירה – המסמך נשאר בתור */if((U.view==='scr'||U.view==='wk')&&(S.tx.length>(U.n0||0)||(typeof ZC!=='undefined'&&ZC&&ZC.sent)||(typeof DP!=='undefined'&&DP&&DP.sent))){const gr=U.grp[U.gi];if(gr)gr.done=1}
+ if(U.grp.some(g=>!g.done&&g.ix.length)){usqSave(U);setTimeout(()=>{if(US)return;US={pg:U.all,all:U.all,grp:U.grp,i:0,type:'',unsure:[],pane:0,sh:0,step:'review',view:'',auto:0};usPane(1);usReview()},0)}else usqDel()}}
+{const o=ACT.usExit;ACT.usExit=()=>{const U=US;if(!U)return;if(!U.grp)return o();
+ ask('לסגור את מסך הסריקה? הדפים שעוד לא נשמרו יישארו במכשיר, ואפשר להמשיך מהם בפתיחה הבאה.',()=>{if(US===U){U.quit=1;usReset();rerender()}},'סגור')}}
+/* פתיחה מחדש של המסך באמצע תור: הדפים נשארים במכשיר */
+{const o=usOpen;usOpen=function(){if(US&&US.grp)US.quit=1;return o.apply(this,arguments)}}
+/* ---- סריקה רציפה: מצלמים כמה דפים אחד אחרי השני, ורק בסוף מזהים ומחלקים ---- */
+{const o=usStart;usStart=function(){o();const b=$('#sheet .bd label.btn');if(b&&!$('#sheet [data-a=usBatch]'))b.insertAdjacentHTML('afterend','<button class="btn g w" style="margin-bottom:10px" data-a="usBatch">📚 צילום כמה דפים ברצף (Z, חשבונית ארוכה, כמה מסמכים)</button>')}}
+ACT.usBatch=()=>{if(!US)return;US.batch=1;usBatchSheet()};
+function usBatchSheet(){const U=US,n=U.pg.length;U.step='batch';
+ usSheet('צילום ברצף',`<p class="note" style="margin:0 0 10px">צלמו כל דף בנפרד. אפשר לערבב מסמכים – האפליקציה תפריד ביניהם ותחבר דפים של אותו מסמך. בסוף תוכלו לתקן את החלוקה.</p><div class="card"><b>${n?n+' דפים צולמו':'עוד לא צולם דף'}</b></div>
+ <label class="btn w" style="cursor:pointer;margin-bottom:10px">📷 ${n?'צילום הדף הבא':'צילום הדף הראשון'}<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden></label>
+ <label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 הוספה מהגלריה<input type="file" accept="image/*" multiple data-c="uspick" hidden></label>
+ <button class="btn w" data-a="usBatchGo" ${n?'':'disabled'}>סיום וזיהוי (${n})</button>`,'usBackStart');if(n&&!U.pane)usPane(1);else if(U.pane)usPaneDraw()}
+{const o=CHG.uspick;CHG.uspick=async el=>{const U=US;if(!U||!U.batch||U.step!=='batch')return o(el);const fs=[...el.files];el.value='';
+ for(const f of fs){if(U.pg.length>=US_MAXP){toast('אפשר עד '+US_MAXP+' דפים בסריקה אחת');break}
+  try{toast('מעבד קובץ…');const du=await rdU(f),r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true),u=r.u||du;if(!imgOk(u))throw 0;U.pg.push({u,hi:hi.u||u})}catch(e){toast('קריאת הקובץ נכשלה')}}
+ if(US!==U)return;U.i=Math.max(0,U.pg.length-1);usqSave(U);usBatchSheet()}}
+ACT.usBatchGo=()=>{const U=US;if(!U||!U.pg.length)return;U.batch=0;U.i=0;if(!U.pane)usPane(1);if(U.pg.length>1&&bzF('scan')&&typeof window.USCLS==='function')return usMulti();if(U.pg.length>1){U.all=U.pg.slice();U.pg=U.all;U.all.forEach(g=>{g.h=g.h||trHash(g.pdf?g.du:g.u);g.cls=g.cls||{kind:'unknown'}});U.grp=usGroup(U.all);usqSave(U);return usReview()}usDetect()};
+/* ---- ח.פ בכרטיס ספק ---- */
+{const o=ACT.subMenu;ACT.subMenu=el=>{o(el);const s=subById(el.dataset.id);if(!s||(cat(s.cat)||{}).beh!=='sup')return;const b=$('#dlg form[data-f=subsave] button.btn');if(b)b.insertAdjacentHTML('beforebegin',fld('ח.פ / ע.מ של הספק (לזיהוי בסריקה)','hp',s.hp||'','text','inputmode="numeric" maxlength="12" autocomplete="off"'))}}
+{const o=FRM.subsave;FRM.subsave=form=>{const s=subById(form.elements.id&&form.elements.id.value),el=form.elements.hp;
+ if(s&&el){const h=hpN(el.value);if(h&&!hpOk(h))return toast('ח.פ / ע.מ: 7 עד 9 ספרות');const ot=h&&S.subs.find(x=>x!==s&&x.hp===h);if(ot)return toast('הח.פ הזה כבר שמור אצל "'+ot.name+'"');if(h)s.hp=h;else delete s.hp}
+ return o(form)}}
+/* ספק חדש מתוך הסריקה: הח.פ שזוהה נשמר בכרטיס החדש */
+{const o=FRM.subnew;FRM.subnew=f=>{const U=US,us=!!(U&&A&&A.us),n0=S.subs.length;o(f);if(!us||S.subs.length<=n0)return;const s=S.subs[S.subs.length-1],h=hpN(U.cls&&U.cls.f&&U.cls.f.supplier_id);
+ if(s&&hpOk(h)&&(cat(s.cat)||{}).beh==='sup'&&!S.subs.some(x=>x.hp===h)){s.hp=h;save()}}}
+/* ---- קבלה שצורפה לחשבונית שכבר יש לה קובץ: צפייה בקבלה מפרטי הרשומה ---- */
+{const o=txDlg;txDlg=function(id){o(id);const t=S.tx.find(x=>x.id===id);if(!t||!t.rcf||!idOk(t.rcf))return;const r=$('#dlg [data-a=txEdit]');const row=r&&r.closest('.row');
+ if(row)row.insertAdjacentHTML('beforebegin',`<div class="row" style="margin-bottom:8px"><button class="btn g grow" data-a="dxView" data-f="${esc(t.rcf)}" data-n="${esc(t.id)}_rcpt">${ico('eye')} צפייה בקבלה</button><button class="btn g grow" data-a="dxShare" data-f="${esc(t.rcf)}" data-n="${esc(t.id)}_rcpt">${ico('share')} שיתוף הקבלה</button></div>`)}}
 /* ===== סריקה אחידה, שלב 7: מסמך ליד כל פעולה (צפייה ושיתוף מהשורה), "מי הכניס", תצוגת PDF ומסך מכסה למנהל־על =====
  צפייה ושיתוף: כפתור עם data-f = קובץ במכשיר (IndexedDB, כמו t.file). כפתור עם data-via = פעולה קיימת שטוענת את הצילומים מהענן (zsImg, zsCoPic, dqImg, zcImg, supImg):
  הצפייה קוראת לה כמו שהיא, והשיתוף קורא לה עם DXS=1 והיא מסתיימת בשיתוף במקום בתצוגה. כך אין קריאות חדשות ל-Firestore, ואין שינוי בשמירה או בהרשאות.
@@ -4693,7 +4860,7 @@ let DXS=0,DXK=null,DXT=0;
 const dxBtns=(ex,lbl)=>`<span class="fa dxa"><button type="button" class="ib" data-a="dxView" ${ex} aria-label="צפייה ב${lbl}" title="צפייה">${ico('eye')}</button><button type="button" class="ib" data-a="dxShare" ${ex} aria-label="שיתוף ${lbl}" title="שיתוף">${ico('share')}</button></span>`;
 const dxLoc=(fid,lbl,n)=>typeof fid==='string'&&idOk(fid)&&(!DXK||DXK.has(fid))?dxBtns(`data-f="${esc(fid)}" data-n="${esc(n||fid)}"`,lbl||'המסמך'):'';
 const dxVia=(via,k,id,lbl)=>typeof id==='string'&&idOk(id)?dxBtns(`data-via="${via}"${k?` data-k="${k}"`:''} data-id="${esc(id)}"`,lbl):'';
-const dxTx=t=>t&&t.file?dxLoc(t.file,'המסמך',t.id):'';
+const dxTx=t=>t?(t.file?dxLoc(t.file,'המסמך',t.id):'')+(t.rcf?dxLoc(t.rcf,'הקבלה',t.id+'_rcpt'):''):'';
 const dxRow=(t,html)=>{let fa='';try{fa=dxTx(t)}catch(e){}return fa?`<div class="lw">${html}${fa}</div>`:html};
 /* אילו קבצים באמת קיימים במכשיר: כפתור לרשומה שהקובץ שלה חסר נעלם (בלי שגיאה). המפתחות נטענים פעם ב-15 שניות, ו-fput מעדכן אותם מיד */
 async function dxProbe(){if(DXT&&Date.now()-DXT<15000)return;DXT=Date.now();try{const d=await idb();DXK=await new Promise((res,rej)=>{const r=d.transaction('f').objectStore('f').getAllKeys();r.onsuccess=()=>res(new Set(r.result));r.onerror=()=>rej(r.error)})}catch(e){DXK=null}}
