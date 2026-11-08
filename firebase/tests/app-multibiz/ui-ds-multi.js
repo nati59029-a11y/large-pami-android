@@ -187,6 +187,30 @@ const strip = (o) => JSON.parse(JSON.stringify(o));
   check('6 עובד בלי "ספקים": פס עם סה"כ בלי "סגירה יחד"; FRM מזויף ו-ACT.msPay נדחים', r6.noBtn && r6.hasBar && r6.forged && !r6.dlgOpen, r6);
   check('6א עובד expR=own: נספר רק מה שהזין (1 מתוך 2), ו-FRM עם חשבונית שאינה שלו נדחה', /נבחרו 1/.test(r6.txt) && r6.own, r6);
 
+  // ===== 11. סבב בדיקה 1: זיכוי של אחר (expR own) ב-FRM, מזהים כפולים, הגבלת סניפים של מנהל =====
+  await seed(page);
+  const r11 = await page.evaluate(() => {
+    const keep = { role: SY.role, refresh: SY.refresh, perms: SY.perms, biz: SY.biz, uid: SY.uid, br: SY.br, sa: SY.sa };
+    const frm = (h) => { const s0 = JSON.stringify(S.tx); dlg('<form data-f="mspay">' + h + '<input name="d" value="2026-11-03"><input name="m" value="העברה"></form>'); FRM.mspay(document.querySelector('#dlg form')); closeDlg(); return JSON.stringify(S.tx) === s0; };
+    // (1) עובד own: חשבונית שלו, זיכוי של אחר
+    SY.role = 'worker'; SY.refresh = SY.refresh || 'r'; SY.biz = Object.assign({}, SY.biz, { dataRoot: 'b' }); SY.uid = 'w'; SY.perms = { expW: true, sup: true, expR: 'own' };
+    S.tx.find((t) => t.id === 'b1').eu = 'w';
+    const crOther = frm('<input name="ids" value="b1"><input name="crs" value="bc"><input name="a" value="180">');
+    Object.assign(SY, keep); delete S.tx.find((t) => t.id === 'b1').eu;
+    // (2) מזהה כפול
+   
+    const dup = frm('<input name="ids" value="a1,a1"><input name="a" value="200">');
+    // (3) מנהל מוגבל לסניף: חשבונית מסניף אחר
+    S.tx.find((t) => t.id === 'a2').br = 'brB'; SY.br = ['brA']; SY.sa = false;
+    const brM = frm('<input name="ids" value="a2"><input name="a" value="250">');
+    dlg('<form data-f="paysave"><input name="id" value="a2"><input name="a" value="250"><input name="d" value="2026-11-03"><input name="m" value="העברה"></form>'); const s2 = JSON.stringify(S.tx); FRM.paysave(document.querySelector('#dlg form')); closeDlg(); const brP = JSON.stringify(S.tx) === s2;
+    Object.assign(SY, keep); delete S.tx.find((t) => t.id === 'a2').br;
+    return { crOther, dup, brM, brP, txBr: typeof txBr === 'function' ? txBr({ br: 'brB' }) : null };
+  }).catch((e) => ({ err: String(e) }));
+  check('11 עובד expR=own: FRM עם זיכוי שהזין מישהו אחר – נדחה', r11.crOther === true, r11);
+  check('11א FRM עם אותה חשבונית פעמיים – נדחה (אין "שולם" כפול)', r11.dup === true, r11);
+  check('11ב מנהל מוגבל לסניף: FRM של סגירה יחד ושל תשלום בודד לחשבונית מסניף אחר – נדחים', r11.brM === true && r11.brP === true, r11);
+
   // ===== 9. מראה: ניגודיות הפס ומגע ב-3 ערכות; אחרי ביטול =====
   await seed(page); await goV('ledger', 'sA'); await H.settle(page, 150); await tap('[data-a=msMode]'); await pick(['a1', 'a2']);
   const BR = `(() => { const P = (s) => { const m = /rgba?\\(([^)]+)\\)/.exec(s); const a = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return [a[0], a[1], a[2], a.length > 3 ? a[3] : 1]; };
