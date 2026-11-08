@@ -61,6 +61,18 @@ describe('הזמנות – יצירה, סכום, מספור, idempotency', () =>
     const r2 = await call('createOrder', MGR, { reqId: rid(), br: 'br2', cust, items: [{ pid: 'pB', qty: 1, price: 7.5 }] });
     assert.equal(r2.result.no, 2);
   });
+  it('שורה ידנית עם עלות וסניף (00:18): נשמרים, מלאי לא משתנה; עובד רק לסניף שלו; שורת מוצר – לא', async () => {
+    const r = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ n: 'זר', qty: 2, price: 20, c: 12, lb: 'br1' }, { n: 'ישן', qty: 1, price: 5 }] });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.total, 45);
+    const o = await get(`b/${A}/ord/${r.result.id}`);
+    assert.equal(o.items[0].c, 12); assert.equal(o.items[0].lb, undefined); assert.equal(o.items[1].c, undefined);
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 3);
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ n: 'זר', qty: 1, price: 1, lb: 'br2' }] })).reason, 'foreign-br');
+    const m = await call('createOrder', MGR, { reqId: rid(), br: 'br1', cust, items: [{ n: 'זר', qty: 1, price: 1, lb: 'br2' }] });
+    assert.equal(m.status, 'OK', m.text); assert.equal((await get(`b/${A}/ord/${m.result.id}`)).items[0].lb, 'br2');
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 1, c: 3 }] })).reason, 'bad-items');
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ n: 'x', qty: 1, price: 1, c: -1 }] })).status === 'OK', false);
+  });
   it('אותו reqId פעמיים (גם במקביל) = הזמנה אחת, מלאי יורד פעם אחת', async () => {
     const q = rid();
     const d = { reqId: q, br: 'br1', cust, items: [{ pid: 'pA', qty: 1, price: 10 }] };

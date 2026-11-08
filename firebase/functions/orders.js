@@ -301,12 +301,13 @@ function cleanCust(c) {
   }
   return o;
 }
-// שורות מהלקוח: { pid?, n?, qty, price, from? }. השם של שורת מוצר נלקח מהמוצר; המחיר – מה שנשלח (העובד רשאי לשנות, תשובה 4).
+// שורות מהלקוח: { pid?, n?, qty, price, from?, c?, lb? }. c/lb – רק בשורה ידנית (00:18): עלות וסניף השורה (ברירת מחדל = סניף ההזמנה), לא משנה מלאי.
+// השם של שורת מוצר נלקח מהמוצר; המחיר – מה שנשלח (העובד רשאי לשנות, תשובה 4).
 function rawItems(items) {
   if (!Array.isArray(items) || !items.length || items.length > MAX_ITEMS) throw bad('bad-items', `פריטים: 1 עד ${MAX_ITEMS}`);
   return items.map((it) => {
     if (!it || typeof it !== 'object' || Array.isArray(it)) throw bad('bad-items', 'פריט לא תקין');
-    onlyKeys(it, ['pid', 'n', 'qty', 'price', 'from'], 'פריט');
+    onlyKeys(it, ['pid', 'n', 'qty', 'price', 'from', 'c', 'lb'], 'פריט');
     const o = { qty: qtyOf(it.qty) };
     if (it.pid != null && it.pid !== '') o.pid = idOf(it.pid, 'מוצר');
     else o.n = txt(it.n, 80, 'bad-items', 'שם הפריט', true);
@@ -315,6 +316,11 @@ function rawItems(items) {
     if (it.from != null && it.from !== '') {
       if (typeof it.from !== 'string' || !BR_RE.test(it.from)) throw bad('bad-from', 'סניף מקור לא תקין');
       o.from = it.from;
+    }
+    if ((it.c != null && it.c !== '') || (it.lb != null && it.lb !== '')) {
+      if (o.pid) throw bad('bad-items', 'עלות/סניף לשורה – רק בשורה ידנית');
+      if (it.c != null && it.c !== '') o.c = money(it.c, 'עלות');
+      if (it.lb != null && it.lb !== '') { if (typeof it.lb !== 'string' || !BR_RE.test(it.lb)) throw bad('bad-br', 'סניף השורה לא תקין'); o.lb = it.lb; }
     }
     return o;
   });
@@ -329,7 +335,12 @@ function resolveItems(w, br, raw, prods, cfgSrc) {
   const fixed = hasBranches(w) && cfgSrc && cfgSrc !== 'stock' && w.activeBr.includes(cfgSrc) ? cfgSrc : null;
   const warn = [];
   const items = raw.map((it) => {
-    if (!it.pid) { const o = { n: it.n, qty: it.qty, price: it.price }; return o; }
+    if (!it.pid) {
+      const o = { n: it.n, qty: it.qty, price: it.price };
+      if (it.c != null) o.c = it.c;
+      if (it.lb != null && it.lb !== br) o.lb = brOf(w, it.lb, 'סניף השורה'); // עובד – רק סניף שמותר לו
+      return o;
+    }
     if (!prods.get(it.pid)) throw new HttpsError('not-found', 'מוצר לא נמצא', { reason: 'no-prod' });
     const p = prods.get(it.pid);
     if (!p) throw new HttpsError('not-found', 'מוצר לא נמצא', { reason: 'no-prod' });
