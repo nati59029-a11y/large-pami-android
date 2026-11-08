@@ -348,7 +348,7 @@ describe('חלק ג\' – classify: statement וצ\'ק עובד', () => {
     GM.state.classify = { type: 'statement', fields: { kind: 'card', last4: '1234', from: '2026-11-01', to: '2026-11-30', lines: V.map((v, i) => ({ date: '2026-11-02', desc: 'חיוב ' + v + ' ב-15.01.2024', amt: -(5 + i), ref: v })) }, confidence: {} };
     const x = (await call('scanDocument', U.mgr, CLS())).result.result;
     const j = JSON.stringify(x);
-    assert.ok(!/4580/.test(j), 'נשאר חלק מהמספר: ' + j); assert.ok(!/\d(?:[\s.\-\/ ‎]*\d){7,}/.test(j.replace(/15\.01\.2024/g, '')), 'נשאר רצף 8+ ספרות');
+    assert.ok(!/4580/.test(j), 'נשאר חלק מהמספר: ' + j); assert.ok(!/\d(?:[\s.\-\/ ‎]*\d){7,}/.test(j.replace(/15\.01\.2024/g, '').replace(/\d{4}-\d{2}-\d{2}/g, '')), 'נשאר רצף 8+ ספרות');
     x.fields.lines.forEach((l, i) => { assert.match(l.desc, /^חיוב ••••\d{4} ב-15\.01\.2024$/); assert.match(l.ref, /^••••\d{4}$/); });
     assert.equal(x.fields.lines[6].ref, '••••9012');
     GM.state.classify = { type: 'check', fields: { number: '4580.1234.1234', bank: 'לאומי 4580 - 1234 - 1234 - 1234', payee: 'מוטב 4580/1234/1234/1234', account: '12-345-678901', amount: 5, date: '2026-12-15' }, confidence: {} };
