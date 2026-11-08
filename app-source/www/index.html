@@ -776,6 +776,22 @@ const monthIncome=m=>rnd(sum(live().filter(t=>t.t==='inc'&&t.date.startsWith(m)&
 const monthExpense=m=>rnd(sum(live().filter(t=>t.t==='exp'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
 const invIn=(t,tag)=>`<div class="m"><b>${esc(subName(t))}</b><small>חשבונית ${dfmt(t.date)}${invS(t)} · ${esc(cat(t.cat).name)}</small>${paid(t)>0?`<small>שולם ${ils(paid(t))} מתוך ${ils(t.amt)}</small>`:''}${dxWhoSm(t)}</div><div class="a">${ils(bal(t))}<small>${tag||mfmt(pmon(t))}</small></div>`;
 const invRow=(t,tag)=>`<div class="lw"><button class="li exp" data-a="payDlg" data-id="${t.id}">${invIn(t,tag)}</button>${fileActs(t)}</div>`;
+/* ===== התאמות: ליבה ===== */
+/* 2026-11-08 חלק ג' (C1) – stubs לחוזה §2 (C2 בונה מעליהם). מימוש מלא בקומיט הבא */
+function stlScrub(str){return String(str??'')}
+function stmAcc(kind,text){return{id:'',sure:false}}
+function stmParse(rows,kind){return{ok:[],dup:0,bad:0}}
+function stmAdd(meta,lines){return null}
+function stlCands(l){return[]}
+function stlAuto(stmId){return{match:0,open:0}}
+function stlLink(lid,tid,o){return'לא ממומש'}
+function stlNewExp(lid,o){return null}
+function stlNewInc(lid,o){return null}
+function stlUnlink(lid){}
+function stmGaps(acc,from,to){return{notInApp:[],notInStm:[]}}
+function offBal(subId){return{cred:0,used:0,bal:0}}
+function offPay(tid,a,d){return'לא ממומש'}
+function usWkAuto(type,fields){}
 /* ===== סניפים: תצוגה ===== */
 /* 2026-11-08 חלק א'. BRSEL = סניפים שנבחרו בצ'יפים (ריק = הכול). כל הזיהוי/הרשאות/הרשימות מ-A1 (brList/inBr/txBr/brGuess). סניף יחיד או בלי org = אין צ'יפים, אין שדה, אין סינון. */
 let BRSEL=[];
