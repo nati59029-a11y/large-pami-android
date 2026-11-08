@@ -291,7 +291,7 @@ function ensure(d){
  d=d||{};['cats','subs','tx','fixTpl','loans','ccx','inbox'].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[]});
  if(!d.fixOk||typeof d.fixOk!=='object'||Array.isArray(d.fixOk))d.fixOk={};
  if(d.pmOff==null)d.pmOff=2;if(d.orgC!=null&&(typeof d.orgC!=='object'||Array.isArray(d.orgC)))delete d.orgC;/* סניפים 2026-11-08: S.orgC = עותק של org מהשרת. tx[].br / pays[].bank / pays[].card – רשות, בלי מיגרציה */if(!d.theme)d.theme='paper';if(!d.fs)d.fs=1;d.v=3;
- /* תזרים/צ'קים (חלק ב' 2026-11-08): subs[].terms / tx[].due / pays[].chk – רשות. כאן רק מוחקים ערך פגום, לא מוסיפים */if(typeof cfClean==='function')cfClean(d);/* התאמות (חלק ג'): S.stm/S.stl, subs[].offset/offBal0, tx.off, pays[].stl – רשות. רק ניקוי ערכים פגומים וצנזור */if(typeof stlClean==='function')stlClean(d);
+ /* תזרים/צ'קים (חלק ב' 2026-11-08): subs[].terms / tx[].due / pays[].chk – רשות. כאן רק מוחקים ערך פגום, לא מוסיפים */if(typeof cfClean==='function')cfClean(d);/* התאמות (חלק ג'): S.stm/S.stl, subs[].offset/offBal0, tx.off, pays[].stl – רשות. רק ניקוי ערכים פגומים וצנזור */if(typeof stlClean==='function')stlClean(d);/* C3: S.ccc/ccMeta/impMap/mLearn – רשות, רק ניקוי */if(typeof c3Clean==='function')c3Clean(d);
  ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});/* סגירת קופה (11.2026): S.zc = הסגירות שהוכנסו; תתי-קטגוריות "שובר קניה", "שובר זיכוי", "הנפקת שובר זיכוי" בשתי הקופות – רק אם חסרות (לפי שם). לא משנים ולא מוחקים קיים */if(!Array.isArray(d.zc))d.zc=[];if(!(d.zcMig>=1)){['i_yh','i_nl'].forEach(c=>{if(d.cats.find(x=>x.id===c))['שובר קניה','שובר זיכוי','הנפקת שובר זיכוי'].forEach(n=>{if(!d.subs.some(x=>x.cat===c&&heKey(x.name)===heKey(n)))d.subs.push({id:uid(),cat:c,name:n})})});d.zcMig=1}/* רצה פעם אחת: תת-קטגוריה שנמחקה אחר כך לא חוזרת */
  return d}
 function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. רשומה חדשה בלי eu = המשתמש שבמכשיר. סריקה אחידה (8.11): לכל סוגי הרשומות, לא רק הוצאות */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
@@ -322,7 +322,7 @@ function brGuess(t){const L=brList();if(!L.length)return{id:'',sure:true};if(L.l
  if(t&&t.br&&L.some(b=>b.id===t.br))return{id:t.br,sure:true};const ok=new Set(L.map(b=>b.id)),r=orgMatch(brAll().filter(b=>ok.has(b.id)),t||{},null);return r||{id:'',sure:false}}
 function bankGuess(t,pay){const L=orgNow().banks.filter(b=>b.on);if(!L.length)return{id:'',sure:false};if(pay&&pay.bank&&L.some(b=>b.id===pay.bank))return{id:pay.bank,sure:true};
  const tx=orgDig(orgTxt(t,pay)),l4=L.filter(b=>b.last4&&tx.includes(b.last4));if(l4.length===1)return{id:l4[0].id,sure:true};const r=orgMatch(L,t||{},pay);if(r)return r;return L.length===1?{id:L[0].id,sure:true}:{id:'',sure:false}}
-function cardGuess(t,pay){const L=orgNow().cards.filter(c=>c.on);if(!L.length)return{id:'',sure:false};if(pay&&pay.card&&L.some(c=>c.id===pay.card))return{id:pay.card,sure:true};
+function cardGuess(t,pay){const L=ccAllCards().filter(c=>c.on);if(!L.length)return{id:'',sure:false};if(pay&&pay.card&&L.some(c=>c.id===pay.card))return{id:pay.card,sure:true};
  const bySub=L.filter(c=>c.sub&&t&&t.sub===c.sub);if(bySub.length===1)return{id:bySub[0].id,sure:true};
  const tx=orgDig(orgTxt(t,pay)),l4=L.filter(c=>c.last4&&tx.includes(c.last4));if(l4.length===1)return{id:l4[0].id,sure:true};return L.length===1?{id:L[0].id,sure:true}:{id:'',sure:false}}
 /* bzLoad: מסמך העסק נקרא – מעדכנים את העותק המקומי (בלי שמירה כשאין שינוי) */
@@ -440,7 +440,7 @@ const pmF=(n,list,v,req,t0)=>`<div class="f"><div style="font-weight:700;margin-
 CHG.pmr=el=>{el.closest('.pm').querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.contains(el)));const f=el.form;if(f)f.querySelectorAll('[data-pmx]').forEach(x=>{x.style.display=pmShow(x.dataset.pmx,el.value)?'':'none'});if(f)f.querySelectorAll('[data-pmc]').forEach(x=>{x.style.display=el.value===METHODS[1]?'':'none'})};
 /* בנק / כרטיס לתשלום (סניפים 2026-11-08): העברה/צ׳ק → בנק, אשראי → כרטיס. לא חובה; הניחוש מ-bankGuess/cardGuess (A1). בלי בנקים/כרטיסים מוגדרים – כלום לא מוצג */
 const pmShow=(k,m)=>k==='bank'?(m===METHODS[0]||m===METHODS[1]):m===METHODS[3];
-function pmX(list,v,t0){const o=orgNow(),bk=o.banks.filter(b=>b.on),cd=o.cards.filter(c=>c.on),t=t0||{};let h='';
+function pmX(list,v,t0){const o=orgNow(),bk=o.banks.filter(b=>b.on),cd=ccAllCards().filter(c=>c.on),t=t0||{};let h='';
  const mk=(k,lbl,L,g)=>`<label class="f" data-pmx="${k}" style="display:${pmShow(k,v)?'':'none'}"><span>${lbl} (לא חובה)</span><select name="${k}"><option value="">לא שויך</option>${L.map(x=>`<option value="${esc(x.id)}"${g.sure&&g.id===x.id?' selected':''}>${esc(x.name)}${x.last4?' ····'+esc(x.last4):''}</option>`).join('')}</select></label>`;
  if(bk.length&&(list.includes(METHODS[0])||list.includes(METHODS[1])))h+=mk('bank','בנק',bk,bankGuess(t,{m:METHODS[0]}));
  if(cd.length&&list.includes(METHODS[3]))h+=mk('card','כרטיס אשראי',cd,cardGuess(t,{m:METHODS[3]}));
@@ -737,8 +737,9 @@ function cfDebits(m,sel){const E=sel===undefined?brFil():sel,chk=[],tr=[],paid=[
    if(p.m===METHODS[1]){const c=chkOf(p),d=c?c.date:p.d;if(typeof d==='string'&&d.startsWith(m))chk.push({t,p,a:rnd(p.a),date:d});return}
    if(typeof p.d==='string'&&p.d.startsWith(m))paid.push({t,p,a:rnd(p.a)})});
   if(hasPay(t)){const b=bal(t),d=dueOf(t);if(b>0.004&&d.startsWith(m))tr.push({t,a:b,date:d})}});
- const sc=rnd(sum(chk,x=>x.a)),st=rnd(sum(tr,x=>x.a)),sumPaid=rnd(sum(paid,x=>x.a)),sumExp=rnd(sc+st);
- return{chk,tr,paid,sum:rnd(sumExp+sumPaid),sumPaid,sumExp,sumChk:sc,sumTr:st}}
+ const cc=(!E||!E.length)&&typeof ccBills==='function'?ccBills(m):[],scc=rnd(sum(cc,x=>x.a));
+ const sc=rnd(sum(chk,x=>x.a)),st=rnd(sum(tr,x=>x.a)),sumPaid=rnd(sum(paid,x=>x.a)),sumExp=rnd(sc+st+scc);
+ return{chk,tr,paid,cc,sum:rnd(sumExp+sumPaid),sumPaid,sumExp,sumChk:sc,sumTr:st,sumCc:scc}}
 function cfMonths(from,n,sel){const out=[];for(let i=0;i<(n||6);i++){const m=addMon(from||NOWM(),i);out.push(Object.assign({m},cfDebits(m,sel)))}return out}
 /* שלושת כרטיסי הבית: לתשלום בחודש m (= "צריך לשלם החודש"), ירידה מהחשבון בחודש m, באיחור נכון להיום */
 function homeCards(m){const D=dueStats(m),E=brFil(),td=today(),late=inv().filter(t=>inBr(t,E)&&isLate(t,td));
@@ -800,8 +801,8 @@ function stlClean(d){try{
  (d.tx||[]).forEach(t=>{if(!t)return;if(t.off!=null&&(typeof t.off!=='object'||Array.isArray(t.off)||typeof t.off.sub!=='string'))delete t.off;if(t.stl!=null&&typeof t.stl!=='string')delete t.stl;
   (Array.isArray(t.pays)?t.pays:[]).forEach(p=>{if(p&&p.stl!=null&&typeof p.stl!=='string')delete p.stl})})}catch(e){}}
 const stlDays=(a,b)=>Math.round((dObj(a)-dObj(b))/864e5);
-const stmList=kind=>{const o=orgNow();return(kind==='card'?o.cards:o.banks).filter(x=>x.on)};
-const stmKind=acc=>{const o=orgNow();return o.cards.some(c=>c.id===acc)?'card':o.banks.some(b=>b.id===acc)?'bank':''};
+const stmList=kind=>{const o=orgNow();return(kind==='card'?ccAllCards():o.banks).filter(x=>x.on)};
+const stmKind=acc=>{const o=orgNow();return ccAllCards().some(c=>c.id===acc)?'card':o.banks.some(b=>b.id===acc)?'bank':''};
 /* זיהוי חשבון/כרטיס: רק לפי 4 ספרות אחרונות (רצף שמסתיים ב-4 ספרות). יחיד = בטוח. בלי התאמה: חשבון יחיד = הצעה לא בטוחה; כמה = אין */
 function stmAcc(kind,text){const L=stmList(kind);if(!L.length)return{id:'',sure:false};const tx=String(text||''),t4=new Set((tx.match(/\d{4}(?!\d)/g)||[]));
  const m=L.filter(x=>x.last4&&/^\d{4}$/.test(String(x.last4))&&t4.has(String(x.last4)));if(m.length===1)return{id:m[0].id,sure:true};if(m.length>1)return{id:'',sure:false};
@@ -828,7 +829,7 @@ function stmAdd(meta,lines){meta=meta||{};const kind=meta.kind==='card'?'card':'
  const D=stlDedup(acc,L),ds=D.ok.map(l=>l.date).sort();
  const stm={id:'m'+uid(),kind,acc,src:['scan','file','manual'].includes(meta.src)?meta.src:'file',from:cfDt(meta.from)?meta.from:(ds[0]||''),to:cfDt(meta.to)?meta.to:(ds[ds.length-1]||''),at:new Date().toISOString(),by:(SY&&SY.uid)||'',n:D.ok.length,dup:D.dup};if(meta.fid&&idOk(meta.fid))stm.fid=meta.fid;
  if(!D.ok.length)return stm;
- const cc=kind==='bank'&&orgNow().cards.some(c=>c.bank===acc);
+ const cc=kind==='bank'&&ccAllCards().some(c=>c.bank===acc||((S.ccMeta||{})[c.id]||{}).bank===acc);
  D.ok.forEach(l=>{l.stm=stm.id;if(cc&&l.dir==='out'&&STL_CC.test(l.desc)){l.st='skip';l.why='cc'}S.stl.push(l)});S.stm.push(stm);stlTrim();save();return stm}
 /* מעל 3000 שורות: שורות מותאמות בנות 18+ חודשים נשמרות מקוצרות (הנחה) */
 function stlTrim(){if((S.stl||[]).length<=3000)return;const lim=addDays(today(),-548);S.stl.forEach(l=>{if(l.st!=='open'&&l.date<lim){if(l.desc&&l.desc.length>24)l.desc=l.desc.slice(0,24);delete l.ref;delete l.why}})}
@@ -860,7 +861,7 @@ function stlLink(lid,tid,o){o=o||{};const l=(S.stl||[]).find(x=>x.id===lid);if(!
  if(t.stl)return'הרשומה כבר הותאמה';if(Math.abs((+t.amt||0)-l.amt)>0.01)return'הסכום לא תואם';if((l.dir==='in')!==(t.t==='inc'))return'כיוון לא תואם';t.stl=lid;return fin()}
 /* הקמת הוצאה ששולמה מהשורה. ספק/קבועה = חשבונית + תשלום (auto); אחר = רשומה פשוטה */
 function stlNewExp(lid,o){o=o||{};const l=(S.stl||[]).find(x=>x.id===lid);if(!l||l.st!=='open'||l.dir!=='out')return null;const c=cat(o.cat);if(!c||c.kind!=='exp')return null;
- const t={id:uid(),t:'exp',cat:c.id,sub:o.sub&&subById(o.sub)?o.sub:null,date:l.date,amt:rnd(l.amt),note:l.desc,stl:lid,stlNew:1};if(o.br&&ORG_ID.test(o.br))t.br=o.br;
+ const t={id:uid(),t:'exp',cat:c.id,sub:o.sub&&subById(o.sub)?o.sub:null,date:l.date,amt:rnd(l.amt),note:l.desc,stl:lid,stlNew:1};if(o.br&&ORG_ID.test(o.br))t.br=o.br;/* C3: noInv = אין חשבונית עדיין → "שולם – ממתין לחשבונית" */if(o.noInv){t.await=1;t.inv=''}
  if(['sup','fixed'].includes(c.beh)){Object.assign(t,{kind:'inv',plan:l.date.slice(0,7),pays:[Object.assign({id:uid(),d:l.date,a:rnd(l.amt),m:stlM(l),stl:lid,auto:1},stlBx(l))]})}
  S.tx.push(t);l.st='exp';l.tx=t.id;delete l.auto;save();return t}
 function stlNewInc(lid,o){o=o||{};const l=(S.stl||[]).find(x=>x.id===lid);if(!l||l.st!=='open'||l.dir!=='in')return null;const c=cat(o.cat);if(!c||c.kind!=='inc')return null;
@@ -885,7 +886,7 @@ function offPay(tid,a,d){const t=S.tx.find(x=>x.id===tid&&!x.x);if(!t||!hasPay(t
  if(a>bal(t)+0.004)return'הסכום גדול מהיתרה ('+ils(bal(t))+')';const B=offBal(s.id);if(a>B.bal+0.004)return'היתרה לקיזוז אצל הספק ('+ils(B.bal)+') לא מספיקה';
  t.pays=t.pays||[];t.pays.push({id:uid(),d:cfDt(d)?d:today(),a,m:'קיזוז'});save();return true}
 /* ייבוא מקובץ (Excel/CSV): השורות + זיהוי חשבון לפי שם הקובץ ושורות הכותרת */
-async function stmFile(f,kind){const rows=await readTable(f),r=stmParse(rows,kind),head=(f&&f.name||'')+' '+rows.slice(0,8).map(x=>(x||[]).join(' ')).join(' ');return{lines:r.ok,dup:r.dup,bad:r.bad,acc:stmAcc(kind,head)}}
+async function stmFile(f,kind){const rows=await readTable(f),d=impDetect(rows,kind,''),r0=d?impParse(rows,kind,d,f&&f.name||''):null,r=r0?{ok:r0.ok.map(l=>{const x=Object.assign({},l);delete x.l4;return x}),dup:0,bad:r0.bad}:stmParse(rows,kind),head=(f&&f.name||'')+' '+rows.slice(0,8).map(x=>(x||[]).join(' ')).join(' ');return{lines:r.ok,dup:r.dup,bad:r.bad,acc:stmAcc(kind,head)}}
 /* שמירת דף: C2 מחליף בחלון ייבוא (recImportDlg). כאן: זיהוי בטוח = שמירה + התאמה אוטומטית; אחרת בחירת חשבון */
 let STMI=null;
 function stmImport(meta,lines,done){if(typeof recImportDlg==='function')return recImportDlg(meta,lines,done);STMI={meta,lines,done};
@@ -970,21 +971,21 @@ ACT.hcDue=()=>go('due',HM);ACT.hcCf=()=>go('cf',HM);ACT.hcLate=()=>go('due',{m:N
 let CFM='';
 const cfBar=(v,mx)=>`<div class="pbar" style="margin-top:6px" role="img" aria-label="${Math.round(v/mx*100)} אחוז"><i style="width:${Math.min(100,Math.round(v/mx*100))}%"></i></div>`;
 function cfRow(x,mx,open){const it=(n,d,a,s2)=>`<div class="li" style="cursor:default;min-height:48px"><div class="m"><b>${esc(n)}</b><small>${s2}</small></div><div class="a">${ils(a)}<small>${dfmt(d)}</small></div></div>`;
- let h=`<button class="li" data-a="cfM" data-m="${x.m}" aria-expanded="${open}" style="display:block"><div class="row" style="justify-content:space-between"><b>${mfmt(x.m)}</b><b>${ils(x.sum)}</b></div><small>צ׳קים ${ils(x.sumChk)} · העברות ${ils(x.sumTr)}${x.sumPaid>0.004?' · ירד בפועל '+ils(x.sumPaid):''}</small>${cfBar(x.sum,mx)}</button>`;
- if(open)h+=`<div data-cfd="${x.m}" style="margin:0 0 12px">${x.chk.map(c=>it(subName(c.t),c.date,c.a,'צ׳ק'+(chkOf(c.p)&&chkOf(c.p).no?' '+esc(chkOf(c.p).no):'')+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.tr.map(c=>it(subName(c.t),c.date,c.a,'העברה פתוחה'+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.paid.map(c=>it(subName(c.t),c.p.d,c.a,'ירד בפועל · '+esc(c.p.m||''))).join('')}${!x.chk.length&&!x.tr.length&&!x.paid.length?'<div class="empty">אין ירידות בחודש הזה</div>':''}</div>`;
+ let h=`<button class="li" data-a="cfM" data-m="${x.m}" aria-expanded="${open}" style="display:block"><div class="row" style="justify-content:space-between"><b>${mfmt(x.m)}</b><b>${ils(x.sum)}</b></div><small>צ׳קים ${ils(x.sumChk)} · העברות ${ils(x.sumTr)}${x.sumCc?' · אשראי '+ils(x.sumCc):''}${x.sumPaid>0.004?' · ירד בפועל '+ils(x.sumPaid):''}</small>${cfBar(x.sum,mx)}</button>`;
+ if(open)h+=`<div data-cfd="${x.m}" style="margin:0 0 12px">${x.chk.map(c=>it(subName(c.t),c.date,c.a,'צ׳ק'+(chkOf(c.p)&&chkOf(c.p).no?' '+esc(chkOf(c.p).no):'')+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.tr.map(c=>it(subName(c.t),c.date,c.a,'העברה פתוחה'+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.paid.map(c=>it(subName(c.t),c.p.d,c.a,'ירד בפועל · '+esc(c.p.m||''))).join('')}${(x.cc||[]).map(c=>`<div data-cfcc>${it(c.name+(c.last4?' ····'+c.last4:''),c.date,c.a,'חיוב אשראי צפוי · '+c.n+' עסקאות')}</div>`).join('')}${!x.chk.length&&!x.tr.length&&!x.paid.length&&!(x.cc||[]).length?'<div class="empty">אין ירידות בחודש הזה</div>':''}</div>`;
  return h}
 ACT.cfM=el=>{CFM=CFM===el.dataset.m?'':el.dataset.m;rerender()};
 /* תיקון 2 (חלק ג'): החודש הפתוח נקבע מהארגומנט בכל כניסה חדשה למסך (לא נשאר מכניסה קודמת); ההתחלה קבועה (החודש הנוכחי + 5). חודש מחוץ לטווח מתווסף כשורה נוספת במקומו ההגיוני */
 V.cf=a=>{const nw=NOWM(),am=pMonth(a),e=cur();if(e&&!e.cfi){e.cfi=1;CFM=am||''}
  const M=cfMonths(nw,6,brFil());if(am&&!M.some(x=>x.m===am)){const x=Object.assign({m:am},cfDebits(am,brFil()));if(am<nw)M.unshift(x);else M.push(x)}const mx=Math.max(1,...M.map(x=>x.sum));
- return{t:'תזרים',s:'מה יורד מהחשבון',h:brChips()+`<p class="note" id="cfNote">מזומן, אשראי וקיזוז לא נכללים. צ׳קים לפי תאריך הפירעון, העברות פתוחות לפי תאריך התשלום.</p>`+M.map(x=>cfRow(x,mx,x.m===CFM)).join('')}};
+ return{t:'תזרים',s:'מה יורד מהחשבון',h:brChips()+`<p class="note" id="cfNote">מזומן וקיזוז לא נכללים. אשראי – רק בכרטיס שהוגדר לו יום חיוב, לפי מועד החיוב. צ׳קים לפי תאריך הפירעון, העברות פתוחות לפי תאריך התשלום.</p>`+M.map(x=>cfRow(x,mx,x.m===CFM)).join('')}};
 /* ===== התאמות: תצוגה ===== */
 /* 2026-11-08 חלק ג' (C2). V.rec (חשבונות ודפים), V.recStm (שלוש לשוניות), recRow, recLineDlg (בחר אחר / הקם הוצאה / הקם הכנסה), recImportDlg (מחליף את חלון הבחירה של C1),
    V.offSup + offCardH (ספק קיזוז), recBanH (שורת התראה בבית). מנהל בלבד – עובד לא רואה התאמות. הכול נשען על הליבה של C1 (פונקציות stm, stl, off). אין מספר כרטיס/חשבון מלא במסך: רק ····4 ספרות */
 let RECT='m',RI=null;
 const recOk=()=>!isW();
-const recAccs=()=>{const o=orgNow();return o.banks.filter(x=>x.on).map(x=>Object.assign({kind:'bank'},x)).concat(o.cards.filter(x=>x.on).map(x=>Object.assign({kind:'card'},x)))};
-const recAccOf=id=>{const o=orgNow(),b=o.banks.find(x=>x.id===id),c=o.cards.find(x=>x.id===id);return b?Object.assign({kind:'bank'},b):c?Object.assign({kind:'card'},c):null};
+const recAccs=()=>{const o=orgNow();return o.banks.filter(x=>x.on).map(x=>Object.assign({kind:'bank'},x)).concat(ccAllCards().filter(x=>x.on).map(x=>Object.assign({kind:'card'},x)))};
+const recAccOf=id=>{const o=orgNow(),b=o.banks.find(x=>x.id===id),c=ccAllCards().find(x=>x.id===id);return b?Object.assign({kind:'bank'},b):c?Object.assign({kind:'card'},c):null};
 const recNm=a=>a?esc(a.name)+(a.last4?' <bdi dir="ltr">····'+esc(a.last4)+'</bdi>':''):'חשבון';
 const recOpenN=()=>(S.stl||[]).filter(l=>l.st==='open').length;
 /* שורת התראה קטנה בבית, מתחת לכרטיסים הקטנים (לא מחליפה את ההיררכיה) */
@@ -993,21 +994,21 @@ function recBanH(){if(!recOk()||!recAccs().length)return '';const n=recOpenN();i
 const recTxNm=t=>t?esc(t.t==='inc'?(cat(t.cat)||{}).name||'הכנסה':subName(t))+(t.inv?' · חשבונית '+esc(t.inv):'')+(t.note&&!t.sub?' · '+esc(t.note):''):'—';
 V.rec=()=>{if(!recOk())return{t:'התאמות',h:'<div class="empty">המסך הזה למנהל בלבד</div>'};
  const A=recAccs();
- let h=`<div class="card"><p class="note">מייבאים דף בנק או אשראי (סריקה, קובץ Excel/CSV או שורה ידנית), והאפליקציה מתאימה שורות לחשבוניות ולתשלומים שכבר רשומים. התאמה אוטומטית מסומנת "לבדוק" עד שתאשר. הדף משויך לחשבון לפי 4 הספרות האחרונות בלבד, ומספר מלא לא נשמר.</p>${bzF('scan')?`<button class="btn w" data-a="recScan">${ico('doc')} סריקת דף</button>`:''}</div>`;
+ let h=`<div class="card"><p class="note">מייבאים דף בנק או אשראי (סריקה, קובץ Excel/CSV או שורה ידנית), והאפליקציה מתאימה שורות לחשבוניות ולתשלומים שכבר רשומים. התאמה אוטומטית מסומנת "לבדוק" עד שתאשר. הדף משויך לחשבון לפי 4 הספרות האחרונות בלבד, ומספר מלא לא נשמר.</p>${bzF('scan')?`<button class="btn w" data-a="recScan">${ico('doc')} סריקת דף</button>`:''}<label class="btn g w" style="cursor:pointer;margin-top:8px">ייבוא דף אשראי (Excel/CSV/PDF) – הכרטיס מזוהה לבד<input type="file" accept=".csv,.xlsx,.xls,.pdf,application/pdf" data-c="recfileK" data-k="card" hidden></label></div>`;
  if(!A.length)return{t:'התאמת דפים',s:'בנק ואשראי',h:h+`<div class="empty">עוד לא הוגדרו חשבונות בנק או כרטיסי אשראי.${orgOk()?'':' מנהל־העל מגדיר אותם במסך הגדרות הארגון.'}</div>`+(orgOk()?`<button class="btn w" data-a="go" data-v="org">להגדרת בנקים וכרטיסים</button>`:'')};
  A.forEach(a=>{const L=(S.stl||[]).filter(l=>l.acc===a.id),M=(S.stm||[]).filter(m=>m.acc===a.id).sort((x,y)=>(y.at||'').localeCompare(x.at||'')),last=M[0],open=L.filter(l=>l.st==='open').length,gaps=last?stmGaps(a.id,last.from,last.to).notInStm.length:0;
   h+=`<div class="card" data-acc="${esc(a.id)}"><div class="row" style="justify-content:space-between"><b>${recNm(a)}</b><span class="tag t2">${a.kind==='card'?'אשראי':'בנק'}</span></div>
-  <div class="note">${last?'דף אחרון: '+dfmt(last.from)+' עד '+dfmt(last.to):'עוד לא יובא דף'}</div>
+  <div class="note">${last?'דף אחרון: '+dfmt(last.from)+' עד '+dfmt(last.to):'עוד לא יובא דף'}</div>${ccSetH(a)}
   <div class="kg" style="margin:8px 0"><div class="k ${open?'neg':''}"><small>שורות פתוחות</small><b>${open}</b></div><div class="k"><small>באפליקציה ולא בדף</small><b>${gaps}</b></div></div>
   ${last?`<button class="btn w" style="margin-bottom:8px" data-a="go" data-v="recStm" data-arg="${esc(last.id)}">פתח את הדף האחרון</button>`:''}
-  <div class="row"><label class="btn g grow" style="cursor:pointer">קובץ Excel/CSV<input type="file" accept=".csv,.xlsx,.xls" data-c="recfile" data-acc="${esc(a.id)}" hidden></label><button class="btn g grow" data-a="recMan" data-acc="${esc(a.id)}">＋ שורה ידנית</button></div>
+  <div class="row"><label class="btn g grow" style="cursor:pointer">קובץ Excel/CSV/PDF<input type="file" accept=".csv,.xlsx,.xls,.pdf,application/pdf" data-c="recfile" data-acc="${esc(a.id)}" hidden></label><button class="btn g grow" data-a="recMan" data-acc="${esc(a.id)}">＋ שורה ידנית</button></div>
   ${M.length>1?`<div class="note" style="margin-top:8px">דפים קודמים</div>`+M.slice(1,4).map(m=>`<button class="li" style="min-height:48px" data-a="go" data-v="recStm" data-arg="${esc(m.id)}"><div class="m"><b>${dfmt(m.from)} עד ${dfmt(m.to)}</b><small>${m.n||0} שורות · ${(S.stl||[]).filter(l=>l.stm===m.id&&l.st==='open').length} פתוחות</small></div>${ico('chev','chev')}</button>`).join(''):''}</div>`});
  return{t:'התאמת דפים',s:'בנק ואשראי',h}};
 ACT.recScan=()=>{if(!recOk())return;if(!bzF('scan'))return toast('הזיהוי החכם כבוי. אפשר לייבא קובץ Excel/CSV');usOpen()};
+/* C3: זיהוי עמודות אוטומטי / מסך מיפוי; אשראי – פיצול לפי 4 ספרות (כרטיס חדש נוצר לבד) */
 CHG.recfile=async el=>{const f=el.files[0],acc=el.dataset.acc;el.value='';if(!f||!recOk())return;const a=recAccOf(acc);if(!a)return;
- try{const r=await stmFile(f,a.kind);if(!r.lines.length)return toast('לא נמצאו שורות תקינות'+(r.bad?' ('+r.bad+' לא תקינות)':''));
-  const mis=r.acc.sure&&r.acc.id&&r.acc.id!==acc;recImportDlg({kind:a.kind,acc:mis?r.acc.id:acc,sure:!mis,src:'file',bad:r.bad},r.lines)}
- catch(e){toast('הקובץ לא נקרא: '+(e&&e.message||''))}};
+ try{await impRun(f,a.kind,acc)}catch(e){toast('הקובץ לא נקרא: '+(e&&e.message||''))}};
+CHG.recfileK=async el=>{const f=el.files[0],k=el.dataset.k;el.value='';if(!f||!recOk())return;try{await impRun(f,k==='card'?'card':'bank','')}catch(e){toast('הקובץ לא נקרא: '+(e&&e.message||''))}};
 /* חלון ייבוא: "זוהה: בנק X ····1234". בלי זיהוי בטוח – בחירה (אין שמירה בלי חשבון). מציג טווח, שורות, כפולות ופגומות */
 function recImportDlg(meta,lines,done){if(!recOk())return;RI={meta:Object.assign({},meta),lines:lines||[],done,det:meta&&meta.sure?meta.acc:''};
  /* זיהוי בטוח (4 ספרות, או חשבון שנבחר במסך ההתאמות) = שמירה והתאמה מיד, עם הודעה "זוהה: …". אחרת – חלון בחירה, ואין שמירה בלי חשבון */
@@ -1050,8 +1051,9 @@ function recRow(l){const o=l.dir==='in',t=l.tx?S.tx.find(x=>x.id===l.tx):null;le
  else if(l.st==='exp'||l.st==='inc'){tg=`<span class="tag t3">הוקמה ${l.st==='exp'?'הוצאה':'הכנסה'}</span>`;ln=`<div class="note">${recTxNm(t)}</div>`;bt=`<button class="btn s g grow" data-a="recUn" data-id="${esc(l.id)}">בטל</button>`}
  else if(l.st==='skip'){tg=l.why==='cc'?'<span class="tag t2">חיוב כרטיס</span>':'<span class="tag t2">התעלמות</span>';ln=l.why==='cc'?'<div class="note">ההתאמה בדף הכרטיס</div>':'';bt=`<button class="btn s g grow" data-a="recUn" data-id="${esc(l.id)}">החזר לטיפול</button>`}
  else{const C=stlCands(l),s=C[0];tg='<span class="tag t4">פתוחה</span>';
-  ln=s?`<div class="note" data-sug>הצעה: ${recCandNm(s)}<br>${esc(s.why)}${C.length>1?' · עוד '+(C.length-1)+' מועמדים':''}</div>`:'<div class="note">לא נמצאה הצעה</div>';
-  bt=`${s?`<button class="btn s grow" data-a="recLink" data-id="${esc(l.id)}">שייך</button>`:''}<button class="btn s g grow" data-a="recPick" data-id="${esc(l.id)}">בחר אחר</button><button class="btn s g grow" data-a="recNew" data-id="${esc(l.id)}">${o?'הקם הכנסה':'הקם הוצאה'}</button><button class="btn s g grow" data-a="recSkip" data-id="${esc(l.id)}">התעלם</button>`}
+  const g=s?null:mSuggest(l);
+  ln=s?`<div class="note" data-sug>הצעה: ${recCandNm(s)}<br>${esc(s.why)}${C.length>1?' · עוד '+(C.length-1)+' מועמדים':''}</div>`:g?`<div class="note" data-msug>הצעה: ${o?'הכנסה':'הוצאה'} ל${mSugNm(g)}<br>${esc(g.why)}</div>`:'<div class="note">לא נמצאה הצעה</div>';
+  bt=`${s?`<button class="btn s grow" data-a="recLink" data-id="${esc(l.id)}">שייך</button>`:g?`<button class="btn s grow" data-a="recQuick" data-id="${esc(l.id)}">שייך</button>`:''}<button class="btn s g grow" data-a="recPick" data-id="${esc(l.id)}">בחר אחר</button><button class="btn s g grow" data-a="recNew" data-id="${esc(l.id)}">${o?'הקם הכנסה':'הקם הוצאה'}</button><button class="btn s g grow" data-a="recSkip" data-id="${esc(l.id)}">התעלם</button>`}
  return `<div class="card" data-lid="${esc(l.id)}"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px"><b style="min-width:0;overflow-wrap:anywhere">${esc(l.desc)}</b><b style="white-space:nowrap" class="${o?'pos':''}">${o?'+':'−'}${ils(l.amt)}</b></div><div class="note">${dfmt(l.date)}${l.ref?' · אסמכתא '+esc(l.ref):''} ${tg}</div>${ln}<div class="row" style="margin-top:8px;flex-wrap:wrap">${bt}</div></div>`}
 const recCandNm=c=>{const t=c.t;return (c.ids&&c.ids.length>1?'צירוף '+c.ids.length+' חשבוניות · ':c.p?'תשלום קיים · ':'')+recTxNm(t)+(c.p?' · '+dfmt(c.p.d):' · '+(t.t==='exp'&&hasPay(t)?'יתרה '+ils(bal(t)):dfmt(t.date)))};
 const recLn=id=>(S.stl||[]).find(x=>x.id===id);
@@ -1068,16 +1070,20 @@ ACT.recPickGo=el=>{const d=el.dataset,r=stlLink(d.l,d.t,{pay:d.p||undefined,ids:
 /* הקם הוצאה / הכנסה: קטגוריה, ספק/כרטיס, סניף (ברירת מחדל מ-brGuess) */
 const recSubOpts=(cid,v)=>'<option value="">—</option>'+subsOf(cid).map(s=>`<option value="${esc(s.id)}"${s.id===v?' selected':''}>${esc(s.name)}</option>`).join('');
 ACT.recNew=el=>{const l=recLn(el.dataset.id);if(!l||l.st!=='open')return;const k=l.dir==='in'?'inc':'exp',cs=catsOf(k);if(!cs.length)return toast('אין קטגוריות');
- let sb=S.subs.find(s=>!s.off&&cs.some(c=>c.id===s.cat)&&stlNm({sub:s.id},l.desc)),cid=sb?sb.cat:(cs.find(c=>c.beh==='free')||cs[0]).id;const bg=brMulti()?brGuess({sub:sb?sb.id:''}):{id:''};
- dlg(`<h3>${k==='inc'?'הקמת הכנסה':'הקמת הוצאה ששולמה'} · ${ils(l.amt)}</h3><p class="note">${esc(l.desc)} · ${dfmt(l.date)}</p><form data-f="recNew"><input type="hidden" name="l" value="${esc(l.id)}">
+ const mg=mSuggest(l);let sb=mg&&mg.sub?subById(mg.sub):S.subs.find(s=>!s.off&&cs.some(c=>c.id===s.cat)&&stlNm({sub:s.id},l.desc)),cid=mg?mg.cat:sb?sb.cat:(cs.find(c=>c.beh==='free')||cs[0]).id;const bg=brMulti()?brGuess({sub:sb?sb.id:''}):{id:''};
+ dlg(`<h3>${k==='inc'?'הקמת הכנסה':'הקמת הוצאה ששולמה'} · ${ils(l.amt)}</h3><p class="note">${esc(l.desc)} · ${dfmt(l.date)}${mg?'<br>הצעה: '+mSugNm(mg)+' ('+esc(mg.why)+')':''}</p><form data-f="recNew"><input type="hidden" name="l" value="${esc(l.id)}">
  <label class="f"><span>קטגוריה</span><select name="cat" data-c="recCat">${cs.map(c=>`<option value="${esc(c.id)}"${c.id===cid?' selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
- <label class="f" data-recsub><span>ספק / כרטיס</span><select name="sub">${recSubOpts(cid,sb?sb.id:'')}</select></label>
+ <label class="f" data-recsub><span>תת־קטגוריה / ספק</span><select name="sub" data-c="recSub">${recSubOpts(cid,sb?sb.id:'')}<option value="__new">＋ חדש…</option></select></label><div data-recnew hidden>${fld('שם חדש','newsub','','text','autocomplete="off" maxlength="40"')}</div>
+ ${k==='exp'?`<label class="cb"><input type="checkbox" name="noinv" value="1" checked> אין חשבונית עדיין – להוסיף ל"ממתינות לחשבונית"</label>`:''}
+ <p class="note">הבחירה נשמרת לבית העסק הזה ותוצע בפעם הבאה. לשיוך להוצאה קיימת – "בחר אחר".</p>
  ${brMulti()?`<label class="f"><span>סניף (חובה)</span><select name="br" required><option value="">בחר סניף</option>${brList().map(b=>`<option value="${esc(b.id)}"${b.id===bg.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:''}
  <div class="row"><button class="btn grow">${k==='inc'?'הקם הכנסה':'הקם הוצאה'}</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-CHG.recCat=el=>{const s=el.form.elements.sub;if(s)s.innerHTML=recSubOpts(el.value,'')};
+CHG.recCat=el=>{const s=el.form.elements.sub;if(s)s.innerHTML=recSubOpts(el.value,'')+'<option value="__new">＋ חדש…</option>';const n=el.form.querySelector('[data-recnew]');if(n)n.hidden=true};
+CHG.recSub=el=>{const n=el.form.querySelector('[data-recnew]');if(n)n.hidden=el.value!=='__new'};
 FRM.recNew=f=>{const x=fd(f),l=recLn(x.l);if(!l||l.st!=='open')return;const c=cat(x.cat);if(!c)return toast('בחר קטגוריה');
+ if(x.sub==='__new'){const nm=s_(x.newsub).slice(0,40);if(!nm)return toast('כתוב שם חדש');let s=S.subs.find(z=>z.cat===c.id&&z.name===nm);if(!s){s={id:uid(),cat:c.id,name:nm};S.subs.push(s)}x.sub=s.id}
  if(['sup','fixed'].includes(c.beh)&&!x.sub)return toast('בחר '+(subWord(c)||'ספק'));if(brMulti()&&!x.br)return toast('בחר סניף');
- const t=l.dir==='in'?stlNewInc(l.id,{cat:c.id,sub:x.sub,br:x.br}):stlNewExp(l.id,{cat:c.id,sub:x.sub,br:x.br});if(!t)return toast('לא ניתן להקים מהשורה הזו');closeDlg();rerender();toast(l.dir==='in'?'הוקמה הכנסה':'הוקמה הוצאה ושולמה')};
+ const t=l.dir==='in'?stlNewInc(l.id,{cat:c.id,sub:x.sub,br:x.br}):stlNewExp(l.id,{cat:c.id,sub:x.sub,br:x.br,noInv:!!x.noinv});if(!t)return toast('לא ניתן להקים מהשורה הזו');mLearnSet(l.desc,c.id,x.sub);save();closeDlg();rerender();toast(l.dir==='in'?'הוקמה הכנסה':x.noinv?'הוקמה הוצאה · ממתינה לחשבונית':'הוקמה הוצאה ושולמה')};
 ACT.recAOk=el=>{const t=S.tx.find(x=>x.id===el.dataset.t),p=t&&(t.pays||[]).find(y=>y.id===el.dataset.p);if(!p)return;p.stlOk=1;save();rerender();toast('סומן כתקין')};
 ACT.recAUn=el=>{const t=S.tx.find(x=>x.id===el.dataset.t),p=t&&(t.pays||[]).find(y=>y.id===el.dataset.p);if(!p)return;delete p.stlOk;save();rerender()};
 /* ---- ספק קיזוז: זכות מלקוחות / קוזז / יתרה + תנועות ---- */
@@ -1578,10 +1584,144 @@ FRM.lnpay=form=>{const f=fd(form),L=S.loans.find(x=>x.id===f.id),a=pNum(f.a);if(
  S.tx.push(x);L.paid=L.paid||{};L.paid[f.k]={a:x.amt,d:f.d,e:x.id};save();closeDlg();rerender();toast('התשלום נרשם')};
 ACT.lnUndo=el=>{const L=S.loans.find(x=>x.id===el.dataset.id),p=(L.paid||{})[el.dataset.k];ask('לבטל את רישום התשלום?',()=>{if(p&&p.e)S.tx=S.tx.filter(x=>x.id!==p.e);delete L.paid[el.dataset.k];save();rerender()},'בטל תשלום')};
 /* ---- אשראי ---- */
+/* ===== C3 (2026-11-08): ייבוא אשראי/בנק משודרג =====
+   נתונים (רשות, תוספות בלבד; גיבוי ישן נטען בלי שינוי): S.ccc[]={id:'lc_…',name,last4,on} כרטיסים שנוצרו בייבוא (רק 4 ספרות, אף פעם לא מספר מלא);
+   S.ccMeta{[cardId]:{day,bank}} יום חיוב בחודש וחשבון הבנק; S.impMap{['h:'+חתימת כותרת]|['a:'+חשבון]:{ix,sig}} מיפוי עמודות שנשמר; S.mLearn{[בית עסק מנורמל]:{cat,sub}} למידה.
+   זרימה: readTable (גם PDF) → impDetect (שמור → כותרות → תוכן) → לא בטוח = impMapDlg → impParse (4 ספרות לכל שורה) → בנק: recImportDlg; אשראי: ccSplit (פיצול לפי כרטיס, כרטיס חדש נוצר לבד) */
+const C3_ID=/^lc_[a-z0-9]{3,17}$/;
+function c3Clean(d){try{
+ if(d.ccc!=null&&!Array.isArray(d.ccc))delete d.ccc;
+ if(Array.isArray(d.ccc))d.ccc=d.ccc.filter(x=>x&&typeof x==='object'&&typeof x.id==='string'&&C3_ID.test(x.id)).map(x=>({id:x.id,name:String(x.name||'כרטיס').slice(0,40),last4:/^\d{4}$/.test(String(x.last4||''))?String(x.last4):'',on:x.on!==false}));
+ for(const k of['ccMeta','impMap','mLearn'])if(d[k]!=null&&(typeof d[k]!=='object'||Array.isArray(d[k])))delete d[k];
+ if(d.ccMeta)Object.keys(d.ccMeta).forEach(k=>{const m=d.ccMeta[k];if(!m||typeof m!=='object'||Array.isArray(m)){delete d.ccMeta[k];return}const n=+m.day;if(n>=1&&n<=31)m.day=Math.round(n);else delete m.day;if(m.bank!=null&&typeof m.bank!=='string')delete m.bank});
+}catch(e){}}
+const ccLocal=()=>(S&&Array.isArray(S.ccc)?S.ccc:[]);
+function ccAllCards(){return orgNow().cards.concat(ccLocal().map(x=>Object.assign({loc:1},x)))}
+function ccNewLocal(l4,name){if(!/^\d{4}$/.test(String(l4||'')))l4='';if(!Array.isArray(S.ccc))S.ccc=[];const c={id:('lc_'+uid().replace(/[^a-z0-9]/g,'')).slice(0,20),name:s_(name).slice(0,40)||'כרטיס חדש',last4:l4,on:true};S.ccc.push(c);return c}
+/* ---- יום חיוב ---- */
+const ccDay=id=>{const m=S&&S.ccMeta&&S.ccMeta[id];return m&&m.day>=1&&m.day<=31?m.day:0};
+/* עסקה לפני יום החיוב → החיוב של אותו חודש; ביום החיוב ואחריו → החיוב של החודש הבא. יום שלא קיים בחודש (31 בפברואר) = היום האחרון */
+function ccBillDate(id,d){const D=ccDay(id);if(!D||!cfDt(d))return '';const m=d.slice(0,7),bm=+d.slice(8,10)<D?m:addMon(m,1),last=+mEnd(bm).slice(8,10);return bm+'-'+p2(Math.min(D,last))}
+/* חיובי אשראי צפויים שיורדים בחודש m: שורות דף הכרטיס (חיוב +, זיכוי −) + תשלומי אשראי באפליקציה שלא הותאמו לשורה. רק כרטיס עם יום חיוב */
+function ccBills(m){const cards=ccAllCards().filter(c=>ccDay(c.id));if(!cards.length)return[];const ids=new Set(cards.map(c=>c.id)),G={};
+ const add=(acc,d,a)=>{const bd=ccBillDate(acc,d);if(!bd||!bd.startsWith(m))return;const k=acc+'|'+bd;const g=G[k]||(G[k]={card:acc,name:(cards.find(c=>c.id===acc)||{}).name||'',last4:(cards.find(c=>c.id===acc)||{}).last4||'',date:bd,a:0,n:0});g.a=rnd(g.a+a);g.n++};
+ (S.stl||[]).forEach(l=>{if(!ids.has(l.acc)||!(l.amt>0))return;add(l.acc,l.date,l.dir==='in'?-l.amt:l.amt)});
+ live().forEach(t=>{if(t.t!=='exp')return;(Array.isArray(t.pays)?t.pays:[]).forEach(p=>{if(p&&p.m===METHODS[3]&&ids.has(p.card)&&!p.stl&&!p.crof&&p.a>0)add(p.card,p.d,p.a)})});
+ return Object.values(G).sort((a,b)=>a.date.localeCompare(b.date))}
+/* ---- PDF → טבלה (pdf.js מקומי). שורה = פריטי טקסט באותו גובה; תאים מימין לשמאל. יש כותרת = יישור לפי מיקום העמודות; אין = [תאריך, תיאור, מספרים…] ---- */
+async function pdfTable(f){const lib=await pdfLoad(),doc=await lib.getDocument({data:new Uint8Array(await f.arrayBuffer())}).promise,lines=[];
+ for(let p=1;p<=Math.min(doc.numPages,40);p++){const pg=await doc.getPage(p),tc=await pg.getTextContent(),L=[];
+  tc.items.forEach(it=>{const s=String(it.str||'');if(!s.trim())return;const x=it.transform[4],y=it.transform[5],w=it.width||0;let ln=L.find(l=>Math.abs(l.y-y)<3);if(!ln){ln={y,it:[]};L.push(ln)}ln.it.push({x0:x,x1:x+w,s})});
+  L.sort((a,b)=>b.y-a.y).forEach(l=>{const it=l.it.sort((a,b)=>b.x1-a.x1),cs=[];it.forEach(i=>{const c=cs[cs.length-1];if(c&&c.x0-i.x1<6){c.s=(c.x0-i.x1<1.2?i.s+c.s:i.s+' '+c.s);c.x0=Math.min(c.x0,i.x0)}else cs.push({x0:i.x0,x1:i.x1,s:i.s})});lines.push(cs.map(c=>({s:c.s.replace(/\s+/g,' ').trim(),x:(c.x0+c.x1)/2})))})}
+ if(!lines.some(l=>l.length))throw new Error('אין טקסט בקובץ ה-PDF (כנראה סרוק). אפשר "סריקת דף"');
+ const H=impHead(lines.map(l=>l.map(c=>c.s)));
+ if(H){const hx=lines[H.hi].map(c=>c.x);return lines.map((l,i)=>{if(i<=H.hi)return l.map(c=>c.s);const r=hx.map(()=>'');l.forEach(c=>{let j=0,b=1e9;hx.forEach((x,k)=>{const d=Math.abs(x-c.x);if(d<b){b=d;j=k}});r[j]=r[j]?r[j]+' '+c.s:c.s});return r})}
+ return lines.map(l=>{const t=l.map(c=>c.s),di=t.findIndex(s=>pDate(s)),nums=[],tx=[];if(di<0)return t;t.forEach((s,i)=>{if(i===di)return;if(/^[-−(]?\s*₪?\s*-?[\d,]+\.\d{2}\s*[-)]?$/.test(s))nums.push(s.replace('−','-'));else tx.push(s)});return[t[di],tx.join(' ')].concat(nums)})}
+/* ---- זיהוי עמודות ---- */
+const impSig=h=>stlScrub((h||[]).map(x=>s_(x)).join('|')).replace(/\d/g,'#').slice(0,240);
+/* כותרות: תאריך עסקה עדיף על תאריך חיוב; "סכום חיוב" עדיף על "סכום עסקה"; עמודת כרטיס/4 ספרות. כמה עמודות סכום בלי עדיפות = לא בטוח */
+function impHead(rows){for(let i=0;i<Math.min(rows.length,25);i++){const h=(rows[i]||[]).map(x=>s_(x)),m={},amts=[];let dCh=null;
+  h.forEach((t,j)=>{if(!t||t.length>60)return;if(/יתרה|balance/i.test(t))return;
+   if(/כרטיס|ספרות|card/i.test(t)&&!/תאריך|סכום/.test(t)){if(m.card==null)m.card=j;return}
+   if(/תאריך|date/i.test(t)){if(/חיוב|ערך|value/i.test(t)){if(dCh==null)dCh=j}else if(m.date==null)m.date=j;return}
+   if(m.cr==null&&/זכות|credit|זיכוי/i.test(t)){m.cr=j;return}if(m.dr==null&&/חובה|debit/i.test(t)){m.dr=j;return}
+   if(m.ref==null&&/אסמכתא|אסמ|reference|^ref/i.test(t)){m.ref=j;return}
+   if(/סכום|amount|חיוב|₪|ש"ח/i.test(t)&&!/מטבע|currency/i.test(t)){amts.push({j,p:/חיוב|charge|ש"ח|₪/i.test(t)&&!/מקור|עסקה/.test(t)?2:/מקור|original/i.test(t)?0:1});return}
+   if(m.desc==null&&!/סוג|קטגוריה|הערות|מטבע/.test(t)&&/בית עסק|בית העסק|תיאור|פירוט|שם|עסק|פעולה|description|merchant/i.test(t))m.desc=j});
+  if(m.date==null&&dCh!=null)m.date=dCh;
+  let sure=true;if(amts.length){const best=amts.slice().sort((a,b)=>b.p-a.p);m.amt=best[0].j;if(best.length>1&&best[0].p===best[1].p&&m.dr==null&&m.cr==null)sure=false}
+  if(m.date!=null&&m.desc!=null&&(m.amt!=null||m.dr!=null||m.cr!=null))return{hi:i,ix:m,sure,by:'head'}}return null}
+/* תוכן (בלי כותרת מוכרת): עמודת תאריכים, עמודת טקסט, עמודות מספרים. עמודת מספרים אחת = בטוח */
+function impContent(rows){const isD=v=>!!pDate(v),isN=v=>{const s=s_(v);return typeof v==='number'||(/\d/.test(s)&&pNum(v)!=null)},isC=v=>/^(?:[•*xX·.]{2,}\s?)?\d{4}$/.test(s_(v));
+ let st=-1;for(let i=0;i<rows.length&&st<0;i++){const r=rows[i]||[];if(r.some(isD)&&r.some((v,j)=>isN(v)&&!isD(v)))st=i}if(st<0)return null;
+ const D=rows.slice(st,st+40).filter(r=>(r||[]).some(isD)),W=Math.max(...D.map(r=>r.length)),c=[];
+ for(let j=0;j<W;j++){let d=0,n=0,t=0,cd=0,ln=0;D.forEach(r=>{const v=r[j];if(v===''||v==null)return;if(isD(v))d++;else if(isC(v))cd++;else if(isN(v))n++;else{t++;ln+=s_(v).length}});c.push({j,d,n,t,cd,ln})}
+ const N=D.length,dc=c.slice().sort((a,b)=>b.d-a.d)[0];if(!dc||dc.d<N*0.6)return null;const tc=c.filter(x=>x.j!==dc.j&&x.t>=N*0.5).sort((a,b)=>b.ln-a.ln)[0];if(!tc)return null;
+ const nc=c.filter(x=>x.j!==dc.j&&x.j!==tc.j&&x.n>=N*0.6),cc=c.find(x=>x.j!==dc.j&&x.cd>=N*0.6),ix={date:dc.j,desc:tc.j};if(cc)ix.card=cc.j;if(!nc.length)return null;ix.amt=nc[0].j;
+ return{hi:st-1,ix,sure:nc.length===1,by:'content'}}
+function impDetect(rows,kind,acc){const M=S.impMap||{};
+ for(let i=0;i<Math.min(rows.length,25);i++){const sg=impSig(rows[i]);if(sg.replace(/[|#\s]/g,'').length<4)continue;const s=M['h:'+sg];if(s&&s.ix&&s.ix.date!=null)return{hi:i,ix:Object.assign({},s.ix),sure:true,by:'saved'}}
+ const h=impHead(rows);if(h&&h.sure)return h;const c=h?null:impContent(rows),a=acc&&M['a:'+acc];
+ if(a&&a.ix){const r=h||c;if(r)return Object.assign({},r,{ix:Object.assign({},a.ix),sure:false,by:'acc'})}return h||c}
+/* ---- 4 ספרות: עמודת כרטיס, שורת כותרת של כרטיס ("כרטיס … 1234", "••••1234"), שם הקובץ. שנים (19xx/20xx) לא נחשבות בלי הקשר */
+function cardL4(t){const s=stlScrub(s_(t));let m=s.match(/(?:כרטיס|card|ויזה|visa|מאסטרקארד|מסטרקארד|mastercard|ישראכרט|isracard|אמריקן|amex|דיינרס|diners|מקס|max|כאל|cal|המסתיים|מסתיים|ספרות)[^\d\n]{0,30}?(?:[•*xX·.]{2,}\s?)?(\d{4})(?!\d)/i)||s.match(/(?:[•*xX·]{2,}|\.{3,})\s?(\d{4})(?!\d)/);return m?m[1]:''}
+function fileL4(nm){const b=s_(nm).replace(/\.[a-z0-9]{2,4}$/i,''),k=cardL4(b);if(k)return k;const L=(b.match(/(?<!\d)\d{4}(?!\d)/g)||[]).filter(x=>!/^(19|20)\d\d$/.test(x));return L.length===1?L[0]:''}
+function impParse(rows,kind,c,fname){const ix=c.ix,ok=[];let bad=0,sec='';const g=fileL4(fname);
+ const isRow=r=>{const d=pDate(r[ix.date]);if(!d)return false;const vs=[ix.amt,ix.dr,ix.cr].filter(j=>j!=null).map(j=>pNum(r[j]));return vs.some(v=>v!=null)};
+ for(let i=0;i<=c.hi&&i<rows.length;i++){const k=cardL4((rows[i]||[]).join(' '));if(k)sec=k}
+ rows.slice(c.hi+1).forEach(r=>{if(!r||!r.some(x=>s_(x)))return;if(!isRow(r)){const k=cardL4(r.join(' '));if(k)sec=k;else if(r.some(x=>pDate(x)))bad++;return}
+  const d=pDate(r[ix.date]),desc=stlScrub(s_(r[ix.desc])).slice(0,200);let a=null,dir='';
+  const sg=v=>({a:Math.abs(v),dir:kind==='card'?(v>0?'out':'in'):(v<0?'out':'in')});
+  if(ix.dr!=null||ix.cr!=null){const dr=ix.dr!=null?pNum(r[ix.dr]):null,cr=ix.cr!=null?pNum(r[ix.cr]):null;if(dr)({a,dir}={a:Math.abs(dr),dir:dr>0?'out':'in'});else if(cr)({a,dir}={a:Math.abs(cr),dir:cr>0?'in':'out'});else if(ix.amt!=null){const v=pNum(r[ix.amt]);if(v)({a,dir}=sg(v))}}
+  else{const v=pNum(r[ix.amt]);if(v)({a,dir}=sg(v))}
+  if(!d||!a||!desc){bad++;return}const l={date:d,desc,amt:rnd(a),dir};const rf=ix.ref!=null?stlScrub(s_(r[ix.ref])).slice(0,40):'';if(rf)l.ref=rf;
+  let l4='';if(ix.card!=null){const dg=s_(r[ix.card]).replace(/\D/g,'');if(dg.length>=4)l4=dg.slice(-4)}l.l4=l4||sec||g;ok.push(l)});
+ return{ok,bad}}
+/* ---- זרימת ייבוא ---- */
+let IMP=null;
+async function impRun(f,kind,acc){const rows=await readTable(f);impGo({rows,kind:kind==='card'?'card':'bank',acc:acc||'',fname:f&&f.name||''})}
+function impGo(P){const d=impDetect(P.rows,P.kind,P.acc);if(!d||!d.sure)return impMapDlg(P,d);impDo(P,d)}
+function impDo(P,d){const r=impParse(P.rows,P.kind,d,P.fname);if(!r.ok.length)return toast('לא נמצאו שורות תקינות'+(r.bad?' ('+r.bad+' לא תקינות)':''));
+ if(P.kind==='bank'){const head=P.fname+' '+P.rows.slice(0,8).map(x=>(x||[]).join(' ')).join(' '),g=stmAcc('bank',head),lines=r.ok.map(l=>{const x=Object.assign({},l);delete x.l4;return x});
+  if(P.acc){const mis=g.sure&&g.id&&g.id!==P.acc;return recImportDlg({kind:'bank',acc:mis?g.id:P.acc,sure:!mis,src:'file',bad:r.bad},lines)}return stmImport({kind:'bank',acc:g.id,sure:g.sure,src:'file',bad:r.bad},lines)}
+ ccSplit(r.ok,r.bad,P.acc)}
+/* מסך מיפוי: לכל תפקיד בוחרים עמודה (עם דוגמה מהשורה הראשונה). נשמר לחתימת הכותרת ולחשבון */
+const IMP_R=[['date','תאריך',1],['desc','תיאור / בית עסק',1],['amt','סכום',0],['dr','חובה (יצא)',0],['cr','זכות (נכנס)',0],['ref','אסמכתא',0],['card','4 ספרות כרטיס',0]];
+function impMapDlg(P,d){const rows=P.rows,hi=d?d.hi:-1,W=Math.min(30,Math.max(0,...rows.slice(0,60).map(r=>(r||[]).length)));if(!W)return toast('הקובץ ריק');
+ const first=rows.slice(hi+1).find(r=>(r||[]).some(x=>pDate(x)))||rows[hi+1]||[],hd=hi>=0?rows[hi]||[]:[];IMP={P,hi,ix:d?Object.assign({},d.ix):{}};
+ const nm=j=>{const h=stlScrub(s_(hd[j])).slice(0,24),v=stlScrub(s_(typeof first[j]==='number'&&j===IMP.ix.date?pDate(first[j]):first[j])).slice(0,24);return (h||'עמודה '+(j+1))+(v?' · '+v:'')};
+ dlg(`<h3>איזו עמודה היא מה?</h3><p class="note">לא זיהינו בוודאות את העמודות בקובץ. בחר פעם אחת – הבחירה נשמרת לקבצים מאותו מבנה${P.acc?' ולחשבון הזה':''}. סכום: עמודה אחת (חיובי/שלילי) או חובה וזכות.</p><form data-f="impMap">${IMP_R.map(([k,l,req])=>`<label class="f"><span>${l}${req?'':' (לא חובה)'}</span><select name="${k}"><option value="">—</option>${Array.from({length:W},(_,j)=>`<option value="${j}"${IMP.ix[k]===j?' selected':''}>${esc(nm(j))}</option>`).join('')}</select></label>`).join('')}<div class="row"><button class="btn grow">המשך</button><button type="button" class="btn g grow" data-a="impNo">ביטול</button></div></form>`)}
+ACT.impNo=()=>{IMP=null;closeDlg()};
+FRM.impMap=f=>{const I=IMP;if(!I)return closeDlg();const x=fd(f),ix={};IMP_R.forEach(([k])=>{if(x[k]!==''&&x[k]!=null&&/^\d+$/.test(x[k]))ix[k]=+x[k]});
+ if(ix.date==null||ix.desc==null)return toast('בחר עמודת תאריך ועמודת תיאור');if(ix.amt==null&&ix.dr==null&&ix.cr==null)return toast('בחר עמודת סכום (או חובה/זכות)');
+ if(!S.impMap||typeof S.impMap!=='object')S.impMap={};const sg=I.hi>=0?impSig(I.P.rows[I.hi]):'';if(sg&&sg.replace(/[|#\s]/g,'').length>=4)S.impMap['h:'+sg]={ix};if(I.P.acc)S.impMap['a:'+I.P.acc]={ix,sig:sg};
+ const ks=Object.keys(S.impMap);if(ks.length>60)delete S.impMap[ks[0]];save();IMP=null;closeDlg();impDo(I.P,{hi:I.hi,ix,sure:true,by:'map'})};
+/* פיצול לפי כרטיס: 4 ספרות קיימות → הכרטיס; לא קיים → כרטיס חדש ("כרטיס חדש ····1234"). שורות בלי ספרות: הכרטיס שנבחר / קבוצה יחידה / כרטיס יחיד / שאלה */
+let CCA=null;
+function ccSplit(lines,bad,acc0){const G={};lines.forEach(l=>{(G[l.l4||'']=G[l.l4||'']||[]).push(l)});const ks=Object.keys(G).filter(k=>k),nw=[],out=[];
+ const find=l4=>{const L=ccAllCards().filter(c=>c.on&&c.last4===l4);return L.find(c=>c.id===acc0)||L.find(c=>!c.loc)||L[0]||null};
+ ks.forEach(k=>{let c=find(k);if(!c){c=ccNewLocal(k);nw.push(c)}out.push({acc:c.id,lines:G[k]})});
+ const fin=()=>{let n=0,dup=0,mt=0;const ms=[];out.forEach(o=>{const m=stmAdd({kind:'card',acc:o.acc,src:'file'},o.lines.map(l=>{const x=Object.assign({},l);delete x.l4;return x}));if(!m)return;dup+=m.dup||0;if(m.n){n+=m.n;ms.push(m);mt+=stlAuto(m.id).match}});save();closeDlg();
+  toast('יובאו '+n+' שורות'+(out.length>1?' ב-'+out.length+' כרטיסים':'')+(dup?' ('+dup+' כפולות)':'')+(bad?' · '+bad+' לא תקינות':'')+' · הותאמו '+mt+(nw.length?' · נוצר כרטיס חדש '+nw.map(c=>'····'+c.last4).join(', ')+' (אפשר לתת כינוי)':''));
+  if(ms.length===1)go('recStm',ms[0].id);else go('rec')};
+ const rest=G['']||[];if(!rest.length)return fin();
+ const toAcc=acc=>{const o=out.find(x=>x.acc===acc);if(o)o.lines=o.lines.concat(rest);else out.push({acc,lines:rest})};
+ const all=ccAllCards().filter(c=>c.on);
+ if(acc0&&all.some(c=>c.id===acc0)){toAcc(acc0);return fin()}if(out.length===1){toAcc(out[0].acc);return fin()}if(!out.length&&all.length===1){toAcc(all[0].id);return fin()}
+ CCA={toAcc,fin,n:rest.length};
+ dlg(`<h3>לאיזה כרטיס שייכות ${rest.length} שורות?</h3><p class="note">בקובץ לא מופיעות 4 הספרות האחרונות של הכרטיס. בחר כרטיס או הוסף כרטיס חדש (כינוי + 4 ספרות אחרונות).</p>${all.map(c=>`<button class="opt" data-a="ccaGo" data-id="${esc(c.id)}"><span>${esc(c.name)}${c.last4?' <bdi dir="ltr">····'+esc(c.last4)+'</bdi>':''}</span></button>`).join('')}<form data-f="ccaNew" class="card"><b>＋ כרטיס חדש</b>${fld('כינוי','name','','text','required maxlength="40" autocomplete="off"')}${fld('4 ספרות אחרונות','last4','','text','required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" dir="ltr" autocomplete="off"')}<button class="btn w">הוסף וייבא</button></form><button class="btn g w" data-a="ccaNo">ביטול</button>`)}
+ACT.ccaGo=el=>{const A=CCA;CCA=null;if(!A)return;A.toAcc(el.dataset.id);A.fin()};
+ACT.ccaNo=()=>{CCA=null;closeDlg();rerender()};
+FRM.ccaNew=f=>{const A=CCA;if(!A)return closeDlg();const x=fd(f),l4=s_(x.last4);if(!/^\d{4}$/.test(l4))return toast('4 ספרות אחרונות: בדיוק 4 ספרות');if(!s_(x.name))return toast('כתוב כינוי');
+ const ex=ccAllCards().find(c=>c.on&&c.last4===l4),c=ex||ccNewLocal(l4,x.name);CCA=null;A.toAcc(c.id);A.fin()};
+/* הגדרות כרטיס (מנהל): כינוי ו-4 ספרות (כרטיס מקומי בלבד; כרטיס מהגדרות הארגון – מנהל־העל), יום חיוב, חשבון בנק */
+ACT.ccSet=el=>{if(!recOk())return;const a=recAccOf(el.dataset.acc);if(!a||a.kind!=='card')return;const loc=ccLocal().find(c=>c.id===a.id),M=(S.ccMeta||{})[a.id]||{},bk=orgNow().banks.filter(b=>b.on);
+ dlg(`<h3>הגדרות כרטיס · ${recNm(a)}</h3><form data-f="ccSetF"><input type="hidden" name="acc" value="${esc(a.id)}">${loc?fld('כינוי','name',loc.name,'text','required maxlength="40" autocomplete="off"')+fld('4 ספרות אחרונות','last4',loc.last4,'text','inputmode="numeric" pattern="[0-9]{4}" maxlength="4" dir="ltr" autocomplete="off"'):'<p class="note">שם ו-4 ספרות של כרטיס מהגדרות הארגון – במסך מנהל המערכת.</p>'}
+ ${fld('יום חיוב בחודש (1–31, ריק = לא מחושב)','day',M.day||'','number','min="1" max="31" step="1" inputmode="numeric"')}<div class="hd">עסקה שנעשתה לפני יום החיוב יורדת מהחשבון ביום החיוב של אותו חודש; ביום החיוב ואחריו – בחודש הבא. החיוב הצפוי מופיע ב"ירידה מהחשבון" ובתזרים.</div>
+ ${bk.length?`<label class="f"><span>יורד מחשבון (לא חובה)</span><select name="bank"><option value="">—</option>${bk.map(b=>`<option value="${esc(b.id)}"${b.id===(M.bank||a.bank)?' selected':''}>${esc(b.name)}${b.last4?' ····'+esc(b.last4):''}</option>`).join('')}</select></label>`:''}
+ ${loc?`<label class="cb"><input type="checkbox" name="off" value="1"${loc.on?'':' checked'}> מושבת</label>`:''}<div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.ccSetF=f=>{if(!recOk())return;const x=fd(f),a=recAccOf(x.acc);if(!a)return closeDlg();const loc=ccLocal().find(c=>c.id===a.id),day=s_(x.day)===''?0:+x.day;
+ if(day&&!(Number.isInteger(day)&&day>=1&&day<=31))return toast('יום חיוב: מספר בין 1 ל-31');
+ if(loc){const nm=s_(x.name),l4=s_(x.last4);if(!nm)return toast('כתוב כינוי');if(l4&&!/^\d{4}$/.test(l4))return toast('4 ספרות אחרונות: בדיוק 4 ספרות');loc.name=nm.slice(0,40);loc.last4=l4;loc.on=!x.off}
+ if(!S.ccMeta||typeof S.ccMeta!=='object')S.ccMeta={};const M=Object.assign({},S.ccMeta[a.id]||{});if(day)M.day=day;else delete M.day;if(x.bank!==undefined){if(x.bank)M.bank=x.bank;else delete M.bank}
+ if(Object.keys(M).length)S.ccMeta[a.id]=M;else delete S.ccMeta[a.id];save();closeDlg();rerender();toast('נשמר')};
+const ccSetH=a=>{if(a.kind!=='card')return '';const D=ccDay(a.id),nx=D?ccBillDate(a.id,today()):'';const loc=ccLocal().some(c=>c.id===a.id&&c.name==='כרטיס חדש');
+ return `<div class="row" style="justify-content:space-between;margin-top:6px"><span class="note" data-ccday>${D?'יום חיוב: '+D+' לחודש · החיוב הקרוב '+dfmt(nx):'יום חיוב: לא הוגדר'}${loc?' · <span class="tag t1">תן כינוי</span>':''}</span><button class="btn s g" data-a="ccSet" data-acc="${esc(a.id)}">הגדרות כרטיס</button></div>`};
+/* ---- הצעת שיוך לפי שם בית העסק + למידה ---- */
+const mKey=s=>heKey(stlScrub(s_(s))).toLowerCase().replace(/•+\d*/g,' ').replace(/\d+/g,' ').replace(/[^\p{L}\s]/gu,' ').replace(/\s+/g,' ').trim().slice(0,40);
+function mLearnSet(desc,cid,sid){const k=mKey(desc),c=cat(cid);if(k.length<2||!c||c.hid)return;if(!S.mLearn||typeof S.mLearn!=='object')S.mLearn={};delete S.mLearn[k];S.mLearn[k]={cat:c.id,sub:sid&&subById(sid)?sid:''};const ks=Object.keys(S.mLearn);if(ks.length>800)delete S.mLearn[ks[0]]}
+/* הצעה לשורה פתוחה: נלמד → הוצאה/הכנסה קודמת עם אותו תיאור → ספק/כרטיס קיים לפי השם. null = אין */
+function mSuggest(l){if(!l)return null;const k=mKey(l.desc),kind=l.dir==='in'?'inc':'exp',ok=c=>c&&c.kind===kind&&!c.hid;if(k.length<2)return null;
+ const L=S.mLearn&&S.mLearn[k];if(L&&ok(cat(L.cat)))return{cat:L.cat,sub:L.sub&&subById(L.sub)?L.sub:'',why:'נלמד מבחירה קודמת'};
+ const p=live().filter(t=>t.t===kind&&t.note&&ok(cat(t.cat))&&mKey(t.note)===k).sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];if(p)return{cat:p.cat,sub:p.sub||'',why:(kind==='inc'?'הכנסה':'הוצאה')+' קודמת עם אותו תיאור'};
+ const s=S.subs.find(x=>!x.off&&ok(cat(x.cat))&&stlNm({sub:x.id},l.desc));if(s)return{cat:s.cat,sub:s.id,why:'לפי שם '+(subWord(cat(s.cat))||'הכרטיס')};return null}
+const mSugNm=g=>{const c=cat(g.cat),s=g.sub?subById(g.sub):null;return esc(c?c.name:'')+(s?' › '+esc(s.name):'')};
+ACT.recQuick=el=>{const l=recLn(el.dataset.id);if(!l||l.st!=='open')return;const g=mSuggest(l);if(!g)return toast('אין הצעה');if(brMulti())return ACT.recNew(el);const c=cat(g.cat);if(['sup','fixed'].includes(c.beh)&&!g.sub)return ACT.recNew(el);
+ const t=l.dir==='in'?stlNewInc(l.id,{cat:g.cat,sub:g.sub}):stlNewExp(l.id,{cat:g.cat,sub:g.sub,noInv:1});if(!t)return toast('לא ניתן להקים מהשורה הזו');mLearnSet(l.desc,g.cat,g.sub);save();rerender();toast(l.dir==='in'?'הוקמה הכנסה':'הוקמה הוצאה · ממתינה לחשבונית')};
 const ccName=id=>(subById(id)||{}).name||'—';
 function ccCands(c){return inv().filter(x=>bal(x)>0.004).map(x=>{let s=0;if(Math.abs(bal(x)-c.amt)<.01)s+=3;else if(Math.abs(x.amt-c.amt)<.01)s+=2;const d=(c.desc||'').toLowerCase(),n=subName(x).toLowerCase();if(n&&d&&(d.includes(n)||(d.length>2&&n.includes(d))))s+=2;const dd=(new Date(c.date)-new Date(x.date))/864e5;if(dd>=-3&&dd<=60)s+=1;return{x,s}}).sort((a,b)=>b.s-a.s||b.x.date.localeCompare(a.x.date))}
 V.cc=()=>{const cards=subsOf('e_cc'),open=S.ccx.filter(c=>!c.match&&!c.exp);
- return{t:'כרטיסי אשראי',s:'חיובים והתאמה',h:`<div class="card"><p class="note">חיוב שמותאם לחשבונית נרשם כתשלום עליה, בלי להיספר פעם שנייה. חיוב בלי חשבונית נרשם כהוצאה.</p>${recOk()&&recAccs().length?`<button class="btn w" style="margin-bottom:10px" data-a="go" data-v="rec">התאמת דפי בנק ואשראי${recOpenN()?' ('+recOpenN()+' פתוחות)':''}</button>`:''}<div class="row"><label class="btn grow" style="cursor:pointer">ייבוא חיובים מקובץ<input type="file" accept=".csv,.xlsx,.xls" data-c="ccfile" hidden></label><button class="btn g grow" data-a="ccNew">＋ חיוב ידני</button></div></div>`+
+ return{t:'כרטיסי אשראי',s:'חיובים והתאמה',h:`<div class="card"><p class="note">חיוב שמותאם לחשבונית נרשם כתשלום עליה, בלי להיספר פעם שנייה. חיוב בלי חשבונית נרשם כהוצאה.</p>${recOk()&&recAccs().length?`<button class="btn w" style="margin-bottom:10px" data-a="go" data-v="rec">התאמת דפי בנק ואשראי${recOpenN()?' ('+recOpenN()+' פתוחות)':''}</button>`:''}<div class="row"><label class="btn grow" style="cursor:pointer">ייבוא חיובים מקובץ<input type="file" accept=".csv,.xlsx,.xls,.pdf,application/pdf" data-c="ccfile" hidden></label><button class="btn g grow" data-a="ccNew">＋ חיוב ידני</button></div></div>`+
  `<div class="sec"><h3>כרטיסים</h3></div>`+(cards.map(s=>`<button class="li exp" data-a="go" data-v="card" data-arg="${s.id}"><div class="m"><b>${esc(s.name)}</b><small>${(s.ext||{}).last4?'••'+esc(s.ext.last4)+' · ':''}${txOfSub(s.id).length} תנועות</small></div>${ico('chev','chev')}</button>`).join('')||'<div class="empty">אין כרטיסי אשראי. הוסף כרטיס דרך קטגוריית אשראי.</div>')+
  `<div class="sec"><h3>חיובים שמחכים לטיפול (${open.length})</h3></div>`+(open.sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(c.desc)}</b><b>${ils(c.amt)}</b></div><div class="note">${dfmt(c.date)} · ${esc(ccName(c.sub))}</div><div class="row" style="margin-top:8px"><button class="btn s grow" data-a="ccMatch" data-id="${c.id}">התאם לחשבונית</button><button class="btn s g grow" data-a="ccReg" data-id="${c.id}">רשום כהוצאה</button><button class="btn s g" data-a="ccDel" data-id="${c.id}">הסר</button></div></div>`).join('')||'<div class="empty">אין חיובים שממתינים ✓</div>')}};
 ACT.ccNew=()=>{const cards=subsOf('e_cc');if(!cards.length)return toast('קודם הוסף כרטיס אשראי בקטגוריית אשראי');dlg(`<h3>חיוב אשראי חדש</h3><form data-f="ccnew">${selO('כרטיס','sub',cards.map(c=>[c.id,c.name]))}${fld('בית עסק / תיאור','desc','','text','required')}${amtF('amt','')}${dateF('תאריך','date',today())}<button class="btn w">הוסף</button></form>`)};
@@ -1592,13 +1732,14 @@ ACT.ccReg=el=>{const c=S.ccx.find(x=>x.id===el.dataset.id);const x={id:uid(),t:'
 ACT.ccDel=el=>{S.ccx=S.ccx.filter(x=>x.id!==el.dataset.id);save();rerender()};
 /* חלק ג': כרטיס לפי 4 ספרות (stmAcc). יש כרטיסים בהגדרות הארגון → דף חדש (S.stl). אין → הייבוא הישן (S.ccx), כרטיס לפי 4 ספרות; בלי זיהוי וכמה כרטיסים – בחירה (לא עוד cards[0] תמיד) */
 CHG.ccfile=async el=>{const f=el.files[0];el.value='';if(!f)return;
+ /* C3: בלי להגדיר כרטיסים מראש – זיהוי לפי 4 ספרות, כרטיס חדש נוצר לבד, כמה כרטיסים בדף */if(recOk()){try{await impRun(f,'card','')}catch(e){toast('הייבוא נכשל: '+(e.message||e))}return}
  try{if(stmList('card').length){const r=await stmFile(f,'card');if(!r.lines.length)return toast('לא נמצאו שורות תקינות ('+r.bad+' לא תקינות)');return stmImport({kind:'card',acc:r.acc.id,sure:r.acc.sure,src:'file'},r.lines)}
   const cards=subsOf('e_cc');if(!cards.length)return toast('קודם הוסף כרטיס אשראי');const rows=await readTable(f),head=(f.name||'')+' '+rows.slice(0,8).map(x=>(x||[]).join(' ')).join(' '),t4=new Set(head.match(/\d{4}(?!\d)/g)||[]);
   const m=cards.filter(c=>(c.ext||{}).last4&&t4.has(String(c.ext.last4)));const go=card=>{const r=ccParse(rows,card.id);r.ok.forEach(c=>{c.sub=card.id;S.ccx.push(c)});save();closeDlg();rerender();toast(`יובאו ${r.ok.length} חיובים (${r.dup} כפולים, ${r.bad} שורות לא תקינות). כרטיס: ${card.name}`)};
   if(m.length===1)return go(m[0]);if(cards.length===1)return go(cards[0]);ccPick={rows,go,cards};
   dlg(`<h3>לאיזה כרטיס שייך הקובץ?</h3>${cards.map(c=>`<button class="opt" data-a="ccPickGo" data-id="${esc(c.id)}"><span>${esc(c.name)}${(c.ext||{}).last4?' ····'+esc(c.ext.last4):''}</span></button>`).join('')}<button class="btn g w" data-a="closeDlg">ביטול</button>`)}catch(e){toast('הייבוא נכשל: '+(e.message||e))}};
 let ccPick=null;ACT.ccPickGo=el=>{const P=ccPick;ccPick=null;if(!P)return;const c=P.cards.find(x=>x.id===el.dataset.id);if(c)P.go(c)};
-async function readTable(f){const nm=f.name||'';if(/\.xlsx?$/i.test(nm)){if(typeof XLSX==='undefined')throw new Error('ספריית האקסל לא נטענה; השתמש ב-CSV');const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:''})}return parseCsv((await f.text()).replace(/^﻿/,''))}
+async function readTable(f){const nm=f.name||'';if(/\.pdf$/i.test(nm)||f.type==='application/pdf')return pdfTable(f);if(/\.xlsx?$/i.test(nm)){if(typeof XLSX==='undefined')throw new Error('ספריית האקסל לא נטענה; השתמש ב-CSV');const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:''})}return parseCsv((await f.text()).replace(/^﻿/,''))}
 function ccParse(rows,card){let hi=-1,ix={};for(let i=0;i<Math.min(rows.length,12)&&hi<0;i++){const h=rows[i].map(x=>String(x??'').trim()),m={};h.forEach((t,j)=>{if(m.date==null&&/תאריך|date/i.test(t))m.date=j;else if(m.amt==null&&/סכום|חיוב|amount/i.test(t))m.amt=j;else if(m.desc==null&&/בית עסק|תיאור|פירוט|שם|עסק|description/i.test(t))m.desc=j});if(m.date!=null&&m.amt!=null&&m.desc!=null){hi=i;ix=m}}
  if(hi<0)throw new Error('לא זוהו עמודות תאריך, תיאור וסכום בשורת הכותרת');
  const have={},cur={},ok=[];let dup=0,bad=0;S.ccx.forEach(c=>{const k=c.sub+'|'+c.date+'|'+c.desc+'|'+c.amt;have[k]=(have[k]||0)+1});
