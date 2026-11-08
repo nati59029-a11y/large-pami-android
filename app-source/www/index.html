@@ -45,7 +45,7 @@ html[data-ds=b]{--bg:#f3f1ee;--card:#fbfaf8;--ink:#2f2f31;--acc:#b23c17;--acc2:#
  --srf-0:#e9e6e1;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#ffffff;--glass:rgba(243,241,238,.8);--blur:12px;--metal:none;--hl:rgba(255,255,255,.95);--lo:rgba(140,124,106,.30);
  --elev-1:5px 5px 12px var(--lo),-5px -5px 12px var(--hl);--elev-2:8px 9px 18px var(--lo),-7px -7px 16px var(--hl);--elev-3:12px 14px 28px var(--lo),-10px -10px 24px var(--hl);
  --inset:inset 3px 3px 7px var(--lo),inset -3px -3px 7px var(--hl);--press:inset 0 -3px 0 rgba(0,0,0,.14);--sh:var(--elev-1);color-scheme:light}
-html[data-ds=c]{--bg:#e3e6e9;--card:#f5f6f7;--ink:#1f2124;--acc:#b5401b;--acc2:#dccbc8;--onacc:#ffffff;--mut:#4f5256;--line:#cdd2d7;--inc:#2a6b4c;--exp:#a83c1b;
+html[data-ds=c]{--bg:#e3e6e9;--card:#f5f6f7;--ink:#1f2124;--acc:#ab3815;--acc2:#dccbc8;--onacc:#ffffff;--mut:#4f5256;--line:#cdd2d7;--inc:#2a6b4c;--exp:#a83c1b;
  --srf-0:#d4d8dc;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#ffffff;--glass:rgba(240,242,244,.72);--blur:14px;
  --metal:repeating-linear-gradient(90deg,rgba(255,255,255,.18) 0 1px,transparent 1px 3px);--hl:rgba(255,255,255,.95);
  --elev-1:inset 0 1px 0 var(--hl),0 1px 0 rgba(30,34,40,.12),0 6px 14px -8px rgba(30,34,40,.35);--elev-2:inset 0 1px 0 var(--hl),0 2px 0 rgba(30,34,40,.12),0 14px 28px -14px rgba(30,34,40,.4);--elev-3:inset 0 1px 0 var(--hl),0 22px 44px -18px rgba(30,34,40,.45);
@@ -251,7 +251,7 @@ body.gate{padding:0;background:var(--bg)}
 .fbbar .v{font-size:.8rem;font-weight:700;min-height:1.1em}.fbbar .x{font-size:.8rem;color:var(--mut);margin-top:3px}
 
 .lw{display:flex;gap:6px;align-items:stretch;margin:0 0 8px}.lw>.li{flex:1;min-width:0;margin:0}.fa{display:flex;gap:4px;align-items:center;flex:none}.fa .ib{width:44px;height:44px;border-radius:12px}.fa .ib svg{width:20px;height:20px}
-.msbar{position:fixed;left:8px;right:8px;bottom:calc(104px + env(safe-area-inset-bottom));z-index:25;max-width:560px;margin:0 auto;background:var(--card);border:2px solid var(--acc);border-radius:16px;padding:10px 12px;box-shadow:0 8px 24px -10px rgba(0,0,0,.5)}.msbar .note{margin:6px 0 0}.mscb{font-size:1.5rem;line-height:1;flex:none;color:var(--acc)}
+.msbar{position:fixed;left:8px;right:8px;bottom:calc(104px + env(safe-area-inset-bottom));z-index:25;max-width:560px;margin:0 auto;background:var(--card);border:2px solid var(--acc);border-radius:16px;padding:10px 12px;box-shadow:0 8px 24px -10px rgba(0,0,0,.5)}.msbar .note{margin:6px 0 0}.mscb{font-size:1.5rem;line-height:1;flex:none;color:var(--acc);display:inline-flex;align-items:center}.mscb svg{width:24px;height:24px;display:block}
 /* DS:D2 – כניסה, בית, כותרת, ניווט, עוד, נעילה ביומטרית, השהיה. רק מראה; כל הצבעים מה-tokens */
 #gate{position:fixed;inset:0;z-index:9999;overflow:auto;background:var(--metal),var(--bg);color:var(--ink);font-family:var(--font-ui);-webkit-overflow-scrolling:touch}
 #gate .gbg{display:none}
@@ -797,13 +797,13 @@ ACT.txDel=el=>{const id=el.dataset.id,t1=S.tx.find(x=>x.id===id);if(t1&&(t1.used
  if(t&&t.link){const inv=S.tx.find(x=>x.id===t.link);if(inv)inv.pays=(inv.pays||[]).filter(p=>p.cc!==t.id)}
  S.tx=S.tx.filter(x=>x.id!==id);Object.keys(S.fixOk).forEach(k=>{if(S.fixOk[k].e===id)delete S.fixOk[k]});S.loans.forEach(l=>{Object.keys(l.paid||{}).forEach(k=>{if(l.paid[k].e===id)delete l.paid[k]})});
  save();rerender();toast('נמחק')},'מחק')};
-ACT.delPay=el=>{const t=S.tx.find(x=>x.id===el.dataset.id);if((t.pays||[]).some(p=>p.id===el.dataset.p&&p.crof))return toast('זה קיזוז זיכוי – לביטול השתמשו ב"ביטול הסגירה כולה"');if(t.tgrp&&(t.pays||[]).some(p=>p.id===el.dataset.p&&p.grp===t.tgrp))return toast('התשלום נוצר מצילום העברה – לביטול השתמשו ב"ביטול ההעברה כולה"');t.pays=t.pays.filter(p=>p.id!==el.dataset.p);save();txDlg(t.id);rerender()};
+ACT.delPay=el=>{const t=S.tx.find(x=>x.id===el.dataset.id);if((t.pays||[]).some(p=>p.id===el.dataset.p&&p.crof))return toast('זה קיזוז זיכוי – לביטול השתמשו ב"ביטול הסגירה כולה"');if(t.tgrp&&(t.pays||[]).some(p=>p.id===el.dataset.p&&p.grp===t.tgrp))return toast('התשלום נוצר מצילום העברה – לביטול השתמשו ב"ביטול ההעברה כולה"');if((t.pays||[]).some(p=>p.id===el.dataset.p&&p.grp))return toast('התשלום שייך לסגירה משותפת – לביטול השתמשו ב"ביטול הסגירה כולה"');const id=t.id,pid=el.dataset.p;ask('למחוק את התשלום?',()=>{const x=S.tx.find(z=>z.id===id);if(!x)return;x.pays=(x.pays||[]).filter(p=>p.id!==pid);save();closeDlg();txDlg(id);rerender()},'מחק')};
 /* ===== סגירת תשלום ===== */
 ACT.payDlg=el=>payDlg(el.dataset.id);
 function payDlg(id){const t=S.tx.find(x=>x.id===id);closeDlg();
  dlg(`<h3>סגירת תשלום · ${esc(subName(t))}</h3><div class="card"><div class="note">חשבונית ${dfmt(t.date)}${t.inv?' · '+esc(t.inv):''} · חודש לתשלום ${mfmt(pmon(t))}</div><div class="row" style="justify-content:space-between"><span>סכום ${ils(t.amt)} · שולם ${ils(paid(t))}</span><b>יתרה ${ils(bal(t))}</b></div></div>
  <form data-f="paysave"><input type="hidden" name="id" value="${t.id}"><label class="f"><span>כמה משלמים עכשיו? (אפשר חלק)</span><input class="amt" name="a" inputmode="decimal" value="${bal(t)}" required></label>${dateF('תאריך התשלום','d',today())}${offSub(t)?offPayH(t):''}${pmF('m',offSub(t)?METHODS.concat('קיזוז'):METHODS,offSub(t)?'קיזוז':'',undefined,t)}<div class="row"><button class="btn grow">אשר תשלום</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)}
-FRM.paysave=async form=>{if(form.dataset.busy)return;const f=fd(form),t=S.tx.find(x=>x.id===f.id),a=pNum(f.a);
+FRM.paysave=async form=>{if(form.dataset.busy)return;const f=fd(form),t=S.tx.find(x=>x.id===f.id),a=pNum(f.a);if(!t||!msBrOk(t))return toast('אין לך הרשאה לחשבונית הזו');
  if(a==null||a<=0)return toast('סכום לא תקין');if(a>bal(t)+0.004)return toast('הסכום גדול מהיתרה ('+ils(bal(t))+')');if(!f.m)return toast('בחר אמצעי תשלום');
  if(f.m==='קיזוז'){const r=offPay(t.id,a,f.d);if(r!==true)return toast(r);closeDlg();rerender();return toast(bal(t)<0.005?'החשבונית נסגרה בקיזוז':'קוזז, נותרו '+ils(bal(t)))}
  if(f.m===METHODS[1]&&!cfDt(f.cdate))return toast('חסר תאריך פירעון לצ׳ק');let img='';if(f.m===METHODS[1]){form.dataset.busy='1';try{img=await chkImg(form)}catch(e){delete form.dataset.busy;return toast('שמירת צילום הצ׳ק נכשלה')}}
@@ -1285,10 +1285,11 @@ V.home=()=>{
  if(!S.tx.length)h+=`<div class="empty">עוד אין תנועות. לחץ על ＋ כדי להוסיף את הראשונה.</div>`;
  return{t:bzNm(),s:'מבט על העסק',h}};
 ACT.hm=el=>{HM=addMon(HM,+el.dataset.d);rerender()};
-function txRow(t,showCat){
+function txRow(t,showCat){return dxRow(t,`<button class="li ${t.t}" data-a="tx" data-id="${t.id}">${txIn(t,showCat)}</button>`)}
+function txIn(t,showCat){
  const c=cat(t.cat),b=c.beh,sub=showCat?`${esc(c.name)} › ${esc(subName(t))}`:esc(t.desc&&b==='free'?t.desc:(t.note||''));
  const extra=b==='emp'?`משכורת ל־${mfmt(pmon(t))} · ${esc((t.pays[0]||{}).m||'לא צוין')}`:(b==='sup'||b==='fixed')?`לתשלום ${cfDt(t.due)?dfmt(t.due):mfmt(pmon(t))}${invS(t)}`:(showCat?esc(t.note||''):'');
- return dxRow(t,`<button class="li ${t.t}" data-a="tx" data-id="${t.id}"><div class="m"><b>${showCat?esc(subName(t)):dfmt(t.date)}</b><small>${showCat?esc(c.name)+' · '+dfmt(t.date):sub}${extra&&!showCat?' · '+extra:''}</small>${hasPay(t)||t.kind==='credit'||t.kind==='refund'?statusTag(t):''}${brTag(t)}${dxWhoSm(t)}</div><div class="a ${t.t==='inc'?'pos':''}">${t.t==='inc'?'+':''}${ils(t.kind==='refund'?t.rf:t.amt)}<small>${hasPay(t)&&bal(t)>0?'יתרה '+ils(bal(t)):''}</small></div></button>`)}
+ return `<div class="m"><b>${showCat?esc(subName(t)):dfmt(t.date)}</b><small>${showCat?esc(c.name)+' · '+dfmt(t.date):sub}${extra&&!showCat?' · '+extra:''}</small>${hasPay(t)||t.kind==='credit'||t.kind==='refund'?statusTag(t):''}${brTag(t)}${dxWhoSm(t)}</div><div class="a ${t.t==='inc'?'pos':''}">${t.t==='inc'?'+':''}${ils(t.kind==='refund'?t.rf:t.amt)}<small>${hasPay(t)&&bal(t)>0?'יתרה '+ils(bal(t)):''}</small></div>`}
 /* ---- חשבוניות לתשלום ---- */
 V.due=a=>{const o=a&&typeof a==='object'?a:{m:a},m=pMonth(o.m)||NOWM(),E=brFil(),td=today(),ok=t=>bal(t)>0.004&&inBr(t,E);
  /* באיחור – נכון להיום, לפי dueOf (B2) */const late=inv().filter(t=>ok(t)&&isLate(t,td)).sort((x,y)=>dueOf(x).localeCompare(dueOf(y))),lid=new Set(late.map(t=>t.id));
@@ -1316,7 +1317,7 @@ V.cat=id=>{const c=cat(id);if(!c)return{t:'?',h:'<div class="empty">הקטגור
  let h=periodBar();
  h+=`<div class="hero" style="background:${c.kind==='inc'?'var(--inc)':'var(--exp)'}"><small>${esc(c.name)} · ${esc(plabel())}</small><div class="big">${ils(total)}</div><small>${all.length} תנועות</small></div>`;
  h+=`<div class="row" style="margin-bottom:12px"><button class="btn grow" data-a="addTo" data-t="${c.kind}" data-cat="${c.id}">＋ הוספה</button><button class="btn g grow" data-a="rep" data-s="cat:${c.id}">${ico('doc')} דוח לקטגוריה</button></div>`;
- if(c.beh==='free'){h+=all.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>txRow(t,true)).join('')||'<div class="empty">אין רישומים בתקופה</div>';return{t:c.name,s:c.kind==='inc'?'הכנסות':'הוצאות',h}}
+ if(c.beh==='free'){const A=all.sort((a,b)=>b.date.localeCompare(a.date)),sv=A.filter(msSees);msSync([],[],'',sv);h+=msTop()+(MS.on&&sv.length?`<button class="chip" style="margin:0 0 8px;min-height:44px" data-a="msAll" data-ids="${esc(sv.map(x=>x.id).join(','))}">${msAllL(sv.map(x=>x.id))}</button>`:'');h+=A.map(t=>MS.on&&msSees(t)?msBox(t,txIn(t,true)):txRow(t,true)).join('')||'<div class="empty">אין רישומים בתקופה</div>';h+=msFoot();return{t:c.name,s:c.kind==='inc'?'הכנסות':'הוצאות',h}}
  const subs=subsOf(id);
  h+=`<div class="sec"><h3>כרטיסים (${subs.length})</h3><button class="btn s ${SEL.on?'':'g'}" data-a="selMode">${SEL.on?'בטל בחירה':'בחירת כמה כרטיסים'}</button></div>`;
  if(SEL.on)h+=`<div class="card" style="border-color:var(--acc)"><div class="row"><b class="grow">נבחרו ${SEL.ids.length}</b><button class="btn s grow" data-a="rep" data-s="subs" ${SEL.ids.length?'':'disabled'}>${ico('doc')} דוח לנבחרים</button></div></div>`;
@@ -1347,8 +1348,9 @@ V.card=id=>{const s=subById(id);if(!s)return{t:'?',h:'<div class="empty">הכר�
  if(b==='sup'&&s.offset)h+=offCardH(s);
  h+=`<div class="row" style="margin-bottom:10px"><button class="btn grow" data-a="addTo" data-t="${c.kind}" data-cat="${c.id}" data-sub="${id}">＋ הוספה לכרטיס</button>${b==='sup'?`<button class="btn g grow" data-a="go" data-v="ledger" data-arg="${id}">כרטסת</button>`:''}</div><div class="row" style="margin-bottom:10px"><button class="btn g grow" data-a="rep" data-s="sub:${id}">${ico('doc')} דוח / PDF</button><button class="btn g grow" data-a="subMenu" data-id="${id}">הגדרות כרטיס</button></div>`+(['sup','emp','fixed'].includes(b)?trBtn(id,'g'):'');
  const groups={};inPer.forEach(t=>{(groups[t.date.slice(0,7)]=groups[t.date.slice(0,7)]||[]).push(t)});
- h+=Object.keys(groups).sort().reverse().map(m=>`<div class="mh"><span>${mfmt(m)}</span><span>${ils(sum(groups[m],t=>t.amt))}</span></div>`+groups[m].map(t=>txRow(t,false)).join('')).join('')||'<div class="empty">אין תנועות בתקופה שנבחרה</div>';
- return{t:s.name,s:c.name,h}};
+ const sv=inPer.filter(msSees);msSync([],[],b==='sup'?id:'',sv);h+=msTop();
+ h+=Object.keys(groups).sort().reverse().map(m=>`<div class="mh"><span>${mfmt(m)}</span><span>${ils(sum(groups[m],t=>t.amt))}</span></div>`+(MS.on?`<button class="chip" style="margin:0 0 8px;min-height:44px" data-a="msAll" data-ids="${esc(groups[m].filter(msSees).map(x=>x.id).join(','))}">${msAllL(groups[m].filter(msSees).map(x=>x.id))}</button>`:'')+groups[m].map(t=>MS.on&&msSees(t)?msBox(t,txIn(t,false)):txRow(t,false)).join('')).join('')||'<div class="empty">אין תנועות בתקופה שנבחרה</div>';
+ h+=msFoot();return{t:s.name,s:c.name,h}};
 ACT.subMenu=el=>{const s=subById(el.dataset.id),c=cat(s.cat),b=c.beh,n=txOfSub(s.id).length;
  dlg(`<h3>הגדרות כרטיס · ${esc(s.name)}</h3><form data-f="subsave"><input type="hidden" name="id" value="${s.id}">${fld('שם','name',s.name,'text','required')}${b==='emp'?fld('תפקיד','role',(s.ext||{}).role)+fld('טלפון','phone',(s.ext||{}).phone,'tel')+fld('תחילת עבודה','start',(s.ext||{}).start,'date')+fld('הערות','notes',(s.ext||{}).notes):''}${b==='cc'?fld('4 ספרות אחרונות','last4',(s.ext||{}).last4):''}${b==='sup'?termsF(cfTermsOk(s.terms)?s.terms:null,s.pm!=null?s.pm:'')+offSubF(s):''}<button class="btn w">שמור</button></form>
  <div class="row" style="margin-top:10px"><button class="btn g grow" data-a="subHide" data-id="${s.id}">${s.off?'החזרת הכרטיס':'הסתרת הכרטיס'}</button>${n===0?`<button class="btn r grow" data-a="subDel" data-id="${s.id}">מחיקה</button>`:''}</div><p class="note">הסתרה לא מוחקת תנועות. מחיקה אפשרית רק לכרטיס בלי תנועות.</p>`)};
@@ -1380,43 +1382,59 @@ CHG.lgf=el=>{LG.from=el.value;rerender()};CHG.lgt=el=>{LG.to=el.value;rerender()
  סגירה משותפת: תשלום בכל חשבונית {id,d,a,m,grp,ref?,file?}; grp משותף לכל התשלומים של אותה סגירה, והקובץ נשמר פעם אחת.
  קיזוז זיכויים (רק בכרטסת): החלק שמכוסה בזיכויים נרשם כתשלום נפרד {id,d,a,m:'קיזוז זיכוי',grp,crof:[מזהי הזיכויים]}, וכל זיכוי שנבחר מקבל t.used={grp,d}.
  תשלום קיזוז נכלל ב-paid/bal (החשבונית סגורה), אבל לא ב"כסף ששולם בפועל" (cashPaid) ולא בכרטסת (שם הזיכוי עצמו כבר מופיע). */
-let MS={ref:null,on:false,ids:[],open:[],led:''};
+let MS={ref:null,on:false,ids:[],open:[],led:''},MSBUSY=0;
 const crOpen=sid=>live().filter(t=>t.sub===sid&&t.t==='exp'&&t.kind==='credit'&&!t.used&&Math.abs(t.amt)>0.004).sort((p,q)=>(p.date||'').localeCompare(q.date||''));
 const crAmt=t=>rnd(Math.abs(t.amt));
-function msSync(open,cr,led){const c=cur();if(MS.ref!==c)MS={ref:c,on:false,ids:[],open:[],led:''};MS.led=led||'';MS.open=open.concat(cr||[]).map(t=>t.id);MS.ids=MS.ids.filter(i=>MS.open.includes(i))}
-const msSel=()=>MS.ids.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&hasPay(t)&&bal(t)>0.004);
-const msCr=()=>MS.led?MS.ids.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&t.kind==='credit'&&!t.used&&t.sub===MS.led):[];
+function msSync(open,cr,led,more){const c=cur();if(MS.ref!==c)MS={ref:c,on:false,ids:[],open:[],led:''};MS.led=led||'';MS.open=[...new Set(open.concat(cr||[],more||[]).map(t=>t.id))];MS.ids=MS.ids.filter(i=>MS.open.includes(i))}
+/* D4: הרשאה לסגירה יחד – כמו payDlg (מנהל; עובד: expW + sup). expR 'own' – רק מה שהעובד הזין (t.eu) */
+const msCanPay=()=>!isW()||(wp('expW')&&wp('sup'));/* הגבלת סניפים של מנהל (SY.br) – אותה בדיקה כמו בתצוגה (brFil/inBr) */const msBrOk=t=>{const m=brMineIds();return!m||inBr(t,m)};
+const msSees=t=>msBrOk(t)&&(!isW()||wpE()==='all'||(wpE()==='own'&&!!t.eu&&t.eu===SY.uid));
+/* ערך חתום של מסמך: זיכוי והחזר כספי בשלילה */const msV=t=>t.kind==='refund'?-rnd(t.rf||0):t.kind==='credit'?-crAmt(t):rnd(t.amt||0);
+const msDocs=()=>MS.ids.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&msSees(t));
+const msSel=()=>msDocs().filter(t=>hasPay(t)&&bal(t)>0.004);
+const msCr=()=>MS.led?msDocs().filter(t=>t.kind==='credit'&&!t.used&&t.sub===MS.led):[];
 const msTot=(L,K)=>{K=K||[];const y=rnd(sum(L,bal)),c=rnd(sum(K,crAmt));return{n:L.length,x:rnd(sum(L,t=>t.amt)),y,c,net:rnd(y-c),subs:new Set(L.map(t=>t.sub).concat(K.map(t=>t.sub)))}};
-const msTop=()=>MS.open.length?`<div class="row" style="justify-content:flex-end;margin:10px 0 0"><button class="btn s ${MS.on?'':'g'}" data-a="msMode">${MS.on?'בטל בחירה':'בחירת כמה חשבוניות'}</button></div>`:'';
+const msTop=()=>MS.open.length?`<div class="row" style="justify-content:flex-end;margin:10px 0 0"><button class="btn s ${MS.on?'':'g'}" data-a="msMode" aria-pressed="${MS.on}">${MS.on?'סיום בחירה':'בחירה'}</button></div>`:'';
+const MSCB=on=>`<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="${on?'var(--acc)':'none'}" stroke="var(--acc)" stroke-width="2"/>${on?'<path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="var(--onacc)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>':''}</svg>`;
 const msAllL=ids=>ids.every(i=>MS.ids.includes(i))?'בטל סימון של כולן':'סמן את כולן';
-const msHd=(t,L,neg)=>`<div class="mh"><span>${t}</span><span>${neg?'‎-'+ils(rnd(sum(L,crAmt))):ils(sum(L,bal))}</span></div>`+(MS.on?`<button class="chip" style="margin:0 0 8px;min-height:38px" data-a="msAll" data-ids="${esc(L.map(x=>x.id).join(','))}">${msAllL(L.map(x=>x.id))}</button>`:'');
-const msBox=(t,inner)=>{const on=MS.ids.includes(t.id);return `<div class="lw"><button class="li exp ${on?'sel':''}" data-a="msPick" data-id="${t.id}" role="checkbox" aria-checked="${on}"><span class="mscb" aria-hidden="true">${on?'☑':'☐'}</span>${inner}</button></div>`};
+const msHd=(t,L,neg)=>`<div class="mh"><span>${t}</span><span>${neg?'‎-'+ils(rnd(sum(L,crAmt))):ils(sum(L,bal))}</span></div>`+(MS.on?`<button class="chip" style="margin:0 0 8px;min-height:44px" data-a="msAll" data-ids="${esc(L.map(x=>x.id).join(','))}">${msAllL(L.map(x=>x.id))}</button>`:'');
+const msBox=(t,inner)=>{const on=MS.ids.includes(t.id);return `<div class="lw"><button class="li ${t.t||'exp'} ${on?'sel':''}" data-a="msPick" data-id="${t.id}" role="checkbox" aria-checked="${on}"><span class="mscb" aria-hidden="true">${MSCB(on)}</span>${inner}</button></div>`};
 const msRow=(t,tag)=>msBox(t,invIn(t,tag));
 const crRow=t=>msBox(t,`<div class="m"><b>זיכוי ${dfmt(t.date)}${t.inv?' · '+esc(t.inv):''}</b><small>${esc(t.note||'')}</small>${dxWhoSm(t)}</div><div class="a pos">‎-${ils(crAmt(t))}<small>זיכוי</small></div>`);
-function msBarH(){const L=msSel(),K=msCr(),T=msTot(L,K),multi=T.subs.size>1,big=T.c>T.y+0.004;
- const oc=!MS.led&&T.subs.size===1&&L.length?rnd(sum(crOpen(L[0].sub),crAmt)):0;
- return `<div style="font-weight:800" id="msTxt">נבחרו ${T.n} חשבוניות · סכום ${ils(T.x)}${MS.led?` · זיכויים ‎-${ils(T.c)}`:''} · נשאר לשלם ${ils(Math.max(0,T.net))}</div><button class="btn w" style="margin-top:8px" data-a="msPay" ${T.n&&!multi&&!big&&T.y>0.004?'':'disabled'}>סגירת תשלום לנבחרות</button>${multi?'<p class="note">נבחרו חשבוניות מכמה ספקים – מוצג רק הסכום. סגירת תשלום משותפת אפשרית רק לחשבוניות של ספק אחד.</p>':''}${big?`<p class="note neg">הזיכויים שנבחרו (${ils(T.c)}) גדולים ממה שנשאר לשלם בחשבוניות (${ils(T.y)}). אי אפשר לנצל זיכוי בחלקו – בחרו פחות זיכויים או עוד חשבוניות.</p>`:''}${oc>0.004?`<p class="note" id="msCrNote">לספק זיכויים פתוחים בסך ${ils(oc)} – לקיזוז סגור מהכרטסת שלו</p>`:''}`}
+function msBarH(){const D=msDocs(),L=msSel(),K=msCr(),T=msTot(L,K),pay=new Set(L.concat(K).map(t=>t.id)),ex=D.filter(t=>!pay.has(t.id)).length,multi=T.subs.size>1,big=T.c>T.y+0.004,can=msCanPay();
+ const I=D.filter(t=>t.t==='inc'),E=D.filter(t=>t.t!=='inc'),tot=rnd(sum(D,msV)),both=I.length&&E.length,oc=!MS.led&&T.subs.size===1&&L.length?rnd(sum(crOpen(L[0].sub),crAmt)):0;
+ const sg=v=>v<-0.004?'‎-'+ils(-v):ils(v),why=!can?'':!L.length?(D.length?'אין בבחירה חשבונית ספק פתוחה – אין מה לסגור.':''):multi?'נבחרו מסמכים של כמה ספקים – מוצג רק הסכום. סגירה יחד אפשרית רק לספק אחד.':big?`הזיכויים שנבחרו (${ils(T.c)}) גדולים ממה שנשאר לשלם בחשבוניות (${ils(T.y)}). אי אפשר לנצל זיכוי בחלקו – בחרו פחות זיכויים או עוד חשבוניות.`:'';
+ return `<div style="font-weight:800" id="msTxt">נבחרו ${D.length} · סה״כ <b>${sg(tot)}</b>${L.length?` · יתרה לתשלום <b>${ils(Math.max(0,T.net))}</b>`:''}</div>${both?`<div class="note" id="msSplit">הכנסות <b>${sg(rnd(sum(I,msV)))}</b> · הוצאות <b>${sg(rnd(sum(E,msV)))}</b></div>`:''}${can?`<button class="btn w" style="margin-top:8px" data-a="msPay" ${L.length&&!multi&&!big&&T.y>0.004?'':'disabled'}>סגירה יחד${L.length?' ('+L.length+')':''}</button>`:''}${can&&ex&&L.length?`<p class="note" id="msEx">לא ייכללו (${ex}) – מסמכים שאין בהם יתרה לתשלום</p>`:''}${why?`<p class="note${big?' neg':''}" id="msWhy">${why}</p>`:''}${can&&oc>0.004?`<p class="note" id="msCrNote">לספק זיכויים פתוחים בסך ${ils(oc)} – לקיזוז סגור מהכרטסת שלו</p>`:''}`}
 const msFoot=()=>MS.on?`<div class="msbar" id="msBar" aria-live="polite">${msBarH()}</div><div style="height:170px" aria-hidden="true"></div>`:'';
 /* עדכון מיידי בלי לבנות את המסך מחדש */
-function msPaint(){$$('[data-a="msPick"]').forEach(b=>{const on=MS.ids.includes(b.dataset.id);b.classList.toggle('sel',on);b.setAttribute('aria-checked',on);const c=b.querySelector('.mscb');if(c)c.textContent=on?'☑':'☐'});
+function msPaint(){$$('[data-a="msPick"]').forEach(b=>{const on=MS.ids.includes(b.dataset.id);b.classList.toggle('sel',on);b.setAttribute('aria-checked',on);const c=b.querySelector('.mscb');if(c)c.innerHTML=MSCB(on)});
  $$('[data-a="msAll"]').forEach(b=>{b.textContent=msAllL(b.dataset.ids.split(','))});const bar=document.getElementById('msBar');if(bar)bar.innerHTML=msBarH()}
 ACT.msMode=()=>{MS.on=!MS.on;MS.ids=[];rerender()};
+/* D4: לחיצה ארוכה (500ms) על מסמך ברשימה – נכנסת למצב בחירה עם המסמך מסומן */
+(()=>{let tm=0,st=null,eat=0;const q='[data-a="tx"],[data-a="payDlg"]',stop=()=>{clearTimeout(tm);tm=0;st=null};
+ document.addEventListener('pointerdown',e=>{eat=0;const el=e.target.closest&&e.target.closest(q);if(!el||MS.on||!MS.open.includes(el.dataset.id)||MS.ref!==cur())return;st={x:e.clientX,y:e.clientY};tm=setTimeout(()=>{tm=0;eat=Date.now();MS.on=true;MS.ids=[el.dataset.id];rerender();try{navigator.vibrate&&navigator.vibrate(15)}catch(_){}},500)},true);
+ document.addEventListener('pointermove',e=>{if(st&&Math.hypot(e.clientX-st.x,e.clientY-st.y)>10)stop()},true);['pointerup','pointercancel','scroll'].forEach(n=>document.addEventListener(n,()=>{if(tm)stop()},true));
+ document.addEventListener('click',e=>{if(eat&&Date.now()-eat<800){eat=0;e.stopPropagation();e.preventDefault()}},true);
+ document.addEventListener('contextmenu',e=>{if(e.target.closest&&e.target.closest(q)&&MS.open.length)e.preventDefault()},true)})();
 ACT.msPick=el=>{const i=MS.ids.indexOf(el.dataset.id);if(i>=0)MS.ids.splice(i,1);else MS.ids.push(el.dataset.id);msPaint()};
 ACT.msAll=el=>{const ids=el.dataset.ids.split(',').filter(Boolean),all=ids.every(i=>MS.ids.includes(i));if(all)MS.ids=MS.ids.filter(i=>!ids.includes(i));else ids.forEach(i=>{if(!MS.ids.includes(i))MS.ids.push(i)});msPaint()};
-ACT.msPay=()=>{const L=msSel(),K=msCr(),T=msTot(L,K);if(!T.n)return toast('לא נבחרו חשבוניות');if(T.subs.size>1)return toast('סגירה משותפת אפשרית רק לספק אחד');if(T.c>T.y+0.004)return toast('הזיכויים שנבחרו גדולים ממה שנשאר לשלם');
+ACT.msPay=()=>{if(!msCanPay())return toast('אין לך הרשאה לסגור תשלום');const L=msSel(),K=msCr(),T=msTot(L,K);if(!T.n)return toast('לא נבחרו חשבוניות');if(T.subs.size>1)return toast('סגירה משותפת אפשרית רק לספק אחד');if(T.c>T.y+0.004)return toast('הזיכויים שנבחרו גדולים ממה שנשאר לשלם');
  dlg(`<h3>סגירת תשלום · ${esc(subName(L[0]))}</h3><div class="card"><div class="note">${T.n} חשבוניות · סכום ${ils(T.x)}</div><div class="row" style="justify-content:space-between"><span>יתרה בחשבוניות</span><b>${ils(T.y)}</b></div>${K.length?`<div class="row" style="justify-content:space-between"><span>קיזוז ${K.length} זיכויים</span><b class="pos">‎-${ils(T.c)}</b></div><div class="row" style="justify-content:space-between"><span>נשאר לשלם</span><b>${ils(T.net)}</b></div>`:''}</div>
- <form data-f="mspay"><input type="hidden" name="ids" value="${esc(L.map(t=>t.id).join(','))}"><input type="hidden" name="crs" value="${esc(K.map(t=>t.id).join(','))}"><label class="f"><span>כמה משלמים? (סכום קטן יותר נסגר מהחשבונית הישנה לחדשה)</span><input class="amt" name="a" inputmode="decimal" autocomplete="off" value="${T.net}" required></label>${dateF('תאריך התשלום','d',today())}${offSub(L[0])?offPayH(L[0]):''}${pmF('m',offSub(L[0])?METHODS.concat('קיזוז'):METHODS,offSub(L[0])?'קיזוז':'',false,L[0])}${fld('מספר אסמכתא (לא חובה)','ref','','text','autocomplete="off" maxlength="60"')}<label class="f"><span>צילום או קובץ של האסמכתא (לא חובה)</span><input type="file" name="f" accept="image/*,application/pdf"></label><div class="row"><button class="btn grow">אשר תשלום</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.mspay=async form=>{if(form.dataset.busy)return;const f=fd(form),L=String(f.ids||'').split(',').map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&hasPay(t)&&bal(t)>0.004);
+ <form data-f="mspay"><input type="hidden" name="ids" value="${esc(L.map(t=>t.id).join(','))}"><input type="hidden" name="crs" value="${esc(K.map(t=>t.id).join(','))}"><input type="hidden" name="bs" value="${esc(L.map(t=>t.id+':'+bal(t)).join(','))}"><p class="note" id="msDef">כל חשבונית תיסגר ביתרה שלה (${L.map(t=>ils(bal(t))).join(' + ')}), באותה סגירה.</p><details id="msAmtD"><summary class="btn g s" style="display:inline-flex;min-height:44px;align-items:center">שינוי סכום</summary><label class="f"><span>כמה משלמים? (סכום קטן יותר נסגר מהחשבונית הישנה לחדשה)</span><input class="amt" name="a" inputmode="decimal" autocomplete="off" value="${T.net}" required></label></details>${dateF('תאריך התשלום','d',today())}${offSub(L[0])?offPayH(L[0]):''}${pmF('m',offSub(L[0])?METHODS.concat('קיזוז'):METHODS,offSub(L[0])?'קיזוז':'',false,L[0])}${fld('מספר אסמכתא (לא חובה)','ref','','text','autocomplete="off" maxlength="60"')}<label class="f"><span>צילום או קובץ של האסמכתא (לא חובה)</span><input type="file" name="f" accept="image/*,application/pdf"></label><div class="row"><button class="btn grow">אשר תשלום</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.mspay=async form=>{if(form.dataset.busy||MSBUSY)return;if(!msCanPay())return toast('אין לך הרשאה לסגור תשלום');const f=fd(form),ids1=String(f.ids||'').split(',').filter(Boolean),ids0=[...new Set(ids1)],L=ids0.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&msSees(t)&&hasPay(t)&&bal(t)>0.004);
+ /* D4: bal מחושב מחדש מ-S.tx; חשבונית שנסגרה/השתנתה מאז פתיחת החלון – עוצרים */const B0=Object.fromEntries(String(f.bs||'').split(',').filter(Boolean).map(x=>{const j=x.lastIndexOf(':');return[x.slice(0,j),+x.slice(j+1)]}));
+ if(ids1.length!==ids0.length||L.length!==ids0.length||(f.bs!==undefined&&L.some(t=>!(t.id in B0)||Math.abs(B0[t.id]-bal(t))>0.004)))return toast('אחת החשבוניות השתנתה – פתחו מחדש');
  if(!L.length)return toast('אין חשבוניות פתוחות בבחירה');const sid=L[0].sub;if(new Set(L.map(t=>t.sub)).size>1)return toast('סגירה משותפת אפשרית רק לספק אחד');
- const crIds=String(f.crs||'').split(',').filter(Boolean),K=crIds.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&t.kind==='credit'&&!t.used&&t.sub===sid);if(K.length!==crIds.length)return toast('אחד הזיכויים כבר קוזז או השתנה – פתחו את המסך מחדש');
+ const crIds=String(f.crs||'').split(',').filter(Boolean),K=crIds.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&msSees(t)&&t.kind==='credit'&&!t.used&&t.sub===sid);if(new Set(crIds).size!==crIds.length||K.length!==crIds.length)return toast('אחד הזיכויים כבר קוזז או השתנה – פתחו את המסך מחדש');
  const Y=rnd(sum(L,bal)),C=rnd(sum(K,crAmt));if(C>Y+0.004)return toast('הזיכויים שנבחרו ('+ils(C)+') גדולים ממה שנשאר לשלם ('+ils(Y)+')');
  const a0=pNum(f.a);if(a0==null||a0<0)return toast('סכום לא תקין');const a=rnd(a0);if(a<0.01&&!K.length)return toast('סכום לא תקין');if(a>rnd(Y-C)+0.004)return toast('הסכום גדול ממה שנשאר לשלם ('+ils(rnd(Y-C))+')');if(rnd(a+C)<0.01)return toast('סכום לא תקין');
  if(!f.d)return toast('חסר תאריך');if(a>=0.01&&!f.m)return toast('בחר אמצעי תשלום');if(a>=0.01&&f.m==='קיזוז'){const s=offSub(L[0]);if(!s)return toast('הספק אינו ספק קיזוז');const B=offBal(s.id);if(a>B.bal+0.004)return toast('היתרה לקיזוז אצל הספק ('+ils(B.bal)+') לא מספיקה')}if(a>=0.01&&f.m===METHODS[1]&&!cfDt(f.cdate))return toast('חסר תאריך פירעון לצ׳ק');
- const ref=s_(f.ref||''),fl=a>=0.01&&form.f&&form.f.files&&form.f.files[0];let fid='';form.dataset.busy='1';
- if(fl){try{const du=await shrinkDU(fl);fid='f'+uid();await fput(fid,du)}catch(e){delete form.dataset.busy;return toast('שמירת הקובץ נכשלה')}}
- if(a>=0.01&&f.m===METHODS[1]){try{const ci=await chkImg(form);if(ci)f._ci=ci}catch(e){delete form.dataset.busy;return toast('שמירת צילום הצ׳ק נכשלה')}}
+ const ref=s_(f.ref||''),fl=a>=0.01&&form.f&&form.f.files&&form.f.files[0];let fid='';form.dataset.busy='1';MSBUSY=1;
+ if(fl){try{const du=await shrinkDU(fl);fid='f'+uid();await fput(fid,du)}catch(e){delete form.dataset.busy;MSBUSY=0;return toast('שמירת הקובץ נכשלה')}}
+ if(a>=0.01&&f.m===METHODS[1]){try{const ci=await chkImg(form);if(ci)f._ci=ci}catch(e){delete form.dataset.busy;MSBUSY=0;return toast('שמירת צילום הצ׳ק נכשלה')}}
+ if(L.some(t=>!S.tx.includes(t)||bal(t)<=0.004||(t.id in B0&&Math.abs(B0[t.id]-bal(t))>0.004))){delete form.dataset.busy;MSBUSY=0;return toast('אחת החשבוניות השתנתה – פתחו מחדש')}
  const grp='g'+uid(),R=msApply(L,K,a,f.d,f.m,ref,fid,grp,f),n=R.n,last=R.last;if(f._ci)L.forEach(t=>(t.pays||[]).forEach(p=>{if(p.grp===grp&&p.chk)p.chk.img=f._ci}));
- save();MS.on=false;MS.ids=[];closeDlg();rerender();toast(n+' חשבוניות'+(last&&bal(last)>0.004?' (האחרונה חלקית, נותרו בה '+ils(bal(last))+')':'')+' · שולם '+ils(a)+(C?' · קוזזו '+ils(C):''))};
+ MSBUSY=0;save();MS.on=false;MS.ids=[];closeDlg();rerender();toast(n+' חשבוניות'+(last&&bal(last)>0.004?' (האחרונה חלקית, נותרו בה '+ils(bal(last))+')':'')+' · שולם '+ils(a)+(C?' · קוזזו '+ils(C):''))};
 /* חלוקת תשלום אחד על כמה חשבוניות (מהישנה לחדשה, האחרונה חלקית), עם קיזוז זיכויים. משותף לסגירה מהכרטסת ולצילום העברה */
 function msApply(L,K,a,d,m,ref,fid,grp,bx){L=L.slice().sort((p,q)=>(p.date||'').localeCompare(q.date||'')||pmon(p).localeCompare(pmon(q)));
  const crof=K.map(t=>t.id);let cr=rnd(sum(K,crAmt)),mo=rnd(a),n=0,last=null;
@@ -4993,7 +5011,7 @@ function dsDerive(t,acc){const[bg,card,ink,m1,m2]=DS_BASE[dsOk(t)?t:'a'],a=bzNor
  const c={acc:a,bg:bzMix(bg,a,m1),card:bzMix(card,a,m2),ink:bzMix(ink,a,.04)};c.acc2=bzAcc2(c.acc,c.bg);c.onacc=bzCR(BZ_K,c.acc)>=bzCR(BZ_W,c.acc)?BZ_K:BZ_W;return bzFix(c)}
 function dsApply(t){try{document.documentElement.dataset.ds=dsOk(t)?t:dsTheme()}catch(e){}}
 const dsPick=(cur,act,def,acc)=>`<div class="dsp" role="radiogroup" aria-label="ערכת עיצוב">${def?`<button type="button" role="radio" aria-checked="${!cur}" data-a="${act}" data-v=""><span class="mini" style="background:var(--srf-0)"><i></i><b></b></span>${esc(def)}</button>`:''}${DS_T.map(t=>`<button type="button" role="radio" aria-checked="${cur===t}" data-a="${act}" data-v="${t}"><span class="mini" style="${bzVars(dsDerive(t,acc||DS_ACC()))}"><i></i><b></b></span>${DS_N[t]}</button>`).join('')}</div>`;
-const DS_ACC=()=>{const b=SY.biz&&SY.biz.brand,c=b&&b.colors;return c&&BZHEX.test(c.acc||'')?c.acc:(t=>t==='a'?'#f0764c':t==='b'?'#b23c17':'#b5401b')(dsBiz())};
+const DS_ACC=()=>{const b=SY.biz&&SY.biz.brand,c=b&&b.colors;return c&&BZHEX.test(c.acc||'')?c.acc:(t=>t==='a'?'#f0764c':t==='b'?'#b23c17':'#ab3815')(dsBiz())};
 const dsRow=()=>typeof isA==='function'&&isA()?`<h3>ערכת עיצוב</h3><p class="note" style="margin:2px 0 0">רק במכשיר הזה ורק לך. העובדים רואים את ברירת המחדל של העסק (${DS_N[dsBiz()]}).</p>${dsPick(dsMine(),'dsMine','ברירת המחדל של העסק')}`:'';
 ACT.dsMine=el=>{const v=el.dataset.v,k=dsKey();if(!k)return;try{if(dsOk(v))localStorage.setItem(k,v);else localStorage.removeItem(k)}catch(e){}BZK='~';rerender()};
 /* לוגו העסק בכותרת: נטען מ-Storage (b/{bizId}/brand/logo) עם הכניסה של המשתמש. נכשל = נשאר הלוגו הרגיל */
