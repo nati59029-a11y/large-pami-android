@@ -595,6 +595,44 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
 
+    // ----- הזמנות ומלאי בשורש – רק ללארג' פעמי במצב legacy (2026-11-08, שלב 1). אותם נתיבים ותנאים כמו ב-b/{bizId},
+    // כך שכלי ההעברה מעתיק אותם כמו שהם. בשורש כל התוספות פעילות ואין מתגי הרשאה לעובד (כמו היום) – עובד פעיל = הזמנות.
+    // כל כתיבה – רק השרת (functions/orders.js). private/pay – אף אחד מהאפליקציה (הכלל האחרון).
+    function rOrd() { return isStaff() || isSuper(); }
+    function rMgr() { return isManager() || isSuper(); }
+    function rBrOk(br) {
+      return rMgr() || get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('br', null) == null
+        || br in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.br;
+    }
+    match /ordcfg/{docId} {
+      allow get: if rOrd() && docId in ['main', 'seq'];
+      allow list, create, update, delete: if false;
+    }
+    match /prod/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+      match /p/{k} {
+        allow read: if rMgr();
+        allow create, update, delete: if false;
+      }
+    }
+    match /ord/{id} {
+      allow read: if rOrd() && rBrOk(resource.data.br);
+      allow create, update, delete: if false;
+      match /log/{k} {
+        allow read: if rOrd() && rBrOk(get(/databases/$(database)/documents/ord/$(id)).data.br);
+        allow create, update, delete: if false;
+      }
+    }
+    match /ordpay/{id} {
+      allow read: if rMgr();
+      allow create, update, delete: if false;
+    }
+    match /stockLog/{id} {
+      allow read: if rOrd() && rBrOk(resource.data.br);
+      allow create, update, delete: if false;
+    }
+
     // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
     match /users/{userId} {
       allow get: if isSelf(userId);
