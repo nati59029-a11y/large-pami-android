@@ -49,7 +49,7 @@ ACT.oxRe=()=>load(true);
 /* ---------- כניסה: אריח לעובד, שורה ב"עוד" למנהל, באנר בבית ---------- */
 window.oxTile=()=>on()?`<button class="tile" data-a="go" data-v="ox" style="font-size:1.15rem;text-align:center;border-color:var(--acc);color:var(--acc)">${ico('doc')}הזמנות</button>`:'';
 {const m=V.more;if(m)V.more=()=>{const r=m();if(on()&&r&&r.h)r.h=r.h.replace('<div class="mlist">',`<div class="mlist"><button class="opt" data-a="go" data-v="ox"><span>הזמנות<small>הזמנות לקוחות, מלאי ותשלום</small></span>${openN()?`<span class="tag t1">${openN()}</span>`:''}${ico('chev')}</button>`);return r}}
-{const h=V.home;if(h)V.home=()=>{const r=h();if(on()&&r&&r.h){if(!O.L)load();const n=openN(),s=sumMonth();if(O.L&&(n||s))r.h=r.h.replace(/(<div class="chips hacts")/,`<button class="ban" style="margin-top:12px" data-a="go" data-v="ox"><span class="tag t1">הזמנות</span><span style="flex:1"><b>${n}</b> פתוחות · החודש שולם <b>${ils(s)}</b></span>${ico('chev')}</button>$1`)}return r}}
+{const h=V.home;if(h)V.home=()=>{const r=h();if(on()&&bzB()&&r&&r.h){if(!O.L)load();const n=openN(),s=sumMonth();if(O.L&&(n||s))r.h=r.h.replace(/(<div class="chips hacts")/,`<button class="ban" style="margin-top:12px" data-a="go" data-v="ox"><span class="tag t1">הזמנות</span><span style="flex:1"><b>${n}</b> פתוחות · החודש שולם <b>${ils(s)}</b></span>${ico('chev')}</button>$1`)}return r}}
 const openN=()=>(O.L||[]).filter(o=>!['done','cancel'].includes(o.status)).length;
 const sumMonth=()=>{const d=new Date(),m0=new Date(d.getFullYear(),d.getMonth(),1).getTime();return(O.L||[]).filter(o=>o.paid&&o.paid.at>=m0&&o.status!=='cancel').reduce((s,o)=>s+(o.total||0),0)};
 
@@ -215,7 +215,7 @@ const OPC='c_ordinc';
 function opCat(){let c=S.cats.find(x=>x.id===OPC);if(!c){c={id:OPC,kind:'inc',name:'הכנסות מהזמנות',beh:'simple'};S.cats.push(c)}let u=S.subs.find(x=>x.cat===OPC&&x.name==='תשלום בקישור');if(!u){u={id:'s_ordlink',cat:OPC,name:'תשלום בקישור'};S.subs.push(u)}return u.id}
 const ymd2=t=>{const d=new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 let OPB=0;
-async function opSync(){if(OPB||!isA()||!bzF('orders')||typeof S==='undefined'||!S)return 0;OPB=1;let n=0;
+async function opSync(){if(OPB||!isA()||!bzB()||!bzF('orders')||typeof S==='undefined'||!S)return 0;OPB=1;let n=0;
  try{const L=await runQ('ordpay',null,2000);for(const r of L){if(!r.ord||!(r.amt>=0)||!r.sup||!r.sup.id)continue;const id='op_'+r.ord;let t=S.tx.find(x=>x.id===id);
    if(r.st==='paid'){const f={t:'inc',cat:OPC,sub:opCat(),date:ymd2(r.at),amt:Math.round(r.amt*100)/100,note:'הזמנה #'+r.no,off:{sub:r.sup.id},ordp:r.ord};if(r.br&&r.br!==NB)f.br=r.br;
     if(!t){S.tx.push(Object.assign({id},f));n++}else if(t.x||t.amt!==f.amt||t.date!==f.date||t.br!==f.br||!t.off||t.off.sub!==f.off.sub){delete t.x;Object.assign(t,f);n++}}
