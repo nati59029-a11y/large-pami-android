@@ -489,6 +489,25 @@ async function setStaffActive(request) {
   return { ok: true, uid, active: input.active };
 }
 
+// setStaffName({uid, name}) – סריקה אחידה, שלב 6: שם העובד (מוצג ב"מי הכניס"). מנהל העסק (במבנה b) או מנהל־על. רק השדה name ב-staff, עם audit.
+// staff נכתב רק דרך השרת (החוקים חוסמים כתיבה מהאפליקציה), ולכן אין שינוי בחוקים. לארג' פעמי במצב legacy – נדחה כמו addStaff/setStaffActive.
+async function setStaffName(request) {
+  const who = await requireBizManager(request);
+  const input = inputObject(request);
+  const uid = typeof input.uid === 'string' ? input.uid : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
+  const name = cleanName(input.name, 60);
+  const db = getFirestore();
+  const sRef = db.doc(T.bizRef(who.biz, 'staff/' + uid));
+  const s = await sRef.get();
+  if (!s.exists) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
+  const b = db.batch();
+  b.update(sRef, { name });
+  b.set(auditRef(who.bizId), auditData(who.uid, 'setStaffName', uid));
+  await b.commit();
+  return { ok: true, uid, name };
+}
+
 // ---------- syncLegacyAdmin / syncLegacyStaff: עותק users/{uid} לחברי לארג' פעמי במצב legacy ----------
 // כללי Storage של app_releases/ קוראים רק את users/{uid} ואת superadmins/{uid} (מגבלת 2 הקריאות, עדכון חוזה 6).
 // לכן כל שינוי ב-admins/{uid} או ב-staff/{uid} בשורש (למשל השבתת עובד בלוח הבקרה) מתעדכן מיד בעותק.
@@ -549,6 +568,7 @@ exports.setBusinessRanks = onCall(wrap('setBusinessRanks', setBusinessRanks));
 exports.setStaffPerms = onCall(wrap('setStaffPerms', setStaffPerms));
 exports.addStaff = onCall(wrap('addStaff', addStaff));
 exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
+exports.setStaffName = onCall(wrap('setStaffName', setStaffName));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,

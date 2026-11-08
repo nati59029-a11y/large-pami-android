@@ -4946,6 +4946,84 @@ FRM.admSqL=f=>{const id=f.dataset.id,x=fd(f),p=s_(x.period),ns=s_(x.n);if(!SQP[p
  sqApply(id,{mode:'limit',period:p,n:+ns},'להגביל ל-'+(+ns)+' דפים '+SQP[p])};
 FRM.admSqR=f=>{const id=f.dataset.id,x=fd(f),w=s_(x.for),T={day:'יום אחד',week:'שבוע',month:'חודש',forever:'קבוע, בלי תפוגה'};if(!T[w])return toast('בחר משך');sqApply(id,{mode:'release',for:w},'לשחרר את החסימה ל'+T[w])};
 ACT.admSqD=el=>sqApply(el.dataset.id,{mode:'default'},'למחוק את הגדרת המכסה ולחזור לברירת המחדל');
+/* ==== סריקה אחידה, שלב 6: תור "נשלח למנהל לטיפול" (אוסף mq) ====
+  עובד שסרק מסמך מסוג שאין לו הרשאה אליו (או שלא בטוח בסוג) שולח למנהל רק את הצילום והסוג המשוער – בלי סכומים ובלי רשומה כספית.
+  המנהל רואה "ממתין לטיפול" (עם מונה במסך הראשי), פותח במסך האחיד, משלים ושומר – או דוחה. העובד מקבל הודעה "טופל"/"נדחה" בלי פרטים.
+  החוקים: עובד יוצר ורואה רק את שלו ולא עורך; מנהל מטפל פעם אחת בלבד (new → done/rej). */
+const MQ={L:[],at:0,b:0,mine:[],mat:0,mb:0},MQK={exp:'invoice',cashout:'cashout',deposit:'deposit',transfer:'transfer',z:'zreport',opening:'opening'},MQKR={invoice:'exp',cashout:'cashout',deposit:'deposit',transfer:'transfer',zreport:'z',opening:'opening'};
+const mqKind=k=>MQKR[k]&&UST[MQKR[k]]?UST[MQKR[k]][0]:'סוג לא ידוע';
+const mqWho=x=>{try{dxLearn()}catch(e){}return s_((EUS[x.uid])||x.by||'עובד').slice(0,60)};
+async function mqQ(where,lim){const sq={from:[{collectionId:'mq'}],select:{fields:['uid','by','t','st','k','np','stAt'].map(f=>({fieldPath:f}))},where:{fieldFilter:{field:{fieldPath:where[0]},op:'EQUAL',value:{stringValue:where[1]}}},limit:lim};
+ const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});
+ return(r||[]).filter(x=>x.document).map(x=>{const d=x.document,f=fvj({mapValue:d})||{};return{id:idOf(d),uid:String(f.uid||''),by:String(f.by||''),t:+f.t||0,st:String(f.st||''),k:String(f.k||''),np:+f.np||0,stAt:+f.stAt||0}}).filter(x=>idOk(x.id))}
+/* מנהל: הפריטים הממתינים (st == 'new') */
+async function mqLoad(){if(!isA()||MQ.b||!fbRole())return;MQ.b=1;MQ.at=Date.now();try{MQ.L=(await mqQ(['st','new'],200)).sort((a,b)=>a.t-b.t);mqLearn(MQ.L)}catch(e){}finally{MQ.b=0}if(cur().v==='mq'||cur().v==='todo'||cur().v==='home')rerender()}
+/* שם השולח (by) לפי uid – נשמר במכשיר (מפתח נפרד, לא בנתוני העסק), כדי ש"מי הכניס" יציג אותו גם אחרי שהפריט יצא מהתור */
+const MQEUN=LK('lp-mq-eun');function mqLearn(L){try{const o=JSON.parse(localStorage.getItem(MQEUN)||'{}')||{};let ch=0;for(const x of L){if(/^[A-Za-z0-9_-]{1,128}$/.test(x.uid)&&x.by&&o[x.uid]!==x.by){o[x.uid]=s_(x.by).slice(0,60);ch=1}}if(ch)localStorage.setItem(MQEUN,JSON.stringify(o));Object.assign(EUN,o)}catch(e){}}
+const mqN=()=>{if(isA()&&!MQ.b&&Date.now()-MQ.at>60000)mqLoad().catch(()=>{});return MQ.L.length};
+{const o=todoC;todoC=function(){const r=o(),m=mqN();r.mq=m;r.n+=m;return r}}
+{const o=V.todo;V.todo=function(){const r=o();if(!isA())return r;const n=mqN();if(n)r.h=adSec('נשלח למנהל לטיפול')+adOpt('mq','📨 ממתין לטיפול','מסמכים שעובדים שלחו כי אין להם הרשאה להזין אותם',n)+r.h;return r}}
+V.mq=()=>{const T='ממתין לטיפול';if(!isA())return{t:T,h:'<div class="card"><p class="note">המסך הזה למנהל בלבד.</p></div>'};if(Date.now()-MQ.at>20000&&!MQ.b)mqLoad().catch(()=>{});
+ const row=x=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(mqKind(x.k))}</b><small>${esc(dfmt(ilDay(new Date(x.t))))}</small></div><small class="who">נשלח על ידי ${esc(mqWho(x))}${x.np?'':' · הצילום לא הגיע'}</small>${MQ.op&&MQ.op[x.id]?'<div class="note" style="font-weight:700">נפתח כבר במסך הסריקה. אם שמרת – סמן כטופל, כדי שלא יישמר פעמיים.</div>':''}
+ <div class="row" style="margin-top:8px"><button class="btn grow" data-a="mqOpen" data-id="${esc(x.id)}">פתח במסך הסריקה</button><button class="btn g grow" data-a="mqDone" data-id="${esc(x.id)}">סמן כטופל</button><button class="btn g grow" data-a="mqRej" data-id="${esc(x.id)}">דחה</button></div></div>`;
+ return{t:T,s:MQ.L.length+' מסמכים',h:`<p class="note" style="margin:0 0 10px">עובדים שלחו את המסמכים האלה כי אין להם הרשאה להזין את הסוג שלהם. פותחים במסך הסריקה, משלימים ושומרים – או דוחים. העובד יקבל הודעה "טופל" או "נדחה", בלי פרטים.</p><button class="btn g w" style="margin-bottom:10px" data-a="mqRefresh">רענן</button>${MQ.L.length?MQ.L.map(row).join(''):'<div class="empty">אין מסמכים שממתינים לטיפול</div>'}`}};
+ACT.mqRefresh=()=>{MQ.at=0;mqLoad().catch(()=>{});toast('מרענן...')};
+/* הצילום מהענף: חלקים p/0..np-1, מחוברים לקובץ אחד (PAGES:[...] או PDF), כמו בתיבת העובדים */
+async function mqFile(x){let all='';for(let k=0;k<x.np;k++){
+  const d=await fsx('/mq/'+x.id+'/p/'+k);
+  all+=gv(d,'data')}return all}
+ACT.mqOpen=async el=>{const x=MQ.L.find(z=>z.id===el.dataset.id);if(!x||ACT.mqOpen.b)return;if(!x.np)return toast('הצילום לא הגיע. אפשר לדחות ולבקש מהעובד לשלוח שוב');ACT.mqOpen.b=1;
+ try{toast('טוען את הצילום…');const du=await mqFile(x);let pg=[];
+  if(du.startsWith('PAGES:')){try{pg=JSON.parse(du.slice(6)).filter(imgOk).map(u=>({u,hi:u}))}catch(e){}}else if(imgOk(du))pg=[{u:du,hi:du}];else if(/^data:application\/pdf;base64,/.test(du))pg=[{pdf:1,du}];
+  if(!pg.length)return toast('הצילום פגום. אפשר לדחות ולבקש מהעובד לשלוח שוב');
+  MQ.op=MQ.op||{};MQ.op[x.id]=1;usOpen();US.pg=pg.slice(0,12);US.i=0;US.mq=x.id;US.mqU=x.uid;US.mqN=S.tx.length;US.who=mqWho(x);usPane(1);
+  const k=MQKR[x.k];if(k&&usAllowed(k)){US.auto=1;usOpenForm(k)}else usChooser('המסמך נשלח על ידי '+US.who+'. בחרו את סוג המסמך','')}
+ catch(e){toast(e.offline?e.message:'טעינת הצילום נכשלה')}finally{ACT.mqOpen.b=0}};
+async function mqSt(id,st){
+ await fsx('/mq/'+id+'?updateMask.fieldPaths=st&updateMask.fieldPaths=stBy&updateMask.fieldPaths=stAt&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:{st:sv(st),stBy:sv(fbBy()),stAt:iv(Date.now())}})});
+ const x=MQ.L.find(z=>z.id===id);MQ.L=MQ.L.filter(z=>z.id!==id);if(MQ.op)delete MQ.op[id];
+ if(x)for(let k=0;k<x.np;k++){try{await fsx('/mq/'+id+'/p/'+k,{method:'DELETE'})}catch(e){}}}
+async function mqSet(id,st,msg){try{await mqSt(id,st);toast(msg)}catch(e){if(e.code===403||e.code===404){MQ.L=MQ.L.filter(z=>z.id!==id);toast('המסמך כבר טופל')}else toast(e.offline?e.message:'העדכון נכשל')}if(cur().v==='mq'||cur().v==='todo')rerender()}
+ACT.mqDone=el=>{const id=el.dataset.id;ask('לסמן את המסמך כטופל? העובד יקבל הודעה "טופל".',()=>mqSet(id,'done','סומן כטופל'),'סמן כטופל')};
+ACT.mqRej=el=>{const id=el.dataset.id;ask('לדחות את המסמך? הוא לא יירשם, והעובד יקבל הודעה "נדחה".',()=>mqSet(id,'rej','המסמך נדחה'),'דחה')};
+/* שמירה מהמסך האחיד של מסמך מהתור: "מי הכניס" = העובד ששלח; הפריט מסומן כטופל (פעם אחת – החוקים לא מאפשרים פעמיים) */
+{const o=usDone;usDone=function(){const U=US,id=U&&U.mq;if(id){const eu=/^[A-Za-z0-9_-]{1,128}$/.test(U.mqU||'')?U.mqU:'';if(eu&&S.tx.length>U.mqN){S.tx.slice(U.mqN).forEach(t=>{t.eu=eu});save()}U.mq='';mqSet(id,'done','המסמך מהתור סומן כטופל')}o()}}
+/* ---- עובד: שליחה למנהל ---- */
+async function mqSend(){const U=US;if(!U||!isW()||!U.pg.length||U.mqB)return;U.mqB=1;
+ try{const pg=U.pg;let v='';if(pg.every(g=>!g.pdf))v=packPages(pg.map(g=>g.u));else if(pg.length===1)v=pg[0].du;else{toast('אפשר לשלוח למנהל קובץ PDF אחד לבד, או תמונות');return}
+  const np=Math.max(1,Math.ceil(v.length/CH));if(np>12){toast('הצילומים גדולים מדי לשליחה');return}
+  const id=U.mqId||('q'+uid());U.mqId=id;const ty=U.cls&&U.cls.ty,k=['invoice','cashout','deposit','transfer','zreport','opening'].includes(ty)?ty:(MQK[U.type]||'unknown');
+  if(!U.mqDoc){
+   try{await fsx('/mq?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields:{uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),st:sv('new'),k:sv(k),np:iv(np)}})})}catch(e){if(e.code!==409)throw e}
+   U.mqDoc=1}
+  for(let i=0;i<np;i++){
+   try{await fsx('/mq/'+id+'/p?documentId='+i,{method:'POST',body:JSON.stringify({fields:{data:sv(v.slice(i*CH,(i+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}
+  mqOutSet(mqOut().filter(x=>x!==id).concat(id));MQ.mat=0;usPane(0);U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשלח למנהל לטיפול</b><div class="note">כשהמנהל יטפל בו תקבל הודעה "טופל" או "נדחה".</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">📷 סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
+ catch(e){toast(e.offline?e.message:'השליחה למנהל נכשלה. נסה שוב')}finally{if(U)U.mqB=0}}
+ACT.mqSend=()=>mqSend();
+/* בבורר הסוג של עובד (סוג חסום שזוהה, או "לא בטוח"): כפתור "שלח למנהל לטיפול" */
+{const o=usChooser;usChooser=function(msg,back){o(msg,back);try{if(!US||!isW()||!US.pg.length)return;const s=$('#sheet .bd');if(s)s.insertAdjacentHTML('afterbegin',`<button class="btn w" style="margin-bottom:10px" data-a="mqSend">📤 שלח למנהל לטיפול</button>${US.cls&&US.cls.toMgr?'':'<p class="note" style="margin:0 0 10px">לא בטוח איזה מסמך זה, או שאין לך הרשאה? אפשר לשלוח את הצילום למנהל.</p>'}`)}catch(e){}}}
+/* עובד: רשימת מה ששלח + הודעה "טופל"/"נדחה" (פעם אחת לכל מסמך; בלי סכומים – אין כאלה בתור) */
+const MQSEEN=LK('lp-mq-seen');
+async function mqMine(){if(!isW()||MQ.mb)return;MQ.mb=1;MQ.mat=Date.now();try{MQ.mine=(await mqQ(['uid',SY.uid],100)).sort((a,b)=>b.t-a.t).slice(0,30);
+  let seen={};try{seen=JSON.parse(localStorage.getItem(MQSEEN)||'{}')||{}}catch(e){}let ch=0;
+  for(const x of MQ.mine){if(x.st!=='done'&&x.st!=='rej'||seen[x.id])continue;seen[x.id]=1;ch=1;toast('המסמך ששלחת למנהל ('+mqKind(x.k)+'): '+(x.st==='done'?'טופל':'נדחה'))}
+  const res=new Set(MQ.mine.filter(x=>x.st==='done'||x.st==='rej').map(x=>x.id)),have=new Set(MQ.mine.map(x=>x.id));mqOutSet(mqOut().filter(x=>have.has(x)?!res.has(x):MQ.mine.length>=100));
+  if(ch){const ks=Object.keys(seen);if(ks.length>300)ks.slice(0,ks.length-300).forEach(k=>delete seen[k]);try{localStorage.setItem(MQSEEN,JSON.stringify(seen))}catch(e){}}}catch(e){}finally{MQ.mb=0}if(cur().v==='wk'&&WS==='home')rerender()}
+/* שאילתה רק כשיש במכשיר מסמך ששלחתי ועוד לא קיבלתי עליו תשובה (lp-mq-out) – בלי בקשות נוספות לעובד שלא שלח כלום */
+const MQOUT=LK('lp-mq-out'),mqOut=()=>{try{const o=JSON.parse(localStorage.getItem(MQOUT)||'[]');return Array.isArray(o)?o.filter(idOk):[]}catch(e){return[]}},mqOutSet=a=>{try{localStorage.setItem(MQOUT,JSON.stringify(a.slice(-100)))}catch(e){}};
+{const o=wkLoad;wkLoad=async function(){await o();if(mqOut().length)mqMine().catch(()=>{})}}
+{const o=V.wk;V.wk=function(){const r=o();try{if(isW()&&WS==='home'&&MQ.mine.length){const st={new:['ממתין לטיפול','t1'],done:['טופל','t3'],rej:['נדחה','t4']};
+ r.h+=`<div class="sec"><h3>מסמכים ששלחתי למנהל</h3></div>${MQ.mine.slice(0,10).map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(mqKind(x.k))}</b><small>${esc(dfmt(ilDay(new Date(x.t))))}</small></div><span class="tag ${(st[x.st]||['',''])[1]}">${(st[x.st]||[esc(x.st)])[0]}</span></div>`).join('')}`}}catch(e){}return r}}
+/* ==== שם עובד ("מי הכניס"): שם מכרטיס העובד (staff.name), ובלי שם – קידומת המייל ==== */
+const EUS={};
+{const o=dxLearn;dxLearn=function(){o();try{try{Object.assign(EUN,JSON.parse(localStorage.getItem(MQEUN)||'{}')||{})}catch(x){}if(typeof admStaffOk==='function'&&admStaffOk()&&!ADM.staff&&!ADM.sbusy&&!ADM.staffErr)admStaffLoad();((ADM&&ADM.staff)||[]).forEach(u=>{if(u&&u.uid){const n=s_(u.name)||String(u.email||'').split('@')[0];if(n){EUS[u.uid]=n;EUN[u.uid]=n}}})}catch(e){}}}
+{const o=dxWho;dxWho=function(t){try{const e=t&&typeof t.eu==='string'?t.eu:'';if(e){dxLearn();if(EUS[e])return s_(EUS[e]).slice(0,60)}}catch(x){}return o(t)}}
+{const o=usOpen;usOpen=function(){o();try{dxLearn();if(US&&SY.uid&&EUS[SY.uid])US.who=EUS[SY.uid]}catch(e){}}}
+ACT.admName=el=>{const u=(ADM.staff||[]).find(x=>x.uid===el.dataset.uid);if(!u)return;dlg(`<h3>שם העובד</h3><p class="note">השם מוצג ב"מי הכניס" ליד כל מסמך. בלי שם מוצג החלק שלפני ה-@ במייל.</p><form data-f="admNameF"><input type="hidden" name="uid" value="${esc(u.uid)}">${fld('שם','name',u.name||'','text','required maxlength="60" autocomplete="off"')}<div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.admNameF=async f=>{const x=fd(f),nm=s_(x.name),b=f.querySelector('button');if(!nm||nm.length>60)return toast('השם: עד 60 תווים');b.disabled=true;
+ try{await fnCall('setStaffName',Object.assign({uid:x.uid,name:nm},SY.sa?{bizId:SY.bizId}:{}));const u=(ADM.staff||[]).find(z=>z.uid===x.uid);if(u)u.name=nm;EUS[x.uid]=nm;EUN[x.uid]=nm;closeDlg();toast('השם נשמר');rerender()}catch(e){toast(e.message||'השמירה נכשלה')}finally{b.disabled=false}};
+{const o=V.staff;V.staff=function(){const r=o();try{if(r&&r.h)r.h=r.h.replace(/<button class="btn s g" data-a="admStf" data-uid="([A-Za-z0-9_-]{1,128})">/g,(m,u)=>`<button class="btn s g" data-a="admName" data-uid="${u}">שם</button>`+m)}catch(e){}return r}}
 try{coSched()}catch(e){}
 boot();(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script><script src="yemot-board.js"></script>
 </body></html>

@@ -86,6 +86,7 @@ const closingBody = (uid, o) => Object.assign({ uid, by: uid, t: now(), st: 'new
 const depBody = (uid, o) => Object.assign({ uid, by: uid, t: now(), d: '2026-11-01', items: ['co1'], a: 10, st: 'new', why: '', np: 1, data: '{}' }, o);
 const coBody = (uid, id, o) => Object.assign({ uid, by: uid, t: now(), reg: 'i_nl', d: '2026-11-01', a: 10, why: 'קניתי חלב', dep: '', src: id, zc: '', dp: '' }, o);
 const inboxBody = (uid, o) => Object.assign({ owner: uid, by: uid, status: 'new', created: 'x', data: '{}', parts: '1', t: now() }, o);
+const mqBody = (uid, o) => Object.assign({ uid, by: uid, t: now(), st: 'new', k: 'invoice', np: 1 }, o);
 const stUpd = (uid, st) => ({ st, stBy: uid, stAt: now() });
 // תת-אוסף p של מסמך שנוצר על ידי המשתמש עצמו (appreq / closings / deposits)
 const partsOf = (coll, parentBody, readAllow) => ({
@@ -181,6 +182,21 @@ const OPS = {
     delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/appreq/${id}`).set({ uid: 'x', st: 'new' })); return db.doc(`${P(biz)}/appreq/${id}`).delete(); } },
   },
   'appreq/p': partsOf('appreq', (uid) => ({ uid, by: uid, txt: 'a', t: now(), st: 'new', np: 1 }), S),
+  // תור "נשלח למנהל לטיפול" (שלב 6): עובד יוצר ורואה רק את שלו; מנהל קורא, מטפל ומוחק; מנהל לא יוצר
+  mq: {
+    get: { allow: S, run: async (db, biz, uid) => { const id = 'q_' + uid; await prep((a) => a.doc(`${P(biz)}/mq/${id}`).set(mqBody(uid || 'x'))); return db.doc(`${P(biz)}/mq/${id}`).get(); } },
+    list: { allow: M, run: (db, biz) => db.collection(`${P(biz)}/mq`).get() },
+    create: { allow: ['emp'], run: (db, biz, uid) => db.doc(`${P(biz)}/mq/${fresh()}`).set(mqBody(uid)) },
+    update: { allow: M, run: async (db, biz, uid) => { const id = fresh('qu'); await prep((a) => a.doc(`${P(biz)}/mq/${id}`).set(mqBody('x'))); return db.doc(`${P(biz)}/mq/${id}`).update(stUpd(uid, 'done')); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/mq/${id}`).set(mqBody('x'))); return db.doc(`${P(biz)}/mq/${id}`).delete(); } },
+  },
+  'mq/p': {
+    get: { allow: S, run: async (db, biz, uid) => { const id = 'qp_' + uid; await prep(async (a) => { await a.doc(`${P(biz)}/mq/${id}`).set(mqBody(uid || 'x')); await a.doc(`${P(biz)}/mq/${id}/p/0`).set({ data: 'x' }); }); return db.doc(`${P(biz)}/mq/${id}/p/0`).get(); } },
+    list: { allow: M, run: async (db, biz) => { await prep(async (a) => { await a.doc(`${P(biz)}/mq/q1`).set(mqBody('x')); await a.doc(`${P(biz)}/mq/q1/p/0`).set({ data: 'x' }); }); return db.collection(`${P(biz)}/mq/q1/p`).get(); } },
+    create: { allow: ['emp'], run: async (db, biz, uid) => { const id = fresh('q'); await prep((a) => a.doc(`${P(biz)}/mq/${id}`).set(mqBody(uid || 'x'))); return db.doc(`${P(biz)}/mq/${id}/p/0`).set({ data: 'x' }); } },
+    update: { allow: NONE, run: async (db, biz, uid) => { const id = fresh('q'); await prep(async (a) => { await a.doc(`${P(biz)}/mq/${id}`).set(mqBody(uid || 'x')); await a.doc(`${P(biz)}/mq/${id}/p/0`).set({ data: 'x' }); }); return db.doc(`${P(biz)}/mq/${id}/p/0`).set({ data: 'y' }); } },
+    delete: { allow: M, run: async (db, biz) => { const id = fresh('q'); await prep(async (a) => { await a.doc(`${P(biz)}/mq/${id}`).set(mqBody('x')); await a.doc(`${P(biz)}/mq/${id}/p/0`).set({ data: 'x' }); }); return db.doc(`${P(biz)}/mq/${id}/p/0`).delete(); } },
+  },
   closings: {
     get: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/closings/z1`).set(closingBody('x'))); return db.doc(`${P(biz)}/closings/z1`).get(); } },
     list: { allow: M, run: (db, biz) => db.collection(`${P(biz)}/closings`).get() },
@@ -282,7 +298,7 @@ describe('ריבוי עסקים – טבלת בידוד: אוסף × פעולה 
     console.log('# פעולות שסגורות לכולם (כמו בשורש, או אוספים של השרת בלבד): ' + closed.join(', '));
     const ok = new Set(['מסמך העסק b/{bizId}|create', 'מסמך העסק b/{bizId}|delete', 'admins|list', 'admins|create', 'admins|update', 'admins|delete',
       'staff|create', 'staff|update', 'staff|delete', 'app_backup_status|create', 'app_backup_status|update', 'app_backup_status|delete',
-      'chunks|update', 'tasks/c|update', 'appreq/p|update', 'closings/p|update', 'deposits/p|update', 'yemot_lexicon|list', 'yemot_lexicon|delete',
+      'chunks|update', 'tasks/c|update', 'appreq/p|update', 'mq/p|update', 'closings/p|update', 'deposits/p|update', 'yemot_lexicon|list', 'yemot_lexicon|delete',
       'yemot_items|get', 'yemot_items|list', 'yemot_items|create', 'yemot_items|update', 'yemot_items|delete',
       'private|get', 'private|list', 'private|create', 'private|update', 'private|delete', 'audit|update', 'audit|delete']);
     assert.deepEqual(closed.filter((k) => !ok.has(k)), [], 'פעולה בלי אף בדיקת "מותר" שלא ברשימת הסגורות-בכוונה');
@@ -708,3 +724,43 @@ describe('ריבוי עסקים – הקוד הישן מול הכללים החד
 });
 
 after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* האמולטור כבר נסגר */ } });
+
+// סריקה אחידה, שלב 6: תור "נשלח למנהל לטיפול" (mq) – הקריטריונים במילים: עובד יוצר ורואה רק את שלו, לא עורך אחרי שליחה,
+// לא רואה של אחרים; רק מנהל העסק מטפל, ופעם אחת בלבד (פריט שטופל לא נשמר פעמיים); בלי סכומים; אין גישה בין עסקים.
+describe('סריקה אחידה שלב 6 – תור "נשלח למנהל לטיפול" (mq)', () => {
+  before(async () => { env = await H.getEnv(); });
+  beforeEach(async () => { await seedAll(); await prep(async (a) => { await a.doc(`b/${A}/staff/e2`).set({ name: 'e2', role: 'employee', active: true, perms: { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false } }); await a.doc(`b/${A}/mq/qo`).set(mqBody('e2')); }); });
+  const e = () => fs(U[A].emp), m = () => fs(U[A].mgr);
+  it('עובד (גם בלי שום הרשאה) יוצר פריט בשמו, רואה רק את שלו, ולא רואה של אחרים', async () => {
+    await assertSucceeds(fs('e2').doc(`b/${A}/mq/qn`).set(mqBody('e2', { k: 'transfer' })));
+    await assertSucceeds(fs('e2').doc(`b/${A}/mq/qn/p/0`).set({ data: 'AAAA' }));
+    await assertSucceeds(e().doc(`b/${A}/mq/q2`).set(mqBody(U[A].emp)));
+    await assertSucceeds(e().collection(`b/${A}/mq`).where('uid', '==', U[A].emp).get());
+    await assertFails(e().doc(`b/${A}/mq/qo`).get());
+    await assertFails(e().doc(`b/${A}/mq/qn/p/0`).get());
+    await assertFails(e().collection(`b/${A}/mq`).get());
+  });
+  it('בלי סכומים ובלי שדות אחרים; סוג לא מוכר / 13 חלקים / שם של אחר / זמן ישן – נדחה', async () => {
+    for (const o of [{ amt: 10 }, { fields: {} }, { k: 'salary' }, { np: 13 }, { np: 0 }, { by: 'e2' }, { t: 1 }, { st: 'done' }]) await assertFails(e().doc(`b/${A}/mq/${fresh()}`).set(mqBody(U[A].emp, o)));
+  });
+  it('לא עורך ולא מוחק אחרי שליחה (גם לא את שלו); לא מוסיף חלק מעבר ל-np', async () => {
+    await prep((a) => a.doc(`b/${A}/mq/qm`).set(mqBody(U[A].emp)));
+    await assertFails(e().doc(`b/${A}/mq/qm`).update({ k: 'transfer' }));
+    await assertFails(e().doc(`b/${A}/mq/qm`).update(stUpd(U[A].emp, 'done')));
+    await assertFails(e().doc(`b/${A}/mq/qm`).delete());
+    await assertFails(e().doc(`b/${A}/mq/qm/p/1`).set({ data: 'x' }));
+  });
+  it('מנהל העסק מטפל פעם אחת: new→done מותר; done→rej, שינוי סוג או בלי stBy שלו – נחסם; מנהל לא יוצר', async () => {
+    await assertSucceeds(m().doc(`b/${A}/mq/qo`).update(stUpd(U[A].mgr, 'done')));
+    await assertFails(m().doc(`b/${A}/mq/qo`).update(stUpd(U[A].mgr, 'rej')));
+    await prep((a) => a.doc(`b/${A}/mq/qx`).set(mqBody('e2')));
+    await assertFails(m().doc(`b/${A}/mq/qx`).update(Object.assign(stUpd(U[A].mgr, 'rej'), { k: 'transfer' })));
+    await assertFails(m().doc(`b/${A}/mq/qx`).update(stUpd('e2', 'rej')));
+    await assertFails(m().doc(`b/${A}/mq/${fresh()}`).set(mqBody(U[A].mgr)));
+  });
+  it('אין גישה בין עסקים: מנהל ועובד של עסק ב\' לא קוראים, לא מטפלים ולא יוצרים בעסק א\'', async () => {
+    await assertFails(fs(U[B].mgr).doc(`b/${A}/mq/qo`).get());
+    await assertFails(fs(U[B].mgr).doc(`b/${A}/mq/qo`).update(stUpd(U[B].mgr, 'done')));
+    await assertFails(fs(U[B].emp).doc(`b/${A}/mq/${fresh()}`).set(mqBody(U[B].emp)));
+  });
+});
