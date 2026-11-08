@@ -132,7 +132,7 @@
   },
   {
    "id": "M10",
-   "line": 2049,
+   "line": 2099,
    "snippet": "updateMask.fieldPaths=status",
    "fn": "pullInbox2",
    "collection": "inbox",
@@ -234,7 +234,7 @@
   },
   {
    "id": "M17",
-   "line": 2793,
+   "line": 2796,
    "snippet": "fsx('/fb/'+r.id,{method:'PATCH'",
    "fn": "fbPush",
    "collection": "fb",
@@ -1551,70 +1551,70 @@
  "excluded": [
   {
    "id": "X01",
-   "line": 1919,
+   "line": 2059,
    "snippet": "collectionId:'site_income_daily'",
    "fn": "pullSiteInc",
    "reason": "רץ רק מול פרויקט הבדיקות (siOn: לא בפרויקט largpeami). לאוסף site_income_daily אין כלל בקובץ הזה, ולכן בפרויקט האמיתי הוא סגור (הכלל האחרון)."
   },
   {
    "id": "X02",
-   "line": 1869,
+   "line": 2009,
    "snippet": "fsx('/users/'+SY.uid,0,1)",
    "fn": "bzWho",
    "reason": "קריאת זיהוי חדשה (ריבוי עסקים, שלב 3): users/{uid} מהשורש (FSR), get של המשתמש עצמו. בחוקים הישנים היא נחסמת (403) והאפליקציה ממשיכה כלארג' פעמי במצב legacy, בלי הודעה. הכלל שלה מגיע בשלב 2 (feature/mb-rules), ולכן אין לה עדיין בדיקת 'מותר' בקובץ הזה; תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X03",
-   "line": 1869,
+   "line": 2009,
    "snippet": "fsx('/b/'+SY.bizId,0,1)",
    "fn": "bzLoad",
    "reason": "קריאת זיהוי חדשה (שלב 3): מסמך העסק b/{bizId} מהשורש (FSR), get. בחוקים הישנים נחסמת (403) והאפליקציה נשארת במצב legacy. הכלל מגיע בשלב 2; תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X04",
-   "line": 1869,
+   "line": 2009,
    "snippet": "fsx('/superadmins/'+SY.uid,0,1)",
    "fn": "bzSA",
    "reason": "קריאת זיהוי חדשה (שלב 3): superadmins/{uid} מהשורש (FSR), get של המשתמש עצמו. נקראת רק כשהעסק מושהה או במעבר עסק של מנהל־על – לא בכניסה רגילה של לארג' פעמי. הכלל מגיע בשלב 2; תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X05",
-   "line": 4368,
+   "line": 4508,
    "snippet": "/b?pageSize=100",
    "fn": "admLoad",
    "reason": "מסך ניהול חדש (ריבוי עסקים, שלב 6א). רשימת כל העסקים מהשורש: GET /b (list), מנהל־על בלבד. מנהל רגיל מקבל 403 (הוכח ב-ui-admin.js בדיקות 26–27). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלבים 2 ו-5); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-admin.js. תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X06",
-   "line": 4371,
+   "line": 4511,
    "snippet": "fsx('/b/'+id+'/private/info',0,1)",
    "fn": "admInfo",
    "reason": "מסך ניהול חדש (ריבוי עסקים, שלב 6א). private/info של עסק (פרטי קשר ו-adv), get. מנהל־על ומנהל העסק קוראים; אחרים נחסמים בחוקים (שלב 2/5). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלבים 2 ו-5); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-admin.js. תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X07",
-   "line": 4452,
+   "line": 4592,
    "snippet": "/staff?pageSize=300",
    "fn": "admStaffLoad",
    "reason": "מסך ניהול חדש (ריבוי עסקים, שלב 6א). רשימת העובדים של העסק הנוכחי (FSB), list. מנהל העסק ומנהל־על; עובד אינו מגיע למסך (isA). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלבים 2 ו-5); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-admin.js. תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X09",
-   "line": 4452,
+   "line": 4592,
    "snippet": "fsx('/private/info')",
    "fn": "admStaffLoad (6ה)",
    "reason": "מסך עובדים, מנהל־על בלבד (SY.sa): קריאת הדרגות של העסק הנוכחי מ-b/{bizId}/private/info (FSB). אותו כלל כמו X06 (מנהל־על ומנהל העסק קוראים; עובד נחסם). נבדק מול האמולטור ב-tests/perms-6e.test.js."
   },
   {
    "id": "X10",
-   "line": 3614,
+   "line": 3754,
    "snippet": "fsx('/wv/'+id,",
    "fn": "wvSync (6ו)",
    "reason": "6ו, עדכון חוזה 16: המכשיר של המנהל מפרסם מראה לקריאה בלבד ל-b/{bizId}/wv/{inc|sal|rpi|rpe|rps}, rpo_<חודש>_<uid>_YYYY-MM (PATCH, FSB). רק במצב b – אין אוסף כזה בשורש (legacy), ולכן אין לו בדיקה בטבלה של השורש. כתיבה רק למנהל העסק / מנהל־על. נבדק מול האמולטור ב-tests/perms-6f.test.js. 6ז: הדוח מפוצל לפי רמה (עדכון חוזה 17)."
   },
   {
    "id": "X11",
-   "line": 3621,
+   "line": 3761,
    "snippet": "fsx('/wv/'+id)",
    "fn": "wvGet / wvLoad (6ו, 6ז)",
    "reason": "6ו+6ז, עדכוני חוזה 16–17: מסכי העובד – get של b/{bizId}/wv/{kind}_YYYY-MM (FSB). inc לפי incR, sal לפי sal; הדוח מפוצל: rpi_ (rep + incR), rpo_<חודש>_<uid> (rep + expR own, רק העובד עצמו), rpe_ (rep + expR כל העסק), rps_ (rep + sal). רק במצב b. נבדק מול האמולטור ב-tests/perms-6f.test.js ו-tests/perms-6g.test.js."
