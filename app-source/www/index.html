@@ -290,6 +290,8 @@ function ensure(d){
  return d}
 function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. רשומה חדשה בלי eu = המשתמש שבמכשיר. סריקה אחידה (8.11): לכל סוגי הרשומות, לא רק הוצאות */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
 function load(){try{const r=localStorage.getItem(KEY);if(r){S=ensure(JSON.parse(r));return true}}catch(e){}return false}
+/* A2: הוזזו לכאן מהשורות 443/470 – בלוק הליבה (V.org, ACT.orgEd, FRM.orgEdF) רץ בטעינה לפני ההכרזה המקורית (TDZ) */
+const ACT={},FRM={},CHG={},INP={};let V={};
 /* ===== סניפים/בנקים: ליבה ===== */
 /* 2026-11-08 חלק א'. org = {branches,banks,cards} – רק השרת כותב (setBusinessOrg, מנהל־על). מנהל: SY.biz.org + עותק ב-S.orgC; עובד: cfg/main (pubCfg) – סניפים בלבד.
    סניף יחיד / אין org = שום שינוי בממשק. t.br חסר = הסניף הראשון (לא כותבים לרשומות קיימות). שיוך משתמש: SY.br (חסר = כל הסניפים).
@@ -322,32 +324,6 @@ function orgSync(f){try{const o=f&&f.org&&typeof f.org==='object'&&!Array.isArra
 async function orgSave(org){const r=await fnCall('setBusinessOrg',{bizId:SY.bizId,org});const o=r&&r.org||org;if(SY.biz)SY.biz.org=o;if(S){S.orgC=o;save()}try{syS()}catch(e){}try{pubCfg().catch(()=>{})}catch(e){}return o}
 async function staffBrSave(uid,kind,br){const r=await fnCall('setStaffBranches',{bizId:SY.bizId,uid,kind,br});return r&&('br'in r)?r.br:br}
 const brArr=v=>Array.isArray(v)?v.filter(x=>typeof x==='string'&&ORG_ID.test(x)):null;
-/* מסך הגדרות: סניפים, בנקים וכרטיסים – מנהל־על בלבד, בעסק במבנה החדש */
-const ORGK={branches:['סניפים','סניף'],banks:['בנקים','בנק'],cards:['כרטיסי אשראי','כרטיס']},SIGK=[['txt','שם / טקסט'],['sup','ספק'],['emp','עובד'],['num','מספר (מסוף / חשבון)'],['other','אחר']];
-const orgOk=()=>!!(ADM.sa&&typeof bzB==='function'&&bzB());
-V.org=()=>{const T='סניפים, בנקים וכרטיסים';if(!orgOk())return{t:T,h:'<div class="empty">המסך הזה למנהל המערכת בלבד</div>'};const o=orgNow(),bn=id=>{const b=o.banks.find(x=>x.id===id);return b?b.name:''};
- const sec=k=>`<div class="sec"><h3>${ORGK[k][0]}</h3><button class="btn s" data-a="orgEd" data-k="${k}" data-id="">＋ חדש</button></div>${o[k].length?o[k].map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(x.name)}</b><small>${[x.last4?'<bdi dir="ltr">•••• '+esc(x.last4)+'</bdi>':'',k==='cards'&&x.bank?esc(bn(x.bank)):'',(x.sig||[]).length?(x.sig.length+' סימני זיהוי'):'',x.on?'':'מושבת'].filter(Boolean).join(' · ')}</small></div><button class="btn s g" data-a="orgEd" data-k="${k}" data-id="${esc(x.id)}">עריכה</button></div>`).join(''):'<p class="note">עוד אין.</p>'}`;
- const imp=subsOf('e_cc').filter(s=>!o.cards.some(c=>c.sub===s.id)).length;
- return{t:T,s:'מנהל המערכת',h:`<p class="note">כשיש סניף אחד בלבד (או אף אחד) – האפליקציה נראית כמו היום. אי אפשר למחוק – אפשר להשבית.</p>${sec('branches')}${sec('banks')}${sec('cards')}${imp?`<button class="btn g w" data-a="orgImp">ייבוא ${imp} כרטיסים קיימים מקטגוריית אשראי</button>`:''}`}};
-const orgSigRows=sig=>{const L=(sig||[]).slice(0,10);while(L.length<Math.min(10,(sig||[]).length+2))L.push({k:'txt',v:''});return L.map((g,i)=>`<div class="row"><select name="sk${i}">${SIGK.map(([k,l])=>`<option value="${k}"${g.k===k?' selected':''}>${l}</option>`).join('')}</select><input name="sv${i}" value="${esc(g.v)}" maxlength="60" class="grow"></div>`).join('')};
-ACT.orgEd=el=>{if(!orgOk())return;const k=el.dataset.k,id=el.dataset.id,o=orgNow(),x=o[k].find(y=>y.id===id)||{id:'',name:'',on:true,sig:[],last4:'',bank:''};if(!ORGK[k])return;
- dlg(`<h3>${id?'עריכת':'הוספת'} ${ORGK[k][1]}</h3><form data-f="orgEdF" data-k="${k}" data-id="${esc(id)}">${fld('שם','name',x.name,'text','required maxlength="40"')}${k!=='branches'?fld('4 ספרות אחרונות (לא חובה)','last4',x.last4||'','text','inputmode="numeric" pattern="[0-9]{4}" maxlength="4" dir="ltr"'):''}${k==='cards'?`<label class="f"><span>בנק</span><select name="bank"><option value="">—</option>${o.banks.map(b=>`<option value="${esc(b.id)}"${b.id===x.bank?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:`<h4 style="margin:10px 0 4px">סימני זיהוי</h4><p class="note">ספק: שם הספק או המזהה שלו. עובד: מזהה העובד. מספר: מספר מסוף או חשבון.</p>${orgSigRows(x.sig)}`}${id?`<label class="cb"><input type="checkbox" name="off" value="1"${x.on?'':' checked'}> מושבת</label>`:''}<div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.orgEdF=async f=>{if(!orgOk())return;const x=fd(f),k=f.dataset.k,id=f.dataset.id,nm=s_(x.name),b=f.querySelector('button');if(!nm||nm.length>40)return toast('שם: עד 40 תווים');
- const l4=s_(x.last4);if(k!=='branches'&&l4&&!/^\d{4}$/.test(l4))return toast('4 ספרות אחרונות: בדיוק 4 ספרות');
- const o=orgNow(),L=o[k].map(y=>Object.assign({},y)),nid=id||((k==='branches'?'br':k==='banks'?'bk':'cc')+Date.now().toString(36)).slice(0,20),old=L.find(y=>y.id===id)||{};
- const it={id:nid,name:nm,on:!x.off};if(k!=='branches')it.last4=l4;if(k==='cards'){it.bank=x.bank||'';if(old.sub)it.sub=old.sub}else{const sg=[];for(let i=0;i<10;i++){const v=s_(x['sv'+i]);if(v)sg.push({k:SIGK.some(([q])=>q===x['sk'+i])?x['sk'+i]:'txt',v:v.slice(0,60)})}it.sig=sg}
- const i=L.findIndex(y=>y.id===id);if(i>=0)L[i]=it;else L.push(it);const org=orgOut(Object.assign({},o,{[k]:L}));
- b.disabled=true;try{await orgSave(org);closeDlg();toast('נשמר');rerender()}catch(e){toast(e.message)}finally{b.disabled=false}};
-function orgOut(o){const m=x=>{const r={id:x.id,name:x.name,on:x.on!==false};return r};return{v:1,branches:o.branches.map(x=>Object.assign(m(x),{sig:x.sig||[]})),banks:o.banks.map(x=>Object.assign(m(x),{last4:x.last4||'',sig:x.sig||[]})),cards:o.cards.map(x=>Object.assign(m(x),{last4:x.last4||'',bank:x.bank||''},x.sub?{sub:x.sub}:{}))}}
-/* ייבוא מהכרטיסים הקיימים (e_cc): שם + 4 ספרות; המזהה הישן נשמר ב-sub. לא משנה את הכרטיסים הקיימים */
-ACT.orgImp=async el=>{if(!orgOk())return;const o=orgNow(),add=subsOf('e_cc').filter(s=>!o.cards.some(c=>c.sub===s.id)&&/^[A-Za-z0-9_-]{1,40}$/.test(s.id));if(!add.length)return;
- const cards=o.cards.concat(add.slice(0,Math.max(0,30-o.cards.length)).map((s,i)=>({id:('cc'+Date.now().toString(36)+i).slice(0,20),name:String(s.name).slice(0,40),on:true,last4:/^\d{4}$/.test(s.ext&&s.ext.last4||'')?s.ext.last4:'',bank:'',sub:s.id})));
- el.disabled=true;try{await orgSave(orgOut(Object.assign({},o,{cards})));toast('הכרטיסים יובאו');rerender()}catch(e){toast(e.message)}finally{el.disabled=false}};
-/* שיוך עובד / מנהל לסניפים – מנהל־על, כשיש 2 סניפים ומעלה. בלי סימון = כל הסניפים */
-ACT.admBr=el=>{if(!SY.sa)return;const u=(ADM.staff||[]).find(x=>x.uid===el.dataset.uid);if(!u)return;const cur=Array.isArray(u.br)?u.br:null;
- dlg(`<h3>סניפים: ${esc(u.name||u.email)}</h3><form data-f="admBrF" data-uid="${esc(u.uid)}" data-kind="${u.role==='manager'?'admin':'staff'}">${brAll().map(b=>`<label class="cb"><input type="checkbox" name="b_${esc(b.id)}" value="1"${cur&&cur.includes(b.id)?' checked':''}> ${esc(b.name)}${b.on?'':' (מושבת)'}</label>`).join('')}<p class="note">בלי סימון = כל הסניפים.${u.role==='manager'?' אצל מנהל ההגבלה היא בתצוגה בלבד.':''}</p><div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.admBrF=async f=>{const x=fd(f),uid=f.dataset.uid,kind=f.dataset.kind,br=brAll().filter(b=>x['b_'+b.id]).map(b=>b.id),btn=f.querySelector('button');btn.disabled=true;
- try{const r=await staffBrSave(uid,kind,br.length?br:null),u=(ADM.staff||[]).find(y=>y.uid===uid);if(u)u.br=r||null;closeDlg();toast('נשמר');rerender()}catch(e){toast(e.message)}finally{btn.disabled=false}};
 
 /* ===== המרה מהאפליקציה הישנה ===== */
 const IMAP={'מזומן נחל לכיש':['i_nl','מזומן'],'אשראי נחל לכיש':['i_nl','אשראי'],'הקפה נחל לכיש':['i_nl','הקפה'],'מזומן יהודה הנשיא':['i_yh','מזומן'],'אשראי יהודה הנשיא':['i_yh','אשראי']};
@@ -440,7 +416,6 @@ function dlg(h){const d=$('#dlg');d.innerHTML=h;if(!d.open)d.showModal()}
 function closeDlg(){const d=$('#dlg');if(d.open)d.close()}
 let PENDING=null;
 function ask(msg,fn,ok){PENDING=fn;dlg(`<h3>${esc(msg)}</h3><div class="row"><button class="btn r grow" data-a="yes">${ok||'כן, המשך'}</button><button class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}
-const ACT={},FRM={},CHG={},INP={};
 ACT.yes=()=>{const f=PENDING;PENDING=null;closeDlg();if(f)f()};
 ACT.closeDlg=()=>closeDlg();
 document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(!el||el.disabled)return;const f=ACT[el.dataset.a];if(f){e.preventDefault();f(el,e)}else console.warn('missing action',el.dataset.a)});
@@ -459,7 +434,7 @@ const pmF=(n,list,v,req)=>`<div class="f"><div style="font-weight:700;margin-bot
 CHG.pmr=el=>{el.closest('.pm').querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.contains(el)))};
 /* ניווט */
 const themeNow=()=>{try{if(isW())return cfgLocal().th||'paper'}catch(e){}return S.theme||'paper'};
-let NAV=[{v:'home'}],A=null,V={};
+let NAV=[{v:'home'}],A=null;
 const cur=()=>NAV[NAV.length-1];
 function go(v,a){NAV.push({v,a});P.open=false;render(1)}
 function tab(v){NAV=[{v}];P.open=false;render(0)}
@@ -4243,6 +4218,33 @@ function admMenu(){if(typeof isA!=='function'||!isA())return'';
  if(admStaffOk())a.push(o('staff','עובדים',ADM.sa||SY.sa?'הוספה, דרגות, הרשאות, השבתה והחזרה':'השבתה והחזרה של עובדים'));/* עדכון חוזה 14: מיתוג – רק מנהל־על, מכרטיס העסק. למנהל העסק אין כניסה */
  return a.length?`<div class="sec"><h3>ניהול</h3></div>`+a.join(''):''}
 const admStaffOk=()=>isA()&&bzB();
+/* ===== סניפים/בנקים: מסכי מנהל־על (חלק מליבת A1; כאן כי V/ACT/ADM מוגדרים רק בהמשך) ===== */
+/* מסך הגדרות: סניפים, בנקים וכרטיסים – מנהל־על בלבד, בעסק במבנה החדש */
+const ORGK={branches:['סניפים','סניף'],banks:['בנקים','בנק'],cards:['כרטיסי אשראי','כרטיס']},SIGK=[['txt','שם / טקסט'],['sup','ספק'],['emp','עובד'],['num','מספר (מסוף / חשבון)'],['other','אחר']];
+const orgOk=()=>!!(ADM.sa&&typeof bzB==='function'&&bzB());
+V.org=()=>{const T='סניפים, בנקים וכרטיסים';if(!orgOk())return{t:T,h:'<div class="empty">המסך הזה למנהל המערכת בלבד</div>'};const o=orgNow(),bn=id=>{const b=o.banks.find(x=>x.id===id);return b?b.name:''};
+ const sec=k=>`<div class="sec"><h3>${ORGK[k][0]}</h3><button class="btn s" data-a="orgEd" data-k="${k}" data-id="">＋ חדש</button></div>${o[k].length?o[k].map(x=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(x.name)}</b><small>${[x.last4?'<bdi dir="ltr">•••• '+esc(x.last4)+'</bdi>':'',k==='cards'&&x.bank?esc(bn(x.bank)):'',(x.sig||[]).length?(x.sig.length+' סימני זיהוי'):'',x.on?'':'מושבת'].filter(Boolean).join(' · ')}</small></div><button class="btn s g" data-a="orgEd" data-k="${k}" data-id="${esc(x.id)}">עריכה</button></div>`).join(''):'<p class="note">עוד אין.</p>'}`;
+ const imp=subsOf('e_cc').filter(s=>!o.cards.some(c=>c.sub===s.id)).length;
+ return{t:T,s:'מנהל המערכת',h:`<p class="note">כשיש סניף אחד בלבד (או אף אחד) – האפליקציה נראית כמו היום. אי אפשר למחוק – אפשר להשבית.</p>${sec('branches')}${sec('banks')}${sec('cards')}${imp?`<button class="btn g w" data-a="orgImp">ייבוא ${imp} כרטיסים קיימים מקטגוריית אשראי</button>`:''}`}};
+const orgSigRows=sig=>{const L=(sig||[]).slice(0,10);while(L.length<Math.min(10,(sig||[]).length+2))L.push({k:'txt',v:''});return L.map((g,i)=>`<div class="row"><select name="sk${i}">${SIGK.map(([k,l])=>`<option value="${k}"${g.k===k?' selected':''}>${l}</option>`).join('')}</select><input name="sv${i}" value="${esc(g.v)}" maxlength="60" class="grow"></div>`).join('')};
+ACT.orgEd=el=>{if(!orgOk())return;const k=el.dataset.k,id=el.dataset.id,o=orgNow(),x=o[k].find(y=>y.id===id)||{id:'',name:'',on:true,sig:[],last4:'',bank:''};if(!ORGK[k])return;
+ dlg(`<h3>${id?'עריכת':'הוספת'} ${ORGK[k][1]}</h3><form data-f="orgEdF" data-k="${k}" data-id="${esc(id)}">${fld('שם','name',x.name,'text','required maxlength="40"')}${k!=='branches'?fld('4 ספרות אחרונות (לא חובה)','last4',x.last4||'','text','inputmode="numeric" pattern="[0-9]{4}" maxlength="4" dir="ltr"'):''}${k==='cards'?`<label class="f"><span>בנק</span><select name="bank"><option value="">—</option>${o.banks.map(b=>`<option value="${esc(b.id)}"${b.id===x.bank?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:`<h4 style="margin:10px 0 4px">סימני זיהוי</h4><p class="note">ספק: שם הספק או המזהה שלו. עובד: מזהה העובד. מספר: מספר מסוף או חשבון.</p>${orgSigRows(x.sig)}`}${id?`<label class="cb"><input type="checkbox" name="off" value="1"${x.on?'':' checked'}> מושבת</label>`:''}<div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.orgEdF=async f=>{if(!orgOk())return;const x=fd(f),k=f.dataset.k,id=f.dataset.id,nm=s_(x.name),b=f.querySelector('button');if(!nm||nm.length>40)return toast('שם: עד 40 תווים');
+ const l4=s_(x.last4);if(k!=='branches'&&l4&&!/^\d{4}$/.test(l4))return toast('4 ספרות אחרונות: בדיוק 4 ספרות');
+ const o=orgNow(),L=o[k].map(y=>Object.assign({},y)),nid=id||((k==='branches'?'br':k==='banks'?'bk':'cc')+Date.now().toString(36)).slice(0,20),old=L.find(y=>y.id===id)||{};
+ const it={id:nid,name:nm,on:!x.off};if(k!=='branches')it.last4=l4;if(k==='cards'){it.bank=x.bank||'';if(old.sub)it.sub=old.sub}else{const sg=[];for(let i=0;i<10;i++){const v=s_(x['sv'+i]);if(v)sg.push({k:SIGK.some(([q])=>q===x['sk'+i])?x['sk'+i]:'txt',v:v.slice(0,60)})}it.sig=sg}
+ const i=L.findIndex(y=>y.id===id);if(i>=0)L[i]=it;else L.push(it);const org=orgOut(Object.assign({},o,{[k]:L}));
+ b.disabled=true;try{await orgSave(org);closeDlg();toast('נשמר');rerender()}catch(e){toast(e.message)}finally{b.disabled=false}};
+function orgOut(o){const m=x=>{const r={id:x.id,name:x.name,on:x.on!==false};return r};return{v:1,branches:o.branches.map(x=>Object.assign(m(x),{sig:x.sig||[]})),banks:o.banks.map(x=>Object.assign(m(x),{last4:x.last4||'',sig:x.sig||[]})),cards:o.cards.map(x=>Object.assign(m(x),{last4:x.last4||'',bank:x.bank||''},x.sub?{sub:x.sub}:{}))}}
+/* ייבוא מהכרטיסים הקיימים (e_cc): שם + 4 ספרות; המזהה הישן נשמר ב-sub. לא משנה את הכרטיסים הקיימים */
+ACT.orgImp=async el=>{if(!orgOk())return;const o=orgNow(),add=subsOf('e_cc').filter(s=>!o.cards.some(c=>c.sub===s.id)&&/^[A-Za-z0-9_-]{1,40}$/.test(s.id));if(!add.length)return;
+ const cards=o.cards.concat(add.slice(0,Math.max(0,30-o.cards.length)).map((s,i)=>({id:('cc'+Date.now().toString(36)+i).slice(0,20),name:String(s.name).slice(0,40),on:true,last4:/^\d{4}$/.test(s.ext&&s.ext.last4||'')?s.ext.last4:'',bank:'',sub:s.id})));
+ el.disabled=true;try{await orgSave(orgOut(Object.assign({},o,{cards})));toast('הכרטיסים יובאו');rerender()}catch(e){toast(e.message)}finally{el.disabled=false}};
+/* שיוך עובד / מנהל לסניפים – מנהל־על, כשיש 2 סניפים ומעלה. בלי סימון = כל הסניפים */
+ACT.admBr=el=>{if(!SY.sa)return;const u=(ADM.staff||[]).find(x=>x.uid===el.dataset.uid);if(!u)return;const cur=Array.isArray(u.br)?u.br:null;
+ dlg(`<h3>סניפים: ${esc(u.name||u.email)}</h3><form data-f="admBrF" data-uid="${esc(u.uid)}" data-kind="${u.role==='manager'?'admin':'staff'}">${brAll().map(b=>`<label class="cb"><input type="checkbox" name="b_${esc(b.id)}" value="1"${cur&&cur.includes(b.id)?' checked':''}> ${esc(b.name)}${b.on?'':' (מושבת)'}</label>`).join('')}<p class="note">בלי סימון = כל הסניפים.${u.role==='manager'?' אצל מנהל ההגבלה היא בתצוגה בלבד.':''}</p><div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.admBrF=async f=>{const x=fd(f),uid=f.dataset.uid,kind=f.dataset.kind,br=brAll().filter(b=>x['b_'+b.id]).map(b=>b.id),btn=f.querySelector('button');btn.disabled=true;
+ try{const r=await staffBrSave(uid,kind,br.length?br:null),u=(ADM.staff||[]).find(y=>y.uid===uid);if(u)u.br=r||null;closeDlg();toast('נשמר');rerender()}catch(e){toast(e.message)}finally{btn.disabled=false}};
 const admTag=b=>`<span class="tag ${b.status==='suspended'?'t4':'t3'}">${b.status==='suspended'?'מושהה':'פעיל'}</span>`;
 V.sa=()=>{const T='מנהל־על';if(!ADM.sa)return{t:T,h:'<div class="empty">אין הרשאה</div>'};if(!ADM.L&&!ADM.err)admLoad();
  const row=b=>`<button class="li" data-a="go" data-v="sab" data-arg="${esc(b.id)}" data-n="${esc((b.name+' '+b.id).toLowerCase())}"><div class="m"><b>${esc(b.name||b.id)}</b><small>${esc(b.id)} · ${b.dataRoot==='legacy'?'מצב קיים':Object.values(b.features).filter(x=>x===true).length+' תוספות מופעלות'}</small></div>${admTag(b)}</button>`;
