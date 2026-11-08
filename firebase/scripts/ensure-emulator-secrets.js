@@ -21,3 +21,5 @@ if (!/^YEMOT_API_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '
 if (!/^YEMOT_HOOK_SECRET=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nYEMOT_HOOK_SECRET=DUMMY-HOOK-5b1e\n');
 // מפתח דמה ל-ElevenLabs (הקול המשוכפל, 61-yemot-line.js) – באותה שיטה
 if (!/^ELEVENLABS_API_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nELEVENLABS_API_KEY=DUMMY-ELEVEN-9c2d\n');
+// מייל הזמנה עצמי: ערכים ריקים באמולטור – הפונקציה נופלת ל-fallback ולא שולחת מייל אמיתי
+if (!/^MAIL_USER=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nMAIL_USER=dummy-not-an-email\nMAIL_APP_PASSWORD=dummy\n');

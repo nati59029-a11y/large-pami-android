@@ -4625,16 +4625,18 @@ const DV_TRUST=30*864e5,DV_LINK=60*6e4,DV_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DV_SENT='אם המייל רשום במערכת, נשלח אליו קישור לקביעת סיסמה. כדאי לבדוק גם בתיקיית הספאם.';
 /* X-Firebase-Locale: המייל בעברית (אם הוגדרה תבנית). אם הכותרת נחסמת בדפדפן (CORS – לא מאומת), שולחים שוב בלעדיה */async function oob(o){const u=`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:sendOobCode?key=${FB.apiKey}`,b=JSON.stringify(o);try{return await jf(u,{method:'POST',headers:{'Content-Type':'application/json','X-Firebase-Locale':'he'},body:b})}catch(e){if(!e.offline)throw e;return jf(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b})}}
 /* דף פתיחה (2026-11-08): continueUrl בדומיין firebaseapp.com של הפרויקט (מורשה תמיד) עם biz – דף welcome.html (Action URL מותאם בקונסול) קורא ממנו את העסק. אם השליחה עם continueUrl נדחית – שולחים בלעדיו */
+/* מייל הזמנה עצמי (2026-11-08): קודם השרת (sendInviteMail – Gmail של המערכת, קישור לדף הפתיחה). רק למנהל־על ורק עם עסק. אם השרת מחזיר fallback או נכשל – המייל המובנה של Firebase, כמו קודם */
+const invMail=async(em,bz)=>{if(SY.sa&&BZOK(bz)){try{const r=await fnCall('sendInviteMail',{bizId:bz,email:em});if(r&&r.status==='sent')return 'sent'}catch(e){if(e.offline)throw e}}await pwMail(em,bz);return 'fb'};
 const pwMail=async(em,bz)=>{if(!BZOK(bz)||EMU)return oob({requestType:'PASSWORD_RESET',email:em});try{return await oob({requestType:'PASSWORD_RESET',email:em,continueUrl:`https://${FB.projectId}.firebaseapp.com/?biz=${bz}`})}catch(e){if(e.offline||!/CONTINUE_URI|UNAUTHORIZED_DOMAIN|DOMAIN/.test(e.message||''))throw e;return oob({requestType:'PASSWORD_RESET',email:em})}};
 /* אחרי פתיחת עסק / הוספת עובד: מייל "קבע סיסמה" לכתובת שהשרת החזיר */
 /* nb = עסק שנפתח עכשיו: מציעים מיד את מסך המיתוג (עדכון חוזה 14), לפני שהמנהל נכנס */
 const brOffer=nb=>nb?`<p class="note">אפשר לקבוע עכשיו לוגו, צבעים ושם תצוגה, עוד לפני שהמנהל נכנס.</p><div class="row"><button class="btn grow" data-a="admBrNow" data-id="${esc(nb)}">למיתוג העסק</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`:'';
 ACT.admBrNow=el=>{const id=el.dataset.id;closeDlg();if(BZOK(id))go('brand',id)};
 async function admMailSend(em,head,quiet,nb){const fin=nb?brOffer(nb):'<button class="btn w" data-a="closeDlg">הבנתי</button>';if(!em||!DV_RE.test(em)){dlg(`<h3>${esc(head)}</h3><p>לא התקבלה כתובת מייל מהשרת, ולכן לא נשלח מייל כניסה.</p>${fin}`);return}
- let ok=1,why='';try{await pwMail(em,nb||SY.bizId)}catch(e){ok=0;why=e.offline?'אין חיבור לאינטרנט':'השליחה נכשלה'}
+ let ok=1,why='';try{await invMail(em,nb||SY.bizId)}catch(e){ok=0;why=e.offline?'אין חיבור לאינטרנט':'השליחה נכשלה'}
  if(ok&&quiet)return toast(head+'. נשלח מייל לקביעת סיסמה ל-'+em);/* במסך העובדים: הודעה קצרה שלא חוסמת את הרשימה */dlg(`<h3>${esc(head)}</h3><p>${ok?`נשלח מייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(em)}</bdi>`:`${esc(why)}. המייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(em)}</bdi> לא נשלח. ${quiet?'אפשר':'אפשר לשלוח שוב מכרטיס העסק, או'} ללחוץ "שכחתי סיסמה" במסך הכניסה`}.</p>${fin}`)}
 ACT.admMail=async el=>{const I=ADM.info[el.dataset.id]||{};if(!I.email)return toast('מייל המנהל לא נטען');el.disabled=true;
- try{await pwMail(I.email,el.dataset.id);dlg(`<h3>מייל כניסה</h3><p>נשלח מייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(I.email)}</bdi>.</p><button class="btn w" data-a="closeDlg">הבנתי</button>`)}catch(e){toast(e.offline?e.message:'שליחת המייל נכשלה, נסה שוב')}finally{el.disabled=false}};
+ try{await invMail(I.email,el.dataset.id);dlg(`<h3>מייל כניסה</h3><p>נשלח מייל לקביעת סיסמה ל-<bdi dir="ltr">${esc(I.email)}</bdi>.</p><button class="btn w" data-a="closeDlg">הבנתי</button>`)}catch(e){toast(e.offline?e.message:'שליחת המייל נכשלה, נסה שוב')}finally{el.disabled=false}};
 /* "שכחתי סיסמה / קביעת סיסמה" במסך הכניסה */
 async function pwForgot(em,out,btn){if(!DV_RE.test(em)){out.textContent='הזינו את כתובת האימייל, ואז לחצו שוב על "שכחתי סיסמה"';return}
  btn.disabled=true;setTimeout(()=>{btn.disabled=false},30000);

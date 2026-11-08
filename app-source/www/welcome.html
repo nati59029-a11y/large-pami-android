@@ -65,6 +65,7 @@ var $=function(i){return document.getElementById(i)};
 var q=new URLSearchParams(location.search);
 var mode=q.get('mode')||'',oob=q.get('oobCode')||'',key=q.get('apiKey')||'',cont=q.get('continueUrl')||'';
 var biz='';try{biz=new URL(cont).searchParams.get('biz')||''}catch(e){}
+if(!biz)biz=q.get('biz')||''; // מייל הזמנה עצמי: biz גם ישירות בקישור
 if(!/^[a-z0-9-]{3,30}$/.test(biz))biz='';
 var emu=/^(127\.0\.0\.1|localhost)$/.test(location.hostname)&&q.get('emu');
 var IDT=emu?'http://'+location.hostname+':9099/identitytoolkit.googleapis.com':'https://identitytoolkit.googleapis.com';

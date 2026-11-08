@@ -177,3 +177,6 @@ Object.assign(exports, require('./business'));
 
 // דף הפתיחה להזמנה (2026-11-08): publicBrand – שם תצוגה, לוגו וצבעים בלבד, ציבורי, עם הגבלת קצב
 Object.assign(exports, require('./public-brand'));
+
+// מייל הזמנה עצמי (2026-11-08): sendInviteMail – קישור מהשרת לדף welcome.html, שליחה ב-Gmail (MAIL_USER/MAIL_APP_PASSWORD), נפילה למייל של Firebase
+Object.assign(exports, require('./invite-mail'));
