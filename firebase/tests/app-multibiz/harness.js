@@ -44,7 +44,7 @@ function firestoreReply(cfg, method, p, body) {
 }
 
 async function newPage(browser, www, cfg, log, label) {
-  const ctx = await browser.newContext({ locale: 'he-IL', timezoneId: 'Asia/Jerusalem' });
+  const ctx = await browser.newContext(Object.assign({ locale: 'he-IL', timezoneId: 'Asia/Jerusalem' }, cfg.ctx || {})); // cfg.ctx: אפשרויות הקשר (למשל hasTouch/isMobile לטלפון)
   const page = await ctx.newPage();
   page.__errors = []; page.__gen = 0; page.__cfg = cfg;
   page.on('framenavigated', (f) => { if (f === page.mainFrame()) page.__gen++; }); // דור הדף: כל טעינה מחדש = דף חדש

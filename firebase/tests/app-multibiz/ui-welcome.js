@@ -50,6 +50,23 @@ const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ
   check('קוד שפג – הודעה ברורה, בלי טופס', (await pg.textContent('#msg')).includes('פג תוקף') && !(await pg.isVisible('#f')));
   check('בלי מיתוג – APK כללי', (await pg.getAttribute('#apk', 'href')).endsWith('/latest/large-pami.apk'));
   await pg.close();
+  // אתר/פרויקט הבדיקה: APK בדיקה (release test-latest) – לפי מפתח ה-API של פרויקט הבדיקה או לפי כתובת האתר; גם כשיש מיתוג עסק
+  const TK = 'AIzaSyBHsEw1IvucT5gh1sv5jfSpd5UKqnPwsXU', TEST_APK = '/releases/download/test-latest/large-pami-test.apk';
+  pg = await open(`?mode=resetPassword&oobCode=T1&apiKey=${TK}&continueUrl=${cont}`, { brand: { name: 'מאפיית דוד', apkTag: 'biz-biz-a' } });
+  check('מפתח פרויקט הבדיקה – APK בדיקה (גם עם מיתוג עסק)', (await pg.getAttribute('#apk', 'href')).endsWith(TEST_APK), await pg.getAttribute('#apk', 'href'));
+  await pg.close();
+  for (const host of ['largpeami-test-desktop.web.app', 'largpeami-test-f4691.web.app']) {
+    pg = await br.newPage({ viewport: { width: 380, height: 760 } });
+    await pg.route(`https://${host}/**`, (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }));
+    await pg.route('**/api/publicBrand**', (r) => r.fulfill({ status: 404, contentType: 'application/json', body: '{}' }));
+    await pg.route('https://identitytoolkit.googleapis.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ email: 'boss@example.invalid' }) }));
+    await pg.goto(`https://${host}/welcome.html?mode=resetPassword&oobCode=T2&apiKey=K&continueUrl=${cont}`); await pg.waitForTimeout(400);
+    check('אתר בדיקה ' + host + ' – APK בדיקה', (await pg.getAttribute('#apk', 'href')).endsWith(TEST_APK), await pg.getAttribute('#apk', 'href'));
+    await pg.close();
+  }
+  pg = await open(`?mode=resetPassword&oobCode=P1&apiKey=AIzaSyPROD&continueUrl=${cont}`, {});
+  check('ייצור (מפתח/כתובת אחרים) – APK ייצור, ללא שינוי', (await pg.getAttribute('#apk', 'href')).endsWith('/latest/large-pami.apk') && !(await pg.getAttribute('#apk', 'href')).includes('test-latest'));
+  await pg.close();
   pg = await open(`?mode=resetPassword&oobCode=C&apiKey=K&continueUrl=${encodeURIComponent('https://x/?biz=<script>')}`, {});
   check('bizId לא תקין – לא נשלחת בקשת מיתוג, הדף עובד (כללי)', (await pg.textContent('#h')) === 'קביעת סיסמה חדשה');
   await pg.close();

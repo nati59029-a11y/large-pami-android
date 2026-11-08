@@ -43,8 +43,10 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAEAQMAAACTPww9AAAAA1BMVEX/AAAZ4gk3AAA
     const g = await gate(page); await shot(page, '02-כניסה-APK-עסק');
     check('4 APK של עסק בטלפון חדש: מסך הכניסה מציג את הלוגו והשם של ה-APK', g.img === 'data:image/png;base64,' + PNG && g.name === 'אקמי', { name: g.name });
     // 5. צבע הודעת המידע ("שלחנו קישור") שונה מצבע השגיאה
-    const col = await page.evaluate(() => { const f = document.getElementById('gform'); const p = document.createElement('p'); p.className = 'gerr ginfo'; f.append(p); const q = document.createElement('p'); q.className = 'gerr'; f.append(q); return [getComputedStyle(p).color, getComputedStyle(q).color]; });
-    check('5 הודעת מידע במסך הכניסה בצבע ירוק כהה, לא בצבע השגיאה האדום', col[0] !== col[1] && col[0] === 'rgb(29, 91, 58)', col);
+    const col = await page.evaluate(() => { const f = document.getElementById('gform'); const p = document.createElement('p'); p.className = 'gerr ginfo'; f.append(p); const q = document.createElement('p'); q.className = 'gerr'; f.append(q); const d = document.createElement('i'); d.style.color = getComputedStyle(document.documentElement).getPropertyValue('--inc'); document.body.append(d); const inc = getComputedStyle(d).color; d.remove(); return [getComputedStyle(p).color, getComputedStyle(q).color, inc]; });
+    /* D2: הצבע נגזר מהערכה (--inc), לא קבוע; הערכה כהה → ירוק בהיר, ערכה בהירה → ירוק כהה */
+    const gr = (/(\d+)[, ]+(\d+)[, ]+(\d+)/.exec(col[0]) || []).slice(1).map(Number);
+    check('5 הודעת מידע במסך הכניסה בצבע ירוק (צבע ההכנסה של הערכה), לא בצבע השגיאה האדום', col[0] !== col[1] && col[0] === col[2] && gr[1] > gr[0] && gr[1] > gr[2], col);
     await ctx.close(); }
 
   // 6. orders/app.html בכתובת ישירה כשהתוספת כבויה (site-backend = off, בלי emu)

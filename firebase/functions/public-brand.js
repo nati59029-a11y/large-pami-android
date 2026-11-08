@@ -1,6 +1,6 @@
 'use strict';
 // דף הפתיחה להזמנה (welcome.html, 2026-11-08): publicBrand – קריאה ציבורית מינימלית של מיתוג העסק, בלי התחברות.
-//   GET ?biz=<bizId>  →  { name, logo, colors, apkTag }   (רק אלה. שום שדה אחר מהמסמך לא יוצא.)
+//   GET ?biz=<bizId>  →  { name, logo, colors, apkTag, theme }   (theme: 'a'|'b'|'c' – ערכת העיצוב, D1)   (רק אלה. שום שדה אחר מהמסמך לא יוצא.)
 //   name   – שם התצוגה (brand.name, או שם העסק). logo – data:image/... (עד 1MB) או ''. colors – רק 6 מפתחות #rrggbb.
 //   apkTag – 'latest' (ה-APK הכללי), או 'biz-<bizId>' רק אם במסמך העסק יש apkTag כזה (נכתב רק בשרת/קונסול; הלקוח לא כותב למסמך).
 // עסק שלא קיים או מושהה – 404 אחיד. bizId הוא מזהה ולא סוד.
@@ -41,7 +41,7 @@ async function logoOf(bizId, path) {
 async function brandOf(bizId) {
   const biz = await T.loadBiz(bizId);
   if (!biz) return null;
-  if (!biz.exists) return bizId === T.BIZ0 ? { name: 'לארג׳ פעמי', logo: '', colors: {}, apkTag: 'latest' } : null;
+  if (!biz.exists) return bizId === T.BIZ0 ? { name: 'לארג׳ פעמי', logo: '', colors: {}, apkTag: 'latest', theme: 'a' } : null;
   if (biz.status !== 'active') return null;
   const d = (await require('firebase-admin/firestore').getFirestore().doc('b/' + bizId).get()).data() || {};
   const br = d.brand && typeof d.brand === 'object' ? d.brand : {};
@@ -49,7 +49,8 @@ async function brandOf(bizId) {
   const colors = {};
   if (br.colors && typeof br.colors === 'object') for (const k of KEYS) if (typeof br.colors[k] === 'string' && HEX.test(br.colors[k])) colors[k] = br.colors[k].toLowerCase();
   const apkTag = d.apkTag === 'biz-' + bizId ? d.apkTag : 'latest';
-  return { name: String(name).slice(0, 60), logo: await logoOf(bizId, br.logoPath), colors, apkTag };
+  const theme = ['a', 'b', 'c'].includes(br.theme) ? br.theme : 'a';
+  return { name: String(name).slice(0, 60), logo: await logoOf(bizId, br.logoPath), colors, apkTag, theme };
 }
 
 async function handle(req, res, now) {

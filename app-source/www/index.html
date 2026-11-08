@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="he" dir="rtl" data-th="paper">
+<html lang="he" dir="rtl" data-th="paper" data-ds="a">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1c5a49">
 <title>לארג׳ פעמי</title><script>/* ריבוי עסקים 6ג-2: נעילה בטביעת אצבע – מכסים את התוכן לפני שהוא מוצג, אם הנעילה הופעלה במכשיר הזה (lp-bio עם תחילית העסק) */try{(function(){var s=JSON.parse(localStorage.getItem('lp-sync')||'{}')||{},b=s.bizId,p=typeof b==='string'&&/^[a-z0-9-]{3,30}$/.test(b)&&b!=='larg'+'peami'?b+':':'';if(s.refresh&&localStorage.getItem(p+'lp-bio')==='1')document.documentElement.classList.add('bzlk')})()}catch(e){}</script>
 <style>[hidden]{display:none!important}html.bzlk body>:not(#bzlk){visibility:hidden!important}#bzlk{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--ink);text-align:center}#gate .glink{font:inherit;color:inherit;letter-spacing:normal;text-transform:none;background:none;border:0;padding:8px;text-decoration:underline;cursor:pointer}#gate .glink:disabled{opacity:.6}
@@ -13,6 +13,101 @@ html[data-th=bake]{--bg:#f7efe2;--card:#fffaf0;--ink:#3a2a1d;--mut:#7a6650;--lin
 html[data-th=baked]{--bg:#1c1713;--card:#28211a;--ink:#f2e8d9;--mut:#b8a68d;--line:#3d3226;--acc:#e0a15a;--acc2:#3a2c1a;--onacc:#2a1a08;--inc:#a3cf6e;--exp:#f0a07c;--warn:#f0c15a;--bad:#ff8c80;--sh:none;color-scheme:dark}
 html[data-th=fresh]{--bg:#eef5ec;--card:#fff;--ink:#1f2d22;--mut:#5a6b5d;--line:#cfe0cc;--acc:#2f7d3a;--acc2:#dff0dc;--onacc:#fff;--inc:#2f7d3a;--exp:#c2441f}
 html[data-th=freshd]{--bg:#101813;--card:#18231b;--ink:#e6f0e6;--mut:#9fb3a2;--line:#2a3b2d;--acc:#6fd07b;--acc2:#1b3a22;--onacc:#06200c;--inc:#6fd07b;--exp:#f09a80;--warn:#f0c15a;--bad:#ff8c80;--sh:none;color-scheme:dark}
+/* DS: tokens – עיצוב מחדש D1. שלוש ערכות: a = גרפיט וזכוכית עשנה (כהה), b = קרמיקה ונייר (בהיר), c = גרפיט וזכוכית (בהיר).
+ html[data-ds] נקבע תמיד (dsApply) וגובר על data-th הישן. --acc/--bg/--card/--ink/--acc2/--onacc נכתבים מעל זה מצבעי הלוגו (bzSkin+dsDerive) אם לעסק יש מיתוג.
+ ברירות המחדל כאן (בלי מיתוג) עוברות 4.5:1 בכל הזוגות של BZ_PAIRS. */
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:400;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-hebrew-400-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:600;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-hebrew-600-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-hebrew-700-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:400;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:600;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-latin-600-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Rubik;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/rubik-hebrew-400-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Rubik;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/rubik-hebrew-600-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Rubik;font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/rubik-hebrew-700-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Rubik;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/rubik-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Rubik;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/rubik-latin-600-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Rubik;font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/rubik-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Assistant;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/assistant-hebrew-400-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Assistant;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/assistant-hebrew-600-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Assistant;font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/assistant-hebrew-700-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Assistant;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/assistant-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Assistant;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/assistant-latin-600-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Assistant;font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/assistant-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+html[data-ds]{--r-s:10px;--r-m:14px;--r-l:20px;--dur:.16s;--font-ui:"IBM Plex Sans Hebrew","Noto Sans Hebrew",Heebo,Roboto,Arial,sans-serif;--font-num:var(--font-ui);--inc:#2f7a56;--exp:#b8431f;--warn:#8a5a00;--bad:#b3261e}
+html[data-ds=a]{--bg:#222427;--card:#2c2f33;--ink:#eef0f2;--acc:#f0764c;--acc2:#43312d;--onacc:#1b0f09;--mut:#bbbdbf;--line:#3d4146;--inc:#6cc49a;--exp:#f39a7c;--warn:#f0c15a;--bad:#ff8c80;
+ --srf-0:#1a1b1e;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#363a3f;--glass:rgba(34,36,39,.72);--blur:14px;
+ --metal:repeating-linear-gradient(90deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px);--hl:rgba(255,255,255,.09);
+ --elev-1:inset 0 1px 0 var(--hl),0 1px 0 rgba(0,0,0,.5),0 6px 14px -8px rgba(0,0,0,.7);--elev-2:inset 0 1px 0 var(--hl),0 2px 0 rgba(0,0,0,.45),0 14px 28px -14px rgba(0,0,0,.8);--elev-3:inset 0 1px 0 var(--hl),0 22px 44px -18px rgba(0,0,0,.85);
+ --inset:inset 0 2px 4px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.25);--press:0 3px 0 rgba(0,0,0,.5);--sh:var(--elev-1);color-scheme:dark}
+html[data-ds=b]{--bg:#f3f1ee;--card:#fbfaf8;--ink:#2f2f31;--acc:#b23c17;--acc2:#ebd5cd;--onacc:#ffffff;--mut:#5d5b58;--line:#e2ddd6;--inc:#2f6f55;--exp:#a93d1b;
+ --r-s:12px;--r-m:18px;--r-l:26px;--font-ui:Assistant,"Noto Sans Hebrew",Arial,sans-serif;--font-num:Rubik,Assistant,sans-serif;
+ --srf-0:#e9e6e1;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#ffffff;--glass:rgba(243,241,238,.8);--blur:12px;--metal:none;--hl:rgba(255,255,255,.95);--lo:rgba(140,124,106,.30);
+ --elev-1:5px 5px 12px var(--lo),-5px -5px 12px var(--hl);--elev-2:8px 9px 18px var(--lo),-7px -7px 16px var(--hl);--elev-3:12px 14px 28px var(--lo),-10px -10px 24px var(--hl);
+ --inset:inset 3px 3px 7px var(--lo),inset -3px -3px 7px var(--hl);--press:inset 0 -3px 0 rgba(0,0,0,.14);--sh:var(--elev-1);color-scheme:light}
+html[data-ds=c]{--bg:#e3e6e9;--card:#f5f6f7;--ink:#1f2124;--acc:#ab3815;--acc2:#dccbc8;--onacc:#ffffff;--mut:#4f5256;--line:#cdd2d7;--inc:#2a6b4c;--exp:#a83c1b;
+ --srf-0:#d4d8dc;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#ffffff;--glass:rgba(240,242,244,.72);--blur:14px;
+ --metal:repeating-linear-gradient(90deg,rgba(255,255,255,.18) 0 1px,transparent 1px 3px);--hl:rgba(255,255,255,.95);
+ --elev-1:inset 0 1px 0 var(--hl),0 1px 0 rgba(30,34,40,.12),0 6px 14px -8px rgba(30,34,40,.35);--elev-2:inset 0 1px 0 var(--hl),0 2px 0 rgba(30,34,40,.12),0 14px 28px -14px rgba(30,34,40,.4);--elev-3:inset 0 1px 0 var(--hl),0 22px 44px -18px rgba(30,34,40,.45);
+ --inset:inset 0 2px 4px rgba(30,34,40,.12),inset 0 0 0 1px rgba(30,34,40,.08);--press:0 3px 0 rgba(30,34,40,.28);--sh:var(--elev-1);color-scheme:light}
+/* DS: רכיבים משותפים (D1) – מראה בלבד, בלי לשנות מידות שבדיקות מודדות. גובר על הכללים הישנים בזכות html[data-ds] */
+html[data-ds] body{font-family:var(--font-ui);background:var(--metal),var(--bg);background-attachment:fixed;letter-spacing:0}
+html[data-ds] .k b,html[data-ds] .li .a,html[data-ds] .hero .big,html[data-ds] .amt,html[data-ds] td.n,html[data-ds] .msbar b{font-family:var(--font-num);font-variant-numeric:tabular-nums lining-nums;letter-spacing:-.01em}
+html[data-ds] h2{font-weight:700;letter-spacing:-.015em}html[data-ds] h3{font-weight:600}
+html[data-ds] .top{background:var(--glass);border-bottom:1px solid var(--line);box-shadow:0 1px 0 var(--hl) inset}
+html[data-ds] .top .ttl{font-weight:700}
+html[data-ds] .ib{border-radius:var(--r-m);background:var(--card);border-color:var(--line);box-shadow:var(--elev-1);transition:transform var(--dur)}
+html[data-ds] .ib:active{transform:translateY(1px)}
+html[data-ds] .card{border-radius:var(--r-l);border-color:var(--line);box-shadow:var(--elev-2);contain:content}
+html[data-ds] .sec h3{font-size:1rem;font-weight:700}
+html[data-ds] .btn{border-radius:var(--r-m);font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),var(--press);transition:transform var(--dur),box-shadow var(--dur)}
+html[data-ds] .btn:active:not([disabled]){transform:translateY(2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+html[data-ds] .btn.g{background:var(--card);border-color:var(--line);color:var(--acc);box-shadow:var(--elev-1)}
+html[data-ds] .btn.r{box-shadow:inset 0 1px 0 rgba(255,255,255,.25),var(--press)}
+html[data-ds] .btn.s{border-radius:var(--r-s)}
+html[data-ds] .chip{border:1px solid var(--line);background:var(--card);box-shadow:var(--elev-1);font-weight:600;transition:transform var(--dur)}
+html[data-ds] .chip.on{background:var(--acc);border-color:var(--acc);color:var(--onacc);box-shadow:var(--inset)}
+html[data-ds] .li{border-radius:var(--r-m);border-color:var(--line);box-shadow:var(--elev-1);contain:layout paint;transition:transform var(--dur)}
+html[data-ds] .li:active{transform:translateY(1px)}
+html[data-ds] .li.inc,html[data-ds] .li.exp{border-inline-start-width:4px}
+html[data-ds] .li .m b{font-weight:600}html[data-ds] .li .a{font-weight:700}
+html[data-ds] .kg .k{border-radius:var(--r-m);border-color:var(--line);box-shadow:var(--elev-1)}
+html[data-ds] .k b{font-weight:700}
+html[data-ds] .hero{border-radius:var(--r-l);box-shadow:var(--elev-3),inset 0 1px 0 rgba(255,255,255,.22)}
+html[data-ds] .tag{border-width:1px;font-weight:600}
+html[data-ds] .mh{font-weight:700;border-bottom-color:var(--line)}
+html[data-ds] label.f{font-weight:600}html[data-ds] label.f>span{color:var(--mut);font-weight:600}
+html[data-ds] input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]),html[data-ds] select,html[data-ds] textarea{border:1px solid var(--line);border-radius:var(--r-s);background:var(--srf-0);box-shadow:var(--inset);transition:border-color var(--dur),box-shadow var(--dur)}
+html[data-ds=b] input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]),html[data-ds=b] select,html[data-ds=b] textarea{background:var(--bg);border-color:transparent}
+html[data-ds] input:focus,html[data-ds] select:focus,html[data-ds] textarea:focus{border-color:var(--acc);outline:none;box-shadow:var(--inset),0 0 0 3px var(--acc2)}
+html[data-ds] :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+html[data-ds] .opt{border-radius:var(--r-m);border:1px solid var(--line);box-shadow:var(--elev-1)}
+html[data-ds] .opt.add{border-style:dashed;border-color:var(--acc);box-shadow:none;background:transparent}
+html[data-ds] .tile{border-radius:var(--r-l);border-width:1px;box-shadow:var(--elev-2)}
+html[data-ds] .tw{border-radius:var(--r-m);border-color:var(--line);box-shadow:var(--elev-1)}
+html[data-ds] th{font-weight:600}
+html[data-ds] dialog{border-radius:var(--r-l);border-color:var(--line);box-shadow:var(--elev-3)}
+html[data-ds] dialog::backdrop{background:rgba(10,11,12,.55)}
+html[data-ds] .sheet .sh{background:var(--glass);box-shadow:0 1px 0 var(--hl) inset}
+html[data-ds] .bar{background:var(--glass);border-top:1px solid var(--line);box-shadow:inset 0 1px 0 var(--hl),0 -10px 26px -18px rgba(0,0,0,.5)}
+html[data-ds] .bar button{font-weight:600}
+html[data-ds] .bar button.on::after{height:2px;width:18px}
+html[data-ds] .bar .fab{border-radius:20px;border-color:var(--bg);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 4px 0 rgba(0,0,0,.35),0 12px 20px -8px rgba(0,0,0,.5)}
+html[data-ds=b] .bar .fab{border-radius:50%;box-shadow:0 0 0 6px var(--bg),var(--elev-2),inset 0 -4px 0 rgba(0,0,0,.15)}
+html[data-ds] .toast{border-radius:var(--r-m);background:var(--ink);color:var(--bg);box-shadow:var(--elev-3)}
+html[data-ds] .pbar{background:var(--srf-0);box-shadow:var(--inset)}
+html[data-ds] .ban{border-radius:var(--r-m);border-width:1px;box-shadow:var(--elev-1)}
+html[data-ds] .msbar{border-radius:var(--r-l);border-width:1px;background:var(--glass);box-shadow:var(--elev-3)}
+@supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){html[data-ds] .top,html[data-ds] .bar{-webkit-backdrop-filter:blur(var(--blur)) saturate(1.2);backdrop-filter:blur(var(--blur)) saturate(1.2)}}
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){html[data-ds] .top,html[data-ds] .bar{background:var(--bg)}}
+html.hc[data-ds] .card,html.hc[data-ds] .li,html.hc[data-ds] .btn,html.hc[data-ds] .chip{box-shadow:none;border-width:2px}
+/* בורר הערכה (הגדרות + מיתוג): תצוגה זעירה של כל ערכה */
+.dsp{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px;margin:8px 0}
+.dsp button{min-height:44px;padding:6px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;font:inherit;font-weight:600;font-size:.85rem;display:flex;flex-direction:column;align-items:stretch;gap:4px;text-align:center}
+.dsp button[aria-checked=true]{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+.dsp .mini{display:block;height:34px;border-radius:8px;background:var(--bg);border:1px solid var(--line);position:relative;overflow:hidden}
+.dsp .mini i{position:absolute;inset:7px 8px auto 8px;height:9px;border-radius:4px;background:var(--card)}.dsp .mini b{position:absolute;inset:auto 8px 6px auto;width:22px;height:9px;border-radius:4px;background:var(--acc)}
+@media (prefers-reduced-motion:reduce){html[data-ds] *,html[data-ds] *::before,html[data-ds] *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 #lglogo{display:none;width:42px;height:42px;border-radius:50%;background:#fff center/110% no-repeat;border:1px solid var(--line);flex:none}
 html[data-th=logo] #lglogo,html[data-th=logod] #lglogo,html[data-th=bake] #lglogo,html[data-th=baked] #lglogo,html[data-th=fresh] #lglogo,html[data-th=freshd] #lglogo{display:block}
 html[data-fs="2"]{--fs:18px}html[data-fs="3"]{--fs:21px}
@@ -124,35 +219,8 @@ body.wk .bar,body.wk header [aria-label="הגדרות"]{display:none!important}b
 
 /* ===== מסך כניסה ===== */
 body.gate>*:not(#gate){display:none!important}
-body.gate{padding:0;background:#16191b}
-#gate{position:fixed;inset:0;z-index:9999;overflow:auto;background:#16191b;color:#1d2a2c;font-family:Heebo,Assistant,Rubik,"Segoe UI",Roboto,"Noto Sans Hebrew",Arial,sans-serif;-webkit-overflow-scrolling:touch}
-#gate .gbg{position:fixed;inset:0;overflow:hidden;pointer-events:none}
-#gate .gbg i{position:absolute;border-radius:50%;border:1.5px solid rgba(255,255,255,.07)}
-#gate .gbg i:nth-child(1){width:560px;height:560px;left:-220px;top:-200px;border-color:rgba(214,82,48,.35)}
-#gate .gbg i:nth-child(2){width:360px;height:360px;left:-120px;top:-100px}
-#gate .gbg i:nth-child(3){width:620px;height:620px;right:-300px;bottom:-280px;border-color:rgba(214,82,48,.22)}
-#gate .gwrap{position:relative;min-height:100%;display:flex;align-items:center;justify-content:center;padding:calc(72px + env(safe-area-inset-top)) 18px calc(28px + env(safe-area-inset-bottom))}
-#gate .gcard{position:relative;width:100%;max-width:430px;background:#fbf8f2;border-radius:28px;padding:84px 26px 22px;box-shadow:0 30px 60px -20px rgba(0,0,0,.6);border-top:5px solid #c9442a}
-#gate .glogo{position:absolute;top:-62px;left:50%;transform:translateX(-50%);width:124px;height:124px;background:#fff;border-radius:34px;display:grid;place-items:center;box-shadow:0 14px 30px -10px rgba(0,0,0,.55);border:5px solid #16191b}
-#gate .glogo img{width:112px;height:112px;border-radius:26px;display:block}
-#gate .gk{margin:0 0 4px;text-align:center;font-size:.82rem;font-weight:700;letter-spacing:.14em;color:#c9442a;text-transform:uppercase}
-#gate .gh{margin:0 0 22px;text-align:center;font-size:1.5rem;font-weight:500;line-height:1.3;color:#1d2a2c}
-#gate .gh b{font-weight:900;font-size:1.7rem}
-#gate .gf{display:block;margin:0 0 14px;position:relative}
-#gate .gf span{display:block;font-size:.8rem;font-weight:700;color:#5f6b69;margin:0 4px 5px}
-#gate .gf input{width:100%;height:54px;border:1.5px solid #d9d2c3;border-radius:14px;background:#fff;padding:0 16px;font-size:1.05rem;text-align:right;outline:none;transition:border-color .15s,box-shadow .15s}
-#gate .gf input:focus{border-color:#c9442a;box-shadow:0 0 0 4px rgba(201,68,42,.14)}
-#gate .geye{position:absolute;left:6px;bottom:5px;width:44px;height:44px;border:0;background:transparent;color:#5f6b69;display:grid;place-items:center;cursor:pointer;border-radius:12px}
-#gate .geye svg{width:22px;height:22px}
-#gate .gf:has(.geye) input{padding-left:52px}
-#gate .gerr{min-height:1.4em;margin:0 2px 8px;color:#b3261e;font-weight:700;font-size:.9rem;text-align:center}#gate .gerr.ginfo{color:#1d5b3a}
-#gate .gbtn{width:100%;height:56px;border:0;border-radius:16px;background:#c9442a;color:#fff;font-size:1.1rem;font-weight:800;letter-spacing:.02em;cursor:pointer;box-shadow:0 10px 20px -10px rgba(201,68,42,.9);transition:transform .1s,opacity .15s}
-#gate .gbtn:active{transform:scale(.985)}
-#gate .gbtn:disabled{opacity:.7}
-#gate .gbtn.ld span::after{content:"";display:inline-block;width:14px;height:14px;margin-right:10px;vertical-align:-2px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:gsp .8s linear infinite}
+body.gate{padding:0;background:var(--bg)}
 @keyframes gsp{to{transform:rotate(360deg)}}
-#gate .gfoot{margin:18px 0 0;text-align:center;font-size:.76rem;color:#7a8583}
-@media(max-height:620px){#gate .gwrap{align-items:flex-start}}
 
 .fbsplit{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:start}
 .fbsplit.one{display:block}
@@ -183,7 +251,104 @@ body.gate{padding:0;background:#16191b}
 .fbbar .v{font-size:.8rem;font-weight:700;min-height:1.1em}.fbbar .x{font-size:.8rem;color:var(--mut);margin-top:3px}
 
 .lw{display:flex;gap:6px;align-items:stretch;margin:0 0 8px}.lw>.li{flex:1;min-width:0;margin:0}.fa{display:flex;gap:4px;align-items:center;flex:none}.fa .ib{width:44px;height:44px;border-radius:12px}.fa .ib svg{width:20px;height:20px}
-.msbar{position:fixed;left:8px;right:8px;bottom:calc(104px + env(safe-area-inset-bottom));z-index:25;max-width:560px;margin:0 auto;background:var(--card);border:2px solid var(--acc);border-radius:16px;padding:10px 12px;box-shadow:0 8px 24px -10px rgba(0,0,0,.5)}.msbar .note{margin:6px 0 0}.mscb{font-size:1.5rem;line-height:1;flex:none;color:var(--acc)}
+.msbar{position:fixed;left:8px;right:8px;bottom:calc(104px + env(safe-area-inset-bottom));z-index:25;max-width:560px;margin:0 auto;background:var(--card);border:2px solid var(--acc);border-radius:16px;padding:10px 12px;box-shadow:0 8px 24px -10px rgba(0,0,0,.5)}.msbar .note{margin:6px 0 0}.mscb{font-size:1.5rem;line-height:1;flex:none;color:var(--acc);display:inline-flex;align-items:center}.mscb svg{width:24px;height:24px;display:block}
+/* DS:D2 – כניסה, בית, כותרת, ניווט, עוד, נעילה ביומטרית, השהיה. רק מראה; כל הצבעים מה-tokens */
+#gate{position:fixed;inset:0;z-index:9999;overflow:auto;background:var(--metal),var(--bg);color:var(--ink);font-family:var(--font-ui);-webkit-overflow-scrolling:touch}
+#gate .gbg{display:none}
+#gate .gwrap{position:relative;min-height:100%;display:flex;align-items:center;justify-content:center;padding:calc(76px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom))}
+#gate .gcard{position:relative;width:100%;max-width:430px;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--acc);border-radius:var(--r-l);padding:76px 22px 20px;box-shadow:var(--elev-3)}
+#gate .glogo{position:absolute;top:-62px;left:50%;transform:translateX(-50%);width:120px;height:120px;background:#fff;border-radius:32px;display:grid;place-items:center;border:4px solid var(--bg);box-shadow:var(--elev-3)}
+#gate .glogo img{width:108px;height:108px;border-radius:24px;display:block}
+#gate .gk{margin:0 0 4px;text-align:center;font-size:.84rem;font-weight:700;letter-spacing:.04em;color:var(--acc)}
+#gate .gh{margin:0 0 20px;text-align:center;font-size:1.4rem;font-weight:600;line-height:1.3;color:var(--ink)}
+#gate .gh b{font-weight:700;font-size:1.75rem;display:block;margin-top:2px}
+#gate .gf{display:block;margin:0 0 14px;position:relative}
+#gate .gf span{display:block;font-size:.84rem;font-weight:600;color:var(--mut);margin:0 4px 6px}
+#gate .gf input{width:100%;height:54px;border:1px solid var(--line);border-radius:var(--r-m);background:var(--srf-0);box-shadow:var(--inset);color:var(--ink);padding:0 16px;font-size:1.05rem;text-align:right;outline:none;transition:border-color var(--dur),box-shadow var(--dur)}
+#gate .gf input:focus{border-color:var(--acc);box-shadow:var(--inset),0 0 0 3px var(--acc2)}
+#gate .geye{position:absolute;left:5px;bottom:5px;width:44px;height:44px;border:0;background:transparent;color:var(--mut);display:grid;place-items:center;cursor:pointer;border-radius:var(--r-s)}
+#gate .geye svg{width:22px;height:22px}
+#gate .gf:has(.geye) input{padding-left:54px}
+#gate .gerr{min-height:1.4em;margin:0 2px 8px;color:var(--bad);font-weight:700;font-size:.9rem;text-align:center}#gate .gerr.ginfo{color:var(--inc)}
+#gate .gbtn{width:100%;min-height:56px;border:0;border-radius:var(--r-m);background:var(--acc);color:var(--onacc);font-size:1.1rem;font-weight:700;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),var(--press);transition:transform var(--dur),opacity var(--dur)}
+#gate .gbtn:active{transform:translateY(2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+#gate .gbtn:disabled{opacity:.7}
+#gate .gbtn.ld span::after{content:"";display:inline-block;width:14px;height:14px;margin-right:10px;vertical-align:-2px;border:2.5px solid rgba(127,127,127,.45);border-top-color:currentColor;border-radius:50%;animation:gsp .8s linear infinite}
+#gate .gfoot{margin:14px 0 0;text-align:center;font-size:.78rem;color:var(--mut)}
+#gate .glink{min-height:44px;color:var(--acc)}
+@media(max-height:620px){#gate .gwrap{align-items:flex-start}}
+/* נעילה ביומטרית והשהיית עסק */
+#bzlk,#susp{background:var(--metal),var(--bg);font-family:var(--font-ui)}
+#bzlk .card,#susp .card{border-radius:var(--r-l);border-top:3px solid var(--acc);box-shadow:var(--elev-3);padding:26px 20px 20px}
+#susp .card{border-top-color:var(--warn)}
+#bzlk .card img{box-shadow:var(--elev-2);border:3px solid var(--card);outline:1px solid var(--line)}
+#bzlk h2,#susp h2{margin:0 0 6px;font-weight:700}
+/* כותרת */
+html[data-ds] .top .ttl{font-size:1.25rem;font-weight:700;line-height:1.15}
+html[data-ds] .top .ttl small{font-size:.76rem;font-weight:600;color:var(--mut)}
+html[data-ds] .top #lglogo{box-shadow:var(--elev-1)}
+/* בית: כרטיס רווח */
+html[data-ds] #hmain{position:relative;overflow:hidden;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-l);box-shadow:var(--elev-3);padding:14px 14px 14px}
+html[data-ds] #hmain::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--acc)}
+html[data-ds] #hmain small{color:var(--mut);opacity:1;font-weight:600}
+html[data-ds] #hmain .hnv{width:44px;height:44px;background:var(--srf-0);color:var(--ink);border:1px solid var(--line);box-shadow:var(--elev-1)}
+html[data-ds] #hmain .big{font-size:2.6rem;font-weight:700;line-height:1.05;margin:6px 0 2px;letter-spacing:-.02em;color:var(--ink)}
+html[data-ds] #hmain .big.pos{color:var(--inc)}html[data-ds] #hmain .big.neg{color:var(--exp)}
+html[data-ds] #hmain .pill{background:var(--acc2);color:var(--ink);font-weight:600}
+html[data-ds] #hmain .two{gap:10px;margin-top:12px}
+html[data-ds] #hmain .two>button{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--inset);padding:10px 12px;min-height:56px;transition:transform var(--dur)}
+html[data-ds] #hmain .two>button:active{transform:translateY(1px)}
+html[data-ds] #hmain .two>button b{font-size:1.3rem;font-weight:700;margin-top:2px}
+html[data-ds] #hmain .two>[data-v=inc] b{color:var(--inc)}html[data-ds] #hmain .two>[data-v=exp] b{color:var(--exp)}
+html[data-ds] #hcards{gap:8px}
+html[data-ds] #hcards .k{padding:10px 9px;min-width:0}
+html[data-ds] #hcards .k small{font-size:.76rem;line-height:1.2}
+html[data-ds] #hcards .k b{font-size:clamp(.78rem,3.7vw,.95rem);overflow:hidden;text-overflow:ellipsis}
+/* פעולות מהירות: רשימה מדורגת */
+html[data-ds] .hacts{display:flex;flex-direction:column;flex-wrap:nowrap;gap:0;border:1px solid var(--line);border-radius:var(--r-l);background:var(--card);box-shadow:var(--elev-1);overflow:hidden}
+html[data-ds] .hacts .chip{width:100%;min-height:52px;padding:0 16px;border:0;border-radius:0;box-shadow:none;background:transparent;justify-content:space-between;font-size:1rem;font-weight:600;text-align:right}
+html[data-ds] .hacts .chip+.chip{border-top:1px solid var(--line)}
+html[data-ds] .hacts .chip::after{content:"";width:8px;height:8px;border-left:2px solid var(--mut);border-bottom:2px solid var(--mut);transform:rotate(45deg);margin-inline-end:4px;flex:none}
+html[data-ds] .hacts .chip:active{background:var(--srf-0)}
+/* ניווט תחתון */
+html[data-ds] .bar button{min-height:56px}
+html[data-ds] .bar button:not(.fab):active{background:var(--srf-0)}
+html[data-ds] .bar button.on svg{stroke-width:2.4}
+html[data-ds] .bar button.on::after{height:3px;width:20px}
+/* עוד: רשימה מדורגת */
+html[data-ds] .mlist{border:1px solid var(--line);border-radius:var(--r-l);background:var(--card);box-shadow:var(--elev-1);overflow:hidden}
+html[data-ds] .mlist .opt{margin:0;border:0;border-radius:0;box-shadow:none;background:transparent;min-height:64px;padding:8px 16px}
+html[data-ds] .mlist .opt+.opt{border-top:1px solid var(--line)}
+html[data-ds] .mlist .opt:active{background:var(--srf-0)}
+html[data-ds] .mlist .opt small{font-size:.82rem;font-weight:400}
+/* DS:D3 – הכנסת חשבונית: אריח ראשי גדול + אריחים קטנים בשורה */
+.sci{width:24px;height:24px;flex:none}
+html[data-ds] .scanhero{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:clamp(190px,38vh,360px);padding:20px 16px;margin:0 0 12px;border:1px solid var(--line);border-radius:var(--r-l);background:var(--card);color:var(--ink);box-shadow:var(--elev-2);text-align:center;overflow:hidden;font-weight:400}
+html[data-ds] .scanhero::before{content:"";position:absolute;inset:12px;pointer-events:none;opacity:.9;background:linear-gradient(var(--acc),var(--acc)) top left/26px 3px no-repeat,linear-gradient(var(--acc),var(--acc)) top left/3px 26px no-repeat,linear-gradient(var(--acc),var(--acc)) top right/26px 3px no-repeat,linear-gradient(var(--acc),var(--acc)) top right/3px 26px no-repeat,linear-gradient(var(--acc),var(--acc)) bottom left/26px 3px no-repeat,linear-gradient(var(--acc),var(--acc)) bottom left/3px 26px no-repeat,linear-gradient(var(--acc),var(--acc)) bottom right/26px 3px no-repeat,linear-gradient(var(--acc),var(--acc)) bottom right/3px 26px no-repeat}
+html[data-ds] .scanhero .shc{display:grid;place-items:center;width:84px;height:84px;border-radius:50%;background:var(--acc);color:var(--onacc);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),var(--press),var(--elev-2)}
+html[data-ds] .scanhero .shc svg{width:38px;height:38px}
+.shc-u{display:none}html.bzd .shc-c{display:none}html.bzd .shc-u{display:block}
+html[data-ds] .scanhero b{font-size:1.3rem;font-weight:700;line-height:1.2}
+html[data-ds] .scanhero small{color:var(--mut);font-size:.88rem;font-weight:400;line-height:1.3}
+html[data-ds] .scanhero:active{transform:translateY(1px)}
+html[data-ds] .scanhero.sm{display:grid;grid-template-columns:auto 1fr;column-gap:12px;row-gap:0;align-items:center;justify-items:start;min-height:76px;padding:12px 14px;text-align:start;box-shadow:var(--elev-1)}
+html[data-ds] .scanhero.sm::before{display:none}
+html[data-ds] .scanhero.sm .shc{grid-row:1/3;width:52px;height:52px}
+html[data-ds] .scanhero.sm .shc svg{width:26px;height:26px}
+html[data-ds] .scanhero.sm b{font-size:1.05rem;grid-column:2}html[data-ds] .scanhero.sm small{grid-column:2}
+.scrow{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px;margin:0 0 12px}
+.scrow.one{grid-auto-flow:row}
+.scant{min-height:84px;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:10px 6px;border:1px solid var(--line);border-radius:var(--r-m);background:var(--card);color:var(--ink);box-shadow:var(--elev-1);font:inherit;font-weight:600;font-size:.84rem;line-height:1.2;text-align:center;cursor:pointer}
+.scant .sci{color:var(--acc)}
+.scant:active{transform:translateY(1px)}
+.scrow.one .scant{flex-direction:row;min-height:56px;gap:10px;font-size:1rem}
+html[data-ds] .scbatch{min-height:48px;margin:0 0 12px;font-size:.92rem;font-weight:600;line-height:1.25}
+html[data-ds] .scbatch .sci{width:20px;height:20px}
+.scth{flex-wrap:wrap;margin-bottom:10px}
+.scimg{width:72px;height:96px;object-fit:cover;border:1px solid var(--line);border-radius:var(--r-s);display:block;background:var(--srf-0)}
+html[data-ds] .scdel{min-height:44px;margin-top:4px;padding:0 12px}
+.scnote{display:flex;gap:8px;align-items:flex-start;font-weight:700}.scnote .sci{width:20px;height:20px;margin-top:1px}
+.scnote.bad{color:var(--bad)}.scnote.acc{color:var(--acc)}.scnote.ok{color:var(--inc)}
 </style>
 <script src="xlsx.full.min.js"></script>
 <script src="orders/site-backend.js"></script>
@@ -467,7 +632,7 @@ function render(dir,keep){
  const root=NAV[0].v;$$('.bar [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===root));
  if(keep)window.scrollTo(0,y);else window.scrollTo(0,0);
  if(dir){const m=$('#main');m.classList.remove('sw');void m.offsetWidth;m.classList.add('sw')}
- document.documentElement.dataset.th=themeNow();document.documentElement.dataset.fs=S.fs||1;try{bzSkin()}catch(e){}
+ document.documentElement.dataset.th=themeNow();document.documentElement.dataset.fs=S.fs||1;try{bzSkin()}catch(e){dsApply()}
 }
 const rerender=()=>render(0,true);
 /* החלקה לחזרה: ימין→שמאל */
@@ -530,8 +695,8 @@ function sheetDraw(){
  else if(A.step==='scan'){
   const n=(A.pg||[]).length;
   body=`${typeof bqBanner==='function'?bqBanner():''}<p class="note" style="margin:4px 0 12px">סרוק או העלה את החשבונית, והאפליקציה תזהה את הספק, המספר, התאריך והסכום. חשבונית של כמה עמודים: הוסף את כל העמודים ואז לחץ "זהה". אפשר לבדוק ולתקן לפני השמירה.</p>
-  ${n?`<div class="row" style="flex-wrap:wrap;margin-bottom:10px">${A.pg.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="scanDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div>${bzF('scan')?`<button class="btn w" style="margin-bottom:10px" data-a="scanGo">זהה פרטים מ-${n} ${n>1?'עמודים':'עמוד'}</button><button class="btn g w" style="margin-bottom:10px" data-a="scanQ">הוסף לתור וצלם חשבונית נוספת</button>`:''}`:''}
-  <label class="btn ${n?'g':''} w" style="cursor:pointer;margin-bottom:10px">📷 ${n?'צלם עמוד נוסף':'צלם חשבונית'}<input type="file" accept="image/*" capture="environment" data-c="scanpick" hidden></label><label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 ${n?'הוסף עמודים מהגלריה':'העלה קובץ מהגלריה'}<input type="file" accept="image/*" multiple data-c="scanpick" hidden></label>${bzF('scan')?'<label class="btn g w" style="cursor:pointer;margin-bottom:10px">🗂 כמה חשבוניות מהגלריה (כל תמונה או PDF היא חשבונית)<input type="file" accept="image/*,application/pdf" multiple data-c="scanmulti" hidden></label>':''}<button class="btn g w" data-a="scanManual">המשך ידני</button>`}
+  ${n?`<div class="row scth">${A.pg.map((u,i)=>`<div style="text-align:center"><img class="scimg" src="${u}" alt="עמוד ${i+1}"><button type="button" class="chip scdel" data-a="scanDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div>${bzF('scan')?`<button class="btn w" style="margin-bottom:10px" data-a="scanGo">זהה פרטים מ-${n} ${n>1?'עמודים':'עמוד'}</button><button class="btn g w" style="margin-bottom:10px" data-a="scanQ">הוסף לתור וצלם חשבונית נוספת</button>`:''}`:''}
+  ${scHero(n?'צלם עמוד נוסף':'צלם חשבונית','מזהה ספק, מספר, תאריך וסכום אוטומטית','<input type="file" accept="image/*" capture="environment" data-c="scanpick" hidden>',n)}<div class="scrow">${scTile('img',n?'הוסף מהגלריה':'העלה מהגלריה','<input type="file" accept="image/*" multiple data-c="scanpick" hidden>')}${bzF('scan')?scTile('pdf','כמה חשבוניות','<input type="file" accept="image/*,application/pdf" multiple data-c="scanmulti" hidden>','כמה חשבוניות מהגלריה (כל תמונה או PDF היא חשבונית)'):''}${scBtn('pen','המשך ידני','data-a="scanManual"')}</div>`}
  else if(A.step==='sub'){
   const L=subsOf(c.id);
   body=L.map(x=>`<button class="opt" data-a="pick" data-k="sub" data-v="${x.id}"><span>${esc(x.name)}${x.cat&&c.beh==='sup'?(bsum(x.id)?`<small>פתוח לתשלום ${ils(bsum(x.id))}</small>`:''):''}</span>${ico('chev')}</button>`).join('')||`<p class="empty">עדיין אין ${subWord(c)||'פריטים'} בקטגוריה הזאת. הוסף את הראשון:</p>`;
@@ -632,13 +797,13 @@ ACT.txDel=el=>{const id=el.dataset.id,t1=S.tx.find(x=>x.id===id);if(t1&&(t1.used
  if(t&&t.link){const inv=S.tx.find(x=>x.id===t.link);if(inv)inv.pays=(inv.pays||[]).filter(p=>p.cc!==t.id)}
  S.tx=S.tx.filter(x=>x.id!==id);Object.keys(S.fixOk).forEach(k=>{if(S.fixOk[k].e===id)delete S.fixOk[k]});S.loans.forEach(l=>{Object.keys(l.paid||{}).forEach(k=>{if(l.paid[k].e===id)delete l.paid[k]})});
  save();rerender();toast('נמחק')},'מחק')};
-ACT.delPay=el=>{const t=S.tx.find(x=>x.id===el.dataset.id);if((t.pays||[]).some(p=>p.id===el.dataset.p&&p.crof))return toast('זה קיזוז זיכוי – לביטול השתמשו ב"ביטול הסגירה כולה"');if(t.tgrp&&(t.pays||[]).some(p=>p.id===el.dataset.p&&p.grp===t.tgrp))return toast('התשלום נוצר מצילום העברה – לביטול השתמשו ב"ביטול ההעברה כולה"');t.pays=t.pays.filter(p=>p.id!==el.dataset.p);save();txDlg(t.id);rerender()};
+ACT.delPay=el=>{const t=S.tx.find(x=>x.id===el.dataset.id);if((t.pays||[]).some(p=>p.id===el.dataset.p&&p.crof))return toast('זה קיזוז זיכוי – לביטול השתמשו ב"ביטול הסגירה כולה"');if(t.tgrp&&(t.pays||[]).some(p=>p.id===el.dataset.p&&p.grp===t.tgrp))return toast('התשלום נוצר מצילום העברה – לביטול השתמשו ב"ביטול ההעברה כולה"');if((t.pays||[]).some(p=>p.id===el.dataset.p&&p.grp))return toast('התשלום שייך לסגירה משותפת – לביטול השתמשו ב"ביטול הסגירה כולה"');const id=t.id,pid=el.dataset.p;ask('למחוק את התשלום?',()=>{const x=S.tx.find(z=>z.id===id);if(!x)return;x.pays=(x.pays||[]).filter(p=>p.id!==pid);save();closeDlg();txDlg(id);rerender()},'מחק')};
 /* ===== סגירת תשלום ===== */
 ACT.payDlg=el=>payDlg(el.dataset.id);
 function payDlg(id){const t=S.tx.find(x=>x.id===id);closeDlg();
  dlg(`<h3>סגירת תשלום · ${esc(subName(t))}</h3><div class="card"><div class="note">חשבונית ${dfmt(t.date)}${t.inv?' · '+esc(t.inv):''} · חודש לתשלום ${mfmt(pmon(t))}</div><div class="row" style="justify-content:space-between"><span>סכום ${ils(t.amt)} · שולם ${ils(paid(t))}</span><b>יתרה ${ils(bal(t))}</b></div></div>
  <form data-f="paysave"><input type="hidden" name="id" value="${t.id}"><label class="f"><span>כמה משלמים עכשיו? (אפשר חלק)</span><input class="amt" name="a" inputmode="decimal" value="${bal(t)}" required></label>${dateF('תאריך התשלום','d',today())}${offSub(t)?offPayH(t):''}${pmF('m',offSub(t)?METHODS.concat('קיזוז'):METHODS,offSub(t)?'קיזוז':'',undefined,t)}<div class="row"><button class="btn grow">אשר תשלום</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)}
-FRM.paysave=async form=>{if(form.dataset.busy)return;const f=fd(form),t=S.tx.find(x=>x.id===f.id),a=pNum(f.a);
+FRM.paysave=async form=>{if(form.dataset.busy)return;const f=fd(form),t=S.tx.find(x=>x.id===f.id),a=pNum(f.a);if(!t||!msBrOk(t))return toast('אין לך הרשאה לחשבונית הזו');
  if(a==null||a<=0)return toast('סכום לא תקין');if(a>bal(t)+0.004)return toast('הסכום גדול מהיתרה ('+ils(bal(t))+')');if(!f.m)return toast('בחר אמצעי תשלום');
  if(f.m==='קיזוז'){const r=offPay(t.id,a,f.d);if(r!==true)return toast(r);closeDlg();rerender();return toast(bal(t)<0.005?'החשבונית נסגרה בקיזוז':'קוזז, נותרו '+ils(bal(t)))}
  if(f.m===METHODS[1]&&!cfDt(f.cdate))return toast('חסר תאריך פירעון לצ׳ק');let img='';if(f.m===METHODS[1]){form.dataset.busy='1';try{img=await chkImg(form)}catch(e){delete form.dataset.busy;return toast('שמירת צילום הצ׳ק נכשלה')}}
@@ -905,7 +1070,7 @@ const WCK=LK('lp-wck'),wckL=()=>{try{const a=JSON.parse(localStorage.getItem(WCK
 async function usWkAuto(type,fields){const U=US;if(type!=='check'||!U||!isW()||U.wca)return;const pg=U.pg||[];let v='';if(pg.length&&pg.every(g=>!g.pdf))v=packPages(pg.map(g=>g.u));else if(pg.length===1)v=pg[0].du;
  if(!v)return toast('אין צילום לשליחה');U.wca=1;
  try{const f=fields||{},key=trHash(v).slice(0,16),id='k'+key;usPane(0);
-  const done=()=>{U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>🖊 זוהה צ׳ק – נשלח למנהל</b><div class="note">המנהל ישייך אותו לחשבונית.</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">📷 סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)};
+  const done=()=>{U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>🖊 זוהה צ׳ק – נשלח למנהל</b><div class="note">המנהל ישייך אותו לחשבונית.</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">${sci('cam')}סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)};
   if(wckL().includes(id)||obGet().some(o=>o.id===id)){toast('הצ׳ק הזה כבר נשלח למנהל');return done()}
   const a=typeof f.amount==='number'&&f.amount>0?rnd(f.amount):0,low=!!(U.cls&&(U.cls.uncertainType||(U.cls.unsure||[]).length))||!a;
   const data={kind:'check',cat:'',catName:'',sub:'',subName:'',amt:a,date:usDate(f.date)||today(),note:'',inv:'',dn:false,no:s_(f.number).replace(/\D/g,'').slice(0,20),bank:stlScrub(s_(f.bank)).slice(0,60),cdate:usDate(f.date),payee:stlScrub(s_(f.payee)).slice(0,80),fid:key};if(low)data.low=1;
@@ -1105,10 +1270,10 @@ V.home=()=>{
  /* כרטיס ראשי: רווח/הפסד + הכנסות והוצאות החודש. הרשאות: עובד בלי "רואה הכנסות" לא רואה הכנסות; הוצאות רק ב-expR=true ('own'/false מוסתר כי הסכום הוא של כל העסק); רווח רק כשרואים את שניהם */
  const cI=!isW()||wp('incR'),cE=!isW()||wpE()==='all',df=rnd(inc-ex),pc=inc>0.004?Math.round(df/inc*100)+'%':'—';
  const mb=(a,l,v)=>`<button data-a="tab" data-v="${a}"><small>${l}</small><b>${ils(v)}</b></button>`;
- let h=`<div class="hero" id="hmain"><div class="row" style="justify-content:space-between"><button class="ib" style="background:rgba(255,255,255,.18);color:inherit;border-color:transparent" data-a="hm" data-d="-1" aria-label="חודש קודם">${ico('chev')}</button><div style="text-align:center"><small>${heb(today())}</small><br><b style="font-size:1.15rem">${mfmt(m)}</b></div><button class="ib" style="background:rgba(255,255,255,.18);color:inherit;border-color:transparent;transform:scaleX(-1)" data-a="hm" data-d="1" aria-label="חודש הבא">${ico('chev')}</button></div>`;
- if(cI&&cE)h+=`<small id="profit">${df<0?'הפסד החודש':'רווח החודש'}</small><span class="pill" title="רווחיות"><bdi dir="ltr">${pc}</bdi> רווחיות</span><div class="big">${ils(df)}</div>`;
- else if(cI)h+=`<small>הכנסות החודש</small><div class="big">${ils(inc)}</div>`;
- else if(cE)h+=`<small>הוצאות החודש</small><div class="big">${ils(ex)}</div>`;
+ let h=`<div class="hero" id="hmain"><div class="row" style="justify-content:space-between"><button class="ib hnv" data-a="hm" data-d="-1" aria-label="חודש קודם">${ico('chev')}</button><div style="text-align:center"><small>${heb(today())}</small><br><b style="font-size:1.15rem">${mfmt(m)}</b></div><button class="ib hnv" style="transform:scaleX(-1)" data-a="hm" data-d="1" aria-label="חודש הבא">${ico('chev')}</button></div>`;
+ if(cI&&cE)h+=`<small id="profit">${df<0?'הפסד החודש':'רווח החודש'}</small><span class="pill" title="רווחיות"><bdi dir="ltr">${pc}</bdi> רווחיות</span><div class="big ${df<0?'neg':'pos'}">${ils(df)}</div>`;
+ else if(cI)h+=`<small>הכנסות החודש</small><div class="big pos">${ils(inc)}</div>`;
+ else if(cE)h+=`<small>הוצאות החודש</small><div class="big neg">${ils(ex)}</div>`;
  if(cI&&cE)h+=`<div class="two">${mb('inc','הכנסות',inc)}${mb('exp','הוצאות',ex)}</div>`;
  h+=`</div>`;
  h+=homeCardsH(m);
@@ -1119,7 +1284,7 @@ V.home=()=>{
  {const aw=tdnL().aw.length;if(aw)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="tdn"><span class="tag t1">ממתין לחשבונית</span><span style="flex:1"><b>${aw}</b> תשלומים ששולמו מחכים לחשבונית</span>${ico('chev')}</button>`}
  h+=dpBan();if(bzF('cashClose')&&zcQN())h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="zc"><span class="tag t1">לאישור</span><span style="flex:1"><b>${zcQN()}</b> סגירות קופה מחכות לאישור שלך</span>${ico('chev')}</button>`; if(pend)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="pend"><span class="tag t1">לסיווג</span><span style="flex:1"><b>${pend}</b> תנועות מהמערכת הישנה מחכות לסיווג</span>${ico('chev')}</button>`;
  const ccp=S.ccx.filter(c=>!c.match&&!c.exp).length;if(ccp)h+=`<button class="ban" style="margin-top:12px" data-a="go" data-v="cc"><span class="tag t1">אשראי</span><span style="flex:1"><b>${ccp}</b> חיובי אשראי לא הותאמו</span>${ico('chev')}</button>`;
- h+=`<div class="chips scroll-x" style="margin-top:14px">${[['rep0','דוחות'],['imp','ייבוא'],['scan','סריקה'],['cmp','השוואות']].filter(x=>x[0]!=='scan'||bzF('scan')).map(([v,l])=>`<button class="chip" data-a="${v==='rep0'?'repAll':'go'}" data-v="${v}">${l}</button>`).join('')}</div>`;
+ h+=`<div class="chips hacts" style="margin-top:14px">${[['rep0','דוחות'],['imp','ייבוא'],['scan','סריקה'],['cmp','השוואות']].filter(x=>x[0]!=='scan'||bzF('scan')).map(([v,l])=>`<button class="chip" data-a="${v==='rep0'?'repAll':'go'}" data-v="${v}">${l}</button>`).join('')}</div>`;
  h+=`<div class="sec"><h3>לסגור ב${mfmt(m)}</h3><button class="btn s g" data-a="go" data-v="due">הכול</button></div>`;
  h+=D.open.sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6).map(t=>invRow(t)).join('')||`<div class="empty">${D.due>0?'כל החשבוניות של החודש שולמו ✓':'אין חשבוניות לתשלום החודש'}</div>`;
  const rec=live().filter(t=>inBr(t,brFil())).sort((a,b)=>(b.date.localeCompare(a.date))).slice(0,5);
@@ -1127,10 +1292,11 @@ V.home=()=>{
  if(!S.tx.length)h+=`<div class="empty">עוד אין תנועות. לחץ על ＋ כדי להוסיף את הראשונה.</div>`;
  return{t:bzNm(),s:'מבט על העסק',h}};
 ACT.hm=el=>{HM=addMon(HM,+el.dataset.d);rerender()};
-function txRow(t,showCat){
+function txRow(t,showCat){return dxRow(t,`<button class="li ${t.t}" data-a="tx" data-id="${t.id}">${txIn(t,showCat)}</button>`)}
+function txIn(t,showCat){
  const c=cat(t.cat),b=c.beh,sub=showCat?`${esc(c.name)} › ${esc(subName(t))}`:esc(t.desc&&b==='free'?t.desc:(t.note||''));
  const extra=b==='emp'?`משכורת ל־${mfmt(pmon(t))} · ${esc((t.pays[0]||{}).m||'לא צוין')}`:(b==='sup'||b==='fixed')?`לתשלום ${cfDt(t.due)?dfmt(t.due):mfmt(pmon(t))}${invS(t)}`:(showCat?esc(t.note||''):'');
- return dxRow(t,`<button class="li ${t.t}" data-a="tx" data-id="${t.id}"><div class="m"><b>${showCat?esc(subName(t)):dfmt(t.date)}</b><small>${showCat?esc(c.name)+' · '+dfmt(t.date):sub}${extra&&!showCat?' · '+extra:''}</small>${hasPay(t)||t.kind==='credit'||t.kind==='refund'?statusTag(t):''}${brTag(t)}${dxWhoSm(t)}</div><div class="a ${t.t==='inc'?'pos':''}">${t.t==='inc'?'+':''}${ils(t.kind==='refund'?t.rf:t.amt)}<small>${hasPay(t)&&bal(t)>0?'יתרה '+ils(bal(t)):''}</small></div></button>`)}
+ return `<div class="m"><b>${showCat?esc(subName(t)):dfmt(t.date)}</b><small>${showCat?esc(c.name)+' · '+dfmt(t.date):sub}${extra&&!showCat?' · '+extra:''}</small>${hasPay(t)||t.kind==='credit'||t.kind==='refund'?statusTag(t):''}${brTag(t)}${dxWhoSm(t)}</div><div class="a ${t.t==='inc'?'pos':''}">${t.t==='inc'?'+':''}${ils(t.kind==='refund'?t.rf:t.amt)}<small>${hasPay(t)&&bal(t)>0?'יתרה '+ils(bal(t)):''}</small></div>`}
 /* ---- חשבוניות לתשלום ---- */
 V.due=a=>{const o=a&&typeof a==='object'?a:{m:a},m=pMonth(o.m)||NOWM(),E=brFil(),td=today(),ok=t=>bal(t)>0.004&&inBr(t,E);
  /* באיחור – נכון להיום, לפי dueOf (B2) */const late=inv().filter(t=>ok(t)&&isLate(t,td)).sort((x,y)=>dueOf(x).localeCompare(dueOf(y))),lid=new Set(late.map(t=>t.id));
@@ -1158,7 +1324,7 @@ V.cat=id=>{const c=cat(id);if(!c)return{t:'?',h:'<div class="empty">הקטגור
  let h=periodBar();
  h+=`<div class="hero" style="background:${c.kind==='inc'?'var(--inc)':'var(--exp)'}"><small>${esc(c.name)} · ${esc(plabel())}</small><div class="big">${ils(total)}</div><small>${all.length} תנועות</small></div>`;
  h+=`<div class="row" style="margin-bottom:12px"><button class="btn grow" data-a="addTo" data-t="${c.kind}" data-cat="${c.id}">＋ הוספה</button><button class="btn g grow" data-a="rep" data-s="cat:${c.id}">${ico('doc')} דוח לקטגוריה</button></div>`;
- if(c.beh==='free'){h+=all.sort((a,b)=>b.date.localeCompare(a.date)).map(t=>txRow(t,true)).join('')||'<div class="empty">אין רישומים בתקופה</div>';return{t:c.name,s:c.kind==='inc'?'הכנסות':'הוצאות',h}}
+ if(c.beh==='free'){const A=all.sort((a,b)=>b.date.localeCompare(a.date)),sv=A.filter(msSees);msSync([],[],'',sv);h+=msTop()+(MS.on&&sv.length?`<button class="chip" style="margin:0 0 8px;min-height:44px" data-a="msAll" data-ids="${esc(sv.map(x=>x.id).join(','))}">${msAllL(sv.map(x=>x.id))}</button>`:'');h+=A.map(t=>MS.on&&msSees(t)?msBox(t,txIn(t,true)):txRow(t,true)).join('')||'<div class="empty">אין רישומים בתקופה</div>';h+=msFoot();return{t:c.name,s:c.kind==='inc'?'הכנסות':'הוצאות',h}}
  const subs=subsOf(id);
  h+=`<div class="sec"><h3>כרטיסים (${subs.length})</h3><button class="btn s ${SEL.on?'':'g'}" data-a="selMode">${SEL.on?'בטל בחירה':'בחירת כמה כרטיסים'}</button></div>`;
  if(SEL.on)h+=`<div class="card" style="border-color:var(--acc)"><div class="row"><b class="grow">נבחרו ${SEL.ids.length}</b><button class="btn s grow" data-a="rep" data-s="subs" ${SEL.ids.length?'':'disabled'}>${ico('doc')} דוח לנבחרים</button></div></div>`;
@@ -1189,8 +1355,9 @@ V.card=id=>{const s=subById(id);if(!s)return{t:'?',h:'<div class="empty">הכר�
  if(b==='sup'&&s.offset)h+=offCardH(s);
  h+=`<div class="row" style="margin-bottom:10px"><button class="btn grow" data-a="addTo" data-t="${c.kind}" data-cat="${c.id}" data-sub="${id}">＋ הוספה לכרטיס</button>${b==='sup'?`<button class="btn g grow" data-a="go" data-v="ledger" data-arg="${id}">כרטסת</button>`:''}</div><div class="row" style="margin-bottom:10px"><button class="btn g grow" data-a="rep" data-s="sub:${id}">${ico('doc')} דוח / PDF</button><button class="btn g grow" data-a="subMenu" data-id="${id}">הגדרות כרטיס</button></div>`+(['sup','emp','fixed'].includes(b)?trBtn(id,'g'):'');
  const groups={};inPer.forEach(t=>{(groups[t.date.slice(0,7)]=groups[t.date.slice(0,7)]||[]).push(t)});
- h+=Object.keys(groups).sort().reverse().map(m=>`<div class="mh"><span>${mfmt(m)}</span><span>${ils(sum(groups[m],t=>t.amt))}</span></div>`+groups[m].map(t=>txRow(t,false)).join('')).join('')||'<div class="empty">אין תנועות בתקופה שנבחרה</div>';
- return{t:s.name,s:c.name,h}};
+ const sv=inPer.filter(msSees);msSync([],[],b==='sup'?id:'',sv);h+=msTop();
+ h+=Object.keys(groups).sort().reverse().map(m=>`<div class="mh"><span>${mfmt(m)}</span><span>${ils(sum(groups[m],t=>t.amt))}</span></div>`+(MS.on?`<button class="chip" style="margin:0 0 8px;min-height:44px" data-a="msAll" data-ids="${esc(groups[m].filter(msSees).map(x=>x.id).join(','))}">${msAllL(groups[m].filter(msSees).map(x=>x.id))}</button>`:'')+groups[m].map(t=>MS.on&&msSees(t)?msBox(t,txIn(t,false)):txRow(t,false)).join('')).join('')||'<div class="empty">אין תנועות בתקופה שנבחרה</div>';
+ h+=msFoot();return{t:s.name,s:c.name,h}};
 ACT.subMenu=el=>{const s=subById(el.dataset.id),c=cat(s.cat),b=c.beh,n=txOfSub(s.id).length;
  dlg(`<h3>הגדרות כרטיס · ${esc(s.name)}</h3><form data-f="subsave"><input type="hidden" name="id" value="${s.id}">${fld('שם','name',s.name,'text','required')}${b==='emp'?fld('תפקיד','role',(s.ext||{}).role)+fld('טלפון','phone',(s.ext||{}).phone,'tel')+fld('תחילת עבודה','start',(s.ext||{}).start,'date')+fld('הערות','notes',(s.ext||{}).notes):''}${b==='cc'?fld('4 ספרות אחרונות','last4',(s.ext||{}).last4):''}${b==='sup'?termsF(cfTermsOk(s.terms)?s.terms:null,s.pm!=null?s.pm:'')+offSubF(s):''}<button class="btn w">שמור</button></form>
  <div class="row" style="margin-top:10px"><button class="btn g grow" data-a="subHide" data-id="${s.id}">${s.off?'החזרת הכרטיס':'הסתרת הכרטיס'}</button>${n===0?`<button class="btn r grow" data-a="subDel" data-id="${s.id}">מחיקה</button>`:''}</div><p class="note">הסתרה לא מוחקת תנועות. מחיקה אפשרית רק לכרטיס בלי תנועות.</p>`)};
@@ -1222,43 +1389,59 @@ CHG.lgf=el=>{LG.from=el.value;rerender()};CHG.lgt=el=>{LG.to=el.value;rerender()
  סגירה משותפת: תשלום בכל חשבונית {id,d,a,m,grp,ref?,file?}; grp משותף לכל התשלומים של אותה סגירה, והקובץ נשמר פעם אחת.
  קיזוז זיכויים (רק בכרטסת): החלק שמכוסה בזיכויים נרשם כתשלום נפרד {id,d,a,m:'קיזוז זיכוי',grp,crof:[מזהי הזיכויים]}, וכל זיכוי שנבחר מקבל t.used={grp,d}.
  תשלום קיזוז נכלל ב-paid/bal (החשבונית סגורה), אבל לא ב"כסף ששולם בפועל" (cashPaid) ולא בכרטסת (שם הזיכוי עצמו כבר מופיע). */
-let MS={ref:null,on:false,ids:[],open:[],led:''};
+let MS={ref:null,on:false,ids:[],open:[],led:''},MSBUSY=0;
 const crOpen=sid=>live().filter(t=>t.sub===sid&&t.t==='exp'&&t.kind==='credit'&&!t.used&&Math.abs(t.amt)>0.004).sort((p,q)=>(p.date||'').localeCompare(q.date||''));
 const crAmt=t=>rnd(Math.abs(t.amt));
-function msSync(open,cr,led){const c=cur();if(MS.ref!==c)MS={ref:c,on:false,ids:[],open:[],led:''};MS.led=led||'';MS.open=open.concat(cr||[]).map(t=>t.id);MS.ids=MS.ids.filter(i=>MS.open.includes(i))}
-const msSel=()=>MS.ids.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&hasPay(t)&&bal(t)>0.004);
-const msCr=()=>MS.led?MS.ids.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&t.kind==='credit'&&!t.used&&t.sub===MS.led):[];
+function msSync(open,cr,led,more){const c=cur();if(MS.ref!==c)MS={ref:c,on:false,ids:[],open:[],led:''};MS.led=led||'';MS.open=[...new Set(open.concat(cr||[],more||[]).map(t=>t.id))];MS.ids=MS.ids.filter(i=>MS.open.includes(i))}
+/* D4: הרשאה לסגירה יחד – כמו payDlg (מנהל; עובד: expW + sup). expR 'own' – רק מה שהעובד הזין (t.eu) */
+const msCanPay=()=>!isW()||(wp('expW')&&wp('sup'));/* הגבלת סניפים של מנהל (SY.br) – אותה בדיקה כמו בתצוגה (brFil/inBr) */const msBrOk=t=>{const m=brMineIds();return!m||inBr(t,m)};
+const msSees=t=>msBrOk(t)&&(!isW()||wpE()==='all'||(wpE()==='own'&&!!t.eu&&t.eu===SY.uid));
+/* ערך חתום של מסמך: זיכוי והחזר כספי בשלילה */const msV=t=>t.kind==='refund'?-rnd(t.rf||0):t.kind==='credit'?-crAmt(t):rnd(t.amt||0);
+const msDocs=()=>MS.ids.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&msSees(t));
+const msSel=()=>msDocs().filter(t=>hasPay(t)&&bal(t)>0.004);
+const msCr=()=>MS.led?msDocs().filter(t=>t.kind==='credit'&&!t.used&&t.sub===MS.led):[];
 const msTot=(L,K)=>{K=K||[];const y=rnd(sum(L,bal)),c=rnd(sum(K,crAmt));return{n:L.length,x:rnd(sum(L,t=>t.amt)),y,c,net:rnd(y-c),subs:new Set(L.map(t=>t.sub).concat(K.map(t=>t.sub)))}};
-const msTop=()=>MS.open.length?`<div class="row" style="justify-content:flex-end;margin:10px 0 0"><button class="btn s ${MS.on?'':'g'}" data-a="msMode">${MS.on?'בטל בחירה':'בחירת כמה חשבוניות'}</button></div>`:'';
+const msTop=()=>MS.open.length?`<div class="row" style="justify-content:flex-end;margin:10px 0 0"><button class="btn s ${MS.on?'':'g'}" data-a="msMode" aria-pressed="${MS.on}">${MS.on?'סיום בחירה':'בחירה'}</button></div>`:'';
+const MSCB=on=>`<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="${on?'var(--acc)':'none'}" stroke="var(--acc)" stroke-width="2"/>${on?'<path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="var(--onacc)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>':''}</svg>`;
 const msAllL=ids=>ids.every(i=>MS.ids.includes(i))?'בטל סימון של כולן':'סמן את כולן';
-const msHd=(t,L,neg)=>`<div class="mh"><span>${t}</span><span>${neg?'‎-'+ils(rnd(sum(L,crAmt))):ils(sum(L,bal))}</span></div>`+(MS.on?`<button class="chip" style="margin:0 0 8px;min-height:38px" data-a="msAll" data-ids="${esc(L.map(x=>x.id).join(','))}">${msAllL(L.map(x=>x.id))}</button>`:'');
-const msBox=(t,inner)=>{const on=MS.ids.includes(t.id);return `<div class="lw"><button class="li exp ${on?'sel':''}" data-a="msPick" data-id="${t.id}" role="checkbox" aria-checked="${on}"><span class="mscb" aria-hidden="true">${on?'☑':'☐'}</span>${inner}</button></div>`};
+const msHd=(t,L,neg)=>`<div class="mh"><span>${t}</span><span>${neg?'‎-'+ils(rnd(sum(L,crAmt))):ils(sum(L,bal))}</span></div>`+(MS.on?`<button class="chip" style="margin:0 0 8px;min-height:44px" data-a="msAll" data-ids="${esc(L.map(x=>x.id).join(','))}">${msAllL(L.map(x=>x.id))}</button>`:'');
+const msBox=(t,inner)=>{const on=MS.ids.includes(t.id);return `<div class="lw"><button class="li ${t.t||'exp'} ${on?'sel':''}" data-a="msPick" data-id="${t.id}" role="checkbox" aria-checked="${on}"><span class="mscb" aria-hidden="true">${MSCB(on)}</span>${inner}</button></div>`};
 const msRow=(t,tag)=>msBox(t,invIn(t,tag));
 const crRow=t=>msBox(t,`<div class="m"><b>זיכוי ${dfmt(t.date)}${t.inv?' · '+esc(t.inv):''}</b><small>${esc(t.note||'')}</small>${dxWhoSm(t)}</div><div class="a pos">‎-${ils(crAmt(t))}<small>זיכוי</small></div>`);
-function msBarH(){const L=msSel(),K=msCr(),T=msTot(L,K),multi=T.subs.size>1,big=T.c>T.y+0.004;
- const oc=!MS.led&&T.subs.size===1&&L.length?rnd(sum(crOpen(L[0].sub),crAmt)):0;
- return `<div style="font-weight:800" id="msTxt">נבחרו ${T.n} חשבוניות · סכום ${ils(T.x)}${MS.led?` · זיכויים ‎-${ils(T.c)}`:''} · נשאר לשלם ${ils(Math.max(0,T.net))}</div><button class="btn w" style="margin-top:8px" data-a="msPay" ${T.n&&!multi&&!big&&T.y>0.004?'':'disabled'}>סגירת תשלום לנבחרות</button>${multi?'<p class="note">נבחרו חשבוניות מכמה ספקים – מוצג רק הסכום. סגירת תשלום משותפת אפשרית רק לחשבוניות של ספק אחד.</p>':''}${big?`<p class="note neg">הזיכויים שנבחרו (${ils(T.c)}) גדולים ממה שנשאר לשלם בחשבוניות (${ils(T.y)}). אי אפשר לנצל זיכוי בחלקו – בחרו פחות זיכויים או עוד חשבוניות.</p>`:''}${oc>0.004?`<p class="note" id="msCrNote">לספק זיכויים פתוחים בסך ${ils(oc)} – לקיזוז סגור מהכרטסת שלו</p>`:''}`}
+function msBarH(){const D=msDocs(),L=msSel(),K=msCr(),T=msTot(L,K),pay=new Set(L.concat(K).map(t=>t.id)),ex=D.filter(t=>!pay.has(t.id)).length,multi=T.subs.size>1,big=T.c>T.y+0.004,can=msCanPay();
+ const I=D.filter(t=>t.t==='inc'),E=D.filter(t=>t.t!=='inc'),tot=rnd(sum(D,msV)),both=I.length&&E.length,oc=!MS.led&&T.subs.size===1&&L.length?rnd(sum(crOpen(L[0].sub),crAmt)):0;
+ const sg=v=>v<-0.004?'‎-'+ils(-v):ils(v),why=!can?'':!L.length?(D.length?'אין בבחירה חשבונית ספק פתוחה – אין מה לסגור.':''):multi?'נבחרו מסמכים של כמה ספקים – מוצג רק הסכום. סגירה יחד אפשרית רק לספק אחד.':big?`הזיכויים שנבחרו (${ils(T.c)}) גדולים ממה שנשאר לשלם בחשבוניות (${ils(T.y)}). אי אפשר לנצל זיכוי בחלקו – בחרו פחות זיכויים או עוד חשבוניות.`:'';
+ return `<div style="font-weight:800" id="msTxt">נבחרו ${D.length} · סה״כ <b>${sg(tot)}</b>${L.length?` · יתרה לתשלום <b>${ils(Math.max(0,T.net))}</b>`:''}</div>${both?`<div class="note" id="msSplit">הכנסות <b>${sg(rnd(sum(I,msV)))}</b> · הוצאות <b>${sg(rnd(sum(E,msV)))}</b></div>`:''}${can?`<button class="btn w" style="margin-top:8px" data-a="msPay" ${L.length&&!multi&&!big&&T.y>0.004?'':'disabled'}>סגירה יחד${L.length?' ('+L.length+')':''}</button>`:''}${can&&ex&&L.length?`<p class="note" id="msEx">לא ייכללו (${ex}) – מסמכים שאין בהם יתרה לתשלום</p>`:''}${why?`<p class="note${big?' neg':''}" id="msWhy">${why}</p>`:''}${can&&oc>0.004?`<p class="note" id="msCrNote">לספק זיכויים פתוחים בסך ${ils(oc)} – לקיזוז סגור מהכרטסת שלו</p>`:''}`}
 const msFoot=()=>MS.on?`<div class="msbar" id="msBar" aria-live="polite">${msBarH()}</div><div style="height:170px" aria-hidden="true"></div>`:'';
 /* עדכון מיידי בלי לבנות את המסך מחדש */
-function msPaint(){$$('[data-a="msPick"]').forEach(b=>{const on=MS.ids.includes(b.dataset.id);b.classList.toggle('sel',on);b.setAttribute('aria-checked',on);const c=b.querySelector('.mscb');if(c)c.textContent=on?'☑':'☐'});
+function msPaint(){$$('[data-a="msPick"]').forEach(b=>{const on=MS.ids.includes(b.dataset.id);b.classList.toggle('sel',on);b.setAttribute('aria-checked',on);const c=b.querySelector('.mscb');if(c)c.innerHTML=MSCB(on)});
  $$('[data-a="msAll"]').forEach(b=>{b.textContent=msAllL(b.dataset.ids.split(','))});const bar=document.getElementById('msBar');if(bar)bar.innerHTML=msBarH()}
 ACT.msMode=()=>{MS.on=!MS.on;MS.ids=[];rerender()};
+/* D4: לחיצה ארוכה (500ms) על מסמך ברשימה – נכנסת למצב בחירה עם המסמך מסומן */
+(()=>{let tm=0,st=null,eat=0;const q='[data-a="tx"],[data-a="payDlg"]',stop=()=>{clearTimeout(tm);tm=0;st=null};
+ document.addEventListener('pointerdown',e=>{eat=0;const el=e.target.closest&&e.target.closest(q);if(!el||MS.on||!MS.open.includes(el.dataset.id)||MS.ref!==cur())return;st={x:e.clientX,y:e.clientY};tm=setTimeout(()=>{tm=0;eat=Date.now();MS.on=true;MS.ids=[el.dataset.id];rerender();try{navigator.vibrate&&navigator.vibrate(15)}catch(_){}},500)},true);
+ document.addEventListener('pointermove',e=>{if(st&&Math.hypot(e.clientX-st.x,e.clientY-st.y)>10)stop()},true);['pointerup','pointercancel','scroll'].forEach(n=>document.addEventListener(n,()=>{if(tm)stop()},true));
+ document.addEventListener('click',e=>{if(eat&&Date.now()-eat<800){eat=0;e.stopPropagation();e.preventDefault()}},true);
+ document.addEventListener('contextmenu',e=>{if(e.target.closest&&e.target.closest(q)&&MS.open.length)e.preventDefault()},true)})();
 ACT.msPick=el=>{const i=MS.ids.indexOf(el.dataset.id);if(i>=0)MS.ids.splice(i,1);else MS.ids.push(el.dataset.id);msPaint()};
 ACT.msAll=el=>{const ids=el.dataset.ids.split(',').filter(Boolean),all=ids.every(i=>MS.ids.includes(i));if(all)MS.ids=MS.ids.filter(i=>!ids.includes(i));else ids.forEach(i=>{if(!MS.ids.includes(i))MS.ids.push(i)});msPaint()};
-ACT.msPay=()=>{const L=msSel(),K=msCr(),T=msTot(L,K);if(!T.n)return toast('לא נבחרו חשבוניות');if(T.subs.size>1)return toast('סגירה משותפת אפשרית רק לספק אחד');if(T.c>T.y+0.004)return toast('הזיכויים שנבחרו גדולים ממה שנשאר לשלם');
+ACT.msPay=()=>{if(!msCanPay())return toast('אין לך הרשאה לסגור תשלום');const L=msSel(),K=msCr(),T=msTot(L,K);if(!T.n)return toast('לא נבחרו חשבוניות');if(T.subs.size>1)return toast('סגירה משותפת אפשרית רק לספק אחד');if(T.c>T.y+0.004)return toast('הזיכויים שנבחרו גדולים ממה שנשאר לשלם');
  dlg(`<h3>סגירת תשלום · ${esc(subName(L[0]))}</h3><div class="card"><div class="note">${T.n} חשבוניות · סכום ${ils(T.x)}</div><div class="row" style="justify-content:space-between"><span>יתרה בחשבוניות</span><b>${ils(T.y)}</b></div>${K.length?`<div class="row" style="justify-content:space-between"><span>קיזוז ${K.length} זיכויים</span><b class="pos">‎-${ils(T.c)}</b></div><div class="row" style="justify-content:space-between"><span>נשאר לשלם</span><b>${ils(T.net)}</b></div>`:''}</div>
- <form data-f="mspay"><input type="hidden" name="ids" value="${esc(L.map(t=>t.id).join(','))}"><input type="hidden" name="crs" value="${esc(K.map(t=>t.id).join(','))}"><label class="f"><span>כמה משלמים? (סכום קטן יותר נסגר מהחשבונית הישנה לחדשה)</span><input class="amt" name="a" inputmode="decimal" autocomplete="off" value="${T.net}" required></label>${dateF('תאריך התשלום','d',today())}${offSub(L[0])?offPayH(L[0]):''}${pmF('m',offSub(L[0])?METHODS.concat('קיזוז'):METHODS,offSub(L[0])?'קיזוז':'',false,L[0])}${fld('מספר אסמכתא (לא חובה)','ref','','text','autocomplete="off" maxlength="60"')}<label class="f"><span>צילום או קובץ של האסמכתא (לא חובה)</span><input type="file" name="f" accept="image/*,application/pdf"></label><div class="row"><button class="btn grow">אשר תשלום</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.mspay=async form=>{if(form.dataset.busy)return;const f=fd(form),L=String(f.ids||'').split(',').map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&hasPay(t)&&bal(t)>0.004);
+ <form data-f="mspay"><input type="hidden" name="ids" value="${esc(L.map(t=>t.id).join(','))}"><input type="hidden" name="crs" value="${esc(K.map(t=>t.id).join(','))}"><input type="hidden" name="bs" value="${esc(L.map(t=>t.id+':'+bal(t)).join(','))}"><p class="note" id="msDef">כל חשבונית תיסגר ביתרה שלה (${L.map(t=>ils(bal(t))).join(' + ')}), באותה סגירה.</p><details id="msAmtD"><summary class="btn g s" style="display:inline-flex;min-height:44px;align-items:center">שינוי סכום</summary><label class="f"><span>כמה משלמים? (סכום קטן יותר נסגר מהחשבונית הישנה לחדשה)</span><input class="amt" name="a" inputmode="decimal" autocomplete="off" value="${T.net}" required></label></details>${dateF('תאריך התשלום','d',today())}${offSub(L[0])?offPayH(L[0]):''}${pmF('m',offSub(L[0])?METHODS.concat('קיזוז'):METHODS,offSub(L[0])?'קיזוז':'',false,L[0])}${fld('מספר אסמכתא (לא חובה)','ref','','text','autocomplete="off" maxlength="60"')}<label class="f"><span>צילום או קובץ של האסמכתא (לא חובה)</span><input type="file" name="f" accept="image/*,application/pdf"></label><div class="row"><button class="btn grow">אשר תשלום</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.mspay=async form=>{if(form.dataset.busy||MSBUSY)return;if(!msCanPay())return toast('אין לך הרשאה לסגור תשלום');const f=fd(form),ids1=String(f.ids||'').split(',').filter(Boolean),ids0=[...new Set(ids1)],L=ids0.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&msSees(t)&&hasPay(t)&&bal(t)>0.004);
+ /* D4: bal מחושב מחדש מ-S.tx; חשבונית שנסגרה/השתנתה מאז פתיחת החלון – עוצרים */const B0=Object.fromEntries(String(f.bs||'').split(',').filter(Boolean).map(x=>{const j=x.lastIndexOf(':');return[x.slice(0,j),+x.slice(j+1)]}));
+ if(ids1.length!==ids0.length||L.length!==ids0.length||(f.bs!==undefined&&L.some(t=>!(t.id in B0)||Math.abs(B0[t.id]-bal(t))>0.004)))return toast('אחת החשבוניות השתנתה – פתחו מחדש');
  if(!L.length)return toast('אין חשבוניות פתוחות בבחירה');const sid=L[0].sub;if(new Set(L.map(t=>t.sub)).size>1)return toast('סגירה משותפת אפשרית רק לספק אחד');
- const crIds=String(f.crs||'').split(',').filter(Boolean),K=crIds.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&t.kind==='credit'&&!t.used&&t.sub===sid);if(K.length!==crIds.length)return toast('אחד הזיכויים כבר קוזז או השתנה – פתחו את המסך מחדש');
+ const crIds=String(f.crs||'').split(',').filter(Boolean),K=crIds.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&msSees(t)&&t.kind==='credit'&&!t.used&&t.sub===sid);if(new Set(crIds).size!==crIds.length||K.length!==crIds.length)return toast('אחד הזיכויים כבר קוזז או השתנה – פתחו את המסך מחדש');
  const Y=rnd(sum(L,bal)),C=rnd(sum(K,crAmt));if(C>Y+0.004)return toast('הזיכויים שנבחרו ('+ils(C)+') גדולים ממה שנשאר לשלם ('+ils(Y)+')');
  const a0=pNum(f.a);if(a0==null||a0<0)return toast('סכום לא תקין');const a=rnd(a0);if(a<0.01&&!K.length)return toast('סכום לא תקין');if(a>rnd(Y-C)+0.004)return toast('הסכום גדול ממה שנשאר לשלם ('+ils(rnd(Y-C))+')');if(rnd(a+C)<0.01)return toast('סכום לא תקין');
  if(!f.d)return toast('חסר תאריך');if(a>=0.01&&!f.m)return toast('בחר אמצעי תשלום');if(a>=0.01&&f.m==='קיזוז'){const s=offSub(L[0]);if(!s)return toast('הספק אינו ספק קיזוז');const B=offBal(s.id);if(a>B.bal+0.004)return toast('היתרה לקיזוז אצל הספק ('+ils(B.bal)+') לא מספיקה')}if(a>=0.01&&f.m===METHODS[1]&&!cfDt(f.cdate))return toast('חסר תאריך פירעון לצ׳ק');
- const ref=s_(f.ref||''),fl=a>=0.01&&form.f&&form.f.files&&form.f.files[0];let fid='';form.dataset.busy='1';
- if(fl){try{const du=await shrinkDU(fl);fid='f'+uid();await fput(fid,du)}catch(e){delete form.dataset.busy;return toast('שמירת הקובץ נכשלה')}}
- if(a>=0.01&&f.m===METHODS[1]){try{const ci=await chkImg(form);if(ci)f._ci=ci}catch(e){delete form.dataset.busy;return toast('שמירת צילום הצ׳ק נכשלה')}}
+ const ref=s_(f.ref||''),fl=a>=0.01&&form.f&&form.f.files&&form.f.files[0];let fid='';form.dataset.busy='1';MSBUSY=1;
+ if(fl){try{const du=await shrinkDU(fl);fid='f'+uid();await fput(fid,du)}catch(e){delete form.dataset.busy;MSBUSY=0;return toast('שמירת הקובץ נכשלה')}}
+ if(a>=0.01&&f.m===METHODS[1]){try{const ci=await chkImg(form);if(ci)f._ci=ci}catch(e){delete form.dataset.busy;MSBUSY=0;return toast('שמירת צילום הצ׳ק נכשלה')}}
+ if(L.some(t=>!S.tx.includes(t)||bal(t)<=0.004||(t.id in B0&&Math.abs(B0[t.id]-bal(t))>0.004))){delete form.dataset.busy;MSBUSY=0;return toast('אחת החשבוניות השתנתה – פתחו מחדש')}
  const grp='g'+uid(),R=msApply(L,K,a,f.d,f.m,ref,fid,grp,f),n=R.n,last=R.last;if(f._ci)L.forEach(t=>(t.pays||[]).forEach(p=>{if(p.grp===grp&&p.chk)p.chk.img=f._ci}));
- save();MS.on=false;MS.ids=[];closeDlg();rerender();toast(n+' חשבוניות'+(last&&bal(last)>0.004?' (האחרונה חלקית, נותרו בה '+ils(bal(last))+')':'')+' · שולם '+ils(a)+(C?' · קוזזו '+ils(C):''))};
+ MSBUSY=0;save();MS.on=false;MS.ids=[];closeDlg();rerender();toast(n+' חשבוניות'+(last&&bal(last)>0.004?' (האחרונה חלקית, נותרו בה '+ils(bal(last))+')':'')+' · שולם '+ils(a)+(C?' · קוזזו '+ils(C):''))};
 /* חלוקת תשלום אחד על כמה חשבוניות (מהישנה לחדשה, האחרונה חלקית), עם קיזוז זיכויים. משותף לסגירה מהכרטסת ולצילום העברה */
 function msApply(L,K,a,d,m,ref,fid,grp,bx){L=L.slice().sort((p,q)=>(p.date||'').localeCompare(q.date||'')||pmon(p).localeCompare(pmon(q)));
  const crof=K.map(t=>t.id);let cr=rnd(sum(K,crAmt)),mo=rnd(a),n=0,last=null;
@@ -1306,7 +1489,7 @@ V.cash=()=>{const T='סגירת קופה והפקדות';if(!isA())return{t:T,s:
 /* ---- עוד ---- */
 V.more=()=>{const pend=S.tx.filter(t=>t.cat==='p_inc'||t.cat==='p_exp').length,fx=fixPending(NOWM()).length;
  const o=(a,v,t,sm,n)=>(a==='ordGo'?!bzF('orders'):BZV[v]&&!bzF(BZV[v]))?'':`<button class="opt" data-a="${a}" data-v="${v||''}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`;
- return{t:'עוד',s:'כלים',h:(ordOn()?o('ordGo','','הזמנות אתר','מוצרים, ייבוא, תמונות והגדרות האתר – גרסת בדיקה'):'')+o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+o('go','tk','משימות','משימות לעובדים, אישור תמונות ואיחורים',typeof tkOverN==='function'?(tkOverN()||''):'')+o('go','ar','🛠️ בקשות לעדכון האפליקציה','תיקונים ושיפורים שהצוות ביקש',typeof arCnt==='function'?(arCnt()||''):'')+o('go','zc','💵 סגירת קופה','דוח Z ופתיחת קופה, הכנסה להכנסות וסגירות לאישור',zcCnt()||'')+o('go','zs','📊 סיכום סגירות קופה','כל הסגירות, הוצאות מקופה, הפקדות וההפרשים שאישרת',typeof zsLostN==='function'?(zsLostN()||''):'')+o('go','dp','🏦 העלאת אישור הפקדה','הוצאות מקופה להפקדה, ואישורי הפקדה לאישור',dqN()||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+trOpt()+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח, חשבוניות בלי מספר ותשלומים שממתינים לחשבונית',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')}};
+ return{t:'עוד',s:'כלים',h:'<div class="mlist">'+(ordOn()?o('ordGo','','הזמנות אתר','מוצרים, ייבוא, תמונות והגדרות האתר – גרסת בדיקה'):'')+o('go','shelf','מחירים ומבצעים למדף','פתקי מחיר ומבצע להדפסה')+o('go','fb','משוב לקוחות','סריקת טפסים, טבלה, גרף וייצוא',FBL.pend.length||'')+o('go','tk','משימות','משימות לעובדים, אישור תמונות ואיחורים',typeof tkOverN==='function'?(tkOverN()||''):'')+o('go','ar','בקשות לעדכון האפליקציה','תיקונים ושיפורים שהצוות ביקש',typeof arCnt==='function'?(arCnt()||''):'')+o('go','zc','סגירת קופה','דוח Z ופתיחת קופה, הכנסה להכנסות וסגירות לאישור',zcCnt()||'')+o('go','zs','סיכום סגירות קופה','כל הסגירות, הוצאות מקופה, הפקדות וההפרשים שאישרת',typeof zsLostN==='function'?(zsLostN()||''):'')+o('go','dp','העלאת אישור הפקדה','הוצאות מקופה להפקדה, ואישורי הפקדה לאישור',dqN()||'')+(BQ.length?o('bqReview','','חשבוניות בתור זיהוי','בדיקה ואישור',BQ.length):'')+trOpt()+o('invExp','','ייצוא חשבוניות','שיתוף או הורדה לפי תאריכים')+o('go','due','חשבוניות לתשלום','כל הספקים, איחורים וחודשים הבאים')+o('go','fix','הוצאות קבועות','אישור חשבונית וסכום בכל חודש',fx||'')+o('go','loans','הלוואות','לוחות סילוקין ותשלומים')+o('go','cc','כרטיסי אשראי','חיובים והתאמה לחשבוניות')+o('go','pend','ממתין לסיווג','תנועות מהאפליקציה הישנה',pend||'')+o('go','scan','סריקת חשבוניות','צילום חשבונית ושמירתה בכרטיס הספק')+o('go','cmp','השוואות','תקופה מול תקופה, לועזי או עברי')+o('go','imp','ייבוא מאקסל','קובץ אחד להכנסות והוצאות')+o('go','sync','סנכרון ועובדים','הוצאות שעובדים מכניסים ממכשיר אחר',S.inbox.length||'')+o('go','tdn','חשבוניות לטיפול','תעודות משלוח, חשבוניות בלי מספר ותשלומים שממתינים לחשבונית',tdnN()||'')+o('go','data','גיבוי ושחזור','שמירת כל הנתונים וקבלת גיבוי')+o('go','settings','הגדרות','קטגוריות, מראה וגודל כתב')+'</div>'}};
 
 ACT.repAll=()=>{RS=scopeOf('all:exp');go('rep')};
 
@@ -1383,7 +1566,7 @@ CHG.trPick=async el=>{const fs=[...el.files],sub=el.dataset.sub||'';el.value='';
 /* שדה בחירת הקבצים קבוע בגוף הדף (לא בתוך המסך), כדי שרענון של המסך בזמן שחלון הבחירה פתוח לא יאבד את הבחירה */
 ACT.trGo=el=>{if(!trOk())return toast('צילום העברה – למנהל בלבד');let i=document.getElementById('trIn');if(!i){i=document.createElement('input');i.type='file';i.id='trIn';i.accept='image/*,application/pdf';i.multiple=true;i.hidden=true;i.dataset.c='trPick';document.body.append(i)}i.dataset.sub=el.dataset.sub||'';i.value='';i.click()};
 const trBtn=(sub,cls)=>trOk()?`<button class="btn ${cls||''} w" style="margin-bottom:10px" data-a="trGo" data-sub="${esc(sub||'')}">📸 צילום העברה</button>`:'';
-const trOpt=()=>trOk()?`<button class="opt" data-a="trGo"><span>📸 צילום העברה<small>העברה בנקאית: חשבוניות ספק, משכורת או הוצאה קבועה</small></span>${ico('chev')}</button>`:'';
+const trOpt=()=>trOk()?`<button class="opt" data-a="trGo"><span>צילום העברה<small>העברה בנקאית: חשבוניות ספק, משכורת או הוצאה קבועה</small></span>${ico('chev')}</button>`:'';
 const trIt=el=>trOk()?TR.items.find(x=>x.id===el.dataset.it):null;
 const trR=el=>{const it=trIt(el);return{it,r:it&&it.rows.find(x=>x.id===el.dataset.r)}};
 const trLive=g=>!!g&&(grpOf(g).length>0||S.tx.some(t=>t.tgrp===g));
@@ -1813,7 +1996,7 @@ const THEMES2=[['logo','לוגו'],['logod','לוגו כהה'],['bake','מאפי
 const thChips=l=>l.map(([k,t])=>`<button class="chip ${S.theme===k?'on':''}" data-a="theme" data-v="${k}" aria-pressed="${S.theme===k}">${t}</button>`).join('');
 V.settings=()=>{
  const row=c=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(c.name)}</b><small>${BEH[c.beh]}${S.tx.filter(t=>t.cat===c.id).length?' · '+S.tx.filter(t=>t.cat===c.id).length+' תנועות':''}${c.off?' · מוסתרת':''}</small></div><button class="btn s g" data-a="catEdit" data-id="${c.id}">עריכה</button></div>`;
- return{t:'הגדרות',s:'מראה וקטגוריות',h:`<div class="sec"><h3>מראה</h3></div><div class="card"><h3>ערכות העסק (עם הלוגו, גם אצל העובדים)</h3><div class="chips" role="radiogroup" aria-label="ערכות העסק" style="margin:8px 0 14px">${thChips(THEMES2)}</div><h3>ערכות קלאסיות</h3><div class="chips" role="radiogroup" aria-label="ערכת צבעים" style="margin-top:8px">${thChips(THEMES)}</div><h3 style="margin-top:14px">גודל כתב</h3><div class="chips">${[[1,'רגיל'],[2,'גדול'],[3,'גדול מאוד']].map(([k,l])=>`<button class="chip ${S.fs==k?'on':''}" data-a="fs" data-v="${k}" aria-pressed="${S.fs==k}">${l}</button>`).join('')}</div></div>
+ return{t:'הגדרות',s:'מראה וקטגוריות',h:`<div class="sec"><h3>מראה</h3></div><div class="card">${dsRow()}<h3 style="margin-top:14px">גודל כתב</h3><div class="chips">${[[1,'רגיל'],[2,'גדול'],[3,'גדול מאוד']].map(([k,l])=>`<button class="chip ${S.fs==k?'on':''}" data-a="fs" data-v="${k}" aria-pressed="${S.fs==k}">${l}</button>`).join('')}</div></div>
  <div class="sec"><h3>תנאי תשלום לספקים</h3></div><div class="card"><form data-f="pmoff">${termsF(cfTermsOk(S.terms)?S.terms:null,S.pmOff,1)}<button class="btn w">שמור</button></form><p class="note">אפשר לשנות לכל ספק בנפרד: בכרטיס הספק ← הגדרות כרטיס. ספק עם תנאי תשלום משלו גובר על ברירת המחדל הזו.</p></div>
  <div class="sec"><h3>קטגוריות הכנסה</h3><button class="btn s" data-a="catWiz" data-t="inc">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='inc'&&!c.hid).map(row).join('')}
  <div class="sec"><h3>קטגוריות הוצאה</h3><button class="btn s" data-a="catWiz" data-t="exp">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='exp'&&!c.hid).map(row).join('')}
@@ -2030,7 +2213,7 @@ ACT.impUndo=()=>ask('לבטל את כל התנועות שיובאו בפעם ה�
 /* ===== סריקת חשבוניות והשוואות ===== */
 let Q=[];
 V.scan=()=>{const sc=S.cats.filter(c=>c.beh==='sup'&&!c.hid&&!c.off);
- let h=`<div class="card"><p class="note">צלם או בחר חשבונית. הקובץ נשמר בכרטיס הספק יחד עם החשבונית שתירשם. מלא את הפרטים ולחץ שמירה.</p><div class="row"><label class="btn grow" style="cursor:pointer">${ico('file')} צילום / בחירת קבצים<input type="file" accept="image/*,application/pdf" multiple data-c="scanFiles" hidden></label></div></div>`;
+ let h=`<div class="card"><p class="note">צלם או בחר חשבונית. הקובץ נשמר בכרטיס הספק יחד עם החשבונית שתירשם. מלא את הפרטים ולחץ שמירה.</p>${scHero('צילום / בחירת קבצים','תמונה או PDF, אפשר כמה יחד','<input type="file" accept="image/*,application/pdf" multiple data-c="scanFiles" hidden>',1)}</div>`;
  h+=Q.map(it=>{const x=it.x,subs=subsOf(x.cat);return `<div class="card" data-q="${it.id}">${it.img?`<img src="${it.img}" alt="תצוגת החשבונית" style="max-width:100%;max-height:220px;border-radius:10px;display:block;margin:0 auto 10px">`:`<div class="note" style="margin-bottom:8px">קובץ: ${esc(it.name)}</div>`}
  <label class="f"><span>קטגוריה</span><select data-c="qf" data-id="${it.id}" data-k="cat">${sc.map(c=>`<option value="${c.id}"${c.id===x.cat?' selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
  <label class="f"><span>ספק</span><select data-c="qf" data-id="${it.id}" data-k="sub">${subs.map(s=>`<option value="${s.id}"${s.id===x.sub?' selected':''}>${esc(s.name)}</option>`).join('')}<option value=""${!x.sub?' selected':''}>＋ ספק חדש</option></select></label>
@@ -2391,9 +2574,9 @@ ACT.syOpen=()=>{sheetClose();NAV=[{v:'sync'}];render(0)};
 const inbName=it=>{const c=cat(it.d.cat);if(it.d.reg&&!c)return 'דף הוצאה מקופה · ללא קטגוריה';return(c?c.name:(it.d.catName||'קטגוריה'))+(it.d.subName?' · '+it.d.subName:'')};
 V.inbox=()=>{inbHeal();const L=S.inbox.slice().sort((a,b)=>(b.at||'').localeCompare(a.at||''));
  return{t:'הוצאות מעובדים',s:L.length+' ממתינות',h:L.length?L.map(it=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${inbChk(it)?'צ׳ק מעובד'+(s_(it.d.payee)?' · '+esc(it.d.payee):''):esc(inbName(it))}</b><b>${ils(num(it.d.amt))}</b></div>${inbChk(it)?`<div style="margin:4px 0"><span class="tag t2" data-chktag>צ׳ק מעובד</span>${it.d.low?'<span class="tag t1">לבדוק</span>':''}</div>`:''}<small>הוכנס על ידי ${esc(it.by)} · ${esc(it.d.date||'')}${it.d.plan?' · לתשלום '+esc(mfmt(it.d.plan)):''}${inbChk(it)&&s_(it.d.no)?' · צ׳ק '+esc(it.d.no):''}${it.d.inv?' · חשבונית '+esc(it.d.inv):''}${it.d.dn?' · תעודת משלוח':''}${it.d.note?' · '+esc(it.d.note):''}</small>
- ${(()=>{const mm=dupMsg(dupInbox(it));return mm.map(m=>`<div class="note" style="color:var(--neg,#b3261e);font-weight:700">⚠ ${esc(m)}</div>`).join('')})()}
- ${it.rq?`<div class="note" style="color:var(--acc);font-weight:700">📷 ביקשת צילום חדש${it.rq.n?': '+esc(it.rq.n):''}. הצילום יוחלף כשהעובד ישלח.</div>`:''}${it.rph?`<div class="note" style="color:var(--pos,#1b7f3b);font-weight:700">✓ התקבל צילום חדש מהעובד</div>`:''}
- <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${esc(it.id)}">צפה בצילום</button>`:''}${it.file&&idOk(it.file)?`<button class="btn g" data-a="dxShare" data-f="${esc(it.file)}" data-n="${esc(it.id)}" aria-label="שיתוף הצילום">${ico('share')}</button>`:''}${inbChk(it)?`<button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">שייך לחשבונית</button>`:`<button class="btn g grow" data-a="inbEdit" data-id="${esc(it.id)}">שינוי</button><button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">אשר</button>`}<button class="btn g grow" data-a="inbNo" data-id="${esc(it.id)}">דחה</button></div><button class="btn g" style="width:100%;margin-top:8px" data-a="inbRe" data-id="${esc(it.id)}">📷 ${it.rq?'בקש שוב צילום חדש':'בקש צילום חדש'}</button></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
+ ${(()=>{const mm=dupMsg(dupInbox(it));return mm.map(m=>`<div class="note scnote bad">${sci('warn')}<span>${esc(m)}</span></div>`).join('')})()}
+ ${it.rq?`<div class="note scnote acc">${sci('cam')}<span>ביקשת צילום חדש${it.rq.n?': '+esc(it.rq.n):''}. הצילום יוחלף כשהעובד ישלח.</span></div>`:''}${it.rph?`<div class="note scnote ok">${sci('ok')}<span>התקבל צילום חדש מהעובד</span></div>`:''}
+ <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${esc(it.id)}">צפה בצילום</button>`:''}${it.file&&idOk(it.file)?`<button class="btn g" data-a="dxShare" data-f="${esc(it.file)}" data-n="${esc(it.id)}" aria-label="שיתוף הצילום">${ico('share')}</button>`:''}${inbChk(it)?`<button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">שייך לחשבונית</button>`:`<button class="btn g grow" data-a="inbEdit" data-id="${esc(it.id)}">שינוי</button><button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">אשר</button>`}<button class="btn g grow" data-a="inbNo" data-id="${esc(it.id)}">דחה</button></div><button class="btn g" style="width:100%;margin-top:8px" data-a="inbRe" data-id="${esc(it.id)}">${sci('cam')}${it.rq?'בקש שוב צילום חדש':'בקש צילום חדש'}</button></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
 /* בקשת צילום חדש: הסטטוס בענן הופך ל-rephoto, והעובד רואה את הבקשה ברשימה שלו */
 async function inbSt(id,st,req){if(!idOk(id))return;const m='?updateMask.fieldPaths=status'+(req!==undefined?'&updateMask.fieldPaths=req':'')+'&currentDocument.exists=true',fl={status:sv(st)};if(req!==undefined)fl.req=sv(req);return await fsx('/inbox/'+id+m,{method:'PATCH',body:JSON.stringify({fields:fl})})}
 /* סגירת בקשה (status ← imported). אם נכשלה (למשל בלי רשת) – נשמרת בתור ונשלחת שוב במשיכה הבאה */
@@ -2431,9 +2614,14 @@ async function wkLoad(){try{await getCfg()}catch(e){}
  if(cur().v==='wk')rerender()}
 let WS='home';
 const wkSubsAll=()=>{const o=[];(cfgLocal().cats||[]).filter(c=>c.beh==='sup').forEach(c=>(c.subs||[]).forEach(s=>o.push({id:s.id,name:s.name,cat:c.id,hp:typeof s.hp==='string'?s.hp:''})));return o};
-const wkThumbs=()=>WK.pages.length?`<div class="card" style="margin:8px 0"><b>${WK.pages.length} ${WK.pages.length>1?'עמודים מצורפים':'עמוד מצורף'}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${WK.pages.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="wkDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div></div>`:'';
-const wkPickBtns=()=>`<label class="btn ${WK.pages.length?'g':''}" style="cursor:pointer;width:100%;margin:8px 0">📷 ${WK.pages.length?'צלם עמוד נוסף':'צלם'}<input type="file" accept="image/*" capture="environment" data-c="wkpick" hidden></label>
- <label class="btn g" style="cursor:pointer;width:100%;margin:0 0 8px">🖼 ${WK.pages.length?'הוסף עמודים מהגלריה':'העלה מהגלריה'}<input type="file" accept="image/*" multiple data-c="wkpick" hidden></label>`;
+/* DS:D3 – הכנסת חשבונית: אריח ראשי + אריחים קטנים. מראה בלבד: אותם input (capture, data-c) ואותם data-a */
+const SCI={cam:'<path d="M4 8.5h3l1.6-2.5h6.8L17 8.5h3v10H4z"/><circle cx="12" cy="13.2" r="3.4"/>',up:'<path d="M12 16V5M7.5 9.5 12 5l4.5 4.5"/><path d="M5 19h14"/>',img:'<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M5 17l5-4.5 3.5 3 2.5-2L20 16"/>',pdf:'<path d="M7 3.5h7l4 4V20.5H7z"/><path d="M14 3.5v4h4M9.5 13h5M9.5 16.5h5"/>',pen:'<path d="M4 20l1-4L16.5 4.5l3 3L8 19z"/><path d="M14.5 6.5l3 3"/>',stack:'<rect x="7" y="9" width="12" height="11" rx="2"/><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H15"/>',warn:'<path d="M12 4 3 19.5h18z"/><path d="M12 10v4.5M12 17.2v.1"/>',ok:'<path d="M5 12.5l4.5 4.5L19 7.5"/>'};
+const sci=n=>`<svg class="sci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SCI[n]}</svg>`;
+const scHero=(ttl,sub,inp,sm)=>`<label class="btn w scanhero${sm?' sm':''}" style="cursor:pointer"><span class="shc"><span class="shc-c">${sci('cam')}</span><span class="shc-u">${sci('up')}</span></span><b>${ttl}</b>${sub?`<small>${sub}</small>`:''}${inp}</label>`;
+const scTile=(ic,txt,inp,tt)=>`<label class="scant" style="cursor:pointer"${tt?` title="${tt}"`:''}>${sci(ic)}<span>${txt}</span>${inp}</label>`;
+const scBtn=(ic,txt,at)=>`<button type="button" class="scant" ${at}>${sci(ic)}<span>${txt}</span></button>`;
+const wkThumbs=()=>WK.pages.length?`<div class="card" style="margin:8px 0"><b>${WK.pages.length} ${WK.pages.length>1?'עמודים מצורפים':'עמוד מצורף'}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${WK.pages.map((u,i)=>`<div style="text-align:center"><img class="scimg" src="${u}" alt="עמוד ${i+1}"><button type="button" class="chip scdel" data-a="wkDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div></div>`:'';
+const wkPickBtns=(t,sm)=>scHero(t||(WK.pages.length?'צלם עמוד נוסף':'צלם'),'','<input type="file" accept="image/*" capture="environment" data-c="wkpick" hidden>',sm||WK.pages.length)+`<div class="scrow one">${scTile('img',WK.pages.length?'הוסף עמודים מהגלריה':'העלה מהגלריה','<input type="file" accept="image/*" multiple data-c="wkpick" hidden>')}</div>`;
 V.wk=()=>{if(WS==='sinv')return supView();if(WS==='wv')return wvView();if(WS==='rp'&&WK.rp)return wkRpView();const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
  const sent=`${ob.length?`<div class="card"><b>ממתינות לשליחה: ${ob.length}</b><p class="note">${SY.err?esc(SY.err):'ישלחו כשיהיה חיבור לאינטרנט.'}</p><button class="btn g" data-a="wkRefresh">נסה לשלוח עכשיו</button></div>`:''}
  <div class="sec"><h3>ההוצאות ששלחתי</h3><button class="btn s g" data-a="wkRefresh">רענן</button></div>
@@ -2447,7 +2635,7 @@ V.wk=()=>{if(WS==='sinv')return supView();if(WS==='wv')return wvView();if(WS==='
   return{t:'הוצאה',s:'סריקה או הכנסה ידנית',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>${dpBan()}
   <p class="note" style="margin:4px 0 8px">סרוק או העלה את החשבונית (או דף ההוצאה מהקופה). חשבונית של כמה עמודים: הוסף את כל העמודים ואז לחץ "זהה".</p>
   ${wkThumbs()}${WK.pages.length&&bzF('scan')?`<button class="btn w" style="margin-bottom:10px" data-a="wkGo">זהה פרטים מ-${WK.pages.length} ${WK.pages.length>1?'עמודים':'עמוד'}</button>`:''}
-  ${wkPickBtns()}<button class="btn g w" data-a="wkManual">הכנסה ידנית</button>${bzF('suppliers')&&wp('sup')?'<button class="btn g w" style="margin-top:8px" data-a="supGo">🧾 חשבוניות ספקים החודש</button>':''}`}}
+  ${wkPickBtns(WK.pages.length?'':'צלם חשבונית')}<button class="btn g w" data-a="wkManual">הכנסה ידנית</button>${bzF('suppliers')&&wp('sup')?`<button class="btn g w" style="margin-top:8px" data-a="supGo">${sci('pdf')}חשבוניות ספקים החודש</button>`:''}`}}
  /* ידני */
  const c=cs.find(x=>x.id===WK.cat),subs=c?c.subs:[];if(subs.length&&WK.sub&&!subs.find(s=>s.id===WK.sub))WK.sub='';if(!subs.length)WK.sub='';
  const sel=(l,n,list,v,ph)=>`<label class="f"><span>${l}</span><select name="${n}" data-c="wkf"><option value="">${ph}</option>${list.map(([k,t])=>`<option value="${esc(k)}"${k===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label>`;
@@ -2457,7 +2645,7 @@ V.wk=()=>{if(WS==='sinv')return supView();if(WS==='wv')return wvView();if(WS==='
  ${!WK.reg&&c&&c.beh==='sup'?`<label class="f"><span>מספר חשבונית</span><input name="inv" value="${esc(WK.inv||'')}" autocomplete="off" ${WK.dn?'':'required'} data-c="wkf"></label>${WK.dn?`<label class="cb"><input type="checkbox" name="dn" value="1" data-c="wkf" checked> זוהתה תעודת משלוח (חסרה חשבונית)</label>`:''}`:''}
  <label class="f"><span>תאריך</span><input name="date" type="date" value="${esc(WK.date)}" required data-c="wkf"></label>${wkBrF(WK.br,WK.sub,'wkf')}
  <label class="f"><span>${WK.reg?'סיבה (חובה) – עבור מה הוצא המזומן':'הערות'}</span><input name="note" value="${esc(WK.note)}" maxlength="300" ${WK.reg?'required':''} data-c="wkf"></label>${WK.reg?coDepHint(WK.note):''}
- ${wkThumbs()}${WK.reg&&WK.pages.length?`<button type="button" class="btn g w" style="margin:6px 0" data-a="wkCoScan" ${WK.cs===1?'disabled':''}>${WK.cs===1?'מזהה את הפתק…':'🔎 זהה סכום, תאריך ושעה מהפתק'}</button>${coSugH(WK.csug,WK)}`:''}${wkPickBtns().replace('width:100%;margin:8px 0','width:100%;margin:8px 0').replace('📷 צלם','📷 '+(WK.pages.length?'צלם':'חובה: צלם חשבונית / דף הוצאה'))}
+ ${wkThumbs()}${WK.reg&&WK.pages.length?`<button type="button" class="btn g w" style="margin:6px 0" data-a="wkCoScan" ${WK.cs===1?'disabled':''}>${WK.cs===1?'מזהה את הפתק…':'🔎 זהה סכום, תאריך ושעה מהפתק'}</button>${coSugH(WK.csug,WK)}`:''}${wkPickBtns(WK.pages.length?'':'חובה: צלם חשבונית / דף הוצאה',1)}
  <button class="btn" style="width:100%">שלח</button></form>`}};
 CHG.wkf=el=>{WK[el.name]=el.type==='checkbox'?el.checked:el.value;if(el.name==='cat'){WK.sub='';WK.dn=false}if(el.name==='reg'){wkSnap();WK.reg=el.checked}if(el.name==='cat'||el.name==='dn'||el.name==='reg')rerender();else if(el.name==='note'&&WK.reg){wkSnap();rerender()}};
 let WKP={o:'',mode:'scan',rot:0,u:'',busy:0};
@@ -2494,7 +2682,7 @@ ACT.wkCoScan=async()=>{if(!WK.pages.length||WK.cs===1)return;wkSnap();const W=WK
 ACT.wkHome=()=>{WS='home';if(WK.rp)WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[],inv:'',dn:false};rerender()};
 /* צילום חדש שהמנהל ביקש: נשלח כפריט חדש עם repl = מזהה ההוצאה המקורית. המנהל מחליף בו רק את הצילום */
 const wkRpSent=id=>obGet().some(o=>o.data&&o.data.repl===id)||WKL.some(o=>o.d&&o.d.repl===id&&o.st==='new');
-const wkRpRow=x=>`<div style="flex-basis:100%;margin-top:6px">${x.rq?`<p class="note" style="margin:0 0 6px;font-weight:700">המנהל ביקש: ${esc(x.rq)}</p>`:''}${wkRpSent(x.id)?'<p class="note" style="margin:0">✓ צילום חדש נשלח. ממתין למנהל.</p>':`<button class="btn" style="width:100%" data-a="wkRe" data-id="${esc(x.id)}">📷 צלם מחדש</button>`}</div>`;
+const wkRpRow=x=>`<div style="flex-basis:100%;margin-top:6px">${x.rq?`<p class="note" style="margin:0 0 6px;font-weight:700">המנהל ביקש: ${esc(x.rq)}</p>`:''}${wkRpSent(x.id)?`<p class="note scnote ok" style="margin:0">${sci('ok')}<span>צילום חדש נשלח. ממתין למנהל.</span></p>`:`<button class="btn" style="width:100%" data-a="wkRe" data-id="${esc(x.id)}">${sci('cam')}צלם מחדש</button>`}</div>`;
 ACT.wkRe=el=>{const x=WKL.find(o=>o.id===el.dataset.id);if(!x)return;if(!el.dataset.ok&&!WK.rp&&(WK.pages.length||s_(WK.amt)||s_(WK.note)))return ask('יש הוצאה שהתחלת למלא ועוד לא שלחת. אם תמשיך, היא תימחק. להמשיך לצילום החדש?',()=>ACT.wkRe({dataset:{id:x.id,ok:'1'}}),'כן, המשך');WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[],inv:'',dn:false,rp:{id:x.id,d:x.d,rq:x.rq}};WS='rp';rerender()};
 function wkRpView(){const r=WK.rp,d=r.d||{};return{t:'צילום חדש',s:'בקשה מהמנהל',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>
  <div class="card"><b>${ils(num(d.amt))} · ${esc(d.reg?'דף הוצאה מקופה':(d.catName||''))}${d.subName?' · '+esc(d.subName):''}</b><p class="note" style="margin:4px 0 0">${esc(d.date||'')}${d.inv?' · חשבונית '+esc(d.inv):''}</p>${r.rq?`<p style="margin:8px 0 0;font-weight:700">המנהל ביקש: ${esc(r.rq)}</p>`:''}<p class="note" style="margin:8px 0 0">צלם שוב את כל הדף (וכל העמודים, אם יש כמה). הסכום והפרטים לא משתנים, רק הצילום.</p></div>
@@ -4974,17 +5162,38 @@ async function bzAnalyze(f){const u=URL.createObjectURL(f);try{const im=await ne
  const w0=im.naturalWidth,h0=im.naturalHeight;if(!w0||!h0)throw new Error('img');const sc=Math.min(1,48/Math.max(w0,h0)),w=Math.max(1,Math.round(w0*sc)),h=Math.max(1,Math.round(h0*sc)),cv=document.createElement('canvas');cv.width=w;cv.height=h;
  const cx=cv.getContext('2d');cx.drawImage(im,0,0,w,h);return bzSuggest(cx.getImageData(0,0,w,h).data)}finally{URL.revokeObjectURL(u)}}
 /* ד. החלת המיתוג: ערכי המשתנים הקיימים של ערכת הנושא (--acc, --acc2, --onacc, --bg, --card, --ink, ועוד --mut ו---line שנגזרים מהם). בלי brand או עם colors ריק: כלום לא נכתב, והמראה זהה לקודם */
-function bzSkin(pv){const b=SY.biz&&SY.biz.brand,c=pv||(b&&b.colors&&typeof b.colors==='object'?b.colors:{}),ok=BZC.filter(k=>BZHEX.test(c[k]||'')),key=ok.map(k=>k+c[k]).join(),st=document.documentElement.style;
+function bzSkin(pv){const b=SY.biz&&SY.biz.brand,t=dsTheme();dsApply(t);let c=pv||(b&&b.colors&&typeof b.colors==='object'?b.colors:{});
+ /* D1: הצבעים השמורים נבחרו לערכת העסק. ערכה אחרת (בחירה אישית של מנהל) – נגזרים מחדש מצבע ההדגשה של הלוגו */if(!pv&&t!==dsBiz()&&BZHEX.test(c.acc||''))c=dsDerive(t,c.acc);
+ const ok=BZC.filter(k=>BZHEX.test(c[k]||'')),key=t+ok.map(k=>k+c[k]).join(),st=document.documentElement.style;
  if(key!==BZK){BZK=key;BZC.forEach(k=>ok.includes(k)?st.setProperty('--'+k,c[k]):st.removeProperty('--'+k));
   if(ok.length===6){st.setProperty('--mut',bzMut(c));st.setProperty('--line',bzLine(c))}else{st.removeProperty('--mut');st.removeProperty('--line')}}
  if(!pv)bzLogo()}
+/* ===== עיצוב מחדש D1: ערכות עיצוב (a = גרפיט וזכוכית כהה, b = קרמיקה ונייר בהיר, c = גרפיט וזכוכית בהיר).
+ ברירת המחדל של העסק: brand.theme (מנהל־על במסך המיתוג). עסק ישן בלי theme: נגזר מ-base (dark-gold → a, אחר → a). לארג' פעמי / בלי מיתוג → a.
+ בחירה אישית (החלטת המשתמש 8.11 13:54): מנהל (admin, לא עובד) בוחר בהגדרות ערכה לעצמו – נשמר רק במכשיר, LK('lp-ds:'+uid), וגובר על ברירת המחדל. עובד – תמיד של העסק.
+ הצבעים נגזרים מצבע ההדגשה של הלוגו לפי הערכה (dsDerive) ומתוקנים ל-4.5:1 (bzFix). לפני זיהוי העסק (מסך כניסה) – הערכה שנשמרה עם הלוגו האחרון (lp-lastlogo.t). ===== */
+const DS_T=['a','b','c'],DS_N={a:'גרפיט כהה',b:'קרמיקה ונייר',c:'גרפיט בהיר'},dsOk=t=>DS_T.includes(t),dsMap=b=>b==='dark-gold'?'a':'a';
+const DS_BASE={a:['#222427','#2c2f33','#eef0f2',.07,.06],b:['#f3f1ee','#fbfaf8','#2f2f31',.05,.025],c:['#e3e6e9','#f5f6f7','#1f2124',.05,.025]};
+const dsOf=br=>br&&typeof br==='object'?(dsOk(br.theme)?br.theme:dsMap(br.base)):'a';
+function dsBiz(){const b=SY.biz&&SY.biz.brand;if(b&&typeof b==='object')return dsOf(b);if(!SY.refresh){const o=bzLastO();if(o&&dsOk(o.t))return o.t}return'a'}
+const dsKey=()=>SY.uid?LK('lp-ds:'+SY.uid):'';
+function dsMine(){try{if(typeof isA==='function'&&isA()&&dsKey()){const v=localStorage.getItem(dsKey());return dsOk(v)?v:''}}catch(e){}return''}
+const dsTheme=()=>dsMine()||dsBiz();
+function dsDerive(t,acc){const[bg,card,ink,m1,m2]=DS_BASE[dsOk(t)?t:'a'],a=bzNorm(acc)||bzNorm(DS_BASE.a[0]);
+ const c={acc:a,bg:bzMix(bg,a,m1),card:bzMix(card,a,m2),ink:bzMix(ink,a,.04)};c.acc2=bzAcc2(c.acc,c.bg);c.onacc=bzCR(BZ_K,c.acc)>=bzCR(BZ_W,c.acc)?BZ_K:BZ_W;return bzFix(c)}
+function dsApply(t){try{document.documentElement.dataset.ds=dsOk(t)?t:dsTheme()}catch(e){}}
+const dsPick=(cur,act,def,acc)=>`<div class="dsp" role="radiogroup" aria-label="ערכת עיצוב">${def?`<button type="button" role="radio" aria-checked="${!cur}" data-a="${act}" data-v=""><span class="mini" style="background:var(--srf-0)"><i></i><b></b></span>${esc(def)}</button>`:''}${DS_T.map(t=>`<button type="button" role="radio" aria-checked="${cur===t}" data-a="${act}" data-v="${t}"><span class="mini" style="${bzVars(dsDerive(t,acc||DS_ACC()))}"><i></i><b></b></span>${DS_N[t]}</button>`).join('')}</div>`;
+const DS_ACC=()=>{const b=SY.biz&&SY.biz.brand,c=b&&b.colors;return c&&BZHEX.test(c.acc||'')?c.acc:(t=>t==='a'?'#f0764c':t==='b'?'#b23c17':'#ab3815')(dsBiz())};
+const dsRow=()=>typeof isA==='function'&&isA()?`<h3>ערכת עיצוב</h3><p class="note" style="margin:2px 0 0">רק במכשיר הזה ורק לך. העובדים רואים את ברירת המחדל של העסק (${DS_N[dsBiz()]}).</p>${dsPick(dsMine(),'dsMine','ברירת המחדל של העסק')}`:'';
+ACT.dsMine=el=>{const v=el.dataset.v,k=dsKey();if(!k)return;try{if(dsOk(v))localStorage.setItem(k,v);else localStorage.removeItem(k)}catch(e){}BZK='~';rerender()};
 /* לוגו העסק בכותרת: נטען מ-Storage (b/{bizId}/brand/logo) עם הכניסה של המשתמש. נכשל = נשאר הלוגו הרגיל */
 /* 6ה, החלטה 1: הטלפון זוכר את הלוגו (ושם התצוגה) של העסק האחרון שנכנסו ממנו – למסך הכניסה ולמסך הנעילה בפתיחה, לפני שיש חיבור.
  המפתח lp-lastlogo בלי תחילית עסק (נקרא לפני שהעסק ידוע). נשמר רק לוגו קטן (מוקטן ל-192px). טלפון חדש / בלי לוגו = הלוגו הרגיל. בדפדפן ההתנתקות מוחקת אותו (dvWipe) */
-const LLK='lp-lastlogo';function bzLastO(){try{const o=JSON.parse(localStorage.getItem(LLK)||'null');if(o&&typeof o.u==='string'&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(o.u)&&o.u.length<400000){/* 6ו: נשמרים רק התמונה והשם המוצג. מזהה העסק (b) שנשמר בגרסה 6ה – נמחק */if('b'in o){delete o.b;try{localStorage.setItem(LLK,JSON.stringify({u:o.u,n:typeof o.n==='string'?o.n:''}))}catch(e){}}return o}}catch(e){}return null}
+const LLK='lp-lastlogo';function bzLastO(){try{const o=JSON.parse(localStorage.getItem(LLK)||'null');if(o&&typeof o.u==='string'&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(o.u)&&o.u.length<400000){/* 6ו: נשמרים רק התמונה והשם המוצג. מזהה העסק (b) שנשמר בגרסה 6ה – נמחק */if('b'in o){delete o.b;try{localStorage.setItem(LLK,JSON.stringify({u:o.u,n:typeof o.n==='string'?o.n:'',t:dsOk(o.t)?o.t:'a'}))}catch(e){}}if('t'in o&&!dsOk(o.t))o.t='a';return o}}catch(e){}return null}
+try{dsApply()}catch(e){}/* D1: הערכה כבר בטעינה (גם במסך הכניסה, מ-lp-lastlogo.t) */
 /* APK של עסק (make-biz-app.sh כותב window.LP_BIZ): הלוגו והשם שלו עד הכניסה הראשונה. בלי – הלוגו הרגיל */const bzDef=()=>{const z=window.LP_BIZ;return z&&typeof z.logo==='string'&&/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(z.logo)?z:null};
 const bzLast=()=>{const o=bzLastO(),z=bzDef();return o?o.u:z?z.logo:GATE_LOGO},bzLastN=()=>{const o=bzLastO(),z=bzDef();return o&&typeof o.n==='string'&&o.n?o.n.slice(0,60):z&&typeof z.name==='string'&&z.name?z.name.slice(0,60):'לארג׳ פעמי'};
-function bzRemember(bl){try{if(!bl){localStorage.removeItem(LLK);return}const im=new Image(),u=URL.createObjectURL(bl);im.onload=()=>{try{const z=192,c=document.createElement('canvas'),r=Math.min(1,z/Math.max(im.width,im.height));c.width=Math.max(1,Math.round(im.width*r));c.height=Math.max(1,Math.round(im.height*r));c.getContext('2d').drawImage(im,0,0,c.width,c.height);let d=c.toDataURL('image/webp',.85);if(!/^data:image\/webp/.test(d))d=c.toDataURL('image/png');const b=SY.biz&&SY.biz.brand;localStorage.setItem(LLK,JSON.stringify({u:d,n:b&&typeof b.name==='string'?b.name:''}))}catch(e){}URL.revokeObjectURL(u)};im.onerror=()=>URL.revokeObjectURL(u);im.src=u}catch(e){}}
+function bzRemember(bl){try{if(!bl){localStorage.removeItem(LLK);return}const im=new Image(),u=URL.createObjectURL(bl);im.onload=()=>{try{const z=192,c=document.createElement('canvas'),r=Math.min(1,z/Math.max(im.width,im.height));c.width=Math.max(1,Math.round(im.width*r));c.height=Math.max(1,Math.round(im.height*r));c.getContext('2d').drawImage(im,0,0,c.width,c.height);let d=c.toDataURL('image/webp',.85);if(!/^data:image\/webp/.test(d))d=c.toDataURL('image/png');const b=SY.biz&&SY.biz.brand;localStorage.setItem(LLK,JSON.stringify({u:d,n:b&&typeof b.name==='string'?b.name:'',t:dsOf(b)}))}catch(e){}URL.revokeObjectURL(u)};im.onerror=()=>URL.revokeObjectURL(u);im.src=u}catch(e){}}
 function bzLogo(){const b=SY.biz&&SY.biz.brand,p=b&&typeof b.logoPath==='string'&&SY.bizId&&SY.bizId!==BZ0&&BZOK(SY.bizId)&&SY.refresh&&b.logoPath===('b/'+SY.bizId+'/brand/logo')?b.logoPath:'',key=p?SY.bizId+'|'+(b.updatedAt||''):'';
  if(key===BZU)return;BZU=key;const el=document.getElementById('lglogo'),h=document.documentElement;
  if(!p){if(BZLG){URL.revokeObjectURL(BZLG);BZLG=null}h.removeAttribute('data-bzl');try{el.style.backgroundImage='url('+GATE_LOGO+')'}catch(e){}if(SY.refresh&&SY.biz)bzRemember(null);return}
@@ -4996,7 +5205,7 @@ function showSusp(){document.body.classList.remove('gate');const g=document.getE
  document.body.classList.add('susp');document.body.append(e);if(isNat())setTimeout(()=>{checkUpdate(false).catch(()=>{})},800)}
 ACT.suspUpd=async()=>{const m=document.getElementById('suspM');if(m)m.textContent='בודק…';try{await checkUpdate(true)}catch(x){}if(m)m.textContent=''};
 /* ו. מחשב (לא באפליקציה, עכבר): "צלם" הופך להעלאת קובץ. בטלפון, גם בדפדפן, המצלמה נשארת */
-function bzDesk(){document.querySelectorAll('input[capture]').forEach(i=>{i.removeAttribute('capture');const l=i.closest('label');if(l)for(const n of l.childNodes)if(n.nodeType===3&&/צלם|📷/.test(n.nodeValue))n.nodeValue=n.nodeValue.replace('📷','📁').replace(/צלם/g,'העלה')})}
+function bzDesk(){document.querySelectorAll('input[capture]').forEach(i=>{i.removeAttribute('capture');const l=i.closest('label');if(!l)return;const w=document.createTreeWalker(l,NodeFilter.SHOW_TEXT);let n;while((n=w.nextNode()))if(/צלם|📷|צילום/.test(n.nodeValue))n.nodeValue=n.nodeValue.replace('📷','📁').replace(/צלם/g,'העלה').replace(/צילום/g,'העלאת')})}
 try{if(!isNat()&&matchMedia('(pointer:fine)').matches){document.documentElement.classList.add('bzd');bzDesk();let q=0;new MutationObserver(()=>{if(q)return;q=1;requestAnimationFrame(()=>{q=0;bzDesk()})}).observe(document.body,{childList:true,subtree:true})}}catch(e){}
 /* ז. מסך מיתוג – מנהל־על בלבד (עדכון חוזה 14), מכרטיס העסק או מיד אחרי "פתיחת עסק": שם, לוגו, הצעות צבע מהלוגו, עריכה ידנית, תצוגה מקדימה, חזרה לברירת המחדל.
  העסק נבחר לפי המזהה (go('brand',bizId)), לא לפי העסק הנוכחי. שמירה: הלוגו ל-Storage (b/{bizId}/brand/logo – רק מנהל־על כותב), ו-brand דרך setBusinessBrand (נרשם ב-audit). למנהל העסק אין כניסה. לא בעסק במצב legacy */
@@ -5004,7 +5213,7 @@ const BR_N={acc:'הדגשה (כפתורים וסימונים)',acc2:'הדגשה 
 function bzProbe(k){const p=document.createElement('i');p.style.color='var(--'+k+')';document.body.append(p);const m=/(\d+)[, ]+(\d+)[, ]+(\d+)/.exec(getComputedStyle(p).color)||[0,0,0,0];p.remove();return bzHex([+m[1],+m[2],+m[3]])}
 const brBiz=id=>{const b=ADM.sa&&BZOK(id)?admBiz(id):null;return b&&!b.missing&&b.dataRoot!=='legacy'?b:null};
 function brInit(id){const bz=brBiz(id),b=bz&&bz.brand||{},c=b.colors&&typeof b.colors==='object'?b.colors:{},full=BZC.every(k=>BZHEX.test(c[k]||''));
- const R={id,name:s_(b.name),colors:full?Object.fromEntries(BZC.map(k=>[k,c[k].toLowerCase()])):{},custom:full,file:null,url:'',lg:'',sugg:[],busy:0},lp='b/'+id+'/brand/logo';
+ const R={id,theme:dsOf(b),name:s_(b.name),colors:full?Object.fromEntries(BZC.map(k=>[k,c[k].toLowerCase()])):{},custom:full,file:null,url:'',lg:'',sugg:[],busy:0},lp='b/'+id+'/brand/logo';
  /* הלוגו הנוכחי של העסק הנבחר (לא של העסק שבו מנהל־העל נמצא) */if(b.logoPath===lp)abkSt('/'+encodeURIComponent(lp)+'?alt=media').then(r=>r.blob()).then(bl=>{if(BR!==R){return}R.lg=URL.createObjectURL(bl);brDraw()}).catch(()=>{});
  return R}
 function brFree(){if(!BR)return;if(BR.url)URL.revokeObjectURL(BR.url);if(BR.lg)URL.revokeObjectURL(BR.lg);BR=null}
@@ -5012,16 +5221,18 @@ const brEff=()=>Object.fromEntries(BZC.map(k=>[k,BR.colors[k]||bzProbe(k)]));
 const bzVars=c=>BZC.map(k=>'--'+k+':'+c[k]).concat(['--mut:'+bzMut(c),'--line:'+bzLine(c)]).join(';');
 const brLg=()=>BR.url?`<img src="${BR.url}" alt="הלוגו שנבחר" style="max-width:96px;max-height:96px;display:block;margin:6px 0;border-radius:12px;background:var(--card)"><p class="note">${esc(BR.file.name)} · יישמר בלחיצה על "שמירה"</p>`:(BR.lg?`<img src="${BR.lg}" alt="הלוגו הנוכחי" style="max-width:96px;max-height:96px;display:block;margin:6px 0;border-radius:12px;background:var(--card)">`:'<p class="note">עדיין אין לוגו לעסק.</p>');
 const brSg=()=>BR.sugg.length?`<h3>הצעות צבע מהלוגו</h3><div class="brsgs">${BR.sugg.map((s,i)=>`<button type="button" class="brsg ${BZC.every(k=>BR.colors[k]===s.c[k])?'on':''}" data-a="brPick" data-i="${i}" style="${bzVars(s.c)}" aria-label="הצעה: ${esc(s.n)}"><i style="background:var(--acc)"></i><i style="background:var(--bg);border:1px solid var(--ink)"></i><i style="background:var(--ink)"></i><small style="color:var(--ink)">${esc(s.n)}</small></button>`).join('')}</div>`:'<p class="note">בחירת לוגו תציג כאן 3–4 הצעות צבע.</p>';
-const brPv=()=>`<div class="brpv" style="${bzVars(brEff())}"><div class="brh"><b>${esc(s_(BR.name)||'שם העסק')}</b></div><div class="brc">כרטיס לדוגמה<br><small>טקסט משני</small></div><span class="btn s">כפתור</span> <span class="btn s g">כפתור משני</span></div>`;
+const brAcc=()=>{const c=BR.colors;if(BZHEX.test(c.acc||''))return c.acc;const s=BR.sugg[0];return s?s.c.acc:(BR.theme==='a'?'#f0764c':'#c2441d')};
+const brDs=()=>`<h3>ערכת עיצוב לעסק</h3><p class="note" style="margin:2px 0 0">ברירת המחדל לכל המשתמשים בעסק. מנהל יכול לבחור לעצמו ערכה אחרת בהגדרות. הצבעים נגזרים מהלוגו.</p>${dsPick(BR.theme,'brDs','',brAcc())}`;
+const brPv=()=>`<div class="brpv" data-ds="${BR.theme}" style="${bzVars(brEff())}"><div class="brh"><b>${esc(s_(BR.name)||'שם העסק')}</b></div><div class="brc">כרטיס לדוגמה<br><small>טקסט משני</small></div><span class="btn s">כפתור</span> <span class="btn s g">כפתור משני</span></div>`;
 const brWn=()=>{if(!BR.custom)return'';const bad=bzChk(brEff()).filter(p=>p.r<4.5);return bad.length?`<div class="card" style="border-color:var(--bad)" role="alert"><b style="color:var(--bad)">הצבעים לא עומדים בניגודיות מינימלית (4.5:1)</b>${bad.map(p=>`<p class="note" style="margin:4px 0">${esc(p.t)}: ${p.r.toFixed(1)}:1</p>`).join('')}<button type="button" class="btn s w" data-a="brFix">תיקון אוטומטי</button></div>`:''};
-function brDraw(skip){if(cur().v!=='brand')return;const set=(id,h)=>{const e=document.getElementById(id);if(e)e.innerHTML=h};set('brLg',brLg());set('brSg',brSg());set('brPv',brPv());set('brWn',brWn());
+function brDraw(skip){if(cur().v!=='brand')return;const set=(id,h)=>{const e=document.getElementById(id);if(e)e.innerHTML=h};set('brLg',brLg());set('brDs',brDs());set('brSg',brSg());set('brPv',brPv());set('brWn',brWn());
  const c=brEff();document.querySelectorAll('[data-i=brc]').forEach(e=>{if(e!==skip)e.value=c[e.dataset.k]});const sb=document.getElementById('brSaveBtn');if(sb)sb.disabled=!!BR.busy||(BR.custom&&!bzOk(c))}
 V.brand=id=>{const T='מיתוג';if(!ADM.sa)return{t:T,h:'<div class="empty">המסך הזה למנהל המערכת בלבד</div>'};
  if(!ADM.L){if(!ADM.busy&&!ADM.err)admLoad();return{t:T,h:`<div class="empty">${ADM.err?esc(ADM.err)+'<br><button class="btn g" data-a="admReload">נסה שוב</button>':'טוען…'}</div>`}}
  const bz=brBiz(id);if(!bz)return{t:T,h:'<div class="empty">אין מיתוג לעסק הזה</div>'};if(!BR||BR.id!==id){brFree();BR=brInit(id)}const c=brEff();
  return{t:T,s:bz.name||bz.id,h:`<p class="note">מיתוג העסק <bdi dir="ltr">${esc(bz.id)}</bdi>. השינוי יוצג למנהל ולעובדים בכניסה הבאה שלהם.</p><form data-f="brSave"><div class="card"><label class="f"><span>שם תצוגה (עד 60 תווים)</span><input name="name" maxlength="60" value="${esc(BR.name)}" data-i="brName" autocomplete="off"></label></div>
  <div class="card"><h3>לוגו</h3><p class="note">png, jpeg או webp, עד 1MB.</p><div id="brLg">${brLg()}</div><label class="btn g w" style="cursor:pointer;margin-top:8px">📁 בחירת לוגו<input type="file" accept="image/png,image/jpeg,image/webp" data-c="brFile" hidden></label></div>
- <div class="card" id="brSg">${brSg()}</div>
+ <div class="card" id="brDs">${brDs()}</div><div class="card" id="brSg">${brSg()}</div>
  <div class="card"><h3>צבעים</h3>${BZC.map(k=>`<div class="brrow"><span>${BR_N[k]}</span><input type="color" data-i="brc" data-k="${k}" value="${c[k]}" aria-label="${BR_N[k]}"><input type="text" data-i="brc" data-k="${k}" value="${c[k]}" dir="ltr" maxlength="7" autocomplete="off" aria-label="${BR_N[k]} (קוד צבע)"></div>`).join('')}</div>
  <div id="brWn">${brWn()}</div><div class="card"><h3>תצוגה מקדימה</h3><div id="brPv">${brPv()}</div></div>
  <button class="btn w" id="brSaveBtn">שמירה</button><button type="button" class="btn g w" style="margin-top:8px" data-a="brReset">חזרה לצבעי ברירת המחדל</button></form>`}};
@@ -5032,6 +5243,7 @@ CHG.brFile=async el=>{const f=el.files&&el.files[0];el.value='';if(!f||!BR)retur
  if(f.size>BR_MAX)return toast('הלוגו גדול מ-1MB. בחר קובץ קטן יותר');
  let sg;try{sg=await bzAnalyze(f)}catch(e){return toast('לא ניתן לקרוא את התמונה')}
  if(!BR)return;BR.file=f;if(BR.url)URL.revokeObjectURL(BR.url);BR.url=URL.createObjectURL(f);BR.sugg=sg;brDraw();toast(sg.length?'הלוגו נקלט. אפשר לבחור הצעת צבעים':'הלוגו נקלט (לא נמצאו בו צבעים להצעה)')};
+ACT.brDs=el=>{if(!BR||!dsOk(el.dataset.v))return;BR.theme=el.dataset.v;BR.colors=dsDerive(BR.theme,brAcc());BR.custom=1;brDraw()};
 ACT.brPick=el=>{const s=BR&&BR.sugg[+el.dataset.i];if(!s)return;BR.colors=Object.assign({},s.c);BR.custom=1;brDraw()};
 ACT.brFix=()=>{if(!BR)return;BR.colors=bzFix(brEff());BR.custom=1;brDraw();toast('הצבעים תוקנו לניגודיות תקינה')};
 ACT.brReset=()=>ask('לחזור לצבעי ברירת המחדל של האפליקציה? השינוי יישמר מיד.',()=>{brSave(true)});
@@ -5042,7 +5254,7 @@ async function brSave(reset){if(!ADM.sa||!BR||BR.busy)return;const id=BR.id,bz=b
  let colors={};if(!reset&&BR.custom){const c=brEff();if(!BZC.every(k=>BZHEX.test(c[k])))return toast('כל צבע חייב להיות בצורה #rrggbb');if(!bzOk(c))return toast('יש צבעים שלא עומדים בניגודיות. לחץ "תיקון אוטומטי"');colors=c}
  const old=bz.brand||{},lp0='b/'+id+'/brand/logo';let lp=old.logoPath===lp0?lp0:'';BR.busy=1;brDraw();
  try{if(BR.file&&!reset){if(BR.file.size>BR_MAX||!BR_TYPES.includes(BR.file.type))throw new Error('הלוגו לא תקין');try{await brUp(BR.file,id)}catch(x){x.logo=1;throw x}lp=lp0}
-  const r=await fnCall('setBusinessBrand',{bizId:id,brand:{name:nm,logoPath:lp,colors}}),B=r&&r.brand&&typeof r.brand==='object'?r.brand:{name:nm,logoPath:lp,colors};
+  const theme=dsOk(BR.theme)?BR.theme:'a',r=await fnCall('setBusinessBrand',{bizId:id,brand:{name:nm,logoPath:lp,colors,theme}}),B=r&&r.brand&&typeof r.brand==='object'?r.brand:{name:nm,logoPath:lp,colors,theme};
   bz.brand=B;if(id===SY.bizId){SY.biz=Object.assign({},SY.biz,{brand:B});syS();bzSkin()}brFree();toast(reset?'חזרנו לצבעי ברירת המחדל':'המיתוג נשמר');rerender()}
  catch(e){if(BR){BR.busy=0;brDraw()}toast(e.logo?(e.message||'העלאת הלוגו נכשלה')+'. המיתוג לא נשמר':e.code===403?'אין הרשאה לשמור מיתוג':e.message||'השמירה נכשלה')}}
 /* ===== ריבוי עסקים, שלב 6ג-2: כניסה ואבטחה באפליקציה =====
@@ -5167,10 +5379,7 @@ function usReset(){const U=US;US=null;const p=$('#uspane'),d=$('#usdiv');documen
 function usOpen(){if(US)usReset();US={pg:[],i:0,type:'',unsure:[],pane:0,sh:0,step:'start',view:'',auto:0};usStart()}
 function usStart(){US.step='start';usPane(0);
  usSheet('הכנסת מסמכים',`<p class="note" style="margin:4px 0 12px">צלם או העלה מסמך. האפליקציה מזהה איזה מסמך זה, והטופס שלו נפתח ליד התמונה. אפשר לבדוק ולתקן כל שדה.</p>${bzF('scan')?'':'<p class="note" style="font-weight:700">הזיהוי החכם כבוי. אחרי הצילום תבחרו את סוג המסמך בעצמכם.</p>'}
- <label class="btn w" style="cursor:pointer;margin-bottom:10px">📷 צילום במצלמה<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden></label>
- <label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 תמונות מהגלריה<input type="file" accept="image/*" multiple data-c="uspick" hidden></label>
- <label class="btn g w" style="cursor:pointer;margin-bottom:10px">📄 קובץ PDF<input type="file" accept="application/pdf" multiple data-c="uspick" hidden></label>
- <button class="btn g w" data-a="usManual">הכנס ידני</button>`)}
+ ${scHero('צילום חשבונית','מזהה איזה מסמך זה, והטופס נפתח ליד התמונה','<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden>')}<div class="scrow">${scTile('img','תמונות מהגלריה','<input type="file" accept="image/*" multiple data-c="uspick" hidden>')}${scTile('pdf','קובץ PDF','<input type="file" accept="application/pdf" multiple data-c="uspick" hidden>')}${scBtn('pen','הכנס ידני','data-a="usManual"')}</div>`)}
 ACT.usOpen=()=>{if(!usAny())return toast('אין לך הרשאה להזין מסמכים');usOpen()};
 ACT.usBackStart=()=>{if(US)usStart()};
 ACT.usManual=()=>{if(!US)return;US.pg=[];US.i=0;usPane(0);usChooser('הכנסה ידנית: איזה סוג מסמך?','usBackStart')};
@@ -5224,7 +5433,7 @@ function usMark(root){if(!US||!root||!US.unsure.length)return;for(const n of US.
 function usUnmark(e){const t=e.target;if(!t||!t.classList||!t.classList.contains('usu'))return;t.classList.remove('usu');if(US)US.unsure=US.unsure.filter(n=>n!==t.name);const m=t.parentElement&&t.parentElement.querySelector('.usn');if(m)m.remove()}
 document.addEventListener('input',usUnmark);document.addEventListener('change',usUnmark);
 /* ---- אחרי שמירה: סרוק עוד / חזרה ---- */
-function usDone(){if(!US)return;const U=US;usPane(0);U.pg=[];U.fid='';U.type='';U.unsure=[];U.view='';U.step='done';usSheet('נשמר',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשמר</b><div class="note">הוכנס על ידי: ${esc(usWho()||'לא ידוע')}</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">📷 סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
+function usDone(){if(!US)return;const U=US;usPane(0);U.pg=[];U.fid='';U.type='';U.unsure=[];U.view='';U.step='done';usSheet('נשמר',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשמר</b><div class="note">הוכנס על ידי: ${esc(usWho()||'לא ידוע')}</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">${sci('cam')}סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
 ACT.usAgain=()=>{usOpen()};
 ACT.usExit=()=>{if(!US)return;if(US.step==='form'){ask('לסגור את מסך הסריקה? מה שלא נשמר יימחק.',()=>{usReset();rerender()},'סגור');return}usReset();rerender()};
 {const o=FRM.addsave;FRM.addsave=(form,ev)=>{const U=US,n=S.tx.length,us=!!(U&&A&&A.us);const r=o(form,ev);if(us&&US===U&&!A&&S.tx.length>n)usDone();return r}}
@@ -5496,12 +5705,11 @@ function usGrpOpen(gi){const U=US,gr=U&&U.grp&&U.grp[gi];if(!gr)return;U.gi=gi;
 /* פתיחה מחדש של המסך באמצע תור: הדפים נשארים במכשיר */
 {const o=usOpen;usOpen=function(){if(US&&US.grp)US.quit=1;return o.apply(this,arguments)}}
 /* ---- סריקה רציפה: מצלמים כמה דפים אחד אחרי השני, ורק בסוף מזהים ומחלקים ---- */
-{const o=usStart;usStart=function(){o();const b=$('#sheet .bd label.btn');if(b&&!$('#sheet [data-a=usBatch]'))b.insertAdjacentHTML('afterend','<button class="btn g w" style="margin-bottom:10px" data-a="usBatch">📚 צילום כמה דפים ברצף (Z, חשבונית ארוכה, כמה מסמכים)</button>')}}
+{const o=usStart;usStart=function(){o();const b=$('#sheet .bd .scrow')||$('#sheet .bd label.btn');if(b&&!$('#sheet [data-a=usBatch]'))b.insertAdjacentHTML('afterend','<button class="btn g w scbatch" data-a="usBatch">'+sci('stack')+'<span>צילום כמה דפים ברצף (Z, חשבונית ארוכה, כמה מסמכים)</span></button>')}}
 ACT.usBatch=()=>{if(!US)return;US.batch=1;usBatchSheet()};
 function usBatchSheet(){const U=US,n=U.pg.length;U.step='batch';
  usSheet('צילום ברצף',`<p class="note" style="margin:0 0 10px">צלמו כל דף בנפרד. אפשר לערבב מסמכים – האפליקציה תפריד ביניהם ותחבר דפים של אותו מסמך. בסוף תוכלו לתקן את החלוקה.</p><div class="card"><b>${n?n+' דפים צולמו':'עוד לא צולם דף'}</b></div>
- <label class="btn w" style="cursor:pointer;margin-bottom:10px">📷 ${n?'צילום הדף הבא':'צילום הדף הראשון'}<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden></label>
- <label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 הוספה מהגלריה<input type="file" accept="image/*" multiple data-c="uspick" hidden></label>
+ ${scHero(n?'צילום הדף הבא':'צילום הדף הראשון','','<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden>',1)}<div class="scrow one">${scTile('img','הוספה מהגלריה','<input type="file" accept="image/*" multiple data-c="uspick" hidden>')}</div>
  <button class="btn w" data-a="usBatchGo" ${n?'':'disabled'}>סיום וזיהוי (${n})</button>`,'usBackStart');if(n&&!U.pane)usPane(1);else if(U.pane)usPaneDraw()}
 {const o=CHG.uspick;CHG.uspick=async el=>{const U=US;if(!U||!U.batch||U.step!=='batch')return o(el);const fs=[...el.files];el.value='';
  for(const f of fs){if(U.pg.length>=US_MAXP){toast('אפשר עד '+US_MAXP+' דפים בסריקה אחת');break}
@@ -5665,7 +5873,7 @@ async function mqSend(){const U=US;if(!U||!isW()||!U.pg.length||U.mqB)return;U.m
    U.mqDoc=1}
   for(let i=0;i<np;i++){
    try{await fsx('/mq/'+id+'/p?documentId='+i,{method:'POST',body:JSON.stringify({fields:{data:sv(v.slice(i*CH,(i+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}
-  mqOutSet(mqOut().filter(x=>x!==id).concat(id));MQ.mat=0;usPane(0);U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשלח למנהל לטיפול</b><div class="note">כשהמנהל יטפל בו תקבל הודעה "טופל" או "נדחה".</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">📷 סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
+  mqOutSet(mqOut().filter(x=>x!==id).concat(id));MQ.mat=0;usPane(0);U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשלח למנהל לטיפול</b><div class="note">כשהמנהל יטפל בו תקבל הודעה "טופל" או "נדחה".</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">${sci('cam')}סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
  catch(e){toast(e.offline?e.message:'השליחה למנהל נכשלה. נסה שוב')}finally{if(U)U.mqB=0}}
 ACT.mqSend=()=>mqSend();
 /* בבורר הסוג של עובד (סוג חסום שזוהה, או "לא בטוח"): כפתור "שלח למנהל לטיפול" */
