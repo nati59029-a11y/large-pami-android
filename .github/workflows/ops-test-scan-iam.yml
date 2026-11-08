@@ -15,17 +15,9 @@ jobs:
           [ "$P" = "largpeami-test-f4691" ] || { echo "::error::not test project"; exit 1; }
           gcloud auth activate-service-account --key-file="$RUNNER_TEMP/sa.json" -q
           gcloud config set project "$P" -q
-      - name: Show invoker policy (read only)
+      - name: Read scanDocument logs (read only)
         run: |
-          set +e
-          for f in scanDocument stockIn createOrder; do
-            echo "== $f"
-            gcloud run services get-iam-policy "$(echo $f | tr 'A-Z' 'a-z')" --region us-central1 --format=json
-          done
-      - name: Grant public invoker on scanDocument (test only)
-        run: |
-          gcloud run services add-iam-policy-binding scandocument --region us-central1 --member=allUsers --role=roles/run.invoker -q
-          gcloud run services get-iam-policy scandocument --region us-central1 --format=json
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="scandocument" AND timestamp>="2026-11-08T19:00:00Z"' --limit 60 --format='value(timestamp,severity,httpRequest.status,textPayload,jsonPayload.message)' | cut -c1-400
       - name: Cleanup
         if: always()
         run: rm -f "$RUNNER_TEMP/sa.json"
