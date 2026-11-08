@@ -72,7 +72,7 @@ const seed = (p, org) => p.evaluate((o) => {
   check('6 אין התאמה: שדה סניף גלוי וחובה, בלי ברירת מחדל', t6.val === '' && !t6.hidden && t6.req && !t6.chg, t6);
   await mp.fill('#sheet input[name=amt]', '80'); await mp.fill('#sheet input[name=inv]', 'Z10'); await mp.click('#sheet button[name=go][value=done]'); await H.settle(mp, 300);
   check('6א שמירה בלי בחירת סניף נחסמת', await mp.evaluate(() => !S.tx.some((x) => x.inv === 'Z10') && !document.getElementById('sheet').hidden));
-  await mp.selectOption('#sheet select[name=br]', 'bra'); await mp.click('#sheet button[name=go][value=done]'); await H.settle(mp, 400);
+  await mp.selectOption('#sheet select[name=br]', 'bra'); await mp.click('#sheet button[name=go][value=done]'); await H.settle(mp, 400); await mp.waitForFunction(() => S.tx.some((x) => x.inv === 'Z10'), null, { timeout: 5000 }).catch(() => {});
   check('6ב אחרי בחירה – נשמר עם הסניף', await mp.evaluate(() => { const t = S.tx.find((x) => x.inv === 'Z10'); return !!t && t.br === 'bra'; }));
   // ---- 7. עריכה: הסניף הנוכחי מוצג ושמירה בלי שינוי לא כותבת br לרשומה ישנה ----
   const t7 = await mp.evaluate(() => { txDlg('i2'); ACT.txEdit({ dataset: { id: 'i2' } }); const s = document.querySelector('#dlg [name=br]'); return { val: s && s.value, hidden: s && s.hidden }; });

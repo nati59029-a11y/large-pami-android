@@ -159,6 +159,20 @@ describe('סניפים – חוקים', () => {
     await assertSucceeds(mk(EMP1, 'i3', {}));
     await assertSucceeds(mk(EMP, 'i4', { br: 'br2' }));
   });
+  // חלק ג' §5א: צ'ק שעובד סרק נשלח לתיבה עם k='check' – גם בלי expW. k אחר נחסם; בלי k ובלי expW – נחסם כמו היום
+  it('inbox: k=check – עובד בלי expW יכול לשלוח צ\'ק (גם chunks k<16 hex>_N); k אחר / בלי k נחסם', async () => {
+    await prep((d) => d.doc(`b/${A}/staff/${EMP}`).set({ name: EMP, role: 'employee', active: true, pushTokens: [], perms: { incW: true, expW: false } }));
+    const id = 'k0123456789abcdef';
+    await assertSucceeds(db(EMP).doc(`b/${A}/chunks/${id}_0`).set({ owner: EMP, data: 'x' }));
+    await assertFails(db(EMP).doc(`b/${A}/chunks/wzzz_0`).set({ owner: EMP, data: 'x' }));
+    const base = { owner: EMP, by: EMP, status: 'new', created: 'x', data: '{"kind":"check"}', parts: '1' };
+    await assertSucceeds(db(EMP).doc(`b/${A}/inbox/${id}`).set(Object.assign({ k: 'check' }, base)));
+    await prep((d) => d.doc(`b/${A}/chunks/i9_0`).set({ owner: EMP, data: 'x' }));
+    await assertFails(db(EMP).doc(`b/${A}/inbox/i9`).set(Object.assign({ k: 'invoice' }, base)));
+    await assertFails(db(EMP).doc(`b/${A}/inbox/i9`).set(base));
+    await prep((d) => d.doc(`b/${A}/chunks/i8_0`).set({ owner: EMP1, data: 'x' }));
+    await assertFails(db(EMP1).doc(`b/${A}/inbox/i8`).set(Object.assign({}, base, { owner: EMP1, by: EMP1, k: 'other' })));
+  });
 });
 
 // ---------------------------------------------------------------------------------------------

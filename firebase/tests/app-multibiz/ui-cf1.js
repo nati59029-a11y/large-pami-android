@@ -103,7 +103,8 @@ const seed = (p) => p.evaluate(() => {
 
   // ---- 5. chkMatch ----
   await seed(mp);
-  const t5 = await mp.evaluate(() => ({ one: chkMatch('sA', 500).map((t) => t.id), combo: chkMatch('sA', 1700).map((t) => t.id).sort(), none: chkMatch('sA', 123).length, big: chkMatch('sA', 99999).length, nosub: chkMatch('', 500).length, tol: chkMatch('sA', 200.01).map((t) => t.id) }));
+  // חלק ג' (תיקון 6): chkMatch מחזיר {one,combo}
+  const t5 = await mp.evaluate(() => { const ids = (r) => r.one.concat(r.combo).map((t) => t.id), ln = (r) => r.one.length + r.combo.length; return { one: ids(chkMatch('sA', 500)), combo: chkMatch('sA', 1700).combo.map((t) => t.id).sort(), none: ln(chkMatch('sA', 123)), big: ln(chkMatch('sA', 99999)), nosub: ln(chkMatch('', 500)), tol: ids(chkMatch('sA', 200.01)) }; });
   check('5 chkMatch: יתרה זהה = חשבונית אחת; ±0.01', t5.one.join() === 'a2' && t5.tol.join() === 'a3', t5);
   check('5א chkMatch: צירוף (1000+500+200=1700)', t5.combo.join() === 'a1,a2,a3', t5);
   check('5ב chkMatch: אין התאמה / גדול מכל היתרות / בלי ספק = []', t5.none === 0 && t5.big === 0 && t5.nosub === 0, t5);
@@ -149,7 +150,7 @@ const seed = (p) => p.evaluate(() => {
   wpg.__q = [{ type: 'check', allowed: true, fields: { amount: 10 }, confidence: {}, uncertain: [] }];
   await wpg.setInputFiles('#sheet input[accept="image/*"][multiple]', { name: 'c.png', mimeType: 'image/png', buffer: await mkImg(wpg, 'CHK') }); await H.settle(wpg, 2200);
   const t9b = await wpg.evaluate(() => document.getElementById('sheet').innerText);
-  check('9א עובד שסורק צ׳ק: הודעה שהמסמך עובר למנהל', /למנהל/.test(t9b), t9b.slice(0, 200));
+  check('9א עובד שסורק צ׳ק: נשלח לבד למנהל (חלק ג\' §5א)', /נשלח למנהל/.test(t9b), t9b.slice(0, 200));
   check('9ב אין שגיאות JS (עובד)', !wpg.__errors.length, wpg.__errors);
 
   await browser.close();
