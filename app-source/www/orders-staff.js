@@ -12,7 +12,7 @@ const NB='_';
 const ST={new:'חדשה',work:'בטיפול',wait_pay:'ממתין לתשלום',paid:'שולם',out:'יצא למשלוח',done:'הושלם',cancel:'בוטלה'};
 const NEXT={new:['work','wait_pay'],work:['wait_pay','new'],wait_pay:['work'],paid:['out','done'],out:['done'],done:[],cancel:[]};
 const PM=[['link','אשראי בקישור'],['phone','אשראי בטלפון'],['cash','מזומן'],['transfer','העברה'],['other','אחר']];
-const WHY={in:'הכנסת מלאי',set:'תיקון כמות',zero:'נגמר במלאי',order:'הזמנה',xout:'הועבר לסניף אחר',xin:'העברה נכנסת',cancel:'ביטול הזמנה',edit:'עריכת הזמנה'};
+const WHY={in:'הכנסת מלאי',set:'תיקון כמות',zero:'נגמר במלאי',order:'הזמנה',xout:'הועבר לסניף אחר',xin:'העברה נכנסת',cancel:'ביטול הזמנה',edit:'עריכת הזמנה',prod:'עריכת מוצר'};
 const O={L:null,P:null,cfg:null,err:'',busy:0,at:0,st:'open',log:{},sl:null,draft:null};
 const on=()=>(isA()||isW()||!!(SY&&SY.sa))&&bzF('orders')&&wp('ord');
 const mgr=()=>isA()||!!(SY&&SY.sa);
@@ -129,7 +129,7 @@ V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return
  ${o.status==='cancel'?`<div class="card"><b>בוטלה</b><p class="note" style="margin:4px 0 0">${esc(o.cancel&&o.cancel.reason||'')}</p></div>`:''}
  ${paid}${pay?`<div class="sec"><h3>תשלום</h3></div>${pay}`:''}
  ${nx?`<div class="sec"><h3>שינוי סטטוס</h3></div><div class="row">${nx}</div>`:''}
- ${o.status!=='done'&&o.status!=='cancel'&&(open||mgr())?`<button class="btn g w" style="margin-top:14px" data-a="oxCancel" data-id="${esc(o.id)}">ביטול הזמנה</button>`:''}
+ ${o.status!=='done'&&o.status!=='cancel'&&(o.status!=='paid'||mgr())?`<button class="btn g w" style="margin-top:14px" data-a="oxCancel" data-id="${esc(o.id)}">ביטול הזמנה</button>`:''}
  <div class="sec"><h3>היסטוריה</h3></div>${lg?lg.map(x=>`<div class="note" style="padding:6px 0;border-bottom:1px solid var(--line)">${tm(x.t)} · ${esc(LOGW[x.act]||x.act)}${x.note?' · '+esc(x.note):''}</div>`).join('')||'<p class="note">אין</p>':'<p class="note">טוען…</p>'}`}};
 const LOGW={create:'נוצרה',edit:'נערכה',status:'סטטוס',paid:'סומן שולם',unpay:'בוטל "שולם"',cancel:'בוטלה',called:'חייגו ללקוח',payOpen:'נפתח דף התשלום'};
 async function logLoad(id){try{const r=await fsx('/ord/'+id+'/log?pageSize=100');O.log[id]=((r&&r.documents)||[]).map(dec).sort((a,b)=>b.t-a.t)}catch(e){O.log[id]=[]}if(cur().v==='oxOrd'&&!typing())rerender()}
@@ -162,7 +162,7 @@ V.oxStock=()=>{const T='מלאי';if(!on())return deny(T);if(!O.P){load();return
  <label class="f"><span>חיפוש (שם או ברקוד)</span><input data-i="oxSQ" value="${esc(O.sq||'')}" autocomplete="off"></label>
  <div id="oxpl">${plH(L,br)}</div><button class="btn g s w" style="margin-top:8px" data-a="oxHist">היסטוריית תנועות</button>`}};
 const plH=(L,br)=>L.map(p=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">לא זמין</span>':''}</b><small>${ils(p.price)}${p.barcode?' · '+esc(p.barcode):''}${hasBr()&&brs().length>1?' · '+brs().map(b=>esc(b.name)+': '+n3(q(p,b.id))).join(' · '):''}</small></div><b class="a${q(p,br)<0?' neg':''}">${n3(q(p,br))}</b>
- <div class="row" style="width:100%"><button class="btn g s grow" data-a="oxZero" data-id="${esc(p.id)}">נגמר במלאי</button>${mgr()?`<button class="btn g s grow" data-a="oxFix" data-id="${esc(p.id)}">תיקון כמות</button><button class="btn g s grow" data-a="oxEditP" data-id="${esc(p.id)}">עריכה</button>`:''}</div></div>`).join('')||'<div class="empty">אין מוצרים. הוסף מוצר חדש.</div>';
+ <div class="row" style="width:100%"><button class="btn g s grow" data-a="oxZero" data-id="${esc(p.id)}">נגמר במלאי</button>${mgr()?`<button class="btn g s grow" data-a="oxFix" data-id="${esc(p.id)}">תיקון כמות</button>`:''}<button class="btn g s grow" data-a="oxEditP" data-id="${esc(p.id)}">עריכה</button></div></div>`).join('')||'<div class="empty">אין מוצרים. הוסף מוצר חדש.</div>';
 INP.oxSQ=el=>{O.sq=el.value;const br=hasBr()?SBR:NB,L=(O.P||[]).filter(p=>!O.sq||String(p.name).includes(O.sq)||String(p.barcode||'')===O.sq.trim());const x=document.getElementById('oxpl');if(x)x.innerHTML=plH(L,br)};
 ACT.oxSBr=el=>{SBR=el.dataset.id;rerender()};
 const sbr=()=>hasBr()?SBR:undefined;
@@ -187,7 +187,7 @@ ACT.oxInAdd=()=>{inRead();O.inL.push({pid:'',qty:''});dlg(inH())};
 FRM.oxInF=async f=>{inRead();const lines=[];for(const l of O.inL){if(!l.pid&&!l.qty)continue;const v=num(l.qty);if(!l.pid)return toast('בחר מוצר בכל שורה');if(!(v>0))return toast('כמות לא תקינה');lines.push({pid:l.pid,qty:v})}if(!lines.length)return toast('אין שורות');
  const b=f.querySelector('button.grow:not(.g)');b.disabled=true;try{await fnCall('stockIn',{reqId:O.inReq,br:sbr(),lines});closeDlg();toast('המלאי עודכן');await load(true)}catch(e){b.disabled=false;err(e)}};
 ACT.oxHist=async()=>{dlg('<h3>היסטוריית תנועות</h3><p class="note">טוען…</p>');try{const L=(await runQ('stockLog',brWhere(),300)).sort((a,b)=>b.at-a.at).slice(0,150);
- dlg(`<h3>היסטוריית תנועות</h3><div style="max-height:60vh;overflow:auto">${L.map(x=>`<div class="note" style="padding:6px 0;border-bottom:1px solid var(--line)">${tm(x.at)} · <b>${esc(x.name)}</b>${hasBr()?' · '+esc(bn(x.br)):''} · ${WHY[x.why]||x.why} · <bdi dir="ltr">${x.delta>0?'+':''}${n3(x.delta)}</bdi>${x.no?' · הזמנה #'+x.no:''}</div>`).join('')||'<p class="note">אין תנועות</p>'}</div><button class="btn g w" data-a="closeDlg">סגור</button>`)}catch(e){dlg(`<h3>היסטוריית תנועות</h3><p class="note">${esc(e.message)}</p><button class="btn g w" data-a="closeDlg">סגור</button>`)}};
+ dlg(`<h3>היסטוריית תנועות</h3><div style="max-height:60vh;overflow:auto">${L.map(x=>`<div class="note" style="padding:6px 0;border-bottom:1px solid var(--line)">${tm(x.at)} · <b>${esc(x.name)}</b>${hasBr()?' · '+esc(bn(x.br)):''} · ${WHY[x.why]||x.why} · <bdi dir="ltr">${x.delta>0?'+':''}${n3(x.delta)}</bdi>${x.no?' · הזמנה #'+x.no:''}${x.note?' · '+esc(x.note):''}</div>`).join('')||'<p class="note">אין תנועות</p>'}</div><button class="btn g w" data-a="closeDlg">סגור</button>`)}catch(e){dlg(`<h3>היסטוריית תנועות</h3><p class="note">${esc(e.message)}</p><button class="btn g w" data-a="closeDlg">סגור</button>`)}};
 
 /* ---------- מקור המלאי לכל סניף (מנהל) ---------- */
 V.oxCfg=()=>{const T='מאיזה סניף יורד המלאי';if(!on()||!mgr())return deny(T);if(!O.cfg){load();return loading(T)}const B=brs();
@@ -231,5 +231,19 @@ setTimeout(()=>{try{opSync()}catch(e){}},8000);setInterval(()=>{if(!document.hid
 CHG.oxSupBr=el=>{const u=subById(el.dataset.id);if(!u)return;if(el.value&&brs().some(b=>b.id===el.value))u.br=el.value;else delete u.br;save();toast('נשמר')};
 if(typeof brGuess==='function'){const g0=brGuess;brGuess=function(t){try{const u=t&&t.sub?subById(t.sub):null;if(u&&u.br&&!(t&&t.br)&&brList().some(b=>b.id===u.br))return{id:u.br,sure:true}}catch(e){}return g0(t)}}
 
-window.__ox=O;window.__opSync=opSync;
+/* 18:56: העברה פנימית בדוח "לפי סניף" – הזכות אצל ספק קיזוז שנוצלה (תשלום 'קיזוז' על חשבונית הספק) כשסניף ההכנסה ≠ סניף החשבונית.
+   הקצאה: הזכות הוותיקה ביותר מנוצלת ראשונה (יתרת פתיחה – בלי סניף, לא מעבירה). החודש = תאריך הקיזוז. סך העסק = 0. שאר הדוחות לא משתנים. */
+function brXfer(m){const N={};let any=false;
+ for(const u of S.subs.filter(x=>x&&x.offset)){const src=[];const b0=typeof u.offBal0==='number'?u.offBal0:0;if(b0>0)src.push({br:null,left:b0,d:''});
+  live().filter(t=>t.t==='inc'&&t.off&&t.off.sub===u.id&&+t.amt>0).sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(t=>src.push({br:txBr(t),left:+t.amt,d:t.date}));
+  const use=[];live().filter(t=>t.t==='exp'&&t.sub===u.id).forEach(t=>(t.pays||[]).forEach(p=>{if(p&&p.m==='קיזוז'&&+p.a>0)use.push({br:txBr(t),a:+p.a,d:String(p.d||t.date||'')})}));
+  use.sort((a,b)=>a.d.localeCompare(b.d));let i=0;
+  for(const x of use){let need=x.a;while(need>0.004&&i<src.length){const c=Math.min(need,src[i].left);if(src[i].br&&x.br&&src[i].br!==x.br&&x.d.startsWith(m)){N[src[i].br]=rnd((N[src[i].br]||0)-c);N[x.br]=rnd((N[x.br]||0)+c);any=true}src[i].left-=c;need-=c;if(src[i].left<=0.004)i++}}}
+ return any?N:null}
+if(typeof brTable==='function'){const bt0=brTable;brTable=function(m){const h=bt0(m);try{if(!h)return h;const X=brXfer(m);if(!X)return h;const E=brFil(),L=brList(),ids=new Set(L.map(b=>b.id));
+  const rows=brAll().filter(b=>(ids.has(b.id)||(!brMineIds()&&live().some(t=>t.date.startsWith(m)&&txBr(t)===b.id)))&&(!E.length||E.includes(b.id)));
+  const v=b=>X[b.id]||0,tot=rnd(rows.reduce((s,b)=>s+v(b),0));
+  return h+`<div class="tw" style="margin-top:6px"><table id="brXfer"><thead><tr><th>העברה פנימית</th><th class="n">סכום</th></tr></thead><tbody>${rows.map(b=>`<tr><td>${esc(b.name)}</td><td class="n ${v(b)>=0?'pos':'neg'}"><bdi dir="ltr">${v(b)>0?'+':''}</bdi>${ils(v(b))}</td></tr>`).join('')}</tbody><tfoot><tr><th>סה״כ לעסק</th><th class="n">${ils(tot)}</th></tr></tfoot></table></div><p class="note">זכות אצל ספק קיזוז שנוצלה לחשבונית בסניף אחר. מתקזז לאפס ברמת העסק; לא נכלל בהכנסות ובהוצאות.</p>`}catch(e){return h}}}
+
+window.__ox=O;window.__opSync=opSync;window.__brXfer=brXfer;
 })();

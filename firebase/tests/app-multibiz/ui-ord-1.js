@@ -127,6 +127,22 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   globalThis.__OP = [doc('ordpay/o2', { ord: S('o2'), no: N(11), br: S('br2'), amt: N(80), at: N(T1), st: S('void'), sup: M({ id: S('s_sup1'), name: S('סמוויקס') }) })];
   const a2 = await page.evaluate(async () => { await window.__opSync(); const t = S.tx.find((x) => x.id === 'op_o2'); return { x: !!t.x, n: S.tx.filter((x) => x.id === 'op_o2').length }; });
   check('14 שולם בקישור הספק → הכנסה אחת (₪80, סניף ההזמנה, זכות אצל הספק); סנכרון כפול לא מכפיל; void → מבוטלת', a1.length === 1 && a1[0].t === 'inc' && a1[0].amt === 80 && a1[0].br === 'br2' && a1[0].off.sub === 's_sup1' && !a1[0].x && a2.x && a2.n === 1, { a1, a2 });
+  // 15. העברה פנימית: זכות מהזמנה (₪80, br2) נוצלה ₪50 לחשבונית של הספק בסניף br1 → br2 −50, br1 +50, סה"כ 0; ניצול באותו סניף – בלי העברה
+  const xf = await page.evaluate(() => {
+    const M0 = new Date().toISOString().slice(0, 7);
+    let u = S.subs.find((x) => x.id === 's_sup1'); if (!u) { const c = S.cats.find((x) => x.beh === 'sup'); u = { id: 's_sup1', cat: c.id, name: 'סמוויקס' }; S.subs.push(u); } u.offset = true;
+    S.tx = S.tx.filter((t) => !/^(op_|xf_)/.test(t.id));
+    S.tx.push({ id: 'op_x1', t: 'inc', cat: 'c_ordinc', sub: 's_ordlink', date: M0 + '-02', amt: 80, br: 'br2', off: { sub: 's_sup1' } });
+    S.tx.push({ id: 'xf_i1', t: 'exp', cat: u.cat, sub: 's_sup1', date: M0 + '-03', amt: 50, br: 'br1', kind: 'inv', pays: [{ id: 'p1', d: M0 + '-03', a: 50, m: 'קיזוז' }] });
+    const a = window.__brXfer(M0);
+    S.tx.find((t) => t.id === 'xf_i1').br = 'br2';
+    const b = window.__brXfer(M0);
+    S.tx.find((t) => t.id === 'xf_i1').br = 'br1';
+    HM = M0; NAV = [{ v: 'home' }]; render(0);
+    const tb = document.querySelector('#brXfer'); return { a, b, html: tb ? tb.innerText : '', inc: document.querySelector('#brTbl') ? document.querySelector('#brTbl').innerText : '' };
+  });
+  await setDs('b'); await H.settle(page, 200); await page.evaluate(() => { const t = document.querySelector('#brXfer'); if (t) t.scrollIntoView(); }); await shot('העברה-פנימית-b');
+  check('15 העברה פנימית בדוח לפי סניף: ‎−50/+50, סה"כ 0; באותו סניף – אין שורה', xf.a && xf.a.br2 === -50 && xf.a.br1 === 50 && xf.b === null && /סה״כ לעסק/.test(xf.html), xf);
   check('12 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
