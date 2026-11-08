@@ -6,7 +6,7 @@
 
 const { hasPerm } = require('./roles');
 
-const TYPES = ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening'];
+const TYPES = ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening', 'check'];
 // תתי־סוג של "invoice" (הוצאה): חשבונית, תעודת משלוח, קבלה (נשמרת כהוצאה), חשבונית זיכוי (סכום שלילי)
 const DOC_TYPES = ['invoice', 'delivery_note', 'receipt', 'credit_note'];
 const Z_PARTS = ['top', 'middle', 'bottom'];
@@ -21,6 +21,8 @@ const FIELDS = {
   zreport: Object.assign({ register: S, store: S, date: S, time: S, report_no: S },
     Object.fromEntries(['credit', 'cash', 'checks', 'voucher_buy', 'voucher_credit', 'voucher_issue', 'house', 'rounding', 'total', 'open_float', 'cash_sales', 'cash_out', 'cash_in_drawer'].map((k) => [k, N]))),
   opening: { register: S, store: S, date: S, time: S, total: N },
+  // צ'ק ששילמנו לספק (חלק ב' 2026-11-08): date = תאריך הפירעון שעל הצ'ק; payee = המוטב (הספק)
+  check: { number: S, bank: S, branch: S, account: S, date: S, amount: N, payee: S },
 };
 
 // מנהל = הכול. עסק legacy (לארג' פעמי היום): עובד – הכול חוץ מהעברה (כמו scanDocument היום). עסק במבנה b: לפי expW/incW/trf.
@@ -28,7 +30,7 @@ function allowedTypes(who) {
   if (!who || who.role === 'manager') return TYPES.slice();
   if (!(who.biz && who.biz.dataRoot === 'b')) return TYPES.filter((t) => t !== 'transfer');
   const out = [];
-  if (hasPerm(who, 'expW')) out.push('invoice', 'cashout');
+  if (hasPerm(who, 'expW')) out.push('invoice', 'cashout', 'check');
   if (hasPerm(who, 'incW')) out.push('zreport', 'opening', 'deposit');
   if (hasPerm(who, 'trf')) out.push('transfer');
   return TYPES.filter((t) => out.includes(t));

@@ -90,8 +90,9 @@ const rect = (page, sel) => page.evaluate((s) => { const e = document.querySelec
     check(T + '9ג יציאה מהמסך הקיים סוגרת את חלונית התמונה', !t9d.us && t9d.pane, t9d);
     // 10. הכנס ידני
     await page.evaluate(() => usOpen()); await page.click('#sheet [data-a=usManual]'); await H.settle(page, 300);
+    // חלק ב': נוסף סוג "צ׳ק" (מנהל) – 8 סוגים
     const t10 = await page.evaluate(() => ({ opts: document.querySelectorAll('#sheet [data-a=usPick]').length, us: document.body.classList.contains('us-on') }));
-    check(T + '10 הכנס ידני: בורר סוג בלי תמונה', t10.opts === 7 && !t10.us, t10); await shot('10-ידני');
+    check(T + '10 הכנס ידני: בורר סוג בלי תמונה', t10.opts === 8 && !t10.us, t10); await shot('10-ידני');
     await page.click('#sheet [data-a=usPick][data-k=exp]'); await H.settle(page, 300);
     check(T + '10א ידני ← אשף ההוצאה הקיים', await page.evaluate(() => A && A.step === 'cat' && A.us === 1));
     await page.click('#sheet [data-a=sheetBack]'); await H.settle(page, 300); check(T + '10ב חזרה מהאשף ← בורר הסוג', await page.evaluate(() => !!document.querySelector('#sheet [data-a=usPick]')));

@@ -41,6 +41,7 @@ const CLASSIFY = {
   transfer: { type: 'transfer', type_confidence: 0.9, fields: { transfers: [{ amount: 1234.56, date: '2026-11-02', payee_name: 'ספק', payee_account: { bank: '12', branch: '345', account: '67890' }, reference: 'R-1' }] }, confidence: {} },
   zreport: { type: 'zreport', type_confidence: 0.9, z_part: 'middle', fields: { open_float: 8919, cash_sales: 3260, cash_out: -10615, cash_in_drawer: 1564 }, confidence: {} },
   opening: { type: 'opening', type_confidence: 0.9, fields: { register: '6328947', store: 'נחל לכיש', date: '2026-10-20', time: '09:11', total: 970.3 }, confidence: {} },
+  check: { type: 'check', type_confidence: 0.92, fields: { number: '000123', bank: 'לאומי', branch: '800', account: '1234567', date: '2026-12-15', amount: '2,360.00', payee: 'ספק דמה בע"מ' }, confidence: { amount: 0.95, date: 0.6, payee: 0.9 } },
   unknown: { type: 'unknown', type_confidence: 0.3, fields: {}, confidence: {} },
 };
 const state = { mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, classify: null };

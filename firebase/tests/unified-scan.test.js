@@ -293,3 +293,27 @@ describe('שלב 2 – סוגי הגבלה (setScanQuota), מנהל־על בלב
     assert.equal((await call('scanDocument', U.bemp, CLS())).status, 'OK');
   });
 });
+
+describe('חלק ב\' – classify: צ\'ק (check)', () => {
+  it('מנהל ועובד עם expW מקבלים שדות צ\'ק; ביטחון נמוך בתאריך = לא בטוח', async () => {
+    GM.state.classify = GM.CLASSIFY.check;
+    for (const u of [U.mgr, U.all]) {
+      const r = (await call('scanDocument', u, CLS())).result.result;
+      assert.equal(r.type, 'check'); assert.equal(r.allowed, true);
+      assert.deepEqual(r.fields, { number: '000123', bank: 'לאומי', branch: '800', account: '1234567', date: '2026-12-15', amount: 2360, payee: 'ספק דמה בע"מ' });
+      assert.ok(r.uncertain.includes('date'));
+    }
+  });
+  it('עובד בלי expW: סוג בלבד, בלי שדות, toManager', async () => {
+    GM.state.classify = GM.CLASSIFY.check;
+    const r = await call('scanDocument', U.noexp, CLS());
+    const x = r.result.result;
+    assert.equal(x.type, 'check'); assert.equal(x.allowed, false); assert.equal(x.toManager, true); assert.deepEqual(x.fields, {});
+    assert.ok(!r.text.includes('2360') && !r.text.includes('1234567'));
+  });
+  it('שדות לא מוכרים בצ\'ק מסוננים', async () => {
+    GM.state.classify = { type: 'check', fields: { amount: 10, iban: 'IL00', evil: '<b>' }, confidence: {} };
+    const r = (await call('scanDocument', U.mgr, CLS())).result.result;
+    assert.deepEqual(r.fields, { amount: 10 });
+  });
+});

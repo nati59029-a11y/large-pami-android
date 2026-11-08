@@ -286,6 +286,7 @@ function ensure(d){
  d=d||{};['cats','subs','tx','fixTpl','loans','ccx','inbox'].forEach(k=>{if(!Array.isArray(d[k]))d[k]=[]});
  if(!d.fixOk||typeof d.fixOk!=='object'||Array.isArray(d.fixOk))d.fixOk={};
  if(d.pmOff==null)d.pmOff=2;if(d.orgC!=null&&(typeof d.orgC!=='object'||Array.isArray(d.orgC)))delete d.orgC;/* סניפים 2026-11-08: S.orgC = עותק של org מהשרת. tx[].br / pays[].bank / pays[].card – רשות, בלי מיגרציה */if(!d.theme)d.theme='paper';if(!d.fs)d.fs=1;d.v=3;
+ /* תזרים/צ'קים (חלק ב' 2026-11-08): subs[].terms / tx[].due / pays[].chk – רשות. כאן רק מוחקים ערך פגום, לא מוסיפים */cfClean(d);
  ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});/* סגירת קופה (11.2026): S.zc = הסגירות שהוכנסו; תתי-קטגוריות "שובר קניה", "שובר זיכוי", "הנפקת שובר זיכוי" בשתי הקופות – רק אם חסרות (לפי שם). לא משנים ולא מוחקים קיים */if(!Array.isArray(d.zc))d.zc=[];if(!(d.zcMig>=1)){['i_yh','i_nl'].forEach(c=>{if(d.cats.find(x=>x.id===c))['שובר קניה','שובר זיכוי','הנפקת שובר זיכוי'].forEach(n=>{if(!d.subs.some(x=>x.cat===c&&heKey(x.name)===heKey(n)))d.subs.push({id:uid(),cat:c,name:n})})});d.zcMig=1}/* רצה פעם אחת: תת-קטגוריה שנמחקה אחר כך לא חוזרת */
  return d}
 function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. רשומה חדשה בלי eu = המשתמש שבמכשיר. סריקה אחידה (8.11): לכל סוגי הרשומות, לא רק הוצאות */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
@@ -431,15 +432,16 @@ CHG.hd=el=>{const d=el.parentElement.querySelector('[data-hd]');if(d)d.textConte
 const amtF=(n,v,neg)=>`<label class="f"><span>סכום (₪)</span><input class="amt" name="${n}" inputmode="decimal" autocomplete="off" value="${v===''||v==null?'':esc(v)}" required placeholder="0.00">${neg?`<div class="hd">חשבונית זיכוי? הקלד מינוס לפני המספר, או לחץ <button type="button" class="chip" style="min-height:36px" data-a="negFlip">הפוך סימן ±</button></div>`:''}</label>`;
 ACT.negFlip=el=>{const i=el.closest('label').querySelector('input');const v=pNum(i.value);if(v!=null)i.value=String(-v);else if(i.value.trim()===''){i.value='-';i.focus()}};
 const pmF=(n,list,v,req,t0)=>`<div class="f"><div style="font-weight:700;margin-bottom:6px;font-size:.92rem">${n==='m'?'אמצעי תשלום':n}</div><div class="pm" role="radiogroup">${list.map((m,i)=>`<label class="chip ${m===v?'on':''}" style="cursor:pointer"><input type="radio" name="${n}" value="${m}" ${m===v?'checked':''} ${i===0&&req!==false?'required':''} style="position:absolute;opacity:0;width:1px;height:1px" data-c="pmr">${m}</label>`).join('')}</div></div>${n==='m'?pmX(list,v,t0):''}`;
-CHG.pmr=el=>{el.closest('.pm').querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.contains(el)));const f=el.form;if(f)f.querySelectorAll('[data-pmx]').forEach(x=>{x.style.display=pmShow(x.dataset.pmx,el.value)?'':'none'})};
+CHG.pmr=el=>{el.closest('.pm').querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',c.contains(el)));const f=el.form;if(f)f.querySelectorAll('[data-pmx]').forEach(x=>{x.style.display=pmShow(x.dataset.pmx,el.value)?'':'none'});if(f)f.querySelectorAll('[data-pmc]').forEach(x=>{x.style.display=el.value===METHODS[1]?'':'none'})};
 /* בנק / כרטיס לתשלום (סניפים 2026-11-08): העברה/צ׳ק → בנק, אשראי → כרטיס. לא חובה; הניחוש מ-bankGuess/cardGuess (A1). בלי בנקים/כרטיסים מוגדרים – כלום לא מוצג */
 const pmShow=(k,m)=>k==='bank'?(m===METHODS[0]||m===METHODS[1]):m===METHODS[3];
 function pmX(list,v,t0){const o=orgNow(),bk=o.banks.filter(b=>b.on),cd=o.cards.filter(c=>c.on),t=t0||{};let h='';
  const mk=(k,lbl,L,g)=>`<label class="f" data-pmx="${k}" style="display:${pmShow(k,v)?'':'none'}"><span>${lbl} (לא חובה)</span><select name="${k}"><option value="">לא שויך</option>${L.map(x=>`<option value="${esc(x.id)}"${g.sure&&g.id===x.id?' selected':''}>${esc(x.name)}${x.last4?' ····'+esc(x.last4):''}</option>`).join('')}</select></label>`;
  if(bk.length&&(list.includes(METHODS[0])||list.includes(METHODS[1])))h+=mk('bank','בנק',bk,bankGuess(t,{m:METHODS[0]}));
  if(cd.length&&list.includes(METHODS[3]))h+=mk('card','כרטיס אשראי',cd,cardGuess(t,{m:METHODS[3]}));
+ if(list.includes(METHODS[1]))h+=chkF(v);
  return h}
-const pyX=(p,f)=>{if(f&&f.bank&&(p.m===METHODS[0]||p.m===METHODS[1]))p.bank=f.bank;if(f&&f.card&&p.m===METHODS[3])p.card=f.card;return p};
+const pyX=(p,f)=>{if(f&&f.bank&&(p.m===METHODS[0]||p.m===METHODS[1]))p.bank=f.bank;if(f&&f.card&&p.m===METHODS[3])p.card=f.card;return chkPay(p,f)};
 /* ניווט */
 const themeNow=()=>{try{if(isW())return cfgLocal().th||'paper'}catch(e){}return S.theme||'paper'};
 let NAV=[{v:'home'}],A=null;
@@ -630,9 +632,10 @@ ACT.payDlg=el=>payDlg(el.dataset.id);
 function payDlg(id){const t=S.tx.find(x=>x.id===id);closeDlg();
  dlg(`<h3>סגירת תשלום · ${esc(subName(t))}</h3><div class="card"><div class="note">חשבונית ${dfmt(t.date)}${t.inv?' · '+esc(t.inv):''} · חודש לתשלום ${mfmt(pmon(t))}</div><div class="row" style="justify-content:space-between"><span>סכום ${ils(t.amt)} · שולם ${ils(paid(t))}</span><b>יתרה ${ils(bal(t))}</b></div></div>
  <form data-f="paysave"><input type="hidden" name="id" value="${t.id}"><label class="f"><span>כמה משלמים עכשיו? (אפשר חלק)</span><input class="amt" name="a" inputmode="decimal" value="${bal(t)}" required></label>${dateF('תאריך התשלום','d',today())}${pmF('m',METHODS,'',undefined,t)}<div class="row"><button class="btn grow">אשר תשלום</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)}
-FRM.paysave=form=>{const f=fd(form),t=S.tx.find(x=>x.id===f.id),a=pNum(f.a);
+FRM.paysave=async form=>{if(form.dataset.busy)return;const f=fd(form),t=S.tx.find(x=>x.id===f.id),a=pNum(f.a);
  if(a==null||a<=0)return toast('סכום לא תקין');if(a>bal(t)+0.004)return toast('הסכום גדול מהיתרה ('+ils(bal(t))+')');if(!f.m)return toast('בחר אמצעי תשלום');
- t.pays.push(pyX({id:uid(),d:f.d,a:rnd(a),m:f.m},f));save();closeDlg();rerender();toast(bal(t)<0.005?'החשבונית נסגרה במלואה':'נרשם תשלום חלקי, נותרו '+ils(bal(t)))};
+ if(f.m===METHODS[1]&&!cfDt(f.cdate))return toast('חסר תאריך פירעון לצ׳ק');let img='';if(f.m===METHODS[1]){form.dataset.busy='1';try{img=await chkImg(form)}catch(e){delete form.dataset.busy;return toast('שמירת צילום הצ׳ק נכשלה')}}
+ t.pays.push(chkPay(pyX({id:uid(),d:f.d,a:rnd(a),m:f.m},f),f,img));save();closeDlg();rerender();toast(bal(t)<0.005?'החשבונית נסגרה במלואה':'נרשם תשלום חלקי, נותרו '+ils(bal(t)))};
 /* ===== קבצים מצורפים ===== */
 const rdU=f=>new Promise(r=>{const a=new FileReader();a.onload=()=>r(a.result);a.readAsDataURL(f)});
 /* מסמך אחד מכמה קבצים: כמה תמונות = עמודים של אותו מסמך (PAGES, כמו בסריקה). PDF – קובץ אחד לבד (כל העמודים שלו = מסמך אחד). קובץ אחד – בדיוק כמו קודם */
@@ -698,19 +701,76 @@ const NOWM=()=>ym(new Date());
 const inv=()=>live().filter(t=>hasPay(t));
 function dueStats(m){
  const E=brFil(),L=live().filter(t=>t.t==='exp'&&['sup','fixed'].includes(beh(t))&&pmon(t)===m&&(t.kind||'inv')!=='refund'&&inBr(t,E));
- const due=rnd(sum(L,t=>t.amt)),pd=rnd(sum(L,cashPaid)),open=inv().filter(t=>pmon(t)===m&&bal(t)>0.004&&inBr(t,E)),late=inv().filter(t=>pmon(t)<m&&bal(t)>0.004&&inBr(t,E));
+ const due=rnd(sum(L,t=>t.amt)),pd=rnd(sum(L,cashPaid)),open=inv().filter(t=>pmon(t)===m&&bal(t)>0.004&&inBr(t,E)),late=inv().filter(t=>isLate(t,m+'-01')&&inBr(t,E));
  return{L,due,pd,rem:rnd(due-pd),open,late,lateSum:rnd(sum(late,bal))}}
 /* ===== תזרים/צ'קים: ליבה ===== */
-/* 2026-11-08 חלק ב' (B1). חוזה ל-B2: termsOf, dueCalc, dueOf, isLate, chkOf, cfDebits, cfMonths, homeCards, chkMatch. stubs – מימוש בקומיט הבא */
-function termsOf(subId){return null}
-function dueCalc(subId,date){return addMon((date||today()).slice(0,7),0)+'-28'}
-function dueOf(t){return pmon(t)+'-28'}
-function isLate(t,td){return false}
-function chkOf(p){return null}
-function cfDebits(m,sel){return{chk:[],tr:[],paid:[],sum:0,sumPaid:0,sumExp:0}}
-function cfMonths(from,n,sel){return[]}
-function homeCards(m){return{due:0,debit:0,lateSum:0,lateN:0,open:[]}}
-function chkMatch(subId,amt){return[]}
+/* 2026-11-08 חלק ב' (B1). חוזה ל-B2: termsOf, dueCalc, dueOf, isLate, chkOf, cfDebits, cfMonths, homeCards, chkMatch. "באיחור" מעכשיו לפי תאריך (dueOf) ולא לפי חודש */
+/* פונקציות (לא const) – ensure() קורא להן בטעינה, לפני השורה הזו */
+function cfDt(v){return typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&pDate(v)===v}
+function cfTermsOk(x){return!!x&&typeof x==='object'&&!Array.isArray(x)&&(x.b==='inv'||x.b==='eom')&&Number.isInteger(x.d)&&x.d>=0&&x.d<=180}
+function cfClean(d){try{(d.subs||[]).forEach(s=>{if(s&&s.terms!=null&&!cfTermsOk(s.terms))delete s.terms});if(d.terms!=null&&!cfTermsOk(d.terms))delete d.terms;
+ (d.tx||[]).forEach(t=>{if(!t)return;if(t.due!=null&&!cfDt(t.due))delete t.due;(Array.isArray(t.pays)?t.pays:[]).forEach(p=>{if(p&&p.chk!=null&&(typeof p.chk!=='object'||Array.isArray(p.chk)||!cfDt(p.chk.date)))delete p.chk})})}catch(e){}}
+const mEnd=m=>{const[y,mm]=m.split('-').map(Number);return m+'-'+p2(new Date(y,mm,0).getDate())};
+const dAdd=(d,k)=>{const[y,m,x]=d.split('-').map(Number);return ymd(new Date(y,m-1,x+k))};
+/* תנאי התשלום של הספק; בלי = null (ואז לפי pm כמו היום). S.terms = ברירת מחדל לעסק (רשות, מסך ההגדרות של B2); ספק עם pm משלו גובר על ברירת המחדל */
+function termsOf(subId){const s=subId?subById(subId):null;if(s&&cfTermsOk(s.terms))return{b:s.terms.b,d:s.terms.d};if(s&&s.pm!=null&&s.pm!=='')return null;return cfTermsOk(S.terms)?{b:S.terms.b,d:S.terms.d}:null}
+/* inv = תאריך החשבונית + d ימים. eom (שוטף) = סוף חודש החשבונית + d; כפולה של 30 = חודשים שלמים (שוטף+60 על נובמבר = 31.1). בלי terms = סוף חודש payDef */
+function dueCalc(subId,date){const dt=cfDt(date)?date:today(),T=termsOf(subId);if(!T)return mEnd(payDef(subId,dt));
+ if(T.b==='inv')return dAdd(dt,T.d);if(T.d%30===0)return mEnd(addMon(dt.slice(0,7),T.d/30));return dAdd(mEnd(dt.slice(0,7)),T.d)}
+function dueOf(t){return t&&cfDt(t.due)?t.due:mEnd(pmon(t))}
+function isLate(t,td){return bal(t)>0.004&&dueOf(t)<(td||today())}
+function chkOf(p){const c=p&&p.chk;if(!c||typeof c!=='object'||!cfDt(c.date))return null;return{no:s_(c.no),bank:s_(c.bank),date:c.date,img:s_(c.img)}}
+/* ספק קיזוז (חלק ג'): sup.offset – לא נספר בתזרים */
+const cfOff=t=>{const s=t&&t.sub?subById(t.sub):null;return!!(s&&s.offset)};
+const cfSkipM=m=>m===METHODS[2]||m===METHODS[3]||m==='קיזוז'||m==='קיזוז זיכוי';
+/* מה יורד מהבנק בחודש m: צ'קים לפי תאריך הפירעון, העברות פתוחות לפי dueOf, העברות ששולמו לפי p.d ("ירד בפועל"). מזומן/אשראי/קיזוז – לא. sel חסר = brFil() */
+function cfDebits(m,sel){const E=sel===undefined?brFil():sel,chk=[],tr=[],paid=[];
+ live().forEach(t=>{if(t.t!=='exp'||!['sup','fixed'].includes(beh(t))||(t.kind||'inv')==='refund'||!inBr(t,E)||cfOff(t))return;
+  (Array.isArray(t.pays)?t.pays:[]).forEach(p=>{if(!p||p.crof||cfSkipM(p.m)||!(p.a>0))return;
+   if(p.m===METHODS[1]){const c=chkOf(p),d=c?c.date:p.d;if(typeof d==='string'&&d.startsWith(m))chk.push({t,p,a:rnd(p.a),date:d});return}
+   if(typeof p.d==='string'&&p.d.startsWith(m))paid.push({t,p,a:rnd(p.a)})});
+  if(hasPay(t)){const b=bal(t),d=dueOf(t);if(b>0.004&&d.startsWith(m))tr.push({t,a:b,date:d})}});
+ const sc=rnd(sum(chk,x=>x.a)),st=rnd(sum(tr,x=>x.a)),sumPaid=rnd(sum(paid,x=>x.a)),sumExp=rnd(sc+st);
+ return{chk,tr,paid,sum:rnd(sumExp+sumPaid),sumPaid,sumExp,sumChk:sc,sumTr:st}}
+function cfMonths(from,n,sel){const out=[];for(let i=0;i<(n||6);i++){const m=addMon(from||NOWM(),i);out.push(Object.assign({m},cfDebits(m,sel)))}return out}
+/* שלושת כרטיסי הבית: לתשלום בחודש m (= "צריך לשלם החודש"), ירידה מהחשבון בחודש m, באיחור נכון להיום */
+function homeCards(m){const D=dueStats(m),E=brFil(),td=today(),late=inv().filter(t=>inBr(t,E)&&isLate(t,td));
+ return{due:D.due,rem:D.rem,debit:cfDebits(m,E).sum,lateSum:rnd(sum(late,bal)),lateN:late.length,late,open:D.open}}
+/* צ'ק → חשבוניות: קודם חשבונית שהיתרה שלה = הסכום (±0.01), אחר כך צירוף (trCombo). כלום / סכום מעל כל היתרות = [] */
+function chkMatch(subId,amt){const a=rnd(+amt||0);if(!subId||!(a>0))return[];
+ const L=inv().filter(t=>t.sub===subId&&bal(t)>0.004).sort((x,y)=>(x.date||'').localeCompare(y.date||'')||pmon(x).localeCompare(pmon(y)));
+ if(!L.length||a>rnd(sum(L,bal))+0.004)return[];const one=L.filter(t=>Math.abs(bal(t)-a)<=0.01);if(one.length)return one;
+ let ids=null;try{ids=trCombo(L,a)}catch(e){}return ids?ids.map(i=>L.find(t=>t.id===i)).filter(Boolean):[]}
+/* שדות צ'ק בטופס תשלום (מוצגים כשבוחרים "צ׳ק"). הבנק – מהשדה הקיים של pmX (bankGuess) */
+function chkF(v,c){c=c||{};return `<div data-pmc="1" style="display:${v===METHODS[1]?'':'none'}"><label class="f"><span>מספר הצ׳ק (לא חובה)</span><input name="cno" inputmode="numeric" autocomplete="off" maxlength="20" value="${esc(c.no||'')}"></label><label class="f"><span>תאריך פירעון (חובה בצ׳ק)</span><input name="cdate" type="date" value="${esc(c.date||'')}" data-c="hd"><div class="hd" data-hd>${c.date?heb(c.date):''}</div></label><label class="f"><span>צילום הצ׳ק (לא חובה)</span><input type="file" name="cimg" accept="image/*"></label></div>`}
+const chkPay=(p,f,img)=>{if(p.m===METHODS[1]&&f&&cfDt(f.cdate)){p.chk={no:s_(f.cno).replace(/\D/g,'').slice(0,20),bank:s_(f.bank),date:f.cdate,img:img||''}}return p};
+async function chkImg(form){const fl=form&&form.cimg&&form.cimg.files&&form.cimg.files[0];if(!fl)return '';const du=await shrinkDU(fl),id='f'+uid();await fput(id,du);return id}
+/* סריקת צ'ק (מנהל): ספק לפי המוטב, סכום, שיוך לחשבוניות. שמירה = תשלום צ׳ק {m:'צ׳ק',d:היום,chk} על החשבוניות שנבחרו */
+let CKS=null;
+async function usFillChk(){const U=US;if(!U)return;const fid=await usFid();if(US!==U)return;const f=usF('check')||{},s=s_(f.payee)?ocrSupplier(s_(f.payee),usSupSubs()):null,a=typeof f.amount==='number'&&f.amount>0?rnd(f.amount):'';
+ const bg=orgNow().banks.filter(b=>b.on),bt=s_(f.bank),bk=bt?bg.find(b=>bt.includes(b.name)||b.name.includes(bt)||(b.last4&&orgDig(f.account).endsWith(b.last4))):null;
+ CKS={sub:s?s.id:'',a:a===''?'':String(a),no:s_(f.number).replace(/\D/g,'').slice(0,20),date:usDate(f.date),bank:bk?bk.id:'',img:fid||'',payee:s_(f.payee).slice(0,80),ids:null};chkLinkDlg()}
+function chkLinkDlg(){if(!CKS)return;const subs=usSupSubs(),a=pNum(CKS.a),M=CKS.sub&&a>0?chkMatch(CKS.sub,a):[],L=CKS.sub?inv().filter(t=>t.sub===CKS.sub&&bal(t)>0.004).sort((x,y)=>(x.date||'').localeCompare(y.date||'')):[];
+ if(CKS.ids==null)CKS.ids=M.map(t=>t.id);const tot=rnd(sum(L,bal)),bg=orgNow().banks.filter(b=>b.on);
+ const msg=!CKS.sub?'בחרו ספק':!(a>0)?'הכניסו סכום':!L.length?'אין חשבוניות פתוחות אצל הספק':a>tot+0.004?'הסכום ('+ils(a)+') גדול מכל היתרות אצל הספק ('+ils(tot)+')':M.length===1?'לשייך לחשבונית '+(M[0].inv?esc(M[0].inv)+' · ':'')+dfmt(M[0].date)+' ('+ils(bal(M[0]))+')?':M.length?'נמצא צירוף של '+M.length+' חשבוניות שמתאים לסכום':'לא נמצאה התאמה מדויקת – סמנו חשבוניות';
+ dlg(`<h3>🖊 צ׳ק ששולם</h3>${CKS.payee?`<p class="note">מוטב בצ׳ק: ${esc(CKS.payee)}</p>`:''}<form data-f="chkLinkF">
+ <label class="f"><span>ספק</span><select name="sub" data-c="chkF" required><option value="">בחר ספק</option>${subs.map(s=>`<option value="${esc(s.id)}"${s.id===CKS.sub?' selected':''}>${esc(s.name)}</option>`).join('')}</select></label>
+ <label class="f"><span>סכום (₪)</span><input class="amt" name="a" inputmode="decimal" autocomplete="off" required value="${esc(CKS.a)}" data-c="chkF"></label>
+ <label class="f"><span>מספר הצ׳ק</span><input name="cno" inputmode="numeric" autocomplete="off" maxlength="20" value="${esc(CKS.no)}" data-c="chkF"></label>
+ <label class="f"><span>תאריך פירעון (חובה)</span><input name="cdate" type="date" required value="${esc(CKS.date)}" data-c="chkF"></label>
+ ${bg.length?`<label class="f"><span>בנק (לא חובה)</span><select name="bank" data-c="chkF"><option value="">לא שויך</option>${bg.map(b=>`<option value="${esc(b.id)}"${b.id===CKS.bank?' selected':''}>${esc(b.name)}${b.last4?' ····'+esc(b.last4):''}</option>`).join('')}</select></label>`:''}
+ <div class="card" id="ckMsg"><b>${msg}</b></div>
+ <div id="ckList">${L.map(t=>`<label class="li exp" style="cursor:pointer"><input type="checkbox" name="ck" value="${esc(t.id)}"${CKS.ids.includes(t.id)?' checked':''} data-c="chkF"><div class="m"><b>${t.inv?esc(t.inv):'חשבונית'} · ${dfmt(t.date)}</b><small>לתשלום ${dfmt(dueOf(t))}</small></div><div class="a">${ils(bal(t))}</div></label>`).join('')}</div>
+ <div class="row"><button class="btn grow">שמור צ׳ק</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)}
+const chkRead=form=>{const f=new FormData(form);return{sub:s_(f.get('sub')),a:s_(f.get('a')),no:s_(f.get('cno')).replace(/\D/g,'').slice(0,20),date:s_(f.get('cdate')),bank:s_(f.get('bank')),ids:f.getAll('ck').map(String)}};
+CHG.chkF=el=>{if(!CKS)return;const r=chkRead(el.form),ch=(el.name==='sub'&&r.sub!==CKS.sub)||(el.name==='a'&&r.a!==CKS.a);Object.assign(CKS,r);if(ch)CKS.ids=null;chkLinkDlg()};
+ACT.chkLink=()=>chkLinkDlg();
+FRM.chkLinkF=form=>{if(!CKS||form.dataset.busy)return;Object.assign(CKS,chkRead(form));const a=pNum(CKS.a);
+ if(!CKS.sub)return toast('בחר ספק');if(a==null||a<=0)return toast('סכום לא תקין');if(!cfDt(CKS.date))return toast('חסר תאריך פירעון');
+ const L=CKS.ids.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&hasPay(t)&&!t.x&&t.sub===CKS.sub&&bal(t)>0.004);if(!L.length)return toast('סמנו לפחות חשבונית אחת');
+ const Y=rnd(sum(L,bal));if(a>Y+0.004)return toast('הסכום ('+ils(a)+') גדול מהיתרה בחשבוניות שנבחרו ('+ils(Y)+')');form.dataset.busy='1';
+ const grp='g'+uid(),R=msApply(L,[],rnd(a),today(),METHODS[1],'',CKS.img,grp,{bank:CKS.bank}),chk={no:CKS.no,bank:CKS.bank,date:CKS.date,img:CKS.img};
+ L.forEach(t=>(t.pays||[]).forEach(p=>{if(p.grp===grp)p.chk=Object.assign({},chk)}));save();CKS=null;closeDlg();toast('הצ׳ק נרשם על '+R.n+' חשבוניות · ירד ב־'+dfmt(chk.date));if(US)usDone();else rerender()};
 const monthIncome=m=>rnd(sum(live().filter(t=>t.t==='inc'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
 const monthExpense=m=>rnd(sum(live().filter(t=>t.t==='exp'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
 const invIn=(t,tag)=>`<div class="m"><b>${esc(subName(t))}</b><small>חשבונית ${dfmt(t.date)}${invS(t)} · ${esc(cat(t.cat).name)}</small>${paid(t)>0?`<small>שולם ${ils(paid(t))} מתוך ${ils(t.amt)}</small>`:''}${dxWhoSm(t)}</div><div class="a">${ils(bal(t))}<small>${tag||mfmt(pmon(t))}</small></div>`;
@@ -887,10 +947,11 @@ FRM.mspay=async form=>{if(form.dataset.busy)return;const f=fd(form),L=String(f.i
  const crIds=String(f.crs||'').split(',').filter(Boolean),K=crIds.map(i=>S.tx.find(t=>t.id===i)).filter(t=>t&&!t.x&&t.kind==='credit'&&!t.used&&t.sub===sid);if(K.length!==crIds.length)return toast('אחד הזיכויים כבר קוזז או השתנה – פתחו את המסך מחדש');
  const Y=rnd(sum(L,bal)),C=rnd(sum(K,crAmt));if(C>Y+0.004)return toast('הזיכויים שנבחרו ('+ils(C)+') גדולים ממה שנשאר לשלם ('+ils(Y)+')');
  const a0=pNum(f.a);if(a0==null||a0<0)return toast('סכום לא תקין');const a=rnd(a0);if(a<0.01&&!K.length)return toast('סכום לא תקין');if(a>rnd(Y-C)+0.004)return toast('הסכום גדול ממה שנשאר לשלם ('+ils(rnd(Y-C))+')');if(rnd(a+C)<0.01)return toast('סכום לא תקין');
- if(!f.d)return toast('חסר תאריך');if(a>=0.01&&!f.m)return toast('בחר אמצעי תשלום');
+ if(!f.d)return toast('חסר תאריך');if(a>=0.01&&!f.m)return toast('בחר אמצעי תשלום');if(a>=0.01&&f.m===METHODS[1]&&!cfDt(f.cdate))return toast('חסר תאריך פירעון לצ׳ק');
  const ref=s_(f.ref||''),fl=a>=0.01&&form.f&&form.f.files&&form.f.files[0];let fid='';form.dataset.busy='1';
  if(fl){try{const du=await shrinkDU(fl);fid='f'+uid();await fput(fid,du)}catch(e){delete form.dataset.busy;return toast('שמירת הקובץ נכשלה')}}
- const grp='g'+uid(),R=msApply(L,K,a,f.d,f.m,ref,fid,grp,f),n=R.n,last=R.last;
+ if(a>=0.01&&f.m===METHODS[1]){try{const ci=await chkImg(form);if(ci)f._ci=ci}catch(e){delete form.dataset.busy;return toast('שמירת צילום הצ׳ק נכשלה')}}
+ const grp='g'+uid(),R=msApply(L,K,a,f.d,f.m,ref,fid,grp,f),n=R.n,last=R.last;if(f._ci)L.forEach(t=>(t.pays||[]).forEach(p=>{if(p.grp===grp&&p.chk)p.chk.img=f._ci}));
  save();MS.on=false;MS.ids=[];closeDlg();rerender();toast(n+' חשבוניות'+(last&&bal(last)>0.004?' (האחרונה חלקית, נותרו בה '+ils(bal(last))+')':'')+' · שולם '+ils(a)+(C?' · קוזזו '+ils(C):''))};
 /* חלוקת תשלום אחד על כמה חשבוניות (מהישנה לחדשה, האחרונה חלקית), עם קיזוז זיכויים. משותף לסגירה מהכרטסת ולצילום העברה */
 function msApply(L,K,a,d,m,ref,fid,grp,bx){L=L.slice().sort((p,q)=>(p.date||'').localeCompare(q.date||'')||pmon(p).localeCompare(pmon(q)));
@@ -4604,14 +4665,14 @@ ACT.bioLkOut=()=>{syOut();location.reload()};
 /* ===== מסך סריקה אחיד (שלב 3): כפתור אחד לכל המסמכים. התמונה בחצי השמאלי של המסך, והמסך הקיים של הסוג בחצי הימני =====
    חיבור הזיהוי בשלב 4: window.USCLS = async (עמודים: מערך data-url) => ({kind, conf, unsure:[שמות שדות לא בטוחים], part}). kind: invoice|delivery_note|receipt|credit_note|bank_transfer|deposit|cashout|zreport|opening|unknown.
    בלי window.USCLS (ברירת המחדל כרגע) המסמך נחשב "לא זוהה" ונפתח בורר סוג ליד התמונה. הטפסים, השמירה וההרשאות הם הקיימים, בלי שינוי. */
-const UST={exp:['חשבונית / הוצאה','🧾'],cashout:['הוצאה מקופה','💵'],deposit:['הפקדה','🏦'],transfer:['העברה','🔁'],z:['דוח Z','📊'],opening:['הצהרת פתיחת קופה','🔓'],inc:['הכנסה','💰']};
-const USK={invoice:'exp',delivery_note:'exp',receipt:'exp',credit_note:'exp',bank_transfer:'transfer',deposit:'deposit',cashout:'cashout',zreport:'z',opening:'opening'};
+const UST={exp:['חשבונית / הוצאה','🧾'],cashout:['הוצאה מקופה','💵'],deposit:['הפקדה','🏦'],transfer:['העברה','🔁'],z:['דוח Z','📊'],opening:['הצהרת פתיחת קופה','🔓'],inc:['הכנסה','💰'],check:['צ׳ק','🖊']};
+const USK={invoice:'exp',delivery_note:'exp',receipt:'exp',credit_note:'exp',bank_transfer:'transfer',deposit:'deposit',cashout:'cashout',zreport:'z',opening:'opening',check:'check'};
 let US=null,USFR=.5,UZ={s:1,x:0,y:0},UP=new Map(),U0=null,UMV=0,UPIN=0;
 try{const v=parseFloat(localStorage.getItem('lp-usf'));if(isFinite(v))USFR=v}catch(e){}
 function usSetF(v,sv){USFR=Math.min(.75,Math.max(.25,+v||.5));document.documentElement.style.setProperty('--usf',String(USFR));const d=$('#usdiv');if(d){d.setAttribute('aria-valuemin','25');d.setAttribute('aria-valuemax','75');d.setAttribute('aria-valuenow',String(Math.round(USFR*100)))}if(sv){try{localStorage.setItem('lp-usf',String(USFR))}catch(e){}}}
 usSetF(USFR,0);
 /* סוג שאין הרשאה אליו לא מוצג בכלל (החלטה 25). הבדיקה האמיתית נשארת בחוקים ובשרת */
-function usAllowed(k){if(isW()){if(k==='exp'||k==='cashout')return wp('expW');if(k==='z'||k==='opening'||k==='deposit')return bzF('cashClose')&&wp('incW');return false}
+function usAllowed(k){/* צ'ק (חלק ב'): שיוך לחשבוניות – מנהל בלבד; עובד שסורק צ׳ק – עובר למנהל */if(k==='check')return!isW();if(isW()){if(k==='exp'||k==='cashout')return wp('expW');if(k==='z'||k==='opening'||k==='deposit')return bzF('cashClose')&&wp('incW');return false}
  if(k==='transfer')return trOk();if(k==='z'||k==='opening'||k==='deposit')return bzF('cashClose');return true}
 const usKeys=()=>Object.keys(UST).filter(usAllowed),usAny=()=>usKeys().length>0;
 function usSheet(title,body,back){const s=$('#sheet');A=null;US.sh=1;s.hidden=false;s.innerHTML=`<div class="sh"><div class="row">${back?`<button class="ib" data-a="${back}" aria-label="חזרה">${ico('back')}</button>`:''}<h2 style="flex:1">${title}</h2><button class="ib" data-a="usExit" aria-label="סגירה">${ico('x')}</button></div></div><div class="bd sw">${body}</div>`;s.scrollTop=0}
@@ -4648,7 +4709,7 @@ async function usDetect(){const U=US;usSheet('מזהה את המסמך…','<div
  if(bzF('scan')&&typeof window.USCLS==='function'){try{r=(await window.USCLS(U.pg.map(g=>g.hi||g.u||g.du)))||r}catch(e){toast('הזיהוי לא זמין עכשיו. בחרו סוג ידנית')}}
  if(US!==U)return;U.cls=r;U.unsure=(Array.isArray(r.unsure)?r.unsure:[]).filter(n=>typeof n==='string'&&/^[A-Za-z0-9_]{1,20}$/.test(n)).slice(0,12);
  const k=USK[r.kind];if(r.err)return usChooser(r.err+(r.retry?'':' בחרו את סוג המסמך'));
- if(r.toMgr)return usChooser('המסמך זוהה כ"'+(k?UST[k][0]:'מסמך')+'" ואין לך הרשאה להזין אותו. הוא צריך לעבור למנהל לטיפול');
+ if(r.toMgr||(k==='check'&&isW()))return usChooser('המסמך זוהה כ"'+(k?UST[k][0]:'מסמך')+'" ואין לך הרשאה להזין אותו. הוא צריך לעבור למנהל לטיפול');
  if(k&&usAllowed(k)){U.auto=1;if(r.uncertainType)toast('הזיהוי לא בטוח בסוג המסמך. אפשר לשנות את הסוג למעלה');usOpenForm(k)}else usChooser(k?'הסוג שזוהה לא זמין לך. בחרו סוג אחר':(bzF('scan')?'לא זוהה אוטומטית. בחרו את סוג המסמך':'הזיהוי החכם כבוי. בחרו את סוג המסמך'))}
 /* שמירת הקובץ כמו בסריקה הקיימת (scanGo): רק כשיש עמודים; נצמד לחשבונית ספק על ידי A.fid */
 async function usFid(){if(!US||!US.pg.length)return '';const pg=US.pg;let v='';if(pg.every(g=>!g.pdf))v=packPages(pg.map(g=>g.u));else if(pg.length===1)v=pg[0].du;else return '';
@@ -4662,6 +4723,7 @@ async function usOpenForm(k){if(!US||!usAllowed(k)||US.busy)return;const U=US;U.
    if(k==='deposit'){if(!DP)DP=dpNew();const F=usF('deposit');for(const d of ims){if(DP.pics.length<6){DP.pics.push(d);DP.rows.push({d:'',a:'',ai:null})}}if(F&&DP.rows.length)usFillDp(DP.rows[DP.rows.length-ims.length]||DP.rows[0],F);DP.sent=0;U.view='scr';U.v='dp';go('dp');return}
    if(!ZC)ZC=zcNew();if(k==='opening'){if(ims[0])ZC.o=ims[0]}else{const pt=U.cls&&Number.isInteger(U.cls.part)?U.cls.part:-1;if(ims.length===1&&pt>=0&&pt<3)ZC.z[pt]=ims[0];else ims.slice(0,3).forEach((d,j)=>{ZC.z[j]=d})}
    usFillZc(k);ZC.sent=0;U.view='scr';U.v='zc';go('zc');return}
+  if(k==='check'){await usFillChk();return}
   if(k==='transfer'){const fl=U.pg.map((g,j)=>{const du=g.pdf?g.du:(g.hi||g.u),b=du2b(du);return new File([b],'doc'+j+(g.pdf?'.pdf':'.jpg'),{type:b.type})});U.view='scr';U.v='tr';if(usF('transfer')&&U.pg.length){usTrOpen();return}if(fl.length)await CHG.trPick({files:fl,dataset:{sub:''},value:''});else go('tr')}
  }finally{U.busy=0}}
 /* עובד: הטופס הקיים של "הכנסה ידנית" (או הוצאה מקופה), עם הצילום שנבחר */
@@ -4725,8 +4787,8 @@ ACT.usRot=async()=>{const U=US,g=U&&U.pg[U.i];if(!g||g.pdf||U.rb)return;U.rb=1;t
    מכסה/תוספת כבויה/אין הרשאה – בלי ניסיון חוזר: הודעה + בורר ידני. ההרשאה האמיתית נבדקת בשרת (allowed=false → בלי נתונים). */
 const US_RETRY=['bad-answer','time-budget','overloaded','gemini-quota','network','internal',''];
 const US_STOP={'feature-off':'הזיהוי החכם כבוי בעסק.','biz-daily-limit':'העסק הגיע למכסת הזיהויים היומית.','biz-period-limit':'העסק הגיע למכסת הזיהויים.','daily-limit':'עברת את מגבלת הזיהויים היומית שלך.','no-perm':'אין לך הרשאה לזיהוי מסמכים.','bad-file-count':'הקובץ לא מתאים לזיהוי.','bad-type':'הקובץ לא מתאים לזיהוי (רק תמונה או PDF).','too-big':'הקובץ גדול מדי לזיהוי (עד 10MB).'};
-const USK2={invoice:'invoice',cashout:'cashout',deposit:'deposit',transfer:'bank_transfer',zreport:'zreport',opening:'opening'};
-const USU={invoice:{total_with_vat:'amt',date:'date',number:'inv'},cashout:{amount:'amt',date:'date'}};
+const USK2={invoice:'invoice',cashout:'cashout',deposit:'deposit',transfer:'bank_transfer',zreport:'zreport',opening:'opening',check:'check'};
+const USU={invoice:{total_with_vat:'amt',date:'date',number:'inv'},cashout:{amount:'amt',date:'date'},check:{amount:'a',date:'cdate',number:'cno'}};
 async function usCall(du){const m=/^data:([^;,]+);base64,(.*)$/.exec(String(du||''));if(!m)throw Object.assign(new Error('קובץ לא תקין'),{reason:'bad-type'});
  const t=await tok(),ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),120000);let r,j=null;
  try{r=await fetch(FNB()+'/scanDocument',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({data:{kind:'classify',files:[{mimeType:m[1],data:m[2]}]}}),signal:ctl.signal})}catch(e){throw Object.assign(new Error('אין חיבור לשרת הזיהוי'),{reason:'network'})}finally{clearTimeout(tm)}
@@ -4754,7 +4816,7 @@ function usFillExp(k){const f=usF('invoice')||usF('cashout');if(!f||!A)return;A.
 function usFillForm(root){if(!US||!US.cls||!A||!A.us||!A.usf||A.usDone)return;const f=US.cls.f||{},E=root.querySelector('form[data-f=addsave]');
  if(A.step==='sub'&&US.cls.ty==='invoice'){const i=root.querySelector('form[data-f=subnew] input[name=name]');if(i&&!i.value&&s_(f.supplier))i.value=s_(f.supplier).slice(0,80)}
  if(A.step!=='det'||!E)return;A.usDone=1;const keep=US.unsure.slice(),el=E.elements,set=(n,v)=>{if(el[n]&&v!==''&&v!=null){el[n].value=v;el[n].dispatchEvent(new Event('change',{bubbles:true}))}};
- if(US.cls.ty==='invoice'){set('amt',usNum(f.total_with_vat));set('date',usDate(f.date));if(US.cls.docType!=='delivery_note'&&US.cls.docType!=='receipt')set('inv',s_(f.number));
+ if(US.cls.ty==='invoice'){set('amt',usNum(f.total_with_vat));set('date',usDate(f.date));if(US.cls.docType!=='delivery_note'&&US.cls.docType!=='receipt')set('inv',s_(f.number));try{brRe(E,A.sub)}catch(e){}
   if(US.cls.docType==='delivery_note'&&el.inv){el.inv.required=false;}if(US.cls.docType==='receipt'&&s_(f.related_invoice))set('inv',s_(f.related_invoice))}
  else{set('amt',usNum(f.amount));set('date',usDate(f.date));const rg=zcRegOne(f.register,f.store);if(rg)set('creg',rg);if(zcTime(f.time))set('cotm',zcTime(f.time))}
  /* מילוי השדות שולח change ומוריד את הצהוב – מחזירים את הסימון של הזיהוי */US.unsure=keep;usMark(root)}
