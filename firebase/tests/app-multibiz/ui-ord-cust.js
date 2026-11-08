@@ -28,6 +28,17 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const f = path.join(tmp, 'orders-cust.js'); const s = fs.readFileSync(f, 'utf8'); const t = s.replace("if(/^\\d{13,19}$/.test(d))return {v:d.slice(-4),cut:1};", "if(/^\\d{13,19}$/.test(d))return {v:d,cut:1};");
     if (s === t) throw new Error('mutation target not found'); fs.writeFileSync(f, t); src = tmp;
   }
+  { // זיהוי מספר כרטיס בשדות חופשיים (טלפון): כל תו שאינו אות/ספרה הוא מפריד
+    const s = fs.readFileSync(path.join(src, 'orders-cust.js'), 'utf8');
+    const line = s.split('\n').find((l) => l.startsWith('const CARD8='));
+    const CARD8 = new Function(line.replace(/^const /, 'let ') + '\nreturn CARD8;')();
+    for (const sep of ['\u2013', '\u2014', '\u05BE', '=', '!', '\u200F', '\u200B', '\u00A0', ' ', '.', '/', '@']) {
+      const v = ['4580', '1234', '5678', '9012'].join(sep);
+      if (!CARD8.test('x ' + v)) throw new Error('CARD8 missed separator ' + JSON.stringify(sep));
+    }
+    if (CARD8.test('רחוב 12 דירה 3456 כניסה 5678')) throw new Error('CARD8 false positive (letters separate runs)');
+    console.log('ok card8 separators');
+  }
   const browser = await H.launch();
   const cfg = { mode: 'new', users: { m: 'biz-o', sa: 'biz-o' }, sa: { sa: 1 }, biz: { 'biz-o': { dataRoot: 'b', features: ALL, name: 'עסק בדיקה' } }, admins: { 'b/biz-o/|m': 1 }, ctx: { hasTouch: true, isMobile: true } };
   const log = []; const calls = [];
@@ -83,7 +94,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.selectOption('select[data-k=br]', 'br1');
   await page.fill('#octz', TZ); await H.settle(page, 700);
   const D = await page.evaluate(() => Object.assign({}, window.__ox.draft));
-  check('2 ת"ז קיימת ממלאת שם/טלפון/מייל/כתובת, לקוח רגיל', D.name === 'משה כהן' && D.phone === '0501234567' && D.mail === 'moshe@x.co' && D.addr === 'הרצל 1' && D.wholesale === false && /לקוח קיים/.test(await page.innerText('#main')), D);
+  check('2 ת"ז קיימת ממלאת שם/טלפון/מייל/כתובת, לקוח רגיל', D.name === 'משה כהן' && D.phone === '0501234567' && D.mail === 'moshe@x.co' && D.addr === 'הרצל 1' && D.wholesale === false && /^[tp]\w+$/.test(D.custId || '') && /לקוח קיים/.test(await page.innerText('#main')), D);
   // 3. ת"ז לא קיימת → לקוח חדש; ת"ז שגויה
   await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
   await page.fill('#octz', '123456789'); await H.settle(page, 200); const bad = await page.innerText('#ocst');

@@ -144,8 +144,16 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.evaluate(() => { const D = window.__ox.draft; D.custId = 't000000018'; D.wholesale = true; rerender(); }); await H.settle(page, 200);
   const e2 = await hasWs();
   const wsv = await page.evaluate(() => document.getElementById('main').innerHTML);
+  await page.click('[data-a=oxWs]'); await H.settle(page, 400);
   const gw = calls.filter((c) => c.n === 'getWsPrices');
-  check('13 סיטונאי: מנהל – כפתור ומחיר ₪9 הוחל; עובד בלי לקוח / לקוח רגיל – אין כפתור; לקוח סיטונאי – יש; העובד לא רואה עלות/טופס סיטונאי', m1 && pw === '9' && !e0 && !e1 && e2 && gw.length >= 1 && !/name="wp"|name="cost"/.test(wsv), { m1, pw, e0, e1, e2 });
+  const gwE = gw[gw.length - 1].d; // עובד: הלקוח + מזהה הטיוטה + רק מוצרי ההזמנה (השרת בודק את הקישור)
+  const wsOk = gwE.custId === 't000000018' && typeof gwE.reqId === 'string' && Array.isArray(gwE.pids) && gwE.pids.length === 1;
+  check('13 סיטונאי: מנהל – כפתור ומחיר ₪9 הוחל; עובד בלי לקוח / לקוח רגיל – אין כפתור; לקוח סיטונאי – יש; העובד לא רואה עלות/טופס סיטונאי', m1 && pw === '9' && !e0 && !e1 && e2 && gw.length >= 2 && wsOk && !/name="wp"|name="cost"/.test(wsv), { m1, pw, e0, e1, e2, gwE });
+  // 13ב. עובד (23:19): רואה "ייבוא מלאי", בלי עמודת סיטונאי, ולא שולח wp
+  await page.evaluate(() => { window.__ox.im = null; NAV = [{ v: 'home' }]; go('oxImp'); }); await H.settle(page, 300);
+  await page.setInputFiles('input[data-c=oxImpFile]', { name: 'w.csv', mimeType: 'text/csv', buffer: Buffer.from('שם,מחיר,סיטונאי\nא,5,3\n') }); await H.settle(page, 400);
+  const wImp = await page.evaluate(() => ({ wp: !!document.querySelector('select[data-c=oxImpMap][data-k=wp]'), name: !!document.querySelector('select[data-c=oxImpMap][data-k=name]') }));
+  check('13ב עובד: מסך ייבוא מלאי נפתח בלי עמודת סיטונאי', wImp.name && !wImp.wp, wImp);
   await page.evaluate(() => { SY.role = window.__mgrSave; });
   check('14 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));

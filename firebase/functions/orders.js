@@ -45,13 +45,15 @@ const MAX_IMPORT = 200;
 const WS_SHOW = 'wsCust';
 
 // ---------- ניקוי קלט ----------
+// הרצף הארוך ביותר של ספרות, כשביניהן מותר כל תו שאינו אות (רווח, פיסוק, מקפים –—־, =, !, תווים בלתי נראים כמו U+200F/U+200B). אות מפרידה בין רצפים.
+const digRun = (v) => String(v == null ? '' : v).split(/\p{L}+/u).reduce((m, p) => Math.max(m, p.replace(/\D/g, '').length), 0);
 function txt(v, max, reason, label, required) {
   const s = typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim() : (v == null ? '' : null);
   if (s === null) throw bad(reason, label + ' לא תקין');
   if (required && !s) throw bad(reason, label + ' – חובה');
   if (s.length > max) throw bad(reason, `${label} – עד ${max} תווים`);
   // הגנה מפני הקלדת מספר כרטיס בשדה טקסט (תקן PCI): 8 ספרות ומעלה ברצף (גם עם רווחים/מקפים ביניהן) – נדחה
-  if (/\d{8,}/.test(s.replace(/[\s._\/\\,:;|·'"`~*#+-]/g, '')) && reason !== 'bad-phone') throw bad('card-like', `${label}: אסור להקליד מספר כרטיס אשראי או מספר ארוך. מותר רק 4 ספרות אחרונות.`);
+  if (digRun(s) >= 8 && reason !== 'bad-phone') throw bad('card-like', `${label}: אסור להקליד מספר כרטיס אשראי או מספר ארוך. מותר רק 4 ספרות אחרונות.`);
   return s;
 }
 function phone(raw) {
@@ -293,7 +295,7 @@ function cleanCust(c) {
   if (c.mail != null && c.mail !== '') {
     const m = String(c.mail).trim().toLowerCase();
     if (m.length > 254 || !/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(m)) throw bad('bad-email', 'כתובת המייל לא תקינה');
-    if (/\d{8,}/.test(m.replace(/[\s._\/\\,:;|·'"`~*#+-]/g, ''))) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
+    if (digRun(m) >= 8) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
     o.mail = m;
   }
   return o;
@@ -361,7 +363,8 @@ function moves(br, items) {
   }
   return m;
 }
-function applyMoves(tx, db, w, prodSnaps, mv, extra, warnings) {
+function applyMoves(tx, db, w, prodSnaps, mv, extra, warnings, reqId) {
+  // reqId של רשומות xfer (חוזה): בהזמנה חדשה – reqId שלה; בעריכה/ביטול – מזהה ההזמנה + פעולה + זמן (אין reqId בקריאות האלה)
   const cur = new Map(); // pid → {q}
   for (const [pid, s] of prodSnaps) cur.set(pid, Object.assign({}, (s.data() || {}).q || {}));
   const now = Date.now();
@@ -375,7 +378,7 @@ function applyMoves(tx, db, w, prodSnaps, mv, extra, warnings) {
     // העברה פנימית: רשומת xfer אחת לכל שורה מסניף אחר (צד המקור). בהיפוך (ביטול/עריכה) הכיוון מתהפך.
     if (x.to) {
       const back = x.delta > 0;
-      tx.set(db.collection('xfer').doc(), Object.assign({ prod: x.pid, name: rec.name, from: back ? x.to : x.br, to: back ? x.br : x.to, qty: r3(Math.abs(x.delta)),
+      tx.set(db.collection('xfer').doc(), Object.assign({ reqId: reqId || (extra.ord + '_' + x.why + '_' + now).slice(0, 40), prod: x.pid, name: rec.name, from: back ? x.to : x.br, to: back ? x.br : x.to, qty: r3(Math.abs(x.delta)),
         why: x.why === 'xout' ? 'order' : x.why, by: w.uid, at: now }, extra.ord ? { ord: extra.ord, no: extra.no } : {}));
     }
   }
@@ -412,20 +415,23 @@ function ordAccess(w, d) {
 async function createOrder(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['reqId', 'br', 'cust', 'items', 'note', 'total']); // total נשלח? מתעלמים – השרת מחשב
+  onlyKeys(input, ['reqId', 'br', 'cust', 'custId', 'items', 'note', 'total']); // custId = לקוח מקושר (cust/{id}); total נשלח? מתעלמים – השרת מחשב
   const reqId = reqIdOf(input);
   const br = brOf(w, input.br);
   const cust = cleanCust(input.cust);
   const raw = rawItems(input.items);
   const note = input.note == null ? '' : txt(input.note, 300, 'bad-note', 'הערה');
+  const custId = input.custId == null || input.custId === '' ? '' : idOf(input.custId, 'לקוח');
   const db = T.tdb();
   const ref = db.doc('ord/o' + reqId);
   const seq = db.doc('ordcfg/seq');
   const cfg = db.doc('ordcfg/main');
   let out = null;
   await db.runTransaction(async (tx) => {
-    const [s, q, c] = await tx.getAll(ref, seq, cfg);
+    const [s, q, c, wb] = await tx.getAll(ref, seq, cfg, db.doc('ordcfg/wsb_' + reqId));
     if (s.exists) { out = { id: s.id, no: s.get('no'), total: s.get('total'), dup: true, warn: [] }; return; }
+    // טיוטה שקיבלה מחיר סיטונאי ללקוח מסוים – נשמרת רק עם אותו לקוח
+    if (wb.exists && wb.get('cust') !== custId) throw deny('ws-not-linked', 'מחיר הסיטונאי נטען ללקוח אחר. בחרו שוב את הלקוח');
     const prods = await loadProds(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
     const { items } = resolveItems(w, br, raw, plain(prods), src);
@@ -434,9 +440,10 @@ async function createOrder(request) {
     const no = (q.exists && typeof q.get('n') === 'number' ? q.get('n') : 0) + 1;
     const now = Date.now();
     const warn = [];
-    applyMoves(tx, db, w, prods, moves(br, items), { ord: ref.id, no }, warn);
+    applyMoves(tx, db, w, prods, moves(br, items), { ord: ref.id, no }, warn, reqId);
     const doc = { no, src: 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now };
     if (note) doc.note = note;
+    if (custId) doc.custId = custId;
     tx.set(ref, doc);
     tx.set(seq, { n: no });
     tx.set(logRef(db, ref.id), logData(w, 'create', `₪${total}`));
@@ -728,14 +735,17 @@ async function saveCat(request) {
   return { ok: true, id };
 }
 
-// importProducts({ reqId, br?, addQty: bool, rows:[{ name, price, barcode?, qty?, cat?, sub?, wp?, pk?, ct?, bpx? }] }) – מנהל. עד 200 שורות למנה.
+// importProducts({ reqId, br?, addQty: bool, rows:[{ name, price, barcode?, qty?, cat?, sub?, wp?, pk?, ct?, bpx? }] }) – מנהל, או עובד עם ord (סניפים שלו, בלי wp). עד 200 שורות למנה.
 // התאמה: ברקוד, אחר כך שם מדויק → עדכון (לא כפילות). כמות: מוצר חדש – כמות פתיחה; קיים – נוספת רק אם addQty. כל כמות = stockLog why:'in'.
 // cat/sub = שמות; קטגוריה שלא קיימת נוצרת (מזהה קבוע לפי השם – ייבוא חוזר לא משכפל). שורה שגויה – נדחית ומוחזרת ב-bad, השאר נשמרות.
 async function importProducts(request) {
   const w = await who(request);
-  mgr(w);
   const input = inputObject(request);
   onlyKeys(input, ['reqId', 'br', 'addQty', 'rows']);
+  // החלטה 23:19: גם עובד עם ord מייבא – רק לסניף שלו (חובה לבחור סניף כשיש סניפים), ובלי סיטונאי/עלות (עמודה כזו – הקריאה נדחית)
+  const staff = w.role !== 'manager';
+  if (staff && Array.isArray(input.rows) && input.rows.some((r) => r && typeof r === 'object' && ((r.wp != null && r.wp !== '') || r.cost != null))) throw deny('manager-only', 'מחיר סיטונאי ועלות – מנהל בלבד. הסירו את העמודה ונסו שוב.');
+  if (staff && hasBranches(w) && (input.br == null || input.br === '')) throw bad('bad-br', 'בחרו סניף');
   const reqId = reqIdOf(input);
   if (!Array.isArray(input.rows) || !input.rows.length || input.rows.length > MAX_IMPORT) throw bad('bad-rows', `שורות: 1 עד ${MAX_IMPORT}`);
   const anyQty = input.rows.some((r) => r && r.qty != null && r.qty !== '' && r.qty !== 0);
@@ -843,24 +853,51 @@ async function transferStock(request) {
   return res;
 }
 
-// getWsPrices({ custId? }) → { wp: { <pid>: מחיר } }. מנהל – תמיד. עובד עם ord – לפי WS_SHOW (ברירת מחדל: רק ללקוח cust/{custId}.wholesale === true).
+// getWsPrices({ custId?, reqId?, ordId?, pids?, after? }) → { wp: { <pid>: מחיר }, next? }
+// מנהל – תמיד, כל המוצרים בעמודים של WS_PAGE (next = מזהה להמשך; אין חיתוך שקט). עובד עם ord – לפי WS_SHOW (ברירת מחדל:
+// רק ללקוח wholesale שמקושר להזמנה הנוכחית): ordId = הזמנה קיימת בסניף שלו עם custId זהה; reqId = טיוטה – הקישור נרשם ב-ordcfg/wsb_<reqId>
+// ו-createOrder עם אותו reqId חייב את אותו custId. לעובד מוחזרים רק המוצרים שב-pids (שורות ההזמנה, עד WS_PIDS).
+const WS_PAGE = 1000, WS_PIDS = 100;
 async function getWsPrices(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['custId']);
+  onlyKeys(input, ['custId', 'reqId', 'ordId', 'pids', 'after']);
   const db = T.tdb();
+  const wp = {};
+  const put = (snaps) => snaps.forEach((s) => { if (s.exists && typeof s.get('wp') === 'number') wp[s.ref.parent.parent.id] = s.get('wp'); });
   if (w.role !== 'manager' && WS_SHOW !== 'ord') {
     if (WS_SHOW === 'mgr') throw deny('manager-only', 'מחיר סיטונאי – מנהל בלבד');
     const cid = idOf(input.custId, 'לקוח');
+    if (!Array.isArray(input.pids) || !input.pids.length || input.pids.length > WS_PIDS) throw bad('bad-pids', `מוצרי ההזמנה: 1 עד ${WS_PIDS}`);
+    const pids = [...new Set(input.pids.map((p) => idOf(p, 'מוצר')))];
     const c = await db.doc('cust/' + cid).get();
     if (!c.exists || c.get('wholesale') !== true) throw deny('not-wholesale', 'הלקוח לא מסומן כסיטונאי');
+    if (input.ordId != null) {
+      const o = await db.doc('ord/' + idOf(input.ordId, 'הזמנה')).get();
+      ordAccess(w, o.exists ? o.data() : null);
+      if (o.get('custId') !== cid) throw deny('ws-not-linked', 'הלקוח לא מקושר להזמנה הזו');
+    } else {
+      const reqId = reqIdOf(input);
+      const bind = db.doc('ordcfg/wsb_' + reqId);
+      await db.runTransaction(async (tx) => {
+        const [b, o] = await tx.getAll(bind, db.doc('ord/o' + reqId));
+        if (o.exists) throw deny('ws-not-linked', 'ההזמנה כבר נשמרה – פתחו אותה מחדש');
+        if (b.exists && (b.get('cust') !== cid || b.get('by') !== w.uid)) throw deny('ws-not-linked', 'הטיוטה מקושרת ללקוח אחר');
+        if (!b.exists) tx.set(bind, { cust: cid, by: w.uid, t: Date.now() });
+      });
+    }
+    put(await db.getAll(...pids.map((p) => db.doc(`prod/${p}/p/ws`))));
+    return { wp };
   }
-  const wp = {};
-  // קוראים לפי רשימת המוצרים של העסק (עד 2000) – לא collectionGroup, שאינו מוגבל לעסק
-  const prods = await db.collection('prod').select().limit(2000).get();
+  // מנהל: עמוד של WS_PAGE מוצרים לפי מזהה (לא collectionGroup, שאינו מוגבל לעסק); next = להמשך
+  let q = db.collection('prod').orderBy(FieldPath.documentId()).select().limit(WS_PAGE);
+  if (input.after != null) q = q.startAfter(idOf(input.after, 'המשך'));
+  const prods = await q.get();
   const refs = prods.docs.map((d) => db.doc(`prod/${d.id}/p/ws`));
-  for (let k = 0; k < refs.length; k += 300) (await db.getAll(...refs.slice(k, k + 300))).forEach((s) => { if (s.exists && typeof s.get('wp') === 'number') wp[s.ref.parent.parent.id] = s.get('wp'); });
-  return { wp };
+  for (let k = 0; k < refs.length; k += 300) put(await db.getAll(...refs.slice(k, k + 300)));
+  const out = { wp };
+  if (prods.size === WS_PAGE) out.next = prods.docs[prods.size - 1].id;
+  return out;
 }
 
 // getProdCost({ pid }) – מנהל בלבד (העובד לא מקבל עלות בשום קריאה)
@@ -875,4 +912,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { saveCat, importProducts, transferStock, getWsPrices, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { digRun, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

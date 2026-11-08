@@ -366,6 +366,14 @@ describe('לארג\' פעמי במצב legacy (שורש)', () => {
     assert.deepEqual((await get(`b/${A}/ordcfg/main`)).pay, { mode: 'phone', has: false });
     const r = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: Object.assign({ mail: '4580123456789012@x.com' }, cust), items: [{ n: 'x', qty: 1, price: 1 }] });
     assert.equal(r.reason, 'card-like');
+    for (const sep of ['\u2013', '\u2014', '\u05BE', '=', '!', '\u200F', '\u200B']) {
+      const v = ['4580', '1234', '5678', '9012'].join(sep);
+      for (const mut of [(d) => { d.note = 'כרטיס ' + v; }, (d) => { d.cust.name = 'דנה ' + v; }, (d) => { d.cust.addr = 'רחוב ' + v; }, (d) => { d.cust.mail = v + '@x.com'; }]) {
+        const d = { reqId: rid(), br: 'br1', cust: Object.assign({}, cust), items: [{ n: 'x', qty: 1, price: 1 }] }; mut(d);
+        const q = await call('createOrder', E1, d);
+        assert.equal(q.reason, 'card-like', JSON.stringify(sep) + ' ' + q.text);
+      }
+    }
   });
 });
 

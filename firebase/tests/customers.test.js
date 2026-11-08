@@ -102,6 +102,19 @@ describe('לקוחות – saveCust', () => {
     assert.deepEqual(r.result.bad.map((x) => [x.i, x.reason]), [[1, 'card-like']]);
     assert.ok(!r.text.includes('5326') && !r.text.includes('4580'));
   });
+  it('מספר כרטיס עם כל מפריד שאינו אות/ספרה (– — ־ = ! U+200F U+200B NBSP @ ×) בשם, בכתובת, במייל ובשדה חופשי – נדחה; ב-last4 – נחתך', async () => {
+    for (const sep of ['\u2013', '\u2014', '\u05BE', '=', '!', '\u200F', '\u200B', '\u00A0', '\u2060', '×', '(', '%']) {
+      const v = ['4580', '1234', '5678', '9012'].join(sep);
+      for (const f of [{ name: 'x ' + v }, { addr: 'רחוב ' + v }, { x: { xcity: v } }].concat(/\s/.test(sep) ? [] : [{ mail: v + '@x.com' }])) { // רווח במייל נדחה כבר כ-bad-email
+        const r = await call('saveCust', E1, { cust: Object.assign({}, c1, f) });
+        assert.equal(r.reason, 'card-like', JSON.stringify(sep) + ' ' + JSON.stringify(f) + ' ' + r.text);
+      }
+      const r = await call('saveCust', E1, { cust: Object.assign({}, c1, { last4: v }) });
+      assert.equal(r.status, 'OK', r.text); assert.equal((await get(`b/${A}/cust/t${TZ}`)).last4, '9012');
+    }
+    const ok = await call('saveCust', E1, { cust: Object.assign({}, c1, { addr: 'רחוב 12 דירה 3456 כניסה 5678' }) }); // אות מפרידה בין רצפים
+    assert.equal(ok.status, 'OK', ok.text);
+  });
   it('last4 עם מספר כרטיס מלא → נחתך ל-4 ספרות; המספר המלא לא נשמר בשום מקום', async () => {
     const r = await call('saveCust', E1, { cust: Object.assign({}, c1, { last4: '4580-1234-5678-9012' }) });
     assert.equal(r.status, 'OK', r.text);
