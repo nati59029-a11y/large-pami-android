@@ -23,3 +23,5 @@ if (!/^YEMOT_HOOK_SECRET=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(
 if (!/^ELEVENLABS_API_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nELEVENLABS_API_KEY=DUMMY-ELEVEN-9c2d\n');
 // מייל הזמנה עצמי: ערכים ריקים באמולטור – הפונקציה נופלת ל-fallback ולא שולחת מייל אמיתי
 if (!/^MAIL_USER=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nMAIL_USER=dummy-not-an-email\nMAIL_APP_PASSWORD=dummy\n');
+// מפתח בדיקה להצפנת כרטיסים (fb/ord-card, customers.js) – 32 בתים קבועים, לא מפתח אמיתי
+if (!/^CARD_ENC_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nCARD_ENC_KEY=' + Buffer.from('test-only-card-key-32-bytes-0000').toString('base64') + '\n');

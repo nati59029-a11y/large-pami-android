@@ -11,12 +11,12 @@ const S = (v) => ({ stringValue: v }), N = (v) => (Number.isInteger(v) ? { integ
 const doc = (p, f) => ({ document: { name: 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/' + p, fields: f } });
 const LINK = 'https://pay.example.com/secret-biz-123';
 const T1 = Date.UTC(2026, 10, 3, 8, 0, 0);
-const ORD = [doc('ord/o1', { no: N(12), br: S('br1'), status: S('new'), total: N(34.5), at: N(T1), byName: S('דנה'), cust: M({ name: S('משה כהן'), phone: S('0501234567'), addr: S('הרצל 1') }), items: A([M({ pid: S('pA'), n: S('עוגת שוקולד'), qty: N(2), price: N(12) }), M({ pid: S('pB'), n: S('לחם מחמצת'), qty: N(1), price: N(10.5), from: S('br2') })]) }),
+const ORD = [doc('ord/o1', { no: N(12), br: S('br1'), status: S('new'), custId: S('t123456782'), total: N(34.5), at: N(T1), byName: S('דנה'), cust: M({ name: S('משה כהן'), phone: S('0501234567'), addr: S('הרצל 1') }), items: A([M({ pid: S('pA'), n: S('עוגת שוקולד'), qty: N(2), price: N(12) }), M({ pid: S('pB'), n: S('לחם מחמצת'), qty: N(1), price: N(10.5), from: S('br2') })]) }),
   doc('ord/o2', { no: N(11), br: S('br2'), status: S('paid'), total: N(80), at: N(T1 - 9e6), cust: M({ name: S('רחל'), phone: S('0521112222') }), items: A([M({ n: S('מגש אירוח'), qty: N(1), price: N(80) })]), paid: M({ method: S('link'), last4: S('4242'), at: N(T1), amt: N(80) }) })];
 const PROD = [doc('prod/pA', { name: S('עוגת שוקולד'), price: N(12), barcode: S('7290001'), on: { booleanValue: true }, q: M({ br1: N(5), br2: N(1) }) }),
   doc('prod/pB', { name: S('לחם מחמצת'), price: N(10.5), on: { booleanValue: true }, q: M({ br1: N(0), br2: N(8) }) })];
 const TZ = '123456782';
-const CUST = [doc('cust/t' + TZ, { name: S('משה כהן'), phone: S('0501234567'), tz: S(TZ), mail: S('moshe@x.co'), addr: S('הרצל 1'), x: M({ xcity: S('אשדוד') }) })];
+const CUST = [doc('cust/t' + TZ, { name: S('משה כהן'), phone: S('0501234567'), tz: S(TZ), last4: S('3456'), card: { booleanValue: true }, mail: S('moshe@x.co'), addr: S('הרצל 1'), x: M({ xcity: S('אשדוד') }) })];
 const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש'), on: { booleanValue: true } }), M({ id: S('br2'), name: S('יהודה הנשיא'), on: { booleanValue: true } })]) });
 
 (async () => {
@@ -58,7 +58,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
-    const R = { saveCust: { ok: true, id: 't' + TZ }, setCustCfg: { ok: true, xKeys: [{ k: 'xcity', label: 'עיר' }, { k: 'xab12', label: 'הערות' }] }, importCusts: { ok: true, created: 2, updated: 0, same: 0, bad: [] }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
+    const R = { saveCust: { ok: true, id: 't' + TZ }, setCustCfg: { ok: true, xKeys: [{ k: 'xcity', label: 'עיר' }, { k: 'xab12', label: 'הערות' }] }, importCusts: { ok: true, created: 2, updated: 0, same: 0, bad: [] }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') }, getCard: n === 'getCard' && d.act === 'view' ? { card: { num: '5326100020003456', exp: '03/29', name: 'Moshe C', cvv: '987' } } : { card: { num: '5326100020003456' } }, setCard: { ok: true, last4: '3456' }, delCard: { ok: true } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
   await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
@@ -115,16 +115,38 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   // 6. ייבוא: קובץ CSV עם עמודת כרטיס מלא ועמודת "סיטונאי"
   await goV('ocList'); await H.settle(page, 300);
   await page.click('[data-a=ocImp]'); await H.settle(page, 200);
-  const csv = 'שם,טלפון,ת.ז,כרטיס,סיטונאי,עיר\nדנה,0501111111,123456782,4580 1234 5678 9012,כן,אשדוד\nיוסי,521112222,,1234,כן,\nשגוי,abc,,12345,,\nרות,0503333333,,4111.1111.1111.1111,,\nטל,0504444444,,,,רחוב 5326/1000/2000/3456\n';
+  const csv = 'שם,טלפון,ת.ז,כרטיס,סיטונאי,עיר,מספר מלא,תוקף,CVV\nדנה,0501111111,123456782,4580 1234 5678 9012,כן,אשדוד,,,\nאבי,0505555555,,,,,4012888888881881,07/28,321\nיוסי,521112222,,1234,כן,\nשגוי,abc,,12345,,\nרות,0503333333,,4111.1111.1111.1111,,\nטל,0504444444,,,,רחוב 5326/1000/2000/3456\n';
   await page.setInputFiles('#dlg input[type=file]', { name: 'c.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) }); await H.settle(page, 500);
   await shot('ייבוא-התאמה-a');
   const mapTxt = await page.innerText('#dlg');
-  await page.selectOption('#dlg select[name=m3]', 'last4'); await page.selectOption('#dlg select[name=m4]', ''); await page.selectOption('#dlg select[name=m5]', 'xcity');
+  await page.selectOption('#dlg select[name=m3]', 'last4'); await page.selectOption('#dlg select[name=m4]', ''); await page.selectOption('#dlg select[name=m5]', 'xcity'); await page.selectOption('#dlg select[name=m6]', 'cnum'); await page.selectOption('#dlg select[name=m7]', 'cexp'); await page.selectOption('#dlg select[name=m8]', 'ccvv');
   await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 400); await shot('ייבוא-תצוגה-a');
   const pv = await page.innerText('#dlg');
   await page.click('#dlg [data-a=ocGo]'); await H.settle(page, 600);
   const ic = calls.find((c) => c.n === 'importCusts'); const all = JSON.stringify(calls) + (await page.evaluate(() => document.body.innerHTML + JSON.stringify(window.__oc) + JSON.stringify(localStorage)));
-  check('6 ייבוא: מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 3 && ic.d.rows[2].last4 === '1111' && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[1].phone === '0521112222' && ic.d.rows[1].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234|4111\.1111|5326\/1000/.test(all) && /שורה 6: מספר ארוך/.test(pv) && /\*\*\*\*9012/.test(mapTxt) && /שורה 4/.test(pv) && /נחתכו/.test(pv), { rows: ic && ic.d.rows, leak: /4580\s?1234|4111\.1111|5326\/1000/.test(all), pv: pv.slice(0, 200) });
+  check('6 ייבוא (כולל עמודת כרטיס מלא מוצפן + תוקף + CVV שנשלחים ב-card בלבד): מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 4 && ic.d.rows[3].last4 === '1111' && ic.d.rows[1].last4 === '1881' && ic.d.rows[1].card && ic.d.rows[1].card.num === '4012888888881881' && ic.d.rows[1].card.exp === '07/28' && ic.d.rows[1].card.cvv === '321' && ic.d.rows.filter((r) => r.card).length === 1 && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[2].phone === '0521112222' && ic.d.rows[2].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234|4111\.1111|5326\/1000/.test(all) && /שורה 7: מספר ארוך/.test(pv) && /\*\*\*\*9012/.test(mapTxt) && /שורה 5/.test(pv) && /נחתכו/.test(pv), { rows: ic && ic.d.rows, leak: /4580\s?1234|4111\.1111|5326\/1000/.test(all), pv: pv.slice(0, 200) });
+  const mem = JSON.stringify(await page.evaluate(() => [window.__oc, localStorage, document.body.innerHTML]));
+  check('6ב אחרי ייבוא: מספר הכרטיס המלא לא נשאר בזיכרון/אחסון/מסך', !mem.includes('4012888888881881'), null);
+  await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } }); await H.settle(page, 200);
+  // 9. מנהל: כרטיס לקוח – הצגה (getCard view), העתקה, מחיקה
+  await goV('ocCard', 't' + TZ); await H.settle(page, 400);
+  const cc = await page.innerText('#main');
+  await page.click('[data-a=ocCardView]'); await H.settle(page, 400); const cv = await page.innerText('#occv');
+  const gv = calls.filter((c) => c.n === 'getCard').pop();
+  await page.click('[data-a=ocCardDel]'); await H.settle(page, 200); await page.click('#dlg [data-a=yes]'); await H.settle(page, 400);
+  const dc = calls.filter((c) => c.n === 'delCard').pop();
+  const ls9 = await page.evaluate(() => JSON.stringify(localStorage) + JSON.stringify(window.__oc));
+  check('9 מנהל: ****3456 מוצפן; "הצג" → getCard view ומציג מספר/תוקף/CVV; מחיקה → delCard; לא נשמר באחסון', /\*\*\*\*3456/.test(cc) && /מוצפן/.test(cc) && gv && gv.d.act === 'view' && gv.d.custId === 't' + TZ && /5326 1000 2000 3456/.test(cv) && /03\/29/.test(cv) && /987/.test(cv) && dc && dc.d.custId === 't' + TZ && !ls9.includes('5326100020003456'), { cv, gv: gv && gv.d });
+  // 10. עובד: כרטיס הזמנה פתוחה – "העתק מספר כרטיס" שולח ordId
+  await page.evaluate(() => { window.__r0 = SY.role; SY.role = 'worker'; }); await goV('oxOrd', 'o1'); await H.settle(page, 600); await goV('oxOrd', 'o1'); await H.settle(page, 300);
+  const oh = await page.innerText('#main');
+  const hasCopy = await page.$('[data-a=ocCardCopy][data-ord=o1]');
+  if (hasCopy) { await page.click('[data-a=ocCardCopy][data-ord=o1]'); await H.settle(page, 400); }
+  const gc = calls.filter((c) => c.n === 'getCard').pop();
+  const noView = !(await page.$('[data-a=ocCardView]'));
+  await goV('oxOrd', 'o2'); await H.settle(page, 300); const paidNo = !(await page.$('[data-a=ocCardCopy]'));
+  check('10 עובד: בהזמנה שלא שולמה – העתק מספר (getCard copy + ordId), בלי "הצג"; בהזמנה ששולמה – אין כפתור', !!hasCopy && gc && gc.d.act === 'copy' && gc.d.ordId === 'o1' && noView && paidNo && /העתק מספר כרטיס/.test(oh), { gc: gc && gc.d, noView, paidNo });
+  await page.evaluate(() => { SY.role = window.__r0; });
   // 7. עובד: אין כפתור סיטונאי ואין ייבוא
   await page.evaluate(() => { SY.role = 'worker'; }); await goV('ocCard', 't' + TZ); await H.settle(page, 300);
   const emp = await page.innerText('#main'); await goV('ocList'); await H.settle(page, 200); const empL = await page.innerText('#main');

@@ -16,6 +16,10 @@ const { getFirestore } = require('firebase-admin/firestore');
 const T = require('./lib/tenant');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const core = require('./orders')._core;
+const { defineSecret } = require('firebase-functions/params');
+const CARD = require('./lib/card');
+// fb/ord-card: מפתח הצפנה לפרטי כרטיס (Secret Manager). באמולטור – ערך דמה מ-functions/.secret.local
+const CARD_ENC_KEY = defineSecret('CARD_ENC_KEY');
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -199,13 +203,25 @@ async function importCusts(request) {
           if (/^\d{13,19}$/.test(d)) { if (empty(r0.last4)) r0.last4 = d.slice(-4); delete r0.x[k]; }
         }
       }
+      const card = r0.card == null ? null : CARD.cleanCard(r0.card); delete r0.card; // fb/ord-card: מוצפן בשרת (00:50 – כולל CVV)
+      if (card) r0.last4 = card.num.slice(-4);
       onlyKeys(r0, ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x'], 'שורה');
       const o = clean(r0, keys);
       const id = idFor(o);
       if (seen.has(id)) { res.same++; continue; } // כפילות בתוך אותה מנה
       seen.add(id);
       let r;
-      await db.runTransaction(async (tx) => { r = await upsert(tx, db, w, o, { fill: true, src: 'import' }); });
+      await db.runTransaction(async (tx) => {
+        r = await upsert(tx, db, w, o, { fill: true, src: 'import' });
+        if (card) { // כרטיס קיים לא נדרס בייבוא (כמו שאר השדות – רק ריקים מתמלאים)
+          const cref = db.doc(`cust/${r.id}/p/card`);
+          if (!(await tx.get(cref)).exists) {
+            tx.set(cref, { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + r.id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'import' });
+            tx.update(db.doc('cust/' + r.id), { last4: card.num.slice(-4), card: true });
+            tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: r.id, act: 'import' });
+          }
+        }
+      });
       if (r.created) res.created++; else if (r.same) res.same++; else res.updated++;
     } catch (e) {
       if (!(e instanceof HttpsError)) throw e;
@@ -238,6 +254,90 @@ async function setCustCfg(request) {
   return { ok: true, xKeys: out };
 }
 
+// ---------- fb/ord-card: פרטי כרטיס מוצפנים ----------
+// cust/{id}/p/card { box:{v,iv,ct,tag}, last4, at, by, src } – אין קריאה מהאפליקציה (חוקים). cust/{id}.card=true + last4 בלבד גלויים.
+// cardLog/{id} { t, by, cust, act:'set'|'import'|'view'|'copy'|'del', ord?, f? } – כל פעולה נרשמת. קריאה – מנהל בלבד.
+const CID_RE = /^[tp][0-9]{8,10}$/;
+const OPEN_ST = ['new', 'work', 'wait_pay'];
+function custIdOf(v) { if (typeof v !== 'string' || !CID_RE.test(v)) throw bad('bad-id', 'לקוח לא תקין'); return v; }
+const mgrOnly = (w) => { if (w.role !== 'manager') throw deny('manager-only', 'הפעולה מותרת למנהל בלבד'); };
+
+// setCard({ custId, card:{num,exp?,name?,cvv?}, ordId? }) – מנהל; או עובד עם ord מתוך הזמנה שלא שולמה. דורס כרטיס קיים.
+// עובד עם ord: רק עם ordId של הזמנה פתוחה (לא שולמה) בסניף שלו שמקושרת ללקוח – הזנת כרטיס מתוך ההזמנה (00:37).
+async function ordGate(db, w, id, ordId) {
+  if (typeof ordId !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(ordId)) throw deny('need-ord', 'פרטי כרטיס לעובד – רק מתוך הזמנה שלא שולמה');
+  const o = await db.doc('ord/' + ordId).get();
+  if (!o.exists) throw new HttpsError('not-found', 'ההזמנה לא נמצאה', { reason: 'no-ord' });
+  if (o.get('custId') !== id) throw deny('not-linked', 'הלקוח לא מקושר להזמנה הזו');
+  if (!OPEN_ST.includes(o.get('status'))) throw deny('ord-paid', 'ההזמנה כבר שולמה – פרטי הכרטיס למנהל בלבד');
+  const br = o.get('br'), mine = w.staff && Array.isArray(w.staff.get('br')) ? w.staff.get('br') : null;
+  if (mine && br && br !== '_' && !mine.includes(br)) throw deny('foreign-br', 'אין לך הרשאה להזמנה של סניף אחר');
+  return ordId;
+}
+async function setCard(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId', 'card', 'ordId']);
+  const id = custIdOf(input.custId);
+  const card = CARD.cleanCard(input.card);
+  const db = T.tdb();
+  const ordId = w.role === 'manager' ? null : await ordGate(db, w, id, input.ordId);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(db.doc('cust/' + id));
+    if (!s.exists || s.get('mv')) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+    tx.set(db.doc(`cust/${id}/p/card`), { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'manual' });
+    tx.update(s.ref, { last4: card.num.slice(-4), card: true, upd: Date.now() });
+    tx.set(db.collection('cardLog').doc(), Object.assign({ t: Date.now(), by: w.uid, cust: id, act: 'set' }, ordId ? { ord: ordId } : {}));
+  });
+  return { ok: true, last4: card.num.slice(-4) };
+}
+
+// getCard({ custId, act:'view'|'copy', ordId? }) → { card:{num,exp?,name?,cvv?} } למנהל; { card:{num} } לעובד.
+// עובד עם ord: רק עם ordId של הזמנה שלא שולמה (new/work/wait_pay), בסניף שלו, שמקושרת ללקוח הזה (custId). נבדק בשרת.
+// כל קריאה מוצלחת נרשמת ב-cardLog לפני שהערך מוחזר.
+async function getCard(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId', 'act', 'ordId']);
+  const id = custIdOf(input.custId);
+  if (!['view', 'copy'].includes(input.act)) throw bad('bad-act', 'פעולה לא תקינה');
+  const db = T.tdb();
+  let ordId = null;
+  if (w.role !== 'manager') {
+    if (input.act !== 'copy') throw deny('manager-only', 'הצגת פרטי כרטיס – מנהל בלבד');
+    ordId = await ordGate(db, w, id, input.ordId);
+  } else if (input.ordId != null) {
+    if (typeof input.ordId !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(input.ordId)) throw bad('bad-id', 'הזמנה לא תקינה');
+    ordId = input.ordId;
+  }
+  const s = await db.doc(`cust/${id}/p/card`).get();
+  if (!s.exists) throw new HttpsError('not-found', 'אין כרטיס שמור ללקוח', { reason: 'no-card' });
+  const c = CARD.open(CARD_ENC_KEY.value(), w.bizId, 'cust/' + id, s.get('box'));
+  const out = w.role === 'manager' ? c : { num: c.num };
+  const log = { t: Date.now(), by: w.uid, cust: id, act: input.act, f: w.role === 'manager' ? 'all' : 'num' };
+  if (ordId) log.ord = ordId;
+  await db.collection('cardLog').add(log);
+  return { card: out };
+}
+
+// delCard({ custId }) – מנהל. מוחק את המוצפן ואת last4/card מהלקוח. נרשם ביומן.
+async function delCard(request) {
+  const w = await who(request); mgrOnly(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId']);
+  const id = custIdOf(input.custId);
+  const db = T.tdb();
+  const { FieldValue } = require('firebase-admin/firestore');
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(db.doc('cust/' + id));
+    if (!s.exists) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+    tx.delete(db.doc(`cust/${id}/p/card`));
+    tx.update(s.ref, { card: FieldValue.delete(), last4: FieldValue.delete(), upd: Date.now() });
+    tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: id, act: 'del' });
+  });
+  return { ok: true };
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -246,6 +346,8 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { saveCust, importCusts, setCustCfg };
+const FNS = { saveCust, setCustCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
+const SFNS = { importCusts, setCard, getCard, delCard }; // צריכות את מפתח הכרטיסים
+for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY] }, wrap(k, f));
 Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor } });

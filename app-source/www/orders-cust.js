@@ -3,7 +3,8 @@
      ת"ז ומייל גלויים בטופס (לא מוסתרים ב"רשות"). שמירת ההזמנה → saveCust עם fill (ממלא רק שדות ריקים, לא דורס).
    - מסכים: V.ocList (לקוחות), V.ocCard (כרטיס לקוח + היסטוריית הזמנות), ייבוא Excel/CSV עם התאמת עמודות, שדות חופשיים (מנהל).
    - סיטונאי (22:10): ברירת מחדל רגיל; רק מנהל מסמן, בכרטיס הלקוח. הייבוא מתעלם. בטיוטת ההזמנה: draft.wholesale (לשימוש ענף הקטלוג).
-   - אשראי (22:04): רק 4 ספרות. עמודת מספר כרטיס מלא בייבוא נחתכת כאן ל-4 האחרונות לפני השליחה (והשרת חותך שוב).
+   - אשראי: fb/ord-card – מספר מלא/תוקף/שם/CVV מוצפנים בשרת (customers.js setCard/getCard/delCard); בלקוח נשמרות 4 ספרות + card:true.
+   - אשראי (22:04, לעמודות שלא סומנו כ'מספר כרטיס מלא'): רק 4 ספרות. עמודת מספר כרטיס מלא בייבוא נחתכת כאן ל-4 האחרונות לפני השליחה (והשרת חותך שוב).
    כל כתיבה – דרך השרת (functions/customers.js). קריאה – cust, custcfg לפי החוקים. */
 (function(){
 'use strict';
@@ -86,12 +87,40 @@ V.ocCard=id=>{const T='לקוח';if(!on())return{t:T,h:'<div class="empty">אי�
  return{t:c.name||T,s:c.wholesale===true?'לקוח סיטונאי':'לקוח רגיל',h:`<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(c.name||'')}</b>${c.wholesale===true?'<span class="tag t1">סיטונאי</span>':''}</div>
  <p style="margin:6px 0"><a href="tel:${esc(c.phone||'')}" dir="ltr" style="color:var(--acc);display:inline-flex;min-height:44px;align-items:center">${esc(c.phone||'')}</a></p>
  ${c.tz?`<p class="note" style="margin:0">ת.ז ${esc(c.tz)}</p>`:''}${c.mail?`<p class="note" style="margin:0" dir="ltr">${esc(c.mail)}</p>`:''}${c.addr?`<p class="note" style="margin:0">${esc(c.addr)}</p>`:''}
- ${c.last4?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4)}</p>`:''}${c.port?`<p class="note" style="margin:0">תאריך ניוד ${esc(c.port)}</p>`:''}${xs}</div>
+ ${c.last4?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4)}${c.card===true?' · שמור מוצפן':''}</p>`:''}${c.port?`<p class="note" style="margin:0">תאריך ניוד ${esc(c.port)}</p>`:''}${xs}</div>
  <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocEdit" data-id="${esc(c.id)}">עריכת פרטים</button>${mgr()?`<button class="btn g grow" data-a="ocWs" data-id="${esc(c.id)}">${c.wholesale===true?'הפוך ללקוח רגיל':'סמן כסיטונאי'}</button>`:''}</div>
- <div class="sec"><h3>הזמנות</h3></div>${L.length?L.map(o=>`<button class="li" data-a="go" data-v="oxOrd" data-arg="${esc(o.id)}"><div class="m"><b>#${o.no}</b><small>${new Date(o.at).toLocaleDateString('he-IL')}</small></div><b class="a">${ils(o.total)}</b></button>`).join(''):`<p class="note">${O.L?'אין הזמנות':'טוען…'}</p>`}`}};
+ ${mgr()?cardMgrH(c):''}<div class="sec"><h3>הזמנות</h3></div>${L.length?L.map(o=>`<button class="li" data-a="go" data-v="oxOrd" data-arg="${esc(o.id)}"><div class="m"><b>#${o.no}</b><small>${new Date(o.at).toLocaleDateString('he-IL')}</small></div><b class="a">${ils(o.total)}</b></button>`).join(''):`<p class="note">${O.L?'אין הזמנות':'טוען…'}</p>`}`}};
 function fnLoadOrders(){/* V.ox טוען את ההזמנות כשאין עדיין */try{V.ox()}catch(e){}setTimeout(()=>{if(cur().v==='ocCard'&&!typing())rerender()},1500)}
 ACT.ocWs=el=>{const c=(C.L||[]).find(x=>x.id===el.dataset.id);if(!c)return;const to=c.wholesale!==true;
  ask(to?`לסמן את ${c.name} כלקוח סיטונאי?`:`להחזיר את ${c.name} ללקוח רגיל?`,async()=>{try{const k=c.tz?{tz:c.tz}:{phone:c.phone};await fnCall('saveCust',{cust:k,wholesale:to});toast('עודכן');await loadL(true)}catch(e){err(e)}},'כן')};
+
+/* ---------- fb/ord-card: כרטיס מלא מוצפן בשרת ----------
+   מנהל: הצגה בלחיצה (getCard view – נרשם ביומן), העתקה (copy – נרשם), הזנה/החלפה (setCard), מחיקה (delCard).
+   עובד עם ord: בכרטיס הזמנה שלא שולמה ומקושרת ללקוח – "העתק מספר כרטיס" (getCard copy + ordId; השרת בודק) והזנת כרטיס.
+   הערך המפוענח לא נשמר במשתנה גלובלי, לא ב-localStorage ולא בכתובת; התצוגה נמחקת אחרי 30 שניות או במעבר מסך. */
+let shown=null;const unshow=()=>{if(shown){clearTimeout(shown.t);shown=null}};
+const cardMgrH=c=>`<div class="sec"><h3>כרטיס אשראי</h3></div><div class="card" id="occard">${c.card===true?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4||'')} · מוצפן בשרת. כל הצגה והעתקה נרשמות ביומן.</p>
+ <div id="occv"></div><div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocCardView" data-id="${esc(c.id)}">הצג פרטי כרטיס</button><button class="btn g grow" data-a="ocCardCopy" data-id="${esc(c.id)}">העתק מספר</button></div>
+ <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocCardSet" data-id="${esc(c.id)}">החלף כרטיס</button><button class="btn g grow" data-a="ocCardDel" data-id="${esc(c.id)}">מחק פרטי כרטיס</button></div>`
+ :`<p class="note" style="margin:0">אין כרטיס שמור</p><button class="btn g w" style="margin-top:8px" data-a="ocCardSet" data-id="${esc(c.id)}">הוספת כרטיס</button>`}</div>`;
+const copyTxt=t=>(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('הועתק. הפעולה נרשמה ביומן'),()=>toast('ההעתקה נכשלה'));
+ACT.ocCardView=async el=>{el.disabled=true;try{const r=await fnCall('getCard',{custId:el.dataset.id,act:'view'});const k=r.card||{};const b=document.getElementById('occv');unshow();
+  if(b){b.innerHTML=`<p style="margin:6px 0" dir="ltr"><b>${esc(String(k.num||'').replace(/(\d{4})(?=\d)/g,'$1 '))}</b></p><p class="note" style="margin:0">תוקף ${esc(k.exp||'—')} · CVV ${esc(k.cvv||'—')}</p><p class="note" style="margin:0">${esc(k.name||'')}</p><p class="note" style="margin:0">(יוסתר בעוד 30 שניות)</p>`;
+   shown={t:setTimeout(()=>{const x=document.getElementById('occv');if(x)x.innerHTML='';shown=null},30000)}}}catch(e){err(e)}finally{el.disabled=false}};
+ACT.ocCardCopy=async el=>{el.disabled=true;try{const a={custId:el.dataset.id,act:'copy'};if(el.dataset.ord)a.ordId=el.dataset.ord;const r=await fnCall('getCard',a);await copyTxt(String(r.card&&r.card.num||''))}catch(e){err(e)}finally{el.disabled=false}};
+ACT.ocCardDel=el=>ask('למחוק את פרטי הכרטיס של הלקוח? אי אפשר לשחזר.',async()=>{try{await fnCall('delCard',{custId:el.dataset.id});toast('פרטי הכרטיס נמחקו');await loadL(true)}catch(e){err(e)}},'מחק');
+ACT.ocCardSet=el=>dlg(`<h3>פרטי כרטיס אשראי</h3><form data-f="ocCardF"><input type="hidden" name="id" value="${esc(el.dataset.id)}">${el.dataset.ord?`<input type="hidden" name="ord" value="${esc(el.dataset.ord)}">`:''}
+ ${fld('מספר כרטיס','num','','text','inputmode="numeric" autocomplete="off" required maxlength="23" dir="ltr"')}${fld('תוקף (MM/YY)','exp','','text','inputmode="numeric" autocomplete="off" maxlength="7" dir="ltr"')}
+ ${fld('שם בעל הכרטיס','name','','text','autocomplete="off" maxlength="60"')}${fld('CVV','cvv','','text','inputmode="numeric" autocomplete="off" maxlength="4" dir="ltr"')}
+ <p class="note">נשמר מוצפן בשרת. באפליקציה נשארות רק 4 ספרות אחרונות.</p><div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`);
+FRM.ocCardF=async f=>{const v=fd(f);const card={num:v.num};['exp','name','cvv'].forEach(k=>{if(String(v[k]||'').trim())card[k]=String(v[k]).trim()});const a={custId:v.id,card};if(v.ord)a.ordId=v.ord;
+ const b=f.querySelector('button');b.disabled=true;try{await fnCall('setCard',a);f.reset();closeDlg();toast('הכרטיס נשמר מוצפן');await loadL(true);rerender()}catch(e){b.disabled=false;err(e)}};
+// כרטיס הזמנה (עובד ומנהל): הזמנה שלא שולמה ומקושרת ללקוח → העתקת מספר / הזנת כרטיס
+{const oo=V.oxOrd;if(oo)V.oxOrd=id=>{const r=oo(id);unshow();if(!r||!r.h||!on())return r;const o=(O.L||[]).find(x=>x.id===id);if(!o||!o.custId||!['new','work','wait_pay'].includes(o.status))return r;
+  if(!C.L&&!C.busy)loadL();const c=(C.L||[]).find(x=>x.id===o.custId);
+  const h=`<div class="sec"><h3>כרטיס אשראי</h3></div><div class="card" id="ocordcard">${c&&c.card===true?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4||'')} שמור. ההעתקה נרשמת ביומן.</p><button class="btn g w" style="margin-top:8px" data-a="ocCardCopy" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}">העתק מספר כרטיס</button>`
+   :`<p class="note" style="margin:0">${c?'אין כרטיס שמור':'…'}</p>`}${c?`<button class="btn g w" style="margin-top:8px" data-a="ocCardSet" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}">${c.card===true?'החלף כרטיס':'הזנת כרטיס'}</button>`:''}</div>`;
+  r.h=r.h.replace('<div class="sec"><h3>היסטוריה</h3></div>',h+'<div class="sec"><h3>היסטוריה</h3></div>');return r}}
 
 /* ---------- טופס לקוח (חדש / עריכה) ---------- */
 const cForm=c=>{const x=c&&c.x||{};return `<h3>${c?'עריכת לקוח':'לקוח חדש'}</h3><form data-f="ocF">${c?`<input type="hidden" name="id" value="${esc(c.id)}">`:''}
@@ -119,12 +148,12 @@ FRM.ocCfgF=async f=>{cfRead();const L=C.cf.filter(k=>String(k.label).trim()).map
  try{const r=await fnCall('setCustCfg',{xKeys:L});C.cfg={xKeys:r.xKeys};closeDlg();toast('נשמר')}catch(e){b.disabled=false;err(e)}};
 
 /* ---------- ייבוא לקוחות (מנהל) ---------- */
-const MAPF=[['name','שם'],['phone','טלפון'],['tz','ת.ז'],['mail','מייל'],['addr','כתובת'],['last4','4 ספרות אחרונות'],['port','תאריך ניוד']];
+const MAPF=[['name','שם'],['phone','טלפון'],['tz','ת.ז'],['mail','מייל'],['addr','כתובת'],['last4','4 ספרות אחרונות'],['port','תאריך ניוד'],['cnum','מספר כרטיס מלא (מוצפן)'],['cexp','תוקף כרטיס'],['cname','שם בעל הכרטיס'],['ccvv','CVV']];
 const MK='lp-ocmap';
 ACT.ocImp=()=>{dlg(`<h3>ייבוא לקוחות</h3><p class="note">קובץ Excel או CSV. השורה הראשונה – כותרות. אחר כך בוחרים איזו עמודה היא מה.</p>
  <label class="btn w" style="display:flex;align-items:center;justify-content:center">בחירת קובץ<input type="file" accept=".xlsx,.xls,.csv,text/csv" data-c="ocFile" hidden></label>
- <p class="note">מספר כרטיס מלא בקובץ – נשמרות רק 4 הספרות האחרונות. עמודת "סיטונאי" – לא מיובאת (מסמנים ידנית).</p><button type="button" class="btn g w" data-a="closeDlg">ביטול</button>`)};
-const guess=(h)=>{const s=String(h||'').replace(/["'\s.]/g,'');return /שם/.test(s)?'name':/טל|נייד|phone/i.test(s)?'phone':/זהות|תז|^id$/i.test(s)?'tz':/מייל|דואל|mail/i.test(s)?'mail':/כתובת|addr/i.test(s)?'addr':/4|אחרונות|last/i.test(s)?'last4':/ניוד/.test(s)?'port':''};
+ <p class="note">עמודה שתסומן "מספר כרטיס מלא (מוצפן)" (וגם תוקף, שם, CVV) – נשמרת מוצפנת בשרת. מספר כרטיס בכל עמודה אחרת – נשמרות רק 4 הספרות האחרונות. עמודת "סיטונאי" – לא מיובאת.</p><button type="button" class="btn g w" data-a="closeDlg">ביטול</button>`)};
+const guess=(h)=>{const s=String(h||'').replace(/["'\s.]/g,'');return /cvv|קודאבטחה|ספרותבגב/i.test(s)?'ccvv':/תוקף|exp/i.test(s)?'cexp':/בעלהכרטיס|holder/i.test(s)?'cname':/שם/.test(s)?'name':/טל|נייד|phone/i.test(s)?'phone':/זהות|תז|^id$/i.test(s)?'tz':/מייל|דואל|mail/i.test(s)?'mail':/כתובת|addr/i.test(s)?'addr':/4|אחרונות|last/i.test(s)?'last4':/ניוד/.test(s)?'port':''};
 CHG.ocFile=async el=>{const f=el.files[0];el.value='';if(!f)return;if(/\.pdf$/i.test(f.name))return toast('רק Excel או CSV');
  try{if(!C.cfg)await cfgLoad();const rows=(await readTable(f)).filter(r=>Array.isArray(r)&&r.some(c=>String(c).trim()));if(rows.length<2)return toast('אין שורות בקובץ');
   const H=rows[0].map(x=>String(x==null?'':x).trim().slice(0,40));let saved={};try{saved=JSON.parse(localStorage.getItem(MK)||'{}')}catch(e){}
@@ -148,6 +177,8 @@ const xlDate=v=>{if(typeof v==='number'&&v>20000&&v<80000){const d=new Date(Math
 function prep(){const I=C.imp,out=[];let cut=0;
  I.R.forEach((r,ri)=>{const o={},x={},why=[];I.map.forEach((m,i)=>{if(!m)return;let v=r[i];if(v==null||String(v).trim()==='')return;
    const d=digs(v);
+   if(m==='cnum'){if(/^\d{13,19}$/.test(d)){o.card=Object.assign(o.card||{},{num:d});o.last4=d.slice(-4)}else why.push('מספר כרטיס');return}
+   if(m==='cexp'||m==='cname'||m==='ccvv'){o.card=Object.assign(o.card||{},{[m.slice(1)]:m==='cexp'&&typeof v==='number'?xlDate(v).slice(5,7)+'/'+xlDate(v).slice(2,4):String(v).trim()});return}
    if(m==='last4'){const k=l4(v);if(k.bad)why.push('4 ספרות');else{o.last4=k.v;if(k.cut)cut++}return}
    if(/^\d{13,19}$/.test(d)){if(!o.last4)o.last4=d.slice(-4);cut++;return} // מספר כרטיס בעמודה אחרת → 4 ספרות בלבד
    if(m==='phone'){const p=phN(v);if(!p)why.push('טלפון');else o.phone=p;return}
@@ -155,19 +186,19 @@ function prep(){const I=C.imp,out=[];let cut=0;
    if(m==='port'){const t=xlDate(v);if(t==='!')why.push('תאריך ניוד');else if(t)o.port=t;return}
    const s=String(v).trim();if(CARD8.test(s)){why.push('מספר ארוך');return}
    if(m==='name'||m==='mail'||m==='addr')o[m]=s;else x[m]=s.slice(0,200)});
-  if(Object.keys(x).length)o.x=x;if(!o.phone&&!o.tz)why.push('אין טלפון/ת.ז');if(!o.name&&!why.length)why.push('אין שם');
+  if(Object.keys(x).length)o.x=x;if(o.card&&!o.card.num){delete o.card;why.push('פרטי כרטיס בלי מספר')}if(!o.phone&&!o.tz)why.push('אין טלפון/ת.ז');if(!o.name&&!why.length)why.push('אין שם');
   out.push({n:ri+2,o,why})});
  I.out=out;I.cut=cut;I.R=null}
 const prevH=()=>{const I=C.imp,ok=I.out.filter(r=>!r.why.length),bad=I.out.filter(r=>r.why.length);
  return `<h3>תצוגה מקדימה</h3><p><b>${ok.length}</b> שורות תקינות · <b>${bad.length}</b> שגויות (לא ייובאו)</p>${I.cut?`<p class="note">${I.cut} מספרי כרטיס נחתכו ל-4 ספרות אחרונות.</p>`:''}
- <div style="max-height:40vh;overflow:auto">${ok.slice(0,5).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line)">${esc(r.o.name||'')} · <bdi dir="ltr">${esc(r.o.phone||'')}</bdi>${r.o.tz?' · '+esc(r.o.tz):''}${r.o.last4?' · ****'+esc(r.o.last4):''}</div>`).join('')}
+ <div style="max-height:40vh;overflow:auto">${ok.slice(0,5).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line)">${esc(r.o.name||'')} · <bdi dir="ltr">${esc(r.o.phone||'')}</bdi>${r.o.tz?' · '+esc(r.o.tz):''}${r.o.last4?' · ****'+esc(r.o.last4):''}${r.o.card?' · כרטיס מוצפן':''}</div>`).join('')}
  ${bad.slice(0,50).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line);color:var(--neg)">שורה ${r.n}: ${esc(r.why.join(', '))}</div>`).join('')}</div>
  <p class="note">לקוח קיים (אותה ת.ז או טלפון) – רק שדות ריקים מתמלאים. אין כפולים.</p>
  <div class="row"><button class="btn grow" data-a="ocGo"${ok.length?'':' disabled'}>ייבא ${ok.length} לקוחות</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>`};
 ACT.ocGo=async el=>{const I=C.imp;if(!I||!I.out)return;el.disabled=true;const ok=I.out.filter(r=>!r.why.length);const t={c:0,u:0,s:0,b:[]};
  try{for(let i=0;i<ok.length;i+=200){const part=ok.slice(i,i+200);el.textContent=`מייבא… ${i}/${ok.length}`;
    const r=await fnCall('importCusts',{reqId:I.req+'_'+(i/200),rows:part.map(x=>x.o)});t.c+=r.created||0;t.u+=r.updated||0;t.s+=r.same||0;(r.bad||[]).forEach(b=>t.b.push('שורה '+part[b.i].n+': '+b.msg))}
-  C.imp=null;dlg(`<h3>הייבוא הסתיים</h3><p>חדשים: <b>${t.c}</b> · עודכנו: <b>${t.u}</b> · ללא שינוי: <b>${t.s}</b></p>${t.b.length?`<div style="max-height:40vh;overflow:auto">${t.b.slice(0,50).map(s=>`<p class="note">${esc(s)}</p>`).join('')}</div>`:''}<button class="btn w" data-a="closeDlg">סגור</button>`);await loadL(true)}
+  C.imp.out=null;C.imp=null;dlg(`<h3>הייבוא הסתיים</h3><p>חדשים: <b>${t.c}</b> · עודכנו: <b>${t.u}</b> · ללא שינוי: <b>${t.s}</b></p>${t.b.length?`<div style="max-height:40vh;overflow:auto">${t.b.slice(0,50).map(s=>`<p class="note">${esc(s)}</p>`).join('')}</div>`:''}<button class="btn w" data-a="closeDlg">סגור</button>`);await loadL(true)}
  catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
 
 window.__oc=C;
