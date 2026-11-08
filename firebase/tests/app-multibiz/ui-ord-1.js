@@ -32,7 +32,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const { ctx, page } = await H.newPage(browser, src, cfg, log, 'm');
   await ctx.route(/:8080\/.*/, async (route) => {
     const req = route.request(); const u = new URL(req.url()); const body = req.postData() || '';
-    if (/:runQuery$/.test(u.pathname)) { let c = ''; try { c = JSON.parse(body).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
+    if (/:runQuery$/.test(u.pathname)) { globalThis.__RQ = (globalThis.__RQ || []).concat([body]); let c = ''; try { c = JSON.parse(body).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
       const r = c === 'ordpay' ? (globalThis.__OP || []) : c === 'ord' ? ORD : c === 'prod' ? PROD : c === 'stockLog' ? [doc('stockLog/s1', { name: S('עוגת שוקולד'), br: S('br1'), delta: N(5), why: S('in'), at: N(T1) })] : [{ readTime: '2026-11-03T09:00:00Z' }];
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) }); }
     if (/\/ordcfg\/main$/.test(u.pathname)) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name: 'x', fields: { pay: M({ mode: S('link'), has: { booleanValue: true } }), src: M({ br1: S('stock') }) } }) });
@@ -143,6 +143,15 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   });
   await setDs('b'); await H.settle(page, 200); await page.evaluate(() => { const t = document.querySelector('#brXfer'); if (t) t.scrollIntoView(); }); await shot('העברה-פנימית-b');
   check('15 העברה פנימית בדוח לפי סניף: ‎−50/+50, סה"כ 0; באותו סניף – אין שורה', xf.a && xf.a.br2 === -50 && xf.a.br1 === 50 && xf.b === null && /סה״כ לעסק/.test(xf.html), xf);
+  // 16. ספק הקישור מסומן אוטומטית כספק קיזוז (ליקוי 2), והזכות נראית בכרטיס שלו
+  globalThis.__OP = [doc('ordpay/o9', { ord: S('o9'), no: N(9), br: S('br1'), amt: N(30), at: N(T1), upd: N(T1), st: S('paid'), sup: M({ id: S('s_sup2'), name: S('ספק ב') }) })];
+  const ao = await page.evaluate(async () => { const c = S.cats.find((x) => x.beh === 'sup'); S.subs = S.subs.filter((x) => x.id !== 's_sup2'); S.subs.push({ id: 's_sup2', cat: c.id, name: 'ספק ב' });
+    await window.__opSync(); const u = subById('s_sup2'); const B = offBal('s_sup2'); NAV = [{ v: 'home' }]; go('card', 's_sup2'); return { off: u.offset === true, bal: B.bal, card: /קיזוז|זכות/.test(document.querySelector('#main').innerText) }; });
+  const oq = calls.length; void oq;
+  check('16 ספק הקישור שאינו ספק קיזוז – מסומן אוטומטית; הזכות (₪30) בכרטיס הספק', ao.off && ao.bal === 30 && ao.card, ao);
+  // 17. ordpay נשאל לפי upd יורד (2,000 האחרונים)
+  const oqB = (globalThis.__RQ || []).filter((b) => /"ordpay"/.test(b)).pop(); const oqLog = oqB ? { body: oqB } : null;
+  check('17 סנכרון ordpay ממוין לפי upd יורד', !!oqLog && /"orderBy":\[\{"field":\{"fieldPath":"upd"\},"direction":"DESCENDING"/.test(oqLog.body), oqLog && oqLog.body.slice(0, 200));
   check('12 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));

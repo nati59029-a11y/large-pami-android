@@ -30,7 +30,7 @@ const n3=x=>Math.round(x*1000)/1000;
 const err=e=>toast(e&&e.message||'הפעולה נכשלה');
 
 /* ---------- קריאה ---------- */
-async function runQ(coll,where,lim){const sq={from:[{collectionId:coll}],limit:lim||500};if(where)sq.where=where;
+async function runQ(coll,where,lim,ord){const sq={from:[{collectionId:coll}],limit:lim||500};if(where)sq.where=where;if(ord)sq.orderBy=[{field:{fieldPath:ord},direction:'DESCENDING'}];
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>dec(x.document))}
 const brWhere=()=>{const m=mine();return m&&hasBr()?{fieldFilter:{field:{fieldPath:'br'},op:'IN',value:{arrayValue:{values:m.slice(0,30).map(s=>({stringValue:s}))}}}}:null};
 let load=async function(force){if(O.busy||(!force&&O.L&&Date.now()-O.at<20000))return;O.busy=1;O.err='';
@@ -49,7 +49,7 @@ ACT.oxRe=()=>load(true);
 /* ---------- כניסה: אריח לעובד, שורה ב"עוד" למנהל, באנר בבית ---------- */
 window.oxTile=()=>on()?`<button class="tile" data-a="go" data-v="ox" style="font-size:1.15rem;text-align:center;border-color:var(--acc);color:var(--acc)">${ico('doc')}הזמנות</button>`:'';
 {const m=V.more;if(m)V.more=()=>{const r=m();if(on()&&r&&r.h)r.h=r.h.replace('<div class="mlist">',`<div class="mlist"><button class="opt" data-a="go" data-v="ox"><span>הזמנות<small>הזמנות לקוחות, מלאי ותשלום</small></span>${openN()?`<span class="tag t1">${openN()}</span>`:''}${ico('chev')}</button>`);return r}}
-{const h=V.home;if(h)V.home=()=>{const r=h();if(on()&&bzB()&&r&&r.h){if(!O.L)load();const n=openN(),s=sumMonth();if(O.L&&(n||s))r.h=r.h.replace(/(<div class="chips hacts")/,`<button class="ban" style="margin-top:12px" data-a="go" data-v="ox"><span class="tag t1">הזמנות</span><span style="flex:1"><b>${n}</b> פתוחות · החודש שולם <b>${ils(s)}</b></span>${ico('chev')}</button>$1`)}return r}}
+{const h=V.home;if(h)V.home=()=>{const r=h();if(on()&&r&&r.h){if(!O.L&&bzB())load();const n=openN(),s=sumMonth();if(O.L&&(n||s))r.h=r.h.replace(/(<div class="chips hacts")/,`<button class="ban" style="margin-top:12px" data-a="go" data-v="ox"><span class="tag t1">הזמנות</span><span style="flex:1"><b>${n}</b> פתוחות · החודש שולם <b>${ils(s)}</b></span>${ico('chev')}</button>$1`)}return r}}
 const openN=()=>(O.L||[]).filter(o=>!['done','cancel'].includes(o.status)).length;
 const sumMonth=()=>{const d=new Date(),m0=new Date(d.getFullYear(),d.getMonth(),1).getTime();return(O.L||[]).filter(o=>o.paid&&o.paid.at>=m0&&o.status!=='cancel').reduce((s,o)=>s+(o.total||0),0)};
 
@@ -197,12 +197,12 @@ FRM.oxCfgF=async f=>{const src=fd(f),b=f.querySelector('button');b.disabled=true
 
 /* ---------- מנהל־על: תשלום בהזמנות, בכרטיס העסק ---------- */
 const PAYC={};
-{const s=V.sab;if(s)V.sab=id=>{const r=s(id);try{const b=(ADM.L||[]).find(x=>x.id===id);if(!SY.sa||!b||b.missing||b.dataRoot==='legacy'||!r||!r.h)return r;
- const c=PAYC[id];if(c===undefined){PAYC[id]=null;Promise.all([fsx('/b/'+id+'/ordcfg/main',{},true).then(d=>dec(d).pay||{}).catch(()=>({})),fsx('/b/'+id+'/cfg/main',{},true).then(d=>{const j=JSON.parse(fvj(d.fields&&d.fields.data)||'{}');return(j.cats||[]).filter(c=>c.beh==='sup').flatMap(c=>(c.subs||[]).map(x=>({id:x.id,name:x.name})))}).catch(()=>[])]).then(([p,sups])=>{PAYC[id]=Object.assign({},p,{sups})}).finally(()=>{if(cur().v==='sab')rerender()})}
+{const s=V.sab;if(s)V.sab=id=>{const r=s(id);try{const b=(ADM.L||[]).find(x=>x.id===id);if(!SY.sa||!b||(b.missing&&id!==BZ0)||!r||!r.h)return r;const pf=(b.dataRoot==='legacy'||b.missing)&&id===BZ0?'':'/b/'+id;
+ const c=PAYC[id];if(c===undefined){PAYC[id]=null;Promise.all([fsx(pf+'/ordcfg/main',{},true).then(d=>dec(d).pay||{}).catch(()=>({})),fsx(pf+'/cfg/main',{},true).then(d=>{const j=JSON.parse(fvj(d.fields&&d.fields.data)||'{}');return(j.cats||[]).filter(c=>c.beh==='sup').flatMap(c=>(c.subs||[]).map(x=>({id:x.id,name:x.name})))}).catch(()=>[])]).then(([p,sups])=>{PAYC[id]=Object.assign({},p,{sups})}).finally(()=>{if(cur().v==='sab')rerender()})}
  const p=c||{},mode=p.mode==='link'?'link':'phone';
  r.h+=`<div class="sec"><h3>תשלום בהזמנות</h3></div><form class="card" data-f="oxPayF" data-id="${esc(id)}"><p class="note" style="margin-top:0">${c===null?'טוען…':p.mode==='link'&&p.has?'מוגדר קישור סליקה. מטעמי אבטחה הקישור לא מוצג – אפשר להחליף אותו.':p.mode==='phone'?'מוגדר: תשלום בטלפון.':'עדיין לא הוגדר. ברירת המחדל: תשלום בטלפון.'} העובדים לא רואים את הקישור, רק כפתור "לתשלום".</p>
  <div class="chips" role="radiogroup"><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="link"${mode==='link'?' checked':''}> קישור סליקה</label><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="phone"${mode==='phone'?' checked':''}> תשלום בטלפון</label></div>
- <label class="f"><span>הקישור שייך לספק (זיכוי אצלו על כל הזמנה ששולמה בקישור)</span><select name="sup"><option value="">בלי ספק</option>${(p.sups||[]).map(x=>`<option value="${esc(x.id)}"${p.sup&&p.sup.id===x.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
+ <label class="f"><span>הקישור שייך לספק (זיכוי אצלו על כל הזמנה ששולמה בקישור; יסומן אוטומטית כספק קיזוז)</span><select name="sup"><option value="">בלי ספק</option>${(p.sups||[]).map(x=>`<option value="${esc(x.id)}"${p.sup&&p.sup.id===x.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
  <label class="f"><span>קישור לדף הסליקה (https)</span><input name="link" type="url" dir="ltr" maxlength="500" placeholder="https://" autocomplete="off"></label><button class="btn w">שמור</button></form>`}catch(e){}return r}}
 FRM.oxPayF=async f=>{const id=f.dataset.id,x=fd(f);if(x.mode==='link'&&!/^https:\/\/[^\s]+\.[^\s]+/.test(x.link||''))return toast('קישור חייב להתחיל ב-https://');const b=f.querySelector('button');b.disabled=true;
  try{const P0=PAYC[id]||{},su=x.sup?(P0.sups||[]).find(s=>s.id===x.sup):null;const r=await fnCall('setBusinessPayLink',{bizId:id,mode:x.mode,link:x.mode==='link'?x.link.trim():undefined,sup:x.mode==='link'&&su?{id:su.id,name:su.name}:undefined});PAYC[id]=Object.assign({},P0,{mode:r.mode,has:r.has,sup:r.sup||null});toast('נשמר');rerender()}catch(e){err(e)}finally{b.disabled=false}};
@@ -215,14 +215,16 @@ const OPC='c_ordinc';
 function opCat(){let c=S.cats.find(x=>x.id===OPC);if(!c){c={id:OPC,kind:'inc',name:'הכנסות מהזמנות',beh:'simple'};S.cats.push(c)}let u=S.subs.find(x=>x.cat===OPC&&x.name==='תשלום בקישור');if(!u){u={id:'s_ordlink',cat:OPC,name:'תשלום בקישור'};S.subs.push(u)}return u.id}
 const ymd2=t=>{const d=new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 let OPB=0;
-async function opSync(){if(OPB||!isA()||!bzB()||!bzF('orders')||typeof S==='undefined'||!S)return 0;OPB=1;let n=0;
- try{const L=await runQ('ordpay',null,2000);for(const r of L){if(!r.ord||!(r.amt>=0)||!r.sup||!r.sup.id)continue;const id='op_'+r.ord;let t=S.tx.find(x=>x.id===id);
+async function opSync(){if(OPB||!isA()||!bzF('orders')||typeof S==='undefined'||!S)return 0;OPB=1;let n=0;
+ /* 2,000 השינויים האחרונים (לפי upd) – רשומה ישנה יותר כבר נקלטה בסנכרון קודם */const warn=[];try{const L=await runQ('ordpay',null,2000,'upd');for(const r of L){if(!r.ord||!(r.amt>=0)||!r.sup||!r.sup.id)continue;const id='op_'+r.ord;let t=S.tx.find(x=>x.id===id);
+   /* בודק סבב 1, ליקוי 2: הספק של הקישור מסומן אוטומטית כ"ספק קיזוז" כדי שהזכות תיראה בכרטיס שלו ותהיה ניתנת לקיזוז */const u=subById(r.sup.id);if(u&&!u.offset&&r.st==='paid'){u.offset=true;n++;toast('הספק "'+u.name+'" סומן כספק קיזוז – הזיכויים מהזמנות בקישור מופיעים בכרטיס שלו')}
    if(r.st==='paid'){const f={t:'inc',cat:OPC,sub:opCat(),date:ymd2(r.at),amt:Math.round(r.amt*100)/100,note:'הזמנה #'+r.no,off:{sub:r.sup.id},ordp:r.ord};if(r.br&&r.br!==NB)f.br=r.br;
     if(!t){S.tx.push(Object.assign({id},f));n++}else if(t.x||t.amt!==f.amt||t.date!==f.date||t.br!==f.br||!t.off||t.off.sub!==f.off.sub){delete t.x;Object.assign(t,f);n++}}
-   else if(r.st==='void'&&t&&!t.x){t.x=1;n++}}
+   else if(r.st==='void'&&t&&!t.x){t.x=1;n++;try{const B=offBal(r.sup.id);if(B.bal<-0.004)warn.push((u?u.name:r.sup.name)+': '+ils(B.bal))}catch(e){}}}
+  if(warn.length)setTimeout(()=>toast('שים לב: יתרת זכות שלילית אצל '+warn.join(', ')),2700);
   if(n){save();if(!typing())rerender()}}catch(e){}finally{OPB=0}return n}
 {const L0=load;load=async f=>{await L0(f);opSync()}}
-setTimeout(()=>{try{opSync()}catch(e){}},8000);setInterval(()=>{if(!document.hidden)opSync()},120000);
+setTimeout(()=>{try{if(bzB())opSync()}catch(e){}},8000);setInterval(()=>{if(!document.hidden)opSync()},120000);
 
 /* 17:51: שיוך ספק לסניף (subs[].br, רשות). בכרטיס הספק – בחירת סניף; חשבונית חדשה של הספק מקבלת אותו כסניף ברירת מחדל (brGuess).
    חשבוניות קיימות לא משתנות. עסק עם פחות מ-2 סניפים – שום שינוי. */
