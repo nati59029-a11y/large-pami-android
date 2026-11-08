@@ -64,9 +64,9 @@ jobs:
       - name: ui-7 (mocked network)
         if: always()
         run: node tests/app-multibiz/ui-7.js ../app-source/www ../out/ui-7.json ../out/shots-7
-      - name: ui-us3 + ui-us4 + ui-us5 + ui-us6 + ui-us7 + no-dup (unified scan, mocked network)
+      - name: ui-us3 + ui-us4 + ui-us5 + ui-us6 + ui-us7 + ui-br1 + no-dup (unified scan, mocked network)
         if: always()
-        run: node tests/app-multibiz/no-dup-functions.js ../app-source/www/index.html && node tests/app-multibiz/ui-us3.js ../app-source/www && node tests/app-multibiz/ui-us4.js ../app-source/www && node tests/app-multibiz/ui-us5.js ../app-source/www && node tests/app-multibiz/ui-us6.js ../app-source/www && node tests/app-multibiz/ui-us7.js ../app-source/www
+        run: node tests/app-multibiz/no-dup-functions.js ../app-source/www/index.html && node tests/app-multibiz/ui-us3.js ../app-source/www && node tests/app-multibiz/ui-us4.js ../app-source/www && node tests/app-multibiz/ui-us5.js ../app-source/www && node tests/app-multibiz/ui-us6.js ../app-source/www && node tests/app-multibiz/ui-us7.js ../app-source/www && node tests/app-multibiz/ui-br1.js ../app-source/www
       - name: extra (mocked network)
         if: always()
         run: node tests/app-multibiz/extra.js ../app-source/www ../out/extra.json
