@@ -158,6 +158,17 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const ipW = calls.filter((c) => c.n === "importProducts").pop();
   check('13ב עובד: ייבוא מלאי עם עמודות סיטונאי ועלות, wp נשלח', wImp.name && wImp.wp && wImp.cost && !!ipW && ipW.d.rows[0].wp === 3, { wImp, ip: ipW && ipW.d });
   await page.evaluate(() => { SY.role = window.__mgrSave; });
+  // 15. מסך ה-+ (00:27): מנהל – "משימה חדשה" בחצי רוחב ולידה "הזמנות"; עובד עם ord – "הזמנות"; עובד בלי ord – אין
+  const plus = async () => { await page.evaluate(() => { NAV = [{ v: 'home' }]; rerender(); openAdd(); }); await H.settle(page, 300);
+    return page.evaluate(() => { const o = document.querySelector('#sheet [data-a=addGo][data-v=ox]'), t = document.querySelector('#sheet [data-a=addGo][data-v=tk]');
+      return { ox: !!o, row: !!(o && t && o.parentElement === t.parentElement), half: !!(t && t.getBoundingClientRect().width < window.innerWidth * 0.6) }; }); };
+  const pm = await plus(); if (shots) await page.screenshot({ path: path.join(shots, 'plus-mgr-390.png') });
+  await page.click('#sheet [data-a=addGo][data-v=ox]'); await H.settle(page, 300);
+  const toOx = await page.evaluate(() => cur().v === 'ox');
+  await page.evaluate(() => { SY.role = 'worker'; SY.perms = { ord: true }; }); const pw1 = await plus(); if (shots) await page.screenshot({ path: path.join(shots, 'plus-wk-390.png') });
+  await page.evaluate(() => { SY.perms = { ord: false }; }); const pw0 = await plus();
+  await page.evaluate(() => { SY.role = window.__mgrSave; SY.perms = {}; sheetClose(); });
+  check('15 מסך +: מנהל – הזמנות ליד משימה חדשה (חצי רוחב) ופותח הזמנות; עובד עם ord – יש; בלי ord – אין', pm.ox && pm.row && pm.half && toOx && pw1.ox && !pw0.ox, { pm, toOx, pw1, pw0 });
   check('14 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
   await browser.close();
