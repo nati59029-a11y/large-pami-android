@@ -82,6 +82,22 @@ const BLOCKED = { type: 'transfer', allowed: false, reason: 'no-perm', toManager
   await mp.evaluate(() => { if (US) usReset(); MQ.at = 0; return mqLoad(); }); await H.settle(mp, 300); await mp.evaluate(() => go('mq')); await H.settle(mp, 300);
   await mp.click('[data-a=mqRej]'); await H.settle(mp, 200); await mp.click('#dlg [data-a=yes]'); await H.settle(mp, 600);
   check('10 דחייה: st=rej, יצא מהרשימה', CLOUD.docs.q2.st.stringValue === 'rej' && (await mp.evaluate(() => MQ.L.length)) === 0, CLOUD.docs.q2.st);
+  // סבב 4: נפתח מהתור, יצא מהמסך האחיד ונשמר ממסך אחר → מסומן "טופל" אוטומטית, פעם אחת
+  CLOUD.docs.q3 = { uid: S('w'), by: S('w'), t: I(Date.now()), st: S('new'), k: S('transfer'), np: I(1) }; CLOUD.parts['q3/0'] = CLOUD.parts['q3/0'] || (await mp.evaluate(() => 'data:image/png;base64,' + document.createElement('canvas').toDataURL('image/png').split(',')[1]));
+  await mp.evaluate(() => { MQ.at = 0; return mqLoad(); }); await H.settle(mp, 300); await mp.evaluate(() => go('mq')); await H.settle(mp, 300);
+  await mp.click('[data-a=mqOpen]'); await H.settle(mp, 1200);
+  const p10 = CLOUD.log.filter((r) => r.m === 'PATCH').length;
+  await mp.evaluate(() => { usReset(); go('todo'); S.tx.push({ id: 'mqT3', t: 'exp', cat: 'x', sub: '', date: '2026-11-03', amt: 20, note: '', pays: [] }); save(); }); await H.settle(mp, 800);
+  const t10a = await mp.evaluate(() => ({ eu: S.tx.find((t) => t.id === 'mqT3').eu, left: MQ.L.length, mqp: MQP }));
+  check('10א נשמר ממסך אחר: הפריט סומן done אוטומטית, eu = העובד', CLOUD.docs.q3.st.stringValue === 'done' && t10a.eu === 'w' && t10a.left === 0 && t10a.mqp === null && CLOUD.log.filter((r) => r.m === 'PATCH').length === p10 + 1, t10a);
+  await mp.evaluate(() => { S.tx.push({ id: 'mqT4', t: 'exp', cat: 'x', sub: '', date: '2026-11-03', amt: 5, note: '', pays: [] }); save(); }); await H.settle(mp, 500);
+  check('10ב שמירה נוספת לא מסמנת שוב (אין PATCH נוסף), והרשומה הבאה לא מקבלת eu של העובד', CLOUD.log.filter((r) => r.m === 'PATCH').length === p10 + 1 && (await mp.evaluate(() => S.tx.find((t) => t.id === 'mqT4').eu)) !== 'w');
+  delete CLOUD.docs.q3; // לא שייך לבדיקות 12–14 של העובד (שני מסמכים)
+  // סבב 4: ח.פ ספק נשלח לעובד (pubCfg) וזיהוי אצל עובד לפי ח.פ קודם
+  const t10c = await mp.evaluate(() => { const o = cfgLocal(); localStorage.setItem(CK, JSON.stringify({ cats: [{ id: 'cS', name: 'ספקים', beh: 'sup', subs: [{ id: 's1', name: 'אלפא', hp: '512345678' }, { id: 's2', name: 'בטא' }] }] }));
+    const L = wkSubsAll(), a = usSup({ supplier: 'שם אחר לגמרי', supplier_id: '512345678' }, L), b = usSup({ supplier: 'בטא', supplier_id: '' }, L); localStorage.setItem(CK, JSON.stringify(o));
+    const src = pubCfg.toString(); return { a: a && a.id, b: b && b.id, hp: L[0].hp, pub: /hp:s\.hp/.test(src) }; });
+  check('10ג עובד: ח.פ ב-cfg (pubCfg שולח hp), זיהוי לפי ח.פ גם כשהשם שונה, ובלי ח.פ – לפי שם', t10c.a === 's1' && t10c.b === 's2' && t10c.hp === '512345678' && t10c.pub, t10c);
   check('11 אין שגיאות JS (מנהל)', mp.__errors.length === 0, mp.__errors);
   // ---- עובד: הודעה "טופל"/"נדחה", בלי סכומים; פעם אחת בלבד ----
   const toasts = async () => wp.evaluate(() => [...document.querySelectorAll('.toast,#toast,[class*=toast]')].map((e) => e.textContent).join(' | '));

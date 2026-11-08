@@ -1701,7 +1701,7 @@ async function pushItem(it){/* 6ח סבב 2: הוצאה מקופה מלפני ה
 async function flush(){if(flush.b||!isW())return;flush.b=1;SY.err='';
  try{for(const it of obGet()){try{await pushItem(it)}catch(e){SY.err=e.offline?'':e.message;break}obSet(obGet().filter(x=>x.id!==it.id))}}finally{flush.b=0;syS()}}
 /* ---- קונפיג קטגוריות (מנהל מפרסם, עובד מקבל) ---- */
-async function pubCfg(){const cats=S.cats.filter(c=>c.kind==='exp'&&!c.hid&&!c.off).map(c=>({id:c.id,name:c.name,beh:c.beh,subs:subsOf(c.id).map(s=>({id:s.id,name:s.name}))}));
+async function pubCfg(){const cats=S.cats.filter(c=>c.kind==='exp'&&!c.hid&&!c.off).map(c=>({id:c.id,name:c.name,beh:c.beh,subs:subsOf(c.id).map(s=>s.hp?{id:s.id,name:s.name,hp:s.hp}:{id:s.id,name:s.name})}));
  await fsx('/cfg/main',{method:'PATCH',body:JSON.stringify({fields:{data:sv(JSON.stringify({cats,th:S.theme||'paper',at:new Date().toISOString()}))}})});return cats.length}
 async function getCfg(){const d=await fsx('/cfg/main');const j=JSON.parse(gv(d,'data')||'{}');try{localStorage.setItem(CK,JSON.stringify(j))}catch(e){}return j}
 const cfgLocal=()=>{try{return JSON.parse(localStorage.getItem(CK))||{cats:[]}}catch(e){return{cats:[]}}};
@@ -1804,7 +1804,7 @@ async function wkLoad(){try{await getCfg()}catch(e){}
  try{await flush();if(wpE()==='none'){WKL=[];throw 0}WKL=(await runQ('owner',SY.uid)).map(d=>({id:idOf(d),st:gv(d,'status'),rq:gv(d,'req'),at:gv(d,'created'),d:(()=>{try{return JSON.parse(gv(d,'data'))}catch(e){return{}}})()})).sort((a,b)=>(b.at||'').localeCompare(a.at||'')).slice(0,40)}catch(e){}
  if(cur().v==='wk')rerender()}
 let WS='home';
-const wkSubsAll=()=>{const o=[];(cfgLocal().cats||[]).filter(c=>c.beh==='sup').forEach(c=>(c.subs||[]).forEach(s=>o.push({id:s.id,name:s.name,cat:c.id})));return o};
+const wkSubsAll=()=>{const o=[];(cfgLocal().cats||[]).filter(c=>c.beh==='sup').forEach(c=>(c.subs||[]).forEach(s=>o.push({id:s.id,name:s.name,cat:c.id,hp:typeof s.hp==='string'?s.hp:''})));return o};
 const wkThumbs=()=>WK.pages.length?`<div class="card" style="margin:8px 0"><b>${WK.pages.length} ${WK.pages.length>1?'עמודים מצורפים':'עמוד מצורף'}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${WK.pages.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="wkDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div></div>`:'';
 const wkPickBtns=()=>`<label class="btn ${WK.pages.length?'g':''}" style="cursor:pointer;width:100%;margin:8px 0">📷 ${WK.pages.length?'צלם עמוד נוסף':'צלם'}<input type="file" accept="image/*" capture="environment" data-c="wkpick" hidden></label>
  <label class="btn g" style="cursor:pointer;width:100%;margin:0 0 8px">🖼 ${WK.pages.length?'הוסף עמודים מהגלריה':'העלה מהגלריה'}<input type="file" accept="image/*" multiple data-c="wkpick" hidden></label>`;
@@ -4630,7 +4630,7 @@ window.USCLS=async pages=>{const U=US,du=pages&&pages[0];if(!du)return{kind:'unk
 const usF=ty=>US&&US.cls&&US.cls.ty===ty&&US.cls.f?US.cls.f:null;
 const usNum=v=>typeof v==='number'&&isFinite(v)?String(v):'';
 const usDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v||''))&&pDate(v)?v:'';
-/* ספק: לפי השם (כמו הזיהוי הקיים). ח.פ לא נשמר היום בכרטיס הספק – לכן לא משמש להתאמה (בלי שינוי מבנה נתונים) */
+/* ספק לפי השם (התאמה בסיסית). העטיפה למטה ("קודם לפי ח.פ") בודקת קודם את הח.פ מכרטיס הספק – אצל מנהל מ-S.subs ואצל עובד מ-cfg/main (pubCfg שולח hp) */
 function usSup(f,subs){const n=s_(f&&f.supplier);return n?ocrSupplier(n,subs):null}
 const usSupSubs=()=>S.subs.filter(s=>!s.off&&(cat(s.cat)||{}).beh==='sup').map(s=>({id:s.id,name:s.name,cat:s.cat,hp:s.hp||''}));
 /* מנהל: חשבונית/הוצאה מקופה. ספק שנמצא → הקטגוריה שלו (הפעם הקודמת) ומיד לפרטים; אחרת בוחרים קטגוריה ו"ספק חדש" מוצע עם השם שזוהה */
@@ -4964,7 +4964,7 @@ const mqN=()=>{if(isA()&&!MQ.b&&Date.now()-MQ.at>60000)mqLoad().catch(()=>{});re
 {const o=todoC;todoC=function(){const r=o(),m=mqN();r.mq=m;r.n+=m;return r}}
 {const o=V.todo;V.todo=function(){const r=o();if(!isA())return r;const n=mqN();if(n)r.h=adSec('נשלח למנהל לטיפול')+adOpt('mq','📨 ממתין לטיפול','מסמכים שעובדים שלחו כי אין להם הרשאה להזין אותם',n)+r.h;return r}}
 V.mq=()=>{const T='ממתין לטיפול';if(!isA())return{t:T,h:'<div class="card"><p class="note">המסך הזה למנהל בלבד.</p></div>'};if(Date.now()-MQ.at>20000&&!MQ.b)mqLoad().catch(()=>{});
- const row=x=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(mqKind(x.k))}</b><small>${esc(dfmt(ilDay(new Date(x.t))))}</small></div><small class="who">נשלח על ידי ${esc(mqWho(x))}${x.np?'':' · הצילום לא הגיע'}</small>${MQ.op&&MQ.op[x.id]?'<div class="note" style="font-weight:700">נפתח כבר במסך הסריקה. אם שמרת – סמן כטופל, כדי שלא יישמר פעמיים.</div>':''}
+ const row=x=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(mqKind(x.k))}</b><small>${esc(dfmt(ilDay(new Date(x.t))))}</small></div><small class="who">נשלח על ידי ${esc(mqWho(x))}${x.np?'':' · הצילום לא הגיע'}</small>${MQ.op&&MQ.op[x.id]?'<div class="note" style="font-weight:700">נפתח כבר במסך הסריקה. שמירה מכל מסך תסמן אותו כטופל אוטומטית; אם שמרת ולא סומן – סמן כטופל, כדי שלא יישמר פעמיים.</div>':''}
  <div class="row" style="margin-top:8px"><button class="btn grow" data-a="mqOpen" data-id="${esc(x.id)}">פתח במסך הסריקה</button><button class="btn g grow" data-a="mqDone" data-id="${esc(x.id)}">סמן כטופל</button><button class="btn g grow" data-a="mqRej" data-id="${esc(x.id)}">דחה</button></div></div>`;
  return{t:T,s:MQ.L.length+' מסמכים',h:`<p class="note" style="margin:0 0 10px">עובדים שלחו את המסמכים האלה כי אין להם הרשאה להזין את הסוג שלהם. פותחים במסך הסריקה, משלימים ושומרים – או דוחים. העובד יקבל הודעה "טופל" או "נדחה", בלי פרטים.</p><button class="btn g w" style="margin-bottom:10px" data-a="mqRefresh">רענן</button>${MQ.L.length?MQ.L.map(row).join(''):'<div class="empty">אין מסמכים שממתינים לטיפול</div>'}`}};
 ACT.mqRefresh=()=>{MQ.at=0;mqLoad().catch(()=>{});toast('מרענן...')};
@@ -4987,7 +4987,7 @@ async function mqSet(id,st,msg){try{await mqSt(id,st);toast(msg)}catch(e){if(e.c
 ACT.mqDone=el=>{const id=el.dataset.id;ask('לסמן את המסמך כטופל? העובד יקבל הודעה "טופל".',()=>mqSet(id,'done','סומן כטופל'),'סמן כטופל')};
 ACT.mqRej=el=>{const id=el.dataset.id;ask('לדחות את המסמך? הוא לא יירשם, והעובד יקבל הודעה "נדחה".',()=>mqSet(id,'rej','המסמך נדחה'),'דחה')};
 /* שמירה מהמסך האחיד של מסמך מהתור: "מי הכניס" = העובד ששלח; הפריט מסומן כטופל (פעם אחת – החוקים לא מאפשרים פעמיים) */
-{const o=usDone;usDone=function(){const U=US,id=U&&U.mq;if(id){const eu=/^[A-Za-z0-9_-]{1,128}$/.test(U.mqU||'')?U.mqU:'';if(eu&&S.tx.length>U.mqN){S.tx.slice(U.mqN).forEach(t=>{t.eu=eu});save()}U.mq='';mqSet(id,'done','המסמך מהתור סומן כטופל')}o()}}
+{const o=usDone;usDone=function(){const U=US,id=U&&U.mq;if(id){U.mq='';mqAuto(id)}o()}}
 /* ---- עובד: שליחה למנהל ---- */
 async function mqSend(){const U=US;if(!U||!isW()||!U.pg.length||U.mqB)return;U.mqB=1;
  try{const pg=U.pg;let v='';if(pg.every(g=>!g.pdf))v=packPages(pg.map(g=>g.u));else if(pg.length===1)v=pg[0].du;else{toast('אפשר לשלוח למנהל קובץ PDF אחד לבד, או תמונות');return}
@@ -5024,6 +5024,16 @@ ACT.admName=el=>{const u=(ADM.staff||[]).find(x=>x.uid===el.dataset.uid);if(!u)r
 FRM.admNameF=async f=>{const x=fd(f),nm=s_(x.name),b=f.querySelector('button');if(!nm||nm.length>60)return toast('השם: עד 60 תווים');b.disabled=true;
  try{await fnCall('setStaffName',Object.assign({uid:x.uid,name:nm},SY.sa?{bizId:SY.bizId}:{}));const u=(ADM.staff||[]).find(z=>z.uid===x.uid);if(u)u.name=nm;EUS[x.uid]=nm;EUN[x.uid]=nm;closeDlg();toast('השם נשמר');rerender()}catch(e){toast(e.message||'השמירה נכשלה')}finally{b.disabled=false}};
 {const o=V.staff;V.staff=function(){const r=o();try{if(r&&r.h)r.h=r.h.replace(/<button class="btn s g" data-a="admStf" data-uid="([A-Za-z0-9_-]{1,128})">/g,(m,u)=>`<button class="btn s g" data-a="admName" data-uid="${u}">שם</button>`+m)}catch(e){}return r}}
+/* סבב 4: מסמך שנפתח מהתור ונשמר מכל מסך (לא רק מהמסך האחיד) – מסומן כטופל אוטומטית.
+   MQP = הפריט הפתוח האחרון: {id, uid של העובד, n0 = מספר הרשומות בפתיחה, at}. נבדק בכל save() של המנהל: נוספה רשומה, או נשלחה סגירה/הפקדה → "מי הכניס" = העובד, ו-mqSet פעם אחת (MQP מתאפס לפני הקריאה; החוקים חוסמים פעם שנייה). תוקף: שעתיים, ופריט אחד בכל פעם */
+let MQP=null;const MQP_TTL=2*3600e3;
+function mqAuto(id){const P=MQP;if(!P||P.id!==id)return;MQP=null;/* כבר סומן (או נסגר) – לא פעם שנייה */
+ const eu=/^[A-Za-z0-9_-]{1,128}$/.test(P.uid||'')?P.uid:'';if(eu&&S.tx.length>P.n0){S.tx.slice(P.n0).forEach(t=>{t.eu=eu});save()}
+ mqSet(id,'done','המסמך מהתור סומן כטופל')}
+{const o=ACT.mqOpen;ACT.mqOpen=async el=>{const id=el&&el.dataset&&el.dataset.id;await o(el);if(US&&US.mq===id)MQP={id,uid:US.mqU,n0:US.mqN,at:Date.now(),dp:typeof DP!=='undefined'?DP:null}}}
+{const o=mqSt;mqSt=async function(id,st){if(MQP&&MQP.id===id)MQP=null;return o(id,st)}}
+{const o=save;save=function(){o.apply(this,arguments);try{const P=MQP;if(!P||!isA())return;if(Date.now()-P.at>MQP_TTL){MQP=null;return}/* בתוך המסך האחיד usDone מסמן קודם (סינכרוני); setTimeout רק אם לא סומן */
+ if(S.tx.length>P.n0||(typeof DP!=='undefined'&&DP&&DP!==P.dp&&DP.sent))setTimeout(()=>mqAuto(P.id),0)}catch(e){}}}
 try{coSched()}catch(e){}
 boot();(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script><script src="yemot-board.js"></script>
 </body></html>
