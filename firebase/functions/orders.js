@@ -525,10 +525,10 @@ async function cancelOrder(request) {
     if (d.status === 'cancel') { res = { ok: true, dup: true }; return; }
     if (d.status === 'done') throw pre('bad-status', 'הזמנה שהושלמה לא מבוטלת');
     if (['paid', 'out'].includes(d.status)) mgr(w);
-    if (['paid', 'out'].includes(d.status) && d.paid && d.paid.sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'cancel' }, { merge: true });
     const items = Array.isArray(d.items) ? d.items : [];
     const prods = await loadProds(tx, db, items.filter((x) => x.pid).map((x) => x.pid));
     applyMoves(tx, db, w, prods, invert(moves(d.br, items.filter((x) => !x.pid || prods.has(x.pid)))), { ord: id, no: d.no });
+    if (['paid', 'out'].includes(d.status) && d.paid && d.paid.sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'cancel' }, { merge: true });
     const now = Date.now();
     tx.update(ref, { status: 'cancel', cancel: { at: now, by: w.uid, reason, from: d.status }, upd: now });
     tx.set(logRef(db, id), logData(w, 'cancel', reason));

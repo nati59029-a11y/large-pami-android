@@ -214,7 +214,7 @@ describe('זיכוי אצל ספק הקישור (17:47)', () => {
     for (const u of [MGR, E1, SUPER]) await assertFails(db(u).doc(`b/${A}/ordpay/x`).set({ amt: 1 }));
   });
   it('ספק לא תקין נדחה; מצב טלפון – בלי ספק ובלי זיכוי', async () => {
-    for (const sup of [{ id: 'a b', name: 'x' }, { id: 's1' }, { id: 's1', name: 'x', evil: 1 }, 'x']) assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup })).reason, 'bad-sup');
+    for (const [sup, why] of [[{ id: 'a b', name: 'x' }, 'bad-sup'], [{ id: 's1' }, 'bad-sup'], [{ id: 's1', name: 'x', evil: 1 }, 'bad-field'], ['x', 'bad-sup']]) assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup })).reason, why);
     await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'phone', sup: SUP });
     const id = await mk();
     await call('markOrderPaid', E1, { id, method: 'link' });
