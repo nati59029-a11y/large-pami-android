@@ -21,7 +21,7 @@ function tzOk(z){if(!/^\d{9}$/.test(z)||z==='000000000')return false;let s=0;for
 function phN(v){let p=String(v==null?'':v).trim().replace(/[\s-]/g,'');if(/^\+?972\d{8,9}$/.test(p))p='0'+p.replace(/^\+?972/,'');if(/^5\d{8}$/.test(p))p='0'+p;return /^0(5\d{8}|7\d{8}|[23489]\d{7})$/.test(p)?p:''}
 // 4 ספרות: 4 ספרות בדיוק נשארות; 13–19 ספרות (מספר כרטיס) → 4 אחרונות; אחר → ''+סימון שגיאה
 const digs=v=>{const s=String(v==null?'':v);return /\p{L}/u.test(s)?s:s.replace(/\D/g,'')};
-const CARD8=/(?:\d[^\p{L}\d]{0,2}){8,}/u;
+const CARD8={test:v=>/\d{8,}/.test(String(v==null?'':v).replace(/[\s._\/\\,:;|·'"`~*#+-]/g,''))}; // כל מפריד שאינו אות מוסר לפני הבדיקה
 function l4(v){const d=digs(v);if(!d)return {v:''};if(/^\d{4}$/.test(d))return {v:d};if(/^\d{13,19}$/.test(d))return {v:d.slice(-4),cut:1};return {v:'',bad:1}}
 const xKeys=()=>(C.cfg&&Array.isArray(C.cfg.xKeys)?C.cfg.xKeys:[]).filter(x=>x&&x.k);
 

@@ -62,7 +62,7 @@ function last4Of(raw) {
 function mailOf(raw) {
   const m = String(raw).trim().toLowerCase();
   if (m.length > 254 || !/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(m)) throw bad('bad-email', 'כתובת המייל לא תקינה');
-  if (/(?:\d[^\p{L}\d]{0,2}){8,}/u.test(m)) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
+  if (/\d{8,}/.test(m.replace(/[\s._\/\\,:;|·'"`~*#+-]/g, ''))) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
   return m;
 }
 function portOf(raw) {
