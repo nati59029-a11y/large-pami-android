@@ -305,9 +305,14 @@ async function logBusinessEntry(request) {
 // שדה שלא נשלח – נשאר כמו שהיה. base נשמר כמו שהיה (ברירת מחדל 'dark-gold'). updatedAt/updatedBy – השרת. כל שינוי נרשם ב-audit.
 const BRAND_COLORS = ['acc', 'acc2', 'onacc', 'bg', 'card', 'ink'];
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+// עיצוב מחדש D1: ערכת עיצוב לעסק – a = גרפיט וזכוכית כהה, b = קרמיקה ונייר בהיר, c = גרפיט וזכוכית בהיר.
+// עסק ישן בלי theme: נגזר מ-base (dark-gold → a; כל ערך אחר → a).
+const BRAND_THEMES = ['a', 'b', 'c'];
+const mapBase = (base) => (base === 'dark-gold' ? 'a' : 'a');
+const themeOf = (br) => (br && BRAND_THEMES.includes(br.theme) ? br.theme : mapBase(br && br.base));
 function cleanBrand(bizId, br) {
   if (!br || typeof br !== 'object' || Array.isArray(br)) throw bad('bad-brand', 'המיתוג לא תקין');
-  for (const k of Object.keys(br)) if (!['name', 'logoPath', 'colors'].includes(k)) throw bad('bad-brand', 'שדה לא מוכר במיתוג: ' + String(k).slice(0, 30));
+  for (const k of Object.keys(br)) if (!['name', 'logoPath', 'colors', 'theme'].includes(k)) throw bad('bad-brand', 'שדה לא מוכר במיתוג: ' + String(k).slice(0, 30));
   const out = {};
   if (br.name !== undefined) {
     const n = typeof br.name === 'string' ? br.name.replace(/[\u0000-\u001f\u007f]/g, '').trim() : null;
@@ -327,6 +332,10 @@ function cleanBrand(bizId, br) {
       if (typeof v !== 'string' || !HEX_RE.test(v)) throw bad('bad-brand', 'כל צבע חייב להיות בצורה #rrggbb');
       out.colors[k] = v.toLowerCase();
     }
+  }
+  if (br.theme !== undefined) {
+    if (!BRAND_THEMES.includes(br.theme)) throw bad('bad-brand', 'ערכה לא מוכרת');
+    out.theme = br.theme;
   }
   if (!Object.keys(out).length) throw bad('bad-brand', 'לא נשלח שום שינוי במיתוג');
   return out;
@@ -349,10 +358,11 @@ async function setBusinessBrand(request) {
       name: upd.name !== undefined ? upd.name : (typeof old.name === 'string' ? old.name : biz.name),
       logoPath: upd.logoPath !== undefined ? upd.logoPath : (old.logoPath === `b/${bizId}/brand/logo` ? old.logoPath : ''),
       colors: upd.colors !== undefined ? upd.colors : (old.colors && typeof old.colors === 'object' ? old.colors : {}),
+      theme: upd.theme !== undefined ? upd.theme : themeOf(old),
       base, updatedAt: Date.now(), updatedBy: by,
     };
     tx.update(ref, { brand });
-    tx.set(auditRef(bizId), auditData(by, 'setBusinessBrand', Object.keys(upd).join(',') + (upd.logoPath !== undefined ? ';logo=' + (upd.logoPath ? 'on' : 'off') : '')));
+    tx.set(auditRef(bizId), auditData(by, 'setBusinessBrand', Object.keys(upd).join(',') + (upd.logoPath !== undefined ? ';logo=' + (upd.logoPath ? 'on' : 'off') : '') + ';theme=' + brand.theme));
   });
   return { ok: true, bizId, brand };
 }
@@ -689,5 +699,5 @@ exports.setStaffBranches = onCall(wrap('setStaffBranches', setStaffBranches));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, addStaff, setBusinessRanks, setStaffPerms, cleanPerms, cleanRanks, setStaffActive, syncLegacyMember, setBusinessOrg, setStaffBranches, cleanOrg, israeliPhone, cleanAdv, BATCH_MAX, wrap,
+  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, mapBase, themeOf, addStaff, setBusinessRanks, setStaffPerms, cleanPerms, cleanRanks, setStaffActive, syncLegacyMember, setBusinessOrg, setStaffBranches, cleanOrg, israeliPhone, cleanAdv, BATCH_MAX, wrap,
 } });

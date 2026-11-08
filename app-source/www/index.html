@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="he" dir="rtl" data-th="paper">
+<html lang="he" dir="rtl" data-th="paper" data-ds="a">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1c5a49">
 <title>לארג׳ פעמי</title><script>/* ריבוי עסקים 6ג-2: נעילה בטביעת אצבע – מכסים את התוכן לפני שהוא מוצג, אם הנעילה הופעלה במכשיר הזה (lp-bio עם תחילית העסק) */try{(function(){var s=JSON.parse(localStorage.getItem('lp-sync')||'{}')||{},b=s.bizId,p=typeof b==='string'&&/^[a-z0-9-]{3,30}$/.test(b)&&b!=='larg'+'peami'?b+':':'';if(s.refresh&&localStorage.getItem(p+'lp-bio')==='1')document.documentElement.classList.add('bzlk')})()}catch(e){}</script>
 <style>[hidden]{display:none!important}html.bzlk body>:not(#bzlk){visibility:hidden!important}#bzlk{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--ink);text-align:center}#gate .glink{font:inherit;color:inherit;letter-spacing:normal;text-transform:none;background:none;border:0;padding:8px;text-decoration:underline;cursor:pointer}#gate .glink:disabled{opacity:.6}
@@ -13,6 +13,101 @@ html[data-th=bake]{--bg:#f7efe2;--card:#fffaf0;--ink:#3a2a1d;--mut:#7a6650;--lin
 html[data-th=baked]{--bg:#1c1713;--card:#28211a;--ink:#f2e8d9;--mut:#b8a68d;--line:#3d3226;--acc:#e0a15a;--acc2:#3a2c1a;--onacc:#2a1a08;--inc:#a3cf6e;--exp:#f0a07c;--warn:#f0c15a;--bad:#ff8c80;--sh:none;color-scheme:dark}
 html[data-th=fresh]{--bg:#eef5ec;--card:#fff;--ink:#1f2d22;--mut:#5a6b5d;--line:#cfe0cc;--acc:#2f7d3a;--acc2:#dff0dc;--onacc:#fff;--inc:#2f7d3a;--exp:#c2441f}
 html[data-th=freshd]{--bg:#101813;--card:#18231b;--ink:#e6f0e6;--mut:#9fb3a2;--line:#2a3b2d;--acc:#6fd07b;--acc2:#1b3a22;--onacc:#06200c;--inc:#6fd07b;--exp:#f09a80;--warn:#f0c15a;--bad:#ff8c80;--sh:none;color-scheme:dark}
+/* DS: tokens – עיצוב מחדש D1. שלוש ערכות: a = גרפיט וזכוכית עשנה (כהה), b = קרמיקה ונייר (בהיר), c = גרפיט וזכוכית (בהיר).
+ html[data-ds] נקבע תמיד (dsApply) וגובר על data-th הישן. --acc/--bg/--card/--ink/--acc2/--onacc נכתבים מעל זה מצבעי הלוגו (bzSkin+dsDerive) אם לעסק יש מיתוג.
+ ברירות המחדל כאן (בלי מיתוג) עוברות 4.5:1 בכל הזוגות של BZ_PAIRS. */
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:400;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-hebrew-400-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:600;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-hebrew-600-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-hebrew-700-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:400;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:600;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-latin-600-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"IBM Plex Sans Hebrew";font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/ibm-plex-sans-hebrew-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Rubik;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/rubik-hebrew-400-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Rubik;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/rubik-hebrew-600-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Rubik;font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/rubik-hebrew-700-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Rubik;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/rubik-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Rubik;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/rubik-latin-600-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Rubik;font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/rubik-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Assistant;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/assistant-hebrew-400-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Assistant;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/assistant-hebrew-600-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Assistant;font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/assistant-hebrew-700-normal.woff2) format("woff2");unicode-range:U+0307-0308,U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F}
+@font-face{font-family:Assistant;font-style:normal;font-weight:400;font-display:swap;src:url(fonts/assistant-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Assistant;font-style:normal;font-weight:600;font-display:swap;src:url(fonts/assistant-latin-600-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Assistant;font-style:normal;font-weight:700 900;font-display:swap;src:url(fonts/assistant-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+html[data-ds]{--r-s:10px;--r-m:14px;--r-l:20px;--dur:.16s;--font-ui:"IBM Plex Sans Hebrew","Noto Sans Hebrew",Heebo,Roboto,Arial,sans-serif;--font-num:var(--font-ui);--inc:#2f7a56;--exp:#b8431f;--warn:#8a5a00;--bad:#b3261e}
+html[data-ds=a]{--bg:#222427;--card:#2c2f33;--ink:#eef0f2;--acc:#f0764c;--acc2:#43312d;--onacc:#1b0f09;--mut:#bbbdbf;--line:#3d4146;--inc:#6cc49a;--exp:#f39a7c;--warn:#f0c15a;--bad:#ff8c80;
+ --srf-0:#1a1b1e;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#363a3f;--glass:rgba(34,36,39,.72);--blur:14px;
+ --metal:repeating-linear-gradient(90deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px);--hl:rgba(255,255,255,.09);
+ --elev-1:inset 0 1px 0 var(--hl),0 1px 0 rgba(0,0,0,.5),0 6px 14px -8px rgba(0,0,0,.7);--elev-2:inset 0 1px 0 var(--hl),0 2px 0 rgba(0,0,0,.45),0 14px 28px -14px rgba(0,0,0,.8);--elev-3:inset 0 1px 0 var(--hl),0 22px 44px -18px rgba(0,0,0,.85);
+ --inset:inset 0 2px 4px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.25);--press:0 3px 0 rgba(0,0,0,.5);--sh:var(--elev-1);color-scheme:dark}
+html[data-ds=b]{--bg:#f3f1ee;--card:#fbfaf8;--ink:#2f2f31;--acc:#c2441d;--acc2:#ebd5cd;--onacc:#ffffff;--mut:#5d5b58;--line:#e2ddd6;--inc:#2f6f55;--exp:#a93d1b;
+ --r-s:12px;--r-m:18px;--r-l:26px;--font-ui:Assistant,"Noto Sans Hebrew",Arial,sans-serif;--font-num:Rubik,Assistant,sans-serif;
+ --srf-0:#e9e6e1;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#ffffff;--glass:rgba(243,241,238,.8);--blur:12px;--metal:none;--hl:rgba(255,255,255,.95);--lo:rgba(140,124,106,.30);
+ --elev-1:5px 5px 12px var(--lo),-5px -5px 12px var(--hl);--elev-2:8px 9px 18px var(--lo),-7px -7px 16px var(--hl);--elev-3:12px 14px 28px var(--lo),-10px -10px 24px var(--hl);
+ --inset:inset 3px 3px 7px var(--lo),inset -3px -3px 7px var(--hl);--press:inset 0 -3px 0 rgba(0,0,0,.14);--sh:var(--elev-1);color-scheme:light}
+html[data-ds=c]{--bg:#e3e6e9;--card:#f5f6f7;--ink:#1f2124;--acc:#b5401b;--acc2:#dccbc8;--onacc:#ffffff;--mut:#4f5256;--line:#cdd2d7;--inc:#2a6b4c;--exp:#a83c1b;
+ --srf-0:#d4d8dc;--srf-1:var(--bg);--srf-2:var(--card);--srf-3:#ffffff;--glass:rgba(240,242,244,.72);--blur:14px;
+ --metal:repeating-linear-gradient(90deg,rgba(255,255,255,.18) 0 1px,transparent 1px 3px);--hl:rgba(255,255,255,.95);
+ --elev-1:inset 0 1px 0 var(--hl),0 1px 0 rgba(30,34,40,.12),0 6px 14px -8px rgba(30,34,40,.35);--elev-2:inset 0 1px 0 var(--hl),0 2px 0 rgba(30,34,40,.12),0 14px 28px -14px rgba(30,34,40,.4);--elev-3:inset 0 1px 0 var(--hl),0 22px 44px -18px rgba(30,34,40,.45);
+ --inset:inset 0 2px 4px rgba(30,34,40,.12),inset 0 0 0 1px rgba(30,34,40,.08);--press:0 3px 0 rgba(30,34,40,.28);--sh:var(--elev-1);color-scheme:light}
+/* DS: רכיבים משותפים (D1) – מראה בלבד, בלי לשנות מידות שבדיקות מודדות. גובר על הכללים הישנים בזכות html[data-ds] */
+html[data-ds] body{font-family:var(--font-ui);background:var(--metal),var(--bg);background-attachment:fixed;letter-spacing:0}
+html[data-ds] .k b,html[data-ds] .li .a,html[data-ds] .hero .big,html[data-ds] .amt,html[data-ds] td.n,html[data-ds] .msbar b{font-family:var(--font-num);font-variant-numeric:tabular-nums lining-nums;letter-spacing:-.01em}
+html[data-ds] h2{font-weight:700;letter-spacing:-.015em}html[data-ds] h3{font-weight:600}
+html[data-ds] .top{background:var(--glass);border-bottom:1px solid var(--line);box-shadow:0 1px 0 var(--hl) inset}
+html[data-ds] .top .ttl{font-weight:700}
+html[data-ds] .ib{border-radius:var(--r-m);background:var(--card);border-color:var(--line);box-shadow:var(--elev-1);transition:transform var(--dur)}
+html[data-ds] .ib:active{transform:translateY(1px)}
+html[data-ds] .card{border-radius:var(--r-l);border-color:var(--line);box-shadow:var(--elev-2);contain:content}
+html[data-ds] .sec h3{font-size:1rem;font-weight:700}
+html[data-ds] .btn{border-radius:var(--r-m);font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),var(--press);transition:transform var(--dur),box-shadow var(--dur)}
+html[data-ds] .btn:active:not([disabled]){transform:translateY(2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+html[data-ds] .btn.g{background:var(--card);border-color:var(--line);color:var(--acc);box-shadow:var(--elev-1)}
+html[data-ds] .btn.r{box-shadow:inset 0 1px 0 rgba(255,255,255,.25),var(--press)}
+html[data-ds] .btn.s{border-radius:var(--r-s)}
+html[data-ds] .chip{border:1px solid var(--line);background:var(--card);box-shadow:var(--elev-1);font-weight:600;transition:transform var(--dur)}
+html[data-ds] .chip.on{background:var(--acc);border-color:var(--acc);color:var(--onacc);box-shadow:var(--inset)}
+html[data-ds] .li{border-radius:var(--r-m);border-color:var(--line);box-shadow:var(--elev-1);contain:layout paint;transition:transform var(--dur)}
+html[data-ds] .li:active{transform:translateY(1px)}
+html[data-ds] .li.inc,html[data-ds] .li.exp{border-inline-start-width:4px}
+html[data-ds] .li .m b{font-weight:600}html[data-ds] .li .a{font-weight:700}
+html[data-ds] .kg .k{border-radius:var(--r-m);border-color:var(--line);box-shadow:var(--elev-1)}
+html[data-ds] .k b{font-weight:700}
+html[data-ds] .hero{border-radius:var(--r-l);box-shadow:var(--elev-3),inset 0 1px 0 rgba(255,255,255,.22)}
+html[data-ds] .tag{border-width:1px;font-weight:600}
+html[data-ds] .mh{font-weight:700;border-bottom-color:var(--line)}
+html[data-ds] label.f{font-weight:600}html[data-ds] label.f>span{color:var(--mut);font-weight:600}
+html[data-ds] input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]),html[data-ds] select,html[data-ds] textarea{border:1px solid var(--line);border-radius:var(--r-s);background:var(--srf-0);box-shadow:var(--inset);transition:border-color var(--dur),box-shadow var(--dur)}
+html[data-ds=b] input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]),html[data-ds=b] select,html[data-ds=b] textarea{background:var(--bg);border-color:transparent}
+html[data-ds] input:focus,html[data-ds] select:focus,html[data-ds] textarea:focus{border-color:var(--acc);outline:none;box-shadow:var(--inset),0 0 0 3px var(--acc2)}
+html[data-ds] :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+html[data-ds] .opt{border-radius:var(--r-m);border:1px solid var(--line);box-shadow:var(--elev-1)}
+html[data-ds] .opt.add{border-style:dashed;border-color:var(--acc);box-shadow:none;background:transparent}
+html[data-ds] .tile{border-radius:var(--r-l);border-width:1px;box-shadow:var(--elev-2)}
+html[data-ds] .tw{border-radius:var(--r-m);border-color:var(--line);box-shadow:var(--elev-1)}
+html[data-ds] th{font-weight:600}
+html[data-ds] dialog{border-radius:var(--r-l);border-color:var(--line);box-shadow:var(--elev-3)}
+html[data-ds] dialog::backdrop{background:rgba(10,11,12,.55)}
+html[data-ds] .sheet .sh{background:var(--glass);box-shadow:0 1px 0 var(--hl) inset}
+html[data-ds] .bar{background:var(--glass);border-top:1px solid var(--line);box-shadow:inset 0 1px 0 var(--hl),0 -10px 26px -18px rgba(0,0,0,.5)}
+html[data-ds] .bar button{font-weight:600}
+html[data-ds] .bar button.on::after{height:2px;width:18px}
+html[data-ds] .bar .fab{border-radius:20px;border-color:var(--bg);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 4px 0 rgba(0,0,0,.35),0 12px 20px -8px rgba(0,0,0,.5)}
+html[data-ds=b] .bar .fab{border-radius:50%;box-shadow:0 0 0 6px var(--bg),var(--elev-2),inset 0 -4px 0 rgba(0,0,0,.15)}
+html[data-ds] .toast{border-radius:var(--r-m);background:var(--ink);color:var(--bg);box-shadow:var(--elev-3)}
+html[data-ds] .pbar{background:var(--srf-0);box-shadow:var(--inset)}
+html[data-ds] .ban{border-radius:var(--r-m);border-width:1px;box-shadow:var(--elev-1)}
+html[data-ds] .msbar{border-radius:var(--r-l);border-width:1px;background:var(--glass);box-shadow:var(--elev-3)}
+@supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){html[data-ds] .top,html[data-ds] .bar{-webkit-backdrop-filter:blur(var(--blur)) saturate(1.2);backdrop-filter:blur(var(--blur)) saturate(1.2)}}
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){html[data-ds] .top,html[data-ds] .bar{background:var(--bg)}}
+html.hc[data-ds] .card,html.hc[data-ds] .li,html.hc[data-ds] .btn,html.hc[data-ds] .chip{box-shadow:none;border-width:2px}
+/* בורר הערכה (הגדרות + מיתוג): תצוגה זעירה של כל ערכה */
+.dsp{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px;margin:8px 0}
+.dsp button{min-height:44px;padding:6px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;font:inherit;font-weight:600;font-size:.85rem;display:flex;flex-direction:column;align-items:stretch;gap:4px;text-align:center}
+.dsp button[aria-checked=true]{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+.dsp .mini{display:block;height:34px;border-radius:8px;background:var(--bg);border:1px solid var(--line);position:relative;overflow:hidden}
+.dsp .mini i{position:absolute;inset:7px 8px auto 8px;height:9px;border-radius:4px;background:var(--card)}.dsp .mini b{position:absolute;inset:auto 8px 6px auto;width:22px;height:9px;border-radius:4px;background:var(--acc)}
+@media (prefers-reduced-motion:reduce){html[data-ds] *,html[data-ds] *::before,html[data-ds] *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 #lglogo{display:none;width:42px;height:42px;border-radius:50%;background:#fff center/110% no-repeat;border:1px solid var(--line);flex:none}
 html[data-th=logo] #lglogo,html[data-th=logod] #lglogo,html[data-th=bake] #lglogo,html[data-th=baked] #lglogo,html[data-th=fresh] #lglogo,html[data-th=freshd] #lglogo{display:block}
 html[data-fs="2"]{--fs:18px}html[data-fs="3"]{--fs:21px}
@@ -467,7 +562,7 @@ function render(dir,keep){
  const root=NAV[0].v;$$('.bar [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===root));
  if(keep)window.scrollTo(0,y);else window.scrollTo(0,0);
  if(dir){const m=$('#main');m.classList.remove('sw');void m.offsetWidth;m.classList.add('sw')}
- document.documentElement.dataset.th=themeNow();document.documentElement.dataset.fs=S.fs||1;try{bzSkin()}catch(e){}
+ document.documentElement.dataset.th=themeNow();document.documentElement.dataset.fs=S.fs||1;try{bzSkin()}catch(e){dsApply()}
 }
 const rerender=()=>render(0,true);
 /* החלקה לחזרה: ימין→שמאל */
@@ -1641,7 +1736,7 @@ const THEMES2=[['logo','לוגו'],['logod','לוגו כהה'],['bake','מאפי
 const thChips=l=>l.map(([k,t])=>`<button class="chip ${S.theme===k?'on':''}" data-a="theme" data-v="${k}" aria-pressed="${S.theme===k}">${t}</button>`).join('');
 V.settings=()=>{
  const row=c=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(c.name)}</b><small>${BEH[c.beh]}${S.tx.filter(t=>t.cat===c.id).length?' · '+S.tx.filter(t=>t.cat===c.id).length+' תנועות':''}${c.off?' · מוסתרת':''}</small></div><button class="btn s g" data-a="catEdit" data-id="${c.id}">עריכה</button></div>`;
- return{t:'הגדרות',s:'מראה וקטגוריות',h:`<div class="sec"><h3>מראה</h3></div><div class="card"><h3>ערכות העסק (עם הלוגו, גם אצל העובדים)</h3><div class="chips" role="radiogroup" aria-label="ערכות העסק" style="margin:8px 0 14px">${thChips(THEMES2)}</div><h3>ערכות קלאסיות</h3><div class="chips" role="radiogroup" aria-label="ערכת צבעים" style="margin-top:8px">${thChips(THEMES)}</div><h3 style="margin-top:14px">גודל כתב</h3><div class="chips">${[[1,'רגיל'],[2,'גדול'],[3,'גדול מאוד']].map(([k,l])=>`<button class="chip ${S.fs==k?'on':''}" data-a="fs" data-v="${k}" aria-pressed="${S.fs==k}">${l}</button>`).join('')}</div></div>
+ return{t:'הגדרות',s:'מראה וקטגוריות',h:`<div class="sec"><h3>מראה</h3></div><div class="card"><h3>ערכות העסק (עם הלוגו, גם אצל העובדים)</h3><div class="chips" role="radiogroup" aria-label="ערכות העסק" style="margin:8px 0 14px">${thChips(THEMES2)}</div><h3>ערכות קלאסיות</h3><div class="chips" role="radiogroup" aria-label="ערכת צבעים" style="margin-top:8px">${thChips(THEMES)}</div>${dsRow()}<h3 style="margin-top:14px">גודל כתב</h3><div class="chips">${[[1,'רגיל'],[2,'גדול'],[3,'גדול מאוד']].map(([k,l])=>`<button class="chip ${S.fs==k?'on':''}" data-a="fs" data-v="${k}" aria-pressed="${S.fs==k}">${l}</button>`).join('')}</div></div>
  <div class="sec"><h3>תנאי תשלום לספקים</h3></div><div class="card"><form data-f="pmoff">${termsF(cfTermsOk(S.terms)?S.terms:null,S.pmOff,1)}<button class="btn w">שמור</button></form><p class="note">אפשר לשנות לכל ספק בנפרד: בכרטיס הספק ← הגדרות כרטיס. ספק עם תנאי תשלום משלו גובר על ברירת המחדל הזו.</p></div>
  <div class="sec"><h3>קטגוריות הכנסה</h3><button class="btn s" data-a="catWiz" data-t="inc">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='inc'&&!c.hid).map(row).join('')}
  <div class="sec"><h3>קטגוריות הוצאה</h3><button class="btn s" data-a="catWiz" data-t="exp">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='exp'&&!c.hid).map(row).join('')}
@@ -4802,17 +4897,38 @@ async function bzAnalyze(f){const u=URL.createObjectURL(f);try{const im=await ne
  const w0=im.naturalWidth,h0=im.naturalHeight;if(!w0||!h0)throw new Error('img');const sc=Math.min(1,48/Math.max(w0,h0)),w=Math.max(1,Math.round(w0*sc)),h=Math.max(1,Math.round(h0*sc)),cv=document.createElement('canvas');cv.width=w;cv.height=h;
  const cx=cv.getContext('2d');cx.drawImage(im,0,0,w,h);return bzSuggest(cx.getImageData(0,0,w,h).data)}finally{URL.revokeObjectURL(u)}}
 /* ד. החלת המיתוג: ערכי המשתנים הקיימים של ערכת הנושא (--acc, --acc2, --onacc, --bg, --card, --ink, ועוד --mut ו---line שנגזרים מהם). בלי brand או עם colors ריק: כלום לא נכתב, והמראה זהה לקודם */
-function bzSkin(pv){const b=SY.biz&&SY.biz.brand,c=pv||(b&&b.colors&&typeof b.colors==='object'?b.colors:{}),ok=BZC.filter(k=>BZHEX.test(c[k]||'')),key=ok.map(k=>k+c[k]).join(),st=document.documentElement.style;
+function bzSkin(pv){const b=SY.biz&&SY.biz.brand,t=dsTheme();dsApply(t);let c=pv||(b&&b.colors&&typeof b.colors==='object'?b.colors:{});
+ /* D1: הצבעים השמורים נבחרו לערכת העסק. ערכה אחרת (בחירה אישית של מנהל) – נגזרים מחדש מצבע ההדגשה של הלוגו */if(!pv&&t!==dsBiz()&&BZHEX.test(c.acc||''))c=dsDerive(t,c.acc);
+ const ok=BZC.filter(k=>BZHEX.test(c[k]||'')),key=t+ok.map(k=>k+c[k]).join(),st=document.documentElement.style;
  if(key!==BZK){BZK=key;BZC.forEach(k=>ok.includes(k)?st.setProperty('--'+k,c[k]):st.removeProperty('--'+k));
   if(ok.length===6){st.setProperty('--mut',bzMut(c));st.setProperty('--line',bzLine(c))}else{st.removeProperty('--mut');st.removeProperty('--line')}}
  if(!pv)bzLogo()}
+/* ===== עיצוב מחדש D1: ערכות עיצוב (a = גרפיט וזכוכית כהה, b = קרמיקה ונייר בהיר, c = גרפיט וזכוכית בהיר).
+ ברירת המחדל של העסק: brand.theme (מנהל־על במסך המיתוג). עסק ישן בלי theme: נגזר מ-base (dark-gold → a, אחר → a). לארג' פעמי / בלי מיתוג → a.
+ בחירה אישית (החלטת המשתמש 8.11 13:54): מנהל (admin, לא עובד) בוחר בהגדרות ערכה לעצמו – נשמר רק במכשיר, LK('lp-ds:'+uid), וגובר על ברירת המחדל. עובד – תמיד של העסק.
+ הצבעים נגזרים מצבע ההדגשה של הלוגו לפי הערכה (dsDerive) ומתוקנים ל-4.5:1 (bzFix). לפני זיהוי העסק (מסך כניסה) – הערכה שנשמרה עם הלוגו האחרון (lp-lastlogo.t). ===== */
+const DS_T=['a','b','c'],DS_N={a:'גרפיט כהה',b:'קרמיקה ונייר',c:'גרפיט בהיר'},dsOk=t=>DS_T.includes(t),dsMap=b=>b==='dark-gold'?'a':'a';
+const DS_BASE={a:['#222427','#2c2f33','#eef0f2',.07,.06],b:['#f3f1ee','#fbfaf8','#2f2f31',.05,.025],c:['#e3e6e9','#f5f6f7','#1f2124',.05,.025]};
+const dsOf=br=>br&&typeof br==='object'?(dsOk(br.theme)?br.theme:dsMap(br.base)):'a';
+function dsBiz(){const b=SY.biz&&SY.biz.brand;if(b&&typeof b==='object')return dsOf(b);if(!SY.refresh){const o=bzLastO();if(o&&dsOk(o.t))return o.t}return'a'}
+const dsKey=()=>SY.uid?LK('lp-ds:'+SY.uid):'';
+function dsMine(){try{if(typeof isA==='function'&&isA()&&dsKey()){const v=localStorage.getItem(dsKey());return dsOk(v)?v:''}}catch(e){}return''}
+const dsTheme=()=>dsMine()||dsBiz();
+function dsDerive(t,acc){const[bg,card,ink,m1,m2]=DS_BASE[dsOk(t)?t:'a'],a=bzNorm(acc)||bzNorm(DS_BASE.a[0]);
+ const c={acc:a,bg:bzMix(bg,a,m1),card:bzMix(card,a,m2),ink:bzMix(ink,a,.04)};c.acc2=bzAcc2(c.acc,c.bg);c.onacc=bzCR(BZ_K,c.acc)>=bzCR(BZ_W,c.acc)?BZ_K:BZ_W;return bzFix(c)}
+function dsApply(t){try{document.documentElement.dataset.ds=dsOk(t)?t:dsTheme()}catch(e){}}
+const dsPick=(cur,act,def,acc)=>`<div class="dsp" role="radiogroup" aria-label="ערכת עיצוב">${def?`<button type="button" role="radio" aria-checked="${!cur}" data-a="${act}" data-v=""><span class="mini" style="background:var(--srf-0)"><i></i><b></b></span>${esc(def)}</button>`:''}${DS_T.map(t=>`<button type="button" role="radio" aria-checked="${cur===t}" data-a="${act}" data-v="${t}"><span class="mini" style="${bzVars(dsDerive(t,acc||DS_ACC()))}"><i></i><b></b></span>${DS_N[t]}</button>`).join('')}</div>`;
+const DS_ACC=()=>{const b=SY.biz&&SY.biz.brand,c=b&&b.colors;return c&&BZHEX.test(c.acc||'')?c.acc:(t=>t==='a'?'#f0764c':'#c2441d')(dsBiz())};
+const dsRow=()=>typeof isA==='function'&&isA()?`<h3>ערכת עיצוב</h3><p class="note" style="margin:2px 0 0">רק במכשיר הזה ורק לך. העובדים רואים את ברירת המחדל של העסק (${DS_N[dsBiz()]}).</p>${dsPick(dsMine(),'dsMine','ברירת המחדל של העסק')}`:'';
+ACT.dsMine=el=>{const v=el.dataset.v,k=dsKey();if(!k)return;try{if(dsOk(v))localStorage.setItem(k,v);else localStorage.removeItem(k)}catch(e){}BZK='~';rerender()};
 /* לוגו העסק בכותרת: נטען מ-Storage (b/{bizId}/brand/logo) עם הכניסה של המשתמש. נכשל = נשאר הלוגו הרגיל */
 /* 6ה, החלטה 1: הטלפון זוכר את הלוגו (ושם התצוגה) של העסק האחרון שנכנסו ממנו – למסך הכניסה ולמסך הנעילה בפתיחה, לפני שיש חיבור.
  המפתח lp-lastlogo בלי תחילית עסק (נקרא לפני שהעסק ידוע). נשמר רק לוגו קטן (מוקטן ל-192px). טלפון חדש / בלי לוגו = הלוגו הרגיל. בדפדפן ההתנתקות מוחקת אותו (dvWipe) */
-const LLK='lp-lastlogo';function bzLastO(){try{const o=JSON.parse(localStorage.getItem(LLK)||'null');if(o&&typeof o.u==='string'&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(o.u)&&o.u.length<400000){/* 6ו: נשמרים רק התמונה והשם המוצג. מזהה העסק (b) שנשמר בגרסה 6ה – נמחק */if('b'in o){delete o.b;try{localStorage.setItem(LLK,JSON.stringify({u:o.u,n:typeof o.n==='string'?o.n:''}))}catch(e){}}return o}}catch(e){}return null}
+const LLK='lp-lastlogo';function bzLastO(){try{const o=JSON.parse(localStorage.getItem(LLK)||'null');if(o&&typeof o.u==='string'&&/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(o.u)&&o.u.length<400000){/* 6ו: נשמרים רק התמונה והשם המוצג. מזהה העסק (b) שנשמר בגרסה 6ה – נמחק */if('b'in o){delete o.b;try{localStorage.setItem(LLK,JSON.stringify({u:o.u,n:typeof o.n==='string'?o.n:'',t:dsOk(o.t)?o.t:'a'}))}catch(e){}}if('t'in o&&!dsOk(o.t))o.t='a';return o}}catch(e){}return null}
+try{dsApply()}catch(e){}/* D1: הערכה כבר בטעינה (גם במסך הכניסה, מ-lp-lastlogo.t) */
 /* APK של עסק (make-biz-app.sh כותב window.LP_BIZ): הלוגו והשם שלו עד הכניסה הראשונה. בלי – הלוגו הרגיל */const bzDef=()=>{const z=window.LP_BIZ;return z&&typeof z.logo==='string'&&/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(z.logo)?z:null};
 const bzLast=()=>{const o=bzLastO(),z=bzDef();return o?o.u:z?z.logo:GATE_LOGO},bzLastN=()=>{const o=bzLastO(),z=bzDef();return o&&typeof o.n==='string'&&o.n?o.n.slice(0,60):z&&typeof z.name==='string'&&z.name?z.name.slice(0,60):'לארג׳ פעמי'};
-function bzRemember(bl){try{if(!bl){localStorage.removeItem(LLK);return}const im=new Image(),u=URL.createObjectURL(bl);im.onload=()=>{try{const z=192,c=document.createElement('canvas'),r=Math.min(1,z/Math.max(im.width,im.height));c.width=Math.max(1,Math.round(im.width*r));c.height=Math.max(1,Math.round(im.height*r));c.getContext('2d').drawImage(im,0,0,c.width,c.height);let d=c.toDataURL('image/webp',.85);if(!/^data:image\/webp/.test(d))d=c.toDataURL('image/png');const b=SY.biz&&SY.biz.brand;localStorage.setItem(LLK,JSON.stringify({u:d,n:b&&typeof b.name==='string'?b.name:''}))}catch(e){}URL.revokeObjectURL(u)};im.onerror=()=>URL.revokeObjectURL(u);im.src=u}catch(e){}}
+function bzRemember(bl){try{if(!bl){localStorage.removeItem(LLK);return}const im=new Image(),u=URL.createObjectURL(bl);im.onload=()=>{try{const z=192,c=document.createElement('canvas'),r=Math.min(1,z/Math.max(im.width,im.height));c.width=Math.max(1,Math.round(im.width*r));c.height=Math.max(1,Math.round(im.height*r));c.getContext('2d').drawImage(im,0,0,c.width,c.height);let d=c.toDataURL('image/webp',.85);if(!/^data:image\/webp/.test(d))d=c.toDataURL('image/png');const b=SY.biz&&SY.biz.brand;localStorage.setItem(LLK,JSON.stringify({u:d,n:b&&typeof b.name==='string'?b.name:'',t:dsOf(b)}))}catch(e){}URL.revokeObjectURL(u)};im.onerror=()=>URL.revokeObjectURL(u);im.src=u}catch(e){}}
 function bzLogo(){const b=SY.biz&&SY.biz.brand,p=b&&typeof b.logoPath==='string'&&SY.bizId&&SY.bizId!==BZ0&&BZOK(SY.bizId)&&SY.refresh&&b.logoPath===('b/'+SY.bizId+'/brand/logo')?b.logoPath:'',key=p?SY.bizId+'|'+(b.updatedAt||''):'';
  if(key===BZU)return;BZU=key;const el=document.getElementById('lglogo'),h=document.documentElement;
  if(!p){if(BZLG){URL.revokeObjectURL(BZLG);BZLG=null}h.removeAttribute('data-bzl');try{el.style.backgroundImage='url('+GATE_LOGO+')'}catch(e){}if(SY.refresh&&SY.biz)bzRemember(null);return}
@@ -4832,7 +4948,7 @@ const BR_N={acc:'הדגשה (כפתורים וסימונים)',acc2:'הדגשה 
 function bzProbe(k){const p=document.createElement('i');p.style.color='var(--'+k+')';document.body.append(p);const m=/(\d+)[, ]+(\d+)[, ]+(\d+)/.exec(getComputedStyle(p).color)||[0,0,0,0];p.remove();return bzHex([+m[1],+m[2],+m[3]])}
 const brBiz=id=>{const b=ADM.sa&&BZOK(id)?admBiz(id):null;return b&&!b.missing&&b.dataRoot!=='legacy'?b:null};
 function brInit(id){const bz=brBiz(id),b=bz&&bz.brand||{},c=b.colors&&typeof b.colors==='object'?b.colors:{},full=BZC.every(k=>BZHEX.test(c[k]||''));
- const R={id,name:s_(b.name),colors:full?Object.fromEntries(BZC.map(k=>[k,c[k].toLowerCase()])):{},custom:full,file:null,url:'',lg:'',sugg:[],busy:0},lp='b/'+id+'/brand/logo';
+ const R={id,theme:dsOf(b),name:s_(b.name),colors:full?Object.fromEntries(BZC.map(k=>[k,c[k].toLowerCase()])):{},custom:full,file:null,url:'',lg:'',sugg:[],busy:0},lp='b/'+id+'/brand/logo';
  /* הלוגו הנוכחי של העסק הנבחר (לא של העסק שבו מנהל־העל נמצא) */if(b.logoPath===lp)abkSt('/'+encodeURIComponent(lp)+'?alt=media').then(r=>r.blob()).then(bl=>{if(BR!==R){return}R.lg=URL.createObjectURL(bl);brDraw()}).catch(()=>{});
  return R}
 function brFree(){if(!BR)return;if(BR.url)URL.revokeObjectURL(BR.url);if(BR.lg)URL.revokeObjectURL(BR.lg);BR=null}
@@ -4840,16 +4956,18 @@ const brEff=()=>Object.fromEntries(BZC.map(k=>[k,BR.colors[k]||bzProbe(k)]));
 const bzVars=c=>BZC.map(k=>'--'+k+':'+c[k]).concat(['--mut:'+bzMut(c),'--line:'+bzLine(c)]).join(';');
 const brLg=()=>BR.url?`<img src="${BR.url}" alt="הלוגו שנבחר" style="max-width:96px;max-height:96px;display:block;margin:6px 0;border-radius:12px;background:var(--card)"><p class="note">${esc(BR.file.name)} · יישמר בלחיצה על "שמירה"</p>`:(BR.lg?`<img src="${BR.lg}" alt="הלוגו הנוכחי" style="max-width:96px;max-height:96px;display:block;margin:6px 0;border-radius:12px;background:var(--card)">`:'<p class="note">עדיין אין לוגו לעסק.</p>');
 const brSg=()=>BR.sugg.length?`<h3>הצעות צבע מהלוגו</h3><div class="brsgs">${BR.sugg.map((s,i)=>`<button type="button" class="brsg ${BZC.every(k=>BR.colors[k]===s.c[k])?'on':''}" data-a="brPick" data-i="${i}" style="${bzVars(s.c)}" aria-label="הצעה: ${esc(s.n)}"><i style="background:var(--acc)"></i><i style="background:var(--bg);border:1px solid var(--ink)"></i><i style="background:var(--ink)"></i><small style="color:var(--ink)">${esc(s.n)}</small></button>`).join('')}</div>`:'<p class="note">בחירת לוגו תציג כאן 3–4 הצעות צבע.</p>';
-const brPv=()=>`<div class="brpv" style="${bzVars(brEff())}"><div class="brh"><b>${esc(s_(BR.name)||'שם העסק')}</b></div><div class="brc">כרטיס לדוגמה<br><small>טקסט משני</small></div><span class="btn s">כפתור</span> <span class="btn s g">כפתור משני</span></div>`;
+const brAcc=()=>{const c=BR.colors;if(BZHEX.test(c.acc||''))return c.acc;const s=BR.sugg[0];return s?s.c.acc:(BR.theme==='a'?'#f0764c':'#c2441d')};
+const brDs=()=>`<h3>ערכת עיצוב לעסק</h3><p class="note" style="margin:2px 0 0">ברירת המחדל לכל המשתמשים בעסק. מנהל יכול לבחור לעצמו ערכה אחרת בהגדרות. הצבעים נגזרים מהלוגו.</p>${dsPick(BR.theme,'brDs','',brAcc())}`;
+const brPv=()=>`<div class="brpv" data-ds="${BR.theme}" style="${bzVars(brEff())}"><div class="brh"><b>${esc(s_(BR.name)||'שם העסק')}</b></div><div class="brc">כרטיס לדוגמה<br><small>טקסט משני</small></div><span class="btn s">כפתור</span> <span class="btn s g">כפתור משני</span></div>`;
 const brWn=()=>{if(!BR.custom)return'';const bad=bzChk(brEff()).filter(p=>p.r<4.5);return bad.length?`<div class="card" style="border-color:var(--bad)" role="alert"><b style="color:var(--bad)">הצבעים לא עומדים בניגודיות מינימלית (4.5:1)</b>${bad.map(p=>`<p class="note" style="margin:4px 0">${esc(p.t)}: ${p.r.toFixed(1)}:1</p>`).join('')}<button type="button" class="btn s w" data-a="brFix">תיקון אוטומטי</button></div>`:''};
-function brDraw(skip){if(cur().v!=='brand')return;const set=(id,h)=>{const e=document.getElementById(id);if(e)e.innerHTML=h};set('brLg',brLg());set('brSg',brSg());set('brPv',brPv());set('brWn',brWn());
+function brDraw(skip){if(cur().v!=='brand')return;const set=(id,h)=>{const e=document.getElementById(id);if(e)e.innerHTML=h};set('brLg',brLg());set('brDs',brDs());set('brSg',brSg());set('brPv',brPv());set('brWn',brWn());
  const c=brEff();document.querySelectorAll('[data-i=brc]').forEach(e=>{if(e!==skip)e.value=c[e.dataset.k]});const sb=document.getElementById('brSaveBtn');if(sb)sb.disabled=!!BR.busy||(BR.custom&&!bzOk(c))}
 V.brand=id=>{const T='מיתוג';if(!ADM.sa)return{t:T,h:'<div class="empty">המסך הזה למנהל המערכת בלבד</div>'};
  if(!ADM.L){if(!ADM.busy&&!ADM.err)admLoad();return{t:T,h:`<div class="empty">${ADM.err?esc(ADM.err)+'<br><button class="btn g" data-a="admReload">נסה שוב</button>':'טוען…'}</div>`}}
  const bz=brBiz(id);if(!bz)return{t:T,h:'<div class="empty">אין מיתוג לעסק הזה</div>'};if(!BR||BR.id!==id){brFree();BR=brInit(id)}const c=brEff();
  return{t:T,s:bz.name||bz.id,h:`<p class="note">מיתוג העסק <bdi dir="ltr">${esc(bz.id)}</bdi>. השינוי יוצג למנהל ולעובדים בכניסה הבאה שלהם.</p><form data-f="brSave"><div class="card"><label class="f"><span>שם תצוגה (עד 60 תווים)</span><input name="name" maxlength="60" value="${esc(BR.name)}" data-i="brName" autocomplete="off"></label></div>
  <div class="card"><h3>לוגו</h3><p class="note">png, jpeg או webp, עד 1MB.</p><div id="brLg">${brLg()}</div><label class="btn g w" style="cursor:pointer;margin-top:8px">📁 בחירת לוגו<input type="file" accept="image/png,image/jpeg,image/webp" data-c="brFile" hidden></label></div>
- <div class="card" id="brSg">${brSg()}</div>
+ <div class="card" id="brDs">${brDs()}</div><div class="card" id="brSg">${brSg()}</div>
  <div class="card"><h3>צבעים</h3>${BZC.map(k=>`<div class="brrow"><span>${BR_N[k]}</span><input type="color" data-i="brc" data-k="${k}" value="${c[k]}" aria-label="${BR_N[k]}"><input type="text" data-i="brc" data-k="${k}" value="${c[k]}" dir="ltr" maxlength="7" autocomplete="off" aria-label="${BR_N[k]} (קוד צבע)"></div>`).join('')}</div>
  <div id="brWn">${brWn()}</div><div class="card"><h3>תצוגה מקדימה</h3><div id="brPv">${brPv()}</div></div>
  <button class="btn w" id="brSaveBtn">שמירה</button><button type="button" class="btn g w" style="margin-top:8px" data-a="brReset">חזרה לצבעי ברירת המחדל</button></form>`}};
@@ -4860,6 +4978,7 @@ CHG.brFile=async el=>{const f=el.files&&el.files[0];el.value='';if(!f||!BR)retur
  if(f.size>BR_MAX)return toast('הלוגו גדול מ-1MB. בחר קובץ קטן יותר');
  let sg;try{sg=await bzAnalyze(f)}catch(e){return toast('לא ניתן לקרוא את התמונה')}
  if(!BR)return;BR.file=f;if(BR.url)URL.revokeObjectURL(BR.url);BR.url=URL.createObjectURL(f);BR.sugg=sg;brDraw();toast(sg.length?'הלוגו נקלט. אפשר לבחור הצעת צבעים':'הלוגו נקלט (לא נמצאו בו צבעים להצעה)')};
+ACT.brDs=el=>{if(!BR||!dsOk(el.dataset.v))return;BR.theme=el.dataset.v;BR.colors=dsDerive(BR.theme,brAcc());BR.custom=1;brDraw()};
 ACT.brPick=el=>{const s=BR&&BR.sugg[+el.dataset.i];if(!s)return;BR.colors=Object.assign({},s.c);BR.custom=1;brDraw()};
 ACT.brFix=()=>{if(!BR)return;BR.colors=bzFix(brEff());BR.custom=1;brDraw();toast('הצבעים תוקנו לניגודיות תקינה')};
 ACT.brReset=()=>ask('לחזור לצבעי ברירת המחדל של האפליקציה? השינוי יישמר מיד.',()=>{brSave(true)});
@@ -4870,7 +4989,7 @@ async function brSave(reset){if(!ADM.sa||!BR||BR.busy)return;const id=BR.id,bz=b
  let colors={};if(!reset&&BR.custom){const c=brEff();if(!BZC.every(k=>BZHEX.test(c[k])))return toast('כל צבע חייב להיות בצורה #rrggbb');if(!bzOk(c))return toast('יש צבעים שלא עומדים בניגודיות. לחץ "תיקון אוטומטי"');colors=c}
  const old=bz.brand||{},lp0='b/'+id+'/brand/logo';let lp=old.logoPath===lp0?lp0:'';BR.busy=1;brDraw();
  try{if(BR.file&&!reset){if(BR.file.size>BR_MAX||!BR_TYPES.includes(BR.file.type))throw new Error('הלוגו לא תקין');try{await brUp(BR.file,id)}catch(x){x.logo=1;throw x}lp=lp0}
-  const r=await fnCall('setBusinessBrand',{bizId:id,brand:{name:nm,logoPath:lp,colors}}),B=r&&r.brand&&typeof r.brand==='object'?r.brand:{name:nm,logoPath:lp,colors};
+  const theme=dsOk(BR.theme)?BR.theme:'a',r=await fnCall('setBusinessBrand',{bizId:id,brand:{name:nm,logoPath:lp,colors,theme}}),B=r&&r.brand&&typeof r.brand==='object'?r.brand:{name:nm,logoPath:lp,colors,theme};
   bz.brand=B;if(id===SY.bizId){SY.biz=Object.assign({},SY.biz,{brand:B});syS();bzSkin()}brFree();toast(reset?'חזרנו לצבעי ברירת המחדל':'המיתוג נשמר');rerender()}
  catch(e){if(BR){BR.busy=0;brDraw()}toast(e.logo?(e.message||'העלאת הלוגו נכשלה')+'. המיתוג לא נשמר':e.code===403?'אין הרשאה לשמור מיתוג':e.message||'השמירה נכשלה')}}
 /* ===== ריבוי עסקים, שלב 6ג-2: כניסה ואבטחה באפליקציה =====

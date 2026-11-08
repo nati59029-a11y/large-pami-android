@@ -17,7 +17,7 @@ before(async () => {
   await env.clearFirestore();
   await prep(async (db) => {
     await db.doc('b/pb-a').set({ name: 'עסק א', status: 'active', dataRoot: 'b', apkTag: 'biz-pb-a', features: {},
-      brand: { name: 'המותג א', logoPath: '', colors: { acc: '#AABBCC', bg: 'red', evil: '#000000' }, base: 'dark-gold' } });
+      brand: { name: 'המותג א', logoPath: '', colors: { acc: '#AABBCC', bg: 'red', evil: '#000000' }, base: 'dark-gold', theme: 'c' } });
     await db.doc('b/pb-a/private/info').set({ ownerEmail: 'secret@example.invalid', ownerPhone: '0500000000' });
     await db.doc('b/pb-s').set({ name: 'מושהה', status: 'suspended', dataRoot: 'b', brand: { name: 'ס' } });
     await db.doc('b/pb-x').set({ name: 'זר', status: 'active', dataRoot: 'b', apkTag: 'biz-other', brand: {} });
@@ -29,13 +29,14 @@ describe('publicBrand – קריאה ציבורית מינימלית', () => {
   it('מחזיר רק name/logo/colors/apkTag, צבעים מסוננים, בלי שדות פרטיים', async () => {
     const r = await call('pb-a', '9.9.9.1');
     assert.equal(r.code, 200);
-    assert.deepEqual(Object.keys(r.body).sort(), ['apkTag', 'colors', 'logo', 'name']);
+    assert.deepEqual(Object.keys(r.body).sort(), ['apkTag', 'colors', 'logo', 'name', 'theme']);
+    assert.equal(r.body.theme, 'c');
     assert.equal(r.body.name, 'המותג א');
     assert.deepEqual(r.body.colors, { acc: '#aabbcc' });
     assert.equal(r.body.apkTag, 'biz-pb-a');
     assert.ok(!JSON.stringify(r.body).includes('secret@'));
   });
-  it('apkTag של עסק אחר לא יוצא – latest', async () => { assert.equal((await call('pb-x', '9.9.9.2')).body.apkTag, 'latest'); });
+  it('apkTag של עסק אחר לא יוצא – latest; בלי theme → a', async () => { const r = await call('pb-x', '9.9.9.2'); assert.equal(r.body.apkTag, 'latest'); assert.equal(r.body.theme, 'a'); });
   it('עסק מושהה או חסר – 404 אחיד; מזהה לא תקין – 400; POST – 405', async () => {
     assert.equal((await call('pb-s', '9.9.9.3')).code, 404);
     assert.equal((await call('pb-none', '9.9.9.3')).code, 404);

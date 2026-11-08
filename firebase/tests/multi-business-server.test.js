@@ -375,7 +375,8 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     const d = await getDoc('b/' + A);
     assert.equal(d.brand.name, 'מאפייה'); assert.equal(d.brand.logoPath, `b/${A}/brand/logo`); assert.equal(d.brand.colors.acc, '#aabbcc');
     assert.equal(d.brand.base, 'dark-gold'); assert.equal(d.brand.updatedBy, U.super); assert.ok(Math.abs(d.brand.updatedAt - Date.now()) < 60000);
-    assert.deepEqual(Object.keys(d.brand).sort(), ['base', 'colors', 'logoPath', 'name', 'updatedAt', 'updatedBy']);
+    assert.deepEqual(Object.keys(d.brand).sort(), ['base', 'colors', 'logoPath', 'name', 'theme', 'updatedAt', 'updatedBy']);
+    assert.equal(d.brand.theme, 'a', 'D1: dark-gold בלי theme → a');
     for (const k of Object.keys(b0)) if (k !== 'brand') assert.deepEqual(d[k], b0[k], k + ' לא השתנה');
     assert.deepEqual(r.result.brand, d.brand);
     // רק colors: השם והלוגו נשארים
@@ -383,7 +384,15 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     const d2 = await getDoc('b/' + A);
     assert.equal(d2.brand.name, 'מאפייה'); assert.equal(d2.brand.logoPath, `b/${A}/brand/logo`); assert.deepEqual(d2.brand.colors, {});
     const acts = (await audits(A)).filter((x) => x.act === 'setBusinessBrand');
-    assert.equal(acts.length, 2); assert.ok(acts.some((x) => x.note === 'name,logoPath,colors;logo=on'), JSON.stringify(acts));
+    assert.ok(acts.length >= 2); assert.ok(acts.some((x) => x.note === 'name,logoPath,colors;logo=on;theme=a'), JSON.stringify(acts));
+    // D1: theme – 'b' נשמר ונשאר כשלא נשלח; 'x' / 5 / '' נדחים
+    const tb = await call('setBusinessBrand', U.super, { bizId: A, brand: { theme: 'b' } });
+    assert.equal(tb.status, 'OK', tb.text); assert.equal((await getDoc('b/' + A)).brand.theme, 'b'); assert.equal(tb.result.brand.theme, 'b');
+    assert.equal((await call('setBusinessBrand', U.super, { bizId: A, brand: { name: 'מאפייה' } })).status, 'OK');
+    assert.equal((await getDoc('b/' + A)).brand.theme, 'b', 'theme נשאר כשלא נשלח');
+    for (const t of ['x', 5, '', 'A', null]) { const x = await call('setBusinessBrand', U.super, { bizId: A, brand: { theme: t } }); assert.equal(x.reason, 'bad-brand', String(t)); }
+    assert.ok((await audits(A)).some((x) => x.note === 'theme;theme=b'));
+    assert.equal((await call('setBusinessBrand', U.super, { bizId: A, brand: { colors: {}, theme: 'a' } })).status, 'OK');
     for (const bad of [{}, { evil: 1 }, { name: 'x'.repeat(61) }, { name: 5 }, { logoPath: `b/${B}/brand/logo` }, { logoPath: 'app_backups/x' },
       { colors: { acc: '#abc' } }, { colors: { acc: 'red' } }, { colors: { evil: '#000000' } }, { colors: [] }, { updatedBy: 'x' }]) {
       const x = await call('setBusinessBrand', U.super, { bizId: A, brand: bad });
