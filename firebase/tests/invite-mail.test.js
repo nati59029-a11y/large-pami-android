@@ -15,6 +15,7 @@ function fake(opt) {
     sent, cfgs, links,
     deps: Object.assign({
       secrets: () => ({ user: 'invites@example.com', pass: 'abcdabcdabcdabcd' }),
+      smtp: () => ({ host: '', port: '', from: '' }),
       site: () => 'my-desktop',
       projectId: () => 'demo-proj',
       link: async (email, s) => { links.push({ email, s }); return FB_LINK; },
@@ -82,7 +83,19 @@ describe('buildMail – escape, שם העסק, קישור', () => {
   it('secretsOk: חסר / לא תקין → null; רווחים בסיסמת אפליקציה מוסרים', () => {
     assert.equal(M.secretsOk('', ''), null);
     assert.equal(M.secretsOk('dummy-not-an-email', 'dummy'), null);
+    assert.deepEqual(M.secretsOk('resend', 're_AbC123_xyz'), { user: 'resend', pass: 're_AbC123_xyz' });
     assert.deepEqual(M.secretsOk('a@gmail.com', 'abcd efgh ijkl mnop'), { user: 'a@gmail.com', pass: 'abcdefghijklmnop' });
+  });
+});
+
+describe('smtpOk – שרת גמיש', () => {
+  it('ברירת מחדל Gmail 465 SSL; Resend 587 STARTTLS עם MAIL_FROM; ערכים לא תקינים → null', () => {
+    assert.deepEqual(M.smtpOk('', '', '', 'a@gmail.com'), { host: 'smtp.gmail.com', port: 465, secure: true, from: 'a@gmail.com' });
+    assert.deepEqual(M.smtpOk('smtp.resend.com', '587', 'invite@biz.co.il', 'resend'), { host: 'smtp.resend.com', port: 587, secure: false, from: 'invite@biz.co.il' });
+    assert.equal(M.smtpOk('smtp.resend.com', '587', '', 'resend'), null, 'משתמש שאינו מייל בלי MAIL_FROM');
+    assert.equal(M.smtpOk('evil host\r\n', '465', '', 'a@b.co'), null);
+    assert.equal(M.smtpOk('smtp.x.com', '25', '', 'a@b.co'), null);
+    assert.equal(M.smtpOk('smtp.x.com', '465', 'a@b.co\r\nBcc: x@y.z', 'a@b.co'), null);
   });
 });
 
@@ -117,6 +130,14 @@ describe('sendInvite – הרשאות, שייכות, נפילה, קצב', () => 
     const f = fake({ deps: { secrets: () => null } });
     assert.deepEqual(await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'owner@example.invalid' }), f.deps), { ok: true, status: 'fallback', why: 'no-secrets' });
     assert.equal(f.links.length, 0);
+  });
+  it('שרת אחר (Resend) – הגדרות התעבורה והשולח לפי MAIL_HOST/PORT/FROM', async () => {
+    const f = fake({ deps: { secrets: () => ({ user: 'resend', pass: 're_key_12345678' }), smtp: () => ({ host: 'smtp.resend.com', port: '587', from: 'invite@biz.co.il' }) } });
+    assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'owner@example.invalid' }), f.deps)).status, 'sent');
+    assert.equal(f.cfgs[0].host, 'smtp.resend.com'); assert.equal(f.cfgs[0].port, 587); assert.equal(f.cfgs[0].secure, false); assert.equal(f.cfgs[0].requireTLS, true);
+    assert.equal(f.sent[0].from.address, 'invite@biz.co.il');
+    const g = fake({ deps: { smtp: () => ({ host: 'smtp.x.com', port: '25' }) } });
+    assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'owner@example.invalid' }), g.deps)).why, 'no-smtp');
   });
   it('בלי אתר מוגדר – fallback', async () => {
     assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'owner@example.invalid' }), fake({ deps: { site: () => '' } }).deps)).why, 'no-site');

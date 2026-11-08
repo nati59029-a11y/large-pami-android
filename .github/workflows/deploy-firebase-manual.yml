@@ -187,6 +187,9 @@ jobs:
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
           SITE: ${{ inputs.project == 'largpeami' && vars.DESKTOP_SITE || vars.DESKTOP_SITE_TEST }}
+          M_HOST: ${{ vars.MAIL_HOST || secrets.MAIL_HOST }}
+          M_PORT: ${{ vars.MAIL_PORT || secrets.MAIL_PORT }}
+          M_FROM: ${{ vars.MAIL_FROM || secrets.MAIL_FROM }}
           P: ${{ inputs.project }}
         run: |
           set +x
@@ -205,6 +208,12 @@ jobs:
               fi
             done
           fi
+          # שרת שליחה גמיש (אופציונלי): MAIL_HOST (ברירת מחדל smtp.gmail.com), MAIL_PORT (465), MAIL_FROM (ברירת מחדל MAIL_USER).
+          # ערך לא תקין לא נכתב (הפונקציה משתמשת בברירת המחדל). הערכים לא מודפסים.
+          ENVF="functions/.env.$P"
+          if [ -n "$M_HOST" ]; then echo "$M_HOST" | grep -Eq '^[a-z0-9.-]{3,253}$' && printf '\nMAIL_HOST=%s\n' "$M_HOST" >> "$ENVF" || echo "::warning::MAIL_HOST לא תקין – לא נכתב"; fi
+          if [ -n "$M_PORT" ]; then echo "$M_PORT" | grep -Eq '^(465|587|2465|2587)$' && printf '\nMAIL_PORT=%s\n' "$M_PORT" >> "$ENVF" || echo "::warning::MAIL_PORT לא תקין – לא נכתב"; fi
+          if [ -n "$M_FROM" ]; then echo "::add-mask::$M_FROM"; echo "$M_FROM" | grep -Eq '^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$' && printf '\nMAIL_FROM=%s\n' "$M_FROM" >> "$ENVF" || echo "::warning::MAIL_FROM לא תקין – לא נכתב"; fi
           if [ -n "$SITE" ] && echo "$SITE" | grep -Eq '^[a-z0-9-]+$'; then
             printf '\nINVITE_SITE=%s\n' "$SITE" >> "functions/.env.$P"
           else

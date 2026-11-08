@@ -6,7 +6,8 @@
 //     כך אי אפשר להשתמש בפונקציה לשליחת מייל לכתובת זרה.
 //   - הקישור נוצר בשרת (generatePasswordResetLink) ומומר לקישור לדף שלנו:
 //       https://<INVITE_SITE>.web.app/welcome.html?mode=resetPassword&oobCode=…&apiKey=…&continueUrl=…&biz=<bizId>
-//   - השליחה: nodemailer דרך smtp.gmail.com:465 (SSL) עם הסודות MAIL_USER / MAIL_APP_PASSWORD (Secret Manager).
+//   - השליחה: nodemailer דרך MAIL_HOST:MAIL_PORT (ברירת מחדל smtp.gmail.com:465 SSL; 587 = STARTTLS) עם הסודות MAIL_USER / MAIL_APP_PASSWORD.
+//     MAIL_FROM (אופציונלי) = כתובת השולח; ריק = MAIL_USER. כך אפשר לעבור לשירות אחר (למשל Resend: smtp.resend.com, משתמש resend).
 //     הסודות לא נכתבים ללוג ולא חוזרים בתשובה. גם הקישור לא נכתב ללוג.
 //   - אם הסודות חסרים / לא תקינים, אין אתר מוגדר, או השליחה נכשלה – status 'fallback' (האפליקציה שולחת את המייל
 //     המובנה של Firebase, כמו קודם). הזמנה לעולם לא נשברת בגלל המייל.
@@ -22,6 +23,9 @@ const R = require('./lib/roles');
 
 const MAIL_USER = defineSecret('MAIL_USER');
 const MAIL_APP_PASSWORD = defineSecret('MAIL_APP_PASSWORD');
+const MAIL_HOST = defineString('MAIL_HOST', { default: 'smtp.gmail.com', description: 'שרת SMTP למייל ההזמנה (למשל smtp.resend.com)' });
+const MAIL_PORT = defineString('MAIL_PORT', { default: '465', description: 'פורט SMTP: 465/2465 (SSL) או 587/2587 (STARTTLS)' });
+const MAIL_FROM = defineString('MAIL_FROM', { default: '', description: 'כתובת השולח. ריק = MAIL_USER' });
 const INVITE_SITE = defineString('INVITE_SITE', { default: '', description: 'שם אתר גרסת המחשב (בלי .web.app) – שם נמצא welcome.html' });
 
 const DEFAULT_NAME = 'ניהול העסק';
@@ -40,9 +44,19 @@ function headerSafe(s) {
   const v = String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/[<>"\\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
   return v || DEFAULT_NAME;
 }
+// משתמש: כתובת מייל (Gmail) או שם משתמש (למשל "resend"). סיסמה: סיסמת אפליקציה (רווחים מוסרים) או מפתח API.
 function secretsOk(user, pass) {
   const u = String(user || '').trim(), p = String(pass || '').replace(/\s+/g, '');
-  return EMAIL_RE.test(u) && p.length >= 12 && p.length <= 64 && /^[A-Za-z0-9]+$/.test(p) ? { user: u, pass: p } : null;
+  return /^[\x21-\x7e]{1,254}$/.test(u) && /^[\x21-\x7e]{8,200}$/.test(p) ? { user: u, pass: p } : null;
+}
+// שרת, פורט וכתובת שולח (גמיש: Gmail כברירת מחדל, או שירות SMTP אחר). לא תקין → null (fallback)
+const HOST_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+function smtpOk(host, port, from, user) {
+  const h = String(host || 'smtp.gmail.com').trim().toLowerCase(), n = Number(String(port || '465').trim());
+  if (!HOST_RE.test(h) || ![465, 587, 2465, 2587].includes(n)) return null;
+  const f = String(from || '').trim() || String(user || '').trim();
+  if (!EMAIL_RE.test(f)) return null;
+  return { host: h, port: n, secure: n === 465 || n === 2465, from: f };
 }
 
 // ---------- הקישור: מהקישור של Firebase לדף שלנו ----------
@@ -153,6 +167,7 @@ async function takeRate(bizId, uid, now) {
 function defaultDeps() {
   return {
     secrets: () => { try { return secretsOk(MAIL_USER.value(), MAIL_APP_PASSWORD.value()); } catch (e) { return null; } },
+    smtp: () => { try { return { host: MAIL_HOST.value(), port: MAIL_PORT.value(), from: MAIL_FROM.value() }; } catch (e) { return {}; } },
     site: () => { try { return INVITE_SITE.value(); } catch (e) { return ''; } },
     projectId: () => process.env.GCLOUD_PROJECT || JSON.parse(process.env.FIREBASE_CONFIG || '{}').projectId || '',
     link: (email, settings) => getAuth().generatePasswordResetLink(email, settings),
@@ -178,6 +193,9 @@ async function sendInvite(request, deps) {
 
   const sec = D.secrets();
   if (!sec) return { ok: true, status: 'fallback', why: 'no-secrets' };
+  const sm = D.smtp ? D.smtp() || {} : {};
+  const smtp = smtpOk(sm.host, sm.port, sm.from, sec.user);
+  if (!smtp) return { ok: true, status: 'fallback', why: 'no-smtp' };
   const site = String(D.site() || '');
   if (!SITE_RE.test(site)) return { ok: true, status: 'fallback', why: 'no-site' };
   if (!(await takeRate(bizId, uid, D.now()))) return { ok: true, status: 'fallback', why: 'rate' };
@@ -192,9 +210,9 @@ async function sendInvite(request, deps) {
   }
   if (!link) return { ok: true, status: 'fallback', why: 'link' };
   const br = (await D.brand(bizId)) || {};
-  const mail = buildMail({ to: email, from: sec.user, brand: br, link });
+  const mail = buildMail({ to: email, from: smtp.from, brand: br, link });
   try {
-    const tr = D.transport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: sec.user, pass: sec.pass }, connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000, logger: false, debug: false });
+    const tr = D.transport({ host: smtp.host, port: smtp.port, secure: smtp.secure, requireTLS: !smtp.secure, auth: { user: sec.user, pass: sec.pass }, connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000, logger: false, debug: false });
     await tr.sendMail(mail);
     if (typeof tr.close === 'function') tr.close();
   } catch (e) {
@@ -215,4 +233,4 @@ exports.sendInviteMail = onCall({ secrets: [MAIL_USER, MAIL_APP_PASSWORD], maxIn
     return { ok: true, status: 'fallback', why: 'internal' };
   }
 }));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { buildMail, welcomeLink, headerSafe, secretsOk, esc, sendInvite, takeRate, belongs, LIMITS, DEFAULT_NAME } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { buildMail, welcomeLink, headerSafe, secretsOk, smtpOk, esc, sendInvite, takeRate, belongs, LIMITS, DEFAULT_NAME } });
