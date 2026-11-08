@@ -110,7 +110,9 @@ service cloud.firestore {
       allow create: if isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.status == 'new'
-        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br'])
+        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br', 'k'])
+        // k (חלק ג' §5א, לא חובה): 'check' = צ'ק שעובד סרק, נשלח אוטומטית למנהל לשיוך
+        && request.resource.data.get('k', 'check') == 'check'
         && brMine(request.resource.data, get(/databases/$(database)/documents/staff/$(request.auth.uid)).data)
         // t (שלב 2 של סגירת קופה, לא חובה – גרסאות ישנות לא שולחות): זמן השליחה, לפי שעון השרת. cashout בודק לפיו שההוצאה חדשה.
         && (!request.resource.data.keys().hasAny(['t'])
@@ -709,7 +711,8 @@ service cloud.firestore {
       match /chunks/{docId} {
         // תוספת: מזהים fbhi_* (תמונות משוב באיכות גבוהה) שייכים לתוספת 'feedback'
         function fbOk() { return feat('feedback') || !docId.matches('^fbhi_.*'); }
-        allow create: if fbOk() && bEmp() && !bMgr() && (docId.matches('^fbhi_.*') || perm('expW'))
+        // חלק ג' §5א: k<טביעה>_N = צילום צ'ק שעובד סרק (גם בלי expW)
+        allow create: if fbOk() && bEmp() && !bMgr() && (docId.matches('^fbhi_.*') || perm('expW') || docId.matches('^k[0-9a-f]{16}_[0-9]+$'))
           && request.resource.data.owner == request.auth.uid
           && request.resource.data.keys().hasOnly(['owner', 'data'])
           && request.resource.data.data is string
@@ -725,10 +728,12 @@ service cloud.firestore {
 
       // inbox: העתק של הכלל בשורש
       match /inbox/{docId} {
-        allow create: if bEmp() && !bMgr() && perm('expW')
+        // חלק ג' §5א: צ'ק שעובד סרק (k == 'check') נשלח למנהל גם בלי expW – העובד לא רושם הוצאה, רק מעביר צילום ופרטי צ'ק
+        allow create: if bEmp() && !bMgr() && (perm('expW') || request.resource.data.get('k', '') == 'check')
           && request.resource.data.owner == request.auth.uid
           && request.resource.data.status == 'new'
-          && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br'])
+          && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br', 'k'])
+          && request.resource.data.get('k', 'check') == 'check'
           && brMine(request.resource.data, myStaff())
           && (!request.resource.data.keys().hasAny(['t'])
               || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))

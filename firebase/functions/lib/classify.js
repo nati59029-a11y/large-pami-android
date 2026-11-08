@@ -6,7 +6,9 @@
 
 const { hasPerm } = require('./roles');
 
-const TYPES = ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening', 'check'];
+const TYPES = ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening', 'check', 'statement'];
+// חלק ג' (2026-11-08): דף בנק/אשראי – עד 300 שורות; מעבר לזה נחתך (truncated)
+const STM_MAX = 300;
 // תתי־סוג של "invoice" (הוצאה): חשבונית, תעודת משלוח, קבלה (נשמרת כהוצאה), חשבונית זיכוי (סכום שלילי)
 const DOC_TYPES = ['invoice', 'delivery_note', 'receipt', 'credit_note'];
 const Z_PARTS = ['top', 'middle', 'bottom'];
@@ -23,12 +25,15 @@ const FIELDS = {
   opening: { register: S, store: S, date: S, time: S, total: N },
   // צ'ק ששילמנו לספק (חלק ב' 2026-11-08): date = תאריך הפירעון שעל הצ'ק; payee = המוטב (הספק)
   check: { number: S, bank: S, branch: S, account: S, date: S, amount: N, payee: S },
+  // דף בנק/אשראי (חלק ג'): kind = bank|card; last4 = רק 4 ספרות אחרונות; lines מצונזרים (אין מספר כרטיס/חשבון מלא)
+  statement: { kind: S, last4: S, from: S, to: S, lines: 'lines' },
 };
 
 // מנהל = הכול. עסק legacy (לארג' פעמי היום): עובד – הכול חוץ מהעברה (כמו scanDocument היום). עסק במבנה b: לפי expW/incW/trf.
+// חלק ג': statement – מנהל בלבד. check אצל עובד לא נכלל כאן (הוא לא מזכה בסריקה); הוא מוחזר תמיד עם route:'mgr' (ראו shapeClassify, opts.route)
 function allowedTypes(who) {
   if (!who || who.role === 'manager') return TYPES.slice();
-  if (!(who.biz && who.biz.dataRoot === 'b')) return TYPES.filter((t) => t !== 'transfer');
+  if (!(who.biz && who.biz.dataRoot === 'b')) return TYPES.filter((t) => t !== 'transfer' && t !== 'statement');
   const out = [];
   if (hasPerm(who, 'expW')) out.push('invoice', 'cashout', 'check');
   if (hasPerm(who, 'incW')) out.push('zreport', 'opening', 'deposit');
@@ -45,6 +50,26 @@ const num = (v) => {
 const conf = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : null);
 const intOrNull = (v) => (Number.isInteger(v) && v > 0 && v < 1000 ? v : null);
 
+// צנזור: כל רצף 8–19 ספרות (גם עם רווחים/מקפים) → ••••+4 אחרונות. כמו stlScrub באפליקציה
+function scrub(v) {
+  if (v == null) return v;
+  return String(v).replace(/\d(?:[ \-]?\d){7,18}/g, (m) => {
+    if (/^\d{1,2}-\d{1,2}-\d{4}$|^\d{4}-\d{1,2}-\d{1,2}$/.test(m)) return m;
+    const d = m.replace(/\D/g, '');
+    return d.length >= 8 && d.length <= 19 ? '••••' + d.slice(-4) : m;
+  });
+}
+function cleanLines(a, out) {
+  if (!Array.isArray(a)) return [];
+  if (a.length > STM_MAX) out.truncated = true;
+  return a.slice(0, STM_MAX).filter((l) => l && typeof l === 'object').map((l) => {
+    const amt = num(l.amt != null ? l.amt : l.amount);
+    const dir = l.dir === 'in' || l.dir === 'out' ? l.dir : (typeof amt === 'number' && amt < 0 ? 'out' : null);
+    return { date: str(l.date), desc: scrub(str(l.desc)), amt: amt == null ? null : Math.abs(amt), dir, ref: scrub(str(l.ref)) };
+  });
+}
+const last4 = (v) => { const d = String(v == null ? '' : v).replace(/\D/g, ''); return d.length >= 4 ? d.slice(-4) : null; };
+
 function cleanTransfers(a) {
   if (!Array.isArray(a)) return [];
   return a.slice(0, 50).filter((t) => t && typeof t === 'object').map((t) => {
@@ -54,7 +79,8 @@ function cleanTransfers(a) {
 }
 
 // raw = התשובה של Gemini אחרי JSON.parse (או null). allowed = allowedTypes(who).
-function shapeClassify(raw, allowed) {
+// opts.route = המשתמש אינו מנהל: צ'ק לא נדחה – מוחזר עם route:'mgr' ושדות הצ'ק בלבד (§5א)
+function shapeClassify(raw, allowed, opts) {
   const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const t0 = typeof o.type === 'string' ? o.type.trim() : '';
   const docType = DOC_TYPES.includes(t0) ? t0 : null;
@@ -64,7 +90,7 @@ function shapeClassify(raw, allowed) {
     zPart: type === 'zreport' && Z_PARTS.includes(o.z_part) ? o.z_part : null,
     page: type === 'invoice' ? intOrNull(o.page_number) : null,
     pages: type === 'invoice' ? intOrNull(o.page_count) : null,
-    allowed: type === 'unknown' || allowed.includes(type),
+    allowed: type === 'unknown' || allowed.includes(type) || (type === 'check' && !!(opts && opts.route)),
     fields: {}, confidence: {}, uncertain: [],
   };
   if (type === 'unknown') return out;
@@ -77,9 +103,17 @@ function shapeClassify(raw, allowed) {
   const c = o.confidence && typeof o.confidence === 'object' && !Array.isArray(o.confidence) ? o.confidence : {};
   for (const [k, kind] of Object.entries(FIELDS[type])) {
     if (!Object.hasOwn(f, k)) continue;
-    out.fields[k] = kind === S ? str(f[k]) : kind === N ? num(f[k]) : cleanTransfers(f[k]);
+    out.fields[k] = kind === S ? str(f[k]) : kind === N ? num(f[k]) : kind === 'lines' ? cleanLines(f[k], out) : cleanTransfers(f[k]);
     const cv = Object.hasOwn(c, k) ? conf(c[k]) : null;
     if (cv !== null) out.confidence[k] = cv;
+  }
+  if (type === 'statement') {
+    if ('kind' in out.fields) out.fields.kind = out.fields.kind === 'card' ? 'card' : out.fields.kind === 'bank' ? 'bank' : null;
+    if ('last4' in out.fields) out.fields.last4 = last4(out.fields.last4);
+  }
+  if (type === 'check') {
+    if ('account' in out.fields) out.fields.account = last4(out.fields.account); // מספר חשבון – רק 4 אחרונות
+    if (opts && opts.route) out.route = 'mgr';
   }
   if (docType === 'credit_note') {
     // חשבונית זיכוי: הסכומים תמיד שליליים (גם אם המודל החזיר חיובי)
@@ -87,7 +121,7 @@ function shapeClassify(raw, allowed) {
     out.credit = true;
   }
   // לא בטוח: ביטחון נמוך, או שדה שלא נקרא. תאריך חסר תמיד ברשימה (האפליקציה ממלאת "היום" בצהוב).
-  const keys = type === 'transfer' ? ['transfers'] : Object.keys(FIELDS[type]);
+  const keys = type === 'transfer' ? ['transfers'] : type === 'statement' ? ['kind', 'last4'] : Object.keys(FIELDS[type]);
   for (const k of keys) {
     const v = out.fields[k];
     const missing = v == null || (Array.isArray(v) && !v.length);
@@ -97,4 +131,4 @@ function shapeClassify(raw, allowed) {
   return out;
 }
 
-module.exports = { TYPES, DOC_TYPES, FIELDS, LOW, allowedTypes, shapeClassify };
+module.exports = { TYPES, DOC_TYPES, FIELDS, LOW, STM_MAX, allowedTypes, shapeClassify, scrub };

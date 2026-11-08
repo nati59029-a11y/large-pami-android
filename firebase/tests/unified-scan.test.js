@@ -300,20 +300,74 @@ describe('חלק ב\' – classify: צ\'ק (check)', () => {
     for (const u of [U.mgr, U.all]) {
       const r = (await call('scanDocument', u, CLS())).result.result;
       assert.equal(r.type, 'check'); assert.equal(r.allowed, true);
-      assert.deepEqual(r.fields, { number: '000123', bank: 'לאומי', branch: '800', account: '1234567', date: '2026-12-15', amount: 2360, payee: 'ספק דמה בע"מ' });
+      // חלק ג': מספר חשבון – רק 4 ספרות אחרונות
+      assert.deepEqual(r.fields, { number: '000123', bank: 'לאומי', branch: '800', account: '4567', date: '2026-12-15', amount: 2360, payee: 'ספק דמה בע"מ' });
       assert.ok(r.uncertain.includes('date'));
     }
   });
-  it('עובד בלי expW: סוג בלבד, בלי שדות, toManager', async () => {
+  // חלק ג' §5א (החלטת המשתמש 8.11): צ'ק אצל עובד לא נדחה – route:'mgr' עם שדות הצ'ק בלבד (נשלח לתור המנהל)
+  it('עובד בלי expW: צ\'ק לא נדחה – route:mgr, שדות צ\'ק בלבד (חשבון 4 ספרות)', async () => {
     GM.state.classify = GM.CLASSIFY.check;
     const r = await call('scanDocument', U.noexp, CLS());
     const x = r.result.result;
-    assert.equal(x.type, 'check'); assert.equal(x.allowed, false); assert.equal(x.toManager, true); assert.deepEqual(x.fields, {});
-    assert.ok(!r.text.includes('2360') && !r.text.includes('1234567'));
+    assert.equal(x.type, 'check'); assert.equal(x.allowed, true); assert.equal(x.route, 'mgr'); assert.equal(x.fields.amount, 2360); assert.equal(x.fields.account, '4567');
+    assert.ok(!r.text.includes('1234567'));
   });
   it('שדות לא מוכרים בצ\'ק מסוננים', async () => {
     GM.state.classify = { type: 'check', fields: { amount: 10, iban: 'IL00', evil: '<b>' }, confidence: {} };
     const r = (await call('scanDocument', U.mgr, CLS())).result.result;
     assert.deepEqual(r.fields, { amount: 10 });
+  });
+});
+
+// ==== חלק ג' (C1): דף בנק/אשראי (statement) + צ'ק עובד → route:'mgr' ====
+describe('חלק ג\' – classify: statement וצ\'ק עובד', () => {
+  const full = '4580123412345678';
+  const STM = (n) => ({ type: 'statement', type_confidence: 0.9, fields: { kind: 'card', last4: full, from: '2026-11-01', to: '2026-11-30',
+    lines: Array.from({ length: n }, (_, i) => ({ date: '2026-11-02', desc: 'שופרסל כרטיס ' + full + ' #' + i, amt: -(10 + i), ref: '9876543210' })), evil: '<b>' }, confidence: {} });
+  it('מנהל: statement עם שדות מסוננים ומצונזרים (אין רצף 8+ ספרות), last4 בלבד', async () => {
+    GM.state.classify = STM(3);
+    const r = await call('scanDocument', U.mgr, CLS());
+    const x = r.result.result;
+    assert.equal(x.type, 'statement'); assert.equal(x.allowed, true);
+    assert.deepEqual(Object.keys(x.fields).sort(), ['from', 'kind', 'last4', 'lines', 'to']);
+    assert.equal(x.fields.kind, 'card'); assert.equal(x.fields.last4, '5678'); assert.equal(x.fields.lines.length, 3);
+    assert.deepEqual(x.fields.lines[0], { date: '2026-11-02', desc: 'שופרסל כרטיס ••••5678 #0', amt: 10, dir: 'out', ref: '••••3210' });
+    assert.ok(!/\d{8,}/.test(JSON.stringify(x)), 'אין מספר מלא בפלט');
+    assert.ok(!r.text.includes(full));
+  });
+  it('מעל 300 שורות: נחתך ל-300 עם truncated', async () => {
+    GM.state.classify = STM(320);
+    const x = (await call('scanDocument', U.mgr, CLS())).result.result;
+    assert.equal(x.fields.lines.length, 300); assert.equal(x.truncated, true);
+  });
+  it('עובד (עם expW, ובלארג\' פעמי): statement חסום – סוג בלבד, בלי שורות', async () => {
+    for (const u of [U.all, U.remp]) {
+      GM.state.classify = STM(2);
+      const r = await call('scanDocument', u, CLS());
+      const x = r.result.result;
+      assert.equal(x.type, 'statement'); assert.equal(x.allowed, false); assert.equal(x.toManager, true); assert.deepEqual(x.fields, {});
+      assert.ok(!r.text.includes('שופרסל') && !r.text.includes('5678'));
+    }
+  });
+  it('צ\'ק אצל עובד עם expW ובלארג\' פעמי: route:mgr; מנהל – בלי route (ללא שינוי)', async () => {
+    for (const u of [U.all, U.remp]) {
+      GM.state.classify = GM.CLASSIFY.check;
+      const x = (await call('scanDocument', u, CLS())).result.result;
+      assert.equal(x.type, 'check'); assert.equal(x.allowed, true); assert.equal(x.route, 'mgr');
+      assert.deepEqual(Object.keys(x.fields).sort(), ['account', 'amount', 'bank', 'branch', 'date', 'number', 'payee']);
+    }
+    GM.state.classify = GM.CLASSIFY.check;
+    const m = (await call('scanDocument', U.mgr, CLS())).result.result;
+    assert.equal(m.route, undefined); assert.equal(m.allowed, true);
+  });
+  it('עובד בלי שום הרשאת הזנה: עדיין נדחה (צ\'ק לבד לא מזכה בסריקה)', async () => {
+    GM.state.classify = GM.CLASSIFY.check;
+    assert.equal((await call('scanDocument', U.none, CLS())).reason, 'no-perm');
+  });
+  it('עובד: חשבונית (סוג אחר) – ללא שינוי, בלי route', async () => {
+    GM.state.classify = GM.CLASSIFY.invoice;
+    const x = (await call('scanDocument', U.all, CLS())).result.result;
+    assert.equal(x.type, 'invoice'); assert.equal(x.route, undefined);
   });
 });

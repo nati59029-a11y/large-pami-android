@@ -56,7 +56,9 @@ exports.scanDocument = onCall(
     const { kind, cfg, files } = scan.validateScanInput(input, maxBytes);
     // סריקה אחידה: classify מותר למי שיש לו לפחות סוג מסמך אחד (expW/incW/trf). מה שמוחזר מסונן לפי הסוגים המותרים.
     const allowed = kind === 'classify' ? CL.allowedTypes(who) : null;
-    if (kind === 'classify' && !allowed.length) throw new HttpsError('permission-denied', 'אין לך הרשאה להכניס מסמכים. פנה למנהל.', { reason: 'no-perm' });
+    // חלק ג' §5א: צ'ק אצל עובד = route:'mgr' (לא נדחה). הזכאות לסריקה עצמה – לפי הסוגים האחרים, כמו קודם
+    const route = kind === 'classify' && who.role !== 'manager';
+    if (kind === 'classify' && !allowed.filter((t) => !(route && t === 'check')).length) throw new HttpsError('permission-denied', 'אין לך הרשאה להכניס מסמכים. פנה למנהל.', { reason: 'no-perm' });
     // צילום העברה בנקאית – מנהל בלבד (החלטת המשתמש). נבדק לפני הספירה במכסה היומית ולפני Gemini
     if (kind === 'transfer' && who.role !== 'manager' && !(who.biz && who.biz.dataRoot === 'b' && hasPerm(who, 'trf'))) throw new HttpsError('permission-denied', 'צילום העברה מותר למנהל בלבד.', { reason: 'manager-only' });
     // 6ה: מתגי עובד (רק בעסק במבנה b; בעסק legacy – כמו היום). חשבונית/הוצאה מקופה = expW; דוח Z/פתיחה/הפקדה = incW
@@ -82,7 +84,7 @@ exports.scanDocument = onCall(
       // classify: בלי text גולמי (כדי שסוג חסום לא ידלוף), רק התשובה המסוננת
       const raw = scan.parseLikeApp(r.text);
       if (!raw) throw new HttpsError('internal', 'התשובה מהזיהוי לא נקראה. אפשר למלא ידנית או לנסות שוב.', { reason: 'bad-answer' });
-      return { result: CL.shapeClassify(raw, allowed), model: r.model, usage: Object.assign(u, { pages: files.length, bizUsed: usage.bizUsed, bizLimit: caps.bizDaily, period: caps.period || 'day' }) };
+      return { result: CL.shapeClassify(raw, allowed, { route }), model: r.model, usage: Object.assign(u, { pages: files.length, bizUsed: usage.bizUsed, bizLimit: caps.bizDaily, period: caps.period || 'day' }) };
     } catch (e) {
       // classify (החלטת המשתמש 33): דף שנכשל לא נספר – כל כשל מחזיר את הדף, בטרנזקציה אחת (משתמש + עסק).
       // שאר הסוגים – כמו היום (מוחזר רק כשאף בקשה לא יצאה).
