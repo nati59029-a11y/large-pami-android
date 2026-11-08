@@ -17,7 +17,8 @@ jobs:
           gcloud config set project "$P" -q
       - name: Read scanDocument logs (read only)
         run: |
-          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="scandocument" AND timestamp>="2026-11-08T19:00:00Z"' --limit 60 --format='value(timestamp,severity,httpRequest.status,textPayload,jsonPayload.message)' | cut -c1-400
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="scandocument" AND timestamp>="2026-11-08T21:00:00Z" AND severity>=WARNING' --limit 6 --format=json | python3 -c 'import json,sys;[print(json.dumps({k:e.get(k) for k in ("timestamp","httpRequest","jsonPayload","textPayload","labels")},ensure_ascii=False)[:1500]) for e in json.load(sys.stdin)]'
+          gcloud logging read 'logName:"cloudfunctions" AND timestamp>="2026-11-08T21:00:00Z" AND (textPayload:"scan" OR jsonPayload.message:"scan")' --limit 10 --format='value(timestamp,severity,textPayload,jsonPayload.message)' | cut -c1-600
       - name: Cleanup
         if: always()
         run: rm -f "$RUNNER_TEMP/sa.json"
