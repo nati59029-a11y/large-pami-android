@@ -224,7 +224,8 @@ async function opSync(){if(OPB||!isA()||!bzF('orders')||typeof S==='undefined'||
   if(warn.length)setTimeout(()=>toast('שים לב: יתרת זכות שלילית אצל '+warn.join(', ')),2700);
   if(n){save();if(!typing())rerender()}}catch(e){}finally{OPB=0}return n}
 {const L0=load;load=async f=>{await L0(f);opSync()}}
-setTimeout(()=>{try{if(bzB())opSync()}catch(e){}},8000);setInterval(()=>{if(!document.hidden)opSync()},120000);
+/* סנכרון רק כשהמנהל בבית או במסכי ההזמנות (לא טיימר כללי שמתערב בפעולות אחרות) */let OPT=0;const opMaybe=()=>{if(Date.now()-OPT<120000)return;OPT=Date.now();opSync()};
+{const h1=V.home;if(h1)V.home=()=>{const r=h1();try{if(isA()&&bzB()&&bzF('orders'))setTimeout(opMaybe,1500)}catch(e){}return r}}
 
 /* 17:51: שיוך ספק לסניף (subs[].br, רשות). בכרטיס הספק – בחירת סניף; חשבונית חדשה של הספק מקבלת אותו כסניף ברירת מחדל (brGuess).
    חשבוניות קיימות לא משתנות. עסק עם פחות מ-2 סניפים – שום שינוי. */
