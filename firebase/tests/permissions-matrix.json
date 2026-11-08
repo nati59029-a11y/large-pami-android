@@ -218,6 +218,37 @@
         "delete":                 "DDDDA"
       }
     },
+    "mq": {
+      "source": "תור \"נשלח למנהל לטיפול\" – סריקה אחידה, שלב 6 (החלטות 26-27): עובד שסרק סוג שאין לו הרשאה אליו שולח צילום + סוג משוער, בלי סכומים",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה בשמו בסטטוס 'new' (רק uid, by, t, st, k, np – בלי סכומים); קריאה של שלו בלבד. בלי עדכון ומחיקה", "manager": "קריאה, טיפול פעם אחת (st מ-'new' ל-'done'/'rej', רק שדות הסטטוס) ומחיקה. לא יוצר" },
+      "ops": {
+        "get-own":            "DDDAA",
+        "get-other":          "DDDDA",
+        "list-own":           "DDDAA",
+        "list-all":           "DDDDA",
+        "create-own":         "DDDAD",
+        "create-other-uid":   "DDDDD",
+        "create-with-status": "DDDDD",
+        "create-with-amount": "DDDDD",
+        "update-handle":      "DDDDA",
+        "update-again":       "DDDDD",
+        "update-own-kind":    "DDDDD",
+        "delete":             "DDDDA"
+      }
+    },
+    "mq_p": {
+      "source": "חלקי הצילום של פריט בתור – mq/{id}/p/{k}",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה של הפריט שלו; יצירה רק בפריט שלו, ב-15 הדקות שאחרי השליחה. בלי עדכון ומחיקה", "manager": "קריאה ומחיקה. בלי יצירה ועדכון" },
+      "ops": {
+        "get-own":         "DDDAA",
+        "get-other":       "DDDDA",
+        "create-own":      "DDDAD",
+        "create-on-other": "DDDDD",
+        "create-too-big":  "DDDDD",
+        "update":          "DDDDD",
+        "delete":          "DDDDA"
+      }
+    },
     "closings": {
       "source": "סגירת קופה – בקשת בעל העסק 2.11.2026 (שלב 1): עובד שולח דוח Z והצהרת פתיחה; הנתונים הכספיים רק אצל המנהל",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "יצירה בשמו בלבד, בסטטוס 'new'. בלי קריאה (גם לא של עצמו), בלי עדכון ומחיקה", "manager": "קריאה, יצירה בשמו (גם בסטטוס 'ok'), שינוי סטטוס (רק שדות הסטטוס) ומחיקה" },

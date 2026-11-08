@@ -285,6 +285,50 @@ service cloud.firestore {
       }
     }
 
+    // ---------- תור "נשלח למנהל לטיפול" (mq) – סריקה אחידה, שלב 6 ----------
+    // עובד שסרק מסמך מסוג שאין לו הרשאה להזין: נשלחים רק הצילום (בחלקים, p) והסוג המשוער (k) – בלי סכומים ובלי רשומה כספית.
+    // יצירה: עובד פעיל (לא מנהל), בשמו, בזמן אמת, בסטטוס 'new', רק השדות האלה. קריאה: מנהל – הכול; עובד – רק את שלו.
+    // עדכון: מנהל בלבד, פעם אחת (רק מ-'new' ל-'done'/'rej'), ורק שדות הסטטוס – כך פריט שטופל לא נשמר פעמיים. העובד לא עורך ולא מוחק.
+    match /mq/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      allow read: if isManager()
+        || (isActiveEmployee() && resource.data.uid == request.auth.uid);
+      allow create: if isActiveEmployee() && !isManager()
+        && nw().keys().hasAll(['uid', 'by', 't', 'st', 'k', 'np'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np'])
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100 && isMyName(nw().by)
+        && nowOk(nw().t)
+        && nw().st == 'new'
+        && nw().k in ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening', 'unknown']
+        && nw().np is int && nw().np >= 1 && nw().np <= 12;
+      allow update: if isManager()
+        && resource.data.st == 'new'
+        && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt'])
+        && nw().st in ['done', 'rej']
+        && isMyName(nw().get('stBy', ''))
+        && nowOk(nw().get('stAt', 0));
+      allow delete: if isManager();
+
+      // חלקי הצילום: mq/{id}/p/{k} – רק data עד 700,000 תווים; כותב רק מי ששלח, רק חלק שהוכרז ב-np, ב-15 הדקות שאחרי השליחה.
+      match /p/{k} {
+        function q() { return get(/databases/$(database)/documents/mq/$(id)).data; }
+        allow read: if isManager()
+          || (isActiveEmployee() && q().uid == request.auth.uid);
+        allow create: if isActiveEmployee() && !isManager()
+          && exists(/databases/$(database)/documents/mq/$(id))
+          && q().uid == request.auth.uid
+          && k.matches('^([0-9]|1[01])$') && int(k) < q().np
+          && request.time.toMillis() - q().t < 900000
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow update: if false;
+        allow delete: if isManager();
+      }
+    }
+
     // ---------- סגירת קופה (closings) ----------
     // בקשת בעל העסק 2.11.2026 (שלב 1): עובד או מנהל שולח סגירת קופה (דוח Z והצהרת פתיחה) עם הסכומים שזוהו.
     // הנתונים הכספיים נשמרים רק בטלפון המנהל, ולכן: קריאה – מנהל בלבד. העובד לא רואה כלום אחרי השליחה (גם לא את שלו).
@@ -847,6 +891,50 @@ service cloud.firestore {
             && request.resource.data.data.size() <= 700000);
           allow update: if false;
           allow delete: if feat('requests') && (bMgr());
+        }
+      }
+
+      // mq: העתק של הכלל בשורש (תור "נשלח למנהל לטיפול", שלב 6). בלי תוספת – כל עסק
+      // עובד שסרק מסמך מסוג שאין לו הרשאה להזין: נשלחים רק הצילום (בחלקים, p) והסוג המשוער (k) – בלי סכומים ובלי רשומה כספית.
+      // יצירה: עובד פעיל (לא מנהל), בשמו, בזמן אמת, בסטטוס 'new', רק השדות האלה. קריאה: מנהל – הכול; עובד – רק את שלו.
+      // עדכון: מנהל בלבד, פעם אחת (רק מ-'new' ל-'done'/'rej'), ורק שדות הסטטוס – כך פריט שטופל לא נשמר פעמיים. העובד לא עורך ולא מוחק.
+      match /mq/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        allow read: if bMgr()
+          || (bEmp() && resource.data.uid == request.auth.uid);
+        allow create: if bEmp() && !bMgr()
+          && nw().keys().hasAll(['uid', 'by', 't', 'st', 'k', 'np'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np'])
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100 && isMyName(nw().by)
+          && nowOk(nw().t)
+          && nw().st == 'new'
+          && nw().k in ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening', 'unknown']
+          && nw().np is int && nw().np >= 1 && nw().np <= 12;
+        allow update: if bMgr()
+          && resource.data.st == 'new'
+          && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt'])
+          && nw().st in ['done', 'rej']
+          && isMyName(nw().get('stBy', ''))
+          && nowOk(nw().get('stAt', 0));
+        allow delete: if bMgr();
+
+        // חלקי הצילום: mq/{id}/p/{k} – רק data עד 700,000 תווים; כותב רק מי ששלח, רק חלק שהוכרז ב-np, ב-15 הדקות שאחרי השליחה.
+        match /p/{k} {
+          function q() { return get(/databases/$(database)/documents/b/$(bizId)/mq/$(id)).data; }
+          allow read: if bMgr()
+            || (bEmp() && q().uid == request.auth.uid);
+          allow create: if bEmp() && !bMgr()
+            && exists(/databases/$(database)/documents/b/$(bizId)/mq/$(id))
+            && q().uid == request.auth.uid
+            && k.matches('^([0-9]|1[01])$') && int(k) < q().np
+            && request.time.toMillis() - q().t < 900000
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000;
+          allow update: if false;
+          allow delete: if bMgr();
         }
       }
 

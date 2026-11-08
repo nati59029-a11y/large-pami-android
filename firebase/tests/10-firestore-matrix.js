@@ -11,6 +11,7 @@ let seq = 0;
 const fresh = (p) => `${p}_${Date.now()}_${++seq}`;
 const newSup = () => ({ c: 'bak', n: 'ספק', d: '2026-11-01', at: '2026-11-01', a: '10', inv: '2', by: 'מנהל', pend: '', src: '', m: '2026-11', np: '0', h: 'a', fh: 'b' });
 const newReq = (uid, np) => ({ uid, by: uid, txt: 'בקשה', t: Date.now(), st: 'new', np: np || 0 });
+const newMq = (uid) => ({ uid, by: uid, t: Date.now(), st: 'new', k: 'invoice', np: 1 });
 const newCl = (uid, o) => Object.assign({ uid, by: uid, t: Date.now(), st: 'new', np: 1, reg: 'i_yh', d: '2026-10-20', no: '777', data: '{"v":1,"f":{}}' }, o);
 // הוצאה מקופה (cashout): המזהה = מזהה ההוצאה ב-inbox של הכותב (src). inbox ו-chunks נוצרים בלי כללים, כאילו pushItem כבר שלח.
 const newCo = (uid, id, o) => Object.assign({ uid, by: uid, t: Date.now(), reg: 'i_yh', d: '2026-10-20', a: 12.5, why: 'קניתי לחם', dep: '', src: id, zc: '', dp: '' }, o);
@@ -183,6 +184,30 @@ const OPS = {
     'update-status':      (db, me) => db.doc('appreq/r1').update({ st: 'doing', stBy: me, stAt: Date.now(), note: 'בטיפול' }),
     'update-text':        (db) => db.doc('appreq/r1').update({ txt: 'שונה' }),
     'delete':             (db) => db.doc('appreq/r1').delete(),
+  },
+  // תור "נשלח למנהל לטיפול" (שלב 6). מסמך של העובד עצמו נזרע בלי כללים (בשביל get-own / update-own)
+  mq: {
+    'get-own':            async (db, me, env) => { await env.withSecurityRulesDisabled((c) => c.firestore().doc('mq/q_' + me).set(newMq(me))); return db.doc('mq/q_' + me).get(); },
+    'get-other':          (db) => db.doc('mq/q1').get(),
+    'list-own':           (db, me) => db.collection('mq').where('uid', '==', me).get(),
+    'list-all':           (db) => db.collection('mq').get(),
+    'create-own':         (db, me) => db.doc('mq/' + fresh('q')).set(newMq(me)),
+    'create-other-uid':   (db) => db.doc('mq/' + fresh('q')).set(newMq(H.OTHER)),
+    'create-with-status': (db, me) => db.doc('mq/' + fresh('q')).set(Object.assign(newMq(me), { st: 'done' })),
+    'create-with-amount': (db, me) => db.doc('mq/' + fresh('q')).set(Object.assign(newMq(me), { amt: 100 })),
+    'update-handle':      (db, me) => db.doc('mq/q1').update({ st: 'done', stBy: me, stAt: Date.now() }),
+    'update-again':       async (db, me, env) => { await env.withSecurityRulesDisabled((c) => c.firestore().doc('mq/q_done').set(Object.assign(newMq(H.OTHER), { st: 'done', stBy: 'u_mgr', stAt: 1 }))); return db.doc('mq/q_done').update({ st: 'rej', stBy: me, stAt: Date.now() }); },
+    'update-own-kind':    async (db, me, env) => { await env.withSecurityRulesDisabled((c) => c.firestore().doc('mq/q_' + me).set(newMq(me))); return db.doc('mq/q_' + me).update({ k: 'transfer' }); },
+    'delete':             (db) => db.doc('mq/q1').delete(),
+  },
+  mq_p: {
+    'get-own':            async (db, me, env) => { await env.withSecurityRulesDisabled(async (c) => { await c.firestore().doc('mq/q_' + me).set(newMq(me)); await c.firestore().doc('mq/q_' + me + '/p/0').set({ data: 'x' }); }); return db.doc('mq/q_' + me + '/p/0').get(); },
+    'get-other':          (db) => db.doc('mq/q1/p/0').get(),
+    'create-own':         async (db, me) => { const id = fresh('q'); await db.doc('mq/' + id).set(newMq(me)); return db.doc('mq/' + id + '/p/0').set({ data: 'AAAA' }); },
+    'create-on-other':    (db) => db.doc('mq/q1/p/0').set({ data: 'AAAA' }),
+    'create-too-big':     async (db, me) => { const id = fresh('q'); try { await db.doc('mq/' + id).set(newMq(me)); } catch (e) { /* תפקיד שלא יוצר */ } return db.doc('mq/' + id + '/p/0').set({ data: 'A'.repeat(700001) }); },
+    'update':             (db) => db.doc('mq/q1/p/0').set({ data: 'BBBB' }),
+    'delete':             (db) => db.doc('mq/q1/p/0').delete(),
   },
   appreq_p: {
     'get':                     (db) => db.doc('appreq/r1/p/0').get(),
