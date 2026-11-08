@@ -347,6 +347,17 @@ describe('לארג\' פעמי במצב legacy (שורש)', () => {
       await assertFails(db(u).doc('ordcfg/main').set({}));
     }
     await assertFails(db('u_out').doc('ord/' + r.result.id).get());
+    // סבב 2, הערה 3: משתמש של עסק b/* (מנהל ועובד) – לא קורא את נתוני השורש; עובד מושבת בשורש – חסום בחוקים ובשרת
+    await seed();
+    await prep(async (d) => { await d.doc('ord/' + r.result.id).set({ br: '_', total: 20, status: 'new' }); await d.doc('prod/pA').set({ name: 'x', q: {} }); await d.doc('staff/l_off').set({ name: 'l_off', role: 'employee', active: false }); });
+    for (const u of [MGR, E1]) {
+      await assertFails(db(u).doc('ord/' + r.result.id).get());
+      await assertFails(db(u).doc('prod/pA').get());
+      await assertFails(db(u).doc('ordcfg/main').get());
+    }
+    await assertFails(db('l_off').doc('ord/' + r.result.id).get());
+    await assertFails(db('l_off').doc('prod/pA').get());
+    assert.equal((await call('createOrder', 'l_off', { reqId: rid(), cust, items: [{ n: 'x', qty: 1, price: 1 }] })).reason, 'staff-disabled');
   });
   it('מעבר לטלפון מנקה את pay.sup; מייל עם רצף ספרות נדחה', async () => {
     await seed();
