@@ -20,7 +20,9 @@ const tzN=v=>{const t=dig(v);return t.length>=5&&t.length<=9?t.padStart(9,'0'):'
 function tzOk(z){if(!/^\d{9}$/.test(z)||z==='000000000')return false;let s=0;for(let i=0;i<9;i++){let d=+z[i]*((i%2)+1);if(d>9)d-=9;s+=d}return s%10===0}
 function phN(v){let p=String(v==null?'':v).trim().replace(/[\s-]/g,'');if(/^\+?972\d{8,9}$/.test(p))p='0'+p.replace(/^\+?972/,'');if(/^5\d{8}$/.test(p))p='0'+p;return /^0(5\d{8}|7\d{8}|[23489]\d{7})$/.test(p)?p:''}
 // 4 ספרות: 4 ספרות בדיוק נשארות; 13–19 ספרות (מספר כרטיס) → 4 אחרונות; אחר → ''+סימון שגיאה
-function l4(v){const d=String(v==null?'':v).replace(/[\s-]/g,'');if(!d)return {v:''};if(/^\d{4}$/.test(d))return {v:d};if(/^\d{13,19}$/.test(d))return {v:d.slice(-4),cut:1};return {v:'',bad:1}}
+const digs=v=>{const s=String(v==null?'':v);return /\p{L}/u.test(s)?s:s.replace(/\D/g,'')};
+const CARD8=/(?:\d[^\p{L}\d]{0,2}){8,}/u;
+function l4(v){const d=digs(v);if(!d)return {v:''};if(/^\d{4}$/.test(d))return {v:d};if(/^\d{13,19}$/.test(d))return {v:d.slice(-4),cut:1};return {v:'',bad:1}}
 const xKeys=()=>(C.cfg&&Array.isArray(C.cfg.xKeys)?C.cfg.xKeys:[]).filter(x=>x&&x.k);
 
 /* ---------- קריאה ---------- */
@@ -100,7 +102,7 @@ const cForm=c=>{const x=c&&c.x||{};return `<h3>${c?'עריכת לקוח':'לקו
  <p class="note">לא מקלידים מספר כרטיס מלא, תוקף או קוד.</p><div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`};
 ACT.ocNew=async()=>{if(!C.cfg)await cfgLoad();dlg(cForm(null))};
 ACT.ocEdit=async el=>{if(!C.cfg)await cfgLoad();const c=(C.L||[]).find(x=>x.id===el.dataset.id);if(c)dlg(cForm(c))};
-FRM.ocF=async f=>{const v=fd(f),tz=dig(v.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');if(!phN(v.phone))return toast('טלפון לא תקין');
+FRM.ocF=async f=>{const v=fd(f),tz=dig(v.tz);if(['name','addr','mail'].concat(xKeys().map(k=>'x_'+k.k)).some(n=>CARD8.test(v[n]||'')))return toast('אסור להקליד מספר כרטיס או מספר ארוך. מותר רק 4 ספרות אחרונות.');if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');if(!phN(v.phone))return toast('טלפון לא תקין');
  const k=l4(v.last4);if(k.bad)return toast('4 ספרות בדיוק');
  const c={name:v.name.trim(),phone:phN(v.phone)};if(tz)c.tz=tz;['mail','addr'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;
  const x={};xKeys().forEach(q=>{const s=(v['x_'+q.k]||'').trim();if(s)x[q.k]=s});if(Object.keys(x).length)c.x=x;
@@ -131,7 +133,7 @@ const optH=(v)=>`<option value="">לא לייבא</option>${MAPF.map(([k,l])=>`<
 const mapH=()=>{const I=C.imp,s=I.R[0]||[];return `<h3>התאמת עמודות · ${I.R.length} שורות</h3><form data-f="ocMapF" style="max-height:60vh;overflow:auto">${I.H.map((h,i)=>`<label class="f"><span>${esc(h||'עמודה '+(i+1))} <small class="note">(${esc(maskCell(s[i]))})</small></span><select name="m${i}">${optH(I.map[i])}</select></label>`).join('')}
  <div class="row"><button class="btn grow">המשך לתצוגה מקדימה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`};
 // דוגמה בכותרת: מספר ארוך מוצג מוסתר (לא מציגים מספר כרטיס על המסך)
-const maskCell=v=>{const s=String(v==null?'':v).slice(0,30);const d=s.replace(/[\s-]/g,'');return /^\d{13,19}$/.test(d)?'****'+d.slice(-4):s};
+const maskCell=v=>{const s=String(v==null?'':v).slice(0,30);const d=digs(s);return /^\d{13,19}$/.test(d)?'****'+d.slice(-4):s};
 FRM.ocMapF=async f=>{const v=fd(f),I=C.imp;I.map=I.H.map((h,i)=>v['m'+i]||'');
  const used=MAPF.map(x=>x[0]).filter(k=>I.map.filter(m=>m===k).length>1);if(used.length)return toast('כל שדה – עמודה אחת בלבד');
  if(!I.map.includes('phone')&&!I.map.includes('tz'))return toast('צריך עמודת טלפון או ת.ז');
@@ -145,13 +147,13 @@ const xlDate=v=>{if(typeof v==='number'&&v>20000&&v<80000){const d=new Date(Math
 // בונה את השורות לשליחה. המספר המלא לא נשמר: נחתך כאן מיד, והשורות המקוריות של הקובץ נמחקות מהזיכרון אחרי ההכנה.
 function prep(){const I=C.imp,out=[];let cut=0;
  I.R.forEach((r,ri)=>{const o={},x={},why=[];I.map.forEach((m,i)=>{if(!m)return;let v=r[i];if(v==null||String(v).trim()==='')return;
-   const d=String(v).replace(/[\s-]/g,'');
+   const d=digs(v);
    if(m==='last4'){const k=l4(v);if(k.bad)why.push('4 ספרות');else{o.last4=k.v;if(k.cut)cut++}return}
    if(/^\d{13,19}$/.test(d)){if(!o.last4)o.last4=d.slice(-4);cut++;return} // מספר כרטיס בעמודה אחרת → 4 ספרות בלבד
    if(m==='phone'){const p=phN(v);if(!p)why.push('טלפון');else o.phone=p;return}
    if(m==='tz'){const z=tzN(v);if(!z||!tzOk(z))why.push('ת.ז');else o.tz=z;return}
    if(m==='port'){const t=xlDate(v);if(t==='!')why.push('תאריך ניוד');else if(t)o.port=t;return}
-   const s=String(v).trim();if(/(?:\d[\s-]?){8,}/.test(s)&&m!=='mail'){why.push('מספר ארוך');return}
+   const s=String(v).trim();if(CARD8.test(s)){why.push('מספר ארוך');return}
    if(m==='name'||m==='mail'||m==='addr')o[m]=s;else x[m]=s.slice(0,200)});
   if(Object.keys(x).length)o.x=x;if(!o.phone&&!o.tz)why.push('אין טלפון/ת.ז');if(!o.name&&!why.length)why.push('אין שם');
   out.push({n:ri+2,o,why})});

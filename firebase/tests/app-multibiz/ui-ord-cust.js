@@ -104,7 +104,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   // 6. ייבוא: קובץ CSV עם עמודת כרטיס מלא ועמודת "סיטונאי"
   await goV('ocList'); await H.settle(page, 300);
   await page.click('[data-a=ocImp]'); await H.settle(page, 200);
-  const csv = 'שם,טלפון,ת.ז,כרטיס,סיטונאי,עיר\nדנה,0501111111,123456782,4580 1234 5678 9012,כן,אשדוד\nיוסי,521112222,,1234,כן,\nשגוי,abc,,12345,,\n';
+  const csv = 'שם,טלפון,ת.ז,כרטיס,סיטונאי,עיר\nדנה,0501111111,123456782,4580 1234 5678 9012,כן,אשדוד\nיוסי,521112222,,1234,כן,\nשגוי,abc,,12345,,\nרות,0503333333,,4111.1111.1111.1111,,\nטל,0504444444,,,,רחוב 5326/1000/2000/3456\n';
   await page.setInputFiles('#dlg input[type=file]', { name: 'c.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) }); await H.settle(page, 500);
   await shot('ייבוא-התאמה-a');
   const mapTxt = await page.innerText('#dlg');
@@ -113,7 +113,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const pv = await page.innerText('#dlg');
   await page.click('#dlg [data-a=ocGo]'); await H.settle(page, 600);
   const ic = calls.find((c) => c.n === 'importCusts'); const all = JSON.stringify(calls) + (await page.evaluate(() => document.body.innerHTML + JSON.stringify(window.__oc) + JSON.stringify(localStorage)));
-  check('6 ייבוא: מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 2 && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[1].phone === '0521112222' && ic.d.rows[1].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234/.test(all) && /\*\*\*\*9012/.test(mapTxt) && /שורה 4/.test(pv) && /נחתכו/.test(pv), { rows: ic && ic.d.rows, leak: /4580\s?1234/.test(all), pv: pv.slice(0, 200) });
+  check('6 ייבוא: מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 3 && ic.d.rows[2].last4 === '1111' && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[1].phone === '0521112222' && ic.d.rows[1].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234|4111\.1111|5326\/1000/.test(all) && /שורה 6: מספר ארוך/.test(pv) && /\*\*\*\*9012/.test(mapTxt) && /שורה 4/.test(pv) && /נחתכו/.test(pv), { rows: ic && ic.d.rows, leak: /4580\s?1234|4111\.1111|5326\/1000/.test(all), pv: pv.slice(0, 200) });
   // 7. עובד: אין כפתור סיטונאי ואין ייבוא
   await page.evaluate(() => { SY.role = 'worker'; }); await goV('ocCard', 't' + TZ); await H.settle(page, 300);
   const emp = await page.innerText('#main'); await goV('ocList'); await H.settle(page, 200); const empL = await page.innerText('#main');

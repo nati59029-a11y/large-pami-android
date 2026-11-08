@@ -54,7 +54,7 @@ function tzOf(raw) {
 // 4 ספרות אחרונות. מספר כרטיס מלא (13–19 ספרות, עם רווחים/מקפים) – נחתך ל-4 האחרונות (22:04). כל דבר אחר – נדחה.
 function last4Of(raw) {
   const s = String(raw == null ? '' : raw).trim();
-  const d = s.replace(/[\s-]/g, '');
+  const d = /\p{L}/u.test(s) ? s : s.replace(/\D/g, ''); // כל מפריד (רווח, מקף, נקודה, /, _) מוסר
   if (/^\d{4}$/.test(d)) return d;
   if (/^\d{13,19}$/.test(d)) return d.slice(-4);
   throw bad('bad-last4', '4 ספרות אחרונות: בדיוק 4 ספרות');
@@ -62,7 +62,7 @@ function last4Of(raw) {
 function mailOf(raw) {
   const m = String(raw).trim().toLowerCase();
   if (m.length > 254 || !/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(m)) throw bad('bad-email', 'כתובת המייל לא תקינה');
-  if (/(?:\d[\s.-]?){8,}/.test(m)) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
+  if (/(?:\d[^\p{L}\d]{0,2}){8,}/u.test(m)) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
   return m;
 }
 function portOf(raw) {
@@ -195,7 +195,7 @@ async function importCusts(request) {
       if (r0.x && typeof r0.x === 'object' && !Array.isArray(r0.x)) {
         r0.x = Object.assign({}, r0.x);
         for (const [k, v] of Object.entries(r0.x)) {
-          const d = String(v == null ? '' : v).replace(/[\s-]/g, '');
+          const s0 = String(v == null ? '' : v), d = /\p{L}/u.test(s0) ? s0 : s0.replace(/\D/g, '');
           if (/^\d{13,19}$/.test(d)) { if (empty(r0.last4)) r0.last4 = d.slice(-4); delete r0.x[k]; }
         }
       }

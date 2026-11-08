@@ -87,6 +87,21 @@ describe('לקוחות – saveCust', () => {
     await bad(Object.assign({}, c1, { x: { xzzz: 'a' } }), 'bad-x');
     await bad(Object.assign({}, c1, { card: '4580123456789012' }), 'bad-field');
   });
+  it('מספר כרטיס עם נקודות / לוכסנים / קו תחתון בשם, בכתובת ובשדה חופשי – נדחה; ב-last4 – נחתך', async () => {
+    for (const v of ['4580.1234.1234.1234', '4580/1234/1234/1234', '4580_1234_1234_1234', '4580 . 1234 . 1234 . 1234']) {
+      for (const f of [{ name: 'x ' + v }, { addr: 'רחוב ' + v }, { x: { xcity: v } }]) {
+        const r = await call('saveCust', E1, { cust: Object.assign({}, c1, f) });
+        assert.equal(r.reason, 'card-like', v + ' ' + JSON.stringify(f) + ' ' + r.text);
+      }
+      const r = await call('saveCust', E1, { cust: Object.assign({}, c1, { last4: v }) });
+      assert.equal(r.status, 'OK', r.text); assert.equal((await get(`b/${A}/cust/t${TZ}`)).last4, '1234');
+    }
+    const r = await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'א', phone: '0501111111', x: { xcity: '5326.1000.2000.3456' } }, { name: 'ב', phone: '0502222222', addr: 'הרצל 4580/1234/5678/9012' }] });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal((await get(`b/${A}/cust/p0501111111`)).last4, '3456');
+    assert.deepEqual(r.result.bad.map((x) => [x.i, x.reason]), [[1, 'card-like']]);
+    assert.ok(!r.text.includes('5326') && !r.text.includes('4580'));
+  });
   it('last4 עם מספר כרטיס מלא → נחתך ל-4 ספרות; המספר המלא לא נשמר בשום מקום', async () => {
     const r = await call('saveCust', E1, { cust: Object.assign({}, c1, { last4: '4580-1234-5678-9012' }) });
     assert.equal(r.status, 'OK', r.text);
