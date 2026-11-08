@@ -321,6 +321,34 @@ html[data-ds] .mlist .opt{margin:0;border:0;border-radius:0;box-shadow:none;back
 html[data-ds] .mlist .opt+.opt{border-top:1px solid var(--line)}
 html[data-ds] .mlist .opt:active{background:var(--srf-0)}
 html[data-ds] .mlist .opt small{font-size:.82rem;font-weight:400}
+/* DS:D3 – הכנסת חשבונית: אריח ראשי גדול + אריחים קטנים בשורה */
+.sci{width:24px;height:24px;flex:none}
+html[data-ds] .scanhero{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:clamp(190px,38vh,360px);padding:20px 16px;margin:0 0 12px;border:1px solid var(--line);border-radius:var(--r-l);background:var(--card);color:var(--ink);box-shadow:var(--elev-2);text-align:center;overflow:hidden;font-weight:400}
+html[data-ds] .scanhero::before{content:"";position:absolute;inset:12px;pointer-events:none;opacity:.9;background:linear-gradient(var(--acc),var(--acc)) top left/26px 3px no-repeat,linear-gradient(var(--acc),var(--acc)) top left/3px 26px no-repeat,linear-gradient(var(--acc),var(--acc)) top right/26px 3px no-repeat,linear-gradient(var(--acc),var(--acc)) top right/3px 26px no-repeat,linear-gradient(var(--acc),var(--acc)) bottom left/26px 3px no-repeat,linear-gradient(var(--acc),var(--acc)) bottom left/3px 26px no-repeat,linear-gradient(var(--acc),var(--acc)) bottom right/26px 3px no-repeat,linear-gradient(var(--acc),var(--acc)) bottom right/3px 26px no-repeat}
+html[data-ds] .scanhero .shc{display:grid;place-items:center;width:84px;height:84px;border-radius:50%;background:var(--acc);color:var(--onacc);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),var(--press),var(--elev-2)}
+html[data-ds] .scanhero .shc svg{width:38px;height:38px}
+.shc-u{display:none}html.bzd .shc-c{display:none}html.bzd .shc-u{display:block}
+html[data-ds] .scanhero b{font-size:1.3rem;font-weight:700;line-height:1.2}
+html[data-ds] .scanhero small{color:var(--mut);font-size:.88rem;font-weight:400;line-height:1.3}
+html[data-ds] .scanhero:active{transform:translateY(1px)}
+html[data-ds] .scanhero.sm{display:grid;grid-template-columns:auto 1fr;column-gap:12px;row-gap:0;align-items:center;justify-items:start;min-height:76px;padding:12px 14px;text-align:start;box-shadow:var(--elev-1)}
+html[data-ds] .scanhero.sm::before{display:none}
+html[data-ds] .scanhero.sm .shc{grid-row:1/3;width:52px;height:52px}
+html[data-ds] .scanhero.sm .shc svg{width:26px;height:26px}
+html[data-ds] .scanhero.sm b{font-size:1.05rem;grid-column:2}html[data-ds] .scanhero.sm small{grid-column:2}
+.scrow{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px;margin:0 0 12px}
+.scrow.one{grid-auto-flow:row}
+.scant{min-height:84px;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:10px 6px;border:1px solid var(--line);border-radius:var(--r-m);background:var(--card);color:var(--ink);box-shadow:var(--elev-1);font:inherit;font-weight:600;font-size:.84rem;line-height:1.2;text-align:center;cursor:pointer}
+.scant .sci{color:var(--acc)}
+.scant:active{transform:translateY(1px)}
+.scrow.one .scant{flex-direction:row;min-height:56px;gap:10px;font-size:1rem}
+html[data-ds] .scbatch{min-height:48px;margin:0 0 12px;font-size:.92rem;font-weight:600;line-height:1.25}
+html[data-ds] .scbatch .sci{width:20px;height:20px}
+.scth{flex-wrap:wrap;margin-bottom:10px}
+.scimg{width:72px;height:96px;object-fit:cover;border:1px solid var(--line);border-radius:var(--r-s);display:block;background:var(--srf-0)}
+html[data-ds] .scdel{min-height:44px;margin-top:4px;padding:0 12px}
+.scnote{display:flex;gap:8px;align-items:flex-start;font-weight:700}.scnote .sci{width:20px;height:20px;margin-top:1px}
+.scnote.bad{color:var(--bad)}.scnote.acc{color:var(--acc)}.scnote.ok{color:var(--inc)}
 </style>
 <script src="xlsx.full.min.js"></script>
 <script src="orders/site-backend.js"></script>
@@ -667,8 +695,8 @@ function sheetDraw(){
  else if(A.step==='scan'){
   const n=(A.pg||[]).length;
   body=`${typeof bqBanner==='function'?bqBanner():''}<p class="note" style="margin:4px 0 12px">סרוק או העלה את החשבונית, והאפליקציה תזהה את הספק, המספר, התאריך והסכום. חשבונית של כמה עמודים: הוסף את כל העמודים ואז לחץ "זהה". אפשר לבדוק ולתקן לפני השמירה.</p>
-  ${n?`<div class="row" style="flex-wrap:wrap;margin-bottom:10px">${A.pg.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="scanDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div>${bzF('scan')?`<button class="btn w" style="margin-bottom:10px" data-a="scanGo">זהה פרטים מ-${n} ${n>1?'עמודים':'עמוד'}</button><button class="btn g w" style="margin-bottom:10px" data-a="scanQ">הוסף לתור וצלם חשבונית נוספת</button>`:''}`:''}
-  <label class="btn ${n?'g':''} w" style="cursor:pointer;margin-bottom:10px">📷 ${n?'צלם עמוד נוסף':'צלם חשבונית'}<input type="file" accept="image/*" capture="environment" data-c="scanpick" hidden></label><label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 ${n?'הוסף עמודים מהגלריה':'העלה קובץ מהגלריה'}<input type="file" accept="image/*" multiple data-c="scanpick" hidden></label>${bzF('scan')?'<label class="btn g w" style="cursor:pointer;margin-bottom:10px">🗂 כמה חשבוניות מהגלריה (כל תמונה או PDF היא חשבונית)<input type="file" accept="image/*,application/pdf" multiple data-c="scanmulti" hidden></label>':''}<button class="btn g w" data-a="scanManual">המשך ידני</button>`}
+  ${n?`<div class="row scth">${A.pg.map((u,i)=>`<div style="text-align:center"><img class="scimg" src="${u}" alt="עמוד ${i+1}"><button type="button" class="chip scdel" data-a="scanDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div>${bzF('scan')?`<button class="btn w" style="margin-bottom:10px" data-a="scanGo">זהה פרטים מ-${n} ${n>1?'עמודים':'עמוד'}</button><button class="btn g w" style="margin-bottom:10px" data-a="scanQ">הוסף לתור וצלם חשבונית נוספת</button>`:''}`:''}
+  ${scHero(n?'צלם עמוד נוסף':'צלם חשבונית','מזהה ספק, מספר, תאריך וסכום אוטומטית','<input type="file" accept="image/*" capture="environment" data-c="scanpick" hidden>',n)}<div class="scrow">${scTile('img',n?'הוסף מהגלריה':'העלה מהגלריה','<input type="file" accept="image/*" multiple data-c="scanpick" hidden>')}${bzF('scan')?scTile('pdf','כמה חשבוניות','<input type="file" accept="image/*,application/pdf" multiple data-c="scanmulti" hidden>','כמה חשבוניות מהגלריה (כל תמונה או PDF היא חשבונית)'):''}${scBtn('pen','המשך ידני','data-a="scanManual"')}</div>`}
  else if(A.step==='sub'){
   const L=subsOf(c.id);
   body=L.map(x=>`<button class="opt" data-a="pick" data-k="sub" data-v="${x.id}"><span>${esc(x.name)}${x.cat&&c.beh==='sup'?(bsum(x.id)?`<small>פתוח לתשלום ${ils(bsum(x.id))}</small>`:''):''}</span>${ico('chev')}</button>`).join('')||`<p class="empty">עדיין אין ${subWord(c)||'פריטים'} בקטגוריה הזאת. הוסף את הראשון:</p>`;
@@ -1041,7 +1069,7 @@ const WCK=LK('lp-wck'),wckL=()=>{try{const a=JSON.parse(localStorage.getItem(WCK
 async function usWkAuto(type,fields){const U=US;if(type!=='check'||!U||!isW()||U.wca)return;const pg=U.pg||[];let v='';if(pg.length&&pg.every(g=>!g.pdf))v=packPages(pg.map(g=>g.u));else if(pg.length===1)v=pg[0].du;
  if(!v)return toast('אין צילום לשליחה');U.wca=1;
  try{const f=fields||{},key=trHash(v).slice(0,16),id='k'+key;usPane(0);
-  const done=()=>{U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>🖊 זוהה צ׳ק – נשלח למנהל</b><div class="note">המנהל ישייך אותו לחשבונית.</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">📷 סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)};
+  const done=()=>{U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>🖊 זוהה צ׳ק – נשלח למנהל</b><div class="note">המנהל ישייך אותו לחשבונית.</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">${sci('cam')}סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)};
   if(wckL().includes(id)||obGet().some(o=>o.id===id)){toast('הצ׳ק הזה כבר נשלח למנהל');return done()}
   const a=typeof f.amount==='number'&&f.amount>0?rnd(f.amount):0,low=!!(U.cls&&(U.cls.uncertainType||(U.cls.unsure||[]).length))||!a;
   const data={kind:'check',cat:'',catName:'',sub:'',subName:'',amt:a,date:usDate(f.date)||today(),note:'',inv:'',dn:false,no:s_(f.number).replace(/\D/g,'').slice(0,20),bank:stlScrub(s_(f.bank)).slice(0,60),cdate:usDate(f.date),payee:stlScrub(s_(f.payee)).slice(0,80),fid:key};if(low)data.low=1;
@@ -1995,7 +2023,7 @@ ACT.impUndo=()=>ask('לבטל את כל התנועות שיובאו בפעם ה�
 /* ===== סריקת חשבוניות והשוואות ===== */
 let Q=[];
 V.scan=()=>{const sc=S.cats.filter(c=>c.beh==='sup'&&!c.hid&&!c.off);
- let h=`<div class="card"><p class="note">צלם או בחר חשבונית. הקובץ נשמר בכרטיס הספק יחד עם החשבונית שתירשם. מלא את הפרטים ולחץ שמירה.</p><div class="row"><label class="btn grow" style="cursor:pointer">${ico('file')} צילום / בחירת קבצים<input type="file" accept="image/*,application/pdf" multiple data-c="scanFiles" hidden></label></div></div>`;
+ let h=`<div class="card"><p class="note">צלם או בחר חשבונית. הקובץ נשמר בכרטיס הספק יחד עם החשבונית שתירשם. מלא את הפרטים ולחץ שמירה.</p>${scHero('צילום / בחירת קבצים','תמונה או PDF, אפשר כמה יחד','<input type="file" accept="image/*,application/pdf" multiple data-c="scanFiles" hidden>',1)}</div>`;
  h+=Q.map(it=>{const x=it.x,subs=subsOf(x.cat);return `<div class="card" data-q="${it.id}">${it.img?`<img src="${it.img}" alt="תצוגת החשבונית" style="max-width:100%;max-height:220px;border-radius:10px;display:block;margin:0 auto 10px">`:`<div class="note" style="margin-bottom:8px">קובץ: ${esc(it.name)}</div>`}
  <label class="f"><span>קטגוריה</span><select data-c="qf" data-id="${it.id}" data-k="cat">${sc.map(c=>`<option value="${c.id}"${c.id===x.cat?' selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
  <label class="f"><span>ספק</span><select data-c="qf" data-id="${it.id}" data-k="sub">${subs.map(s=>`<option value="${s.id}"${s.id===x.sub?' selected':''}>${esc(s.name)}</option>`).join('')}<option value=""${!x.sub?' selected':''}>＋ ספק חדש</option></select></label>
@@ -2356,9 +2384,9 @@ ACT.syOpen=()=>{sheetClose();NAV=[{v:'sync'}];render(0)};
 const inbName=it=>{const c=cat(it.d.cat);if(it.d.reg&&!c)return 'דף הוצאה מקופה · ללא קטגוריה';return(c?c.name:(it.d.catName||'קטגוריה'))+(it.d.subName?' · '+it.d.subName:'')};
 V.inbox=()=>{inbHeal();const L=S.inbox.slice().sort((a,b)=>(b.at||'').localeCompare(a.at||''));
  return{t:'הוצאות מעובדים',s:L.length+' ממתינות',h:L.length?L.map(it=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${inbChk(it)?'צ׳ק מעובד'+(s_(it.d.payee)?' · '+esc(it.d.payee):''):esc(inbName(it))}</b><b>${ils(num(it.d.amt))}</b></div>${inbChk(it)?`<div style="margin:4px 0"><span class="tag t2" data-chktag>צ׳ק מעובד</span>${it.d.low?'<span class="tag t1">לבדוק</span>':''}</div>`:''}<small>הוכנס על ידי ${esc(it.by)} · ${esc(it.d.date||'')}${it.d.plan?' · לתשלום '+esc(mfmt(it.d.plan)):''}${inbChk(it)&&s_(it.d.no)?' · צ׳ק '+esc(it.d.no):''}${it.d.inv?' · חשבונית '+esc(it.d.inv):''}${it.d.dn?' · תעודת משלוח':''}${it.d.note?' · '+esc(it.d.note):''}</small>
- ${(()=>{const mm=dupMsg(dupInbox(it));return mm.map(m=>`<div class="note" style="color:var(--neg,#b3261e);font-weight:700">⚠ ${esc(m)}</div>`).join('')})()}
- ${it.rq?`<div class="note" style="color:var(--acc);font-weight:700">📷 ביקשת צילום חדש${it.rq.n?': '+esc(it.rq.n):''}. הצילום יוחלף כשהעובד ישלח.</div>`:''}${it.rph?`<div class="note" style="color:var(--pos,#1b7f3b);font-weight:700">✓ התקבל צילום חדש מהעובד</div>`:''}
- <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${esc(it.id)}">צפה בצילום</button>`:''}${it.file&&idOk(it.file)?`<button class="btn g" data-a="dxShare" data-f="${esc(it.file)}" data-n="${esc(it.id)}" aria-label="שיתוף הצילום">${ico('share')}</button>`:''}${inbChk(it)?`<button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">שייך לחשבונית</button>`:`<button class="btn g grow" data-a="inbEdit" data-id="${esc(it.id)}">שינוי</button><button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">אשר</button>`}<button class="btn g grow" data-a="inbNo" data-id="${esc(it.id)}">דחה</button></div><button class="btn g" style="width:100%;margin-top:8px" data-a="inbRe" data-id="${esc(it.id)}">📷 ${it.rq?'בקש שוב צילום חדש':'בקש צילום חדש'}</button></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
+ ${(()=>{const mm=dupMsg(dupInbox(it));return mm.map(m=>`<div class="note scnote bad">${sci('warn')}<span>${esc(m)}</span></div>`).join('')})()}
+ ${it.rq?`<div class="note scnote acc">${sci('cam')}<span>ביקשת צילום חדש${it.rq.n?': '+esc(it.rq.n):''}. הצילום יוחלף כשהעובד ישלח.</span></div>`:''}${it.rph?`<div class="note scnote ok">${sci('ok')}<span>התקבל צילום חדש מהעובד</span></div>`:''}
+ <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${esc(it.id)}">צפה בצילום</button>`:''}${it.file&&idOk(it.file)?`<button class="btn g" data-a="dxShare" data-f="${esc(it.file)}" data-n="${esc(it.id)}" aria-label="שיתוף הצילום">${ico('share')}</button>`:''}${inbChk(it)?`<button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">שייך לחשבונית</button>`:`<button class="btn g grow" data-a="inbEdit" data-id="${esc(it.id)}">שינוי</button><button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">אשר</button>`}<button class="btn g grow" data-a="inbNo" data-id="${esc(it.id)}">דחה</button></div><button class="btn g" style="width:100%;margin-top:8px" data-a="inbRe" data-id="${esc(it.id)}">${sci('cam')}${it.rq?'בקש שוב צילום חדש':'בקש צילום חדש'}</button></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
 /* בקשת צילום חדש: הסטטוס בענן הופך ל-rephoto, והעובד רואה את הבקשה ברשימה שלו */
 async function inbSt(id,st,req){if(!idOk(id))return;const m='?updateMask.fieldPaths=status'+(req!==undefined?'&updateMask.fieldPaths=req':'')+'&currentDocument.exists=true',fl={status:sv(st)};if(req!==undefined)fl.req=sv(req);return await fsx('/inbox/'+id+m,{method:'PATCH',body:JSON.stringify({fields:fl})})}
 /* סגירת בקשה (status ← imported). אם נכשלה (למשל בלי רשת) – נשמרת בתור ונשלחת שוב במשיכה הבאה */
@@ -2396,9 +2424,14 @@ async function wkLoad(){try{await getCfg()}catch(e){}
  if(cur().v==='wk')rerender()}
 let WS='home';
 const wkSubsAll=()=>{const o=[];(cfgLocal().cats||[]).filter(c=>c.beh==='sup').forEach(c=>(c.subs||[]).forEach(s=>o.push({id:s.id,name:s.name,cat:c.id,hp:typeof s.hp==='string'?s.hp:''})));return o};
-const wkThumbs=()=>WK.pages.length?`<div class="card" style="margin:8px 0"><b>${WK.pages.length} ${WK.pages.length>1?'עמודים מצורפים':'עמוד מצורף'}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${WK.pages.map((u,i)=>`<div style="text-align:center"><img src="${u}" alt="עמוד ${i+1}" style="width:72px;height:96px;object-fit:cover;border:1px solid #bbb;border-radius:6px;display:block"><button type="button" class="chip" style="min-height:36px;margin-top:4px" data-a="wkDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div></div>`:'';
-const wkPickBtns=()=>`<label class="btn ${WK.pages.length?'g':''}" style="cursor:pointer;width:100%;margin:8px 0">📷 ${WK.pages.length?'צלם עמוד נוסף':'צלם'}<input type="file" accept="image/*" capture="environment" data-c="wkpick" hidden></label>
- <label class="btn g" style="cursor:pointer;width:100%;margin:0 0 8px">🖼 ${WK.pages.length?'הוסף עמודים מהגלריה':'העלה מהגלריה'}<input type="file" accept="image/*" multiple data-c="wkpick" hidden></label>`;
+/* DS:D3 – הכנסת חשבונית: אריח ראשי + אריחים קטנים. מראה בלבד: אותם input (capture, data-c) ואותם data-a */
+const SCI={cam:'<path d="M4 8.5h3l1.6-2.5h6.8L17 8.5h3v10H4z"/><circle cx="12" cy="13.2" r="3.4"/>',up:'<path d="M12 16V5M7.5 9.5 12 5l4.5 4.5"/><path d="M5 19h14"/>',img:'<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M5 17l5-4.5 3.5 3 2.5-2L20 16"/>',pdf:'<path d="M7 3.5h7l4 4V20.5H7z"/><path d="M14 3.5v4h4M9.5 13h5M9.5 16.5h5"/>',pen:'<path d="M4 20l1-4L16.5 4.5l3 3L8 19z"/><path d="M14.5 6.5l3 3"/>',stack:'<rect x="7" y="9" width="12" height="11" rx="2"/><path d="M5 16V6.5A1.5 1.5 0 0 1 6.5 5H15"/>',warn:'<path d="M12 4 3 19.5h18z"/><path d="M12 10v4.5M12 17.2v.1"/>',ok:'<path d="M5 12.5l4.5 4.5L19 7.5"/>'};
+const sci=n=>`<svg class="sci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SCI[n]}</svg>`;
+const scHero=(ttl,sub,inp,sm)=>`<label class="btn w scanhero${sm?' sm':''}" style="cursor:pointer"><span class="shc"><span class="shc-c">${sci('cam')}</span><span class="shc-u">${sci('up')}</span></span><b>${ttl}</b>${sub?`<small>${sub}</small>`:''}${inp}</label>`;
+const scTile=(ic,txt,inp,tt)=>`<label class="scant" style="cursor:pointer"${tt?` title="${tt}"`:''}>${sci(ic)}<span>${txt}</span>${inp}</label>`;
+const scBtn=(ic,txt,at)=>`<button type="button" class="scant" ${at}>${sci(ic)}<span>${txt}</span></button>`;
+const wkThumbs=()=>WK.pages.length?`<div class="card" style="margin:8px 0"><b>${WK.pages.length} ${WK.pages.length>1?'עמודים מצורפים':'עמוד מצורף'}</b><div class="row" style="flex-wrap:wrap;margin-top:8px">${WK.pages.map((u,i)=>`<div style="text-align:center"><img class="scimg" src="${u}" alt="עמוד ${i+1}"><button type="button" class="chip scdel" data-a="wkDel" data-i="${i}">הסר ${i+1}</button></div>`).join('')}</div></div>`:'';
+const wkPickBtns=(t,sm)=>scHero(t||(WK.pages.length?'צלם עמוד נוסף':'צלם'),'','<input type="file" accept="image/*" capture="environment" data-c="wkpick" hidden>',sm||WK.pages.length)+`<div class="scrow one">${scTile('img',WK.pages.length?'הוסף עמודים מהגלריה':'העלה מהגלריה','<input type="file" accept="image/*" multiple data-c="wkpick" hidden>')}</div>`;
 V.wk=()=>{if(WS==='sinv')return supView();if(WS==='wv')return wvView();if(WS==='rp'&&WK.rp)return wkRpView();const cf=cfgLocal(),cs=cf.cats||[],ob=obGet();
  const sent=`${ob.length?`<div class="card"><b>ממתינות לשליחה: ${ob.length}</b><p class="note">${SY.err?esc(SY.err):'ישלחו כשיהיה חיבור לאינטרנט.'}</p><button class="btn g" data-a="wkRefresh">נסה לשלוח עכשיו</button></div>`:''}
  <div class="sec"><h3>ההוצאות ששלחתי</h3><button class="btn s g" data-a="wkRefresh">רענן</button></div>
@@ -2412,7 +2445,7 @@ V.wk=()=>{if(WS==='sinv')return supView();if(WS==='wv')return wvView();if(WS==='
   return{t:'הוצאה',s:'סריקה או הכנסה ידנית',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>${dpBan()}
   <p class="note" style="margin:4px 0 8px">סרוק או העלה את החשבונית (או דף ההוצאה מהקופה). חשבונית של כמה עמודים: הוסף את כל העמודים ואז לחץ "זהה".</p>
   ${wkThumbs()}${WK.pages.length&&bzF('scan')?`<button class="btn w" style="margin-bottom:10px" data-a="wkGo">זהה פרטים מ-${WK.pages.length} ${WK.pages.length>1?'עמודים':'עמוד'}</button>`:''}
-  ${wkPickBtns()}<button class="btn g w" data-a="wkManual">הכנסה ידנית</button>${bzF('suppliers')&&wp('sup')?'<button class="btn g w" style="margin-top:8px" data-a="supGo">🧾 חשבוניות ספקים החודש</button>':''}`}}
+  ${wkPickBtns(WK.pages.length?'':'צלם חשבונית')}<button class="btn g w" data-a="wkManual">הכנסה ידנית</button>${bzF('suppliers')&&wp('sup')?`<button class="btn g w" style="margin-top:8px" data-a="supGo">${sci('pdf')}חשבוניות ספקים החודש</button>`:''}`}}
  /* ידני */
  const c=cs.find(x=>x.id===WK.cat),subs=c?c.subs:[];if(subs.length&&WK.sub&&!subs.find(s=>s.id===WK.sub))WK.sub='';if(!subs.length)WK.sub='';
  const sel=(l,n,list,v,ph)=>`<label class="f"><span>${l}</span><select name="${n}" data-c="wkf"><option value="">${ph}</option>${list.map(([k,t])=>`<option value="${esc(k)}"${k===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label>`;
@@ -2422,7 +2455,7 @@ V.wk=()=>{if(WS==='sinv')return supView();if(WS==='wv')return wvView();if(WS==='
  ${!WK.reg&&c&&c.beh==='sup'?`<label class="f"><span>מספר חשבונית</span><input name="inv" value="${esc(WK.inv||'')}" autocomplete="off" ${WK.dn?'':'required'} data-c="wkf"></label>${WK.dn?`<label class="cb"><input type="checkbox" name="dn" value="1" data-c="wkf" checked> זוהתה תעודת משלוח (חסרה חשבונית)</label>`:''}`:''}
  <label class="f"><span>תאריך</span><input name="date" type="date" value="${esc(WK.date)}" required data-c="wkf"></label>${wkBrF(WK.br,WK.sub,'wkf')}
  <label class="f"><span>${WK.reg?'סיבה (חובה) – עבור מה הוצא המזומן':'הערות'}</span><input name="note" value="${esc(WK.note)}" maxlength="300" ${WK.reg?'required':''} data-c="wkf"></label>${WK.reg?coDepHint(WK.note):''}
- ${wkThumbs()}${WK.reg&&WK.pages.length?`<button type="button" class="btn g w" style="margin:6px 0" data-a="wkCoScan" ${WK.cs===1?'disabled':''}>${WK.cs===1?'מזהה את הפתק…':'🔎 זהה סכום, תאריך ושעה מהפתק'}</button>${coSugH(WK.csug,WK)}`:''}${wkPickBtns().replace('width:100%;margin:8px 0','width:100%;margin:8px 0').replace('📷 צלם','📷 '+(WK.pages.length?'צלם':'חובה: צלם חשבונית / דף הוצאה'))}
+ ${wkThumbs()}${WK.reg&&WK.pages.length?`<button type="button" class="btn g w" style="margin:6px 0" data-a="wkCoScan" ${WK.cs===1?'disabled':''}>${WK.cs===1?'מזהה את הפתק…':'🔎 זהה סכום, תאריך ושעה מהפתק'}</button>${coSugH(WK.csug,WK)}`:''}${wkPickBtns(WK.pages.length?'':'חובה: צלם חשבונית / דף הוצאה',1)}
  <button class="btn" style="width:100%">שלח</button></form>`}};
 CHG.wkf=el=>{WK[el.name]=el.type==='checkbox'?el.checked:el.value;if(el.name==='cat'){WK.sub='';WK.dn=false}if(el.name==='reg'){wkSnap();WK.reg=el.checked}if(el.name==='cat'||el.name==='dn'||el.name==='reg')rerender();else if(el.name==='note'&&WK.reg){wkSnap();rerender()}};
 let WKP={o:'',mode:'scan',rot:0,u:'',busy:0};
@@ -2459,7 +2492,7 @@ ACT.wkCoScan=async()=>{if(!WK.pages.length||WK.cs===1)return;wkSnap();const W=WK
 ACT.wkHome=()=>{WS='home';if(WK.rp)WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[],inv:'',dn:false};rerender()};
 /* צילום חדש שהמנהל ביקש: נשלח כפריט חדש עם repl = מזהה ההוצאה המקורית. המנהל מחליף בו רק את הצילום */
 const wkRpSent=id=>obGet().some(o=>o.data&&o.data.repl===id)||WKL.some(o=>o.d&&o.d.repl===id&&o.st==='new');
-const wkRpRow=x=>`<div style="flex-basis:100%;margin-top:6px">${x.rq?`<p class="note" style="margin:0 0 6px;font-weight:700">המנהל ביקש: ${esc(x.rq)}</p>`:''}${wkRpSent(x.id)?'<p class="note" style="margin:0">✓ צילום חדש נשלח. ממתין למנהל.</p>':`<button class="btn" style="width:100%" data-a="wkRe" data-id="${esc(x.id)}">📷 צלם מחדש</button>`}</div>`;
+const wkRpRow=x=>`<div style="flex-basis:100%;margin-top:6px">${x.rq?`<p class="note" style="margin:0 0 6px;font-weight:700">המנהל ביקש: ${esc(x.rq)}</p>`:''}${wkRpSent(x.id)?`<p class="note scnote ok" style="margin:0">${sci('ok')}<span>צילום חדש נשלח. ממתין למנהל.</span></p>`:`<button class="btn" style="width:100%" data-a="wkRe" data-id="${esc(x.id)}">${sci('cam')}צלם מחדש</button>`}</div>`;
 ACT.wkRe=el=>{const x=WKL.find(o=>o.id===el.dataset.id);if(!x)return;if(!el.dataset.ok&&!WK.rp&&(WK.pages.length||s_(WK.amt)||s_(WK.note)))return ask('יש הוצאה שהתחלת למלא ועוד לא שלחת. אם תמשיך, היא תימחק. להמשיך לצילום החדש?',()=>ACT.wkRe({dataset:{id:x.id,ok:'1'}}),'כן, המשך');WK={cat:'',sub:'',amt:'',date:today(),note:'',pages:[],inv:'',dn:false,rp:{id:x.id,d:x.d,rq:x.rq}};WS='rp';rerender()};
 function wkRpView(){const r=WK.rp,d=r.d||{};return{t:'צילום חדש',s:'בקשה מהמנהל',h:`<button class="btn g" style="margin-bottom:10px" data-a="wkHome">‹ חזרה</button>
  <div class="card"><b>${ils(num(d.amt))} · ${esc(d.reg?'דף הוצאה מקופה':(d.catName||''))}${d.subName?' · '+esc(d.subName):''}</b><p class="note" style="margin:4px 0 0">${esc(d.date||'')}${d.inv?' · חשבונית '+esc(d.inv):''}</p>${r.rq?`<p style="margin:8px 0 0;font-weight:700">המנהל ביקש: ${esc(r.rq)}</p>`:''}<p class="note" style="margin:8px 0 0">צלם שוב את כל הדף (וכל העמודים, אם יש כמה). הסכום והפרטים לא משתנים, רק הצילום.</p></div>
@@ -4982,7 +5015,7 @@ function showSusp(){document.body.classList.remove('gate');const g=document.getE
  document.body.classList.add('susp');document.body.append(e);if(isNat())setTimeout(()=>{checkUpdate(false).catch(()=>{})},800)}
 ACT.suspUpd=async()=>{const m=document.getElementById('suspM');if(m)m.textContent='בודק…';try{await checkUpdate(true)}catch(x){}if(m)m.textContent=''};
 /* ו. מחשב (לא באפליקציה, עכבר): "צלם" הופך להעלאת קובץ. בטלפון, גם בדפדפן, המצלמה נשארת */
-function bzDesk(){document.querySelectorAll('input[capture]').forEach(i=>{i.removeAttribute('capture');const l=i.closest('label');if(l)for(const n of l.childNodes)if(n.nodeType===3&&/צלם|📷/.test(n.nodeValue))n.nodeValue=n.nodeValue.replace('📷','📁').replace(/צלם/g,'העלה')})}
+function bzDesk(){document.querySelectorAll('input[capture]').forEach(i=>{i.removeAttribute('capture');const l=i.closest('label');if(!l)return;const w=document.createTreeWalker(l,NodeFilter.SHOW_TEXT);let n;while((n=w.nextNode()))if(/צלם|📷|צילום/.test(n.nodeValue))n.nodeValue=n.nodeValue.replace('📷','📁').replace(/צלם/g,'העלה').replace(/צילום/g,'העלאת')})}
 try{if(!isNat()&&matchMedia('(pointer:fine)').matches){document.documentElement.classList.add('bzd');bzDesk();let q=0;new MutationObserver(()=>{if(q)return;q=1;requestAnimationFrame(()=>{q=0;bzDesk()})}).observe(document.body,{childList:true,subtree:true})}}catch(e){}
 /* ז. מסך מיתוג – מנהל־על בלבד (עדכון חוזה 14), מכרטיס העסק או מיד אחרי "פתיחת עסק": שם, לוגו, הצעות צבע מהלוגו, עריכה ידנית, תצוגה מקדימה, חזרה לברירת המחדל.
  העסק נבחר לפי המזהה (go('brand',bizId)), לא לפי העסק הנוכחי. שמירה: הלוגו ל-Storage (b/{bizId}/brand/logo – רק מנהל־על כותב), ו-brand דרך setBusinessBrand (נרשם ב-audit). למנהל העסק אין כניסה. לא בעסק במצב legacy */
@@ -5156,10 +5189,7 @@ function usReset(){const U=US;US=null;const p=$('#uspane'),d=$('#usdiv');documen
 function usOpen(){if(US)usReset();US={pg:[],i:0,type:'',unsure:[],pane:0,sh:0,step:'start',view:'',auto:0};usStart()}
 function usStart(){US.step='start';usPane(0);
  usSheet('הכנסת מסמכים',`<p class="note" style="margin:4px 0 12px">צלם או העלה מסמך. האפליקציה מזהה איזה מסמך זה, והטופס שלו נפתח ליד התמונה. אפשר לבדוק ולתקן כל שדה.</p>${bzF('scan')?'':'<p class="note" style="font-weight:700">הזיהוי החכם כבוי. אחרי הצילום תבחרו את סוג המסמך בעצמכם.</p>'}
- <label class="btn w" style="cursor:pointer;margin-bottom:10px">📷 צילום במצלמה<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden></label>
- <label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 תמונות מהגלריה<input type="file" accept="image/*" multiple data-c="uspick" hidden></label>
- <label class="btn g w" style="cursor:pointer;margin-bottom:10px">📄 קובץ PDF<input type="file" accept="application/pdf" multiple data-c="uspick" hidden></label>
- <button class="btn g w" data-a="usManual">הכנס ידני</button>`)}
+ ${scHero('צילום חשבונית','מזהה איזה מסמך זה, והטופס נפתח ליד התמונה','<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden>')}<div class="scrow">${scTile('img','תמונות מהגלריה','<input type="file" accept="image/*" multiple data-c="uspick" hidden>')}${scTile('pdf','קובץ PDF','<input type="file" accept="application/pdf" multiple data-c="uspick" hidden>')}${scBtn('pen','הכנס ידני','data-a="usManual"')}</div>`)}
 ACT.usOpen=()=>{if(!usAny())return toast('אין לך הרשאה להזין מסמכים');usOpen()};
 ACT.usBackStart=()=>{if(US)usStart()};
 ACT.usManual=()=>{if(!US)return;US.pg=[];US.i=0;usPane(0);usChooser('הכנסה ידנית: איזה סוג מסמך?','usBackStart')};
@@ -5213,7 +5243,7 @@ function usMark(root){if(!US||!root||!US.unsure.length)return;for(const n of US.
 function usUnmark(e){const t=e.target;if(!t||!t.classList||!t.classList.contains('usu'))return;t.classList.remove('usu');if(US)US.unsure=US.unsure.filter(n=>n!==t.name);const m=t.parentElement&&t.parentElement.querySelector('.usn');if(m)m.remove()}
 document.addEventListener('input',usUnmark);document.addEventListener('change',usUnmark);
 /* ---- אחרי שמירה: סרוק עוד / חזרה ---- */
-function usDone(){if(!US)return;const U=US;usPane(0);U.pg=[];U.fid='';U.type='';U.unsure=[];U.view='';U.step='done';usSheet('נשמר',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשמר</b><div class="note">הוכנס על ידי: ${esc(usWho()||'לא ידוע')}</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">📷 סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
+function usDone(){if(!US)return;const U=US;usPane(0);U.pg=[];U.fid='';U.type='';U.unsure=[];U.view='';U.step='done';usSheet('נשמר',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשמר</b><div class="note">הוכנס על ידי: ${esc(usWho()||'לא ידוע')}</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">${sci('cam')}סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
 ACT.usAgain=()=>{usOpen()};
 ACT.usExit=()=>{if(!US)return;if(US.step==='form'){ask('לסגור את מסך הסריקה? מה שלא נשמר יימחק.',()=>{usReset();rerender()},'סגור');return}usReset();rerender()};
 {const o=FRM.addsave;FRM.addsave=(form,ev)=>{const U=US,n=S.tx.length,us=!!(U&&A&&A.us);const r=o(form,ev);if(us&&US===U&&!A&&S.tx.length>n)usDone();return r}}
@@ -5485,12 +5515,11 @@ function usGrpOpen(gi){const U=US,gr=U&&U.grp&&U.grp[gi];if(!gr)return;U.gi=gi;
 /* פתיחה מחדש של המסך באמצע תור: הדפים נשארים במכשיר */
 {const o=usOpen;usOpen=function(){if(US&&US.grp)US.quit=1;return o.apply(this,arguments)}}
 /* ---- סריקה רציפה: מצלמים כמה דפים אחד אחרי השני, ורק בסוף מזהים ומחלקים ---- */
-{const o=usStart;usStart=function(){o();const b=$('#sheet .bd label.btn');if(b&&!$('#sheet [data-a=usBatch]'))b.insertAdjacentHTML('afterend','<button class="btn g w" style="margin-bottom:10px" data-a="usBatch">📚 צילום כמה דפים ברצף (Z, חשבונית ארוכה, כמה מסמכים)</button>')}}
+{const o=usStart;usStart=function(){o();const b=$('#sheet .bd .scrow')||$('#sheet .bd label.btn');if(b&&!$('#sheet [data-a=usBatch]'))b.insertAdjacentHTML('afterend','<button class="btn g w scbatch" data-a="usBatch">'+sci('stack')+'<span>צילום כמה דפים ברצף (Z, חשבונית ארוכה, כמה מסמכים)</span></button>')}}
 ACT.usBatch=()=>{if(!US)return;US.batch=1;usBatchSheet()};
 function usBatchSheet(){const U=US,n=U.pg.length;U.step='batch';
  usSheet('צילום ברצף',`<p class="note" style="margin:0 0 10px">צלמו כל דף בנפרד. אפשר לערבב מסמכים – האפליקציה תפריד ביניהם ותחבר דפים של אותו מסמך. בסוף תוכלו לתקן את החלוקה.</p><div class="card"><b>${n?n+' דפים צולמו':'עוד לא צולם דף'}</b></div>
- <label class="btn w" style="cursor:pointer;margin-bottom:10px">📷 ${n?'צילום הדף הבא':'צילום הדף הראשון'}<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden></label>
- <label class="btn g w" style="cursor:pointer;margin-bottom:10px">🖼 הוספה מהגלריה<input type="file" accept="image/*" multiple data-c="uspick" hidden></label>
+ ${scHero(n?'צילום הדף הבא':'צילום הדף הראשון','','<input type="file" accept="image/*" capture="environment" data-c="uspick" hidden>',1)}<div class="scrow one">${scTile('img','הוספה מהגלריה','<input type="file" accept="image/*" multiple data-c="uspick" hidden>')}</div>
  <button class="btn w" data-a="usBatchGo" ${n?'':'disabled'}>סיום וזיהוי (${n})</button>`,'usBackStart');if(n&&!U.pane)usPane(1);else if(U.pane)usPaneDraw()}
 {const o=CHG.uspick;CHG.uspick=async el=>{const U=US;if(!U||!U.batch||U.step!=='batch')return o(el);const fs=[...el.files];el.value='';
  for(const f of fs){if(U.pg.length>=US_MAXP){toast('אפשר עד '+US_MAXP+' דפים בסריקה אחת');break}
@@ -5654,7 +5683,7 @@ async function mqSend(){const U=US;if(!U||!isW()||!U.pg.length||U.mqB)return;U.m
    U.mqDoc=1}
   for(let i=0;i<np;i++){
    try{await fsx('/mq/'+id+'/p?documentId='+i,{method:'POST',body:JSON.stringify({fields:{data:sv(v.slice(i*CH,(i+1)*CH))}})})}catch(e){if(e.code!==409)throw e}}
-  mqOutSet(mqOut().filter(x=>x!==id).concat(id));MQ.mat=0;usPane(0);U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשלח למנהל לטיפול</b><div class="note">כשהמנהל יטפל בו תקבל הודעה "טופל" או "נדחה".</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">📷 סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
+  mqOutSet(mqOut().filter(x=>x!==id).concat(id));MQ.mat=0;usPane(0);U.pg=[];U.step='done';usSheet('נשלח למנהל',`<div class="card" style="border-color:var(--inc)"><b>✓ המסמך נשלח למנהל לטיפול</b><div class="note">כשהמנהל יטפל בו תקבל הודעה "טופל" או "נדחה".</div></div><button class="btn w" style="margin-bottom:10px" data-a="usAgain">${sci('cam')}סרוק עוד</button><button class="btn g w" data-a="usExit">חזרה</button>`)}
  catch(e){toast(e.offline?e.message:'השליחה למנהל נכשלה. נסה שוב')}finally{if(U)U.mqB=0}}
 ACT.mqSend=()=>mqSend();
 /* בבורר הסוג של עובד (סוג חסום שזוהה, או "לא בטוח"): כפתור "שלח למנהל לטיפול" */

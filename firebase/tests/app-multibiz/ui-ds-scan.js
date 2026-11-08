@@ -32,7 +32,8 @@ const BR = `(() => {
   }
   const browser = await H.launch();
   const cfg = { mode: 'new', biz: { [BZ0]: { dataRoot: 'legacy', features: ALL } }, admins: { '|m': 1 }, staff: { '|w': 1 } };
-  const { page } = await H.newPage(browser, src, cfg, [], 'm'); const SYS = {};
+  const cfgM = Object.assign({}, cfg, { ctx: { hasTouch: true, isMobile: true } }); // טלפון: (pointer:fine) כבוי, כך ש-capture נשאר
+  const { page } = await H.newPage(browser, src, cfgM, [], 'm');
   await H.login(page, 'm@x.co');
   await page.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden) ACT.startBlank(); }); await H.settle(page, 400); await page.evaluate(BR);
   const shot = async (name, pg) => { if (shots) await (pg || page).screenshot({ path: path.join(shots, name + '.png') }); };
@@ -51,7 +52,7 @@ const BR = `(() => {
     await shot(`הכנסת-חשבונית-${t}-390`); await widths(r); return r;
   });
   check('1 הכנסת מסמכים: אותם input (3 קבצים: מצלמה עם capture=environment ו-data-c=uspick, גלריה, PDF), usManual, usBatch', ok3(us, (r) => r.inputs === 3 && r.pdf && r.man && r.batch && r.cap.length === 1 && r.cap[0] === 'environment|uspick|image/*'), Object.fromEntries(Object.entries(us).map(([k, v]) => [k, [v.inputs, v.cap, v.man, v.batch]])));
-  check('2 האריח הראשי גדול לפחות פי 2 מכל אריח קטן ובערך 40% מגובה המסך', ok3(us, (r) => r.t.length === 2 && r.h >= 2 * Math.max(...r.t) && r.h >= 0.28 * r.vh), Object.fromEntries(Object.entries(us).map(([k, v]) => [k, [v.h, v.t, v.vh]])));
+  check('2 האריח הראשי גדול לפחות פי 2 מכל אריח קטן ובערך 40% מגובה המסך', ok3(us, (r) => r.t.length === 3 && r.h >= 2 * Math.max(...r.t) && r.h >= 0.28 * r.vh), Object.fromEntries(Object.entries(us).map(([k, v]) => [k, [v.h, v.t, v.vh]])));
   check('3 מגע ≥44px, ניגודיות ≥4.5, בלי אימוג׳י', ok3(us, (r) => r.small.length === 0 && mn(r.cr) >= 4.5 && !r.emoji), Object.fromEntries(Object.entries(us).map(([k, v]) => [k, [v.small, mn(v.cr), v.emoji]])));
   check('4 בלי גלילה אופקית ב-320/360/390/412 (3 ערכות)', ok3(us, noHs), Object.fromEntries(Object.entries(us).map(([k, v]) => [k, v.hs320])));
   await setDs('a'); await page.setViewportSize({ width: 320, height: 640 }); await page.evaluate(() => { usReset && usReset(); usOpen(); }); await H.settle(page, 250); await shot('הכנסת-חשבונית-a-320'); await page.setViewportSize({ width: 390, height: 844 });
@@ -86,17 +87,17 @@ const BR = `(() => {
   check('7 סריקת חשבוניות: האריח הראשי עם scanFiles (multiple), מגע וניגודיות', ok3(sq, (r) => r.scan.cap.join() === 'scanFiles|true' && r.scan.small.length === 0 && mn(r.scan.cr) >= 4.5), Object.fromEntries(Object.entries(sq).map(([k, v]) => [k, [v.scan.cap, v.scan.small]])));
   check('8 הוצאות מעובדים: בלי אימוג׳י (⚠ 📷 ✓ הוחלפו ב-SVG), הטקסטים נשמרו, ניגודיות ≥4.5, בלי גלילה אופקית', ok3(sq, (r) => !r.inbox.emoji && r.inbox.icons >= 2 && r.inbox.txt && mn(r.inbox.cr) >= 4.5 && noHs(r)), Object.fromEntries(Object.entries(sq).map(([k, v]) => [k, [v.inbox.emoji, v.inbox.icons, v.inbox.txt, v.inbox.cr]])));
 
-  // ===== 5. מחשב: "העלה" במקום "צלם", בלי capture =====
-  await setDs('a'); await page.setViewportSize({ width: 1366, height: 768 }); await H.settle(page, 400);
-  const dk = await page.evaluate(async () => { usReset && usReset(); usOpen(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const sh = document.getElementById('sheet'); const c1 = { bzd: document.documentElement.classList.contains('bzd'), cap: sh.querySelectorAll('input[capture]').length, ttl: sh.querySelector('.scanhero b').textContent };
+  // ===== 5. מחשב: "העלה" במקום "צלם", בלי capture (דפדפן שולחני, עכבר) =====
+  const { page: pd } = await H.newPage(browser, src, cfg, [], 'm'); await pd.setViewportSize({ width: 1366, height: 768 }); await H.login(pd, 'm@x.co');
+  await pd.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden) ACT.startBlank(); }); await H.settle(pd, 400);
+  const dk = await pd.evaluate(async () => { usReset && usReset(); usOpen(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const sh = document.getElementById('sheet'); const c1 = { bzd: document.documentElement.classList.contains('bzd'), cap: sh.querySelectorAll('input[capture]').length, ttl: sh.querySelector('.scanhero b').textContent };
     document.body.insertAdjacentHTML('beforeend', '<label id="tcam">📷 צלם חשבונית<input type="file" capture="environment" hidden></label><label id="tcam2"><b>צילום חשבונית</b><input type="file" capture="environment" hidden></label>'); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const c2 = { a: document.getElementById('tcam').innerText.trim(), b: document.getElementById('tcam2').innerText.trim(), cap: document.querySelectorAll('#tcam input[capture],#tcam2 input[capture]').length }; document.getElementById('tcam').remove(); document.getElementById('tcam2').remove(); usReset(); return { c1, c2 }; });
   check('9 במחשב: האריח הראשי "העלאת חשבונית" בלי capture; תוכן שנוצר אחר כך מומר (כולל בלי אימוג׳י ובתוך <b>)', dk.c1.bzd && dk.c1.cap === 0 && /העלאת חשבונית/.test(dk.c1.ttl) && dk.c2.a === '📁 העלה חשבונית' && dk.c2.b === 'העלאת חשבונית' && dk.c2.cap === 0, dk);
-  await page.setViewportSize({ width: 390, height: 844 });
-  check('10 אין שגיאות JS (מנהל)', page.__errors.length === 0, page.__errors);
+  check('10 אין שגיאות JS (מנהל, מחשב)', page.__errors.length === 0 && pd.__errors.length === 0, page.__errors.concat(pd.__errors));
 
   // ===== 6. עובד: הוצאה (WS=exp) וטופס ידני =====
-  const { page: pw } = await H.newPage(browser, src, cfg, [], 'w'); await pw.setViewportSize({ width: 390, height: 844 }); await H.login(pw, 'w@x.co'); await pw.evaluate(BR);
+  const { page: pw } = await H.newPage(browser, src, cfgM, [], 'w'); await pw.setViewportSize({ width: 390, height: 844 }); await H.login(pw, 'w@x.co'); await pw.evaluate(BR);
   const wkR = {};
   for (const t of ['a', 'b', 'c']) {
     await pw.evaluate((t) => { SY.biz = Object.assign({}, SY.biz, { brand: { name: 'x', colors: {}, theme: t, base: 'dark-gold' } }); BZK = '~'; bzSkin(); WK.pages = []; WS = 'exp'; render(0); }, t); await H.settle(pw, 250);
