@@ -36,6 +36,7 @@ const COPY = [
   'yemot_items', 'yemot_line_backups', 'yemot_hook_usage', 'yemot_lexicon',
   'yemot_promos', 'yemot_state', 'yemot_usage', 'yemot_test', 'voice_usage', 'scan_usage',
   'audit_log', 'table_bases', // אוספים שנמצאו בבדיקה 7.11 – הועברו בהחלטת המשתמש
+  'ord', 'prod', 'stockLog', 'ordcfg', 'ordpay', 'private', // הזמנות שלב 1 (2026-11-08): לארג' פעמי ב-legacy כותב לשורש, באותם שמות כמו ב-b/{bizId}
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [

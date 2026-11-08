@@ -283,3 +283,58 @@ describe('מלאי', () => {
     assert.equal(r.status, 'OK', r.text);
   });
 });
+
+describe('לארג\' פעמי במצב legacy (שורש)', () => {
+  const LM = 'l_mgr', LE = 'l_emp';
+  async function seedL() {
+    await env.clearFirestore();
+    await prep(async (d) => {
+      const b = d.batch();
+      b.set(d.doc('superadmins/' + SUPER), {});
+      b.set(d.doc('admins/' + LM), { email: 'lm@x.invalid' });
+      b.set(d.doc('staff/' + LM), { name: LM, role: 'manager', active: true });
+      b.set(d.doc('staff/' + LE), { name: LE, role: 'employee', active: true });
+      b.set(d.doc('prod/pA'), { name: 'עוגה', price: 10, on: true, q: { _: 5 } });
+      b.set(d.doc('prod/pA/p/cost'), { cost: 3 });
+      await b.commit();
+    });
+  }
+  it('עובד יוצר הזמנה בשורש (בלי סניפים), מלאי יורד, מנהל־על קובע קישור, עובד מקבל אותו; חוקי השורש: קריאה כן, כתיבה לא, עלות/ordpay/private – מנהל/אף אחד', async () => {
+    await seedL();
+    const r = await call('createOrder', LE, { reqId: rid(), cust, items: [{ pid: 'pA', qty: 2, price: 10 }] });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.no, 1);
+    const o = await get('ord/' + r.result.id); assert.equal(o.br, '_'); assert.equal(o.total, 20);
+    assert.equal((await get('prod/pA')).q._, 3);
+    assert.equal(await get(`b/largpeami/ord/${r.result.id}`), null);
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: 'largpeami', mode: 'link', link: 'https://pay.example.com/l', sup: { id: 's1', name: 'ספק' } })).status, 'OK');
+    assert.equal((await call('getPayLink', LE, { id: r.result.id })).result.link, 'https://pay.example.com/l');
+    assert.equal((await call('markOrderPaid', LE, { id: r.result.id, method: 'link' })).status, 'OK');
+    assert.equal((await get('ordpay/' + r.result.id)).st, 'paid');
+    await assertSucceeds(db(LE).doc('ord/' + r.result.id).get());
+    await assertSucceeds(db(LE).collection('ord').get());
+    await assertSucceeds(db(LE).doc('prod/pA').get());
+    await assertSucceeds(db(LE).doc('ordcfg/main').get());
+    await assertSucceeds(db(LE).collection(`ord/${r.result.id}/log`).get());
+    await assertSucceeds(db(LE).collection('stockLog').get());
+    await assertFails(db(LE).doc('prod/pA/p/cost').get());
+    await assertSucceeds(db(LM).doc('prod/pA/p/cost').get());
+    await assertFails(db(LE).doc('ordpay/' + r.result.id).get());
+    await assertSucceeds(db(LM).doc('ordpay/' + r.result.id).get());
+    for (const u of [LM, LE, SUPER]) {
+      await assertFails(db(u).doc('private/pay').get());
+      await assertFails(db(u).doc('ord/x').set({ total: 1 }));
+      await assertFails(db(u).doc('prod/x').set({ name: 'x' }));
+      await assertFails(db(u).doc('ordcfg/main').set({}));
+    }
+    await assertFails(db('u_out').doc('ord/' + r.result.id).get());
+  });
+  it('מעבר לטלפון מנקה את pay.sup; מייל עם רצף ספרות נדחה', async () => {
+    await seed();
+    await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup: { id: 's1', name: 'ספק' } });
+    await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'phone' });
+    assert.deepEqual((await get(`b/${A}/ordcfg/main`)).pay, { mode: 'phone', has: false });
+    const r = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: Object.assign({ mail: '4580123456789012@x.com' }, cust), items: [{ n: 'x', qty: 1, price: 1 }] });
+    assert.equal(r.reason, 'card-like');
+  });
+});
+
