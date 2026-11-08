@@ -124,7 +124,7 @@ describe('ימות שלב 2: תוכן שלוחות, שכבת קול, מילון,
     assert.equal(ex.uploadPreview, undefined);
     assert.equal(ex.tzintukJoin, undefined, 'tzintukJoin מושבת (אין פעולת הוספה מתועדת) ואסור שיפורסם');
     assert.equal(ex._core, undefined); assert.equal(ex.shared, undefined);
-    assert.equal(Object.keys(ex).length, 53, Object.keys(ex).join(',')); // +4 קטלוג (saveCat, importProducts, transferStock, getWsPrices – orders-catalog.test.js); +13 הזמנות שלב 1 (orders.js, orders.test.js); +1 sendInviteMail (מייל עצמי); +1 publicBrand (דף פתיחה); +2 סניפים (setBusinessOrg, setStaffBranches); 15 = כולל previewVoice (שלב 9, 62-voice.js) ו-4 הפונקציות של שלב 5 (משימה 2026-11-04); +12 של ריבוי עסקים (משימה 2026-11-05, business.js: 10 פונקציות ניהול ו-2 סנכרון; completeInvite הוסרה בשלב 6ג; setBusinessBrand נוספה בעדכון חוזה 14; setBusinessRanks ו-setStaffPerms – עדכון חוזה 15) + setScanQuota (סריקה אחידה)
+    assert.equal(Object.keys(ex).length, 56, Object.keys(ex).join(',')); // +3 לקוחות (customers.js: saveCust, importCusts, setCustCfg); +4 קטלוג (saveCat, importProducts, transferStock, getWsPrices – orders-catalog.test.js); +13 הזמנות שלב 1 (orders.js, orders.test.js); +1 sendInviteMail (מייל עצמי); +1 publicBrand (דף פתיחה); +2 סניפים (setBusinessOrg, setStaffBranches); 15 = כולל previewVoice (שלב 9, 62-voice.js) ו-4 הפונקציות של שלב 5 (משימה 2026-11-04); +12 של ריבוי עסקים (משימה 2026-11-05, business.js: 10 פונקציות ניהול ו-2 סנכרון; completeInvite הוסרה בשלב 6ג; setBusinessBrand נוספה בעדכון חוזה 14; setBusinessRanks ו-setStaffPerms – עדכון חוזה 15) + setScanQuota (סריקה אחידה)
     assert.equal(ex.runLineExpiry, undefined); assert.equal(ex.cleanLineAudio, undefined);
   });
 

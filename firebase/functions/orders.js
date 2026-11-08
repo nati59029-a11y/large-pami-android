@@ -51,7 +51,7 @@ function txt(v, max, reason, label, required) {
   if (required && !s) throw bad(reason, label + ' – חובה');
   if (s.length > max) throw bad(reason, `${label} – עד ${max} תווים`);
   // הגנה מפני הקלדת מספר כרטיס בשדה טקסט (תקן PCI): 8 ספרות ומעלה ברצף (גם עם רווחים/מקפים ביניהן) – נדחה
-  if (/(?:\d[\s-]?){8,}/.test(s) && reason !== 'bad-phone') throw bad('card-like', `${label}: אסור להקליד מספר כרטיס אשראי או מספר ארוך. מותר רק 4 ספרות אחרונות.`);
+  if (/\d{8,}/.test(s.replace(/[\s._\/\\,:;|·'"`~*#+-]/g, '')) && reason !== 'bad-phone') throw bad('card-like', `${label}: אסור להקליד מספר כרטיס אשראי או מספר ארוך. מותר רק 4 ספרות אחרונות.`);
   return s;
 }
 function phone(raw) {
@@ -293,7 +293,7 @@ function cleanCust(c) {
   if (c.mail != null && c.mail !== '') {
     const m = String(c.mail).trim().toLowerCase();
     if (m.length > 254 || !/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(m)) throw bad('bad-email', 'כתובת המייל לא תקינה');
-    if (/(?:\d[\s.-]?){8,}/.test(m)) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
+    if (/\d{8,}/.test(m.replace(/[\s._\/\\,:;|·'"`~*#+-]/g, ''))) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
     o.mail = m;
   }
   return o;

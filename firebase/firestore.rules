@@ -641,6 +641,15 @@ service cloud.firestore {
       allow read: if rOrd() && (rBrOk(resource.data.from) || rBrOk(resource.data.to));
       allow create, update, delete: if false;
     }
+    // לקוחות (fb/ord-cust): קריאה – עובד/מנהל; כתיבה – רק השרת (functions/customers.js), כולל סימון סיטונאי (מנהל בלבד)
+    match /cust/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+    }
+    match /custcfg/{docId} {
+      allow get: if rOrd() && docId == 'main';
+      allow list, create, update, delete: if false;
+    }
 
     // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
     match /users/{userId} {
@@ -1046,6 +1055,15 @@ service cloud.firestore {
       match /xfer/{id} {
         allow read: if ordOk() && (brOk(resource.data.from) || brOk(resource.data.to));
         allow create, update, delete: if false;
+      }
+      // לקוחות (fb/ord-cust): עובד עם ord (תשובה 7) ומנהל קוראים; כתיבה – רק השרת (customers.js). wholesale – רק מנהל, דרך השרת
+      match /cust/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+      }
+      match /custcfg/{docId} {
+        allow get: if ordOk() && docId == 'main';
+        allow list, create, update, delete: if false;
       }
 
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')

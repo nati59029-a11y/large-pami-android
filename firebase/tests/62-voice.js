@@ -99,7 +99,7 @@ describe('שלב 9: הקול המשוכפל (ElevenLabs) – מנוע, גבול 
   it('index.js מייצא את previewVoice (15 פונקציות, כולל שלב 5 של משימה 2026-11-04)', () => {
     const ex = require('../functions/index.js');
     assert.equal(typeof ex.previewVoice, 'function');
-    assert.equal(Object.keys(ex).length, 53); // +4 קטלוג (orders-catalog.test.js); +13 הזמנות שלב 1 (orders.js, orders.test.js); +1 sendInviteMail; +1 publicBrand (דף פתיחה); +2 סניפים (setBusinessOrg, setStaffBranches); + setStaffName (סריקה אחידה שלב 6); + setScanQuota (סריקה אחידה); // 15 + 12 של ריבוי עסקים (משימה 2026-11-05, business.js: 10 פונקציות ניהול ו-2 סנכרון; completeInvite הוסרה בשלב 6ג; setBusinessBrand – עדכון חוזה 14)
+    assert.equal(Object.keys(ex).length, 56); // +3 לקוחות (customers.js: saveCust, importCusts, setCustCfg); +4 קטלוג (orders-catalog.test.js); +13 הזמנות שלב 1 (orders.js, orders.test.js); +1 sendInviteMail; +1 publicBrand (דף פתיחה); +2 סניפים (setBusinessOrg, setStaffBranches); + setStaffName (סריקה אחידה שלב 6); + setScanQuota (סריקה אחידה); // 15 + 12 של ריבוי עסקים (משימה 2026-11-05, business.js: 10 פונקציות ניהול ו-2 סנכרון; completeInvite הוסרה בשלב 6ג; setBusinessBrand – עדכון חוזה 14)
   });
 
   // ---------------- הצלחה ----------------
