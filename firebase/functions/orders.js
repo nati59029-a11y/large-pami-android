@@ -114,7 +114,7 @@ const qOf = (p, br) => { const q = p && p.q && typeof p.q === 'object' ? p.q[br]
 // מוצרים ומלאי
 // =====================================================================================
 // saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
-// עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) ועלות – מנהל בלבד.
+// עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0). עלות – מנהל בלבד.
 async function saveProduct(request) {
   const w = await who(request);
   const input = inputObject(request);
@@ -128,13 +128,19 @@ async function saveProduct(request) {
   const db = T.tdb();
   const now = Date.now();
   if (input.id != null) {
-    mgr(w);
     const id = idOf(input.id, 'מוצר');
     const ref = db.doc('prod/' + id);
     await db.runTransaction(async (tx) => {
       const s = await tx.get(ref);
       if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
+      const o = s.data() || {};
+      const ch = [];
+      if (o.name !== name) ch.push(`שם: ${String(o.name || '').slice(0, 60)} → ${name}`);
+      if (o.price !== price) ch.push(`מחיר: ₪${o.price} → ₪${price}`);
+      if ((o.barcode || '') !== barcode) ch.push('ברקוד');
+      if ((o.on !== false) !== (input.on !== false)) ch.push(input.on === false ? 'לא זמין' : 'זמין');
       tx.update(ref, { name, price, barcode, on: input.on !== false, upd: now });
+      if (ch.length) tx.set(stockRef(db), { prod: id, name, br: NB, delta: 0, why: 'prod', note: ch.join('; ').slice(0, 300), by: w.uid, at: now });
       if (input.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: money(input.cost, 'עלות'), at: now, by: w.uid });
     });
     return { ok: true, id };
@@ -524,7 +530,7 @@ async function cancelOrder(request) {
     const d = s.data();
     if (d.status === 'cancel') { res = { ok: true, dup: true }; return; }
     if (d.status === 'done') throw pre('bad-status', 'הזמנה שהושלמה לא מבוטלת');
-    if (['paid', 'out'].includes(d.status)) mgr(w);
+    if (d.status === 'paid') mgr(w); // 18:56: "יצא למשלוח" – גם עובד; "שולם" (לפני משלוח) – מנהל, כמו קודם
     const items = Array.isArray(d.items) ? d.items : [];
     const prods = await loadProds(tx, db, items.filter((x) => x.pid).map((x) => x.pid));
     applyMoves(tx, db, w, prods, invert(moves(d.br, items.filter((x) => !x.pid || prods.has(x.pid)))), { ord: id, no: d.no });

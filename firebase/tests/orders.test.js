@@ -144,7 +144,7 @@ describe('סטטוסים, תשלום, נעילה', () => {
     assert.equal((await call('updateOrder', MGR, { id, items: [{ n: 'x', qty: 1, price: 1 }] })).reason, 'locked');
     assert.equal((await call('unpayOrder', E1, { id, reason: 'x' })).reason, 'manager-only');
     assert.equal((await call('unpayOrder', MGR, { id })).reason, 'bad-reason');
-    assert.equal((await call('cancelOrder', E1, { id, reason: 'x' })).reason, 'manager-only');
+    assert.equal((await call('cancelOrder', E1, { id, reason: 'x' })).reason, 'manager-only'); // שולם (לפני משלוח) – מנהל
     assert.equal((await call('unpayOrder', MGR, { id, reason: 'חיוב בוטל' })).status, 'OK');
     assert.equal((await get(`b/${A}/ord/${id}`)).status, 'wait_pay');
   });
@@ -183,6 +183,23 @@ describe('סטטוסים, תשלום, נעילה', () => {
     assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'phone' })).status, 'OK');
     assert.equal((await call('getPayLink', E1, { id })).reason, 'no-pay-link');
     assert.ok((await coll(`b/${A}/audit`)).some((x) => x.act === 'setBusinessPayLink'));
+  });
+});
+
+describe('ביטול הזמנה שיצאה למשלוח (18:56)', () => {
+  it('עובד מבטל הזמנה במצב "יצא למשלוח": מלאי חוזר, זיכוי void; "הושלם" – לא', async () => {
+    await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup: { id: 's1', name: 'ספק' } });
+    const id = (await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 2, price: 10 }] })).result.id;
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 1);
+    await call('markOrderPaid', E1, { id, method: 'link' });
+    assert.equal((await call('setOrderStatus', E1, { id, status: 'out' })).status, 'OK');
+    const r = await call('cancelOrder', E1, { id, reason: 'הלקוח החזיר' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 3);
+    assert.equal((await get(`b/${A}/ordpay/${id}`)).st, 'void');
+    const id2 = (await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, items: [{ n: 'x', qty: 1, price: 1 }] })).result.id;
+    await prep((d) => d.doc(`b/${A}/ord/${id2}`).update({ status: 'done' }));
+    assert.equal((await call('cancelOrder', E1, { id: id2, reason: 'x' })).reason, 'bad-status');
   });
 });
 
@@ -243,7 +260,13 @@ describe('מלאי', () => {
   it('תיקון כמות / עריכת מוצר / עלות – מנהל בלבד; עובד סניף 2 לא משנה מלאי סניף 1; עובד לא קורא עלות', async () => {
     assert.equal((await call('stockSet', E1, { reqId: rid(), pid: 'pA', br: 'br1', qty: 7 })).reason, 'manager-only');
     assert.equal((await call('stockSet', MGR, { reqId: rid(), pid: 'pA', br: 'br1', qty: 7 })).status, 'OK');
-    assert.equal((await call('saveProduct', E1, { id: 'pA', name: 'x', price: 1 })).reason, 'manager-only');
+    // 18:56: עובד עם ord עורך שם/מחיר – נרשם ביומן; עובד בלי ord – לא; עלות – רק מנהל
+    assert.equal((await call('saveProduct', E1, { id: 'pA', name: 'עוגה גדולה', price: 11 })).status, 'OK');
+    const pa = await get(`b/${A}/prod/pA`); assert.equal(pa.name, 'עוגה גדולה'); assert.equal(pa.price, 11); assert.equal(pa.q.br1, 7);
+    const pl = (await coll(`b/${A}/stockLog`)).filter((x) => x.why === 'prod');
+    assert.equal(pl.length, 1); assert.equal(pl[0].delta, 0); assert.match(pl[0].note, /מחיר: ₪10 → ₪11/); assert.equal(pl[0].by, E1);
+    assert.equal((await call('saveProduct', NOORD, { id: 'pA', name: 'x', price: 1 })).reason, 'no-perm');
+    assert.equal((await call('saveProduct', E1, { id: 'pA', name: 'x', price: 1, cost: 2 })).reason, 'manager-only');
     assert.equal((await call('saveProduct', E1, { reqId: rid(), name: 'x', price: 1, cost: 1 })).reason, 'manager-only');
     assert.equal((await call('stockIn', E2, { reqId: rid(), br: 'br1', lines: [{ pid: 'pA', qty: 1 }] })).reason, 'foreign-br');
     await assertFails(db(E1).doc(`b/${A}/prod/pA/p/cost`).get());
