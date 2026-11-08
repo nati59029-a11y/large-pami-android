@@ -231,6 +231,47 @@ const seed = (p) => p.evaluate((org) => {
     const v = (m) => (cfDebits(m, []).cc.find((c) => c.card === cid) || {}).a || 0; const r = { field: /name="ins"/.test(h) && /max="36"/.test(h), ins: p.ins, bad: p1.ins, bank: pb.ins, mar: v('2027-03'), apr: v('2027-04'), may: v('2027-05'), jun: v('2027-06'), exps: S.tx.filter((x) => x.id === 'mi').length };
     S.tx = S.tx.filter((x) => x.id !== 'mi'); save(); return r; }, cid);
   check('9ח הזנה ידנית: שדה "מספר תשלומים" 1–36 באשראי בלבד; 3 תשלומים → 33.34/33.33/33.33 בחודשי החיוב; הוצאה אחת', m9.field && m9.ins === 3 && m9.bad === undefined && m9.bank === undefined && m9.mar === 33.34 && m9.apr === 33.33 && m9.may === 33.33 && m9.jun === 0 && m9.exps === 1, m9);
+  // ---- 10. סבב 2 ----
+  const r10 = await mp.evaluate(() => ({ a1: cardL4('סה"כ לחיוב בכרטיס 2345'), a2: cardL4('כרטיס 3456 ₪'), a3: cardL4('יתרה בכרטיס 4567'), ok: cardL4('כרטיס ויזה 5566'),
+    d: (S.ccMeta.d1 = { day: 1 }, [ccBillDate('d1', '2026-10-31'), ccBillDate('d1', '2026-10-30'), ccBillDate('d1', '2026-11-01')]) }));
+  await mp.evaluate(() => { delete S.ccMeta.d1; save(); });
+  check('10א סכום שלם בשורת סיכום (סה"כ/₪/יתרה) לא נחשב 4 ספרות; שם כרטיס + 4 ספרות כן', r10.a1 === '' && r10.a2 === '' && r10.a3 === '' && r10.ok === '5566', r10);
+  check('10ד יום חיוב 1: 31.10 (יום לפני) → 1.12; 30.10 → 1.11; 1.11 → 1.12', r10.d.join() === '2026-12-01,2026-11-01,2026-12-01', r10.d);
+  // ב: תשלום ידני 3 תשלומים (300, 2.11) + דף דצמבר עם "תשלום 2 מתוך 3" פתוחה → דצמבר נספר פעם אחת
+  const b10 = await mp.evaluate(() => { const c = ccNewLocal('1357', 'ידני'); S.ccMeta[c.id] = { day: 10 }; const v = (m) => (cfDebits(m, []).cc.find((x) => x.card === c.id) || {}).a || 0;
+    S.tx.push({ id: 'mb', t: 'exp', cat: 'e_sup', sub: 'sA', date: '2026-11-02', amt: 300, kind: 'inv', plan: '2026-11', inv: 'MB', pays: [{ id: 'pb', d: '2026-11-02', a: 300, m: 'אשראי', card: c.id, ins: 3 }] });
+    const before = [v('2026-11'), v('2026-12'), v('2027-01')];
+    const m = stmAdd({ kind: 'card', acc: c.id, src: 'file', from: '2026-11-10', to: '2026-12-09' }, [{ date: '2026-11-02', desc: 'רהיטים', amt: 100, dir: 'out', ins: { n: 2, of: 3 } }]);
+    const open = [v('2026-11'), v('2026-12'), v('2027-01')];
+    // התאמה ידנית של השורה לתשלום → שאר הפריסה נשאר
+    const l = S.stl.find((x) => x.stm === m.id); l.st = 'match'; l.tx = 'mb'; S.tx.find((x) => x.id === 'mb').pays[0].stl = l.id;
+    const matched = [v('2026-11'), v('2026-12'), v('2027-01')];
+    S.tx = S.tx.filter((x) => x.id !== 'mb'); save(); return { before, open, matched }; });
+  check('10ב תשלום ידני בתשלומים + שורת דף "2 מתוך 3" פתוחה: כל חודש נספר פעם אחת (100/100/100)', b10.before.join() === '100,100,100' && b10.open.join() === '100,100,100', b10);
+  check('10ב2 התאמה ידנית של השורה לא מוחקת את כל הפריסה (נובמבר וינואר נשארים)', b10.matched.join() === '100,100,100', b10);
+  // ג: דף עם תאריך חיוב בלבד – התאמה לפי בית עסק + X מתוך Y + סכום עד 1 ₪, בלי ספירה כפולה
+  const c10 = await mp.evaluate(() => { const c = ccNewLocal('9753', 'חיוב'); S.ccMeta[c.id] = { day: 10 }; const v = (m) => (cfDebits(m, []).cc.find((x) => x.card === c.id) || {}).a || 0;
+    const H = [['תאריך חיוב', 'שם בית העסק', 'סכום חיוב', 'פירוט']];
+    const d1 = impHead(H); const p1 = impParse(H.concat([['10/11/2026', 'מחשבים בע"מ', '200', 'תשלום 1 מתוך 3']]), 'card', d1, 'a.csv').ok;
+    const m1 = stmAdd({ kind: 'card', acc: c.id, src: 'file' }, p1); const l1 = S.stl.find((x) => x.stm === m1.id); const t = stlNewExp(l1.id, { cat: 'e_sup', sub: 'sA' });
+    const a1 = [v('2026-11'), v('2026-12'), v('2027-01')];
+    const p2 = impParse(H.concat([['10/12/2026', 'מחשבים בע"מ', '200.50', 'תשלום 2 מתוך 3']]), 'card', d1, 'b.csv').ok; const m2 = stmAdd({ kind: 'card', acc: c.id, src: 'file' }, p2); const au = stlAuto(m2.id); const l2 = S.stl.find((x) => x.stm === m2.id);
+    const a2 = [v('2026-11'), v('2026-12'), v('2027-01')];
+    return { bd: l1.bd, amt: t.amt, a1, a2, st: l2.st, same: l2.tx === t.id, au }; });
+  check('10ג דף עם תאריך חיוב בלבד: הוצאה אחת 600; צפוי 200 בכל חודש; הדף הבא (200.50) מותאם לאותה הוצאה ונספר פעם אחת (צפוי בלי סכום עסקה = התשלום האחרון שאינו הראשון)', c10.bd === 1 && c10.amt === 600 && c10.a1.join() === '200,200,200' && c10.a2.join() === '200,200.5,200.5' && c10.st === 'match' && c10.same, c10);
+  // ו: בלי tot – תשלום ראשון עם אגורות עודפות לא מנפח את הצפויים
+  const f10 = await mp.evaluate(() => { const c = ccNewLocal('8642', 'אגורות'); S.ccMeta[c.id] = { day: 10 }; const v = (m) => (cfDebits(m, []).cc.find((x) => x.card === c.id) || {}).a || 0;
+    stmAdd({ kind: 'card', acc: c.id, src: 'file' }, [{ date: '2026-11-02', desc: 'ספרים', amt: 33.34, dir: 'out', ins: { n: 1, of: 3 } }]); const r1 = [v('2026-11'), v('2026-12'), v('2027-01')];
+    stmAdd({ kind: 'card', acc: c.id, src: 'file' }, [{ date: '2026-11-02', desc: 'ספרים', amt: 33.33, dir: 'out', ins: { n: 2, of: 3 } }]); const r2 = [v('2026-11'), v('2026-12'), v('2027-01')]; save(); return { r1, r2 }; });
+  check('10ו בלי סכום עסקה: אחרי שתשלום 2 מופיע, הצפוי לפיו (33.33) ולא לפי הראשון', f10.r2.join() === '33.34,33.33,33.33', f10);
+  // ה: כפתור "בטל תשלומים צפויים" בתנועה, עם אישור
+  const e10 = await mp.evaluate(() => { const c = ccAllCards().find((x) => x.last4 === '1357'); S.tx.push({ id: 'me', t: 'exp', cat: 'e_sup', sub: 'sA', date: '2026-11-02', amt: 90, kind: 'inv', plan: '2026-11', inv: 'ME', pays: [{ id: 'pe', d: '2026-11-02', a: 90, m: 'אשראי', card: c.id, ins: 3 }] }); save(); ACT.tx({ dataset: { id: 'me' } }); return !!document.querySelector('[data-a=insXp][data-p=pe]'); });
+  await mp.click('[data-a=insXp][data-p=pe]'); await H.settle(mp, 200);
+  const e10b = await mp.evaluate(() => ({ ask: /לבטל את התשלומים הצפויים/.test(document.getElementById('dlg').innerText), x: S.tx.find((t) => t.id === 'me').pays[0].insX }));
+  await mp.click('#dlg [data-a=yes]'); await H.settle(mp, 200);
+  const e10c = await mp.evaluate(() => S.tx.find((t) => t.id === 'me').pays[0].insX);
+  check('10ה כפתור "בטל תשלומים צפויים" בתשלום אשראי בתשלומים; שואל קודם, ורק אחרי אישור מבטל', e10 && e10b.ask && !e10b.x && e10c === 1, { e10, e10b, e10c });
+  await mp.evaluate(() => { S.tx = S.tx.filter((t) => t.id !== 'me'); save(); closeDlg(); try { sheetClose(); } catch (e) {} });
   // ---- 8. אין מספר מלא בשום מקום חדש ----
   const s8 = await mp.evaluate(() => JSON.stringify({ stl: S.stl, ccc: S.ccc, impMap: S.impMap, mLearn: S.mLearn, ccMeta: S.ccMeta }));
   check('8 אין רצף של 8+ ספרות בנתונים החדשים', !/\d{8,}/.test(s8.replace(/\d{4}-\d{2}-\d{2}/g, '')), '');
