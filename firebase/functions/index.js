@@ -184,3 +184,6 @@ Object.assign(exports, require('./public-brand'));
 
 // מייל הזמנה עצמי (2026-11-08): sendInviteMail – קישור מהשרת לדף welcome.html, שליחה ב-Gmail (MAIL_USER/MAIL_APP_PASSWORD), נפילה למייל של Firebase
 Object.assign(exports, require('./invite-mail'));
+
+// מערכת הזמנות – שלב 1 (2026-11-08): מוצרים ומלאי לכל סניף, הזמנות עובד, תשלום ידני וקישור סליקה (orders.js)
+Object.assign(exports, require('./orders'));
