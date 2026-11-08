@@ -24,6 +24,7 @@ const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ
       return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ email: 'boss@example.invalid', requestType: 'PASSWORD_RESET' }) });
     });
     await pg.route('https://next.example/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>next</p>' }));
+    await pg.route('https://largpeami-test-f4691.web.app/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>app</p>' }));
     await pg.goto(base + qs); await pg.waitForTimeout(500); return pg;
   }
   const cont = encodeURIComponent('https://demo.firebaseapp.com/?biz=biz-a');
@@ -50,10 +51,21 @@ const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ
   check('בלי מיתוג – APK כללי', (await pg.getAttribute('#apk', 'href')).endsWith('/latest/large-pami.apk'));
   await pg.close();
   pg = await open(`?mode=resetPassword&oobCode=C&apiKey=K&continueUrl=${encodeURIComponent('https://x/?biz=<script>')}`, {});
-  check('bizId לא תקין – לא נשלחת בקשת מיתוג, הדף עובד', (await pg.textContent('#h')) === 'ברוכים הבאים');
+  check('bizId לא תקין – לא נשלחת בקשת מיתוג, הדף עובד (כללי)', (await pg.textContent('#h')) === 'קביעת סיסמה חדשה');
   await pg.close();
-  pg = await open(`?mode=signIn&oobCode=S1&apiKey=K&continueUrl=${encodeURIComponent('https://next.example/app')}`, {});
-  check('mode=signIn מועבר ל-continueUrl עם הקוד', pg.url().startsWith('https://next.example/app') && pg.url().includes('oobCode=S1'), pg.url());
+  pg = await open(`?mode=signIn&oobCode=S1&apiKey=K&continueUrl=${encodeURIComponent('https://largpeami-test-f4691.web.app/')}`, {});
+  check('mode=signIn לאתר של הפרויקט – מועבר עם הקוד', pg.url().startsWith('https://largpeami-test-f4691.web.app/') && pg.url().includes('oobCode=S1'), pg.url());
+  await pg.close();
+  for (const bad of ['https://next.example/app', 'https://evil.web.app/', 'https://largpeami-test-f4691.web.app.evil.com/', 'javascript:alert(1)', 'http://largpeami-test-f4691.web.app/', 'https://u:p@largpeami-test-f4691.web.app/']) {
+    pg = await open(`?mode=signIn&oobCode=S2&apiKey=K&continueUrl=${encodeURIComponent(bad)}`, {});
+    check('הפניה ליעד זר נחסמת: ' + bad, pg.url().startsWith(base) && !pg.url().includes('S2') && (await pg.textContent('#sub')).includes('לא נתמך'), pg.url());
+    await pg.close();
+  }
+  // "שכחתי סיסמה": אין continueUrl/biz שלנו – כותרת כללית, בלי "הוזמנתם", בלי הורדה/הוראות
+  pg = await open('?mode=resetPassword&oobCode=F1&apiKey=K&lang=he', {});
+  check('שכחתי סיסמה: כותרת "קביעת סיסמה חדשה", בלי "הוזמנתם"', (await pg.textContent('#h')) === 'קביעת סיסמה חדשה' && !(await pg.textContent('#sub')).includes('הוזמנתם'));
+  await pg.fill('#p1', 'Secret123!'); await pg.fill('#p2', 'Secret123!'); await pg.click('#go'); await pg.waitForTimeout(300);
+  check('שכחתי סיסמה: אחרי קביעה – הודעת הצלחה, בלי כפתור הורדה והוראות', (await pg.textContent('#msg')).includes('נקבעה') && !(await pg.isVisible('#apk')) && !(await pg.isVisible('#steps')));
   await pg.close();
   await br.close(); srv.close();
   console.log(fail ? `נכשלו ${fail}` : 'הכול עבר'); process.exit(fail ? 1 : 0);

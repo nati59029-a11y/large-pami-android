@@ -72,10 +72,16 @@ function msg(t,c){var m=$('msg');m.textContent=t;m.className='msg'+(c?' '+c:'')}
 function apk(tag){var t=/^biz-[a-z0-9-]{3,30}$/.test(tag)?tag:'latest';$('apk').href='https://github.com/'+REPO+'/releases/download/'+t+'/'+(t==='latest'?'large-pami':t)+'.apk'}
 apk('latest');
 
-// כל פעולה שאינה קביעת סיסמה: ממשיכים לכתובת המקורית עם אותם פרמטרים (רק לכתובות https, או מקומית באמולטור)
+// כל פעולה שאינה קביעת סיסמה (למשל קישור "מחשב חדש"): ממשיכים רק לכתובת מרשימה סגורה – האתר הזה עצמו,
+// או firebaseapp.com / web.app של שני הפרויקטים (בדיקה וייצור). localhost – רק באמולטור. כל יעד אחר: "הקישור לא נתמך".
+// הקוד והמפתח מצורפים רק כשהיעד ברשימה (שם האפליקציה צריכה את oobCode כדי להשלים את הכניסה).
+var PROJ=['largpe'+'ami','largpeami-test-f4691'],HOSTS=[location.hostname];
+PROJ.forEach(function(p){HOSTS.push(p+'.firebaseapp.com',p+'.web.app')});
+function okDest(u){if(emu)return u.protocol==='http:'&&/^(127\.0\.0\.1|localhost)$/.test(u.hostname);return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&HOSTS.indexOf(u.hostname)>=0}
 if(mode&&mode!=='resetPassword'){
-  try{var u=new URL(cont);if(u.protocol==='https:'||emu){q.forEach(function(v,k){if(k!=='continueUrl')u.searchParams.set(k,v)});location.replace(u.href);return}}catch(e){}
-  $('sub').textContent='הקישור לא נתמך בדף הזה.';return;
+  try{var u=new URL(cont);if(okDest(u)){q.forEach(function(v,k){if(k!=='continueUrl')u.searchParams.set(k,v)});location.replace(u.href);return}}catch(e){}
+  try{history.replaceState(null,'',location.pathname)}catch(e){}
+  $('h').textContent='הקישור לא נתמך';$('sub').textContent='הקישור לא נתמך בדף הזה.';return;
 }
 // הקוד לא נשאר בשורת הכתובת / בהיסטוריה
 try{history.replaceState(null,'',location.pathname)}catch(e){}
@@ -104,7 +110,8 @@ var pb=biz?fetch('/api/publicBrand?biz='+encodeURIComponent(biz)).then(function(
 Promise.all([pb,post('resetPassword',{oobCode:oob}).then(function(j){return{ok:1,email:j.email||''}},function(e){return{ok:0,e:e}})]).then(function(a){
   brand(a[0]);var v=a[1];
   if(!v.ok){$('sub').textContent='';msg(why(v.e),'err');$('dl').classList.remove('hide');return}
-  $('sub').innerHTML='';var s=$('sub');s.appendChild(document.createTextNode('הוזמנתם לאפליקציית ניהול העסק. קבעו סיסמה לחשבון '));
+  $('sub').innerHTML='';var s=$('sub');s.appendChild(document.createTextNode(biz?'הוזמנתם לאפליקציית ניהול העסק. קבעו סיסמה לחשבון ':'בחרו סיסמה חדשה לחשבון '));
+  if(!biz)$('h').textContent='קביעת סיסמה חדשה';
   var em=document.createElement('bdi');em.className='em';em.textContent=v.email;s.appendChild(em);
   $('user').value=v.email;$('f').classList.remove('hide');$('p1').focus();
 });
@@ -115,7 +122,7 @@ $('f').addEventListener('submit',function(ev){ev.preventDefault();
   if(a!==b)return msg('שתי הסיסמאות לא זהות','err');
   $('go').disabled=true;msg('שומר…');
   post('resetPassword',{oobCode:oob,newPassword:a}).then(function(){
-    $('f').classList.add('hide');$('em2').textContent=$('user').value;$('steps').classList.remove('hide');msg('הסיסמה נקבעה. עכשיו מורידים את האפליקציה ונכנסים עם המייל והסיסמה.','ok');$('dl').classList.remove('hide');
+    $('f').classList.add('hide');if(!biz){msg('הסיסמה נקבעה. אפשר להיכנס לאפליקציה עם המייל והסיסמה החדשה.','ok');return}$('em2').textContent=$('user').value;$('steps').classList.remove('hide');msg('הסיסמה נקבעה. עכשיו מורידים את האפליקציה ונכנסים עם המייל והסיסמה.','ok');$('dl').classList.remove('hide');
   },function(e){$('go').disabled=false;msg(why(e),'err')});
 });
 })();
