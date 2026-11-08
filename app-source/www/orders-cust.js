@@ -28,8 +28,9 @@ function l4(v){const d=digs(v);if(!d)return {v:''};if(/^\d{4}$/.test(d))return {
 /* 00:19: שדות נפרדים. לקוח ישן (שם/כתובת בשדה אחד) – השם הישן מוצג בשם הפרטי והכתובת ברחוב, כהצעה בלבד; הרשומה לא משתנה עד שמירה */
 const NP=['fn','ln'],AP=['st','city','fl','apt'],CPK=NP.concat(AP);
 function splitOld(c,D){const e=k=>!String(D[k]||'').trim();
- if(NP.every(e)){if(c.fn||c.ln){D.fn=c.fn||'';D.ln=c.ln||''}else if(c.name)D.fn=String(c.name)}
- if(AP.every(e)){if(AP.some(k=>c[k]))AP.forEach(k=>D[k]=c[k]||'');else if(c.addr)D.st=String(c.addr)}return D}
+ if(NP.every(e)){if(c.fn||c.ln){D.fn=c.fn||'';D.ln=c.ln||''}else if(c.name){if(String(c.name).length<=30)D.fn=String(c.name);else D.name=String(c.name)}}
+ if(AP.every(e)){if(AP.some(k=>c[k]))AP.forEach(k=>D[k]=c[k]||'');else if(c.addr){if(String(c.addr).length<=80)D.st=String(c.addr);else D.addr=String(c.addr)}}return D}
+// ערך ישן ארוך ממגבלת השדה החדש (שם>30, כתובת>80) נשאר בשדה המלא הישן בלבד – לא חוסם שמירה
 const joinC=o=>(window.__custJoin?window.__custJoin(o):o);
 /* 00:21: ניודים קודמים – ports:[{d?,phone?,tz?}] בלקוח. port הישן (תאריך בלבד) מוצג כרשומה */
 const portsOf=c=>{const L=Array.isArray(c&&c.ports)?c.ports.slice():[];if(c&&c.port&&!Array.isArray(c.ports)&&!L.some(p=>p.d===c.port))L.unshift({d:c.port});return L};
@@ -68,7 +69,7 @@ ACT.ocByPh=async()=>{const D=O.draft;if(!D)return;const p=phN(D.phone);if(!p)ret
 // שמירת הזמנה → קודם הלקוח (fill: רק שדות ריקים). כשל בשמירת הלקוח לא עוצר את ההזמנה.
 {const sv=ACT.oxSave;if(sv)ACT.oxSave=async el=>{const D=O.draft;if(D)joinC(D);
   if(D&&on()){const tz=dig(D.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');
-   const p=phN(D.phone);if((tz||p)&&String(D.name||'').trim()){const c={name:D.name.trim()};if(p)c.phone=p;if(tz)c.tz=tz;if(D.mail)c.mail=D.mail.trim();CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)c[k]=v});if(D.addr&&!AP.some(k=>c[k]))c.addr=D.addr.trim();
+   const p=phN(D.phone);if((tz||p)&&String(D.name||'').trim()){const c={};if(!NP.some(k=>String(D[k]||'').trim()))c.name=D.name.trim();if(p)c.phone=p;if(tz)c.tz=tz;if(D.mail)c.mail=D.mail.trim();CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)c[k]=v});if(D.addr&&!AP.some(k=>c[k]))c.addr=D.addr.trim();
     fnCall('saveCust',{fill:true,cust:c}).then(()=>{C.at=0}).catch(e=>toast('ההזמנה נשמרת, אבל פרטי הלקוח לא נשמרו: '+(e.message||'')))}}
   return sv(el)}}
 
@@ -109,9 +110,9 @@ const pRows=()=>(C.pf||[]).map((p,i)=>`<div class="card" style="margin:6px 0"><d
 const pRead=()=>{const f=document.querySelector('#dlg form');if(!f)return;const v=fd(f);C.pf=(C.pf||[]).map((p,i)=>({d:v['pd'+i]||'',phone:v['pp'+i]||'',tz:v['pt'+i]||''}))};
 ACT.ocPAdd=()=>{pRead();if(C.pf.length>=30)return toast('עד 30 ניודים');C.pf.push({});const b=document.getElementById('ocpl');if(b)b.innerHTML=pRows()};
 ACT.ocPDel=el=>{pRead();C.pf.splice(+el.dataset.n,1);const b=document.getElementById('ocpl');if(b)b.innerHTML=pRows()};
-const cForm=c=>{const x=c&&c.x||{},s=splitOld(c||{},{});C.pf=portsOf(c);return `<h3>${c?'עריכת לקוח':'לקוח חדש'}</h3><form data-f="ocF">${c?`<input type="hidden" name="id" value="${esc(c.id)}">`:''}
- ${fld('ת.ז','tz',c&&c.tz||'','text','inputmode="numeric" maxlength="9" autocomplete="off"'+(c&&c.tz?' readonly':''))}${fld('שם פרטי','fn',s.fn||'','text','required maxlength="30"')}${fld('שם משפחה','ln',s.ln||'','text','maxlength="30"')}${fld('טלפון','phone',c&&c.phone||'','tel','inputmode="tel" required'+(c&&!c.tz?' readonly':''))}
- ${fld('מייל','mail',c&&c.mail||'','email','dir="ltr"')}${fld('רחוב ומספר','st',s.st||'','text','maxlength="80"')}${fld('עיר','city',s.city||'','text','maxlength="40"')}<div class="row"><div class="grow">${fld('קומה','fl',s.fl||'','text','maxlength="10"')}</div><div class="grow">${fld('דירה','apt',s.apt||'','text','maxlength="10"')}</div></div>
+const cForm=c=>{const x=c&&c.x||{},s=splitOld(c||{},{});C.pf=portsOf(c);return `${s.name?`<input type="hidden" name="oname" value="${esc(s.name)}">`:''}${s.addr?`<input type="hidden" name="oaddr" value="${esc(s.addr)}">`:''}<h3>${c?'עריכת לקוח':'לקוח חדש'}</h3><form data-f="ocF">${c?`<input type="hidden" name="id" value="${esc(c.id)}">`:''}
+ ${fld('ת.ז','tz',c&&c.tz||'','text','inputmode="numeric" maxlength="9" autocomplete="off"'+(c&&c.tz?' readonly':''))}${(s.name?`<p class="note">שם קיים: ${esc(s.name)} (נשמר כמו שהוא אם לא ממלאים שם פרטי)</p>`:'')+fld('שם פרטי','fn',s.fn||'','text',(s.name?'':'required ')+'maxlength="30"')}${fld('שם משפחה','ln',s.ln||'','text','maxlength="30"')}${fld('טלפון','phone',c&&c.phone||'','tel','inputmode="tel" required'+(c&&!c.tz?' readonly':''))}
+ ${fld('מייל','mail',c&&c.mail||'','email','dir="ltr"')}${(s.addr?`<p class="note">כתובת קיימת: ${esc(s.addr)} (נשמרת כמו שהיא אם לא ממלאים רחוב/עיר)</p>`:'')+fld('רחוב ומספר','st',s.st||'','text','maxlength="80"')}${fld('עיר','city',s.city||'','text','maxlength="40"')}<div class="row"><div class="grow">${fld('קומה','fl',s.fl||'','text','maxlength="10"')}</div><div class="grow">${fld('דירה','apt',s.apt||'','text','maxlength="10"')}</div></div>
  ${fld('4 ספרות אחרונות של כרטיס (רשות)','last4',c&&c.last4||'','text','inputmode="numeric" maxlength="4" autocomplete="off"')}
  ${xKeys().map(k=>fld(esc(k.label),'x_'+k.k,x[k.k]||'','text','maxlength="200"')).join('')}
  ${cell()?`<div class="sec"><h3>ניודים קודמים</h3></div><div id="ocpl">${pRows()}</div><button type="button" class="btn g s w" data-a="ocPAdd">＋ ניוד</button>`:''}
@@ -121,8 +122,8 @@ ACT.ocEdit=async el=>{if(!C.cfg)await cfgLoad();const c=(C.L||[]).find(x=>x.id==
 FRM.ocF=async f=>{pRead();const v=fd(f),tz=dig(v.tz);if(CPK.concat(['mail']).concat(xKeys().map(k=>'x_'+k.k)).some(n=>CARD8.test(v[n]||'')))return toast('אסור להקליד מספר כרטיס או מספר ארוך. מותר רק 4 ספרות אחרונות.');if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');if(!phN(v.phone))return toast('טלפון לא תקין');
  const k=l4(v.last4);if(k.bad)return toast('4 ספרות בדיוק');
  const P=[];for(const p of C.pf||[]){const o={};if(p.d)o.d=p.d;if(String(p.phone).trim()){o.phone=phN(p.phone);if(!o.phone)return toast('טלפון ניוד לא תקין')}if(dig(p.tz)){const z=tzN(p.tz);if(!z||!tzOk(z))return toast('ת.ז ניוד לא תקינה');o.tz=z}if(Object.keys(o).length)P.push(o)}
- if(!v.fn.trim())return toast('חסר שם פרטי');
- const c={phone:phN(v.phone)};if(cell())c.ports=P;if(tz)c.tz=tz;CPK.forEach(n=>c[n]=(v[n]||'').trim());['mail'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;
+ if(!v.fn.trim()&&!v.oname)return toast('חסר שם פרטי');
+ const c={phone:phN(v.phone)};if(cell())c.ports=P;if(tz)c.tz=tz;CPK.forEach(n=>c[n]=(v[n]||'').trim());if(!c.fn&&!c.ln){delete c.fn;delete c.ln;if(v.oname)c.name=v.oname}if(!AP.some(n=>c[n])){AP.forEach(n=>delete c[n]);if(v.oaddr)c.addr=v.oaddr}['mail'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;
  const x={};xKeys().forEach(q=>{const s=(v['x_'+q.k]||'').trim();if(s)x[q.k]=s});if(Object.keys(x).length)c.x=x;
  const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('saveCust',{cust:c});closeDlg();toast('נשמר');await loadL(true);if(cur().v!=='ocCard')go('ocCard',r.id);else rerender()}catch(e){b.disabled=false;err(e)}};
 
@@ -190,5 +191,5 @@ ACT.ocGo=async el=>{const I=C.imp;if(!I||!I.out)return;el.disabled=true;const ok
   C.imp=null;dlg(`<h3>הייבוא הסתיים</h3><p>חדשים: <b>${t.c}</b> · עודכנו: <b>${t.u}</b> · ללא שינוי: <b>${t.s}</b></p>${t.b.length?`<div style="max-height:40vh;overflow:auto">${t.b.slice(0,50).map(s=>`<p class="note">${esc(s)}</p>`).join('')}</div>`:''}<button class="btn w" data-a="closeDlg">סגור</button>`);await loadL(true)}
  catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
 
-window.__oc=C;
+C.split=splitOld;window.__oc=C;
 })();

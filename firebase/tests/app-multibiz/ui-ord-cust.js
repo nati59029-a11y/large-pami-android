@@ -130,6 +130,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const emp = await page.innerText('#main'); await goV('ocList'); await H.settle(page, 200); const empL = await page.innerText('#main');
   check('7 עובד: בלי "סמן כסיטונאי", בלי ייבוא ובלי הגדרת שדות', !/סיטונאי/.test(emp.replace('לקוח רגיל', '')) && !/ייבוא/.test(empL) && !/שדות נוספים/.test(empL), { emp: emp.slice(0, 150) });
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
+  { const L = await page.evaluate(() => { const n = 'א'.repeat(45), a = 'ב'.repeat(120); const D = window.__oc.split({ name: n, addr: a }, {}); const S = window.__oc.split({ name: 'קצר', addr: 'הרצל 1' }, {}); return { D, S }; });
+    check('ישן ארוך: שם 45 / כתובת 120 נשארים בשדה המלא, לא נדחסים לשם פרטי/רחוב', L.D.name.length === 45 && L.D.addr.length === 120 && !L.D.fn && !L.D.st && L.S.fn === 'קצר' && L.S.st === 'הרצל 1', L); }
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
   console.log(fail ? `נכשלו ${fail}` : 'הכול עבר'); process.exit(fail ? 1 : 0);

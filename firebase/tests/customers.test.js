@@ -214,6 +214,14 @@ describe('לקוחות – שדות נפרדים וניודים', () => {
     assert.equal(o.status, 'OK', o.text);
     const od = (await coll(`b/${A}/ord`))[0]; assert.equal(od.cust.name, 'רות לוי'); assert.equal(od.cust.addr, 'חולון'); assert.equal(od.cust.city, 'חולון');
   });
+  it('לקוח ישן עם שם 45 וכתובת 120 תווים – נשמר (שדה מלא) גם בעריכה וגם בהזמנה', async () => {
+    const n = 'א'.repeat(45), ad = 'ב'.repeat(120);
+    await prep((d) => d.doc(`b/${A}/cust/t${TZ}`).set({ name: n, phone: '0501234567', tz: TZ, addr: ad, at: 1, upd: 1, x: {} }));
+    assert.equal((await call('saveCust', E1, { cust: { tz: TZ, name: n, addr: ad, phone: '0501234567', mail: 'a@b.co' } })).status, 'OK');
+    const d = await get(`b/${A}/cust/t${TZ}`); assert.equal(d.name, n); assert.equal(d.addr, ad); assert.equal(d.mail, 'a@b.co');
+    const o = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: { name: n, addr: ad, phone: '0501234567', tz: TZ }, items: [{ pid: 'pA', qty: 1, price: 10 }] });
+    assert.equal(o.status, 'OK', o.text);
+  });
   it('ports: כבוי (ברירת מחדל) – נדחה; פעיל – נשמר, ייבוא חוזר לא מכפיל, port ישן נשמר', async () => {
     assert.equal((await call('saveCust', E1, { cust: Object.assign({ ports: [{ d: '2025-01-02' }] }, c1) })).reason, 'feature-off');
     await seed(Object.assign({}, ALL, { cellular: true }));
