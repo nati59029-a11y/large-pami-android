@@ -495,6 +495,23 @@ const REPLAY = {
   M107: { run: async (uid) => [
     await fsx(uid, '/inbox/' + `i_${H.OTHER}` + '?updateMask.fieldPaths=status&updateMask.fieldPaths=req&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { status: sv('rephoto'), req: sv('הצילום חתוך. צלם שוב את כל הדף.') } }) }),
     await fsx(uid, '/inbox/' + `i_${H.OTHER}` + '?updateMask.fieldPaths=status&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { status: sv('imported') } }) })] },
+  // סריקה אחידה שלב 6: תור "נשלח למנהל לטיפול" (mq). q1 = פריט של עובד אחר (helpers.seed)
+  M109: { run: async (uid, env, role) => {
+    const where = role === 'employee' ? ['uid', uid] : ['st', 'new'];
+    const sq = { from: [{ collectionId: 'mq' }], select: { fields: ['uid', 'by', 't', 'st', 'k', 'np', 'stAt'].map((f) => ({ fieldPath: f })) }, where: { fieldFilter: { field: { fieldPath: where[0] }, op: 'EQUAL', value: { stringValue: where[1] } } }, limit: role === 'employee' ? 100 : 200 };
+    const r = await fsx(uid, ':runQuery', { method: 'POST', body: JSON.stringify({ structuredQuery: sq }) });
+    if (r.status === 200 && role !== 'employee') assert.ok(r.json.some((x) => x.document && x.document.name.endsWith('/mq/q1')));
+    return [r];
+  } },
+  M110: { run: async (uid) => [await fsx(uid, '/mq/' + 'q1' + '/p/' + 0)] },
+  M111: { run: async (uid) => [await fsx(uid, '/mq/' + 'q1' + '?updateMask.fieldPaths=st&updateMask.fieldPaths=stBy&updateMask.fieldPaths=stAt&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { st: sv('done'), stBy: sv(uid), stAt: iv(Date.now()) } }) })] },
+  M112: { run: async (uid) => [await fsx(uid, '/mq/' + 'q1' + '/p/' + 0, { method: 'DELETE' })] },
+  M113: { run: async (uid) => [await fsx(uid, '/mq?documentId=' + encodeURIComponent(fresh('q')), { method: 'POST', body: JSON.stringify({ fields: { uid: sv(uid), by: sv(uid), t: iv(Date.now()), st: sv('new'), k: sv('transfer'), np: iv(1) } }) })] },
+  M114: { run: async (uid) => {
+    const id = fresh('q');
+    const a = await fsx(uid, '/mq?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ fields: { uid: sv(uid), by: sv(uid), t: iv(Date.now()), st: sv('new'), k: sv('invoice'), np: iv(2) } }) });
+    return [a, await fsx(uid, '/mq/' + id + '/p?documentId=' + 0, { method: 'POST', body: JSON.stringify({ fields: { data: sv('PAGES:["data:image/jpeg;base64,AAAA"]') } }) }), await fsx(uid, '/mq/' + id + '/p?documentId=' + 1, { method: 'POST', body: JSON.stringify({ fields: { data: sv('x') } }) })];
+  } },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,

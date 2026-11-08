@@ -122,6 +122,7 @@ const MEMBER_FNS = {
   sendPromoToLine: () => ({ statusOnly: true }), publishLineItem: () => ({}), removeLineItem: () => ({}), getLineState: () => ({}), listLineFiles: () => ({}),
   previewVoice: () => ({}), getLineBoard: () => ({}), getLineAudio: () => ({}), extendLineItem: () => ({}), restoreLineItem: () => ({}),
   addStaff: () => ({ email: 'new@example.invalid', name: 'חדש' }), setStaffActive: () => ({ uid: U[A].emp, active: false }),
+  setStaffName: () => ({ uid: U[A].emp, name: 'זר' }),
 };
 describe('שלב 5 – bizId של עסק אחר בקלט: שגיאה, בלי פעולה על העסק האחר (לכל פונקציה)', () => {
   for (const [fn, input] of Object.entries(MEMBER_FNS)) {
@@ -428,6 +429,24 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     assert.equal(JSON.stringify([await listDocs(`b/${B}/staff`), await listDocs(`b/${B}/audit`)]), snapB);
     // במצב legacy (לארג' פעמי בשורש) – לא דרך הפונקציה, כמו היום
     assert.equal((await call('addStaff', R.mgr, { email: 'w2@example.invalid', name: 'x' })).reason, 'legacy-biz');
+  });
+  it('setStaffName (סריקה אחידה שלב 6): מנהל א\' משנה שם עובד בעסק שלו (רק name + audit); עובד, מנהל ב\' ו-legacy – נדחים; שם ריק/ארוך – נדחה', async () => {
+    const snapB = JSON.stringify(await listDocs(`b/${B}/staff`));
+    const before = await getDoc(`b/${A}/staff/${U[A].emp}`);
+    assert.equal((await call('setStaffName', U[A].emp, { uid: U[A].emp, name: 'אני' })).reason, 'manager-only');
+    assert.equal((await call('setStaffName', U[B].mgr, { uid: U[A].emp, name: 'זר' })).reason, 'no-staff');
+    assert.equal((await call('setStaffName', U[A].mgr, { uid: U[A].emp, name: '' })).reason, 'bad-name');
+    assert.equal((await call('setStaffName', U[A].mgr, { uid: U[A].emp, name: 'א'.repeat(61) })).reason, 'bad-name');
+    assert.equal((await call('setStaffName', U[A].mgr, { uid: '../x', name: 'א' })).reason, 'bad-uid');
+    const r = await call('setStaffName', U[A].mgr, { uid: U[A].emp, name: '  משה כהן ' });
+    assert.equal(r.status, 'OK', r.text);
+    const after = await getDoc(`b/${A}/staff/${U[A].emp}`);
+    assert.equal(after.name, 'משה כהן');
+    assert.deepEqual(Object.assign({}, after, { name: before.name }), before, 'רק השדה name השתנה');
+    assert.ok((await audits(A)).find((x) => x.act === 'setStaffName' && x.by === U[A].mgr && x.note === U[A].emp));
+    assert.equal((await call('setStaffName', U.super, { bizId: A, uid: U[A].emp, name: 'דרך מנהל־על' })).status, 'OK');
+    assert.equal(JSON.stringify(await listDocs(`b/${B}/staff`)), snapB);
+    assert.equal((await call('setStaffName', R.mgr, { uid: R.emp, name: 'x' })).reason, 'legacy-biz');
   });
 });
 
