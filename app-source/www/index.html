@@ -3746,12 +3746,14 @@ ACT.tkTake=el=>{const id=el.dataset.id;let t=tkGet(id);if(!t)return;const b=el;b
  (async()=>{let err=null;for(let i=0;i<2;i++){try{await tkPatch(id,{ow:SY.uid,owN:fbBy(),clt:Date.now()},t.ut);toast('✓ המשימה אצלך');err=null;break}catch(e){err=e;if(e.offline)break;try{await tkLoad()}catch(e2){}t=tkGet(id);if(!t||t.ow)break}}
   if(err){try{await tkLoad()}catch(e){}t=tkGet(id);toast(err.offline?tkErr(err):t&&t.ow&&t.ow!==SY.uid?'המשימה כבר בטיפול של '+(t.owN||'עובד אחר'):t&&t.ow===SY.uid?'✓ המשימה אצלך':tkErr(err))}
   try{await tkLoad()}catch(e){}tkRe()})()};
-ACT.tkUnclaim=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('לבטל את התפיסה? המשימה תחזור להיות פנויה לכל הנמענים',()=>tkDo(()=>tkPatch(t.id,{ow:'',owN:'',clt:0}),'התפיסה בוטלה'),'בטל תפיסה')};
+/* ביטול תפיסה / העברה: תמונות הביצוע של המטפל הקודם נמחקות (מנהל רשאי), כדי שלא ייספרו למטפל החדש */
+const tkWipeW=async id=>{for(const k of['w1','w2','w3'])await fsx('/tasks/'+id+'/p/'+k,{method:'DELETE'})};
+ACT.tkUnclaim=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('לבטל את התפיסה? המשימה תחזור להיות פנויה לכל הנמענים. תמונות ביצוע שהועלו יימחקו',()=>tkDo(async()=>{await tkWipeW(t.id);await tkPatch(t.id,{ow:'',owN:'',clt:0,wp:0})},'התפיסה בוטלה'),'בטל תפיסה')};
 ACT.tkMv=el=>{const t=tkGet(el.dataset.id),S=TKST.L;if(!t)return;if(!S||!S.length)return toast('רשימת העובדים לא נטענה. נסה שוב בעוד רגע');
  dlg(`<h3>העבר לעובד</h3><form data-f="tkMv" data-id="${esc(t.id)}"><label class="f"><span>עובד</span><select name="u" required>${S.map(x=>`<option value="${esc(x.uid)}" ${x.uid===t.ow?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label><div class="row"><button class="btn grow">העבר</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.tkMv=f=>{const id=f.dataset.id,t=tkGet(id),z=(TKST.L||[]).find(x=>x.uid===String(fd(f).u||''));if(!t||!z)return;closeDlg();
  const o={ow:z.uid,owN:z.name,clt:Date.now()};if(!(t.to||[]).includes(z.uid)){o.to=(t.to||[]).concat(z.uid);o.toN=(t.to||[]).map((u,i)=>(t.toN||[])[i]||u).concat(z.name)}
- tkDo(()=>tkPatch(id,o),'✓ המשימה הועברה ל'+z.name)};
+ tkDo(async()=>{if(z.uid!==t.ow){await tkWipeW(id);o.wp=0}await tkPatch(id,o)},'✓ המשימה הועברה ל'+z.name)};
 /* סימון נקרא ידני */
 ACT.tkRead=el=>{const id=el.dataset.id;tkMark([id]).then(()=>{toast('סומן כנקרא');tkRe()})};
 /* תמונות המשימה (מנהל ביצוע) – נטענות רק כשפותחים */
