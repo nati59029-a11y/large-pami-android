@@ -642,7 +642,7 @@ service cloud.firestore {
       allow read: if rOrd() && (rBrOk(resource.data.from) || rBrOk(resource.data.to));
       allow create, update, delete: if false;
     }
-    // לקוחות (fb/ord-cust): קריאה – עובד/מנהל; כתיבה – רק השרת (functions/customers.js), כולל סימון סיטונאי (מנהל בלבד)
+    // לקוחות (fb/ord-cust): קריאה – עובד/מנהל; כתיבה – רק השרת (functions/customers.js), כולל סימון סיטונאי/לקוח עסקי (בדיקת הרשאה בשרת)
     match /cust/{id} {
       allow read: if rOrd();
       allow create, update, delete: if false;
@@ -1066,7 +1066,7 @@ service cloud.firestore {
         allow read: if ordOk() && (brOk(resource.data.from) || brOk(resource.data.to));
         allow create, update, delete: if false;
       }
-      // לקוחות (fb/ord-cust): עובד עם ord (תשובה 7) ומנהל קוראים; כתיבה – רק השרת (customers.js). wholesale – רק מנהל, דרך השרת
+      // לקוחות (fb/ord-cust): עובד עם ord (תשובה 7) ומנהל קוראים; כתיבה – רק השרת (customers.js). wholesale – דרך השרת (עובד: רק בפתיחת לקוח עסקי חדש)
       match /cust/{id} {
         allow read: if ordOk();
         allow create, update, delete: if false;
