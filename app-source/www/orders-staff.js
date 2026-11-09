@@ -52,7 +52,7 @@ ACT.oxRe=()=>load(true);
 
 /* ---------- כניסה: אריח לעובד, שורה ב"עוד" למנהל, באנר בבית ---------- */
 window.oxTile=()=>on()?`<button class="tile" data-a="go" data-v="ox" style="font-size:1.15rem;text-align:center;border-color:var(--acc);color:var(--acc)">${ico('doc')}הזמנות</button>`:'';
-{const m=V.more;if(m)V.more=()=>{const r=m();if(on()&&r&&r.h)r.h=r.h.replace('<div class="mlist">',`<div class="mlist"><button class="opt" data-a="go" data-v="ox"><span>הזמנות<small>הזמנות לקוחות, מלאי ותשלום</small></span>${openN()?`<span class="tag t1">${openN()}</span>`:''}${ico('chev')}</button>`);return r}}
+{const m=V.more;if(m)V.more=()=>{const r=m();if(on()&&!(isA()&&typeof adOrd==='function'&&adOrd())&&r&&r.h)r.h=r.h.replace('<div class="mlist">',`<div class="mlist"><button class="opt" data-a="go" data-v="ox"><span>הזמנות<small>הזמנות לקוחות, מלאי ותשלום</small></span>${openN()?`<span class="tag t1">${openN()}</span>`:''}${ico('chev')}</button>`);return r}}
 {const h=V.home;if(h)V.home=()=>{const r=h();if(on()&&r&&r.h){if(!O.L&&bzB())load();const n=openN(),s=sumMonth();if(O.L&&(n||s))r.h=r.h.replace(/(<div class="chips hacts")/,`<button class="ban" style="margin-top:12px" data-a="go" data-v="ox"><span class="tag t1">הזמנות</span><span style="flex:1"><b>${n}</b> פתוחות · החודש שולם <b>${ils(s)}</b></span>${ico('chev')}</button>$1`)}return r}}
 const openN=()=>(O.L||[]).filter(o=>!['done','cancel'].includes(o.status)).length;
 const sumMonth=()=>{const d=new Date(),m0=new Date(d.getFullYear(),d.getMonth(),1).getTime();return(O.L||[]).filter(o=>o.paid&&o.paid.at>=m0&&o.status!=='cancel').reduce((s,o)=>s+(o.total||0),0)};
