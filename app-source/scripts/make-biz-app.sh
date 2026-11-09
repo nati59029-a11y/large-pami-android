@@ -9,7 +9,7 @@ B="$1"
 # 9.11: "business" = האפליקציה הכללית "ניהול עסק" לכל העסקים החדשים: applicationId com.largepami.business, סמל כללי,
 # בלי עסק ברירת מחדל (בלי biz-default.js – המשתמש רואה את העסק שלו לפי ההרשאות אחרי הכניסה), release business-latest / business.apk.
 if [ "$B" = "business" ]; then
-python3 scripts/biz-icons.py --generic android/app/src/main/res "${TMPDIR:-/tmp}/business-icon.png"
+python3 scripts/biz-icons.py --generic android/app/src/main/res www/biz-logo.png
 node -e '
 const fs=require("fs"),nm="ניהול עסק",pkg="com.largepami.business",old=JSON.parse(fs.readFileSync("capacitor.config.json","utf8")).appName;
 const sub=(f,from,to)=>{const t=fs.readFileSync(f,"utf8"),n=t.split(from).length-1;if(n!==1){console.error("::error::business app: expected 1 match in "+f+", found "+n+": "+from);process.exit(1)}fs.writeFileSync(f,t.replace(from,()=>to))};
@@ -17,7 +17,13 @@ sub("android/app/build.gradle","applicationId \"com.largepami.finance\"","applic
 const S="android/app/src/main/res/values/strings.xml";
 sub(S,"<string name=\"app_name\">"+old+"</string>","<string name=\"app_name\">"+nm+"</string>");
 sub(S,"<string name=\"title_activity_main\">"+old+"</string>","<string name=\"title_activity_main\">"+nm+"</string>");
+// שם וסמל כלליים במסך הכניסה עד הכניסה הראשונה (window.LP_BIZ – רק name/logo נקראים; אחרי הכניסה העסק לפי ההרשאות)
+const logo="data:image/png;base64,"+fs.readFileSync("www/biz-logo.png").toString("base64");
+fs.writeFileSync("www/biz-default.js","/* נכתב בבנייה (scripts/make-biz-app.sh business) */\nwindow.LP_BIZ="+JSON.stringify({id:"business",name:nm,logo})+";\n");
 for(const W of ["www","android/app/src/main/assets/public"]){if(!fs.existsSync(W+"/index.html"))continue;
+ if(W!=="www")fs.copyFileSync("www/biz-default.js",W+"/biz-default.js");
+ sub(W+"/index.html","<script src=\"orders/site-backend.js\"></script>\n","<script src=\"orders/site-backend.js\"></script>\n<script src=\"biz-default.js\"></script>\n");
+ sub(W+"/index.html","<title>לארג׳ פעמי</title>","<title>"+nm+"</title>");
  sub(W+"/index.html","const UPD_DIR=\x27app_releases/latest/\x27;","const UPD_DIR=\x27app_releases/business/\x27;");
  sub(W+"/index.html","/releases/tags/latest`","/releases/tags/business-latest`");
  sub(W+"/index.html","/releases/download/latest/large-pami.apk`","/releases/download/business-latest/business.apk`")}

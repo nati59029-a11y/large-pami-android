@@ -73,6 +73,14 @@ jobs:
       - name: Make the business app (${{ matrix.biz }})
         run: bash scripts/make-biz-app.sh "${{ matrix.biz }}"
       - run: npx cap sync android
+      - name: Generic app – no "Large Pami" before login
+        if: matrix.biz == 'business'
+        run: |
+          for W in www android/app/src/main/assets/public; do
+            grep -q '<title>ניהול עסק</title>' $W/index.html && grep -q '<script src="biz-default.js"></script>' $W/index.html || { echo "::error::$W: title/biz-default missing"; exit 1; }
+            grep -q '"name":"ניהול עסק"' $W/biz-default.js && ! grep -q 'לארג' $W/biz-default.js || { echo "::error::$W/biz-default.js"; exit 1; }
+          done
+          ! grep -q 'לארג' android/app/src/main/res/values/strings.xml || { echo "::error::strings.xml mentions Large Pami"; exit 1; }
       - name: Use the fixed signing key
         run: mkdir -p ~/.android && cp keystore/debug.keystore ~/.android/debug.keystore
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug

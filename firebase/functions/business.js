@@ -22,7 +22,7 @@ const { requireStaff, inputObject } = R;
 
 const BATCH_MAX = 400;                // מתחת למגבלה של 500 פעולות באצווה
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
-const RESERVED = new Set([T.BIZ0]);   // לארג' פעמי נוצר רק בכלי ההעברה (שלב 4), לא כאן
+const RESERVED = new Set([T.BIZ0, 'business']);   // לארג' פעמי נוצר רק בכלי ההעברה (שלב 4), לא כאן; business = שם האפליקציה הכללית "ניהול עסק" (9.11)
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });

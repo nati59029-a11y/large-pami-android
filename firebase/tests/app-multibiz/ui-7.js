@@ -49,6 +49,14 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAEAQMAAACTPww9AAAAA1BMVEX/AAAZ4gk3AAA
     check('5 הודעת מידע במסך הכניסה בצבע ירוק (צבע ההכנסה של הערכה), לא בצבע השגיאה האדום', col[0] !== col[1] && col[0] === col[2] && gr[1] > gr[0] && gr[1] > gr[2], col);
     await ctx.close(); }
 
+  // 4ב. האפליקציה הכללית "ניהול עסק" (make-biz-app.sh business כותב LP_BIZ עם השם הכללי): במסך הכניסה אין "לארג"
+  { const { ctx, page } = await H.newPage(browser, www, legacy, [], 'g1b');
+    await page.addInitScript((u) => { window.LP_BIZ = { id: 'business', name: 'ניהול עסק', logo: 'data:image/png;base64,' + u }; }, PNG);
+    await page.goto(H.ORIGIN + '/?emu=1'); await page.waitForSelector('#gform');
+    const g = await gate(page), txt = await page.evaluate(() => document.getElementById('gate').innerText + ' ' + (document.querySelector('#gate .glogo img') || {}).alt);
+    check('4ב אפליקציה כללית: מסך הכניסה "ניהול עסק" בלי "לארג" ובלי הלוגו של לארג׳ פעמי', g.name === 'ניהול עסק' && !/לארג/.test(txt) && g.img === 'data:image/png;base64,' + PNG, { name: g.name, txt: txt.slice(0, 200) });
+    await ctx.close(); }
+
   // 6. orders/app.html בכתובת ישירה כשהתוספת כבויה (site-backend = off, בלי emu)
   { const { ctx, page } = await H.newPage(browser, www, legacy, [], 'ord'); const reqs = [];
     page.on('request', (r) => { const u = new URL(r.url()); if (u.port !== '8491') reqs.push(r.url()); });

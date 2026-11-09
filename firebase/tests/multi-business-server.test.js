@@ -252,7 +252,7 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     for (const k of ['ownerEmail', 'ownerPhone', 'adv']) assert.equal(d[k], undefined, k + ' לא במסמך העסק');
     assert.deepEqual(await getDoc('b/biz-new/private/info'), { ownerEmail: 'owner@example.invalid', ownerPhone: '0501234567', adv: { limits: { scanDaily: 20 } } }); // סריקה אחידה, שלב 2
     assert.equal((await call('createBusiness', U.super, { bizId: 'biz-new', name: 'x', ownerEmail: 'a@example.invalid', ownerPhone: '0501234567' })).reason, 'biz-exists');
-    for (const [bad, reason] of [[{ bizId: 'AB' }, 'bad-biz'], [{ bizId: 'ab_c' }, 'bad-biz'], [{ bizId: 'a'.repeat(31) }, 'bad-biz'], [{ bizId: L }, 'reserved'], [{ ownerPhone: '123' }, 'bad-phone'], [{ ownerEmail: 'no-at' }, 'bad-email'], [{ name: 'x'.repeat(61) }, 'bad-name']]) {
+    for (const [bad, reason] of [[{ bizId: 'AB' }, 'bad-biz'], [{ bizId: 'ab_c' }, 'bad-biz'], [{ bizId: 'a'.repeat(31) }, 'bad-biz'], [{ bizId: L }, 'reserved'], [{ bizId: 'business' }, 'reserved'], [{ ownerPhone: '123' }, 'bad-phone'], [{ ownerEmail: 'no-at' }, 'bad-email'], [{ name: 'x'.repeat(61) }, 'bad-name']]) {
       const x = await call('createBusiness', U.super, Object.assign({ bizId: 'biz-ok', name: 'x', ownerEmail: 'a@example.invalid', ownerPhone: '0501234567' }, bad));
       assert.equal(x.reason, reason, JSON.stringify(bad) + ' ' + x.text);
     }
