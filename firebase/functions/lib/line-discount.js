@@ -13,16 +13,18 @@
 //   2. מבצע פעיל כשמספר הקווים לכל החברות המשתתפות (יחד) >= min, והוא פעיל בתאריך (from/to כולל, אופציונלי).
 //      'line' = ההנחה לכל קו משתתף; 'once' = הנחה אחת (אחוז – מסך התשלום לחנות של הקווים המשתתפים).
 //      'add' = נוסף לקבועה; 'replace' = מבטל את הקבועה בקווים המשתתפים. כמה מבצעים – רק המשתלם ביותר.
-//   3. הנחה ידנית כשיש מבצע פעיל – אסורה כתוספת; העובד משנה את המבצע (promo.disc) או מבטל אותו (promo.off).
-//      בלי מבצע – ידנית לקו/להזמנה, נוספת על הקבועה.
-//   4. תקרה (רק לעובד שאינו מנהל): סך ההנחה הידנית לכל חברה (ושינוי מבצע) עד התקרה. הנחה להזמנה/שינוי מבצע שנוגע בכמה חברות –
-//      התקרה הנמוכה מביניהן. תקרה באחוז – מהתשלום לחנות של הקווים שהיא חלה עליהם.
-//   5. ההנחה לא מורידה את הסכום לתשלום לחנות (פריטים + ניוד) מתחת ל-0. (בסיס: כל ההזמנה – ראו "דורש החלטה" בתוצר.)
+//      מבצע באחוזים "פעם אחת" להזמנה – אסור (החלטה 9.11): השרת דוחה בשמירה, וכאן מבצע כזה (ישן) לא חל.
+//   3. הנחה ידנית **מחליפה** ולא מתווספת (החלטה 9.11), גם כשאין מבצע. 0 = בלי הנחה.
+//      להזמנה (order): מחליפה את כל ההנחות (קבועה + מבצע). לקו (lines[i]): מחליפה את הקבועה של הקו; כשיש מבצע – אסור (משנים/מבטלים את המבצע).
+//      שינוי מבצע (promo.disc) מחליף את הנחת המבצע; ביטול (promo.off) מחזיר לקבועה. לא משלבים הנחה להזמנה עם הנחה לקו.
+//   4. תקרה (רק לעובד שאינו מנהל) – לכל קו לפי החברה שלו ("עד 50 ₪ לכל קו"; אחוז – מהתשלום לחנות של הקו).
+//      הנחה לקו – עד תקרת הקו; הנחה להזמנה/שינוי מבצע – עד סכום תקרות הקווים שהיא חלה עליהם. קו שלחברה שלו אין תקרה = בלי הגבלה.
+//   5. ההנחה יורדת מכל הסכום לחנות (פריטים + משלוח/סים לחנות), ולא מתחת ל-0 (החלטה 9.11).
 
 const ag = (x) => Math.round(Number(x || 0) * 100);
 const val = (d, baseAg) => (!d ? 0 : d.t === 'pct' ? Math.round(baseAg * d.v / 100) : ag(d.v));
 const fee = (f, pay) => (f && typeof f.amt === 'number' && f.amt > 0 && (f.pay || 'store') === pay ? ag(f.amt) : 0);
-const promoLive = (p, today) => p && p.on !== false && Array.isArray(p.carriers) && p.carriers.length
+const promoLive = (p, today) => p && p.on !== false && !(p.kind === 'once' && p.disc && p.disc.t === 'pct') && Array.isArray(p.carriers) && p.carriers.length
   && Number.isInteger(p.min) && p.min >= 1 && (!p.from || today >= p.from) && (!p.to || today <= p.to);
 
 class CalcErr extends Error { constructor(reason, message) { super(message); this.reason = reason; } }
@@ -61,21 +63,26 @@ function calcCell(lines, plans, cfg, man, opt) {
     const store = fee(pl && pl.ship, 'store') + fee(pl && pl.sim, 'store');
     const ext = fee(pl && pl.ship, 'carrier') + fee(pl && pl.sim, 'carrier');
     const monthly = pl && typeof pl.monthly === 'number' ? ag(pl.monthly) : 0;
-    const fix = Math.min(store, Math.max(0, val(c && discCfg[c], store)));
+    const fix = Math.max(0, val(c && discCfg[c], store)); // סכום – מלא לכל קו (יורד מכל ההזמנה); אחוז – מהתשלום לחנות של הקו
     return { c, store, ext, monthly, fix };
   });
   const storeAg = L.reduce((s, l) => s + l.store, 0);
-  const capOf = (carriers, baseAg) => { // תקרה באגורות; null = בלי הגבלה
-    let m = null;
-    for (const c of carriers) { const k = capCfg[c]; if (k) { const a = val(k, baseAg); m = m == null ? a : Math.min(m, a); } }
-    return m;
-  };
+  const room = Math.max(0, (opt.itemsAg || 0) + storeAg);
+  const lineCap = (l) => (capCfg[l.c] ? val(capCfg[l.c], l.store) : null); // אגורות; null = בלי הגבלה
+  const capSum = (ls) => { let m = 0; for (const l of ls) { const a = lineCap(l); if (a == null) return null; m += a; } return m; };
+  const overCap = (msg, a, cap) => { if (opt.capped && cap != null && a > cap) throw new CalcErr('over-cap', `${msg} עוברת את התקרה (₪${cap / 100}).`); };
   const best = bestPromo(promos, L);
   const manLines = Array.isArray(man.lines) ? man.lines : [];
-  const hasManual = manLines.some((d) => d) || !!man.order;
+  const hasLines = manLines.some((d) => d);
+  if (hasLines && man.order) throw new CalcErr('bad-manual', 'הנחה ידנית: להזמנה או לקווים, לא שתיהן.');
+  if (man.order && man.promo) throw new CalcErr('bad-manual', 'הנחה ידנית להזמנה מחליפה את המבצע – אין צורך לשנות אותו.');
   let promo = null, disc;
-  if (best) {
-    if (hasManual) throw new CalcErr('promo-active', `יש מבצע פעיל ("${best.p.name}") – הנחה ידנית לא נוספת עליו. אפשר לשנות את המבצע או לבטל אותו.`);
+  if (man.order) { // מחליפה הכול (קבועה + מבצע)
+    disc = Math.max(0, val(man.order, room));
+    overCap('הנחה ידנית להזמנה', disc, capSum(L));
+    if (best) promo = { id: best.p.id, name: best.p.name, amt: 0, off: true, carriers: best.v.carriers };
+  } else if (best) {
+    if (hasLines) throw new CalcErr('promo-active', `יש מבצע פעיל ("${best.p.name}") – הנחה ידנית לקו לא נוספת עליו. אפשר לשנות את המבצע, לבטל אותו או לתת הנחה להזמנה.`);
     const ed = man.promo && man.promo.id === best.p.id ? man.promo : null;
     if (man.promo && !ed) throw new CalcErr('bad-promo', 'המבצע שנבחר כבר לא חל על ההזמנה. רעננו את הטופס.');
     if (ed && ed.off) {
@@ -84,11 +91,9 @@ function calcCell(lines, plans, cfg, man, opt) {
     } else {
       let v = best.v;
       if (ed && ed.disc) {
+        if (best.p.kind === 'once' && ed.disc.t === 'pct') throw new CalcErr('bad-promo', 'מבצע פעם אחת להזמנה – הנחה בסכום בלבד, לא באחוזים.');
         v = promoValue(best.p, L, ed.disc);
-        if (opt.capped) {
-          const cap = capOf(v.carriers, v.pStore);
-          if (cap != null && v.amt > cap) throw new CalcErr('over-cap', `שינוי המבצע עובר את התקרה (₪${cap / 100}).`);
-        }
+        overCap('שינוי המבצע', v.amt, capSum(L.filter((l) => best.p.carriers.includes(l.c))));
       }
       disc = v.total;
       promo = { id: best.p.id, name: best.p.name, amt: v.amt, carriers: v.carriers };
@@ -96,33 +101,19 @@ function calcCell(lines, plans, cfg, man, opt) {
     }
   } else {
     if (man.promo) throw new CalcErr('bad-promo', 'אין מבצע פעיל להזמנה הזו. רעננו את הטופס.');
-    const per = new Map(); // חברה → הנחה ידנית לקווים (אגורות)
-    L.forEach((l, i) => { const d = manLines[i]; if (!d) return; l.man = Math.max(0, val(d, l.store)); per.set(l.c, (per.get(l.c) || 0) + l.man); });
-    if (opt.capped) {
-      for (const [c, a] of per) {
-        const cap = capOf([c], L.filter((l) => l.c === c).reduce((s, l) => s + l.store, 0));
-        if (cap != null && a > cap) throw new CalcErr('over-cap', `הנחה ידנית ל${c || 'קווים בלי חברה'} עוברת את התקרה (₪${cap / 100}).`);
-      }
-    }
-    let ord = 0;
-    if (man.order) {
-      ord = Math.max(0, val(man.order, storeAg));
-      if (opt.capped) {
-        const cs = [...new Set(L.map((l) => l.c))];
-        const cap = capOf(cs, storeAg);
-        const tot = ord + [...per.values()].reduce((s, a) => s + a, 0);
-        if (cap != null && tot > cap) throw new CalcErr('over-cap', `הנחה ידנית להזמנה עוברת את התקרה (₪${cap / 100}).`);
-      }
-    }
-    disc = L.reduce((s, l) => s + l.fix + (l.man || 0), 0) + ord;
+    L.forEach((l, i) => { // ידנית לקו מחליפה את הקבועה של הקו
+      const d = manLines[i]; if (!d) return;
+      l.man = Math.max(0, val(d, l.store));
+      overCap('הנחה ידנית לקו ' + (i + 1), l.man, lineCap(l));
+    });
+    disc = L.reduce((s, l) => s + (l.man != null ? l.man : l.fix), 0);
   }
   // לא מתחת ל-0: ההנחה מוגבלת לסכום לחנות (פריטים + ניוד)
-  const room = Math.max(0, (opt.itemsAg || 0) + storeAg);
   if (disc > room) disc = room;
   const out = {
-    store: storeAg / 100, disc: disc / 100, net: (storeAg - disc) / 100, ext: L.reduce((s, l) => s + l.ext, 0) / 100,
+    store: storeAg / 100, disc: disc / 100, net: (room - disc) / 100, ext: L.reduce((s, l) => s + l.ext, 0) / 100,
     monthly: L.reduce((s, l) => s + l.monthly, 0) / 100,
-    lines: L.map((l) => ({ c: l.c, store: l.store / 100, fix: l.fix / 100, man: (l.man || 0) / 100, ext: l.ext / 100, monthly: l.monthly / 100 })),
+    lines: L.map((l) => ({ c: l.c, store: l.store / 100, fix: l.fix / 100, man: l.man != null ? l.man / 100 : null, ext: l.ext / 100, monthly: l.monthly / 100 })),
     promo, hint: hintOf(promos, L, disc),
   };
   return out;
@@ -145,7 +136,10 @@ function hintOf(promos, L, curDisc) {
   }
   if (!best) return null;
   const p = best.promo;
-  return { line: best.line, promo: p.id, name: p.name, carriers: p.carriers.slice(), min: p.min, kind: p.kind, pdisc: Object.assign({}, p.disc), disc: best.total / 100, gain: best.gain / 100 };
+  const disc = best.total / 100;
+  // הערכה (החבילה בחברה החדשה תשתנה) – לכן "עד" (החלטה 9.11)
+  const msg = `העברת קו ${best.line + 1} ל${p.carriers.join(' / ')} תזכה במבצע "${p.name}" (${p.min} קווים ומעלה): הנחה של עד ₪${disc}`;
+  return { line: best.line, promo: p.id, name: p.name, carriers: p.carriers.slice(), min: p.min, kind: p.kind, pdisc: Object.assign({}, p.disc), disc, gain: best.gain / 100, upTo: true, msg };
 }
 
 module.exports = { calcCell, CalcErr, promoLive, _t: { val, fee, promoValue, bestPromo, hintOf } };
