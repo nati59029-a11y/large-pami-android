@@ -89,7 +89,8 @@ const STEPS = (email) => [
 
 // ---------- בניית המייל (טהור, נבדק ביחידה) ----------
 // brand: { name, logo } – logo הוא data:image/(png|jpeg|webp);base64,… או ''. הלוגו מוטמע כקובץ מצורף (cid), לא כ-data URI.
-function buildMail({ to, from, brand, link }) {
+function buildMail({ to, from, brand, link, desktop }) {
+  const dk = typeof desktop === 'string' && /^https:\/\/[a-z0-9-]+\.web\.app\/$/.test(desktop) ? desktop : '';
   const name = headerSafe(brand && brand.name);
   const html1 = esc(name);
   const mailTo = String(to || '');
@@ -110,6 +111,7 @@ function buildMail({ to, from, brand, link }) {
     + `<p style="text-align:center;margin:0 0 24px"><a href="${esc(link)}" style="display:inline-block;background:#b8860b;color:#ffffff;text-decoration:none;font-size:18px;font-weight:bold;padding:14px 28px;border-radius:10px">קביעת סיסמה</a></p>`
     + `<p style="font-size:16px;font-weight:bold;margin:0 0 8px">איך מתחילים (בטלפון אנדרואיד):</p>`
     + `<ol style="font-size:15px;line-height:1.7;margin:0 0 20px;padding-right:20px;padding-left:0">${steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>`
+    + (dk ? `<p style="font-size:16px;font-weight:bold;margin:0 0 8px">התחברות ממחשב:</p><p style="font-size:15px;line-height:1.7;margin:0 0 20px">אחרי שקבעתם סיסמה, אפשר לעבוד גם מהמחשב: פתחו בדפדפן את הקישור <a href="${esc(dk)}" dir="ltr">${esc(dk)}</a> והתחברו עם אותו מייל ואותה סיסמה.</p>` : '')
     + `<p style="font-size:13px;color:#6b7280;line-height:1.6;margin:0">הקישור תקף לזמן מוגבל. אם פג תוקפו, בקשו מהמנהל לשלוח מייל חדש.<br>אם לא ציפיתם להזמנה, אפשר להתעלם מהמייל.</p>`
     + `<p style="font-size:12px;color:#9ca3af;line-height:1.5;margin:16px 0 0">אם הכפתור לא עובד, העתיקו את הקישור לדפדפן:<br><span dir="ltr" style="word-break:break-all">${esc(link)}</span></p>`
     + `</div><p style="font-size:13px;color:#6b7280;text-align:center;margin:16px 0 0">${html1}</p></div></body></html>`;
@@ -119,6 +121,7 @@ function buildMail({ to, from, brand, link }) {
     'קישור לקביעת סיסמה:', link, '',
     'איך מתחילים (בטלפון אנדרואיד):',
     ...steps.map((s, i) => `${i + 1}. ${i === 0 ? 'פתחו את הקישור שלמעלה.' : s}`), '',
+    ...(dk ? ['התחברות ממחשב:', 'אחרי שקבעתם סיסמה, פתחו בדפדפן את הקישור ' + dk + ' והתחברו עם אותו מייל ואותה סיסמה.', ''] : []),
     'הקישור תקף לזמן מוגבל. אם פג תוקפו, בקשו מהמנהל לשלוח מייל חדש.',
     'אם לא ציפיתם להזמנה, אפשר להתעלם מהמייל.', '', name,
   ].join('\n');
@@ -141,13 +144,13 @@ async function belongs(biz, email) {
   const same = (v) => typeof v === 'string' && v.trim().toLowerCase() === want;
   if (biz.exists) {
     const info = await db.doc(`b/${biz.bizId}/private/info`).get();
-    if (info.exists && same(info.get('ownerEmail'))) return true;
+    if (info.exists && same(info.get('ownerEmail'))) return 'owner';
   }
   for (const c of ['admins', 'staff']) {
     const col = db.collection(T.bizRef(biz, c));
-    if (!(await col.where('email', '==', want).limit(1).get()).empty) return true;
+    if (!(await col.where('email', '==', want).limit(1).get()).empty) return c;
     const all = await col.select('email').limit(500).get();
-    if (all.docs.some((d) => same(d.get('email')))) return true;
+    if (all.docs.some((d) => same(d.get('email')))) return c;
   }
   return false;
 }
@@ -195,7 +198,8 @@ async function sendInvite(request, deps) {
   if (!EMAIL_RE.test(email) || email.length > 254) throw new HttpsError('invalid-argument', 'כתובת המייל לא תקינה', { reason: 'bad-email' });
   const biz = await T.loadBiz(bizId);
   if (!biz) throw new HttpsError('not-found', 'העסק לא נמצא', { reason: 'no-biz' });
-  if (!(await belongs(biz, email))) throw new HttpsError('permission-denied', 'המייל לא שייך לעסק', { reason: 'not-member' });
+  const who = await belongs(biz, email);
+  if (!who) throw new HttpsError('permission-denied', 'המייל לא שייך לעסק', { reason: 'not-member' });
 
   const sec = D.secrets();
   if (!sec) return { ok: true, status: 'fallback', why: 'no-secrets' };
@@ -216,7 +220,9 @@ async function sendInvite(request, deps) {
   }
   if (!link) return { ok: true, status: 'fallback', why: 'link' };
   const br = (await D.brand(bizId)) || {};
-  const mail = buildMail({ to: email, from: smtp.from, brand: br, link });
+  // מנהל (בעלים או admins) מקבל גם את הקישור לגרסת המחשב. עובד – לא (גרסת המחשב למנהל בלבד)
+  const desktop = who === 'staff' ? '' : `https://${site}.web.app/`;
+  const mail = buildMail({ to: email, from: smtp.from, brand: br, link, desktop });
   try {
     const tr = D.transport({ host: smtp.host, port: smtp.port, secure: smtp.secure, requireTLS: !smtp.secure, auth: { user: sec.user, pass: sec.pass }, connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000, logger: false, debug: false });
     await tr.sendMail(mail);
