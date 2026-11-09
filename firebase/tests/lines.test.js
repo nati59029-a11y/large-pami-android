@@ -327,12 +327,12 @@ describe('חבילות ניוד – הנחה בסכום ההזמנה', () => {
     r = await order(E1, { lines: L2(pN), man: { lines: [{ t: 'amt', v: 0 }] } });
     assert.equal(r.status, 'OK', r.text);
     await call('setCellCfg', MGR, { cap: { 'פרטנר': { t: 'amt', v: 50 } } });
-    const m = await order(MGR, { lines: L2(pN), man: { order: { t: 'amt', v: 90 } } });
+    const m = await order(MGR, { lines: L2(pN), man: { order: { t: 'amt', v: 150 } } }); // מעל התקרה (50 × 2 = 100)
     assert.equal(m.status, 'OK', m.text);
     const id = m.result.id;
     let u = await call('updateOrder', E1, { id, items: [{ n: 'כיסוי', qty: 2, price: 50 }] });
-    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 100 + 60 - 90);
-    u = await call('updateOrder', E1, { id, cell: { lines: L2(pN), man: { order: { t: 'amt', v: 95 } } } });
+    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 100 + 60 - 150);
+    u = await call('updateOrder', E1, { id, cell: { lines: L2(pN), man: { order: { t: 'amt', v: 140 } } } });
     assert.equal(u.reason, 'over-cap');
   });
   it('מבצע פעם אחת באחוזים – נדחה בשמירה', async () => {
