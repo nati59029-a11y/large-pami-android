@@ -186,13 +186,28 @@ jobs:
           P: ${{ inputs.project }}
         run: |
           set +x
-          if firebase functions:secrets:get CARD_ENC_KEY --project "$P" --non-interactive >/dev/null 2>&1; then
-            echo "CARD_ENC_KEY: קיים – לא נוגעים" | tee -a "$GITHUB_STEP_SUMMARY"
-          else
-            head -c 32 /dev/urandom | base64 -w0 | firebase functions:secrets:set CARD_ENC_KEY --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 \
-              || { echo "::error::יצירת המפתח CARD_ENC_KEY נכשלה. כנראה שלחשבון השירות של הפרויקט $P אין הרשאה – יש להוסיף לו את התפקיד Secret Manager Admin (roles/secretmanager.admin)"; exit 1; }
-            echo "CARD_ENC_KEY: נוצר עכשיו (ערך אקראי, לא מודפס)" | tee -a "$GITHUB_STEP_SUMMARY"
-          fi
+          [ "$P" = "largpeami" ] || { echo "::error::צעד זה רק לייצור"; exit 1; }
+          TOKEN=$(CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="$GOOGLE_APPLICATION_CREDENTIALS" gcloud auth print-access-token 2>/dev/null) || { echo "::error::לא הצלחתי לקבל אסימון גישה מחשבון השירות – עוצר בלי לגעת במפתח"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          API="https://secretmanager.googleapis.com/v1/projects/$P/secrets"
+          NOPERM="::error::לחשבון השירות של $P אין הרשאה ל-Secret Manager. יש להוסיף לו את התפקיד Secret Manager Admin (roles/secretmanager.admin)"
+          # יוצרים רק כשהתשובה היא במפורש 404 (לא קיים). כל תשובה אחרת (שגיאת רשת, 403, 5xx) = עצירה, בלי ליצור ובלי לדרוס.
+          C=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$API/CARD_ENC_KEY") || C=000
+          case "$C" in
+            200) echo "CARD_ENC_KEY: קיים – לא נוגעים" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0 ;;
+            404) ;;
+            403) echo "$NOPERM"; exit 1 ;;
+            *) echo "::error::בדיקת המפתח CARD_ENC_KEY נכשלה (HTTP $C) – עוצר בלי ליצור"; exit 1 ;;
+          esac
+          C=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"replication":{"automatic":{}},"labels":{"firebase-managed":"true"}}' "$API?secretId=CARD_ENC_KEY") || C=000
+          [ "$C" = "403" ] && { echo "$NOPERM"; exit 1; }
+          [ "$C" = "200" ] || { echo "::error::יצירת CARD_ENC_KEY נכשלה (HTTP $C)"; exit 1; }
+          # הערך: 32 בתים אקראיים ב-base64, נשלח דרך stdin בלבד – לא מודפס ולא נשמר. נוסף רק לסוד שזה עתה נוצר (ריק).
+          C=$(printf '{"payload":{"data":"%s"}}' "$(head -c 32 /dev/urandom | base64 -w0 | base64 -w0)" | \
+            curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @- "$API/CARD_ENC_KEY:addVersion") || C=000
+          [ "$C" = "200" ] || { echo "::error::שמירת ערך ל-CARD_ENC_KEY נכשלה (HTTP $C)"; exit 1; }
+          echo "CARD_ENC_KEY: נוצר עכשיו (ערך אקראי, לא מודפס)" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # מייל הזמנה עצמי (2026-11-08): אם הוגדרו סודות GitHub MAIL_USER ו-MAIL_APP_PASSWORD – נכתבים ל-Secret Manager של הפרויקט
       # (גרסה חדשה, דרך stdin בלבד – לא מודפסים). אם חסרים – ממשיכים: הסוד הקיים (או הזמני) נשאר, והאפליקציה נופלת למייל של Firebase.
