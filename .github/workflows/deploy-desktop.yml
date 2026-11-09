@@ -7,7 +7,7 @@ name: Deploy desktop (auto)
 on:
   push:
     branches: [main]
-    paths: ["app-source/**", "large-pami-android-project.zip", "scripts/web-generic-brand.sh", ".github/workflows/deploy-desktop.yml"]
+    paths: ["app-source/**", "large-pami-android-project.zip", "scripts/web-generic-brand.sh", "firebase/desktop-site.txt", ".github/workflows/deploy-desktop.yml"]
   workflow_dispatch:
 
 concurrency:
