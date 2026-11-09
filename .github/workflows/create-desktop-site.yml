@@ -1,0 +1,58 @@
+# פעם אחת: פתיחת אתר Hosting חדש לגרסת המחשב בשם כללי באנגלית (במקום largpeami-desktop).
+# מנסה את השמות לפי הסדר ופותח את הראשון שפנוי (שם אתר ב-Firebase חייב להיות פנוי בכל העולם). לא מפרסם קבצים ולא משנה אתר קיים.
+# אחרי ההרצה: כותבים את השם שנפתח ב-firebase/desktop-site.txt, והפרסום האוטומטי עובר אליו.
+name: Create desktop site (once)
+
+on:
+  workflow_dispatch:
+    inputs:
+      names:
+        description: "שמות לנסות, לפי הסדר, מופרדים בפסיק"
+        required: true
+        default: "business-management,businessmanagement-app,business-management-il,bizmanagement-app"
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: firebase-prod
+    env:
+      P: largpeami
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install firebase-tools (before the service account exists on disk)
+        run: npm install -g firebase-tools@15.34.1 --no-audit --no-fund && firebase --version
+      - name: Service account (temporary file, must belong to the project)
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          umask 077
+          [ -n "$SA" ] || { echo "::error::חסר הסוד FIREBASE_SERVICE_ACCOUNT"; exit 1; }
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          SP=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("project_id",""))' "$RUNNER_TEMP/sa.json")
+          [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+      - name: Create the first free name
+        env:
+          NAMES: ${{ inputs.names }}
+        run: |
+          IFS=',' read -ra L <<< "$NAMES"
+          for n in "${L[@]}"; do
+            n=$(echo "$n" | tr -d ' ')
+            echo "$n" | grep -Eq '^[a-z0-9][a-z0-9-]{4,28}[a-z0-9]$' || { echo "דילוג על שם לא תקין: $n"; continue; }
+            if firebase hosting:sites:get "$n" --project "$P" >/dev/null 2>&1; then
+              echo "האתר $n כבר קיים בפרויקט – משתמשים בו" | tee -a "$GITHUB_STEP_SUMMARY"; echo "CREATED=$n" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0
+            fi
+            if firebase hosting:sites:create "$n" --project "$P" --non-interactive; then
+              echo "נפתח האתר: https://$n.web.app" | tee -a "$GITHUB_STEP_SUMMARY"; echo "CREATED=$n" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0
+            fi
+            echo "השם $n לא פנוי"
+          done
+          echo "::error::אף אחד מהשמות לא היה פנוי"; exit 1
+      - name: Remove the service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

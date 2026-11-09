@@ -1,0 +1,70 @@
+# כניסה ממחשב בכתובת החדשה: מוסיף את אתר גרסת המחשב (firebase/desktop-site.txt) לרשימת הדומיינים המורשים של Firebase Auth,
+# ומדפיס את מצב שיטות הכניסה (סיסמה / קישור במייל). אם enable_email_link=yes – מפעיל גם "קישור כניסה במייל" (נדרש לאימות מחשב חדש).
+name: Auth – desktop domain
+
+on:
+  workflow_dispatch:
+    inputs:
+      enable_email_link:
+        description: "להפעיל כניסה בקישור במייל (yes/no)"
+        required: true
+        default: "no"
+
+permissions:
+  contents: read
+
+jobs:
+  auth:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: firebase-prod
+    env:
+      P: largpeami
+    steps:
+      - uses: actions/checkout@v4
+      - name: Service account (temporary file, must belong to the project)
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          umask 077
+          [ -n "$SA" ] || { echo "::error::חסר הסוד FIREBASE_SERVICE_ACCOUNT"; exit 1; }
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          SP=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("project_id",""))' "$RUNNER_TEMP/sa.json")
+          [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
+      - name: Update auth config
+        env:
+          EL: ${{ inputs.enable_email_link }}
+        run: |
+          pip install -q google-auth requests
+          SITE=$(tr -d ' \r\n' < firebase/desktop-site.txt)
+          python3 - "$SITE" "$EL" <<'PY'
+          import sys, json
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import AuthorizedSession
+          import os
+          site, el = sys.argv[1], sys.argv[2]
+          cr = service_account.Credentials.from_service_account_file(os.environ['RUNNER_TEMP'] + '/sa.json', scopes=['https://www.googleapis.com/auth/cloud-platform'])
+          s = AuthorizedSession(cr)
+          U = 'https://identitytoolkit.googleapis.com/admin/v2/projects/largpeami/config'
+          c = s.get(U).json()
+          if 'error' in c: print('::error::' + json.dumps(c['error'])[:300]); sys.exit(1)
+          em = c.get('signIn', {}).get('email', {})
+          print('לפני: email enabled=%s, passwordRequired=%s' % (em.get('enabled'), em.get('passwordRequired')))
+          doms = c.get('authorizedDomains', [])
+          print('דומיינים מורשים: ' + ', '.join(doms))
+          body, mask = {}, []
+          d = site + '.web.app'
+          if d not in doms:
+              body['authorizedDomains'] = doms + [d]; mask.append('authorizedDomains')
+          if el == 'yes' and em.get('passwordRequired', True):
+              body['signIn'] = {'email': {'enabled': True, 'passwordRequired': False}}; mask.append('signIn.email')
+          if mask:
+              r = s.patch(U + '?updateMask=' + ','.join(mask), json=body)
+              if r.status_code != 200: print('::error::' + r.text[:300]); sys.exit(1)
+              print('עודכן: ' + ', '.join(mask))
+          else:
+              print('אין מה לעדכן')
+          PY
+      - name: Remove the service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

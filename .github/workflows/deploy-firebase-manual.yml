@@ -87,10 +87,12 @@ jobs:
           LIVE: ${{ vars.LIVE_UPDATE_SITE }}
           P: ${{ inputs.project }}
         run: |
+          FILE=""; if [ "$P" = "largpeami" ] && [ -f firebase/desktop-site.txt ]; then FILE=$(tr -d ' \r\n' < firebase/desktop-site.txt); fi
+          [ -n "$FILE" ] && SITE="$FILE"
           [ -n "$SITE" ] || { echo "::error::חסר המשתנה DESKTOP_SITE (ייצור) או DESKTOP_SITE_TEST (בדיקה)"; exit 1; }
           echo "$SITE" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::שם אתר לא תקין"; exit 1; }
           # fail-closed (סבב 2): גם כש-LIVE_UPDATE_SITE לא מוגדר – השם חייב לכלול desktop, ולא יכול להיות האתר הראשי של הפרויקט
-          case "$SITE" in *desktop*) ;; *) echo "::error::שם אתר גרסת המחשב חייב לכלול desktop (הגנה מפני דריסת אתר אחר)"; exit 1 ;; esac
+          [ -n "$FILE" ] || case "$SITE" in *desktop*) ;; *) echo "::error::שם אתר גרסת המחשב חייב לכלול desktop (הגנה מפני דריסת אתר אחר)"; exit 1 ;; esac
           [ "$SITE" != "$P" ] || { echo "::error::אסור לפרסם לאתר הראשי של הפרויקט"; exit 1; }
           [ -z "$LIVE" ] || [ "$SITE" != "$LIVE" ] || { echo "::error::אסור לפרסם את גרסת המחשב לאתר של העדכון החי"; exit 1; }
           echo "site=$SITE" >> "$GITHUB_OUTPUT"
@@ -253,6 +255,8 @@ jobs:
           if [ -n "$M_HOST" ]; then if oneline "$M_HOST" && [[ "$M_HOST" =~ ^[a-z0-9.-]{3,253}$ ]]; then printf '\nMAIL_HOST=%s\n' "$M_HOST" >> "$ENVF"; else echo "::warning::MAIL_HOST לא תקין – לא נכתב"; fi; fi
           if [ -n "$M_PORT" ]; then if oneline "$M_PORT" && [[ "$M_PORT" =~ ^(465|587|2465|2587)$ ]]; then printf '\nMAIL_PORT=%s\n' "$M_PORT" >> "$ENVF"; else echo "::warning::MAIL_PORT לא תקין – לא נכתב"; fi; fi
           if [ -n "$M_FROM" ]; then if oneline "$M_FROM"; then echo "::add-mask::$M_FROM"; fi; if oneline "$M_FROM" && [[ "$M_FROM" =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$ ]]; then printf '\nMAIL_FROM=%s\n' "$M_FROM" >> "$ENVF"; else echo "::warning::MAIL_FROM לא תקין – לא נכתב"; fi; fi
+          # אתר גרסת המחשב של הייצור יכול להיקבע במאגר (firebase/desktop-site.txt) – גובר על המשתנה
+          if [ "$P" = "largpeami" ] && [ -f desktop-site.txt ]; then F=$(tr -d ' \r\n' < desktop-site.txt); [ -n "$F" ] && SITE="$F"; fi
           if [ -n "$SITE" ] && oneline "$SITE" && [[ "$SITE" =~ ^[a-z0-9-]+$ ]]; then
             printf '\nINVITE_SITE=%s\n' "$SITE" >> "functions/.env.$P"
           else
