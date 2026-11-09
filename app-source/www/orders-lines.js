@@ -49,7 +49,7 @@ const lineH=(D,l,i)=>{const P=plans(),C=carriers(),pk=l.plan&&plan(l.plan);retur
  <label class="row" style="min-height:44px;gap:8px"><input type="checkbox" data-c="olSameTz" data-k="${esc(l.k)}"${l.sameTz?' checked':''}>הת.ז של הלקוח</label>
  ${l.sameTz?'':`<label class="f"><span>ת.ז לניוד</span><input data-i="olF" data-f="tz" data-k="${esc(l.k)}" inputmode="numeric" maxlength="9" value="${esc(l.tz)}" autocomplete="off"></label>`}
  ${P.length?`<label class="f"><span>חבילה</span><select data-c="olSel" data-f="plan" data-k="${esc(l.k)}"><option value="">בלי חבילה</option>${P.map(p=>`<option value="${esc(p.id)}"${l.plan===p.id?' selected':''}>${esc(pkOpt(p))}</option>`).join('')}</select></label>`:''}
- ${pk?pkH(pk):''}${giftSel(l,pk)}
+ ${pk?pkH(pk):''}${prSel(l,pk)}${giftSel(l)}
  ${C.length&&!(pk&&pk.carrier)?`<label class="f"><span>חברת ניוד</span><select data-c="olSel" data-f="carrier" data-k="${esc(l.k)}">${opts(C,l.carrier,'בחר')}</select></label>`:''}
  <div data-olh="${esc(l.k)}">${hitH(D,l)}</div><button type="button" class="btn g s" data-a="olRm" data-k="${esc(l.k)}">הסר קו</button></div>`};
 /* ---------- חבילה לכל קו, הנחות ומבצעים בטופס (שלב 4, 2026-11-09). החישוב – אותה פונקציה של השרת (line-discount.js, window.LineDisc) ---------- */
@@ -58,22 +58,29 @@ const pkFee=(l,f)=>f&&typeof f.amt==='number'&&f.amt>0?`${l} ${ils(f.amt)} – $
 const pkOpt=p=>[p.name,p.carrier||'',typeof p.monthly==='number'?ils(p.monthly)+' לחודש':''].filter(Boolean).join(' · ');
 const pkH=p=>{const x=[p.carrier?'חברה: '+esc(p.carrier):'',typeof p.monthly==='number'?'עלות חודשית: '+ils(p.monthly)+' (משלמים לחברה)':'',pkFee('משלוח',p.ship),pkFee('סים',p.sim)].filter(Boolean);
  return `<div class="note" data-olpk role="note" style="margin:0 0 6px;padding:8px;border:1px solid var(--line,rgba(127,127,127,.35));border-radius:8px">${x.map(t=>`<div>${t}</div>`).join('')}${p.details?`<div>${esc(p.details)}</div>`:''}</div>`};
-const PKG=['monthly','ship','sim','details','promo'];
+const PKG=['monthly','ship','sim','details','promo','promos'];
 const isPkg=p=>!!p&&PKG.some(k=>p[k]!=null); // כמו בשרת (cellTotal): חבילה "חדשה" = יש לה אחד מהשדות
 const itemsAg=D=>(D.items||[]).reduce((s,it)=>s+Math.round((+String(it.qty).replace(',','.')||0)*(+String(it.price).replace(',','.')||0)*100),0);
-const pLive=p=>!!(p&&window.LineDisc&&LineDisc.live(p.promo,LineDisc.ilDay()));
-/* מתנות (פישוט 9.11): שורת מוצר רגילה (יורדת מהמלאי, עלות לפי המוצר) שמסומנת gk = מפתח הקו. אחת – נוספת לבד; כמה – העובד בוחר */
-const gifts=p=>pLive(p)&&Array.isArray(p.promo.gifts)?p.promo.gifts.filter(g=>O.P&&(O.P||[]).some(x=>x.id===g.pid)):[];
+/* כמה מבצעים לחבילה (23:52): רשימה (מבנה ישן promo = רשימה עם פריט אחד). לכל קו העובד בוחר מבצע או "בלי מבצע"; ברירת מחדל – הראשון הפעיל.
+   l.pr = אינדקס ברשימה או -1. אותה בחירה בשרת: LineDisc.pick */
+const prs=p=>window.LineDisc?LineDisc.promosOf(p):[];
+const lnPr=l=>{const p=l.plan&&plan(l.plan);return p&&window.LineDisc?LineDisc.pick(p,Number.isInteger(l.pr)?l.pr:undefined,LineDisc.ilDay()):null};
+const prSel=(l,p)=>{if(!p)return '';const t=LineDisc.ilDay(),A=prs(p).map((r,i)=>[r,i]).filter(([r])=>LineDisc.live(r,t));if(!A.length)return '';const k=lnPr(l);const cur=k?k.i:-1;
+ return `<label class="f"><span>מבצע</span><select data-c="olPr" data-k="${esc(l.k)}">${A.map(([r,i])=>`<option value="${i}"${cur===i?' selected':''}>${esc(prTxt(r))}</option>`).join('')}<option value="-1"${cur===-1?' selected':''}>בלי מבצע</option></select></label>`};
+/* מתנות (פישוט 9.11; 23:50): שורת מוצר רגילה במחיר המלא של המוצר (יורדת מהמלאי, עלות לפי המוצר), מסומנת gk = מפתח הקו. אחת – נוספת לבד; כמה – העובד בוחר.
+   ההפרש (מלא פחות מחיר המבצע) נכנס ל"סה"כ הנחה" – line-discount.js, אותו חישוב כמו בשרת (הקו נשלח עם gift) */
+const fullP=(pid,br)=>{const p=(O.P||[]).find(x=>x.id===pid);const v=p&&p.bp&&typeof p.bp==='object'?p.bp[br]:undefined;return typeof v==='number'?v:(+(p&&p.price)||0)}; // כמו unitP ב-orders-staff.js
+const gifts=l=>{const k=lnPr(l);return k&&Array.isArray(k.pr.gifts)?k.pr.gifts.filter(g=>O.P&&(O.P||[]).some(x=>x.id===g.pid)):[]};
 const gName=g=>{const x=(O.P||[]).find(p=>p.id===g.pid);return (x?x.name:'מוצר')+' · '+(g.price?ils(g.price):'מתנה')};
-const giftSel=(l,p)=>{const G=gifts(p);if(G.length<2)return '';return `<label class="f"><span>בחירת מתנה</span><select data-c="olGift" data-k="${esc(l.k)}"><option value="">בלי מתנה</option>${G.map(g=>`<option value="${esc(g.pid)}"${l.gift===g.pid?' selected':''}>${esc(gName(g))}</option>`).join('')}</select></label>`};
-function giftSync(D,l){D.items=(D.items||[]).filter(it=>it.gk!==l.k);const p=plan(l.plan),G=gifts(p);if(G.length===1)l.gift=G[0].pid;else if(!G.some(g=>g.pid===l.gift))l.gift='';
- const g=G.find(x=>x.pid===l.gift);if(g)D.items.push({pid:g.pid,qty:'1',price:String(g.price||0),auto:0,from:'',gk:l.k})}
+const giftSel=l=>{const G=gifts(l);if(G.length<2)return '';return `<label class="f"><span>בחירת מתנה</span><select data-c="olGift" data-k="${esc(l.k)}"><option value="">בלי מתנה</option>${G.map(g=>`<option value="${esc(g.pid)}"${l.gift===g.pid?' selected':''}>${esc(gName(g))}</option>`).join('')}</select></label>`};
+function giftSync(D,l){D.items=(D.items||[]).filter(it=>it.gk!==l.k);const G=gifts(l);if(G.length===1)l.gift=G[0].pid;else if(!G.some(g=>g.pid===l.gift))l.gift='';
+ const g=G.find(x=>x.pid===l.gift);if(g)D.items.push({pid:g.pid,qty:'1',price:String(fullP(g.pid,D.br)),auto:1,from:'',gk:l.k})}
 const giftDrop=(D,k)=>{D.items=(D.items||[]).filter(it=>it.gk!==k)};
 // "סה"כ הנחה" (פישוט 9.11): משבצת אחת. S.man = null (המוצע) או מה שהעובד הזין (גם 0, גם למעלה)
 function calcOf(D){const S=CS(D);if(!S.on||!window.LineDisc)return null;const pm=new Map((L.P||[]).map(p=>[p.id,p]));
  if(!S.lines.some(l=>isPkg(l.plan&&pm.get(l.plan))))return null;
- const lines=S.lines.map(l=>{const o={};if(l.plan)o.plan=l.plan;if(l.carrier)o.carrier=l.carrier;return o});
- return LineDisc.calcCell(lines,pm,Number.isFinite(S.man)?S.man:null,{itemsAg:itemsAg(D),today:LineDisc.ilDay()})}
+ const lines=S.lines.map(l=>{const o={};if(l.plan)o.plan=l.plan;if(l.carrier)o.carrier=l.carrier;if(l.plan&&Number.isInteger(l.pr))o.pr=l.pr;if(l.gift&&l.plan)o.gift=l.gift;return o});
+ return LineDisc.calcCell(lines,pm,Number.isFinite(S.man)?S.man:null,{itemsAg:itemsAg(D),today:LineDisc.ilDay(),items:D.items||[]})}
 const sugT=r=>r.man!=null&&r.man!==r.sug?`מחושב לפי המבצעים: ${ils(r.sug)}`:'';
 function calcH(D){const r=calcOf(D);if(!r)return '';const S=CS(D);const v=S.man==null?r.sug:S.manRaw;
  return `<label class="f" style="margin:0"><span><b>סה״כ הנחה ₪</b> (0 = בלי הנחה)</span><input id="olman" data-i="olMan" inputmode="decimal" maxlength="9" value="${esc(v)}" autocomplete="off"></label>
@@ -112,7 +119,8 @@ ACT.olDel=ACT.olRm;
 ACT.olOk=el=>{const[D,l]=lnOf(el);if(!l)return;CS(D).ok[l.k]=1;paintHit(D,l)};
 CHG.olSame=el=>{const[D,l]=lnOf(el);if(!l)return;l.same=el.checked;repaint();check(D,l)};
 CHG.olSameTz=el=>{const[D,l]=lnOf(el);if(!l)return;l.sameTz=el.checked;repaint()};
-CHG.olSel=el=>{const[D,l]=lnOf(el);if(!l)return;l[el.dataset.f]=el.value;if(el.dataset.f==='plan'){const p=plan(l.plan);if(p&&p.carrier)l.carrier=p.carrier;const had=D.items.some(it=>it.gk===l.k);giftSync(D,l);if(had||D.items.some(it=>it.gk===l.k))repaintAll();else repaint();check(D,l)}else paintCalc()};
+CHG.olSel=el=>{const[D,l]=lnOf(el);if(!l)return;l[el.dataset.f]=el.value;if(el.dataset.f==='plan'){const p=plan(l.plan);if(p&&p.carrier)l.carrier=p.carrier;delete l.pr;l.gift='';const had=D.items.some(it=>it.gk===l.k);giftSync(D,l);if(had||D.items.some(it=>it.gk===l.k))repaintAll();else repaint();check(D,l)}else paintCalc()};
+CHG.olPr=el=>{const[D,l]=lnOf(el);if(!l)return;l.pr=+el.value;l.gift='';giftSync(D,l);repaintAll()};
 CHG.olGift=el=>{const[D,l]=lnOf(el);if(!l)return;l.gift=el.value;giftSync(D,l);repaintAll()};
 INP.olMan=el=>{const D=O.draft;if(!D)return;const S=CS(D),t=String(el.value).trim().replace(',','.');S.manRaw=el.value;
  if(t===''){S.man=null}else if(/^\d+(\.\d{1,2})?$/.test(t)&&+t<=100000)S.man=+t;else{S.man=NaN}paintCalc()};
@@ -128,7 +136,7 @@ INP.olB=el=>{const D=O.draft;if(!D)return;const S=CS(D);if(el.dataset.f==='ctz')
 function out(D){const S=CS(D);if(!S.on)return undefined;const o={lines:[]};
  for(const l of S.lines){const ph=lnPhone(D,l);if(!ph)throw new Error(l.same?'חסר טלפון לקוח לקו לניוד':'טלפון לניוד לא תקין');
   const r=l.same?{same:true}:{phone:ph};if(l.sameTz){if(!tzN(D.tz))throw new Error('אין ת.ז ללקוח – הקלידו ת.ז לקו');r.sameTz=true}else if(dig(l.tz)){const z=tzN(l.tz);if(!z||!tzOk(z))throw new Error('ת.ז לניוד לא תקינה');r.tz=z}
-  if(l.plan)r.plan=l.plan;if(l.carrier)r.carrier=l.carrier;
+  if(l.plan)r.plan=l.plan;if(l.carrier)r.carrier=l.carrier;if(l.plan&&Number.isInteger(l.pr))r.pr=l.pr;if(l.plan&&l.gift&&gifts(l).some(g=>g.pid===l.gift))r.gift=l.gift;
   const h=S.hits[l.k];if(h==='wait')throw new Error('עוד בודק ניודים קודמים – נסו שוב בעוד רגע');if(Array.isArray(h)&&h.length){if(!S.ok[l.k])throw new Error('יש קו שכבר נויד – בחרו "המשך בכל זאת" או "בטל ניוד לקו"');o.ack=true}
   o.lines.push(r)}
  if(S.ad)o.ad=S.ad;
@@ -172,14 +180,14 @@ ACT.olPE=el=>{const p=el.dataset.id?plan(el.dataset.id):null,M=mgr();dlg(`<h3>${
  ${fld('עלות חודשית ללקוח ₪ (רשות)','monthly',p&&typeof p.monthly==='number'?p.monthly:'','text','inputmode="decimal" maxlength="9"')}
  ${feeF('משלוח','ship',p&&p.ship)}${feeF('סים','sim',p&&p.sim)}
  ${fld('טווח התראה על ניוד חוזר (ימים)','days',p&&Number.isInteger(p.days)?p.days:60,'text','required inputmode="numeric" maxlength="4"')}
- ${prF(p&&p.promo)}
+ ${prFs(p)}
  ${p?ck('off',p.on===false,'כבויה (לא מוצגת בהזמנה)'):''}
  <div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.olPF=async f=>{const x=fd(f),M=mgr();if(!x.name.trim())return toast('חסר שם');const d={name:x.name.trim(),carrier:x.carrier||'',details:String(x.details||'').trim()};
  {const days=+dig(x.days);if(!(days>=1&&days<=3650))return toast('טווח: 1 עד 3650 ימים');d.days=days} // גם עובד (החלטה 9.11 21:25)
  const mo=nm(x.monthly);if(Number.isNaN(mo))return toast('עלות חודשית: מספר');d.monthly=mo==null?'':mo;
  for(const[k,l]of[['ship','משלוח'],['sim','סים']]){const v=nm(x[k]);if(Number.isNaN(v))return toast(l+': מספר');d[k]=v==null?null:{amt:v,pay:x[k+'P']==='carrier'?'carrier':'store'}}
- try{d.promo=prRd(x)}catch(e){return toast(e.message)}
+ try{d.promos=prRds(x)}catch(e){return toast(e.message)}
  if(x.id){d.id=x.id;d.on=!x.off}
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('saveLinePlan',d);closeDlg();toast('נשמר');await lload(true)}catch(e){b.disabled=false;err(e)}};
 ACT.olCfg=()=>dlg(`<h3>רשימות לניוד</h3><form data-f="olCF"><label class="f"><span>חברות ניוד (שורה לכל חברה)</span><textarea name="c" rows="5" maxlength="1300">${esc(carriers().join('\n'))}</textarea></label>
@@ -188,27 +196,31 @@ ACT.olCfg=()=>dlg(`<h3>רשימות לניוד</h3><form data-f="olCF"><label cl
 FRM.olCF=async f=>{const x=fd(f),sp=s=>[...new Set(String(s||'').split('\n').map(v=>v.trim()).filter(Boolean))];const c=sp(x.c),a=sp(x.a);if(c.length>30||a.length>30)return toast('עד 30 בכל רשימה');if(c.concat(a).some(v=>v.length>40))return toast('עד 40 תווים לשם');
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('setCellCfg',{carriers:c,ads:a});closeDlg();toast('נשמר');await lload(true)}catch(e){b.disabled=false;err(e)}};
 
-/* מבצע לחבילה (פישוט 9.11): הנחה בקנייה, מתנות מהמלאי (מחיר 0 = מתנה, או מחיר מבצע), מבצע כמות קווים, תאריכים (רשות) */
-const SC={plan:'אותה חבילה',carrier:'אותה חברה',all:'כל קו בהזמנה'};
+/* מבצעים לחבילה (פישוט 9.11; כמה מבצעים 23:52): כל מבצע – הנחה לקו, מתנות מהמלאי (מחיר 0 = מתנה, או מחיר מבצע), מבצע כמות, תאריכים (רשות).
+   בטופס: המבצעים הקיימים + מבצע ריק אחד להוספה (עד 5). מבצע כמות סופר רק קווים שבחרו באותו מבצע */
+const PRMAX=5;
 const pnm=id=>{const x=(O.P||[]).find(p=>p.id===id);return x?x.name:'מוצר'};
-const prT=p=>{const r=p&&p.promo;if(!r)return '';const x=[];if(r.disc)x.push('הנחה '+ils(r.disc)+' לקו');
- if(Array.isArray(r.gifts)&&r.gifts.length)x.push((r.gifts.length>1?'מתנה לבחירה: ':'מתנה: ')+r.gifts.map(g=>esc(pnm(g.pid))+(g.price?' ב-'+ils(g.price):'')).join(' / '));
- if(r.qty)x.push(`${r.qty.n} קווים (${SC[r.qty.scope]||''}) – הנחה ${ils(r.qty.amt)}`);if(r.from||r.to)x.push((r.from?'מ-'+dd(r.from):'')+(r.to?' עד '+dd(r.to):''));return x.join(' · ')};
+const prTxt=r=>{if(!r)return '';const x=[];if(r.disc)x.push('הנחה '+ils(r.disc)+' לקו');
+ if(Array.isArray(r.gifts)&&r.gifts.length)x.push((r.gifts.length>1?'מתנה לבחירה: ':'מתנה: ')+r.gifts.map(g=>pnm(g.pid)+(g.price?' ב-'+ils(g.price):'')).join(' / '));
+ if(r.qty)x.push(`${r.qty.n} קווים – הנחה ${ils(r.qty.amt)}`);if(r.from||r.to)x.push((r.from?'מ-'+dd(r.from):'')+(r.to?' עד '+dd(r.to):''));return x.join(' · ')};
+const prT=p=>prs(p).map(r=>esc(prTxt(r))).join(' | ');
 const GN=3; // שורות מתנה בטופס
-const prF=r=>{r=r||{};const G=Array.isArray(r.gifts)?r.gifts:[],q=r.qty||{},P=(O.P||[]).filter(p=>p.on!==false).concat(G.filter(g=>!(O.P||[]).some(p=>p.id===g.pid&&p.on!==false)).map(g=>({id:g.pid,name:pnm(g.pid)}))),n=Math.max(GN,G.length);
- const gRow=i=>{const g=G[i]||{};return `<div class="row"><label class="f grow"><span>מתנה ${i+1}</span><select name="g${i}"><option value="">—</option>${P.map(p=>`<option value="${esc(p.id)}"${g.pid===p.id?' selected':''}>${esc(p.name)}</option>`).join('')}</select></label><label class="f" style="width:96px"><span>מחיר ₪</span><input name="gp${i}" inputmode="decimal" maxlength="9" value="${g.pid&&g.price?g.price:''}" placeholder="0" autocomplete="off"></label></div>`};
- return `<details${r.disc||G.length||r.qty?' open':''}><summary style="min-height:44px;display:flex;align-items:center"><b>מבצע לחבילה (רשות)</b></summary>
- ${fld('הנחה בקנייה לכל קו ₪','pd',r.disc||'','text','inputmode="decimal" maxlength="9"')}
- <p class="note" style="margin:4px 0">מתנה מהמלאי: מחיר ריק/0 = מתנה, או מחיר מבצע. כמה מתנות = העובד בוחר אחת.</p>${Array.from({length:n},(x,i)=>gRow(i)).join('')}
- <div class="row"><label class="f grow"><span>מבצע כמות: קווים</span><input name="qn" inputmode="numeric" maxlength="2" value="${q.n||''}" autocomplete="off"></label><label class="f grow"><span>הנחה ₪</span><input name="qa" inputmode="decimal" maxlength="9" value="${q.amt||''}" autocomplete="off"></label></div>
- <label class="f"><span>אילו קווים נספרים</span><select name="qs">${Object.keys(SC).map(k=>`<option value="${k}"${(q.scope||'plan')===k?' selected':''}>${SC[k]}</option>`).join('')}</select></label>
- <div class="row"><label class="f grow"><span>מתאריך (רשות)</span><input name="pf" type="date" value="${esc(r.from||'')}"></label><label class="f grow"><span>עד תאריך (רשות)</span><input name="pt" type="date" value="${esc(r.to||'')}"></label></div></details>`};
-// קורא את המבצע מהטופס → אובייקט לשרת, או null (בלי מבצע)
-function prRd(x){const o={};const d=nm(x.pd);if(Number.isNaN(d))throw new Error('הנחה בקנייה: מספר');if(d)o.disc=d;
- const gs=[];for(let i=0;x['g'+i]!==undefined;i++){if(!x['g'+i])continue;const v=nm(x['gp'+i]);if(Number.isNaN(v))throw new Error('מחיר מתנה: מספר');if(gs.some(g=>g.pid===x['g'+i]))throw new Error('אותה מתנה פעמיים');gs.push({pid:x['g'+i],price:v||0})}if(gs.length)o.gifts=gs;
- const qn=dig(x.qn),qa=nm(x.qa);if(qn||qa!=null){if(!(+qn>=2&&+qn<=20))throw new Error('מבצע כמות: 2 עד 20 קווים');if(!(qa>0))throw new Error('מבצע כמות: חסרה הנחה');o.qty={n:+qn,amt:qa,scope:SC[x.qs]?x.qs:'plan'}}
- if(x.pf)o.from=x.pf;if(x.pt)o.to=x.pt;if(o.from&&o.to&&o.from>o.to)throw new Error('תאריך ההתחלה אחרי הסיום');
+const prF=(r,j)=>{const e=!r;r=r||{};const G=Array.isArray(r.gifts)?r.gifts:[],q=r.qty||{},P=(O.P||[]).filter(p=>p.on!==false).concat(G.filter(g=>!(O.P||[]).some(p=>p.id===g.pid&&p.on!==false)).map(g=>({id:g.pid,name:pnm(g.pid)}))),n=Math.max(GN,G.length);
+ const gRow=i=>{const g=G[i]||{};return `<div class="row"><label class="f grow"><span>מתנה ${i+1}</span><select name="g${j}_${i}"><option value="">—</option>${P.map(p=>`<option value="${esc(p.id)}"${g.pid===p.id?' selected':''}>${esc(p.name)}</option>`).join('')}</select></label><label class="f" style="width:96px"><span>מחיר ₪</span><input name="gp${j}_${i}" inputmode="decimal" maxlength="9" value="${g.pid&&g.price?g.price:''}" placeholder="0" autocomplete="off"></label></div>`};
+ return `<details data-pr="${j}"${e?'':' open'}><summary style="min-height:44px;display:flex;align-items:center"><b>${e?(j?'הוספת מבצע (רשות)':'מבצע לחבילה (רשות)'):'מבצע '+(j+1)}</b></summary>
+ ${fld('הנחה בקנייה לכל קו ₪','pd'+j,r.disc||'','text','inputmode="decimal" maxlength="9"')}
+ <p class="note" style="margin:4px 0">מתנה מהמלאי: מחיר ריק/0 = מתנה, או מחיר מבצע. כמה מתנות = העובד בוחר אחת לכל קו.</p>${Array.from({length:n},(x,i)=>gRow(i)).join('')}
+ <div class="row"><label class="f grow"><span>מבצע כמות: קווים</span><input name="qn${j}" inputmode="numeric" maxlength="2" value="${q.n||''}" autocomplete="off"></label><label class="f grow"><span>הנחה ₪</span><input name="qa${j}" inputmode="decimal" maxlength="9" value="${q.amt||''}" autocomplete="off"></label></div>
+ <p class="note" style="margin:4px 0">נספרים רק קווים שבחרו במבצע הזה. ריק = למחוק את המבצע.</p>
+ <div class="row"><label class="f grow"><span>מתאריך (רשות)</span><input name="pf${j}" type="date" value="${esc(r.from||'')}"></label><label class="f grow"><span>עד תאריך (רשות)</span><input name="pt${j}" type="date" value="${esc(r.to||'')}"></label></div></details>`};
+const prFs=p=>{const R=prs(p).slice(0,PRMAX);return R.map((r,j)=>prF(r,j)).join('')+(R.length<PRMAX?prF(null,R.length):'')};
+// קורא מבצע אחד מהטופס → אובייקט לשרת, או null (ריק)
+function prRd(x,j){const o={};const N=(k)=>x[k+j];const d=nm(N('pd'));if(Number.isNaN(d))throw new Error('הנחה בקנייה: מספר');if(d)o.disc=d;
+ const gs=[];for(let i=0;x['g'+j+'_'+i]!==undefined;i++){const pid=x['g'+j+'_'+i];if(!pid)continue;const v=nm(x['gp'+j+'_'+i]);if(Number.isNaN(v))throw new Error('מחיר מתנה: מספר');if(gs.some(g=>g.pid===pid))throw new Error('אותה מתנה פעמיים');gs.push({pid,price:v||0})}if(gs.length)o.gifts=gs;
+ const qn=dig(N('qn')),qa=nm(N('qa'));if(qn||qa!=null){if(!(+qn>=2&&+qn<=20))throw new Error('מבצע כמות: 2 עד 20 קווים');if(!(qa>0))throw new Error('מבצע כמות: חסרה הנחה');o.qty={n:+qn,amt:qa}}
+ if(N('pf'))o.from=N('pf');if(N('pt'))o.to=N('pt');if(o.from&&o.to&&o.from>o.to)throw new Error('תאריך ההתחלה אחרי הסיום');
  return o.disc||o.gifts||o.qty?o:null}
+const prRds=x=>{const a=[];for(let j=0;j<PRMAX&&x['pd'+j]!==undefined;j++){const r=prRd(x,j);if(r)a.push(r)}return a};
 
 window.__ol={L,out,CS};
 })();
