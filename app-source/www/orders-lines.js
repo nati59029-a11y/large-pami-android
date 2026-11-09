@@ -4,7 +4,7 @@
      פרטי בנק (בנק/סניף/חשבון) ות"ז בעל הכרטיס. כמות הקווים – אוטומטי.
    - התראה לעובד (01:45): מיד כשמסמנים ניוד ובכל שינוי טלפון – checkLines בשרת (כל סניפי העסק, בטווח של התוכנית; ברירת מחדל 60 יום).
      ניוד קודם → "קו זה כבר נויד בתאריך … בסניף …" עם "המשך בכל זאת" / "בטל ניוד לקו". אי אפשר לשמור לפני שבוחרים.
-   - חבילות ניוד (קטגוריה במלאי): מנהל ועובד עם הרשאת הזמנות. מנהל: גם טווח התראה, רשימות, ומסך "הנחות, תקרות ומבצעים" (oxLnCfg).
+   - חבילות ניוד (קטגוריה במלאי): מנהל ועובד עם הרשאת הזמנות. טווח התראה – גם עובד (21:25). מנהל: רשימות, ומסך "הנחות, תקרות ומבצעים" (oxLnCfg).
    כל כתיבה – דרך השרת (orders.js: createOrder.cell, saveLinePlan, setCellCfg, checkLines). קריאה – lineplan, ordcfg/cell לפי החוקים. */
 (function(){
 'use strict';
@@ -43,14 +43,46 @@ const lnTz=(D,l)=>l.sameTz?tzN(D.tz):tzN(l.tz);
 const hitH=(D,l)=>{const S=CS(D),h=S.hits[l.k];if(h==='wait')return '<p class="note">בודק ניודים קודמים…</p>';if(!Array.isArray(h)||!h.length)return '';
  const t=h.map(x=>`קו זה כבר נויד בתאריך <b>${dd(x.d)}</b>${x.br?' בסניף <b>'+esc(bn(x.br))+'</b>':''}`).join('<br>');
  return S.ok[l.k]?`<p class="note" role="status">${t}<br>העובד אישר להמשיך בכל זאת.</p>`:`<div class="ban" role="alert" style="display:block;margin:6px 0;border-color:var(--neg)"><p style="margin:0 0 6px">${t}. האם להמשיך בכל זאת בניוד?</p><div class="row"><button type="button" class="btn grow s" data-a="olOk" data-k="${esc(l.k)}">המשך בכל זאת</button><button type="button" class="btn g grow s" data-a="olDel" data-k="${esc(l.k)}">בטל ניוד לקו</button></div></div>`};
-const lineH=(D,l,i)=>{const P=plans(),C=carriers();return `<div class="card" style="margin:6px 0" data-ol="${esc(l.k)}"><b>קו ${i+1}</b>
+const lineH=(D,l,i)=>{const P=plans(),C=carriers(),pk=l.plan&&plan(l.plan);return `<div class="card" style="margin:6px 0" data-ol="${esc(l.k)}"><b>קו ${i+1}</b>
  <label class="row" style="min-height:44px;gap:8px"><input type="checkbox" data-c="olSame" data-k="${esc(l.k)}"${l.same?' checked':''}>הטלפון של הלקוח${l.same&&phN(D.phone)?' (<bdi dir="ltr">'+esc(phN(D.phone))+'</bdi>)':''}</label>
  ${l.same?'':`<label class="f"><span>טלפון לניוד</span><input data-i="olF" data-f="phone" data-k="${esc(l.k)}" type="tel" inputmode="tel" dir="ltr" value="${esc(l.phone)}" autocomplete="off"></label>`}
  <label class="row" style="min-height:44px;gap:8px"><input type="checkbox" data-c="olSameTz" data-k="${esc(l.k)}"${l.sameTz?' checked':''}>הת.ז של הלקוח</label>
  ${l.sameTz?'':`<label class="f"><span>ת.ז לניוד</span><input data-i="olF" data-f="tz" data-k="${esc(l.k)}" inputmode="numeric" maxlength="9" value="${esc(l.tz)}" autocomplete="off"></label>`}
- <div class="row">${P.length?`<label class="f grow"><span>תוכנית</span><select data-c="olSel" data-f="plan" data-k="${esc(l.k)}"><option value="">בלי תוכנית</option>${P.map(p=>`<option value="${esc(p.id)}"${l.plan===p.id?' selected':''}>${esc(p.name)}</option>`).join('')}</select></label>`:''}
- ${C.length?`<label class="f grow"><span>חברת ניוד</span><select data-c="olSel" data-f="carrier" data-k="${esc(l.k)}">${opts(C,l.carrier,'בחר')}</select></label>`:''}</div>
+ ${P.length?`<label class="f"><span>חבילה</span><select data-c="olSel" data-f="plan" data-k="${esc(l.k)}"><option value="">בלי חבילה</option>${P.map(p=>`<option value="${esc(p.id)}"${l.plan===p.id?' selected':''}>${esc(pkOpt(p))}</option>`).join('')}</select></label>`:''}
+ ${pk?pkH(pk):''}
+ ${C.length&&!(pk&&pk.carrier)?`<label class="f"><span>חברת ניוד</span><select data-c="olSel" data-f="carrier" data-k="${esc(l.k)}">${opts(C,l.carrier,'בחר')}</select></label>`:''}
  <div data-olh="${esc(l.k)}">${hitH(D,l)}</div><button type="button" class="btn g s" data-a="olRm" data-k="${esc(l.k)}">הסר קו</button></div>`};
+/* ---------- חבילה לכל קו, הנחות ומבצעים בטופס (שלב 4, 2026-11-09). החישוב – אותה פונקציה של השרת (line-discount.js, window.LineDisc) ---------- */
+const PAY0={store:'לחנות',carrier:'לחברה'};
+const pkFee=(l,f)=>f&&typeof f.amt==='number'&&f.amt>0?`${l} ${ils(f.amt)} – ${f.pay==='carrier'?'משלמים לחברה':'משלמים לחנות'}`:'';
+const pkOpt=p=>[p.name,p.carrier||'',typeof p.monthly==='number'?ils(p.monthly)+' לחודש':''].filter(Boolean).join(' · ');
+const pkH=p=>{const x=[p.carrier?'חברה: '+esc(p.carrier):'',typeof p.monthly==='number'?'עלות חודשית: '+ils(p.monthly)+' (משלמים לחברה)':'',pkFee('משלוח',p.ship),pkFee('סים',p.sim)].filter(Boolean);
+ return `<div class="note" data-olpk role="note" style="margin:0 0 6px;padding:8px;border:1px solid var(--line,rgba(127,127,127,.35));border-radius:8px">${x.map(t=>`<div>${t}</div>`).join('')}${p.details?`<div>${esc(p.details)}</div>`:''}</div>`};
+const PKG=['monthly','ship','sim','details'];
+const isPkg=p=>!!p&&PKG.some(k=>p[k]!=null); // כמו בשרת (cellTotal): חבילה "חדשה" = יש לה אחד מהשדות
+const itemsAg=D=>(D.items||[]).reduce((s,it)=>s+Math.round((+String(it.qty).replace(',','.')||0)*(+String(it.price).replace(',','.')||0)*100),0);
+// ידני בטיוטה: S.man = { lines:{[k]:{t,v}}, order:{t,v}|null, promo:{id,off}|{id,disc}|null }
+const MS=S=>{if(!S.man)S.man={lines:{},order:null,promo:null};return S.man};
+const manOut=S=>{const m=MS(S),o={};const ls=S.lines.map(l=>m.lines[l.k]||null);if(ls.some(Boolean))o.lines=ls;if(m.order)o.order=m.order;if(m.promo)o.promo=m.promo;return Object.keys(o).length?o:null};
+// מחזיר null (אין חבילה חדשה – הסכום כמו היום) או { r } / { e } (שגיאה בעברית, למשל מעל התקרה)
+function calcOf(D){const S=CS(D);if(!S.on||!window.LineDisc)return null;const pm=new Map((L.P||[]).map(p=>[p.id,p]));
+ if(!S.lines.some(l=>isPkg(l.plan&&pm.get(l.plan))))return null;
+ const lines=S.lines.map(l=>{const o={};if(l.plan)o.plan=l.plan;if(l.carrier)o.carrier=l.carrier;return o});
+ try{return{r:LineDisc.calcCell(lines,pm,L.cfg||{},manOut(S)||{},{itemsAg:itemsAg(D),today:LineDisc.ilDay(),capped:!mgr()})}}catch(e){return{e:e&&e.message||'שגיאה בחישוב ההנחה'}}}
+const dT=d=>d?(d.t==='pct'?d.v+'%':ils(d.v)):'';
+function calcH(D){const c=calcOf(D);if(!c)return '';const S=CS(D),m=MS(S);
+ if(c.e)return `<div class="ban" role="alert" style="display:block;margin:6px 0;border-color:var(--neg)"><p style="margin:0 0 6px">${esc(c.e)}</p><button type="button" class="btn g s w" data-a="olMClr">ביטול ההנחה הידנית</button></div>`;
+ const r=c.r,p=r.promo;
+ const ln=r.lines.map((l,i)=>{const d=l.man!=null?l.man:(p&&!p.off&&p.carriers.includes(l.c)?null:l.fix);return `<div class="row" style="justify-content:space-between"><span>קו ${i+1}${l.c?' · '+esc(l.c):''}${l.store?' · לחנות '+ils(l.store):''}</span><span>${d?'הנחה '+ils(d)+(l.man!=null?' (ידנית)':''):''}</span></div>`}).join('');
+ const pr=p?`<div class="row" style="justify-content:space-between"><span>מבצע "${esc(p.name)}"${p.off?' – בוטל בהזמנה':p.edit?' – שונה בהזמנה':''}</span><span>${p.off?'':ils(p.amt)}</span></div>`:'';
+ const mo=m.order?`<p class="note" style="margin:4px 0">הנחה ידנית להזמנה: ${dT(m.order)} (מחליפה את שאר ההנחות)</p>`:'';
+ const h=r.hint?`<div class="ban" role="status" id="olhint" style="display:block;margin:6px 0"><p style="margin:0"><b>המלצה:</b> ${esc(r.hint.msg)}</p><p class="note" style="margin:4px 0 0">חברות במבצע: ${r.hint.carriers.map(esc).join(', ')} · מ-${r.hint.min} קווים · ${dT(r.hint.pdisc)} ${r.hint.kind==='once'?'פעם אחת להזמנה':'לכל קו'}</p></div>`:'';
+ const btn=p?`<div class="row"><button type="button" class="btn g s grow" data-a="olMan">${p.off||p.edit?'שינוי ההנחה':'שינוי / ביטול מבצע'}</button>${m.promo||m.order?'<button type="button" class="btn g s grow" data-a="olMClr">חזרה למבצע</button>':''}</div>`
+  :`<div class="row"><button type="button" class="btn g s grow" data-a="olMan">הנחה ידנית</button>${m.order||Object.keys(m.lines).length?'<button type="button" class="btn g s grow" data-a="olMClr">ביטול הנחה ידנית</button>':''}</div>`;
+ return `<b>הנחות ניוד</b>${ln}${pr}${mo}
+ <div class="row" style="justify-content:space-between"><b>סה״כ הנחה</b><b>${ils(r.disc)}</b></div>${r.ext?`<p class="note" style="margin:2px 0">משלמים ישירות לחברה (לא בסכום כאן): ${ils(r.ext)}</p>`:''}${r.monthly?`<p class="note" style="margin:2px 0">עלות חודשית מהחברה: ${ils(r.monthly)}</p>`:''}${btn}${h}`}
+// מצייר את פירוט ההנחות ואת הסה"כ (מעל הסה"כ של הפריטים מ-orders-staff.js)
+function paintCalc(){const D=O.draft;if(!D||!cell())return;const b=document.getElementById('olcalc');if(b){const h=calcH(D);b.innerHTML=h;b.hidden=!h}const c=calcOf(D),t=document.getElementById('oxtot');if(t&&c&&c.r)t.textContent=ils(c.r.net)}
 const boxH=D=>{const S=CS(D);if(!S.on)return '';const A=ads();
  return `${S.lines.map((l,i)=>lineH(D,l,i)).join('')}<button type="button" class="btn g s w" data-a="olAdd">＋ קו נוסף לניוד</button>
  <p class="note">כמות קווים: <b id="oln">${S.lines.length}</b></p>
@@ -60,7 +92,7 @@ const boxH=D=>{const S=CS(D);if(!S.on)return '';const A=ads();
  <label class="f"><span>מספר חשבון</span><input data-i="olB" data-f="acct" inputmode="numeric" maxlength="12" value="${esc(S.bank.acct)}" autocomplete="off"></label>
  <label class="f"><span>ת.ז בעל הכרטיס</span><input data-i="olB" data-f="ctz" inputmode="numeric" maxlength="9" value="${esc(S.ctz)}" autocomplete="off"></label></details>`};
 const secH=D=>{const S=CS(D);return `<div class="sec"><h3>ניוד קווים</h3></div><div class="card" id="olbox"><label class="row" style="min-height:44px;gap:8px"><input type="checkbox" data-c="olOn"${S.on?' checked':''}><b>הלקוח רוצה ניוד</b></label><div id="olin">${boxH(D)}</div></div>`};
-const repaint=()=>{const D=O.draft,b=document.getElementById('olin');if(D&&b)b.innerHTML=boxH(D)};
+const repaint=()=>{const D=O.draft,b=document.getElementById('olin');if(D&&b)b.innerHTML=boxH(D);paintCalc()};
 const paintHit=(D,l)=>{const b=document.querySelector(`[data-olh="${l.k}"]`);if(b)b.innerHTML=hitH(D,l)};
 const lnOf=el=>{const D=O.draft;if(!D)return [null,null];const l=CS(D).lines.find(x=>x.k===el.dataset.k);return [D,l]};
 
@@ -73,17 +105,35 @@ const checkAll=D=>CS(D).lines.forEach(l=>check(D,l));
 
 CHG.olOn=el=>{const D=O.draft;if(!D)return;const S=CS(D);S.on=el.checked;if(S.on&&!S.lines.length)S.lines.push(lnNew(true));repaint();if(S.on){lload();checkAll(D)}};
 ACT.olAdd=()=>{const D=O.draft;if(!D)return;const S=CS(D);if(S.lines.length>=20)return toast('עד 20 קווים');S.lines.push(lnNew(false));repaint()};
-ACT.olRm=el=>{const[D,l]=lnOf(el);if(!l)return;const S=CS(D);S.lines=S.lines.filter(x=>x!==l);delete S.hits[l.k];delete S.ok[l.k];repaint()};
+ACT.olRm=el=>{const[D,l]=lnOf(el);if(!l)return;const S=CS(D);S.lines=S.lines.filter(x=>x!==l);delete S.hits[l.k];delete S.ok[l.k];if(S.man)delete S.man.lines[l.k];repaint()};
 ACT.olDel=ACT.olRm;
 ACT.olOk=el=>{const[D,l]=lnOf(el);if(!l)return;CS(D).ok[l.k]=1;paintHit(D,l)};
 CHG.olSame=el=>{const[D,l]=lnOf(el);if(!l)return;l.same=el.checked;repaint();check(D,l)};
 CHG.olSameTz=el=>{const[D,l]=lnOf(el);if(!l)return;l.sameTz=el.checked;repaint()};
-CHG.olSel=el=>{const[D,l]=lnOf(el);if(!l)return;l[el.dataset.f]=el.value;if(el.dataset.f==='plan')check(D,l)};
+CHG.olSel=el=>{const[D,l]=lnOf(el);if(!l)return;l[el.dataset.f]=el.value;if(el.dataset.f==='plan'){const p=plan(l.plan);if(p&&p.carrier)l.carrier=p.carrier;repaint();check(D,l)}else paintCalc()};
+// הנחה ידנית / שינוי או ביטול מבצע. ידנית מחליפה (לא מתווספת). התקרה לא מוצגת – החישוב (כמו בשרת) מחזיר שגיאה אם חורגים.
+ACT.olMan=()=>{const D=O.draft;if(!D)return;const S=CS(D),c=calcOf(D);if(!c)return;const p=c.r&&c.r.promo,m=MS(S);
+ const sc=[];if(p){sc.push(['pedit','שינוי הנחת המבצע "'+p.name+'"'],['poff','ביטול המבצע בהזמנה הזו'])}else S.lines.forEach((l,i)=>sc.push(['l'+l.k,'לקו '+(i+1)]));sc.push(['order','לכל ההזמנה']);
+ const cur=m.order?['order',m.order]:m.promo&&m.promo.off?['poff',null]:m.promo?['pedit',m.promo.disc]:(()=>{const k=Object.keys(m.lines)[0];return k?['l'+k,m.lines[k]]:[sc[0][0],null]})();
+ dlg(`<h3>${p?'שינוי מבצע / הנחה ידנית':'הנחה ידנית'}</h3><form data-f="olMF"><label class="f"><span>על מה</span><select name="sc">${sc.map(([v,t])=>`<option value="${esc(v)}"${cur[0]===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label>
+ <div class="row"><label class="f grow"><span>הנחה (0 = בלי הנחה)</span><input name="v" inputmode="decimal" maxlength="9" value="${cur[1]?cur[1].v:''}" autocomplete="off"></label><label class="f grow"><span>סוג</span>${tpSel('vT',cur[1]&&cur[1].t)}</label></div>
+ <p class="note">ההנחה הידנית מחליפה את ההנחה הקיימת (לא נוספת עליה).${p?' בביטול מבצע – השדה לא נדרש.':''}</p>
+ <div class="row"><button class="btn grow">החל</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.olMF=f=>{const D=O.draft;if(!D)return closeDlg();const S=CS(D),m=MS(S),x=fd(f),c=calcOf(D),p=c&&c.r&&c.r.promo;
+ const prev=JSON.stringify(m);let d=null;
+ if(x.sc!=='poff'){const v=nm(x.v);if(v==null||Number.isNaN(v))return toast('הנחה: מספר');const t=x.vT==='pct'?'pct':'amt';if(t==='pct'&&v>100)return toast('אחוז: 0 עד 100');if(t==='amt'&&v>100000)return toast('סכום: עד 100,000');d={t,v}}
+ m.lines={};m.order=null;m.promo=null;
+ if(x.sc==='order')m.order=d;else if(x.sc==='poff'&&p)m.promo={id:p.id,off:true};else if(x.sc==='pedit'&&p)m.promo={id:p.id,disc:d};else if(/^l/.test(x.sc))m.lines[x.sc.slice(1)]=d;
+ const r=calcOf(D);if(r&&r.e){const e=r.e;Object.assign(m,JSON.parse(prev));return toast(e)}
+ closeDlg();paintCalc()};
+ACT.olMClr=()=>{const D=O.draft;if(!D)return;const m=MS(CS(D));m.lines={};m.order=null;m.promo=null;paintCalc()};
 CHG.olAd=el=>{const D=O.draft;if(D)CS(D).ad=el.value};
 INP.olF=el=>{const[D,l]=lnOf(el);if(!l)return;l[el.dataset.f]=el.value;if(el.dataset.f==='phone'){if(phN(l.phone))check(D,l);else{delete CS(D).hits[l.k];paintHit(D,l)}}};
 INP.olB=el=>{const D=O.draft;if(!D)return;const S=CS(D);if(el.dataset.f==='ctz')S.ctz=el.value;else S.bank[el.dataset.f]=el.value};
+// שינוי כמות/מחיר/סניף בפריטים → הסכום וההנחה מחושבים מחדש (orders-staff.js מצייר את סה"כ הפריטים, ואנחנו אחריו)
+{const f=INP.oxLn;if(f)INP.oxLn=el=>{f(el);paintCalc()}}
 // טלפון הלקוח השתנה → קווים עם "הטלפון של הלקוח" נבדקים שוב
-{const f=INP.oxD;if(f)INP.oxD=el=>{f(el);const D=O.draft;if(D&&cell()&&D.cell&&D.cell.on&&el.dataset.k==='phone'&&phN(D.phone))D.cell.lines.filter(l=>l.same).forEach(l=>check(D,l))}}
+{const f=INP.oxD;if(f)INP.oxD=el=>{f(el);paintCalc();const D=O.draft;if(D&&cell()&&D.cell&&D.cell.on&&el.dataset.k==='phone'&&phN(D.phone))D.cell.lines.filter(l=>l.same).forEach(l=>check(D,l))}}
 
 // בונה את cell לשרת. זורק שגיאה בעברית אם חסר / לא תקין / יש התראה שלא נענתה.
 function out(D){const S=CS(D);if(!S.on)return undefined;const o={lines:[]};
@@ -95,16 +145,19 @@ function out(D){const S=CS(D);if(!S.on)return undefined;const o={lines:[]};
  if(S.ad)o.ad=S.ad;
  const b=S.bank,bb=[b.bank,b.br,b.acct].map(x=>String(x||'').trim());if(bb.some(Boolean)){if(!/^\d{2,3}$/.test(bb[0]))throw new Error('מספר בנק: 2–3 ספרות');if(!/^\d{3,4}$/.test(bb[1]))throw new Error('מספר סניף: 3–4 ספרות');if(!/^\d{4,12}$/.test(bb[2]))throw new Error('מספר חשבון: 4–12 ספרות');o.bank={bank:bb[0],br:bb[1],acct:bb[2]}}
  if(dig(S.ctz)){const z=tzN(S.ctz);if(!z||!tzOk(z))throw new Error('ת.ז בעל הכרטיס לא תקינה');o.ctz=z}
+ const c=calcOf(D);if(c&&c.e)throw new Error(c.e);if(c){const mo=manOut(S);if(mo)o.man=mo}
  return o}
 
 {const nw=V.oxNew;if(nw)V.oxNew=()=>{const r=nw();if(!r||!r.h||!on()||!cell())return r;const D=O.draft;if(!D)return r;if(!L.P)lload();
-  r.h=r.h.replace('<div class="sec"><h3>מוצרים</h3>',secH(D)+'<div class="sec"><h3>מוצרים</h3>');return r}}
-{const sv=ACT.oxSave;if(sv)ACT.oxSave=async el=>{const D=O.draft;if(D)D.cellOut=undefined;if(D&&on()&&cell()&&D.cell&&D.cell.on){try{D.cellOut=out(D)}catch(e){return toast(e.message)}}return sv(el)}}
+  r.h=r.h.replace('<div class="sec"><h3>מוצרים</h3>',secH(D)+'<div class="sec"><h3>מוצרים</h3>');
+  const c=calcOf(D);r.h=r.h.replace('<div class="card" style="margin:10px 0"><div class="row" style="justify-content:space-between"><b>סה״כ</b>',`<div class="card" id="olcalc" style="margin:10px 0"${c?'':' hidden'}>${calcH(D)}</div><div class="card" style="margin:10px 0"><div class="row" style="justify-content:space-between"><b>סה״כ</b>`);
+  if(c&&c.r)r.h=r.h.replace(/(<b class="amt" id="oxtot">)[^<]*(<\/b>)/,'$1'+ils(c.r.net)+'$2');return r}}
+{const sv=ACT.oxSave;if(sv)ACT.oxSave=async el=>{const D=O.draft;if(D)D.cellOut=undefined;if(D&&on()&&cell()&&D.cell&&D.cell.on){try{D.cellOut=out(D)}catch(e){paintCalc();return toast(e.message)}}return sv(el)}}
 
 /* ---------- כרטיס הזמנה: פרטי הניוד (קריאה בלבד) ---------- */
 {const vo=V.oxOrd;if(vo)V.oxOrd=id=>{const r=vo(id);if(!r||!r.h||!on()||!cell())return r;const o=(O.L||[]).find(x=>x.id===id),c=o&&o.cell;if(!c)return r;if(!L.P)lload();
-  const ls=(c.lines||[]).map((l,i)=>`<p class="note" style="margin:2px 0">קו ${i+1}: <bdi dir="ltr">${esc(l.phone)}</bdi>${l.same?' (של הלקוח)':''}${l.tz?' · ת.ז '+esc(l.tz):''}${l.plan?' · '+esc((plan(l.plan)||{}).name||'תוכנית'):''}${l.carrier?' · '+esc(l.carrier):''}</p>`).join('');
-  const h=`<div class="card"><b>ניוד קווים · ${c.n||0} קווים</b>${c.ack?' <span class="tag">אושר למרות ניוד קודם</span>':''}${ls}${c.ad?`<p class="note" style="margin:2px 0">פרסום: ${esc(c.ad)}</p>`:''}${c.bank?`<p class="note" style="margin:2px 0">בנק ${esc(c.bank.bank)} · סניף ${esc(c.bank.br)} · חשבון ${esc(c.bank.acct)}</p>`:''}${c.ctz?`<p class="note" style="margin:2px 0">ת.ז בעל הכרטיס ${esc(c.ctz)}</p>`:''}</div>`;
+  const ls=(c.lines||[]).map((l,i)=>`<p class="note" style="margin:2px 0">קו ${i+1}: <bdi dir="ltr">${esc(l.phone)}</bdi>${l.same?' (של הלקוח)':''}${l.tz?' · ת.ז '+esc(l.tz):''}${l.plan?' · '+esc((plan(l.plan)||{}).name||'חבילה'):''}${l.carrier?' · '+esc(l.carrier):''}</p>`).join('');
+  const h=`<div class="card"><b>ניוד קווים · ${c.n||0} קווים</b>${c.ack?' <span class="tag">אושר למרות ניוד קודם</span>':''}${ls}${c.ad?`<p class="note" style="margin:2px 0">פרסום: ${esc(c.ad)}</p>`:''}${c.bank?`<p class="note" style="margin:2px 0">בנק ${esc(c.bank.bank)} · סניף ${esc(c.bank.br)} · חשבון ${esc(c.bank.acct)}</p>`:''}${c.ctz?`<p class="note" style="margin:2px 0">ת.ז בעל הכרטיס ${esc(c.ctz)}</p>`:''}${c.calc&&c.calc.disc?`<p style="margin:4px 0 0"><b>הנחה: ${ils(c.calc.disc)}</b></p>`:''}</div>`;
   r.h=r.h.replace('<div class="sec"><h3>פריטים</h3>',h+'<div class="sec"><h3>פריטים</h3>');return r}}
 
 /* ---------- חבילות ניוד (מלאי: מנהל ועובד עם הרשאת הזמנות) + הגדרות ניוד (מנהל): הנחה קבועה, תקרה, מבצעים – 2026-11-09 ---------- */
@@ -119,7 +172,7 @@ const ck=(n,on,t,v)=>`<label class="row" style="min-height:44px;gap:8px"><input 
 {const st=V.oxStock;if(st)V.oxStock=()=>{const r=st();if(on()&&cell()&&r&&r.h&&r.h.includes('data-a="oxNewP"')){if(!L.P)lload();r.h=r.h.replace(/(data-a="oxNewP">[^<]*<\/button><\/div>)/,`$1<button class="btn g s w" data-a="go" data-v="oxLines">חבילות ניוד${L.P?' ('+L.P.length+')':''}</button>`)}return r}}
 {const ox=V.ox;if(ox)V.ox=()=>{const r=ox();if(on()&&cell()&&mgr()&&r&&r.h&&r.h.includes('data-v="oxNew"'))r.h=r.h.replace(/(<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="go" data-v="oxNew">[\s\S]*?<\/div>)/,'$1<button class="btn g s w" data-a="go" data-v="oxLines">חבילות ניוד והגדרות ניוד</button>');return r}}
 V.oxLines=()=>{const T='חבילות ניוד';if(!on()||!cell())return{t:T,h:'<div class="empty">אין לך הרשאה למסך הזה</div>'};if(!L.P){lload();return{t:T,h:'<div class="empty">טוען…</div>'}}const M=mgr();
- const P=L.P.map(p=>{const x=[p.carrier?esc(p.carrier):'',typeof p.monthly==='number'?'חודשי '+ils(p.monthly):'',feeT('משלוח',p.ship),feeT('סים',p.sim),M?'התראה על ניוד חוזר: '+(Number.isInteger(p.days)?p.days:60)+' יום':''].filter(Boolean).join(' · ');
+ const P=L.P.map(p=>{const x=[p.carrier?esc(p.carrier):'',typeof p.monthly==='number'?'חודשי '+ils(p.monthly):'',feeT('משלוח',p.ship),feeT('סים',p.sim),'התראה על ניוד חוזר: '+(Number.isInteger(p.days)?p.days:60)+' יום'].filter(Boolean).join(' · ');
   return `<div class="li" style="cursor:default"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">כבויה</span>':''}</b><small>${x}</small>${p.details?`<small>${esc(p.details)}</small>`:''}</div><button class="btn g s" data-a="olPE" data-id="${esc(p.id)}">עריכה</button></div>`}).join('')||'<div class="empty">אין חבילות עדיין</div>';
  return{t:T,s:'קטגוריה במלאי',h:`<button class="btn w" data-a="olPE" data-id="">${ico('plus')}חבילה חדשה</button>${M?'<button class="btn g s w" style="margin-top:8px" data-a="go" data-v="oxLnCfg">הנחות, תקרות ומבצעים</button>':''}${P}
  ${M?`<div class="sec"><h3>רשימות</h3></div><div class="card"><p class="note" style="margin:0">חברות ניוד: ${carriers().map(esc).join(', ')||'אין'}</p><p class="note" style="margin:4px 0 0">מקורות פרסום: ${ads().map(esc).join(', ')||'אין'}</p>
@@ -131,11 +184,11 @@ ACT.olPE=el=>{const p=el.dataset.id?plan(el.dataset.id):null,M=mgr();dlg(`<h3>${
  <label class="f"><span>פרטי התוכנית (רשות)</span><textarea name="details" rows="3" maxlength="300">${esc(p&&p.details||'')}</textarea></label>
  ${fld('עלות חודשית ללקוח ₪ (רשות)','monthly',p&&typeof p.monthly==='number'?p.monthly:'','text','inputmode="decimal" maxlength="9"')}
  ${feeF('משלוח','ship',p&&p.ship)}${feeF('סים','sim',p&&p.sim)}
- ${M?fld('טווח התראה על ניוד חוזר (ימים)','days',p&&Number.isInteger(p.days)?p.days:60,'text','required inputmode="numeric" maxlength="4"'):''}
+ ${fld('טווח התראה על ניוד חוזר (ימים)','days',p&&Number.isInteger(p.days)?p.days:60,'text','required inputmode="numeric" maxlength="4"')}
  ${p?ck('off',p.on===false,'כבויה (לא מוצגת בהזמנה)'):''}
  <div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.olPF=async f=>{const x=fd(f),M=mgr();if(!x.name.trim())return toast('חסר שם');const d={name:x.name.trim(),carrier:x.carrier||'',details:String(x.details||'').trim()};
- if(M){const days=+dig(x.days);if(!(days>=1&&days<=3650))return toast('טווח: 1 עד 3650 ימים');d.days=days}
+ {const days=+dig(x.days);if(!(days>=1&&days<=3650))return toast('טווח: 1 עד 3650 ימים');d.days=days} // גם עובד (החלטה 9.11 21:25)
  const mo=nm(x.monthly);if(Number.isNaN(mo))return toast('עלות חודשית: מספר');d.monthly=mo==null?'':mo;
  for(const[k,l]of[['ship','משלוח'],['sim','סים']]){const v=nm(x[k]);if(Number.isNaN(v))return toast(l+': מספר');d[k]=v==null?null:{amt:v,pay:x[k+'P']==='carrier'?'carrier':'store'}}
  if(x.id){d.id=x.id;d.on=!x.off}

@@ -1,5 +1,4 @@
-'use strict';
-// חבילות ניוד, הנחות ומבצעים (משימה 2026-11-09_חבילות-ניוד, שלב 2). פונקציה טהורה – בלי Firestore, כדי שהטופס יוכל להריץ אותה נוסחה.
+// חבילות ניוד, הנחות ומבצעים. (התקרה לא מוצגת לעובד – רק הודעת שגיאה; החלטה 9.11 ערב) (משימה 2026-11-09_חבילות-ניוד, שלב 2). פונקציה טהורה – בלי Firestore, כדי שהטופס יוכל להריץ אותה נוסחה.
 // כל החישוב באגורות (שלמים). קלט כבר מאומת (השרת מנקה לפני כן).
 //
 // חבילה (lineplan): ship/sim = { amt (₪), pay: 'store' | 'carrier' }, monthly (₪, מוצג בלבד).
@@ -22,6 +21,8 @@
 //      הנחה להזמנה/שינוי מבצע – עד התקרה הנמוכה מבין הקווים שהיא חלה עליהם × מספר הקווים; קו בלי תקרה לא מבטל; לאף קו אין תקרה = בלי הגבלה.
 //   5. ההנחה יורדת מכל הסכום לחנות (פריטים + משלוח/סים לחנות), ולא מתחת ל-0 (החלטה 9.11).
 
+(function (root) {
+'use strict';
 const ag = (x) => Math.round(Number(x || 0) * 100);
 const val = (d, baseAg) => (!d ? 0 : d.t === 'pct' ? Math.round(baseAg * d.v / 100) : ag(d.v));
 const fee = (f, pay) => (f && typeof f.amt === 'number' && f.amt > 0 && (f.pay || 'store') === pay ? ag(f.amt) : 0);
@@ -77,7 +78,7 @@ function calcCell(lines, plans, cfg, man, opt) {
   // תקרה להזמנה/לשינוי מבצע (החלטה 16:15): התקרה הנמוכה מבין החברות של הקווים, לכל קו (× מספר הקווים).
   // חברה בלי תקרה לא מבטלת תקרה של חברה אחרת; רק אם לאף קו אין תקרה – בלי הגבלה.
   const capSum = (ls) => { let lo = null; for (const l of ls) { const a = lineCap(l); if (a != null && (lo == null || a < lo)) lo = a; } return lo == null ? null : lo * ls.length; };
-  const overCap = (msg, a, cap) => { if (opt.capped && cap != null && a > cap) throw new CalcErr('over-cap', `${msg} עוברת את התקרה (₪${cap / 100}).`); };
+  const overCap = (msg, a, cap) => { if (opt.capped && cap != null && a > cap) throw new CalcErr('over-cap', `${msg} גבוהה מהמותר לעובד. הקטינו את ההנחה או פנו למנהל.`); };
   const best = bestPromo(promos, L);
   const manLines = Array.isArray(man.lines) ? man.lines : [];
   const hasLines = manLines.some((d) => d);
@@ -149,4 +150,7 @@ function hintOf(promos, L, curDisc) {
   return { line: best.line, promo: p.id, name: p.name, carriers: p.carriers.slice(), min: p.min, kind: p.kind, pdisc: Object.assign({}, p.disc), disc, gain: best.gain / 100, upTo: true, msg };
 }
 
-module.exports = { calcCell, CalcErr, promoLive, ilDay, _t: { val, fee, promoValue, bestPromo, hintOf } };
+const api = { calcCell, CalcErr, promoLive, ilDay, _t: { val, fee, promoValue, bestPromo, hintOf } };
+// שרת (Node) – module.exports; טופס ההזמנה (דפדפן) – window.LineDisc. אותו קובץ בדיוק: app-source/www/line-discount.js (בדיקה ב-ui-ord-lines.js)
+if (typeof module === 'object' && module.exports) module.exports = api; else root.LineDisc = api;
+})(typeof self !== 'undefined' ? self : this);

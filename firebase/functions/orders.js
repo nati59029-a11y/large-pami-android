@@ -1208,7 +1208,7 @@ async function setCellCfg(request) {
   return Object.assign({ ok: true }, o);
 }
 // saveLinePlan({ id?, name, carrier?, days?, on? }) – מנהל העסק, ועובד עם הרשאת הזמנות/מלאי (ord) – חבילות ניוד (החלטה 9.11 ערב).
-// days = טווח התראה לניוד חוזר (1–3650, ברירת מחדל 60) – מנהל בלבד; עובד שעורך חבילה קיימת לא משנה אותו.
+// days = טווח התראה לניוד חוזר (1–3650, ברירת מחדל 60) – מנהל ועובד עם הרשאה (החלטה 9.11 21:25); עובד שעורך בלי days – הטווח נשאר.
 async function saveLinePlan(request) {
   const w = await who(request);
   needCell(w);
@@ -1222,8 +1222,8 @@ async function saveLinePlan(request) {
     if (typeof input.carrier !== 'string' || !cfg.carriers.includes(input.carrier)) throw bad('bad-carrier', 'חברה: בחרו מהרשימה');
     d.carrier = input.carrier;
   } else d.carrier = '';
-  if (!isMgr && input.days !== undefined) throw deny('manager-only', 'טווח ההתראה – מנהל בלבד');
-  if (!isMgr && input.id != null && input.id !== '') { /* עובד בעריכה: days נשאר כמו שהוא */ }
+  // טווח ההתראה: גם עובד עם הרשאת הזמנות רשאי לשנות (החלטה 9.11 21:25). עובד בעריכה שלא שלח days – הטווח נשאר כמו שהוא
+  if (!isMgr && input.id != null && input.id !== '' && input.days === undefined) { /* נשאר */ }
   else if (input.days == null || input.days === '') d.days = DEF_DAYS;
   else if (!Number.isInteger(input.days) || input.days < 1 || input.days > 3650) throw bad('bad-days', 'טווח התראה: 1 עד 3650 ימים');
   else d.days = input.days;

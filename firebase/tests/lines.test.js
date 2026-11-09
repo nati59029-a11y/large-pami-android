@@ -91,8 +91,7 @@ describe('ניוד קווים – מתג cellular', () => {
 });
 
 describe('ניוד קווים – הגדרות מנהל', () => {
-  it('עובד לא מגדיר רשימות/טווח התראה; עובד בלי ord לא בודק קווים', async () => {
-    assert.equal((await call('saveLinePlan', E1, { name: 'x', days: 30 })).reason, 'manager-only');
+  it('עובד לא מגדיר רשימות; עובד בלי ord לא בודק קווים', async () => {
     assert.equal((await call('saveLinePlan', NOORD, { name: 'x' })).reason, 'no-perm');
     assert.equal((await call('setCellCfg', E1, { carriers: ['x'] })).reason, 'manager-only');
     assert.equal((await call('checkLines', NOORD, { lines: [{ phone: '0521234567' }] })).reason, 'no-perm');
@@ -261,7 +260,6 @@ describe('חבילות ניוד – הגדרות מנהל', () => {
       { promos: [Object.assign({}, PR, { zz: 1 })] }, { promos: [Object.assign({}, PR, { id: 'a' }), Object.assign({}, PR, { id: 'a' })] }];
     for (const b of bads) assert.equal((await call('setCellCfg', MGR, b)).status, 'INVALID_ARGUMENT', JSON.stringify(b));
     assert.equal((await call('setCellCfg', E1, { disc: {} })).reason, 'manager-only');
-    assert.equal((await call('saveLinePlan', E1, { name: 'x', monthly: 1, days: 9 })).reason, 'manager-only');
   });
   it('חבילות ניוד: עובד עם ord מוסיף ועורך חבילה (בלי טווח התראה); הטווח שקבע המנהל נשמר', async () => {
     await call('setCellCfg', MGR, { carriers: ['פרטנר'] });
@@ -271,6 +269,11 @@ describe('חבילות ניוד – הגדרות מנהל', () => {
     assert.equal((await call('saveLinePlan', MGR, { id: r.result.id, name: 'חבילת עובד', days: 14 })).status, 'OK');
     assert.equal((await call('saveLinePlan', E1, { id: r.result.id, name: 'חבילה 2', monthly: 39, on: false })).status, 'OK');
     p = await get(`b/${A}/lineplan/${r.result.id}`); assert.equal(p.days, 14); assert.equal(p.name, 'חבילה 2'); assert.equal(p.on, false); assert.equal(p.monthly, 39);
+    // החלטה 9.11 21:25: גם עובד עם הרשאת הזמנות משנה את טווח ההתראה (עם אותה ולידציה)
+    assert.equal((await call('saveLinePlan', E1, { id: r.result.id, name: 'חבילה 2', days: 9 })).status, 'OK');
+    assert.equal((await get(`b/${A}/lineplan/${r.result.id}`)).days, 9);
+    assert.equal((await call('saveLinePlan', E1, { name: 'חדשה', days: 4000 })).reason, 'bad-days');
+    const n = await call('saveLinePlan', E1, { name: 'חדשה', days: 21 }); assert.equal(n.status, 'OK'); assert.equal(n.result.days, 21);
   });
   it('הזמנה ישנה/חבילה ישנה – total לא משתנה אחרי שמירת ההגדרות החדשות', async () => {
     const { p30 } = await setup();
