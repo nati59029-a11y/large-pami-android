@@ -26,6 +26,11 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const [www, outFile, shots] = process.argv.slice(2);
   if (shots) fs.mkdirSync(shots, { recursive: true });
   let src = www;
+  if (process.env.MUTATE === 'nobiz') { // באג מכוון: בלי העטיפה של bizId → בדיקה 10 נכשלת
+    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ob-')); fs.cpSync(www, tmp, { recursive: true });
+    for (const n of ['orders-staff.js', 'orders-cust.js', 'orders-lines.js']) { const f = path.join(tmp, n); const s = fs.readFileSync(f, 'utf8'); const t = s.replace(/^const fnCall=\(n,d\)=>.*$/m, ''); if (s === t) throw new Error('mutation target not found'); fs.writeFileSync(f, t); }
+    src = tmp;
+  }
   if (process.env.MUTATE === 'nohit') {
     const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'ol-')); fs.cpSync(www, tmp, { recursive: true });
     const f = path.join(tmp, 'orders-lines.js'); const s = fs.readFileSync(f, 'utf8'); const t = s.replace("const r=await fnCall('checkLines',{lines:[ln]});", "const r={hits:[]};");
@@ -97,8 +102,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const tz0 = !(await page.$('#octz'));
   const before = calls.filter((c) => c.n === 'createOrder').length;
   await page.click('[data-c=olOn]'); await H.settle(page, 700);
-  await page.fill('#octz', '000000018'); await H.settle(page, 300); // 2026-11-09: שדה הת"ז מופיע רק בניוד
-  if (!tz0) throw new Error('ת"ז מוצגת לפני סימון ניוד');
+  await page.fill('#octz', '000000018'); await H.settle(page, 300); // 2026-11-09: בעסק עם ניוד השדה מוצג מההתחלה (רשות)
+  if (tz0) throw new Error('ת"ז (רשות) לא מוצגת בתחילת ההזמנה בעסק עם ניוד'); // 2026-11-09 (Dפון): בעסק עם ניוד – השדה מוצג מההתחלה, לא חובה
   const t2 = await page.innerText('#main'); const ck = calls.filter((c) => c.n === 'checkLines').pop();
   check('2 סימון "הלקוח רוצה ניוד" → checkLines מיד ובלי שמירה; "קו זה כבר נויד בתאריך 30.10.2026 בסניף יהודה הנשיא" + המשך/בטל', !!ck && ck.d.lines[0].phone === '0521111111' && /כבר נויד בתאריך 30\.10\.2026 בסניף יהודה הנשיא/.test(t2) && /המשך בכל זאת/.test(t2) && /בטל ניוד לקו/.test(t2) && calls.filter((c) => c.n === 'createOrder').length === before, { t2: t2.slice(0, 300), ck: ck && ck.d });
   await shot('התראת-ניוד');
@@ -142,6 +147,19 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.click('#dlg [data-a=ocGo]'); await H.settle(page, 600);
   const ic = calls.filter((c) => c.n === 'importCusts').pop();
   check('7 ייבוא: עמודת "סניף" מזוהה כסניף הניוד, נשלח מזהה הסניף; סניף לא קיים – שורה מסומנת', g7 === 'pbr' && !!ic && ic.d.rows.length === 1 && ic.d.rows[0].ports[0].br === 'br2' && /שורה 3: סניף/.test(pv), { g7, rows: ic && ic.d.rows, pv: pv.slice(0, 200) });
+  // 9 (2026-11-09, Dפון): מנהל־על שנכנס לעסק – כל קריאות ההזמנות נושאות bizId של העסק שנבחר; מנהל רגיל – בלי bizId
+  const n0 = calls.length;
+  await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0529998887'); await H.settle(page, 300);
+  const tz9 = !!(await page.$('#octz')) && /רשות/.test(await page.evaluate(() => document.getElementById('octz').closest('label').innerText));
+  await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); await page.click('[data-a=oxSave]'); await H.settle(page, 800);
+  const m9 = calls.slice(n0).filter((c) => c.n !== 'getBackupKey'); const co9 = m9.find((c) => c.n === 'createOrder');
+  check('9 עסק עם ניוד: ת"ז (רשות) מוצגת מההתחלה; הזמנה בלי ת"ז ובלי ניוד נשמרת; מנהל רגיל – בלי bizId', tz9 && !!co9 && !(co9.d.cust && co9.d.cust.tz) && co9.d.cell === undefined && m9.every((c) => !('bizId' in (c.d || {}))), m9.map((c) => c.n));
+  await page.evaluate(() => { window.__sa0 = SY.sa; SY.sa = 1; }); const n1 = calls.length;
+  await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0529998886'); await H.settle(page, 300);
+  await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); await page.click('[data-a=oxSave]'); await H.settle(page, 800);
+  await page.evaluate(() => { SY.sa = window.__sa0; });
+  const m10 = calls.slice(n1).filter((c) => c.n !== 'getBackupKey'); const co10 = m10.find((c) => c.n === 'createOrder');
+  check('10 מנהל־על בתוך העסק: createOrder (עם הסניף שנבחר) וכל קריאות ההזמנות נשלחות עם bizId=biz-o', !!co10 && co10.d.br === 'br1' && m10.every((c) => c.d && c.d.bizId === 'biz-o'), m10.map((c) => [c.n, c.d && c.d.bizId]));
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   }
   await browser.close();

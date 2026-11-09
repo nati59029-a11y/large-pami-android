@@ -9,6 +9,7 @@
 (function(){
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined'||!window.__ox)return;
+const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)}; // 2026-11-09 (Dפון): מנהל־על שנכנס לעסק – הפונקציות רצות בעסק שנבחר ולא בעסק הבית שלו
 const O=window.__ox;
 const on=()=>(isA()||isW()||!!(SY&&SY.sa))&&bzF('orders')&&wp('ord');
 const cell=()=>{const b=SY&&SY.biz;return !!(b&&b.features&&b.features.cellular===true)&&bzF('cellular')};
