@@ -92,8 +92,9 @@ describe('קטלוג: מוצר ישן, מחיר לסניף, שדות חדשים'
 });
 
 describe('מחיר סיטונאי (22:07: עובד רואה רק ללקוח סיטונאי)', () => {
-  it('(6) מנהל קובע wp; עובד לא קובע; עובד מקבל wp רק ללקוח wholesale; עובד לא קורא p/ws ו-p/cost ישירות', async () => {
-    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, wp: 5 })).reason, 'manager-only');
+  it('(6) מנהל קובע wp; עובד קובע wp/עלות (00:13); עובד מקבל wp רק ללקוח wholesale; עובד לא קורא p/ws, כן קורא p/cost', async () => {
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, wp: 4 })).status, 'OK');
+    assert.equal((await get(`b/${A}/prod/pB/p/ws`)).wp, 4);
     assert.equal((await call('saveProduct', MGR, { id: 'pB', name: 'לחם', price: 7.5, wp: 5, cost: 3 })).status, 'OK');
     assert.equal((await get(`b/${A}/prod/pB`)).wp, undefined); // לא על מסמך המוצר (שעובד קורא)
     assert.deepEqual((await call('getWsPrices', MGR, {})).result.wp, { pB: 5 });
@@ -118,7 +119,9 @@ describe('מחיר סיטונאי (22:07: עובד רואה רק ללקוח סי
     const o3 = await call('createOrder', E2, { reqId: rid(), br: 'br2', cust, custId: 't000000018', items: [{ pid: 'pB', qty: 1 }] });
     assert.equal((await call('getWsPrices', E1, { custId: 't000000018', ordId: o3.result.id, pids: ['pB'] })).reason, 'foreign-br'); // הזמנה של סניף זר
     await assertFails(db(E1).doc(`b/${A}/prod/pB/p/ws`).get());
-    await assertFails(db(E1).doc(`b/${A}/prod/pB/p/cost`).get());
+    await assertSucceeds(db(E1).doc(`b/${A}/prod/pB/p/cost`).get());
+    assert.deepEqual((await call('getCosts', E1, {})).result.cost, { pB: 3 });
+    assert.equal((await call('getCosts', NOORD, {})).reason, 'no-perm');
     await assertSucceeds(db(MGR).doc(`b/${A}/prod/pB/p/ws`).get());
   });
 });
@@ -145,7 +148,7 @@ describe('ייבוא מוצרים', () => {
     const L = (await coll(`b/${A}/stockLog`)).filter((x) => x.why === 'in' && x.note === 'ייבוא');
     assert.equal(L.length, 249 + 199);
   });
-  it('התאמה לפי שם כשאין ברקוד; אותו reqId פעמיים = מנה אחת; עובד לא מייבא; יותר מ-200 נדחה; סיטונאי בייבוא נשמר ב-p/ws', async () => {
+  it('התאמה לפי שם כשאין ברקוד; אותו reqId פעמיים = מנה אחת; עובד מייבא גם סיטונאי; יותר מ-200 נדחה; סיטונאי בייבוא נשמר ב-p/ws', async () => {
     const q = rid();
     const d = { reqId: q, br: 'br1', rows: [{ name: 'עוגה', price: 12, qty: 1, wp: 8 }, { name: 'חדש', price: 3 }] };
     const r1 = await call('importProducts', MGR, d); assert.equal(r1.result.updated, 1); assert.equal(r1.result.added, 1);
@@ -153,22 +156,24 @@ describe('ייבוא מוצרים', () => {
     const o = await get(`b/${A}/prod/pOld`); assert.equal(o.price, 12); assert.equal(o.q.br1, 5);
     assert.equal((await get(`b/${A}/prod/pOld/p/ws`)).wp, 8);
     assert.equal((await coll(`b/${A}/prod`)).length, 3);
-    assert.equal((await call('importProducts', E1, Object.assign({}, d, { reqId: rid() }))).reason, 'manager-only'); // עובד עם עמודת סיטונאי – נדחה
+    assert.equal((await call('importProducts', E1, Object.assign({}, d, { reqId: rid() }))).status, 'OK'); // 00:12: עובד עם עמודת סיטונאי – מותר
     assert.equal((await call('importProducts', MGR, { reqId: rid(), rows: rows(201) })).reason, 'bad-rows');
   });
 });
 
 describe('ייבוא מלאי ע"י עובד (החלטה 23:19)', () => {
-  it('עובד עם ord: לסניף שלו – כן; סניף זר / בלי סניף – לא; סיטונאי/עלות – נדחה; עובד בלי ord – לא; לא נכתב p/ws', async () => {
+  it('עובד עם ord: לסניף שלו – כן; סניף זר / בלי סניף – לא; סיטונאי/עלות – נשמרים (00:12); עובד בלי ord – לא', async () => {
     const ok = await call('importProducts', E1, { reqId: rid(), br: 'br1', rows: [{ name: 'עוגה', price: 11, qty: 2 }, { name: 'חדש עובד', price: 4, qty: 3 }] });
     assert.equal(ok.status, 'OK', ok.text); assert.equal(ok.result.updated, 1); assert.equal(ok.result.added, 1);
     assert.equal((await get(`b/${A}/prod/pOld`)).price, 11);
     assert.equal((await call('importProducts', E1, { reqId: rid(), br: 'br2', rows: [{ name: 'x', price: 1 }] })).reason, 'foreign-br');
     assert.equal((await call('importProducts', E1, { reqId: rid(), rows: [{ name: 'x', price: 1 }] })).reason, 'bad-br');
-    assert.equal((await call('importProducts', E1, { reqId: rid(), br: 'br1', rows: [{ name: 'x', price: 1, wp: 0 }] })).reason, 'manager-only');
-    assert.equal((await call('importProducts', E1, { reqId: rid(), br: 'br1', rows: [{ name: 'x', price: 1, cost: 1 }] })).reason, 'manager-only');
-    assert.equal((await call('importProducts', NOORD, { reqId: rid(), br: 'br1', rows: [{ name: 'x', price: 1 }] })).reason, 'no-perm');
     assert.equal(await get(`b/${A}/prod/pOld/p/ws`), null);
+    const wc = await call('importProducts', E1, { reqId: rid(), br: 'br1', rows: [{ name: 'עוגה', price: 11, wp: 7, cost: 5 }] });
+    assert.equal(wc.status, 'OK', wc.text); assert.equal(wc.result.updated, 1);
+    assert.equal((await get(`b/${A}/prod/pOld/p/ws`)).wp, 7); assert.equal((await get(`b/${A}/prod/pOld/p/cost`)).cost, 5);
+    assert.equal((await call('importProducts', E1, { reqId: rid(), br: 'br1', rows: [{ name: 'x', price: 1, cost: -1 }] })).result.bad.length, 1);
+    assert.equal((await call('importProducts', NOORD, { reqId: rid(), br: 'br1', rows: [{ name: 'x', price: 1 }] })).reason, 'no-perm');
   });
 });
 

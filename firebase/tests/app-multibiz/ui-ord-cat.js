@@ -45,7 +45,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
     if (n === 'getWsPrices' && globalThis.__WSDENY) return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { status: 'PERMISSION_DENIED', message: 'x', details: { reason: 'not-wholesale' } } }) });
-    const R = { importProducts: { ok: true, added: 2, updated: 1, bad: [] }, getWsPrices: { wp: { pA: 9 } }, transferStock: { ok: true }, saveCat: { ok: true, id: 'c3' }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
+    const R = { importProducts: { ok: true, added: 2, updated: 1, bad: [] }, getWsPrices: { wp: { pA: 9 } }, getCosts: { cost: { pA: 4 } }, transferStock: { ok: true }, saveCat: { ok: true, id: 'c3' }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
   await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
@@ -148,13 +148,27 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const gw = calls.filter((c) => c.n === 'getWsPrices');
   const gwE = gw[gw.length - 1].d; // עובד: הלקוח + מזהה הטיוטה + רק מוצרי ההזמנה (השרת בודק את הקישור)
   const wsOk = gwE.custId === 't000000018' && typeof gwE.reqId === 'string' && Array.isArray(gwE.pids) && gwE.pids.length === 1;
-  check('13 סיטונאי: מנהל – כפתור ומחיר ₪9 הוחל; עובד בלי לקוח / לקוח רגיל – אין כפתור; לקוח סיטונאי – יש; העובד לא רואה עלות/טופס סיטונאי', m1 && pw === '9' && !e0 && !e1 && e2 && gw.length >= 2 && wsOk && !/name="wp"|name="cost"/.test(wsv), { m1, pw, e0, e1, e2, gwE });
-  // 13ב. עובד (23:19): רואה "ייבוא מלאי", בלי עמודת סיטונאי, ולא שולח wp
+  check('13 סיטונאי: מנהל – כפתור ומחיר ₪9 הוחל; עובד בלי לקוח / לקוח רגיל – אין כפתור; לקוח סיטונאי – יש; העובד רואה עלות (00:12)', m1 && pw === '9' && !e0 && !e1 && e2 && gw.length >= 2 && wsOk && /עלות/.test(wsv), { m1, pw, e0, e1, e2, gwE });
+  // 13ב. עובד (00:12): רואה "ייבוא מלאי" עם עמודות סיטונאי ועלות, ושולח אותן
   await page.evaluate(() => { window.__ox.im = null; NAV = [{ v: 'home' }]; go('oxImp'); }); await H.settle(page, 300);
   await page.setInputFiles('input[data-c=oxImpFile]', { name: 'w.csv', mimeType: 'text/csv', buffer: Buffer.from('שם,מחיר,סיטונאי\nא,5,3\n') }); await H.settle(page, 400);
-  const wImp = await page.evaluate(() => ({ wp: !!document.querySelector('select[data-c=oxImpMap][data-k=wp]'), name: !!document.querySelector('select[data-c=oxImpMap][data-k=name]') }));
-  check('13ב עובד: מסך ייבוא מלאי נפתח בלי עמודת סיטונאי', wImp.name && !wImp.wp, wImp);
+  const wImp = await page.evaluate(() => ({ wp: !!document.querySelector('select[data-c=oxImpMap][data-k=wp]'), cost: !!document.querySelector('select[data-c=oxImpMap][data-k=cost]'), name: !!document.querySelector('select[data-c=oxImpMap][data-k=name]') }));
+  await page.selectOption('select[data-c=oxImpMap][data-k=wp]', '2'); await H.settle(page, 200);
+  await page.click('[data-a=oxImpGo]'); await H.settle(page, 400);
+  const ipW = calls.filter((c) => c.n === "importProducts").pop();
+  check('13ב עובד: ייבוא מלאי עם עמודות סיטונאי ועלות, wp נשלח', wImp.name && wImp.wp && wImp.cost && !!ipW && ipW.d.rows[0].wp === 3, { wImp, ip: ipW && ipW.d });
   await page.evaluate(() => { SY.role = window.__mgrSave; });
+  // 15. מסך ה-+ (00:27): מנהל – "משימה חדשה" בחצי רוחב ולידה "הזמנות"; עובד עם ord – "הזמנות"; עובד בלי ord – אין
+  const plus = async () => { await page.evaluate(() => { NAV = [{ v: 'home' }]; rerender(); openAdd(); }); await H.settle(page, 300);
+    return page.evaluate(() => { const o = document.querySelector('#sheet [data-a=addGo][data-v=ox]'), t = document.querySelector('#sheet [data-a=addGo][data-v=tk]');
+      return { ox: !!o, row: !!(o && t && o.parentElement === t.parentElement), half: !!(t && t.getBoundingClientRect().width < window.innerWidth * 0.6) }; }); };
+  const pm = await plus(); if (shots) await page.screenshot({ path: path.join(shots, 'plus-mgr-390.png') });
+  await page.click('#sheet [data-a=addGo][data-v=ox]'); await H.settle(page, 300);
+  const toOx = await page.evaluate(() => cur().v === 'ox');
+  await page.evaluate(() => { SY.role = 'worker'; SY.perms = { ord: true }; }); const pw1 = await plus(); if (shots) await page.screenshot({ path: path.join(shots, 'plus-wk-390.png') });
+  await page.evaluate(() => { SY.perms = { ord: false }; }); const pw0 = await plus();
+  await page.evaluate(() => { SY.role = window.__mgrSave; SY.perms = {}; sheetClose(); });
+  check('15 מסך +: מנהל – הזמנות ליד משימה חדשה (חצי רוחב) ופותח הזמנות; עובד עם ord – יש; בלי ord – אין', pm.ox && pm.row && pm.half && toOx && pw1.ox && !pw0.ox, { pm, toOx, pw1, pw0 });
   check('14 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
   await browser.close();
