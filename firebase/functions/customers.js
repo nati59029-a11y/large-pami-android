@@ -212,10 +212,12 @@ async function importCusts(request) {
       seen.add(id);
       let r;
       await db.runTransaction(async (tx) => {
+        // קריאות לפני כתיבות (חובה בטרנזקציה): קודם בודקים אם יש כבר כרטיס
+        const cref = card ? db.doc(`cust/${id}/p/card`) : null;
+        const has = cref ? (await tx.get(cref)).exists : true;
         r = await upsert(tx, db, w, o, { fill: true, src: 'import' });
         if (card) { // כרטיס קיים לא נדרס בייבוא (כמו שאר השדות – רק ריקים מתמלאים)
-          const cref = db.doc(`cust/${r.id}/p/card`);
-          if (!(await tx.get(cref)).exists) {
+          if (!has) {
             tx.set(cref, { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + r.id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'import' });
             tx.update(db.doc('cust/' + r.id), { last4: card.num.slice(-4), card: true });
             tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: r.id, act: 'import' });
