@@ -12,10 +12,14 @@
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const T = require('./lib/tenant');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const core = require('./orders')._core;
+const { defineSecret } = require('firebase-functions/params');
+const CARD = require('./lib/card');
+// fb/ord-card: מפתח הצפנה לפרטי כרטיס (Secret Manager). באמולטור – ערך דמה מ-functions/.secret.local
+const CARD_ENC_KEY = defineSecret('CARD_ENC_KEY');
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -144,11 +148,13 @@ function merge(old, o, fill) {
   return Object.keys(up).length ? up : null;
 }
 // כתיבה בטרנזקציה: לקוח שקיים רק לפי טלפון ועכשיו יש לו ת"ז – מועתק ל-t{tz}, והישן מסומן mv (לא נמחק).
+// fb/ord-card (ליקוי 2): כרטיס מוצפן של הישן מפוענח ומוצפן מחדש לנתיב החדש (ה-AAD הוא הנתיב), הישן נמחק באותה טרנזקציה, ונרשם ביומן act:'move'.
 async function upsert(tx, db, w, o, opts) {
   const id = idFor(o);
   const ref = db.doc('cust/' + id);
   const pref = o.tz && o.phone ? db.doc('cust/p' + o.phone) : null;
-  const [s, ps] = pref ? await tx.getAll(ref, pref) : [await tx.get(ref), null];
+  const pcref = pref ? db.doc(`cust/p${o.phone}/p/card`) : null;
+  const [s, ps, pcs] = pref ? await tx.getAll(ref, pref, pcref) : [await tx.get(ref), null, null];
   const now = Date.now();
   let base = s.exists ? s.data() : null;
   let moved = false;
@@ -168,9 +174,19 @@ async function upsert(tx, db, w, o, opts) {
     const up = merge(base, o, opts.fill) || {};
     for (const [k, v] of Object.entries(up)) { if (k.startsWith('x.')) { d.x = Object.assign({}, d.x || {}); d.x[k.slice(2)] = v; } else d[k] = v; }
     if (typeof ws === 'boolean') d.wholesale = ws;
+    let cardMoved = false;
+    if (pcs && pcs.exists) {
+      const key = CARD_ENC_KEY.value();
+      const c = CARD.open(key, w.bizId, 'cust/p' + o.phone, pcs.get('box'));
+      tx.set(db.doc(`cust/${id}/p/card`), Object.assign({}, pcs.data(), { box: CARD.seal(key, w.bizId, 'cust/' + id, c), last4: c.num.slice(-4) }));
+      tx.delete(pcref);
+      d.card = true; d.last4 = c.num.slice(-4);
+      tx.set(db.collection('cardLog').doc(), { t: now, by: w.uid, cust: id, act: 'move', from: 'p' + o.phone });
+      cardMoved = true;
+    } else delete d.card; // סימון בלי מוצפן – לא מועבר
     tx.set(ref, d);
-    tx.update(pref, { mv: id, upd: now });
-    return { id, created: false, moved: true };
+    tx.update(pref, Object.assign({ mv: id, upd: now }, cardMoved ? { card: FieldValue.delete() } : {}));
+    return { id, created: false, moved: true, cardMoved };
   }
   const u = merge(base, o, opts.fill) || {};
   if (typeof ws === 'boolean' && (base.wholesale === true) !== ws) u.wholesale = ws;
@@ -238,13 +254,27 @@ async function importCusts(request) {
         }
       }
       if (r0.ports !== undefined && !cellOn(w)) throw deny('feature-off', 'ניודים – התוספת "סלולר" כבויה');
+      const card = r0.card == null ? null : CARD.cleanCard(r0.card); delete r0.card; // fb/ord-card: מוצפן בשרת (00:50 – כולל CVV)
+      if (card) r0.last4 = card.num.slice(-4);
       onlyKeys(r0, ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports'].concat(core.CPART_KEYS), 'שורה');
       const o = clean(r0, keys, brs);
       const id = idFor(o);
       if (seen.has(id)) { res.same++; continue; } // כפילות בתוך אותה מנה
       seen.add(id);
       let r;
-      await db.runTransaction(async (tx) => { r = await upsert(tx, db, w, o, { fill: true, src: 'import' }); });
+      await db.runTransaction(async (tx) => {
+        // קריאות לפני כתיבות (חובה בטרנזקציה): קודם בודקים אם יש כבר כרטיס
+        const cref = card ? db.doc(`cust/${id}/p/card`) : null;
+        const has = cref ? (await tx.get(cref)).exists : true;
+        r = await upsert(tx, db, w, o, { fill: true, src: 'import' });
+        if (card && !r.cardMoved) { // כרטיס קיים לא נדרס בייבוא (כמו שאר השדות – רק ריקים מתמלאים)
+          if (!has) {
+            tx.set(cref, { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + r.id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'import' });
+            tx.update(db.doc('cust/' + r.id), { last4: card.num.slice(-4), card: true });
+            tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: r.id, act: 'import' });
+          }
+        }
+      });
       if (r.created) res.created++; else if (r.same) res.same++; else res.updated++;
     } catch (e) {
       if (!(e instanceof HttpsError)) throw e;
@@ -277,6 +307,118 @@ async function setCustCfg(request) {
   return { ok: true, xKeys: out };
 }
 
+// ---------- fb/ord-card: פרטי כרטיס מוצפנים ----------
+// cust/{id}/p/card { box:{v,iv,ct,tag}, last4, at, by, src } – אין קריאה מהאפליקציה (חוקים). cust/{id}.card=true + last4 בלבד גלויים.
+// cardLog/{id} { t, by, cust, act:'set'|'import'|'view'|'copy'|'del', ord?, f? } – כל פעולה נרשמת. קריאה – מנהל בלבד.
+const CID_RE = /^[tp][0-9]{8,10}$/;
+const OPEN_ST = ['new', 'work', 'wait_pay'];
+function custIdOf(v) { if (typeof v !== 'string' || !CID_RE.test(v)) throw bad('bad-id', 'לקוח לא תקין'); return v; }
+const mgrOnly = (w) => { if (w.role !== 'manager') throw deny('manager-only', 'הפעולה מותרת למנהל בלבד'); };
+
+// setCard({ custId, card:{num,exp?,name?,cvv?}, ordId? }) – מנהל; או עובד עם ord מתוך הזמנה שלא שולמה. דורס כרטיס קיים.
+// עובד עם ord: רק עם ordId של הזמנה פתוחה (לא שולמה) בסניף שלו שמקושרת ללקוח – הזנת כרטיס מתוך ההזמנה (00:37).
+async function ordGate(db, w, id, ordId) {
+  if (typeof ordId !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(ordId)) throw deny('need-ord', 'פרטי כרטיס לעובד – רק מתוך הזמנה שלא שולמה');
+  const o = await db.doc('ord/' + ordId).get();
+  if (!o.exists) throw new HttpsError('not-found', 'ההזמנה לא נמצאה', { reason: 'no-ord' });
+  if (o.get('custId') !== id) throw deny('not-linked', 'הלקוח לא מקושר להזמנה הזו');
+  if (!OPEN_ST.includes(o.get('status'))) throw deny('ord-paid', 'ההזמנה כבר שולמה – פרטי הכרטיס למנהל בלבד');
+  const br = o.get('br'), mine = w.staff && Array.isArray(w.staff.get('br')) ? w.staff.get('br') : null;
+  // סמנטיקה זהה ל-orders.js (canBr ו-assertOrdBr): עובד בלי רשימת br במסמך staff = כל הסניפים (mine=null),
+  // והזמנה בלי סניף ('' או '_' = עסק בלי סניפים) – בלי בדיקת סניף. ליקוי 3 – מיושר בכוונה, לא חסימה.
+  if (mine && br && br !== '_' && !mine.includes(br)) throw deny('foreign-br', 'אין לך הרשאה להזמנה של סניף אחר');
+  return ordId;
+}
+async function setCard(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId', 'card', 'ordId']);
+  const id = custIdOf(input.custId);
+  const card = CARD.cleanCard(input.card);
+  const db = T.tdb();
+  const ordId = w.role === 'manager' ? null : await ordGate(db, w, id, input.ordId);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(db.doc('cust/' + id));
+    if (!s.exists || s.get('mv')) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+    tx.set(db.doc(`cust/${id}/p/card`), { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'manual' });
+    tx.update(s.ref, { last4: card.num.slice(-4), card: true, upd: Date.now() });
+    tx.set(db.collection('cardLog').doc(), Object.assign({ t: Date.now(), by: w.uid, cust: id, act: 'set' }, ordId ? { ord: ordId } : {}));
+  });
+  return { ok: true, last4: card.num.slice(-4) };
+}
+
+// getCard({ custId, act:'view'|'copy', ordId? }) → { card:{num,exp?,name?,cvv?} } למנהל; { card:{num} } לעובד.
+// עובד עם ord: רק עם ordId של הזמנה שלא שולמה (new/work/wait_pay), בסניף שלו, שמקושרת ללקוח הזה (custId). נבדק בשרת.
+// כל קריאה מוצלחת נרשמת ב-cardLog לפני שהערך מוחזר.
+// מכסת פענוח לכל משתמש (ליקוי 4, הנחה): עובד 20 לדקה / 150 ליום, מנהל 60 / 500. מונה cardQ/{uid} בטרנזקציה (חוקים: סגור).
+// יום = תאריך UTC. חריגה → resource-exhausted (card-quota) ונרשמת ביומן act:'quota'.
+const QUOTA = { manager: [60, 500], other: [20, 150] };
+async function quota(db, w) {
+  const [perMin, perDay] = QUOTA[w.role === 'manager' ? 'manager' : 'other'];
+  const ref = db.doc('cardQ/' + w.uid);
+  const now = Date.now(), m = Math.floor(now / 60000), d = new Date(now).toISOString().slice(0, 10);
+  let over = null;
+  await db.runTransaction(async (tx) => {
+    over = null;
+    const s = await tx.get(ref);
+    const q = s.exists ? s.data() : {};
+    const mn = q.m === m ? q.mn || 0 : 0, dn = q.d === d ? q.dn || 0 : 0;
+    if (mn >= perMin) { over = 'min'; return; }
+    if (dn >= perDay) { over = 'day'; return; }
+    tx.set(ref, { m, mn: mn + 1, d, dn: dn + 1, upd: now });
+  });
+  if (over) {
+    await db.collection('cardLog').add({ t: now, by: w.uid, act: 'quota', f: over });
+    throw new HttpsError('resource-exhausted', over === 'min'
+      ? `הגעת למכסת הצגת פרטי כרטיס (${perMin} בדקה). נסו שוב בעוד דקה.`
+      : `הגעת למכסה היומית של הצגת פרטי כרטיס (${perDay}). פנו למנהל.`, { reason: 'card-quota' });
+  }
+}
+async function getCard(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId', 'act', 'ordId']);
+  const id = custIdOf(input.custId);
+  if (!['view', 'copy'].includes(input.act)) throw bad('bad-act', 'פעולה לא תקינה');
+  const db = T.tdb();
+  let ordId = null;
+  if (w.role !== 'manager') {
+    if (input.act !== 'copy') throw deny('manager-only', 'הצגת פרטי כרטיס – מנהל בלבד');
+    ordId = await ordGate(db, w, id, input.ordId);
+  } else if (input.ordId != null) {
+    if (typeof input.ordId !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(input.ordId)) throw bad('bad-id', 'הזמנה לא תקינה');
+    ordId = input.ordId;
+  }
+  const cs = await db.doc('cust/' + id).get();
+  if (!cs.exists || cs.get('mv') || cs.get('card') !== true) throw new HttpsError('not-found', 'אין כרטיס שמור ללקוח', { reason: 'no-card' });
+  await quota(db, w);
+  const s = await db.doc(`cust/${id}/p/card`).get();
+  if (!s.exists) throw new HttpsError('not-found', 'אין כרטיס שמור ללקוח', { reason: 'no-card' });
+  const c = CARD.open(CARD_ENC_KEY.value(), w.bizId, 'cust/' + id, s.get('box'));
+  const out = w.role === 'manager' ? c : { num: c.num };
+  const log = { t: Date.now(), by: w.uid, cust: id, act: input.act, f: w.role === 'manager' ? 'all' : 'num' };
+  if (ordId) log.ord = ordId;
+  await db.collection('cardLog').add(log);
+  return { card: out };
+}
+
+// delCard({ custId }) – מנהל. מוחק את המוצפן ואת last4/card מהלקוח. נרשם ביומן.
+async function delCard(request) {
+  const w = await who(request); mgrOnly(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId']);
+  const id = custIdOf(input.custId);
+  const db = T.tdb();
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(db.doc('cust/' + id));
+    if (!s.exists) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+    tx.delete(db.doc(`cust/${id}/p/card`));
+    tx.update(s.ref, { card: FieldValue.delete(), last4: FieldValue.delete(), upd: Date.now() });
+    tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: id, act: 'del' });
+  });
+  return { ok: true };
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -285,6 +427,8 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { saveCust, importCusts, setCustCfg };
+const FNS = { setCustCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
+const SFNS = { saveCust, importCusts, setCard, getCard, delCard }; // צריכות את מפתח הכרטיסים
+for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY] }, wrap(k, f));
 Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor } });

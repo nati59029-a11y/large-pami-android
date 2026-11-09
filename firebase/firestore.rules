@@ -646,10 +646,19 @@ service cloud.firestore {
     match /cust/{id} {
       allow read: if rOrd();
       allow create, update, delete: if false;
+      // fb/ord-card: פרטי כרטיס מוצפנים (cust/{id}/p/card) – אף אחד לא קורא מהאפליקציה (רק השרת, getCard)
+      match /p/{k} {
+        allow read, write: if false;
+      }
     }
     match /custcfg/{docId} {
       allow get: if rOrd() && docId == 'main';
       allow list, create, update, delete: if false;
+    }
+    // fb/ord-card: יומן צפייה/העתקה של פרטי כרטיס – מנהל קורא
+    match /cardLog/{id} {
+      allow read: if rMgr();
+      allow create, update, delete: if false;
     }
 
     // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
@@ -1061,6 +1070,10 @@ service cloud.firestore {
       match /cust/{id} {
         allow read: if ordOk();
         allow create, update, delete: if false;
+        // fb/ord-card: המוצפן – אין קריאה מהאפליקציה
+        match /p/{k} {
+          allow read, write: if false;
+        }
       }
       match /custcfg/{docId} {
         allow get: if ordOk() && docId == 'main';
@@ -1074,6 +1087,11 @@ service cloud.firestore {
       }
       match /lineLog/{id} {
         allow read, create, update, delete: if false;
+      }
+      // fb/ord-card: יומן הכרטיסים – מנהל העסק בלבד
+      match /cardLog/{id} {
+        allow read: if feat('orders') && bMgr();
+        allow create, update, delete: if false;
       }
 
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')
