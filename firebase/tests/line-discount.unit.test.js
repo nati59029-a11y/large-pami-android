@@ -1,157 +1,67 @@
 'use strict';
-// בדיקות יחידה לחישוב הנחות ניוד (lib/line-discount.js) – בלי אמולטור. הרצה: node --test tests/line-discount.unit.test.js
+// בדיקות יחידה לחישוב מבצעי ניוד המפושטים (lib/line-discount.js) – בלי אמולטור. הרצה: node --test tests/line-discount.unit.test.js
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { calcCell, CalcErr } = require('../functions/lib/line-discount');
+const { calcCell, ilDay } = require('../functions/lib/line-discount');
 
 const plans = new Map([
-  ['pP', { carrier: 'פרטנר', monthly: 39.9, ship: { amt: 30, pay: 'store' }, sim: { amt: 20, pay: 'carrier' } }],
-  ['pH', { carrier: 'הוט', monthly: 29.9, ship: { amt: 30, pay: 'store' }, sim: { amt: 10, pay: 'store' } }],
-  ['pC', { carrier: 'סלקום', monthly: 49, sim: { amt: 25, pay: 'store' } }],
-  ['pOld', { name: 'ישנה', carrier: 'פרטנר', days: 60, on: true }],
+  ['p39', { carrier: 'פרטנר', monthly: 39, ship: { amt: 30, pay: 'store' }, sim: { amt: 20, pay: 'carrier' }, promo: { disc: 200 } }],
+  ['pQ', { carrier: 'פרטנר', monthly: 49, ship: { amt: 10, pay: 'store' }, promo: { qty: { n: 3, amt: 150, scope: 'plan' } } }],
+  ['pQc', { carrier: 'פרטנר', monthly: 59, promo: { qty: { n: 2, amt: 100, scope: 'carrier' } } }],
+  ['pQa', { carrier: 'הוט', monthly: 29, promo: { qty: { n: 3, amt: 90, scope: 'all' } } }],
+  ['pH', { carrier: 'הוט', monthly: 29.9, sim: { amt: 10, pay: 'store' } }],
+  ['pC', { carrier: 'סלקום', monthly: 49 }],
+  ['pOld', { carrier: 'פרטנר', promo: { disc: 50, from: '2026-01-01', to: '2026-01-31' } }],
+  ['pFut', { carrier: 'פרטנר', monthly: 1, promo: { disc: 70, from: '2026-11-10' } }],
 ]);
 const T = '2026-11-09';
-const run = (lines, cfg, man, opt) => calcCell(lines.map((p) => ({ plan: p })), plans, cfg, man, Object.assign({ today: T, itemsAg: 0 }, opt || {}));
-const P3 = { id: 'x3', name: '3 קווים', carriers: ['פרטנר', 'הוט'], min: 3, kind: 'once', disc: { t: 'amt', v: 100 }, stack: 'add', on: true };
+const run = (ps, man, items) => calcCell(ps.map((p) => ({ plan: p })), plans, man == null ? null : man, { today: T, itemsAg: Math.round((items || 0) * 100) });
 
-describe('חישוב הנחות ניוד', () => {
-  it('חבילה לכל קו, לחברות שונות; לחנות נספר, לחברה ועלות חודשית מוצגים בלבד', () => {
-    const r = run(['pP', 'pH', 'pC'], {});
-    assert.equal(r.store, 30 + 40 + 25);
-    assert.equal(r.ext, 20);
-    assert.equal(r.monthly, 118.8);
-    assert.deepEqual(r.lines.map((l) => l.c), ['פרטנר', 'הוט', 'סלקום']);
-    assert.equal(r.disc, 0);
+describe('מבצעי ניוד – פישוט', () => {
+  it('לחנות נספר, לחברה ועלות חודשית מוצגים בלבד; בלי מבצע – אין הנחה', () => {
+    const r = run(['pH', 'pC'], null, 100);
+    assert.equal(r.store, 10); assert.equal(r.ext, 0); assert.equal(r.monthly, 78.9);
+    assert.equal(r.sug, 0); assert.equal(r.disc, 0); assert.equal(r.net, 110);
   });
-  it('הנחה קבועה לכל חברה בנפרד – סכום ואחוז', () => {
-    const r = run(['pP', 'pH'], { disc: { 'פרטנר': { t: 'amt', v: 10 }, 'הוט': { t: 'pct', v: 50 } } });
-    assert.deepEqual(r.lines.map((l) => l.fix), [10, 20]);
-    assert.equal(r.disc, 30); assert.equal(r.net, 40);
+  it('הנחה בסכום בקנייה – לכל קו בחבילה', () => {
+    const r = run(['p39', 'p39'], null, 500);
+    assert.equal(r.sug, 400); assert.equal(r.disc, 400); assert.equal(r.ext, 40); assert.equal(r.net, 500 + 60 - 400);
   });
-  it('הנחה קבועה לא עוברת את התשלום לחנות של הקו; לא נוגעת בלחברה/חודשי', () => {
-    const r = run(['pP'], { disc: { 'פרטנר': { t: 'amt', v: 500 } } });
-    assert.equal(r.disc, 30); assert.equal(r.net, 0); assert.equal(r.ext, 20); assert.equal(r.monthly, 39.9);
+  it('העובד משנה את הסה"כ: למטה, למעלה, 0 = בלי הנחה', () => {
+    assert.equal(run(['p39'], 80, 500).disc, 80);
+    assert.equal(run(['p39'], 250, 500).disc, 250);
+    const z = run(['p39'], 0, 500); assert.equal(z.disc, 0); assert.equal(z.net, 530); assert.equal(z.sug, 200);
   });
-  it('מבצע "פעם אחת": חברות משתתפות נספרות יחד; מתחת למינימום – אין', () => {
-    assert.equal(run(['pP', 'pH'], { promos: [P3] }).promo, null);
-    const r = run(['pP', 'pH', 'pH'], { promos: [P3] });
-    assert.equal(r.promo.id, 'x3'); assert.equal(r.disc, 100);
+  it('לא מתחת ל-0: ההנחה מוגבלת לסכום לחנות', () => {
+    const r = run(['p39'], null, 50); assert.equal(r.disc, 80); assert.equal(r.net, 0);
+    assert.equal(run(['p39'], 9999, 0).net, 0);
   });
-  it('מבצע "לכל קו": ההנחה לכל קו משתתף', () => {
-    const p = Object.assign({}, P3, { kind: 'line', disc: { t: 'amt', v: 15 }, min: 2 });
-    const r = run(['pP', 'pH', 'pC'], { promos: [p] });
-    assert.equal(r.disc, 30);
+  it('מבצע כמות – אותה חבילה: 2 קווים לא, 3 כן (פעם אחת), והמלצה ב-2', () => {
+    const a = run(['pQ', 'pQ'], null, 0);
+    assert.equal(a.sug, 0); assert.ok(a.hint); assert.match(a.hint.msg, /עוד קו אחד באותה חבילה יזכה בהנחה של ₪150 \(מבצע 3 קווים\)/);
+    const b = run(['pQ', 'pQ', 'pQ'], null, 0);
+    assert.equal(b.sug, 150); assert.equal(b.disc, 30); // ההנחה בפועל מוגבלת לסכום לחנות (3×10)
+    assert.equal(run(['pQ', 'pQ', 'pQ'], null, 1000).sug, 150); assert.equal(b.hint, null);
   });
-  it('כמה מבצעים – רק המשתלם ביותר', () => {
-    const a = Object.assign({}, P3, { id: 'a', min: 2, disc: { t: 'amt', v: 20 } });
-    const b = Object.assign({}, P3, { id: 'b', min: 2, kind: 'line', disc: { t: 'amt', v: 15 } });
-    const r = run(['pP', 'pH', 'pH'], { promos: [a, b] });
-    assert.equal(r.promo.id, 'b'); assert.equal(r.disc, 45);
+  it('מבצע כמות – אותה חברה: קו פרטנר מחבילה אחרת נספר; הוט לא', () => {
+    assert.equal(run(['pQc', 'p39'], null, 1000).sug, 100 + 200);
+    const r = run(['pQc', 'pH'], null, 1000); assert.equal(r.sug, 0); assert.match(r.hint.msg, /באותה חברה/);
   });
-  it('מצטרף מוסיף לקבועה; מחליף מבטל אותה בקווים המשתתפים', () => {
-    const disc = { 'פרטנר': { t: 'amt', v: 5 }, 'סלקום': { t: 'amt', v: 5 } };
-    const add = run(['pP', 'pH', 'pH', 'pC'], { disc, promos: [P3] });
-    assert.equal(add.disc, 100 + 5 + 5);
-    const rep = run(['pP', 'pH', 'pH', 'pC'], { disc, promos: [Object.assign({}, P3, { stack: 'replace' })] });
-    assert.equal(rep.disc, 100 + 5); // פרטנר (משתתף) בלי קבועה, סלקום (לא משתתף) נשאר
+  it('מבצע כמות – כל קו בהזמנה', () => {
+    assert.equal(run(['pQa', 'pC', 'p39'], null, 1000).sug, 90 + 200);
+    assert.equal(run(['pQa', 'pC'], null, 1000).sug, 0);
   });
-  it('הנחה ידנית לקו כשיש מבצע – נדחית; שינוי מבצע מחליף אותו; ביטול מחזיר לקבועה', () => {
-    assert.throws(() => run(['pP', 'pH', 'pH'], { promos: [P3] }, { lines: [{ t: 'amt', v: 5 }] }), (e) => e instanceof CalcErr && e.reason === 'promo-active');
-    const ed = run(['pP', 'pH', 'pH'], { promos: [P3] }, { promo: { id: 'x3', disc: { t: 'amt', v: 80 } } });
-    assert.equal(ed.disc, 80); assert.deepEqual(ed.promo.edit, { t: 'amt', v: 80 });
-    const off = run(['pP', 'pH', 'pH'], { promos: [P3], disc: { 'הוט': { t: 'amt', v: 3 } } }, { promo: { id: 'x3', off: true } });
-    assert.equal(off.disc, 6); assert.equal(off.promo.off, true);
+  it('תאריכי תוקף: מבצע שפג או שעוד לא התחיל – לא חל', () => {
+    assert.equal(run(['pOld'], null, 100).sug, 0);
+    assert.equal(run(['pFut'], null, 100).sug, 0);
+    assert.equal(calcCell([{ plan: 'pFut' }], plans, null, { today: '2026-11-10', itemsAg: 10000 }).sug, 70);
   });
-  it('בלי מבצע – ידנית לקו או להזמנה', () => {
-    assert.equal(run(['pP', 'pH'], {}, { lines: [{ t: 'amt', v: 7 }, null] }).disc, 7);
-    assert.equal(run(['pP', 'pH'], {}, { order: { t: 'pct', v: 10 } }).disc, 7);
+  it('אגורות: בלי שגיאות עיגול', () => {
+    const r = calcCell([{ plan: 'pH' }], plans, 0.1, { today: T, itemsAg: 20 }); // 0.2 + 10 − 0.1
+    assert.equal(r.net, 10.1);
   });
-  it('תקרה: עובד מעל התקרה נדחה; מנהל/בלי תקרה – אין הגבלה; הזמנה עם כמה חברות – הנמוכה', () => {
-    const cap = { 'פרטנר': { t: 'amt', v: 10 }, 'הוט': { t: 'amt', v: 20 } };
-    assert.throws(() => run(['pP'], { cap }, { lines: [{ t: 'amt', v: 11 }] }, { capped: true }), (e) => e.reason === 'over-cap');
-    assert.equal(run(['pP'], { cap }, { lines: [{ t: 'amt', v: 10 }] }, { capped: true }).disc, 10);
-    assert.equal(run(['pP'], { cap }, { lines: [{ t: 'amt', v: 25 }] }, { capped: false }).disc, 25);
-    assert.equal(run(['pC'], { cap }, { lines: [{ t: 'amt', v: 25 }] }, { capped: true }).disc, 25);
-    // הנחה להזמנה – התקרה הנמוכה (10) × מספר הקווים (2) = 20 (החלטה 16:15)
-    assert.equal(run(['pP', 'pH'], { cap }, { order: { t: 'amt', v: 20 } }, { capped: true }).disc, 20);
-    assert.throws(() => run(['pP', 'pH'], { cap }, { order: { t: 'amt', v: 21 } }, { capped: true }), (e) => e.reason === 'over-cap');
-    // חברה בלי תקרה (סלקום) לא מבטלת את התקרה של פרטנר: 10 × 2
-    assert.equal(run(['pP', 'pC'], { cap }, { order: { t: 'amt', v: 20 } }, { capped: true }).disc, 20);
-    assert.throws(() => run(['pP', 'pC'], { cap }, { order: { t: 'amt', v: 400 } }, { capped: true }), (e) => e.reason === 'over-cap');
-    // לאף חברה אין תקרה – בלי הגבלה (עד הסכום)
-    assert.equal(run(['pC', 'pC'], { cap }, { order: { t: 'amt', v: 400 } }, { capped: true }).disc, 50);
-    assert.throws(() => run(['pP', 'pH', 'pH'], { cap, promos: [P3] }, { promo: { id: 'x3', disc: { t: 'amt', v: 150 } } }, { capped: true }), (e) => e.reason === 'over-cap');
-  });
-  it('סכום לחנות לא שלילי (הנחה גדולה מהסכום)', () => {
-    const r = run(['pP', 'pH', 'pH'], { promos: [Object.assign({}, P3, { disc: { t: 'amt', v: 1000 } })] });
-    assert.equal(r.net, 0); assert.equal(r.disc, 110);
-  });
-  it('אגורות: 33.33% על 3 קווים – בלי שגיאות עיגול', () => {
-    const p = Object.assign({}, P3, { kind: 'line', disc: { t: 'pct', v: 33.33 } });
-    const r = run(['pP', 'pP', 'pP'], { promos: [p] });
-    assert.equal(r.disc, 30); // 10.00 (=999.9 אגורות → 1000) ×3
-    assert.equal(r.net, 60);
-    assert.ok(Number.isInteger(Math.round(r.net * 100)) && Math.abs(r.net * 100 - Math.round(r.net * 100)) < 1e-9);
-  });
-  it('המלצה: קו לחברה לא משתתפת – הודעה עם חברות, מבצע וסכום; בלי שיפור – אין', () => {
-    const h = run(['pP', 'pH', 'pC'], { promos: [P3] }).hint;
-    assert.equal(h.line, 2); assert.deepEqual(h.carriers, ['פרטנר', 'הוט']); assert.equal(h.name, '3 קווים'); assert.equal(h.disc, 100);
-    assert.equal(run(['pP', 'pH', 'pH'], { promos: [P3] }).hint, null);
-    assert.equal(run(['pC'], { promos: [P3] }).hint, null);
-  });
-  it('מבצע כבוי או מחוץ לתאריכים – לא חל', () => {
-    assert.equal(run(['pP', 'pH', 'pH'], { promos: [Object.assign({}, P3, { on: false })] }).disc, 0);
-    assert.equal(run(['pP', 'pH', 'pH'], { promos: [Object.assign({}, P3, { to: '2026-11-08' })] }).disc, 0);
-    assert.equal(run(['pP', 'pH', 'pH'], { promos: [Object.assign({}, P3, { from: '2026-11-09', to: '2026-11-09' })] }).disc, 100);
-  });
-  it('החלטה 9.11: ידנית מחליפה ולא מתווספת – גם בלי מבצע; 0 = בלי הנחה', () => {
-    const disc = { 'פרטנר': { t: 'amt', v: 50 }, 'הוט': { t: 'amt', v: 50 } };
-    // קבועה 50 לכל קו, יורדת מכל ההזמנה (פריטים 200)
-    assert.equal(run(['pP', 'pH'], { disc }, {}, { itemsAg: 20000 }).disc, 100);
-    const r = run(['pP', 'pH'], { disc }, { lines: [{ t: 'amt', v: 20 }, null] }, { itemsAg: 20000 });
-    assert.equal(r.disc, 70); assert.deepEqual(r.lines.map((l) => l.man), [20, null]);
-    assert.equal(run(['pP', 'pH'], { disc }, { lines: [{ t: 'amt', v: 0 }, { t: 'amt', v: 0 }] }, { itemsAg: 20000 }).disc, 0);
-    assert.equal(run(['pP', 'pH'], { disc }, { order: { t: 'amt', v: 10 } }, { itemsAg: 20000 }).disc, 10);
-    // עם מבצע: הנחה להזמנה מחליפה גם את המבצע
-    const o = run(['pP', 'pH', 'pH'], { disc, promos: [P3] }, { order: { t: 'amt', v: 20 } }, { itemsAg: 20000 });
-    assert.equal(o.disc, 20); assert.equal(o.promo.off, true);
-    assert.throws(() => run(['pP'], { disc }, { order: { t: 'amt', v: 1 }, lines: [{ t: 'amt', v: 1 }] }), (e) => e.reason === 'bad-manual');
-  });
-  it('החלטה 9.11: תקרה לכל קו ("עד 50 לכל קו") – הנחה לקו מעל התקרה נדחית', () => {
-    const cap = { 'פרטנר': { t: 'amt', v: 50 } };
-    assert.equal(run(['pP', 'pP'], { cap }, { lines: [{ t: 'amt', v: 50 }, { t: 'amt', v: 50 }] }, { capped: true, itemsAg: 20000 }).disc, 100);
-    assert.throws(() => run(['pP', 'pP'], { cap }, { lines: [{ t: 'amt', v: 51 }, null] }, { capped: true, itemsAg: 20000 }), (e) => e.reason === 'over-cap');
-  });
-  it('החלטה 9.11: מבצע באחוזים "פעם אחת" לא חל, ושינוי מבצע פעם-אחת לאחוז נדחה', () => {
-    assert.equal(run(['pP', 'pH', 'pH'], { promos: [Object.assign({}, P3, { disc: { t: 'pct', v: 10 } })] }).promo, null);
-    assert.throws(() => run(['pP', 'pH', 'pH'], { promos: [P3] }, { promo: { id: 'x3', disc: { t: 'pct', v: 10 } } }), (e) => e.reason === 'bad-promo');
-  });
-  it('החלטה 9.11: ההנחה יורדת מכל ההזמנה עד 0; המלצה בניסוח "עד"', () => {
-    const r = run(['pP', 'pH', 'pH'], { promos: [P3] }, {}, { itemsAg: 5000 });
-    assert.equal(r.disc, 100); assert.equal(r.net, 50 + 110 - 100);
-    const z = run(['pP', 'pH', 'pH'], { promos: [Object.assign({}, P3, { disc: { t: 'amt', v: 1000 } })] }, {}, { itemsAg: 5000 });
-    assert.equal(z.net, 0); assert.equal(z.disc, 160);
-    const h = run(['pP', 'pH', 'pC'], { promos: [P3] }).hint;
-    assert.equal(h.upTo, true); assert.ok(h.msg.includes('עד ₪') && h.msg.includes('3 קווים'), h.msg);
-  });
-  it('legacy: חבילה ישנה / קו בלי חבילה – אפס בכל השדות', () => {
-    const r = calcCell([{ plan: 'pOld' }, { carrier: 'פרטנר' }, {}], plans, {}, {}, { today: T });
-    assert.deepEqual([r.store, r.disc, r.net, r.ext, r.monthly, r.promo, r.hint], [0, 0, 0, 0, 0, null, null]);
-  });
-  it('תקרה 0 = עובד לא נותן הנחה ידנית (לקו, להזמנה, שינוי מבצע); 0 מותר; מנהל – בלי הגבלה', () => {
-    const cap = { 'פרטנר': { t: 'amt', v: 0 } };
-    assert.throws(() => run(['pP'], { cap }, { lines: [{ t: 'amt', v: 1 }] }, { capped: true }), (e) => e.reason === 'over-cap');
-    assert.equal(run(['pP'], { cap }, { lines: [{ t: 'amt', v: 0 }] }, { capped: true }).disc, 0);
-    assert.throws(() => run(['pP', 'pC'], { cap }, { order: { t: 'amt', v: 1 } }, { capped: true }), (e) => e.reason === 'over-cap');
-    assert.throws(() => run(['pP', 'pH', 'pH'], { cap, promos: [P3] }, { promo: { id: 'x3', disc: { t: 'amt', v: 1 } } }, { capped: true }), (e) => e.reason === 'over-cap');
-    assert.equal(run(['pP'], { cap }, { lines: [{ t: 'amt', v: 5 }] }, { capped: false }).disc, 5);
-  });
-  it('תאריך מבצע לפי שעון ישראל – חורף ‎+2 וקיץ ‎+3', () => {
-    const { ilDay } = require('../functions/lib/line-discount');
-    assert.equal(ilDay(Date.UTC(2026, 10, 9, 21, 59)), '2026-11-09'); // חורף: 23:59 בישראל
-    assert.equal(ilDay(Date.UTC(2026, 10, 9, 22, 0)), '2026-11-10'); // חורף: 00:00 בישראל
-    assert.equal(ilDay(Date.UTC(2026, 6, 9, 20, 59)), '2026-07-09'); // קיץ: 23:59
-    assert.equal(ilDay(Date.UTC(2026, 6, 9, 21, 0)), '2026-07-10'); // קיץ: 00:00
-    assert.match(ilDay(), /^\d{4}-\d{2}-\d{2}$/);
+  it('שעון ישראל: חצות בחורף ובקיץ', () => {
+    assert.equal(ilDay(Date.UTC(2026, 0, 1, 22, 30)), '2026-01-02'); // חורף +2
+    assert.equal(ilDay(Date.UTC(2026, 6, 1, 21, 30)), '2026-07-02'); // קיץ +3
   });
 });

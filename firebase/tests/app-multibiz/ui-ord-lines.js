@@ -22,12 +22,11 @@ const CUST = [doc('cust/t' + TZL, { name: S(LN), phone: S('0507777777'), tz: S(T
 const PLANS = [doc('lineplan/pl1', { name: S('פרטנר 30'), carrier: S('פרטנר'), days: N(30), on: { booleanValue: true } })];
 // שלב 4 (חבילות): ערך JS → שדה Firestore REST
 const FV = (v) => (v === null ? { nullValue: null } : typeof v === 'boolean' ? { booleanValue: v } : typeof v === 'number' ? N(v) : typeof v === 'string' ? S(v) : Array.isArray(v) ? A(v.map(FV)) : M(Object.fromEntries(Object.entries(v).map(([k, x]) => [k, FV(x)]))));
-const PK = { pP: { name: 'פרטנר חדשה', carrier: 'פרטנר', monthly: 39.9, details: '5G ללא הגבלה', ship: { amt: 30, pay: 'store' }, sim: { amt: 20, pay: 'carrier' }, on: true },
-  pH: { name: 'הוט 29', carrier: 'הוט', monthly: 29.9, ship: { amt: 30, pay: 'store' }, sim: { amt: 10, pay: 'store' }, on: true },
-  pC: { name: 'סלקום 49', carrier: 'סלקום', monthly: 49, sim: { amt: 25, pay: 'store' }, on: true } };
+const PK = { pP: { name: 'פרטנר חדשה', carrier: 'פרטנר', monthly: 39.9, details: '5G ללא הגבלה', ship: { amt: 30, pay: 'store' }, sim: { amt: 20, pay: 'carrier' }, on: true, promo: { disc: 20, qty: { n: 3, amt: 100, scope: 'carrier' } } },
+  pH: { name: 'הוט 29', carrier: 'הוט', monthly: 29.9, ship: { amt: 30, pay: 'store' }, sim: { amt: 10, pay: 'store' }, on: true, promo: { gifts: [{ pid: 'pA', price: 0 }, { pid: 'pB', price: 5 }] } },
+  pC: { name: 'סלקום 49', carrier: 'סלקום', monthly: 49, sim: { amt: 25, pay: 'store' }, on: true, promo: { gifts: [{ pid: 'pA', price: 0 }] } } };
 for (const [id, p] of Object.entries(PK)) PLANS.push(doc('lineplan/' + id, Object.fromEntries(Object.entries(p).map(([k, v]) => [k, FV(v)]))));
-const CCFG = { carriers: ['פרטנר', 'סלקום', 'הוט'], ads: ['פייסבוק'], disc: { 'פרטנר': { t: 'amt', v: 20 } }, cap: { 'פרטנר': { t: 'amt', v: 50 }, 'הוט': { t: 'amt', v: 50 } },
-  promos: [{ id: 'x3', name: '3 קווים', carriers: ['פרטנר', 'הוט'], min: 3, kind: 'once', disc: { t: 'amt', v: 100 }, stack: 'add', on: true }] };
+const CCFG = { carriers: ['פרטנר', 'סלקום', 'הוט'], ads: ['פייסבוק'] };
 const CC0 = { carriers: ['פרטנר', 'סלקום'], ads: ['פייסבוק'] }; // בדיקות 1–10 כמו קודם; בדיקה 11 – CCFG (נטען מחדש דרך שמירת הרשימות)
 const LD = require('../../functions/lib/line-discount');
 const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש'), on: { booleanValue: true } }), M({ id: S('br2'), name: S('יהודה הנשיא'), on: { booleanValue: true } })]) });
@@ -152,29 +151,28 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   // 5ב. מלאי: כפתור "חבילות ניוד"
   await goV('oxStock'); await H.settle(page, 400); const st = await page.innerText('#main');
   check('5ב מלאי: כפתור "חבילות ניוד"', /חבילות ניוד/.test(st), st.slice(0, 120));
-  // 5ג. הגדרות ניוד: הנחה קבועה, תקרה (0 נשמרת, ריק = בלי), מבצע
-  const s5c = await screen('הגדרות-ניוד', () => goV('oxLnCfg'));
-  await page.fill('#main input[name=d0]', '50'); await page.fill('#main input[name=k0]', '0'); await page.fill('#main input[name=d1]', '10'); await page.selectOption('#main select[name=d1T]', 'pct');
-  await page.click('form[data-f=olDF] button'); await H.settle(page, 500);
-  const sc = calls.filter((c) => c.n === 'setCellCfg').pop();
-  check('5ג הנחה קבועה ותקרה לכל חברה; מגע/ניגודיות/גלילה', okAll(s5c) && !!sc && JSON.stringify(sc.d) === JSON.stringify({ disc: { 'פרטנר': { t: 'amt', v: 50 }, 'סלקום': { t: 'pct', v: 10 } }, cap: { 'פרטנר': { t: 'amt', v: 0 } } }), { d: sc && sc.d, s: sum(s5c) });
-  await page.click('[data-a=olPrE][data-id=""]'); await H.settle(page, 200);
-  await page.fill('#dlg input[name=name]', '3 קווים'); await page.check('#dlg input[name=c0]'); await page.check('#dlg input[name=c1]'); await page.fill('#dlg input[name=min]', '3'); await page.fill('#dlg input[name=disc]', '10'); await page.selectOption('#dlg select[name=discT]', 'pct'); await page.selectOption('#dlg select[name=kind]', 'once');
-  const nPr = calls.filter((c) => c.n === 'setCellCfg').length; await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 300);
-  const blockedPct = calls.filter((c) => c.n === 'setCellCfg').length === nPr;
-  await page.fill('#dlg input[name=disc]', '100'); await page.selectOption('#dlg select[name=discT]', 'amt'); await page.selectOption('#dlg select[name=stack]', 'replace'); await page.fill('#dlg input[name=to]', '2026-12-31');
-  await page.setViewportSize({ width: 320, height: 700 }); await H.settle(page, 100); const sw = await page.evaluate(() => { const g = document.getElementById('dlg'); const gr = g.getBoundingClientRect(); window.__ovf = [...g.querySelectorAll('*')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.left < gr.left - 1 || r.right > gr.right + 1); }).map((e) => e.tagName + '.' + (e.name || e.className) + ':' + Math.round(e.getBoundingClientRect().width)).slice(0, 8); return [document.documentElement.scrollWidth, innerWidth, g.scrollWidth, g.clientWidth, window.__ovf]; }); await page.setViewportSize({ width: 390, height: 844 }); await H.settle(page, 100); await shot('מבצע-חדש');
+  // 5ג (פישוט 9.11). מבצע בתוך החבילה: הנחה בקנייה, 2 מתנות (0 ומחיר מבצע), מבצע כמות לפי חברה, תאריך; אין מסך "הנחות, תקרות ומבצעים"
+  await goV('oxLines'); await H.settle(page, 300); const noCfg = (await page.evaluate(() => typeof V.oxLnCfg)) === 'undefined' && !/הנחות, תקרות ומבצעים/.test(await page.innerText('#main'));
+  await page.click('[data-a=olPE][data-id=pl1]'); await H.settle(page, 200); await page.click('#dlg details summary'); await H.settle(page, 100);
+  await page.fill('#dlg input[name=pd]', '200'); await page.selectOption('#dlg select[name=g0]', 'pA'); await page.selectOption('#dlg select[name=g1]', 'pB'); await page.fill('#dlg input[name=gp1]', '100');
+  await page.fill('#dlg input[name=qn]', '3'); await page.fill('#dlg input[name=qa]', '150'); await page.selectOption('#dlg select[name=qs]', 'carrier'); await page.fill('#dlg input[name=pt]', '2026-12-31');
+  await page.setViewportSize({ width: 360, height: 780 }); await H.settle(page, 100);
+  const sw = await page.evaluate(() => { const g = document.getElementById('dlg'); const gr = g.getBoundingClientRect(); return [document.documentElement.scrollWidth, innerWidth, g.scrollWidth, g.clientWidth, [...g.querySelectorAll('*')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.left < gr.left - 1 || r.right > gr.right + 1); }).map((e) => e.tagName + '.' + (e.name || '')).slice(0, 8)]; });
+  await page.evaluate(() => { const d = document.querySelector('#dlg details'); if (d) d.scrollIntoView({ block: 'start' }); }); await shot('חבילה-מבצע'); await page.setViewportSize({ width: 390, height: 844 }); await H.settle(page, 100);
   await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 500);
-  const pr = calls.filter((c) => c.n === 'setCellCfg').pop(); const P0 = pr && pr.d.promos && pr.d.promos[0];
-  check('5ד מבצע: כמה חברות, מינימום, סכום, פעם אחת, מחליף, תאריך; אחוז "פעם אחת" נחסם', blockedPct && !!P0 && P0.carriers.join() === 'פרטנר,סלקום' && P0.min === 3 && P0.kind === 'once' && P0.stack === 'replace' && P0.disc.t === 'amt' && P0.disc.v === 100 && P0.to === '2026-12-31' && P0.on === true && sw[0] <= sw[1] && sw[2] <= sw[3] && !sw[4].length, { blockedPct, P0, sw });
+  const spr = calls.filter((c) => c.n === 'saveLinePlan').pop(); const PR0 = spr && spr.d.promo;
+  check('5ג מבצע בחבילה: הנחה 200, מתנות (0 / 100), 3 קווים באותה חברה ← 150, תאריך; אין מסך הנחות/תקרות; 360px בלי חריגה', noCfg && JSON.stringify(PR0) === JSON.stringify({ disc: 200, gifts: [{ pid: 'pA', price: 0 }, { pid: 'pB', price: 100 }], qty: { n: 3, amt: 150, scope: 'carrier' }, to: '2026-12-31' }) && sw[0] <= sw[1] && sw[2] <= sw[3] && !sw[4].length, { noCfg, PR0, sw });
+  await page.click('[data-a=olPE][data-id=pl1]'); await H.settle(page, 200); await page.click('#dlg details summary'); await page.fill('#dlg input[name=qn]', '1'); const nq = calls.filter((c) => c.n === 'saveLinePlan').length; await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 300);
+  check('5ד מבצע כמות של קו אחד נחסם בטופס', calls.filter((c) => c.n === 'saveLinePlan').length === nq);
+  await page.evaluate(() => { const g = document.getElementById('dlg'); if (g && g.open) g.close(); });
   await goV('oxLines'); await H.settle(page, 200);
   check('5 מסך תוכניות ניוד (מנהל): טווח 30 מוצג, ברירת מחדל 60 בתוכנית חדשה, saveLinePlan {name, days:45, carrier}; מגע/ניגודיות/גלילה', okAll(s5) && /התראה על ניוד חוזר: 30 יום/.test(s5.a.text) && def === '60' && !!sp && sp.d.days === 45 && sp.d.carrier === 'סלקום', { def, sp: sp && sp.d, s: sum(s5) });
   // 6. עובד: אין מסך תוכניות
   await page.evaluate(() => { window.__role0 = SY.role; window.__sa0 = SY.sa; SY.role = 'worker'; delete SY.sa; }); await goV('oxLines'); await H.settle(page, 200); const e6 = await page.innerText('#main');
   await page.click('[data-a=olPE][data-id=pl1]'); await H.settle(page, 200); /* החלטה 21:25: גם עובד רואה ומשנה את הטווח */ const noDays = !!(await page.$('#dlg input[name=days]')); await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 500); const sw6 = calls.filter((c) => c.n === 'saveLinePlan').pop();
-  await goV('oxLnCfg'); await H.settle(page, 200); const e6c = await page.innerText('#main'); await goV('ox'); await H.settle(page, 200); const e6b = await page.innerText('#main');
+  await goV('ox'); await H.settle(page, 200); const e6b = await page.innerText('#main');
   await page.evaluate(() => { SY.role = window.__role0; if (window.__sa0) SY.sa = window.__sa0; });
-  check('6 עובד: רואה ועורך חבילות (כולל טווח התראה), בלי הנחות/תקרות/מבצעים ובלי רשימות', /פרטנר 30/.test(e6) && !/הנחות, תקרות ומבצעים|עריכת הרשימות/.test(e6) && /התראה על ניוד חוזר: 30 יום/.test(e6) && noDays && !!sw6 && sw6.d.days === 30 && /אין לך הרשאה/.test(e6c) && !/חבילות ניוד/.test(e6b), { e6: e6.slice(0, 120), sw6: sw6 && sw6.d });
+  check('6 עובד: רואה ועורך חבילות (כולל טווח התראה ומבצע), בלי רשימות', /פרטנר 30/.test(e6) && !/הנחות, תקרות ומבצעים|עריכת הרשימות/.test(e6) && /התראה על ניוד חוזר: 30 יום/.test(e6) && noDays && !!sw6 && sw6.d.days === 30 && !/חבילות ניוד/.test(e6b), { e6: e6.slice(0, 120), sw6: sw6 && sw6.d });
   // 7. ייבוא לקוחות: עמודת סניף הניוד (01:00)
   await goV('ocList'); await H.settle(page, 300); await page.click('[data-a=ocImp]'); await H.settle(page, 200);
   const csv = 'שם,טלפון,תאריך ניוד,טלפון ניוד,סניף\nדנה,0501111111,02/01/2025,0521234567,יהודה הנשיא\nיוסי,0502222222,02/01/2025,,סניף לא קיים\n';
@@ -197,48 +195,42 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.evaluate(() => { SY.sa = window.__sa0; });
   const m10 = calls.slice(n1).filter((c) => c.n !== 'getBackupKey'); const co10 = m10.find((c) => c.n === 'createOrder');
   check('10 מנהל־על בתוך העסק: createOrder (עם הסניף שנבחר) וכל קריאות ההזמנות נשלחות עם bizId=biz-o', !!co10 && co10.d.br === 'br1' && m10.every((c) => c.d && c.d.bizId === 'biz-o'), m10.map((c) => [c.n, c.d && c.d.bizId]));
-  // 11 (שלב 4): חבילה לכל קו, פירוט הנחות, המלצה, הנחה ידנית/מבצע, תקרה. הסכום בטופס = אותה פונקציה של השרת על מה שנשלח.
+  // 11 (פישוט 9.11): חבילה לכל קו, מבצע מהחבילה, מתנות כשורות מוצר, משבצת "סה"כ הנחה" שהעובד משנה, המלצה בשורה אחת. הסכום בטופס = אותה פונקציה של השרת.
   const same = fs.readFileSync(path.join(www, 'line-discount.js'), 'utf8') === fs.readFileSync(path.join(__dirname, '../../functions/lib/line-discount.js'), 'utf8');
   check('11א line-discount.js בטופס זהה לקובץ של השרת', same);
   const pm = new Map(Object.entries(PK));
   globalThis.__CC = CCFG; await goV('oxLines'); await H.settle(page, 200); await page.click('[data-a=olCfg]'); await H.settle(page, 200); await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 600);
-  const srvNet = (d, capped) => { const it = d.items.reduce((s, x) => s + Math.round(x.qty * x.price * 100), 0); try { return LD.calcCell(d.cell.lines, pm, CCFG, d.cell.man || {}, { itemsAg: it, today: LD.ilDay(), capped }).net; } catch (e) { return 'ERR ' + e.reason; } };
+  const srvNet = (d) => { const it = d.items.reduce((s, x) => s + Math.round(x.qty * x.price * 100), 0); return LD.calcCell(d.cell.lines, pm, typeof d.cell.man === 'number' ? d.cell.man : null, { itemsAg: it, today: LD.ilDay() }).net; };
   const tot = async () => +String(await page.innerText('#oxtot')).replace(/[^\d.]/g, '');
   const build = async (ph, pkgs) => { await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', ph); await H.settle(page, 300); await page.fill('#octz', '123456782');
     await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); await page.click('[data-c=olOn]'); await H.settle(page, 500);
     for (let i = 0; i < pkgs.length; i++) { if (i) { await page.click('[data-a=olAdd]'); await H.settle(page, 150); await page.fill(`[data-i=olF][data-f=phone] >> nth=${i - 1}`, '05344444' + (10 + i)); await H.settle(page, 300); }
       await page.selectOption(`[data-c=olSel][data-f=plan] >> nth=${i}`, pkgs[i]); await H.settle(page, 250); } };
   const save = async () => { const n = calls.filter((c) => c.n === 'createOrder').length; await page.click('[data-a=oxSave]'); await H.settle(page, 700); globalThis.__T = await page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.innerText).join(' | ')); const a = calls.filter((c) => c.n === 'createOrder'); return a.length > n ? a[a.length - 1].d : null; };
-  // א: קו אחד, פרטים לפני בחירה; קבועה 20 → 10.5 + 30 − 20 = 20.5; אין המלצה
-  await build('0529998880', ['pP']); const ta = await tot(); const tA = await page.innerText('#main');
+  const manV = () => page.inputValue('#olman').catch(() => null);
+  // ב: קו אחד, פרטים לפני בחירה; הנחה 20 מהחבילה → 10.5 + 30 − 20 = 20.5; המשבצת = 20; אין המלצה
+  await build('0529998880', ['pP']); const ta = await tot(); const tA = await page.innerText('#main'); const mA = await manV();
   const pkInfo = /עלות חודשית: \W*39\.9/.test(tA) && /משלוח \W*30\.00.*משלמים לחנות/.test(tA) && /סים \W*20\.00.*משלמים לחברה/.test(tA) && /5G ללא הגבלה/.test(tA);
-  const noHintA = !(await page.$('#olhint')); const dA = await save();
-  check('11ב קו עם חבילה: עלות חודשית, משלוח וסים ולמי משלמים מוצגים לפני השמירה; סכום 20.5 = השרת; אין המלצה כשאין שיפור', pkInfo && noHintA && ta === 20.5 && !!dA && srvNet(dA, false) === ta, { toast: globalThis.__T, ta, srv: dA && srvNet(dA, false), pkInfo, t: tA.slice(tA.indexOf('קו 1'), tA.indexOf('קו 1') + 260) });
-  // ב: 3 קווים, 2 בפרטנר (במבצע 3 קווים) ו-1 בסלקום → המלצה עם החברות, המבצע וההנחה; 360px בלי גלילה אופקית
+  const noHintA = !(await page.$('#olhint')); const noOld = !/הנחה ידנית|שינוי \/ ביטול מבצע/.test(tA); const dA = await save();
+  check('11ב קו עם חבילה: פרטים מוצגים; משבצת "סה״כ הנחה" = 20; סכום 20.5 = השרת; אין המלצה; אין כפתורי הנחה ידנית/מבצע ישנים', pkInfo && noHintA && noOld && mA === '20' && ta === 20.5 && !!dA && dA.cell.man === 20 && srvNet(dA) === ta, { toast: globalThis.__T, ta, mA, man: dA && dA.cell.man });
+  // ג: 2 קווי פרטנר + סלקום (מתנה אחת → נוספת לבד במחיר 0) → המלצה בשורה אחת; 360px
   await build('0529998881', ['pP', 'pP', 'pC']); await H.settle(page, 200); const tb = await tot(); const hb = (await page.$('#olhint')) ? await page.innerText('#olhint') : '';
+  const gB = await page.evaluate(() => window.__ox.draft.items.filter((it) => it.gk).map((it) => [it.pid, it.price]));
   await page.setViewportSize({ width: 360, height: 780 }); await H.settle(page, 150); const w360 = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
-  await page.evaluate(() => document.getElementById('olhint') && document.getElementById('olhint').scrollIntoView({ block: 'center' })); await shot('הזמנה-חבילות-המלצה'); await page.setViewportSize({ width: 390, height: 844 }); await H.settle(page, 100);
+  await page.evaluate(() => document.getElementById('olcalc') && document.getElementById('olcalc').scrollIntoView({ block: 'center' })); await shot('הזמנה-סהכ-הנחה-המלצה'); await page.setViewportSize({ width: 390, height: 844 }); await H.settle(page, 100);
   const dB = await save();
-  check('11ג 3 קווים (2 במבצע, 1 לא): הודעה עם "פרטנר / הוט", שם המבצע, 3 קווים והנחה "עד"; סכום = השרת; 360px בלי גלילה', /העברת קו 3 לפרטנר \/ הוט/.test(hb) && /"3 קווים"/.test(hb) && /עד ₪140/.test(hb) && /פעם אחת להזמנה/.test(hb) && !!dB && srvNet(dB, false) === tb && w360[0] <= w360[1], { hb, tb, srv: dB && srvNet(dB, false), w360 });
-  // ג: 3 קווים במבצע → ביטול המבצע בהזמנה (חוזר לקבועה 40): 10.5 + 30 + 30 + 40 − 40 = 70.5
-  await build('0529998882', ['pP', 'pP', 'pH']); const tc0 = await tot(); const hasPromo = /מבצע "3 קווים"/.test(await page.innerText('#olcalc'));
-  await page.click('[data-a=olMan]'); await H.settle(page, 200); await page.selectOption('#dlg select[name=sc]', 'poff'); await shot('הנחה-ידנית-מבצע'); await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 300);
-  const tc = await tot(); const dC = await save();
-  check('11ד מבצע פעיל מוצג; ביטול המבצע בהזמנה → 70.5; נשלח man.promo.off; סכום = השרת', hasPromo && tc0 === 0 && tc === 70.5 && !!dC && dC.cell.man && dC.cell.man.promo && dC.cell.man.promo.off === true && srvNet(dC, false) === tc, { tc0, tc, man: dC && dC.cell.man });
-  // ד: עובד – הנחה ידנית לקו מעל התקרה → שגיאה בעברית בלי לחשוף את התקרה, לא נשמר; 40 → מחליפה את הקבועה: 10.5 + 30 − 40 = 0.5
+  check('11ג המלצה בשורה אחת ("עוד קו אחד באותה חברה … ₪100"); מתנה יחידה נוספה כשורת מוצר ב-0; 55.5 = השרת; 360px בלי גלילה', /עוד קו אחד באותה חברה יזכה בהנחה של ₪100/.test(hb) && hb.split('\n').length === 1 && JSON.stringify(gB) === JSON.stringify([['pA', '0']]) && tb === 55.5 && !!dB && dB.items.some((it) => it.pid === 'pA' && it.price === 0) && srvNet(dB) === tb && w360[0] <= w360[1], { hb, gB, tb, w360 });
+  // ד: 3 קווי פרטנר → 60 + 100 = 160, מוגבל לסכום לחנות (100.5) → 0; העובד משנה ל-80 → 20.5, ואז 0 = בלי הנחה → 100.5
+  await build('0529998882', ['pP', 'pP', 'pP']); const td0 = await tot(); const md0 = await manV();
+  await page.fill('#olman', '80'); await H.settle(page, 150); const td1 = await tot(); const sug1 = await page.innerText('#olsug');
+  await page.fill('#olman', '0'); await H.settle(page, 150); const td2 = await tot(); const dD = await save();
+  check('11ד מבצע כמות: מוצע 160, סה"כ לא מתחת ל-0; העובד משנה ל-80 (20.5) ול-0 (100.5); נשמר man=0', md0 === '160' && td0 === 0 && td1 === 20.5 && /160/.test(sug1) && td2 === 100.5 && !!dD && dD.cell.man === 0 && srvNet(dD) === td2, { md0, td0, td1, sug1, td2, man: dD && dD.cell.man });
+  // ה: בחירה בין 2 מתנות – בוחרים מתנה במחיר מבצע 5 ← שורת מוצר; עובד מעלה את ההנחה ל-15 (מעל המוצע 0)
   await page.evaluate(() => { window.__role0 = SY.role; window.__sa0 = SY.sa; SY.role = 'worker'; delete SY.sa; });
-  await build('0529998883', ['pP']); await page.click('[data-a=olMan]'); await H.settle(page, 200); await page.fill('#dlg input[name=v]', '60'); await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 300);
-  const toastT = await page.evaluate(() => { return [...document.querySelectorAll('.toast')].map((t) => t.innerText).join(' | '); }); const stillOpen = await page.evaluate(() => document.getElementById('dlg').open);
-  await page.evaluate(() => { const m = window.__ox.draft.cell.man; m.lines[window.__ox.draft.cell.lines[0].k] = { t: 'amt', v: 60 }; }); const nSv = calls.filter((c) => c.n === 'createOrder').length; await page.evaluate(() => document.getElementById('dlg').close()); await page.click('[data-a=oxSave]'); await H.settle(page, 500);
-  const blockedCap = calls.filter((c) => c.n === 'createOrder').length === nSv; const banT = await page.innerText('#olcalc').catch(() => '');
-  await page.click('#olcalc [data-a=olMClr]'); await H.settle(page, 200); await page.click('[data-a=olMan]'); await H.settle(page, 200); await page.fill('#dlg input[name=v]', '40'); await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 300);
-  const td = await tot(); const dD = await save();
+  await build('0529998883', ['pH']); const opts = await page.$$eval('[data-c=olGift] option', (o) => o.map((x) => x.value));
+  await page.selectOption('[data-c=olGift]', 'pB'); await H.settle(page, 300); await page.fill('#olman', '15'); await H.settle(page, 150); const te = await tot(); const dE = await save();
   await page.evaluate(() => { SY.role = window.__role0; if (window.__sa0) SY.sa = window.__sa0; });
-  check('11ה עובד: מעל התקרה – שגיאה בעברית בלי סכום התקרה, ההזמנה לא נשמרת; 40 מחליפה את הקבועה → 0.5 = השרת', stillOpen && /גבוהה מהמותר לעובד/.test(toastT + banT) && !/50/.test(toastT + banT) && blockedCap && td === 0.5 && !!dD && JSON.stringify(dD.cell.man) === JSON.stringify({ lines: [{ t: 'amt', v: 40 }] }) && srvNet(dD, true) === td, { toastT, banT, blockedCap, td, man: dD && dD.cell.man });
-  // ה: הנחה ידנית להזמנה (מנהל) מחליפה הכול: 10% מ-(10.5 + 30 + 25) = 6.55 → 58.95
-  await build('0529998884', ['pP', 'pC']); await page.click('[data-a=olMan]'); await H.settle(page, 200); await page.selectOption('#dlg select[name=sc]', 'order'); await page.fill('#dlg input[name=v]', '10'); await page.selectOption('#dlg select[name=vT]', 'pct'); await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 300);
-  const te = await tot(); const dE = await save();
-  check('11ו הנחה להזמנה באחוזים מחליפה את הקבועה → 58.95 = השרת', te === 58.95 && !!dE && srvNet(dE, false) === te, { te, srv: dE && srvNet(dE, false), man: dE && dE.cell.man });
+  check('11ה בחירת מתנה מתוך 2 → שורת מוצר במחיר 5; עובד מעלה ל-15 → 10.5 + 5 + 40 − 15 = 40.5 = השרת', opts.join() === ',pA,pB' && te === 40.5 && !!dE && dE.items.some((it) => it.pid === 'pB' && it.price === 5) && dE.cell.man === 15 && srvNet(dE) === te, { opts, te, items: dE && dE.items, man: dE && dE.cell.man });
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   }
   await browser.close();

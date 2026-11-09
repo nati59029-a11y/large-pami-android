@@ -4,7 +4,7 @@
      פרטי בנק (בנק/סניף/חשבון) ות"ז בעל הכרטיס. כמות הקווים – אוטומטי.
    - התראה לעובד (01:45): מיד כשמסמנים ניוד ובכל שינוי טלפון – checkLines בשרת (כל סניפי העסק, בטווח של התוכנית; ברירת מחדל 60 יום).
      ניוד קודם → "קו זה כבר נויד בתאריך … בסניף …" עם "המשך בכל זאת" / "בטל ניוד לקו". אי אפשר לשמור לפני שבוחרים.
-   - חבילות ניוד (קטגוריה במלאי): מנהל ועובד עם הרשאת הזמנות. טווח התראה – גם עובד (21:25). מנהל: רשימות, ומסך "הנחות, תקרות ומבצעים" (oxLnCfg).
+   - חבילות ניוד (קטגוריה במלאי): מנהל ועובד עם הרשאת הזמנות, כולל טווח התראה ומבצע לחבילה (פישוט 9.11 22:35). מנהל: רשימות.
    כל כתיבה – דרך השרת (orders.js: createOrder.cell, saveLinePlan, setCellCfg, checkLines). קריאה – lineplan, ordcfg/cell לפי החוקים. */
 (function(){
 'use strict';
@@ -49,7 +49,7 @@ const lineH=(D,l,i)=>{const P=plans(),C=carriers(),pk=l.plan&&plan(l.plan);retur
  <label class="row" style="min-height:44px;gap:8px"><input type="checkbox" data-c="olSameTz" data-k="${esc(l.k)}"${l.sameTz?' checked':''}>הת.ז של הלקוח</label>
  ${l.sameTz?'':`<label class="f"><span>ת.ז לניוד</span><input data-i="olF" data-f="tz" data-k="${esc(l.k)}" inputmode="numeric" maxlength="9" value="${esc(l.tz)}" autocomplete="off"></label>`}
  ${P.length?`<label class="f"><span>חבילה</span><select data-c="olSel" data-f="plan" data-k="${esc(l.k)}"><option value="">בלי חבילה</option>${P.map(p=>`<option value="${esc(p.id)}"${l.plan===p.id?' selected':''}>${esc(pkOpt(p))}</option>`).join('')}</select></label>`:''}
- ${pk?pkH(pk):''}
+ ${pk?pkH(pk):''}${giftSel(l,pk)}
  ${C.length&&!(pk&&pk.carrier)?`<label class="f"><span>חברת ניוד</span><select data-c="olSel" data-f="carrier" data-k="${esc(l.k)}">${opts(C,l.carrier,'בחר')}</select></label>`:''}
  <div data-olh="${esc(l.k)}">${hitH(D,l)}</div><button type="button" class="btn g s" data-a="olRm" data-k="${esc(l.k)}">הסר קו</button></div>`};
 /* ---------- חבילה לכל קו, הנחות ומבצעים בטופס (שלב 4, 2026-11-09). החישוב – אותה פונקציה של השרת (line-discount.js, window.LineDisc) ---------- */
@@ -58,31 +58,31 @@ const pkFee=(l,f)=>f&&typeof f.amt==='number'&&f.amt>0?`${l} ${ils(f.amt)} – $
 const pkOpt=p=>[p.name,p.carrier||'',typeof p.monthly==='number'?ils(p.monthly)+' לחודש':''].filter(Boolean).join(' · ');
 const pkH=p=>{const x=[p.carrier?'חברה: '+esc(p.carrier):'',typeof p.monthly==='number'?'עלות חודשית: '+ils(p.monthly)+' (משלמים לחברה)':'',pkFee('משלוח',p.ship),pkFee('סים',p.sim)].filter(Boolean);
  return `<div class="note" data-olpk role="note" style="margin:0 0 6px;padding:8px;border:1px solid var(--line,rgba(127,127,127,.35));border-radius:8px">${x.map(t=>`<div>${t}</div>`).join('')}${p.details?`<div>${esc(p.details)}</div>`:''}</div>`};
-const PKG=['monthly','ship','sim','details'];
+const PKG=['monthly','ship','sim','details','promo'];
 const isPkg=p=>!!p&&PKG.some(k=>p[k]!=null); // כמו בשרת (cellTotal): חבילה "חדשה" = יש לה אחד מהשדות
 const itemsAg=D=>(D.items||[]).reduce((s,it)=>s+Math.round((+String(it.qty).replace(',','.')||0)*(+String(it.price).replace(',','.')||0)*100),0);
-// ידני בטיוטה: S.man = { lines:{[k]:{t,v}}, order:{t,v}|null, promo:{id,off}|{id,disc}|null }
-const MS=S=>{if(!S.man)S.man={lines:{},order:null,promo:null};return S.man};
-const manOut=S=>{const m=MS(S),o={};const ls=S.lines.map(l=>m.lines[l.k]||null);if(ls.some(Boolean))o.lines=ls;if(m.order)o.order=m.order;if(m.promo)o.promo=m.promo;return Object.keys(o).length?o:null};
-// מחזיר null (אין חבילה חדשה – הסכום כמו היום) או { r } / { e } (שגיאה בעברית, למשל מעל התקרה)
+const pLive=p=>!!(p&&window.LineDisc&&LineDisc.live(p.promo,LineDisc.ilDay()));
+/* מתנות (פישוט 9.11): שורת מוצר רגילה (יורדת מהמלאי, עלות לפי המוצר) שמסומנת gk = מפתח הקו. אחת – נוספת לבד; כמה – העובד בוחר */
+const gifts=p=>pLive(p)&&Array.isArray(p.promo.gifts)?p.promo.gifts.filter(g=>O.P&&(O.P||[]).some(x=>x.id===g.pid)):[];
+const gName=g=>{const x=(O.P||[]).find(p=>p.id===g.pid);return (x?x.name:'מוצר')+' · '+(g.price?ils(g.price):'מתנה')};
+const giftSel=(l,p)=>{const G=gifts(p);if(G.length<2)return '';return `<label class="f"><span>בחירת מתנה</span><select data-c="olGift" data-k="${esc(l.k)}"><option value="">בלי מתנה</option>${G.map(g=>`<option value="${esc(g.pid)}"${l.gift===g.pid?' selected':''}>${esc(gName(g))}</option>`).join('')}</select></label>`};
+function giftSync(D,l){D.items=(D.items||[]).filter(it=>it.gk!==l.k);const p=plan(l.plan),G=gifts(p);if(G.length===1)l.gift=G[0].pid;else if(!G.some(g=>g.pid===l.gift))l.gift='';
+ const g=G.find(x=>x.pid===l.gift);if(g)D.items.push({pid:g.pid,qty:'1',price:String(g.price||0),auto:0,from:'',gk:l.k})}
+const giftDrop=(D,k)=>{D.items=(D.items||[]).filter(it=>it.gk!==k)};
+// "סה"כ הנחה" (פישוט 9.11): משבצת אחת. S.man = null (המוצע) או מה שהעובד הזין (גם 0, גם למעלה)
 function calcOf(D){const S=CS(D);if(!S.on||!window.LineDisc)return null;const pm=new Map((L.P||[]).map(p=>[p.id,p]));
  if(!S.lines.some(l=>isPkg(l.plan&&pm.get(l.plan))))return null;
  const lines=S.lines.map(l=>{const o={};if(l.plan)o.plan=l.plan;if(l.carrier)o.carrier=l.carrier;return o});
- try{return{r:LineDisc.calcCell(lines,pm,L.cfg||{},manOut(S)||{},{itemsAg:itemsAg(D),today:LineDisc.ilDay(),capped:!mgr()})}}catch(e){return{e:e&&e.message||'שגיאה בחישוב ההנחה'}}}
-const dT=d=>d?(d.t==='pct'?d.v+'%':ils(d.v)):'';
-function calcH(D){const c=calcOf(D);if(!c)return '';const S=CS(D),m=MS(S);
- if(c.e)return `<div class="ban" role="alert" style="display:block;margin:6px 0;border-color:var(--neg)"><p style="margin:0 0 6px">${esc(c.e)}</p><button type="button" class="btn g s w" data-a="olMClr">ביטול ההנחה הידנית</button></div>`;
- const r=c.r,p=r.promo;
- const ln=r.lines.map((l,i)=>{const d=l.man!=null?l.man:(p&&!p.off&&p.carriers.includes(l.c)?null:l.fix);return `<div class="row" style="justify-content:space-between"><span>קו ${i+1}${l.c?' · '+esc(l.c):''}${l.store?' · לחנות '+ils(l.store):''}</span><span>${d?'הנחה '+ils(d)+(l.man!=null?' (ידנית)':''):''}</span></div>`}).join('');
- const pr=p?`<div class="row" style="justify-content:space-between"><span>מבצע "${esc(p.name)}"${p.off?' – בוטל בהזמנה':p.edit?' – שונה בהזמנה':''}</span><span>${p.off?'':ils(p.amt)}</span></div>`:'';
- const mo=m.order?`<p class="note" style="margin:4px 0">הנחה ידנית להזמנה: ${dT(m.order)} (מחליפה את שאר ההנחות)</p>`:'';
- const h=r.hint?`<div class="ban" role="status" id="olhint" style="display:block;margin:6px 0"><p style="margin:0"><b>המלצה:</b> ${esc(r.hint.msg)}</p><p class="note" style="margin:4px 0 0">חברות במבצע: ${r.hint.carriers.map(esc).join(', ')} · מ-${r.hint.min} קווים · ${dT(r.hint.pdisc)} ${r.hint.kind==='once'?'פעם אחת להזמנה':'לכל קו'}</p></div>`:'';
- const btn=p?`<div class="row"><button type="button" class="btn g s grow" data-a="olMan">${p.off||p.edit?'שינוי ההנחה':'שינוי / ביטול מבצע'}</button>${m.promo||m.order?'<button type="button" class="btn g s grow" data-a="olMClr">חזרה למבצע</button>':''}</div>`
-  :`<div class="row"><button type="button" class="btn g s grow" data-a="olMan">הנחה ידנית</button>${m.order||Object.keys(m.lines).length?'<button type="button" class="btn g s grow" data-a="olMClr">ביטול הנחה ידנית</button>':''}</div>`;
- return `<b>הנחות ניוד</b>${ln}${pr}${mo}
- <div class="row" style="justify-content:space-between"><b>סה״כ הנחה</b><b>${ils(r.disc)}</b></div>${r.ext?`<p class="note" style="margin:2px 0">משלמים ישירות לחברה (לא בסכום כאן): ${ils(r.ext)}</p>`:''}${r.monthly?`<p class="note" style="margin:2px 0">עלות חודשית מהחברה: ${ils(r.monthly)}</p>`:''}${btn}${h}`}
-// מצייר את פירוט ההנחות ואת הסה"כ (מעל הסה"כ של הפריטים מ-orders-staff.js)
-function paintCalc(){const D=O.draft;if(!D||!cell())return;const b=document.getElementById('olcalc');if(b){const h=calcH(D);b.innerHTML=h;b.hidden=!h}const c=calcOf(D),t=document.getElementById('oxtot');if(t&&c&&c.r)t.textContent=ils(c.r.net)}
+ return LineDisc.calcCell(lines,pm,Number.isFinite(S.man)?S.man:null,{itemsAg:itemsAg(D),today:LineDisc.ilDay()})}
+const sugT=r=>r.man!=null&&r.man!==r.sug?`מחושב לפי המבצעים: ${ils(r.sug)}`:'';
+function calcH(D){const r=calcOf(D);if(!r)return '';const S=CS(D);const v=S.man==null?r.sug:S.manRaw;
+ return `<label class="f" style="margin:0"><span><b>סה״כ הנחה ₪</b> (0 = בלי הנחה)</span><input id="olman" data-i="olMan" inputmode="decimal" maxlength="9" value="${esc(v)}" autocomplete="off"></label>
+ <p class="note" id="olsug" style="margin:2px 0">${sugT(r)}</p>${r.ext?`<p class="note" style="margin:2px 0">משלמים ישירות לחברה (לא בסכום כאן): ${ils(r.ext)}</p>`:''}${r.monthly?`<p class="note" style="margin:2px 0">עלות חודשית מהחברה: ${ils(r.monthly)}</p>`:''}
+ ${r.hint?`<p class="note" role="status" id="olhint" style="margin:4px 0 0;color:var(--gold,inherit)"><b>המלצה:</b> ${esc(r.hint.msg)}</p>`:''}`}
+const totSet=r=>{const t=document.getElementById('oxtot');if(t&&r)t.textContent=ils(r.net)};
+// מצייר את משבצת ההנחה ואת הסה"כ (מעל הסה"כ של הפריטים מ-orders-staff.js). לא מצייר מחדש בזמן הקלדה במשבצת
+function paintCalc(){const D=O.draft;if(!D||!cell())return;const r=calcOf(D),b=document.getElementById('olcalc');
+ if(b){if(document.activeElement&&document.activeElement.id==='olman'&&r){const s=document.getElementById('olsug');if(s)s.textContent=sugT(r)}else{const h=calcH(D);b.innerHTML=h;b.hidden=!h}}totSet(r)}
 const boxH=D=>{const S=CS(D);if(!S.on)return '';const A=ads();
  return `${S.lines.map((l,i)=>lineH(D,l,i)).join('')}<button type="button" class="btn g s w" data-a="olAdd">＋ קו נוסף לניוד</button>
  <p class="note">כמות קווים: <b id="oln">${S.lines.length}</b></p>
@@ -93,6 +93,8 @@ const boxH=D=>{const S=CS(D);if(!S.on)return '';const A=ads();
  <label class="f"><span>ת.ז בעל הכרטיס</span><input data-i="olB" data-f="ctz" inputmode="numeric" maxlength="9" value="${esc(S.ctz)}" autocomplete="off"></label></details>`};
 const secH=D=>{const S=CS(D);return `<div class="sec"><h3>ניוד קווים</h3></div><div class="card" id="olbox"><label class="row" style="min-height:44px;gap:8px"><input type="checkbox" data-c="olOn"${S.on?' checked':''}><b>הלקוח רוצה ניוד</b></label><div id="olin">${boxH(D)}</div></div>`};
 const repaint=()=>{const D=O.draft,b=document.getElementById('olin');if(D&&b)b.innerHTML=boxH(D);paintCalc()};
+// שינוי שמוסיף/מסיר שורת מתנה – מצייר את כל הטופס (גם רשימת המוצרים)
+const repaintAll=()=>{if(typeof rerender==='function')rerender();else repaint()};
 const paintHit=(D,l)=>{const b=document.querySelector(`[data-olh="${l.k}"]`);if(b)b.innerHTML=hitH(D,l)};
 const lnOf=el=>{const D=O.draft;if(!D)return [null,null];const l=CS(D).lines.find(x=>x.k===el.dataset.k);return [D,l]};
 
@@ -103,30 +105,17 @@ async function check(D,l){const S=CS(D),ph=lnPhone(D,l);delete S.ok[l.k];if(!ph)
  catch(e){if(my!==l.seq)return;S.hits[l.k]=[];err(e)}if(O.draft===D)paintHit(D,l)}
 const checkAll=D=>CS(D).lines.forEach(l=>check(D,l));
 
-CHG.olOn=el=>{const D=O.draft;if(!D)return;const S=CS(D);S.on=el.checked;if(S.on&&!S.lines.length)S.lines.push(lnNew(true));repaint();if(S.on){lload();checkAll(D)}};
+CHG.olOn=el=>{const D=O.draft;if(!D)return;const S=CS(D);S.on=el.checked;if(S.on&&!S.lines.length)S.lines.push(lnNew(true));if(!S.on){S.lines.forEach(l=>giftDrop(D,l.k));repaintAll()}else repaint();if(S.on){lload();checkAll(D)}};
 ACT.olAdd=()=>{const D=O.draft;if(!D)return;const S=CS(D);if(S.lines.length>=20)return toast('עד 20 קווים');S.lines.push(lnNew(false));repaint()};
-ACT.olRm=el=>{const[D,l]=lnOf(el);if(!l)return;const S=CS(D);S.lines=S.lines.filter(x=>x!==l);delete S.hits[l.k];delete S.ok[l.k];if(S.man)delete S.man.lines[l.k];repaint()};
+ACT.olRm=el=>{const[D,l]=lnOf(el);if(!l)return;const S=CS(D);S.lines=S.lines.filter(x=>x!==l);delete S.hits[l.k];delete S.ok[l.k];const g=D.items.some(it=>it.gk===l.k);giftDrop(D,l.k);if(g)repaintAll();else repaint()};
 ACT.olDel=ACT.olRm;
 ACT.olOk=el=>{const[D,l]=lnOf(el);if(!l)return;CS(D).ok[l.k]=1;paintHit(D,l)};
 CHG.olSame=el=>{const[D,l]=lnOf(el);if(!l)return;l.same=el.checked;repaint();check(D,l)};
 CHG.olSameTz=el=>{const[D,l]=lnOf(el);if(!l)return;l.sameTz=el.checked;repaint()};
-CHG.olSel=el=>{const[D,l]=lnOf(el);if(!l)return;l[el.dataset.f]=el.value;if(el.dataset.f==='plan'){const p=plan(l.plan);if(p&&p.carrier)l.carrier=p.carrier;repaint();check(D,l)}else paintCalc()};
-// הנחה ידנית / שינוי או ביטול מבצע. ידנית מחליפה (לא מתווספת). התקרה לא מוצגת – החישוב (כמו בשרת) מחזיר שגיאה אם חורגים.
-ACT.olMan=()=>{const D=O.draft;if(!D)return;const S=CS(D),c=calcOf(D);if(!c)return;const p=c.r&&c.r.promo,m=MS(S);
- const sc=[];if(p){sc.push(['pedit','שינוי הנחת המבצע "'+p.name+'"'],['poff','ביטול המבצע בהזמנה הזו'])}else S.lines.forEach((l,i)=>sc.push(['l'+l.k,'לקו '+(i+1)]));sc.push(['order','לכל ההזמנה']);
- const cur=m.order?['order',m.order]:m.promo&&m.promo.off?['poff',null]:m.promo?['pedit',m.promo.disc]:(()=>{const k=Object.keys(m.lines)[0];return k?['l'+k,m.lines[k]]:[sc[0][0],null]})();
- dlg(`<h3>${p?'שינוי מבצע / הנחה ידנית':'הנחה ידנית'}</h3><form data-f="olMF"><label class="f"><span>על מה</span><select name="sc">${sc.map(([v,t])=>`<option value="${esc(v)}"${cur[0]===v?' selected':''}>${esc(t)}</option>`).join('')}</select></label>
- <div class="row"><label class="f grow"><span>הנחה (0 = בלי הנחה)</span><input name="v" inputmode="decimal" maxlength="9" value="${cur[1]?cur[1].v:''}" autocomplete="off"></label><label class="f grow"><span>סוג</span>${tpSel('vT',cur[1]&&cur[1].t)}</label></div>
- <p class="note">ההנחה הידנית מחליפה את ההנחה הקיימת (לא נוספת עליה).${p?' בביטול מבצע – השדה לא נדרש.':''}</p>
- <div class="row"><button class="btn grow">החל</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.olMF=f=>{const D=O.draft;if(!D)return closeDlg();const S=CS(D),m=MS(S),x=fd(f),c=calcOf(D),p=c&&c.r&&c.r.promo;
- const prev=JSON.stringify(m);let d=null;
- if(x.sc!=='poff'){const v=nm(x.v);if(v==null||Number.isNaN(v))return toast('הנחה: מספר');const t=x.vT==='pct'?'pct':'amt';if(t==='pct'&&v>100)return toast('אחוז: 0 עד 100');if(t==='amt'&&v>100000)return toast('סכום: עד 100,000');d={t,v}}
- m.lines={};m.order=null;m.promo=null;
- if(x.sc==='order')m.order=d;else if(x.sc==='poff'&&p)m.promo={id:p.id,off:true};else if(x.sc==='pedit'&&p)m.promo={id:p.id,disc:d};else if(/^l/.test(x.sc))m.lines[x.sc.slice(1)]=d;
- const r=calcOf(D);if(r&&r.e){const e=r.e;Object.assign(m,JSON.parse(prev));return toast(e)}
- closeDlg();paintCalc()};
-ACT.olMClr=()=>{const D=O.draft;if(!D)return;const m=MS(CS(D));m.lines={};m.order=null;m.promo=null;paintCalc()};
+CHG.olSel=el=>{const[D,l]=lnOf(el);if(!l)return;l[el.dataset.f]=el.value;if(el.dataset.f==='plan'){const p=plan(l.plan);if(p&&p.carrier)l.carrier=p.carrier;const had=D.items.some(it=>it.gk===l.k);giftSync(D,l);if(had||D.items.some(it=>it.gk===l.k))repaintAll();else repaint();check(D,l)}else paintCalc()};
+CHG.olGift=el=>{const[D,l]=lnOf(el);if(!l)return;l.gift=el.value;giftSync(D,l);repaintAll()};
+INP.olMan=el=>{const D=O.draft;if(!D)return;const S=CS(D),t=String(el.value).trim().replace(',','.');S.manRaw=el.value;
+ if(t===''){S.man=null}else if(/^\d+(\.\d{1,2})?$/.test(t)&&+t<=100000)S.man=+t;else{S.man=NaN}paintCalc()};
 CHG.olAd=el=>{const D=O.draft;if(D)CS(D).ad=el.value};
 INP.olF=el=>{const[D,l]=lnOf(el);if(!l)return;l[el.dataset.f]=el.value;if(el.dataset.f==='phone'){if(phN(l.phone))check(D,l);else{delete CS(D).hits[l.k];paintHit(D,l)}}};
 INP.olB=el=>{const D=O.draft;if(!D)return;const S=CS(D);if(el.dataset.f==='ctz')S.ctz=el.value;else S.bank[el.dataset.f]=el.value};
@@ -145,13 +134,13 @@ function out(D){const S=CS(D);if(!S.on)return undefined;const o={lines:[]};
  if(S.ad)o.ad=S.ad;
  const b=S.bank,bb=[b.bank,b.br,b.acct].map(x=>String(x||'').trim());if(bb.some(Boolean)){if(!/^\d{2,3}$/.test(bb[0]))throw new Error('מספר בנק: 2–3 ספרות');if(!/^\d{3,4}$/.test(bb[1]))throw new Error('מספר סניף: 3–4 ספרות');if(!/^\d{4,12}$/.test(bb[2]))throw new Error('מספר חשבון: 4–12 ספרות');o.bank={bank:bb[0],br:bb[1],acct:bb[2]}}
  if(dig(S.ctz)){const z=tzN(S.ctz);if(!z||!tzOk(z))throw new Error('ת.ז בעל הכרטיס לא תקינה');o.ctz=z}
- const c=calcOf(D);if(c&&c.e)throw new Error(c.e);if(c){const mo=manOut(S);if(mo)o.man=mo}
+ if(Number.isNaN(S.man))throw new Error('סה״כ הנחה: מספר (0 = בלי הנחה)');const c=calcOf(D);if(c)o.man=S.man==null?c.sug:S.man; // נשמר מה שהעובד ראה/הזין
  return o}
 
 {const nw=V.oxNew;if(nw)V.oxNew=()=>{const r=nw();if(!r||!r.h||!on()||!cell())return r;const D=O.draft;if(!D)return r;if(!L.P)lload();
   r.h=r.h.replace('<div class="sec"><h3>מוצרים</h3>',secH(D)+'<div class="sec"><h3>מוצרים</h3>');
   const c=calcOf(D);r.h=r.h.replace('<div class="card" style="margin:10px 0"><div class="row" style="justify-content:space-between"><b>סה״כ</b>',`<div class="card" id="olcalc" style="margin:10px 0"${c?'':' hidden'}>${calcH(D)}</div><div class="card" style="margin:10px 0"><div class="row" style="justify-content:space-between"><b>סה״כ</b>`);
-  if(c&&c.r)r.h=r.h.replace(/(<b class="amt" id="oxtot">)[^<]*(<\/b>)/,'$1'+ils(c.r.net)+'$2');return r}}
+  if(c)r.h=r.h.replace(/(<b class="amt" id="oxtot">)[^<]*(<\/b>)/,'$1'+ils(c.net)+'$2');return r}}
 {const sv=ACT.oxSave;if(sv)ACT.oxSave=async el=>{const D=O.draft;if(D)D.cellOut=undefined;if(D&&on()&&cell()&&D.cell&&D.cell.on){try{D.cellOut=out(D)}catch(e){paintCalc();return toast(e.message)}}return sv(el)}}
 
 /* ---------- כרטיס הזמנה: פרטי הניוד (קריאה בלבד) ---------- */
@@ -160,21 +149,19 @@ function out(D){const S=CS(D);if(!S.on)return undefined;const o={lines:[]};
   const h=`<div class="card"><b>ניוד קווים · ${c.n||0} קווים</b>${c.ack?' <span class="tag">אושר למרות ניוד קודם</span>':''}${ls}${c.ad?`<p class="note" style="margin:2px 0">פרסום: ${esc(c.ad)}</p>`:''}${c.bank?`<p class="note" style="margin:2px 0">בנק ${esc(c.bank.bank)} · סניף ${esc(c.bank.br)} · חשבון ${esc(c.bank.acct)}</p>`:''}${c.ctz?`<p class="note" style="margin:2px 0">ת.ז בעל הכרטיס ${esc(c.ctz)}</p>`:''}${c.calc&&c.calc.disc?`<p style="margin:4px 0 0"><b>הנחה: ${ils(c.calc.disc)}</b></p>`:''}</div>`;
   r.h=r.h.replace('<div class="sec"><h3>פריטים</h3>',h+'<div class="sec"><h3>פריטים</h3>');return r}}
 
-/* ---------- חבילות ניוד (מלאי: מנהל ועובד עם הרשאת הזמנות) + הגדרות ניוד (מנהל): הנחה קבועה, תקרה, מבצעים – 2026-11-09 ---------- */
+/* ---------- חבילות ניוד (מלאי: מנהל ועובד עם הרשאת הזמנות), כולל מבצע לחבילה (פישוט 9.11 22:35) ---------- */
 const PAY={store:'לחנות',carrier:'לחברה'};
 const nm=v=>{const t=String(v==null?'':v).trim().replace(',','.');return t===''?null:(/^\d+(\.\d{1,2})?$/.test(t)?+t:NaN)};
-const dscT=d=>d&&typeof d.v==='number'?(d.t==='pct'?d.v+'%':ils(d.v)):'';
 const feeT=(l,f)=>f&&typeof f.amt==='number'?`${l} ${ils(f.amt)} (${PAY[f.pay]||''})`:'';
-const tpSel=(n,v)=>`<select name="${n}" aria-label="סוג"><option value="amt"${v!=='pct'?' selected':''}>₪ סכום</option><option value="pct"${v==='pct'?' selected':''}>% אחוז</option></select>`;
 const paySel=(n,v)=>`<select name="${n}" aria-label="למי משלמים"><option value="store"${v!=='carrier'?' selected':''}>לחנות</option><option value="carrier"${v==='carrier'?' selected':''}>לחברה</option></select>`;
 const ck=(n,on,t,v)=>`<label class="row" style="min-height:44px;gap:8px"><input type="checkbox" name="${n}"${v!=null?` value="${esc(v)}"`:''}${on?' checked':''}>${t}</label>`;
 // מלאי: כפתור "חבילות ניוד" לכל מי שרואה את המלאי כשהסלולר פעיל
 {const st=V.oxStock;if(st)V.oxStock=()=>{const r=st();if(on()&&cell()&&r&&r.h&&r.h.includes('data-a="oxNewP"')){if(!L.P)lload();r.h=r.h.replace(/(data-a="oxNewP">[^<]*<\/button><\/div>)/,`$1<button class="btn g s w" data-a="go" data-v="oxLines">חבילות ניוד${L.P?' ('+L.P.length+')':''}</button>`)}return r}}
-{const ox=V.ox;if(ox)V.ox=()=>{const r=ox();if(on()&&cell()&&mgr()&&r&&r.h&&r.h.includes('data-v="oxNew"'))r.h=r.h.replace(/(<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="go" data-v="oxNew">[\s\S]*?<\/div>)/,'$1<button class="btn g s w" data-a="go" data-v="oxLines">חבילות ניוד והגדרות ניוד</button>');return r}}
+{const ox=V.ox;if(ox)V.ox=()=>{const r=ox();if(on()&&cell()&&mgr()&&r&&r.h&&r.h.includes('data-v="oxNew"'))r.h=r.h.replace(/(<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="go" data-v="oxNew">[\s\S]*?<\/div>)/,'$1<button class="btn g s w" data-a="go" data-v="oxLines">חבילות ניוד</button>');return r}}
 V.oxLines=()=>{const T='חבילות ניוד';if(!on()||!cell())return{t:T,h:'<div class="empty">אין לך הרשאה למסך הזה</div>'};if(!L.P){lload();return{t:T,h:'<div class="empty">טוען…</div>'}}const M=mgr();
  const P=L.P.map(p=>{const x=[p.carrier?esc(p.carrier):'',typeof p.monthly==='number'?'חודשי '+ils(p.monthly):'',feeT('משלוח',p.ship),feeT('סים',p.sim),'התראה על ניוד חוזר: '+(Number.isInteger(p.days)?p.days:60)+' יום'].filter(Boolean).join(' · ');
-  return `<div class="li" style="cursor:default"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">כבויה</span>':''}</b><small>${x}</small>${p.details?`<small>${esc(p.details)}</small>`:''}</div><button class="btn g s" data-a="olPE" data-id="${esc(p.id)}">עריכה</button></div>`}).join('')||'<div class="empty">אין חבילות עדיין</div>';
- return{t:T,s:'קטגוריה במלאי',h:`<button class="btn w" data-a="olPE" data-id="">${ico('plus')}חבילה חדשה</button>${M?'<button class="btn g s w" style="margin-top:8px" data-a="go" data-v="oxLnCfg">הנחות, תקרות ומבצעים</button>':''}${P}
+  return `<div class="li" style="cursor:default"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">כבויה</span>':''}</b><small>${x}</small>${p.details?`<small>${esc(p.details)}</small>`:''}${prT(p)?`<small class="tag" style="white-space:normal">מבצע: ${prT(p)}</small>`:''}</div><button class="btn g s" data-a="olPE" data-id="${esc(p.id)}">עריכה</button></div>`}).join('')||'<div class="empty">אין חבילות עדיין</div>';
+ return{t:T,s:'קטגוריה במלאי',h:`<button class="btn w" data-a="olPE" data-id="">${ico('plus')}חבילה חדשה</button>${P}
  ${M?`<div class="sec"><h3>רשימות</h3></div><div class="card"><p class="note" style="margin:0">חברות ניוד: ${carriers().map(esc).join(', ')||'אין'}</p><p class="note" style="margin:4px 0 0">מקורות פרסום: ${ads().map(esc).join(', ')||'אין'}</p>
  <button class="btn g s w" style="margin-top:8px" data-a="olCfg">עריכת הרשימות</button></div>
  <p class="note">ניוד של אותו קו בתוך הטווח (בכל הסניפים) מקפיץ לעובד התראה בטופס ההזמנה. בלי חבילה – 60 יום.</p>`:''}`}};
@@ -185,12 +172,14 @@ ACT.olPE=el=>{const p=el.dataset.id?plan(el.dataset.id):null,M=mgr();dlg(`<h3>${
  ${fld('עלות חודשית ללקוח ₪ (רשות)','monthly',p&&typeof p.monthly==='number'?p.monthly:'','text','inputmode="decimal" maxlength="9"')}
  ${feeF('משלוח','ship',p&&p.ship)}${feeF('סים','sim',p&&p.sim)}
  ${fld('טווח התראה על ניוד חוזר (ימים)','days',p&&Number.isInteger(p.days)?p.days:60,'text','required inputmode="numeric" maxlength="4"')}
+ ${prF(p&&p.promo)}
  ${p?ck('off',p.on===false,'כבויה (לא מוצגת בהזמנה)'):''}
  <div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.olPF=async f=>{const x=fd(f),M=mgr();if(!x.name.trim())return toast('חסר שם');const d={name:x.name.trim(),carrier:x.carrier||'',details:String(x.details||'').trim()};
  {const days=+dig(x.days);if(!(days>=1&&days<=3650))return toast('טווח: 1 עד 3650 ימים');d.days=days} // גם עובד (החלטה 9.11 21:25)
  const mo=nm(x.monthly);if(Number.isNaN(mo))return toast('עלות חודשית: מספר');d.monthly=mo==null?'':mo;
  for(const[k,l]of[['ship','משלוח'],['sim','סים']]){const v=nm(x[k]);if(Number.isNaN(v))return toast(l+': מספר');d[k]=v==null?null:{amt:v,pay:x[k+'P']==='carrier'?'carrier':'store'}}
+ try{d.promo=prRd(x)}catch(e){return toast(e.message)}
  if(x.id){d.id=x.id;d.on=!x.off}
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('saveLinePlan',d);closeDlg();toast('נשמר');await lload(true)}catch(e){b.disabled=false;err(e)}};
 ACT.olCfg=()=>dlg(`<h3>רשימות לניוד</h3><form data-f="olCF"><label class="f"><span>חברות ניוד (שורה לכל חברה)</span><textarea name="c" rows="5" maxlength="1300">${esc(carriers().join('\n'))}</textarea></label>
@@ -199,39 +188,27 @@ ACT.olCfg=()=>dlg(`<h3>רשימות לניוד</h3><form data-f="olCF"><label cl
 FRM.olCF=async f=>{const x=fd(f),sp=s=>[...new Set(String(s||'').split('\n').map(v=>v.trim()).filter(Boolean))];const c=sp(x.c),a=sp(x.a);if(c.length>30||a.length>30)return toast('עד 30 בכל רשימה');if(c.concat(a).some(v=>v.length>40))return toast('עד 40 תווים לשם');
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('setCellCfg',{carriers:c,ads:a});closeDlg();toast('נשמר');await lload(true)}catch(e){b.disabled=false;err(e)}};
 
-/* הגדרות ניוד – מנהל בלבד (השרת דוחה עובד: setCellCfg = manager-only) */
-const cmap=k=>L.cfg&&L.cfg[k]&&typeof L.cfg[k]==='object'&&!Array.isArray(L.cfg[k])?L.cfg[k]:{};
-const promos=()=>Array.isArray(L.cfg&&L.cfg.promos)?L.cfg.promos.filter(p=>p&&p.id):[];
-const prT=p=>`${(p.carriers||[]).map(esc).join(', ')} · מ-${p.min} קווים · ${dscT(p.disc)} ${p.kind==='once'?'פעם אחת להזמנה':'לכל קו'} · ${p.stack==='replace'?'מחליף את ההנחה הקבועה':'מצטרף להנחה הקבועה'}${p.from||p.to?' · '+(p.from?'מ-'+dd(p.from):'')+(p.to?' עד '+dd(p.to):''):''}`;
-const dv=(n,d,l,cap)=>`<div class="row"><label class="f grow"><span>${l}</span><input name="${n}" inputmode="decimal" maxlength="9" value="${d&&typeof d.v==='number'&&(cap||d.v>0)?d.v:''}" autocomplete="off"></label><label class="f grow"><span>סוג</span>${tpSel(n+'T',d&&d.t)}</label></div>`;
-V.oxLnCfg=()=>{const T='הנחות, תקרות ומבצעים';if(!on()||!cell()||!mgr())return{t:T,h:'<div class="empty">אין לך הרשאה למסך הזה</div>'};if(!L.P){lload();return{t:T,h:'<div class="empty">טוען…</div>'}}
- const C=carriers(),D=cmap('disc'),K=cmap('cap');
- const cf=C.length?`<form data-f="olDF">${C.map((c,i)=>`<div class="card" style="margin:6px 0"><b>${esc(c)}</b>${dv('d'+i,D[c],'הנחה קבועה (ריק = בלי)')}${dv('k'+i,K[c],'תקרה להנחה ידנית לכל קו (ריק = בלי הגבלה)',1)}</div>`).join('')}
- <p class="note">ההנחה של העסק יורדת מסכום ההזמנה לחנות, עד 0. תקרה 0 = העובד לא נותן הנחה ידנית. התקרה לא מוצגת לעובד.</p><button class="btn w">שמור הנחות ותקרות</button></form>`:'<div class="empty">אין חברות ניוד. הוסיפו ב"עריכת הרשימות" במסך החבילות.</div>';
- const PR=promos().map(p=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">כבוי</span>':''}</b><small>${prT(p)}</small></div><button class="btn g s" data-a="olPrE" data-id="${esc(p.id)}">עריכה</button></div>`).join('')||'<div class="empty">אין מבצעים</div>';
- return{t:T,s:'מנהל בלבד',h:`<div class="sec"><h3>הנחה קבועה ותקרה לכל חברה</h3></div>${cf}
- <div class="sec"><h3>מבצעים</h3></div>${C.length?`<button class="btn w" data-a="olPrE" data-id="">${ico('plus')}מבצע חדש</button>`:''}${PR}
- <p class="note">כשכמה מבצעים מתאימים להזמנה – חל רק המשתלם ביותר.</p>`}};
-const rdD=(x,n,cap)=>{const v=nm(x[n]);if(v==null)return null;if(Number.isNaN(v))throw new Error('יש סכום לא תקין');const t=x[n+'T']==='pct'?'pct':'amt';if(t==='pct'&&v>100)throw new Error('אחוז: 0 עד 100');if(t==='amt'&&v>100000)throw new Error('סכום: עד 100,000');return !cap&&v===0?null:{t,v}};
-FRM.olDF=async f=>{const x=fd(f),C=carriers(),disc={},cap={};try{C.forEach((c,i)=>{const d=rdD(x,'d'+i),k=rdD(x,'k'+i,1);if(d)disc[c]=d;if(k)cap[c]=k})}catch(e){return toast(e.message)}
- const b=f.querySelector('button');b.disabled=true;try{await fnCall('setCellCfg',{disc,cap});toast('נשמר');await lload(true)}catch(e){err(e)}finally{b.disabled=false}};
-ACT.olPrE=el=>{const p=el.dataset.id?promos().find(x=>x.id===el.dataset.id):null,C=carriers(),pc=p&&p.carriers||[];
- dlg(`<h3>${p?'עריכת מבצע':'מבצע חדש'}</h3><form data-f="olPrF">${p?`<input type="hidden" name="id" value="${esc(p.id)}">`:''}${fld('שם המבצע','name',p?p.name:'','text','required maxlength="60"')}
- <fieldset style="border:0;padding:0;margin:0"><legend class="note">חברות משתתפות (הקווים לכולן נספרים יחד)</legend>${C.map((c,i)=>ck('c'+i,pc.includes(c),esc(c),c)).join('')}</fieldset>
- ${fld('מינימום קווים','min',p?p.min:2,'text','required inputmode="numeric" maxlength="2"')}
- ${dv('disc',p&&p.disc,'הנחת המבצע')}
- <label class="f"><span>איך ניתנת ההנחה</span><select name="kind"><option value="line"${!p||p.kind!=='once'?' selected':''}>לכל קו</option><option value="once"${p&&p.kind==='once'?' selected':''}>פעם אחת להזמנה (סכום בלבד)</option></select></label>
- <label class="f"><span>מול ההנחה הקבועה של החברה</span><select name="stack"><option value="add"${!p||p.stack!=='replace'?' selected':''}>מצטרף</option><option value="replace"${p&&p.stack==='replace'?' selected':''}>מחליף</option></select></label>
- <div class="row"><label class="f grow"><span>מתאריך (רשות)</span><input name="from" type="date" value="${esc(p&&p.from||'')}"></label><label class="f grow"><span>עד תאריך (רשות)</span><input name="to" type="date" value="${esc(p&&p.to||'')}"></label></div>
- ${ck('on',!p||p.on!==false,'פעיל')}
- <div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.olPrF=async f=>{const x=fd(f),C=carriers();const o={name:String(x.name||'').trim(),carriers:C.filter((c,i)=>x['c'+i]!=null),min:+dig(x.min),kind:x.kind==='once'?'once':'line',stack:x.stack==='replace'?'replace':'add',on:!!x.on};
- if(!o.name)return toast('חסר שם');if(!o.carriers.length)return toast('בחרו חברה אחת לפחות');if(!(o.min>=1&&o.min<=20))return toast('מינימום קווים: 1 עד 20');
- try{o.disc=rdD(x,'disc')}catch(e){return toast(e.message)}if(!o.disc)return toast('חסרה הנחה');if(o.kind==='once'&&o.disc.t==='pct')return toast('מבצע פעם אחת להזמנה – הנחה בסכום בלבד');
- if(x.from)o.from=x.from;if(x.to)o.to=x.to;if(o.from&&o.to&&o.from>o.to)return toast('תאריך ההתחלה אחרי הסיום');
- if(x.id)o.id=x.id;const all=promos().map(p=>Object.fromEntries(['id','name','carriers','min','kind','disc','stack','on','from','to'].filter(k=>p[k]!=null).map(k=>[k,p[k]])));
- const i=all.findIndex(p=>p.id===o.id);if(i>=0)all[i]=o;else all.push(o);
- const b=f.querySelector('button');b.disabled=true;try{await fnCall('setCellCfg',{promos:all});closeDlg();toast('נשמר');await lload(true)}catch(e){b.disabled=false;err(e)}};
+/* מבצע לחבילה (פישוט 9.11): הנחה בקנייה, מתנות מהמלאי (מחיר 0 = מתנה, או מחיר מבצע), מבצע כמות קווים, תאריכים (רשות) */
+const SC={plan:'אותה חבילה',carrier:'אותה חברה',all:'כל קו בהזמנה'};
+const pnm=id=>{const x=(O.P||[]).find(p=>p.id===id);return x?x.name:'מוצר'};
+const prT=p=>{const r=p&&p.promo;if(!r)return '';const x=[];if(r.disc)x.push('הנחה '+ils(r.disc)+' לקו');
+ if(Array.isArray(r.gifts)&&r.gifts.length)x.push((r.gifts.length>1?'מתנה לבחירה: ':'מתנה: ')+r.gifts.map(g=>esc(pnm(g.pid))+(g.price?' ב-'+ils(g.price):'')).join(' / '));
+ if(r.qty)x.push(`${r.qty.n} קווים (${SC[r.qty.scope]||''}) – הנחה ${ils(r.qty.amt)}`);if(r.from||r.to)x.push((r.from?'מ-'+dd(r.from):'')+(r.to?' עד '+dd(r.to):''));return x.join(' · ')};
+const GN=3; // שורות מתנה בטופס
+const prF=r=>{r=r||{};const G=Array.isArray(r.gifts)?r.gifts:[],q=r.qty||{},P=(O.P||[]).filter(p=>p.on!==false).concat(G.filter(g=>!(O.P||[]).some(p=>p.id===g.pid&&p.on!==false)).map(g=>({id:g.pid,name:pnm(g.pid)}))),n=Math.max(GN,G.length);
+ const gRow=i=>{const g=G[i]||{};return `<div class="row"><label class="f grow"><span>מתנה ${i+1}</span><select name="g${i}"><option value="">—</option>${P.map(p=>`<option value="${esc(p.id)}"${g.pid===p.id?' selected':''}>${esc(p.name)}</option>`).join('')}</select></label><label class="f" style="width:96px"><span>מחיר ₪</span><input name="gp${i}" inputmode="decimal" maxlength="9" value="${g.pid&&g.price?g.price:''}" placeholder="0" autocomplete="off"></label></div>`};
+ return `<details${r.disc||G.length||r.qty?' open':''}><summary style="min-height:44px;display:flex;align-items:center"><b>מבצע לחבילה (רשות)</b></summary>
+ ${fld('הנחה בקנייה לכל קו ₪','pd',r.disc||'','text','inputmode="decimal" maxlength="9"')}
+ <p class="note" style="margin:4px 0">מתנה מהמלאי: מחיר ריק/0 = מתנה, או מחיר מבצע. כמה מתנות = העובד בוחר אחת.</p>${Array.from({length:n},(x,i)=>gRow(i)).join('')}
+ <div class="row"><label class="f grow"><span>מבצע כמות: קווים</span><input name="qn" inputmode="numeric" maxlength="2" value="${q.n||''}" autocomplete="off"></label><label class="f grow"><span>הנחה ₪</span><input name="qa" inputmode="decimal" maxlength="9" value="${q.amt||''}" autocomplete="off"></label></div>
+ <label class="f"><span>אילו קווים נספרים</span><select name="qs">${Object.keys(SC).map(k=>`<option value="${k}"${(q.scope||'plan')===k?' selected':''}>${SC[k]}</option>`).join('')}</select></label>
+ <div class="row"><label class="f grow"><span>מתאריך (רשות)</span><input name="pf" type="date" value="${esc(r.from||'')}"></label><label class="f grow"><span>עד תאריך (רשות)</span><input name="pt" type="date" value="${esc(r.to||'')}"></label></div></details>`};
+// קורא את המבצע מהטופס → אובייקט לשרת, או null (בלי מבצע)
+function prRd(x){const o={};const d=nm(x.pd);if(Number.isNaN(d))throw new Error('הנחה בקנייה: מספר');if(d)o.disc=d;
+ const gs=[];for(let i=0;x['g'+i]!==undefined;i++){if(!x['g'+i])continue;const v=nm(x['gp'+i]);if(Number.isNaN(v))throw new Error('מחיר מתנה: מספר');if(gs.some(g=>g.pid===x['g'+i]))throw new Error('אותה מתנה פעמיים');gs.push({pid:x['g'+i],price:v||0})}if(gs.length)o.gifts=gs;
+ const qn=dig(x.qn),qa=nm(x.qa);if(qn||qa!=null){if(!(+qn>=2&&+qn<=20))throw new Error('מבצע כמות: 2 עד 20 קווים');if(!(qa>0))throw new Error('מבצע כמות: חסרה הנחה');o.qty={n:+qn,amt:qa,scope:SC[x.qs]?x.qs:'plan'}}
+ if(x.pf)o.from=x.pf;if(x.pt)o.to=x.pt;if(o.from&&o.to&&o.from>o.to)throw new Error('תאריך ההתחלה אחרי הסיום');
+ return o.disc||o.gifts||o.qty?o:null}
 
 window.__ol={L,out,CS};
 })();
