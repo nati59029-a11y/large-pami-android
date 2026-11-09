@@ -87,6 +87,18 @@ function portOf(raw) {
   return s;
 }
 const empty = (v) => v == null || v === '';
+// סבב 1 (ליקוי 2): פתיחת לקוח עסקי, או סימון לקוח קיים כעסקי – כל השדות חובה (על הרשומה אחרי המיזוג).
+// לקוח שכבר מסומן סיטונאי (גם ישן בלי השדות) – שמירות רגילות לא נחסמות.
+const BIZ_REQ = [['bn', 'bad-bn', 'שם העסק'], ['vat', 'bad-vat', 'ע.מ'], ['ct', 'bad-ct', 'איש קשר'], ['phone', 'bad-phone', 'טלפון'], ['st', 'bad-addr', 'כתובת'], ['city', 'bad-city', 'עיר'], ['pay', 'bad-pay', 'תנאי תשלום']];
+function needBiz(base, o, fill) {
+  const f = Object.assign({}, base || {});
+  for (const [k, v] of Object.entries(o)) {
+    if (k === 'x' || v === undefined) continue;
+    if (fill) { if (empty(f[k]) && !empty(v)) f[k] = v; } else if (v === '') delete f[k]; else f[k] = v;
+  }
+  for (const [k, r, l] of BIZ_REQ) if (empty(f[k])) throw bad(r, 'לקוח עסקי: ' + l + ' – חובה');
+  if (f.pay === 'other' && empty(f.payTxt)) throw bad('bad-pay', 'לקוח עסקי: פירוט תנאי התשלום – חובה');
+}
 // מנקה פרטי לקוח. keys = מפתחות השדות החופשיים המותרים (custcfg). name/phone חובה רק כשיוצרים לקוח בלי ת"ז.
 // סניפי העסק (01:00: סניף בניוד הקודם / בייבוא). עסק בלי מסמך (legacy) – אין סניפים
 async function brIds(w) {
@@ -105,7 +117,6 @@ function clean(c, keys, brs, byId) {
   if (!empty(c.pay)) { if (!PAYS.includes(c.pay)) throw bad('bad-pay', 'תנאי תשלום לא תקינים'); o.pay = c.pay; }
   if (o.pay === 'other') o.payTxt = txt(c.payTxt, 60, 'bad-pay', 'תנאי תשלום', true);
   else if (!empty(c.payTxt)) throw bad('bad-pay', 'פירוט תנאי תשלום – רק כשנבחר "אחר"');
-  if (!o.name && o.bn) o.name = o.bn; // לקוח עסקי: השם המוצג = שם העסק
   if (!empty(c.phone)) o.phone = phoneOf(c.phone);
   if (!empty(c.tz)) o.tz = tzOf(c.tz);
   if (!empty(c.mail)) o.mail = mailOf(c.mail);
@@ -176,8 +187,9 @@ async function upsert(tx, db, w, o, opts) {
   if (!base && ps && ps.exists && !ps.get('mv') && empty(ps.get('tz'))) { base = Object.assign({}, ps.data()); moved = true; }
   const ws = opts.wholesale;
   if (base && ws === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
+  if (ws === true && !(base && base.wholesale === true)) needBiz(base, o, opts.fill);
   if (!base) {
-    if (ws === true && !o.bn && !opts.mgr) throw bad('bad-bn', 'לקוח עסקי: שם העסק – חובה');
+    if (!o.name && o.bn) o.name = o.bn; // לקוח עסקי חדש: השם המוצג = שם העסק (בלקוח קיים השם לא נדרס)
     if (!o.name) throw bad('bad-name', 'שם הלקוח – חובה');
     if (!o.phone) throw bad('bad-phone', 'טלפון – חובה');
     const d = Object.assign({ x: {} }, o, { at: now, upd: now, by: w.uid, src: opts.src });
@@ -223,7 +235,8 @@ async function update(tx, db, w, o, opts, st) {
 }
 // לקוח נוסף עם אותו טלפון (asNew, בלי ת"ז): מזהה אקראי c{20}, לא תלוי בת"ז/טלפון
 async function createNew(tx, db, w, o, opts) {
-  if (opts.wholesale === true && !o.bn && !opts.mgr) throw bad('bad-bn', 'לקוח עסקי: שם העסק – חובה');
+  if (opts.wholesale === true) needBiz(null, o, false);
+  if (!o.name && o.bn) o.name = o.bn;
   if (!o.name) throw bad('bad-name', 'שם הלקוח – חובה');
   if (!o.phone) throw bad('bad-phone', 'טלפון – חובה');
   const ref = db.collection('cust').doc('c' + db.collection('cust').doc().id);
@@ -255,6 +268,7 @@ async function upsertId(tx, db, w, id, o, opts) {
   if (o.tz && !empty(base.tz) && base.tz !== o.tz) throw bad('tz-fixed', 'אי אפשר לשנות ת.ז של לקוח');
   if (ts && ts.exists && base.tz !== o.tz) throw bad('tz-taken', 'כבר יש לקוח עם הת.ז הזו. בחרו אותו.');
   if (opts.wholesale === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
+  if (opts.wholesale === true && base.wholesale !== true) needBiz(base, o, opts.fill);
   return update(tx, db, w, o, opts, { id, ref, base, moved: false, now: Date.now() });
 }
 

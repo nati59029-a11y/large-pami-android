@@ -53,6 +53,7 @@ async function seed(features) {
 
 const TZ = '123456782', TZ2 = '000000018';
 const c1 = { name: 'דנה', phone: '050-1234567', tz: TZ };
+const BZF = { bn: 'עסק', vat: '515555555', ct: 'קשר', st: 'רחוב 1', city: 'עיר', pay: 'cash' };
 before(async () => { env = await H.getEnv(); require('../functions/index.js'); });
 after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* */ } });
 beforeEach(() => seed());
@@ -126,7 +127,8 @@ describe('לקוחות – saveCust', () => {
     assert.equal((await call('saveCust', E1, { cust: c1 })).status, 'OK'); // לקוח רגיל קיים
     r = await call('saveCust', E1, { cust: c1, wholesale: true }); assert.equal(r.reason, 'manager-only');
     assert.equal((await get(`b/${A}/cust/t${TZ}`)).wholesale, undefined);
-    r = await call('saveCust', MGR, { cust: c1, wholesale: true }); assert.equal(r.status, 'OK', r.text);
+    r = await call('saveCust', MGR, { cust: c1, wholesale: true }); assert.equal(r.reason, 'bad-bn'); // סבב 1: סימון כעסקי דורש את כל שדות העסק
+    r = await call('saveCust', MGR, { cust: Object.assign({}, c1, BZF), wholesale: true }); assert.equal(r.status, 'OK', r.text);
     assert.equal((await get(`b/${A}/cust/t${TZ}`)).wholesale, true);
     await call('saveCust', E1, { cust: { tz: TZ, addr: 'x 1' } }); // עדכון של עובד לא מוריד סיטונאי
     assert.equal((await get(`b/${A}/cust/t${TZ}`)).wholesale, true);
@@ -139,6 +141,14 @@ describe('לקוחות – saveCust', () => {
     assert.equal((await call('saveCust', E1, { cust: Object.assign({}, bz, { vat: '12345' }), wholesale: true })).reason, 'bad-vat');
     assert.equal((await call('saveCust', E1, { cust: Object.assign({}, bz, { pay: 'other' }), wholesale: true })).reason, 'bad-pay');
     assert.equal((await call('saveCust', E1, { cust: Object.assign({}, bz, { pay: 'bitcoin' }), wholesale: true })).reason, 'bad-pay');
+    // סבב 1: כל השדות חובה בפתיחת לקוח עסקי
+    for (const [k, why] of [['vat', 'bad-vat'], ['ct', 'bad-ct'], ['st', 'bad-addr'], ['city', 'bad-city'], ['pay', 'bad-pay']]) {
+      const c = Object.assign({}, bz); delete c[k];
+      assert.equal((await call('saveCust', E1, { cust: c, wholesale: true })).reason, why, k);
+      assert.equal((await call('saveCust', MGR, { asNew: true, cust: c, wholesale: true })).reason, why, 'asNew ' + k);
+    }
+    { const c = Object.assign({}, bz); delete c.phone; assert.notEqual((await call('saveCust', E1, { cust: c, wholesale: true })).status, 'OK'); }
+    assert.equal(await get(`b/${A}/cust/p0541234567`), null);
     const r = await call('saveCust', E1, { cust: bz, wholesale: true }); assert.equal(r.status, 'OK', r.text);
     assert.equal(r.result.id, 'p0541234567');
     const d = await get(`b/${A}/cust/p0541234567`);
@@ -170,11 +180,20 @@ describe('לקוחות – saveCust', () => {
     assert.equal((await call('saveCust', E1, { id: '../x', cust: { name: 'x' } })).reason, 'bad-id');
     // עובד לא הופך לקוח קיים (גם c) לעסקי דרך id; מנהל כן
     assert.equal((await call('saveCust', E1, { id: r.result.id, cust: {}, wholesale: true })).reason, 'manager-only');
-    assert.equal((await call('saveCust', MGR, { id: r.result.id, cust: {}, wholesale: true })).status, 'OK');
+    assert.equal((await call('saveCust', MGR, { id: r.result.id, cust: {}, wholesale: true })).reason, 'bad-bn'); // סבב 1: חסרים שדות עסק
+    assert.equal((await call('saveCust', MGR, { id: r.result.id, cust: BZF, wholesale: true })).status, 'OK');
     assert.equal((await get(`b/${A}/cust/${r.result.id}`)).wholesale, true);
     // p עם ת"ז חדשה – המעבר הקיים (הישן mv, לא נמחק)
     assert.equal((await call('saveCust', E1, { id: 'p0529990000', cust: { tz: TZ2 } })).result.id, 't' + TZ2);
     assert.equal((await get(`b/${A}/cust/p0529990000`)).mv, 't' + TZ2);
+  });
+  it('סבב 1: לקוח סיטונאי ישן בלי שדות עסק – שמירות רגילות (עריכה, fill מהזמנה, id) לא נחסמות', async () => {
+    await prep((x) => x.doc(`b/${A}/cust/p0531112222`).set({ name: 'סיטונאי ישן', phone: '0531112222', wholesale: true, at: 1, upd: 1, x: {} }));
+    assert.equal((await call('saveCust', E1, { cust: { phone: '0531112222', name: 'סיטונאי ישן', mail: 'a@b.co' } })).status, 'OK');
+    assert.equal((await call('saveCust', E1, { fill: true, cust: { phone: '0531112222', fn: 'א', ln: 'ב', city: 'אשדוד' } })).status, 'OK');
+    assert.equal((await call('saveCust', E1, { id: 'p0531112222', cust: { st: 'הרצל 1' } })).status, 'OK');
+    assert.equal((await call('saveCust', MGR, { id: 'p0531112222', cust: {}, wholesale: true })).status, 'OK'); // כבר סיטונאי – לא סימון חדש
+    const d = await get(`b/${A}/cust/p0531112222`); assert.equal(d.wholesale, true); assert.equal(d.mail, 'a@b.co'); assert.equal(d.name, 'סיטונאי ישן');
   });
   it('עובד בלי ord / תוספת כבויה – נחסם', async () => {
     assert.equal((await call('saveCust', NOORD, { cust: c1 })).reason, 'no-perm');

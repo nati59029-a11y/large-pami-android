@@ -83,7 +83,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   if (!CELLON) { // מתג כבוי: אין שום שדה ניוד, createOrder בלי cell, אין תוכניות ניוד
     await fresh(); const t = await page.innerText('#main');
     const noTz = !(await page.$('#octz')); // 2026-11-09: בלי ניוד – אין ת"ז בטופס
-    await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0529998888');
+    await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0529998888');
     await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); await page.click('[data-a=oxSave]'); await H.settle(page, 800);
     const co = calls.find((c) => c.n === 'createOrder'); await goV('ox'); await H.settle(page, 300); const lt = await page.innerText('#main');
     check('כבוי: אין "ניוד" ואין ת"ז בטופס, createOrder בלי cell, אין checkLines, אין "תוכניות ניוד"', noTz && !/ניוד/.test(t) && !!co && co.d.cell === undefined && !calls.some((c) => c.n === 'checkLines') && !/תוכניות ניוד/.test(lt), { co: co && co.d });
@@ -93,7 +93,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const s1 = await screen('הזמנה-ניוד', async () => { await fresh(); await page.click('[data-c=olOn]'); await H.settle(page, 500); });
   check('1 הזמנה חדשה עם ניוד: קו ראשון "הטלפון/הת.ז של הלקוח", תוכנית וחברה מהרשימות, פרסום, בנק; מגע/ניגודיות/גלילה', okAll(s1) && /ניוד קווים/.test(s1.a.text) && /פרטנר 30/.test(await page.innerHTML('#main')) && /סלקום/.test(await page.innerHTML('#main')) && /פייסבוק/.test(await page.innerHTML('#main')), sum(s1));
   // 2. התראה מיד בסימון – לפני שמירה (טלפון הלקוח נויד לאחרונה)
-  await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0521111111'); await H.settle(page, 400);
+  await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0521111111'); await H.settle(page, 400);
   const tz0 = !(await page.$('#octz'));
   const before = calls.filter((c) => c.n === 'createOrder').length;
   await page.click('[data-c=olOn]'); await H.settle(page, 700);
@@ -117,7 +117,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const co = calls.filter((c) => c.n === 'createOrder').pop(); const cl = co && co.d.cell;
   check('3 שמירה נחסמת עד מענה להתראה; אחרי "המשך" נשלח cell: קו של הלקוח + קו נוסף עם ת"ז/תוכנית/חברה, ack, פרסום, בנק, ת"ז בעל כרטיס', blocked && !!cl && cl.ack === true && cl.lines.length === 2 && cl.lines[0].same === true && cl.lines[0].sameTz === true && cl.lines[1].phone === '0532222222' && cl.lines[1].tz === '123456782' && cl.lines[1].plan === 'pl1' && cl.lines[1].carrier === 'סלקום' && cl.ad === 'פייסבוק' && cl.bank.acct === '123456' && cl.ctz === '123456782', { blocked, cl });
   // 4. "בטל ניוד לקו" מסיר את הקו; בנק עם אותיות נחסם בטופס
-  await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0521111111'); await page.click('[data-c=olOn]'); await H.settle(page, 700);
+  await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0521111111'); await page.click('[data-c=olOn]'); await H.settle(page, 700);
   await page.click('[data-a=olDel]'); await H.settle(page, 200); const n4 = await page.evaluate(() => window.__ox.draft.cell.lines.length);
   await page.click('[data-a=olAdd]'); await page.fill('[data-i=olF][data-f=phone] >> nth=0', '0533333333'); await page.click('#olin details summary'); await page.fill('[data-i=olB][data-f=bank]', '1a');
   await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 300);
