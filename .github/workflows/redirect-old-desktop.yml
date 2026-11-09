@@ -1,0 +1,56 @@
+# פעם אחת: הכתובת הישנה של גרסת המחשב (largpeami-desktop) מפנה לכתובת החדשה (firebase/desktop-site.txt),
+# עם אותו נתיב ואותם פרמטרים (גם קישורי קביעת סיסמה ממיילים ישנים). מפרסם רק לאתר largpeami-desktop.
+name: Redirect old desktop site (once)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  redirect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: firebase-prod
+    env:
+      P: largpeami
+      OLD: largpeami-desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Build the redirect site
+        run: |
+          NEW=$(tr -d ' \r\n' < firebase/desktop-site.txt)
+          echo "$NEW" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::שם האתר החדש לא תקין"; exit 1; }
+          [ "$NEW" != "$OLD" ] || { echo "::error::האתר החדש זהה לישן"; exit 1; }
+          mkdir -p rd/public
+          cat > rd/public/index.html <<HTML
+          <!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ניהול עסק</title>
+          <script>location.replace('https://$NEW.web.app'+location.pathname+location.search+location.hash)</script>
+          <noscript><meta http-equiv="refresh" content="0;url=https://$NEW.web.app/"></noscript></head>
+          <body style="font-family:Arial,sans-serif;text-align:center;padding:40px">המערכת עברה לכתובת חדשה: <a href="https://$NEW.web.app/">https://$NEW.web.app</a></body></html>
+          HTML
+          printf '{"hosting":{"site":"%s","public":"public","rewrites":[{"source":"**","destination":"/index.html"}],"headers":[{"source":"**","headers":[{"key":"Cache-Control","value":"no-store"}]}]}}\n' "$OLD" > rd/firebase.json
+          cat rd/public/index.html
+      - name: Install firebase-tools (before the service account exists on disk)
+        run: npm install -g firebase-tools@15.34.1 --no-audit --no-fund
+      - name: Service account (temporary file, must belong to the project)
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          umask 077
+          [ -n "$SA" ] || { echo "::error::חסר הסוד FIREBASE_SERVICE_ACCOUNT"; exit 1; }
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          SP=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("project_id",""))' "$RUNNER_TEMP/sa.json")
+          [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+      - name: Deploy the redirect to the old site only
+        working-directory: rd
+        run: |
+          firebase deploy --only "hosting:$OLD" --project "$P" --non-interactive || firebase deploy --only hosting --project "$P" --non-interactive
+          echo "https://$OLD.web.app מפנה עכשיו לכתובת החדשה" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove the service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
