@@ -20,7 +20,7 @@ fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','www/xlsx.full.min.js'
   // שלב 2.8: אימות דו-שלבי (קוד מתחלף מאפליקציה, TOTP) לצוות – רק בגרסת הבדיקה (ה11). בגרסה הרגילה index.html לא משתנה.
   fs.copyFileSync('scripts/mfa-login.js','www/mfa-login.js');
   sub('www/index.html','<script src="orders/site-backend.js"></script>\n','<script src="orders/site-backend.js"></script>\n<script src="mfa-login.js"></script>\n');
-  sub('www/index.html',"const j=await jf(`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:signInWithPassword?key=${FB.apiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw,returnSecureToken:true})});","const j=await LP_MFA.signIn(email,pw);");
+  sub('www/index.html',"await jf(`${GAPI('identitytoolkit.googleapis.com')}/v1/accounts:signInWithPassword?key=${FB.apiKey}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pw,returnSecureToken:true})});","await LP_MFA.signIn(email,pw);");
   sub('www/index.html',"enterApp(false);syCheck()}","enterApp(false);syCheck();LP_MFA.check()}");
   const left=fs.readFileSync('www/index.html','utf8').match(/'largpeami'|largpeami\.appspot\.com|largpeami\.firebasestorage\.app/g);
   if(left)throw new Error('SITE_BACKEND=test: index.html still points at largpeami: '+left.join(','));
@@ -42,9 +42,11 @@ core.forEach(f=>fs.copyFileSync(path.join(cd,f),path.join('www/tess',f)));
 (async()=>{
   for(const l of ['heb','eng']){
     const repo=l==='heb'?'tessdata_best':'tessdata_fast';
-    const r=await fetch('https://github.com/tesseract-ocr/'+repo+'/raw/main/'+l+'.traineddata');
-    if(!r.ok)throw new Error('language data '+l+' http '+r.status);
-    const b=Buffer.from(await r.arrayBuffer());
+    /* כמה מקורות + ניסיונות חוזרים: תקלה זמנית ב-GitHub (504) לא עוצרת את הבנייה */
+    const urls=['https://github.com/tesseract-ocr/'+repo+'/raw/main/'+l+'.traineddata','https://raw.githubusercontent.com/tesseract-ocr/'+repo+'/main/'+l+'.traineddata','https://cdn.jsdelivr.net/gh/tesseract-ocr/'+repo+'@main/'+l+'.traineddata'];
+    let b=null,last='';
+    for(let t=0;t<3&&!b;t++){for(const u of urls){try{const r=await fetch(u);if(!r.ok){last=u+' http '+r.status;continue}const x=Buffer.from(await r.arrayBuffer());if(x.length<500000){last=u+' too small: '+x.length;continue}b=x;break}catch(e){last=u+' '+e.message}}if(!b)await new Promise(z=>setTimeout(z,5000*(t+1)))}
+    if(!b)throw new Error('language data '+l+': '+last);
     if(b.length<500000)throw new Error('language data '+l+' too small: '+b.length);
     fs.writeFileSync('www/tess/'+l+'.traineddata',b);
   }

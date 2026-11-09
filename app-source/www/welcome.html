@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>ברוכים הבאים</title>
+<!-- דף פתיחה להזמנה (2026-11-08). זה "Action URL" המותאם של Firebase Auth: מגיעים אליו עם mode, oobCode, apiKey, continueUrl.
+     resetPassword: מציג "ברוך הבא ל<שם העסק>" + לוגו (publicBrand, רק שם/לוגו/צבעים), טופס קביעת סיסמה (Identity Toolkit REST,
+     עם ה-apiKey הציבורי שבקישור), וכפתור הורדת האפליקציה. bizId מגיע בתוך continueUrl (?biz=) – מזהה בלבד, לא סוד.
+     כל mode אחר (signIn וכו') – מועבר כמו שהוא ל-continueUrl, כדי שקישורי "מחשב חדש" ימשיכו לעבוד. -->
+<style>
+:root{--bg:#14110c;--card:#1f1a12;--ink:#f3ead8;--mut:#b5a88f;--acc:#d4a640;--onacc:#1a1408;--err:#ff8a7a;--ok:#8fd19e}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Arial,sans-serif;display:flex;align-items:flex-start;justify-content:center;padding:32px 16px}
+main{width:100%;max-width:420px;background:var(--card);border-radius:18px;padding:28px 22px;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+.logo{display:block;width:96px;height:96px;object-fit:contain;margin:0 auto 14px;border-radius:16px;background:rgba(255,255,255,.06)}
+h1{font-size:1.45rem;margin:0 0 6px;text-align:center}
+p{margin:.4em 0;color:var(--mut);text-align:center}
+label{display:block;margin:16px 0 6px;font-weight:600}
+input{width:100%;padding:13px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.25);color:var(--ink);font-size:16px;direction:ltr;text-align:left}
+.btn{display:block;width:100%;margin-top:18px;padding:14px;border:0;border-radius:12px;background:var(--acc);color:var(--onacc);font-weight:700;font-size:1.05rem;text-align:center;text-decoration:none;cursor:pointer}
+.btn.g{background:transparent;color:var(--acc);border:1.5px solid var(--acc)}
+.btn:disabled{opacity:.6}
+.msg{min-height:1.5em;margin-top:12px;text-align:center}
+.msg.err{color:var(--err)}.msg.ok{color:var(--ok)}
+.em{direction:ltr;unicode-bidi:isolate;color:var(--ink)}
+.hide{display:none}
+.steps{margin:18px 0 0;padding:0 1.3em 0 0;color:var(--ink);line-height:1.6}
+.steps li{margin:0 0 10px}
+small{display:block;margin-top:10px;color:var(--mut);text-align:center}
+</style>
+</head>
+<body>
+<main id="m">
+  <img id="logo" class="logo hide" alt="">
+  <h1 id="h">ברוכים הבאים</h1>
+  <p id="sub">טוען…</p>
+  <form id="f" class="hide" autocomplete="on" novalidate>
+    <input type="email" id="user" class="hide" autocomplete="username" readonly>
+    <label for="p1">בחרו סיסמה (לפחות 8 תווים)</label>
+    <input type="password" id="p1" autocomplete="new-password" minlength="8" required>
+    <label for="p2">הקלידו שוב את הסיסמה</label>
+    <input type="password" id="p2" autocomplete="new-password" minlength="8" required>
+    <button class="btn" id="go" type="submit">קביעת סיסמה</button>
+  </form>
+  <div id="msg" class="msg" role="status" aria-live="polite"></div>
+  <div id="dl" class="hide">
+    <a class="btn" id="apk" href="#" rel="noopener">הורד את האפליקציה</a>
+    <small>לטלפון אנדרואיד.</small>
+    <ol id="steps" class="steps hide">
+      <li>לחצו על "הורד את האפליקציה" שלמעלה.</li>
+      <li>כשההורדה מסתיימת, פתחו את הקובץ שירד (מההתראה למעלה, או מתיקיית "הורדות").</li>
+      <li>אם מופיעה הודעה שההתקנה חסומה: לחצו "הגדרות", הפעילו "אפשר ממקור זה" (התקנה ממקור לא ידוע), וחזרו אחורה.</li>
+      <li>לחצו "התקן", וכשמסתיים – "פתח".</li>
+      <li>במסך הכניסה הזינו את המייל <bdi class="em" id="em2"></bdi> ואת הסיסמה שקבעתם עכשיו.</li>
+    </ol>
+  </div>
+</main>
+<script>
+(function(){
+'use strict';
+var REPO='nati59029-a11y/large-pami-android';
+var $=function(i){return document.getElementById(i)};
+var q=new URLSearchParams(location.search);
+var mode=q.get('mode')||'',oob=q.get('oobCode')||'',key=q.get('apiKey')||'',cont=q.get('continueUrl')||'';
+var biz='';try{biz=new URL(cont).searchParams.get('biz')||''}catch(e){}
+if(!biz)biz=q.get('biz')||''; // מייל הזמנה עצמי: biz גם ישירות בקישור
+if(!/^[a-z0-9-]{3,30}$/.test(biz))biz='';
+var emu=/^(127\.0\.0\.1|localhost)$/.test(location.hostname)&&q.get('emu');
+var IDT=emu?'http://'+location.hostname+':9099/identitytoolkit.googleapis.com':'https://identitytoolkit.googleapis.com';
+function msg(t,c){var m=$('msg');m.textContent=t;m.className='msg'+(c?' '+c:'')}
+// אתר/פרויקט הבדיקה (largpeami-test-f4691): ההזמנה שם שייכת לפרויקט Firebase אחר, ולכן APK הייצור לא יכניס אותה
+// ("אימייל או סיסמה לא נכונים"). מזהים לפי מפתח ה-API של פרויקט הבדיקה (מופיע בקישור שפיירבייס שולח – הוא מזהה את הפרויקט שהנפיק
+// את ההזמנה) או לפי כתובות האתר של הבדיקה. אצל הייצור שום דבר לא משתנה. APK הבדיקה: release קבוע test-latest (נבנה ע"י main.yml עם site_backend=test).
+var TEST_KEY='AIzaSyBHsEw1IvucT5gh1sv5jfSpd5UKqnPwsXU',TEST_HOSTS=['largpeami-test-f4691.web.app','largpeami-test-f4691.firebaseapp.com','largpeami-test-desktop.web.app'];
+var isTest=key===TEST_KEY||TEST_HOSTS.indexOf(location.hostname)>=0;
+function apk(tag){
+  if(isTest){$('apk').href='https://github.com/'+REPO+'/releases/download/test-latest/large-pami-test.apk';return}
+  var t=/^biz-[a-z0-9-]{3,30}$/.test(tag)?tag:'latest';$('apk').href='https://github.com/'+REPO+'/releases/download/'+t+'/'+(t==='latest'?'large-pami':t)+'.apk'}
+apk('latest');
+
+// כל פעולה שאינה קביעת סיסמה (למשל קישור "מחשב חדש"): ממשיכים רק לכתובת מרשימה סגורה – האתר הזה עצמו,
+// או firebaseapp.com / web.app של שני הפרויקטים (בדיקה וייצור). localhost – רק באמולטור. כל יעד אחר: "הקישור לא נתמך".
+// הקוד והמפתח מצורפים רק כשהיעד ברשימה (שם האפליקציה צריכה את oobCode כדי להשלים את הכניסה).
+var PROJ=['largpe'+'ami','largpeami-test-f4691'],HOSTS=[location.hostname];
+PROJ.forEach(function(p){HOSTS.push(p+'.firebaseapp.com',p+'.web.app')});
+function okDest(u){if(emu)return u.protocol==='http:'&&/^(127\.0\.0\.1|localhost)$/.test(u.hostname);return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&HOSTS.indexOf(u.hostname)>=0}
+if(mode&&mode!=='resetPassword'){
+  try{var u=new URL(cont);if(okDest(u)){q.forEach(function(v,k){if(k!=='continueUrl')u.searchParams.set(k,v)});location.replace(u.href);return}}catch(e){}
+  try{history.replaceState(null,'',location.pathname)}catch(e){}
+  $('h').textContent='הקישור לא נתמך';$('sub').textContent='הקישור לא נתמך בדף הזה.';return;
+}
+// הקוד לא נשאר בשורת הכתובת / בהיסטוריה
+try{history.replaceState(null,'',location.pathname)}catch(e){}
+if(!oob||!key){$('h').textContent='הקישור לא שלם';$('sub').textContent='פתחו שוב את הקישור מהמייל, או בקשו מהמנהל לשלוח מייל חדש.';$('dl').classList.remove('hide');return}
+
+function post(method,body){
+  return fetch(IDT+'/v1/accounts:'+method+'?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+   .then(function(r){return r.json().then(function(j){if(!r.ok){var e=new Error((j&&j.error&&j.error.message)||'ERR');throw e}return j})});
+}
+function why(e){var s=String(e&&e.message||'');
+  if(/EXPIRED_OOB_CODE|INVALID_OOB_CODE/.test(s))return'הקישור פג תוקף או שכבר נעשה בו שימוש. בקשו מהמנהל מייל חדש, או לחצו "שכחתי סיסמה" באפליקציה.';
+  if(/WEAK_PASSWORD/.test(s))return'הסיסמה חלשה מדי. בחרו סיסמה ארוכה יותר.';
+  if(/USER_DISABLED/.test(s))return'החשבון מושבת. פנו למנהל.';
+  if(/TOO_MANY/.test(s))return'יותר מדי ניסיונות. נסו שוב מאוחר יותר.';
+  return'משהו השתבש. בדקו את החיבור לאינטרנט ונסו שוב.'}
+
+function brand(b){
+  if(!b)return;var r=document.documentElement.style,c=b.colors||{};
+  ['acc','onacc','bg','card','ink'].forEach(function(k){if(/^#[0-9a-f]{6}$/i.test(c[k]||''))r.setProperty('--'+k,c[k])});
+  if(b.name){$('h').textContent='ברוכים הבאים ל'+b.name;document.title=b.name}
+  if(typeof b.logo==='string'&&/^data:image\/(png|jpeg|webp);base64,/.test(b.logo)){$('logo').src=b.logo;$('logo').alt=b.name||'';$('logo').classList.remove('hide')}
+  if(b.apkTag)apk(b.apkTag);
+}
+var pb=biz?fetch('/api/publicBrand?biz='+encodeURIComponent(biz)).then(function(r){return r.ok?r.json():null}).catch(function(){return null}):Promise.resolve(null);
+
+Promise.all([pb,post('resetPassword',{oobCode:oob}).then(function(j){return{ok:1,email:j.email||''}},function(e){return{ok:0,e:e}})]).then(function(a){
+  brand(a[0]);var v=a[1];
+  if(!v.ok){$('sub').textContent='';msg(why(v.e),'err');$('dl').classList.remove('hide');return}
+  $('sub').innerHTML='';var s=$('sub');s.appendChild(document.createTextNode(biz?'הוזמנתם לאפליקציית ניהול העסק. קבעו סיסמה לחשבון ':'בחרו סיסמה חדשה לחשבון '));
+  if(!biz)$('h').textContent='קביעת סיסמה חדשה';
+  var em=document.createElement('bdi');em.className='em';em.textContent=v.email;s.appendChild(em);
+  $('user').value=v.email;$('f').classList.remove('hide');$('p1').focus();
+});
+
+$('f').addEventListener('submit',function(ev){ev.preventDefault();
+  var a=$('p1').value,b=$('p2').value;
+  if(a.length<8)return msg('הסיסמה צריכה להיות לפחות 8 תווים','err');
+  if(a!==b)return msg('שתי הסיסמאות לא זהות','err');
+  $('go').disabled=true;msg('שומר…');
+  post('resetPassword',{oobCode:oob,newPassword:a}).then(function(){
+    $('f').classList.add('hide');if(!biz){msg('הסיסמה נקבעה. אפשר להיכנס לאפליקציה עם המייל והסיסמה החדשה.','ok');return}$('em2').textContent=$('user').value;$('steps').classList.remove('hide');msg('הסיסמה נקבעה. עכשיו מורידים את האפליקציה ונכנסים עם המייל והסיסמה.','ok');$('dl').classList.remove('hide');
+  },function(e){$('go').disabled=false;msg(why(e),'err')});
+});
+})();
+</script>
+</body>
+</html>

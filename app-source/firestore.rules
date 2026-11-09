@@ -39,6 +39,14 @@ service cloud.firestore {
         && n is string && n.lower() == request.auth.token.email.lower().split('@')[0];
     }
 
+    // 2026-11-08 (סניפים): br שהעובד שולח (inbox / mq, לא חובה) חייב להיות אחד מהסניפים שלו (staff/{uid}.br).
+    // אין br לעובד (חסר) = כל הסניפים, ולכן כל מזהה תקין מותר. st = מסמך העובד.
+    function brMine(d, st) {
+      return !d.keys().hasAny(['br'])
+        || (d.br is string && d.br.matches('^[a-z0-9_]{2,20}$')
+            && (st.get('br', null) == null || d.br in st.br));
+    }
+
     // ---------- 7 האוספים הקיימים (המבנה לא משתנה, רק מי רשאי) ----------
 
     // admins: כל מחובר קורא רק את המסמך של עצמו (כמו היום; האפליקציה בודקת בכניסה אם הוא מנהל).
@@ -102,7 +110,10 @@ service cloud.firestore {
       allow create: if isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.status == 'new'
-        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't'])
+        && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br', 'k'])
+        // k (חלק ג' §5א, לא חובה): 'check' = צ'ק שעובד סרק, נשלח אוטומטית למנהל לשיוך
+        && request.resource.data.get('k', 'check') == 'check'
+        && brMine(request.resource.data, get(/databases/$(database)/documents/staff/$(request.auth.uid)).data)
         // t (שלב 2 של סגירת קופה, לא חובה – גרסאות ישנות לא שולחות): זמן השליחה, לפי שעון השרת. cashout בודק לפיו שההוצאה חדשה.
         && (!request.resource.data.keys().hasAny(['t'])
             || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))
@@ -285,6 +296,51 @@ service cloud.firestore {
       }
     }
 
+    // ---------- תור "נשלח למנהל לטיפול" (mq) – סריקה אחידה, שלב 6 ----------
+    // עובד שסרק מסמך מסוג שאין לו הרשאה להזין: נשלחים רק הצילום (בחלקים, p) והסוג המשוער (k) – בלי סכומים ובלי רשומה כספית.
+    // יצירה: עובד פעיל (לא מנהל), בשמו, בזמן אמת, בסטטוס 'new', רק השדות האלה. קריאה: מנהל – הכול; עובד – רק את שלו.
+    // עדכון: מנהל בלבד, פעם אחת (רק מ-'new' ל-'done'/'rej'), ורק שדות הסטטוס – כך פריט שטופל לא נשמר פעמיים. העובד לא עורך ולא מוחק.
+    match /mq/{id} {
+      function nw() { return request.resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      allow read: if isManager()
+        || (isActiveEmployee() && resource.data.uid == request.auth.uid);
+      allow create: if isActiveEmployee() && !isManager()
+        && nw().keys().hasAll(['uid', 'by', 't', 'st', 'k', 'np'])
+        && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np', 'br'])
+        && brMine(nw(), get(/databases/$(database)/documents/staff/$(request.auth.uid)).data)
+        && nw().uid == request.auth.uid
+        && nw().by is string && nw().by.size() <= 100 && isMyName(nw().by)
+        && nowOk(nw().t)
+        && nw().st == 'new'
+        && nw().k in ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening', 'unknown']
+        && nw().np is int && nw().np >= 1 && nw().np <= 12;
+      allow update: if isManager()
+        && resource.data.st == 'new'
+        && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt'])
+        && nw().st in ['done', 'rej']
+        && isMyName(nw().get('stBy', ''))
+        && nowOk(nw().get('stAt', 0));
+      allow delete: if isManager();
+
+      // חלקי הצילום: mq/{id}/p/{k} – רק data עד 700,000 תווים; כותב רק מי ששלח, רק חלק שהוכרז ב-np, ב-15 הדקות שאחרי השליחה.
+      match /p/{k} {
+        function q() { return get(/databases/$(database)/documents/mq/$(id)).data; }
+        allow read: if isManager()
+          || (isActiveEmployee() && q().uid == request.auth.uid);
+        allow create: if isActiveEmployee() && !isManager()
+          && exists(/databases/$(database)/documents/mq/$(id))
+          && q().uid == request.auth.uid
+          && k.matches('^([0-9]|1[01])$') && int(k) < q().np
+          && request.time.toMillis() - q().t < 900000
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000;
+        allow update: if false;
+        allow delete: if isManager();
+      }
+    }
+
     // ---------- סגירת קופה (closings) ----------
     // בקשת בעל העסק 2.11.2026 (שלב 1): עובד או מנהל שולח סגירת קופה (דוח Z והצהרת פתיחה) עם הסכומים שזוהו.
     // הנתונים הכספיים נשמרים רק בטלפון המנהל, ולכן: קריאה – מנהל בלבד. העובד לא רואה כלום אחרי השליחה (גם לא את שלו).
@@ -376,6 +432,19 @@ service cloud.firestore {
         return dd.uid == request.auth.uid && dd.st == 'new' && id in dd.items
           && request.time.toMillis() - dd.t < 900000;
       }
+      // 6ח (עדכון חוזה 18, החלטת המשתמש): עובד לא רושם הוצאה מקופה מתאריך שלפני הפתיחה האחרונה של הקופה (zlast/{reg}).
+      // הגבול כמו zcB באפליקציה ו-bound בשרת: הפתיחה שצורפה (od/otm) אם היא אחרי הסגירה ועד יום אחד אחריה; אחרת זמן הסגירה.
+      // אותו יום כמו הגבול בלי שעה (בהוצאה או בגבול) – מותר ("לא ברור", המנהל מכריע בסגירה). אין zlast – מותר.
+      function dt(s) { return timestamp.date(int(s[0:4]), int(s[5:7]), int(s[8:10])); }
+      function afterB(z) {
+        let cd = z.get('d', ''); let ctm = z.get('tm', ''); let od = z.get('od', ''); let otm = z.get('otm', '');
+        let useO = od != '' && otm != '' && cd != '' && dt(od) <= dt(cd) + duration.value(1, 'd') && (od + ' ' + otm) > (cd + ' ' + ctm);
+        let bd = useO ? od : cd; let bt = useO ? otm : ctm; let xt = nw().get('tm', '');
+        return bd == '' || nw().d > bd || (nw().d == bd && (xt == '' || bt == '' || xt > bt));
+      }
+      function notOld() {
+        return !exists(/databases/$(database)/documents/zlast/$(nw().reg)) || afterB(get(/databases/$(database)/documents/zlast/$(nw().reg)).data);
+      }
       allow read: if isStaff();
       allow create: if isStaff()
         && nw().keys().hasAll(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
@@ -387,7 +456,7 @@ service cloud.firestore {
         && bodyOk()
         && idStr(nw().src) && nw().src != ''
         && idStr(nw().zc) && idStr(nw().dp)
-        && (isManager() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk()));
+        && (isManager() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk() && notOld()));
       allow update: if (isManager()
           && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp', 'reg', 'd', 'tm', 'a', 'why', 'dep'])
           && idStr(nw().zc) && idStr(nw().dp) && bodyOk())
@@ -506,6 +575,730 @@ service cloud.firestore {
         && request.resource.data.updatedAt is int && math.abs(request.resource.data.updatedAt - request.time.toMillis()) < 120000
         && request.resource.data.updatedBy == request.auth.uid;
       allow delete: if false;
+    }
+
+    // ---------- ריבוי עסקים (משימה 2026-11-05, שלב 2) ----------
+    // כל הכללים שלמעלה (בשורש) נשארו בדיוק כמו שהיו: לארג' פעמי במצב legacy והגרסאות הישנות ממשיכים לעבוד בלי שינוי.
+    // מכאן ועד הכלל האחרון: רק תוספות. הנתונים של כל עסק נמצאים מתחת ל-b/{bizId}, והתפקיד נבדק בתוך העסק בלבד:
+    //   מנהל עסק = b/{bizId}/admins/{uid}; עובד = b/{bizId}/staff/{uid} עם active == true.
+    //   מנהל־על = superadmins/{uid}: מנהל מלא בכל עסק (כולל נתונים כספיים, וגם בעסק מושהה). עדכון חוזה 2.
+    //   עסק מושהה (status != 'active'): מנהל העסק ועובדיו חסומים בכל הנתונים. מותרת להם רק קריאה של מסמך העסק.
+    //   תוספת כבויה (features[key] != true, כולל מסמך בלי features): אין גישה לאוסף שלה, לאף אחד.
+
+    function isSuper() {
+      return request.auth != null && exists(/databases/$(database)/documents/superadmins/$(request.auth.uid));
+    }
+
+    // superadmins: המשתמש קורא רק את המסמך של עצמו. כתיבה – רק בלוח הבקרה.
+    match /superadmins/{userId} {
+      allow get: if isSelf(userId);
+      allow list, create, update, delete: if false;
+    }
+
+    // ----- הזמנות ומלאי בשורש – רק ללארג' פעמי במצב legacy (2026-11-08, שלב 1). אותם נתיבים ותנאים כמו ב-b/{bizId},
+    // כך שכלי ההעברה מעתיק אותם כמו שהם. בשורש כל התוספות פעילות ואין מתגי הרשאה לעובד (כמו היום) – עובד פעיל = הזמנות.
+    // כל כתיבה – רק השרת (functions/orders.js). private/pay – אף אחד מהאפליקציה (הכלל האחרון).
+    function rOrd() { return isStaff() || isSuper(); }
+    function rMgr() { return isManager() || isSuper(); }
+    function rBrOk(br) {
+      return rMgr() || get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('br', null) == null
+        || br in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.br;
+    }
+    match /ordcfg/{docId} {
+      allow get: if rOrd() && docId in ['main', 'seq'];
+      allow list, create, update, delete: if false;
+    }
+    match /prod/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+      // עלות (p/cost) – גם עובד עם הזמנות (החלטה 00:12); סיטונאי (p/ws) – מנהל בלבד
+      match /p/{k} {
+        allow read: if rMgr() || (k == 'cost' && rOrd());
+        allow create, update, delete: if false;
+      }
+    }
+    match /ord/{id} {
+      allow read: if rOrd() && rBrOk(resource.data.br);
+      allow create, update, delete: if false;
+      match /log/{k} {
+        allow read: if rOrd() && rBrOk(get(/databases/$(database)/documents/ord/$(id)).data.br);
+        allow create, update, delete: if false;
+      }
+    }
+    match /ordpay/{id} {
+      allow read: if rMgr();
+      allow create, update, delete: if false;
+    }
+    match /stockLog/{id} {
+      allow read: if rOrd() && rBrOk(resource.data.br);
+      allow create, update, delete: if false;
+    }
+    // fb/ord-catalog: קטגוריות (כולם עם הזמנות קוראים) והעברות פנימיות (לפי סניף המקור או היעד). כתיבה – רק השרת.
+    match /cat/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+    }
+    match /xfer/{id} {
+      allow read: if rOrd() && (rBrOk(resource.data.from) || rBrOk(resource.data.to));
+      allow create, update, delete: if false;
+    }
+    // לקוחות (fb/ord-cust): קריאה – עובד/מנהל; כתיבה – רק השרת (functions/customers.js), כולל סימון סיטונאי (מנהל בלבד)
+    match /cust/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+      // fb/ord-card: פרטי כרטיס מוצפנים (cust/{id}/p/card) – אף אחד לא קורא מהאפליקציה (רק השרת, getCard)
+      match /p/{k} {
+        allow read, write: if false;
+      }
+    }
+    match /custcfg/{docId} {
+      allow get: if rOrd() && docId == 'main';
+      allow list, create, update, delete: if false;
+    }
+    // fb/ord-card: יומן צפייה/העתקה של פרטי כרטיס – מנהל קורא
+    match /cardLog/{id} {
+      allow read: if rMgr();
+      allow create, update, delete: if false;
+    }
+
+    // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
+    match /users/{userId} {
+      allow get: if isSelf(userId);
+      allow list, create, update, delete: if false;
+    }
+
+    match /b/{bizId} {
+      function bizDoc() { return get(/databases/$(database)/documents/b/$(bizId)).data; }
+      function bSuper() { return isSuper(); }
+      function bActive() { return bizDoc().get('status', '') == 'active'; }
+      function bIsAdmin() {
+        return request.auth != null && exists(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid));
+      }
+      function bIsActiveStaff() {
+        return request.auth != null && exists(/databases/$(database)/documents/b/$(bizId)/staff/$(request.auth.uid))
+          && get(/databases/$(database)/documents/b/$(bizId)/staff/$(request.auth.uid)).data.active == true;
+      }
+      // אותם תפקידים כמו בשורש (isManager / isActiveEmployee / isStaff), אבל בתוך העסק
+      function bMgr() { return (bIsAdmin() && bActive()) || bSuper(); }
+      function bEmp() { return bIsActiveStaff() && bActive(); }
+      function bStaff() { return bMgr() || bEmp(); }
+      // 6ה (עדכון חוזה 15): הרשאות עובד לפי מתגים. staff/{uid}.perms – מפה של מתגים (רק השרת כותב, setStaffPerms, מנהל־על).
+      // אין perms (עובד ישן) = בדיוק ההרשאות שהיו עד היום (dflt). יש perms = רק מתג שערכו true. מנהל / מנהל־על = הכול.
+      // הקריאה ל-staff/{uid} זהה לזו של bIsActiveStaff, ולכן לא נספרת פעמיים.
+      function myStaff() { return get(/databases/$(database)/documents/b/$(bizId)/staff/$(request.auth.uid)).data; }
+      function dflt(k) { return k in ['expR', 'expW', 'incW', 'sup', 'ord']; }
+      // 6ו (עדכון חוזה 16): pv(k) = ערך המתג של העובד (בלי perms = dflt). perm(k) = רק true.
+      // expR יכול להיות גם 'own' = "רואה רק את ההוצאות שהוא עצמו הזין". expOwn() = true או 'own'.
+      function pv(k) { return myStaff().get('perms', null) == null ? dflt(k) : myStaff().perms.get(k, false); }
+      function perm(k) {
+        return bMgr() || (bEmp() && pv(k) == true);
+      }
+      function expOwn() { return bMgr() || (bEmp() && (pv('expR') == true || pv('expR') == 'own')); }
+      function feat(k) { return bizDoc().get('features', {}).get(k, false) == true; }
+
+      function nowMs(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      // brand (שם תצוגה, לוגו, צבעים): אף אחד לא כותב מהאפליקציה – רק השרת (setBusinessBrand, מנהל־על בלבד, עם audit).
+      // עדכון חוזה 14: מנהל העסק ועובד – קריאה בלבד (כחלק ממסמך העסק).
+      function aff() { return request.resource.data.diff(resource.data).affectedKeys(); }
+      // מנהל־על כותב מהאפליקציה רק migrationTarget. status, features, adv, brand, ownerEmail, ownerPhone – רק דרך פונקציות השרת (שלב 5,
+      // עדכון חוזה 6): כך כל שינוי נרשם ב-audit, ו-users/{uid}.bizStatus מתעדכן יחד עם status. ownerEmail/ownerPhone/adv
+      // נשמרים ב-b/{bizId}/private/info ולא במסמך העסק. name, dataRoot, bizId, schemaVersion וכו' – רק השרת.
+      // עדכון חוזה 7א: migrationTarget (בוליאני, כלי ההעברה כותב אותו) – רק מנהל־על (או השרת). מנהל העסק ועובד – לא.
+      // 2026-11-08: org (סניפים, בנקים, כרטיסים) – רק השרת (setBusinessOrg, עם audit). לא ברשימה כאן, ולכן נחסם מהאפליקציה.
+      function superUpdOk() {
+        return aff().hasOnly(['migrationTarget'])
+          && request.resource.data.migrationTarget is bool;
+      }
+
+      // מסמך העסק: קריאה – חברי העסק (גם כשהעסק מושהה, כדי להציג "החשבון מושהה") ומנהל־על. רשימת כל העסקים – רק מנהל־על.
+      // כתיבה: מנהל העסק – כלום (עדכון חוזה 14: גם לא brand). מנהל־על – לפי superUpdOk. יצירה ומחיקה – רק השרת.
+      allow get: if bIsAdmin() || bIsActiveStaff() || bSuper();
+      allow list: if isSuper();
+      allow update: if bSuper() && superUpdOk();
+      allow create, delete: if false;
+
+      // private: הגדרות שרת של העסק (למשל גיבוב אסימון ימות, קודי הזמנה) – אף אחד מהאפליקציה.
+      // חריג אחד (עדכון חוזה 6): private/info (ownerEmail, ownerPhone, adv) – קריאה למנהל העסק (בעסק פעיל) ולמנהל־על.
+      // עובד לא קורא. כתיבה – רק השרת.
+      match /private/{docId} {
+        // 2026-11-08: גם private/org (מספרי חשבון מלאים של בנקים) – באותו תנאי כמו info. עובד לא קורא.
+        allow get: if docId in ['info', 'org'] && ((bIsAdmin() && bActive()) || bSuper());
+        allow list, create, update, delete: if false;
+      }
+
+      // audit: יומן פעולות של מנהל־על. קריאה ויצירה – מנהל־על בלבד. אין עדכון ואין מחיקה, לאף אחד.
+      match /audit/{id} {
+        allow read: if bSuper();
+        allow create: if bSuper()
+          && request.resource.data.keys().hasAll(['by', 't', 'act'])
+          && request.resource.data.keys().hasOnly(['by', 't', 'act', 'note'])
+          && request.resource.data.by == request.auth.uid
+          && nowMs(request.resource.data.t)
+          && request.resource.data.act is string && request.resource.data.act.size() > 0 && request.resource.data.act.size() <= 60
+          && request.resource.data.get('note', '') is string && request.resource.data.get('note', '').size() <= 500;
+        allow update, delete: if false;
+      }
+
+      // ----- כל האוספים הקיימים, בתוך העסק (העתק של הכללים בשורש; isManager/isActiveEmployee/isStaff ← bMgr/bEmp/bStaff,
+      // וכל get/exists מצביע לתוך b/{bizId}). אוסף של תוספת עטוף ב-feat('<מפתח>'). -----
+      // admins: העתק של הכלל בשורש
+      match /admins/{userId} {
+        allow get: if (isSelf(userId) && bActive() && (bIsAdmin() || bIsActiveStaff())) || bSuper();
+        allow list, create, update, delete: if false;
+      }
+
+      // cfg: העתק של הכלל בשורש
+      match /cfg/{docId} {
+        allow read: if bStaff();
+        allow write: if bMgr();
+      }
+
+      // shelf: העתק של הכלל בשורש (תוספת 'shelf')
+      match /shelf/{docId} {
+        allow read, write: if feat('shelf') && (bStaff());
+      }
+
+      // fb: העתק של הכלל בשורש (תוספת 'feedback')
+      match /fb/{docId} {
+        allow create: if feat('feedback') && (bStaff()
+          && request.resource.data.owner == request.auth.uid
+          && (request.resource.data.st == 'new' || bMgr()));
+        allow read: if feat('feedback') && (bMgr()
+          || (bEmp() && resource.data.st == 'ok'));
+        allow update, delete: if feat('feedback') && (bMgr());
+      }
+
+      // bk: העתק של הכלל בשורש
+      match /bk/{docId} {
+        allow read, write: if bMgr();
+      }
+
+      // chunks: העתק של הכלל בשורש
+      match /chunks/{docId} {
+        // תוספת: מזהים fbhi_* (תמונות משוב באיכות גבוהה) שייכים לתוספת 'feedback'
+        function fbOk() { return feat('feedback') || !docId.matches('^fbhi_.*'); }
+        // חלק ג' §5א: k<טביעה>_N = צילום צ'ק שעובד סרק (גם בלי expW)
+        allow create: if fbOk() && bEmp() && !bMgr() && (docId.matches('^fbhi_.*') || perm('expW') || docId.matches('^k[0-9a-f]{16}_[0-9]+$'))
+          && request.resource.data.owner == request.auth.uid
+          && request.resource.data.keys().hasOnly(['owner', 'data'])
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000
+          && (docId.matches('^.+_0$')
+              || (docId.matches('^.+_[1-9][0-9]*$')
+                  && get(/databases/$(database)/documents/b/$(bizId)/chunks/$(docId.replace('_[0-9]+$', '_0'))).data.owner == request.auth.uid));
+        allow read: if fbOk() && (bMgr()
+          || (bEmp() && resource.data.owner == request.auth.uid && (docId.matches('^fbhi_.*') || expOwn())));
+        allow delete: if fbOk() && bMgr();
+        allow update: if false;
+      }
+
+      // inbox: העתק של הכלל בשורש
+      match /inbox/{docId} {
+        // חלק ג' §5א: צ'ק שעובד סרק (k == 'check') נשלח למנהל גם בלי expW – העובד לא רושם הוצאה, רק מעביר צילום ופרטי צ'ק
+        allow create: if bEmp() && !bMgr() && (perm('expW') || request.resource.data.get('k', '') == 'check')
+          && request.resource.data.owner == request.auth.uid
+          && request.resource.data.status == 'new'
+          && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br', 'k'])
+          && request.resource.data.get('k', 'check') == 'check'
+          && brMine(request.resource.data, myStaff())
+          && (!request.resource.data.keys().hasAny(['t'])
+              || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))
+          && get(/databases/$(database)/documents/b/$(bizId)/chunks/$(docId + '_0')).data.owner == request.auth.uid;
+        allow read: if bMgr()
+          || (bEmp() && resource.data.owner == request.auth.uid && expOwn());
+        allow update, delete: if bMgr();
+      }
+
+      // 6ו (עדכון חוזה 16): wv – תצוגות לעובד (הכנסות, משכורות, דוחות), חודש אחד לכל מסמך: {inc|sal|rep}_YYYY-MM.
+      // רק המכשיר של המנהל כותב (המראה של הנתונים שלו). קריאה – לפי המתג: inc = incR, sal = sal. רק קריאה ישירה (get).
+      // 6ז (עדכון חוזה 17): הדוח מפוצל לפי רמה, כדי שעובד לא יוכל לקרוא נתון שאסור לו גם בבקשה ישירה:
+      //   rpi_ = הכנסות לפי קטגוריה (rep); rpe_ = הוצאות לפי קטגוריה בלי משכורות (rep + expR == true; 'own' / false – לא);
+      //   rps_ = סך המשכורות (rep + sal). המסמך הישן rep_ (6ו, כלל גם הוצאות ומשכורות) – רק למנהל, ולא נכתב יותר.
+      //   (החלטות 7.11, 20:45) rpi_ דורש גם incR. rpo_YYYY-MM_<uid> = ההוצאות שהעובד הזה הזין (לפי eu) – רק הוא קורא (uid במזהה), עם rep ו-expR 'own' או true.
+      match /wv/{id} {
+        allow get: if (id.matches('^inc_.*') && perm('incR'))
+          || (id.matches('^sal_.*') && perm('sal'))
+          || (id.matches('^rpi_.*') && perm('rep') && perm('incR'))
+          || (id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_.+$') && id == 'rpo_' + id.split('_')[1] + '_' + request.auth.uid && perm('rep') && expOwn())
+          || (id.matches('^rpe_.*') && perm('rep') && perm('expR'))
+          || (id.matches('^rps_.*') && perm('rep') && perm('sal'))
+          || bMgr();
+        allow list: if bMgr();
+        allow create, update: if bMgr()
+          && (id.matches('^(inc|sal|rpi|rpe|rps)_20[0-9]{2}-(0[1-9]|1[0-2])$') || id.matches('^rpo_20[0-9]{2}-(0[1-9]|1[0-2])_[A-Za-z0-9_-]{1,128}$'))
+          && request.resource.data.keys().hasOnly(['data', 'h', 'm', 'at'])
+          && request.resource.data.data is string && request.resource.data.data.size() <= 900000
+          && request.resource.data.h is string && request.resource.data.h.size() <= 40
+          && request.resource.data.m == id.split('_')[1]
+          && request.resource.data.at is int;
+        allow delete: if bMgr();
+      }
+
+      // staff: העתק של הכלל בשורש
+      match /staff/{userId} {
+        allow get: if bMgr()
+          || (isSelf(userId) && resource.data.active == true && bActive());
+        allow list: if bMgr();
+        allow create, update, delete: if false;
+      }
+
+      // app_backup_status: העתק של הכלל בשורש
+      match /app_backup_status/{userId} {
+        allow get: if bMgr()
+          || (isSelf(userId) && bEmp());
+        allow list: if bMgr();
+        allow create, update, delete: if false;
+      }
+
+      // tasks: העתק של הכלל בשורש (תוספת 'tasks')
+      match /tasks/{id} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function hasNc() { return od().get('nc', '') == '1'; }
+        function workerUpd() {
+          return od().st == 'open'
+            && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
+            && nowOk(nw().sub)
+            && isMyName(nw().doneBy)
+            && (
+              (od().pr == '1' && nw().st == 'wait' && nw().open == '1'
+                && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
+                && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*')
+                && nw().late == od().late && nw().ok == od().ok)
+              || (od().pr != '1' && !hasNc() && nw().st == 'done' && nw().open == ''
+                && nw().img == od().img && nw().ok == nw().sub
+                && (nw().late == '1') == (request.time.toMillis() > od().due))
+              || (od().pr != '1' && hasNc() && nw().st == 'wait' && nw().open == '1'
+                && nw().img == od().img && nw().late == od().late && nw().ok == od().ok)
+            );
+        }
+        function ncMark() {
+          return nw().diff(od()).affectedKeys().hasOnly(['nc'])
+            && nw().get('nc', '') == '1'
+            && od().st == 'open' && od().open == '1';
+        }
+        function commentMark() {
+          return nw().diff(od()).affectedKeys().hasOnly(['cAt', 'cBy'])
+            && nw().cBy == request.auth.uid
+            && nowOk(nw().cAt)
+            && (bMgr() || od().open == '1' || od().late == '1');
+        }
+        allow read: if feat('tasks') && (bMgr()
+          || (bStaff() && (resource.data.open == '1' || resource.data.late == '1'))
+          || (bEmp() && isMyName(resource.data.doneBy)));
+        allow create: if feat('tasks') && (bStaff()
+          && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
+          && nw().owner == request.auth.uid
+          && isMyName(nw().by)
+          && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
+          && nw().sub == 0 && nw().ok == 0 && nw().note == ''
+          && (nw().pr == '' || bMgr())
+          && (nw().role == 'w' || bMgr())
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+          && nowOk(nw().cr)
+          && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000);
+        allow update: if feat('tasks') && (bMgr() || (bStaff() && (workerUpd() || commentMark() || ncMark())));
+        allow delete: if feat('tasks') && (bMgr());
+
+        match /c/{cid} {
+          function task() { return get(/databases/$(database)/documents/b/$(bizId)/tasks/$(id)).data; }
+          function canReadTask() {
+            return exists(/databases/$(database)/documents/b/$(bizId)/tasks/$(id))
+              && (bMgr() || (bStaff() && (task().open == '1' || task().late == '1')));
+          }
+          allow read: if feat('tasks') && (canReadTask());
+          allow create: if feat('tasks') && (bStaff() && canReadTask()
+            && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
+            && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
+            && nw().uid == request.auth.uid
+            && nw().by is string && nw().by.size() <= 100
+            && isMyName(nw().by)
+            && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+            && nowOk(nw().t)
+            && (bMgr() || (task().get('nc', '') == '1' && task().st == 'open')));
+          allow update: if false;
+          allow delete: if feat('tasks') && (bMgr());
+        }
+      }
+
+      // supinv: העתק של הכלל בשורש (תוספת 'suppliers')
+      match /supinv/{id} {
+        allow read: if feat('suppliers') && perm('sup');
+        allow create, update: if feat('suppliers') && (bMgr()
+          && request.resource.data.keys().hasOnly(['c', 'n', 'd', 'at', 'a', 'inv', 'by', 'pend', 'src', 'm', 'np', 'h', 'fh']));
+        allow delete: if feat('suppliers') && (bMgr());
+
+        match /p/{k} {
+          allow read: if feat('suppliers') && perm('sup');
+          allow create, update: if feat('suppliers') && (bMgr()
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000);
+          allow delete: if feat('suppliers') && (bMgr());
+        }
+      }
+
+      // appreq: העתק של הכלל בשורש (תוספת 'requests')
+      match /appreq/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        allow read: if feat('requests') && (bStaff());
+        allow create: if feat('requests') && (bStaff()
+          && nw().keys().hasAll(['uid', 'by', 'txt', 't', 'st', 'np'])
+          && nw().keys().hasOnly(['uid', 'by', 'txt', 't', 'st', 'np'])
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 2000
+          && nowOk(nw().t)
+          && nw().st == 'new'
+          && nw().np is int && nw().np >= 0 && nw().np <= 8);
+        allow update: if feat('requests') && (bMgr()
+          && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+          && nw().st in ['new', 'doing', 'done', 'rej']
+          && isMyName(nw().get('stBy', ''))
+          && nowOk(nw().get('stAt', 0))
+          && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+        allow delete: if feat('requests') && (bMgr());
+
+        match /p/{k} {
+          function req() { return get(/databases/$(database)/documents/b/$(bizId)/appreq/$(id)).data; }
+          allow read: if feat('requests') && (bStaff());
+          allow create: if feat('requests') && (bStaff()
+            && exists(/databases/$(database)/documents/b/$(bizId)/appreq/$(id))
+            && req().uid == request.auth.uid
+            && k.matches('^[0-7]$') && int(k) < req().np
+            && request.time.toMillis() - req().t < 900000
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000);
+          allow update: if false;
+          allow delete: if feat('requests') && (bMgr());
+        }
+      }
+
+      // mq: העתק של הכלל בשורש (תור "נשלח למנהל לטיפול", שלב 6). בלי תוספת – כל עסק
+      // עובד שסרק מסמך מסוג שאין לו הרשאה להזין: נשלחים רק הצילום (בחלקים, p) והסוג המשוער (k) – בלי סכומים ובלי רשומה כספית.
+      // יצירה: עובד פעיל (לא מנהל), בשמו, בזמן אמת, בסטטוס 'new', רק השדות האלה. קריאה: מנהל – הכול; עובד – רק את שלו.
+      // עדכון: מנהל בלבד, פעם אחת (רק מ-'new' ל-'done'/'rej'), ורק שדות הסטטוס – כך פריט שטופל לא נשמר פעמיים. העובד לא עורך ולא מוחק.
+      match /mq/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        allow read: if bMgr()
+          || (bEmp() && resource.data.uid == request.auth.uid);
+        allow create: if bEmp() && !bMgr()
+          && nw().keys().hasAll(['uid', 'by', 't', 'st', 'k', 'np'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np', 'br'])
+          && brMine(nw(), myStaff())
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100 && isMyName(nw().by)
+          && nowOk(nw().t)
+          && nw().st == 'new'
+          && nw().k in ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening', 'unknown']
+          && nw().np is int && nw().np >= 1 && nw().np <= 12;
+        allow update: if bMgr()
+          && resource.data.st == 'new'
+          && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt'])
+          && nw().st in ['done', 'rej']
+          && isMyName(nw().get('stBy', ''))
+          && nowOk(nw().get('stAt', 0));
+        allow delete: if bMgr();
+
+        // חלקי הצילום: mq/{id}/p/{k} – רק data עד 700,000 תווים; כותב רק מי ששלח, רק חלק שהוכרז ב-np, ב-15 הדקות שאחרי השליחה.
+        match /p/{k} {
+          function q() { return get(/databases/$(database)/documents/b/$(bizId)/mq/$(id)).data; }
+          allow read: if bMgr()
+            || (bEmp() && q().uid == request.auth.uid);
+          allow create: if bEmp() && !bMgr()
+            && exists(/databases/$(database)/documents/b/$(bizId)/mq/$(id))
+            && q().uid == request.auth.uid
+            && k.matches('^([0-9]|1[01])$') && int(k) < q().np
+            && request.time.toMillis() - q().t < 900000
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000;
+          allow update: if false;
+          allow delete: if bMgr();
+        }
+      }
+
+      // ----- הזמנות ומלאי (2026-11-08, שלב 1, תוספת 'orders'). כל כתיבה – רק השרת (functions/orders.js). -----
+      // עובד: רק עם מתג ord, ורק סניפים שלו (staff.br; חסר = הכול). שאילתת רשימה של עובד משויך חייבת לסנן לפי br.
+      function ordOk() { return feat('orders') && perm('ord'); }
+      function brOk(br) { return bMgr() || myStaff().get('br', null) == null || br in myStaff().br; }
+      match /ordcfg/{docId} {
+        allow get: if ordOk() && (docId in ['main', 'seq'] || (docId == 'cell' && feat('cellular')));
+        allow list, create, update, delete: if false;
+      }
+      match /prod/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+        // עלות (p/cost) – מנהל ועובד עם ord (החלטה 00:12); סיטונאי (p/ws) – מנהל בלבד (עובד דרך getWsPrices)
+        match /p/{k} {
+          allow read: if feat('orders') && (bMgr() || (k == 'cost' && ordOk()));
+          allow create, update, delete: if false;
+        }
+      }
+      match /ord/{id} {
+        allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+        match /log/{k} {
+          allow read: if ordOk() && brOk(get(/databases/$(database)/documents/b/$(bizId)/ord/$(id)).data.br);
+          allow create, update, delete: if false;
+        }
+      }
+      // 17:47: ordpay/{ordId} – הזמנה ששולמה דרך קישור הספק: הכנסה + זיכוי אצל הספק. st: 'paid' | 'void'. מנהל בלבד (יומן הכספים)
+      match /ordpay/{id} {
+        allow read: if feat('orders') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /stockLog/{id} {
+        allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+      }
+      // fb/ord-catalog: קטגוריות והעברות פנימיות. מחיר סיטונאי (prod/{id}/p/ws) – תחת p/{k}, מנהל בלבד; עובד מקבל דרך getWsPrices.
+      match /cat/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+      }
+      match /xfer/{id} {
+        allow read: if ordOk() && (brOk(resource.data.from) || brOk(resource.data.to));
+        allow create, update, delete: if false;
+      }
+      // לקוחות (fb/ord-cust): עובד עם ord (תשובה 7) ומנהל קוראים; כתיבה – רק השרת (customers.js). wholesale – רק מנהל, דרך השרת
+      match /cust/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+        // fb/ord-card: המוצפן – אין קריאה מהאפליקציה
+        match /p/{k} {
+          allow read, write: if false;
+        }
+      }
+      match /custcfg/{docId} {
+        allow get: if ordOk() && docId == 'main';
+        allow list, create, update, delete: if false;
+      }
+      // ניוד קווים (fb/ord-lines): תוכניות – קריאה לעובד ord רק כשמתג cellular פעיל; כתיבה – רק השרת (saveLinePlan).
+      // lineLog – אין גישה מהאפליקציה בכלל (הבדיקה דרך checkLines בשרת). בנק/ת"ז בעל כרטיס – בתוך ord.cell, אותן הרשאות כמו ההזמנה (07:38)
+      match /lineplan/{id} {
+        allow read: if ordOk() && feat('cellular');
+        allow create, update, delete: if false;
+      }
+      match /lineLog/{id} {
+        allow read, create, update, delete: if false;
+      }
+      // fb/ord-card: יומן הכרטיסים – מנהל העסק בלבד
+      match /cardLog/{id} {
+        allow read: if feat('orders') && bMgr();
+        allow create, update, delete: if false;
+      }
+
+      // closings: העתק של הכלל בשורש (תוספת 'cashClose')
+      match /closings/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        allow read: if feat('cashClose') && (bMgr());
+        allow create: if feat('cashClose') && (bStaff() && perm('incW')
+          && nw().keys().hasAll(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data', 'tm', 'od', 'otm'])
+          && (!nw().keys().hasAny(['tm']) || (nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+          && (!nw().keys().hasAny(['od']) || (nw().od is string && (nw().od == '' || nw().od.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'))))
+          && (!nw().keys().hasAny(['otm']) || (nw().otm is string && (nw().otm == '' || nw().otm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nowOk(nw().t)
+          && (nw().st == 'new' || (nw().st == 'ok' && bMgr()))
+          && nw().np is int && nw().np >= 1 && nw().np <= 8
+          && nw().reg in ['i_yh', 'i_nl']
+          && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+          && nw().no is string && nw().no.size() <= 30
+          && nw().data is string && nw().data.size() <= 20000);
+        allow update: if feat('cashClose') && (bMgr()
+          && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+          && nw().st in ['new', 'ok', 'rej']
+          && isMyName(nw().get('stBy', ''))
+          && nowOk(nw().get('stAt', 0))
+          && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+        allow delete: if feat('cashClose') && (bMgr());
+
+        match /p/{k} {
+          function cl() { return get(/databases/$(database)/documents/b/$(bizId)/closings/$(id)).data; }
+          allow read: if feat('cashClose') && (bMgr());
+          allow create: if feat('cashClose') && (bStaff() && perm('incW')
+            && exists(/databases/$(database)/documents/b/$(bizId)/closings/$(id))
+            && cl().uid == request.auth.uid
+            && k.matches('^[0-7]$') && int(k) < cl().np
+            && request.time.toMillis() - cl().t < 900000
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000);
+          allow update: if false;
+          allow delete: if feat('cashClose') && (bMgr());
+        }
+      }
+
+      // cashout: העתק של הכלל בשורש (תוספת 'cashClose')
+      match /cashout/{id} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function idStr(v) { return v is string && (v == '' || v.matches('^[A-Za-z0-9_-]{1,120}$')); }
+        function amtOk(a) { return (a is int || a is float) && a > 0 && a <= 1000000; }
+        function depRe() {
+          return '(?s).*(^|[^א-ת])[ובלשהכמ]{0,3}(הפקיד(ה|ו|ים)?|הפקד(ה|ות|ת|תי|נו|תם|ו)?|הופקד(ה|ו)?|מופקד(ת|ים|ות)?|מפקיד(ה|ים|ות)?|[אינ]פקיד(ו|ה)?|יופקד(ו)?|תופקד)([^א-ת]|$).*';
+        }
+        function inbOk() {
+          let ib = get(/databases/$(database)/documents/b/$(bizId)/inbox/$(id)).data;
+          return ib.owner == request.auth.uid && ib.status == 'new'
+            && ib.get('t', 0) is int && request.time.toMillis() - ib.get('t', 0) < 900000;
+        }
+        function bodyOk() {
+          return nw().reg in ['i_yh', 'i_nl']
+            && (!nw().keys().hasAny(['tm']) || (nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+            && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+            && amtOk(nw().a)
+            && nw().why is string && nw().why.size() > 0 && nw().why.size() <= 300
+            && nw().dep in ['', '1'] && (nw().dep == '1') == nw().why.matches(depRe());
+        }
+        function depOk(did) {
+          let dd = getAfter(/databases/$(database)/documents/b/$(bizId)/deposits/$(did)).data;
+          return dd.uid == request.auth.uid && dd.st == 'new' && id in dd.items
+            && request.time.toMillis() - dd.t < 900000;
+        }
+        // 6ח (עדכון חוזה 18, החלטת המשתמש): עובד לא רושם הוצאה מקופה מתאריך שלפני הפתיחה האחרונה של הקופה (zlast/{reg}).
+        // הגבול כמו zcB באפליקציה ו-bound בשרת: הפתיחה שצורפה (od/otm) אם היא אחרי הסגירה ועד יום אחד אחריה; אחרת זמן הסגירה.
+        // אותו יום כמו הגבול בלי שעה (בהוצאה או בגבול) – מותר ("לא ברור", המנהל מכריע בסגירה). אין zlast – מותר.
+        function dt(s) { return timestamp.date(int(s[0:4]), int(s[5:7]), int(s[8:10])); }
+        function afterB(z) {
+          let cd = z.get('d', ''); let ctm = z.get('tm', ''); let od = z.get('od', ''); let otm = z.get('otm', '');
+          let useO = od != '' && otm != '' && cd != '' && dt(od) <= dt(cd) + duration.value(1, 'd') && (od + ' ' + otm) > (cd + ' ' + ctm);
+          let bd = useO ? od : cd; let bt = useO ? otm : ctm; let xt = nw().get('tm', '');
+          return bd == '' || nw().d > bd || (nw().d == bd && (xt == '' || bt == '' || xt > bt));
+        }
+        function notOld() {
+          return !exists(/databases/$(database)/documents/b/$(bizId)/zlast/$(nw().reg)) || afterB(get(/databases/$(database)/documents/b/$(bizId)/zlast/$(nw().reg)).data);
+        }
+        // 6ו: "רואה הכול" – כל ההוצאות מהקופה; "רק שלו" – רק uid == שלו (גם בשאילתה: חייבת לסנן uid == שלו)
+        allow read: if feat('cashClose') && (perm('expR') || (expOwn() && resource.data.uid == request.auth.uid));
+        allow create: if feat('cashClose') && (bStaff() && perm('expW')
+          && nw().keys().hasAll(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'reg', 'd', 'tm', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nowOk(nw().t)
+          && bodyOk()
+          && idStr(nw().src) && nw().src != ''
+          && idStr(nw().zc) && idStr(nw().dp)
+          && (bMgr() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk() && notOld())));
+        allow update: if feat('cashClose') && ((bMgr()
+            && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp', 'reg', 'd', 'tm', 'a', 'why', 'dep'])
+            && idStr(nw().zc) && idStr(nw().dp) && bodyOk())
+          || (bEmp() && perm('incW')
+            && nw().diff(od()).affectedKeys().hasOnly(['dp'])
+            && od().dp == '' && od().dep == '1'
+            && nw().dp is string && nw().dp.matches('^[A-Za-z0-9_-]{1,120}$')
+            && depOk(nw().dp)));
+        allow delete: if feat('cashClose') && (bMgr());
+      }
+
+      // deposits: העתק של הכלל בשורש (תוספת 'cashClose')
+      match /deposits/{id} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        allow read: if feat('cashClose') && (bMgr() || perm('incW'));
+        allow create: if feat('cashClose') && (bStaff() && perm('incW')
+          && nw().keys().hasAll(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
+          && nw().keys().hasOnly(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
+          && nw().data is string && nw().data.size() <= 5000
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nowOk(nw().t)
+          && nw().st == 'new'
+          && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+          && nw().items is list && nw().items.size() >= 1 && nw().items.size() <= 30
+          && (nw().a is int || nw().a is float) && nw().a > 0 && nw().a <= 1000000
+          && nw().why is string && nw().why.size() <= 500
+          && nw().np is int && nw().np >= 1 && nw().np <= 8);
+        allow update: if feat('cashClose') && (bMgr()
+          && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
+          && nw().st in ['new', 'ok', 'rej']
+          && isMyName(nw().get('stBy', ''))
+          && nowOk(nw().get('stAt', 0))
+          && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+        allow delete: if feat('cashClose') && (bMgr());
+
+        match /p/{k} {
+          function dp() { return get(/databases/$(database)/documents/b/$(bizId)/deposits/$(id)).data; }
+          allow read: if feat('cashClose') && (bMgr());
+          allow create: if feat('cashClose') && (bStaff() && perm('incW')
+            && exists(/databases/$(database)/documents/b/$(bizId)/deposits/$(id))
+            && dp().uid == request.auth.uid
+            && k.matches('^[0-7]$') && int(k) < dp().np
+            && request.time.toMillis() - dp().t < 900000
+            && request.resource.data.keys().hasOnly(['data'])
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000);
+          allow update: if false;
+          allow delete: if feat('cashClose') && (bMgr());
+        }
+      }
+
+      // zlast: העתק של הכלל בשורש (תוספת 'cashClose')
+      match /zlast/{reg} {
+        function nw() { return request.resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function cl() { return getAfter(/databases/$(database)/documents/b/$(bizId)/closings/$(nw().id)).data; }
+        function fwd() {
+          return resource == null || nw().d > resource.data.d
+            || (nw().d == resource.data.d && nw().tm > resource.data.get('tm', ''));
+        }
+        allow read: if feat('cashClose') && (bMgr() || perm('incW'));
+        allow create, update: if feat('cashClose') && (bStaff() && perm('incW')
+          && reg in ['i_yh', 'i_nl']
+          && nw().keys().hasAll(['d', 'tm', 'id', 'uid', 't'])
+          && nw().keys().hasOnly(['d', 'tm', 'id', 'uid', 't', 'od', 'otm'])
+          && (!nw().keys().hasAny(['od']) || (nw().od is string && (nw().od == '' || nw().od.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'))))
+          && (!nw().keys().hasAny(['otm']) || (nw().otm is string && (nw().otm == '' || nw().otm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
+          && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+          && nw().tm is string && (nw().tm == '' || nw().tm.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
+          && nw().id is string && nw().id.matches('^[A-Za-z0-9_-]{1,120}$')
+          && nw().uid == request.auth.uid
+          && nowOk(nw().t)
+          && (bMgr()
+              || (!exists(/databases/$(database)/documents/b/$(bizId)/closings/$(nw().id))
+                  && cl().uid == request.auth.uid && cl().reg == reg && cl().d == nw().d
+                  && cl().get('tm', '') == nw().tm && nowOk(cl().t)
+                  && cl().get('od', '') == nw().get('od', '') && cl().get('otm', '') == nw().get('otm', '')
+                  && fwd())));
+        allow delete: if feat('cashClose') && (bMgr());
+      }
+
+      // yemot_items: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_items/{id} {
+        allow read, write: if false;
+      }
+      // yemot_line_backups: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_line_backups/{id} {
+        allow read, write: if false;
+      }
+      // yemot_hook_usage: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_hook_usage/{id} {
+        allow read, write: if false;
+      }
+      // yemot_lexicon: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_lexicon/{docId} {
+        allow read: if feat('yemot') && (docId == 'main' && bMgr());
+        allow create, update: if feat('yemot') && (docId == 'main' && bMgr()
+          && request.resource.data.keys().hasOnly(['text', 'updatedAt', 'updatedBy'])
+          && request.resource.data.text is string && request.resource.data.text.size() <= 8000
+          && request.resource.data.updatedAt is int && math.abs(request.resource.data.updatedAt - request.time.toMillis()) < 120000
+          && request.resource.data.updatedBy == request.auth.uid);
+        allow delete: if false;
+      }
     }
 
     // ---------- הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם ----------

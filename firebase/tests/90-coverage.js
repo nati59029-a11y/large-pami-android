@@ -42,7 +42,7 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     assert.deepEqual(extra, [], 'בדיקות שלא מופיעות ברשימה');
 
     // כל האוספים (9 שבטבלה + משימות ותגובות במשימה) ו-5 התפקידים מופיעים
-    const nine = ['admins', 'cfg', 'shelf', 'fb', 'bk', 'chunks', 'inbox', 'staff', 'app_backup_status', 'tasks', 'tasks_c', 'supinv', 'supinv_p', 'appreq', 'appreq_p', 'closings', 'closings_p', 'cashout', 'deposits', 'deposits_p', 'zlast'];
+    const nine = ['admins', 'cfg', 'shelf', 'fb', 'bk', 'chunks', 'inbox', 'staff', 'app_backup_status', 'tasks', 'tasks_c', 'supinv', 'supinv_p', 'appreq', 'appreq_p', 'closings', 'closings_p', 'cashout', 'deposits', 'deposits_p', 'zlast', 'mq', 'mq_p'];
     for (const c of nine) for (const r of H.ROLES) assert.ok(cells.some((x) => x.coll === c && x.role === r), `${c} × ${r} חסר`);
 
     const denyCells = cells.filter((c) => c.expected === 'deny');
@@ -120,12 +120,17 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     // וסגירת קופה (closings, וחלקי הצילומים p – מקונן בתוך closings/{id})
     // והוצאות מקופה (cashout) ואישורי הפקדה (deposits, וחלקי הצילומים p – מקונן בתוך deposits/{id}) – שלב 2, וזמן הסגירה האחרונה (zlast)
     // ואוספי ימות (yemot_items, yemot_line_backups, yemot_hook_usage, yemot_lexicon – משימה 2026-11-02)
-    const colls = matches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cashout', 'cfg', 'chunks', 'closings', 'deposits', 'fb', 'inbox', 'p', 'p', 'p', 'p', 'shelf', 'staff', 'supinv', 'tasks', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
+    // ריבוי עסקים (2026-11-05): אוספי השורש נבדקים רק עד הבלוק match /b/{bizId}, שמכיל העתק שלהם בתוך העסק
+    const rootPart = t.slice(0, t.indexOf('match /b/{bizId} {'));
+    const rootMatches = [...rootPart.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
+    const colls = rootMatches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
+    assert.ok(/match \/b\/\{bizId\} \{/.test(t), 'בלוק העסקים חסר');
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cust', 'custcfg', 'deposits', 'fb', 'inbox', 'log', 'mq', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'prod', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/supinv\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך supinv');
     assert.match(t, /match \/appreq\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך appreq');
     assert.match(t, /match \/closings\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך closings');
+    assert.match(t, /match \/cust\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך cust (fb/ord-card)');
     assert.match(t, /match \/deposits\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך deposits');
   });
 

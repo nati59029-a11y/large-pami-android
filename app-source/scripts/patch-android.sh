@@ -1,4 +1,7 @@
 set -e
+# הורדת Gradle: זמן המתנה 2 דקות במקום 10 שניות (תקלות רשת זמניות הכשילו בנייה)
+W=android/gradle/wrapper/gradle-wrapper.properties
+if [ -f "$W" ]; then if grep -q '^networkTimeout=' "$W"; then sed -i 's/^networkTimeout=.*/networkTimeout=120000/' "$W"; else echo 'networkTimeout=120000' >> "$W"; fi; fi
 sed -i "s/versionCode 1/versionCode 4/;s/versionName \"1.0\"/versionName \"2.0\"/" android/app/build.gradle
 # Force the committed signing key (Gradle was generating a random debug key on every build)
 test -f keystore/debug.keystore || { echo "::error::keystore missing"; exit 1; }
@@ -22,6 +25,8 @@ sed -i 's|<application|<uses-permission android:name="android.permission.RECORD_
 sed -i 's|<application|<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <application|' $M
 # Silent self-update (Android 12+): lets the app ask PackageInstaller for USER_ACTION_NOT_REQUIRED
 sed -i 's|<application|<uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />\n    <application|' $M
+# App lock for managers (BiometricLock plugin): fingerprint/face through the system BiometricPrompt, screen lock as fallback
+sed -i 's|<application|<uses-permission android:name="android.permission.USE_BIOMETRIC" />\n    <application|' $M
 grep -q 'fileprovider' $M || echo "::warning::FileProvider not found in manifest"
 # --- SHARE-TARGET BEGIN ---
 # "Share" menu of Android (WhatsApp, bank app, gallery): images and PDF, one file or many.
@@ -82,6 +87,7 @@ cp android-plugin/PdfPrintPlugin.java $J/PdfPrintPlugin.java
 cp android-plugin/LiveUpdateCore.java $J/LiveUpdateCore.java
 cp android-plugin/LiveUpdatePlugin.java $J/LiveUpdatePlugin.java
 cp android-plugin/ShareInPlugin.java $J/ShareInPlugin.java
+cp android-plugin/BiometricLockPlugin.java $J/BiometricLockPlugin.java
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
@@ -96,10 +102,13 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PdfPrintPlugin.class);
         registerPlugin(LiveUpdatePlugin.class);
         registerPlugin(ShareInPlugin.class);
+        registerPlugin(BiometricLockPlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them
         LiveUpdatePlugin.beforeLoad(this);
+        // App lock: FLAG_SECURE before the first frame, so no app content shows in "recent apps"
+        BiometricLockPlugin.applyEarly(this);
         super.onCreate(savedInstanceState);
     }
 }

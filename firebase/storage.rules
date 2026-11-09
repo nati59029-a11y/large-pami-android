@@ -44,8 +44,62 @@ service firebase.storage {
     // כתיבה ומחיקה: אסורות לכולם. ההעלאה נעשית רק בתהליך הבנייה, עם מפתח גישה של חשבון שירות,
     // שעוקף את הכללים.
     match /app_releases/{allPaths=**} {
-      allow read: if isStaff();
+      // ריבוי עסקים (שלב 5, סבב 2): לכל היותר 2 מסמכים בכל מסלול – users/{uid} ו-superadmins/{uid} (עדכון חוזה 6).
+      // חבר פעיל בכל עסק, כולל לארג' פעמי במצב legacy (מסמך users שכלי ההעברה יוצר, והשרת מסנכרן מ-admins/staff
+      // בשורש – syncLegacyAdmin / syncLegacyStaff), גם כשהעסק מושהה (עדכוני אבטחה), ומנהל־על.
+      // משתמש שורש בלי מסמך users נחסם, ולכן מפרסמים את הכלל רק אחרי ההעברה והפונקציות (ראו 5-שרת.md).
+      allow read: if relMember();
       allow write: if false;
+    }
+
+    // ---------- ריבוי עסקים (משימה 2026-11-05, שלבים 2 ו-5) ----------
+    // הכללים בשורש (app_backups/) לא השתנו. app_releases/ – ראו למעלה (קורא רק users ו-superadmins).
+    // עדכון חוזה 6: בכל הערכה בתוך b/{bizId} לכל היותר 2 קריאות מסמכים ל-Firestore: users/{uid} ו-superadmins/{uid}.
+    // השרת (שלב 5) שומר ב-users/{uid} עותק מעודכן: bizId, role ('admin'/'worker'), active, bizStatus ('active'/'suspended').
+    // מנהל = role 'admin'; עובד = role 'worker'; שניהם active == true ו-bizStatus == 'active', בעסק של הנתיב.
+    // מנהל־על = superadmins/{uid} (מנהל מלא בכל עסק, גם מושהה). users/{uid} חסר = get נכשל = לא חבר (מנהל־על עדיין עובר).
+    function uDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    function uIn(bizId, role) {
+      return request.auth != null && uDoc().get('bizId', '') == bizId && uDoc().get('role', '') == role
+        && uDoc().get('active', false) == true && uDoc().get('bizStatus', '') == 'active';
+    }
+    function bSuper() {
+      return request.auth != null && firestore.exists(/databases/(default)/documents/superadmins/$(request.auth.uid));
+    }
+    function bMgr(bizId) {
+      return uIn(bizId, 'admin') || bSuper();
+    }
+    function bEmp(bizId) {
+      return uIn(bizId, 'worker');
+    }
+    function bStaff(bizId) {
+      return uIn(bizId, 'admin') || uIn(bizId, 'worker') || bSuper();
+    }
+    // חבר פעיל בעסק כלשהו, לעדכוני APK: לא תלוי בסטטוס העסק, כדי שגם עסק מושהה יקבל עדכוני אבטחה (עדכון חוזה 6).
+    function relMember() {
+      return request.auth != null
+        && ((uDoc().get('active', false) == true && uDoc().get('role', '') in ['admin', 'worker']) || bSuper());
+    }
+
+    // גיבוי מוצפן של האפליקציה בתוך העסק: אותם תנאים כמו app_backups/ בשורש, עם התפקיד בתוך העסק.
+    match /b/{bizId}/app_backups/{userId}/{fileName} {
+      allow read: if (isSelf(userId) && bStaff(bizId)) || bMgr(bizId);
+      allow create, update: if isSelf(userId) && bStaff(bizId)
+        && request.resource.size <= 50 * 1024 * 1024
+        && request.resource.contentType == 'application/octet-stream';
+      allow delete: if isSelf(userId) && bStaff(bizId);
+    }
+
+    // לוגו העסק: קריאה – חברי העסק. כתיבה ומחיקה – מנהל־על בלבד (עדכון חוזה 14; קריאה אחת: superadmins/{uid}).
+    // מנהל העסק ועובד – קריאה בלבד. png/jpeg/webp עד 1MB. מסמך brand עצמו נשמר רק דרך setBusinessBrand (audit).
+    match /b/{bizId}/brand/logo {
+      allow read: if bStaff(bizId);
+      allow create, update: if bSuper()
+        && request.resource.size <= 1024 * 1024
+        && request.resource.contentType in ['image/png', 'image/jpeg', 'image/webp'];
+      allow delete: if bSuper();
     }
 
     // הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם.

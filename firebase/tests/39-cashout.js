@@ -310,4 +310,25 @@ describe('הוצאות מקופה (cashout) ואישורי הפקדה (deposits)
     await env.withSecurityRulesDisabled((c) => c.firestore().doc('deposits/' + id).set(dep('u_off', ['co2'], { np: 2 })));
     await assertFails(off.doc('deposits/' + id + '/p/0').set({ data: 'AAAA' }));
   });
+
+  // 6ח (עדכון חוזה 18): גם בעסק היחיד (legacy, שורש) – עובד לא רושם הוצאה מקופה מלפני הפתיחה האחרונה (zlast/i_nl = 20.10 09:02)
+  it('6ח legacy: הוצאה מקופה מלפני הסגירה/הפתיחה האחרונה – נדחית; אחריה, אותו יום בלי שעה, קופה בלי סגירה ומנהל – מותר', async () => {
+    const T = async (o) => { const id = fresh('w'); await inbox('u_emp', id); return emp.doc('cashout/' + id).set(co('u_emp', id, o)); };
+    await assertFails(T({ d: '2026-10-19', tm: '23:00' }));
+    await assertFails(T({ d: '2026-10-19' }));
+    await assertFails(T({ d: '2026-10-20', tm: '09:02' }));
+    await assertSucceeds(T({ d: '2026-10-20', tm: '09:03' }));
+    await assertSucceeds(T({ d: '2026-10-20' }));
+    await assertSucceeds(T({ d: '2026-10-21', tm: '01:00' }));
+    await assertSucceeds(T({ d: '2026-01-01', reg: 'i_yh' }));
+    await assertSucceeds(mgr.doc('cashout/m' + fresh('t')).set(co('u_mgr', 'tx1', { d: '2026-01-01', zc: 'z1' })));
+    // פתיחה שצורפה (למחרת 08:00) – הגבול הוא הפתיחה
+    await env.withSecurityRulesDisabled((c) => c.firestore().doc('zlast/i_nl').set({ d: '2026-10-20', tm: '09:02', id: 'z1', uid: 'x', t: 1, od: '2026-10-21', otm: '08:00' }));
+    await assertFails(T({ d: '2026-10-21', tm: '07:59' }));
+    await assertSucceeds(T({ d: '2026-10-21', tm: '08:01' }));
+    // פתיחה יותר מיום אחרי הסגירה – לא נחשבת; הגבול חוזר לזמן הסגירה
+    await env.withSecurityRulesDisabled((c) => c.firestore().doc('zlast/i_nl').set({ d: '2026-10-20', tm: '09:02', id: 'z1', uid: 'x', t: 1, od: '2026-10-22', otm: '08:00' }));
+    await assertSucceeds(T({ d: '2026-10-21', tm: '07:59' }));
+    await assertFails(T({ d: '2026-10-20', tm: '09:00' }));
+  });
 });

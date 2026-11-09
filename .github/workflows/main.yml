@@ -19,7 +19,7 @@ on:
         type: boolean
         default: false
       site_backend:
-        description: "test = a SEPARATE test app (com.largepami.finance.test) connected to the TEST project (largpeami-test-f4691), live update and APK update OFF, never published. Not allowed from main."
+        description: "test = a SEPARATE test app (com.largepami.finance.test) connected to the TEST project (largpeami-test-f4691), live update and APK update OFF, never published to phones (from feature/* its APK goes only to the prerelease test-latest, for the test invite page). Not allowed from main."
         type: choice
         options: ["off", "test"]
         default: "off"
@@ -184,6 +184,43 @@ jobs:
           cp apk/app-debug.apk large-pami.apk
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest large-pami.apk --title "latest" --notes "versionCode: $VC"
+
+  # Test APK for the invite page of the TEST site (welcome.html links to releases/download/test-latest/large-pami-test.apk).
+  # ONLY a manual run with site_backend=test from a feature/* branch. A fixed prerelease "test-latest" is created once and its
+  # file is replaced on every such run. Never touches the production release "latest" or "biz-*", never runs on main or on a push.
+  publish-test:
+    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.site_backend == 'test' &&
+      startsWith(github.ref, 'refs/heads/feature/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-test-latest
+      cancel-in-progress: false
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: large-pami-apk, path: apk }
+      - name: Update the test release (test-latest, prerelease)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          [ "$GITHUB_REF" != "refs/heads/main" ] || { echo "::error::test release is not allowed from main"; exit 1; }
+          VC=$((1000 + GITHUB_RUN_NUMBER))
+          cp apk/app-debug.apk large-pami-test.apk
+          NOTES="TEST build (com.largepami.finance.test, project largpeami-test-f4691). versionCode: $VC. Branch: $REF_NAME. Commit: $GITHUB_SHA"
+          if gh release view test-latest >/dev/null 2>&1; then
+            gh release edit test-latest --prerelease --latest=false --title "test-latest" --notes "$NOTES"
+          else
+            gh release create test-latest --prerelease --latest=false --target "$GITHUB_SHA" --title "test-latest" --notes "$NOTES"
+          fi
+          gh release upload test-latest large-pami-test.apk --clobber
+          echo "Test APK updated: https://github.com/$GITHUB_REPOSITORY/releases/download/test-latest/large-pami-test.apk (versionCode $VC)" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # APK updates from Firebase Storage (app_releases/latest/), for signed-in staff only (storage.rules).
   # Its own job, next to publish: if this upload fails, the GitHub release is not affected.

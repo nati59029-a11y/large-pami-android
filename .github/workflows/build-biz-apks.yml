@@ -1,0 +1,118 @@
+name: Build business APKs
+# 6ה (עדכון חוזה 15): APK נפרד לכל עסק, עם הסמל והשם שלו, מתוך app-source/brands/build-biz.json ו-brands/<bizId>/logo.png.
+# כל APK = אותו קוד בדיוק כמו ה-APK הרגיל (main.yml), ורק: applicationId com.largepami.finance.b.<bizId>, שם וסמל, לוגו לפני כניסה,
+# וערוץ עדכונים משלו (GitHub release biz-<bizId>, Storage app_releases/biz-<bizId>/). עדכון חי כבוי ב-APK כזה.
+# בנייה: בכל דחיפה שנוגעת בקוד, ובהפעלה ידנית. פרסום (release + Storage): רק מ-main (דחיפה, או ידני עם publish) – כמו main.yml.
+# כך כל עדכון ב-main יוצא לכל העסקים. אין כאן פרסום של חוקים או פונקציות.
+on:
+  push:
+    paths: ["app-source/**", "large-pami-android-project.zip", ".github/workflows/build-biz-apks.yml"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the business APKs (release biz-<id>). Works only when run from main."
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      ids: ${{ steps.l.outputs.ids }}
+      any: ${{ steps.l.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: l
+        run: |
+          IDS=$(python3 -c 'import json,re;c=json.load(open("app-source/brands/build-biz.json"));ids=[b["bizId"] for b in c.get("businesses",[]) if re.fullmatch(r"[a-z0-9-]{3,30}",str(b.get("bizId","")))];print(json.dumps(ids))')
+          echo "ids=$IDS" >> "$GITHUB_OUTPUT"
+          [ "$IDS" = "[]" ] && echo "any=no" >> "$GITHUB_OUTPUT" || echo "any=yes" >> "$GITHUB_OUTPUT"
+          echo "Business APKs: $IDS" | tee -a "$GITHUB_STEP_SUMMARY"
+  build:
+    needs: list
+    if: needs.list.outputs.any == 'yes'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        biz: ${{ fromJson(needs.list.outputs.ids) }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - name: Check that app-source matches the project ZIP
+        working-directory: .
+        run: python3 scripts/verify-source-matches-zip.py large-pami-android-project.zip app-source
+      - name: Copy project source
+        working-directory: .
+        run: rm -rf app && mkdir app && cp -a app-source/. app/
+      - run: pip install pillow==10.4.0
+      - run: npm install
+      - run: node scripts/prepare.js
+      - run: npx cap add android
+      - run: bash scripts/patch-android.sh
+      - name: Versions
+        run: |
+          sed -i "s/versionCode [0-9]*/versionCode $((1000 + GITHUB_RUN_NUMBER))/" android/app/build.gradle
+          sed -i "s#__VC__#$((1000 + GITHUB_RUN_NUMBER))#; s#__REPO__#${GITHUB_REPOSITORY}#" www/index.html
+      - name: Storage bucket (variable FIREBASE_STORAGE_BUCKET, like main.yml)
+        env:
+          FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+        run: |
+          if [ -n "$FIREBASE_STORAGE_BUCKET" ]; then
+            echo "$FIREBASE_STORAGE_BUCKET" | grep -Eq '^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$' || { echo "::error::bad FIREBASE_STORAGE_BUCKET"; exit 1; }
+            sed -i "s#^const ST_BUCKET='[^']*';\$#const ST_BUCKET='$FIREBASE_STORAGE_BUCKET';#" www/index.html
+          fi
+      - name: Make the business app (${{ matrix.biz }})
+        run: bash scripts/make-biz-app.sh "${{ matrix.biz }}"
+      - run: npx cap sync android
+      - name: Use the fixed signing key
+        run: mkdir -p ~/.android && cp keystore/debug.keystore ~/.android/debug.keystore
+      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - name: Show package
+        run: |
+          AAPT=$(ls -d $ANDROID_HOME/build-tools/*/ | tail -1)aapt2
+          $AAPT dump badging android/app/build/outputs/apk/debug/app-debug.apk | grep -E "^package:|application-label:" | tee -a $GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with: { name: "apk-${{ matrix.biz }}", path: app/android/app/build/outputs/apk/debug/app-debug.apk }
+  publish:
+    needs: [list, build]
+    if: >-
+      needs.list.outputs.any == 'yes' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && (inputs.publish == true || inputs.publish == 'true')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: { group: publish-biz, cancel-in-progress: false }
+    strategy:
+      fail-fast: false
+      matrix:
+        biz: ${{ fromJson(needs.list.outputs.ids) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: "apk-${{ matrix.biz }}", path: apk }
+      - name: GitHub release biz-${{ matrix.biz }}
+        env: { GH_TOKEN: "${{ github.token }}", GH_REPO: "${{ github.repository }}" }
+        run: |
+          VC=$((1000 + GITHUB_RUN_NUMBER)); T="biz-${{ matrix.biz }}"
+          cp apk/app-debug.apk "$T.apk"
+          gh release delete "$T" --yes --cleanup-tag || true
+          gh release create "$T" "$T.apk" --title "$T" --notes "versionCode: $VC"
+      - name: Storage app_releases/biz-${{ matrix.biz }}/ (only with the secret and the variable)
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ] || [ -z "$BUCKET" ]; then echo "::notice::Storage upload skipped (דולג)"; exit 0; fi
+          umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"; trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
+          python3 scripts/upload-apk-to-storage.py --apk apk/app-debug.apk --version-code $((1000 + GITHUB_RUN_NUMBER)) \
+            --bucket "$BUCKET" --sa "$RUNNER_TEMP/sa.json" --prefix "app_releases/biz-${{ matrix.biz }}/" --summary "$GITHUB_STEP_SUMMARY"

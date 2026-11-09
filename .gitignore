@@ -8,3 +8,15 @@ RELEASE_KEY_ALIAS.txt
 SIGNING_LINEAGE_B64.txt
 # Live update signing key (see scripts/create-live-update-key.sh)
 live-update-signing-key.pem
+# כלי ההעברה (firebase/migrate): קובצי גיבוי, מצב ודוחות מכילים נתונים כספיים – לעולם לא במאגר.
+# (הכלי עצמו מסרב לכתוב אותם בתוך מאגר git; זו שכבת הגנה נוספת)
+lp-migrate/
+lp-migrate-*/
+*.lp-backup.json
+backup-before-switch*.json
+migrate-backup*.json
+migrate-state*.json
+firebase/migrate/*.json
+firebase/migrate/**/*.json
+# קישורים (symlink) ל-node_modules שאינם תיקייה רגילה
+node_modules

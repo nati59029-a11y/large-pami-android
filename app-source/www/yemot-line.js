@@ -8,7 +8,7 @@
 (function(){
 'use strict';
 if(typeof V==='undefined'||typeof ACT==='undefined')return;
-const DK='lp-yl-draft',ID=/^[A-Za-z0-9_-]{8,64}$/,MG=['4','open','lex'];
+const DK=(typeof LK==='function'?LK:(k=>k))('lp-yl-draft'),ID=/^[A-Za-z0-9_-]{8,64}$/,MG=['4','open','lex'];
 const DEF={recipes:2500,updates:800,hours:600,opening:600,promo:400,lex:8000,recordSec:120,tempMaxDays:60,promoMaxDays:60}; // ברירות מחדל לפי החוזה; השרת מחזיר את הערכים האמיתיים ב-getLineState
 const LEX_DENY='רק מנהל יכול לשנות את מילון ההגייה.';
 const MSG={ // הודעות לפי reason מהשרת (גיבוי, אם ההודעה מהשרת לא בעברית)

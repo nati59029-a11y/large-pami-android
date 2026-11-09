@@ -141,6 +141,119 @@ jobs:
             require('fs').appendFileSync(process.env.GITHUB_OUTPUT,'only='+want.map(n=>'functions:'+n).join(',')+'\n');
             console.log('פונקציות לפרסום ('+want.length+'): '+want.join(', '));"
 
+      # רק בפרויקט הבדיקה: Firebase דורש שכל סוד (defineSecret) בקוד יהיה קיים ב-Secret Manager, גם כשמפרסמים רק חלק מהפונקציות.
+      # סוד חסר נוצר עם ערך אקראי זמני. פונקציות שמשתמשות בסודות האלה לא יעבדו בפרויקט הבדיקה – זה מקובל.
+      # סוד קיים לא נדרס לעולם, וערכים לא מודפסים.
+      - name: Placeholder secrets (test project only)
+        if: inputs.project == 'largpeami-test-f4691' && inputs.what == 'functions'
+        working-directory: firebase/functions
+        env:
+          P: ${{ inputs.project }}
+        run: |
+          [ "$P" = "largpeami-test-f4691" ] || { echo "::error::סודות זמניים נוצרים רק בפרויקט הבדיקה largpeami-test-f4691 – מסרב"; exit 1; }
+          NAMES=$(grep -rhoE "defineSecret\(['\"][A-Z0-9_]+['\"]" --include=*.js --include=*.ts --exclude-dir=node_modules . | grep -oE "[A-Z0-9_]+" | sort -u)
+          [ -n "$NAMES" ] || { echo "אין סודות בקוד"; exit 0; }
+          TOKEN=$(CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="$GOOGLE_APPLICATION_CREDENTIALS" gcloud auth print-access-token 2>/dev/null) || { echo "::error::לא הצלחתי לקבל אסימון גישה מחשבון השירות"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          API="https://secretmanager.googleapis.com/v1/projects/$P/secrets"
+          NOPERM="::error::לחשבון השירות אין הרשאה ל-Secret Manager בפרויקט $P. יש להוסיף לו את התפקיד roles/secretmanager.admin"
+          for N in $NAMES; do
+            C=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$API/$N")
+            case "$C" in
+              200) echo "$N: קיים – לא נוגעים"; continue ;;
+              404) ;;
+              403) echo "$NOPERM"; exit 1 ;;
+              *) echo "::error::בדיקת הסוד $N נכשלה (HTTP $C)"; exit 1 ;;
+            esac
+            C=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d '{"replication":{"automatic":{}},"labels":{"firebase-managed":"true"}}' "$API?secretId=$N")
+            [ "$C" = "403" ] && { echo "$NOPERM"; exit 1; }
+            [ "$C" = "200" ] || { echo "::error::יצירת הסוד $N נכשלה (HTTP $C)"; exit 1; }
+            # הערך נוצר ונשלח דרך stdin בלבד – לא מודפס ולא נשמר
+            C=$(printf '{"payload":{"data":"%s"}}' "$(head -c 32 /dev/urandom | base64 -w0 | tr -d '=+/' | base64 -w0)" | \
+              curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @- "$API/$N:addVersion")
+            [ "$C" = "403" ] && { echo "$NOPERM"; exit 1; }
+            [ "$C" = "200" ] || { echo "::error::שמירת ערך לסוד $N נכשלה (HTTP $C)"; exit 1; }
+            echo "$N: נוצר עם ערך זמני" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+      # מפתח הצפנת כרטיסי אשראי (9.11, אושר ע"י המשתמש): אם CARD_ENC_KEY חסר בייצור – נוצר פעם אחת עם 32 בתים אקראיים (base64),
+      # דרך stdin בלבד, לא מודפס ולא נשמר. סוד קיים לא נדרס לעולם (החלפה = אי אפשר לפענח כרטיסים שנשמרו).
+      - name: Card encryption key (create once if missing)
+        if: inputs.project == 'largpeami' && inputs.what == 'functions'
+        working-directory: firebase
+        env:
+          P: ${{ inputs.project }}
+        run: |
+          set +x
+          [ "$P" = "largpeami" ] || { echo "::error::צעד זה רק לייצור"; exit 1; }
+          TOKEN=$(CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="$GOOGLE_APPLICATION_CREDENTIALS" gcloud auth print-access-token 2>/dev/null) || { echo "::error::לא הצלחתי לקבל אסימון גישה מחשבון השירות – עוצר בלי לגעת במפתח"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          API="https://secretmanager.googleapis.com/v1/projects/$P/secrets"
+          NOPERM="::error::לחשבון השירות של $P אין הרשאה ל-Secret Manager. יש להוסיף לו את התפקיד Secret Manager Admin (roles/secretmanager.admin)"
+          # יוצרים רק כשהתשובה היא במפורש 404 (לא קיים). כל תשובה אחרת (שגיאת רשת, 403, 5xx) = עצירה, בלי ליצור ובלי לדרוס.
+          C=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$API/CARD_ENC_KEY") || C=000
+          case "$C" in
+            200) echo "CARD_ENC_KEY: קיים – לא נוגעים" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0 ;;
+            404) ;;
+            403) echo "$NOPERM"; exit 1 ;;
+            *) echo "::error::בדיקת המפתח CARD_ENC_KEY נכשלה (HTTP $C) – עוצר בלי ליצור"; exit 1 ;;
+          esac
+          C=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"replication":{"automatic":{}},"labels":{"firebase-managed":"true"}}' "$API?secretId=CARD_ENC_KEY") || C=000
+          [ "$C" = "403" ] && { echo "$NOPERM"; exit 1; }
+          [ "$C" = "200" ] || { echo "::error::יצירת CARD_ENC_KEY נכשלה (HTTP $C)"; exit 1; }
+          # הערך: 32 בתים אקראיים ב-base64, נשלח דרך stdin בלבד – לא מודפס ולא נשמר. נוסף רק לסוד שזה עתה נוצר (ריק).
+          C=$(printf '{"payload":{"data":"%s"}}' "$(head -c 32 /dev/urandom | base64 -w0 | base64 -w0)" | \
+            curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @- "$API/CARD_ENC_KEY:addVersion") || C=000
+          [ "$C" = "200" ] || { echo "::error::שמירת ערך ל-CARD_ENC_KEY נכשלה (HTTP $C)"; exit 1; }
+          echo "CARD_ENC_KEY: נוצר עכשיו (ערך אקראי, לא מודפס)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # מייל הזמנה עצמי (2026-11-08): אם הוגדרו סודות GitHub MAIL_USER ו-MAIL_APP_PASSWORD – נכתבים ל-Secret Manager של הפרויקט
+      # (גרסה חדשה, דרך stdin בלבד – לא מודפסים). אם חסרים – ממשיכים: הסוד הקיים (או הזמני) נשאר, והאפליקציה נופלת למייל של Firebase.
+      # INVITE_SITE = אתר גרסת המחשב (שם welcome.html), מהמשתנים DESKTOP_SITE / DESKTOP_SITE_TEST.
+      - name: Mail secrets and invite site
+        if: inputs.what == 'functions'
+        working-directory: firebase
+        env:
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+          SITE: ${{ inputs.project == 'largpeami' && vars.DESKTOP_SITE || vars.DESKTOP_SITE_TEST }}
+          M_HOST: ${{ vars.MAIL_HOST || secrets.MAIL_HOST }}
+          M_PORT: ${{ vars.MAIL_PORT || secrets.MAIL_PORT }}
+          M_FROM: ${{ vars.MAIL_FROM || secrets.MAIL_FROM }}
+          P: ${{ inputs.project }}
+        run: |
+          set +x
+          if [ -n "$MAIL_USER" ] && [ -n "$MAIL_APP_PASSWORD" ]; then
+            echo "::add-mask::$MAIL_USER"; echo "::add-mask::$MAIL_APP_PASSWORD"
+            printf '%s' "$MAIL_USER" | firebase functions:secrets:set MAIL_USER --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 || { echo "::error::שמירת הסוד MAIL_USER נכשלה"; exit 1; }
+            printf '%s' "$MAIL_APP_PASSWORD" | firebase functions:secrets:set MAIL_APP_PASSWORD --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 || { echo "::error::שמירת הסוד MAIL_APP_PASSWORD נכשלה"; exit 1; }
+            echo "סודות המייל עודכנו ב-$P" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "אין סודות GitHub MAIL_USER/MAIL_APP_PASSWORD – ממשיכים בלי (מייל ההזמנה יישלח דרך Firebase)" | tee -a "$GITHUB_STEP_SUMMARY"
+            # Firebase דורש שכל defineSecret יהיה קיים. סוד חסר נוצר עם הערך "unset" (לא תקין → הפונקציה נופלת למייל של Firebase). סוד קיים לא נדרס.
+            for N in MAIL_USER MAIL_APP_PASSWORD; do
+              if ! firebase functions:secrets:get "$N" --project "$P" --non-interactive >/dev/null 2>&1; then
+                printf 'unset' | firebase functions:secrets:set "$N" --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 || { echo "::error::יצירת הסוד $N נכשלה"; exit 1; }
+                echo "$N: נוצר עם ערך זמני (unset)" | tee -a "$GITHUB_STEP_SUMMARY"
+              fi
+            done
+          fi
+          # שרת שליחה גמיש (אופציונלי): MAIL_HOST (ברירת מחדל smtp.gmail.com), MAIL_PORT (465), MAIL_FROM (ברירת מחדל MAIL_USER).
+          # ערך לא תקין לא נכתב (הפונקציה משתמשת בברירת המחדל). הערכים לא מודפסים.
+          ENVF="functions/.env.$P"
+          # כל ערך נבדק בשלמותו (bash =~, לא grep לפי שורה): ירידת שורה או CR – נדחה
+          oneline() { case "$1" in *$'\n'*|*$'\r'*) return 1 ;; esac; return 0; }
+          if [ -n "$M_HOST" ]; then if oneline "$M_HOST" && [[ "$M_HOST" =~ ^[a-z0-9.-]{3,253}$ ]]; then printf '\nMAIL_HOST=%s\n' "$M_HOST" >> "$ENVF"; else echo "::warning::MAIL_HOST לא תקין – לא נכתב"; fi; fi
+          if [ -n "$M_PORT" ]; then if oneline "$M_PORT" && [[ "$M_PORT" =~ ^(465|587|2465|2587)$ ]]; then printf '\nMAIL_PORT=%s\n' "$M_PORT" >> "$ENVF"; else echo "::warning::MAIL_PORT לא תקין – לא נכתב"; fi; fi
+          if [ -n "$M_FROM" ]; then if oneline "$M_FROM"; then echo "::add-mask::$M_FROM"; fi; if oneline "$M_FROM" && [[ "$M_FROM" =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$ ]]; then printf '\nMAIL_FROM=%s\n' "$M_FROM" >> "$ENVF"; else echo "::warning::MAIL_FROM לא תקין – לא נכתב"; fi; fi
+          if [ -n "$SITE" ] && oneline "$SITE" && [[ "$SITE" =~ ^[a-z0-9-]+$ ]]; then
+            printf '\nINVITE_SITE=%s\n' "$SITE" >> "functions/.env.$P"
+          else
+            echo "::warning::חסר DESKTOP_SITE(_TEST) – מייל עצמי לא יופעל (fallback למייל של Firebase)"
+          fi
+
       - name: Deploy functions
         if: inputs.what == 'functions'
         working-directory: firebase

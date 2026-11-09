@@ -62,6 +62,11 @@ async function seed(env) {
     staff('u_emp', 'employee', true);
     staff('u_emp2', 'employee', true);
     staff('u_off', 'employee', false);
+    // ריבוי עסקים (שלב 5): עותק users/{uid} לכל חבר בשורש – כמו שכלי ההעברה יוצר והשרת מסנכרן (syncLegacyAdmin/Staff).
+    // כללי Storage של app_releases/ קוראים רק אותו (מגבלת 2 הקריאות). u_out (מחובר בלי חברות) – בלי מסמך.
+    for (const [uid, role, active] of [['u_mgr', 'admin', true], [MANAGER_ONLY_ADMINS, 'admin', true], ['u_emp', 'worker', true], ['u_emp2', 'worker', true], ['u_off', 'worker', false]]) {
+      b.set(db.doc('users/' + uid), { bizId: 'largpeami', role, active, bizStatus: 'active', email: uid + '@example.invalid', createdAt: 1 });
+    }
     for (const uid of ['u_mgr', 'u_emp', 'u_emp2', 'u_off', 'u_out']) {
       b.set(db.doc('app_backup_status/' + uid), { lastBackupAt: now, size: 1234, device: 'demo' });
     }
@@ -93,6 +98,9 @@ async function seed(env) {
     // בקשות לעדכון האפליקציה (appreq): בקשה של עובד אחר עם תמונה בחלק אחד
     b.set(db.doc('appreq/r1'), { uid: OTHER, by: OTHER, txt: 'בקשה', t: T - 5000, st: 'new', np: 1 });
     b.set(db.doc('appreq/r1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
+    // תור "נשלח למנהל לטיפול" (mq, סריקה אחידה שלב 6): פריט של עובד אחר, עם צילום בחלק אחד
+    b.set(db.doc('mq/q1'), { uid: OTHER, by: OTHER, t: T - 5000, st: 'new', k: 'invoice', np: 1 });
+    b.set(db.doc('mq/q1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
     // סגירת קופה (closings): סגירה של עובד אחר, בסטטוס 'new', עם צילומים בחלק אחד
     b.set(db.doc('closings/z1'), { uid: OTHER, by: OTHER, t: T - 5000, st: 'new', np: 1, reg: 'i_nl', d: '2026-10-20', no: '555', data: JSON.stringify({ v: 1, f: { d: '2026-10-20', no: '555', credit: '594.72', cash: '60.10', total: '654.82', drawer: '982.70', oTot: '970.30' }, ack: 1 }) });
     b.set(db.doc('closings/z1/p/0'), { data: 'PAGES:["data:image/jpeg;base64,AAAA"]' });
