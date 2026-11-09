@@ -694,7 +694,7 @@ function sheetDraw(){
  const title={type:'מה מוסיפים?',scan:'חשבונית ספק',cat:'באיזו קטגוריה?',sub:c?'איזה '+(subWord(c)||'פריט')+'?':'',det:'פרטים'}[A.step];
  let body='';
  if(A.step==='type'){
-  body=(A.type?`<div class="big2"><button class="tile inc" data-a="pick" data-k="type" data-v="inc">${ico('inc')}הכנסה</button><button class="tile exp" data-a="pick" data-k="type" data-v="exp">${ico('exp')}הוצאה</button></div>`:`<button class="tile exp" style="width:100%" data-a="usOpen">${ico('doc')}הכנסת מסמכים</button>`)+`${typeof isA==='function'&&isA()?`${bzF('shelf')||bzF('feedback')?`<div class="big2" style="margin-top:10px">${bzF('shelf')?`<button class="tile" data-a="addGo" data-v="shelf" style="font-size:1rem">🏷️<br>מחירים ומבצעים למדף</button>`:''}${bzF('feedback')?`<button class="tile" data-a="addGo" data-v="fb" style="font-size:1rem">📝<br>משוב לקוחות</button>`:''}</div>`:''}${bzF('tasks')||adOrd()?`<div class="big2" style="margin-top:10px">${bzF('tasks')?`<button class="tile" data-a="addGo" data-v="tk" style="font-size:1rem">✅<br>משימה חדשה</button>`:''}${adOrdT()}</div>`:''}${window.ylTile&&bzF('yemot')?'<button class="tile" data-a="addGo" data-v="yl" style="font-size:1rem;width:100%;margin-top:10px">📞<br>שלוחות הקו</button>':''}${adTiles()}`:adOrd()?`<div class="big2" style="margin-top:10px">${adOrdT()}</div>`:''}`}
+  body=(A.type?`<div class="big2"><button class="tile inc" data-a="pick" data-k="type" data-v="inc">${ico('inc')}הכנסה</button><button class="tile exp" data-a="pick" data-k="type" data-v="exp">${ico('exp')}הוצאה</button></div>`:`<button class="tile exp" style="width:100%" data-a="usOpen">${ico('doc')}הכנסת מסמכים</button>`)+`${typeof isA==='function'&&isA()?`<div class="big2" style="margin-top:10px">${bzF('shelf')?`<button class="tile" data-a="addGo" data-v="shelf" style="font-size:1rem">🏷️<br>מחירים ומבצעים למדף</button>`:''}${bzF('feedback')?`<button class="tile" data-a="addGo" data-v="fb" style="font-size:1rem">📝<br>משוב לקוחות</button>`:''}${bzF('tasks')?`<button class="tile" data-a="addGo" data-v="tk" style="font-size:1rem">✅<br>משימה חדשה</button>`:''}${adOrdT()}${adTiles()}${window.ylTile&&bzF('yemot')?'<button class="tile" data-a="addGo" data-v="yl" style="font-size:1rem;grid-column:1/-1">📞<br>שלוחות הקו</button>':''}</div>`:adOrd()?`<div class="big2" style="margin-top:10px">${adOrdT()}</div>`:''}`}
  else if(A.step==='cat'){
   body=catsOf(A.type).map(x=>`<button class="opt" data-a="pick" data-k="cat" data-v="${x.id}"><span>${esc(x.name)}</span>${ico('chev')}</button>`).join('')+`<button class="opt add" data-a="newCatFromSheet"><span>＋ קטגוריה חדשה</span></button>`}
  else if(A.step==='scan'){
@@ -1476,7 +1476,7 @@ function todoC(){const si=typeof siN==='function'?siN():0,ib=S.inbox||[],sup=ib.
 const cashC=()=>{const zc=zcCnt(),dq=dqN(),zs=typeof zsLostN==='function'?(zsLostN()||0):0;return{zc,dq,zs,n:zc+dq+zs}};
 const adTag=n=>n?`<span class="tag t1">${n}</span>`:'';
 function adTiles(){if(!(typeof isA==='function'&&isA()))return '';const a=todoC(),b=bzF('cashClose')?cashC():{n:0};
- return `<div class="big2" style="margin-top:10px"><button class="tile" data-a="addGo" data-v="todo" style="font-size:1rem">📥<br>לטיפול${adTag(a.n)}</button>${bzF('cashClose')?`<button class="tile" data-a="addGo" data-v="cash" style="font-size:1rem">💵<br>סגירת קופה והפקדות${adTag(b.n)}</button>`:''}</div>`}/* משבצת "הזמנות" במסך ה-+ (00:27): רק כשהתכונה orders פעילה, ולעובד רק עם הרשאת ord (מנהל = הכול) */const adOrd=()=>bzF('orders')&&(!isW()||(bzB()&&wp('ord')));const adOrdT=()=>adOrd()?`<button class="tile" data-a="addGo" data-v="ox" style="font-size:1rem">🛒<br>הזמנות</button>`:'';
+ /* המשבצות נכנסות לרשת אחת במסך ה-+: משבצת של תכונה כבויה לא משאירה חור */return `<button class="tile" data-a="addGo" data-v="todo" style="font-size:1rem">📥<br>לטיפול${adTag(a.n)}</button>${bzF('cashClose')?`<button class="tile" data-a="addGo" data-v="cash" style="font-size:1rem">💵<br>סגירת קופה והפקדות${adTag(b.n)}</button>`:''}`}/* משבצת "הזמנות" במסך ה-+ (00:27): רק כשהתכונה orders פעילה, ולעובד רק עם הרשאת ord (מנהל = הכול) */const adOrd=()=>bzF('orders')&&(!isW()||(bzB()&&wp('ord')));const adOrdT=()=>adOrd()?`<button class="tile" data-a="addGo" data-v="ox" style="font-size:1rem">🛒<br>הזמנות</button>`:'';
 const adOpt=(v,t,sm,n)=>`<button class="opt" data-a="go" data-v="${v}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${adTag(n)}${ico('chev')}</button>`;
 const adSec=t=>`<div class="sec"><h3>${t}</h3></div>`;
 V.todo=()=>{const T='לטיפול';if(!isA())return{t:T,s:'',h:'<div class="card"><p class="note">המסך הזה למנהל בלבד.</p></div>'};const c=todoC();let h='';
@@ -1620,7 +1620,8 @@ V.tr=()=>{const T='צילום העברה';if(!trOk())return{t:T,s:'',h:'<div cla
  let h=n>1?`<div class="card"><div class="row" style="justify-content:space-between"><button class="ib" data-a="trNav" data-d="-1" aria-label="הקובץ הקודם" ${TR.i?'':'disabled'}>${ico('chev')}</button><b>קובץ ${TR.i+1} מתוך ${n}</b><button class="ib" style="transform:scaleX(-1)" data-a="trNav" data-d="1" aria-label="הקובץ הבא" ${TR.i<n-1?'':'disabled'}>${ico('chev')}</button></div><p class="note" style="text-align:center;margin:4px 0 0">${dn} מתוך ${n} עברו זיהוי</p></div>`:'';
  let b=trHead(it);
  if(it.type==='bank_transfer')b+=it.rows.map((r,j)=>trRowH(it,r,j)).join('')+`<button class="btn g w" data-a="trAddRow" data-it="${it.id}" style="margin-bottom:10px">＋ מקבל נוסף באותה העברה</button>`;
- h+=`<div class="split"><div>${b}</div><div class="doc">${!it.pdf&&imgOk(it.du)?`<img src="${it.du}" alt="המסמך" data-a="trView" data-it="${it.id}"><p class="note" style="text-align:center;margin:4px 0 0">הקשה להגדלה</p>`:`<button class="btn g w" data-a="trView" data-it="${it.id}">📄 פתיחת ה-PDF</button>`}</div></div>`;
+ /* בתוך מסך הסריקה האחיד התמונה כבר בחצי השמאלי – לא מציגים אותה שוב */
+ if(document.body.classList.contains('us-on'))h+=b;else h+=`<div class="split"><div>${b}</div><div class="doc">${!it.pdf&&imgOk(it.du)?`<img src="${it.du}" alt="המסמך" data-a="trView" data-it="${it.id}"><p class="note" style="text-align:center;margin:4px 0 0">הקשה להגדלה</p>`:`<button class="btn g w" data-a="trView" data-it="${it.id}">📄 פתיחת ה-PDF</button>`}</div></div>`;
  return{t:T,s:n>1?'קובץ '+(TR.i+1)+' מתוך '+n:'מנהל',h}};
 ACT.trNav=el=>{if(!trOk())return;TR.i=Math.max(0,Math.min(TR.items.length-1,TR.i+ +el.dataset.d));render(0)};
 ACT.trView=el=>{const it=trIt(el);if(it)viewImg(it.fid,'LargePami_transfer',it.du)};
@@ -3829,7 +3830,7 @@ async function fdelK(id){try{const d=await idb();await new Promise(res=>{const t
 function siLoad(){if(SI.L&&SI.u===SY.uid)return SI.L;if(!SY.uid)return[];/* בלי משתמש מחובר: לא טוענים, לא שומרים ולא מנקים */let o=null;try{o=JSON.parse(localStorage.getItem(SI_K))}catch(e){}
  const ok=x=>x&&typeof x==='object'&&typeof x.id==='string'&&typeof x.h==='string'&&/^[0-9a-z]{8,40}$/.test(x.h);
  SI={u:SY.uid,L:o&&o.u===SY.uid&&Array.isArray(o.L)?o.L.filter(ok).slice(0,200):[]};
- SI.L.forEach(x=>{x.name=siName(x.name);if(x.st==='run')x.st='q';delete x.wr;if(x.type&&!SIT[x.type])x.type=null;if(!x.bq||typeof x.bq!=='object'||Array.isArray(x.bq))delete x.bq;if(x.trq!==1)delete x.trq});
+ SI.L.forEach(x=>{x.name=siName(x.name);if(x.st==='run'||x.st==='us')x.st='q';delete x.wr;if(x.type&&!SIT[x.type])x.type=null;if(!x.bq||typeof x.bq!=='object'||Array.isArray(x.bq))delete x.bq;if(x.trq!==1)delete x.trq});
  setTimeout(siGc,3000);return SI.L}
 function siSave(){if(!SI.L||!SY.uid||SI.u!==SY.uid)return;try{localStorage.setItem(SI_K,JSON.stringify({u:SY.uid,L:SI.L||[]}))}catch(e){toast('אין מקום לשמור את תור המסמכים במכשיר')}}
 /* קבצים של התור שכבר לא ברשימה (נמחקו, טופלו או של משתמש קודם) */
@@ -3865,9 +3866,9 @@ async function siIn(files,meta){meta=meta||{};files=Array.isArray(files)?files:[
   try{await fput('shin:'+h,du)}catch(e){siSplice(y=>y===it);siSave();throw e}
   delete it.wr;if(!(SI.L||[]).includes(it))fdelK('shin:'+h);else{if(!pdf)SIU[it.id]=du;rep.ok++;nw.push(it)}siSave()}
   catch(e){rep.bad.push({name,why:SIW.read})}}
- siSave();if(isA()&&nw.length)await siOpenTr(nw);if(isA())siPump();siShow(rep)}finally{SIing--}}
+ siSave();if(isA()&&nw.length)siOpenUs(nw);if(isA())siPump();siShow(rep)}finally{SIing--}}
 function siShow(rep){rep.dupQ=rep.dupQ||[];const issues=rep.dup.length||rep.bad.length||rep.over;
- if(isA()){if(!A&&!$('#dlg').open&&cur().v!=='todo'&&cur().v!=='tr')go('todo');else rerender()}else if(isW()){if(WS==='home'&&cur().v==='wk')rerender()}
+ if(isA()){if(!A&&!US&&!(typeof SIUQ!=='undefined'&&(SIUQ.length||siUsNext.b))&&!$('#dlg').open&&cur().v!=='todo'&&cur().v!=='tr')go('todo');else rerender()}else if(isW()){if(WS==='home'&&cur().v==='wk')rerender()}
  const head=rep.ok?rep.ok+(rep.ok>1?' מסמכים התקבלו':' מסמך התקבל')+' ונכנסו לתור "מסמכים שהתקבלו"':'לא נוסף מסמך חדש לתור';
  /* אותו קובץ שכבר מחכה בתור (למשל אותו שיתוף שהגיע שוב): הודעה קצרה בלבד */
  if(!issues){if(rep.ok||rep.dupQ.length)toast(rep.ok?head+(rep.dupQ.length?' · '+rep.dupQ.length+' כבר בתור':''):rep.dupQ.length+(rep.dupQ.length>1?' מסמכים כבר בתור':' מסמך כבר בתור')+' "מסמכים שהתקבלו"');return}
@@ -3898,7 +3899,7 @@ const siFind=el=>(SI.L||[]).find(x=>x.id===el.dataset.id);
 function siThumbs(){(SI.L||[]).forEach(x=>{if(x.mime==='application/pdf'||x.id in SIU)return;SIU[x.id]=0;fget(siKey(x)).then(du=>{SIU[x.id]=imgOk(du)?du:0;if(SIU[x.id]){if(cur().v==='todo'&&isA())siUI();else if(isW()&&cur().v==='wk'&&WS==='home')rerender()}}).catch(()=>{})})}
 const siThumb=x=>{const u=SIU[x.id];return `<div style="width:56px;height:72px;flex:none;border-radius:8px;border:1px solid var(--line);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:.8rem">${x.mime==='application/pdf'?'📄 PDF':u&&imgOk(u)?`<img src="${u}" alt="" style="width:100%;height:100%;object-fit:cover">`:'🖼'}</div>`};
 const siSize=n=>n>=1048576?(n/1048576).toFixed(1)+'MB':Math.max(1,Math.round(n/1024))+'KB';
-function siCard(x){const busy=x.st==='q'||x.st==='run'||x.st==='tr',k=siKind(x),fid='ft'+x.h,inBQ=BQ.some(b=>b.fid===fid),inTR=TR.items.some(t=>t.fid===fid);
+function siCard(x){const busy=x.st==='q'||x.st==='run'||x.st==='tr'||x.st==='us',k=siKind(x),fid='ft'+x.h,inBQ=BQ.some(b=>b.fid===fid),inTR=TR.items.some(t=>t.fid===fid);
  let h=`<div class="card" data-si="${x.id}"><div class="row" style="align-items:flex-start">${siThumb(x)}<div class="grow" style="min-width:0"><div style="overflow-wrap:anywhere;font-weight:700">${esc(x.name)}</div><div class="note">${siSize(x.size||0)}${x.mime==='application/pdf'?' · PDF (כל העמודים = מסמך אחד)':''}</div>
  <div data-sity>זוהה כ: ${busy&&!x.man?'<span class="tag t1">מזהה…</span>':x.type&&x.type!=='other'?`<b>${SIT[x.type]}</b>`:'<span class="tag t1">לא ברור</span>'}</div></div><button class="btn s g" data-a="siDel" data-id="${x.id}">מחק</button></div>`;
  h+=`<label class="f" style="margin:8px 0 0"><span>שינוי הסוג</span><select data-c="siTy" data-id="${x.id}"><option value="" ${x.type&&x.type!=='other'?'':'selected'}>${busy&&!x.man?'מזהה…':'לא ברור – בחרו'}</option>${['bank_transfer','invoice','delivery_note'].map(t=>`<option value="${t}" ${t===x.type?'selected':''}>${SIT[t]}</option>`).join('')}</select></label>`;
@@ -5574,6 +5575,14 @@ ACT.siUs=async el=>{const x=siFind(el);if(!x)return;if(siUsed('ft'+x.h))return t
  usOpen();US.si=x.id;if(x.mime==='application/pdf')US.pg.push({pdf:1,du});else{try{const r=await scanDoc(du,'scan',0),hi=await scanDoc(du,'scan',0,true);US.pg.push({u:r.u||du,hi:hi.u||r.u||du})}catch(e){return toast('קריאת הקובץ נכשלה')}}
  US.i=0;usPane(1);usDetect()};
 {const o=siCard;siCard=function(x){const h=o(x);return h.replace(/<\/div>$/,`<button class="btn w" style="margin-top:8px" data-a="siUs" data-id="${esc(x.id)}">📄 פתיחה במסך הסריקה האחיד</button></div>`)}}
+/* מסמך ששותף (מנהל): נפתח ישר במסך הסריקה האחיד – התמונה בחצי השמאלי, הזיהוי בוחר את הסוג והטופס שלו נפתח מימין, ואפשר לשנות סוג למעלה.
+   כמה מסמכים: אחד אחרי השני (SIUQ). x.st='us' = הזיהוי רץ במסך הסריקה, לא בתור. יציאה בלי שמירה: המסמך חוזר לתור הרגיל */
+let SIUQ=[];
+function siOpenUs(L){L.forEach(x=>{if(!x.big&&!SIUQ.includes(x.id)){SIUQ.push(x.id);x.st='us'}});siSave();if(!US&&!A&&!$('#dlg').open)siUsNext()}
+async function siUsNext(){if(siUsNext.b)return;siUsNext.b=1;try{while(SIUQ.length){const id=SIUQ.shift(),x=(SI.L||[]).find(y=>y.id===id);if(!x||siUsed('ft'+x.h))continue;await ACT.siUs({dataset:{id}});if(US&&US.si===id)return}}finally{siUsNext.b=0}}
+{const o=ACT.siUs;ACT.siUs=async el=>{const x=siFind(el);if(x&&!SIUQ.includes(x.id)){x.st='us';siSave()}return o(el)}}
+{const o=usReset;usReset=function(){const si=US&&US.si;o();const x=si&&(SI.L||[]).find(y=>y.id===si);if(x&&x.st==='us'){x.st='q';siSave();siPump()}if(si&&SIUQ.length&&!siUsNext.b)setTimeout(siUsNext,0)}}
+{const o=usDone;usDone=function(){o();if(SIUQ.length)setTimeout(siUsNext,600)}}
 /* "צילום העברה" (בלי ספק שנבחר מראש) פותח את המסך האחיד (החלטה 7) */
 {const o=ACT.trGo;ACT.trGo=el=>{if(!el.dataset.sub&&usAllowed('transfer')){usOpen();return}o(el)}}
 /* ===== סריקה אחידה, שלב 5: חיבור דפים. כל דף מזוהה לבד (דף = 1 במכסה), והאפליקציה מחברת: Z בשלושה חלקים (עליון/אמצעי/תחתון, בסדר הנכון), חשבונית עד 12 דפים (לפי מספר+ספק),
