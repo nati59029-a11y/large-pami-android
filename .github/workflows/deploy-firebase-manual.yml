@@ -177,6 +177,23 @@ jobs:
             echo "$N: נוצר עם ערך זמני" | tee -a "$GITHUB_STEP_SUMMARY"
           done
 
+      # מפתח הצפנת כרטיסי אשראי (9.11, אושר ע"י המשתמש): אם CARD_ENC_KEY חסר בייצור – נוצר פעם אחת עם 32 בתים אקראיים (base64),
+      # דרך stdin בלבד, לא מודפס ולא נשמר. סוד קיים לא נדרס לעולם (החלפה = אי אפשר לפענח כרטיסים שנשמרו).
+      - name: Card encryption key (create once if missing)
+        if: inputs.project == 'largpeami' && inputs.what == 'functions'
+        working-directory: firebase
+        env:
+          P: ${{ inputs.project }}
+        run: |
+          set +x
+          if firebase functions:secrets:get CARD_ENC_KEY --project "$P" --non-interactive >/dev/null 2>&1; then
+            echo "CARD_ENC_KEY: קיים – לא נוגעים" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            head -c 32 /dev/urandom | base64 -w0 | firebase functions:secrets:set CARD_ENC_KEY --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 \
+              || { echo "::error::יצירת המפתח CARD_ENC_KEY נכשלה. כנראה שלחשבון השירות של הפרויקט $P אין הרשאה – יש להוסיף לו את התפקיד Secret Manager Admin (roles/secretmanager.admin)"; exit 1; }
+            echo "CARD_ENC_KEY: נוצר עכשיו (ערך אקראי, לא מודפס)" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
       # מייל הזמנה עצמי (2026-11-08): אם הוגדרו סודות GitHub MAIL_USER ו-MAIL_APP_PASSWORD – נכתבים ל-Secret Manager של הפרויקט
       # (גרסה חדשה, דרך stdin בלבד – לא מודפסים). אם חסרים – ממשיכים: הסוד הקיים (או הזמני) נשאר, והאפליקציה נופלת למייל של Firebase.
       # INVITE_SITE = אתר גרסת המחשב (שם welcome.html), מהמשתנים DESKTOP_SITE / DESKTOP_SITE_TEST.
