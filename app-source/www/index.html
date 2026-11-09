@@ -437,6 +437,7 @@ function defaults(){
  C('e_cc','exp','אשראי','cc',[]);
  C('e_loan','exp','הלוואות','loan',[]);
  C('e_misc','exp','שונות','free',[]);
+ C('e_own','exp','משכורת בעלים','simple',[]);
  cats.push({id:'p_inc',kind:'inc',name:'ממתין לסיווג',beh:'simple',hid:true},{id:'p_exp',kind:'exp',name:'ממתין לסיווג',beh:'simple',hid:true});
  return{v:3,theme:'paper',fs:1,cats,subs,tx:[],fixTpl:[],fixOk:{},loans:[],ccx:[],imp:null,created:new Date().toISOString()};
 }
@@ -462,6 +463,7 @@ function ensure(d){
  if(!d.fixOk||typeof d.fixOk!=='object'||Array.isArray(d.fixOk))d.fixOk={};
  if(d.pmOff==null)d.pmOff=2;if(d.orgC!=null&&(typeof d.orgC!=='object'||Array.isArray(d.orgC)))delete d.orgC;/* סניפים 2026-11-08: S.orgC = עותק של org מהשרת. tx[].br / pays[].bank / pays[].card – רשות, בלי מיגרציה */if(!d.theme)d.theme='paper';if(!d.fs)d.fs=1;d.v=3;
  /* תזרים/צ'קים (חלק ב' 2026-11-08): subs[].terms / tx[].due / pays[].chk – רשות. כאן רק מוחקים ערך פגום, לא מוסיפים */if(typeof cfClean==='function')cfClean(d);/* התאמות (חלק ג'): S.stm/S.stl, subs[].offset/offBal0, tx.off, pays[].stl – רשות. רק ניקוי ערכים פגומים וצנזור */if(typeof stlClean==='function')stlClean(d);/* C3: S.ccc/ccMeta/impMap/mLearn – רשות, רק ניקוי */if(typeof c3Clean==='function')c3Clean(d);
+ /* משכורת בעלים (9.11): קטגוריה חדשה – נוספת רק אם חסרה. S.ownExp=false = משיכה, לא נספרת בהוצאות וברווח (ברירת מחדל: נספרת) */if(!d.cats.find(c=>c.id==='e_own'))d.cats.push({id:'e_own',kind:'exp',name:'משכורת בעלים',beh:'simple'});if(d.ownExp!=null&&typeof d.ownExp!=='boolean')delete d.ownExp;
  ['p_inc','p_exp'].forEach(id=>{if(!d.cats.find(c=>c.id===id))d.cats.push({id,kind:id==='p_inc'?'inc':'exp',name:'ממתין לסיווג',beh:'simple',hid:true})});/* סגירת קופה (11.2026): S.zc = הסגירות שהוכנסו; תתי-קטגוריות "שובר קניה", "שובר זיכוי", "הנפקת שובר זיכוי" בשתי הקופות – רק אם חסרות (לפי שם). לא משנים ולא מוחקים קיים */if(!Array.isArray(d.zc))d.zc=[];if(!(d.zcMig>=1)){['i_yh','i_nl'].forEach(c=>{if(d.cats.find(x=>x.id===c))['שובר קניה','שובר זיכוי','הנפקת שובר זיכוי'].forEach(n=>{if(!d.subs.some(x=>x.cat===c&&heKey(x.name)===heKey(n)))d.subs.push({id:uid(),cat:c,name:n})})});d.zcMig=1}/* רצה פעם אחת: תת-קטגוריה שנמחקה אחר כך לא חוזרת */
  return d}
 function save(){try{if(isW())return}catch(e){}try{const nw=new Date().toISOString();if(!S.tsFrom){S.tsFrom=nw;S.tx.forEach(t=>{if(t.ts==null)t.ts=''})}S.tx.forEach(t=>{if(t.ts==null)t.ts=nw});/* 6ז (החלטת המשתמש 7.11): eu = מי הזין את ההוצאה (uid). הוצאות שהיו לפני העדכון מקבלות '' (לא של אף עובד) – תוספת שדה בלבד. רשומה חדשה בלי eu = המשתמש שבמכשיר. סריקה אחידה (8.11): לכל סוגי הרשומות, לא רק הוצאות */if(!S.euFrom){S.euFrom=nw;S.tx.forEach(t=>{if(t.eu==null)t.eu=''})}S.tx.forEach(t=>{if(t.eu==null)t.eu=typeof SY!=='undefined'&&SY&&typeof SY.uid==='string'?SY.uid:''})}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('השמירה במכשיר נכשלה – יצא גיבוי עכשיו')}try{supSched()}catch(e){}}
@@ -915,11 +917,13 @@ function cfDebits(m,sel){const E=sel===undefined?brFil():sel,chk=[],tr=[],paid=[
   if(hasPay(t)){const b=bal(t),d=dueOf(t);if(b>0.004&&d.startsWith(m))tr.push({t,a:b,date:d})}});
  const cc=(!E||!E.length)&&typeof ccBills==='function'?ccBills(m):[],scc=rnd(sum(cc,x=>x.a)),sccr=rnd(sum(cc,x=>x.cr||0));
  const sc=rnd(sum(chk,x=>x.a)),st=rnd(sum(tr,x=>x.a)),sumPaid=rnd(sum(paid,x=>x.a)),sumExp=rnd(sc+st+scc);
- return{chk,tr,paid,cc,sum:rnd(sumExp+sumPaid),sumPaid,sumExp,sumChk:sc,sumTr:st,sumCc:scc,sumCcCr:sccr}}
+ /* הלוואות פעילות: התשלום של החודש לפי לוח הסילוקין (רק בלי סינון סניף, כמו אשראי) */const ln=[];if(!E||!E.length)(S.loans||[]).filter(l=>l&&l.act!==false).forEach(l=>{try{sched(l).forEach(r=>{if(typeof r.date==='string'&&r.date.startsWith(m)&&r.pay>0)ln.push({l,r,a:rnd(r.pay),date:r.date})})}catch(e){}});const sln=rnd(sum(ln,x=>x.a));
+ /* "מה יורד החודש" (9.11): רק חיובים שיורדים לבד – צ׳קים, אשראי, הלוואות. העברות שצריך לשלם – ב"לתשלום החודש" */
+ return{chk,tr,paid,cc,ln,sum:rnd(sumExp+sumPaid),sumPaid,sumExp,sumChk:sc,sumTr:st,sumCc:scc,sumCcCr:sccr,sumLn:sln,sumAuto:rnd(sc+scc+sln)}}
 function cfMonths(from,n,sel){const out=[];for(let i=0;i<(n||6);i++){const m=addMon(from||NOWM(),i);out.push(Object.assign({m},cfDebits(m,sel)))}return out}
 /* שלושת כרטיסי הבית: לתשלום בחודש m (= "צריך לשלם החודש"), ירידה מהחשבון בחודש m, באיחור נכון להיום */
 function homeCards(m){const D=dueStats(m),E=brFil(),td=today(),late=inv().filter(t=>inBr(t,E)&&isLate(t,td));
- return{due:D.due,rem:D.rem,debit:cfDebits(m,E).sum,lateSum:rnd(sum(late,bal)),lateN:late.length,late,open:D.open}}
+ return{due:D.due,rem:D.rem,debit:cfDebits(m,E).sumAuto,lateSum:rnd(sum(late,bal)),lateN:late.length,late,open:D.open}}
 /* צ'ק → חשבוניות: קודם חשבונית שהיתרה שלה = הסכום (±0.01), אחר כך צירוף (trCombo). כלום / סכום מעל כל היתרות = [] */
 /* תיקון 6 (חלק ג'): {one,combo}. one = כל החשבוניות שהיתרה שלהן = הסכום (כמה = לבחור אחת, בלי סימון מראש); combo = צירוף, רק כשאין בודדת */
 function chkMatch(subId,amt){const a=rnd(+amt||0),E={one:[],combo:[]};if(!subId||!(a>0))return E;
@@ -957,7 +961,10 @@ FRM.chkLinkF=form=>{if(!CKS||form.dataset.busy)return;Object.assign(CKS,chkRead(
  const grp='g'+uid(),R=msApply(L,[],rnd(a),today(),METHODS[1],'',CKS.img,grp,{bank:CKS.bank}),chk={no:CKS.no,bank:CKS.bank,date:CKS.date,img:CKS.img};
  L.forEach(t=>(t.pays||[]).forEach(p=>{if(p.grp===grp)p.chk=Object.assign({},chk)}));const ib=CKS.inb;if(ib){S.inbox=S.inbox.filter(x=>x.id!==ib)}save();CKS=null;closeDlg();if(ib)inbClose(ib);toast('הצ׳ק נרשם על '+R.n+' חשבוניות · ירד ב־'+dfmt(chk.date));if(US)usDone();else rerender()};
 const monthIncome=m=>rnd(sum(live().filter(t=>t.t==='inc'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
-const monthExpense=m=>rnd(sum(live().filter(t=>t.t==='exp'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
+/* משכורת בעלים כמשיכה (S.ownExp===false): לא בהוצאות ולא ברווח */
+const ownOut=t=>t&&t.cat==='e_own'&&S&&S.ownExp===false;
+const monthExpense=m=>rnd(sum(live().filter(t=>t.t==='exp'&&!ownOut(t)&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
+const monthOwner=m=>rnd(sum(live().filter(t=>t.cat==='e_own'&&t.date.startsWith(m)&&inBr(t,brFil())),t=>t.amt));
 const invIn=(t,tag)=>`<div class="m"><b>${esc(subName(t))}</b><small>חשבונית ${dfmt(t.date)}${invS(t)} · ${esc(cat(t.cat).name)}</small>${paid(t)>0?`<small>שולם ${ils(paid(t))} מתוך ${ils(t.amt)}</small>`:''}${dxWhoSm(t)}</div><div class="a">${ils(bal(t))}<small>${tag||mfmt(pmon(t))}</small></div>`;
 const invRow=(t,tag)=>`<div class="lw"><button class="li exp" data-a="payDlg" data-id="${t.id}">${invIn(t,tag)}</button>${fileActs(t)}</div>`;
 /* ===== התאמות: ליבה ===== */
@@ -1104,7 +1111,7 @@ function brChips(){const L=brList();if(L.length<2)return '';const s=BRSEL.filter
 ACT.brSel=el=>{const id=el.dataset.id,L=brList().map(b=>b.id);if(!id)BRSEL=[];else{const i=BRSEL.indexOf(id);if(i>=0)BRSEL.splice(i,1);else BRSEL.push(id);if(L.length&&L.every(x=>BRSEL.includes(x)))BRSEL=[]}rerender()};
 /* טבלת סניפים לחודש m: הכנסה · הוצאה · הפרש + סה"כ (רק ב-2+ סניפים) */
 function brTable(m){const L=brList();if(L.length<2)return '';const E=brFil(),ids=new Set(L.map(b=>b.id));
- const rows=brAll().filter(b=>(ids.has(b.id)||(!brMineIds()&&live().some(t=>t.date.startsWith(m)&&txBr(t)===b.id)))&&(!E.length||E.includes(b.id))).map(b=>{const l=live().filter(t=>t.date.startsWith(m)&&txBr(t)===b.id),i=rnd(sum(l.filter(t=>t.t==='inc'),t=>t.amt)),e=rnd(sum(l.filter(t=>t.t==='exp'),t=>t.amt));return{n:b.name,i,e,d:rnd(i-e)}});
+ const rows=brAll().filter(b=>(ids.has(b.id)||(!brMineIds()&&live().some(t=>t.date.startsWith(m)&&txBr(t)===b.id)))&&(!E.length||E.includes(b.id))).map(b=>{const l=live().filter(t=>t.date.startsWith(m)&&txBr(t)===b.id),i=rnd(sum(l.filter(t=>t.t==='inc'),t=>t.amt)),e=rnd(sum(l.filter(t=>t.t==='exp'&&!ownOut(t)),t=>t.amt));return{n:b.name,i,e,d:rnd(i-e)}});
  const T={i:rnd(sum(rows,r=>r.i)),e:rnd(sum(rows,r=>r.e))};T.d=rnd(T.i-T.e);const c=v=>v>=0?'pos':'neg';
  return `<div class="sec"><h3>לפי סניף · ${mfmt(m)}</h3></div><div class="tw"><table id="brTbl"><thead><tr><th>סניף</th><th class="n">הכנסה</th><th class="n">הוצאה</th><th class="n">הפרש</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.n)}</td><td class="n">${ils(r.i)}</td><td class="n">${ils(r.e)}</td><td class="n ${c(r.d)}">${ils(r.d)}</td></tr>`).join('')}</tbody><tfoot><tr><th>סה״כ</th><th class="n">${ils(T.i)}</th><th class="n">${ils(T.e)}</th><th class="n ${c(T.d)}">${ils(T.d)}</th></tr></tfoot></table></div>`}
 /* שדה סניף בטופס (הוספה / עריכה / סריקה): מופיע רק בעסק עם 2+ סניפים. מזוהה מראש = שורה + "שנה"; לא מזוהה = בחירה חובה; סניף יחיד מותר = אוטומטי בלי שאלה */
@@ -1141,20 +1148,20 @@ CHG.dueC=el=>{el.dataset.t='1';if(el.form&&el.form.dataset.f==='inbsave'&&typeof
 function dueRe(f,date){const du=f&&f.elements&&f.elements.due;if(!du||du.dataset.t==='1'||!cfDt(date))return;du.value=dueCalc(du.dataset.ps,date);const d=du.parentElement.querySelector('[data-hd]');if(d)d.textContent=dueHint(du.dataset.ps,du.value)}
 /* שלושת כרטיסי הבית (חודש HM): לתשלום החודש → חשבוניות לתשלום; ירידה מהחשבון → תזרים; באיחור (נכון להיום) → קטע באיחור */
 function homeCardsH(m){const H=homeCards(m),pc=H.due>0?Math.min(100,Math.max(0,Math.round((H.due-H.rem)/H.due*100))):0,bs='text-align:start;font:inherit;color:inherit;cursor:pointer;width:100%;min-width:0';
- return `<div class="kg" id="hcards" style="grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 10px"><button class="k" style="${bs}" data-a="hcDue"><small>לתשלום החודש</small><b>${ils(H.due)}</b>${H.due>0.004?`<div class="pbar" role="img" aria-label="שולם ${pc} אחוז"><i style="width:${pc}%"></i></div><small style="white-space:nowrap;margin-top:3px">נשאר ${ils(Math.max(0,H.rem))}</small>${(n=>n?`<small style="white-space:nowrap;display:block" data-hlate>מתוכם באיחור ${n}</small>`:'')(H.open.filter(t=>isLate(t,today())).length)}`:''}</button><button class="k" style="${bs}" data-a="hcCf"><small>ירידה מהחשבון</small><b>${ils(H.debit)}</b></button><button class="k ${H.lateN?'neg':''}" style="${bs}" data-a="hcLate"><small>באיחור${H.lateN?' ('+H.lateN+')':''}</small><b>${ils(H.lateSum)}</b></button></div>`}
+ return `<div class="kg" id="hcards" style="grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 10px"><button class="k" style="${bs}" data-a="hcDue"><small>לתשלום החודש</small><b>${ils(H.due)}</b>${H.due>0.004?`<div class="pbar" role="img" aria-label="שולם ${pc} אחוז"><i style="width:${pc}%"></i></div><small style="white-space:nowrap;margin-top:3px">נשאר ${ils(Math.max(0,H.rem))}</small>${(n=>n?`<small style="white-space:nowrap;display:block" data-hlate>מתוכם באיחור ${n}</small>`:'')(H.open.filter(t=>isLate(t,today())).length)}`:''}</button><button class="k" style="${bs}" data-a="hcCf"><small>יורד החודש</small><b>${ils(H.debit)}</b></button><button class="k ${H.lateN?'neg':''}" style="${bs}" data-a="hcLate"><small>באיחור${H.lateN?' ('+H.lateN+')':''}</small><b>${ils(H.lateSum)}</b></button></div>`}
 ACT.hcDue=()=>go('due',HM);ACT.hcCf=()=>go('cf',HM);ACT.hcLate=()=>go('due',{m:NOWM(),late:1});
 /* מסך תזרים: 6 חודשים מ-NOWM (או מחודש קודם שנפתח מהבית). שורה לחיצה = פירוט */
 let CFM='';
 const cfBar=(v,mx)=>`<div class="pbar" style="margin-top:6px" role="img" aria-label="${Math.round(v/mx*100)} אחוז"><i style="width:${Math.min(100,Math.round(v/mx*100))}%"></i></div>`;
 function cfRow(x,mx,open){const it=(n,d,a,s2)=>`<div class="li" style="cursor:default;min-height:48px"><div class="m"><b>${esc(n)}</b><small>${s2}</small></div><div class="a">${ils(a)}<small>${dfmt(d)}</small></div></div>`;
- let h=`<button class="li" data-a="cfM" data-m="${x.m}" aria-expanded="${open}" style="display:block"><div class="row" style="justify-content:space-between"><b>${mfmt(x.m)}</b><b>${ils(x.sum)}</b></div><small>צ׳קים ${ils(x.sumChk)} · העברות ${ils(x.sumTr)}${x.sumCc?' · אשראי '+ils(x.sumCc):''}${x.sumCcCr?' · זיכוי אשראי '+ils(x.sumCcCr)+' (לא מקטין)':''}${x.sumPaid>0.004?' · ירד בפועל '+ils(x.sumPaid):''}</small>${cfBar(x.sum,mx)}</button>`;
- if(open)h+=`<div data-cfd="${x.m}" style="margin:0 0 12px">${x.chk.map(c=>it(subName(c.t),c.date,c.a,'צ׳ק'+(chkOf(c.p)&&chkOf(c.p).no?' '+esc(chkOf(c.p).no):'')+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.tr.map(c=>it(subName(c.t),c.date,c.a,'העברה פתוחה'+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${x.paid.map(c=>it(subName(c.t),c.p.d,c.a,'ירד בפועל · '+esc(c.p.m||''))).join('')}${(x.cc||[]).map(c=>`<div data-cfcc>${it(c.name+(c.last4?' ····'+c.last4:''),c.date,c.cr?c.cr:c.a,(c.cr?'זיכוי אשראי צפוי (לא מקטין את הירידה)':'חיוב אשראי צפוי')+' · '+c.n+' עסקאות')}</div>`).join('')}${!x.chk.length&&!x.tr.length&&!x.paid.length&&!(x.cc||[]).length?'<div class="empty">אין ירידות בחודש הזה</div>':''}</div>`;
+ let h=`<button class="li" data-a="cfM" data-m="${x.m}" aria-expanded="${open}" style="display:block"><div class="row" style="justify-content:space-between"><b>${mfmt(x.m)}</b><b>${ils(x.sumAuto)}</b></div><small>צ׳קים ${ils(x.sumChk)}${x.sumCc?' · אשראי '+ils(x.sumCc):''}${x.sumLn?' · הלוואות '+ils(x.sumLn):''}${x.sumCcCr?' · זיכוי אשראי '+ils(x.sumCcCr)+' (לא מקטין)':''}</small>${cfBar(x.sumAuto,mx)}</button>`;
+ if(open)h+=`<div data-cfd="${x.m}" style="margin:0 0 12px">${x.chk.map(c=>it(subName(c.t),c.date,c.a,'צ׳ק'+(chkOf(c.p)&&chkOf(c.p).no?' '+esc(chkOf(c.p).no):'')+(c.t.inv?' · חשבונית '+esc(c.t.inv):''))).join('')}${(x.ln||[]).map(c=>it(c.l.name||'הלוואה',c.date,c.a,'הלוואה · תשלום '+c.r.k+' מתוך '+c.l.n)).join('')}${(x.cc||[]).map(c=>`<div data-cfcc>${it(c.name+(c.last4?' ····'+c.last4:''),c.date,c.cr?c.cr:c.a,(c.cr?'זיכוי אשראי צפוי (לא מקטין את הירידה)':'חיוב אשראי צפוי')+' · '+c.n+' עסקאות')}</div>`).join('')}${!x.chk.length&&!(x.ln||[]).length&&!(x.cc||[]).length?'<div class="empty">אין ירידות בחודש הזה</div>':''}</div>`;
  return h}
 ACT.cfM=el=>{CFM=CFM===el.dataset.m?'':el.dataset.m;rerender()};
 /* תיקון 2 (חלק ג'): החודש הפתוח נקבע מהארגומנט בכל כניסה חדשה למסך (לא נשאר מכניסה קודמת); ההתחלה קבועה (החודש הנוכחי + 5). חודש מחוץ לטווח מתווסף כשורה נוספת במקומו ההגיוני */
 V.cf=a=>{const nw=NOWM(),am=pMonth(a),e=cur();if(e&&!e.cfi){e.cfi=1;CFM=am||''}
- const M=cfMonths(nw,6,brFil());if(am&&!M.some(x=>x.m===am)){const x=Object.assign({m:am},cfDebits(am,brFil()));if(am<nw)M.unshift(x);else M.push(x)}const mx=Math.max(1,...M.map(x=>x.sum));
- return{t:'תזרים',s:'מה יורד מהחשבון',h:brChips()+`<p class="note" id="cfNote">מזומן וקיזוז לא נכללים. אשראי – רק בכרטיס שהוגדר לו יום חיוב, לפי מועד החיוב. צ׳קים לפי תאריך הפירעון, העברות פתוחות לפי תאריך התשלום.</p>`+M.map(x=>cfRow(x,mx,x.m===CFM)).join('')}};
+ const M=cfMonths(nw,6,brFil());if(am&&!M.some(x=>x.m===am)){const x=Object.assign({m:am},cfDebits(am,brFil()));if(am<nw)M.unshift(x);else M.push(x)}const mx=Math.max(1,...M.map(x=>x.sumAuto));
+ return{t:'תזרים',s:'מה יורד מהחשבון',h:brChips()+`<p class="note" id="cfNote">רק מה שיורד לבד מהחשבון: צ׳קים לפי תאריך הפירעון, אשראי לפי מועד החיוב (בכרטיס שהוגדר לו יום חיוב), והלוואות לפי לוח הסילוקין. העברות שצריך לשלם מופיעות ב"לתשלום החודש".</p>`+M.map(x=>cfRow(x,mx,x.m===CFM)).join('')}};
 /* ===== התאמות: תצוגה ===== */
 /* 2026-11-08 חלק ג' (C2). V.rec (חשבונות ודפים), V.recStm (שלוש לשוניות), recRow, recLineDlg (בחר אחר / הקם הוצאה / הקם הכנסה), recImportDlg (מחליף את חלון הבחירה של C1),
    V.offSup + offCardH (ספק קיזוז), recBanH (שורת התראה בבית). מנהל בלבד – עובד לא רואה התאמות. הכול נשען על הליבה של C1 (פונקציות stm, stl, off). אין מספר כרטיס/חשבון מלא במסך: רק ····4 ספרות */
@@ -1286,6 +1293,7 @@ V.home=()=>{
  else if(cI)h+=`<small>הכנסות החודש</small><div class="big pos">${ils(inc)}</div>`;
  else if(cE)h+=`<small>הוצאות החודש</small><div class="big neg">${ils(ex)}</div>`;
  if(cI&&cE)h+=`<div class="two">${mb('inc','הכנסות',inc)}${mb('exp','הוצאות',ex)}</div>`;
+ if(cE&&S.ownExp===false){const ow=monthOwner(m);if(ow>0.004)h+=`<small style="display:block;text-align:center;margin-top:6px">משיכות בעלים החודש: ${ils(ow)} (לא נכללות ברווח)</small>`}
  h+=`</div>`;
  h+=homeCardsH(m);
  h+=recBanH();
@@ -1318,12 +1326,12 @@ V.due=a=>{const o=a&&typeof a==='object'?a:{m:a},m=pMonth(o.m)||NOWM(),E=brFil()
 /* ---- הכנסות / הוצאות ---- */
 const catTotal=(c,list)=>rnd(sum(list.filter(t=>t.cat===c.id&&inP(t.date)&&inBr(t,brFil())),t=>t.amt));
 function overview(kind){
- const L=live().filter(t=>t.t===kind&&inP(t.date)&&inBr(t,brFil())),total=rnd(sum(L,t=>t.amt)),cs=catsOf(kind);
+ const L=live().filter(t=>t.t===kind&&inP(t.date)&&inBr(t,brFil())),total=rnd(sum(L.filter(t=>!ownOut(t)),t=>t.amt)),cs=catsOf(kind);
  let h=periodBar();
  h+=`<div class="hero" style="background:${kind==='inc'?'var(--inc)':'var(--exp)'}"><small>${kind==='inc'?'סך ההכנסות':'סך ההוצאות'} · ${esc(plabel())}</small><div class="big">${ils(total)}</div><small>${L.length} תנועות</small></div>`;
  h+=`<div class="row" style="margin-bottom:12px"><button class="btn grow" data-a="addTo" data-t="${kind}">＋ הוספת ${TL[kind]}</button><button class="btn g grow" data-a="rep" data-s="all:${kind}">${ico('doc')} דוח לכל הקטגוריות</button></div>`;
  h+=cs.map(c=>{const subs=subsOf(c.id).length,ct=catTotal(c,live());const op=c.beh==='sup'||c.beh==='fixed'?rnd(sum(inv().filter(t=>t.cat===c.id&&inBr(t,brFil())),bal)):0;
-  return `<button class="li ${kind}" data-a="go" data-v="cat" data-arg="${c.id}"><div class="m"><b>${esc(c.name)}</b><small>${c.beh==='free'?L.filter(t=>t.cat===c.id).length+' רישומים':subs+' כרטיסים'}${op>0.004?' · פתוח לתשלום '+ils(op):''}</small></div><div class="a">${ils(ct)}</div>${ico('chev','chev')}</button>`}).join('');
+  return `<button class="li ${kind}" data-a="go" data-v="cat" data-arg="${c.id}"><div class="m"><b>${esc(c.name)}</b><small>${c.id==='e_own'&&S.ownExp===false?'משיכת בעלים – לא נספרת בהוצאות · ':''}${c.beh==='free'?L.filter(t=>t.cat===c.id).length+' רישומים':subs+' כרטיסים'}${op>0.004?' · פתוח לתשלום '+ils(op):''}</small></div><div class="a">${ils(ct)}</div>${ico('chev','chev')}</button>`}).join('');
  h+=`<button class="opt add" data-a="catWiz" data-t="${kind}" style="margin-top:6px"><span>＋ קטגוריה חדשה</span></button>`;
  return{t:kind==='inc'?'הכנסות':'הוצאות',s:'כל הקטגוריות',h}}
 V.inc=()=>overview('inc');V.exp=()=>{const r=overview('exp');r.h=dpBan()+r.h;return r};
@@ -2007,6 +2015,18 @@ FRM.cwName=f=>{CW.name=s_(f.name.value);if(S.cats.find(c=>c.name===CW.name&&c.ki
 ACT.cwBeh=el=>{CW.beh=el.dataset.v;CW.step=CW.beh==='free'?'ok':'subs';cwDraw()};
 FRM.cwSubs=f=>{CW.subs=f.subs.value;CW.step='ok';cwDraw()};
 ACT.cwDone=()=>{const id='c_'+uid();S.cats.push({id,kind:CW.kind,name:CW.name,beh:CW.beh});CW.subs.split('\n').map(s_).filter(Boolean).forEach(n=>{if(!S.subs.find(x=>x.cat===id&&x.name===n))S.subs.push({id:uid(),cat:id,name:n})});save();closeDlg();toast('נוצרה קטגוריה: '+CW.name);go('cat',id)};
+/* ---- משכורת בעלים: הגדרה והעברת הוצאות ישנות ---- */
+CHG.ownExp=el=>{if(isW())return;S.ownExp=el.value!=='0';save();rerender();toast(S.ownExp?'משכורת בעלים נרשמת כהוצאה':'משכורת בעלים נרשמת כמשיכה – לא בהוצאות')};
+let OWN={cat:'',sel:{}};
+V.ownMv=()=>{if(isW())return{t:'משכורת בעלים',h:'<div class="empty">למנהל בלבד</div>'};const cs=S.cats.filter(c=>c.kind==='exp'&&c.id!=='e_own'&&!c.hid);if(!cs.find(c=>c.id===OWN.cat))OWN.cat='';
+ const L=OWN.cat?live().filter(t=>t.t==='exp'&&t.cat===OWN.cat).sort((a,b)=>b.date.localeCompare(a.date)):[],n=L.filter(t=>OWN.sel[t.id]).length;
+ let h=`<div class="card"><p class="note" style="margin-top:0">בחרו קטגוריה, סמנו את ההוצאות שהן בעצם משכורת בעלים, ולחצו "העבר". ההוצאות עוברות לקטגוריה "משכורת בעלים" – הסכום, התאריך, הקובץ והתשלומים לא משתנים.</p><label class="f"><span>מאיזו קטגוריה</span><select data-c="ownCat"><option value="">בחרו קטגוריה</option>${cs.map(c=>`<option value="${c.id}"${c.id===OWN.cat?' selected':''}>${esc(c.name)}</option>`).join('')}</select></label></div>`;
+ if(OWN.cat)h+=L.length?L.map(t=>`<label class="li" style="cursor:pointer;align-items:center"><input type="checkbox" data-c="ownPick" data-id="${t.id}"${OWN.sel[t.id]?' checked':''} style="width:22px;height:22px;flex:none"><div class="m"><b>${esc(subName(t)||t.desc||cat(t.cat).name)}</b><small>${dfmt(t.date)}${t.note?' · '+esc(t.note):''}</small></div><div class="a">${ils(t.amt)}</div></label>`).join('')+`<button class="btn w" style="margin-top:12px" data-a="ownGo" ${n?'':'disabled'}>העבר ${n||''} הוצאות למשכורת בעלים</button>`:'<div class="empty">אין הוצאות בקטגוריה הזו</div>';
+ return{t:'משכורת בעלים',s:'העברת הוצאות ישנות',h}};
+CHG.ownCat=el=>{OWN={cat:el.value,sel:{}};rerender()};
+CHG.ownPick=el=>{OWN.sel[el.dataset.id]=el.checked;rerender()};
+ACT.ownGo=()=>{if(isW())return;const ids=Object.keys(OWN.sel).filter(k=>OWN.sel[k]),L=S.tx.filter(t=>ids.includes(t.id)&&t.t==='exp'&&t.cat!=='e_own');if(!L.length)return;
+ ask('להעביר '+L.length+' הוצאות לקטגוריה "משכורת בעלים"?',()=>{L.forEach(t=>{t.cat='e_own';t.sub=null});OWN.sel={};save();rerender();toast(L.length+' הוצאות הועברו למשכורת בעלים')},'העבר')};
 /* ---- הגדרות ---- */
 const THEMES=[['paper','נייר – בהיר חם'],['sea','כחול בהיר'],['night','לילה'],['contrast','ניגודיות גבוהה']];
 const THEMES2=[['logo','לוגו'],['logod','לוגו כהה'],['bake','מאפייה'],['baked','מאפייה כהה'],['fresh','ירוק טרי'],['freshd','ירוק טרי כהה']];
@@ -2017,6 +2037,7 @@ V.settings=()=>{
  <div class="sec"><h3>תנאי תשלום לספקים</h3></div><div class="card"><form data-f="pmoff">${termsF(cfTermsOk(S.terms)?S.terms:null,S.pmOff,1)}<button class="btn w">שמור</button></form><p class="note">אפשר לשנות לכל ספק בנפרד: בכרטיס הספק ← הגדרות כרטיס. ספק עם תנאי תשלום משלו גובר על ברירת המחדל הזו.</p></div>
  <div class="sec"><h3>קטגוריות הכנסה</h3><button class="btn s" data-a="catWiz" data-t="inc">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='inc'&&!c.hid).map(row).join('')}
  <div class="sec"><h3>קטגוריות הוצאה</h3><button class="btn s" data-a="catWiz" data-t="exp">＋ חדשה</button></div>${S.cats.filter(c=>c.kind==='exp'&&!c.hid).map(row).join('')}
+ ${isW()?'':`<div class="sec"><h3>משכורת בעלים</h3></div><div class="card"><label class="f"><span>איך נרשמת משכורת בעלים</span><select data-c="ownExp"><option value="1"${S.ownExp===false?'':' selected'}>כהוצאה של העסק (נכללת ברווח)</option><option value="0"${S.ownExp===false?' selected':''}>כמשיכה – לא נרשמת כהוצאה</option></select></label><p class="note">במשיכה הסכומים לא נכללים בהוצאות וברווח, אבל נשמרים בקטגוריה "משכורת בעלים".</p><button class="btn g w" data-a="go" data-v="ownMv">העברת הוצאות ישנות למשכורת בעלים</button></div>`}
  <div class="sec"><h3>נתונים</h3></div><button class="opt" data-a="go" data-v="data"><span>גיבוי ושחזור</span>${ico('chev')}</button><button class="opt" data-a="go" data-v="imp"><span>ייבוא מאקסל</span>${ico('chev')}</button>
  ${typeof isA==='function'&&isA()&&bzF('scan')?`<div class="sec"><h3>זיהוי חכם</h3></div>${shKeyCard()}`:''}
  ${admMenu()}<div class="sec"><h3>עדכון האפליקציה</h3></div><button class="opt" data-a="updChk"><span>בדוק עדכון והתקן</span>${ico('chev')}</button>
@@ -2257,7 +2278,7 @@ function hMonths(y){const out=[],gy=y-3761;for(let i=0;i<450;i++){const p=hp(ymd
 const CMP={A:{cal:'g',y:NOW.getFullYear()-1,months:[]},B:{cal:'g',y:NOW.getFullYear(),months:[]}};
 const hYearOf=d=>+hp(d).year;
 function cmpMatch(s,d){if(s.cal==='g')return +d.slice(0,4)===+s.y&&(!s.months.length||s.months.includes(+d.slice(5,7)));const p=hp(d);return +p.year===+s.y&&(!s.months.length||s.months.includes(p.month))}
-function cmpTot(s){const T={inc:0,exp:0,c:{}};live().filter(t=>cmpMatch(s,t.date)).forEach(t=>{const v=t.amt;T[t.t]+=v;const c=cat(t.cat);const k=t.t+'|'+c.name;T.c[k]=(T.c[k]||0)+v});return T}
+function cmpTot(s){const T={inc:0,exp:0,c:{}};live().filter(t=>cmpMatch(s,t.date)&&!ownOut(t)).forEach(t=>{const v=t.amt;T[t.t]+=v;const c=cat(t.cat);const k=t.t+'|'+c.name;T.c[k]=(T.c[k]||0)+v});return T}
 function cmpYears(cal){return [...new Set([...live().map(t=>cal==='g'?+t.date.slice(0,4):hYearOf(t.date)),cal==='g'?NOW.getFullYear():hYearOf(today())])].sort((a,b)=>b-a)}
 function cmpSide(k){const s=CMP[k],ys=cmpYears(s.cal),ms=s.cal==='g'?MN.map((n,i)=>[i+1,n]):hMonths(s.y).map(m=>[m,m]);
  return `<div class="card"><h3>תקופה ${k==='A'?'א׳':'ב׳'}</h3><div class="chips" style="margin:8px 0"><button class="chip ${s.cal==='g'?'on':''}" data-a="cmpCal" data-k="${k}" data-v="g">לועזי</button><button class="chip ${s.cal==='h'?'on':''}" data-a="cmpCal" data-k="${k}" data-v="h">עברי</button></div>
