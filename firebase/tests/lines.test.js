@@ -224,3 +224,48 @@ describe('ניוד קווים – חוקי Firestore', () => {
     await assertFails(db('m2').doc(`b/${A}/ord/${r.result.id}`).get());
   });
 });
+
+// חבילות ניוד, הנחות ומבצעים (2026-11-09_חבילות-ניוד, שלב 2 חלק א: שמירת הגדרות)
+describe('חבילות ניוד – הגדרות מנהל', () => {
+  const PR = { name: '3 קווים', carriers: ['פרטנר', 'סלקום'], min: 3, kind: 'once', disc: { t: 'amt', v: 100 }, stack: 'add' };
+  it('חבילה: פרטים, עלות חודשית, משלוח/סים לחנות/לחברה; עדכון בלי השדות לא מוחק; null מוחק', async () => {
+    await call('setCellCfg', MGR, { carriers: ['פרטנר'] });
+    const r = await call('saveLinePlan', MGR, { name: 'פרטנר 5G', carrier: 'פרטנר', details: '500GB', monthly: 39.9, ship: { amt: 30, pay: 'store' }, sim: { amt: 20, pay: 'carrier' } });
+    assert.equal(r.status, 'OK', r.text);
+    let p = await get(`b/${A}/lineplan/${r.result.id}`);
+    assert.deepEqual([p.details, p.monthly, p.ship, p.sim], ['500GB', 39.9, { amt: 30, pay: 'store' }, { amt: 20, pay: 'carrier' }]);
+    assert.equal((await call('saveLinePlan', MGR, { id: r.result.id, name: 'פרטנר 5G', carrier: 'פרטנר' })).status, 'OK');
+    p = await get(`b/${A}/lineplan/${r.result.id}`); assert.equal(p.monthly, 39.9);
+    assert.equal((await call('saveLinePlan', MGR, { id: r.result.id, name: 'x', carrier: 'פרטנר', sim: null, details: '' })).status, 'OK');
+    p = await get(`b/${A}/lineplan/${r.result.id}`); assert.equal(p.sim, undefined); assert.equal(p.details, undefined); assert.deepEqual(p.ship, { amt: 30, pay: 'store' });
+    for (const bad of [{ ship: { amt: 30, pay: 'x' } }, { ship: { amt: -1, pay: 'store' } }, { sim: { amt: 5, pay: 'store', z: 1 } }, { monthly: '40' }])
+      assert.equal((await call('saveLinePlan', MGR, Object.assign({ name: 'x' }, bad))).status, 'INVALID_ARGUMENT', JSON.stringify(bad));
+  });
+  it('הנחה קבועה ותקרה לכל חברה, מבצעים; ולידציה; עובד נדחה', async () => {
+    await call('setCellCfg', MGR, { carriers: ['פרטנר', 'סלקום'] });
+    const r = await call('setCellCfg', MGR, { disc: { 'פרטנר': { t: 'amt', v: 10 }, 'סלקום': { t: 'pct', v: 5 } }, cap: { 'פרטנר': { t: 'amt', v: 50 } }, promos: [PR] });
+    assert.equal(r.status, 'OK', r.text);
+    const c = await get(`b/${A}/ordcfg/cell`);
+    assert.deepEqual(c.carriers, ['פרטנר', 'סלקום']);
+    assert.deepEqual(c.disc, { 'פרטנר': { t: 'amt', v: 10 }, 'סלקום': { t: 'pct', v: 5 } });
+    assert.deepEqual(c.cap, { 'פרטנר': { t: 'amt', v: 50 } });
+    assert.equal(c.promos.length, 1); assert.equal(c.promos[0].on, true); assert.ok(/^p[0-9a-f]{12}$/.test(c.promos[0].id));
+    // מחיקת חברה מהמפה – נמחקת בשרת (החלפה, לא מיזוג)
+    assert.equal((await call('setCellCfg', MGR, { disc: { 'פרטנר': { t: 'amt', v: 10 } } })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/ordcfg/cell`)).disc, { 'פרטנר': { t: 'amt', v: 10 } });
+    assert.equal((await get(`b/${A}/ordcfg/cell`)).promos.length, 1);
+    const bads = [{ disc: { 'גולן': { t: 'amt', v: 1 } } }, { disc: { 'פרטנר': { t: 'pct', v: 101 } } }, { cap: { 'פרטנר': { t: 'x', v: 1 } } },
+      { promos: [Object.assign({}, PR, { carriers: ['גולן'] })] }, { promos: [Object.assign({}, PR, { min: 0 })] }, { promos: [Object.assign({}, PR, { kind: 'x' })] },
+      { promos: [Object.assign({}, PR, { stack: 'x' })] }, { promos: [Object.assign({}, PR, { disc: null })] }, { promos: [Object.assign({}, PR, { from: '2026-12-01', to: '2026-11-01' })] },
+      { promos: [Object.assign({}, PR, { zz: 1 })] }, { promos: [Object.assign({}, PR, { id: 'a' }), Object.assign({}, PR, { id: 'a' })] }];
+    for (const b of bads) assert.equal((await call('setCellCfg', MGR, b)).status, 'INVALID_ARGUMENT', JSON.stringify(b));
+    assert.equal((await call('setCellCfg', E1, { disc: {} })).reason, 'manager-only');
+    assert.equal((await call('saveLinePlan', E1, { name: 'x', monthly: 1 })).reason, 'manager-only');
+  });
+  it('הזמנה ישנה/חבילה ישנה – total לא משתנה אחרי שמירת ההגדרות החדשות', async () => {
+    const { p30 } = await setup();
+    await call('setCellCfg', MGR, { disc: { 'פרטנר': { t: 'amt', v: 10 } }, promos: [PR] });
+    const r = await order(E1, { lines: [{ phone: '0521111111', plan: p30 }, { phone: '0521111112', plan: p30 }, { phone: '0521111113', plan: p30 }] });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.total, 50);
+  });
+});
