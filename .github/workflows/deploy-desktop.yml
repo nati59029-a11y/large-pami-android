@@ -34,15 +34,18 @@ jobs:
       - name: Check that app-source matches the project ZIP
         run: python3 scripts/verify-source-matches-zip.py large-pami-android-project.zip app-source
 
-      - name: Hosting site (variable, never the live-update site)
+      - name: Hosting site (file or variable, never the live-update site)
         id: site
         env:
           SITE: ${{ vars.DESKTOP_SITE }}
           LIVE: ${{ vars.LIVE_UPDATE_SITE }}
         run: |
+          # שם האתר: מהקובץ firebase/desktop-site.txt (נקבע במאגר, אחרי create-desktop-site.yml), ואם אין – מהמשתנה
+          FILE=""; [ -f firebase/desktop-site.txt ] && FILE=$(tr -d ' \r\n' < firebase/desktop-site.txt)
+          [ -n "$FILE" ] && SITE="$FILE"
           [ -n "$SITE" ] || { echo "::error::חסר המשתנה DESKTOP_SITE"; exit 1; }
           echo "$SITE" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::שם אתר לא תקין"; exit 1; }
-          case "$SITE" in *desktop*) ;; *) echo "::error::שם אתר גרסת המחשב חייב לכלול desktop"; exit 1 ;; esac
+          [ -n "$FILE" ] || case "$SITE" in *desktop*) ;; *) echo "::error::שם אתר גרסת המחשב חייב לכלול desktop"; exit 1 ;; esac
           [ "$SITE" != "$P" ] || { echo "::error::אסור לפרסם לאתר הראשי של הפרויקט"; exit 1; }
           [ -z "$LIVE" ] || [ "$SITE" != "$LIVE" ] || { echo "::error::אסור לפרסם את גרסת המחשב לאתר של העדכון החי"; exit 1; }
           echo "site=$SITE" >> "$GITHUB_OUTPUT"
