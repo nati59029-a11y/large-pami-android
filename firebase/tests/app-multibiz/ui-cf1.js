@@ -83,7 +83,8 @@ const seed = (p) => p.evaluate(() => {
   const t3d = await mp.evaluate((o) => { S.orgC = o; S.tx.find((t) => t.id === 'a2').br = 'brb'; save(); BRSEL = ['brb']; const r = { sel: cfDebits('2026-11').sumExp, a: cfDebits('2026-11', ['bra']).sumExp, all: cfDebits('2026-11', []).sumExp }; BRSEL = []; delete S.orgC; delete S.tx.find((t) => t.id === 'a2').br; save(); return r; }, ORG2);
   check('3ד סינון סניף: brb = 500 בלבד, bra = 250 (העברה 150 + צ׳ק 100; בלי br = סניף ראשון), הכול = 750', t3d.sel === 500 && t3d.a === 250 && t3d.all === 750, t3d);
   const t3e = await mp.evaluate(() => { const H = homeCards('2026-11'), D = dueStats('2026-11'); return { due: H.due === D.due, lateN: H.lateN, lateSum: H.lateSum, debit: H.debit }; });
-  check('3ה homeCards: לתשלום = dueStats, באיחור 1000 (a1), ירידה = cfDebits', t3e.due && t3e.lateN === 1 && t3e.lateSum === 1000 && t3e.debit === 850, t3e);
+  // 9.11: "יורד החודש" = רק צ׳קים, אשראי והלוואות (העברות פתוחות/ששולמו – לא). בנובמבר: צ׳ק 100
+  check('3ה homeCards: לתשלום = dueStats, באיחור 1000 (a1), יורד החודש = cfDebits.sumAuto (צ׳ק 100)', t3e.due && t3e.lateN === 1 && t3e.lateSum === 1000 && t3e.debit === 100, t3e);
 
   // ---- 4. צ'ק בטופס תשלום ----
   await seed(mp);

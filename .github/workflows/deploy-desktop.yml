@@ -1,0 +1,87 @@
+# גרסת המחשב מתעדכנת לבד: בכל דחיפה ל-main שנוגעת בקוד האפליקציה (כלומר אחרי מיזוג, שמותר רק באישור בעל הפרויקט),
+# בדיוק כמו העדכון לטלפונים. מפרסם רק Hosting לאתר גרסת המחשב של הייצור (DESKTOP_SITE) – בלי פונקציות ובלי חוקים.
+# אותן הגנות כמו בפרסום הידני (deploy-firebase-manual.yml): שם אתר עם desktop, לא האתר הראשי ולא אתר העדכון החי,
+# חשבון שירות של הפרויקט בלבד, וה-environment firebase-prod. מסך הכניסה כללי ("ניהול עסק") – scripts/web-generic-brand.sh.
+name: Deploy desktop (auto)
+
+on:
+  push:
+    branches: [main]
+    paths: ["app-source/**", "large-pami-android-project.zip", "scripts/web-generic-brand.sh", ".github/workflows/deploy-desktop.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-firebase-largpeami
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  hosting:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: firebase-prod
+    env:
+      P: largpeami
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Check that app-source matches the project ZIP
+        run: python3 scripts/verify-source-matches-zip.py large-pami-android-project.zip app-source
+
+      - name: Hosting site (variable, never the live-update site)
+        id: site
+        env:
+          SITE: ${{ vars.DESKTOP_SITE }}
+          LIVE: ${{ vars.LIVE_UPDATE_SITE }}
+        run: |
+          [ -n "$SITE" ] || { echo "::error::חסר המשתנה DESKTOP_SITE"; exit 1; }
+          echo "$SITE" | grep -Eq '^[a-z0-9-]+$' || { echo "::error::שם אתר לא תקין"; exit 1; }
+          case "$SITE" in *desktop*) ;; *) echo "::error::שם אתר גרסת המחשב חייב לכלול desktop"; exit 1 ;; esac
+          [ "$SITE" != "$P" ] || { echo "::error::אסור לפרסם לאתר הראשי של הפרויקט"; exit 1; }
+          [ -z "$LIVE" ] || [ "$SITE" != "$LIVE" ] || { echo "::error::אסור לפרסם את גרסת המחשב לאתר של העדכון החי"; exit 1; }
+          echo "site=$SITE" >> "$GITHUB_OUTPUT"
+
+      - name: Build the web files (before the service account exists on disk)
+        env:
+          SITE_BACKEND: "off"
+        run: |
+          pip install pillow==10.4.0
+          rm -rf app && mkdir app && cp -a app-source/. app/
+          (cd app && npm install --ignore-scripts --no-audit --no-fund && node scripts/prepare.js)
+          if grep -q "largpeami-test-f4691" app/www/index.html; then echo "::error::גרסת הייצור מפנה לפרויקט הבדיקה"; exit 1; fi
+          bash scripts/web-generic-brand.sh app/www
+          rm -rf firebase/hosting-public && cp -a app/www firebase/hosting-public
+          echo "קבצים לפרסום: $(find firebase/hosting-public -type f | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install firebase-tools (before the service account exists on disk)
+        run: npm install -g firebase-tools@15.34.1 --no-audit --no-fund && firebase --version
+
+      - name: Service account (temporary file, must belong to the project)
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          umask 077
+          [ -n "$SA" ] || { echo "::error::חסר הסוד FIREBASE_SERVICE_ACCOUNT"; exit 1; }
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          SP=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("project_id",""))' "$RUNNER_TEMP/sa.json")
+          [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Deploy hosting
+        working-directory: firebase
+        env:
+          SITE: ${{ steps.site.outputs.site }}
+        run: |
+          node -e "const f='firebase.json',j=JSON.parse(require('fs').readFileSync(f));j.hosting.site=process.argv[1];require('fs').writeFileSync(f,JSON.stringify(j,null,2))" "$SITE"
+          firebase deploy --only hosting --project "$P" --non-interactive
+          echo "פורסמה גרסת המחשב: https://$SITE.web.app" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

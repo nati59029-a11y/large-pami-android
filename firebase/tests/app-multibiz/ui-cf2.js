@@ -52,12 +52,13 @@ const openAdd = (p, sub) => p.evaluate((sub) => { A = { step: 'det', type: 'exp'
   // ---- 4. כרטיסי בית ----
   await seed(mp);
   const t4 = await mp.evaluate(() => { const g = (a) => document.querySelector('#hcards [data-a=' + a + '] b').innerText; return { due: g('hcDue'), cf: g('hcCf'), late: g('hcLate'), H: homeCards(NOWM()), banner: /מחודשים קודמים/.test(document.body.innerText) }; });
-  check('4 כרטיסי בית: לתשלום 500, ירידה 500 (העברה פתוחה a2), באיחור 1000', t4.H.due === 500 && t4.H.debit === 500 && t4.H.lateSum === 1000 && /500/.test(t4.due) && /1,000/.test(t4.late), t4);
+  // 9.11: העברה פתוחה לא נספרת ב"יורד החודש" – היא ב"לתשלום"
+  check('4 כרטיסי בית: לתשלום 500, יורד החודש 0 (העברה פתוחה רק בלתשלום), באיחור 1000', t4.H.due === 500 && t4.H.debit === 0 && t4.H.lateSum === 1000 && /500/.test(t4.due) && /1,000/.test(t4.late), t4);
   const t4b = await mp.evaluate(() => { const r = {}; document.querySelector('#hcards [data-a=hcDue]').click(); r.v1 = cur().v; NAV.pop(); render(0); document.querySelector('#hcards [data-a=hcCf]').click(); r.v2 = cur().v; r.cfTot = document.querySelector('[data-a=cfM]').innerText; NAV.pop(); render(0); document.querySelector('#hcards [data-a=hcLate]').click(); r.v3 = cur().v; r.lateSec = !!document.querySelector('#dueLate .li, #dueLate button'); NAV.pop(); render(0); return r; });
   check('4א הכרטיסים פותחים: חשבוניות לתשלום / תזרים / קטע באיחור', t4b.v1 === 'due' && t4b.v2 === 'cf' && t4b.v3 === 'due' && t4b.lateSec, t4b);
-  check('4ב סכום ירידה בבית = סכום החודש בתזרים', /500/.test(t4b.cfTot), t4b.cfTot);
+  check('4ב סכום יורד החודש בבית = סכום החודש בתזרים', /0\.00/.test(t4b.cfTot), t4b.cfTot);
   const t4c = await mp.evaluate(() => { ACT.hm({ dataset: { d: '1' } }); const H = homeCards(HM); const r = { m: HM, due: H.due, debit: H.debit, late: H.lateSum, card: document.querySelector('#hcards [data-a=hcCf] b').innerText }; ACT.hm({ dataset: { d: '-1' } }); return r; });
-  check('4ג חודש הבא: לתשלום 800, ירידה 800 (צ׳ק 300 + יתרה 500), באיחור לא משתנה', t4c.m === '2026-12' && t4c.due === 800 && t4c.debit === 800 && t4c.late === 1000, t4c);
+  check('4ג חודש הבא: לתשלום 800, יורד החודש 300 (רק הצ׳ק), באיחור לא משתנה', t4c.m === '2026-12' && t4c.due === 800 && t4c.debit === 300 && t4c.late === 1000, t4c);
 
   // ---- 4ד. מסך הבית: כרטיס ראשי (רווח, הכנסות, הוצאות), בלי כפילויות, הרשאות ----
   const t4d = await mp.evaluate(() => { const ic = S.cats.find((c) => c.kind === 'inc'); S.tx.push({ id: 'in1', t: 'inc', cat: ic.id, date: '2026-11-01', amt: 1000, note: '', pays: [] }); S.tx.push({ id: 'ex9', t: 'exp', cat: S.cats.find((c) => c.kind === 'exp' && c.beh === 'free').id, date: '2026-11-02', amt: 400, note: '', pays: [] }); save(); render(0);
