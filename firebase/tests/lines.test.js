@@ -269,3 +269,58 @@ describe('חבילות ניוד – הגדרות מנהל', () => {
     assert.equal(r.status, 'OK', r.text); assert.equal(r.result.total, 50);
   });
 });
+
+// שלב 2 חלק ב: הנחה בסכום ההזמנה (החלטות 9.11)
+describe('חבילות ניוד – הנחה בסכום ההזמנה', () => {
+  async function setup2() {
+    await call('setCellCfg', MGR, { carriers: ['פרטנר', 'סלקום'], disc: { 'פרטנר': { t: 'amt', v: 20 } }, cap: { 'פרטנר': { t: 'amt', v: 50 } } });
+    const r = await call('saveLinePlan', MGR, { name: 'פרטנר חדשה', carrier: 'פרטנר', monthly: 39.9, ship: { amt: 30, pay: 'store' }, sim: { amt: 20, pay: 'carrier' } });
+    assert.equal(r.status, 'OK', r.text);
+    const old = await call('saveLinePlan', MGR, { name: 'ישנה', carrier: 'פרטנר' });
+    return { pN: r.result.id, pO: old.result.id };
+  }
+  const L2 = (p) => [{ phone: '0521111111', plan: p }, { phone: '0521111112', plan: p }];
+  it('total = פריטים + משלוח לחנות − קבועה; לחברה ועלות חודשית לא נכנסים; פירוט נשמר', async () => {
+    const { pN } = await setup2();
+    const r = await order(E1, { lines: L2(pN) });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.total, 50 + 60 - 40);
+    const d = await get(`b/${A}/ord/${r.result.id}`);
+    assert.equal(d.total, 70); assert.equal(d.cell.calc.store, 60); assert.equal(d.cell.calc.disc, 40);
+  });
+  it('הנחה ידנית מחליפה את הקבועה (גם 0); מעל תקרת הקו לעובד – נדחה; מנהל – בלי תקרה', async () => {
+    const { pN } = await setup2();
+    let r = await order(E1, { lines: L2(pN), man: { lines: [{ t: 'amt', v: 5 }, { t: 'amt', v: 0 }] } });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.total, 110 - 5);
+    r = await order(E1, { lines: L2(pN), man: { lines: [{ t: 'amt', v: 51 }] } });
+    assert.equal(r.reason, 'over-cap');
+    r = await order(MGR, { lines: L2(pN), man: { order: { t: 'amt', v: 200 } } });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.total, 0); // לא מתחת ל-0
+    assert.equal((await order(E1, { lines: L2(pN), man: { zz: 1 } })).status, 'INVALID_ARGUMENT');
+  });
+  it('legacy: חבילה ישנה – total כמו קודם, בלי calc; הנחה ידנית נדחית', async () => {
+    const { pO } = await setup2();
+    const r = await order(E1, { lines: L2(pO) });
+    assert.equal(r.result.total, 50);
+    assert.equal((await get(`b/${A}/ord/${r.result.id}`)).cell.calc, undefined);
+    assert.equal((await order(E1, { lines: L2(pO), man: { order: { t: 'amt', v: 5 } } })).reason, 'bad-disc');
+  });
+  it('updateOrder: שינוי פריטים מחשב מחדש עם ההנחה; מחיקת ניוד מחזירה לסכום הפריטים; הזמנה ישנה לא משתנה', async () => {
+    const { pN, pO } = await setup2();
+    const r = await order(E1, { lines: L2(pN) });
+    const id = r.result.id;
+    let u = await call('updateOrder', E1, { id, items: [{ n: 'כיסוי', qty: 2, price: 50 }] });
+    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 100 + 60 - 40);
+    u = await call('updateOrder', E1, { id, note: 'x' }); assert.equal((await get(`b/${A}/ord/${id}`)).total, 120);
+    u = await call('updateOrder', E1, { id, cell: null }); assert.equal(u.result.total, 100);
+    assert.equal((await get(`b/${A}/ord/${id}`)).total, 100);
+    const o = await order(E1, { lines: L2(pO) });
+    u = await call('updateOrder', E1, { id: o.result.id, items: [{ n: 'כיסוי', qty: 1, price: 60 }] });
+    assert.equal(u.result.total, 60);
+  });
+  it('מבצע פעם אחת באחוזים – נדחה בשמירה', async () => {
+    await call('setCellCfg', MGR, { carriers: ['פרטנר'] });
+    const r = await call('setCellCfg', MGR, { promos: [{ name: 'x', carriers: ['פרטנר'], min: 2, kind: 'once', disc: { t: 'pct', v: 10 }, stack: 'add' }] });
+    assert.equal(r.status, 'INVALID_ARGUMENT');
+  });
+});
