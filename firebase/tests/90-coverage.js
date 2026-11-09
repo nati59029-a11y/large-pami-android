@@ -125,8 +125,9 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     const rootMatches = [...rootPart.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
     const colls = rootMatches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
     assert.ok(/match \/b\/\{bizId\} \{/.test(t), 'בלוק העסקים חסר');
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cust', 'custcfg', 'deposits', 'fb', 'inbox', 'log', 'mq', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'prod', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cust', 'custcfg', 'deposits', 'fb', 'inbox', 'log', 'mq', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'prod', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
+    assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/p\/\{pid\} \{/, 'p (תמונות משימה) חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/supinv\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך supinv');
     assert.match(t, /match \/appreq\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך appreq');
     assert.match(t, /match \/closings\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך closings');

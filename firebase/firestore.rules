@@ -150,30 +150,80 @@ service cloud.firestore {
     // תוספת (בקשת בעל העסק 2.11.2026): nc == '1' = "יש במשימה הערה של עובד". עובד מסמן אותו לפני שהוא מגיב,
     // ומשימה עם nc לא נסגרת אצל עובד ב"בוצע" – היא עוברת להמתנה לאישור מנהל (st 'wait'). עובד לא מסיר את nc.
     // rt == '1' = "המנהל החזיר את המשימה" (רק מנהל כותב). משימה ישנה בלי nc – כמו היום.
+    // שדרוג 2026-11-09: to/toN = נמענים (רק במשימת מנהל חדשה). ow/owN/clt = המטפל ("מי שתופס ראשון"; '' = לא נתפסה).
+    // np = תמונות נדרשות לסגירה (0–3) ב-p/w1..w{np}; mi = מספר תמונות מנהל (p/m1..m5); wp = מונה תמונות ביצוע;
+    // cT/cN = תצוגה מקדימה של התגובה האחרונה; rd = מפה uid → מתי סימן "נקרא".
+    // משימה בלי to = ישנה, ועובדת כמו היום – חוץ ממשימה ישנה שנתפסה (ow לא ריק): אז רק המטפל פועל.
+    // עובד לא משחרר ולא מעביר: אין כאן כלל שמאפשר לעובד לשנות ow שאינו ריק. ביטול תפיסה והעברה – מנהל (מעדכן הכול).
     match /tasks/{id} {
       function nw() { return request.resource.data; }
       function od() { return resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       function hasNc() { return od().get('nc', '') == '1'; }
+      function npOf() { return od().get('np', 0); }
+      function isNew() { return od().keys().hasAny(['to']); }
+      // המשתמש רשאי לפעול במשימה: הוא המטפל, או משימה ישנה (בלי to) שלא נתפסה – כמו היום.
+      function canAct() {
+        return od().get('ow', '') == request.auth.uid || (!isNew() && od().get('ow', '') == '');
+      }
+      // np תמונות ביצוע קיימות (p/w1..w{np}). לכל היותר 3 קריאות exists.
+      function photosOk() {
+        return npOf() == 0
+          || (exists(/databases/$(database)/documents/tasks/$(id)/p/w1)
+            && (npOf() < 2 || exists(/databases/$(database)/documents/tasks/$(id)/p/w2))
+            && (npOf() < 3 || exists(/databases/$(database)/documents/tasks/$(id)/p/w3)));
+      }
       // עובד: מסמן בוצע (בלי דרישת תמונה) או מצרף תמונה (כשנדרשת). לא סוגר משימה שנדרשת בה תמונה.
-      // במשימה עם הערת עובד (nc): "בוצע" = st 'wait' (open נשאר '1'), בלי תמונה, ו-late/ok לא משתנים – המנהל מאשר או מחזיר.
+      // במשימה עם הערת עובד (nc) או עם חובת תמונות (np > 0): "בוצע" = st 'wait' (open נשאר '1'), בלי img,
+      // ו-late/ok לא משתנים – המנהל מאשר או מחזיר. עם np > 0 – רק אחרי שהועלו np תמונות ביצוע.
       // עובד לא מחזיר משימה ל-open בעצמו: כל עדכון של עובד מתחיל ממשימה פתוחה (st 'open').
       function workerUpd() {
-        return od().st == 'open'
+        return od().st == 'open' && canAct()
           && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
           && nowOk(nw().sub)
           && isMyName(nw().doneBy)
           && (
-            (od().pr == '1' && nw().st == 'wait' && nw().open == '1'
+            (od().pr == '1' && npOf() == 0 && nw().st == 'wait' && nw().open == '1'
               && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
               && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*')
               && nw().late == od().late && nw().ok == od().ok)
-            || (od().pr != '1' && !hasNc() && nw().st == 'done' && nw().open == ''
+            || (od().pr != '1' && !hasNc() && npOf() == 0 && nw().st == 'done' && nw().open == ''
               && nw().img == od().img && nw().ok == nw().sub
               && (nw().late == '1') == (request.time.toMillis() > od().due))
-            || (od().pr != '1' && hasNc() && nw().st == 'wait' && nw().open == '1'
-              && nw().img == od().img && nw().late == od().late && nw().ok == od().ok)
+            || (od().pr != '1' && (hasNc() || npOf() > 0) && nw().st == 'wait' && nw().open == '1'
+              && nw().img == od().img && nw().late == od().late && nw().ok == od().ok
+              && photosOk())
           );
+      }
+      // תפיסה ("אני מטפל"): משימה פתוחה שלא נתפסה; המשתמש בין הנמענים (או משימת מנהל ישנה בלי to);
+      // רק ow/owN/clt, בשמו ובזמן אמת. תפיסה שנייה נדחית כי ow כבר לא ריק.
+      function claim() {
+        return od().st == 'open' && od().get('ow', '') == ''
+          && ((isNew() && request.auth.uid in od().to) || (!isNew() && od().role == 'a'))
+          && nw().diff(od()).affectedKeys().hasOnly(['ow', 'owN', 'clt'])
+          && nw().ow == request.auth.uid
+          && isMyName(nw().owN)
+          && nowOk(nw().clt);
+      }
+      // מונה תמונות הביצוע (לתצוגה): רק המטפל, רק wp, 0–3, במשימה פתוחה.
+      function wpMark() {
+        return od().st == 'open' && od().get('ow', '') == request.auth.uid
+          && nw().diff(od()).affectedKeys().hasOnly(['wp'])
+          && nw().wp is int && nw().wp >= 0 && nw().wp <= 3;
+      }
+      // מי שרשאי לקרוא את המשימה (כמו allow read למטה)
+      function canRead(d) {
+        return isManager()
+          || (isStaff() && (d.open == '1' || d.late == '1'))
+          || (isActiveEmployee() && isMyName(d.get('doneBy', '')));
+      }
+      // "נקרא": רק rd, רק המפתח של המשתמש עצמו, בזמן אמת.
+      function rdMark() {
+        return nw().diff(od()).affectedKeys().hasOnly(['rd'])
+          && nw().rd is map
+          && nw().rd.diff(od().get('rd', {})).affectedKeys().hasOnly([request.auth.uid])
+          && nowOk(nw().rd[request.auth.uid])
+          && canRead(od());
       }
       // סימון "יש הערת עובד": רק השדה nc, רק לערך '1' (אי אפשר להסיר), ורק במשימה פתוחה (st 'open').
       // אחרי "בוצע" (done או wait) העובד כבר לא מוסיף הערה (החלטת בעל העסק 2.11.2026).
@@ -182,20 +232,40 @@ service cloud.firestore {
           && nw().get('nc', '') == '1'
           && od().st == 'open' && od().open == '1';
       }
-      // סימון "תגובה חדשה": רק cAt (זמן התגובה האחרונה, לפי שעון השרת) ו-cBy (המגיב עצמו),
-      // ורק במשימה שהמגיב רשאי לקרוא.
+      // סימון "תגובה חדשה": cAt (זמן התגובה האחרונה, לפי שעון השרת) ו-cBy (המגיב עצמו), ורק במשימה שהמגיב רשאי לקרוא.
+      // 2026-11-09: אפשר גם cT (תחילת התגובה, עד 120 תווים) ו-cN (שם המגיב, בשמו – isMyName). אפליקציה ישנה כותבת רק cAt/cBy.
       function commentMark() {
-        return nw().diff(od()).affectedKeys().hasOnly(['cAt', 'cBy'])
+        return nw().diff(od()).affectedKeys().hasOnly(['cAt', 'cBy', 'cT', 'cN'])
           && nw().cBy == request.auth.uid
           && nowOk(nw().cAt)
+          && (!nw().diff(od()).affectedKeys().hasAny(['cT']) || (nw().cT is string && nw().cT.size() <= 120))
+          && (!nw().diff(od()).affectedKeys().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN)))
           && (isManager() || od().open == '1' || od().late == '1');
+      }
+      // שדות המשימה החדשה (רק מנהל): to 1–30, toN באותו אורך; נמען אחד ← ow == to[0], כמה ← ow ''.
+      // np 0–3 (עם np > 0 אין pr), mi 0–5, wp 0.
+      function mgrNewOk() {
+        return (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt'])
+            || (nw().keys().hasAll(['to', 'toN', 'ow'])
+              && nw().to is list && nw().to.size() >= 1 && nw().to.size() <= 30
+              && nw().toN is list && nw().toN.size() == nw().to.size()
+              && nw().ow is string
+              && ((nw().to.size() == 1 && nw().ow == nw().to[0]) || (nw().to.size() > 1 && nw().ow == ''))
+              && nw().get('owN', '') is string && nw().get('owN', '').size() <= 100
+              && nw().get('clt', 0) is int))
+          && nw().get('np', 0) is int && nw().get('np', 0) >= 0 && nw().get('np', 0) <= 3
+          && (nw().get('np', 0) == 0 || nw().pr == '')
+          && nw().get('mi', 0) is int && nw().get('mi', 0) >= 0 && nw().get('mi', 0) <= 5
+          && nw().get('wp', 0) == 0;
       }
       // סיכום משימות: עובד פעיל קורא גם משימה שהוא עצמו ביצע (doneBy בשמו), כולל כזו שבוצעה בזמן.
       allow read: if isManager()
         || (isStaff() && (resource.data.open == '1' || resource.data.late == '1'))
         || (isActiveEmployee() && isMyName(resource.data.doneBy));
       allow create: if isStaff()
-        && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
+        && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late',
+          'to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp'])
+        && (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp']) || (isManager() && mgrNewOk()))
         && nw().owner == request.auth.uid
         && isMyName(nw().by)
         && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
@@ -205,7 +275,8 @@ service cloud.firestore {
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
         && nowOk(nw().cr)
         && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000;
-      allow update: if isManager() || (isStaff() && (workerUpd() || commentMark() || ncMark()));
+      allow update: if isManager()
+        || (isStaff() && (workerUpd() || commentMark() || ncMark() || claim() || wpMark() || rdMark()));
       allow delete: if isManager();
 
       // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
@@ -229,6 +300,38 @@ service cloud.firestore {
           && (isManager() || (task().get('nc', '') == '1' && task().st == 'open'));
         allow update: if false;
         allow delete: if isManager();
+      }
+
+      // תמונות המשימה (2026-11-09): tasks/{id}/p/{pid}, מסמך {img, t, uid}.
+      // m1..m5 – תמונות מנהל: יצירה/עדכון/מחיקה – מנהל. w1..w3 – תמונות ביצוע: יצירה/עדכון רק המטפל (ow), במשימה פתוחה,
+      // ורק wN עם N <= np; מחיקה – מנהל. קריאה – מי שרשאי לקרוא את המשימה.
+      match /p/{pid} {
+        function task() { return get(/databases/$(database)/documents/tasks/$(id)).data; }
+        function hasTask() { return exists(/databases/$(database)/documents/tasks/$(id)); }
+        function canReadTask() {
+          return hasTask()
+            && (isManager()
+              || (isStaff() && (task().open == '1' || task().late == '1'))
+              || (isActiveEmployee() && isMyName(task().get('doneBy', ''))));
+        }
+        function imgOk() {
+          return nw().keys().hasAll(['img', 't', 'uid'])
+            && nw().keys().hasOnly(['img', 't', 'uid'])
+            && nw().uid == request.auth.uid
+            && nowOk(nw().t)
+            && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+            && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+        }
+        function workOk() {
+          return hasTask() && task().get('ow', '') == request.auth.uid && task().st == 'open'
+            && ((pid == 'w1' && task().get('np', 0) >= 1)
+              || (pid == 'w2' && task().get('np', 0) >= 2)
+              || (pid == 'w3' && task().get('np', 0) >= 3));
+        }
+        allow read: if canReadTask();
+        allow create, update: if imgOk()
+          && ((isManager() && pid.matches('^m[1-5]$')) || (isStaff() && workOk()));
+        allow delete: if isManager() && pid.matches('^(m[1-5]|w[1-3])$');
       }
     }
 
@@ -850,28 +953,65 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
 
-      // tasks: העתק של הכלל בשורש (תוספת 'tasks')
+      // tasks: העתק של הכלל בשורש (תוספת 'tasks'). שדרוג 2026-11-09 – ראו ההסבר בשורש.
       match /tasks/{id} {
         function nw() { return request.resource.data; }
         function od() { return resource.data; }
         function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
         function hasNc() { return od().get('nc', '') == '1'; }
+        function npOf() { return od().get('np', 0); }
+        function isNew() { return od().keys().hasAny(['to']); }
+        function canAct() {
+          return od().get('ow', '') == request.auth.uid || (!isNew() && od().get('ow', '') == '');
+        }
+        function photosOk() {
+          return npOf() == 0
+            || (exists(/databases/$(database)/documents/b/$(bizId)/tasks/$(id)/p/w1)
+              && (npOf() < 2 || exists(/databases/$(database)/documents/b/$(bizId)/tasks/$(id)/p/w2))
+              && (npOf() < 3 || exists(/databases/$(database)/documents/b/$(bizId)/tasks/$(id)/p/w3)));
+        }
         function workerUpd() {
-          return od().st == 'open'
+          return od().st == 'open' && canAct()
             && nw().diff(od()).affectedKeys().hasOnly(['st', 'open', 'img', 'sub', 'doneBy', 'late', 'ok'])
             && nowOk(nw().sub)
             && isMyName(nw().doneBy)
             && (
-              (od().pr == '1' && nw().st == 'wait' && nw().open == '1'
+              (od().pr == '1' && npOf() == 0 && nw().st == 'wait' && nw().open == '1'
                 && nw().img is string && nw().img.size() > 100 && nw().img.size() < 900000
                 && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*')
                 && nw().late == od().late && nw().ok == od().ok)
-              || (od().pr != '1' && !hasNc() && nw().st == 'done' && nw().open == ''
+              || (od().pr != '1' && !hasNc() && npOf() == 0 && nw().st == 'done' && nw().open == ''
                 && nw().img == od().img && nw().ok == nw().sub
                 && (nw().late == '1') == (request.time.toMillis() > od().due))
-              || (od().pr != '1' && hasNc() && nw().st == 'wait' && nw().open == '1'
-                && nw().img == od().img && nw().late == od().late && nw().ok == od().ok)
+              || (od().pr != '1' && (hasNc() || npOf() > 0) && nw().st == 'wait' && nw().open == '1'
+                && nw().img == od().img && nw().late == od().late && nw().ok == od().ok
+                && photosOk())
             );
+        }
+        function claim() {
+          return od().st == 'open' && od().get('ow', '') == ''
+            && ((isNew() && request.auth.uid in od().to) || (!isNew() && od().role == 'a'))
+            && nw().diff(od()).affectedKeys().hasOnly(['ow', 'owN', 'clt'])
+            && nw().ow == request.auth.uid
+            && isMyName(nw().owN)
+            && nowOk(nw().clt);
+        }
+        function wpMark() {
+          return od().st == 'open' && od().get('ow', '') == request.auth.uid
+            && nw().diff(od()).affectedKeys().hasOnly(['wp'])
+            && nw().wp is int && nw().wp >= 0 && nw().wp <= 3;
+        }
+        function canRead(d) {
+          return bMgr()
+            || (bStaff() && (d.open == '1' || d.late == '1'))
+            || (bEmp() && isMyName(d.get('doneBy', '')));
+        }
+        function rdMark() {
+          return nw().diff(od()).affectedKeys().hasOnly(['rd'])
+            && nw().rd is map
+            && nw().rd.diff(od().get('rd', {})).affectedKeys().hasOnly([request.auth.uid])
+            && nowOk(nw().rd[request.auth.uid])
+            && canRead(od());
         }
         function ncMark() {
           return nw().diff(od()).affectedKeys().hasOnly(['nc'])
@@ -879,16 +1019,34 @@ service cloud.firestore {
             && od().st == 'open' && od().open == '1';
         }
         function commentMark() {
-          return nw().diff(od()).affectedKeys().hasOnly(['cAt', 'cBy'])
+          return nw().diff(od()).affectedKeys().hasOnly(['cAt', 'cBy', 'cT', 'cN'])
             && nw().cBy == request.auth.uid
             && nowOk(nw().cAt)
+            && (!nw().diff(od()).affectedKeys().hasAny(['cT']) || (nw().cT is string && nw().cT.size() <= 120))
+            && (!nw().diff(od()).affectedKeys().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN)))
             && (bMgr() || od().open == '1' || od().late == '1');
+        }
+        function mgrNewOk() {
+          return (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt'])
+              || (nw().keys().hasAll(['to', 'toN', 'ow'])
+                && nw().to is list && nw().to.size() >= 1 && nw().to.size() <= 30
+                && nw().toN is list && nw().toN.size() == nw().to.size()
+                && nw().ow is string
+                && ((nw().to.size() == 1 && nw().ow == nw().to[0]) || (nw().to.size() > 1 && nw().ow == ''))
+                && nw().get('owN', '') is string && nw().get('owN', '').size() <= 100
+                && nw().get('clt', 0) is int))
+            && nw().get('np', 0) is int && nw().get('np', 0) >= 0 && nw().get('np', 0) <= 3
+            && (nw().get('np', 0) == 0 || nw().pr == '')
+            && nw().get('mi', 0) is int && nw().get('mi', 0) >= 0 && nw().get('mi', 0) <= 5
+            && nw().get('wp', 0) == 0;
         }
         allow read: if feat('tasks') && (bMgr()
           || (bStaff() && (resource.data.open == '1' || resource.data.late == '1'))
           || (bEmp() && isMyName(resource.data.doneBy)));
         allow create: if feat('tasks') && (bStaff()
-          && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late'])
+          && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late',
+            'to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp'])
+          && (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp']) || (bMgr() && mgrNewOk()))
           && nw().owner == request.auth.uid
           && isMyName(nw().by)
           && nw().st == 'open' && nw().open == '1' && nw().late == '' && nw().img == ''
@@ -898,7 +1056,8 @@ service cloud.firestore {
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
           && nowOk(nw().cr)
           && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000);
-        allow update: if feat('tasks') && (bMgr() || (bStaff() && (workerUpd() || commentMark() || ncMark())));
+        allow update: if feat('tasks') && (bMgr()
+          || (bStaff() && (workerUpd() || commentMark() || ncMark() || claim() || wpMark() || rdMark())));
         allow delete: if feat('tasks') && (bMgr());
 
         match /c/{cid} {
@@ -919,6 +1078,35 @@ service cloud.firestore {
             && (bMgr() || (task().get('nc', '') == '1' && task().st == 'open')));
           allow update: if false;
           allow delete: if feat('tasks') && (bMgr());
+        }
+
+        match /p/{pid} {
+          function task() { return get(/databases/$(database)/documents/b/$(bizId)/tasks/$(id)).data; }
+          function hasTask() { return exists(/databases/$(database)/documents/b/$(bizId)/tasks/$(id)); }
+          function canReadTask() {
+            return hasTask()
+              && (bMgr()
+                || (bStaff() && (task().open == '1' || task().late == '1'))
+                || (bEmp() && isMyName(task().get('doneBy', ''))));
+          }
+          function imgOk() {
+            return nw().keys().hasAll(['img', 't', 'uid'])
+              && nw().keys().hasOnly(['img', 't', 'uid'])
+              && nw().uid == request.auth.uid
+              && nowOk(nw().t)
+              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+          }
+          function workOk() {
+            return hasTask() && task().get('ow', '') == request.auth.uid && task().st == 'open'
+              && ((pid == 'w1' && task().get('np', 0) >= 1)
+                || (pid == 'w2' && task().get('np', 0) >= 2)
+                || (pid == 'w3' && task().get('np', 0) >= 3));
+          }
+          allow read: if feat('tasks') && (canReadTask());
+          allow create, update: if feat('tasks') && (imgOk()
+            && ((bMgr() && pid.matches('^m[1-5]$')) || (bStaff() && workOk())));
+          allow delete: if feat('tasks') && (bMgr() && pid.matches('^(m[1-5]|w[1-3])$'));
         }
       }
 
