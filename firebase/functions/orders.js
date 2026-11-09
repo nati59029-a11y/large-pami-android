@@ -468,14 +468,17 @@ function manOf(m, n) {
 }
 const PKG_KEYS = ['monthly', 'ship', 'sim', 'details'];
 // סכום ההזמנה עם ניוד. בלי קו עם חבילה חדשה (או בלי cell) – סכום הפריטים בלבד, בלי calc (תאימות להזמנות ישנות).
-function cellTotal(w, items, cell, cfg, plans) {
+// השוואה יציבה (סדר מפתחות לא משנה) – לזיהוי הנחה ידנית שלא שונתה
+const stable = (x) => (x && typeof x === 'object' ? (Array.isArray(x) ? '[' + x.map(stable).join(',') + ']' : '{' + Object.keys(x).sort().map((k) => JSON.stringify(k) + ':' + stable(x[k])).join(',') + '}') : JSON.stringify(x === undefined ? null : x));
+// keepMan = ההנחה הידנית זהה לשמורה (למשל מנהל נתן מעל התקרה ועובד מעדכן רק פריטים) – התקרה לא נבדקת שוב
+function cellTotal(w, items, cell, cfg, plans, keepMan) {
   const base = totalOf(items);
   const L = cell && Array.isArray(cell.lines) ? cell.lines : [];
   const pkg = L.some((l) => { const p = l.plan && plans.get(l.plan); return p && PKG_KEYS.some((k) => p[k] != null); });
   if (!pkg) { if (cell && cell.man) throw bad('bad-disc', 'הנחת ניוד – רק לקווים עם חבילה'); return { total: base, calc: null }; }
-  const today = new Date(Date.now() + 3 * 3600000).toISOString().slice(0, 10); // שעון ישראל (בקירוב, ‎+3)
+  const today = LD.ilDay(); // תאריך בישראל (כולל שעון חורף/קיץ)
   let r;
-  try { r = LD.calcCell(L, plans, cfg, cell.man || {}, { itemsAg: Math.round(base * 100), today, capped: w.role !== 'manager' }); }
+  try { r = LD.calcCell(L, plans, cfg, cell.man || {}, { itemsAg: Math.round(base * 100), today, capped: w.role !== 'manager' && !keepMan }); }
   catch (e) { if (e instanceof LD.CalcErr) throw bad(e.reason, e.message); throw e; }
   const calc = { store: r.store, disc: r.disc, lines: r.lines.map((l) => (l.man != null ? { fix: l.fix, man: l.man } : { fix: l.fix })) };
   if (r.promo) calc.promo = r.promo;
@@ -710,7 +713,10 @@ async function updateOrder(request) {
       const its = raw ? upd.items : (Array.isArray(d.items) ? d.items : []);
       const cl = cell !== undefined ? cell : (d.cell ? Object.assign({}, d.cell) : null);
       if (cl) delete cl.calc;
-      const ct = cl && pc0.cfg ? cellTotal(w, its, cl, pc0.cfg, pc0.plans) : { total: totalOf(its), calc: null };
+      // עובד שמעדכן הזמנה שבה מנהל נתן הנחה מעל התקרה: לא נחסם כל עוד ההנחה הידנית והקווים (חבילה/חברה) לא שונו
+      const lk = (c) => (c && Array.isArray(c.lines) ? c.lines.map((l) => [l && l.plan || '', l && l.carrier || '']) : []);
+      const keepMan = !!(d.cell && d.cell.man) && stable(cl && cl.man) === stable(d.cell.man) && stable(lk(cl)) === stable(lk(d.cell));
+      const ct = cl && pc0.cfg ? cellTotal(w, its, cl, pc0.cfg, pc0.plans, keepMan) : { total: totalOf(its), calc: null };
       if (cl) { if (ct.calc) cl.calc = ct.calc; if (cell === undefined && (ct.calc || d.cell.calc)) cell = cl; }
       if (raw || ct.total !== d.total || ct.calc || (d.cell && d.cell.calc)) upd.total = ct.total;
       if (upd.total !== undefined && upd.total !== d.total) notes.push(`סכום ₪${d.total} → ₪${upd.total}`);
@@ -1186,7 +1192,7 @@ async function setCellCfg(request) {
     const byC = (m, label) => {
       if (!m || typeof m !== 'object' || Array.isArray(m) || Object.keys(m).length > MAX_LIST) throw bad('bad-disc', label + ' לא תקין');
       const r = {};
-      for (const [c, d] of Object.entries(m)) { if (!carriers.includes(c)) throw bad('bad-carrier', label + ': חברה מהרשימה בלבד'); const x = discOf(d, label); if (x) r[c] = x; }
+      for (const [c, d] of Object.entries(m)) { if (!carriers.includes(c)) throw bad('bad-carrier', label + ': חברה מהרשימה בלבד'); const x = label === 'תקרה' ? manDisc(d, label) : discOf(d, label); if (x) r[c] = x; } // תקרה 0 נשמרת (= אין הנחה ידנית לעובד)
       return r;
     };
     if (input.disc !== undefined) o.disc = byC(input.disc, 'הנחה קבועה');

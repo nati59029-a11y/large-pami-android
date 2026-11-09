@@ -72,10 +72,14 @@ describe('חישוב הנחות ניוד', () => {
     assert.equal(run(['pP'], { cap }, { lines: [{ t: 'amt', v: 10 }] }, { capped: true }).disc, 10);
     assert.equal(run(['pP'], { cap }, { lines: [{ t: 'amt', v: 25 }] }, { capped: false }).disc, 25);
     assert.equal(run(['pC'], { cap }, { lines: [{ t: 'amt', v: 25 }] }, { capped: true }).disc, 25);
-    // הנחה להזמנה – עד סכום תקרות הקווים (10 + 20)
-    assert.equal(run(['pP', 'pH'], { cap }, { order: { t: 'amt', v: 30 } }, { capped: true }).disc, 30);
-    assert.throws(() => run(['pP', 'pH'], { cap }, { order: { t: 'amt', v: 31 } }, { capped: true }), (e) => e.reason === 'over-cap');
-    assert.equal(run(['pP', 'pC'], { cap }, { order: { t: 'amt', v: 60 } }, { capped: true }).disc, 55); // סלקום בלי תקרה – בלי הגבלה (עד הסכום)
+    // הנחה להזמנה – התקרה הנמוכה (10) × מספר הקווים (2) = 20 (החלטה 16:15)
+    assert.equal(run(['pP', 'pH'], { cap }, { order: { t: 'amt', v: 20 } }, { capped: true }).disc, 20);
+    assert.throws(() => run(['pP', 'pH'], { cap }, { order: { t: 'amt', v: 21 } }, { capped: true }), (e) => e.reason === 'over-cap');
+    // חברה בלי תקרה (סלקום) לא מבטלת את התקרה של פרטנר: 10 × 2
+    assert.equal(run(['pP', 'pC'], { cap }, { order: { t: 'amt', v: 20 } }, { capped: true }).disc, 20);
+    assert.throws(() => run(['pP', 'pC'], { cap }, { order: { t: 'amt', v: 400 } }, { capped: true }), (e) => e.reason === 'over-cap');
+    // לאף חברה אין תקרה – בלי הגבלה (עד הסכום)
+    assert.equal(run(['pC', 'pC'], { cap }, { order: { t: 'amt', v: 400 } }, { capped: true }).disc, 50);
     assert.throws(() => run(['pP', 'pH', 'pH'], { cap, promos: [P3] }, { promo: { id: 'x3', disc: { t: 'amt', v: 150 } } }, { capped: true }), (e) => e.reason === 'over-cap');
   });
   it('סכום לחנות לא שלילי (הנחה גדולה מהסכום)', () => {
@@ -133,5 +137,21 @@ describe('חישוב הנחות ניוד', () => {
   it('legacy: חבילה ישנה / קו בלי חבילה – אפס בכל השדות', () => {
     const r = calcCell([{ plan: 'pOld' }, { carrier: 'פרטנר' }, {}], plans, {}, {}, { today: T });
     assert.deepEqual([r.store, r.disc, r.net, r.ext, r.monthly, r.promo, r.hint], [0, 0, 0, 0, 0, null, null]);
+  });
+  it('תקרה 0 = עובד לא נותן הנחה ידנית (לקו, להזמנה, שינוי מבצע); 0 מותר; מנהל – בלי הגבלה', () => {
+    const cap = { 'פרטנר': { t: 'amt', v: 0 } };
+    assert.throws(() => run(['pP'], { cap }, { lines: [{ t: 'amt', v: 1 }] }, { capped: true }), (e) => e.reason === 'over-cap');
+    assert.equal(run(['pP'], { cap }, { lines: [{ t: 'amt', v: 0 }] }, { capped: true }).disc, 0);
+    assert.throws(() => run(['pP', 'pC'], { cap }, { order: { t: 'amt', v: 1 } }, { capped: true }), (e) => e.reason === 'over-cap');
+    assert.throws(() => run(['pP', 'pH', 'pH'], { cap, promos: [P3] }, { promo: { id: 'x3', disc: { t: 'amt', v: 1 } } }, { capped: true }), (e) => e.reason === 'over-cap');
+    assert.equal(run(['pP'], { cap }, { lines: [{ t: 'amt', v: 5 }] }, { capped: false }).disc, 5);
+  });
+  it('תאריך מבצע לפי שעון ישראל – חורף ‎+2 וקיץ ‎+3', () => {
+    const { ilDay } = require('../functions/lib/line-discount');
+    assert.equal(ilDay(Date.UTC(2026, 10, 9, 21, 59)), '2026-11-09'); // חורף: 23:59 בישראל
+    assert.equal(ilDay(Date.UTC(2026, 10, 9, 22, 0)), '2026-11-10'); // חורף: 00:00 בישראל
+    assert.equal(ilDay(Date.UTC(2026, 6, 9, 20, 59)), '2026-07-09'); // קיץ: 23:59
+    assert.equal(ilDay(Date.UTC(2026, 6, 9, 21, 0)), '2026-07-10'); // קיץ: 00:00
+    assert.match(ilDay(), /^\d{4}-\d{2}-\d{2}$/);
   });
 });

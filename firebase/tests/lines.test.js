@@ -318,6 +318,23 @@ describe('חבילות ניוד – הנחה בסכום ההזמנה', () => {
     u = await call('updateOrder', E1, { id: o.result.id, items: [{ n: 'כיסוי', qty: 1, price: 60 }] });
     assert.equal(u.result.total, 60);
   });
+  it('תקרה 0 נשמרת ונאכפת לעובד; מנהל נתן מעל התקרה – עובד מעדכן פריטים בלי חסימה, אבל לא משנה את ההנחה', async () => {
+    const { pN } = await setup2();
+    let r = await call('setCellCfg', MGR, { cap: { 'פרטנר': { t: 'amt', v: 0 } } });
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual((await get(`b/${A}/ordcfg/cell`)).cap, { 'פרטנר': { t: 'amt', v: 0 } });
+    assert.equal((await order(E1, { lines: L2(pN), man: { lines: [{ t: 'amt', v: 1 }] } })).reason, 'over-cap');
+    r = await order(E1, { lines: L2(pN), man: { lines: [{ t: 'amt', v: 0 }] } });
+    assert.equal(r.status, 'OK', r.text);
+    await call('setCellCfg', MGR, { cap: { 'פרטנר': { t: 'amt', v: 50 } } });
+    const m = await order(MGR, { lines: L2(pN), man: { order: { t: 'amt', v: 90 } } });
+    assert.equal(m.status, 'OK', m.text);
+    const id = m.result.id;
+    let u = await call('updateOrder', E1, { id, items: [{ n: 'כיסוי', qty: 2, price: 50 }] });
+    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 100 + 60 - 90);
+    u = await call('updateOrder', E1, { id, cell: { lines: L2(pN), man: { order: { t: 'amt', v: 95 } } } });
+    assert.equal(u.reason, 'over-cap');
+  });
   it('מבצע פעם אחת באחוזים – נדחה בשמירה', async () => {
     await call('setCellCfg', MGR, { carriers: ['פרטנר'] });
     const r = await call('setCellCfg', MGR, { promos: [{ name: 'x', carriers: ['פרטנר'], min: 2, kind: 'once', disc: { t: 'pct', v: 10 }, stack: 'add' }] });

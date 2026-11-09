@@ -18,7 +18,8 @@
 //      להזמנה (order): מחליפה את כל ההנחות (קבועה + מבצע). לקו (lines[i]): מחליפה את הקבועה של הקו; כשיש מבצע – אסור (משנים/מבטלים את המבצע).
 //      שינוי מבצע (promo.disc) מחליף את הנחת המבצע; ביטול (promo.off) מחזיר לקבועה. לא משלבים הנחה להזמנה עם הנחה לקו.
 //   4. תקרה (רק לעובד שאינו מנהל) – לכל קו לפי החברה שלו ("עד 50 ₪ לכל קו"; אחוז – מהתשלום לחנות של הקו).
-//      הנחה לקו – עד תקרת הקו; הנחה להזמנה/שינוי מבצע – עד סכום תקרות הקווים שהיא חלה עליהם. קו שלחברה שלו אין תקרה = בלי הגבלה.
+//      הנחה לקו – עד תקרת הקו (קו שלחברה שלו אין תקרה = בלי הגבלה). תקרה 0 = עובד לא נותן הנחה ידנית.
+//      הנחה להזמנה/שינוי מבצע – עד התקרה הנמוכה מבין הקווים שהיא חלה עליהם × מספר הקווים; קו בלי תקרה לא מבטל; לאף קו אין תקרה = בלי הגבלה.
 //   5. ההנחה יורדת מכל הסכום לחנות (פריטים + משלוח/סים לחנות), ולא מתחת ל-0 (החלטה 9.11).
 
 const ag = (x) => Math.round(Number(x || 0) * 100);
@@ -26,6 +27,10 @@ const val = (d, baseAg) => (!d ? 0 : d.t === 'pct' ? Math.round(baseAg * d.v / 1
 const fee = (f, pay) => (f && typeof f.amt === 'number' && f.amt > 0 && (f.pay || 'store') === pay ? ag(f.amt) : 0);
 const promoLive = (p, today) => p && p.on !== false && !(p.kind === 'once' && p.disc && p.disc.t === 'pct') && Array.isArray(p.carriers) && p.carriers.length
   && Number.isInteger(p.min) && p.min >= 1 && (!p.from || today >= p.from) && (!p.to || today <= p.to);
+
+// תאריך היום בישראל 'YYYY-MM-DD' (Asia/Jerusalem – חורף ‎+2, קיץ ‎+3) – לתאריכי מבצע
+const IL_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' });
+const ilDay = (ms) => IL_FMT.format(new Date(ms == null ? Date.now() : ms));
 
 class CalcErr extends Error { constructor(reason, message) { super(message); this.reason = reason; } }
 
@@ -68,8 +73,10 @@ function calcCell(lines, plans, cfg, man, opt) {
   });
   const storeAg = L.reduce((s, l) => s + l.store, 0);
   const room = Math.max(0, (opt.itemsAg || 0) + storeAg);
-  const lineCap = (l) => (capCfg[l.c] ? val(capCfg[l.c], l.store) : null); // אגורות; null = בלי הגבלה
-  const capSum = (ls) => { let m = 0; for (const l of ls) { const a = lineCap(l); if (a == null) return null; m += a; } return m; };
+  const lineCap = (l) => (capCfg[l.c] && typeof capCfg[l.c] === 'object' ? val(capCfg[l.c], l.store) : null); // אגורות; null = בלי הגבלה
+  // תקרה להזמנה/לשינוי מבצע (החלטה 16:15): התקרה הנמוכה מבין החברות של הקווים, לכל קו (× מספר הקווים).
+  // חברה בלי תקרה לא מבטלת תקרה של חברה אחרת; רק אם לאף קו אין תקרה – בלי הגבלה.
+  const capSum = (ls) => { let lo = null; for (const l of ls) { const a = lineCap(l); if (a != null && (lo == null || a < lo)) lo = a; } return lo == null ? null : lo * ls.length; };
   const overCap = (msg, a, cap) => { if (opt.capped && cap != null && a > cap) throw new CalcErr('over-cap', `${msg} עוברת את התקרה (₪${cap / 100}).`); };
   const best = bestPromo(promos, L);
   const manLines = Array.isArray(man.lines) ? man.lines : [];
@@ -142,4 +149,4 @@ function hintOf(promos, L, curDisc) {
   return { line: best.line, promo: p.id, name: p.name, carriers: p.carriers.slice(), min: p.min, kind: p.kind, pdisc: Object.assign({}, p.disc), disc, gain: best.gain / 100, upTo: true, msg };
 }
 
-module.exports = { calcCell, CalcErr, promoLive, _t: { val, fee, promoValue, bestPromo, hintOf } };
+module.exports = { calcCell, CalcErr, promoLive, ilDay, _t: { val, fee, promoValue, bestPromo, hintOf } };
