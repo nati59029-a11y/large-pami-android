@@ -1207,10 +1207,12 @@ async function setCellCfg(request) {
   await ref.set(o, { mergeFields: Object.keys(o) });
   return Object.assign({ ok: true }, o);
 }
-// saveLinePlan({ id?, name, carrier?, days?, on? }) – מנהל העסק. days = טווח התראה לניוד חוזר (1–3650, ברירת מחדל 60)
+// saveLinePlan({ id?, name, carrier?, days?, on? }) – מנהל העסק, ועובד עם הרשאת הזמנות/מלאי (ord) – חבילות ניוד (החלטה 9.11 ערב).
+// days = טווח התראה לניוד חוזר (1–3650, ברירת מחדל 60) – מנהל בלבד; עובד שעורך חבילה קיימת לא משנה אותו.
 async function saveLinePlan(request) {
   const w = await who(request);
-  mgr(w); needCell(w);
+  needCell(w);
+  const isMgr = w.role === 'manager';
   const input = inputObject(request);
   onlyKeys(input, ['id', 'name', 'carrier', 'days', 'on', 'details', 'monthly', 'ship', 'sim']);
   const d = { name: txt(input.name, 40, 'bad-name', 'שם התוכנית', true), upd: Date.now(), by: w.uid };
@@ -1220,7 +1222,9 @@ async function saveLinePlan(request) {
     if (typeof input.carrier !== 'string' || !cfg.carriers.includes(input.carrier)) throw bad('bad-carrier', 'חברה: בחרו מהרשימה');
     d.carrier = input.carrier;
   } else d.carrier = '';
-  if (input.days == null || input.days === '') d.days = DEF_DAYS;
+  if (!isMgr && input.days !== undefined) throw deny('manager-only', 'טווח ההתראה – מנהל בלבד');
+  if (!isMgr && input.id != null && input.id !== '') { /* עובד בעריכה: days נשאר כמו שהוא */ }
+  else if (input.days == null || input.days === '') d.days = DEF_DAYS;
   else if (!Number.isInteger(input.days) || input.days < 1 || input.days > 3650) throw bad('bad-days', 'טווח התראה: 1 עד 3650 ימים');
   else d.days = input.days;
   if (input.on !== undefined) { if (typeof input.on !== 'boolean') throw bad('bad-field', 'פעיל: כן/לא'); d.on = input.on; } else d.on = true;
