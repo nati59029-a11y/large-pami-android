@@ -15,7 +15,7 @@ const PM=[['link','אשראי בקישור'],['phone','אשראי בטלפון']
 const WHY={in:'הכנסת מלאי',set:'תיקון כמות',zero:'נגמר במלאי',order:'הזמנה',xout:'הועבר לסניף אחר',xin:'העברה נכנסת',cancel:'ביטול הזמנה',edit:'עריכת הזמנה',prod:'עריכת מוצר'};
 const O={L:null,P:null,C:[],cf:'',cfg:null,err:'',busy:0,at:0,st:'open',log:{},sl:null,draft:null};
 const on=()=>(isA()||isW()||!!(SY&&SY.sa))&&bzF('orders')&&wp('ord');
-const mgr=()=>isA()||!!(SY&&SY.sa);
+const mgr=()=>isA()||!!(SY&&SY.sa);window.oxImpOk=()=>on()&&mgr();
 const brs=()=>brAll().filter(b=>b.on);
 const hasBr=()=>brs().length>0;
 const mine=()=>brMineIds();
@@ -269,7 +269,7 @@ const catNm=id=>{const c=(O.C||[]).find(x=>x.id===id);return c?c.name:''};
 const topC=()=>(O.C||[]).filter(c=>!c.parent);
 const subC=id=>(O.C||[]).filter(c=>c.parent===id);
 const catBar=()=>{const T=topC();if(!T.length&&!mgr())return '';return `<div class="row" style="margin:8px 0">${T.length?`<label class="f grow" style="margin:0"><span>קטגוריה</span><select data-c="oxCF"><option value="">הכול</option>${T.map(c=>`<option value="${esc(c.id)}"${O.cf===c.id?' selected':''}>${esc(c.name)}</option>${subC(c.id).map(u=>`<option value="${esc(u.id)}"${O.cf===u.id?' selected':''}>– ${esc(u.name)}</option>`).join('')}`).join('')}</select></label>`:''}</div>
- <div class="row" style="margin-bottom:8px">${mgr()?'<button class="btn g s grow" data-a="oxCats">קטגוריות</button>':''}<button class="btn g s grow" data-a="go" data-v="oxImp">ייבוא מלאי</button>${hasBr()&&brs().length>1?'<button class="btn g s grow" data-a="go" data-v="oxXfer">העברות</button>':''}</div>`};
+ <div class="row" style="margin-bottom:8px">${mgr()?'<button class="btn g s grow" data-a="oxCats">קטגוריות</button>':''}${mgr()?'':'<button class="btn g s grow" data-a="go" data-v="oxImp">ייבוא מלאי</button>'}${hasBr()&&brs().length>1?'<button class="btn g s grow" data-a="go" data-v="oxXfer">העברות</button>':''}</div>`};
 const stockL=()=>(O.P||[]).filter(p=>(!O.sq||String(p.name).includes(O.sq)||String(p.barcode||'')===O.sq.trim())&&(!O.cf||p.cat===O.cf||p.sub===O.cf));
 CHG.oxCF=el=>{O.cf=el.value;rerender()};
 const wsCan=()=>mgr()||!!(O.draft&&O.draft.custId&&O.draft.wholesale===true);

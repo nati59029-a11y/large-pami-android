@@ -16,7 +16,7 @@ const C={L:null,cfg:null,busy:0,at:0,q:'',hit:{},imp:null};
 const on=()=>(isA()||isW()||!!(SY&&SY.sa))&&bzF('orders')&&wp('ord');
 /* 00:24: ניודים – רק כשמנהל־העל הפעיל את cellular בעסק (גם בעסק הישן – ברירת מחדל כבוי). כבוי = מוסתר, הנתונים נשארים */
 const cell=()=>{const b=SY&&SY.biz;return !!(b&&b.features&&b.features.cellular===true)&&bzF('cellular')};
-const mgr=()=>isA()||!!(SY&&SY.sa);
+const mgr=()=>isA()||!!(SY&&SY.sa);window.ocImpOk=()=>(isA()||isW()||!!(SY&&SY.sa))&&bzF('orders')&&wp('ord')&&mgr();
 const dec=d=>Object.assign({id:idOf(d)},Object.fromEntries(Object.entries(d.fields||{}).map(([k,v])=>[k,fvj(v)])));
 const rid=()=>{const a=new Uint8Array(12);crypto.getRandomValues(a);return 'r'+[...a].map(x=>x.toString(36).padStart(2,'0')).join('').slice(0,22)};
 const err=e=>toast(e&&e.message||'הפעולה נכשלה');
@@ -112,7 +112,7 @@ const crow=c=>`<button class="li" data-a="go" data-v="ocCard" data-arg="${esc(c.
 const match=(c,q)=>!q||String(c.name||'').includes(q)||String(c.bn||'').includes(q)||String(c.phone||'').includes(dig(q)||'\u0000')||String(c.tz||'').includes(dig(q)||'\u0000');
 const listH=()=>{const L=(C.L||[]).filter(c=>match(c,C.q.trim()));return L.slice(0,200).map(crow).join('')+(L.length>200?`<p class="note">מוצגים 200 מתוך ${L.length}. חפשו כדי לצמצם.</p>`:'')||'<div class="empty">אין לקוחות</div>'};
 V.ocList=()=>{const T='לקוחות';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
- return{t:T,s:C.L.length+' לקוחות',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button>${mgr()?'<button class="btn g grow" data-a="ocImp">ייבוא מאקסל</button>':''}</div>
+ return{t:T,s:C.L.length+' לקוחות',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button></div>
  ${mgr()?'<button class="btn g s w" data-a="ocCfg">שדות נוספים ללקוח</button>':''}
  <label class="f"><span>חיפוש (שם, טלפון או ת.ז)</span><input data-i="ocQ" value="${esc(C.q)}" autocomplete="off"></label><div id="ocl">${listH()}</div>
  <button class="btn g s w" style="margin-top:8px" data-a="ocRe">רענן</button>`}};
