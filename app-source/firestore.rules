@@ -1019,7 +1019,7 @@ service cloud.firestore {
       function ordOk() { return feat('orders') && perm('ord'); }
       function brOk(br) { return bMgr() || myStaff().get('br', null) == null || br in myStaff().br; }
       match /ordcfg/{docId} {
-        allow get: if ordOk() && docId in ['main', 'seq'];
+        allow get: if ordOk() && (docId in ['main', 'seq'] || (docId == 'cell' && feat('cellular')));
         allow list, create, update, delete: if false;
       }
       match /prod/{id} {
@@ -1065,6 +1065,15 @@ service cloud.firestore {
       match /custcfg/{docId} {
         allow get: if ordOk() && docId == 'main';
         allow list, create, update, delete: if false;
+      }
+      // ניוד קווים (fb/ord-lines): תוכניות – קריאה לעובד ord רק כשמתג cellular פעיל; כתיבה – רק השרת (saveLinePlan).
+      // lineLog – אין גישה מהאפליקציה בכלל (הבדיקה דרך checkLines בשרת). בנק/ת"ז בעל כרטיס – בתוך ord.cell, אותן הרשאות כמו ההזמנה (07:38)
+      match /lineplan/{id} {
+        allow read: if ordOk() && feat('cellular');
+        allow create, update, delete: if false;
+      }
+      match /lineLog/{id} {
+        allow read, create, update, delete: if false;
       }
 
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')

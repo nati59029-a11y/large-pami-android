@@ -25,7 +25,7 @@ const XK_RE = /^x[0-9a-z_]{1,20}$/;
 const MAX_X = 20;
 const MAX_ROWS = 200;
 const MAX_PORTS = 30;
-const portKey = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|');
+const portKey = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|'); // br (סניף, 01:00) לא חלק מהמפתח – אותו ניוד מסניף אחר אינו כפילות
 const FIELDS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port'].concat(core.CPART_KEYS);
 
 // 00:24: ports נכתב רק כשמתג cellular פעיל בעסק. כבוי – נתונים קיימים נשארים (רק מוסתרים באפליקציה)
@@ -76,7 +76,14 @@ function portOf(raw) {
 }
 const empty = (v) => v == null || v === '';
 // מנקה פרטי לקוח. keys = מפתחות השדות החופשיים המותרים (custcfg). name/phone חובה רק כשיוצרים לקוח בלי ת"ז.
-function clean(c, keys) {
+// סניפי העסק (01:00: סניף בניוד הקודם / בייבוא). עסק בלי מסמך (legacy) – אין סניפים
+async function brIds(w) {
+  if (!w || !w.biz || !w.biz.exists) return [];
+  const s = await getFirestore().doc('b/' + w.bizId).get();
+  const org = s.exists && s.get('org') && typeof s.get('org') === 'object' ? s.get('org') : {};
+  return (Array.isArray(org.branches) ? org.branches : []).map((b) => b && b.id).filter((x) => typeof x === 'string');
+}
+function clean(c, keys, brs) {
   if (!c || typeof c !== 'object' || Array.isArray(c)) throw bad('bad-cust', 'פרטי לקוח חסרים');
   const o = core.custParts(c, {}); // 00:19: שם פרטי/משפחה, רחוב/עיר/קומה/דירה → גם name/addr כרשור
   if (!o.name && !empty(c.name)) o.name = txt(c.name, 60, 'bad-name', 'שם הלקוח');
@@ -92,8 +99,9 @@ function clean(c, keys) {
     o.ports = [];
     for (const p of c.ports) {
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw bad('bad-ports', 'רשומת ניוד לא תקינה');
-      onlyKeys(p, ['d', 'phone', 'tz'], 'רשומת ניוד');
+      onlyKeys(p, ['d', 'phone', 'tz', 'br'], 'רשומת ניוד');
       const r = {};
+      if (!empty(p.br)) { if (typeof p.br !== 'string' || !(brs || []).includes(p.br)) throw bad('bad-br', 'סניף הניוד לא קיים בעסק'); r.br = p.br; }
       if (!empty(p.d)) r.d = portOf(p.d);
       if (!empty(p.phone)) r.phone = phoneOf(p.phone);
       if (!empty(p.tz)) r.tz = tzOf(p.tz);
@@ -189,7 +197,7 @@ async function saveCust(request) {
   onlyKeys(input.cust || {}, ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports'].concat(core.CPART_KEYS), 'פרטי לקוח');
   const db = T.tdb();
   if (input.cust && input.cust.ports !== undefined && !cellOn(w)) throw deny('feature-off', 'ניודים – התוספת "סלולר" כבויה בעסק הזה');
-  const o = clean(input.cust, await xKeys(db));
+  const o = clean(input.cust, await xKeys(db), input.cust && input.cust.ports ? await brIds(w) : []);
   // עריכה (לא fill): חלק ששדה אחר מקבוצתו נשלח ריק – נמחק, כדי שהשדה הנפרד יתאים לרשור החדש
   if (input.fill !== true) for (const g of [['fn', 'ln'], ['st', 'city', 'fl', 'apt']]) if (g.some((k) => o[k] !== undefined)) for (const k of g) if (o[k] === undefined) o[k] = '';
   // עריכה: addr:'' בלי אף חלק כתובת = מחיקת הכתובת כולה (גם החלקים). ב-fill מתעלמים
@@ -213,6 +221,7 @@ async function importCusts(request) {
   const mark = db.doc('custcfg/req_' + input.reqId);
   if ((await mark.get()).exists) return { ok: true, dup: true, created: 0, updated: 0, bad: [] };
   const keys = await xKeys(db);
+  const brs = await brIds(w);
   const res = { ok: true, dup: false, created: 0, updated: 0, same: 0, bad: [] };
   const seen = new Set();
   for (let i = 0; i < input.rows.length; i++) {
@@ -230,7 +239,7 @@ async function importCusts(request) {
       }
       if (r0.ports !== undefined && !cellOn(w)) throw deny('feature-off', 'ניודים – התוספת "סלולר" כבויה');
       onlyKeys(r0, ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports'].concat(core.CPART_KEYS), 'שורה');
-      const o = clean(r0, keys);
+      const o = clean(r0, keys, brs);
       const id = idFor(o);
       if (seen.has(id)) { res.same++; continue; } // כפילות בתוך אותה מנה
       seen.add(id);

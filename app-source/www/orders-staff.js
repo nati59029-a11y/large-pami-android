@@ -119,7 +119,7 @@ function itemsOut(items){const out=[];for(const it of items){const qty=num(it.qt
 ACT.oxSave=async el=>{const D=draft();custJoin(D);let items;try{if(hasBr()&&!D.br)throw new Error('בחר סניף');if(!D.name.trim())throw new Error('חסר שם לקוח');if(!D.phone.trim())throw new Error('חסר טלפון');if(!D.items.length)throw new Error('הוסף לפחות פריט אחד');items=itemsOut(D.items)}catch(e){return toast(e.message)}
  if(D.wsC&&D.wsC!==D.custId){D.req=rid();D.wsC=''} // הלקוח הוחלף אחרי טעינת סיטונאי – הטיוטה מקבלת מזהה חדש (השרת קושר סיטונאי ל-reqId)
  const cust={name:D.name,phone:D.phone};if(D.tz)cust.tz=D.tz;CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)cust[k]=v});if(D.addr&&!CPK.slice(2).some(k=>cust[k]))cust.addr=D.addr;if(D.mail)cust.mail=D.mail;
- el.disabled=true;try{const r=await fnCall('createOrder',{reqId:D.req,br:hasBr()?D.br:undefined,cust,custId:D.custId||undefined,items,note:D.note||undefined});O.draft=null;
+ el.disabled=true;try{const r=await fnCall('createOrder',{reqId:D.req,br:hasBr()?D.br:undefined,cust,custId:D.custId||undefined,items,note:D.note||undefined,cell:D.cellOut});O.draft=null;
   toast(`הזמנה #${r.no} נשמרה · ${ils(r.total)}`);if(r.warn&&r.warn.length)setTimeout(()=>toast('שים לב: אין מספיק במלאי – '+r.warn.map(w=>w.n+(hasBr()?' ב'+bn(w.br):'')).join(', ')),2700);
   await load(true);NAV.pop();go('oxOrd',r.id)}catch(e){el.disabled=false;err(e)}};
 
