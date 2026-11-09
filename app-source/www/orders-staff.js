@@ -9,6 +9,7 @@
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined')return;
 const NB='_';
+const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)}; // 2026-11-09 (Dפון): מנהל־על שנכנס לעסק – הפונקציות רצות בעסק שנבחר ולא בעסק הבית שלו
 const ST={new:'חדשה',work:'בטיפול',wait_pay:'ממתין לתשלום',paid:'שולם',out:'יצא למשלוח',done:'הושלם',cancel:'בוטלה'};
 const NEXT={new:['work','wait_pay'],work:['wait_pay','new'],wait_pay:['work'],paid:['out','done'],out:['done'],done:[],cancel:[]};
 const PM=[['link','אשראי בקישור'],['phone','אשראי בטלפון'],['cash','מזומן'],['transfer','העברה'],['other','אחר']];
