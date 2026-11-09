@@ -1,6 +1,8 @@
 /* ORD:CUST – לקוחות להזמנות (ענף fb/ord-cust). קובץ עצמאי, נטען אחרי orders-staff.js.
-   - הזמנה חדשה: שדה ראשון ת"ז; 9 ספרות → חיפוש cust/t{tz} → ממלא שם/טלפון/מייל/כתובת. לא נמצא → "לקוח חדש" עם הת"ז. חיפוש גם לפי טלפון.
-     ת"ז ומייל גלויים בטופס (לא מוסתרים ב"רשות"). שמירת ההזמנה → saveCust עם fill (ממלא רק שדות ריקים, לא דורס).
+   - הזמנה חדשה (2026-11-09, לקוח לפי טלפון): שדה ראשון טלפון; טלפון תקין → חיפוש cust/p{phone} + שאילתה phone==; הלקוחות שנמצאו מוצגים לבחירה,
+     ואפשר "לקוח חדש עם אותו טלפון" (asNew → מזהה c{20} בשרת). ת"ז – רק בניוד קווים (או כשללקוח שנבחר יש ת"ז). משלוח: רחוב/עיר/קומה/דירה (רשות).
+     שמירת ההזמנה → saveCust עם fill (ממלא רק שדות ריקים – כך מצרפים פרטים חדשים ללקוח קיים), id של הלקוח שנבחר, וההזמנה מקושרת ללקוח.
+   - לקוח עסקי (= סיטונאי): שם העסק, ע.מ, איש קשר, טלפון, כתובת, עיר, תנאי תשלום. עובד ומנהל פותחים לקוח עסקי חדש; הפיכת לקוח קיים / ביטול – מנהל (נבדק בשרת).
    - מסכים: V.ocList (לקוחות), V.ocCard (כרטיס לקוח + היסטוריית הזמנות), ייבוא Excel/CSV עם התאמת עמודות, שדות חופשיים (מנהל).
    - סיטונאי (22:10): ברירת מחדל רגיל; רק מנהל מסמן, בכרטיס הלקוח. הייבוא מתעלם. בטיוטת ההזמנה: draft.wholesale (לשימוש ענף הקטלוג).
    - אשראי: fb/ord-card – מספר מלא/תוקף/שם/CVV מוצפנים בשרת (customers.js setCard/getCard/delCard); בלקוח נשמרות 4 ספרות + card:true.
@@ -41,9 +43,14 @@ const xKeys=()=>(C.cfg&&Array.isArray(C.cfg.xKeys)?C.cfg.xKeys:[]).filter(x=>x&&
 /* ---------- קריאה ---------- */
 async function getC(id){try{const d=await fsx('/cust/'+id);return d?dec(d):null}catch(e){if(e.code===404)return null;throw e}}
 async function byTz(z){let c=await getC('t'+z);return c}
-async function byPhone(p){let c=await getC('p'+p);if(c&&c.mv)c=await getC(c.mv);if(c)return c;
- const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cust'}],where:{fieldFilter:{field:{fieldPath:'phone'},op:'EQUAL',value:{stringValue:p}}},limit:3}})});
- const L=(r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>!x.mv);return L[0]||null}
+// כל הלקוחות עם הטלפון (p{phone} ישן + לקוחות נוספים c… / t… עם אותו טלפון). בלי מסמכים שהועברו (mv)
+async function byPhoneAll(p){const out=[],seen=new Set(),add=c=>{if(c&&!c.mv&&!seen.has(c.id)){seen.add(c.id);out.push(c)}};let c=await getC('p'+p);if(c&&c.mv)c=await getC(c.mv);add(c);
+ const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cust'}],where:{fieldFilter:{field:{fieldPath:'phone'},op:'EQUAL',value:{stringValue:p}}},limit:10}})});
+ (r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>x.phone===p).forEach(add);return out}
+const PAYS=[['cash','מזומן'],['n30','שוטף+30'],['n60','שוטף+60'],['n90','שוטף+90'],['credit','אשראי'],['transfer','העברה בנקאית'],['other','אחר']];
+const payTxt=c=>c.pay==='other'?String(c.payTxt||'אחר'):((PAYS.find(x=>x[0]===c.pay)||[])[1]||'');
+const WSTAG='<span class="tag t1">לקוח עסקי</span>';
+const cLabel=c=>esc(c.name||c.bn||'')+(c.wholesale===true?' '+WSTAG:'');
 async function cfgLoad(){try{const d=await fsx('/custcfg/main');C.cfg=d?dec(d):{}}catch(e){C.cfg={}}}
 async function loadL(force){if(C.busy||(!force&&C.L&&Date.now()-C.at<20000))return;C.busy=1;
  try{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cust'}],limit:3000}})});
@@ -55,34 +62,52 @@ const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|
 /* סבב 3: פרטי לקוח שנטענו מהמערכת (כולל שם/כתובת ישנים ארוכים שאין להם שדה גלוי) נמחקים כשמחליפים לקוח – הזמנה ללקוח אחר לא יורשת אותם */
 const LDK=['name','addr'].concat(CPK);
 function dropLoaded(D){const F=D.cFrom||{};LDK.concat(['phone','mail'].filter(k=>F[k]&&String(D[k]||'').trim()===F[k])).forEach(k=>{D[k]='';document.querySelectorAll('#main input[data-i=oxD][data-k='+k+']').forEach(e=>{e.value=''})});D.cName='';D.cFrom=null;D.wholesale=false}
-function fillDraft(D,c){if(D.custId&&D.custId!==c.id)dropLoaded(D);D.name='';D.addr='';splitOld(c,D);['phone','mail'].forEach(k=>{if(c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])});D.cFrom={phone:String(c.phone||''),mail:String(c.mail||'')};D.tz=c.tz||D.tz;D.custId=c.id;D.wholesale=c.wholesale===true;D.cName=c.name||''}
-const custBox=D=>{const st=D.cSt;return st==='found'?`<p class="note" role="status" id="ocst">לקוח קיים: <b>${esc(D.cName)}</b>${D.wholesale?' <span class="tag t1">סיטונאי</span>':''} – הפרטים מולאו</p>`
- :st==='new'?`<p class="note" role="status" id="ocst">לקוח חדש – ממלאים את הפרטים, והלקוח יישמר עם ההזמנה</p>`:st==='bad'?`<p class="note" role="status" id="ocst">ת.ז לא תקינה</p>`:st==='wait'?`<p class="note" role="status" id="ocst">מחפש…</p>`:`<p class="note" role="status" id="ocst"></p>`};
+function fillDraft(D,c){if(D.custId&&D.custId!==c.id)dropLoaded(D);D.name='';D.addr='';splitOld(c,D);['phone','mail'].forEach(k=>{if(c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])});D.cFrom={phone:String(c.phone||''),mail:String(c.mail||''),tz:String(c.tz||'')};D.tz=c.tz||D.tz;D.custId=c.id;D.wholesale=c.wholesale===true;D.cName=c.name||''}
+const NEWB='<button type="button" class="btn g s w" data-a="ocAsNew">לקוח חדש עם אותו טלפון</button>';
+const custBox=D=>{const st=D.cSt,w=h=>`<div role="status" id="ocst">${h}</div>`;
+ if(st==='found')return w(`<p class="note">לקוח קיים: <b>${esc(D.cName)}</b>${D.wholesale?' '+WSTAG:''} – הפרטים מולאו. פרטים שתוסיפו (כמו כתובת) יצורפו ללקוח.</p>${NEWB}`);
+ if(st==='hits')return w(`<p class="note">לטלפון הזה כבר יש ${(D.cHits||[]).length>1?(D.cHits||[]).length+' לקוחות':'לקוח'}. בחרו:</p>${(D.cHits||[]).map(c=>`<button type="button" class="li" data-a="ocPick" data-id="${esc(c.id)}"><div class="m"><b>${cLabel(c)}</b><small>${esc(c.addr||'')}</small></div>${ico('chev')}</button>`).join('')}${NEWB}`);
+ if(st==='asnew')return w(`<p class="note">לקוח חדש עם טלפון קיים – יישמר כלקוח נפרד.</p><button type="button" class="btn g s w" data-a="ocPhAgain">חזרה ללקוחות הקיימים</button>`);
+ return w(st==='new'?'<p class="note">לקוח חדש – ממלאים שם פרטי ושם משפחה, והלקוח יישמר עם ההזמנה</p>':st==='bad'?'<p class="note">ת.ז לא תקינה</p>':st==='wait'?'<p class="note">מחפש…</p>':'')};
+const tzVis=D=>(cell()&&!!(D.cell&&D.cell.on))||!!dig(D.tz);
 {const nw=V.oxNew;if(nw)V.oxNew=()=>{const r=nw();if(!r||!r.h||!on())return r;const D=O.draft;if(!D)return r;
   if(!C.cfg)cfgLoad();
-  let h=r.h.replace(/<details><summary[^>]*>ת\.ז, כתובת ומייל \(רשות\)<\/summary>/,'').replace(/<label class="f"><span>ת\.ז<\/span><input data-i="oxD" data-k="tz"[^>]*><\/label>/,'').replace('</details></div>','</div>');
-  const tz=`<label class="f"><span>ת.ז הלקוח (מקלידים קודם – לקוח קיים יתמלא לבד)</span><input data-i="ocTz" data-k="tz" inputmode="numeric" maxlength="9" autocomplete="off" value="${esc(D.tz||'')}" id="octz"></label>${custBox(D)}
-  <button type="button" class="btn g s w" data-a="ocByPh">חיפוש לקוח לפי הטלפון שהוקלד</button>`;
-  h=h.replace('<div class="card">','<div class="card">'+tz);
-  r.h=h;r.s='ת.ז, פרטי לקוח ומוצרים';return r}}
-INP.ocTz=el=>{const D=O.draft;if(!D)return;const t=dig(el.value);D.tz=t;if(D.custId){D.custId='';D.cSt='';dropLoaded(D)}
+  // ניוד קווים (orders-lines.js, נטען אחרי הקובץ הזה): סימון/ביטול ניוד מצייר מחדש, כדי ששדה הת"ז יופיע/ייעלם
+  if(typeof CHG!=='undefined'&&CHG.olOn&&!CHG.olOn.__oc){const f=CHG.olOn;CHG.olOn=el=>{f(el);rerender()};CHG.olOn.__oc=1}
+  let h=r.h.replace(/<label class="f"><span>ת\.ז<\/span><input data-i="oxD" data-k="tz"[^>]*><\/label>/,'');
+  const ad=AP.some(k=>String(D[k]||'').trim())||String(D.mail||'').trim();
+  h=h.replace(/<details><summary([^>]*)>ת\.ז, כתובת ומייל \(רשות\)<\/summary>/,`<details${ad?' open':''}><summary$1>משלוח – כתובת, עיר, קומה ודירה (רשות)</summary>`);
+  const ph=/<label class="f"><span>טלפון<\/span><input data-i="oxD" data-k="phone"[^>]*><\/label>/.exec(h);
+  if(ph){h=h.replace(ph[0],'');h=h.replace('<div class="card">','<div class="card">'+ph[0].replace('<span>טלפון</span>','<span>טלפון הלקוח (מקלידים קודם – לקוח קיים יימצא לבד)</span>')+custBox(D)+(tzVis(D)?`<label class="f"><span>ת.ז הלקוח (לניוד קווים)</span><input data-i="ocTz" data-k="tz" inputmode="numeric" maxlength="9" autocomplete="off" value="${esc(D.tz||'')}" id="octz"></label>`:''))}
+  r.h=h;r.s='טלפון, פרטי לקוח ומוצרים';return r}}
+// טלפון בהזמנה: טלפון תקין → חיפוש הלקוחות שלו. שינוי טלפון אחרי בחירת לקוח – מנתק את הקישור (הפרטים שהוקלדו נשארים)
+const phSearch=D=>{const p=phN(D.phone);if(D.custId&&(!D.cFrom||D.cFrom.phone!==p)){const ph=D.phone,tz=D.cFrom&&D.cFrom.tz;if(tz&&dig(D.tz)===tz)D.tz='';dropLoaded(D);D.phone=ph;D.custId=''}
+ if(D.custId)return;D.asNew=false;D.cHits=null;if(!p){D.cSt='';paintSt(D);return}
+ D.cSt='wait';paintSt(D);const my=D.phSeq=(D.phSeq||0)+1;
+ byPhoneAll(p).then(L=>{if(O.draft!==D||D.phSeq!==my||D.custId)return;if(L.length){D.cHits=L;D.cSt='hits'}else D.cSt='new';paintSt(D)}).catch(e=>{D.cSt='';paintSt(D);err(e)})};
+{const f=INP.oxD;if(f)INP.oxD=el=>{f(el);const D=O.draft;if(D&&on()&&el.dataset.k==='phone')phSearch(D)}}
+ACT.ocPick=el=>{const D=O.draft;if(!D)return;const c=(D.cHits||[]).find(x=>x.id===el.dataset.id);if(!c)return;fillDraft(D,c);D.cBy='ph';D.asNew=false;D.cSt='found';rerender()};
+ACT.ocAsNew=()=>{const D=O.draft;if(!D)return;const ph=D.phone;if(D.custId)dropLoaded(D);D.phone=ph;D.custId='';D.asNew=true;D.cSt='asnew';rerender()};
+ACT.ocPhAgain=()=>{const D=O.draft;if(!D)return;D.asNew=false;phSearch(D)};
+INP.ocTz=el=>{const D=O.draft;if(!D)return;const t=dig(el.value);D.tz=t;if(D.custId&&D.cBy==='tz'){D.custId='';D.cSt='';dropLoaded(D)}if(D.custId)return; // לקוח שנבחר לפי טלפון – הת"ז רק נוספת לו
  if(t.length<9){D.cSt='';paintSt(D);return}const z=t.padStart(9,'0');if(!tzOk(z)){D.cSt='bad';paintSt(D);return}
- D.cSt='wait';paintSt(D);const my=z;byTz(z).then(c=>{if(O.draft!==D||dig(D.tz).padStart(9,'0')!==my)return;if(c){fillDraft(D,c);D.cSt='found';rerender()}else{D.cSt='new';paintSt(D)}}).catch(e=>{D.cSt='';paintSt(D);err(e)})};
+ D.cSt='wait';paintSt(D);const my=z;byTz(z).then(c=>{if(O.draft!==D||dig(D.tz).padStart(9,'0')!==my)return;if(c){fillDraft(D,c);D.cBy='tz';D.cSt='found';rerender()}else{D.cSt='new';paintSt(D)}}).catch(e=>{D.cSt='';paintSt(D);err(e)})};
 const paintSt=D=>{const s=document.getElementById('ocst');if(s)s.outerHTML=custBox(D)};
-ACT.ocByPh=async()=>{const D=O.draft;if(!D)return;const p=phN(D.phone);if(!p)return toast('הקלד טלפון תקין');try{const c=await byPhone(p);if(!c)return toast('לא נמצא לקוח עם הטלפון הזה');fillDraft(D,c);D.cSt='found';rerender()}catch(e){err(e)}};
-// שמירת הזמנה → קודם הלקוח (fill: רק שדות ריקים). כשל בשמירת הלקוח לא עוצר את ההזמנה.
+// שמירת הזמנה → קודם הלקוח (fill: רק שדות ריקים; id = הלקוח שנבחר; asNew = לקוח נוסף עם אותו טלפון). כשל בשמירת הלקוח לא עוצר את ההזמנה.
+// לקוח חדש שנשמר – ההזמנה מקושרת אליו (custId)
 {const sv=ACT.oxSave;if(sv)ACT.oxSave=async el=>{const D=O.draft;if(D)joinC(D);
   if(D&&on()){const tz=dig(D.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');
-   const p=phN(D.phone);if((tz||p)&&String(D.name||'').trim()){const c={};if(!NP.some(k=>String(D[k]||'').trim()))c.name=D.name.trim();if(p)c.phone=p;if(tz)c.tz=tz;if(D.mail)c.mail=D.mail.trim();CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)c[k]=v});if(D.addr&&!AP.some(k=>c[k]))c.addr=D.addr.trim();
-    fnCall('saveCust',{fill:true,cust:c}).then(()=>{C.at=0}).catch(e=>toast('ההזמנה נשמרת, אבל פרטי הלקוח לא נשמרו: '+(e.message||'')))}}
+   const p=phN(D.phone);if(p&&String(D.name||'').trim()&&D.items&&D.items.length){const c={};if(!NP.some(k=>String(D[k]||'').trim()))c.name=D.name.trim();c.phone=p;if(tz)c.tz=tz;if(D.mail)c.mail=D.mail.trim();CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)c[k]=v});if(D.addr&&!AP.some(k=>c[k]))c.addr=D.addr.trim();
+    const a={fill:true,cust:c};if(D.custId)a.id=D.custId;else if(D.asNew)a.asNew=true;
+    try{const r=await fnCall('saveCust',a);C.at=0;if(!D.custId&&r&&r.id){D.custId=r.id;D.asNew=false}}catch(e){toast('ההזמנה נשמרת, אבל פרטי הלקוח לא נשמרו: '+(e.message||''))}}}
   return sv(el)}}
 
 /* ---------- כניסה: כפתור "לקוחות" במסך ההזמנות ---------- */
 {const ox=V.ox;if(ox)V.ox=()=>{const r=ox();if(on()&&r&&r.h&&r.h.includes('data-v="oxStock"'))r.h=r.h.replace(/(<button class="btn g grow" data-a="go" data-v="oxStock">מלאי<\/button>)/,'$1<button class="btn g grow" data-a="go" data-v="ocList">לקוחות</button>');return r}}
 
 /* ---------- רשימת לקוחות ---------- */
-const crow=c=>`<button class="li" data-a="go" data-v="ocCard" data-arg="${esc(c.id)}"><div class="m"><b>${esc(c.name||'')}${c.wholesale===true?' <span class="tag t1">סיטונאי</span>':''}</b><small dir="ltr" style="text-align:right">${esc(c.phone||'')}${c.tz?' · '+esc(c.tz):''}</small></div>${ico('chev')}</button>`;
-const match=(c,q)=>!q||String(c.name||'').includes(q)||String(c.phone||'').includes(dig(q)||'\u0000')||String(c.tz||'').includes(dig(q)||'\u0000');
+const crow=c=>`<button class="li" data-a="go" data-v="ocCard" data-arg="${esc(c.id)}"><div class="m"><b>${cLabel(c)}</b><small dir="ltr" style="text-align:right">${esc(c.phone||'')}${c.tz?' · '+esc(c.tz):''}</small></div>${ico('chev')}</button>`;
+const match=(c,q)=>!q||String(c.name||'').includes(q)||String(c.bn||'').includes(q)||String(c.phone||'').includes(dig(q)||'\u0000')||String(c.tz||'').includes(dig(q)||'\u0000');
 const listH=()=>{const L=(C.L||[]).filter(c=>match(c,C.q.trim()));return L.slice(0,200).map(crow).join('')+(L.length>200?`<p class="note">מוצגים 200 מתוך ${L.length}. חפשו כדי לצמצם.</p>`:'')||'<div class="empty">אין לקוחות</div>'};
 V.ocList=()=>{const T='לקוחות';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
  return{t:T,s:C.L.length+' לקוחות',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button>${mgr()?'<button class="btn g grow" data-a="ocImp">ייבוא מאקסל</button>':''}</div>
@@ -93,21 +118,22 @@ INP.ocQ=el=>{C.q=el.value;const x=document.getElementById('ocl');if(x)x.innerHTM
 ACT.ocRe=()=>loadL(true);
 
 /* ---------- כרטיס לקוח ---------- */
-const ordsOf=c=>(O.L||[]).filter(o=>o.cust&&((c.tz&&o.cust.tz===c.tz)||(c.phone&&o.cust.phone===c.phone))).sort((a,b)=>(b.at||0)-(a.at||0));
+const ordsOf=c=>(O.L||[]).filter(o=>o.custId?o.custId===c.id:o.cust&&((c.tz&&o.cust.tz===c.tz)||(c.phone&&o.cust.phone===c.phone))).sort((a,b)=>(b.at||0)-(a.at||0));
 V.ocCard=id=>{const T='לקוח';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
  const c=C.L.find(x=>x.id===id);if(!c)return{t:T,h:'<div class="empty">הלקוח לא נמצא</div>'};
  if(!O.L&&!C.ol){C.ol=1;fnLoadOrders()}
  const xs=xKeys().filter(k=>c.x&&c.x[k.k]).map(k=>`<p class="note" style="margin:0">${esc(k.label)}: ${esc(c.x[k.k])}</p>`).join('');
  const L=ordsOf(c);
- return{t:c.name||T,s:c.wholesale===true?'לקוח סיטונאי':'לקוח רגיל',h:`<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(c.name||'')}</b>${c.wholesale===true?'<span class="tag t1">סיטונאי</span>':''}</div>
+ return{t:c.name||c.bn||T,s:c.wholesale===true?'לקוח עסקי (סיטונאי)':'לקוח רגיל',h:`<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(c.name||c.bn||'')}</b>${c.wholesale===true?WSTAG:''}</div>
+ ${c.bn&&c.bn!==c.name?`<p class="note" style="margin:0">שם העסק: ${esc(c.bn)}</p>`:''}${c.vat?`<p class="note" style="margin:0">ע.מ ${esc(c.vat)}</p>`:''}${c.ct?`<p class="note" style="margin:0">איש קשר: ${esc(c.ct)}</p>`:''}${c.pay?`<p class="note" style="margin:0">תנאי תשלום: ${esc(payTxt(c))}</p>`:''}
  <p style="margin:6px 0"><a href="tel:${esc(c.phone||'')}" dir="ltr" style="color:var(--acc);display:inline-flex;min-height:44px;align-items:center">${esc(c.phone||'')}</a></p>
  ${c.tz?`<p class="note" style="margin:0">ת.ז ${esc(c.tz)}</p>`:''}${c.mail?`<p class="note" style="margin:0" dir="ltr">${esc(c.mail)}</p>`:''}${c.addr?`<p class="note" style="margin:0">${esc(c.addr)}</p>`:''}
  ${c.last4?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4)}${c.card===true?' · שמור מוצפן':''}</p>`:''}${cell()&&portsOf(c).length?'<p class="note" style="margin:6px 0 0"><b>ניודים קודמים</b></p>'+portsOf(c).map(p=>`<p class="note" style="margin:0">${portTxt(p)}</p>`).join(''):''}${xs}</div>
- <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocEdit" data-id="${esc(c.id)}">עריכת פרטים</button>${mgr()?`<button class="btn g grow" data-a="ocWs" data-id="${esc(c.id)}">${c.wholesale===true?'הפוך ללקוח רגיל':'סמן כסיטונאי'}</button>`:''}</div>
+ <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocEdit" data-id="${esc(c.id)}">עריכת פרטים</button>${mgr()?`<button class="btn g grow" data-a="ocWs" data-id="${esc(c.id)}">${c.wholesale===true?'הפוך ללקוח רגיל':'סמן כלקוח עסקי (סיטונאי)'}</button>`:''}</div>
  ${mgr()?cardMgrH(c):''}<div class="sec"><h3>הזמנות</h3></div>${L.length?L.map(o=>`<button class="li" data-a="go" data-v="oxOrd" data-arg="${esc(o.id)}"><div class="m"><b>#${o.no}</b><small>${new Date(o.at).toLocaleDateString('he-IL')}</small></div><b class="a">${ils(o.total)}</b></button>`).join(''):`<p class="note">${O.L?'אין הזמנות':'טוען…'}</p>`}`}};
 function fnLoadOrders(){/* V.ox טוען את ההזמנות כשאין עדיין */try{V.ox()}catch(e){}setTimeout(()=>{if(cur().v==='ocCard'&&!typing())rerender()},1500)}
 ACT.ocWs=el=>{const c=(C.L||[]).find(x=>x.id===el.dataset.id);if(!c)return;const to=c.wholesale!==true;
- ask(to?`לסמן את ${c.name} כלקוח סיטונאי?`:`להחזיר את ${c.name} ללקוח רגיל?`,async()=>{try{const k=c.tz?{tz:c.tz}:{phone:c.phone};await fnCall('saveCust',{cust:k,wholesale:to});toast('עודכן');await loadL(true)}catch(e){err(e)}},'כן')};
+ ask(to?`לסמן את ${c.name} כלקוח עסקי (סיטונאי)?`:`להחזיר את ${c.name} ללקוח רגיל?`,async()=>{try{await fnCall('saveCust',{id:c.id,cust:{},wholesale:to});toast('עודכן');await loadL(true)}catch(e){err(e)}},'כן')};
 
 /* ---------- fb/ord-card: כרטיס מלא מוצפן בשרת ----------
    מנהל: הצגה בלחיצה (getCard view – נרשם ביומן), העתקה (copy – נרשם), הזנה/החלפה (setCard), מחיקה (delCard).
@@ -146,22 +172,45 @@ const pRows=()=>(C.pf||[]).map((p,i)=>`<div class="card" style="margin:6px 0"><d
 const pRead=()=>{const f=document.querySelector('#dlg form');if(!f)return;const v=fd(f);C.pf=(C.pf||[]).map((p,i)=>Object.assign({d:v['pd'+i]||'',phone:v['pp'+i]||'',tz:v['pt'+i]||''},p.br?{br:p.br}:{}))};
 ACT.ocPAdd=()=>{pRead();if(C.pf.length>=30)return toast('עד 30 ניודים');C.pf.push({});const b=document.getElementById('ocpl');if(b)b.innerHTML=pRows()};
 ACT.ocPDel=el=>{pRead();C.pf.splice(+el.dataset.n,1);const b=document.getElementById('ocpl');if(b)b.innerHTML=pRows()};
-const cForm=c=>{const x=c&&c.x||{},s=splitOld(c||{},{});C.pf=portsOf(c);return `<h3>${c?'עריכת לקוח':'לקוח חדש'}</h3><form data-f="ocF">${s.name?`<input type="hidden" name="oname" value="${esc(s.name)}">`:''}${s.addr?`<input type="hidden" name="oaddr" value="${esc(s.addr)}">`:''}${c?`<input type="hidden" name="id" value="${esc(c.id)}">`:''}
- ${fld('ת.ז','tz',c&&c.tz||'','text','inputmode="numeric" maxlength="9" autocomplete="off"'+(c&&c.tz?' readonly':''))}${(s.name?`<p class="note">שם קיים: ${esc(s.name)} (נשמר כמו שהוא אם משאירים ריקים את השם הפרטי ושם המשפחה)</p>`:'')+fld('שם פרטי','fn',s.fn||'','text',(s.name?'':'required ')+'maxlength="30"')}${fld('שם משפחה','ln',s.ln||'','text','maxlength="30"')}${fld('טלפון','phone',c&&c.phone||'','tel','inputmode="tel" required'+(c&&!c.tz?' readonly':''))}
+/* 2026-11-09: סוג לקוח בטופס חדש – רגיל (שם פרטי, משפחה, טלפון; כתובת למשלוח רשות; ת"ז רק לניוד) או עסקי (שם העסק, ע.מ, איש קשר, טלפון, כתובת, עיר, תנאי תשלום) */
+const isBiz=c=>c?!!c.bn:C.ft==='biz'; // לקוח סיטונאי ישן בלי שם עסק – נערך בטופס הרגיל, כמו קודם
+const bizH=c=>{const v=k=>c&&c[k]||'',pay=v('pay');return `${fld('שם העסק','bn',v('bn'),'text','required maxlength="60"')}${fld('ע.מ (9 ספרות)','vat',v('vat'),'text','inputmode="numeric" maxlength="11" autocomplete="off" dir="ltr"')}${fld('איש קשר','ct',v('ct'),'text','maxlength="60"')}
+ <label class="f"><span>תנאי תשלום</span><select name="pay" data-c="ocPay"><option value="">בחרו</option>${PAYS.map(([k,l])=>`<option value="${k}"${pay===k?' selected':''}>${l}</option>`).join('')}</select></label>
+ <div id="ocpayx"${pay==='other'?'':' hidden'}>${fld('פירוט תנאי התשלום','payTxt',v('payTxt'),'text','maxlength="60"')}</div>`};
+CHG.ocPay=el=>{const b=document.getElementById('ocpayx');if(b)b.hidden=el.value!=='other'};
+const cForm=c=>{const x=c&&c.x||{},s=splitOld(c||{},{}),bz=isBiz(c);C.pf=portsOf(c);return `<h3>${c?'עריכת לקוח':'לקוח חדש'}</h3>${c?'':`<div class="row" role="group" aria-label="סוג לקוח" style="margin-bottom:8px"><button type="button" class="btn grow${bz?' g':''}" data-a="ocFt" data-t="reg" aria-pressed="${!bz}">לקוח רגיל</button><button type="button" class="btn grow${bz?'':' g'}" data-a="ocFt" data-t="biz" aria-pressed="${bz}">לקוח עסקי (סיטונאי)</button></div>`}<form data-f="ocF">${bz?'<input type="hidden" name="biz" value="1">':''}${s.name?`<input type="hidden" name="oname" value="${esc(s.name)}">`:''}${s.addr?`<input type="hidden" name="oaddr" value="${esc(s.addr)}">`:''}${c?`<input type="hidden" name="id" value="${esc(c.id)}">`:''}
+ ${bz?bizH(c):''}${(s.name&&!bz?`<p class="note">שם קיים: ${esc(s.name)} (נשמר כמו שהוא אם משאירים ריקים את השם הפרטי ושם המשפחה)</p>`:'')+(bz?'':fld('שם פרטי','fn',s.fn||'','text',(s.name?'':'required ')+'maxlength="30"')+fld('שם משפחה','ln',s.ln||'','text',(s.name?'':'required ')+'maxlength="30"'))}${fld('טלפון','phone',c&&c.phone||'','tel','inputmode="tel" required'+(c&&/^p/.test(c.id)?' readonly':''))}
+ ${fld(c&&c.tz?'ת.ז':'ת.ז (רק ללקוח עם ניוד קווים – רשות)','tz',c&&c.tz||'','text','inputmode="numeric" maxlength="9" autocomplete="off"'+(c&&c.tz?' readonly':''))}
  ${fld('מייל','mail',c&&c.mail||'','email','dir="ltr"')}${(s.addr?`<p class="note">כתובת קיימת: ${esc(s.addr)} (נשמרת כמו שהיא אם לא ממלאים רחוב/עיר)</p><label class="row" style="min-height:44px;gap:8px"><input type="checkbox" name="odel" value="1">מחק את הכתובת הקיימת</label>`:'')+fld('רחוב ומספר','st',s.st||'','text','maxlength="80"')}${fld('עיר','city',s.city||'','text','maxlength="40"')}<div class="row"><div class="grow">${fld('קומה','fl',s.fl||'','text','maxlength="10"')}</div><div class="grow">${fld('דירה','apt',s.apt||'','text','maxlength="10"')}</div></div>
  ${fld('4 ספרות אחרונות של כרטיס (רשות)','last4',c&&c.last4||'','text','inputmode="numeric" maxlength="4" autocomplete="off"')}
  ${xKeys().map(k=>fld(esc(k.label),'x_'+k.k,x[k.k]||'','text','maxlength="200"')).join('')}
  ${cell()?`<div class="sec"><h3>ניודים קודמים</h3></div><div id="ocpl">${pRows()}</div><button type="button" class="btn g s w" data-a="ocPAdd">＋ ניוד</button>`:''}
  <p class="note">לא מקלידים מספר כרטיס מלא, תוקף או קוד.</p><div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`};
-ACT.ocNew=async()=>{if(!C.cfg)await cfgLoad();dlg(cForm(null))};
+ACT.ocNew=async()=>{if(!C.cfg)await cfgLoad();C.ft='reg';dlg(cForm(null))};
+ACT.ocFt=el=>{C.ft=el.dataset.t==='biz'?'biz':'reg';dlg(cForm(null))};
 ACT.ocEdit=async el=>{if(!C.cfg)await cfgLoad();const c=(C.L||[]).find(x=>x.id===el.dataset.id);if(c){C.ea=!!(c.addr||AP.some(k=>c[k]));dlg(cForm(c))}};
-FRM.ocF=async f=>{pRead();const v=fd(f),tz=dig(v.tz);if(CPK.concat(['mail']).concat(xKeys().map(k=>'x_'+k.k)).some(n=>CARD8.test(v[n]||'')))return toast('אסור להקליד מספר כרטיס או מספר ארוך. מותר רק 4 ספרות אחרונות.');if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');if(!phN(v.phone))return toast('טלפון לא תקין');
+FRM.ocF=async f=>{pRead();const v=fd(f),tz=dig(v.tz),bz=!!v.biz;if(CPK.concat(['mail','bn','ct','payTxt']).concat(xKeys().map(k=>'x_'+k.k)).some(n=>CARD8.test(v[n]||'')))return toast('אסור להקליד מספר כרטיס או מספר ארוך. מותר רק 4 ספרות אחרונות.');if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');if(!phN(v.phone))return toast('טלפון לא תקין');
  const k=l4(v.last4);if(k.bad)return toast('4 ספרות בדיוק');
  const P=[];for(const p of C.pf||[]){const o={};if(p.d)o.d=p.d;if(String(p.phone).trim()){o.phone=phN(p.phone);if(!o.phone)return toast('טלפון ניוד לא תקין')}if(dig(p.tz)){const z=tzN(p.tz);if(!z||!tzOk(z))return toast('ת.ז ניוד לא תקינה');o.tz=z}if(Object.keys(o).length){if(p.br&&brAll().some(b=>b.id===p.br))o.br=p.br;P.push(o)}}
- if(!v.fn.trim()&&(!v.oname||v.ln.trim()))return toast(v.oname?'ממלאים שם פרטי, או משאירים את שני שדות השם ריקים כדי לשמור את השם הקיים':'חסר שם פרטי');
- const c={phone:phN(v.phone)};if(cell())c.ports=P;if(tz)c.tz=tz;CPK.forEach(n=>c[n]=(v[n]||'').trim());if(!c.fn&&!c.ln){delete c.fn;delete c.ln;if(v.oname)c.name=v.oname}if(!AP.some(n=>c[n])){AP.forEach(n=>delete c[n]);const had=f.querySelector('[name=id]')&&(v.oaddr||C.ea);if(v.oaddr&&!v.odel)c.addr=v.oaddr;else if(had)c.addr=''}['mail'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;
+ v.fn=v.fn||'';v.ln=v.ln||'';
+ if(bz){if(!String(v.bn||'').trim())return toast('חסר שם העסק');const t=String(v.vat||'').replace(/[\s-]/g,'');if(t&&!/^\d{9}$/.test(t))return toast('ע.מ: 9 ספרות');if(v.pay==='other'&&!String(v.payTxt||'').trim())return toast('כתבו את תנאי התשלום')}
+ else{if(!v.fn.trim()&&(!v.oname||v.ln.trim()))return toast(v.oname?'ממלאים שם פרטי, או משאירים את שני שדות השם ריקים כדי לשמור את השם הקיים':'חסר שם פרטי');if(v.fn.trim()&&!v.ln.trim())return toast('חסר שם משפחה')}
+ const c={phone:phN(v.phone)};if(cell())c.ports=P;if(tz)c.tz=tz;CPK.forEach(n=>c[n]=(v[n]||'').trim());if(!c.fn&&!c.ln){delete c.fn;delete c.ln;if(v.oname)c.name=v.oname}
+ if(bz){c.bn=v.bn.trim();['vat','ct','pay'].forEach(n=>{c[n]=String(v[n]||'').replace(n==='vat'?/[\s-]/g:/^$/,'').trim()});if(v.pay==='other')c.payTxt=v.payTxt.trim();['vat','ct','pay'].forEach(n=>{if(!c[n])delete c[n]})}if(!AP.some(n=>c[n])){AP.forEach(n=>delete c[n]);const had=f.querySelector('[name=id]')&&(v.oaddr||C.ea);if(v.oaddr&&!v.odel)c.addr=v.oaddr;else if(had)c.addr=''}['mail'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;
  const x={};xKeys().forEach(q=>{const s=(v['x_'+q.k]||'').trim();if(s)x[q.k]=s});if(Object.keys(x).length)c.x=x;
- const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('saveCust',{cust:c});closeDlg();toast('נשמר');await loadL(true);if(cur().v!=='ocCard')go('ocCard',r.id);else rerender()}catch(e){b.disabled=false;err(e)}};
+ const id=(v.id||'').trim(),a={cust:c};if(id)a.id=id;else if(bz)a.wholesale=true;
+ const b=f.querySelector('button.grow:not(.g)')||f.querySelector('button');b.disabled=true;
+ // לקוח חדש בלי ת"ז עם טלפון שכבר קיים – מציגים את הקיימים לבחירה (פתיחה / צירוף הפרטים / לקוח חדש)
+ if(!id&&!tz){try{const L=await byPhoneAll(c.phone);if(L.length){C.pend=a;b.disabled=false;return dlg(dupH(L))}}catch(e){b.disabled=false;return err(e)}}
+ try{await saveGo(a)}catch(e){b.disabled=false;err(e)}};
+async function saveGo(a){const r=await fnCall('saveCust',a);C.pend=null;closeDlg();toast('נשמר');await loadL(true);if(cur().v!=='ocCard'||a.asNew||!a.id)go('ocCard',r.id);else rerender()}
+const dupH=L=>`<h3>הטלפון כבר שייך ל${L.length>1?'-'+L.length+' לקוחות':'לקוח'}</h3>${L.map(c=>`<div class="card" style="margin:6px 0"><b>${cLabel(c)}</b><small class="note" style="display:block">${esc(c.addr||'')}</small>
+ <div class="row" style="margin-top:6px"><button type="button" class="btn g grow s" data-a="ocDupOpen" data-id="${esc(c.id)}">פתיחת הלקוח</button><button type="button" class="btn g grow s" data-a="ocDupAdd" data-id="${esc(c.id)}">צרף את הפרטים ללקוח הזה</button></div></div>`).join('')}
+ <button type="button" class="btn w" data-a="ocDupNew">שמור כלקוח חדש עם אותו טלפון</button><button type="button" class="btn g w" style="margin-top:8px" data-a="closeDlg">ביטול</button>`;
+ACT.ocDupOpen=el=>{C.pend=null;closeDlg();loadL(true).then(()=>go('ocCard',el.dataset.id))};
+// צירוף: ממלא רק שדות ריקים בלקוח הקיים (fill) – לא דורס שם/כתובת קיימים. לקוח עסקי: הפיכת לקוח קיים לעסקי – מנהל בלבד (השרת בודק)
+ACT.ocDupAdd=async el=>{const a=C.pend;if(!a)return;el.disabled=true;try{await saveGo(Object.assign({},a,{id:el.dataset.id,fill:true}))}catch(e){el.disabled=false;err(e)}};
+ACT.ocDupNew=async el=>{const a=C.pend;if(!a)return;el.disabled=true;try{await saveGo(Object.assign({},a,{asNew:true}))}catch(e){el.disabled=false;err(e)}};
 
 /* ---------- שדות נוספים (מנהל) ---------- */
 ACT.ocCfg=async()=>{if(!C.cfg)await cfgLoad();C.cf=xKeys().map(k=>({k:k.k,label:k.label}));dlg(cfH())};

@@ -121,15 +121,60 @@ describe('לקוחות – saveCust', () => {
     const d = await get(`b/${A}/cust/t${TZ}`); assert.equal(d.last4, '9012');
     assert.ok(!JSON.stringify(d).includes('45801234')); assert.ok(!r.text.includes('45801234'));
   });
-  it('סיטונאי: עובד לא יכול (גם false); מנהל מסמן ומבטל', async () => {
-    let r = await call('saveCust', E1, { cust: c1, wholesale: true }); assert.equal(r.reason, 'manager-only');
-    r = await call('saveCust', E1, { cust: c1, wholesale: false }); assert.equal(r.reason, 'manager-only');
+  it('סיטונאי: עובד לא מסמן לקוח קיים ולא מבטל (גם false); מנהל מסמן ומבטל', async () => {
+    let r = await call('saveCust', E1, { cust: c1, wholesale: false }); assert.equal(r.reason, 'manager-only');
+    assert.equal((await call('saveCust', E1, { cust: c1 })).status, 'OK'); // לקוח רגיל קיים
+    r = await call('saveCust', E1, { cust: c1, wholesale: true }); assert.equal(r.reason, 'manager-only');
+    assert.equal((await get(`b/${A}/cust/t${TZ}`)).wholesale, undefined);
     r = await call('saveCust', MGR, { cust: c1, wholesale: true }); assert.equal(r.status, 'OK', r.text);
     assert.equal((await get(`b/${A}/cust/t${TZ}`)).wholesale, true);
     await call('saveCust', E1, { cust: { tz: TZ, addr: 'x 1' } }); // עדכון של עובד לא מוריד סיטונאי
     assert.equal((await get(`b/${A}/cust/t${TZ}`)).wholesale, true);
     r = await call('saveCust', MGR, { cust: { tz: TZ }, wholesale: false });
     assert.equal((await get(`b/${A}/cust/t${TZ}`)).wholesale, false);
+  });
+  it('לקוח עסקי: עובד פעיל פותח חדש (שם עסק, ע.מ, איש קשר, תנאי תשלום); בלי שם עסק / ע.מ שגוי / "אחר" בלי פירוט – נדחה; עובד לא פעיל – נחסם', async () => {
+    const bz = { bn: 'מאפיית הדר', vat: '515-555-555', ct: 'יוסי', phone: '0541234567', st: 'הרצל 3', city: 'אשדוד', pay: 'n30' };
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, bz, { bn: '' }), wholesale: true })).reason, 'bad-bn');
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, bz, { vat: '12345' }), wholesale: true })).reason, 'bad-vat');
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, bz, { pay: 'other' }), wholesale: true })).reason, 'bad-pay');
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, bz, { pay: 'bitcoin' }), wholesale: true })).reason, 'bad-pay');
+    const r = await call('saveCust', E1, { cust: bz, wholesale: true }); assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.id, 'p0541234567');
+    const d = await get(`b/${A}/cust/p0541234567`);
+    assert.equal(d.wholesale, true); assert.equal(d.bn, 'מאפיית הדר'); assert.equal(d.vat, '515555555'); assert.equal(d.ct, 'יוסי'); assert.equal(d.pay, 'n30'); assert.equal(d.name, 'מאפיית הדר'); assert.equal(d.city, 'אשדוד');
+    // "אחר" עם פירוט
+    const r2 = await call('saveCust', E1, { cust: Object.assign({}, bz, { phone: '0541234568', pay: 'other', payTxt: 'צ\'ק דחוי' }), wholesale: true });
+    assert.equal(r2.status, 'OK', r2.text); assert.equal((await get(`b/${A}/cust/p0541234568`)).payTxt, 'צ\'ק דחוי');
+    // עובד לא פעיל – נחסם בשרת
+    await prep((x) => x.doc(`b/${A}/staff/${E2}`).update({ active: false }));
+    assert.notEqual((await call('saveCust', E2, { cust: Object.assign({}, bz, { phone: '0541234569' }), wholesale: true })).status, 'OK');
+    assert.equal(await get(`b/${A}/cust/p0541234569`), null);
+  });
+  it('לפי טלפון: לקוח נוסף עם אותו טלפון (asNew) → c{20}; עדכון לפי id; לקוח ישן לפי ת"ז לא משתנה; t/p לא מחליפים טלפון/ת"ז', async () => {
+    await prep((x) => x.doc(`b/${A}/cust/t${TZ}`).set({ name: 'ישן', phone: '0501234567', tz: TZ, at: 1, upd: 1, x: {} }));
+    const before = await get(`b/${A}/cust/t${TZ}`);
+    const r = await call('saveCust', E1, { asNew: true, cust: { fn: 'בן', ln: 'כהן', phone: '0501234567' } });
+    assert.equal(r.status, 'OK', r.text); assert.match(r.result.id, /^c[A-Za-z0-9]{20}$/);
+    const n = await get(`b/${A}/cust/${r.result.id}`); assert.equal(n.name, 'בן כהן'); assert.equal(n.phone, '0501234567'); assert.equal(n.tz, undefined);
+    assert.deepEqual(await get(`b/${A}/cust/t${TZ}`), before); // הרשומה הישנה לא נגעה
+    // עדכון לפי id (צירוף פרטים מהזמנה – fill): כתובת נוספת, שם לא נדרס
+    let u = await call('saveCust', E1, { id: r.result.id, fill: true, cust: { fn: 'אחר', phone: '0501234567', st: 'הגפן 2', city: 'אשקלון' } });
+    assert.equal(u.status, 'OK', u.text); const n2 = await get(`b/${A}/cust/${r.result.id}`); assert.equal(n2.name, 'בן כהן'); assert.equal(n2.city, 'אשקלון');
+    // c: ת"ז של לקוח אחר – נדחה; t: שינוי ת"ז – נדחה; p: שינוי טלפון – נדחה; id לא קיים – not-found; id לא תקין
+    assert.equal((await call('saveCust', E1, { id: r.result.id, cust: { tz: TZ } })).reason, 'tz-taken');
+    assert.equal((await call('saveCust', E1, { id: 't' + TZ, cust: { tz: TZ2 } })).reason, 'tz-fixed');
+    await call('saveCust', E1, { cust: { name: 'פ', phone: '0529990000' } });
+    assert.equal((await call('saveCust', E1, { id: 'p0529990000', cust: { phone: '0529990001' } })).reason, 'phone-fixed');
+    assert.equal((await call('saveCust', E1, { id: 'c' + 'a'.repeat(20), cust: { name: 'x' } })).reason, 'no-cust');
+    assert.equal((await call('saveCust', E1, { id: '../x', cust: { name: 'x' } })).reason, 'bad-id');
+    // עובד לא הופך לקוח קיים (גם c) לעסקי דרך id; מנהל כן
+    assert.equal((await call('saveCust', E1, { id: r.result.id, cust: {}, wholesale: true })).reason, 'manager-only');
+    assert.equal((await call('saveCust', MGR, { id: r.result.id, cust: {}, wholesale: true })).status, 'OK');
+    assert.equal((await get(`b/${A}/cust/${r.result.id}`)).wholesale, true);
+    // p עם ת"ז חדשה – המעבר הקיים (הישן mv, לא נמחק)
+    assert.equal((await call('saveCust', E1, { id: 'p0529990000', cust: { tz: TZ2 } })).result.id, 't' + TZ2);
+    assert.equal((await get(`b/${A}/cust/p0529990000`)).mv, 't' + TZ2);
   });
   it('עובד בלי ord / תוספת כבויה – נחסם', async () => {
     assert.equal((await call('saveCust', NOORD, { cust: c1 })).reason, 'no-perm');

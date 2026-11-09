@@ -82,19 +82,23 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const fresh = async () => { await page.evaluate(() => { const g = document.getElementById('dlg'); if (g && g.open) g.close(); window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 400); await page.selectOption('select[data-k=br]', 'br1'); };
   if (!CELLON) { // מתג כבוי: אין שום שדה ניוד, createOrder בלי cell, אין תוכניות ניוד
     await fresh(); const t = await page.innerText('#main');
-    await page.fill('#octz', '000000018'); await H.settle(page, 400); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0529998888');
+    const noTz = !(await page.$('#octz')); // 2026-11-09: בלי ניוד – אין ת"ז בטופס
+    await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0529998888');
     await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); await page.click('[data-a=oxSave]'); await H.settle(page, 800);
     const co = calls.find((c) => c.n === 'createOrder'); await goV('ox'); await H.settle(page, 300); const lt = await page.innerText('#main');
-    check('כבוי: אין "ניוד" בטופס, createOrder בלי cell, אין checkLines, אין "תוכניות ניוד"', !/ניוד/.test(t) && !!co && co.d.cell === undefined && !calls.some((c) => c.n === 'checkLines') && !/תוכניות ניוד/.test(lt), { co: co && co.d });
+    check('כבוי: אין "ניוד" ואין ת"ז בטופס, createOrder בלי cell, אין checkLines, אין "תוכניות ניוד"', noTz && !/ניוד/.test(t) && !!co && co.d.cell === undefined && !calls.some((c) => c.n === 'checkLines') && !/תוכניות ניוד/.test(lt), { co: co && co.d });
     check('בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   } else {
   // 1. טופס: חלק "ניוד קווים" + מגע/ניגודיות/גלילה
   const s1 = await screen('הזמנה-ניוד', async () => { await fresh(); await page.click('[data-c=olOn]'); await H.settle(page, 500); });
   check('1 הזמנה חדשה עם ניוד: קו ראשון "הטלפון/הת.ז של הלקוח", תוכנית וחברה מהרשימות, פרסום, בנק; מגע/ניגודיות/גלילה', okAll(s1) && /ניוד קווים/.test(s1.a.text) && /פרטנר 30/.test(await page.innerHTML('#main')) && /סלקום/.test(await page.innerHTML('#main')) && /פייסבוק/.test(await page.innerHTML('#main')), sum(s1));
   // 2. התראה מיד בסימון – לפני שמירה (טלפון הלקוח נויד לאחרונה)
-  await fresh(); await page.fill('#octz', '000000018'); await H.settle(page, 400); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0521111111');
+  await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0521111111'); await H.settle(page, 400);
+  const tz0 = !(await page.$('#octz'));
   const before = calls.filter((c) => c.n === 'createOrder').length;
   await page.click('[data-c=olOn]'); await H.settle(page, 700);
+  await page.fill('#octz', '000000018'); await H.settle(page, 300); // 2026-11-09: שדה הת"ז מופיע רק בניוד
+  if (!tz0) throw new Error('ת"ז מוצגת לפני סימון ניוד');
   const t2 = await page.innerText('#main'); const ck = calls.filter((c) => c.n === 'checkLines').pop();
   check('2 סימון "הלקוח רוצה ניוד" → checkLines מיד ובלי שמירה; "קו זה כבר נויד בתאריך 30.10.2026 בסניף יהודה הנשיא" + המשך/בטל', !!ck && ck.d.lines[0].phone === '0521111111' && /כבר נויד בתאריך 30\.10\.2026 בסניף יהודה הנשיא/.test(t2) && /המשך בכל זאת/.test(t2) && /בטל ניוד לקו/.test(t2) && calls.filter((c) => c.n === 'createOrder').length === before, { t2: t2.slice(0, 300), ck: ck && ck.d });
   await shot('התראת-ניוד');

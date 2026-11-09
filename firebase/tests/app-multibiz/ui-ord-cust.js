@@ -1,5 +1,5 @@
 'use strict';
-// לקוחות (orders-cust.js, fb/ord-cust): ת"ז ראשונה בהזמנה, כרטיס לקוח, סיטונאי (מנהל), ייבוא עם חיתוך כרטיס ל-4 ספרות.
+// לקוחות (orders-cust.js, fb/ord-cust): טלפון ראשון בהזמנה (2026-11-09, ת"ז רק בניוד), לקוח עסקי, כרטיס לקוח, סיטונאי (מנהל), ייבוא עם חיתוך כרטיס ל-4 ספרות.
 // רשת מדומה. שימוש: node ui-ord-cust.js <www-dir> [out.json] [shots-dir]. MUTATE=card – באג מכוון: בלי חיתוך → בדיקה 6 נכשלת.
 const fs = require('fs');
 const path = require('path');
@@ -17,7 +17,8 @@ const PROD = [doc('prod/pA', { name: S('עוגת שוקולד'), price: N(12), b
   doc('prod/pB', { name: S('לחם מחמצת'), price: N(10.5), on: { booleanValue: true }, q: M({ br1: N(0), br2: N(8) }) })];
 const TZ = '123456782';
 const TZL = '222222226', LN = 'א'.repeat(45), LA = 'ב'.repeat(120);
-const CUST = [doc('cust/t' + TZL, { name: S(LN), phone: S('0507777777'), tz: S(TZL), addr: S(LA), mail: S('old@x.co') }), doc('cust/t' + TZ, { name: S('משה כהן'), phone: S('0501234567'), tz: S(TZ), last4: S('3456'), card: { booleanValue: true }, mail: S('moshe@x.co'), addr: S('הרצל 1'), x: M({ xcity: S('אשדוד') }) })];
+const CUST = [doc('cust/t' + TZL, { name: S(LN), phone: S('0507777777'), tz: S(TZL), addr: S(LA), mail: S('old@x.co') }), doc('cust/t' + TZ, { name: S('משה כהן'), phone: S('0501234567'), tz: S(TZ), last4: S('3456'), card: { booleanValue: true }, mail: S('moshe@x.co'), addr: S('הרצל 1'), x: M({ xcity: S('אשדוד') }) }),
+  doc('cust/cAbCdEfGhIjKlMnOpQrSt', { name: S('בן כהן'), phone: S('0501234567'), addr: S('הגפן 2, אשקלון') })];
 const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש'), on: { booleanValue: true } }), M({ id: S('br2'), name: S('יהודה הנשיא'), on: { booleanValue: true } })]) });
 
 (async () => {
@@ -87,32 +88,47 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const goV = (v, a) => page.evaluate(([v, a]) => { NAV = [{ v: 'home' }]; go(v, a); }, [v, a]);
 
 
-  // 1. הזמנה חדשה: ת"ז ראשונה וגלויה, מייל גלוי
-  const nw = await screen('הזמנה-תז', async () => { await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300); });
-  const order = await page.evaluate(() => { const i = [...document.querySelectorAll('#main input')].filter((e) => e.offsetParent); return i.map((e) => e.dataset.k || e.id); });
-  check('1 הזמנה חדשה: השדה הראשון ת"ז, ת"ז ומייל גלויים (לא בתוך "רשות"), מגע/ניגודיות/גלילה', okAll(nw) && order[0] === 'tz' && order.includes('mail') && !/\(רשות\)<\/summary>/.test(await page.evaluate(() => document.querySelector('#main').innerHTML)), { order, s: sum(nw) });
-  // 2. ת"ז קיימת → מילוי
+  // 1. הזמנה חדשה: טלפון ראשון; אין ת"ז (לא ניוד); משלוח ברשות
+  const nw = await screen('הזמנה-טלפון', async () => { await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300); });
+  const order = await page.evaluate(() => [...document.querySelectorAll('#main input')].filter((e) => e.offsetParent).map((e) => e.dataset.k || e.id));
+  const h1 = await page.evaluate(() => document.querySelector('#main').innerHTML);
+  check('1 הזמנה חדשה: השדה הראשון טלפון, שם פרטי ומשפחה, אין ת"ז; משלוח (רחוב/עיר/קומה/דירה) ברשות; מגע/ניגודיות/גלילה', okAll(nw) && order[0] === 'phone' && order[1] === 'fn' && order[2] === 'ln' && !order.includes('tz') && !h1.includes('id="octz"') && /משלוח – כתובת, עיר, קומה ודירה \(רשות\)/.test(h1), { order, s: sum(nw) });
+  // 2. טלפון קיים → שני לקוחות לבחירה; בחירה ממלאת
   await page.selectOption('select[data-k=br]', 'br1');
-  await page.fill('#octz', TZ); await H.settle(page, 700);
+  await page.fill('input[data-k=phone]', '050-1234567'); await H.settle(page, 700);
+  const st2 = await page.innerText('#ocst');
+  await shot('הזמנה-טלפון-קיים');
+  await page.click('[data-a=ocPick][data-id="t' + TZ + '"]'); await H.settle(page, 300);
   const D = await page.evaluate(() => Object.assign({}, window.__ox.draft));
-  check('2 ת"ז קיימת ממלאת שם (ישן→שם פרטי)/טלפון/מייל/כתובת (ישנה→רחוב), לקוח רגיל', D.fn === 'משה כהן' && D.phone === '0501234567' && D.mail === 'moshe@x.co' && D.st === 'הרצל 1' && D.wholesale === false && /^[tp]\w+$/.test(D.custId || '') && /לקוח קיים/.test(await page.innerText('#main')), D);
-  // 3. ת"ז לא קיימת → לקוח חדש; ת"ז שגויה
-  await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
-  await page.fill('#octz', '123456789'); await H.settle(page, 200); const bad = await page.innerText('#ocst');
-  await page.fill('#octz', '000000018'); await H.settle(page, 600); const nu = await page.innerText('#ocst');
-  check('3 ת"ז שגויה מסומנת; ת"ז תקינה שלא קיימת → "לקוח חדש"', /לא תקינה/.test(bad) && /לקוח חדש/.test(nu), { bad, nu });
-  // 4. שמירה → saveCust עם fill ובלי wholesale
-  await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=phone]', '0529998888'); await page.fill('input[data-k=mail]', 'r@x.co');
+  check('2 טלפון קיים: מוצגים שני הלקוחות (ת"ז ישן + נוסף); בחירה ממלאת שם/מייל/כתובת, לקוח רגיל, מקושר', /2 לקוחות/.test(st2) && /משה כהן/.test(st2) && /בן כהן/.test(st2) && D.fn === 'משה כהן' && D.mail === 'moshe@x.co' && D.st === 'הרצל 1' && D.wholesale === false && D.custId === 't' + TZ && /לקוח קיים/.test(await page.innerText('#main')), { st2, D });
+  // 2ב. צירוף כתובת ללקוח הקיים → saveCust {id, fill}
   await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
-  await page.click('[data-a=oxSave]'); await H.settle(page, 800);
-  const sc = calls.find((c) => c.n === 'saveCust'), co = calls.find((c) => c.n === 'createOrder');
-  check('4 שמירת הזמנה: saveCust {fill:true, tz, mail} בלי wholesale, ו-createOrder עם tz+mail', !!sc && sc.d.fill === true && sc.d.cust.tz === '000000018' && sc.d.cust.mail === 'r@x.co' && sc.d.wholesale === undefined && !!co && co.d.cust.tz === '000000018' && co.d.cust.mail === 'r@x.co', { sc: sc && sc.d, co: co && co.d.cust });
+  const n2 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 800);
+  const sc2 = calls.slice(n2).find((c) => c.n === 'saveCust'), co2 = calls.slice(n2).find((c) => c.n === 'createOrder');
+  check('2ב שמירה עם לקוח שנבחר: saveCust {id, fill:true} (פרטים מצטרפים, לא דורסים), createOrder עם custId', !!sc2 && sc2.d.id === 't' + TZ && sc2.d.fill === true && !sc2.d.asNew && !!co2 && co2.d.custId === 't' + TZ, { sc2: sc2 && sc2.d });
+  // 3. "לקוח חדש עם אותו טלפון" → asNew
+  await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
+  await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=phone]', '0501234567'); await H.settle(page, 700);
+  await page.click('[data-a=ocAsNew]'); await H.settle(page, 200);
+  await page.fill('input[data-k=fn]', 'דן'); await page.fill('input[data-k=ln]', 'לוי');
+  await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
+  const n3 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 800);
+  const sc3 = calls.slice(n3).find((c) => c.n === 'saveCust');
+  check('3 "לקוח חדש עם אותו טלפון": saveCust {asNew:true} בלי id ובלי ת"ז', !!sc3 && sc3.d.asNew === true && !sc3.d.id && sc3.d.cust.tz === undefined && sc3.d.cust.fn === 'דן' && sc3.d.cust.phone === '0501234567', { sc3: sc3 && sc3.d });
+  // 4. טלפון חדש → "לקוח חדש"; שמירה → saveCust fill בלי ת"ז ובלי wholesale; createOrder מקושר ללקוח שנוצר
+  await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
+  await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=phone]', '0529998888'); await H.settle(page, 600); const nu = await page.innerText('#ocst');
+  await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.click('#main details summary'); await page.fill('input[data-k=city]', 'אשדוד'); await page.fill('input[data-k=fl]', '3');
+  await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
+  const n4 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 800);
+  const sc = calls.slice(n4).find((c) => c.n === 'saveCust'), co = calls.slice(n4).find((c) => c.n === 'createOrder');
+  check('4 טלפון חדש → "לקוח חדש"; saveCust {fill} בלי ת"ז/wholesale עם עיר וקומה; createOrder עם custId', /לקוח חדש/.test(nu) && !!sc && sc.d.fill === true && sc.d.cust.tz === undefined && sc.d.cust.city === 'אשדוד' && sc.d.cust.fl === '3' && sc.d.wholesale === undefined && !sc.d.id && !sc.d.asNew && !!co && co.d.cust.tz === undefined && co.d.custId === 't' + TZ, { sc: sc && sc.d, co: co && co.d });
   // 5. רשימה + כרטיס (מנהל): כפתור סיטונאי
   const ls = await screen('לקוחות-רשימה', () => goV('ocList'));
   const cdr = await screen('כרטיס-לקוח', () => goV('ocCard', 't' + TZ));
   await page.click('[data-a=ocWs]'); await H.settle(page, 200); await page.click('#dlg [data-a=yes]'); await H.settle(page, 500);
   const ws = calls.filter((c) => c.n === 'saveCust').pop();
-  check('5 רשימה וכרטיס לקוח (פרטים, שדה חופשי, הזמנות); מנהל מסמן סיטונאי → saveCust wholesale:true; מגע/ניגודיות/גלילה', okAll(ls) && okAll(cdr) && /משה כהן/.test(ls.a.text) && /עיר: אשדוד/.test(cdr.a.text) && /סמן כסיטונאי/.test(cdr.a.text) && ws.d.wholesale === true && ws.d.cust.tz === TZ, { ws: ws.d, l: sum(ls), c: sum(cdr) });
+  check('5 רשימה וכרטיס לקוח (פרטים, שדה חופשי, הזמנות); מנהל מסמן סיטונאי → saveCust wholesale:true; מגע/ניגודיות/גלילה', okAll(ls) && okAll(cdr) && /משה כהן/.test(ls.a.text) && /עיר: אשדוד/.test(cdr.a.text) && /סמן כלקוח עסקי \(סיטונאי\)/.test(cdr.a.text) && ws.d.wholesale === true && ws.d.id === 't' + TZ, { ws: ws.d, l: sum(ls), c: sum(cdr) });
   // 6. ייבוא: קובץ CSV עם עמודת כרטיס מלא ועמודת "סיטונאי"
   await goV('ocList'); await H.settle(page, 300);
   await page.click('[data-a=ocImp]'); await H.settle(page, 200);
@@ -170,30 +186,40 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   // 7. עובד: אין כפתור סיטונאי ואין ייבוא
   await page.evaluate(() => { window.__role0 = SY.role; SY.role = 'worker'; }); await goV('ocCard', 't' + TZ); await H.settle(page, 300);
   const emp = await page.innerText('#main'); await goV('ocList'); await H.settle(page, 200); const empL = await page.innerText('#main');
-  check('7 עובד: בלי "סמן כסיטונאי", בלי ייבוא ובלי הגדרת שדות', !/סיטונאי/.test(emp.replace('לקוח רגיל', '')) && !/ייבוא/.test(empL) && !/שדות נוספים/.test(empL), { emp: emp.slice(0, 150) });
+  check('7 עובד: בלי "סמן כלקוח עסקי", בלי ייבוא ובלי הגדרת שדות', !/סמן כלקוח עסקי|הפוך ללקוח רגיל/.test(emp) && !/ייבוא/.test(empL) && !/שדות נוספים/.test(empL), { emp: emp.slice(0, 150) });
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   { const L = await page.evaluate(() => { const n = 'א'.repeat(45), a = 'ב'.repeat(120); const D = window.__oc.split({ name: n, addr: a }, {}); const S = window.__oc.split({ name: 'קצר', addr: 'הרצל 1' }, {}); return { D, S }; });
     check('ישן ארוך: שם 45 / כתובת 120 נשארים בשדה המלא, לא נדחסים לשם פרטי/רחוב', L.D.name.length === 45 && L.D.addr.length === 120 && !L.D.fn && !L.D.st && L.S.fn === 'קצר' && L.S.st === 'הרצל 1', L); }
-  { // סבב 3: לקוח ישן עם שם 45 / כתובת 120 (בלי שדה גלוי) ואז החלפת ת"ז – ההזמנה לא יורשת שם/כתובת/טלפון/מייל
+  { // סבב 3 (מעודכן לטלפון): לקוח ישן עם שם 45 / כתובת 120, ואז החלפת טלפון – ההזמנה לא יורשת שם/כתובת/מייל
     const fresh = async () => { await page.evaluate(() => { SY.role = window.__role0; const g = document.getElementById('dlg'); if (g && g.open) g.close(); window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300); await page.selectOption('select[data-k=br]', 'br1'); };
-    await fresh(); await page.fill('#octz', TZL); await H.settle(page, 700);
+    await fresh(); await page.fill('input[data-k=phone]', '0507777777'); await H.settle(page, 700); await page.click('[data-a=ocPick]'); await H.settle(page, 300);
     const a = await page.evaluate(() => Object.assign({}, window.__ox.draft));
-    await page.fill('#octz', '00000001'); await H.settle(page, 200);
+    await page.fill('input[data-k=phone]', '0529990000'); await H.settle(page, 600);
     const b = await page.evaluate(() => Object.assign({}, window.__ox.draft));
-    await page.fill('#octz', '000000018'); await H.settle(page, 600);
-    const n0 = calls.length; await page.fill('#oxq', 'לחם'); console.log('DBG', await page.evaluate(() => [document.querySelectorAll('#oxq').length, document.getElementById('oxhits')&&document.getElementById('oxhits').innerHTML.slice(0,200), JSON.stringify(window.__ox.draft).slice(0,300)])); await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
+    const n0 = calls.length; await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
     await page.click('[data-a=oxSave]'); await H.settle(page, 600);
-    const after = calls.slice(n0).map((c) => c.n), vis = await page.evaluate(() => [...document.querySelectorAll('#main input[data-i=oxD]')].map((e) => e.value).join('|'));
-    check('12 לקוח ישן ארוך ואז שינוי ת"ז: name/addr/טלפון/מייל נמחקים, אין שמירה בלי שם', a.name === LN && a.addr === LA && !b.name && !b.addr && !b.phone && !b.mail && !b.custId && !after.includes('createOrder') && !after.includes('saveCust') && !vis.includes('0507777777'), { a: [a.name && a.name.length, a.addr && a.addr.length], b, after });
-    // מחיקת ת"ז לגמרי, ואז החלפה ישירה ללקוח קיים אחר (fillDraft)
-    await fresh(); await page.fill('#octz', TZL); await H.settle(page, 700); await page.fill('#octz', ''); await H.settle(page, 200);
-    const c = await page.evaluate(() => Object.assign({}, window.__ox.draft));
-    await page.fill('#octz', TZL); await H.settle(page, 700); await page.fill('#octz', TZ); await H.settle(page, 700);
-    const d = await page.evaluate(() => Object.assign({}, window.__ox.draft));
-    await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); const n1 = calls.length;
-    await page.click('[data-a=oxSave]'); await H.settle(page, 800);
-    const co = calls.slice(n1).find((x) => x.n === 'createOrder');
-    check('13 מחיקת ת"ז מאפסת; מעבר ישיר ללקוח קיים אחר – רק הפרטים שלו נשלחים', !c.name && !c.addr && !c.phone && d.fn === 'משה כהן' && !d.name.startsWith('א') && d.phone === '0501234567' && d.mail === 'moshe@x.co' && !!co && co.d.cust.name === 'משה כהן' && co.d.cust.st === 'הרצל 1' && co.d.cust.addr === undefined && co.d.cust.tz === TZ, { co: co && co.d.cust, d });
+    const after = calls.slice(n0).map((c) => c.n);
+    check('12 לקוח ישן ארוך ואז שינוי טלפון: name/addr/מייל וקישור נמחקים, אין שמירה בלי שם', a.name === LN && a.addr === LA && a.custId === 't' + TZL && !b.name && !b.addr && !b.mail && !b.custId && !b.tz && b.phone === '0529990000' && !after.includes('createOrder') && !after.includes('saveCust'), { a: [a.name && a.name.length, a.addr && a.addr.length], b, after });
+    // לקוח עסקי בטופס לקוח חדש (עובד): שם עסק, ע.מ, איש קשר, תנאי תשלום "אחר" + פירוט → saveCust wholesale:true
+    await page.evaluate(() => { SY.role = 'worker'; }); await goV('ocList'); await H.settle(page, 300);
+    await page.click('[data-a=ocNew]'); await H.settle(page, 300); await page.click('#dlg [data-a=ocFt][data-t=biz]'); await H.settle(page, 200);
+    const fz = await page.evaluate(() => { const d = document.querySelector('#dlg'); return { names: [...d.querySelectorAll('input:not([type=hidden]),select')].map((e) => e.name), sw: d.scrollWidth <= d.clientWidth + 1 }; });
+    await shot('לקוח-עסקי-a');
+    await page.fill('#dlg input[name=bn]', 'מאפיית הדר'); await page.fill('#dlg input[name=vat]', '515555555'); await page.fill('#dlg input[name=ct]', 'יוסי'); await page.fill('#dlg input[name=phone]', '0541234567');
+    await page.fill('#dlg input[name=st]', 'הרצל 3'); await page.fill('#dlg input[name=city]', 'אשדוד'); await page.selectOption('#dlg select[name=pay]', 'other'); await H.settle(page, 100);
+    const n5 = calls.length; await page.click('#dlg form button.grow:not(.g)'); await H.settle(page, 300); const blk = calls.slice(n5).filter((c) => c.n === 'saveCust').length === 0;
+    await page.fill('#dlg input[name=payTxt]', 'צק דחוי'); await page.click('#dlg form button.grow:not(.g)'); await H.settle(page, 600);
+    const bz = calls.slice(n5).filter((c) => c.n === 'saveCust').pop();
+    check('13 עובד פותח לקוח עסקי (סיטונאי): שם העסק, ע.מ, איש קשר, טלפון, כתובת, עיר, תנאי תשלום; "אחר" בלי פירוט נחסם; saveCust wholesale:true', ['bn', 'vat', 'ct', 'pay', 'phone', 'st', 'city'].every((k) => fz.names.includes(k)) && !fz.names.includes('fn') && blk && !!bz && bz.d.wholesale === true && bz.d.cust.bn === 'מאפיית הדר' && bz.d.cust.vat === '515555555' && bz.d.cust.pay === 'other' && bz.d.cust.payTxt === 'צק דחוי' && bz.d.cust.city === 'אשדוד' && !bz.d.id, { fz, bz: bz && bz.d });
+    // לקוח רגיל חדש עם טלפון קיים → חלון בחירה: פתיחה / צירוף / חדש
+    await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } }); await goV('ocList'); await H.settle(page, 300); await page.click('[data-a=ocNew]'); await H.settle(page, 300);
+    await page.fill('#dlg input[name=fn]', 'דן'); await page.fill('#dlg input[name=ln]', 'לוי'); await page.fill('#dlg input[name=phone]', '0501234567');
+    const n6 = calls.length; await page.click('#dlg form button.grow:not(.g)'); await H.settle(page, 600);
+    const dup = await page.innerText('#dlg'); await shot('טלפון-קיים-חלון-a');
+    await page.click('#dlg [data-a=ocDupNew]'); await H.settle(page, 600);
+    const dn = calls.slice(n6).filter((c) => c.n === 'saveCust').pop();
+    check('13ב לקוח חדש עם טלפון קיים: חלון עם הלקוחות הקיימים, "צרף" ו"לקוח חדש"; בחירה בחדש → asNew', /הטלפון כבר שייך/.test(dup) && /משה כהן/.test(dup) && /צרף את הפרטים/.test(dup) && calls.slice(n6, n6 + 1).every((c) => c.n !== 'saveCust' || c.d.asNew) && !!dn && dn.d.asNew === true && dn.d.cust.fn === 'דן', { dn: dn && dn.d });
+    await page.evaluate(() => { SY.role = window.__role0; try { closeDlg(); } catch (e) { /* */ } });
   }
   { // סבב 3: עריכת לקוח ישן ארוך – מחיקת כתובת, ושם משפחה בלבד לא דורס שם קיים
     await goV('ocList'); await H.settle(page, 600);
