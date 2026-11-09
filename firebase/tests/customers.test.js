@@ -250,7 +250,7 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     await call('saveCust', MGR, { cust: c1 }); await call('setCard', MGR, { custId: 't' + TZ, card: CARD });
     assert.equal((await call('getCard', 'm2', { custId: 't' + TZ, act: 'view' })).reason, 'no-card');
     const p = await get(`b/${A}/cust/t${TZ}/p/card`);
-    await prep(async (d) => { await d.doc(`b/${B2}/cust/t${TZ}`).set({ name: 'x', phone: '0501234567', tz: TZ }); await d.doc(`b/${B2}/cust/t${TZ}/p/card`).set(p); });
+    await prep(async (d) => { await d.doc(`b/${B2}/cust/t${TZ}`).set({ name: 'x', phone: '0501234567', tz: TZ, card: true }); await d.doc(`b/${B2}/cust/t${TZ}/p/card`).set(p); });
     const r = await call('getCard', 'm2', { custId: 't' + TZ, act: 'view' });
     assert.equal(r.reason, 'bad-box', r.text); assert.ok(!r.text.includes('4580'));
   });
