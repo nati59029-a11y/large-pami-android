@@ -211,7 +211,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const srvNet = (d) => { const it = d.items.reduce((s, x) => s + Math.round(x.qty * x.price * 100), 0); return LD.calcCell(d.cell.lines, pm, typeof d.cell.man === 'number' ? d.cell.man : null, { itemsAg: it, today: LD.ilDay(), items: d.items }).net; };
   const tot = async () => +String(await page.innerText('#oxtot')).replace(/[^\d.]/g, '');
   const build = async (ph, pkgs) => { await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', ph); await H.settle(page, 300); await page.fill('#octz', '123456782');
-    await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); await page.click('[data-c=olOn]'); await H.settle(page, 500);
+    await page.fill('#oxq', 'לחם'); if (!(await page.waitForSelector('[data-a=oxAdd]', { timeout: 8000 }).catch(() => null))) { await page.fill('#oxq', ''); await H.settle(page, 300); await page.fill('#oxq', 'לחם'); } // תזמון: החיפוש אחרי שמירה קודמת
+    await page.click('[data-a=oxAdd]'); await H.settle(page, 200); await page.click('[data-c=olOn]'); await H.settle(page, 500);
     for (let i = 0; i < pkgs.length; i++) { if (i) { await page.click('[data-a=olAdd]'); await H.settle(page, 150); await page.fill(`[data-i=olF][data-f=phone] >> nth=${i - 1}`, '05344444' + (10 + i)); await H.settle(page, 300); }
       await page.selectOption(`[data-c=olSel][data-f=plan] >> nth=${i}`, pkgs[i]); await H.settle(page, 250); } };
   const save = async () => { const n = calls.filter((c) => c.n === 'createOrder').length; await page.click('[data-a=oxSave]'); await H.settle(page, 700); globalThis.__T = await page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.innerText).join(' | ')); const a = calls.filter((c) => c.n === 'createOrder'); return a.length > n ? a[a.length - 1].d : null; };

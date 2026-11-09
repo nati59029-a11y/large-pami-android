@@ -286,7 +286,7 @@ describe('חבילות ניוד – מבצע בחבילה ו"סה"כ הנחה"',
   it('מבצע כמות: 3 קווים באותה חבילה → הנחה פעם אחת; 2 קווים → המלצה', async () => {
     const { pN } = await setup2({ qty: { n: 3, amt: 100, scope: 'plan' } });
     let r = await order(E1, { lines: L2(pN) });
-    assert.equal(r.result.total, 110); assert.match(r.result.hint.msg, /עוד קו אחד באותה חבילה יזכה בהנחה של ₪100/);
+    assert.equal(r.result.total, 110); assert.match(r.result.hint.msg, /עוד קו אחד באותו מבצע יזכה בהנחה של ₪100/);
     r = await order(E1, { lines: L2(pN).concat([{ phone: '0521111113', plan: pN }]) });
     assert.equal(r.result.total, 50 + 90 - 100); assert.equal(r.result.hint, null);
   });
