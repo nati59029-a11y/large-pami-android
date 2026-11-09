@@ -274,5 +274,46 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     await assertFails(db(E1).collection(`b/${A}/cardLog`).get());
     await assertFails(db('m2').collection(`b/${A}/cardLog`).get());
     await assertFails(db(MGR).collection(`b/${A}/cardLog`).add({ t: 1 }));
+    await assertFails(db(MGR).doc(`b/${A}/cardQ/${MGR}`).get()); await assertFails(db(MGR).doc(`b/${A}/cardQ/${MGR}`).set({ mn: 0 }));
+  });
+  it('ליקוי 2: מעבר מטלפון לת"ז – המוצפן מוצפן מחדש לנתיב החדש, הישן נמחק, נרשם move; הישן נדחה ב-getCard', async () => {
+    await call('saveCust', MGR, { cust: { name: 'יוסי', phone: '0521112222' } });
+    assert.equal((await call('setCard', MGR, { custId: 'p0521112222', card: CARD })).status, 'OK');
+    const r = await call('saveCust', E1, { fill: true, cust: { phone: '0521112222', tz: TZ2 } });
+    assert.equal(r.status, 'OK', r.text); assert.ok(!leak(r.text));
+    assert.equal(await get(`b/${A}/cust/p0521112222/p/card`), null);
+    const old = await get(`b/${A}/cust/p0521112222`); assert.equal(old.mv, 't' + TZ2); assert.equal(old.card, undefined);
+    const nu = await get(`b/${A}/cust/t${TZ2}`); assert.equal(nu.card, true); assert.equal(nu.last4, '9012');
+    const v = await call('getCard', MGR, { custId: 't' + TZ2, act: 'view' });
+    assert.equal(v.status, 'OK', v.text); assert.equal(v.result.card.num, '4580123456789012'); assert.equal(v.result.card.cvv, '123');
+    assert.equal((await call('getCard', MGR, { custId: 'p0521112222', act: 'view' })).reason, 'no-card');
+    assert.ok((await coll(`b/${A}/cardLog`)).some((x) => x.act === 'move' && x.cust === 't' + TZ2 && x.from === 'p0521112222'));
+    // לקוח עם סימון card בלי מוצפן / בלי סימון – getCard מסרב
+    await prep((d) => d.doc(`b/${A}/cust/p0533333333`).set({ name: 'z', phone: '0533333333' }));
+    assert.equal((await call('getCard', MGR, { custId: 'p0533333333', act: 'view' })).reason, 'no-card');
+  });
+  it('ליקוי 3: עובד בלי רשימת סניפים = כל הסניפים (כמו orders.js); הזמנה בלי סניף – בלי בדיקת סניף', async () => {
+    await call('saveCust', MGR, { cust: c1 }); await call('setCard', MGR, { custId: 't' + TZ, card: CARD });
+    const id = 't' + TZ;
+    await mkOrd('oB2', 'new', 'br2', id); await mkOrd('oNB', 'new', '_', id);
+    await prep(async (d) => { await d.doc(`b/${A}/staff/r_all`).set({ name: 'r_all', role: 'employee', active: true }); await d.doc('users/r_all').set({ bizId: A, role: 'worker', active: true, bizStatus: 'active', email: 'r_all@x.invalid', createdAt: 1 }); });
+    assert.equal((await call('getCard', 'r_all', { custId: id, act: 'copy', ordId: 'oB2' })).status, 'OK');
+    assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oB2' })).reason, 'foreign-br');
+    assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oNB' })).status, 'OK');
+  });
+  it('ליקוי 4: מכסת פענוח – עובד 20 בדקה, החריגה נדחית בעברית ונרשמת ביומן; מנהל 60 בדקה', async () => {
+    await call('saveCust', MGR, { cust: c1 }); await call('setCard', MGR, { custId: 't' + TZ, card: CARD });
+    const id = 't' + TZ; await mkOrd('oQ', 'new', 'br1', id);
+    for (let i = 0; i < 20; i++) assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' })).status, 'OK', 'i=' + i);
+    const r = await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' });
+    assert.equal(r.reason, 'card-quota', r.text); assert.match(r.text, /מכסת/); assert.ok(!leak(r.text));
+    assert.ok((await coll(`b/${A}/cardLog`)).some((x) => x.act === 'quota' && x.by === E1 && x.f === 'min'));
+    // יומי: מונה שכבר ב-150 היום
+    const d = new Date().toISOString().slice(0, 10);
+    await prep((x) => x.doc(`b/${A}/cardQ/${E1}`).set({ m: 0, mn: 0, d, dn: 150 }));
+    assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' })).reason, 'card-quota');
+    await prep((x) => x.doc(`b/${A}/cardQ/${MGR}`).set({ m: Math.floor(Date.now() / 60000), mn: 59, d, dn: 59 }));
+    assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).status, 'OK');
+    assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).reason, 'card-quota');
   });
 });

@@ -103,7 +103,11 @@ const cardMgrH=c=>`<div class="sec"><h3>כרטיס אשראי</h3></div><div cla
  <div id="occv"></div><div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocCardView" data-id="${esc(c.id)}">הצג פרטי כרטיס</button><button class="btn g grow" data-a="ocCardCopy" data-id="${esc(c.id)}">העתק מספר</button></div>
  <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocCardSet" data-id="${esc(c.id)}">החלף כרטיס</button><button class="btn g grow" data-a="ocCardDel" data-id="${esc(c.id)}">מחק פרטי כרטיס</button></div>`
  :`<p class="note" style="margin:0">אין כרטיס שמור</p><button class="btn g w" style="margin-top:8px" data-a="ocCardSet" data-id="${esc(c.id)}">הוספת כרטיס</button>`}</div>`;
-const copyTxt=t=>(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('הועתק. הפעולה נרשמה ביומן'),()=>toast('ההעתקה נכשלה'));
+// ליקוי 5: אחרי 45 שניות הלוח מתנקה – אם אפשר לקרוא, רק כשהתוכן עדיין זהה; בלי הרשאת קריאה – כותבים ריק. כל כישלון נבלע.
+let clipT=null;const CLIP_MS=45000;
+const clipClear=t=>{clipT=null;const cb=navigator.clipboard;if(!cb||!cb.writeText)return;const w=()=>cb.writeText('').catch(()=>{});
+ try{if(cb.readText)cb.readText().then(x=>{if(x===t)w()},w);else w()}catch(e){w()}};
+const copyTxt=t=>(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{if(clipT)clearTimeout(clipT);clipT=setTimeout(()=>clipClear(t),CLIP_MS);toast('הועתק. הלוח יתנקה בעוד 45 שניות. הפעולה נרשמה ביומן')},()=>toast('ההעתקה נכשלה'));
 ACT.ocCardView=async el=>{el.disabled=true;try{const r=await fnCall('getCard',{custId:el.dataset.id,act:'view'});const k=r.card||{};const b=document.getElementById('occv');unshow();
   if(b){b.innerHTML=`<p style="margin:6px 0" dir="ltr"><b>${esc(String(k.num||'').replace(/(\d{4})(?=\d)/g,'$1 '))}</b></p><p class="note" style="margin:0">תוקף ${esc(k.exp||'—')} · CVV ${esc(k.cvv||'—')}</p><p class="note" style="margin:0">${esc(k.name||'')}</p><p class="note" style="margin:0">(יוסתר בעוד 30 שניות)</p>`;
    shown={t:setTimeout(()=>{const x=document.getElementById('occv');if(x)x.innerHTML='';shown=null},30000)}}}catch(e){err(e)}finally{el.disabled=false}};

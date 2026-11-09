@@ -146,6 +146,25 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const noView = !(await page.$('[data-a=ocCardView]'));
   await goV('oxOrd', 'o2'); await H.settle(page, 300); const paidNo = !(await page.$('[data-a=ocCardCopy]'));
   check('10 עובד: בהזמנה שלא שולמה – העתק מספר (getCard copy + ordId), בלי "הצג"; בהזמנה ששולמה – אין כפתור', !!hasCopy && gc && gc.d.act === 'copy' && gc.d.ordId === 'o1' && noView && paidNo && /העתק מספר כרטיס/.test(oh), { gc: gc && gc.d, noView, paidNo });
+  // 10ב (ליקוי 5): אחרי העתקה – טיימר 45 שניות מנקה את הלוח: קריאה זהה → ריק; תוכן אחר → לא נוגעים; בלי readText / קריאה נדחית → כותבים ריק
+  const clip = [];
+  for (const mode of ['same', 'other', 'noread', 'deny']) {
+    await page.evaluate((mode) => {
+      window.__clip = { v: null, w: [] }; window.__tm = [];
+      const st = window.__st0 || (window.__st0 = window.setTimeout);
+      window.setTimeout = (f, ms, ...a) => { if (ms === 45000) { window.__tm.push(f); return 0; } return st(f, ms, ...a); };
+      const cb = { writeText: (t) => { window.__clip.v = t; window.__clip.w.push(t); return Promise.resolve(); } };
+      if (mode === 'same') cb.readText = () => Promise.resolve(window.__clip.v);
+      if (mode === 'other') cb.readText = () => Promise.resolve('אחר');
+      if (mode === 'deny') cb.readText = () => Promise.reject(new Error('NotAllowed'));
+      Object.defineProperty(navigator, 'clipboard', { value: cb, configurable: true });
+    }, mode);
+    await goV('oxOrd', 'o1'); await H.settle(page, 300);
+    if (await page.$('[data-a=ocCardCopy][data-ord=o1]')) { await page.click('[data-a=ocCardCopy][data-ord=o1]'); await H.settle(page, 400); }
+    clip.push(await page.evaluate(async () => { const n = window.__tm.length; window.__tm.forEach((f) => f()); await new Promise((r) => window.__st0(r, 50)); window.setTimeout = window.__st0; return { n, w: window.__clip.w }; }));
+  }
+  check('10ב לוח ההעתקה מתנקה אחרי 45 שניות (זהה → ריק; אחר → לא נוגעים; בלי הרשאת קריאה → ריק), בלי שגיאות',
+    clip.every((c) => c.n === 1 && c.w[0] && c.w[0] !== '') && clip[0].w[1] === '' && clip[1].w.length === 1 && clip[2].w[1] === '' && clip[3].w[1] === '', { clip: clip.map((c) => ({ n: c.n, k: c.w.length, last: c.w[c.w.length - 1] === '' })) });
   await page.evaluate(() => { SY.role = window.__r0; });
   // 7. עובד: אין כפתור סיטונאי ואין ייבוא
   await page.evaluate(() => { SY.role = 'worker'; }); await goV('ocCard', 't' + TZ); await H.settle(page, 300);
