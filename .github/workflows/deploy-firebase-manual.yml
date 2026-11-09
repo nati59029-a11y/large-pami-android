@@ -95,6 +95,9 @@ jobs:
           [ -z "$LIVE" ] || [ "$SITE" != "$LIVE" ] || { echo "::error::אסור לפרסם את גרסת המחשב לאתר של העדכון החי"; exit 1; }
           echo "site=$SITE" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/setup-python@v5
+        if: inputs.what == 'hosting'
+        with: { python-version: '3.12' }
       - name: Build the web files (before the service account exists on disk)
         if: inputs.what == 'hosting'
         env:
@@ -106,6 +109,8 @@ jobs:
           # סבב 2: הבנייה רצה לפני שחשבון השירות נכתב לקובץ, ובלי סקריפטי התקנה של חבילות
           cd app && npm install --ignore-scripts --no-audit --no-fund && node scripts/prepare.js
           if [ "$P" = "largpeami" ] && grep -q "largpeami-test-f4691" www/index.html; then echo "::error::גרסת הייצור מפנה לפרויקט הבדיקה"; exit 1; fi
+          # מסך כניסה כללי "ניהול עסק" (כמו בפרסום האוטומטי, deploy-desktop.yml)
+          pip install pillow==10.4.0 && (cd .. && bash scripts/web-generic-brand.sh app/www)
           rm -rf ../firebase/hosting-public && cp -a www ../firebase/hosting-public
           echo "קבצים לפרסום: $(find ../firebase/hosting-public -type f | wc -l)" | tee -a "$GITHUB_STEP_SUMMARY"
 
