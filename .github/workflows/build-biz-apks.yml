@@ -53,6 +53,9 @@ jobs:
       - name: Copy project source
         working-directory: .
         run: rm -rf app && mkdir app && cp -a app-source/. app/
+      # השרת של GitHub עבר ל-Python 3.14, ול-pillow 10.4.0 אין שם קובץ מוכן – נועלים Python 3.12
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
       - run: pip install pillow==10.4.0
       - run: npm install
       - run: node scripts/prepare.js
