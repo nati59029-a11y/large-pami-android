@@ -62,30 +62,33 @@ const oobReqs = (log, type) => log.filter((r) => /accounts:sendOobCode/.test(r.u
   await page.fill('#dlg input[name=id]', 'newco'); await page.fill('#dlg input[name=name]', 'עסק חדש'); await page.fill('#dlg input[name=email]', 'Owner-New@X.co'); await page.fill('#dlg input[name=phone]', '0501234567');
   page.__step = 'create';
   await page.click('#dlg form button:not([type=button])');
-  const d1 = await until(async () => { const t = await dlgText(page); return /נשלח מייל|לא נשלח/.test(t) ? t : ''; }, 30000);
-  await shot(page, '01-פתיחת-עסק-מייל-נשלח');
+  // 9.11: פתיחת עסק לא שולחת מייל – ההזמנה נשלחת רק בכפתור "שלח הזמנה" בכרטיס העסק
+  const d1 = await until(async () => { const t = await dlgText(page); return /טרם נשלח/.test(t) ? t : ''; }, 30000);
+  await shot(page, '01-פתיחת-עסק-מייל-טרם-נשלח');
   const res1 = createResp[0] && createResp[0].result || {};
   const pr1 = oobReqs(logSa, 'PASSWORD_RESET');
   check('1 פתיחת עסק: תשובת השרת {ok,bizId,uid,email} בלבד, בלי קוד', JSON.stringify(Object.keys(res1).sort()) === JSON.stringify(['bizId', 'email', 'ok', 'uid']) && !/\b\d{6,8}\b/.test(JSON.stringify(res1).replace(res1.uid || '#', '')), res1);
-  check('2 מייל "קבע סיסמה" (PASSWORD_RESET) נשלח מהאפליקציה לכתובת שהשרת החזיר (אותיות קטנות), לא לכתובת שהוקלדה', pr1.length === 1 && pr1[0].email === OWNER && res1.email === OWNER && /נשלח מייל לקביעת סיסמה ל-\s*owner-new@x\.co/.test(d1), { sent: pr1, dialog: d1 });
+  check('2 פתיחת עסק לא שולחת מייל (טרם נשלח)', pr1.length === 0 && res1.email === OWNER && /טרם נשלח/.test(d1), { sent: pr1, dialog: d1 });
+
+  // ---------- 2. כרטיס העסק: "שלח הזמנה" לכתובת שבשרת ----------
+  await page.evaluate(() => closeDlg());
+  await page.evaluate(() => { ADM.L = null; NAV = [{ v: 'home' }, { v: 'sa' }]; go('sab', 'newco'); });
+  await until(() => page.evaluate(() => !!document.querySelector('[data-a=admMail]')), 15000);
+  const bt0 = await page.textContent('[data-a=admMail]');
+  page.__step = 'card-mail';
+  await page.click('[data-a=admMail]');
+  const d2 = await until(async () => { const t = await dlgText(page); return /נשלח מייל/.test(t) ? t : ''; }, 15000);
+  const pr2 = oobReqs(logSa.filter((r) => r.step === 'card-mail'), 'PASSWORD_RESET');
+  check('5 "שלח הזמנה" בכרטיס העסק: נשלח למייל המנהל שנשמר בשרת (אותיות קטנות), לא לכתובת שהוקלדה', /שלח הזמנה/.test(bt0) && pr2.length === 1 && pr2[0].email === OWNER && /owner-new@x\.co/.test(d2), { btn: bt0, sent: pr2, dialog: d2 });
+  await page.evaluate(() => closeDlg()); await wait(page, 300);
+  check('5א אחרי השליחה: הכפתור "שלח שוב" והכיתוב "ההזמנה נשלחה"', /שלח שוב/.test(await page.textContent('[data-a=admMail]')) && /ההזמנה נשלחה/.test(await page.evaluate(() => document.body.innerText)));
+  await shot(page, '02-כרטיס-עסק-שלח-מייל', true);
   const code1 = await lastCode(OWNER, 'PASSWORD_RESET');
   const before = await signIn(OWNER, 'pw-123456');
   check('3 לפני קביעת הסיסמה המנהל לא יכול להיכנס; באמולטור נרשם קישור "קבע סיסמה" אחד', !!code1 && before.status === 400 && (await oobCodes()).filter((c) => c.email === OWNER && c.requestType === 'PASSWORD_RESET').length === 1, { before, link: code1 && code1.oobLink && code1.oobLink.replace(/oobCode=[^&]+/, 'oobCode=…') });
   const st3 = await resetPw(code1.oobCode, NEWPW);
   const after = await signIn(OWNER, NEWPW);
   check('4 המנהל קובע סיסמה דרך הקישור (resetPassword) ואז הסיסמה עובדת', st3 === 200 && after.status === 200 && after.uid === res1.uid, { reset: st3, after });
-
-  // ---------- 2. כרטיס העסק: "שלח מייל כניסה" לכתובת שבשרת, והפעלת תוספת אחת ----------
-  await page.evaluate(() => closeDlg());
-  await page.evaluate(() => { ADM.L = null; NAV = [{ v: 'home' }, { v: 'sa' }]; go('sab', 'newco'); });
-  await until(() => page.evaluate(() => !!document.querySelector('[data-a=admMail]')), 15000);
-  page.__step = 'card-mail';
-  await page.click('[data-a=admMail]');
-  const d2 = await until(async () => { const t = await dlgText(page); return /נשלח מייל/.test(t) ? t : ''; }, 15000);
-  const pr2 = oobReqs(logSa.filter((r) => r.step === 'card-mail'), 'PASSWORD_RESET');
-  check('5 "שלח מייל כניסה" בכרטיס העסק: נשלח למייל המנהל שנשמר בשרת', pr2.length === 1 && pr2[0].email === OWNER && /owner-new@x\.co/.test(d2), { sent: pr2, dialog: d2 });
-  await page.evaluate(() => closeDlg()); await wait(page, 300);
-  await shot(page, '02-כרטיס-עסק-שלח-מייל', true);
   page.__step = 'feat';
   await page.click('[data-a=admFeat][data-k=tasks]');
   const feat = await until(async () => { const d = await getDoc('b/newco'); const f = d && d.fields.features && d.fields.features.mapValue.fields || {}; return f.tasks && f.tasks.booleanValue === true ? Object.keys(f).filter((k) => f[k].booleanValue === true) : null; }, 15000);

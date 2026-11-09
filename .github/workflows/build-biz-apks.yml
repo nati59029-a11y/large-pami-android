@@ -3,6 +3,7 @@ name: Build business APKs
 # כל APK = אותו קוד בדיוק כמו ה-APK הרגיל (main.yml), ורק: applicationId com.largepami.finance.b.<bizId>, שם וסמל, לוגו לפני כניסה,
 # וערוץ עדכונים משלו (GitHub release biz-<bizId>, Storage app_releases/biz-<bizId>/). עדכון חי כבוי ב-APK כזה.
 # בנייה: בכל דחיפה שנוגעת בקוד, ובהפעלה ידנית. פרסום (release + Storage): רק מ-main (דחיפה, או ידני עם publish) – כמו main.yml.
+# 9.11: תמיד נבנית גם האפליקציה הכללית "ניהול עסק" (business: com.largepami.business, release business-latest/business.apk).
 # כך כל עדכון ב-main יוצא לכל העסקים. אין כאן פרסום של חוקים או פונקציות.
 on:
   push:
@@ -25,7 +26,7 @@ jobs:
       - uses: actions/checkout@v4
       - id: l
         run: |
-          IDS=$(python3 -c 'import json,re;c=json.load(open("app-source/brands/build-biz.json"));ids=[b["bizId"] for b in c.get("businesses",[]) if re.fullmatch(r"[a-z0-9-]{3,30}",str(b.get("bizId","")))];print(json.dumps(ids))')
+          IDS=$(python3 -c 'import json,re;c=json.load(open("app-source/brands/build-biz.json"));ids=["business"]+[b["bizId"] for b in c.get("businesses",[]) if re.fullmatch(r"[a-z0-9-]{3,30}",str(b.get("bizId",""))) and b.get("bizId")!="business"];print(json.dumps(ids))')
           echo "ids=$IDS" >> "$GITHUB_OUTPUT"
           [ "$IDS" = "[]" ] && echo "any=no" >> "$GITHUB_OUTPUT" || echo "any=yes" >> "$GITHUB_OUTPUT"
           echo "Business APKs: $IDS" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -103,10 +104,12 @@ jobs:
       - name: GitHub release biz-${{ matrix.biz }}
         env: { GH_TOKEN: "${{ github.token }}", GH_REPO: "${{ github.repository }}" }
         run: |
-          VC=$((1000 + GITHUB_RUN_NUMBER)); T="biz-${{ matrix.biz }}"
-          cp apk/app-debug.apk "$T.apk"
+          VC=$((1000 + GITHUB_RUN_NUMBER)); T="biz-${{ matrix.biz }}"; F="$T"
+          # האפליקציה הכללית "ניהול עסק": release business-latest, קובץ business.apk
+          if [ "${{ matrix.biz }}" = "business" ]; then T="business-latest"; F="business"; fi
+          cp apk/app-debug.apk "$F.apk"
           gh release delete "$T" --yes --cleanup-tag || true
-          gh release create "$T" "$T.apk" --title "$T" --notes "versionCode: $VC"
+          gh release create "$T" "$F.apk" --title "$T" --notes "versionCode: $VC"
       - name: Storage app_releases/biz-${{ matrix.biz }}/ (only with the secret and the variable)
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
@@ -115,4 +118,4 @@ jobs:
           if [ -z "$FIREBASE_SERVICE_ACCOUNT" ] || [ -z "$BUCKET" ]; then echo "::notice::Storage upload skipped (דולג)"; exit 0; fi
           umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"; trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
           python3 scripts/upload-apk-to-storage.py --apk apk/app-debug.apk --version-code $((1000 + GITHUB_RUN_NUMBER)) \
-            --bucket "$BUCKET" --sa "$RUNNER_TEMP/sa.json" --prefix "app_releases/biz-${{ matrix.biz }}/" --summary "$GITHUB_STEP_SUMMARY"
+            --bucket "$BUCKET" --sa "$RUNNER_TEMP/sa.json" --prefix "$([ "${{ matrix.biz }}" = business ] && echo app_releases/business/ || echo "app_releases/biz-${{ matrix.biz }}/")" --summary "$GITHUB_STEP_SUMMARY"

@@ -101,7 +101,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   page.__step = 'create';
   await page.click('#dlg form button:not([type=button])'); await wait(page, 2500);
   // מייל עצמי: לפני מייל Firebase יש קריאה ל-sendInviteMail (באמולטור – fallback, לפעמים עם הפעלה ראשונה איטית). ממתינים לחלון התוצאה, לא לזמן קבוע
-  await page.waitForFunction(() => { const d = document.querySelector('#dlg'); return d && d.open && /נשלח מייל|לא נשלח|לא התקבלה/.test(d.innerText); }, null, { timeout: 15000 }).catch(() => {});
+  await page.waitForFunction(() => { const d = document.querySelector('#dlg'); return d && d.open && /טרם נשלח|נשלח מייל|לא נשלח|לא התקבלה/.test(d.innerText); }, null, { timeout: 15000 }).catch(() => {});
   const flag = await getDoc('b/flagship'), flagInfo = await getDoc('b/flagship/private/info');
   const ca = (await audit('flagship')).map((a) => a.act);
   const t1 = await toasts(page);

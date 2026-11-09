@@ -48,7 +48,7 @@ const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ
   pg = await open(`?mode=resetPassword&oobCode=OLD&apiKey=K&continueUrl=${cont}`, { expired: true });
   check('בלי סיסמה – אין הוראות', !(await pg.isVisible('#steps')));
   check('קוד שפג – הודעה ברורה, בלי טופס', (await pg.textContent('#msg')).includes('פג תוקף') && !(await pg.isVisible('#f')));
-  check('בלי מיתוג – APK כללי', (await pg.getAttribute('#apk', 'href')).endsWith('/latest/large-pami.apk'));
+  check('בלי מיתוג, עסק אחר – APK "ניהול עסק"', (await pg.getAttribute('#apk', 'href')).endsWith('/releases/download/business-latest/business.apk'));
   await pg.close();
   // אתר/פרויקט הבדיקה: APK בדיקה (release test-latest) – לפי מפתח ה-API של פרויקט הבדיקה או לפי כתובת האתר; גם כשיש מיתוג עסק
   const TK = 'AIzaSyBHsEw1IvucT5gh1sv5jfSpd5UKqnPwsXU', TEST_APK = '/releases/download/test-latest/large-pami-test.apk';
@@ -65,7 +65,13 @@ const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ
     await pg.close();
   }
   pg = await open(`?mode=resetPassword&oobCode=P1&apiKey=AIzaSyPROD&continueUrl=${cont}`, {});
-  check('ייצור (מפתח/כתובת אחרים) – APK ייצור, ללא שינוי', (await pg.getAttribute('#apk', 'href')).endsWith('/latest/large-pami.apk') && !(await pg.getAttribute('#apk', 'href')).includes('test-latest'));
+  check('ייצור (מפתח/כתובת אחרים), עסק אחר – business.apk', (await pg.getAttribute('#apk', 'href')).endsWith('/business-latest/business.apk') && !(await pg.getAttribute('#apk', 'href')).includes('test-latest'));
+  await pg.close();
+  pg = await open(`?mode=resetPassword&oobCode=P2&apiKey=AIzaSyPROD&continueUrl=${encodeURIComponent('https://demo.firebaseapp.com/?biz=largpeami')}`, { brand: { name: 'לארג׳ פעמי', apkTag: 'latest' } });
+  check('לארג׳ פעמי – large-pami.apk כמו היום', (await pg.getAttribute('#apk', 'href')).endsWith('/latest/large-pami.apk'));
+  await pg.close();
+  pg = await open(`?mode=resetPassword&oobCode=P3&apiKey=AIzaSyPROD&continueUrl=${cont}`, { brand: { name: 'מאפיית דוד', apkTag: 'latest' } });
+  check('עסק אחר עם apkTag=latest – business.apk', (await pg.getAttribute('#apk', 'href')).endsWith('/business-latest/business.apk'));
   await pg.close();
   pg = await open(`?mode=resetPassword&oobCode=C&apiKey=K&continueUrl=${encodeURIComponent('https://x/?biz=<script>')}`, {});
   check('bizId לא תקין – לא נשלחת בקשת מיתוג, הדף עובד (כללי)', (await pg.textContent('#h')) === 'קביעת סיסמה חדשה');

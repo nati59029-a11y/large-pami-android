@@ -77,7 +77,10 @@ var TEST_KEY='AIzaSyBHsEw1IvucT5gh1sv5jfSpd5UKqnPwsXU',TEST_HOSTS=['largpeami-te
 var isTest=key===TEST_KEY||TEST_HOSTS.indexOf(location.hostname)>=0;
 function apk(tag){
   if(isTest){$('apk').href='https://github.com/'+REPO+'/releases/download/test-latest/large-pami-test.apk';return}
-  var t=/^biz-[a-z0-9-]{3,30}$/.test(tag)?tag:'latest';$('apk').href='https://github.com/'+REPO+'/releases/download/'+t+'/'+(t==='latest'?'large-pami':t)+'.apk'}
+  // עסק שאינו לארג' פעמי ובלי apkTag: האפליקציה הכללית "ניהול עסק" (release business-latest, קובץ business.apk)
+  // (publicBrand מחזיר apkTag='latest' כשאין APK נפרד – גם אז עסק אחר מקבל business.apk)
+  var t=/^biz-[a-z0-9-]{3,30}$/.test(tag)?tag:biz&&biz!=='largpeami'?'business':'latest';
+  $('apk').href='https://github.com/'+REPO+'/releases/download/'+(t==='business'?'business-latest':t)+'/'+(t==='latest'?'large-pami':t)+'.apk'}
 apk('latest');
 
 // כל פעולה שאינה קביעת סיסמה (למשל קישור "מחשב חדש"): ממשיכים רק לכתובת מרשימה סגורה – האתר הזה עצמו,

@@ -6,6 +6,24 @@ set -e
 # עדכון חי כבוי ב-APK כזה (חבילת המסכים הכללית הייתה מוחקת את העסק והלוגו); העדכון מגיע כ-APK.
 # namespace, החבילה של Java והתוספים נשארים com.largepami.finance (כמו make-test-app.sh). אותו מפתח חתימה.
 B="$1"
+# 9.11: "business" = האפליקציה הכללית "ניהול עסק" לכל העסקים החדשים: applicationId com.largepami.business, סמל כללי,
+# בלי עסק ברירת מחדל (בלי biz-default.js – המשתמש רואה את העסק שלו לפי ההרשאות אחרי הכניסה), release business-latest / business.apk.
+if [ "$B" = "business" ]; then
+python3 scripts/biz-icons.py --generic android/app/src/main/res "${TMPDIR:-/tmp}/business-icon.png"
+node -e '
+const fs=require("fs"),nm="ניהול עסק",pkg="com.largepami.business",old=JSON.parse(fs.readFileSync("capacitor.config.json","utf8")).appName;
+const sub=(f,from,to)=>{const t=fs.readFileSync(f,"utf8"),n=t.split(from).length-1;if(n!==1){console.error("::error::business app: expected 1 match in "+f+", found "+n+": "+from);process.exit(1)}fs.writeFileSync(f,t.replace(from,()=>to))};
+sub("android/app/build.gradle","applicationId \"com.largepami.finance\"","applicationId \""+pkg+"\"");
+const S="android/app/src/main/res/values/strings.xml";
+sub(S,"<string name=\"app_name\">"+old+"</string>","<string name=\"app_name\">"+nm+"</string>");
+sub(S,"<string name=\"title_activity_main\">"+old+"</string>","<string name=\"title_activity_main\">"+nm+"</string>");
+for(const W of ["www","android/app/src/main/assets/public"]){if(!fs.existsSync(W+"/index.html"))continue;
+ sub(W+"/index.html","const UPD_DIR=\x27app_releases/latest/\x27;","const UPD_DIR=\x27app_releases/business/\x27;");
+ sub(W+"/index.html","/releases/tags/latest`","/releases/tags/business-latest`");
+ sub(W+"/index.html","/releases/download/latest/large-pami.apk`","/releases/download/business-latest/business.apk`")}
+console.log("BUSINESS APP:",pkg,nm);
+'
+else
 echo "$B" | grep -Eq '^[a-z0-9-]{3,30}$' || { echo "::error::biz app: bad bizId '$B'"; exit 1; }
 [ "$B" != "largpeami" ] || { echo "::error::biz app: largpeami is the regular app"; exit 1; }
 [ -f "brands/$B/logo.png" ] || { echo "::error::biz app: brands/$B/logo.png is missing"; exit 1; }
@@ -29,6 +47,7 @@ for(const W of ["www","android/app/src/main/assets/public"]){if(!fs.existsSync(W
  sub(W+"/index.html","/releases/tags/latest`","/releases/tags/biz-"+B+"`")}
 console.log("BIZ APP:",pkg,nm);
 ' "$B"
+fi
 rm -f android/app/src/main/assets/live-update.properties
 grep -q 'namespace "com.largepami.finance"$' android/app/build.gradle || { echo "::error::biz app: namespace changed"; exit 1; }
 if grep -o 'android:authorities="[^"]*"' android/app/src/main/AndroidManifest.xml | grep -v 'android:authorities="${applicationId}\.'; then echo "::error::biz app: fixed provider authority"; exit 1; fi
