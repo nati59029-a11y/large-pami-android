@@ -54,6 +54,12 @@ let fail = 0; const check = (n, ok, info) => { if (!ok) fail++; console.log((ok 
   await H.settle(p, 300);
   const t = await p.evaluate(() => { const x = S.tx.find((y) => y.id === 'l1'); return { amt: x.amt, inv: x.inv, date: x.date }; });
   check('6 עריכה אחרי קליטה: סכום, מספר חשבונית ותאריך נשמרו', e.amt && e.inv && t.amt === 120 && t.inv === 'NEW-9' && t.date === info.prev + '-07', { e, t });
+  // 7א. "חשבוניות לתשלום" (כל הספקים): זיכוי שתאריכו עבר מוריד מ"באיחור" של אותו ספק ומוצג
+  await p.evaluate(() => { closeDlg(); S.tx = S.tx.filter((t) => t.sub === 'sD' || !hasPay(t)); save(); NAV.length = 1; go('due'); }); await H.settle(p, 400);
+  const du = await p.evaluate(() => { const num = (x) => +String(x || '').replace(/[^\d.]/g, ''); const lateL = inv().filter((t) => bal(t) > 0.004 && isLate(t, today()) && t.sub === 'sD'); const exp = Math.max(0, rnd(sum(lateL, bal) - 15));
+    const k = [...document.querySelectorAll('#main .kg .k')].find((e) => /באיחור/.test(e.innerText)); return { exp, got: num(k && k.querySelector('b').innerText), lbl: k && k.innerText, sec: /זיכויים פתוחים – מורידים מהאיחור/.test(document.querySelector('#main').innerText), c1: !!document.querySelector('#main [data-a=tx][data-id=c1]'), n: lateL.length }; });
+  check('7א "חשבוניות לתשלום": באיחור = חשבוניות הספק שבאיחור פחות הזיכוי (15), עם "(אחרי זיכויים)", והזיכוי מוצג', du.n > 0 && Math.abs(du.got - du.exp) < 0.01 && /אחרי זיכויים/.test(du.lbl) && du.sec && du.c1, du);
+  if (shots) await p.screenshot({ path: shots + '/due.png', fullPage: true });
   // 8. זיכויים גדולים מהחוב: "יתרת זכות אצל הספק", לא מינוס; ברשימת הספקים "יתרת זכות"
   await p.evaluate(() => { closeDlg(); S.tx.push({ id: 'c3', t: 'exp', cat: 'e_sup', sub: 'sD', date: today(), amt: -500, kind: 'credit', inv: 'CR3', note: '', pays: [] }); save(); NAV.length = 1; go('card', 'sD'); }); await H.settle(p, 400);
   const z = await p.evaluate(() => ({ k: document.querySelector('button.k[data-arg="sD|all"]').innerText.replace(/\s+/g, ' '), late: document.querySelector('button.k[data-arg="sD|late"]').innerText.replace(/\s+/g, ' '), b: bsum('sD') }));
