@@ -60,7 +60,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
-    const R = { saveCust: { ok: true, id: 't' + TZ }, setCustCfg: { ok: true, xKeys: [{ k: 'xcity', label: 'עיר' }, { k: 'xab12', label: 'הערות' }] }, importCusts: { ok: true, created: 2, updated: 0, same: 0, bad: [] }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') }, getCard: n === 'getCard' && d.act === 'view' ? { card: { num: '5326100020003456', exp: '03/29', name: 'Moshe C', cvv: '987' } } : { card: { num: '5326100020003456' } }, setCard: { ok: true, last4: '3456' }, delCard: { ok: true } };
+    const R = { saveCust: { ok: true, id: 't' + TZ }, setCustCfg: { ok: true, xKeys: [{ k: 'xcity', label: 'עיר' }, { k: 'xab12', label: 'הערות' }] }, importCusts: { ok: true, created: 2, updated: 0, same: 0, bad: [] }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, mergeCust: { ok: true, id: 't' + TZ, from: 'cXyZ12345678901234567', ords: 1, cards: 1 }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') }, getCard: n === 'getCard' && d.act === 'view' ? { card: { num: '5326100020003456', exp: '03/29', name: 'Moshe C', cvv: '987' } } : { card: { num: '5326100020003456' } }, setCard: { ok: true, last4: '3456' }, delCard: { ok: true } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
   await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
@@ -261,6 +261,39 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const sv = calls.slice(n2).filter((x) => x.n === 'saveCust').pop();
     check('14 עריכה: שם משפחה בלבד עם שם ישן – נחסם עם הודעה; "מחק את הכתובת" שולח addr:"" ושומר את השם הישן', blocked && !!sv && sv.d.cust.addr === '' && sv.d.cust.name === 'א'.repeat(45) && sv.d.cust.fn === undefined, { blocked, sv: sv && sv.d });
   }
+  // 15. (2026-11-10) טלפון נוסף + כתובת משלוח נפרדת. לקוח שהטלפון 0538887777 שמור אצלו כטלפון נוסף (phs) – נמצא בשאילתת השרת
+  CUST.push(doc('cust/cXyZ12345678901234567', { name: S('שרה לוי'), phone: S('0549998888'), phs: A([S('0538887777')]) }));
+  await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
+  globalThis.__RQ = [];
+  const h15 = await page.evaluate(() => document.querySelector('#main').innerHTML);
+  await page.selectOption('select[data-k=br]', 'br1');
+  await page.fill('input[data-k=phone]', '050-1234567'); await H.settle(page, 700);
+  await page.click('[data-a=ocPick][data-id="t' + TZ + '"]'); await H.settle(page, 300);
+  await page.click('[data-a=ocP2Add]'); await H.settle(page, 200);
+  await page.fill('input[data-i=ocP2][data-n="0"]', '053-8887777'); await H.settle(page, 700);
+  const rq = (globalThis.__RQ || []).some((b) => /"phs"/.test(b) && /ARRAY_CONTAINS/.test(b) && /0538887777/.test(b));
+  const st15 = await page.evaluate(() => (document.getElementById('ocp2st') || {}).innerText || '');
+  check('15 טלפון נוסף: כפתור פלוס בכל העסקים; חיפוש בשרת לפי phs (array-contains); שייך ללקוח אחר → שאלה: לאחד / לשייך לאחר / לשייך לנוכחי', /data-a="ocP2Add"/.test(h15) && /data-a="oxShip"/.test(h15) && rq && /שייך ללקוח אחר/.test(st15) && /לאחד את שני הכרטיסים/.test(st15) && /שרה לוי/.test(st15) && /הנוכחי/.test(st15), { rq, st15 });
+  await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
+  let n15 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 500);
+  check('15א שמירה נחסמת כל עוד לא נבחר מה לעשות עם הטלפון הנוסף', !calls.slice(n15).some((c) => c.n === 'createOrder'), calls.slice(n15).map((c) => c.n));
+  await page.click('[data-a=oxShip]'); await H.settle(page, 200);
+  await page.fill('input[data-i=oxS][data-k=st]', 'הגפן 5'); await page.fill('input[data-i=oxS][data-k=city]', 'אשקלון');
+  await setDs('a'); await page.evaluate(() => { rerender(); document.querySelectorAll('.toast,#toast').forEach((e) => e.remove()); const d = document.getElementById('occd'); if (d) d.open = true; });
+  await page.evaluate(() => window.scrollTo(0, 0)); await page.setViewportSize({ width: 360, height: 1100 }); await H.settle(page, 200);
+  const g15 = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
+  if (shots) await page.screenshot({ path: path.join(shots, 'הזמנה-טלפון-נוסף-ומשלוח.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  page.once('dialog', (d) => d.accept());
+  await page.click('[data-a=ocMerge]'); await H.settle(page, 300);
+  await page.click('#dlg [data-a=yes]'); await H.settle(page, 900);
+  const mc = calls.filter((c) => c.n === 'mergeCust').pop();
+  const D15 = await page.evaluate(() => ({ p2c: window.__ox.draft && window.__ox.draft.p2c, id: window.__ox.draft && window.__ox.draft.custId, ph: window.__ox.draft && window.__ox.draft.phone }));
+  check('15ב איחוד: mergeCust {a: הנוכחי, b: האחר}, השאלה נסגרת, ההזמנה נשארת מקושרת והטלפון הראשי לא נמחק; 360px בלי גלילה לצד', !!mc && mc.d.a === 't' + TZ && mc.d.b === 'cXyZ12345678901234567' && !D15.p2c && D15.id === 't' + TZ && D15.ph === '050-1234567' && g15.sw <= g15.iw, { mc: mc && mc.d, D15, g15 });
+  n15 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 900);
+  const sc15 = calls.slice(n15).find((c) => c.n === 'saveCust'), co15 = calls.slice(n15).find((c) => c.n === 'createOrder');
+  check('15ג שמירה: הזמנה עם phs וכתובת משלוח נפרדת (ship); הלקוח מקבל את הטלפון הנוסף (phs), כתובת הלקוח לא מוחלפת בכתובת המשלוח', !!co15 && JSON.stringify(co15.d.cust.phs) === '["0538887777"]' && co15.d.cust.ship && co15.d.cust.ship.st === 'הגפן 5' && co15.d.cust.ship.city === 'אשקלון' && co15.d.cust.st === 'הרצל 1' && !!sc15 && JSON.stringify(sc15.d.cust.phs) === '["0538887777"]' && sc15.d.cust.st === 'הרצל 1', { co: co15 && co15.d.cust, sc: sc15 && sc15.d.cust });
+  CUST.pop();
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
   console.log(fail ? `נכשלו ${fail}` : 'הכול עבר'); process.exit(fail ? 1 : 0);

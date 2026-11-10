@@ -318,7 +318,7 @@ function custParts(c, o) {
 }
 function cleanCust(c) {
   if (!c || typeof c !== 'object' || Array.isArray(c)) throw bad('bad-cust', 'פרטי לקוח חסרים');
-  onlyKeys(c, ['name', 'phone', 'tz', 'addr', 'mail'].concat(CPART_KEYS), 'פרטי לקוח');
+  onlyKeys(c, ['name', 'phone', 'tz', 'addr', 'mail', 'phs', 'ship'].concat(CPART_KEYS), 'פרטי לקוח');
   const o = custParts(c, {});
   if (!o.name) o.name = txt(c.name, 60, 'bad-name', 'שם הלקוח', true);
   o.phone = phone(c.phone);
@@ -334,7 +334,28 @@ function cleanCust(c) {
     if (cardLike(m)) throw bad('card-like', 'מייל: אסור מספר כרטיס (13–19 ספרות).'); // 2026-11-10: מייל עם מספר טלפון מותר
     o.mail = m;
   }
+  // 2026-11-10 (טלפון נוסף): phs = עד 3 טלפונים נוספים (בלי הראשי ובלי כפילות)
+  const ph = phsOf(c.phs, o.phone);
+  if (ph.length) o.phs = ph;
+  // כתובת משלוח נפרדת להזמנה בלבד (לא משנה את כתובת הלקוח): { st, city, fl?, apt? } → גם addr כרשור
+  if (c.ship != null && c.ship !== '') {
+    if (typeof c.ship !== 'object' || Array.isArray(c.ship)) throw bad('bad-ship', 'כתובת משלוח לא תקינה');
+    onlyKeys(c.ship, ['st', 'city', 'fl', 'apt'], 'כתובת משלוח');
+    const sp = {};
+    for (const [k, max, label] of CPARTS.slice(2)) if (c.ship[k] != null && c.ship[k] !== '') sp[k] = txt(c.ship[k], max, 'bad-ship', 'משלוח – ' + label);
+    if (!sp.st) throw bad('bad-ship', 'כתובת משלוח: רחוב ומספר – חובה');
+    sp.addr = cap([sp.st, sp.city, sp.fl && 'קומה ' + sp.fl, sp.apt && 'דירה ' + sp.apt].filter(Boolean).join(', '), ADDR_MAX);
+    o.ship = sp;
+  }
   return o;
+}
+const MAX_PHS = 3;
+function phsOf(v, main) {
+  if (v == null || v === '') return [];
+  if (!Array.isArray(v) || v.length > MAX_PHS) throw bad('bad-phs', `טלפונים נוספים: עד ${MAX_PHS}`);
+  const out = [];
+  for (const x of v) { const p = phone(x); if (p !== main && !out.includes(p)) out.push(p); }
+  return out;
 }
 // =====================================================================================
 // ניוד קווים (fb/ord-lines; החלטות 00:59, 01:45, 07:35, 07:38) – רק כשמנהל־העל הפעיל את cellular בעסק. כבוי = השרת דוחה כל שדה ניוד.
@@ -1287,4 +1308,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { setCellCfg, saveLinePlan, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

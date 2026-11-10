@@ -66,7 +66,12 @@ async function byTz(z){let c=await getC('t'+z);return c}
 // כל הלקוחות עם הטלפון (p{phone} ישן + לקוחות נוספים c… / t… עם אותו טלפון). בלי מסמכים שהועברו (mv)
 async function byPhoneAll(p){const out=[],seen=new Set(),add=c=>{if(c&&!c.mv&&!seen.has(c.id)){seen.add(c.id);out.push(c)}};let c=await getC('p'+p);if(c&&c.mv)c=await getC(c.mv);add(c);
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cust'}],where:{fieldFilter:{field:{fieldPath:'phone'},op:'EQUAL',value:{stringValue:p}}},limit:10}})});
- (r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>x.phone===p).forEach(add);return out}
+ (r||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>x.phone===p).forEach(add);
+ // 2026-11-10: גם לקוחות שהטלפון שמור אצלם כטלפון נוסף (phs) – שאילתה בשרת, לא סינון ברשימה שבטלפון
+ const r2=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'cust'}],where:{fieldFilter:{field:{fieldPath:'phs'},op:'ARRAY_CONTAINS',value:{stringValue:p}}},limit:10}})});
+ (r2||[]).filter(x=>x.document).map(x=>dec(x.document)).filter(x=>Array.isArray(x.phs)&&x.phs.includes(p)).forEach(add);return out}
+const phsOf=c=>Array.isArray(c&&c.phs)?c.phs:[];
+const allPh=c=>[c&&c.phone].concat(phsOf(c)).filter(Boolean);
 const PAYS=[['cash','מזומן'],['n30','שוטף+30'],['n60','שוטף+60'],['n90','שוטף+90'],['credit','אשראי'],['transfer','העברה בנקאית'],['other','אחר']];
 const payTxt=c=>c.pay==='other'?String(c.payTxt||'אחר'):((PAYS.find(x=>x[0]===c.pay)||[])[1]||'');
 const WSTAG='<span class="tag t1">לקוח עסקי</span>';
@@ -82,7 +87,7 @@ const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|
 /* סבב 3: פרטי לקוח שנטענו מהמערכת (כולל שם/כתובת ישנים ארוכים שאין להם שדה גלוי) נמחקים כשמחליפים לקוח – הזמנה ללקוח אחר לא יורשת אותם */
 const LDK=['name','addr'].concat(CPK,INFK);
 function dropLoaded(D){const F=D.cFrom||{};LDK.concat(['phone','mail'].filter(k=>F[k]&&String(D[k]||'').trim()===F[k])).forEach(k=>{D[k]='';document.querySelectorAll('#main input[data-i=oxD][data-k='+k+']').forEach(e=>{e.value=''})});D.cName='';D.cFrom=null;D.cInf=null;D.cBad=null;D.wholesale=false}
-function fillDraft(D,c){if(D.custId&&D.custId!==c.id)dropLoaded(D);D.name='';D.addr='';splitOld(c,D);['phone','mail'].forEach(k=>{if(c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])});D.cFrom={phone:String(c.phone||''),mail:String(c.mail||''),tz:String(c.tz||'')};D.tz=c.tz||D.tz;D.custId=c.id;D.wholesale=c.wholesale===true;D.cName=c.name||'';
+function fillDraft(D,c){if(D.custId&&D.custId!==c.id)dropLoaded(D);D.name='';D.addr='';splitOld(c,D);['phone','mail'].forEach(k=>{if(c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])});D.cFrom={phone:String(c.phone||''),mail:String(c.mail||''),tz:String(c.tz||''),all:allPh(c)};D.tz=c.tz||D.tz;D.custId=c.id;D.wholesale=c.wholesale===true;D.cName=c.name||'';
  D.cBad=badOf(c);D.cInf={};INFK.forEach(k=>{D.cInf[k]=String(c[k]||'');if(cell()&&c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])})} // 2026-11-10: שדות המידע של הלקוח נטענים לטופס (עריכה – נשמרת ללקוח)
 const NEWB='<button type="button" class="btn g s w" data-a="ocAsNew">לקוח חדש עם אותו טלפון</button>';
 const custBox=D=>{const st=D.cSt,w=h=>`<div role="status" id="ocst">${h}</div>`;
@@ -99,21 +104,31 @@ const tzVis=D=>cell()||!!dig(D.tz); // 2026-11-09: עסק עם ניוד קווי
   const ad=AP.some(k=>String(D[k]||'').trim())||String(D.mail||'').trim();
   h=h.replace(/<details><summary([^>]*)>ת\.ז, כתובת ומייל \(רשות\)<\/summary>/,`<details${ad?' open':''}><summary$1>משלוח – כתובת, עיר, קומה ודירה (רשות)</summary>`);
   const ph=/<label class="f"><span>טלפון<\/span><input data-i="oxD" data-k="phone"[^>]*><\/label>/.exec(h);
-  if(ph){h=h.replace(ph[0],'');h=h.replace('<div class="card">','<div class="card">'+ph[0].replace('<span>טלפון</span>','<span>טלפון הלקוח (מקלידים קודם – לקוח קיים יימצא לבד)</span>')+custBox(D)+(tzVis(D)?`<label class="f"><span>ת.ז הלקוח (רשות)</span><input data-i="ocTz" data-k="tz" inputmode="numeric" maxlength="9" autocomplete="off" value="${esc(D.tz||'')}" id="octz"></label>`:''))}
+  if(ph){h=h.replace(ph[0],'');h=h.replace('<div class="card">','<div class="card">'+ph[0].replace('<span>טלפון</span>','<span>טלפון הלקוח (מקלידים קודם – לקוח קיים יימצא לבד)</span>')+custBox(D)+p2H(D)+(tzVis(D)?`<label class="f"><span>ת.ז הלקוח (רשות)</span><input data-i="ocTz" data-k="tz" inputmode="numeric" maxlength="9" autocomplete="off" value="${esc(D.tz||'')}" id="octz"></label>`:''))}
   if(cell()){const ih=`<details${INFK.some(k=>String(D[k]||'').trim())?' open':''}><summary>פרטים נוספים ללקוח (רשות)</summary>${INF.map(([k,l,mx])=>`<label class="f"><span>${l}</span><input data-i="oxD" data-k="${k}" maxlength="${mx}" autocomplete="off" value="${esc(D[k]||'')}"${k==='bank'?' dir="auto"':''}></label>`).join('')}</details>`;
    const am=/<details[^>]*><summary[^>]*>משלוח[\s\S]*?<\/details>/.exec(h);h=am?h.replace(am[0],am[0]+ih):h.replace('<div class="card">','<div class="card">'+ih)}
   if(ocOn()){if(CD.d!==D)cdReset(D);const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId),full=!!c&&cardsOf(c).length>=3;
    const ch=`<details${CD.num?' open':''} id="occd"><summary>כרטיס אשראי (רשות)</summary>${full?'<p class="note">ללקוח כבר שמורים 3 כרטיסים – אפשר להחליף או למחוק בכרטיס הלקוח.</p>':`<p class="note">נשמר מוצפן ללקוח ההזמנה כשהיא נשמרת. נשארות גלויות רק 4 ספרות אחרונות.</p>
-    ${[['num','מספר כרטיס','inputmode="numeric" maxlength="23" dir="ltr"'],['exp','תוקף (MM/YY)','inputmode="numeric" maxlength="7" dir="ltr"'],['name','שם בעל הכרטיס','maxlength="60"'],['cvv','CVV','inputmode="numeric" maxlength="4" dir="ltr"']].map(([k,l,x])=>`<label class="f"><span>${l}</span><input data-i="ocCd" data-k="${k}" autocomplete="off" ${x} value="${esc(CD[k]||'')}"></label>`).join('')}`}</details>`;
+    ${CDF.map(([k,l,x])=>`<label class="f"><span>${l}</span><input data-i="ocCd" data-k="${k}" autocomplete="off" ${x} value="${esc(CD[k]||'')}"></label>`).join('')}${cdMore(c)}`}</details>`;
    const am=/<details[^>]*><summary[^>]*>(פרטים נוספים ללקוח|משלוח)[\s\S]*?<\/details>/.exec(h);h=am?h.replace(am[0],am[0]+ch):h.replace('<div class="card">','<div class="card">'+ch)}
   r.h=h;r.s='טלפון, פרטי לקוח ומוצרים';return r}}
 /* תוספת 11:50: כרטיס אשראי בטופס ההזמנה (רשות). מתג ordCard לעסק – ברירת מחדל פעיל, רק מנהל־על מכבה (השרת אוכף).
    הערכים נשמרים רק במשתנה מקומי של הטיוטה (לא ב-O.draft, לא באחסון), נשלחים ל-setCard {add, ordId} אחרי שההזמנה נשמרה, ונמחקים. */
 const ocOn=()=>!(SY&&SY.biz&&SY.biz.features&&SY.biz.features.ordCard===false);
-let CD={};const cdReset=D=>{CD={d:D}};
+let CD={};const cdReset=D=>{CD={d:D,more:[]}};
+const CDF=[['num','מספר כרטיס','inputmode="numeric" maxlength="23" dir="ltr"'],['exp','תוקף (MM/YY)','inputmode="numeric" maxlength="7" dir="ltr"'],['name','שם בעל הכרטיס','maxlength="60"'],['cvv','CVV','inputmode="numeric" maxlength="4" dir="ltr"']];
+/* 2026-11-10 (סעיף 2): עסק עם ניוד – "+" מוסיף משבצת כרטיס נוספת (עד 3 כרטיסים ללקוח בסה"כ, כולל השמורים). כפוף למתג ordCard */
+const cdMore=c=>{if(!cell())return '';const M=CD.more||[],room=3-(c?cardsOf(c).length:0)-1-M.length;
+ return M.map((m,i)=>`<div class="card" style="margin:8px 0"><div class="row" style="justify-content:space-between;align-items:center"><b>כרטיס נוסף ${i+2}</b><button type="button" class="btn g s" data-a="ocCdX" data-n="${i}">הסר</button></div>${CDF.map(([k,l,x])=>`<label class="f"><span>${l}</span><input data-i="ocCdM" data-n="${i}" data-k="${k}" autocomplete="off" ${x} value="${esc(m[k]||'')}"></label>`).join('')}</div>`).join('')
+  +(room>0?'<button type="button" class="btn g s w" data-a="ocCdAdd">＋ כרטיס אשראי נוסף</button>':'')};
+ACT.ocCdAdd=()=>{const D=O.draft;if(!D)return;if(CD.d!==D)cdReset(D);CD.more.push({});rerender();setTimeout(()=>{const d=document.getElementById('occd');if(d)d.open=true},0)};
+ACT.ocCdX=el=>{CD.more&&CD.more.splice(+el.dataset.n,1);rerender();setTimeout(()=>{const d=document.getElementById('occd');if(d)d.open=true},0)};
+INP.ocCdM=el=>{const m=(CD.more||[])[+el.dataset.n];if(m)m[el.dataset.k]=el.value};
+const cdOut=(o,lb)=>{if(!['num','exp','name','cvv'].some(k=>String(o[k]||'').trim()))return null;const n=String(o.num||'').replace(/[\s-]/g,'');if(!/^\d{13,19}$/.test(n))throw new Error(lb+'מספר כרטיס: 13 עד 19 ספרות');
+ const card={num:n},e=String(o.exp||'').trim(),v=String(o.cvv||'').trim(),nm=String(o.name||'').trim();if(e){const t=CEXP(e);if(!t)throw new Error(lb+'תוקף: חודש/שנה (MM/YY)');card.exp=t}if(v){if(!/^\d{3,4}$/.test(v))throw new Error(lb+'קוד אבטחה: 3 או 4 ספרות');card.cvv=v}if(nm){if(!CNAME(nm))throw new Error(lb+'שם בעל הכרטיס: עד 60 תווים, בלי מספרים');card.name=nm}return card};
 INP.ocCd=el=>{const D=O.draft;if(!D)return;if(CD.d!==D)cdReset(D);CD[el.dataset.k]=el.value};
 // טלפון בהזמנה: טלפון תקין → חיפוש הלקוחות שלו. שינוי טלפון אחרי בחירת לקוח – מנתק את הקישור (הפרטים שהוקלדו נשארים)
-const phSearch=D=>{const p=phN(D.phone);if(D.custId&&(!D.cFrom||D.cFrom.phone!==p)){const ph=D.phone,tz=D.cFrom&&D.cFrom.tz;if(tz&&dig(D.tz)===tz)D.tz='';dropLoaded(D);D.phone=ph;D.custId=''}
+const phSearch=D=>{const p=phN(D.phone);if(D.custId&&(!D.cFrom||(D.cFrom.phone!==p&&!(D.cFrom.all||[]).includes(p)&&D.cBy!=='p2'))){const ph=D.phone,tz=D.cFrom&&D.cFrom.tz;if(tz&&dig(D.tz)===tz)D.tz='';dropLoaded(D);D.phone=ph;D.custId=''}
  if(D.custId)return;D.asNew=false;D.cHits=null;if(!p){D.cSt='';paintSt(D);return}
  D.cSt='wait';paintSt(D);const my=D.phSeq=(D.phSeq||0)+1;
  byPhoneAll(p).then(L=>{if(O.draft!==D||D.phSeq!==my||D.custId)return;if(L.length){D.cHits=L;D.cSt='hits'}else D.cSt='new';paintSt(D)}).catch(e=>{D.cSt='';paintSt(D);err(e)})};
@@ -125,34 +140,63 @@ INP.ocTz=el=>{const D=O.draft;if(!D)return;const t=dig(el.value);D.tz=t;if(D.cus
  if(t.length<9){D.cSt='';paintSt(D);return}const z=t.padStart(9,'0');if(!tzOk(z)){D.cSt='bad';paintSt(D);return}
  D.cSt='wait';paintSt(D);const my=z;byTz(z).then(c=>{if(O.draft!==D||dig(D.tz).padStart(9,'0')!==my)return;if(c){fillDraft(D,c);D.cBy='tz';D.cSt='found';rerender()}else{D.cSt='new';paintSt(D)}}).catch(e=>{D.cSt='';paintSt(D);err(e)})};
 const paintSt=D=>{const s=document.getElementById('ocst');if(s)s.outerHTML=custBox(D)};
+/* 2026-11-10: טלפון נוסף בהזמנה (כל העסקים, עד 3). מספר תקין → חיפוש בשרת (byPhoneAll: phone וגם phs).
+   אין לקוח מקושר – הלקוחות שנמצאו מוצגים לבחירה. יש לקוח מקושר והמספר שייך ללקוח אחר – שואלים (שינוי 13:16): לאחד את שני הכרטיסים (mergeCust בשרת),
+   או לבחור לאיזה מהם לשייך את ההזמנה. בשמירה הטלפונים הנוספים נשמרים בהזמנה ומצטרפים ללקוח (phs). */
+const MAXP=3;
+const p2St=D=>{const x=D.p2c;if(!x)return '<div id="ocp2st"></div>';const cur=(C.L||[]).find(c=>c.id===D.custId);
+ return `<div id="ocp2st" role="status" class="card" style="margin:6px 0;border-color:var(--acc)"><p class="note" style="margin:0 0 6px">הטלפון הנוסף <bdi dir="ltr">${esc(x.p)}</bdi> שייך ללקוח אחר. מה לעשות?</p>
+ ${x.L.map(c=>`<div style="margin:4px 0"><b>${cLabel(c)}</b>${badTag(c)}<div class="row" style="margin-top:4px"><button type="button" class="btn s grow" data-a="ocMerge" data-id="${esc(c.id)}">לאחד את שני הכרטיסים</button><button type="button" class="btn g s grow" data-a="ocUseB" data-id="${esc(c.id)}">לשייך ל${esc(c.name||c.bn||'לקוח הזה')}</button></div></div>`).join('')}
+ <button type="button" class="btn g s w" data-a="ocKeepA">לשייך ל${esc(D.cName||(cur&&cur.name)||'לקוח הנוכחי')} (הנוכחי)</button></div>`};
+const p2H=D=>{const L=D.phs||[];return `<div id="ocp2">${L.map((v,i)=>`<div class="row" style="align-items:flex-end"><label class="f grow"><span>טלפון נוסף ${L.length>1?i+1:''}</span><input data-i="ocP2" data-n="${i}" type="tel" inputmode="tel" autocomplete="off" dir="ltr" value="${esc(v)}"></label><button type="button" class="btn g s" data-a="ocP2X" data-n="${i}" aria-label="הסר טלפון נוסף">הסר</button></div>`).join('')}
+ ${L.length<MAXP?'<button type="button" class="btn g s w" data-a="ocP2Add">＋ טלפון נוסף</button>':''}${p2St(D)}</div>`};
+const p2Paint=D=>{const s=document.getElementById('ocp2st');if(s)s.outerHTML=p2St(D)};
+ACT.ocP2Add=()=>{const D=O.draft;if(!D)return;D.phs=(D.phs||[]).concat(['']).slice(0,MAXP);rerender()};
+ACT.ocP2X=el=>{const D=O.draft;if(!D||!D.phs)return;const v=phN(D.phs[+el.dataset.n]);D.phs.splice(+el.dataset.n,1);if(D.p2c&&D.p2c.p===v)D.p2c=null;rerender()};
+INP.ocP2=el=>{const D=O.draft;if(!D||!D.phs)return;D.phs[+el.dataset.n]=el.value;const p=phN(el.value);
+ if(D.p2c&&!D.phs.some(v=>phN(v)===D.p2c.p)){D.p2c=null;p2Paint(D)}
+ if(!p||p===phN(D.phone))return;const my=D.p2Seq=(D.p2Seq||0)+1;
+ byPhoneAll(p).then(L=>{if(O.draft!==D||D.p2Seq!==my)return;const o=L.filter(c=>c.id!==D.custId);if(!o.length)return;
+  if(!D.custId){D.cHits=o;D.cSt='hits';D.cVia=p;paintSt(D);return}
+  D.p2c={p,L:o};p2Paint(D)}).catch(err)};
+const relink=(D,c)=>{const ph=D.phone;fillDraft(D,c);D.phone=ph;D.cBy='p2';D.asNew=false;D.cSt='found';D.p2c=null;rerender()};
+ACT.ocKeepA=()=>{const D=O.draft;if(!D)return;D.p2c=null;rerender()};
+ACT.ocUseB=el=>{const D=O.draft;if(!D||!D.p2c)return;const c=D.p2c.L.find(x=>x.id===el.dataset.id);if(c)relink(D,c)};
+ACT.ocMerge=el=>{const D=O.draft;if(!D||!D.p2c||!D.custId)return;const c=D.p2c.L.find(x=>x.id===el.dataset.id);if(!c)return;
+ ask(`לאחד את "${D.cName||''}" ואת "${c.name||c.bn||''}" ללקוח אחד? הטלפונים, הכתובות, הניודים, הכרטיסים וההזמנות יעברו ללקוח המאוחד.`,async()=>{
+  try{const r=await fnCall('mergeCust',{a:D.custId,b:c.id});const n=await getC(r.id);C.at=0;loadL(true);if(n)relink(D,n);else{D.p2c=null;rerender()}toast('הלקוחות אוחדו')}catch(e){err(e)}},'כן, לאחד')};
 // שמירת הזמנה → קודם הלקוח (fill: רק שדות ריקים; id = הלקוח שנבחר; asNew = לקוח נוסף עם אותו טלפון). כשל בשמירת הלקוח לא עוצר את ההזמנה.
 // לקוח חדש שנשמר – ההזמנה מקושרת אליו (custId)
 {const sv=ACT.oxSave;if(sv)ACT.oxSave=async el=>{const D=O.draft;if(D)joinC(D);
   // סבב 1 (ליקוי 1): לקוח חדש (לא נבחר מהרשימה) – שם פרטי ושם משפחה, כל אחד בנפרד
   if(D&&on()&&!D.custId){if(!String(D.fn||'').trim())return toast('חסר שם פרטי');if(!String(D.ln||'').trim())return toast('חסר שם משפחה')}
+  if(D&&on()){if(D.p2c)return toast('בחרו מה לעשות עם הטלפון הנוסף ששייך ללקוח אחר');const xs=[];for(const v of D.phs||[]){if(!String(v||'').trim())continue;const p=phN(v);if(!p)return toast('טלפון נוסף לא תקין');if(!xs.includes(p))xs.push(p)}D.phs=xs}
   if(D&&on()&&cell()){const b=INF.find(([k])=>k!=='bank'&&cardLike(D[k],1));if(b)return toast(b[1]+': אסור להקליד מספר כרטיס אשראי')}
   // כרטיס מהטופס: בדיקה לפני שמירה (השרת בודק שוב)
-  let card=null;if(D&&on()&&ocOn()&&CD.d===D&&['num','exp','name','cvv'].some(k=>String(CD[k]||'').trim())){const n=String(CD.num||'').replace(/[\s-]/g,'');if(!/^\d{13,19}$/.test(n))return toast('מספר כרטיס: 13 עד 19 ספרות');
-   card={num:n};const e=String(CD.exp||'').trim(),v=String(CD.cvv||'').trim(),nm=String(CD.name||'').trim();if(e){const t=CEXP(e);if(!t)return toast('תוקף: חודש/שנה (MM/YY)');card.exp=t}if(v){if(!/^\d{3,4}$/.test(v))return toast('קוד אבטחה: 3 או 4 ספרות');card.cvv=v}if(nm){if(!CNAME(nm))return toast('שם בעל הכרטיס: עד 60 תווים, בלי מספרים');card.name=nm}
-   const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId);if(c&&cardsOf(c).length>=3)return toast('ללקוח כבר שמורים 3 כרטיסים')}
+  let cards=[];if(D&&on()&&ocOn()&&CD.d===D){try{const a=cdOut(CD,'');if(a)cards.push(a);(cell()?CD.more||[]:[]).forEach((m,i)=>{const x=cdOut(m,'כרטיס נוסף '+(i+2)+': ');if(x)cards.push(x)})}catch(e){return toast(e.message)}
+   if(cards.some((x,i)=>cards.findIndex(y=>y.num===x.num)!==i))return toast('אותו מספר כרטיס הוקלד פעמיים');
+   const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId);if(cards.length&&(c?cardsOf(c).length:0)+cards.length>3)return toast(c&&cardsOf(c).length>=3?'ללקוח כבר שמורים 3 כרטיסים':'עד 3 כרטיסים ללקוח (כולל השמורים)')}
   if(D&&on()){const tz=dig(D.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');
-   const p=phN(D.phone);if(p&&String(D.name||'').trim()&&D.items&&D.items.length){const c={};if(!NP.some(k=>String(D[k]||'').trim()))c.name=D.name.trim();c.phone=p;if(tz)c.tz=tz;if(D.mail)c.mail=D.mail.trim();CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)c[k]=v});if(D.addr&&!AP.some(k=>c[k]))c.addr=D.addr.trim();
+   const p=phN(D.phone);if(p&&String(D.name||'').trim()&&D.items&&D.items.length){const c={};if(!NP.some(k=>String(D[k]||'').trim()))c.name=D.name.trim();c.phone=p;if(tz)c.tz=tz;
+    // 2026-11-10: הלקוח נמצא לפי טלפון נוסף – הטלפון הראשי שלו לא משתנה, והמספר שהוקלד מצטרף לטלפונים הנוספים
+    const xp=(D.phs||[]).slice();if(D.custId&&D.cFrom&&D.cFrom.phone&&D.cFrom.phone!==p){c.phone=D.cFrom.phone;xp.unshift(p)}{const q=xp.filter((x,i)=>x!==c.phone&&xp.indexOf(x)===i).slice(0,3);if(q.length)c.phs=q}if(D.mail)c.mail=D.mail.trim();CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)c[k]=v});if(D.addr&&!AP.some(k=>c[k]))c.addr=D.addr.trim();
     // 2026-11-10: שדות מידע – לקוח חדש: עם הלקוח; לקוח קיים: רק מה ששונה, כעריכה (לא רק שדות ריקים)
     const ch={};if(cell())INFK.forEach(k=>{const v=String(D[k]||'').trim();if(D.custId){if(D.cInf&&v!==String(D.cInf[k]||'').trim())ch[k]=v}else if(v)c[k]=v});
     const a={fill:true,cust:c};if(D.custId)a.id=D.custId;else if(D.asNew)a.asNew=true;
     try{const r=await fnCall('saveCust',a);C.at=0;if(!D.custId&&r&&r.id){D.custId=r.id;D.asNew=false}
      if(D.custId&&Object.keys(ch).length&&a.id){await fnCall('saveCust',{id:D.custId,cust:ch});D.cInf=Object.assign({},D.cInf,ch)}}catch(e){toast('ההזמנה נשמרת, אבל פרטי הלקוח לא נשמרו: '+(e.message||''))}}}
   const r=await sv(el);
-  if(card&&D){const cid=D.custId;cdReset(null);if(r&&r.id){if(!cid)setTimeout(()=>toast('ההזמנה נשמרה, אבל הכרטיס לא נשמר: אין לקוח מקושר'),3000);
-   else try{const x=await fnCall('setCard',{custId:cid,card,ordId:r.id,add:true});setTimeout(()=>toast('הכרטיס ****'+esc(x&&x.last4||'')+' נשמר מוצפן ללקוח'),3000);C.at=0;loadL(true)}catch(e){setTimeout(()=>toast('ההזמנה נשמרה, אבל הכרטיס לא נשמר: '+(e.message||'')),3000)}}}
-  card=null;return r}}
+  if(cards.length&&D){const cid=D.custId;cdReset(null);if(r&&r.id){if(!cid)setTimeout(()=>toast('ההזמנה נשמרה, אבל הכרטיס לא נשמר: אין לקוח מקושר'),3000);
+   else{const ok=[],bad=[];for(const card of cards){try{const x=await fnCall('setCard',{custId:cid,card,ordId:r.id,add:true});ok.push('****'+(x&&x.last4||''))}catch(e){bad.push(e.message||'')}}
+    setTimeout(()=>toast(bad.length?'ההזמנה נשמרה, אבל '+(ok.length?'חלק מהכרטיסים':'הכרטיס')+' לא נשמר: '+bad[0]:(ok.length>1?'הכרטיסים ':'הכרטיס ')+ok.join(', ')+' נשמר מוצפן ללקוח'),3000);C.at=0;loadL(true)}}}
+  cards=[];return r}}
 
 /* ---------- כניסה: כפתור "לקוחות" במסך ההזמנות ---------- */
 {const ox=V.ox;if(ox)V.ox=()=>{const r=ox();if(on()&&r&&r.h&&r.h.includes('data-v="oxStock"'))r.h=r.h.replace(/(<button class="btn g grow" data-a="go" data-v="oxStock">מלאי<\/button>)/,'$1<button class="btn g grow" data-a="go" data-v="ocList">לקוחות</button>');return r}}
 
 /* ---------- רשימת לקוחות ---------- */
 const crow=c=>`<button class="li" data-a="go" data-v="ocCard" data-arg="${esc(c.id)}"><div class="m"><b>${cLabel(c)}</b>${badTag(c)}<small dir="ltr" style="text-align:right">${esc(c.phone||c.bph||'')}${c.tz||c.btz?' · '+esc(c.tz||c.btz):''}</small></div>${ico('chev')}</button>`;
-const match=(c,q)=>!q||String(c.name||'').includes(q)||String(c.bn||'').includes(q)||String(c.phone||'').includes(dig(q)||'\u0000')||String(c.tz||'').includes(dig(q)||'\u0000')||dig(c.bph).includes(dig(q)||'\u0000')||dig(c.btz).includes(dig(q)||'\u0000');
+const match=(c,q)=>!q||String(c.name||'').includes(q)||String(c.bn||'').includes(q)||String(c.phone||'').includes(dig(q)||'\u0000')||phsOf(c).some(p=>p.includes(dig(q)||'\u0000'))||String(c.tz||'').includes(dig(q)||'\u0000')||dig(c.bph).includes(dig(q)||'\u0000')||dig(c.btz).includes(dig(q)||'\u0000');
 const listH=()=>{const L=(C.L||[]).filter(c=>match(c,C.q.trim()));return L.slice(0,200).map(crow).join('')+(L.length>200?`<p class="note">מוצגים 200 מתוך ${L.length}. חפשו כדי לצמצם.</p>`:'')||'<div class="empty">אין לקוחות</div>'};
 V.ocList=()=>{const T='לקוחות';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
  return{t:T,s:C.L.length+' לקוחות',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button></div>
@@ -171,7 +215,7 @@ V.ocCard=id=>{const T='לקוח';if(!on())return{t:T,h:'<div class="empty">אי�
  const L=ordsOf(c);
  return{t:c.name||c.bn||T,s:c.wholesale===true?'לקוח עסקי (סיטונאי)':'לקוח רגיל',h:`<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(c.name||c.bn||'')}</b>${c.wholesale===true?WSTAG:''}</div>${badOf(c).length?`<p class="note" style="margin:4px 0" data-bad="1">${RED('פרט לא תקין: '+esc(badOf(c).join(', '))+' – נשמר כמו שהוא מהקובץ')}</p>`:''}
  ${c.bn&&c.bn!==c.name?`<p class="note" style="margin:0">שם העסק: ${esc(c.bn)}</p>`:''}${c.vat?`<p class="note" style="margin:0">ע.מ ${esc(c.vat)}</p>`:''}${c.ct?`<p class="note" style="margin:0">איש קשר: ${esc(c.ct)}</p>`:''}${c.pay?`<p class="note" style="margin:0">תנאי תשלום: ${esc(payTxt(c))}</p>`:''}
- ${c.phone?`<p style="margin:6px 0"><a href="tel:${esc(c.phone||'')}" dir="ltr" style="color:var(--acc);display:inline-flex;min-height:44px;align-items:center">${esc(c.phone||'')}</a></p>`:''}${c.bph?`<p class="note" style="margin:0" data-bad="ph">טלפון <bdi dir="ltr">${esc(c.bph)}</bdi> ${BADT}</p>`:''}
+ ${c.phone?`<p style="margin:6px 0"><a href="tel:${esc(c.phone||'')}" dir="ltr" style="color:var(--acc);display:inline-flex;min-height:44px;align-items:center">${esc(c.phone||'')}</a></p>`:''}${phsOf(c).length?`<p class="note" style="margin:0">טלפון נוסף: ${phsOf(c).map(p=>`<a href="tel:${esc(p)}" dir="ltr" style="color:var(--acc)">${esc(p)}</a>`).join(', ')}</p>`:''}${c.bph?`<p class="note" style="margin:0" data-bad="ph">טלפון <bdi dir="ltr">${esc(c.bph)}</bdi> ${BADT}</p>`:''}
  ${c.tz?`<p class="note" style="margin:0">ת.ז ${esc(c.tz)}</p>`:''}${c.btz?`<p class="note" style="margin:0" data-bad="tz">ת.ז ${esc(c.btz)} ${BADT}</p>`:''}${c.mail?`<p class="note" style="margin:0" dir="ltr">${esc(c.mail)}</p>`:''}${c.bml?`<p class="note" style="margin:0" data-bad="ml">מייל <bdi dir="ltr">${esc(c.bml)}</bdi> ${BADT}</p>`:''}${c.addr?`<p class="note" style="margin:0">${esc(c.addr)}</p>`:''}
  ${cardsOf(c).length?cardsOf(c).map(k=>`<p class="note" style="margin:0">כרטיס ****${esc(k.last4||'')} · שמור מוצפן</p>`).join(''):c.last4?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4)}</p>`:''}${cell()&&INFK.some(k=>c[k])?'<p class="note" style="margin:6px 0 0"><b>פרטים נוספים</b></p>'+INF.filter(([k])=>c[k]).map(([k,l])=>`<p class="note" style="margin:0;white-space:pre-wrap" dir="auto">${l}: ${esc(c[k])}</p>`).join(''):''}${cell()&&portsOf(c).length?'<p class="note" style="margin:6px 0 0"><b>ניודים קודמים</b></p>'+portsOf(c).map(p=>`<p class="note" style="margin:0">${portTxt(p)}</p>`).join(''):''}${xs}</div>
  <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocEdit" data-id="${esc(c.id)}">עריכת פרטים</button>${mgr()?`<button class="btn g grow" data-a="ocWs" data-id="${esc(c.id)}">${c.wholesale===true?'הפוך ללקוח רגיל':'סמן כלקוח עסקי (סיטונאי)'}</button>`:''}</div>
@@ -233,7 +277,7 @@ const bizH=c=>{const v=k=>c&&c[k]||'',pay=v('pay');return `${fld('שם העסק'
  <div id="ocpayx"${pay==='other'?'':' hidden'}>${fld('פירוט תנאי התשלום','payTxt',v('payTxt'),'text','maxlength="60"')}</div>`};
 CHG.ocPay=el=>{const b=document.getElementById('ocpayx');if(b)b.hidden=el.value!=='other'};
 const cForm=c=>{const x=c&&c.x||{},s=splitOld(c||{},{}),bz=isBiz(c);C.pf=pfOf(c);return `<h3>${c?'עריכת לקוח':'לקוח חדש'}</h3>${c?'':`<div class="row" role="group" aria-label="סוג לקוח" style="margin-bottom:8px"><button type="button" class="btn grow${bz?' g':''}" data-a="ocFt" data-t="reg" aria-pressed="${!bz}">לקוח רגיל</button><button type="button" class="btn grow${bz?'':' g'}" data-a="ocFt" data-t="biz" aria-pressed="${bz}">לקוח עסקי (סיטונאי)</button></div>`}<form data-f="ocF">${bz?'<input type="hidden" name="biz" value="1">':''}${c&&C.wsMark===c.id?'<input type="hidden" name="wsmark" value="1">':''}${s.name?`<input type="hidden" name="oname" value="${esc(s.name)}">`:''}${s.addr?`<input type="hidden" name="oaddr" value="${esc(s.addr)}">`:''}${c?`<input type="hidden" name="id" value="${esc(c.id)}">`:''}
- ${bz?bizH(c):''}${(s.name&&!bz?`<p class="note">שם קיים: ${esc(s.name)} (נשמר כמו שהוא אם משאירים ריקים את השם הפרטי ושם המשפחה)</p>`:'')+(bz?'':fld('שם פרטי','fn',s.fn||'','text',(s.name?'':'required ')+'maxlength="30"')+fld('שם משפחה','ln',s.ln||'','text',(s.name?'':'required ')+'maxlength="30"'))}${c&&!c.phone&&c.bph?`<input type="hidden" name="obph" value="${esc(c.bph)}">`:''}${fld('טלפון'+(c&&!c.phone&&c.bph?' '+BADT:''),'phone',c&&(c.phone||c.bph)||'','tel','inputmode="tel"'+(!c||c.phone?' required':'')+(c&&/^p/.test(c.id)?' readonly':''))}
+ ${bz?bizH(c):''}${(s.name&&!bz?`<p class="note">שם קיים: ${esc(s.name)} (נשמר כמו שהוא אם משאירים ריקים את השם הפרטי ושם המשפחה)</p>`:'')+(bz?'':fld('שם פרטי','fn',s.fn||'','text',(s.name?'':'required ')+'maxlength="30"')+fld('שם משפחה','ln',s.ln||'','text',(s.name?'':'required ')+'maxlength="30"'))}${c&&!c.phone&&c.bph?`<input type="hidden" name="obph" value="${esc(c.bph)}">`:''}${fld('טלפון'+(c&&!c.phone&&c.bph?' '+BADT:''),'phone',c&&(c.phone||c.bph)||'','tel','inputmode="tel"'+(!c||c.phone?' required':'')+(c&&/^p/.test(c.id)?' readonly':''))}${fld('טלפונים נוספים (מופרדים בפסיק, עד 3)','phs',phsOf(c).join(', '),'tel','inputmode="tel" dir="ltr"')}
  ${c&&!c.tz&&c.btz?`<input type="hidden" name="obtz" value="${esc(c.btz)}">`:''}${fld(c&&c.tz?'ת.ז':c&&c.btz?'ת.ז '+BADT:'ת.ז (רק ללקוח עם ניוד קווים – רשות)','tz',c&&(c.tz||c.btz)||'','text','inputmode="numeric" maxlength="'+(c&&!c.tz&&c.btz?20:9)+'" autocomplete="off"'+(c&&c.tz?' readonly':''))}
  ${c&&!c.mail&&c.bml?`<input type="hidden" name="obml" value="${esc(c.bml)}">`:''}${fld('מייל'+(c&&!c.mail&&c.bml?' '+BADT:''),'mail',c&&(c.mail||c.bml)||'',c&&!c.mail&&c.bml?'text':'email','dir="ltr"')}${(s.addr?`<p class="note">כתובת קיימת: ${esc(s.addr)} (נשמרת כמו שהיא אם לא ממלאים רחוב/עיר)</p><label class="row" style="min-height:44px;gap:8px"><input type="checkbox" name="odel" value="1">מחק את הכתובת הקיימת</label>`:'')+fld(bz?'כתובת (רחוב ומספר)':'רחוב ומספר','st',s.st||'','text',(bz?'required ':'')+'maxlength="80"')}${fld('עיר','city',s.city||'','text',(bz?'required ':'')+'maxlength="40"')}<div class="row"><div class="grow">${fld('קומה','fl',s.fl||'','text','maxlength="10"')}</div><div class="grow">${fld('דירה','apt',s.apt||'','text','maxlength="10"')}</div></div>
  ${fld('4 ספרות אחרונות של כרטיס (רשות)','last4',c&&c.last4||'','text','inputmode="numeric" maxlength="4" autocomplete="off"')}
@@ -260,7 +304,7 @@ FRM.ocF=async f=>{pRead();const v=fd(f),bz=!!v.biz;if(CPK.concat(['bn','ct','pay
   if(bzReq){if(!t)return toast('חסר ע.מ');if(e('ct'))return toast('חסר איש קשר');if(e('st'))return toast('חסרה כתובת');if(e('city'))return toast('חסרה עיר');if(e('pay'))return toast('בחרו תנאי תשלום')}
   if(v.pay==='other'&&!String(v.payTxt||'').trim())return toast('כתבו את תנאי התשלום')}
  else{if(!v.fn.trim()&&(!v.oname||v.ln.trim()))return toast(v.oname?'ממלאים שם פרטי, או משאירים את שני שדות השם ריקים כדי לשמור את השם הקיים':'חסר שם פרטי');if(v.fn.trim()&&!v.ln.trim())return toast('חסר שם משפחה')}
- const c={};if(ph)c.phone=ph;if(cell())c.ports=P;const old=(C.L||[]).find(x=>x.id===v.id)||{};
+ const c={};if(ph)c.phone=ph;if(cell())c.ports=P;{const raw=String(v.phs||'').split(/[,;]/).map(x=>x.trim()).filter(Boolean),xs=[];for(const x of raw){const q=phN(x);if(!q)return toast('טלפון נוסף לא תקין: '+x);if(!xs.includes(q))xs.push(q)}if(xs.length>3)return toast('עד 3 טלפונים נוספים');const old0=(C.L||[]).find(x=>x.id===v.id);if(xs.length||phsOf(old0).length)c.phs=xs}const old=(C.L||[]).find(x=>x.id===v.id)||{};
  if(ph&&old.bph&&!old.phone)c.bph='';if(tz&&old.btz&&!old.tz)c.btz=''; /* סבב 2: ערך לא תקין נמחק רק כשהמשתמש החליף אותו (השדה הציג אותו) */if(String(v.mail||'').trim()&&old.bml)c.bml='';
  if(cell())INFK.forEach(k=>{const s=String(v[k]||'').trim();if(s)c[k]=s;else if(v.id&&old[k])c[k]=''});if(tz)c.tz=tz;CPK.forEach(n=>c[n]=(v[n]||'').trim());if(!c.fn&&!c.ln){delete c.fn;delete c.ln;if(v.oname)c.name=v.oname}
  if(bz){c.bn=v.bn.trim();['vat','ct','pay'].forEach(n=>{c[n]=String(v[n]||'').replace(n==='vat'?/[\s-]/g:/^$/,'').trim()});if(v.pay==='other')c.payTxt=v.payTxt.trim();['vat','ct','pay'].forEach(n=>{if(!c[n])delete c[n]})}if(!AP.some(n=>c[n])){AP.forEach(n=>delete c[n]);const had=f.querySelector('[name=id]')&&(v.oaddr||C.ea);if(v.oaddr&&!v.odel)c.addr=v.oaddr;else if(had)c.addr=''}['mail'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;

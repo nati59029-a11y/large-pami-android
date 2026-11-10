@@ -491,4 +491,74 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).status, 'OK');
     assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).reason, 'card-quota');
   });
+  it('2026-11-10 סעיף 1: ייבוא – שני כרטיסים שונים עם אותן 4 ספרות נשמרים שניהם; אותו מספר מלא לא מוכפל (גם בייבוא חוזר)', async () => {
+    const rows = [{ name: 'א', phone: '0501111111', cards: [{ num: '4580123456789012' }, { num: '4580000000009012' }] }];
+    let r = await call('importCusts', MGR, { reqId: rid(), rows });
+    assert.equal(r.status, 'OK', r.text); assert.ok(!r.text.includes('4580000000009012'));
+    assert.deepEqual((await get(`b/${A}/cust/p0501111111`)).cards, [{ s: 1, last4: '9012' }, { s: 2, last4: '9012' }]);
+    r = await call('importCusts', MGR, { reqId: rid(), rows });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.cardSkip, 0);
+    assert.equal((await get(`b/${A}/cust/p0501111111`)).cards.length, 2);
+    assert.equal((await call('getCard', MGR, { custId: 'p0501111111', act: 'view', slot: 2 })).result.card.num, '4580000000009012');
+  });
+  it('2026-11-10 טלפון נוסף: phs נשמר (עד 3, בלי הראשי), fill מצרף, עריכה מחליפה; שאילתה array-contains מוצאת; הזמנה שומרת phs וכתובת משלוח', async () => {
+    let r = await call('saveCust', E1, { cust: { name: 'רון', phone: '0501111111', phs: ['052-2222222', '0501111111'] } });
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual((await get(`b/${A}/cust/p0501111111`)).phs, ['0522222222']);
+    r = await call('saveCust', E1, { fill: true, id: 'p0501111111', cust: { phone: '0501111111', phs: ['0533333333', '0522222222'] } });
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual((await get(`b/${A}/cust/p0501111111`)).phs, ['0522222222', '0533333333']);
+    assert.equal((await call('saveCust', E1, { cust: { name: 'x', phone: '0501111111', phs: ['0521', '0522'] } })).reason, 'bad-phone');
+    assert.equal((await call('saveCust', E1, { cust: { name: 'x', phone: '0541111111', phs: ['0521111111', '0522222221', '0523333331', '0524444441'] } })).reason, 'bad-phs');
+    let q = []; await prep(async (d) => { q = (await d.collection(`b/${A}/cust`).where('phs', 'array-contains', '0533333333').get()).docs.map((x) => x.id); });
+    assert.deepEqual(q, ['p0501111111']);
+    await assertSucceeds(db(E1).collection(`b/${A}/cust`).where('phs', 'array-contains', '0533333333').get());
+    r = await call('saveCust', MGR, { id: 'p0501111111', cust: { phs: [] } });
+    assert.equal(r.status, 'OK', r.text); assert.equal((await get(`b/${A}/cust/p0501111111`)).phs, undefined);
+    const o = await call('createOrder', E1, { reqId: rid(), br: 'br1', custId: 'p0501111111', cust: { name: 'רון', phone: '0501111111', st: 'הרצל 1', city: 'אשדוד', phs: ['0522222222'], ship: { st: 'הגפן 5', city: 'אשקלון', fl: '2' } }, items: [{ n: 'זר', qty: 1, price: 5 }] });
+    assert.equal(o.status, 'OK', o.text);
+    const od = await get(`b/${A}/ord/${o.result.id}`);
+    assert.deepEqual(od.cust.phs, ['0522222222']); assert.equal(od.cust.addr, 'הרצל 1, אשדוד');
+    assert.deepEqual(od.cust.ship, { st: 'הגפן 5', city: 'אשקלון', fl: '2', addr: 'הגפן 5, אשקלון, קומה 2' });
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: { name: 'x', phone: '0501111111', ship: { city: 'אשקלון' } }, items: [{ n: 'זר', qty: 1, price: 5 }] })).reason, 'bad-ship');
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: { name: 'x', phone: '0501111111', ship: { st: 'הגפן 45801234' } }, items: [{ n: 'זר', qty: 1, price: 5 }] })).reason, 'card-like');
+    // לקוח ישן בלי phs – לא משתנה מעצם הקריאה
+    await prep((d) => d.doc(`b/${A}/cust/p0509999999`).set({ name: 'ישן', phone: '0509999999' }));
+    r = await call('saveCust', E1, { fill: true, id: 'p0509999999', cust: { phone: '0509999999' } });
+    assert.equal(r.result.same, true);
+  });
+  it('2026-11-10 שינוי 13:16: mergeCust – מאחד שדות, טלפונים, ניודים, כרטיסים והזמנות; השני מסומן mv; התנגשויות נחסמות', async () => {
+    await prep((d) => d.doc('b/' + A).update({ 'features.cellular': true }));
+    await call('saveCust', MGR, { cust: { name: 'דנה', phone: '0501111111', tz: TZ, st: 'הרצל 1' } });
+    await call('saveCust', MGR, { cust: { name: 'דנה ל', phone: '0522222222', mail: 'd@x.co', phs: ['0533333333'], ports: [{ d: '2026-01-01', phone: '0544444444' }] } });
+    await call('setCard', MGR, { custId: 'p0522222222', card: CARD });
+    await call('setCard', MGR, { custId: 't' + TZ, card: { num: '5326100020003456' } });
+    await mkOrd('oM1', 'new', 'br1', 'p0522222222'); await mkOrd('oM2', 'paid', 'br1', 'p0522222222');
+    // עובד עם ord מורשה; היעד = בעל הת"ז גם כשהוא נשלח כ-b
+    const r = await call('mergeCust', E1, { a: 'p0522222222', b: 't' + TZ });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.id, 't' + TZ); assert.ok(!leak(r.text));
+    const t = await get(`b/${A}/cust/t${TZ}`);
+    assert.equal(t.name, 'דנה'); assert.equal(t.mail, 'd@x.co'); assert.equal(t.st, 'הרצל 1');
+    assert.deepEqual(t.phs, ['0522222222', '0533333333']);
+    assert.deepEqual(t.ports, [{ d: '2026-01-01', phone: '0544444444' }]);
+    assert.deepEqual(t.cards, [{ s: 1, last4: '3456' }, { s: 2, last4: '9012' }]);
+    assert.equal((await call('getCard', MGR, { custId: 't' + TZ, act: 'view', slot: 2 })).result.card.num, '4580123456789012');
+    const old = await get(`b/${A}/cust/p0522222222`); assert.equal(old.mv, 't' + TZ); assert.equal(old.card, undefined); assert.equal(old.mail, 'd@x.co');
+    assert.equal(await get(`b/${A}/cust/p0522222222/p/card`), null);
+    assert.equal((await get(`b/${A}/ord/oM1`)).custId, 't' + TZ); assert.equal((await get(`b/${A}/ord/oM2`)).custId, 't' + TZ);
+    assert.ok((await coll(`b/${A}/cardLog`)).some((x) => x.act === 'merge' && x.cust === 't' + TZ && x.from === 'p0522222222' && x.ords === 2));
+    assert.equal((await call('mergeCust', E1, { a: 'p0522222222', b: 't' + TZ })).reason, 'no-cust'); // כבר אוחד
+    // ת"ז שונות
+    await call('saveCust', MGR, { cust: { name: 'ב', phone: '0555555555', tz: TZ2 } });
+    assert.equal((await call('mergeCust', E1, { a: 't' + TZ2, b: 't' + TZ })).reason, 'merge-tz');
+    // יותר מ-3 כרטיסים
+    await call('saveCust', MGR, { cust: { name: 'ג', phone: '0566666666' } });
+    await call('setCard', MGR, { custId: 'p0566666666', card: { num: '4111111111111111' } }); await call('setCard', MGR, { custId: 'p0566666666', card: { num: '4000000000000002' }, slot: 2 });
+    const m = await call('mergeCust', E1, { a: 't' + TZ, b: 'p0566666666' });
+    assert.equal(m.reason, 'merge-cards'); assert.match(m.text, /3/);
+    assert.equal((await get(`b/${A}/cust/p0566666666`)).mv, undefined);
+    // בלי הרשאת הזמנות – נחסם
+    assert.equal((await call('mergeCust', NOORD, { a: 't' + TZ, b: 'p0566666666' })).status, 'PERMISSION_DENIED');
+    assert.equal((await call('mergeCust', E1, { a: 't' + TZ, b: 't' + TZ })).reason, 'same-cust');
+  });
 });
