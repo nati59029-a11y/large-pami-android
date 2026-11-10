@@ -276,7 +276,7 @@ service cloud.firestore {
         && nowOk(nw().cr)
         && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000;
       allow update: if isManager()
-        || (isStaff() && (workerUpd() || commentMark() || ncMark() || claim() || wpMark() || rdMark()));
+        || (isStaff() && (rdMark() || claim() || wpMark() || ncMark() || commentMark() || workerUpd()));
       allow delete: if isManager();
 
       // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
@@ -1057,7 +1057,7 @@ service cloud.firestore {
           && nowOk(nw().cr)
           && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000);
         allow update: if feat('tasks') && (bMgr()
-          || (bStaff() && (workerUpd() || commentMark() || ncMark() || claim() || wpMark() || rdMark())));
+          || (bStaff() && (rdMark() || claim() || wpMark() || ncMark() || commentMark() || workerUpd())));
         allow delete: if feat('tasks') && (bMgr());
 
         match /c/{cid} {
