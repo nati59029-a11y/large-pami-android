@@ -750,7 +750,7 @@ async function restoreCusts(request) {
   return r;
 }
 const FNS = { setCustCfg, wipeCusts, restoreCusts };
-for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
+for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(['wipeCusts', 'restoreCusts'].includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f)); // 11.11.2026: אלפי לקוחות
 const SFNS = { saveCust, importCusts, setCard, getCard, delCard, mergeCust }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY], ...(k === 'importCusts' ? { timeoutSeconds: 540, memory: '512MiB' } : {}) }, wrap(k, f)); // ייבוא גדול: 60 שניות לא מספיקות (10.11)
 Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });

@@ -313,53 +313,76 @@ async function stockSet(request) {
 // אותו מנגנון (wipeAll/restoreAll) משמש גם למחיקת כל הלקוחות (customers.js: cust → custBak, כולל p/card* המוצפנים כמו שהם).
 const WIPE_WORD = 'מחק';
 const CHUNK = 400;
-async function inChunks(db, ops) { for (let i = 0; i < ops.length; i += CHUNK) { const b = db.batch(); ops.slice(i, i + CHUNK).forEach((f) => f(b)); await b.commit(); } }
+// groups = מערך של קבוצות פעולות; קבוצה (מסמך + תת־אוסף p שלו) תמיד באותו batch – כשל באמצע לא מפריד ביניהם
+async function inChunks(db, groups) {
+  let b = db.batch(), k = 0;
+  for (const g of groups) {
+    if (k && k + g.length > CHUNK) { await b.commit(); b = db.batch(); k = 0; }
+    g.forEach((f) => f(b)); k += g.length;
+  }
+  if (k) await b.commit();
+}
+const BAK_OK = ['done', 'wiped'];
+// גיבוי אחרון שאפשר לשחזר ממנו (מדלגים על גיבוי חלקי – partial – שנכתב בזמן תקלה, לפני שנמחק משהו)
+async function lastBak(db, bak) {
+  const q = await db.collection(bak).orderBy('at', 'desc').limit(20).get();
+  return q.docs.find((d) => d.get('st') !== 'partial') || null;
+}
 // כללי: מחיקת כל המסמכים באוסף coll (כולל תת־אוסף p) אחרי גיבוי מלא ל-bak. mark = מסמך כפילות הבקשה (reqId)
+// st: partial (נכתב) → done (הגיבוי שלם, מוחקים) → wiped (המחיקה הסתיימה) → restored.
+// מחיקה שנעצרה באמצע (הגיבוי האחרון done): ניסיון חוזר ממשיך את אותו גיבוי – לא נוצר גיבוי חדש של מה שנשאר בלבד.
 async function wipeAll(db, w, input, coll, bak, mark, label) {
   if (input.confirm !== WIPE_WORD) throw bad('bad-confirm', `כדי למחוק את כל ${label} יש להקליד "${WIPE_WORD}"`);
   const m = await mark.get();
   if (m.exists) return { ok: true, dup: true, n: m.get('n') || 0 };
   const now = Date.now();
   const all = await db.collection(coll).get();
-  if (all.empty) { await mark.set({ t: now, by: w.uid, k: 'wipe:' + coll, n: 0 }); return { ok: true, dup: false, n: 0 }; }
+  const last = await lastBak(db, bak);
+  const resume = !!last && last.get('st') === 'done';
+  if (all.empty) {
+    if (resume) await last.ref.update({ st: 'wiped' });
+    await mark.set({ t: now, by: w.uid, k: 'wipe:' + coll, n: 0 }); return { ok: true, dup: false, n: 0 };
+  }
   const subs = [];
   for (let i = 0; i < all.docs.length; i += 50) subs.push(...await Promise.all(all.docs.slice(i, i + 50).map((d) => d.ref.collection('p').get())));
-  const bref = db.collection(bak).doc();
-  await bref.set({ at: now, by: w.uid, byName: w.name || '', n: all.size, st: 'partial' });
-  await inChunks(db, all.docs.map((d, i) => (b) => {
+  const bref = resume ? last.ref : db.collection(bak).doc();
+  let have = new Set();
+  if (resume) have = new Set((await bref.collection('items').select().get()).docs.map((x) => x.id));
+  else await bref.set({ at: now, by: w.uid, byName: w.name || '', n: all.size, st: 'partial' });
+  const add = [];
+  all.docs.forEach((d, i) => {
+    if (have.has(d.id)) return; // כבר בגיבוי (ניסיון קודם) – לא דורסים את העותק המקורי
     const p = {}; subs[i].docs.forEach((x) => { p[x.id] = x.data(); });
-    b.set(bref.collection('items').doc(d.id), { d: d.data(), p });
-  }));
-  await bref.update({ st: 'done' }); // מכאן הגיבוי שלם – רק עכשיו מוחקים
-  const del = [];
-  all.docs.forEach((d, i) => { subs[i].docs.forEach((x) => del.push((b) => b.delete(x.ref))); del.push((b) => b.delete(d.ref)); });
-  await inChunks(db, del);
+    add.push([(b) => b.set(bref.collection('items').doc(d.id), { d: d.data(), p })]);
+  });
+  await inChunks(db, add);
+  if (resume) { if (add.length) await bref.update({ n: have.size + add.length }); } else await bref.update({ st: 'done' }); // מכאן הגיבוי שלם – רק עכשיו מוחקים
+  await inChunks(db, all.docs.map((d, i) => subs[i].docs.map((x) => (b) => b.delete(x.ref)).concat([(b) => b.delete(d.ref)])));
+  await bref.update({ st: 'wiped' });
   await mark.set({ t: now, by: w.uid, k: 'wipe:' + coll, n: all.size, bak: bref.id });
-  logger.info('wipe ' + coll, { biz: w.bizId || '', n: all.size, bak: bref.id });
+  logger.info('wipe ' + coll, { biz: w.bizId || '', n: all.size, bak: bref.id, resume });
   return { ok: true, dup: false, n: all.size };
 }
-// כללי: שחזור מהגיבוי האחרון (רק st:'done'). מסמך שקיים כבר לא נדרס
+// כללי: שחזור מהגיבוי האחרון שלם (done/wiped). מסמך שקיים כבר לא נדרס. מסמך ו-p שלו נכתבים יחד, כך שניסיון חוזר אחרי תקלה בטוח
 async function restoreAll(db, w, coll, bak, mark) {
   const m = await mark.get();
   if (m.exists) return { ok: true, dup: true, n: m.get('n') || 0, skip: m.get('skip') || 0 };
-  const q = await db.collection(bak).orderBy('at', 'desc').limit(1).get();
-  if (q.empty) throw pre('no-bak', 'אין גיבוי לשחזור');
-  const b0 = q.docs[0];
+  const b0 = await lastBak(db, bak);
+  if (!b0) throw pre('no-bak', 'אין גיבוי לשחזור');
   if (b0.get('st') === 'restored') throw pre('bak-used', 'הגיבוי האחרון כבר שוחזר');
-  if (b0.get('st') !== 'done') throw pre('bak-partial', 'הגיבוי האחרון לא שלם – אי אפשר לשחזר ממנו');
+  if (!BAK_OK.includes(b0.get('st'))) throw pre('bak-partial', 'הגיבוי האחרון לא שלם – אי אפשר לשחזר ממנו');
   const items = await b0.ref.collection('items').get();
   const refs = items.docs.map((x) => db.collection(coll).doc(x.id));
   const ex = [];
   for (let i = 0; i < refs.length; i += 100) ex.push(...await db.getAll(...refs.slice(i, i + 100)));
-  const ops = []; let n = 0, skip = 0;
+  const groups = []; let n = 0, skip = 0;
   items.docs.forEach((x, i) => {
     if (ex[i].exists) { skip++; return; }
     n++;
     const it = x.data() || {};
-    ops.push((b) => b.set(refs[i], it.d || {}));
-    Object.entries(it.p && typeof it.p === 'object' ? it.p : {}).forEach(([k, v]) => ops.push((b) => b.set(refs[i].collection('p').doc(k), v || {})));
+    groups.push([(b) => b.set(refs[i], it.d || {})].concat(Object.entries(it.p && typeof it.p === 'object' ? it.p : {}).map(([k, v]) => (b) => b.set(refs[i].collection('p').doc(k), v || {}))));
   });
-  await inChunks(db, ops);
+  await inChunks(db, groups);
   const now = Date.now();
   await b0.ref.update({ st: 'restored', rAt: now, rBy: w.uid });
   await mark.set({ t: now, by: w.uid, k: 'restore:' + coll, n, skip, bak: b0.id });
@@ -1402,5 +1425,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
   }
 });
 const FNS = { setCellCfg, saveLinePlan, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
-for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
+const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
+for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f));
 Object.defineProperty(exports, '_core', { enumerable: false, value: { wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

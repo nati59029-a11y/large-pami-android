@@ -338,7 +338,7 @@ describe('מחיקת כל המלאי ושחזור (11.11.2026)', () => {
     assert.equal((await coll(`b/${A}/prod`)).length, 0);
     assert.equal(await get(`b/${A}/prod/pA/p/cost`), null); assert.equal(await get(`b/${A}/prod/pA/p/ws`), null);
     assert.equal((await coll(`b/${A}/cat`)).length, 1); assert.equal((await coll(`b/${A}/stockLog`)).length, 1);
-    const bk = await coll(`b/${A}/stockBak`); assert.equal(bk.length, 1); assert.equal(bk[0].st, 'done'); assert.equal(bk[0].n, 2);
+    const bk = await coll(`b/${A}/stockBak`); assert.equal(bk.length, 1); assert.equal(bk[0].st, 'wiped'); assert.equal(bk[0].n, 2);
     await assertFails(db(MGR).doc(`b/${A}/stockBak/${bk[0].id}`).get());
     await prep((d) => d.doc(`b/${A}/prod/pN`).set({ name: 'חדש', price: 1, on: true, q: {} }));
     const rs = await call('restoreStock', MGR, { reqId: rid() });
@@ -346,6 +346,28 @@ describe('מחיקת כל המלאי ושחזור (11.11.2026)', () => {
     assert.deepEqual((await get(`b/${A}/prod/pA`)).q, { br1: 4 }); assert.equal((await get(`b/${A}/prod/pA/p/cost`)).cost, 6); assert.equal((await get(`b/${A}/prod/pA/p/ws`)).wp, 8);
     assert.equal((await coll(`b/${A}/prod`)).length, 3);
     assert.equal((await call('restoreStock', MGR, { reqId: rid() })).reason, 'bak-used');
+  });
+  it('תקלה באמצע: מחיקה שנעצרה (גיבוי done) – ניסיון חוזר ממשיך את אותו גיבוי; גיבוי partial חדש יותר לא חוסם שחזור; מוצר קיים לא נדרס', async () => {
+    const B = `b/${A}/stockBak`;
+    await prep(async (d) => {
+      // מצב אחרי תקלה: גיבוי שלם של pA+pB (done), pA כבר נמחק, pB נשאר
+      await d.doc(`${B}/k1`).set({ at: 100, by: MGR, n: 2, st: 'done' });
+      await d.doc(`${B}/k1/items/pA`).set({ d: { name: 'עוגה', price: 10, q: { br1: 4 } }, p: { cost: { cost: 6 } } });
+      await d.doc(`${B}/k1/items/pB`).set({ d: { name: 'קפה', price: 12, q: { br2: 2 } }, p: {} });
+      await d.doc(`b/${A}/prod/pB`).set({ name: 'קפה', price: 12, q: { br2: 2 } });
+    });
+    const r = await call('wipeStock', MGR, { reqId: rid(), confirm: 'מחק' });
+    assert.equal(r.status, 'OK', r.text);
+    const bk = await coll(B); assert.equal(bk.length, 1); assert.equal(bk[0].st, 'wiped'); // אותו גיבוי, לא חדש
+    assert.equal((await coll(`b/${A}/prod`)).length, 0);
+    await prep(async (d) => {
+      await d.doc(`${B}/k2`).set({ at: 200, by: MGR, n: 1, st: 'partial' }); // גיבוי שנכשל בכתיבה – לא נמחק כלום
+      await d.doc(`b/${A}/prod/pA`).set({ name: 'עוגה חדשה', price: 99, q: {} });
+    });
+    const rs = await call('restoreStock', MGR, { reqId: rid() });
+    assert.equal(rs.status, 'OK', rs.text); assert.equal(rs.result.n, 1); assert.equal(rs.result.skip, 1);
+    assert.equal((await get(`b/${A}/prod/pA`)).name, 'עוגה חדשה'); assert.equal(await get(`b/${A}/prod/pA/p/cost`), null);
+    assert.deepEqual((await get(`b/${A}/prod/pB`)).q, { br2: 2 });
   });
 });
 
