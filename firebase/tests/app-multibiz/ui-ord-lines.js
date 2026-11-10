@@ -182,7 +182,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.evaluate(() => { SY.role = window.__role0; if (window.__sa0) SY.sa = window.__sa0; });
   check('6 עובד: רואה ועורך חבילות (כולל טווח התראה ומבצע), בלי רשימות', /פרטנר 30/.test(e6) && !/הנחות, תקרות ומבצעים|עריכת הרשימות/.test(e6) && /התראה על ניוד חוזר: 30 יום/.test(e6) && noDays && !!sw6 && sw6.d.days === 30 && !/חבילות ניוד/.test(e6b), { e6: e6.slice(0, 120), sw6: sw6 && sw6.d });
   // 7. ייבוא לקוחות: עמודת סניף הניוד (01:00)
-  await goV('ocList'); await H.settle(page, 300); await page.click('[data-a=ocImp]'); await H.settle(page, 200);
+  await goV('imp'); await H.settle(page, 300); await page.click('#main [data-a=ocImp]'); // 9.11.2026: ייבוא לקוחות – ממרכז הייבוא await H.settle(page, 200);
   const csv = 'שם,טלפון,תאריך ניוד,טלפון ניוד,סניף\nדנה,0501111111,02/01/2025,0521234567,יהודה הנשיא\nיוסי,0502222222,02/01/2025,,סניף לא קיים\n';
   await page.setInputFiles('#dlg input[type=file]', { name: 'c.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) }); await H.settle(page, 500);
   const g7 = await page.inputValue('#dlg select[name=m4]');

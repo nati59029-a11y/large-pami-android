@@ -140,9 +140,9 @@ const dataPath = (u) => decodeURIComponent(new URL(u).pathname).replace(/^.*\/do
       openAdd(); r.add = document.getElementById('sheet').innerText; sheetClose();
       return r;
     });
-    const must = ['משימות', 'הוצאות קבועות', 'הלוואות', 'כרטיסי אשראי', 'ייבוא מאקסל', 'גיבוי ושחזור', 'חשבוניות לתשלום', 'השוואות', 'הגדרות'];
-    const gone = ['מחירים ומבצעים למדף', 'משוב לקוחות', 'בקשות לעדכון האפליקציה', 'סגירת קופה', 'סיכום סגירות קופה', 'העלאת אישור הפקדה', 'סריקת חשבוניות', 'הזמנות אתר'];
-    check('6 מנהל בעסק עם תוספת אחת (tasks): מסך "עוד" מציג את הבסיס ואת "משימות" בלבד; כל שאר התוספות לא ב-DOM', must.every((t) => dom.more.includes(t)) && gone.every((t) => !dom.more.includes(t)), { missing: must.filter((t) => !dom.more.includes(t)), present: gone.filter((t) => dom.more.includes(t)) });
+    const must = ['הוצאות קבועות', 'הלוואות', 'כרטיסי אשראי', 'ייבוא מאקסל', 'גיבוי ושחזור', 'חשבוניות לתשלום', 'השוואות', 'הגדרות'];
+    const gone = ['משימות', 'מחירים ומבצעים למדף', 'משוב לקוחות', 'בקשות לעדכון האפליקציה', 'סגירת קופה', 'סיכום סגירות קופה', 'העלאת אישור הפקדה', 'סריקת חשבוניות', 'הזמנות אתר'];
+    check('6 מנהל בעסק עם תוספת אחת (tasks): מסך "עוד" מציג רק את הבסיס ("משימות" – במסך ה-+); כל שאר התוספות לא ב-DOM', must.every((t) => dom.more.includes(t)) && gone.every((t) => !dom.more.includes(t)), { missing: must.filter((t) => !dom.more.includes(t)), present: gone.filter((t) => dom.more.includes(t)) });
     check('7 בית, הגדרות ותפריט ההוספה: תוספות כבויות לא מוצגות (סריקה, זיהוי חכם, מדף, משוב, קופה); "משימה חדשה" ו"לטיפול" כן', !/סריקה/.test(dom.home) && !/זיהוי חכם/.test(dom.settings) && !/מחירים ומבצעים|משוב לקוחות|סגירת קופה/.test(dom.add) && /משימה חדשה/.test(dom.add) && /לטיפול/.test(dom.add), { home: dom.home.slice(0, 80), add: dom.add.slice(0, 200) });
     await show(page, 'more'); await shot(page, '05-עוד-עסק-עם-תוספת-אחת', true);
     // אין גם בקשות רשת לאוספים של תוספות כבויות

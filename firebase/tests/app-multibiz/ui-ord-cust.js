@@ -139,8 +139,13 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const ws = calls.filter((c) => c.n === 'saveCust').pop();
   check('5 רשימה וכרטיס לקוח (פרטים, שדה חופשי, הזמנות); מנהל מסמן סיטונאי → saveCust wholesale:true; מגע/ניגודיות/גלילה', okAll(ls) && okAll(cdr) && /משה כהן/.test(ls.a.text) && /עיר: אשדוד/.test(cdr.a.text) && /סמן כלקוח עסקי \(סיטונאי\)/.test(cdr.a.text) && wsBlk && ws.d.wholesale === true && ws.d.id === 't' + TZ && ws.d.cust.bn === 'כהן בע"מ' && ws.d.cust.st === 'הרצל 1', { ws: ws.d, l: sum(ls), c: sum(cdr) });
   // 6. ייבוא: קובץ CSV עם עמודת כרטיס מלא ועמודת "סיטונאי"
+  const ih = await screen('מרכז-ייבוא', () => goV('imp'));
+  check('6 מרכז הייבוא (עוד ← ייבוא מאקסל): מוצרים ומלאי, לקוחות, הכנסות והוצאות; מגע/ניגודיות/גלילה (3 ערכות)', okAll(ih) && /מוצרים ומלאי/.test(ih.a.text) && /לקוחות/.test(ih.a.text) && /הכנסות והוצאות/.test(ih.a.text), sum(ih));
+  // 9.11.2026: ייבוא לקוחות עבר למרכז הייבוא (עוד ← ייבוא מאקסל), ולא נמצא יותר ברשימת הלקוחות
   await goV('ocList'); await H.settle(page, 300);
-  await page.click('[data-a=ocImp]'); await H.settle(page, 200);
+  check('6א ברשימת הלקוחות אין כפתור ייבוא (עבר למרכז הייבוא)', !(await page.$('#main [data-a=ocImp]')), null);
+  await goV('imp'); await H.settle(page, 300);
+  await page.click('#main [data-a=ocImp]'); await H.settle(page, 200);
   const csv = 'שם,טלפון,ת.ז,כרטיס,סיטונאי,עיר,מספר מלא,תוקף,CVV\nדנה,0501111111,123456782,4580 1234 5678 9012,כן,אשדוד,,,\nאבי,0505555555,,,,,4012888888881881,07/28,321\nיוסי,521112222,,1234,כן,\nשגוי,abc,,12345,,\nרות,0503333333,,4111.1111.1111.1111,,\nטל,0504444444,,,,רחוב 5326/1000/2000/3456\n';
   await page.setInputFiles('#dlg input[type=file]', { name: 'c.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) }); await H.settle(page, 500);
   await shot('ייבוא-התאמה-a');
