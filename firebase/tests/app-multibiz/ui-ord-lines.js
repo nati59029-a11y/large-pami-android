@@ -255,8 +255,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     await page.evaluate(() => { const g = document.getElementById('dlg'); if (g && g.open) g.close(); window.__oc.L = null; }); await goV('ocCard', 'p0509990000'); await H.settle(page, 900);
     const ct = await page.innerText('#main'); const red = await page.$$eval('#main [data-bad]', (e) => e.length);
     await shot('כרטיס-לקוח-לא-תקין');
-    const okCard = CELLON ? /פרט לא תקין: ת\.ז, מייל, פרטי ניוד/.test(ct) && /פרטי בנק: בנק לדוגמה/.test(ct) && /סטטוס: ממתין/.test(ct) && /תאריך הזמנה: 2026-11-01/.test(ct) && /חברה חברה א/.test(ct) && /נויד בפועל: כן/.test(ct) && /נויד בפועל: לא ידוע/.test(ct) && red >= 3
-      : /פרט לא תקין: ת\.ז, מייל, פרטי ניוד/.test(ct) && !/פרטי בנק|סטטוס:|חברה חברה/.test(ct);
+    const okCard = CELLON ? /פרט לא תקין: ת\.ז, מייל, פרטי ניוד/.test(ct) && /פרטי בנק: בנק לדוגמה/.test(ct) && /סטטוס: ממתין/.test(ct) && /תאריך הזמנה: 2026-11-01/.test(ct) && /חברת ניוד: חברה א/.test(ct) && /נויד בפועל: כן/.test(ct) && /נויד בפועל: לא ידוע/.test(ct) && red >= 3
+      : /פרט לא תקין: ת\.ז, מייל, פרטי ניוד/.test(ct) && !/פרטי בנק|סטטוס:|חברת ניוד/.test(ct);
     check('12 כרטיס לקוח: ' + (CELLON ? 'שדות מידע, חברה ונויד בפועל לכל קו, סימון אדום' : 'בלי cellular – שדות המידע מוסתרים, הסימון נשאר'), okCard, { red, ct: ct.slice(0, 300) });
     await page.click('#main [data-a=ocEdit]'); await H.settle(page, 400); const ft = await page.innerText('#dlg');
     check('12א טופס עריכה: ' + (CELLON ? 'שדות המידע + חברת ניוד/נויד בפועל, ת"ז לא תקינה מסומנת' : 'בלי שדות המידע'), CELLON ? /פרטי בנק/.test(ft) && /חברת ניוד/.test(ft) && /נויד בפועל/.test(ft) && /\(לא תקין\)/.test(ft) : !/פרטי בנק|חברת ניוד/.test(ft), ft.slice(0, 200));
