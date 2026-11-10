@@ -46,13 +46,13 @@ function fakeNative(o) {
   check('1 מנהל במכשיר עם נעילת מסך: המתג "כניסה בטביעת אצבע" מוצג בהגדרות, כבוי', s.btn && s.txt === 'כבוי' && !s.key, s);
   await page.click('[data-a=bioTog]'); await wait(page, 900);
   s = await vis(page);
-  check('2 הפעלה: קודם אימות מוצלח, אחר כך נשמר lp-bio ומופעל FLAG_SECURE (setSecureWindow true)', s.calls.length === 1 && s.key === '1' && s.secure[s.secure.length - 1] === true && !s.cls, s);
+  check('2 הפעלה: קודם אימות מוצלח, אחר כך נשמר lp-bio; צילומי מסך מותרים כברירת מחדל (10.11) – FLAG_SECURE כבוי (setSecureWindow false)', s.calls.length === 1 && s.key === '1' && s.secure[s.secure.length - 1] === false && !s.cls, s);
   await shot(page, '08-הגדרות-מתג-טביעת-אצבע', true);
   // פתיחה מחדש של האפליקציה: מכסה לפני תוכן; ביטול באימות → נסה שוב / התנתק
   await page.evaluate(() => sessionStorage.setItem('__bioQ', JSON.stringify({ results: [{ ok: false, reason: 'cancelled' }] })));
   await page.reload(); await wait(page, 1200);
   s = await vis(page); const first = await page.evaluate(() => window.__bio.first);
-  check('3 בפתיחה: הכיסוי היה במקום לפני שנוסף ל-body תוכן כלשהו, והתוכן מוסתר עד אימות', first && first.cls === true && s.lock && s.mainVis === 'hidden' && s.lockVis === 'visible' && s.secure[0] === true, { first, s });
+  check('3 בפתיחה: הכיסוי היה במקום לפני שנוסף ל-body תוכן כלשהו, והתוכן מוסתר עד אימות', first && first.cls === true && s.lock && s.mainVis === 'hidden' && s.lockVis === 'visible' && s.secure[0] === false, { first, s }); // 10.11: צילומי מסך מותרים כברירת מחדל
   check('4 ביטול באימות: מוצגת הודעה עם "פתיחה" ו"התנתק" (אין נעילה לתמיד), ואין לולאת אימות', s.calls.length === 1 && /אפשר לנסות שוב או להתנתק/.test(s.msg) && await page.evaluate(() => !!document.querySelector('#bzlk [data-a=bioTry]') && !!document.querySelector('#bzlk [data-a=bioLkOut]')), s);
   await shot(page, '09-מסך-נעילה');
   await page.click('#bzlk [data-a=bioTry]'); await wait(page, 700);
