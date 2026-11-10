@@ -54,6 +54,10 @@ let fail = 0; const check = (n, ok, info) => { if (!ok) fail++; console.log((ok 
   await H.settle(p, 300);
   const t = await p.evaluate(() => { const x = S.tx.find((y) => y.id === 'l1'); return { amt: x.amt, inv: x.inv, date: x.date }; });
   check('6 עריכה אחרי קליטה: סכום, מספר חשבונית ותאריך נשמרו', e.amt && e.inv && t.amt === 120 && t.inv === 'NEW-9' && t.date === info.prev + '-07', { e, t });
+  // 8. זיכויים גדולים מהחוב: "יתרת זכות אצל הספק", לא מינוס; ברשימת הספקים "יתרת זכות"
+  await p.evaluate(() => { closeDlg(); S.tx.push({ id: 'c3', t: 'exp', cat: 'e_sup', sub: 'sD', date: today(), amt: -500, kind: 'credit', inv: 'CR3', note: '', pays: [] }); save(); NAV.length = 1; go('card', 'sD'); }); await H.settle(p, 400);
+  const z = await p.evaluate(() => ({ k: document.querySelector('button.k[data-arg="sD|all"]').innerText.replace(/\s+/g, ' '), late: document.querySelector('button.k[data-arg="sD|late"]').innerText.replace(/\s+/g, ' '), b: bsum('sD') }));
+  check('8 זיכויים גדולים מהחוב: "יתרת זכות אצל הספק" בערך חיובי, "באיחור" 0', z.b < 0 && /יתרת זכות אצל הספק/.test(z.k) && !/-/.test(z.k.replace(/‏|‎/g, '')) && /0\.00/.test(z.late), z);
   const errs = (p.__errors || []).filter((x) => !/favicon/.test(x));
   check('7 בלי שגיאות JS', errs.length === 0, errs);
   await browser.close(); console.log(fail ? 'תוצאה: נכשל' : 'תוצאה: הכול עבר'); process.exit(fail ? 1 : 0);
