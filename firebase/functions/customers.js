@@ -34,11 +34,34 @@ const XK_RE = /^x[0-9a-z_]{1,20}$/;
 const MAX_X = 20;
 const MAX_ROWS = 200;
 const MAX_PORTS = 30;
-const portKey = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|'); // br (סניף, 01:00) לא חלק מהמפתח – אותו ניוד מסניף אחר אינו כפילות
+// 2026-11-10: bph/btz (טלפון/ת"ז לא תקינים שנשמרו כמו שהם) חלק מהמפתח – קווים שונים עם ערך לא תקין לא מתאחדים
+const portKey = (r) => [r.d || '', r.phone || '', r.tz || ''].concat(r.bph || r.btz ? [r.bph || '', r.btz || ''] : []).join('|'); // br (סניף, 01:00) לא חלק מהמפתח – אותו ניוד מסניף אחר אינו כפילות
+// 2026-11-10 (ייבוא לקוחות מלא): שדות מידע בכרטיס הלקוח – רק בעסק עם מתג cellular; בלי השפעה על דוחות.
+// bank = טקסט גלוי (החלטת המשתמש, בלי בדיקת ספרות). השאר – חסום רק מספר כרטיס (13–19 ספרות שעוברים ספרת ביקורת), כדי שטלפונים בהערות יישמרו.
+const INFO = [['bank', 300, 'פרטי בנק'], ['prod', 300, 'מוצר'], ['due', 200, 'לתשלום'], ['orig', 100, 'מקור'], ['stat', 200, 'סטטוס'], ['note', 1000, 'הערות'], ['od', 100, 'תאריך הזמנה']];
+const INFO_KEYS = INFO.map((x) => x[0]);
+// סימון "לא תקין": הערך המקורי נשמר כמו שהוא (bph טלפון, btz ת"ז, bml מייל). לא משמש לזיהוי או לאיחוד לקוחות.
+const FLAG = [['bph', 30, 'טלפון (לא תקין)'], ['btz', 20, 'ת.ז (לא תקינה)'], ['bml', 120, 'מייל (לא תקין)']];
+const FLAG_KEYS = FLAG.map((x) => x[0]);
+const PACT = ['y', 'n', 'u']; // נויד בפועל: כן / לא / לא ידוע
 const BIZF = ['bn', 'vat', 'ct', 'pay', 'payTxt']; // לקוח עסקי
 const PAYS = ['cash', 'n30', 'n60', 'n90', 'credit', 'transfer', 'other'];
-const FIELDS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port'].concat(core.CPART_KEYS, BIZF);
-const CKEYS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports'].concat(core.CPART_KEYS);
+const FIELDS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port'].concat(core.CPART_KEYS, BIZF, INFO_KEYS, FLAG_KEYS);
+const CKEYS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports'].concat(core.CPART_KEYS, INFO_KEYS, FLAG_KEYS);
+const NEWK = INFO_KEYS.concat(FLAG_KEYS);
+const hasInfo = (c) => !!c && typeof c === 'object' && (INFO_KEYS.some((k) => c[k] !== undefined) || (Array.isArray(c.ports) && c.ports.some((p) => p && typeof p === 'object' && (p.co !== undefined || p.act !== undefined))));
+// טקסט חופשי בלי בדיקת ספרות (פרטי בנק); plain + חסימת מספר כרטיס (שאר שדות המידע והערכים הלא תקינים)
+function plain(v, max, reason, label) {
+  if (typeof v !== 'string' && typeof v !== 'number') throw bad(reason, label + ' לא תקין');
+  const s = String(v).replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, ' ').replace(/[ \t]+/g, ' ').trim();
+  if (s.length > max) throw bad(reason, `${label} – עד ${max} תווים`);
+  return s;
+}
+function info(v, max, reason, label, lu) {
+  const s = plain(v, max, reason, label);
+  if (core.cardLike(s, lu)) throw bad('card-like', `${label}: אסור להקליד מספר כרטיס אשראי.`);
+  return s;
+}
 
 // 00:24: ports נכתב רק כשמתג cellular פעיל בעסק. כבוי – נתונים קיימים נשארים (רק מוסתרים באפליקציה)
 function cellOn(w) { const b = w && w.biz; return !!(b && b.features && b.features.cellular === true); }
@@ -78,7 +101,7 @@ function last4Of(raw) {
 function mailOf(raw) {
   const m = String(raw).trim().toLowerCase();
   if (m.length > 254 || !/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(m)) throw bad('bad-email', 'כתובת המייל לא תקינה');
-  if (core.digRun(m) >= 8) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
+  if (core.cardLike(m)) throw bad('card-like', 'מייל: אסור מספר כרטיס (13–19 ספרות).'); // 2026-11-10: מייל עם מספר טלפון מותר
   return m;
 }
 function portOf(raw) {
@@ -107,7 +130,7 @@ async function brIds(w) {
   const org = s.exists && s.get('org') && typeof s.get('org') === 'object' ? s.get('org') : {};
   return (Array.isArray(org.branches) ? org.branches : []).map((b) => b && b.id).filter((x) => typeof x === 'string');
 }
-function clean(c, keys, brs, byId) {
+function clean(c, keys, brs, byId, imp) {
   if (!c || typeof c !== 'object' || Array.isArray(c)) throw bad('bad-cust', 'פרטי לקוח חסרים');
   const o = core.custParts(c, {}); // 00:19: שם פרטי/משפחה, רחוב/עיר/קומה/דירה → גם name/addr כרשור
   if (!o.name && !empty(c.name)) o.name = txt(c.name, 60, 'bad-name', 'שם הלקוח');
@@ -123,20 +146,28 @@ function clean(c, keys, brs, byId) {
   if (!o.addr && !empty(c.addr)) o.addr = txt(c.addr, 150, 'bad-addr', 'כתובת');
   if (!empty(c.last4)) o.last4 = last4Of(c.last4);
   if (!empty(c.port)) o.port = portOf(c.port);
+  for (const [k, max, label] of INFO.concat(FLAG)) { // '' = מחיקה בעריכה
+    if (c[k] === '') o[k] = '';
+    else if (!empty(c[k])) o[k] = (k === 'bank' ? plain : info)(c[k], max, 'bad-' + k, label, true);
+  }
   if (c.ports != null) { // 00:21: ניודים קודמים [{d?,phone?,tz?}] – כל שדה רשות, רשומה ריקה נזרקת. סבב הניוד (fb/ord-lines) בודק לפיו
     if (!Array.isArray(c.ports) || c.ports.length > MAX_PORTS) throw bad('bad-ports', `ניודים: עד ${MAX_PORTS} רשומות`);
     const seen = new Set();
     o.ports = [];
     for (const p of c.ports) {
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw bad('bad-ports', 'רשומת ניוד לא תקינה');
-      onlyKeys(p, ['d', 'phone', 'tz', 'br'], 'רשומת ניוד');
+      onlyKeys(p, ['d', 'phone', 'tz', 'br', 'co', 'act', 'bph', 'btz'], 'רשומת ניוד');
       const r = {};
       if (!empty(p.br)) { if (typeof p.br !== 'string' || !(brs || []).includes(p.br)) throw bad('bad-br', 'סניף הניוד לא קיים בעסק'); r.br = p.br; }
       if (!empty(p.d)) r.d = portOf(p.d);
       if (!empty(p.phone)) r.phone = phoneOf(p.phone);
       if (!empty(p.tz)) r.tz = tzOf(p.tz);
+      if (!empty(p.bph)) r.bph = info(p.bph, 30, 'bad-ports', 'טלפון ניוד (לא תקין)', true);
+      if (!empty(p.btz)) r.btz = info(p.btz, 20, 'bad-ports', 'ת.ז ניוד (לא תקינה)', true);
+      if (!empty(p.co)) r.co = txt(String(p.co), 40, 'bad-ports', 'חברת ניוד');
+      if (!empty(p.act)) { if (!PACT.includes(p.act)) throw bad('bad-ports', 'נויד בפועל: כן/לא/לא ידוע'); r.act = p.act; }
       const k = portKey(r);
-      if (k !== '||' && !seen.has(k)) { seen.add(k); o.ports.push(r); }
+      if (Object.keys(r).some((x) => x !== 'br') && !seen.has(k)) { seen.add(k); o.ports.push(r); }
     }
   }
   if (c.x != null) {
@@ -149,7 +180,8 @@ function clean(c, keys, brs, byId) {
       o.x[k] = txt(String(v), 200, 'bad-x', 'שדה נוסף');
     }
   }
-  if (!o.tz && !o.phone && !byId) throw bad('bad-cust', 'צריך ת.ז או טלפון');
+  // ייבוא (2026-11-10): שורה בלי טלפון/ת"ז תקינים נכנסת לפי שם, כלקוח נפרד (לא מתאחדת)
+  if (!o.tz && !o.phone && !byId && !(imp && o.name)) throw bad('bad-cust', 'צריך ת.ז או טלפון');
   return o;
 }
 const idFor = (o) => (o.tz ? 't' + o.tz : 'p' + o.phone);
@@ -161,7 +193,7 @@ async function xKeys(db) {
 // ממזג: fill = ממלא רק שדות ריקים (לא דורס); אחרת – דורס את מה שנשלח. מחזיר את השדות לעדכון (או null אם אין שינוי).
 function merge(old, o, fill) {
   const up = {};
-  for (const k of FIELDS) if (o[k] !== undefined && (fill ? empty(old[k]) : old[k] !== o[k])) up[k] = o[k];
+  for (const k of FIELDS) if (o[k] !== undefined && !(o[k] === '' && empty(old[k]) && NEWK.includes(k)) && (fill ? empty(old[k]) : old[k] !== o[k])) up[k] = o[k];
   if (o.ports) { // fill (ייבוא/הזמנה) = מוסיפים רק רשומות שאין (בלי כפילות); עריכה = הרשימה שנשלחה מחליפה
     const op = Array.isArray(old.ports) ? old.ports : (old.port ? [{ d: old.port }] : []); // port ישן (תאריך בלבד) נכנס כרשומה ראשונה; port עצמו לא נמחק
     if (fill) { const ks = new Set(op.map(portKey)); const add = o.ports.filter((r) => !ks.has(portKey(r))); if (add.length) up.ports = op.concat(add).slice(0, MAX_PORTS); }
@@ -191,8 +223,8 @@ async function upsert(tx, db, w, o, opts) {
   if (!base) {
     if (!o.name && o.bn) o.name = o.bn; // לקוח עסקי חדש: השם המוצג = שם העסק (בלקוח קיים השם לא נדרס)
     if (!o.name) throw bad('bad-name', 'שם הלקוח – חובה');
-    if (!o.phone) throw bad('bad-phone', 'טלפון – חובה');
-    const d = Object.assign({ x: {} }, o, { at: now, upd: now, by: w.uid, src: opts.src });
+    if (!o.phone && opts.src !== 'import') throw bad('bad-phone', 'טלפון – חובה'); // ייבוא: טלפון לא תקין נשמר ב-bph
+    const d = newDoc(o, w, opts, now);
     if (ws === true) d.wholesale = true;
     tx.set(ref, d);
     return { id, created: true };
@@ -233,15 +265,20 @@ async function update(tx, db, w, o, opts, st) {
   tx.update(ref, Object.assign(u, { upd: now, by: w.uid }));
   return { id, created: false };
 }
-// לקוח נוסף עם אותו טלפון (asNew, בלי ת"ז): מזהה אקראי c{20}, לא תלוי בת"ז/טלפון
+function newDoc(o, w, opts, now) {
+  const d = Object.assign({ x: {} }, o, { at: now, upd: now, by: w.uid, src: opts.src });
+  for (const k of NEWK) if (d[k] === '') delete d[k];
+  return d;
+}
+// לקוח נוסף עם אותו טלפון (asNew, בלי ת"ז): מזהה אקראי c{20}, לא תלוי בת"ז/טלפון. גם שורת ייבוא בלי טלפון/ת"ז תקינים
 async function createNew(tx, db, w, o, opts) {
   if (opts.wholesale === true) needBiz(null, o, false);
   if (!o.name && o.bn) o.name = o.bn;
   if (!o.name) throw bad('bad-name', 'שם הלקוח – חובה');
-  if (!o.phone) throw bad('bad-phone', 'טלפון – חובה');
+  if (!o.phone && opts.src !== 'import') throw bad('bad-phone', 'טלפון – חובה');
   const ref = db.collection('cust').doc('c' + db.collection('cust').doc().id);
   const now = Date.now();
-  const d = Object.assign({ x: {} }, o, { at: now, upd: now, by: w.uid, src: opts.src });
+  const d = newDoc(o, w, opts, now);
   if (opts.wholesale === true) d.wholesale = true;
   tx.set(ref, d);
   return { id: ref.id, created: true };
@@ -290,6 +327,7 @@ async function saveCust(request) {
   onlyKeys(input.cust || {}, CKEYS.concat(BIZF), 'פרטי לקוח');
   const db = T.tdb();
   if (input.cust && input.cust.ports !== undefined && !cellOn(w)) throw deny('feature-off', 'ניודים – התוספת "סלולר" כבויה בעסק הזה');
+  if (hasInfo(input.cust) && !cellOn(w)) throw deny('feature-off', 'שדות המידע (בנק, מוצר, סטטוס…) – רק כשהתוספת "סלולר" פעילה');
   const o = clean(input.cust, await xKeys(db), input.cust && input.cust.ports ? await brIds(w) : [], !!id);
   // עריכה (לא fill): חלק ששדה אחר מקבוצתו נשלח ריק – נמחק, כדי שהשדה הנפרד יתאים לרשור החדש
   if (input.fill !== true) for (const g of [['fn', 'ln'], ['st', 'city', 'fl', 'apt']]) if (g.some((k) => o[k] !== undefined)) for (const k of g) if (o[k] === undefined) o[k] = '';
@@ -336,14 +374,28 @@ async function importCusts(request) {
         }
       }
       if (r0.ports !== undefined && !cellOn(w)) throw deny('feature-off', 'ניודים – התוספת "סלולר" כבויה');
+      if (hasInfo(r0) && !cellOn(w)) throw deny('feature-off', 'שדות המידע – רק כשהתוספת "סלולר" פעילה');
       const card = r0.card == null ? null : CARD.cleanCard(r0.card); delete r0.card; // fb/ord-card: מוצפן בשרת (00:50 – כולל CVV)
       if (card) r0.last4 = card.num.slice(-4);
       onlyKeys(r0, CKEYS, 'שורה');
-      const o = clean(r0, keys, brs);
-      const id = idFor(o);
-      if (seen.has(id)) { res.same++; continue; } // כפילות בתוך אותה מנה
-      seen.add(id);
+      const o = clean(r0, keys, brs, false, true);
+      const keyed = !!(o.tz || o.phone); // בלי טלפון/ת"ז תקינים – לקוח חדש נפרד (c{20}), בלי איחוד
+      const id = keyed ? idFor(o) : null;
+      if (keyed && seen.has(id)) { res.same++; continue; } // כפילות בתוך אותה מנה
+      if (keyed) seen.add(id);
       let r;
+      if (!keyed) {
+        await db.runTransaction(async (tx) => {
+          r = await createNew(tx, db, w, o, { src: 'import' });
+          if (card) {
+            tx.set(db.doc(`cust/${r.id}/p/card`), { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + r.id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'import' });
+            tx.update(db.doc('cust/' + r.id), { last4: card.num.slice(-4), card: true });
+            tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: r.id, act: 'import' });
+          }
+        });
+        res.created++;
+        continue;
+      }
       await db.runTransaction(async (tx) => {
         // קריאות לפני כתיבות (חובה בטרנזקציה): קודם בודקים אם יש כבר כרטיס
         const cref = card ? db.doc(`cust/${id}/p/card`) : null;
@@ -513,4 +565,4 @@ const FNS = { setCustCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
 const SFNS = { saveCust, importCusts, setCard, getCard, delCard }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY] }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor, portKey } });

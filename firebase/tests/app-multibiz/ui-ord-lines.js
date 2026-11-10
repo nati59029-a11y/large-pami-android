@@ -18,7 +18,10 @@ const PROD = [doc('prod/pA', { name: S('עוגת שוקולד'), price: N(12), b
   doc('prod/pB', { name: S('לחם מחמצת'), price: N(10.5), on: { booleanValue: true }, q: M({ br1: N(0), br2: N(8) }) })];
 const TZ = '123456782';
 const TZL = '222222226', LN = 'א'.repeat(45), LA = 'ב'.repeat(120);
-const CUST = [doc('cust/t' + TZL, { name: S(LN), phone: S('0507777777'), tz: S(TZL), addr: S(LA), mail: S('old@x.co') }), doc('cust/t' + TZ, { name: S('משה כהן'), phone: S('0501234567'), tz: S(TZ), mail: S('moshe@x.co'), addr: S('הרצל 1'), x: M({ xcity: S('אשדוד') }) })];
+const CUST = [doc('cust/t' + TZL, { name: S(LN), phone: S('0507777777'), tz: S(TZL), addr: S(LA), mail: S('old@x.co') }), doc('cust/t' + TZ, { name: S('משה כהן'), phone: S('0501234567'), tz: S(TZ), mail: S('moshe@x.co'), addr: S('הרצל 1'), x: M({ xcity: S('אשדוד') }) }),
+  // 2026-11-10 (ייבוא לקוחות מלא): לקוח בדוי עם ת"ז ומייל לא תקינים, שדות מידע וקווים עם חברה / נויד בפועל
+  doc('cust/p0509990000', { name: S('נועה בדויה'), fn: S('נועה'), ln: S('בדויה'), phone: S('0509990000'), btz: S('12345'), bml: S('noa@@demo'), bank: S('בנק לדוגמה, סניף 100, חשבון 12345'), prod: S('חבילת גלישה'), due: S('₪99'), orig: S('פייסבוק'), stat: S('ממתין'), note: S('לחזור בערב'), od: S('2026-11-01'),
+    ports: A([M({ phone: S('0521230000'), co: S('חברה א'), act: S('y'), d: S('2026-10-20') }), M({ bph: S('05212'), co: S('חברה ב'), act: S('u') })]) })];
 const PLANS = [doc('lineplan/pl1', { name: S('פרטנר 30'), carrier: S('פרטנר'), days: N(30), on: { booleanValue: true } })];
 // שלב 4 (חבילות): ערך JS → שדה Firestore REST
 const FV = (v) => (v === null ? { nullValue: null } : typeof v === 'boolean' ? { booleanValue: v } : typeof v === 'number' ? N(v) : typeof v === 'string' ? S(v) : Array.isArray(v) ? A(v.map(FV)) : M(Object.fromEntries(Object.entries(v).map(([k, x]) => [k, FV(x)]))));
@@ -248,6 +251,23 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.selectOption('[data-c=olPr] >> nth=1', '1'); await H.settle(page, 200); const mF2 = await manV();
   await page.selectOption('[data-c=olPr] >> nth=1', '-1'); await H.settle(page, 200); const mF3 = await manV(); const dF = await save();
   check('11ו כמה מבצעים: רשימה לכל קו (2 מבצעים + "בלי מבצע"); ברירת מחדל 15+15=30; קו אחד במבצע כמות → 15; שניהם → 40; אחד "בלי מבצע" → 0; pr נשלח לשרת', oF.join() === '0,1,-1' && mF0 === '30' && mF1 === '15' && mF2 === '40' && mF3 === '0' && !!dF && dF.cell.lines[0].pr === 1 && dF.cell.lines[1].pr === -1 && srvNet(dF) === 10.5, { oF, mF0, mF1, mF2, mF3, lines: dF && dF.cell.lines });
+  { // 12 (2026-11-10): כרטיס לקוח – שדות מידע, חברת ניוד / נויד בפועל, סימון אדום "לא תקין"; הזמנה חדשה – סימון כשבוחרים את הלקוח; טופס עריכה
+    await page.evaluate(() => { const g = document.getElementById('dlg'); if (g && g.open) g.close(); window.__oc.L = null; }); await goV('ocCard', 'p0509990000'); await H.settle(page, 900);
+    const ct = await page.innerText('#main'); const red = await page.$$eval('#main [data-bad]', (e) => e.length);
+    await shot('כרטיס-לקוח-לא-תקין');
+    const okCard = CELLON ? /פרט לא תקין: ת\.ז, מייל, פרטי ניוד/.test(ct) && /פרטי בנק: בנק לדוגמה/.test(ct) && /סטטוס: ממתין/.test(ct) && /תאריך הזמנה: 2026-11-01/.test(ct) && /חברה חברה א/.test(ct) && /נויד בפועל: כן/.test(ct) && /נויד בפועל: לא ידוע/.test(ct) && red >= 3
+      : /פרט לא תקין: ת\.ז, מייל, פרטי ניוד/.test(ct) && !/פרטי בנק|סטטוס:|חברה חברה/.test(ct);
+    check('12 כרטיס לקוח: ' + (CELLON ? 'שדות מידע, חברה ונויד בפועל לכל קו, סימון אדום' : 'בלי cellular – שדות המידע מוסתרים, הסימון נשאר'), okCard, { red, ct: ct.slice(0, 300) });
+    await page.click('#main [data-a=ocEdit]'); await H.settle(page, 400); const ft = await page.innerText('#dlg');
+    check('12א טופס עריכה: ' + (CELLON ? 'שדות המידע + חברת ניוד/נויד בפועל, ת"ז לא תקינה מסומנת' : 'בלי שדות המידע'), CELLON ? /פרטי בנק/.test(ft) && /חברת ניוד/.test(ft) && /נויד בפועל/.test(ft) && /\(לא תקין\)/.test(ft) : !/פרטי בנק|חברת ניוד/.test(ft), ft.slice(0, 200));
+    await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 500);
+    const sv = calls.filter((c) => c.n === 'saveCust').pop();
+    check('12ב שמירה בלי שינוי: ת"ז ומייל לא תקינים לא נשלחים (נשארים כמו שהם), פרטי הניוד הלא תקינים נשמרים', !!sv && sv.d.id === 'p0509990000' && sv.d.cust.tz === undefined && sv.d.cust.mail === undefined && sv.d.cust.btz === undefined && (!CELLON || (sv.d.cust.ports[1].bph === '05212' && sv.d.cust.ports[1].act === 'u' && sv.d.cust.bank === 'בנק לדוגמה, סניף 100, חשבון 12345')), sv && sv.d);
+    await fresh(); await page.fill('input[data-k=phone]', '0509990000'); await H.settle(page, 700);
+    const hl = await page.innerText('#ocst'); await page.click('#ocst [data-a=ocPick]'); await H.settle(page, 400);
+    const st = await page.innerText('#ocst'); const inf = CELLON ? await page.inputValue('input[data-k=stat]') : '';
+    check('12ג הזמנה חדשה: ברשימה ואחרי בחירה – סימון אדום של הפרט הלא תקין' + (CELLON ? '; שדות המידע נטענים לטופס' : ''), /לא תקין/.test(hl) && /פרט לא תקין אצל הלקוח: ת\.ז, מייל/.test(st) && (!CELLON || inf === 'ממתין'), { hl: hl.slice(0, 120), st: st.slice(0, 160), inf });
+  }
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   }
   await browser.close();

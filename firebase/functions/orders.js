@@ -48,6 +48,26 @@ const WS_SHOW = 'wsCust';
 // ---------- ניקוי קלט ----------
 // הרצף הארוך ביותר של ספרות, כשביניהן מותר כל תו שאינו אות (רווח, פיסוק, מקפים –—־, =, !, תווים בלתי נראים כמו U+200F/U+200B). אות מפרידה בין רצפים.
 const digRun = (v) => String(v == null ? '' : v).split(/\p{L}+/u).reduce((m, p) => Math.max(m, p.replace(/\D/g, '').length), 0);
+// 2026-11-10 (ייבוא לקוחות מלא): מספר כרטיס אפשרי = קבוצות ספרות רצופות (מופרדות בכל תו שאינו אות) שסכום אורכן 13–19.
+// משמש במייל ובשדות המידע החדשים של הלקוח: מספר טלפון (10 ספרות) או שני טלפונים (20) מותרים, מספר כרטיס – לא.
+// luhn=true (טלפון/ת"ז לא תקינים בלקוח): רק רצף שעובר ספרת ביקורת של כרטיס – שני טלפונים מודבקים (19 ספרות) נשמרים.
+const luhn = (d) => { let t = 0; for (let i = 0; i < d.length; i++) { let x = +d[d.length - 1 - i]; if (i % 2) { x *= 2; if (x > 9) x -= 9; } t += x; } return t % 10 === 0; };
+function cardAt(v, lu) {
+  const s = String(v == null ? '' : v), G = [], re = /\d+/g; let m;
+  while ((m = re.exec(s))) G.push([m.index, m.index + m[0].length]);
+  for (let i = 0; i < G.length; i++) {
+    let n = 0, d = '';
+    for (let j = i; j < G.length; j++) {
+      if (j > i && (/\p{L}/u.test(s.slice(G[j - 1][1], G[j][0])) || (lu && G[j][0] - G[j - 1][1] > 2))) break;
+      if (lu && j > i && [i, j].some((q) => G[q][1] - G[q][0] < 3 || G[q][1] - G[q][0] > 6)) break; // מצב ספרת ביקורת: קבוצות כמו בכרטיס (4-4-4-4, 4-6-5)
+      n += G[j][1] - G[j][0]; d += s.slice(G[j][0], G[j][1]);
+      if (n > 19) break;
+      if (n >= 13 && (!lu || luhn(d))) return [G[i][0], G[j][1]];
+    }
+  }
+  return null;
+}
+const cardLike = (v, lu) => !!cardAt(v, lu);
 function txt(v, max, reason, label, required) {
   const s = typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim() : (v == null ? '' : null);
   if (s === null) throw bad(reason, label + ' לא תקין');
@@ -311,7 +331,7 @@ function cleanCust(c) {
   if (c.mail != null && c.mail !== '') {
     const m = String(c.mail).trim().toLowerCase();
     if (m.length > 254 || !/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(m)) throw bad('bad-email', 'כתובת המייל לא תקינה');
-    if (digRun(m) >= 8) throw bad('card-like', 'מייל: אסור רצף של 8 ספרות ומעלה (מספר כרטיס).');
+    if (cardLike(m)) throw bad('card-like', 'מייל: אסור מספר כרטיס (13–19 ספרות).'); // 2026-11-10: מייל עם מספר טלפון מותר
     o.mail = m;
   }
   return o;
@@ -1267,4 +1287,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { setCellCfg, saveLinePlan, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

@@ -197,6 +197,40 @@ describe('ניוד קווים – "שולם", היסטוריה ובדיקת ני
   });
 });
 
+// 2026-11-10 (ייבוא לקוחות מלא): לא תקין נשמר עם סימון, שדות מידע, חברת ניוד / נויד בפועל, איחוד רק לפי מזהה תקין, מתג cellular
+describe('ייבוא לקוחות מלא – סימון "לא תקין" ושדות מידע', () => {
+  it('טלפון/ת"ז/מייל לא תקינים נשמרים ב-bph/btz/bml; שורה בלי מזהה תקין – לקוח נפרד (לא מתאחד); שדות מידע וקו עם חברה ונויד בפועל', async () => {
+    const r = await call('importCusts', MGR, { reqId: rid(), rows: [
+      { fn: 'א', ln: 'ב', phone: '0501111111', bml: 'x@@y', bank: 'בנק 12 סניף 345 חשבון 123456789', prod: 'חבילה', due: '₪100', orig: 'פייסבוק', stat: 'פעיל', note: 'להתקשר 0521234567 0531234567', od: '2026-10-01', ports: [{ phone: '0521111111', co: 'חברה א', act: 'y' }, { bph: '12345', btz: '99', act: 'u' }] },
+      { name: 'ג', bph: '0' }, { name: 'ד', bph: '0' }, { name: 'ה', btz: '123', phone: '0502222222' }] });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.bad.length, 0, JSON.stringify(r.result.bad)); assert.equal(r.result.created, 4);
+    const a = await get(`b/${A}/cust/p0501111111`);
+    assert.equal(a.bml, 'x@@y'); assert.equal(a.bank, 'בנק 12 סניף 345 חשבון 123456789'); assert.equal(a.note, 'להתקשר 0521234567 0531234567'); assert.equal(a.od, '2026-10-01');
+    assert.deepEqual(a.ports, [{ phone: '0521111111', co: 'חברה א', act: 'y' }, { bph: '12345', btz: '99', act: 'u' }]);
+    assert.equal((await get(`b/${A}/cust/p0502222222`)).btz, '123');
+    const L = (await coll(`b/${A}/cust`)).filter((d) => d.bph === '0');
+    assert.equal(L.length, 2); // טלפון "0" לא מאחד לקוחות שונים
+  });
+  it('מספר כרטיס בשדות המידע / בטלפון לא תקין – נדחה; פרטי בנק – טקסט גלוי; נויד בפועל רק y/n/u', async () => {
+    const one = async (row) => (await call('importCusts', MGR, { reqId: rid(), rows: [Object.assign({ name: 'א', phone: '0501111111' }, row)] })).result.bad.map((x) => x.reason);
+    assert.deepEqual(await one({ note: 'כרטיס 4111 1111 1111 1111' }), ['card-like']);
+    assert.deepEqual(await one({ bph: '4111111111111111' }), ['card-like']);
+    assert.deepEqual(await one({ ports: [{ act: 'yes' }] }), ['bad-ports']);
+    assert.deepEqual(await one({ bank: '4111111111111111' }), []); // החלטת המשתמש: גלוי
+  });
+  it('לקוח קיים לא משתנה בייבוא (רק שדות ריקים); עריכה מוחקת סימון; בעסק בלי cellular – שדות המידע נדחים', async () => {
+    await call('saveCust', E1, { cust: { name: 'קיים', phone: '0503333333', mail: 'a@b.co' } });
+    await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'אחר', phone: '0503333333', bml: 'zz', stat: 'חדש' }] });
+    let d = await get(`b/${A}/cust/p0503333333`); assert.equal(d.name, 'קיים'); assert.equal(d.mail, 'a@b.co'); assert.equal(d.stat, 'חדש');
+    assert.equal((await call('saveCust', MGR, { id: 'p0503333333', cust: { bml: '', stat: '' } })).status, 'OK');
+    d = await get(`b/${A}/cust/p0503333333`); assert.ok(!d.bml && !d.stat);
+    assert.equal((await call('saveCust', E1, { cust: { name: 'מ', phone: '0504444444', mail: '0504444444@x.co' } })).status, 'OK'); // מייל עם טלפון – מותר
+    await seed(ALL);
+    assert.equal((await call('saveCust', E1, { cust: { name: 'ב', phone: '0505555555', note: 'x' } })).reason, 'feature-off');
+    assert.equal((await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'ב', phone: '0505555555', bph: 'x' }] })).result.bad.length, 0); // סימון לא תקין – גם בלי cellular
+  });
+});
+
 describe('ניוד קווים – חוקי Firestore', () => {
   it('lineLog – אין קריאה ואין כתיבה מהאפליקציה; lineplan/ordcfg/cell – קריאה לעובד ord רק כשהמתג פעיל, כתיבה לאף אחד', async () => {
     await setup();
