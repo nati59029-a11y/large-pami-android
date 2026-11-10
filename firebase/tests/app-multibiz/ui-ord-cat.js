@@ -91,6 +91,23 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 500);
   const sp = calls.filter((c) => c.n === 'saveProduct').pop();
   check('4 טופס מוצר: saveProduct עם cat/sub, bp {br1:11, br2:""}, pk 6, ct 24, home, wp; מגע בדיאלוג', !!sp && sp.d.cat === 'c1' && sp.d.sub === 's1' && sp.d.bp.br1 === 11 && sp.d.bp.br2 === '' && sp.d.pk === 6 && sp.d.ct === 24 && sp.d.home === 'br2' && sp.d.wp === 9 && pf.small.length === 0 && pf.sw <= pf.iw, { d: sp && sp.d, small: pf.small });
+  // 4ב. עלות לפני מע"מ (חישוב דו־כיווני, 18%), הערות, צילום הטופס
+  await page.click('[data-a=oxEditP][data-id=pA]'); await H.settle(page, 300);
+  const vx0 = await page.evaluate(() => ({ x: document.querySelector('#dlg input[name=costx]').value, c: document.querySelector('#dlg input[name=cost]').value }));
+  await page.fill('#dlg input[name=costx]', '10'); const vx1 = await page.evaluate(() => document.querySelector('#dlg input[name=cost]').value);
+  await page.fill('#dlg input[name=cost]', '23.6'); const vx2 = await page.evaluate(() => document.querySelector('#dlg input[name=costx]').value);
+  await page.fill('#dlg input[name=cost]', ''); const vx3 = await page.evaluate(() => document.querySelector('#dlg input[name=costx]').value);
+  await page.fill('#dlg input[name=costx]', '8.47'); const vx4 = await page.evaluate(() => document.querySelector('#dlg input[name=cost]').value);
+  await page.fill('#dlg textarea[name=note]', 'שומר במקרר\nעד 3 ימים'); await setDs('a'); await H.settle(page, 200); await shot('מוצר-עלות-לפני-מעמ-הערות');
+  const ntLen = await page.evaluate(() => document.querySelector('#dlg textarea[name=note]').maxLength);
+  await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 500);
+  const sp2 = calls.filter((c) => c.n === 'saveProduct').pop();
+  check('4ב עלות לפני מע"מ: מוצר עם עלות 4 → לפני 3.39; הקלדת 10 → כולל 11.8; כולל 23.6 → לפני 20; ריקון מנקה; 8.47 → 9.99; הערות נשלחות (maxlength 500); נשמר cost בלבד', vx0.x === '3.39' && vx0.c === '4' && vx1 === '11.8' && vx2 === '20' && vx3 === '' && vx4 === '9.99' && ntLen === 500 && sp2.d.cost === 9.99 && sp2.d.costx === undefined && /שומר במקרר/.test(sp2.d.note), { vx0, vx1, vx2, vx3, vx4, d: sp2.d });
+  await page.click('[data-a=oxEditP][data-id=pA]'); await H.settle(page, 200);
+  await page.fill('#dlg textarea[name=note]', 'x'); await page.evaluate(() => { document.querySelector('#dlg textarea[name=note]').removeAttribute('maxlength'); document.querySelector('#dlg textarea[name=note]').value = 'א'.repeat(501); });
+  const nSave = calls.filter((c) => c.n === 'saveProduct').length; await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 300);
+  check('4ג הערות מעל 500 תווים נחסמות בלקוח (לא נשלח)', calls.filter((c) => c.n === 'saveProduct').length === nSave);
+  await page.evaluate(() => closeDlg());
   // 5. ייבוא: קובץ CSV עם כותרות בסדר אחר + עמודה מיותרת + מחיר טקסט
   await page.evaluate(() => { localStorage.removeItem('lp-ox-imp-map'); window.__ox.im = null; });
   const im = await screen('קטלוג-ייבוא', () => goV('oxImp'));
@@ -158,6 +175,20 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const ipW = calls.filter((c) => c.n === "importProducts").pop();
   check('13ב עובד: ייבוא מלאי עם עמודות סיטונאי ועלות, wp נשלח', wImp.name && wImp.wp && wImp.cost && !!ipW && ipW.d.rows[0].wp === 3, { wImp, ip: ipW && ipW.d });
   await page.evaluate(() => { SY.role = window.__mgrSave; });
+  // 13ג. ייבוא: זיהוי אוטומטי של כותרות "עלות לפני מע"מ" ו"הערות"; כולל גובר; רק לפני → כולל
+  await page.evaluate(() => { localStorage.removeItem('lp-ox-imp-map'); window.__ox.im = null; NAV = [{ v: 'home' }]; go('oxImp'); }); await H.settle(page, 300);
+  await page.setInputFiles('input[data-c=oxImpFile]', { name: 'v.csv', mimeType: 'text/csv', buffer: Buffer.from('שם,מחיר,"עלות לפני מע""מ",הערות,מחיר עלות\nא,5,10,שביר,\nב,6,10,,20\nג,7,,תיאור,\n') }); await H.settle(page, 400);
+  const vm = await page.evaluate(() => ({ costx: document.querySelector('select[data-c=oxImpMap][data-k=costx]').value, note: document.querySelector('select[data-c=oxImpMap][data-k=note]').value, cost: document.querySelector('select[data-c=oxImpMap][data-k=cost]').value }));
+  await page.click('[data-a=oxImpGo]'); await H.settle(page, 400);
+  const ipV = calls.filter((c) => c.n === 'importProducts').pop();
+  check('13ג ייבוא: כותרות מזוהות (costx=2, note=3, cost=4); שורה 1 לפני 10 → עלות 11.8 + הערה; שורה 2 כולל 20 גובר; שורה 3 בלי עלות והערה נשמרת', vm.costx === '2' && vm.note === '3' && vm.cost === '4' && ipV.d.rows[0].cost === 11.8 && ipV.d.rows[0].note === 'שביר' && ipV.d.rows[1].cost === 20 && ipV.d.rows[1].note === undefined && ipV.d.rows[2].cost === undefined && ipV.d.rows[2].note === 'תיאור' && ipV.d.rows.every((r) => r.costx === undefined), { vm, rows: ipV.d.rows });
+  for (const [h, k] of [['עלות ללא מע"מ', 'costx'], ['מחיר ללא מעמ', 'costx'], ['הערה', 'note'], ['תיאור נוסף', 'note']]) {
+    await page.evaluate(() => { localStorage.removeItem('lp-ox-imp-map'); window.__ox.im = null; NAV = [{ v: 'home' }]; go('oxImp'); }); await H.settle(page, 200);
+    await page.setInputFiles('input[data-c=oxImpFile]', { name: 'h.csv', mimeType: 'text/csv', buffer: Buffer.from('שם,מחיר,"' + h.replace(/"/g, '""') + '"\nא,5,3\n') }); await H.settle(page, 300);
+    const mv = await page.evaluate((k) => document.querySelector('select[data-c=oxImpMap][data-k=' + k + ']').value, k);
+    check('13ד זיהוי כותרת "' + h + '"', mv === '2', mv);
+  }
+  await page.evaluate(() => { window.__ox.im = null; });
   // 15. מסך ה-+ (00:27): מנהל – "משימה חדשה" בחצי רוחב ולידה "הזמנות"; עובד עם ord – "הזמנות"; עובד בלי ord – אין
   const plus = async () => { await page.evaluate(() => { NAV = [{ v: 'home' }]; rerender(); openAdd(); }); await H.settle(page, 300);
     return page.evaluate(() => { const o = document.querySelector('#sheet [data-a=addGo][data-v=ox]'), t = document.querySelector('#sheet [data-a=addGo][data-v=tk]');

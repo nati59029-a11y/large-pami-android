@@ -221,3 +221,33 @@ describe('העברה פנימית', () => {
     for (const u of [MGR, E1, SUPER]) await assertFails(db(u).doc(`b/${A}/xfer/new`).set({ qty: 1 }));
   });
 });
+
+describe('הערות למוצר ואחוז מע"מ (10.11)', () => {
+  it('הערות: נשמרות במסמך המוצר, מנוקות בריק, עד 500 תווים, מספר כרטיס נחסם; מוצר בלי הערות לא משתנה; ייבוא עם הערות', async () => {
+    assert.equal((await call('saveProduct', MGR, { id: 'pB', name: 'לחם', price: 7.5, note: 'שומר במקרר' })).status, 'OK');
+    assert.equal((await get(`b/${A}/prod/pB`)).note, 'שומר במקרר');
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, note: 'א'.repeat(501) })).reason, 'bad-note');
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, note: 'א'.repeat(500) })).status, 'OK');
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, note: 'כרטיס 4580 1234 5678 9012' })).reason, 'card-like');
+    assert.equal((await call('saveProduct', E1, { id: 'pB', name: 'לחם', price: 7.5, note: 5 })).reason, 'bad-note');
+    assert.equal((await get(`b/${A}/prod/pB`)).note.length, 500); // הנחסם לא דרס
+    assert.equal((await call('saveProduct', MGR, { id: 'pB', name: 'לחם', price: 7.5 })).status, 'OK'); // בלי note – לא משתנה
+    assert.equal((await get(`b/${A}/prod/pB`)).note.length, 500);
+    assert.equal((await call('saveProduct', MGR, { id: 'pB', name: 'לחם', price: 7.5, note: null })).status, 'OK');
+    assert.equal((await get(`b/${A}/prod/pB`)).note, undefined);
+    const r = await call('importProducts', MGR, { reqId: rid(), br: 'br1', rows: [{ name: 'ייבוא-הערה', price: 3, note: 'שביר', cost: 2 }, { name: 'ייבוא-כרטיס', price: 3, note: '4580123456789012' }, { name: 'ייבוא-ארוך', price: 3, note: 'ב'.repeat(501) }] });
+    assert.equal(r.status, 'OK'); assert.equal(r.result.added, 1); assert.equal(r.result.bad.length, 2);
+  });
+  it('אחוז מע"מ: מנהל בלבד, 0–100, נשמר ב-ordcfg/main בלי לגעת בשאר; לא תקין נדחה; src נשאר', async () => {
+    assert.equal((await call('setOrderCfg', E1, { vat: 17 })).reason, 'manager-only');
+    assert.equal((await call('setOrderCfg', MGR, { vat: 101 })).reason, 'bad-vat');
+    assert.equal((await call('setOrderCfg', MGR, { vat: -1 })).reason, 'bad-vat');
+    assert.equal((await call('setOrderCfg', MGR, { vat: '18' })).reason, 'bad-vat');
+    assert.equal((await call('setOrderCfg', MGR, { vat: 17.123 })).reason, 'bad-vat');
+    assert.equal((await call('setOrderCfg', MGR, { src: { br1: 'br2' } })).status, 'OK');
+    assert.equal((await call('setOrderCfg', MGR, { vat: 18.07 })).status, 'OK');
+    const c = await get(`b/${A}/ordcfg/main`);
+    assert.equal(c.vat, 18.07); assert.deepEqual(c.src, { br1: 'br2' });
+    assert.equal((await call('setOrderCfg', MGR, {})).reason, 'bad-src');
+  });
+});

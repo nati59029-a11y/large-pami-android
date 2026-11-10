@@ -170,6 +170,10 @@ function prodExt(w, input) {
     o[k] = qtyOf(input[k]);
     if (!Number.isInteger(o[k])) throw bad('bad-qty', l + ': מספר שלם');
   }
+  if (input.note !== undefined) { // הערות למוצר: טקסט חופשי עד 500 תווים, עם חסימת מספר כרטיס (txt)
+    const n = input.note === null ? '' : txt(input.note, 500, 'bad-note', 'הערות');
+    o.note = n ? n : FV().delete();
+  }
   if (input.home !== undefined) {
     if (input.home === null || input.home === '') o.home = FV().delete();
     else if (typeof input.home !== 'string' || !w.branches.some((b) => b.id === input.home)) throw bad('bad-br', 'סניף בית לא קיים');
@@ -184,7 +188,7 @@ const noDel = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => !(v 
 async function saveProduct(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'home']);
+  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'home', 'note']);
   const name = txt(input.name, 60, 'bad-name', 'שם המוצר', true);
   const price = money(input.price, 'מחיר');
   const barcode = input.barcode == null || input.barcode === '' ? '' : String(input.barcode).trim();
@@ -208,6 +212,7 @@ async function saveProduct(request) {
       if ((o.barcode || '') !== barcode) ch.push('ברקוד');
       if ((o.on !== false) !== (input.on !== false)) ch.push(input.on === false ? 'לא זמין' : 'זמין');
       if (ext.bp && JSON.stringify(ext.bp) !== JSON.stringify(o.bp || {})) ch.push('מחיר לסניף');
+      if (input.note !== undefined && (o.note || '') !== (typeof ext.note === 'string' ? ext.note : '')) ch.push('הערות');
       tx.update(ref, Object.assign({ name, price, barcode, on: input.on !== false, upd: now }, ext));
       if (input.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: money(input.wp, 'מחיר סיטונאי'), at: now, by: w.uid });
       if (ch.length) tx.set(stockRef(db), { prod: id, name, br: NB, delta: 0, why: 'prod', note: ch.join('; ').slice(0, 300), by: w.uid, at: now });
@@ -937,7 +942,17 @@ async function setOrderCfg(request) {
   const w = await who(request);
   mgr(w);
   const input = inputObject(request);
-  onlyKeys(input, ['src']);
+  onlyKeys(input, ['src', 'vat']);
+  if (input.vat !== undefined) { // אחוז מע"מ (0 עד 100, עד שתי ספרות אחרי הנקודה) – נשמר ב-ordcfg/main.vat
+    const v = input.vat;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 100 || Math.abs(Math.round(v * 100) - v * 100) > 1e-6) throw bad('bad-vat', 'אחוז מע"מ: מספר בין 0 ל-100');
+    await T.tdb().doc('ordcfg/main').set({ vat: v, upd: Date.now() }, { merge: true });
+    if (input.src === undefined) {
+      const w0 = w;
+      if (w0.biz.exists) await getFirestore().collection(`b/${w0.bizId}/audit`).add({ by: w0.uid, t: Date.now(), act: 'setOrderCfg', note: 'vat=' + v });
+      return { ok: true, vat: v };
+    }
+  }
   const src = input.src;
   if (!src || typeof src !== 'object' || Array.isArray(src)) throw bad('bad-src', 'הגדרה לא תקינה');
   const out = {};
@@ -1000,7 +1015,7 @@ async function importProducts(request) {
   input.rows.forEach((r, i) => {
     try {
       if (!r || typeof r !== 'object' || Array.isArray(r)) throw bad('bad-row', 'שורה לא תקינה');
-      onlyKeys(r, ['name', 'price', 'barcode', 'qty', 'cat', 'sub', 'wp', 'cost', 'pk', 'ct'], 'שורה');
+      onlyKeys(r, ['name', 'price', 'barcode', 'qty', 'cat', 'sub', 'wp', 'cost', 'pk', 'ct', 'note'], 'שורה');
       const o = { i, name: txt(r.name, 60, 'bad-name', 'שם המוצר', true), price: money(r.price, 'מחיר') };
       const bc = r.barcode == null ? '' : String(r.barcode).trim();
       if (bc && !/^[0-9A-Za-z-]{3,30}$/.test(bc)) throw bad('bad-barcode', 'ברקוד לא תקין');
@@ -1009,6 +1024,7 @@ async function importProducts(request) {
       if (r.wp != null && r.wp !== '') o.wp = money(r.wp, 'מחיר סיטונאי');
       if (r.cost != null && r.cost !== '') o.cost = money(r.cost, 'עלות');
       for (const k of ['pk', 'ct']) if (r[k] != null && r[k] !== '' && r[k] !== 0) { const v = qtyOf(r[k]); if (!Number.isInteger(v)) throw bad('bad-qty', 'מארז/קרטון: מספר שלם'); o[k] = v; }
+      if (r.note != null && r.note !== '') o.note = txt(r.note, 500, 'bad-note', 'הערות');
       if (r.cat != null && r.cat !== '') o.cat = txt(r.cat, 40, 'bad-cat', 'קטגוריה');
       if (r.sub != null && r.sub !== '') { if (!o.cat) throw bad('bad-cat', 'תת־קטגוריה בלי קטגוריה'); o.sub = txt(r.sub, 40, 'bad-cat', 'תת־קטגוריה'); }
       ok.push(o);
@@ -1038,6 +1054,7 @@ async function importProducts(request) {
       if (o.cat) { ext.cat = catIdOf(o.cat, ''); if (o.sub) ext.sub = catIdOf(o.sub, ext.cat); }
       if (o.pk) ext.pk = o.pk;
       if (o.ct) ext.ct = o.ct;
+      if (o.note) ext.note = o.note; // ריק בקובץ = ההערה הקיימת לא משתנה
       let id; let qty = 0;
       if (ex && ex.ref) {
         id = ex.id;
