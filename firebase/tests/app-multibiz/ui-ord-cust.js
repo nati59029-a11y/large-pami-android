@@ -284,12 +284,13 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const g15 = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
   if (shots) await page.screenshot({ path: path.join(shots, 'הזמנה-טלפון-נוסף-ומשלוח.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  page.once('dialog', (d) => d.accept());
   await page.click('[data-a=ocMerge]'); await H.settle(page, 300);
-  await page.click('#dlg [data-a=yes]'); await H.settle(page, 900);
+  const dl15 = await page.evaluate(() => [...document.querySelectorAll('#dlg [data-a=ocMergeK]')].map((b) => ({ k: b.dataset.k, t: b.innerText })));
+  check('15ב-1 חלון האיחוד: שתי בחירות "להשאיר את" עם שם, טלפון ות"ז של כל לקוח', dl15.length === 2 && dl15[0].k === 't' + TZ && dl15[1].k === 'cXyZ12345678901234567' && dl15.every((x) => /להשאיר את/.test(x.t) && /טלפון/.test(x.t) && /ת"ז/.test(x.t)) && /050-1234567/.test(dl15[0].t) && /שרה לוי/.test(dl15[1].t), dl15);
+  await page.click('#dlg [data-a=ocMergeK][data-k="cXyZ12345678901234567"]'); await H.settle(page, 900);
   const mc = calls.filter((c) => c.n === 'mergeCust').pop();
   const D15 = await page.evaluate(() => ({ p2c: window.__ox.draft && window.__ox.draft.p2c, id: window.__ox.draft && window.__ox.draft.custId, ph: window.__ox.draft && window.__ox.draft.phone }));
-  check('15ב איחוד: mergeCust {a: הנוכחי, b: האחר}, השאלה נסגרת, ההזמנה נשארת מקושרת והטלפון הראשי לא נמחק; 360px בלי גלילה לצד', !!mc && mc.d.a === 't' + TZ && mc.d.b === 'cXyZ12345678901234567' && !D15.p2c && D15.id === 't' + TZ && D15.ph === '050-1234567' && g15.sw <= g15.iw, { mc: mc && mc.d, D15, g15 });
+  check('15ב איחוד: mergeCust {a: הנוכחי, b: האחר, keep: הנבחר}, השאלה נסגרת, ההזמנה נשארת מקושרת והטלפון הראשי לא נמחק; 360px בלי גלילה לצד', !!mc && mc.d.a === 't' + TZ && mc.d.b === 'cXyZ12345678901234567' && mc.d.keep === 'cXyZ12345678901234567' && !D15.p2c && D15.id === 't' + TZ && D15.ph === '050-1234567' && g15.sw <= g15.iw, { mc: mc && mc.d, D15, g15 });
   n15 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 900);
   const sc15 = calls.slice(n15).find((c) => c.n === 'saveCust'), co15 = calls.slice(n15).find((c) => c.n === 'createOrder');
   check('15ג שמירה: הזמנה עם phs וכתובת משלוח נפרדת (ship); הלקוח מקבל את הטלפון הנוסף (phs), כתובת הלקוח לא מוחלפת בכתובת המשלוח', !!co15 && JSON.stringify(co15.d.cust.phs) === '["0538887777"]' && co15.d.cust.ship && co15.d.cust.ship.st === 'הגפן 5' && co15.d.cust.ship.city === 'אשקלון' && co15.d.cust.st === 'הרצל 1' && !!sc15 && JSON.stringify(sc15.d.cust.phs) === '["0538887777"]' && sc15.d.cust.st === 'הרצל 1', { co: co15 && co15.d.cust, sc: sc15 && sc15.d.cust });

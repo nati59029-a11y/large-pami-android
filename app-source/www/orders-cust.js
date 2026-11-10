@@ -162,9 +162,14 @@ INP.ocP2=el=>{const D=O.draft;if(!D||!D.phs)return;D.phs[+el.dataset.n]=el.value
 const relink=(D,c)=>{const ph=D.phone;fillDraft(D,c);D.phone=ph;D.cBy='p2';D.asNew=false;D.cSt='found';D.p2c=null;rerender()};
 ACT.ocKeepA=()=>{const D=O.draft;if(!D)return;D.p2c=null;rerender()};
 ACT.ocUseB=el=>{const D=O.draft;if(!D||!D.p2c)return;const c=D.p2c.L.find(x=>x.id===el.dataset.id);if(c)relink(D,c)};
+/* תיקון 17:23: העובד בוחר איזה משני הלקוחות נשאר (שם/טלפון/ת"ז של כל אחד). השרת מאמת שהבחירה היא אחד מהשניים (keep). */
+const mgCard=(c,k)=>`<button type="button" class="btn g w" style="text-align:right;margin-bottom:8px;white-space:normal" data-a="ocMergeK" data-k="${esc(k)}"><b>להשאיר את: ${cLabel(c)}</b><br>טלפון: <bdi dir="ltr">${esc(c.phone||'—')}</bdi> · ת"ז: <bdi dir="ltr">${esc(c.tz||'—')}</bdi></button>`;
 ACT.ocMerge=el=>{const D=O.draft;if(!D||!D.p2c||!D.custId)return;const c=D.p2c.L.find(x=>x.id===el.dataset.id);if(!c)return;
- ask(`לאחד את "${D.cName||''}" ואת "${c.name||c.bn||''}" ללקוח אחד? הטלפונים, הכתובות, הניודים, הכרטיסים וההזמנות יעברו ללקוח המאוחד.`,async()=>{
-  try{const r=await fnCall('mergeCust',{a:D.custId,b:c.id});const n=await getC(r.id);C.at=0;loadL(true);if(n)relink(D,n);else{D.p2c=null;rerender()}toast('הלקוחות אוחדו')}catch(e){err(e)}},'כן, לאחד')};
+ const cur=(C.L||[]).find(x=>x.id===D.custId)||{};const a={name:D.cName||cur.name,bn:cur.bn,wholesale:cur.wholesale,phone:D.phone||cur.phone,tz:D.tz||cur.tz};
+ D.p2m={a:D.custId,b:c.id};
+ dlg(`<h3>איחוד לקוחות – איזה לקוח נשאר?</h3><p class="note">הפרטים של הלקוח שתבחרו נשארים. מהלקוח השני מצטרפים הטלפונים, השדות הריקים, הניודים, הכרטיסים וההזמנות.</p>${mgCard(a,D.custId)}${mgCard(c,c.id)}<button type="button" class="btn g w" data-a="closeDlg">ביטול</button>`)};
+ACT.ocMergeK=async el=>{const D=O.draft,m=D&&D.p2m;if(!m||![m.a,m.b].includes(el.dataset.k))return;closeDlg();D.p2m=null;
+ try{const r=await fnCall('mergeCust',{a:m.a,b:m.b,keep:el.dataset.k});const n=await getC(r.id);C.at=0;loadL(true);if(n)relink(D,n);else{D.p2c=null;rerender()}toast('הלקוחות אוחדו')}catch(e){err(e)}};
 // שמירת הזמנה → קודם הלקוח (fill: רק שדות ריקים; id = הלקוח שנבחר; asNew = לקוח נוסף עם אותו טלפון). כשל בשמירת הלקוח לא עוצר את ההזמנה.
 // לקוח חדש שנשמר – ההזמנה מקושרת אליו (custId)
 {const sv=ACT.oxSave;if(sv)ACT.oxSave=async el=>{const D=O.draft;if(D)joinC(D);

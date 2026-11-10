@@ -534,8 +534,8 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     await call('setCard', MGR, { custId: 'p0522222222', card: CARD });
     await call('setCard', MGR, { custId: 't' + TZ, card: { num: '5326100020003456' } });
     await mkOrd('oM1', 'new', 'br1', 'p0522222222'); await mkOrd('oM2', 'paid', 'br1', 'p0522222222');
-    // עובד עם ord מורשה; היעד = בעל הת"ז גם כשהוא נשלח כ-b
-    const r = await call('mergeCust', E1, { a: 'p0522222222', b: 't' + TZ });
+    // עובד עם ord מורשה; keep = הלקוח שנבחר (תיקון 17:23)
+    const r = await call('mergeCust', E1, { a: 'p0522222222', b: 't' + TZ, keep: 't' + TZ });
     assert.equal(r.status, 'OK', r.text); assert.equal(r.result.id, 't' + TZ); assert.ok(!leak(r.text));
     const t = await get(`b/${A}/cust/t${TZ}`);
     assert.equal(t.name, 'דנה'); assert.equal(t.mail, 'd@x.co'); assert.equal(t.st, 'הרצל 1');
@@ -547,18 +547,38 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     assert.equal(await get(`b/${A}/cust/p0522222222/p/card`), null);
     assert.equal((await get(`b/${A}/ord/oM1`)).custId, 't' + TZ); assert.equal((await get(`b/${A}/ord/oM2`)).custId, 't' + TZ);
     assert.ok((await coll(`b/${A}/cardLog`)).some((x) => x.act === 'merge' && x.cust === 't' + TZ && x.from === 'p0522222222' && x.ords === 2));
-    assert.equal((await call('mergeCust', E1, { a: 'p0522222222', b: 't' + TZ })).reason, 'no-cust'); // כבר אוחד
+    assert.equal((await call('mergeCust', E1, { a: 'p0522222222', b: 't' + TZ, keep: 't' + TZ })).reason, 'no-cust'); // כבר אוחד
     // ת"ז שונות
     await call('saveCust', MGR, { cust: { name: 'ב', phone: '0555555555', tz: TZ2 } });
-    assert.equal((await call('mergeCust', E1, { a: 't' + TZ2, b: 't' + TZ })).reason, 'merge-tz');
+    assert.equal((await call('mergeCust', E1, { a: 't' + TZ2, b: 't' + TZ, keep: 't' + TZ2 })).reason, 'merge-tz');
     // יותר מ-3 כרטיסים
     await call('saveCust', MGR, { cust: { name: 'ג', phone: '0566666666' } });
     await call('setCard', MGR, { custId: 'p0566666666', card: { num: '4111111111111111' } }); await call('setCard', MGR, { custId: 'p0566666666', card: { num: '4000000000000002' }, slot: 2 });
-    const m = await call('mergeCust', E1, { a: 't' + TZ, b: 'p0566666666' });
+    const m = await call('mergeCust', E1, { a: 't' + TZ, b: 'p0566666666', keep: 't' + TZ });
     assert.equal(m.reason, 'merge-cards'); assert.match(m.text, /3/);
     assert.equal((await get(`b/${A}/cust/p0566666666`)).mv, undefined);
     // בלי הרשאת הזמנות – נחסם
-    assert.equal((await call('mergeCust', NOORD, { a: 't' + TZ, b: 'p0566666666' })).status, 'PERMISSION_DENIED');
-    assert.equal((await call('mergeCust', E1, { a: 't' + TZ, b: 't' + TZ })).reason, 'same-cust');
+    assert.equal((await call('mergeCust', NOORD, { a: 't' + TZ, b: 'p0566666666', keep: 't' + TZ })).status, 'PERMISSION_DENIED');
+    assert.equal((await call('mergeCust', E1, { a: 't' + TZ, b: 't' + TZ, keep: 't' + TZ })).reason, 'same-cust');
+    // תיקון 17:23: keep חובה, ורק אחד משני הלקוחות
+    assert.equal((await call('mergeCust', E1, { a: 't' + TZ, b: 'p0566666666' })).reason, 'bad-keep');
+    assert.equal((await call('mergeCust', E1, { a: 't' + TZ, b: 'p0566666666', keep: 't' + TZ2 })).reason, 'bad-keep');
+    assert.equal((await get(`b/${A}/cust/p0566666666`)).mv, undefined);
+  });
+  it('2026-11-10 תיקון 17:23: mergeCust – העובד בוחר מי נשאר; נבחר בלי ת"ז והשני עם ת"ז – הפרטים של הנבחר במסמך הת"ז', async () => {
+    await prep((d) => d.doc('b/' + A).update({ 'features.cellular': true }));
+    await call('saveCust', MGR, { cust: { name: 'יוסי', phone: '0507777777', tz: TZ, st: 'הרצל 1' } });
+    await call('saveCust', MGR, { cust: { name: 'יוסי כהן', phone: '0528888888', mail: 'y@x.co' } });
+    await call('setCard', MGR, { custId: 'p0528888888', card: CARD });
+    await mkOrd('oK1', 'new', 'br1', 'p0528888888'); await mkOrd('oK2', 'new', 'br1', 't' + TZ);
+    const r = await call('mergeCust', E1, { a: 't' + TZ, b: 'p0528888888', keep: 'p0528888888' });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.id, 't' + TZ); assert.equal(r.result.keep, 'p0528888888');
+    const t = await get(`b/${A}/cust/t${TZ}`);
+    assert.equal(t.name, 'יוסי כהן'); assert.equal(t.phone, '0528888888'); assert.equal(t.tz, TZ); assert.equal(t.mail, 'y@x.co'); assert.equal(t.st, 'הרצל 1');
+    assert.deepEqual(t.phs, ['0507777777']); assert.deepEqual(t.cards, [{ s: 1, last4: '9012' }]); assert.equal(t.mv, undefined);
+    assert.equal((await call('getCard', MGR, { custId: 't' + TZ, act: 'view' })).result.card.num, '4580123456789012');
+    assert.equal((await get(`b/${A}/cust/p0528888888`)).mv, 't' + TZ);
+    assert.equal((await get(`b/${A}/ord/oK1`)).custId, 't' + TZ); assert.equal((await get(`b/${A}/ord/oK2`)).custId, 't' + TZ);
+    assert.ok((await coll(`b/${A}/cardLog`)).some((x) => x.act === 'merge' && x.keep === 'p0528888888' && x.from === 'p0528888888'));
   });
 });

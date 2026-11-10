@@ -401,46 +401,51 @@ async function saveCust(request) {
   return Object.assign({ ok: true }, r);
 }
 
-// mergeCust({ a, b }) – 2026-11-10 (שינוי 13:16): איחוד שני לקוחות לאחד. מותר למי שמורשה לערוך לקוחות (ord, כמו saveCust).
-// היעד: הלקוח עם ת"ז (אם רק לאחד יש), אחרת a. השני מסומן mv:<יעד> (לא נמחק – אפשר לשחזר).
-// היעד שומר את ערכיו; שדות ריקים מתמלאים מהשני; טלפונים (ראשי+נוספים) מצטרפים לרשימת phs; ניודים מתאחדים; כרטיסים עוברים (מפוענחים ומוצפנים מחדש)
-// למקומות פנויים; ההזמנות של השני מקבלות custId של היעד. הכול בטרנזקציה אחת, ונרשם ביומן (cardLog act:'merge').
+// mergeCust({ a, b, keep }) – 2026-11-10 (שינוי 13:16; תיקון 17:23): איחוד שני לקוחות לאחד. מותר למי שמורשה לערוך לקוחות (ord, כמו saveCust).
+// keep = הלקוח שנשאר, לפי בחירת העובד (חייב להיות a או b). הערכים שלו גוברים; שדות ריקים מתמלאים מהשני; טלפונים (ראשי+נוספים) מצטרפים ל-phs;
+// ניודים מתאחדים; כרטיסים עוברים (מפוענחים ומוצפנים מחדש) למקומות פנויים; ההזמנות של השני עוברות. השני מסומן mv:<יעד> (לא נמחק – אפשר לשחזר).
+// מסמך היעד: של keep. חריג: אם רק לשני יש ת"ז – הנתונים של keep נכתבים למסמך t{tz} של השני (החיפוש לפי ת"ז נשען על המזהה הזה), ו-keep מסומן mv.
+// הכול בטרנזקציה אחת, ונרשם ביומן (cardLog act:'merge', keep).
 // התנגשות – לא מאחדים: ת"ז שונות, יותר מ-3 כרטיסים, יותר מ-3 טלפונים נוספים, הערות ארוכות מדי, יותר מ-400 הזמנות, סימון עסקי שונה (עובד).
 const MAX_MERGE_ORD = 400;
+const CARDF = ['cards', 'card', 'last4'];
 async function mergeCust(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['a', 'b']);
-  let a = custIdOf(input.a), b = custIdOf(input.b);
+  onlyKeys(input, ['a', 'b', 'keep']);
+  const a = custIdOf(input.a), b = custIdOf(input.b);
   if (a === b) throw bad('same-cust', 'זה אותו לקוח');
+  if (typeof input.keep !== 'string' || ![a, b].includes(input.keep)) throw bad('bad-keep', 'בחרו איזה משני הלקוחות נשאר');
+  const k = input.keep, o = k === a ? b : a; // k = נשאר (ערכיו גוברים), o = השני
   const db = T.tdb();
   let out = null;
   await db.runTransaction(async (tx) => {
-    let [sa, sb] = await tx.getAll(db.doc('cust/' + a), db.doc('cust/' + b));
-    if (!sa.exists || sa.get('mv') || !sb.exists || sb.get('mv')) throw new HttpsError('not-found', 'אחד הלקוחות לא נמצא (אולי כבר אוחד)', { reason: 'no-cust' });
-    let A = sa.data(), B = sb.data();
+    const [sk, so] = await tx.getAll(db.doc('cust/' + k), db.doc('cust/' + o));
+    if (!sk.exists || sk.get('mv') || !so.exists || so.get('mv')) throw new HttpsError('not-found', 'אחד הלקוחות לא נמצא (אולי כבר אוחד)', { reason: 'no-cust' });
+    const A = sk.data(), B = so.data();
     if (!empty(A.tz) && !empty(B.tz) && A.tz !== B.tz) throw pre('merge-tz', 'אי אפשר לאחד: לשני הלקוחות ת.ז שונות. בחרו לאיזה לקוח לשייך את ההזמנה.');
-    if (empty(A.tz) && !empty(B.tz)) { [a, b, sa, sb, A, B] = [b, a, sb, sa, B, A]; } // היעד = הלקוח עם הת"ז (המזהה שלו t{tz})
     if ((A.wholesale === true) !== (B.wholesale === true) && w.role !== 'manager') throw deny('manager-only', 'אחד הלקוחות עסקי והשני לא – איחוד כזה רק למנהל');
-    const ca = cardsOf(A), cb = cardsOf(B);
-    if (ca.length + cb.length > SLOTS.length) throw pre('merge-cards', `אי אפשר לאחד: יחד יש ${ca.length + cb.length} כרטיסי אשראי, והמקסימום 3. מחקו כרטיס בכרטיס הלקוח, או בחרו לאיזה לקוח לשייך את ההזמנה.`);
+    const flip = empty(A.tz) && !empty(B.tz); // היעד = מסמך הת"ז של השני
+    const d = flip ? o : k, s = flip ? k : o, sd = flip ? sk : so, dd = flip ? so : sk; // d = מסמך היעד, s = המסמך שמסומן mv
+    const cd = cardsOf(dd.data()), cs = cardsOf(sd.data());
+    if (cd.length + cs.length > SLOTS.length) throw pre('merge-cards', `אי אפשר לאחד: יחד יש ${cd.length + cs.length} כרטיסי אשראי, והמקסימום 3. מחקו כרטיס בכרטיס הלקוח, או בחרו לאיזה לקוח לשייך את ההזמנה.`);
     const main = A.phone || B.phone;
     const phs = [[B.phone], B.phs].flat().filter((p) => p && typeof p === 'string');
     const allPh = (Array.isArray(A.phs) ? A.phs : []).concat(phs).filter((p, i, L) => p !== main && L.indexOf(p) === i);
     if (allPh.length > core.MAX_PHS) throw pre('merge-phs', `אי אפשר לאחד: יחד יש ${allPh.length} טלפונים נוספים, והמקסימום ${core.MAX_PHS}.`);
-    const bcs = cb.length ? await tx.getAll(...cb.map((x) => db.doc(cardPath(b, x.s)))) : [];
-    const os = await tx.get(db.collection('ord').where('custId', '==', b).limit(MAX_MERGE_ORD + 1));
+    const scs = cs.length ? await tx.getAll(...cs.map((x) => db.doc(cardPath(s, x.s)))) : [];
+    const os = await tx.get(db.collection('ord').where('custId', '==', s).limit(MAX_MERGE_ORD + 1));
     if (os.size > MAX_MERGE_ORD) throw pre('merge-ords', 'אי אפשר לאחד: ללקוח יותר מ-400 הזמנות.');
     const up = {};
     const SKIP = ['x', 'ports', 'phs', 'cards', 'card', 'last4', 'at', 'upd', 'by', 'src', 'mv', 'phone', 'tz', 'wholesale'];
-    for (const [k, v] of Object.entries(B)) if (!SKIP.includes(k) && empty(A[k]) && !empty(v)) up[k] = v;
+    for (const [kk, v] of Object.entries(B)) if (!SKIP.includes(kk) && empty(A[kk]) && !empty(v)) up[kk] = v;
     if (!empty(A.note) && !empty(B.note) && A.note !== B.note) {
       const n = A.note + ' | ' + B.note;
       if (n.length > 1000) throw pre('merge-note', 'אי אפשר לאחד: ההערות של שני הלקוחות יחד ארוכות מ-1000 תווים. קצרו הערה בכרטיס הלקוח.');
       up.note = n;
     }
     if (empty(A.phone) && !empty(B.phone)) up.phone = B.phone;
-    if (empty(A.tz) && !empty(B.tz)) up.tz = B.tz; // לא קורה (היעד הוא בעל הת"ז) – ליתר ביטחון
+    if (flip) up.tz = B.tz;
     if (B.wholesale === true && A.wholesale !== true) up.wholesale = true;
     const ox = A.x && typeof A.x === 'object' ? A.x : {}, bx = B.x && typeof B.x === 'object' ? B.x : {};
     const x = Object.assign({}, bx, ox);
@@ -449,22 +454,30 @@ async function mergeCust(request) {
     if (pb.length) { const ks = new Set(pa.map(portKey)), add = pb.filter((r) => !ks.has(portKey(r))); if (add.length) { if (pa.length + add.length > MAX_PORTS) throw pre('merge-ports', `אי אפשר לאחד: יחד יותר מ-${MAX_PORTS} ניודים.`); up.ports = pa.concat(add); } }
     if (JSON.stringify(allPh) !== JSON.stringify(Array.isArray(A.phs) ? A.phs : [])) up.phs = allPh;
     const now = Date.now();
-    const list = ca.slice();
-    bcs.forEach((q, j) => {
+    const list = cd.slice();
+    scs.forEach((q, j) => {
       if (!q.exists) return;
-      const key = CARD_ENC_KEY.value(), c = CARD.open(key, w.bizId, cardAad(b, cb[j].s), q.get('box'));
-      const n = SLOTS.find((s) => !list.some((y) => y.s === s));
-      tx.set(db.doc(cardPath(a, n)), Object.assign({}, q.data(), { box: CARD.seal(key, w.bizId, cardAad(a, n), c), last4: c.num.slice(-4) }));
+      const key = CARD_ENC_KEY.value(), c = CARD.open(key, w.bizId, cardAad(s, cs[j].s), q.get('box'));
+      const n = SLOTS.find((y) => !list.some((z) => z.s === y));
+      tx.set(db.doc(cardPath(d, n)), Object.assign({}, q.data(), { box: CARD.seal(key, w.bizId, cardAad(d, n), c), last4: c.num.slice(-4) }));
       tx.delete(q.ref);
       list.push({ s: n, last4: c.num.slice(-4) });
-      tx.set(db.collection('cardLog').doc(), Object.assign({ t: now, by: w.uid, cust: a, act: 'move', from: b }, n > 1 ? { s: n } : {}));
+      tx.set(db.collection('cardLog').doc(), Object.assign({ t: now, by: w.uid, cust: d, act: 'move', from: s }, n > 1 ? { s: n } : {}));
     });
-    if (list.length !== ca.length) Object.assign(up, cardsUp(list));
-    tx.update(sa.ref, Object.assign(up, { upd: now, by: w.uid }));
-    tx.update(sb.ref, Object.assign({ mv: a, upd: now, by: w.uid }, cb.length ? { card: FieldValue.delete(), cards: FieldValue.delete(), last4: FieldValue.delete() } : {}));
-    os.docs.forEach((d) => tx.update(d.ref, { custId: a, upd: now }));
-    tx.set(db.collection('cardLog').doc(), { t: now, by: w.uid, cust: a, act: 'merge', from: b, ords: os.size, cards: list.length - ca.length });
-    out = { ok: true, id: a, from: b, ords: os.size, cards: list.length };
+    if (!flip) {
+      if (list.length !== cd.length) Object.assign(up, cardsUp(list));
+      tx.update(dd.ref, Object.assign(up, { upd: now, by: w.uid }));
+    } else { // הנתונים של keep (עם ההשלמות) נכתבים במלואם למסמך הת"ז; הכרטיסים – אלה שבמסמך היעד בפועל
+      const full = Object.assign({}, A, up, { upd: now, by: w.uid });
+      delete full.mv; CARDF.forEach((f) => delete full[f]);
+      const l = list.slice().sort((p, q) => p.s - q.s);
+      if (l.length) Object.assign(full, { cards: l, card: true, last4: l[0].last4 });
+      tx.set(dd.ref, full);
+    }
+    tx.update(sd.ref, Object.assign({ mv: d, upd: now, by: w.uid }, cs.length ? { card: FieldValue.delete(), cards: FieldValue.delete(), last4: FieldValue.delete() } : {}));
+    os.docs.forEach((q) => tx.update(q.ref, { custId: d, upd: now }));
+    tx.set(db.collection('cardLog').doc(), { t: now, by: w.uid, cust: d, act: 'merge', from: s, keep: k, ords: os.size, cards: list.length - cd.length });
+    out = { ok: true, id: d, from: s, keep: k, ords: os.size, cards: list.length };
   });
   return out;
 }
