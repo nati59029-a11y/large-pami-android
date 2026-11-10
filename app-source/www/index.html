@@ -3529,17 +3529,26 @@ function tkDue(t){let rem=72*36e5,x=t;for(let i=0;i<400;i++){const d=new Date(x)
 const iv=v=>({integerValue:String(Math.round(+v||0))});
 const gi=(d,k)=>{const f=d&&d.fields&&d.fields[k];return f?+(f.integerValue||f.doubleValue||0):0};
 /* nc='1': יש במשימה הערה של עובד – "בוצע" של עובד עובר לאישור המנהל (st 'wait'). rt='1': המנהל החזיר את המשימה לעובד */
-const TKF=['owner','by','role','txt','cr','due','st','open','pr','sub','doneBy','note','ok','late','cAt','cBy','nc','rt'];
-const tkOf=d=>({id:idOf(d),owner:gv(d,'owner'),by:gv(d,'by'),role:gv(d,'role'),txt:gv(d,'txt'),cr:gi(d,'cr'),due:gi(d,'due'),st:gv(d,'st'),pr:gv(d,'pr'),sub:gi(d,'sub'),doneBy:gv(d,'doneBy'),note:gv(d,'note'),ok:gi(d,'ok'),late:gv(d,'late'),cAt:gi(d,'cAt'),cBy:gv(d,'cBy'),nc:gv(d,'nc'),rt:gv(d,'rt')});
+/* משימה חדשה (שדרוג): to/toN = נמענים (uid ושם), ow/owN/clt = המטפל שתפס, np = תמונות נדרשות לסגירה, wp = כמה הועלו, mi = תמונות מנהל, cT/cN = תצוגה מקדימה של התגובה האחרונה, rd = מי סימן "נקרא" ומתי. בלי to = משימה ישנה. התמונות (img ותת-אוסף p) לא נטענות ברשימה */
+const TKF=['owner','by','role','txt','cr','due','st','open','pr','sub','doneBy','note','ok','late','cAt','cBy','nc','rt','to','toN','ow','owN','clt','np','wp','mi','cT','cN','rd'];
+const tkOf=d=>({id:idOf(d),owner:gv(d,'owner'),by:gv(d,'by'),role:gv(d,'role'),txt:gv(d,'txt'),cr:gi(d,'cr'),due:gi(d,'due'),st:gv(d,'st'),pr:gv(d,'pr'),sub:gi(d,'sub'),doneBy:gv(d,'doneBy'),note:gv(d,'note'),ok:gi(d,'ok'),late:gv(d,'late'),cAt:gi(d,'cAt'),cBy:gv(d,'cBy'),nc:gv(d,'nc'),rt:gv(d,'rt'),ut:d.updateTime||'',to:tkArr(d,'to'),toN:tkArr(d,'toN'),ow:gv(d,'ow'),owN:gv(d,'owN'),clt:gi(d,'clt'),np:gi(d,'np'),wp:gi(d,'wp'),mi:gi(d,'mi'),cT:gv(d,'cT'),cN:gv(d,'cN'),rd:tkRdOf(d)});
+const tkArr=(d,k)=>{const f=d&&d.fields&&d.fields[k],v=f&&f.arrayValue?(f.arrayValue.values||[]).map(x=>x.stringValue||''):null;return v};
+const tkRdOf=d=>{const f=d&&d.fields&&d.fields.rd,o={};if(f&&f.mapValue)for(const k in (f.mapValue.fields||{}))o[k]=+(f.mapValue.fields[k].integerValue||f.mapValue.fields[k].doubleValue||0);return o};
+/* tkNew: משימה חדשה (עם נמענים). עובד רואה רק משימות שהוא נמען בהן, או משימות ישנות */
+const tkNew=t=>Array.isArray(t.to)&&t.to.length>0;
+const tkSee=t=>!tkNew(t)||t.to.includes(SY.uid);
+const tkVis=()=>fbAdmin()?(TK.L||[]):(TK.L||[]).filter(tkSee);
 let TK=(()=>{try{return JSON.parse(localStorage.getItem(LK('lp-tasks')))||{L:[]}}catch(e){return{L:[]}}})();
 const tkSave=()=>{try{localStorage.setItem(LK('lp-tasks'),JSON.stringify(TK))}catch(e){}};
 /* תגובות במשימות: במכשיר נשמר לכל משימה מתי נצפה השרשור לאחרונה (s) וכמה תגובות היו (n). "תגובה חדשה" = cAt של המשימה חדש מהצפייה, ומישהו אחר כתב */
 let TKC=(()=>{try{return JSON.parse(localStorage.getItem(LK('lp-tk-c')))||{}}catch(e){return{}}})();
 const tkcSave=()=>{try{localStorage.setItem(LK('lp-tk-c'),JSON.stringify(TKC))}catch(e){}};
-const tkCNew=t=>!!(t.cAt&&t.cBy&&t.cBy!==SY.uid&&t.cAt>((TKC[t.id]||{}).s||0));
+const tkRdv=t=>Math.max(((t.rd||{})[SY.uid])||0,(TKC[t.id]||{}).s||0);
+const tkCNew=t=>!!(t.cAt&&t.cBy&&t.cBy!==SY.uid&&t.cAt>tkRdv(t));
+const tkUnr=t=>tkNew(t)&&t.to.includes(SY.uid)&&!((t.rd||{})[SY.uid]);
 const tkLateNow=t=>t.st==='open'&&Date.now()>t.due;
 const tkIsLate=t=>tkLateNow(t)||t.late==='1'||((t.st==='wait'||t.st==='done')&&t.sub>t.due);
-const tkOverN=()=>(TK.L||[]).filter(tkLateNow).length;
+const tkOverN=()=>tkVis().filter(tkLateNow).length;
 const tkErr=e=>e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה לפעולה הזו. אם זה חוזר, בדוק שהשעה בטלפון מדויקת, או פנה למנהל':'שגיאה: '+((e&&e.message)||e));
 async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields:TKF.map(f=>({fieldPath:f}))},limit:1000};if(where)sq.where={fieldFilter:{field:{fieldPath:where},op:'EQUAL',value:{stringValue:'1'}}};
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document&&idOk(idOf(x.document))).map(x=>tkOf(x.document))}
@@ -3547,39 +3556,77 @@ async function tkLoad(){if(!fbRole()||!bzF('tasks'))return;let L;if(fbAdmin())L=
  TK.L=L.map(t=>Object.assign(t,{due:t.cr?tkDue(t.cr):t.due}));TK.at=Date.now();tkSave();tkRe();return L.length}
 /* בונים מחדש רק כשאין טופס פתוח עם נתונים שהוקלדו */
 function tkRe(){if(document.querySelector('#dlg[open] form'))return;const ta=document.querySelector('form[data-f=tkAdd] textarea'),v=ta?ta.value:'',fo=ta&&document.activeElement===ta,cb=document.querySelector('form[data-f=tkAdd] input[name=pr]'),pr=!!(cb&&cb.checked);if(cur().v==='tk'||(isW()&&cur().v==='wk'&&typeof WS!=='undefined'&&WS==='home')){rerender();const n=document.querySelector('form[data-f=tkAdd] textarea');if(n&&v){n.value=v;if(fo)n.focus()}const c=document.querySelector('form[data-f=tkAdd] input[name=pr]');if(c&&pr)c.checked=true}}
-async function tkPatch(id,o){const fields={},mask=[];for(const k in o){fields[k]=typeof o[k]==='number'?iv(o[k]):sv(o[k]);mask.push('updateMask.fieldPaths='+k)}
- await fsx('/tasks/'+id+'?'+mask.join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}
+/* ut = updateTime של המסמך שראינו: תנאי מוקדם (תפיסה) – אם המסמך השתנה מאז, השרת דוחה */
+async function tkPatch(id,o,ut){const fields={},mask=[];for(const k in o){const v=o[k];fields[k]=Array.isArray(v)?{arrayValue:{values:v.map(sv)}}:typeof v==='number'?iv(v):sv(v);mask.push('updateMask.fieldPaths='+k)}
+ await fsx('/tasks/'+id+'?'+mask.join('&')+'&'+(ut?'currentDocument.updateTime='+encodeURIComponent(ut):'currentDocument.exists=true'),{method:'PATCH',body:JSON.stringify({fields})})}
+/* סימון "נקרא": רק המפתח של המשתמש בתוך rd (נתיב עם backticks כי uid עלול להתחיל בספרה). כשל (למשל חוקים ישנים) – בשקט */
+async function tkMark(ids){const now=Date.now(),u=SY.uid,pth=encodeURIComponent('rd.`'+String(u).replace(/[`\\]/g,'\\$&')+'`');
+ await Promise.all(ids.slice(0,60).map(async id=>{try{await fsx('/tasks/'+id+'?updateMask.fieldPaths='+pth+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:{rd:{mapValue:{fields:{[u]:iv(now)}}}}})});const t=tkGet(id);if(t)t.rd=Object.assign({},t.rd,{[u]:now})}catch(e){}}));tkSave()}
+/* רשימת העובדים הפעילים (למנהל): נטענת לפי דרישה ונשמרת בזיכרון */
+let TKST={L:null,busy:0,t:0};
+async function tkStaffLoad(){if(TKST.busy)return;TKST.busy=1;try{const j=await fsx('/staff?pageSize=300');TKST.L=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d}),id=idOf(d);return{uid:id,name:String(f.name||'').trim()||String(f.email||'').split('@')[0]||id,active:f.active===true}}).filter(x=>x.active&&idOk(x.uid)).sort((a,b)=>a.name.localeCompare(b.name,'he'))}catch(e){TKST.L=null}finally{TKST.busy=0;TKST.t=Date.now();tkRe()}}
+/* מצב טופס יצירה (מנהל): נמענים שנבחרו, תמונות נדרשות, תמונות מצורפות (כבר מוקטנות) */
+let TKN={sel:null,np:0,imgs:[]};
 async function tkDo(fn,msg){try{await fn();if(msg)toast(msg)}catch(e){toast(tkErr(e))}try{await tkLoad()}catch(e){}tkRe()}
 function tkTile(){const n=tkOverN();return `<button class="tile" data-a="go" data-v="tk" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:34px;height:34px;display:block;margin:0 auto 6px"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>משימות${n?`<small style="display:block;color:var(--bad);font-weight:700">${n} באיחור</small>`:''}</button>`}
 const tkDT=ms=>ms?new Date(ms).toLocaleString('he-IL',{weekday:'short',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
 let TKT='open';
-V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbAdmin(),L=(TK.L||[]).slice();
+V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbAdmin(),L=tkVis().slice();
+ if(adm&&!TKST.busy&&(!TKST.t||Date.now()-TKST.t>(TKST.L?6e5:3e4)))tkStaffLoad();
  const tabs=[['open','פתוחות',L.filter(t=>t.st!=='done').length],['late','באיחור',L.filter(tkIsLate).length]].concat(adm?[['done','בוצעו',L.filter(t=>t.st==='done').length]]:[]).concat([['sum','📊 סיכום',0]]);
  if(!tabs.find(x=>x[0]===TKT))TKT='open';
  let S0=TKT==='open'?L.filter(t=>t.st!=='done'):TKT==='late'?L.filter(tkIsLate):L.filter(t=>t.st==='done');
  S0.sort((a,b)=>TKT==='done'?(b.ok-a.ok):(a.due-b.due));
  const card=t=>{const lt=tkIsLate(t),mine=t.owner===SY.uid;
-  const cn=tkCNew(t),cc=TKC[t.id]&&!cn?TKC[t.id].n:null;
-  const tags=(cn?'<span class="tag t2">💬 תגובה חדשה</span> ':'')+(lt?'<span class="tag t4">באיחור</span> ':'')+(t.st==='wait'?`<span class="tag t1">${t.pr==='1'?'ממתין לאישור תמונה':'ממתין לאישור מנהל'}</span> `:'')+(t.st==='open'&&t.rt==='1'?'<span class="tag t4">↩️ הוחזרה על ידי המנהל</span> ':'')+(t.st==='open'&&t.pr==='1'?'<span class="tag t2">נדרשת תמונה</span> ':'')+(t.st==='done'?'<span class="tag t3">בוצע</span>':'');
+  const cn=tkCNew(t),unr=tkUnr(t),cc=TKC[t.id]&&!cn?TKC[t.id].n:null;
+  const tags=(unr?'<span class="tag t2">🆕 משימה חדשה</span> ':'')+(cn?'<span class="tag t2">💬 תגובה חדשה</span> ':'')+(tkNew(t)&&t.st==='open'?(t.ow?(t.ow===SY.uid?'<span class="tag t3">אני מטפל</span> ':'<span class="tag t1">בטיפול של '+esc(t.owN||'עובד')+'</span> '):'<span class="tag t1">'+(adm?'לא נתפסה':'פנויה לתפיסה')+'</span> '):'')+(lt?'<span class="tag t4">באיחור</span> ':'')+(t.st==='wait'?`<span class="tag t1">${t.pr==='1'?'ממתין לאישור תמונה':'ממתין לאישור מנהל'}</span> `:'')+(t.st==='open'&&t.rt==='1'?'<span class="tag t4">↩️ הוחזרה על ידי המנהל</span> ':'')+(t.st==='open'&&t.pr==='1'?'<span class="tag t2">נדרשת תמונה</span> ':'')+(t.st==='done'?'<span class="tag t3">בוצע</span>':'');
+  const nw=tkNew(t),me=SY.uid,mineN=nw&&t.ow===me,did=esc(t.id),np=t.np||0,wp=t.wp||0;
   let act='';
+  /* הזרימה הישנה (תמונה בודדת pr / "בוצע") – למשימות ישנות, למנהל, ולמטפל במשימה חדשה בלי תמונות נדרשות */
+  const legacy=()=>{let a='';
+   if(t.pr==='1'){a+=`<label class="btn" style="cursor:pointer">📷 צלם תמונה<input type="file" accept="image/*" capture="environment" data-c="tkimg" data-id="${did}" hidden></label><label class="btn g" style="cursor:pointer">🖼 מהגלריה<input type="file" accept="image/*" data-c="tkimg" data-id="${did}" hidden></label>`;if(adm)a+=`<button class="btn g" data-a="tkDone" data-id="${did}">סגור בלי תמונה</button>`}
+   else{a+=`<button class="btn" data-a="tkDone" data-id="${did}">✓ בוצע</button>`;if(adm&&!(np>0))a+=`<button class="btn g" data-a="tkReq" data-id="${did}">📷 בקש תמונה</button>`}return a};
   if(t.st==='open'){
-   if(t.pr==='1'){act+=`<label class="btn" style="cursor:pointer">📷 צלם תמונה<input type="file" accept="image/*" capture="environment" data-c="tkimg" data-id="${esc(t.id)}" hidden></label><label class="btn g" style="cursor:pointer">🖼 מהגלריה<input type="file" accept="image/*" data-c="tkimg" data-id="${esc(t.id)}" hidden></label>`;if(adm)act+=`<button class="btn g" data-a="tkDone" data-id="${esc(t.id)}">סגור בלי תמונה</button>`}
-   else{act+=`<button class="btn" data-a="tkDone" data-id="${esc(t.id)}">✓ בוצע</button>`;if(adm)act+=`<button class="btn g" data-a="tkReq" data-id="${esc(t.id)}">📷 בקש תמונה</button>`}}
-  if(t.st==='wait'){if(t.pr==='1')act+=`<button class="btn g" data-a="tkImg" data-id="${esc(t.id)}">הצג תמונה</button>`;if(adm)act+=`<button class="btn" data-a="tkOk" data-id="${esc(t.id)}">✓ אשר</button><button class="btn r" data-a="tkRej" data-id="${esc(t.id)}">${t.pr==='1'?'דחה':'החזר לעובד'}</button>`;else act+=`<span class="note">${t.pr==='1'?'ממתין לאישור המנהל':'המשימה ממתינה לאישור מנהל כי נכתבה בה הערה'}</span>`}
-  if(t.st==='done'&&t.pr==='1'&&adm)act+=`<button class="btn g" data-a="tkImg" data-id="${esc(t.id)}">הצג תמונה</button>`;
-  act+=`<button class="btn g" data-a="tkCm" data-id="${esc(t.id)}" style="${cn?'border-color:var(--acc);color:var(--acc)':''}">💬 תגובות${cc!=null?' ('+cc+')':''}</button>`;
-  if(adm)act+=`<button class="btn g" data-a="tkDel" data-id="${esc(t.id)}" aria-label="מחק משימה">🗑</button>`;
-  return `<div class="card" style="${lt?'border-color:var(--bad)':''}"><div style="white-space:pre-wrap;font-weight:700">${esc(t.txt)}</div><div style="margin:6px 0">${tags}</div>
-  <p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${mine?' (אני)':''}<br>יעד לביצוע: ${tkDT(t.due)}${t.sub?`<br>בוצעה בפועל: ${tkDT(t.sub)}${t.doneBy?' · '+esc(t.doneBy):''}`:''}${t.st==='done'&&t.ok&&t.ok!==t.sub?`<br>אושרה: ${tkDT(t.ok)}`:''}</p>
+   if(!nw||adm)act+=legacy();
+   else if(!t.ow)act+=`<button class="btn" data-a="tkTake" data-id="${did}">🙋 אני מטפל</button>`;
+   else if(mineN){
+    if(np>0){act+=(wp<np?`<label class="btn" style="cursor:pointer">📷 צלם תמונה (${wp+1}/${np})<input type="file" accept="image/*" capture="environment" data-c="tkwimg" data-id="${did}" hidden></label><label class="btn g" style="cursor:pointer">🖼 מהגלריה<input type="file" accept="image/*" data-c="tkwimg" data-id="${did}" hidden></label>`:'')+`<button class="btn" data-a="tkDone" data-id="${did}" ${wp<np?'disabled':''}>✓ סיום (${Math.min(wp,np)}/${np})</button>`}
+    else act+=legacy()}}
+  if(adm&&nw&&t.st!=='done')act+=(t.ow?`<button class="btn g" data-a="tkUnclaim" data-id="${did}">בטל תפיסה</button>`:'')+`<button class="btn g" data-a="tkMv" data-id="${did}">העבר לעובד…</button>`;
+  if(t.st==='wait'){if(t.pr==='1')act+=`<button class="btn g" data-a="tkImg" data-id="${did}">הצג תמונה</button>`;if(adm)act+=`<button class="btn" data-a="tkOk" data-id="${did}">✓ אשר</button><button class="btn r" data-a="tkRej" data-id="${did}">${t.pr==='1'?'דחה':'החזר לעובד'}</button>`;else act+=`<span class="note">${t.pr==='1'||np>0?'ממתין לאישור המנהל':'המשימה ממתינה לאישור מנהל כי נכתבה בה הערה'}</span>`}
+  if(t.st==='done'&&t.pr==='1'&&adm)act+=`<button class="btn g" data-a="tkImg" data-id="${did}">הצג תמונה</button>`;
+  if(nw&&(t.mi>0||wp>0))act+=`<button class="btn g" data-a="tkPics" data-id="${did}">🖼 תמונות${t.mi>0?' · מהמנהל '+t.mi:''}${wp>0?' · ביצוע '+wp+(np?'/'+np:''):''}</button>`;
+  act+=`<button class="btn g" data-a="tkCm" data-id="${did}" style="${cn?'border-color:var(--acc);color:var(--acc)':''}">💬 תגובות${cc!=null?' ('+cc+')':''}</button>`;
+  if(cn||unr)act+=`<button class="btn g" data-a="tkRead" data-id="${did}">סמן כנקרא</button>`;
+  if(adm)act+=`<button class="btn g" data-a="tkDel" data-id="${did}" aria-label="מחק משימה">🗑</button>`;
+  const pv=t.cT?`<p class="note" style="margin:4px 0 0;${cn?'color:var(--acc);font-weight:700':'opacity:.6'}">💬 ${esc(t.cN||'')}${t.cN?': ':''}${esc(t.cT)}</p>`:'';
+  return `<div class="card" id="tkc-${did}" style="${lt?'border-color:var(--bad)':''}"><div style="white-space:pre-wrap;font-weight:700">${esc(t.txt)}</div><div style="margin:6px 0">${tags}</div>${pv}
+  <p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${mine?' (אני)':''}<br>יעד לביצוע: ${tkDT(t.due)}${nw&&adm?`<br>נמענים: ${esc((t.toN&&t.toN.length?t.toN:t.to).join(', '))}`:''}${np>0?`<br>תמונות נדרשות לסגירה: ${np} (הועלו ${wp})`:''}${t.sub?`<br>בוצעה בפועל: ${tkDT(t.sub)}${t.doneBy?' · '+esc(t.doneBy):''}`:''}${t.st==='done'&&t.ok&&t.ok!==t.sub?`<br>אושרה: ${tkDT(t.ok)}`:''}</p>
   ${t.note&&t.st==='open'?`<p class="note" style="color:var(--bad);margin:6px 0 0;white-space:pre-wrap">${t.rt==='1'?'המנהל החזיר את המשימה':'התמונה לא אושרה'}: ${esc(t.note)}</p>`:''}
   ${t.st==='open'&&t.nc==='1'&&t.pr!=='1'&&!adm?'<p class="note" style="margin:6px 0 0">יש במשימה הערה, ולכן אחרי "בוצע" היא תעבור לאישור המנהל.</p>':''}
   ${act?`<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">${act}</div>`:''}</div>`};
  return{t:'משימות',s:adm?'לעובדים':'שלי ושל הצוות',h:`<form class="card" data-f="tkAdd"><label class="f"><span>משימה חדשה</span><textarea name="txt" maxlength="500" required placeholder="מה צריך לעשות?"></textarea></label>
-  ${adm?'<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" name="pr" value="1"> לבקש תמונה שהמשימה בוצעה</label>':''}
+  ${adm?tkFormExtra():''}
   <p class="note" style="margin:4px 0 8px">יעד לביצוע: 3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p><button class="btn w">הוסף משימה</button></form>
   <div class="chips" style="margin:12px 0">${tabs.map(x=>`<button class="chip ${x[0]===TKT?'on':''}" data-a="tkTab" data-v="${x[0]}">${x[1]}${x[2]?' ('+x[2]+')':''}</button>`).join('')}</div>
   ${TKT==='sum'?tkSumView():S0.length?S0.map(card).join(''):`<p class="note">${TKT==='open'?'אין משימות פתוחות.':TKT==='late'?'אין משימות באיחור.':'עוד אין משימות שבוצעו.'}</p>`}
   <button class="btn g w" data-a="tkRefresh" style="margin-top:8px">רענן</button>`}};
+function tkSelInit(){if(TKN.sel===null&&TKST.L)TKN.sel=new Set(TKST.L.map(x=>x.uid));return TKN.sel||new Set()}
+function tkFormExtra(){const S=TKST.L;
+ const mi=`<div id="tkmi" style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">${tkMiHtml()}</div><label class="btn g" style="cursor:pointer;margin:2px 0">🖼 צרף תמונות (עד 5)<input type="file" accept="image/*" multiple data-c="tkMimg" hidden></label>`;
+ if(!S||!S.length)return (TKST.busy||!TKST.t?'<p class="note">טוען רשימת עובדים…</p>':`<p class="note" style="color:var(--bad)">${S?'אין עובדים פעילים.':'לא ניתן לטעון את רשימת העובדים.'} המשימה תישלח לכל הצוות. <button type="button" class="btn g" data-a="tkStaffRetry">נסה שוב</button></p>`)+'<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" name="pr" value="1"> לבקש תמונה שהמשימה בוצעה</label>'+mi;
+ const sel=tkSelInit();
+ return `<div class="f"><span>נמענים</span><div class="chips" id="tkrc" style="margin:4px 0"><button type="button" class="chip ${sel.size===S.length?'on':''}" data-a="tkSel" data-v="*">כל העובדים</button>${S.map(x=>`<button type="button" class="chip ${sel.has(x.uid)?'on':''}" data-a="tkSel" data-v="${esc(x.uid)}">${esc(x.name)}</button>`).join('')}</div></div>
+ <div class="f"><span>תמונות נדרשות לסגירה</span><div class="chips" id="tknp" style="margin:4px 0">${[0,1,2,3].map(n=>`<button type="button" class="chip ${TKN.np===n?'on':''}" data-a="tkNp" data-v="${n}">${n}</button>`).join('')}</div></div>`+mi}
+const tkMiHtml=()=>TKN.imgs.map((u,i)=>`<span style="position:relative;display:inline-block"><img src="${esc(u)}" alt="תמונה ${i+1}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"><button type="button" class="btn r" data-a="tkMiDel" data-i="${i}" aria-label="הסר תמונה" style="position:absolute;top:-6px;inset-inline-start:-6px;min-height:0;padding:0 6px;line-height:20px">✕</button></span>`).join('');
+const tkMiPaint=()=>{const e=$('#tkmi');if(e)e.innerHTML=tkMiHtml()};
+ACT.tkStaffRetry=()=>{TKST.t=0;tkStaffLoad()};
+ACT.tkSel=el=>{const S=TKST.L||[],sel=tkSelInit(),v=el.dataset.v;if(v==='*'){if(sel.size===S.length)sel.clear();else S.forEach(x=>sel.add(x.uid))}else{if(sel.has(v))sel.delete(v);else sel.add(v)}
+ document.querySelectorAll('#tkrc .chip').forEach(c=>c.classList.toggle('on',c.dataset.v==='*'?sel.size===S.length:sel.has(c.dataset.v)))};
+ACT.tkNp=el=>{TKN.np=+el.dataset.v||0;document.querySelectorAll('#tknp .chip').forEach(c=>c.classList.toggle('on',+c.dataset.v===TKN.np))};
+ACT.tkMiDel=el=>{TKN.imgs.splice(+el.dataset.i,1);tkMiPaint()};
+CHG.tkMimg=async el=>{const fs=[...(el.files||[])];el.value='';if(!fs.length)return;const room=5-TKN.imgs.length;if(fs.length>room)toast('אפשר לצרף עד 5 תמונות');
+ for(const f of fs.slice(0,Math.max(0,room))){try{const du=await fbShrink(await rdU(f));if(du.length>880000)throw 0;TKN.imgs.push(du)}catch(e){toast('תמונה לא תקינה או גדולה מדי, דילגתי עליה')}}tkMiPaint()};
 ACT.tkTab=el=>{TKT=el.dataset.v;if(TKT==='sum')TKS.k='';rerender()};
 ACT.tkRefresh=()=>{if(TKT==='sum')TKS.k='';tkDo(()=>Promise.resolve(),'')};
 /* סיכום משימות: בוצעו בזמן / באיחור / סה"כ, לפי תאריך הכתיבה (cr), ליום / שבוע (ראשון–שבת) / חודש / שנה, לפי שעון ישראל.
@@ -3640,29 +3687,43 @@ const tkGet=id=>(TK.L||[]).find(t=>t.id===id);
 FRM.tkAdd=async f=>{const x=fd(f),txt=String(x.txt||'').trim().slice(0,500);if(!txt)return toast('כתוב מה צריך לעשות');const b=f.querySelector('button');if(b)b.disabled=true;
  const now=Date.now(),id=uid(),adm=fbAdmin();
  const fields={owner:sv(SY.uid),by:sv(fbBy()),role:sv(adm?'a':'w'),txt:sv(txt),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),open:sv('1'),pr:sv(adm&&x.pr?'1':''),img:sv(''),sub:iv(0),doneBy:sv(''),note:sv(''),ok:iv(0),late:sv('')};
- try{await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})});toast('✓ המשימה נוספה');f.reset();TKT='open'}catch(e){toast(tkErr(e))}finally{if(b)b.disabled=false}
+ /* מנהל עם רשימת עובדים: משימה חדשה עם נמענים. בלי רשימה – משימה ישנה לכל הצוות */
+ let ims=[];const S=TKST.L;
+ if(adm){ims=TKN.imgs.slice();if(S&&S.length){const sel=tkSelInit(),pk=S.filter(z=>sel.has(z.uid));
+   if(!pk.length){if(b)b.disabled=false;return toast('בחר לפחות עובד אחד')}
+   if(pk.length>30){if(b)b.disabled=false;return toast('אפשר לבחור עד 30 עובדים. בחר פחות')}
+   const one=pk.length===1;fields.pr=sv('');
+   Object.assign(fields,{to:{arrayValue:{values:pk.map(z=>sv(z.uid))}},toN:{arrayValue:{values:pk.map(z=>sv(z.name))}},ow:sv(one?pk[0].uid:''),owN:sv(one?pk[0].name:''),clt:iv(one?now:0),np:iv(TKN.np),wp:iv(0),mi:iv(ims.length)})}
+  else if(ims.length)fields.mi=iv(ims.length)}
+ let ok=false;
+ try{await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})});ok=true;toast('✓ המשימה נוספה');f.reset();TKT='open'}catch(e){toast(tkErr(e))}finally{if(b)b.disabled=false}
+ if(ok&&ims.length){let n=0;try{for(const u of ims){await tkPutImg(id,'m'+(n+1),u);n++}}catch(e){toast('המשימה נוצרה, אבל רק '+n+' מתוך '+ims.length+' תמונות הועלו. '+tkErr(e));try{await tkPatch(id,{mi:n})}catch(e2){}}}
+ if(ok){TKN.imgs=[];TKN.np=0;TKN.sel=null}
  try{await tkLoad()}catch(e){}rerender()};
+/* כתיבת תמונה לתת-אוסף p של המשימה: m1..m5 מנהל, w1..w3 ביצוע */
+const tkPutImg=(id,pid,du)=>fsx('/tasks/'+id+'/p/'+pid,{method:'PATCH',body:JSON.stringify({fields:{img:sv(du),t:iv(Date.now()),uid:sv(SY.uid)}})});
 /* עובד במשימה עם הערת עובד (nc): "בוצע" לא סוגר – המשימה עוברת להמתנה לאישור המנהל. אם הסימון nc לא הגיע עדיין למכשיר והשרת דחה (403) – מנסים כהמתנה לאישור */
-ACT.tkDone=el=>{const t=tkGet(el.dataset.id);if(!t)return;const adm=fbAdmin(),nc=!adm&&t.nc==='1',WM='המשימה ממתינה לאישור מנהל כי נכתבה בה הערה';
- ask(nc?'לסמן שהמשימה בוצעה? כי נכתבה בה הערה, היא תעבור לאישור המנהל':'לסמן שהמשימה בוצעה?',()=>tkDo(async()=>{const now=Date.now(),wait=async()=>{await tkPatch(t.id,{st:'wait',sub:Date.now(),doneBy:fbBy()});toast(WM)};
-  if(nc)return wait();
+ACT.tkDone=el=>{const t=tkGet(el.dataset.id);if(!t)return;const adm=fbAdmin(),nc=!adm&&t.nc==='1',WM=!adm&&t.np>0?'✓ נשלח לאישור המנהל':'המשימה ממתינה לאישור מנהל כי נכתבה בה הערה';
+ if(!adm&&t.np>0&&(t.wp||0)<t.np)return toast('צריך להעלות '+t.np+' תמונות לפני הסיום');
+ ask(!adm&&t.np>0?'לשלוח לאישור המנהל? התמונות כבר הועלו':nc?'לסמן שהמשימה בוצעה? כי נכתבה בה הערה, היא תעבור לאישור המנהל':'לסמן שהמשימה בוצעה?',()=>tkDo(async()=>{const now=Date.now(),wait=async()=>{await tkPatch(t.id,{st:'wait',sub:Date.now(),doneBy:fbBy()});toast(WM)};
+  if(nc||(!adm&&t.np>0))return wait();
   try{await tkPatch(t.id,{st:'done',open:'',sub:now,ok:now,doneBy:fbBy(),late:now>t.due?'1':''})}catch(e){if(adm||e.code!==403)throw e;return wait()}
   toast('✓ סומן כבוצע')},''),'כן, בוצע')};
 ACT.tkReq=el=>{const t=tkGet(el.dataset.id);if(t)tkDo(()=>tkPatch(t.id,{pr:'1'}),'העובד יתבקש לצרף תמונה')};
 ACT.tkOk=el=>{const t=tkGet(el.dataset.id);if(!t)return;tkDo(()=>tkPatch(t.id,{st:'done',open:'',ok:Date.now(),late:t.sub>t.due?'1':'',note:''}),'✓ אושר')};
 ACT.tkRej=el=>{const t=tkGet(el.dataset.id);if(!t)return;dlg(`<h3>${t.pr==='1'?'למה התמונה לא מאושרת?':'למה מחזירים את המשימה?'}</h3><form data-f="tkRej" data-id="${esc(t.id)}"><label class="f"><span>הערה לעובד</span><textarea name="note" maxlength="300" required></textarea></label><div class="row"><button class="btn r grow">החזר לעובד</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.tkRej=f=>{const id=f.dataset.id,t=tkGet(id),note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');closeDlg();tkDo(()=>tkPatch(id,{st:'open',img:'',sub:0,doneBy:'',note,rt:t&&t.pr!=='1'?'1':''}),'המשימה הוחזרה לעובד')};
+FRM.tkRej=f=>{const id=f.dataset.id,t=tkGet(id),note=String(fd(f).note||'').trim().slice(0,300);if(!note)return toast('כתוב הערה');closeDlg();tkDo(()=>tkPatch(id,Object.assign({st:'open',img:'',sub:0,doneBy:'',note,rt:t&&t.pr!=='1'?'1':''},t&&t.np>0?{wp:0}:{})),'המשימה הוחזרה לעובד')};
 ACT.tkDel=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('למחוק את המשימה לצמיתות?',()=>tkDo(()=>fsx('/tasks/'+t.id,{method:'DELETE'}),'המשימה נמחקה'),'מחק')};
 ACT.tkImg=async el=>{try{const d=await fsx('/tasks/'+el.dataset.id),u=gv(d,'img');if(!u)return toast('אין תמונה');if(!imgOk(u))return toast('התמונה לא תקינה ולא תוצג');dlg(`<div style="max-height:75vh;overflow:auto;border-radius:8px"><img src="${esc(u)}" alt="תמונת ביצוע" style="width:100%;display:block"></div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)}catch(e){toast(tkErr(e))}};
 /* תגובות: השרשור נטען רק כשפותחים אותו. בחלון (dlg) – ולכן tkRe לא בונה את המסך מחדש בזמן שמקלידים */
 async function tkCmLoad(id){const L=[];let pt='';do{const r=await fsx('/tasks/'+id+'/c?pageSize=300'+(pt?'&pageToken='+encodeURIComponent(pt):''));((r&&r.documents)||[]).forEach(d=>L.push({id:idOf(d),uid:gv(d,'uid'),by:gv(d,'by'),txt:gv(d,'txt'),t:gi(d,'t')}));pt=(r&&r.nextPageToken)||''}while(pt);return L.sort((a,b)=>a.t-b.t)}
 function tkCmView(t,L){const adm=fbAdmin();return `<h3>💬 תגובות</h3><p class="note" style="white-space:pre-wrap;margin:0 0 8px;max-height:4.5em;overflow:hidden">${esc(t.txt)}</p>
  <div class="tkcm" style="max-height:45vh;overflow:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:8px">${L.length?L.map(c=>`<div class="card" style="margin:0;padding:8px 10px;${c.uid===SY.uid?'border-color:var(--acc)':''}"><div class="row" style="justify-content:space-between;align-items:center;gap:6px"><span class="note" style="margin:0">${esc(c.by||'—')}${c.uid===SY.uid?' (אני)':''} · ${tkDT(c.t)}</span>${adm?`<button class="btn g" data-a="tkCmDel" data-id="${esc(t.id)}" data-cid="${esc(c.id)}" aria-label="מחק תגובה" style="padding:2px 8px;min-height:0">🗑</button>`:''}</div><div style="white-space:pre-wrap;margin-top:4px">${esc(c.txt)}</div></div>`).join(''):'<p class="note">עוד אין תגובות.</p>'}</div>
- ${!adm&&t.st!=='open'?'<p class="note" style="margin:0 0 8px">המשימה נסגרה, אי אפשר להוסיף הערה.</p><button type="button" class="btn g w" data-a="closeDlg">סגור</button>':`<form data-f="tkCm" data-id="${esc(t.id)}"><label class="f"><span>תגובה</span><textarea name="txt" maxlength="500" required placeholder="כתוב תגובה…"></textarea></label>
- ${adm&&(t.st==='done'||t.st==='wait')?'<label style="display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" name="back" value="1" checked> להחזיר לעובד (המשימה תיפתח שוב אצלו)</label>':''}${!adm&&t.st==='open'&&t.pr!=='1'&&t.nc!=='1'?'<p class="note" style="margin:0 0 8px">שים לב: אחרי שתכתוב הערה, "בוצע" במשימה הזו יעבור לאישור המנהל.</p>':''}<div class="row"><button class="btn grow">שלח</button><button type="button" class="btn g grow" data-a="closeDlg">סגור</button></div></form>`}`}
+ ${!adm&&tkNew(t)&&t.st==='open'&&t.ow&&t.ow!==SY.uid?`<p class="note" style="margin:0 0 8px">המשימה בטיפול של ${esc(t.owN||'עובד אחר')}, אפשר רק לקרוא.</p><button type="button" class="btn g w" data-a="closeDlg">סגור</button>`:!adm&&t.st!=='open'?'<p class="note" style="margin:0 0 8px">המשימה נסגרה, אי אפשר להוסיף הערה.</p><button type="button" class="btn g w" data-a="closeDlg">סגור</button>':`<form data-f="tkCm" data-id="${esc(t.id)}"><label class="f"><span>תגובה</span><textarea name="txt" maxlength="500" required placeholder="כתוב תגובה…"></textarea></label>
+ ${adm&&(t.st==='done'||t.st==='wait')?'<label style="display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" name="back" value="1" checked> להחזיר לעובד (המשימה תיפתח שוב אצלו)</label>':''}${!adm&&t.st==='open'&&t.pr!=='1'&&t.nc!=='1'&&!(t.np>0)?'<p class="note" style="margin:0 0 8px">שים לב: אחרי שתכתוב הערה, "בוצע" במשימה הזו יעבור לאישור המנהל.</p>':''}<div class="row"><button class="btn grow">שלח</button><button type="button" class="btn g grow" data-a="closeDlg">סגור</button></div></form>`}`}
 async function tkCmOpen(id){const t=tkGet(id);if(!t)return;dlg('<h3>💬 תגובות</h3><p class="note">טוען…</p>');let L;
  try{L=await tkCmLoad(id)}catch(e){dlg(`<h3>💬 תגובות</h3><p class="note" style="color:var(--bad)">${esc(tkErr(e))}</p><button class="btn g w" data-a="closeDlg">סגור</button>`);return}
- TKC[id]={s:Math.max(Date.now(),t.cAt||0,L.length?L[L.length-1].t:0),n:L.length};tkcSave();tkRe();dlg(tkCmView(t,L));const b=document.querySelector('#dlg .tkcm');if(b)b.scrollTop=b.scrollHeight}
+ TKC[id]={s:Math.max(Date.now(),t.cAt||0,L.length?L[L.length-1].t:0),n:L.length};tkcSave();if(!(t.rd||{})[SY.uid]||t.cAt>(t.rd||{})[SY.uid])tkMark([id]).then(tkRe);tkRe();dlg(tkCmView(t,L));const b=document.querySelector('#dlg .tkcm');if(b)b.scrollTop=b.scrollHeight}
 ACT.tkCm=el=>tkCmOpen(el.dataset.id);
 FRM.tkCm=async f=>{const id=f.dataset.id,x=fd(f),txt=String(x.txt||'').trim().slice(0,500);if(!txt)return toast('כתוב תגובה');const b=f.querySelector('button');if(b)b.disabled=true;
  const adm=fbAdmin(),t=tkGet(id),back=adm&&!!x.back&&!!t&&(t.st==='done'||t.st==='wait');
@@ -3673,18 +3734,52 @@ FRM.tkCm=async f=>{const id=f.dataset.id,x=fd(f),txt=String(x.txt||'').trim().sl
  try{await fsx('/tasks/'+id+'/c?documentId='+encodeURIComponent(uid()),{method:'POST',body:JSON.stringify({fields})})}catch(e){toast(tkErr(e));if(b)b.disabled=false;return}
  /* מנהל עם "להחזיר לעובד": משימה שבוצעה או ממתינה לאישור חוזרת לעובד (st 'open'). היעד (due) לא משתנה – אם עבר, היא באיחור.
     שדות הביצוע מתנקים כמו בדחיית תמונה, וההערה מוצגת לעובד בכרטיס */
- if(back){try{await tkPatch(id,{cAt:now,cBy:SY.uid,st:'open',open:'1',img:'',sub:0,doneBy:'',ok:0,late:'',note:txt,rt:'1'})}catch(e){toast('התגובה נשלחה, אבל החזרת המשימה נכשלה. '+tkErr(e));return tkCmOpen(id)}
+ if(back){try{await tkPatch(id,Object.assign({cAt:now,cBy:SY.uid,cT:txt.slice(0,120),cN:fbBy().slice(0,100),st:'open',open:'1',img:'',sub:0,doneBy:'',ok:0,late:'',note:txt,rt:'1'},t&&t.np>0?{wp:0}:{}))}catch(e){toast('התגובה נשלחה, אבל החזרת המשימה נכשלה. '+tkErr(e));return tkCmOpen(id)}
   closeDlg();toast('✓ המשימה הוחזרה לעובד עם ההערה');try{await tkLoad()}catch(e){}tkRe();return}
- try{await tkPatch(id,{cAt:now,cBy:SY.uid});if(t){t.cAt=now;t.cBy=SY.uid;tkSave()}}catch(e){}
+ try{try{await tkPatch(id,{cAt:now,cBy:SY.uid,cT:txt.slice(0,120),cN:fbBy().slice(0,100)})}catch(e){if(e.offline)throw e;await tkPatch(id,{cAt:now,cBy:SY.uid})}if(t){t.cAt=now;t.cBy=SY.uid;t.cT=txt.slice(0,120);t.cN=fbBy().slice(0,100);tkSave()}}catch(e){}
  toast(!adm&&t&&t.st==='open'&&t.pr!=='1'?'✓ ההערה נשלחה. "בוצע" במשימה הזו יעבור לאישור המנהל':'✓ התגובה נשלחה');await tkCmOpen(id)};
 ACT.tkCmDel=el=>{const id=el.dataset.id,cid=el.dataset.cid;ask('למחוק את התגובה?',async()=>{try{await fsx('/tasks/'+id+'/c/'+cid,{method:'DELETE'});toast('התגובה נמחקה')}catch(e){toast(tkErr(e))}tkCmOpen(id)},'מחק')};
 CHG.tkimg=async el=>{const id=el.dataset.id,f=el.files&&el.files[0];el.value='';const t=tkGet(id);if(!f||!t)return;toast('מעלה תמונה…');
  tkDo(async()=>{const du=await fbShrink(await rdU(f));if(du.length>880000)throw new Error('התמונה גדולה מדי. צלם שוב ממרחק קצת יותר גדול');await tkPatch(id,{st:'wait',img:du,sub:Date.now(),doneBy:fbBy()})},'✓ התמונה נשלחה לאישור המנהל')};
+/* תפיסה: "אני מטפל". תנאי מוקדם על updateTime – מי שתפס קודם מנצח. כשל ← טוענים מחדש ואומרים מי תפס. updateTime משתנה גם בסימון "נקרא", לכן אם עדיין פנויה – מנסים פעם נוספת */
+ACT.tkTake=el=>{const id=el.dataset.id;let t=tkGet(id);if(!t)return;const b=el;b.disabled=true;
+ (async()=>{let err=null;for(let i=0;i<2;i++){try{await tkPatch(id,{ow:SY.uid,owN:fbBy(),clt:Date.now()},t.ut);toast('✓ המשימה אצלך');err=null;break}catch(e){err=e;if(e.offline)break;try{await tkLoad()}catch(e2){}t=tkGet(id);if(!t||t.ow)break}}
+  if(err){try{await tkLoad()}catch(e){}t=tkGet(id);toast(err.offline?tkErr(err):t&&t.ow&&t.ow!==SY.uid?'המשימה כבר בטיפול של '+(t.owN||'עובד אחר'):t&&t.ow===SY.uid?'✓ המשימה אצלך':tkErr(err))}
+  try{await tkLoad()}catch(e){}tkRe()})()};
+/* ביטול תפיסה / העברה: תמונות הביצוע של המטפל הקודם נמחקות (מנהל רשאי), כדי שלא ייספרו למטפל החדש */
+const tkWipeW=async id=>{for(const k of['w1','w2','w3'])await fsx('/tasks/'+id+'/p/'+k,{method:'DELETE'})};
+ACT.tkUnclaim=el=>{const t=tkGet(el.dataset.id);if(!t)return;ask('לבטל את התפיסה? המשימה תחזור להיות פנויה לכל הנמענים. תמונות ביצוע שהועלו יימחקו',()=>tkDo(async()=>{await tkWipeW(t.id);await tkPatch(t.id,{ow:'',owN:'',clt:0,wp:0})},'התפיסה בוטלה'),'בטל תפיסה')};
+ACT.tkMv=el=>{const t=tkGet(el.dataset.id),S=TKST.L;if(!t)return;if(!S||!S.length)return toast('רשימת העובדים לא נטענה. נסה שוב בעוד רגע');
+ dlg(`<h3>העבר לעובד</h3><form data-f="tkMv" data-id="${esc(t.id)}"><label class="f"><span>עובד</span><select name="u" required>${S.map(x=>`<option value="${esc(x.uid)}" ${x.uid===t.ow?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label><div class="row"><button class="btn grow">העבר</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.tkMv=f=>{const id=f.dataset.id,t=tkGet(id),z=(TKST.L||[]).find(x=>x.uid===String(fd(f).u||''));if(!t||!z)return;closeDlg();
+ const o={ow:z.uid,owN:z.name,clt:Date.now()};if(!(t.to||[]).includes(z.uid)){o.to=(t.to||[]).concat(z.uid);o.toN=(t.to||[]).map((u,i)=>(t.toN||[])[i]||u).concat(z.name)}
+ tkDo(async()=>{if(z.uid!==t.ow){await tkWipeW(id);o.wp=0}await tkPatch(id,o)},'✓ המשימה הועברה ל'+z.name)};
+/* סימון נקרא ידני */
+ACT.tkRead=el=>{const id=el.dataset.id;tkMark([id]).then(()=>{toast('סומן כנקרא');tkRe()})};
+/* תמונות המשימה (מנהל ביצוע) – נטענות רק כשפותחים */
+ACT.tkPics=async el=>{const id=el.dataset.id;dlg('<h3>🖼 תמונות</h3><p class="note">טוען…</p>');
+ try{const r=await fsx('/tasks/'+id+'/p?pageSize=20'),L=((r&&r.documents)||[]).map(d=>({pid:idOf(d),img:gv(d,'img')})).filter(x=>/^[mw][1-5]$/.test(x.pid)&&imgOk(x.img)).sort((a,b)=>a.pid.localeCompare(b.pid));
+  const sec=(h,k)=>{const a=L.filter(x=>x.pid[0]===k);return a.length?`<h4 style="margin:10px 0 4px">${h} (${a.length})</h4>${a.map(x=>`<img src="${esc(x.img)}" alt="${h}" style="width:100%;display:block;border-radius:8px;margin-bottom:6px">`).join('')}`:''};
+  dlg(`<h3>🖼 תמונות</h3><div style="max-height:70vh;overflow:auto">${sec('תמונות מהמנהל','m')}${sec('תמונות ביצוע','w')}${L.length?'':'<p class="note">אין תמונות להצגה.</p>'}</div><button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגור</button>`)}
+ catch(e){dlg(`<h3>🖼 תמונות</h3><p class="note" style="color:var(--bad)">${esc(tkErr(e))}</p><button class="btn g w" data-a="closeDlg">סגור</button>`)}};
+/* תמונת ביצוע של המטפל: w1..w{np}, ואז מונה wp */
+CHG.tkwimg=el=>{const id=el.dataset.id,f=el.files&&el.files[0];el.value='';const t=tkGet(id);if(!f||!t)return;const n=(t.wp||0)+1;if(n>(t.np||0))return;toast('מעלה תמונה…');
+ tkDo(async()=>{const du=await fbShrink(await rdU(f));if(du.length>880000)throw new Error('התמונה גדולה מדי. צלם שוב ממרחק קצת יותר גדול');await tkPutImg(id,'w'+n,du);await tkPatch(id,{wp:n})},'✓ תמונה '+n+' מתוך '+t.np+' הועלתה')};
 /* התראה על משימות באיחור בכל כניסה לאפליקציה */
-let TKA=0;
-async function tkAlert(){if(!fbRole()||!bzF('tasks'))return;try{await tkLoad()}catch(e){}const n=tkOverN();if(!n||Date.now()-TKA<600000)return;const d=$('#dlg');if(d&&d.open)return;TKA=Date.now();
- dlg(`<h3>⚠️ ${n>1?n+' משימות באיחור':'משימה אחת באיחור'}</h3><p class="note">${n>1?'יש משימות שלא טופלו':'יש משימה שלא טופלה'} תוך 3 ימי עסקים.</p><div class="row"><button class="btn grow" data-a="tkGoAl">לצפייה</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`)}
+let TKA=0;const TKSH=new Set();
+/* חלון כניסה: איחורים (כמו תמיד) + לעובד גם משימות חדשות ותגובות חדשות שעוד לא הוצגו בפתיחה הזו. לכל היותר פעם ב-10 דקות; לא מעל חלון פתוח */
+async function tkAlert(){if(!fbRole()||!bzF('tasks'))return;try{await tkLoad()}catch(e){}const n=tkOverN();
+ const V0=fbAdmin()?[]:tkVis().filter(t=>t.st!=='done'),nw=V0.filter(t=>tkUnr(t)&&!TKSH.has('n'+t.id)),cm=V0.filter(t=>!tkUnr(t)&&tkCNew(t)&&!TKSH.has('c'+t.id+':'+t.cAt));
+ if(!(n||nw.length||cm.length)||Date.now()-TKA<600000)return;const d=$('#dlg');if(d&&d.open)return;TKA=Date.now();
+ if(!nw.length&&!cm.length)return dlg(`<h3>⚠️ ${n>1?n+' משימות באיחור':'משימה אחת באיחור'}</h3><p class="note">${n>1?'יש משימות שלא טופלו':'יש משימה שלא טופלה'} תוך 3 ימי עסקים.</p><div class="row"><button class="btn grow" data-a="tkGoAl">לצפייה</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`);
+ nw.forEach(t=>TKSH.add('n'+t.id));cm.forEach(t=>TKSH.add('c'+t.id+':'+t.cAt));TKAL=nw.concat(cm).map(t=>t.id);
+ const row=(t,k)=>`<div class="card" style="margin:0 0 8px;padding:8px 10px"><div style="font-weight:700;white-space:pre-wrap;max-height:3em;overflow:hidden">${esc(t.txt)}</div>${k==='c'?`<p class="note" style="margin:2px 0 0;color:var(--acc)">💬 ${esc(t.cN||'')}${t.cN?': ':''}${esc(t.cT||'תגובה חדשה')}</p>`:`<p class="note" style="margin:2px 0 0">${t.ow?'בטיפול של '+esc(t.owN||'עובד'):'פנויה לתפיסה'}</p>`}<button class="btn g" data-a="tkGoIt" data-id="${esc(t.id)}" data-k="${k}" style="margin-top:6px">${k==='c'?'לתגובות':'פתח'}</button></div>`;
+ dlg(`<h3>📣 יש חדש במשימות</h3><div style="max-height:55vh;overflow:auto">${n?`<p class="note" style="color:var(--bad);font-weight:700;margin:0 0 8px">⚠️ ${n>1?n+' משימות באיחור':'משימה אחת באיחור'} <button class="btn g" data-a="tkGoAl" style="margin-inline-start:6px">לצפייה</button></p>`:''}${nw.length?`<h4 style="margin:6px 0">משימות חדשות (${nw.length})</h4>${nw.map(t=>row(t,'n')).join('')}`:''}${cm.length?`<h4 style="margin:6px 0">תגובות חדשות (${cm.length})</h4>${cm.map(t=>row(t,'c')).join('')}`:''}</div><div class="row" style="margin-top:8px"><button class="btn grow" data-a="tkReadAll">סמן הכל כנקרא</button><button class="btn g grow" data-a="closeDlg">אחר כך</button></div>`)}
+let TKAL=[];
 ACT.tkGoAl=()=>{closeDlg();TKT='late';go('tk')};
+ACT.tkGoIt=el=>{const id=el.dataset.id,t=tkGet(id);closeDlg();TKT='open';go('tk');if(t&&el.dataset.k==='n')tkMark([id]).then(tkRe);
+ setTimeout(()=>{const c=document.getElementById('tkc-'+id);if(c)c.scrollIntoView({block:'start'});if(el.dataset.k==='c')tkCmOpen(id)},200)};
+ACT.tkReadAll=()=>{const ids=TKAL.slice();closeDlg();tkMark(ids).then(()=>{toast('✓ סומנו כנקראו');tkRe()})};
 setTimeout(tkAlert,3500);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(tkAlert,1500)});
 

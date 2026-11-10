@@ -6,6 +6,7 @@ require('./20-app-replay');
 require('./30-special-cases');
 require('./35-hardening');
 require('./36-tasks');
+require('./36b-tasks-claim');
 require('./37-appreq');
 require('./38-closings');
 require('./39-cashout');

@@ -82,6 +82,7 @@ const simple = (coll, readAllow, writeAllow, body) => ({
 });
 
 const taskBody = (uid, o) => Object.assign({ owner: uid, by: uid, role: 'w', txt: 'משימה', cr: now(), due: now() + 4 * 86400000, st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '' }, o);
+const taskImg = (uid) => ({ img: 'data:image/jpeg;base64,' + 'A'.repeat(200), t: now(), uid });
 const closingBody = (uid, o) => Object.assign({ uid, by: uid, t: now(), st: 'new', np: 1, reg: 'i_nl', d: '2026-11-01', no: '1', data: '{}' }, o);
 const depBody = (uid, o) => Object.assign({ uid, by: uid, t: now(), d: '2026-11-01', items: ['co1'], a: 10, st: 'new', why: '', np: 1, data: '{}' }, o);
 const coBody = (uid, id, o) => Object.assign({ uid, by: uid, t: now(), reg: 'i_nl', d: '2026-11-01', a: 10, why: 'קניתי חלב', dep: '', src: id, zc: '', dp: '' }, o);
@@ -158,6 +159,14 @@ const OPS = {
     create: { allow: S, run: (db, biz, uid) => db.doc(`${P(biz)}/tasks/${fresh()}`).set(taskBody(uid)) },
     update: { allow: S, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/tasks/tu`).set(taskBody('x'))); return db.doc(`${P(biz)}/tasks/tu`).update({ cAt: now(), cBy: uid }); } },
     delete: { allow: M, run: async (db, biz) => { const id = fresh(); await prep((a) => a.doc(`${P(biz)}/tasks/${id}`).set(taskBody('x'))); return db.doc(`${P(biz)}/tasks/${id}`).delete(); } },
+  },
+  // תמונות משימה (2026-11-09): m1..m5 – מנהל; קריאה – מי שרשאי לקרוא את המשימה. (w1..w3 של המטפל – tests/36b-tasks-claim.js)
+  'tasks/p': {
+    get: { allow: S, run: async (db, biz) => { await prep(async (a) => { await a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x')); await a.doc(`${P(biz)}/tasks/t1/p/m1`).set(taskImg('x')); }); return db.doc(`${P(biz)}/tasks/t1/p/m1`).get(); } },
+    list: { allow: S, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x'))); return db.collection(`${P(biz)}/tasks/t1/p`).get(); } },
+    create: { allow: M, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x'))); return db.doc(`${P(biz)}/tasks/t1/p/m2`).set(taskImg(uid)); } },
+    update: { allow: M, run: async (db, biz, uid) => { await prep(async (a) => { await a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x')); await a.doc(`${P(biz)}/tasks/t1/p/m3`).set(taskImg('x')); }); return db.doc(`${P(biz)}/tasks/t1/p/m3`).set(taskImg(uid)); } },
+    delete: { allow: M, run: async (db, biz) => { await prep(async (a) => { await a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x')); await a.doc(`${P(biz)}/tasks/t1/p/m4`).set(taskImg('x')); }); return db.doc(`${P(biz)}/tasks/t1/p/m4`).delete(); } },
   },
   'tasks/c': {
     get: { allow: S, run: async (db, biz) => { await prep(async (a) => { await a.doc(`${P(biz)}/tasks/t1`).set(taskBody('x')); await a.doc(`${P(biz)}/tasks/t1/c/c1`).set({ uid: 'x', by: 'x', txt: 'a', t: 1 }); }); return db.doc(`${P(biz)}/tasks/t1/c/c1`).get(); } },
