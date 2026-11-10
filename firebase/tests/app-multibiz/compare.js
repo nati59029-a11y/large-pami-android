@@ -7,6 +7,13 @@ const load = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
 const DOCS = '/databases/(default)/documents';
 const ident = (r) => r.method === 'GET' && /\/documents\/(users|superadmins|b)\/[^/?]+$/.test(new URL(r.url).pathname);
 const key = (r) => [r.who, r.step, r.method, r.url, r.body].join(' | ');
+/* שדרוג משימות (feature/tasks-upgrade): שאילתת tasks בענף בוחרת שדות נוספים (to, ow, np, rd...). חריג צר ומכוון:
+   ב-runQuery על tasks בלבד – הענף חייב לבחור את כל שדות main (ועוד), וכל שאר הגוף זהה. אחרי ההשוואה הגוף מנורמל לשדות של main */
+const tkSel = (r) => { try { const q = JSON.parse(r.body).structuredQuery; return q && q.from && q.from[0] && q.from[0].collectionId === 'tasks' && q.select ? q : null; } catch (e) { return null; } };
+const tkNorm = (am, br) => { if (!am || !br || am.url !== br.url || am.method !== br.method) return; const qa = tkSel(am), qb = tkSel(br); if (!qa || !qb) return;
+  const fa = qa.select.fields.map((f) => f.fieldPath), fb = qb.select.fields.map((f) => f.fieldPath);
+  if (!fa.every((f) => fb.includes(f))) return; const o = JSON.parse(br.body); o.structuredQuery.select.fields = qa.select.fields; const nb = JSON.stringify(o);
+  if (nb === am.body) br.body = nb; };
 let fail = 0;
 if (mode === 'legacy') {
   const A0 = load(a).requests; const B = load(b).requests;
@@ -15,6 +22,7 @@ if (mode === 'legacy') {
   const idn = B.filter(ident); const B2 = B.filter((r) => !ident(r));
   console.log(`main: ${A0.length} בקשות (${A.length} בלי זיהוי); ענף: ${B.length} (מתוכן ${idn.length} קריאות זיהוי חדשות: ${[...new Set(idn.map((r) => new URL(r.url).pathname.split('/documents/')[1].replace(/\/[^/]+$/, '/{x}')))].join(', ')})`);
   if (idn.some((r) => r.method !== 'GET')) { console.log('נכשל: קריאת זיהוי שאינה GET'); fail++; }
+  A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');
   if (!seqEq) { fail++; const n = Math.max(A.length, B2.length); for (let i = 0; i < n; i++) if (!A[i] || !B2[i] || key(A[i]) !== key(B2[i])) { console.log('הבדל ראשון', i, '\n main  :', A[i] && key(A[i]).slice(0, 400), '\n branch:', B2[i] && key(B2[i]).slice(0, 400)); break; } }
