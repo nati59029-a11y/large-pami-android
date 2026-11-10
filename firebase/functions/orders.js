@@ -24,6 +24,7 @@ const logger = require('firebase-functions/logger');
 const { getFirestore, FieldPath } = require('firebase-admin/firestore');
 const T = require('./lib/tenant');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
+const LD = require('./lib/line-discount');
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -318,8 +319,14 @@ function cleanCust(c) {
 // =====================================================================================
 // ניוד קווים (fb/ord-lines; החלטות 00:59, 01:45, 07:35, 07:38) – רק כשמנהל־העל הפעיל את cellular בעסק. כבוי = השרת דוחה כל שדה ניוד.
 //   ord/{id}.cell   { lines:[{phone, same?, tz?, sameTz?, plan?, carrier?}], n (כמות קווים – אוטומטי), ad?, bank?:{bank,br,acct}, ctz?, ack? }
-//   lineplan/{id}   { name, carrier, days (טווח התראה, ברירת מחדל 60), on, upd }   – מנהל העסק (saveLinePlan)
+//   lineplan/{id}   { name, carrier, days (טווח התראה, ברירת מחדל 60), on, upd, details?, monthly?, ship?:{amt,pay}, sim?:{amt,pay}, promo? } – saveLinePlan
+//                   promo = { disc?, gifts?:[{pid,price}], qty?:{n,amt,scope?}, from?, to? } – מבצע של החבילה (פישוט 9.11 22:35)
+//                   promos = [promo, ...] (עד 5) – כמה מבצעים לחבילה (23:52). promo הישן נקרא כרשימה עם פריט אחד (LD.promosOf); שמירה חדשה כותבת promos ומוחקת promo.
+//   קו בהזמנה: pr = אינדקס המבצע שהעובד בחר (‎-1 = בלי מבצע; חסר = הראשון הפעיל), gift = המתנה שנבחרה לקו
 //   ordcfg/cell     { carriers:[שם], ads:[שם] }                                    – רשימות המנהל (setCellCfg)
+//   בהזמנה: cell.man = "סה"כ הנחה" שהעובד הזין (₪, גם 0/גם מעל המוצע). cell.calc = { store, sug, disc } (השרת; lib/line-discount.js).
+//   total = פריטים + משלוח/סים "לחנות" − הנחה, לא מתחת ל-0. חל רק כשלפחות קו אחד עם חבילה חדשה (monthly/ship/sim/details/promo).
+//   מתנות – שורות מוצר רגילות (במחיר 0 או מחיר מבצע), יורדות מהמלאי והעלות לפי המוצר. הזמנה/חבילה ישנה – total = סכום הפריטים כמו קודם.
 //   lineLog/{id}    { phone, tz?, plan?, carrier?, br, ord, at, by }               – נכתב ב"שולם"; גם ports בלקוח (היסטוריה)
 // בנק/ת"ז בעל כרטיס (07:38): לא מוצפנים, הרשאות כמו שאר ההזמנה (ord + סניף), ספרות בלבד.
 // =====================================================================================
@@ -341,17 +348,60 @@ async function cellCfg(tx, db) {
   const g = (k) => (s.exists && Array.isArray(s.get(k)) ? s.get(k).filter((x) => typeof x === 'string') : []);
   return { carriers: g('carriers'), ads: g('ads') };
 }
-// מאמת cell מהלקוח. cust = פרטי הלקוח המנוקים (לסימון "הטלפון/הת"ז של הלקוח"). plans = Map מזהה→נתוני תוכנית
+const D_RE = /^\d{4}-\d{2}-\d{2}$/;
+// fee {amt, pay:'store'|'carrier'} של חבילה (משלוח/סים)
+function feeOf(f, label) {
+  if (f == null || f === '') return null;
+  if (!f || typeof f !== 'object' || Array.isArray(f)) throw bad('bad-fee', label + ' לא תקין');
+  onlyKeys(f, ['amt', 'pay'], label);
+  if (f.pay !== 'store' && f.pay !== 'carrier') throw bad('bad-fee', label + ': לחנות או לחברה');
+  return { amt: money(f.amt, label), pay: f.pay };
+}
+// מבצע של חבילה: { disc?, gifts?:[{pid, price}] (עד 10), qty?:{n 2–20, amt, scope}, from?, to? }. ריק = בלי מבצע (null)
+function promoOf(p) {
+  if (p == null || p === '') return null;
+  if (!p || typeof p !== 'object' || Array.isArray(p)) throw bad('bad-promo', 'מבצע לא תקין');
+  onlyKeys(p, ['disc', 'gifts', 'qty', 'from', 'to'], 'מבצע');
+  const o = {};
+  if (p.disc != null && p.disc !== '') { const v = money(p.disc, 'הנחה בקנייה'); if (v > 0) o.disc = v; }
+  if (p.gifts != null) {
+    if (!Array.isArray(p.gifts) || p.gifts.length > 10) throw bad('bad-promo', 'מתנות: עד 10');
+    const seen = new Set();
+    const gs = p.gifts.map((g) => {
+      if (!g || typeof g !== 'object' || Array.isArray(g)) throw bad('bad-promo', 'מתנה לא תקינה');
+      onlyKeys(g, ['pid', 'price'], 'מתנה');
+      const pid = idOf(g.pid, 'מוצר מתנה');
+      if (seen.has(pid)) throw bad('bad-promo', 'אותה מתנה פעמיים');
+      seen.add(pid);
+      return { pid, price: g.price == null || g.price === '' ? 0 : money(g.price, 'מחיר המתנה') };
+    });
+    if (gs.length) o.gifts = gs;
+  }
+  if (p.qty != null && p.qty !== '') {
+    const q = p.qty;
+    if (!q || typeof q !== 'object' || Array.isArray(q)) throw bad('bad-promo', 'מבצע כמות לא תקין');
+    onlyKeys(q, ['n', 'amt', 'scope'], 'מבצע כמות');
+    if (!Number.isInteger(q.n) || q.n < 2 || q.n > MAX_LINES) throw bad('bad-promo', `מבצע כמות: 2 עד ${MAX_LINES} קווים`);
+    if (q.scope != null && !['plan', 'carrier', 'all'].includes(q.scope)) throw bad('bad-promo', 'מבצע כמות: אילו קווים נספרים'); // מ-23:52 נספרים רק קווים שבחרו במבצע; scope נשמר לתאימות
+    const amt = money(q.amt, 'הנחת מבצע הכמות');
+    if (!(amt > 0)) throw bad('bad-promo', 'מבצע כמות: חסרה הנחה');
+    o.qty = { n: q.n, amt }; if (q.scope != null) o.qty.scope = q.scope;
+  }
+  for (const k of ['from', 'to']) if (p[k] != null && p[k] !== '') { if (typeof p[k] !== 'string' || !D_RE.test(p[k])) throw bad('bad-promo', 'תאריך לא תקין'); o[k] = p[k]; }
+  if (o.from && o.to && o.from > o.to) throw bad('bad-promo', 'מבצע: תאריך התחלה אחרי הסיום');
+  if (!o.disc && !o.gifts && !o.qty) return null; // רק תאריכים – אין מבצע
+  return o;
+}
 function cleanCell(c, cust, cfg, plans) {
   if (!c || typeof c !== 'object' || Array.isArray(c)) throw bad('bad-cell', 'פרטי ניוד לא תקינים');
-  onlyKeys(c, ['lines', 'ad', 'bank', 'ctz', 'ack'], 'פרטי ניוד');
+  onlyKeys(c, ['lines', 'ad', 'bank', 'ctz', 'ack', 'man'], 'פרטי ניוד');
   const o = { lines: [] };
   const L = c.lines == null ? [] : c.lines;
   if (!Array.isArray(L) || L.length > MAX_LINES) throw bad('bad-lines', `קווים לניוד: עד ${MAX_LINES}`);
   const seen = new Set();
   for (const l of L) {
     if (!l || typeof l !== 'object' || Array.isArray(l)) throw bad('bad-lines', 'קו לא תקין');
-    onlyKeys(l, ['phone', 'same', 'tz', 'sameTz', 'plan', 'carrier'], 'קו לניוד');
+    onlyKeys(l, ['phone', 'same', 'tz', 'sameTz', 'plan', 'carrier', 'pr', 'gift'], 'קו לניוד');
     const r = {};
     if (l.same === true) { if (!cust.phone) throw bad('bad-lines', 'אין טלפון ללקוח'); r.phone = cust.phone; r.same = true; } else r.phone = phone(l.phone);
     if (l.sameTz === true) { if (!cust.tz) throw bad('bad-lines', 'אין ת.ז ללקוח'); r.tz = cust.tz; r.sameTz = true; } else if (l.tz != null && l.tz !== '') r.tz = tzOk(l.tz, 'ת.ז לניוד');
@@ -360,6 +410,20 @@ function cleanCell(c, cust, cfg, plans) {
       const p = plans.get(id);
       if (!p || p.on === false) throw bad('bad-plan', 'תוכנית הניוד לא קיימת או כבויה');
       r.plan = id;
+    }
+    // המבצע שנבחר לקו (23:52): אינדקס ברשימת המבצעים של החבילה, או ‎-1 = בלי מבצע
+    if (l.pr != null) {
+      const n = r.plan ? LD.promosOf(plans.get(r.plan)).length : 0;
+      if (!Number.isInteger(l.pr) || l.pr < -1 || l.pr >= n) throw bad('bad-promo', 'המבצע שנבחר לא קיים בחבילה');
+      r.pr = l.pr;
+    }
+    // מתנה שנבחרה לקו (החלטה 23:50): חייבת להיות ברשימת המתנות של המבצע שחל על הקו. ההפרש מחושב ב-lib/line-discount.js
+    if (l.gift != null && l.gift !== '') {
+      const g = idOf(l.gift, 'מתנה');
+      const pk = r.plan ? LD.pick(plans.get(r.plan), r.pr, LD.ilDay()) : null;
+      const pr = pk && pk.pr;
+      if (!pr || !Array.isArray(pr.gifts) || !pr.gifts.some((x) => x && x.pid === g)) throw bad('bad-gift', 'המתנה לא שייכת למבצע של החבילה');
+      r.gift = g;
     }
     if (l.carrier != null && l.carrier !== '') {
       if (typeof l.carrier !== 'string' || !cfg.carriers.includes(l.carrier)) throw bad('bad-carrier', 'חברת ניוד: בחרו מהרשימה');
@@ -386,7 +450,19 @@ function cleanCell(c, cust, cfg, plans) {
   }
   if (c.ctz != null && c.ctz !== '') o.ctz = tzOk(c.ctz, 'ת.ז בעל הכרטיס');
   if (c.ack != null) { if (typeof c.ack !== 'boolean') throw bad('bad-cell', 'אישור לא תקין'); if (c.ack) o.ack = true; }
+  if (c.man != null && c.man !== '') o.man = money(c.man, 'סה"כ הנחה'); // מה שהעובד הזין (גם 0, גם מעל המוצע)
   return o;
+}
+const PKG_KEYS = ['monthly', 'ship', 'sim', 'details', 'promo', 'promos'];
+// סכום ההזמנה עם ניוד. בלי קו עם חבילה חדשה (או בלי cell) – סכום הפריטים בלבד, בלי calc (תאימות להזמנות ישנות).
+function cellTotal(items, cell, plans) {
+  const base = totalOf(items);
+  const L = cell && Array.isArray(cell.lines) ? cell.lines : [];
+  const pkg = L.some((l) => { const p = l.plan && plans.get(l.plan); return p && PKG_KEYS.some((k) => p[k] != null); });
+  if (!pkg) { if (cell && cell.man != null) throw bad('bad-disc', 'הנחת ניוד – רק לקווים עם חבילה'); return { total: base, calc: null }; }
+  const man = typeof cell.man === 'number' ? cell.man : null;
+  const r = LD.calcCell(L, plans, man, { itemsAg: Math.round(base * 100), today: LD.ilDay(), items });
+  return { total: r.net, calc: Object.assign({ store: r.store, sug: r.sug, disc: r.disc }, r.gift ? { gift: r.gift } : {}), hint: r.hint };
 }
 async function loadPlans(tx, db, cell) {
   const ids = [...new Set(((cell && Array.isArray(cell.lines)) ? cell.lines : []).map((l) => l && l.plan).filter((x) => typeof x === 'string' && ID_RE.test(x)))];
@@ -394,12 +470,17 @@ async function loadPlans(tx, db, cell) {
   if (ids.length) { const ss = await tx.getAll(...ids.map((i) => db.doc('lineplan/' + i))); ss.forEach((s) => { if (s.exists) m.set(s.id, s.data()); }); }
   return m;
 }
-async function prepCell(tx, db, w, input, cust) {
-  if (input.cell === undefined) return undefined;
+// מחזיר { cell, cfg, plans } (cell: undefined = לא נשלח; null = מחיקה). old = cell השמור (לחישוב מחדש כשמשנים רק פריטים)
+async function prepCell(tx, db, w, input, cust, old) {
+  if (input.cell === undefined) {
+    if (!old || !cellOn(w)) return { cell: undefined };
+    const [cfg, plans] = await Promise.all([cellCfg(tx, db), loadPlans(tx, db, old)]);
+    return { cell: undefined, cfg, plans };
+  }
   needCell(w);
-  if (input.cell === null) return null;
+  if (input.cell === null) return { cell: null };
   const [cfg, plans] = await Promise.all([cellCfg(tx, db), loadPlans(tx, db, input.cell)]);
-  return cleanCell(input.cell, cust, cfg, plans);
+  return { cell: cleanCell(input.cell, cust, cfg, plans), cfg, plans };
 }
 
 // שורות מהלקוח: { pid?, n?, qty, price, from?, c?, lb? }. c/lb – רק בשורה ידנית (00:18): עלות וסניף השורה (ברירת מחדל = סניף ההזמנה), לא משנה מלאי.
@@ -547,11 +628,13 @@ async function createOrder(request) {
     // טיוטה שקיבלה מחיר סיטונאי ללקוח מסוים – נשמרת רק עם אותו לקוח
     if (wb.exists && wb.get('cust') !== custId) throw deny('ws-not-linked', 'מחיר הסיטונאי נטען ללקוח אחר. בחרו שוב את הלקוח');
     const prods = await loadProds(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
-    const cell = await prepCell(tx, db, w, input, cust);
+    const { cell, plans } = await prepCell(tx, db, w, input, cust);
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
     const { items } = resolveItems(w, br, raw, plain(prods), src);
     for (const it of items) if (it.pid && prods.get(it.pid).get('on') === false) throw pre('prod-off', `המוצר "${it.n}" לא זמין`);
-    const total = totalOf(items);
+    const ct = cell ? cellTotal(items, cell, plans) : { total: totalOf(items), calc: null };
+    const total = ct.total;
+    if (ct.calc) cell.calc = ct.calc;
     const no = (q.exists && typeof q.get('n') === 'number' ? q.get('n') : 0) + 1;
     const now = Date.now();
     const warn = [];
@@ -563,7 +646,7 @@ async function createOrder(request) {
     tx.set(ref, doc);
     tx.set(seq, { n: no });
     tx.set(logRef(db, ref.id), logData(w, 'create', `₪${total}${doc.cell && doc.cell.n ? ` · ${doc.cell.n} קווים לניוד${doc.cell.ack ? ' (אושר למרות ניוד קודם)' : ''}` : ''}`));
-    out = { id: ref.id, no, total, dup: false, warn };
+    out = Object.assign({ id: ref.id, no, total, dup: false, warn }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
   });
   return out;
 }
@@ -586,7 +669,8 @@ async function updateOrder(request) {
     ordAccess(w, s.exists ? s.data() : null);
     const d = s.data();
     if (!PAYABLE.includes(d.status)) throw pre('locked', d.status === 'cancel' ? 'ההזמנה בוטלה' : 'ההזמנה שולמה – אי אפשר לשנות פריטים או סכום');
-    const cell = await prepCell(tx, db, w, input, cust || d.cust || {});
+    const pc0 = await prepCell(tx, db, w, input, cust || d.cust || {}, d.cell && d.cell.calc ? d.cell : null);
+    let cell = pc0.cell;
     const upd = { upd: Date.now() };
     const warn = [];
     const notes = [];
@@ -597,14 +681,23 @@ async function updateOrder(request) {
       const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[d.br] : null;
       // שורה קיימת שנשארת עם אותו מוצר – שומרת את סניף המקור שלה, אלא אם נשלח אחר
       const { items } = resolveItems(w, d.br, raw, plain(prods), src);
-      const total = totalOf(items);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
       applyMoves(tx, db, w, prods, mv, { ord: id, no: d.no }, warn);
-      Object.assign(upd, { items, total });
-      if (total !== d.total) notes.push(`סכום ₪${d.total} → ₪${total}`);
+      upd.items = items;
       const pc = items.filter((it, i) => oldItems[i] && oldItems[i].pid === it.pid && oldItems[i].price !== it.price).map((it) => `${it.n}: ₪${oldItems[items.indexOf(it)].price} → ₪${it.price}`);
       notes.push(...pc);
-      out = { total, warn };
+      out = { warn };
+    }
+    // סכום: מחושב מחדש כשהפריטים או הניוד השתנו. הזמנה בלי חבילות חדשות – סכום הפריטים (כמו קודם)
+    if (raw || cell !== undefined) {
+      const its = raw ? upd.items : (Array.isArray(d.items) ? d.items : []);
+      const cl = cell !== undefined ? cell : (d.cell ? Object.assign({}, d.cell) : null);
+      if (cl) delete cl.calc;
+      const ct = cl && pc0.plans ? cellTotal(its, cl, pc0.plans) : { total: totalOf(its), calc: null };
+      if (cl) { if (ct.calc) cl.calc = ct.calc; if (cell === undefined && (ct.calc || d.cell.calc)) cell = cl; }
+      if (raw || ct.total !== d.total || ct.calc || (d.cell && d.cell.calc)) upd.total = ct.total;
+      if (upd.total !== undefined && upd.total !== d.total) notes.push(`סכום ₪${d.total} → ₪${upd.total}`);
+      out = Object.assign(out || {}, { total: ct.total }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
     }
     if (cust) upd.cust = cust;
     if (note !== null) upd.note = note;
@@ -1073,12 +1166,14 @@ async function setCellCfg(request) {
   await T.tdb().doc('ordcfg/cell').set(o, { merge: true });
   return Object.assign({ ok: true }, o);
 }
-// saveLinePlan({ id?, name, carrier?, days?, on? }) – מנהל העסק. days = טווח התראה לניוד חוזר (1–3650, ברירת מחדל 60)
+// saveLinePlan({ id?, name, carrier?, days?, on? }) – מנהל העסק, ועובד עם הרשאת הזמנות/מלאי (ord) – חבילות ניוד (החלטה 9.11 ערב).
+// days = טווח התראה לניוד חוזר (1–3650, ברירת מחדל 60) – מנהל ועובד עם הרשאה (החלטה 9.11 21:25); עובד שעורך בלי days – הטווח נשאר.
 async function saveLinePlan(request) {
   const w = await who(request);
-  mgr(w); needCell(w);
+  needCell(w);
+  const isMgr = w.role === 'manager';
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'name', 'carrier', 'days', 'on']);
+  onlyKeys(input, ['id', 'name', 'carrier', 'days', 'on', 'details', 'monthly', 'ship', 'sim', 'promo', 'promos']);
   const d = { name: txt(input.name, 40, 'bad-name', 'שם התוכנית', true), upd: Date.now(), by: w.uid };
   const db = T.tdb();
   if (input.carrier != null && input.carrier !== '') {
@@ -1086,10 +1181,30 @@ async function saveLinePlan(request) {
     if (typeof input.carrier !== 'string' || !cfg.carriers.includes(input.carrier)) throw bad('bad-carrier', 'חברה: בחרו מהרשימה');
     d.carrier = input.carrier;
   } else d.carrier = '';
-  if (input.days == null || input.days === '') d.days = DEF_DAYS;
+  // טווח ההתראה: גם עובד עם הרשאת הזמנות רשאי לשנות (החלטה 9.11 21:25). עובד בעריכה שלא שלח days – הטווח נשאר כמו שהוא
+  if (!isMgr && input.id != null && input.id !== '' && input.days === undefined) { /* נשאר */ }
+  else if (input.days == null || input.days === '') d.days = DEF_DAYS;
   else if (!Number.isInteger(input.days) || input.days < 1 || input.days > 3650) throw bad('bad-days', 'טווח התראה: 1 עד 3650 ימים');
   else d.days = input.days;
   if (input.on !== undefined) { if (typeof input.on !== 'boolean') throw bad('bad-field', 'פעיל: כן/לא'); d.on = input.on; } else d.on = true;
+  // חבילות ניוד (2026-11-09): שדות אופציונליים. נשלח null/'' = מחיקה; לא נשלח = לא משתנה (תוכנית ישנה נשארת כמו שהיא)
+  const del = () => FV().delete();
+  if (input.details !== undefined) { const t = txt(input.details, 300, 'bad-details', 'פרטי התוכנית'); d.details = t || del(); }
+  if (input.monthly !== undefined) d.monthly = input.monthly == null || input.monthly === '' ? del() : money(input.monthly, 'עלות חודשית');
+  if (input.ship !== undefined) d.ship = feeOf(input.ship, 'משלוח') || del();
+  if (input.sim !== undefined) d.sim = feeOf(input.sim, 'סים') || del();
+  // מבצעים בחבילה (פישוט 9.11; כמה מבצעים 23:52): מי שעורך חבילות. promo (יחיד) = רשימה עם פריט אחד. נשמר תמיד כ-promos; promo הישן נמחק
+  if (input.promo !== undefined || input.promos !== undefined) {
+    if (input.promo !== undefined && input.promos !== undefined) throw bad('bad-promo', 'מבצעים: promo או promos');
+    let raw = input.promos !== undefined ? input.promos : (input.promo == null || input.promo === '' ? [] : [input.promo]);
+    if (raw == null) raw = [];
+    if (!Array.isArray(raw) || raw.length > 5) throw bad('bad-promo', 'עד 5 מבצעים לחבילה');
+    const ps = raw.map(promoOf).filter(Boolean);
+    const pids = [...new Set(ps.flatMap((p) => (p.gifts || []).map((g) => g.pid)))];
+    if (pids.length) { const ss = await db.getAll(...pids.map((x) => db.doc('prod/' + x))); if (ss.some((x) => !x.exists)) throw bad('bad-promo', 'מוצר המתנה לא נמצא במלאי'); }
+    d.promos = ps.length ? ps : del();
+    d.promo = del();
+  }
   const ref = input.id == null || input.id === '' ? db.collection('lineplan').doc() : db.doc('lineplan/' + idOf(input.id, 'תוכנית'));
   if (input.id && !(await ref.get()).exists) throw new HttpsError('not-found', 'התוכנית לא נמצאה', { reason: 'no-plan' });
   await ref.set(d, { merge: true });

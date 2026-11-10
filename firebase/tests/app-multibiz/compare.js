@@ -9,9 +9,11 @@ const ident = (r) => r.method === 'GET' && /\/documents\/(users|superadmins|b)\/
 const key = (r) => [r.who, r.step, r.method, r.url, r.body].join(' | ');
 let fail = 0;
 if (mode === 'legacy') {
-  const A = load(a).requests; const B = load(b).requests;
+  const A0 = load(a).requests; const B = load(b).requests;
+  /* main כבר כולל את קריאות הזיהוי (אחרי המיזוג של ריבוי עסקים), לכן מסננים אותן משני הצדדים */
+  const A = A0.filter((r) => !ident(r));
   const idn = B.filter(ident); const B2 = B.filter((r) => !ident(r));
-  console.log(`main: ${A.length} בקשות; ענף: ${B.length} (מתוכן ${idn.length} קריאות זיהוי חדשות: ${[...new Set(idn.map((r) => new URL(r.url).pathname.split('/documents/')[1].replace(/\/[^/]+$/, '/{x}')))].join(', ')})`);
+  console.log(`main: ${A0.length} בקשות (${A.length} בלי זיהוי); ענף: ${B.length} (מתוכן ${idn.length} קריאות זיהוי חדשות: ${[...new Set(idn.map((r) => new URL(r.url).pathname.split('/documents/')[1].replace(/\/[^/]+$/, '/{x}')))].join(', ')})`);
   if (idn.some((r) => r.method !== 'GET')) { console.log('נכשל: קריאת זיהוי שאינה GET'); fail++; }
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');
