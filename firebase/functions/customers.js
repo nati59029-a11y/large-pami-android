@@ -48,6 +48,7 @@ function slotOf(v) {
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
+const pre = (reason, message) => new HttpsError('failed-precondition', message, { reason });
 const txt = core.txt;
 const REQ_RE = /^[A-Za-z0-9_-]{8,40}$/;
 const XK_RE = /^x[0-9a-z_]{1,20}$/;
@@ -67,7 +68,7 @@ const PACT = ['y', 'n', 'u']; // נויד בפועל: כן / לא / לא ידו�
 const BIZF = ['bn', 'vat', 'ct', 'pay', 'payTxt']; // לקוח עסקי
 const PAYS = ['cash', 'n30', 'n60', 'n90', 'credit', 'transfer', 'other'];
 const FIELDS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port'].concat(core.CPART_KEYS, BIZF, INFO_KEYS, FLAG_KEYS);
-const CKEYS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports'].concat(core.CPART_KEYS, INFO_KEYS, FLAG_KEYS);
+const CKEYS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports', 'phs'].concat(core.CPART_KEYS, INFO_KEYS, FLAG_KEYS);
 const NEWK = INFO_KEYS.concat(FLAG_KEYS);
 const hasInfo = (c) => !!c && typeof c === 'object' && (INFO_KEYS.some((k) => c[k] !== undefined) || (Array.isArray(c.ports) && c.ports.some((p) => p && typeof p === 'object' && (p.co !== undefined || p.act !== undefined))));
 // טקסט חופשי בלי בדיקת ספרות (פרטי בנק); plain + חסימת מספר כרטיס (שאר שדות המידע והערכים הלא תקינים)
@@ -182,6 +183,7 @@ function clean(c, keys, brs, byId, imp) {
   else if (!empty(c.payTxt)) throw bad('bad-pay', 'פירוט תנאי תשלום – רק כשנבחר "אחר"');
   if (!empty(c.phone)) o.phone = phoneOf(c.phone);
   if (!empty(c.tz)) o.tz = tzOf(c.tz);
+  if (c.phs != null) o.phs = core.phsOf(Array.isArray(c.phs) ? c.phs.map(phoneOf) : c.phs, o.phone); // 2026-11-10: עד 3 טלפונים נוספים; [] בעריכה = מחיקה
   if (!empty(c.mail)) o.mail = mailOf(c.mail);
   if (!o.addr && !empty(c.addr)) o.addr = txt(c.addr, 150, 'bad-addr', 'כתובת');
   if (!empty(c.last4)) o.last4 = last4Of(c.last4);
@@ -240,6 +242,11 @@ function merge(old, o, fill) {
     if (fill) { const ks = new Set(op.map(portKey)); const add = o.ports.filter((r) => !ks.has(portKey(r))); if (add.length) up.ports = op.concat(add).slice(0, MAX_PORTS); }
     else if (JSON.stringify(op) !== JSON.stringify(o.ports)) up.ports = o.ports;
   }
+  if (o.phs) { // fill = מצרפים טלפונים שאין (עד 3, בלי הראשי); עריכה = הרשימה שנשלחה מחליפה
+    const main = up.phone || old.phone, op = Array.isArray(old.phs) ? old.phs : [];
+    const nx = (fill ? op.concat(o.phs) : o.phs).filter((p, i, A) => p !== main && A.indexOf(p) === i).slice(0, core.MAX_PHS);
+    if (JSON.stringify(nx) !== JSON.stringify(op)) up.phs = nx.length ? nx : FieldValue.delete();
+  }
   if (o.x) {
     const ox = old.x && typeof old.x === 'object' ? old.x : {};
     for (const [k, v] of Object.entries(o.x)) if (fill ? empty(ox[k]) : ox[k] !== v) up['x.' + k] = v;
@@ -281,15 +288,16 @@ async function update(tx, db, w, o, opts, st) {
     delete d.mv;
     const up = merge(base, o, opts.fill) || {};
     for (const [k, v] of Object.entries(up)) { if (k.startsWith('x.')) { d.x = Object.assign({}, d.x || {}); d.x[k.slice(2)] = v; } else d[k] = v; }
+    if (up.phs instanceof FieldValue) delete d.phs;
     if (typeof ws === 'boolean') d.wholesale = ws;
-    const cards = []; // כל הכרטיסים (עד 3) מפוענחים ומוצפנים מחדש לנתיב החדש, באותו מקום
+    const cards = [], nums = []; // כל הכרטיסים (עד 3) מפוענחים ומוצפנים מחדש לנתיב החדש, באותו מקום
     (pcs || []).forEach((cs, i) => {
       if (!cs || !cs.exists) return;
       const n = SLOTS[i], key = CARD_ENC_KEY.value();
       const c = CARD.open(key, w.bizId, cardAad('p' + o.phone, n), cs.get('box'));
       tx.set(db.doc(cardPath(id, n)), Object.assign({}, cs.data(), { box: CARD.seal(key, w.bizId, cardAad(id, n), c), last4: c.num.slice(-4) }));
       tx.delete(pcref[i]);
-      cards.push({ s: n, last4: c.num.slice(-4) });
+      cards.push({ s: n, last4: c.num.slice(-4) }); nums.push(c.num); // nums – רק בזיכרון (זיהוי כפילות בייבוא), לא נשמר
       tx.set(db.collection('cardLog').doc(), Object.assign({ t: now, by: w.uid, cust: id, act: 'move', from: 'p' + o.phone }, n > 1 ? { s: n } : {}));
     });
     delete d.card; delete d.cards; // סימון בלי מוצפן – לא מועבר
@@ -297,7 +305,7 @@ async function update(tx, db, w, o, opts, st) {
     const cardMoved = cards.length > 0;
     tx.set(ref, d);
     tx.update(pref, Object.assign({ mv: id, upd: now }, cardMoved ? { card: FieldValue.delete(), cards: FieldValue.delete() } : {}));
-    return { id, created: false, moved: true, cardMoved, cards };
+    return { id, created: false, moved: true, cardMoved, cards, nums };
   }
   const u = merge(base, o, opts.fill) || {};
   if (typeof ws === 'boolean' && (base.wholesale === true) !== ws) u.wholesale = ws;
@@ -313,6 +321,7 @@ async function update(tx, db, w, o, opts, st) {
 function newDoc(o, w, opts, now) {
   const d = Object.assign({ x: {} }, o, { at: now, upd: now, by: w.uid, src: opts.src });
   for (const k of NEWK) if (d[k] === '') delete d[k];
+  if (Array.isArray(d.phs)) { d.phs = d.phs.filter((p) => p !== d.phone); if (!d.phs.length) delete d.phs; }
   delete d.__note;
   return d;
 }
@@ -388,7 +397,89 @@ async function saveCust(request) {
   await db.runTransaction(async (tx) => {
     r = id ? await upsertId(tx, db, w, id, o, opts) : (input.asNew && !o.tz) ? await createNew(tx, db, w, o, opts) : await upsert(tx, db, w, o, opts);
   });
+  if (r) delete r.nums; // מספרי כרטיס מלאים – לעולם לא חוזרים לאפליקציה
   return Object.assign({ ok: true }, r);
+}
+
+// mergeCust({ a, b, keep }) – 2026-11-10 (שינוי 13:16; תיקון 17:23): איחוד שני לקוחות לאחד. מותר למי שמורשה לערוך לקוחות (ord, כמו saveCust).
+// keep = הלקוח שנשאר, לפי בחירת העובד (חייב להיות a או b). הערכים שלו גוברים; שדות ריקים מתמלאים מהשני; טלפונים (ראשי+נוספים) מצטרפים ל-phs;
+// ניודים מתאחדים; כרטיסים עוברים (מפוענחים ומוצפנים מחדש) למקומות פנויים; ההזמנות של השני עוברות. השני מסומן mv:<יעד> (לא נמחק – אפשר לשחזר).
+// מסמך היעד: של keep. חריג: אם רק לשני יש ת"ז – הנתונים של keep נכתבים למסמך t{tz} של השני (החיפוש לפי ת"ז נשען על המזהה הזה), ו-keep מסומן mv.
+// הכול בטרנזקציה אחת, ונרשם ביומן (cardLog act:'merge', keep).
+// התנגשות – לא מאחדים: ת"ז שונות, יותר מ-3 כרטיסים, יותר מ-3 טלפונים נוספים, הערות ארוכות מדי, יותר מ-400 הזמנות, סימון עסקי שונה (עובד).
+const MAX_MERGE_ORD = 400;
+const CARDF = ['cards', 'card', 'last4'];
+async function mergeCust(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['a', 'b', 'keep']);
+  const a = custIdOf(input.a), b = custIdOf(input.b);
+  if (a === b) throw bad('same-cust', 'זה אותו לקוח');
+  if (typeof input.keep !== 'string' || ![a, b].includes(input.keep)) throw bad('bad-keep', 'בחרו איזה משני הלקוחות נשאר');
+  const k = input.keep, o = k === a ? b : a; // k = נשאר (ערכיו גוברים), o = השני
+  const db = T.tdb();
+  let out = null;
+  await db.runTransaction(async (tx) => {
+    const [sk, so] = await tx.getAll(db.doc('cust/' + k), db.doc('cust/' + o));
+    if (!sk.exists || sk.get('mv') || !so.exists || so.get('mv')) throw new HttpsError('not-found', 'אחד הלקוחות לא נמצא (אולי כבר אוחד)', { reason: 'no-cust' });
+    const A = sk.data(), B = so.data();
+    if (!empty(A.tz) && !empty(B.tz) && A.tz !== B.tz) throw pre('merge-tz', 'אי אפשר לאחד: לשני הלקוחות ת.ז שונות. בחרו לאיזה לקוח לשייך את ההזמנה.');
+    if ((A.wholesale === true) !== (B.wholesale === true) && w.role !== 'manager') throw deny('manager-only', 'אחד הלקוחות עסקי והשני לא – איחוד כזה רק למנהל');
+    const flip = empty(A.tz) && !empty(B.tz); // היעד = מסמך הת"ז של השני
+    const d = flip ? o : k, s = flip ? k : o, sd = flip ? sk : so, dd = flip ? so : sk; // d = מסמך היעד, s = המסמך שמסומן mv
+    const cd = cardsOf(dd.data()), cs = cardsOf(sd.data());
+    if (cd.length + cs.length > SLOTS.length) throw pre('merge-cards', `אי אפשר לאחד: יחד יש ${cd.length + cs.length} כרטיסי אשראי, והמקסימום 3. מחקו כרטיס בכרטיס הלקוח, או בחרו לאיזה לקוח לשייך את ההזמנה.`);
+    const main = A.phone || B.phone;
+    const phs = [[B.phone], B.phs].flat().filter((p) => p && typeof p === 'string');
+    const allPh = (Array.isArray(A.phs) ? A.phs : []).concat(phs).filter((p, i, L) => p !== main && L.indexOf(p) === i);
+    if (allPh.length > core.MAX_PHS) throw pre('merge-phs', `אי אפשר לאחד: יחד יש ${allPh.length} טלפונים נוספים, והמקסימום ${core.MAX_PHS}.`);
+    const scs = cs.length ? await tx.getAll(...cs.map((x) => db.doc(cardPath(s, x.s)))) : [];
+    const os = await tx.get(db.collection('ord').where('custId', '==', s).limit(MAX_MERGE_ORD + 1));
+    if (os.size > MAX_MERGE_ORD) throw pre('merge-ords', 'אי אפשר לאחד: ללקוח יותר מ-400 הזמנות.');
+    const up = {};
+    const SKIP = ['x', 'ports', 'phs', 'cards', 'card', 'last4', 'at', 'upd', 'by', 'src', 'mv', 'phone', 'tz', 'wholesale'];
+    for (const [kk, v] of Object.entries(B)) if (!SKIP.includes(kk) && empty(A[kk]) && !empty(v)) up[kk] = v;
+    if (!empty(A.note) && !empty(B.note) && A.note !== B.note) {
+      const n = A.note + ' | ' + B.note;
+      if (n.length > 1000) throw pre('merge-note', 'אי אפשר לאחד: ההערות של שני הלקוחות יחד ארוכות מ-1000 תווים. קצרו הערה בכרטיס הלקוח.');
+      up.note = n;
+    }
+    if (empty(A.phone) && !empty(B.phone)) up.phone = B.phone;
+    if (flip) up.tz = B.tz;
+    if (B.wholesale === true && A.wholesale !== true) up.wholesale = true;
+    const ox = A.x && typeof A.x === 'object' ? A.x : {}, bx = B.x && typeof B.x === 'object' ? B.x : {};
+    const x = Object.assign({}, bx, ox);
+    if (JSON.stringify(x) !== JSON.stringify(ox)) up.x = x;
+    const pa = Array.isArray(A.ports) ? A.ports : (A.port ? [{ d: A.port }] : []), pb = Array.isArray(B.ports) ? B.ports : (B.port ? [{ d: B.port }] : []);
+    if (pb.length) { const ks = new Set(pa.map(portKey)), add = pb.filter((r) => !ks.has(portKey(r))); if (add.length) { if (pa.length + add.length > MAX_PORTS) throw pre('merge-ports', `אי אפשר לאחד: יחד יותר מ-${MAX_PORTS} ניודים.`); up.ports = pa.concat(add); } }
+    if (JSON.stringify(allPh) !== JSON.stringify(Array.isArray(A.phs) ? A.phs : [])) up.phs = allPh;
+    const now = Date.now();
+    const list = cd.slice();
+    scs.forEach((q, j) => {
+      if (!q.exists) return;
+      const key = CARD_ENC_KEY.value(), c = CARD.open(key, w.bizId, cardAad(s, cs[j].s), q.get('box'));
+      const n = SLOTS.find((y) => !list.some((z) => z.s === y));
+      tx.set(db.doc(cardPath(d, n)), Object.assign({}, q.data(), { box: CARD.seal(key, w.bizId, cardAad(d, n), c), last4: c.num.slice(-4) }));
+      tx.delete(q.ref);
+      list.push({ s: n, last4: c.num.slice(-4) });
+      tx.set(db.collection('cardLog').doc(), Object.assign({ t: now, by: w.uid, cust: d, act: 'move', from: s }, n > 1 ? { s: n } : {}));
+    });
+    if (!flip) {
+      if (list.length !== cd.length) Object.assign(up, cardsUp(list));
+      tx.update(dd.ref, Object.assign(up, { upd: now, by: w.uid }));
+    } else { // הנתונים של keep (עם ההשלמות) נכתבים במלואם למסמך הת"ז; הכרטיסים – אלה שבמסמך היעד בפועל
+      const full = Object.assign({}, A, up, { upd: now, by: w.uid });
+      delete full.mv; CARDF.forEach((f) => delete full[f]);
+      const l = list.slice().sort((p, q) => p.s - q.s);
+      if (l.length) Object.assign(full, { cards: l, card: true, last4: l[0].last4 });
+      tx.set(dd.ref, full);
+    }
+    tx.update(sd.ref, Object.assign({ mv: d, upd: now, by: w.uid }, cs.length ? { card: FieldValue.delete(), cards: FieldValue.delete(), last4: FieldValue.delete() } : {}));
+    os.docs.forEach((q) => tx.update(q.ref, { custId: d, upd: now }));
+    tx.set(db.collection('cardLog').doc(), { t: now, by: w.uid, cust: d, act: 'merge', from: s, keep: k, ords: os.size, cards: list.length - cd.length });
+    out = { ok: true, id: d, from: s, keep: k, ords: os.size, cards: list.length };
+  });
+  return out;
 }
 
 // importCusts({ reqId, rows:[{name,phone,tz,mail,addr,last4,port,x}] }) – מנהל בלבד, עד 200 שורות למנה.
@@ -435,18 +526,19 @@ async function importCusts(request) {
       if (keyed && seen.has(id)) { res.same++; continue; } // כפילות בתוך אותה מנה
       if (keyed) seen.add(id);
       const opts = { fill: true, src: 'import', cell: cellOn(w) };
-      // כרטיסים חדשים נכנסים למקומות הפנויים בלבד (קיים לא נדרס). כרטיס עם אותן 4 ספרות כמו כרטיס שמור – נחשב אותו כרטיס (ייבוא חוזר לא מכפיל)
+      // כרטיסים חדשים נכנסים למקומות הפנויים בלבד (קיים לא נדרס). 2026-11-10 (סעיף 1): כפילות = אותו מספר מלא בלבד.
+      // כרטיס שמור עם אותן 4 ספרות מפוענח בזיכרון להשוואה (לא נרשם ולא מוחזר) – כך ייבוא חוזר לא מכפיל, ושני כרטיסים שונים עם אותן 4 ספרות נשמרים שניהם
       let skip = 0, added = 0;
-      const putCards = (tx, cid, have) => {
+      const putCards = (tx, cid, have, nums) => {
         const list = have.slice(); skip = 0; added = 0;
         for (const c of cl) {
           const l4 = c.num.slice(-4);
-          if (list.some((x) => x.last4 === l4)) continue;
+          if (nums.includes(c.num)) continue;
           const n = SLOTS.find((q) => !list.some((x) => x.s === q));
           if (!n) { skip++; continue; }
           tx.set(db.doc(cardPath(cid, n)), { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, cardAad(cid, n), c), last4: l4, at: Date.now(), by: w.uid, src: 'import' });
           tx.set(db.collection('cardLog').doc(), Object.assign({ t: Date.now(), by: w.uid, cust: cid, act: 'import' }, n > 1 ? { s: n } : {}));
-          list.push({ s: n, last4: l4 });
+          list.push({ s: n, last4: l4 }); nums.push(c.num);
         }
         added = list.length - have.length;
         if (added) tx.update(db.doc('cust/' + cid), cardsUp(list));
@@ -455,7 +547,7 @@ async function importCusts(request) {
       if (!keyed) {
         await db.runTransaction(async (tx) => {
           r = await createNew(tx, db, w, o, opts);
-          putCards(tx, r.id, []);
+          putCards(tx, r.id, [], []);
         });
         res.created++; res.cardSkip = (res.cardSkip || 0) + skip;
         continue;
@@ -463,8 +555,14 @@ async function importCusts(request) {
       await db.runTransaction(async (tx) => {
         // קריאות לפני כתיבות (חובה בטרנזקציה): קודם הכרטיסים השמורים של הלקוח
         const cs = cl.length ? await tx.get(db.doc('cust/' + id)) : null;
+        const have = cardsOf(cs && cs.exists && !cs.get('mv') ? cs.data() : null), nums = [];
+        const same = have.filter((x) => cl.some((c) => c.num.slice(-4) === x.last4));
+        if (same.length) {
+          const ss = await tx.getAll(...same.map((x) => db.doc(cardPath(id, x.s))));
+          ss.forEach((q, j) => { if (q.exists) nums.push(CARD.open(CARD_ENC_KEY.value(), w.bizId, cardAad(id, same[j].s), q.get('box')).num); });
+        }
         r = await upsert(tx, db, w, o, opts);
-        if (cl.length) putCards(tx, r.id, r.moved ? (r.cards || []) : cardsOf(cs && cs.exists ? cs.data() : null));
+        if (cl.length) putCards(tx, r.id, r.moved ? (r.cards || []) : have, r.moved ? (r.nums || []) : nums);
       });
       res.cardSkip = (res.cardSkip || 0) + skip;
       if (r.created) res.created++; else if (r.same && !added) res.same++; else res.updated++;
@@ -631,6 +729,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { setCustCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
-const SFNS = { saveCust, importCusts, setCard, getCard, delCard }; // צריכות את מפתח הכרטיסים
+const SFNS = { saveCust, importCusts, setCard, getCard, delCard, mergeCust }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY], ...(k === 'importCusts' ? { timeoutSeconds: 540, memory: '512MiB' } : {}) }, wrap(k, f)); // ייבוא גדול: 60 שניות לא מספיקות (10.11)
 Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });

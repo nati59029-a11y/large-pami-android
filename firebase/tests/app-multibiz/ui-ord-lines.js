@@ -286,6 +286,24 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   }
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   }
+  { // 13 (2026-11-10, סעיף 2): עסק עם ניוד – "+ כרטיס אשראי נוסף" בטופס ההזמנה (עד 3); בלי ניוד – אין כפתור
+    await fresh(); await page.click('#occd summary'); await H.settle(page, 200);
+    const hasAdd = !!(await page.$('[data-a=ocCdAdd]'));
+    if (!CELLON) check('13 בלי ניוד: אין "+ כרטיס אשראי נוסף"', !hasAdd);
+    else {
+      await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0529998877'); await H.settle(page, 400);
+      await page.fill('input[data-i=ocCd][data-k=num]', '4580123456789012');
+      await page.click('[data-a=ocCdAdd]'); await H.settle(page, 200);
+      await page.fill('input[data-i=ocCdM][data-n="0"][data-k=num]', '5326100020003456'); await page.fill('input[data-i=ocCdM][data-n="0"][data-k=cvv]', '987');
+      await page.click('[data-a=ocCdAdd]'); await H.settle(page, 200);
+      const third = !!(await page.$('input[data-i=ocCdM][data-n="1"]')), noFourth = !(await page.$('[data-a=ocCdAdd]'));
+      await page.click('[data-a=ocCdX][data-n="1"]'); await H.settle(page, 200);
+      await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
+      const n13 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 1500);
+      const sc = calls.slice(n13).filter((c) => c.n === 'setCard');
+      check('13 ניוד: "+" מוסיף משבצת כרטיס, עד 3 בסה"כ; שני כרטיסים נשמרים (setCard add, עם ההזמנה)', hasAdd && third && noFourth && sc.length === 2 && sc.every((c) => c.d.add === true && c.d.ordId === 'o1') && sc[1].d.card.num === '5326100020003456' && sc[1].d.card.cvv === '987', { hasAdd, third, noFourth, sc: sc.map((c) => c.d.card.num.slice(-4)) });
+    }
+  }
   await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
   console.log(fail ? `נכשלו ${fail}` : 'הכול עבר');

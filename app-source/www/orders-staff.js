@@ -100,7 +100,7 @@ V.oxNew=()=>{const T='הזמנה חדשה';if(!on())return deny(T);if(!O.P){load
  const hits=D.q?(O.P||[]).filter(p=>p.on!==false&&(String(p.name).includes(D.q)||(p.barcode&&String(p.barcode)===D.q.trim()))).slice(0,8):[];
  const tot=D.items.reduce((s,it)=>s+Math.round((+it.qty||0)*(+it.price||0)*100),0)/100;
  return{t:T,s:'פרטי לקוח ומוצרים',h:`<div class="card">${brH}${f('שם פרטי','fn','text','maxlength="30" autocomplete="off"')}${f('שם משפחה','ln','text','maxlength="30" autocomplete="off"')}${f('טלפון','phone','tel','inputmode="tel" autocomplete="off"')}
- <details><summary class="note" style="min-height:44px;display:flex;align-items:center">ת.ז, כתובת ומייל (רשות)</summary>${f('ת.ז','tz','text','inputmode="numeric" maxlength="9"')}${f('רחוב ומספר','st','text','maxlength="80"')}${f('עיר','city','text','maxlength="40"')}${f('קומה','fl','text','maxlength="10"')}${f('דירה','apt','text','maxlength="10"')}${f('מייל','mail','email','dir="ltr"')}</details></div>
+ <details><summary class="note" style="min-height:44px;display:flex;align-items:center">ת.ז, כתובת ומייל (רשות)</summary>${f('ת.ז','tz','text','inputmode="numeric" maxlength="9"')}${f('רחוב ומספר','st','text','maxlength="80"')}${f('עיר','city','text','maxlength="40"')}${f('קומה','fl','text','maxlength="10"')}${f('דירה','apt','text','maxlength="10"')}${f('מייל','mail','email','dir="ltr"')}</details>${shipH(D)}</div>
  <div class="sec"><h3>מוצרים</h3></div>
  <label class="f"><span>חיפוש מוצר (שם או ברקוד)</span><input data-i="oxQ" value="${esc(D.q)}" autocomplete="off" id="oxq"></label>
  <div id="oxhits">${hitsH(hits,D)}</div>
@@ -109,6 +109,12 @@ V.oxNew=()=>{const T='הזמנה חדשה';if(!on())return deny(T);if(!O.P){load
  ${f('הערה (לא להקליד פרטי אשראי)','note','text','maxlength="300"')}
  <div class="card" style="margin:10px 0"><div class="row" style="justify-content:space-between"><b>סה״כ</b><b class="amt" id="oxtot">${ils(tot)}</b></div><p class="note" style="margin:4px 0 0">הסכום הסופי מחושב בשרת.</p></div>
  <button class="btn w" data-a="oxSave">שמור הזמנה</button><button class="btn g w" style="margin-top:8px" data-a="oxDrop">נקה טופס</button>`}};
+/* 2026-11-10: כתובת משלוח נפרדת – להזמנה בלבד (לא משנה את כתובת הלקוח). בכל העסקים */
+const SHK=[['st','רחוב ומספר',80],['city','עיר',40],['fl','קומה',10],['apt','דירה',10]];
+const shipH=D=>D.ship?`<div class="card" style="margin:8px 0" id="oxship"><div class="row" style="justify-content:space-between;align-items:center"><b>כתובת משלוח נפרדת</b><button type="button" class="btn g s" data-a="oxShipX">הסר</button></div><p class="note" style="margin:0">להזמנה הזו בלבד. כתובת הלקוח לא משתנה.</p>${SHK.map(([k,l,m])=>`<label class="f"><span>${l}</span><input data-i="oxS" data-k="${k}" maxlength="${m}" autocomplete="off" value="${esc(D.ship[k]||'')}"></label>`).join('')}</div>`:'<button type="button" class="btn g s w" data-a="oxShip" style="margin-top:6px">＋ כתובת משלוח נפרדת</button>';
+ACT.oxShip=()=>{draft().ship={st:'',city:'',fl:'',apt:''};rerender()};
+ACT.oxShipX=()=>{draft().ship=null;rerender()};
+INP.oxS=el=>{const D=draft();if(D.ship)D.ship[el.dataset.k]=el.value};
 const hitsH=(hits,D)=>hits.map(p=>`<button type="button" class="li" data-a="oxAdd" data-id="${esc(p.id)}"><div class="m"><b>${esc(p.name)}</b><small>${hasBr()&&D.br?'במלאי ב'+esc(bn(D.br))+': '+n3(q(p,D.br))+' · ':''}סה״כ במלאי: ${n3(hasBr()?qAll(p):q(p,NB))}${costH(p.id)}</small></div><b class="a">${ils(unitP(p,D.br))}</b></button>`).join('')||(D.q?'<p class="note">לא נמצא מוצר. אפשר להוסיף שורה חופשית או מוצר חדש במסך המלאי.</p>':'');
 INP.oxD=el=>{const D=draft();D[el.dataset.k]=el.value;if(el.dataset.k==='br'){D.items.forEach(it=>{if(it.pid){const p=prod(it.pid);it.from=suggest(p,D.br,+it.qty||0)||'';if(it.auto&&p)it.price=String(unitP(p,D.br))}});redrawLines()}};
 INP.oxQ=el=>{const D=draft();D.q=el.value;const hits=D.q?(O.P||[]).filter(p=>p.on!==false&&(String(p.name).includes(D.q)||(p.barcode&&String(p.barcode)===D.q.trim()))).slice(0,8):[];const h=document.getElementById('oxhits');if(h)h.innerHTML=hitsH(hits,D)};
@@ -125,6 +131,8 @@ function itemsOut(items){const out=[];for(const it of items){const qty=num(it.qt
 ACT.oxSave=async el=>{const D=draft();custJoin(D);let items;try{if(hasBr()&&!D.br)throw new Error('בחר סניף');if(!D.name.trim())throw new Error('חסר שם לקוח');if(!D.phone.trim())throw new Error('חסר טלפון');if(!D.items.length)throw new Error('הוסף לפחות פריט אחד');items=itemsOut(D.items)}catch(e){return toast(e.message)}
  if(D.wsC&&D.wsC!==D.custId){D.req=rid();D.wsC=''} // הלקוח הוחלף אחרי טעינת סיטונאי – הטיוטה מקבלת מזהה חדש (השרת קושר סיטונאי ל-reqId)
  const cust={name:D.name,phone:D.phone};if(D.tz)cust.tz=D.tz;CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)cust[k]=v});if(D.addr&&!CPK.slice(2).some(k=>cust[k]))cust.addr=D.addr;if(D.mail)cust.mail=D.mail;
+ const xp=(D.phs||[]).map(v=>String(v||'').trim()).filter(Boolean);if(xp.length)cust.phs=xp;
+ if(D.ship){const sp={};SHK.forEach(([k])=>{const v=String(D.ship[k]||'').trim();if(v)sp[k]=v});if(Object.keys(sp).length){if(!sp.st)return toast('כתובת משלוח: חסר רחוב ומספר');cust.ship=sp}}
  el.disabled=true;try{const r=await fnCall('createOrder',{reqId:D.req,br:hasBr()?D.br:undefined,cust,custId:D.custId||undefined,items,note:D.note||undefined,cell:D.cellOut});O.draft=null;
   toast(`הזמנה #${r.no} נשמרה · ${ils(r.total)}`);if(r.warn&&r.warn.length)setTimeout(()=>toast('שים לב: אין מספיק במלאי – '+r.warn.map(w=>w.n+(hasBr()?' ב'+bn(w.br):'')).join(', ')),2700);
   await load(true);NAV.pop();go('oxOrd',r.id);return r}catch(e){el.disabled=false;err(e)}}; // מחזיר את ההזמנה שנשמרה (לכרטיס מטופס ההזמנה)
@@ -139,7 +147,7 @@ V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return
  const lg=O.log[id];if(lg===undefined){O.log[id]=null;logLoad(id)}
  return{t:'הזמנה #'+o.no,s:ST[o.status],h:`<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(c.name||'')}</b><span class="tag">${ST[o.status]}</span></div>
  <p style="margin:6px 0"><a href="tel:${esc(c.phone)}" dir="ltr" data-a="oxCall" data-id="${esc(o.id)}" style="color:var(--acc);display:inline-flex;min-height:44px;align-items:center">${esc(c.phone||'')}</a>${o.calledAt?` <small class="note">· חייגת ${tm(o.calledAt)}</small>`:''}</p>
- ${c.addr?`<p class="note" style="margin:0">${esc(c.addr)}</p>`:''}${c.mail?`<p class="note" style="margin:0" dir="ltr">${esc(c.mail)}</p>`:''}${c.tz?`<p class="note" style="margin:0">ת.ז ${esc(c.tz)}</p>`:''}
+ ${(c.phs||[]).length?`<p class="note" style="margin:0">טלפון נוסף: ${c.phs.map(p=>`<a href="tel:${esc(p)}" dir="ltr" style="color:var(--acc)">${esc(p)}</a>`).join(', ')}</p>`:''}${c.addr?`<p class="note" style="margin:0">${esc(c.addr)}</p>`:''}${c.ship&&c.ship.addr?`<p style="margin:4px 0 0"><b>משלוח ל:</b> ${esc(c.ship.addr)}</p>`:''}${c.mail?`<p class="note" style="margin:0" dir="ltr">${esc(c.mail)}</p>`:''}${c.tz?`<p class="note" style="margin:0">ת.ז ${esc(c.tz)}</p>`:''}
  <p class="note" style="margin:6px 0 0">${tm(o.at)}${hasBr()&&o.br!==NB?' · סניף '+esc(bn(o.br)):''}${o.byName?' · הזין '+esc(o.byName):''}</p>${o.note?`<p style="margin:6px 0 0">${esc(o.note)}</p>`:''}</div>
  <div class="sec"><h3>פריטים</h3>${open?`<button class="btn s g" data-a="oxEdit" data-id="${esc(o.id)}">עריכה</button>`:''}</div>${items}
  <div class="card"><div class="row" style="justify-content:space-between"><b>סה״כ</b><b class="amt">${ils(o.total)}</b></div>${open?'':'<p class="note" style="margin:4px 0 0">הסכום נעול.</p>'}</div>
