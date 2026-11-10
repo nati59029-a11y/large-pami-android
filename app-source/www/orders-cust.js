@@ -384,8 +384,8 @@ const prevH=()=>{const I=C.imp,ok=I.G,bad=I.out.filter(r=>r.why.length),nl=ok.re
  <p class="note">לקוח קיים (אותה ת.ז או טלפון) – רק שדות ריקים מתמלאים. אין כפולים.</p>
  <div class="row"><button class="btn grow" data-a="ocGo"${ok.length?'':' disabled'}>ייבא ${ok.length} לקוחות</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>`};
 ACT.ocGo=async el=>{const I=C.imp;if(!I||!I.out)return;el.disabled=true;const ok=I.G;const t={c:0,u:0,s:0,b:[]};
- try{for(let i=0;i<ok.length;i+=200){const part=ok.slice(i,i+200);el.textContent=`מייבא… ${i}/${ok.length}`;
-   const r=await fnCall('importCusts',{reqId:I.req+'_'+(i/200),rows:part.map(x=>x.o)});t.c+=r.created||0;t.u+=r.updated||0;t.s+=r.same||0;(r.bad||[]).forEach(b=>t.b.push('שורה '+part[b.i].n+': '+b.msg))}
+ try{const N=25;for(let i=0;i<ok.length;i+=N){const part=ok.slice(i,i+N);el.textContent=`מייבא… ${i}/${ok.length}`;
+   const r=await fnCall('importCusts',{reqId:I.req+'_n'+N+'_'+(i/N),rows:part.map(x=>x.o)});t.c+=r.created||0;t.u+=r.updated||0;t.s+=r.same||0;(r.bad||[]).forEach(b=>t.b.push('שורה '+part[b.i].n+': '+b.msg))}
   C.imp.out=null;C.imp.G=null;C.imp=null;dlg(`<h3>הייבוא הסתיים</h3><p>חדשים: <b>${t.c}</b> · עודכנו: <b>${t.u}</b> · ללא שינוי: <b>${t.s}</b></p>${t.b.length?`<div style="max-height:40vh;overflow:auto">${t.b.slice(0,50).map(s=>`<p class="note">${esc(s)}</p>`).join('')}</div>`:''}<button class="btn w" data-a="closeDlg">סגור</button>`);await loadL(true)}
  catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
 
