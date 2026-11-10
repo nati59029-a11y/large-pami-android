@@ -5492,17 +5492,17 @@ function bioBoot(){const P=bioP();if(!P){if(bioOn())try{localStorage.removeItem(
   A.addListener('pause',()=>{if(BIO.busy)return;BIO.bg=Date.now();if(bioOn())bioCover(1)});
   A.addListener('resume',()=>{if(!bioOn()){bioCover(0);return}if(BIO.busy||Date.now()-BIO.t<1500)return;if(BIO.lk||Date.now()-BIO.bg>=BIO_GRACE)bioLock();else bioCover(0)})}}catch(e){}
  if(!SY.refresh&&bioOn())try{localStorage.removeItem(LK('lp-bio'))}catch(e){}
- try{Promise.resolve(P.setSecureWindow({on:bioOn()})).catch(()=>{})}catch(e){}
+ try{Promise.resolve(P.setSecureWindow({on:bioSec()})).catch(()=>{})}catch(e){}
  if(bioOn())bioLock();else bioCover(0)}
 /* בכל כניסה לאפליקציה (פתיחה או התחברות): בודקים אם יש במכשיר נעילת מסך מאובטחת. רק למנהל ולמנהל־על */
 function bioAv(){const P=bioP();if(!P||!(isA()||SY.sa))return;Promise.resolve(P.isAvailable()).then(r=>{const a=r&&r.available===true?1:0;if(a===BIO.av)return;BIO.av=a;if(cur().v==='settings')rerender()}).catch(()=>{})}
 /* המתג בהגדרות: רק באפליקציה, רק למנהל ולמנהל־על, ורק כשיש במכשיר נעילת מסך מאובטחת. אחרת לא נוצר ב-DOM */
-function bioRow(){if(!BIO.av||!bioP()||!(isA()||SY.sa))return'';const on=bioOn();
- return`<div class="li" style="cursor:default;margin:0 0 8px"><div class="m"><b>כניסה בטביעת אצבע</b><small>נעילה בכל פתיחה. גיבוי: נעילת המסך של המכשיר</small></div><button class="chip ${on?'on':''}" data-a="bioTog" aria-pressed="${on}">${on?'פעיל':'כבוי'}</button></div>`}
+/* צילומי מסך: מותרים כברירת מחדל (בקשת בעל העסק 10.11.2026). חסימה (FLAG_SECURE) רק כשהנעילה פעילה והמשתמש בחר לחסום */function shotOk(){try{return localStorage.getItem(LK('lp-shot'))!=='0'}catch(e){return true}}function bioSec(){return bioOn()&&!shotOk()}ACT.shotTog=()=>{try{localStorage.setItem(LK('lp-shot'),shotOk()?'0':'1')}catch(e){}const P=bioP();if(P)try{Promise.resolve(P.setSecureWindow({on:bioSec()})).catch(()=>{})}catch(e){}toast(shotOk()?'צילומי מסך מותרים':'צילומי מסך חסומים');if(cur().v==='settings')rerender()};function bioRow(){if(!BIO.av||!bioP()||!(isA()||SY.sa))return'';const on=bioOn();
+ return`<div class="li" style="cursor:default;margin:0 0 8px"><div class="m"><b>כניסה בטביעת אצבע</b><small>נעילה בכל פתיחה. גיבוי: נעילת המסך של המכשיר</small></div><button class="chip ${on?'on':''}" data-a="bioTog" aria-pressed="${on}">${on?'פעיל':'כבוי'}</button></div>`+(on?`<div class="li" style="cursor:default;margin:0 0 8px"><div class="m"><b>צילומי מסך</b><small>כשהנעילה פעילה: לאפשר צילום מסך באפליקציה</small></div><button class="chip ${shotOk()?'on':''}" data-a="shotTog" aria-pressed="${shotOk()}">${shotOk()?'מותר':'חסום'}</button></div>`:'')}
 ACT.bioTog=async el=>{const P=bioP();if(!P)return;el.disabled=true;
  try{if(bioOn()){bioOff();toast('הנעילה בטביעת אצבע בוטלה');return}
   const r=await bioAuth('אישור הפעלת כניסה בטביעת אצבע');if(!r.ok)return toast(r.reason==='not-available'?'אין במכשיר נעילת מסך מאובטחת':'האימות לא הושלם, והנעילה לא הופעלה');
-  localStorage.setItem(LK('lp-bio'),'1');try{await P.setSecureWindow({on:true})}catch(e){}toast('מעכשיו האפליקציה תינעל בכל פתיחה')}
+  localStorage.setItem(LK('lp-bio'),'1');try{await P.setSecureWindow({on:bioSec()})}catch(e){}toast('מעכשיו האפליקציה תינעל בכל פתיחה')}
  catch(e){toast('ההפעלה נכשלה')}finally{el.disabled=false;if(cur().v==='settings')rerender()}};
 ACT.bioTry=()=>{bioLock()};
 ACT.bioLkOut=()=>{syOut();location.reload()};
