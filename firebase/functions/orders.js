@@ -306,6 +306,84 @@ async function stockSet(request) {
   return res;
 }
 
+// 11.11.2026: מחיקת כל המלאי (מנהל) – מוצרים וכמויות, כולל עלות ומחיר סיטונאי (prod/{id}/p/*).
+// לפני כל מחיקה נשמר גיבוי מלא: stockBak/{id} { at, by, byName, n, st:'partial'|'done'|'restored' } + stockBak/{id}/items/{pid} { d, p }.
+// המחיקה מתחילה רק אחרי שהגיבוי נכתב כולו (st:'done'). רק השרת קורא/כותב stockBak (חוקים: ברירת מחדל – חסום).
+// לא נמחקים: קטגוריות, הזמנות, היסטוריית תנועות (stockLog/xfer) והגדרות. שחזור: restoreStock – מהגיבוי האחרון, מוצר שקיים כבר לא נדרס.
+// אותו מנגנון (wipeAll/restoreAll) משמש גם למחיקת כל הלקוחות (customers.js: cust → custBak, כולל p/card* המוצפנים כמו שהם).
+const WIPE_WORD = 'מחק';
+const CHUNK = 400;
+async function inChunks(db, ops) { for (let i = 0; i < ops.length; i += CHUNK) { const b = db.batch(); ops.slice(i, i + CHUNK).forEach((f) => f(b)); await b.commit(); } }
+// כללי: מחיקת כל המסמכים באוסף coll (כולל תת־אוסף p) אחרי גיבוי מלא ל-bak. mark = מסמך כפילות הבקשה (reqId)
+async function wipeAll(db, w, input, coll, bak, mark, label) {
+  if (input.confirm !== WIPE_WORD) throw bad('bad-confirm', `כדי למחוק את כל ${label} יש להקליד "${WIPE_WORD}"`);
+  const m = await mark.get();
+  if (m.exists) return { ok: true, dup: true, n: m.get('n') || 0 };
+  const now = Date.now();
+  const all = await db.collection(coll).get();
+  if (all.empty) { await mark.set({ t: now, by: w.uid, k: 'wipe:' + coll, n: 0 }); return { ok: true, dup: false, n: 0 }; }
+  const subs = [];
+  for (let i = 0; i < all.docs.length; i += 50) subs.push(...await Promise.all(all.docs.slice(i, i + 50).map((d) => d.ref.collection('p').get())));
+  const bref = db.collection(bak).doc();
+  await bref.set({ at: now, by: w.uid, byName: w.name || '', n: all.size, st: 'partial' });
+  await inChunks(db, all.docs.map((d, i) => (b) => {
+    const p = {}; subs[i].docs.forEach((x) => { p[x.id] = x.data(); });
+    b.set(bref.collection('items').doc(d.id), { d: d.data(), p });
+  }));
+  await bref.update({ st: 'done' }); // מכאן הגיבוי שלם – רק עכשיו מוחקים
+  const del = [];
+  all.docs.forEach((d, i) => { subs[i].docs.forEach((x) => del.push((b) => b.delete(x.ref))); del.push((b) => b.delete(d.ref)); });
+  await inChunks(db, del);
+  await mark.set({ t: now, by: w.uid, k: 'wipe:' + coll, n: all.size, bak: bref.id });
+  logger.info('wipe ' + coll, { biz: w.bizId || '', n: all.size, bak: bref.id });
+  return { ok: true, dup: false, n: all.size };
+}
+// כללי: שחזור מהגיבוי האחרון (רק st:'done'). מסמך שקיים כבר לא נדרס
+async function restoreAll(db, w, coll, bak, mark) {
+  const m = await mark.get();
+  if (m.exists) return { ok: true, dup: true, n: m.get('n') || 0, skip: m.get('skip') || 0 };
+  const q = await db.collection(bak).orderBy('at', 'desc').limit(1).get();
+  if (q.empty) throw pre('no-bak', 'אין גיבוי לשחזור');
+  const b0 = q.docs[0];
+  if (b0.get('st') === 'restored') throw pre('bak-used', 'הגיבוי האחרון כבר שוחזר');
+  if (b0.get('st') !== 'done') throw pre('bak-partial', 'הגיבוי האחרון לא שלם – אי אפשר לשחזר ממנו');
+  const items = await b0.ref.collection('items').get();
+  const refs = items.docs.map((x) => db.collection(coll).doc(x.id));
+  const ex = [];
+  for (let i = 0; i < refs.length; i += 100) ex.push(...await db.getAll(...refs.slice(i, i + 100)));
+  const ops = []; let n = 0, skip = 0;
+  items.docs.forEach((x, i) => {
+    if (ex[i].exists) { skip++; return; }
+    n++;
+    const it = x.data() || {};
+    ops.push((b) => b.set(refs[i], it.d || {}));
+    Object.entries(it.p && typeof it.p === 'object' ? it.p : {}).forEach(([k, v]) => ops.push((b) => b.set(refs[i].collection('p').doc(k), v || {})));
+  });
+  await inChunks(db, ops);
+  const now = Date.now();
+  await b0.ref.update({ st: 'restored', rAt: now, rBy: w.uid });
+  await mark.set({ t: now, by: w.uid, k: 'restore:' + coll, n, skip, bak: b0.id });
+  return { ok: true, dup: false, n, skip };
+}
+async function wipeStock(request) {
+  const w = await who(request);
+  mgr(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId', 'confirm']);
+  const reqId = reqIdOf(input);
+  const db = T.tdb();
+  return wipeAll(db, w, input, 'prod', 'stockBak', db.doc('ordcfg/req_' + reqId), 'המלאי');
+}
+async function restoreStock(request) {
+  const w = await who(request);
+  mgr(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId']);
+  const reqId = reqIdOf(input);
+  const db = T.tdb();
+  return restoreAll(db, w, 'prod', 'stockBak', db.doc('ordcfg/req_' + reqId));
+}
+
 // =====================================================================================
 // הזמנות
 // =====================================================================================
@@ -1323,6 +1401,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { setCellCfg, saveLinePlan, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, saveProduct, stockIn, stockSet, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
+const FNS = { setCellCfg, saveLinePlan, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

@@ -214,7 +214,13 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   // 7. עובד: אין כפתור סיטונאי ואין ייבוא
   await page.evaluate(() => { window.__role0 = SY.role; SY.role = 'worker'; }); await goV('ocCard', 't' + TZ); await H.settle(page, 300);
   const emp = await page.innerText('#main'); await goV('ocList'); await H.settle(page, 200); const empL = await page.innerText('#main');
-  check('7 עובד: בלי "סמן כלקוח עסקי", בלי ייבוא ובלי הגדרת שדות', !/סמן כלקוח עסקי|הפוך ללקוח רגיל/.test(emp) && !/ייבוא/.test(empL) && !/שדות נוספים/.test(empL), { emp: emp.slice(0, 150) });
+  check('7 עובד: בלי "סמן כלקוח עסקי", בלי ייבוא, בלי הגדרת שדות ובלי מחיקת כל הלקוחות', !/סמן כלקוח עסקי|הפוך ללקוח רגיל/.test(emp) && !/ייבוא/.test(empL) && !/שדות נוספים/.test(empL) && !/מחיקת כל הלקוחות|שחזור לקוחות/.test(empL), { emp: emp.slice(0, 150) });
+  await page.evaluate(() => { SY.role = window.__role0; }); await goV('ocList'); await H.settle(page, 200);
+  { const n0 = calls.length; await page.click('#main [data-a=ocWipe]'); await H.settle(page, 200); const wt = await page.innerText('#dlg');
+    await page.fill('#dlg input[name=cf]', 'כן'); await page.click('#dlg form button.r'); await H.settle(page, 300); const blk = calls.slice(n0).every((c) => c.n !== 'wipeCusts');
+    await page.fill('#dlg input[name=cf]', 'מחק'); await page.click('#dlg form button.r'); await H.settle(page, 500); const wc = calls.slice(n0).find((c) => c.n === 'wipeCusts');
+    await page.click('#main [data-a=ocRest]'); await H.settle(page, 200); await page.click('#dlg [data-a=yes]'); await H.settle(page, 400); const rc = calls.slice(n0).find((c) => c.n === 'restoreCusts');
+    check('7א מנהל: מחיקת כל הלקוחות – אזהרה עם גיבוי, בלי "מחק" לא נשלח, עם "מחק" → wipeCusts confirm; שחזור → restoreCusts', /גיבוי/.test(wt) && blk && !!wc && wc.d.confirm === 'מחק' && /^r/.test(wc.d.reqId) && !!rc, { wt: wt.slice(0, 120), wc: wc && wc.d }); }
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   { const L = await page.evaluate(() => { const n = 'א'.repeat(45), a = 'ב'.repeat(120); const D = window.__oc.split({ name: n, addr: a }, {}); const S = window.__oc.split({ name: 'קצר', addr: 'הרצל 1' }, {}); return { D, S }; });
     check('ישן ארוך: שם 45 / כתובת 120 נשארים בשדה המלא, לא נדחסים לשם פרטי/רחוב', L.D.name.length === 45 && L.D.addr.length === 120 && !L.D.fn && !L.D.st && L.S.fn === 'קצר' && L.S.st === 'הרצל 1', L); }

@@ -206,7 +206,11 @@ V.ocList=()=>{const T='לקוחות';if(!on())return{t:T,h:'<div class="empty">�
  return{t:T,s:C.L.length+' לקוחות',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button></div>
  ${mgr()?'<button class="btn g s w" data-a="ocCfg">שדות נוספים ללקוח</button>':''}
  <label class="f"><span>חיפוש (שם, טלפון או ת.ז)</span><input data-i="ocQ" value="${esc(C.q)}" autocomplete="off"></label><div id="ocl">${listH()}</div>
- <button class="btn g s w" style="margin-top:8px" data-a="ocRe">רענן</button>`}};
+ <button class="btn g s w" style="margin-top:8px" data-a="ocRe">רענן</button>${mgr()?'<div class="row" style="margin-top:16px"><button class="btn g s grow" data-a="ocWipe" style="color:var(--bad)">מחיקת כל הלקוחות</button><button class="btn g s grow" data-a="ocRest">שחזור לקוחות מגיבוי</button></div>':''}`}};
+/* 11.11.2026: מחיקת כל הלקוחות (מנהל) – הקלדת "מחק" לאישור; השרת שומר גיבוי מלא (כולל כרטיסים מוצפנים) לפני המחיקה. שחזור – מהגיבוי האחרון */
+ACT.ocWipe=()=>dlg(`<h3>מחיקת כל הלקוחות</h3><p>יימחקו <b>כל הלקוחות</b> (${(C.L||[]).length}) עם כל הפרטים, הקווים המנויידים וכרטיסי האשראי השמורים.</p><p class="note">לא נמחקים: הזמנות והגדרת השדות הנוספים. לפני המחיקה נשמר גיבוי, ואפשר לשחזר אותו בכפתור "שחזור לקוחות מגיבוי".</p><form data-f="ocWipeF"><input type="hidden" name="req" value="${rid()}"><label class="f"><span>כדי לאשר הקלידו: מחק</span><input name="cf" autocomplete="off" required></label><div class="row"><button class="btn r grow">מחק את כל הלקוחות</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`);
+FRM.ocWipeF=async f=>{const x=fd(f);if(String(x.cf||'').trim()!=='מחק')return toast('כדי למחוק יש להקליד: מחק');const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('wipeCusts',{reqId:x.req,confirm:'מחק'});closeDlg();toast('נמחקו '+(r&&r.n||0)+' לקוחות. נשמר גיבוי');await loadL(true)}catch(e){b.disabled=false;err(e)}};
+ACT.ocRest=()=>ask('לשחזר את הלקוחות מהגיבוי האחרון? לקוחות שקיימים עכשיו נשארים כמו שהם.',async()=>{try{const r=await fnCall('restoreCusts',{reqId:rid()});toast('שוחזרו '+(r&&r.n||0)+' לקוחות'+(r&&r.skip?' ('+r.skip+' כבר קיימים)':''));await loadL(true)}catch(e){err(e)}},'שחזר');
 INP.ocQ=el=>{C.q=el.value;const x=document.getElementById('ocl');if(x)x.innerHTML=listH()};
 ACT.ocRe=()=>loadL(true);
 

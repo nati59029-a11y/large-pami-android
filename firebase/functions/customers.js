@@ -727,7 +727,29 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { setCustCfg };
+// 11.11.2026: מחיקת כל הלקוחות (מנהל) – גיבוי מלא ל-custBak לפני מחיקה (כולל כרטיסים מוצפנים p/card*, כמו שהם – המפתח לא נדרש).
+// לא נמחקים: הגדרות שדות (custcfg), הזמנות (שומרות עותק של פרטי הלקוח), יומן כרטיסים. שחזור: restoreCusts – מהגיבוי האחרון.
+async function wipeCusts(request) {
+  const w = await who(request); mgrOnly(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId', 'confirm']);
+  if (typeof input.reqId !== 'string' || !REQ_RE.test(input.reqId)) throw bad('bad-req', 'מזהה בקשה לא תקין');
+  const db = T.tdb();
+  const r = await core.wipeAll(db, w, input, 'cust', 'custBak', db.doc('custcfg/req_' + input.reqId), 'הלקוחות');
+  if (!r.dup && r.n) await db.collection('cardLog').add({ t: Date.now(), by: w.uid, act: 'wipe', n: r.n });
+  return r;
+}
+async function restoreCusts(request) {
+  const w = await who(request); mgrOnly(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId']);
+  if (typeof input.reqId !== 'string' || !REQ_RE.test(input.reqId)) throw bad('bad-req', 'מזהה בקשה לא תקין');
+  const db = T.tdb();
+  const r = await core.restoreAll(db, w, 'cust', 'custBak', db.doc('custcfg/req_' + input.reqId));
+  if (!r.dup && r.n) await db.collection('cardLog').add({ t: Date.now(), by: w.uid, act: 'restore', n: r.n });
+  return r;
+}
+const FNS = { setCustCfg, wipeCusts, restoreCusts };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
 const SFNS = { saveCust, importCusts, setCard, getCard, delCard, mergeCust }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY], ...(k === 'importCusts' ? { timeoutSeconds: 540, memory: '512MiB' } : {}) }, wrap(k, f)); // ייבוא גדול: 60 שניות לא מספיקות (10.11)

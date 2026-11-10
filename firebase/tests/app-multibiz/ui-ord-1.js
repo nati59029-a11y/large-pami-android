@@ -97,6 +97,11 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   // 7. מלאי
   const st = await screen('מלאי', () => goV('oxStock'));
   check('7 מלאי: הכנסת מלאי, מוצר חדש, נגמר במלאי, תיקון (מנהל), היסטוריה, כמויות לכל סניף; מגע/ניגודיות/גלילה', okAll(st) && /הכנסת מלאי/.test(st.a.text) && /נגמר במלאי/.test(st.a.text) && /תיקון כמות/.test(st.a.text) && /יהודה הנשיא: 1/.test(st.a.text), sum(st));
+  { const n0 = calls.length; await page.click('#main [data-a=oxWipe]'); await H.settle(page, 200); const wt = await page.innerText('#dlg');
+    await page.fill('#dlg input[name=cf]', 'לא'); await page.click('#dlg form button.r'); await H.settle(page, 300); const blk = calls.slice(n0).every((c) => c.n !== 'wipeStock');
+    await page.fill('#dlg input[name=cf]', 'מחק'); await page.click('#dlg form button.r'); await H.settle(page, 500); const wc = calls.slice(n0).find((c) => c.n === 'wipeStock');
+    await page.click('#main [data-a=oxRest]'); await H.settle(page, 200); await page.click('#dlg [data-a=yes]'); await H.settle(page, 400); const rc = calls.slice(n0).find((c) => c.n === 'restoreStock');
+    check('7ב מנהל: מחיקת כל המלאי – אזהרה עם גיבוי, בלי "מחק" לא נשלח, עם "מחק" → wipeStock confirm; שחזור → restoreStock', /גיבוי/.test(wt) && blk && !!wc && wc.d.confirm === 'מחק' && !!rc, { wt: wt.slice(0, 120), wc: wc && wc.d }); }
   await page.click('[data-a=oxIn]'); await H.settle(page, 300); await shot('הכנסת-מלאי-a');
   await page.selectOption('#dlg select[name=p0]', 'pA'); await page.fill('#dlg input[name=q0]', '5'); await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 500);
   const si = calls.find((c) => c.n === 'stockIn');
