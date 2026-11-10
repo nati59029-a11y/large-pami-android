@@ -9,6 +9,7 @@
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined')return;
 const NB='_';
+const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)}; // 2026-11-09 (Dפון): מנהל־על שנכנס לעסק – הפונקציות רצות בעסק שנבחר ולא בעסק הבית שלו
 const ST={new:'חדשה',work:'בטיפול',wait_pay:'ממתין לתשלום',paid:'שולם',out:'יצא למשלוח',done:'הושלם',cancel:'בוטלה'};
 const NEXT={new:['work','wait_pay'],work:['wait_pay','new'],wait_pay:['work'],paid:['out','done'],out:['done'],done:[],cancel:[]};
 const PM=[['link','אשראי בקישור'],['phone','אשראי בטלפון'],['cash','מזומן'],['transfer','העברה'],['other','אחר']];
@@ -81,7 +82,7 @@ function draft(){if(!O.draft){const B=myBr();O.draft={br:B.length===1?B[0].id:''
 const lineH=(it,i,br)=>{const p=it.pid?prod(it.pid):null,src=hasBr()&&br?srcOf(br):null;
  let stock='';if(p){const from=it.from||br||NB;stock=`<small class="note">במלאי${hasBr()?' ב'+esc(bn(from)):''}: <b>${n3(q(p,from))}</b>${costH(p.id)}${q(p,from)<it.qty?' – אין מספיק, ההזמנה תישמר והמלאי ירד למינוס':''}</small>`;}
  const sel=p&&hasBr()&&br&&src==='stock'?`<label class="f"><span>הסחורה מסניף</span><select data-i="oxLn" data-k="from" data-n="${i}">${brs().map(b=>`<option value="${esc(b.id)}"${(it.from||br)===b.id?' selected':''}>${esc(b.name)} (${n3(q(p,b.id))})</option>`).join('')}</select></label>`:p&&hasBr()&&br&&src!=='stock'?`<small class="note">יורד ממלאי ${esc(bn(src))} (הגדרת המנהל)</small>`:'';
- return `<div class="card" style="margin:6px 0">${p?`<b>${esc(p.name)}</b>`:`<label class="f"><span>פריט</span><input data-i="oxLn" data-k="n" data-n="${i}" value="${esc(it.n||'')}" maxlength="80"></label>`}
+ return `<div class="card" style="margin:6px 0">${p?`<b>${esc(p.name)}</b>${it.gk?' <span class="tag">מתנה מהמבצע</span>':''}`:`<label class="f"><span>פריט</span><input data-i="oxLn" data-k="n" data-n="${i}" value="${esc(it.n||'')}" maxlength="80"></label>`}
  <div class="row"><label class="f grow"><span>כמות</span><input data-i="oxLn" data-k="qty" data-n="${i}" inputmode="decimal" value="${esc(it.qty)}"></label><label class="f grow"><span>מחיר ליחידה ₪</span><input data-i="oxLn" data-k="price" data-n="${i}" inputmode="decimal" value="${esc(it.price)}"></label></div>
  ${p?'':freeH(it,i,br)}${stock}${sel}<button type="button" class="btn g s" data-a="oxLnDel" data-n="${i}">הסר שורה</button></div>`};
 /* שורה ידנית (00:18): עלות ליחידה וסניף השורה (רשות; ברירת מחדל = סניף ההזמנה, רק סניפים שמותרים לעובד). לא משנה מלאי */
@@ -109,7 +110,7 @@ INP.oxQ=el=>{const D=draft();D.q=el.value;const hits=D.q?(O.P||[]).filter(p=>p.o
 INP.oxLn=el=>{const D=draft(),it=D.items[+el.dataset.n];if(!it)return;it[el.dataset.k]=el.value;if(el.dataset.k==='price')it.auto=0;if(el.dataset.k==='from'||el.tagName==='SELECT')redrawLines();else totRedraw()};
 function totRedraw(){const D=draft(),t=document.getElementById('oxtot');if(t)t.textContent=ils(D.items.reduce((s,it)=>s+Math.round((+it.qty||0)*(+it.price||0)*100),0)/100)}
 function redrawLines(){const D=draft(),l=document.getElementById('oxlines');if(l)l.innerHTML=D.items.map((it,i)=>lineH(it,i,D.br)).join('');totRedraw()}
-ACT.oxAdd=el=>{const D=draft(),p=prod(el.dataset.id);if(!p)return;const ex=D.items.find(it=>it.pid===p.id);if(ex)ex.qty=String((+ex.qty||0)+1);else D.items.push({pid:p.id,qty:'1',price:String(unitP(p,D.br)),auto:1,from:suggest(p,D.br,1)});D.q='';rerender()};
+ACT.oxAdd=el=>{const D=draft(),p=prod(el.dataset.id);if(!p)return;const ex=D.items.find(it=>it.pid===p.id&&!it.gk);if(ex)ex.qty=String((+ex.qty||0)+1);else D.items.push({pid:p.id,qty:'1',price:String(unitP(p,D.br)),auto:1,from:suggest(p,D.br,1)});D.q='';rerender()};
 ACT.oxFree=()=>{draft().items.push({n:'',qty:'1',price:''});rerender()};
 ACT.oxLnDel=el=>{draft().items.splice(+el.dataset.n,1);rerender()};
 ACT.oxDrop=()=>ask('לנקות את הטופס?',()=>{O.draft=null;rerender()},'כן, נקה');

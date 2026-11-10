@@ -11,6 +11,7 @@
 (function(){
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined'||!window.__ox)return;
+const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)}; // 2026-11-09 (Dפון): מנהל־על שנכנס לעסק – הפונקציות רצות בעסק שנבחר ולא בעסק הבית שלו
 const O=window.__ox;
 const C={L:null,cfg:null,busy:0,at:0,q:'',hit:{},imp:null};
 const on=()=>(isA()||isW()||!!(SY&&SY.sa))&&bzF('orders')&&wp('ord');
@@ -69,7 +70,7 @@ const custBox=D=>{const st=D.cSt,w=h=>`<div role="status" id="ocst">${h}</div>`;
  if(st==='hits')return w(`<p class="note">לטלפון הזה כבר יש ${(D.cHits||[]).length>1?(D.cHits||[]).length+' לקוחות':'לקוח'}. בחרו:</p>${(D.cHits||[]).map(c=>`<button type="button" class="li" data-a="ocPick" data-id="${esc(c.id)}"><div class="m"><b>${cLabel(c)}</b><small>${esc(c.addr||'')}</small></div>${ico('chev')}</button>`).join('')}${NEWB}`);
  if(st==='asnew')return w(`<p class="note">לקוח חדש עם טלפון קיים – יישמר כלקוח נפרד.</p><button type="button" class="btn g s w" data-a="ocPhAgain">חזרה ללקוחות הקיימים</button>`);
  return w(st==='new'?'<p class="note">לקוח חדש – ממלאים שם פרטי ושם משפחה, והלקוח יישמר עם ההזמנה</p>':st==='bad'?'<p class="note">ת.ז לא תקינה</p>':st==='wait'?'<p class="note">מחפש…</p>':'')};
-const tzVis=D=>(cell()&&!!(D.cell&&D.cell.on))||!!dig(D.tz);
+const tzVis=D=>cell()||!!dig(D.tz); // 2026-11-09: עסק עם ניוד קווים – שדה ת"ז (רשות) כבר בתחילת ההזמנה
 {const nw=V.oxNew;if(nw)V.oxNew=()=>{const r=nw();if(!r||!r.h||!on())return r;const D=O.draft;if(!D)return r;
   if(!C.cfg)cfgLoad();
   // ניוד קווים (orders-lines.js, נטען אחרי הקובץ הזה): סימון/ביטול ניוד מצייר מחדש, כדי ששדה הת"ז יופיע/ייעלם
@@ -78,7 +79,7 @@ const tzVis=D=>(cell()&&!!(D.cell&&D.cell.on))||!!dig(D.tz);
   const ad=AP.some(k=>String(D[k]||'').trim())||String(D.mail||'').trim();
   h=h.replace(/<details><summary([^>]*)>ת\.ז, כתובת ומייל \(רשות\)<\/summary>/,`<details${ad?' open':''}><summary$1>משלוח – כתובת, עיר, קומה ודירה (רשות)</summary>`);
   const ph=/<label class="f"><span>טלפון<\/span><input data-i="oxD" data-k="phone"[^>]*><\/label>/.exec(h);
-  if(ph){h=h.replace(ph[0],'');h=h.replace('<div class="card">','<div class="card">'+ph[0].replace('<span>טלפון</span>','<span>טלפון הלקוח (מקלידים קודם – לקוח קיים יימצא לבד)</span>')+custBox(D)+(tzVis(D)?`<label class="f"><span>ת.ז הלקוח (לניוד קווים)</span><input data-i="ocTz" data-k="tz" inputmode="numeric" maxlength="9" autocomplete="off" value="${esc(D.tz||'')}" id="octz"></label>`:''))}
+  if(ph){h=h.replace(ph[0],'');h=h.replace('<div class="card">','<div class="card">'+ph[0].replace('<span>טלפון</span>','<span>טלפון הלקוח (מקלידים קודם – לקוח קיים יימצא לבד)</span>')+custBox(D)+(tzVis(D)?`<label class="f"><span>ת.ז הלקוח (רשות)</span><input data-i="ocTz" data-k="tz" inputmode="numeric" maxlength="9" autocomplete="off" value="${esc(D.tz||'')}" id="octz"></label>`:''))}
   r.h=h;r.s='טלפון, פרטי לקוח ומוצרים';return r}}
 // טלפון בהזמנה: טלפון תקין → חיפוש הלקוחות שלו. שינוי טלפון אחרי בחירת לקוח – מנתק את הקישור (הפרטים שהוקלדו נשארים)
 const phSearch=D=>{const p=phN(D.phone);if(D.custId&&(!D.cFrom||D.cFrom.phone!==p)){const ph=D.phone,tz=D.cFrom&&D.cFrom.tz;if(tz&&dig(D.tz)===tz)D.tz='';dropLoaded(D);D.phone=ph;D.custId=''}
