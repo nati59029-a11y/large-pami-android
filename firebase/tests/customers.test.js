@@ -388,6 +388,69 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     await assertFails(db(MGR).collection(`b/${A}/cardLog`).add({ t: 1 }));
     await assertFails(db(MGR).doc(`b/${A}/cardQ/${MGR}`).get()); await assertFails(db(MGR).doc(`b/${A}/cardQ/${MGR}`).set({ mn: 0 }));
   });
+  // סבב 2: עד 3 כרטיסים ללקוח
+  it('סבב 2: 3 כרטיסים – הוספה למקום, הצגה/העתקה/מחיקה לכל כרטיס, רביעי נדחה; כרטיס ישן (card:true בלי cards) נקרא כמקום 1; עובד לא מקבל תצוגה מלאה', async () => {
+    const C2 = { num: '5326100020003456', exp: '03/29', cvv: '987' }, C3 = { num: '4111111111111111' };
+    await call('saveCust', MGR, { cust: c1 });
+    const id = 't' + TZ;
+    assert.equal((await call('setCard', MGR, { custId: id, card: CARD })).status, 'OK'); // בלי slot = מקום 1 (כמו היום)
+    assert.equal((await call('setCard', MGR, { custId: id, card: C2, slot: 2 })).status, 'OK');
+    assert.equal((await call('setCard', MGR, { custId: id, card: C3, slot: 3 })).status, 'OK');
+    assert.equal((await call('setCard', MGR, { custId: id, card: C3, slot: 4 })).reason, 'bad-slot');
+    let cu = await get(`b/${A}/cust/${id}`);
+    assert.deepEqual(cu.cards, [{ s: 1, last4: '9012' }, { s: 2, last4: '3456' }, { s: 3, last4: '1111' }]); assert.equal(cu.card, true); assert.equal(cu.last4, '9012');
+    const p2 = await get(`b/${A}/cust/${id}/p/card2`); assert.ok(p2.box && !JSON.stringify(p2).includes('5326100020003456'));
+    const v2 = await call('getCard', MGR, { custId: id, act: 'view', slot: 2 });
+    assert.equal(v2.status, 'OK', v2.text); assert.deepEqual(v2.result.card, { num: '5326100020003456', exp: '03/29', cvv: '987' });
+    assert.equal((await call('getCard', MGR, { custId: id, act: 'view', slot: 3 })).result.card.num, '4111111111111111');
+    assert.ok((await coll(`b/${A}/cardLog`)).some((x) => x.act === 'view' && x.s === 2));
+    await mkOrd('oOpen', 'new', 'br1', id);
+    assert.equal((await call('getCard', E1, { custId: id, act: 'view', slot: 2, ordId: 'oOpen' })).reason, 'manager-only');
+    assert.deepEqual((await call('getCard', E1, { custId: id, act: 'copy', slot: 2, ordId: 'oOpen' })).result.card, { num: '5326100020003456' });
+    assert.equal((await call('delCard', MGR, { custId: id, slot: 1 })).status, 'OK');
+    cu = await get(`b/${A}/cust/${id}`);
+    assert.deepEqual(cu.cards, [{ s: 2, last4: '3456' }, { s: 3, last4: '1111' }]); assert.equal(cu.last4, '3456'); assert.equal(cu.card, true);
+    assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).reason, 'no-card');
+    await call('delCard', MGR, { custId: id, slot: 2 }); await call('delCard', MGR, { custId: id, slot: 3 });
+    cu = await get(`b/${A}/cust/${id}`); assert.equal(cu.cards, undefined); assert.equal(cu.card, undefined); assert.equal(cu.last4, undefined);
+    // כרטיס ישן (לפני השינוי): card:true + p/card בלי cards → נקרא כמקום 1, ומקום 2 מתווסף לידו
+    await call('setCard', MGR, { custId: id, card: CARD });
+    await prep(async (d) => { const r = d.doc(`b/${A}/cust/${id}`); const x = (await r.get()).data(); delete x.cards; await r.set(x); });
+    assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).result.card.num, '4580123456789012');
+    await call('setCard', MGR, { custId: id, card: C2, slot: 2 });
+    assert.deepEqual((await get(`b/${A}/cust/${id}`)).cards, [{ s: 1, last4: '9012' }, { s: 2, last4: '3456' }]);
+  });
+  it('תוספת 11:50: כרטיס מטופס ההזמנה – add למקום הפנוי, מלא → cards-full; מתג ordCard כבוי → השרת דוחה כרטיס עם הזמנה', async () => {
+    await call('saveCust', MGR, { cust: c1 }); const id = 't' + TZ;
+    await mkOrd('oOpen', 'new', 'br1', id);
+    for (const num of ['4580123456789012', '5326100020003456', '4111111111111111']) {
+      const r = await call('setCard', E1, { custId: id, card: { num }, ordId: 'oOpen', add: true }); assert.equal(r.status, 'OK', r.text);
+    }
+    assert.deepEqual((await get(`b/${A}/cust/${id}`)).cards.map((x) => x.s), [1, 2, 3]);
+    assert.equal((await call('setCard', E1, { custId: id, card: { num: '4000000000000002' }, ordId: 'oOpen', add: true })).reason, 'cards-full');
+    assert.equal((await call('setCard', MGR, { custId: id, card: { num: '4000000000000002' }, slot: 2, add: true })).reason, 'bad-field');
+    assert.ok((await coll(`b/${A}/cardLog`)).filter((x) => x.act === 'set' && x.ord === 'oOpen').length === 3);
+    await prep((d) => d.doc('b/' + A).update({ 'features.ordCard': false }));
+    await call('delCard', MGR, { custId: id, slot: 3 });
+    assert.equal((await call('setCard', E1, { custId: id, card: { num: '4000000000000002' }, ordId: 'oOpen', add: true })).reason, 'feature-off');
+    assert.equal((await call('setCard', MGR, { custId: id, card: { num: '4000000000000002' }, ordId: 'oOpen', add: true })).reason, 'feature-off');
+    assert.equal((await call('setCard', MGR, { custId: id, card: { num: '4000000000000002' }, slot: 3 })).status, 'OK'); // מנהל בכרטיס הלקוח – לא מושפע מהמתג
+  });
+  it('סבב 2: ייבוא cards – עד 3 מוצפנים, ייבוא חוזר לא מכפיל, נכנס למקום פנוי; מעבר טלפון→ת"ז מעביר את כל הכרטיסים', async () => {
+    const rows = [{ name: 'א', phone: '0501111111', cards: [{ num: '5326100020003456', cvv: '111' }, { num: '4111111111111111' }] }];
+    let r = await call('importCusts', MGR, { reqId: rid(), rows });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.bad.length, 0, JSON.stringify(r.result.bad));
+    assert.deepEqual((await get(`b/${A}/cust/p0501111111`)).cards, [{ s: 1, last4: '3456' }, { s: 2, last4: '1111' }]);
+    r = await call('importCusts', MGR, { reqId: rid(), rows: rows.concat([]).map((x) => Object.assign({}, x, { cards: x.cards.concat([{ num: '4580123456789012' }]) })) });
+    assert.deepEqual((await get(`b/${A}/cust/p0501111111`)).cards.map((x) => x.s), [1, 2, 3]);
+    assert.equal((await call('getCard', MGR, { custId: 'p0501111111', act: 'view', slot: 3 })).result.card.num, '4580123456789012');
+    assert.equal((await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'ב', phone: '0502222222', cards: [{ num: '4111111111111111' }, { num: '4111111111111111' }, { num: '4111111111111111' }, { num: '4111111111111111' }] }] })).result.bad[0].reason, 'bad-card-num');
+    r = await call('saveCust', E1, { fill: true, cust: { phone: '0501111111', tz: TZ2 } });
+    assert.equal(r.status, 'OK', r.text);
+    for (const k of ['card', 'card2', 'card3']) assert.equal(await get(`b/${A}/cust/p0501111111/p/${k}`), null);
+    assert.deepEqual((await get(`b/${A}/cust/t${TZ2}`)).cards.map((x) => x.s), [1, 2, 3]);
+    assert.equal((await call('getCard', MGR, { custId: 't' + TZ2, act: 'view', slot: 2 })).result.card.num, '4111111111111111');
+  });
   it('ליקוי 2: מעבר מטלפון לת"ז – המוצפן מוצפן מחדש לנתיב החדש, הישן נמחק, נרשם move; הישן נדחה ב-getCard', async () => {
     await call('saveCust', MGR, { cust: { name: 'יוסי', phone: '0521112222' } });
     assert.equal((await call('setCard', MGR, { custId: 'p0521112222', card: CARD })).status, 'OK');

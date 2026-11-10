@@ -229,6 +229,27 @@ describe('ייבוא לקוחות מלא – סימון "לא תקין" ושדו
     assert.equal((await call('saveCust', E1, { cust: { name: 'ב', phone: '0505555555', note: 'x' } })).reason, 'feature-off');
     assert.equal((await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'ב', phone: '0505555555', bph: 'x' }] })).result.bad.length, 0); // סימון לא תקין – גם בלי cellular
   });
+  // סבב 2 (ליקוי הבודק, החלטה 4): לקוח עם טלפון תקין + עוד שורה שלו עם טלפון לא תקין
+  it('סבב 2: ללקוח עם טלפון/ת"ז תקינים לא נשמר bph/btz – הערך עובר להערות; עריכה בלי שינוי לא מוחקת ערך לא תקין; חברת ניוד עם מספר כרטיס נחסמת', async () => {
+    await call('saveCust', E1, { cust: { name: 'ק', phone: '0506666666', tz: TZ } });
+    let r = await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'ק', tz: TZ, bph: '05012', note: 'ישן' }] }); // לקוח קיים במאגר
+    assert.equal(r.status, 'OK', r.text);
+    let d = await get(`b/${A}/cust/t${TZ}`);
+    assert.equal(d.bph, undefined); assert.equal(d.phone, '0506666666'); assert.equal(d.note, 'ישן | טלפון נוסף (לא תקין): 05012');
+    await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'ק', tz: TZ, bph: '05012' }] }); // ייבוא חוזר – לא מכפיל בהערות
+    assert.equal((await get(`b/${A}/cust/t${TZ}`)).note, 'ישן | טלפון נוסף (לא תקין): 05012');
+    r = await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'ש', phone: '0507777777', btz: '12' }] }); // באותה שורה: טלפון תקין + ת"ז לא תקינה – נשמרת (אין ת"ז תקינה)
+    assert.equal((await get(`b/${A}/cust/p0507777777`)).btz, '12');
+    r = await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'ח', phone: '0508888888', bph: '0508888888x' }] }); // חדש: טלפון תקין + לא תקין באותה שורה
+    d = await get(`b/${A}/cust/p0508888888`); assert.equal(d.bph, undefined); assert.equal(d.note, 'טלפון נוסף (לא תקין): 0508888888x');
+    // לקוח בלי טלפון תקין: עריכה שלא שולחת bph – הערך הלא תקין נשאר
+    await call('importCusts', MGR, { reqId: rid(), rows: [{ name: 'בלי', bph: '123' }] });
+    const cid = ((await coll(`b/${A}/cust`)).find((x) => x.bph === '123') || {}).id;
+    assert.ok(cid);
+    assert.equal((await call('saveCust', MGR, { id: cid, cust: { stat: 'א' } })).status, 'OK');
+    assert.equal((await get(`b/${A}/cust/${cid}`)).bph, '123');
+    assert.equal((await call('saveCust', MGR, { id: 't' + TZ, cust: { ports: [{ phone: '0521111111', co: 'חברה 4580 1234 5678' }] } })).reason, 'card-like');
+  });
 });
 
 describe('ניוד קווים – חוקי Firestore', () => {

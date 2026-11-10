@@ -268,6 +268,22 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const st = await page.innerText('#ocst'); const inf = CELLON ? await page.inputValue('input[data-k=stat]') : '';
     check('12ג הזמנה חדשה: ברשימה ואחרי בחירה – סימון אדום של הפרט הלא תקין' + (CELLON ? '; שדות המידע נטענים לטופס' : ''), /לא תקין/.test(hl) && /פרט לא תקין אצל הלקוח: ת\.ז, מייל/.test(st) && (!CELLON || inf === 'ממתין'), { hl: hl.slice(0, 120), st: st.slice(0, 160), inf });
   }
+  { // 12ד (סבב 2): פענוח הייבוא – לקוח עם טלפון תקין + שורה עם טלפון לא תקין (לא נשמר bph, עובר להערות), שני טלפונים בתא, שורה בלי שם, עד 3 כרטיסים
+    const R = await page.evaluate(() => { const C = window.__oc;
+      const I = { map: ['fn', 'phone', 'tz', 'cnum', 'note'], R: [
+        ['דנה', '0501234567', '123456782', '4580123456789012', ''], ['דנה', '05012', '123456782', '5326100020003456', 'ה1'], ['דנה', '', '123456782', '4111111111111111', ''], ['דנה', '', '123456782', '4000000000000002', ''],
+        ['', '0521111111', '', '', ''], ['רון', '05222222220533333333', '', '', 'הערה'], ['טל', '0544444444 / 0555555555', '', '', '']] };
+      const { out } = C.prepRows(I); const { G, cardX } = C.groupRows(out.filter((r) => !r.why.length));
+      return { rej: out.filter((r) => r.why.length).length, G: G.map((g) => ({ name: g.o.name || g.o.fn, phone: g.o.phone, bph: g.o.bph, note: g.o.note, cards: (g.o.cards || []).length })), cardX }; });
+    const d = R.G.find((g) => g.name === 'דנה') || {}, nn = R.G.find((g) => g.name === 'ללא שם') || {}, rn = R.G.find((g) => g.name === 'רון') || {}, tl = R.G.find((g) => g.name === 'טל') || {};
+    check('12ד ייבוא סבב 2: טלפון תקין + לא תקין → בלי bph' + (CELLON ? ' והערך בהערות' : '') + '; 3 כרטיסים + 1 מעבר; שורה בלי שם → "ללא שם"; שני טלפונים בתא מפוצלים', R.rej === 0 && d.phone === '0501234567' && d.bph === undefined && d.cards === 3 && R.cardX === 1 &&
+      (!CELLON || /טלפון נוסף \(לא תקין\): 05012/.test(d.note || '')) && nn.phone === '0521111111' && rn.phone === '0522222222' && tl.phone === '0544444444' && (!CELLON || (/^הערה \| טלפון נוסף: 0533333333$/.test(rn.note || '') && /טלפון נוסף: 0555555555/.test(tl.note || ''))), R);
+    // כרטיס לקוח עם 3 כרטיסים: כל כרטיס עם 4 ספרות + הצגה/העתקה/החלפה/מחיקה משלו; בלי "הוספה" (מלא)
+    await page.evaluate(() => { const C = window.__oc; const c = (C.L || []).find((x) => x.id === 'p0509990000'); if (c) { c.cards = [{ s: 1, last4: '9012' }, { s: 2, last4: '3456' }, { s: 3, last4: '1111' }]; c.card = true; c.last4 = '9012'; } });
+    await goV('ocCard', 'p0509990000'); await H.settle(page, 500);
+    const cc = await page.evaluate(() => ({ t: (document.getElementById('occard') || {}).innerText || '', v: [...document.querySelectorAll('#occard [data-a=ocCardView]')].map((b) => b.dataset.s || '1').join(), del: document.querySelectorAll('#occard [data-a=ocCardDel]').length, add: /הוספת כרטיס/.test((document.getElementById('occard') || {}).innerText || '') }));
+    check('12ה כרטיס לקוח: 3 כרטיסים, לכל אחד 4 ספרות והצגה/מחיקה משלו (מקום 1/2/3), בלי הוספה רביעית', /\*{4}9012/.test(cc.t) && /\*{4}3456/.test(cc.t) && /\*{4}1111/.test(cc.t) && cc.v === '1,2,3' && cc.del === 3 && !cc.add, cc);
+  }
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   }
   await browser.close();

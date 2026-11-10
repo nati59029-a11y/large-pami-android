@@ -102,7 +102,16 @@ const tzVis=D=>cell()||!!dig(D.tz); // 2026-11-09: עסק עם ניוד קווי
   if(ph){h=h.replace(ph[0],'');h=h.replace('<div class="card">','<div class="card">'+ph[0].replace('<span>טלפון</span>','<span>טלפון הלקוח (מקלידים קודם – לקוח קיים יימצא לבד)</span>')+custBox(D)+(tzVis(D)?`<label class="f"><span>ת.ז הלקוח (רשות)</span><input data-i="ocTz" data-k="tz" inputmode="numeric" maxlength="9" autocomplete="off" value="${esc(D.tz||'')}" id="octz"></label>`:''))}
   if(cell()){const ih=`<details${INFK.some(k=>String(D[k]||'').trim())?' open':''}><summary>פרטים נוספים ללקוח (רשות)</summary>${INF.map(([k,l,mx])=>`<label class="f"><span>${l}</span><input data-i="oxD" data-k="${k}" maxlength="${mx}" autocomplete="off" value="${esc(D[k]||'')}"${k==='bank'?' dir="auto"':''}></label>`).join('')}</details>`;
    const am=/<details[^>]*><summary[^>]*>משלוח[\s\S]*?<\/details>/.exec(h);h=am?h.replace(am[0],am[0]+ih):h.replace('<div class="card">','<div class="card">'+ih)}
+  if(ocOn()){if(CD.d!==D)cdReset(D);const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId),full=!!c&&cardsOf(c).length>=3;
+   const ch=`<details${CD.num?' open':''} id="occd"><summary>כרטיס אשראי (רשות)</summary>${full?'<p class="note">ללקוח כבר שמורים 3 כרטיסים – אפשר להחליף או למחוק בכרטיס הלקוח.</p>':`<p class="note">נשמר מוצפן ללקוח ההזמנה כשהיא נשמרת. נשארות גלויות רק 4 ספרות אחרונות.</p>
+    ${[['num','מספר כרטיס','inputmode="numeric" maxlength="23" dir="ltr"'],['exp','תוקף (MM/YY)','inputmode="numeric" maxlength="7" dir="ltr"'],['name','שם בעל הכרטיס','maxlength="60"'],['cvv','CVV','inputmode="numeric" maxlength="4" dir="ltr"']].map(([k,l,x])=>`<label class="f"><span>${l}</span><input data-i="ocCd" data-k="${k}" autocomplete="off" ${x} value="${esc(CD[k]||'')}"></label>`).join('')}`}</details>`;
+   const am=/<details[^>]*><summary[^>]*>(פרטים נוספים ללקוח|משלוח)[\s\S]*?<\/details>/.exec(h);h=am?h.replace(am[0],am[0]+ch):h.replace('<div class="card">','<div class="card">'+ch)}
   r.h=h;r.s='טלפון, פרטי לקוח ומוצרים';return r}}
+/* תוספת 11:50: כרטיס אשראי בטופס ההזמנה (רשות). מתג ordCard לעסק – ברירת מחדל פעיל, רק מנהל־על מכבה (השרת אוכף).
+   הערכים נשמרים רק במשתנה מקומי של הטיוטה (לא ב-O.draft, לא באחסון), נשלחים ל-setCard {add, ordId} אחרי שההזמנה נשמרה, ונמחקים. */
+const ocOn=()=>!(SY&&SY.biz&&SY.biz.features&&SY.biz.features.ordCard===false);
+let CD={};const cdReset=D=>{CD={d:D}};
+INP.ocCd=el=>{const D=O.draft;if(!D)return;if(CD.d!==D)cdReset(D);CD[el.dataset.k]=el.value};
 // טלפון בהזמנה: טלפון תקין → חיפוש הלקוחות שלו. שינוי טלפון אחרי בחירת לקוח – מנתק את הקישור (הפרטים שהוקלדו נשארים)
 const phSearch=D=>{const p=phN(D.phone);if(D.custId&&(!D.cFrom||D.cFrom.phone!==p)){const ph=D.phone,tz=D.cFrom&&D.cFrom.tz;if(tz&&dig(D.tz)===tz)D.tz='';dropLoaded(D);D.phone=ph;D.custId=''}
  if(D.custId)return;D.asNew=false;D.cHits=null;if(!p){D.cSt='';paintSt(D);return}
@@ -122,6 +131,10 @@ const paintSt=D=>{const s=document.getElementById('ocst');if(s)s.outerHTML=custB
   // סבב 1 (ליקוי 1): לקוח חדש (לא נבחר מהרשימה) – שם פרטי ושם משפחה, כל אחד בנפרד
   if(D&&on()&&!D.custId){if(!String(D.fn||'').trim())return toast('חסר שם פרטי');if(!String(D.ln||'').trim())return toast('חסר שם משפחה')}
   if(D&&on()&&cell()){const b=INF.find(([k])=>k!=='bank'&&cardLike(D[k],1));if(b)return toast(b[1]+': אסור להקליד מספר כרטיס אשראי')}
+  // כרטיס מהטופס: בדיקה לפני שמירה (השרת בודק שוב)
+  let card=null;if(D&&on()&&ocOn()&&CD.d===D&&['num','exp','name','cvv'].some(k=>String(CD[k]||'').trim())){const n=String(CD.num||'').replace(/[\s-]/g,'');if(!/^\d{13,19}$/.test(n))return toast('מספר כרטיס: 13 עד 19 ספרות');
+   card={num:n};const e=String(CD.exp||'').trim(),v=String(CD.cvv||'').trim(),nm=String(CD.name||'').trim();if(e){const t=CEXP(e);if(!t)return toast('תוקף: חודש/שנה (MM/YY)');card.exp=t}if(v){if(!/^\d{3,4}$/.test(v))return toast('קוד אבטחה: 3 או 4 ספרות');card.cvv=v}if(nm){if(!CNAME(nm))return toast('שם בעל הכרטיס: עד 60 תווים, בלי מספרים');card.name=nm}
+   const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId);if(c&&cardsOf(c).length>=3)return toast('ללקוח כבר שמורים 3 כרטיסים')}
   if(D&&on()){const tz=dig(D.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');
    const p=phN(D.phone);if(p&&String(D.name||'').trim()&&D.items&&D.items.length){const c={};if(!NP.some(k=>String(D[k]||'').trim()))c.name=D.name.trim();c.phone=p;if(tz)c.tz=tz;if(D.mail)c.mail=D.mail.trim();CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)c[k]=v});if(D.addr&&!AP.some(k=>c[k]))c.addr=D.addr.trim();
     // 2026-11-10: שדות מידע – לקוח חדש: עם הלקוח; לקוח קיים: רק מה ששונה, כעריכה (לא רק שדות ריקים)
@@ -129,7 +142,10 @@ const paintSt=D=>{const s=document.getElementById('ocst');if(s)s.outerHTML=custB
     const a={fill:true,cust:c};if(D.custId)a.id=D.custId;else if(D.asNew)a.asNew=true;
     try{const r=await fnCall('saveCust',a);C.at=0;if(!D.custId&&r&&r.id){D.custId=r.id;D.asNew=false}
      if(D.custId&&Object.keys(ch).length&&a.id){await fnCall('saveCust',{id:D.custId,cust:ch});D.cInf=Object.assign({},D.cInf,ch)}}catch(e){toast('ההזמנה נשמרת, אבל פרטי הלקוח לא נשמרו: '+(e.message||''))}}}
-  return sv(el)}}
+  const r=await sv(el);
+  if(card&&D){const cid=D.custId;cdReset(null);if(r&&r.id){if(!cid)setTimeout(()=>toast('ההזמנה נשמרה, אבל הכרטיס לא נשמר: אין לקוח מקושר'),3000);
+   else try{const x=await fnCall('setCard',{custId:cid,card,ordId:r.id,add:true});setTimeout(()=>toast('הכרטיס ****'+esc(x&&x.last4||'')+' נשמר מוצפן ללקוח'),3000);C.at=0;loadL(true)}catch(e){setTimeout(()=>toast('ההזמנה נשמרה, אבל הכרטיס לא נשמר: '+(e.message||'')),3000)}}}
+  card=null;return r}}
 
 /* ---------- כניסה: כפתור "לקוחות" במסך ההזמנות ---------- */
 {const ox=V.ox;if(ox)V.ox=()=>{const r=ox();if(on()&&r&&r.h&&r.h.includes('data-v="oxStock"'))r.h=r.h.replace(/(<button class="btn g grow" data-a="go" data-v="oxStock">מלאי<\/button>)/,'$1<button class="btn g grow" data-a="go" data-v="ocList">לקוחות</button>');return r}}
@@ -157,7 +173,7 @@ V.ocCard=id=>{const T='לקוח';if(!on())return{t:T,h:'<div class="empty">אי�
  ${c.bn&&c.bn!==c.name?`<p class="note" style="margin:0">שם העסק: ${esc(c.bn)}</p>`:''}${c.vat?`<p class="note" style="margin:0">ע.מ ${esc(c.vat)}</p>`:''}${c.ct?`<p class="note" style="margin:0">איש קשר: ${esc(c.ct)}</p>`:''}${c.pay?`<p class="note" style="margin:0">תנאי תשלום: ${esc(payTxt(c))}</p>`:''}
  ${c.phone?`<p style="margin:6px 0"><a href="tel:${esc(c.phone||'')}" dir="ltr" style="color:var(--acc);display:inline-flex;min-height:44px;align-items:center">${esc(c.phone||'')}</a></p>`:''}${c.bph?`<p class="note" style="margin:0" data-bad="ph">טלפון <bdi dir="ltr">${esc(c.bph)}</bdi> ${BADT}</p>`:''}
  ${c.tz?`<p class="note" style="margin:0">ת.ז ${esc(c.tz)}</p>`:''}${c.btz?`<p class="note" style="margin:0" data-bad="tz">ת.ז ${esc(c.btz)} ${BADT}</p>`:''}${c.mail?`<p class="note" style="margin:0" dir="ltr">${esc(c.mail)}</p>`:''}${c.bml?`<p class="note" style="margin:0" data-bad="ml">מייל <bdi dir="ltr">${esc(c.bml)}</bdi> ${BADT}</p>`:''}${c.addr?`<p class="note" style="margin:0">${esc(c.addr)}</p>`:''}
- ${c.last4?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4)}${c.card===true?' · שמור מוצפן':''}</p>`:''}${cell()&&INFK.some(k=>c[k])?'<p class="note" style="margin:6px 0 0"><b>פרטים נוספים</b></p>'+INF.filter(([k])=>c[k]).map(([k,l])=>`<p class="note" style="margin:0;white-space:pre-wrap" dir="auto">${l}: ${esc(c[k])}</p>`).join(''):''}${cell()&&portsOf(c).length?'<p class="note" style="margin:6px 0 0"><b>ניודים קודמים</b></p>'+portsOf(c).map(p=>`<p class="note" style="margin:0">${portTxt(p)}</p>`).join(''):''}${xs}</div>
+ ${cardsOf(c).length?cardsOf(c).map(k=>`<p class="note" style="margin:0">כרטיס ****${esc(k.last4||'')} · שמור מוצפן</p>`).join(''):c.last4?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4)}</p>`:''}${cell()&&INFK.some(k=>c[k])?'<p class="note" style="margin:6px 0 0"><b>פרטים נוספים</b></p>'+INF.filter(([k])=>c[k]).map(([k,l])=>`<p class="note" style="margin:0;white-space:pre-wrap" dir="auto">${l}: ${esc(c[k])}</p>`).join(''):''}${cell()&&portsOf(c).length?'<p class="note" style="margin:6px 0 0"><b>ניודים קודמים</b></p>'+portsOf(c).map(p=>`<p class="note" style="margin:0">${portTxt(p)}</p>`).join(''):''}${xs}</div>
  <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocEdit" data-id="${esc(c.id)}">עריכת פרטים</button>${mgr()?`<button class="btn g grow" data-a="ocWs" data-id="${esc(c.id)}">${c.wholesale===true?'הפוך ללקוח רגיל':'סמן כלקוח עסקי (סיטונאי)'}</button>`:''}</div>
  ${mgr()?cardMgrH(c):''}<div class="sec"><h3>הזמנות</h3></div>${L.length?L.map(o=>`<button class="li" data-a="go" data-v="oxOrd" data-arg="${esc(o.id)}"><div class="m"><b>#${o.no}</b><small>${new Date(o.at).toLocaleDateString('he-IL')}</small></div><b class="a">${ils(o.total)}</b></button>`).join(''):`<p class="note">${O.L?'אין הזמנות':'טוען…'}</p>`}`}};
 function fnLoadOrders(){/* V.ox טוען את ההזמנות כשאין עדיין */try{V.ox()}catch(e){}setTimeout(()=>{if(cur().v==='ocCard'&&!typing())rerender()},1500)}
@@ -170,31 +186,37 @@ ACT.ocWs=async el=>{const c=(C.L||[]).find(x=>x.id===el.dataset.id);if(!c)return
    עובד עם ord: בכרטיס הזמנה שלא שולמה ומקושרת ללקוח – "העתק מספר כרטיס" (getCard copy + ordId; השרת בודק) והזנת כרטיס.
    הערך המפוענח לא נשמר במשתנה גלובלי, לא ב-localStorage ולא בכתובת; התצוגה נמחקת אחרי 30 שניות או במעבר מסך. */
 let shown=null;const unshow=()=>{if(shown){clearTimeout(shown.t);shown=null}};
-const cardMgrH=c=>`<div class="sec"><h3>כרטיס אשראי</h3></div><div class="card" id="occard">${c.card===true?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4||'')} · מוצפן בשרת. כל הצגה והעתקה נרשמות ביומן.</p>
- <div id="occv"></div><div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocCardView" data-id="${esc(c.id)}">הצג פרטי כרטיס</button><button class="btn g grow" data-a="ocCardCopy" data-id="${esc(c.id)}">העתק מספר</button></div>
- <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocCardSet" data-id="${esc(c.id)}">החלף כרטיס</button><button class="btn g grow" data-a="ocCardDel" data-id="${esc(c.id)}">מחק פרטי כרטיס</button></div>`
- :`<p class="note" style="margin:0">אין כרטיס שמור</p><button class="btn g w" style="margin-top:8px" data-a="ocCardSet" data-id="${esc(c.id)}">הוספת כרטיס</button>`}</div>`;
+/* סבב 2: עד 3 כרטיסים ללקוח (cards:[{s,last4}]). לקוח ישן עם card:true בלי cards = כרטיס אחד במקום 1. data-s = מקום הכרטיס (1 בלי data-s – תאימות) */
+const cardsOf=c=>!c?[]:Array.isArray(c.cards)?c.cards.filter(x=>x&&[1,2,3].includes(x.s)).sort((a,b)=>a.s-b.s):c.card===true?[{s:1,last4:c.last4||''}]:[];
+const freeSlot=c=>[1,2,3].find(n=>!cardsOf(c).some(x=>x.s===n));
+const sAt=n=>n>1?` data-s="${n}"`:'';
+const cardMgrH=c=>{const L=cardsOf(c),f=freeSlot(c);return `<div class="sec"><h3>${L.length>1?'כרטיסי אשראי ('+L.length+')':'כרטיס אשראי'}</h3></div><div class="card" id="occard">${L.length?'<p class="note" style="margin:0">מוצפן בשרת. כל הצגה והעתקה נרשמות ביומן.</p>'+L.map(k=>`<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:6px" data-card="${k.s}"><p class="note" style="margin:0"><b>כרטיס ****${esc(k.last4||'')}</b></p>
+ <div id="occv${k.s>1?k.s:''}"></div><div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocCardView" data-id="${esc(c.id)}"${sAt(k.s)}>הצג פרטי כרטיס</button><button class="btn g grow" data-a="ocCardCopy" data-id="${esc(c.id)}"${sAt(k.s)}>העתק מספר</button></div>
+ <div class="row" style="margin-top:8px"><button class="btn g grow" data-a="ocCardSet" data-id="${esc(c.id)}"${sAt(k.s)}>החלף כרטיס</button><button class="btn g grow" data-a="ocCardDel" data-id="${esc(c.id)}"${sAt(k.s)}>מחק פרטי כרטיס</button></div></div>`).join('')
+ :'<p class="note" style="margin:0">אין כרטיס שמור</p>'}${f?`<button class="btn g w" style="margin-top:8px" data-a="ocCardSet" data-id="${esc(c.id)}"${sAt(f)}>${L.length?'הוספת כרטיס נוסף':'הוספת כרטיס'}</button>`:'<p class="note" style="margin:6px 0 0">אפשר לשמור עד 3 כרטיסים ללקוח.</p>'}</div>`};
 // ליקוי 5: אחרי 45 שניות הלוח מתנקה – אם אפשר לקרוא, רק כשהתוכן עדיין זהה; בלי הרשאת קריאה – כותבים ריק. כל כישלון נבלע.
 let clipT=null;const CLIP_MS=45000;
 const clipClear=t=>{clipT=null;const cb=navigator.clipboard;if(!cb||!cb.writeText)return;const w=()=>cb.writeText('').catch(()=>{});
  try{if(cb.readText)cb.readText().then(x=>{if(x===t)w()},w);else w()}catch(e){w()}};
 const copyTxt=t=>(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{if(clipT)clearTimeout(clipT);clipT=setTimeout(()=>clipClear(t),CLIP_MS);toast('הועתק. הלוח יתנקה בעוד 45 שניות. הפעולה נרשמה ביומן')},()=>toast('ההעתקה נכשלה'));
-ACT.ocCardView=async el=>{el.disabled=true;try{const r=await fnCall('getCard',{custId:el.dataset.id,act:'view'});const k=r.card||{};const b=document.getElementById('occv');unshow();
+const slotA=(el,a)=>{const n=+el.dataset.s;if(n>1)a.slot=n;return a};
+ACT.ocCardView=async el=>{el.disabled=true;try{const n=+el.dataset.s>1?+el.dataset.s:1,r=await fnCall('getCard',slotA(el,{custId:el.dataset.id,act:'view'}));const k=r.card||{};document.querySelectorAll('[id^=occv]').forEach(x=>x.innerHTML='');const b=document.getElementById('occv'+(n>1?n:''));unshow();
   if(b){b.innerHTML=`<p style="margin:6px 0" dir="ltr"><b>${esc(String(k.num||'').replace(/(\d{4})(?=\d)/g,'$1 '))}</b></p><p class="note" style="margin:0">תוקף ${esc(k.exp||'—')} · CVV ${esc(k.cvv||'—')}</p><p class="note" style="margin:0">${esc(k.name||'')}</p><p class="note" style="margin:0">(יוסתר בעוד 30 שניות)</p>`;
-   shown={t:setTimeout(()=>{const x=document.getElementById('occv');if(x)x.innerHTML='';shown=null},30000)}}}catch(e){err(e)}finally{el.disabled=false}};
-ACT.ocCardCopy=async el=>{el.disabled=true;try{const a={custId:el.dataset.id,act:'copy'};if(el.dataset.ord)a.ordId=el.dataset.ord;const r=await fnCall('getCard',a);await copyTxt(String(r.card&&r.card.num||''))}catch(e){err(e)}finally{el.disabled=false}};
-ACT.ocCardDel=el=>ask('למחוק את פרטי הכרטיס של הלקוח? אי אפשר לשחזר.',async()=>{try{await fnCall('delCard',{custId:el.dataset.id});toast('פרטי הכרטיס נמחקו');await loadL(true)}catch(e){err(e)}},'מחק');
-ACT.ocCardSet=el=>dlg(`<h3>פרטי כרטיס אשראי</h3><form data-f="ocCardF"><input type="hidden" name="id" value="${esc(el.dataset.id)}">${el.dataset.ord?`<input type="hidden" name="ord" value="${esc(el.dataset.ord)}">`:''}
+   shown={t:setTimeout(()=>{document.querySelectorAll('[id^=occv]').forEach(x=>x.innerHTML='');shown=null},30000)}}}catch(e){err(e)}finally{el.disabled=false}};
+ACT.ocCardCopy=async el=>{el.disabled=true;try{const a=slotA(el,{custId:el.dataset.id,act:'copy'});if(el.dataset.ord)a.ordId=el.dataset.ord;const r=await fnCall('getCard',a);await copyTxt(String(r.card&&r.card.num||''))}catch(e){err(e)}finally{el.disabled=false}};
+ACT.ocCardDel=el=>ask('למחוק את פרטי הכרטיס של הלקוח? אי אפשר לשחזר.',async()=>{try{await fnCall('delCard',slotA(el,{custId:el.dataset.id}));toast('פרטי הכרטיס נמחקו');await loadL(true)}catch(e){err(e)}},'מחק');
+ACT.ocCardSet=el=>dlg(`<h3>פרטי כרטיס אשראי</h3><form data-f="ocCardF"><input type="hidden" name="id" value="${esc(el.dataset.id)}">${+el.dataset.s>1?`<input type="hidden" name="slot" value="${+el.dataset.s}">`:''}${el.dataset.ord?`<input type="hidden" name="ord" value="${esc(el.dataset.ord)}">`:''}
  ${fld('מספר כרטיס','num','','text','inputmode="numeric" autocomplete="off" required maxlength="23" dir="ltr"')}${fld('תוקף (MM/YY)','exp','','text','inputmode="numeric" autocomplete="off" maxlength="7" dir="ltr"')}
  ${fld('שם בעל הכרטיס','name','','text','autocomplete="off" maxlength="60"')}${fld('CVV','cvv','','text','inputmode="numeric" autocomplete="off" maxlength="4" dir="ltr"')}
  <p class="note">נשמר מוצפן בשרת. באפליקציה נשארות רק 4 ספרות אחרונות.</p><div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`);
-FRM.ocCardF=async f=>{const v=fd(f);const card={num:v.num};['exp','name','cvv'].forEach(k=>{if(String(v[k]||'').trim())card[k]=String(v[k]).trim()});const a={custId:v.id,card};if(v.ord)a.ordId=v.ord;
+FRM.ocCardF=async f=>{const v=fd(f);const card={num:v.num};['exp','name','cvv'].forEach(k=>{if(String(v[k]||'').trim())card[k]=String(v[k]).trim()});const a={custId:v.id,card};if(v.ord)a.ordId=v.ord;if(+v.slot>1)a.slot=+v.slot;
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('setCard',a);f.reset();closeDlg();toast('הכרטיס נשמר מוצפן');await loadL(true);rerender()}catch(e){b.disabled=false;err(e)}};
 // כרטיס הזמנה (עובד ומנהל): הזמנה שלא שולמה ומקושרת ללקוח → העתקת מספר / הזנת כרטיס
 {const oo=V.oxOrd;if(oo)V.oxOrd=id=>{const r=oo(id);unshow();if(!r||!r.h||!on())return r;const o=(O.L||[]).find(x=>x.id===id);if(!o||!o.custId||!['new','work','wait_pay'].includes(o.status))return r;
   if(!C.L&&!C.busy)loadL();const c=(C.L||[]).find(x=>x.id===o.custId);
-  const h=`<div class="sec"><h3>כרטיס אשראי</h3></div><div class="card" id="ocordcard">${c&&c.card===true?`<p class="note" style="margin:0">כרטיס ****${esc(c.last4||'')} שמור. ההעתקה נרשמת ביומן.</p><button class="btn g w" style="margin-top:8px" data-a="ocCardCopy" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}">העתק מספר כרטיס</button>`
-   :`<p class="note" style="margin:0">${c?'אין כרטיס שמור':'…'}</p>`}${c?`<button class="btn g w" style="margin-top:8px" data-a="ocCardSet" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}">${c.card===true?'החלף כרטיס':'הזנת כרטיס'}</button>`:''}</div>`;
+  const K=cardsOf(c),fs=c?freeSlot(c):0;
+  const h=`<div class="sec"><h3>כרטיס אשראי</h3></div><div class="card" id="ocordcard">${K.length?'<p class="note" style="margin:0">ההעתקה נרשמת ביומן.</p>'+K.map(k=>`<p class="note" style="margin:8px 0 0">כרטיס ****${esc(k.last4||'')} שמור</p><button class="btn g w" style="margin-top:6px" data-a="ocCardCopy" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}"${sAt(k.s)}>העתק מספר כרטיס${K.length>1?' ****'+esc(k.last4||''):''}</button>`).join('')
+   :`<p class="note" style="margin:0">${c?'אין כרטיס שמור':'…'}</p>`}${c?`<button class="btn g w" style="margin-top:8px" data-a="ocCardSet" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}"${fs?sAt(fs):''}>${!K.length?'הזנת כרטיס':fs?'הוספת כרטיס נוסף':'החלף כרטיס'}</button>`:''}</div>`;
   r.h=r.h.replace('<div class="sec"><h3>היסטוריה</h3></div>',h+'<div class="sec"><h3>היסטוריה</h3></div>');return r}}
 
 /* ---------- טופס לקוח (חדש / עריכה) ---------- */
@@ -239,7 +261,7 @@ FRM.ocF=async f=>{pRead();const v=fd(f),bz=!!v.biz;if(CPK.concat(['bn','ct','pay
   if(v.pay==='other'&&!String(v.payTxt||'').trim())return toast('כתבו את תנאי התשלום')}
  else{if(!v.fn.trim()&&(!v.oname||v.ln.trim()))return toast(v.oname?'ממלאים שם פרטי, או משאירים את שני שדות השם ריקים כדי לשמור את השם הקיים':'חסר שם פרטי');if(v.fn.trim()&&!v.ln.trim())return toast('חסר שם משפחה')}
  const c={};if(ph)c.phone=ph;if(cell())c.ports=P;const old=(C.L||[]).find(x=>x.id===v.id)||{};
- if(ph&&old.bph)c.bph='';if(tz&&old.btz)c.btz='';if(String(v.mail||'').trim()&&old.bml)c.bml='';
+ if(ph&&old.bph&&!old.phone)c.bph='';if(tz&&old.btz&&!old.tz)c.btz=''; /* סבב 2: ערך לא תקין נמחק רק כשהמשתמש החליף אותו (השדה הציג אותו) */if(String(v.mail||'').trim()&&old.bml)c.bml='';
  if(cell())INFK.forEach(k=>{const s=String(v[k]||'').trim();if(s)c[k]=s;else if(v.id&&old[k])c[k]=''});if(tz)c.tz=tz;CPK.forEach(n=>c[n]=(v[n]||'').trim());if(!c.fn&&!c.ln){delete c.fn;delete c.ln;if(v.oname)c.name=v.oname}
  if(bz){c.bn=v.bn.trim();['vat','ct','pay'].forEach(n=>{c[n]=String(v[n]||'').replace(n==='vat'?/[\s-]/g:/^$/,'').trim()});if(v.pay==='other')c.payTxt=v.payTxt.trim();['vat','ct','pay'].forEach(n=>{if(!c[n])delete c[n]})}if(!AP.some(n=>c[n])){AP.forEach(n=>delete c[n]);const had=f.querySelector('[name=id]')&&(v.oaddr||C.ea);if(v.oaddr&&!v.odel)c.addr=v.oaddr;else if(had)c.addr=''}['mail'].forEach(n=>{if(v[n]&&v[n].trim())c[n]=v[n].trim()});if(k.v)c.last4=k.v;
  const x={};xKeys().forEach(q=>{const s=(v['x_'+q.k]||'').trim();if(s)x[q.k]=s});if(Object.keys(x).length)c.x=x;
@@ -304,13 +326,16 @@ const CNAME=v=>{const s=String(v==null?'':v).replace(/\s+/g,' ').trim();return s
 const MAILOK=m=>m.length<=254&&/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(m)&&!cardLike(m);
 const LIM={fn:30,ln:30,st:80,city:40,fl:10,apt:10};
 const pKey=r=>[r.d||'',r.phone||'',r.tz||''].concat(r.bph||r.btz?[r.bph||'',r.btz||'']:[]).join('|'); // זהה לשרת (portKey)
+// סבב 2 (החלטה 3): שני טלפונים מודבקים בתא (עם או בלי מפריד) – הראשון לטלפון, השני להערות. רק כששני החלקים טלפונים תקינים
+function split2(s){const g=String(s).split(/[^\d+]+/).filter(Boolean);if(g.length===2){const a=phN(g[0]),b=phN(g[1]);if(a&&b)return[a,b]}
+ const d=digs(s);if(d.length<17||d.length>20)return null;for(const k of [10,9]){const a=phN(d.slice(0,k)),b=phN(d.slice(k));if(a&&b)return[a,b]}return null}
 function prepRows(I){const out=[];let cut=0,mk=0;const mask=(v,n,lu)=>{const r=maskCard(v,lu);mk+=r.n;return r.s.slice(0,n)};
  I.R.forEach((r,ri)=>{const o={},x={},why=[],warn=[],pr={};I.map.forEach((m,i)=>{if(!m)return;let v=r[i];if(v==null||String(v).trim()==='')return;
    const d=digs(v),s0=String(v).trim();
    if(m==='cnum'){if(/^\d{13,19}$/.test(d)){o.card=Object.assign(o.card||{},{num:d});o.last4=d.slice(-4)}else warn.push('מספר כרטיס');return}
    if(m==='cexp'||m==='cname'||m==='ccvv'){const t=m==='cexp'?CEXP(typeof v==='number'?xlDate(v).slice(5,7)+'/'+xlDate(v).slice(2,4):s0):m==='ccvv'?(/^\d{3,4}$/.test(s0)?s0:''):CNAME(s0);if(t)o.card=Object.assign(o.card||{},{[m.slice(1)]:t});else warn.push(m==='cexp'?'תוקף':m==='ccvv'?'קוד אבטחה':'שם בעל הכרטיס');return}
    if(m==='last4'){const k=l4(v);if(k.bad)why.push('4 ספרות');else{o.last4=k.v;if(k.cut)cut++}return}
-   if(m==='phone'){const p=phN(v);if(p)o.phone=p;else{o.bph=mask(s0,30,1);warn.push('טלפון')}return}
+   if(m==='phone'){const sp=split2(s0);if(sp){o.phone=sp[0];if(cell())o.note=(o.note?o.note+' | ':'')+'טלפון נוסף: '+sp[1];else warn.push('טלפון נוסף');return}const p=phN(v);if(p)o.phone=p;else{o.bph=mask(s0,30,1);warn.push('טלפון')}return}
    if(m==='tz'){const z=tzN(v);if(z&&tzOk(z))o.tz=z;else{o.btz=mask(s0,20,1);warn.push('ת.ז')}return}
    if(m==='pph'){const p=phN(v);if(p)pr.phone=p;else{pr.bph=mask(s0,30,1);warn.push('טלפון ניוד')}return}
    if(m==='ptz'){const z=tzN(v);if(z&&tzOk(z))pr.tz=z;else{pr.btz=mask(s0,20,1);warn.push('ת.ז ניוד')}return}
@@ -318,7 +343,7 @@ function prepRows(I){const out=[];let cut=0,mk=0;const mask=(v,n,lu)=>{const r=m
    if(m==='pco'){const t=s0.slice(0,40);if(CARD8.test(t))warn.push('חברת ניוד');else pr.co=t;return}
    if(m==='pact'){pr.act=actOf(s0);return}
    if(m==='od'){const t=xlDate(v);o.od=t&&t!=='!'?t:mask(s0,100,1);return}
-   if(INFK.includes(m)){o[m]=mask(s0,INF.find(z=>z[0]===m)[2],1);return}
+   if(INFK.includes(m)){const mx=INF.find(z=>z[0]===m)[2],t=mask(s0,mx,1);o[m]=o[m]?(t+' | '+o[m]).slice(0,mx):t;return} // הערות + טלפון נוסף מפיצול
    if(/^\d{13,19}$/.test(d)){if(!o.last4)o.last4=d.slice(-4);cut++;return} // מספר כרטיס בעמודה אחרת → 4 ספרות בלבד
    if(m==='mail'){const t=s0.toLowerCase();if(MAILOK(t))o.mail=t;else{o.bml=mask(s0,120);warn.push('מייל')}return}
    if(m==='port'){const t=xlDate(v);if(t==='!')why.push('תאריך ניוד');else if(t)pr.d=t;return} // 00:21: נשמר כרשומה ב-ports
@@ -328,7 +353,7 @@ function prepRows(I){const out=[];let cut=0,mk=0;const mask=(v,n,lu)=>{const r=m
   // ערך ארוך ממגבלת השדה הנפרד – נשמר בשדה המלא (שם 60 / כתובת 150), כמו לקוח ישן
   if(['fn','ln'].some(k=>o[k]&&o[k].length>LIM[k])){const n=[o.fn,o.ln].filter(Boolean).join(' ');if(n.length>60)warn.push('שם קוצר');o.name=n.slice(0,60).trim();delete o.fn;delete o.ln}
   if(AP.some(k=>o[k]&&o[k].length>LIM[k])){const a=[o.st,o.city,o.fl&&'קומה '+o.fl,o.apt&&'דירה '+o.apt].filter(Boolean).join(', ');if(a.length>150)warn.push('כתובת קוצרה');o.addr=a.slice(0,150).trim();AP.forEach(k=>delete o[k])}
-  if(Object.keys(x).length)o.x=x;if(Object.keys(pr).length&&cell())o.ports=[pr];joinC(o);if(o.card&&!o.card.num){delete o.card;warn.push('פרטי כרטיס בלי מספר')}if(!o.name&&!why.length)why.push('אין שם');
+  if(Object.keys(x).length)o.x=x;if(Object.keys(pr).length&&cell())o.ports=[pr];joinC(o);if(o.card&&!o.card.num){delete o.card;warn.push('פרטי כרטיס בלי מספר')}if(!o.name&&!o.fn&&!o.bn){o.name='ללא שם';warn.push('שם')} // סבב 2 (הנחה 5): לא נדחית – שם זמני
   out.push({n:ri+2,o,why,warn})});
  return {out,cut,mk}}
 // איחוד: ת"ז תקינה → לקוח; טלפון תקין → מצטרף ללקוח היחיד עם ת"ז ואותו טלפון, אחרת לקוח לפי טלפון; בלי שניהם – לקוח נפרד
@@ -338,19 +363,23 @@ function groupRows(rows){const T=new Map(),P=new Map(),TP=new Map(),G=[],L=[];le
   for(const [k,v] of Object.entries(b)){
    if(k==='ports'){const ks=new Set((a.ports||[]).map(pKey));a.ports=a.ports||[];v.forEach(p=>{const q=pKey(p);if(!ks.has(q)){ks.add(q);if(a.ports.length<30)a.ports.push(p);else portX++}})}
    else if(k==='x'){a.x=Object.assign({},v,a.x||{})}
-   else if(k==='card'){if(!a.card){a.card=v;a.last4=v.num.slice(-4)}else if(a.card.num!==v.num)cardX++}
+   else if(k==='card'){a.cards=a.cards||[];if(!a.cards.some(q=>q.num===v.num)){if(a.cards.length<3){a.cards.push(v);if(!a.last4)a.last4=v.num.slice(-4)}else cardX++}}
    else if(k==='last4'){if(!a.last4)a.last4=v}
    else if(INFK.includes(k)){const mx=INF.find(z=>z[0]===k)[2];if(!a[k])a[k]=v;else if(!a[k].split(' | ').includes(v)){const j=a[k]+' | '+v;if(j.length<=mx)a[k]=j}}
    else if(a[k]===undefined||a[k]==='')a[k]=v}};
  rows.forEach(r=>{if(r.o.tz){let g=T.get(r.o.tz);if(!g){g=mk(r);T.set(r.o.tz,g);G.push(g)}add(g,r);if(r.o.phone){const s=TP.get(r.o.phone)||new Set();s.add(g);TP.set(r.o.phone,s)}}});
  rows.forEach(r=>{if(r.o.tz)return;let g=null;if(r.o.phone){const s=TP.get(r.o.phone);if(s&&s.size===1)g=[...s][0];else{g=P.get(r.o.phone);if(!g){g=mk(r);P.set(r.o.phone,g);L.push(g)}}}else{g=mk(r);L.push(g)}add(g,r)});
+ G.concat(L).forEach(g=>flagFix(g.o)); // סבב 2 (החלטה 4) – זהה לשרת
  return {G:G.concat(L),cardX,portX}}
+// ללקוח עם טלפון/ת"ז תקינים לא נשמר ערך לא תקין נוסף (bph/btz); אם הוא שונה – מצטרף להערות (רק בעסק עם cellular)
+function flagFix(o){const add=[];[['bph','phone','טלפון נוסף (לא תקין)'],['btz','tz','ת.ז נוספת (לא תקינה)']].forEach(([b,v,l])=>{if(!o[b]||!o[v])return;if(o[b]!==o[v])add.push(l+': '+o[b]);delete o[b]});
+ if(add.length&&cell()){let n=o.note||'';add.forEach(a=>{if(!n.split(' | ').includes(a)){const j=n?n+' | '+a:a;if(j.length<=1000)n=j}});if(n)o.note=n}}
 function prep(){const I=C.imp,{out,cut,mk}=prepRows(I);const ok=out.filter(r=>!r.why.length),{G,cardX,portX}=groupRows(ok);
  I.out=out;I.G=G;I.cut=cut;I.mk=mk;I.cardX=cardX;I.portX=portX;I.R=null}
 const gBad=g=>!!(g.o.bph||g.o.btz||g.o.bml||(g.o.ports||[]).some(p=>p.bph||p.btz));
 const prevH=()=>{const I=C.imp,ok=I.G,bad=I.out.filter(r=>r.why.length),nl=ok.reduce((s,g)=>s+(g.o.ports||[]).length,0),nb=ok.filter(gBad).length;
- return `<h3>תצוגה מקדימה</h3><p><b>${ok.length}</b> לקוחות (מתוך ${I.out.length-bad.length} שורות)${cell()?` · <b>${nl}</b> קווים`:''} · <b>${bad.length}</b> שורות שגויות (לא ייובאו)</p>${nb?`<p class="note" style="color:var(--bad)">${nb} לקוחות עם טלפון/ת.ז/מייל לא תקינים – ייובאו כמו שהם עם סימון "לא תקין".</p>`:''}${I.cut?`<p class="note">${I.cut} מספרי כרטיס נחתכו ל-4 ספרות אחרונות.</p>`:''}${I.mk?`<p class="note">${I.mk} מספרי כרטיס בשדות טקסט הוסתרו.</p>`:''}${I.cardX?`<p class="note">${I.cardX} כרטיסים נוספים של אותו לקוח לא נשמרו (נשמר הראשון).</p>`:''}${I.portX?`<p class="note">${I.portX} קווים מעבר ל-30 ללקוח לא נשמרו.</p>`:''}
- <div style="max-height:40vh;overflow:auto">${ok.slice(0,5).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line)">${esc(r.o.name||'')} · <bdi dir="ltr">${esc(r.o.phone||'')}</bdi>${r.o.tz?' · '+esc(r.o.tz):''}${r.o.last4?' · ****'+esc(r.o.last4):''}${r.o.card?' · כרטיס מוצפן':''}${gBad(r)?' '+BADT:''}</div>`).join('')}
+ return `<h3>תצוגה מקדימה</h3><p><b>${ok.length}</b> לקוחות (מתוך ${I.out.length-bad.length} שורות)${cell()?` · <b>${nl}</b> קווים`:''} · <b>${bad.length}</b> שורות שגויות (לא ייובאו)</p>${nb?`<p class="note" style="color:var(--bad)">${nb} לקוחות עם טלפון/ת.ז/מייל לא תקינים – ייובאו כמו שהם עם סימון "לא תקין".</p>`:''}${I.cut?`<p class="note">${I.cut} מספרי כרטיס נחתכו ל-4 ספרות אחרונות.</p>`:''}${I.mk?`<p class="note">${I.mk} מספרי כרטיס בשדות טקסט הוסתרו.</p>`:''}${I.cardX?`<p class="note">${I.cardX} כרטיסים מעבר ל-3 ללקוח לא יישמרו.</p>`:''}${I.portX?`<p class="note">${I.portX} קווים מעבר ל-30 ללקוח לא נשמרו.</p>`:''}
+ <div style="max-height:40vh;overflow:auto">${ok.slice(0,5).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line)">${esc(r.o.name||'')} · <bdi dir="ltr">${esc(r.o.phone||'')}</bdi>${r.o.tz?' · '+esc(r.o.tz):''}${r.o.last4?' · ****'+esc(r.o.last4):''}${r.o.cards?' · '+r.o.cards.length+' כרטיסים מוצפנים':''}${gBad(r)?' '+BADT:''}</div>`).join('')}
  ${bad.slice(0,50).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line);color:var(--bad)">שורה ${r.n}: ${esc(r.why.join(', '))}</div>`).join('')}</div>
  <p class="note">לקוח קיים (אותה ת.ז או טלפון) – רק שדות ריקים מתמלאים. אין כפולים.</p>
  <div class="row"><button class="btn grow" data-a="ocGo"${ok.length?'':' disabled'}>ייבא ${ok.length} לקוחות</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>`};

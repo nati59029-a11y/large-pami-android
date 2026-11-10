@@ -25,6 +25,26 @@ const { defineSecret } = require('firebase-functions/params');
 const CARD = require('./lib/card');
 // fb/ord-card: מפתח הצפנה לפרטי כרטיס (Secret Manager). באמולטור – ערך דמה מ-functions/.secret.local
 const CARD_ENC_KEY = defineSecret('CARD_ENC_KEY');
+// סבב 2 (החלטה 1): עד 3 כרטיסים מוצפנים ללקוח. מקום 1 = cust/{id}/p/card (הכרטיס הקיים, AAD 'cust/{id}' – בלי שינוי, תאימות מלאה);
+// מקום 2/3 = p/card2, p/card3 (AAD 'cust/{id}#2'). בלקוח: cards:[{s,last4}] + card:true/last4 של הכרטיס הראשון (כמו היום, לשאר הקוד).
+// לקוח ישן בלי cards ועם card:true נקרא כרשימה של כרטיס אחד במקום 1.
+const SLOTS = [1, 2, 3];
+const cardPath = (id, n) => `cust/${id}/p/card${n > 1 ? n : ''}`;
+const cardAad = (id, n) => 'cust/' + id + (n > 1 ? '#' + n : '');
+function cardsOf(d) {
+  if (!d) return [];
+  if (Array.isArray(d.cards)) return d.cards.filter((x) => x && SLOTS.includes(x.s)).map((x) => ({ s: x.s, last4: String(x.last4 || '') }));
+  return d.card === true ? [{ s: 1, last4: String(d.last4 || '') }] : [];
+}
+function cardsUp(list) {
+  const l = list.slice().sort((a, b) => a.s - b.s);
+  return l.length ? { cards: l, card: true, last4: l[0].last4 } : { cards: FieldValue.delete(), card: FieldValue.delete(), last4: FieldValue.delete() };
+}
+function slotOf(v) {
+  if (v == null) return 1; // בלי מקום = הכרטיס הראשון (כמו לפני השינוי)
+  if (!SLOTS.includes(v)) throw bad('bad-slot', 'מספר כרטיס ללקוח: 1 עד 3');
+  return v;
+}
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -110,6 +130,26 @@ function portOf(raw) {
   return s;
 }
 const empty = (v) => v == null || v === '';
+// סבב 2 (החלטה 4): ללקוח עם טלפון/ת"ז תקינים לא נשמר ערך לא תקין נוסף כסימון (bph/btz). אם הוא שונה – מצטרף להערות (רק כש-cellular פעיל; אחרת לא נשמר).
+// chk = הרשומה אחרי המיזוג (old + o). חל על לקוח חדש, על מילוי (fill) ועל עריכה. o משתנה במקום.
+function flagFix(old, o, cell, fill) {
+  old = old || {};
+  const add = [];
+  for (const [b, v, l] of [['bph', 'phone', 'טלפון נוסף (לא תקין)'], ['btz', 'tz', 'ת.ז נוספת (לא תקינה)']]) {
+    if (empty(o[b])) continue;
+    const has = !empty(o[v]) || !empty(old[v]);
+    if (!has) continue;
+    if (o[b] !== o[v] && o[b] !== old[v]) add.push(l + ': ' + o[b]);
+    delete o[b];
+  }
+  if (!add.length || !cell) return;
+  // הבסיס: עריכה – ההערה שנשלחה (או הקיימת); fill/חדש – הקיימת, ואם אין – זו שנשלחה
+  const base = String((fill ? (empty(old.note) ? o.note : old.note) : (o.note !== undefined ? o.note : old.note)) || '');
+  let n = base;
+  for (const a of add) if (!n.split(' | ').includes(a)) { const j = n ? n + ' | ' + a : a; if (j.length <= 1000) n = j; }
+  if (n === base) return;
+  if (fill && !empty(old.note)) { if (n !== old.note) o.__note = n; } else o.note = n; // fill לא דורס הערה קיימת – לכן מעדכנים במפורש (__note)
+}
 // סבב 1 (ליקוי 2): פתיחת לקוח עסקי, או סימון לקוח קיים כעסקי – כל השדות חובה (על הרשומה אחרי המיזוג).
 // לקוח שכבר מסומן סיטונאי (גם ישן בלי השדות) – שמירות רגילות לא נחסמות.
 const BIZ_REQ = [['bn', 'bad-bn', 'שם העסק'], ['vat', 'bad-vat', 'ע.מ'], ['ct', 'bad-ct', 'איש קשר'], ['phone', 'bad-phone', 'טלפון'], ['st', 'bad-addr', 'כתובת'], ['city', 'bad-city', 'עיר'], ['pay', 'bad-pay', 'תנאי תשלום']];
@@ -164,7 +204,7 @@ function clean(c, keys, brs, byId, imp) {
       if (!empty(p.tz)) r.tz = tzOf(p.tz);
       if (!empty(p.bph)) r.bph = info(p.bph, 30, 'bad-ports', 'טלפון ניוד (לא תקין)', true);
       if (!empty(p.btz)) r.btz = info(p.btz, 20, 'bad-ports', 'ת.ז ניוד (לא תקינה)', true);
-      if (!empty(p.co)) r.co = txt(String(p.co), 40, 'bad-ports', 'חברת ניוד');
+      if (!empty(p.co)) r.co = txt(String(p.co), 40, 'bad-ports', 'חברת ניוד'); // סבב 2: txt חוסם 8+ ספרות (card-like) – זהה לממשק (CARD8)
       if (!empty(p.act)) { if (!PACT.includes(p.act)) throw bad('bad-ports', 'נויד בפועל: כן/לא/לא ידוע'); r.act = p.act; }
       const k = portKey(r);
       if (Object.keys(r).some((x) => x !== 'br') && !seen.has(k)) { seen.add(k); o.ports.push(r); }
@@ -193,6 +233,7 @@ async function xKeys(db) {
 // ממזג: fill = ממלא רק שדות ריקים (לא דורס); אחרת – דורס את מה שנשלח. מחזיר את השדות לעדכון (או null אם אין שינוי).
 function merge(old, o, fill) {
   const up = {};
+  if (o.__note !== undefined) up.note = o.__note;
   for (const k of FIELDS) if (o[k] !== undefined && !(o[k] === '' && empty(old[k]) && NEWK.includes(k)) && (fill ? empty(old[k]) : old[k] !== o[k])) up[k] = o[k];
   if (o.ports) { // fill (ייבוא/הזמנה) = מוסיפים רק רשומות שאין (בלי כפילות); עריכה = הרשימה שנשלחה מחליפה
     const op = Array.isArray(old.ports) ? old.ports : (old.port ? [{ d: old.port }] : []); // port ישן (תאריך בלבד) נכנס כרשומה ראשונה; port עצמו לא נמחק
@@ -211,8 +252,8 @@ async function upsert(tx, db, w, o, opts) {
   const id = idFor(o);
   const ref = db.doc('cust/' + id);
   const pref = o.tz && o.phone ? db.doc('cust/p' + o.phone) : null;
-  const pcref = pref ? db.doc(`cust/p${o.phone}/p/card`) : null;
-  const [s, ps, pcs] = pref ? await tx.getAll(ref, pref, pcref) : [await tx.get(ref), null, null];
+  const pcref = pref ? SLOTS.map((n) => db.doc(cardPath('p' + o.phone, n))) : null;
+  const [s, ps, ...pcs] = pref ? await tx.getAll(ref, pref, ...pcref) : [await tx.get(ref), null];
   const now = Date.now();
   let base = s.exists ? s.data() : null;
   let moved = false;
@@ -220,6 +261,7 @@ async function upsert(tx, db, w, o, opts) {
   const ws = opts.wholesale;
   if (base && ws === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
   if (ws === true && !(base && base.wholesale === true)) needBiz(base, o, opts.fill);
+  flagFix(base, o, opts.cell, opts.fill);
   if (!base) {
     if (!o.name && o.bn) o.name = o.bn; // לקוח עסקי חדש: השם המוצג = שם העסק (בלקוח קיים השם לא נדרס)
     if (!o.name) throw bad('bad-name', 'שם הלקוח – חובה');
@@ -240,19 +282,22 @@ async function update(tx, db, w, o, opts, st) {
     const up = merge(base, o, opts.fill) || {};
     for (const [k, v] of Object.entries(up)) { if (k.startsWith('x.')) { d.x = Object.assign({}, d.x || {}); d.x[k.slice(2)] = v; } else d[k] = v; }
     if (typeof ws === 'boolean') d.wholesale = ws;
-    let cardMoved = false;
-    if (pcs && pcs.exists) {
-      const key = CARD_ENC_KEY.value();
-      const c = CARD.open(key, w.bizId, 'cust/p' + o.phone, pcs.get('box'));
-      tx.set(db.doc(`cust/${id}/p/card`), Object.assign({}, pcs.data(), { box: CARD.seal(key, w.bizId, 'cust/' + id, c), last4: c.num.slice(-4) }));
-      tx.delete(pcref);
-      d.card = true; d.last4 = c.num.slice(-4);
-      tx.set(db.collection('cardLog').doc(), { t: now, by: w.uid, cust: id, act: 'move', from: 'p' + o.phone });
-      cardMoved = true;
-    } else delete d.card; // סימון בלי מוצפן – לא מועבר
+    const cards = []; // כל הכרטיסים (עד 3) מפוענחים ומוצפנים מחדש לנתיב החדש, באותו מקום
+    (pcs || []).forEach((cs, i) => {
+      if (!cs || !cs.exists) return;
+      const n = SLOTS[i], key = CARD_ENC_KEY.value();
+      const c = CARD.open(key, w.bizId, cardAad('p' + o.phone, n), cs.get('box'));
+      tx.set(db.doc(cardPath(id, n)), Object.assign({}, cs.data(), { box: CARD.seal(key, w.bizId, cardAad(id, n), c), last4: c.num.slice(-4) }));
+      tx.delete(pcref[i]);
+      cards.push({ s: n, last4: c.num.slice(-4) });
+      tx.set(db.collection('cardLog').doc(), Object.assign({ t: now, by: w.uid, cust: id, act: 'move', from: 'p' + o.phone }, n > 1 ? { s: n } : {}));
+    });
+    delete d.card; delete d.cards; // סימון בלי מוצפן – לא מועבר
+    if (cards.length) { const u = cardsUp(cards); d.cards = u.cards; d.card = true; d.last4 = u.last4; }
+    const cardMoved = cards.length > 0;
     tx.set(ref, d);
-    tx.update(pref, Object.assign({ mv: id, upd: now }, cardMoved ? { card: FieldValue.delete() } : {}));
-    return { id, created: false, moved: true, cardMoved };
+    tx.update(pref, Object.assign({ mv: id, upd: now }, cardMoved ? { card: FieldValue.delete(), cards: FieldValue.delete() } : {}));
+    return { id, created: false, moved: true, cardMoved, cards };
   }
   const u = merge(base, o, opts.fill) || {};
   if (typeof ws === 'boolean' && (base.wholesale === true) !== ws) u.wholesale = ws;
@@ -268,11 +313,13 @@ async function update(tx, db, w, o, opts, st) {
 function newDoc(o, w, opts, now) {
   const d = Object.assign({ x: {} }, o, { at: now, upd: now, by: w.uid, src: opts.src });
   for (const k of NEWK) if (d[k] === '') delete d[k];
+  delete d.__note;
   return d;
 }
 // לקוח נוסף עם אותו טלפון (asNew, בלי ת"ז): מזהה אקראי c{20}, לא תלוי בת"ז/טלפון. גם שורת ייבוא בלי טלפון/ת"ז תקינים
 async function createNew(tx, db, w, o, opts) {
   if (opts.wholesale === true) needBiz(null, o, false);
+  flagFix(null, o, opts.cell, false);
   if (!o.name && o.bn) o.name = o.bn;
   if (!o.name) throw bad('bad-name', 'שם הלקוח – חובה');
   if (!o.phone && opts.src !== 'import') throw bad('bad-phone', 'טלפון – חובה');
@@ -306,6 +353,7 @@ async function upsertId(tx, db, w, id, o, opts) {
   if (ts && ts.exists && base.tz !== o.tz) throw bad('tz-taken', 'כבר יש לקוח עם הת.ז הזו. בחרו אותו.');
   if (opts.wholesale === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
   if (opts.wholesale === true && base.wholesale !== true) needBiz(base, o, opts.fill);
+  flagFix(base, o, opts.cell, opts.fill);
   return update(tx, db, w, o, opts, { id, ref, base, moved: false, now: Date.now() });
 }
 
@@ -336,7 +384,7 @@ async function saveCust(request) {
   let r;
   // עריכה של שדות עסקיים: pay שאינו 'other' מוחק את הפירוט הישן
   if (input.fill !== true && o.pay && o.pay !== 'other') o.payTxt = '';
-  const opts = { fill: input.fill === true, wholesale: input.wholesale, src: input.fill === true ? 'order' : 'manual', mgr };
+  const opts = { fill: input.fill === true, wholesale: input.wholesale, src: input.fill === true ? 'order' : 'manual', mgr, cell: cellOn(w) };
   await db.runTransaction(async (tx) => {
     r = id ? await upsertId(tx, db, w, id, o, opts) : (input.asNew && !o.tz) ? await createNew(tx, db, w, o, opts) : await upsert(tx, db, w, o, opts);
   });
@@ -375,41 +423,51 @@ async function importCusts(request) {
       }
       if (r0.ports !== undefined && !cellOn(w)) throw deny('feature-off', 'ניודים – התוספת "סלולר" כבויה');
       if (hasInfo(r0) && !cellOn(w)) throw deny('feature-off', 'שדות המידע – רק כשהתוספת "סלולר" פעילה');
-      const card = r0.card == null ? null : CARD.cleanCard(r0.card); delete r0.card; // fb/ord-card: מוצפן בשרת (00:50 – כולל CVV)
-      if (card) r0.last4 = card.num.slice(-4);
+      // fb/ord-card: מוצפן בשרת (00:50 – כולל CVV). סבב 2: cards = עד 3 כרטיסים; card (כרטיס יחיד) – נתמך כמו קודם
+      if (r0.cards != null && (!Array.isArray(r0.cards) || r0.cards.length > SLOTS.length)) throw bad('bad-card-num', 'עד 3 כרטיסים ללקוח');
+      const cl = (r0.cards || []).concat(r0.card == null ? [] : [r0.card]).map((c) => CARD.cleanCard(c)).filter((c, j, A) => A.findIndex((q) => q.num === c.num) === j);
+      delete r0.card; delete r0.cards;
+      if (cl.length) r0.last4 = cl[0].num.slice(-4);
       onlyKeys(r0, CKEYS, 'שורה');
       const o = clean(r0, keys, brs, false, true);
       const keyed = !!(o.tz || o.phone); // בלי טלפון/ת"ז תקינים – לקוח חדש נפרד (c{20}), בלי איחוד
       const id = keyed ? idFor(o) : null;
       if (keyed && seen.has(id)) { res.same++; continue; } // כפילות בתוך אותה מנה
       if (keyed) seen.add(id);
+      const opts = { fill: true, src: 'import', cell: cellOn(w) };
+      // כרטיסים חדשים נכנסים למקומות הפנויים בלבד (קיים לא נדרס). כרטיס עם אותן 4 ספרות כמו כרטיס שמור – נחשב אותו כרטיס (ייבוא חוזר לא מכפיל)
+      let skip = 0, added = 0;
+      const putCards = (tx, cid, have) => {
+        const list = have.slice(); skip = 0; added = 0;
+        for (const c of cl) {
+          const l4 = c.num.slice(-4);
+          if (list.some((x) => x.last4 === l4)) continue;
+          const n = SLOTS.find((q) => !list.some((x) => x.s === q));
+          if (!n) { skip++; continue; }
+          tx.set(db.doc(cardPath(cid, n)), { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, cardAad(cid, n), c), last4: l4, at: Date.now(), by: w.uid, src: 'import' });
+          tx.set(db.collection('cardLog').doc(), Object.assign({ t: Date.now(), by: w.uid, cust: cid, act: 'import' }, n > 1 ? { s: n } : {}));
+          list.push({ s: n, last4: l4 });
+        }
+        added = list.length - have.length;
+        if (added) tx.update(db.doc('cust/' + cid), cardsUp(list));
+      };
       let r;
       if (!keyed) {
         await db.runTransaction(async (tx) => {
-          r = await createNew(tx, db, w, o, { src: 'import' });
-          if (card) {
-            tx.set(db.doc(`cust/${r.id}/p/card`), { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + r.id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'import' });
-            tx.update(db.doc('cust/' + r.id), { last4: card.num.slice(-4), card: true });
-            tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: r.id, act: 'import' });
-          }
+          r = await createNew(tx, db, w, o, opts);
+          putCards(tx, r.id, []);
         });
-        res.created++;
+        res.created++; res.cardSkip = (res.cardSkip || 0) + skip;
         continue;
       }
       await db.runTransaction(async (tx) => {
-        // קריאות לפני כתיבות (חובה בטרנזקציה): קודם בודקים אם יש כבר כרטיס
-        const cref = card ? db.doc(`cust/${id}/p/card`) : null;
-        const has = cref ? (await tx.get(cref)).exists : true;
-        r = await upsert(tx, db, w, o, { fill: true, src: 'import' });
-        if (card && !r.cardMoved) { // כרטיס קיים לא נדרס בייבוא (כמו שאר השדות – רק ריקים מתמלאים)
-          if (!has) {
-            tx.set(cref, { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + r.id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'import' });
-            tx.update(db.doc('cust/' + r.id), { last4: card.num.slice(-4), card: true });
-            tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: r.id, act: 'import' });
-          }
-        }
+        // קריאות לפני כתיבות (חובה בטרנזקציה): קודם הכרטיסים השמורים של הלקוח
+        const cs = cl.length ? await tx.get(db.doc('cust/' + id)) : null;
+        r = await upsert(tx, db, w, o, opts);
+        if (cl.length) putCards(tx, r.id, r.moved ? (r.cards || []) : cardsOf(cs && cs.exists ? cs.data() : null));
       });
-      if (r.created) res.created++; else if (r.same) res.same++; else res.updated++;
+      res.cardSkip = (res.cardSkip || 0) + skip;
+      if (r.created) res.created++; else if (r.same && !added) res.same++; else res.updated++;
     } catch (e) {
       if (!(e instanceof HttpsError)) throw e;
       res.bad.push({ i, reason: (e.details && e.details.reason) || 'bad', msg: String(e.message).slice(0, 120) });
@@ -449,7 +507,7 @@ const OPEN_ST = ['new', 'work', 'wait_pay'];
 function custIdOf(v) { if (typeof v !== 'string' || !CID_RE.test(v)) throw bad('bad-id', 'לקוח לא תקין'); return v; }
 const mgrOnly = (w) => { if (w.role !== 'manager') throw deny('manager-only', 'הפעולה מותרת למנהל בלבד'); };
 
-// setCard({ custId, card:{num,exp?,name?,cvv?}, ordId? }) – מנהל; או עובד עם ord מתוך הזמנה שלא שולמה. דורס כרטיס קיים.
+// setCard({ custId, card:{num,exp?,name?,cvv?}, ordId?, slot? }) – מנהל; או עובד עם ord מתוך הזמנה שלא שולמה. דורס כרטיס קיים.
 // עובד עם ord: רק עם ordId של הזמנה פתוחה (לא שולמה) בסניף שלו שמקושרת ללקוח – הזנת כרטיס מתוך ההזמנה (00:37).
 async function ordGate(db, w, id, ordId) {
   if (typeof ordId !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(ordId)) throw deny('need-ord', 'פרטי כרטיס לעובד – רק מתוך הזמנה שלא שולמה');
@@ -466,19 +524,26 @@ async function ordGate(db, w, id, ordId) {
 async function setCard(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['custId', 'card', 'ordId']);
+  onlyKeys(input, ['custId', 'card', 'ordId', 'slot', 'add']);
   const id = custIdOf(input.custId);
+  if (input.add !== undefined && input.add !== true) throw bad('bad-field', 'add: true בלבד');
+  if (input.add && input.slot != null) throw bad('bad-field', 'מקום או הוספה – לא שניהם');
+  let n = input.add ? 0 : slotOf(input.slot); // 1–3; בלי = מקום 1 (כמו היום – מחליף את הכרטיס הראשון); add = המקום הפנוי הראשון
+  // תוספת 11:50: הזנת כרטיס מתוך הזמנה (ordId) – רק כשמתג ordCard של העסק פעיל (ברירת מחדל פעיל; מנהל־על מכבה)
+  if (input.ordId != null && w.biz && w.biz.features && w.biz.features.ordCard === false) throw deny('feature-off', 'הזנת כרטיס אשראי בהזמנה כבויה בעסק הזה');
   const card = CARD.cleanCard(input.card);
   const db = T.tdb();
-  const ordId = w.role === 'manager' ? null : await ordGate(db, w, id, input.ordId);
+  const ordId = w.role === 'manager' ? (typeof input.ordId === 'string' && /^[A-Za-z0-9_-]{1,60}$/.test(input.ordId) ? input.ordId : null) : await ordGate(db, w, id, input.ordId);
   await db.runTransaction(async (tx) => {
     const s = await tx.get(db.doc('cust/' + id));
     if (!s.exists || s.get('mv')) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
-    tx.set(db.doc(`cust/${id}/p/card`), { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, 'cust/' + id, card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'manual' });
-    tx.update(s.ref, { last4: card.num.slice(-4), card: true, upd: Date.now() });
-    tx.set(db.collection('cardLog').doc(), Object.assign({ t: Date.now(), by: w.uid, cust: id, act: 'set' }, ordId ? { ord: ordId } : {}));
+    if (input.add) { n = SLOTS.find((q) => !cardsOf(s.data()).some((x) => x.s === q)) || 0; if (!n) throw bad('cards-full', 'ללקוח כבר שמורים 3 כרטיסים. מחקו כרטיס בכרטיס הלקוח.'); }
+    tx.set(db.doc(cardPath(id, n)), { box: CARD.seal(CARD_ENC_KEY.value(), w.bizId, cardAad(id, n), card), last4: card.num.slice(-4), at: Date.now(), by: w.uid, src: 'manual' });
+    const list = cardsOf(s.data()).filter((x) => x.s !== n).concat([{ s: n, last4: card.num.slice(-4) }]);
+    tx.update(s.ref, Object.assign(cardsUp(list), { upd: Date.now() }));
+    tx.set(db.collection('cardLog').doc(), Object.assign({ t: Date.now(), by: w.uid, cust: id, act: 'set' }, ordId ? { ord: ordId } : {}, n > 1 ? { s: n } : {}));
   });
-  return { ok: true, last4: card.num.slice(-4) };
+  return { ok: true, last4: card.num.slice(-4), slot: n };
 }
 
 // getCard({ custId, act:'view'|'copy', ordId? }) → { card:{num,exp?,name?,cvv?} } למנהל; { card:{num} } לעובד.
@@ -511,8 +576,9 @@ async function quota(db, w) {
 async function getCard(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['custId', 'act', 'ordId']);
+  onlyKeys(input, ['custId', 'act', 'ordId', 'slot']);
   const id = custIdOf(input.custId);
+  const n = slotOf(input.slot);
   if (!['view', 'copy'].includes(input.act)) throw bad('bad-act', 'פעולה לא תקינה');
   const db = T.tdb();
   let ordId = null;
@@ -524,31 +590,33 @@ async function getCard(request) {
     ordId = input.ordId;
   }
   const cs = await db.doc('cust/' + id).get();
-  if (!cs.exists || cs.get('mv') || cs.get('card') !== true) throw new HttpsError('not-found', 'אין כרטיס שמור ללקוח', { reason: 'no-card' });
+  if (!cs.exists || cs.get('mv') || !cardsOf(cs.data()).some((x) => x.s === n)) throw new HttpsError('not-found', 'אין כרטיס שמור ללקוח', { reason: 'no-card' });
   await quota(db, w);
-  const s = await db.doc(`cust/${id}/p/card`).get();
+  const s = await db.doc(cardPath(id, n)).get();
   if (!s.exists) throw new HttpsError('not-found', 'אין כרטיס שמור ללקוח', { reason: 'no-card' });
-  const c = CARD.open(CARD_ENC_KEY.value(), w.bizId, 'cust/' + id, s.get('box'));
+  const c = CARD.open(CARD_ENC_KEY.value(), w.bizId, cardAad(id, n), s.get('box'));
   const out = w.role === 'manager' ? c : { num: c.num };
   const log = { t: Date.now(), by: w.uid, cust: id, act: input.act, f: w.role === 'manager' ? 'all' : 'num' };
   if (ordId) log.ord = ordId;
+  if (n > 1) log.s = n;
   await db.collection('cardLog').add(log);
   return { card: out };
 }
 
-// delCard({ custId }) – מנהל. מוחק את המוצפן ואת last4/card מהלקוח. נרשם ביומן.
+// delCard({ custId, slot? }) – מנהל. מוחק את המוצפן ואת last4/card מהלקוח. נרשם ביומן.
 async function delCard(request) {
   const w = await who(request); mgrOnly(w);
   const input = inputObject(request);
-  onlyKeys(input, ['custId']);
+  onlyKeys(input, ['custId', 'slot']);
   const id = custIdOf(input.custId);
+  const n = slotOf(input.slot); // בלי = מקום 1 (כמו היום)
   const db = T.tdb();
   await db.runTransaction(async (tx) => {
     const s = await tx.get(db.doc('cust/' + id));
     if (!s.exists) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
-    tx.delete(db.doc(`cust/${id}/p/card`));
-    tx.update(s.ref, { card: FieldValue.delete(), last4: FieldValue.delete(), upd: Date.now() });
-    tx.set(db.collection('cardLog').doc(), { t: Date.now(), by: w.uid, cust: id, act: 'del' });
+    tx.delete(db.doc(cardPath(id, n)));
+    tx.update(s.ref, Object.assign(cardsUp(cardsOf(s.data()).filter((x) => x.s !== n)), { upd: Date.now() }));
+    tx.set(db.collection('cardLog').doc(), Object.assign({ t: Date.now(), by: w.uid, cust: id, act: 'del' }, n > 1 ? { s: n } : {}));
   });
   return { ok: true };
 }
@@ -565,4 +633,4 @@ const FNS = { setCustCfg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(wrap(k, f));
 const SFNS = { saveCust, importCusts, setCard, getCard, delCard }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY] }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor, portKey } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });

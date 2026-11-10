@@ -122,7 +122,7 @@ ACT.oxSave=async el=>{const D=draft();custJoin(D);let items;try{if(hasBr()&&!D.b
  const cust={name:D.name,phone:D.phone};if(D.tz)cust.tz=D.tz;CPK.forEach(k=>{const v=String(D[k]||'').trim();if(v)cust[k]=v});if(D.addr&&!CPK.slice(2).some(k=>cust[k]))cust.addr=D.addr;if(D.mail)cust.mail=D.mail;
  el.disabled=true;try{const r=await fnCall('createOrder',{reqId:D.req,br:hasBr()?D.br:undefined,cust,custId:D.custId||undefined,items,note:D.note||undefined,cell:D.cellOut});O.draft=null;
   toast(`הזמנה #${r.no} נשמרה · ${ils(r.total)}`);if(r.warn&&r.warn.length)setTimeout(()=>toast('שים לב: אין מספיק במלאי – '+r.warn.map(w=>w.n+(hasBr()?' ב'+bn(w.br):'')).join(', ')),2700);
-  await load(true);NAV.pop();go('oxOrd',r.id)}catch(e){el.disabled=false;err(e)}};
+  await load(true);NAV.pop();go('oxOrd',r.id);return r}catch(e){el.disabled=false;err(e)}}; // מחזיר את ההזמנה שנשמרה (לכרטיס מטופס ההזמנה)
 
 /* ---------- כרטיס הזמנה ---------- */
 V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return loading(T)}const o=O.L.find(x=>x.id===id);if(!o)return{t:T,h:'<div class="empty">ההזמנה לא נמצאה</div>'};

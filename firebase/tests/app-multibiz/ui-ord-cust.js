@@ -129,6 +129,20 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const sc = calls.slice(n4).find((c) => c.n === 'saveCust'), co = calls.slice(n4).find((c) => c.n === 'createOrder');
   check('4א הזמנה ללקוח חדש בלי שם משפחה – נחסמת (בלי saveCust ובלי createOrder)', noLn, null);
   check('4 טלפון חדש → "לקוח חדש"; saveCust {fill} בלי ת"ז/wholesale עם עיר וקומה; createOrder עם custId', /לקוח חדש/.test(nu) && !!sc && sc.d.fill === true && sc.d.cust.tz === undefined && sc.d.cust.city === 'אשדוד' && sc.d.cust.fl === '3' && sc.d.wholesale === undefined && !sc.d.id && !sc.d.asNew && !!co && co.d.cust.tz === undefined && co.d.custId === 't' + TZ, { sc: sc && sc.d, co: co && co.d });
+  { // 4ב (תוספת 11:50): כרטיס אשראי בטופס ההזמנה → אחרי createOrder: setCard {custId, ordId, add:true}; המספר לא נשאר בטיוטה; מתג ordCard כבוי – אין משבצת
+    await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
+    await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=phone]', '0529998877'); await H.settle(page, 600);
+    await page.fill('input[data-k=fn]', 'גל'); await page.fill('input[data-k=ln]', 'לוי'); await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
+    const box = await page.$('#occd'); await page.click('#occd summary');
+    await page.fill('input[data-i=ocCd][data-k=num]', '4580 1234 5678 9012'); await page.fill('input[data-i=ocCd][data-k=exp]', '7/28'); await page.fill('input[data-i=ocCd][data-k=cvv]', '123');
+    const inDraft = await page.evaluate(() => JSON.stringify(window.__ox.draft || {}).includes('4580'));
+    const n5 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 1200);
+    const co5 = calls.slice(n5).findIndex((c) => c.n === 'createOrder'), sc5 = calls.slice(n5).findIndex((c) => c.n === 'setCard'), sd = sc5 >= 0 ? calls.slice(n5)[sc5].d : null;
+    await page.evaluate(() => { SY.biz = Object.assign({}, SY.biz || {}, { features: Object.assign({}, (SY.biz && SY.biz.features) || {}, { ordCard: false }) }); window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
+    const off = !(await page.$('#occd'));
+    await page.evaluate(() => { delete SY.biz.features.ordCard; });
+    check('4ב כרטיס בטופס ההזמנה: משבצת קיימת; setCard אחרי createOrder עם ordId ו-add; המספר לא בטיוטה; מתג כבוי → בלי משבצת', !!box && !inDraft && co5 >= 0 && sc5 > co5 && !!sd && sd.custId === 't' + TZ && sd.ordId === 'o1' && sd.add === true && sd.card.num === '4580123456789012' && sd.card.exp === '07/28' && sd.card.cvv === '123' && off, { box: !!box, inDraft, co5, sc5, off, sd: sd && Object.assign({}, sd, { card: sd.card && { l: String(sd.card.num).slice(-4) } }) });
+  }
   // 5. רשימה + כרטיס (מנהל): כפתור סיטונאי
   const ls = await screen('לקוחות-רשימה', () => goV('ocList'));
   const cdr = await screen('כרטיס-לקוח', () => goV('ocCard', 't' + TZ));
@@ -154,8 +168,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 400); await shot('ייבוא-תצוגה-a');
   const pv = await page.innerText('#dlg');
   await page.click('#dlg [data-a=ocGo]'); await H.settle(page, 600);
-  const ic = calls.find((c) => c.n === 'importCusts'); const all = JSON.stringify(calls) + (await page.evaluate(() => document.body.innerHTML + JSON.stringify(window.__oc) + JSON.stringify(localStorage)));
-  check('6 ייבוא (כולל עמודת כרטיס מלא מוצפן + תוקף + CVV שנשלחים ב-card בלבד): מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 4 && ic.d.rows[3].last4 === '1111' && ic.d.rows[1].last4 === '1881' && ic.d.rows[1].card && ic.d.rows[1].card.num === '4012888888881881' && ic.d.rows[1].card.exp === '07/28' && ic.d.rows[1].card.cvv === '321' && ic.d.rows.filter((r) => r.card).length === 1 && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[2].phone === '0521112222' && ic.d.rows[2].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234|4111\.1111|5326\/1000/.test(all) && /שורה 7: מספר ארוך/.test(pv) && /\*\*\*\*9012/.test(mapTxt) && /שורה 5/.test(pv) && /נחתכו/.test(pv), { rows: ic && ic.d.rows, leak: /4580\s?1234|4111\.1111|5326\/1000/.test(all), pv: pv.slice(0, 200) });
+  const ic = calls.find((c) => c.n === 'importCusts'); const all = JSON.stringify(calls.filter((c) => c.n !== 'setCard')) /* setCard (4ב) שולח את המספר לשרת בכוונה */ + (await page.evaluate(() => document.body.innerHTML + JSON.stringify(window.__oc) + JSON.stringify(localStorage)));
+  check('6 ייבוא (כולל עמודת כרטיס מלא מוצפן + תוקף + CVV שנשלחים ב-cards בלבד – סבב 2): מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 4 && ic.d.rows[3].last4 === '1111' && ic.d.rows[1].last4 === '1881' && ic.d.rows[1].cards && ic.d.rows[1].cards.length === 1 && ic.d.rows[1].cards[0].num === '4012888888881881' && ic.d.rows[1].cards[0].exp === '07/28' && ic.d.rows[1].cards[0].cvv === '321' && ic.d.rows.filter((r) => r.cards || r.card).length === 1 && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[2].phone === '0521112222' && ic.d.rows[2].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234|4111\.1111|5326\/1000/.test(all) && /שורה 7: מספר ארוך/.test(pv) && /\*\*\*\*9012/.test(mapTxt) && /שורה 5/.test(pv) && /נחתכו/.test(pv), { rows: ic && ic.d.rows, leak: /4580\s?1234|4111\.1111|5326\/1000/.test(all), pv: pv.slice(0, 600) });
   const mem = JSON.stringify(await page.evaluate(() => [window.__oc, localStorage, document.body.innerHTML]));
   check('6ב אחרי ייבוא: מספר הכרטיס המלא לא נשאר בזיכרון/אחסון/מסך', !mem.includes('4012888888881881'), null);
   await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } }); await H.settle(page, 200);

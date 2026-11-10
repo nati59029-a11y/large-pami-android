@@ -16,7 +16,8 @@ const { getFirestore } = require('firebase-admin/firestore');
 const BIZ0 = 'largpeami';
 const BIZ_RE = /^[a-z0-9-]{3,30}$/;
 // מפתחות התוספות (חוזה, סעיף ו)
-const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cellular'];
+const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cellular', 'ordCard'];
+// ordCard (2026-11-10 11:50): הזנת כרטיס אשראי בטופס ההזמנה – ברירת מחדל פעיל (גם כשהמפתח חסר במסמך); רק מנהל־על מכבה (false)
 // cellular (00:24, ניודים בלקוח) – ברירת מחדל כבוי גם בעסק הישן; רק מנהל־על מפעיל
 const ALL_ON = Object.freeze(Object.fromEntries(FEATURES.map((k) => [k, k !== 'cellular'])));
 
@@ -59,7 +60,7 @@ async function loadBiz(bizId) {
     bizId, exists: true,
     status: d.status === 'active' ? 'active' : 'suspended', // חסר או ערך לא מוכר = לא פעיל (כמו בחוקים)
     dataRoot: bizId === BIZ0 && d.dataRoot === 'legacy' ? 'legacy' : 'b', // השורש שייך רק ללארג' פעמי
-    features: Object.fromEntries(FEATURES.map((k) => [k, f[k] === true])),
+    features: Object.fromEntries(FEATURES.map((k) => [k, k === 'ordCard' ? f[k] !== false : f[k] === true])),
     name: typeof d.name === 'string' ? d.name : '',
   };
 }
