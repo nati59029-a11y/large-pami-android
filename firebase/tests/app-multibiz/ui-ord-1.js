@@ -110,7 +110,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   check('10 בית המנהל: באנר הזמנות פתוחות וסכום ששולם החודש', /פתוחות/.test(hm) && /שולם/.test(hm), hm);
   // 11. "עוד"
   await page.evaluate(() => tab('more')); await H.settle(page, 300);
-  check('11 "עוד": שורת "הזמנות" (מנהל)', await page.evaluate(() => !!document.querySelector('#main [data-v=ox]')));
+  check('11 מנהל: "הזמנות" במסך ה-+ ולא שוב ב"עוד" (9.11.2026)', await page.evaluate(() => { const inMore = !!document.querySelector('#main [data-v=ox]'); openAdd(); const inPlus = !!document.querySelector('#sheet [data-v=ox]'); sheetClose(); return !inMore && inPlus; }));
   // 13. מנהל־על: תשלום בהזמנות בכרטיס העסק
   await page.evaluate(() => { SY.sa = true; ADM.sa = true; ADM.L = [{ id: 'biz-o', name: 'עסק בדיקה', status: 'active', dataRoot: 'b', features: {} }]; ADM.info['biz-o'] = { adv: {} }; NAV = [{ v: 'more' }]; go('sab', 'biz-o'); }); await H.settle(page, 600);
   await page.evaluate(() => { const f = document.querySelector('form[data-f=oxPayF]'); if (f) f.scrollIntoView(); }); await setDs('a'); await H.settle(page, 200); await shot('תשלום-מנהל-על-a');

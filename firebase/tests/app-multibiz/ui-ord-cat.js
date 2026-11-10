@@ -75,7 +75,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
 
   // 1. מלאי: סינון קטגוריה, מחיר לפי הסניף, כפתורי קטגוריות/ייבוא/העברות
   const st = await screen('קטלוג-מלאי', () => goV('oxStock'));
-  check('1 מלאי: בורר קטגוריה, קטגוריות/ייבוא/העברות (מנהל), מחיר סניף נחל לכיש = בסיס ₪12, מארז; מגע/ניגודיות/גלילה (3 ערכות)', okAll(st) && /ייבוא מלאי/.test(st.a.text) && /העברות/.test(st.a.text) && /קטגוריות/.test(st.a.text) && /עוגות/.test(st.a.text) && /מארז 6/.test(st.a.text) && /12\.00/.test(st.a.text), sum(st));
+  check('1 מלאי: בורר קטגוריה, קטגוריות/העברות (מנהל; ייבוא מלאי – ממרכז הייבוא בעוד), מחיר סניף נחל לכיש = בסיס ₪12, מארז; מגע/ניגודיות/גלילה (3 ערכות)', okAll(st) && !/ייבוא מלאי/.test(st.a.text) && /העברות/.test(st.a.text) && /קטגוריות/.test(st.a.text) && /עוגות/.test(st.a.text) && /מארז 6/.test(st.a.text) && /12\.00/.test(st.a.text), sum(st));
   await page.selectOption('select[data-c=oxCF]', 'c2'); await H.settle(page, 200);
   const f1 = await page.evaluate(() => document.getElementById('oxpl').innerText);
   check('2 סינון קטגוריה "עוגות": רק עוגת שוקולד', /עוגת שוקולד/.test(f1) && !/לחם מחמצת/.test(f1), f1.slice(0, 120));
