@@ -62,6 +62,9 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
       it('rcB', { creg: 'i_nl', cat: EX, amt: 45, note: 'ניקיון' }),
       it('rcC', { creg: 'i_yh', cat: 'e_sup', sub: 'rcSup1', amt: 30, note: 'ספק במזומן' }),
       it('rcN', { creg: 'i_nl', cat: EX, amt: -10, note: 'החזר' }),
+      it('rcP', { creg: 'i_nl', cat: EX, amt: 15, note: 'לחם' }),
+      it('rcE', { creg: 'i_nl', cat: EX, amt: 80, note: 'גז' }, { file: 'fE' }),
+      it('rcF', { creg: 'i_nl', cat: EX, amt: 80, note: 'חשמלאי' }, { file: 'fF' }),
       Object.assign(it('rcS', { cat: 'e_sup', sub: 'rcSup2', amt: 117, inv: '5501' }), { d: { cat: 'e_sup', sub: 'rcSup2', amt: 117, inv: '5501', date: '2026-11-03' } }),
     ];
     S.zc = [{ id: 'rcZ1', reg: 'i_nl', d: '2026-11-01', tm: '22:00', tx: [], co: { z: 50, s: 50, ids: ['rcOldW'], ok: 1, done: 1 } },
@@ -69,13 +72,13 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
     save(); try { await coSync(); } catch (e) { /* */ } // המראה של rcA נרשם במטמון (כמו במכשיר אמיתי) – כדי לבדוק שאחרי הייחוד הוא לא נמחק
     NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
     const card = (id) => { const b = document.querySelector(`#main [data-id=${id}]`); return b && b.closest('.card'); };
-    const btns = (id) => { const c = card(id); return c ? [...c.querySelectorAll('button[data-a]')].map((b) => b.dataset.a + (b.dataset.wi ? ':wi' : '')) : []; };
+    const btns = (id) => { const c = card(id); return c ? [...c.querySelectorAll('button[data-a]')].map((b) => b.dataset.a) : []; };
     const R = ['rcA', 'rcB', 'rcC'].map((id) => [id, btns(id)]);
     NAV.pop(); go('inbox', 'sup'); const sup = btns('rcS');
     return { R, sup, ttl: document.getElementById('ttl').innerText };
   });
-  check('3 לכל פריט "הוצאה מקופה" שתי אפשרויות: ייחוד לחשבונית ספק, והוצאה לפי קטגוריה שממתינה לחשבונית (ובלי "אשר" רגיל)', r3.R.every(([, b]) => b.includes('inbInv') && b.includes('inbOk:wi') && !b.includes('inbOk')), r3.R);
-  check('4 חשבונית ספק רגילה (לא מקופה) – "אשר" הרגיל לא השתנה, בלי האפשרויות החדשות', r3.sup.includes('inbOk') && !r3.sup.includes('inbInv') && !r3.sup.includes('inbOk:wi'), r3.sup);
+  check('3 לכל פריט "הוצאה מקופה" שלוש אפשרויות: אשר (כמו קודם), ייחוד לחשבונית ספק, והוצאה לפי קטגוריה שממתינה לחשבונית – כל אחת פעם אחת', r3.R.every(([, b]) => ['inbOk', 'inbInv', 'inbAw'].every((k) => b.filter((x) => x === k).length === 1)), r3.R);
+  check('4 חשבונית ספק רגילה (לא מקופה) – "אשר" הרגיל לא השתנה, בלי האפשרויות החדשות', r3.sup.includes('inbOk') && !r3.sup.includes('inbInv') && !r3.sup.includes('inbAw'), r3.sup);
 
   // (א) ייחוד לחשבונית קיימת
   const r5 = await page.evaluate(async () => {
@@ -106,15 +109,15 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   const r9 = await page.evaluate(async () => {
     const tot = () => Math.round(S.tx.filter((t) => t.t === 'exp' && !t.x && (t.date || '').slice(0, 7) === '2026-11').reduce((s, t) => s + t.amt, 0) * 100) / 100;
     const t0 = tot(); NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
-    await ACT.inbOk(document.querySelector('#main [data-a=inbOk][data-wi][data-id=rcB]')); await new Promise((r) => setTimeout(r, 100));
-    await ACT.inbOk(document.querySelector('#main [data-a=inbOk][data-wi][data-id=rcC]')); await new Promise((r) => setTimeout(r, 100));
+    await ACT.inbAw(document.querySelector('#main [data-a=inbAw][data-id=rcB]')); await new Promise((r) => setTimeout(r, 100));
+    await ACT.inbAw(document.querySelector('#main [data-a=inbAw][data-id=rcC]')); await new Promise((r) => setTimeout(r, 100));
     const B = S.tx.filter((t) => t.src === 'rcB'), C = S.tx.filter((t) => t.src === 'rcC'), aw = tdnL().aw.map((t) => t.src);
     NAV = [{ v: 'home' }]; go('todo'); const todo = document.getElementById('main').innerText.includes('שולם – ממתין לחשבונית');
     return { t0, t1: tot(), B, C, aw, todo, left: S.inbox.map((x) => x.id), dlg: !!document.querySelector('#dlg[open]') };
   });
   const B = r9.B[0] || {}, C = r9.C[0] || {};
   check('9 הוצאה לפי קטגוריה: נרשמה פעם אחת, עם creg נכון, שולמה במזומן, ומסומנת "ממתין לחשבונית"; הסכום בחודש עלה בדיוק בסכום ההוצאות', r9.B.length === 1 && r9.C.length === 1 && B.creg === 'i_nl' && C.creg === 'i_yh' && B.await === 1 && C.await === 1 && B.pays.length === 1 && B.pays[0].m === 'מזומן' && B.pays[0].a === 45 && r9.t1 === Math.round((r9.t0 + 45 + 30) * 100) / 100 && !r9.dlg, r9);
-  check('10 קטגוריית ספק בלי מספר חשבונית – לא נחסמת ("ממתין לחשבונית"), ושתיהן ברשימה הקיימת "שולם – ממתין לחשבונית"', C.sub === 'rcSup1' && !C.dn && r9.aw.includes('rcB') && r9.aw.includes('rcC') && r9.todo && r9.left.join() === 'rcN,rcS', r9);
+  check('10 קטגוריית ספק בלי מספר חשבונית – לא נחסמת ("ממתין לחשבונית"), ושתיהן ברשימה הקיימת "שולם – ממתין לחשבונית"', C.sub === 'rcSup1' && !C.dn && r9.aw.includes('rcB') && r9.aw.includes('rcC') && r9.todo && r9.left.join() === 'rcN,rcP,rcE,rcF,rcS', r9);
 
   // כשחשבונית מגיעה: (1) חיבור ישיר מפרטי התנועה (awAtt), (2) חשבונית ספק מעובד → awOffer מציע לחבר
   const r11 = await page.evaluate(async () => {
@@ -141,6 +144,44 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
     return { d1, n1: n1 - n0, t: t.map((x) => ({ amt: x.amt, kind: x.kind, aw: !!x.await, pays: x.pays.length, creg: x.creg })) };
   });
   check('13 זיכוי (סכום שלילי): ייחוד לחשבונית לא נפתח; כהוצאה לפי קטגוריה – זיכוי אחד, בלי "ממתין" ובלי תשלום', !r13.d1 && r13.n1 === 0 && r13.t.length === 1 && r13.t[0].amt === -10 && r13.t[0].kind === 'credit' && !r13.t[0].aw && r13.t[0].pays === 0, r13);
+
+  // "אשר" הרגיל בפריט מקופה – בדיוק המסלול שלפני השינוי (בלי "ממתין"), עם creg, ומופיע בסגירת הקופה
+  const r20 = await page.evaluate(async () => {
+    const tot = () => Math.round(S.tx.filter((t) => t.t === 'exp' && !t.x && (t.date || '').slice(0, 7) === '2026-11').reduce((s, t) => s + t.amt, 0) * 100) / 100;
+    const t0 = tot(); NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
+    await ACT.inbOk(document.querySelector('#main [data-a=inbOk][data-id=rcP]')); await new Promise((r) => setTimeout(r, 100));
+    const T = S.tx.filter((t) => t.src === 'rcP'), W = coWant();
+    return { n: T.length, t: T[0] && { creg: T[0].creg, aw: !!T[0].await, pays: T[0].pays.length, coa: 'coa' in T[0], amt: T[0].amt }, d: tot() - t0, w: W.rcP && W.rcP.f, mine: coMine().some((x) => x.id === 'rcP' && x.reg === 'i_nl' && x.a === 15) };
+  });
+  check('20 "אשר" בפריט מקופה: הוצאה אחת עם creg, בלי "ממתין" ובלי שדות חדשים (כמו לפני השינוי), נספרת בבדיקת הסגירה ומופיעה ב"הוצאה מקופה"', r20.n === 1 && r20.t.creg === 'i_nl' && !r20.t.aw && r20.t.pays === 0 && !r20.t.coa && r20.d === 15 && r20.w && r20.w.a === 15 && r20.mine, r20);
+
+  // חשבונית בסכום ובתאריך אחרים מתחברת להוצאה מקופה שממתינה: הסכום, התאריך והצילום של הקופה לא משתנים
+  const r21 = await page.evaluate(async () => {
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
+    await ACT.inbAw({ dataset: { id: 'rcE' } }); await new Promise((r) => setTimeout(r, 50)); await ACT.inbAw({ dataset: { id: 'rcF' } }); await new Promise((r) => setTimeout(r, 50));
+    const e = S.tx.find((t) => t.src === 'rcE'), f = S.tx.find((t) => t.src === 'rcF'), X = (id) => ({ id, uid: 'w', by: 'עובד בדיקה', t: 1, reg: 'i_nl', d: '2026-11-03', tm: '', a: 80, why: 'w', dep: '', src: id, zc: '', dp: '' });
+    const W0 = coWant(), h0 = [W0.rcE.h, W0.rcF.h], n0 = S.tx.length;
+    awJoin(e, { inv: 'גז-100', date: '2026-11-09', amt: 100, plan: '' }, 'fInvE'); // חשבונית גדולה (100 על 80)
+    ACT.awAtt({ dataset: { id: f.id } }); await new Promise((r) => setTimeout(r, 50)); const fm = document.querySelector('#dlg[open] form[data-f=awatt]');
+    fm.elements.date.value = '2026-11-09'; fm.elements.a.value = '60'; await FRM.awatt(fm); await new Promise((r) => setTimeout(r, 100)); // חשבונית קטנה (60 על 80)
+    const W = coWant(), M = coMine(), rest = S.tx.slice(n0);
+    return { e: { amt: e.amt, date: e.date, aw: !!e.await, file: e.file }, f: { amt: f.amt, date: f.date, aw: !!f.await }, wE: W.rcE.f, wF: W.rcF.f, same: W.rcE.h === h0[0] && W.rcF.h === h0[1],
+      vE: coVer(X('rcE')), vF: coVer(X('rcF')), fileE: zsCoFile(X('rcE')), mE: M.find((x) => x.id === 'rcE'), mF: M.find((x) => x.id === 'rcF'),
+      rest: rest.map((t) => ({ amt: t.amt, aw: !!t.await, creg: t.creg || '' })), restMine: M.filter((x) => rest.some((t) => t.src && t.src === x.id)).length,
+      cash: Math.round((rest.reduce((s, t) => s + cashPaid(t), 0) + cashPaid(f)) * 100) / 100 };
+  });
+  check('21 חשבונית גדולה (100 על 80, תאריך אחר): בחשבונית הסכום 100 והתאריך שלה, אבל בקופה נשארים 80 ו-03/11 (coWant/coVer/סימון), והצילום של הפתק נשמר לסיכום הסגירות', r21.e.amt === 100 && r21.e.date === '2026-11-09' && !r21.e.aw && r21.e.file === 'fInvE' && r21.wE.a === 80 && r21.wE.d === '2026-11-03' && r21.vE && r21.fileE === 'fE' && r21.mE.a === 80 && r21.mE.d === '2026-11-03', r21);
+  check('22 חשבונית קטנה (60 על 80, תאריך אחר): בקופה נשארים 80 ו-03/11; היתרה (20) נשארת "ממתין" בלי creg – לא נספרת פעמיים, וסך המזומן ששולם נשאר 80', r21.f.amt === 60 && !r21.f.aw && r21.wF.a === 80 && r21.wF.d === '2026-11-03' && r21.vF && r21.mF.a === 80 && r21.rest.length === 1 && r21.rest[0].amt === 20 && r21.rest[0].aw && !r21.rest[0].creg && r21.restMine === 0 && r21.cash === 80 && r21.same, r21);
+
+  // משיכה חוזרת: מסמך העובד שיוחד לחשבונית (rcA) חוזר מהענן כ-new – לא נכנס שוב ל"לטיפול"; מסמך חדש כן נכנס
+  const r23 = await page.evaluate(async () => {
+    const D = (id, d) => ({ name: 'projects/p/databases/(default)/documents/inbox/' + id, fields: { status: { stringValue: 'new' }, owner: { stringValue: 'w' }, by: { stringValue: 'עובד בדיקה' }, created: { stringValue: '2026-11-03T09:00:00Z' }, data: { stringValue: JSON.stringify(d) } } });
+    const rq = runQ; runQ = async () => [D('rcA', { reg: true, creg: 'i_nl', amt: 80, date: '2026-11-03', note: 'שילמתי לספק' }), D('rcNew9', { reg: true, creg: 'i_nl', amt: 9, date: '2026-11-05', note: 'חדש' })];
+    try { await pullInbox2(); } catch (e) { /* */ } finally { runQ = rq; }
+    return { ids: S.inbox.map((x) => x.id), reg: todoC().reg };
+  });
+  check('23 משיכה חוזרת: מסמך שיוחד לחשבונית לא נקלט שוב (אין כפילות), ומסמך חדש כן נקלט', !r23.ids.includes('rcA') && r23.ids.includes('rcNew9'), r23);
+  await page.evaluate(() => { S.inbox = S.inbox.filter((x) => x.id !== 'rcNew9'); save(); });
 
   // סגירת קופה: "הוצאה מקופה" לכל קופה, מסומנות אלו של הסגירה האחרונה (2 סגירות, הוצאות בסגירה האחרונה / בקודמת / אחריה), סכום המסומנות מול הסגירה
   const r14 = await page.evaluate(async () => {
