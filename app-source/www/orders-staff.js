@@ -344,7 +344,7 @@ const IMF=IMF0; // 00:12: גם עובד מייבא סיטונאי ועלות
 const IMK='lp-ox-imp-map';
 const imMap0=()=>{try{return JSON.parse(localStorage.getItem(IMK)||'{}')||{}}catch(e){return{}}};
 V.oxImp=()=>{const T='ייבוא מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}const I=O.im;
- if(!I)return{t:T,s:'Excel או CSV',h:`<div class="card"><p class="note" style="margin-top:0">שורה ראשונה = כותרות. אחרי בחירת הקובץ בוחרים איזו עמודה היא איזה שדה. מוצר קיים (לפי ברקוד, ואם אין – לפי שם מדויק) מתעדכן ולא נוצר פעמיים.</p><label class="btn w" style="display:flex;align-items:center;justify-content:center">בחר קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="oxImpFile" style="position:absolute;opacity:0;width:1px;height:1px"></label></div>`};
+ if(!I)return{t:T,s:'Excel או CSV',h:`${impCardH('prod')}<div class="card"><p class="note" style="margin-top:0">שורה ראשונה = כותרות. אחרי בחירת הקובץ בוחרים איזו עמודה היא איזה שדה. מוצר קיים (לפי ברקוד, ואם אין – לפי שם מדויק) מתעדכן ולא נוצר פעמיים.</p><label class="btn w" style="display:flex;align-items:center;justify-content:center">בחר קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="oxImpFile" style="position:absolute;opacity:0;width:1px;height:1px"></label></div>`};
  const opt=(k)=>`<option value="">— לא לייבא —</option>${I.head.map((h,i)=>`<option value="${i}"${String(I.map[k])===String(i)?' selected':''}>${esc(String(h||'עמודה '+(i+1)))}</option>`).join('')}`;
  const pv=imRows(),bad=pv.filter(r=>r.err),good=pv.length-bad.length;
  return{t:T,s:esc(I.file),h:`<div class="card"><b>התאמת עמודות</b>${IMF.map(([k,l,req])=>`<label class="f"><span>${l}${req?' (חובה)':''}</span><select data-c="oxImpMap" data-k="${k}">${opt(k)}</select></label>`).join('')}</div>
@@ -369,8 +369,44 @@ function imRows(){const I=O.im,M=I.map,out=[];if(M.name==null||M.price==null)ret
   if(M.note!=null){const v=String(g('note')).replace(/\s+/g,' ').trim();if(v.length>500)e.push('הערות: עד 500 תווים');else if(v)o.note=v}
   for(const k of['cat','sub']){const v=String(g(k)).trim();if(v)o[k]=v.slice(0,40)}if(o.sub&&!o.cat)e.push('תת־קטגוריה בלי קטגוריה');
   out.push({n:i+2,o,err:e.join(', ')})});return out}
-ACT.oxImpGo=async el=>{const I=O.im;if(!I)return;const G=imRows().filter(r=>!r.err).map(r=>r.o);if(!G.length)return;if(hasBr()&&!I.br&&(G.some(o=>o.qty)||!mgr()))return toast('בחר סניף');el.disabled=true;
+ACT.oxImpGo=async el=>{const I=O.im;if(!I)return;const R=imRows().filter(r=>!r.err),G=R.map(r=>r.o);if(!G.length)return;if(hasBr()&&!I.br&&(G.some(o=>o.qty)||!mgr()))return toast('בחר סניף');el.disabled=true;
+ if(mgr()){try{await impSend('prod',G,R.map(r=>r.n),Object.assign({addQty:I.add},hasBr()?{br:I.br}:{}),el);O.im=null;rerender();toast('הקובץ נשלח לשרת – אפשר לצאת מהאפליקציה. ההתקדמות מוצגת כאן')}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}return} /* 11.11.2026: מנהל – ייבוא ברקע בשרת (startImport). עובד – כמו קודם */
  let a=0,u=0,b=0;try{for(let k=0;k<G.length;k+=200){el.textContent='מייבא… '+Math.min(k+200,G.length)+'/'+G.length;const r=await fnCall('importProducts',{reqId:(I.req+'_'+(k/200)).slice(0,40),br:hasBr()?I.br:undefined,addQty:I.add,rows:G.slice(k,k+200)});a+=r.added||0;u+=r.updated||0;b+=(r.bad||[]).length}
   O.im=null;toast(`יובא: ${a} חדשים, ${u} עודכנו${b?', '+b+' נדחו':''}`);await load(true);rerender()}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
+/* ---------- ייבוא ברקע (11.11.2026, שלב 3) ----------
+   מנהל: הקובץ (אחרי התאמת העמודות והבדיקה במכשיר) נשלח לשרת ב-startImport, 200 שורות בקריאה, עם מזהה עבודה אחד. השרת מייבא לבד –
+   אפשר לצאת מהאפליקציה. השורות לא נשמרות במכשיר בשום שלב (רק בזיכרון עד סוף השליחה). שליחה חוזרת של חלק (ניתוק) לא מכפילה (השרת מזהה).
+   כרטיס התקדמות (רשימת הלקוחות, ייבוא המלאי, מרכז הייבוא) קורא את impJobs – מונים בלבד, מנהל בלבד (חוקים). מתעדכן כל 4 שניות רק
+   כשיש ייבוא פעיל והמסך פתוח; כשחוזרים לאפליקציה – מיד. "נסה שוב" לחלקים שנכשלו – startImport {retry}. "סגור" – רק מסתיר (מזהים במכשיר). */
+const IMP={L:null,busy:0,at:0,tm:0},IHK='lp-imp-hide',IKN={cust:'לקוחות',prod:'מוצרים ומלאי'};
+const impJid=()=>{const a=new Uint8Array(20),c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';crypto.getRandomValues(a);return [...a].map(x=>c[x%62]).join('')};
+const impErr=e=>e&&e.offline?new Error('לא הצלחנו להגיע לשירות הייבוא בשרת. בדקו את החיבור לאינטרנט. אם יש חיבור – ייתכן ששירות הייבוא עוד לא הופעל בשרת: פנו למנהל המערכת.'):e;
+async function impSend(kind,rows,ns,opt,el){const job=impJid(),N=200;
+ for(let at=0;at<rows.length;at+=N){if(el)el.textContent='שולח לשרת… '+Math.min(at+N,rows.length)+'/'+rows.length;
+  for(let k=0;;k++){try{await fnCall('startImport',Object.assign({job,kind,total:rows.length,at,rows:rows.slice(at,at+N),ns:ns.slice(at,at+N)},opt||{}));break}catch(e){if(!e.offline||k>=2)throw impErr(e);await new Promise(r=>setTimeout(r,1500*(k+1)))}}}
+ IMP.at=0;impLoad(true);return job}
+const impHid=()=>{try{const a=JSON.parse(localStorage.getItem(IHK)||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}};
+const impView=()=>['ocList','oxImp','imp'].includes(cur().v);
+const impAct=j=>j.st==='run'||(j.st==='up'&&Date.now()-(j.upd||j.t||0)<6e5);
+async function impLoad(force){if(!mgr()||!bzF('orders')||IMP.busy||(!force&&IMP.L&&Date.now()-IMP.at<3000))return;IMP.busy=1;const was=IMP.L;
+ try{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'impJobs'}],orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:5}})});
+  IMP.L=(r||[]).filter(x=>x.document).map(x=>dec(x.document));IMP.at=Date.now();
+  if(was)IMP.L.forEach(j=>{const o=was.find(x=>x.id===j.id);if(o&&impAct(o)&&!impAct(j)){if(j.k==='prod')load(true);else if(window.__ocLoad)window.__ocLoad(true)}})} // הסתיים עכשיו – רענון הרשימה
+ catch(e){IMP.L=IMP.L||[]}finally{IMP.busy=0;const el=document.getElementById('impc');if(el)el.innerHTML=impIn(el.dataset.k);clearTimeout(IMP.tm);if(IMP.L.some(impAct)&&!document.hidden&&impView())IMP.tm=setTimeout(()=>impLoad(true),4000)}}
+function impRow(j){const c=j.cnt||{},tot=j.total||0,dn=(j.dn||0)+(j.fr||0),stale=j.st==='up'&&!impAct(j),end=j.st==='done'||j.st==='part',B=Array.isArray(j.bad)?j.bad:[],F=Array.isArray(j.fail)?j.fail:[];
+ const head=j.st==='done'?'הסתיים':j.st==='part'?'הסתיים – חלק לא יובא':stale?'השליחה לא הושלמה':j.st==='up'?'שולח לשרת…':'מייבא בשרת…';
+ return `<div class="card" style="margin-bottom:8px"><b>ייבוא ${IKN[j.k]||''}: ${head}</b><p class="note" style="margin:4px 0">${dn} מתוך ${tot} שורות${tot?' ('+Math.round(dn*100/tot)+'%)':''} · ${tm(j.t)}</p>
+ <p style="margin:4px 0">חדשים: <b>${c.c||0}</b> · עודכנו: <b>${c.u||0}</b>${j.k==='cust'?` · ללא שינוי: <b>${c.s||0}</b>`:''}${c.b?` · שגויות: <b>${c.b}</b>`:''}</p>
+ ${impAct(j)?'<p class="note" style="margin:4px 0">אפשר לצאת מהאפליקציה – הייבוא ממשיך בשרת.</p>':''}
+ ${stale?`<p class="note" style="margin:4px 0">רק חלק מהקובץ הגיע לשרת (האפליקציה נסגרה או החיבור נותק בזמן השליחה). מה שהגיע – יובא. כדי להשלים, בחרו את הקובץ שוב: ${j.k==='cust'?'לקוחות קיימים לא יוכפלו':'מוצרים קיימים לא יוכפלו'+(j.addQty?', אבל הכמות של שורות שכבר יובאו תתווסף שוב':'')}.</p>`:''}
+ ${B.length?`<details><summary class="note" style="min-height:44px;display:flex;align-items:center;cursor:pointer">שורות שגויות (${c.b>B.length?B.length+' מתוך '+c.b:B.length})</summary>${B.slice(0,50).map(b=>`<p class="note" style="margin:2px 0">שורה ${esc(String(b.n))}: ${esc(b.m||b.r||'')}</p>`).join('')}</details>`:''}
+ ${F.length?`<p class="note" style="margin:4px 0;color:var(--bad)">${j.fr||0} שורות לא יובאו בגלל תקלה.</p><button class="btn w" data-a="impRetry" data-id="${esc(j.id)}">נסה שוב</button>`:''}
+ ${end||stale?`<button class="btn g s w" style="margin-top:6px" data-a="impHide" data-id="${esc(j.id)}">סגור</button>`:''}</div>`}
+const impIn=k=>{const h=impHid();return (IMP.L||[]).filter(j=>(!k||j.k===k)&&!h.includes(j.id)&&(impAct(j)||Date.now()-(j.fin||j.upd||j.t||0)<864e5)).map(impRow).join('')};
+function impCardH(k){if(!mgr()||!bzF('orders'))return '';if(!IMP.L||Date.now()-IMP.at>15000)setTimeout(()=>impLoad(),0);return `<div id="impc" data-k="${k||''}">${impIn(k)}</div>`}
+window.impCardH=impCardH;window.__imp={send:impSend,load:impLoad};
+ACT.impRetry=async el=>{el.disabled=true;try{const r=await fnCall('startImport',{retry:el.dataset.id});toast(r&&r.n?'נשלח שוב לשרת':'אין חלקים לנסות שוב');await impLoad(true)}catch(e){el.disabled=false;err(impErr(e))}};
+ACT.impHide=el=>{try{localStorage.setItem(IHK,JSON.stringify(impHid().concat([el.dataset.id]).slice(-30)))}catch(e){}const c=document.getElementById('impc');if(c)c.innerHTML=impIn(c.dataset.k)};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&impView())impLoad(true)});
 window.__ox=O;window.__opSync=opSync;window.__brXfer=brXfer;
 })();
