@@ -763,6 +763,12 @@ service cloud.firestore {
       allow read: if rMgr();
       allow create, update, delete: if false;
     }
+    // ייבוא ברקע (2026-11-11, functions/imports.js): מסמך העבודה – מונים בלבד, מנהל קורא; כתיבה – רק השרת.
+    // החלקים המוצפנים (impQ/**) ותוצאות השורות – בלי שום כלל, כלומר סגורים לכולם (הכלל האחרון).
+    match /impJobs/{id} {
+      allow read: if rMgr();
+      allow create, update, delete: if false;
+    }
 
     // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
     match /users/{userId} {
@@ -1278,6 +1284,11 @@ service cloud.firestore {
       }
       // fb/ord-card: יומן הכרטיסים – מנהל העסק בלבד
       match /cardLog/{id} {
+        allow read: if feat('orders') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // ייבוא ברקע: מסמך העבודה של העסק – מנהל העסק בלבד
+      match /impJobs/{id} {
         allow read: if feat('orders') && bMgr();
         allow create, update, delete: if false;
       }
