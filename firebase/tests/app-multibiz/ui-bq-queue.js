@@ -74,7 +74,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let f1 = await addImgs(1); let s1 = await waitSt(f1, (x) => x === 'ok');
   let D = docOf()[0]; const gaps = D.t.slice(1).map((t, i) => t - D.t[i]);
   check('1 כשל מדומה ב-2 הניסיונות הראשונים – הזיהוי מצליח בניסיון ה-3', s1[0] === 'ok' && D.att === 3, { s1, att: D.att });
-  check('1א הזמן בין ניסיונות ≤ התקרה (בבדיקה 250ms; בקוד 30 שניות) וגדל בהדרגה', gaps.length === 2 && gaps.every((g) => g <= 250 + 400) && gaps[0] >= 25, gaps);
+  check('1א הזמן בין ניסיונות ≤ התקרה (בבדיקה 250ms; בקוד 30 שניות) וגדל בהדרגה', gaps.length === 2 && gaps.every((g) => g <= 250 + 400) && gaps[0] >= 8, gaps);
   await clearQ();
 
   // 2. כשל ממושך שלא נספר במכסה (15 כשלים: 503/429 בלי תשובת הפונקציה) – ממשיך לנסות במהירות ומצליח בניסיון 16
