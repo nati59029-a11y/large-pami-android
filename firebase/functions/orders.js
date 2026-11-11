@@ -175,6 +175,12 @@ function prodExt(w, input) {
     const n = input.note === null ? '' : txt(input.note, 500, 'bad-note', 'הערות');
     o.note = n ? n : FV().delete();
   }
+  // 12.11.2026: קוד פריט (מהנהלת החשבונות) וספק – טקסט חופשי, ריק = מחיקה
+  for (const [k, l, mx] of [['sku', 'קוד פריט', 30], ['sup', 'ספק', 60]]) {
+    if (input[k] === undefined) continue;
+    const v = input[k] === null || input[k] === '' ? '' : txt(String(input[k]), mx, 'bad-' + k, l);
+    o[k] = v ? v : FV().delete();
+  }
   if (input.home !== undefined) {
     if (input.home === null || input.home === '') o.home = FV().delete();
     else if (typeof input.home !== 'string' || !w.branches.some((b) => b.id === input.home)) throw bad('bad-br', 'סניף בית לא קיים');
@@ -189,7 +195,7 @@ const noDel = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => !(v 
 async function saveProduct(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'home', 'note']);
+  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'home', 'note', 'sku', 'sup']);
   const name = txt(input.name, 60, 'bad-name', 'שם המוצר', true);
   const price = money(input.price, 'מחיר');
   const barcode = input.barcode == null || input.barcode === '' ? '' : String(input.barcode).trim();
@@ -1120,7 +1126,7 @@ async function saveCat(request) {
 }
 
 // importProducts({ reqId, br?, addQty: bool, rows:[{ name, price, barcode?, qty?, cat?, sub?, wp?, cost?, pk?, ct?, bpx? }] }) – מנהל, או עובד עם ord (סניפים שלו; גם wp ועלות – 00:12). עד 200 שורות למנה.
-// התאמה: ברקוד, אחר כך שם מדויק → עדכון (לא כפילות). כמות: מוצר חדש – כמות פתיחה; קיים – נוספת רק אם addQty. כל כמות = stockLog why:'in'.
+// התאמה: ברקוד, אחר כך קוד פריט (sku), אחר כך שם מדויק → עדכון (לא כפילות). כמות: מוצר חדש – כמות פתיחה; קיים – נוספת רק אם addQty. כל כמות = stockLog why:'in'.
 // cat/sub = שמות; קטגוריה שלא קיימת נוצרת (מזהה קבוע לפי השם – ייבוא חוזר לא משכפל). שורה שגויה – נדחית ומוחזרת ב-bad, השאר נשמרות.
 async function importProducts(request) {
   const w = await who(request);
@@ -1148,7 +1154,7 @@ async function prodRows(w, input) {
   input.rows.forEach((r, i) => {
     try {
       if (!r || typeof r !== 'object' || Array.isArray(r)) throw bad('bad-row', 'שורה לא תקינה');
-      onlyKeys(r, ['name', 'price', 'barcode', 'qty', 'cat', 'sub', 'wp', 'cost', 'pk', 'ct', 'note'], 'שורה');
+      onlyKeys(r, ['name', 'price', 'barcode', 'qty', 'cat', 'sub', 'wp', 'cost', 'pk', 'ct', 'note', 'sku', 'sup'], 'שורה');
       const o = { i, name: txt(r.name, 60, 'bad-name', 'שם המוצר', true), price: money(r.price, 'מחיר') };
       const bc = r.barcode == null ? '' : String(r.barcode).trim();
       if (bc && !/^[0-9A-Za-z-]{3,30}$/.test(bc)) throw bad('bad-barcode', 'ברקוד לא תקין');
@@ -1158,6 +1164,8 @@ async function prodRows(w, input) {
       if (r.cost != null && r.cost !== '') o.cost = money(r.cost, 'עלות');
       for (const k of ['pk', 'ct']) if (r[k] != null && r[k] !== '' && r[k] !== 0) { const v = qtyOf(r[k]); if (!Number.isInteger(v)) throw bad('bad-qty', 'מארז/קרטון: מספר שלם'); o[k] = v; }
       if (r.note != null && r.note !== '') o.note = txt(r.note, 500, 'bad-note', 'הערות');
+      if (r.sku != null && r.sku !== '') o.sku = txt(String(r.sku), 30, 'bad-sku', 'קוד פריט');
+      if (r.sup != null && r.sup !== '') o.sup = txt(String(r.sup), 60, 'bad-sup', 'ספק');
       if (r.cat != null && r.cat !== '') o.cat = txt(r.cat, 40, 'bad-cat', 'קטגוריה');
       if (r.sub != null && r.sub !== '') { if (!o.cat) throw bad('bad-cat', 'תת־קטגוריה בלי קטגוריה'); o.sub = txt(r.sub, 40, 'bad-cat', 'תת־קטגוריה'); }
       ok.push(o);
@@ -1170,7 +1178,9 @@ async function prodRows(w, input) {
   await db.runTransaction(async (tx) => {
     const m = await tx.get(mark);
     if (m.exists) { Object.assign(res, m.get('res') || {}, { dup: true }); return; }
-    const byBc = new Map(); const byName = new Map();
+    const byBc = new Map(); const byName = new Map(); const bySku = new Map();
+    const skus = [...new Set(ok.map((o) => o.sku).filter(Boolean))];
+    for (let k = 0; k < skus.length; k += 30) (await tx.get(db.collection('prod').where('sku', 'in', skus.slice(k, k + 30)))).forEach((s) => { if (!bySku.has(s.get('sku'))) bySku.set(s.get('sku'), s); });
     const bcs = [...new Set(ok.map((o) => o.barcode).filter(Boolean))];
     const names = [...new Set(ok.map((o) => o.name))];
     for (let k = 0; k < bcs.length; k += 30) (await tx.get(db.collection('prod').where('barcode', 'in', bcs.slice(k, k + 30)))).forEach((s) => { if (!byBc.has(s.get('barcode'))) byBc.set(s.get('barcode'), s); });
@@ -1182,11 +1192,13 @@ async function prodRows(w, input) {
     catSnaps.forEach((s) => { if (!s.exists) tx.set(s.ref, Object.assign({ ord: 0, upd: now }, cats.get(s.id))); });
     const seen = new Map(); // מוצר חדש שכבר נוצר במנה הזו (שורה כפולה בקובץ)
     for (const o of ok) {
-      const ex = (o.barcode && byBc.get(o.barcode)) || byName.get(o.name) || seen.get(o.barcode || ('n:' + o.name)) || null;
+      const ex = (o.barcode && byBc.get(o.barcode)) || (o.sku && bySku.get(o.sku)) || byName.get(o.name) || seen.get(o.barcode || ('n:' + o.name)) || null;
       const ext = { upd: now };
       if (o.cat) { ext.cat = catIdOf(o.cat, ''); if (o.sub) ext.sub = catIdOf(o.sub, ext.cat); }
       if (o.pk) ext.pk = o.pk;
       if (o.ct) ext.ct = o.ct;
+      if (o.sku) ext.sku = o.sku;
+      if (o.sup) ext.sup = o.sup;
       if (o.note) ext.note = o.note; // ריק בקובץ = ההערה הקיימת לא משתנה
       let id; let qty = 0;
       if (ex && skipEx) { res.same++; continue; } // דילוג: בלי שם/מחיר/עלות/סיטונאי/כמות
