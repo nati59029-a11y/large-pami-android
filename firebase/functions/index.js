@@ -207,3 +207,6 @@ Object.assign(exports, require('./secretary-know'));
 Object.assign(exports, require('./imports'));
 // המזכירה שלב 4 (2026-11-11): secNotes, secReports, secHistory (מנהל העסק), secRemind (מתוזמנת – תזכורות, דוחות, התראות), secDaily (מתוזמנת – שמירה ומחיקה 9.5). secretary-remind.js
 Object.assign(exports, require('./secretary-remind'));
+// המזכירה שלב 5 (2026-11-11): secWaHook (webhook ווצאפ, us-central1 בלבד – כתובת קבועה אצל Meta), secWaWork (טריגר תור, europe-west1),
+// secInbox, secSend, secWaCfg (מנהל העסק), secAdminWa (מנהל־על). secretary-wa.js
+Object.assign(exports, require('./secretary-wa'));

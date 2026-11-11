@@ -319,7 +319,8 @@ async function dailyBiz(opts) {
   for (const p of await db.collection('sec_chat').listDocuments()) out.chat += await delWhere(db, `sec_chat/${p.id}/m`, c12);
   for (const p of await db.collection('sec_note').listDocuments()) out.notes += await delWhere(db, `sec_note/${p.id}/n`, c12);
   out.log = await delWhere(db, 'sec_log', c24);
-  if (out.chat || out.notes || out.log) await db.collection('sec_log').doc().set(logData('', 'auto', 'retention', { note: 'chat=' + out.chat + ',notes=' + out.notes + ',log=' + out.log }));
+  out.inbox = await require('./secretary-wa')._core.shrinkOld(db, c12); // שלב 5: הודעות ווצאפ וטיוטות בנות יותר מ-12 חודשים – רק תקציר (9.5)
+  if (out.chat || out.notes || out.log || out.inbox) await db.collection('sec_log').doc().set(logData('', 'auto', 'retention', { note: 'chat=' + out.chat + ',notes=' + out.notes + ',log=' + out.log + ',inbox=' + out.inbox }));
   return out;
 }
 const runSecDaily = (opts) => forAll(dailyBiz, opts, 'daily');

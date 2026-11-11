@@ -355,7 +355,7 @@ describe('שמירת היסטוריה (9.5, 91–95): secDaily, מחיקה יז�
     await seedHist(true);
     const r = await RM.runSecDaily({ now: NOW, bizzes: [await bizA()] });
     assert.deepEqual(r.errors, []);
-    assert.deepEqual(r.res[A], { chat: 2, notes: 1, log: 1 });
+    assert.deepEqual(r.res[A], { chat: 2, notes: 1, log: 1, inbox: 0 }); // inbox – שלב 5 (sec_in בן יותר מ-12 חודשים → תקציר; secretary-wa.test.js)
     assert.deepEqual((await coll(`b/${A}/sec_chat/${M1}/m`)).map((x) => x.id), ['young']);
     assert.equal((await coll(`b/${A}/sec_chat/${M2}/m`)).length, 0);
     const lg = (await coll(`b/${A}/sec_log`)).map((x) => x.id);

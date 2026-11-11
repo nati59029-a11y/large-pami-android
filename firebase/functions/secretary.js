@@ -62,7 +62,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note']); // sec_note – שלב 4
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd']); // sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -859,4 +859,6 @@ Object.defineProperty(exports, '_core', { enumerable: false, value: {
   usageOf, DEFAULT_CAP_CENTS, reserveOf, PREFS_HOUR, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
   // לשלב 3 (secretary-know.js): אותו שער הרשאה ואותו יומן
   gate, logData, hourKey, bad, deny, pre, wrap,
+  // שלב 5 (secretary-wa.js): אותו מונה עלות (11.3) לעיבוד הודעות ווצאפ ולתמלול
+  meter, settle,
 } });

@@ -27,3 +27,5 @@ if (!/^MAIL_USER=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nMA
 if (!/^CARD_ENC_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nCARD_ENC_KEY=' + Buffer.from('test-only-card-key-32-bytes-0000').toString('base64') + '\n');
 // מפתח בדיקה להצפנת המידע הרגיש של המזכירה (שלב 3, lib/sec-sens.js) – 32 בתים קבועים, לא מפתח אמיתי
 if (!/^SEC_SENS_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nSEC_SENS_KEY=' + Buffer.from('test-only-sec-sens-key-32-bytes!').toString('base64') + '\n');
+// סודות דמה לווצאפ של המזכירה (שלב 5, secretary-wa.js) – לא סודות אמיתיים של Meta
+if (!/^WA_APP_SECRET=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nWA_APP_SECRET=DUMMY-WA-APP-SECRET-3c1f\nWA_VERIFY_TOKEN=DUMMY-WA-VERIFY-77ab\nWA_ACCESS_TOKEN=DUMMY-WA-ACCESS-TOKEN-9e2d\n');
