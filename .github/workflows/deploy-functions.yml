@@ -11,6 +11,11 @@ on:
         description: "Function names, separated by commas (for example: scanDocument)"
         required: true
         default: "scanDocument"
+      force:
+        description: "Pass --force (needed for functions with retry, and sets the artifact cleanup policy). Approved by the owner 11.11.2026"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-functions
@@ -66,5 +71,5 @@ jobs:
             const add=[];for(const x of P){if(x.constructor.name==='SecretParam'||have.has(x.name))continue;const d=(x.options||{}).default;if(d===undefined){console.error('::error::No value and no default for '+x.name);process.exit(1)}if(typeof d==='object'){console.error('::error::Param '+x.name+' has a non-literal default');process.exit(1)}add.push(x.name+'='+String(d))}
             if(add.length){fs.appendFileSync('.env.'+process.argv[1],'\\n'+add.join('\\n')+'\\n');console.log('Defaults used for: '+add.map(a=>a.split('=')[0]).join(', '))}
           " "$PROJECT")
-          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json" npx --yes firebase-tools@15.34.1 deploy --only "$ONLY" --project "$PROJECT" --non-interactive
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json" npx --yes firebase-tools@15.34.1 deploy --only "$ONLY" --project "$PROJECT" --non-interactive ${{ inputs.force && '--force' || '' }}
           echo "Deployed $ONLY to $PROJECT" >> "$GITHUB_STEP_SUMMARY"
