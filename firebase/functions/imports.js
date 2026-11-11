@@ -46,14 +46,17 @@ const pre = (reason, message) => new HttpsError('failed-precondition', message, 
 // גודל חלק: לקוחות עד 100 שורות, מוצרים עד 200 (= מנה של הייבוא הישן), ובכל מקרה עד CHUNK_BYTES של JSON לפני הצפנה.
 // שורה גדולה מ-rowMax (גדולה מכל שורה תקינה אפשרית) נשמרת כ-null ונספרת כ"שורה לא תקינה".
 const KINDS = { cust: { rows: 100, rowMax: 48000 }, prod: { rows: 200, rowMax: 4000 } };
-const CHUNK_BYTES = 400000; // ← אחרי base64 ≈ 534KB; מסמך Firestore מוגבל ל-1MB
-const DOC_MAX = 900000;
+// סבב 2: אירוע של טריגר (Eventarc) מוגבל ל-512KB (לא מאומת – מכסות Eventarc), והמסמך כולו נשלח באירוע.
+// 300,000 בתים של JSON → אחרי base64 ≈ 400KB + תקורה; DOC_MAX = גבול קשיח לפני שמירה, בבירור מתחת ל-512KB.
+const CHUNK_BYTES = 300000;
+const DOC_MAX = 460000;
 const CALL_ROWS = 200;
 const MAX_TOTAL = 50000;
 const MAX_TRIES = 6;
 const MAX_AGE_MS = 3 * 3600 * 1000;
 const BAD_MAX = 200;
 const KEEP_DATA_MS = 7 * 86400 * 1000;
+const STUCK_MS = 10 * 60 * 1000; // סבב 2: חלק שתורו הגיע ולא התקדם 10 דקות (יותר מ-540 שניות של ריצה) = "נתקע"; "נסה שוב" מפעיל אותו מחדש
 const KEEP_JOB_MS = 30 * 86400 * 1000;
 const JOB_RE = /^[A-Za-z0-9]{20}$/;
 
@@ -157,7 +160,9 @@ async function sweep(db, w) {
   }
 }
 
-// "נסה שוב": כל חלק שנכשל נוצר מחדש (מזהה חדש) – הטריגר מפעיל אותו שוב. שורות שכבר בוצעו בחלק לא יבוצעו פעמיים.
+// "נסה שוב": כל חלק שנכשל נוצר מחדש (מזהה חדש, אותו n) – הטריגר מפעיל אותו שוב. שורות שכבר בוצעו בחלק לא יבוצעו פעמיים.
+// סבב 2 (חילוץ ייבוא תקוע): גם חלק במצב 'q'/'wait' שתורו הגיע (n ≤ next) ולא התקדם STUCK_MS – למשל אירוע שלא הגיע לטריגר,
+// או הפעלה של החלק הבא שלא קרתה – נוצר מחדש. אם הוא בכל זאת עדיין רץ, ההרצה הישנה תסתיים ב-'skip' (המסמך שלה נמחק) והעיבוד אידמפוטנטי.
 async function retryJob(w, job) {
   const db = getFirestore();
   const jobRef = db.doc(w.prefix + 'impJobs/' + job);
@@ -166,22 +171,28 @@ async function retryJob(w, job) {
     const js = await tx.get(jobRef);
     if (!js.exists) throw new HttpsError('not-found', 'הייבוא לא נמצא', { reason: 'no-job' });
     const j = js.data();
+    const now = Date.now();
     const fail = Array.isArray(j.fail) ? j.fail : [];
-    if (!fail.length) return { ok: true, n: 0, st: j.st };
-    const snaps = await tx.getAll(...fail.map((f) => q.collection('c').doc(String(f.id))));
+    const snaps = fail.length ? await tx.getAll(...fail.map((f) => q.collection('c').doc(String(f.id)))) : [];
+    const open = (await tx.get(q.collection('c').where('st', 'in', ['q', 'wait']))).docs
+      .filter((s) => s.get('n') <= (j.next || 0) && now - (s.get('at') || s.get('t') || 0) > STUCK_MS && now - (j.upd || 0) > STUCK_MS);
     let rows = 0, n = 0;
-    snaps.forEach((s) => {
-      if (!s.exists || s.get('st') !== 'err') return;
+    const redo = (s) => {
       const d = s.data(); delete d.why; delete d.at;
       const kk = (d.kk || 0) + 1;
-      tx.create(q.collection('c').doc(`${d.n}-${kk}`), Object.assign(d, { st: 'q', tries: 0, kk }));
+      tx.create(q.collection('c').doc(`${d.n}-${kk}`), Object.assign(d, { st: 'q', tries: 0, kk, t: now }));
       tx.delete(s.ref);
-      rows += d.cnt; n++;
-    });
-    const upd = { fail: [], fr: Math.max(0, (j.fr || 0) - rows), upd: Date.now(), fin: FieldValue.delete() };
+      n++;
+      return d;
+    };
+    snaps.forEach((s) => { if (s.exists && s.get('st') === 'err') rows += redo(s).cnt; });
+    open.forEach((s) => redo(s));
+    const upd = { upd: now };
+    if (fail.length) Object.assign(upd, { fail: [], fr: Math.max(0, (j.fr || 0) - rows), fin: FieldValue.delete() });
+    if (open.length) upd.wait = (j.wait || []).filter((x) => !open.some((s) => s.id === x.id));
     upd.st = stOf(Object.assign({}, j, upd));
-    tx.update(jobRef, upd);
-    return { ok: true, n, st: upd.st };
+    if (n) tx.update(jobRef, upd);
+    return { ok: true, n, st: n ? upd.st : j.st };
   });
 }
 
@@ -245,7 +256,7 @@ async function processChunk(ref, opts) {
   } catch (e) {
     if (e instanceof HttpsError) return finish(ref, c, jobRef, { err: String((e.details && e.details.reason) || 'bad').slice(0, 40) });
     logger.warn('imports: chunk failed, retrying', { job: c.job, n: c.n, tries: step.tries, name: e && e.name, code: e && e.code });
-    throw e;
+    throw transient(e);
   }
   return finish(ref, c, jobRef, { res, ns });
 }
@@ -306,6 +317,8 @@ async function finish(ref, c, jobRef, r) {
   return r.err ? 'err' : 'done';
 }
 
+// סבב 2: השגיאה שנזרקת ל-Google (ונרשמת ביומן עם ההודעה) – בלי ההודעה המקורית, שעלולה לכלול נתיב מסמך (למשל cust/t<ת"ז>)
+const transient = (e) => Object.assign(new Error('transient: ' + String((e && (e.code || e.name)) || 'error').replace(/[^\w.-]/g, '').slice(0, 40)), { transient: true });
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -320,7 +333,7 @@ exports.runImportChunk = onDocumentCreated(
   async (event) => {
     if (!event.data) return;
     const age = Date.now() - Date.parse(event.time || '');
-    await processChunk(event.data.ref, { old: age > MAX_AGE_MS });
+    try { await processChunk(event.data.ref, { old: age > MAX_AGE_MS }); } catch (e) { throw e && e.transient ? e : transient(e); }
   },
 );
-Object.defineProperty(exports, '_core', { enumerable: false, value: { pack, sealChunk, processChunk, finish, aadOf, qRef, clean, stOf, docBytes, KINDS, CHUNK_BYTES, DOC_MAX, CALL_ROWS, MAX_TRIES } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { pack, sealChunk, processChunk, finish, aadOf, qRef, clean, stOf, docBytes, KINDS, CHUNK_BYTES, DOC_MAX, STUCK_MS, retryJob, transient, CALL_ROWS, MAX_TRIES } });

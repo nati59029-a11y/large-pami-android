@@ -53,10 +53,37 @@ describe('ייבוא ברקע – חלוקה, גודל והצפנה (בלי אמ
       const doc = { biz: 'biz-o', job: JOB, n: s.n, cnt: s.cnt, k: kind, uid: 'u'.repeat(28), box: s.box, t: Date.now(), tries: 0, st: 'q', kk: 0 };
       const b = I.docBytes(doc);
       sizes.push(b);
-      assert.ok(b < MB, `${kind} חלק ${c.n}: ${b} בתים`);
+      assert.ok(b < MB && b < 512 * 1024, `${kind} חלק ${c.n}: ${b} בתים`);
       assert.ok(b <= I.DOC_MAX, `${kind} חלק ${c.n}: מעל הגבול הפנימי`);
     }
     console.log('גודל חלק מוצפן מרבי (בתים, הערכה עליונה):', Math.max(...sizes));
+  });
+
+  it('סבב 2: חלק מלא עד גבול הבתים (שורות כבדות של לקוחות ומוצרים, ושורה בודדת בגודל המרבי) – המסמך המוצפן < 460KB, כלומר בבירור מתחת ל-512KB (מגבלת אירוע)', () => {
+    const KiB512 = 512 * 1024;
+    assert.ok(I.DOC_MAX < KiB512 * 0.9);
+    const cases = [
+      ['cust', Array.from({ length: 200 }, (_, i) => ({ name: 'א'.repeat(1990), phone: '05' + String(10000000 + i), note: 'ב'.repeat(10) }))], // ~4KB לשורה
+      ['cust', Array.from({ length: 200 }, (_, i) => ({ name: 'n' + i, note: 'ג'.repeat(23900) }))], // ~47.8KB לשורה (מתחת ל-rowMax)
+      ['prod', Array.from({ length: 200 }, (_, i) => ({ name: 'ד'.repeat(1984), price: i }))], // ~4KB לשורה = גבול rowMax של מוצרים
+    ];
+    let fullest = 0, maxDoc = 0;
+    for (const [kind, rows] of cases) {
+      const ch = I.pack(kind, rows, rows.map((_, i) => i + 2), 0);
+      assert.ok(ch.length > 1, kind + ': החלוקה לפי בתים פעלה');
+      assert.ok(ch.every((c) => c.rows.every((r) => r !== null)), kind + ': אף שורה לא נחתכה');
+      for (const c of ch) {
+        const json = Buffer.byteLength(JSON.stringify({ rows: c.rows, ns: c.ns }), 'utf8');
+        assert.ok(json <= I.CHUNK_BYTES, 'תוכן החלק מעל CHUNK_BYTES');
+        fullest = Math.max(fullest, json);
+        const s = I.sealChunk(KEY, 'biz-o', JOB, c);
+        const b = I.docBytes({ biz: 'biz-o', job: JOB, n: s.n, cnt: s.cnt, k: kind, uid: 'u'.repeat(28), box: s.box, t: Date.now(), tries: 0, st: 'q', kk: 0 });
+        maxDoc = Math.max(maxDoc, b);
+        assert.ok(b <= I.DOC_MAX && b < KiB512, `${kind} חלק ${c.n}: ${b} בתים`);
+      }
+    }
+    assert.ok(fullest > I.CHUNK_BYTES * 0.9, 'נבדק חלק מלא באמת (' + fullest + ')');
+    console.log('סבב 2 – חלק מלא: תוכן', fullest, 'בתים, מסמך מוצפן מרבי', maxDoc, 'בתים');
   });
 
   it('שורה גדולה מכל שורה תקינה → null (תיספר כשורה לא תקינה), השאר נשמרות', () => {
