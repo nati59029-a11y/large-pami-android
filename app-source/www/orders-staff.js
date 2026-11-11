@@ -39,7 +39,7 @@ let load=async function(force){if(O.busy||(!force&&O.L&&Date.now()-O.at<20000))r
   O.L=L.sort((a,b)=>(b.no||0)-(a.no||0));O.P=P.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));O.cfg=c?dec(c):{};O.at=Date.now();costLoad()}
  catch(e){O.err=e.message||'הטעינה נכשלה'}finally{O.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}}
 /* עלות (החלטה 00:12): מנהל ועובד עם ord רואים עלות בכל מקום; נטען ברקע מ-getCosts (בעמודים) */
-async function costLoad(){try{const W={};let a;for(let g=0;g<200;g++){const r=await fnCall('getCosts',a?{after:a}:{});Object.assign(W,r&&r.cost||{});if(!r||!r.next)break;a=r.next}O.cost=W;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}}
+async function costLoad(){try{const W={};let a;for(let g=0;g<200;g++){const r=await fnCall('getCosts',a?{after:a}:{});Object.assign(W,r&&r.cost||{});if(!r||!r.next)break;a=r.next}O.cost=W;O.cerr=0;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){O.cerr=1}}
 const costOf=id=>O.cost&&typeof O.cost[id]==='number'?O.cost[id]:null;
 const costH=id=>{const c=costOf(id);return c==null?'':' · עלות '+ils(c)};
 /* עלות לפני מע"מ: מחושב להצגה בלבד מול "מחיר עלות" (כולל מע"מ); נשמר רק cost. אחוז המע"מ בהגדרות העסק (ברירת מחדל 18) */
@@ -47,6 +47,20 @@ const vatP=()=>{const v=O.cfg&&O.cfg.vat;return typeof v==='number'&&v>=0&&v<=10
 const r2=x=>Math.round((x+Number.EPSILON)*100)/100;
 const exVat=c=>r2(c/(1+vatP()/100)),incVat=c=>r2(c*(1+vatP()/100));
 const costXH=id=>{const c=costOf(id);return c==null?'':' · לפני מע"מ '+ils(exVat(c))};
+/* סיכום מלאי (12.11.2026): מוצרים, יחידות, שווי לפי עלות לפני מע"מ (מנהל בלבד). חישוב באגורות שלמות; העלות השמורה כוללת מע"מ ולכן מחולקת באחוז המע"מ של העסק (כמו costXH). מוצר בלי עלות לא נספר בשווי; כמות שלילית נספרת כמו שהיא. נשמר בזיכרון עד שהנתונים משתנים – לא מחושב מחדש בכל ציור */
+const stockSum=(P,cost,vat,br)=>{let n=0,u=0,ua=0,v=0,va=0,nc=0;for(const p of P||[]){n++;const qa=qAll(p),qb=q(p,br);ua+=qa;u+=qb;const c=cost&&typeof cost[p.id]==='number'?cost[p.id]:null;if(c==null){nc++;continue}const unit=Math.round(c*100/(1+vat/100));v+=Math.round(qb*unit);va+=Math.round(qa*unit)}return{n,u:n3(u),ua:n3(ua),v,va,nc}};
+window.oxStockSum=stockSum;
+// 11.11: הסיכום לפי הסינונים שבמסך (חיפוש, קטגוריה) + "זמינים בלבד" (ברירת מחדל; O.sall=1 = כולל לא זמינים)
+const sumL=()=>stockL().filter(p=>O.sall||p.on!==false);
+const sumGet=br=>{const k=[O.P,O.cost,vatP(),br,O.sq||'',O.cf||'',!!O.sall];const m=O.sm;if(m&&m.k.every((x,i)=>x===k[i]))return m.r;const r=stockSum(sumL(),O.cost,vatP(),br);O.sm={k,r};return r};
+ACT.oxSall=()=>{O.sall=O.sall?0:1;const x=document.getElementById('oxsum');if(x)x.outerHTML=sumH(hasBr()?SBR:NB)};
+const agH=a=>ils(a/100);
+const sumH=br=>{const r=sumGet(br),M=mgr(),multi=hasBr()&&brs().length>1;
+ const cell=(l,v,id)=>`<div style="flex:1 1 30%;min-width:84px;text-align:center"><b class="a" id="${id}" style="display:block;font-size:1.25em">${v}</b><small class="note">${l}</small></div>`;
+ const val=!M?'':O.cost?cell('שווי לפני מע"מ',agH(r.v),'oxSumV'):cell('שווי לפני מע"מ',O.cerr?'לא נטען':'טוען…','oxSumV');
+ return `<div class="card" id="oxsum" style="margin:8px 0"><div class="row" style="flex-wrap:wrap;gap:8px;justify-content:space-between">${cell('מוצרים',r.n,'oxSumN')}${cell(multi?'יחידות בסניף':'יחידות',r.u,'oxSumU')}${val}</div>`
+ +(M&&multi?`<small class="note" id="oxSumA" style="display:block;margin-top:6px">כל הסניפים: ${r.ua} יחידות${O.cost?' · שווי '+agH(r.va)+' לפני מע"מ':''}</small>`:'')
+ +`<button type="button" class="chip${O.sall?'':' on'}" data-a="oxSall" aria-pressed="${!O.sall}" style="margin-top:8px">${O.sall?'כולל מוצרים לא זמינים':'זמינים בלבד'}</button>`+(O.sq||O.cf?'<small class="note" style="display:block;margin-top:4px">לפי החיפוש/הקטגוריה שנבחרו</small>':'')+(M&&O.cost&&r.nc?`<small class="note" id="oxSumNC" style="display:block;margin-top:4px">${r.nc===1?'מוצר אחד':r.nc+' מוצרים'} בלי עלות – לא נכללים בשווי</small>`:'')+'</div>'};
 // בכל מסך עם הקלדה – רענון לא בונה מחדש כשיש טקסט בתיבה (לקח)
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const prod=id=>(O.P||[]).find(p=>p.id===id);
@@ -183,12 +197,12 @@ let SBR='';
 V.oxStock=()=>{const T='מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}const B=myBr();if(hasBr()&&!SBR&&B.length)SBR=B[0].id;const br=hasBr()?SBR:NB;
  const bc=B.length>1?`<div class="chips scroll-x" role="group" aria-label="סניף" style="margin:8px 0">${B.map(b=>`<button class="chip ${SBR===b.id?'on':''}" data-a="oxSBr" data-id="${esc(b.id)}" aria-pressed="${SBR===b.id}">${esc(b.name)}</button>`).join('')}</div>`:B.length===1?`<p class="note">סניף: ${esc(B[0].name)}</p>`:'';
  const L=stockL();
- return{t:T,s:hasBr()?bn(br):'כמויות במלאי',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="oxIn">הכנסת מלאי</button><button class="btn g grow" data-a="oxNewP">מוצר חדש</button></div>${catBar()}${bc}
+ return{t:T,s:hasBr()?bn(br):'כמויות במלאי',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="oxIn">הכנסת מלאי</button><button class="btn g grow" data-a="oxNewP">מוצר חדש</button></div>${sumH(br)}${catBar()}${bc}
  <label class="f"><span>חיפוש (שם או ברקוד)</span><input data-i="oxSQ" value="${esc(O.sq||'')}" autocomplete="off"></label>
  <div id="oxpl">${plH(L,br)}</div><button class="btn g s w" style="margin-top:8px" data-a="oxHist">היסטוריית תנועות</button>${mgr()?'<div class="row" style="margin-top:16px"><button class="btn g s grow" data-a="oxWipe" style="color:var(--bad)">מחיקת כל המלאי</button><button class="btn g s grow" data-a="oxRest">שחזור מלאי מגיבוי</button></div>':''}`}};
 const plH=(L,br)=>L.map(p=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">לא זמין</span>':''}</b><small>${ils(unitP(p,br))}${p.barcode?' · '+esc(p.barcode):''}${p.cat?' · '+esc(catNm(p.cat))+(p.sub?' / '+esc(catNm(p.sub)):''):''}${costH(p.id)}${costXH(p.id)}${p.pk?' · מארז '+p.pk:''}${p.ct?' · קרטון '+p.ct:''}${hasBr()&&brs().length>1?' · '+brs().map(b=>esc(b.name)+': '+n3(q(p,b.id))).join(' · '):''}</small>${p.note?`<small class="note" style="width:100%;white-space:pre-wrap;overflow-wrap:anywhere">הערות: ${esc(p.note)}</small>`:''}</div><b class="a${q(p,br)<0?' neg':''}">${n3(q(p,br))}</b>
  <div class="row" style="width:100%"><button class="btn g s grow" data-a="oxZero" data-id="${esc(p.id)}">נגמר במלאי</button>${mgr()?`<button class="btn g s grow" data-a="oxFix" data-id="${esc(p.id)}">תיקון כמות</button>`:''}<button class="btn g s grow" data-a="oxEditP" data-id="${esc(p.id)}">עריכה</button></div></div>`).join('')||'<div class="empty">אין מוצרים. הוסף מוצר חדש.</div>';
-INP.oxSQ=el=>{O.sq=el.value;const br=hasBr()?SBR:NB,L=stockL();const x=document.getElementById('oxpl');if(x)x.innerHTML=plH(L,br)};
+INP.oxSQ=el=>{O.sq=el.value;const br=hasBr()?SBR:NB,L=stockL();const x=document.getElementById('oxpl');if(x)x.innerHTML=plH(L,br);const y=document.getElementById('oxsum');if(y)y.outerHTML=sumH(br)};
 ACT.oxSBr=el=>{SBR=el.dataset.id;rerender()};
 const sbr=()=>hasBr()?SBR:undefined;
 ACT.oxZero=el=>{const p=prod(el.dataset.id);if(!p)return;ask(`לסמן "${p.name}" כנגמר במלאי${hasBr()?' ב'+bn(SBR):''}? הכמות תתאפס.`,async()=>{try{await fnCall('stockSet',{reqId:rid(),pid:p.id,br:sbr(),qty:0});toast('עודכן');await load(true)}catch(e){err(e)}},'כן, נגמר')};
