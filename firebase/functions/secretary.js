@@ -144,6 +144,9 @@ async function secState(request) {
   out.nt = RM.ntOf(me); out.types = Object.fromEntries(Object.entries(RM.TYPES).map(([k, v]) => [k, v.l]));
   out.unseen = un ? un.data().count : 0;
   if (out.unseen) out.rows.push({ k: 'notes', t: out.unseen === 1 ? 'התראה חדשה אחת' : out.unseen + ' התראות חדשות' });
+  // שלב 5: טיוטות ווצאפ שממתינות לאישור (שורה בכרטיס הבית – 11)
+  const wp = consented ? (await db.collection('sec_draft').where('st', '==', 'pend').count().get()).data().count : 0;
+  if (wp) out.rows.unshift({ k: 'wa', t: wp === 1 ? 'הודעת ווצאפ אחת ממתינה לתשובה' : wp + ' הודעות ווצאפ ממתינות לתשובה' });
   Object.assign(out, { mirror: cfg.mirror, mirrorAt: mir && mir.exists && Number.isInteger(mir.get('at')) ? mir.get('at') : null, cfTh: cfg.cfTh, pct: u.pct, saving: u.saving });
   return out;
 }

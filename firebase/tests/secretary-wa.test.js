@@ -571,6 +571,8 @@ describe('תיבת ההודעות (secInbox) והרשאות קריאה', () => {
     assert.equal((await call('secInbox', E1, { op: 'list' })).status, 'PERMISSION_DENIED');
     assert.equal((await call('secInbox', MB, { op: 'get', wa: CUST })).reason, 'not-found', 'עסק אחר לא רואה');
     assert.equal((await call('secInbox', M1, { op: 'link', wa: CUST, k: 'sup', name: 'טרה' })).result.link.name, 'טרה');
+    const ss = await call('secState', M1);
+    assert.ok(ss.result.rows.some((r) => r.k === 'wa' && /הודעת ווצאפ אחת ממתינה/.test(r.t)), 'שורה בכרטיס הבית');
     assert.equal((await call('secInbox', M1, { op: 'done', id: W.msgId('wamid.I1') })).status, 'OK');
     assert.equal((await get(`b/${A}/sec_draft/${W.msgId('wamid.I1')}`)).st, 'done');
   });

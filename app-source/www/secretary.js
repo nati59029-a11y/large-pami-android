@@ -1,4 +1,4 @@
-/* SEC:1+2+3+4 – המזכירה העסקית. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
+/* SEC:1+2+3+4+5 – המזכירה העסקית. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
    שלב 2: secFin – נתוני הכספים לצ'אט ולמראה, מחושבים בפונקציות של מסכי האפליקציה עצמם (monthIncome, monthExpense, monthOwner, catTotal,
    inv/bal/dueOf, bsum, homeCards, dueStats, cfDebits, cfMonths) – אין כאן נוסחה כספית שנייה; מראה לענן אחרי כל שמירה (לכל היותר פעם ב-3 דקות);
    מסך הצ'אט (מקורות, "נכון ל-", "חשבי לעומק", אחוז ניצול, סף תזרים, "לא רלוונטי", מתג המראה).
@@ -226,6 +226,7 @@ function setH(S){return `<div class="card"><b>מראה הכספים בענן</b>
  <label class="chip" style="min-height:44px;width:100%;justify-content:flex-start"><input type="checkbox" data-c="secMir"${S.mirror!==false?' checked':''}> פעיל${S.mirrorAt?' · עודכן '+esc(fmtAt(S.mirrorAt)):''}</label></div>
  <div class="card" style="margin-top:8px"><b>סף התראת תזרים</b><p class="note" style="margin:4px 0 8px">${S.cfTh!=null?'הסף שאישרת: '+esc(Number(S.cfTh).toLocaleString('he-IL'))+' ₪':'עדיין לא נקבע. המזכירה תציע סף כשתשאלו על התזרים.'}</p><button class="chip" data-a="secThEd" style="min-height:40px">${S.cfTh!=null?'שינוי':'קביעת סף'}</button></div>
  <div class="card" style="margin-top:8px"><b>פגישה בשישי, בשבת או בחג</b><p class="note" style="margin:4px 0 8px">מה לעשות כשאירוע נקבע ליום שאינו יום עסקים.</p><div class="chips" role="radiogroup"><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="warn"${S.we!=='accept'?' checked':''}> להזהיר ולהציע יום אחר</label><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="accept"${S.we==='accept'?' checked':''}> לקבל בלי הערה</label></div></div>
+ ${waSetH()}
  ${ntH(S)}
  <button class="btn g w" data-a="secEdit" style="margin-top:10px">שינוי שם ואופן פנייה</button><button class="btn g w" data-a="secSetX" style="margin-top:8px">חזרה לשיחה</button>
  <div class="sec"><h3>יומן פעולות</h3></div>${logH()}`}
@@ -262,9 +263,9 @@ css3.textContent='.sectabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.
 +'.secsens{border-style:dashed!important}.sectags{font-size:.78rem;padding:1px 8px;border:1px solid var(--line);border-radius:10px;margin-inline-start:4px;white-space:nowrap}'
 +'.secrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.secrow .chip{min-height:40px}.secli{padding:10px 0;border-bottom:1px solid var(--line)}.secli:last-child{border-bottom:0}.secli p{margin:0 0 4px;white-space:pre-wrap;overflow-wrap:anywhere}';
 document.head.appendChild(css3);
-const TABS=[['chat','שיחה'],['notes','התראות'],['reps','דוחות'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
+const TABS=[['chat','שיחה'],['wa','ווצאפ'],['notes','התראות'],['reps','דוחות'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
 const unseenN=()=>X.nl&&!X.nl.err?X.nl.unseen:((X.st&&X.st.unseen)||0);
-function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}</button>`).join('')}</div>`}
+function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
 ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')X.fl=null;if(X.tab==='cal')X.cl=null;if(X.tab==='bank')X.rl=null;if(X.tab==='notes')X.nl=null;if(X.tab==='reps'){X.rpl=null;X.rp=null}rerender()};
 const dShort=d=>{if(!d)return '';const[y,m,x]=d.split('-').map(Number);return x+'.'+m+'.'+y};
 const hebD=d=>{try{const[y,m,x]=d.split('-').map(Number);return new Intl.DateTimeFormat('he-u-ca-hebrew',{day:'numeric',month:'long'}).format(new Date(y,m-1,x,12))}catch(e){return ''}};
@@ -449,7 +450,7 @@ const WDN=['ראשון','שני','שלישי','רביעי','חמישי','שיש�
 async function notesLoad(){X.nb=1;try{const r=await fnCall('secNotes',{op:'list'});X.nl=r;const ids=(r.notes||[]).filter(n=>!n.seen).map(n=>n.id).slice(0,100);
  if(ids.length)fnCall('secNotes',{op:'seen',ids}).then(()=>{if(X.st)X.st.unseen=0;if(X.nl)X.nl.unseen=0}).catch(()=>{})}
  catch(e){X.nl={err:e&&e.message||'לא נטען'}}finally{X.nb=0;if(cur().v==='sec'&&!typing())rerender()}}
-const KIND={rep:'דוח',emp:'עובד',dig:'תקציר'};
+const KIND={rep:'דוח',emp:'עובד',dig:'תקציר',wa:'ווצאפ'};
 function noteH(n,T){const lab=n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');const open=n.st==='open'&&n.k==='rem';
  return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><p><b>${esc(n.title)}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
  <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note" style="margin:4px 0 0">${esc(n.body)}</p>`:''}
@@ -505,6 +506,126 @@ async function pushReg(){try{if(PN.done||!ready())return;const P=window.Capacito
  await P.addListener('pushNotificationActionPerformed',()=>{X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
  let p=await P.checkPermissions();if(p.receive==='prompt'||p.receive==='prompt-with-rationale')p=await P.requestPermissions();if(p.receive==='granted')await P.register()}catch(e){}}
 {const r0=V.sec;V.sec=()=>{const r=r0();try{if(ready())pushReg()}catch(e){}return r}}
+
+/* =====================================================================================
+   שלב 5: ווצאפ (3.2, 3.5, 8.2 מסך 2): תיבת הודעות, כרטיס שולח (17), טיוטה עם "שלח" – רק בלחיצה (secSend), חלון 24 שעות ותבניות,
+   סימונים ("לא בטוחה", "לבדוק", "חשוד", הודעה קולית עם תמליל), "עצור הכל" (30–33), הגדרות המנהל (מספר המנהל – 16, "קיבלנו" – 22, פתיחה – 97),
+   ובכרטיס העסק של מנהל־על: חיבור המספר (14), אישור מספרי המנהלים, מגבלת הודעות לשולח (89), שעות "קיבלנו", תבניות, עצירה לעסק ולכל העסקים.
+   הכול דרך השרת (secInbox, secSend, secWaCfg, secAdminWa). כל ההרשאות נאכפות בשרת.
+   ===================================================================================== */
+const css5=document.createElement('style');
+css5.textContent='.secstop{border-color:var(--bad)!important;background:color-mix(in srgb,var(--bad) 12%,var(--card))}.secstop b{color:var(--bad)}'
++'.secwa .li{align-items:flex-start;cursor:pointer}.secwa .li small{display:block;overflow-wrap:anywhere}.secin1{background:color-mix(in srgb,var(--ink) 6%,var(--card));border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere}'
++'.secdr{border:1.5px solid var(--acc);border-radius:12px;padding:8px 10px;margin:6px 0 10px;overflow-wrap:anywhere}.secdr textarea{width:100%;min-height:84px;box-sizing:border-box;margin-top:6px}.secdr select{min-height:40px;max-width:100%;flex:1}'
++'.sectags.w{border-color:var(--bad);color:var(--bad)}.sectags.g{border-color:var(--acc);color:var(--acc)}.sectg{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 0;min-width:0}.sectg .sectags{margin:0;white-space:normal}';
+document.head.appendChild(css5);
+const STOPW={flood:'הצפת הודעות',cap:'חריגה בתקרת העלות',errors:'שגיאות חוזרות'};
+const FL={unsure:['המזכירה לא בטוחה','w'],sus:['תוכן חשוד – בלי טיוטה','w'],chk:['לבדוק לפני שליחה','w'],over:['מעל מגבלת ההודעות','w'],saving:['מצב חיסכון – בלי עיבוד','w'],voice:['הודעה קולית','g'],file:['קובץ','g'],ord:['בוט ההזמנות','']};
+const flH=a=>(a||[]).filter(f=>FL[f]).map(f=>`<span class="sectags ${FL[f][1]}">${FL[f][0]}</span>`).join('');
+const winH=ms=>ms>0?`<span class="sectags g">נותרו ${Math.max(1,Math.floor(ms/3600e3))} שעות לחלון</span>`:'<span class="sectags w">עברו 24 שעות</span>';
+const linkL=l=>l?`<span class="sectags">${l.k==='sup'?'ספק':'לקוח'}: ${esc(l.name||'')}</span>`:'';
+const lastTxt=m=>!m?'':String(m.sum||(m.type==='audio'?'🎤 '+(m.tr||'הודעה קולית'):m.type==='other'?'📎 קובץ':m.text)).slice(0,90);
+const waN=()=>X.wa&&X.wa.list&&!X.wa.list.err?(X.wa.list.cards||[]).reduce((s,c)=>s+(c.pend||0),0):0;
+/* ---------- "עצור הכל" (32: כל מנהל) ---------- */
+async function wcLoad(){X.wcb=1;try{const r=await fnCall('secWaCfg',{op:'get'});X.wc=r&&r.ok&&r.stop&&r.ack&&r.open&&r.ackH?r:{err:'לא נטען'}}catch(e){X.wc={err:e&&e.message||'לא נטען'}}finally{X.wcb=0;if(cur().v==='sec'&&!typing())rerender()}}
+function stopH(){const c=X.wc;if(!c){if(!X.wcb)wcLoad();return ''}if(c.err)return '';
+ if(c.stop&&c.stop.on)return `<div class="card secstop" id="secStopBar" style="margin:0 0 8px" role="status"><b>עצור הכל – פעיל</b><p class="note" style="margin:4px 0 8px">${c.stop.auto?'המזכירה עצרה את עצמה ('+esc(STOPW[c.stop.why]||'תקלה')+'). ':''}שליחה אוטומטית בווצאפ עצורה. ההודעות ממשיכות להיכנס, ו"שלח" בלחיצה שלך עובד.</p><button class="btn w" data-a="secStop" data-on="0">ביטול העצירה</button></div>`;
+ return `<div class="secrow" id="secStopBar" style="margin:0 0 8px;justify-content:flex-end"><button class="chip" data-a="secStop" data-on="1" style="min-height:40px">⏸ עצור הכל</button></div>`}
+ACT.secStop=el=>{const on=el.dataset.on==='1';const run=async()=>{el.disabled=true;try{const r=await fnCall('secWaCfg',{op:'stop',on});if(r&&r.ok&&r.stop)X.wc=r;if(X.wa)X.wa.list=null;toast(on?'השליחה האוטומטית נעצרה':'העצירה בוטלה')}catch(e){err(e)}finally{el.disabled=false;rerender()}};
+ if(on)ask('לעצור את כל השליחה האוטומטית בווצאפ (הודעת פתיחה, "קיבלנו" ותשובות למספר המנהל)? ההודעות ימשיכו להיכנס, ושליחה בלחיצה שלך תמשיך לעבוד.',run,'עצור הכל');else run()};
+/* ---------- תיבת ההודעות ---------- */
+const WF=[['all','הכול'],['pend','ממתין לתשובה'],['unsure','לא בטוחה'],['chk','לבדוק'],['sus','חשוד']];
+async function waLoad(){X.wab=1;try{const r=await fnCall('secInbox',{op:'list'});X.wa.list=r&&Array.isArray(r.cards)?r:{err:'לא נטען'}}catch(e){X.wa.list={err:e&&e.message||'לא נטען'}}finally{X.wab=0;if(cur().v==='sec'&&!typing())rerender()}}
+function waH(){if(X.wa.cur)return waCardH();const R=X.wa.list;if(!R){if(!X.wab)waLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="wa">נסה שוב</button></div>`;
+ const f=X.wa.f||'all',L=(R.cards||[]).filter(c=>f==='all'||(f==='pend'?c.pend>0:(c.flags||[]).includes(f)));
+ return `${R.connected?'':'<div class="card" style="margin-bottom:8px"><p class="note" style="margin:0">ווצאפ עוד לא מחובר לעסק. מנהל המערכת מחבר את המספר.</p></div>'}
+ <div class="chips" style="margin:0 0 8px">${WF.map(([k,l])=>`<button class="chip${f===k?' on':''}" data-a="secWaF" data-v="${k}" style="min-height:40px" aria-pressed="${f===k}">${l}</button>`).join('')}</div>
+ <div class="card secwa" id="secWaList">${L.length?L.map(c=>`<div class="li" data-a="secWaOpen" data-wa="${esc(c.wa)}" role="button" tabindex="0"><div class="m"><b>${esc(c.name||c.show)}</b><div class="sectg">${linkL(c.link)}${c.isNew?'<span class="sectags g">שולח חדש</span>':''}</div><small><bdi dir="ltr">${esc(c.show)}</bdi> · ${esc(tm(c.lastIn))}</small><small>${esc(lastTxt(c.last))}</small><div class="sectg">${c.pend?`<span class="sectags g">${c.pend===1?'טיוטה אחת':c.pend+' טיוטות'}</span>`:''}${flH(c.flags)}${winH(c.winLeft)}</div></div></div>`).join(''):'<p class="note">אין הודעות</p>'}</div>`}
+ACT.secWaF=el=>{X.wa.f=el.dataset.v;rerender()};
+ACT.secWaOpen=el=>{X.wa.cur=el.dataset.wa;X.wa.card=null;rerender()};
+ACT.secWaBack=()=>{X.wa.cur=null;X.wa.card=null;X.wa.list=null;rerender()};
+/* ---------- כרטיס שולח + טיוטות ---------- */
+async function waCardLoad(){const wa=X.wa.cur;X.wa.cb=1;try{const r=await fnCall('secInbox',{op:'get',wa});if(X.wa.cur===wa)X.wa.card=r&&r.card?r:{err:'לא נטען'}}catch(e){X.wa.card={err:e&&e.message||'לא נטען'}}finally{X.wa.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
+function drH(d,open,tpls){
+ if(d.st==='sent')return `<div class="secdr"><small class="note">נשלח ✓</small><div style="white-space:pre-wrap">${esc(d.sum||d.text)}</div></div>`;
+ if(d.st==='done')return '<div class="secdr" style="opacity:.75"><small class="note">טופל בלי לענות</small></div>';
+ const why=(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:'';
+ const head=`<small class="note">טיוטת תשובה${d.src==='bank'?' (מתשובה מוכנה)':''}${d.lang&&d.lang!=='he'?' · בשפת הפונה':''}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+flH(d.flags)+'</div>':''}${why}`;
+ if(open)return `<div class="secdr" data-id="${esc(d.id)}">${head}<textarea class="secin" id="secDr_${esc(d.id)}" maxlength="2000" aria-label="טיוטת תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" style="flex:1">שלח</button><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button></div></div>`;
+ return `<div class="secdr" data-id="${esc(d.id)}">${head}<div style="white-space:pre-wrap;margin-top:4px">${esc(d.text)}</div><p class="note" style="margin:6px 0">עברו 24 שעות מההודעה האחרונה של הפונה. אפשר לשלוח רק הודעת תבנית מאושרת.</p>${(tpls||[]).length?`<div class="secrow"><select id="secTpl_${esc(d.id)}" aria-label="תבנית">${tpls.map(t=>`<option value="${esc(t.name)}">${esc(t.label)}</option>`).join('')}</select><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" data-t="1">שלח תבנית</button></div>`:'<p class="note" style="margin:0">אין תבניות מאושרות. מנהל המערכת מוסיף אותן.</p>'}<div class="secrow"><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button></div></div>`}
+function waCardH(){const R=X.wa.card,back='<button class="btn g w" data-a="secWaBack" style="margin-bottom:8px">חזרה לתיבת ההודעות</button>';
+ if(!R){if(!X.wa.cb)waCardLoad();return back+'<div class="empty">טוען…</div>'}if(R.err)return back+`<div class="card"><p class="note">${esc(R.err)}</p></div>`;
+ const c=R.card,open=c.winLeft>0,dr={};for(const d of R.drafts||[])if(d.in&&!d.auto)dr[d.in]=d;
+ const items=(R.msgs||[]).map(m=>{const d=m.draft?dr[m.draft]:null;return `<div class="secin1"><small class="note">${esc(tm(m.t))}${m.clsL?' · '+esc(m.clsL):''}</small>${(m.flags||[]).length?'<div class="sectg">'+flH(m.flags)+'</div>':''}<div>${m.type==='audio'?'🎤 <b>תמליל:</b> '+esc(m.tr||m.sum||'(לא תומלל)'):m.type==='other'?'📎 קובץ'+(m.sub?' ('+esc(m.sub)+')':'')+' – קליטת חשבוניות תגיע בהמשך':esc(m.sum||m.text)}</div></div>${d?drH(d,open,R.tpls):''}`}).join('');
+ const autos=(R.drafts||[]).filter(d=>d.auto).map(d=>`<div class="secin1" style="border-style:dashed"><small class="note">נשלח אוטומטית (${/open/.test(d.kind)?'הודעת פתיחה':''}${/open/.test(d.kind)&&/ack/.test(d.kind)?' + ':''}${/ack/.test(d.kind)?'"קיבלנו"':''}) · ${esc(tm(d.t))}</small><div>${esc(d.sum||d.text)}</div></div>`).join('');
+ return back+`<div class="card" id="secWaCard"><b>${esc(c.name||c.show)}</b> <bdi dir="ltr" class="note">${esc(c.show)}</bdi><div class="sectg">${c.link?linkL(c.link):'<span class="sectags">לא מקושר</span>'}${c.langL?`<span class="sectags">${esc(c.langL)}</span>`:''}${c.isNew?'<span class="sectags g">שולח חדש</span>':''}${winH(c.winLeft)}</div>
+ <form class="secrow" data-f="secWaLink" style="margin-top:8px"><select name="k" aria-label="סוג" style="min-height:40px"><option value="cust"${c.link&&c.link.k==='cust'?' selected':''}>לקוח</option><option value="sup"${c.link&&c.link.k==='sup'?' selected':''}>ספק</option><option value="">בלי קישור</option></select><input name="name" maxlength="60" placeholder="שם הספק או הלקוח" value="${esc(c.link?c.link.name||'':'')}" style="flex:1;min-width:110px;min-height:40px" aria-label="שם"><button class="chip" style="min-height:40px">קישור</button></form></div>
+ <div class="sec"><h3>הודעות</h3></div>${items||'<p class="note">אין הודעות</p>'}${autos}`}
+const sid=()=>{try{const a=new Uint8Array(12);crypto.getRandomValues(a);return 's'+Array.from(a,b=>b.toString(16).padStart(2,'0')).join('')}catch(e){return 's'+Date.now().toString(36)+Math.random().toString(36).slice(2,10)}};
+ACT.secWaSend=el=>{const id=el.dataset.id,isT=el.dataset.t==='1',d=((X.wa.card||{}).drafts||[]).find(x=>x.id===id);if(!d)return;
+ d._sid=d._sid||sid();/* אותו מזהה בכל ניסיון חוזר – השרת לא ישלח פעמיים (10.2) */
+ const data={id,sendId:d._sid};
+ if(isT){const s=document.getElementById('secTpl_'+id);if(!s||!s.value)return;data.tpl=s.value}
+ else{const t=document.getElementById('secDr_'+id),v=t?t.value.trim():d.text;if(!v)return toast('הטיוטה ריקה');if(v.length>2000)return toast('עד 2,000 תווים');if(v!==d.text)data.text=v}
+ const run=async()=>{el.disabled=true;try{const r=await fnCall('secSend',data);toast(r&&r.already?'כבר נשלח':'נשלח');X.wa.card=null;X.wa.list=null;
+   if(r&&r.offerAuto)dlg(`<h3>לענות על זה לבד?</h3><p>אישרת 3 פעמים תשובה מסוג "${esc(r.offerLabel)}" בלי שינוי. מהיום לענות על זה לבד?</p><p class="note">בשלב הזה רק נרשמת ההעדפה – כל תשובה עדיין נשלחת רק בלחיצה שלך.</p><div class="secrow"><button class="btn" data-a="secAutoYes" data-c="${esc(r.offerAuto)}" style="flex:1">כן</button><button class="btn g" data-a="closeDlg" style="flex:1">לא עכשיו</button></div>`)}
+  catch(e){err(e);if(e&&e.reason==='window-closed')X.wa.card=null}finally{el.disabled=false;rerender()}};
+ if((d.flags||[]).includes('chk'))ask('בטיוטה יש מידע שכדאי לבדוק ('+(d.why||[]).join(', ')+'). לשלוח בכל זאת?',run,'שלח');else run()};
+ACT.secWaDone=el=>{const id=el.dataset.id;ask('לסמן כטופל בלי לענות? לא תישלח תשובה.',async()=>{try{await fnCall('secInbox',{op:'done',id});toast('סומן כטופל');X.wa.card=null;X.wa.list=null;rerender()}catch(e){err(e)}},'טופל')};
+ACT.secAutoYes=async el=>{try{await fnCall('secInbox',{op:'autoYes',cls:el.dataset.c});closeDlg();toast('נרשם. בינתיים כל תשובה עדיין באישורך.')}catch(e){err(e)}};
+FRM.secWaLink=async f=>{const x=fd(f),wa=X.wa.cur,name=String(x.name||'').trim();if(x.k&&!name)return toast('כתבו שם');try{await fnCall('secInbox',{op:'link',wa,k:x.k||'',name});toast('נשמר');X.wa.card=null;rerender()}catch(e){err(e)}};
+/* ---------- הגדרות המנהל: מספר המנהל (16), פתיחה (97), "קיבלנו" (22) ---------- */
+function waSetH(){const c=X.wc;if(!c){if(!X.wcb)wcLoad();return '<div class="empty">טוען…</div>'}if(c.err)return '';
+ return `<form class="card" data-f="secWaSetF" id="secWaSet" style="margin-top:8px"><b>ווצאפ</b><p class="note" style="margin:4px 0 8px">${c.connected?'מחובר: <bdi dir="ltr">'+esc(c.num)+'</bdi>'+(c.link==='coexist'?' (דו־קיום עם WhatsApp Business בטלפון)':c.link==='moved'?' (המספר הועבר לשירות)':''):'עוד לא מחובר. מנהל המערכת מחבר את מספר העסק.'}</p>
+ <label class="f"><span>המספר שלי ("מספר המנהל" – רק יומן ותזכורות)</span><input name="num" type="tel" dir="ltr" inputmode="tel" maxlength="20" value="${esc(c.myNum||c.myReq||'')}" placeholder="050-0000000"><small class="note">${c.myNum?'מאושר. מהמספר הזה אפשר לשאול על היומן ולבקש תזכורת ("תזכירי לי מחר ב-10…"). נתוני כספים והוראות אחרות – רק באפליקציה.':c.myReq?'ממתין לאישור מנהל המערכת.':'מנהל המערכת מאשר את המספר.'}</small></label>
+ <label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:8px"><input type="checkbox" name="openOn" value="1"${c.open.on?' checked':''}> הודעת פתיחה לפונה חדש</label><label class="f"><span>נוסח הודעת הפתיחה</span><textarea name="openText" rows="2" class="secin" maxlength="500">${esc(c.open.text||'')}</textarea></label>
+ <label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:8px"><input type="checkbox" name="ackOn" value="1"${c.ack.on?' checked':''}> "קיבלנו" מחוץ לשעות העבודה (<bdi dir="ltr">${esc(c.ackH.f)}–${esc(c.ackH.t)}</bdi>), בימי חול בלבד</label><label class="f"><span>נוסח "קיבלנו"</span><textarea name="ackText" rows="2" class="secin" maxlength="500">${esc(c.ack.text||'')}</textarea></label>
+ <small class="note">כל שאר התשובות – טיוטה שנשלחת רק בלחיצה שלך. מגבלה: ${esc(String(c.hour))} הודעות לשעה לכל שולח.</small>
+ ${(c.appr||[]).length?`<p class="note" style="margin:8px 0 0">אישורים לפי סוג: ${c.appr.map(a=>esc(a.label)+' '+a.n+(a.want?' (ביקשת לענות לבד)':'')).join(' · ')}</p>`:''}
+ <button class="btn w" style="margin-top:10px">שמירה</button></form>`}
+FRM.secWaSetF=async f=>{const x=fd(f),c=X.wc||{},b=f.querySelector('button.btn');
+ const ack={on:x.ackOn==='1',text:String(x.ackText||'').trim()},open={on:x.openOn==='1',text:String(x.openText||'').trim()};
+ if((ack.on&&!ack.text)||(open.on&&!open.text))return toast('כדי להפעיל – כתבו נוסח');
+ b.disabled=true;try{let r=null;if(ack.on!==c.ack.on||ack.text!==c.ack.text||open.on!==c.open.on||open.text!==c.open.text)r=await fnCall('secWaCfg',{op:'texts',ack,open});
+  const num=String(x.num||'').trim(),curN=c.myNum||c.myReq||'';if(num.replace(/\D/g,'')!==curN.replace(/\D/g,''))r=await fnCall('secWaCfg',{op:'mgrNum',num});
+  if(r&&r.ok&&r.stop)X.wc=r;toast(r?'נשמר':'אין שינוי')}catch(e){err(e)}finally{b.disabled=false;rerender()}};
+/* ---------- חיבור למסך: לשונית, פס "עצור הכל", החלפת עסק ---------- */
+{const t0=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='wa')X.wa={f:X.wa&&X.wa.f||'all',list:null,cur:null,card:null};t0(el)}}
+{const r5=V.sec;V.sec=()=>{const k=keyNow();if(X.wcKey!==k){X.wcKey=k;X.wc=null;X.wa=null}
+ if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&X.tab==='wa'){X.wa=X.wa||{f:'all'};const S=X.st;try{pushReg()}catch(e){}return{t:S.name||'המזכירה',s:'ווצאפ',h:stopH()+tabsH()+waH()}}
+ const r=r5();try{if(r&&r.h&&r.h.includes('id="secTabs"'))r.h=stopH()+r.h}catch(e){}return r}}
+/* ---------- מנהל־על: בכרטיס העסק ---------- */
+const SW={};
+const swLoad=id=>{SW[id]=null;window.fnCall('secAdminWa',{bizId:id,op:'get'}).then(r=>{SW[id]=r&&r.ok&&r.ackH?r:{err:'לא נטען'}}).catch(e=>{SW[id]={err:e&&e.message||'שגיאה'}}).finally(()=>{if(cur().v==='sab')rerender()})};
+{const s5=V.sab;if(s5)V.sab=id=>{const r=s5(id);try{const b=(ADM.L||[]).find(x=>x.id===id);if(!SY.sa||!b||(b.missing&&id!==BZ0)||!r||!r.h||!(b.features&&b.features.secretary===true))return r;
+ if(SW[id]===undefined)swLoad(id);const c=SW[id];let h='<div class="sec"><h3>המזכירה – ווצאפ</h3></div>';
+ if(!c){r.h+=h+'<div class="empty">טוען…</div>';return r}if(c.err){r.h+=h+`<div class="card"><p class="note">${esc(c.err)}</p></div>`;return r}
+ const st=c.stop&&c.stop.on;
+ h+=`<form class="card" data-f="secSwF" data-id="${esc(id)}" id="secSwF">
+ <label class="f"><span>מזהה המספר אצל Meta (Phone number ID)</span><input name="pnid" dir="ltr" inputmode="numeric" maxlength="25" value="${esc(c.pnid)}"></label>
+ <label class="f"><span>מספר העסק (להצגה)</span><input name="num" type="tel" dir="ltr" maxlength="20" value="${esc(c.num)}"></label>
+ <b style="display:block;margin-top:6px">אופן החיבור</b><div class="chips" role="radiogroup" style="margin:6px 0"><label class="chip" style="min-height:44px"><input type="radio" name="link" value="coexist"${c.link==='coexist'?' checked':''}> דו־קיום</label><label class="chip" style="min-height:44px"><input type="radio" name="link" value="moved"${c.link==='moved'?' checked':''}> העברת מספר</label></div>
+ <label class="f"><span>הודעות לשעה לכל שולח (ברירת מחדל ${esc(String(c.hourDefault))})</span><input name="hour" inputmode="numeric" dir="ltr" maxlength="3" value="${esc(String(c.hour))}"></label>
+ <div class="row" style="flex-wrap:wrap"><label class="f grow"><span>שעות עבודה – מ-</span><input type="time" name="af" dir="ltr" value="${esc(c.ackH.f)}"></label><label class="f grow"><span>עד</span><input type="time" name="at" dir="ltr" value="${esc(c.ackH.t)}"></label></div><small class="note">"קיבלנו" נשלח רק מחוץ לשעות האלה, בימי חול.</small>
+ <label class="f"><span>תבניות שאושרו ב-Meta (שורה לכל תבנית: שם|תיאור|שפה)</span><textarea name="tpls" rows="3" dir="ltr" maxlength="2000" class="secin">${esc((c.tpls||[]).map(t=>t.name+'|'+t.label+'|'+t.lang).join('\n'))}</textarea></label>
+ <button class="btn w" style="margin-top:8px">שמירה</button></form>
+ <div class="card" style="margin-top:8px"><b>מספרי המנהלים (יומן ותזכורות בלבד)</b><p class="note" style="margin:4px 0">כדאי לאמת את המספר מול המנהל לפני האישור – מספר שגוי יחשוף את היומן שלו.</p>${(c.admins||[]).map(a=>`<form class="secrow" data-f="secSwMgr" data-id="${esc(id)}" data-u="${esc(a.uid)}" style="margin:8px 0"><span style="flex:1 1 100%;overflow-wrap:anywhere">${esc(a.email||a.uid)}${a.req?` <span class="sectags g">ביקש/ה: <bdi dir="ltr">${esc(a.req)}</bdi></span>`:''}${a.show?' <span class="sectags">מאושר</span>':''}</span><input name="num" type="tel" dir="ltr" maxlength="20" value="${esc(a.show||a.req||'')}" style="flex:1;min-width:110px;min-height:40px" aria-label="מספר"><button class="chip" style="min-height:40px">${a.req&&!a.show?'אישור':'שמירה'}</button></form>`).join('')||'<p class="note">אין מנהלים</p>'}</div>
+ <div class="card${st?' secstop':''}" style="margin-top:8px"><b>עצור הכל</b><p class="note" style="margin:4px 0 8px">${st?'פעיל בעסק הזה.':'לא פעיל.'} עוצר רק שליחה אוטומטית; הקליטה ושליחה בלחיצה ממשיכות.</p><div class="secrow"><button class="chip" data-a="secSwStop" data-id="${esc(id)}" data-on="${st?'0':'1'}" style="min-height:44px">${st?'ביטול העצירה בעסק':'עצור בעסק הזה'}</button><button class="chip" data-a="secSwStopAll" data-id="${esc(id)}" style="min-height:44px">עצור הכל – כל העסקים</button></div></div>`;
+ r.h+=h}catch(e){}return r}}
+FRM.secSwF=async f=>{const id=f.dataset.id,c=SW[id];if(!c||c.err)return;const x=fd(f),b=f.querySelector('button.btn'),data={bizId:id,op:'set'};
+ const pn=String(x.pnid||'').trim();if(pn!==c.pnid){if(pn&&!/^\d{5,25}$/.test(pn))return toast('מזהה המספר – ספרות בלבד');data.pnid=pn}
+ const num=String(x.num||'').trim();if(num!==c.num)data.num=num;if(x.link&&x.link!==c.link)data.link=x.link;
+ const hr=String(x.hour||'').trim();if(hr!==String(c.hour)){if(!/^\d{1,3}$/.test(hr)||+hr<1||+hr>500)return toast('הודעות לשעה: 1 עד 500');data.hour=+hr}
+ if(x.af!==c.ackH.f||x.at!==c.ackH.t){if(!x.af||!x.at||x.af===x.at)return toast('שעות עבודה: התחלה וסיום שונות');data.ackH={f:x.af,t:x.at}}
+ const tp=String(x.tpls||'').split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const[n,lb,lg]=l.split('|').map(s=>(s||'').trim());return{name:n,label:lb||n,lang:lg||'he'}});
+ if(JSON.stringify(tp)!==JSON.stringify((c.tpls||[]).map(t=>({name:t.name,label:t.label,lang:t.lang})))){if(tp.length>20||tp.some(t=>!/^[a-z0-9_]{1,100}$/.test(t.name)))return toast('שם תבנית: אותיות אנגליות קטנות, ספרות וקו תחתון (עד 20 תבניות)');data.tpls=tp}
+ if(Object.keys(data).length<=2)return toast('אין שינוי');
+ b.disabled=true;try{SW[id]=await window.fnCall('secAdminWa',data);toast('נשמר')}catch(e){err(e)}finally{b.disabled=false;if(cur().v==='sab')rerender()}};
+FRM.secSwMgr=async f=>{const id=f.dataset.id,u=f.dataset.u,x=fd(f),num=String(x.num||'').trim();
+ const run=async()=>{try{SW[id]=await window.fnCall('secAdminWa',{bizId:id,op:'mgr',uid:u,num});toast(num?'המספר אושר':'המספר הוסר')}catch(e){err(e)}finally{if(cur().v==='sab')rerender()}};
+ if(num)ask('לאשר את '+num+' כ"מספר המנהל"? מהמספר הזה אפשר יהיה לשאול על היומן וליצור תזכורות ביומן האישי שלו. כדאי לאמת את המספר מול המנהל.',run,'אישור');else run()};
+ACT.secSwStop=async el=>{const id=el.dataset.id,on=el.dataset.on==='1';el.disabled=true;try{SW[id]=await window.fnCall('secAdminWa',{bizId:id,op:'stop',on});toast(on?'נעצר':'העצירה בוטלה')}catch(e){err(e)}finally{el.disabled=false;if(cur().v==='sab')rerender()}};
+ACT.secSwStopAll=el=>{const id=el.dataset.id;ask('לעצור שליחה אוטומטית בווצאפ בכל העסקים?',async()=>{try{const r=await window.fnCall('secAdminWa',{bizId:id,op:'stopAll',on:true});toast('נעצר ב-'+r.n+' עסקים');swLoad(id)}catch(e){err(e)}},'עצור הכל')};
 
 window.__sec=X;
 })();
