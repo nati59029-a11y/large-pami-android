@@ -77,7 +77,7 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
     NAV.pop(); go('inbox', 'sup'); const sup = btns('rcS');
     return { R, sup, ttl: document.getElementById('ttl').innerText };
   });
-  check('3 לכל פריט "הוצאה מקופה" שלוש אפשרויות: אשר (כמו קודם), ייחוד לחשבונית ספק, והוצאה לפי קטגוריה שממתינה לחשבונית – כל אחת פעם אחת', r3.R.every(([, b]) => ['inbOk', 'inbInv', 'inbAw'].every((k) => b.filter((x) => x === k).length === 1)), r3.R);
+  check('3 לכל פריט "הוצאה מקופה" שלוש אפשרויות: אשר (עם בחירת קטגוריה), ייחוד לחשבונית ספק, והוצאה לפי קטגוריה שממתינה לחשבונית – כל אחת פעם אחת', r3.R.every(([, b]) => ['inbOk', 'inbInv', 'inbAw'].every((k) => b.filter((x) => x === k).length === 1)), r3.R);
   check('4 חשבונית ספק רגילה (לא מקופה) – "אשר" הרגיל לא השתנה, בלי האפשרויות החדשות', r3.sup.includes('inbOk') && !r3.sup.includes('inbInv') && !r3.sup.includes('inbAw'), r3.sup);
 
   // (א) ייחוד לחשבונית קיימת
@@ -145,15 +145,30 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   });
   check('13 זיכוי (סכום שלילי): ייחוד לחשבונית לא נפתח; כהוצאה לפי קטגוריה – זיכוי אחד, בלי "ממתין" ובלי תשלום', !r13.d1 && r13.n1 === 0 && r13.t.length === 1 && r13.t[0].amt === -10 && r13.t[0].kind === 'credit' && !r13.t[0].aw && r13.t[0].pays === 0, r13);
 
-  // "אשר" הרגיל בפריט מקופה – בדיוק המסלול שלפני השינוי (בלי "ממתין"), עם creg, ומופיע בסגירת הקופה
+  // "אשר" בפריט מקופה (סבב 3, החלטת המשתמש): חלון בחירת קטגוריה (+ ספק/עובד), ונרשם כשולם במזומן מהקופה – בלי חשבונית, בלי "ממתין", בלי "לתשלום"
   const r20 = await page.evaluate(async () => {
+    const W8 = (ms) => new Promise((r) => setTimeout(r, ms || 80));
+    const emp = S.cats.find((c) => c.kind === 'exp' && !c.hid && c.beh === 'emp'); if (!S.subs.some((x) => x.id === 'rcEmp1')) S.subs.push({ id: 'rcEmp1', cat: emp.id, name: 'עובד א' });
+    S.inbox.push({ id: 'rcQ', by: 'עובד בדיקה', at: '2026-11-03T09:00:00Z', file: 'fQ', d: { reg: true, creg: 'i_yh', cat: 'e_sup', sub: 'rcSup2', amt: 70, date: '2026-11-03', note: 'ירקות', ctm: '11:00' } }); save();
     const tot = () => Math.round(S.tx.filter((t) => t.t === 'exp' && !t.x && (t.date || '').slice(0, 7) === '2026-11').reduce((s, t) => s + t.amt, 0) * 100) / 100;
-    const t0 = tot(); NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
-    await ACT.inbOk(document.querySelector('#main [data-a=inbOk][data-id=rcP]')); await new Promise((r) => setTimeout(r, 100));
-    const T = S.tx.filter((t) => t.src === 'rcP'), W = coWant();
-    return { n: T.length, t: T[0] && { creg: T[0].creg, aw: !!T[0].await, pays: T[0].pays.length, coa: 'coa' in T[0], amt: T[0].amt }, d: tot() - t0, w: W.rcP && W.rcP.f, mine: coMine().some((x) => x.id === 'rcP' && x.reg === 'i_nl' && x.a === 15) };
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
+    const one = async (id, cid, sid) => { const t0 = tot(), n0 = S.tx.length; document.querySelector(`#main [data-a=inbOk][data-id=${id}]`).click(); await W8();
+      const f = document.querySelector('#dlg[open] form[data-f=inbRegF]'); if (!f) return { nodlg: true }; const pre = { cat: f.elements.cat.value, sub: f.elements.sub ? f.elements.sub.value : '' };
+      if (cid && f.elements.cat.value !== cid) { f.elements.cat.value = cid; f.elements.cat.dispatchEvent(new Event('change', { bubbles: true })); await W8(); }
+      const f2 = document.querySelector('#dlg[open] form[data-f=inbRegF]'), subOpts = f2.elements.sub ? [...f2.elements.sub.options].map((o) => o.value) : [];
+      if (sid) f2.elements.sub.value = sid; f2.querySelector('button:not([type=button])').click(); await W8(200);
+      const askM = !!document.querySelector('#dlg[open]'), T = S.tx.filter((t) => t.src === id);
+      return { pre, subOpts, askM, n: S.tx.length - n0, d: Math.round((tot() - t0) * 100) / 100, gone: !S.inbox.some((x) => x.id === id), t: T[0] && { cat: T[0].cat, sub: T[0].sub, creg: T[0].creg, aw: !!T[0].await, dn: !!T[0].dn, due: T[0].due || '', inv: T[0].inv, pays: T[0].pays.map((p) => ({ m: p.m, a: p.a, d: p.d })), coa: T[0].coa, cod: T[0].cod, cof: T[0].cof, bal: bal(T[0]), owe: S.tx.filter((x) => bal(x) > 0.004).some((x) => x.id === T[0].id), awL: tdnL().aw.some((x) => x.id === T[0].id), no: tdnL().no.some((x) => x.id === T[0].id) } };
+    };
+    const P = await one('rcP', emp.id, 'rcEmp1'); const Q = await one('rcQ', '', '');
+    const W = coWant(), M = coMine(), X = (id, reg, a) => ({ id, uid: 'w', by: 'עובד בדיקה', t: 1, reg, d: '2026-11-03', tm: '', a, why: 'w', dep: '', src: id, zc: '', dp: '' });
+    return { emp: emp.id, P, Q, wP: W.rcP && W.rcP.f, wQ: W.rcQ && W.rcQ.f, vP: coVer(X('rcP', 'i_nl', 15)), vQ: coVer(X('rcQ', 'i_yh', 70)), mP: M.find((x) => x.id === 'rcP'), mQ: M.find((x) => x.id === 'rcQ'), err: document.querySelector('#dlg[open]') ? document.querySelector('#dlg').innerText.slice(0, 100) : '' };
   });
-  check('20 "אשר" בפריט מקופה: הוצאה אחת עם creg, בלי "ממתין" ובלי שדות חדשים (כמו לפני השינוי), נספרת בבדיקת הסגירה ומופיעה ב"הוצאה מקופה"', r20.n === 1 && r20.t.creg === 'i_nl' && !r20.t.aw && r20.t.pays === 0 && !r20.t.coa && r20.d === 15 && r20.w && r20.w.a === 15 && r20.mine, r20);
+  const P = r20.P, Q = r20.Q;
+  check('20 "אשר" פותח חלון קטגוריה: הקטגוריה שבפריט מסומנת מראש, והחלפת קטגוריה מחליפה את רשימת הכרטיסים (עובדים)', P.pre && P.pre.cat !== r20.emp && P.subOpts.includes('rcEmp1') && Q.pre.cat === 'e_sup' && Q.pre.sub === 'rcSup2', { P: P.pre, subOpts: P.subOpts, Q: Q.pre });
+  check('21 משכורת לעובד במזומן: הוצאה אחת בקטגוריית משכורת, תשלום במזומן בסכום ובתאריך שלה, בלי שאלת מזומן/העברה, ונשמרו creg והסכום/התאריך/הצילום של הקופה', P.n === 1 && P.d === 15 && !P.askM && P.gone && P.t.cat === r20.emp && P.t.sub === 'rcEmp1' && P.t.creg === 'i_nl' && P.t.pays.length === 1 && P.t.pays[0].m === 'מזומן' && P.t.pays[0].a === 15 && P.t.pays[0].d === '2026-11-03' && !P.t.aw && P.t.coa === 15 && P.t.cod === '2026-11-03', P);
+  check('22 ספק בלי חשבונית: נשמר (הוצאה אחת), שולם במזומן, יתרה 0 – לא ב"לתשלום"/"באיחור", לא "ממתין לחשבונית" ולא "בלי מספר חשבונית"', Q.n === 1 && Q.d === 70 && Q.gone && Q.t.cat === 'e_sup' && Q.t.sub === 'rcSup2' && Q.t.creg === 'i_yh' && !Q.t.inv && !Q.t.aw && !Q.t.dn && !Q.t.due && Q.t.bal === 0 && !Q.t.owe && !Q.t.awL && Q.t.pays.length === 1 && Q.t.pays[0].m === 'מזומן' && Q.t.pays[0].a === 70 && Q.t.cof === 'fQ' && !r20.err, Q);
+  check('23 שתי ההוצאות בסגירת הקופה עם creg וסכום נכונים (coWant/coVer/"הוצאה מקופה")', r20.wP && r20.wP.reg === 'i_nl' && r20.wP.a === 15 && r20.wQ && r20.wQ.reg === 'i_yh' && r20.wQ.a === 70 && r20.wQ.tm === '11:00' && r20.vP && r20.vQ && r20.mP && r20.mP.a === 15 && r20.mQ && r20.mQ.reg === 'i_yh' && r20.mQ.a === 70, r20);
 
   // חשבונית בסכום ובתאריך אחרים מתחברת להוצאה מקופה שממתינה: הסכום, התאריך והצילום של הקופה לא משתנים
   const r21 = await page.evaluate(async () => {
@@ -170,8 +185,8 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
       rest: rest.map((t) => ({ amt: t.amt, aw: !!t.await, creg: t.creg || '' })), restMine: M.filter((x) => rest.some((t) => t.src && t.src === x.id)).length,
       cash: Math.round((rest.reduce((s, t) => s + cashPaid(t), 0) + cashPaid(f)) * 100) / 100 };
   });
-  check('21 חשבונית גדולה (100 על 80, תאריך אחר): בחשבונית הסכום 100 והתאריך שלה, אבל בקופה נשארים 80 ו-03/11 (coWant/coVer/סימון), והצילום של הפתק נשמר לסיכום הסגירות', r21.e.amt === 100 && r21.e.date === '2026-11-09' && !r21.e.aw && r21.e.file === 'fInvE' && r21.wE.a === 80 && r21.wE.d === '2026-11-03' && r21.vE && r21.fileE === 'fE' && r21.mE.a === 80 && r21.mE.d === '2026-11-03', r21);
-  check('22 חשבונית קטנה (60 על 80, תאריך אחר): בקופה נשארים 80 ו-03/11; היתרה (20) נשארת "ממתין" בלי creg – לא נספרת פעמיים, וסך המזומן ששולם נשאר 80', r21.f.amt === 60 && !r21.f.aw && r21.wF.a === 80 && r21.wF.d === '2026-11-03' && r21.vF && r21.mF.a === 80 && r21.rest.length === 1 && r21.rest[0].amt === 20 && r21.rest[0].aw && !r21.rest[0].creg && r21.restMine === 0 && r21.cash === 80 && r21.same, r21);
+  check('24 חשבונית גדולה (100 על 80, תאריך אחר): בחשבונית הסכום 100 והתאריך שלה, אבל בקופה נשארים 80 ו-03/11 (coWant/coVer/סימון), והצילום של הפתק נשמר לסיכום הסגירות', r21.e.amt === 100 && r21.e.date === '2026-11-09' && !r21.e.aw && r21.e.file === 'fInvE' && r21.wE.a === 80 && r21.wE.d === '2026-11-03' && r21.vE && r21.fileE === 'fE' && r21.mE.a === 80 && r21.mE.d === '2026-11-03', r21);
+  check('25 חשבונית קטנה (60 על 80, תאריך אחר): בקופה נשארים 80 ו-03/11; היתרה (20) נשארת "ממתין" בלי creg – לא נספרת פעמיים, וסך המזומן ששולם נשאר 80', r21.f.amt === 60 && !r21.f.aw && r21.wF.a === 80 && r21.wF.d === '2026-11-03' && r21.vF && r21.mF.a === 80 && r21.rest.length === 1 && r21.rest[0].amt === 20 && r21.rest[0].aw && !r21.rest[0].creg && r21.restMine === 0 && r21.cash === 80 && r21.same, r21);
 
   // משיכה חוזרת: מסמך העובד שיוחד לחשבונית (rcA) חוזר מהענן כ-new – לא נכנס שוב ל"לטיפול"; מסמך חדש כן נכנס
   const r23 = await page.evaluate(async () => {
@@ -180,7 +195,7 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
     try { await pullInbox2(); } catch (e) { /* */ } finally { runQ = rq; }
     return { ids: S.inbox.map((x) => x.id), reg: todoC().reg };
   });
-  check('23 משיכה חוזרת: מסמך שיוחד לחשבונית לא נקלט שוב (אין כפילות), ומסמך חדש כן נקלט', !r23.ids.includes('rcA') && r23.ids.includes('rcNew9'), r23);
+  check('26 משיכה חוזרת: מסמך שיוחד לחשבונית לא נקלט שוב (אין כפילות), ומסמך חדש כן נקלט', !r23.ids.includes('rcA') && r23.ids.includes('rcNew9'), r23);
   await page.evaluate(() => { S.inbox = S.inbox.filter((x) => x.id !== 'rcNew9'); save(); });
 
   // סגירת קופה: "הוצאה מקופה" לכל קופה, מסומנות אלו של הסגירה האחרונה (2 סגירות, הוצאות בסגירה האחרונה / בקודמת / אחריה), סכום המסומנות מול הסגירה
