@@ -2605,8 +2605,8 @@ V.sync=()=>{
 FRM.sylogin=async f=>{const x=fd(f);const b=f.querySelector('button');b.disabled=true;
  try{await syLogin(s_(x.email),x.pw);toast('התחברת');if(isW()){wkStart()}else{try{await pullInbox()}catch(e){}rerender()}siReady();}catch(e){toast(loginMsg(e))}finally{b.disabled=false}};
 ACT.syOut=()=>{const w=!isNat();ask(w?'להתנתק? כל הנתונים של האפליקציה יימחקו מהמחשב הזה.':'להתנתק מהחשבון במכשיר הזה?',async()=>{if(w&&!(await dvSafe()))return;syOut();if(w)await dvWiped();location.reload()})};
-ACT.syPub=async()=>{try{const n=await pubCfg();toast('פורסמו '+n+' קטגוריות לעובדים')}catch(e){toast(e.offline?e.message:'הפרסום נכשל: '+e.message)}};
-ACT.syPull=async()=>{try{const n=await pullInbox();if(n||!RPL.ok)toast(n?n+' הוצאות חדשות':'אין הוצאות חדשות');rerender()}catch(e){toast(e.offline?e.message:'הבדיקה נכשלה: '+e.message)}};
+ACT.syPub=async()=>{if(!isA())return;try{const n=await pubCfg();toast('פורסמו '+n+' קטגוריות לעובדים')}catch(e){toast(e.offline?e.message:'הפרסום נכשל: '+e.message)}};
+ACT.syPull=async()=>{if(!isA())return;try{const n=await pullInbox();if(n||!RPL.ok)toast(n?n+' הוצאות חדשות':'אין הוצאות חדשות');rerender()}catch(e){toast(e.offline?e.message:'הבדיקה נכשלה: '+e.message)}};
 ACT.syOpen=()=>{sheetClose();NAV=[{v:'sync'}];render(0)};
 /* ---- אישור הוצאות מעובדים (מנהל) ---- */
 const inbName=it=>{const c=cat(it.d.cat);if(it.d.reg&&!c)return 'דף הוצאה מקופה · ללא קטגוריה';return(c?c.name:(it.d.catName||'קטגוריה'))+(it.d.subName?' · '+it.d.subName:'')};
