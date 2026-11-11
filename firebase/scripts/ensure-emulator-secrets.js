@@ -25,3 +25,5 @@ if (!/^ELEVENLABS_API_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync
 if (!/^MAIL_USER=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nMAIL_USER=dummy-not-an-email\nMAIL_APP_PASSWORD=dummy\n');
 // מפתח בדיקה להצפנת כרטיסים (fb/ord-card, customers.js) – 32 בתים קבועים, לא מפתח אמיתי
 if (!/^CARD_ENC_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nCARD_ENC_KEY=' + Buffer.from('test-only-card-key-32-bytes-0000').toString('base64') + '\n');
+// מפתח בדיקה להצפנת המידע הרגיש של המזכירה (שלב 3, lib/sec-sens.js) – 32 בתים קבועים, לא מפתח אמיתי
+if (!/^SEC_SENS_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nSEC_SENS_KEY=' + Buffer.from('test-only-sec-sens-key-32-bytes!').toString('base64') + '\n');

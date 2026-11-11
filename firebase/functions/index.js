@@ -195,5 +195,7 @@ Object.assign(exports, require('./customers'));
 // המזכירה העסקית – שלב 1 (2026-11-11): secState, secConsent, secSetup (מנהל העסק), secAdminGet, secAdminSetCfg, secAdminReadChat (מנהל־על),
 // secBackupDaily (מתוזמנת – גיבוי אוספי sec_* ל-Storage). secretary.js
 Object.assign(exports, require('./secretary'));
+// המזכירה שלב 3 (2026-11-11): secFacts, secSens (מידע רגיש מוצפן), secRules, secCal, secImport. secretary-know.js
+Object.assign(exports, require('./secretary-know'));
 // ייבוא קבצים ברקע (2026-11-11, שלב 3): startImport (מנהל, שני האזורים) + runImportChunk (טריגר, europe-west1 בלבד) – imports.js
 Object.assign(exports, require('./imports'));

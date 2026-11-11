@@ -323,7 +323,7 @@ describe('רק נושאי עסק; ערוץ והרשאות (5.5) נאכפים ב�
   });
   it('אין אף כלי ששולח, משלם, מוחק או משנה; ערוצים אחרים – בלי כלי כספים, שכר ועובדים', () => {
     const all = ST.toolsFor('app', { pay: true, emp: true });
-    assert.ok(all.every((n) => /^(get|simulate|loanCalc|refuseOffTopic)/.test(n)), all.join(','));
+    assert.ok(all.every((n) => /^(get|simulate|loanCalc|refuseOffTopic|propose)/.test(n)), all.join(',')); // propose* (שלב 3) – רק הצעה ממתינה, נשמרת באישור המנהל
     for (const ch of ['wa', 'in', '', 'x']) assert.deepEqual(ST.toolsFor(ch, { pay: true, emp: true }), []);
     assert.ok(!ST.toolsFor('app', {}).includes('getPayroll') && !ST.toolsFor('app', {}).includes('getEmployeeActivity'));
   });

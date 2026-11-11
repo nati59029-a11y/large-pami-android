@@ -33,6 +33,8 @@ const T = require('./lib/tenant');
 const { requireStaff, inputObject } = require('./lib/roles');
 const AI = require('./lib/sec-ai');
 const ST = require('./lib/sec-tools');
+const SK = require('./lib/sec-know');   // שלב 3: בנק תשובות
+const SENS = require('./lib/sec-sens'); // שלב 3: מידע רגיש (מוצפן)
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -77,6 +79,7 @@ function cfgOf(snap, bizId) {
     mainUid: typeof d.mainUid === 'string' ? d.mainUid : '',
     emp: typeof d.emp === 'boolean' ? d.emp : bizId === T.BIZ0,
     pay: obj(d.pay),
+    sens: obj(d.sens), // שלב 3: הרשאה אישית למידע רגיש על עובדים (10.8 המלצה 2), לכל מנהל – מנהל־על קובע
     mgr: obj(d.mgr),
     mirror: d.mirror !== false,
     cfTh: typeof d.cfTh === 'number' && Number.isFinite(d.cfTh) ? d.cfTh : null,
@@ -112,18 +115,21 @@ async function gate(request, opts) {
   if (o.consent && !consented) throw pre('no-consent', 'צריך לאשר את תנאי השימוש במזכירה לפני שמתחילים');
   // מנהל עם הגבלת סניפים (admins/{uid}.br): נתוני כל העסק (המראה, נתוני ענן) לא נמסרים לו בצ'אט (החלטת המתאם, סבב 1)
   const brLimited = !who.superadmin && Array.isArray(adm.get('br'));
-  return { who, cfg, me, consented, db, brLimited };
+  // מידע רגיש (10.8): המתג העסקי (ניתוח עובדים ומידע רגיש) + הרשאה אישית של המנהל + בלי הגבלת סניפים
+  const sensOn = cfg.emp === true && cfg.sens[who.uid] === true && !brLimited;
+  return { who, cfg, me, consented, db, brLimited, sensOn };
 }
 
 // secState: מה האפליקציה צריכה כדי להציג כפתור, כרטיס, הסכמה ואשף. לא דורש הסכמה (כדי להציג את מסך ההסכמה).
 async function secState(request) {
   inputObject(request);
-  const { who, cfg, me, consented } = await gate(request);
+  const { who, cfg, me, consented, sensOn } = await gate(request);
   const out = {
     ok: true, bizId: who.bizId, mode: cfg.mode, isMain: cfg.mode === 'main',
     consented, consentAt: consented && Number.isFinite(me.ca) ? me.ca : null, consentVer: CONSENT_VER,
     name: typeof me.nm === 'string' ? me.nm : '', addr: me.ad === 'f' ? 'f' : me.ad === 'm' ? 'm' : '', call: typeof me.call === 'string' ? me.call : '',
     pay: cfg.pay[who.uid] === true, emp: cfg.emp === true,
+    sens: sensOn, we: me.we === 'accept' ? 'accept' : 'warn', // שלב 3: מידע רגיש; פגישה בשישי/שבת/חג (72)
     rows: [], // כרטיס הבית מתמלא בהדרגה (11): ממתינים / חשבוניות / תזכורות – נוספים רק בשלבים שבונים אותם
   };
   out.setupDone = !!(out.name && out.addr);
@@ -319,6 +325,12 @@ async function secPrefs(request) {
     b.update(main, { nr: Object.fromEntries(keep), upd: t });
     b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'notRelevant', { note: k }));
     out = { key: k, until: nr[k] };
+  } else if (input.op === 'calWe') {
+    // פגישה בשישי, בשבת או בחג (72): 'warn' – להזהיר ולהציע יום אחר (ברירת מחדל), 'accept' – לקבל בלי הערה. אישי לכל מנהל
+    if (!['warn', 'accept'].includes(input.v)) throw bad('bad-input', 'ערך לא תקין');
+    b.set(main, { mgr: { [who.uid]: { we: input.v } }, upd: t }, { merge: true });
+    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'calWe', { note: input.v }));
+    out = { we: input.v };
   } else throw bad('bad-op', 'פעולה לא מוכרת');
   await b.commit();
   return Object.assign({ ok: true }, out);
@@ -336,7 +348,7 @@ async function secChatLoad(request) {
 function msgOut(id, x) {
   const o = { id, t: x.t || null, role: x.role === 'a' ? 'a' : 'u', text: typeof x.text === 'string' ? x.text : '' };
   if (Array.isArray(x.src)) o.src = x.src.slice(0, 12);
-  for (const k of ['asOf', 'mode', 'deep', 'stale', 'ideas', 'th']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
+  for (const k of ['asOf', 'mode', 'deep', 'stale', 'ideas', 'th', 'cards']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
   return o;
 }
 
@@ -344,7 +356,7 @@ const CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g;
 // secChat({ text, deep?, fin? }) – צ'אט עם כלים. הכלים נקבעים כאן לפי ערוץ (app) והרשאות – לא לפי בקשת המודל (5.5)
 async function secChat(request) {
   const input = inputObject(request);
-  const { who, cfg, me, db, brLimited } = await gate(request, { consent: true });
+  const { who, cfg, me, db, brLimited, sensOn } = await gate(request, { consent: true });
   if (typeof input.text !== 'string') throw bad('bad-text', 'כתבו שאלה');
   if (input.text.length > CHAT_MAX) throw bad('too-long', 'השאלה ארוכה מדי (עד ' + CHAT_MAX + ' תווים)');
   const text = input.text.replace(CTRL, '').trim();
@@ -369,19 +381,40 @@ async function secChat(request) {
   const pol = ST.policyOf(text);
   const logs = [];
   const results = [];
+  const cards = []; // שלב 3: כרטיסי אישור (עובדה / אירוע) שהכלים propose* יצרו
   let reply = null, mode = 'ok', mt = null, usage = { in: 0, out: 0 }, sent = 0, denied = [], offered = [];
+  let bank = null, bankCond = [];
+  if (!pol.sensitive && !deep) {
+    // בנק תשובות (3.5): לפני כל פנייה למודל. התאמה בלי תנאים = התשובה השמורה, בלי AI ובלי עלות (נספר ב-sec_usage.bank).
+    // "חשבי לעומק" – תמיד למודל. כלל עם תנאים – עובר למודל כמידע (עד 40)
+    const rs = await db.collection('sec_rules').limit(SK.RULES_MAX).get();
+    const m = SK.bankMatch(text, rs.docs.map((d) => Object.assign({ id: d.id }, d.data())));
+    bank = m.hit; bankCond = m.cond;
+  }
   if (pol.sensitive) {
     // שאלה שמבקשת מסקנה לפי מצב בריאותי/משפחתי (6.3 כלל 3): תשובה קבועה, בלי מודל ובלי עלות
     await meter(db, who.uid, tier, false, cfg.rate);
     reply = ST.TXT.sensitive; mode = 'policy';
     logs.push(['policy', 'sensitive']);
+  } else if (bank) {
+    await meter(db, who.uid, tier, false, cfg.rate); // קצב בלבד – אין עלות
+    reply = bank.rule.a; mode = 'bank';
+    logs.push(['bank', '', bank.rule.id]);
   } else {
     mt = await meter(db, who.uid, tier, true, cfg.rate);
     if (mt.saving) { reply = mt.saving === 'day' ? ST.TXT.savingDay : ST.TXT.saving; mode = 'saving'; }
   }
   if (reply === null) {
-    offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited });
-    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr };
+    offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited, sens: sensOn });
+    const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards };
+    // מידע רגיש (10.8): נמסר למודל רק דרך הכלי, רק כשהוא הוצע (מתג עסקי + הרשאה אישית), ורק הרשומות של העובד שנשאל עליו (מזעור, עד 5)
+    if (sensOn && offered.includes('getSensitiveInfo')) ctx.sensRead = async (emp) => {
+      const all = (await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId)).filter((x) => !x.bad && SENS.sameEmp(x.emp, emp));
+      const items = all.slice(0, 5);
+      logs.push(['sensTool', 'n=' + items.length, items.map((x) => x.id).join(',').slice(0, 120)]);
+      if (!items.length) return { employee: SENS.clean(emp, SENS.NAME_MAX), count: 0, note: 'אין מידע רגיש שמור על העובד הזה.' };
+      return { employee: items[0].emp, count: items.length, items: items.map((x) => ({ text: x.text, saved: SK.dayOf(x.t || now) })), _at: items.reduce((m, x) => Math.max(m, x.t || 0), 0) };
+    };
     let turns;
     try {
       const hs = await db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc').limit(HIST).get();
@@ -389,7 +422,8 @@ async function secChat(request) {
     } catch (e) { await settle(db, who.uid, mt, -mt.reserved, deep).catch(() => {}); throw e; } // לא משאירים את השמירה מראש במונה
     turns.push({ role: 'u', text });
     const finNote = brLimited ? 'למנהל הזה יש הגבלת סניפים, ולכן אין לו בצ\'אט נתוני כספים ונתוני העסק. אם שואלים על כספים, משימות, קופה או הזמנות – עני בנימוס: "' + ST.TXT.brLimited + '"' : fin ? (finFrom === 'device' ? 'מהמכשיר של המנהל, נכון ל-' + ST.fmtAt(fin.at) : 'מהמראה בענן, נכון ל-' + ST.fmtAt(mirrorAt) + (stale ? ' (ישן מ-3 ימים – אמרי זאת)' : '')) : (!cfg.mirror ? 'המראה כבוי ואין נתונים מהמכשיר' : 'אין נתוני כספים');
-    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote });
+    const bankNote = bankCond.length ? JSON.stringify(bankCond.map((r) => ({ q: r.q, a: r.a, cond: r.cond }))).slice(0, 12000) : '';
+    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote });
     let final = null, refused = false;
     try {
       for (let round = 0; round < MAX_ROUNDS && final === null && !refused; round++) {
@@ -404,8 +438,8 @@ async function secChat(request) {
           if (!offered.includes(c.name)) { denied.push(String(c.name).slice(0, 40)); logs.push(['toolDenied', String(c.name).slice(0, 40)]); res.push({ name: c.name, data: { error: 'not-available', note: 'הכלי לא זמין' } }); continue; }
           if (c.name === 'refuseOffTopic') { refused = true; break; }
           const data = await ST.runTool(c.name, c.args, ctx);
-          const tgt = data._tgt; delete data._tgt;
-          results.push({ name: c.name, data, src: ST.sourceOf(c.name, c.args, ctx) });
+          const tgt = data._tgt, at0 = data._at; delete data._tgt; delete data._at;
+          results.push({ name: c.name, data, src: ST.sourceOf(c.name, c.args, ctx, at0) });
           res.push({ name: c.name, data });
           logs.push(['tool', c.name, tgt, argNote(c.args)]);
         }
@@ -428,6 +462,8 @@ async function secChat(request) {
     const pp = ST.applyPolicy(reply, pol, results);
     const v = ST.verify(pp.text, results, text);
     srcs = v.srcs; nums = v.nums; unverified = v.unverified;
+    // שלב 3: תשובה מתוך "מידע על העסק", מידע רגיש או יומן – המקור מוצג גם כשאין בה מספרים
+    for (const r of results) if (['getBusinessFacts', 'getSensitiveInfo', 'getCalendar'].includes(r.name) && !r.data.error && !srcs.some((x) => x.k === r.src.k && x.l === r.src.l)) srcs.push(r.src);
     reply = v.text + (pp.notes.length ? '\n\n' + pp.notes.join('\n') : '');
     const usedFin = results.some((r) => ST.FIN_TOOLS.includes(r.name) || r.name === 'getPayroll');
     if (stale && usedFin) reply += '\n\nשימו לב: נתוני הכספים נכונים ל-' + ST.fmtAt(mirrorAt) + ' – לפני יותר מ-3 ימים. כדאי לפתוח את האפליקציה במכשיר שבו נשמרים הנתונים כדי לעדכן.';
@@ -449,10 +485,15 @@ async function secChat(request) {
   if (stale) am.stale = true;
   if (ideas.length) am.ideas = ideas;
   if (th) am.th = th.suggestedThreshold;
+  if (cards.length) am.cards = cards.slice(0, 8);
+  if (mode === 'bank') {
+    am.src = [{ k: 'bank', l: 'בנק התשובות – "' + String(bank.q).slice(0, 60) + '"', at: bank.rule.upd || bank.rule.t || now, s: 'bank' }];
+    b.set(db.doc('sec_usage/' + monthKey(now)), { bank: FieldValue.increment(1), upd: now }, { merge: true }); // המונה שמוכיח "בלי AI"
+  }
   b.set(aa, am);
-  for (const l of logs) b.set(db.collection('sec_log').doc(), logData(who.uid, l[0] === 'tool' || l[0] === 'toolDenied' ? 'sec' : 'auto', l[0], { tgt: l[2], note: [l[1], l[3]].filter(Boolean).join(' ') }));
+  for (const l of logs) b.set(db.collection('sec_log').doc(), logData(who.uid, l[0] === 'tool' || l[0] === 'toolDenied' || l[0] === 'sensTool' ? 'sec' : 'auto', l[0], { tgt: l[2], note: [l[1], l[3]].filter(Boolean).join(' ') }));
   await b.commit();
-  return { ok: true, id: aa.id, reply, mode, deep, src: am.src, nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied, brLimited };
+  return { ok: true, id: aa.id, reply, mode, deep, src: am.src, cards: am.cards || [], nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied, brLimited };
 }
 function argNote(a) {
   if (!a || typeof a !== 'object') return '';
@@ -491,6 +532,7 @@ async function secAdminGet(request) {
     bizId: who.bizId, on: who.biz.features.secretary === true,
     mode: cfg.mode, mainUid: cfg.mainUid, emp: cfg.emp, empDefault: empDefault(who.bizId),
     pay: Object.fromEntries(admins.map((a) => [a.uid, cfg.pay[a.uid] === true])),
+    sens: Object.fromEntries(admins.map((a) => [a.uid, cfg.sens[a.uid] === true])),
     capCents: cap.exists && Number.isInteger(cap.get('capCents')) ? cap.get('capCents') : null,
     rate: cfg.rate, rateDefault: { hour: RATE_HOUR, day: RATE_DAY },
     admins, consent, consentVer: CONSENT_VER,
@@ -501,7 +543,7 @@ async function secAdminGet(request) {
 async function secAdminSetCfg(request) {
   const input = inputObject(request);
   const who = await superIn(request);
-  const known = ['mode', 'mainUid', 'emp', 'pay', 'capCents', 'rate'];
+  const known = ['mode', 'mainUid', 'emp', 'pay', 'sens', 'capCents', 'rate'];
   for (const k of Object.keys(input)) if (!known.includes(k)) throw bad('bad-input', 'שדה לא מוכר: ' + String(k).slice(0, 30));
   const db = T.tdb();
   const [cs, admins] = await Promise.all([db.doc('sec_cfg/main').get(), adminsOf(db)]);
@@ -530,6 +572,15 @@ async function secAdminSetCfg(request) {
       upd['pay.' + u] = v; notes.push('pay:' + u + '=' + (v ? 'on' : 'off'));
     }
   }
+  if (input.sens !== undefined) {
+    // שלב 3: הרשאה אישית למידע רגיש על עובדים (10.8 המלצה 2) – כמו מתג השכר
+    const p = input.sens;
+    if (!p || typeof p !== 'object' || Array.isArray(p) || Object.keys(p).length > 50) throw bad('bad-sens', 'הרשאות מידע רגיש לא תקינות');
+    for (const [u, v] of Object.entries(p)) {
+      if (!UID_RE.test(u) || !isAdmin(u) || typeof v !== 'boolean') throw bad('bad-sens', 'הרשאת מידע רגיש – רק למנהל של העסק, כן/לא');
+      upd['sens.' + u] = v; notes.push('sens:' + u + '=' + (v ? 'on' : 'off'));
+    }
+  }
   let cap; // undefined = בלי שינוי; null = ניקוי התקרה; מספר = תקרה בסנטים
   if (input.capCents !== undefined) {
     if (input.capCents !== null && (!Number.isInteger(input.capCents) || input.capCents < 0 || input.capCents > MAX_CAP_CENTS)) throw bad('bad-cap', 'תקרה: מספר שלם של דולרים, בין 0 ל-' + (MAX_CAP_CENTS / 100).toLocaleString('en-US') + '$');
@@ -554,6 +605,7 @@ async function secAdminSetCfg(request) {
   else {
     const first = { mode, mainUid, emp: upd.emp !== undefined ? upd.emp : empDefault(who.bizId), pay: {}, mgr: {}, upd: t, updBy: who.uid };
     for (const [k, v] of Object.entries(upd)) if (k.startsWith('pay.')) first.pay[k.slice(4)] = v;
+    for (const [k, v] of Object.entries(upd)) if (k.startsWith('sens.')) { first.sens = first.sens || {}; first.sens[k.slice(5)] = v; }
     if (upd.rate && Number.isInteger(upd.rate.hour)) first.rate = upd.rate;
     b.set(main, first);
   }
@@ -747,7 +799,7 @@ exports.secState = onCall(wrap('secState', secState));
 exports.secConsent = onCall(wrap('secConsent', secConsent));
 exports.secSetup = onCall(wrap('secSetup', secSetup));
 // שלב 2. secChat: מפתח ה-AI מהכספת (אותו סוד של הזיהוי החכם – 9.3), זמן מספיק לכמה סבבי כלים
-exports.secChat = onCall({ secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 180, memory: '512MiB' }, wrap('secChat', secChat));
+exports.secChat = onCall({ secrets: [AI.GEMINI_API_KEY, SENS.SEC_SENS_KEY], timeoutSeconds: 180, memory: '512MiB' }, wrap('secChat', secChat));
 exports.secChatLoad = onCall(wrap('secChatLoad', secChatLoad));
 exports.secMirrorPut = onCall(wrap('secMirrorPut', secMirrorPut));
 exports.secPrefs = onCall(wrap('secPrefs', secPrefs));
@@ -765,4 +817,6 @@ exports.secBackupDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every da
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   CONSENT, CONSENT_VER, SEC_COLLS, SEC_ROOT_COLLS, SEC_SUBS, BACKUP_KEEP_DAYS, cfgOf, runSecBackup, restoreSecBackup, pruneSecBackups, enc, dec, dayKey,
   usageOf, DEFAULT_CAP_CENTS, reserveOf, PREFS_HOUR, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
+  // לשלב 3 (secretary-know.js): אותו שער הרשאה ואותו יומן
+  gate, logData, hourKey, bad, deny, pre, wrap,
 } });

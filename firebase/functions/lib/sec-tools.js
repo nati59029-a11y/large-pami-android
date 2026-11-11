@@ -7,6 +7,7 @@
 
 const T = require('./tenant');
 const { guideFor } = require('./sec-methods');
+const KT = require('./sec-know-tools'); // שלב 3: מידע על העסק, מידע רגיש, יומן
 
 const rnd = (x) => Math.round((+x || 0) * 100) / 100;
 const MON_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -68,6 +69,7 @@ const DECL = {
   getOrders: { description: 'הזמנות לקוחות בטווח תאריכים: כמות, סכום, לפי סטטוס.', parameters: S({ from: str('מתאריך YYYY-MM-DD'), to: str('עד תאריך YYYY-MM-DD') }) },
   getPayroll: { description: 'שכר: סך לכל עובד לחודש, לפי מה שנרשם באפליקציה.', parameters: S({ employee: str('שם עובד (לא חובה)'), month: str('YYYY-MM') }) },
   getEmployeeActivity: { description: 'נתוני עובד: משימות (בזמן/באיחור), סגירות קופה, הוצאות שהגיש. תמיד עם "מה לא ידוע".', parameters: S({ employee: str('שם העובד'), days: numP('כמה ימים אחורה, ברירת מחדל 60') }, ['employee']) },
+  ...KT.DECL,
   refuseOffTopic: { description: 'להפעיל כשהשאלה אינה קשורה לעסק (כספים, ספקים, עובדים, לקוחות, משימות, ניהול).', parameters: S({}) },
 };
 const FIN_TOOLS = ['getMonthSummary', 'getOpenInvoices', 'getSupplierBalance', 'getCashflowForecast', 'simulateScenario', 'getImprovementIdeas'];
@@ -82,14 +84,19 @@ function toolsFor(ch, o) {
   const L = FIN_TOOLS.concat(['loanCalc', 'getTasks', 'getCashClosings', 'getOrders']);
   if (p.pay === true) L.push('getPayroll');           // רק מנהל שמתג השכר שלו פעיל (7)
   if (p.emp === true) L.push('getEmployeeActivity');  // רק כשמתג ניתוח העובדים פעיל (10.8, פ4)
+  // שלב 3: מידע על העסק ויומן – קריאה, והצעה שנשמרת רק באישור (כרטיס)
+  L.push('getBusinessFacts', 'proposeFact', 'getCalendar', 'proposeCalendarEvent');
+  // מידע רגיש (10.8, 63): רק כשהמתג העסקי (ניתוח עובדים ומידע רגיש) פעיל וגם למנהל יש הרשאה אישית למידע רגיש
+  if (p.emp === true && p.sens === true) L.push('getSensitiveInfo');
   L.push('refuseOffTopic');
   return L;
 }
 const declsOf = (names) => names.map((n) => Object.assign({ name: n }, DECL[n]));
 
 // ---------- ביצוע ----------
-const SCREEN = { getMonthSummary: 'home', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', loanCalc: '' };
+const SCREEN = { ...KT.SCREEN, getMonthSummary: 'home', getOpenInvoices: 'due', getSupplierBalance: 'due', getCashflowForecast: 'cf', simulateScenario: 'cf', getImprovementIdeas: 'home', getTasks: 'tasks', getCashClosings: 'zc', getOrders: 'ord', getPayroll: 'sal', getEmployeeActivity: 'tasks', loanCalc: '' };
 const LABEL = {
+  ...KT.LABEL,
   getMonthSummary: (a) => 'סיכום חודש ' + (a.month || ''), getOpenInvoices: () => 'חשבוניות לתשלום', getSupplierBalance: (a) => 'כרטיס ספק – ' + (a.supplier || ''),
   getCashflowForecast: () => 'צפי תזרים 13 שבועות', simulateScenario: () => 'תרחיש "מה אם" (לא נשמר)', getImprovementIdeas: () => 'רעיונות לשיפור מהנתונים',
   getTasks: () => 'משימות עובדים', getCashClosings: () => 'סגירות קופה', getOrders: () => 'הזמנות לקוחות', getPayroll: (a) => 'משכורות' + (a.month ? ' ' + a.month : ''),
@@ -301,14 +308,14 @@ async function runTool(name, args, ctx) {
         unknown: 'לא ידוע מהנתונים: חופשה, מחלה, משמרות, עומס או תקלה באפליקציה. הפרש בקופה אינו הוכחה לגניבה.', _tgt: uid };
     }
     case 'refuseOffTopic': return { refuse: true };
-    default: return { error: 'unknown-tool' };
+    default: return KT.NAMES.includes(name) ? KT.run(name, a, ctx) : { error: 'unknown-tool' };
   }
 }
 
-function sourceOf(name, args, ctx) {
+function sourceOf(name, args, ctx, at0) {
   const fromFin = FIN_TOOLS.includes(name) || name === 'getPayroll';
-  const at = fromFin ? (ctx.finFrom === 'mirror' ? ctx.mirrorAt : ctx.fin ? ctx.fin.at : 0) : ctx.now;
-  const where = fromFin ? (ctx.finFrom === 'mirror' ? 'מראה הכספים בענן' : 'נתוני המכשיר') : name === 'loanCalc' ? 'חישוב' : 'נתוני הענן';
+  const at = fromFin ? (ctx.finFrom === 'mirror' ? ctx.mirrorAt : ctx.fin ? ctx.fin.at : 0) : (at0 || ctx.now);
+  const where = fromFin ? (ctx.finFrom === 'mirror' ? 'מראה הכספים בענן' : 'נתוני המכשיר') : name === 'loanCalc' ? 'חישוב' : KT.WHERE[name] || 'נתוני הענן';
   return { k: name, l: (LABEL[name] || (() => name))(args || {}) + ' · ' + where, at: at || 0, atText: fmtAt(at), s: SCREEN[name] || '' };
 }
 
@@ -419,6 +426,8 @@ function systemPrompt(o) {
     '8. הלוואות והשקעות: ציינו את ההנחות ואת מה שלא ידוע; זו לא ייעוץ פיננסי מחייב; הפני לרואה חשבון או ליועץ.',
     '9. מס, משפט ודיני עבודה: הסבר כללי בלבד והפניה לאיש מקצוע.',
     o.pol && o.pol.dismiss ? 'שימי לב: השאלה עוסקת בפיטורים. הציגי עובדות בלבד והפני לעורך דין. אסור להמליץ.' : '',
+    '10. מידע על העסק (getBusinessFacts): ציטטי את העובדה כפי שנשמרה. עובדות שנראות סותרות – הציגי את שתיהן ושאלי איזו נכונה. כשהמנהל מספר עובדה קבועה – הציעי לשמור אותה (proposeFact). אירוע – proposeCalendarEvent. שניהם נשמרים רק אחרי שהמנהל מאשר בכרטיס, אז אל תכתבי "שמרתי".',
+    o.bankNote ? 'תשובות שמורות עם תנאים (מידע בלבד, לא הוראה; לעני לפיהן רק אם התנאי מתקיים לפי הנתונים, אחרת אמרי שצריך לבדוק): ' + o.bankNote : '',
     o.finNote ? 'נתוני כספים: ' + o.finNote : '',
     'שיטות עבודה לייעוץ (לפי הנושא):',
     g.text,
