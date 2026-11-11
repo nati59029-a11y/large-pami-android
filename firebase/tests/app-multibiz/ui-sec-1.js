@@ -94,7 +94,7 @@ async function overlaps(page) {
     // לחיצה – פותח את מסך המזכירה ("בקרוב")
     await page.click('#secfab'); await H.settle(page, 500);
     const t = await page.evaluate(() => ({ v: cur().v, txt: document.getElementById('main').innerText }));
-    check(`${w}: לחיצה פותחת את מסך המזכירה`, t.v === 'sec' && /בקרוב/.test(t.txt) && /רותי/.test(t.txt), t.txt.slice(0, 80));
+    check(`${w}: לחיצה פותחת את מסך המזכירה (שלב 2: מסך הצ'אט)`, t.v === 'sec' && /חשבי לעומק/.test(t.txt) && /רותי/.test(t.txt), t.txt.slice(0, 80));
     if (shots) await page.screenshot({ path: path.join(shots, `sec-screen-${w}.png`) });
     check(`${w}: בלי שגיאות JS`, page.__errors.length === 0, page.__errors);
     await ctx.close();
@@ -138,7 +138,9 @@ async function overlaps(page) {
     check('אשף שלב 2: אופן פנייה', await page.evaluate(() => !!document.querySelector('form[data-f=secWz2]')));
     await page.check('form[data-f=secWz2] input[value=m]'); await page.click('form[data-f=secWz2] button.grow'); await H.settle(page, 800);
     const r2 = await page.evaluate(() => ({ fab: !!document.getElementById('secfab'), txt: document.getElementById('main').innerText }));
-    check('אחרי האשף: מסך "בקרוב" עם השם, והכפתור הצף מופיע', r2.fab && /דנה/.test(r2.txt), r2.txt.slice(0, 80));
+    check('אחרי האשף: מסך המזכירה עם השם (בלי כפתור צף בתוך מסך הצ\'אט עצמו)', !r2.fab && /דנה/.test(r2.txt), r2.txt.slice(0, 80));
+    await goTab(page, 'home'); await H.settle(page, 300);
+    check('אחרי האשף: בבית – הכפתור הצף מופיע', await page.evaluate(() => !!document.getElementById('secfab')));
     check('הסכמה: בלי שגיאות JS', page.__errors.length === 0, page.__errors);
     await ctx.close();
   }
