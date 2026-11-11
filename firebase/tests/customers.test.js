@@ -235,6 +235,31 @@ describe('לקוחות – importCusts', () => {
   });
 });
 
+describe('מחיקת כל הלקוחות ושחזור (11.11.2026)', () => {
+  it('עובד נחסם; מנהל מוחק לקוחות + כרטיסים מוצפנים עם גיבוי; הזמנות ו-custcfg נשארות; שחזור מחזיר הכול והכרטיס נפתח שוב', async () => {
+    const CARD = { num: '4580 1234 5678 9012', exp: '07/28', name: 'Dana Levi', cvv: '123' };
+    await call('saveCust', MGR, { cust: c1 });
+    assert.equal((await call('setCard', MGR, { custId: 't' + TZ, card: CARD })).status, 'OK');
+    await call('setCustCfg', MGR, { xKeys: [{ k: 'xcity', label: 'עיר' }] });
+    await prep((d) => d.doc(`b/${A}/ord/o9`).set({ no: 9, br: 'br1', status: 'new', custId: 't' + TZ, total: 1, items: [], cust: { name: 'x' }, at: 1 }));
+    assert.equal((await call('wipeCusts', E1, { reqId: rid(), confirm: 'מחק' })).reason, 'manager-only');
+    assert.equal((await call('wipeCusts', MGR, { reqId: rid() })).reason, 'bad-confirm');
+    const r = await call('wipeCusts', MGR, { reqId: rid(), confirm: 'מחק' });
+    assert.equal(r.status, 'OK', r.text); assert.ok(r.result.n >= 1);
+    assert.equal((await coll(`b/${A}/cust`)).length, 0); assert.equal(await get(`b/${A}/cust/t${TZ}/p/card`), null);
+    assert.ok(await get(`b/${A}/ord/o9`)); assert.ok(await get(`b/${A}/custcfg/main`));
+    const bk = await coll(`b/${A}/custBak`); assert.equal(bk.length, 1); assert.equal(bk[0].st, 'wiped');
+    await assertFails(db(MGR).doc(`b/${A}/custBak/${bk[0].id}`).get());
+    assert.ok((await coll(`b/${A}/cardLog`)).some((x) => x.act === 'wipe'));
+    const rs = await call('restoreCusts', MGR, { reqId: rid() });
+    assert.equal(rs.status, 'OK', rs.text); assert.equal(rs.result.n, r.result.n);
+    assert.equal((await get(`b/${A}/cust/t${TZ}`)).last4, '9012');
+    const v = await call('getCard', MGR, { custId: 't' + TZ, act: 'view' });
+    assert.equal(v.status, 'OK', v.text); assert.equal(v.result.card.num, '4580123456789012');
+    assert.equal((await call('restoreCusts', MGR, { reqId: rid() })).reason, 'bak-used');
+  });
+});
+
 describe('לקוחות – setCustCfg וחוקים', () => {
   it('setCustCfg: מנהל בלבד, יוצר מזהה, דוחה 21 שדות', async () => {
     assert.equal((await call('setCustCfg', E1, { xKeys: [{ label: 'א' }] })).reason, 'manager-only');

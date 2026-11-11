@@ -318,6 +318,59 @@ describe('מלאי', () => {
   });
 });
 
+describe('מחיקת כל המלאי ושחזור (11.11.2026)', () => {
+  it('עובד נחסם; בלי "מחק" נדחה; מנהל מוחק הכול עם גיבוי (כולל עלות/סיטונאי); קטגוריות והיסטוריה נשארות; שחזור מחזיר הכול ולא דורס מוצר חדש; שחזור שני נדחה', async () => {
+    await prep(async (d) => {
+      await d.doc(`b/${A}/prod/pA`).set({ name: 'עוגה', price: 10, on: true, q: { br1: 4 } });
+      await d.doc(`b/${A}/prod/pA/p/cost`).set({ cost: 6 });
+      await d.doc(`b/${A}/prod/pA/p/ws`).set({ wp: 8 });
+      await d.doc(`b/${A}/prod/pB`).set({ name: 'קפה', price: 12, on: true, q: { br2: 2 } });
+      await d.doc(`b/${A}/cat/c1`).set({ name: 'מאפים', ord: 1 });
+      await d.doc(`b/${A}/stockLog/l1`).set({ prod: 'pA', name: 'עוגה', br: 'br1', delta: 4, why: 'in', by: MGR, at: 1 });
+    });
+    assert.equal((await call('wipeStock', E1, { reqId: rid(), confirm: 'מחק' })).reason, 'manager-only');
+    assert.equal((await call('wipeStock', MGR, { reqId: rid(), confirm: 'כן' })).reason, 'bad-confirm');
+    assert.equal((await call('restoreStock', MGR, { reqId: rid() })).reason, 'no-bak');
+    const q = rid();
+    const r = await call('wipeStock', MGR, { reqId: q, confirm: 'מחק' });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.n, 2);
+    assert.equal((await call('wipeStock', MGR, { reqId: q, confirm: 'מחק' })).result.dup, true);
+    assert.equal((await coll(`b/${A}/prod`)).length, 0);
+    assert.equal(await get(`b/${A}/prod/pA/p/cost`), null); assert.equal(await get(`b/${A}/prod/pA/p/ws`), null);
+    assert.equal((await coll(`b/${A}/cat`)).length, 1); assert.equal((await coll(`b/${A}/stockLog`)).length, 1);
+    const bk = await coll(`b/${A}/stockBak`); assert.equal(bk.length, 1); assert.equal(bk[0].st, 'wiped'); assert.equal(bk[0].n, 2);
+    await assertFails(db(MGR).doc(`b/${A}/stockBak/${bk[0].id}`).get());
+    await prep((d) => d.doc(`b/${A}/prod/pN`).set({ name: 'חדש', price: 1, on: true, q: {} }));
+    const rs = await call('restoreStock', MGR, { reqId: rid() });
+    assert.equal(rs.status, 'OK', rs.text); assert.equal(rs.result.n, 2); assert.equal(rs.result.skip, 0);
+    assert.deepEqual((await get(`b/${A}/prod/pA`)).q, { br1: 4 }); assert.equal((await get(`b/${A}/prod/pA/p/cost`)).cost, 6); assert.equal((await get(`b/${A}/prod/pA/p/ws`)).wp, 8);
+    assert.equal((await coll(`b/${A}/prod`)).length, 3);
+    assert.equal((await call('restoreStock', MGR, { reqId: rid() })).reason, 'bak-used');
+  });
+  it('תקלה באמצע: מחיקה שנעצרה (גיבוי done) – ניסיון חוזר ממשיך את אותו גיבוי; גיבוי partial חדש יותר לא חוסם שחזור; מוצר קיים לא נדרס', async () => {
+    const B = `b/${A}/stockBak`;
+    await prep(async (d) => {
+      // מצב אחרי תקלה: גיבוי שלם של pA+pB (done), pA כבר נמחק, pB נשאר
+      await d.doc(`${B}/k1`).set({ at: 100, by: MGR, n: 2, st: 'done' });
+      await d.doc(`${B}/k1/items/pA`).set({ d: { name: 'עוגה', price: 10, q: { br1: 4 } }, p: { cost: { cost: 6 } } });
+      await d.doc(`${B}/k1/items/pB`).set({ d: { name: 'קפה', price: 12, q: { br2: 2 } }, p: {} });
+      await d.doc(`b/${A}/prod/pB`).set({ name: 'קפה', price: 12, q: { br2: 2 } });
+    });
+    const r = await call('wipeStock', MGR, { reqId: rid(), confirm: 'מחק' });
+    assert.equal(r.status, 'OK', r.text);
+    const bk = await coll(B); assert.equal(bk.length, 1); assert.equal(bk[0].st, 'wiped'); // אותו גיבוי, לא חדש
+    assert.equal((await coll(`b/${A}/prod`)).length, 0);
+    await prep(async (d) => {
+      await d.doc(`${B}/k2`).set({ at: 200, by: MGR, n: 1, st: 'partial' }); // גיבוי שנכשל בכתיבה – לא נמחק כלום
+      await d.doc(`b/${A}/prod/pA`).set({ name: 'עוגה חדשה', price: 99, q: {} });
+    });
+    const rs = await call('restoreStock', MGR, { reqId: rid() });
+    assert.equal(rs.status, 'OK', rs.text); assert.equal(rs.result.n, 1); assert.equal(rs.result.skip, 1);
+    assert.equal((await get(`b/${A}/prod/pA`)).name, 'עוגה חדשה'); assert.equal(await get(`b/${A}/prod/pA/p/cost`), null);
+    assert.deepEqual((await get(`b/${A}/prod/pB`)).q, { br2: 2 });
+  });
+});
+
 describe('לארג\' פעמי במצב legacy (שורש)', () => {
   const LM = 'l_mgr', LE = 'l_emp';
   async function seedL() {
