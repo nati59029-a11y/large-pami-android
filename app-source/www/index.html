@@ -1485,21 +1485,21 @@ ACT.grpDel=el=>{const g=el.dataset.g,L=grpOf(g),K=grpCr(g),R=S.tx.filter(t=>t.tg
   S.tx.forEach(t=>{if(t.tgrp===g)delete t.tgrp});
   closeDlg();save();rerender();toast(R.length?'ההעברה בוטלה':'הסגירה בוטלה')},R.length?'בטל את ההעברה':'בטל את הסגירה')};
 /* ---- מסך הפלוס (מנהל): "לטיפול" ו"סגירת קופה והפקדות" – קיצורי דרך למסכים הקיימים. הכניסות ב"עוד" ובבית לא השתנו ---- */
-function todoC(){const si=typeof siN==='function'?siN():0,ib=S.inbox||[],sup=ib.filter(it=>SUPC[(it.d||{}).cat]).length,x=tdnL(),ar=typeof arCnt==='function'?arCnt():0,arD=((typeof AR!=='undefined'&&AR&&AR.L)||[]).filter(r=>r.st==='doing').length;
- return{si,exp:ib.length-sup,sup,ar,arD,dn:x.dn.length,no:x.no.length,aw:x.aw.length,n:si+ib.length+ar+x.dn.length+x.no.length+x.aw.length}}
+/* חלוקה ב"לטיפול" (11.11): כל מסמך מעובד בקבוצה אחת בלבד – הוצאה מקופה (reg) גוברת, אחריה חשבונית ספק, והשאר הוצאות */function inbK(it){const d=(it&&it.d)||{};return d.reg?'reg':SUPC[d.cat]?'sup':'exp'}function todoC(){const si=typeof siN==='function'?siN():0,ib=S.inbox||[],reg=ib.filter(it=>inbK(it)==='reg').length,sup=ib.filter(it=>inbK(it)==='sup').length,x=tdnL(),ar=typeof arCnt==='function'?arCnt():0,arD=((typeof AR!=='undefined'&&AR&&AR.L)||[]).filter(r=>r.st==='doing').length;
+ return{si,reg,exp:ib.length-sup-reg,sup,ar,arD,dn:x.dn.length,no:x.no.length,aw:x.aw.length,n:si+ib.length+ar+x.dn.length+x.no.length+x.aw.length}}
 const cashC=()=>{const zc=zcCnt(),dq=dqN(),zs=typeof zsLostN==='function'?(zsLostN()||0):0;return{zc,dq,zs,n:zc+dq+zs}};
 const adTag=n=>n?`<span class="tag t1">${n}</span>`:'';
 function adTiles(){if(!(typeof isA==='function'&&isA()))return '';const a=todoC(),b=bzF('cashClose')?cashC():{n:0};
  /* המשבצות נכנסות לרשת אחת במסך ה-+: משבצת של תכונה כבויה לא משאירה חור */return `<button class="tile" data-a="addGo" data-v="todo" style="font-size:1rem">📥<br>לטיפול${adTag(a.n)}</button>${bzF('cashClose')?`<button class="tile" data-a="addGo" data-v="cash" style="font-size:1rem">💵<br>סגירת קופה והפקדות${adTag(b.n)}</button>`:''}`}/* משבצת "הזמנות" במסך ה-+ (00:27): רק כשהתכונה orders פעילה, ולעובד רק עם הרשאת ord (מנהל = הכול) */const adOrd=()=>bzF('orders')&&(!isW()||(bzB()&&wp('ord')));const adOrdT=()=>adOrd()?`<button class="tile" data-a="addGo" data-v="ox" style="font-size:1rem">🛒<br>הזמנות</button>`:'';
 const adOpt=(v,t,sm,n)=>`<button class="opt" data-a="go" data-v="${v}"><span>${t}${sm?`<small>${sm}</small>`:''}</span>${adTag(n)}${ico('chev')}</button>`;
-const adSec=t=>`<div class="sec"><h3>${t}</h3></div>`;
+const adSec=t=>`<div class="sec"><h3>${t}</h3></div>`;const adInb=(k,t,sm,n)=>adOpt('inbox',t,sm,n).replace('data-v="inbox"','data-v="inbox" data-arg="'+k+'"');
 V.todo=()=>{const T='לטיפול';if(!isA())return{t:T,s:'',h:'<div class="card"><p class="note">המסך הזה למנהל בלבד.</p></div>'};const c=todoC();let h='';
  /* סבב 3: ראשון ברשימה – "מסמכים שהתקבלו" (תפריט השיתוף של אנדרואיד) */
  h+=siSec();
  h+=trBtn('','');
  if(c.aw)h+=adSec('שולם – ממתין לחשבונית')+adOpt('tdn','תשלומים שממתינים לחשבונית','שולמו בהעברה, החשבונית עוד לא הגיעה',c.aw);
- if(c.exp)h+=adSec('הוצאות מעובדים')+adOpt('inbox','הוצאות שעובדים שלחו','ממתינות לאישור שלך',c.exp);
- if(c.sup)h+=adSec('חשבוניות ספקים מעובדים')+adOpt('inbox','חשבוניות ספקים שעובדים שלחו','ממתינות לאישור שלך',c.sup);
+ if(c.reg)h+=adSec('הוצאה מקופה')+adInb('reg','💵 הוצאות מקופה שעובדים שלחו','מזומן שהוצא מהקופה – ממתינות לאישור שלך',c.reg);
+ if(c.sup)h+=adSec('חשבוניות ספקים')+adInb('sup','חשבוניות ספקים שעובדים שלחו לך','אישור או שינוי',c.sup);if(c.exp)h+=adSec('הוצאות מעובדים')+adInb('exp','הוצאות שעובדים שלחו','ממתינות לאישור שלך',c.exp);
  if(c.ar||c.arD)h+=adSec('בקשות לעדכון האפליקציה')+adOpt('ar','🛠️ בקשות מהצוות',[c.ar?c.ar+' חדשות':'',c.arD?c.arD+' בטיפול':''].filter(Boolean).join(' · '),c.ar);
  if(c.dn||c.no)h+=adSec('חשבוניות לטיפול')+adOpt('tdn','תעודות משלוח וחשבוניות בלי מספר',[c.dn?c.dn+' תעודות משלוח בלי חשבונית':'',c.no?c.no+' בלי מספר חשבונית':''].filter(Boolean).join(' · '),c.dn+c.no);
  return{t:T,s:c.n?c.n+' ממתינים':'הכול מטופל',h:c.n?h:h+'<div class="empty">אין כרגע דברים לטיפול ✓</div>'}};
@@ -2610,8 +2610,8 @@ ACT.syPull=async()=>{try{const n=await pullInbox();if(n||!RPL.ok)toast(n?n+' ה�
 ACT.syOpen=()=>{sheetClose();NAV=[{v:'sync'}];render(0)};
 /* ---- אישור הוצאות מעובדים (מנהל) ---- */
 const inbName=it=>{const c=cat(it.d.cat);if(it.d.reg&&!c)return 'דף הוצאה מקופה · ללא קטגוריה';return(c?c.name:(it.d.catName||'קטגוריה'))+(it.d.subName?' · '+it.d.subName:'')};
-V.inbox=()=>{inbHeal();const L=S.inbox.slice().sort((a,b)=>(b.at||'').localeCompare(a.at||''));
- return{t:'הוצאות מעובדים',s:L.length+' ממתינות',h:L.length?L.map(it=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${inbChk(it)?'צ׳ק מעובד'+(s_(it.d.payee)?' · '+esc(it.d.payee):''):esc(inbName(it))}</b><b>${ils(num(it.d.amt))}</b></div>${inbChk(it)?`<div style="margin:4px 0"><span class="tag t2" data-chktag>צ׳ק מעובד</span>${it.d.low?'<span class="tag t1">לבדוק</span>':''}</div>`:''}<small>הוכנס על ידי ${esc(it.by)} · ${esc(it.d.date||'')}${it.d.plan?' · לתשלום '+esc(mfmt(it.d.plan)):''}${inbChk(it)&&s_(it.d.no)?' · צ׳ק '+esc(it.d.no):''}${it.d.inv?' · חשבונית '+esc(it.d.inv):''}${it.d.dn?' · תעודת משלוח':''}${it.d.note?' · '+esc(it.d.note):''}</small>
+const INBT={reg:'הוצאות מקופה מעובדים',sup:'חשבוניות ספקים מעובדים',exp:'הוצאות מעובדים'};V.inbox=a=>{inbHeal();const k=INBT[a]?a:'',L=S.inbox.filter(it=>!k||inbK(it)===k).sort((a,b)=>(b.at||'').localeCompare(a.at||''));
+ return{t:k?INBT[k]:'הוצאות מעובדים',s:L.length+' ממתינות',h:L.length?L.map(it=>`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${inbChk(it)?'צ׳ק מעובד'+(s_(it.d.payee)?' · '+esc(it.d.payee):''):esc(inbName(it))}</b><b>${ils(num(it.d.amt))}</b></div>${inbChk(it)?`<div style="margin:4px 0"><span class="tag t2" data-chktag>צ׳ק מעובד</span>${it.d.low?'<span class="tag t1">לבדוק</span>':''}</div>`:''}<small>הוכנס על ידי ${esc(it.by)} · ${esc(it.d.date||'')}${it.d.plan?' · לתשלום '+esc(mfmt(it.d.plan)):''}${inbChk(it)&&s_(it.d.no)?' · צ׳ק '+esc(it.d.no):''}${it.d.inv?' · חשבונית '+esc(it.d.inv):''}${it.d.dn?' · תעודת משלוח':''}${it.d.note?' · '+esc(it.d.note):''}</small>
  ${(()=>{const mm=dupMsg(dupInbox(it));return mm.map(m=>`<div class="note scnote bad">${sci('warn')}<span>${esc(m)}</span></div>`).join('')})()}
  ${it.rq?`<div class="note scnote acc">${sci('cam')}<span>ביקשת צילום חדש${it.rq.n?': '+esc(it.rq.n):''}. הצילום יוחלף כשהעובד ישלח.</span></div>`:''}${it.rph?`<div class="note scnote ok">${sci('ok')}<span>התקבל צילום חדש מהעובד</span></div>`:''}
  <div class="row" style="margin-top:8px">${it.file?`<button class="btn g grow" data-a="inbView" data-id="${esc(it.id)}">צפה בצילום</button>`:''}${it.file&&idOk(it.file)?`<button class="btn g" data-a="dxShare" data-f="${esc(it.file)}" data-n="${esc(it.id)}" aria-label="שיתוף הצילום">${ico('share')}</button>`:''}${inbChk(it)?`<button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">שייך לחשבונית</button>`:`<button class="btn g grow" data-a="inbEdit" data-id="${esc(it.id)}">בדיקה ושינוי</button><button class="btn grow" data-a="inbOk" data-id="${esc(it.id)}">אשר</button>`}<button class="btn g grow" data-a="inbNo" data-id="${esc(it.id)}">דחה</button></div><button class="btn g" style="width:100%;margin-top:8px" data-a="inbRe" data-id="${esc(it.id)}">${sci('cam')}${it.rq?'בקש שוב צילום חדש':'בקש צילום חדש'}</button></div>`).join(''):'<p class="note" style="padding:16px">אין הוצאות שממתינות לאישור.</p>'}};
