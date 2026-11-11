@@ -203,7 +203,7 @@ const crow=c=>`<button class="li" data-a="go" data-v="ocCard" data-arg="${esc(c.
 const match=(c,q)=>!q||String(c.name||'').includes(q)||String(c.bn||'').includes(q)||String(c.phone||'').includes(dig(q)||'\u0000')||phsOf(c).some(p=>p.includes(dig(q)||'\u0000'))||String(c.tz||'').includes(dig(q)||'\u0000')||dig(c.bph).includes(dig(q)||'\u0000')||dig(c.btz).includes(dig(q)||'\u0000');
 const listH=()=>{const L=(C.L||[]).filter(c=>match(c,C.q.trim()));return L.slice(0,200).map(crow).join('')+(L.length>200?`<p class="note">מוצגים 200 מתוך ${L.length}. חפשו כדי לצמצם.</p>`:'')||'<div class="empty">אין לקוחות</div>'};
 V.ocList=()=>{const T='לקוחות';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
- return{t:T,s:C.L.length+' לקוחות',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button></div>
+ return{t:T,s:C.L.length+' לקוחות',h:`${mgr()&&typeof impCardH==='function'?impCardH('cust'):''}<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button></div>
  <div class="card" id="ocCount" style="margin:8px 0;text-align:center"><b class="a" style="font-size:1.4em">${C.L.length}</b> <span>לקוחות</span></div>
  ${mgr()?'<button class="btn g s w" data-a="ocCfg">שדות נוספים ללקוח</button>':''}
  <label class="f"><span>חיפוש (שם, טלפון או ת.ז)</span><input data-i="ocQ" value="${esc(C.q)}" autocomplete="off"></label><div id="ocl">${listH()}</div>
@@ -440,7 +440,7 @@ function groupRows(rows){const T=new Map(),P=new Map(),TP=new Map(),G=[],L=[];le
 // ללקוח עם טלפון/ת"ז תקינים לא נשמר ערך לא תקין נוסף (bph/btz); אם הוא שונה – מצטרף להערות (רק בעסק עם cellular)
 function flagFix(o){const add=[];[['bph','phone','טלפון נוסף (לא תקין)'],['btz','tz','ת.ז נוספת (לא תקינה)']].forEach(([b,v,l])=>{if(!o[b]||!o[v])return;if(o[b]!==o[v])add.push(l+': '+o[b]);delete o[b]});
  if(add.length&&cell()){let n=o.note||'';add.forEach(a=>{if(!n.split(' | ').includes(a)){const j=n?n+' | '+a:a;if(j.length<=1000)n=j}});if(n)o.note=n}}
-function prep(){const I=C.imp,{out,cut,mk}=prepRows(I);const ok=out.filter(r=>!r.why.length),{G,cardX,portX}=groupRows(ok);
+function prep(){const I=C.imp,{out,cut,mk}=prepRows(I);I.req=rid(); /* סבב 2: מזהה עבודה חדש לכל תצוגה מקדימה (מיפוי חדש); "נסה שוב" באותו מסך – אותו מזהה */const ok=out.filter(r=>!r.why.length),{G,cardX,portX}=groupRows(ok);
  I.out=out;I.G=G;I.cut=cut;I.mk=mk;I.cardX=cardX;I.portX=portX;I.R=null}
 const gBad=g=>!!(g.o.bph||g.o.btz||g.o.bml||(g.o.ports||[]).some(p=>p.bph||p.btz));
 const prevH=()=>{const I=C.imp,ok=I.G,bad=I.out.filter(r=>r.why.length),nl=ok.reduce((s,g)=>s+(g.o.ports||[]).length,0),nb=ok.filter(gBad).length;
@@ -449,11 +449,12 @@ const prevH=()=>{const I=C.imp,ok=I.G,bad=I.out.filter(r=>r.why.length),nl=ok.re
  ${bad.slice(0,50).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line);color:var(--bad)">שורה ${r.n}: ${esc(r.why.join(', '))}</div>`).join('')}</div>
  <p class="note">לקוח קיים (אותה ת.ז או טלפון) – רק שדות ריקים מתמלאים. אין כפולים.</p>
  <div class="row"><button class="btn grow" data-a="ocGo"${ok.length?'':' disabled'}>ייבא ${ok.length} לקוחות</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>`};
-ACT.ocGo=async el=>{const I=C.imp;if(!I||!I.out)return;el.disabled=true;const ok=I.G;const t={c:0,u:0,s:0,b:[]};
- try{const N=25;for(let i=0;i<ok.length;i+=N){const part=ok.slice(i,i+N);el.textContent=`מייבא… ${i}/${ok.length}`;
-   const r=await fnCall('importCusts',{reqId:I.req+'_n'+N+'_'+(i/N),rows:part.map(x=>x.o)});t.c+=r.created||0;t.u+=r.updated||0;t.s+=r.same||0;(r.bad||[]).forEach(b=>t.b.push('שורה '+part[b.i].n+': '+b.msg))}
-  C.imp.out=null;C.imp.G=null;C.imp=null;dlg(`<h3>הייבוא הסתיים</h3><p>חדשים: <b>${t.c}</b> · עודכנו: <b>${t.u}</b> · ללא שינוי: <b>${t.s}</b></p>${t.b.length?`<div style="max-height:40vh;overflow:auto">${t.b.slice(0,50).map(s=>`<p class="note">${esc(s)}</p>`).join('')}</div>`:''}<button class="btn w" data-a="closeDlg">סגור</button>`);await loadL(true)}
+/* 11.11.2026 (ייבוא ברקע): הקובץ נשלח לשרת (startImport, 200 לקוחות בקריאה) והשרת מייבא לבד – אפשר לצאת מהאפליקציה.
+   ההתקדמות והסיכום – בכרטיס ברשימת הלקוחות ובמרכז הייבוא (orders-staff.js, impCardH). הייבוא הישן (importCusts) נשאר בשרת לטלפונים ישנים */
+ACT.ocGo=async el=>{const I=C.imp;if(!I||!I.out)return;el.disabled=true;const ok=I.G;
+ try{await window.__imp.send('cust',ok.map(x=>x.o),ok.map(x=>x.n),null,el,I.req.slice(1,21));
+  C.imp.out=null;C.imp.G=null;C.imp=null;dlg(`<h3>הקובץ נשלח לשרת</h3><p>${ok.length} לקוחות מיובאים עכשיו בשרת. <b>אפשר לצאת מהאפליקציה</b> – הייבוא ממשיך, וההתקדמות והסיכום מופיעים ברשימת הלקוחות ובמרכז הייבוא.</p><button class="btn w" data-a="closeDlg">סגור</button>`)}
  catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
 
-C.split=splitOld;C.prepRows=prepRows;C.groupRows=groupRows;C.guess=guess;window.__oc=C;
+window.__ocLoad=f=>loadL(f);C.split=splitOld;C.prepRows=prepRows;C.groupRows=groupRows;C.guess=guess;window.__oc=C;
 })();

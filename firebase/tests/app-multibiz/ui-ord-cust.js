@@ -48,7 +48,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await ctx.route(/:8080\/.*/, async (route) => {
     const req = route.request(); const u = new URL(req.url()); const body = req.postData() || '';
     if (/:runQuery$/.test(u.pathname)) { globalThis.__RQ = (globalThis.__RQ || []).concat([body]); let c = ''; try { c = JSON.parse(body).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
-      const r = c === 'cust' ? CUST : c === 'ordpay' ? (globalThis.__OP || []) : c === 'ord' ? ORD : c === 'prod' ? PROD : c === 'stockLog' ? [doc('stockLog/s1', { name: S('עוגת שוקולד'), br: S('br1'), delta: N(5), why: S('in'), at: N(T1) })] : [{ readTime: '2026-11-03T09:00:00Z' }];
+      const r = c === 'cust' ? CUST : c === 'impJobs' ? (globalThis.__IJ || [{ readTime: '2026-11-03T09:00:00Z' }]) : c === 'ordpay' ? (globalThis.__OP || []) : c === 'ord' ? ORD : c === 'prod' ? PROD : c === 'stockLog' ? [doc('stockLog/s1', { name: S('עוגת שוקולד'), br: S('br1'), delta: N(5), why: S('in'), at: N(T1) })] : [{ readTime: '2026-11-03T09:00:00Z' }];
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) }); }
     const cm = /\/cust\/([^/]+)$/.exec(u.pathname); if (cm) { const d = CUST.find((x) => x.document.name.endsWith('/' + cm[1])); return d ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(d.document) }) : route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":{"code":404}}' }); }
     if (/\/custcfg\/main$/.test(u.pathname)) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name: 'x', fields: { xKeys: A([M({ k: S('xcity'), label: S('עיר') })]) } }) });
@@ -168,10 +168,38 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 400); await shot('ייבוא-תצוגה-a');
   const pv = await page.innerText('#dlg');
   await page.click('#dlg [data-a=ocGo]'); await H.settle(page, 600);
-  const ic = calls.find((c) => c.n === 'importCusts'); const all = JSON.stringify(calls.filter((c) => c.n !== 'setCard')) /* setCard (4ב) שולח את המספר לשרת בכוונה */ + (await page.evaluate(() => document.body.innerHTML + JSON.stringify(window.__oc) + JSON.stringify(localStorage)));
-  check('6 ייבוא (כולל עמודת כרטיס מלא מוצפן + תוקף + CVV שנשלחים ב-cards בלבד – סבב 2): מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 4 && ic.d.rows[3].last4 === '1111' && ic.d.rows[1].last4 === '1881' && ic.d.rows[1].cards && ic.d.rows[1].cards.length === 1 && ic.d.rows[1].cards[0].num === '4012888888881881' && ic.d.rows[1].cards[0].exp === '07/28' && ic.d.rows[1].cards[0].cvv === '321' && ic.d.rows.filter((r) => r.cards || r.card).length === 1 && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[2].phone === '0521112222' && ic.d.rows[2].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234|4111\.1111|5326\/1000/.test(all) && /שורה 7: מספר ארוך/.test(pv) && /\*\*\*\*9012/.test(mapTxt) && /שורה 5/.test(pv) && /נחתכו/.test(pv), { rows: ic && ic.d.rows, leak: /4580\s?1234|4111\.1111|5326\/1000/.test(all), pv: pv.slice(0, 600) });
+  const dTxt = await page.innerText('#dlg'); // 11.11.2026: ייבוא ברקע – startImport (מזהה עבודה אחד, מיקום בקובץ ומספרי השורות), לא importCusts
+  const ic = calls.find((c) => c.n === 'startImport' && c.d.kind === 'cust'); const all = JSON.stringify(calls.filter((c) => c.n !== 'setCard')) /* setCard (4ב) שולח את המספר לשרת בכוונה */ + (await page.evaluate(() => document.body.innerHTML + JSON.stringify(window.__oc) + JSON.stringify(localStorage)));
+  check('6 ייבוא (כולל עמודת כרטיס מלא מוצפן + תוקף + CVV שנשלחים ב-cards בלבד – סבב 2): מספר כרטיס מלא → last4 9012 בלבד; המספר המלא לא נשלח, לא מוצג ולא בזיכרון/אחסון; עמודת סיטונאי לא נשלחת; 0 בטלפון משוחזר; שורה שגויה מסומנת', !!ic && ic.d.rows.length === 4 && ic.d.rows[3].last4 === '1111' && ic.d.rows[1].last4 === '1881' && ic.d.rows[1].cards && ic.d.rows[1].cards.length === 1 && ic.d.rows[1].cards[0].num === '4012888888881881' && ic.d.rows[1].cards[0].exp === '07/28' && ic.d.rows[1].cards[0].cvv === '321' && ic.d.rows.filter((r) => r.cards || r.card).length === 1 && ic.d.rows[0].last4 === '9012' && ic.d.rows[0].x.xcity === 'אשדוד' && ic.d.rows[2].phone === '0521112222' && ic.d.rows[2].last4 === '1234' && ic.d.rows.every((r) => r.wholesale === undefined) && !/4580\s?1234|4111\.1111|5326\/1000/.test(all) && /שורה 7: מספר ארוך/.test(pv) && /\*\*\*\*9012/.test(mapTxt) && /שורה 5/.test(pv) && /נחתכו/.test(pv) && /^[A-Za-z0-9]{20}$/.test(ic.d.job) && ic.d.at === 0 && ic.d.total === 4 && ic.d.ns.length === 4 && !calls.some((c) => c.n === 'importCusts') && /הקובץ נשלח לשרת/.test(dTxt) && /אפשר לצאת מהאפליקציה/.test(dTxt), { dTxt: dTxt.slice(0, 200), rows: ic && ic.d.rows, leak: /4580\s?1234|4111\.1111|5326\/1000/.test(all), pv: pv.slice(0, 600) });
   const mem = JSON.stringify(await page.evaluate(() => [window.__oc, localStorage, document.body.innerHTML]));
   check('6ב אחרי ייבוא: מספר הכרטיס המלא לא נשאר בזיכרון/אחסון/מסך', !mem.includes('4012888888881881'), null);
+  // 6ג (11.11.2026): כרטיס התקדמות של ייבוא ברקע ברשימת הלקוחות – בזמן ייבוא, ובסיום עם חלק שנכשל ("נסה שוב")
+  await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } });
+  const JID = 'AbCdEfGhIjKlMnOpQrSt';
+  const ij = (f) => [doc('impJobs/' + JID, Object.assign({ k: S('cust'), total: N(916), t: N(Date.now() - 60000), upd: N(Date.now()), cnt: M({ c: N(290), u: N(5), s: N(5), b: N(2) }), bad: A([M({ n: N(7), r: S('bad-phone'), m: S('מספר הטלפון לא תקין') })]), fail: A([]) }, f))];
+  globalThis.__IJ = ij({ st: S('run'), dn: N(300), fr: N(0) });
+  const pr = await screen('ייבוא-ברקע-התקדמות', async () => { await goV('ocList'); await H.settle(page, 300); await page.evaluate(() => window.__imp.load(true)); await H.settle(page, 300); });
+  globalThis.__IJ = ij({ st: S('part'), dn: N(816), fr: N(100), fin: N(Date.now()), fail: A([M({ n: N(800), id: S('800'), why: S('tries') })]) });
+  await page.evaluate(() => window.__imp.load(true)); await H.settle(page, 400);
+  const pt = await page.innerText('#impc'); const nr = calls.length;
+  await page.click('#impc [data-a=impRetry]'); await H.settle(page, 400);
+  const rt = calls.slice(nr).find((c) => c.n === 'startImport');
+  check('6ג ייבוא ברקע: כרטיס התקדמות ("מייבא בשרת", 300 מתוך 916, אפשר לצאת, מונים, שורה שגויה); בסיום עם כשל – "נסה שוב" שולח retry; מגע/ניגודיות/גלילה (3 ערכות)',
+    okAll(pr) && /מייבא בשרת/.test(pr.a.text) && /300 מתוך 916/.test(pr.a.text) && /אפשר לצאת מהאפליקציה/.test(pr.a.text) && /חדשים: 290/.test(pr.a.text) && /שגויות: 2/.test(pr.a.text)
+    && /חלק לא יובא/.test(pt) && /100 שורות לא יובאו/.test(pt) && !!rt && rt.d.retry === JID, { s: sum(pr), pt: pt.slice(0, 300), rt: rt && rt.d });
+  // 6ד (סבב 2): ייבוא תקוע (אין שינוי 10+ דקות) → "נתקע" + "נסה שוב" (retry), בלי בדיקה אוטומטית; ייבוא פעיל בלי התקדמות → בדיקה פחות תכופה (4→8→16 שניות)
+  const pnow = await page.evaluate(() => Date.now()); // השעון של הדף קבוע (harness)
+  globalThis.__IJ = ij({ st: S('run'), dn: N(300), fr: N(0), recv: N(916), t: N(pnow - 20 * 60000), upd: N(pnow - 11 * 60000) });
+  await page.evaluate(() => window.__imp.load(true)); await H.settle(page, 400);
+  const sk = await page.evaluate(() => { const e = document.getElementById('impc'); return e ? e.innerText : 'NO-IMPC ' + cur().v; }); const ns0 = calls.length; const ivS = await page.evaluate(() => window.__imp.iv());
+  await page.click('#impc [data-a=impRetry]'); await H.settle(page, 400);
+  const rs = calls.slice(ns0).find((c) => c.n === 'startImport');
+  globalThis.__IJ = ij({ st: S('run'), dn: N(300), fr: N(0), recv: N(916), upd: N(pnow) });
+  const iv = []; for (let k = 0; k < 3; k++) { await page.evaluate(() => window.__imp.load(true)); await H.settle(page, 150); iv.push(await page.evaluate(() => window.__imp.iv())); }
+  globalThis.__IJ = ij({ st: S('run'), dn: N(400), fr: N(0), recv: N(916), upd: N(pnow) });
+  await page.evaluate(() => window.__imp.load(true)); await H.settle(page, 150); iv.push(await page.evaluate(() => window.__imp.iv()));
+  check('6ד ייבוא תקוע: "נתקע" + הסבר + "נסה שוב" שולח retry; בלי התקדמות – המרווח גדל (8, 16…), התקדמות – חוזר ל-4 שניות', /נתקע/.test(sk) && /10 דקות/.test(sk) && !/אפשר לצאת/.test(sk) && !!rs && rs.d.retry === JID && iv[1] > iv[0] && iv[2] > iv[1] && iv[3] === 4000, { sk: sk.slice(0, 200), iv, ivS });
+  globalThis.__IJ = null; await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } });
   await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } }); await H.settle(page, 200);
   // 9. מנהל: כרטיס לקוח – הצגה (getCard view), העתקה, מחיקה
   await goV('ocCard', 't' + TZ); await H.settle(page, 400);
