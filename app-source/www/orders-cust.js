@@ -204,6 +204,7 @@ const match=(c,q)=>!q||String(c.name||'').includes(q)||String(c.bn||'').includes
 const listH=()=>{const L=(C.L||[]).filter(c=>match(c,C.q.trim()));return L.slice(0,200).map(crow).join('')+(L.length>200?`<p class="note">מוצגים 200 מתוך ${L.length}. חפשו כדי לצמצם.</p>`:'')||'<div class="empty">אין לקוחות</div>'};
 V.ocList=()=>{const T='לקוחות';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};if(!C.L){loadL();return{t:T,h:'<div class="empty">טוען…</div>'}}
  return{t:T,s:C.L.length+' לקוחות',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="ocNew">${ico('plus')}לקוח חדש</button></div>
+ <div class="card" id="ocCount" style="margin:8px 0;text-align:center"><b class="a" style="font-size:1.4em">${C.L.length}</b> <span>לקוחות</span></div>
  ${mgr()?'<button class="btn g s w" data-a="ocCfg">שדות נוספים ללקוח</button>':''}
  <label class="f"><span>חיפוש (שם, טלפון או ת.ז)</span><input data-i="ocQ" value="${esc(C.q)}" autocomplete="off"></label><div id="ocl">${listH()}</div>
  <button class="btn g s w" style="margin-top:8px" data-a="ocRe">רענן</button>${mgr()?'<div class="row" style="margin-top:16px"><button class="btn g s grow" data-a="ocWipe" style="color:var(--bad)">מחיקת כל הלקוחות</button><button class="btn g s grow" data-a="ocRest">שחזור לקוחות מגיבוי</button></div>':''}`}};
