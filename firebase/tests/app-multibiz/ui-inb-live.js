@@ -76,6 +76,7 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   check('5 חזרה לאפליקציה (visibilitychange) – משיכה תוך 2 שניות', t4 >= 0 && t4 <= 2000, { ms: t4 });
 
   // 6. מנעול: שתי קריאות בו־זמנית = משיכה אחת; גם מול pullInbox המלא
+  await waitFor(() => page.evaluate(() => !pullInbox.b), 3000); // המשיכה מבדיקה 5 עלולה עוד לרוץ (המנעול תפוס) – מחכים שתסתיים, כדי למדוד רק את 3 הקריאות
   M.delay = 300; M.inb = 0;
   await page.evaluate(() => Promise.all([inbTick(0), inbTick(0), inbTick(0)]));
   const c6a = M.inb; M.inb = 0;
