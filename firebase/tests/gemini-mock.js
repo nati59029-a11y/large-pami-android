@@ -44,10 +44,14 @@ const CLASSIFY = {
   check: { type: 'check', type_confidence: 0.92, fields: { number: '000123', bank: 'לאומי', branch: '800', account: '1234567', date: '2026-12-15', amount: '2,360.00', payee: 'ספק דמה בע"מ' }, confidence: { amount: 0.95, date: 0.6, payee: 0.9 } },
   unknown: { type: 'unknown', type_confidence: 0.3, fields: {}, confidence: {} },
 };
-const state = { mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, classify: null };
-function reset() { state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+// המזכירה (שלב 2): בקשה עם הנחיית מערכת שמתחילה ב-SEC-CHAT-V1. התשובה נקבעת בבדיקה: state.sec = (body) => ({ calls: [{ name, args }] } | { text })
+// usage = טוקנים מדומים לכל תשובה (לבדיקת מונה העלות)
+const state = { mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
+  const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
+  if (typeof si === 'string' && si.startsWith('SEC-CHAT-V1')) return 'sec';
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
   if (s.startsWith('סווג את המסמך')) return 'classify'; // סריקה אחידה – לפני כל השאר, כי ההנחיה מזכירה את כל הסוגים
@@ -65,7 +69,14 @@ function kindOf(body) {
 
 // התשובה הגולמית שהשרת מחזיר לבקשה – נחשפת לבדיקה, כדי להשוות לתוצאה של הפונקציה
 // classify: התשובה נקבעת בבדיקה (state.classify), ובלי – חשבונית רגילה
-function rawAnswer(kind) {
+function secAnswer(body) {
+  let r = { text: 'שלום' };
+  try { if (typeof state.sec === 'function') r = state.sec(body) || r; } catch (e) { r = { text: 'mock error: ' + e.message }; }
+  const parts = r.calls && r.calls.length ? r.calls.map((c) => ({ functionCall: { name: c.name, args: c.args || {} } })) : [{ text: String(r.text || '') }];
+  return { candidates: [{ content: { parts, role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
+}
+function rawAnswer(kind, body) {
+  if (kind === 'sec') return secAnswer(body || {});
   if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
   let text = JSON.stringify(kind === 'classify' ? (state.classify || CLASSIFY.invoice) : (ANSWERS[kind] || { ok: true }));
   if (state.fenced) text = '```json\n' + text + '\n```';
@@ -103,7 +114,7 @@ function start() {
       if (state.mode === 'badkey') return send(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
       if (state.mode === 'quota') return send(429, { error: { message: 'quota' } });
       if (state.mode === 'overloaded') return send(503, { error: { message: 'overloaded' } });
-      return send(200, rawAnswer(kind));
+      return send(200, rawAnswer(kind, body));
     });
   });
   return new Promise((ok, no) => { server.once('error', no); server.listen(PORT, '127.0.0.1', ok); });
