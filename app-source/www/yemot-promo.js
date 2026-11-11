@@ -5,7 +5,7 @@
 (function(){
 'use strict';
 const YM_DEFAULT_DAYS=7,YM_MAX_DAYS=60,YM_TEXT_MAX=400; // לפי חוזה השמות (שלב 1)
-const YM_BASE=()=>(typeof EMU!=='undefined'&&EMU)?`http://${EMU}:5001/${FB.projectId}/us-central1`:`https://us-central1-${FB.projectId}.cloudfunctions.net`;
+const YM_BASE=()=>FNB(); // כתובת הפונקציות – אחת לכל האפליקציה (FN_REGION/FNB ב-index.html)
 const YM_MSG={ // הודעות לפי reason מהחוזה; כולן בעברית
  'voice-unavailable':'הקול האנושי לא זמין כרגע. אפשר לשלוח בקול הממוחשב, או לנסות שוב מאוחר יותר.','voice-quota':'הגענו לתקרת הקול האנושי לחודש הזה.',
  'daily-limit':'כבר שלחת היום צינתוק לנרשמים. סימנו "בלי צינתוק": אפשר לשלוח כך עכשיו, לשלוח עם צינתוק מחר, או לבקש ממנהל.',
