@@ -1,4 +1,4 @@
-/* SEC:1+2+3 – המזכירה העסקית. שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
+/* SEC:1+2+3+4 – המזכירה העסקית. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
    שלב 2: secFin – נתוני הכספים לצ'אט ולמראה, מחושבים בפונקציות של מסכי האפליקציה עצמם (monthIncome, monthExpense, monthOwner, catTotal,
    inv/bal/dueOf, bsum, homeCards, dueStats, cfDebits, cfMonths) – אין כאן נוסחה כספית שנייה; מראה לענן אחרי כל שמירה (לכל היותר פעם ב-3 דקות);
    מסך הצ'אט (מקורות, "נכון ל-", "חשבי לעומק", אחוז ניצול, סף תזרים, "לא רלוונטי", מתג המראה).
@@ -82,7 +82,8 @@ const ACTS={consent:'אישור תנאי השימוש',setup:'הגדרת שם ו
  factAdd:'נשמרה עובדה',factOk:'אושרה עובדה שהמזכירה הציעה',factNo:'בוטלה הצעה לעובדה',factEdit:'עובדה נערכה',factDel:'עובדה נמחקה',fixed:'עודכנו פרטים קבועים',price:'הועלה מחירון',priceDel:'המחירון נמחק',
  sensRead:'צפייה במידע הרגיש',sensTool:'המזכירה קראה מידע רגיש',sensAdd:'נשמר מידע רגיש',sensEdit:'מידע רגיש נערך',sensDel:'מידע רגיש נמחק',
  ruleAdd:'נוספה תשובה מוכנה',ruleEdit:'תשובה מוכנה נערכה',ruleDel:'תשובה מוכנה נמחקה',bank:'נענתה שאלה מתשובה מוכנה (בלי AI)',import:'ייבוא מהמזכירה הקודמת',
- calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג'};
+ calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
+ notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 V.sec=()=>{const T='המזכירה';
  if(!elig())return{t:T,h:'<div class="empty">המזכירה לא מופעלת בעסק הזה</div>'};
@@ -96,6 +97,8 @@ V.sec=()=>{const T='המזכירה';
  if(tab==='facts')return{t:S.name||T,s:'מידע על העסק',h:tabsH()+factsH(S)};
  if(tab==='cal')return{t:S.name||T,s:'יומן',h:tabsH()+calH()};
  if(tab==='bank')return{t:S.name||T,s:'תשובות מוכנות',h:tabsH()+bankH()};
+ if(tab==='notes')return{t:S.name||T,s:'התראות',h:tabsH()+notesH()};
+ if(tab==='reps')return{t:S.name||T,s:'דוחות ותובנות',h:tabsH()+repsH()};
  if(!X.msgs&&!X.mb)msgLoad();
  return{t:S.name||T,s:'המזכירה העסקית',h:tabsH()+chatH(S)}};
 ACT.secRe=()=>{X.st=null;load(true);rerender()};
@@ -223,6 +226,7 @@ function setH(S){return `<div class="card"><b>מראה הכספים בענן</b>
  <label class="chip" style="min-height:44px;width:100%;justify-content:flex-start"><input type="checkbox" data-c="secMir"${S.mirror!==false?' checked':''}> פעיל${S.mirrorAt?' · עודכן '+esc(fmtAt(S.mirrorAt)):''}</label></div>
  <div class="card" style="margin-top:8px"><b>סף התראת תזרים</b><p class="note" style="margin:4px 0 8px">${S.cfTh!=null?'הסף שאישרת: '+esc(Number(S.cfTh).toLocaleString('he-IL'))+' ₪':'עדיין לא נקבע. המזכירה תציע סף כשתשאלו על התזרים.'}</p><button class="chip" data-a="secThEd" style="min-height:40px">${S.cfTh!=null?'שינוי':'קביעת סף'}</button></div>
  <div class="card" style="margin-top:8px"><b>פגישה בשישי, בשבת או בחג</b><p class="note" style="margin:4px 0 8px">מה לעשות כשאירוע נקבע ליום שאינו יום עסקים.</p><div class="chips" role="radiogroup"><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="warn"${S.we!=='accept'?' checked':''}> להזהיר ולהציע יום אחר</label><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="accept"${S.we==='accept'?' checked':''}> לקבל בלי הערה</label></div></div>
+ ${ntH(S)}
  <button class="btn g w" data-a="secEdit" style="margin-top:10px">שינוי שם ואופן פנייה</button><button class="btn g w" data-a="secSetX" style="margin-top:8px">חזרה לשיחה</button>
  <div class="sec"><h3>יומן פעולות</h3></div>${logH()}`}
 ACT.secSet=()=>{X.set=1;rerender()};
@@ -258,9 +262,10 @@ css3.textContent='.sectabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.
 +'.secsens{border-style:dashed!important}.sectags{font-size:.78rem;padding:1px 8px;border:1px solid var(--line);border-radius:10px;margin-inline-start:4px;white-space:nowrap}'
 +'.secrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.secrow .chip{min-height:40px}.secli{padding:10px 0;border-bottom:1px solid var(--line)}.secli:last-child{border-bottom:0}.secli p{margin:0 0 4px;white-space:pre-wrap;overflow-wrap:anywhere}';
 document.head.appendChild(css3);
-const TABS=[['chat','שיחה'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
-function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}</button>`).join('')}</div>`}
-ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')X.fl=null;if(X.tab==='cal')X.cl=null;if(X.tab==='bank')X.rl=null;rerender()};
+const TABS=[['chat','שיחה'],['notes','התראות'],['reps','דוחות'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
+const unseenN=()=>X.nl&&!X.nl.err?X.nl.unseen:((X.st&&X.st.unseen)||0);
+function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}</button>`).join('')}</div>`}
+ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')X.fl=null;if(X.tab==='cal')X.cl=null;if(X.tab==='bank')X.rl=null;if(X.tab==='notes')X.nl=null;if(X.tab==='reps'){X.rpl=null;X.rp=null}rerender()};
 const dShort=d=>{if(!d)return '';const[y,m,x]=d.split('-').map(Number);return x+'.'+m+'.'+y};
 const hebD=d=>{try{const[y,m,x]=d.split('-').map(Number);return new Intl.DateTimeFormat('he-u-ca-hebrew',{day:'numeric',month:'long'}).format(new Date(y,m-1,x,12))}catch(e){return ''}};
 const wkD=d=>{try{const[y,m,x]=d.split('-').map(Number);return new Date(y,m-1,x,12).toLocaleDateString('he-IL',{weekday:'long'})}catch(e){return ''}};
@@ -342,7 +347,7 @@ ACT.secSDel=el=>{const id=el.dataset.id;ask('למחוק את המידע הרגי
 /* ---------- יומן (8.2 מסך 4): רשימה (ברירת מחדל) ושבוע; שישי/שבת/חג בגוון עדין; הצעות מהמזכירה – לאישור ---------- */
 async function calLoad(){X.cb=1;try{X.cl=await fnCall('secCal',{op:'list'})}catch(e){X.cl={err:e&&e.message||'לא נטען'}}finally{X.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
 const SRC={mgr:'ידני',sec:'מהמזכירה',import:'ייבוא'};
-function evH(e){return `<div class="secli"><p><b>${e.tm?'<bdi dir="ltr">'+esc(e.tm)+'</bdi> · ':''}${esc(e.title)}</b> <span class="sectags">${e.biz?'של העסק':'אישי'}</span><span class="sectags">${esc(SRC[e.src]||'ידני')}</span></p>${e.note?`<small class="note">${esc(e.note)}</small>`:''}<div class="secrow"><button class="chip" data-a="secEvEd" data-id="${esc(e.id)}">ערוך</button><button class="chip" data-a="secEvDel" data-id="${esc(e.id)}">מחק</button></div></div>`}
+function evH(e){return `<div class="secli"><p><b>${e.tm?'<bdi dir="ltr">'+esc(e.tm)+'</bdi> · ':''}${esc(e.title)}</b> ${e.rem?'<span class="sectags">תזכורת</span>':''}<span class="sectags">${e.biz?'של העסק':'אישי'}</span><span class="sectags">${esc(SRC[e.src]||'ידני')}</span></p>${e.note?`<small class="note">${esc(e.note)}</small>`:''}<div class="secrow"><button class="chip" data-a="secEvEd" data-id="${esc(e.id)}">ערוך</button><button class="chip" data-a="secEvDel" data-id="${esc(e.id)}">מחק</button></div></div>`}
 function calH(){const R=X.cl;if(!R){if(!X.cb)calLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="cal">נסה שוב</button></div>`;
  const td=R.today||todayS(),E=R.events||[],pend=E.filter(e=>e.st==='prop'),ok=E.filter(e=>e.st==='ok'&&e.d>=td),view=X.cv||'list';
  let h=`<div class="secrow" style="margin:0 0 8px"><button class="btn" data-a="secEvAdd" style="flex:1">+ אירוע</button><button class="chip${view==='list'?' on':''}" data-a="secCv" data-v="list">רשימה</button><button class="chip${view==='week'?' on':''}" data-a="secCv" data-v="week">שבוע</button></div>`;
@@ -358,14 +363,14 @@ ACT.secCv=el=>{X.cv=el.dataset.v;rerender()};
 function evForm(e){e=e||{};return `<h3>${e.id?'עריכת אירוע':'אירוע חדש'}</h3><form data-f="secEvF"${e.id?` data-id="${esc(e.id)}"`:''}><label class="f"><span>כותרת</span><input name="title" maxlength="120" autocomplete="off" value="${esc(e.title||'')}"></label>
  <div class="row"><label class="f grow"><span>תאריך</span><input type="date" name="d" dir="ltr" min="${todayS()}" value="${esc(e.d||todayS())}"></label><label class="f grow"><span>שעה (לא חובה)</span><input type="time" name="tm" dir="ltr" value="${esc(e.tm||'')}"></label></div>
  <label class="f"><span>הערה (לא חובה)</span><input name="note" maxlength="500" autocomplete="off" value="${esc(e.note||'')}"></label>
- ${e.id?'':`<label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:6px"><input type="checkbox" name="biz" value="1"> של העסק (כל המנהלים רואים)</label>`}
+ ${e.id?'':`<label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:6px"><input type="checkbox" name="biz" value="1"> של העסק (כל המנהלים רואים)</label><label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:6px"><input type="checkbox" name="rem" value="1"> תזכורת (התראה בשעה שנקבעה)</label>`}
  <div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`}
 ACT.secEvAdd=()=>dlg(evForm());
 ACT.secEvEd=el=>{const e=((X.cl||{}).events||[]).find(z=>z.id===el.dataset.id);if(e)dlg(evForm(e))};
 async function evSave(d){const r=await fnCall('secCal',d);if(r&&r.ok===false&&r.warn){const w=r.warn;
-  dlg(`<h3>${esc(w.kind)}</h3><p>האירוע נופל ב${esc(w.kind)} (${esc(dShort(w.d))}). להשאיר או להעביר ל${esc(wkD(w.next))} ${esc(dShort(w.next))}?</p><div class="secrow"><button class="chip" data-a="secEvW" data-m="move">להעביר ל-${esc(dShort(w.next))}</button><button class="chip" data-a="secEvW" data-m="keep">להשאיר</button><button class="chip" data-a="closeDlg">ביטול</button></div>`);X.evp={d,next:w.next};return}
+  dlg(`<h3>${esc(w.kind)}</h3><p>${w.rem?'התזכורת':'האירוע'} נופל${w.rem?'ת':''} ב${esc(w.kind)} (${esc(dShort(w.d))}). ${w.rem?'להשאיר בזמנה':'להשאיר'} או להעביר ל${esc(wkD(w.next))} ${esc(dShort(w.next))}?</p><div class="secrow"><button class="chip" data-a="secEvW" data-m="move">להעביר ל-${esc(dShort(w.next))}</button><button class="chip" data-a="secEvW" data-m="keep">להשאיר</button><button class="chip" data-a="closeDlg">ביטול</button></div>`);X.evp={d,next:w.next};return}
  closeDlg();toast('נשמר ביומן');X.cl=null;rerender()}
-FRM.secEvF=async f=>{const x=fd(f),t=String(x.title||'').trim();if(!t)return toast('כתבו כותרת');if(!x.d)return toast('בחרו תאריך');const d={op:f.dataset.id?'edit':'add',title:t,d:x.d,tm:x.tm||'',note:String(x.note||'').trim()};if(f.dataset.id)d.id=f.dataset.id;else d.biz=x.biz==='1';
+FRM.secEvF=async f=>{const x=fd(f),t=String(x.title||'').trim();if(!t)return toast('כתבו כותרת');if(!x.d)return toast('בחרו תאריך');const d={op:f.dataset.id?'edit':'add',title:t,d:x.d,tm:x.tm||'',note:String(x.note||'').trim()};if(f.dataset.id)d.id=f.dataset.id;else{d.biz=x.biz==='1';if(x.rem==='1')d.rem=true}
  const b=f.querySelector('button');b.disabled=true;try{await evSave(d)}catch(e){err(e)}finally{b.disabled=false}};
 ACT.secEvW=async el=>{const p=X.evp;if(!p)return;X.evp=null;const d=Object.assign({},p.d);if(el.dataset.m==='move')d.d=p.next;else d.force=true;try{await evSave(d)}catch(e){err(e)}};
 ACT.secEvDel=el=>{const id=el.dataset.id;ask('למחוק את האירוע?',async()=>{try{await fnCall('secCal',{op:'del',id});toast('נמחק');X.cl=null;rerender()}catch(e){err(e)}},'מחיקה')};
@@ -429,6 +434,76 @@ FRM.secSaF=async f=>{const id=f.dataset.id,c=SA[id];if(!c||c.err)return;const x=
 ACT.secSaChat=el=>{const id=el.dataset.id,u=el.dataset.u;ask('לצפות בשיחה? הצפייה תירשם ביומן הפעולות, ומנהל העסק יראה אותה.',async()=>{
  try{const r=await window.fnCall('secAdminReadChat',{bizId:id,uid:u});const L=r&&r.msgs||[];
   dlg(`<h3>שיחה (קריאה בלבד)</h3>${L.length?L.map(m=>`<div class="card" style="margin:6px 0;${m.role==='a'?'border-color:var(--acc)':''}"><small class="note">${m.role==='a'?'המזכירה':'המנהל'} · ${esc(tm(m.t))}</small><div style="white-space:pre-wrap">${esc(m.text)}</div></div>`).join(''):'<p class="note">אין הודעות בשיחה</p>'}<button class="btn g w" data-a="closeDlg">סגירה</button>`)}catch(e){err(e)}},'כן, לצפות')};
+
+/* =====================================================================================
+   שלב 4: התראות (7.2), תזכורות (7.3, 76), דוחות ותובנות (6.4, 8.2 מסך 7), הגדרות (67, 69, 74, 77), מחיקת היסטוריה (93), רישום להתראות טלפון.
+   הכול דרך השרת (secNotes, secReports, secHistory, secPrefs op:'notify', registerPushToken). תוכן התראת הטלפון כללי – הפרטים רק כאן.
+   ===================================================================================== */
+const css4=document.createElement('style');
+css4.textContent='.secbadge{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:var(--acc);color:var(--card);font-size:.75rem;line-height:20px;text-align:center}'
++'.secnew{border-inline-start:3px solid var(--acc)!important}.secrep h4{margin:12px 0 4px}.secrep ul{margin:0;padding-inline-start:18px}.secrep li{overflow-wrap:anywhere}'
++'.secnt select,.secnt input[type=time]{min-height:40px;max-width:100%}.secnt .row{flex-wrap:wrap}';
+document.head.appendChild(css4);
+const WDN=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+/* ---------- התראות ---------- */
+async function notesLoad(){X.nb=1;try{const r=await fnCall('secNotes',{op:'list'});X.nl=r;const ids=(r.notes||[]).filter(n=>!n.seen).map(n=>n.id).slice(0,100);
+ if(ids.length)fnCall('secNotes',{op:'seen',ids}).then(()=>{if(X.st)X.st.unseen=0;if(X.nl)X.nl.unseen=0}).catch(()=>{})}
+ catch(e){X.nl={err:e&&e.message||'לא נטען'}}finally{X.nb=0;if(cur().v==='sec'&&!typing())rerender()}}
+const KIND={rep:'דוח',emp:'עובד',dig:'תקציר'};
+function noteH(n,T){const lab=n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');const open=n.st==='open'&&n.k==='rem';
+ return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><p><b>${esc(n.title)}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
+ <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note" style="margin:4px 0 0">${esc(n.body)}</p>`:''}
+ <div class="secrow">${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
+function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="notes">נסה שוב</button></div>`;
+ const L=R.notes||[];if(!L.length)return '<div class="empty">אין התראות</div>';
+ return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
+ACT.secNDone=async el=>{el.disabled=true;try{await fnCall('secNotes',{op:'done',id:el.dataset.id});toast('סומן כטופל');X.nl=null;rerender()}catch(e){el.disabled=false;err(e)}};
+CHG.secNReps=async el=>{const n=+el.value;try{await fnCall('secNotes',{op:'reps',id:el.dataset.id,n});toast(n?'התזכורת תחזור עוד '+n+' פעמים':'החזרות בוטלו')}catch(e){err(e);X.nl=null;rerender()}};
+/* ---------- דוחות ותובנות ---------- */
+async function repsLoad(){X.rb4=1;try{X.rpl=await fnCall('secReports',{op:'list'})}catch(e){X.rpl={err:e&&e.message||'לא נטען'}}finally{X.rb4=0;if(cur().v==='sec'&&!typing())rerender()}}
+function repH(r){const done=new Set(r.done||[]);
+ return `<div class="card secrep" id="secRep"><button class="chip" data-a="secRpBack">חזרה לרשימה</button><h3 style="margin:8px 0 0">${esc(r.title)} · ${esc(dShort(r.key.length===7?r.key+'-01':r.key))}</h3>${r.why?`<p class="note" style="margin:4px 0 0">${esc(r.why)}</p>`:''}
+ ${(r.secs||[]).map(x=>`<h4>${esc(x.h)}</h4><ul>${(x.lines||[]).map(l=>`<li>${esc(String(l).replace(/^• /,''))}</li>`).join('')}</ul>`).join('')}
+ ${(r.ideas||[]).length?`<h4>רעיונות לשיפור</h4>${r.ideas.map(i=>`<div class="secli"><p>${esc(i.seen)}</p><small class="note">למה זה חשוב: ${esc(i.why||'')}</small>${(i.options||[]).length?`<ul>${i.options.map(o=>`<li>${esc(o)}</li>`).join('')}</ul>`:''}${i.unknown?`<small class="note" style="display:block">מה לא ידוע: ${esc(i.unknown)}</small>`:''}
+  <div class="secrow">${done.has(i.key)?'<span class="sectags">טופל</span>':`<button class="chip" data-a="secRpDone" data-id="${esc(r.id)}" data-k="${esc(i.key)}">סמן כטופל</button>`}${X.nr&&X.nr[i.key]?'<span class="sectags">לא יוצע שוב 90 יום</span>':`<button class="chip" data-a="secNr" data-k="${esc(i.key)}">לא רלוונטי</button>`}</div></div>`).join('')}`:''}
+ <p class="note" style="margin:10px 0 0">${esc(r.src||'')}</p></div>`}
+function repsH(){if(X.rp)return X.rp.err?`<div class="card"><p class="note">${esc(X.rp.err)}</p></div>`:repH(X.rp);
+ const R=X.rpl;if(!R){if(!X.rb4)repsLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="reps">נסה שוב</button></div>`;
+ const L=R.reports||[];if(!L.length)return '<div class="empty">עוד אין דוחות. הדוח השבועי והחודשי יופיעו כאן ביום ובשעה שנקבעו בהגדרות.</div>';
+ return `<div class="card">${L.map(r=>`<button type="button" class="li" data-a="secRpOpen" data-id="${esc(r.id)}" style="width:100%;text-align:right;color:var(--ink);background:none;border:0;border-bottom:1px solid var(--line)"><div class="m"><b>${esc(r.title)}</b><small>${esc(tm(r.t))}${r.why?' · '+esc(r.why):''}</small></div></button>`).join('')}</div>`}
+ACT.secRpOpen=async el=>{const id=el.dataset.id;X.tab='reps';X.rp={title:'טוען…',key:'',secs:[],ideas:[],id};rerender();try{const r=await fnCall('secReports',{op:'get',id});X.rp=r.report}catch(e){X.rp={err:e&&e.message||'הדוח לא נטען'}}rerender()};
+ACT.secRpBack=()=>{X.rp=null;rerender()};
+ACT.secRpDone=async el=>{const id=el.dataset.id,key=el.dataset.k;el.disabled=true;try{await fnCall('secReports',{op:'done',id,key});if(X.rp&&X.rp.id===id)X.rp.done=(X.rp.done||[]).concat([key]);toast('סומן כטופל');rerender()}catch(e){el.disabled=false;err(e)}};
+/* ---------- הגדרות: התראות ודוחות (67, 69, 74, 76, 77) + מחיקת היסטוריה (93) ---------- */
+const hours=(v,nm)=>`<select name="${nm}" aria-label="שעה">${Array.from({length:24},(_,h)=>`<option value="${h}"${h===v?' selected':''}>${String(h).padStart(2,'0')}:00</option>`).join('')}</select>`;
+function ntH(S){const n=S.nt||{q:{}},T=S.types||{},rt=n.rt||{};
+ return `<form class="card secnt" data-f="secNtF" style="margin-top:8px"><b>התראות ודוחות</b><p class="note" style="margin:4px 0 8px">התראות מופיעות כאן במסך המזכירה, וגם בטלפון (אם ההתראות מופעלות במכשיר). הדוחות – באפליקציה בלבד.</p>
+ <div class="row"><label class="f grow"><span>דוח שבועי – יום</span><select name="wd" data-c="secNtWd">${WDN.map((d,i)=>`<option value="${i}"${i===n.wd?' selected':''}>${d}</option>`).join('')}</select></label><label class="f grow"><span>שעה</span>${hours(n.wh,'wh')}</label></div>
+ <p class="note" id="secWdWarn" style="margin:0 0 6px">${n.wd===5||n.wd===6?'הדוח יופיע ביום העסקים הבא':''}</p>
+ <label class="f"><span>דוח חודשי – ביום העסקים הראשון בחודש, בשעה</span>${hours(n.mh,'mh')}</label>
+ <div class="row"><label class="chip" style="min-height:44px;flex:1;justify-content:flex-start"><input type="checkbox" name="dg" value="1"${n.dg?' checked':''}> תקציר יומי</label><label class="f grow"><span>בשעה</span>${hours(n.dh,'dh')}</label></div>
+ <b style="display:block;margin-top:8px">שעות שקטות</b><small class="note">התראת טלפון שנופלת בהן מחכה לסופן.</small>
+ <div class="row"><label class="chip" style="min-height:44px;justify-content:flex-start"><input type="checkbox" name="qon" value="1"${n.q&&n.q.on?' checked':''}> פעיל</label><label class="f grow"><span>מ-</span><input type="time" name="qf" dir="ltr" value="${esc((n.q||{}).f||'22:00')}"></label><label class="f grow"><span>עד</span><input type="time" name="qt" dir="ltr" value="${esc((n.q||{}).t||'07:00')}"></label></div>
+ <b style="display:block;margin-top:8px">תזכורות</b>${Object.keys(T).map(k=>`<label class="chip" style="min-height:44px;margin:4px 0;width:100%;justify-content:flex-start"><input type="checkbox" name="rt_${esc(k)}" value="1"${rt[k]?' checked':''}> ${esc(T[k])}${k==='emp'&&!S.emp?' (פועל רק כשניתוח העובדים פעיל)':''}</label>`).join('')}
+ <label class="f"><span>חזרות לתזכורת שלא טופלה (פעם ביום עסקים)</span><select name="reps">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.reps?' selected':''}>${k}</option>`).join('')}</select></label>
+ <button class="btn w" style="margin-top:8px">שמירה</button></form>
+ <div class="card" style="margin-top:8px"><b>מחיקת היסטוריה</b><p class="note" style="margin:4px 0 8px">השיחות נשמרות 12 חודשים, ויומן הפעולות 24 חודשים. אפשר למחוק עכשיו את השיחה, ההתראות והדוחות שלך (יומן הפעולות נשאר). המחיקה סופית.</p><button class="btn g w" data-a="secHistDel">מחיקת ההיסטוריה שלי</button></div>`}
+CHG.secNtWd=el=>{const w=document.getElementById('secWdWarn');if(w)w.textContent=(+el.value===5||+el.value===6)?'הדוח יופיע ביום העסקים הבא':''};
+FRM.secNtF=async f=>{const x=fd(f),T=(X.st&&X.st.types)||{},rt={};for(const k of Object.keys(T))rt[k]=x['rt_'+k]==='1';
+ const hm=/^([01]\d|2[0-3]):[0-5]\d$/;if(!hm.test(x.qf||'')||!hm.test(x.qt||'')||x.qf===x.qt)return toast('שעות שקטות: שעת התחלה וסיום שונות');
+ const nt={wd:+x.wd,wh:+x.wh,mh:+x.mh,dg:x.dg==='1',dh:+x.dh,q:{on:x.qon==='1',f:x.qf,t:x.qt},rt,reps:+x.reps};
+ const b=f.querySelector('button.btn');b.disabled=true;try{const r=await fnCall('secPrefs',{op:'notify',nt});X.st.nt=r.nt||nt;toast(r.warn?'נשמר. '+r.warn:'נשמר')}catch(e){err(e)}finally{b.disabled=false}};
+ACT.secHistDel=()=>{ask('למחוק את כל ההיסטוריה שלך במזכירה (שיחה, התראות ודוחות)?',async()=>{
+ try{const r=await fnCall('secHistory',{op:'ask'});const c=r.counts||{};X.hd=r.token;
+  dlg(`<h3>אישור שני – מחיקה סופית</h3><p>יימחקו: ${esc(String(c.chat||0))} הודעות בשיחה, ${esc(String(c.notes||0))} התראות ו-${esc(String(c.reports||0))} דוחות. אי אפשר לשחזר. המחיקה תירשם ביומן הפעולות.</p><div class="row"><button class="btn grow" data-a="secHistOk">כן, למחוק סופית</button><button class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}catch(e){err(e)}},'המשך')};
+ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disabled=true;try{const r=await fnCall('secHistory',{op:'del',token:t,sure:true});closeDlg();X.msgs=null;X.nl=null;X.rpl=null;X.rp=null;X.log=null;const d=r.deleted||{};toast('נמחק: '+(d.chat||0)+' הודעות, '+(d.notes||0)+' התראות, '+(d.reports||0)+' דוחות');rerender()}catch(e){el.disabled=false;err(e)}};
+/* ---------- רישום הטלפון להתראות (7.2): רק אם רכיב ההתראות קיים באפליקציה (Capacitor PushNotifications). בלי הרכיב – ההתראות במסך בלבד ---------- */
+const PN={done:0};
+async function pushReg(){try{if(PN.done||!ready())return;const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.PushNotifications;if(!P)return;PN.done=1;
+ await P.addListener('registration',t=>{if(t&&t.value)window.fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
+ await P.addListener('pushNotificationActionPerformed',()=>{X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
+ let p=await P.checkPermissions();if(p.receive==='prompt'||p.receive==='prompt-with-rationale')p=await P.requestPermissions();if(p.receive==='granted')await P.register()}catch(e){}}
+{const r0=V.sec;V.sec=()=>{const r=r0();try{if(ready())pushReg()}catch(e){}return r}}
 
 window.__sec=X;
 })();

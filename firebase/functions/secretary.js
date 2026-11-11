@@ -35,6 +35,7 @@ const AI = require('./lib/sec-ai');
 const ST = require('./lib/sec-tools');
 const SK = require('./lib/sec-know');   // שלב 3: בנק תשובות
 const SENS = require('./lib/sec-sens'); // שלב 3: מידע רגיש (מוצפן)
+const RM = require('./lib/sec-remind'); // שלב 4: הגדרות התראות ודוחות
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -61,7 +62,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive']);
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note']); // sec_note – שלב 4
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -136,8 +137,13 @@ async function secState(request) {
   if (!consented) out.consent = CONSENT;
   // שלב 2: מתג המראה (45), סף התזרים שאושר (51), אחוז ניצול בלבד (83) ומצב חיסכון (84). בלי סכומי עלות ובלי התקרה עצמה
   const db = T.tdb();
-  const [use, cap, mir] = await Promise.all([db.doc('sec_cfg/use').get(), db.doc('sec_cfg/cap').get(), cfg.mirror ? db.doc('sec_mirror/fin').get() : null]);
+  const [use, cap, mir, un] = await Promise.all([db.doc('sec_cfg/use').get(), db.doc('sec_cfg/cap').get(), cfg.mirror ? db.doc('sec_mirror/fin').get() : null,
+    consented ? db.collection(`sec_note/${who.uid}/n`).where('seen', '==', false).count().get() : null]);
   const u = usageOf(use, capOf(cap), Date.now());
+  // שלב 4: הגדרות ההתראות האישיות + מספר התראות שלא נקראו (שורה בכרטיס הבית – 11)
+  out.nt = RM.ntOf(me); out.types = Object.fromEntries(Object.entries(RM.TYPES).map(([k, v]) => [k, v.l]));
+  out.unseen = un ? un.data().count : 0;
+  if (out.unseen) out.rows.push({ k: 'notes', t: out.unseen === 1 ? 'התראה חדשה אחת' : out.unseen + ' התראות חדשות' });
   Object.assign(out, { mirror: cfg.mirror, mirrorAt: mir && mir.exists && Number.isInteger(mir.get('at')) ? mir.get('at') : null, cfTh: cfg.cfTh, pct: u.pct, saving: u.saving });
   return out;
 }
@@ -289,7 +295,7 @@ async function secMirrorPut(request) {
 const NR_DAYS = 90, NR_MAX = 200, PREFS_HOUR = 30;
 async function secPrefs(request) {
   const input = inputObject(request);
-  const { who, cfg, db } = await gate(request, { consent: true });
+  const { who, cfg, me, db } = await gate(request, { consent: true });
   const t = Date.now();
   // קצב (10.3): כל שינוי נרשם ביומן שאי אפשר למחוק – עד PREFS_HOUR שינויים בשעה לכל מנהל
   await db.runTransaction(async (tx) => {
@@ -331,6 +337,13 @@ async function secPrefs(request) {
     b.set(main, { mgr: { [who.uid]: { we: input.v } }, upd: t }, { merge: true });
     b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'calWe', { note: input.v }));
     out = { we: input.v };
+  } else if (input.op === 'notify') {
+    // שלב 4: דוח שבועי/חודשי – יום ושעה (67), תקציר יומי (69, כבוי), שעות שקטות (74), חזרות (76), מתג לכל סוג תזכורת (77). אישי לכל מנהל
+    let nt;
+    try { nt = RM.readNt(input.nt && typeof input.nt === 'object' && !Array.isArray(input.nt) ? input.nt : {}, RM.ntOf(me)); } catch (e) { if (e && e.badNt) throw bad('bad-input', 'הגדרה לא תקינה'); throw e; }
+    b.set(main, { mgr: { [who.uid]: { nt } }, upd: t }, { merge: true });
+    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'notify', { note: 'wd=' + nt.wd + ',wh=' + nt.wh + ',mh=' + nt.mh + ',dg=' + (nt.dg ? 1 : 0) + ',q=' + (nt.q.on ? nt.q.f + '-' + nt.q.t : 'off') + ',reps=' + nt.reps }));
+    out = { nt, warn: RM.wkWarn(nt.wd) };
   } else throw bad('bad-op', 'פעולה לא מוכרת');
   await b.commit();
   return Object.assign({ ok: true }, out);
@@ -393,6 +406,7 @@ async function secChat(request) {
   const logs = [];
   const results = [];
   let sensUsed = false; // תיקון סבב 1: התור הזה הפעיל את getSensitiveInfo
+  let sensHist = false; // שלב 4: ההיסטוריה שנשלחה למודל כללה הודעה רגישה (מפוענחת)
   const cards = []; // שלב 3: כרטיסי אישור (עובדה / אירוע) שהכלים propose* יצרו
   let reply = null, mode = 'ok', mt = null, usage = { in: 0, out: 0 }, sent = 0, denied = [], offered = [];
   let bank = null, bankCond = [];
@@ -434,6 +448,8 @@ async function secChat(request) {
       const hs = await db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc').limit(HIST).get();
       // תיקון סבב 1: הודעה שמבוססת על מידע רגיש (sens) – נשלחת למודל רק כשהמתג וההרשאה פעילים (מפוענחת), אחרת לא נשלחת בכלל
       turns = hs.docs.reverse().map((d) => ({ role: d.get('role') === 'a' ? 'a' : 'u', text: String(msgText(d, who, sensOn, null) || '').slice(0, 1500) })).filter((x) => x.text);
+      // שלב 4 (תיקון משלב 3): היסטוריה מפוענחת עם מידע רגיש נשלחה למודל – בתור הזה אין proposeFact (שלא יוצע לשמור מידע רגיש כעובדה גלויה)
+      sensHist = sensOn && hs.docs.some((d) => d.get('sens') === true);
     } catch (e) { await settle(db, who.uid, mt, -mt.reserved, deep).catch(() => {}); throw e; } // לא משאירים את השמירה מראש במונה
     turns.push({ role: 'u', text });
     const finNote = brLimited ? 'למנהל הזה יש הגבלת סניפים, ולכן אין לו בצ\'אט נתוני כספים ונתוני העסק. אם שואלים על כספים, משימות, קופה או הזמנות – עני בנימוס: "' + ST.TXT.brLimited + '"' : fin ? (finFrom === 'device' ? 'מהמכשיר של המנהל, נכון ל-' + ST.fmtAt(fin.at) : 'מהמראה בענן, נכון ל-' + ST.fmtAt(mirrorAt) + (stale ? ' (ישן מ-3 ימים – אמרי זאת)' : '')) : (!cfg.mirror ? 'המראה כבוי ואין נתונים מהמכשיר' : 'אין נתוני כספים');
@@ -452,6 +468,8 @@ async function secChat(request) {
           // כלי שלא הוצע בערוץ/בהרשאה הזו – לא מופעל, גם אם המודל ביקש (נרשם ביומן)
           if (!offered.includes(c.name)) { denied.push(String(c.name).slice(0, 40)); logs.push(['toolDenied', String(c.name).slice(0, 40)]); res.push({ name: c.name, data: { error: 'not-available', note: 'הכלי לא זמין' } }); continue; }
           if (c.name === 'refuseOffTopic') { refused = true; break; }
+          // שלב 4 (תיקון משלב 3): בתור שבו המודל ראה מידע רגיש (הכלי הופעל, או היסטוריה רגישה) – אין הצעת עובדה. הכרטיס נשמר גלוי, והעובדה נמסרת אחר כך למודל בלי הגנה
+          if (c.name === 'proposeFact' && (sensUsed || sensHist)) { denied.push('proposeFact'); logs.push(['toolDenied', 'proposeFact', '', 'sens']); res.push({ name: c.name, data: { error: 'not-available', note: 'אחרי שימוש במידע רגיש אי אפשר להציע לשמור עובדה בשיחה הזו. אפשר לשמור במסך "מידע על העסק".' } }); continue; }
           const data = await ST.runTool(c.name, c.args, ctx);
           const tgt = data._tgt, at0 = data._at; delete data._tgt; delete data._at;
           results.push({ name: c.name, data, src: ST.sourceOf(c.name, c.args, ctx, at0) });
@@ -687,7 +705,7 @@ function dec(v, db) {
 // קריאה לפי אוסף, בעמודים של 500 (שאילתה אחת לכל עמוד, לא מסמך־מסמך). תת־אוספים ידועים (SEC_SUBS):
 // sec_chat/{uid}/m ו-sec_inv/{id}/p. מסמך אב "חסר" (רק תת־אוסף, כמו sec_chat/{uid}) נמצא ב-listDocuments (רשימת מזהים בלבד, בלי קריאת תוכן).
 // path – יחסי לתחילית העסק (prefix), כדי שאפשר לשחזר לעסק/סביבה אחרים. תת־אוסף חדש בשלבים הבאים – להוסיף ל-SEC_SUBS (בדיקה ב-secretary.test.js).
-const SEC_SUBS = Object.freeze({ sec_chat: ['m'], sec_inv: ['p'] });
+const SEC_SUBS = Object.freeze({ sec_chat: ['m'], sec_inv: ['p'], sec_note: ['n'] });
 const PAGE = 500;
 async function pagedColl(db, prefix, rel, out) {
   let last = null;

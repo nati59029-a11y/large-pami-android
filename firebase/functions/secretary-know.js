@@ -262,9 +262,11 @@ async function secCal(request) {
   await rate(db, who.uid, 'kn', KN_HOUR);
   const b = db.batch();
   // אזהרת שישי/שבת/חג – לפני כל שמירה של תאריך חדש
-  const offCheck = (d) => {
+  // שלב 4 (75): תזכורת (rem) שנופלת בשישי/שבת/חג – תמיד נשאלת ביצירה ("להשאיר בזמנה או להעביר?"), בלי קשר להגדרת הפגישות (72)
+  const rem = input.rem === true;
+  const offCheck = (d, isRem) => {
     const k = K.offKind(d);
-    if (k && we === 'warn' && input.force !== true) return { ok: false, warn: { kind: k, d, next: K.nextBizDay(d) } };
+    if (k && (we === 'warn' || isRem) && input.force !== true) return { ok: false, warn: { kind: k, d, next: K.nextBizDay(d), rem: !!isRem } };
     return k ? { keepOff: true } : {};
   };
   let id;
@@ -272,10 +274,10 @@ async function secCal(request) {
     const ev = K.cleanEvent(input);
     if (!ev) throw bad('bad-event', 'כותרת (עד ' + K.CAL_TITLE + ' תווים), תאריך ושעה תקינים');
     if (ev.d < today) throw bad('past', 'התאריך כבר עבר');
-    const w = offCheck(ev.d); if (w.ok === false) return w;
+    const w = offCheck(ev.d, rem); if (w.ok === false) return w;
     if ((await col.select().limit(K.CAL_MAX).get()).size >= K.CAL_MAX) throw pre('too-many', 'היומן מלא (' + K.CAL_MAX + ' אירועים)');
     id = col.doc().id;
-    b.set(col.doc(id), Object.assign({ uid: input.biz === true ? '' : who.uid, st: 'ok', src: 'mgr', by: who.uid, t: now }, ev, w.keepOff ? { keepOff: true } : {}));
+    b.set(col.doc(id), Object.assign({ uid: input.biz === true ? '' : who.uid, st: 'ok', src: 'mgr', by: who.uid, t: now }, ev, w.keepOff ? { keepOff: true } : {}, rem ? { rem: true } : {}));
     log(b, db, who.uid, 'calAdd', { tgt: id, note: input.biz === true ? 'biz' : 'me' });
   } else {
     id = idOf(input.id);
@@ -299,7 +301,7 @@ async function secCal(request) {
       const ev = K.cleanEvent(input);
       if (!ev) throw bad('bad-event', 'כותרת, תאריך ושעה תקינים');
       let w = {};
-      if (ev.d !== x.d) { w = offCheck(ev.d); if (w.ok === false) return w; } else if (x.keepOff) w = { keepOff: true };
+      if (ev.d !== x.d) { w = offCheck(ev.d, x.rem === true); if (w.ok === false) return w; } else if (x.keepOff) w = { keepOff: true };
       b.update(col.doc(id), { title: ev.title, d: ev.d, tm: ev.tm || FieldValue.delete(), note: ev.note || FieldValue.delete(), keepOff: w.keepOff ? true : FieldValue.delete(), upd: now, updBy: who.uid });
       log(b, db, who.uid, 'calEdit', { tgt: id });
     } else {

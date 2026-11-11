@@ -337,6 +337,36 @@ describe('מידע רגיש (10.8, 63): מוצפן, רק עם הרשאה, ונמ
     for (const w of ['דנה', 'חופשת לידה', 'בהיריון']) assert.ok(!js.includes(w), 'בגיבוי: ' + w);
     await st.file(f.path).delete().catch(() => {});
   });
+  it('שלב 4 (תיקון משלב 3): בתור שהפעיל getSensitiveInfo, או כשהיסטוריה רגישה נשלחה למודל – proposeFact נחסם (אין עובדה גלויה עם מידע רגיש)', async () => {
+    await seed();
+    await call('secSens', M1, { op: 'add', emp: 'דנה לוי', text: SECRET });
+    let n = 0;
+    const fake = () => {
+      n++;
+      if (n === 1) return { calls: [{ name: 'getSensitiveInfo', args: { employee: 'דנה לוי' } }] };
+      if (n === 2) return { calls: [{ name: 'proposeFact', args: { topic: 'emp', text: 'דנה בחופשת לידה עד מרץ' } }] };
+      return { text: 'בסדר' };
+    };
+    GM.state.sec = fake;
+    const r = await call('secChat', M1, { text: 'מה עם דנה לוי?' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual(r.result.cards, []);
+    assert.ok(r.result.denied.includes('proposeFact'));
+    assert.equal((await coll(`b/${A}/sec_facts`)).length, 0, 'לא נוצרה הצעת עובדה');
+    // תור הבא: ההיסטוריה הרגישה נשלחת למודל (המנהל עם הרשאה) – גם עכשיו אין proposeFact
+    GM.reset(); n = 1; GM.state.sec = fake;
+    const r2 = await call('secChat', M1, { text: 'תשמרי את זה' });
+    assert.equal(r2.status, 'OK', r2.text);
+    assert.ok(r2.result.denied.includes('proposeFact'));
+    assert.equal((await coll(`b/${A}/sec_facts`)).length, 0);
+    // בקרה: אחרי כיבוי המתג ההיסטוריה הרגישה לא נשלחת – proposeFact רגיל עובד
+    await prep((d) => d.doc(`b/${A}/sec_cfg/main`).update({ emp: false }));
+    GM.reset(); n = 1; GM.state.sec = fake;
+    const r3 = await call('secChat', M1, { text: 'תשמרי עובדה' });
+    assert.equal(r3.result.cards.length, 1, 'בקרה: בלי מידע רגיש – הכרטיס נוצר');
+    const logs = await coll(`b/${A}/sec_log`);
+    assert.ok(logs.some((l) => l.act === 'toolDenied' && /proposeFact/.test(l.note || '')));
+  });
   it('תיקון סבב 1: שם חלקי ("ה", "דנ") לא מתאים; כמה עובדים באותו שם – רק רשימת שמות לבירור, בלי תוכן', async () => {
     assert.equal(SENS.sameEmp('דנה לוי', 'ה'), false); assert.equal(SENS.sameEmp('משה כהן', 'ה'), false);
     assert.equal(SENS.sameEmp('דנה לוי', 'דנ'), false);

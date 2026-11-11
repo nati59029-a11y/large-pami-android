@@ -104,6 +104,8 @@ exports.scanDocument = onCall(
 // =====================================================================================
 // registerPushToken
 // קלט: { token }  ←  מוסיף ל-staff/{uid}.pushTokens (בלי כפילויות). מעל MAX_PUSH_TOKENS – הישן ביותר יוצא.
+// המזכירה שלב 4: מנהל בלי רשומת עובד (רק admins/{uid}) – נרשם ב-push_tokens/{uid} (אותו מבנה; שרת בלבד, אין גישה מהאפליקציה).
+// מי שיש לו staff/{uid} – בדיוק כמו קודם. מי שאין לו לא staff ולא admins (למשל מנהל־על שאינו מנהל העסק) – אותה שגיאה כמו קודם.
 // פלט: { ok: true, count, removed }
 // =====================================================================================
 const TOKEN_RE = /^[A-Za-z0-9_:.\-]+$/;
@@ -116,14 +118,18 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
   }
   const max = MAX_PUSH_TOKENS.value();
   const db = T.tdb(); // staff/{uid} בתוך העסק (בשורש ללארג' פעמי במצב legacy)
-  const ref = db.doc('staff/' + who.uid);
+  const staffRef = db.doc('staff/' + who.uid);
+  const mgrRef = db.doc('push_tokens/' + who.uid);
   return db.runTransaction(async (tx) => {
-    const s = await tx.get(ref);
-    if (!s.exists) throw new HttpsError('failed-precondition', 'אין לך עדיין רשומה ברשימת העובדים (staff). המנהל צריך להוסיף אותה.', { reason: 'no-staff-doc' });
+    const [st, adm] = await Promise.all([tx.get(staffRef), tx.get(db.doc('admins/' + who.uid))]);
+    let ref = staffRef, s = st;
+    if (!st.exists && adm.exists) { ref = mgrRef; s = await tx.get(mgrRef); }
+    else if (!st.exists) throw new HttpsError('failed-precondition', 'אין לך עדיין רשומה ברשימת העובדים (staff). המנהל צריך להוסיף אותה.', { reason: 'no-staff-doc' });
     const old = (Array.isArray(s.get('pushTokens')) ? s.get('pushTokens') : []).filter((t) => typeof t === 'string' && t !== token);
     const all = old.concat([token]);
     const kept = all.slice(Math.max(0, all.length - max));
-    tx.update(ref, { pushTokens: kept });
+    if (ref === mgrRef) tx.set(ref, { pushTokens: kept, upd: Date.now() });
+    else tx.update(ref, { pushTokens: kept });
     return { ok: true, count: kept.length, removed: all.length - kept.length };
   });
 }));
@@ -199,3 +205,5 @@ Object.assign(exports, require('./secretary'));
 Object.assign(exports, require('./secretary-know'));
 // ייבוא קבצים ברקע (2026-11-11, שלב 3): startImport (מנהל, שני האזורים) + runImportChunk (טריגר, europe-west1 בלבד) – imports.js
 Object.assign(exports, require('./imports'));
+// המזכירה שלב 4 (2026-11-11): secNotes, secReports, secHistory (מנהל העסק), secRemind (מתוזמנת – תזכורות, דוחות, התראות), secDaily (מתוזמנת – שמירה ומחיקה 9.5). secretary-remind.js
+Object.assign(exports, require('./secretary-remind'));

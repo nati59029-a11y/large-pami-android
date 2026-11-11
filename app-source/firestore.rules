@@ -827,8 +827,9 @@ service cloud.firestore {
       allow read: if sUser() && resource.data.get('uid', '') in ['', request.auth.uid];
       allow create, update, delete: if false;
     }
+    // דוחות (שלב 4): אישיים לכל מנהל (uid) – רק בעליו; בלי uid – כל מי שמשתמש במזכירה
     match /sec_rep/{id} {
-      allow read: if sUser();
+      allow read: if sUser() && resource.data.get('uid', '') in ['', request.auth.uid];
       allow create, update, delete: if false;
     }
     // יומן פעולות – הוספה בלבד, ורק השרת. קוראים: מי שמשתמש במזכירה, ומנהל־על
@@ -845,6 +846,13 @@ service cloud.firestore {
     }
     match /sec_facts_sensitive/{id} {
       allow read, create, update, delete: if false;
+    }
+    // התראות (שלב 4): רק דרך השרת (secNotes) – אף אחד מהאפליקציה
+    match /sec_note/{uid} {
+      allow read, create, update, delete: if false;
+      match /n/{id} {
+        allow read, create, update, delete: if false;
+      }
     }
 
     // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
@@ -1427,8 +1435,9 @@ service cloud.firestore {
         allow read: if bsUser() && resource.data.get('uid', '') in ['', request.auth.uid];
         allow create, update, delete: if false;
       }
+      // דוחות (שלב 4): אישיים לכל מנהל (uid) – רק בעליו; בלי uid – כל מי שמשתמש במזכירה
       match /sec_rep/{id} {
-        allow read: if bsUser();
+        allow read: if bsUser() && resource.data.get('uid', '') in ['', request.auth.uid];
         allow create, update, delete: if false;
       }
       // יומן פעולות – הוספה בלבד, ורק השרת. קוראים: מי שמשתמש במזכירה, ומנהל־על
@@ -1445,6 +1454,13 @@ service cloud.firestore {
       }
       match /sec_facts_sensitive/{id} {
         allow read, create, update, delete: if false;
+      }
+      // התראות (שלב 4): רק דרך השרת (secNotes) – אף אחד מהאפליקציה
+      match /sec_note/{uid} {
+        allow read, create, update, delete: if false;
+        match /n/{id} {
+          allow read, create, update, delete: if false;
+        }
       }
 
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')
