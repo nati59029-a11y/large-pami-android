@@ -39,7 +39,7 @@ window.ypApply=text=>{ // כמו applyLexicon בשרת
  const froms=[...map.keys()].sort((a,b)=>b.length-a.length);
  const re=new RegExp(`(?<![\\p{L}\\p{N}'׳"״])([ובהלמשכ]{0,2})(${froms.map(rx).join('|')})(?![\\p{L}\\p{N}'׳])`,'giu');
  return s.replace(re,(m,pre,word)=>pre+map.get(word.toLowerCase()))};
-const base=()=>(typeof EMU!=='undefined'&&EMU)?`http://${EMU}:5001/${FB.projectId}/us-central1`:`https://us-central1-${FB.projectId}.cloudfunctions.net`;
+const base=()=>FNB(); // כתובת הפונקציות – אחת לכל האפליקציה (FN_REGION/FNB ב-index.html)
 window.ypLoad=()=>{ // כשל = הקראה בלי מילון (ypSpeak מדווח על כך), לא שגיאה
  if(LX.loaded&&Date.now()-LX.at<YP_TTL)return Promise.resolve(true);
  if(LOAD)return LOAD;

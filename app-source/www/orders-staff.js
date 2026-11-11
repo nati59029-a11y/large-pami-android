@@ -39,7 +39,7 @@ let load=async function(force){if(O.busy||(!force&&O.L&&Date.now()-O.at<20000))r
   O.L=L.sort((a,b)=>(b.no||0)-(a.no||0));O.P=P.sort((a,b)=>String(a.name).localeCompare(String(b.name),'he'));O.cfg=c?dec(c):{};O.at=Date.now();costLoad()}
  catch(e){O.err=e.message||'הטעינה נכשלה'}finally{O.busy=0;if(/^ox/.test(cur().v)&&!typing())rerender()}}
 /* עלות (החלטה 00:12): מנהל ועובד עם ord רואים עלות בכל מקום; נטען ברקע מ-getCosts (בעמודים) */
-async function costLoad(){try{const W={};let a;for(let g=0;g<200;g++){const r=await fnCall('getCosts',a?{after:a}:{});Object.assign(W,r&&r.cost||{});if(!r||!r.next)break;a=r.next}O.cost=W;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}}
+async function costLoad(){try{const W={};let a;for(let g=0;g<200;g++){const r=await fnCall('getCosts',a?{after:a}:{});Object.assign(W,r&&r.cost||{});if(!r||!r.next)break;a=r.next}O.cost=W;O.cerr=0;if(/^ox/.test(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){O.cerr=1}}
 const costOf=id=>O.cost&&typeof O.cost[id]==='number'?O.cost[id]:null;
 const costH=id=>{const c=costOf(id);return c==null?'':' · עלות '+ils(c)};
 /* עלות לפני מע"מ: מחושב להצגה בלבד מול "מחיר עלות" (כולל מע"מ); נשמר רק cost. אחוז המע"מ בהגדרות העסק (ברירת מחדל 18) */
@@ -47,6 +47,20 @@ const vatP=()=>{const v=O.cfg&&O.cfg.vat;return typeof v==='number'&&v>=0&&v<=10
 const r2=x=>Math.round((x+Number.EPSILON)*100)/100;
 const exVat=c=>r2(c/(1+vatP()/100)),incVat=c=>r2(c*(1+vatP()/100));
 const costXH=id=>{const c=costOf(id);return c==null?'':' · לפני מע"מ '+ils(exVat(c))};
+/* סיכום מלאי (12.11.2026): מוצרים, יחידות, שווי לפי עלות לפני מע"מ (מנהל בלבד). חישוב באגורות שלמות; העלות השמורה כוללת מע"מ ולכן מחולקת באחוז המע"מ של העסק (כמו costXH). מוצר בלי עלות לא נספר בשווי; כמות שלילית נספרת כמו שהיא. נשמר בזיכרון עד שהנתונים משתנים – לא מחושב מחדש בכל ציור */
+const stockSum=(P,cost,vat,br)=>{let n=0,u=0,ua=0,v=0,va=0,nc=0;for(const p of P||[]){n++;const qa=qAll(p),qb=q(p,br);ua+=qa;u+=qb;const c=cost&&typeof cost[p.id]==='number'?cost[p.id]:null;if(c==null){nc++;continue}const unit=Math.round(c*100/(1+vat/100));v+=Math.round(qb*unit);va+=Math.round(qa*unit)}return{n,u:n3(u),ua:n3(ua),v,va,nc}};
+window.oxStockSum=stockSum;
+// 11.11: הסיכום לפי הסינונים שבמסך (חיפוש, קטגוריה) + "זמינים בלבד" (ברירת מחדל; O.sall=1 = כולל לא זמינים)
+const sumL=()=>stockL().filter(p=>O.sall||p.on!==false);
+const sumGet=br=>{const k=[O.P,O.cost,vatP(),br,O.sq||'',O.cf||'',!!O.sall];const m=O.sm;if(m&&m.k.every((x,i)=>x===k[i]))return m.r;const r=stockSum(sumL(),O.cost,vatP(),br);O.sm={k,r};return r};
+ACT.oxSall=()=>{O.sall=O.sall?0:1;const x=document.getElementById('oxsum');if(x)x.outerHTML=sumH(hasBr()?SBR:NB)};
+const agH=a=>ils(a/100);
+const sumH=br=>{const r=sumGet(br),M=mgr(),multi=hasBr()&&brs().length>1;
+ const cell=(l,v,id)=>`<div style="flex:1 1 30%;min-width:84px;text-align:center"><b class="a" id="${id}" style="display:block;font-size:1.25em">${v}</b><small class="note">${l}</small></div>`;
+ const val=!M?'':O.cost?cell('שווי לפני מע"מ',agH(r.v),'oxSumV'):cell('שווי לפני מע"מ',O.cerr?'לא נטען':'טוען…','oxSumV');
+ return `<div class="card" id="oxsum" style="margin:8px 0"><div class="row" style="flex-wrap:wrap;gap:8px;justify-content:space-between">${cell('מוצרים',r.n,'oxSumN')}${cell(multi?'יחידות בסניף':'יחידות',r.u,'oxSumU')}${val}</div>`
+ +(M&&multi?`<small class="note" id="oxSumA" style="display:block;margin-top:6px">כל הסניפים: ${r.ua} יחידות${O.cost?' · שווי '+agH(r.va)+' לפני מע"מ':''}</small>`:'')
+ +`<button type="button" class="chip${O.sall?'':' on'}" data-a="oxSall" aria-pressed="${!O.sall}" style="margin-top:8px">${O.sall?'כולל מוצרים לא זמינים':'זמינים בלבד'}</button>`+(O.sq||O.cf?'<small class="note" style="display:block;margin-top:4px">לפי החיפוש/הקטגוריה שנבחרו</small>':'')+(M&&O.cost&&r.nc?`<small class="note" id="oxSumNC" style="display:block;margin-top:4px">${r.nc===1?'מוצר אחד':r.nc+' מוצרים'} בלי עלות – לא נכללים בשווי</small>`:'')+'</div>'};
 // בכל מסך עם הקלדה – רענון לא בונה מחדש כשיש טקסט בתיבה (לקח)
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const prod=id=>(O.P||[]).find(p=>p.id===id);
@@ -183,12 +197,12 @@ let SBR='';
 V.oxStock=()=>{const T='מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}const B=myBr();if(hasBr()&&!SBR&&B.length)SBR=B[0].id;const br=hasBr()?SBR:NB;
  const bc=B.length>1?`<div class="chips scroll-x" role="group" aria-label="סניף" style="margin:8px 0">${B.map(b=>`<button class="chip ${SBR===b.id?'on':''}" data-a="oxSBr" data-id="${esc(b.id)}" aria-pressed="${SBR===b.id}">${esc(b.name)}</button>`).join('')}</div>`:B.length===1?`<p class="note">סניף: ${esc(B[0].name)}</p>`:'';
  const L=stockL();
- return{t:T,s:hasBr()?bn(br):'כמויות במלאי',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="oxIn">הכנסת מלאי</button><button class="btn g grow" data-a="oxNewP">מוצר חדש</button></div>${catBar()}${bc}
+ return{t:T,s:hasBr()?bn(br):'כמויות במלאי',h:`<div class="row" style="margin-bottom:8px"><button class="btn grow" data-a="oxIn">הכנסת מלאי</button><button class="btn g grow" data-a="oxNewP">מוצר חדש</button></div>${sumH(br)}${catBar()}${bc}
  <label class="f"><span>חיפוש (שם או ברקוד)</span><input data-i="oxSQ" value="${esc(O.sq||'')}" autocomplete="off"></label>
  <div id="oxpl">${plH(L,br)}</div><button class="btn g s w" style="margin-top:8px" data-a="oxHist">היסטוריית תנועות</button>${mgr()?'<div class="row" style="margin-top:16px"><button class="btn g s grow" data-a="oxWipe" style="color:var(--bad)">מחיקת כל המלאי</button><button class="btn g s grow" data-a="oxRest">שחזור מלאי מגיבוי</button></div>':''}`}};
 const plH=(L,br)=>L.map(p=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(p.name)}${p.on===false?' <span class="tag">לא זמין</span>':''}</b><small>${ils(unitP(p,br))}${p.barcode?' · '+esc(p.barcode):''}${p.cat?' · '+esc(catNm(p.cat))+(p.sub?' / '+esc(catNm(p.sub)):''):''}${costH(p.id)}${costXH(p.id)}${p.pk?' · מארז '+p.pk:''}${p.ct?' · קרטון '+p.ct:''}${hasBr()&&brs().length>1?' · '+brs().map(b=>esc(b.name)+': '+n3(q(p,b.id))).join(' · '):''}</small>${p.note?`<small class="note" style="width:100%;white-space:pre-wrap;overflow-wrap:anywhere">הערות: ${esc(p.note)}</small>`:''}</div><b class="a${q(p,br)<0?' neg':''}">${n3(q(p,br))}</b>
  <div class="row" style="width:100%"><button class="btn g s grow" data-a="oxZero" data-id="${esc(p.id)}">נגמר במלאי</button>${mgr()?`<button class="btn g s grow" data-a="oxFix" data-id="${esc(p.id)}">תיקון כמות</button>`:''}<button class="btn g s grow" data-a="oxEditP" data-id="${esc(p.id)}">עריכה</button></div></div>`).join('')||'<div class="empty">אין מוצרים. הוסף מוצר חדש.</div>';
-INP.oxSQ=el=>{O.sq=el.value;const br=hasBr()?SBR:NB,L=stockL();const x=document.getElementById('oxpl');if(x)x.innerHTML=plH(L,br)};
+INP.oxSQ=el=>{O.sq=el.value;const br=hasBr()?SBR:NB,L=stockL();const x=document.getElementById('oxpl');if(x)x.innerHTML=plH(L,br);const y=document.getElementById('oxsum');if(y)y.outerHTML=sumH(br)};
 ACT.oxSBr=el=>{SBR=el.dataset.id;rerender()};
 const sbr=()=>hasBr()?SBR:undefined;
 ACT.oxZero=el=>{const p=prod(el.dataset.id);if(!p)return;ask(`לסמן "${p.name}" כנגמר במלאי${hasBr()?' ב'+bn(SBR):''}? הכמות תתאפס.`,async()=>{try{await fnCall('stockSet',{reqId:rid(),pid:p.id,br:sbr(),qty:0});toast('עודכן');await load(true)}catch(e){err(e)}},'כן, נגמר')};
@@ -344,7 +358,7 @@ const IMF=IMF0; // 00:12: גם עובד מייבא סיטונאי ועלות
 const IMK='lp-ox-imp-map';
 const imMap0=()=>{try{return JSON.parse(localStorage.getItem(IMK)||'{}')||{}}catch(e){return{}}};
 V.oxImp=()=>{const T='ייבוא מלאי';if(!on())return deny(T);if(!O.P){load();return loading(T)}const I=O.im;
- if(!I)return{t:T,s:'Excel או CSV',h:`<div class="card"><p class="note" style="margin-top:0">שורה ראשונה = כותרות. אחרי בחירת הקובץ בוחרים איזו עמודה היא איזה שדה. מוצר קיים (לפי ברקוד, ואם אין – לפי שם מדויק) מתעדכן ולא נוצר פעמיים.</p><label class="btn w" style="display:flex;align-items:center;justify-content:center">בחר קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="oxImpFile" style="position:absolute;opacity:0;width:1px;height:1px"></label></div>`};
+ if(!I)return{t:T,s:'Excel או CSV',h:`${impCardH('prod')}<div class="card"><p class="note" style="margin-top:0">שורה ראשונה = כותרות. אחרי בחירת הקובץ בוחרים איזו עמודה היא איזה שדה. מוצר קיים (לפי ברקוד, ואם אין – לפי שם מדויק) מתעדכן ולא נוצר פעמיים.</p><label class="btn w" style="display:flex;align-items:center;justify-content:center">בחר קובץ<input type="file" accept=".xlsx,.xls,.csv" data-c="oxImpFile" style="position:absolute;opacity:0;width:1px;height:1px"></label></div>`};
  const opt=(k)=>`<option value="">— לא לייבא —</option>${I.head.map((h,i)=>`<option value="${i}"${String(I.map[k])===String(i)?' selected':''}>${esc(String(h||'עמודה '+(i+1)))}</option>`).join('')}`;
  const pv=imRows(),bad=pv.filter(r=>r.err),good=pv.length-bad.length;
  return{t:T,s:esc(I.file),h:`<div class="card"><b>התאמת עמודות</b>${IMF.map(([k,l,req])=>`<label class="f"><span>${l}${req?' (חובה)':''}</span><select data-c="oxImpMap" data-k="${k}">${opt(k)}</select></label>`).join('')}</div>
@@ -369,8 +383,48 @@ function imRows(){const I=O.im,M=I.map,out=[];if(M.name==null||M.price==null)ret
   if(M.note!=null){const v=String(g('note')).replace(/\s+/g,' ').trim();if(v.length>500)e.push('הערות: עד 500 תווים');else if(v)o.note=v}
   for(const k of['cat','sub']){const v=String(g(k)).trim();if(v)o[k]=v.slice(0,40)}if(o.sub&&!o.cat)e.push('תת־קטגוריה בלי קטגוריה');
   out.push({n:i+2,o,err:e.join(', ')})});return out}
-ACT.oxImpGo=async el=>{const I=O.im;if(!I)return;const G=imRows().filter(r=>!r.err).map(r=>r.o);if(!G.length)return;if(hasBr()&&!I.br&&(G.some(o=>o.qty)||!mgr()))return toast('בחר סניף');el.disabled=true;
+ACT.oxImpGo=async el=>{const I=O.im;if(!I)return;const R=imRows().filter(r=>!r.err),G=R.map(r=>r.o);if(!G.length)return;if(hasBr()&&!I.br&&(G.some(o=>o.qty)||!mgr()))return toast('בחר סניף');el.disabled=true;
+ if(mgr()){try{await impSend('prod',G,R.map(r=>r.n),Object.assign({addQty:I.add},hasBr()?{br:I.br}:{}),el,I.req.slice(1,21));O.im=null;rerender();toast('הקובץ נשלח לשרת – אפשר לצאת מהאפליקציה. ההתקדמות מוצגת כאן')}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}return} /* 11.11.2026: מנהל – ייבוא ברקע בשרת (startImport). עובד – כמו קודם */
  let a=0,u=0,b=0;try{for(let k=0;k<G.length;k+=200){el.textContent='מייבא… '+Math.min(k+200,G.length)+'/'+G.length;const r=await fnCall('importProducts',{reqId:(I.req+'_'+(k/200)).slice(0,40),br:hasBr()?I.br:undefined,addQty:I.add,rows:G.slice(k,k+200)});a+=r.added||0;u+=r.updated||0;b+=(r.bad||[]).length}
   O.im=null;toast(`יובא: ${a} חדשים, ${u} עודכנו${b?', '+b+' נדחו':''}`);await load(true);rerender()}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
+/* ---------- ייבוא ברקע (11.11.2026, שלב 3) ----------
+   מנהל: הקובץ (אחרי התאמת העמודות והבדיקה במכשיר) נשלח לשרת ב-startImport, 200 שורות בקריאה, עם מזהה עבודה אחד. השרת מייבא לבד –
+   אפשר לצאת מהאפליקציה. השורות לא נשמרות במכשיר בשום שלב (רק בזיכרון עד סוף השליחה). שליחה חוזרת של חלק (ניתוק) לא מכפילה (השרת מזהה).
+   כרטיס התקדמות (רשימת הלקוחות, ייבוא המלאי, מרכז הייבוא) קורא את impJobs – מונים בלבד, מנהל בלבד (חוקים). מתעדכן כל 4 שניות רק
+   כשיש ייבוא פעיל והמסך פתוח; כשחוזרים לאפליקציה – מיד. "נסה שוב" לחלקים שנכשלו – startImport {retry}. "סגור" – רק מסתיר (מזהים במכשיר). */
+const IMP={L:null,busy:0,at:0,tm:0,iv:4000,sig:''},IHK='lp-imp-hide',IKN={cust:'לקוחות',prod:'מוצרים ומלאי'};
+const impJid=()=>{const a=new Uint8Array(20),c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';crypto.getRandomValues(a);return [...a].map(x=>c[x%62]).join('')};
+const impErr=e=>e&&e.offline?new Error('לא הצלחנו להגיע לשירות הייבוא בשרת. בדקו את החיבור לאינטרנט. אם יש חיבור – ייתכן ששירות הייבוא עוד לא הופעל בשרת: פנו למנהל המערכת.'):e;
+/* סבב 2: מזהה העבודה קבוע לקובץ (נגזר מ-req, שמתחלף רק בקובץ/התאמה/סניף/"הוסף כמות" חדשים) – "נסה שוב" אחרי תקלה בשליחה שולח שוב עם אותו מזהה, והשרת מדלג על חלקים שכבר קיבל (לא מכפיל כמות ולא פותח עבודה נוספת) */
+async function impSend(kind,rows,ns,opt,el,job){if(!/^[A-Za-z0-9]{20}$/.test(job||''))job=impJid();const N=200;
+ for(let at=0;at<rows.length;at+=N){if(el)el.textContent='שולח לשרת… '+Math.min(at+N,rows.length)+'/'+rows.length;
+  for(let k=0;;k++){try{await fnCall('startImport',Object.assign({job,kind,total:rows.length,at,rows:rows.slice(at,at+N),ns:ns.slice(at,at+N)},opt||{}));break}catch(e){if(!e.offline||k>=2)throw impErr(e);await new Promise(r=>setTimeout(r,1500*(k+1)))}}}
+ IMP.at=0;impLoad(true);return job}
+const impHid=()=>{try{const a=JSON.parse(localStorage.getItem(IHK)||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}};
+const impView=()=>['ocList','oxImp','imp'].includes(cur().v);
+/* סבב 2: "נתקע" = בייבוא, ושום דבר לא התקדם 10 דקות (חלק שלא הופעל בשרת). מוצג עם "נסה שוב" (השרת מפעיל אותו מחדש), ולא נבדק יותר אוטומטית */
+const impStuck=j=>j.st==='run'&&Date.now()-(j.upd||j.t||0)>6e5;
+const impAct=j=>(j.st==='run'&&!impStuck(j))||(j.st==='up'&&Date.now()-(j.upd||j.t||0)<6e5);
+async function impLoad(force){if(!mgr()||!bzF('orders')||IMP.busy||(!force&&IMP.L&&Date.now()-IMP.at<3000))return;IMP.busy=1;const was=IMP.L;
+ try{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'impJobs'}],orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:5}})});
+  IMP.L=(r||[]).filter(x=>x.document).map(x=>dec(x.document));IMP.at=Date.now();
+  if(was)IMP.L.forEach(j=>{const o=was.find(x=>x.id===j.id);if(o&&impAct(o)&&!impAct(j)){if(j.k==='prod')load(true);else if(window.__ocLoad)window.__ocLoad(true)}})} // הסתיים עכשיו – רענון הרשימה
+ catch(e){IMP.L=IMP.L||[]}finally{IMP.busy=0;const el=document.getElementById('impc');if(el)el.innerHTML=impIn(el.dataset.k);clearTimeout(IMP.tm);const A=IMP.L.filter(impAct),sg=A.map(j=>j.id+':'+((j.dn||0)+(j.fr||0))+':'+(j.recv||0)).join();IMP.iv=sg&&sg===IMP.sig?Math.min(IMP.iv*2,60000):4000;IMP.sig=sg;/* סבב 2: בלי התקדמות – בדיקה פחות תכופה (4→8→…→60 שניות) */if(A.length&&!document.hidden&&impView())IMP.tm=setTimeout(()=>impLoad(true),IMP.iv)}}
+function impRow(j){const c=j.cnt||{},tot=j.total||0,dn=(j.dn||0)+(j.fr||0),stale=j.st==='up'&&!impAct(j),end=j.st==='done'||j.st==='part',B=Array.isArray(j.bad)?j.bad:[],F=Array.isArray(j.fail)?j.fail:[];
+ const stuck=impStuck(j),head=j.st==='done'?'הסתיים':j.st==='part'?'הסתיים – חלק לא יובא':stale?'השליחה לא הושלמה':stuck?'נתקע':j.st==='up'?'שולח לשרת…':'מייבא בשרת…';
+ return `<div class="card" style="margin-bottom:8px"><b>ייבוא ${IKN[j.k]||''}: ${head}</b><p class="note" style="margin:4px 0">${dn} מתוך ${tot} שורות${tot?' ('+Math.round(dn*100/tot)+'%)':''} · ${tm(j.t)}</p>
+ <p style="margin:4px 0">חדשים: <b>${c.c||0}</b> · עודכנו: <b>${c.u||0}</b>${j.k==='cust'?` · ללא שינוי: <b>${c.s||0}</b>`:''}${c.b?` · שגויות: <b>${c.b}</b>`:''}</p>
+ ${impAct(j)?'<p class="note" style="margin:4px 0">אפשר לצאת מהאפליקציה – הייבוא ממשיך בשרת.</p>':''}
+ ${stale?`<p class="note" style="margin:4px 0">רק חלק מהקובץ הגיע לשרת (האפליקציה נסגרה או החיבור נותק בזמן השליחה). מה שהגיע – יובא. כדי להשלים, בחרו את הקובץ שוב: ${j.k==='cust'?'לקוחות קיימים לא יוכפלו':'מוצרים קיימים לא יוכפלו'+(j.addQty?', אבל הכמות של שורות שכבר יובאו תתווסף שוב':'')}.</p>`:''}
+ ${B.length?`<details><summary class="note" style="min-height:44px;display:flex;align-items:center;cursor:pointer">שורות שגויות (${c.b>B.length?B.length+' מתוך '+c.b:B.length})</summary>${B.slice(0,50).map(b=>`<p class="note" style="margin:2px 0">שורה ${esc(String(b.n))}: ${esc(b.m||b.r||'')}</p>`).join('')}</details>`:''}
+ ${stuck?'<p class="note" style="margin:4px 0;color:var(--bad)">אין התקדמות כבר יותר מ-10 דקות. "נסה שוב" יפעיל את הייבוא מחדש בשרת – שורות שכבר יובאו לא יוכפלו.</p>':''}
+ ${F.length?`<p class="note" style="margin:4px 0;color:var(--bad)">${j.fr||0} שורות לא יובאו בגלל תקלה.</p>`:''}${F.length||stuck?`<button class="btn w" data-a="impRetry" data-id="${esc(j.id)}">נסה שוב</button>`:''}
+ ${end||stale?`<button class="btn g s w" style="margin-top:6px" data-a="impHide" data-id="${esc(j.id)}">סגור</button>`:''}</div>`}
+const impIn=k=>{const h=impHid();return (IMP.L||[]).filter(j=>(!k||j.k===k)&&!h.includes(j.id)&&(impAct(j)||Date.now()-(j.fin||j.upd||j.t||0)<864e5)).map(impRow).join('')};
+function impCardH(k){if(!mgr()||!bzF('orders'))return '';if(!IMP.L||Date.now()-IMP.at>15000)setTimeout(()=>impLoad(),0);return `<div id="impc" data-k="${k||''}">${impIn(k)}</div>`}
+window.impCardH=impCardH;window.__imp={send:impSend,load:impLoad,iv:()=>IMP.iv};
+ACT.impRetry=async el=>{el.disabled=true;try{const r=await fnCall('startImport',{retry:el.dataset.id});toast(r&&r.n?'נשלח שוב לשרת':'אין חלקים לנסות שוב – הייבוא מתקדם');IMP.iv=4000;IMP.sig='';await impLoad(true)}catch(e){el.disabled=false;err(impErr(e))}};
+ACT.impHide=el=>{try{localStorage.setItem(IHK,JSON.stringify(impHid().concat([el.dataset.id]).slice(-30)))}catch(e){}const c=document.getElementById('impc');if(c)c.innerHTML=impIn(c.dataset.k)};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&impView())impLoad(true)});
 window.__ox=O;window.__opSync=opSync;window.__brXfer=brXfer;
 })();

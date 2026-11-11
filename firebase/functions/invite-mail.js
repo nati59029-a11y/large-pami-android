@@ -13,7 +13,8 @@
 //     המובנה של Firebase, כמו קודם). הזמנה לעולם לא נשברת בגלל המייל.
 //   - הגבלת קצב (Firestore, mailRate/*): 10 מיילים לשעה לכל עסק, 40 ביום לכל שולח. חריגה – status 'fallback', why 'rate'.
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall } = require('./lib/region'); // שני אזורים (europe-west1 + us-central1) – lib/region.js
 const { defineSecret, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');

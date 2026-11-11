@@ -19,7 +19,8 @@
 // ומיד יוצאת ללקוח (order). מקור לכל שורה: ordcfg/main.src[A] = 'stock' (העובד בוחר, ברירת מחדל = הסניף שיש בו) או מזהה סניף קבוע.
 // אין מספיק במלאי → ההזמנה נשמרת, הכמות יכולה לרדת מתחת לאפס, ומוחזרת אזהרה (תשובה 5). ביטול מחזיר את כל התנועות של ההזמנה.
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall } = require('./lib/region'); // שני אזורים (europe-west1 + us-central1) – lib/region.js
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldPath } = require('firebase-admin/firestore');
 const T = require('./lib/tenant');
@@ -1125,13 +1126,22 @@ async function importProducts(request) {
   const w = await who(request);
   const input = inputObject(request);
   onlyKeys(input, ['reqId', 'br', 'addQty', 'rows']);
+  return prodRows(w, input);
+}
+// הסניף של מנת ייבוא (אותו כלל לייבוא הישן ולייבוא ברקע – imports.js)
+function prodBr(w, inBr, rows) {
+  const anyQty = rows.some((r) => r && r.qty != null && r.qty !== '' && r.qty !== 0);
+  return anyQty ? brOf(w, inBr) : (hasBranches(w) && inBr ? brOf(w, inBr) : (hasBranches(w) ? null : NB));
+}
+// 11.11.2026 (ייבוא ברקע): הליבה של importProducts – משותפת לייבוא הישן (קריאה מהטלפון) ולעיבוד בשרת (imports.js). בלי שינוי בתוצאה.
+// input = { reqId, br, addQty, rows }. הסימון ordcfg/req_<reqId> (עם התוצאה) – ניסיון חוזר לא מכפיל.
+async function prodRows(w, input) {
   // החלטה 23:19: גם עובד עם ord מייבא – רק לסניף שלו (חובה לבחור סניף כשיש סניפים). החלטה 00:12: כולל עלות וסיטונאי
   const staff = w.role !== 'manager';
   if (staff && hasBranches(w) && (input.br == null || input.br === '')) throw bad('bad-br', 'בחרו סניף');
   const reqId = reqIdOf(input);
   if (!Array.isArray(input.rows) || !input.rows.length || input.rows.length > MAX_IMPORT) throw bad('bad-rows', `שורות: 1 עד ${MAX_IMPORT}`);
-  const anyQty = input.rows.some((r) => r && r.qty != null && r.qty !== '' && r.qty !== 0);
-  const br = anyQty ? brOf(w, input.br) : (hasBranches(w) && input.br ? brOf(w, input.br) : (hasBranches(w) ? null : NB));
+  const br = prodBr(w, input.br, input.rows);
   const addQty = input.addQty === true;
   const ok = []; const badRows = [];
   input.rows.forEach((r, i) => {
@@ -1427,4 +1437,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 const FNS = { setCellCfg, saveLinePlan, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

@@ -44,6 +44,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
+    if (n === 'startImport' && globalThis.__SIFAIL && d.at === 200) { globalThis.__SIFAIL = 0; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { status: 'UNAVAILABLE', message: 'x' } }) }); } // סבב 2: תקלה בשליחת החלק השני
     if (n === 'getWsPrices' && globalThis.__WSDENY) return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { status: 'PERMISSION_DENIED', message: 'x', details: { reason: 'not-wholesale' } } }) });
     const R = { importProducts: { ok: true, added: 2, updated: 1, bad: [] }, getWsPrices: { wp: { pA: 9 } }, getCosts: { cost: { pA: 4 } }, transferStock: { ok: true }, saveCat: { ok: true, id: 'c3' }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
@@ -118,8 +119,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const mp = await page.evaluate(() => __q('#main'));
   check('5 ייבוא – מסך התאמה: 2 תקינות, 1 שגויה (מחיר "abc" מסומן); מסך הבחירה עובר מגע/ניגודיות/גלילה', okAll(im) && /2 שורות תקינות/.test(mp.text) && /1 שגויות/.test(mp.text) && /מחיר לא תקין/.test(mp.text) && mp.small.length === 0 && mp.sw <= mp.iw, { text: mp.text.slice(0, 300), small: mp.small });
   await page.click('[data-a=oxImpGo]'); await H.settle(page, 600);
-  const ip = calls.filter((c) => c.n === 'importProducts');
-  check('6 ייבוא נשלח: מנה אחת, 2 שורות, addQty=false, בלי השורה השגויה, שם/מחיר/ברקוד/כמות/קטגוריה; reqId', (ip.length === 1 && ip[0].d.rows.length === 2 && ip[0].d.addQty === false && ip[0].d.rows[0].name === 'קפה' && ip[0].d.rows[0].price === 5 && ip[0].d.rows[0].barcode === '111' && ip[0].d.rows[0].qty === 3 && ip[0].d.rows[0].cat === 'שתייה' && !ip[0].d.rows.some((r) => r.name === 'תה') && /^r/.test(ip[0].d.reqId)), ip.map((x) => x.d));
+  const ip = calls.filter((c) => c.n === 'startImport'); // 11.11.2026: מנהל – ייבוא ברקע (startImport), לא importProducts
+  check('6 ייבוא נשלח לשרת (ברקע): קריאה אחת, 2 שורות, addQty=false, בלי השורה השגויה, שם/מחיר/ברקוד/כמות/קטגוריה; מזהה עבודה, מספרי השורות בקובץ', (ip.length === 1 && ip[0].d.kind === 'prod' && ip[0].d.rows.length === 2 && ip[0].d.addQty === false && ip[0].d.rows[0].name === 'קפה' && ip[0].d.rows[0].price === 5 && ip[0].d.rows[0].barcode === '111' && ip[0].d.rows[0].qty === 3 && ip[0].d.rows[0].cat === 'שתייה' && !ip[0].d.rows.some((r) => r.name === 'תה') && /^[A-Za-z0-9]{20}$/.test(ip[0].d.job) && ip[0].d.total === 2 && ip[0].d.at === 0 && JSON.stringify(ip[0].d.ns) === '[2,4]' && !calls.some((c) => c.n === 'importProducts')), ip.map((x) => x.d));
   const mem = await page.evaluate(() => JSON.parse(localStorage.getItem('lp-ox-imp-map') || '{}'));
   check('7 ההתאמה נזכרת לפי שם הכותרת', mem.name === 'שם' && mem.price === 'מחיר' && mem.barcode === 'ברקוד', mem);
   await page.evaluate(() => { window.__ox.im = null; rerender(); }); await H.settle(page, 200);
@@ -130,10 +131,20 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const big = 'שם,מחיר,ברקוד\n' + Array.from({ length: 250 }, (_, i) => `מוצר ${i},${i + 1},B${String(i).padStart(4, '0')}`).join('\n') + '\n';
   await page.evaluate(() => { window.__ox.im = null; rerender(); }); await H.settle(page, 200);
   await page.setInputFiles('input[data-c=oxImpFile]', { name: 'big.csv', mimeType: 'text/csv', buffer: Buffer.from(big) }); await H.settle(page, 400);
-  const n0 = calls.filter((c) => c.n === 'importProducts').length;
+  const n0 = calls.filter((c) => c.n === 'startImport').length;
   await page.click('[data-a=oxImpGo]'); await H.settle(page, 900);
-  const ip2 = calls.filter((c) => c.n === 'importProducts').slice(n0);
-  check('9 250 שורות: שתי מנות 200+50 עם reqId שונה לכל מנה', ip2.length === 2 && ip2[0].d.rows.length === 200 && ip2[1].d.rows.length === 50 && ip2[0].d.reqId !== ip2[1].d.reqId, ip2.map((x) => [x.d.rows.length, x.d.reqId]));
+  const ip2 = calls.filter((c) => c.n === 'startImport').slice(n0);
+  check('9 250 שורות: שתי קריאות 200+50 של אותה עבודה (at 0 ו-200, total 250)', ip2.length === 2 && ip2[0].d.rows.length === 200 && ip2[1].d.rows.length === 50 && ip2[0].d.job === ip2[1].d.job && ip2[0].d.at === 0 && ip2[1].d.at === 200 && ip2[1].d.total === 250, ip2.map((x) => [x.d.rows.length, x.d.at, x.d.total]));
+  // 9ב (סבב 2): תקלה בשליחת החלק השני → "נסה שוב" שולח שוב את כל הקובץ עם אותו מזהה עבודה (השרת מדלג על מה שכבר קיבל – לא מכפיל כמות)
+  await page.evaluate(() => { window.__ox.im = null; rerender(); }); await H.settle(page, 200);
+  await page.setInputFiles('input[data-c=oxImpFile]', { name: 'big2.csv', mimeType: 'text/csv', buffer: Buffer.from(big) }); await H.settle(page, 400);
+  await page.check('input[data-c=oxImpAdd]'); await H.settle(page, 200);
+  globalThis.__SIFAIL = 1; const n1 = calls.filter((c) => c.n === 'startImport').length;
+  await page.click('[data-a=oxImpGo]'); await H.settle(page, 900);
+  const btnTxt = await page.evaluate(() => (document.querySelector('[data-a=oxImpGo]') || {}).textContent || '');
+  await page.click('[data-a=oxImpGo]'); await H.settle(page, 900);
+  const ip3 = calls.filter((c) => c.n === 'startImport').slice(n1);
+  check('9ב תקלה בחלק השני → "נסה שוב" → אותו מזהה עבודה בכל הקריאות (4: 0, 200 שנכשל, 0, 200), עם addQty', ip3.length === 4 && new Set(ip3.map((x) => x.d.job)).size === 1 && ip3.map((x) => x.d.at).join() === '0,200,0,200' && ip3.every((x) => x.d.addQty === true) && /נסה שוב/.test(btnTxt) && ip3[0].d.job !== ip2[0].d.job, { at: ip3.map((x) => x.d.at), jobs: new Set(ip3.map((x) => x.d.job)).size, btnTxt });
   // 10. העברות
   const xf = await screen('קטלוג-העברות', async () => { await page.evaluate(() => { window.__ox.xf = undefined; }); await goV('oxXfer'); await H.settle(page, 400); });
   check('10 העברות: רשימה (יהודה הנשיא ← נחל לכיש, הזמנה #12) + העברה ידנית; מגע/ניגודיות/גלילה', okAll(xf) && /העברה ידנית/.test(xf.a.text) && /הזמנה #12/.test(xf.a.text), sum(xf));
@@ -180,7 +191,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.setInputFiles('input[data-c=oxImpFile]', { name: 'v.csv', mimeType: 'text/csv', buffer: Buffer.from('שם,מחיר,"עלות לפני מע""מ",הערות,מחיר עלות\nא,5,10,שביר,\nב,6,10,,20\nג,7,,תיאור,\n') }); await H.settle(page, 400);
   const vm = await page.evaluate(() => ({ costx: document.querySelector('select[data-c=oxImpMap][data-k=costx]').value, note: document.querySelector('select[data-c=oxImpMap][data-k=note]').value, cost: document.querySelector('select[data-c=oxImpMap][data-k=cost]').value }));
   await page.click('[data-a=oxImpGo]'); await H.settle(page, 400);
-  const ipV = calls.filter((c) => c.n === 'importProducts').pop();
+  const ipV = calls.filter((c) => c.n === 'startImport').pop(); // מנהל – ייבוא ברקע
   check('13ג ייבוא: כותרות מזוהות (costx=2, note=3, cost=4); שורה 1 לפני 10 → עלות 11.8 + הערה; שורה 2 כולל 20 גובר; שורה 3 בלי עלות והערה נשמרת', vm.costx === '2' && vm.note === '3' && vm.cost === '4' && ipV.d.rows[0].cost === 11.8 && ipV.d.rows[0].note === 'שביר' && ipV.d.rows[1].cost === 20 && ipV.d.rows[1].note === undefined && ipV.d.rows[2].cost === undefined && ipV.d.rows[2].note === 'תיאור' && ipV.d.rows.every((r) => r.costx === undefined), { vm, rows: ipV.d.rows });
   for (const [h, k] of [['עלות ללא מע"מ', 'costx'], ['מחיר ללא מעמ', 'costx'], ['הערה', 'note'], ['תיאור נוסף', 'note']]) {
     await page.evaluate(() => { localStorage.removeItem('lp-ox-imp-map'); window.__ox.im = null; NAV = [{ v: 'home' }]; go('oxImp'); }); await H.settle(page, 200);

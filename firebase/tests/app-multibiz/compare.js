@@ -22,6 +22,14 @@ if (mode === 'legacy') {
   const idn = B.filter(ident); const B2 = B.filter((r) => !ident(r));
   console.log(`main: ${A0.length} בקשות (${A.length} בלי זיהוי); ענף: ${B.length} (מתוכן ${idn.length} קריאות זיהוי חדשות: ${[...new Set(idn.map((r) => new URL(r.url).pathname.split('/documents/')[1].replace(/\/[^/]+$/, '/{x}')))].join(', ')})`);
   if (idn.some((r) => r.method !== 'GET')) { console.log('נכשל: קריאת זיהוי שאינה GET'); fail++; }
+  /* הגעה מיידית (feature/inbox-live, 11.11.2026): אצל מנהל, inbox (status==new) ו-mq (st==new) נמשכים גם 3 שניות אחרי הפתיחה, כל 20 שניות ובחזרה לאפליקציה,
+     כך שמספרן ומיקומן ברצף תלויים בזמן. חריג צר ומכוון: רק שתי השאילתות האלה (runQuery, POST, אותו גוף בדיוק) מוצאות משני הצדדים לפני ההשוואה,
+     והענף חייב לכלול לפחות כמה שיש ב-main מכל אחת. כל שאר הבקשות – אותו סדר ואותו גוף כמו קודם */
+  const lvQ = { inb: '{"structuredQuery":{"from":[{"collectionId":"inbox"}],"where":{"fieldFilter":{"field":{"fieldPath":"status"},"op":"EQUAL","value":{"stringValue":"new"}}},"limit":300}}',
+    mq: '{"structuredQuery":{"from":[{"collectionId":"mq"}],"select":{"fields":[{"fieldPath":"uid"},{"fieldPath":"by"},{"fieldPath":"t"},{"fieldPath":"st"},{"fieldPath":"k"},{"fieldPath":"np"},{"fieldPath":"stAt"}]},"where":{"fieldFilter":{"field":{"fieldPath":"st"},"op":"EQUAL","value":{"stringValue":"new"}}},"limit":200}}' };
+  const lvK = (r) => (r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) ? Object.keys(lvQ).find((k) => lvQ[k] === r.body) : undefined);
+  for (const k of Object.keys(lvQ)) { const na = A.filter((r) => lvK(r) === k).length, nb = B2.filter((r) => lvK(r) === k).length; console.log(`הגעה מיידית – שאילתת ${k}: main ${na}, ענף ${nb}`); if (nb < na) { console.log('נכשל: בענף פחות שאילתות ' + k + ' מאשר ב-main'); fail++; } }
+  for (const L of [A, B2]) for (let i = L.length - 1; i >= 0; i--) if (lvK(L[i])) L.splice(i, 1);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');

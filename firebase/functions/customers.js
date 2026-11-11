@@ -15,7 +15,8 @@
 // 2026-11-09 (החלטת המשתמש 2): עובד פעיל עם ord רשאי לפתוח לקוח עסקי (wholesale:true בלקוח שנוצר באותה קריאה).
 // הפיכת לקוח קיים רגיל לעסקי, וביטול סימון – מנהל בלבד (נבדק כאן, בטרנזקציה).
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall } = require('./lib/region'); // שני אזורים (europe-west1 + us-central1) – lib/region.js
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const T = require('./lib/tenant');
@@ -495,12 +496,21 @@ async function importCusts(request) {
   const db = T.tdb();
   const mark = db.doc('custcfg/req_' + input.reqId);
   if ((await mark.get()).exists) return { ok: true, dup: true, created: 0, updated: 0, bad: [] };
+  const res = await custRows(w, db, input.rows, null);
+  await mark.set({ t: Date.now(), by: w.uid, k: 'importCusts', n: input.rows.length });
+  return res;
+}
+// 11.11.2026 (ייבוא ברקע): הליבה של importCusts – משותפת לייבוא הישן ולעיבוד בשרת (imports.js). בלי hk – בדיוק כמו קודם.
+// hk (רק בעיבוד בשרת) = { prior: Map(i → {k, sk}), ref(i) → מסמך תוצאת השורה, fail(i) – בדיקות בלבד }.
+// תוצאת כל שורה נכתבת באותה טרנזקציה של השורה; ניסיון חוזר מדלג על שורה שכבר בוצעה וסופר אותה לפי התוצאה השמורה – בלי כפילות ובלי ספירה כפולה.
+async function custRows(w, db, rows, hk) {
   const keys = await xKeys(db);
   const brs = await brIds(w);
   const res = { ok: true, dup: false, created: 0, updated: 0, same: 0, bad: [] };
   const seen = new Set();
-  for (let i = 0; i < input.rows.length; i++) {
-    const row = input.rows[i];
+  const was = (p) => { res.cardSkip = (res.cardSkip || 0) + (p.sk || 0); if (p.k === 'c') res.created++; else if (p.k === 's') res.same++; else res.updated++; };
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
     try {
       if (!row || typeof row !== 'object' || Array.isArray(row)) throw bad('bad-row', 'שורה לא תקינה');
       const r0 = Object.assign({}, row); delete r0.wholesale; delete r0.ws; // מתעלמים מעמודת סיטונאי
@@ -525,6 +535,9 @@ async function importCusts(request) {
       const id = keyed ? idFor(o) : null;
       if (keyed && seen.has(id)) { res.same++; continue; } // כפילות בתוך אותה מנה
       if (keyed) seen.add(id);
+      if (hk && hk.prior.has(i)) { was(hk.prior.get(i)); continue; } // בוצעה בניסיון קודם
+      if (hk && hk.fail) hk.fail(i);
+      let prior = null;
       const opts = { fill: true, src: 'import', cell: cellOn(w) };
       // כרטיסים חדשים נכנסים למקומות הפנויים בלבד (קיים לא נדרס). 2026-11-10 (סעיף 1): כפילות = אותו מספר מלא בלבד.
       // כרטיס שמור עם אותן 4 ספרות מפוענח בזיכרון להשוואה (לא נרשם ולא מוחזר) – כך ייבוא חוזר לא מכפיל, ושני כרטיסים שונים עם אותן 4 ספרות נשמרים שניהם
@@ -546,13 +559,19 @@ async function importCusts(request) {
       let r;
       if (!keyed) {
         await db.runTransaction(async (tx) => {
+          prior = null;
+          if (hk) { const p = await tx.get(hk.ref(i)); if (p.exists) { prior = p.data(); return; } }
           r = await createNew(tx, db, w, o, opts);
           putCards(tx, r.id, [], []);
+          if (hk) tx.set(hk.ref(i), { k: 'c', sk: skip });
         });
+        if (prior) { was(prior); continue; }
         res.created++; res.cardSkip = (res.cardSkip || 0) + skip;
         continue;
       }
       await db.runTransaction(async (tx) => {
+        prior = null;
+        if (hk) { const p = await tx.get(hk.ref(i)); if (p.exists) { prior = p.data(); return; } }
         // קריאות לפני כתיבות (חובה בטרנזקציה): קודם הכרטיסים השמורים של הלקוח
         const cs = cl.length ? await tx.get(db.doc('cust/' + id)) : null;
         const have = cardsOf(cs && cs.exists && !cs.get('mv') ? cs.data() : null), nums = [];
@@ -563,7 +582,9 @@ async function importCusts(request) {
         }
         r = await upsert(tx, db, w, o, opts);
         if (cl.length) putCards(tx, r.id, r.moved ? (r.cards || []) : have, r.moved ? (r.nums || []) : nums);
+        if (hk) tx.set(hk.ref(i), { k: r.created ? 'c' : (r.same && !added) ? 's' : 'u', sk: skip });
       });
+      if (prior) { was(prior); continue; }
       res.cardSkip = (res.cardSkip || 0) + skip;
       if (r.created) res.created++; else if (r.same && !added) res.same++; else res.updated++;
     } catch (e) {
@@ -571,7 +592,6 @@ async function importCusts(request) {
       res.bad.push({ i, reason: (e.details && e.details.reason) || 'bad', msg: String(e.message).slice(0, 120) });
     }
   }
-  await mark.set({ t: Date.now(), by: w.uid, k: 'importCusts', n: input.rows.length });
   return res;
 }
 
@@ -753,4 +773,4 @@ const FNS = { setCustCfg, wipeCusts, restoreCusts };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(['wipeCusts', 'restoreCusts'].includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f)); // 11.11.2026: אלפי לקוחות
 const SFNS = { saveCust, importCusts, setCard, getCard, delCard, mergeCust }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY], ...(k === 'importCusts' ? { timeoutSeconds: 540, memory: '512MiB' } : {}) }, wrap(k, f)); // ייבוא גדול: 60 שניות לא מספיקות (10.11)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, custRows, CARD_ENC_KEY, MAX_ROWS, tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });

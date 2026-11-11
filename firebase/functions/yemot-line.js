@@ -16,7 +16,8 @@
 //   * המפתח של ימות רק בכספת (YEMOT_API_KEY), נשלח רק בכותרת. לא ביומן, לא ברשומה ולא בהודעה. גם טקסט מימות לא מועבר.
 //   * אין ניסיון חוזר אוטומטי. ניסיון חוזר = אותו requestId מהאפליקציה (לא מעלה פעמיים, ומשתמש באותו נתיב).
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall } = require('./lib/region'); // שני אזורים (europe-west1 + us-central1) – lib/region.js
 const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');

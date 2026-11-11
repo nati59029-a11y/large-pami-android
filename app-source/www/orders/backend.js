@@ -11,6 +11,9 @@ const EMU = LOCAL && q.get('emu') === '1';
 // פרויקט הבדיקה (largpeami-test): הפרטים ימולאו כשהפרויקט יוקם (לא מאומת – הפרויקט עוד לא קיים).
 const TEST = { projectId: '', apiKey: '', appId: '', storageBucket: '' };
 
+// אזור פונקציות השרת בלשונית (11.11.2026: אירופה). חייב להיות זהה ל-FN_REGION ב-index.html (נבדק ב-firebase/tests/regions.unit.test.js).
+export const FN_REGION = 'europe-west1';
+
 export function backend() {
   const mode = EMU ? 'emulator' : (window.LP_SITE_BACKEND || 'off');
   if (mode === 'emulator') {

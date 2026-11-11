@@ -9,7 +9,8 @@
 //   previewVoice (עובד/מנהל) – "שמע קודם" בקול המשוכפל (ElevenLabs, yemot-line.js + lib/voice.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall, LEGACY_REGION } = require('./lib/region'); // onCall בשני אזורים (europe-west1 + us-central1) – lib/region.js
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
@@ -24,9 +25,9 @@ const T = require('./lib/tenant');
 
 initializeApp();
 
-// אזור ברירת המחדל של Firebase. מגבלת מופעים נמוכה – הגנה על העלות.
-const REGION = 'us-central1';
-setGlobalOptions({ region: REGION, maxInstances: 5 });
+// אזור ברירת מחדל = האזור הישן (לכל מה שלא קובע אזור). פונקציות onCall מתפרסמות בשני אזורים דרך lib/region.js.
+// מגבלת מופעים נמוכה – הגנה על העלות.
+setGlobalOptions({ region: LEGACY_REGION, maxInstances: 5 });
 
 // ---- סודות (Secret Manager). באמולטור: ערכי דמה מתוך functions/.secret.local, שלא נכנס למאגר ----
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
@@ -190,3 +191,6 @@ Object.assign(exports, require('./orders'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
+
+// ייבוא קבצים ברקע (2026-11-11, שלב 3): startImport (מנהל, שני האזורים) + runImportChunk (טריגר, europe-west1 בלבד) – imports.js
+Object.assign(exports, require('./imports'));
