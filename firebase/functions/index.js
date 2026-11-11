@@ -191,3 +191,7 @@ Object.assign(exports, require('./orders'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
+
+// המזכירה העסקית – שלב 1 (2026-11-11): secState, secConsent, secSetup (מנהל העסק), secAdminGet, secAdminSetCfg, secAdminReadChat (מנהל־על),
+// secBackupDaily (מתוזמנת – גיבוי אוספי sec_* ל-Storage). secretary.js
+Object.assign(exports, require('./secretary'));
