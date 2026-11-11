@@ -158,16 +158,17 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
       const f2 = document.querySelector('#dlg[open] form[data-f=inbRegF]'), subOpts = f2.elements.sub ? [...f2.elements.sub.options].map((o) => o.value) : [];
       if (sid) f2.elements.sub.value = sid; f2.querySelector('button:not([type=button])').click(); await W8(200);
       const askM = !!document.querySelector('#dlg[open]'), T = S.tx.filter((t) => t.src === id);
-      return { pre, subOpts, askM, n: S.tx.length - n0, d: Math.round((tot() - t0) * 100) / 100, gone: !S.inbox.some((x) => x.id === id), t: T[0] && { cat: T[0].cat, sub: T[0].sub, creg: T[0].creg, aw: !!T[0].await, dn: !!T[0].dn, due: T[0].due || '', inv: T[0].inv, pays: T[0].pays.map((p) => ({ m: p.m, a: p.a, d: p.d })), coa: T[0].coa, cod: T[0].cod, cof: T[0].cof, bal: bal(T[0]), owe: S.tx.filter((x) => bal(x) > 0.004).some((x) => x.id === T[0].id), awL: tdnL().aw.some((x) => x.id === T[0].id), no: tdnL().no.some((x) => x.id === T[0].id) } };
+      return { pre, subOpts, askM, n: S.tx.length - n0, d: Math.round((tot() - t0) * 100) / 100, gone: !S.inbox.some((x) => x.id === id), t: T[0] && { cat: T[0].cat, sub: T[0].sub, creg: T[0].creg, aw: !!T[0].await, dn: !!T[0].dn, due: T[0].due || '', plan: T[0].plan, hc: ['2026-11', '2026-12', '2027-01', '2027-02'].map((m) => homeCards(m).due), inv: T[0].inv, pays: T[0].pays.map((p) => ({ m: p.m, a: p.a, d: p.d })), coa: T[0].coa, cod: T[0].cod, cof: T[0].cof, bal: bal(T[0]), owe: S.tx.filter((x) => bal(x) > 0.004).some((x) => x.id === T[0].id), awL: tdnL().aw.some((x) => x.id === T[0].id), no: tdnL().no.some((x) => x.id === T[0].id) } };
     };
+    const hc0 = ['2026-11', '2026-12', '2027-01', '2027-02'].map((m) => homeCards(m).due);
     const P = await one('rcP', emp.id, 'rcEmp1'); const Q = await one('rcQ', '', '');
     const W = coWant(), M = coMine(), X = (id, reg, a) => ({ id, uid: 'w', by: 'עובד בדיקה', t: 1, reg, d: '2026-11-03', tm: '', a, why: 'w', dep: '', src: id, zc: '', dp: '' });
-    return { emp: emp.id, P, Q, wP: W.rcP && W.rcP.f, wQ: W.rcQ && W.rcQ.f, vP: coVer(X('rcP', 'i_nl', 15)), vQ: coVer(X('rcQ', 'i_yh', 70)), mP: M.find((x) => x.id === 'rcP'), mQ: M.find((x) => x.id === 'rcQ'), err: document.querySelector('#dlg[open]') ? document.querySelector('#dlg').innerText.slice(0, 100) : '' };
+    return { hc0, emp: emp.id, P, Q, wP: W.rcP && W.rcP.f, wQ: W.rcQ && W.rcQ.f, vP: coVer(X('rcP', 'i_nl', 15)), vQ: coVer(X('rcQ', 'i_yh', 70)), mP: M.find((x) => x.id === 'rcP'), mQ: M.find((x) => x.id === 'rcQ'), err: document.querySelector('#dlg[open]') ? document.querySelector('#dlg').innerText.slice(0, 100) : '' };
   });
-  const P = r20.P, Q = r20.Q;
+  const P = r20.P, Q = r20.Q; const Q0hc = r20.hc0;
   check('20 "אשר" פותח חלון קטגוריה: הקטגוריה שבפריט מסומנת מראש, והחלפת קטגוריה מחליפה את רשימת הכרטיסים (עובדים)', P.pre && P.pre.cat !== r20.emp && P.subOpts.includes('rcEmp1') && Q.pre.cat === 'e_sup' && Q.pre.sub === 'rcSup2', { P: P.pre, subOpts: P.subOpts, Q: Q.pre });
   check('21 משכורת לעובד במזומן: הוצאה אחת בקטגוריית משכורת, תשלום במזומן בסכום ובתאריך שלה, בלי שאלת מזומן/העברה, ונשמרו creg והסכום/התאריך/הצילום של הקופה', P.n === 1 && P.d === 15 && !P.askM && P.gone && P.t.cat === r20.emp && P.t.sub === 'rcEmp1' && P.t.creg === 'i_nl' && P.t.pays.length === 1 && P.t.pays[0].m === 'מזומן' && P.t.pays[0].a === 15 && P.t.pays[0].d === '2026-11-03' && !P.t.aw && P.t.coa === 15 && P.t.cod === '2026-11-03', P);
-  check('22 ספק בלי חשבונית: נשמר (הוצאה אחת), שולם במזומן, יתרה 0 – לא ב"לתשלום"/"באיחור", לא "ממתין לחשבונית" ולא "בלי מספר חשבונית"', Q.n === 1 && Q.d === 70 && Q.gone && Q.t.cat === 'e_sup' && Q.t.sub === 'rcSup2' && Q.t.creg === 'i_yh' && !Q.t.inv && !Q.t.aw && !Q.t.dn && !Q.t.due && Q.t.bal === 0 && !Q.t.owe && !Q.t.awL && Q.t.pays.length === 1 && Q.t.pays[0].m === 'מזומן' && Q.t.pays[0].a === 70 && Q.t.cof === 'fQ' && !r20.err, Q);
+  check('22 ספק בלי חשבונית: נשמר (הוצאה אחת), שולם במזומן, יתרה 0, חודש התשלום = חודש ההוצאה (homeCards של החודשים הבאים לא השתנו) – לא ב"לתשלום"/"באיחור", לא "ממתין לחשבונית" ולא "בלי מספר חשבונית"', Q.n === 1 && Q.d === 70 && Q.gone && Q.t.cat === 'e_sup' && Q.t.sub === 'rcSup2' && Q.t.creg === 'i_yh' && !Q.t.inv && !Q.t.aw && !Q.t.dn && !Q.t.due && Q.t.bal === 0 && !Q.t.owe && !Q.t.awL && Q.t.plan === '2026-11' && Q.t.hc[1] === Q0hc[1] && Q.t.hc[2] === Q0hc[2] && Q.t.hc[3] === Q0hc[3] && Q.t.pays.length === 1 && Q.t.pays[0].m === 'מזומן' && Q.t.pays[0].a === 70 && Q.t.cof === 'fQ' && !r20.err, Q);
   check('23 שתי ההוצאות בסגירת הקופה עם creg וסכום נכונים (coWant/coVer/"הוצאה מקופה")', r20.wP && r20.wP.reg === 'i_nl' && r20.wP.a === 15 && r20.wQ && r20.wQ.reg === 'i_yh' && r20.wQ.a === 70 && r20.wQ.tm === '11:00' && r20.vP && r20.vQ && r20.mP && r20.mP.a === 15 && r20.mQ && r20.mQ.reg === 'i_yh' && r20.mQ.a === 70, r20);
 
   // חשבונית בסכום ובתאריך אחרים מתחברת להוצאה מקופה שממתינה: הסכום, התאריך והצילום של הקופה לא משתנים
@@ -197,6 +198,28 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   });
   check('26 משיכה חוזרת: מסמך שיוחד לחשבונית לא נקלט שוב (אין כפילות), ומסמך חדש כן נקלט', !r23.ids.includes('rcA') && r23.ids.includes('rcNew9'), r23);
   await page.evaluate(() => { S.inbox = S.inbox.filter((x) => x.id !== 'rcNew9'); save(); });
+
+  // ביטול באמצע לא משנה את הפריט; "שמור ואשר" (בדיקה ושינוי) בפריט מקופה – גם הוא נרשם כשולם במזומן מהקופה
+  const r27 = await page.evaluate(async () => {
+    const W8 = (ms) => new Promise((r) => setTimeout(r, ms || 80)), emp = S.cats.find((c) => c.kind === 'exp' && !c.hid && c.beh === 'emp');
+    S.inbox.push({ id: 'rcV', by: 'עובד בדיקה', at: '2026-11-03T09:00:00Z', rq: { n: 'צלם שוב', at: '2026-11-03T10:00:00Z' }, d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup2', amt: 64, date: '2026-11-03', note: 'ספק' } }); save();
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg'); const d0 = JSON.stringify(S.inbox.find((x) => x.id === 'rcV').d), n0 = S.tx.length;
+    document.querySelector('#main [data-a=inbOk][data-id=rcV]').click(); await W8(); const f = document.querySelector('#dlg[open] form[data-f=inbRegF]');
+    const cats = [...f.elements.cat.options].map((o) => o.value), bad = S.cats.filter((c) => c.kind === 'exp' && (c.off || c.beh === 'loan')).map((c) => c.id);
+    f.elements.cat.value = emp.id; f.elements.cat.dispatchEvent(new Event('change', { bubbles: true })); await W8();
+    document.querySelector('#dlg[open] form[data-f=inbRegF] button:not([type=button])').click(); await W8(150);
+    const askRq = !!document.querySelector('#dlg[open]'); closeDlg(); await W8(); // ביטול בשאלת "צילום חדש"
+    const same = JSON.stringify(S.inbox.find((x) => x.id === 'rcV').d) === d0, n1 = S.tx.length - n0;
+    delete S.inbox.find((x) => x.id === 'rcV').rq; save(); render(1);
+    const hc0 = ['2026-12', '2027-01', '2027-02'].map((m) => homeCards(m).due);
+    ACT.inbEdit({ dataset: { id: 'rcV' } }); await W8(); const g = document.querySelector('#dlg[open] form[data-f=inbsave]'); g.elements.inv.value = '123';
+    ACT.inbSaveOk(); await W8(300);
+    const T = S.tx.filter((t) => t.src === 'rcV'), t = T[0] || {};
+    return { cats, bad, hasBad: cats.some((c) => bad.includes(c)), askRq, same, n1, n: T.length, inv: t.inv, creg: t.creg, pays: (t.pays || []).map((p) => [p.m, p.a]), bal: T[0] ? bal(t) : null, plan: t.plan, aw: !!t.await,
+      owe: S.tx.filter((x) => bal(x) > 0.004).some((x) => x.id === t.id), hc: ['2026-12', '2027-01', '2027-02'].map((m) => homeCards(m).due), hc0, coa: t.coa, gone: !S.inbox.some((x) => x.id === 'rcV') };
+  });
+  check('27 החלון מציג רק קטגוריות פעילות (בלי מוסתרות ובלי הלוואות); ביטול באמצע (שאלת צילום חדש) לא משנה את הפריט ולא רושם הוצאה', !r27.hasBad && r27.askRq && r27.same && r27.n1 === 0, r27);
+  check('28 "שמור ואשר" בפריט מקופה (ספק, עם מספר חשבונית): הוצאה אחת, תשלום במזומן 64, יתרה 0, חודש התשלום 11/2026, לא ב"לתשלום" ולא בחודשים הבאים', r27.n === 1 && r27.inv === '123' && r27.creg === 'i_nl' && JSON.stringify(r27.pays) === JSON.stringify([['מזומן', 64]]) && r27.bal === 0 && r27.plan === '2026-11' && !r27.aw && !r27.owe && JSON.stringify(r27.hc) === JSON.stringify(r27.hc0) && r27.coa === 64 && r27.gone, r27);
 
   // סגירת קופה: "הוצאה מקופה" לכל קופה, מסומנות אלו של הסגירה האחרונה (2 סגירות, הוצאות בסגירה האחרונה / בקודמת / אחריה), סכום המסומנות מול הסגירה
   const r14 = await page.evaluate(async () => {
