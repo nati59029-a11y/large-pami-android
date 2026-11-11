@@ -112,13 +112,19 @@ async function open(browser, www, o) {
       const hc = homeCards(m0);
       go('due'); await wait(200);
       const lateK = [...document.querySelectorAll('#main .kg .k')].find((e) => /באיחור/.test(e.innerText));
-      ok('13 חשבונית באיחור: late = homeCards; ובמסך "חשבוניות לתשלום" – אותו סכום (אחרי זיכויים שעברו)', near(f.late.sum, hc.lateSum) && f.late.n === hc.lateN && f.late.sum >= 600 && lateK && lateK.innerText.includes(ils(Math.max(0, hc.lateSum - 150))), { late: f.late, k: lateK && lateK.innerText });
+      ok('13 חשבונית באיחור (600) וזיכוי פתוח (150): המזכירה מקבלת בדיוק את המספר שמסך "חשבוניות לתשלום" מציג (450); לפני זיכויים = כרטיס הבית', near(f.late.sum, 450) && lateK && lateK.innerText.includes(ils(f.late.sum)) && near(f.late.gross, hc.lateSum) && f.late.n === hc.lateN && f.crs.some((c) => c[0] === supName && near(c[1], 150)), { late: f.late, k: lateK && lateK.innerText, crs: f.crs });
       tab('home');
       // 14
       const p14 = supInv({ amt: 900, inv: 'C14' }); const cd = addMon(m0, 0) + '-25'; p14.pays.push({ id: 'pp14', d: td, a: 900, m: 'צ׳ק', chk: { no: '1', bank: '', date: cd, img: '' } }); save(); f = F();
       const wkI = Math.floor((new Date(cd + 'T00:00:00') - new Date(td + 'T00:00:00')) / (7 * 864e5));
       const cf0 = cfDebits(m0, []);
       ok('14 צ\'ק עתידי: ברשימת הצ\'קים, ובשבוע הנכון בצפי; סך הצ\'קים בחודש = cfDebits (מסך התזרים)', f.chk.some((c) => c[0] === cd && near(c[2], 900)) && f.wk.out[wkI] >= 900 && near(f.cf[0][3], cf0.sumChk), { chk: f.chk, wk: f.wk.out, i: wkI });
+      // 14א – צפי 13 שבועות: צ'ק שירד בתחילת החודש (לפני היום) לא נספר שוב; חשבונית פתוחה שמועדה עבר – כן, בשבוע הראשון
+      const w0 = f.wk.out[0];
+      const p14a = supInv({ amt: 300, inv: 'C14A' }); p14a.pays.push({ id: 'pp14a', d: m0 + '-01', a: 300, m: 'צ׳ק', chk: { no: '2', bank: '', date: m0 + '-01', img: '' } });
+      save(); const f14a = F();
+      ok('14א צ\'ק שתאריכו עבר (תחילת החודש) לא נספר בצפי – כבר ירד ונמצא ביתרה של היום', td > m0 + '-01' && near(f14a.wk.out[0], w0) && !f14a.chk.some((c) => c[0] === m0 + '-01'), { before: w0, after: f14a.wk.out[0] });
+      f = f14a;
       // 15
       const ds = dueStats(m0);
       ok('15 "לתשלום החודש" ו"ירידה מהחשבון" = כרטיסי הבית', near(f.due.due, ds.due) && near(f.due.rem, ds.rem) && near(f.due.debit, homeCards(m0).debit), f.due);
@@ -148,7 +154,7 @@ async function open(browser, www, o) {
       return out;
     });
     for (const [n, c, info] of R) check(n, c, info);
-    check('חלק א: בדיוק 20 מקרים + בדיקת מבנה', R.length === 21, R.length);
+    check('חלק א: 20 מקרים + צפי (14א) + בדיקת מבנה', R.length === 22, R.length);
     check('חלק א: בלי שגיאות JS', page.__errors.length === 0, page.__errors);
     await ctx.close();
   }

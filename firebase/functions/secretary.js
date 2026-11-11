@@ -81,6 +81,8 @@ function cfgOf(snap, bizId) {
     mirror: d.mirror !== false,
     cfTh: typeof d.cfTh === 'number' && Number.isFinite(d.cfTh) ? d.cfTh : null,
     nr: obj(d.nr),
+    // קצב הודעות לכל מנהל (10.3, 89): מנהל־על קובע לכל עסק; בלי הגדרה – ברירת המחדל
+    rate: { hour: Number.isInteger(d.rate && d.rate.hour) ? d.rate.hour : RATE_HOUR, day: Number.isInteger(d.rate && d.rate.day) ? d.rate.day : RATE_DAY },
   };
 }
 const empDefault = (bizId) => bizId === T.BIZ0;
@@ -108,7 +110,9 @@ async function gate(request, opts) {
   const me = cfg.mgr[who.uid] && typeof cfg.mgr[who.uid] === 'object' ? cfg.mgr[who.uid] : {};
   const consented = me.cv === CONSENT_VER;
   if (o.consent && !consented) throw pre('no-consent', 'צריך לאשר את תנאי השימוש במזכירה לפני שמתחילים');
-  return { who, cfg, me, consented, db };
+  // מנהל עם הגבלת סניפים (admins/{uid}.br): נתוני כל העסק (המראה, נתוני ענן) לא נמסרים לו בצ'אט (החלטת המתאם, סבב 1)
+  const brLimited = !who.superadmin && Array.isArray(adm.get('br'));
+  return { who, cfg, me, consented, db, brLimited };
 }
 
 // secState: מה האפליקציה צריכה כדי להציג כפתור, כרטיס, הסכמה ואשף. לא דורש הסכמה (כדי להציג את מסך ההסכמה).
@@ -172,7 +176,10 @@ const CHAT_MAX = 2000;            // תווים בשאלה (10.3)
 const FIN_MAX = 400000;           // גודל נתוני הכספים שמגיעים מהמכשיר (JSON)
 const RATE_HOUR = 40, RATE_DAY = 200; // הודעות לכל מנהל (10.3; הנחה)
 const MIRROR_HOUR = 40;           // עדכוני מראה לעסק בשעה (האפליקציה שולחת לכל היותר פעם ב-3 דקות)
-const RESERVE_MC = { fast: 3000, deep: 30000 }; // שמירה מראש במונה לפני הקריאה למודל (11.3), מילי־סנט
+// שמירה מראש במונה לפני הקריאה למודל (11.3), מילי־סנט: העלות המרבית האפשרית – MAX_ROUNDS סבבים, כל אחד עד 20,000 טוקנים נכנסים
+// ועד מגבלת הפלט של המודל (2,048 מהיר / 8,192 איכותי). מחושב לפי המחירים שבהגדרות (sec-ai.js)
+const MAX_IN_ROUND = 20000;
+const reserveOf = (tier) => AI.costMc(tier, { in: 5 * MAX_IN_ROUND, out: 5 * (tier === 'deep' ? 8192 : 2048) });
 const STALE_MS = 3 * 864e5;       // מראה ישן מ-3 ימים – אומרים ומתריעים (44)
 const HIST = 10;                  // הודעות קודמות שנשלחות למודל
 const MAX_ROUNDS = 5, MAX_CALLS = 4;
@@ -190,7 +197,8 @@ function usageOf(snap, capCents, now) {
 }
 
 // מונה: קצב לכל מנהל + עלות (שמירה מראש). reserve=false – רק קצב (תשובה שלא עולה כסף)
-async function meter(db, uid, tier, reserve) {
+async function meter(db, uid, tier, reserve, rate) {
+  const RL = rate || { hour: RATE_HOUR, day: RATE_DAY };
   const now = Date.now();
   const useRef = db.doc('sec_cfg/use');
   return db.runTransaction(async (tx) => {
@@ -200,11 +208,18 @@ async function meter(db, uid, tier, reserve) {
     const r0 = d.r && typeof d.r === 'object' && d.r[uid] && typeof d.r[uid] === 'object' ? d.r[uid] : {};
     const h = hourKey(now);
     const r = { h, n: r0.h === h ? (r0.n || 0) : 0, d: u.day, dn: r0.d === u.day ? (r0.dn || 0) : 0 };
-    if (r.n >= RATE_HOUR || r.dn >= RATE_DAY) throw new HttpsError('resource-exhausted', 'יותר מדי הודעות בזמן קצר. נסו שוב מאוחר יותר.', { reason: 'rate-limit' });
+    if (r.n >= RL.hour || r.dn >= RL.day) throw new HttpsError('resource-exhausted', 'יותר מדי הודעות בזמן קצר. נסו שוב מאוחר יותר.', { reason: 'rate-limit' });
     r.n++; r.dn++;
     const upd = { m: u.m, mc: u.mc, d: u.day, dmc: u.dmc, r: Object.assign({}, d.r && typeof d.r === 'object' ? d.r : {}, { [uid]: r }) };
     let reserved = 0;
-    if (reserve && !u.saving) { reserved = RESERVE_MC[tier] || RESERVE_MC.fast; upd.mc += reserved; upd.dmc += reserved; }
+    if (reserve && !u.saving) {
+      // מה שנשאר מהתקרה (החודשית והיומית). "חשבי לעומק" רק כשנשאר מספיק לעלות המרבית; מהיר – עד מה שנשאר
+      const left = Math.min(u.capMc - u.mc, u.capMc / DAY_CAP_DIV - u.dmc);
+      const max = reserveOf(tier);
+      if (tier === 'deep' && left < max) throw new HttpsError('resource-exhausted', 'לא נשאר מספיק מתקרת השימוש ל"חשבי לעומק". אפשר לשאול שאלה רגילה.', { reason: 'deep-over-cap' });
+      reserved = Math.max(1, Math.min(max, Math.floor(left)));
+      upd.mc += reserved; upd.dmc += reserved;
+    }
     tx.set(useRef, upd, { merge: true });
     return { saving: reserve ? u.saving : '', reserved, m: u.m, day: u.day, capMc: u.capMc };
   });
@@ -244,8 +259,9 @@ function readFin(x) {
 // secMirrorPut({ fin }) – האפליקציה של המנהל אחרי שמירה (43). מראה כבוי (45) = נדחה. עובד/עסק אחר – נחסמים ב-gate
 async function secMirrorPut(request) {
   const input = inputObject(request);
-  const { who, cfg, db } = await gate(request, { consent: true });
+  const { who, cfg, db, brLimited } = await gate(request, { consent: true });
   if (!cfg.mirror) throw pre('mirror-off', 'מראה הכספים כבוי בהגדרות');
+  if (brLimited) throw deny('branch-limited', 'מנהל עם הגבלת סניפים לא מעדכן את מראה הכספים (הנתונים במכשיר שלו חלקיים)');
   const fin = readFin(input.fin);
   const now = Date.now();
   const useRef = db.doc('sec_cfg/use');
@@ -264,11 +280,20 @@ async function secMirrorPut(request) {
 }
 
 // secPrefs – הגדרות של מנהל העסק: מתג המראה (45), אישור סף התזרים (51), "לא רלוונטי" לרעיון (56)
-const NR_DAYS = 90, NR_MAX = 200;
+const NR_DAYS = 90, NR_MAX = 200, PREFS_HOUR = 30;
 async function secPrefs(request) {
   const input = inputObject(request);
   const { who, cfg, db } = await gate(request, { consent: true });
   const t = Date.now();
+  // קצב (10.3): כל שינוי נרשם ביומן שאי אפשר למחוק – עד PREFS_HOUR שינויים בשעה לכל מנהל
+  await db.runTransaction(async (tx) => {
+    const ref = db.doc('sec_cfg/use');
+    const us = await tx.get(ref);
+    const pp = us.exists && us.get('pp') && typeof us.get('pp') === 'object' && us.get('pp')[who.uid] ? us.get('pp')[who.uid] : {};
+    const h = hourKey(t), n = pp.h === h ? (pp.n || 0) : 0;
+    if (n >= PREFS_HOUR) throw new HttpsError('resource-exhausted', 'יותר מדי שינויים בזמן קצר. נסו שוב בעוד שעה.', { reason: 'rate-limit' });
+    tx.set(ref, { pp: { [who.uid]: { h, n: n + 1 } } }, { merge: true });
+  });
   const b = db.batch();
   const main = db.doc('sec_cfg/main');
   let out;
@@ -285,7 +310,8 @@ async function secPrefs(request) {
     out = { cfTh: a === null ? null : Math.round(a) };
   } else if (input.op === 'notRelevant') {
     const k = typeof input.key === 'string' ? input.key : '';
-    if (!k || k.length > 120 || /[\u0000-\u001f]/.test(k)) throw bad('bad-key', 'מפתח לא תקין');
+    // שם שדה ב-Firestore: בלי תווי בקרה, בלי "__x__" (שמור), בלי נקודה/לוכסן/סוגריים (נתיב)
+    if (!k || k.length > 120 || /[\u0000-\u001f.\/\[\]`*~]/.test(k) || /^__.*__$/.test(k)) throw bad('bad-key', 'מפתח לא תקין');
     const nr = {};
     for (const [x, v] of Object.entries(cfg.nr)) if (Number.isInteger(v) && v > t) nr[x] = v; // ניקוי פגי תוקף
     nr[k] = t + NR_DAYS * 864e5;
@@ -318,7 +344,7 @@ const CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g;
 // secChat({ text, deep?, fin? }) – צ'אט עם כלים. הכלים נקבעים כאן לפי ערוץ (app) והרשאות – לא לפי בקשת המודל (5.5)
 async function secChat(request) {
   const input = inputObject(request);
-  const { who, cfg, me, db } = await gate(request, { consent: true });
+  const { who, cfg, me, db, brLimited } = await gate(request, { consent: true });
   if (typeof input.text !== 'string') throw bad('bad-text', 'כתבו שאלה');
   if (input.text.length > CHAT_MAX) throw bad('too-long', 'השאלה ארוכה מדי (עד ' + CHAT_MAX + ' תווים)');
   const text = input.text.replace(CTRL, '').trim();
@@ -326,10 +352,11 @@ async function secChat(request) {
   const deep = input.deep === true;
   const tier = deep ? 'deep' : 'fast';
   const now = Date.now();
-  const payOn = cfg.pay[who.uid] === true;
+  const payOn = cfg.pay[who.uid] === true && !brLimited;
   // נתוני הכספים: קודם מהמכשיר (87 – רק לשיחה הזו, לא נשמרים), אחרת מהמראה (אם המתג פעיל)
   let fin = null, finFrom = '', mirrorAt = 0, pay = null;
-  if (input.fin !== undefined && input.fin !== null) { fin = readFin(input.fin); finFrom = 'device'; pay = fin.pay || null; delete fin.pay; }
+  if (brLimited) { /* מנהל עם הגבלת סניפים: לא נתוני מכשיר, לא מראה */ }
+  else if (input.fin !== undefined && input.fin !== null) { fin = readFin(input.fin); finFrom = 'device'; pay = fin.pay || null; delete fin.pay; }
   else if (cfg.mirror) {
     const ms = await db.doc('sec_mirror/fin').get();
     if (ms.exists) { fin = ST.cleanFin(parseJ(ms.get('data'))); if (fin) { finFrom = 'mirror'; mirrorAt = ms.get('at') || fin.at; } }
@@ -345,20 +372,23 @@ async function secChat(request) {
   let reply = null, mode = 'ok', mt = null, usage = { in: 0, out: 0 }, sent = 0, denied = [], offered = [];
   if (pol.sensitive) {
     // שאלה שמבקשת מסקנה לפי מצב בריאותי/משפחתי (6.3 כלל 3): תשובה קבועה, בלי מודל ובלי עלות
-    await meter(db, who.uid, tier, false);
+    await meter(db, who.uid, tier, false, cfg.rate);
     reply = ST.TXT.sensitive; mode = 'policy';
     logs.push(['policy', 'sensitive']);
   } else {
-    mt = await meter(db, who.uid, tier, true);
+    mt = await meter(db, who.uid, tier, true, cfg.rate);
     if (mt.saving) { reply = mt.saving === 'day' ? ST.TXT.savingDay : ST.TXT.saving; mode = 'saving'; }
   }
   if (reply === null) {
-    offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true });
+    offered = ST.toolsFor('app', { pay: payOn, emp: cfg.emp === true, brLimited });
     const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr };
-    const hs = await db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc').limit(HIST).get();
-    const turns = hs.docs.reverse().map((d) => ({ role: d.get('role') === 'a' ? 'a' : 'u', text: String(d.get('text') || '').slice(0, 1500) })).filter((x) => x.text);
+    let turns;
+    try {
+      const hs = await db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc').limit(HIST).get();
+      turns = hs.docs.reverse().map((d) => ({ role: d.get('role') === 'a' ? 'a' : 'u', text: String(d.get('text') || '').slice(0, 1500) })).filter((x) => x.text);
+    } catch (e) { await settle(db, who.uid, mt, -mt.reserved, deep).catch(() => {}); throw e; } // לא משאירים את השמירה מראש במונה
     turns.push({ role: 'u', text });
-    const finNote = fin ? (finFrom === 'device' ? 'מהמכשיר של המנהל, נכון ל-' + ST.fmtAt(fin.at) : 'מהמראה בענן, נכון ל-' + ST.fmtAt(mirrorAt) + (stale ? ' (ישן מ-3 ימים – אמרי זאת)' : '')) : (!cfg.mirror ? 'המראה כבוי ואין נתונים מהמכשיר' : 'אין נתוני כספים');
+    const finNote = brLimited ? 'למנהל הזה יש הגבלת סניפים, ולכן אין לו בצ\'אט נתוני כספים ונתוני העסק. אם שואלים על כספים, משימות, קופה או הזמנות – עני בנימוס: "' + ST.TXT.brLimited + '"' : fin ? (finFrom === 'device' ? 'מהמכשיר של המנהל, נכון ל-' + ST.fmtAt(fin.at) : 'מהמראה בענן, נכון ל-' + ST.fmtAt(mirrorAt) + (stale ? ' (ישן מ-3 ימים – אמרי זאת)' : '')) : (!cfg.mirror ? 'המראה כבוי ואין נתונים מהמכשיר' : 'אין נתוני כספים');
     const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote });
     let final = null, refused = false;
     try {
@@ -422,7 +452,7 @@ async function secChat(request) {
   b.set(aa, am);
   for (const l of logs) b.set(db.collection('sec_log').doc(), logData(who.uid, l[0] === 'tool' || l[0] === 'toolDenied' ? 'sec' : 'auto', l[0], { tgt: l[2], note: [l[1], l[3]].filter(Boolean).join(' ') }));
   await b.commit();
-  return { ok: true, id: aa.id, reply, mode, deep, src: am.src, nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied };
+  return { ok: true, id: aa.id, reply, mode, deep, src: am.src, nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied, brLimited };
 }
 function argNote(a) {
   if (!a || typeof a !== 'object') return '';
@@ -462,6 +492,7 @@ async function secAdminGet(request) {
     mode: cfg.mode, mainUid: cfg.mainUid, emp: cfg.emp, empDefault: empDefault(who.bizId),
     pay: Object.fromEntries(admins.map((a) => [a.uid, cfg.pay[a.uid] === true])),
     capCents: cap.exists && Number.isInteger(cap.get('capCents')) ? cap.get('capCents') : null,
+    rate: cfg.rate, rateDefault: { hour: RATE_HOUR, day: RATE_DAY },
     admins, consent, consentVer: CONSENT_VER,
   };
 }
@@ -470,7 +501,7 @@ async function secAdminGet(request) {
 async function secAdminSetCfg(request) {
   const input = inputObject(request);
   const who = await superIn(request);
-  const known = ['mode', 'mainUid', 'emp', 'pay', 'capCents'];
+  const known = ['mode', 'mainUid', 'emp', 'pay', 'capCents', 'rate'];
   for (const k of Object.keys(input)) if (!known.includes(k)) throw bad('bad-input', 'שדה לא מוכר: ' + String(k).slice(0, 30));
   const db = T.tdb();
   const [cs, admins] = await Promise.all([db.doc('sec_cfg/main').get(), adminsOf(db)]);
@@ -504,6 +535,15 @@ async function secAdminSetCfg(request) {
     if (input.capCents !== null && (!Number.isInteger(input.capCents) || input.capCents < 0 || input.capCents > MAX_CAP_CENTS)) throw bad('bad-cap', 'תקרה: מספר שלם של דולרים, בין 0 ל-' + (MAX_CAP_CENTS / 100).toLocaleString('en-US') + '$');
     cap = input.capCents; notes.push('cap=' + (cap === null ? 'none' : cap));
   }
+  if (input.rate !== undefined) {
+    // קצב הודעות לכל מנהל בעסק (89): { hour: 1–500, day: 1–5000 }, או null = ברירת המחדל
+    const r = input.rate;
+    if (r === null) { upd.rate = FieldValue.delete(); notes.push('rate=default'); }
+    else {
+      if (!r || typeof r !== 'object' || Array.isArray(r) || !Number.isInteger(r.hour) || r.hour < 1 || r.hour > 500 || !Number.isInteger(r.day) || r.day < 1 || r.day > 5000 || r.day < r.hour) throw bad('bad-rate', 'קצב: הודעות לשעה 1–500, ליום 1–5,000 (ליום לא פחות מלשעה)');
+      upd.rate = { hour: r.hour, day: r.day }; notes.push('rate=' + r.hour + '/' + r.day);
+    }
+  }
   if (!notes.length) throw bad('bad-input', 'לא נשלח שום שינוי');
   const t = Date.now();
   const b = getFirestore().batch();
@@ -514,6 +554,7 @@ async function secAdminSetCfg(request) {
   else {
     const first = { mode, mainUid, emp: upd.emp !== undefined ? upd.emp : empDefault(who.bizId), pay: {}, mgr: {}, upd: t, updBy: who.uid };
     for (const [k, v] of Object.entries(upd)) if (k.startsWith('pay.')) first.pay[k.slice(4)] = v;
+    if (upd.rate && Number.isInteger(upd.rate.hour)) first.rate = upd.rate;
     b.set(main, first);
   }
   if (cap === null) b.delete(db.doc('sec_cfg/cap'));
@@ -723,5 +764,5 @@ exports.secBackupDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every da
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   CONSENT, CONSENT_VER, SEC_COLLS, SEC_ROOT_COLLS, SEC_SUBS, BACKUP_KEEP_DAYS, cfgOf, runSecBackup, restoreSecBackup, pruneSecBackups, enc, dec, dayKey,
-  usageOf, DEFAULT_CAP_CENTS, RESERVE_MC, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
+  usageOf, DEFAULT_CAP_CENTS, reserveOf, PREFS_HOUR, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
 } });

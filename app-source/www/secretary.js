@@ -143,15 +143,22 @@ function secFin(o){o=o||{};
   const op=inv().filter(t=>bal(t)>0.004).sort((x,y)=>dueOf(x).localeCompare(dueOf(y)));
   f.open=op.slice(0,400).map(t=>[String(subName(t)).slice(0,60),String(t.inv||'').slice(0,30),t.date||'',dueOf(t),rnd(t.amt),bal(t)]);
   f.sups=S.subs.filter(x=>x&&!x.off&&['sup','fixed'].includes((cat(x.cat)||{}).beh)).map(x=>[String(x.name||'').slice(0,60),bsum(x.id)]).filter(x=>Math.abs(x[1])>0.004).slice(0,400);
+  /* זיכויים פתוחים שתאריכם עבר (crDueS) – מורידים מהחוב ומ"באיחור", כמו בכרטיס הספק ובמסך "חשבוניות לתשלום" (החלטת בעל העסק 10.11.2026) */
+  f.crs=S.subs.filter(x=>x&&['sup','fixed'].includes((cat(x.cat)||{}).beh)).map(x=>[String(x.name||'').slice(0,60),crDueS(x.id)]).filter(x=>x[1]>0.004).slice(0,400);
   const hc=homeCards(m0),ds=dueStats(m0);
-  f.late={sum:hc.lateSum,n:hc.lateN};f.due={m:m0,due:ds.due,rem:ds.rem,debit:hc.debit};
+  /* "באיחור (אחרי זיכויים)" – אותו חישוב שמסך "חשבוניות לתשלום" (V.due) מציג: לכל ספק באיחור, יתרות באיחור פחות זיכויים פתוחים, לא פחות מ-0.
+     (V.due מחשב את זה בתוך המסך ולא בפונקציה נפרדת; הבדיקה ui-sec-2 משווה למספר שהמסך מציג) */
+  const lt=inv().filter(t=>bal(t)>0.004&&isLate(t,td)),ls=[...new Set(lt.map(t=>t.sub))];
+  f.late={sum:rnd(sum(ls,sd=>Math.max(0,sum(lt.filter(t=>t.sub===sd),bal)-crDueS(sd)))),gross:hc.lateSum,n:hc.lateN};f.due={m:m0,due:ds.due,rem:ds.rem,debit:hc.debit};
   const CF=cfMonths(m0,4,[]);f.cf=CF.map(x=>[x.m,x.sumAuto,x.sumTr,x.sumChk,x.sumCc,x.sumLn]);
   /* 13 שבועות (52): יציאות לפי התאריך של כל פריט בתזרים (צ'קים, חשבוניות לתשלום, אשראי, הלוואות); מה שכבר עבר מועדו – בשבוע הראשון.
      הכנסות: טווח לפי 3 החודשים המלאים האחרונים (monthIncome), לשבוע */
   const out=Array(WK).fill(0),w0=new Date(td+'T00:00:00'),wi=d=>{const k=Math.floor((new Date(d+'T00:00:00')-w0)/(7*864e5));return k<0?0:k},put=(d,a)=>{if(typeof d!=='string'||!(a>0))return;const k=wi(d);if(k<WK)out[k]=rnd(out[k]+a)};
-  CF.forEach(x=>{x.chk.forEach(c=>put(c.date,c.a));x.tr.forEach(c=>put(c.date,c.a));(x.cc||[]).forEach(c=>put(c.date,c.a));(x.ln||[]).forEach(c=>put(c.date,c.a));
+  /* צ'קים, אשראי והלוואות – רק מהיום והלאה (מה שתאריכו עבר כבר ירד מהבנק ונמצא ביתרה של היום). חשבוניות פתוחות שמועדן עבר – בשבוע הראשון */
+  const fut=c=>typeof c.date==='string'&&c.date>=td;
+  CF.forEach(x=>{x.chk.filter(fut).forEach(c=>put(c.date,c.a));x.tr.forEach(c=>put(c.date,c.a));(x.cc||[]).filter(fut).forEach(c=>put(c.date,c.a));(x.ln||[]).filter(fut).forEach(c=>put(c.date,c.a));
    x.chk.filter(c=>c.date>=td).forEach(c=>f.chk.length<200&&f.chk.push([c.date,String(subName(c.t)).slice(0,60),c.a]))});
-  inv().filter(t=>bal(t)>0.004&&dueOf(t)<m0+'-01').forEach(t=>{out[0]=rnd(out[0]+bal(t))});
+  inv().filter(t=>bal(t)>0.004&&!cfOff(t)&&(t.kind||'inv')!=='refund'&&dueOf(t)<m0+'-01').forEach(t=>{out[0]=rnd(out[0]+bal(t))});
   const ms=[1,2,3].map(k=>addMon(m0,-k)),wk=ms.map(m=>{const[y,mm]=m.split('-').map(Number);return monthIncome(m)*7/new Date(y,mm,0).getDate()});
   f.wk={start:td,out,inLo:rnd(Math.min(...wk)),inHi:rnd(Math.max(...wk)),inAvg:rnd(sum(wk,x=>x)/3)};
   if(o.pay){f.pay={};const emp=t=>(cat(t.cat)||{}).beh==='emp';
@@ -246,6 +253,7 @@ const saLoad=id=>{SA[id]=null;fnCall('secAdminGet',{bizId:id}).then(r=>{SA[id]=r
  <label class="f"><span>המנהל הראשי</span><select name="mainUid"><option value="">לא נבחר</option>${A.map(a=>`<option value="${esc(a.uid)}"${c.mainUid===a.uid?' selected':''}>${nm(a)}</option>`).join('')}</select></label>
  <b style="display:block;margin-top:10px">2. תקרת עלות חודשית</b><label class="f"><span>דולרים בחודש (מספר שלם; מנהל העסק רואה רק אחוז ניצול)</span><input name="cap" inputmode="numeric" dir="ltr" maxlength="6" value="${esc(dollars)}" placeholder="לא נקבעה"><small class="note">עד 10,000 דולר. שדה ריק = בלי תקרה.</small></label>
  <b style="display:block;margin-top:10px">3. שאלות שכר – לכל מנהל</b>${A.length?A.map(a=>`<label class="chip" style="min-height:44px;margin:4px 0;width:100%;justify-content:flex-start"><input type="checkbox" name="pay_${esc(a.uid)}" value="1"${c.pay&&c.pay[a.uid]?' checked':''}> ${nm(a)}</label>`).join(''):'<p class="note">אין מנהלים בעסק</p>'}
+ <b style="display:block;margin-top:10px">3א. קצב הודעות לכל מנהל</b><div class="row"><label class="f grow"><span>לשעה</span><input name="rh" inputmode="numeric" dir="ltr" maxlength="3" value="${esc(String((c.rate||{}).hour||''))}"></label><label class="f grow"><span>ליום</span><input name="rd" inputmode="numeric" dir="ltr" maxlength="4" value="${esc(String((c.rate||{}).day||''))}"></label></div><small class="note">ברירת מחדל: ${esc(String((c.rateDefault||{}).hour||40))} לשעה, ${esc(String((c.rateDefault||{}).day||200))} ליום.</small>
  <b style="display:block;margin-top:10px">4. ניתוח עובדים ומידע רגיש</b><label class="chip" style="min-height:44px;margin:4px 0;width:100%;justify-content:flex-start"><input type="checkbox" name="emp" value="1"${c.emp?' checked':''}> פעיל</label>
  <p class="note" style="margin:0">${c.empDefault?'עסק הפיילוט: פעיל כברירת מחדל (החלטה פ4).':'בעסק של לקוח – להפעיל רק אחרי חוות דעת עורך דין.'}</p>
  <button class="btn w" style="margin-top:10px">שמירה</button></form>`;
@@ -258,6 +266,8 @@ FRM.secSaF=async f=>{const id=f.dataset.id,c=SA[id];if(!c||c.err)return;const x=
  if(x.mode==='main'&&!x.mainUid)return toast('בחרו מנהל ראשי');
  const pay={};for(const a of c.admins||[])pay[a.uid]=x['pay_'+a.uid]==='1';
  const data={bizId:id,mode:x.mode==='main'?'main':'all',mainUid:x.mainUid||'',emp:x.emp==='1'};if(Object.keys(pay).length)data.pay=pay;if(cap)data.capCents=+cap*100;else if(c.capCents!=null)data.capCents=null;/* ריק אחרי שהייתה תקרה = ניקוי */
+ const rh=String(x.rh||'').trim(),rd=String(x.rd||'').trim(),R=c.rate||{};
+ if(rh||rd){if(!/^\d{1,3}$/.test(rh)||!/^\d{1,4}$/.test(rd)||+rh<1||+rh>500||+rd<1||+rd>5000||+rd<+rh)return toast('קצב: לשעה 1–500, ליום 1–5,000 (ליום לא פחות מלשעה)');if(+rh!==R.hour||+rd!==R.day)data.rate={hour:+rh,day:+rd}}
  b.disabled=true;try{const r=await window.fnCall('secAdminSetCfg',data);SA[id]=r;toast('נשמר')}catch(e){err(e)}finally{b.disabled=false;if(cur().v==='sab')rerender()}};
 ACT.secSaChat=el=>{const id=el.dataset.id,u=el.dataset.u;ask('לצפות בשיחה? הצפייה תירשם ביומן הפעולות, ומנהל העסק יראה אותה.',async()=>{
  try{const r=await window.fnCall('secAdminReadChat',{bizId:id,uid:u});const L=r&&r.msgs||[];

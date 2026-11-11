@@ -50,7 +50,8 @@ const FIN = () => ({
   },
   open: [['ספק החלב', 'INV-1', dAdd(TODAY, -40), dAdd(TODAY, -10), 4500, 4500], ['ספק החלב', 'INV-2', dAdd(TODAY, -5), dAdd(TODAY, 25), 3200.4, 1200.4], ['מאפיית הצפון', '77', dAdd(TODAY, -2), dAdd(TODAY, 28), 8750, 8750]],
   sups: [['ספק החלב', 5550.4], ['מאפיית הצפון', 8750]],
-  late: { sum: 4500, n: 1 },
+  crs: [['ספק החלב', 150]], // זיכוי פתוח שתאריכו עבר (crDueS)
+  late: { sum: 4350, gross: 4500, n: 1 }, // "באיחור (אחרי זיכויים)" כמו במסך חשבוניות לתשלום: 4500 − 150
   due: { m: M0, due: 16450.4, rem: 10200.4, debit: 7300 },
   cf: [[M0, 7300, 13950.4, 5000, 2300, 0]],
   wk: { start: TODAY, out: [4500, 1200.4, 0, 8750, 3000, 0, 0, 2000, 0, 0, 0, 0, 0], inLo: 30000, inHi: 38000, inAvg: 34000 },
@@ -144,8 +145,9 @@ describe('30 שאלות בדיקה: כל מספר בתשובה – עם מקור
       const R = responses(secReqs().slice(-1)[0].body);
       const exp = expected(cs, R);
       assert.ok(exp.length >= 1);
+      // ערכי אמת שידועים מראש (חושבו ידנית מ-FIN ומהנתונים בענן) – לא רק "יש מקור"
+      for (const [k, val] of Object.entries(cs.expect || {})) { const [tool, ...rest] = k.split('.'); const got = getPath(R[tool], rest.join('.')); assert.ok(Math.abs(got - val) < 0.006, `${k}: צפוי ${val}, התקבל ${got}`); }
       for (const e of exp) {
-        if (Number.isInteger(e.v) && e.v <= 10) continue; // מונים קטנים – פטורים מבדיקה (מוגדר ב-verify)
         const n = res.nums.find((x) => !x.exempt && Math.abs(x.v - e.v) < 0.006 && x.src === e.tool);
         assert.ok(n, `המספר ${e.v} מ-${e.tool} לא סומן עם המקור הנכון: ` + JSON.stringify(res.nums));
         const s = res.src[n.i - 1];
@@ -185,6 +187,89 @@ describe('בדיקת מספרים (80): מספר שלא הופיע בתוצאת 
     assert.ok(!/24\.11\.2026 \(/.test(r.result.reply) && !/777 \(/.test(r.result.reply));
     assert.deepEqual(r.result.unverified, [250000]);
     assert.equal((await coll(`b/${A}/sec_log`)).filter((x) => x.act === 'unverified').length, 1);
+  });
+});
+
+describe('בדיקת מספרים: אחוזים וסכומים קטנים, "שנה" שהיא סכום, והיפוך סימן', () => {
+  it('7% ו-2050 ₪ מומצאים – "לא אומת"; אחוז שינוי אמיתי מקבל מקור; 3 חשבוניות ושנת 2026 – פטורים', () => {
+    const R = [{ name: 'getMonthSummary', data: { incomeChangePct: 7, expenses: 98765.25 }, src: { k: 'getMonthSummary', l: 'L', at: 1 } }];
+    const v1 = ST.verify('ההכנסות עלו ב-7% וההוצאות 98,765.25 ₪.', R, '');
+    assert.match(v1.text, /7% \[1\]/); assert.deepEqual(v1.unverified, []);
+    const v2 = ST.verify('עלייה של 9% והוצאה של 2050 ₪, 5 ₪ לפריט; 3 חשבוניות בשנת 2026.', R, '');
+    assert.deepEqual(v2.unverified.sort((a, b) => a - b), [5, 9, 2050]);
+    assert.match(v2.text, /3 חשבוניות/); assert.ok(!/3 \(לא/.test(v2.text) && !/2026 \(/.test(v2.text));
+  });
+  it('זיכוי לא מוצג כחוב: יתרה עם מינוס כשהכלי מחזיר חוב חיובי – "לא אומת"; יתרת זכות מסומנת במפורש', async () => {
+    const R = [{ name: 'getSupplierBalance', data: { suppliers: [{ name: 'א', balance: 250 }, { name: 'ב', balance: -150 }] }, src: { k: 'getSupplierBalance', l: 'L', at: 1 } }];
+    assert.deepEqual(ST.verify('היתרה לספק א: -250 ₪', R, '').unverified, [250]);
+    assert.deepEqual(ST.verify('לספק ב יתרה -150 ₪, ולספק א 250 ₪', R, '').unverified, []);
+    const f = Object.assign(FIN(), { sups: [['ספק זכות', -150]], open: [], crs: [['ספק זכות', 150]] });
+    const r = await ST.runTool('getSupplierBalance', { supplier: 'ספק זכות' }, { now: NOW, fin: ST.cleanFin(f) }).catch((e) => e);
+    // אין חשבוניות פתוחות אבל יש יתרה – מוחזרת עם הסבר שזו זכות
+    assert.equal(r.suppliers[0].balance, -150); assert.match(r.suppliers[0].meaning, /זכות/);
+  });
+});
+
+describe('זיכויים פתוחים: אותם מספרים כמו במסך "חשבוניות לתשלום" ובכרטיס הספק', () => {
+  it('total ו-lateTotal אחרי זיכויים; לפני זיכויים – בשדה נפרד', async () => {
+    const fin = ST.cleanFin(FIN());
+    const all = await ST.runTool('getOpenInvoices', {}, { now: NOW, fin });
+    assert.equal(all.total, 14300.4); assert.equal(all.totalBeforeCredits, 14450.4); assert.equal(all.openCredits, 150);
+    assert.equal(all.lateTotal, 4350); assert.equal(all.lateBeforeCredits, 4500);
+    const milk = await ST.runTool('getOpenInvoices', { supplier: 'חלב' }, { now: NOW, fin });
+    assert.equal(milk.total, 5550.4, '= יתרת הספק בכרטיס (bsum)'); assert.equal(milk.lateTotal, 4350);
+    const bakery = await ST.runTool('getOpenInvoices', { supplier: 'מאפיית' }, { now: NOW, fin });
+    assert.equal(bakery.total, 8750); assert.equal(bakery.openCredits, 0);
+    const sb = await ST.runTool('getSupplierBalance', { supplier: 'ספק החלב' }, { now: NOW, fin });
+    assert.equal(sb.openInvoicesTotal, sb.suppliers[0].balance);
+  });
+});
+
+describe('מנהל עם הגבלת סניפים: אין לו נתוני כל העסק בצ\'אט (נאכף בשרת)', () => {
+  it('כלי כספים ונתוני ענן לא מוצעים ונדחים; מראה לא נקרא ולא מתעדכן; תשובה מנומסת בהנחיה', async () => {
+    await seed({ cfg: { pay: { [M1]: true }, emp: true } });
+    await prep((d) => d.doc(`b/${A}/admins/${M1}`).set({ email: 'x', br: ['b1'] }));
+    await setDoc(`b/${A}/sec_mirror/fin`, { v: 1, data: JSON.stringify(FIN()), at: NOW, devAt: AT, by: M2 });
+    GM.state.sec = (body) => (lastIsRes(body) ? { text: 'x' } : { calls: [{ name: 'getMonthSummary', args: { month: M0 } }, { name: 'getTasks', args: {} }] });
+    const r = await call('secChat', M1, { text: 'כמה הכנסות?', fin: FIN() });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.brLimited, true);
+    assert.deepEqual(declNames(secReqs()[0]), ['loanCalc', 'refuseOffTopic']);
+    assert.deepEqual(r.result.tools, []); assert.deepEqual(r.result.denied.sort(), ['getMonthSummary', 'getTasks']);
+    assert.ok(!JSON.stringify(secReqs().map((x) => x.body)).includes('152340.5'), 'שום נתון כספי (מהמכשיר או מהמראה) לא הגיע למודל');
+    assert.match(secReqs()[0].body.systemInstruction.parts[0].text, /רק למנהל בלי הגבלת סניפים/);
+    assert.equal((await call('secMirrorPut', M1, { fin: FIN() })).reason, 'branch-limited');
+    // מנהל בלי הגבלה באותו עסק – כרגיל
+    GM.reset(); GM.state.sec = () => ({ text: 'בסדר' });
+    await call('secChat', M2, { text: 'הכנסות', fin: FIN() });
+    assert.ok(declNames(secReqs()[0]).includes('getMonthSummary'));
+  });
+});
+
+describe('קצב: secPrefs, וקצב הודעות שמנהל־על קובע לכל עסק', () => {
+  it('secPrefs – עד 30 שינויים בשעה; מפתח לא תקין נדחה', async () => {
+    await seed();
+    assert.equal((await call('secPrefs', M1, { op: 'notRelevant', key: '__x__' })).reason, 'bad-key');
+    assert.equal((await call('secPrefs', M1, { op: 'notRelevant', key: 'a.b' })).reason, 'bad-key');
+    const h = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Jerusalem' }).slice(0, 13);
+    await prep((d) => d.doc(`b/${A}/sec_cfg/use`).set({ pp: { [M1]: { h, n: SEC.PREFS_HOUR } } }, { merge: true }));
+    assert.equal((await call('secPrefs', M1, { op: 'mirror', on: true })).reason, 'rate-limit');
+    assert.equal((await call('secPrefs', M2, { op: 'mirror', on: true })).status, 'OK');
+  });
+  it('מנהל־על קובע קצב לעסק; ברירת מחדל 40/200; הקצב נאכף', async () => {
+    await seed();
+    const g = await call('secAdminGet', SUPER, { bizId: A });
+    assert.deepEqual(g.result.rate, { hour: 40, day: 200 }); assert.deepEqual(g.result.rateDefault, { hour: 40, day: 200 });
+    assert.equal((await call('secAdminSetCfg', SUPER, { bizId: A, rate: { hour: 0, day: 5 } })).reason, 'bad-rate');
+    assert.equal((await call('secAdminSetCfg', M1, { bizId: A, rate: { hour: 2, day: 5 } })).reason, 'not-superadmin');
+    const s2 = await call('secAdminSetCfg', SUPER, { bizId: A, rate: { hour: 2, day: 5 } });
+    assert.equal(s2.status, 'OK', s2.text); assert.deepEqual(s2.result.rate, { hour: 2, day: 5 });
+    GM.state.sec = () => ({ text: 'בסדר' });
+    assert.equal((await call('secChat', M1, { text: 'א', fin: FIN() })).status, 'OK');
+    assert.equal((await call('secChat', M1, { text: 'ב', fin: FIN() })).status, 'OK');
+    assert.equal((await call('secChat', M1, { text: 'ג', fin: FIN() })).reason, 'rate-limit');
+    const s3 = await call('secAdminSetCfg', SUPER, { bizId: A, rate: null });
+    assert.deepEqual(s3.result.rate, { hour: 40, day: 200 });
   });
 });
 
@@ -419,6 +504,20 @@ describe('תקרת עלות (11.3, 83, 84) ומגבלות (10.3)', () => {
     assert.equal(r3.result.mode, 'saving'); assert.equal(r3.result.reply, ST.TXT.saving); assert.equal(r3.result.saving, true);
     assert.equal(secReqs().length, 0, 'במצב חיסכון אין פנייה למודל');
     assert.equal((await call('secState', M1)).result.saving, 'month');
+  });
+  it('"חשבי לעומק" נשמר מראש לפי העלות המרבית (5 סבבים); כשלא נשאר מספיק – נדחה בלי פנייה למודל', async () => {
+    const max = SEC.reserveOf('deep');
+    assert.ok(max >= 50000, String(max)); // 5 × (20,000 × 1.25$ + 8,192 × 10$) / מיליון
+    const capC = Math.ceil(max / 1000) * 10; // יומית = עשירית = capC × 100 מילי־סנט
+    await seed({ cap: capC });
+    await prep((d) => d.doc(`b/${A}/sec_cfg/use`).set({ m: M0, mc: 0, d: TODAY, dmc: capC * 100 - max + 1 })); // נשאר ביום פחות מהעלות המרבית
+    const r = await call('secChat', M1, { text: 'שלום', fin: FIN(), deep: true });
+    assert.equal(r.reason, 'deep-over-cap', r.text); assert.equal(secReqs().length, 0);
+    await prep((d) => d.doc(`b/${A}/sec_cfg/use`).set({ dmc: 0 }, { merge: true }));
+    GM.state.sec = () => ({ text: 'בסדר' });
+    let seen = 0; const orig = GM.state.sec; GM.state.sec = (b) => { seen++; return orig(b); };
+    const ok = await call('secChat', M1, { text: 'שלום', fin: FIN(), deep: true });
+    assert.equal(ok.status, 'OK', ok.text); assert.equal(seen, 1);
   });
   it('"חשבי לעומק" – המודל האיכותי, ונספר יותר בתקרה', async () => {
     await seed({ cap: 100000 });

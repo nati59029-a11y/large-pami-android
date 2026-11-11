@@ -21,7 +21,7 @@ const N = (v) => (typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1
 const LIM = { months: 26, cats: 40, open: 400, sups: 400, cf: 6, wk: 13, chk: 200, pay: 26, payRows: 120 };
 function cleanFin(x) {
   if (!x || typeof x !== 'object' || Array.isArray(x) || x.v !== 1 || !Number.isInteger(x.at)) return null;
-  const f = { v: 1, at: x.at, months: {}, open: [], sups: [], late: { sum: 0, n: 0 }, due: null, cf: [], wk: null, chk: [], bk: null };
+  const f = { v: 1, at: x.at, months: {}, open: [], sups: [], crs: [], late: { sum: 0, gross: 0, n: 0 }, due: null, cf: [], wk: null, chk: [], bk: null };
   const mk = Object.keys(x.months && typeof x.months === 'object' ? x.months : {}).filter((k) => MON_RE.test(k)).sort().slice(-LIM.months);
   for (const k of mk) {
     const m = x.months[k] || {};
@@ -31,7 +31,9 @@ function cleanFin(x) {
   f.open = (Array.isArray(x.open) ? x.open : []).filter((r) => Array.isArray(r) && N(r[5]) !== null).slice(0, LIM.open)
     .map((r) => [clean(r[0], 60), clean(r[1], 30), DAY_RE.test(r[2]) ? r[2] : '', DAY_RE.test(r[3]) ? r[3] : '', N(r[4]) || 0, N(r[5])]);
   f.sups = (Array.isArray(x.sups) ? x.sups : []).filter((r) => Array.isArray(r) && N(r[1]) !== null).slice(0, LIM.sups).map((r) => [clean(r[0], 60), N(r[1])]);
-  if (x.late && typeof x.late === 'object') f.late = { sum: N(x.late.sum) || 0, n: Number.isInteger(x.late.n) && x.late.n >= 0 ? x.late.n : 0 };
+  if (x.late && typeof x.late === 'object') f.late = { sum: N(x.late.sum) || 0, gross: N(x.late.gross) || 0, n: Number.isInteger(x.late.n) && x.late.n >= 0 ? x.late.n : 0 };
+  // זיכויים פתוחים לכל ספק (תאריכם עבר) – מורידים מהחוב ומ"באיחור", כמו בכרטיס הספק ובמסך "חשבוניות לתשלום"
+  f.crs = (Array.isArray(x.crs) ? x.crs : []).filter((r) => Array.isArray(r) && N(r[1]) !== null && r[1] > 0).slice(0, LIM.sups).map((r) => [clean(r[0], 60), N(r[1])]);
   if (x.due && typeof x.due === 'object' && MON_RE.test(x.due.m)) f.due = { m: x.due.m, due: N(x.due.due) || 0, rem: N(x.due.rem) || 0, debit: N(x.due.debit) || 0 };
   f.cf = (Array.isArray(x.cf) ? x.cf : []).filter((r) => Array.isArray(r) && MON_RE.test(r[0])).slice(0, LIM.cf).map((r) => [r[0], N(r[1]) || 0, N(r[2]) || 0, N(r[3]) || 0, N(r[4]) || 0, N(r[5]) || 0]);
   if (x.wk && typeof x.wk === 'object' && DAY_RE.test(x.wk.start) && Array.isArray(x.wk.out)) {
@@ -75,6 +77,8 @@ const FIN_TOOLS = ['getMonthSummary', 'getOpenInvoices', 'getSupplierBalance', '
 function toolsFor(ch, o) {
   const p = o || {};
   if (ch !== 'app') return [];
+  // מנהל עם הגבלת סניפים: הכלים על נתוני כל העסק (כספים מהמראה, משימות, קופה, הזמנות, שכר, עובדים) לא מוצעים לו (החלטת המתאם, סבב 1)
+  if (p.brLimited === true) return ['loanCalc', 'refuseOffTopic'];
   const L = FIN_TOOLS.concat(['loanCalc', 'getTasks', 'getCashClosings', 'getOrders']);
   if (p.pay === true) L.push('getPayroll');           // רק מנהל שמתג השכר שלו פעיל (7)
   if (p.emp === true) L.push('getEmployeeActivity');  // רק כשמתג ניתוח העובדים פעיל (10.8, פ4)
@@ -185,15 +189,26 @@ async function runTool(name, args, ctx) {
       const L = fin.open.filter((r) => (!a.supplier || match(r[0], a.supplier)) && (!until || (r[3] || r[2]) <= until));
       const today = dayOf(now);
       const late = L.filter((r) => r[3] && r[3] < today);
-      return { count: L.length, total: rnd(L.reduce((s, r) => s + r[5], 0)), lateCount: late.length, lateTotal: rnd(late.reduce((s, r) => s + r[5], 0)), lateAllSuppliers: fin.late.sum,
+      // אותם כללים כמו במסכים: החוב הפתוח = יתרות פחות זיכויים פתוחים שתאריכם עבר (כרטיס הספק, bsum);
+      // "באיחור" = לכל ספק, יתרות באיחור פחות זיכויים, לא פחות מ-0 (מסך "חשבוניות לתשלום")
+      const CR = fin.crs.filter((r) => !a.supplier || match(r[0], a.supplier));
+      const crOf = (n) => CR.filter((r) => r[0] === n).reduce((x, r) => x + r[1], 0);
+      const credits = rnd(CR.reduce((x, r) => x + r[1], 0));
+      const gross = rnd(L.reduce((x, r) => x + r[5], 0));
+      const lateNet = rnd([...new Set(late.map((r) => r[0]))].reduce((x, n) => x + Math.max(0, late.filter((r) => r[0] === n).reduce((y, r) => y + r[5], 0) - crOf(n)), 0));
+      return { count: L.length, total: rnd(gross - (until ? 0 : credits)), totalBeforeCredits: gross, openCredits: credits, lateCount: late.length,
+        lateTotal: !a.supplier && !until ? fin.late.sum : lateNet, lateBeforeCredits: rnd(late.reduce((x, r) => x + r[5], 0)), lateAllSuppliers: fin.late.sum,
+        note: 'סכומים "total" ו-"lateTotal" – אחרי זיכויים פתוחים, כמו במסך "חשבוניות לתשלום" ובכרטיס הספק. זיכוי הוא סכום לטובת העסק, לא חוב.',
         items: L.slice(0, 50).map((r) => ({ supplier: r[0], invoice: r[1], date: r[2], due: r[3], amount: r[4], balance: r[5] })), more: Math.max(0, L.length - 50) };
     }
     case 'getSupplierBalance': {
       if (!fin) return noFin(ctx);
       const s = fin.sups.filter((r) => match(r[0], a.supplier));
       const o = fin.open.filter((r) => match(r[0], a.supplier));
+      const c = fin.crs.filter((r) => match(r[0], a.supplier));
       if (!s.length && !o.length) return { supplier: clean(a.supplier, 60), balance: 0, note: 'אין חוב פתוח לספק בשם הזה (או שהשם לא נמצא).' };
-      return { suppliers: s.slice(0, 10).map((r) => ({ name: r[0], balance: r[1] })), openInvoices: o.length, openInvoicesTotal: rnd(o.reduce((x, r) => x + r[5], 0)) };
+      return { suppliers: s.slice(0, 10).map((r) => ({ name: r[0], balance: r[1], meaning: r[1] < 0 ? 'יתרת זכות לטובת העסק (הספק חייב לעסק), לא חוב' : 'חוב של העסק לספק, אחרי זיכויים' })),
+        openInvoices: o.length, openInvoicesTotal: rnd(o.reduce((x, r) => x + r[5], 0) - c.reduce((x, r) => x + r[1], 0)), openInvoicesBeforeCredits: rnd(o.reduce((x, r) => x + r[5], 0)), openCredits: rnd(c.reduce((x, r) => x + r[1], 0)) };
     }
     case 'getCashflowForecast': {
       if (!fin) return noFin(ctx);
@@ -309,6 +324,10 @@ function numsIn(o, out, depth) {
   return out;
 }
 const same = (t, n) => Math.abs(Math.abs(t) - n) < 0.006 || (Number.isInteger(n) && n >= 100 && Math.round(Math.abs(t)) === n);
+// סימן: "-250" (מינוס צמוד, לא "ב-250") חייב להתאים לערך שלילי בכלי; מספר בלי מינוס מתאים לערך בכל סימן (ניסוח כמו "הפסד של 500")
+const sameSigned = (t, n, neg) => same(t, n) && (!neg || t < 0);
+const MONEY_AFTER = /^\s{0,2}(%|₪|ש["״]ח|שקל|אחוז|אלף|אלפים)/;
+const MONEY_BEFORE = /(₪|[-−]\s?₪)\s{0,2}$/;
 function verify(text, results, userText) {
   const srcs = [];
   const pool = results.map((r, i) => ({ i, nums: numsIn(r.data, [], 0) }));
@@ -318,14 +337,22 @@ function verify(text, results, userText) {
     if (!num) return m;
     const v = Math.abs(parseFloat(num.replace(/[,%]/g, '')));
     if (!Number.isFinite(v)) return m;
-    if ((Number.isInteger(v) && v <= 10) || (Number.isInteger(v) && v >= 2000 && v <= 2100 && !/,/.test(num)) || userNums.some((u) => Math.abs(u - v) < 0.006)) { nums.push({ v, ok: true, exempt: true }); return m; }
-    const hit = pool.find((p) => p.nums.some((t) => same(t, v)));
-    if (!hit) { nums.push({ v, ok: false }); return m + ' (לא אומת מהנתונים)'; }
-    const r = results[hit.i];
-    let k = srcs.findIndex((s) => s.k === r.src.k && s.l === r.src.l);
-    if (k < 0) { srcs.push(r.src); k = srcs.length - 1; }
-    nums.push({ v, ok: true, src: r.src.k, i: k + 1 });
-    return m + ' [' + (k + 1) + ']';
+    const before = all.slice(Math.max(0, off - 4), off), after = all.slice(off + m.length, off + m.length + 8);
+    const neg = /(^|[\s(:])[-−]$/.test(all.slice(Math.max(0, off - 2), off)) || /^[-−]$/.test(all.slice(Math.max(0, off - 1), off)) && off === 1;
+    const money = /%$/.test(num) || MONEY_AFTER.test(after) || MONEY_BEFORE.test(before);
+    // 1. קודם מחפשים בתוצאות הכלים – כל מספר שנמצא מקבל מקור (גם מספר קטן או "שנה")
+    const hit = pool.find((p) => p.nums.some((t) => sameSigned(t, v, neg)));
+    if (hit) {
+      const r = results[hit.i];
+      let k = srcs.findIndex((x) => x.k === r.src.k && x.l === r.src.l);
+      if (k < 0) { srcs.push(r.src); k = srcs.length - 1; }
+      nums.push({ v, ok: true, src: r.src.k, i: k + 1 });
+      return m + ' [' + (k + 1) + ']';
+    }
+    // 2. פטור רק כשזה לא סכום/אחוז: מספר מהשאלה, מספר שלם קטן (מונה/מספור), או שנה
+    if (userNums.some((u) => Math.abs(u - v) < 0.006) || (!money && Number.isInteger(v) && (v <= 10 || (v >= 2000 && v <= 2100 && !/,/.test(num))))) { nums.push({ v, ok: true, exempt: true }); return m; }
+    nums.push({ v, ok: false, neg });
+    return m + ' (לא אומת מהנתונים)';
   });
   return { text: out, nums, srcs, unverified: nums.filter((x) => !x.ok).map((x) => x.v) };
 }
@@ -346,6 +373,7 @@ const TXT = {
   loan: 'חשוב: זה לא ייעוץ פיננסי מחייב. החישוב מבוסס על הנחות (ריבית, תקופה, הכנסות צפויות), ויש דברים שאינם ידועים לי – עמלות, ביטוחים ותנאי הבנק. לפני החלטה כדאי לבדוק עם רואה החשבון או עם יועץ פיננסי.',
   tax: 'בנושאי מס אני נותנת רק הסבר כללי – את הפרטים ואת מה שחל על העסק כדאי לבדוק עם רואה החשבון.',
   saving: 'הגעתם לתקרת השימוש של המזכירה לתקופה הזו, ולכן היא במצב חיסכון: הודעות וחשבוניות נקלטות כרגיל, אבל אין שיחה עד תחילת החודש הבא או עד הגדלת התקרה. אפשר לבקש ממנהל המערכת להגדיל את התקרה.',
+  brLimited: 'נתוני הכספים והעסק זמינים בצ\'אט רק למנהל בלי הגבלת סניפים. אפשר לראות את נתוני הסניפים שלך במסכי האפליקציה.',
   savingDay: 'הגעתם לתקרת השימוש היומית של המזכירה. אפשר להמשיך מחר, או לבקש ממנהל המערכת להגדיל את התקרה.',
 };
 function policyOf(q) {
