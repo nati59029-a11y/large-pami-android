@@ -12,7 +12,8 @@ const doc = (p, f) => ({ document: { name: 'projects/demo-largpeami/databases/(d
 // 3 מוצרים: pA עלות 11.8 כולל מע"מ (=10.00 לפני) כמויות 5+1; pB בלי עלות 0+8; pC עלות 5.9 (=5.00) כמות -2 ב-br1
 const PROD = [doc('prod/pA', { name: S('מוצר א'), price: N(12), on: { booleanValue: true }, q: M({ br1: N(5), br2: N(1) }) }),
   doc('prod/pB', { name: S('מוצר ב'), price: N(10), on: { booleanValue: true }, q: M({ br1: N(0), br2: N(8) }) }),
-  doc('prod/pC', { name: S('מוצר ג'), price: N(9), on: { booleanValue: true }, q: M({ br1: N(-2) }) })];
+  doc('prod/pC', { name: S('מוצר ג'), price: N(9), on: { booleanValue: true }, q: M({ br1: N(-2) }) }),
+  doc('prod/pD', { name: S('מוצר ד לא זמין'), price: N(1), on: { booleanValue: false }, q: M({ br1: N(10) }) })];
 const COST = { pA: 11.8, pC: 5.9 };
 const CUST = [1, 2, 3, 4, 5, 6, 7].map((i) => doc('cust/c' + i, { name: S('לקוח ' + i), phone: S('05000000' + String(i).padStart(2, '0')) }));
 const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('סניף 1'), on: { booleanValue: true } }), M({ id: S('br2'), name: S('סניף 2'), on: { booleanValue: true } })]) });
@@ -57,6 +58,15 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('סניף 1'), o
   const gc1 = calls.filter((c) => c === 'getCosts').length;
   await page.evaluate(() => { rerender(); rerender(); }); await H.settle(page, 300);
   check('3 ציור חוזר לא קורא ל-getCosts שוב ', calls.filter((c) => c === 'getCosts').length === gc1, { gc1 });
+  // 11.11: ברירת מחדל זמינים בלבד; צ'יפ "כולל לא זמינים"; חיפוש מצמצם את הסיכום
+  await page.click('[data-a=oxSall]'); await H.settle(page, 200);
+  const ma = { n: await txt('oxSumN'), u: await txt('oxSumU') };
+  await page.click('[data-a=oxSall]'); await H.settle(page, 200);
+  await page.fill('input[data-i=oxSQ]', 'מוצר ג'); await H.settle(page, 300);
+  const ms = { n: await txt('oxSumN'), u: await txt('oxSumU') };
+  await page.fill('input[data-i=oxSQ]', ''); await H.settle(page, 300);
+  const mb = { n: await txt('oxSumN') };
+  check('3א זמינים בלבד (ברירת מחדל) 3; כולל לא זמינים 4 / יחידות 13; חיפוש "מוצר ג" → 1 מוצר, -2 יחידות; ניקוי → 3', ma.n === '4' && ma.u === '13' && ms.n === '1' && ms.u === '-2' && mb.n === '3', { ma, ms, mb });
   // מעבר לסניף 2 – נמצא בצ'יפ
   await page.click('button[data-a=oxSBr][data-id=br2]'); await H.settle(page, 200);
   const m2 = { u: await txt('oxSumU'), v: await txt('oxSumV') };
