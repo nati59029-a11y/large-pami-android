@@ -235,6 +235,10 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   check('16 סכום המסומנות (125) שווה לסכום ההוצאות מקופה בסגירה האחרונה (125), ומוצג "תואם"; לקופה בלי סגירה – אין סימון', r14.s === 125 && r14.cs === 125 && r14.nl.ok === '1' && /125/.test(r14.nl.ms) && /125/.test(r14.nl.cs) && r14.yh.rows.every((x) => x[1] === '0') && /עוד אין סגירה/.test(r14.yh.txt), r14);
   check('17 רשומה ישנה בלי creg וזיכוי של ספק לא מופיעים ולא נספרים, וכל הוצאה מופיעה פעם אחת', !r14.ids.includes('rcLegW') && r14.uniq, r14.ids);
 
+  // 17א. פתק הקופה מוצג גם במשבצת "סגירת קופה והפקדות" (שאלת המשתמש 11.11): בכל מסלול – יוחדה לחשבונית, ממתינה לחשבונית (גם אחרי שהחשבונית חוברה), "אשר"
+  const r17a = await page.evaluate(() => { const L = coMine(), f = (id) => { const x = L.find((c) => c.id === id); return x ? coLFile(x) : null; }; NAV = [{ v: 'home' }]; go('cash'); const btn = [...document.querySelectorAll('#main [data-a=coLPic]')].map((b) => b.dataset.id); const withF = L.filter((x) => coLFile(x)).map((x) => x.id); return { A: f('rcA'), E: f('rcE'), Q: f('rcQ'), btn, withF }; });
+  check('17א פתק הקופה גם ב"סגירת קופה והפקדות": יוחדה לחשבונית (fA), ממתינה לחשבונית אחרי חיבור חשבונית (fE – הפתק, לא החשבונית), "אשר" (fQ); כפתור "פתק" לכל הוצאה שיש לה צילום', r17a.A === 'fA' && r17a.E === 'fE' && r17a.Q === 'fQ' && r17a.btn.length > 0 && r17a.btn.every((id) => r17a.withF.includes(id)), r17a);
+
   // הסגירה לא תואמת כשחסרה הוצאה (בדיקה שהסימון באמת משווה)
   const r18 = await page.evaluate(() => { const z = S.zc.find((x) => x.id === 'rcZ2'); z.co.s = 150; z.co.ids = ['rcA', 'rcB', 'rcMissing']; const R = coLastR('i_nl', coMine()); z.co.s = 125; z.co.ids = ['rcA', 'rcB']; return { s: R.s, cs: R.cs, miss: R.miss }; });
   check('18 סגירה עם הוצאה שלא נמצאה במכשיר: סכום המסומנות (125) שונה מהסגירה (150) ומדווח חסר', r18.s === 125 && r18.cs === 150 && r18.miss === 1, r18);
