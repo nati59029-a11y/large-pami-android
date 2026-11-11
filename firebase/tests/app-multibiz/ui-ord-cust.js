@@ -187,6 +187,18 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   check('6ג ייבוא ברקע: כרטיס התקדמות ("מייבא בשרת", 300 מתוך 916, אפשר לצאת, מונים, שורה שגויה); בסיום עם כשל – "נסה שוב" שולח retry; מגע/ניגודיות/גלילה (3 ערכות)',
     okAll(pr) && /מייבא בשרת/.test(pr.a.text) && /300 מתוך 916/.test(pr.a.text) && /אפשר לצאת מהאפליקציה/.test(pr.a.text) && /חדשים: 290/.test(pr.a.text) && /שגויות: 2/.test(pr.a.text)
     && /חלק לא יובא/.test(pt) && /100 שורות לא יובאו/.test(pt) && !!rt && rt.d.retry === JID, { s: sum(pr), pt: pt.slice(0, 300), rt: rt && rt.d });
+  // 6ד (סבב 2): ייבוא תקוע (אין שינוי 10+ דקות) → "נתקע" + "נסה שוב" (retry), בלי בדיקה אוטומטית; ייבוא פעיל בלי התקדמות → בדיקה פחות תכופה (4→8→16 שניות)
+  const pnow = await page.evaluate(() => Date.now()); // השעון של הדף קבוע (harness)
+  globalThis.__IJ = ij({ st: S('run'), dn: N(300), fr: N(0), recv: N(916), t: N(pnow - 20 * 60000), upd: N(pnow - 11 * 60000) });
+  await page.evaluate(() => window.__imp.load(true)); await H.settle(page, 400);
+  const sk = await page.evaluate(() => { const e = document.getElementById('impc'); return e ? e.innerText : 'NO-IMPC ' + cur().v; }); const ns0 = calls.length; const ivS = await page.evaluate(() => window.__imp.iv());
+  await page.click('#impc [data-a=impRetry]'); await H.settle(page, 400);
+  const rs = calls.slice(ns0).find((c) => c.n === 'startImport');
+  globalThis.__IJ = ij({ st: S('run'), dn: N(300), fr: N(0), recv: N(916), upd: N(pnow) });
+  const iv = []; for (let k = 0; k < 3; k++) { await page.evaluate(() => window.__imp.load(true)); await H.settle(page, 150); iv.push(await page.evaluate(() => window.__imp.iv())); }
+  globalThis.__IJ = ij({ st: S('run'), dn: N(400), fr: N(0), recv: N(916), upd: N(pnow) });
+  await page.evaluate(() => window.__imp.load(true)); await H.settle(page, 150); iv.push(await page.evaluate(() => window.__imp.iv()));
+  check('6ד ייבוא תקוע: "נתקע" + הסבר + "נסה שוב" שולח retry; בלי התקדמות – המרווח גדל (8, 16…), התקדמות – חוזר ל-4 שניות', /נתקע/.test(sk) && /10 דקות/.test(sk) && !/אפשר לצאת/.test(sk) && !!rs && rs.d.retry === JID && iv[1] > iv[0] && iv[2] > iv[1] && iv[3] === 4000, { sk: sk.slice(0, 200), iv, ivS });
   globalThis.__IJ = null; await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } });
   await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } }); await H.settle(page, 200);
   // 9. מנהל: כרטיס לקוח – הצגה (getCard view), העתקה, מחיקה

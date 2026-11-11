@@ -44,6 +44,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
+    if (n === 'startImport' && globalThis.__SIFAIL && d.at === 200) { globalThis.__SIFAIL = 0; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { status: 'UNAVAILABLE', message: 'x' } }) }); } // סבב 2: תקלה בשליחת החלק השני
     if (n === 'getWsPrices' && globalThis.__WSDENY) return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { status: 'PERMISSION_DENIED', message: 'x', details: { reason: 'not-wholesale' } } }) });
     const R = { importProducts: { ok: true, added: 2, updated: 1, bad: [] }, getWsPrices: { wp: { pA: 9 } }, getCosts: { cost: { pA: 4 } }, transferStock: { ok: true }, saveCat: { ok: true, id: 'c3' }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
@@ -134,6 +135,16 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.click('[data-a=oxImpGo]'); await H.settle(page, 900);
   const ip2 = calls.filter((c) => c.n === 'startImport').slice(n0);
   check('9 250 שורות: שתי קריאות 200+50 של אותה עבודה (at 0 ו-200, total 250)', ip2.length === 2 && ip2[0].d.rows.length === 200 && ip2[1].d.rows.length === 50 && ip2[0].d.job === ip2[1].d.job && ip2[0].d.at === 0 && ip2[1].d.at === 200 && ip2[1].d.total === 250, ip2.map((x) => [x.d.rows.length, x.d.at, x.d.total]));
+  // 9ב (סבב 2): תקלה בשליחת החלק השני → "נסה שוב" שולח שוב את כל הקובץ עם אותו מזהה עבודה (השרת מדלג על מה שכבר קיבל – לא מכפיל כמות)
+  await page.evaluate(() => { window.__ox.im = null; rerender(); }); await H.settle(page, 200);
+  await page.setInputFiles('input[data-c=oxImpFile]', { name: 'big2.csv', mimeType: 'text/csv', buffer: Buffer.from(big) }); await H.settle(page, 400);
+  await page.check('input[data-c=oxImpAdd]'); await H.settle(page, 200);
+  globalThis.__SIFAIL = 1; const n1 = calls.filter((c) => c.n === 'startImport').length;
+  await page.click('[data-a=oxImpGo]'); await H.settle(page, 900);
+  const btnTxt = await page.evaluate(() => (document.querySelector('[data-a=oxImpGo]') || {}).textContent || '');
+  await page.click('[data-a=oxImpGo]'); await H.settle(page, 900);
+  const ip3 = calls.filter((c) => c.n === 'startImport').slice(n1);
+  check('9ב תקלה בחלק השני → "נסה שוב" → אותו מזהה עבודה בכל הקריאות (4: 0, 200 שנכשל, 0, 200), עם addQty', ip3.length === 4 && new Set(ip3.map((x) => x.d.job)).size === 1 && ip3.map((x) => x.d.at).join() === '0,200,0,200' && ip3.every((x) => x.d.addQty === true) && /נסה שוב/.test(btnTxt) && ip3[0].d.job !== ip2[0].d.job, { at: ip3.map((x) => x.d.at), jobs: new Set(ip3.map((x) => x.d.job)).size, btnTxt });
   // 10. העברות
   const xf = await screen('קטלוג-העברות', async () => { await page.evaluate(() => { window.__ox.xf = undefined; }); await goV('oxXfer'); await H.settle(page, 400); });
   check('10 העברות: רשימה (יהודה הנשיא ← נחל לכיש, הזמנה #12) + העברה ידנית; מגע/ניגודיות/גלילה', okAll(xf) && /העברה ידנית/.test(xf.a.text) && /הזמנה #12/.test(xf.a.text), sum(xf));
