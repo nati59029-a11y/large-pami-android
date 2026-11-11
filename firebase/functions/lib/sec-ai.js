@@ -47,7 +47,9 @@ function geminiBody(o) {
     else if (t.role === 'call') contents.push({ role: 'model', parts: t.calls.map((c) => ({ functionCall: { name: c.name, args: c.args || {} } })) });
     else if (t.role === 'res') contents.push({ role: 'user', parts: t.results.map((r) => ({ functionResponse: { name: r.name, response: { content: r.data } } })) });
   }
-  const body = { systemInstruction: { parts: [{ text: o.system }] }, contents, generationConfig: { temperature: o.tier === 'deep' ? 0.3 : 0.2, maxOutputTokens: o.tier === 'deep' ? 4096 : 1500 } };
+  const body = { systemInstruction: { parts: [{ text: o.system }] }, contents, generationConfig: o.tier === 'deep'
+    ? { temperature: 0.3, maxOutputTokens: 8192 } // מודל איכותי: "חשיבה" פעילה (נספרת בעלות)
+    : { temperature: 0.2, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } } }; // מהיר וזול: בלי "חשיבה" (לא מאומת: שם השדה בכל גרסת מודל)
   if (o.tools && o.tools.length) {
     body.tools = [{ functionDeclarations: o.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })) }];
     body.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
