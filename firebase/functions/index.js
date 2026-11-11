@@ -191,3 +191,6 @@ Object.assign(exports, require('./orders'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
+
+// ייבוא קבצים ברקע (2026-11-11, שלב 3): startImport (מנהל, שני האזורים) + runImportChunk (טריגר, europe-west1 בלבד) – imports.js
+Object.assign(exports, require('./imports'));

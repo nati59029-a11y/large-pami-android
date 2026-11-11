@@ -21,7 +21,11 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - run: npm ci || npm install
       - run: npm test
-      - run: npm run test:multibiz
+      # ייבוא ברקע (11.11.2026): היומן המלא (כולל יומני הפונקציות באמולטור) נבדק שאין בו מספרי כרטיס מהקבצים המדומים ואין CVV
+      - run: |
+          set -o pipefail
+          npm run test:multibiz 2>&1 | tee "$RUNNER_TEMP/multibiz.log"
+          node scripts/scan-log-for-cards.js "$RUNNER_TEMP/multibiz.log"
       - run: npm run test:migrate
   # 7: בדיקות הדפדפן (ui-*, b-emulator, extra, scenario+compare) מול האמולטור, ב-Chromium. לא מפרסם דבר.
   browser:

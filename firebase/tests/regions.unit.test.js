@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'runImportChunk', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -48,6 +48,18 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     }
     assert.ok(ep(ex.expirePromosOnLine).scheduleTrigger, 'expirePromosOnLine מתוזמנת');
     assert.ok(ep(ex.syncLegacyAdmin).eventTrigger && ep(ex.syncLegacyStaff).eventTrigger, 'טריגרים של Firestore');
+  });
+
+  it('ייבוא ברקע (11.11.2026): runImportChunk – טריגר Firestore חדש, רק europe-west1, עם retry ומגבלת מקביליות; startImport – onCall בשני האזורים', () => {
+    const e = ep(ex.runImportChunk);
+    assert.deepEqual(regions(ex.runImportChunk), ['europe-west1']);
+    assert.ok(e.eventTrigger && /document\.v1\.created$/.test(e.eventTrigger.eventType), 'טריגר יצירת מסמך');
+    assert.equal(e.eventTrigger.eventFilterPathPatterns.document, 'impQ/{qid}/c/{cid}');
+    assert.equal(e.eventTrigger.retry, true);
+    assert.ok(e.maxInstances >= 1 && e.maxInstances <= 3, 'maxInstances נמוך');
+    assert.ok(e.timeoutSeconds > 60 && e.timeoutSeconds <= 540);
+    assert.ok(ep(ex.startImport).callableTrigger);
+    assert.deepEqual(regions(ex.startImport), BOTH);
   });
 
   it('אין פונקציה שאינה onCall ביותר מאזור אחד', () => {
