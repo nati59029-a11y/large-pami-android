@@ -22,7 +22,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
-const { getFirestore, Timestamp, GeoPoint } = require('firebase-admin/firestore');
+const { getFirestore, Timestamp, GeoPoint, FieldPath } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 const { onCall, LEGACY_REGION } = require('./lib/region');
 const T = require('./lib/tenant');
@@ -35,9 +35,11 @@ const pre = (reason, message) => new HttpsError('failed-precondition', message, 
 const UID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_CAP_CENTS = 1000000; // 10,000$ לחודש – גבול עליון סביר להקלדה שגויה
 const TZ = 'Asia/Jerusalem';
+const BACKUP_KEEP_DAYS = 35; // מדיניות שמירה של עותקי הגיבוי (הנחת המתאם, תיקון סבב 1) – מופיעה גם בנוסח ההסכמה
 
 // ---------- נוסח מסך ההסכמה (98). מקור אחד: השרת. שינוי בנוסח = מזהה חדש, וכל מנהל מתבקש לאשר שוב ----------
-const CONSENT_VER = 'sec-terms-2026-11-v1';
+// v2 (תיקון סבב 1): נוסף משך השמירה של עותקי הגיבוי. חובה להחליף גם את הקבוע SEC_CONSENT_VER בחוקים (firestore.rules) – בדיקה ב-secretary.test.js
+const CONSENT_VER = 'sec-terms-2026-11-v2';
 const CONSENT = Object.freeze({
   ver: CONSENT_VER,
   title: 'לפני שמתחילים לעבוד עם המזכירה',
@@ -45,7 +47,7 @@ const CONSENT = Object.freeze({
     'המזכירה היא עוזרת ממוחשבת. היא מכינה הצעות, טיוטות ותזכורות – ושום דבר לא נשלח, לא משולם ולא נמחק בלי אישור שלך.',
     'כדי לענות, המזכירה שולחת את השאלה ואת הנתונים הנדרשים לה לשירות בינה מלאכותית חיצוני (ספק AI מחוץ לאפליקציה, ייתכן שבחו"ל). נשלח רק מה שנחוץ לשאלה.',
     'מנהל המערכת (בעל האפליקציה) רשאי לקרוא את השיחות שלך עם המזכירה. כל צפייה כזו נרשמת ביומן הפעולות, ואפשר לראות אותה במסך המזכירה.',
-    'השיחות נשמרות עד 12 חודשים, ויומן הפעולות עד 24 חודשים. אפשר לבקש מחיקה של ההיסטוריה.',
+    'השיחות נשמרות עד 12 חודשים, ויומן הפעולות עד 24 חודשים. אפשר לבקש מחיקה של ההיסטוריה. בנוסף נשמר עותק גיבוי יומי בשרת, וכל עותק גיבוי נמחק אוטומטית אחרי 35 יום.',
     'המזכירה עלולה לטעות. לפני החלטה כספית, משפטית או החלטה לגבי עובד – יש לבדוק את הנתונים ולהתייעץ עם איש מקצוע.',
   ]),
   ok: 'קראתי ואני מסכים/ה',
@@ -211,10 +213,10 @@ async function secAdminSetCfg(request) {
       upd['pay.' + u] = v; notes.push('pay:' + u + '=' + (v ? 'on' : 'off'));
     }
   }
-  let cap = null;
+  let cap; // undefined = בלי שינוי; null = ניקוי התקרה; מספר = תקרה בסנטים
   if (input.capCents !== undefined) {
-    if (!Number.isInteger(input.capCents) || input.capCents < 0 || input.capCents > MAX_CAP_CENTS) throw bad('bad-cap', 'תקרה: מספר שלם של סנטים בין 0 ל-' + MAX_CAP_CENTS);
-    cap = input.capCents; notes.push('cap=' + cap);
+    if (input.capCents !== null && (!Number.isInteger(input.capCents) || input.capCents < 0 || input.capCents > MAX_CAP_CENTS)) throw bad('bad-cap', 'תקרה: מספר שלם של דולרים, בין 0 ל-' + (MAX_CAP_CENTS / 100).toLocaleString('en-US') + '$');
+    cap = input.capCents; notes.push('cap=' + (cap === null ? 'none' : cap));
   }
   if (!notes.length) throw bad('bad-input', 'לא נשלח שום שינוי');
   const t = Date.now();
@@ -228,7 +230,8 @@ async function secAdminSetCfg(request) {
     for (const [k, v] of Object.entries(upd)) if (k.startsWith('pay.')) first.pay[k.slice(4)] = v;
     b.set(main, first);
   }
-  if (cap !== null) b.set(db.doc('sec_cfg/cap'), { capCents: cap, upd: t, updBy: who.uid });
+  if (cap === null) b.delete(db.doc('sec_cfg/cap'));
+  else if (cap !== undefined) b.set(db.doc('sec_cfg/cap'), { capCents: cap, upd: t, updBy: who.uid });
   b.set(db.collection('sec_log').doc(), logData(who.uid, 'sa', 'cfg', { note: notes.join(',') }));
   b.set(auditRef(who.bizId), { by: who.uid, t, act: 'secAdminSetCfg', note: notes.join(',').slice(0, 500) });
   await b.commit();
@@ -280,16 +283,28 @@ function dec(v, db) {
   return o;
 }
 
-// כל המסמכים באוסף, כולל תת־אוספים (למשל sec_chat/{uid}/m, sec_inv/{id}/p), גם כשמסמך האב "חסר" (רק תת־אוסף).
-// path – יחסי לתחילית העסק (prefix), כדי שאפשר לשחזר לעסק/סביבה אחרים.
-async function dumpColl(db, prefix, rel, out) {
-  const refs = await db.collection(prefix + rel).listDocuments();
-  for (const ref of refs) {
-    const s = await ref.get();
-    const relDoc = rel + '/' + ref.id;
-    if (s.exists) out.push({ p: relDoc, d: enc(s.data()) });
-    for (const sub of await ref.listCollections()) await dumpColl(db, prefix, relDoc + '/' + sub.id, out);
+// קריאה לפי אוסף, בעמודים של 500 (שאילתה אחת לכל עמוד, לא מסמך־מסמך). תת־אוספים ידועים (SEC_SUBS):
+// sec_chat/{uid}/m ו-sec_inv/{id}/p. מסמך אב "חסר" (רק תת־אוסף, כמו sec_chat/{uid}) נמצא ב-listDocuments (רשימת מזהים בלבד, בלי קריאת תוכן).
+// path – יחסי לתחילית העסק (prefix), כדי שאפשר לשחזר לעסק/סביבה אחרים. תת־אוסף חדש בשלבים הבאים – להוסיף ל-SEC_SUBS (בדיקה ב-secretary.test.js).
+const SEC_SUBS = Object.freeze({ sec_chat: ['m'], sec_inv: ['p'] });
+const PAGE = 500;
+async function pagedColl(db, prefix, rel, out) {
+  let last = null;
+  for (;;) {
+    let q = db.collection(prefix + rel).orderBy(FieldPath.documentId()).limit(PAGE);
+    if (last) q = q.startAfter(last);
+    const snap = await q.get();
+    for (const d of snap.docs) out.push({ p: rel + '/' + d.id, d: enc(d.data()) });
+    if (snap.size < PAGE) return;
+    last = snap.docs[snap.docs.length - 1];
   }
+}
+async function dumpColl(db, prefix, rel, out) {
+  await pagedColl(db, prefix, rel, out);
+  const subs = SEC_SUBS[rel];
+  if (!subs) return;
+  const parents = await db.collection(prefix + rel).listDocuments();
+  for (const ref of parents) for (const sub of subs) await pagedColl(db, prefix, rel + '/' + ref.id + '/' + sub, out);
 }
 
 // עסקים לגיבוי: כל עסק שהתוספת פעילה אצלו, וגם עסק שהתוספת כובתה אבל יש לו הגדרות מזכירה (ניתוק לא מוחק נתונים – 9.5)
@@ -313,7 +328,8 @@ async function bizzesForBackup() {
 const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD לפי שעון ישראל
 
 // runSecBackup({ bucket, now }) – כותב קובץ דחוס לכל עסק: sec_backups/<bizId>/<יום>.json.gz, וקובץ לטבלאות השורש: sec_backups/_root/<יום>.json.gz
-// מחזיר { files: [{ bizId, path, docs }] }. לא מוחק גיבויים ישנים (מדיניות שמירה – החלטה פתוחה).
+// מחזיר { day, files: [{ bizId, path, docs }], errors: [{ bizId, reason }], removed: [נתיבים שנמחקו] }.
+// שגיאה בעסק אחד נרשמת וממשיכים לעסק הבא. בסוף: מחיקת עותקים בני יותר מ-BACKUP_KEEP_DAYS ימים (מדיניות השמירה).
 async function runSecBackup(opts) {
   const o = opts || {};
   const db = getFirestore();
@@ -327,17 +343,43 @@ async function runSecBackup(opts) {
     await bucket.file(path).save(buf, { resumable: false, contentType: 'application/gzip', metadata: { metadata: { docs: String(payload.docs.length), at: new Date(now).toISOString() } } });
     return path;
   };
-  for (const biz of await bizzesForBackup()) {
-    const prefix = T.bizPrefix(biz);
-    const docs = [];
-    for (const c of SEC_COLLS) await dumpColl(db, prefix, c, docs);
-    const path = await write(biz.bizId, { v: 1, kind: 'sec', bizId: biz.bizId, dataRoot: biz.dataRoot, at: now, colls: SEC_COLLS, docs });
-    files.push({ bizId: biz.bizId, path, docs: docs.length });
+  const errors = [];
+  const fail = (bizId, e) => {
+    errors.push({ bizId, reason: String(e && (e.code || e.name) || 'error').slice(0, 60) });
+    logger.error('secretary: backup failed for business', { bizId, name: e && e.name, code: e && e.code });
+  };
+  const bizzes = o.bizzes || await bizzesForBackup();
+  for (const biz of bizzes) {
+    try {
+      const prefix = T.bizPrefix(biz);
+      const docs = [];
+      for (const c of SEC_COLLS) await dumpColl(db, prefix, c, docs);
+      const path = await write(biz.bizId, { v: 1, kind: 'sec', bizId: biz.bizId, dataRoot: biz.dataRoot, at: now, colls: SEC_COLLS, docs });
+      files.push({ bizId: biz.bizId, path, docs: docs.length });
+    } catch (e) { fail(biz.bizId, e); }
   }
-  const rootDocs = [];
-  for (const c of SEC_ROOT_COLLS) await dumpColl(db, '', c, rootDocs);
-  if (rootDocs.length) files.push({ bizId: '_root', path: await write('_root', { v: 1, kind: 'sec-root', at: now, colls: SEC_ROOT_COLLS, docs: rootDocs }), docs: rootDocs.length });
-  return { day, files };
+  try {
+    const rootDocs = [];
+    for (const c of SEC_ROOT_COLLS) await dumpColl(db, '', c, rootDocs);
+    if (rootDocs.length) files.push({ bizId: '_root', path: await write('_root', { v: 1, kind: 'sec-root', at: now, colls: SEC_ROOT_COLLS, docs: rootDocs }), docs: rootDocs.length });
+  } catch (e) { fail('_root', e); }
+  let removed = [];
+  try { removed = await pruneSecBackups(bucket, now); } catch (e) { fail('_prune', e); }
+  return { day, files, errors, removed };
+}
+
+// מחיקת עותקי גיבוי ישנים: רק קבצים בתבנית sec_backups/<שם>/<YYYY-MM-DD>.json.gz שהתאריך שלהם לפני (היום − BACKUP_KEEP_DAYS).
+// קובץ בשם אחר לא נמחק (לא ננחש). התאריך נלקח משם הקובץ (יום הגיבוי לפי שעון ישראל).
+const BK_RE = /^sec_backups\/[^/]+\/(\d{4}-\d{2}-\d{2})\.json\.gz$/;
+async function pruneSecBackups(bucket, now) {
+  const cutoff = dayKey(now - BACKUP_KEEP_DAYS * 86400000);
+  const [list] = await bucket.getFiles({ prefix: 'sec_backups/' });
+  const removed = [];
+  for (const f of list) {
+    const m = BK_RE.exec(f.name);
+    if (m && m[1] < cutoff) { await f.delete({ ignoreNotFound: true }); removed.push(f.name); }
+  }
+  return removed;
 }
 
 // restoreSecBackup({ bucket, path, prefix, overwrite }) – שחזור קובץ גיבוי לתחילית נתונה ('' = שורש, 'b/<id>/' = עסק).
@@ -383,9 +425,11 @@ exports.secAdminReadChat = onCall(wrap('secAdminReadChat', secAdminReadChat));
 // מתוזמנת – אזור אחד בלבד (ריצה כפולה = גיבוי כפול), כמו expirePromosOnLine
 exports.secBackupDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 03:30', timeZone: TZ, timeoutSeconds: 540, memory: '512MiB' }, async () => {
   const r = await runSecBackup({ bucket: BACKUP_BUCKET.value() || undefined });
-  logger.info('secretary: backup done', { day: r.day, files: r.files.length, docs: r.files.reduce((s, f) => s + f.docs, 0) });
+  logger.info('secretary: backup done', { day: r.day, files: r.files.length, docs: r.files.reduce((s, f) => s + f.docs, 0), removed: r.removed.length, errors: r.errors.length });
+  // ריצה עם שגיאה בעסק כלשהו – מסומנת ככישלון (מופיעה כשגיאה בלוח הבקרה), אחרי שכל העסקים האחרים גובו
+  if (r.errors.length) throw new Error('secretary backup: ' + r.errors.length + ' errors');
 });
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  CONSENT, CONSENT_VER, SEC_COLLS, SEC_ROOT_COLLS, cfgOf, runSecBackup, restoreSecBackup, enc, dec, dayKey,
+  CONSENT, CONSENT_VER, SEC_COLLS, SEC_ROOT_COLLS, SEC_SUBS, BACKUP_KEEP_DAYS, cfgOf, runSecBackup, restoreSecBackup, pruneSecBackups, enc, dec, dayKey,
 } });

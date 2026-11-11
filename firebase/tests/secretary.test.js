@@ -233,6 +233,15 @@ describe('הסכמה (98): אין שימוש לפני אישור; האישור �
     await setDoc(`b/${A}/sec_cfg/main`, { mode: 'all', mgr: { [M1]: { cv: 'sec-terms-old', ca: 1 } } });
     assert.equal((await call('secSetup', M1, { name: 'x', addr: 'm' })).reason, 'no-consent');
     assert.equal((await call('secState', M1)).result.consented, false);
+    // גם בחוקים: הסכמה לנוסח קודם לא פותחת את האוספים (תיקון סבב 1)
+    await assertFails(db(M1).doc(`b/${A}/sec_log/l1`).get());
+    await assertFails(db(M1).doc(`b/${A}/sec_chat/${M1}/m/x1`).get());
+  });
+  it('מזהה הנוסח בחוקים זהה למזהה בשרת (בשורש ובעסק), והנוסח מציין את משך שמירת הגיבויים', () => {
+    const rules = fsm.readFileSync(path.join(H.ROOT, 'firestore.rules'), 'utf8');
+    assert.equal(rules.split(`get('cv', '') == '${SEC.CONSENT_VER}'`).length - 1, 2);
+    assert.ok(!/get\('cv', ''\) != ''/.test(rules), 'אין "הסכמה כלשהי" בחוקים');
+    assert.match(SEC.CONSENT.items.join(' '), new RegExp('גיבוי.*נמחק אוטומטית אחרי ' + SEC.BACKUP_KEEP_DAYS + ' יום'));
   });
 });
 
@@ -271,6 +280,12 @@ describe('הגדרות מנהל־על: תקרה, מתג שכר, ניתוח עו�
     assert.equal(st.result.pay, true); assert.equal(st.result.capCents, undefined, 'מנהל העסק לא מקבל את סכום התקרה (83)');
     assert.equal((await coll(`b/${A}/audit`)).filter((x) => x.act === 'secAdminSetCfg' && x.by === SUPER).length, 1);
     assert.equal((await coll(`b/${A}/sec_log`)).filter((x) => x.act === 'cfg' && x.who === 'sa').length, 1);
+    // תקרה: מעל 10,000$ נדחה בהודעה בדולרים; null = ניקוי
+    const big = await call('secAdminSetCfg', SUPER, { bizId: A, capCents: 1000100 });
+    assert.equal(big.reason, 'bad-cap'); assert.match(big.text, /10,000\$/);
+    const clr = await call('secAdminSetCfg', SUPER, { bizId: A, capCents: null });
+    assert.equal(clr.status, 'OK', clr.text); assert.equal(clr.result.capCents, null);
+    assert.equal(await get(`b/${A}/sec_cfg/cap`), null);
   });
   it('עסק בלי מסמך הגדרות: יצירה ראשונה שומרת ברירות מחדל ומתג שכר', async () => {
     await prep((d) => d.doc(`b/${A}/sec_cfg/main`).delete());
@@ -392,6 +407,43 @@ describe('גיבוי אוטומטי בשרת (94, 9.6): כל אוספי sec_*, �
     await assert.rejects(SEC.restoreSecBackup({ bucket: BUCKET, path: 'sec_backups/x/bad.json.gz', prefix: 'b/biz-restore/' }), /bad path/);
     assert.equal(await get('b/biz-restore/admins/evil'), null);
     await assert.rejects(SEC.restoreSecBackup({ bucket: BUCKET, path: 'sec_backups/x/bad.json.gz', prefix: '../' }), /bad prefix/);
+  });
+  it('מדיניות שמירה: עותק בן יותר מ-35 יום נמחק בריצת הגיבוי; צעיר יותר וקובץ בשם אחר – נשארים', async () => {
+    await seed({ consent: [M1] });
+    await bucket().deleteFiles({ prefix: 'sec_backups/' }).catch(() => {});
+    const put = (p) => bucket().file(p).save(Buffer.from('x'));
+    await put(`sec_backups/${A}/2026-10-07.json.gz`); // 36 ימים לפני 12.11 – נמחק
+    await put(`sec_backups/${A}/2026-10-08.json.gz`); // 35 ימים – נשאר
+    await put('sec_backups/_root/2025-01-01.json.gz'); // ישן מאוד – נמחק
+    await put(`sec_backups/${A}/note.txt`); // לא בתבנית – לא נוגעים
+    const r = await SEC.runSecBackup({ bucket: BUCKET, now: Date.parse('2026-11-12T01:30:00Z') });
+    assert.deepEqual(r.removed.sort(), [`sec_backups/${A}/2026-10-07.json.gz`, 'sec_backups/_root/2025-01-01.json.gz'].sort());
+    const [left] = await bucket().getFiles({ prefix: 'sec_backups/' });
+    const names = left.map((f) => f.name).sort();
+    assert.ok(names.includes(`sec_backups/${A}/2026-10-08.json.gz`));
+    assert.ok(names.includes(`sec_backups/${A}/note.txt`));
+    assert.ok(names.includes(`sec_backups/${A}/2026-11-12.json.gz`));
+    assert.ok(!names.includes(`sec_backups/${A}/2026-10-07.json.gz`));
+    assert.equal(SEC.BACKUP_KEEP_DAYS, 35);
+  });
+  it('עמידות: שגיאה בעסק אחד נרשמת, ושאר העסקים מגובים; קריאה בעמודים (מעל 500 מסמכים באוסף)', async () => {
+    await seed({ consent: [M1] });
+    await prep(async (d) => { for (let k = 0; k < 2; k++) { const b = d.batch(); for (let i = 0; i < 300; i++) b.set(d.doc(`b/${A}/sec_log/p${k}_${String(i).padStart(3, '0')}`), { t: i }); await b.commit(); } });
+    const T = require('../functions/lib/tenant');
+    const good = await T.loadBiz(A);
+    const broken = { bizId: 'bad/x', dataRoot: 'b', features: { secretary: true } }; // נתיב לא תקין – הקריאה של העסק הזה נכשלת
+    const r = await SEC.runSecBackup({ bucket: BUCKET, now: Date.parse('2026-11-13T01:30:00Z'), bizzes: [broken, good] }).catch((e) => ({ thrown: e }));
+    assert.equal(r.thrown, undefined, 'הריצה לא נעצרה');
+    assert.equal(r.errors.length, 1); assert.equal(r.errors[0].bizId, 'bad/x');
+    const fa = r.files.find((f) => f.bizId === A);
+    assert.ok(fa, 'עסק A גובה למרות השגיאה בעסק הקודם');
+    assert.equal(fa.docs, SAMPLE.length + 1 + 600, 'כל 600 המסמכים הנוספים ב-sec_log (שני עמודים)');
+  });
+  it('תת־אוספים בגיבוי (SEC_SUBS) = כל התת־אוספים של sec_* בחוקים', () => {
+    const rules = fsm.readFileSync(path.join(H.ROOT, 'firestore.rules'), 'utf8');
+    const nested = new Set([...rules.matchAll(/match \/(sec_[a-z_]+)\/\{[a-z]+\} \{\s*(?:allow[^\n]*\n\s*)+match \/([a-z]+)\//g)].map((m) => m[1] + '/' + m[2]));
+    const subs = new Set(Object.entries(SEC.SEC_SUBS).flatMap(([c, l]) => l.map((x) => c + '/' + x)));
+    assert.deepEqual([...nested].sort(), [...subs].sort());
   });
   it('גיבויים ב-Storage – אף אחד לא קורא מהאפליקציה', async () => {
     const st = env.authenticatedContext(M1, { email: M1 + '@example.invalid' }).storage();

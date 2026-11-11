@@ -32,12 +32,13 @@ const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|
 
 /* ---------- עיצוב: כפתור צף בלבד (כל השאר ברכיבים הקיימים) ----------
    פינה שמאלית (בעברית – הצד שלא מסתיר את כפתור ה-＋ שבמרכז הסרגל), מעל הסרגל התחתון. מוסתר כשהמקלדת פתוחה (שדה בפוקוס),
-   כשסרגל הבחירה המרובה פתוח, במסך הסריקה האחידה, בעסק מושהה ובהדפסה. ריווח תחתון נוסף לתוכן, כדי שאפשר יהיה לגלול אותו אל מעל הכפתור. */
+   כשסרגל הבחירה המרובה פתוח, במסך הסריקה האחידה, בעסק מושהה ובהדפסה. ריווח תחתון נוסף לתוכן, כדי שאפשר יהיה לגלול אותו אל מעל הכפתור.
+   תיקון סבב 1: בלי בורר has (לא נתמך ב-WebView ישן) – מחלקות על body שה-JS מעדכן: sec-kb (שדה בפוקוס = מקלדת), sec-cover (סרגל בחירה מרובה / מסך הוספה פתוח). */
 const css=document.createElement('style');
 css.textContent='.secfab{position:fixed;left:max(12px,env(safe-area-inset-left));bottom:calc(84px + env(safe-area-inset-bottom));z-index:29;width:52px;height:52px;border-radius:50%;border:1.5px solid var(--acc);background:var(--card);color:var(--acc);box-shadow:0 8px 20px -8px rgba(0,0,0,.55);display:grid;place-items:center;cursor:pointer;padding:0}'
 +'.secfab svg{width:26px;height:26px}.secfab:active{transform:scale(.94)}.secfab:focus-visible{outline:3px solid var(--acc);outline-offset:3px}'
 +'body.secfab-on main{padding-bottom:76px}'
-+'body:has(.msbar) .secfab,body:has(#main :is(input,textarea,select):focus) .secfab,body:has(.sheet:not([hidden])) .secfab,body.us-on .secfab,body.susp .secfab{display:none}'
++'body.sec-kb .secfab,body.sec-cover .secfab,body.us-on .secfab,body.susp .secfab{display:none}'
 +'@media(min-width:901px){.secfab{left:max(12px,calc((100vw - 980px)/2 + 12px))}}@media print{.secfab{display:none}}@media(prefers-reduced-motion:reduce){.secfab:active{transform:none}}'
 +'.secav{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;border:1.5px solid var(--acc);color:var(--acc);flex:none}.secav svg{width:24px;height:24px}'
 +'.secterms{margin:8px 0 0;padding-inline-start:20px}.secterms li{margin:0 0 8px;line-height:1.5}';
@@ -53,6 +54,13 @@ function fabSync(){
  const nm=X.st.name||'המזכירה';b.setAttribute('aria-label',nm);b.title=nm;
 }
 window.secFabSync=fabSync;
+/* מקלדת: שדה קלט בתוך המסך בפוקוס */
+const isField=t=>!!(t&&t.closest&&t.closest('#main')&&/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)&&!/^(checkbox|radio|button|submit|range|color|file)$/i.test(t.type||''));
+document.addEventListener('focusin',e=>{document.body.classList.toggle('sec-kb',isField(e.target))});
+document.addEventListener('focusout',()=>{setTimeout(()=>{document.body.classList.toggle('sec-kb',isField(document.activeElement))},0)});
+/* סרגל בחירה מרובה (.msbar) או מסך הוספה (#sheet) פתוחים – בדיקה אחרי כל שינוי ב-DOM, לכל היותר פעם בפריים, ורק כשהכפתור מוצג */
+let covQ=0;const covSync=()=>{covQ=0;const sh=document.getElementById('sheet');document.body.classList.toggle('sec-cover',!!document.querySelector('.msbar')||!!(sh&&!sh.hidden))};
+try{new MutationObserver(()=>{if(!covQ&&document.getElementById('secfab')){covQ=1;requestAnimationFrame(covSync)}}).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']})}catch(e){}
 ACT.secOpen=()=>{if(cur().v!=='sec')go('sec')};
 
 /* כל ציור מסך: מסנכרנים את הכפתור (עסק אחר / התוספת כובתה / התנתקות) – בלי קריאה לשרת אם אין צורך */
@@ -128,7 +136,7 @@ const saLoad=id=>{SA[id]=null;fnCall('secAdminGet',{bizId:id}).then(r=>{SA[id]=r
  h+=`<form class="card" data-f="secSaF" data-id="${esc(id)}"><p class="note" style="margin-top:0">${on?'התוספת פעילה בעסק.':'התוספת כבויה בעסק. אפשר להכין את ההגדרות, ולהפעיל במתג "המזכירה העסקית" ברשימת התוספות.'}</p>
  <b>1. מי משתמש במזכירה</b><div class="chips" role="radiogroup" style="margin:6px 0"><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="all"${c.mode!=='main'?' checked':''}> כל המנהלים</label><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="main"${c.mode==='main'?' checked':''}> מנהל ראשי בלבד</label></div>
  <label class="f"><span>המנהל הראשי</span><select name="mainUid"><option value="">לא נבחר</option>${A.map(a=>`<option value="${esc(a.uid)}"${c.mainUid===a.uid?' selected':''}>${nm(a)}</option>`).join('')}</select></label>
- <b style="display:block;margin-top:10px">2. תקרת עלות חודשית</b><label class="f"><span>דולרים בחודש (מספר שלם; מנהל העסק רואה רק אחוז ניצול)</span><input name="cap" inputmode="numeric" dir="ltr" maxlength="5" value="${esc(dollars)}" placeholder="לא נקבעה"></label>
+ <b style="display:block;margin-top:10px">2. תקרת עלות חודשית</b><label class="f"><span>דולרים בחודש (מספר שלם; מנהל העסק רואה רק אחוז ניצול)</span><input name="cap" inputmode="numeric" dir="ltr" maxlength="6" value="${esc(dollars)}" placeholder="לא נקבעה"><small class="note">עד 10,000 דולר. שדה ריק = בלי תקרה.</small></label>
  <b style="display:block;margin-top:10px">3. שאלות שכר – לכל מנהל</b>${A.length?A.map(a=>`<label class="chip" style="min-height:44px;margin:4px 0;width:100%;justify-content:flex-start"><input type="checkbox" name="pay_${esc(a.uid)}" value="1"${c.pay&&c.pay[a.uid]?' checked':''}> ${nm(a)}</label>`).join(''):'<p class="note">אין מנהלים בעסק</p>'}
  <b style="display:block;margin-top:10px">4. ניתוח עובדים ומידע רגיש</b><label class="chip" style="min-height:44px;margin:4px 0;width:100%;justify-content:flex-start"><input type="checkbox" name="emp" value="1"${c.emp?' checked':''}> פעיל</label>
  <p class="note" style="margin:0">${c.empDefault?'עסק הפיילוט: פעיל כברירת מחדל (החלטה פ4).':'בעסק של לקוח – להפעיל רק אחרי חוות דעת עורך דין.'}</p>
@@ -138,10 +146,10 @@ const saLoad=id=>{SA[id]=null;fnCall('secAdminGet',{bizId:id}).then(r=>{SA[id]=r
  r.h+=h}catch(e){}return r}}
 ACT.secSaRe=el=>{saLoad(el.dataset.id);rerender()};
 FRM.secSaF=async f=>{const id=f.dataset.id,c=SA[id];if(!c||c.err)return;const x=fd(f),b=f.querySelector('button');
- const cap=String(x.cap||'').trim();if(cap&&(!/^\d{1,5}$/.test(cap)))return toast('תקרה: מספר שלם של דולרים');
+ const cap=String(x.cap||'').replace(/[,\s$]/g,'').trim();if(cap&&(!/^\d{1,5}$/.test(cap)||+cap>10000))return toast('תקרה: מספר שלם של דולרים, בין 0 ל-10,000');
  if(x.mode==='main'&&!x.mainUid)return toast('בחרו מנהל ראשי');
  const pay={};for(const a of c.admins||[])pay[a.uid]=x['pay_'+a.uid]==='1';
- const data={bizId:id,mode:x.mode==='main'?'main':'all',mainUid:x.mainUid||'',emp:x.emp==='1'};if(Object.keys(pay).length)data.pay=pay;if(cap)data.capCents=+cap*100;
+ const data={bizId:id,mode:x.mode==='main'?'main':'all',mainUid:x.mainUid||'',emp:x.emp==='1'};if(Object.keys(pay).length)data.pay=pay;if(cap)data.capCents=+cap*100;else if(c.capCents!=null)data.capCents=null;/* ריק אחרי שהייתה תקרה = ניקוי */
  b.disabled=true;try{const r=await window.fnCall('secAdminSetCfg',data);SA[id]=r;toast('נשמר')}catch(e){err(e)}finally{b.disabled=false;if(cur().v==='sab')rerender()}};
 ACT.secSaChat=el=>{const id=el.dataset.id,u=el.dataset.u;ask('לצפות בשיחה? הצפייה תירשם ביומן הפעולות, ומנהל העסק יראה אותה.',async()=>{
  try{const r=await window.fnCall('secAdminReadChat',{bizId:id,uid:u});const L=r&&r.msgs||[];
