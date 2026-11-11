@@ -70,3 +70,37 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     for (const n of list) assert.match(n, /^[A-Za-z][A-Za-z0-9_]{0,62}$/); // אותו תנאי כמו ב-deploy-functions.yml
   });
 });
+
+// האפליקציה (המיזוג השני): פונה לאירופה, מכתובת אחת. us-central1 לא מופיע בקוד האפליקציה בכלל
+// (publicBrand נקראת דרך hosting – /api/publicBrand – ו-tzintukJoin לא נקראת מהאפליקציה). vendor/ = ספריית Firebase הרשמית, לא נבדקת.
+describe('אזור הפונקציות באפליקציה', () => {
+  const fs = require('node:fs');
+  const WWW = path.join(__dirname, '..', '..', 'app-source', 'www');
+  const read = (f) => fs.readFileSync(path.join(WWW, f), 'utf8');
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'vendor' ? [] : walk(path.join(d, e.name))) : [path.join(d, e.name)]));
+
+  it("index.html: FN_REGION='europe-west1', ו-FNB בונה את הכתובת ממנו", () => {
+    const h = read('index.html');
+    assert.equal((h.match(/const FN_REGION='([^']+)'/) || [])[1], 'europe-west1');
+    assert.ok(h.includes('const FNB=()=>EMU?`http://${EMU}:5001/${FB.projectId}/${FN_REGION}`:`https://${FN_REGION}-${FB.projectId}.cloudfunctions.net`;'), 'FNB השתנה');
+  });
+
+  it('orders/backend.js: אותו אזור; api.js ו-trial.js משתמשים בו', () => {
+    assert.equal((read('orders/backend.js').match(/export const FN_REGION = '([^']+)'/) || [])[1], 'europe-west1');
+    for (const f of ['orders/api.js', 'orders/trial.js']) {
+      const s = read(f);
+      assert.ok(s.includes("import { FN_REGION } from './backend.js';"), f);
+      assert.ok(/getFunctions\(app, FN_REGION\)/.test(s), f);
+    }
+  });
+
+  it('yemot-promo.js ו-yemot-preview.js פונים דרך FNB()', () => {
+    assert.ok(read('yemot-promo.js').includes('const YM_BASE=()=>FNB();'));
+    assert.ok(read('yemot-preview.js').includes('const base=()=>FNB();'));
+  });
+
+  it('אין us-central1 בשום קובץ של האפליקציה (חוץ מ-vendor)', () => {
+    const hits = walk(WWW).filter((f) => /\.(html|js|json|css)$/.test(f) && fs.readFileSync(f, 'utf8').includes('us-central1')).map((f) => path.relative(WWW, f));
+    assert.deepEqual(hits, []);
+  });
+});

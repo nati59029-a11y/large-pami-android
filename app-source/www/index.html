@@ -3028,7 +3028,7 @@ async function shBcSync(){if(!shOn())return 0;let r={};try{const d=await fsx('/s
 /* הזיהוי החכם זמין לכל מי שמחובר לחשבון (מנהל או עובד). המפתח של Gemini נמצא רק בשרת */const shKey=()=>SY.refresh&&SY.role?'srv':'';
 const SHAI_P='בתמונה מוצר מחנות לכלי בית, חד פעמי ומוצרי אפייה. החזר JSON בלבד בצורה {"name":"...","details":"..."}. name = שם המוצר בעברית כפי שמופיע על האריזה, קצר וברור (למשל: כוסות קרטון, שקיות אשפה, נייר אפייה). details = שם החברה או המותג ואחריו הכמות, הגודל או המשקל (למשל: תבניכל, 50 יחידות, 250 מ"ל). שדה שלא נראה בתמונה השאר ריק. אל תמציא פרטים.';
 /* הזיהוי החכם עובר דרך פונקציית השרת scanDocument. המפתח של Gemini נמצא רק בשרת, ואין יותר פנייה ישירה מהמכשיר ל-Gemini */
-const FN_REGION='us-central1';/* האזור של פונקציות השרת. חייב להתאים לאזור שבו הן מפורסמות */
+const FN_REGION='europe-west1';/* האזור של פונקציות השרת (11.11.2026: אירופה, ליד מסד הנתונים; האזור הישן נשאר בשרת לטלפונים ישנים). כל קריאה לשרת עוברת דרך FNB(). חייב להתאים לאזור שבו הן מפורסמות, ול-FN_REGION ב-orders/backend.js */
 const FNB=()=>EMU?`http://${EMU}:5001/${FB.projectId}/${FN_REGION}`:`https://${FN_REGION}-${FB.projectId}.cloudfunctions.net`;
 /* kind: invoice = חשבונית, product = מוצר למדף, feedback = טופס משוב. נשלחות רק התמונות (files); ההנחיות ל-Gemini נמצאות בשרת. התשובה (text) היא אותה מחרוזת ש-Gemini החזיר, ולכן הפענוח במכשיר לא השתנה */
 async function shAIcall(body,k,tmo,pro,kind){const t=await tok(),ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),tmo||120000);let r,j=null;

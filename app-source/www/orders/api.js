@@ -8,6 +8,7 @@ import { initializeApp } from './vendor/firebase-app.js';
 import { initializeAuth, connectAuthEmulator, signOut, onAuthStateChanged } from './vendor/firebase-auth.js';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, collection, query, where, orderBy, limit } from './vendor/firebase-firestore-lite.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from './vendor/firebase-functions.js';
+import { FN_REGION } from './backend.js';
 
 // שמות הפונקציות בשרת (מאגר האתר, firebase/functions/index.js, שלב 1.4)
 export const FN = {
@@ -78,7 +79,7 @@ export function init(be, appSession) {
   app = initializeApp(be.config);
   auth = initializeAuth(app, { persistence: AppSessionPersistence });
   db = getFirestore(app);
-  fns = getFunctions(app, 'us-central1');
+  fns = getFunctions(app, FN_REGION);
   if (be.emu) {
     connectAuthEmulator(auth, `http://${be.emu.host}:${be.emu.auth}`, { disableWarnings: true });
     connectFirestoreEmulator(db, be.emu.host, be.emu.fs);
