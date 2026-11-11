@@ -12,6 +12,7 @@
 
 const crypto = require('node:crypto');
 const { onRequest } = require('firebase-functions/v2/https');
+const { LEGACY_REGION } = require('./lib/region'); // נשארת באזור הישן בלבד (כתובת קבועה מחוץ לקוד)
 const { defineSecret, defineInt } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore } = require('firebase-admin/firestore');
@@ -121,7 +122,7 @@ async function joinInBiz(req, res, o, biz, send) {
 async function addCaller(phone) { void phone; return 'blocked'; }
 
 // לא מיובא מ-index.js (מושבת). נשאר כאן כדי שההפעלה בעתיד תהיה שורת חיבור אחת, אחרי אישור.
-exports.tzintukJoin = onRequest({ secrets: [YEMOT_HOOK_SECRET], timeoutSeconds: 30, maxInstances: 2 }, async (req, res) => {
+exports.tzintukJoin = onRequest({ region: LEGACY_REGION, secrets: [YEMOT_HOOK_SECRET], timeoutSeconds: 30, maxInstances: 2 }, async (req, res) => {
   try { await handleJoin(req, res); } catch (e) {
     logger.error('yemot-hook: failed', { reason: 'internal', name: e && e.name });
     if (!res.headersSent) res.status(200).set('Content-Type', 'text/plain; charset=utf-8').send(answer(MSG.error));

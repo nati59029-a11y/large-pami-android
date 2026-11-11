@@ -11,7 +11,8 @@
 // עקרונות: התפקיד נקבע בשרת (requireStaff), קודם הרשאה ורק אחר כך פנייה לימות/Storage. המפתח רק בכותרת, לא ביומן ולא בתשובה.
 // מחיקה מהקו – רק נתיב מדויק אחד (safeFilePath / staleRe), אף פעם לא תיקייה, ext.ini או M*. רק שדות ורשומות חדשים, בלי מיגרציה.
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall } = require('./lib/region'); // שני אזורים (europe-west1 + us-central1) – lib/region.js
 const { defineSecret, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');

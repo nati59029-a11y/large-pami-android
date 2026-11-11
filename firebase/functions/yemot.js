@@ -14,7 +14,8 @@
 // המפתח של ימות נמצא רק בכספת של השרת (YEMOT_API_KEY). הוא נשלח לימות בכותרת authorization בלבד,
 // ולעולם לא נכתב ליומן, לרשומה או להודעת שגיאה. גם טקסט שחוזר מימות לא מועבר לטלפון.
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall, LEGACY_REGION } = require('./lib/region'); // onCall בשני אזורים (europe-west1 + us-central1) – lib/region.js
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
@@ -581,7 +582,7 @@ async function nightlyAll(opts) {
   }
   return out;
 }
-exports.expirePromosOnLine = onSchedule({ schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await nightlyAll(); });
+exports.expirePromosOnLine = onSchedule({ region: LEGACY_REGION, schedule: 'every day 00:15', timeZone: TZ, secrets: [YEMOT_API_KEY] }, async () => { await nightlyAll(); });
 
 // לבדיקות בלבד. לא נספרים (enumerable: false), ולכן Object.assign ב-index.js מעתיק רק את שתי הפונקציות.
 Object.defineProperty(exports, 'runExpiry', { enumerable: false, value: runExpiry });
