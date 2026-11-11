@@ -92,8 +92,15 @@ async function login(page, email, opts) {
   await page.goto(ORIGIN + '/?emu=1');
   await page.waitForSelector('#gform', { timeout: 15000 });
   if (!(opts && opts.trust === false)) { const u = await trustUid(page, email); if (u) await page.evaluate((x) => localStorage.setItem('lp-trust', JSON.stringify({ uid: x, exp: Date.now() + 864e5 })), u); }
-  await page.fill('#gform input[name=email]', email);
-  await page.fill('#gform input[name=pw]', (opts && opts.pw) || 'pw-123456');
+  // 11.11: מסך הכניסה עלול להצטייר מחדש מיד אחרי טעינה (למשל אחרי התנתקות) ולמחוק את מה שהוקלד – ממלאים שוב עד שהערכים נשארים
+  const pw = (opts && opts.pw) || 'pw-123456';
+  for (let k = 0; k < 5; k++) {
+    await page.fill('#gform input[name=email]', email);
+    await page.fill('#gform input[name=pw]', pw);
+    await page.waitForTimeout(300);
+    const ok = await page.evaluate(([e, p]) => { const f = document.querySelector('#gform'); return !!f && f.querySelector('input[name=email]').value === e && f.querySelector('input[name=pw]').value === p; }, [email, pw]).catch(() => false);
+    if (ok) break;
+  }
   page.__step = 'login';
   await Promise.all([page.waitForLoadState('load'), page.click('#gbtn')]);
   await settle(page);
