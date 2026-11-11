@@ -125,14 +125,14 @@ const logCount = async (biz, act) => (await adm().collection(`b/${biz}/cardLog`)
 
 // עבודה שנכתבת ישירות (כמו startImport), עם _t = כשל מדומה בניסיון הראשון (באמולטור)
 async function mkJob(biz, uid, kind, rows, opts) {
-  const o = opts || {}; const job = jid(); const now = Date.now();
+  const o = opts || {}; const job = jid(); const now = Date.now() - (o.age || 0);
   const chunks = I.pack(kind, rows, rows.map((_, i) => i + 2), 0).map((c) => I.sealChunk(KEY, biz, job, c));
   const got = {}; chunks.forEach((c) => { got[c.n] = c.cnt; });
   await adm().doc(`b/${biz}/impJobs/${job}`).set({ k: kind, uid, t: now, upd: now, total: rows.length, br: o.br || null, addQty: false, st: 'run', recv: rows.length, got, next: 0, wait: [], dn: 0, fr: 0, cnt: { c: 0, u: 0, s: 0, b: 0, sk: 0 }, bad: [], fail: [] });
   const refs = [];
   for (const c of chunks) {
     const ref = I.qRef(biz, job).collection('c').doc(String(c.n));
-    await ref.set(Object.assign({ biz, job, n: c.n, cnt: c.cnt, k: kind, uid, box: c.box, t: now, tries: 0, st: 'q', kk: 0 }, o.t != null ? { _t: o.t } : {}));
+    await ref.set(Object.assign({ biz, job, n: c.n, cnt: c.cnt, k: kind, uid, box: c.box, t: now, tries: 0, st: o.st || 'q', kk: 0 }, o.t != null ? { _t: o.t } : {}));
     refs.push(ref);
   }
   return { job, refs };
@@ -142,7 +142,7 @@ async function firstTryFails(ref, failAt) {
   const t0 = Date.now(); let tries = 0;
   while (Date.now() - t0 < 20000) { const s = await ref.get(); tries = s.exists ? (s.get('tries') || 0) : 0; if (tries >= 1) break; await sleep(300); }
   if (tries >= 1) { await sleep(2000); return 'trigger'; }
-  await assert.rejects(I.processChunk(ref, { failAt }), /injected/);
+  await assert.rejects(I.processChunk(ref, { failAt }), /transient/); // סבב 2: שגיאה מנוקה (בלי ההודעה המקורית)
   return 'direct';
 }
 
@@ -298,6 +298,52 @@ describe('ייבוא ברקע – מוצרים: זהה לייבוא הישן', (
     const j2 = await waitJob(A, job2);
     assert.equal(j2.cnt.c, 0); assert.equal(j2.cnt.u, 450);
     assert.equal((await adm().collection(`b/${A}/prod`).get()).size, 450);
+  });
+});
+
+describe('ייבוא ברקע – סבב 2: מזהה עבודה קבוע לקובץ, וחילוץ ייבוא תקוע', () => {
+  it('מלאי עם "הוסף כמות": החלק השני לא נשלח (תקלה) ואז "נסה שוב" שולח את כל הקובץ עם אותו מזהה – הכמות נוספת פעם אחת בלבד, עבודה אחת', { timeout: 300000 }, async () => {
+    const rows = Array.from({ length: 250 }, (_, i) => ({ name: 'קבוע ' + i, price: 10, barcode: 'K' + String(i).padStart(5, '0'), qty: 5 }));
+    const ns = rows.map((_, i) => i + 2);
+    await waitJob(A, await upload(MGR, 'prod', rows, ns, { br: 'br1', addQty: false }));
+    const job = jid(); const base = { job, kind: 'prod', total: 250, br: 'br1', addQty: true };
+    const p1 = await call('startImport', MGR, Object.assign({ at: 0, rows: rows.slice(0, 200), ns: ns.slice(0, 200) }, base));
+    assert.equal(p1.status, 'OK', short(p1.text)); // החלק השני "נכשל" – לא נשלח
+    for (let k = 0; k < 2; k++) for (let at = 0; at < 250; at += 200) { // "נסה שוב" (כל הקובץ, אותו מזהה) – ועוד פעם אחרי זה
+      const r = await call('startImport', MGR, Object.assign({ at, rows: rows.slice(at, at + 200), ns: ns.slice(at, at + 200) }, base));
+      assert.equal(r.status, 'OK', short(r.text)); assert.ok(r.result.recv <= 250);
+    }
+    const j = await waitJob(A, job);
+    assert.equal(j.st, 'done'); assert.equal(j.recv, 250); assert.equal(j.dn, 250); assert.equal(j.cnt.u, 250); assert.equal(j.cnt.c, 0);
+    const p = await prods(A);
+    const qs = rows.map((r) => p[r.name].o.q.br1);
+    assert.ok(qs.every((q) => q === 10), 'כמות: 5 בייבוא הראשון + 5 פעם אחת (' + [...new Set(qs)].join(',') + ')');
+  });
+
+  it('לקוחות: שליחה חוזרת של כל הקובץ עם אותו מזהה אחרי תקלה – עבודה אחת, כל לקוח נספר פעם אחת', { timeout: 120000 }, async () => {
+    const rows = Array.from({ length: 300 }, (_, i) => ({ name: 'חוזר ' + i, phone: '05' + String(60000000 + i).slice(-8) }));
+    const ns = rows.map((_, i) => i + 2); const job = jid();
+    const send = (at) => call('startImport', MGR, { job, kind: 'cust', total: 300, at, rows: rows.slice(at, at + 200), ns: ns.slice(at, at + 200) });
+    assert.equal((await send(0)).status, 'OK');
+    for (const at of [0, 200]) assert.equal((await send(at)).status, 'OK');
+    const j = await waitJob(A, job);
+    assert.equal(j.recv, 300); assert.equal(j.cnt.c, 300); assert.equal(j.cnt.c + j.cnt.u + j.cnt.s + j.cnt.b, 300);
+  });
+
+  it('ייבוא תקוע (חלק שתורו הגיע ולא הופעל): לפני 10 דקות "נסה שוב" לא נוגע; אחרי – מפעיל אותו מחדש, הייבוא מסתיים פעם אחת; "נסה שוב" נוסף – לא משנה', { timeout: 120000 }, async () => {
+    const rows = [{ name: 'תקוע 1', phone: '0547780001' }, { name: 'תקוע 2', phone: '0547780002' }];
+    const fresh = await mkJob(A, MGR, 'cust', rows, { st: 'wait' }); // הטריגר מדלג (לא 'q') – כמו אירוע שלא הגיע
+    assert.equal((await call('startImport', MGR, { retry: fresh.job })).result.n, 0, 'עוד לא עברו 10 דקות');
+    const { job } = await mkJob(A, MGR, 'cust', rows.map((r) => Object.assign({}, r, { phone: r.phone.replace('0547780', '0547781') })), { st: 'wait', age: I.STUCK_MS + 60000 });
+    await sleep(1500);
+    assert.equal((await adm().doc(`b/${A}/impJobs/${job}`).get()).get('st'), 'run', 'תקוע לפני החילוץ');
+    const r = await call('startImport', MGR, { retry: job });
+    assert.equal(r.status, 'OK', short(r.text)); assert.equal(r.result.n, 1);
+    let j;
+    try { j = await waitJob(A, job, 20000); } catch (e) { await I.processChunk(I.qRef(A, job).collection('c').doc('0-1')); j = await waitJob(A, job, 20000); }
+    assert.equal(j.st, 'done'); assert.equal(j.cnt.c, 2); assert.equal(j.dn, 2);
+    assert.equal((await call('startImport', MGR, { retry: job })).result.n, 0);
+    assert.equal((await adm().doc(`b/${A}/impJobs/${job}`).get()).get('cnt').c, 2);
   });
 });
 
