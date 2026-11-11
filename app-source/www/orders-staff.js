@@ -364,6 +364,7 @@ V.oxImp=()=>{const T='ייבוא מלאי';if(!on())return deny(T);if(!O.P){load
  return{t:T,s:esc(I.file),h:`<div class="card"><b>התאמת עמודות</b>${IMF.map(([k,l,req])=>`<label class="f"><span>${l}${req?' (חובה)':''}</span><select data-c="oxImpMap" data-k="${k}">${opt(k)}</select></label>`).join('')}</div>
  ${hasBr()?`<label class="f"><span>הכמות נכנסת לסניף</span><select data-c="oxImpBr">${myBr().map(b=>`<option value="${esc(b.id)}"${I.br===b.id?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`:''}
  <label class="cb" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" data-c="oxImpAdd"${I.add?' checked':''}> הוסף כמות גם למוצרים קיימים (בלי סימון – מוצר קיים מתעדכן בשם/מחיר בלבד)</label>
+ <label class="cb" style="min-height:44px;display:flex;align-items:center;gap:6px"><input type="checkbox" data-c="oxImpSkip"${I.skip?' checked':''}> דלג על מוצרים שכבר קיימים (לא לשנות בהם כלום – רק להוסיף מוצרים חדשים)</label>
  <div class="card"><b>${good} שורות תקינות</b>${bad.length?` · <span class="neg">${bad.length} שגויות (לא ייובאו)</span>`:''}<div style="max-height:40vh;overflow:auto;margin-top:6px">${pv.slice(0,60).map(r=>`<div class="note" style="padding:4px 0;border-bottom:1px solid var(--line)${r.err?';color:var(--neg,#e66)':''}">${r.n}. ${esc(r.o.name||'')} · ${esc(String(r.o.price!=null?r.o.price:''))}${r.o.qty?' · כמות '+esc(String(r.o.qty)):''}${r.err?' – '+esc(r.err):''}</div>`).join('')}${pv.length>60?`<p class="note">ועוד ${pv.length-60} שורות…</p>`:''}</div></div>
  <button class="btn w" data-a="oxImpGo"${good?'':' disabled'}>ייבא ${good} שורות</button><button class="btn g w" style="margin-top:8px" data-a="oxImpX">קובץ אחר</button>`}};
 CHG.oxImpFile=async el=>{const f=el.files&&el.files[0];if(!f)return;try{if(/\.pdf$/i.test(f.name))throw new Error('ייבוא מלאי – רק Excel או CSV');const T=await readTable(f);const rows=(T||[]).filter(r=>Array.isArray(r)&&r.some(c=>String(c).trim()));if(rows.length<2)throw new Error('בקובץ אין שורות מתחת לכותרות');
@@ -371,7 +372,8 @@ CHG.oxImpFile=async el=>{const f=el.files&&el.files[0];if(!f)return;try{if(/\.pd
  O.im={file:f.name,head,rows:rows.slice(1),map,br:hasBr()?(SBR||(myBr()[0]||{}).id||''):'',add:false,req:rid()};rerender()}catch(e){err(e)}};
 CHG.oxImpMap=el=>{const I=O.im;if(!I)return;if(el.value==='')delete I.map[el.dataset.k];else I.map[el.dataset.k]=+el.value;I.req=rid();const m={};for(const[k,i]of Object.entries(I.map))m[k]=I.head[i];try{localStorage.setItem(IMK,JSON.stringify(m))}catch(e){}rerender()};
 CHG.oxImpBr=el=>{if(O.im){O.im.br=el.value;O.im.req=rid()}};
-CHG.oxImpAdd=el=>{if(O.im){O.im.add=el.checked;O.im.req=rid()}};
+CHG.oxImpAdd=el=>{if(O.im){O.im.add=el.checked;if(el.checked)O.im.skip=false;O.im.req=rid();rerender()}};
+CHG.oxImpSkip=el=>{if(O.im){O.im.skip=el.checked;if(el.checked)O.im.add=false;O.im.req=rid();rerender()}};
 ACT.oxImpX=()=>{O.im=null;rerender()};
 const cellN=v=>{if(typeof v==='number')return v;const s=String(v==null?'':v).replace(/[₪\s,]/g,'');if(s==='')return null;return /^-?\d+(\.\d+)?$/.test(s)?+s:NaN};
 function imRows(){const I=O.im,M=I.map,out=[];if(M.name==null||M.price==null)return I.rows.map((r,i)=>({n:i+2,o:{},err:'יש לבחור עמודות לשם ולמחיר'}));
@@ -384,9 +386,9 @@ function imRows(){const I=O.im,M=I.map,out=[];if(M.name==null||M.price==null)ret
   for(const k of['cat','sub']){const v=String(g(k)).trim();if(v)o[k]=v.slice(0,40)}if(o.sub&&!o.cat)e.push('תת־קטגוריה בלי קטגוריה');
   out.push({n:i+2,o,err:e.join(', ')})});return out}
 ACT.oxImpGo=async el=>{const I=O.im;if(!I)return;const R=imRows().filter(r=>!r.err),G=R.map(r=>r.o);if(!G.length)return;if(hasBr()&&!I.br&&(G.some(o=>o.qty)||!mgr()))return toast('בחר סניף');el.disabled=true;
- if(mgr()){try{await impSend('prod',G,R.map(r=>r.n),Object.assign({addQty:I.add},hasBr()?{br:I.br}:{}),el,I.req.slice(1,21));O.im=null;rerender();toast('הקובץ נשלח לשרת – אפשר לצאת מהאפליקציה. ההתקדמות מוצגת כאן')}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}return} /* 11.11.2026: מנהל – ייבוא ברקע בשרת (startImport). עובד – כמו קודם */
- let a=0,u=0,b=0;try{for(let k=0;k<G.length;k+=200){el.textContent='מייבא… '+Math.min(k+200,G.length)+'/'+G.length;const r=await fnCall('importProducts',{reqId:(I.req+'_'+(k/200)).slice(0,40),br:hasBr()?I.br:undefined,addQty:I.add,rows:G.slice(k,k+200)});a+=r.added||0;u+=r.updated||0;b+=(r.bad||[]).length}
-  O.im=null;toast(`יובא: ${a} חדשים, ${u} עודכנו${b?', '+b+' נדחו':''}`);await load(true);rerender()}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
+ if(mgr()){try{await impSend('prod',G,R.map(r=>r.n),Object.assign({addQty:!!I.add&&!I.skip},I.skip?{skipEx:true}:{},hasBr()?{br:I.br}:{}),el,I.req.slice(1,21));O.im=null;rerender();toast('הקובץ נשלח לשרת – אפשר לצאת מהאפליקציה. ההתקדמות מוצגת כאן')}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}return} /* 11.11.2026: מנהל – ייבוא ברקע בשרת (startImport). עובד – כמו קודם */
+ let a=0,u=0,b=0,sk=0;try{for(let k=0;k<G.length;k+=200){el.textContent='מייבא… '+Math.min(k+200,G.length)+'/'+G.length;const r=await fnCall('importProducts',{reqId:(I.req+'_'+(k/200)).slice(0,40),br:hasBr()?I.br:undefined,addQty:!!I.add&&!I.skip,skipEx:I.skip?true:undefined,rows:G.slice(k,k+200)});a+=r.added||0;u+=r.updated||0;sk+=r.same||0;b+=(r.bad||[]).length}
+  O.im=null;toast(`יובא: ${a} חדשים, ${u} עודכנו${sk?', '+sk+' דולגו (קיימים)':''}${b?', '+b+' נדחו':''}`);await load(true);rerender()}catch(e){el.disabled=false;el.textContent='נסה שוב';err(e)}};
 /* ---------- ייבוא ברקע (11.11.2026, שלב 3) ----------
    מנהל: הקובץ (אחרי התאמת העמודות והבדיקה במכשיר) נשלח לשרת ב-startImport, 200 שורות בקריאה, עם מזהה עבודה אחד. השרת מייבא לבד –
    אפשר לצאת מהאפליקציה. השורות לא נשמרות במכשיר בשום שלב (רק בזיכרון עד סוף השליחה). שליחה חוזרת של חלק (ניתוק) לא מכפילה (השרת מזהה).
@@ -413,7 +415,7 @@ async function impLoad(force){if(!mgr()||!bzF('orders')||IMP.busy||(!force&&IMP.
 function impRow(j){const c=j.cnt||{},tot=j.total||0,dn=(j.dn||0)+(j.fr||0),stale=j.st==='up'&&!impAct(j),end=j.st==='done'||j.st==='part',B=Array.isArray(j.bad)?j.bad:[],F=Array.isArray(j.fail)?j.fail:[];
  const stuck=impStuck(j),head=j.st==='done'?'הסתיים':j.st==='part'?'הסתיים – חלק לא יובא':stale?'השליחה לא הושלמה':stuck?'נתקע':j.st==='up'?'שולח לשרת…':'מייבא בשרת…';
  return `<div class="card" style="margin-bottom:8px"><b>ייבוא ${IKN[j.k]||''}: ${head}</b><p class="note" style="margin:4px 0">${dn} מתוך ${tot} שורות${tot?' ('+Math.round(dn*100/tot)+'%)':''} · ${tm(j.t)}</p>
- <p style="margin:4px 0">חדשים: <b>${c.c||0}</b> · עודכנו: <b>${c.u||0}</b>${j.k==='cust'?` · ללא שינוי: <b>${c.s||0}</b>`:''}${c.b?` · שגויות: <b>${c.b}</b>`:''}</p>
+ <p style="margin:4px 0">חדשים: <b>${c.c||0}</b> · עודכנו: <b>${c.u||0}</b>${j.k==='cust'?` · ללא שינוי: <b>${c.s||0}</b>`:c.s?` · דולגו (קיימים): <b>${c.s}</b>`:''}${c.b?` · שגויות: <b>${c.b}</b>`:''}</p>
  ${impAct(j)?'<p class="note" style="margin:4px 0">אפשר לצאת מהאפליקציה – הייבוא ממשיך בשרת.</p>':''}
  ${stale?`<p class="note" style="margin:4px 0">רק חלק מהקובץ הגיע לשרת (האפליקציה נסגרה או החיבור נותק בזמן השליחה). מה שהגיע – יובא. כדי להשלים, בחרו את הקובץ שוב: ${j.k==='cust'?'לקוחות קיימים לא יוכפלו':'מוצרים קיימים לא יוכפלו'+(j.addQty?', אבל הכמות של שורות שכבר יובאו תתווסף שוב':'')}.</p>`:''}
  ${B.length?`<details><summary class="note" style="min-height:44px;display:flex;align-items:center;cursor:pointer">שורות שגויות (${c.b>B.length?B.length+' מתוך '+c.b:B.length})</summary>${B.slice(0,50).map(b=>`<p class="note" style="margin:2px 0">שורה ${esc(String(b.n))}: ${esc(b.m||b.r||'')}</p>`).join('')}</details>`:''}

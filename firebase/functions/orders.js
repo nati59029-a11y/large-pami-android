@@ -1125,7 +1125,7 @@ async function saveCat(request) {
 async function importProducts(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['reqId', 'br', 'addQty', 'rows']);
+  onlyKeys(input, ['reqId', 'br', 'addQty', 'skipEx', 'rows']);
   return prodRows(w, input);
 }
 // הסניף של מנת ייבוא (אותו כלל לייבוא הישן ולייבוא ברקע – imports.js)
@@ -1143,6 +1143,7 @@ async function prodRows(w, input) {
   if (!Array.isArray(input.rows) || !input.rows.length || input.rows.length > MAX_IMPORT) throw bad('bad-rows', `שורות: 1 עד ${MAX_IMPORT}`);
   const br = prodBr(w, input.br, input.rows);
   const addQty = input.addQty === true;
+  const skipEx = input.skipEx === true; // 12.11.2026: מוצר שכבר קיים (לפי ברקוד/שם) – לא נוגעים בו בכלל
   const ok = []; const badRows = [];
   input.rows.forEach((r, i) => {
     try {
@@ -1164,7 +1165,7 @@ async function prodRows(w, input) {
   });
   const db = T.tdb();
   const mark = db.doc('ordcfg/req_' + reqId);
-  const res = { ok: true, dup: false, added: 0, updated: 0, bad: badRows };
+  const res = { ok: true, dup: false, added: 0, updated: 0, same: 0, bad: badRows };
   if (!ok.length) return res;
   await db.runTransaction(async (tx) => {
     const m = await tx.get(mark);
@@ -1188,6 +1189,7 @@ async function prodRows(w, input) {
       if (o.ct) ext.ct = o.ct;
       if (o.note) ext.note = o.note; // ריק בקובץ = ההערה הקיימת לא משתנה
       let id; let qty = 0;
+      if (ex && skipEx) { res.same++; continue; } // דילוג: בלי שם/מחיר/עלות/סיטונאי/כמות
       if (ex && ex.ref) {
         id = ex.id;
         const upd = Object.assign({ name: o.name, price: o.price }, o.barcode ? { barcode: o.barcode } : {}, ext);
@@ -1208,7 +1210,7 @@ async function prodRows(w, input) {
       if (o.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: o.cost, at: now, by: w.uid });
       if (qty) tx.set(stockRef(db), { prod: id, name: o.name, br, delta: qty, why: 'in', note: 'ייבוא', by: w.uid, at: now });
     }
-    tx.set(mark, { t: now, by: w.uid, k: 'importProducts', res: { added: res.added, updated: res.updated } });
+    tx.set(mark, { t: now, by: w.uid, k: 'importProducts', res: { added: res.added, updated: res.updated, same: res.same } });
   });
   return res;
 }
