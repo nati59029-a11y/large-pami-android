@@ -339,14 +339,25 @@ async function secPrefs(request) {
 // secChatLoad({ limit? }) – השיחה של המנהל עצמו, דרך השרת (גם למנהל־על שהוא מנהל של העסק – החוקים חוסמים אותו מקריאה ישירה)
 async function secChatLoad(request) {
   const input = inputObject(request);
-  const { who, db } = await gate(request, { consent: true });
+  const { who, db, sensOn } = await gate(request, { consent: true });
   const lim = input.limit === undefined ? 50 : input.limit;
   if (!Number.isInteger(lim) || lim < 1 || lim > 200) throw bad('bad-limit', 'מספר הודעות: 1 עד 200');
   const s = await db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc').limit(lim).get();
-  return { ok: true, msgs: s.docs.map((d) => msgOut(d.id, d.data())).reverse() };
+  return { ok: true, msgs: s.docs.map((d) => msgOut(d.id, d.data(), msgText(d, who, sensOn))).reverse() };
 }
-function msgOut(id, x) {
-  const o = { id, t: x.t || null, role: x.role === 'a' ? 'a' : 'u', text: typeof x.text === 'string' ? x.text : '' };
+// טקסט של הודעה: הודעה עם מידע רגיש – מפוענחת רק כש-sensOn (מתג עסקי + הרשאה אישית); אחרת hidden (ברירת מחדל: הנוסח הכללי; null = לא נשלחת)
+function msgText(d, who, sensOn, hidden) {
+  const x = d.data ? d.data() : d;
+  if (x.sens !== true) return typeof x.text === 'string' ? x.text : '';
+  const hid = hidden === undefined ? SENS.HIDDEN : hidden;
+  if (!sensOn) return hid;
+  const rel = d.ref.path.replace(/^b\/[^/]+\//, '');
+  const o = SENS.open(SENS.SEC_SENS_KEY.value(), who.bizId, rel, x.box);
+  return o && typeof o.text === 'string' ? o.text : hid;
+}
+function msgOut(id, x, text) {
+  const o = { id, t: x.t || null, role: x.role === 'a' ? 'a' : 'u', text: text !== undefined ? text : typeof x.text === 'string' ? x.text : '' };
+  if (x.sens === true) o.sens = true;
   if (Array.isArray(x.src)) o.src = x.src.slice(0, 12);
   for (const k of ['asOf', 'mode', 'deep', 'stale', 'ideas', 'th', 'cards']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
   return o;
@@ -381,6 +392,7 @@ async function secChat(request) {
   const pol = ST.policyOf(text);
   const logs = [];
   const results = [];
+  let sensUsed = false; // תיקון סבב 1: התור הזה הפעיל את getSensitiveInfo
   const cards = []; // שלב 3: כרטיסי אישור (עובדה / אירוע) שהכלים propose* יצרו
   let reply = null, mode = 'ok', mt = null, usage = { in: 0, out: 0 }, sent = 0, denied = [], offered = [];
   let bank = null, bankCond = [];
@@ -409,16 +421,19 @@ async function secChat(request) {
     const ctx = { now, fin, finFrom, mirrorAt, finOff: !cfg.mirror, pay, threshold: cfg.cfTh, nr: cfg.nr, uid: who.uid, we: me.we === 'accept' ? 'accept' : 'warn', cards };
     // מידע רגיש (10.8): נמסר למודל רק דרך הכלי, רק כשהוא הוצע (מתג עסקי + הרשאה אישית), ורק הרשומות של העובד שנשאל עליו (מזעור, עד 5)
     if (sensOn && offered.includes('getSensitiveInfo')) ctx.sensRead = async (emp) => {
-      const all = (await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId)).filter((x) => !x.bad && SENS.sameEmp(x.emp, emp));
-      const items = all.slice(0, 5);
-      logs.push(['sensTool', 'n=' + items.length, items.map((x) => x.id).join(',').slice(0, 120)]);
+      const pk = SENS.pickEmp(await SENS.readAll(db, SENS.SEC_SENS_KEY.value(), who.bizId), emp);
+      const items = pk.items;
+      logs.push(['sensTool', pk.ambiguous ? 'ambiguous' : 'n=' + items.length, items.map((x) => x.id).join(',').slice(0, 120)]);
+      sensUsed = true; // תיקון סבב 1: כל התור (שאלה ותשובה) נשמר מוצפן ומסומן
+      if (pk.ambiguous) return { ambiguous: true, names: pk.names, note: 'יש כמה עובדים בשם הזה. שאלי את המנהל לאיזה מהם הכוונה (שם מלא). לא נמסר שום מידע.' };
       if (!items.length) return { employee: SENS.clean(emp, SENS.NAME_MAX), count: 0, note: 'אין מידע רגיש שמור על העובד הזה.' };
       return { employee: items[0].emp, count: items.length, items: items.map((x) => ({ text: x.text, saved: SK.dayOf(x.t || now) })), _at: items.reduce((m, x) => Math.max(m, x.t || 0), 0) };
     };
     let turns;
     try {
       const hs = await db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc').limit(HIST).get();
-      turns = hs.docs.reverse().map((d) => ({ role: d.get('role') === 'a' ? 'a' : 'u', text: String(d.get('text') || '').slice(0, 1500) })).filter((x) => x.text);
+      // תיקון סבב 1: הודעה שמבוססת על מידע רגיש (sens) – נשלחת למודל רק כשהמתג וההרשאה פעילים (מפוענחת), אחרת לא נשלחת בכלל
+      turns = hs.docs.reverse().map((d) => ({ role: d.get('role') === 'a' ? 'a' : 'u', text: String(msgText(d, who, sensOn, null) || '').slice(0, 1500) })).filter((x) => x.text);
     } catch (e) { await settle(db, who.uid, mt, -mt.reserved, deep).catch(() => {}); throw e; } // לא משאירים את השמירה מראש במונה
     turns.push({ role: 'u', text });
     const finNote = brLimited ? 'למנהל הזה יש הגבלת סניפים, ולכן אין לו בצ\'אט נתוני כספים ונתוני העסק. אם שואלים על כספים, משימות, קופה או הזמנות – עני בנימוס: "' + ST.TXT.brLimited + '"' : fin ? (finFrom === 'device' ? 'מהמכשיר של המנהל, נכון ל-' + ST.fmtAt(fin.at) : 'מהמראה בענן, נכון ל-' + ST.fmtAt(mirrorAt) + (stale ? ' (ישן מ-3 ימים – אמרי זאת)' : '')) : (!cfg.mirror ? 'המראה כבוי ואין נתונים מהמכשיר' : 'אין נתוני כספים');
@@ -441,7 +456,7 @@ async function secChat(request) {
           const tgt = data._tgt, at0 = data._at; delete data._tgt; delete data._at;
           results.push({ name: c.name, data, src: ST.sourceOf(c.name, c.args, ctx, at0) });
           res.push({ name: c.name, data });
-          logs.push(['tool', c.name, tgt, argNote(c.args)]);
+          logs.push(['tool', c.name, tgt, argNote(c.args, c.name)]);
         }
         if (!refused) turns.push({ role: 'res', results: res });
       }
@@ -479,8 +494,13 @@ async function secChat(request) {
   const b = db.batch();
   const col = db.collection(`sec_chat/${who.uid}/m`);
   const ua = col.doc(), aa = col.doc();
-  b.set(ua, { t: now, role: 'u', text, deep });
   const am = { t: now + 1, role: 'a', text: reply, mode, deep, src: srcs.map((x) => ({ k: x.k, l: x.l, at: x.at, s: x.s })) };
+  if (sensUsed) {
+    // תיקון סבב 1: תור שהשתמש במידע רגיש – שאלה ותשובה נשמרות מוצפנות (sec-sens, AAD = נתיב ההודעה), בלי טקסט קריא במסד ובגיבוי
+    const key = SENS.SEC_SENS_KEY.value();
+    b.set(ua, { t: now, role: 'u', text: '', sens: true, box: SENS.seal(key, who.bizId, ua.path.replace(/^b\/[^/]+\//, ''), { text }), deep });
+    am.sealed = { text: '', sens: true, box: SENS.seal(key, who.bizId, aa.path.replace(/^b\/[^/]+\//, ''), { text: reply }) };
+  } else b.set(ua, { t: now, role: 'u', text, deep });
   if (asOf && srcs.some((x) => x.at === asOf)) am.asOf = asOf;
   if (stale) am.stale = true;
   if (ideas.length) am.ideas = ideas;
@@ -490,12 +510,13 @@ async function secChat(request) {
     am.src = [{ k: 'bank', l: 'בנק התשובות – "' + String(bank.q).slice(0, 60) + '"', at: bank.rule.upd || bank.rule.t || now, s: 'bank' }];
     b.set(db.doc('sec_usage/' + monthKey(now)), { bank: FieldValue.increment(1), upd: now }, { merge: true }); // המונה שמוכיח "בלי AI"
   }
-  b.set(aa, am);
+  { const sealed = am.sealed; delete am.sealed; b.set(aa, sealed ? Object.assign({}, am, sealed) : am); } // התשובה עכשיו (למנהל עם הרשאה) – בטקסט; במסד – מוצפנת
   for (const l of logs) b.set(db.collection('sec_log').doc(), logData(who.uid, l[0] === 'tool' || l[0] === 'toolDenied' || l[0] === 'sensTool' ? 'sec' : 'auto', l[0], { tgt: l[2], note: [l[1], l[3]].filter(Boolean).join(' ') }));
   await b.commit();
   return { ok: true, id: aa.id, reply, mode, deep, src: am.src, cards: am.cards || [], nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied, brLimited };
 }
-function argNote(a) {
+function argNote(a, name) {
+  if (name === 'getSensitiveInfo') return ''; // תיקון סבב 1: בלי שם העובד או טקסט מהמודל ביומן – רק שם הכלי
   if (!a || typeof a !== 'object') return '';
   // בלי תוכן רגיש: רק שמות שדות וערכים קצרים (חודש, טווח, שם ספק/עובד)
   return Object.entries(a).slice(0, 4).map(([k, v]) => String(k).slice(0, 16) + '=' + String(v).replace(CTRL, '').slice(0, 30)).join(',');
@@ -630,7 +651,8 @@ async function secAdminReadChat(request) {
   await db.collection('sec_log').doc().set(logData(who.uid, 'sa', 'readChat', { tgt: uid }));
   await auditRef(who.bizId).set({ by: who.uid, t: Date.now(), act: 'secAdminReadChat', note: uid });
   const s = await db.collection(`sec_chat/${uid}/m`).orderBy('t', 'desc').limit(lim).get();
-  const msgs = s.docs.map((d) => ({ id: d.id, t: d.get('t') || null, role: d.get('role') === 'a' ? 'a' : 'u', text: typeof d.get('text') === 'string' ? d.get('text') : '' })).reverse();
+  // תיקון סבב 1: הודעות עם מידע רגיש לא נחשפות למנהל־על (אין לו הרשאת מידע רגיש בעסק) – רק נוסח כללי
+  const msgs = s.docs.map((d) => ({ id: d.id, t: d.get('t') || null, role: d.get('role') === 'a' ? 'a' : 'u', text: d.get('sens') === true ? SENS.HIDDEN : typeof d.get('text') === 'string' ? d.get('text') : '' })).reverse();
   return { ok: true, uid, msgs, readOnly: true };
 }
 
@@ -800,7 +822,7 @@ exports.secConsent = onCall(wrap('secConsent', secConsent));
 exports.secSetup = onCall(wrap('secSetup', secSetup));
 // שלב 2. secChat: מפתח ה-AI מהכספת (אותו סוד של הזיהוי החכם – 9.3), זמן מספיק לכמה סבבי כלים
 exports.secChat = onCall({ secrets: [AI.GEMINI_API_KEY, SENS.SEC_SENS_KEY], timeoutSeconds: 180, memory: '512MiB' }, wrap('secChat', secChat));
-exports.secChatLoad = onCall(wrap('secChatLoad', secChatLoad));
+exports.secChatLoad = onCall({ secrets: [SENS.SEC_SENS_KEY] }, wrap('secChatLoad', secChatLoad));
 exports.secMirrorPut = onCall(wrap('secMirrorPut', secMirrorPut));
 exports.secPrefs = onCall(wrap('secPrefs', secPrefs));
 exports.secAdminGet = onCall(wrap('secAdminGet', secAdminGet));

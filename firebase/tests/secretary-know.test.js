@@ -291,6 +291,73 @@ describe('מידע רגיש (10.8, 63): מוצפן, רק עם הרשאה, ונמ
     const lg = (await coll(`b/${A}/sec_log`)).filter((x) => x.act === 'sensTool');
     assert.equal(lg.length, 1); assert.ok(!JSON.stringify(lg).includes('דנה'));
   });
+  it('תיקון סבב 1: תור שהשתמש במידע רגיש – מוצפן במסד ובגיבוי; אחרי כיבוי המתג / ביטול ההרשאה לא נשלח למודל בהיסטוריה ולא מוצג; מנהל־על רואה רק נוסח כללי; יומן בלי שם ובלי טקסט', async () => {
+    await seed();
+    await call('secSens', M1, { op: 'add', emp: 'דנה לוי', text: SECRET });
+    GM.state.sec = model([{ name: 'getSensitiveInfo', args: { employee: 'דנה לוי' } }], (R) => 'לפי המידע שנשמר: ' + R.getSensitiveInfo.items[0].text);
+    const r1 = await call('secChat', M1, { text: 'למה דנה לוי מאחרת?' });
+    assert.match(r1.result.reply, /חופשת לידה/, 'למנהל עם הרשאה – התשובה עכשיו');
+    const raw = await coll(`b/${A}/sec_chat/${M1}/m`);
+    assert.equal(raw.length, 2);
+    assert.ok(raw.every((x) => x.sens === true && x.text === '' && x.box && x.box.ct));
+    assert.ok(!JSON.stringify(raw).includes('חופשת לידה') && !JSON.stringify(raw).includes('דנה'), 'טקסט קריא ב-sec_chat');
+    let ld = await call('secChatLoad', M1);
+    assert.ok(ld.result.msgs.some((m) => /חופשת לידה/.test(m.text)), 'עם הרשאה – מוצג (מפוענח)');
+    // עם הרשאה – ההיסטוריה נשלחת למודל
+    GM.reset(); GM.state.sec = () => ({ text: 'בסדר' });
+    await call('secChat', M1, { text: 'תודה' });
+    assert.ok(LEAK(), 'בקרה: עם הרשאה ההיסטוריה המפוענחת נשלחת');
+    for (const [label, upd] of [['מתג עסקי כבוי', { emp: false }], ['הרשאה בוטלה', { emp: true, ['sens.' + M1]: false }]]) {
+      await prep((d) => d.doc(`b/${A}/sec_cfg/main`).update(upd));
+      GM.reset(); GM.state.sec = () => ({ text: 'בסדר' });
+      for (const deep of [false, true]) {
+        const r = await call('secChat', M1, { text: 'מה שלום הצוות?', deep });
+        assert.equal(r.status, 'OK', r.text);
+      }
+      assert.ok(!LEAK(), label + ': מידע רגיש בהיסטוריה שנשלחה למודל');
+      assert.ok(secReqs().every((q) => !declNames(q).includes('getSensitiveInfo')), label + ': הכלי הוצע');
+      ld = await call('secChatLoad', M1);
+      assert.ok(!JSON.stringify(ld.result).includes('חופשת לידה'), label + ': מוצג בטעינת השיחה');
+      assert.ok(ld.result.msgs.some((m) => m.text === SENS.HIDDEN));
+    }
+    const ad = await call('secAdminReadChat', SUPER, { bizId: A, uid: M1 });
+    assert.equal(ad.status, 'OK', ad.text);
+    assert.ok(!JSON.stringify(ad.result).includes('חופשת לידה') && ad.result.msgs.some((m) => m.text === SENS.HIDDEN), 'מנהל־על');
+    // יומן: אין שם עובד ואין טקסט רגיש בשום שורה (גם לא בשורת tool)
+    const lg = JSON.stringify(await coll(`b/${A}/sec_log`));
+    for (const w of ['דנה', 'לוי', 'חופשת לידה', 'בהיריון']) assert.ok(!lg.includes(w), 'ב-sec_log: ' + w);
+    // גיבוי: אין טקסט קריא
+    const zlib = require('node:zlib');
+    const bk = await SEC.runSecBackup({ bucket: H.PROJECT_ID, now: Date.now(), bizzes: [{ bizId: A, dataRoot: 'b' }] });
+    const f = bk.files.find((x) => x.bizId === A);
+    assert.ok(f && f.docs > 0, JSON.stringify(bk.errors));
+    const st = require(require.resolve('firebase-admin/storage', { paths: [path.join(H.ROOT, 'functions')] })).getStorage().bucket(H.PROJECT_ID);
+    const [buf] = await st.file(f.path).download();
+    const js = zlib.gunzipSync(buf).toString('utf8');
+    for (const w of ['דנה', 'חופשת לידה', 'בהיריון']) assert.ok(!js.includes(w), 'בגיבוי: ' + w);
+    await st.file(f.path).delete().catch(() => {});
+  });
+  it('תיקון סבב 1: שם חלקי ("ה", "דנ") לא מתאים; כמה עובדים באותו שם – רק רשימת שמות לבירור, בלי תוכן', async () => {
+    assert.equal(SENS.sameEmp('דנה לוי', 'ה'), false); assert.equal(SENS.sameEmp('משה כהן', 'ה'), false);
+    assert.equal(SENS.sameEmp('דנה לוי', 'דנ'), false);
+    assert.equal(SENS.sameEmp('דנה לוי', 'דנה'), true); assert.equal(SENS.sameEmp('דנה לוי', 'לוי'), true); assert.equal(SENS.sameEmp('דנה לוי', 'דנה לוי'), true);
+    assert.equal(SENS.sameEmp('דנה', 'דנה לוי'), false);
+    await seed();
+    await call('secSens', M1, { op: 'add', emp: 'דנה לוי', text: SECRET });
+    await call('secSens', M1, { op: 'add', emp: 'דנה כהן', text: 'דנה כהן מטפלת באמה החולה' });
+    await call('secSens', M1, { op: 'add', emp: 'משה כהן', text: 'משה מטפל באמו החולה' });
+    for (const [q, exp] of [['ה', 0], ['דנה', 'amb'], ['כהן', 'amb']]) {
+      GM.reset(); GM.state.sec = model([{ name: 'getSensitiveInfo', args: { employee: q } }], (R) => 'בדיקה ' + (R.getSensitiveInfo.ambiguous ? 'לאיזו?' : 'אין'));
+      const r = await call('secChat', M1, { text: 'מה המצב עם העובד?' });
+      assert.equal(r.status, 'OK', r.text);
+      const R = responses(secReqs().slice(-1)[0].body).getSensitiveInfo;
+      if (exp === 'amb') { assert.equal(R.ambiguous, true, q); assert.ok(R.names.length >= 2); } else assert.equal(R.count, 0, q);
+      assert.ok(!LEAK() && !allBodies().includes('באמה החולה'), 'תוכן נמסר ל-' + q);
+    }
+    GM.reset(); GM.state.sec = model([{ name: 'getSensitiveInfo', args: { employee: 'דנה כהן' } }], () => 'ok');
+    await call('secChat', M1, { text: 'מה עם דנה כהן?' });
+    assert.ok(allBodies().includes('באמה החולה') && !LEAK() && !allBodies().includes('באמו החולה'), 'שם מלא – רק העובדת הזו');
+  });
   it('מנהל־על: מתג הרשאה אישי למידע רגיש (secAdminSetCfg / secAdminGet); מנהל רגיל לא יכול לשנות', async () => {
     await seed();
     const r = await call('secAdminSetCfg', SUPER, { bizId: A, sens: { [M2]: true } });
