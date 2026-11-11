@@ -8,6 +8,7 @@
 // הלוגו נקרא בשרת (Admin) רק מהנתיב הקבוע b/{bizId}/brand/logo – כללי Storage לא נפתחים.
 
 const { onRequest } = require('firebase-functions/v2/https');
+const { LEGACY_REGION } = require('./lib/region'); // נשארת באזור הישן בלבד (כתובת קבועה מחוץ לקוד)
 const logger = require('firebase-functions/logger');
 const { getStorage } = require('firebase-admin/storage');
 const T = require('./lib/tenant');
@@ -73,7 +74,7 @@ async function handle(req, res, now) {
   return res.status(200).json(c.v);
 }
 
-exports.publicBrand = onRequest({ maxInstances: 2, timeoutSeconds: 20, memory: '256MiB' }, async (req, res) => {
+exports.publicBrand = onRequest({ region: LEGACY_REGION, maxInstances: 2, timeoutSeconds: 20, memory: '256MiB' }, async (req, res) => {
   try { await handle(req, res, Date.now()); } catch (e) {
     logger.error('publicBrand failed', { reason: 'internal', name: e && e.name });
     if (!res.headersSent) res.status(500).json({ error: 'internal' });

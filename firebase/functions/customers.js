@@ -15,7 +15,8 @@
 // 2026-11-09 (החלטת המשתמש 2): עובד פעיל עם ord רשאי לפתוח לקוח עסקי (wholesale:true בלקוח שנוצר באותה קריאה).
 // הפיכת לקוח קיים רגיל לעסקי, וביטול סימון – מנהל בלבד (נבדק כאן, בטרנזקציה).
 
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall } = require('./lib/region'); // שני אזורים (europe-west1 + us-central1) – lib/region.js
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const T = require('./lib/tenant');

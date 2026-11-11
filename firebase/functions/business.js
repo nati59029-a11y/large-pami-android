@@ -11,7 +11,8 @@
 //   ("קבע סיסמה", accounts:sendOobCode עם PASSWORD_RESET). רק מי שמקבל את המייל יכול לקבוע סיסמה ולהיכנס.
 
 const crypto = require('node:crypto');
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { HttpsError } = require('firebase-functions/v2/https');
+const { onCall, LEGACY_REGION } = require('./lib/region'); // onCall בשני אזורים (europe-west1 + us-central1) – lib/region.js
 const { onDocumentWritten } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
@@ -666,7 +667,7 @@ async function syncLegacyMember(uid, attempt) {
   }
   return active ? 'active' : 'inactive';
 }
-const syncTrigger = (coll) => onDocumentWritten({ document: coll + '/{uid}', maxInstances: 2 }, async (event) => {
+const syncTrigger = (coll) => onDocumentWritten({ region: LEGACY_REGION, document: coll + '/{uid}', maxInstances: 2 }, async (event) => {
   try { await syncLegacyMember(event.params.uid); } catch (e) { logger.error('business: legacy sync failed', { reason: 'internal', name: e && e.name }); throw e; }
 });
 exports.syncLegacyAdmin = syncTrigger('admins');
