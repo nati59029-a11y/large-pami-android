@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'secBackupDaily', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'runImportChunk', 'secBackupDaily', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -51,6 +51,18 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.ok(ep(ex.syncLegacyAdmin).eventTrigger && ep(ex.syncLegacyStaff).eventTrigger, 'טריגרים של Firestore');
   });
 
+  it('ייבוא ברקע (11.11.2026): runImportChunk – טריגר Firestore חדש, רק europe-west1, עם retry ומגבלת מקביליות; startImport – onCall בשני האזורים', () => {
+    const e = ep(ex.runImportChunk);
+    assert.deepEqual(regions(ex.runImportChunk), ['europe-west1']);
+    assert.ok(e.eventTrigger && /document\.v1\.created$/.test(e.eventTrigger.eventType), 'טריגר יצירת מסמך');
+    assert.equal(e.eventTrigger.eventFilterPathPatterns.document, 'impQ/{qid}/c/{cid}');
+    assert.equal(e.eventTrigger.retry, true);
+    assert.ok(e.maxInstances >= 1 && e.maxInstances <= 3, 'maxInstances נמוך');
+    assert.ok(e.timeoutSeconds > 60 && e.timeoutSeconds <= 540);
+    assert.ok(ep(ex.startImport).callableTrigger);
+    assert.deepEqual(regions(ex.startImport), BOTH);
+  });
+
   it('אין פונקציה שאינה onCall ביותר מאזור אחד', () => {
     const bad = entries.filter(([, f]) => !ep(f).callableTrigger && regions(f).length !== 1).map(([n]) => n);
     assert.deepEqual(bad, []);
@@ -69,5 +81,39 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.deepEqual([...list].sort(), callable);
     for (const n of SINGLE) assert.ok(!list.includes(n), n + ' לא אמורה להיות ברשימת הפרסום הכפול');
     for (const n of list) assert.match(n, /^[A-Za-z][A-Za-z0-9_]{0,62}$/); // אותו תנאי כמו ב-deploy-functions.yml
+  });
+});
+
+// האפליקציה (המיזוג השני): פונה לאירופה, מכתובת אחת. us-central1 לא מופיע בקוד האפליקציה בכלל
+// (publicBrand נקראת דרך hosting – /api/publicBrand – ו-tzintukJoin לא נקראת מהאפליקציה). vendor/ = ספריית Firebase הרשמית, לא נבדקת.
+describe('אזור הפונקציות באפליקציה', () => {
+  const fs = require('node:fs');
+  const WWW = path.join(__dirname, '..', '..', 'app-source', 'www');
+  const read = (f) => fs.readFileSync(path.join(WWW, f), 'utf8');
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'vendor' ? [] : walk(path.join(d, e.name))) : [path.join(d, e.name)]));
+
+  it("index.html: FN_REGION='europe-west1', ו-FNB בונה את הכתובת ממנו", () => {
+    const h = read('index.html');
+    assert.equal((h.match(/const FN_REGION='([^']+)'/) || [])[1], 'europe-west1');
+    assert.ok(h.includes('const FNB=()=>EMU?`http://${EMU}:5001/${FB.projectId}/${FN_REGION}`:`https://${FN_REGION}-${FB.projectId}.cloudfunctions.net`;'), 'FNB השתנה');
+  });
+
+  it('orders/backend.js: אותו אזור; api.js ו-trial.js משתמשים בו', () => {
+    assert.equal((read('orders/backend.js').match(/export const FN_REGION = '([^']+)'/) || [])[1], 'europe-west1');
+    for (const f of ['orders/api.js', 'orders/trial.js']) {
+      const s = read(f);
+      assert.ok(s.includes("import { FN_REGION } from './backend.js';"), f);
+      assert.ok(/getFunctions\(app, FN_REGION\)/.test(s), f);
+    }
+  });
+
+  it('yemot-promo.js ו-yemot-preview.js פונים דרך FNB()', () => {
+    assert.ok(read('yemot-promo.js').includes('const YM_BASE=()=>FNB();'));
+    assert.ok(read('yemot-preview.js').includes('const base=()=>FNB();'));
+  });
+
+  it('אין us-central1 בשום קובץ של האפליקציה (חוץ מ-vendor)', () => {
+    const hits = walk(WWW).filter((f) => /\.(html|js|json|css)$/.test(f) && fs.readFileSync(f, 'utf8').includes('us-central1')).map((f) => path.relative(WWW, f));
+    assert.deepEqual(hits, []);
   });
 });

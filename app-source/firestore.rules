@@ -763,6 +763,12 @@ service cloud.firestore {
       allow read: if rMgr();
       allow create, update, delete: if false;
     }
+    // ייבוא ברקע (2026-11-11, functions/imports.js): מסמך העבודה – מונים בלבד, מנהל קורא; כתיבה – רק השרת.
+    // החלקים המוצפנים (impQ/**) ותוצאות השורות – בלי שום כלל, כלומר סגורים לכולם (הכלל האחרון).
+    match /impJobs/{id} {
+      allow read: if rMgr();
+      allow create, update, delete: if false;
+    }
 
     // ----- המזכירה העסקית (שלב 1, 2026-11-11; אפיון 9.4, 2.3, 10.6). כל כתיבה – רק השרת (functions/secretary.js). -----
     // משתמש במזכירה = מנהל אמיתי של העסק (admins/{uid}, לא מנהל־על בתוקף תפקידו) + התוספת פעילה + עסק פעיל +
@@ -1355,6 +1361,11 @@ service cloud.firestore {
       }
       // fb/ord-card: יומן הכרטיסים – מנהל העסק בלבד
       match /cardLog/{id} {
+        allow read: if feat('orders') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // ייבוא ברקע: מסמך העבודה של העסק – מנהל העסק בלבד
+      match /impJobs/{id} {
         allow read: if feat('orders') && bMgr();
         allow create, update, delete: if false;
       }

@@ -7,6 +7,7 @@ import { initializeApp } from './vendor/firebase-app.js';
 import { getAuth, connectAuthEmulator, signInWithEmailAndPassword } from './vendor/firebase-auth.js';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc } from './vendor/firebase-firestore-lite.js';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from './vendor/firebase-functions.js';
+import { FN_REGION } from './backend.js';
 
 const out = document.getElementById('out');
 const log = (m) => { out.textContent += '\n' + m; };
@@ -24,7 +25,7 @@ if (!EMU) {
   connectAuthEmulator(auth, `http://${host}:${q.get('auth') || 9099}`, { disableWarnings: true });
   const db = getFirestore(app);
   connectFirestoreEmulator(db, host, Number(q.get('fs') || 8080));
-  const fns = getFunctions(app, 'us-central1');
+  const fns = getFunctions(app, FN_REGION);
   connectFunctionsEmulator(fns, host, Number(q.get('fn') || 5001));
   const $ = (id) => document.getElementById(id);
   const fail = (e) => log('שגיאה: ' + (e && e.code ? e.code + ' – ' : '') + (e && e.message ? e.message : e));
