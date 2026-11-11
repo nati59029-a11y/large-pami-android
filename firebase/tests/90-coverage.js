@@ -126,7 +126,7 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     const rootMatches = [...rootPart.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
     const colls = rootMatches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
     assert.ok(/match \/b\/\{bizId\} \{/.test(t), 'בלוק העסקים חסר');
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'm', 'mq', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'prod', 'sec_cal', 'sec_cfg', 'sec_chat', 'sec_draft', 'sec_facts', 'sec_facts_sensitive', 'sec_in', 'sec_inv', 'sec_log', 'sec_mirror', 'sec_rep', 'sec_rules', 'sec_usage', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'm', 'mq', 'n', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'prod', 'sec_cal', 'sec_cfg', 'sec_chat', 'sec_draft', 'sec_facts', 'sec_facts_sensitive', 'sec_in', 'sec_inv', 'sec_log', 'sec_mirror', 'sec_note', 'sec_rep', 'sec_rules', 'sec_usage', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/p\/\{pid\} \{/, 'p (תמונות משימה) חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/supinv\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך supinv');
@@ -136,6 +136,7 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     assert.match(t, /match \/deposits\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך deposits');
     // המזכירה (2026-11-11): m מקונן בתוך sec_chat, p בתוך sec_inv
     assert.match(t, /match \/sec_chat\/\{uid\} \{\s*allow read, create, update, delete: if false;\s*match \/m\/\{id\} \{/, 'm חייב להיות מקונן בתוך sec_chat');
+    assert.match(t, /match \/sec_note\/\{uid\} \{\s*allow read, create, update, delete: if false;\s*match \/n\/\{id\} \{/, 'n חייב להיות מקונן בתוך sec_note (המזכירה שלב 4)');
     assert.match(t, /match \/sec_inv\/\{id\} \{[^}]*\}?[\s\S]{0,200}match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך sec_inv');
   });
 

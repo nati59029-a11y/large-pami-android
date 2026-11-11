@@ -32,14 +32,14 @@ const closingData = (drawer, oTot) => JSON.stringify({ v: 1, f: { drawer: String
 const finOf = (o) => JSON.stringify(Object.assign({ v: 1, at: IL('2026-11-11T20:00'), months: {}, open: [], sups: [], crs: [], late: { sum: 0, gross: 0, n: 0 }, chk: [] }, o));
 
 async function seed(o) {
-  const opt = Object.assign({ cfg: {}, featA: true, nt: {}, consent: [M1, M2, M3] }, o);
+  const opt = Object.assign({ cfg: {}, featA: true, featB: false, nt: {}, consent: [M1, M2, M3] }, o);
   await env.clearFirestore();
   const ver = SEC.CONSENT_VER;
   await prep(async (d) => {
     const b = d.batch();
     b.set(d.doc('superadmins/' + SUPER), {});
     b.set(d.doc('b/' + A), { name: A, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: { tasks: true, secretary: opt.featA } });
-    b.set(d.doc('b/' + B), { name: B, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: { tasks: true, secretary: false } });
+    b.set(d.doc('b/' + B), { name: B, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: SUPER, features: { tasks: true, secretary: opt.featB } });
     b.set(d.doc(`b/${A}/admins/${M1}`), { email: 'm1@x.invalid' });
     b.set(d.doc(`b/${A}/staff/${M1}`), { name: 'מנהל 1', role: 'manager', active: true, pushTokens: ['tokM1_' + 'a'.repeat(30)] });
     b.set(d.doc(`b/${A}/admins/${M2}`), { email: 'm2@x.invalid' }); // מנהל בלי רשומת עובד
@@ -397,5 +397,146 @@ describe('שמירת היסטוריה (9.5, 91–95): secDaily, מחיקה יז�
     assert.equal((await call('secHistory', M1, { op: 'del', token: a.result.token, sure: true })).reason, 'bad-confirm', 'חד־פעמי');
     // אין מחיקה מהאפליקציה ישירות
     await assertFails(db(M1).doc(`b/${A}/sec_chat/${M2}/m/old2`).delete());
+  });
+});
+
+// ---------------------------------------------------------------------------------
+describe('תיקון סבב 1', () => {
+  const finSet = (biz, data) => prep((d) => d.doc(`b/${biz}/sec_mirror/fin`).set({ v: 1, data, at: IL('2026-11-11T20:00') }));
+  it('ליקוי 2: תזכורת חשבונית/צ\'ק לא נסגרת כשאין מראה (חסר/פגום) או כשעבר חלון הזמן – רק כשהפריט באמת נעלם מהמראה', async () => {
+    await seed({ nt: { [M1]: { rt: ALL_RT } } });
+    await bizA();
+    const full = finOf({ open: [['ספק הקמח', '77', '2026-11-01', '2026-11-15', 500, 450]], chk: [['2026-11-16', 'בעל הבית', -8000]] });
+    await finSet(A, full);
+    await run('2026-11-12T08:30');
+    const st = async () => { const L = await notes(M1); return [byKey(L, /^invDue:pre:/)[0].st, byKey(L, /^chk:/)[0].st]; };
+    assert.deepEqual(await st(), ['open', 'open']);
+    await prep((d) => d.doc(`b/${A}/sec_mirror/fin`).delete());
+    await run('2026-11-15T08:10');
+    assert.deepEqual(await st(), ['open', 'open'], 'מראה חסר – לא נסגרות');
+    await finSet(A, '{not json');
+    await run('2026-11-16T08:10');
+    assert.deepEqual(await st(), ['open', 'open'], 'מראה פגום – לא נסגרות');
+    await prep((d) => d.doc(`b/${A}/sec_cfg/main`).update({ mirror: false }));
+    await run('2026-11-17T08:10');
+    assert.deepEqual(await st(), ['open', 'open'], 'מראה כבוי – לא נסגרות');
+    await prep((d) => d.doc(`b/${A}/sec_cfg/main`).update({ mirror: true }));
+    await finSet(A, full);
+    await run('2026-11-18T08:10');
+    assert.deepEqual(await st(), ['open', 'open'], 'חלון הזמן עבר אבל החשבונית והצ\'ק עדיין במראה – לא נסגרות');
+    await finSet(A, finOf({ open: [], chk: [] }));
+    await run('2026-11-19T08:10');
+    assert.deepEqual(await st(), ['gone', 'gone'], 'נעלמו ממראה תקין – נסגרות');
+  });
+
+  it('ליקוי 3: הדוח החודשי ביום שהמנהל קבע – שבת → יום העסקים הבא (גם בחודש הבא), 31 בחודש של 30 ימים → היום האחרון, חג → "נדחה בגלל חג"; ברירת מחדל – יום העסקים הראשון', async () => {
+    await seed();
+    await bizA();
+    await finSet(A, finOf({ months: { '2026-09': { inc: 100, exp: 50, own: 0, cats: [] }, '2026-10': { inc: 200, exp: 90, own: 0, cats: [] } } }));
+    assert.equal((await call('secPrefs', M1, { op: 'notify', nt: { md: 32 } })).reason, 'bad-input');
+    assert.equal((await call('secPrefs', M1, { op: 'notify', nt: { md: 31, mh: 8 } })).status, 'OK');
+    assert.equal((await call('secState', M1)).result.nt.md, 31);
+    await run('2026-10-30T09:00'); // שישי – לא
+    assert.equal(await get(`b/${A}/sec_rep/m_${M1}_2026-10`), null);
+    await run('2026-11-01T08:10'); // 31.10.2026 = שבת → ראשון 1.11
+    const oct = await get(`b/${A}/sec_rep/m_${M1}_2026-10`);
+    assert.ok(oct, 'דוח אוקטובר יצא ביום העסקים הבא, בחודש הבא'); assert.match(oct.why, /יום העסקים הבא/); assert.match(JSON.stringify(oct.secs), /סיכום 2026-09/);
+    assert.ok(await get(`b/${A}/sec_rep/m_${M2}_2026-11`), 'ברירת מחדל (M2) – יום העסקים הראשון בנובמבר');
+    assert.equal(await get(`b/${A}/sec_rep/m_${M1}_2026-11`), null, 'M1 – לא ב-1 בחודש');
+    await run('2026-11-29T09:00');
+    assert.equal(await get(`b/${A}/sec_rep/m_${M1}_2026-11`), null);
+    await run('2026-11-30T08:10'); // בנובמבר אין 31 – היום האחרון (שני)
+    const nov = await get(`b/${A}/sec_rep/m_${M1}_2026-11`);
+    assert.ok(nov); assert.match(nov.why, /אין 31 ימים/); assert.match(JSON.stringify(nov.secs), /סיכום 2026-10/);
+    const K = require('../functions/lib/sec-know.js');
+    const h = R.monthlyOf('2026-09', 13); // 13.9.2026 – ראש השנה (ראשון)
+    assert.equal(K.bizDay('2026-09-13'), false); assert.equal(h.fire, R.bizOnOrAfter('2026-09-13')); assert.equal(h.why, 'נדחה בגלל חג');
+    assert.equal(R.monthlyOf('2026-10', 0).fire, R.bizOnOrAfter('2026-10-01'));
+  });
+
+  it('ליקוי 4: סגירה שנדחתה (st:rej) לא נספרת – לא בהתראה על עובד, לא בתזכורת סגירות ולא בדוח השבועי', async () => {
+    await seed();
+    await bizA();
+    const t0 = IL('2026-11-12T10:00');
+    await run('2026-11-12T10:00');
+    await prep(async (d) => {
+      await d.doc(`b/${A}/closings/r1`).set({ uid: E1, by: 'דוד כהן', t: t0 + 60000, reg: 'i_yh', d: '2026-11-12', st: 'rej', data: closingData(1000, 880) });
+      await d.doc(`b/${A}/closings/r2`).set({ uid: E1, by: 'דוד כהן', t: t0 + 120000, reg: 'i_yh', d: '2026-11-12', st: 'new', data: closingData(1000, 920) });
+    });
+    await run('2026-11-12T10:15');
+    const L = (await notes(M1)).filter((x) => x.k === 'emp');
+    assert.equal(L.length, 1, 'רק על הסגירה שלא נדחתה');
+    assert.match(L[0].body, /הפרש ראשון החודש/); assert.doesNotMatch(L[0].body, /120/);
+    const P = '2026-11-11';
+    const cl = [{ reg: 'i_yh', d: P, st: 'rej', data: closingData(1000, 800) }, { reg: 'i_yh', d: P, st: 'ok', data: closingData(500, 500) }];
+    assert.deepEqual(R.closeCands(cl, '2026-11-12'), [], 'סגירה תקינה בלי הפרש + נדחית עם הפרש – אין תזכורת');
+    assert.equal(R.closeCands([{ reg: 'i_nl', d: '2026-11-08', st: 'rej', data: closingData(1, 1) }], '2026-11-12').length, 0, 'קופה שרק נדחו בה סגירות – לא "חסרה"');
+    const rep = R.buildReport({ kind: 'w', today: '2026-11-15', now: IL('2026-11-15T08:00'), fin: null, nr: {}, tasks: [], closings: cl, rt: { invLate: true } });
+    assert.match(JSON.stringify(rep.secs), /הפרשי קופה בשבוע האחרון","lines":\["אין"\]/);
+  });
+
+  it('ליקוי 5 (החלטה 75): secCal – תזכורת בשישי/שבת נשאלת גם כשהמנהל בחר "לקבל"; force שומר עם keepOff; אירוע רגיל – בלי שאלה; עריכה לשבת – שואלת שוב', async () => {
+    await seed();
+    await prep((d) => d.doc(`b/${A}/sec_cfg/main`).set({ mgr: { [M1]: { we: 'accept' } } }, { merge: true }));
+    const dkIL = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+    let k = 2; while (new Date(dkIL(Date.now() + k * 864e5) + 'T12:00:00Z').getUTCDay() !== 6) k++;
+    const sat = dkIL(Date.now() + k * 864e5), sat2 = dkIL(Date.now() + (k + 7) * 864e5), mon = dkIL(Date.now() + (k + 2) * 864e5);
+    const w = await call('secCal', M1, { op: 'add', title: 'להתקשר לרו"ח', d: sat, tm: '11:00', rem: true });
+    assert.equal(w.status, 'OK', w.text); assert.equal(w.result.ok, false); assert.equal(w.result.warn.rem, true); assert.equal(w.result.warn.kind, 'שבת');
+    assert.equal((await coll(`b/${A}/sec_cal`)).length, 0, 'לא נשמר לפני תשובה');
+    const f = await call('secCal', M1, { op: 'add', title: 'להתקשר לרו"ח', d: sat, tm: '11:00', rem: true, force: true });
+    assert.equal(f.result.ok, true);
+    const x = await get(`b/${A}/sec_cal/${f.result.id}`);
+    assert.equal(x.rem, true); assert.equal(x.keepOff, true); assert.equal(x.d, sat);
+    const e = await call('secCal', M1, { op: 'add', title: 'פגישה', d: sat, tm: '10:00' });
+    assert.equal(e.result.ok, true, 'אירוע רגיל עם "לקבל" – בלי שאלה');
+    const r2 = await call('secCal', M1, { op: 'add', title: 'תזכורת', d: mon, rem: true });
+    assert.equal(r2.result.ok, true);
+    const ed = await call('secCal', M1, { op: 'edit', id: r2.result.id, title: 'תזכורת', d: sat2 });
+    assert.equal(ed.result.ok, false); assert.equal(ed.result.warn.rem, true, 'עריכת תאריך לשבת – שואלת שוב');
+    assert.equal((await get(`b/${A}/sec_cal/${r2.result.id}`)).d, mon);
+  });
+
+  it('ליקוי 6: בידוד בין שני עסקים פעילים – runRemind ו-runSecDaily', async () => {
+    await seed({ featB: true });
+    const bizB = await T.loadBiz(B); await bizA();
+    await prep(async (d) => {
+      await d.doc(`b/${B}/staff/${MB}`).set({ name: 'מנהל B', role: 'manager', active: true, pushTokens: ['tokMB_' + 'c'.repeat(30)] });
+      await d.doc(`b/${B}/sec_cal/cb`).set({ uid: '', st: 'ok', title: 'אירוע של B', d: '2026-11-15', tm: '10:00', t: 1 });
+      await d.doc(`b/${A}/sec_cal/ca`).set({ uid: '', st: 'ok', title: 'אירוע של A', d: '2026-11-15', tm: '10:00', t: 1 });
+      await d.doc(`b/${A}/sec_chat/${M1}/m/old`).set({ t: IL('2025-09-01T10:00'), role: 'u', text: 'ישן A' });
+      await d.doc(`b/${B}/sec_chat/${MB}/m/old`).set({ t: IL('2025-09-01T10:00'), role: 'u', text: 'ישן B' });
+    });
+    await finSet(A, finOf({ open: [['ספק של A', '1', '2026-11-01', '2026-11-15', 100, 100]] }));
+    await finSet(B, finOf({ open: [['ספק של B', '2', '2026-11-01', '2026-11-15', 200, 200]] }));
+    PUSH.length = 0;
+    const r = await RM.runRemind({ now: IL('2026-11-15T09:30'), bizzes: [BIZA, bizB], send });
+    assert.deepEqual(r.errors, []);
+    const nA = JSON.stringify(await notes(M1)), nB = JSON.stringify(await coll(`b/${B}/sec_note/${MB}/n`));
+    assert.match(nA, /ספק של A/); assert.match(nA, /אירוע של A/); assert.doesNotMatch(nA, /של B/);
+    assert.match(nB, /ספק של B/); assert.match(nB, /אירוע של B/); assert.doesNotMatch(nB, /של A/);
+    assert.equal((await coll(`b/${A}/sec_note/${MB}/n`)).length, 0); assert.equal((await coll(`b/${B}/sec_note/${M1}/n`)).length, 0);
+    const repB = await coll(`b/${B}/sec_rep`);
+    assert.ok(repB.length && repB.every((x) => x.uid === MB)); assert.ok((await coll(`b/${A}/sec_rep`)).every((x) => x.uid !== MB));
+    assert.ok(PUSH.filter((p) => p.meta.uid === MB).every((p) => p.meta.bizId === B && p.tokens[0].startsWith('tokMB_')));
+    // secDaily בעסק A בלבד – לא נוגע ב-B; בשניהם – כל עסק לחוד
+    const d1 = await RM.runSecDaily({ now: IL('2026-11-15T04:15'), bizzes: [BIZA] });
+    assert.equal(d1.res[A].chat, 1); assert.equal((await coll(`b/${B}/sec_chat/${MB}/m`)).length, 1, 'B לא נגע');
+    const d2 = await RM.runSecDaily({ now: IL('2026-11-15T04:15'), bizzes: [BIZA, bizB] });
+    assert.equal(d2.res[A].chat, 0); assert.equal(d2.res[B].chat, 1);
+  });
+
+  it('תקלה בשליחת התראה למנהל אחד לא עוצרת את שאר העסק; ההתראה נשארת ממתינה', async () => {
+    await seed();
+    await bizA();
+    await prep((d) => d.doc(`b/${A}/push_tokens/${M2}`).set({ pushTokens: ['tokM2_' + 'b'.repeat(30)] }));
+    await finSet(A, finOf({ open: [['ספק', '9', '2026-11-01', '2026-11-15', 100, 100]] }));
+    PUSH.length = 0;
+    const bad = async (tokens, msg, meta) => { if (meta.uid === M1) throw new Error('fcm down'); return send(tokens, msg, meta); };
+    const r = await RM.runRemind({ now: IL('2026-11-15T08:10'), bizzes: [BIZA], send: bad });
+    assert.deepEqual(r.errors, []); assert.equal(r.res[A].pushErr, 1);
+    assert.ok(PUSH.some((p) => p.meta.uid === M2), 'מנהל אחר קיבל');
+    assert.ok(byKey(await notes(M1), /^invDue:due:/)[0].pend, 'נשארה ממתינה');
+    assert.equal((await get(`b/${A}/sec_cfg/rem`)).scan, '2026-11-15', 'מצב הריצה נשמר');
   });
 });

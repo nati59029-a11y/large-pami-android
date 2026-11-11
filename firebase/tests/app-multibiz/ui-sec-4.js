@@ -15,7 +15,7 @@ const addD = (k) => { const d = new Date(); d.setDate(d.getDate() + k); return d
 let SAT = 1; while (new Date(Date.now() + SAT * 864e5).getDay() !== 6) SAT++;
 const SATD = addD(SAT), SUND = addD(SAT + 1);
 const TYPES = { invDue: 'חשבונית לתשלום', invLate: 'חשבוניות באיחור (בדוח השבועי)', chk: 'צ\'ק שעומד להיפרע', task: 'משימות שעברו את הזמן', close: 'סגירת קופה חסרה או עם הפרש', backup: 'גיבוי ישן', fact: 'עובדה במידע על העסק שפגה', cal: 'אירועים ותזכורות מהיומן', emp: 'התראה מיידית על עובד' };
-const NT = { wd: 0, wh: 8, mh: 8, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3, rt: { invDue: true, invLate: true, chk: true, task: false, close: false, backup: false, fact: false, cal: true, emp: true } };
+const NT = { wd: 0, wh: 8, md: 0, mh: 8, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3, rt: { invDue: true, invLate: true, chk: true, task: false, close: false, backup: false, fact: false, cal: true, emp: true } };
 
 async function open(browser, www, o) {
   const who = 'm';
@@ -136,12 +136,13 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     await page.selectOption('form[data-f=secNtF] select[name=wd]', '5'); await H.settle(page, 200);
     check(`${w}: בחירת שישי – אזהרה "הדוח יופיע ביום העסקים הבא"`, /הדוח יופיע ביום העסקים הבא/.test(await page.evaluate(() => document.getElementById('secWdWarn').innerText)));
     await page.selectOption('form[data-f=secNtF] select[name=wh]', '9');
+    await page.selectOption('form[data-f=secNtF] select[name=md]', '31');
     await page.check('form[data-f=secNtF] input[name=rt_backup]');
     await page.fill('form[data-f=secNtF] input[name=qf]', '21:30');
     await page.selectOption('form[data-f=secNtF] select[name=reps]', '2');
     await page.click('form[data-f=secNtF] button.btn'); await H.settle(page, 500);
     const nt = last(bodies, 'secPrefs', (b) => b.op === 'notify');
-    check(`${w}: שמירת ההגדרות – יום, שעה, שעות שקטות, מתג, חזרות`, nt && nt[1].nt.wd === 5 && nt[1].nt.wh === 9 && nt[1].nt.q.f === '21:30' && nt[1].nt.q.on === true && nt[1].nt.rt.backup === true && nt[1].nt.rt.task === false && nt[1].nt.reps === 2 && nt[1].nt.dg === false, nt && nt[1]);
+    check(`${w}: שמירת ההגדרות – יום, שעה, יום בחודש לדוח החודשי, שעות שקטות, מתג, חזרות`, nt && nt[1].nt.wd === 5 && nt[1].nt.wh === 9 && nt[1].nt.md === 31 && nt[1].nt.q.f === '21:30' && nt[1].nt.q.on === true && nt[1].nt.rt.backup === true && nt[1].nt.rt.task === false && nt[1].nt.reps === 2 && nt[1].nt.dg === false, nt && nt[1]);
     check(`${w}: הגדרות – בלי גלילה לרוחב`, (await sx(page)) <= 0, await sx(page));
     if (shots) await page.screenshot({ path: path.join(shots, `sec4-settings-${w}.png`), fullPage: true });
     // מחיקת היסטוריה: אישור כפול
@@ -149,7 +150,7 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     check(`${w}: מחיקה – אישור ראשון, בלי קריאה לשרת עדיין`, /למחוק את כל ההיסטוריה/.test(await dlgText(page)) && !bodies.some((b) => b[0] === 'secHistory'));
     await page.click('#dlg [data-a=yes]'); await H.settle(page, 500);
     const d2 = await dlgText(page);
-    check(`${w}: מחיקה – אישור שני עם מה יימחק; עוד לא נמחק`, /אישור שני/.test(d2) && /12 הודעות/.test(d2) && !bodies.some((b) => b[0] === 'secHistory' && b[1].op === 'del'), d2.slice(0, 160));
+    check(`${w}: מחיקה – אישור שני עם מה יימחק; עוד לא נמחק`, /אישור שני/.test(d2) && /12 הודעות/.test(d2) && /35 יום/.test(d2) && !bodies.some((b) => b[0] === 'secHistory' && b[1].op === 'del'), d2.slice(0, 160));
     await page.click('#dlg [data-a=secHistOk]'); await H.settle(page, 500);
     const hd = last(bodies, 'secHistory', (b) => b.op === 'del');
     check(`${w}: מחיקה – רק אחרי האישור השני, עם קוד האישור`, hd && hd[1].token === 'tok123' && hd[1].sure === true, hd && hd[1]);

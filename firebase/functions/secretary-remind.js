@@ -32,7 +32,8 @@ const { gate, logData, bad, pre, wrap } = C;
 const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 const hh = (n) => String(n).padStart(2, '0') + ':00';
 const nid = (uid, key) => crypto.createHash('sha256').update(uid + '|' + key, 'utf8').digest('hex').slice(0, 32);
-const RESOLVE = ['invDue', 'chk', 'task', 'backup', 'fact']; // נעלם מהנתונים (שולם, נפרע, טופל) – התזכורת נסגרת לבד ולא חוזרת
+const RESOLVE = ['task', 'backup', 'fact']; // נעלם מהנתונים (טופל) – התזכורת נסגרת לבד ולא חוזרת
+const FIN_RESOLVE = ['invDue', 'chk']; // תיקון סבב 1: נסגרת רק כשהחשבונית/הצ'ק באמת נעלמו ממראה תקין – לא כשאין מראה ולא בגלל חלון זמן
 
 // ---------- תוכן התראת הטלפון: כללי בלבד ----------
 function pushText(notes) {
@@ -96,6 +97,7 @@ async function addNote(db, m, n, now, autoDay) {
   const doc = { k: n.k, typ: n.typ || '', key: n.key.slice(0, 300), title: n.title.slice(0, 120), body: String(n.body || '').slice(0, 2000), t: now, at, pend: true, pushAt, n: 1, rep, st: 'open', seen: false };
   if (rep > 0) doc.nextAt = R.nextBizMorning(at);
   if (n.ref) doc.ref = n.ref;
+  if (n.item) doc.item = String(n.item).slice(0, 300);
   try { await ref.create(doc); return true; } catch (e) { if (e && (e.code === 6 || /ALREADY_EXISTS/.test(String(e.message)))) return false; throw e; }
 }
 
@@ -146,12 +148,12 @@ async function remindBiz(opts) {
     for (const d of s.docs) {
       const c = d.data();
       if (Number.isFinite(c.t)) maxT = Math.max(maxT, c.t);
-      if (!c.uid || adminIds.has(c.uid)) continue;
+      if (!c.uid || adminIds.has(c.uid) || !R.notRej(c)) continue; // תיקון סבב 1: סגירה שנדחתה – לא
       const a = R.cashDiff(c);
       if (a === null || a < R.EMP_MIN) continue;
       const mon = String(c.d || today).slice(0, 7);
       const all = (await db.collection('closings').where('uid', '==', c.uid).limit(300).get()).docs.map((x) => x.data())
-        .filter((x) => String(x.d || '').slice(0, 7) === mon).map((x) => ({ d: x.d, a: R.cashDiff(x) })).filter((x) => x.a !== null && x.a >= R.EMP_MIN).sort((p, q) => String(p.d).localeCompare(String(q.d)));
+        .filter((x) => R.notRej(x) && String(x.d || '').slice(0, 7) === mon).map((x) => ({ d: x.d, a: R.cashDiff(x) })).filter((x) => x.a !== null && x.a >= R.EMP_MIN).sort((p, q) => String(p.d).localeCompare(String(q.d)));
       const name = String(c.by || '').slice(0, 40) || 'עובד';
       const nth = Math.max(1, all.length);
       const title = 'הפרש בקופה – ' + name;
@@ -170,6 +172,7 @@ async function remindBiz(opts) {
     upd.scan = today;
     const need = (k) => mgrs.some((m) => m.nt.rt[k] && (!m.br || k === 'fact'));
     const F = (need('invDue') || need('chk')) ? await finGet() : null;
+    const items = F ? R.finItems(F.fin) : null; // null = אין מראה תקין: לא סוגרים שום תזכורת כספים
     const base = [];
     if (F) base.push(...R.finCands(F.fin, today, { invDue: true, chk: true }));
     if (need('task')) { const [tk, ns] = await Promise.all([tasksGet(), db.collection('staff').limit(300).get()]); const names = {}; ns.docs.forEach((x) => { names[x.id] = String(x.get('name') || '').slice(0, 40); }); base.push(...R.taskCands(tk, names, now, today)); }
@@ -183,7 +186,12 @@ async function remindBiz(opts) {
       const keys = new Set(mine.map((c) => c.key));
       const open = await db.collection(`sec_note/${m.uid}/n`).where('st', '==', 'open').limit(500).get();
       const b = db.batch(); let nb = 0;
-      for (const d of open.docs) if (d.get('k') === 'rem' && RESOLVE.includes(d.get('typ')) && !keys.has(d.get('key'))) { b.update(d.ref, { st: 'gone', nextAt: FieldValue.delete(), pend: false }); nb++; }
+      for (const d of open.docs) {
+        if (d.get('k') !== 'rem') continue;
+        const typ = d.get('typ'), item = d.get('item');
+        const gone = RESOLVE.includes(typ) ? !keys.has(d.get('key')) : FIN_RESOLVE.includes(typ) ? !!(items && item && !items.has(item)) : false;
+        if (gone) { b.update(d.ref, { st: 'gone', nextAt: FieldValue.delete(), pend: false }); nb++; }
+      }
       if (nb) { await b.commit(); out.gone += nb; }
     }
   }
@@ -194,8 +202,7 @@ async function remindBiz(opts) {
     const jobs = [];
     const W = R.weeklyDue(today, m.nt.wd);
     if (today >= W.fire && today <= K.addDays(W.fire, 2) && (today > W.fire || P.hm >= hh(m.nt.wh))) jobs.push({ kind: 'w', key: W.key, why: W.why });
-    const M = R.monthlyDue(today);
-    if (today >= M.fire && today <= K.addDays(M.fire, 3) && (today > M.fire || P.hm >= hh(m.nt.mh))) jobs.push({ kind: 'm', key: M.key, why: '' });
+    for (const M of R.monthlyDue(today, m.nt.md)) if (today >= M.fire && today <= K.addDays(M.fire, 3) && (today > M.fire || P.hm >= hh(m.nt.mh))) jobs.push({ kind: 'm', key: M.key, why: M.why });
     for (const j of jobs) {
       const ref = db.doc('sec_rep/' + j.kind + '_' + m.uid + '_' + j.key);
       if ((await ref.get()).exists) continue;
@@ -206,10 +213,10 @@ async function remindBiz(opts) {
         const ps = await db.doc('sec_mirror/pay').get();
         let pj = null; try { pj = ps.exists ? JSON.parse(ps.get('data')) : null; } catch (e) { pj = null; }
         const pay = (ST.cleanFin({ v: 1, at: 1, pay: pj }) || {}).pay || {};
-        const pm = R.prevMon(today.slice(0, 7));
+        const pm = R.prevMon(j.key);
         if (pay[pm]) payTotal = Math.round(pay[pm].reduce((s, r) => s + r[1], 0) * 100) / 100;
       }
-      const rep = R.buildReport({ kind: j.kind, today, now, fin: F && F.fin, finAt: F && F.at, nr: cfg.nr, tasks: tk, closings: cl, rt: m.nt.rt, payTotal, threshold: cfg.cfTh, why: j.why });
+      const rep = R.buildReport({ kind: j.kind, mon: j.kind === 'm' ? R.prevMon(j.key) : undefined, today, now, fin: F && F.fin, finAt: F && F.at, nr: cfg.nr, tasks: tk, closings: cl, rt: m.nt.rt, payTotal, threshold: cfg.cfTh, why: j.why });
       try { await ref.create(Object.assign({ uid: m.uid, key: j.key, t: now, done: [] }, rep)); } catch (e) { if (e && (e.code === 6 || /ALREADY_EXISTS/.test(String(e.message)))) continue; throw e; }
       out.reports++;
       await addNote(db, m, { k: 'rep', typ: j.kind, key: 'rep:' + j.kind + ':' + j.key, title: rep.title + (j.why ? ' (' + j.why + ')' : ''), body: rep.secs.slice(0, 2).map((x) => x.h + ': ' + x.lines[0]).join('\n'), ref: ref.id }, now, true);
@@ -245,12 +252,19 @@ async function remindBiz(opts) {
     const s = await db.collection(`sec_note/${m.uid}/n`).where('pend', '==', true).limit(100).get();
     const due = s.docs.filter((d) => (d.get('pushAt') || 0) <= now);
     if (!due.length) continue;
-    const toks = await tokensOf(db, m.uid);
     let sent = 0;
-    if (toks.length) {
-      const res = await (opts.send || fcmSend)(toks, pushText(due.map((d) => d.data())), { uid: m.uid, bizId: scope.bizId });
-      sent = res.filter((x) => x.ok).length;
-      await dropTokens(db, m.uid, res.filter((x) => !x.ok && BAD_TOKEN.includes(x.code)).map((x) => x.token));
+    try {
+      const toks = await tokensOf(db, m.uid);
+      if (toks.length) {
+        const res = await (opts.send || fcmSend)(toks, pushText(due.map((d) => d.data())), { uid: m.uid, bizId: scope.bizId });
+        sent = res.filter((x) => x.ok).length;
+        await dropTokens(db, m.uid, res.filter((x) => !x.ok && BAD_TOKEN.includes(x.code)).map((x) => x.token));
+      }
+    } catch (e) {
+      // תיקון סבב 1: תקלה בשליחה למנהל אחד לא עוצרת את שאר העסק. ההתראה נשארת ממתינה ותישלח בריצה הבאה
+      logger.error('secretary: push failed', { bizId: scope.bizId, name: e && e.name, code: e && e.code });
+      out.pushErr = (out.pushErr || 0) + 1;
+      continue;
     }
     const b = db.batch();
     for (const d of due) b.update(d.ref, { pend: false, pushed: sent ? now : 0 });

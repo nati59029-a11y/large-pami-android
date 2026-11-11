@@ -49,7 +49,7 @@ const TYPES = Object.freeze({
   emp: { l: 'התראה מיידית על עובד', on: true },
 });
 const NO_REPEAT = ['task', 'emp']; // משימות – הודעה מקובצת אחת ביום (7.3), כך שחזרה מיותרת; התראה על עובד – פעם אחת
-const DEF = Object.freeze({ wd: 0, wh: 8, mh: 8, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3 });
+const DEF = Object.freeze({ wd: 0, wh: 8, md: 0, mh: 8, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3 });
 function ntOf(me) {
   const x = me && me.nt && typeof me.nt === 'object' ? me.nt : {};
   const int = (v, lo, hi, d) => (Number.isInteger(v) && v >= lo && v <= hi ? v : d);
@@ -57,7 +57,7 @@ function ntOf(me) {
   const rt = {};
   for (const [k, v] of Object.entries(TYPES)) rt[k] = x.rt && typeof x.rt[k] === 'boolean' ? x.rt[k] : v.on;
   return {
-    wd: int(x.wd, 0, 6, DEF.wd), wh: int(x.wh, 0, 23, DEF.wh), mh: int(x.mh, 0, 23, DEF.mh),
+    wd: int(x.wd, 0, 6, DEF.wd), wh: int(x.wh, 0, 23, DEF.wh), md: int(x.md, 0, 31, DEF.md), mh: int(x.mh, 0, 23, DEF.mh),
     dg: x.dg === true, dh: int(x.dh, 0, 23, DEF.dh),
     q: { on: typeof q.on === 'boolean' ? q.on : DEF.q.on, f: HM_RE.test(q.f) ? q.f : DEF.q.f, t: HM_RE.test(q.t) ? q.t : DEF.q.t },
     reps: int(x.reps, 0, 3, DEF.reps), rt,
@@ -68,7 +68,8 @@ function readNt(input, cur) {
   const o = JSON.parse(JSON.stringify(cur));
   const bad = (m) => { const e = new Error(m); e.badNt = true; throw e; };
   const int = (k, lo, hi) => { if (input[k] === undefined) return; if (!Number.isInteger(input[k]) || input[k] < lo || input[k] > hi) bad(k); o[k] = input[k]; };
-  int('wd', 0, 6); int('wh', 0, 23); int('mh', 0, 23); int('dh', 0, 23); int('reps', 0, 3);
+  int('wd', 0, 6); int('wh', 0, 23); int('md', 0, 31); // md: יום בחודש לדוח החודשי (0 = יום העסקים הראשון)
+  int('mh', 0, 23); int('dh', 0, 23); int('reps', 0, 3);
   if (input.dg !== undefined) { if (typeof input.dg !== 'boolean') bad('dg'); o.dg = input.dg; }
   if (input.q !== undefined) {
     const q = input.q;
@@ -111,6 +112,10 @@ const EMP_MIN = 1; // הפרש מזומן מ-1 ₪ ומעלה – התראה ע�
 // כל מועמד: { typ, key (קבוע – מונע כפילות), title, body (באפליקציה בלבד), fire (היום שבו יוצאת) }.
 // fire תמיד יום עסקים: מה שנפל בשישי/שבת/חג – ביום העסקים הבא (7.4). מועמד נוצר כשהיום ≥ fire ובתוך חלון השלמה קצר.
 const CATCH_DAYS = 7;
+const chkItem = (r) => 'chk:' + r[0] + '|' + r[1] + '|' + r[2];
+// הפריטים שקיימים כרגע במראה (חשבונית פתוחה עם יתרה, צ'ק) – תזכורת נסגרת רק כשהפריט שלה באמת נעלם (תיקון סבב 1)
+function finItems(fin) { const S = new Set(); for (const r of fin.open || []) if (r[5] > 0.004) S.add('inv:' + r[0] + '|' + r[1]); for (const r of fin.chk || []) S.add(chkItem(r)); return S; }
+const notRej = (c) => c && c.st !== 'rej'; // סגירה שהמנהל דחה (כפולה/שגויה) לא נספרת – תיקון סבב 1
 const within = (today, fire, last) => today >= fire && today <= (last || K.addDays(fire, CATCH_DAYS));
 function finCands(fin, today, rt) {
   const out = [];
@@ -119,18 +124,18 @@ function finCands(fin, today, rt) {
     for (const r of fin.open || []) {
       const due = r[3], bal = r[5];
       if (!due || !(bal > 0.004)) continue;
-      const id = r[0] + '|' + r[1] + '|' + due;
+      const id = r[0] + '|' + r[1] + '|' + due, item = 'inv:' + r[0] + '|' + r[1];
       const pre = prevBizDay(due);
-      if (within(today, pre, K.addDays(due, -1))) out.push({ typ: 'invDue', key: 'invDue:pre:' + id, title: 'חשבונית לתשלום מחר', body: 'חשבונית ' + (r[1] || '') + ' של ' + (r[0] || 'ספק') + ' – יתרה ' + ils(bal) + ', לתשלום עד ' + due + '.', fire: pre });
+      if (within(today, pre, K.addDays(due, -1))) out.push({ typ: 'invDue', key: 'invDue:pre:' + id, item, title: 'חשבונית לתשלום מחר', body: 'חשבונית ' + (r[1] || '') + ' של ' + (r[0] || 'ספק') + ' – יתרה ' + ils(bal) + ', לתשלום עד ' + due + '.', fire: pre });
       const onDue = bizOnOrAfter(due);
-      if (within(today, onDue)) out.push({ typ: 'invDue', key: 'invDue:due:' + id, title: 'חשבונית לתשלום היום', body: 'חשבונית ' + (r[1] || '') + ' של ' + (r[0] || 'ספק') + ' – יתרה ' + ils(bal) + ', מועד התשלום ' + due + (onDue !== due ? ' (נפל ביום שאינו יום עסקים)' : '') + '.', fire: onDue });
+      if (within(today, onDue)) out.push({ typ: 'invDue', key: 'invDue:due:' + id, item, title: 'חשבונית לתשלום היום', body: 'חשבונית ' + (r[1] || '') + ' של ' + (r[0] || 'ספק') + ' – יתרה ' + ils(bal) + ', מועד התשלום ' + due + (onDue !== due ? ' (נפל ביום שאינו יום עסקים)' : '') + '.', fire: onDue });
     }
   }
   if (rt.chk) {
     for (const r of fin.chk || []) {
       const d = r[0];
       const fire = bizOnOrAfter(prevBizDay(prevBizDay(d)));
-      if (within(today, fire, d)) out.push({ typ: 'chk', key: 'chk:' + d + '|' + r[1] + '|' + r[2], title: 'צ\'ק שעומד להיפרע', body: 'צ\'ק ל' + (r[1] || 'מוטב') + ' על ' + ils(Math.abs(r[2])) + ' ייפרע ב-' + d + '.', fire });
+      if (within(today, fire, d)) out.push({ typ: 'chk', key: 'chk:' + d + '|' + r[1] + '|' + r[2], item: chkItem(r), title: 'צ\'ק שעומד להיפרע', body: 'צ\'ק ל' + (r[1] || 'מוטב') + ' על ' + ils(Math.abs(r[2])) + ' ייפרע ב-' + d + '.', fire });
     }
   }
   return out;
@@ -143,7 +148,8 @@ function taskCands(tasks, names, now, today) {
   return [{ typ: 'task', key: 'task:' + today, title: late.length + ' משימות פתוחות עברו את הזמן', body: lines.join('\n') + (late.length > 10 ? '\nועוד ' + (late.length - 10) + '.' : ''), fire: today }];
 }
 // סגירות: יום העסקים הקודם – קופה שנסגרה ב-30 הימים האחרונים ולא נסגרה בו ("חסרה"), או סגירה עם הפרש מזומן
-function closeCands(closings, today) {
+function closeCands(closings0, today) {
+  const closings = closings0.filter(notRej);
   const P = prevBizDay(today);
   const regs = [...new Set(closings.filter((c) => typeof c.reg === 'string' && c.d >= K.addDays(today, -30)).map((c) => c.reg))];
   const onP = closings.filter((c) => c.d === P);
@@ -185,9 +191,19 @@ function weeklyDue(today, wd) {
   const why = fire === s ? '' : (wdOf(s) === 5 || wdOf(s) === 6 ? 'היום שנבחר אינו יום עסקים – הדוח מופיע ביום העסקים הבא' : 'נדחה בגלל חג');
   return { key: s, fire, why };
 }
-function monthlyDue(today) {
-  const first = today.slice(0, 8) + '01';
-  return { key: today.slice(0, 7), fire: bizOnOrAfter(first) };
+// md = 0: יום העסקים הראשון בחודש (ברירת המחדל). md 1–31: היום שהמנהל קבע (67); יום שלא קיים בחודש (31 בנובמבר) – היום האחרון בחודש;
+// שישי/שבת/חג – יום העסקים הבא (גם אם הוא בחודש הבא). מחזיר את הדוח של החודש הזה ושל החודש הקודם (שאולי נדחה לתוך החודש הזה)
+const lastDay = (mon) => { const [y, m] = mon.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+function monthlyOf(mon, md) {
+  const first = mon + '-01';
+  if (!md) return { key: mon, s: first, fire: bizOnOrAfter(first), why: '' };
+  const d = Math.min(md, lastDay(mon)), s = mon + '-' + String(d).padStart(2, '0'), fire = bizOnOrAfter(s);
+  const why = (d < md ? 'בחודש הזה אין ' + md + ' ימים – ביום האחרון בחודש' : '') + (fire === s ? '' : (d < md ? '; ' : '') + (wdOf(s) === 5 || wdOf(s) === 6 ? 'היום שנבחר אינו יום עסקים – הדוח מופיע ביום העסקים הבא' : 'נדחה בגלל חג'));
+  return { key: mon, s, fire, why };
+}
+function monthlyDue(today, md) {
+  const mon = today.slice(0, 7);
+  return [monthlyOf(prevMon(mon), md || 0), monthlyOf(mon, md || 0)];
 }
 const sum = (L, f) => rnd(L.reduce((s, x) => s + (f(x) || 0), 0));
 const prevMon = (m) => { const [y, x] = m.split('-').map(Number); return x === 1 ? (y - 1) + '-12' : y + '-' + String(x - 1).padStart(2, '0'); };
@@ -216,7 +232,7 @@ function buildReport(o) {
     const open = o.tasks.filter((t) => t.st === 'open'), late = open.filter((t) => +t.due && +t.due < o.now);
     secs.push({ h: 'משימות פתוחות', lines: [open.length + ' פתוחות, מהן ' + late.length + ' באיחור'] });
     const from = K.addDays(o.today, -7);
-    const df = o.closings.filter((c) => c.d >= from && c.d < o.today).map((c) => cashDiff(c)).filter((a) => a !== null && a >= EMP_MIN);
+    const df = o.closings.filter(notRej).filter((c) => c.d >= from && c.d < o.today).map((c) => cashDiff(c)).filter((a) => a !== null && a >= EMP_MIN);
     secs.push({ h: 'הפרשי קופה בשבוע האחרון', lines: df.length ? [df.length + ' סגירות עם הפרש, סך ' + ils(sum(df, (a) => a))] : ['אין'] });
     const ideas = ideasOf(fin, o.nr, o.now, 3);
     if (ideas.length) secs.push({ h: 'תובנה', lines: [ideas[0].seen] });
@@ -224,7 +240,7 @@ function buildReport(o) {
   }
   // חודשי
   if (fin) {
-    const m = prevMon(o.today.slice(0, 7)), a = fin.months[m], b = fin.months[prevMon(m)], y = fin.months[(Number(m.slice(0, 4)) - 1) + m.slice(4)];
+    const m = o.mon || prevMon(o.today.slice(0, 7)), a = fin.months[m], b = fin.months[prevMon(m)], y = fin.months[(Number(m.slice(0, 4)) - 1) + m.slice(4)];
     if (a) {
       const L = ['הכנסות: ' + ils(a.inc), 'הוצאות: ' + ils(a.exp), 'רווח: ' + ils(rnd(a.inc - a.exp))];
       if (b) L.push('מול החודש הקודם: הכנסות' + pctTxt(pctCh(a.inc, b.inc)) + ', הוצאות' + pctTxt(pctCh(a.exp, b.exp)));
@@ -241,10 +257,10 @@ function buildReport(o) {
   if (o.payTotal !== null && o.payTotal !== undefined) secs.push({ h: 'שכר', lines: ['סך השכר בחודש הקודם: ' + ils(o.payTotal) + ' (סך כולל בלבד)'] });
   const ideas = ideasOf(fin, o.nr, o.now, 3);
   if (ideas.length) secs.push({ h: '3 רעיונות לשיפור', lines: ideas.map((x) => '• ' + x.seen) });
-  return { kind: 'm', title: 'הדוח החודשי', secs, ideas, src, why: '' };
+  return { kind: 'm', title: 'הדוח החודשי', secs, ideas, src, why: o.why || '' };
 }
 
 module.exports = {
   TZ, MORNING, TYPES, NO_REPEAT, DEF, EMP_MIN, il, ilMs, wdOf, bizOnOrAfter, prevBizDay, nextBizMorning, ntOf, readNt, wkWarn, inQuiet, pushAtOf,
-  cashDiff, finCands, taskCands, closeCands, backupCands, factCands, calAt, weeklyDue, monthlyDue, buildReport, ils, prevMon,
+  cashDiff, finItems, notRej, monthlyOf, finCands, taskCands, closeCands, backupCands, factCands, calAt, weeklyDue, monthlyDue, buildReport, ils, prevMon,
 };
