@@ -369,4 +369,58 @@ describe('תמחור – לארג\' פעמי במצב legacy (שורש)', () => 
     assert.deepEqual((await get('prod/pA')).q, { _: 8 }); assert.equal((await get('prod/pA')).price, 12);
     assert.equal((await get('prod/pA/p/cost')).cost, 4.72);
   });
+
+  // החלטה 8 (שלב 7): setStaffPrc – מנהל העסק מדליק/מכבה לעובד רק את prc, ורק בעסק במצב legacy
+  it('setStaffPrc: מנהל בלבד; רק prc – עובד ישן מקבל את ברירות המחדל + prc, עובד עם perms – רק prc משתנה; עובד לא מדליק לעצמו', async () => {
+    const DEF = require('../functions/lib/roles').DEFAULT_PERMS;
+    const id = (await call('piCreate', LE, { reqId: rid(), sup: 'אסם', lines: [{ n: 'עוגה', bc: '7290', qty: 1, cost: 4 }] })).result.id;
+    // עובד (גם עם prc) – לא לעצמו ולא לאחר; לא השתנה כלום
+    for (const [u, t] of [[LE, LE], [LP, LP], [LP, LE]]) {
+      const r = await call('setStaffPrc', u, { uid: t, on: true });
+      assert.equal(r.reason, 'manager-only', u + '→' + t);
+    }
+    assert.equal((await get('staff/' + LE)).perms, undefined);
+    assert.equal((await call('setStaffPrc', null, { uid: LE, on: true })).status, 'UNAUTHENTICATED');
+    // קלט לא תקין / מנהל / לא קיים
+    assert.equal((await call('setStaffPrc', LM, { uid: LE, on: 'yes' })).reason, 'bad-on');
+    assert.equal((await call('setStaffPrc', LM, { uid: 'bad uid', on: true })).reason, 'bad-uid');
+    assert.equal((await call('setStaffPrc', LM, { uid: 'ghost', on: true })).reason, 'no-staff');
+    assert.equal((await call('setStaffPrc', LM, { uid: LM, on: true })).reason, 'is-admin');
+    // כיבוי לעובד ישן בלי perms – אין שינוי במסמך
+    assert.equal((await call('setStaffPrc', LM, { uid: LE, on: false })).status, 'OK');
+    assert.equal((await get('staff/' + LE)).perms, undefined);
+    // הדלקה לעובד ישן: מפה מלאה של ברירות המחדל + prc (שאר ההרשאות כמו היום – גם בחוקים: הזמנות בשורש)
+    const on = await call('setStaffPrc', LM, { uid: LE, on: true });
+    assert.equal(on.status, 'OK', on.text); assert.deepEqual(on.result, { ok: true, uid: LE, prc: true });
+    const s1 = await get('staff/' + LE);
+    assert.deepEqual(s1.perms, Object.assign({}, DEF, { prc: true }));
+    assert.equal(s1.active, true); assert.equal(s1.name, LE); assert.equal(s1.role, 'employee');
+    await assertSucceeds(db(LE).doc('pinv/' + id).get());
+    assert.equal((await call('piClaim', LE, { id })).status, 'OK');
+    await assertSucceeds(db(LE).collection('prod').get()); // מתג "הזמנות" (ברירת מחדל) עדיין פעיל
+    // כיבוי: רק prc משתנה
+    assert.equal((await call('setStaffPrc', LM, { uid: LE, on: false })).status, 'OK');
+    assert.deepEqual((await get('staff/' + LE)).perms, Object.assign({}, DEF, { prc: false }));
+    await assertFails(db(LE).doc('pinv/' + id).get());
+    // עובד שכבר יש לו perms (כאן: הכול כבוי חוץ מ-prc) – רק prc משתנה
+    assert.equal((await call('setStaffPrc', LM, { uid: LP, on: false })).status, 'OK');
+    assert.deepEqual((await get('staff/' + LP)).perms, Object.assign({}, PRC, { prc: false }));
+    assert.equal((await call('setStaffPrc', LM, { uid: LP, on: true })).status, 'OK');
+    assert.deepEqual((await get('staff/' + LP)).perms, PRC);
+    // רישום ביומן
+    const acts = (await coll('b/largpeami/audit')).filter((x) => x.act === 'setStaffPrc').map((x) => x.note).sort();
+    assert.deepEqual(acts, [LE + '=false', LE + '=false', LE + '=true', LP + '=false', LP + '=true'].sort());
+    // setStaffPerms ב-legacy – עדיין נדחה (שאר ההרשאות לא משתנות מהאפליקציה)
+    assert.equal((await call('setStaffPerms', LM, { bizId: 'largpeami', uid: LE, perms: { prc: true } })).reason, 'not-superadmin');
+  });
+});
+
+describe('setStaffPrc – עסק במבנה b (לא legacy)', () => {
+  beforeEach(() => seed());
+  it('נדחה גם למנהל העסק וגם למנהל־על; ההרשאות לא משתנות', async () => {
+    assert.equal((await call('setStaffPrc', MGR, { uid: OLD, on: true })).reason, 'not-legacy');
+    assert.equal((await call('setStaffPrc', SUPER, { bizId: A, uid: OLD, on: true })).reason, 'not-legacy');
+    assert.equal((await call('setStaffPrc', P1, { uid: OLD, on: true })).reason, 'manager-only');
+    assert.equal((await get(`b/${A}/staff/${OLD}`)).perms, undefined);
+  });
 });

@@ -397,4 +397,55 @@ function wrapF(name,v,st){const f0=FRM[name];if(typeof f0!=='function')return;
 wrapF('shadd','shAdd','F');wrapF('shpromo','shPromo','P');
 {const c0=ACT.shCancel;if(typeof c0==='function')ACT.shCancel=function(){const v=cur().v;if(!rtOk(v))return c0.apply(this,arguments);
  const r=RT,x=c0.apply(this,arguments);rtBack(r);return x}}
+
+/* ===== שלב 7: נקודות כניסה למסך התמחור =====
+   רק למי ש-can() (מנהל / מנהל־על, או עובד עם המתג prc). מדף (V.shelf, אם המדף פעיל) – משבצת; הזמנות (V.ox, אם ההזמנות פעילות) – כפתור;
+   עסק עם שניהם – בשניהם. מנהל: סעיף ב"לטיפול" (todoC / V.todo, עטיפה כמו במשימות ובבקשות) עם מונה, ו"בטיפול של X".
+   עובד עם prc: גם בבית העובד (V.wk). המונה = החשבוניות הפתוחות (st:'new') – חשבונית שסיימו לטפל בה יוצאת מהשאילתה.
+   טעינה: אותה שאילתה של הרשימה (lload, שדות מעטים), רק כשמגיעים לאחד המסכים האלה, ולא יותר מפעם בדקה (מטמון קצר). */
+const CNV=['shelf','ox','todo','wk','home'];let CNT=0;
+function piN(){if(!can())return null;const t=Date.now();
+ if(!LS.b&&(!LS.L||t-LS.at>60e3)&&t-CNT>60e3){CNT=t;Promise.resolve(lload()).then(()=>{try{if(CNV.includes(cur().v)&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}})}
+ return LS.L?LS.L.length:null}
+PI.n=piN;
+const piBusy=()=>{const o=(LS.L||[]).filter(lkOther);return o.length?'בטיפול של '+[...new Set(o.map(x=>String(x.lk.name||'משתמש אחר')))].join(', '):''};
+const piOpt=(sm,st)=>{const n=piN(),b=piBusy();return`<button class="opt" data-a="go" data-v="pi"${st?` style="${st}"`:''}><span>🧾 חשבוניות לתמחור<small>${esc([sm,b].filter(Boolean).join(' · '))}</small></span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`};
+{const o=V.shelf;if(typeof o==='function')V.shelf=function(){const r=o.apply(this,arguments);
+ try{if(r&&typeof r.h==='string'&&bzF('shelf')&&can()){const i=r.h.lastIndexOf('</div>');if(i>=0)r.h=r.h.slice(0,i)+piOpt('מחירים חדשים מחשבוניות ספק','min-height:92px;margin:0')+r.h.slice(i)}}catch(e){}return r}}
+{const o=V.ox;if(typeof o==='function')V.ox=function(){const r=o.apply(this,arguments);
+ try{if(r&&typeof r.h==='string'&&r.h.includes('data-v="oxNew"')&&bzF('orders')&&can()){const m='<div class="row" style="margin-bottom:8px">',b=piOpt('עלות, מחיר וסיטונאי מחשבוניות ספק','margin-bottom:8px');
+  if(r.h.startsWith(m)){const i=r.h.indexOf('</div>')+6;r.h=r.h.slice(0,i)+b+r.h.slice(i)}else r.h=b+r.h}}catch(e){}return r}}
+if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(this,arguments);try{const n=isA()?piN():0;r.pi=n||0;r.n+=r.pi}catch(e){r.pi=0}return r}}
+{const o=V.todo;if(typeof o==='function')V.todo=function(){const r=o.apply(this,arguments);
+ try{if(isA()&&can()&&r&&typeof r.h==='string'){const n=piN();if(n){const sm=[n===1?'חשבונית אחת ממתינה לעדכון מחירים':n+' חשבוניות ממתינות לעדכון מחירים',piBusy()].filter(Boolean).join(' · ');
+  r.h=adSec('חשבוניות לתמחור')+adOpt('pi','🧾 חשבוניות ספק לתמחור',esc(sm),n)+r.h}}}catch(e){}return r}}
+{const o=V.wk;if(typeof o==='function')V.wk=function(){const r=o.apply(this,arguments);
+ try{if(isW()&&WS==='home'&&r&&typeof r.h==='string'&&can()){const m='<button class="btn g" style="width:100%;margin-top:14px" data-a="updChk">',b=piOpt('עדכון מחירים ומלאי מחשבוניות ספק','margin-top:8px');
+  r.h=r.h.includes(m)?r.h.replace(m,()=>b+m):r.h+b}}catch(e){}return r}}
+
+/* ===== החלטה 8: לארג' פעמי במצב legacy – מסך "עדכון מחירים ומלאי" עם מתג אחד לכל עובד (V.piStf) =====
+   הכניסה – ממסך העובדים של לארג' פעמי ("עובדים ופרסום קטגוריות", V.sync). מסך העובדים של עסק b (V.staff) וההגדרות – בלי שינוי.
+   מנהל העסק (או מנהל־על בתוך העסק) בלבד; השרת (setStaffPrc) משנה רק את prc ורק ב-legacy. בעסק במבנה b – מתגי מנהל־על (PMK) */
+const lgOn=()=>{try{return isA()&&!bzB()&&(bzF('shelf')||bzF('orders'))}catch(e){return false}};
+const LG={L:null,b:0,err:''},UID_OK=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(v);
+async function lgLoad(){if(LG.b)return;LG.b=1;LG.err='';
+ try{const j=await fsx('/staff?pageSize=300');LG.L=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d})||{},p=f.perms;
+   return{uid:idOf(d),name:String(f.name||''),email:String(f.email||''),role:String(f.role||''),active:f.active===true,prc:!!(p&&typeof p==='object'&&p.prc===true)}})
+  .filter(u=>UID_OK(u.uid)&&u.role!=='manager'&&u.uid!==SY.uid).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email,'he'))}
+ catch(e){LG.err=e&&e.offline?e.message:'טעינת רשימת העובדים נכשלה'}
+ finally{LG.b=0;try{if(cur().v==='piStf')rerender()}catch(e){}}}
+V.piStf=()=>{const T='עדכון מחירים ומלאי';if(!lgOn())return{t:T,h:'<div class="empty">המסך הזה למנהל לארג׳ פעמי בלבד</div>'};
+ if(!LG.L&&!LG.err&&!LG.b)lgLoad();
+ const row=u=>`<div class="card" style="padding:10px 12px;margin:0 0 8px"><b>${esc(u.name||u.email||u.uid)}</b>${u.active?'':' <span class="tag t4">מושבת</span>'}${u.email&&u.name?`<small style="display:block;color:var(--mut)"><bdi dir="ltr">${esc(u.email)}</bdi></small>`:''}`
+  +`<label class="cb" style="margin:6px 0 0"><input type="checkbox" data-c="piPrc" data-uid="${esc(u.uid)}"${u.prc?' checked':''}> עדכון מחירים ומלאי</label></div>`;
+ return{t:T,s:'מתג לכל עובד',h:'<p class="note">עובד שהמתג דולק אצלו רואה את "חשבוניות לתמחור", כולל עלות ומחיר סיטונאי של מוצרי החשבונית, ומעדכן מחירים ומלאי. שאר ההרשאות לא משתנות.</p>'
+  +(LG.err?`<div class="card"><p>${esc(LG.err)}</p><button class="btn g" data-a="piLgRe">נסה שוב</button></div>`:LG.L?(LG.L.length?LG.L.map(row).join(''):'<div class="empty">אין עובדים</div>'):'<div class="empty">טוען…</div>')}};
+ACT.piLgRe=()=>{LG.L=null;LG.err='';rerender()};
+if(typeof CHG!=='undefined')CHG.piPrc=async el=>{const uid=el.dataset.uid,u=(LG.L||[]).find(x=>x.uid===uid);if(!u||!lgOn())return;const on=!!el.checked,nm=u.name||u.email||'העובד';el.disabled=true;
+ try{await fnc('setStaffPrc',{uid,on});u.prc=on;toast(on?'✓ '+nm+' יכול לעדכן מחירים ומלאי':'המתג כובה ל'+nm)}
+ catch(e){el.checked=!on;toast(e&&e.offline?'אין חיבור לאינטרנט':(e&&e.message)||'השמירה נכשלה')}finally{el.disabled=false}};
+/* הכניסה: במסך העובדים של לארג' פעמי (V.sync של המנהל) */
+{const o=V.sync;if(typeof o==='function')V.sync=function(){const r=o.apply(this,arguments);
+ try{if(lgOn()&&r&&typeof r.h==='string'){const m='<button class="btn grow" style="width:100%;margin-top:8px" data-a="syPull">',it=`<button class="opt" data-a="go" data-v="piStf" style="margin-top:8px"><span>עדכון מחירים ומלאי<small>מתג לכל עובד: מי מעדכן מחירים ומלאי מחשבוניות ספק</small></span>${ico('chev')}</button>`;
+  if(r.h.includes(m))r.h=r.h.replace(m,()=>it+m)}}catch(e){}return r}}
 })();
