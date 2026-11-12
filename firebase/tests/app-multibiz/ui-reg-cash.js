@@ -309,6 +309,14 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   check('32ב פריט מקופה בלי תאריך: השמירה נחסמת ("חסר תאריך התשלום"), לא נרשם תשלום והפריט לא השתנה', r32.nd.n === 0 && r32.nd.still && r32.nd.date === '2026-11-10', r32.nd);
   check('32ד זיכוי ספק מקופה בלי מספר חשבונית: "שמור ואשר" לא רושם זיכוי והפריט נשאר בתור (כמו ב-main)', r32.crN === 0 && r32.crLeft, r32);
   check('32ג משכורת מקופה: "לתשלום" נשאר בכרטיס כמו קודם', r32.sal, r32);
+  // 33. מסך הבדיקה: מסמך עם כמה עמודים – כל העמודים מוצגים (לא רק הראשון)
+  const r33 = await page.evaluate(async () => {
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const fg = fget; fget = async (id) => id === 'fMulti' ? 'PAGES:' + JSON.stringify([png, png, png]) : id === 'fOne' ? png : fg(id);
+    const one = async (file) => { document.querySelectorAll('#inbDoc').forEach((e) => e.remove()); document.body.insertAdjacentHTML('beforeend', '<div id="inbDoc"></div>'); IE = { id: 'x' + file }; await inbDoc({ id: 'x' + file, file }); const el = document.getElementById('inbDoc'); const r = { imgs: el.querySelectorAll('.zb img').length, txt: el.innerText }; el.remove(); return r; };
+    try { return { m: await one('fMulti'), o: await one('fOne') }; } finally { fget = fg; IE = null; }
+  });
+  check('33 מסמך של 3 עמודים במסך הבדיקה: 3 תמונות עם "עמוד X מתוך 3"; מסמך של עמוד אחד – תמונה אחת בלי מספור', r33.m.imgs === 3 && /עמוד 3 מתוך 3/.test(r33.m.txt) && r33.o.imgs === 1 && !/מתוך/.test(r33.o.txt), r33);
   check('19 אין שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
   if (out) fs.writeFileSync(out, JSON.stringify({ fail, res }, null, 1));
