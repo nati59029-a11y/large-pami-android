@@ -197,6 +197,85 @@ describe('ניוד קווים – "שולם", היסטוריה ובדיקת ני
   });
 });
 
+// 12.11.2026 (fix/lines-unpay): ביטול "שולם" מבטל את הניוד; תשלום חוזר – רישום אחד לכל הזמנה+קו
+describe('ניוד קווים – ביטול "שולם" ותשלום חוזר', () => {
+  const L1 = '0521234567', L2 = '0537654321';
+  async function paidOrder() {
+    await call('saveCust', E1, { cust });
+    const r = await order(E1, { lines: [{ phone: L1, tz: TZ2 }, { phone: L2 }] }, { custId: 't' + TZ });
+    assert.equal(r.status, 'OK', r.text);
+    const id = r.result.id;
+    assert.equal((await call('markOrderPaid', E1, { id, method: 'cash' })).status, 'OK');
+    return id;
+  }
+  it('תשלום → ביטול: אין רישום lineLog, ports של הלקוח חוזר, checkLines לא מתריע', async () => {
+    await setup();
+    const id = await paidOrder();
+    assert.deepEqual((await coll(`b/${A}/lineLog`)).map((x) => x.id).sort(), [`o_${id}_0`, `o_${id}_1`]);
+    assert.equal((await get(`b/${A}/cust/t${TZ}`)).ports.length, 2);
+    const u = await call('unpayOrder', MGR, { id, reason: 'טעות' });
+    assert.equal(u.status, 'OK', u.text);
+    assert.equal((await coll(`b/${A}/lineLog`)).length, 0);
+    assert.deepEqual((await get(`b/${A}/cust/t${TZ}`)).ports, []);
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'wait_pay');
+    assert.equal((await call('checkLines', E2, { lines: [{ phone: L1 }, { phone: L2 }] })).result.hits.length, 0);
+  });
+  it('תשלום → ביטול → תשלום: רישום אחד לכל קו, ports בלי כפילות', async () => {
+    await setup();
+    const id = await paidOrder();
+    assert.equal((await call('unpayOrder', MGR, { id, reason: 'טעות' })).status, 'OK');
+    assert.equal((await call('markOrderPaid', E1, { id, method: 'cash' })).status, 'OK');
+    const L = await coll(`b/${A}/lineLog`);
+    assert.equal(L.length, 2); assert.deepEqual(L.map((x) => x.phone).sort(), [L1, L2].sort());
+    assert.equal((await get(`b/${A}/cust/t${TZ}`)).ports.length, 2);
+    // לחיצה כפולה על "שולם" – עדיין רישום אחד לכל קו
+    assert.equal((await call('markOrderPaid', E1, { id, method: 'cash' })).result.dup, true);
+    assert.equal((await coll(`b/${A}/lineLog`)).length, 2);
+  });
+  it('תשלום → ביטול הזמנה (cancelOrder): אין רישום lineLog, ports של הלקוח חוזר, checkLines לא מתריע', async () => {
+    await setup();
+    const id = await paidOrder();
+    const c = await call('cancelOrder', MGR, { id, reason: 'הלקוח התחרט' });
+    assert.equal(c.status, 'OK', c.text);
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'cancel');
+    assert.equal((await coll(`b/${A}/lineLog`)).length, 0);
+    assert.deepEqual((await get(`b/${A}/cust/t${TZ}`)).ports, []);
+    assert.equal((await call('checkLines', E2, { lines: [{ phone: L1 }, { phone: L2 }] })).result.hits.length, 0);
+  });
+  it('הזמנה ישנה (רישומים עם מזהה אקראי, בלי paid.pk): ביטול מנקה; רשומת ניוד אחרת של הלקוח נשארת', async () => {
+    await setup();
+    const id = await paidOrder();
+    const o = await get(`b/${A}/ord/${id}`);
+    const d0 = new Date(o.paid.at).toISOString().slice(0, 10);
+    // מדמים את המצב שלפני התיקון: מזהים אקראיים, בלי pk, ורשומת ניוד מיובאת נוספת (תאריך אחר) + רשומה מועשרת
+    await prep(async (d) => {
+      for (const x of await coll(`b/${A}/lineLog`)) await d.doc(`b/${A}/lineLog/${x.id}`).delete();
+      await d.doc(`b/${A}/lineLog/rndA1`).set({ phone: L1, br: 'br1', ord: id, at: o.paid.at, by: E1, tz: TZ2 });
+      await d.doc(`b/${A}/lineLog/rndA2`).set({ phone: L2, br: 'br1', ord: id, at: o.paid.at, by: E1 });
+      await d.doc(`b/${A}/lineLog/other`).set({ phone: L1, br: 'br2', ord: 'zzz', at: o.paid.at, by: E2 });
+      const p = Object.assign({}, o.paid); delete p.pk;
+      await d.doc(`b/${A}/ord/${id}`).update({ paid: p });
+      await d.doc(`b/${A}/cust/t${TZ}`).update({ ports: [{ d: '2025-01-02', phone: L1 }, { d: d0, phone: L1, tz: TZ2, br: 'br1' }, { d: d0, phone: L2, br: 'br1', co: 'פרטנר' }] });
+    });
+    assert.equal((await call('unpayOrder', MGR, { id, reason: 'טעות' })).status, 'OK');
+    assert.deepEqual((await coll(`b/${A}/lineLog`)).map((x) => x.id), ['other']);
+    assert.deepEqual((await get(`b/${A}/cust/t${TZ}`)).ports, [{ d: '2025-01-02', phone: L1 }, { d: d0, phone: L2, br: 'br1', co: 'פרטנר' }]);
+    // תשלום חוזר אחרי הביטול – לא מכפיל
+    assert.equal((await call('markOrderPaid', E1, { id, method: 'cash' })).status, 'OK');
+    assert.equal((await coll(`b/${A}/lineLog`)).filter((x) => x.ord === id).length, 2);
+  });
+  it('הזמנה ישנה ששולמה, בוטלה ושולמה שוב לפני התיקון (2 רישומים אקראיים לקו): ביטול מוחק את כולם', async () => {
+    await setup();
+    const id = await paidOrder();
+    await prep(async (d) => {
+      await d.doc(`b/${A}/lineLog/dup1`).set({ phone: L1, br: 'br1', ord: id, at: 1, by: E1 });
+      await d.doc(`b/${A}/lineLog/dup2`).set({ phone: L2, br: 'br1', ord: id, at: 1, by: E1 });
+    });
+    assert.equal((await call('unpayOrder', MGR, { id, reason: 'טעות' })).status, 'OK');
+    assert.equal((await coll(`b/${A}/lineLog`)).length, 0);
+  });
+});
+
 // 2026-11-10 (ייבוא לקוחות מלא): לא תקין נשמר עם סימון, שדות מידע, חברת ניוד / נויד בפועל, איחוד רק לפי מזהה תקין, מתג cellular
 describe('ייבוא לקוחות מלא – סימון "לא תקין" ושדות מידע', () => {
   it('טלפון/ת"ז/מייל לא תקינים נשמרים ב-bph/btz/bml; שורה בלי מזהה תקין – לקוח נפרד (לא מתאחד); שדות מידע וקו עם חברה ונויד בפועל', async () => {
