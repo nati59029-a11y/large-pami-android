@@ -608,8 +608,9 @@ async function secInbox(request) {
   const now = Date.now();
   const waOf = () => { const w = W.waNum(input.wa); if (!w) throw bad('bad-wa', 'מספר לא תקין'); return w; };
   if (op === 'list') {
-    const [ss, ins, ds, cs] = await Promise.all([db.collection('sec_snd').orderBy('lastIn', 'desc').limit(150).get(), db.collection('sec_in').orderBy('rt', 'desc').limit(300).get(),
-      db.collection('sec_draft').where('st', 'in', ['pend', 'fail', 'sending']).limit(300).get(), db.doc('sec_cfg/wa').get()]);
+    // רק ווצאפ: מיילים (ch:'mail') וטיוטות מייל (בלי שדה wa) לא תופסים את המקומות (אינדקסים ch+rt ו-st+wa ב-firestore.indexes.json)
+    const [ss, ins, ds, cs] = await Promise.all([db.collection('sec_snd').orderBy('lastIn', 'desc').limit(150).get(), db.collection('sec_in').where('ch', '==', 'wa').orderBy('rt', 'desc').limit(300).get(),
+      db.collection('sec_draft').where('st', 'in', ['pend', 'fail', 'sending']).where('wa', '>', '').limit(300).get(), db.doc('sec_cfg/wa').get()]);
     const last = {}, flags = {};
     for (const d of ins.docs) { const x = d.data(); if (x.own === 'mgr') continue; if (!last[x.from]) last[x.from] = inOut(d.id, x); (flags[x.from] = flags[x.from] || new Set()); (x.flags || []).forEach((f) => flags[x.from].add(f)); if (x.own === 'ord') flags[x.from].add('ord'); }
     const pend = {};
@@ -912,4 +913,4 @@ exports.secSend = onCall({ secrets: [WA_ACCESS_TOKEN] }, wrap('secSend', (r) => 
 exports.secWaCfg = onCall(wrap('secWaCfg', secWaCfg));
 exports.secAdminWa = onCall(wrap('secAdminWa', secAdminWa));
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handleHook, ingest, work, workIn, secSend, shrinkOld, requeue, REQ_MAX, waCfgOf, syncRoute, autoStop, MGR_TOOLS, IN_SYS, notifyMgrs, pubInfo, staffNames } }); // notifyMgrs, pubInfo, staffNames – גם לשלב 6 (secretary-google.js)
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handleHook, ingest, work, workIn, secSend, secInbox, shrinkOld, requeue, REQ_MAX, waCfgOf, syncRoute, autoStop, MGR_TOOLS, IN_SYS, notifyMgrs, pubInfo, staffNames } }); // notifyMgrs, pubInfo, staffNames – גם לשלב 6 (secretary-google.js)

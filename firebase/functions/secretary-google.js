@@ -375,10 +375,12 @@ async function secMail(request) {
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const now = Date.now();
   if (op === 'list') {
-    const [ins, ds, ms, cl] = await Promise.all([db.collection('sec_in').where('ch', '==', 'mail').limit(400).get(), db.collection('sec_draft').where('ch', '==', 'mail').limit(400).get(),
+    // המיון לפי זמן המייל – בשאילתה עצמה, לפני החיתוך (אינדקס ch+t ב-firestore.indexes.json). הטיוטות – לפי המזהים של המיילים שמוצגים (מזהה הטיוטה = מזהה המייל)
+    const [ins, ms, cl] = await Promise.all([db.collection('sec_in').where('ch', '==', 'mail').orderBy('t', 'desc').limit(200).get(),
       db.doc('sec_cfg/mail').get(), db.collection('sec_clean').where('st', '==', 'pend').limit(20).get()]);
-    const dr = {}; for (const d of ds.docs) dr[d.id] = d.data();
-    const mails = ins.docs.map((d) => mailOut(d.id, d.data(), dr[d.id])).sort((a, b) => b.t - a.t).slice(0, 200);
+    const dr = {};
+    if (ins.docs.length) for (const d of await db.getAll(...ins.docs.map((x) => db.doc('sec_draft/' + x.id)))) if (d.exists && d.get('ch') === 'mail') dr[d.id] = d.data();
+    const mails = ins.docs.map((d) => mailOut(d.id, d.data(), dr[d.id]));
     const m = mailCfgOf(ms);
     return { ok: true, mails, boxes: boxesOut(m), max: m.max, cleanN: cl.size };
   }

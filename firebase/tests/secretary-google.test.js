@@ -696,3 +696,54 @@ describe('Google Calendar: סנכרון דו־כיווני (70), אישי ושל
     assert.equal((await coll(`b/${A}/sec_cal`)).length, 1);
   });
 });
+
+// =================================================================================
+// תיקון סבב 1 (בדיקה עצמאית של שלב 6)
+// =================================================================================
+const hex40 = (i) => require('node:crypto').createHash('sha1').update('m' + i).digest('hex');
+describe('תיקון 2+3: תיבת המייל ותיבת הווצאפ – מיון לפי זמן בשאילתה, לפני החיתוך, וסינון לפי ערוץ', () => {
+  beforeEach(() => seed());
+
+  it('יותר מ-400 מיילים: המייל החדש ביותר והטיוטה שלו מוצגים; כרטיס הווצאפ לא נדחק על ידי מיילים וטיוטות מייל', async () => {
+    const now = Date.now(), WA_NUM = '972501234567';
+    await prep(async (d) => {
+      for (let k = 0; k < 2; k++) {
+        const b = d.batch();
+        for (let i = k * 250; i < (k + 1) * 250; i++) {
+          b.set(d.doc(`b/${A}/sec_in/g${hex40(i)}`), { ch: 'mail', own: 'sec', box: 'gm0000000000000001', from: 'old' + i + '@x.example', subj: 'ישן ' + i, text: 'x', t: now - 864e5 * 30 - i, rt: now, st: 'done', flags: [] });
+          b.set(d.doc(`b/${A}/sec_draft/g${hex40(i)}`), { ch: 'mail', in: 'g' + hex40(i), to: 'old' + i + '@x.example', st: 'pend', t: now, text: 'x' });
+        }
+        await b.commit();
+      }
+      const b = d.batch();
+      b.set(d.doc(`b/${A}/sec_in/g${hex40('new')}`), { ch: 'mail', own: 'sec', box: 'gm0000000000000001', from: 'new@x.example', subj: 'החדש ביותר', text: 'x', t: now, rt: now - 5000, st: 'done', flags: [] });
+      b.set(d.doc(`b/${A}/sec_draft/g${hex40('new')}`), { ch: 'mail', in: 'g' + hex40('new'), to: 'new@x.example', st: 'pend', t: now, text: 'x', src: 'ai' });
+      b.set(d.doc(`b/${A}/sec_snd/${WA_NUM}`), { wa: WA_NUM, name: 'לקוח ווצאפ', lastIn: now - 60000, first: now - 60000, n: 1 });
+      b.set(d.doc(`b/${A}/sec_in/mwa1`), { ch: 'wa', wamid: 'wamid.1', from: WA_NUM, name: 'לקוח ווצאפ', t: now - 60000, rt: now - 60000, type: 'text', text: 'שלום מווצאפ', own: 'sec', st: 'sus', flags: ['sus'] });
+      b.set(d.doc(`b/${A}/sec_draft/mwa1`), { in: 'mwa1', wa: WA_NUM, text: 'טיוטה לווצאפ', st: 'pend', t: now - 60000 });
+      await b.commit();
+    });
+    const r = await call('secMail', M1, { op: 'list' });
+    assert.ok(r.ok, r.msg);
+    assert.equal(r.r.mails.length, 200);
+    assert.equal(r.r.mails[0].subj, 'החדש ביותר', 'המייל החדש ביותר – ראשון');
+    assert.deepEqual(r.r.mails[0].draft, { st: 'pend', src: 'ai' }, 'סימון "טיוטה ממתינה" נשמר');
+    for (let i = 1; i < r.r.mails.length; i++) assert.ok(r.r.mails[i - 1].t >= r.r.mails[i].t, 'ממוין לפי זמן');
+    const w = await T.scoped((x) => WA.secInbox(x))(req(M1, { op: 'list' }));
+    const card = w.cards.find((c) => c.wa === WA_NUM);
+    assert.ok(card, 'כרטיס הווצאפ מוצג');
+    assert.ok(card.last && card.last.text === 'שלום מווצאפ', 'ההודעה האחרונה מוצגת למרות 451 מיילים חדשים יותר');
+    assert.ok(card.flags.includes('sus'), 'סימון "חשוד" נשמר');
+    assert.equal(card.pend, 1, 'הטיוטה הממתינה נספרת למרות 451 טיוטות מייל');
+  });
+
+  it('האינדקסים שהשאילתות צריכות מוגדרים ב-firestore.indexes.json, והקובץ מחובר ב-firebase.json', () => {
+    const fs = require('node:fs'), path = require('node:path');
+    const ix = JSON.parse(fs.readFileSync(path.join(H.ROOT, 'firestore.indexes.json'), 'utf8')).indexes;
+    const has = (cg, f) => ix.some((x) => x.collectionGroup === cg && x.queryScope === 'COLLECTION' && JSON.stringify(x.fields) === JSON.stringify(f));
+    assert.ok(has('sec_in', [{ fieldPath: 'ch', order: 'ASCENDING' }, { fieldPath: 't', order: 'DESCENDING' }]));
+    assert.ok(has('sec_in', [{ fieldPath: 'ch', order: 'ASCENDING' }, { fieldPath: 'rt', order: 'DESCENDING' }]));
+    assert.ok(has('sec_draft', [{ fieldPath: 'st', order: 'ASCENDING' }, { fieldPath: 'wa', order: 'ASCENDING' }]));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).firestore.indexes, 'firestore.indexes.json');
+  });
+});
