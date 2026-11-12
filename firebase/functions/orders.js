@@ -932,6 +932,13 @@ async function updateOrder(request) {
       notes.push(...pc);
       out = { warn };
     }
+    // 12.11.2026 (החלטה 9, סבב 2): רק הניוד השתנה (בלי items) – בודקים את הפריטים השמורים מול הניוד החדש, כדי שביטול המתנה לא ישאיר מארז בודד ללקוח סיטונאי.
+    // על עותק בלבד – הפריטים לא נשמרים מחדש. הזמנה בלי מוצרי cto (או לקוח לא סיטונאי) – לא נחסמת.
+    if (!raw && cell !== undefined && Array.isArray(d.items) && d.items.some((x) => x && x.pid)) {
+      const its = d.items.map((x) => Object.assign({}, x));
+      const ws = await isWs(tx, db, d.custId);
+      if (ws) cartons(its, plain(await loadProds(tx, db, its.filter((x) => x.pid).map((x) => x.pid))), ws, d.items, cell, d.cell);
+    }
     // סכום: מחושב מחדש כשהפריטים או הניוד השתנו. הזמנה בלי חבילות חדשות – סכום הפריטים (כמו קודם)
     if (raw || cell !== undefined) {
       const its = raw ? upd.items : (Array.isArray(d.items) ? d.items : []);

@@ -556,6 +556,15 @@ describe('קרטונים סגורים ללקוח סיטונאי (cto)', () => {
     assert.equal((await call('updateOrder', E1, { id, items: G, cell: null })).reason, 'cto-qty');
     assert.equal((await call('updateOrder', E1, { id, items: G, cell: { lines: [{ phone: '0521111111', plan: 'lpG' }] } })).reason, 'cto-qty');
     assert.equal((await get(`b/${A}/ord/${id}`)).items.length, 2);
+    // סבב 2: ביטול הניוד בלי items – נבדקים הפריטים השמורים; נדחה, הסכום והמלאי לא משתנים. הזמנה בלי cto – לא נחסמת
+    const o0 = await get(`b/${A}/ord/${id}`), q0 = (await get(`b/${A}/prod/pC`)).q.br1;
+    assert.equal((await call('updateOrder', E1, { id, cell: null })).reason, 'cto-qty');
+    assert.equal((await call('updateOrder', E1, { id, cell: { lines: [{ phone: '0521111111', plan: 'lpG' }] } })).reason, 'cto-qty');
+    const o1 = await get(`b/${A}/ord/${id}`);
+    assert.deepEqual([o1.total, o1.items.length, !!o1.cell, (await get(`b/${A}/prod/pC`)).q.br1], [o0.total, 2, true, q0]);
+    const r2 = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId: 'cW', items: [{ pid: 'pE', qty: 1, price: 6 }], cell: { lines: [{ phone: '0521111112', plan: 'lpG' }] } });
+    assert.equal(r2.status, 'OK', r2.text);
+    assert.equal((await call('updateOrder', E1, { id: r2.result.id, cell: null })).status, 'OK');
     const u = await call('updateOrder', E1, { id, items: [G[0]], cell: null });
     assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 60);
     // ליקוי 3: קרטון ב-5 ומתנה ב-6 – הנחה 6 (המתנה חינם) בשני הסדרים
