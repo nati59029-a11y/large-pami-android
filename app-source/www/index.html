@@ -4867,13 +4867,13 @@ const coSlipB=x=>{if(!coSlipMiss(x))return '';const id=esc(String(x.src||x.id));
 ACT.coSlipW=el=>{const src=el.dataset.src;if(!ZC||!/^mcp/.test(src||''))return;dlg(`<h3>דף הוצאה מקופה</h3><p class="note">צלם או צרף את הדף שנרשם בקופה על ההשלמה במזומן. הצילום יישלח עם הסגירה, והמנהל יצרף אותו.</p><div class="row" style="gap:6px;flex-wrap:wrap"><label class="btn grow" style="cursor:pointer">📷 צלם דף<input type="file" accept="image/*" capture="environment" data-c="coSlipWF" data-src="${esc(src)}" hidden></label><label class="btn g grow" style="cursor:pointer">🖼 גלריה<input type="file" accept="image/*" data-c="coSlipWF" data-src="${esc(src)}" hidden></label></div><button class="btn g w" style="margin-top:8px" data-a="closeDlg">ביטול</button>`)};
 CHG.coSlipWF=async el=>{const fl=(el.files||[])[0],src=el.dataset.src;el.value='';if(!fl||!ZC)return;const Z=ZC;let du;try{du=await ocrDown(await rdU(fl),1600);if(!imgOk(du))throw 0}catch(e){return toast('תמונה לא תקינה')}if(ZC!==Z)return;Z.nsp=Z.nsp||{};Z.nsp[src]=du;closeDlg();toast('✓ הדף צורף לסגירה');zcChkR()};
 /* מנהל, באישור סגירה מעובד: הצילומים שהעובד צירף (אחרי 3 צילומי Z ודף הפתיחה, לפי סדר nsp) נכתבים על התשלום שעדיין חסר לו דף */
-async function zcNsPut(it){const L=(it.nsp||[]).filter(src=>{const p=coPay(src);return p&&!p.file});if(!L.length||!it.np)return 0;let du='',n=0;
+async function zcNsPut(it){/* 12.11 (בדיקה עצמאית): רק תשלומים שמסומנים "חסר דף" בסגירה הזו – לא תשלום אחר שהוכנס לרשימה */const ok=new Set(((it.co&&it.co.ns)||[]).map(x=>String(x&&x.id)));const L=(it.nsp||[]).filter(src=>{const p=ok.has(String(src))&&coPay(src);return p&&!p.file});if(!L.length||!it.np)return 0;let du='',n=0;
  try{for(let k=0;k<it.np;k++)du+=gv(await fsx('/closings/'+it.id+'/p/'+k),'data');const P=JSON.parse(du.slice(6));for(const src of L){const i=it.nsp.indexOf(src),pic=P[4+i];if(pic&&imgOk(pic)&&await coSlipPut(src,pic))n++}}catch(e){}return n}
 ACT.coSlip=el=>{const src=el.dataset.src,p=coPay(src);if(!p||!/^mcp/.test(src))return toast('התשלום לא נמצא במכשיר');const t=S.tx.find(t=>(t.pays||[]).includes(p));
  dlg(`<h3>דף הוצאה מקופה</h3><p class="note">${esc(s_(p.cowhy)||'השלמה במזומן')}${t?' ← '+esc(subName(t))+(t.inv?' '+esc(t.inv):''):''} · ${ils(p.a)} · ${esc(dfmt(p.d))}. צלם או צרף את הדף שנרשם בקופה.</p><div class="row" style="gap:6px;flex-wrap:wrap"><label class="btn grow" style="cursor:pointer">📷 צלם דף<input type="file" accept="image/*" capture="environment" data-c="coSlipF" data-src="${esc(src)}" hidden></label><label class="btn g grow" style="cursor:pointer">🖼 גלריה<input type="file" accept="image/*" data-c="coSlipF" data-src="${esc(src)}" hidden></label></div><button class="btn g w" style="margin-top:8px" data-a="closeDlg">ביטול</button>`)};
 CHG.coSlipF=async el=>{const fl=(el.files||[])[0],src=el.dataset.src;el.value='';if(!fl)return;let du;try{du=await ocrDown(await rdU(fl),1600);if(!imgOk(du))throw 0}catch(e){return toast('תמונה לא תקינה')}
  if(!(await coSlipPut(src,du)))return toast('שמירת הצילום נכשלה');closeDlg();toast('✓ הדף צורף');coSlipRe()};
-async function coSlipPut(src,du){const p=coPay(src);if(!p||!imgOk(du))return false;const fid='z'+uid();try{await fput(fid,du)}catch(e){return false}p.file=fid;save();/* הסימון בסיבה שכבר נטענה מהענן – יורד מיד (בענן: coSync) */for(const x of(COQ&&COQ.L)||[])if(x&&x.id===src&&typeof x.why==='string')x.why=x.why.replace(' · '+ZNS,'');coSched();return true}
+var COSL=new Set();/* צירוף דף בלבד – העדכון בענן לא משנה סכום/תאריך, בלי אזהרת שיוך */async function coSlipPut(src,du){const p=coPay(src);if(!p||!imgOk(du))return false;const fid='z'+uid();try{await fput(fid,du)}catch(e){return false}p.file=fid;COSL.add(String(src));save();/* הסימון בסיבה שכבר נטענה מהענן – יורד מיד (בענן: coSync) */for(const x of(COQ&&COQ.L)||[])if(x&&x.id===src&&typeof x.why==='string')x.why=x.why.replace(' · '+ZNS,'');coSched();return true}
 /* אחרי צירוף: הסגירות שממתינות לאישור – מעדכנים את "חסר דף", והמסכים הפתוחים */
 function coSlipRe(){for(const it of(ZQ&&ZQ.L)||[])if(it.co&&it.co.ns&&it.co.ns.length){it.co.ns=it.co.ns.filter(coSlipMiss);it.need=it.need.filter(m=>!m.startsWith(ZNS)).concat(zcNsNeed(it))}
  try{zcChkR()}catch(e){}try{zcRe()}catch(e){}try{zsRe()}catch(e){}}
@@ -4894,9 +4894,10 @@ async function coSync(){if(!isA()||Date.now()<(COS.off||0)||!bzF('cashClose'))re
   const fields={reg:sv(w.f.reg),d:sv(w.f.d),tm:sv(w.f.tm||''),a:dv(w.f.a),why:sv(w.f.why),dep:sv(coDep(w.f.why))};
   const patch=async()=>{try{return await fsx('/cashout/'+id+'?'+Object.keys(fields).map(k=>'updateMask.fieldPaths='+k).join('&')+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields})})}catch(e){if(e.code===404||e.code===403)return null;throw e}};
   const post=async()=>{const nf=Object.assign({uid:sv(SY.uid),by:sv(fbBy()),t:iv(Date.now()),src:sv(w.f.src),zc:sv(''),dp:sv('')},fields);try{await fsx('/cashout?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields:nf})});return 1}catch(e){if(e.code===409)return 0;throw e}};
-  if(w.w){const d=await patch();if(!d){C[id]={h:w.h,w:1,miss:1};keep();continue}if(c)coWarn(d)}
-  else if(c&&!c.miss){const d=await patch();if(d)coWarn(d);else await post()}
-  else if(!(await post())){const d=await patch();if(d)coWarn(d)}
+  const cw=d=>{if(COSL.delete(id))return;coWarn(d)};
+  if(w.w){const d=await patch();if(!d){C[id]={h:w.h,w:1,miss:1};keep();continue}if(c)cw(d)}
+  else if(c&&!c.miss){const d=await patch();if(d)cw(d);else await post()}
+  else if(!(await post())){const d=await patch();if(d)cw(d)}
   C[id]=Object.assign({h:w.h},w.w?{w:1}:{});keep()}
  }catch(e){if(e.code===403)COS.off=Date.now()+6e5;throw e}finally{COS.b=0;if(COS.again){COS.again=0;coSched()}}}
 /* ---- בדיקת הסגירה ---- */
