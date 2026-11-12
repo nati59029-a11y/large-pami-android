@@ -535,7 +535,7 @@ async function secSend(request, opts) {
   const dRef = db.doc('sec_draft/' + id);
   const [ds, cs] = await Promise.all([dRef.get(), db.doc('sec_cfg/wa').get()]);
   const dr = ds.exists ? ds.data() : null;
-  if (!dr || dr.auto === true) throw pre('not-found', 'הטיוטה לא נמצאה');
+  if (!dr || dr.auto === true || dr.ch === 'mail') throw pre('not-found', 'הטיוטה לא נמצאה'); // טיוטת מייל – רק secMailSend (שלב 6)
   if (dr.st === 'sent' && dr.sid === input.sendId) return { ok: true, already: true, id };
   if (!['pend', 'fail', 'sending'].includes(dr.st)) throw pre('not-pending', dr.st === 'sent' ? 'ההודעה כבר נשלחה' : 'הטיוטה כבר טופלה');
   const cfg = waCfgOf(cs);
@@ -852,7 +852,7 @@ async function shrinkOld(db, cutoff) {
         const x = d.data();
         const what = col === 'sec_in' ? (W.CLS[x.cls] || 'הודעה') + (x.type === 'audio' ? ' קולית' : x.type === 'other' ? ' (קובץ)' : '') : (x.auto ? 'תשובה אוטומטית' : 'טיוטה') + (x.st === 'sent' ? ' שנשלחה' : '');
         const sum = (what + ' – ' + String(x.text || x.tr || '').replace(/\s+/g, ' ').slice(0, 40) + (String(x.text || x.tr || '').length > 40 ? '…' : '')).slice(0, 120);
-        b.update(d.ref, { sum, text: FieldValue.delete(), tr: FieldValue.delete(), media: FieldValue.delete(), why: FieldValue.delete(), tf: FieldValue.delete(), short: true });
+        b.update(d.ref, { sum, text: FieldValue.delete(), tr: FieldValue.delete(), media: FieldValue.delete(), why: FieldValue.delete(), tf: FieldValue.delete(), short: true, ...(x.subj !== undefined ? { subj: FieldValue.delete() } : {}) }); // subj – מייל (שלב 6)
         n++;
       }
       await b.commit();
@@ -912,4 +912,4 @@ exports.secSend = onCall({ secrets: [WA_ACCESS_TOKEN] }, wrap('secSend', (r) => 
 exports.secWaCfg = onCall(wrap('secWaCfg', secWaCfg));
 exports.secAdminWa = onCall(wrap('secAdminWa', secAdminWa));
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handleHook, ingest, work, workIn, secSend, shrinkOld, requeue, REQ_MAX, waCfgOf, syncRoute, autoStop, MGR_TOOLS, IN_SYS } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handleHook, ingest, work, workIn, secSend, shrinkOld, requeue, REQ_MAX, waCfgOf, syncRoute, autoStop, MGR_TOOLS, IN_SYS, notifyMgrs, pubInfo, staffNames } }); // notifyMgrs, pubInfo, staffNames – גם לשלב 6 (secretary-google.js)

@@ -140,6 +140,7 @@ function calOut(id, x, me) {
   if (x.st === 'prop') o.to = x.to === 'biz' ? 'biz' : 'me';
   if (x.keepOff) o.keepOff = true;
   if (x.rem === true) o.rem = true; // שלב 4: תזכורת שהמנהל קבע (ולא אירוע)
+  if (x.offW) o.offW = String(x.offW).slice(0, 20); // שלב 6: אירוע מיומן Google בשישי/שבת/חג, כשהמנהל בחר "להזהיר" (72)
   o.mine = !!x.uid && x.uid === me;
   return o;
 }

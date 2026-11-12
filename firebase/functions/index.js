@@ -210,3 +210,6 @@ Object.assign(exports, require('./secretary-remind'));
 // המזכירה שלב 5 (2026-11-11): secWaHook (webhook ווצאפ, us-central1 בלבד – כתובת קבועה אצל Meta), secWaWork (טריגר תור, europe-west1),
 // secInbox, secSend, secWaCfg (מנהל העסק), secAdminWa (מנהל־על). secretary-wa.js
 Object.assign(exports, require('./secretary-wa'));
+// המזכירה שלב 6 (2026-11-12): secOAuthCb (חזרה מ-Google, us-central1 בלבד – כתובת קבועה אצל Google), secMailHook (Pub/Sub – התראות Gmail),
+// secCalSync (מתוזמנת – יומן Google וחידוש התראות Gmail), secGoogle, secMail, secMailSend (מנהל העסק), secAdminMail (מנהל־על). secretary-google.js
+Object.assign(exports, require('./secretary-google'));
