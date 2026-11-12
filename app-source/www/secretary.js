@@ -1,4 +1,4 @@
-/* SEC:1+2+3+4+5 – המזכירה העסקית. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
+/* SEC:1+2+3+4+5+6 – המזכירה העסקית. שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
    שלב 2: secFin – נתוני הכספים לצ'אט ולמראה, מחושבים בפונקציות של מסכי האפליקציה עצמם (monthIncome, monthExpense, monthOwner, catTotal,
    inv/bal/dueOf, bsum, homeCards, dueStats, cfDebits, cfMonths) – אין כאן נוסחה כספית שנייה; מראה לענן אחרי כל שמירה (לכל היותר פעם ב-3 דקות);
    מסך הצ'אט (מקורות, "נכון ל-", "חשבי לעומק", אחוז ניצול, סף תזרים, "לא רלוונטי", מתג המראה).
@@ -227,6 +227,7 @@ function setH(S){return `<div class="card"><b>מראה הכספים בענן</b>
  <div class="card" style="margin-top:8px"><b>סף התראת תזרים</b><p class="note" style="margin:4px 0 8px">${S.cfTh!=null?'הסף שאישרת: '+esc(Number(S.cfTh).toLocaleString('he-IL'))+' ₪':'עדיין לא נקבע. המזכירה תציע סף כשתשאלו על התזרים.'}</p><button class="chip" data-a="secThEd" style="min-height:40px">${S.cfTh!=null?'שינוי':'קביעת סף'}</button></div>
  <div class="card" style="margin-top:8px"><b>פגישה בשישי, בשבת או בחג</b><p class="note" style="margin:4px 0 8px">מה לעשות כשאירוע נקבע ליום שאינו יום עסקים.</p><div class="chips" role="radiogroup"><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="warn"${S.we!=='accept'?' checked':''}> להזהיר ולהציע יום אחר</label><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="accept"${S.we==='accept'?' checked':''}> לקבל בלי הערה</label></div></div>
  ${waSetH()}
+ ${gSetH()}
  ${ntH(S)}
  <button class="btn g w" data-a="secEdit" style="margin-top:10px">שינוי שם ואופן פנייה</button><button class="btn g w" data-a="secSetX" style="margin-top:8px">חזרה לשיחה</button>
  <div class="sec"><h3>יומן פעולות</h3></div>${logH()}`}
@@ -348,7 +349,7 @@ ACT.secSDel=el=>{const id=el.dataset.id;ask('למחוק את המידע הרגי
 /* ---------- יומן (8.2 מסך 4): רשימה (ברירת מחדל) ושבוע; שישי/שבת/חג בגוון עדין; הצעות מהמזכירה – לאישור ---------- */
 async function calLoad(){X.cb=1;try{X.cl=await fnCall('secCal',{op:'list'})}catch(e){X.cl={err:e&&e.message||'לא נטען'}}finally{X.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
 const SRC={mgr:'ידני',sec:'מהמזכירה',import:'ייבוא',wa:'מווצאפ'};
-function evH(e){return `<div class="secli"><p><b>${e.tm?'<bdi dir="ltr">'+esc(e.tm)+'</bdi> · ':''}${esc(e.title)}</b> ${e.rem?'<span class="sectags">תזכורת</span>':''}<span class="sectags">${e.biz?'של העסק':'אישי'}</span><span class="sectags">${esc(SRC[e.src]||'ידני')}</span></p>${e.note?`<small class="note">${esc(e.note)}</small>`:''}<div class="secrow"><button class="chip" data-a="secEvEd" data-id="${esc(e.id)}">ערוך</button><button class="chip" data-a="secEvDel" data-id="${esc(e.id)}">מחק</button></div></div>`}
+function evH(e){return `<div class="secli"><p><b>${e.tm?'<bdi dir="ltr">'+esc(e.tm)+'</bdi> · ':''}${esc(e.title)}</b> ${e.rem?'<span class="sectags">תזכורת</span>':''}<span class="sectags">${e.biz?'של העסק':'אישי'}</span><span class="sectags">${esc(SRC[e.src]||'ידני')}</span>${e.offW?'<span class="sectags w">'+esc(e.offW)+'</span>':''}</p>${e.note?`<small class="note">${esc(e.note)}</small>`:''}<div class="secrow"><button class="chip" data-a="secEvEd" data-id="${esc(e.id)}">ערוך</button><button class="chip" data-a="secEvDel" data-id="${esc(e.id)}">מחק</button></div></div>`}
 function calH(){const R=X.cl;if(!R){if(!X.cb)calLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="cal">נסה שוב</button></div>`;
  const td=R.today||todayS(),E=R.events||[],pend=E.filter(e=>e.st==='prop'),ok=E.filter(e=>e.st==='ok'&&e.d>=td),view=X.cv||'list';
  let h=`<div class="secrow" style="margin:0 0 8px"><button class="btn" data-a="secEvAdd" style="flex:1">+ אירוע</button><button class="chip${view==='list'?' on':''}" data-a="secCv" data-v="list">רשימה</button><button class="chip${view==='week'?' on':''}" data-a="secCv" data-v="week">שבוע</button></div>`;
@@ -626,6 +627,128 @@ FRM.secSwMgr=async f=>{const id=f.dataset.id,u=f.dataset.u,x=fd(f),num=String(x.
  if(num)ask('לאשר את '+num+' כ"מספר המנהל"? מהמספר הזה אפשר יהיה לשאול על היומן וליצור תזכורות ביומן האישי שלו. כדאי לאמת את המספר מול המנהל.',run,'אישור');else run()};
 ACT.secSwStop=async el=>{const id=el.dataset.id,on=el.dataset.on==='1';el.disabled=true;try{SW[id]=await window.fnCall('secAdminWa',{bizId:id,op:'stop',on});toast(on?'נעצר':'העצירה בוטלה')}catch(e){err(e)}finally{el.disabled=false;if(cur().v==='sab')rerender()}};
 ACT.secSwStopAll=el=>{const id=el.dataset.id;ask('לעצור שליחה אוטומטית בווצאפ בכל העסקים?',async()=>{try{const r=await window.fnCall('secAdminWa',{bizId:id,op:'stopAll',on:true});toast('נעצר ב-'+r.n+' עסקים');swLoad(id)}catch(e){err(e)}},'עצור הכל')};
+
+/* =====================================================================================
+   שלב 6: Gmail ויומן Google (3.3, 3.5, 7.1, 10.1, 10.2; החלטות 26א, 27, 28, 29, 70, 72, פ3).
+   לשונית "מייל": תיבת המיילים, מייל עם סימון "חשוד" (לא מבוצע), טיוטה רק בבקשה, "שלח מה-Gmail של העסק" – רק בלחיצה (secMailSend, מזהה שליחה חד־פעמי),
+   ורשימת ניקוי ספאם שממתינה לאישור מנהל העסק – העברה לאשפה של Gmail בלבד (לא מחיקה לצמיתות).
+   בהגדרות: חיבור/ניתוק תיבות Gmail (עד המספר שמנהל־על קבע) ויומן Google, "סנכרן עכשיו". בכרטיס העסק של מנהל־על: מספר התיבות, סריקת היסטוריה
+   (הכול / 12 / 6 / חודש / בכלל לא) עם ספירה והערכת עלות לפני הסריקה, וניתוק תיבה. הכול דרך השרת (secGoogle, secMail, secMailSend, secAdminMail).
+   האסימונים לא מגיעים לטלפון בשום שלב.
+   ===================================================================================== */
+const css6=document.createElement('style');
+css6.textContent='.secml .li{align-items:flex-start;cursor:pointer}.secml .li small{display:block;overflow-wrap:anywhere}.secml .m{min-width:0}'
++'.seccl{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line)}.seccl:last-child{border-bottom:0}.seccl input{width:22px;height:22px;flex:none;margin-top:2px;accent-color:var(--acc)}.seccl span{min-width:0;overflow-wrap:anywhere}'
++'.secaddr{overflow-wrap:anywhere;word-break:break-all}';
+document.head.appendChild(css6);
+TABS.splice(2,0,['mail','מייל']);
+SRC.gcal='מיומן Google';
+const MFL={sus:['תוכן חשוד – לא מבוצע','w'],mgrMail:['מכתובת של מנהל','w'],spam:['ספאם','w'],promo:['פרסומת',''],big:['מייל גדול – רק תקציר',''],cut:['קוצר',''],file:['קובץ מצורף','g'],chk:['לבדוק לפני שליחה','w'],unsure:['המזכירה לא בטוחה','w']};
+const mflH=a=>(a||[]).filter(f=>MFL[f]).map(f=>`<span class="sectags ${MFL[f][1]}">${MFL[f][0]}</span>`).join('');
+const kb=z=>z>=1048576?(z/1048576).toFixed(1)+' MB':Math.max(1,Math.round((z||0)/1024))+' KB';
+const usd=mc=>'$'+((Number(mc)||0)/100000).toFixed(2);
+const WHY={spam:'ספאם',promo:'פרסומת',big:'גדול וישן'};
+const MF=[['all','הכול'],['pend','עם טיוטה'],['sus','חשוד'],['promo','פרסומות']];
+/* ---------- לשונית "מייל" ---------- */
+async function mlLoad(){X.mlb=1;try{const r=await fnCall('secMail',{op:'list'});X.ml.list=r&&Array.isArray(r.mails)?r:{err:'לא נטען'}}catch(e){X.ml.list={err:e&&e.message||'לא נטען'}}finally{X.mlb=0;if(cur().v==='sec'&&!typing())rerender()}}
+function mailH(){const M=X.ml;if(M.clean)return cleanH();if(M.cur)return mlCardH();const R=M.list;if(!R){if(!X.mlb)mlLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="mail">נסה שוב</button></div>`;
+ const f=M.f||'all',L=(R.mails||[]).filter(m=>f==='all'||(f==='pend'?m.draft&&['pend','fail'].includes(m.draft.st):f==='promo'?(m.flags||[]).some(x=>x==='promo'||x==='spam'):(m.flags||[]).includes(f)));
+ let h='';
+ if(R.cleanN)h+=`<div class="card secwarn" id="secClPend" style="margin-bottom:8px"><b>רשימת ניקוי ממתינה לאישורך (${R.cleanN})</b><p class="note" style="margin:4px 0 8px">מנהל המערכת הכין רשימת מיילים לפינוי. שום מייל לא יועבר לאשפה בלי האישור שלך.</p><button class="btn w" data-a="secClOpen">לצפייה ואישור</button></div>`;
+ if(!(R.boxes||[]).length)h+=`<div class="card" style="margin-bottom:8px"><p class="note" style="margin:0 0 8px">${R.max?'עוד לא חוברה תיבת Gmail. מחברים בהגדרות המזכירה.':'מנהל המערכת עוד לא אישר חיבור תיבות מייל לעסק.'}</p>${R.max?'<button class="chip" data-a="secSet" style="min-height:40px">להגדרות</button>':''}</div>`;
+ else{const ex=(R.boxes||[]).filter(b=>b.st==='expired');if(ex.length)h+=`<div class="card secwarn" style="margin-bottom:8px"><p class="note" style="margin:0">החיבור פג: ${ex.map(b=>'<bdi dir="ltr" class="secaddr">'+esc(b.addr)+'</bdi>').join(', ')}. אפשר לחבר מחדש בהגדרות.</p></div>`}
+ h+=`<div class="chips" style="margin:0 0 8px">${MF.map(([k,l])=>`<button class="chip${f===k?' on':''}" data-a="secMlF" data-v="${k}" style="min-height:40px" aria-pressed="${f===k}">${l}</button>`).join('')}</div>`;
+ return h+`<div class="card secml" id="secMlList">${L.length?L.map(m=>`<div class="li" data-a="secMlOpen" data-id="${esc(m.id)}" role="button" tabindex="0"><div class="m"><b>${esc(m.subj||'(בלי נושא)')}</b><small><bdi dir="ltr" class="secaddr">${esc(m.name||m.from)}</bdi> · ${esc(tm(m.t))}</small><small>${esc(m.snip)}</small><div class="sectg">${m.st==='replied'?'<span class="sectags g">נענה ✓</span>':m.draft&&['pend','fail'].includes(m.draft.st)?'<span class="sectags g">טיוטה ממתינה</span>':''}${mflH(m.flags)}</div></div></div>`).join(''):'<p class="note">אין מיילים</p>'}</div>`}
+ACT.secMlF=el=>{X.ml.f=el.dataset.v;rerender()};
+ACT.secMlOpen=el=>{X.ml.cur=el.dataset.id;X.ml.card=null;rerender()};
+ACT.secMlBack=()=>{X.ml.cur=null;X.ml.card=null;X.ml.clean=null;X.ml.list=null;X.ml.w=0;rerender()};
+async function mlCardLoad(){const id=X.ml.cur;X.ml.cb=1;try{const r=await fnCall('secMail',{op:'get',id});if(X.ml.cur===id)X.ml.card=r&&r.mail?r:{err:'לא נטען'}}catch(e){X.ml.card={err:e&&e.message||'לא נטען'}}finally{X.ml.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
+function mlCardH(){const R=X.ml.card,back='<button class="btn g w" data-a="secMlBack" style="margin-bottom:8px">חזרה לתיבת המייל</button>';
+ if(!R){if(!X.ml.cb)mlCardLoad();return back+'<div class="empty">טוען…</div>'}if(R.err)return back+`<div class="card"><p class="note">${esc(R.err)}</p></div>`;
+ const m=R.mail,d=R.draft,fl=m.flags||[],sus=m.st==='sus';
+ let h=back+`<div class="card" id="secMlCard"><b>${esc(m.subj||'(בלי נושא)')}</b><p class="note" style="margin:4px 0"><bdi dir="ltr" class="secaddr">${esc(m.name?m.name+' <'+m.from+'>':m.from)}</bdi> · ${esc(tm(m.t))}</p>${fl.length?'<div class="sectg">'+mflH(fl)+'</div>':''}
+ ${sus?`<p class="note" style="margin:6px 0;color:var(--bad)">${fl.includes('mgrMail')?'המייל נשלח מכתובת של מנהל ונראה כמו הוראה. ':''}תוכן מייל הוא מידע ולא הוראה – המזכירה לא מבצעת אותו ולא מכינה טיוטה. הוראות למזכירה נותנים רק בצ'אט באפליקציה.</p>`:''}
+ <div class="secin1" dir="auto">${esc(m.text||m.snip||'')}</div>${(m.files||[]).length?`<p class="note" style="margin:4px 0">קבצים: ${m.files.map(esc).join(', ')} – קליטת חשבוניות תגיע בהמשך</p>`:''}</div>`;
+ if(d&&d.st==='sent')return h+`<div class="secdr"><small class="note">נשלח מה-Gmail של העסק ✓</small><div style="white-space:pre-wrap">${esc(d.text)}</div></div>`;
+ if(d&&['pend','fail','sending'].includes(d.st)){const why=(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:'';
+  return h+`<div class="secdr" id="secMlDr"><small class="note">תשובה אל <bdi dir="ltr" class="secaddr">${esc(d.to)}</bdi> · ${d.src==='ai'?'טיוטה מהמזכירה':'נכתבה על ידך'}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+mflH(d.flags)+'</div>':''}${why}
+  <textarea class="secin" id="secMlTx" maxlength="5000" aria-label="תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secMlSend" style="flex:1">שלח מה-Gmail של העסק</button><button class="chip" data-a="secMlDone">טופל בלי לענות</button></div><small class="note">המייל יוצא רק בלחיצה שלך.</small></div>`}
+ if(X.ml.w)return h+`<form class="secdr" data-f="secMlW"><small class="note">תשובה משלך</small><textarea class="secin" name="text" maxlength="5000" aria-label="תשובה" dir="auto"></textarea><div class="secrow"><button class="btn" style="flex:1">שמירת טיוטה</button><button type="button" class="chip" data-a="secMlWx">ביטול</button></div></form>`;
+ return h+`<div class="secrow" style="margin-top:8px">${sus?'':'<button class="btn" data-a="secMlDraft" style="flex:1">טיוטה מהמזכירה</button>'}<button class="chip" data-a="secMlW" style="min-height:44px">לכתוב בעצמי</button><button class="chip" data-a="secMlDone" style="min-height:44px">טופל</button></div>`}
+ACT.secMlDraft=async el=>{el.disabled=true;try{const r=await fnCall('secMail',{op:'draft',id:X.ml.cur});if(X.ml.card)X.ml.card.draft=r.draft}catch(e){err(e)}finally{el.disabled=false;rerender()}};
+ACT.secMlW=()=>{X.ml.w=1;rerender()};ACT.secMlWx=()=>{X.ml.w=0;rerender()};
+FRM.secMlW=async f=>{const t=String(fd(f).text||'').trim();if(!t)return toast('כתבו תשובה');const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('secMail',{op:'write',id:X.ml.cur,text:t});X.ml.w=0;if(X.ml.card)X.ml.card.draft=r.draft}catch(e){err(e)}finally{b.disabled=false;rerender()}};
+ACT.secMlSend=el=>{const c=X.ml.card,d=c&&c.draft;if(!d)return;d._sid=d._sid||sid();/* אותו מזהה בכל ניסיון חוזר – השרת לא ישלח פעמיים (10.2) */
+ const t=document.getElementById('secMlTx'),v=t?t.value.trim():d.text;if(!v)return toast('התשובה ריקה');const data={id:X.ml.cur,sendId:d._sid};if(v!==d.text)data.text=v;
+ const run=async()=>{el.disabled=true;try{const r=await fnCall('secMailSend',data);toast(r&&r.already?'כבר נשלח':'נשלח מה-Gmail של העסק');X.ml.card=null;X.ml.list=null}catch(e){err(e)}finally{el.disabled=false;rerender()}};
+ ask('לשלוח את התשובה אל '+d.to+' מה-Gmail של העסק?'+((d.flags||[]).includes('chk')?' בטיוטה יש מידע שכדאי לבדוק ('+(d.why||[]).join(', ')+').':''),run,'שלח')};
+ACT.secMlDone=()=>{ask('לסמן כטופל? לא תישלח תשובה.',async()=>{try{await fnCall('secMail',{op:'done',id:X.ml.cur});toast('סומן כטופל');X.ml.cur=null;X.ml.card=null;X.ml.list=null;rerender()}catch(e){err(e)}},'טופל')};
+/* ---------- רשימת ניקוי ספאם – אישור מנהל העסק (פ3) ---------- */
+ACT.secClOpen=()=>{X.ml.clean={L:null};rerender()};
+async function clLoad(){X.clb=1;try{const r=await fnCall('secMail',{op:'cleanList'});X.ml.clean.L=r&&Array.isArray(r.lists)?r.lists:[]}catch(e){X.ml.clean.L={err:e&&e.message||'לא נטען'}}finally{X.clb=0;if(cur().v==='sec'&&!typing())rerender()}}
+function cleanH(){const C=X.ml.clean,back='<button class="btn g w" data-a="secMlBack" style="margin-bottom:8px">חזרה לתיבת המייל</button>';
+ if(!C.L){if(!X.clb)clLoad();return back+'<div class="empty">טוען…</div>'}if(C.L.err)return back+`<div class="card"><p class="note">${esc(C.L.err)}</p></div>`;
+ const P=C.L.filter(l=>l.st==='pend'),D=C.L.filter(l=>l.st!=='pend');
+ let h=back+(P.length?'':'<div class="card"><p class="note" style="margin:0">אין רשימה שממתינה לאישור.</p></div>');
+ for(const l of P){const z=l.items.reduce((s,i)=>s+(i.z||0),0);
+  h+=`<form class="card" data-f="secClOk" data-id="${esc(l.id)}" id="secCl_${esc(l.id)}" style="margin-bottom:8px"><b>רשימת ניקוי · ${esc(l.rangeL||'')}</b><p class="note" style="margin:4px 0">${l.items.length} מיילים · כ-<bdi dir="ltr">${esc(kb(z))}</bdi>. המסומנים יועברו <b>לאשפה</b> של Gmail – לא נמחקים לצמיתות, ואפשר לשחזר אותם מהאשפה ב-Gmail (שם הם נמחקים אוטומטית אחרי כחודש).</p>
+  <div class="secrow" style="margin:4px 0"><button type="button" class="chip" data-a="secClAll" data-id="${esc(l.id)}" data-v="1">סמן הכול</button><button type="button" class="chip" data-a="secClAll" data-id="${esc(l.id)}" data-v="0">נקה סימון</button></div>
+  ${l.items.map(i=>`<label class="seccl"><input type="checkbox" name="g" value="${esc(i.g)}" checked><span><b>${esc(i.s||'(בלי נושא)')}</b><br><small class="note"><bdi dir="ltr" class="secaddr">${esc(i.f||'')}</bdi>${i.d?' · '+esc(tm(i.d)):''} · <bdi dir="ltr">${esc(kb(i.z))}</bdi> · ${esc(WHY[i.w]||'')}</small></span></label>`).join('')}
+  <div class="secrow" style="margin-top:8px"><button class="btn" style="flex:1">העברה לאשפה</button><button type="button" class="chip" data-a="secClNo" data-id="${esc(l.id)}" style="min-height:44px">דחיית הרשימה</button></div></form>`}
+ if(D.length)h+=`<div class="sec"><h3>רשימות קודמות</h3></div><div class="card">${D.map(l=>`<p class="note" style="margin:4px 0">${esc(tm(l.t))} · ${esc(l.rangeL||'')} · ${l.st==='done'?'הועברו לאשפה '+l.trashed+(l.failed?' (נכשלו '+l.failed+')':''):l.st==='rej'?'נדחתה':'בטיפול'}</p>`).join('')}</div>`;
+ return h}
+ACT.secClAll=el=>{const f=document.getElementById('secCl_'+el.dataset.id);if(f)f.querySelectorAll('input[name=g]').forEach(i=>{i.checked=el.dataset.v==='1'})};
+FRM.secClOk=f=>{const id=f.dataset.id,ids=[...f.querySelectorAll('input[name=g]:checked')].map(i=>i.value);if(!ids.length)return toast('לא סומנו מיילים');
+ ask(`להעביר ${ids.length} מיילים לאשפה של Gmail? אפשר לשחזר אותם מהאשפה ב-Gmail.`,async()=>{const b=f.querySelector('button.btn');if(b)b.disabled=true;try{const r=await fnCall('secMail',{op:'cleanOk',id,ids});toast('הועברו לאשפה: '+r.trashed+(r.failed?' · נכשלו: '+r.failed:''));X.ml.clean={L:null};X.ml.list=null}catch(e){err(e)}finally{if(b)b.disabled=false;rerender()}},'העברה לאשפה')};
+ACT.secClNo=el=>{const id=el.dataset.id;ask('לדחות את הרשימה? שום מייל לא יועבר.',async()=>{try{await fnCall('secMail',{op:'cleanNo',id});toast('הרשימה נדחתה');X.ml.clean={L:null};X.ml.list=null;rerender()}catch(e){err(e)}},'דחייה')};
+/* ---------- הגדרות: חיבורי Google ---------- */
+async function gsLoad(){X.gsb=1;try{const r=await fnCall('secGoogle',{op:'status'});X.gs=r&&r.ok?r:{err:'לא נטען'}}catch(e){X.gs={err:e&&e.message||'לא נטען'}}finally{X.gsb=0;if(cur().v==='sec'&&!typing())rerender()}}
+function gSetH(){const g=X.gs;if(!g){if(!X.gsb)gsLoad();return '<div class="empty">טוען…</div>'}if(g.err)return `<div class="card" style="margin-top:8px"><b>Gmail ויומן Google</b><p class="note" style="margin:4px 0 0">${esc(g.err)}</p></div>`;
+ const n=(g.boxes||[]).length;
+ let h=`<div class="card" id="secGSet" style="margin-top:8px"><b>Gmail ויומן Google</b>${g.configured?'':'<p class="note" style="margin:4px 0">החיבור ל-Google עוד לא הוגדר בשרת. מנהל המערכת צריך להשלים את ההגדרה.</p>'}
+ <p class="note" style="margin:4px 0 8px">תיבות Gmail: ${n} מתוך ${g.max} שמנהל המערכת אישר. המזכירה קוראת מיילים חדשים ושולחת תשובה רק בלחיצה שלך. אין מחיקה לצמיתות.</p>`;
+ h+=(g.boxes||[]).map(b=>`<div class="secin1"><bdi dir="ltr" class="secaddr"><b>${esc(b.addr)}</b></bdi><div class="sectg">${b.st==='expired'?'<span class="sectags w">החיבור פג – לחבר מחדש</span>':'<span class="sectags g">מחובר</span>'}${b.clean?'<span class="sectags">הרשאת ניקוי ספאם</span>':''}</div><div class="secrow" style="margin-top:6px">${b.st==='expired'||!b.clean?`<button class="chip" data-a="secGCon" data-k="mail" data-c="${b.st==='expired'&&!b.clean?'0':'1'}">${b.st==='expired'?'חיבור מחדש':'הוספת הרשאת ניקוי'}</button>`:''}<button class="chip" data-a="secGOff" data-box="${esc(b.id)}">ניתוק</button></div></div>`).join('');
+ if(g.configured&&n<g.max)h+=`<button class="btn w" data-a="secGCon" data-k="mail" data-c="0" style="margin-top:6px">חיבור תיבת Gmail</button><small class="note">הרשאות: קריאה ושליחה בלבד. הרשאת ניקוי (העברה לאשפה) – רק כשמבקשים.</small>`;
+ const c=g.cal||{};
+ h+=`<div style="margin-top:12px"><b>יומן Google</b><p class="note" style="margin:4px 0 8px">${c.connected?'מחובר'+(c.addr?': <bdi dir="ltr" class="secaddr">'+esc(c.addr)+'</bdi>':'')+(c.st==='expired'?' · <span style="color:var(--bad)">החיבור פג</span>':'')+(c.last?' · סונכרן '+esc(fmtAt(c.last)):''):'היומן האישי שלך באפליקציה יסונכרן בשני הכיוונים עם יומן Google. אירועי העסק עוברים ל-Google, ולא חוזרים ממנו.'}</p>
+ <div class="secrow">${c.connected?(c.st==='expired'?'<button class="chip" data-a="secGCon" data-k="cal">חיבור מחדש</button>':'<button class="chip" data-a="secGSync">סנכרן עכשיו</button>')+'<button class="chip" data-a="secGOff" data-k="cal">ניתוק</button>':g.configured?'<button class="btn" data-a="secGCon" data-k="cal" style="flex:1">חיבור יומן Google</button>':''}</div></div>
+ <button class="chip" data-a="secGRe" style="margin-top:8px;min-height:40px">רענון</button></div>`;
+ return h}
+const openExt=u=>{try{window.open(u,'_system')}catch(e){location.href=u}};
+ACT.secGCon=async el=>{const kind=el.dataset.k==='cal'?'cal':'mail',d={op:'connect',kind};if(kind==='mail'&&el.dataset.c==='1')d.clean=true;el.disabled=true;
+ try{const r=await fnCall('secGoogle',d);if(!r||typeof r.url!=='string'||!/^https?:\/\//.test(r.url))throw new Error('לא התקבל קישור');openExt(r.url);toast('אשרו ב-Google, ואז חזרו לאפליקציה ולחצו "רענון"');X.gs=null}catch(e){err(e)}finally{el.disabled=false;rerender()}};
+ACT.secGOff=el=>{const cal=el.dataset.k==='cal',d=cal?{op:'disconnect',kind:'cal'}:{op:'disconnect',kind:'mail',box:el.dataset.box};
+ ask(cal?'לנתק את יומן Google? ההרשאה תבוטל והאסימון יימחק. האירועים באפליקציה נשארים.':'לנתק את התיבה? ההרשאה תבוטל והאסימון יימחק. מיילים חדשים לא ייקלטו; המיילים שכבר נקלטו נשארים.',async()=>{try{await fnCall('secGoogle',d);toast('נותק');X.gs=null;if(X.ml)X.ml.list=null}catch(e){err(e)}finally{rerender()}},'ניתוק')};
+ACT.secGSync=async el=>{el.disabled=true;try{const r=await fnCall('secGoogle',{op:'calSync'});toast('סונכרן'+(r&&(r.add||r.upd||r.del||r.out)?': '+[r.add?'נוספו '+r.add:'',r.upd?'עודכנו '+r.upd:'',r.del?'נמחקו '+r.del:'',r.out?'נשלחו ל-Google '+r.out:''].filter(Boolean).join(', '):''));X.gs=null;X.cl=null}catch(e){err(e)}finally{el.disabled=false;rerender()}};
+ACT.secGRe=()=>{X.gs=null;rerender()};
+/* ---------- חיבור למסך ---------- */
+{const t0=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='mail')X.ml={f:X.ml&&X.ml.f||'all',list:null,cur:null,card:null,clean:null};t0(el)}}
+{const s0=ACT.secSet;ACT.secSet=()=>{X.gs=null;s0()}}
+{const r6=V.sec;V.sec=()=>{const k=keyNow();if(X.mlKey!==k){X.mlKey=k;X.ml=null;X.gs=null}
+ if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&X.tab==='mail'){X.ml=X.ml||{f:'all'};const S=X.st;return{t:S.name||'המזכירה',s:'מייל',h:stopH()+tabsH()+mailH()}}
+ return r6()}}
+/* ---------- מנהל־על: בכרטיס העסק – Gmail ---------- */
+const SG={};
+const sgLoad=id=>{SG[id]=null;window.fnCall('secAdminMail',{bizId:id,op:'get'}).then(r=>{SG[id]=r&&r.ok?r:{err:'לא נטען'}}).catch(e=>{SG[id]={err:e&&e.message||'שגיאה'}}).finally(()=>{if(cur().v==='sab')rerender()})};
+const RG=[['all','הכול'],['12','12 חודשים'],['6','6 חודשים'],['1','חודש'],['none','בכלל לא']];
+{const s6=V.sab;if(s6)V.sab=id=>{const r=s6(id);try{const b=(ADM.L||[]).find(x=>x.id===id);if(!SY.sa||!b||(b.missing&&id!==BZ0)||!r||!r.h||!(b.features&&b.features.secretary===true))return r;
+ if(SG[id]===undefined)sgLoad(id);const c=SG[id];let h='<div class="sec"><h3>המזכירה – Gmail</h3></div>';
+ if(!c){r.h+=h+'<div class="empty">טוען…</div>';return r}if(c.err){r.h+=h+`<div class="card"><p class="note">${esc(c.err)}</p></div>`;return r}
+ const ct=c.count,rg=c.rg||'12';
+ h+=`<form class="card" data-f="secSgMax" data-id="${esc(id)}" id="secSgMax"><label class="f"><span>מספר תיבות Gmail לעסק (ברירת מחדל ${esc(String(c.maxDefault))}; 0 = בלי מייל)</span><input name="max" inputmode="numeric" dir="ltr" maxlength="2" value="${esc(String(c.max))}"></label><button class="btn w" style="margin-top:6px">שמירה</button></form>
+ <div class="card" style="margin-top:8px"><b>תיבות מחוברות</b>${(c.boxes||[]).length?c.boxes.map(x=>`<div class="secrow" style="margin:6px 0"><span style="flex:1 1 100%" class="secaddr"><bdi dir="ltr">${esc(x.addr)}</bdi> ${x.st==='expired'?'<span class="sectags w">פג</span>':'<span class="sectags g">מחובר</span>'}${x.clean?' <span class="sectags">ניקוי</span>':''}</span><button class="chip" data-a="secSgOff" data-id="${esc(id)}" data-box="${esc(x.id)}" style="min-height:40px">ניתוק</button></div>`).join(''):'<p class="note" style="margin:4px 0 0">אין. מנהל העסק מחבר מהגדרות המזכירה.</p>'}</div>
+ <div class="card" style="margin-top:8px" id="secSgScan"><b>סריקת היסטוריה וניקוי ספאם</b><p class="note" style="margin:4px 0">קודם סופרים ומציגים הערכת עלות, ורק אחרי אישור סורקים. הסריקה מכינה רשימת ניקוי (ספאם, פרסומות, גדולים וישנים) שעוברת <b>לאישור מנהל העסק</b>. שום מייל לא יועבר לאשפה בלי האישור שלו, ואין מחיקה לצמיתות.</p>
+ <div class="chips" role="radiogroup" style="margin:6px 0">${RG.map(([k,l])=>`<label class="chip" style="min-height:44px"><input type="radio" name="secSgR_${esc(id)}" data-c="secSgR" data-id="${esc(id)}" value="${k}"${rg===k?' checked':''}> ${l}</label>`).join('')}</div>
+ <button class="btn w" data-a="secSgCount" data-id="${esc(id)}">ספירה והערכת עלות</button>
+ ${ct?`<div class="secin1" id="secSgCt">${ct.none?'נבחר "בכלל לא" – אין סריקה.':`<b>${esc(Number(ct.n).toLocaleString('he-IL'))}${ct.capped?'+':''} מיילים</b> בטווח "${esc((RG.find(x=>x[0]===ct.range)||[])[1]||'')}"${(ct.per||[]).length>1?'<br>'+ct.per.map(p=>'<bdi dir="ltr" class="secaddr">'+esc(p.addr)+'</bdi>: '+p.n).join(' · '):''}<br><small class="note">עלות הסריקה עצמה: 0 (בלי מודל AI). אם יסוכם כל מייל במודל: כ-${esc(usd(ct.est&&ct.est.aiIfSummarizedMc))} (הערכה, לא מאומת).</small><button class="btn" data-a="secSgRun" data-id="${esc(id)}" style="margin-top:8px;width:100%">אישור וסריקה (${esc(String(ct.n))} מיילים)</button>`}</div>`:''}
+ ${(c.lists||[]).length?'<p class="note" style="margin:8px 0 0">רשימות: '+c.lists.map(l=>esc(tm(l.t))+' – '+l.n+' מיילים, '+(l.st==='pend'?'ממתינה לאישור מנהל העסק':l.st==='done'?'הועברו לאשפה '+l.trashed:l.st==='rej'?'נדחתה':'בטיפול')).join(' · ')+'</p>':''}</div>`;
+ r.h+=h}catch(e){}return r}}
+CHG.secSgR=el=>{const c=SG[el.dataset.id];if(c&&!c.err){c.rg=el.value;c.count=null;rerender()}};
+FRM.secSgMax=async f=>{const id=f.dataset.id,v=String(fd(f).max||'').trim();if(!/^\d{1,2}$/.test(v)||+v>10)return toast('מספר תיבות: 0 עד 10');const b=f.querySelector('button');b.disabled=true;try{const rg=(SG[id]||{}).rg;SG[id]=Object.assign(await window.fnCall('secAdminMail',{bizId:id,op:'set',max:+v}),{rg});toast('נשמר')}catch(e){err(e)}finally{b.disabled=false;if(cur().v==='sab')rerender()}};
+ACT.secSgCount=async el=>{const id=el.dataset.id,c=SG[id];if(!c||c.err)return;const range=c.rg||'12';el.disabled=true;try{const r=await window.fnCall('secAdminMail',{bizId:id,op:'count',range});SG[id]=Object.assign(r,{rg:range})}catch(e){err(e)}finally{el.disabled=false;if(cur().v==='sab')rerender()}};
+ACT.secSgRun=el=>{const id=el.dataset.id,c=SG[id];if(!c||!c.count)return;const ct=c.count;
+ ask(`לסרוק ${ct.n} מיילים ולהכין רשימת ניקוי? הרשימה תעבור לאישור מנהל העסק, ושום מייל לא יועבר לפני כן.`,async()=>{try{const r=await window.fnCall('secAdminMail',{bizId:id,op:'run',range:ct.range,confirm:ct.n});SG[id]=Object.assign(r,{rg:ct.range,count:null});toast(r.list&&r.list.n?'הרשימה ('+r.list.n+') נשלחה לאישור מנהל העסק':'לא נמצאו מיילים לניקוי')}catch(e){err(e)}finally{if(cur().v==='sab')rerender()}},'סריקה')};
+ACT.secSgOff=el=>{const id=el.dataset.id,box=el.dataset.box;ask('לנתק את התיבה מהעסק? ההרשאה תבוטל והאסימון יימחק.',async()=>{try{const rg=(SG[id]||{}).rg;SG[id]=Object.assign(await window.fnCall('secAdminMail',{bizId:id,op:'disconnect',box}),{rg});toast('נותק')}catch(e){err(e)}finally{if(cur().v==='sab')rerender()}},'ניתוק')};
 
 window.__sec=X;
 })();

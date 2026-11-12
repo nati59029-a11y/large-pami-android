@@ -123,7 +123,8 @@ async function secGoogle(request) {
     const u = G.urls(), cfg = G.oauthCfg();
     if (kind === 'mail' && !clean) {
       const m = mailCfgOf(await db.doc('sec_cfg/mail').get());
-      if (Object.keys(m.boxes).length >= m.max) throw pre('max-boxes', m.max ? 'הגעתם למספר התיבות שמנהל המערכת קבע לעסק (' + m.max + ')' : 'מנהל המערכת עוד לא אישר חיבור תיבות מייל לעסק');
+      // חיבור מחדש של תיבה שהחיבור שלה פג – לא נחסם כאן (finishConnect בודק שוב בטרנזקציה, ותיבה קיימת לא נספרת פעמיים)
+      if (Object.keys(m.boxes).length >= m.max && !Object.values(m.boxes).some((b) => b.st === 'expired')) throw pre('max-boxes', m.max ? 'הגעתם למספר התיבות שמנהל המערכת קבע לעסק (' + m.max + ')' : 'מנהל המערכת עוד לא אישר חיבור תיבות מייל לעסק');
     }
     await rateConnect(db, who.uid, now);
     const scopes = G.scopesFor(kind, clean);

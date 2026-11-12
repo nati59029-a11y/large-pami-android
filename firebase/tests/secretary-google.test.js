@@ -569,6 +569,22 @@ describe('ניתוק ומחיקת האסימון', () => {
     assert.equal(await get(`b/${A}/private/sec_gm_${box}`), null);
     assert.ok((await coll(`b/${A}/audit`)).some((a) => a.act === 'secAdminMail' && /disconnect/.test(a.note)));
   });
+
+  it('חיבור מחדש של תיבה שפג החיבור שלה – מותר גם כשהעסק במספר המרבי; תיבה אחרת – עדיין לא', async () => {
+    const box = G.boxIdOf(BOX_A);
+    GO.state.mode.expired = true;
+    GO.addMail(BOX_A, { text: 'x' });
+    await CORE.mailHook(GO.note(BOX_A));
+    GO.state.mode.expired = false;
+    assert.equal((await get(`b/${A}/sec_cfg/mail`)).boxes[box].st, 'expired');
+    assert.equal((await connect(M1, 'mail', { email: BOX_A })).res.code, 200, 'אותה תיבה – מתחברת מחדש');
+    const m = await get(`b/${A}/sec_cfg/mail`);
+    assert.equal(m.boxes[box].st, 'ok');
+    assert.equal(Object.keys(m.boxes).length, 1);
+    assert.equal((await call('secGoogle', M1, { op: 'connect', kind: 'mail' })).reason, 'max-boxes', 'אין תיבה שפגה – החסימה חוזרת');
+    GO.addMail(BOX_A, { text: 'אחרי החיבור מחדש', subject: 'חדש' });
+    assert.equal((await CORE.mailHook(GO.note(BOX_A))).saved >= 1, true, 'הקליטה חזרה');
+  });
 });
 
 // ---------------------------------------------------------------------------------
