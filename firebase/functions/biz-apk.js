@@ -59,17 +59,22 @@ async function requestBizApk(request, deps) {
   if (!biz || !biz.exists) throw new HttpsError('not-found', 'העסק לא נמצא', { reason: 'no-biz' });
   if (biz.dataRoot === 'legacy') throw new HttpsError('failed-precondition', 'העסק עדיין פועל במצב הקיים', { reason: 'legacy-biz' });
   const db = getFirestore(), ref = db.doc('b/' + bizId);
-  const d = (await ref.get()).data() || {};
-  const br = d.brand && typeof d.brand === 'object' ? d.brand : {};
-  const logo = br.logoPath === `b/${bizId}/brand/logo`;
-  if (!logo && input.noLogo !== true) throw new HttpsError('failed-precondition', 'לעסק אין לוגו', { reason: 'no-logo' });
   const now = D.now();
-  const st = d.apkState && typeof d.apkState === 'object' ? d.apkState : {};
-  if (st.st === 'building' && typeof st.t === 'number' && now - st.t < BUSY_MS) return { ok: true, status: 'already' };
   const token = String(D.token() || '').trim();
-  if (!TOKEN_RE.test(token)) return { ok: true, status: 'no-token' };
-  const rebuild = d.apkTag === 'biz-' + bizId;
-  await ref.update({ apkState: { st: 'building', t: now, by: uid, noLogo: !logo, rebuild } });
+  // בדיקה וסימון בעסקה אחת – שתי בקשות באותו רגע לא מפעילות שתי בניות
+  const res = await db.runTransaction(async (tx) => {
+    const d = (await tx.get(ref)).data() || {};
+    const br = d.brand && typeof d.brand === 'object' ? d.brand : {};
+    const logo = br.logoPath === `b/${bizId}/brand/logo`;
+    if (!logo && input.noLogo !== true) throw new HttpsError('failed-precondition', 'לעסק אין לוגו', { reason: 'no-logo' });
+    const st = d.apkState && typeof d.apkState === 'object' ? d.apkState : {};
+    if (st.st === 'building' && typeof st.t === 'number' && now - st.t < BUSY_MS) return { status: 'already' };
+    if (!TOKEN_RE.test(token)) return { status: 'no-token' };
+    tx.update(ref, { apkState: { st: 'building', t: now, by: uid, noLogo: !logo, rebuild: d.apkTag === 'biz-' + bizId } });
+    return { status: 'go', logo };
+  });
+  if (res.status !== 'go') return { ok: true, status: res.status };
+  const logo = res.logo;
   const why = await dispatch(D, token, bizId);
   if (why) {
     logger.warn('requestBizApk: dispatch failed', { bizId, why });

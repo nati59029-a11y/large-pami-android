@@ -5236,7 +5236,7 @@ V.sab=id=>{const T='כרטיס עסק';if(!ADM.sa)return{t:T,h:'<div class="empt
 const admBiz=id=>(ADM.L||[]).find(x=>x.id===id);
 /* ===== אפליקציה עם הסמל של העסק (12.11.2026): מצב הבנייה בכרטיס העסק – מנהל־על בלבד. requestBizApk (שרת) מפעיל את הבנייה ב-GitHub; בסופה GitHub כותב apkState.st=ready ו-apkTag.
  "שלח הזמנה" מופיע רק כשהאפליקציה מוכנה. אין לוגו – שואלים אם לבנות בלי לוגו. לוגו חדש – נבנית מחדש לבד (brSave), ובסוף נשאלים אם לשלוח קישור מעודכן ===== */
-const APK_STALE=30*60*1000;
+const APK_STALE=20*60*1000;/* כמו BUSY_MS בשרת */
 function apkOf(b){const a=b&&b.apk||{},logo=!!(b&&b.brand&&b.brand.logoPath==='b/'+b.id+'/brand/logo'),has=b&&b.apkTag==='biz-'+b.id,t=+a.t||0,bld=a.st==='building'&&Date.now()-t<APK_STALE;
  return{logo,has,bld,fail:a.st==='failed'||(a.st==='building'&&!bld),ready:has&&!bld,noLogo:a.noLogo===true,rebuild:a.rebuild===true,t}}
 const apkAskK=(id,t)=>'lp-apkask:'+id+':'+t;

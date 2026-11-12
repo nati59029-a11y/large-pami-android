@@ -121,7 +121,7 @@ def discover(sa_path, bucket, brands):
     print('auto businesses:', ' '.join(added) or '(none)')
 
 
-def tag(sa_path, bid):
+def tag(sa_path, bid, only_run='0'):
     if not BIZ_RE.match(bid) or bid in (BIZ0, 'business'):
         raise SystemExit('bad bizId')
     pid = json.load(open(sa_path))['project_id']
@@ -133,7 +133,7 @@ def tag(sa_path, bid):
     br = f.get('brand') if isinstance(f.get('brand'), dict) else {}
     # 12.11.2026: גם apkState = ready – כרטיס העסק מציג "האפליקציה מוכנה" ומאפשר לשלוח הזמנה
     st = {'st': {'stringValue': 'ready'}, 't': {'integerValue': str(int(time.time() * 1000))},
-          'noLogo': {'booleanValue': br.get('logoPath') != f'b/{bid}/brand/logo'}, 'rebuild': {'booleanValue': ap.get('rebuild') is True}}
+          'noLogo': {'booleanValue': br.get('logoPath') != f'b/{bid}/brand/logo'}, 'rebuild': {'booleanValue': only_run == '1' and ap.get('rebuild') is True}}
     patch(base, tok, {'apkTag': {'stringValue': 'biz-' + bid}, 'apkState': {'mapValue': {'fields': st}}}, ['apkTag', 'apkState'])
     print(f'apkTag set: b/{bid} = biz-{bid} (ready)')
 
@@ -161,8 +161,8 @@ if __name__ == '__main__':
     a = sys.argv[1:]
     if len(a) == 4 and a[0] == 'discover':
         discover(a[1], a[2], a[3])
-    elif len(a) == 3 and a[0] == 'tag':
-        tag(a[1], a[2])
+    elif len(a) in (3, 4) and a[0] == 'tag':
+        tag(a[1], a[2], a[3] if len(a) == 4 else '0')
     elif len(a) == 3 and a[0] == 'fail':
         fail(a[1], a[2])
     else:

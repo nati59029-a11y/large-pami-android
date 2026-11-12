@@ -53,7 +53,7 @@ jobs:
         run: |
           IDS=$(python3 -c 'import json,re,os,sys;c=json.load(open("app-source/brands/build-biz.json"));ids=["business"]+[b["bizId"] for b in c.get("businesses",[]) if re.fullmatch(r"[a-z0-9-]{3,30}",str(b.get("bizId",""))) and b.get("bizId")!="business"];o=os.environ.get("ONLY","")
           if o:
-            if not re.fullmatch(r"[a-z0-9-]{3,30}",o) or o=="business" or o not in ids: sys.exit("only: business not found or not ready: "+o[:40])
+            if not re.fullmatch(r"[a-z0-9-]{3,30}",o) or o=="business" or o not in ids: sys.exit("only: business not found or not ready: "+repr(o[:40]))
             ids=[o]
           print(json.dumps(ids))')
           echo "ids=$IDS" >> "$GITHUB_OUTPUT"
@@ -167,14 +167,16 @@ jobs:
         if: matrix.biz != 'business'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # "לשלוח קישור מעודכן?" רק אחרי בנייה של עסק אחד (only) – לא בכל פרסום כללי
+          ONLY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.only != '' && '1' || '0' }}
         run: |
           if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then echo "::notice::apkTag skipped (no secret)"; exit 0; fi
           umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"; trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
-          python3 scripts/biz-auto.py tag "$RUNNER_TEMP/sa.json" "${{ matrix.biz }}"
+          python3 scripts/biz-auto.py tag "$RUNNER_TEMP/sa.json" "${{ matrix.biz }}" "$ONLY_RUN"
   # 12.11.2026: בנייה של עסק אחד (requestBizApk) שנכשלה – מסמנים בכרטיס העסק "הבנייה נכשלה" (apkState.st = failed)
   failed:
     needs: [list, build, publish]
-    if: failure() && github.event_name == 'workflow_dispatch' && inputs.only != '' && github.ref == 'refs/heads/main'
+    if: (failure() || cancelled()) && github.event_name == 'workflow_dispatch' && inputs.only != '' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

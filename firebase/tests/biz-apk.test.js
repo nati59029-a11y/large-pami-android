@@ -67,6 +67,12 @@ describe('requestBizApk', () => {
     const g = fake({ deps: { now: () => 1e12 + M.BUSY_MS + 1 } });
     assert.equal((await M.requestBizApk(req('u_super', { bizId: 'withlogo' }), g.deps)).status, 'building');
   });
+  it('שתי בקשות באותו רגע – בנייה אחת בלבד (עסקה)', async () => {
+    const f = fake();
+    const r = await Promise.all([M.requestBizApk(req('u_super', { bizId: 'withlogo' }), f.deps), M.requestBizApk(req('u_super', { bizId: 'withlogo' }), f.deps)]);
+    assert.deepEqual(r.map((x) => x.status).sort(), ['already', 'building']);
+    assert.equal(f.calls.length, 1);
+  });
   it('בנייה מחדש לעסק שכבר יש לו APK: rebuild=true', async () => {
     await prep((db) => db.doc('b/withlogo').update({ apkTag: 'biz-withlogo' }));
     await M.requestBizApk(req('u_super', { bizId: 'withlogo' }), fake().deps);
