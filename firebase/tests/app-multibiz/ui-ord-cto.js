@@ -107,6 +107,19 @@ async function open(browser, www, calls) {
   await page.evaluate(() => { const D = __ox.draft; D.items.forEach((i) => { delete i.chk; }); D.items[0].qty = '0'; D.wholesale = true; window.__oxWsChg(D, false); }); await H.settle(page, 300);
   const w4 = await page.evaluate(() => __ox.draft.items.map((i) => !!i.chk));
   check('15 כמות 0 בשורת cto – לא מסומנת', !w4[0], w4);
+  // החלטה 9 (12.11): שורת מתנה ממבצע (gk) במוצר cto ללקוח סיטונאי = מארז אחד, לא קרטון. ההנחה המוצעת במסך – לפי מארזים, כמו בשרת
+  await page.evaluate(() => { const D = __ox.draft; D.items.length = 0; Object.assign(D, { fn: 'דנה', ln: 'כהן', phone: '0502222222', custId: 'cW', wholesale: true }); ACT.oxAdd({ dataset: { id: 'pC' } }); D.items[0].price = '5';
+    D.items.push({ pid: 'pC', qty: '1', price: '6', auto: 1, from: '', gk: 'k1' }); window.__oxRedraw(); });
+  await H.settle(page, 300);
+  const g1 = await lines(), gt = await tot();
+  const gc = await page.evaluate(() => { const D = __ox.draft, ol = window.__ol; if (!ol || !ol.calcOf) return null;
+    const keep = [ol.L.P, D.cell]; ol.L.P = [{ id: 'lpG', name: 'מבצע', monthly: 39, on: true, promos: [{ gifts: [{ pid: 'pC', price: 0 }] }] }];
+    const S = ol.CS(D); Object.assign(S, { on: true, lines: [{ k: 'k1', plan: 'lpG', gift: 'pC' }, { k: 'k2', plan: 'lpG', gift: 'pC' }] });
+    const r = ol.calcOf(D); ol.L.P = keep[0]; D.cell = keep[1]; if (!keep[1]) delete D.cell; return r && { gift: r.gift, sug: r.sug }; });
+  check('16 מתנה (gk) ללקוח סיטונאי: בלי תגית קרטון בשורת המתנה, סכום 1×6×5 + 1×6 = 36; 2 קווים עם מתנה → הנחה מוצעת 5 + 5 = 10 (לפי מארזים, כמו בשרת; לפי קרטונים היה 5 + 6)', /קרטון \(6 מארזים\)/.test(g1[0]) && !/קרטון/.test(g1[1]) && /36\.00/.test(gt) && gc && gc.gift === 10 && gc.sug === 10, { g1, gt, gc });
+  calls.length = 0; await page.evaluate(() => { __ox.draft.cdOk = true; return ACT.oxSave({ disabled: false }); }); await H.settle(page, 1500);
+  const gs = calls.find((x) => x.n === 'createOrder');
+  check('17 שמירה עם מתנה: קרטון נשלח כ-6 מארזים, המתנה כמארז 1', gs && gs.d.items.length === 2 && gs.d.items[0].qty === 6 && gs.d.items[1].qty === 1, gs && gs.d.items);
   check('11 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify({ out }, null, 1));

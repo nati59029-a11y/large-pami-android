@@ -112,7 +112,7 @@ function draft(){if(!O.draft){const B=myBr();O.draft={br:B.length===1?B[0].id:''
 /* 12.11.2026 (תמחור חשבונית, שלב 5א): מוצר "רק קרטונים סגורים" (cto, ct ≥ 2) בהזמנה של לקוח סיטונאי – בטופס מקלידים קרטונים (1 = קרטון),
    ונשלח לשרת במארזים (קרטונים × ct). המחיר נשאר מחיר מארז. לקוח רגיל / מוצר בלי ct תקין – כמו קודם. השרת אוכף (cartons ב-orders.js) */
 const ctoOf=p=>p&&p.cto===true&&Number.isInteger(p.ct)&&p.ct>=2?p.ct:0;
-const ctx=(D,it)=>D&&D.custId&&D.wholesale===true&&it&&it.pid?ctoOf(prod(it.pid)):0;
+const ctx=(D,it)=>D&&D.custId&&D.wholesale===true&&it&&it.pid&&!it.gk?ctoOf(prod(it.pid)):0; // gk = מתנה ממבצע: מארז אחד, לא קרטון (החלטה 9, 12.11)
 const pkQ=(D,it)=>{const n=+String(it.qty).replace(',','.')||0,c=ctx(D,it);return c?n*c:n}; // כמות במארזים (כמו בשרת)
 const ctTag=c=>` <span class="tag">קרטון (${c} מארזים)</span>`;
 window.__oxPk=pkQ;
@@ -155,7 +155,7 @@ function totRedraw(){const D=draft(),t=document.getElementById('oxtot');if(t)t.t
 function redrawLines(){const D=draft(),l=document.getElementById('oxlines');if(l)l.innerHTML=D.items.map((it,i)=>lineH(it,i,D.br)).join('');totRedraw()}
 window.__oxRedraw=()=>{if(O.draft)redrawLines()};
 /* 12.11.2026: מצב סיטונאי הוחלף אחרי שהוקלדו כמויות – שורות cto עם כמות מסומנות לבדיקה והודעה בולטת. הכמות לא משתנה אוטומטית */
-window.__oxWsChg=(D,was)=>{const now=D.wholesale===true;if(was===now||D!==O.draft)return;let hit=0;D.items.forEach(it=>{if(ctoOf(it.pid?prod(it.pid):null)&&(+String(it.qty).replace(',','.')||0)>0){it.chk=1;hit++}else delete it.chk});redrawLines();if(hit)toast('שים לב: הכמות במוצרי \'רק קרטונים\' נספרת עכשיו ב'+(now?'קרטונים':'מארזים')+' – בדוק את הכמויות')}; // הלקוח הוחלף (סיטונאי ↔ רגיל) – תגית "קרטון" והסכום מתעדכנים
+window.__oxWsChg=(D,was)=>{const now=D.wholesale===true;if(was===now||D!==O.draft)return;let hit=0;D.items.forEach(it=>{if(!it.gk&&ctoOf(it.pid?prod(it.pid):null)&&(+String(it.qty).replace(',','.')||0)>0){it.chk=1;hit++}else delete it.chk});redrawLines();if(hit)toast('שים לב: הכמות במוצרי \'רק קרטונים\' נספרת עכשיו ב'+(now?'קרטונים':'מארזים')+' – בדוק את הכמויות')}; // הלקוח הוחלף (סיטונאי ↔ רגיל) – תגית "קרטון" והסכום מתעדכנים
 ACT.oxAdd=el=>{const D=draft(),p=prod(el.dataset.id);if(!p)return;const ex=D.items.find(it=>it.pid===p.id&&!it.gk);if(ex)ex.qty=String((+ex.qty||0)+1);else D.items.push({pid:p.id,qty:'1',price:String(unitP(p,D.br)),auto:1,from:suggest(p,D.br,ctx(D,{pid:p.id})||1)});D.q='';rerender()};
 ACT.oxFree=()=>{draft().items.push({n:'',qty:'1',price:''});rerender()};
 ACT.oxLnDel=el=>{draft().items.splice(+el.dataset.n,1);rerender()};

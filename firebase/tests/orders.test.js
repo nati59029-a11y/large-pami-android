@@ -515,6 +515,30 @@ describe('קרטונים סגורים ללקוח סיטונאי (cto)', () => {
     assert.equal((await call('updateOrder', E1, { id, items: L(1) })).status, 'OK');
     assert.equal((await call('updateOrder', E1, { id, items: L(2) })).reason, 'cto-qty'); // אחרי הצמצום – רק שורה ישנה אחת
   });
+  it('החלטה 9: מתנה ממבצע (קו עם gift) במוצר cto ללקוח סיטונאי = מארז אחד, בלי ct; המלאי יורד 1; רק שורה אחת לכל קו עם מתנה', async () => {
+    await prep(async (d) => {
+      await d.doc('b/' + A).update({ features: Object.assign({}, ALL, { cellular: true }) });
+      await d.doc(`b/${A}/lineplan/lpG`).set({ name: 'מבצע מתנה', on: true, monthly: 39, promos: [{ gifts: [{ pid: 'pC', price: 0 }] }] });
+    });
+    const cell = { lines: [{ phone: '0521111111', plan: 'lpG', gift: 'pC' }] };
+    const go = (items) => call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId: 'cW', items, cell });
+    const r = await go([{ pid: 'pC', qty: 12, price: 5 }, { pid: 'pC', qty: 1, price: 5 }]);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.total, 65 - 5); // ההנחה המוצעת: מארז אחד במחיר 5 (מתנה חינם)
+    const o = await get(`b/${A}/ord/${r.result.id}`);
+    assert.deepEqual(o.items.map((x) => [x.qty, x.ct]), [[12, 6], [1, undefined]]);
+    assert.equal(o.cell.calc.gift, 5);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 30 - 13);
+    // קו אחד עם מתנה פוטר שורה אחת בלבד, ורק בכמות 1
+    assert.equal((await go([{ pid: 'pC', qty: 1, price: 5 }, { pid: 'pC', qty: 1, price: 5 }])).reason, 'cto-qty');
+    assert.equal((await go([{ pid: 'pC', qty: 2, price: 5 }])).reason, 'cto-qty');
+    // בלי קו עם מתנה – מארז בודד נדחה כמו קודם
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId: 'cW', items: [{ pid: 'pC', qty: 1, price: 5 }] })).reason, 'cto-qty');
+    // עריכה בלי לשלוח cell (הקווים השמורים בהזמנה) – שורת המתנה נשארת מארז אחד
+    const u = await call('updateOrder', E1, { id: r.result.id, items: [{ pid: 'pC', qty: 18, price: 5 }, { pid: 'pC', qty: 1, price: 5 }] });
+    assert.equal(u.status, 'OK', u.text);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 30 - 19);
+  });
 });
 
 describe('לארג\' פעמי במצב legacy (שורש)', () => {

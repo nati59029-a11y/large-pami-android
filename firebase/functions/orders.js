@@ -811,15 +811,19 @@ async function isWs(tx, db, custId) {
   const s = await tx.get(db.doc('cust/' + custId));
   return s.exists && s.get('wholesale') === true;
 }
-function cartons(items, prods, ws, oldItems) {
+// 12.11.2026 (החלטה 9): מתנה ממבצע (cell.lines[].gift) = מארז אחד בלבד, לא קרטון – כל קו עם מתנה פוטר שורה אחת של אותו מוצר בכמות 1 (בלי ct).
+function cartons(items, prods, ws, oldItems, cell) {
   if (!ws) return items;
   const keep = new Map(); // מוצר|כמות → כמה שורות כאלה היו בהזמנה (כל שורה ישנה פוטרת שורה אחת בלבד)
   for (const x of oldItems || []) if (x && x.pid) keep.set(x.pid + '|' + x.qty, (keep.get(x.pid + '|' + x.qty) || 0) + 1);
+  const gift = new Map(); // מוצר → כמה קווים בחרו אותו כמתנה
+  for (const l of (cell && Array.isArray(cell.lines) ? cell.lines : [])) if (l && l.gift) gift.set(l.gift, (gift.get(l.gift) || 0) + 1);
   for (const it of items) {
     const ct = it.pid ? ctoOf(prods.get(it.pid)) : 0;
     if (!ct) continue;
     const k = it.pid + '|' + it.qty;
     if (Number.isInteger(it.qty / ct)) it.ct = ct;
+    else if (it.qty === 1 && gift.get(it.pid) > 0) gift.set(it.pid, gift.get(it.pid) - 1);
     else if (keep.get(k) > 0) keep.set(k, keep.get(k) - 1);
     else throw bad('cto-qty', `"${it.n}": ללקוח סיטונאי נמכר רק בקרטונים שלמים (${ct} מארזים בקרטון)`);
   }
@@ -860,7 +864,7 @@ async function createOrder(request) {
     const pd = plain(prods);
     const { items } = resolveItems(w, br, raw, pd, src);
     snapCosts(items, costs);
-    cartons(items, pd, await isWs(tx, db, custId));
+    cartons(items, pd, await isWs(tx, db, custId), null, cell);
     for (const it of items) if (it.pid && prods.get(it.pid).get('on') === false) throw pre('prod-off', `המוצר "${it.n}" לא זמין`);
     const ct = cell ? cellTotal(items, cell, plans) : { total: totalOf(items), calc: null };
     const total = ct.total;
@@ -913,7 +917,7 @@ async function updateOrder(request) {
       const pd = plain(prods);
       const { items } = resolveItems(w, d.br, raw, pd, src);
       snapCosts(items, await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid)), oldItems);
-      cartons(items, pd, await isWs(tx, db, d.custId), oldItems);
+      cartons(items, pd, await isWs(tx, db, d.custId), oldItems, cell !== undefined ? cell : d.cell);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
       applyMoves(tx, db, w, prods, mv, { ord: id, no: d.no }, warn);
       upd.items = items;

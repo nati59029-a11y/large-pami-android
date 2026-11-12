@@ -93,7 +93,7 @@ const giftDrop=(D,k)=>{D.items=(D.items||[]).filter(it=>it.gk!==k)};
 function calcOf(D){const S=CS(D);if(!S.on||!window.LineDisc)return null;const pm=new Map((L.P||[]).map(p=>[p.id,p]));
  if(!S.lines.some(l=>isPkg(l.plan&&pm.get(l.plan))))return null;
  const lines=S.lines.map(l=>{const o={};if(l.plan)o.plan=l.plan;if(l.carrier)o.carrier=l.carrier;if(l.plan&&Number.isInteger(l.pr))o.pr=l.pr;if(l.gift&&l.plan)o.gift=l.gift;return o});
- return LineDisc.calcCell(lines,pm,Number.isFinite(S.man)?S.man:null,{itemsAg:itemsAg(D),today:LineDisc.ilDay(),items:D.items||[]})}
+ return LineDisc.calcCell(lines,pm,Number.isFinite(S.man)?S.man:null,{itemsAg:itemsAg(D),today:LineDisc.ilDay(),items:(D.items||[]).map(it=>window.__oxPk?Object.assign({},it,{qty:String(window.__oxPk(D,it))}):it)})} // כמויות במארזים – כמו בשרת (12.11.2026)
 const sugT=r=>r.man!=null&&r.man!==r.sug?`מחושב לפי המבצעים: ${ils(r.sug)}`:'';
 function calcH(D){const r=calcOf(D);if(!r)return '';const S=CS(D);const v=S.man==null?r.sug:S.manRaw;
  return `<label class="f" style="margin:0"><span><b>סה״כ הנחה ₪</b> (0 = בלי הנחה)</span><input id="olman" data-i="olMan" inputmode="decimal" maxlength="9" value="${esc(v)}" autocomplete="off"></label>
@@ -261,5 +261,5 @@ function prRd(x,j){const o={};const N=(k)=>x[k+j];const d=nm(N('pd'));if(Number.
  return o.disc||o.gifts||o.qty?o:null}
 const prRds=x=>{const a=[];for(let j=0;j<PRMAX&&x['pd'+j]!==undefined;j++){const r=prRd(x,j);if(r)a.push(r)}return a};
 
-window.__ol={L,out,CS};
+window.__ol={L,out,CS,calcOf};
 })();
