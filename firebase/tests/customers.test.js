@@ -383,6 +383,36 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     assert.equal((await call('setCard', E1, { custId: id, card: CARD })).reason, 'need-ord');
     assert.equal((await call('setCard', E1, { custId: id, card: CARD, ordId: 'oOpen' })).status, 'OK');
   });
+  // 2026-11-12: "העתק פרטי לקוח" בהזמנת ניוד – act:'copyAll' (כרטיס מלא כולל CVV גם לעובד, גם אחרי תשלום)
+  it('copyAll: עובד + הזמנת ניוד (גם ששולמה) – כרטיס מלא כולל CVV ונרשם ביומן; בלי ניוד/מבוטלת/סניף זר/לא מקושר – נדחה', async () => {
+    await seed(Object.assign({}, ALL, { cellular: true }));
+    await call('saveCust', MGR, { cust: c1 }); await call('setCard', MGR, { custId: 't' + TZ, card: CARD });
+    const id = 't' + TZ, cell = { lines: [{ phone: '0521111111' }] };
+    const mk = (oid, status, br, cid, withCell) => prep((d) => d.doc(`b/${A}/ord/${oid}`).set(Object.assign({ no: 1, br, status, custId: cid, total: 1, items: [], cust: { name: 'x', phone: '0501234567' }, at: 1 }, withCell ? { cell } : {})));
+    await mk('cPaid', 'paid', 'br1', id, true); await mk('cDone', 'done', 'br1', id, true); await mk('cNew', 'new', 'br1', id, true); await mk('cCancel', 'cancel', 'br1', id, true);
+    await mk('nPaid', 'paid', 'br1', id, false); await mk('nNew', 'new', 'br1', id, false); await mk('cBr2', 'paid', 'br2', id, true); await mk('cOther', 'paid', 'br1', 'p0500000000', true);
+    const FULL = { num: '4580123456789012', exp: '07/28', name: 'Dana Levi', cvv: '123' };
+    for (const o of ['cPaid', 'cDone', 'cNew']) {
+      const r = await call('getCard', E1, { custId: id, act: 'copyAll', ordId: o });
+      assert.equal(r.status, 'OK', o + ' ' + r.text); assert.deepEqual(r.result.card, FULL);
+    }
+    for (const [o, why] of [['nPaid', 'ord-not-cell'], ['nNew', 'ord-not-cell'], ['cCancel', 'ord-cancel'], ['cBr2', 'foreign-br'], ['cOther', 'not-linked'], [undefined, 'need-ord']]) {
+      const r = await call('getCard', E1, Object.assign({ custId: id, act: 'copyAll' }, o ? { ordId: o } : {}));
+      assert.equal(r.reason, why, String(o)); assert.ok(!r.text.includes('4580123456789012') && !r.text.includes('Dana'));
+    }
+    assert.equal((await call('getCard', NOORD, { custId: id, act: 'copyAll', ordId: 'cPaid' })).reason, 'no-perm');
+    assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'cPaid' })).reason, 'ord-paid', 'copy רגיל – בלי שינוי');
+    assert.equal((await call('getCard', E1, { custId: id, act: 'view', ordId: 'cPaid' })).reason, 'manager-only');
+    const m = await call('getCard', MGR, { custId: id, act: 'copyAll' });
+    assert.equal(m.status, 'OK', m.text); assert.deepEqual(m.result.card, FULL);
+    const lg = (await coll(`b/${A}/cardLog`)).filter((x) => x.act === 'copyAll');
+    assert.equal(lg.length, 4); assert.ok(!leak(JSON.stringify(lg)));
+    const e1 = lg.filter((x) => x.by === E1);
+    assert.deepEqual(e1.map((x) => x.ord).sort(), ['cDone', 'cNew', 'cPaid']); assert.ok(e1.every((x) => x.f === 'all' && x.cust === id));
+    // מתג cellular כבוי – גם הזמנה עם cell נדחית
+    await prep((d) => d.doc('b/' + A).update({ 'features.cellular': false }));
+    assert.equal((await call('getCard', E1, { custId: id, act: 'copyAll', ordId: 'cPaid' })).reason, 'ord-not-cell');
+  });
   it('הפרדת עסקים: מנהל עסק אחר לא מגיע; מוצפן שהועתק לעסק אחר לא נפתח (מפתח לכל עסק)', async () => {
     await call('saveCust', MGR, { cust: c1 }); await call('setCard', MGR, { custId: 't' + TZ, card: CARD });
     assert.equal((await call('getCard', 'm2', { custId: 't' + TZ, act: 'view' })).reason, 'no-card');

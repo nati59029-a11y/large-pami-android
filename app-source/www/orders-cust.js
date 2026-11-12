@@ -180,6 +180,10 @@ ACT.ocMergeK=async el=>{const D=O.draft,m=D&&D.p2m;if(!m||![m.a,m.b].includes(el
   let cards=[];if(D&&on()&&ocOn()&&CD.d===D){try{const a=cdOut(CD,'');if(a)cards.push(a);(cell()?CD.more||[]:[]).forEach((m,i)=>{const x=cdOut(m,'כרטיס נוסף '+(i+2)+': ');if(x)cards.push(x)})}catch(e){return toast(e.message)}
    if(cards.some((x,i)=>cards.findIndex(y=>y.num===x.num)!==i))return toast('אותו מספר כרטיס הוקלד פעמיים');
    const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId);if(cards.length&&(c?cardsOf(c).length:0)+cards.length>3)return toast(c&&cardsOf(c).length>=3?'ללקוח כבר שמורים 3 כרטיסים':'עד 3 כרטיסים ללקוח (כולל השמורים)')}
+  // 12.11.2026: מסך כרטיס אשראי מלא לפני סיום ההזמנה (לא חובה). ניוד – תמיד; בלי ניוד – רק כשאין קישור סליקה. מדלגים אם כבר הוקלד כרטיס במשבצת שבטופס,
+  // אם ללקוח כבר 3 כרטיסים, או אחרי "סיום הזמנה" (cdOk). קודם בדיקה מקדימה – שגיאה בטופס מוצגת בטופס ולא אחרי מסך הכרטיס
+  if(D&&on()&&ocOn()&&!D.cdOk&&!cards.length&&(cell()||payM()!=='link')){const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId);
+   if(!(c&&cardsOf(c).length>=3)){const m=window.__oxPre?window.__oxPre():'';if(m)return toast(m);const tz=dig(D.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');if(CD.d!==D)cdReset(D);go('ocCardStep');return}}
   if(D&&on()){const tz=dig(D.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');
    const p=phN(D.phone);if(p&&String(D.name||'').trim()&&D.items&&D.items.length){const c={};if(!NP.some(k=>String(D[k]||'').trim()))c.name=D.name.trim();c.phone=p;if(tz)c.tz=tz;
     // 2026-11-10: הלקוח נמצא לפי טלפון נוסף – הטלפון הראשי שלו לא משתנה, והמספר שהוקלד מצטרף לטלפונים הנוספים
@@ -194,6 +198,20 @@ ACT.ocMergeK=async el=>{const D=O.draft,m=D&&D.p2m;if(!m||![m.a,m.b].includes(el
    else{const ok=[],bad=[];for(const card of cards){try{const x=await fnCall('setCard',{custId:cid,card,ordId:r.id,add:true});ok.push('****'+(x&&x.last4||''))}catch(e){bad.push(e.message||'')}}
     setTimeout(()=>toast(bad.length?'ההזמנה נשמרה, אבל '+(ok.length?'חלק מהכרטיסים':'הכרטיס')+' לא נשמר: '+bad[0]:(ok.length>1?'הכרטיסים ':'הכרטיס ')+ok.join(', ')+' נשמר מוצפן ללקוח'),3000);C.at=0;loadL(true)}}}
   cards=[];return r}}
+
+const payM=()=>window.__payMode?window.__payMode():'phone';
+/* מסך הכרטיס שלפני הסיום: אותו CD (בזיכרון בלבד) כמו המשבצת שבטופס; כרטיסים נוספים בניוד (cdMore). ריק = מותר. "סיום הזמנה" → שמירה רגילה (setCard עם ordId אחרי createOrder) */
+V.ocCardStep=()=>{const T='כרטיס אשראי (לא חובה)';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};const D=O.draft;
+ if(!D)return{t:T,h:'<div class="empty">אין הזמנה פתוחה</div><button class="btn g w" data-a="back">חזרה</button>'};if(CD.d!==D)cdReset(D);
+ const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId),full=!!c&&cardsOf(c).length>=3,tot=(D.items||[]).reduce((s,it)=>s+Math.round((+it.qty||0)*(+it.price||0)*100),0)/100;
+ return{t:T,s:esc(String(D.name||'').trim()||'הזמנה חדשה'),h:`<div class="card" id="occstep" style="border:2px solid var(--acc)"><h3 style="margin:0 0 4px;color:var(--acc)">כרטיס אשראי (לא חובה)</h3><p class="note" style="margin:0 0 8px">אפשר לסיים את ההזמנה גם בלי למלא. הכרטיס נשמר מוצפן ללקוח ההזמנה; נשארות גלויות רק 4 ספרות אחרונות.</p>
+ ${full?'<p class="note">ללקוח כבר שמורים 3 כרטיסים – אפשר להחליף או למחוק בכרטיס הלקוח.</p>':CDF.map(([k,l,x])=>`<label class="f"><span>${l}</span><input data-i="ocCd" data-k="${k}" autocomplete="off" ${x} value="${esc(CD[k]||'')}"></label>`).join('')+cdMore(c)}</div>
+ <div class="card" style="margin:10px 0"><div class="row" style="justify-content:space-between"><b>סה״כ</b><b class="amt">${ils(tot)}</b></div></div>
+ <button class="btn w" data-a="ocFinish">סיום הזמנה</button><button class="btn g w" style="margin-top:8px" data-a="back">חזרה לטופס</button>`}};
+ACT.ocFinish=async el=>{const D=O.draft;if(!D){NAV.pop();return rerender()}
+ if(CD.d===D){try{cdOut(CD,'');(cell()?CD.more||[]:[]).forEach((m,i)=>cdOut(m,'כרטיס נוסף '+(i+2)+': '))}catch(e){return toast(e.message)}} // שגיאה בכרטיס – נשארים במסך הכרטיס
+ el.disabled=true;D.cdOk=true;NAV.pop();rerender();
+ try{await ACT.oxSave(document.querySelector('#main [data-a=oxSave]')||el)}finally{if(O.draft===D)D.cdOk=false}}; // שמירה שנכשלה – בשמירה הבאה המסך יופיע שוב (אם לא הוקלד כרטיס)
 
 /* ---------- כניסה: כפתור "לקוחות" במסך ההזמנות ---------- */
 {const ox=V.ox;if(ox)V.ox=()=>{const r=ox();if(on()&&r&&r.h&&r.h.includes('data-v="oxStock"'))r.h=r.h.replace(/(<button class="btn g grow" data-a="go" data-v="oxStock">מלאי<\/button>)/,'$1<button class="btn g grow" data-a="go" data-v="ocList">לקוחות</button>');return r}}
@@ -277,13 +295,56 @@ ACT.ocCardSet=el=>dlg(`<h3>פרטי כרטיס אשראי</h3><form data-f="ocCa
  <p class="note">נשמר מוצפן בשרת. באפליקציה נשארות רק 4 ספרות אחרונות.</p><div class="row"><button class="btn grow">שמור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`);
 FRM.ocCardF=async f=>{const v=fd(f);const card={num:v.num};['exp','name','cvv'].forEach(k=>{if(String(v[k]||'').trim())card[k]=String(v[k]).trim()});const a={custId:v.id,card};if(v.ord)a.ordId=v.ord;if(+v.slot>1)a.slot=+v.slot;
  const b=f.querySelector('button');b.disabled=true;try{await fnCall('setCard',a);f.reset();closeDlg();toast('הכרטיס נשמר מוצפן');await loadL(true);rerender()}catch(e){b.disabled=false;err(e)}};
-// כרטיס הזמנה (עובד ומנהל): הזמנה שלא שולמה ומקושרת ללקוח → העתקת מספר / הזנת כרטיס
-{const oo=V.oxOrd;if(oo)V.oxOrd=id=>{const r=oo(id);unshow();if(!r||!r.h||!on())return r;const o=(O.L||[]).find(x=>x.id===id);if(!o||!o.custId||!['new','work','wait_pay'].includes(o.status))return r;
-  if(!C.L&&!C.busy)loadL();const c=(C.L||[]).find(x=>x.id===o.custId);
-  const K=cardsOf(c),fs=c?freeSlot(c):0;
-  const h=`<div class="sec"><h3>כרטיס אשראי</h3></div><div class="card" id="ocordcard">${K.length?'<p class="note" style="margin:0">ההעתקה נרשמת ביומן.</p>'+K.map(k=>`<p class="note" style="margin:8px 0 0">כרטיס ****${esc(k.last4||'')} שמור</p><button class="btn g w" style="margin-top:6px" data-a="ocCardCopy" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}"${sAt(k.s)}>העתק מספר כרטיס${K.length>1?' ****'+esc(k.last4||''):''}</button>`).join('')
-   :`<p class="note" style="margin:0">${c?'אין כרטיס שמור':'…'}</p>`}${c?`<button class="btn g w" style="margin-top:8px" data-a="ocCardSet" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}"${fs?sAt(fs):''}>${!K.length?'הזנת כרטיס':fs?'הוספת כרטיס נוסף':'החלף כרטיס'}</button>`:''}</div>`;
-  r.h=r.h.replace('<div class="sec"><h3>היסטוריה</h3></div>',h+'<div class="sec"><h3>היסטוריה</h3></div>');return r}}
+// כרטיס הזמנה (עובד ומנהל): הזמנה שלא שולמה ומקושרת ללקוח → העתקת מספר. 12.11.2026: "הזנת כרטיס" הוסר מכאן – הכרטיס מוזן במסך שלפני סיום ההזמנה (ניהול כרטיסים – בכרטיס הלקוח אצל המנהל)
+// 12.11.2026: הזמנת ניוד מקושרת ללקוח (לא מבוטלת, גם אחרי תשלום) → "העתק פרטי לקוח"
+{const oo=V.oxOrd;if(oo)V.oxOrd=id=>{const r=oo(id);unshow();if(!r||!r.h||!on())return r;const o=(O.L||[]).find(x=>x.id===id);if(!o||!o.custId)return r;
+  if(!C.L&&!C.busy)loadL();const c=(C.L||[]).find(x=>x.id===o.custId);let h='';
+  if(['new','work','wait_pay'].includes(o.status)){const K=cardsOf(c);
+   h+=`<div class="sec"><h3>כרטיס אשראי</h3></div><div class="card" id="ocordcard">${K.length?'<p class="note" style="margin:0">ההעתקה נרשמת ביומן.</p>'+K.map(k=>`<p class="note" style="margin:8px 0 0">כרטיס ****${esc(k.last4||'')} שמור</p><button class="btn g w" style="margin-top:6px" data-a="ocCardCopy" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}"${sAt(k.s)}>העתק מספר כרטיס${K.length>1?' ****'+esc(k.last4||''):''}</button>`).join('')
+    :`<p class="note" style="margin:0">${c?'אין כרטיס שמור':'…'}</p>`}</div>`}
+  if(cell()&&o.status!=='cancel')h+=`<div class="card" id="occopy" style="margin-top:8px"><button class="btn w" data-a="ocCopyAll" data-id="${esc(o.id)}">העתק פרטי לקוח</button><p class="note" style="margin:6px 0 0">לפי השדות שהמנהל בחר, כולל פרטי אשראי אם נבחרו. ההעתקה נרשמת ביומן, והלוח מתנקה אחרי 45 שניות.</p></div>`;
+  if(h)r.h=r.h.replace('<div class="sec"><h3>היסטוריה</h3></div>',h+'<div class="sec"><h3>היסטוריה</h3></div>');return r}}
+/* ---------- 12.11.2026: העתקת פרטי לקוח בהזמנת ניוד ----------
+   השדות והסדר – ordcfg/main.copyF (המנהל בוחר ב"הגדרות הזמנות"). הערכים: מהלקוח (נקרא מחדש מהשרת), ואם חסר – מההזמנה (o.cust / o.cell).
+   פרטי אשראי (c*) – getCard {act:'copyAll', ordId} לכל כרטיס שמור (השרת בודק שזו הזמנת ניוד, רושם ביומן ובמכסה). הטקסט נשאר רק במשתנה מקומי ובלוח (מתנקה אחרי 45 שניות). */
+const CPF0=['name','phone','tz','city','st','lines'];
+const CPL={name:'שם',phone:'טלפון',phs:'טלפון נוסף',tz:'ת.ז',mail:'מייל',st:'רחוב ומספר',city:'עיר',fl:'קומה',apt:'דירה',bank:'פרטי בנק',prod:'מוצר',due:'לתשלום',orig:'מקור',stat:'סטטוס',note:'הערות',od:'תאריך הזמנה',lines:'קווים לניוד',no:'מספר הזמנה',total:'סכום ההזמנה',cnum:'מספר כרטיס',cexp:'תוקף כרטיס',cname:'שם בעל הכרטיס',ccvv:'CVV'};
+const CPC=['cnum','cexp','cname','ccvv'];
+const cpKeys=()=>Object.keys(CPL).concat(xKeys().map(k=>'x:'+k.k));
+const cpLabel=k=>k.startsWith('x:')?((xKeys().find(x=>'x:'+x.k===k)||{}).label||k.slice(2)):CPL[k]||k;
+const cpSel=()=>{const v=O.cfg&&Array.isArray(O.cfg.copyF)?O.cfg.copyF.filter(k=>typeof k==='string'):null;return v&&v.length?v:CPF0};
+const oldSrv=e=>['bad-field','bad-act'].includes(e&&e.reason);
+function cpVal(k,o,c){const u=Object.assign({},o.cust||{}),t=v=>String(v==null?'':v).trim();c=c||{};
+ if(k==='name')return t(c.name||[c.fn,c.ln].filter(Boolean).join(' ')||c.bn||u.name);
+ if(k==='phs')return (phsOf(c).length?phsOf(c):Array.isArray(u.phs)?u.phs:[]).join(', ');
+ if(['phone','tz','mail','st','city','fl','apt'].includes(k))return t(c[k]||u[k]);
+ if(k==='bank'){if(t(c.bank))return t(c.bank);const b=o.cell&&o.cell.bank;return b?`בנק ${t(b.bank)} סניף ${t(b.br)} חשבון ${t(b.acct)}`:''}
+ if(INFK.includes(k))return t(c[k]);
+ if(k==='lines')return ((o.cell&&o.cell.lines)||[]).map((l,i)=>'\n  קו '+(i+1)+': '+[t(l.phone),l.tz?'ת.ז '+t(l.tz):'',t(l.carrier)].filter(Boolean).join(', ')).join('');
+ if(k==='no')return o.no!=null?'#'+o.no:'';
+ if(k==='total')return typeof o.total==='number'?ils(o.total):'';
+ if(k.startsWith('x:'))return t(c.x&&c.x[k.slice(2)]);return ''}
+ACT.ocCopyAll=async el=>{const o=(O.L||[]).find(x=>x.id===el.dataset.id);if(!o||!o.custId)return;el.disabled=true;
+ try{if(!C.cfg)await cfgLoad();const c=await getC(o.custId).catch(()=>null)||(C.L||[]).find(x=>x.id===o.custId)||null;const F=cpSel(),wantC=F.some(k=>CPC.includes(k)),out=[];let warn='',cards=[];
+  if(wantC){const K=cardsOf(c);for(const k of K){try{const a={custId:o.custId,act:'copyAll',ordId:o.id};if(k.s>1)a.slot=k.s;const r=await fnCall('getCard',a);cards.push(r&&r.card||{})}
+   catch(e){if(oldSrv(e)){warn='פרטי האשראי לא הועתקו – הפעולה דורשת עדכון שרת';break}if(e.reason==='ord-not-cell'){warn='פרטי האשראי מועתקים רק בהזמנת ניוד';break}throw e}}}
+  let cd=false;for(const k of F){if(CPC.includes(k)){if(cd)continue;cd=true;const CK=F.filter(x=>CPC.includes(x));
+    cards.forEach((card,i)=>CK.forEach(x=>{const v=String(card[x.slice(1)]||'').trim();if(v)out.push((cards.length>1?'כרטיס '+(i+1)+' – ':'')+CPL[x]+': '+v)}));continue}
+   const v=cpVal(k,o,c);if(v)out.push(cpLabel(k)+': '+v)}
+  cards=null;if(!out.length)return toast(warn||'אין פרטים להעתקה');
+  await copyTxt(out.join('\n'));out.length=0;if(warn)setTimeout(()=>toast(warn),2700)}catch(e){err(e)}finally{el.disabled=false}};
+/* הגדרת השדות להעתקה (מנהל, עסק עם ניוד) – במסך "הגדרות הזמנות" (V.oxCfg); כניסה גם בעסק בלי סניפים */
+{const ox=V.ox;if(ox)V.ox=()=>{const r=ox();if(on()&&mgr()&&cell()&&r&&r.h&&!r.h.includes('data-v="oxCfg"')&&r.h.includes('data-v="oxStock"'))r.h=r.h.replace(/(data-v="oxStock">מלאי<\/button>(?:<button[^>]*>[^<]*<\/button>)*<\/div>)/,'$1<button class="btn g s w" data-a="go" data-v="oxCfg">הגדרות הזמנות</button>');return r}}
+{const cf=V.oxCfg;if(cf)V.oxCfg=()=>{const r=cf();if(!r||!r.h||!on()||!mgr()||!cell()||!O.cfg)return r;if(!C.cfg){cfgLoad().then(()=>{if(cur().v==='oxCfg'&&!typing())rerender()})}
+  if(!brAll().some(b=>b.on)){r.t='הגדרות הזמנות';r.s='העתקת פרטים ומע"מ'}
+  if(!C.cpf)C.cpf=cpSel().slice();const sel=C.cpf.filter(k=>cpKeys().includes(k)),rest=cpKeys().filter(k=>!sel.includes(k));
+  const rw=(k,on,i)=>`<div class="row" style="align-items:center;gap:6px;border-bottom:1px solid var(--line);padding:2px 0"><label class="row grow" style="min-height:44px;gap:8px;align-items:center"><input type="checkbox" data-c="ocCpOn" data-k="${esc(k)}"${on?' checked':''}>${esc(cpLabel(k))}</label>${on?`<button type="button" class="btn g s" data-a="ocCpMv" data-k="${esc(k)}" data-d="-1" aria-label="למעלה"${i===0?' disabled':''}>▲</button><button type="button" class="btn g s" data-a="ocCpMv" data-k="${esc(k)}" data-d="1" aria-label="למטה"${i===sel.length-1?' disabled':''}>▼</button>`:''}</div>`;
+  r.h+=`<div class="sec"><h3>פרטים להעתקה בהזמנת ניוד</h3></div><div class="card" id="occpf"><p class="note" style="margin-top:0">בכרטיס הזמנת ניוד יש כפתור "העתק פרטי לקוח". מסמנים אילו פרטים יועתקו ובאיזה סדר (חצים). פרטי אשראי (כולל CVV) מועתקים מלאים ונרשמים ביומן.</p>
+  ${sel.map((k,i)=>rw(k,1,i)).join('')}${rest.length?'<p class="note" style="margin:8px 0 0">לא מסומנים:</p>'+rest.map(k=>rw(k,0)).join(''):''}<button class="btn w" style="margin-top:8px" data-a="ocCpSave">שמור</button></div>`;return r}}
+CHG.ocCpOn=el=>{const k=el.dataset.k;C.cpf=(C.cpf||cpSel().slice()).filter(x=>x!==k);if(el.checked)C.cpf.push(k);rerender()};
+ACT.ocCpMv=el=>{const L=C.cpf||cpSel().slice(),i=L.indexOf(el.dataset.k),j=i+(+el.dataset.d);if(i<0||j<0||j>=L.length)return;[L[i],L[j]]=[L[j],L[i]];C.cpf=L;rerender()};
+ACT.ocCpSave=async el=>{const L=(C.cpf||cpSel()).filter(k=>cpKeys().includes(k));if(!L.length)return toast('סמנו לפחות פרט אחד');el.disabled=true;
+ try{await fnCall('setOrderCfg',{copyF:L});O.cfg=Object.assign(O.cfg||{},{copyF:L});C.cpf=null;toast('נשמר');rerender()}catch(e){err(oldSrv(e)?new Error('שמירת הפרטים להעתקה דורשת עדכון שרת'):e)}finally{el.disabled=false}};
 
 /* ---------- טופס לקוח (חדש / עריכה) ---------- */
 // 2026-11-10: לכל קו – חברת ניוד ונויד בפועל; טלפון/ת"ז לא תקינים מהייבוא מוצגים באדום ונשמרים כמו שהם אם לא שונו (obph/obtz)

@@ -43,7 +43,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
-    const R = { createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
+    if (n === 'getPayLink' && d.auto && globalThis.__OLDPAY) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'שדה לא מוכר: auto', details: { reason: 'bad-field' } } }) }); // שרת ישן
+    const R = { createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: d.auto ? { link: LINK, total: 34.5, auto: { user: 'pay@biz.co', pass: 'Sekret-77' } } : { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: Object.assign({ ok: true, mode: 'link', has: true }, 'cred' in d ? { cred: !!d.cred } : {}), getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
   await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
@@ -87,6 +88,17 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const op = await page.evaluate(() => window.__opened.slice());
   const txt = await page.evaluate(() => document.body.innerText + document.body.innerHTML);
   check('4 "לתשלום": getPayLink ונפתח בדיוק הקישור, והקישור לא מופיע בשום מקום בעמוד', op.length === 1 && op[0] === LINK && !txt.includes('secret-biz-123'), { op, inPage: txt.includes('secret-biz-123') });
+  { // 4ב (12.11.2026): באפליקציה (תוסף PayBrowser) – getPayLink {auto:true}, הדף נפתח בתוך האפליקציה עם פרטי הכניסה; לא window.open; הסיסמה לא בעמוד/באחסון. שרת ישן – ניסיון חוזר בלי auto
+    await page.evaluate(() => { window.__pb = []; window.Capacitor = { Plugins: { PayBrowser: { open: (o) => { window.__pb.push(Object.assign({}, o)); return Promise.resolve({ closed: true, filled: true }); } } } }; });
+    const n0 = calls.length; await page.click('[data-a=oxPay]'); await H.settle(page, 800);
+    const g1 = calls.slice(n0).filter((c) => c.n === 'getPayLink'); const pb = await page.evaluate(() => window.__pb.slice()); const op2 = await page.evaluate(() => window.__opened.length);
+    const leak = await page.evaluate(() => (document.body.innerHTML + JSON.stringify(localStorage) + JSON.stringify(sessionStorage) + JSON.stringify(window.__ox)).includes('Sekret-77'));
+    globalThis.__OLDPAY = 1; const n1 = calls.length; await page.click('[data-a=oxPay]'); await H.settle(page, 800); globalThis.__OLDPAY = 0;
+    const g2 = calls.slice(n1).filter((c) => c.n === 'getPayLink'); const pb2 = await page.evaluate(() => window.__pb.slice(1));
+    await page.evaluate(() => { delete window.Capacitor; });
+    check('4ב PayBrowser: getPayLink auto:true → open({url,user,pass}) בלי window.open; הסיסמה לא בעמוד/אחסון; שרת ישן → ניסיון שני בלי auto ופתיחה בלי פרטים', g1.length === 1 && g1[0].d.auto === true && pb.length === 1 && pb[0].url === LINK && pb[0].user === 'pay@biz.co' && pb[0].pass === 'Sekret-77' && op2 === 1 && !leak
+      && g2.length === 2 && g2[0].d.auto === true && g2[1].d.auto === undefined && pb2.length === 1 && pb2[0].url === LINK && pb2[0].user === '' && pb2[0].pass === '', { g1: g1.map((c) => c.d), pb: pb.map((x) => [x.url, x.user, !!x.pass]), op2, leak, g2: g2.map((c) => c.d), pb2: pb2.map((x) => [x.user, x.pass]) });
+  }
   check('5 כרטיס הזמנה: פריטים, סכום, "מסניף יהודה הנשיא", שינוי סטטוס, ביטול, מגע/ניגודיות/גלילה', okAll(cd) && /מסניף יהודה הנשיא/.test(cd.a.text) && /סמן שולם/.test(cd.a.text) && /בטיפול/.test(cd.a.text), sum(cd));
   // 6. סימון שולם
   await page.click('[data-a=oxPaid]'); await H.settle(page, 300); await setDs('a'); await shot('סימון-שולם-a');
@@ -127,6 +139,21 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.fill('form[data-f=oxPayF] input[name=link]', LINK); await page.click('form[data-f=oxPayF] button'); await H.settle(page, 400);
   const sp = calls.filter((c) => c.n === 'setBusinessPayLink');
   check('13 מנהל־על: "תשלום בהזמנות" – קישור/טלפון; הקישור הקיים לא מוצג; http נחסם בטופס; https נשלח', /קישור סליקה/.test(pf) && /לא מוצג/.test(pf) && n0 === 0 && sp.length === 1 && sp[0].d.link === LINK && sp[0].d.bizId === 'biz-o', { pf: pf.slice(0, 120), n0, sp: sp.map((x) => x.d) });
+  { // 13ב (12.11.2026): פרטי כניסה לאתר הסליקה – שדות ריקים תמיד, סיסמה מוסתרת; cred נשלח רק כשהוקלדה סיסמה; "מחק" → cred:null; בלי סיסמה – לא נשלח
+    const f0 = await page.evaluate(() => { const f = document.querySelector('form[data-f=oxPayF]'); const p = f.querySelector('[name=cpass]'), u = f.querySelector('[name=cuser]'); return { t: f.innerText, pt: p && p.type, ac: p && p.autocomplete, pv: p && p.value, uv: u && u.value }; });
+    await page.fill('form[data-f=oxPayF] input[name=link]', LINK); await page.fill('form[data-f=oxPayF] input[name=cuser]', 'pay@biz.co'); await page.fill('form[data-f=oxPayF] input[name=cpass]', 'Sekret-77');
+    await page.click('form[data-f=oxPayF] button.btn'); await H.settle(page, 500);
+    const c1 = calls.filter((c) => c.n === 'setBusinessPayLink').pop();
+    const f1 = await page.evaluate(() => { const f = document.querySelector('form[data-f=oxPayF]'); return { t: f.innerText, pv: f.querySelector('[name=cpass]').value, del: !!f.querySelector('[name=cdel]'), leak: document.body.innerHTML.includes('Sekret-77') }; });
+    const sm = await page.evaluate(() => [...document.querySelectorAll('form[data-f=oxPayF] button, form[data-f=oxPayF] input:not([type=hidden]):not([type=radio]):not([type=checkbox])')].filter((e) => { const r = e.getBoundingClientRect(); return r.height > 0 && r.height < 44 && !e.closest('label.f'); }).length);
+    await page.fill('form[data-f=oxPayF] input[name=link]', LINK); await page.check('form[data-f=oxPayF] input[name=cdel]'); await page.click('form[data-f=oxPayF] button.btn'); await H.settle(page, 500);
+    const c2 = calls.filter((c) => c.n === 'setBusinessPayLink').pop();
+    await page.fill('form[data-f=oxPayF] input[name=link]', LINK); await page.click('form[data-f=oxPayF] button.btn'); await H.settle(page, 500);
+    const c3 = calls.filter((c) => c.n === 'setBusinessPayLink').pop();
+    check('13ב מנהל־על: פרטי כניסה – שדות ריקים, סיסמה type=password/new-password; שמירה שולחת cred {user,pass} ומרוקנת; "מוגדרים"; מחיקה → cred:null; בלי סיסמה – בלי cred; כפתורים ≥44px',
+      /לא מוגדרים/.test(f0.t) && /SMS/.test(f0.t) && f0.pt === 'password' && f0.ac === 'new-password' && f0.pv === '' && f0.uv === '' && !!c1 && c1.d.cred && c1.d.cred.user === 'pay@biz.co' && c1.d.cred.pass === 'Sekret-77' && f1.pv === '' && /מוגדרים/.test(f1.t) && !/לא מוגדרים/.test(f1.t) && f1.del && !f1.leak && sm === 0
+      && !!c2 && c2.d.cred === null && !!c3 && !('cred' in c3.d), { f0: Object.assign({}, f0, { t: f0.t.slice(-200) }), c1: c1 && Object.assign({}, c1.d, { cred: c1.d.cred && { user: c1.d.cred.user, pass: !!c1.d.cred.pass } }), f1: Object.assign({}, f1, { t: '' }), sm, c2: c2 && c2.d.cred, c3: c3 && Object.keys(c3.d) });
+  }
   // 14. הכנסה + זיכוי: ordpay → תנועת הכנסה אחת בסניף ההזמנה עם off.sub; void → מבוטלת; בלי כפילות
   globalThis.__OP = [doc('ordpay/o2', { ord: S('o2'), no: N(11), br: S('br2'), amt: N(80), at: N(T1), st: S('paid'), sup: M({ id: S('s_sup1'), name: S('סמוויקס') }) })];
   await page.evaluate(() => { SY.sa = false; });

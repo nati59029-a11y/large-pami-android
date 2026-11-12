@@ -143,6 +143,22 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     await page.evaluate(() => { delete SY.biz.features.ordCard; });
     check('4ב כרטיס בטופס ההזמנה: משבצת קיימת; setCard אחרי createOrder עם ordId ו-add; המספר לא בטיוטה; מתג כבוי → בלי משבצת', !!box && !inDraft && co5 >= 0 && sc5 > co5 && !!sd && sd.custId === 't' + TZ && sd.ordId === 'o1' && sd.add === true && sd.card.num === '4580123456789012' && sd.card.exp === '07/28' && sd.card.cvv === '123' && off, { box: !!box, inDraft, co5, sc5, off, sd: sd && Object.assign({}, sd, { card: sd.card && { l: String(sd.card.num).slice(-4) } }) });
   }
+  { // 4ג (12.11.2026): בלי ניוד – מסך הכרטיס שלפני הסיום רק כשאין קישור סליקה. קישור → נשמר ישר; תשלום בטלפון → מסך מלא, "סיום הזמנה" ריק שומר בלי setCard
+    const mk = async (ph) => { await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
+      await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=phone]', ph); await H.settle(page, 600); await page.fill('input[data-k=fn]', 'גל'); await page.fill('input[data-k=ln]', 'לוי'); await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200); };
+    await mk('0529998866'); const a0 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 900);
+    const linkDirect = calls.slice(a0).some((c) => c.n === 'createOrder');
+    const pay0 = await page.evaluate(() => { const p = window.__ox.cfg.pay; window.__ox.cfg.pay = { mode: 'phone' }; return p; });
+    await mk('0529998855'); const b0 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 500);
+    const v = await page.evaluate(() => cur().v); const none = !calls.slice(b0).some((c) => c.n === 'createOrder'); const noMore = !(await page.$('[data-a=ocCdAdd]'));
+    await page.click('[data-a=ocFinish]'); await H.settle(page, 1200);
+    const b = calls.slice(b0).map((c) => c.n); const v2 = await page.evaluate(() => cur().v);
+    // בדיקה מקדימה: בלי פריטים – הודעה בטופס, לא מעבר למסך הכרטיס
+    await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300); await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=phone]', '0529998844'); await H.settle(page, 500); await page.fill('input[data-k=fn]', 'גל'); await page.fill('input[data-k=ln]', 'לוי');
+    await page.click('[data-a=oxSave]'); await H.settle(page, 400); const v3 = await page.evaluate(() => cur().v);
+    await page.evaluate((p) => { window.__ox.cfg.pay = p; }, pay0);
+    check('4ג בלי ניוד: קישור סליקה → נשמר בלי מסך כרטיס; תשלום בטלפון → מסך כרטיס (בלי "+ נוסף"), "סיום הזמנה" ריק → createOrder בלי setCard; חסר פריט → נשאר בטופס', linkDirect && v === 'ocCardStep' && none && noMore && b.includes('createOrder') && !b.includes('setCard') && v2 === 'oxOrd' && v3 === 'oxNew', { linkDirect, v, none, noMore, b, v2, v3 });
+  }
   // 5. רשימה + כרטיס (מנהל): כפתור סיטונאי
   const ls = await screen('לקוחות-רשימה', () => goV('ocList'));
   const cdr = await screen('כרטיס-לקוח', () => goV('ocCard', 't' + TZ));
@@ -217,6 +233,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   if (hasCopy) { await page.click('[data-a=ocCardCopy][data-ord=o1]'); await H.settle(page, 400); }
   const gc = calls.filter((c) => c.n === 'getCard').pop();
   const noView = !(await page.$('[data-a=ocCardView]'));
+  const noSet = !(await page.$('#ocordcard [data-a=ocCardSet]')) && !/הזנת כרטיס|הוספת כרטיס נוסף|החלף כרטיס/.test(oh);
+  check('10ג כרטיס הזמנה: אין "הזנת כרטיס" (עבר למסך שלפני סיום ההזמנה); "העתק מספר" נשאר', noSet && !!hasCopy, { noSet });
   await goV('oxOrd', 'o2'); await H.settle(page, 300); const paidNo = !(await page.$('[data-a=ocCardCopy]'));
   check('10 עובד: בהזמנה שלא שולמה – העתק מספר (getCard copy + ordId), בלי "הצג"; בהזמנה ששולמה – אין כפתור', !!hasCopy && gc && gc.d.act === 'copy' && gc.d.ordId === 'o1' && noView && paidNo && /העתק מספר כרטיס/.test(oh), { gc: gc && gc.d, noView, paidNo });
   // 10ב (ליקוי 5): אחרי העתקה – טיימר 45 שניות מנקה את הלוח: קריאה זהה → ריק; תוכן אחר → לא נוגעים; בלי readText / קריאה נדחית → כותבים ריק
