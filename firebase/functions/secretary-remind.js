@@ -127,6 +127,8 @@ async function remindBiz(opts) {
 
   // 0. שלב 5: הודעות ווצאפ שלא עובדו (טריגר שנכשל / נקטע) – חוזרות לתור, ואחרי 3 ניסיונות – סימון והתראה. תקלה כאן לא עוצרת את התזכורות
   try { const q = await require('./secretary-wa')._core.requeue(db, scope.bizId, now); if (q.requeued || q.failed) Object.assign(out, { waq: q.requeued, waFail: q.failed }); } catch (e) { logger.warn('secretary: wa requeue failed', { bizId: scope.bizId, code: e && e.code }); }
+  // 0ב. שלב 8: חשבוניות שהזיהוי שלהן נתקע – חוזרות לתור (עד 3 פעמים), ואחר כך לטיפול ידני. לא נעלמות
+  try { const q = await require('./secretary-inv')._core.requeue(db, scope.bizId, now); if (q.requeued || q.failed) Object.assign(out, { invq: q.requeued, invFail: q.failed }); } catch (e) { logger.warn('secretary: inv requeue failed', { bizId: scope.bizId, code: e && e.code }); }
 
   // 1. יומן (sec_cal): תזכורות שהמנהל קבע ואירועים – בכל ריצה. גם אירוע מ-3 הימים האחרונים שנדחה ליום העסקים הבא
   if (mgrs.some((m) => m.nt.rt.cal)) {

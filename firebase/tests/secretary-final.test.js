@@ -164,7 +164,9 @@ describe('קריטריון 4: תזכורות 7.3 על sec_in (חלון 24 השע
     assert.equal(L.length, 2); assert.equal(L.find((x) => x.key === 'inv:2026-11-12').st, 'gone', 'של אתמול נסגרה – אחת פתוחה בכל רגע');
     assert.equal(L.find((x) => x.key === 'inv:2026-11-15').st, 'open');
     // הכול טופל
-    await prep(async (d) => { for (const c of ['1', '2', '3']) await d.doc(`b/${A}/sec_inv/f${c.repeat(40)}`).update({ st: 'ok' }); });
+    // (גם '5' – שנתקע בזיהוי ימים, ולכן הוחזר לטיפול ידני ע"י requeue של שלב 8)
+    assert.equal((await get(`b/${A}/sec_inv/f${'5'.repeat(40)}`)).st, 'new', 'זיהוי שנתקע – עבר לטיפול ידני ולא נעלם');
+    await prep(async (d) => { for (const c of ['1', '2', '3', '5']) await d.doc(`b/${A}/sec_inv/f${c.repeat(40)}`).update({ st: 'ok' }); });
     await run('2026-11-16T08:10');
     L = byKey(await notes(M1), /^inv:/);
     assert.equal(L.length, 2, 'אין חשבוניות שמחכות – לא נוצרת'); assert.ok(L.every((x) => x.st === 'gone'), 'והפתוחה נסגרה');
@@ -329,5 +331,35 @@ describe('קריטריון 1: אבטחה – כל הפונקציות, בידוד
     await assertFails(env.authenticatedContext(M3).firestore().doc(`b/${A}/sec_inv/f${'2'.repeat(40)}`).get());
     await assertFails(env.authenticatedContext(E1).firestore().doc(`b/${A}/sec_inv/f${'2'.repeat(40)}`).get());
     await assertFails(env.authenticatedContext(MB).firestore().doc(`b/${A}/sec_facts/f1`).get());
+  });
+});
+
+// =====================================================================================
+describe('קריטריון 2 (ליקוי שנמצא בבדיקת העומס): חשבונית שהזיהוי שלה נתקע חוזרת לתור, ואחרי 3 ניסיונות – לטיפול ידני', () => {
+  it('requeue: q/qw ישן מ-10 דקות → חוזר לתור (רשומה ב-sec_waq), עד 3 פעמים; אחר כך "הזיהוי לא הצליח"; חדש – לא נוגעים; secRemind מפעיל אותו', async () => {
+    await seed();
+    await bizzes();
+    const INV = require('../functions/secretary-inv.js')._core;
+    const t0 = IL('2026-11-12T10:00');
+    const id1 = 'f' + 'a'.repeat(40), id2 = 'f' + 'b'.repeat(40), id3 = 'f' + 'c'.repeat(40);
+    await prep(async (d) => {
+      await d.doc(`b/${A}/sec_inv/${id1}`).set({ st: 'qw', wk: t0 - 11 * 60000, k: 'q', t: t0 - 3600e3, np: 1, src: [] }); // הזיהוי נקטע
+      await d.doc(`b/${A}/sec_inv/${id2}`).set({ st: 'q', k: 'q', t: t0 - 20 * 60000, np: 1, src: [] });                    // רשומת התור לא נוצרה
+      await d.doc(`b/${A}/sec_inv/${id3}`).set({ st: 'qw', wk: t0 - 60000, k: 'q', t: t0 - 60000, np: 1, src: [] });          // בעבודה עכשיו – לא נוגעים
+    });
+    const r = await T.runInBiz({ bizId: A, prefix: T.bizPrefix(BIZA), biz: BIZA }, () => INV.requeue(T.tdb(), A, t0));
+    assert.deepEqual(r, { requeued: 2, failed: 0 });
+    assert.equal((await get(`b/${A}/sec_inv/${id1}`)).st, 'q'); assert.equal((await get(`b/${A}/sec_inv/${id3}`)).st, 'qw');
+    const q = (await coll('sec_waq')).filter((x) => x.biz === A && x.inv === true);
+    assert.deepEqual(q.map((x) => x.id).sort(), [id1, id2].sort());
+    // שוב מיד – לא (עברו פחות מ-10 דקות מההחזרה)
+    assert.deepEqual(await T.runInBiz({ bizId: A, prefix: T.bizPrefix(BIZA), biz: BIZA }, () => INV.requeue(T.tdb(), A, t0 + 60000)), { requeued: 0, failed: 0 });
+    // עוד שתי החזרות, ובפעם הרביעית – לטיפול ידני (דרך secRemind)
+    await run('2026-11-12T10:15'); await run('2026-11-12T10:30');
+    assert.equal((await get(`b/${A}/sec_inv/${id1}`)).rq, 3);
+    await run('2026-11-12T10:45');
+    const x = await get(`b/${A}/sec_inv/${id1}`);
+    assert.deepEqual([x.st, x.k, x.err], ['new', 'unk', 'ai'], 'כרטיס "הזיהוי לא הצליח – אפשר להזין ידנית"');
+    assert.ok((await coll(`b/${A}/sec_log`)).some((l) => l.act === 'invErr' && l.note === 'stuck'));
   });
 });

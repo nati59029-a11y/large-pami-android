@@ -516,7 +516,10 @@ async function ingestBox(boxId, addr, o) {
   if (gone) hist = String((await c.profile()).historyId || last);
   const lag = !gone && !(all && !more);
   out.over = ids.filter((g) => !done.has(g)).length;
-  if (unusedReserve(cap.ok, todo, done)) await dayIn(db, boxId, -unusedReserve(cap.ok, todo, done), now).catch(() => {});
+  // שלב 8 (בדיקת עומס): מוחזר כל מקום שלא נוצל בפועל לשמירה – גם מייל שריצה מקבילה כבר שמרה ('dup') או שדולג ('skip'), ולא רק תקלה באמצע.
+  // בלי זה, כמה התראות במקביל ספרו את אותם מיילים כמה פעמים, והמכסה היומית "נגמרה" מוקדם (מיילים אמיתיים לא נקלטו)
+  const back = unusedReserve(cap.ok, out.saved);
+  if (back) await dayIn(db, boxId, -back, now).catch(() => {});
   await cref.set({ boxes: { [boxId]: { hist, lag, fail: fail || FieldValue.delete() } } }, { merge: true });
   if (out.saved || out.dup) await db.collection('sec_log').doc().set(glog('', 'auto', 'mailIn', { tgt: boxId, note: out.saved + '/' + out.dup + '/' + out.sus }));
   if (lag && (out.over > 0 || more) && (!bx.lag || out.saved || cap.first)) await db.collection('sec_log').doc().set(glog('', 'auto', 'mailOver', { tgt: boxId, note: String(out.over) + (more ? '+' : '') + (err ? ':err' : '') }));
@@ -540,8 +543,8 @@ async function mailFailNote(db, kind, boxId, addr, gid, now) {
     await WA.notifyMgrs(db, 'mailerr|' + boxId + '|' + g, 'תקלה בקליטת מייל', 'שליפת מייל מהתיבה ' + addr + ' נכשלה (תקלה מול Google). המזכירה תנסה שוב בעוד כ-15 דקות; אם זה יחזור ' + MAIL_TRIES + ' פעמים – המייל ידולג וזה יופיע כאן.', now).catch(() => {});
   }
 }
-// מקום שנשמר במונה היומי ולא נוצל (תקלה באמצע) – מוחזר
-function unusedReserve(ok, todo, done) { return Math.max(0, ok - todo.slice(0, ok).filter((g) => done.has(g)).length); }
+// מקום שנשמר במונה היומי ולא נוצל לשמירת מייל חדש (תקלה באמצע, כפול מריצה מקבילה, דילוג) – מוחזר
+function unusedReserve(ok, saved) { return Math.max(0, ok - saved); }
 
 // =====================================================================================
 // secMail – מנהל העסק: תיבת המייל, טיוטה (רק בבקשה), "טופל", ורשימות ניקוי הספאם שממתינות לאישורו (פ3)

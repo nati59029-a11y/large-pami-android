@@ -471,4 +471,31 @@ async function retention(db, now) {
 
 exports.secInv = onCall(wrap('secInv', secInv));
 exports.secDecide = onCall(wrap('secDecide', secDecide));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { ingest, work, workIn, secInv, secDecide, retention, SEC_SCAN_UID, readFile } });
+// שלב 8 (בדיקת עומס): קובץ שהזיהוי שלו נקטע (תקלה זמנית, עומס על מונה הסריקה, הפונקציה נעצרה) או שרשומת התור שלו לא נוצרה – נשאר ב-'q'/'qw'
+// ולא היה חוזר לבד (הטריגר בלי ניסיון חוזר). כאן: אחרי 10 דקות – חוזר לתור, עד 3 פעמים; אחר כך – כרטיס "הזיהוי לא הצליח – אפשר להזין ידנית".
+// נקרא מ-secRemind (כל 15 דקות), כמו requeue של ווצאפ. בטוח להרצה כפולה (טרנזקציה לכל רשומה)
+const INV_REQ_AGE = 10 * 60000, INV_REQ_MAX = 3;
+async function requeue(db, bizId, now) {
+  const out = { requeued: 0, failed: 0 };
+  const s = await db.collection('sec_inv').where('st', 'in', ['q', 'qw']).limit(100).get();
+  for (const d of s.docs) {
+    const r = await db.runTransaction(async (tx) => {
+      const c = await tx.get(d.ref);
+      if (!c.exists) return '';
+      const x = c.data();
+      const at = Number(x.st === 'qw' ? x.wk : x.rqAt || x.t) || 0;
+      if (!['q', 'qw'].includes(x.st) || now - at <= INV_REQ_AGE) return '';
+      const n = Number(x.rq) || 0;
+      if (n >= INV_REQ_MAX) { tx.update(d.ref, { st: 'new', k: 'unk', err: 'ai', el: false, why: ['type'] }); return 'fail'; }
+      tx.update(d.ref, { st: 'q', rq: n + 1, rqAt: now });
+      return 'r' + (n + 1);
+    });
+    if (!r) continue;
+    if (r === 'fail') { out.failed++; await db.collection('sec_log').doc().set(ilog('', 'auto', 'invErr', { tgt: d.id, note: 'stuck' })).catch(() => {}); continue; }
+    await getFirestore().doc('sec_waq/' + bizId + '__' + d.id + '__' + r).create({ biz: bizId, id: d.id, inv: true, t: now }).catch(() => {});
+    out.requeued++;
+  }
+  return out;
+}
+
+Object.defineProperty(exports, '_core', { enumerable: false, value: { ingest, work, workIn, secInv, secDecide, retention, requeue, INV_REQ_AGE, INV_REQ_MAX, SEC_SCAN_UID, readFile } });
