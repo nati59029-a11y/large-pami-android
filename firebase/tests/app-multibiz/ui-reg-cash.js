@@ -288,6 +288,25 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   check('31ב תאריך שזוהה רחוק מסגירת הקופה (10/11/2024 מול 10/11/2026): אזהרה בכרטיס ובטופס, והצעה לתאריך הסגירה שמחליפה את התאריך ומעלימה את האזהרה', r31.cardW && /סגירת הקופה/.test(r31.o1.warn) && r31.o1.useD === '2026-11-10' && r31.o2.date === '2026-11-10' && !r31.o2.warn, { o1: r31.o1, o2: r31.o2 });
   check('31ג "שמור ואשר" שואל "תגיע חשבונית מהספק בהמשך?"; "כן" – תשלום במזומן מהקופה בתאריך הפתק שממתין לחשבונית, חודש התשלום = חודש הפתק, בלי תאריך תשלום לפי תנאים', /תגיע חשבונית מהספק בהמשך/.test(r31.q) && r31.t.aw && r31.t.date === '2026-11-10' && r31.t.plan === '2026-11' && !r31.t.due && r31.t.creg === 'i_nl' && r31.t.pays.join() === 'מזומן:55:2026-11-10', r31);
   check('31ד חשבונית ספק אמיתית (לא מקופה) בלי שינוי: "תאריך החשבונית", מספר חשבונית חובה, בלי אזהרת תאריך', r31.o3.lbl === 'תאריך החשבונית' && r31.o3.invReq === true && !r31.o3.warn, r31.o3);
+  // 32. בודק עצמאי סבב 1: זיכוי ספק בפריט מקופה – השדות הקודמים; תאריך ריק נחסם; משכורת מקופה – "לתשלום" נשאר בכרטיס
+  const r32 = await page.evaluate(async () => {
+    const W = (ms) => new Promise((r) => setTimeout(r, ms || 150)), F = () => document.querySelector('#dlg[open] form[data-f=inbsave]');
+    const emp = S.cats.find((c) => c.kind === 'exp' && !c.hid && !c.off && c.beh === 'emp');
+    S.inbox.push({ id: 'rcCrS', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup2', amt: -20, date: '2026-11-10', note: 'החזר' } },
+      { id: 'rcNoD', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup2', amt: 12, date: '2026-11-10', note: 'בלי תאריך' } },
+      { id: 'rcSalP', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', d: { reg: true, creg: 'i_nl', cat: emp.id, sub: 'rcEmp9', amt: 100, date: '2026-11-10', plan: '2026-11', m: 'מזומן', note: 'משכורת' } }); save();
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
+    const salCard = document.querySelector('#main [data-id=rcSalP]').closest('.card').innerText;
+    ACT.inbEdit({ dataset: { id: 'rcCrS' } }); await W(); let f = F();
+    const cr = { lbl: f.elements.date.closest('label').querySelector('span').textContent, inv: f.elements.inv && f.elements.inv.required, regpay: !!f.querySelector('[data-regpay]'), plan: !!(f.elements.plan || f.elements.due) }; closeDlg();
+    ACT.inbEdit({ dataset: { id: 'rcNoD' } }); await W(); f = F(); f.elements.date.value = ''; const n0 = S.tx.length; ACT.inbSaveOk(); await W(300);
+    const nd = { n: S.tx.length - n0, still: S.inbox.some((x) => x.id === 'rcNoD'), date: S.inbox.find((x) => x.id === 'rcNoD').d.date }; closeDlg();
+    S.inbox = S.inbox.filter((x) => !['rcCrS', 'rcNoD', 'rcSalP'].includes(x.id)); save();
+    return { sal: /לתשלום/.test(salCard), cr, nd };
+  });
+  check('32א זיכוי ספק בפריט מקופה (סכום שלילי) – בלי שינוי: "תאריך החשבונית", מספר חשבונית חובה, חודש/תאריך תשלום', r32.cr.lbl === 'תאריך החשבונית' && r32.cr.inv === true && !r32.cr.regpay && r32.cr.plan, r32.cr);
+  check('32ב פריט מקופה בלי תאריך: השמירה נחסמת ("חסר תאריך התשלום"), לא נרשם תשלום והפריט לא השתנה', r32.nd.n === 0 && r32.nd.still && r32.nd.date === '2026-11-10', r32.nd);
+  check('32ג משכורת מקופה: "לתשלום" נשאר בכרטיס כמו קודם', r32.sal, r32);
   check('19 אין שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
   if (out) fs.writeFileSync(out, JSON.stringify({ fail, res }, null, 1));
