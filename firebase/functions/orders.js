@@ -9,7 +9,7 @@
 //   cat/{id}           { name, parent?, ord, upd }                                  – קטגוריה (parent ריק) / תת־קטגוריה. מנהל, דרך saveCat
 //   xfer/{id}          { prod, name, from, to, qty, why:'order'|'cancel'|'edit'|'manual', ord?, no?, by, at, reqId }  – העברה פנימית בין סניפים
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
-//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
+//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
@@ -27,6 +27,7 @@ const T = require('./lib/tenant');
 const { seedLinePlans } = require('./lib/line-plans-seed');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const LD = require('./lib/line-discount');
+const { profitOf, ilDayStart } = require('./lib/ord-profit'); // 2026-11-12: רווחיות הזמנות
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -754,6 +755,26 @@ async function loadProds(tx, db, pids) {
   return m;
 }
 const plain = (prods) => new Map([...prods].map(([k, s]) => [k, s.data()]));
+// 2026-11-12 (רווחיות הזמנות, החלטת המשתמש: "העלות ביום ההזמנה"): לשורת מוצר נשמרת העלות של המוצר ברגע ההזמנה (it.c).
+// בעריכה – שורה שהמוצר שלה כבר היה בהזמנה שומרת את העלות הקודמת שלה. בלי עלות למוצר – בלי c (בחישוב: העלות הנוכחית, אם תוגדר).
+async function loadCosts(tx, db, pids) {
+  const ids = [...new Set(pids)];
+  const m = new Map();
+  if (!ids.length) return m;
+  const snaps = await tx.getAll(...ids.map((id) => db.doc(`prod/${id}/p/cost`)));
+  for (const s of snaps) if (s.exists && typeof s.get('cost') === 'number') m.set(s.ref.parent.parent.id, s.get('cost'));
+  return m;
+}
+function snapCosts(items, costs, oldItems) {
+  const prev = new Map();
+  for (const it of oldItems || []) if (it && it.pid && typeof it.c === 'number' && !prev.has(it.pid)) prev.set(it.pid, it.c);
+  for (const it of items) {
+    if (!it.pid) continue;
+    const c = prev.has(it.pid) ? prev.get(it.pid) : costs.get(it.pid);
+    if (typeof c === 'number') it.c = c;
+  }
+  return items;
+}
 
 function ordAccess(w, d) {
   if (!d) throw new HttpsError('not-found', 'ההזמנה לא נמצאה', { reason: 'no-ord' });
@@ -783,9 +804,11 @@ async function createOrder(request) {
     // טיוטה שקיבלה מחיר סיטונאי ללקוח מסוים – נשמרת רק עם אותו לקוח
     if (wb.exists && wb.get('cust') !== custId) throw deny('ws-not-linked', 'מחיר הסיטונאי נטען ללקוח אחר. בחרו שוב את הלקוח');
     const prods = await loadProds(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
+    const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
     const { cell, plans } = await prepCell(tx, db, w, input, cust);
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
     const { items } = resolveItems(w, br, raw, plain(prods), src);
+    snapCosts(items, costs);
     for (const it of items) if (it.pid && prods.get(it.pid).get('on') === false) throw pre('prod-off', `המוצר "${it.n}" לא זמין`);
     const ct = cell ? cellTotal(items, cell, plans) : { total: totalOf(items), calc: null };
     const total = ct.total;
@@ -836,6 +859,7 @@ async function updateOrder(request) {
       const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[d.br] : null;
       // שורה קיימת שנשארת עם אותו מוצר – שומרת את סניף המקור שלה, אלא אם נשלח אחר
       const { items } = resolveItems(w, d.br, raw, plain(prods), src);
+      snapCosts(items, await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid)), oldItems);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
       applyMoves(tx, db, w, prods, mv, { ord: id, no: d.no }, warn);
       upd.items = items;
@@ -1105,7 +1129,14 @@ async function setOrderCfg(request) {
   const w = await who(request);
   mgr(w);
   const input = inputObject(request);
-  onlyKeys(input, ['src', 'vat']);
+  onlyKeys(input, ['src', 'vat', 'nc']);
+  if (input.nc !== undefined) { // 2026-11-12: שורה בלי מחיר עלות ברווחיות – 'skip' (לא נספרת, ומסומנת) או 'zero' (עלות 0). נשמר ב-ordcfg/main.nc
+    if (!['skip', 'zero'].includes(input.nc)) throw bad('bad-nc', 'הגדרה לא תקינה');
+    if (input.src !== undefined || input.vat !== undefined) throw bad('bad-nc', 'שורות בלי עלות – הגדרה נפרדת');
+    await T.tdb().doc('ordcfg/main').set({ nc: input.nc, upd: Date.now() }, { merge: true });
+    if (w.biz.exists) await getFirestore().collection(`b/${w.bizId}/audit`).add({ by: w.uid, t: Date.now(), act: 'setOrderCfg', note: 'nc=' + input.nc });
+    return { ok: true, nc: input.nc };
+  }
   if (input.vat !== undefined) { // אחוז מע"מ (0 עד 100, עד שתי ספרות אחרי הנקודה) – נשמר ב-ordcfg/main.vat
     const v = input.vat;
     if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 100 || Math.abs(Math.round(v * 100) - v * 100) > 1e-6) throw bad('bad-vat', 'אחוז מע"מ: מספר בין 0 ל-100');
@@ -1344,6 +1375,49 @@ async function getWsPrices(request) {
   return out;
 }
 
+// ordProfit({ from, to, br?, paid? }) → { n, total, cost, profit, miss, nc, more?, rows:[{ id, no, name, at, br, st, total, cost, profit, miss }] } – סכומים בשקלים.
+// 2026-11-12: רווחיות הזמנות – מנהל, או עובד עם ord + ordP (רק הסניפים שלו). from/to = 'YYYY-MM-DD' לפי שעון ישראל (כולל), עד 366 יום.
+// בלי מבוטלות. paid = true – רק הזמנות ששולמו. נשלף לפי at (שדה אחד, בלי אינדקס מורכב); עד ORD_PROF_MAX הזמנות בתקופה.
+const ORD_PROF_MAX = 3000;
+const DAY_RE = /^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+async function ordProfit(request) {
+  const w = await who(request);
+  if (w.role !== 'manager' && !hasPerm(w, 'ordP')) throw deny('no-perm', 'אין לך הרשאה לרווחיות הזמנות. פנה למנהל.');
+  const input = inputObject(request);
+  onlyKeys(input, ['from', 'to', 'br', 'paid']);
+  if (typeof input.from !== 'string' || !DAY_RE.test(input.from) || typeof input.to !== 'string' || !DAY_RE.test(input.to)) throw bad('bad-date', 'בחרו תאריכים');
+  const [ty, tm, td] = input.to.split('-').map(Number);
+  ilDayStart(input.to); // תאריך שקיים בלוח השנה (31.2 – נדחה)
+  const t0 = ilDayStart(input.from), t1 = ilDayStart(new Date(Date.UTC(ty, tm - 1, td + 1)).toISOString().slice(0, 10)); // עד סוף יום to
+  if (t1 <= t0) throw bad('bad-date', 'תאריך הסיום לפני תאריך ההתחלה');
+  if (t1 - t0 > 367 * 86400e3) throw bad('bad-date', 'תקופה של עד שנה');
+  let br = null;
+  if (input.br != null && input.br !== '') {
+    if (typeof input.br !== 'string' || !BR_RE.test(input.br) || !w.branches.some((b) => b.id === input.br)) throw bad('bad-br', 'סניף לא תקין');
+    if (!canBr(w, input.br)) throw deny('foreign-br', 'אין לך הרשאה לסניף הזה');
+    br = input.br;
+  }
+  if (input.paid != null && typeof input.paid !== 'boolean') throw bad('bad-paid', 'סינון לא תקין');
+  const db = T.tdb();
+  const [qs, cfg] = await Promise.all([db.collection('ord').where('at', '>=', t0).where('at', '<', t1).orderBy('at', 'desc').limit(ORD_PROF_MAX + 1).get(), db.doc('ordcfg/main').get()]);
+  if (qs.size > ORD_PROF_MAX) throw pre('too-many', `יותר מ-${ORD_PROF_MAX} הזמנות בתקופה – בחרו תקופה קצרה יותר`);
+  const nc = cfg.exists && cfg.get('nc') === 'zero' ? 'zero' : 'skip';
+  const L = qs.docs.map((s) => Object.assign({ id: s.id }, s.data())).filter((o) => o.status !== 'cancel'
+    && (!br || o.br === br) && canBr(w, o.br) // כמו brOk בחוקים: עובד משויך לסניפים – רק הזמנות שהסניף שלהן ברשימה שלו (גם לא '_' / חסר)
+    && (!input.paid || (!!o.paid && ['paid', 'out', 'done'].includes(o.status))));
+  const need = [...new Set(L.flatMap((o) => (Array.isArray(o.items) ? o.items : []).filter((it) => it && it.pid && typeof it.c !== 'number' && ID_RE.test(it.pid)).map((it) => it.pid)))];
+  const cur = new Map();
+  for (let k = 0; k < need.length; k += 300) (await db.getAll(...need.slice(k, k + 300).map((id) => db.doc(`prod/${id}/p/cost`)))).forEach((s) => { if (s.exists && typeof s.get('cost') === 'number') cur.set(s.ref.parent.parent.id, s.get('cost')); });
+  const ag = (x) => Math.round(x) / 100;
+  const T0 = { total: 0, cost: 0, profit: 0, miss: 0 };
+  const rows = L.map((o) => {
+    const r = profitOf(o, cur, nc);
+    T0.total += r.total; T0.cost += r.cost; T0.profit += r.profit; T0.miss += r.miss;
+    return { id: o.id, no: o.no || 0, name: String((o.cust && o.cust.name) || '').slice(0, 60), at: o.at || 0, br: o.br || NB, st: o.status || '', total: ag(r.total), cost: ag(r.cost), profit: ag(r.profit), miss: r.miss };
+  });
+  return { n: rows.length, total: ag(T0.total), cost: ag(T0.cost), profit: ag(T0.profit), miss: T0.miss, nc, rows };
+}
+
 // getCosts({ after? }) → { cost: { <pid>: עלות }, next? } – מנהל ועובד עם ord (החלטה 00:12: עובד רואה עלות בכל מקום).
 // עמודים של WS_PAGE מוצרים (כמו getWsPrices למנהל). העלות נקראת גם ישירות מ-prod/{id}/p/cost לפי החוקים.
 async function getCosts(request) {
@@ -1515,7 +1589,7 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
+const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, ordProfit, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f));
 Object.defineProperty(exports, '_core', { enumerable: false, value: { who, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

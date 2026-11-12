@@ -14,7 +14,7 @@ const GM = require('./gemini-mock');
 const A = 'biz-a';
 const ALL = { scan: true, shelf: true, feedback: true, tasks: true, suppliers: true, requests: true, cashClose: true, yemot: true, orders: true };
 const MGR = 'p_mgr', OLD = 'p_old', NOEXP = 'p_noexp', TRF = 'p_trf', SUPER = 'p_super';
-const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false };
+const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false };
 
 const FN_EMU = JSON.parse(fsm.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).emulators.functions;
 const fnUrl = (name) => `http://${process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`}/${H.PROJECT_ID}/us-central1/${name}`;
@@ -140,6 +140,24 @@ describe('6ה – פונקציות: הוספת עובד, דרגות ומתגים
     await prep((d) => d.doc('b/largpeami').set({ name: 'L', status: 'active', dataRoot: 'legacy' }));
     assert.equal((await call('setBusinessRanks', SUPER, { bizId: 'largpeami', ranks: [] })).reason, 'legacy-biz');
     assert.equal((await call('setStaffPerms', SUPER, { bizId: 'largpeami', uid: OLD, perms: {} })).reason, 'legacy-biz');
+  });
+  it('2026-11-12 מצב העסק: bal + balB (סניפים) נשמרים בעובד ובדרגה; balB ריק לא נשמר; קלט לא תקין נחסם', async () => {
+    const p = await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, perms: { bal: true, balB: ['br_a', 'br_a', 'zz'] } });
+    assert.equal(p.status, 'OK', p.text);
+    const sp = (await getDoc(`b/${A}/staff/${OLD}`)).perms;
+    assert.equal(sp.bal, true); assert.deepEqual(sp.balB, ['br_a', 'zz']);
+    const q = await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, perms: { bal: true, balB: [] } });
+    assert.equal(q.status, 'OK', q.text); assert.equal((await getDoc(`b/${A}/staff/${OLD}`)).perms.balB, undefined);
+    for (const balB of ['br_a', ['Bad-ID'], ['x'], [1], Array.from({ length: 21 }, (_, i) => 'b' + i)]) {
+      assert.equal((await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, perms: { bal: true, balB } })).reason, 'bad-perms', JSON.stringify(balB));
+    }
+    assert.equal((await call('setStaffPerms', SUPER, { bizId: A, uid: OLD, perms: { bal: 'yes' } })).reason, 'bad-perms');
+    const rk = await call('setBusinessRanks', SUPER, { bizId: A, ranks: [{ id: 'br', name: 'מנהל סניף', perms: { bal: true, balB: ['br_b'] } }] });
+    assert.equal(rk.status, 'OK', rk.text);
+    assert.deepEqual((await getDoc(`b/${A}/private/info`)).ranks[0].perms, Object.assign({}, NONE, { bal: true, balB: ['br_b'] }));
+    const add = await call('addStaff', SUPER, { bizId: A, email: 'bal6e@example.invalid', name: 'סניף', rank: 'br' });
+    assert.equal(add.status, 'OK', add.text);
+    assert.deepEqual((await getDoc(`b/${A}/staff/${add.result.uid}`)).perms.balB, ['br_b']);
   });
   it('זיהוי חכם: צילום העברה – עובד עם מתג "צילום העברות" עובר את בדיקת ההרשאה; בלי "מזין הוצאות" – חשבונית נחסמת', async () => {
     const jpg = () => { const b = Buffer.alloc(200); Buffer.from([0xff, 0xd8, 0xff, 0xe0]).copy(b); return { mimeType: 'image/jpeg', data: b.toString('base64') }; };

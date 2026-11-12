@@ -221,7 +221,7 @@ describe('6ז – מי הזין כל הוצאה (eu) והדוח "רק שלו"', 
     const take = (p) => { const i = L.findIndex((l) => l.startsWith(p)); if (i < 0) throw new Error('לא נמצא: ' + p); let j = i + 1; while (j < L.length && L[j].startsWith(' ')) j++; return L.slice(i, j).join('\n'); };
     const pre = 'var S,SY={uid:"mgr1",role:"admin"},MEM={};const localStorage={setItem:(k,v)=>{MEM[k]=v}},isW=()=>false,supSched=()=>{},toast=()=>{},KEY="k",' +
       'rnd=n=>Math.round(n*100)/100,num=v=>+v||0,sum=(a,f)=>a.reduce((s,x)=>s+f(x),0),CATS={c1:{name:"חומרים"},c2:{name:"שכר",beh:"emp"}},cat=id=>CATS[id],' +
-      'subName=()=>"",live=()=>S.tx,pmon=t=>(t.date||"").slice(0,7),wvMonths=()=>["2026-11"];\n';
+      'subName=()=>"",live=()=>S.tx,pmon=t=>(t.date||"").slice(0,7),wvMonths=()=>["2026-11"],ownOut=()=>false,brAll=()=>[],txBr=t=>t.br||"";\n';
     const post = '\n;({setS:(x)=>{S=x},getS:()=>S,save,wvWant})';
     return vm.runInNewContext(pre + take('function save(') + '\n' + take('function wvWant(') + post, {}, { filename: 'index.html (eu)' });
   }
@@ -248,6 +248,8 @@ describe('6ז – מי הזין כל הוצאה (eu) והדוח "רק שלו"', 
     assert.deepEqual(JSON.parse(o['rpo_2026-11_emp1']), [['חומרים', 15]]);
     assert.deepEqual(JSON.parse(o['rpo_2026-11_emp2']), [['חומרים', 99]]);
     assert.equal(Object.keys(o).filter((k) => k.startsWith('rpo_')).length, 2);
+    assert.deepEqual(JSON.parse(o['bal_2026-11']), { i: 0, e: 3614 }); // מצב העסק: סכומים בלבד, כולל משכורות; בלי סניפים – בלי מסמכי סניף
+    assert.equal(Object.keys(o).filter((k) => k.startsWith('bal_')).length, 1);
     assert.equal(JSON.parse(o['rps_2026-11']), 500);
   });
   it('קליטה מ-inbox רושמת eu = העובד ששלח (owner)', () => {
