@@ -70,6 +70,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
     if (n === 'getCard' && globalThis.__GCOLD) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'פעולה לא תקינה', details: { reason: 'bad-act' } } }) }); // שרת ישן
+    if (n === 'getCard' && globalThis.__GCNOCARD) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'FAILED_PRECONDITION', message: 'לא נבחרו שדות אשראי', details: { reason: 'copy-no-card' } } }) });
     if (n === 'getCard' && d.act === 'copyAll') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: { card: d.slot === 2 ? { num: '5326100020003456', exp: '03/29', name: 'Noa B', cvv: '987' } : { num: '4580123456789012', exp: '07/28', cvv: '123' } } }) });
     const R = { checkLines: { hits: d && d.lines && d.lines[0] && d.lines[0].phone === '0521111111' ? [{ i: 0, phone: '0521111111', d: '2026-10-30', br: 'br2', days: 30, src: 'ord' }] : [] }, saveLinePlan: { ok: true, id: 'pl2', days: 45 }, saveCust: { ok: true, id: 't' + TZ }, setCustCfg: { ok: true, xKeys: [{ k: 'xcity', label: 'עיר' }, { k: 'xab12', label: 'הערות' }] }, importCusts: { ok: true, created: 2, updated: 0, same: 0, bad: [] }, createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: { ok: true, mode: 'link', has: true }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
@@ -303,7 +304,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
       const third = !!(await page.$('input[data-i=ocCdM][data-n="1"]')), noFourth = !(await page.$('[data-a=ocCdAdd]'));
       await page.click('[data-a=ocCdX][data-n="1"]'); await H.settle(page, 200);
       await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
-      const n13 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 1500);
+      const n13 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 500); await fin(); await H.settle(page, 800);
       const sc = calls.slice(n13).filter((c) => c.n === 'setCard');
       check('13 ניוד: "+" מוסיף משבצת כרטיס, עד 3 בסה"כ; שני כרטיסים נשמרים (setCard add, עם ההזמנה)', hasAdd && third && noFourth && sc.length === 2 && sc.every((c) => c.d.add === true && c.d.ordId === 'o1') && sc[1].d.card.num === '5326100020003456' && sc[1].d.card.cvv === '987', { hasAdd, third, noFourth, sc: sc.map((c) => c.d.card.num.slice(-4)) });
     }
@@ -316,15 +317,28 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const v1 = await page.evaluate(() => cur().v); const t1 = await page.innerText('#main'); const add1 = !!(await page.$('[data-a=ocCdAdd]'));
     await page.setViewportSize({ width: 360, height: 780 }); await H.settle(page, 150); await page.evaluate(M3); const q1 = await page.evaluate(() => __q('#main')); await shot('מסך-כרטיס-לפני-סיום'); await page.setViewportSize({ width: 390, height: 844 });
     await page.click('#main [data-a=back]'); await H.settle(page, 300); const v2 = await page.evaluate(() => [cur().v, (window.__ox.draft || {}).items && window.__ox.draft.items.length]);
-    await page.click('[data-a=oxSave]'); await H.settle(page, 500); await page.fill('input[data-i=ocCd][data-k=num]', '1234'); await page.click('[data-a=ocFinish]'); await H.settle(page, 500);
+    await page.click('[data-a=oxSave]'); await H.settle(page, 500); await page.fill('input[data-i=ocCs][data-k=num]', '1234'); await page.click('[data-a=ocFinish]'); await H.settle(page, 500);
     const v3 = await page.evaluate(() => cur().v); const none = calls.filter((c) => c.n === 'createOrder').length === nc0;
-    check('14 ניוד + קישור: "שמור הזמנה" → מסך "כרטיס אשראי (לא חובה)" בלי createOrder, עם "+ כרטיס נוסף"; "חזרה לטופס" שומר את הטיוטה; כרטיס שגוי – נשאר במסך; כפתורים ≥44px, 360px',
-      v1 === 'ocCardStep' && /כרטיס אשראי \(לא חובה\)/.test(t1) && /סיום הזמנה/.test(t1) && /חזרה לטופס/.test(t1) && add1 && q1.small.length === 0 && q1.sw <= q1.iw && v2[0] === 'oxNew' && v2[1] === 1 && v3 === 'ocCardStep' && none, { v1, add1, small: q1.small, sw: [q1.sw, q1.iw], v2, v3, none });
-    await page.fill('input[data-i=ocCd][data-k=num]', '4580 1234 5678 9012'); await page.fill('input[data-i=ocCd][data-k=exp]', '7/28'); await page.fill('input[data-i=ocCd][data-k=cvv]', '123');
+    check('14 ניוד + קישור: "שמור הזמנה" → מסך "כרטיס אשראי (לא חובה)" בלי createOrder, בלי "+ כרטיס נוסף" (נשאר במשבצת שבטופס); "חזרה לטופס" שומר את הטיוטה; כרטיס שגוי – נשאר במסך; כפתורים ≥44px, 360px',
+      v1 === 'ocCardStep' && /כרטיס אשראי \(לא חובה\)/.test(t1) && /סיום הזמנה/.test(t1) && /חזרה לטופס/.test(t1) && !add1 && q1.small.length === 0 && q1.sw <= q1.iw && v2[0] === 'oxNew' && v2[1] === 1 && v3 === 'ocCardStep' && none, { v1, add1, small: q1.small, sw: [q1.sw, q1.iw], v2, v3, none });
+    await page.fill('input[data-i=ocCs][data-k=num]', '4580 1234 5678 9012'); await page.fill('input[data-i=ocCs][data-k=exp]', '7/28'); await page.fill('input[data-i=ocCs][data-k=cvv]', '123');
     const k0 = calls.length; await page.click('[data-a=ocFinish]'); await H.settle(page, 1500);
     const a = calls.slice(k0), ci = a.findIndex((c) => c.n === 'createOrder'), si = a.findIndex((c) => c.n === 'setCard'), sd = si >= 0 ? a[si].d : null;
     const st = await page.evaluate(() => ({ v: cur().v, d: window.__ox.draft, /* טיוטה ריקה חדשה מותרת */ ls: JSON.stringify(localStorage).includes('4580123456789012') }));
     check('14א "סיום הזמנה" עם כרטיס: createOrder ואחריו setCard {ordId, add, num, exp}; עוברים לכרטיס ההזמנה; לא נשמר באחסון', ci >= 0 && si > ci && !!sd && sd.ordId === 'o1' && sd.add === true && sd.card.num === '4580123456789012' && sd.card.exp === '07/28' && st.v === 'oxOrd' && (!st.d || !st.d.items.length) && !JSON.stringify(st.d || {}).includes('4580') && !st.ls, { ci, si, st, sd: sd && { ordId: sd.ordId, add: sd.add } });
+    { // 14ג (ניוד): המשבצת שבטופס = כרטיס לקו (הערה בולטת), המסך המלא = כרטיס להזמנה (נפרד, ריק). שניהם נשלחים: קודם המשבצת ואחריה המסך; אותו מספר בשניהם – נחסם במסך
+      await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0529998869'); await H.settle(page, 300);
+      await page.click('#occd summary'); await H.settle(page, 150); await page.fill('input[data-i=ocCd][data-k=num]', '4111111111111111'); await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);
+      const note = await page.evaluate(() => (document.getElementById('occdline') || {}).innerText || '');
+      const n0 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 500);
+      const sv = await page.evaluate(() => ({ v: cur().v, num: (document.querySelector('input[data-i=ocCs][data-k=num]') || {}).value, mid: !!document.querySelector('[data-i=ocCd]') }));
+      await page.fill('input[data-i=ocCs][data-k=num]', '4111 1111 1111 1111'); await page.click('[data-a=ocFinish]'); await H.settle(page, 500);
+      const dupStay = (await page.evaluate(() => cur().v)) === 'ocCardStep' && !calls.slice(n0).some((c) => c.n === 'createOrder');
+      await page.fill('input[data-i=ocCs][data-k=num]', '4580123456789012'); await page.click('[data-a=ocFinish]'); await H.settle(page, 1500);
+      const sc = calls.slice(n0).filter((c) => c.n === 'setCard').map((c) => [c.d.card.num.slice(-4), c.d.ordId]);
+      check('14ג ניוד: הערה "לתשלום על הקו…" במשבצת; המסך המלא מופיע גם כשבמשבצת הוקלד כרטיס, ריק ונפרד; אותו מספר – נחסם ונשארים; שני הכרטיסים נשמרים: קודם המשבצת ואחריו המסך',
+        /לתשלום על הקו באשראי אחר מההזמנה יש להקליד כאן את פרטי האשראי לקו/.test(note) && sv.v === 'ocCardStep' && sv.num === '' && !sv.mid && dupStay && JSON.stringify(sc) === JSON.stringify([['1111', 'o1'], ['9012', 'o1']]), { note, sv, dupStay, sc });
+    }
     // 15: הגדרת הפרטים להעתקה (מנהל) + "העתק פרטי לקוח" בהזמנת ניוד ששולמה
     await goV('oxCfg'); await H.settle(page, 600);
     const h15 = await page.evaluate(() => (document.getElementById('occpf') || {}).innerText || '');
@@ -348,12 +362,21 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     if (hasB) { await page.click('#main [data-a=ocCopyAll]'); await H.settle(page, 800); }
     const gc = calls.slice(k2).filter((c) => c.n === 'getCard'); const txt = await page.evaluate(() => window.__clip[window.__clip.length - 1] || '');
     await goV('oxOrd', 'o8'); await H.settle(page, 300); const noCancel = !(await page.$('#main [data-a=ocCopyAll]'));
-    check('15ב עובד, הזמנת ניוד ששולמה: "העתק פרטי לקוח" → getCard copyAll + ordId לכל כרטיס (מקום 2); טקסט "תווית: ערך" לפי הסדר, כולל CVV, כרטיס 1/2; שדה ריק לא נכתב; בהזמנה מבוטלת – אין כפתור',
-      hasB && gc.length === 2 && gc.every((c) => c.d.act === 'copyAll' && c.d.ordId === 'o7' && c.d.custId === 'cCopy0000000000000001') && gc[1].d.slot === 2 && gc[0].d.slot === undefined
-      && /^שם: נועה בדויה\nטלפון: 0501112233\nעיר: אשדוד\nקווים לניוד: \n  קו 1: 0521234567, ת\.ז 123456782, סלקום\nכרטיס 1 – מספר כרטיס: 4580123456789012\nכרטיס 1 – CVV: 123\nכרטיס 2 – מספר כרטיס: 5326100020003456\nכרטיס 2 – CVV: 987\nעיר: אשקלון$/.test(txt) && !/רחוב ומספר/.test(txt) && noCancel, { hasB, gc: gc.map((c) => c.d), txt, noCancel });
+    check('15ב עובד, הזמנת ניוד ששולמה: "העתק פרטי לקוח" → getCard copyAll + ordId רק לכרטיס הראשון (ללקוח 2 כרטיסים), בלי "כרטיס N"; טקסט "תווית: ערך" לפי הסדר, כולל CVV; שדה ריק לא נכתב; בהזמנה מבוטלת – אין כפתור',
+      hasB && gc.length === 1 && gc.every((c) => c.d.act === 'copyAll' && c.d.ordId === 'o7' && c.d.custId === 'cCopy0000000000000001') && gc[0].d.slot === undefined
+      && /^שם: נועה בדויה\nטלפון: 0501112233\nעיר: אשדוד\nקווים לניוד: \n  קו 1: 0521234567, ת\.ז 123456782, סלקום\nמספר כרטיס: 4580123456789012\nCVV: 123\nעיר: אשקלון$/.test(txt) && !/רחוב ומספר/.test(txt) && noCancel, { hasB, gc: gc.map((c) => c.d), txt, noCancel });
     globalThis.__GCOLD = 1; await goV('oxOrd', 'o7'); await H.settle(page, 300); await page.click('#main [data-a=ocCopyAll]'); await H.settle(page, 3200); globalThis.__GCOLD = 0;
     const t2 = await page.evaluate(() => ({ c: window.__clip[window.__clip.length - 1] || '', toast: [...document.querySelectorAll('.toast,#toast')].map((t) => t.innerText).join(' | ') }));
     check('15ג שרת ישן (getCard copyAll נדחה): שאר הפרטים מועתקים בלי אשראי + הודעה "דורשת עדכון שרת"', /^שם: נועה בדויה/.test(t2.c) && !/כרטיס/.test(t2.c) && /עדכון שרת/.test(t2.toast), t2);
+    { // 15ד: copyF בלי שדות אשראי → לא נקרא getCard; השרת דוחה copy-no-card → מועתק בלי אשראי + הודעה
+      const cf0 = await page.evaluate(() => { const v = window.__ox.cfg.copyF; window.__ox.cfg.copyF = ['name', 'phone']; return v; });
+      const k3 = calls.length; await goV('oxOrd', 'o7'); await H.settle(page, 300); await page.click('#main [data-a=ocCopyAll]'); await H.settle(page, 800);
+      const noGc = !calls.slice(k3).some((c) => c.n === 'getCard'); const c3 = await page.evaluate(() => window.__clip[window.__clip.length - 1] || '');
+      await page.evaluate((v) => { window.__ox.cfg.copyF = v; }, cf0);
+      globalThis.__GCNOCARD = 1; await goV('oxOrd', 'o7'); await H.settle(page, 300); await page.click('#main [data-a=ocCopyAll]'); await H.settle(page, 3200); globalThis.__GCNOCARD = 0;
+      const t4 = await page.evaluate(() => ({ c: window.__clip[window.__clip.length - 1] || '', toast: [...document.querySelectorAll('.toast,#toast')].map((t) => t.innerText).join(' | ') }));
+      check('15ד בלי שדות אשראי ב-copyF – בלי getCard; copy-no-card → בלי אשראי + הודעה בעברית', noGc && c3 === 'שם: נועה בדויה\nטלפון: 0501112233' && /^שם: נועה בדויה/.test(t4.c) && !/כרטיס/.test(t4.c) && /לא נבחרו שדות אשראי/.test(t4.toast), { noGc, c3, t4 });
+    }
     await page.evaluate(() => { SY.role = window.__r0; window.__ox.L = window.__ox.L.filter((o) => !['o7', 'o8'].includes(o.id)); }); CUST.pop();
     check('14ב בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   }

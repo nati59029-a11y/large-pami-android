@@ -392,6 +392,16 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     await mk('cPaid', 'paid', 'br1', id, true); await mk('cDone', 'done', 'br1', id, true); await mk('cNew', 'new', 'br1', id, true); await mk('cCancel', 'cancel', 'br1', id, true);
     await mk('nPaid', 'paid', 'br1', id, false); await mk('nNew', 'new', 'br1', id, false); await mk('cBr2', 'paid', 'br2', id, true); await mk('cOther', 'paid', 'br1', 'p0500000000', true);
     const FULL = { num: '4580123456789012', exp: '07/28', name: 'Dana Levi', cvv: '123' };
+    const setF = (F) => prep((d) => d.doc(`b/${A}/ordcfg/main`).set({ copyF: F }, { merge: true }));
+    // המנהל לא בחר שדות כרטיס (או לא בחר כלום) – עובד נדחה, גם בהזמנת ניוד
+    assert.equal((await call('getCard', E1, { custId: id, act: 'copyAll', ordId: 'cPaid' })).reason, 'copy-no-card');
+    await setF(['name', 'phone']);
+    const nc = await call('getCard', E1, { custId: id, act: 'copyAll', ordId: 'cPaid' });
+    assert.equal(nc.reason, 'copy-no-card'); assert.ok(nc.text.includes('המנהל לא בחר פרטי אשראי להעתקה'));
+    // רק מספר ותוקף – בלי שם ובלי CVV
+    await setF(['name', 'cnum', 'cexp']);
+    assert.deepEqual((await call('getCard', E1, { custId: id, act: 'copyAll', ordId: 'cPaid' })).result.card, { num: '4580123456789012', exp: '07/28' });
+    await setF(['ccvv', 'cname', 'cexp', 'cnum']);
     for (const o of ['cPaid', 'cDone', 'cNew']) {
       const r = await call('getCard', E1, { custId: id, act: 'copyAll', ordId: o });
       assert.equal(r.status, 'OK', o + ' ' + r.text); assert.deepEqual(r.result.card, FULL);
@@ -406,9 +416,14 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     const m = await call('getCard', MGR, { custId: id, act: 'copyAll' });
     assert.equal(m.status, 'OK', m.text); assert.deepEqual(m.result.card, FULL);
     const lg = (await coll(`b/${A}/cardLog`)).filter((x) => x.act === 'copyAll');
-    assert.equal(lg.length, 4); assert.ok(!leak(JSON.stringify(lg)));
+    assert.equal(lg.length, 5); assert.ok(!leak(JSON.stringify(lg)));
     const e1 = lg.filter((x) => x.by === E1);
-    assert.deepEqual(e1.map((x) => x.ord).sort(), ['cDone', 'cNew', 'cPaid']); assert.ok(e1.every((x) => x.f === 'all' && x.cust === id));
+    assert.deepEqual(e1.map((x) => x.ord).sort(), ['cDone', 'cNew', 'cPaid', 'cPaid']); assert.ok(e1.every((x) => x.cust === id));
+    assert.deepEqual(e1.map((x) => x.f).sort(), ['num,exp', 'num,exp,name,cvv', 'num,exp,name,cvv', 'num,exp,name,cvv']);
+    assert.equal(lg.find((x) => x.by === MGR).f, 'all', 'מנהל – כמו היום, בלי תלות ב-copyF');
+    // מנהל גם כש-copyF בלי שדות כרטיס
+    await setF(['name']);
+    assert.deepEqual((await call('getCard', MGR, { custId: id, act: 'copyAll' })).result.card, FULL);
     // מתג cellular כבוי – גם הזמנה עם cell נדחית
     await prep((d) => d.doc('b/' + A).update({ 'features.cellular': false }));
     assert.equal((await call('getCard', E1, { custId: id, act: 'copyAll', ordId: 'cPaid' })).reason, 'ord-not-cell');

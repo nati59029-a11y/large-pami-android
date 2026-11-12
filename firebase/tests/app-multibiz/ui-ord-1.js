@@ -44,7 +44,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
     if (n === 'getPayLink' && d.auto && globalThis.__OLDPAY) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'שדה לא מוכר: auto', details: { reason: 'bad-field' } } }) }); // שרת ישן
-    const R = { createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: d.auto ? { link: LINK, total: 34.5, auto: { user: 'pay@biz.co', pass: 'Sekret-77' } } : { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: Object.assign({ ok: true, mode: 'link', has: true }, 'cred' in d ? { cred: !!d.cred } : {}), getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
+    const R = { createOrder: { id: 'o1', no: 13, total: 24, warn: [] }, getPayLink: d.auto && !globalThis.__NOAUTO ? { link: LINK, total: 34.5, auto: { user: 'pay@biz.co', pass: 'Sekret-77' } } : { link: LINK, total: 34.5 }, markOrderPaid: { ok: true }, setBusinessPayLink: Object.assign({ ok: true, mode: 'link', has: true }, 'cred' in d ? { cred: !!d.cred } : {}), getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
   await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(String(u)); return null; }; });
@@ -95,6 +95,9 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const leak = await page.evaluate(() => (document.body.innerHTML + JSON.stringify(localStorage) + JSON.stringify(sessionStorage) + JSON.stringify(window.__ox)).includes('Sekret-77'));
     globalThis.__OLDPAY = 1; const n1 = calls.length; await page.click('[data-a=oxPay]'); await H.settle(page, 800); globalThis.__OLDPAY = 0;
     const g2 = calls.slice(n1).filter((c) => c.n === 'getPayLink'); const pb2 = await page.evaluate(() => window.__pb.slice(1));
+    globalThis.__NOAUTO = 1; await page.click('[data-a=oxPay]'); await H.settle(page, 800); globalThis.__NOAUTO = 0; // השרת לא החזיר auto (פענוח נכשל / אתר אחר)
+    const pb3 = await page.evaluate(() => window.__pb.slice(2)); const op3 = await page.evaluate(() => window.__opened.length);
+    check('4ג PayBrowser: getPayLink בלי auto → הדפדפן הפנימי נפתח בלי מילוי (user/pass ריקים), בלי window.open', pb3.length === 1 && pb3[0].url === LINK && pb3[0].user === '' && pb3[0].pass === '' && op3 === 1, { pb3: pb3.map((x) => [x.url, x.user, x.pass]), op3 });
     await page.evaluate(() => { delete window.Capacitor; });
     check('4ב PayBrowser: getPayLink auto:true → open({url,user,pass}) בלי window.open; הסיסמה לא בעמוד/אחסון; שרת ישן → ניסיון שני בלי auto ופתיחה בלי פרטים', g1.length === 1 && g1[0].d.auto === true && pb.length === 1 && pb[0].url === LINK && pb[0].user === 'pay@biz.co' && pb[0].pass === 'Sekret-77' && op2 === 1 && !leak
       && g2.length === 2 && g2[0].d.auto === true && g2[1].d.auto === undefined && pb2.length === 1 && pb2[0].url === LINK && pb2[0].user === '' && pb2[0].pass === '', { g1: g1.map((c) => c.d), pb: pb.map((x) => [x.url, x.user, !!x.pass]), op2, leak, g2: g2.map((c) => c.d), pb2: pb2.map((x) => [x.user, x.pass]) });
@@ -153,6 +156,13 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     check('13ב מנהל־על: פרטי כניסה – שדות ריקים, סיסמה type=password/new-password; שמירה שולחת cred {user,pass} ומרוקנת; "מוגדרים"; מחיקה → cred:null; בלי סיסמה – בלי cred; כפתורים ≥44px',
       /לא מוגדרים/.test(f0.t) && /SMS/.test(f0.t) && f0.pt === 'password' && f0.ac === 'new-password' && f0.pv === '' && f0.uv === '' && !!c1 && c1.d.cred && c1.d.cred.user === 'pay@biz.co' && c1.d.cred.pass === 'Sekret-77' && f1.pv === '' && /מוגדרים/.test(f1.t) && !/לא מוגדרים/.test(f1.t) && f1.del && !f1.leak && sm === 0
       && !!c2 && c2.d.cred === null && !!c3 && !('cred' in c3.d), { f0: Object.assign({}, f0, { t: f0.t.slice(-200) }), c1: c1 && Object.assign({}, c1.d, { cred: c1.d.cred && { user: c1.d.cred.user, pass: !!c1.d.cred.pass } }), f1: Object.assign({}, f1, { t: '' }), sm, c2: c2 && c2.d.cred, c3: c3 && Object.keys(c3.d) });
+  }
+  { // 13ג: קישור קיים – שדה הקישור רשות ("השאירו ריק…", "החלפת הקישור… מוחקת את פרטי הכניסה"); שמירה עם קישור ריק → בלי link, עם cred
+    await page.evaluate(() => rerender()); await H.settle(page, 300);
+    const t = await page.evaluate(() => (document.getElementById('oxpaykeep') || {}).innerText || '');
+    const k0 = calls.length; await page.fill('form[data-f=oxPayF] input[name=cpass]', 'New-pass-1'); await page.click('form[data-f=oxPayF] button.btn'); await H.settle(page, 500);
+    const c = calls.slice(k0).find((x) => x.n === 'setBusinessPayLink');
+    check('13ג קישור קיים: הערה "השאירו ריק" + "מוחקת את פרטי הכניסה"; קישור ריק → נשלח בלי link ועם cred', /השאירו ריק/.test(t) && /מוחקת את פרטי הכניסה/.test(t) && !!c && !('link' in c.d) && c.d.mode === 'link' && c.d.cred && c.d.cred.pass === 'New-pass-1', { t, d: c && Object.keys(c.d) });
   }
   // 14. הכנסה + זיכוי: ordpay → תנועת הכנסה אחת בסניף ההזמנה עם off.sub; void → מבוטלת; בלי כפילות
   globalThis.__OP = [doc('ordpay/o2', { ord: S('o2'), no: N(11), br: S('br2'), amt: N(80), at: N(T1), st: S('paid'), sup: M({ id: S('s_sup1'), name: S('סמוויקס') }) })];

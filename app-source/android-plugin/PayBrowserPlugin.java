@@ -3,8 +3,10 @@ package com.largepami.finance;
 import android.app.Dialog;
 import android.content.DialogInterface;
 import android.graphics.Color;
+import android.graphics.Bitmap;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.TypedValue;
@@ -35,7 +37,7 @@ import org.json.JSONObject;
 /**
  * In-app browser for the business payment (clearing) site (task 2026-11-12).
  * Opens the site in a separate full screen WebView, and - when the app passes login details - fills them ONCE
- * on the login page of the same site (same host, a sub-domain or a parent domain) and presses the login button.
+ * on the login page of the same site (the same host or a sub-domain of it) and presses the login button.
  * An SMS code (if the site asks for one) is typed by the worker on the page.
  *
  * JS (window.Capacitor.Plugins.PayBrowser):
@@ -44,8 +46,11 @@ import org.json.JSONObject;
  * Security:
  *  - https only (the start url and every navigation; tel:, mailto:, intent: and the rest are blocked, not opened).
  *  - No JavaScript bridge (no addJavascriptInterface), no file / content access, no mixed content, no saved form data.
- *  - The login details are never logged, are injected only into the matching host, and are cleared from memory
- *    right after the injection. On close: the WebView is destroyed and the WebView form data is cleared.
+ *  - The login details are never logged (capacitor.config.json: loggingBehavior "none" - Capacitor would log the call data),
+ *    are injected only into the matching host (checked in Java right before every try, and again inside the page:
+ *    location.protocol / location.hostname), and are cleared from memory right after the injection.
+ *  - The WebView is excluded from Android Autofill (no "save password" offer).
+ *    On close: the WebView is destroyed and the WebView form data is cleared.
  */
 @CapacitorPlugin(name = "PayBrowser")
 public class PayBrowserPlugin extends Plugin {
@@ -64,7 +69,8 @@ public class PayBrowserPlugin extends Plugin {
     private String pass;
     private boolean done;
     private boolean filled;
-    private int gen; // page generation: a retry of an older page never runs on a newer one
+    private int gen; // page generation: a retry of an older page never runs on a newer one (moved on every page start and finish)
+    private boolean inflight; // one injection at a time
 
     @PluginMethod
     public void open(final PluginCall call) {
@@ -77,6 +83,10 @@ public class PayBrowserPlugin extends Plugin {
         }
         final String p = call.getString("pass");
         final String us = call.getString("user");
+        try { // the call stays open until the screen closes - do not keep the details in its data
+            call.getData().remove("pass");
+            call.getData().remove("user");
+        } catch (Exception ignored) { /* nothing to remove */ }
         final Uri start = u;
         getActivity().runOnUiThread(new Runnable() {
             @Override
@@ -107,6 +117,7 @@ public class PayBrowserPlugin extends Plugin {
         user = has && us != null ? us : null;
         done = !has; // no details: only open the site
         filled = false;
+        inflight = false;
         gen = 0;
 
         final Dialog d = new Dialog(getActivity(), android.R.style.Theme_DeviceDefault_NoActionBar);
@@ -166,6 +177,7 @@ public class PayBrowserPlugin extends Plugin {
         s.setGeolocationEnabled(false);
         s.setSupportMultipleWindows(false); // target=_blank opens here (and passes the https check below)
         s.setJavaScriptCanOpenWindowsAutomatically(false);
+        if (Build.VERSION.SDK_INT >= 26) w.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         w.setWebChromeClient(new WebChromeClient()); // default alert/confirm dialogs of the site
         w.setWebViewClient(new WebViewClient() {
             @Override
@@ -180,9 +192,18 @@ public class PayBrowserPlugin extends Plugin {
             }
 
             @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                gen++; // a new page: pending tries of the old one are dropped
+                inflight = false; // a result of the old page (if any) is ignored by gen
+                ui.removeCallbacksAndMessages(null);
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 gen++;
+                ui.removeCallbacksAndMessages(null);
                 if (!done && view == web && hostOk(url)) tryFill(gen, 0);
             }
         });
@@ -237,20 +258,23 @@ public class PayBrowserPlugin extends Plugin {
         return u != null && "https".equalsIgnoreCase(u.getScheme()) && u.getHost() != null && u.getHost().length() > 0;
     }
 
-    /** The same host as the start url, a sub-domain of it, or a parent domain of it (only https). */
+    /** The same host as the start url, or a sub-domain of it (only https). A parent domain is NOT accepted (co.il). */
     private boolean hostOk(String url) {
         if (url == null || host0 == null) return false;
         Uri u;
         try { u = Uri.parse(url); } catch (Exception e) { return false; }
         if (!isHttps(u)) return false;
         String h = u.getHost().toLowerCase();
-        if (h.equals(host0) || h.endsWith("." + host0)) return true;
-        return h.indexOf('.') > 0 && host0.endsWith("." + h);
+        return h.equals(host0) || h.endsWith("." + host0);
     }
 
     private void tryFill(final int g, final int attempt) {
-        if (done || web == null || g != gen || pass == null) return;
-        String js = "(function(u,p){"
+        if (done || inflight || web == null || g != gen || pass == null) return;
+        if (!hostOk(web.getUrl())) return; // the page moved on meanwhile
+        inflight = true;
+        String js = "(function(u,p,h0){"
+                + "var h=String(location.hostname||'').toLowerCase();"
+                + "if(location.protocol!=='https:'||!(h===h0||h.slice(-(h0.length+1))==='.'+h0))return 'host';"
                 + "function vis(e){if(!e||e.disabled||e.readOnly)return false;var r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;"
                 + "var s=window.getComputedStyle(e);return s.visibility!=='hidden'&&s.display!=='none';}"
                 + "var a=[].slice.call(document.querySelectorAll('input')),pi=-1,i;"
@@ -269,17 +293,20 @@ public class PayBrowserPlugin extends Plugin {
                 + "else{var b3=document.querySelector('button[type=submit],input[type=submit]');if(b3)b3.click();}"
                 + "}catch(x){}},300);"
                 + "return 'ok';"
-                + "})(" + JSONObject.quote(user == null ? "" : user) + "," + JSONObject.quote(pass) + ");";
+                + "})(" + JSONObject.quote(user == null ? "" : user) + "," + JSONObject.quote(pass) + "," + JSONObject.quote(host0) + ");";
         web.evaluateJavascript(js, new android.webkit.ValueCallback<String>() {
             @Override
             public void onReceiveValue(String v) {
-                if (done || g != gen) return;
-                if ("\"ok\"".equals(v)) {
+                inflight = false;
+                if ("\"ok\"".equals(v)) { // filled - even if the page has moved on meanwhile: never again
                     done = true;
                     filled = true;
                     user = null;
                     pass = null;
-                } else if (attempt + 1 < MAX_TRIES) {
+                    return;
+                }
+                if (done || g != gen) return;
+                if ("\"nopass\"".equals(v) && attempt + 1 < MAX_TRIES) {
                     ui.postDelayed(new Runnable() {
                         @Override
                         public void run() {
@@ -297,6 +324,7 @@ public class PayBrowserPlugin extends Plugin {
         user = null;
         pass = null;
         done = true;
+        inflight = false;
         pending = null;
         WebView w = web;
         web = null;

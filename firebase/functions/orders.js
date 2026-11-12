@@ -1089,12 +1089,16 @@ async function getPayLink(request) {
   if (!PAYABLE.includes(s.get('status'))) throw pre('bad-status', 'ההזמנה כבר שולמה או בוטלה');
   const link = p.exists && p.get('mode') === 'link' && typeof p.get('link') === 'string' ? p.get('link') : '';
   if (!link) throw pre('no-pay-link', 'לעסק לא הוגדר קישור תשלום. תשלום בטלפון.');
-  let auto = null;
+  let auto = null, note = '';
   if (c && c.exists && c.get('box')) {
-    const v = CARD.open(CARD_ENC_KEY.value(), w.bizId, PAY_CRED, c.get('box'));
-    if (v && typeof v.pass === 'string' && v.pass) auto = { user: typeof v.user === 'string' ? v.user : '', pass: v.pass };
+    // פרטי הכניסה קשורים ל-host של הקישור שאליו נשמרו (בתוך המוצפן). host אחר – בלי auto. כשל פענוח – הקישור בלי auto (לא נכשלים)
+    try {
+      const v = CARD.open(CARD_ENC_KEY.value(), w.bizId, PAY_CRED, c.get('box'));
+      if (v && typeof v.pass === 'string' && v.pass && typeof v.host === 'string' && v.host === new URL(link).hostname.toLowerCase()) auto = { user: typeof v.user === 'string' ? v.user : '', pass: v.pass };
+      note = auto ? 'auto' : 'auto-host';
+    } catch (e) { note = 'auto-fail'; } // בלי פרטי השגיאה
   }
-  await db.collection(`ord/${id}/log`).add(logData(w, 'payOpen', auto ? 'auto' : ''));
+  await db.collection(`ord/${id}/log`).add(logData(w, 'payOpen', note));
   return auto ? { link, total: s.get('total'), auto } : { link, total: s.get('total') };
 }
 
@@ -1125,15 +1129,23 @@ async function setBusinessPayLink(request) {
   // לארג' פעמי במצב legacy (גם בלי מסמך b/largpeami) – הנתונים בשורש (bizPrefix = '')
   if (!biz || (!biz.exists && bizId !== T.BIZ0)) throw new HttpsError('not-found', 'העסק לא נמצא', { reason: 'no-biz' });
   if (!['link', 'phone'].includes(input.mode)) throw bad('bad-mode', 'בחרו: קישור או תשלום בטלפון');
+  const db = getFirestore();
+  const pfx = T.bizPrefix(biz);
+  const payRef = db.doc(pfx + 'private/pay'), credRef = db.doc(pfx + PAY_CRED);
+  const [old, oldCred] = await Promise.all([payRef.get(), credRef.get()]);
   let link = '';
+  // 2026-11-12: במצב link בלי קישור (למשל עדכון פרטי כניסה בלבד) – הקישור הקיים נשמר (וגם הספק שלו, אם sup לא נשלח). אין קישור קיים – bad-link כמו קודם
+  const keep = input.mode === 'link' && (input.link == null || (typeof input.link === 'string' && !input.link.trim()))
+    && old.exists && old.get('mode') === 'link' && typeof old.get('link') === 'string' && old.get('link');
   if (input.mode === 'link') {
-    link = typeof input.link === 'string' ? input.link.trim() : '';
+    link = keep ? old.get('link') : typeof input.link === 'string' ? input.link.trim() : '';
     let u = null;
     try { u = new URL(link); } catch (e) { /* */ }
     if (!u || u.protocol !== 'https:' || !u.hostname.includes('.') || link.length > 500 || /[\s<>"']/.test(link) || u.username || u.password) throw bad('bad-link', 'קישור לא תקין: חייב להתחיל ב-https:// ועד 500 תווים');
   }
   // 17:47: לאיזה ספק שייך הקישור (ספק קיזוז). { id, name } מתוך רשימת הספקים של העסק (cfg/main). null = בלי ספק
   let sup = null;
+  if (keep && input.sup === undefined) { const o = old.get('sup'); sup = o && typeof o === 'object' && typeof o.id === 'string' ? { id: o.id, name: String(o.name || '') } : null; }
   if (input.mode === 'link' && input.sup != null) {
     const x = input.sup;
     if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad('bad-sup', 'ספק לא תקין');
@@ -1143,17 +1155,16 @@ async function setBusinessPayLink(request) {
   }
   const cred = credOf(input.cred);
   if (cred && input.mode !== 'link') throw bad('bad-cred', 'פרטי כניסה – רק לקישור תשלום');
-  const db = getFirestore();
-  const pfx = T.bizPrefix(biz);
-  const credRef = db.doc(pfx + PAY_CRED);
-  const had = (await credRef.get()).exists;
-  const box = cred ? CARD.seal(CARD_ENC_KEY.value(), bizId, PAY_CRED, cred) : null; // לפני הכתיבה: מפתח חסר → שום דבר לא נשמר
-  const del = had && (cred === null || input.mode !== 'link');
-  const hasCred = cred ? true : (cred === undefined && input.mode === 'link' && had);
+  const host = link ? new URL(link).hostname.toLowerCase() : '';
+  const had = oldCred.exists;
+  // פרטי הכניסה קשורים ל-host (בתוך המוצפן, ו-host גלוי לצדו להחלטה כאן). קישור ל-host אחר בלי cred חדש – הישנים נמחקים
+  const box = cred ? CARD.seal(CARD_ENC_KEY.value(), bizId, PAY_CRED, Object.assign({}, cred, { host })) : null; // לפני הכתיבה: מפתח חסר → שום דבר לא נשמר
+  const del = had && !box && (cred === null || input.mode !== 'link' || oldCred.get('host') !== host);
+  const hasCred = !!box || (cred === undefined && input.mode === 'link' && had && !del);
   const now = Date.now();
   const b = db.batch();
-  b.set(db.doc(pfx + 'private/pay'), { mode: input.mode, link, sup, at: now, by: uid });
-  if (box) b.set(credRef, { box, at: now, by: uid });
+  b.set(payRef, { mode: input.mode, link, sup, at: now, by: uid });
+  if (box) b.set(credRef, { box, host, at: now, by: uid });
   else if (del) b.delete(credRef);
   b.set(db.doc(pfx + 'ordcfg/main'), { pay: Object.assign({ mode: input.mode, has: !!link, cred: hasCred }, sup ? { sup } : {}), upd: now }, { mergeFields: ['pay', 'upd'] }); // pay מוחלף כולו (בלי sup ישן)
   b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') + (sup ? ' sup=' + sup.id : '') + (box ? ' cred:set' : del ? ' cred:del' : '') });

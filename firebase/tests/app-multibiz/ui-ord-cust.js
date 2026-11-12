@@ -139,8 +139,10 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const n5 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 1200);
     const co5 = calls.slice(n5).findIndex((c) => c.n === 'createOrder'), sc5 = calls.slice(n5).findIndex((c) => c.n === 'setCard'), sd = sc5 >= 0 ? calls.slice(n5)[sc5].d : null;
     await page.evaluate(() => { SY.biz = Object.assign({}, SY.biz || {}, { features: Object.assign({}, (SY.biz && SY.biz.features) || {}, { ordCard: false }) }); window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300);
+    const noLineNote = !(await page.$('#occdline')); // בלי ניוד – בלי ההערה על כרטיס לקו
     const off = !(await page.$('#occd'));
     await page.evaluate(() => { delete SY.biz.features.ordCard; });
+    check('4ב2 בלי ניוד: במשבצת אין הערה "לתשלום על הקו"', noLineNote);
     check('4ב כרטיס בטופס ההזמנה: משבצת קיימת; setCard אחרי createOrder עם ordId ו-add; המספר לא בטיוטה; מתג כבוי → בלי משבצת', !!box && !inDraft && co5 >= 0 && sc5 > co5 && !!sd && sd.custId === 't' + TZ && sd.ordId === 'o1' && sd.add === true && sd.card.num === '4580123456789012' && sd.card.exp === '07/28' && sd.card.cvv === '123' && off, { box: !!box, inDraft, co5, sc5, off, sd: sd && Object.assign({}, sd, { card: sd.card && { l: String(sd.card.num).slice(-4) } }) });
   }
   { // 4ג (12.11.2026): בלי ניוד – מסך הכרטיס שלפני הסיום רק כשאין קישור סליקה. קישור → נשמר ישר; תשלום בטלפון → מסך מלא, "סיום הזמנה" ריק שומר בלי setCard
@@ -153,6 +155,10 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const v = await page.evaluate(() => cur().v); const none = !calls.slice(b0).some((c) => c.n === 'createOrder'); const noMore = !(await page.$('[data-a=ocCdAdd]'));
     await page.click('[data-a=ocFinish]'); await H.settle(page, 1200);
     const b = calls.slice(b0).map((c) => c.n); const v2 = await page.evaluate(() => cur().v);
+    // בלי ניוד, תשלום בטלפון, כרטיס הוקלד במשבצת → בלי מסך מלא, נשמר ישר עם הכרטיס
+    await mk('0529998833'); await page.click('#occd summary'); await page.fill('input[data-i=ocCd][data-k=num]', '4580123456789012'); const m0 = calls.length; await page.click('[data-a=oxSave]'); await H.settle(page, 1500);
+    const midDirect = calls.slice(m0).some((c) => c.n === 'createOrder') && calls.slice(m0).filter((c) => c.n === 'setCard').length === 1;
+    check('4ג2 בלי ניוד: כרטיס במשבצת שבטופס → מדלגים על המסך המלא (נשמר ישר, setCard אחד)', midDirect, calls.slice(m0).map((c) => c.n));
     // בדיקה מקדימה: בלי פריטים – הודעה בטופס, לא מעבר למסך הכרטיס
     await page.evaluate(() => { window.__ox.draft = null; NAV = [{ v: 'home' }]; go('oxNew'); }); await H.settle(page, 300); await page.selectOption('select[data-k=br]', 'br1'); await page.fill('input[data-k=phone]', '0529998844'); await H.settle(page, 500); await page.fill('input[data-k=fn]', 'גל'); await page.fill('input[data-k=ln]', 'לוי');
     await page.click('[data-a=oxSave]'); await H.settle(page, 400); const v3 = await page.evaluate(() => cur().v);
