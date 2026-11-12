@@ -361,7 +361,7 @@
   },
   {
    "id": "M26",
-   "line": 4132,
+   "line": 4137,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames()",
    "collection": "bk",
@@ -375,7 +375,7 @@
   },
   {
    "id": "M27",
-   "line": 4132,
+   "line": 4137,
    "snippet": "collectionId:coll||'bk'",
    "fn": "bkNames('fb')",
    "collection": "fb",
@@ -389,7 +389,7 @@
   },
   {
    "id": "M28",
-   "line": 4133,
+   "line": 4138,
    "snippet": "fsx('/bk/'+encodeURIComponent(id),{method:'PATCH'",
    "fn": "bkPut",
    "collection": "bk",
@@ -403,7 +403,7 @@
   },
   {
    "id": "M29",
-   "line": 4151,
+   "line": 4156,
    "snippet": "fsx('/bk/'+encodeURIComponent(n),{method:'DELETE'})",
    "fn": "bkCloud",
    "collection": "bk",
@@ -417,7 +417,7 @@
   },
   {
    "id": "M30",
-   "line": 4162,
+   "line": 4167,
    "snippet": "fsx('/bk/meta')",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -431,7 +431,7 @@
   },
   {
    "id": "M31",
-   "line": 4163,
+   "line": 4168,
    "snippet": "fsx('/bk/d'+m.gen+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -445,7 +445,7 @@
   },
   {
    "id": "M32",
-   "line": 4165,
+   "line": 4170,
    "snippet": "fsx('/bk/'+m.files[id].d+'_'+k)",
    "fn": "bkCloudGet",
    "collection": "bk",
@@ -601,7 +601,7 @@
   },
   {
    "id": "M43",
-   "line": 3702,
+   "line": 3707,
    "snippet": "fsx('/tasks?documentId='",
    "fn": "FRM.tkAdd",
    "collection": "tasks",
@@ -616,7 +616,7 @@
   },
   {
    "id": "M44",
-   "line": 3719,
+   "line": 3724,
    "snippet": "fsx('/tasks/'+t.id,{method:'DELETE'})",
    "fn": "ACT.tkDel",
    "collection": "tasks",
@@ -630,7 +630,7 @@
   },
   {
    "id": "M45",
-   "line": 3720,
+   "line": 3725,
    "snippet": "fsx('/tasks/'+el.dataset.id)",
    "fn": "ACT.tkImg",
    "collection": "tasks",
@@ -645,7 +645,7 @@
   },
   {
    "id": "M46",
-   "line": 3722,
+   "line": 3727,
    "snippet": "fsx('/tasks/'+id+'/c?pageSize=300'",
    "fn": "tkCmLoad",
    "collection": "tasks_c",
@@ -660,7 +660,7 @@
   },
   {
    "id": "M47",
-   "line": 3737,
+   "line": 3742,
    "snippet": "fsx('/tasks/'+id+'/c?documentId='",
    "fn": "FRM.tkCm",
    "collection": "tasks_c",
@@ -675,7 +675,7 @@
   },
   {
    "id": "M48",
-   "line": 3744,
+   "line": 3749,
    "snippet": "fsx('/tasks/'+id+'/c/'+cid,{method:'DELETE'})",
    "fn": "ACT.tkCmDel",
    "collection": "tasks_c",
@@ -717,7 +717,7 @@
   },
   {
    "id": "M51",
-   "line": 3658,
+   "line": 3661,
    "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;",
    "fn": "tkSumLoad (עובד)",
    "collection": "tasks",
@@ -731,7 +731,7 @@
   },
   {
    "id": "M52",
-   "line": 3658,
+   "line": 3661,
    "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;",
    "fn": "tkSumLoad (מנהל)",
    "collection": "tasks",
@@ -745,7 +745,7 @@
   },
   {
    "id": "M53",
-   "line": 4321,
+   "line": 4326,
    "snippet": "collectionId:'supinv'}],select",
    "fn": "supSync",
    "collection": "supinv",
@@ -759,7 +759,7 @@
   },
   {
    "id": "M54",
-   "line": 4328,
+   "line": 4333,
    "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'PATCH'",
    "fn": "supSync",
    "collection": "supinv_p",
@@ -773,7 +773,7 @@
   },
   {
    "id": "M55",
-   "line": 4331,
+   "line": 4336,
    "snippet": "await fsx('/supinv/'+id,{method:'PATCH'",
    "fn": "supSync",
    "collection": "supinv",
@@ -787,7 +787,7 @@
   },
   {
    "id": "M56",
-   "line": 4334,
+   "line": 4339,
    "snippet": "await fsx('/supinv/'+id+'/p/'+k,{method:'DELETE'})",
    "fn": "supDel",
    "collection": "supinv_p",
@@ -801,7 +801,7 @@
   },
   {
    "id": "M57",
-   "line": 4335,
+   "line": 4340,
    "snippet": "await fsx('/supinv/'+id,{method:'DELETE'})",
    "fn": "supDel",
    "collection": "supinv",
@@ -815,7 +815,7 @@
   },
   {
    "id": "M58",
-   "line": 4343,
+   "line": 4348,
    "snippet": "collectionId:'supinv'}],where",
    "fn": "supLoad",
    "collection": "supinv",
@@ -829,7 +829,7 @@
   },
   {
    "id": "M59",
-   "line": 4354,
+   "line": 4359,
    "snippet": "fsx('/chunks/'+x.id+'_'+k)",
    "fn": "supImg",
    "collection": "chunks",
@@ -843,7 +843,7 @@
   },
   {
    "id": "M60",
-   "line": 4354,
+   "line": 4359,
    "snippet": "fsx('/supinv/'+x.id+'/p/'+k)",
    "fn": "supImg",
    "collection": "supinv_p",
@@ -899,7 +899,7 @@
   },
   {
    "id": "M64",
-   "line": 4431,
+   "line": 4436,
    "snippet": "collectionId:'appreq'}],select",
    "fn": "arLoad",
    "collection": "appreq",
@@ -914,7 +914,7 @@
   },
   {
    "id": "M65",
-   "line": 4463,
+   "line": 4468,
    "snippet": "fsx('/appreq?documentId='",
    "fn": "FRM.arAdd",
    "collection": "appreq",
@@ -929,7 +929,7 @@
   },
   {
    "id": "M66",
-   "line": 4466,
+   "line": 4471,
    "snippet": "fsx('/appreq/'+id+'/p?documentId='",
    "fn": "FRM.arAdd",
    "collection": "appreq_p",
@@ -944,7 +944,7 @@
   },
   {
    "id": "M67",
-   "line": 4469,
+   "line": 4474,
    "snippet": "fsx('/appreq/'+x.id+'/p/'+k),'data')",
    "fn": "ACT.arImg",
    "collection": "appreq_p",
@@ -959,7 +959,7 @@
   },
   {
    "id": "M68",
-   "line": 4479,
+   "line": 4484,
    "snippet": "fsx('/appreq/'+id+'?'+mask.join('&')",
    "fn": "FRM.arSt",
    "collection": "appreq",
@@ -973,7 +973,7 @@
   },
   {
    "id": "M69",
-   "line": 4482,
+   "line": 4487,
    "snippet": "fsx('/appreq/'+x.id+'/p/'+k,{method:'DELETE'})",
    "fn": "ACT.arDel",
    "collection": "appreq_p",
@@ -987,7 +987,7 @@
   },
   {
    "id": "M70",
-   "line": 4482,
+   "line": 4487,
    "snippet": "fsx('/appreq/'+x.id,{method:'DELETE'})",
    "fn": "ACT.arDel",
    "collection": "appreq",
@@ -1001,7 +1001,7 @@
   },
   {
    "id": "M71",
-   "line": 4553,
+   "line": 4558,
    "snippet": "collectionId:'closings'}]",
    "fn": "zcPull",
    "collection": "closings",
@@ -1015,7 +1015,7 @@
   },
   {
    "id": "M72",
-   "line": 4568,
+   "line": 4573,
    "snippet": "fsx('/closings/'+id+'?'+mask.join('&')",
    "fn": "zcMark",
    "collection": "closings",
@@ -1029,7 +1029,7 @@
   },
   {
    "id": "M74",
-   "line": 4666,
+   "line": 4671,
    "snippet": "fsx('/closings/'+id+'/p?documentId='",
    "fn": "FRM.zcSend",
    "collection": "closings_p",
@@ -1044,7 +1044,7 @@
   },
   {
    "id": "M75",
-   "line": 4670,
+   "line": 4675,
    "snippet": "fsx('/closings/'+x.id+'/p/'+k),'data')",
    "fn": "ACT.zcImg",
    "collection": "closings_p",
@@ -1058,7 +1058,7 @@
   },
   {
    "id": "M76",
-   "line": 4566,
+   "line": 4571,
    "snippet": "fsx('/closings/'+id+'/p/'+k+'?mask.fieldPaths=x')",
    "fn": "zcHasPics (zcPull)",
    "collection": "closings_p",
@@ -1072,7 +1072,7 @@
   },
   {
    "id": "M73",
-   "line": 4850,
+   "line": 4855,
    "snippet": "await fsx(':commit',{method:'POST',body:JSON.stringify({writes:w})})",
    "fn": "zcCommit (FRM.zcSend)",
    "collection": "closings + zlast",
@@ -1087,7 +1087,7 @@
   },
   {
    "id": "M96",
-   "line": 4731,
+   "line": 4736,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "coLoad (coQ)",
    "collection": "cashout",
@@ -1102,7 +1102,7 @@
   },
   {
    "id": "M97",
-   "line": 4738,
+   "line": 4743,
    "snippet": "ZL[r]=zlParse(await fsx('/zlast/'+r))",
    "fn": "coLoad",
    "collection": "zlast",
@@ -1117,7 +1117,7 @@
   },
   {
    "id": "M98",
-   "line": 4848,
+   "line": 4853,
    "snippet": "let fwd=1;try{const z=zlParse(await fsx('/zlast/'+reg))",
    "fn": "zcCommit",
    "collection": "zlast",
@@ -1132,7 +1132,7 @@
   },
   {
    "id": "M99",
-   "line": 4853,
+   "line": 4858,
    "snippet": "async function zlRewind(reg,id){let z=null;try{z=zlParse(await fsx('/zlast/'+reg))",
    "fn": "zlRewind (FRM.zcNo)",
    "collection": "zlast",
@@ -1146,7 +1146,7 @@
   },
   {
    "id": "M100",
-   "line": 4855,
+   "line": 4860,
    "snippet": "fsx('/zlast/'+reg,{method:'DELETE'})",
    "fn": "zlRewind",
    "collection": "zlast",
@@ -1160,7 +1160,7 @@
   },
   {
    "id": "M101",
-   "line": 4856,
+   "line": 4861,
    "snippet": "fsx('/zlast/'+reg,{method:'PATCH'",
    "fn": "zlRewind",
    "collection": "zlast",
@@ -1174,7 +1174,7 @@
   },
   {
    "id": "M77",
-   "line": 4731,
+   "line": 4736,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "coLoad (coQ)",
    "collection": "cashout",
@@ -1189,7 +1189,7 @@
   },
   {
    "id": "M78",
-   "line": 4731,
+   "line": 4736,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "coSync (coQ)",
    "collection": "cashout",
@@ -1203,7 +1203,7 @@
   },
   {
    "id": "M79",
-   "line": 4731,
+   "line": 4736,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "dpLoad (coQ)",
    "collection": "cashout",
@@ -1218,7 +1218,7 @@
   },
   {
    "id": "M80",
-   "line": 4731,
+   "line": 4736,
    "snippet": "collectionId:'cashout'}],where",
    "fn": "dqPull (coQ)",
    "collection": "cashout",
@@ -1232,7 +1232,7 @@
   },
   {
    "id": "M81",
-   "line": 4758,
+   "line": 4763,
    "snippet": "fsx('/cashout?documentId='+encodeURIComponent(it.id)",
    "fn": "coPush (pushItem)",
    "collection": "cashout",
@@ -1246,7 +1246,7 @@
   },
   {
    "id": "M82",
-   "line": 4775,
+   "line": 4780,
    "snippet": "try{await fsx('/cashout/'+id,{method:'DELETE'})}catch(e){if(e.code!==404)throw e}}",
    "fn": "coDrop (coSync)",
    "collection": "cashout",
@@ -1260,7 +1260,7 @@
   },
   {
    "id": "M83",
-   "line": 4774,
+   "line": 4779,
    "snippet": "async function coDrop(id){let d;try{d=await fsx('/cashout/'+id)}",
    "fn": "coDrop (coSync)",
    "collection": "cashout",
@@ -1274,7 +1274,7 @@
   },
   {
    "id": "M84",
-   "line": 4786,
+   "line": 4791,
    "snippet": "return await fsx('/cashout/'+id+'?'+Object.keys(fields)",
    "fn": "coSync",
    "collection": "cashout",
@@ -1288,7 +1288,7 @@
   },
   {
    "id": "M85",
-   "line": 4787,
+   "line": 4792,
    "snippet": "fsx('/cashout?documentId='+encodeURIComponent(id)",
    "fn": "coSync",
    "collection": "cashout",
@@ -1302,7 +1302,7 @@
   },
   {
    "id": "M86",
-   "line": 4894,
+   "line": 4899,
    "snippet": "fsx('/cashout/'+cid+'?updateMask.fieldPaths=zc&currentDocument.exists=true'",
    "fn": "coAssign",
    "collection": "cashout",
@@ -1316,7 +1316,7 @@
   },
   {
    "id": "M87",
-   "line": 4967,
+   "line": 4972,
    "snippet": "await fsx(':commit',{method:'POST',body:JSON.stringify({writes})})",
    "fn": "FRM.dpSend",
    "collection": "deposits + cashout",
@@ -1331,7 +1331,7 @@
   },
   {
    "id": "M88",
-   "line": 4969,
+   "line": 4974,
    "snippet": "fsx('/deposits/'+id+'/p?documentId='",
    "fn": "FRM.dpSend",
    "collection": "deposits_p",
@@ -1346,7 +1346,7 @@
   },
   {
    "id": "M89",
-   "line": 4977,
+   "line": 4982,
    "snippet": "fsx('/deposits/'+id+'/p/'+k+'?mask.fieldPaths=x')",
    "fn": "dpHasPics (dqPull)",
    "collection": "deposits_p",
@@ -1360,7 +1360,7 @@
   },
   {
    "id": "M90",
-   "line": 4979,
+   "line": 4984,
    "snippet": "fsx('/deposits/'+id+'?'+mask.join('&')",
    "fn": "dpMark",
    "collection": "deposits",
@@ -1374,7 +1374,7 @@
   },
   {
    "id": "M91",
-   "line": 4981,
+   "line": 4986,
    "snippet": "collectionId:'deposits'}]",
    "fn": "dqPull",
    "collection": "deposits",
@@ -1388,7 +1388,7 @@
   },
   {
    "id": "M92",
-   "line": 5006,
+   "line": 5011,
    "snippet": "fsx('/deposits/'+x.id+'/p/'+k),'data')",
    "fn": "ACT.dqImg",
    "collection": "deposits_p",
@@ -1402,7 +1402,7 @@
   },
   {
    "id": "M93",
-   "line": 5018,
+   "line": 5023,
    "snippet": "writes:[{update:{name:docName('deposits/'+it.id),fields},updateMask",
    "fn": "FRM.dqNo",
    "collection": "deposits + cashout",
@@ -1416,7 +1416,7 @@
   },
   {
    "id": "M94",
-   "line": 5021,
+   "line": 5026,
    "snippet": "writes:[{delete:docName('deposits/'+it.id)}]",
    "fn": "ACT.dqDel",
    "collection": "deposits + cashout",
@@ -1430,7 +1430,7 @@
   },
   {
    "id": "M95",
-   "line": 5022,
+   "line": 5027,
    "snippet": "fsx('/deposits/'+it.id+'/p/'+k,{method:'DELETE'})",
    "fn": "ACT.dqDel",
    "collection": "deposits_p",
@@ -1444,7 +1444,7 @@
   },
   {
    "id": "M102",
-   "line": 5044,
+   "line": 5049,
    "snippet": "collectionId:'closings'}],select:zsFp(ZSF)",
    "fn": "zsLoad",
    "collection": "closings",
@@ -1458,7 +1458,7 @@
   },
   {
    "id": "M103",
-   "line": 5040,
+   "line": 5045,
    "snippet": "collectionId:'cashout'}],select:zsFp(ZSC)",
    "fn": "zsCoIn",
    "collection": "cashout",
@@ -1472,7 +1472,7 @@
   },
   {
    "id": "M104",
-   "line": 5048,
+   "line": 5053,
    "snippet": "fsx(':batchGet'",
    "fn": "zsLoad",
    "collection": "deposits",
@@ -1486,7 +1486,7 @@
   },
   {
    "id": "M105",
-   "line": 5131,
+   "line": 5136,
    "snippet": "fsx('/'+coll+'/'+id+'/p/'+k)",
    "fn": "ACT.zsImg",
    "collection": "closings_p + deposits_p",
@@ -1528,7 +1528,7 @@
   },
   {
    "id": "M108",
-   "line": 4823,
+   "line": 4828,
    "snippet": "const z=zlParse(await fsx('/zlast/'+reg));ZL[reg]=z",
    "fn": "coOldB (6ח)",
    "collection": "zlast",
@@ -1542,7 +1542,7 @@
   },
   {
    "id": "M109",
-   "line": 6016,
+   "line": 6021,
    "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
    "fn": "mqQ (mqLoad / mqMine)",
    "collection": "mq",
@@ -1557,7 +1557,7 @@
   },
   {
    "id": "M110",
-   "line": 6032,
+   "line": 6037,
    "snippet": "fsx('/mq/'+x.id+'/p/'+k)",
    "fn": "mqFile",
    "collection": "mq_p",
@@ -1571,7 +1571,7 @@
   },
   {
    "id": "M111",
-   "line": 6042,
+   "line": 6047,
    "snippet": "fsx('/mq/'+id+'?updateMask.fieldPaths=st&updateMask.fieldPaths=stBy&updateMask.fieldPaths=stAt&currentDocument.exists=true'",
    "fn": "mqSt",
    "collection": "mq",
@@ -1585,7 +1585,7 @@
   },
   {
    "id": "M112",
-   "line": 6044,
+   "line": 6049,
    "snippet": "fsx('/mq/'+id+'/p/'+k,{method:'DELETE'})",
    "fn": "mqSt",
    "collection": "mq_p",
@@ -1599,7 +1599,7 @@
   },
   {
    "id": "M113",
-   "line": 6056,
+   "line": 6061,
    "snippet": "fsx('/mq?documentId='+encodeURIComponent(id)",
    "fn": "mqSend",
    "collection": "mq",
@@ -1613,7 +1613,7 @@
   },
   {
    "id": "M114",
-   "line": 6059,
+   "line": 6064,
    "snippet": "fsx('/mq/'+id+'/p?documentId='+i",
    "fn": "mqSend",
    "collection": "mq_p",
@@ -1658,42 +1658,42 @@
   },
   {
    "id": "X05",
-   "line": 5144,
+   "line": 5149,
    "snippet": "/b?pageSize=100",
    "fn": "admLoad",
    "reason": "מסך ניהול חדש (ריבוי עסקים, שלב 6א). רשימת כל העסקים מהשורש: GET /b (list), מנהל־על בלבד. מנהל רגיל מקבל 403 (הוכח ב-ui-admin.js בדיקות 26–27). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלבים 2 ו-5); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-admin.js. תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X06",
-   "line": 5147,
+   "line": 5152,
    "snippet": "fsx('/b/'+id+'/private/info',0,1)",
    "fn": "admInfo",
    "reason": "מסך ניהול חדש (ריבוי עסקים, שלב 6א). private/info של עסק (פרטי קשר ו-adv), get. מנהל־על ומנהל העסק קוראים; אחרים נחסמים בחוקים (שלב 2/5). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלבים 2 ו-5); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-admin.js. תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X07",
-   "line": 5251,
+   "line": 5256,
    "snippet": "/staff?pageSize=300",
    "fn": "admStaffLoad",
    "reason": "מסך ניהול חדש (ריבוי עסקים, שלב 6א). רשימת העובדים של העסק הנוכחי (FSB), list. מנהל העסק ומנהל־על; עובד אינו מגיע למסך (isA). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלבים 2 ו-5); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-admin.js. תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X09",
-   "line": 5251,
+   "line": 5256,
    "snippet": "fsx('/private/info')",
    "fn": "admStaffLoad (6ה)",
    "reason": "מסך עובדים, מנהל־על בלבד (SY.sa): קריאת הדרגות של העסק הנוכחי מ-b/{bizId}/private/info (FSB). אותו כלל כמו X06 (מנהל־על ומנהל העסק קוראים; עובד נחסם). נבדק מול האמולטור ב-tests/perms-6e.test.js."
   },
   {
    "id": "X10",
-   "line": 4390,
+   "line": 4395,
    "snippet": "fsx('/wv/'+id,",
    "fn": "wvSync (6ו)",
    "reason": "6ו, עדכון חוזה 16: המכשיר של המנהל מפרסם מראה לקריאה בלבד ל-b/{bizId}/wv/{inc|sal|rpi|rpe|rps}, rpo_<חודש>_<uid>_YYYY-MM (PATCH, FSB). רק במצב b – אין אוסף כזה בשורש (legacy), ולכן אין לו בדיקה בטבלה של השורש. כתיבה רק למנהל העסק / מנהל־על. נבדק מול האמולטור ב-tests/perms-6f.test.js. 6ז: הדוח מפוצל לפי רמה (עדכון חוזה 17)."
   },
   {
    "id": "X11",
-   "line": 4397,
+   "line": 4402,
    "snippet": "fsx('/wv/'+id)",
    "fn": "wvGet / wvLoad (6ו, 6ז)",
    "reason": "6ו+6ז, עדכוני חוזה 16–17: מסכי העובד – get של b/{bizId}/wv/{kind}_YYYY-MM (FSB). inc לפי incR, sal לפי sal; הדוח מפוצל: rpi_ (rep + incR), rpo_<חודש>_<uid> (rep + expR own, רק העובד עצמו), rpe_ (rep + expR כל העסק), rps_ (rep + sal). רק במצב b. נבדק מול האמולטור ב-tests/perms-6f.test.js ו-tests/perms-6g.test.js."
@@ -1714,24 +1714,94 @@
   },
   {
    "id": "X-TK3",
-   "line": 3707,
+   "line": 3712,
    "snippet": "const tkPutImg=(id,pid,du)=>fsx('/tasks/'+id+'/p/'+pid",
    "fn": "tkPutImg – תמונת מנהל m1..m5 / תמונת ביצוע w1..w3",
    "reason": "שדרוג משימות (feature/tasks-upgrade): הכלל והבדיקות של הקריאה נמצאים ב-tests/36b-tasks-claim.js (שורש ו-b/{bizId}), ולא ב-replay של האפליקציה הישנה."
   },
   {
    "id": "X-TK4",
-   "line": 3753,
+   "line": 3758,
    "snippet": "const tkWipeW=async id=>{for(const k of['w1','w2','w3'])await fsx(",
    "fn": "tkWipeW – מנהל מוחק תמונות ביצוע בביטול תפיסה/העברה",
    "reason": "שדרוג משימות (feature/tasks-upgrade): הכלל והבדיקות של הקריאה נמצאים ב-tests/36b-tasks-claim.js (שורש ו-b/{bizId}), ולא ב-replay של האפליקציה הישנה."
   },
   {
    "id": "X-TK5",
-   "line": 3764,
+   "line": 3769,
    "snippet": "fsx('/tasks/'+id+'/p?pageSize=20')",
    "fn": "ACT.tkPics – טעינת תמונות המשימה לפי דרישה",
    "reason": "שדרוג משימות (feature/tasks-upgrade): הכלל והבדיקות של הקריאה נמצאים ב-tests/36b-tasks-claim.js (שורש ו-b/{bizId}), ולא ב-replay של האפליקציה הישנה."
+  },
+  {
+   "id": "X-RP1",
+   "line": 3694,
+   "snippet": "fsx('/ptk?documentId='",
+   "fn": "FRM.tkAdd (משימה פרטית) – יצירת ptk",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP2",
+   "line": 6107,
+   "snippet": "fsx('/'+col+'/'+id+'?'+mask.join('&')+'&currentDocument.exists=true'",
+   "fn": "docPatch – עדכון ptk (בוצע/החזר), rtk (כלל קבוע), rq (תשובה/תגובה)",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP3",
+   "line": 6108,
+   "snippet": "fsx('/'+col+'/'+id,{method:'DELETE'})",
+   "fn": "docDel – מחיקת ptk (בעלים/מנהל) ו-rtk (מנהל)",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP4",
+   "line": 6113,
+   "snippet": "fsx(':runQuery'",
+   "fn": "ptQ – רשימת ptk (עובד: owner==uid; מנהל: הכול)",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP5",
+   "line": 6129,
+   "snippet": "fsx('/rtk?pageSize=300')",
+   "fn": "rcLoad – רשימת משימות קבועות (מנהל)",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP6",
+   "line": 6187,
+   "snippet": "fsx('/rtk?documentId='",
+   "fn": "FRM.rcSave – יצירת משימה קבועה (מנהל)",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP7",
+   "line": 6199,
+   "snippet": "fsx(':runQuery'",
+   "fn": "rqQ – רשימת בקשות (עובד: owner==uid; מנהל: st==new / st IN [done,rej])",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP8",
+   "line": 6227,
+   "snippet": "fsx('/rq?documentId='",
+   "fn": "FRM.rqNew – עובד שולח בקשה למנהל",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP9",
+   "line": 6230,
+   "snippet": "fsx('/rq/'+id+'/c?pageSize=300'",
+   "fn": "rqCmLoad – קריאת שרשור התגובות",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
+  },
+  {
+   "id": "X-RP10",
+   "line": 6243,
+   "snippet": "fsx('/rq/'+id+'/c?documentId='",
+   "fn": "FRM.rqCm – כתיבת תגובה בשרשור (עובד או מנהל)",
+   "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   }
  ]
 }
