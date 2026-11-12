@@ -820,3 +820,55 @@ describe('תיקון 4 + הנחה ב\' + הנחה א\': יומן אחרי חיב
     assert.equal((await logs(A)).find((l) => l.act === 'mailTrash').by, SUPER2);
   });
 });
+
+describe('תיקון 5: שטף מיילים – נקודת ההמשך מתקדמת רק עד מה שעובד; אף מייל לא הולך לאיבוד', () => {
+  beforeEach(async () => { await seed(); await connect(M1, 'mail', { email: BOX_A }); });
+  const inA = async () => (await coll(`b/${A}/sec_in`)).filter((x) => x.ch === 'mail');
+  const boxCfg = async () => (await get(`b/${A}/sec_cfg/mail`)).boxes[G.boxIdOf(BOX_A)];
+
+  it('60 מיילים בבת אחת ועוד מייל אחריהם: 50 בהתראה הראשונה, השאר בהתראה הבאה – כל ה-61 נקלטים; המנהלים מקבלים התראה על הפיגור', async () => {
+    for (let i = 0; i < 60; i++) GO.addMail(BOX_A, { subject: 'שטף ' + i, text: 'x' + i });
+    const r1 = await CORE.mailHook(GO.note(BOX_A));
+    assert.equal(r1.saved, G.RUN_MAX); assert.equal(r1.lag, true); assert.equal(r1.over, 60 - G.RUN_MAX);
+    const b1 = await boxCfg();
+    assert.equal(b1.lag, true);
+    assert.ok(Number(b1.hist) < GO.box(BOX_A).hist, 'נקודת ההמשך לא קפצה לסוף');
+    assert.ok((await coll(`b/${A}/sec_note/${M1}/n`)).some((n) => /ממתינים לקליטה/.test(n.title)), 'התראה למנהל על הפיגור');
+    assert.ok((await coll(`b/${A}/sec_note/${M2}/n`)).some((n) => /ממתינים לקליטה/.test(n.title)), 'לכל המנהלים');
+    GO.addMail(BOX_A, { subject: 'שטף 60', text: 'x60' });
+    const r2 = await CORE.mailHook(GO.note(BOX_A));
+    assert.equal(r2.saved, 11); assert.equal(r2.lag, false);
+    const L = await inA();
+    assert.equal(L.length, 61, 'כל 61 המיילים נקלטו');
+    assert.equal(new Set(L.map((x) => x.subj)).size, 61, 'בלי כפילויות');
+    const b2 = await boxCfg();
+    assert.equal(b2.lag, false); assert.equal(b2.hist, String(GO.box(BOX_A).hist));
+  });
+
+  it('בלי מייל נוסף: הריצה המתוזמנת (כל 15 דקות) ממשיכה את הקליטה עד הסוף; 120 מיילים – שלוש ריצות', async () => {
+    for (let i = 0; i < 120; i++) GO.addMail(BOX_A, { subject: 'גל ' + i, text: 'x' });
+    await CORE.mailHook(GO.note(BOX_A));
+    assert.equal((await inA()).length, 50);
+    await CORE.syncAll();
+    assert.equal((await inA()).length, 100);
+    assert.equal((await boxCfg()).lag, true);
+    await CORE.syncAll();
+    assert.equal((await inA()).length, 120);
+    assert.equal((await boxCfg()).lag, false);
+    await CORE.syncAll();
+    assert.equal((await inA()).length, 120, 'בלי לקלוט שוב');
+  });
+
+  it('תקלה זמנית מול Google באמצע: מה שנקלט נשמר, ונקודת ההמשך לא עוברת את המייל שנכשל – הוא נקלט בריצה הבאה; מייל שנמחק ב-Gmail לא תוקע את הקליטה', async () => {
+    const ids = []; for (let i = 0; i < 5; i++) ids.push(GO.addMail(BOX_A, { subject: 'ת ' + i, text: 'x' }));
+    delete GO.box(BOX_A).msgs[ids[1]]; // נמחק ב-Gmail לפני שנשלף
+    GO.state.mode['/gmail/v1/users/me/messages/' + ids[3]] = 'fail';
+    const r1 = await CORE.mailHook(GO.note(BOX_A));
+    assert.equal(r1.saved, 2); assert.equal(r1.lag, true);
+    delete GO.state.mode['/gmail/v1/users/me/messages/' + ids[3]];
+    await CORE.syncAll();
+    const L = await inA();
+    assert.deepEqual(L.map((x) => x.subj).sort(), ['ת 0', 'ת 2', 'ת 3', 'ת 4']);
+    assert.equal((await boxCfg()).lag, false);
+  });
+});

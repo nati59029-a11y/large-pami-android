@@ -13,7 +13,7 @@
 //   יומן: secCalSync (כל 15 דקות + "סנכרן עכשיו") – דו־כיווני ליומן האישי של כל מנהל שחיבר (70, 71); אירועי העסק – מהאפליקציה ל-Google בלבד.
 //
 // אוספים (בתוך העסק, T.tdb(); כתיבה רק כאן):
-//   sec_cfg/mail      { max, boxes:{ boxId:{ addr, st:'ok'|'expired', at, by, scopes[], clean, hist, watchExp } } } – בלי סודות
+//   sec_cfg/mail      { max, boxes:{ boxId:{ addr, st:'ok'|'expired', at, by, scopes[], clean, hist, watchExp, lag (נשארו מיילים לקליטה) } } } – בלי סודות
 //   sec_cfg/gcal      { u:{ uid:{ addr, st, at, sync, last } } }
 //   sec_cfg/mail_use  מונים: יציאות ליום, קליטה ליום לתיבה, ניסיונות חיבור לשעה
 //   sec_cfg/mail_scan { range, n, at, by } – הספירה האחרונה, לאישור הסריקה
@@ -52,7 +52,7 @@ function mailCfgOf(snap) {
   const boxes = {};
   for (const [k, v] of Object.entries(d.boxes && typeof d.boxes === 'object' ? d.boxes : {})) {
     if (!/^gm[0-9a-f]{16}$/.test(k) || !v || typeof v !== 'object' || typeof v.addr !== 'string') continue;
-    boxes[k] = { addr: v.addr, st: v.st === 'expired' ? 'expired' : 'ok', at: Number(v.at) || 0, by: typeof v.by === 'string' ? v.by : '', scopes: Array.isArray(v.scopes) ? v.scopes : [], clean: v.clean === true, hist: typeof v.hist === 'string' ? v.hist : '', watchExp: Number(v.watchExp) || 0 };
+    boxes[k] = { addr: v.addr, st: v.st === 'expired' ? 'expired' : 'ok', at: Number(v.at) || 0, by: typeof v.by === 'string' ? v.by : '', scopes: Array.isArray(v.scopes) ? v.scopes : [], clean: v.clean === true, hist: typeof v.hist === 'string' ? v.hist : '', watchExp: Number(v.watchExp) || 0, lag: v.lag === true };
   }
   return { max: Number.isInteger(d.max) && d.max >= 0 && d.max <= G.MAX_BOX_LIMIT ? d.max : G.MAX_BOX_DEFAULT, boxes };
 }
@@ -297,11 +297,41 @@ async function dayIn(db, box, want, now) {
     const s = await tx.get(ref);
     const x = s.exists && s.get('in') && typeof s.get('in') === 'object' && s.get('in')[box] ? s.get('in')[box] : {};
     const n = x.d === d ? x.n || 0 : 0;
+    if (want < 0) { if (x.d === d) tx.set(ref, { in: { [box]: { d, n: Math.max(0, n + want) } } }, { merge: true }); return { ok: 0, first: false }; } // החזרת מקום שלא נוצל
     const ok = Math.max(0, Math.min(want, G.DAY_IN_MAX - n));
     tx.set(ref, { in: { [box]: { d, n: n + ok } } }, { merge: true });
     return { ok, first: n + ok >= G.DAY_IN_MAX && n < G.DAY_IN_MAX };
   });
 }
+// מייל אחד → sec_in (בלי מודל AI, בלי טיוטה, בלי שליחה). מחזיר 'saved' | 'sus' | 'dup' | 'skip'. o.hist – מייל ישן מסריקת היסטוריה (רקע, 28)
+const gone404 = (e) => !!(e && e.details && e.details.status === 404); // המייל נמחק ב-Gmail בינתיים – אין מה לקלוט
+async function saveMail(db, c, ctx, gid, now, o) {
+  const ref = db.doc('sec_in/' + inIdOf(ctx.boxId, gid));
+  if ((await ref.get()).exists) return 'dup';
+  let p;
+  try { p = G.parseMsg(await c.meta(gid)); } catch (e) { if (gone404(e)) return 'skip'; throw e; }
+  if (!p || p.labels.includes('SENT') || p.labels.includes('DRAFT')) return 'skip';
+  if (o.hist && (p.labels.includes('SPAM') || p.labels.includes('TRASH'))) return 'skip'; // היסטוריה: בלי ספאם ואשפה (הם עוברים לרשימת הניקוי)
+  const big = p.size > G.FULL_MAX; // גודל – לפני הורדת הגוף (10.3)
+  if (!big) { let f = null; try { f = G.parseMsg(await c.full(gid)); } catch (e) { if (!gone404(e)) throw e; } if (f) p = f; }
+  const kind = G.kindOf(p);
+  const fromMgr = !!p.from && (ctx.mgrMails.has(p.from) || p.from === ctx.addr);
+  const all = p.subj + '\n' + (big ? p.snippet : p.text || p.snippet);
+  // 10.1 + 29: מייל הוא מידע ולא הוראה. ניסיון גלוי לתת הוראות – חשוד; ממנהל (כל כתובת שלו או של התיבה) – כל "הוראה" חשודה. אין שום כלי ואין טיוטה
+  const sus = W.susOf(all) || (fromMgr && G.isInstr(all));
+  const flags = [];
+  if (big) flags.push('big'); if (p.cut) flags.push('cut'); if (kind) flags.push(kind); if (p.files.length) flags.push('file');
+  if (sus) flags.push('sus'); if (sus && fromMgr) flags.push('mgrMail'); if (o.hist) flags.push('hist');
+  const doc = { ch: 'mail', own: 'sec', box: ctx.boxId, gid: p.gid, thr: p.thr, mid: p.mid, from: p.from, rto: p.replyTo, name: p.name, subj: p.subj, text: big ? p.snippet : p.text,
+    t: p.t || now, rt: now, type: 'text', st: sus ? 'sus' : 'done', cls: kind ? 'promo' : 'mail', flags, files: p.files, size: p.size, tf: p.t || now };
+  if (o.hist) doc.bg = true; // רקע: מייל ישן – בלי טיוטה ובלי שליחה אוטומטית (ממילא אין כאלה למייל)
+  try { await ref.create(doc); } catch (e) { if (e && e.code === 6) return 'dup'; throw e; }
+  if (sus) await db.collection('sec_log').doc().set(glog('', 'sec', 'sus', { tgt: ref.id, note: fromMgr ? 'mgrMail' : '' }));
+  return sus ? 'sus' : 'saved';
+}
+async function mgrMailsOf(db) { const ad = await db.collection('admins').get(); return new Set(ad.docs.map((d) => G.addrOf(d.get('email'))).filter(Boolean)); }
+// קליטה מתיבה (התראה מ-Gmail, או המשך מהריצה המתוזמנת כשנשאר פיגור).
+// 5: נקודת ההמשך (hist) מתקדמת רק עד רשומת ההיסטוריה האחרונה שכל המיילים שלה טופלו בפועל. מה שנשאר – בריצה הבאה (lag:true → secCalSync ממשיך כל 15 דקות).
 async function ingestBox(boxId, addr, o) {
   const db = T.tdb(), bizId = T.scope().bizId, now = o.now || Date.now();
   const cref = db.doc('sec_cfg/mail');
@@ -309,58 +339,65 @@ async function ingestBox(boxId, addr, o) {
   if (!bx || bx.addr !== addr || bx.st !== 'ok') return { skip: 'box' };
   let c;
   try { c = (await access(db, bizId, 'mail', boxId)).c; } catch (e) { return { skip: 'token' }; }
-  if (!bx.hist) { const p = await c.profile(); await cref.set({ boxes: { [boxId]: { hist: String(p.historyId || '') } } }, { merge: true }); return { init: true }; }
-  const ids = [];
-  let last = bx.hist, pageT = '', gone = false;
-  for (let i = 0; i < 5 && ids.length <= G.RUN_MAX; i++) {
+  if (!bx.hist) { const p = await c.profile(); await cref.set({ boxes: { [boxId]: { hist: String(p.historyId || ''), lag: false } } }, { merge: true }); return { init: true }; }
+  const recs = [], seen = new Set();
+  let last = bx.hist, pageT = '', gone = false, more = false;
+  for (let i = 0; ; i++) {
+    if (i >= 5 || seen.size > G.RUN_MAX) { more = true; break; } // נשארו עמודים – ימשיכו בריצה הבאה
     const r = await c.history(bx.hist, pageT);
-    if (r.status === 404) { gone = true; break; } // היסטוריה ישנה מדי אצל Google – ממשיכים מעכשיו
+    if (r.status === 404) { gone = true; break; } // היסטוריה ישנה מדי אצל Google – ממשיכים מעכשיו (ומתריעים)
     const j = r.j || {};
     for (const h of Array.isArray(j.history) ? j.history : []) {
-      for (const x of Array.isArray(h.messagesAdded) ? h.messagesAdded : []) {
+      const rec = { hid: h && /^\d{1,30}$/.test(String(h.id || '')) ? String(h.id) : '', ids: [] };
+      for (const x of Array.isArray(h && h.messagesAdded) ? h.messagesAdded : []) {
         const mm = x && x.message;
-        if (mm && typeof mm.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(mm.id) && !ids.includes(mm.id) && !(mm.labelIds || []).some((l) => l === 'SENT' || l === 'DRAFT')) ids.push(mm.id);
+        if (mm && typeof mm.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(mm.id) && !seen.has(mm.id) && !(mm.labelIds || []).some((l) => l === 'SENT' || l === 'DRAFT')) { seen.add(mm.id); rec.ids.push(mm.id); }
       }
+      recs.push(rec);
     }
     if (j.historyId) last = String(j.historyId);
     if (!j.nextPageToken) break;
     pageT = String(j.nextPageToken);
   }
-  if (gone) last = String((await c.profile()).historyId || last);
-  const take = ids.slice(0, G.RUN_MAX);
-  const cap = await dayIn(db, boxId, take.length, now);
-  const ad = await db.collection('admins').get();
-  const mgrMails = new Set(ad.docs.map((d) => G.addrOf(d.get('email'))).filter(Boolean));
-  const out = { saved: 0, dup: 0, sus: 0, over: ids.length - take.length + (take.length - cap.ok) };
-  for (const gid of take.slice(0, cap.ok)) {
-    const ref = db.doc('sec_in/' + inIdOf(boxId, gid));
-    if ((await ref.get()).exists) { out.dup++; continue; }
-    let p = G.parseMsg(await c.meta(gid));
-    if (!p || p.labels.includes('SENT') || p.labels.includes('DRAFT')) continue;
-    const big = p.size > G.FULL_MAX; // גודל – לפני הורדת הגוף (10.3)
-    if (!big) { const f = G.parseMsg(await c.full(gid)); if (f) p = f; }
-    const kind = G.kindOf(p);
-    const fromMgr = !!p.from && (mgrMails.has(p.from) || p.from === addr);
-    const all = p.subj + '\n' + (big ? p.snippet : p.text || p.snippet);
-    // 10.1 + 29: מייל הוא מידע ולא הוראה. ניסיון גלוי לתת הוראות – חשוד; ממנהל (כל כתובת שלו או של התיבה) – כל "הוראה" חשודה. אין שום כלי ואין טיוטה
-    const sus = W.susOf(all) || (fromMgr && G.isInstr(all));
-    const flags = [];
-    if (big) flags.push('big'); if (p.cut) flags.push('cut'); if (kind) flags.push(kind); if (p.files.length) flags.push('file');
-    if (sus) flags.push('sus'); if (sus && fromMgr) flags.push('mgrMail');
-    const doc = { ch: 'mail', own: 'sec', box: boxId, gid: p.gid, thr: p.thr, mid: p.mid, from: p.from, rto: p.replyTo, name: p.name, subj: p.subj, text: big ? p.snippet : p.text,
-      t: p.t || now, rt: now, type: 'text', st: sus ? 'sus' : 'done', cls: kind ? 'promo' : 'mail', flags, files: p.files, size: p.size, tf: p.t || now };
-    try { await ref.create(doc); } catch (e) { if (e && e.code === 6) { out.dup++; continue; } throw e; }
-    out.saved++;
-    if (sus) { out.sus++; await db.collection('sec_log').doc().set(glog('', 'sec', 'sus', { tgt: ref.id, note: fromMgr ? 'mgrMail' : '' })); }
+  const out = { saved: 0, dup: 0, sus: 0, over: 0 };
+  const done = new Set();
+  // מה שכבר נקלט – בלי לספור במגבלות; עד RUN_MAX מיילים חדשים בריצה
+  const ids = recs.flatMap((r) => r.ids);
+  const ex = ids.length ? await db.getAll(...ids.map((g) => db.doc('sec_in/' + inIdOf(boxId, g)))) : [];
+  const todo = [];
+  ids.forEach((g, k) => { if (ex[k].exists) { done.add(g); out.dup++; } else if (todo.length < G.RUN_MAX) todo.push(g); });
+  const cap = await dayIn(db, boxId, todo.length, now);
+  const ctx = { boxId, addr, mgrMails: await mgrMailsOf(db) };
+  let err = false;
+  for (const gid of todo.slice(0, cap.ok)) {
+    let r;
+    try { r = await saveMail(db, c, ctx, gid, now, {}); } catch (e) { err = true; logger.warn('secretary-google: mail fetch failed', { reason: (e && e.details && e.details.reason) || 'error' }); break; } // תקלה זמנית – נקודת ההמשך לא עוברת את המייל הזה
+    done.add(gid);
+    if (r === 'saved' || r === 'sus') out.saved++;
+    if (r === 'sus') out.sus++;
+    if (r === 'dup') out.dup++;
   }
-  await cref.set({ boxes: { [boxId]: { hist: last } } }, { merge: true });
+  // נקודת ההמשך: עד הרשומה האחרונה שכל המיילים שלה טופלו
+  let hist = bx.hist, all = true;
+  for (const rec of recs) { if (rec.ids.every((g) => done.has(g))) { if (rec.hid) hist = rec.hid; } else { all = false; break; } }
+  if (all && !more) hist = last;
+  if (gone) hist = String((await c.profile()).historyId || last);
+  const lag = !gone && !(all && !more);
+  out.over = ids.filter((g) => !done.has(g)).length;
+  if (unusedReserve(cap.ok, todo, done)) await dayIn(db, boxId, -unusedReserve(cap.ok, todo, done), now).catch(() => {});
+  await cref.set({ boxes: { [boxId]: { hist, lag } } }, { merge: true });
   if (out.saved || out.dup) await db.collection('sec_log').doc().set(glog('', 'auto', 'mailIn', { tgt: boxId, note: out.saved + '/' + out.dup + '/' + out.sus }));
-  if (out.over > 0) {
-    await db.collection('sec_log').doc().set(glog('', 'auto', 'mailOver', { tgt: boxId, note: String(out.over) }));
-    if (cap.first) await WA.notifyMgrs(db, 'mailover|' + boxId + '|' + dayKey(now), 'יותר מדי מיילים היום', 'הגיעו יותר מ-' + G.DAY_IN_MAX + ' מיילים היום לתיבה ' + addr + '. המיילים הנוספים לא נקלטו למזכירה (הם נמצאים ב-Gmail).', now).catch(() => {});
+  if (lag && (out.over > 0 || more) && (!bx.lag || out.saved || cap.first)) await db.collection('sec_log').doc().set(glog('', 'auto', 'mailOver', { tgt: boxId, note: String(out.over) + (more ? '+' : '') + (err ? ':err' : '') }));
+  if (cap.first) await WA.notifyMgrs(db, 'mailover|' + boxId + '|' + dayKey(now), 'יותר מדי מיילים היום', 'הגיעו יותר מ-' + G.DAY_IN_MAX + ' מיילים היום לתיבה ' + addr + '. המיילים הנוספים ייקלטו למזכירה מחר, בהדרגה (הם נמצאים ב-Gmail).', now).catch(() => {});
+  else if (lag && !err) await WA.notifyMgrs(db, 'maillag|' + boxId + '|' + dayKey(now), 'מיילים ממתינים לקליטה', 'הגיעו הרבה מיילים בבת אחת לתיבה ' + addr + '. המזכירה קולטת אותם בהדרגה (עד ' + G.RUN_MAX + ' בכל פעם, וממשיכה כל 15 דקות), והם יופיעו בתיבה בהמשך.', now).catch(() => {});
+  if (gone) {
+    await db.collection('sec_log').doc().set(glog('', 'auto', 'mailGap', { tgt: boxId }));
+    await WA.notifyMgrs(db, 'mailgap|' + boxId + '|' + dayKey(now), 'ייתכן שחלק מהמיילים לא נקלטו', 'הקליטה מהתיבה ' + addr + ' הייתה מופסקת זמן רב, ו-Gmail כבר לא מחזיר את רשימת השינויים מאז. מיילים מהתקופה הזו נמצאים ב-Gmail; מנהל המערכת יכול להשלים אותם בסריקת היסטוריה.', now).catch(() => {});
   }
-  return out;
+  return Object.assign(out, { lag });
 }
+// מקום שנשמר במונה היומי ולא נוצל (תקלה באמצע) – מוחזר
+function unusedReserve(ok, todo, done) { return Math.max(0, ok - todo.slice(0, ok).filter((g) => done.has(g)).length); }
 
 // =====================================================================================
 // secMail – מנהל העסק: תיבת המייל, טיוטה (רק בבקשה), "טופל", ורשימות ניקוי הספאם שממתינות לאישורו (פ3)
@@ -819,6 +856,7 @@ async function syncAll(o) {
         try { await syncOne(db, uid, o || {}); out.cal++; } catch (e) { out.errors++; logger.warn('secretary-google: cal sync failed', { reason: (e && e.details && e.details.reason) || 'error' }); }
       }
       for (const [box, b] of Object.entries(mailCfgOf(ms).boxes)) {
+        if (b.st === 'ok' && b.lag) { try { await ingestBox(box, b.addr, {}); out.mail = (out.mail || 0) + 1; } catch (e) { out.errors++; } } // 5: המשך קליטה שנשארה מאחור
         if (b.st !== 'ok' || b.watchExp > now + 864e5) continue;
         try { const { c } = await access(db, biz.bizId, 'mail', box); const w = await c.watch(G.topicName()); await db.doc('sec_cfg/mail').set({ boxes: { [box]: { watchExp: Number(w.expiration) || 0 } } }, { merge: true }); out.watch++; } catch (e) { out.errors++; }
       }
