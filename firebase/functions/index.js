@@ -66,7 +66,9 @@ exports.scanDocument = onCall(
     // צילום העברה בנקאית – מנהל בלבד (החלטת המשתמש). נבדק לפני הספירה במכסה היומית ולפני Gemini
     if (kind === 'transfer' && who.role !== 'manager' && !(who.biz && who.biz.dataRoot === 'b' && hasPerm(who, 'trf'))) throw new HttpsError('permission-denied', 'צילום העברה מותר למנהל בלבד.', { reason: 'manager-only' });
     // 6ה: מתגי עובד (רק בעסק במבנה b; בעסק legacy – כמו היום). חשבונית/הוצאה מקופה = expW; דוח Z/פתיחה/הפקדה = incW
-    if (who.biz && who.biz.dataRoot === 'b' && ((['invoice', 'cashout', 'check'].includes(kind) && !hasPerm(who, 'expW')) || (['zreport', 'opening', 'deposit'].includes(kind) && !hasPerm(who, 'incW')))) {
+    // שורות מוצרים מחשבונית ספק (invlines): expW (מי שמכניס את החשבונית) או prc (עדכון מחירים ומלאי – "נסה לזהות שוב")
+    if (who.biz && who.biz.dataRoot === 'b' && ((['invoice', 'cashout', 'check'].includes(kind) && !hasPerm(who, 'expW')) || (['zreport', 'opening', 'deposit'].includes(kind) && !hasPerm(who, 'incW'))
+      || (kind === 'invlines' && !hasPerm(who, 'expW') && !hasPerm(who, 'prc')))) {
       throw new HttpsError('permission-denied', 'אין לך הרשאה לפעולה הזו. פנה למנהל.', { reason: 'no-perm' });
     }
     const key = GEMINI_API_KEY.value();

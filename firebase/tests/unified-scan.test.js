@@ -396,3 +396,75 @@ describe('חלק ג\' – classify: statement וצ\'ק עובד', () => {
     assert.equal(x.type, 'invoice'); assert.equal(x.route, undefined);
   });
 });
+
+// תמחור חשבונית ספק, שלב 2: scanDocument kind:'invlines' (שורות מוצרים), ופענוח התשובה באפליקציה (www/pricing-lines.js) לשורות של piCreate
+describe('תמחור חשבונית ספק – שורות מוצרים (invlines)', () => {
+  const PL = require('../../app-source/www/pricing-lines.js');
+  const P = require('../functions/lib/prompts');
+  const INV = (bizId, n) => Object.assign({ kind: 'invlines', files: Array.from({ length: n || 1 }, jpg) }, bizId ? { bizId } : {});
+  it('3 חשבוניות לדוגמה (יחידות, קרטונים, הנחה בשורה): ההנחיה INVL_P נשלחת עם כל העמודים, והשורות מפוענחות נכון', async () => {
+    const r = await call('scanDocument', U.all, INV(null, 4));
+    assert.equal(r.status, 'OK', r.text.slice(0, 300));
+    const q = GM.state.requests[0];
+    assert.equal(q.kind, 'invlines');
+    assert.equal(q.body.contents[0].parts[0].text, P.invlines);
+    assert.equal(q.body.contents[0].parts.length, 5);
+    assert.deepEqual(q.body.generationConfig, { responseMimeType: 'application/json', temperature: 0 });
+    assert.equal((await getDoc(`b/${A}/scan_usage/_biz`)).count, 4); // כל עמוד נספר במכסת העסק
+    // יחידות / מארזים: עלות = המחיר; שורה שהסה"כ שלה לא מתאים – לבדיקה
+    const u = PL.invLines(r.result.data);
+    assert.deepEqual([u.sup, u.inv, u.date, u.bad], ['תבניכל בע"מ', '50123', '2026-11-10', 0]);
+    assert.deepEqual(u.lines[0], { n: 'כוסות קרטון 250 מ"ל', qty: 12, unit: 'pk', bc: '7290000000011', sku: 'K-250', pk: 50, ct: 20, cost: 9.5, raw: '12 מארז × 9.5 = 114' });
+    assert.deepEqual(u.lines[1], { n: 'מפיות לבנות', qty: 30, unit: 'u', sku: '3301', cost: 4.2, raw: '30 יח׳ × 4.2 = 126' });
+    assert.equal(u.chk[0], ''); assert.equal(u.chk[1], '');
+    assert.match(u.chk[2], /סה"כ שורה 70 ולא 60/);
+    assert.match(u.lines[2].raw, /^לבדיקה: /);
+    // קרטונים: עלות מארז = מחיר קרטון ÷ מארזים בקרטון; כמות במלאי = קרטונים × מארזים. בלי כמות בקרטון – לבדיקה, בלי עלות
+    GM.reset(); GM.state.invlines = 'cartons';
+    const c = PL.invLines((await call('scanDocument', U.mgr, INV())).result.data);
+    assert.deepEqual(c.lines[0], { n: 'תבנית אלומיניום 30', qty: 48, unit: 'ct', bc: '7290000000035', sku: 'AL30', pk: 10, ct: 24, cost: 9, raw: '2 קרטון × 216 = 432' });
+    assert.equal(c.lines[1].cost, undefined); assert.equal(c.lines[1].qty, 1); assert.equal(c.chk[1], 'חסרה כמות בקרטון');
+    // הנחה בשורה + מחירים כולל מע"מ: 11.8 כולל → 10 לפני, פחות 10% = 9; מחרוזת "23,60" → 20 לפני מע"מ
+    GM.reset(); GM.state.invlines = 'discount';
+    const d = PL.invLines((await call('scanDocument', U.mgr, INV())).result.data, 18);
+    assert.equal(d.lines[0].cost, 9); assert.equal(d.chk[0], '');
+    assert.equal(d.lines[1].cost, 20); assert.equal(d.lines[1].qty, 5); assert.equal(d.lines[1].bc, undefined);
+  });
+  it('תשובה פגומה לא מפילה: השרת מחזיר data:null והפענוח מחזיר רשימה ריקה; שורות פגומות נזרקות ונספרות', async () => {
+    GM.state.mode = 'garbage';
+    const r = await call('scanDocument', U.mgr, INV());
+    assert.equal(r.status, 'OK'); assert.equal(r.result.data, null);
+    for (const g of [null, undefined, 'not json', '```json\n{', 5, [], { lines: 'x' }, { supplier: { a: 1 }, date: '10/11/2026', lines: null }]) {
+      const o = PL.invLines(g);
+      assert.deepEqual(o.lines, []); assert.equal(o.sup, ''); assert.equal(o.date, '');
+    }
+    const o = PL.invLines({ lines: [null, 1, 'a', [], {}, { name: 'x', qty: -3, price: 'abc', barcode: '12 34 56', unit: 'box' }, ...Array(120).fill({ name: 'y', qty: 1, price: 1 })] });
+    assert.equal(o.lines.length, 100); assert.equal(o.bad, 5 + 21);
+    assert.deepEqual(o.lines[0], { n: 'x', qty: 0, unit: 'u', bc: '123456', raw: 'לבדיקה: חסרה כמות; חסרה עלות.' });
+    // מחרוזת JSON (גם עם ```json) מפוענחת כמו באפליקציה
+    assert.equal(PL.invLines('```json\n' + JSON.stringify(GM.INVLINES.units) + '\n```').lines.length, 3);
+  });
+  it('השורות שהפענוח מחזיר עוברות את piCreate ונשמרות בחשבונית בלי שינוי', async () => {
+    await prep((db) => db.doc('b/' + A).update({ 'features.orders': true }));
+    for (const [i, k] of ['units', 'cartons', 'discount'].entries()) {
+      const o = PL.invLines(GM.INVLINES[k], 18);
+      const r = await call('piCreate', U.mgr, { reqId: 'invl-test-' + i + '-0001', sup: o.sup, inv: o.inv, date: o.date, lines: o.lines });
+      assert.equal(r.status, 'OK', r.text.slice(0, 300));
+      const d = await getDoc(`b/${A}/pinv/${r.result.id}`);
+      assert.deepEqual(d.lines, o.lines);
+      assert.deepEqual([d.sup, d.inv, d.date], [o.sup, o.inv, o.date]);
+    }
+  });
+  it('הרשאות: עובד בלי expW ובלי prc נחסם לפני Gemini; עובד עם trf בלבד – גם; סוג invlines מקבל עד 4 עמודים', async () => {
+    for (const u of [U.none, U.trf]) {
+      const e = await call('scanDocument', u, INV());
+      assert.equal(e.status, 'PERMISSION_DENIED'); assert.equal(e.reason, 'no-perm');
+    }
+    await prep((db) => db.doc(`b/${A}/staff/${U.none}`).update({ 'perms.prc': true }));
+    assert.equal((await call('scanDocument', U.none, INV())).status, 'OK');
+    assert.equal(GM.state.requests.length, 1);
+    assert.equal((await call('scanDocument', U.all, INV(null, 5))).reason, 'bad-file-count');
+    // לארג' פעמי (legacy) – כמו חשבונית היום
+    assert.equal((await call('scanDocument', U.remp, INV())).status, 'OK');
+  });
+});

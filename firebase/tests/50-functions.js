@@ -241,8 +241,8 @@ describe('פונקציות שרת (שלב 3)', () => {
 
     it('תקציב הזמן בשרת: 100 שניות לחשבונית, למוצר ולסגירת קופה, 135 למשוב – תמיד פחות ממה שהטלפון מחכה (120 / 150)', () => {
       const scan = require('../functions/lib/scan');
-      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, zreport: 100000, opening: 100000, deposit: 100000, cashout: 100000, transfer: 100000, recipe: 135000, classify: 100000 });
-      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000, classify: 120000 });
+      assert.deepEqual(Object.fromEntries(Object.entries(scan.KINDS).map(([k, v]) => [k, v.budgetMs])), { invoice: 100000, product: 100000, feedback: 135000, zreport: 100000, opening: 100000, deposit: 100000, cashout: 100000, transfer: 100000, recipe: 135000, classify: 100000, invlines: 100000 });
+      assert.deepEqual(scan.PHONE_WAIT_MS, { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000, classify: 120000, invlines: 120000 });
       for (const k of Object.keys(scan.KINDS)) assert.ok(scan.KINDS[k].budgetMs < scan.PHONE_WAIT_MS[k], k);
       // מחוץ לאמולטור אין קיצור זמנים, גם אם מישהו הגדיר SCAN_TIME_SCALE
       const prevE = process.env.FUNCTIONS_EMULATOR, prevS = process.env.SCAN_TIME_SCALE;
@@ -400,6 +400,8 @@ describe('פונקציות שרת (שלב 3)', () => {
       assert.equal(SERVER_PROMPTS.deposit, P.deposit.value);
       assert.equal(SERVER_PROMPTS.cashout, P.cashout.value);
       assert.equal(SERVER_PROMPTS.transfer, P.transfer.value);
+      assert.equal(SERVER_PROMPTS.invlines, P.invlines.value); // תמחור חשבונית ספק: INVL_P (באמצע שורת OCAI_P)
+      assert.ok(P.invlines.value.includes('"lines"') && P.invlines.value !== P.invoice.value);
     });
 
     it('סגירת קופה: דוח Z – בדיוק 3 צילומים בבקשה אחת, ודף פתיחה – צילום אחד; ההנחיה מהאפליקציה, temperature 0, התשובה מפוענחת', async () => {
