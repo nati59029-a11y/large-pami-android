@@ -699,9 +699,16 @@ service cloud.firestore {
     }
 
     // ----- הזמנות ומלאי בשורש – רק ללארג' פעמי במצב legacy (2026-11-08, שלב 1). אותם נתיבים ותנאים כמו ב-b/{bizId},
-    // כך שכלי ההעברה מעתיק אותם כמו שהם. בשורש כל התוספות פעילות ואין מתגי הרשאה לעובד (כמו היום) – עובד פעיל = הזמנות.
+    // כך שכלי ההעברה מעתיק אותם כמו שהם. בשורש כל התוספות פעילות.
     // כל כתיבה – רק השרת (functions/orders.js). private/pay – אף אחד מהאפליקציה (הכלל האחרון).
-    function rOrd() { return isStaff() || isSuper(); }
+    // fb/ord-perm-enforce (2026-11-11): מתג "הזמנות" (perms.ord) נאכף גם בשורש, בדיוק כמו בשרת (roles.js hasPerm, שקורא את staff/{uid} בשורש)
+    // וכמו perm('ord') ב-b/{bizId}: מנהל / מנהל־על = כן; עובד פעיל בלי perms (עובד ישן) = כן (ברירת המחדל); עם perms – רק ord == true.
+    // הקריאה ל-staff/{uid} זהה לזו של isActiveEmployee, ולכן לא נספרת פעמיים.
+    function rOrdPerm() {
+      return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', null) == null
+        || get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.perms.get('ord', false) == true;
+    }
+    function rOrd() { return isManager() || isSuper() || (isActiveEmployee() && rOrdPerm()); }
     function rMgr() { return isManager() || isSuper(); }
     function rBrOk(br) {
       return rMgr() || get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('br', null) == null
