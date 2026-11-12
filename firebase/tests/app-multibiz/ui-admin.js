@@ -292,9 +292,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const log4 = []; ({ ctx, page } = await open('sa@x.co', log4, 'sa2'));
   await settingsOf(page); await page.evaluate(() => go('sa')); await wait(page, 2000);
   await page.evaluate((b) => go('sab', b), BZ0); await wait(page, 1800);
-  const lgc = await page.evaluate(() => ({ brand: !!document.querySelector('[data-v=brand]'), enter: !!document.querySelector('[data-a=admEnter]'), sus: !!document.querySelector('[data-a=admSus]'), feat: !!document.querySelector('[data-a=admFeat]'), adv: !!document.querySelector('form[data-f=admAdv]'), tok: !!document.querySelector('[data-a=admTok]'), txt: document.querySelector('#main').innerText.slice(0, 160) }));
+  const lgc = await page.evaluate(() => ({ brand: !!document.querySelector('[data-v=brand]'), enter: !!document.querySelector('[data-a=admEnter]'), sus: !!document.querySelector('[data-a=admSus]'), feat: [...document.querySelectorAll('[data-a=admFeat]')].map((e) => e.dataset.k).join(','), adv: !!document.querySelector('form[data-f=admAdv]'), tok: !!document.querySelector('[data-a=admTok]'), txt: document.querySelector('#main').innerText.slice(0, 160) }));
   await shot(page, '12-כרטיס-לארג-פעמי', true);
-  check('31 כרטיס לארג\' פעמי (legacy): מוצג עם "כניסה כמנהל" בלבד, בלי פעולות שהשרת דוחה (השהיה, תוספות, adv, אסימון)', lgc.enter && !lgc.sus && !lgc.feat && !lgc.adv && !lgc.tok && !lgc.brand, lgc);
+  // 12.11.2026: בעסק legacy – רק המתגים של התוספות שכבויות בו כברירת מחדל (סלולר, המזכירה); השרת (setBusinessFeatures) תומך בהן גם ב-legacy
+  check('31 כרטיס לארג\' פעמי (legacy): "כניסה כמנהל" + מתגי סלולר והמזכירה בלבד, בלי פעולות שהשרת דוחה (השהיה, adv, אסימון, מיתוג)', lgc.enter && !lgc.sus && lgc.feat === 'cellular,secretary' && !lgc.adv && !lgc.tok && !lgc.brand, lgc);
+  await page.click('[data-a=admFeat][data-k=secretary]'); await wait(page, 2000);
+  const lsec = await page.evaluate(() => { const e = document.querySelector('[data-a=admFeat][data-k=secretary]'); return e ? e.textContent : ''; });
+  check('31ב לארג\' פעמי: הפעלת המזכירה מהכרטיס – המתג "פעיל"', lsec === 'פעיל', lsec);
   check('32 אין שגיאות JS (כרטיס לארג\' פעמי)', page.__errors.length === 0, page.__errors);
   await ctx.close();
   await browser.close();

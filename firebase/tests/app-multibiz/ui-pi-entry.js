@@ -47,7 +47,8 @@ async function open(browser, www, cfg, email, perms) {
   await H.settle(page, 300);
   return { ctx, page };
 }
-const noOverflow = (page) => page.evaluate(() => { const W = document.documentElement.clientWidth; const bad = [...document.querySelectorAll('#main *')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > W + 1 || r.left < -1); }).slice(0, 5).map((e) => e.tagName + '.' + e.className + ' ' + (e.textContent || '').slice(0, 30)); return { W, sw: document.documentElement.scrollWidth, bad }; });
+// אחרי מיזוג #49 (D5): פסי שבבים גוללים לרוחב (.scroll-x, למשל סינון הסטטוס בהזמנות) – גלילה מכוונת בתוך הפס, לא גלישה של הדף
+const noOverflow = (page) => page.evaluate(() => { const W = document.documentElement.clientWidth; const bad = [...document.querySelectorAll('#main *')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > W + 1 || r.left < -1) && !e.closest('.scroll-x'); }).slice(0, 5).map((e) => e.tagName + '.' + e.className + ' ' + (e.textContent || '').slice(0, 30)); return { W, sw: document.documentElement.scrollWidth, bad }; });
 const lists = () => S.calls.filter((c) => c.fn === 'list').length;
 // מה מופיע במסך: כניסה לתמחור (data-v="pi") – הטקסט והמונה
 const entry = (page) => page.evaluate(() => { const b = document.querySelector('#main [data-v="pi"]'); if (!b) return null; const t = b.querySelector('.tag'); const r = b.getBoundingClientRect(); return { txt: b.innerText.replace(/\s+/g, ' ').trim(), n: t ? t.innerText.trim() : '', w: r.width, right: r.right }; });

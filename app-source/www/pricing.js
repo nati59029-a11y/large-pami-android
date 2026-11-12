@@ -410,7 +410,7 @@ function piN(c){if(!can())return null;const t=Date.now();
  return LS.L?LS.L.length:null}
 PI.n=piN;
 const piBusy=()=>{const o=(LS.L||[]).filter(lkOther);return o.length?'בטיפול של '+[...new Set(o.map(x=>String(x.lk.name||'משתמש אחר')))].join(', '):''};
-const piOpt=(sm,st)=>{const n=piN(),b=piBusy();return`<button class="opt" data-a="go" data-v="pi"${st?` style="${st}"`:''}><span>🧾 חשבוניות לתמחור<small>${esc([sm,b].filter(Boolean).join(' · '))}</small></span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`};
+const piOpt=(sm,st)=>{const n=piN(),b=piBusy();return`<button class="opt" data-a="go" data-v="pi"${st?` style="${st}"`:''}><span>חשבוניות לתמחור<small>${esc([sm,b].filter(Boolean).join(' · '))}</small></span>${n?`<span class="tag t1">${n}</span>`:''}${ico('chev')}</button>`};
 {const o=V.shelf;if(typeof o==='function')V.shelf=function(){const r=o.apply(this,arguments);
  try{if(r&&typeof r.h==='string'&&bzF('shelf')&&can()){const i=r.h.lastIndexOf('</div>');if(i>=0)r.h=r.h.slice(0,i)+piOpt('מחירים חדשים מחשבוניות ספק','min-height:92px;margin:0')+r.h.slice(i)}}catch(e){}return r}}
 {const o=V.ox;if(typeof o==='function')V.ox=function(){const r=o.apply(this,arguments);
@@ -420,7 +420,7 @@ const piOpt=(sm,st)=>{const n=piN(),b=piBusy();return`<button class="opt" data-a
 if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(this,arguments);try{const n=isA()?piN(1):0;r.pi=n||0;r.n+=r.pi}catch(e){r.pi=0}return r}}
 {const o=V.todo;if(typeof o==='function')V.todo=function(){const r=o.apply(this,arguments);
  try{if(isA()&&can()&&r&&typeof r.h==='string'){const n=piN();if(n){const sm=[n===1?'חשבונית אחת ממתינה לעדכון מחירים':n+' חשבוניות ממתינות לעדכון מחירים',piBusy()].filter(Boolean).join(' · ');
-  r.h=adSec('חשבוניות לתמחור')+adOpt('pi','🧾 חשבוניות ספק לתמחור',esc(sm),n)+r.h}}}catch(e){}return r}}
+  r.h=adSec('חשבוניות לתמחור')+adOpt('pi','חשבוניות ספק לתמחור',esc(sm),n)+r.h}}}catch(e){}return r}}
 {const o=V.wk;if(typeof o==='function')V.wk=function(){const r=o.apply(this,arguments);
  try{if(isW()&&WS==='home'&&r&&typeof r.h==='string'&&can()){const m='<button class="btn g" style="width:100%;margin-top:14px" data-a="updChk">',b=piOpt('עדכון מחירים ומלאי מחשבוניות ספק','margin-top:8px');
   r.h=r.h.includes(m)?r.h.replace(m,()=>b+m):r.h+b}}catch(e){}return r}}
