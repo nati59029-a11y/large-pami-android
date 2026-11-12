@@ -61,7 +61,8 @@ async function seed() {
 const LINES = [
   { n: 'במבה 80 גרם', bc: '729001', qty: 10, unit: 'u', cost: 3.2 },
   { n: 'ביסלי גריל', bc: '729002', qty: 5, unit: 'u', cost: 4 },
-  { n: 'מוצר חדש', bc: '729099', qty: 2, unit: 'ct', pk: 6, ct: 12, cost: 2.5 },
+  // שורת קרטונים שהמכשיר כבר המיר ליחידת מלאי (מארז): 2 קרטונים × 12 = 24 מארזים, מחיר קרטון 120 ÷ 12 = 10 לפני מע"מ. unit – מידע בלבד
+  { n: 'מוצר חדש', bc: '729099', qty: 24, unit: 'ct', pk: 6, ct: 12, cost: 10, raw: '2 קרטון × 120 = 240', chk: 'לבדוק מחיר' },
 ];
 const mk = async (u, lines, biz) => {
   const r = await call('piCreate', u || MGR, { reqId: rid(), sup: 'אסם', inv: '5001', date: '2026-11-12', lines: lines || LINES });
@@ -85,6 +86,13 @@ describe('תמחור חשבונית ספק – שרת', () => {
     assert.equal(d.st, 'new'); assert.equal(d.src, 'worker'); assert.equal(d.byName, 'בלי'); assert.equal(d.lines.length, 1);
     assert.equal(d.inv, '', 'רצף ארוך של ספרות לא נשמר'); assert.equal(d.lines[0].n, 'x'); assert.equal(d.lines[0].bc, undefined, 'ברקוד לא תקין מהזיהוי – לא נשמר');
     assert.equal((await coll(PFX() + 'pinv')).length, 1);
+    // ליקוי 2: עובד ששולח חשבונית לא קובע קישור / מחירים / סימונים – רק שדות זיהוי נשמרים. ליקוי 5: שם עד 60 תווים. chk נשמר
+    const long = 'א'.repeat(70);
+    const c = await call('piCreate', NOP, { reqId: rid(), sup: 'אסם', lines: [{ n: long, bc: '729001', qty: 3, unit: 'ct', ct: 4, cost: 2, raw: 'r', chk: 'סה"כ לא מתאים',
+      pid: 'pA', price: 0.1, wp: 0.1, wpSrc: 'stock', cto: true, nw: true, skip: true }] });
+    assert.equal(c.status, 'OK', c.text);
+    const cl = (await get(PFX() + 'pinv/' + c.result.id)).lines[0];
+    assert.deepEqual(cl, { n: 'א'.repeat(60), bc: '729001', qty: 3, unit: 'ct', ct: 4, cost: 2, raw: 'r', chk: 'סה"כ לא מתאים' });
     assert.equal((await call('piCreate', XM, { reqId: rid(), lines: [] })).reason, 'feature-off');
     assert.equal((await call('piCreate', null, { reqId: rid(), lines: [] })).status, 'UNAUTHENTICATED');
   });
@@ -169,14 +177,19 @@ describe('תמחור חשבונית ספק – שרת', () => {
       await d.doc(PFX() + 'prod/pM').set({ name: 'שוקו, בקבוק  1 ליטר', price: 9, barcode: '', on: true, q: {}, sup: 'אסם בע"מ' });
       await d.doc(PFX() + 'prod/pX').set({ name: 'מיץ ענבים', price: 9, barcode: '', on: true, q: {}, sup: 'שטראוס' });
     });
-    const id = await mk(MGR, [
+    const L = [
       { n: 'משהו אחר', sku: 'K-77', qty: 1 },
       { n: 'שוקו בקבוק 1 ליטר', qty: 1 },
       { n: 'שוקו בקבוק 1', qty: 1 },
       { n: 'מיץ ענבים', qty: 1 },
-      { n: 'שוקו בקבוק 1 ליטר', qty: 1, nw: true },
-      { n: 'כלשהו', qty: 1, pid: 'pX' },
-    ]);
+      { n: 'שוקו בקבוק 1 ליטר', qty: 1 },
+      { n: 'כלשהו', qty: 1 },
+    ];
+    const id = await mk(MGR, L);
+    assert.equal((await call('piClaim', P2, { id })).result.m[4].k, 'name');
+    // המשתמש ביטל את ההתאמה (מוצר חדש) בשורה 5 וקישר ידנית בשורה 6 – נשמר בטיוטה ומכובד
+    const L2 = L.map((l, i) => Object.assign({}, l, i === 4 ? { nw: true } : i === 5 ? { pid: 'pX' } : {}));
+    assert.equal((await call('piDraft', P2, { id, lines: L2 })).status, 'OK');
     const r = await call('piClaim', P2, { id });
     assert.equal(r.status, 'OK', r.text);
     assert.deepEqual(r.result.m.map((x) => [x.k, x.m && x.m.pid]), [['sku', 'pS'], ['name', 'pM'], ['', null], ['', null], ['', null], ['pid', 'pX']]);
@@ -187,7 +200,7 @@ describe('תמחור חשבונית ספק – שרת', () => {
     const L = [
       Object.assign({}, LINES[0], { pid: 'pA', price: 6.9, wp: 5, wpSrc: 'man', ct: 24, cto: true }),
       Object.assign({}, LINES[1], { skip: true }),
-      Object.assign({}, LINES[2], { cost: 3.33, price: 9.9, wp: 5.5, wpSrc: 'auto', cto: false }),
+      Object.assign({}, LINES[2], { price: 9.9, wp: 5.5, wpSrc: 'auto', cto: false }),
       Object.assign({}, LINES[0], { pid: 'pA', qty: 2, price: 1 }), // שורה נוספת לאותו מוצר: רק הכמות מצטרפת
     ];
     assert.equal((await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: L })).reason, 'not-locked', 'בלי כניסה – נדחה');
@@ -198,7 +211,7 @@ describe('תמחור חשבונית ספק – שרת', () => {
     const reqId = rid();
     const f = await call('piFinish', P1, { id, reqId, br: 'br1', lines: L });
     assert.equal(f.status, 'OK', f.text);
-    assert.equal(f.result.added, 1); assert.equal(f.result.updated, 1); assert.equal(f.result.qty, 14);
+    assert.equal(f.result.added, 1); assert.equal(f.result.updated, 1); assert.equal(f.result.qty, 36, '12 של pA + 24 מארזים, בלי המרה נוספת לפי unit');
     const a = await get(PFX() + 'prod/pA');
     assert.equal(a.price, 6.9); assert.equal(a.ct, 24); assert.equal(a.cto, true); assert.equal(a.pk, 1);
     assert.deepEqual(a.q, { br1: 16, br2: 1 }, '4 + 10 + 2');
@@ -211,10 +224,10 @@ describe('תמחור חשבונית ספק – שרת', () => {
     const nid = fin.lines[2].pid; assert.ok(nid);
     const p = await get(PFX() + 'prod/' + nid);
     assert.equal(p.name, 'מוצר חדש'); assert.equal(p.barcode, '729099'); assert.equal(p.price, 9.9); assert.equal(p.pk, 6); assert.equal(p.ct, 12);
-    assert.equal(p.cto, undefined); assert.equal(p.sup, 'אסם'); assert.deepEqual(p.q, { br1: 2 }); assert.equal(p.src, 'pinv');
-    assert.equal((await get(PFX() + `prod/${nid}/p/cost`)).cost, 3.93); assert.equal((await get(PFX() + `prod/${nid}/p/ws`)).wp, 5.5);
+    assert.equal(p.cto, undefined); assert.equal(p.sup, 'אסם'); assert.deepEqual(p.q, { br1: 24 }); assert.equal(p.src, 'pinv');
+    assert.equal((await get(PFX() + `prod/${nid}/p/cost`)).cost, 11.8, 'עלות מארז 10 + 18% – לא מחולקת שוב ב-ct'); assert.equal((await get(PFX() + `prod/${nid}/p/ws`)).wp, 5.5);
     const log = (await coll(PFX() + 'stockLog')).filter((x) => x.why === 'pinv');
-    assert.deepEqual(log.map((x) => [x.prod, x.delta, x.br, x.pinv]).sort(), [[nid, 2, 'br1', id], ['pA', 12, 'br1', id]].sort());
+    assert.deepEqual(log.map((x) => [x.prod, x.delta, x.br, x.pinv]).sort(), [[nid, 24, 'br1', id], ['pA', 12, 'br1', id]].sort());
     const again = await call('piFinish', P1, { id, reqId, br: 'br1', lines: L });
     assert.equal(again.status, 'OK'); assert.equal(again.result.dup, true); assert.equal(again.result.added, 1);
     assert.deepEqual((await get(PFX() + 'prod/pA')).q, { br1: 16, br2: 1 }, 'ניסיון חוזר לא מוסיף שוב');

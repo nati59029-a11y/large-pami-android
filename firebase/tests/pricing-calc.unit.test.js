@@ -19,7 +19,7 @@ describe('תמחור – חישובים טהורים', () => {
     for (const [x, y] of T) assert.equal(PC.roundWs(x), y, `${x} → ${y}`);
   });
   it('עיגול: ריק / לא מספר / שלילי = null', () => {
-    for (const x of [null, undefined, '', 'abc', -1, -0.5, NaN, Infinity, true, {}]) assert.equal(PC.roundWs(x), null, String(x));
+    for (const x of [null, undefined, '', '   ', '₪', ' ₪ ', 'abc', -1, -0.5, NaN, Infinity, true, {}]) assert.equal(PC.roundWs(x), null, JSON.stringify(x));
   });
   it('סיטונאי ברירת מחדל = עלות לפני מע"מ × 1.5 ואז עיגול (החלטה 2)', () => {
     const T = [[1, 1.5], [0.87, 1.5], [1.2, 1.9], [1.28, 2], [4, 6], [6.9, 10.5], [10, 15], [0, 0], [0.01, 0.5]];
@@ -79,5 +79,7 @@ describe('תמחור – חישובים טהורים', () => {
     assert.equal(PC.num('₪ 12'), 12);
     assert.equal(PC.num('0'), 0);
     assert.equal(PC.num(''), null);
+    assert.equal(PC.num('  '), null); assert.equal(PC.num('₪'), null); assert.equal(PC.num(' ₪ '), null);
+    assert.equal(PC.wsDefault(' '), null); assert.equal(PC.withVat('₪', 18), null); assert.equal(PC.margin(' ', 3), null);
   });
 });

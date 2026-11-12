@@ -418,7 +418,7 @@ describe('תמחור חשבונית ספק – שורות מוצרים (invlines
     assert.deepEqual(u.lines[1], { n: 'מפיות לבנות', qty: 30, unit: 'u', sku: '3301', cost: 4.2, raw: '30 יח׳ × 4.2 = 126' });
     assert.equal(u.chk[0], ''); assert.equal(u.chk[1], '');
     assert.match(u.chk[2], /סה"כ שורה 70 ולא 60/);
-    assert.match(u.lines[2].raw, /^לבדיקה: /);
+    assert.match(u.lines[2].chk, /סה"כ שורה 70 ולא 60/); assert.doesNotMatch(u.lines[2].raw, /לבדיקה/);
     // קרטונים: עלות מארז = מחיר קרטון ÷ מארזים בקרטון; כמות במלאי = קרטונים × מארזים. בלי כמות בקרטון – לבדיקה, בלי עלות
     GM.reset(); GM.state.invlines = 'cartons';
     const c = PL.invLines((await call('scanDocument', U.mgr, INV())).result.data);
@@ -440,7 +440,7 @@ describe('תמחור חשבונית ספק – שורות מוצרים (invlines
     }
     const o = PL.invLines({ lines: [null, 1, 'a', [], {}, { name: 'x', qty: -3, price: 'abc', barcode: '12 34 56', unit: 'box' }, ...Array(120).fill({ name: 'y', qty: 1, price: 1 })] });
     assert.equal(o.lines.length, 100); assert.equal(o.bad, 5 + 21);
-    assert.deepEqual(o.lines[0], { n: 'x', qty: 0, unit: 'u', bc: '123456', raw: 'לבדיקה: חסרה כמות; חסרה עלות.' });
+    assert.deepEqual(o.lines[0], { n: 'x', qty: 0, unit: 'u', bc: '123456', chk: 'חסרה כמות; חסרה עלות' });
     // מחרוזת JSON (גם עם ```json) מפוענחת כמו באפליקציה
     assert.equal(PL.invLines('```json\n' + JSON.stringify(GM.INVLINES.units) + '\n```').lines.length, 3);
   });

@@ -2,14 +2,15 @@
 // לשורות במבנה ש-piCreate מצפה לו (firebase/functions/pricing.js, LINE_KEYS). פונקציה טהורה – בלי רשת ובלי DOM. אף פעם לא זורקת:
 // תשובה פגומה / חסרה = { lines: [] } ושאר השדות ריקים.
 //
-//   invLines(data, vat?) → { sup, inv, date, lines:[{ n, bc?, sku?, qty, unit, pk?, ct?, cost?, raw? }], chk:[סיבה|''], bad }
+//   invLines(data, vat?) → { sup, inv, date, lines:[{ n, bc?, sku?, qty, unit, pk?, ct?, cost?, raw?, chk? }], chk:[סיבה|''], bad }
 //     qty  = כמות ביחידות מלאי (מארזים; החלטה 3) – זה מה ש-piFinish מוסיף למלאי. שורת קרטונים: קרטונים × ct.
 //            שורת קרטונים בלי ct: qty = מספר הקרטונים (לא הומר) והשורה "לבדיקה" – כשממלאים ct במסך, הכמות = קרטונים × ct.
 //     unit = היחידה שבחשבונית (u / pk / ct), להצגה בלבד.
 //     cost = עלות ליחידת מלאי לפני מע"מ, אחרי הנחה בשורה. מחיר לקרטון – מחולק ב-ct (PricingCalc.unitCost).
-//     raw  = מה שהיה כתוב בשורה (כמות, יחידה, מחיר, הנחה, סה"כ), ובשורה שצריך לבדוק – "לבדיקה: <סיבה>" בהתחלה
-//            (piCreate לא מקבל שדה נפרד לסימון, ו-raw נשמר בחשבונית – כך גם עובד אחר רואה את הסימון).
-//     chk  = לכל שורה (אותו אינדקס) הסיבה לבדיקה, או '' – למסך התמחור.
+//     raw  = מה שהיה כתוב בשורה (כמות, יחידה, מחיר, הנחה, סה"כ).
+//     chk  = בשורה: הסיבה לבדיקה (רק כשיש), נשמרת בחשבונית (piCreate) – כך גם עובד אחר רואה את הסימון.
+//            גם out.chk – לכל שורה (אותו אינדקס) הסיבה או '' – למסך התמחור.
+//     n    = עד 60 תווים, כמו שם מוצר במלאי (saveProduct).
 //     bad  = כמה שורות נזרקו (בלי שם ובלי ברקוד, או לא אובייקט).
 // "לבדיקה": סה"כ השורה לא מתאים לכמות × מחיר (אחרי הנחה), חסרה כמות / עלות, או שורת קרטונים בלי כמות בקרטון.
 
@@ -34,7 +35,7 @@ const r3 = (x) => Math.round(x * 1000) / 1000;
 const fmt = (x) => String(r2(x));
 
 function line(o, vat, inclVat) {
-  const n = txt(o.name, 80);
+  const n = txt(o.name, 60);
   let bc = txt(o.barcode, 30).replace(/\s/g, '');
   if (!BC_RE.test(bc)) bc = '';
   if (!n && !bc) return null;
@@ -69,8 +70,9 @@ function line(o, vat, inclVat) {
   if (cost != null && cost <= 1000000) l.cost = cost;
   const was = [q0 != null ? fmt(q0) + ' ' + UNIT_NAME[unit] : '', price != null ? '× ' + fmt(price) : '', dsc ? 'הנחה ' + fmt(dsc) + '%' : '', tot != null ? '= ' + fmt(tot) : '', inclVat ? '(לפני מע"מ)' : ''].filter(Boolean).join(' ');
   const c = why.join('; ');
-  const raw = ((c ? 'לבדיקה: ' + c + '. ' : '') + was).trim().slice(0, 200);
+  const raw = was.trim().slice(0, 200);
   if (raw) l.raw = raw;
+  if (c) l.chk = c.slice(0, 120);
   return { l, c };
 }
 

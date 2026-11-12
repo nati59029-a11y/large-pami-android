@@ -16,7 +16,9 @@ const VAT0 = 18; // ברירת המחדל כמו ordcfg/main.vat
 // מספר מקלט (גם מחרוזת מהמסך, עם פסיק עשרוני). ריק / לא מספר / שלילי = null
 const num = (v) => {
   if (v == null || v === '' || typeof v === 'boolean') return null;
-  const n = typeof v === 'number' ? v : Number(String(v).trim().replace(/,/g, '.').replace(/[₪\s]/g, ''));
+  const t = typeof v === 'number' ? null : String(v).replace(/,/g, '.').replace(/[₪\s]/g, '');
+  if (t === '') return null; // רק רווחים / רק ₪ = ריק
+  const n = typeof v === 'number' ? v : Number(t);
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
 const vatOf = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100 ? v : VAT0);

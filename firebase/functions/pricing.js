@@ -3,11 +3,15 @@
 // כל הנתיבים תחת b/{bizId}/ (או בשורש ללארג' פעמי במצב legacy – T.tdb()). כל כתיבה רק כאן; מהאפליקציה – קריאה לפי החוקים.
 //
 //   pinv/{id}  { st:'new'|'done'|'void', src:'scan'|'worker', sup, supId?, inv, date, by, byName, at, upd, n,
-//                lines:[{ n, bc?, sku?, qty, unit:'u'|'pk'|'ct', pk?, ct?, cost? (לפני מע"מ, ליחידת מלאי), raw?,
+//                lines:[{ n, bc?, sku?, qty, unit:'u'|'pk'|'ct', pk?, ct?, cost?, raw?, chk? (הסיבה לסימון "לבדיקה"),
 //                         pid? (מוצר קיים לעדכון), nw? (נבחר "מוצר חדש"), skip?, price? (לצרכן כולל מע"מ), wp? (סיטונאי לפני מע"מ),
 //                         wpSrc?: 'stock'|'auto'|'man', cto? }],
 //                lk?: { uid, name, t } (בטיפול), fin?: { by, name, t, rq, add, upd, void? } }
 //
+// חוזה השורה (תיקון סבב 1, ליקוי 1): qty ו-cost הם תמיד ביחידת מלאי (מארז; החלטה 3) – qty = מספר המארזים שנכנסים למלאי,
+//   cost = עלות מארז לפני מע"מ. ההמרה מקרטונים (קרטונים × ct, מחיר קרטון ÷ ct) נעשית במכשיר לפני השליחה (www/pricing-lines.js,
+//   PricingCalc.unitCost). unit = מה שהיה כתוב בחשבונית – מידע להצגה בלבד; השרת לא ממיר לפיו (אחרת – המרה כפולה).
+// piCreate שומר רק שדות זיהוי (CREATE_KEYS); pid / מחירים / סימונים – רק מהמסך של מי שמטפל (piDraft / piFinish).
 // מי: piCreate – כל איש צוות (גם עובד בלי prc ששולח חשבונית). כל השאר – מנהל, או עובד עם מתג prc ("עדכון מחירים ומלאי", כבוי כברירת מחדל).
 // תוספת: מדף (shelf) או הזמנות (orders). בלי הזמנות (מדף בלבד) – אין מלאי בענן: piFinish רק סוגר את החשבונית.
 // נעילה (החלטה 6): piClaim נועל; כל פעילות (piBeat / piDraft) מחדשת. 30 דקות בלי פעילות = משתחרר. אין שחרור כפוי –
@@ -34,7 +38,9 @@ const BC_RE = /^[0-9A-Za-z-]{3,30}$/;
 const DATE_RE = /^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const UNITS = ['u', 'pk', 'ct'];
 const WP_SRC = ['stock', 'auto', 'man'];
-const LINE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'pid', 'nw', 'skip', 'price', 'wp', 'wpSrc', 'cto'];
+const LINE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'chk', 'pid', 'nw', 'skip', 'price', 'wp', 'wpSrc', 'cto'];
+const CREATE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'chk']; // piCreate: שדות זיהוי בלבד (ליקוי 2)
+const NAME_MAX = 60; // כמו שם מוצר ב-saveProduct (prodClean) – ליקוי 5
 
 // ---------- הרשאות ----------
 function feats(w) {
@@ -68,11 +74,12 @@ function cleanLine(l, i, strict) {
   const fail = (reason, msg) => { if (strict) throw bad(reason, no + msg); };
   if (!l || typeof l !== 'object' || Array.isArray(l)) throw bad('bad-lines', no + 'לא תקינה');
   for (const k of Object.keys(l)) if (!LINE_KEYS.includes(k)) throw bad('bad-field', no + 'שדה לא מוכר: ' + String(k).slice(0, 30));
-  const o = { n: soft(l.n, 80), qty: 0, unit: UNITS.includes(l.unit) ? l.unit : 'u' };
+  const o = { n: soft(l.n, NAME_MAX), qty: 0, unit: UNITS.includes(l.unit) ? l.unit : 'u' };
   if (l.unit != null && !UNITS.includes(l.unit)) fail('bad-unit', 'יחידה לא תקינה');
   if (l.bc != null && l.bc !== '') { const b = String(l.bc).trim(); if (BC_RE.test(b)) o.bc = b; else fail('bad-barcode', 'ברקוד: ספרות/אותיות, 3 עד 30'); }
   if (l.sku != null && l.sku !== '') { const k = soft(l.sku, 30); if (k) o.sku = k; }
   if (l.raw != null && l.raw !== '') { const r = soft(l.raw, 200); if (r) o.raw = r; }
+  if (l.chk != null && l.chk !== '') { const c = soft(l.chk, 120); if (c) o.chk = c; }
   if (l.qty != null && l.qty !== '') {
     if (isNum(l.qty) && l.qty >= 0 && l.qty <= 100000) o.qty = O.r3(l.qty); else fail('bad-qty', 'כמות לא תקינה');
   }
@@ -92,10 +99,14 @@ function cleanLine(l, i, strict) {
   if (l.pid != null && l.pid !== '') { if (typeof l.pid === 'string' && O.ID_RE.test(l.pid)) o.pid = l.pid; else fail('bad-id', 'מוצר לא תקין'); }
   return o;
 }
-function cleanLines(v, strict, allowEmpty) {
+function cleanLines(v, strict, allowEmpty, keys) {
   if (v == null && allowEmpty) return [];
   if (!Array.isArray(v) || v.length > MAX_LINES || (!allowEmpty && !v.length)) throw bad('bad-lines', `שורות: ${allowEmpty ? 0 : 1} עד ${MAX_LINES}`);
-  return v.map((l, i) => cleanLine(l, i, strict));
+  return v.map((l, i) => {
+    const o = cleanLine(l, i, strict);
+    if (keys) for (const k of Object.keys(o)) if (!keys.includes(k)) delete o[k]; // piCreate – מה שאינו זיהוי לא נשמר
+    return o;
+  });
 }
 // כותרת: ספק, מספר חשבונית, תאריך (רק מה שנשלח)
 function cleanHdr(input) {
@@ -218,7 +229,7 @@ async function piCreate(request) {
   O.onlyKeys(input, ['reqId', 'sup', 'supId', 'inv', 'date', 'lines']);
   const reqId = O.reqIdOf(input);
   const h = Object.assign({ sup: '', inv: '', date: '' }, cleanHdr(input));
-  const lines = cleanLines(input.lines, false, true);
+  const lines = cleanLines(input.lines, false, true, CREATE_KEYS);
   const db = T.tdb();
   const ref = db.doc('pinv/i' + reqId);
   const now = Date.now();
