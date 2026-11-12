@@ -93,7 +93,7 @@ async function startImport(request) {
   if (w.role !== 'manager') throw deny('manager-only', 'ייבוא קובץ ברקע – מנהל בלבד');
   const input = inputObject(request);
   if (input.retry !== undefined) { onlyKeys(input, ['retry']); return retryJob(w, jobIdOf(input.retry)); }
-  onlyKeys(input, ['job', 'kind', 'total', 'at', 'rows', 'ns', 'br', 'addQty']);
+  onlyKeys(input, ['job', 'kind', 'total', 'at', 'rows', 'ns', 'br', 'addQty', 'skipEx']);
   const job = jobIdOf(input.job);
   const kind = input.kind;
   if (!KINDS[kind]) throw bad('bad-kind', 'סוג ייבוא לא תקין');
@@ -104,13 +104,14 @@ async function startImport(request) {
   let ns = input.ns;
   if (ns === undefined || ns === null) ns = rows.map((_, i) => at + i + 1);
   else if (!Array.isArray(ns) || ns.length !== rows.length || !ns.every((x) => intIn(x, 1, 10000000))) throw bad('bad-ns', 'מספרי שורות לא תקינים');
-  let br = null, addQty = false;
+  let br = null, addQty = false, skipEx = false;
   if (kind === 'prod') {
     if (input.br != null && input.br !== '' && typeof input.br !== 'string') throw bad('bad-br', 'סניף לא תקין');
     br = input.br == null || input.br === '' ? null : input.br;
     addQty = input.addQty === true;
+    skipEx = input.skipEx === true;
     ORD.prodBr(w, br, rows); // אותה בדיקת סניף כמו importProducts – כבר עכשיו, ולא רק בעיבוד
-  } else if (input.br !== undefined || input.addQty !== undefined) throw bad('bad-field', 'שדה לא מוכר');
+  } else if (input.br !== undefined || input.addQty !== undefined || input.skipEx !== undefined) throw bad('bad-field', 'שדה לא מוכר');
 
   const key = CARD_ENC_KEY.value();
   const chunks = pack(kind, rows, ns, at).map((c) => sealChunk(key, w.bizId, job, c));
@@ -126,11 +127,11 @@ async function startImport(request) {
     let j;
     if (!js.exists) {
       isNew = true;
-      j = { k: kind, uid: w.uid, t: now, total, br, addQty, st: 'up', recv: 0, got: {}, next: 0, wait: [], dn: 0, fr: 0, cnt: { c: 0, u: 0, s: 0, b: 0, sk: 0 }, bad: [], fail: [] };
+      j = { k: kind, uid: w.uid, t: now, total, br, addQty, skipEx, st: 'up', recv: 0, got: {}, next: 0, wait: [], dn: 0, fr: 0, cnt: { c: 0, u: 0, s: 0, b: 0, sk: 0 }, bad: [], fail: [] };
     } else {
       isNew = false;
       j = js.data();
-      if (j.k !== kind || j.total !== total || j.uid !== w.uid || (j.br || null) !== br || (j.addQty === true) !== addQty) throw pre('job-mismatch', 'החלק לא תואם לייבוא שכבר התחיל. התחילו ייבוא חדש.');
+      if (j.k !== kind || j.total !== total || j.uid !== w.uid || (j.br || null) !== br || (j.addQty === true) !== addQty || (j.skipEx === true) !== skipEx) throw pre('job-mismatch', 'החלק לא תואם לייבוא שכבר התחיל. התחילו ייבוא חדש.');
     }
     const got = Object.assign({}, j.got || {});
     let recv = j.recv || 0;
@@ -222,7 +223,7 @@ async function processChunk(ref, opts) {
     }
     const tries = (cs.get('tries') || 0) + 1;
     tx.update(ref, { tries, at: now });
-    return { go: tries > MAX_TRIES || opts.old ? 'fail' : 'run', tries, br: j.br || null, addQty: j.addQty === true };
+    return { go: tries > MAX_TRIES || opts.old ? 'fail' : 'run', tries, br: j.br || null, addQty: j.addQty === true, skipEx: j.skipEx === true };
   });
   if (step.go === 'skip' || step.go === 'wait') return step.go;
   if (step.go === 'nojob') { await db.recursiveDelete(q); return 'nojob'; }
@@ -244,7 +245,7 @@ async function processChunk(ref, opts) {
       const w = await (c.k === 'prod' ? ORD.who : CUS.who)({ auth: { uid: c.uid }, data: { bizId: c.biz } }); // ההרשאה נבדקת שוב בזמן העיבוד
       if (w.role !== 'manager') throw deny('manager-only', 'ייבוא – מנהל בלבד');
       if (c.k === 'prod') {
-        const r = await ORD.prodRows(w, { reqId: c.job + '_' + c.n, br: step.br, addQty: step.addQty, rows });
+        const r = await ORD.prodRows(w, { reqId: c.job + '_' + c.n, br: step.br, addQty: step.addQty, skipEx: step.skipEx, rows });
         if (failAt === 0) throw new Error('test: injected failure');
         return r;
       }
