@@ -32,7 +32,7 @@ const { gate, logData, bad, pre, wrap } = C;
 const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 const hh = (n) => String(n).padStart(2, '0') + ':00';
 const nid = (uid, key) => crypto.createHash('sha256').update(uid + '|' + key, 'utf8').digest('hex').slice(0, 32);
-const RESOLVE = ['task', 'backup', 'fact']; // נעלם מהנתונים (טופל) – התזכורת נסגרת לבד ולא חוזרת
+const RESOLVE = ['task', 'backup', 'fact', 'inv']; // נעלם מהנתונים (טופל) – התזכורת נסגרת לבד ולא חוזרת
 const FIN_RESOLVE = ['invDue', 'chk']; // תיקון סבב 1: נסגרת רק כשהחשבונית/הצ'ק באמת נעלמו ממראה תקין – לא כשאין מראה ולא בגלל חלון זמן
 
 // ---------- תוכן התראת הטלפון: כללי בלבד ----------
@@ -72,7 +72,8 @@ async function managersOf(db, cfg) {
     const me = cfg.mgr[d.id] && typeof cfg.mgr[d.id] === 'object' ? cfg.mgr[d.id] : {};
     if (me.cv !== C.CONSENT_VER) continue;
     if (cfg.mode === 'main' && cfg.mainUid !== d.id) continue;
-    out.push({ uid: d.id, br: Array.isArray(d.get('br')), me, nt: R.ntOf(me) });
+    const brs = Array.isArray(d.get('br')) ? d.get('br').filter((b) => typeof b === 'string') : null; // שלב 8: הסניפים עצמם (לתזכורת החשבוניות)
+    out.push({ uid: d.id, br: !!brs, brs, me, nt: R.ntOf(me) });
   }
   return { list: out, ids: new Set(s.docs.map((d) => d.id)) };
 }
@@ -94,7 +95,10 @@ async function addNote(db, m, n, now, autoDay) {
   let pushAt = R.pushAtOf(at, m.nt.q);
   if (autoDay && !K.bizDay(R.il(pushAt).day)) pushAt = R.pushAtOf(R.nextBizMorning(pushAt), m.nt.q);
   const rep = n.k === 'rem' && !R.NO_REPEAT.includes(n.typ) ? m.nt.reps : 0;
-  const doc = { k: n.k, typ: n.typ || '', key: n.key.slice(0, 300), title: n.title.slice(0, 120), body: String(n.body || '').slice(0, 2000), t: now, at, pend: true, pushAt, n: 1, rep, st: 'open', seen: false };
+  // שלב 8: תזכורת עם מועד אחרון (חלון 24 השעות) – אם בגלל שעות שקטות התראת הטלפון תצא רק אחרי המועד, היא לא נשלחת (נשארת באפליקציה)
+  const late = Number.isFinite(n.until) && pushAt >= n.until;
+  const doc = { k: n.k, typ: n.typ || '', key: n.key.slice(0, 300), title: n.title.slice(0, 120), body: String(n.body || '').slice(0, 2000), t: now, at, pend: !late, pushAt, n: 1, rep, st: 'open', seen: false };
+  if (Number.isFinite(n.until)) doc.until = n.until;
   if (rep > 0) doc.nextAt = R.nextBizMorning(at);
   if (n.ref) doc.ref = n.ref;
   if (n.item) doc.item = String(n.item).slice(0, 300);
@@ -142,6 +146,28 @@ async function remindBiz(opts) {
     }
   }
 
+  // 1ב. שלב 8 (7.3): הודעת ווצאפ שלא נענתה ועומד להיסגר חלון 24 השעות – שעתיים לפני הסוף. בכל ריצה (כל 15 דקות), רק ביום עסקים (7.4;
+  // ביום שאינו יום עסקים אין טעם לדחות – החלון כבר ייסגר עד הבוקר). תזכורת שההודעה שלה נענתה בינתיים – נסגרת
+  if (biz && mgrs.some((m) => m.nt.rt.win)) {
+    const W = require('./lib/sec-wa');
+    const s = await db.collection('sec_snd').where('lastIn', '>', now - R.WIN_MS).where('lastIn', '<=', now - R.WIN_MS + R.WIN_LEAD).limit(300).get();
+    for (const d of s.docs) {
+      const x = d.data();
+      if (x.mgr === true || typeof x.lastId !== 'string' || !x.lastId) continue;
+      const ms = await db.doc('sec_in/' + x.lastId).get();
+      const c = R.winCand(Object.assign({ wa: d.id }, x), ms.exists ? Object.assign({ id: ms.id }, ms.data()) : null, now, W.waShow);
+      if (!c) continue;
+      for (const m of mgrs) if (m.nt.rt.win && (await addNote(db, m, Object.assign({ k: 'rem' }, c), now, false))) out.notes++;
+    }
+  }
+  for (const m of mgrs) {
+    const open = await db.collection(`sec_note/${m.uid}/n`).where('typ', '==', 'win').where('st', '==', 'open').limit(200).get();
+    for (const d of open.docs) {
+      const ms = await db.doc('sec_in/' + String(d.get('item') || '').replace(/^win:/, '')).get();
+      if (!ms.exists || !R.winOpen(ms.data())) { await d.ref.update({ st: 'gone', pend: false }); out.gone++; }
+    }
+  }
+
   // 2. התראה מיידית על עובד (61) – רק כשמתג ניתוח העובדים פעיל. הפרש מזומן בסגירת קופה של עובד (לא של מנהל)
   if (cfg.emp === true) {
     const since = Number.isFinite(ck.empT) ? ck.empT : now - 2 * 3600e3;
@@ -181,9 +207,12 @@ async function remindBiz(opts) {
     if (need('task')) { const [tk, ns] = await Promise.all([tasksGet(), db.collection('staff').limit(300).get()]); const names = {}; ns.docs.forEach((x) => { names[x.id] = String(x.get('name') || '').slice(0, 40); }); base.push(...R.taskCands(tk, names, now, today)); }
     if (need('close')) base.push(...R.closeCands(await closGet(), today));
     if (need('backup')) base.push(...R.backupCands((await db.collection('app_backup_status').limit(100).get()).docs.map((x) => Object.assign({ id: x.id }, x.data())), now, today));
+    // שלב 8 (7.3): חשבוניות שהתקבלו ומחכות – לכל מנהל לפי הסניפים שלו (כמו ב-secInv)
+    const invL = mgrs.some((m) => m.nt.rt.inv) ? (await db.collection('sec_inv').where('st', 'in', R.INV_WAIT).limit(300).get()).docs.map((x) => x.data()) : [];
     if (need('fact')) base.push(...R.factCands((await db.collection('sec_facts').limit(K.FACTS_MAX + K.PROP_MAX + 50).get()).docs.map((x) => Object.assign({ id: x.id }, x.data())), today));
     for (const m of mgrs) {
       const mine = base.filter((c) => m.nt.rt[c.typ] && (!m.br || c.typ === 'fact')); // מנהל עם הגבלת סניפים – בלי נתוני כל העסק (כמו בצ'אט)
+      if (m.nt.rt.inv) mine.push(...R.invCands(invL, today, m.brs));
       for (const c of mine) if (await addNote(db, m, Object.assign({ k: 'rem' }, c), now, true)) out.notes++;
       // מה שנעלם מהנתונים (שולם/נפרע/טופל) – נסגר ולא חוזר
       const keys = new Set(mine.map((c) => c.key));

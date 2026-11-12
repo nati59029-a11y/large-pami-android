@@ -39,7 +39,10 @@ function magicBad(buf) {
 }
 // PDF: שם בקידוד #xx (למשל /J#61vaScript) – מפוענח לפני החיפוש (תיקון 1, ליקוי 3)
 const decNames = (t) => t.replace(/\/[^\s\/\[\]<>(){}%]+/g, (m) => (m.includes('#') ? m.replace(/#([0-9A-Fa-f]{2})/g, (z, h) => String.fromCharCode(parseInt(h, 16))) : m));
-const ACTIVE_RE = /\/(JavaScript|JS|Launch|EmbeddedFile|RichMedia|XFA)(?![A-Za-z0-9])/;
+// שלב 8: גם קובץ מוטמע שמסומן רק במפתח /EF (ה-/Type של זרם הקובץ אינו חובה), עץ /EmbeddedFiles, מעבר לקובץ מוטמע (/GoToE) וייבוא נתונים (/ImportData)
+const ACTIVE_RE = /\/(JavaScript|JS|Launch|EmbeddedFiles?|EF|GoToE|ImportData|RichMedia|XFA)(?![A-Za-z0-9])/;
+// מילת stream: קוראי PDF מקבלים גם רווחים לפני סוף השורה ("stream \r\n") – שלב 8: נבדק גם כך, אחרת אוסף דחוס כזה לא היה נבדק
+const STREAM_HEAD = /^stream[ \t\f\x00]*(\r\n|\n|\r)/;
 const OBJSTM_MAX = 200, INFLATE_MAX = 30 * 1024 * 1024;
 // המילון שסביב מיקום i (איזון << >>) – כדי לקרוא /Count של עץ העמודים ולא של משהו אחר
 function dictAt(t, i) {
@@ -82,7 +85,8 @@ function streamDicts(s) {
     if (c === '>' && s[i + 1] === '>') { if (depth > 0) { depth--; if (depth === 0 && dStart >= 0) last = s.slice(dStart, i + 2); } i += 2; continue; }
     if (c === '<') { const e = s.indexOf('>', i); if (e < 0) return null; i = e + 1; continue; }
     if (depth === 0 && c === 's' && s.startsWith('stream', i) && !/[A-Za-z0-9]/.test(s[i - 1] || ' ')) {
-      const m = /^stream(\r\n|\n|\r)/.exec(s.slice(i, i + 8));
+      const m = STREAM_HEAD.exec(s.slice(i, i + 64));
+      if (!m && last && !/[A-Za-z0-9]/.test(s[i + 6] || ' ')) return null; // מילת stream אחרי מילון בלי סוף שורה – לא ניתן לבדוק (שלב 8)
       if (m) {
         const a = i + m[0].length;
         let e = -1;
@@ -120,7 +124,7 @@ function objStreams(buf, s) {
   const hdr = /\d+\s+\d+\s+obj(?![A-Za-z])/g;
   let hNext = hdr.exec(s), h = -1; // מצביע שמתקדם רק קדימה – זמן ליניארי
   let prevEnd = 0; // המילון של זרם מתחיל אחרי סוף הזרם הקודם – כל תו נבדק פעם אחת
-  const re = /stream(\r\n|\n|\r)/g;
+  const re = /stream[ \t\f\x00]*(\r\n|\n|\r)/g; // שלב 8: כמו STREAM_HEAD
   let m;
   while ((m = re.exec(s))) {
     if (s.slice(Math.max(0, m.index - 3), m.index) === 'end') continue;

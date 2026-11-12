@@ -47,8 +47,11 @@ const TYPES = Object.freeze({
   fact: { l: 'עובדה במידע על העסק שפגה', on: false },
   cal: { l: 'אירועים ותזכורות מהיומן', on: true },
   emp: { l: 'התראה מיידית על עובד', on: true },
+  inv: { l: 'חשבוניות שהתקבלו ומחכות', on: true },          // שלב 8 (7.3): sec_inv – פעם ביום אם יש
+  win: { l: 'הודעה שלא נענתה – חלון 24 השעות נסגר', on: true }, // שלב 8 (7.3): sec_in – שעתיים לפני סוף החלון
 });
-const NO_REPEAT = ['task', 'emp']; // משימות – הודעה מקובצת אחת ביום (7.3), כך שחזרה מיותרת; התראה על עובד – פעם אחת
+// משימות וחשבוניות שמחכות – הודעה מקובצת אחת ביום (7.3), כך שחזרה מיותרת; התראה על עובד וחלון 24 השעות – פעם אחת (אחרי החלון אין למה לחזור)
+const NO_REPEAT = ['task', 'emp', 'inv', 'win'];
 const DEF = Object.freeze({ wd: 0, wh: 8, md: 0, mh: 8, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3 });
 function ntOf(me) {
   const x = me && me.nt && typeof me.nt === 'object' ? me.nt : {};
@@ -173,6 +176,36 @@ function factCands(facts, today) {
     .map((f) => ({ typ: 'fact', key: 'fact:' + f.id + ':' + f.exp, title: 'עובדה במידע על העסק פגה', body: '"' + String(f.text || '').slice(0, 120) + '" – בתוקף עד ' + f.exp + '. כדאי לעדכן או למחוק.', fire: bizOnOrAfter(f.exp) }))
     .filter((c) => c.fire <= today);
 }
+// ---------- שלב 8: חשבוניות שהתקבלו ומחכות (sec_inv, 7.3 – "פעם ביום אם יש") ----------
+// items: רשומות sec_inv במצב 'new' (ממתינות לאישור המנהל). brs: מערך סניפים של מנהל עם הגבלת סניפים (null = כל העסק) – רואה רק את הסניפים שלו, כמו ב-secInv.
+const INV_WAIT = ['new'];
+function invCands(items, today, brs) {
+  const L = (items || []).filter((x) => x && INV_WAIT.includes(x.st) && (!brs || (typeof x.br === 'string' && !!x.br && brs.includes(x.br))));
+  if (!L.length) return [];
+  const old = L.reduce((a, x) => Math.min(a, Number(x.t) || Infinity), Infinity);
+  const nm = (x) => String((x.f && x.f.supplier) || x.subN || '').slice(0, 40);
+  const lines = L.slice(0, 5).map((x) => '• ' + (nm(x) || 'שולח לא מזוהה') + (x.f && typeof x.f.total === 'number' ? ' – ' + ils(x.f.total) : ''));
+  return [{ typ: 'inv', key: 'inv:' + today, title: L.length === 1 ? 'חשבונית אחת מחכה לאישור' : L.length + ' חשבוניות מחכות לאישור',
+    body: lines.join('\n') + (L.length > 5 ? '\nועוד ' + (L.length - 5) + '.' : '') + (Number.isFinite(old) ? '\nהוותיקה התקבלה ב-' + il(old).day + '.' : '') + '\nבלשונית "חשבוניות" של המזכירה.', fire: today }];
+}
+// ---------- שלב 8: הודעה שלא נענתה ועומד להיסגר חלון 24 השעות (sec_in, 7.3 – "שעתיים לפני סוף החלון") ----------
+// החלון של Meta נמדד מההודעה האחרונה של הפונה (sec_snd.lastIn). תזכורת אחת לכל הודעה אחרונה, כשנשארו שעתיים או פחות (ועדיין לא נסגר).
+// "לא נענתה" = ההודעה האחרונה של הפונה (sec_snd.lastId) שייכת למזכירה (own:'sec') ולא סומנה "נענתה" (replied) או "טופלה" (handled).
+const WIN_MS = 24 * 3600e3, WIN_LEAD = 2 * 3600e3;
+const ANSWERED = ['replied', 'handled', 'ord'];
+const winOpen = (m) => !!m && m.own === 'sec' && (m.ch || 'wa') === 'wa' && !ANSWERED.includes(m.st);
+// snd: כרטיס השולח; msg: sec_in של lastId (id במפתח). מחזיר מועמד או null
+function winCand(snd, msg, now, show) {
+  if (!snd || snd.mgr === true || !Number.isFinite(snd.lastIn) || !msg || !winOpen(msg)) return null;
+  const end = snd.lastIn + WIN_MS;
+  if (now < end - WIN_LEAD || now >= end) return null;
+  const hm = il(end).hm;
+  const who = (show || String)(snd.wa) + (snd.name ? ' (' + String(snd.name).slice(0, 40) + ')' : '');
+  const txt = msg.type === 'audio' ? 'הודעה קולית' : msg.type === 'other' ? 'קובץ' : '"' + String(msg.text || '').slice(0, 80) + '"';
+  return { typ: 'win', key: 'win:' + snd.wa + ':' + snd.lastIn, item: 'win:' + msg.id, title: 'הודעה שלא נענתה – החלון נסגר ב-' + hm,
+    body: 'מ-' + who + ': ' + txt + '\nאחרי ' + hm + ' אפשר לענות רק בתבנית מאושרת (חלון 24 השעות של ווצאפ).', until: end };
+}
+
 // יומן (sec_cal): תזכורת שהמנהל קבע (rem) – בשעה שקבע (בלי שעה: 08:00); אירוע – שעה לפני (בלי שעה: 08:00).
 // ביום שאינו יום עסקים: אם המנהל בחר "להשאיר" (keepOff, 75) – בזמנה; אחרת – ביום העסקים הבא בבוקר (7.4)
 function calAt(e) {
@@ -262,5 +295,5 @@ function buildReport(o) {
 
 module.exports = {
   TZ, MORNING, TYPES, NO_REPEAT, DEF, EMP_MIN, il, ilMs, wdOf, bizOnOrAfter, prevBizDay, nextBizMorning, ntOf, readNt, wkWarn, inQuiet, pushAtOf,
-  cashDiff, finItems, notRej, monthlyOf, finCands, taskCands, closeCands, backupCands, factCands, calAt, weeklyDue, monthlyDue, buildReport, ils, prevMon,
+  cashDiff, finItems, notRej, monthlyOf, finCands, invCands, winCand, winOpen, WIN_MS, WIN_LEAD, INV_WAIT, taskCands, closeCands, backupCands, factCands, calAt, weeklyDue, monthlyDue, buildReport, ils, prevMon,
 };
