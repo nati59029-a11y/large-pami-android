@@ -55,7 +55,7 @@ function mailCfgOf(snap) {
   const boxes = {};
   for (const [k, v] of Object.entries(d.boxes && typeof d.boxes === 'object' ? d.boxes : {})) {
     if (!/^gm[0-9a-f]{16}$/.test(k) || !v || typeof v !== 'object' || typeof v.addr !== 'string') continue;
-    boxes[k] = { addr: v.addr, st: v.st === 'expired' ? 'expired' : 'ok', at: Number(v.at) || 0, by: typeof v.by === 'string' ? v.by : '', scopes: Array.isArray(v.scopes) ? v.scopes : [], clean: v.clean === true, hist: typeof v.hist === 'string' ? v.hist : '', watchExp: Number(v.watchExp) || 0, lag: v.lag === true };
+    boxes[k] = { addr: v.addr, st: v.st === 'expired' ? 'expired' : 'ok', at: Number(v.at) || 0, by: typeof v.by === 'string' ? v.by : '', scopes: Array.isArray(v.scopes) ? v.scopes : [], clean: v.clean === true, hist: typeof v.hist === 'string' ? v.hist : '', watchExp: Number(v.watchExp) || 0, lag: v.lag === true, fail: v.fail && typeof v.fail === 'object' && typeof v.fail.g === 'string' ? { g: v.fail.g, n: Number(v.fail.n) || 0 } : null };
   }
   return { max: Number.isInteger(d.max) && d.max >= 0 && d.max <= G.MAX_BOX_LIMIT ? d.max : G.MAX_BOX_DEFAULT, boxes };
 }
@@ -145,13 +145,24 @@ async function secGoogle(request) {
   return Object.assign({ ok: true }, await syncOne(db, who.uid, {}));
 }
 
-// האם אותו חשבון Google משמש עוד חיבור (תיבה – בכל עסק, לפי טבלת הניתוב; יומן – בעסק הזה). skip – החיבור שמנתקים עכשיו.
+// האם אותו חשבון Google משמש עוד חיבור (תיבה – בכל עסק, לפי טבלת הניתוב; יומן – בכל העסקים, גם אם המזכירה כבויה שם). skip – החיבור שמנתקים עכשיו.
 // הנחה ב': ביטול אסימון אצל Google (revoke) אולי מבטל את כל ההרשאות של החשבון לאפליקציה (לא מאומת) – לכן מבטלים רק כשאין שימוש נוסף, ואחרת רק מוחקים אצלנו
 async function acctInUse(db, bizId, addr, skip) {
   if (!addr) return false;
-  const [rs, gs] = await Promise.all([getFirestore().doc('sec_mailroute/' + addr).get(), db.doc('sec_cfg/gcal').get()]);
+  const rs = await getFirestore().doc('sec_mailroute/' + addr).get();
   if (rs.exists && !(skip.box && rs.get('biz') === bizId && rs.get('box') === skip.box)) return true;
-  return Object.entries(gcalOf(gs).u).some(([uid, v]) => v.addr === addr && uid !== skip.cal);
+  // יומנים: העסק הזה (חוץ מהיומן שמנתקים) + כל שאר העסקים (b/{id}/sec_cfg/gcal, ושורש המאגר – לארג' פעמי במצב legacy). קריאה רק בניתוק / ביטול חיבור
+  const mine = db.doc('sec_cfg/gcal');
+  const ids = (await getFirestore().collection('b').select().get()).docs.map((d) => d.id);
+  const refs = [mine, getFirestore().doc('sec_cfg/gcal'), ...ids.map((id) => getFirestore().doc('b/' + id + '/sec_cfg/gcal'))];
+  const seen = new Set();
+  for (const s of await getFirestore().getAll(...refs)) {
+    if (seen.has(s.ref.path)) continue;
+    seen.add(s.ref.path);
+    const own = s.ref.path === mine.path;
+    if (Object.entries(gcalOf(s).u).some(([uid, v]) => v.addr === addr && !(own && uid === skip.cal))) return true;
+  }
+  return false;
 }
 async function revokeUnused(db, bizId, addr, skip, token) {
   if (await acctInUse(db, bizId, addr, skip).catch(() => true)) return 'shared';
@@ -444,10 +455,18 @@ async function ingestBox(boxId, addr, o) {
   ids.forEach((g, k) => { if (ex[k].exists) { done.add(g); out.dup++; } else if (todo.length < G.RUN_MAX) todo.push(g); });
   const cap = await dayIn(db, boxId, todo.length, now);
   const ctx = { boxId, addr, mgrMails: await mgrMailsOf(db) };
-  let err = false;
+  let err = false, fail = null;
   for (const gid of todo.slice(0, cap.ok)) {
     let r;
-    try { r = await saveMail(db, c, ctx, gid, now, {}); } catch (e) { err = true; logger.warn('secretary-google: mail fetch failed', { reason: (e && e.details && e.details.reason) || 'error' }); break; } // תקלה זמנית – נקודת ההמשך לא עוברת את המייל הזה
+    try { r = await saveMail(db, c, ctx, gid, now, {}); } catch (e) {
+      logger.warn('secretary-google: mail fetch failed', { reason: (e && e.details && e.details.reason) || 'error' });
+      // תקלה – נקודת ההמשך לא עוברת את המייל הזה. אותו מייל נכשל MAIL_TRIES פעמים – מדלגים עליו (נרשם ומתריעים), כדי שלא יתקע את כל מה שאחריו
+      const n = (bx.fail && bx.fail.g === gid ? bx.fail.n : 0) + 1;
+      if (n >= MAIL_TRIES) { await mailFailNote(db, 'skip', boxId, addr, gid, now); done.add(gid); out.skip = (out.skip || 0) + 1; continue; }
+      fail = { g: gid, n }; err = true;
+      if (n === 1) await mailFailNote(db, 'err', boxId, addr, gid, now);
+      break;
+    }
     done.add(gid);
     if (r === 'saved' || r === 'sus') out.saved++;
     if (r === 'sus') out.sus++;
@@ -461,7 +480,7 @@ async function ingestBox(boxId, addr, o) {
   const lag = !gone && !(all && !more);
   out.over = ids.filter((g) => !done.has(g)).length;
   if (unusedReserve(cap.ok, todo, done)) await dayIn(db, boxId, -unusedReserve(cap.ok, todo, done), now).catch(() => {});
-  await cref.set({ boxes: { [boxId]: { hist, lag } } }, { merge: true });
+  await cref.set({ boxes: { [boxId]: { hist, lag, fail: fail || FieldValue.delete() } } }, { merge: true });
   if (out.saved || out.dup) await db.collection('sec_log').doc().set(glog('', 'auto', 'mailIn', { tgt: boxId, note: out.saved + '/' + out.dup + '/' + out.sus }));
   if (lag && (out.over > 0 || more) && (!bx.lag || out.saved || cap.first)) await db.collection('sec_log').doc().set(glog('', 'auto', 'mailOver', { tgt: boxId, note: String(out.over) + (more ? '+' : '') + (err ? ':err' : '') }));
   if (cap.first) await WA.notifyMgrs(db, 'mailover|' + boxId + '|' + dayKey(now), 'יותר מדי מיילים היום', 'הגיעו יותר מ-' + G.DAY_IN_MAX + ' מיילים היום לתיבה ' + addr + '. המיילים הנוספים ייקלטו למזכירה מחר, בהדרגה (הם נמצאים ב-Gmail).', now).catch(() => {});
@@ -471,6 +490,18 @@ async function ingestBox(boxId, addr, o) {
     await WA.notifyMgrs(db, 'mailgap|' + boxId + '|' + dayKey(now), 'ייתכן שחלק מהמיילים לא נקלטו', 'הקליטה מהתיבה ' + addr + ' הייתה מופסקת זמן רב, ו-Gmail כבר לא מחזיר את רשימת השינויים מאז. מיילים מהתקופה הזו נמצאים ב-Gmail; מנהל המערכת יכול להשלים אותם בסריקת היסטוריה.', now).catch(() => {});
   }
   return Object.assign(out, { lag });
+}
+// מייל שנכשל בשליפה: בפעם הראשונה – התראה שיש תקלה; אחרי MAIL_TRIES ניסיונות – מדלגים (המייל נשאר ב-Gmail), נרשם ביומן ומתריעים. התראה אחת לכל מייל
+const MAIL_TRIES = 3;
+async function mailFailNote(db, kind, boxId, addr, gid, now) {
+  const g = String(gid).slice(0, 64);
+  if (kind === 'skip') {
+    await db.collection('sec_log').doc().set(glog('', 'auto', 'mailSkip', { tgt: boxId, note: g }));
+    await WA.notifyMgrs(db, 'mailskip|' + boxId + '|' + g, 'מייל אחד לא נקלט', 'מייל אחד בתיבה ' + addr + ' לא נקלט למזכירה אחרי ' + MAIL_TRIES + ' ניסיונות (Google החזירה שגיאה). המייל נמצא ב-Gmail, ושאר המיילים ממשיכים להיקלט.', now).catch(() => {});
+  } else {
+    await db.collection('sec_log').doc().set(glog('', 'auto', 'mailErr', { tgt: boxId, note: g }));
+    await WA.notifyMgrs(db, 'mailerr|' + boxId + '|' + g, 'תקלה בקליטת מייל', 'שליפת מייל מהתיבה ' + addr + ' נכשלה (תקלה מול Google). המזכירה תנסה שוב בעוד כ-15 דקות; אם זה יחזור ' + MAIL_TRIES + ' פעמים – המייל ידולג וזה יופיע כאן.', now).catch(() => {});
+  }
 }
 // מקום שנשמר במונה היומי ולא נוצל (תקלה באמצע) – מוחזר
 function unusedReserve(ok, todo, done) { return Math.max(0, ok - todo.slice(0, ok).filter((g) => done.has(g)).length); }
@@ -871,7 +902,12 @@ async function histStep(db, bizId, max, now) {
         j = await c.list((job.q ? job.q + ' ' : '') + '-in:spam', bj.pg, HIST_PAGE);
         for (const x of (Array.isArray(j.messages) ? j.messages : []).slice(0, HIST_PAGE)) {
           if (!x || typeof x.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(x.id)) continue;
-          const r = await saveMail(db, c, ctx, x.id, now, { hist: true });
+          let r;
+          try { r = await saveMail(db, c, ctx, x.id, now, { hist: true }); } catch (e) {
+            const fn = (bj.fail && bj.fail.g === x.id ? Number(bj.fail.n) || 0 : 0) + 1; // אותו מייל נכשל MAIL_TRIES פעמים – מדלגים, כדי שהעמוד לא ייתקע
+            if (fn < MAIL_TRIES) { bj.fail = { g: x.id, n: fn }; await ref.update({ ['boxes.' + id + '.fail']: bj.fail }); if (fn === 1) await mailFailNote(db, 'err', id, bx.addr, x.id, now); throw e; }
+            bj.fail = null; await mailFailNote(db, 'skip', id, bx.addr, x.id, now); continue;
+          }
           if (r === 'saved' || r === 'sus') k++; else if (r === 'dup') kd++;
         }
       } catch (e) { // תקלה זמנית – העמוד ייקלט שוב בריצה הבאה (מה שכבר נשמר – לא ייכפל)
@@ -1059,7 +1095,7 @@ exports.secMailSend = onCall({ secrets: SECRETS }, wrap('secMailSend', secMailSe
 exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdminMail));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
+  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },
 } });

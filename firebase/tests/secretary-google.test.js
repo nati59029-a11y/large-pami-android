@@ -1041,3 +1041,59 @@ describe('תיקון 1: סריקת היסטוריה – המיילים מהטו�
     assert.ok((await coll(`b/${A}/audit`)).some((a) => a.note === 'hist=stop'));
   });
 });
+
+describe('תיקון סבב 2: מייל שנכשל קבוע לא תוקע את הקליטה; ניתוק יומן כשאותו חשבון מחובר בעסק אחר', () => {
+  beforeEach(() => seed());
+  const inA = async () => (await coll(`b/${A}/sec_in`)).filter((x) => x.ch === 'mail');
+  const notes = async (u) => coll(`b/${A}/sec_note/${u}/n`);
+
+  it('קליטה חיה: מייל שנכשל (לא 404) – התראה על תקלה; אחרי 3 ניסיונות מדלגים עליו, נרשם ביומן ומתריעים, והשאר נקלטים', async () => {
+    await connect(M1, 'mail', { email: BOX_A });
+    const ids = []; for (let i = 0; i < 4; i++) ids.push(GO.addMail(BOX_A, { subject: 'ק ' + i, text: 'x' }));
+    GO.state.mode['/gmail/v1/users/me/messages/' + ids[1]] = 'fail'; // שגיאה קבועה (500) רק במייל הזה
+    const r1 = await CORE.mailHook(GO.note(BOX_A));
+    assert.equal(r1.saved, 1); assert.equal(r1.lag, true);
+    assert.ok((await notes(M1)).some((n) => /תקלה בקליטת מייל/.test(n.title)), 'התראה במצב תקלה');
+    assert.ok((await logs(A)).some((l) => l.act === 'mailErr'));
+    await CORE.syncAll(); // ניסיון 2 – עדיין תקוע
+    assert.equal((await inA()).length, 1);
+    await CORE.syncAll(); // ניסיון 3 – מדלגים
+    assert.deepEqual((await inA()).map((x) => x.subj).sort(), ['ק 0', 'ק 2', 'ק 3']);
+    const b = (await get(`b/${A}/sec_cfg/mail`)).boxes[G.boxIdOf(BOX_A)];
+    assert.equal(b.lag, false); assert.equal(b.fail, undefined); assert.equal(b.hist, String(GO.box(BOX_A).hist));
+    assert.ok((await logs(A)).some((l) => l.act === 'mailSkip' && l.note === ids[1]));
+    assert.ok((await notes(M2)).some((n) => /מייל אחד לא נקלט/.test(n.title)), 'התראה לכל המנהלים על הדילוג');
+    GO.addMail(BOX_A, { subject: 'אחרי', text: 'x' });
+    assert.equal((await CORE.mailHook(GO.note(BOX_A))).saved, 1, 'הקליטה ממשיכה כרגיל');
+  });
+
+  it('סריקת היסטוריה: מייל שנכשל קבוע – אחרי 3 ניסיונות מדלגים עליו והקליטה מסתיימת', async () => {
+    await connect(M1, 'mail', { email: BOX_A });
+    const ids = []; for (let i = 0; i < 10; i++) ids.push(GO.addMail(BOX_A, { subject: 'ה ' + i, text: 'x', date: Date.now() - (5 + i) * 864e5 }));
+    const cfg = await get(`b/${A}/sec_cfg/mail`); cfg.boxes[G.boxIdOf(BOX_A)].hist = String(GO.box(BOX_A).hist); await put(`b/${A}/sec_cfg/mail`, cfg);
+    GO.state.mode['/gmail/v1/users/me/messages/' + ids[4]] = 'fail';
+    const c = await call('secAdminMail', SUPER, { bizId: A, op: 'count', range: 'all' });
+    assert.ok((await call('secAdminMail', SUPER, { bizId: A, op: 'run', range: 'all', confirm: c.r.count.n })).ok);
+    assert.equal((await get(`b/${A}/sec_cfg/mail_hist`)).st, 'run');
+    assert.ok((await notes(M1)).some((n) => /תקלה בקליטת מייל/.test(n.title)));
+    await CORE.syncAll(); await CORE.syncAll();
+    const j = await get(`b/${A}/sec_cfg/mail_hist`);
+    assert.equal(j.st, 'done');
+    assert.equal((await inA()).length, 9, '9 מתוך 10 – רק המייל הפגום דולג');
+    assert.ok((await logs(A)).some((l) => l.act === 'mailSkip' && l.note === ids[4]));
+  });
+
+  it('ניתוק יומן: אותו חשבון Google מחובר כיומן גם בעסק אחר – לא מבטלים אצל Google; בניתוק האחרון – מבטלים', async () => {
+    const SAME = 'shared@gmail.example';
+    assert.equal((await connect(MB, 'cal', { email: SAME })).res.code, 200);
+    assert.equal((await connect(M1, 'cal', { email: SAME })).res.code, 200);
+    const n0 = GO.state.revoked.length;
+    const d1 = await call('secGoogle', M1, { op: 'disconnect', kind: 'cal' });
+    assert.ok(d1.ok, d1.msg); assert.equal(d1.r.revoked, false); assert.equal(d1.r.shared, true);
+    assert.equal(GO.state.revoked.length, n0);
+    assert.ok((await call('secGoogle', MB, { op: 'calSync' })).ok, 'היומן בעסק השני ממשיך לעבוד');
+    const d2 = await call('secGoogle', MB, { op: 'disconnect', kind: 'cal' });
+    assert.equal(d2.r.revoked, true);
+    assert.equal(GO.state.revoked.length, n0 + 1);
+  });
+});
