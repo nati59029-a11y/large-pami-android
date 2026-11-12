@@ -673,6 +673,27 @@ describe('תיקון 2 – בדיקת PDF: "obj" שמוסתר במילון לא 
   });
 });
 
+describe('תיקון 3 – בדיקת PDF: מסנן עקיף נחסם, וזמן הבדיקה ליניארי', () => {
+  it('/Filter עקיף (7 0 R), מערך עם הפניה, ו-/DecodeParms עקיף – "לא ניתן לבדוק"', () => {
+    for (const f of ['7 0 R', '[7 0 R]', '[/FlateDecode 7 0 R]', '/FlateDecode /DecodeParms 8 0 R']) {
+      const b = Buffer.from(pdfObjStm('3 0 <</S /JavaScript>>').toString('latin1').replace('/Filter /FlateDecode', '/Filter ' + f), 'latin1');
+      assert.equal(SI.inspect(b).why, 'unv', f);
+    }
+  });
+  it('קובץ של כ-9MB עם מאות אלפי זרמים (עם ובלי כותרות, ואורכים עקיפים) – נבדק בתוך פחות מ-5 שניות', () => {
+    let p = ['%PDF-1.5\n'], sz = 0, n = 0;
+    while (sz < 6 * 1024 * 1024) { const x = (++n) + ' 0 obj<</Length 3>>stream\nabc\nendstream\nendobj\n'; p.push(x); sz += x.length; }
+    for (let i = 0; i < 60000; i++) p.push('<</Length 3>>stream\nabc\nendstream\n');
+    for (let i = 0; i < 10000; i++) { p.push((n + 1) + ' 0 obj<</Length ' + (n + 2) + ' 0 R>>stream\nabc\nendstream\nendobj\n' + (n + 2) + ' 0 obj 3 endobj\n'); n += 2; }
+    p.push('%%EOF');
+    const b = Buffer.from(p.join(''), 'latin1');
+    assert.ok(b.length < SI.MAX_FILE);
+    const t = Date.now();
+    assert.equal(SI.inspect(b).ok, true);
+    assert.ok(Date.now() - t < 5000, 'זמן: ' + (Date.now() - t));
+  });
+});
+
 describe('תיקון 1 – ליקוי 4: ביטול רק מהמכשיר שהכניס', () => {
   beforeEach(() => seed());
   it('אותו מנהל ממכשיר אחר – "אפשר לבטל רק במכשיר שבו החשבונית נכנסה", בלי שינוי; מהמכשיר שהכניס – בוטל; המזהה מגיע לרשימה', async () => {

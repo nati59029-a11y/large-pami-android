@@ -59,9 +59,13 @@ function dictAt(t, i) {
 function streamDicts(s) {
   const res = [], n = s.length;
   let i = 0, depth = 0, dStart = -1, last = '';
+  let ints = null; // "N G obj <מספר> endobj" – נבנה פעם אחת, רק אם צריך (בלי סריקה של כל הקובץ לכל זרם)
   const lenOf = (d) => {
     let m = /\/Length\s+(\d+)\s+(\d+)\s+R(?![A-Za-z])/.exec(d);
-    if (m) { const r = new RegExp('(?:^|[^0-9])' + m[1] + '\\s+' + m[2] + '\\s+obj\\s*(\\d+)\\s*endobj').exec(s); return r ? Number(r[1]) : -1; }
+    if (m) {
+      if (!ints) { ints = new Map(); const r = /(?:^|[^0-9])(\d+)\s+(\d+)\s+obj\s*(\d+)\s*endobj/g; let x; while ((x = r.exec(s))) if (!ints.has(x[1] + ' ' + x[2])) ints.set(x[1] + ' ' + x[2], Number(x[3])); }
+      const v = ints.get(m[1] + ' ' + m[2]); return v === undefined ? -1 : v;
+    }
     m = /\/Length\s+(\d+)(?![\d\s]*R)/.exec(d);
     return m ? Number(m[1]) : -1;
   };
@@ -96,7 +100,14 @@ function streamDicts(s) {
   return res;
 }
 const isObjStmDict = (d) => /\/Type\s*\/ObjStm(?![A-Za-z])/.test(d) || (/\/N\s+\d/.test(d) && /\/First\s+\d/.test(d));
-const filtersOf = (d) => { const fm = /\/Filter\s*(\/[A-Za-z0-9]+|\[[^\]]*\])/.exec(d); return fm ? (fm[1].match(/\/[A-Za-z0-9]+/g) || []) : null; };
+// /Filter שאינו שם או מערך של שמות בלבד (למשל הפניה עקיפה "7 0 R") – לא ידוע, ולכן נחסם (תיקון 3)
+const filtersOf = (d) => {
+  if (!/\/Filter(?![A-Za-z0-9])/.test(d)) return null;
+  const fm = /\/Filter\s*(\/[A-Za-z0-9]+(?![A-Za-z0-9#])|\[\s*(?:\/[A-Za-z0-9]+\s*)*\])/.exec(d);
+  if (!fm) return ['/?'];
+  const f = fm[1].match(/\/[A-Za-z0-9]+/g) || [];
+  return /\[\s*\]/.test(fm[1]) ? [] : f;
+};
 // אוספי אובייקטים דחוסים (/ObjStm, או כל זרם עם /N ו-/First) – נפרסים (FlateDecode) ונבדקים גם הם. מה שאי אפשר לפרוס – null (חסימה).
 // כל זרם נבדק בשתי דרכים: לפי הקריאה הרציפה (streamDicts) ולפי חיפוש לאחור לכותרת אובייקט "N G obj". אם אחת מהן מזהה אוסף – נבדק;
 // אם הן לא מסכימות על המסנן – חסום
@@ -107,6 +118,8 @@ function objStreams(buf, s) {
   if (!sd) return null;
   const byA = new Map(sd.map((x) => [x.a, x]));
   const hdr = /\d+\s+\d+\s+obj(?![A-Za-z])/g;
+  let hNext = hdr.exec(s), h = -1; // מצביע שמתקדם רק קדימה – זמן ליניארי
+  let prevEnd = 0; // המילון של זרם מתחיל אחרי סוף הזרם הקודם – כל תו נבדק פעם אחת
   const re = /stream(\r\n|\n|\r)/g;
   let m;
   while ((m = re.exec(s))) {
@@ -114,10 +127,9 @@ function objStreams(buf, s) {
     const a = m.index + m[0].length;
     const tok = byA.get(a);
     // כותרת האובייקט האחרונה לפני הזרם (ולא סתם המחרוזת "obj")
-    let h = -1, hm;
-    hdr.lastIndex = Math.max(0, m.index - 20000);
-    while ((hm = hdr.exec(s)) && hm.index < m.index) h = hm.index;
-    const cands = [tok ? tok.dict : '', h >= 0 ? s.slice(h, m.index) : ''].map(decNames).filter(Boolean);
+    while (hNext && hNext.index < m.index) { h = hNext.index; hNext = hdr.exec(s); }
+    const cands = [tok ? tok.dict : '', h >= 0 ? s.slice(Math.max(h, prevEnd, m.index - 20000), m.index) : ''].map(decNames).filter(Boolean);
+    prevEnd = tok ? tok.e : a;
     if (!cands.some(isObjStmDict)) continue;
     if (out.length >= OBJSTM_MAX) return null;
     const fls = cands.map(filtersOf).filter(Boolean).map((f) => f.join(' '));
@@ -127,7 +139,7 @@ function objStreams(buf, s) {
     if (e < 0) return null;
     let raw = buf.subarray(a, e);
     while (raw.length && (raw[raw.length - 1] === 0x0a || raw[raw.length - 1] === 0x0d)) raw = raw.subarray(0, raw.length - 1);
-    const pred = cands.some((d) => /\/Predictor\s+([2-9]|\d\d)/.test(d));
+    const pred = cands.some((d) => /\/Predictor\s+([2-9]|\d\d)/.test(d) || /\/(DecodeParms|DP)\s*(\d|\[[^\]]*\d+\s+\d+\s+R)/.test(d) || /\/Predictor\s+\d+\s+\d+\s+R/.test(d));
     let txt;
     if (!fl.length) txt = raw.toString('latin1');
     else if (fl.length === 1 && ['/FlateDecode', '/Fl'].includes(fl[0]) && !pred) {
