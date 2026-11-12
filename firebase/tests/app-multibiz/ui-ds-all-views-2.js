@@ -17,7 +17,7 @@ const VIEWS = [
   ['sec', "go('sec')"], ['yl', "go('yl')"],
 ];
 const SHOT = new Set(['settings', 'sync', 'fb', 'tk', 'staff', 'sec']);
-const EMO = /[\u{1F000}-\u{1FAFF}☀-➿⬀-⯿❓❗️]/u;
+const EMO = /[\u{1F000}-\u{1FAFF}\u2600-\u2712\u2715-\u27BF⬀-⯿❓❗️]/u;
 const BR = `(() => {
   const P = (s) => { const m = /rgba?\\(([^)]+)\\)/.exec(s); if (!m) return [0, 0, 0, 0]; const a = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return [a[0], a[1], a[2], a.length > 3 ? a[3] : 1]; };
   const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
@@ -50,7 +50,7 @@ const BR = `(() => {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.evaluate((c) => { NAV = [{ v: 'home' }]; try { (0, eval)(c); } catch (e) { window.__openErr = String(e); } }, code); await H.settle(page, 150);
       const r = await page.evaluate(() => ({ ds: document.documentElement.dataset.ds, oe: window.__openErr || '', len: document.getElementById('main').innerText.length, emo: [...document.getElementById('main').innerText.matchAll(/./gu)].length ? document.getElementById('main').innerHTML : '', low: __low() }));
-      r.emo = (r.emo.match(/[\u{1F000}-\u{1FAFF}☀-➿⬀-⯿❓❗️]/gu) || []).join('');
+      r.emo = (r.emo.match(/[\u{1F000}-\u{1FAFF}\u2600-\u2712\u2715-\u27BF⬀-⯿❓❗️]/gu) || []).join('');
       await page.evaluate(() => { window.__openErr = ''; });
       r.hs = {}; for (const w of [360]) { await page.setViewportSize({ width: w, height: 740 }); await H.settle(page, 50); r.hs[w] = await page.evaluate(() => __hs()); }
       r.err = page.__errors.slice(e0).concat(cons.slice(c0));
