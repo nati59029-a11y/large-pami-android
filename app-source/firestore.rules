@@ -335,6 +335,134 @@ service cloud.firestore {
       }
     }
 
+    // ---------- משימות פרטיות (ptk), משימות קבועות (rtk), בקשות למנהל (rq) – 12.11.2026 ----------
+    // ptk: תזכורת אישית. רואים רק הבעלים (owner) והמנהל – גם לא בשאילתה (עובד שולף where owner == uid).
+    // יצירה: צוות פעיל, בשמו, בזמן אמת, פתוחה, יעד בטווח של tasks. עדכון (בעלים או מנהל): רק st/sub/late/txt.
+    // done: sub בזמן אמת (או ללא שינוי כשכבר done), late '' או '1'. open: sub 0, late ''. מחיקה: הבעלים או מנהל.
+    match /ptk/{id} {
+      function nw() { return request.resource.data; }
+      function od() { return resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function mine(d) { return isManager() || (isActiveEmployee() && d.owner == request.auth.uid); }
+      function updOk() {
+        return nw().diff(od()).affectedKeys().hasOnly(['st', 'sub', 'late', 'txt'])
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+          && ((nw().st == 'done' && nw().late in ['', '1'] && (od().st == 'done' ? nw().sub == od().sub : nowOk(nw().sub)))
+            || (nw().st == 'open' && nw().sub == 0 && nw().late == ''));
+      }
+      allow read: if mine(resource.data);
+      allow create: if isStaff()
+        && nw().keys().hasAll(['owner', 'by', 'txt', 'cr', 'due', 'st', 'sub', 'late'])
+        && nw().keys().hasOnly(['owner', 'by', 'txt', 'cr', 'due', 'st', 'sub', 'late'])
+        && nw().owner == request.auth.uid
+        && isMyName(nw().by)
+        && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+        && nw().st == 'open' && nw().sub == 0 && nw().late == ''
+        && nowOk(nw().cr)
+        && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000;
+      allow update: if mine(od()) && updOk();
+      allow delete: if mine(resource.data);
+    }
+
+    // rtk: כללי משימות קבועות – מנהל בלבד (קריאה וכתיבה). עובד – אין גישה. last/n/err – רק השרת (recurringTasks).
+    // fq: 'd' יומי, 'w' שבועי (wd: ימים 0–5), 'm' חודשי (md: 1–31). hh 0–23, mm 0–55 בכפולות 5. ed = זמן העריכה (בזמן אמת בכל כתיבה):
+    // השרת לא פותח משימה למועד שלפני ed, ולכן שמירה/הפעלה לא פותחת משימה "באיחור".
+    // עדכון: רק שדות הכלל (מהאפליקציה – עם updateMask), ו-ed חייב להשתנות. owner/by נשארים, או עוברים למנהל המעדכן בשמו.
+    match /rtk/{id} {
+      function nw() { return request.resource.data; }
+      function od() { return resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function ruleOk() {
+        return nw().keys().hasAll(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'hh', 'mm', 'hol', 'on', 'cr', 'ed'])
+          && nw().keys().hasOnly(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'wd', 'md', 'hh', 'mm', 'hol', 'on', 'cr', 'ed', 'last', 'n', 'err'])
+          && nw().owner is string && nw().by is string && nw().by.size() <= 100
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+          && nw().to is list && nw().to.size() >= 1 && nw().to.size() <= 30
+          && nw().toN is list && nw().toN.size() == nw().to.size()
+          && nw().np is int && nw().np >= 0 && nw().np <= 3
+          && nw().fq in ['d', 'w', 'm']
+          && (nw().fq != 'w' || (nw().get('wd', null) is list && nw().wd.size() >= 1 && nw().wd.size() <= 6 && nw().wd.hasOnly([0, 1, 2, 3, 4, 5])))
+          && (nw().fq != 'm' || (nw().get('md', null) is int && nw().md >= 1 && nw().md <= 31))
+          && nw().hh is int && nw().hh >= 0 && nw().hh <= 23
+          && nw().mm is int && nw().mm >= 0 && nw().mm <= 55 && nw().mm % 5 == 0
+          && nw().hol is bool && nw().on is bool
+          && nw().cr is int && nowOk(nw().ed);
+      }
+      allow read: if isManager();
+      allow create: if isManager() && ruleOk()
+        && nw().owner == request.auth.uid && isMyName(nw().by)
+        && nowOk(nw().cr)
+        && nw().get('last', '') == '' && nw().get('n', 0) == 0 && nw().get('err', '') == '';
+      allow update: if isManager() && ruleOk()
+        && nw().diff(od()).affectedKeys().hasOnly(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'wd', 'md', 'hh', 'mm', 'hol', 'on', 'ed'])
+        && nw().diff(od()).affectedKeys().hasAny(['ed'])
+        && ((nw().owner == od().owner && nw().by == od().by) || (nw().owner == request.auth.uid && isMyName(nw().by)));
+      allow delete: if isManager();
+    }
+
+    // rq: בקשה של עובד למנהל. קריאה (בקשה ותגובות): מנהל, או הבעלים (עובד שולף where owner == uid).
+    // יצירה: צוות פעיל, בשמו, בזמן אמת, st 'new', ans ''. עדכון: מנהל – מצב, תשובה וסימון תגובה;
+    // בעלים – רק סימון תגובה (cAt/cBy/cT/cN) ו-st == 'new' (תגובת עובד מחזירה ל"ממתין"). מחיקה: מנהל.
+    match /rq/{id} {
+      function nw() { return request.resource.data; }
+      function od() { return resource.data; }
+      function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+      function aff() { return nw().diff(od()).affectedKeys(); }
+      // סימון "תגובה חדשה" (כמו commentMark במשימות)
+      function cmOk() {
+        return (!aff().hasAny(['cAt', 'cBy', 'cT', 'cN'])
+            || (nw().get('cBy', '') == request.auth.uid && nowOk(nw().get('cAt', 0))))
+          && (!aff().hasAny(['cT']) || (nw().cT is string && nw().cT.size() <= 120))
+          && (!aff().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN)));
+      }
+      function mgrUpd() {
+        return aff().hasOnly(['st', 'ans', 'aBy', 'aAt', 'cAt', 'cBy', 'cT', 'cN'])
+          && nw().st in ['new', 'done', 'rej']
+          && nw().ans is string && nw().ans.size() <= 500
+          && (!aff().hasAny(['aBy']) || isMyName(nw().aBy))
+          && (!aff().hasAny(['aAt']) || nowOk(nw().aAt))
+          && cmOk();
+      }
+      function ownUpd() {
+        return aff().hasOnly(['cAt', 'cBy', 'cT', 'cN', 'st'])
+          && aff().hasAny(['cAt'])
+          && nw().st == 'new'
+          && cmOk();
+      }
+      allow read: if isManager() || (isActiveEmployee() && resource.data.owner == request.auth.uid);
+      allow create: if isStaff()
+        && nw().keys().hasAll(['owner', 'by', 'txt', 't', 'st', 'ans'])
+        && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans'])
+        && nw().owner == request.auth.uid
+        && isMyName(nw().by)
+        && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 1000
+        && nw().st == 'new' && nw().ans == ''
+        && nowOk(nw().t);
+      allow update: if (isManager() && mgrUpd())
+        || (isActiveEmployee() && od().owner == request.auth.uid && ownUpd());
+      allow delete: if isManager();
+
+      // תגובות: rq/{id}/c/{cid}. מנהל או הבעלים, בשמו, בזמן אמת, בלי עדכון. מחיקה – מנהל.
+      match /c/{cid} {
+        function req() { return get(/databases/$(database)/documents/rq/$(id)).data; }
+        function canRead() {
+          return exists(/databases/$(database)/documents/rq/$(id))
+            && (isManager() || (isActiveEmployee() && req().owner == request.auth.uid));
+        }
+        allow read: if canRead();
+        allow create: if canRead()
+          && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
+          && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
+          && nw().uid == request.auth.uid
+          && nw().by is string && nw().by.size() <= 100
+          && isMyName(nw().by)
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+          && nowOk(nw().t);
+        allow update: if false;
+        allow delete: if isManager();
+      }
+    }
+
     // ---------- חשבוניות ספקים לעובד (supinv) ----------
     // טלפון המנהל משקף לכאן רק חשבוניות "ספקים" ו"ספקים אפייה" של החודש הנוכחי (כולל ממתינות לאישור), בלי שום נתון כספי אחר.
     // קריאה: עובד פעיל או מנהל. כתיבה ומחיקה: מנהל בלבד, ורק השדות שהאפליקציה כותבת (supSync).
@@ -1120,6 +1248,134 @@ service cloud.firestore {
           allow create, update: if feat('tasks') && (imgOk()
             && ((bMgr() && pid.matches('^m[1-5]$')) || (bStaff() && workOk())));
           allow delete: if feat('tasks') && (bMgr() && pid.matches('^(m[1-5]|w[1-3])$'));
+        }
+      }
+
+      // ptk, rtk, rq (+ rq/{id}/c): העתק של הכללים בשורש (תוספת 'tasks'), 12.11.2026
+      // ptk: תזכורת אישית. רואים רק הבעלים (owner) והמנהל – גם לא בשאילתה (עובד שולף where owner == uid).
+      // יצירה: צוות פעיל, בשמו, בזמן אמת, פתוחה, יעד בטווח של tasks. עדכון (בעלים או מנהל): רק st/sub/late/txt.
+      // done: sub בזמן אמת (או ללא שינוי כשכבר done), late '' או '1'. open: sub 0, late ''. מחיקה: הבעלים או מנהל.
+      match /ptk/{id} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function mine(d) { return bMgr() || (bEmp() && d.owner == request.auth.uid); }
+        function updOk() {
+          return nw().diff(od()).affectedKeys().hasOnly(['st', 'sub', 'late', 'txt'])
+            && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+            && ((nw().st == 'done' && nw().late in ['', '1'] && (od().st == 'done' ? nw().sub == od().sub : nowOk(nw().sub)))
+              || (nw().st == 'open' && nw().sub == 0 && nw().late == ''));
+        }
+        allow read: if feat('tasks') && (mine(resource.data));
+        allow create: if feat('tasks') && (bStaff()
+          && nw().keys().hasAll(['owner', 'by', 'txt', 'cr', 'due', 'st', 'sub', 'late'])
+          && nw().keys().hasOnly(['owner', 'by', 'txt', 'cr', 'due', 'st', 'sub', 'late'])
+          && nw().owner == request.auth.uid
+          && isMyName(nw().by)
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+          && nw().st == 'open' && nw().sub == 0 && nw().late == ''
+          && nowOk(nw().cr)
+          && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000);
+        allow update: if feat('tasks') && (mine(od()) && updOk());
+        allow delete: if feat('tasks') && (mine(resource.data));
+      }
+
+      // rtk: כללי משימות קבועות – מנהל בלבד (קריאה וכתיבה). עובד – אין גישה. last/n/err – רק השרת (recurringTasks).
+      // fq: 'd' יומי, 'w' שבועי (wd: ימים 0–5), 'm' חודשי (md: 1–31). hh 0–23, mm 0–55 בכפולות 5. ed = זמן העריכה (בזמן אמת בכל כתיבה):
+      // השרת לא פותח משימה למועד שלפני ed, ולכן שמירה/הפעלה לא פותחת משימה "באיחור".
+      // עדכון: רק שדות הכלל (מהאפליקציה – עם updateMask), ו-ed חייב להשתנות. owner/by נשארים, או עוברים למנהל המעדכן בשמו.
+      match /rtk/{id} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function ruleOk() {
+          return nw().keys().hasAll(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'hh', 'mm', 'hol', 'on', 'cr', 'ed'])
+            && nw().keys().hasOnly(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'wd', 'md', 'hh', 'mm', 'hol', 'on', 'cr', 'ed', 'last', 'n', 'err'])
+            && nw().owner is string && nw().by is string && nw().by.size() <= 100
+            && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+            && nw().to is list && nw().to.size() >= 1 && nw().to.size() <= 30
+            && nw().toN is list && nw().toN.size() == nw().to.size()
+            && nw().np is int && nw().np >= 0 && nw().np <= 3
+            && nw().fq in ['d', 'w', 'm']
+            && (nw().fq != 'w' || (nw().get('wd', null) is list && nw().wd.size() >= 1 && nw().wd.size() <= 6 && nw().wd.hasOnly([0, 1, 2, 3, 4, 5])))
+            && (nw().fq != 'm' || (nw().get('md', null) is int && nw().md >= 1 && nw().md <= 31))
+            && nw().hh is int && nw().hh >= 0 && nw().hh <= 23
+            && nw().mm is int && nw().mm >= 0 && nw().mm <= 55 && nw().mm % 5 == 0
+            && nw().hol is bool && nw().on is bool
+            && nw().cr is int && nowOk(nw().ed);
+        }
+        allow read: if feat('tasks') && (bMgr());
+        allow create: if feat('tasks') && (bMgr() && ruleOk()
+          && nw().owner == request.auth.uid && isMyName(nw().by)
+          && nowOk(nw().cr)
+          && nw().get('last', '') == '' && nw().get('n', 0) == 0 && nw().get('err', '') == '');
+        allow update: if feat('tasks') && (bMgr() && ruleOk()
+          && nw().diff(od()).affectedKeys().hasOnly(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'wd', 'md', 'hh', 'mm', 'hol', 'on', 'ed'])
+          && nw().diff(od()).affectedKeys().hasAny(['ed'])
+          && ((nw().owner == od().owner && nw().by == od().by) || (nw().owner == request.auth.uid && isMyName(nw().by))));
+        allow delete: if feat('tasks') && (bMgr());
+      }
+
+      // rq: בקשה של עובד למנהל. קריאה (בקשה ותגובות): מנהל, או הבעלים (עובד שולף where owner == uid).
+      // יצירה: צוות פעיל, בשמו, בזמן אמת, st 'new', ans ''. עדכון: מנהל – מצב, תשובה וסימון תגובה;
+      // בעלים – רק סימון תגובה (cAt/cBy/cT/cN) ו-st == 'new' (תגובת עובד מחזירה ל"ממתין"). מחיקה: מנהל.
+      match /rq/{id} {
+        function nw() { return request.resource.data; }
+        function od() { return resource.data; }
+        function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+        function aff() { return nw().diff(od()).affectedKeys(); }
+        // סימון "תגובה חדשה" (כמו commentMark במשימות)
+        function cmOk() {
+          return (!aff().hasAny(['cAt', 'cBy', 'cT', 'cN'])
+              || (nw().get('cBy', '') == request.auth.uid && nowOk(nw().get('cAt', 0))))
+            && (!aff().hasAny(['cT']) || (nw().cT is string && nw().cT.size() <= 120))
+            && (!aff().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN)));
+        }
+        function mgrUpd() {
+          return aff().hasOnly(['st', 'ans', 'aBy', 'aAt', 'cAt', 'cBy', 'cT', 'cN'])
+            && nw().st in ['new', 'done', 'rej']
+            && nw().ans is string && nw().ans.size() <= 500
+            && (!aff().hasAny(['aBy']) || isMyName(nw().aBy))
+            && (!aff().hasAny(['aAt']) || nowOk(nw().aAt))
+            && cmOk();
+        }
+        function ownUpd() {
+          return aff().hasOnly(['cAt', 'cBy', 'cT', 'cN', 'st'])
+            && aff().hasAny(['cAt'])
+            && nw().st == 'new'
+            && cmOk();
+        }
+        allow read: if feat('tasks') && (bMgr() || (bEmp() && resource.data.owner == request.auth.uid));
+        allow create: if feat('tasks') && (bStaff()
+          && nw().keys().hasAll(['owner', 'by', 'txt', 't', 'st', 'ans'])
+          && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans'])
+          && nw().owner == request.auth.uid
+          && isMyName(nw().by)
+          && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 1000
+          && nw().st == 'new' && nw().ans == ''
+          && nowOk(nw().t));
+        allow update: if feat('tasks') && ((bMgr() && mgrUpd())
+          || (bEmp() && od().owner == request.auth.uid && ownUpd()));
+        allow delete: if feat('tasks') && (bMgr());
+
+        // תגובות: rq/{id}/c/{cid}. מנהל או הבעלים, בשמו, בזמן אמת, בלי עדכון. מחיקה – מנהל.
+        match /c/{cid} {
+          function req() { return get(/databases/$(database)/documents/b/$(bizId)/rq/$(id)).data; }
+          function canRead() {
+            return exists(/databases/$(database)/documents/b/$(bizId)/rq/$(id))
+              && (bMgr() || (bEmp() && req().owner == request.auth.uid));
+          }
+          allow read: if feat('tasks') && (canRead());
+          allow create: if feat('tasks') && (canRead()
+            && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
+            && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
+            && nw().uid == request.auth.uid
+            && nw().by is string && nw().by.size() <= 100
+            && isMyName(nw().by)
+            && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+            && nowOk(nw().t));
+          allow update: if false;
+          allow delete: if feat('tasks') && (bMgr());
         }
       }
 
