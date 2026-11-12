@@ -69,7 +69,8 @@ async function open(browser, www, calls) {
   calls.length = 0; await page.evaluate(() => ACT.oxSave({ disabled: false })); await H.settle(page, 600);
   check('5 חצי קרטון – נעצר בטופס, לא נשלח לשרת', !calls.some((x) => x.n === 'createOrder'), calls.map((x) => x.n));
   await page.fill('#oxlines input[data-k=qty][data-n="0"]', '2'); await H.settle(page, 200);
-  calls.length = 0; await page.evaluate(() => ACT.oxSave({ disabled: false })); await H.settle(page, 1500);
+  // מ-main (12.11.2026): לפני השמירה נפתח מסך "כרטיס אשראי (לא חובה)"; cdOk = כמו "סיום הזמנה" במסך הזה, כדי לבדוק את השליחה לשרת
+  calls.length = 0; await page.evaluate(() => { __ox.draft.cdOk = true; return ACT.oxSave({ disabled: false }); }); await H.settle(page, 1500);
   const cr = calls.find((x) => x.n === 'createOrder');
   check('6 שמירה: נשלח במארזים – חטיף 12 × 6 (מחיר מארז), לחם 1', cr && cr.d.items[0].pid === 'pC' && cr.d.items[0].qty === 12 && cr.d.items[0].price === 6 && cr.d.items[1].qty === 1 && cr.d.custId === 'cW', cr && cr.d);
   // כרטיס הזמנה ועריכה

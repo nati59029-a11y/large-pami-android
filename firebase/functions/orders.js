@@ -14,6 +14,7 @@
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
 //   private/pay        { link, mode, at, by }                                       – רק השרת (setBusinessPayLink, מנהל־על)
+//   private/payCred    { box, at, by }                                              – 2026-11-12: פרטי כניסה לאתר הסליקה, מוצפנים (CARD.seal, AAD 'private/payCred'). ב-ordcfg/main.pay רק cred:true/false
 //
 // מלאי בין סניפים (החלטת המשתמש 16:39, אפשרות ב): הזמנה בסניף A, שורה שמקורה בסניף B → ב-B יורד (xout), ב-A העברה נכנסת (xin)
 // ומיד יוצאת ללקוח (order). מקור לכל שורה: ordcfg/main.src[A] = 'stock' (העובד בוחר, ברירת מחדל = הסניף שיש בו) או מזהה סניף קבוע.
@@ -28,6 +29,11 @@ const { seedLinePlans } = require('./lib/line-plans-seed');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const LD = require('./lib/line-discount');
 const { profitOf, ilDayStart } = require('./lib/ord-profit'); // 2026-11-12: רווחיות הזמנות
+const { defineSecret } = require('firebase-functions/params');
+const CARD = require('./lib/card');
+// 2026-11-12: אותו סוד כמו ב-customers.js (defineSecret עם אותו שם – פרמטר אחד). פרטי הכניסה לאתר הסליקה מוצפנים בו.
+const CARD_ENC_KEY = defineSecret('CARD_ENC_KEY');
+const PAY_CRED = 'private/payCred';
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -1116,44 +1122,78 @@ async function markOrderCalled(request) {
 // =====================================================================================
 // תשלום: הקישור של העסק (מנהל־על) ופתיחתו מתוך הזמנה
 // =====================================================================================
-// getPayLink({ id }) – מחזיר את קישור הסליקה לפתיחה מיידית (האפליקציה לא מציגה אותו). רק להזמנה שעוד לא שולמה.
+// getPayLink({ id, auto? }) – מחזיר את קישור הסליקה לפתיחה מיידית (האפליקציה לא מציגה אותו). רק להזמנה שעוד לא שולמה.
+// 2026-11-12: auto:true (רק מהאפליקציה, לפתיחה בדפדפן הפנימי) – אם מנהל־העל שמר פרטי כניסה, מוחזרים גם auto:{user,pass} לצורך מילוי.
+// בלי auto – אין שדה auto בתשובה. היומן: note 'auto' בלבד, בלי הערכים.
 async function getPayLink(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id']);
+  onlyKeys(input, ['id', 'auto']);
   const id = idOf(input.id, 'הזמנה');
+  if (input.auto !== undefined && typeof input.auto !== 'boolean') throw bad('bad-field', 'auto: true או false');
   const db = T.tdb();
-  const [s, p] = await Promise.all([db.doc('ord/' + id).get(), db.doc('private/pay').get()]);
+  const [s, p, c] = await Promise.all([db.doc('ord/' + id).get(), db.doc('private/pay').get(), input.auto === true ? db.doc(PAY_CRED).get() : null]);
   ordAccess(w, s.exists ? s.data() : null);
   if (!PAYABLE.includes(s.get('status'))) throw pre('bad-status', 'ההזמנה כבר שולמה או בוטלה');
   const link = p.exists && p.get('mode') === 'link' && typeof p.get('link') === 'string' ? p.get('link') : '';
   if (!link) throw pre('no-pay-link', 'לעסק לא הוגדר קישור תשלום. תשלום בטלפון.');
-  await db.collection(`ord/${id}/log`).add(logData(w, 'payOpen', ''));
-  return { link, total: s.get('total') };
+  let auto = null, note = '';
+  if (c && c.exists && c.get('box')) {
+    // פרטי הכניסה קשורים ל-host של הקישור שאליו נשמרו (בתוך המוצפן). host אחר – בלי auto. כשל פענוח – הקישור בלי auto (לא נכשלים)
+    try {
+      const v = CARD.open(CARD_ENC_KEY.value(), w.bizId, PAY_CRED, c.get('box'));
+      if (v && typeof v.pass === 'string' && v.pass && typeof v.host === 'string' && v.host === new URL(link).hostname.toLowerCase()) auto = { user: typeof v.user === 'string' ? v.user : '', pass: v.pass };
+      note = auto ? 'auto' : 'auto-host';
+    } catch (e) { note = 'auto-fail'; } // בלי פרטי השגיאה
+  }
+  await db.collection(`ord/${id}/log`).add(logData(w, 'payOpen', note));
+  return auto ? { link, total: s.get('total'), auto } : { link, total: s.get('total') };
 }
 
-// setBusinessPayLink({ bizId, mode: 'link'|'phone', link? }) – מנהל־על בלבד. https בלבד, עד 500 תווים.
+// פרטי כניסה לאתר הסליקה: undefined = בלי שינוי, null = מחיקה, { user?, pass } = שמירה. הערכים לא מופיעים בשום הודעת שגיאה.
+const CTRL_RE = /[\u0000-\u001f\u007f]/;
+function credOf(v) {
+  if (v === undefined || v === null) return v;
+  const e = () => bad('bad-cred', 'פרטי כניסה לא תקינים: סיסמה 1 עד 200 תווים, שם משתמש עד 120 תווים, בלי תווים מיוחדים');
+  if (typeof v !== 'object' || Array.isArray(v)) throw e();
+  for (const k of Object.keys(v)) if (!['user', 'pass'].includes(k)) throw e();
+  const user = v.user == null ? '' : v.user;
+  if (typeof user !== 'string' || user.length > 120 || CTRL_RE.test(user)) throw e();
+  if (typeof v.pass !== 'string' || v.pass.length < 1 || v.pass.length > 200 || CTRL_RE.test(v.pass)) throw e();
+  return { user: user.trim(), pass: v.pass };
+}
+
+// setBusinessPayLink({ bizId, mode: 'link'|'phone', link?, sup?, cred? }) – מנהל־על בלבד. https בלבד, עד 500 תווים.
+// 2026-11-12: cred – פרטי כניסה לאתר (ראו credOf). רק במצב link; מעבר ל-phone מוחק אותם. בלי cred – הקיימים נשמרים.
 async function setBusinessPayLink(request) {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'צריך להתחבר לאפליקציה', { reason: 'not-signed-in' });
   if (!(await T.isSuper(uid))) throw deny('not-superadmin', 'הפעולה מותרת למנהל המערכת בלבד');
   const input = inputObject(request);
-  onlyKeys(input, ['bizId', 'mode', 'link', 'sup']);
+  onlyKeys(input, ['bizId', 'mode', 'link', 'sup', 'cred']);
   const bizId = input.bizId;
   if (typeof bizId !== 'string' || !T.BIZ_RE.test(bizId)) throw bad('bad-biz', 'מזהה עסק לא תקין');
   const biz = await T.loadBiz(bizId);
   // לארג' פעמי במצב legacy (גם בלי מסמך b/largpeami) – הנתונים בשורש (bizPrefix = '')
   if (!biz || (!biz.exists && bizId !== T.BIZ0)) throw new HttpsError('not-found', 'העסק לא נמצא', { reason: 'no-biz' });
   if (!['link', 'phone'].includes(input.mode)) throw bad('bad-mode', 'בחרו: קישור או תשלום בטלפון');
+  const db = getFirestore();
+  const pfx = T.bizPrefix(biz);
+  const payRef = db.doc(pfx + 'private/pay'), credRef = db.doc(pfx + PAY_CRED);
+  const [old, oldCred] = await Promise.all([payRef.get(), credRef.get()]);
   let link = '';
+  // 2026-11-12: במצב link בלי קישור (למשל עדכון פרטי כניסה בלבד) – הקישור הקיים נשמר (וגם הספק שלו, אם sup לא נשלח). אין קישור קיים – bad-link כמו קודם
+  const keep = input.mode === 'link' && (input.link == null || (typeof input.link === 'string' && !input.link.trim()))
+    && old.exists && old.get('mode') === 'link' && typeof old.get('link') === 'string' && old.get('link');
   if (input.mode === 'link') {
-    link = typeof input.link === 'string' ? input.link.trim() : '';
+    link = keep ? old.get('link') : typeof input.link === 'string' ? input.link.trim() : '';
     let u = null;
     try { u = new URL(link); } catch (e) { /* */ }
     if (!u || u.protocol !== 'https:' || !u.hostname.includes('.') || link.length > 500 || /[\s<>"']/.test(link) || u.username || u.password) throw bad('bad-link', 'קישור לא תקין: חייב להתחיל ב-https:// ועד 500 תווים');
   }
   // 17:47: לאיזה ספק שייך הקישור (ספק קיזוז). { id, name } מתוך רשימת הספקים של העסק (cfg/main). null = בלי ספק
   let sup = null;
+  if (keep && input.sup === undefined) { const o = old.get('sup'); sup = o && typeof o === 'object' && typeof o.id === 'string' ? { id: o.id, name: String(o.name || '') } : null; }
   if (input.mode === 'link' && input.sup != null) {
     const x = input.sup;
     if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad('bad-sup', 'ספק לא תקין');
@@ -1161,15 +1201,46 @@ async function setBusinessPayLink(request) {
     if (typeof x.id !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(x.id)) throw bad('bad-sup', 'ספק לא תקין');
     sup = { id: x.id, name: txt(x.name, 60, 'bad-sup', 'שם הספק', true) };
   }
-  const db = getFirestore();
-  const pfx = T.bizPrefix(biz);
+  const cred = credOf(input.cred);
+  if (cred && input.mode !== 'link') throw bad('bad-cred', 'פרטי כניסה – רק לקישור תשלום');
+  const host = link ? new URL(link).hostname.toLowerCase() : '';
+  const had = oldCred.exists;
+  // פרטי הכניסה קשורים ל-host (בתוך המוצפן, ו-host גלוי לצדו להחלטה כאן). קישור ל-host אחר בלי cred חדש – הישנים נמחקים
+  const box = cred ? CARD.seal(CARD_ENC_KEY.value(), bizId, PAY_CRED, Object.assign({}, cred, { host })) : null; // לפני הכתיבה: מפתח חסר → שום דבר לא נשמר
+  const del = had && !box && (cred === null || input.mode !== 'link' || oldCred.get('host') !== host);
+  const hasCred = !!box || (cred === undefined && input.mode === 'link' && had && !del);
   const now = Date.now();
   const b = db.batch();
-  b.set(db.doc(pfx + 'private/pay'), { mode: input.mode, link, sup, at: now, by: uid });
-  b.set(db.doc(pfx + 'ordcfg/main'), { pay: Object.assign({ mode: input.mode, has: !!link }, sup ? { sup } : {}), upd: now }, { mergeFields: ['pay', 'upd'] }); // pay מוחלף כולו (בלי sup ישן)
-  b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') + (sup ? ' sup=' + sup.id : '') });
+  b.set(payRef, { mode: input.mode, link, sup, at: now, by: uid });
+  if (box) b.set(credRef, { box, host, at: now, by: uid });
+  else if (del) b.delete(credRef);
+  b.set(db.doc(pfx + 'ordcfg/main'), { pay: Object.assign({ mode: input.mode, has: !!link, cred: hasCred }, sup ? { sup } : {}), upd: now }, { mergeFields: ['pay', 'upd'] }); // pay מוחלף כולו (בלי sup ישן)
+  b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') + (sup ? ' sup=' + sup.id : '') + (box ? ' cred:set' : del ? ' cred:del' : '') });
   await b.commit();
-  return { ok: true, bizId, mode: input.mode, has: !!link, sup };
+  return { ok: true, bizId, mode: input.mode, has: !!link, sup, cred: hasCred };
+}
+
+// 2026-11-12: copyF – השדות (וסדרם) ב"העתק פרטי לקוח" של הזמנת ניוד. רשימה סגורה + 'x:'+מפתח של שדה חופשי מ-custcfg/main.xKeys.
+// שדות הלקוח: name, phone, phs (טלפונים נוספים), tz, mail, st/city/fl/apt (כתובת), bank..od (שדות המידע).
+// שדות ההזמנה: lines (קווים לניוד), no (מספר הזמנה), total. כרטיס: cnum, cexp, cname, ccvv (נחשף רק ב-getCard act:'copyAll').
+const COPY_F = ['name', 'phone', 'phs', 'tz', 'mail', 'st', 'city', 'fl', 'apt', 'bank', 'prod', 'due', 'orig', 'stat', 'note', 'od', 'lines', 'no', 'total', 'cnum', 'cexp', 'cname', 'ccvv'];
+const COPY_MAX = 40;
+const XK_RE = /^x[0-9a-z_]{1,20}$/; // כמו customers.js
+async function copyFOf(v) {
+  const e = () => bad('bad-copyf', 'רשימת השדות להעתקה לא תקינה');
+  if (!Array.isArray(v) || v.length > COPY_MAX) throw bad('bad-copyf', `שדות להעתקה: עד ${COPY_MAX}`);
+  let xk = null;
+  const out = [];
+  for (const k of v) {
+    if (typeof k !== 'string' || out.includes(k)) throw e();
+    if (k.startsWith('x:')) {
+      if (!XK_RE.test(k.slice(2))) throw e();
+      if (!xk) { const c = await T.tdb().doc('custcfg/main').get(); xk = (c.exists && Array.isArray(c.get('xKeys')) ? c.get('xKeys') : []).map((x) => x && x.k).filter((x) => typeof x === 'string'); }
+      if (!xk.includes(k.slice(2))) throw bad('bad-copyf', 'שדה נוסף לא מוגדר: ' + k.slice(2, 25));
+    } else if (!COPY_F.includes(k)) throw e();
+    out.push(k);
+  }
+  return out;
 }
 
 // setOrderCfg({ src: { <br>: 'stock' | <br> } }) – מנהל העסק (או מנהל־על). מקור המלאי לכל סניף (16:42).
@@ -1177,7 +1248,14 @@ async function setOrderCfg(request) {
   const w = await who(request);
   mgr(w);
   const input = inputObject(request);
-  onlyKeys(input, ['src', 'vat', 'nc']);
+  onlyKeys(input, ['src', 'vat', 'nc', 'copyF']);
+  if (input.copyF !== undefined) { // הגדרה נפרדת (כמו nc). נשמר ב-ordcfg/main.copyF
+    if (input.src !== undefined || input.vat !== undefined || input.nc !== undefined) throw bad('bad-copyf', 'שדות להעתקה – הגדרה נפרדת');
+    const copyF = await copyFOf(input.copyF);
+    await T.tdb().doc('ordcfg/main').set({ copyF, upd: Date.now() }, { merge: true });
+    if (w.biz.exists) await getFirestore().collection(`b/${w.bizId}/audit`).add({ by: w.uid, t: Date.now(), act: 'setOrderCfg', note: ('copyF=' + copyF.join(',')).slice(0, 500) });
+    return { ok: true, copyF };
+  }
   if (input.nc !== undefined) { // 2026-11-12: שורה בלי מחיר עלות ברווחיות – 'skip' (לא נספרת, ומסומנת) או 'zero' (עלות 0). נשמר ב-ordcfg/main.nc
     if (!['skip', 'zero'].includes(input.nc)) throw bad('bad-nc', 'הגדרה לא תקינה');
     if (input.src !== undefined || input.vat !== undefined) throw bad('bad-nc', 'שורות בלי עלות – הגדרה נפרדת');
@@ -1426,13 +1504,18 @@ async function getWsPrices(request) {
 // ordProfit({ from, to, br?, paid? }) → { n, total, cost, profit, miss, nc, more?, rows:[{ id, no, name, at, br, st, total, cost, profit, miss }] } – סכומים בשקלים.
 // 2026-11-12: רווחיות הזמנות – מנהל, או עובד עם ord + ordP (רק הסניפים שלו). from/to = 'YYYY-MM-DD' לפי שעון ישראל (כולל), עד 366 יום.
 // בלי מבוטלות. paid = true – רק הזמנות ששולמו. נשלף לפי at (שדה אחד, בלי אינדקס מורכב); עד ORD_PROF_MAX הזמנות בתקופה.
+// 2026-11-12 (סיכום יומי בכניסה להזמנות): בתשובה גם paid (סכום ששולם – paid.amt, ואם חסר total) ו-paidN של הזמנות שנוצרו בתקופה ושולמו.
+// lite:true – לכל מי שיש לו ord (גם בלי ordP), מחזיר רק { n, total, paid, paidN } – בלי עלות, רווח ושורות.
 const ORD_PROF_MAX = 3000;
+const isPaid = (o) => !!o.paid && typeof o.paid === 'object' && ['paid', 'out', 'done'].includes(o.status);
 const DAY_RE = /^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 async function ordProfit(request) {
   const w = await who(request);
-  if (w.role !== 'manager' && !hasPerm(w, 'ordP')) throw deny('no-perm', 'אין לך הרשאה לרווחיות הזמנות. פנה למנהל.');
   const input = inputObject(request);
-  onlyKeys(input, ['from', 'to', 'br', 'paid']);
+  if (input.lite !== undefined && typeof input.lite !== 'boolean') throw bad('bad-field', 'lite: true או false');
+  const lite = input.lite === true;
+  if (!lite && w.role !== 'manager' && !hasPerm(w, 'ordP')) throw deny('no-perm', 'אין לך הרשאה לרווחיות הזמנות. פנה למנהל.');
+  onlyKeys(input, ['from', 'to', 'br', 'paid', 'lite']);
   if (typeof input.from !== 'string' || !DAY_RE.test(input.from) || typeof input.to !== 'string' || !DAY_RE.test(input.to)) throw bad('bad-date', 'בחרו תאריכים');
   const [ty, tm, td] = input.to.split('-').map(Number);
   ilDayStart(input.to); // תאריך שקיים בלוח השנה (31.2 – נדחה)
@@ -1452,7 +1535,10 @@ async function ordProfit(request) {
   const nc = cfg.exists && cfg.get('nc') === 'zero' ? 'zero' : 'skip';
   const L = qs.docs.map((s) => Object.assign({ id: s.id }, s.data())).filter((o) => o.status !== 'cancel'
     && (!br || o.br === br) && canBr(w, o.br) // כמו brOk בחוקים: עובד משויך לסניפים – רק הזמנות שהסניף שלהן ברשימה שלו (גם לא '_' / חסר)
-    && (!input.paid || (!!o.paid && ['paid', 'out', 'done'].includes(o.status))));
+    && (!input.paid || isPaid(o)));
+  let paidA = 0, paidN = 0;
+  for (const o of L) if (isPaid(o)) { paidN++; paidA += Math.round((typeof o.paid.amt === 'number' ? o.paid.amt : (typeof o.total === 'number' ? o.total : 0)) * 100); }
+  if (lite) return { n: L.length, total: Math.round(L.reduce((a, o) => a + Math.round((typeof o.total === 'number' ? o.total : 0) * 100), 0)) / 100, paid: Math.round(paidA) / 100, paidN };
   const need = [...new Set(L.flatMap((o) => (Array.isArray(o.items) ? o.items : []).filter((it) => it && it.pid && typeof it.c !== 'number' && ID_RE.test(it.pid)).map((it) => it.pid)))];
   const cur = new Map();
   for (let k = 0; k < need.length; k += 300) (await db.getAll(...need.slice(k, k + 300).map((id) => db.doc(`prod/${id}/p/cost`)))).forEach((s) => { if (s.exists && typeof s.get('cost') === 'number') cur.set(s.ref.parent.parent.id, s.get('cost')); });
@@ -1463,7 +1549,7 @@ async function ordProfit(request) {
     T0.total += r.total; T0.cost += r.cost; T0.profit += r.profit; T0.miss += r.miss;
     return { id: o.id, no: o.no || 0, name: String((o.cust && o.cust.name) || '').slice(0, 60), at: o.at || 0, br: o.br || NB, st: o.status || '', total: ag(r.total), cost: ag(r.cost), profit: ag(r.profit), miss: r.miss };
   });
-  return { n: rows.length, total: ag(T0.total), cost: ag(T0.cost), profit: ag(T0.profit), miss: T0.miss, nc, rows };
+  return { n: rows.length, total: ag(T0.total), cost: ag(T0.cost), profit: ag(T0.profit), miss: T0.miss, nc, paid: ag(paidA), paidN, rows };
 }
 
 // getCosts({ after? }) → { cost: { <pid>: עלות }, next? } – מנהל ועובד עם ord (החלטה 00:12: עובד רואה עלות בכל מקום).
@@ -1639,5 +1725,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, ordProfit, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
-for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f));
+const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכניסה לאתר הסליקה מוצפנים ב-CARD_ENC_KEY
+for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : {}, wrap(k, f));
 Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

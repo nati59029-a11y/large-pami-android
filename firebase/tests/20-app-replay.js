@@ -512,6 +512,8 @@ const REPLAY = {
     const a = await fsx(uid, '/mq?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ fields: { uid: sv(uid), by: sv(uid), t: iv(Date.now()), st: sv('new'), k: sv('invoice'), np: iv(2) } }) });
     return [a, await fsx(uid, '/mq/' + id + '/p?documentId=' + 0, { method: 'POST', body: JSON.stringify({ fields: { data: sv('PAGES:["data:image/jpeg;base64,AAAA"]') } }) }), await fsx(uid, '/mq/' + id + '/p?documentId=' + 1, { method: 'POST', body: JSON.stringify({ fields: { data: sv('x') } }) })];
   } },
+  // zcNsPut (מ-main, 12.11.2026): באישור סגירה – הורדת חלקי הצילומים, אותה בקשה כמו M75
+  M115: { run: async (uid) => [await fsx(uid, '/closings/' + 'z1' + '/p/' + 0)] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,

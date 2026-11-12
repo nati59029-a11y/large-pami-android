@@ -415,7 +415,8 @@ const piOpt=(sm,st)=>{const n=piN(),b=piBusy();return`<button class="opt" data-a
  try{if(r&&typeof r.h==='string'&&bzF('shelf')&&can()){const i=r.h.lastIndexOf('</div>');if(i>=0)r.h=r.h.slice(0,i)+piOpt('מחירים חדשים מחשבוניות ספק','min-height:92px;margin:0')+r.h.slice(i)}}catch(e){}return r}}
 {const o=V.ox;if(typeof o==='function')V.ox=function(){const r=o.apply(this,arguments);
  try{if(r&&typeof r.h==='string'&&r.h.includes('data-v="oxNew"')&&bzF('orders')&&can()){const m='<div class="row" style="margin-bottom:8px">',b=piOpt('עלות, מחיר וסיטונאי מחשבוניות ספק','margin-bottom:8px');
-  if(r.h.startsWith(m)){const i=r.h.indexOf('</div>')+6;r.h=r.h.slice(0,i)+b+r.h.slice(i)}else r.h=b+r.h}}catch(e){}return r}}
+  const k=r.h.lastIndexOf(m,r.h.indexOf('data-v="oxNew"'));/* אחרי שורת "הזמנה חדשה" – גם כשלפניה כותרת היום (dayH מ-main) */
+  if(k>=0){const i=r.h.indexOf('</div>',k)+6;r.h=r.h.slice(0,i)+b+r.h.slice(i)}else r.h=b+r.h}}catch(e){}return r}}
 if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(this,arguments);try{const n=isA()?piN(1):0;r.pi=n||0;r.n+=r.pi}catch(e){r.pi=0}return r}}
 {const o=V.todo;if(typeof o==='function')V.todo=function(){const r=o.apply(this,arguments);
  try{if(isA()&&can()&&r&&typeof r.h==='string'){const n=piN();if(n){const sm=[n===1?'חשבונית אחת ממתינה לעדכון מחירים':n+' חשבוניות ממתינות לעדכון מחירים',piBusy()].filter(Boolean).join(' · ');

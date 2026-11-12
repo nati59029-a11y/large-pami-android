@@ -14,9 +14,10 @@ const DOC_TYPES = ['invoice', 'delivery_note', 'receipt', 'credit_note'];
 const Z_PARTS = ['top', 'middle', 'bottom'];
 const LOW = 0.7; // מתחת לזה השדה מסומן "לא בטוח" (צהוב באפליקציה)
 
-const S = 's', N = 'n';
+const S = 's', N = 'n', B = 'b', I = 'i';
 const FIELDS = {
-  invoice: { supplier: S, supplier_id: S, number: S, date: S, total_before_vat: N, vat_amount: N, total_with_vat: N, related_invoice: S },
+  // 12.11.2026: "שולם באשראי" – paid_by_card (true בלבד אם כתוב במפורש), card_last4 (רק 4 ספרות), installments (2–36), paid_amount
+  invoice: { supplier: S, supplier_id: S, number: S, date: S, total_before_vat: N, vat_amount: N, total_with_vat: N, related_invoice: S, paid_by_card: B, card_last4: S, installments: I, paid_amount: N },
   cashout: { register: S, store: S, date: S, time: S, amount: N },
   deposit: { date: S, time: S, amount: N, bank: S, account: S },
   transfer: { transfers: 'transfers' },
@@ -49,6 +50,7 @@ const num = (v) => {
 };
 const conf = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : null);
 const intOrNull = (v) => (Number.isInteger(v) && v > 0 && v < 1000 ? v : null);
+const insOrNull = (v) => { const n = typeof v === 'string' ? Number(v.trim()) : v; return Number.isInteger(n) && n >= 1 && n <= 36 ? n : null; };
 
 // צנזור: כל רצף 8–19 ספרות (גם עם רווחים/מקפים) → ••••+4 אחרונות. כמו stlScrub באפליקציה
 function scrub(v) {
@@ -104,7 +106,7 @@ function shapeClassify(raw, allowed, opts) {
   const c = o.confidence && typeof o.confidence === 'object' && !Array.isArray(o.confidence) ? o.confidence : {};
   for (const [k, kind] of Object.entries(FIELDS[type])) {
     if (!Object.hasOwn(f, k)) continue;
-    out.fields[k] = kind === S ? str(f[k]) : kind === N ? num(f[k]) : kind === 'lines' ? cleanLines(f[k], out) : cleanTransfers(f[k]);
+    out.fields[k] = kind === S ? str(f[k]) : kind === N ? num(f[k]) : kind === B ? f[k] === true : kind === I ? insOrNull(f[k]) : kind === 'lines' ? cleanLines(f[k], out) : cleanTransfers(f[k]);
     const cv = Object.hasOwn(c, k) ? conf(c[k]) : null;
     if (cv !== null) out.confidence[k] = cv;
   }
@@ -112,6 +114,7 @@ function shapeClassify(raw, allowed, opts) {
     if ('kind' in out.fields) out.fields.kind = out.fields.kind === 'card' ? 'card' : out.fields.kind === 'bank' ? 'bank' : null;
     if ('last4' in out.fields) out.fields.last4 = last4(out.fields.last4);
   }
+  if (type === 'invoice' && 'card_last4' in out.fields) out.fields.card_last4 = last4(out.fields.card_last4); // לעולם לא מספר כרטיס מלא
   if (type === 'check') {
     if ('account' in out.fields) out.fields.account = last4(out.fields.account); // מספר חשבון – רק 4 אחרונות
     for (const k of ['payee', 'bank', 'number']) if (k in out.fields) out.fields[k] = scrub(out.fields[k]);
