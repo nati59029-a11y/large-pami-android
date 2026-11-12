@@ -246,6 +246,43 @@ describe('תמחור חשבונית ספק – שרת', () => {
     assert.deepEqual((await get(PFX() + 'prod/pA')).q, { br1: 4, br2: 1 });
   });
 
+  it('piImg (שלב 4): צילום בחלקים – מי ששלח (גם בלי prc) או מנהל; אחר / קובץ שאינו תמונה / גדול מדי – נחסם; np רק בחלק האחרון; קריאה לפי prc', async () => {
+    const r0 = await call('piCreate', NOP, { reqId: rid(), sup: 'אסם', lines: [LINES[0]] });
+    const id = r0.result.id;
+    const img = 'data:image/jpeg;base64,' + 'A'.repeat(1000);
+    const a = await call('piImg', NOP, { id, k: 0, np: 2, data: img.slice(0, 600) });
+    assert.equal(a.status, 'OK', a.text);
+    assert.equal((await get(PFX() + 'pinv/' + id)).np, undefined, 'חלק ראשון מתוך 2 – עוד לא מוצג');
+    assert.equal((await call('piImg', NOP, { id, k: 1, np: 2, data: img.slice(600) })).status, 'OK');
+    assert.equal((await get(PFX() + 'pinv/' + id)).np, 2);
+    assert.equal((await get(PFX() + 'pinv/' + id + '/p/0')).data + (await get(PFX() + 'pinv/' + id + '/p/1')).data, img);
+    // מנהל מעלה מחדש בחלק אחד – החלק הישן נמחק
+    assert.equal((await call('piImg', MGR, { id, k: 0, np: 1, data: img })).status, 'OK');
+    assert.equal((await get(PFX() + 'pinv/' + id)).np, 1); assert.equal(await get(PFX() + 'pinv/' + id + '/p/1'), null);
+    // עובד אחר (גם עם prc) – לא; בלי התחברות – לא
+    assert.equal((await call('piImg', P1, { id, k: 0, np: 1, data: img })).reason, 'not-owner');
+    assert.equal((await call('piImg', null, { id, k: 0, np: 1, data: img })).status, 'UNAUTHENTICATED');
+    // תוכן וגודל
+    assert.equal((await call('piImg', NOP, { id, k: 0, np: 1, data: '<html><script>alert(1)</script>' })).reason, 'bad-img');
+    assert.equal((await call('piImg', NOP, { id, k: 0, np: 1, data: 'data:text/html;base64,AAAA' })).reason, 'bad-img');
+    assert.equal((await call('piImg', NOP, { id, k: 0, np: 1, data: 'data:image/jpeg;base64,' + 'A'.repeat(700000) })).reason, 'img-big');
+    assert.equal((await call('piImg', NOP, { id, k: 0, np: 9, data: img })).reason, 'img-big');
+    assert.equal((await call('piImg', NOP, { id, k: 2, np: 2, data: 'AAAA' })).reason, 'bad-part');
+    assert.equal((await call('piImg', NOP, { id, k: 0, np: 1, data: img, x: 1 })).reason, 'bad-field');
+    assert.equal((await call('piImg', NOP, { id: 'nope12345', k: 0, np: 1, data: img })).reason, 'no-pinv');
+    // קריאה: עובד עם prc ומנהל – כן; מי ששלח בלי prc – לא; כתיבה מהאפליקציה – לאף אחד
+    await assertSucceeds(db(P1).doc(PFX() + 'pinv/' + id + '/p/0').get());
+    await assertSucceeds(db(MGR).doc(PFX() + 'pinv/' + id + '/p/0').get());
+    await assertFails(db(NOP).doc(PFX() + 'pinv/' + id + '/p/0').get());
+    await assertFails(db(MGR).doc(PFX() + 'pinv/' + id + '/p/0').set({ data: img }));
+    // piClaim מחזיר np; חשבונית סגורה – אין העלאה
+    const c = await call('piClaim', P1, { id });
+    assert.equal(c.result.inv.np, 1);
+    const f = await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: [Object.assign({}, LINES[0], { pid: 'pA', price: 5.9 })] });
+    assert.equal(f.status, 'OK', f.text);
+    assert.equal((await call('piImg', NOP, { id, k: 0, np: 1, data: img })).reason, 'closed');
+  });
+
   it('עסק עם מדף בלבד: עובד עם prc קורא ומטפל; בלי זיהוי מלאי; סיום רק סוגר', async () => {
     const r0 = await call('piCreate', SM, { reqId: rid(), sup: 'אסם', lines: [LINES[0]] });
     const id = r0.result.id;

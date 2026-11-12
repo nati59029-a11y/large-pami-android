@@ -6,7 +6,8 @@
 //                lines:[{ n, bc?, sku?, qty, unit:'u'|'pk'|'ct', pk?, ct?, cost?, raw?, chk? (הסיבה לסימון "לבדיקה"),
 //                         pid? (מוצר קיים לעדכון), nw? (נבחר "מוצר חדש"), skip?, price? (לצרכן כולל מע"מ), wp? (סיטונאי לפני מע"מ),
 //                         wpSrc?: 'stock'|'auto'|'man', cto? }],
-//                lk?: { uid, name, t } (בטיפול), fin?: { by, name, t, rq, add, upd, void? } }
+//                lk?: { uid, name, t } (בטיפול), fin?: { by, name, t, rq, add, upd, void? }, np? (חלקי הצילום), img? }
+//   pinv/{id}/p/{k} { data } – צילום החשבונית בחלקים (piImg, שלב 4)
 //
 // חוזה השורה (תיקון סבב 1, ליקוי 1): qty ו-cost הם תמיד ביחידת מלאי (מארז; החלטה 3) – qty = מספר המארזים שנכנסים למלאי,
 //   cost = עלות מארז לפני מע"מ. ההמרה מקרטונים (קרטונים × ct, מחיר קרטון ÷ ct) נעשית במכשיר לפני השליחה (www/pricing-lines.js,
@@ -259,7 +260,7 @@ async function piClaim(request) {
   });
   const vat = await vatOf(db, w);
   const m = w.ord ? await matches(db, d, vat) : [];
-  const inv = { st: d.st, src: d.src, sup: d.sup || '', supId: d.supId || '', inv: d.inv || '', date: d.date || '', by: d.by, byName: d.byName || '', at: d.at, lines: Array.isArray(d.lines) ? d.lines : [] };
+  const inv = { st: d.st, src: d.src, sup: d.sup || '', supId: d.supId || '', inv: d.inv || '', date: d.date || '', by: d.by, byName: d.byName || '', at: d.at, np: Number.isInteger(d.np) ? d.np : 0, lines: Array.isArray(d.lines) ? d.lines : [] };
   return { ok: true, id, inv, lk: d.lk, until: now + LOCK_MS, vat, ord: w.ord, m };
 }
 
@@ -406,6 +407,37 @@ async function piVoid(request) {
   return { ok: true, dup };
 }
 
+// piImg({ id, k, np, data }) – צילום החשבונית בענן (שלב 4), כדי שכל מי שמטפל יראה אותו: חלק k מתוך np, כמו supinv –
+//   pinv/{id}/p/{k} { data } (עד IMG_CH תווים לחלק, עד IMG_MAX חלקים). המסמך מקבל np (מספר החלקים) רק בחלק האחרון, כך שצילום חלקי
+//   לא מוצג. החלק הראשון חייב להיות תמונה / PDF (data:) או PAGES:[...] (כמה עמודים, כמו fput במכשיר). כתיבה חוזרת – דורסת (ניסיון חוזר).
+//   מי: מי שיצר את החשבונית (by – גם עובד בלי prc, ששלח אותה), או מנהל. רק חשבונית פתוחה (st:'new'). הקריאה – לפי החוקים (pinv/{id}/p/{k}).
+const IMG_CH = 700000, IMG_MAX = 8;
+const IMG_HEAD = /^(data:image\/(jpeg|png|webp);base64,|data:application\/pdf;base64,|PAGES:\["data:image\/(jpeg|png|webp);base64,)/;
+const IMG_CHARS = /^[A-Za-z0-9+/=:;,"\[\]._-]+$/;
+async function piImg(request) {
+  const w = feats(await requireStaff(request));
+  const input = inputObject(request);
+  O.onlyKeys(input, ['id', 'k', 'np', 'data']);
+  const id = O.idOf(input.id, 'חשבונית');
+  const { k, np, data } = input;
+  if (!Number.isInteger(np) || np < 1 || np > IMG_MAX) throw bad('img-big', `הצילום גדול מדי (עד ${IMG_MAX} חלקים)`);
+  if (!Number.isInteger(k) || k < 0 || k >= np) throw bad('bad-part', 'חלק לא תקין');
+  if (typeof data !== 'string' || !data.length || data.length > IMG_CH) throw bad('img-big', `חלק בצילום: עד ${IMG_CH} תווים`);
+  if (!IMG_CHARS.test(data) || (k === 0 && !IMG_HEAD.test(data))) throw bad('bad-img', 'הקובץ אינו תמונה או PDF');
+  const db = T.tdb();
+  const ref = db.doc('pinv/' + id);
+  const s = await ref.get();
+  const d = open(s);
+  if (d.by !== w.uid && w.role !== 'manager') throw deny('not-owner', 'רק מי ששלח את החשבונית או מנהל מעלים את הצילום');
+  await ref.collection('p').doc(String(k)).set({ data });
+  if (k === np - 1) {
+    const old = Number.isInteger(d.np) ? d.np : 0;
+    for (let x = np; x < Math.min(old, IMG_MAX); x++) await ref.collection('p').doc(String(x)).delete(); // צילום קודם עם יותר חלקים
+    await ref.update({ np, img: Date.now() });
+  }
+  return { ok: true, k, np };
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -413,6 +445,6 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid };
+const FNS = { piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall({}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanLine, cleanLines, soft, normSup, matches, LOCK_MS, MAX_LINES } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanLine, cleanLines, soft, normSup, matches, LOCK_MS, MAX_LINES, IMG_CH, IMG_MAX } });
