@@ -47,7 +47,8 @@ def req(method, url, tok, body=None):
             return json.loads(x.read() or b'{}')
     except urllib.error.HTTPError as e:
         txt = e.read()[:2000].decode('utf-8', 'replace')
-        if e.code == 429 or 'RESOURCE_EXHAUSTED' in txt or re.search(r'(?i)quota|limit.*apps|maximum number', txt):
+        # מכסת אפליקציות – רק ביצירה (POST). 429 בקריאה (GET) = הגבלת קצב זמנית, לא מכסה
+        if method == 'POST' and (e.code == 429 or 'RESOURCE_EXHAUSTED' in txt or re.search(r'(?i)quota|limit.*apps|maximum number', txt)):
             raise Quota('%s %s: %s' % (e.code, method, txt))
         if e.code in (401, 403):
             raise NoPermission('%s %s: %s' % (e.code, method, txt))
