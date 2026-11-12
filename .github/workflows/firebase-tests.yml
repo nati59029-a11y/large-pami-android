@@ -59,6 +59,9 @@ jobs:
       - name: ui-safab
         if: always()
         run: $EX "node tests/app-multibiz/ui-safab.js ../app-source/www ../out/ui-safab.json ../out/shots-safab"
+      - name: ui-bizapk
+        if: always()
+        run: $EX "node tests/app-multibiz/ui-bizapk.js ../app-source/www ../out/ui-bizapk.json ../out/shots-bizapk"
       - name: ui-brand
         if: always()
         run: $EX "node tests/app-multibiz/ui-brand.js ../app-source/www ../out/ui-brand.json ../out/shots-brand"
