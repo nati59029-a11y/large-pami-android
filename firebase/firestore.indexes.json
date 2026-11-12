@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "sec_in",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ch", "order": "ASCENDING" },
+        { "fieldPath": "t", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "sec_in",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ch", "order": "ASCENDING" },
+        { "fieldPath": "rt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "sec_draft",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "st", "order": "ASCENDING" },
+        { "fieldPath": "wa", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

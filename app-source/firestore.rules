@@ -905,6 +905,95 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // ----- המזכירה העסקית (שלב 1, 2026-11-11; אפיון 9.4, 2.3, 10.6). כל כתיבה – רק השרת (functions/secretary.js). -----
+    // משתמש במזכירה = מנהל אמיתי של העסק (admins/{uid}, לא מנהל־על בתוקף תפקידו) + התוספת פעילה + עסק פעיל +
+    // במצב "מנהל ראשי בלבד" (sec_cfg/main.mode == 'main') – רק mainUid + אישר את הנוסח הנוכחי של מסך ההסכמה (mgr.<uid>.cv ==
+// CONSENT_VER בשרת, functions/secretary.js; החלפת נוסח = לעדכן כאן ובשרת יחד – בדיקה ב-secretary.test.js).
+    // עובד – אין גישה לשום אוסף sec_*. sec_mirror, sec_facts_sensitive – אף אחד מהאפליקציה (רק השרת).
+    function sOn() { return exists(/databases/$(database)/documents/b/largpeami) && get(/databases/$(database)/documents/b/largpeami).data.get('dataRoot', '') == 'legacy' && get(/databases/$(database)/documents/b/largpeami).data.get('status', '') == 'active' && get(/databases/$(database)/documents/b/largpeami).data.get('features', {}).get('secretary', false) == true; }
+    function sCfg() { return get(/databases/$(database)/documents/sec_cfg/main).data; }
+    function sUser() {
+      return sOn() && isManager()
+        && exists(/databases/$(database)/documents/sec_cfg/main)
+        && (sCfg().get('mode', 'all') != 'main' || sCfg().get('mainUid', '') == request.auth.uid)
+        && sCfg().get('mgr', {}).get(request.auth.uid, {}).get('cv', '') == 'sec-terms-2026-11-v2';
+    }
+    // הגדרות: main – מנהלי העסק (כשהתוספת פעילה) ומנהל־על; cap (תקרת עלות) – מנהל־על בלבד (83: מנהל העסק רואה רק אחוז ניצול)
+    match /sec_cfg/{docId} {
+      allow get: if (docId == 'main' && sOn() && isManager()) || isSuper();
+      allow list, create, update, delete: if false;
+    }
+    // שיחה אישית: רק המנהל עצמו. מנהל־על חסום במפורש, גם אם הוא מנהל של העסק לפי admins (החלטה 8):
+    // הוא קורא רק דרך secAdminReadChat, שרושמת כל צפייה ב-sec_log.
+    match /sec_chat/{uid} {
+      allow read, create, update, delete: if false;
+      match /m/{id} {
+        allow read: if isSelf(uid) && sUser() && !isSuper();
+        allow create, update, delete: if false;
+      }
+    }
+    // הודעה מ"מספר המנהל" (own:'mgr') – רק המנהל ששלח אותה (פ1: היומן והשיחה האישיים של כל מנהל נפרדים)
+    match /sec_in/{id} {
+      allow get: if sUser() && (resource.data.get('own', 'sec') != 'mgr' || resource.data.get('mgr', '') == request.auth.uid);
+      // שאילתה – רק כזו שמסננת לפי בעלים שאינו 'mgr' (where own in ['sec','ord']); בלי סינון – נדחית, כדי שהודעה אישית של מנהל לא תצא ברשימה
+      allow list: if sUser() && resource.data.own in ['sec', 'ord'];
+      allow create, update, delete: if false;
+    }
+    match /sec_draft/{id} {
+      allow read: if sUser();
+      allow create, update, delete: if false;
+    }
+    // חשבוניות שהתקבלו: שינוי מצב רק דרך secDecide (שלב 7). מנהל עם הגבלת סניפים (admins/{uid}.br) – לא קורא ישירות; הוא מקבל רק את הסניפים שלו דרך secInv
+    function sNoBr() { return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('br', null) == null; }
+    match /sec_inv/{id} {
+      allow read: if sUser() && sNoBr();
+      allow create, update, delete: if false;
+      match /p/{k} {
+        allow read: if sUser() && sNoBr();
+        allow create, update, delete: if false;
+      }
+    }
+    match /sec_facts/{id} {
+      allow read: if sUser();
+      allow create, update, delete: if false;
+    }
+    match /sec_rules/{id} {
+      allow read: if sUser();
+      allow create, update, delete: if false;
+    }
+    // יומן: אירוע אישי (uid) – רק של המנהל עצמו; אירוע של העסק (בלי uid) – כל מי שמשתמש במזכירה
+    match /sec_cal/{id} {
+      allow read: if sUser() && resource.data.get('uid', '') in ['', request.auth.uid];
+      allow create, update, delete: if false;
+    }
+    // דוחות (שלב 4): אישיים לכל מנהל (uid) – רק בעליו; בלי uid – כל מי שמשתמש במזכירה
+    match /sec_rep/{id} {
+      allow read: if sUser() && resource.data.get('uid', '') in ['', request.auth.uid];
+      allow create, update, delete: if false;
+    }
+    // יומן פעולות – הוספה בלבד, ורק השרת. קוראים: מי שמשתמש במזכירה, ומנהל־על
+    match /sec_log/{id} {
+      allow read: if sUser() || isSuper();
+      allow create, update, delete: if false;
+    }
+    match /sec_usage/{id} {
+      allow read: if sUser() || isSuper();
+      allow create, update, delete: if false;
+    }
+    match /sec_mirror/{id} {
+      allow read, create, update, delete: if false;
+    }
+    match /sec_facts_sensitive/{id} {
+      allow read, create, update, delete: if false;
+    }
+    // התראות (שלב 4): רק דרך השרת (secNotes) – אף אחד מהאפליקציה
+    match /sec_note/{uid} {
+      allow read, create, update, delete: if false;
+      match /n/{id} {
+        allow read, create, update, delete: if false;
+      }
+    }
+
     // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
     match /users/{userId} {
       allow get: if isSelf(userId);
@@ -1561,6 +1650,95 @@ service cloud.firestore {
       match /impJobs/{id} {
         allow read: if feat('orders') && bMgr();
         allow create, update, delete: if false;
+      }
+
+      // ----- המזכירה העסקית (שלב 1, 2026-11-11; אפיון 9.4, 2.3, 10.6). כל כתיבה – רק השרת (functions/secretary.js). -----
+      // משתמש במזכירה = מנהל אמיתי של העסק (admins/{uid}, לא מנהל־על בתוקף תפקידו) + התוספת פעילה + עסק פעיל +
+      // במצב "מנהל ראשי בלבד" (sec_cfg/main.mode == 'main') – רק mainUid + אישר את הנוסח הנוכחי של מסך ההסכמה (mgr.<uid>.cv ==
+// CONSENT_VER בשרת, functions/secretary.js; החלפת נוסח = לעדכן כאן ובשרת יחד – בדיקה ב-secretary.test.js).
+      // עובד – אין גישה לשום אוסף sec_*. sec_mirror, sec_facts_sensitive – אף אחד מהאפליקציה (רק השרת).
+      function bsOn() { return feat('secretary') && bActive(); }
+      function bsCfg() { return get(/databases/$(database)/documents/b/$(bizId)/sec_cfg/main).data; }
+      function bsUser() {
+        return bsOn() && bIsAdmin()
+          && exists(/databases/$(database)/documents/b/$(bizId)/sec_cfg/main)
+          && (bsCfg().get('mode', 'all') != 'main' || bsCfg().get('mainUid', '') == request.auth.uid)
+          && bsCfg().get('mgr', {}).get(request.auth.uid, {}).get('cv', '') == 'sec-terms-2026-11-v2';
+      }
+      // הגדרות: main – מנהלי העסק (כשהתוספת פעילה) ומנהל־על; cap (תקרת עלות) – מנהל־על בלבד (83: מנהל העסק רואה רק אחוז ניצול)
+      match /sec_cfg/{docId} {
+        allow get: if (docId == 'main' && bsOn() && bIsAdmin()) || bSuper();
+        allow list, create, update, delete: if false;
+      }
+      // שיחה אישית: רק המנהל עצמו. מנהל־על חסום במפורש, גם אם הוא מנהל של העסק לפי admins (החלטה 8):
+      // הוא קורא רק דרך secAdminReadChat, שרושמת כל צפייה ב-sec_log.
+      match /sec_chat/{uid} {
+        allow read, create, update, delete: if false;
+        match /m/{id} {
+          allow read: if isSelf(uid) && bsUser() && !bSuper();
+          allow create, update, delete: if false;
+        }
+      }
+      // הודעה מ"מספר המנהל" (own:'mgr') – רק המנהל ששלח אותה (פ1)
+      match /sec_in/{id} {
+        allow get: if bsUser() && (resource.data.get('own', 'sec') != 'mgr' || resource.data.get('mgr', '') == request.auth.uid);
+        // שאילתה – רק כזו שמסננת לפי בעלים שאינו 'mgr' (where own in ['sec','ord']); בלי סינון – נדחית, כדי שהודעה אישית של מנהל לא תצא ברשימה
+        allow list: if bsUser() && resource.data.own in ['sec', 'ord'];
+        allow create, update, delete: if false;
+      }
+      match /sec_draft/{id} {
+        allow read: if bsUser();
+        allow create, update, delete: if false;
+      }
+      // חשבוניות שהתקבלו: שינוי מצב רק דרך secDecide (שלב 7). מנהל עם הגבלת סניפים (admins/{uid}.br) – לא קורא ישירות; הוא מקבל רק את הסניפים שלו דרך secInv
+      function bsNoBr() { return get(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid)).data.get('br', null) == null; }
+      match /sec_inv/{id} {
+        allow read: if bsUser() && bsNoBr();
+        allow create, update, delete: if false;
+        match /p/{k} {
+          allow read: if bsUser() && bsNoBr();
+          allow create, update, delete: if false;
+        }
+      }
+      match /sec_facts/{id} {
+        allow read: if bsUser();
+        allow create, update, delete: if false;
+      }
+      match /sec_rules/{id} {
+        allow read: if bsUser();
+        allow create, update, delete: if false;
+      }
+      // יומן: אירוע אישי (uid) – רק של המנהל עצמו; אירוע של העסק (בלי uid) – כל מי שמשתמש במזכירה
+      match /sec_cal/{id} {
+        allow read: if bsUser() && resource.data.get('uid', '') in ['', request.auth.uid];
+        allow create, update, delete: if false;
+      }
+      // דוחות (שלב 4): אישיים לכל מנהל (uid) – רק בעליו; בלי uid – כל מי שמשתמש במזכירה
+      match /sec_rep/{id} {
+        allow read: if bsUser() && resource.data.get('uid', '') in ['', request.auth.uid];
+        allow create, update, delete: if false;
+      }
+      // יומן פעולות – הוספה בלבד, ורק השרת. קוראים: מי שמשתמש במזכירה, ומנהל־על
+      match /sec_log/{id} {
+        allow read: if bsUser() || bSuper();
+        allow create, update, delete: if false;
+      }
+      match /sec_usage/{id} {
+        allow read: if bsUser() || bSuper();
+        allow create, update, delete: if false;
+      }
+      match /sec_mirror/{id} {
+        allow read, create, update, delete: if false;
+      }
+      match /sec_facts_sensitive/{id} {
+        allow read, create, update, delete: if false;
+      }
+      // התראות (שלב 4): רק דרך השרת (secNotes) – אף אחד מהאפליקציה
+      match /sec_note/{uid} {
+        allow read, create, update, delete: if false;
+        match /n/{id} {
+          allow read, create, update, delete: if false;
+        }
       }
 
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')

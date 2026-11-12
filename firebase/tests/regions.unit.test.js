@@ -15,7 +15,7 @@ const hook = require(path.join(FN_DIR, 'yemot-hook.js')); // tzintukJoin מוש�
 const R = require(path.join(FN_DIR, 'lib', 'region.js'));
 
 const BOTH = ['europe-west1', 'us-central1'];
-const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'recurringTasks'];
+const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync', 'recurringTasks'];
 const ep = (f) => f && f.__endpoint;
 const regions = (f) => [].concat(ep(f).region || []);
 const entries = Object.entries(ex).filter(([, f]) => ep(f));
@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'recurringTasks', 'runImportChunk', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'recurringTasks', 'runImportChunk', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -39,7 +39,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.deepEqual(bad, [], 'פונקציות onCall בלי שני האזורים: ' + bad.join(', '));
   });
 
-  it('6 הפונקציות המיוחדות – באזור us-central1 בלבד', () => {
+  it('13 הפונקציות המיוחדות – באזור us-central1 בלבד', () => {
     for (const n of SINGLE) {
       const f = ex[n] || hook[n];
       assert.ok(ep(f), n + ' לא נמצאה');
@@ -47,10 +47,27 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
       assert.deepEqual(regions(f), ['us-central1'], n);
     }
     assert.ok(ep(ex.expirePromosOnLine).scheduleTrigger, 'expirePromosOnLine מתוזמנת');
+    assert.ok(ep(ex.secBackupDaily).scheduleTrigger, 'secBackupDaily מתוזמנת (גיבוי המזכירה)');
+    assert.ok(ep(ex.secRemind).scheduleTrigger && ep(ex.secDaily).scheduleTrigger, 'secRemind ו-secDaily מתוזמנות (המזכירה שלב 4)');
     assert.ok(ep(ex.recurringTasks).scheduleTrigger, 'recurringTasks מתוזמנת (משימות קבועות, 12.11.2026)');
     assert.ok(ep(ex.syncLegacyAdmin).eventTrigger && ep(ex.syncLegacyStaff).eventTrigger, 'טריגרים של Firestore');
   });
 
+  it('המזכירה שלב 5: secWaHook – onRequest ב-us-central1 בלבד (כתובת קבועה אצל Meta); secWaWork – טריגר Firestore על התור, europe-west1 בלבד, בלי ניסיון חוזר', () => {
+    assert.ok(ep(ex.secWaHook).httpsTrigger, 'secWaHook היא onRequest');
+    const e = ep(ex.secWaWork);
+    assert.deepEqual(regions(ex.secWaWork), ['europe-west1']);
+    assert.ok(e.eventTrigger, 'טריגר');
+    assert.equal(e.eventTrigger.retry, false);
+  });
+  it('המזכירה שלב 6: secOAuthCb – onRequest (כתובת חזרה קבועה אצל Google); secMailHook – Pub/Sub בלי ניסיון חוזר; secCalSync – מתוזמנת; כולן us-central1 בלבד', () => {
+    assert.ok(ep(ex.secOAuthCb).httpsTrigger, 'secOAuthCb היא onRequest');
+    const h = ep(ex.secMailHook);
+    assert.ok(h.eventTrigger && /pubsub/.test(h.eventTrigger.eventType), 'secMailHook – טריגר Pub/Sub');
+    assert.equal(h.eventTrigger.retry, false);
+    assert.ok(ep(ex.secCalSync).scheduleTrigger, 'secCalSync מתוזמנת');
+    for (const n of ['secGoogle', 'secMail', 'secMailSend', 'secAdminMail']) assert.deepEqual(regions(ex[n]), BOTH, n);
+  });
   it('ייבוא ברקע (11.11.2026): runImportChunk – טריגר Firestore חדש, רק europe-west1, עם retry ומגבלת מקביליות; startImport – onCall בשני האזורים', () => {
     const e = ep(ex.runImportChunk);
     assert.deepEqual(regions(ex.runImportChunk), ['europe-west1']);

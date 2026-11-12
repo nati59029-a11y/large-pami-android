@@ -128,7 +128,7 @@ const dl = async (page, fn) => { const p = page.waitForEvent('download', { timeo
     await page.evaluate(() => usReset());
     // 9. מסך מנהל־על: סוג מכסה (setScanQuota)
     await page.evaluate(() => {
-      window.__calls = []; window.fnCall = async (name, data) => { window.__calls.push({ name, data }); if (data.mode === 'limit') return { ok: true, scanQuota: { period: data.period, n: data.n } }; if (data.mode === 'release') return { ok: true, scanQuota: { release: { until: data.for === 'forever' ? null : Date.now() + 86400000 } } }; return { ok: true, scanQuota: null }; };
+      window.__calls = []; window.fnCall = async (name, data) => { if (/^sec/.test(name)) return { err: 1 }; /* כרטיס המזכירה (משימה 2026-11-10) קורא secAdminGet בכרטיס העסק – לא חלק מהבדיקה הזו */ window.__calls.push({ name, data }); if (data.mode === 'limit') return { ok: true, scanQuota: { period: data.period, n: data.n } }; if (data.mode === 'release') return { ok: true, scanQuota: { release: { until: data.for === 'forever' ? null : Date.now() + 86400000 } } }; return { ok: true, scanQuota: null }; };
       SY.sa = true; ADM.sa = 1; ADM.L = [{ id: 'acme', name: 'Acme', dataRoot: 'b', status: 'active', features: { scan: true }, missing: false }]; ADM.info.acme = { email: 'a@x.co', phone: '', adv: { limits: {} }, sq: null };
       NAV = [{ v: 'home' }]; go('sab', 'acme');
     }); await H.settle(page, 400);
