@@ -191,7 +191,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const g7 = await page.inputValue('#dlg select[name=m4]');
   await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 400); const pv = await page.innerText('#dlg');
   await page.click('#dlg [data-a=ocGo]'); await H.settle(page, 600);
-  const ic = calls.filter((c) => c.n === 'importCusts').pop();
+  const ic = calls.filter((c) => c.n === 'startImport' && c.d.kind === 'cust').pop(); // 11.11.2026: ייבוא ברקע
   check('7 ייבוא: עמודת "סניף" מזוהה כסניף הניוד, נשלח מזהה הסניף; סניף לא קיים – שורה מסומנת', g7 === 'pbr' && !!ic && ic.d.rows.length === 1 && ic.d.rows[0].ports[0].br === 'br2' && /שורה 3: סניף/.test(pv), { g7, rows: ic && ic.d.rows, pv: pv.slice(0, 200) });
   // 9 (2026-11-09, Dפון): מנהל־על שנכנס לעסק – כל קריאות ההזמנות נושאות bizId של העסק שנבחר; מנהל רגיל – בלי bizId
   const n0 = calls.length;
