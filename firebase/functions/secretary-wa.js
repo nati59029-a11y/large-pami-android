@@ -134,6 +134,12 @@ async function sendAuto(db, ctx, to, text, kind, o) {
   const cs = await db.doc('sec_cfg/wa').get();
   const cfg = waCfgOf(cs);
   if (cfg.stop.on) { await db.collection('sec_log').doc().set(wlog('', 'auto', 'autoStopped', { tgt: to, note: kind })); return { stopped: true }; }
+  // פעם אחת לכל הודעה: סימון ב-sec_in לפני השליחה (בטרנזקציה). עיבוד חוזר של אותה הודעה לא שולח שוב פתיחה / "קיבלנו" / תשובה למנהל
+  if (ctx.in) {
+    const iRef = db.doc('sec_in/' + ctx.in);
+    const first = await db.runTransaction(async (tx) => { const c = await tx.get(iRef); if (!c.exists || c.get('autoAt')) return false; tx.update(iRef, { autoAt: now, autoK: kind }); return true; });
+    if (!first) { await db.collection('sec_log').doc().set(wlog('', 'auto', 'autoDup', { tgt: to, note: kind })); return { dup: true }; }
+  }
   if (!(await countOut(db, now))) { await db.collection('sec_log').doc().set(wlog('', 'auto', 'outLimit', { note: kind })); return { limit: true }; }
   try {
     const r = await (o.send || W.send)(o.token, ctx.pnid, to, { text });
@@ -269,7 +275,8 @@ async function workIn(id, o) {
     return r;
   } catch (e) {
     const reason = String((e && e.details && e.details.reason) || (e && (e.code || e.name)) || 'error').slice(0, 40);
-    await ref.update({ st: 'err', err: reason, ea: now }).catch(() => {});
+    // רק אם ההודעה עדיין בעבודה שלנו – תוצאה שכבר נשמרה (done) לא נדרסת ל-err, ולכן לא תעובד שוב (סבב 2)
+    await db.runTransaction(async (tx) => { const c = await tx.get(ref); if (c.exists && c.get('st') === 'work' && c.get('wk') === now) tx.update(ref, { st: 'err', err: reason, ea: now }); }).catch(() => {});
     await db.collection('sec_log').doc().set(wlog('', 'sec', 'waErr', { tgt: id, note: reason })).catch(() => {});
     logger.error('secretary-wa: work failed', { reason });
     await errMark(db, false, now).catch(() => {});
@@ -350,12 +357,14 @@ async function doMgr(db, id, x, o) {
   }
   reply = reply.slice(0, W.DRAFT_MAX);
   const b = db.batch();
-  b.set(db.collection(`sec_chat/${uid}/m`).doc(), { t: now, role: 'u', text: (tr ? '🎤 ' : '') + text.slice(0, 2000), ch: 'wa' });
-  b.set(db.collection(`sec_chat/${uid}/m`).doc(), { t: now + 1, role: 'a', text: reply, ch: 'wa' });
+  // מזהה קבוע לפי מזהה ההודעה – עיבוד חוזר לא מוסיף שיחה כפולה
+  b.set(db.doc(`sec_chat/${uid}/m/wa_${id}_u`), { t: now, role: 'u', text: (tr ? '🎤 ' : '') + text.slice(0, 2000), ch: 'wa' });
+  b.set(db.doc(`sec_chat/${uid}/m/wa_${id}_a`), { t: now + 1, role: 'a', text: reply, ch: 'wa' });
   for (const l of logs) b.set(db.collection('sec_log').doc(), l);
   b.set(db.collection('sec_log').doc(), wlog(uid, 'sec', 'waMgr', { tgt: id, note: intent + (tools.length ? ':' + tools.join('+') : '') }));
   b.update(ref, Object.assign({ st: 'done', intent, tools }, tr ? { tr } : {}));
   await b.commit();
+  if (o.afterCommit) await o.afterCommit(); // בדיקות בלבד: כשל אחרי השמירה (o מגיע רק מקוד פנימי)
   const s = await sendAuto(db, ctx, x.from, reply, 'mgr', o);
   return { intent, tools, created: created.map((e) => e.id), reply, sent: !!s.sent, stopped: !!s.stopped };
 }
@@ -382,6 +391,10 @@ async function calCreate(db, uid, inId, a, today, now, created, logs) {
   const ev = K.cleanEvent({ title: a.title, d: a.d, tm: a.tm, note: a.note }); // רק השדות האלה. uid / biz / מוזמנים – לא נלקחים מהמודל
   if (!ev) return { error: 'כותרת, תאריך (YYYY-MM-DD) ושעה (HH:MM) תקינים' };
   if (ev.d < today) return { error: 'התאריך כבר עבר' };
+  // מזהה קבוע לפי ההודעה ומספר היצירה בה – עיבוד חוזר של אותה הודעה לא יוצר אירוע כפול ולא נספר שוב במגבלה
+  const ref = db.doc('sec_cal/w' + inId + '_' + created.length);
+  const ex = await ref.get();
+  if (ex.exists) { const e = ex.data(); created.push({ id: ref.id, off: K.offKind(e.d), title: e.title, d: e.d, tm: e.tm || '' }); return { ok: true, id: ref.id, title: e.title, d: e.d, tm: e.tm || '' }; }
   const use = db.doc('sec_cfg/wa_use'), d = dayKey(now);
   const ok = await db.runTransaction(async (tx) => {
     const s = await tx.get(use);
@@ -393,9 +406,8 @@ async function calCreate(db, uid, inId, a, today, now, created, logs) {
   });
   if (!ok) { logs.push(wlog(uid, 'sec', 'calLimit', { tgt: inId })); return { error: 'הגעת למגבלת היצירה מווצאפ להיום (' + W.MGR_DAY + '). אפשר להמשיך באפליקציה.' }; }
   if ((await db.collection('sec_cal').select().limit(K.CAL_MAX).get()).size >= K.CAL_MAX) return { error: 'היומן מלא' };
-  const ref = db.collection('sec_cal').doc();
   const doc = Object.assign({ uid, st: 'ok', src: 'wa', by: uid, t: now, wa: inId }, ev, a.kind === 'ev' ? {} : { rem: true });
-  await ref.set(doc);
+  await ref.create(doc);
   logs.push(wlog(uid, 'sec', 'calAdd', { tgt: ref.id, note: 'wa' }));
   const off = K.offKind(ev.d);
   created.push(Object.assign({ id: ref.id, off }, ev));
@@ -486,11 +498,13 @@ async function doSec(db, id, x, o) {
   if (why.length) flags.push('chk');           // 90: "לבדוק לפני שליחה"
   if (unsure || !draft) flags.push('unsure');  // 24: "לא בטוחה" + התראה
   const b = db.batch();
-  if (draft) b.set(db.doc('sec_draft/' + id), { in: id, wa: x.from, text: draft, lang: W.langOf(draft) || lang, cls, flags, why, src, st: 'pend', t: now, tf: now });
+  const dEx = draft ? (await db.doc('sec_draft/' + id).get()).exists : false; // טיוטה שכבר קיימת (אולי כבר נשלחה) – לא נדרסת בעיבוד חוזר
+  if (draft && !dEx) b.create(db.doc('sec_draft/' + id), { in: id, wa: x.from, text: draft, lang: W.langOf(draft) || lang, cls, flags, why, src, st: 'pend', t: now, tf: now });
   b.update(ref, Object.assign({ st: 'done', cls, lang, flags, draft: draft ? id : '' }, tr ? { tr } : {}));
   b.set(sRef, { lastCls: cls }, { merge: true });
   b.set(db.collection('sec_log').doc(), wlog('', 'sec', 'draft', { tgt: id, note: cls + (flags.length ? ':' + flags.join('+') : '') + ':' + src }));
   await b.commit();
+  if (o.afterCommit) await o.afterCommit(); // בדיקות בלבד
   if (flags.includes('unsure')) await notifyMgrs(db, 'unsure|' + id, 'המזכירה לא בטוחה בטיוטה', 'הודעה מ-' + W.waShow(x.from) + ' מחכה לבדיקה שלך בתיבת ההודעות.', now).catch(() => {});
   // אוטומטי – רק תבניות קבועות שהמנהל אישר: הודעת פתיחה (97) בפעם הראשונה, "קיבלנו" מחוץ לשעות ביום חול (22)
   const parts = [], kinds = [];

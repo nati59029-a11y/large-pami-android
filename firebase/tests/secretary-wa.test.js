@@ -703,6 +703,64 @@ describe('תיקונים 4–5: הודעה שלא עובדה חוזרת לתור
   });
 });
 
+describe('סבב 2: כשל אחרי השמירה ועיבוד חוזר – בלי כפילות', () => {
+  beforeEach(() => seed({ wa: { ack: { on: true, text: 'קיבלנו, נחזור אליך מחר בבוקר.' }, open: { on: true, text: 'שלום! כאן המזכירה הממוחשבת.' }, ackH: { f: '08:00', t: '18:00' } } }));
+  const NOW = Date.parse('2026-11-16T20:30:00+02:00'); // יום שני בערב – פתיחה + "קיבלנו"
+  const boom = () => { throw Object.assign(new Error('after commit'), { code: 'unavailable' }); };
+  async function put(wamid, from, text, own) {
+    const id = W.msgId(wamid);
+    await prep(async (d) => {
+      await d.doc(`b/${A}/sec_in/${id}`).set(Object.assign({ wamid, ch: 'wa', from, pnid: PN_A, name: '', t: NOW, rt: NOW, type: 'text', text, own, st: 'new', flags: [], tf: NOW }, own === 'mgr' ? { mgr: M1 } : {}));
+      await d.doc(`b/${A}/sec_snd/${from}`).set({ wa: from, lastIn: NOW, n: 1 }, { merge: true });
+    });
+    return id;
+  }
+  // מה ש-requeue עושה להודעה שחוזרת לתור
+  const requeueLike = (id) => prep((d) => d.doc(`b/${A}/sec_in/${id}`).update({ st: 'new', rq: 1 }));
+  it('פונה מבחוץ: שגיאה אחרי השמירה לא דורסת done; עיבוד חוזר – טיוטה אחת שלא חוזרת ל-pend, ופתיחה+"קיבלנו" נשלחות פעם אחת', async () => {
+    const S = [];
+    const send = async (tok, pnid, to, p) => { S.push(p.text); return { wamid: 'wamid.S' + S.length }; };
+    const ai = async () => ({ text: '', calls: [{ name: 'prepareReplyDraft', args: { text: 'תודה, נחזור אליך.', cls: 'other' } }], usage: { in: 10, out: 5 } });
+    const id = await put('wamid.D1', OUT1, 'שלום', 'sec');
+    const r1 = await WA.work(A, id, { now: NOW, send, ai, token: 'tok', afterCommit: boom });
+    assert.ok(r1.err);
+    assert.equal((await get(`b/${A}/sec_in/${id}`)).st, 'done', 'done לא נדרס ל-err');
+    // המנהל שולח את הטיוטה, ואז ההודעה מעובדת שוב (למשל אחרי שנקטעה)
+    await prep((d) => d.doc(`b/${A}/sec_draft/${id}`).update({ st: 'sent' }));
+    await WA.work(A, id, { now: NOW, send, ai, token: 'tok' }); // st=done – לא נלקחת בכלל
+    await requeueLike(id);
+    await WA.work(A, id, { now: NOW + 1000, send, ai, token: 'tok' });
+    await requeueLike(id);
+    await WA.work(A, id, { now: NOW + 2000, send, ai, token: 'tok' });
+    const drafts = (await coll(`b/${A}/sec_draft`)).filter((x) => x.in === id && !x.auto);
+    assert.equal(drafts.length, 1); assert.equal(drafts[0].st, 'sent', 'הטיוטה שנשלחה לא חוזרת ל-pend');
+    assert.equal(S.length, 1, 'שליחה אוטומטית אחת'); assert.match(S[0], /המזכירה הממוחשבת/); assert.match(S[0], /קיבלנו/);
+    assert.equal((await coll(`b/${A}/sec_draft`)).filter((x) => x.auto).length, 1);
+  });
+  it('מספר המנהל: כשל אחרי השמירה + עיבוד חוזר – אירוע אחד, שיחה אחת, תשובה אחת', async () => {
+    const S = [];
+    const send = async (tok, pnid, to, p) => { S.push(p.text); return { wamid: 'wamid.S' + S.length }; };
+    const ai = async (q) => { const l = q.turns[q.turns.length - 1]; return l.role === 'res' ? { text: 'סיימתי', usage: {} } : { calls: [{ name: 'createCalendarItem', args: { title: 'תור לרופא', d: '2026-11-17', tm: '10:00' } }], usage: {} }; };
+    const id = await put('wamid.D2', NUM_M1, 'תזכירי לי מחר ב-10 תור לרופא', 'mgr');
+    const r1 = await WA.work(A, id, { now: NOW, send, ai, token: 'tok', afterCommit: boom });
+    assert.ok(r1.err); assert.equal((await get(`b/${A}/sec_in/${id}`)).st, 'done');
+    await requeueLike(id);
+    await WA.work(A, id, { now: NOW + 1000, send, ai, token: 'tok' });
+    await requeueLike(id);
+    await WA.work(A, id, { now: NOW + 2000, send, ai, token: 'tok' });
+    const cal = await coll(`b/${A}/sec_cal`);
+    assert.equal(cal.length, 1); assert.equal(cal[0].uid, M1); assert.equal(cal[0].title, 'תור לרופא');
+    assert.equal((await coll(`b/${A}/sec_chat/${M1}/m`)).length, 2, 'שאלה + תשובה, פעם אחת');
+    assert.equal(S.length, 1); assert.match(S[0], /^נקבע: תור לרופא/);
+    assert.equal((await get(`b/${A}/sec_cfg/wa_use`)).md[M1].n, 1, 'נספר פעם אחת במגבלה היומית');
+  });
+  it('שגיאה לפני השמירה – עדיין err (וחוזרת לתור)', async () => {
+    const id = await put('wamid.D3', OUT2, 'שלום', 'sec');
+    await WA.work(A, id, { now: NOW, send: async () => ({}), ai: async () => { throw Object.assign(new Error('x'), { code: 'unavailable' }); }, token: 'tok' });
+    assert.equal((await get(`b/${A}/sec_in/${id}`)).st, 'err');
+  });
+});
+
 describe('secDaily (9.5): הודעה ב-sec_in בת יותר מ-12 חודשים מצטמצמת לתקציר, צעירה נשארת', () => {
   beforeEach(() => seed());
   it('ריצה מדומה', async () => {
