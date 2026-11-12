@@ -22,7 +22,7 @@ function load() {
     let j = i + 1; while (j < L.length && L[j].startsWith(' ')) j++;
     return L.slice(i, j).join('\n');
   });
-  const pre = 'var S={zc:[]},ADM=true,SRV=false,CALLS=[];const isA=()=>ADM,coVer=()=>true,gv=()=>"",ils=n=>String(Math.round((n||0)*100)/100),coSrvOn=()=>SRV,idOk=s=>typeof s===\'string\'&&/^[A-Za-z0-9_-]{1,80}$/.test(s),fnCall=async(n,a)=>{CALLS.push([n,a]);return{s:777}},zcChkR=()=>{},zcRe=()=>{};\n';
+  const pre = 'var S={zc:[]},ADM=true,SRV=false,CALLS=[];const isA=()=>ADM,coVer=()=>true,gv=()=>"",ils=n=>String(Math.round((n||0)*100)/100),coSrvOn=()=>SRV,coSlipMiss=()=>false,idOk=s=>typeof s===\'string\'&&/^[A-Za-z0-9_-]{1,80}$/.test(s),fnCall=async(n,a)=>{CALLS.push([n,a]);return{s:777}},zcChkR=()=>{},zcRe=()=>{};\n';
   const post = '\n;({S,COQ,COT,CALLS,setSrv:(v)=>{SRV=v},setZQP:(v)=>{ZQP=v},setAdm:(v)=>{ADM=v},zcB,coIn,coOldX,coChk,coLost,zcPendBefore,zsDepAuto,coMerge,COM,zcTime,coScanParse,ZPB})';
   return vm.runInNewContext(pre + chunks.join('\n') + post, {}, { filename: 'index.html (חלקים)' });
 }

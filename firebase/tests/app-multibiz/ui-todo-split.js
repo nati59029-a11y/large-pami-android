@@ -31,7 +31,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     NAV = [{ v: 'home' }]; go('todo');
     const opts = [...document.querySelectorAll('#main [data-v=inbox]')].map((b) => ({ k: b.dataset.arg, n: (b.querySelector('.tag') || {}).textContent || '', t: b.innerText }));
     const c = todoC();
-    const ids = (k) => { NAV.push({ v: 'inbox', a: k }); render(1); const r = [...document.querySelectorAll('#main [data-a=inbOk]')].map((b) => b.dataset.id); NAV.pop(); return r; };
+    const ids = (k) => { NAV.push({ v: 'inbox', a: k }); render(1); const r = [...document.querySelectorAll('#main [data-a=inbEdit]')].map((b) => b.dataset.id); NAV.pop(); return r; };
     const g = { reg: ids('reg'), sup: ids('sup'), exp: ids('exp'), all: ids(undefined) };
     render(1);
     const tile = (() => { const d = document.createElement('div'); d.innerHTML = adTiles(); return [...d.querySelectorAll('[data-v=todo] .tag')].map((e) => +e.textContent); })();
@@ -48,12 +48,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // 7. קבוצת החשבוניות: יש "בדיקה ושינוי" ו"אשר", והאישור מכניס הוצאה ומוציא מהרשימה
   const r7 = await page.evaluate(async () => {
     NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'sup'); await new Promise((r) => setTimeout(r, 50));
-    const ttl = document.getElementById('ttl').innerText, edit = !!document.querySelector('#main [data-a=inbEdit][data-id=tsSup]'), ok = document.querySelector('#main [data-a=inbOk][data-id=tsSup]');
+    const ttl = document.getElementById('ttl').innerText, edit = !!document.querySelector('#main [data-a=inbEdit][data-id=tsSup]') && document.querySelectorAll('#main .card button[data-a]').length === 1; ACT.inbEdit({ dataset: { id: 'tsSup' } }); const hasOk = !!document.querySelector('#dlg[open] [data-a=inbSaveOk]') && !!document.querySelector('#dlg[open] [data-a=inbNo][data-id=tsSup]'); closeDlg(); const ok = { dataset: { id: 'tsSup' } };
     const n0 = S.tx.length; await ACT.inbOk(ok); await new Promise((r) => setTimeout(r, 300));
     const dlgOpen = !!document.querySelector('#dlg[open]'); let btn = document.querySelector('#dlg[open] [data-a=closeDlg]');
-    return { ttl, edit, added: S.tx.length - n0, gone: !S.inbox.some((x) => x.id === 'tsSup'), stay: cur().v === 'inbox' && cur().a === 'sup', dlgOpen, dlgTxt: dlgOpen ? document.querySelector('#dlg').innerText.slice(0, 200) : '', btn: !!btn };
+    return { ttl, edit, hasOk, added: S.tx.length - n0, gone: !S.inbox.some((x) => x.id === 'tsSup'), stay: cur().v === 'inbox' && cur().a === 'sup', dlgOpen, dlgTxt: dlgOpen ? document.querySelector('#dlg').innerText.slice(0, 200) : '', btn: !!btn };
   });
-  check('7 קבוצת החשבוניות: כותרת נכונה, כפתורי "בדיקה ושינוי" ו"אשר"; אישור מכניס הוצאה אחת ומוציא את החשבונית מהרשימה', /חשבוניות ספקים/.test(r7.ttl) && r7.edit && r7.added === 1 && r7.gone && r7.stay, r7);
+  check('7 קבוצת החשבוניות: כותרת נכונה, בכרטיס רק "בדיקה", ובמסך הבדיקה "שמור ואשר" ו"דחה"; אישור מכניס הוצאה אחת ומוציא את החשבונית מהרשימה', /חשבוניות ספקים/.test(r7.ttl) && r7.edit && r7.hasOk && r7.added === 1 && r7.gone && r7.stay, r7);
 
   // 8. קבוצות אחרות לא נעלמו: שולם-ממתין לחשבונית, חשבוניות לטיפול, ממתין לטיפול (mq)
   const r8 = await page.evaluate(() => {

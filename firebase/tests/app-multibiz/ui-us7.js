@@ -113,9 +113,9 @@ const dl = async (page, fn) => { const p = page.waitForEvent('download', { timeo
     const f6c = await dl(page, () => page.click('#main [data-a=dxShare][data-via=zsImg][data-k=d]')); check(T + '6ד שיתוף צילומי ההפקדה', /\.pdf$/.test(f6c || ''), f6c);
     // 7. תיבת הוצאות מעובדים: צפייה ושיתוף + מי הכניס
     await page.evaluate(() => { S.inbox = [{ id: 'ib1', by: 'דנה', ow: 'w1', at: new Date().toISOString(), d: { cat: 'e_sup', catName: 'ספקים', sub: 's1', subName: 'ספק בדיקה', amt: '50', date: today(), inv: 'IB-1' }, file: 'fImg', np: 1 }]; NAV = [{ v: 'home' }]; go('inbox'); }); await H.settle(page, 400);
-    const i7 = await page.evaluate(() => ({ v: !!document.querySelector('#main [data-a=inbView]'), s: !!document.querySelector('#main [data-a=dxShare][data-f=fImg]'), who: /הוכנס על ידי דנה/.test(document.querySelector('#main').innerText) }));
+    const i7 = await page.evaluate(async () => { const who = /הוכנס על ידי דנה/.test(document.querySelector('#main').innerText), one = document.querySelectorAll('#main .card button[data-a]').length === 1; ACT.inbEdit({ dataset: { id: 'ib1' } }); await new Promise((r) => setTimeout(r, 300)); return { v: one && !!document.querySelector('#dlg[open] #inbDoc .zb img'), s: !!document.querySelector('#dlg[open] [data-a=dxShare][data-f=fImg]'), who }; });
     check(T + '7 הוצאות מעובדים: צפייה ושיתוף ו"הוכנס על ידי"', i7.v && i7.s && i7.who, i7); await shot('05-הוצאות-מעובדים');
-    const f7 = await dl(page, () => page.click('#main [data-a=dxShare][data-f=fImg]')); check(T + '7א שיתוף מהתיבה', /\.jpg$/.test(f7 || ''), f7);
+    const f7 = await dl(page, () => page.click('#dlg[open] [data-a=dxShare][data-f=fImg]')); check(T + '7א שיתוף מהתיבה', /\.jpg$/.test(f7 || ''), f7); await page.evaluate(() => closeDlg());
     // 8. המסך האחיד: "הוכנס על ידי" בחלונית, ו-PDF מוצג בחלונית
     await page.evaluate(() => { S.inbox = []; usReset(); NAV = [{ v: 'home' }]; render(0); }); await H.settle(page, 300);
     await page.evaluate(() => { window.USCLS = async () => ({ kind: 'unknown' }); usOpen(); });
