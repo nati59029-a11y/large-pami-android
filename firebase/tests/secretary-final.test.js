@@ -18,6 +18,12 @@ async function coll(p) { let v = []; await prep(async (d) => { v = (await d.coll
 async function get(p) { let v = null; await prep(async (d) => { const s = await d.doc(p).get(); v = s.exists ? s.data() : null; }); return v; }
 const IL = (s) => Date.parse(s + ':00+02:00'); // נובמבר 2026: UTC+2
 
+// אמולטור הפונקציות רץ (ב-CI)? אז הטריגר על sec_waq מעבד ומוחק את רשומות התור, ולכן אותן לא סופרים. נבדק מול ה-hub המקומי של האמולטורים
+async function fnLive() {
+  if (process.env.FUNCTIONS_EMULATOR_HOST) return true;
+  const hub = process.env.FIREBASE_EMULATOR_HUB; if (!hub) return false;
+  try { const j = await (await fetch('http://' + hub + '/emulators')).json(); return !!(j && j.functions); } catch (e) { return false; }
+}
 async function seed(o) {
   const opt = Object.assign({ cfg: {}, nt: {}, featB: true }, o);
   await env.clearFirestore();
@@ -353,7 +359,7 @@ describe('קריטריון 2 (ליקוי שנמצא בבדיקת העומס): ח
     const r = await T.runInBiz({ bizId: A, prefix: T.bizPrefix(BIZA), biz: BIZA }, () => INV.requeue(T.tdb(), A, t0));
     assert.deepEqual(r, { requeued: 2, failed: 0 });
     assert.equal((await get(`b/${A}/sec_inv/${id1}`)).st, 'q'); assert.equal((await get(`b/${A}/sec_inv/${id3}`)).st, 'qw');
-    if (!process.env.FUNCTIONS_EMULATOR_HOST) {
+    if (!(await fnLive())) {
       const q = (await coll('sec_waq')).filter((x) => x.biz === A && x.inv === true);
       assert.deepEqual(q.map((x) => x.id).sort(), [id1, id2].sort());
     }

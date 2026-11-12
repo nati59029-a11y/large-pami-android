@@ -29,6 +29,12 @@ async function coll(p) { let v = []; await prep(async (d) => { v = (await d.coll
 async function inBiz(fn) { const b = await T.loadBiz(A); return T.runInBiz({ bizId: A, prefix: T.bizPrefix(b), biz: b }, () => fn(T.tdb())); }
 const chunks = (L, n) => Array.from({ length: Math.ceil(L.length / n) }, (_, i) => L.slice(i * n, (i + 1) * n));
 
+// אמולטור הפונקציות רץ (ב-CI)? אז הטריגר על sec_waq מעבד ומוחק את רשומות התור, ולכן אותן לא סופרים. נבדק מול ה-hub המקומי של האמולטורים
+async function fnLive() {
+  if (process.env.FUNCTIONS_EMULATOR_HOST) return true;
+  const hub = process.env.FIREBASE_EMULATOR_HUB; if (!hub) return false;
+  try { const j = await (await fetch('http://' + hub + '/emulators')).json(); return !!(j && j.functions); } catch (e) { return false; }
+}
 async function seed() {
   await env.clearFirestore();
   GO.reset();
@@ -94,7 +100,7 @@ describe('עומס: ווצאפ, מייל ותור חשבוניות – בלי א
       assert.equal(L.filter((s) => s === 'over').length, 5, wa + ': 5 מעל המגבלה – נשמרו בלי עיבוד');
     }
     // בלי אמולטור הפונקציות התור נשאר לבדיקה; איתו (CI) הטריגר מעבד ומוחק את רשומות התור
-    if (!process.env.FUNCTIONS_EMULATOR_HOST) { const q = (await coll('sec_waq')).filter((x) => x.biz === A); assert.equal(q.length, 160, 'רשומה אחת בתור לכל הודעה לעיבוד – בלי כפילות'); }
+    if (!(await fnLive())) { const q = (await coll('sec_waq')).filter((x) => x.biz === A); assert.equal(q.length, 160, 'רשומה אחת בתור לכל הודעה לעיבוד – בלי כפילות'); }
     const snd = await coll(`b/${A}/sec_snd`);
     assert.ok(snd.every((x) => x.n === 10 && x.rn === 10), 'מונה לכל שולח – מדויק');
     assert.equal((await get(`b/${A}/sec_cfg/wa_use`)).n, 320, 'מונה ההצפה – מדויק');
