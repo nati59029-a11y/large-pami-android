@@ -31,3 +31,5 @@ if (!/^SEC_SENS_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\
 if (!/^WA_APP_SECRET=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nWA_APP_SECRET=DUMMY-WA-APP-SECRET-3c1f\nWA_VERIFY_TOKEN=DUMMY-WA-VERIFY-77ab\nWA_ACCESS_TOKEN=DUMMY-WA-ACCESS-TOKEN-9e2d\n');
 // סודות דמה ל-Gmail ויומן Google של המזכירה (שלב 6, secretary-google.js) – לא סודות אמיתיים של Google. SEC_GOOGLE_KEY – 32 בתים קבועים (base64)
 if (!/^SEC_GOOGLE_KEY=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nSEC_GOOGLE_KEY=' + Buffer.from('test-only-sec-google-key-32bytes').toString('base64') + '\nGOOGLE_CLIENT_SECRET=DUMMY-GOOGLE-CLIENT-SECRET-41ac\n');
+// מפתח GitHub לבנייה מיידית (requestBizApk, 12.11.2026): "unset" באמולטור – הפונקציה מחזירה no-token ולא פונה ל-GitHub
+if (!/^GH_DISPATCH_TOKEN=/m.test(fs.readFileSync(f, 'utf8'))) fs.appendFileSync(f, '\nGH_DISPATCH_TOKEN=unset\n');

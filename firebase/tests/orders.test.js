@@ -426,6 +426,36 @@ describe('לארג\' פעמי במצב legacy (שורש)', () => {
     await assertFails(db('l_off').doc('prod/pA').get());
     assert.equal((await call('createOrder', 'l_off', { reqId: rid(), cust, items: [{ n: 'x', qty: 1, price: 1 }] })).reason, 'staff-disabled');
   });
+  it('fb/ord-perm-enforce: מתג "הזמנות" בשורש – עובד עם perms.ord=false חסום בחוקים ובשרת; בלי perms / ord=true / מנהל – מורשים', async () => {
+    await seedL();
+    const OFF = 'l_off_ord', ON = 'l_on_ord';
+    await prep(async (d) => {
+      const b = d.batch();
+      b.set(d.doc('staff/' + OFF), { name: OFF, role: 'employee', active: true, perms: NONE });
+      b.set(d.doc('staff/' + ON), { name: ON, role: 'employee', active: true, perms: Object.assign({}, NONE, { ord: true }) });
+      b.set(d.doc('ord/o1'), { br: '_', total: 5, status: 'new', no: 1 });
+      b.set(d.doc('ord/o1/log/l1'), { at: 1 });
+      b.set(d.doc('stockLog/s1'), { br: '_', pid: 'pA', d: 1 });
+      b.set(d.doc('cat/c1'), { name: 'עוגות' });
+      b.set(d.doc('xfer/x1'), { from: '_', to: '_', items: [] });
+      b.set(d.doc('cust/k1'), { name: 'דנה', phone: '0501234567' });
+      b.set(d.doc('ordcfg/main'), { v: 1 });
+      b.set(d.doc('custcfg/main'), { v: 1 });
+      await b.commit();
+    });
+    const reads = (u) => [
+      () => db(u).doc('ord/o1').get(), () => db(u).collection('ord').get(), () => db(u).collection('ord/o1/log').get(),
+      () => db(u).doc('prod/pA').get(), () => db(u).collection('prod').get(), () => db(u).doc('prod/pA/p/cost').get(),
+      () => db(u).collection('stockLog').get(), () => db(u).collection('cat').get(), () => db(u).doc('xfer/x1').get(),
+      () => db(u).doc('cust/k1').get(), () => db(u).collection('cust').get(), () => db(u).doc('ordcfg/main').get(), () => db(u).doc('custcfg/main').get(),
+    ];
+    for (const f of reads(OFF)) await assertFails(f());
+    for (const u of [LE, ON, LM, SUPER]) for (const f of reads(u)) await assertSucceeds(f());
+    // השרת: אותה תוצאה (hasPerm קורא את staff/{uid} בשורש)
+    assert.equal((await call('createOrder', OFF, { reqId: rid(), cust, items: [{ n: 'x', qty: 1, price: 1 }] })).reason, 'no-perm');
+    assert.equal((await call('saveCust', OFF, { name: 'א', phone: '0501111111' })).reason, 'no-perm');
+    assert.equal((await call('createOrder', ON, { reqId: rid(), cust, items: [{ n: 'x', qty: 1, price: 1 }] })).status, 'OK');
+  });
   it('מעבר לטלפון מנקה את pay.sup; מייל עם רצף ספרות נדחה', async () => {
     await seed();
     await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup: { id: 's1', name: 'ספק' } });

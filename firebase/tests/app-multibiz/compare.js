@@ -30,6 +30,13 @@ if (mode === 'legacy') {
   const lvK = (r) => (r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) ? Object.keys(lvQ).find((k) => lvQ[k] === r.body) : undefined);
   for (const k of Object.keys(lvQ)) { const na = A.filter((r) => lvK(r) === k).length, nb = B2.filter((r) => lvK(r) === k).length; console.log(`הגעה מיידית – שאילתת ${k}: main ${na}, ענף ${nb}`); if (nb < na) { console.log('נכשל: בענף פחות שאילתות ' + k + ' מאשר ב-main'); fail++; } }
   for (const L of [A, B2]) for (let i = L.length - 1; i >= 0; i--) if (lvK(L[i])) L.splice(i, 1);
+  /* משימות פרטיות, בקשות למנהל (feature/recurring-private-requests, 12.11.2026): שאילתות runQuery חדשות על האוספים rq ו-ptk (בקשות עובד/מנהל, משימות פרטיות, נמשכות עם tkLoad ו-inbTick).
+     חריג צר ומכוון: רק POST :runQuery שהאוסף שלו rq או ptk, רק בענף (ב-main אין אוספים כאלה). כל שאר הבקשות – אותו סדר ואותו גוף */
+  const rpQ = (r) => { try { return r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && ['rq', 'ptk'].includes(JSON.parse(r.body).structuredQuery.from[0].collectionId); } catch (e) { return false; } };
+  /* 12.11 (אחרי המיזוג של #37 ל-main): השאילתות האלה קיימות עכשיו גם ב-main – מוציאים אותן משני הצדדים (מספרן תלוי בזמן) */
+  let rpN = 0, rpA = 0; for (let i = B2.length - 1; i >= 0; i--) if (rpQ(B2[i])) { rpN++; B2.splice(i, 1); }
+  for (let i = A.length - 1; i >= 0; i--) if (rpQ(A[i])) { rpA++; A.splice(i, 1); }
+  console.log(`בקשות/פרטיות – שאילתות על rq ו-ptk: main ${rpA}, ענף ${rpN}`);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');

@@ -15,7 +15,7 @@ const hook = require(path.join(FN_DIR, 'yemot-hook.js')); // tzintukJoin מוש�
 const R = require(path.join(FN_DIR, 'lib', 'region.js'));
 
 const BOTH = ['europe-west1', 'us-central1'];
-const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync'];
+const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync', 'recurringTasks'];
 const ep = (f) => f && f.__endpoint;
 const regions = (f) => [].concat(ep(f).region || []);
 const entries = Object.entries(ex).filter(([, f]) => ep(f));
@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'runImportChunk', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'recurringTasks', 'runImportChunk', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -39,7 +39,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.deepEqual(bad, [], 'פונקציות onCall בלי שני האזורים: ' + bad.join(', '));
   });
 
-  it('12 הפונקציות המיוחדות – באזור us-central1 בלבד', () => {
+  it('13 הפונקציות המיוחדות – באזור us-central1 בלבד', () => {
     for (const n of SINGLE) {
       const f = ex[n] || hook[n];
       assert.ok(ep(f), n + ' לא נמצאה');
@@ -49,6 +49,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.ok(ep(ex.expirePromosOnLine).scheduleTrigger, 'expirePromosOnLine מתוזמנת');
     assert.ok(ep(ex.secBackupDaily).scheduleTrigger, 'secBackupDaily מתוזמנת (גיבוי המזכירה)');
     assert.ok(ep(ex.secRemind).scheduleTrigger && ep(ex.secDaily).scheduleTrigger, 'secRemind ו-secDaily מתוזמנות (המזכירה שלב 4)');
+    assert.ok(ep(ex.recurringTasks).scheduleTrigger, 'recurringTasks מתוזמנת (משימות קבועות, 12.11.2026)');
     assert.ok(ep(ex.syncLegacyAdmin).eventTrigger && ep(ex.syncLegacyStaff).eventTrigger, 'טריגרים של Firestore');
   });
 
