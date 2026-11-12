@@ -36,7 +36,10 @@ async function call(fn, uid, data) {
   try { return { ok: true, r: await CORE.call[fn](req(uid, data)) }; } catch (e) { return { ok: false, code: e.code, reason: e.details && e.details.reason, msg: e.message }; }
 }
 function fakeRes() { return { code: 0, headers: {}, body: '', headersSent: false, status(c) { this.code = c; return this; }, set(h) { Object.assign(this.headers, h); return this; }, send(b) { this.body = b; this.headersSent = true; return this; } }; }
-async function cb(query) { const res = fakeRes(); await CORE.handleCb({ method: 'GET', query, originalUrl: '/secOAuthCb?' + new URLSearchParams(query) }, res); return res; }
+// תיקון סבב 1 (6): אחרי החזרה מ-Google השרת מציג דף אישור ("לחבר את <כתובת> לעסק <שם>?"). העזר מאשר אותו כמו לחיצה על "כן" (אלא אם raw) – כך הבדיקות הקיימות בודקות את החיבור המלא
+const confirmTok = (res) => { const m = /name="tok" value="([A-Za-z0-9_-]{43})"/.exec(res.body || ''); return m ? m[1] : ''; };
+async function confirmCb(tok, ok) { const res = fakeRes(); await CORE.handleCb({ method: 'POST', body: { tok, ok: ok === undefined ? '1' : ok }, originalUrl: '/secOAuthCb' }, res); return res; }
+async function cb(query, raw) { const res = fakeRes(); await CORE.handleCb({ method: 'GET', query, originalUrl: '/secOAuthCb?' + new URLSearchParams(query) }, res); const tok = confirmTok(res); return tok && !raw ? confirmCb(tok) : res; }
 // חיבור מלא: קישור מהשרת → "הסכמה" בדמה (קוד עם ה-challenge מה-URL) → חזרה ל-secOAuthCb
 async function connect(uid, kind, o) {
   const opt = o || {};
@@ -870,5 +873,85 @@ describe('תיקון 5: שטף מיילים – נקודת ההמשך מתקדמ
     const L = await inA();
     assert.deepEqual(L.map((x) => x.subj).sort(), ['ת 0', 'ת 2', 'ת 3', 'ת 4']);
     assert.equal((await boxCfg()).lag, false);
+  });
+});
+
+describe('תיקון 6: חטיפת חיבור – דף אישור בשרת לפני השלמת החיבור, והודעה לכל מנהלי העסק', () => {
+  beforeEach(async () => { await seed(); const b = await get('b/' + A); await put('b/' + A, Object.assign(b, { name: 'מאפיית רותי' })); });
+  const start = async (uid, kind, email, clean) => {
+    const r = await call('secGoogle', uid, { op: 'connect', kind, clean });
+    assert.ok(r.ok, r.msg);
+    const u = new URL(r.r.url);
+    return cb({ state: u.searchParams.get('state'), code: GO.code({ challenge: u.searchParams.get('code_challenge'), scope: u.searchParams.get('scope'), email }) }, true);
+  };
+
+  it('החזרה מ-Google מציגה "לחבר את <כתובת> לעסק <שם>?" – ועד האישור שום דבר לא מחובר; האישור – POST עם אסימון חד־פעמי', async () => {
+    const VICTIM = 'victim@other-biz.example';
+    const res = await start(M1, 'mail', VICTIM);
+    assert.equal(res.code, 200);
+    assert.match(res.body, /מאפיית רותי/, 'שם העסק');
+    assert.ok(res.body.includes(VICTIM), 'כתובת התיבה');
+    assert.match(res.body, /<form method="post" action="http:\/\/127\.0\.0\.1:5001\/demo-largpeami\/us-central1\/secOAuthCb">/);
+    assert.match(res.headers['Content-Security-Policy'], /form-action 'self'/);
+    assert.match(res.headers['Content-Security-Policy'], /frame-ancestors 'none'/);
+    assert.equal(res.headers['X-Frame-Options'], 'DENY');
+    const tok = confirmTok(res);
+    assert.ok(tok);
+    // עדיין לא מחובר: אין ניתוב, אין אסימון, אין תיבה, ואין watch
+    assert.equal(await get('sec_mailroute/' + VICTIM), null);
+    assert.equal((await coll(`b/${A}/private`)).length, 0);
+    assert.equal(await get(`b/${A}/sec_cfg/mail`), null);
+    assert.ok(!GO.state.requests.some((x) => x.path.endsWith('/watch')));
+    // בקשת האישור: נשמר רק הגיבוב של האסימון, והאסימון של Google מוצפן
+    const pend = (await coll('sec_oauth')).filter((x) => x.cf === true);
+    assert.equal(pend.length, 1);
+    assert.ok(!JSON.stringify(pend[0]).includes(tok));
+    assert.ok(!JSON.stringify(pend[0]).includes(Object.keys(GO.state.rts)[0]), 'אסימון ה-refresh לא בגלוי');
+    // אסימון לא תקין / ערך לא תקין – נדחה
+    assert.equal((await confirmCb('A'.repeat(43))).code, 400);
+    assert.equal((await confirmCb(tok, 'yes')).code, 400);
+    assert.equal((await confirmCb('bad')).code, 400);
+    assert.equal((await coll('sec_oauth')).filter((x) => x.cf === true).length, 1, 'ניסיונות פגומים לא שרפו את הבקשה');
+    // בעל התיבה (הקורבן) רואה שזה עסק זר ולוחץ "לא לחבר" – שום דבר לא חובר, וההרשאה בוטלה אצל Google
+    const no = await confirmCb(tok, '0');
+    assert.equal(no.code, 200); assert.match(no.body, /בוטל/);
+    assert.equal(await get('sec_mailroute/' + VICTIM), null);
+    assert.equal((await coll(`b/${A}/private`)).length, 0);
+    assert.equal(GO.state.revoked.length, 1);
+    assert.ok((await logs(A)).some((l) => l.act === 'gConnectNo' && l.note === 'mail:confirm'));
+    assert.equal((await confirmCb(tok)).code, 400, 'שימוש אחד');
+    assert.equal(await get('sec_mailroute/' + VICTIM), null);
+  });
+
+  it('אישור: התיבה מחוברת, וכל מנהלי העסק מקבלים הודעה עם הכתובת ועם מי שחיבר; גם ביומן Google', async () => {
+    const res = await start(M1, 'mail', BOX_A);
+    const ok = await confirmCb(confirmTok(res));
+    assert.equal(ok.code, 200, ok.body);
+    assert.equal((await get('sec_mailroute/' + BOX_A)).biz, A);
+    for (const u of [M1, M2, SUPER2]) {
+      const n = (await coll(`b/${A}/sec_note/${u}/n`)).find((x) => /חוברה תיבת Gmail/.test(x.title));
+      assert.ok(n, 'הודעה ל-' + u);
+      assert.ok(n.body.includes(BOX_A) && n.body.includes(M1_MAIL), n.body);
+    }
+    assert.equal((await coll(`b/${B}/sec_note/${MB}/n`)).length, 0, 'לא לעסק אחר');
+    const rc = await start(M2, 'cal', 'm2cal@gmail.example');
+    assert.match(rc.body, /יומן Google של m2cal@gmail\.example לעסק &quot;מאפיית רותי&quot;/);
+    assert.equal((await get(`b/${A}/sec_cfg/gcal`)), null, 'היומן לא מחובר לפני האישור');
+    assert.equal((await confirmCb(confirmTok(rc))).code, 200);
+    assert.equal((await get(`b/${A}/sec_cfg/gcal`)).u[M2].addr, 'm2cal@gmail.example');
+    assert.ok((await coll(`b/${A}/sec_note/${M1}/n`)).some((x) => /חובר יומן Google/.test(x.title) && x.body.includes('m2cal@gmail.example')));
+  });
+
+  it('אישור אחרי שפג תוקף, או אחרי שהמנהל כבר לא מנהל העסק – נדחה ושום דבר לא נשמר', async () => {
+    const r1 = await start(M1, 'mail', BOX_A);
+    const [p1] = (await coll('sec_oauth')).filter((x) => x.cf === true);
+    await put('sec_oauth/' + p1.id, Object.assign({}, p1, { exp: Date.now() - 1 }));
+    assert.equal((await confirmCb(confirmTok(r1))).code, 400);
+    assert.equal(await get('sec_mailroute/' + BOX_A), null);
+    const r2 = await start(M2, 'mail', BOX_A);
+    await prep((d) => d.doc(`b/${A}/admins/${M2}`).delete());
+    assert.equal((await confirmCb(confirmTok(r2))).code, 403);
+    assert.equal(await get('sec_mailroute/' + BOX_A), null);
+    assert.equal((await coll(`b/${A}/private`)).length, 0);
   });
 });

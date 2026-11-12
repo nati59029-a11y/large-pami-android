@@ -4,7 +4,8 @@
 //
 // הזרימה:
 //   חיבור (OAuth): secGoogle {op:'connect'} (מנהל העסק) → קישור ל-Google עם state חד־פעמי (נגד CSRF) ו-PKCE → Google מחזירה לכתובת secOAuthCb
-//   → state נבדק ונמחק (שימוש אחד, 10 דקות, קשור למנהל ולעסק) → החלפת הקוד באסימון → בדיקת ההרשאות שהתקבלו → האסימון נשמר מוצפן ב-private/sec_g*.
+//   → state נבדק ונמחק (שימוש אחד, 10 דקות, קשור למנהל ולעסק) → החלפת הקוד באסימון → בדיקת ההרשאות שהתקבלו
+//   → דף אישור בשרת: "לחבר את <כתובת> לעסק <שם>?" (נגד חטיפת חיבור; POST עם אסימון חד־פעמי, 10 דקות) → האסימון נשמר מוצפן ב-private/sec_g*, וכל מנהלי העסק מקבלים הודעה.
 //   קליטה: Gmail → Pub/Sub (נושא sec-gmail) → secMailHook → העסק נקבע רק מ-sec_mailroute (לפי הכתובת) → שליפת המיילים החדשים → sec_in (ch:'mail').
 //          בלי מודל AI (חיסכון, 3.3). תוכן מייל הוא מידע ולא הוראה (10.1); מייל עם ניסיון לתת הוראות – "חשוד", וכך גם מייל מכתובת של מנהל עם "הוראה" (29).
 //   טיוטה: רק כשהמנהל מבקש (secMail {op:'draft'}) – למודל יש כלי אחד (prepareReplyDraft). שליחה: רק secMailSend, בלחיצה של מנהל מחובר (27). אין שליחה אוטומטית של מייל.
@@ -20,7 +21,7 @@
 //   sec_clean/{id}    רשימת ניקוי: { st:'pend'|'work'|'done'|'rej', by, t, range, items:[{g,box,f,s,d,z,w,r?}], n, z }
 //   sec_gcal/{uid}__{calId} מיפוי אירוע ↔ Google: { uid, cal, gid, at (עדכון אחרון אצל Google), lt (סנכרון אחרון מקומי), biz }
 //   private/sec_gm_{boxId}, private/sec_gc_{uid}  { box: אסימון מוצפן, at } – אף אחד מהאפליקציה (החוקים), לא מגובה
-// בשורש (שרת בלבד): sec_oauth/{sha256(state)} – בקשות חיבור פתוחות; sec_mailroute/{כתובת} – { biz, box } (בידוד: כתובת אחת → עסק אחד).
+// בשורש (שרת בלבד): sec_oauth/{sha256(state)} – בקשות חיבור פתוחות; sec_oauth/c_{sha256(אסימון האישור)} – חיבור שממתין לאישור בדף (האסימון של Google מוצפן); sec_mailroute/{כתובת} – { biz, box } (בידוד: כתובת אחת → עסק אחד).
 
 const { onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { onMessagePublished } = require('firebase-functions/v2/pubsub');
@@ -191,27 +192,38 @@ async function disconnectCal(db, bizId, uid, by, who) {
 }
 
 // =====================================================================================
-// secOAuthCb – הכתובת ש-Google מחזירה אליה אחרי ההסכמה. GET בלבד. state: חד־פעמי, 10 דקות, קשור למנהל ולעסק
+// secOAuthCb – הכתובת ש-Google מחזירה אליה אחרי ההסכמה (GET), ודף האישור שלפני השלמת החיבור (POST). state ואסימון האישור: חד־פעמיים, 10 דקות, קשורים למנהל ולעסק
 // =====================================================================================
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-function page(res, code, title, body) {
+function page(res, code, title, body, form) {
   res.status(code).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" })
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action " + (form ? "'self'" : "'none'") + "; frame-ancestors 'none'" })
     .send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + esc(title) + '</title></head>'
       + '<body style="margin:0;background:#111;color:#eee;font-family:system-ui,sans-serif;padding:24px"><div style="max-width:480px;margin:auto;border:1px solid #c9a227;border-radius:14px;padding:18px">'
-      + '<h1 style="color:#c9a227;font-size:1.25rem;margin:0 0 10px">' + esc(title) + '</h1><p style="line-height:1.6;margin:0">' + esc(body) + '</p><p style="margin:14px 0 0;color:#aaa">אפשר לסגור את החלון ולחזור לאפליקציה.</p></div></body></html>');
+      + '<h1 style="color:#c9a227;font-size:1.25rem;margin:0 0 10px">' + esc(title) + '</h1><p style="line-height:1.6;margin:0">' + esc(body) + '</p>'
+      + (form ? confirmForm(form) : '<p style="margin:14px 0 0;color:#aaa">אפשר לסגור את החלון ולחזור לאפליקציה.</p>') + '</div></body></html>');
+}
+// דף האישור (6): "לחבר את <כתובת> לעסק <שם>?" – POST עם אסימון חד־פעמי, לאותה כתובת
+function confirmForm(f) {
+  const btn = 'style="display:block;width:100%;min-height:48px;margin:12px 0 0;border-radius:10px;font-size:1rem;font-family:inherit;cursor:pointer;';
+  return '<p style="line-height:1.6;margin:12px 0 0;color:#ccc">' + esc(f.note) + '</p><form method="post" action="' + esc(f.action) + '">'
+    + '<input type="hidden" name="tok" value="' + esc(f.tok) + '">'
+    + '<button name="ok" value="1" ' + btn + 'background:#c9a227;color:#111;border:0;font-weight:700">' + esc(f.yes) + '</button>'
+    + '<button name="ok" value="0" ' + btn + 'background:transparent;color:#eee;border:1px solid #666">לא לחבר</button></form>';
 }
 const qp = (req, k) => { const v = req.query && req.query[k]; return typeof v === 'string' ? v : ''; };
+const BAD_LINK = 'הקישור לא תקין או שפג תוקפו. התחילו שוב מהאפליקציה.';
 async function handleCb(req, res) {
+  if (req.method === 'POST') return handleConfirm(req, res);
   if (req.method !== 'GET') return page(res, 405, 'לא נתמך', 'הכתובת הזו מקבלת רק חזרה מ-Google.');
   if (String(req.originalUrl || req.url || '').length > 4096) return page(res, 414, 'הקישור לא תקין', 'הקישור ארוך מדי.');
   const state = qp(req, 'state'), code = qp(req, 'code'), error = qp(req, 'error');
-  if (!G.STATE_RE.test(state)) { logger.warn('secretary-google: callback rejected', { reason: 'bad-state' }); return page(res, 400, 'הקישור לא תקין', 'הקישור לא תקין או שפג תוקפו. התחילו שוב מהאפליקציה.'); }
+  if (!G.STATE_RE.test(state)) { logger.warn('secretary-google: callback rejected', { reason: 'bad-state' }); return page(res, 400, 'הקישור לא תקין', BAD_LINK); }
   const now = Date.now();
   const ref = getFirestore().doc('sec_oauth/' + G.sha(state));
   // שימוש אחד: נמחק לפני כל דבר אחר (גם אם ההמשך נכשל)
   const st = await getFirestore().runTransaction(async (tx) => { const s = await tx.get(ref); if (!s.exists) return null; tx.delete(ref); return s.data(); });
-  if (!st || !(st.exp > now) || typeof st.biz !== 'string' || typeof st.uid !== 'string') { logger.warn('secretary-google: callback rejected', { reason: st ? 'expired' : 'unknown-state' }); return page(res, 400, 'הקישור לא תקין', 'הקישור לא תקין או שפג תוקפו. התחילו שוב מהאפליקציה.'); }
+  if (!st || st.cf || !(st.exp > now) || typeof st.biz !== 'string' || typeof st.uid !== 'string') { logger.warn('secretary-google: callback rejected', { reason: st ? 'expired' : 'unknown-state' }); return page(res, 400, 'הקישור לא תקין', BAD_LINK); }
   const biz = await T.loadBiz(st.biz);
   if (!biz || biz.status !== 'active' || !biz.features || biz.features.secretary !== true) return page(res, 403, 'אין הרשאה', 'המזכירה לא פעילה בעסק.');
   if (error) {
@@ -219,16 +231,22 @@ async function handleCb(req, res) {
     return page(res, 200, 'החיבור בוטל', 'לא ניתנה הרשאה, ושום דבר לא חובר.');
   }
   if (!code || code.length > 2048 || !/^[\x21-\x7e]+$/.test(code)) return page(res, 400, 'הקישור לא תקין', 'חסר קוד הרשאה. התחילו שוב מהאפליקציה.');
-  const r = await T.runInBiz({ bizId: biz.bizId, prefix: T.bizPrefix(biz), biz }, () => finishConnect(st, code, now));
-  return page(res, r.code, r.title, r.body);
+  const r = await T.runInBiz({ bizId: biz.bizId, prefix: T.bizPrefix(biz), biz }, () => prepConnect(st, code, now, biz));
+  return page(res, r.code, r.title, r.body, r.form);
 }
-async function finishConnect(st, code, now) {
-  const db = T.tdb(), bizId = T.scope().bizId;
-  // עדיין מנהל של העסק, עם הסכמה בתוקף (עברו כמה דקות מאז שהתחיל)
-  const [adm, cs] = await Promise.all([db.doc('admins/' + st.uid).get(), db.doc('sec_cfg/main').get()]);
+// עדיין מנהל של העסק, עם הסכמה בתוקף (עברו כמה דקות מאז שהתחיל)
+async function stillMgr(db, bizId, uid) {
+  const [adm, cs] = await Promise.all([db.doc('admins/' + uid).get(), db.doc('sec_cfg/main').get()]);
   const cfgM = C.cfgOf(cs, bizId);
-  const me = cfgM.mgr[st.uid] && typeof cfgM.mgr[st.uid] === 'object' ? cfgM.mgr[st.uid] : {};
-  if (!adm.exists || me.cv !== C.CONSENT_VER || (cfgM.mode === 'main' && cfgM.mainUid !== st.uid)) return { code: 403, title: 'אין הרשאה', body: 'רק מנהל של העסק יכול לחבר.' };
+  const me = cfgM.mgr[uid] && typeof cfgM.mgr[uid] === 'object' ? cfgM.mgr[uid] : {};
+  if (!adm.exists || me.cv !== C.CONSENT_VER || (cfgM.mode === 'main' && cfgM.mainUid !== uid)) return null;
+  return { label: G.addrOf(adm.get('email')) || (typeof me.nm === 'string' && me.nm) || 'מנהל העסק' };
+}
+const NO_MGR = { code: 403, title: 'אין הרשאה', body: 'רק מנהל של העסק יכול לחבר.' };
+// שלב א' (חזרה מ-Google): בדיקת הקוד וההרשאות, זיהוי הכתובת, ובדיקות מוקדמות – אבל עוד לא מחברים. האסימון נשמר מוצפן לבקשת האישור (10 דקות, שימוש אחד)
+async function prepConnect(st, code, now, biz) {
+  const db = T.tdb(), bizId = T.scope().bizId;
+  if (!(await stillMgr(db, bizId, st.uid))) return NO_MGR;
   const u = G.urls(), cfg = G.oauthCfg();
   const ch = st.kind === 'cal' ? 'cal' : 'mail';
   let tk;
@@ -240,17 +258,76 @@ async function finishConnect(st, code, now) {
     return { code: 400, title: 'החיבור לא הושלם', body: gr.ok ? 'Google לא החזירה הרשאה קבועה. התחילו שוב מהאפליקציה.' : 'יש לאשר בדיוק את ההרשאות המבוקשות (בלי לבטל אף אחת). התחילו שוב מהאפליקציה.' };
   }
   const c = G.client(u, tk.at);
-  if (st.kind === 'cal') {
-    const p = await c.calPrimary();
-    const addr = G.addrOf(p.id);
-    await saveTok(db, bizId, 'cal', st.uid, { rt: tk.rt, scope: gr.granted });
+  let addr = '', boxId = '';
+  if (st.kind === 'cal') addr = G.addrOf((await c.calPrimary()).id);
+  else {
+    addr = G.addrOf((await c.profile()).emailAddress);
+    if (!addr) { await G.revoke(u, tk.rt); return { code: 400, title: 'החיבור לא הושלם', body: 'לא התקבלה כתובת התיבה.' }; }
+    boxId = G.boxIdOf(addr);
+    const bad = await mailBlock(db, bizId, addr, boxId);
+    if (bad) return failConnect(db, bizId, st.uid, addr, boxId, tk.rt, bad);
+  }
+  const p = G.newState(), path = 'sec_oauth/c_' + p.hash;
+  await getFirestore().doc(path).create({ cf: true, biz: bizId, uid: st.uid, kind: ch, addr, boxId, granted: gr.granted, box: G.seal(keyOf(), bizId, path, { rt: tk.rt }), t: now, exp: now + G.STATE_TTL });
+  const bizName = (biz && biz.name) || bizId;
+  const what = ch === 'cal' ? 'יומן Google' + (addr ? ' של ' + addr : '') : 'תיבת ה-Gmail ' + addr;
+  return { code: 200, title: 'אישור חיבור', body: 'לחבר את ' + what + ' לעסק "' + bizName + '"?',
+    form: { tok: p.state, action: cfg.redirect, yes: 'כן, לחבר לעסק "' + bizName + '"', note: 'אם לא ביקשת לחבר את ' + (ch === 'cal' ? 'היומן' : 'התיבה') + ' לעסק הזה – לחצו "לא לחבר". כל מנהלי העסק מקבלים הודעה על כל חיבור.' } };
+}
+// בידוד (תיבה אחת → עסק אחד) ו-26א (מספר התיבות). קריאה בלבד; הבדיקה הקובעת – שוב בטרנזקציה בשלב ב'
+async function mailBlock(db, bizId, addr, boxId) {
+  const [rs, ms] = await Promise.all([getFirestore().doc('sec_mailroute/' + addr).get(), db.doc('sec_cfg/mail').get()]);
+  if (rs.exists && rs.get('biz') !== bizId) return 'taken';
+  const m = mailCfgOf(ms);
+  return !m.boxes[boxId] && Object.keys(m.boxes).length >= m.max ? 'max' : '';
+}
+async function failConnect(db, bizId, uid, addr, boxId, rt, why) {
+  await revokeUnused(db, bizId, addr, { box: boxId }, rt).catch(() => {});
+  await db.collection('sec_log').doc().set(glog(uid, 'mgr', 'gConnectFail', { note: why }));
+  return { code: 409, title: 'החיבור לא הושלם', body: why === 'taken' ? 'התיבה הזו כבר מחוברת לעסק אחר.' : 'הגעתם למספר התיבות שמנהל המערכת קבע לעסק.' };
+}
+// שלב ב' (POST מדף האישור): אסימון חד־פעמי, 10 דקות. "כן" – מחברים; "לא" – מבטלים ושום דבר לא נשמר
+async function handleConfirm(req, res) {
+  let body = req.body;
+  if ((!body || typeof body !== 'object' || Buffer.isBuffer(body) || !Object.keys(body).length) && Buffer.isBuffer(req.rawBody)) body = req.rawBody;
+  if (typeof body === 'string' || Buffer.isBuffer(body)) body = String(body).length <= 2048 ? Object.fromEntries(new URLSearchParams(String(body))) : {};
+  if (!body || typeof body !== 'object') body = {};
+  const tok = typeof body.tok === 'string' ? body.tok : '', yes = body.ok === '1';
+  if (!G.STATE_RE.test(tok) || !['0', '1'].includes(body.ok)) return page(res, 400, 'הבקשה לא תקינה', BAD_LINK);
+  const now = Date.now(), path = 'sec_oauth/c_' + G.sha(tok), ref = getFirestore().doc(path);
+  const st = await getFirestore().runTransaction(async (tx) => { const s = await tx.get(ref); if (!s.exists) return null; tx.delete(ref); return s.data(); });
+  if (!st || st.cf !== true || !(st.exp > now) || typeof st.biz !== 'string' || typeof st.uid !== 'string') { logger.warn('secretary-google: confirm rejected', { reason: st ? 'expired' : 'unknown' }); return page(res, 400, 'הבקשה לא תקינה', BAD_LINK); }
+  const biz = await T.loadBiz(st.biz);
+  if (!biz || biz.status !== 'active' || !biz.features || biz.features.secretary !== true) return page(res, 403, 'אין הרשאה', 'המזכירה לא פעילה בעסק.');
+  const r = await T.runInBiz({ bizId: biz.bizId, prefix: T.bizPrefix(biz), biz }, () => finishConnect(Object.assign({}, st, { path }), yes, now));
+  return page(res, r.code, r.title, r.body);
+}
+async function finishConnect(st, yes, now) {
+  const db = T.tdb(), bizId = T.scope().bizId;
+  const ch = st.kind === 'cal' ? 'cal' : 'mail';
+  const tok = G.open(keyOf(), bizId, st.path, st.box);
+  if (!tok || typeof tok.rt !== 'string') return { code: 400, title: 'החיבור לא הושלם', body: BAD_LINK };
+  const u = G.urls(), cfg = G.oauthCfg();
+  if (!yes) {
+    await revokeUnused(db, bizId, st.addr, ch === 'cal' ? { cal: st.uid } : { box: st.boxId }, tok.rt).catch(() => {});
+    await db.collection('sec_log').doc().set(glog(st.uid, 'mgr', 'gConnectNo', { note: ch + ':confirm' }, ch));
+    return { code: 200, title: 'החיבור בוטל', body: 'שום דבר לא חובר.' };
+  }
+  const mgr = await stillMgr(db, bizId, st.uid);
+  if (!mgr) return NO_MGR;
+  const c = G.client(u, await G.refresh(u, cfg, tok.rt));
+  const granted = Array.isArray(st.granted) ? st.granted : [];
+  if (ch === 'cal') {
+    const addr = st.addr || '';
+    await saveTok(db, bizId, 'cal', st.uid, { rt: tok.rt, scope: granted });
     await db.doc('sec_cfg/gcal').set({ u: { [st.uid]: { addr, st: 'ok', at: now, sync: '', last: 0 } } }, { merge: true });
     await db.collection('sec_log').doc().set(glog(st.uid, 'mgr', 'gcalOn', { tgt: st.uid }, 'cal'));
+    await WA.notifyMgrs(db, 'gcalon|' + st.uid + '|' + now, 'חובר יומן Google', 'יומן Google' + (addr ? ' ' + addr : '') + ' חובר לסנכרון עם היומן באפליקציה, על ידי ' + mgr.label + '. אם לא ידוע לך על החיבור – אפשר לנתק בהגדרות המזכירה.', now).catch(() => {});
     return { code: 200, title: 'יומן Google חובר', body: 'האירועים יסונכרנו בין היומן באפליקציה ליומן Google' + (addr ? ' (' + addr + ')' : '') + '.' };
   }
   const prof = await c.profile();
   const addr = G.addrOf(prof.emailAddress);
-  if (!addr) { await G.revoke(u, tk.rt); return { code: 400, title: 'החיבור לא הושלם', body: 'לא התקבלה כתובת התיבה.' }; }
+  if (!addr || addr !== st.addr) { await G.revoke(u, tok.rt); return { code: 400, title: 'החיבור לא הושלם', body: 'לא התקבלה כתובת התיבה.' }; }
   const boxId = G.boxIdOf(addr);
   const rref = getFirestore().doc('sec_mailroute/' + addr), cref = db.doc('sec_cfg/mail');
   const res = await getFirestore().runTransaction(async (tx) => {
@@ -259,20 +336,17 @@ async function finishConnect(st, code, now) {
     const m = mailCfgOf(ms);
     if (!m.boxes[boxId] && Object.keys(m.boxes).length >= m.max) return 'max'; // 26א – גם אם שתי בקשות חיבור רצו במקביל
     tx.set(rref, { biz: bizId, box: boxId, t: now });
-    tx.set(cref, { boxes: { [boxId]: { addr, st: 'ok', at: now, by: st.uid, scopes: gr.granted, clean: gr.granted.includes(G.SC.modify), hist: String(prof.historyId || '') } } }, { merge: true });
+    tx.set(cref, { boxes: { [boxId]: { addr, st: 'ok', at: now, by: st.uid, scopes: granted, clean: granted.includes(G.SC.modify), hist: String(prof.historyId || ''), lag: false } } }, { merge: true });
     return 'ok';
   });
-  if (res !== 'ok') {
-    await G.revoke(u, tk.rt);
-    await db.collection('sec_log').doc().set(glog(st.uid, 'mgr', 'gConnectFail', { note: res }));
-    return { code: 409, title: 'החיבור לא הושלם', body: res === 'taken' ? 'התיבה הזו כבר מחוברת לעסק אחר.' : 'הגעתם למספר התיבות שמנהל המערכת קבע לעסק.' };
-  }
-  await saveTok(db, bizId, 'mail', boxId, { rt: tk.rt, scope: gr.granted });
+  if (res !== 'ok') return failConnect(db, bizId, st.uid, addr, boxId, tok.rt, res);
+  await saveTok(db, bizId, 'mail', boxId, { rt: tok.rt, scope: granted });
   try {
     const w = await c.watch(G.topicName());
     await cref.set({ boxes: { [boxId]: { hist: String(w.historyId || prof.historyId || ''), watchExp: Number(w.expiration) || 0 } } }, { merge: true });
   } catch (e) { await db.collection('sec_log').doc().set(glog('', 'auto', 'watchFail', { tgt: boxId })); }
-  await db.collection('sec_log').doc().set(glog(st.uid, 'mgr', 'gmailOn', { tgt: boxId, note: gr.granted.includes(G.SC.modify) ? 'clean' : 'base' }));
+  await db.collection('sec_log').doc().set(glog(st.uid, 'mgr', 'gmailOn', { tgt: boxId, note: granted.includes(G.SC.modify) ? 'clean' : 'base' }));
+  await WA.notifyMgrs(db, 'gmailon|' + boxId + '|' + now, 'חוברה תיבת Gmail', 'התיבה ' + addr + ' חוברה למזכירה של העסק, על ידי ' + mgr.label + '. אם לא ידוע לך על החיבור – אפשר לנתק בהגדרות המזכירה.', now).catch(() => {});
   return { code: 200, title: 'תיבת ה-Gmail חוברה', body: 'מיילים חדשים ב-' + addr + ' ייכנסו לתיבת המזכירה. תשובה נשלחת רק בלחיצה שלך.' };
 }
 
@@ -886,7 +960,7 @@ exports.secMailSend = onCall({ secrets: SECRETS }, wrap('secMailSend', secMailSe
 exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdminMail));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  handleCb, finishConnect, mailHook, ingestBox, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
+  handleCb, prepConnect, finishConnect, mailHook, ingestBox, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },
 } });
