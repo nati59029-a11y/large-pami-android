@@ -9,7 +9,8 @@
 //   קליטה: Gmail → Pub/Sub (נושא sec-gmail) → secMailHook → העסק נקבע רק מ-sec_mailroute (לפי הכתובת) → שליפת המיילים החדשים → sec_in (ch:'mail').
 //          בלי מודל AI (חיסכון, 3.3). תוכן מייל הוא מידע ולא הוראה (10.1); מייל עם ניסיון לתת הוראות – "חשוד", וכך גם מייל מכתובת של מנהל עם "הוראה" (29).
 //   טיוטה: רק כשהמנהל מבקש (secMail {op:'draft'}) – למודל יש כלי אחד (prepareReplyDraft). שליחה: רק secMailSend, בלחיצה של מנהל מחובר (27). אין שליחה אוטומטית של מייל.
-//   סריקת היסטוריה (28): secAdminMail (מנהל־על) – ספירה והערכת עלות, ואז הכנת רשימת ניקוי (ספאם / פרסומות / גדולים וישנים) ב-sec_clean.
+//   סריקת היסטוריה (28): secAdminMail (מנהל־על) – ספירה והערכת עלות, ואז: קליטת המיילים מהטווח ל-sec_in כרקע (בתור, בהדרגה, sec_cfg/mail_hist; אפשר לעצור),
+//          והכנת רשימת ניקוי (ספאם / פרסומות / גדולים וישנים) ב-sec_clean.
 //   ניקוי: secMail {op:'cleanOk'} – רק מנהל של העסק (לא מנהל־על לבד; מנהל העסק – גם אם הכין את הרשימה) – העברה לאשפה של Gmail בלבד (פ3), עם רישום ב-sec_log.
 //   יומן: secCalSync (כל 15 דקות + "סנכרן עכשיו") – דו־כיווני ליומן האישי של כל מנהל שחיבר (70, 71); אירועי העסק – מהאפליקציה ל-Google בלבד.
 //
@@ -18,6 +19,7 @@
 //   sec_cfg/gcal      { u:{ uid:{ addr, st, at, sync, last } } }
 //   sec_cfg/mail_use  מונים: יציאות ליום, קליטה ליום לתיבה, ניסיונות חיבור לשעה
 //   sec_cfg/mail_scan { range, n, at, by } – הספירה האחרונה, לאישור הסריקה
+//   sec_cfg/mail_hist { st:'run'|'stop'|'cap'|'done', range, q, by, t, upd, total, n, dup, boxes:{ boxId:{ pg, end } }, lock } – תור קליטת ההיסטוריה
 //   sec_clean/{id}    רשימת ניקוי: { st:'pend'|'work'|'done'|'rej', by, t, range, items:[{g,box,f,s,d,z,w,r?}], n, z }
 //   sec_gcal/{uid}__{calId} מיפוי אירוע ↔ Google: { uid, cal, gid, at (עדכון אחרון אצל Google), lt (סנכרון אחרון מקומי), biz }
 //   private/sec_gm_{boxId}, private/sec_gc_{uid}  { box: אסימון מוצפן, at } – אף אחד מהאפליקציה (החוקים), לא מגובה
@@ -712,19 +714,33 @@ async function countBox(c, q) {
   return { n, capped };
 }
 async function adminOut(db) {
-  const [ms, sc, cl] = await Promise.all([db.doc('sec_cfg/mail').get(), db.doc('sec_cfg/mail_scan').get(), db.collection('sec_clean').orderBy('t', 'desc').limit(5).get()]);
-  const m = mailCfgOf(ms);
+  const [ms, sc, cl, hs] = await Promise.all([db.doc('sec_cfg/mail').get(), db.doc('sec_cfg/mail_scan').get(), db.collection('sec_clean').orderBy('t', 'desc').limit(5).get(), db.doc('sec_cfg/mail_hist').get()]);
+  const m = mailCfgOf(ms), h = hs.exists ? hs.data() : null;
   return { ok: true, max: m.max, maxDefault: G.MAX_BOX_DEFAULT, boxes: boxesOut(m), scan: sc.exists ? sc.data() : null, ranges: G.RANGES,
+    hist: h ? { st: h.st, range: h.range || '', rangeL: G.RANGES[h.range] || '', n: h.n || 0, dup: h.dup || 0, total: h.total || 0, t: h.t || 0, upd: h.upd || 0 } : null,
     lists: cl.docs.map((d) => { const x = d.data(); return { id: d.id, st: x.st, t: x.t || 0, n: x.n || 0, z: x.z || 0, trashed: x.trashed || 0, rangeL: G.RANGES[x.range] || '' }; }) };
 }
 async function secAdminMail(request) {
   const input = inputObject(request);
   const who = await superIn(request);
-  const op = ['get', 'set', 'count', 'run', 'disconnect'].includes(input.op) ? input.op : null;
+  const op = ['get', 'set', 'count', 'run', 'disconnect', 'histStop', 'histGo'].includes(input.op) ? input.op : null;
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const db = T.tdb(), now = Date.now();
   const audit = (note) => getFirestore().collection(`b/${who.bizId}/audit`).doc().set({ by: who.uid, t: now, act: 'secAdminMail', note: String(note).slice(0, 500) });
   if (op === 'get') return adminOut(db);
+  if (op === 'histStop' || op === 'histGo') { // עצירה באמצע / המשך של קליטת ההיסטוריה (28)
+    const ref = db.doc('sec_cfg/mail_hist');
+    const st = await db.runTransaction(async (tx) => {
+      const s = await tx.get(ref);
+      const cur = s.exists ? s.get('st') : '';
+      if (op === 'histStop' ? !['run', 'cap'].includes(cur) : !['stop', 'cap'].includes(cur)) throw pre('not-running', op === 'histStop' ? 'אין קליטת היסטוריה פעילה' : 'אין קליטה שנעצרה');
+      tx.update(ref, { st: op === 'histStop' ? 'stop' : 'run', upd: now, lock: 0, [op === 'histStop' ? 'stopBy' : 'goBy']: who.uid });
+      return op === 'histStop' ? 'stop' : 'run';
+    });
+    await db.collection('sec_log').doc().set(glog(who.uid, 'sa', st === 'stop' ? 'histStop' : 'histGo'));
+    await audit(st === 'stop' ? 'hist=stop' : 'hist=go');
+    return adminOut(db);
+  }
   if (op === 'set') {
     if (!Number.isInteger(input.max) || input.max < 0 || input.max > G.MAX_BOX_LIMIT) throw bad('bad-max', 'מספר תיבות: 0 עד ' + G.MAX_BOX_LIMIT);
     const b = db.batch();
@@ -800,8 +816,90 @@ async function secAdminMail(request) {
   b.set(db.collection('sec_log').doc(), glog(who.uid, 'sa', 'scanRun', { tgt: ref.id, note: range + ':' + S0.n + ':list ' + items.length }));
   await b.commit();
   await audit('scan=' + range + ',n=' + S0.n + ',list=' + items.length);
+  // 28: קליטת המיילים מהטווח ל-sec_in כרקע – בתור, בהדרגה (עמוד ראשון עכשיו, והשאר בריצה המתוזמנת כל 15 דקות). אפשר לעצור באמצע (histStop)
+  const hb = {}; for (const [id] of boxes) hb[id] = { pg: '', end: false };
+  await db.doc('sec_cfg/mail_hist').set({ st: 'run', range, q: q || '', by: who.uid, t: now, upd: now, total: S0.n, n: 0, dup: 0, boxes: hb, lock: 0 });
+  await db.collection('sec_log').doc().set(glog(who.uid, 'sa', 'histStart', { note: range + ':' + S0.n }));
+  await histStep(db, who.bizId, HIST_PAGE, now).catch((e) => logger.warn('secretary-google: hist step failed', { reason: (e && e.details && e.details.reason) || 'error' }));
   if (items.length) await WA.notifyMgrs(db, 'clean|' + ref.id, 'רשימת ניקוי מייל ממתינה לאישורך', items.length + ' מיילים (ספאם, פרסומות, גדולים וישנים) מוכנים להעברה לאשפה של Gmail. שום דבר לא יועבר בלי האישור שלך.', now).catch(() => {});
   return Object.assign(await adminOut(db), { list: { id: ref.id, n: items.length, z, counts } });
+}
+
+// =====================================================================================
+// קליטת היסטוריה (28, אפיון 3.3): המיילים מהטווח שאושר נקלטים ל-sec_in כרקע (flags:'hist', bg:true) – בלי מודל AI, בלי טיוטה ובלי שליחה.
+// בתור (sec_cfg/mail_hist), בהדרגה: עמוד של 50 בכל פעם, עד HIST_RUN לתיבה בכל ריצה מתוזמנת. כפילות – לפי מזהה המייל (inIdOf). נעצר כשהעסק בתקרת העלות החודשית,
+// כשמנהל־על עוצר, או אחרי HIST_MAX מיילים. נקודת ההמשך (pg) נשמרת אחרי כל עמוד שנקלט במלואו.
+// =====================================================================================
+const HIST_PAGE = 50, HIST_RUN = 100, HIST_MAX = G.COUNT_PAGES * 500, HIST_LEASE = 4 * 60000;
+async function histStep(db, bizId, max, now) {
+  const ref = db.doc('sec_cfg/mail_hist');
+  const job = await db.runTransaction(async (tx) => { // נעילה: ריצה אחת בכל פעם
+    const s = await tx.get(ref);
+    if (!s.exists) return null;
+    const j = s.data();
+    if (j.st !== 'run' || (Number(j.lock) || 0) > now) return null;
+    tx.update(ref, { lock: now + HIST_LEASE });
+    return j;
+  });
+  if (!job) return null;
+  // תקרת העלות החודשית של העסק (11.3): הקליטה עצמה בלי מודל (עלות AI 0), אבל בעסק שהגיע לתקרה – לא ממשיכים עד שהתקרה מתפנה / מוגדלת
+  const [us, cs] = await Promise.all([db.doc('sec_cfg/use').get(), db.doc('sec_cfg/cap').get()]);
+  const capC = cs.exists && Number.isInteger(cs.get('capCents')) ? cs.get('capCents') : C.DEFAULT_CAP_CENTS;
+  if (C.usageOf(us, capC, now).saving === 'month') {
+    await ref.update({ st: 'cap', lock: 0, upd: now });
+    await db.collection('sec_log').doc().set(glog('', 'auto', 'histCap', { note: String(job.n || 0) }));
+    await WA.notifyMgrs(db, 'histcap|' + (job.t || 0), 'קליטת היסטוריית המייל נעצרה', 'העסק הגיע לתקרת העלות החודשית של המזכירה, ולכן קליטת המיילים הישנים נעצרה אחרי ' + (job.n || 0) + ' מיילים. מנהל המערכת יכול להמשיך אותה אחרי שהתקרה תתפנה.', now).catch(() => {});
+    return { st: 'cap', n: 0 };
+  }
+  const m = mailCfgOf(await db.doc('sec_cfg/mail').get());
+  const mgrMails = await mgrMailsOf(db);
+  let n = 0, dup = 0, stopped = false, total = (job.n || 0) + (job.dup || 0);
+  const boxes = Object.assign({}, job.boxes && typeof job.boxes === 'object' ? job.boxes : {});
+  for (const id of Object.keys(boxes)) {
+    const bj = Object.assign({ pg: '', end: false }, boxes[id]);
+    if (bj.end) continue;
+    const bx = m.boxes[id];
+    let c = null;
+    if (bx && bx.st === 'ok') { try { c = (await access(db, bizId, 'mail', id)).c; } catch (e) { c = null; } }
+    if (!c) { boxes[id] = Object.assign(bj, { end: true, why: 'off' }); await ref.update({ ['boxes.' + id]: boxes[id] }); continue; } // תיבה שנותקה / פגה – מדלגים
+    const ctx = { boxId: id, addr: bx.addr, mgrMails };
+    let done = 0;
+    while (done < max && total < HIST_MAX) {
+      if ((await ref.get()).get('st') !== 'run') { stopped = true; break; } // עצירה באמצע – בין עמודים
+      let k = 0, kd = 0, j;
+      try {
+        j = await c.list((job.q ? job.q + ' ' : '') + '-in:spam', bj.pg, HIST_PAGE);
+        for (const x of (Array.isArray(j.messages) ? j.messages : []).slice(0, HIST_PAGE)) {
+          if (!x || typeof x.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(x.id)) continue;
+          const r = await saveMail(db, c, ctx, x.id, now, { hist: true });
+          if (r === 'saved' || r === 'sus') k++; else if (r === 'dup') kd++;
+        }
+      } catch (e) { // תקלה זמנית – העמוד ייקלט שוב בריצה הבאה (מה שכבר נשמר – לא ייכפל)
+        logger.warn('secretary-google: hist page failed', { reason: (e && e.details && e.details.reason) || 'error' });
+        n += k; dup += kd; if (k || kd) await ref.update({ n: FieldValue.increment(k), dup: FieldValue.increment(kd), upd: now });
+        break;
+      }
+      n += k; dup += kd; total += k + kd; done += HIST_PAGE;
+      bj.pg = typeof j.nextPageToken === 'string' ? j.nextPageToken.slice(0, 500) : '';
+      if (!bj.pg) bj.end = true;
+      boxes[id] = Object.assign({}, bj);
+      await ref.update({ ['boxes.' + id]: boxes[id], n: FieldValue.increment(k), dup: FieldValue.increment(kd), upd: now });
+      if (bj.end) break;
+    }
+    if (stopped) break;
+  }
+  const fin = await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) return '';
+    const j = s.data();
+    const all = Object.values(j.boxes || {}).every((b) => b && b.end);
+    const st = j.st === 'run' && (all || total >= HIST_MAX) ? 'done' : j.st;
+    tx.update(ref, { lock: 0, upd: now, st });
+    return st;
+  });
+  if (n) await db.collection('sec_log').doc().set(glog('', 'auto', 'histIn', { note: n + '/' + dup }));
+  if (fin === 'done' && job.st === 'run') await db.collection('sec_log').doc().set(glog('', 'auto', 'histDone', { note: String((job.n || 0) + n) }));
+  return { st: fin, n, dup };
 }
 
 // =====================================================================================
@@ -934,6 +1032,7 @@ async function syncAll(o) {
         if (b.st !== 'ok' || b.watchExp > now + 864e5) continue;
         try { const { c } = await access(db, biz.bizId, 'mail', box); const w = await c.watch(G.topicName()); await db.doc('sec_cfg/mail').set({ boxes: { [box]: { watchExp: Number(w.expiration) || 0 } } }, { merge: true }); out.watch++; } catch (e) { out.errors++; }
       }
+      try { const h = await histStep(db, biz.bizId, HIST_RUN, now); if (h) out.hist = (out.hist || 0) + h.n; } catch (e) { out.errors++; } // 28: המשך קליטת ההיסטוריה
     });
   }
   return out;
@@ -960,7 +1059,7 @@ exports.secMailSend = onCall({ secrets: SECRETS }, wrap('secMailSend', secMailSe
 exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdminMail));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  handleCb, prepConnect, finishConnect, mailHook, ingestBox, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
+  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },
 } });

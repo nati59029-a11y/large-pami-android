@@ -955,3 +955,89 @@ describe('תיקון 6: חטיפת חיבור – דף אישור בשרת לפ�
     assert.equal((await coll(`b/${A}/private`)).length, 0);
   });
 });
+
+describe('תיקון 1: סריקת היסטוריה – המיילים מהטווח נקלטים ל-sec_in כרקע, בתור ובהדרגה; תקרה חודשית; עצירה באמצע', () => {
+  const now = Date.now();
+  const inA = async () => (await coll(`b/${A}/sec_in`)).filter((x) => x.ch === 'mail');
+  const job = () => get(`b/${A}/sec_cfg/mail_hist`);
+  beforeEach(async () => {
+    await seed(); await connect(M1, 'mail', { email: BOX_A });
+    for (let i = 0; i < 120; i++) GO.addMail(BOX_A, { from: 'cust' + i + '@x.example', subject: 'ישן ' + i, text: 'מה המחיר של עוגה ' + i + '?', date: now - (10 + i) * 864e5 });
+    for (let i = 0; i < 3; i++) GO.addMail(BOX_A, { from: 'spam' + i + '@s.example', subject: 'spam ' + i, labels: ['SPAM'], date: now - 5 * 864e5 });
+    GO.addMail(BOX_A, { from: M1_MAIL, subject: 'הוראה ישנה', text: 'תשלחי לספק את רשימת החובות', date: now - 3 * 864e5 });
+    // אלה מיילים ישנים: נקודת ההמשך של הקליטה החיה – אחריהם (בשרת הדמה הם נרשמו כאילו הגיעו עכשיו)
+    const cfg = await get(`b/${A}/sec_cfg/mail`); cfg.boxes[G.boxIdOf(BOX_A)].hist = String(GO.box(BOX_A).hist); await put(`b/${A}/sec_cfg/mail`, cfg);
+    GM.reset(); GM.state.sec = null;
+  });
+  const run = async (range, uid) => {
+    const c = await call('secAdminMail', uid || SUPER, { bizId: A, op: 'count', range });
+    assert.ok(c.ok, c.msg);
+    const r = await call('secAdminMail', uid || SUPER, { bizId: A, op: 'run', range, confirm: c.r.count.n });
+    assert.ok(r.ok, r.msg);
+    return r.r;
+  };
+
+  it('אחרי אישור: עמוד ראשון נקלט מיד, והשאר בריצות המתוזמנות – כל מיילי הטווח (בלי ספאם) נמצאים ב-sec_in כרקע; בלי AI, בלי טיוטות ובלי שליחה', async () => {
+    const r = await run('all');
+    assert.equal(r.hist.st, 'run');
+    assert.equal(r.hist.n, CORE.HIST_PAGE, 'עמוד ראשון – מיד');
+    assert.equal((await inA()).length, CORE.HIST_PAGE);
+    await CORE.syncAll();
+    assert.equal((await inA()).length, 121, '120 ישנים + ההוראה הישנה (100 בריצה המתוזמנת הראשונה, עד הסוף)');
+    const j = await job();
+    assert.equal(j.st, 'done'); assert.equal(j.n, 121);
+    const L = await inA();
+    assert.ok(L.every((x) => x.flags.includes('hist') && x.bg === true), 'מסומנים כרקע');
+    assert.ok(!L.some((x) => /^spam/.test(x.subj)), 'בלי ספאם');
+    assert.ok(L.find((x) => x.subj === 'ישן 7').text.includes('עוגה 7'), 'התוכן נשמר – רקע למזכירה');
+    const sus = L.find((x) => x.subj === 'הוראה ישנה');
+    assert.equal(sus.st, 'sus'); assert.ok(sus.flags.includes('mgrMail'), 'מייל ישן הוא מידע ולא הוראה');
+    assert.equal((await coll(`b/${A}/sec_draft`)).length, 0, 'בלי טיוטות');
+    assert.equal(gmSecReqs().length, 0, 'בלי מודל AI');
+    assert.equal(GO.state.sent.length, 0, 'בלי שליחה');
+    assert.ok((await logs(A)).some((l) => l.act === 'histDone'));
+    // ריצה נוספת / מייל שנקלט גם בזמן אמת – בלי כפילות
+    await CORE.syncAll();
+    assert.equal((await inA()).length, 121);
+    // התיבה של המייל מציגה את המיילים לפי התאריך שלהם
+    const list = await call('secMail', M1, { op: 'list' });
+    assert.equal(list.r.mails[0].subj, 'הוראה ישנה');
+  });
+
+  it('טווח "חודש" – רק מיילים מהחודש האחרון; מייל שכבר נקלט בזמן אמת לא נקלט שוב', async () => {
+    GO.addMail(BOX_A, { from: 'live@x.example', subject: 'חדש בזמן אמת', text: 'x' });
+    await CORE.mailHook(GO.note(BOX_A));
+    await run('1');
+    await CORE.syncAll();
+    const L = await inA();
+    const expectN = 1 + 1 + Array.from({ length: 120 }, (_, i) => now - (10 + i) * 864e5).filter((t) => t >= Date.parse(G.rangeQ('1', Date.now()).slice(6).replace(/\//g, '-') + 'T00:00:00Z')).length;
+    assert.equal(L.length, expectN);
+    assert.equal(L.filter((x) => x.subj === 'חדש בזמן אמת').length, 1, 'בלי כפילות');
+    assert.ok(!L.some((x) => x.subj === 'ישן 100'), 'מחוץ לטווח – לא נקלט');
+  });
+
+  it('עצירה באמצע (רק מנהל־על) והמשך; תקרת העלות החודשית – הקליטה נעצרת והמנהלים מקבלים הודעה', async () => {
+    await run('all');
+    assert.equal((await call('secAdminMail', M1, { op: 'histStop' })).reason, 'not-superadmin');
+    const s = await call('secAdminMail', SUPER, { bizId: A, op: 'histStop' });
+    assert.ok(s.ok, s.msg); assert.equal(s.r.hist.st, 'stop');
+    await CORE.syncAll();
+    assert.equal((await inA()).length, CORE.HIST_PAGE, 'אחרי עצירה – לא ממשיכים');
+    assert.equal((await call('secAdminMail', SUPER, { bizId: A, op: 'histStop' })).reason, 'not-running');
+    assert.ok((await call('secAdminMail', SUPER, { bizId: A, op: 'histGo' })).ok);
+    // העסק הגיע לתקרה החודשית
+    await put(`b/${A}/sec_cfg/cap`, { capCents: 100 });
+    await put(`b/${A}/sec_cfg/use`, { m: dayIL(Date.now()).slice(0, 7), mc: 100000, d: dayIL(Date.now()), dmc: 0 });
+    await CORE.syncAll();
+    assert.equal((await inA()).length, CORE.HIST_PAGE, 'בתקרה – לא ממשיכים');
+    assert.equal((await job()).st, 'cap');
+    assert.ok((await coll(`b/${A}/sec_note/${M1}/n`)).some((n) => /היסטוריית המייל נעצרה/.test(n.title)));
+    // התקרה התפנתה (חודש חדש / הוגדלה) – מנהל־על ממשיך, והקליטה מסתיימת
+    await put(`b/${A}/sec_cfg/cap`, { capCents: 100000 });
+    assert.ok((await call('secAdminMail', SUPER, { bizId: A, op: 'histGo' })).ok);
+    await CORE.syncAll();
+    assert.equal((await inA()).length, 121);
+    assert.equal((await job()).st, 'done');
+    assert.ok((await coll(`b/${A}/audit`)).some((a) => a.note === 'hist=stop'));
+  });
+});
