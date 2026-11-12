@@ -200,8 +200,12 @@ const card = (id) => `#secIv_${id}`;
     const before = await tx(page, 's' + ID.F1);
     const led = await page.evaluate((id) => !!(S.secL && S.secL[id]), ID.F1);
     check(`${w}: הדיווח נכשל – ההוצאה נשמרה במכשיר, והפריט נשאר בפנקס ההשלמה`, before.length === 1 && led, { before, led });
-    delete Q.failDone[ID.F1]; // הרשת חזרה; האפליקציה נפתחת מחדש
-    await page.reload(); await H.settle(page, 2500);
+    // האפליקציה נסגרת, ורק אז הרשת חוזרת ונפתחים מחדש. אם הרשת חוזרת לפני הסגירה, הדף הישן מספיק לנסות שוב ולדווח
+    // לפני שהפנקס נשמר, ואז יוצא דיווח כפול (נכשל ב-CI ב-360). השרת מקבל דיווח כפול בלי נזק (again)
+    const appUrl = page.url();
+    await page.goto('about:blank');
+    delete Q.failDone[ID.F1];
+    await page.goto(appUrl); await H.settle(page, 2500);
     await page.evaluate(() => { window.__secInv.at = 0; go('sec'); }); await H.settle(page, 1800);
     const after = await tx(page, 's' + ID.F1);
     const dones = Q.doneOk[ID.F1] || 0;
