@@ -811,13 +811,20 @@ async function isWs(tx, db, custId) {
   const s = await tx.get(db.doc('cust/' + custId));
   return s.exists && s.get('wholesale') === true;
 }
-// 12.11.2026 (החלטה 9): מתנה ממבצע (cell.lines[].gift) = מארז אחד בלבד, לא קרטון – כל קו עם מתנה פוטר שורה אחת של אותו מוצר בכמות 1 (בלי ct).
-function cartons(items, prods, ws, oldItems, cell) {
+// 12.11.2026 (החלטה 9): מתנה ממבצע (cell.lines[].gift) = מארז אחד בלבד, לא קרטון – כל קו עם מתנה בבקשה הנוכחית פוטר שורה אחת של אותו מוצר בכמות 1 (בלי ct).
+// oldCell = הניוד השמור בהזמנה: שורה ישנה שהייתה מתנה לפיו לא מקבלת פטור "שורה ישנה" – הפטור היחיד שלה הוא מתנה בבקשה הנוכחית
+// (בלי פטור כפול; ביטול הניוד/המתנה → מארז בודד נדחה, וצריך להסיר אותו או להשלים לקרטון).
+const giftCnt = (cell) => { const m = new Map(); for (const l of (cell && Array.isArray(cell.lines) ? cell.lines : [])) if (l && l.gift) m.set(l.gift, (m.get(l.gift) || 0) + 1); return m; };
+function cartons(items, prods, ws, oldItems, cell, oldCell) {
   if (!ws) return items;
+  const was = giftCnt(oldCell); // מוצר → כמה שורות ישנות בכמות 1 היו מתנה
   const keep = new Map(); // מוצר|כמות → כמה שורות כאלה היו בהזמנה (כל שורה ישנה פוטרת שורה אחת בלבד)
-  for (const x of oldItems || []) if (x && x.pid) keep.set(x.pid + '|' + x.qty, (keep.get(x.pid + '|' + x.qty) || 0) + 1);
-  const gift = new Map(); // מוצר → כמה קווים בחרו אותו כמתנה
-  for (const l of (cell && Array.isArray(cell.lines) ? cell.lines : [])) if (l && l.gift) gift.set(l.gift, (gift.get(l.gift) || 0) + 1);
+  for (const x of oldItems || []) {
+    if (!x || !x.pid) continue;
+    if (x.qty === 1 && !x.ct && was.get(x.pid) > 0) { was.set(x.pid, was.get(x.pid) - 1); continue; }
+    keep.set(x.pid + '|' + x.qty, (keep.get(x.pid + '|' + x.qty) || 0) + 1);
+  }
+  const gift = giftCnt(cell); // מוצר → כמה קווים בבקשה הנוכחית בחרו אותו כמתנה
   for (const it of items) {
     const ct = it.pid ? ctoOf(prods.get(it.pid)) : 0;
     if (!ct) continue;
@@ -917,7 +924,7 @@ async function updateOrder(request) {
       const pd = plain(prods);
       const { items } = resolveItems(w, d.br, raw, pd, src);
       snapCosts(items, await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid)), oldItems);
-      cartons(items, pd, await isWs(tx, db, d.custId), oldItems, cell !== undefined ? cell : d.cell);
+      cartons(items, pd, await isWs(tx, db, d.custId), oldItems, cell !== undefined ? cell : d.cell, d.cell);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
       applyMoves(tx, db, w, prods, mv, { ord: id, no: d.no }, warn);
       upd.items = items;

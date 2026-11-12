@@ -114,9 +114,10 @@ async function open(browser, www, calls) {
   const g1 = await lines(), gt = await tot();
   const gc = await page.evaluate(() => { const D = __ox.draft, ol = window.__ol; if (!ol || !ol.calcOf) return null;
     const keep = [ol.L.P, D.cell]; ol.L.P = [{ id: 'lpG', name: 'מבצע', monthly: 39, on: true, promos: [{ gifts: [{ pid: 'pC', price: 0 }] }] }];
-    const S = ol.CS(D); Object.assign(S, { on: true, lines: [{ k: 'k1', plan: 'lpG', gift: 'pC' }, { k: 'k2', plan: 'lpG', gift: 'pC' }] });
-    const r = ol.calcOf(D); ol.L.P = keep[0]; D.cell = keep[1]; if (!keep[1]) delete D.cell; return r && { gift: r.gift, sug: r.sug }; });
-  check('16 מתנה (gk) ללקוח סיטונאי: בלי תגית קרטון בשורת המתנה, סכום 1×6×5 + 1×6 = 36; 2 קווים עם מתנה → הנחה מוצעת 5 + 5 = 10 (לפי מארזים, כמו בשרת; לפי קרטונים היה 5 + 6)', /קרטון \(6 מארזים\)/.test(g1[0]) && !/קרטון/.test(g1[1]) && /36\.00/.test(gt) && gc && gc.gift === 10 && gc.sug === 10, { g1, gt, gc });
+    const S = ol.CS(D); Object.assign(S, { on: true, lines: [{ k: 'k1', plan: 'lpG', gift: 'pC' }] });
+    const a = ol.calcOf(D); D.items.reverse(); const b = ol.calcOf(D); D.items.reverse();
+    ol.L.P = keep[0]; D.cell = keep[1]; if (!keep[1]) delete D.cell; return a && b && { gift: [a.gift, b.gift], sug: [a.sug, b.sug] }; });
+  check('16 מתנה (gk) ללקוח סיטונאי: בלי תגית קרטון בשורת המתנה, סכום 1×6×5 + 1×6 = 36; קרטון ב-5 ומתנה ב-6 → הנחה מוצעת 6 (המתנה חינם) בשני סדרי השורות, כמו בשרת', /קרטון \(6 מארזים\)/.test(g1[0]) && !/קרטון/.test(g1[1]) && /36\.00/.test(gt) && gc && gc.gift.join() === '6,6' && gc.sug.join() === '6,6', { g1, gt, gc });
   calls.length = 0; await page.evaluate(() => { __ox.draft.cdOk = true; return ACT.oxSave({ disabled: false }); }); await H.settle(page, 1500);
   const gs = calls.find((x) => x.n === 'createOrder');
   check('17 שמירה עם מתנה: קרטון נשלח כ-6 מארזים, המתנה כמארז 1', gs && gs.d.items.length === 2 && gs.d.items[0].qty === 6 && gs.d.items[1].qty === 1, gs && gs.d.items);

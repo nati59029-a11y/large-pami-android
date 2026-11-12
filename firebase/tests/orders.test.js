@@ -539,6 +539,31 @@ describe('קרטונים סגורים ללקוח סיטונאי (cto)', () => {
     assert.equal(u.status, 'OK', u.text);
     assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 30 - 19);
   });
+  it('החלטה 9 (תיקון): שורת מתנה שמורה לא מקבלת גם פטור "שורה ישנה" – עריכה ל-12+1+1 נדחית; ביטול הניוד עם אותם פריטים נדחה; הנחת המתנה = המארז היקר בשני הסדרים', async () => {
+    await prep(async (d) => {
+      await d.doc('b/' + A).update({ features: Object.assign({}, ALL, { cellular: true }) });
+      await d.doc(`b/${A}/lineplan/lpG`).set({ name: 'מבצע מתנה', on: true, monthly: 39, promos: [{ gifts: [{ pid: 'pC', price: 0 }] }] });
+    });
+    const cell = { lines: [{ phone: '0521111111', plan: 'lpG', gift: 'pC' }] };
+    const go = (items) => call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId: 'cW', items, cell });
+    const r = await go([{ pid: 'pC', qty: 12, price: 5 }, { pid: 'pC', qty: 1, price: 5 }]);
+    assert.equal(r.status, 'OK', r.text);
+    const id = r.result.id, G = [{ pid: 'pC', qty: 12, price: 5 }, { pid: 'pC', qty: 1, price: 5 }];
+    // ליקוי 1: בלי פטור כפול – מארז בודד נוסף נדחה (גם בלי לשלוח cell וגם כששולחים את אותו ניוד)
+    assert.equal((await call('updateOrder', E1, { id, items: G.concat([{ pid: 'pC', qty: 1, price: 5 }]) })).reason, 'cto-qty');
+    assert.equal((await call('updateOrder', E1, { id, items: G.concat([{ pid: 'pC', qty: 1, price: 5 }]), cell })).reason, 'cto-qty');
+    // ליקוי 2: ביטול הניוד / המתנה – שורת המתנה הבודדת נדחית; הסרה שלה עוברת
+    assert.equal((await call('updateOrder', E1, { id, items: G, cell: null })).reason, 'cto-qty');
+    assert.equal((await call('updateOrder', E1, { id, items: G, cell: { lines: [{ phone: '0521111111', plan: 'lpG' }] } })).reason, 'cto-qty');
+    assert.equal((await get(`b/${A}/ord/${id}`)).items.length, 2);
+    const u = await call('updateOrder', E1, { id, items: [G[0]], cell: null });
+    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 60);
+    // ליקוי 3: קרטון ב-5 ומתנה ב-6 – הנחה 6 (המתנה חינם) בשני הסדרים
+    for (const items of [[{ pid: 'pC', qty: 12, price: 5 }, { pid: 'pC', qty: 1, price: 6 }], [{ pid: 'pC', qty: 1, price: 6 }, { pid: 'pC', qty: 12, price: 5 }]]) {
+      const x = await go(items);
+      assert.equal(x.status, 'OK', x.text); assert.equal(x.result.total, 60); assert.equal(x.result.calc.gift, 6);
+    }
+  });
 });
 
 describe('לארג\' פעמי במצב legacy (שורש)', () => {
