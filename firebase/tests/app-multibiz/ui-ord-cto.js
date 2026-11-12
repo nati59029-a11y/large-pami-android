@@ -91,6 +91,21 @@ async function open(browser, www, calls) {
   await H.settle(page, 300);
   const r3 = await lines();
   check('10 הלקוח כבר לא סיטונאי – בלי תגית קרטון', r3.length > 0 && !r3.some((t) => /קרטון/.test(t)), r3);
+  // החלפת מצב סיטונאי אחרי שהוקלדו כמויות: הודעה + סימון, בלי שינוי כמות
+  await page.evaluate(() => { const D = __ox.draft; D.items.length = 0; ACT.oxAdd({ dataset: { id: 'pC' } }); ACT.oxAdd({ dataset: { id: 'pR' } }); D.items[0].qty = '6'; D.items[1].qty = '3'; D.custId = 'cW'; D.wholesale = false; window.__oxRedraw(); document.getElementById('toast') && (document.getElementById('toast').textContent = ''); D.wholesale = true; window.__oxWsChg(D, false); });
+  await H.settle(page, 300);
+  const w1 = await page.evaluate(() => ({ q: __ox.draft.items.map((i) => i.qty), chk: __ox.draft.items.map((i) => !!i.chk), marks: document.querySelectorAll('#oxlines [data-oxchkn]').length, body: document.body.innerText.replace(/\s+/g, ' ') }));
+  check('12 רגיל→סיטונאי: הודעה "נספרת עכשיו בקרטונים", רק שורת cto מסומנת, הכמויות לא השתנו', /נספרת עכשיו ב\s*קרטונים/.test(w1.body) && w1.chk[0] && !w1.chk[1] && w1.marks === 1 && w1.q[0] === '6' && w1.q[1] === '3', w1);
+  await shot(page, '04-סימון-לבדיקה');
+  await page.fill('#oxlines input[data-k=qty][data-n="0"]', '6'); await H.settle(page, 200);
+  const w2 = await page.evaluate(() => ({ chk: !!__ox.draft.items[0].chk, marks: document.querySelectorAll('#oxlines [data-oxchkn]').length }));
+  check('13 עריכת הכמות מנקה את הסימון', !w2.chk && w2.marks === 0, w2);
+  await page.evaluate(() => { const D = __ox.draft; D.wholesale = false; window.__oxWsChg(D, true); }); await H.settle(page, 300);
+  const w3 = await page.evaluate(() => ({ chk: __ox.draft.items.map((i) => !!i.chk), body: document.body.innerText.replace(/\s+/g, ' ') }));
+  check('14 סיטונאי→רגיל: הודעה "נספרת עכשיו במארזים"', /נספרת עכשיו ב\s*מארזים/.test(w3.body) && w3.chk[0] && !w3.chk[1], w3);
+  await page.evaluate(() => { const D = __ox.draft; D.items.forEach((i) => { delete i.chk; }); D.items[0].qty = '0'; D.wholesale = true; window.__oxWsChg(D, false); }); await H.settle(page, 300);
+  const w4 = await page.evaluate(() => __ox.draft.items.map((i) => !!i.chk));
+  check('15 כמות 0 בשורת cto – לא מסומנת', !w4[0], w4);
   check('11 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
   if (outFile) fs.writeFileSync(outFile, JSON.stringify({ out }, null, 1));
