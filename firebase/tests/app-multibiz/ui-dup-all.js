@@ -101,6 +101,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }, K);
   check('8 הוספה ידנית: אזהרה מופיעה בטופס מיד כשהסכום והתאריך זהים, ונעלמת כשהסכום משתנה (בלי ציור מחדש)', /בקטגוריה/.test(r2.live1) && r2.live2 === '' && r2.same, r2);
   check('9 הוספה ידנית: בשמירה – חלון "המסמך כבר קיים", לא נשמר עד "שמור בכל זאת", ואז נשמר פעם אחת', /כבר קיים/.test(r2.dlg) && r2.n1 === 0 && r2.n2 === 1, r2);
+  // 2ב (תיקון 7). עריכה בטופס addsave (A.edit; עריכה מפרטי תנועה עוברת ב-FRM.tsave, בלי בדיקת כפילות): בלי שינוי בשדות הכפילות – אין חלון; שינוי שיוצר כפילות – חלון עם "בטל את השינוי", והרשומה לא משתנה
+  const r2b = await page.evaluate(async (K) => {
+    const W = (ms) => new Promise((r) => setTimeout(r, ms || 80));
+    const dupT0 = S.tx.filter((t) => t.cat === K.SIM && t.amt === 77 && t.date === '2026-10-12').pop();
+    A = { type: 'exp', cat: K.SIM, step: 'det', edit: dupT0.id }; sheetDraw(); await W(); let f = document.querySelector('#sheet form[data-f=addsave]');
+    f.elements.note.value = 'הערה חדשה'; FRM.addsave(f, { submitter: { value: 'done' } }); await W();
+    const dlg1 = !!document.querySelector('#dlg[open]'); if (dlg1) closeDlg(); try { sheetClose(); } catch (e) { /* */ }
+    const note1 = S.tx.find((t) => t.id === dupT0.id).note;
+    S.tx.push({ id: 'dEd2', t: 'exp', cat: K.SIM, date: '2026-10-14', amt: 91, note: 'אחרת', pays: [] }); save(); const before = JSON.stringify(S.tx.find((t) => t.id === 'dEd2'));
+    A = { type: 'exp', cat: K.SIM, step: 'det', edit: 'dEd2' }; sheetDraw(); await W(); f = document.querySelector('#sheet form[data-f=addsave]');
+    f.elements.amt.value = '77'; f.elements.date.value = '2026-10-12'; FRM.addsave(f, { submitter: { value: 'done' } }); await W();
+    const d2 = document.querySelector('#dlg[open]') ? document.getElementById('dlg').innerText : ''; const b = document.querySelector('#dlg[open] [data-a=dupDel]'); const btn = b ? b.innerText : '';
+    if (b) b.click(); await W(); const same = JSON.stringify(S.tx.find((t) => t.id === 'dEd2')) === before; const sheetOpen = !!document.querySelector('#sheet.open, #sheet[open]');
+    S.tx = S.tx.filter((t) => t.id !== 'dEd2'); save();
+    return { dlg1, note1, d2: d2.slice(0, 80), btn, same, sheetOpen };
+  }, K);
+  check('9ב עריכה: שינוי הערה בלבד – אין חלון כפילות ונשמר; שינוי סכום+תאריך שיוצר כפילות – חלון עם "בטל את השינוי", והרשומה לא השתנתה',
+    !r2b.dlg1 && r2b.note1 === 'הערה חדשה' && /כבר קיים/.test(r2b.d2) && /בטל את השינוי/.test(r2b.btn) && !/מחק/.test(r2b.btn) && r2b.same, r2b);
   check('10 הוספה ידנית של משכורת: אותו עובד+חודש+סכום – אזהרה בטופס', /משכורת/.test(r2.liveE), r2.liveE);
 
   // 3. סריקה: זיהוי ראשון – scanDlg (ספק) ו-usFillForm (סורק אחיד)

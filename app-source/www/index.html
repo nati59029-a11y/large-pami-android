@@ -614,9 +614,9 @@ let PENDING=null;
 function ask(msg,fn,ok){PENDING=fn;dlg(`<h3>${esc(msg)}</h3><div class="row"><button class="btn r grow" data-a="yes">${ok||'כן, המשך'}</button><button class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}
 ACT.yes=()=>{const f=PENDING;PENDING=null;closeDlg();if(f)f()};
 /* מסמך כפול: שמירה בכל זאת, מחיקת המסמך החדש (לא נשמר ויוצא מהתור), או חזרה */
-let PDEL=null;
-function askDup(msg,fnSave,fnDel,okTx){PENDING=fnSave;PDEL=fnDel;dlg(`<h3>המסמך כבר קיים במערכת</h3><p>${esc(msg)}</p><button class="btn r w" data-a="dupDel" style="margin-bottom:8px">🗑 מחק את המסמך החדש</button><button class="btn g w" data-a="yes" style="margin-bottom:8px">${esc(okTx||'זה מסמך אחר – שמור בכל זאת')}</button><button class="btn g w" data-a="closeDlg">חזרה</button>`)}
-ACT.dupDel=()=>{const f=PDEL;PDEL=null;PENDING=null;closeDlg();if(f){f();toast('המסמך החדש נמחק ולא נשמר')}};
+let PDEL=null,PDELT='';
+/* delTx (12.11): בעריכה של רשומה קיימת – "בטל את השינוי" במקום "מחק את המסמך החדש" */function askDup(msg,fnSave,fnDel,okTx,delTx){PENDING=fnSave;PDEL=fnDel;PDELT=delTx?'השינוי בוטל':'';dlg(`<h3>המסמך כבר קיים במערכת</h3><p>${esc(msg)}</p><button class="btn r w" data-a="dupDel" style="margin-bottom:8px">${delTx?esc(delTx):'🗑 מחק את המסמך החדש'}</button><button class="btn g w" data-a="yes" style="margin-bottom:8px">${esc(okTx||'זה מסמך אחר – שמור בכל זאת')}</button><button class="btn g w" data-a="closeDlg">חזרה</button>`)}
+ACT.dupDel=()=>{const f=PDEL,m=PDELT;PDEL=null;PDELT='';PENDING=null;closeDlg();if(f){f();toast(m||'המסמך החדש נמחק ולא נשמר')}};
 /* ביטול מסמך מתוך טופס פתוח: סוגר את הטופס, ומסמך ששותף יוצא מ"מסמכים שהתקבלו" */
 function dupDropForm(){const si=typeof US!=='undefined'&&US&&US.si;if(si&&typeof siDrop==='function')siDrop(si);if(typeof US!=='undefined'&&US)usReset();else sheetClose();rerender()}
 ACT.closeDlg=()=>closeDlg();
@@ -763,12 +763,13 @@ function detHtml(c,t){
  if(b==='sup'){const sid=(A&&A.sub)||(t&&t.sub)||'',need=!(t&&!t.inv&&!t.dn)&&!(t&&t.dn);h+=(dueF(sid,d,t)||fld('חודש לתשלום','plan',t?pmon(t):payDef(sid,d),'month','required data-sup="1" data-ps="'+esc(sid)+'"'))+fld('מספר חשבונית','inv',t?.inv,'text','autocomplete="off" '+(need?'required':''))+(t&&t.dn?`<label class="cb"><input type="checkbox" name="dn" value="1" data-c="dn" checked> זו תעודת משלוח (עדיין אין חשבונית)</label>`:'')}
  else if(b==='fixed')h+=fld('חודש לתשלום','plan',t?pmon(t):d.slice(0,7),'month','required')+fld('מספר חשבונית (לא חובה)','inv',t?.inv,'text','autocomplete="off"');
  if(b==='emp')h+=fld('עבור איזה חודש המשכורת','plan',t?pmon(t):d.slice(0,7),'month','required')+pmF('m',SAL_METHODS,t&&t.pays&&t.pays[0]?t.pays[0].m:'',undefined,t||{sub:A&&A.sub});
- if(b==='cc'&&!t){const L=S.tx.filter(x=>hasPay(x)&&bal(x)>0.004).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,60);
-  h+=`<label class="f"><span>החיוב הזה הוא תשלום עבור חשבונית ספק? (לא חובה)</span><select name="link"><option value="">לא – רשום כהוצאה</option>${L.map(x=>`<option value="${x.id}">${esc(subName(x))} · ${dfmt(x.date)} · ${ils(bal(x))}</option>`).join('')}</select><div class="hd">אם תבחר חשבונית, החיוב יירשם כתשלום שלה ולא יספר פעם שנייה כהוצאה.</div></label>`}
+ /* 12.11: גם חשבונית ששולמה באשראי (תשלום אשראי בלי חיוב – ccLinkP) – החיוב מתחבר לתשלום הקיים, באותו סכום */if(b==='cc'&&!t){const L=S.tx.filter(x=>hasPay(x)&&(bal(x)>0.004||ccLinkP(x).length)).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,60);
+  h+=`<label class="f"><span>החיוב הזה הוא תשלום עבור חשבונית ספק? (לא חובה)</span><select name="link"><option value="">לא – רשום כהוצאה</option>${L.map(x=>`<option value="${x.id}">${esc(subName(x))} · ${dfmt(x.date)} · ${bal(x)>0.004?ils(bal(x)):'שולם באשראי '+ccLinkP(x).map(p=>ils(p.a)).join(' / ')}</option>`).join('')}</select><div class="hd">אם תבחר חשבונית, החיוב יירשם כתשלום שלה ולא יספר פעם שנייה כהוצאה.</div></label>`}
  if(b==='fixed'&&!t)h+=`<label class="cb"><input type="checkbox" name="paynow" value="1" data-c="paynow"> כבר שולם?</label><div data-pg hidden class="card"><label class="f"><span>כמה שולם (ריק = הכול)</span><input name="pa" inputmode="decimal"></label>${dateF('תאריך התשלום','pd',today())}${pmF('m',METHODS,'',false,t||{sub:A&&A.sub})}</div>`;
  h+=brF(t,A&&A.sub)+offIncF(c,t)+coF(c,t)+fld('הערות','note',t?.note,'text','autocomplete="off"');
  if(t)h+=`<input type="hidden" name="id" value="${t.id}">`;
  return h}
+/* תשלומי אשראי של החשבונית שעוד לא חוברו לחיוב (כמו ccPayC) */const ccLinkP=x=>(x&&x.pays||[]).filter(p=>p&&p.m===METHODS[3]&&!p.cc&&!p.stl&&!p.crof);
 /* קריאת טופס → תנועה */
 function readTx(f,c,sub,t0){
  const b=c.beh,errs=[],amt=pNum(f.amt);
@@ -789,15 +790,17 @@ function readTx(f,c,sub,t0){
  if(b==='sup'||b==='fixed'){t.plan=f.plan;t.inv=s_(f.inv);if(b==='sup'){if(f.dn&&!t.inv)t.dn=true;else delete t.dn;/* due (B2): נכתב רק בחדשה, אם כבר היה, או אם השתנה */if(cfDt(f.due)&&(!t0||cfDt(t0.due)||f.due!==dueOf(t0)))t.due=f.due}t.kind=amt<0?'credit':'inv';if(t0&&t0.kind==='refund'){t.kind='refund';t.amt=0;t.rf=Math.abs(amt)}}
  if(b==='emp'){t.plan=f.plan;t.pays=[pyX({id:(t.pays[0]||{}).id||uid(),d:f.date,a:t.amt,m:f.m},f)]}
  if((b==='sup'||b==='fixed')&&!t0&&f.paynow){const pa=f.pa?pNum(f.pa):t.amt;if(pa==null||pa<=0||pa>t.amt+0.004)return{errs:['סכום ששולם לא תקין']};if(!f.m)return{errs:['בחר אמצעי תשלום']};if(!f.pd)return{errs:['חסר תאריך תשלום']};t.pays=[pyX({id:uid(),d:f.pd,a:rnd(pa),m:f.m},f)]}
- if(b==='cc'&&!t0&&f.link){const inv=S.tx.find(x=>x.id===f.link);if(inv){if(t.amt>bal(inv)+0.004)return{errs:['החיוב גדול מיתרת החשבונית ('+ils(bal(inv))+')']};inv.pays=inv.pays||[];inv.pays.push({id:uid(),d:t.date,a:t.amt,m:'אשראי',cc:t.id});t.x=1;t.link=inv.id}}
+ if(b==='cc'&&!t0&&f.link){const inv=S.tx.find(x=>x.id===f.link);const cp=inv&&ccLinkP(inv).find(p=>Math.abs(p.a-t.amt)<.01);if(cp){t.x=1;t.link=inv.id;return{t,ccl:cp}/* p.cc נכתב רק בשמירה (FRM.addsave) – readTx רץ שוב אחרי שאלת כפילות */}else if(inv){if(!(bal(inv)>0.004))return{errs:['לחשבונית הזו אין תשלום אשראי פתוח בסכום '+ils(t.amt)]};if(t.amt>bal(inv)+0.004)return{errs:['החיוב גדול מיתרת החשבונית ('+ils(bal(inv))+')']};inv.pays=inv.pays||[];inv.pays.push({id:uid(),d:t.date,a:t.amt,m:'אשראי',cc:t.id});t.x=1;t.link=inv.id}}
  return{t}}
 FRM.addsave=(form,ev)=>{const f=fd(form),go=ev.submitter&&ev.submitter.value;const c=cat(A.cat);
  const r=readTx(f,c,A.sub,A.edit?S.tx.find(t=>t.id===A.edit):null);
  if(r.errs){toast(r.errs[0]);return}
- if(c.kind==='exp'&&!form.dataset.dupok){const dd=dupOf(dupT(r.t)),mm=dupMsg(dd);if(mm.length){askDup('נראה שההוצאה כבר קיימת: '+mm.join('; ')+'.',()=>{form.dataset.dupok='1';FRM.addsave(form,ev)},dupDropForm);return}}
+ /* 12.11: בעריכה – מזהירים רק אם השתנה שדה שקובע כפילות (סכום/תאריך/חודש/ספק/קטגוריה/חשבונית/קופה) */const t0=A.edit?S.tx.find(t=>t.id===A.edit):null,dk=t=>{const o=dupT(t);return JSON.stringify([o.cat,o.sub,o.amt,o.date,o.plan,o.inv||'',o.reg])};
+ if(c.kind==='exp'&&!form.dataset.dupok&&!(t0&&dk(t0)===dk(r.t))){const dd=dupOf(dupT(r.t)),mm=dupMsg(dd);if(mm.length){askDup('נראה שההוצאה כבר קיימת: '+mm.join('; ')+'.',()=>{form.dataset.dupok='1';FRM.addsave(form,ev)},t0?()=>{sheetClose();rerender()}:dupDropForm,undefined,t0?'בטל את השינוי':'');return}}
  if(!A.edit&&!form.dataset.awok&&(c.beh==='sup'||c.beh==='fixed')&&r.t.kind==='inv'&&!r.t.dn&&!(r.t.pays||[]).length&&r.t.sub&&awFor(r.t.sub).length)return awOffer(r.t,c.beh==='sup'?A.fid:null,()=>{form.dataset.awok='1';FRM.addsave(form,ev)},()=>sheetClose());
  /* 12.11: סריקה מאוחדת – בחשבונית כתוב ששולמה באשראי (A.ccp). אחרי כפילות ו-awOffer; לא כש"שולם עכשיו" */if(!A.edit&&!f.paynow&&A.ccp&&A.ccp.ccp){if(!form.dataset.cp&&ccpNeed(r.t,A.ccp))return ccpAsk(r.t,A.ccp,x=>{form.dataset.cp=JSON.stringify(x);FRM.addsave(form,ev)},()=>{form.dataset.cp='0';FRM.addsave(form,ev)});if(form.dataset.cp&&form.dataset.cp!=='0'&&ccpNeed(r.t,A.ccp))ccpApply(r.t,JSON.parse(form.dataset.cp))}
  if(!A.edit&&A.fid&&c.beh==='sup')r.t.file=A.fid;if(!A.edit&&A.codu&&f.co&&!r.t.file){const fid='f'+uid(),du=A.codu;r.t.file=fid;fput(fid,du).catch(()=>toast('שמירת צילום הפתק נכשלה'));A.codu=null}
+ if(!A.edit&&r.ccl)r.ccl.cc=r.t.id;
  if(!A.edit)S.tx.push(r.t);else{const i=S.tx.findIndex(t=>t.id===A.edit);S.tx[i]=r.t}
  save();const subn=A.sub?subById(A.sub).name:r.t.desc;toast('נשמר: '+ils(r.t.amt)+' · '+(subn||c.name));
  if(go==='more'&&!A.edit){const keep={type:A.type,cat:A.cat,sub:A.sub};A={step:'det',...keep};sheetDraw();rerender();return}
@@ -1756,7 +1759,7 @@ ACT.awJoin=el=>{const o=AWP,e=S.tx.find(x=>x.id===el.dataset.e);if(!o||!e||!e.aw
 ACT.awNew=()=>{const o=AWP;AWP=null;closeDlg();if(o&&o.onNew)o.onNew()};
 /* 12.11 (החלטות בעל הפרויקט): חשבונית ספק שבה כתוב ששולמה באשראי. h={ccp,cc4,ccn,cca} מהזיהוי – ccpH מנקה (רק 4 ספרות אחרונות, אף פעם לא מספר כרטיס מלא). שואלים רק כש-ccpNeed, ותמיד אחרי כפילות ו-awOffer. "כן" = תשלום אשראי על החשבונית (ivc=1, שדה לא חובה), שדף האשראי מתחבר אליו (stlCands/stlAuto/ccx). סכום חלקי: השלמה במזומן מהקופה (תשלום עם creg/src, כמו ייחוד הוצאה מקופה) או השארה פתוחה אצל הספק */
 const ccpH=o=>{const h={};if(!o||(o.ccp!==true&&o.ccp!==1&&o.ccp!=='1'))return h;h.ccp=true;const l=String(o.cc4==null?'':o.cc4).replace(/\D/g,'');if(l.length>=4)h.cc4=l.slice(-4);const n=+o.ccn;if(Number.isInteger(n)&&n>=2&&n<=36)h.ccn=n;const a=o.cca==null||o.cca===''?null:pNum(String(o.cca));if(a!=null&&a>0&&a<5e6)h.cca=rnd(a);return h};
-const ccpNeed=(t,h)=>!!(h&&h.ccp&&t&&t.t==='exp'&&['sup','fixed'].includes(beh(t))&&(t.kind||'inv')==='inv'&&!t.dn&&!t.await&&t.amt>0&&!(t.pays||[]).length);
+/* הוצאה מקופה (co/creg) – כבר שולמה במזומן, לא שואלים על אשראי */const ccpNeed=(t,h)=>!!(h&&h.ccp&&t&&t.t==='exp'&&!t.co&&!t.creg&&['sup','fixed'].includes(beh(t))&&(t.kind||'inv')==='inv'&&!t.dn&&!t.await&&t.amt>0&&!(t.pays||[]).length);
 function ccpCard(t,h){const L=ccAllCards().filter(c=>c.on);if(!L.length)return'';if(h&&h.cc4){const m=L.filter(c=>c.last4===h.cc4);if(m.length===1)return m[0].id}const g=cardGuess(t||{},{m:METHODS[3]});return g.sure?g.id:''}
 let CCP=null;
 function ccpAsk(t,h,onYes,onNo){h=h||{};const L=ccAllCards().filter(c=>c.on),g=ccpCard(t,h),a0=h.cca&&h.cca<=t.amt+0.004?h.cca:t.amt;CCP={t,h,onYes,onNo};
@@ -1767,11 +1770,14 @@ FRM.ccpok=form=>{const o=CCP;if(!o)return closeDlg();const x=fd(form),a=pNum(x.a
  o.r={a:rnd(a),card:x.card&&ccAllCards().some(c=>c.id===x.card)?x.card:'',ins:n};if(o.r.a<T-0.004)return ccpPart(o);CCP=null;closeDlg();o.onYes(o.r)};
 function ccpPart(o){const R=bzF('cashClose')?Object.keys(ZREG).filter(zcRegOk):[],d=rnd(o.t.amt-o.r.a);
  dlg(`<h3>שולם באשראי רק חלק מהחשבונית</h3><p class="note">בכרטיס שולמו ${ils(o.r.a)} מתוך ${ils(o.t.amt)}. נשאר ${ils(d)}.</p>${R.length?`<form data-f="ccpco">${selO('השלמה במזומן – מאיזו קופה','creg',R.map(k=>[k,ZREG[k].n]),R[0])}<button class="btn w">השלמה במזומן מהקופה</button></form>`:''}<button class="btn g w" style="margin-top:8px" data-a="ccpOpen">להשאיר ${ils(d)} פתוח לתשלום אצל הספק</button><button class="btn g w" style="margin-top:8px" data-a="closeDlg">ביטול</button>`)}
-FRM.ccpco=form=>{const o=CCP,x=fd(form);if(!o||!o.r)return closeDlg();if(!zcRegOk(x.creg))return toast('בחר קופה');o.r.co=x.creg;CCP=null;closeDlg();o.onYes(o.r)};
+/* 12.11: תאריך ההשלמה נבדק כמו הוצאה מקופה – בתקופה סגורה נרשם בתאריך היום; אם גם היום חסום, ההשלמה לא נרשמת וההפרש נשאר פתוח */
+FRM.ccpco=async form=>{const o=CCP,x=fd(form);if(!o||!o.r)return closeDlg();if(!zcRegOk(x.creg))return toast('בחר קופה');const b=await coOldB(x.creg);if(CCP!==o)return;let d=o.t.date,m='';
+ if(coOldX({d,tm:''},b)){d=today();if(coOldX({d,tm:''},b)){CCP=null;closeDlg();o.onYes(o.r);toast(coOldMsg(b)+' ההשלמה במזומן לא נרשמה – היתרה נשארה פתוחה אצל הספק.');return}m='תקופת הקופה בתאריך החשבונית נסגרה – ההשלמה במזומן נרשמה בתאריך היום'}
+ o.r.co=x.creg;o.r.cod=d;CCP=null;closeDlg();o.onYes(o.r);if(m)toast(m)};
 ACT.ccpOpen=()=>{const o=CCP;if(!o||!o.r)return closeDlg();CCP=null;closeDlg();o.onYes(o.r)};
 /* כותב את התשלום על t (חשבונית חדשה, עוד לא נשמרה). src='mcp'+מזהה – הוצאה מקופה של המנהל: נספרת בסגירה (coMine) ונוצרת בענן (coWant) */
 function ccpApply(t,r){if(!t||!r||!(r.a>0))return t;const a=rnd(Math.min(r.a,t.amt));t.pays=[pyX({id:uid(),d:t.date,a,m:METHODS[3],ivc:1},{card:r.card||'',ins:r.ins})];
- if(r.co&&zcRegOk(r.co)){const q=rnd(t.amt-a),id=uid();if(q>0.004)t.pays.push({id,d:t.date,a:q,m:'מזומן',src:'mcp'+id,creg:r.co,cowhy:'השלמה לתשלום באשראי'})}
+ if(r.co&&zcRegOk(r.co)){const q=rnd(t.amt-a),id=uid();if(q>0.004)t.pays.push({id,d:r.cod||t.date,a:q,m:'מזומן',src:'mcp'+id,creg:r.co,cowhy:'השלמה לתשלום באשראי'})}
  if(bal(t)<0.005)delete t.due;return t}
 /* חיבור ישיר מפרטי התנועה */
 ACT.awAtt=el=>{const e=S.tx.find(x=>x.id===el.dataset.id);if(!e||!e.await)return;closeDlg();const sup=beh(e)==='sup';
@@ -2498,7 +2504,10 @@ function parseInv(text,subs){
  const lines=ocrNorm(text).split(/\n+/).map(x=>x.trim()).filter(Boolean);
  const n=ocrNorm(text);return{regAmt:ocrRegAmount(lines),inv:ocrInvNo(lines),date:ocrDate(lines),amt:ocrAmount(lines),sup:ocrSupplier(text,subs),dn:/תעודת משלוח|תעודת משלוח|delivery note/.test(n),hasInv:/חשבונית|invoice/.test(n.replace(/תעודת משלוח[^\n]*חשבונית[^\n]*/g,'x')),...ocrCcp(n)}}
 /* 12.11: "שולם באשראי" בטקסט (גיבוי לזיהוי החכם). "אשראי" לבד (למשל "אשראי 30 יום") לא נחשב. רק 4 ספרות אחרי כרטיס/אשראי/כוכביות */
-function ocrCcp(n){if(!/שולם[^\n]{0,20}(אשראי|בכרטיס)|אמצעי תשלום[^\n]{0,15}(אשראי|ויזה|מאסטרקארד|ישראכרט|אמריקן|דיינרס)/.test(n))return{};const o={ccp:true},m=/(?:כרטיס|אשראי|\*{2,}|x{2,})[^\d\n]{0,12}(\d{4})(?!\d)/.exec(n),k=/(\d{1,2})\s*תשלומים/.exec(n);if(m)o.cc4=m[1];if(k&&+k[1]>=2&&+k[1]<=36)o.ccn=+k[1];return o}
+/* 12.11: 4 הספרות האחרונות של מספר כרטיס. קודם אחרי מיסוך (כוכביות או xxxx); אחרת רצף ספרות/כוכביות אחרי "כרטיס"/"אשראי" – הקבוצה האחרונה. לא סכום (נקודה עשרונית או ₪/ש"ח אחריו, או ₪ לפניו) */
+function ocrCc4(n){const NA='(?!\\d|[.,]\\d|\\s*(?:₪|ש"ח|ש״ח|שח))';let m=new RegExp('(?:\\*{2,}|[xX]{2,})[\\s\\-]*(\\d{4})'+NA).exec(n);if(m)return m[1];
+ const re=new RegExp('(?:כרטיס|אשראי)[^\\d\\n*₪]{0,12}([\\d*xX](?:[\\d*xX \\-]{0,24}\\d)?)'+NA,'g');while((m=re.exec(n))){const g=m[1].split(/[^\d]+/).pop();if(g.length>=4)return g.slice(-4)}return ''}
+function ocrCcp(n){if(!/שולם[^\n]{0,20}(אשראי|בכרטיס)|אמצעי תשלום[^\n]{0,15}(אשראי|ויזה|מאסטרקארד|ישראכרט|אמריקן|דיינרס)/.test(n))return{};const o={ccp:true},m=ocrCc4(n),k=/(\d{1,2})\s*תשלומים/.exec(n);if(m)o.cc4=m;if(k&&+k[1]>=2&&+k[1]<=36)o.ccn=+k[1];return o}
 /* איחוד כמה עמודים: מספר/תאריך/ספק מהעמוד הראשון שיש בו, הסכום מהאחרון שמצא */
 function mergeInv(rs){const o={inv:null,date:null,amt:null,sup:null,dn:false};
  rs.forEach(r=>{if(!o.inv&&r.inv)o.inv=r.inv;if(!o.date&&r.date)o.date=r.date;if(!o.sup&&r.sup)o.sup=r.sup;if(r.amt&&(!o.amt||r.amt.sure||!o.amt.sure))o.amt=r.amt});o.dn=rs.some(r=>r.dn)&&!rs.some(r=>r.hasInv);o.hasInv=rs.some(r=>r.hasInv);rs.forEach(r=>{if(r.regAmt!=null)o.regAmt=r.regAmt});if(!o.dn)rs.forEach(r=>{if(r.ccp){o.ccp=true;if(!o.cc4&&r.cc4)o.cc4=r.cc4;if(!o.ccn&&r.ccn)o.ccn=r.ccn}});return o}
@@ -3967,7 +3976,11 @@ function bqCard(it){const f=it.f,subs=bqSubs(it),ready=it.st==='ok'||it.st==='fa
  <div class="row"><label class="f grow"><span>${f.dn?'מס׳ תעודת משלוח':'מספר חשבונית'}</span><input data-c="bqf" data-id="${it.id}" data-k="${f.dn?'dnum':'inv'}" value="${esc(f.dn?f.dnum:f.inv)}" autocomplete="off"></label><label class="f grow"><span>סכום</span><input class="amt" inputmode="decimal" data-c="bqf" data-id="${it.id}" data-k="amt" value="${esc(f.amt)}"></label></div>
  <div class="row"><label class="f grow"><span>תאריך</span><input type="date" data-c="bqf" data-id="${it.id}" data-k="date" value="${esc(f.date)}"></label><label class="f grow"><span>חודש לתשלום</span><input type="month" data-bqplan="${it.id}" data-c="bqf" data-id="${it.id}" data-k="plan" value="${esc(f.plan)}"></label></div>
  ${bqCp(it)}${it.err&&it.dupok===0?`<button class="btn r w" style="margin-bottom:8px" data-a="bqDupDel" data-id="${it.id}">🗑 מחק את המסמך החדש</button><button class="btn g w" data-a="bqDup" data-id="${it.id}">זה מסמך אחר – שמור בכל זאת</button>`:''}${it.err&&it.awq?`<div class="row"><button class="btn grow" data-a="bqAw" data-id="${it.id}">לחבר לתשלום שממתין</button><button class="btn g grow" data-a="bqAwNo" data-id="${it.id}">הוצאה חדשה בכל זאת</button></div>`:''}</div>`}
-function bqCp(it){if(it.f.dn)return '';const f=it.f,L=ccAllCards().filter(c=>c.on);return `<label class="cb"><input type="checkbox" data-c="bqf" data-id="${it.id}" data-k="cp" value="1"${f.cp?' checked':''}> שולם באשראי${f.cpa?' · בחשבונית: '+ils(+f.cpa)+' (סכום חלקי)':''}</label>${L.length?`<div data-bqcp="${it.id}"${f.cp?'':' hidden'}><label class="f"><span>כרטיס</span><select data-c="bqf" data-id="${it.id}" data-k="card"><option value="">בחר כרטיס</option>${L.map(c=>`<option value="${esc(c.id)}"${c.id===f.card?' selected':''}>${esc(c.name)}${c.last4?' ····'+esc(c.last4):''}</option>`).join('')}</select></label></div>`:''}`}
+function bqCp(it){if(it.f.dn)return '';const f=it.f,L=ccAllCards().filter(c=>c.on);return `<label class="cb"><input type="checkbox" data-c="bqf" data-id="${it.id}" data-k="cp" value="1"${f.cp?' checked':''}> שולם באשראי${f.cpa?' · בחשבונית: '+ils(+f.cpa)+' (סכום חלקי)':''}</label><div data-bqcp="${it.id}"${f.cp?'':' hidden'}>${L.length?`<label class="f"><span>כרטיס</span><select data-c="bqf" data-id="${it.id}" data-k="card"><option value="">בחר כרטיס</option>${L.map(c=>`<option value="${esc(c.id)}"${c.id===f.card?' selected':''}>${esc(c.name)}${c.last4?' ····'+esc(c.last4):''}</option>`).join('')}</select></label>`:''}<label class="f"><span>מספר תשלומים</span><input type="number" min="1" max="36" step="1" inputmode="numeric" data-c="bqf" data-id="${it.id}" data-k="ccn" value="${esc(f.ccn||'1')}"></label>${f.cpa?`<p class="note" style="margin:0 0 6px">סכום חלקי – להשלמה במזומן פתח את החשבונית</p><button type="button" class="btn g w" style="margin-bottom:8px" data-a="bqCpCo" data-id="${it.id}">פתח להשלמה במזומן</button>`:''}</div>`}
+/* 12.11: סכום חלקי באשראי בתור – אותו חלון השלמה (ccpPart) כמו בחשבונית בודדת; השמירה רק אחרי הבחירה בחלון */
+ACT.bqCpCo=el=>{const it=BQ.find(x=>x.id===el.dataset.id);if(!it)return;bqRd(it);const f=it.f,T=pNum(f.amt),pa=f.cpa?pNum(f.cpa):null,n=+(f.ccn||1);
+ if(!(T>0)||!(pa>0&&pa<T-0.004))return toast('סכום לא תקין');if(!Number.isInteger(n)||n<1||n>36)return toast('מספר תשלומים: 1 עד 36');
+ CCP={t:{amt:rnd(T),date:f.date||today()},h:{},r:{a:rnd(pa),card:f.card&&ccAllCards().some(c=>c.id===f.card)?f.card:'',ins:n},onYes:r=>{f.cp='1';if(bqSaveOne(it,r)){BQ=BQ.filter(x=>x!==it);save()}bqSave();bqDraw();rerender()}};ccpPart(CCP)};
 function bqDraw(){const c=bqCnt();bqSave();
  dlg(`<h3>בדיקת חשבוניות</h3><p class="note" data-bqhead style="margin:4px 0 10px">${c.n} חשבוניות · ${c.done} זוהו</p>${BQ.length?BQ.map(bqCard).join(''):'<p class="empty">אין חשבוניות בתור.</p>'}
  <div class="row" style="position:sticky;bottom:0;background:var(--card);padding:8px 0"><button class="btn grow" data-a="bqAll" ${BQ.some(x=>x.st==='ok'||x.st==='fail')?'':'disabled'}>אישור הכול</button><button class="btn g grow" data-a="closeDlg">סגור</button></div>`)}
@@ -3985,7 +3998,7 @@ ACT.bqNow=el=>{const it=BQ.find(x=>x.id===el.dataset.id);if(!it||it.st!=='q')ret
 ACT.bqDupDel=el=>{const it=BQ.find(x=>x.id===el.dataset.id);if(!it)return;ask('למחוק את המסמך החדש? הוא לא יישמר.',()=>{BQ=BQ.filter(x=>x!==it);if(it.si&&typeof siDrop==='function')siDrop(it.si);bqDraw();rerender();toast('המסמך החדש נמחק ולא נשמר')},'מחק')};
 ACT.bqDup=el=>{const it=BQ.find(x=>x.id===el.dataset.id);if(!it)return;it.dupok=1;it.err='';bqSaveOne(it)&&(BQ=BQ.filter(x=>x!==it));save();bqDraw();rerender()};
 function bqRd(it){document.querySelectorAll('[data-bq="'+it.id+'"] [data-k]').forEach(i=>{const k=i.dataset.k;if(k in it.f||k==='cp'||k==='card')it.f[k]=i.type==='checkbox'?(i.checked?'1':''):i.value})}
-function bqSaveOne(it){const c=cat(it.cat),f={...it.f};let sid=f.sub;
+function bqSaveOne(it,cr){const c=cat(it.cat),f={...it.f};let sid=f.sub;
  if(!sid){it.err='בחר ספק';return false}
  /* אותו קובץ כבר מקושר לרשומה (למשל נשמר כהעברה): לא נשמר אוטומטית, גם לא ב"אישור הכול" */
  if(!it.dupok&&it.fid&&typeof siUsed==='function'&&siUsed(it.fid)){it.err='הקובץ הזה כבר נשמר ברשומה אחרת – כנראה אותו מסמך. לשמור בכל זאת?';it.dupok=0;return false}
@@ -3995,11 +4008,12 @@ function bqSaveOne(it){const c=cat(it.cat),f={...it.f};let sid=f.sub;
  const probeSub=nsub?null:sid;
  const r=readTx({inv:f.inv,date:f.date,amt:f.amt,plan:f.plan,note:f.note,dn:f.dn},c,probeSub||'__x',null);
  if(r.errs){it.err=r.errs[0];return false}
+ /* 12.11: מספר התשלומים – רק מה שמוצג בכרטיס (ccn) */if(f.cp&&!r.t.dn){const n=+(f.ccn||1);if(!Number.isInteger(n)||n<1||n>36){it.err='מספר תשלומים: 1 עד 36';return false}}
  if(!it.dupok&&probeSub){const mm=dupMsg(dupOf(dupT({...r.t,sub:probeSub})));if(mm.length){it.err='נראה שכבר קיימת: '+mm.join('; ');it.dupok=0;return false}}
  if(!it.awok&&probeSub&&!r.t.dn&&r.t.kind==='inv'&&awFor(probeSub).length){it.err='לספק יש תשלום ששולם בהעברה וממתין לחשבונית. לחבר אליו?';it.awq=1;return false}
  /* 12.11: סכום חלקי באשראי – לא נרשם אוטומטית. פעם אחת הודעה; "אישור" נוסף שומר בלי תשלום (או עם הסכום החלקי, אם סומן) */if(f.cpa&&!f.cp&&!it.cpw&&!r.t.dn){it.cpw=1;it.err='סכום חלקי – פתח לבדיקה: בחשבונית כתוב ששולם באשראי רק '+ils(+f.cpa)+'. סמן "שולם באשראי" לרישום הסכום החלקי, או אשר שוב לשמירה בלי תשלום';return false}
  if(nsub){let ex=S.subs.find(x=>x.cat===c.id&&x.name===nsub);if(!ex){ex={id:uid(),cat:c.id,name:nsub};S.subs.push(ex)}else if(ex.off)ex.off=false;sid=ex.id}
- r.t.sub=sid;r.t.file=it.fid;if(f.cp&&ccpNeed(r.t,{ccp:true})){const pa=f.cpa?pNum(f.cpa):null;ccpApply(r.t,{a:pa&&pa>0&&pa<r.t.amt?pa:r.t.amt,card:f.card&&ccAllCards().some(c=>c.id===f.card)?f.card:'',ins:+f.ccn||1})}S.tx.push(r.t);return true}
+ r.t.sub=sid;r.t.file=it.fid;if(f.cp&&ccpNeed(r.t,{ccp:true})){const pa=f.cpa?pNum(f.cpa):null;ccpApply(r.t,cr||{a:pa&&pa>0&&pa<r.t.amt?pa:r.t.amt,card:f.card&&ccAllCards().some(c=>c.id===f.card)?f.card:'',ins:+f.ccn||1})}S.tx.push(r.t);return true}
 ACT.bqAll=()=>{let ok=0,bad=0;const keep=[];
  for(const it of BQ){if(it.st!=='ok'&&it.st!=='fail'){keep.push(it);continue}
   bqRd(it);

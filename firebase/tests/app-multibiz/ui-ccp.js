@@ -42,7 +42,7 @@ const ORG = { v: 1, branches: [], banks: [{ id: 'bka', name: 'לאומי', last4
     };
   });
   check('1 זיהוי בטקסט: "שולם באשראי" + 4 ספרות + תשלומים; "אמצעי תשלום: ויזה"; לא "אשראי 30 יום" ולא "אשראי" לבד; מספר מלא לא נשמר',
-    r1.yes.ccp && r1.yes.cc4 === '5678' && r1.yes.ccn === 3 && r1.pm.ccp && !r1.net.ccp && !r1.plain.ccp && r1.full.ccp && r1.full.cc4 === '' && r1.merge.ccp && r1.merge.cc4 === '4321' && !r1.dn, r1);
+    r1.yes.ccp && r1.yes.cc4 === '5678' && r1.yes.ccn === 3 && r1.pm.ccp && !r1.net.ccp && !r1.plain.ccp && r1.full.ccp && r1.full.cc4 === '5678' /* תיקון 6: 4 אחרונות של רצף מספר כרטיס; המספר המלא לא נשמר */ && r1.merge.ccp && r1.merge.cc4 === '4321' && !r1.dn, r1);
   check('2 ccpH: רק 4 ספרות אחרונות, תשלומים 2–36 בלבד, ccp לא-בוליאני נדחה', r1.h.cc4 === '9876' && !r1.h.ccn && r1.h.cca === 1000 && !r1.hNo.ccp && !JSON.stringify(r1.h).includes('4580'), r1.h);
 
   const W = 'var W=(ms)=>new Promise((r)=>setTimeout(r,ms||150));';
@@ -195,6 +195,86 @@ const ORG = { v: 1, branches: [], banks: [{ id: 'bka', name: 'לאומי', last4
     return { txt: /לפי החשבונית/.test(txt) && /מקס/.test(txt), same: JSON.stringify(S.tx.find((x) => x.id === 'cOld')) === old, cmine: coMine().filter((c) => /^mcp/.test(c.id)).length };
   }, old);
   check('14 תצוגה: "(לפי החשבונית) · שם הכרטיס"; הרשומה הישנה לא השתנתה', r14.txt && r14.same, r14);
+
+  // 16. (תיקון 1) תור: מספר תשלומים מוצג בכרטיס, ניתן לשינוי – רק הערך המוצג נשמר (גם ב"אישור הכול"); ערך לא תקין – שגיאה
+  const r16 = await page.evaluate(async (a) => {
+    eval(a.W);
+    const mk = (id, res) => { const it = { id, cat: 'e_sup', pg: ['x'], hi: [], fid: 'f' + id, st: 'ok' }; bqInit(it, res); return it; };
+    const base = (a, x) => Object.assign({ sup: { id: 'cA', cat: 'e_sup' }, inv: 'N' + a, date: '2026-11-02', amt: { v: a, sure: 1 }, dn: false }, x);
+    const i1 = mk('bq16', base(916, { ccp: true, ccn: 3 })), i2 = mk('bq17', base(917, { ccp: true, ccn: 3 }));
+    const html = bqCard(i1); const shown = (/data-k="ccn" value="3"/.test(html) && /מספר תשלומים/.test(html));
+    i2.f.ccn = '40'; const ok2 = bqSaveOne(i2), e2 = i2.err;
+    BQ = [i1]; bqDraw(); await W(); const inp = document.querySelector('#dlg[open] [data-bq="bq16"] [data-k="ccn"]'); const vis = !!(inp && inp.offsetParent);
+    inp.value = '4'; ACT.bqAll(); await W(); closeDlg();
+    const t = S.tx.find((x) => x.file === 'fbq16'); return { shown, vis, ok2, e2, p: t && t.pays };
+  }, { W });
+  check('16 תור: "מספר תשלומים" מוצג (3 מהזיהוי), שינוי ל-4 נשמר ב"אישור הכול"; 40 – שגיאה ולא נשמר', r16.shown && r16.vis && !r16.ok2 && /תשלומים/.test(r16.e2) && r16.p && r16.p[0].ins === 4, r16);
+
+  // 17. (תיקון 2) הוצאה מקופה – לא שואלים על אשראי
+  const r17 = await page.evaluate(async (a) => {
+    eval(a.W);
+    const need = ccpNeed({ t: 'exp', cat: 'e_sup', sub: 'cU', amt: 77, kind: 'inv', pays: [], co: { reg: 'i_nl' } }, { ccp: true }) || ccpNeed({ t: 'exp', cat: 'e_sup', sub: 'cU', amt: 77, kind: 'inv', pays: [], creg: 'i_nl' }, { ccp: true });
+    A = { type: 'exp', cat: 'e_sup', sub: 'cU', step: 'det', ccp: { ccp: true } }; sheetDraw();
+    let f = document.querySelector('#sheet form[data-f=addsave]'); const hasCo = !!f.elements.co;
+    if (hasCo) { f.elements.co.checked = true; f.elements.co.dispatchEvent(new Event('change', { bubbles: true })); await W(); f = document.querySelector('#sheet form[data-f=addsave]'); }
+    const e = f.elements; e.amt.value = '77'; e.date.value = today(); e.inv.value = 'CO77'; if (e.co) e.co.checked = true; if (e.creg) e.creg.value = 'i_nl'; if (e.cowhy) e.cowhy.value = 'x';
+    FRM.addsave(f, { submitter: { value: 'done' } }); await W();
+    const asked = !!document.querySelector('#dlg[open] form[data-f=ccpok]'); if (asked) closeDlg();
+    const t = S.tx.find((x) => x.inv === 'CO77'); try { sheetClose(); } catch (er) { /* */ }
+    return { need, hasCo, asked, co: t && t.co, pays: t && t.pays };
+  }, { W });
+  check('17 הוצאה מקופה (co/creg): ccpNeed=false, בשמירה אין שאלת אשראי ואין תשלום אשראי', !r17.need && r17.hasCo && !r17.asked && r17.co && r17.co.reg === 'i_nl' && !(r17.pays || []).some((p) => p.m === 'אשראי'), r17);
+
+  // 18. (תיקון 3) חיוב כרטיס ידני (קטגוריית cc) מתחבר לחשבונית ששולמה באשראי – p.cc, בלי תשלום חדש
+  const r18 = await page.evaluate(async (a) => {
+    eval(a.W); if (!S.cats.some((c) => c.id === 'e_ccT')) S.cats.push({ id: 'e_ccT', kind: 'exp', name: 'חיובי אשראי', beh: 'cc' });
+    const inv = ccpApply({ id: 'cLk', t: 'exp', cat: 'e_sup', sub: 'cS', date: '2026-11-01', amt: 431.5, inv: 'LK1', plan: '2026-11', kind: 'inv', pays: [] }, { a: 431.5, card: 'cv', ins: 1 }); S.tx.push(inv); save();
+    A = { type: 'exp', cat: 'e_ccT', step: 'det' }; sheetDraw(); const f = document.querySelector('#sheet form[data-f=addsave]');
+    const opt = f && f.elements.link ? [...f.elements.link.options].some((o) => o.value === 'cLk') : false;
+    f.elements.amt.value = '431.5'; f.elements.date.value = '2026-11-06'; f.elements.link.value = 'cLk';
+    const n0 = S.tx.length; FRM.addsave(f, { submitter: { value: 'done' } }); await W();
+    let dup = false; if (document.querySelector('#dlg[open] [data-a=yes]')) { dup = true; document.querySelector('#dlg[open] [data-a=yes]').click(); await W(); }
+    const ch = S.tx.slice(n0).find((x) => x.cat === 'e_ccT'); try { sheetClose(); } catch (er) { /* */ }
+    return { opt, dup, n: S.tx.length - n0, ch: ch && { x: ch.x, link: ch.link, id: ch.id }, pays: inv.pays.map((p) => ({ a: p.a, cc: p.cc, ivc: p.ivc })), bal: bal(inv) };
+  }, { W });
+  check('18 חיוב ידני בקטגוריית אשראי: החשבונית ששולמה באשראי מוצעת; בחירה כותבת p.cc על התשלום הקיים, החיוב x=1/link, בלי תשלום חדש',
+    r18.opt && r18.n === 1 && r18.ch && r18.ch.x === 1 && r18.ch.link === 'cLk' && r18.pays.length === 1 && r18.pays[0].cc === r18.ch.id && r18.bal === 0, r18);
+
+  // 19. (תיקון 4) השלמה במזומן בתקופת קופה סגורה – בתאריך היום; אם גם היום חסום – לא נרשמת, היתרה פתוחה
+  const r19 = await page.evaluate(async (a) => {
+    eval(a.W); const z0 = S.zc; const out = {};
+    const run = async (id, zd, amt) => {
+      S.zc = [{ id: 'z' + id, reg: 'i_nl', d: zd, tm: '22:00', tx: [], co: { z: 0, s: 0, ids: [], ok: 1, done: 1 } }]; S.inbox.push(Object.assign({ id, by: 'עובד', at: '2026-11-01T09:00:00Z', d: { cat: 'e_sup', catName: '', sub: 'cB', subName: '', amt, date: '2026-10-25', inv: 'I' + id, plan: '2026-11', ccp: true, cc4: '5678', cca: amt - 400 } })); save();
+      await ACT.inbOk({ dataset: { id } }); await W(); const q = document.querySelector('#dlg[open] form[data-f=ccpok]'); if (!q) return { noq: (document.getElementById('dlg').open ? document.getElementById('dlg').innerText : 'closed').slice(0, 200) }; q.requestSubmit(); await W();
+      const g = document.querySelector('#dlg[open] form[data-f=ccpco]'); g.elements.creg.value = 'i_nl'; g.requestSubmit(); await W(300);
+      const t = S.tx.find((x) => x.src === id); return { pays: t && t.pays.map((p) => ({ a: p.a, m: p.m, d: p.d, creg: p.creg })), bal: t && bal(t), toast: (document.querySelector('#toast') || {}).innerText || '' };
+    };
+    out.a = await run('iC19', '2026-11-01', 1019); out.b = await run('iC20', '2099-01-01', 1020); out.today = today(); S.zc = z0; save(); return out;
+  }, { W });
+  const c19 = ((r19.a.pays || [])[1]) || {};
+  check('19 השלמה במזומן: תאריך החשבונית בתקופה סגורה – נרשמת בתאריך היום; גם היום חסום – לא נרשמת, יתרה 400 פתוחה',
+    c19.m === 'מזומן' && c19.d === r19.today && c19.a === 400 && r19.a.bal === 0 && (r19.b.pays || []).length === 1 && r19.b.pays[0].m === 'אשראי' && r19.b.bal === 400, r19);
+
+  // 20. (תיקון 5) תור: סכום חלקי – הודעה וכפתור לחלון ההשלמה במזומן
+  const r20 = await page.evaluate(async (a) => {
+    eval(a.W);
+    const it = { id: 'bq20', cat: 'e_sup', pg: ['x'], hi: [], fid: 'fbq20', st: 'ok' }; bqInit(it, { sup: { id: 'cA', cat: 'e_sup' }, inv: 'P20', date: today(), amt: { v: 920, sure: 1 }, dn: false, ccp: true, cca: 500 });
+    it.f.cp = '1'; BQ = [it]; bqDraw(); await W();
+    const txt = document.querySelector('#dlg[open] [data-bq="bq20"]').innerText; document.querySelector('#dlg[open] [data-a=bqCpCo]').click(); await W();
+    const g = document.querySelector('#dlg[open] form[data-f=ccpco]'); if (!g) return { txt, nog: 1 }; g.elements.creg.value = 'i_nl'; g.requestSubmit(); await W(300);
+    const t = S.tx.find((x) => x.file === 'fbq20'); const back = !!document.querySelector('#dlg[open] [data-bqhead]'); closeDlg();
+    return { msg: /להשלמה במזומן פתח את החשבונית/.test(txt), pays: t && t.pays.map((p) => ({ a: p.a, m: p.m, creg: p.creg, ivc: p.ivc })), bal: t && bal(t), q: BQ.length, back };
+  }, { W });
+  check('20 תור, סכום חלקי: הודעה "להשלמה במזומן פתח את החשבונית" + כפתור; השלמה מהקופה – אשראי 500 + מזומן 420, יתרה 0, הוסר מהתור',
+    r20.msg && r20.pays && r20.pays.length === 2 && r20.pays[0].a === 500 && r20.pays[0].ivc === 1 && r20.pays[1].m === 'מזומן' && r20.pays[1].a === 420 && r20.pays[1].creg === 'i_nl' && r20.bal === 0 && r20.q === 0, r20);
+
+  // 21. (תיקון 6) 4 ספרות: מספר כרטיס מלא בקבוצות, סכום עשרוני / ₪ – לא
+  const r21 = await page.evaluate(() => {
+    const p = (t) => { const o = parseInv(t, []); return o.cc4 || ''; };
+    return { grp: p('שולם באשראי\nכרטיס 4580 1234 5678 9012'), dec: p('שולם באשראי: 1250.00'), shk: p('שולם באשראי 1250 ₪'), mask: p('שולם בכרטיס אשראי ****9876 סה"כ 2500.00'), xx: p('שולם באשראי xxxx-xxxx-xxxx-7788'), comma: p('שולם בכרטיס 1234, 3 תשלומים') };
+  });
+  check('21 4 ספרות: "4580 1234 5678 9012"→9012; "1250.00" / "1250 ₪" – לא; מיסוך ****9876→9876; xxxx-…-7788; "1234," → 1234',
+    r21.grp === '9012' && r21.dec === '' && r21.shk === '' && r21.mask === '9876' && r21.xx === '7788' && r21.comma === '1234', r21);
 
   check('15 אין שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
