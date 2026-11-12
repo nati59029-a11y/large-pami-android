@@ -60,9 +60,10 @@ function hookReq(msgs) {
   return { method: 'POST', rawBody: raw, get: (h) => hd[String(h).toLowerCase()] };
 }
 function fakeRes() { return { code: 0, body: '', headersSent: false, status(c) { this.code = c; return this; }, set() { return this; }, send(b) { this.body = b; this.headersSent = true; return this; } }; }
-// Meta: אם התשובה אינה 200 – שולחת שוב (עד 6 ניסיונות כאן)
+// Meta: אם התשובה אינה 200 – שולחת שוב (במציאות במשך שעות; כאן עד 20 ניסיונות עם המתנה קצרה שגדלה)
 async function deliver(msgs, now) {
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 20; i++) {
+    if (i) await new Promise((r) => setTimeout(r, Math.min(3000, 150 * i)));
     const res = fakeRes();
     try { await WA.handleHook(hookReq(msgs), res, { secret: SECRET, now }); } catch (e) { res.code = 500; }
     if (res.code === 200) return i + 1;
