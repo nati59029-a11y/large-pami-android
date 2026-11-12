@@ -67,11 +67,21 @@ async function open(browser, www, who, calls) {
     calls.length = 0;
     await page.evaluate(() => go('oxProf')); await H.settle(page, 1200);
     const today = await page.evaluate(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' })); // שעון הדפדפן המדומה (harness)
-    const pf = await page.evaluate(() => ({ t: document.getElementById('main').innerText, sum: (document.getElementById('oxpfsum') || {}).innerText || '', rows: document.querySelectorAll('#main .li[data-v=oxOrd]').length, nc: !!document.querySelector('[data-c=oxNc]') }));
+    const pf = await page.evaluate(() => ({ t: document.getElementById('main').innerText, sum: (document.getElementById('oxpfsum') || {}).innerText || '', rows: document.querySelectorAll('#main .li[data-a=oxPfGo]').length, nc: !!document.querySelector('[data-c=oxNc]') }));
     const c1 = calls.find((x) => x.n === 'ordProfit');
     await shot(page, '03-מסך-רווחיות');
     check('4 מסך רווחיות: ברירת מחדל = היום, בלי "רק ששולמו"', c1 && c1.d.from === today && c1.d.to === today && c1.d.paid === false, c1 && c1.d);
     check('4א סיכום: 2 הזמנות, 139, עלות 70.5, רווח 63.5; שורה לכל הזמנה; הגדרת "שורה בלי עלות" למנהל; בלי גלילה רוחבית', /139\.00/.test(pf.sum) && /70\.50/.test(pf.sum) && /63\.50/.test(pf.sum) && pf.rows === 2 && pf.nc, pf);
+    // מרוץ: שתי טעינות ברצף – מוצגת רק התשובה של האחרונה
+    const race = await page.evaluate(async () => { const P = __ox.pf; let k = 0; const f0 = window.fnCall; window.fnCall = (n, d) => { const i = k++; return new Promise((res) => setTimeout(() => res({ n: i === 0 ? 1 : 7, total: 0, cost: 0, profit: 0, miss: 0, nc: 'skip', rows: [] }), i === 0 ? 400 : 50)); };
+      ACT.oxPfK({ dataset: { k: 'yest' } }); ACT.oxPfK({ dataset: { k: 'today' } }); await new Promise((r) => setTimeout(r, 700)); window.fnCall = f0; return { n: P.r && P.r.n, k: P.k }; });
+    check('4ב מרוץ: שינוי תקופה בזמן טעינה – מוצגים נתוני הבחירה האחרונה', race.n === 7 && race.k === 'today', race);
+    await page.evaluate(() => ACT.oxPfRe()); await H.settle(page, 600);
+    // הזמנה ישנה שלא ברשימה – נטענת ונפתחת
+    const og = await page.evaluate(async () => { const f0 = window.fsx; window.fsx = async (p) => (p === '/ord/o9' ? { name: 'x/ord/o9', fields: { no: { integerValue: '9' }, status: { stringValue: 'paid' }, total: { integerValue: '100' }, br: { stringValue: 'br2' }, items: { arrayValue: { values: [] } }, cust: { mapValue: { fields: { name: { stringValue: 'רחל' } } } } } } : f0(p));
+      await ACT.oxPfGo({ dataset: { id: 'o9' } }); window.fsx = f0; return { v: cur().v, t: document.getElementById('main').innerText.slice(0, 200) }; });
+    check('4ג לחיצה על הזמנה ישנה (לא ב-500 האחרונות) – נטענת ונפתחת', og.v === 'oxOrd' && /רחל/.test(og.t), og);
+    await page.evaluate(() => go('oxProf')); await H.settle(page, 600);
     calls.length = 0; await page.evaluate(() => ACT.oxPfK({ dataset: { k: 'month' } })); await H.settle(page, 600);
     const c2 = calls.find((x) => x.n === 'ordProfit');
     check('5 "החודש": מה-1 בחודש עד היום', c2 && c2.d.from === today.slice(0, 8) + '01' && c2.d.to === today, c2 && c2.d);

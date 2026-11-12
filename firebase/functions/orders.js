@@ -1354,6 +1354,7 @@ async function ordProfit(request) {
   onlyKeys(input, ['from', 'to', 'br', 'paid']);
   if (typeof input.from !== 'string' || !DAY_RE.test(input.from) || typeof input.to !== 'string' || !DAY_RE.test(input.to)) throw bad('bad-date', 'בחרו תאריכים');
   const [ty, tm, td] = input.to.split('-').map(Number);
+  ilDayStart(input.to); // תאריך שקיים בלוח השנה (31.2 – נדחה)
   const t0 = ilDayStart(input.from), t1 = ilDayStart(new Date(Date.UTC(ty, tm - 1, td + 1)).toISOString().slice(0, 10)); // עד סוף יום to
   if (t1 <= t0) throw bad('bad-date', 'תאריך הסיום לפני תאריך ההתחלה');
   if (t1 - t0 > 367 * 86400e3) throw bad('bad-date', 'תקופה של עד שנה');
@@ -1369,7 +1370,7 @@ async function ordProfit(request) {
   if (qs.size > ORD_PROF_MAX) throw pre('too-many', `יותר מ-${ORD_PROF_MAX} הזמנות בתקופה – בחרו תקופה קצרה יותר`);
   const nc = cfg.exists && cfg.get('nc') === 'zero' ? 'zero' : 'skip';
   const L = qs.docs.map((s) => Object.assign({ id: s.id }, s.data())).filter((o) => o.status !== 'cancel'
-    && (!br || o.br === br) && (!o.br || o.br === NB || canBr(w, o.br))
+    && (!br || o.br === br) && canBr(w, o.br) // כמו brOk בחוקים: עובד משויך לסניפים – רק הזמנות שהסניף שלהן ברשימה שלו (גם לא '_' / חסר)
     && (!input.paid || (!!o.paid && ['paid', 'out', 'done'].includes(o.status))));
   const need = [...new Set(L.flatMap((o) => (Array.isArray(o.items) ? o.items : []).filter((it) => it && it.pid && typeof it.c !== 'number' && ID_RE.test(it.pid)).map((it) => it.pid)))];
   const cur = new Map();

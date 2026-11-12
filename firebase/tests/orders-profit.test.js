@@ -96,6 +96,9 @@ describe('רווחיות הזמנות', () => {
     await call('createOrder', MGR, { reqId: rid(), br: 'br2', cust, items: [{ pid: 'pB', qty: 1, price: 10 }] });
     const r = await prof(PF1); assert.equal(r.status, 'OK', r.text); assert.equal(r.result.n, 1); assert.equal(r.result.rows[0].br, 'br1');
     assert.equal((await prof(PF1, { br: 'br2' })).reason, 'foreign-br');
+    await prep((d) => d.doc(`b/${A}/ord/oNoBr`).set({ no: 99, br: '_', status: 'new', total: 50, items: [{ n: 'x', qty: 1, price: 50, c: 1 }], cust: { name: 'סוד' }, at: Date.now() }));
+    const r2 = await prof(PF1); assert.ok(!r2.result.rows.some((x) => x.id === 'oNoBr'), 'עובד משויך לסניף לא רואה הזמנה בלי סניף (כמו בחוקים)');
+    assert.ok((await prof(MGR)).result.rows.some((x) => x.id === 'oNoBr'), 'מנהל – כן');
     assert.equal((await prof(E1)).reason, 'no-perm');
     assert.equal((await prof(NOORD)).reason, 'no-perm');
     assert.equal((await call('setOrderCfg', PF1, { nc: 'zero' })).reason, 'manager-only');
@@ -105,6 +108,7 @@ describe('רווחיות הזמנות', () => {
     assert.equal((await prof(MGR, { from: '12/11/2026' })).reason, 'bad-date');
     assert.equal((await prof(MGR, { from: '2024-01-01', to: '2026-01-01' })).reason, 'bad-date');
     assert.equal((await prof(MGR, { from: '2026-02-02', to: '2026-02-01' })).reason, 'bad-date');
+    assert.equal((await prof(MGR, { from: '2026-02-01', to: '2026-02-31' })).reason, 'bad-date');
     assert.notEqual((await prof(MGR, { x: 1 })).status, 'OK');
   });
 });
