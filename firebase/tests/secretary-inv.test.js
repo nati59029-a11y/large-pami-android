@@ -609,12 +609,14 @@ describe('תיקון 1 – ליקוי 2: מייל עם כתובת שולח מז�
     const y = await get(`b/${A}/sec_inv/${y0.id}`);
     assert.equal(y.match, 'snd'); assert.equal(y.el, true, JSON.stringify(y.why));
   });
-  it('מייל לא מאומת עם ח.פ של ספק מוכר – עדיין לא "נכנס ישר"', async () => {
+  // שלב 8 – החלטה חדשה של בעל הפרויקט (מחליפה את הבדיקה הקודמת "עדיין לא נכנס ישר"): ח.פ של ספק מוכר מספיק גם כשהמייל לא מאומת
+  it('מייל לא מאומת עם ח.פ של ספק מוכר – "נכנס ישר" (החלטת שלב 8), עם סימון והתראה "שולח לא מאומת"', async () => {
     await saveG(gmail('gfake2', pdf(1), SUP_MAIL, null), 'gfake2');
     const L = await coll(`b/${A}/sec_inv`);
     await inBiz(A, () => INV.workIn(L[0].id, { classify: async () => RAW.inv() }));
     const x = await get(`b/${A}/sec_inv/${L[0].id}`);
-    assert.equal(x.match, 'hp'); assert.equal(x.el, false); assert.deepEqual(x.why, ['auth']);
+    assert.equal(x.match, 'hp'); assert.equal(x.ua, true); assert.equal(x.el, true, JSON.stringify(x.why)); assert.deepEqual(x.why, []);
+    assert.ok((await coll(`b/${A}/sec_note/${M1}/n`)).some((n) => /לא מאומת/.test(n.title) && /תיכנס ישר/.test(n.body)), 'התראה "שולח לא מאומת"');
   });
 });
 

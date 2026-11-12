@@ -399,3 +399,49 @@ describe('קריטריון 1: הזרקת הוראות – הודעה מבחוץ 
     assert.equal(await get(`b/${A}/sec_draft/${id2}`), null, 'בלי טיוטה (88)');
   });
 });
+
+// =====================================================================================
+// החלטת בעל הפרויקט (שלב 8, לשלב 7): ח.פ של ספק מוכר → זכאית ל"נכנס ישר" גם כשהשולח לא מאומת (מייל בלי SPF/DKIM/DMARC) או לא מוכר
+// (שולח חדש / מספר המנהל בווצאפ). שאר התנאים נשארים ונבדקים שוב בתפיסה בשרת. ההתראה "שולח לא מאומת" / "שולח חדש" נשמרת.
+describe('החלטה: ח.פ מוכר מספיק ל"נכנס ישר" גם משולח לא מאומת או חדש', () => {
+  const INVC = () => require('../functions/secretary-inv.js')._core;
+  const raw = (f, type) => ({ type: 'invoice', docType: type, type_confidence: 0.97, fields: Object.assign({ supplier: 'ספק דמה בע"מ', supplier_id: '512345678', number: 'N-' + Math.random().toString(36).slice(2, 8), date: '2026-11-01', total_with_vat: 118 }, f || {}), confidence: { supplier: 0.95, number: 0.95, date: 0.95, total_with_vat: 0.97 } });
+  let n = 0;
+  const pdfU = () => Buffer.from('%PDF-1.4\n1 0 obj<</Type /Page>>endobj\n%u ' + (++n) + ' ' + Date.now() + '\n%%EOF', 'latin1');
+  async function arrive(o, r) {
+    return T.runInBiz({ bizId: A, prefix: T.bizPrefix(BIZA), biz: BIZA }, async () => {
+      const db = T.tdb();
+      const x = await INVC().ingest(db, Object.assign({ name: 'ספק', inId: 'in' + n, fn: 'a.pdf', buf: pdfU() }, o));
+      await INVC().workIn(x.id, { classify: async () => r });
+      return Object.assign({ id: x.id }, (await db.doc('sec_inv/' + x.id).get()).data());
+    });
+  }
+  it('מייל לא מאומת: ח.פ מוכר – נכנס ישר (+התראה "לא מאומת", התפיסה האוטומטית בשרת מצליחה); ח.פ לא מוכר – ממתין; תקרה, זיכוי וכפילות – עדיין ממתינים; ווצאפ משולח חדש / מספר המנהל עם ח.פ מוכר – נכנס ישר עם "שולח חדש"', async () => {
+    await seed();
+    await bizzes();
+    await prep(async (d) => {
+      await d.doc('b/' + A).update({ 'features.secretary': false }); // ב-CI: הטריגר של התור מדלג (העיבוד נקרא כאן ישירות)
+      await d.doc(`b/${A}/sec_cfg/inv`).set({ sups: [{ id: 's1', name: 'ספק דמה בע"מ', hp: '512345678', br: [] }], links: { 'm:billing@supplier.example': 's1' } });
+    });
+    const UA = { ch: 'mail', from: 'billing@supplier.example', auth: false };
+    const ok = await arrive(UA, raw());
+    assert.deepEqual([ok.ua, ok.match, ok.el, ok.why], [true, 'hp', true, []], 'ח.פ מוכר + שולח לא מאומת → נכנס ישר');
+    assert.ok((await notes(M1)).some((x) => /לא מאומת/.test(x.title) && /תיכנס ישר/.test(x.body)), 'התראה "שולח לא מאומת"');
+    const bad = await arrive(Object.assign({}, UA, { from: 'billing@supplier.example' }), raw({ supplier_id: '599999999', supplier: 'ספק אחר לגמרי' }));
+    assert.equal(bad.el, false); assert.ok(bad.why.includes('auth') && bad.why.includes('sup'), JSON.stringify(bad.why));
+    const cap = await arrive(UA, raw({ total_with_vat: 20000 }));
+    assert.equal(cap.el, false); assert.deepEqual(cap.why, ['cap'], 'סכום ששווה לתקרה – ממתין');
+    const cr = await arrive(UA, raw({ total_with_vat: -59 }, 'credit_note'));
+    assert.equal(cr.el, false); assert.ok(cr.why.includes('type') || cr.why.includes('neg'));
+    const dupF = raw(); const d1 = await arrive(UA, dupF); const d2 = await arrive({ ch: 'wa', from: '972520000001' }, JSON.parse(JSON.stringify(dupF)));
+    assert.ok(d1.el !== d2.el || !d2.el, 'אותה חשבונית פעמיים – השנייה ממתינה'); assert.ok(d2.why.includes('dup'));
+    // ווצאפ: שולח חדש, ומספר המנהל (גם הוא "שולח" שלא מקושר לספק)
+    const wa = await arrive({ ch: 'wa', from: '972527654321' }, raw({ total_with_vat: 333, date: '2026-11-05' })); // סכום ותאריך אחרים – לא כפולה
+    assert.deepEqual([wa.match, wa.el, wa.ns], ['hp', true, 'wa:972527654321'], 'שולח חדש עם ח.פ מוכר – נכנס ישר, מסומן "שולח חדש"');
+    // תפיסה אוטומטית בשרת – בודקת שוב: הלא מאומת עם ח.פ מוכר עובר, עם ח.פ לא מוכר נדחה
+    await prep((d) => d.doc('b/' + A).update({ 'features.secretary': true }));
+    assert.equal((await callFn('secDecide', M1, { op: 'claim', id: ok.id, mode: 'auto', dev: 'devA0001' })).code, 'ok');
+    assert.equal((await callFn('secDecide', M1, { op: 'claim', id: bad.id, mode: 'auto', dev: 'devA0001' })).reason, 'not-eligible');
+    assert.equal((await callFn('secDecide', M1, { op: 'claim', id: cap.id, mode: 'auto', dev: 'devA0001' })).reason, 'not-eligible');
+  });
+});

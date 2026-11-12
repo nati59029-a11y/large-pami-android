@@ -191,10 +191,11 @@ async function workIn(id, o) {
     }
     if (up.dup) { up.el = false; up.why = [...new Set(up.why.concat(['dup']))]; await ref.update({ dup: up.dup, el: false, why: up.why }); }
   }
-  if (ua && cfg.links[skey]) {
-    // כתובת של ספק מקושר, אבל המייל לא אומת – אולי זיוף. ממתינה + התראה
-    await db.collection('sec_log').doc().set(ilog('', 'sec', 'invUnauth', { tgt: id }));
-    await notify(db, 'ua|' + id, 'חשבונית ממייל לא מאומת', 'הגיעה חשבונית במייל מהכתובת ' + show(skey) + ', אבל Gmail לא אישר שהמייל באמת נשלח ממנה. היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".', now);
+  if (ua && (cfg.links[skey] || up.el)) {
+    // המייל לא אומת – אולי זיוף. כתובת של ספק מקושר: ממתינה + התראה. ח.פ של ספק מוכר (החלטה, שלב 8): זכאית ל"נכנס ישר" – עם התראה "שולח לא מאומת"
+    await db.collection('sec_log').doc().set(ilog('', 'sec', 'invUnauth', { tgt: id, note: up.el ? 'el' : '' }));
+    await notify(db, 'ua|' + id, 'חשבונית ממייל לא מאומת', 'הגיעה חשבונית במייל מהכתובת ' + show(skey) + ', אבל Gmail לא אישר שהמייל באמת נשלח ממנה. '
+      + (up.el ? 'מספר העוסק בה תואם ספק מוכר (' + (up.subN || '') + '), ולכן היא תיכנס ישר – כדאי לבדוק שהיא אמיתית. אפשר לבטל במסך "חשבוניות שהתקבלו".' : 'היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".'), now);
   }
   if (up.dup) {
     await db.collection('sec_log').doc().set(ilog('', 'sec', 'invDup', { tgt: id, note: up.dup }));
