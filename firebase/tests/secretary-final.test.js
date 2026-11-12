@@ -265,6 +265,28 @@ describe('קריטריון 6: בדיקת קובצי PDF (lib/sec-inv.js) – ע�
     // אוסף דחוס עם רווח אחרי stream (נפוץ בכלים מסוימים) – לגיטימי: נפרס ונבדק, לא נחסם
     r = SI.inspect(objStm('6 0 <</Type /Page>>', null, 'stream \r\n')); assert.equal(r.ok, true, r.why);
   });
+  it('נחסם (סבב 1 של הבודק, שלב 8): מילון אוסף עם הערה / תו אפס / "+", Predictor בכל צורה, ואוסף שמוסתר בתוך זרם אחר', () => {
+    const js = '6 0 <</OpenAction <</S /JavaScript /JS 7 0 R>>>>';
+    for (const d of ['/Type%x\n/ObjStm/N%x\n1/First%x\n4/Filter/FlateDecode', '/Type /ObjStm /N\x001 /First\x004 /Filter /FlateDecode', '/N +1 /First +4 /Filter /FlateDecode']) {
+      const r = SI.inspect(objStm(js, d)); assert.deepEqual([r.ok, r.why], [false, 'active'], JSON.stringify(d));
+    }
+    for (const d of ['/Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /DecodeParms <</Predictor +12 /Columns 5>>', '/Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /DecodeParms <</Predictor %c\n12>>', '/Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /DP 9 0 R']) {
+      const r = SI.inspect(objStm(js, d)); assert.equal(r.ok, false, JSON.stringify(d));
+    }
+    // אוסף דחוס שלם בתוך הנתונים (בלי דחיסה) של זרם אחר – ה-xref יכול להפנות אליו ישירות
+    const z = zlib.deflateSync(Buffer.from(js, 'latin1'));
+    const innerObj = Buffer.concat([Buffer.from('9 0 obj\n<</Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length ' + z.length + '>>\nstream\n', 'latin1'), z, Buffer.from('\nendstream\nendobj\n', 'latin1')]);
+    const wrap = Buffer.concat([Buffer.from('%PDF-1.7\n5 0 obj\n<</Length ' + innerObj.length + '>>\nstream\n', 'latin1'), innerObj, Buffer.from('\nendstream\nendobj\ntrailer<</Root 1 0 R>>\n%%EOF\n', 'latin1')]);
+    const r = SI.inspect(wrap); assert.deepEqual([r.ok, r.why], [false, 'active']);
+  });
+  it('עומס (סבב 1 של הבודק, שלב 8): 200 אוספים עם 600 /Type/Pages כל אחד – הבדיקה מסתיימת מהר', () => {
+    const z = zlib.deflateSync(Buffer.from('<<' + '/Type/Pages'.repeat(600) + ' '.repeat(25000), 'latin1')); // מילון שלא נסגר – כל חיפוש מילון סורק 20,000 תווים
+    const parts = [Buffer.from('%PDF-1.7\n', 'latin1')];
+    for (let k = 0; k < 200; k++) parts.push(Buffer.from((10 + k) + ' 0 obj\n<</Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length ' + z.length + '>>\nstream\n', 'latin1'), z, Buffer.from('\nendstream\nendobj\n', 'latin1'));
+    parts.push(Buffer.from('trailer<</Root 1 0 R>>\n%%EOF\n', 'latin1'));
+    const t0 = Date.now(); SI.inspect(Buffer.concat(parts));
+    assert.ok(Date.now() - t0 < 2000, 'נמשך ' + (Date.now() - t0) + 'ms');
+  });
 });
 
 // =====================================================================================

@@ -103,7 +103,24 @@ function streamDicts(s) {
   }
   return res;
 }
-const isObjStmDict = (d) => /\/Type\s*\/ObjStm(?![A-Za-z])/.test(d) || (/\/N\s+\d/.test(d) && /\/First\s+\d/.test(d));
+// שלב 8 סבב 1 של הבודק: המילון מנורמל לפני הבדיקה – הערה (%…סוף שורה) ותו אפס הם רווח ב-PDF, ו-"+4" הוא המספר 4.
+// בלי זה "/Type%x\n/ObjStm", "/N\x00 1" או "/Predictor +12" לא זוהו, והאוסף לא נפרס (או נפרס בלי ה-Predictor)
+function normDict(d) {
+  let o = '', i = 0;
+  const n = d.length;
+  while (i < n) {
+    const c = d[i];
+    if (c === '(') { // מחרוזת – מועתקת כמו שהיא (% בתוכה אינו הערה)
+      let k = i + 1, dp = 1;
+      while (k < n && dp) { const ch = d[k]; if (ch === '\\') { k += 2; continue; } if (ch === '(') dp++; else if (ch === ')') dp--; k++; }
+      o += d.slice(i, k); i = k; continue;
+    }
+    if (c === '%') { while (i < n && d[i] !== '\n' && d[i] !== '\r') i++; o += ' '; continue; }
+    o += c === '\x00' ? ' ' : c; i++;
+  }
+  return o.replace(/([\s\[<>\/])\+(?=\d)/g, '$1 ');
+}
+const isObjStmDict = (d) => /\/ObjStm(?![A-Za-z])/.test(d) || (/\/N\s*\d/.test(d) && /\/First\s*\d/.test(d));
 // /Filter שאינו שם או מערך של שמות בלבד (למשל הפניה עקיפה "7 0 R") – לא ידוע, ולכן נחסם (תיקון 3)
 const filtersOf = (d) => {
   if (!/\/Filter(?![A-Za-z0-9])/.test(d)) return null;
@@ -123,7 +140,7 @@ function objStreams(buf, s) {
   const byA = new Map(sd.map((x) => [x.a, x]));
   const hdr = /\d+\s+\d+\s+obj(?![A-Za-z])/g;
   let hNext = hdr.exec(s), h = -1; // מצביע שמתקדם רק קדימה – זמן ליניארי
-  let prevEnd = 0; // המילון של זרם מתחיל אחרי סוף הזרם הקודם – כל תו נבדק פעם אחת
+  let prevEnd = 0, prevA = 0; // המילון של זרם מתחיל אחרי סוף הזרם הקודם – כל תו נבדק פעם אחת
   const re = /stream[ \t\f\x00]*(\r\n|\n|\r)/g; // שלב 8: כמו STREAM_HEAD
   let m;
   while ((m = re.exec(s))) {
@@ -132,8 +149,11 @@ function objStreams(buf, s) {
     const tok = byA.get(a);
     // כותרת האובייקט האחרונה לפני הזרם (ולא סתם המחרוזת "obj")
     while (hNext && hNext.index < m.index) { h = hNext.index; hNext = hdr.exec(s); }
-    const cands = [tok ? tok.dict : '', h >= 0 ? s.slice(Math.max(h, prevEnd, m.index - 20000), m.index) : ''].map(decNames).filter(Boolean);
-    prevEnd = tok ? tok.e : a;
+    // זרם שמתחיל בתוך הנתונים של זרם קודם (אוסף מוסתר שה-xref מפנה אליו ישירות – סבב 1 של הבודק, שלב 8): המילון שלו
+    // נמצא אחרי תחילת הנתונים של הזרם הקודם, ולא אחרי סופו. החלונות עדיין לא חופפים – זמן ליניארי
+    const from = m.index < prevEnd ? prevA : prevEnd;
+    const cands = [tok ? tok.dict : '', h >= 0 ? s.slice(Math.max(h, from, m.index - 20000), m.index) : ''].map((d) => normDict(decNames(d))).filter((d) => d.trim());
+    prevEnd = Math.max(prevEnd, tok ? tok.e : a); prevA = a;
     if (!cands.some(isObjStmDict)) continue;
     if (out.length >= OBJSTM_MAX) return null;
     const fls = cands.map(filtersOf).filter(Boolean).map((f) => f.join(' '));
@@ -143,7 +163,8 @@ function objStreams(buf, s) {
     if (e < 0) return null;
     let raw = buf.subarray(a, e);
     while (raw.length && (raw[raw.length - 1] === 0x0a || raw[raw.length - 1] === 0x0d)) raw = raw.subarray(0, raw.length - 1);
-    const pred = cands.some((d) => /\/Predictor\s+([2-9]|\d\d)/.test(d) || /\/(DecodeParms|DP)\s*(\d|\[[^\]]*\d+\s+\d+\s+R)/.test(d) || /\/Predictor\s+\d+\s+\d+\s+R/.test(d));
+    // כל פרמטר פענוח באוסף (Predictor, DecodeParms, DP) – לא נפרס בלי לפענח אותו, ולכן נחסם. אוסף רגיל אינו משתמש בהם (הנחה)
+    const pred = cands.some((d) => /\/(Predictor|DecodeParms|DP)(?![A-Za-z0-9])/.test(d));
     let txt;
     if (!fl.length) txt = raw.toString('latin1');
     else if (fl.length === 1 && ['/FlateDecode', '/Fl'].includes(fl[0]) && !pred) {
@@ -172,12 +193,13 @@ function inspect(buf) {
   if (!os) return { ok: false, why: 'unv' }; // אי אפשר לאמת שאין בו פקודות – חסום (הנחה: כרטיס "התקבל קובץ שלא נקלט")
   if (os.some((t) => ACTIVE_RE.test(t) || /\/Encrypt(?![A-Za-z0-9])/.test(t))) return { ok: false, why: 'active' };
   // עמודים: גם /Type /Page (כולל בתוך אוספים דחוסים) וגם /Count של עץ העמודים – הגבוה מביניהם
-  let nPage = 0, nCount = 0;
+  // מגבלה אחת לכל הקובץ (ולא 500 לכל אוסף) – אחרת 200 אוספים × 500 חיפושי מילון תוקעים את התור (סבב 1 של הבודק, שלב 8)
+  let nPage = 0, nCount = 0, guard = 0;
   for (const t of [s].concat(os)) {
     nPage += (t.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
     const re = /\/Type\s*\/Pages(?![a-zA-Z])/g;
-    let m, guard = 0;
-    while ((m = re.exec(t)) && guard++ < 500) { const c = /\/Count\s+(\d{1,7})/.exec(dictAt(t, m.index)); if (c) nCount = Math.max(nCount, Number(c[1])); }
+    let m;
+    while (guard < 200 && (m = re.exec(t)) && guard++ < 200) { const c = /\/Count\s+(\d{1,7})/.exec(dictAt(t, m.index)); if (c) nCount = Math.max(nCount, Number(c[1])); }
   }
   const pages = Math.max(nPage, nCount) || 1;
   return pages > MAX_PAGES ? { ok: true, long: true, mime, pages } : { ok: true, mime, pages };
