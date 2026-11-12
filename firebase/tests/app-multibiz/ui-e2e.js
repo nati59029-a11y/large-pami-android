@@ -73,6 +73,11 @@ const oobReqs = (log, type) => log.filter((r) => /accounts:sendOobCode/.test(r.u
   // ---------- 2. כרטיס העסק: "שלח הזמנה" לכתובת שבשרת ----------
   await page.evaluate(() => closeDlg());
   await page.evaluate(() => { ADM.L = null; NAV = [{ v: 'home' }, { v: 'sa' }]; go('sab', 'newco'); });
+  // 12.11.2026: "שלח הזמנה" מופיע רק כשהאפליקציה של העסק מוכנה. עסק חדש בלי לוגו: "המשך בלי לוגו"; באמולטור אין מפתח GitHub (no-token) – ואז ההזמנה זמינה לאפליקציה הכללית
+  await until(() => page.evaluate(() => !!document.querySelector('#apkC [data-a=apkBuild][data-nologo]')), 15000);
+  const noInv0 = await page.evaluate(() => !document.querySelector('[data-a=admMail]'));
+  check('2א עסק חדש בלי לוגו: לפני הבנייה אין "שלח הזמנה", ויש "המשך בלי לוגו"', noInv0, null);
+  await page.click('#apkC [data-a=apkBuild][data-nologo]');
   await until(() => page.evaluate(() => !!document.querySelector('[data-a=admMail]')), 15000);
   const bt0 = await page.textContent('[data-a=admMail]');
   page.__step = 'card-mail';
