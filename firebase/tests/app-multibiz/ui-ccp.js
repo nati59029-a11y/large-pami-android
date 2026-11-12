@@ -1,6 +1,6 @@
 'use strict';
 // חשבונית ספק ששולמה באשראי (12.11.2026): זיהוי בטקסט, שאלה אחרי כפילות ו-awOffer, כרטיס לפי 4 ספרות, תשלומים, סכום חלקי + השלמה במזומן מהקופה,
-// "לא" – נשארת פתוחה, בלי כרטיסים, תור חשבוניות, סריקה רגילה, סריקה מאוחדת, דף אשראי מתחבר לתשלום הקיים, ccBills, מסך ccx, נתונים ישנים לא משתנים.
+// דף הוצאה מקופה להשלמה במזומן (22–27), "לא" – נשארת פתוחה, בלי כרטיסים, תור חשבוניות, סריקה רגילה, סריקה מאוחדת, דף אשראי מתחבר לתשלום הקיים, ccBills, מסך ccx, נתונים ישנים לא משתנים.
 // שימוש: NODE_PATH=... node ui-ccp.js <www-dir> [out.json]
 const fs = require('fs'); const H = require('./harness');
 const BZ0 = ['larg', 'peami'].join('');
@@ -275,6 +275,118 @@ const ORG = { v: 1, branches: [], banks: [{ id: 'bka', name: 'לאומי', last4
   });
   check('21 4 ספרות: "4580 1234 5678 9012"→9012; "1250.00" / "1250 ₪" – לא; מיסוך ****9876→9876; xxxx-…-7788; "1234," → 1234',
     r21.grp === '9012' && r21.dec === '' && r21.shk === '' && r21.mask === '9876' && r21.xx === '7788' && r21.comma === '1234', r21);
+
+  // 22–27. דף הוצאה מקופה להשלמה במזומן (12.11): צירוף בחלון ההשלמה; בלי דף – סימון בסגירה, עובד חייב הסבר או צילום, המנהל רואה ב"דורש אישור" ויכול לאשר; צירוף מהסגירה; הוצאות אחרות לא מושפעות
+  const JPG = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 40; c.height = 60; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 40, 60); g.fillStyle = '#000'; g.fillRect(5, 5, 20, 10); return c.toDataURL('image/jpeg').split(',')[1]; });
+  const FILE = { name: 'slip.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(JPG, 'base64') };
+  const SETUP = `var W=(ms)=>new Promise((r)=>setTimeout(r,ms||150));
+    var NS='חסר דף הוצאה מקופה';
+    var part=async(id,amt)=>{S.inbox.push({id,by:'עובד',at:'2026-11-01T09:00:00Z',d:{cat:'e_sup',catName:'',sub:'cB',subName:'',amt,date:'2026-11-01',inv:'I'+id,plan:'2026-11',ccp:true,cc4:'5678',cca:amt-400}});save();
+      await ACT.inbOk({dataset:{id}});await W();document.querySelector('#dlg[open] form[data-f=ccpok]').requestSubmit();await W();};
+    var mir=(src)=>{const w=coWant()[src];return w&&Object.assign({id:src,uid:'m',by:'מנהל',t:1,dep:'',zc:'',dp:''},w.f)};
+    var payOf=(id)=>{const t=S.tx.find((x)=>x.src===id);return t&&t.pays.find((p)=>/^mcp/.test(p.src||''))};
+    var zcSet=(cout)=>{ZC=zcNew();ZC.reg='i_nl';ZC.z=[window.DU,window.DU,window.DU];ZC.o=window.DU;ZC.f=zcClean({d:'2026-11-20',tm:'22:00',no:'77',cash:'1000',total:'1000',cout:String(cout),drawer:'500',oTot:'500',oD:'2026-11-20',oTm:'07:00'});};
+    var stub=()=>{const L={calls:[],pages:{}};window.__fsx0=window.__fsx0||fsx;window.fsx=async(p,o)=>{L.calls.push([p,o&&o.body]);if(/^\\/zlast\\//.test(p)&&!(o&&o.method))throw Object.assign(new Error('nf'),{code:404});
+      const m=p.match(/^\\/closings\\/([^/]+)\\/p\\?documentId=(\\d+)/);if(m){L.pages[m[2]]=JSON.parse(o.body).fields.data.stringValue}const g=p.match(/^\\/closings\\/([^/?]+)\\/p\\/(\\d+)$/);if(g&&window.__pg)return{fields:{data:{stringValue:window.__pg[g[2]]}}};return{}};return L};
+    var unstub=()=>{if(window.__fsx0)window.fsx=window.__fsx0};
+    var commitOf=(L)=>{const c=L.calls.find((x)=>x[0]===':commit');return c&&JSON.parse(c[1]).writes[0].update.fields};
+    var toastT=()=>[...document.querySelectorAll('.toast')].map((e)=>e.textContent).join(' | ');`;
+  const z0 = await page.evaluate((J) => { window.DU = 'data:image/jpeg;base64,' + J; const z = JSON.stringify(S.zc || []); window.__z0 = z; S.zc = []; ZL.i_nl = null; return 1; }, JPG);
+
+  // 22. צירוף בחלון ההשלמה (מצלמה / גלריה)
+  await page.evaluate(async (a) => { eval(a.S); await part('iC22', 1022); }, { S: SETUP });
+  await page.setInputFiles('#dlg[open] form[data-f=ccpco] input[data-c=ccpPic]:not([capture])', FILE); await sleep(500);
+  const r22 = await page.evaluate(async (a) => {
+    eval(a.S); const prev = !!document.querySelector('#ccpPic img'); const g = document.querySelector('#dlg[open] form[data-f=ccpco]'); g.elements.creg.value = 'i_nl'; g.requestSubmit(); await W(400);
+    const p = payOf('iC22') || {}; const du = p.file ? await fget(p.file) : ''; const m = mir(p.src) || {}; const cm = coMine().find((x) => x.id === p.src);
+    return { prev, file: p.file || '', img: imgOk(du), why: m.why, lf: cm ? coLFile(cm) : '', zs: zsCoFile({ id: p.src, src: p.src }), ver: coVer(m), miss: coSlipMiss(m) };
+  }, { S: SETUP });
+  check('22 צירוף דף בחלון ההשלמה: תצוגה מקדימה, p.file נשמר במכשיר, הסיבה בענן בלי סימון, coLFile/zsCoFile מציגים אותו, coVer סופר, לא "חסר דף"',
+    r22.prev && /^z/.test(r22.file) && r22.img && r22.why === 'השלמה לתשלום באשראי' && r22.lf === r22.file && r22.zs === r22.file && r22.ver && !r22.miss, r22);
+
+  // 23. בלי דף – מנהל: תג + כפתור בסגירה, zcNeed, אבל אפשר לשמור (מסומנת self) והשיוך כולל את ההשלמה
+  const r23 = await page.evaluate(async (a) => {
+    eval(a.S); await part('iC23', 1023); const g = document.querySelector('#dlg[open] form[data-f=ccpco]'); g.elements.creg.value = 'i_nl'; g.requestSubmit(); await W(400); const t0 = toastT();
+    const p = payOf('iC23'); const m = mir(p.src); COQ.L = [m]; zcSet(400);
+    const co = coChk('i_nl', ZC.f.d, ZC.f.tm, ZC.f.cout, { id: '' }); const h = zcCoH();
+    const it = { reg: 'i_nl', f: ZC.f, c: zcCalc(ZC.f, 'i_nl'), co, nsp: [], nw: '' }; const need = zcNeed(it);
+    const L = stub(); const n0 = S.zc.length; try { await FRM.zcSend({}); } finally { unstub(); } await W();
+    const z = S.zc[S.zc.length - 1] || {}; const out = { file: p.file || '', why: m.why, t0, ns: co.ns.length, ok: co.ok, tag: h.includes(NS) && h.includes('data-a="coSlip"'), need: need.filter((x) => x.startsWith(NS)), saved: S.zc.length === n0 + 1, ap: z.ap, ids: (z.co && z.co.ids) || [], src: p.src };
+    S.tx = S.tx.filter((t) => t.src !== 'zc:' + z.id); S.zc = []; save(); return out;
+  }, { S: SETUP });
+  check('23 בלי דף: הסיבה בענן "… · חסר דף הוצאה מקופה", הודעה; מנהל בסגירה – תג + כפתור "צלם / צרף דף", zcNeed מציין, ובכל זאת נשמרת (ap=self) ומשייכת את ההשלמה',
+    !r23.file && /· חסר דף הוצאה מקופה$/.test(r23.why) && /בלי דף/.test(r23.t0) && r23.ns === 1 && r23.ok && r23.tag && r23.need.length === 1 && r23.saved && r23.ap === 'self' && r23.ids.includes(r23.src), r23);
+
+  // 24. עובד: רואה את הסימון (מהסיבה בענן) + כפתור; בלי צילום ובלי הסבר – לא נשלחת; עם הסבר – נשלחת (nw)
+  const r24 = await page.evaluate(async (a) => {
+    eval(a.S); const p = payOf('iC23'); COQ.L = [mir(p.src)]; const role = SY.role; SY.role = 'worker'; const out = {};
+    try { zcSet(400); const h = zcCoH(); out.tag = h.includes(NS) && h.includes('data-a="coSlipW"') && h.includes('data-i="zcNw"');
+      let L = stub(); try { await FRM.zcSend({}); } finally { unstub(); } out.t1 = toastT(); out.c1 = !!commitOf(L);
+      zcSet(400); ZC.nw = 'הדף נשאר בקופה'; L = stub(); try { await FRM.zcSend({}); } finally { unstub(); } const f = commitOf(L); out.d2 = f && JSON.parse(f.data.stringValue); out.st = f && f.st.stringValue;
+    } finally { SY.role = role; } return out;
+  }, { S: SETUP });
+  check('24 עובד: תג "חסר דף" + כפתור + תיבת הסבר; בלי צילום ובלי הסבר – לא נשלחת (הודעה); עם הסבר – נשלחת לאישור (st=new) עם nw',
+    r24.tag && /חסר דף הוצאה מקופה/.test(r24.t1) && !r24.c1 && r24.d2 && r24.d2.nw === 'הדף נשאר בקופה' && r24.st === 'new', r24);
+
+  // 25. עובד מצרף צילום מהסגירה → נשלחת בלי הסבר, הצילום בתמונות הסגירה; מנהל: zcNeed מציין, ובאישור הצילום נכתב על התשלום ושניהם מאושרים
+  await page.evaluate(async (a) => { eval(a.S); const p = payOf('iC23'); COQ.L = [mir(p.src)]; window.__role = SY.role; SY.role = 'worker'; zcSet(400); ACT.coSlipW({ dataset: { src: p.src } }); await W(); }, { S: SETUP });
+  await page.setInputFiles('#dlg[open] input[data-c=coSlipWF]:not([capture])', FILE); await sleep(500);
+  const r25 = await page.evaluate(async (a) => {
+    eval(a.S); const p = payOf('iC23'); const out = {};
+    try { out.nsp = !!(ZC.nsp && ZC.nsp[p.src]); const h = zcCoH(); out.h = h.includes('הדף צורף לסגירה') && !h.includes('data-i="zcNw"');
+      const L = stub(); try { await FRM.zcSend({}); } finally { unstub(); } const f = commitOf(L); out.d = f && JSON.parse(f.data.stringValue); out.np = f && +f.np.integerValue;
+      const all = Object.keys(L.pages).sort().map((k) => L.pages[k]).join(''); out.pics = JSON.parse(all.slice(6)).length; window.__pg = L.pages; window.__doc = { fields: f }; out.id = L.calls.find((x) => x[0] === ':commit') && JSON.parse(L.calls.find((x) => x[0] === ':commit')[1]).writes[0].update.name.split('/').pop();
+    } finally { SY.role = window.__role; }
+    const it = zcParse(window.__doc, out.id); it.co = coChk(it.reg, it.f.d, it.f.tm, it.f.cout, { id: it.id, inc: it.inc, od: it.f.oD, otm: it.f.oTm }); it.need.push(...zcNsNeed(it));
+    out.need = it.need.filter((x) => x.startsWith(NS)); out.itNsp = it.nsp; ZQ.L = [it]; ZQP = [];
+    const L2 = stub(); try { await ACT.zcOk({ dataset: { id: it.id } }); await W(); const y = document.querySelector('#dlg[open] [data-a=yes]'); out.ask = y ? document.getElementById('dlg').innerText.slice(0, 400) : ''; if (y) { y.click(); await W(800); } } finally { unstub(); }
+    const z = S.zc.find((x) => x.id === it.id) || {}; out.file = p.file || ''; out.img = p.file ? imgOk(await fget(p.file)) : false; out.ids = (z.co && z.co.ids) || []; out.src = p.src; out.why = (mir(p.src) || {}).why;
+    S.tx = S.tx.filter((t) => t.src !== 'zc:' + it.id); S.zc = []; ZQ.L = []; save(); return out;
+  }, { S: SETUP });
+  check('25 עובד צירף צילום: נשלחת בלי הסבר, nsp + 5 תמונות; מנהל: "חסר דף · העובד צירף צילום"; אישור – הצילום נכתב על התשלום, הסגירה נרשמת ומשייכת את ההשלמה, הסימון בענן יורד',
+    r25.nsp && r25.h && r25.d && (r25.d.nsp || []).length === 1 && !r25.d.nw && r25.pics === 5 && r25.need.length === 1 && /העובד צירף צילום/.test(r25.need[0]) && /חסר דף/.test(r25.ask) && /^z/.test(r25.file) && r25.img && r25.ids.includes(r25.src) && r25.why === 'השלמה לתשלום באשראי', r25);
+
+  // 26. מנהל מצרף דף מתוך הסגירה (כפתור "צלם / צרף דף") → לא חסר עוד, zcNeed נקי
+  await page.evaluate(async (a) => { eval(a.S); await part('iC26', 1026); const g = document.querySelector('#dlg[open] form[data-f=ccpco]'); g.elements.creg.value = 'i_nl'; g.requestSubmit(); await W(400);
+    const p = payOf('iC26'); COQ.L = [mir(p.src)]; zcSet(400); const box = document.createElement('div'); box.id = 'tst26'; box.innerHTML = zcCoH(); document.body.appendChild(box); box.querySelector('[data-a=coSlip]').click(); await W(); }, { S: SETUP });
+  await page.setInputFiles('#dlg[open] input[data-c=coSlipF]:not([capture])', FILE); await sleep(500);
+  const r26 = await page.evaluate(async (a) => { eval(a.S); const p = payOf('iC26'); const co = coChk('i_nl', ZC.f.d, ZC.f.tm, ZC.f.cout, { id: '' }); const need = zcNeed({ reg: 'i_nl', f: ZC.f, c: zcCalc(ZC.f, 'i_nl'), co, nsp: [], nw: '' });
+    document.getElementById('tst26').remove(); const h = zcCoH(); ZC = null; return { file: p.file || '', ns: co.ns.length, need: need.filter((x) => x.startsWith(NS)).length, h: h.includes(NS), why: (mir(p.src) || {}).why }; }, { S: SETUP });
+  check('26 מנהל מצרף מהסגירה: p.file נשמר, אין "חסר דף" בסגירה וב-zcNeed, הסיבה בענן בלי סימון',
+    /^z/.test(r26.file) && r26.ns === 0 && r26.need === 0 && !r26.h && r26.why === 'השלמה לתשלום באשראי', r26);
+
+  // 27. הוצאות מקופה אחרות בלי צילום – בלי שינוי (לא "חסר דף")
+  const r27 = await page.evaluate(async (a) => {
+    eval(a.S); const EX = S.cats.find((c) => c.kind === 'exp' && c.beh === 'simple').id;
+    S.tx.push({ id: 'cM27', t: 'exp', cat: EX, date: '2026-11-02', amt: 30, co: { reg: 'i_nl', why: 'מונית', tm: '' }, pays: [], kind: 'inv' });
+    S.tx.push({ id: 'cW27', t: 'exp', cat: EX, date: '2026-11-02', amt: 20, creg: 'i_nl', src: 'w27', cowhy: 'חלב', pays: [], kind: 'inv' }); save();
+    const W2 = coWant(); COQ.L = [Object.assign({ id: 'mcM27', uid: 'm', by: 'מנהל', t: 1, dep: '', zc: '', dp: '' }, W2.mcM27.f), Object.assign({ id: 'w27', uid: 'u', by: 'עובד', t: 1, dep: '', zc: '', dp: '' }, W2.w27.f)];
+    zcSet(50); const co = coChk('i_nl', ZC.f.d, ZC.f.tm, ZC.f.cout, { id: '' }); const h = zcCoH(); const role = SY.role; SY.role = 'worker'; let hw = ''; try { hw = zcCoH(); } finally { SY.role = role; }
+    const out = { ns: co.ns.length, ok: co.ok, L: co.L.length, h: h.includes(NS) || hw.includes(NS), why: [W2.mcM27.f.why, W2.w27.f.why] };
+    S.tx = S.tx.filter((t) => !['cM27', 'cW27'].includes(t.id)); ZC = null; COQ.L = null; S.zc = JSON.parse(window.__z0); save(); return out;
+  }, { S: SETUP });
+  check('27 הוצאה מקופה של המנהל ושל עובד בלי צילום – לא מסומנות "חסר דף", הסגירה תואמת, הסיבה בענן בלי שינוי',
+    r27.ns === 0 && r27.ok && r27.L === 2 && !r27.h && r27.why[0] === 'מונית' && r27.why[1] === 'חלב', r27);
+
+  // 28. (בעל העסק 12.11) עובד – הוצאה מקופה רק עם צילום הדף: הוספה מחלון הסגירה (FRM.coAdd) ושליחת "דף הוצאה מקופה" (wkSubmit / סריקה). מנהל – בלי צילום כמו היום
+  const r28 = await page.evaluate(async (a) => {
+    eval(a.S); const out = {}; const role = SY.role; const q0 = JSON.stringify(obGet()); window.__fsx0 = window.__fsx0 || fsx; window.fsx = async () => { throw Object.assign(new Error('offline'), { offline: true }); };
+    const coAddRun = async (pic) => { zcSet(0); ACT.coAdd(); await W(); const f = document.querySelector('#dlg[open] form[data-f=coAdd]'); f.elements.a.value = '35'; f.elements.why.value = 'חלב לעובדים'; f.elements.d.value = today(); if (pic) CO1.pic = window.DU; const lab = document.getElementById('dlg').innerHTML; await FRM.coAdd(f); await W(300); closeDlg(); return lab; };
+    try {
+      SY.role = 'worker'; COQ.L = []; ZL.i_nl = null; let n = obGet().length;
+      out.lab = /(צילום|העלאת) הפתק \(חובה\)/.test(await coAddRun(0)); /* בדפדפן בלי מצלמה הכפתור נקרא "העלאת" */ out.t1 = toastT(); out.q1 = obGet().length - n;
+      n = obGet().length; await coAddRun(1); const it = obGet().find((x) => x.data && x.data.reg && x.data.note === 'חלב לעובדים'); out.q2 = obGet().length - n; out.fid = !!(it && it.fileId) && !(it && it.nopic);
+      WK = { cat: '', sub: '', amt: '50', date: today(), note: 'קפה', pages: [], inv: '', dn: false }; n = obGet().length;
+      await wkSubmit({ reg: true, creg: 'i_nl', amt: '50', date: today(), note: 'קפה', ctm: '' }); out.t3 = toastT(); out.q3 = obGet().length - n;
+      WK.pages = [window.DU]; n = obGet().length; await wkSubmit({ reg: true, creg: 'i_nl', amt: '50', date: today(), note: 'קפה', ctm: '' }); await W(300);
+      const w = obGet().find((x) => x.data && x.data.reg && x.data.note === 'קפה'); out.q4 = obGet().length - n; out.wf = !!(w && w.fileId);
+    } finally { SY.role = role; }
+    obSet(JSON.parse(q0));
+    const t0 = S.tx.length; await coAddRun(0); const mt = S.tx.find((t) => t.co && t.co.why === 'חלב לעובדים'); out.m = !!mt && !mt.file && S.tx.length === t0 + 1;
+    window.fsx = window.__fsx0; S.tx = S.tx.filter((t) => t !== mt); ZC = null; COQ.L = null; save(); return out;
+  }, { S: SETUP });
+  check('28 עובד: בלי צילום – הוצאה מקופה לא נשמרת (חלון הסגירה ו"דף הוצאה מקופה"), הודעה "חובה לצרף צילום של דף ההוצאה מקופה"; עם צילום – נשמרת עם fileId; מנהל בלי צילום – נרשמת כמו היום',
+    r28.lab && /חובה לצרף צילום של דף ההוצאה מקופה/.test(r28.t1) && r28.q1 === 0 && r28.q2 === 1 && r28.fid && /חובה לצרף צילום של דף ההוצאה מקופה/.test(r28.t3) && r28.q3 === 0 && r28.q4 === 1 && r28.wf && r28.m, r28);
 
   check('15 אין שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
