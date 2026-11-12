@@ -1,4 +1,4 @@
-/* SEC:1+2+3+4+5+6 – המזכירה העסקית. שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
+/* SEC:1+2+3+4+5+6+7 – המזכירה העסקית. שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
    שלב 2: secFin – נתוני הכספים לצ'אט ולמראה, מחושבים בפונקציות של מסכי האפליקציה עצמם (monthIncome, monthExpense, monthOwner, catTotal,
    inv/bal/dueOf, bsum, homeCards, dueStats, cfDebits, cfMonths) – אין כאן נוסחה כספית שנייה; מראה לענן אחרי כל שמירה (לכל היותר פעם ב-3 דקות);
    מסך הצ'אט (מקורות, "נכון ל-", "חשבי לעומק", אחוז ניצול, סף תזרים, "לא רלוונטי", מתג המראה).
@@ -751,6 +751,179 @@ ACT.secSgRun=el=>{const id=el.dataset.id,c=SG[id];if(!c||!c.count)return;const c
  ask(`לסרוק ${ct.n} מיילים? הם ייקלטו למזכירה כרקע (בהדרגה, בלי טיוטות ובלי שליחה), ותוכן רשימת ניקוי. הרשימה תעבור לאישור מנהל העסק, ושום מייל לא יועבר לאשפה לפני כן.`,async()=>{try{const r=await window.fnCall('secAdminMail',{bizId:id,op:'run',range:ct.range,confirm:ct.n});SG[id]=Object.assign(r,{rg:ct.range,count:null});toast((r.list&&r.list.n?'הרשימה ('+r.list.n+') נשלחה לאישור מנהל העסק':'לא נמצאו מיילים לניקוי')+(r.hist?'. קליטת ההיסטוריה התחילה':''))}catch(e){err(e)}finally{if(cur().v==='sab')rerender()}},'סריקה')};
 ACT.secSgHist=async el=>{const id=el.dataset.id,op=el.dataset.op;if(!['histStop','histGo'].includes(op))return;el.disabled=true;try{const rg=(SG[id]||{}).rg;SG[id]=Object.assign(await window.fnCall('secAdminMail',{bizId:id,op}),{rg});toast(op==='histStop'?'הקליטה נעצרה':'הקליטה ממשיכה')}catch(e){err(e)}finally{el.disabled=false;if(cur().v==='sab')rerender()}};
 ACT.secSgOff=el=>{const id=el.dataset.id,box=el.dataset.box;ask('לנתק את התיבה מהעסק? ההרשאה תבוטל והאסימון יימחק.',async()=>{try{const rg=(SG[id]||{}).rg;SG[id]=Object.assign(await window.fnCall('secAdminMail',{bizId:id,op:'disconnect',box}),{rg});toast('נותק')}catch(e){err(e)}finally{if(cur().v==='sab')rerender()}},'ניתוק')};
+
+/* ---------- שלב 7: "חשבוניות שהתקבלו" (קליטת חשבוניות מווצאפ ומ-Gmail, אפיון 4) ----------
+   העיקרון (4.1): השרת שומר את המסמך בתור (sec_inv) ולא כותב הוצאה. המכשיר מכניס אותו דרך תיבת ההוצאות הקיימת (S.inbox → ACT.inbOk / ACT.inbEdit / inbChkOpen),
+   כלומר אותה פונקציית כניסה של תיבת העובדים, עם בדיקת הכפילויות הקיימת – אחרי "תפיסה" חד־פעמית בשרת (secDecide, 4.7).
+   סגירה באמצע (4.7(2–3)): הפריט שנתפס נשמר מקומית יחד עם הנתונים (S.inbox + S.secL – פנקס קטן: נתפס/נדחה), ובפתיחה הבאה ההשלמה מדווחת לשרת.
+   ההוצאה שנכנסת שומרת את מזהה המקור (src='s'+מזהה), כך שאותה חשבונית לא תיכנס פעמיים באותו מכשיר.
+   "נכנס ישר" (34, 110): השרת מסמן זכאות; המכשיר רק מחמיר (כפילות אצלו, תעודת משלוח פתוחה, תשלום שממתין לחשבונית – מעכב עם התראה), תופס במצב אוטומטי
+   (השרת בודק שוב את כל התנאים) ומכניס עם ACT.inbOk. הודעה "נכנסו N חשבוניות" + ביטול במסך. */
+const css7=document.createElement('style');
+css7.textContent='.secinv .ivh{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.secinv .ivh b{min-width:0;overflow-wrap:anywhere}.secinv .iva{flex:none;font-weight:800;direction:ltr}'
++'.secinv .ivs{display:block;overflow-wrap:anywhere;margin-top:2px}.secinv .secrow{margin-top:8px}.secinv .secrow .btn,.secinv .secrow .chip{min-height:44px}.secivsug{border:1px solid var(--acc);border-radius:10px;padding:8px;margin-top:8px}'
++'.secivset summary{cursor:pointer;font-weight:800;min-height:44px;display:flex;align-items:center}.secivset .row{flex-wrap:wrap;gap:8px}';
+document.head.appendChild(css7);
+TABS.splice(1,0,['inv','חשבוניות']);
+const IV={L:null,b:0,at:0,auto:0,held:{},sup:''};
+const devId=()=>{const k='lp-secdev';let v='';try{v=localStorage.getItem(k)||''}catch(e){}if(!/^[A-Za-z0-9_-]{6,64}$/.test(v)){v='d'+sid().slice(0,20);try{localStorage.setItem(k,v)}catch(e){}}return v};
+const lidOf=id=>'s'+id;
+const secL=()=>{if(!S.secL||typeof S.secL!=='object'||Array.isArray(S.secL))S.secL={};return S.secL};
+const txOfLid=lid=>S.tx.find(t=>t.src===lid||(Array.isArray(t.srcs)&&t.srcs.includes(lid)));
+const IVK={inv:'חשבונית',cr:'הודעת זיכוי',rcpt:'קבלה',dn:'תעודת משלוח',chk:'צ׳ק',unk:'מסמך שלא זוהה',bad:'התקבל קובץ שלא נקלט',long:'קובץ ארוך – לבדיקה ידנית',q:'בזיהוי…'};
+const IVW={type:'לא חשבונית רגילה',neg:'סכום שלילי או אפס',sup:'ספק לא מוכר',fields:'לא כל השדות זוהו בוודאות',cap:'בגובה התקרה או מעליה',br:'סניף לא ידוע',off:'"נכנס ישר" כבוי',stop:'"עצור הכל" פעיל',dup:'חשד לכפילות',hold:'עוכב לבדיקה',sus:'נשלח עם תוכן חשוד',el:'לא סומנה כזכאית'};
+const IVB={zip:'קובץ מכווץ (zip)',office:'קובץ Office',exe:'קובץ הפעלה',type:'סוג קובץ שלא נתמך',enc:'PDF מוצפן בסיסמה',active:'PDF עם פקודות',big:'גדול מ-10MB',empty:'קובץ ריק'};
+const IVE={quota:'נגמרה מכסת הזיהוי של העסק – אפשר להזין ידנית',ai:'הזיהוי לא הצליח – אפשר להזין ידנית',file:'הקובץ לא נקרא'};
+const ivAmt=x=>x.k==='chk'?x.f.amt:x.f.total;
+const ivSrc=x=>(x.src||[]).map(s=>(s.ch==='mail'?'במייל מ-':'בווצאפ מ-')+(s.ch==='mail'?s.from:'+'+s.from)).join(' · ');
+const ivPend=()=>(IV.L&&IV.L.items||[]).filter(x=>x.st==='new'||(x.st==='cl'&&x.mine)).length;
+const ivSub=x=>{const s=x.sub&&subById(x.sub);if(s)return s;try{const f={supplier_id:x.f.hp,supplier:x.f.supplier};return x.f&&(x.f.hp||x.f.supplier)&&typeof usSup==='function'?usSup(f,usSupSubs()):null}catch(e){return null}};
+const subOk=s=>!!(s&&!s.off&&(cat(s.cat)||{}).beh==='sup');
+/* ספקים לשרת (4.3, 40): שם, ח.פ וסניפים (חתימת "ספק" בסניף). נשלח רק כשהרשימה השתנתה */
+async function ivSups(){if(IV.supB)return;const on=brAll().filter(b=>b.on);
+ const sups=S.subs.filter(s=>subOk(s)).map(s=>({id:s.id,name:s.name,hp:s.hp||'',br:on.filter(b=>(b.sig||[]).some(g=>g.k==='sup'&&(g.v===s.id||(!!g.v&&heKey(g.v)===heKey(s.name))))).map(b=>b.id)})).filter(s=>/^[A-Za-z0-9_-]{1,64}$/.test(s.id));
+ const body={op:'sups',sups,nb:on.length,br1:on.length===1?on[0].id:''},h=JSON.stringify(body),k='lp-secsup:'+keyNow();let old='';try{old=localStorage.getItem(k)||''}catch(e){}if(old===h)return;
+ IV.supB=1;try{await fnCall('secInv',body);try{localStorage.setItem(k,h)}catch(e){}}catch(e){}finally{IV.supB=0}}
+async function ivLoad(force){if(!ready()||IV.b)return;if(!force&&IV.L&&Date.now()-IV.at<120000)return;IV.b=1;
+ try{const r=await fnCall('secInv',{op:'list'});IV.L=r&&Array.isArray(r.items)?r:{err:'לא נטען',items:[]};IV.at=Date.now();if(!r.br)ivSups()}catch(e){IV.L={err:e&&e.message||'לא נטען',items:[]};IV.at=Date.now()}finally{IV.b=0}
+ await ivRec();if(IV.L&&!IV.L.err)await ivAuto();if(['sec','home'].includes(cur().v)&&!typing())rerender()}
+/* פנקס ההשלמה: פריט שנתפס ויצא מהתיבה המקומית – אושר (done) או נדחה (rej). מדווח לשרת; בלי רשת – נשאר לפעם הבאה */
+let recQ=0;const ivRecSoon=()=>{if(!recQ){recQ=1;setTimeout(()=>{recQ=0;ivRec().then(()=>{if(cur().v==='sec'&&X.tab==='inv'&&!typing())rerender()})},300)}};
+async function ivRec(){if(ivRec.b||!S)return;const L=secL(),ids=Object.keys(L).filter(id=>!S.inbox.some(i=>i.sec===id));if(!ids.length)return;ivRec.b=1;let ch=0;
+ try{for(const id of ids){const v=L[id]||{},op=v.s==='rej'?'rej':'done';
+  try{await fnCall('secDecide',{op,id,dev:devId()});
+   if(op==='done'&&v.ns){const t=txOfLid(lidOf(id));if(t)t.secNs=v.ns}
+   delete L[id];ch=1}
+  catch(e){if(['not-found','not-mine','already','taken','rejected'].includes(e&&e.reason)){delete L[id];ch=1}}}}
+ finally{ivRec.b=0;if(ch){save();IV.at=0}}}
+/* הורדת הקובץ מהתור (בחלקים) – data URL כמו קובץ שעובד שלח */
+async function ivFile(x){if(!x.np)return '';let d='';for(let k=0;k<x.np;k++){const r=await fnCall('secInv',{op:'file',id:x.id,k});d+=r&&r.d||''}return d?'data:'+(x.mime||'application/pdf')+';base64,'+d:''}
+/* הפריט שנתפס → תיבת ההוצאות המקומית (אותו מבנה של הוצאה מעובד) */
+async function toInbox(x){const lid=lidOf(x.id),L=secL();let it=S.inbox.find(i=>i.id===lid);if(it)return it;
+ if(txOfLid(lid)){L[x.id]={s:'in',ns:x.ns||''};save();ivRecSoon();toast('החשבונית כבר נרשמה במכשיר הזה');return null}
+ let du='';try{du=await ivFile(x)}catch(e){}if(du){try{await fput('i'+lid,du)}catch(e){du=''}}
+ const f=x.f||{},s=ivSub(x),ok=subOk(s),srcN='מהמזכירה – '+ivSrc(x)+(x.ns?' · שולח חדש – לבדוק':'');let d;
+ if(x.k==='chk')d={kind:'check',amt:Math.max(0,+f.amt||0),date:'',cdate:f.cdate||'',no:String(f.no||'').replace(/\D/g,'').slice(0,20),bank:String(f.bank||'').slice(0,60),payee:String(f.payee||'').slice(0,80),cat:'',catName:'',sub:'',subName:'',note:'',inv:'',dn:false};
+ else d={cat:ok?s.cat:'',sub:ok?s.id:'',subName:ok?s.name:String(f.supplier||'').slice(0,80),amt:typeof f.total==='number'?String(f.total):'',date:/^\d{4}-\d{2}-\d{2}$/.test(f.date||'')?f.date:'',inv:x.k==='dn'?'':x.k==='rcpt'?String(f.rel||''):String(f.num||''),dn:x.k==='dn',note:srcN};
+ if(x.br&&brAll().some(b=>b.id===x.br))d.br=x.br;
+ it={id:lid,by:'המזכירה',ow:'',at:new Date(x.t||Date.now()).toISOString(),d,file:du?'i'+lid:'',np:0,sec:x.id,secK:x.k};
+ S.inbox.push(it);L[x.id]={s:'in',ns:x.ns||''};save();return it}
+const brNeed=it=>brMulti()&&!(it.d&&it.d.br&&brAll().some(b=>b.id===it.d.br));
+async function ivClaim(x,mode){try{const r=await fnCall('secDecide',{op:'claim',id:x.id,mode,dev:devId()});return r&&r.item||x}catch(e){if(mode==='man')toast(e&&e.reason==='already'?'החשבונית כבר הוכנסה במכשיר אחר':e&&e.message||'לא ניתן לקחת את החשבונית');IV.at=0;return null}}
+/* תעודת משלוח פתוחה של אותו ספק שמתאימה לחשבונית (סכום ותקופה) – 4.6 */
+function dnOpen(x){const s=ivSub(x),f=x.f||{};if(!s||typeof f.total!=='number')return [];const d=f.date||todayS(),lo=new Date(Date.parse(d)-62*864e5).toISOString().slice(0,10);
+ return live().filter(t=>t.t==='exp'&&t.dn&&!t.inv&&t.sub===s.id&&Math.abs(rnd(t.amt)-rnd(f.total))<0.5&&(t.date||'')<=d&&(t.date||'')>=lo)}
+/* קבלה: חשבונית פתוחה של אותו ספק – לפי מספר החשבונית שבקבלה, ואם אין – לפי סכום (4.6) */
+function rcptOf(x){const s=ivSub(x),f=x.f||{};if(!s)return null;const L=live().filter(t=>t.t==='exp'&&t.sub===s.id&&hasPay(t)&&bal(t)>0.004);
+ const n=NINV(f.rel);return(n&&L.find(t=>NINV(t.inv)===n))||(typeof f.total==='number'?L.find(t=>Math.abs(bal(t)-f.total)<0.5||Math.abs(t.amt-f.total)<0.5):null)||null}
+function locDup(x){const s=ivSub(x),f=x.f||{};if(!s||x.k!=='inv')return null;const o=dupOf({id:'-',sub:s.id,amt:rnd(+f.total||0),date:f.date,inv:f.num});
+ if(o.same||o.inv)return o.inv||o.same;return S.inbox.find(i=>!i.sec&&i.d&&i.d.sub===s.id&&((NINV(f.num)&&NINV(i.d.inv)===NINV(f.num))||(i.d.date===f.date&&rnd(num(i.d.amt))===rnd(+f.total||0))))||null}
+async function ivHold(x,why){if(IV.held[x.id])return;IV.held[x.id]=1;try{await fnCall('secDecide',{op:'hold',id:x.id,why})}catch(e){}}
+/* "נכנס ישר": רק מה שהשרת סימן זכאי; המכשיר רק מחמיר */
+async function ivAuto(){if(IV.ab)return;const L=(IV.L&&IV.L.items||[]).filter(x=>x.st==='new'&&x.el);if(!L.length)return;IV.ab=1;let n=0;
+ try{for(const x of L){const s=ivSub(x);
+  if(!subOk(s)||s.id!==x.sub){await ivHold(x,'local');continue}
+  if(brMulti()&&!(x.br&&brAll().some(b=>b.id===x.br))){await ivHold(x,'local');continue}
+  if(txOfLid(lidOf(x.id))||S.inbox.some(i=>i.sec===x.id))continue;
+  if(locDup(x)){await ivHold(x,'dup');continue}
+  if(dnOpen(x).length){await ivHold(x,'dn');continue}
+  if(awFor(x.sub).length){await ivHold(x,'aw');continue}
+  const c=await ivClaim(x,'auto');if(!c)continue;
+  const it=await toInbox(c);if(!it)continue;
+  await ACT.inbOk({dataset:{id:it.id,ok:'1',aw:'1'}});
+  if(!S.inbox.some(i=>i.id===it.id))n++}}
+ finally{IV.ab=0}
+ if(n){IV.auto+=n;IV.at=0;await ivRec();toast(n===1?'נכנסה חשבונית אחת מהמזכירה. אפשר לבטל במסך "חשבוניות"':'נכנסו '+n+' חשבוניות מהמזכירה. אפשר לבטל במסך "חשבוניות"')}}
+/* חיבור לפעולות הקיימות: אחרי אישור / שמירה / דחייה / שיוך צ׳ק – מדווחים לשרת */
+{const o=ACT.inbOk;ACT.inbOk=async function(el){const r=await o.apply(this,arguments);ivRecSoon();return r}}
+{const o=FRM.inbsave;if(o)FRM.inbsave=function(){const r=o.apply(this,arguments);ivRecSoon();return r}}
+{const o=window.inbDrop;if(typeof o==='function')window.inbDrop=function(id){const it=S.inbox.find(x=>x.id===id);if(it&&it.sec){const L=secL();L[it.sec]=Object.assign({},L[it.sec]||{},{s:'rej'})}const r=o.apply(this,arguments);ivRecSoon();return r}}
+{const o=ACT.inbRe;if(o)ACT.inbRe=el=>{const it=S.inbox.find(x=>x.id===el.dataset.id);if(it&&it.sec)return toast('חשבונית מהמזכירה – אין עובד לבקש ממנו צילום. אפשר לפתוח את הקובץ או לדחות');return o(el)}}
+{const r0=window.render;if(typeof r0==='function')window.render=function(){const r=r0.apply(this,arguments);try{if(elig()&&ready()&&!IV.b&&(!IV.L||Date.now()-IV.at>120000))ivLoad();else if(S&&S.secL&&Object.keys(S.secL).length)ivRecSoon()}catch(e){}return r}}
+/* ---------- המסך ---------- */
+function ivCard(x){const f=x.f||{},a=ivAmt(x),s=ivSub(x),tg=[],sug=[];let act='';const id=esc(x.id);
+ const supL=x.k==='chk'?(f.payee?'מוטב: '+f.payee:''):x.match==='hp'||x.match==='snd'?'ספק: '+(x.subN||''):x.match==='name'?'נראה כמו '+(x.subN||'')+' – לאשר?':(f.supplier||f.hp)?'ספק חדש: '+(f.supplier||'')+(f.hp?' (ח.פ '+f.hp+')':''):'';
+ if(x.ns)tg.push(`<span class="sectags w">שולח חדש: <bdi dir="ltr">${esc(x.nsShow)}</bdi></span>`);
+ if(x.dup)tg.push('<span class="sectags w">חשד לכפילות</span>');
+ const ld=x.st==='new'?locDup(x):null;if(ld)tg.push('<span class="sectags w">כבר רשומה אצלך</span>');
+ if(x.st==='new'&&['inv','cr','dn','rcpt'].includes(x.k)&&brMulti()&&!x.br)tg.push('<span class="sectags">ממתין לבחירת סניף</span>');
+ if(x.br&&brMulti())tg.push(`<span class="sectags">סניף: ${esc(brNm(x.br))}</span>`);
+ if((x.unsure||[]).length&&x.k!=='bad')tg.push('<span class="sectags">יש שדות לא בטוחים</span>');
+ if(x.st==='new'&&x.el)tg.push('<span class="sectags g">ייכנס אוטומטית</span>');
+ else if(x.st==='new'&&x.k==='inv'&&(x.why||[]).length)tg.push(`<span class="sectags">ממתין לאישור: ${esc((x.why||[]).map(w=>IVW[w]||w).join(', '))}</span>`);
+ if(x.err)tg.push(`<span class="sectags w">${esc(IVE[x.err]||x.err)}</span>`);
+ const mineIn=S.inbox.find(i=>i.sec===x.id);
+ if(x.st==='q'||x.st==='qw')act='<p class="note" style="margin:6px 0 0">המזכירה מזהה את המסמך…</p>';
+ else if(x.st==='cl'&&!x.mine&&!x.stale)act='<p class="note" style="margin:6px 0 0">בטיפול במכשיר אחר</p>';
+ else if(x.st==='ok')act=`<div class="secrow">${x.mineOk&&x.auto?`<button class="btn g" data-a="secIvUndo" data-id="${id}">ביטול ההכנסה</button>`:''}${x.ns?`<button class="chip" data-a="secIvSnd" data-id="${id}">אישור השולח</button>`:''}</div>`;
+ else if(x.k==='bad')act=`<p class="note" style="margin:6px 0 0">${esc((x.why||[]).map(w=>IVB[w]||w).join(', '))}. הקובץ לא נפתח ולא נשמר.</p><div class="secrow"><button class="btn g" data-a="secIvNo" data-id="${id}">סגירה</button></div>`;
+ else{
+  if(x.st==='cl'&&x.mine)tg.push('<span class="sectags g">נלקחה במכשיר הזה – לא הושלמה</span>');
+  const view=x.np?`<button class="chip" data-a="secIvView" data-id="${id}">צפייה בקובץ</button>`:'';
+  const no=`<button class="chip" data-a="secIvNo" data-id="${id}">דחייה</button>`;
+  if(x.k==='inv'||x.k==='cr'){const dn=x.k==='inv'?dnOpen(x):[];
+   if(dn.length)sug.push(`<div class="secivsug"><small>יש תעודת משלוח פתוחה של ${esc(s?s.name:'')} באותו סכום (${esc(dfmt(dn[0].date))}). כדי שלא תיספר פעמיים:</small><button class="btn w" style="margin-top:6px" data-a="secIvDn" data-id="${id}" data-t="${esc(dn[0].id)}">החלף את תעודת המשלוח בחשבונית</button></div>`);
+   act=`<div class="secrow"><button class="btn" data-a="secIvOk" data-id="${id}" style="flex:1">${mineIn||x.mine?'המשך':'אישור'}</button><button class="chip" data-a="secIvEd" data-id="${id}">עריכה${brMulti()&&!x.br?' ובחירת סניף':''}</button>${view}${no}</div>`}
+  else if(x.k==='rcpt'){const t=rcptOf(x);
+   if(t)sug.push(`<div class="secivsug"><small>נמצאה חשבונית פתוחה: ${esc(t.inv||'')} · ${esc(ils(bal(t)))} לתשלום (${esc(dfmt(t.date))}). זו קבלה – לא הוצאה חדשה.</small><button class="btn w" style="margin-top:6px" data-a="secIvPay" data-id="${id}" data-t="${esc(t.id)}">סמן כשולם</button></div>`);
+   else sug.push('<div class="secivsug"><small><b>קבלה בלי חשבונית – מה לעשות?</b> לא נמצאה חשבונית פתוחה מתאימה. אפשר לרשום כהוצאה (רק אם אין עליה חשבונית), או לדחות.</small></div>');
+   act=`<div class="secrow">${t?'':`<button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כהוצאה</button>`}${view}${no}</div>`}
+  else if(x.k==='dn')act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כתעודת משלוח</button>${view}${no}</div>`;
+  else if(x.k==='chk')act=`<div class="secrow"><button class="btn" data-a="secIvOk" data-id="${id}" style="flex:1">שיוך לחשבונית</button>${view}${no}</div>`;
+  else act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">הזנה ידנית</button>${view}${no}</div>`;
+  if(x.ns&&x.sub)act+=`<div class="secrow"><button class="chip" data-a="secIvSnd" data-id="${id}">אישור השולח כ${esc(x.subN||'ספק')}</button></div>`}
+ const sub=[f.date?dfmt(f.date):'',x.k==='chk'?(f.no?'צ׳ק '+f.no:'')+(f.cdate?' · לפירעון '+dfmt(f.cdate):''):f.num?'מס׳ '+f.num:'',x.fn?x.fn:''].filter(Boolean).join(' · ');
+ return `<div class="card secinv" id="secIv_${id}" style="margin-bottom:8px"><div class="ivh"><b>${esc(IVK[x.k]||'מסמך')}${supL?' · '+esc(supL):''}</b>${typeof a==='number'?`<span class="iva">${esc(ils(a))}</span>`:''}</div>
+ ${sub?`<small class="note ivs">${esc(sub)}</small>`:''}<small class="note ivs">${esc(ivSrc(x))} · ${esc(tm(x.t))}</small>${tg.length?'<div class="sectg">'+tg.join('')+'</div>':''}${sug.join('')}${act}</div>`}
+function ivSetH(){const R=IV.L;if(!R||R.err||R.br)return '';const c=R.cfg||{},off=c.off||[],subs=S.subs.filter(s=>subOk(s)).sort((a,b)=>heCmp(a.name,b.name));
+ return `<details class="card secivset" id="secIvSet" style="margin-bottom:8px"><summary>הגדרות "נכנס ישר"</summary>
+ <p class="note" style="margin:4px 0 8px">חשבונית רגילה מספק מוכר, שכל השדות שלה זוהו ושהסכום שלה מתחת לתקרה – נכנסת לבד בפתיחה הבאה של האפליקציה, עם אפשרות ביטול. זיכוי, קבלה, תעודת משלוח, צ׳ק, סכום שלילי וחשד לכפילות – תמיד מחכים לאישור שלך.</p>
+ <label class="chip" style="min-height:44px"><input type="checkbox" data-c="secIvAuto"${c.auto!==false?' checked':''}> "נכנס ישר" פעיל בעסק</label>
+ <form data-f="secIvCap" class="row" style="margin-top:8px;align-items:flex-end"><label class="f grow"><span>תקרה אחת לעסק (₪, לפי ערך מוחלט)</span><input name="cap" inputmode="decimal" dir="ltr" maxlength="10" value="${esc(String(c.cap!=null?c.cap:2000))}"></label><button class="btn">שמירה</button></form>
+ <form data-f="secIvOff" class="row" style="margin-top:8px;align-items:flex-end"><label class="f grow"><span>כיבוי "נכנס ישר" לספק</span><select name="sub"><option value="">בחר ספק</option>${subs.filter(s=>!off.includes(s.id)).map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select></label><button class="btn g">כיבוי</button></form>
+ ${off.length?`<div class="sectg" style="margin-top:6px">${off.map(id=>{const s=subById(id);return `<span class="sectags">${esc(s?s.name:id)} <button class="chip" style="min-height:32px;padding:0 8px" data-a="secIvOn" data-id="${esc(id)}" aria-label="הפעלה מחדש">הפעלה</button></span>`}).join('')}</div>`:''}
+ ${R.stop?'<p class="note" style="margin:8px 0 0;color:var(--bad)">"עצור הכל" פעיל – שום חשבונית לא נכנסת לבד עד שהעצירה תבוטל.</p>':''}</details>`}
+function invH(){const R=IV.L;if(!R){if(!IV.b)ivLoad(1);return '<div class="empty">טוען…</div>'}
+ if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secIvRe">נסה שוב</button></div>`;
+ const L=R.items||[],P=L.filter(x=>['new','cl','q','qw'].includes(x.st)),D=L.filter(x=>x.st==='ok'&&x.auto&&x.mineOk);
+ let h=ivSetH();
+ h+=`<div class="secrow" style="margin:0 0 8px"><button class="chip" data-a="secIvRe">רענון</button>${R.br?'<small class="note">מוצגות רק חשבוניות של הסניפים שלך</small>':''}</div>`;
+ h+=P.length?P.map(ivCard).join(''):'<div class="card"><p class="note" style="margin:0">אין חשבוניות שממתינות. קבצים שנשלחים לווצאפ של העסק או מצורפים למייל המחובר יופיעו כאן.</p></div>';
+ if(D.length)h+=`<div class="sec"><h3>נכנסו אוטומטית (3 ימים אחרונים)</h3></div>`+D.map(ivCard).join('');
+ return `<div id="secInv">${h}</div>`}
+const ivX=el=>(IV.L&&IV.L.items||[]).find(x=>x.id===el.dataset.id);
+ACT.secIvRe=()=>{IV.at=0;IV.L=null;rerender()};
+ACT.secIvOk=async el=>{const x=ivX(el);if(!x)return;el.disabled=true;try{const c=x.st==='cl'&&x.mine?x:await ivClaim(x,'man');if(!c)return;const it=await toInbox(c);if(!it)return;
+ if(x.k==='chk')return inbChkOpen(it);if(brNeed(it)||!it.d.cat||!it.d.sub)return ACT.inbEdit({dataset:{id:it.id}});await ACT.inbOk({dataset:{id:it.id}})}finally{el.disabled=false;IV.at=0;rerender()}};
+ACT.secIvEd=async el=>{const x=ivX(el);if(!x)return;el.disabled=true;try{const c=x.st==='cl'&&x.mine?x:await ivClaim(x,'man');if(!c)return;const it=await toInbox(c);if(!it)return;ACT.inbEdit({dataset:{id:it.id}})}finally{el.disabled=false;IV.at=0}};
+ACT.secIvNo=el=>{const x=ivX(el);if(!x)return;ask(x.k==='bad'?'לסגור את הכרטיס?':'לדחות את המסמך? הוא לא יירשם, והקובץ יימחק מהתור אחרי 30 יום.',async()=>{const it=S.inbox.find(i=>i.sec===x.id);
+ try{await fnCall('secDecide',{op:'rej',id:x.id});if(it){S.inbox=S.inbox.filter(i=>i!==it);delete secL()[x.id];save()}toast(x.k==='bad'?'נסגר':'נדחה')}catch(e){err(e)}finally{IV.at=0;IV.L=null;rerender()}},x.k==='bad'?'סגירה':'דחייה')};
+ACT.secIvView=async el=>{const x=ivX(el);if(!x)return;el.disabled=true;try{const it=S.inbox.find(i=>i.sec===x.id);if(it&&it.file)return viewImg(it.file,'LargePami_'+x.id.slice(0,8));const du=await ivFile(x);if(!du)return toast('הקובץ כבר לא שמור בתור');await fput('sv'+x.id,du);viewImg('sv'+x.id,'LargePami_'+x.id.slice(0,8),du)}catch(e){err(e)}finally{el.disabled=false}};
+/* קבלה → "סמן כשולם": הקבלה מצורפת לחשבונית (כמו בסריקה האחידה), ונפתח מסך התשלום הקיים. אין הוצאה חדשה */
+ACT.secIvPay=async el=>{const x=ivX(el),t=S.tx.find(z=>z.id===el.dataset.t);if(!x||!t)return;const c=await ivClaim(x,'man');if(!c)return;let du='';try{du=await ivFile(x)}catch(e){}
+ if(du){const fid='f'+uid();try{await fput(fid,du);if(!t.file)t.file=fid;else t.rcf=fid}catch(e){}}const lid=lidOf(x.id);t.srcs=Array.isArray(t.srcs)?t.srcs:[];if(!t.srcs.includes(lid))t.srcs.push(lid);
+ secL()[x.id]={s:'in'};save();ivRecSoon();IV.at=0;toast('הקבלה צורפה לחשבונית '+(t.inv||''));payDlg(t.id)};
+/* חשבונית אחרי תעודת משלוח → "החלף את תעודת המשלוח בחשבונית" (המנגנון הקיים dnfix: מספר וקובץ, הסכום ברשומה לא משתנה) */
+ACT.secIvDn=async el=>{const x=ivX(el),t=S.tx.find(z=>z.id===el.dataset.t);if(!x||!t)return;const f=x.f||{},inv=String(f.num||'').trim();if(!inv)return toast('לא זוהה מספר חשבונית – אפשר לאשר ולערוך');
+ const dd=dupOf({id:t.id,sub:t.sub,amt:t.amt,date:t.date,inv});
+ ask((dd.inv?'מספר החשבונית כבר קיים אצל הספק. ':'')+'להחליף את תעודת המשלוח ('+ils(t.amt)+', '+dfmt(t.date)+') בחשבונית '+inv+'? הסכום ברשומה לא משתנה.',async()=>{const c=await ivClaim(x,'man');if(!c)return;let du='';try{du=await ivFile(x)}catch(e){}
+  if(du){const fid='f'+uid();try{await fput(fid,du);t.file=fid}catch(e){}}t.inv=inv;delete t.dn;const lid=lidOf(x.id);t.srcs=Array.isArray(t.srcs)?t.srcs:[];if(!t.srcs.includes(lid))t.srcs.push(lid);
+  secL()[x.id]={s:'in',ns:x.ns||''};save();ivRecSoon();IV.at=0;rerender();toast('התעודה הוחלפה בחשבונית')},'החלפה')};
+ACT.secIvSnd=el=>{const x=ivX(el);if(!x)return;ask('לאשר את '+x.nsShow+' כשולח של '+(x.subN||'הספק')+'? חשבוניות הבאות ממנו לא יסומנו "שולח חדש".',async()=>{try{const r=await fnCall('secDecide',{op:'sender',id:x.id});
+ let ch=0;for(const t of S.tx){if(t.secNs===x.ns){delete t.secNs;if(typeof t.note==='string')t.note=t.note.replace(' · שולח חדש – לבדוק','');ch=1}}if(ch)save();toast('השולח אושר: '+(r&&r.sender||''))}catch(e){err(e)}finally{IV.at=0;IV.L=null;rerender()}},'אישור')};
+ACT.secIvUndo=el=>{const x=ivX(el);if(!x)return;const t=txOfLid(lidOf(x.id));if(t&&(t.pays||[]).length)return toast('כבר נרשם תשלום על החשבונית – אי אפשר לבטל מכאן');
+ ask('לבטל את ההכנסה? ההוצאה תוסר מהרשומות במכשיר הזה, והחשבונית תחזור ל"ממתינות לאישור".',async()=>{try{await fnCall('secDecide',{op:'undo',id:x.id});if(t){S.tx=S.tx.filter(z=>z!==t);save()}toast('ההכנסה בוטלה')}catch(e){err(e)}finally{IV.at=0;IV.L=null;rerender()}},'ביטול ההכנסה')};
+CHG.secIvAuto=async el=>{try{const r=await fnCall('secInv',{op:'cfg',auto:!!el.checked});if(IV.L&&r.cfg)IV.L.cfg=Object.assign(IV.L.cfg||{},r.cfg);toast(el.checked?'"נכנס ישר" הופעל':'"נכנס ישר" כובה')}catch(e){err(e);el.checked=!el.checked}};
+FRM.secIvCap=async f=>{const v=pNum(fd(f).cap);if(v==null||v<0)return toast('תקרה לא תקינה');const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('secInv',{op:'cfg',cap:v});if(IV.L&&r.cfg)IV.L.cfg=Object.assign(IV.L.cfg||{},r.cfg);toast('התקרה נשמרה')}catch(e){err(e)}finally{b.disabled=false;rerender()}};
+FRM.secIvOff=async f=>{const s=fd(f).sub;if(!s)return toast('בחר ספק');try{const r=await fnCall('secInv',{op:'cfg',sub:s,off:true});if(IV.L&&r.cfg)IV.L.cfg=Object.assign(IV.L.cfg||{},r.cfg);toast('"נכנס ישר" כובה לספק')}catch(e){err(e)}finally{rerender()}};
+ACT.secIvOn=async el=>{try{const r=await fnCall('secInv',{op:'cfg',sub:el.dataset.id,off:false});if(IV.L&&r.cfg)IV.L.cfg=Object.assign(IV.L.cfg||{},r.cfg);toast('"נכנס ישר" הופעל לספק')}catch(e){err(e)}finally{rerender()}};
+{const r7=V.sec;V.sec=()=>{const k=keyNow();if(IV.key!==k){IV.key=k;IV.L=null;IV.at=0}
+ let r;if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&X.tab==='inv'){const S0=X.st;r={t:S0.name||'המזכירה',s:'חשבוניות שהתקבלו',h:stopH()+tabsH()+invH()}}else r=r7();
+ try{const n=ivPend();if(n&&r&&r.h)r.h=r.h.replace('data-v="inv">חשבוניות','data-v="inv">חשבוניות <span class="secbadge">'+n+'</span>')}catch(e){}return r}}
+/* כרטיס בבית (11): שורת חשבוניות – רק כשיש */
+{const h7=V.home;if(h7)V.home=()=>{const r=h7();try{const n=ivPend();if(n&&r&&r.h&&r.h.includes('id="secHome"'))r.h=r.h.replace(/(id="secHome"[\s\S]*?<small class="note" style="display:block">[^<]*<\/small>)/,'$1<div class="note" style="margin-top:4px" id="secHomeInv">'+(n===1?'חשבונית אחת ממתינה לאישור':n+' חשבוניות ממתינות לאישור')+'</div>')}catch(e){}return r}}
+{const t7=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='inv'){IV.at=0}t7(el)}}
+window.__secInv=IV;
 
 window.__sec=X;
 })();
