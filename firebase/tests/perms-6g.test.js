@@ -170,6 +170,57 @@ describe('6ז – החלטות 7.11 (20:45): הכנסות דורשות incR; "ר
   });
 });
 
+// 2026-11-12: "מצב העסק" (bal) – סכומים בלבד. bal_<חודש> = כל העסק; bal_<חודש>_<סניף> = סניף. perms.balB = הסניפים המותרים (ריק = הכול).
+describe('מצב העסק (bal) – קריאה לפי המתג והסניפים', () => {
+  const BAL_ALL = 'g_balall', BAL_A = 'g_bala', NOBAL = 'g_nobal', BAL_OTHB = 'g_balothb';
+  beforeEach(async () => {
+    await prep(async (d) => {
+      const b = d.batch();
+      for (const z of [A, B]) for (const id of [`bal_${M}`, `bal_${M}_br_a`, `bal_${M}_br_b`]) b.set(d.doc(`b/${z}/wv/${id}`), body(M, '{"i":1,"e":2}'));
+      const emp = (u, perms, z) => b.set(d.doc(`b/${z || A}/staff/${u}`), { name: u, role: 'employee', active: true, pushTokens: [], rank: '', perms: Object.assign({}, NONE, perms) });
+      emp(BAL_ALL, { bal: true });
+      emp(BAL_A, { bal: true, balB: ['br_a'] });
+      emp(NOBAL, { incR: true, expR: true, sal: true, rep: true, balB: ['br_a'] });
+      emp(BAL_OTHB, { bal: true }, B);
+      await b.commit();
+    });
+  });
+  it('בלי הגבלת סניפים: סך העסק וכל הסניפים', async () => {
+    for (const id of [`bal_${M}`, `bal_${M}_br_a`, `bal_${M}_br_b`]) await canId(BAL_ALL, id);
+  });
+  it('מוגבל לסניף א: רק סניף א. לא סניף ב ולא סך העסק', async () => {
+    await canId(BAL_A, `bal_${M}_br_a`);
+    await cannotId(BAL_A, `bal_${M}_br_b`);
+    await cannotId(BAL_A, `bal_${M}`);
+  });
+  it('עקיפה: מזהה מזויף (תוספת, אות גדולה, סניף שמתחיל כמו המותר) – חסום למוגבל', async () => {
+    await prep(async (d) => { for (const id of [`bal_${M}_br_ab`, `bal_${M}_BR_A`, `bal_${M}_br_a_x`, `xbal_${M}_br_a`]) await d.doc(`b/${A}/wv/${id}`).set(body()); });
+    for (const id of [`bal_${M}_br_ab`, `bal_${M}_BR_A`, `bal_${M}_br_a_x`, `xbal_${M}_br_a`]) await cannotId(BAL_A, id);
+  });
+  it('בלי המתג (גם עם כל שאר המתגים), עובד ישן, עובד לא פעיל – חסום', async () => {
+    for (const id of [`bal_${M}`, `bal_${M}_br_a`]) { await cannotId(NOBAL, id); await cannotId(OLD, id); await cannotId(INACT, id); }
+  });
+  it('עובד מעסק אחר – חסום בעסק א, מותר בעסק שלו', async () => {
+    await cannotId(BAL_OTHB, `bal_${M}`, A); await canId(BAL_OTHB, `bal_${M}`, B);
+  });
+  it('מנהל ומנהל־על קוראים הכול; list חסום לעובד', async () => {
+    for (const u of [MGR, SUPER]) for (const id of [`bal_${M}`, `bal_${M}_br_b`]) await canId(u, id);
+    await assertFails(db(BAL_ALL).collection(`b/${A}/wv`).get());
+  });
+  it('כתיבה: מנהל כותב bal_ ו-bal_<סניף>; עובד עם המתג לא כותב; מזהה סניף לא תקין – חסום', async () => {
+    await assertSucceeds(db(MGR).doc(`b/${A}/wv/bal_2026-10`).set(body('2026-10')));
+    await assertSucceeds(db(MGR).doc(`b/${A}/wv/bal_2026-10_br_a`).set(body('2026-10')));
+    await assertFails(db(MGR).doc(`b/${A}/wv/bal_2026-10_Br-A`).set(body('2026-10')));
+    await assertFails(db(MGR).doc(`b/${A}/wv/bal_2026-10_br_a`).set(body('2026-09')));
+    await assertFails(db(BAL_ALL).doc(`b/${A}/wv/bal_${M}`).set(body()));
+    await assertFails(db(BAL_A).doc(`b/${A}/wv/bal_${M}_br_a`).set(body()));
+  });
+  it('עקיפה: עובד מוגבל מנסה להוסיף לעצמו סניף או לבטל את ההגבלה – חסום', async () => {
+    await assertFails(db(BAL_A).doc(`b/${A}/staff/${BAL_A}`).update({ 'perms.balB': ['br_a', 'br_b'] }));
+    await assertFails(db(BAL_A).doc(`b/${A}/staff/${BAL_A}`).update({ 'perms.balB': [] }));
+  });
+});
+
 describe('6ז – כתיבה של המנהל', () => {
   it('מנהל כותב את שלושת החלקים החדשים', async () => {
     for (const k of ['rpi', 'rpe', 'rps']) await assertSucceeds(db(MGR).doc(`b/${A}/wv/${k}_2026-10`).set(body('2026-10')));
