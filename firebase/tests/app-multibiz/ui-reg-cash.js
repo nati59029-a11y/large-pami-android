@@ -214,14 +214,14 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
     const same = JSON.stringify(S.inbox.find((x) => x.id === 'rcV').d) === d0, n1 = S.tx.length - n0;
     delete S.inbox.find((x) => x.id === 'rcV').rq; save(); render(1);
     const hc0 = ['2026-12', '2027-01', '2027-02'].map((m) => homeCards(m).due);
-    ACT.inbEdit({ dataset: { id: 'rcV' } }); await W8(); const g = document.querySelector('#dlg[open] form[data-f=inbsave]'); g.elements.inv.value = '123';
-    ACT.inbSaveOk(); await W8(300);
+    ACT.inbEdit({ dataset: { id: 'rcV' } }); await W8(); const g = document.querySelector('#dlg[open] form[data-f=inbsave]'); g.elements.inv && (g.elements.inv.value = '123');
+    ACT.inbSaveOk(); await W8(300); const off28 = !!document.querySelector('#dlg[open] [data-a=inbInvOk]'); if (document.querySelector('#dlg[open] [data-a=inbRegNoInv]')) { document.querySelector('#dlg[open] [data-a=inbRegNoInv]').click(); await W8(200); } const ask28 = (document.querySelector('#dlg[open]') || {}).innerText || ''; const no28 = document.querySelector('#dlg[open] [data-a=inbRegAw]:not([data-w])'); if (no28) { no28.click(); await W8(300); }
     const T = S.tx.filter((t) => t.src === 'rcV'), t = T[0] || {};
-    return { cats, bad, hasBad: cats.some((c) => bad.includes(c)), askRq, same, n1, n: T.length, inv: t.inv, creg: t.creg, pays: (t.pays || []).map((p) => [p.m, p.a]), bal: T[0] ? bal(t) : null, plan: t.plan, aw: !!t.await,
+    return { off28, ask28: /צריך חשבונית כנגד התשלום/.test(ask28), noInvF: !g.elements.inv, cats, bad, hasBad: cats.some((c) => bad.includes(c)), askRq, same, n1, n: T.length, inv: t.inv, creg: t.creg, pays: (t.pays || []).map((p) => [p.m, p.a]), bal: T[0] ? bal(t) : null, plan: t.plan, aw: !!t.await,
       owe: S.tx.filter((x) => bal(x) > 0.004).some((x) => x.id === t.id), hc: ['2026-12', '2027-01', '2027-02'].map((m) => homeCards(m).due), hc0, coa: t.coa, gone: !S.inbox.some((x) => x.id === 'rcV') };
   });
   check('27 החלון מציג רק קטגוריות פעילות (בלי מוסתרות ובלי הלוואות); ביטול באמצע (שאלת צילום חדש) לא משנה את הפריט ולא רושם הוצאה', !r27.hasBad && r27.askRq && r27.same && r27.n1 === 0, r27);
-  check('28 "שמור ואשר" בפריט מקופה (ספק, עם מספר חשבונית): הוצאה אחת, תשלום במזומן 64, יתרה 0, חודש התשלום 11/2026, לא ב"לתשלום" ולא בחודשים הבאים', r27.n === 1 && r27.inv === '123' && r27.creg === 'i_nl' && JSON.stringify(r27.pays) === JSON.stringify([['מזומן', 64]]) && r27.bal === 0 && r27.plan === '2026-11' && !r27.aw && !r27.owe && JSON.stringify(r27.hc) === JSON.stringify(r27.hc0) && r27.coa === 64 && r27.gone, r27);
+  check('28 "שמור ואשר" בפריט מקופה (ספק): אין שדה מספר חשבונית, נשאלת "צריך חשבונית כנגד התשלום"; "לא" – הוצאה אחת, תשלום במזומן 64, יתרה 0, חודש התשלום 11/2026, לא ב"לתשלום" ולא בחודשים הבאים', r27.ask28 && r27.noInvF && r27.n === 1 && r27.inv === '' && r27.creg === 'i_nl' && JSON.stringify(r27.pays) === JSON.stringify([['מזומן', 64]]) && r27.bal === 0 && r27.plan === '2026-11' && !r27.aw && !r27.owe && JSON.stringify(r27.hc) === JSON.stringify(r27.hc0) && r27.coa === 64 && r27.gone, r27);
 
   // 12.11: מסך הבדיקה – משכורת (אף פעם בלי חשבונית) וספק "לא – בלי חשבונית"
   const r29 = await page.evaluate(async () => {
@@ -284,9 +284,9 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
     closeDlg(); S.inbox = S.inbox.filter((x) => x.id !== 'rcRealInv'); save();
     return { cardW, o1, o2, q: q.slice(0, 300), t: { date: t.date, plan: t.plan, due: t.due || '', aw: !!t.await, inv: t.inv, creg: t.creg, pays: (t.pays || []).map((p) => p.m + ':' + p.a + ':' + p.d) }, o3 };
   });
-  check('31א פתק מקופה בקטגוריית ספק: "תאריך התשלום", בלי חודש/תאריך תשלום לפי תנאי הספק, מספר חשבונית לא חובה, בלי "תעודת משלוח"', r31.o1.lbl === 'תאריך התשלום' && !r31.o1.plan && !r31.o1.due && r31.o1.invReq === false && r31.o1.note && !r31.o1.dn, r31.o1);
+  check('31א פתק מקופה בקטגוריית ספק: "תאריך התשלום", בלי חודש/תאריך תשלום לפי תנאי הספק, מספר חשבונית לא חובה, בלי "תעודת משלוח"', r31.o1.lbl === 'תאריך התשלום' && !r31.o1.plan && !r31.o1.due && r31.o1.invReq === null && r31.o1.note && !r31.o1.dn, r31.o1);
   check('31ב תאריך שזוהה רחוק מסגירת הקופה (10/11/2024 מול 10/11/2026): אזהרה בכרטיס ובטופס, והצעה לתאריך הסגירה שמחליפה את התאריך ומעלימה את האזהרה', r31.cardW && /סגירת הקופה/.test(r31.o1.warn) && r31.o1.useD === '2026-11-10' && r31.o2.date === '2026-11-10' && !r31.o2.warn, { o1: r31.o1, o2: r31.o2 });
-  check('31ג "שמור ואשר" שואל "תגיע חשבונית מהספק בהמשך?"; "כן" – תשלום במזומן מהקופה בתאריך הפתק שממתין לחשבונית, חודש התשלום = חודש הפתק, בלי תאריך תשלום לפי תנאים', /תגיע חשבונית מהספק בהמשך/.test(r31.q) && r31.t.aw && r31.t.date === '2026-11-10' && r31.t.plan === '2026-11' && !r31.t.due && r31.t.creg === 'i_nl' && r31.t.pays.join() === 'מזומן:55:2026-11-10', r31);
+  check('31ג "שמור ואשר" שואל "צריך חשבונית כנגד התשלום הזה?"; "כן" – תשלום במזומן מהקופה בתאריך הפתק שממתין לחשבונית, חודש התשלום = חודש הפתק, בלי תאריך תשלום לפי תנאים', /צריך חשבונית כנגד התשלום הזה/.test(r31.q) && r31.t.aw && r31.t.date === '2026-11-10' && r31.t.plan === '2026-11' && !r31.t.due && r31.t.creg === 'i_nl' && r31.t.pays.join() === 'מזומן:55:2026-11-10', r31);
   check('31ד חשבונית ספק אמיתית (לא מקופה) בלי שינוי: "תאריך החשבונית", מספר חשבונית חובה, בלי אזהרת תאריך', r31.o3.lbl === 'תאריך החשבונית' && r31.o3.invReq === true && !r31.o3.warn, r31.o3);
   // 32. בודק עצמאי סבב 1: זיכוי ספק בפריט מקופה – השדות הקודמים; תאריך ריק נחסם; משכורת מקופה – "לתשלום" נשאר בכרטיס
   const r32 = await page.evaluate(async () => {
