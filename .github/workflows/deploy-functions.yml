@@ -1,6 +1,8 @@
 # Deploy Cloud Functions to Firebase (project from the service account).
 # Manual only (Actions -> "Deploy Firebase Functions" -> Run workflow), and only from main.
 # Deploys only the functions named in the input; never rules, data or hosting.
+# Before the functions it deploys the Firestore indexes (firebase/firestore.indexes.json – secMail / secInbox need them),
+# always WITHOUT --force, so an index that exists on the server but not in the file is never deleted. Can be turned off (indexes: false).
 # Needs the secret FIREBASE_SERVICE_ACCOUNT with permission to deploy functions.
 name: Deploy Firebase Functions
 
@@ -11,6 +13,11 @@ on:
         description: "Function names, separated by commas (for example: scanDocument)"
         required: true
         default: "scanDocument"
+      indexes:
+        description: "Deploy the Firestore indexes (firestore.indexes.json) before the functions. Never with --force"
+        required: false
+        type: boolean
+        default: true
       force:
         description: "Pass --force (needed for functions with retry, and sets the artifact cleanup policy). Approved by the owner 11.11.2026"
         required: false
@@ -56,6 +63,7 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ONLY: ${{ steps.names.outputs.only }}
+          INDEXES: ${{ inputs.indexes && 'true' || 'false' }}
         run: |
           umask 077
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
@@ -71,5 +79,10 @@ jobs:
             const add=[];for(const x of P){if(x.constructor.name==='SecretParam'||have.has(x.name))continue;const d=(x.options||{}).default;if(d===undefined){console.error('::error::No value and no default for '+x.name);process.exit(1)}if(typeof d==='object'){console.error('::error::Param '+x.name+' has a non-literal default');process.exit(1)}add.push(x.name+'='+String(d))}
             if(add.length){fs.appendFileSync('.env.'+process.argv[1],'\\n'+add.join('\\n')+'\\n');console.log('Defaults used for: '+add.map(a=>a.split('=')[0]).join(', '))}
           " "$PROJECT")
+          if [ "$INDEXES" = "true" ]; then
+            node -e "const j=JSON.parse(require('fs').readFileSync('firebase.json'));if(!j.firestore||j.firestore.indexes!=='firestore.indexes.json'){console.error('::error::firebase.json does not point to firestore.indexes.json');process.exit(1)}JSON.parse(require('fs').readFileSync('firestore.indexes.json'))"
+            GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json" npx --yes firebase-tools@15.34.1 deploy --only firestore:indexes --project "$PROJECT" --non-interactive
+            echo "Deployed the Firestore indexes to $PROJECT (Google keeps building them in the background)" >> "$GITHUB_STEP_SUMMARY"
+          fi
           GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json" npx --yes firebase-tools@15.34.1 deploy --only "$ONLY" --project "$PROJECT" --non-interactive ${{ inputs.force && '--force' || '' }}
           echo "Deployed $ONLY to $PROJECT" >> "$GITHUB_STEP_SUMMARY"

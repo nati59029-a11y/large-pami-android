@@ -1,4 +1,5 @@
-# 6ז: פרסום ידני ל-Firebase – פונקציות, firestore.rules, storage.rules, Hosting לגרסת המחשב.
+# 6ז: פרסום ידני ל-Firebase – פונקציות, firestore.rules, storage.rules, Hosting לגרסת המחשב, ואינדקסים של Firestore (firestore.indexes.json – מזכירה שלב 6).
+# אינדקסים: נפרסים גם לבד (firestore-indexes) וגם אוטומטית לפני פונקציות. תמיד בלי --force – אינדקס קיים בשרת שלא מופיע בקובץ לא נמחק.
 # ידני בלבד (Actions -> "Deploy Firebase (manual)" -> Run workflow). אין push, אין schedule.
 # שכבות הגנה:
 #   1. רק מהענפים feature/multi-business או main.
@@ -23,10 +24,10 @@ on:
         required: true
         type: string
       what:
-        description: "מה לפרסם (פעם אחת, לפי הסדר: functions -> העברה -> firestore-rules -> storage-rules; hosting בסוף)"
+        description: "מה לפרסם (פעם אחת, לפי הסדר: firestore-indexes -> functions -> העברה -> firestore-rules -> storage-rules; hosting בסוף). functions מפרסם קודם גם את האינדקסים"
         required: true
         type: choice
-        options: [functions, firestore-rules, storage-rules, hosting]
+        options: [firestore-indexes, functions, firestore-rules, storage-rules, hosting]
       functions:
         description: "רק ל-functions: שמות מופרדים בפסיק, או all = כל הפונקציות שהקוד מייצא"
         required: false
@@ -286,6 +287,18 @@ jobs:
           else
             echo "::warning::חסר DESKTOP_SITE(_TEST) – מייל עצמי לא יופעל (fallback למייל של Firebase)"
           fi
+
+      # ---------- אינדקסים של Firestore (צעד 0): לבד, או לפני פונקציות (שאילתות של secMail / secInbox צריכות אותם) ----------
+      # בלי --force: אינדקס שקיים בשרת ולא בקובץ – לא נמחק. בניית אינדקס חדש אצל Google לוקחת זמן (לא מאומת כמה) – עד שהיא מסתיימת השאילתה נכשלת.
+      - name: Deploy Firestore indexes
+        if: inputs.what == 'firestore-indexes' || inputs.what == 'functions'
+        working-directory: firebase
+        env:
+          P: ${{ inputs.project }}
+        run: |
+          node -e "const j=JSON.parse(require('fs').readFileSync('firebase.json'));if(!j.firestore||j.firestore.indexes!=='firestore.indexes.json'){console.error('::error::firebase.json לא מפנה ל-firestore.indexes.json');process.exit(1)}JSON.parse(require('fs').readFileSync('firestore.indexes.json'))"
+          firebase deploy --only firestore:indexes --project "$P" --non-interactive
+          echo "פורסמו האינדקסים של Firestore ל-$P (הבנייה אצל Google נמשכת ברקע – לבדוק במסוף Firebase שהסתיימה)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy functions
         if: inputs.what == 'functions'
