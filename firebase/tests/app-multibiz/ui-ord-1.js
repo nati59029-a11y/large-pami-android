@@ -93,6 +93,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   const dl = await page.evaluate(() => __q('#dlg'));
   await page.fill('#dlg input[name=last4]', '4242'); await page.fill('#dlg input[name=conf]', 'A123'); await page.click('#dlg button.btn.grow:not(.g)'); await H.settle(page, 500);
   const mp = calls.find((c) => c.n === 'markOrderPaid');
+  const prf = await page.evaluate(() => { const t = (document.getElementById('dlg') || {}).innerText || ''; if (/ההזמנה שולמה/.test(t)) closeDlg(); return t; }); // 12.11: "סך הכול הרווחת" אחרי שולם (מנהל) – נסגר כדי להמשיך
+  check('6א אחרי שולם (מנהל): חלון רווח (כאן אין עלות לאף פריט – "אי אפשר לחשב")', /אי אפשר לחשב רווח/.test(prf), prf.slice(0, 120));
   check('6 סימון שולם: אמצעי + 4 ספרות + אישור; אין שדה מספר כרטיס מלא; מגע', !!mp && mp.d.last4 === '4242' && mp.d.conf === 'A123' && mp.d.id === 'o1' && dl.small.length === 0 && !/תוקף|CVV/i.test(await page.evaluate(() => [...document.querySelectorAll('#dlg input')].map((i) => i.name).join())), { mp: mp && mp.d, small: dl.small });
   // 7. מלאי
   const st = await screen('מלאי', () => goV('oxStock'));
