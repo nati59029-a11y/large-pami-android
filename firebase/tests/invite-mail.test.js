@@ -38,7 +38,7 @@ beforeEach(async () => {
     await db.doc('superadmins/u_super').set({});
     await db.doc('b/im-a').set({ name: 'עסק א', status: 'active', dataRoot: 'b', brand: { name: 'א' } });
     await db.doc('b/im-a/private/info').set({ ownerEmail: 'owner@example.invalid' });
-    await db.doc('b/im-a/staff/w1').set({ email: 'worker@example.invalid', active: true });
+    await db.doc('b/im-a/staff/w1').set({ email: 'worker@example.invalid', active: true, name: 'דנה <b>' });
     await db.doc('b/im-a/admins/a_mgr').set({ email: 'mgr@example.invalid' });
     await db.doc('b/im-a/staff/w2').set({ email: 'Mixed.Case@Example.invalid', active: true });
     await db.doc('b/im-b').set({ name: 'ב', status: 'active', dataRoot: 'b', brand: {} });
@@ -116,6 +116,28 @@ describe('sendInvite – הרשאות, שייכות, נפילה, קצב', () => 
   });
   it('עובד שנוסף (staff) – גם נשלח', async () => {
     assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'worker@example.invalid' }), fake().deps)).status, 'sent');
+  });
+  it('12.11: מייל לעובד – שם העובד, פרטי הכניסה, לוגו העסק, קישור הורדה של העסק וקישור למחשב', async () => {
+    const f = fake();
+    assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'worker@example.invalid' }), f.deps)).status, 'sent');
+    const m = f.sent[0];
+    assert.ok(m.text.startsWith('שלום דנה b,'), 'פנייה בשם (בלי תגיות)');
+    assert.ok(m.text.includes('מייל לכניסה: worker@example.invalid'));
+    assert.ok(m.text.includes('https://my-desktop.web.app/'), 'גם לעובד – קישור למחשב');
+    assert.ok(m.text.includes('https://github.com/nati59029-a11y/large-pami-android/releases/download/business-latest/business.apk'));
+    assert.ok(!m.html.includes('<b>"x"</b>') && !m.html.includes('דנה <b>'), 'escape');
+    assert.equal(m.attachments.length, 1); assert.equal(m.attachments[0].cid, 'bizlogo@invite');
+    assert.ok(m.html.includes('src="cid:bizlogo@invite"'), 'הלוגו של העסק במייל');
+  });
+  it('12.11: עסק עם APK משלו (apkTag) – הקישור ל-APK של העסק; לארג\' פעמי – latest; ערך זר – הכללי', async () => {
+    assert.equal(M.apkUrl('im-a', 'biz-im-a'), 'https://github.com/nati59029-a11y/large-pami-android/releases/download/biz-im-a/biz-im-a.apk');
+    assert.equal(M.apkUrl('im-a', 'biz-other'), 'https://github.com/nati59029-a11y/large-pami-android/releases/download/business-latest/business.apk');
+    assert.equal(M.apkUrl('largpeami', 'latest'), 'https://github.com/nati59029-a11y/large-pami-android/releases/download/latest/large-pami.apk');
+    const f = fake({ deps: { brand: async () => ({ name: 'א', logo: '', apkTag: 'biz-im-a' }) } });
+    await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'owner@example.invalid' }), f.deps);
+    assert.ok(f.sent[0].text.includes('/releases/download/biz-im-a/biz-im-a.apk'));
+    assert.ok(f.sent[0].text.startsWith('שלום,'), 'בלי שם – פנייה כללית');
+    assert.equal(M.buildMail({ to: 'a@b.co', from: 'x@y.co', brand: {}, link: 'https://s.web.app/w', apk: 'https://evil.example/x.apk' }).text.includes('evil'), false);
   });
   it('השוואת מייל בלי תלות באותיות: מייל שנשמר באותיות גדולות (staff ו-ownerEmail) – נשלח', async () => {
     assert.equal((await M.sendInvite(req('u_super', { bizId: 'im-a', email: 'mixed.case@example.invalid' }), fake().deps)).status, 'sent');

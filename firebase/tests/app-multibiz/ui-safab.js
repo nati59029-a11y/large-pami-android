@@ -95,6 +95,14 @@ async function seedMember(biz, email, role) {
   await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); });
   const okFab2 = await until(() => page.evaluate(() => !!document.getElementById('safab')), 15000);
   check('7 בתוך העסק האחר הכפתור הצף עדיין מופיע', okFab2, null);
+  // 12.11: מייל ידני לעובד מתוך מסך העובדים (מנהל־על)
+  await page.evaluate(() => go('staff')); await until(() => page.evaluate(() => !!document.querySelector('[data-a=admStfMail]')), 15000);
+  page.__step = 'mail';
+  await page.click('[data-a=admStfMail]'); await wait(page, 300); await page.click('#dlg [data-a=yes]'); await wait(page, 3500);
+  const tm = await page.evaluate(() => window.__toasts.slice(-1)[0] || '');
+  const callM = log.some((r) => r.step === 'mail' && /sendInviteMail/.test(r.url));
+  check('7א מנהל־על, מסך עובדים: כפתור "מייל" ליד העובד שולח מייל (sendInviteMail, ובאמולטור – המייל הרגיל)', callM && /wk@x\.co/.test(tm), { tm, callM });
+  await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await wait(page, 500);
   await page.click('#safab'); await until(() => page.evaluate(() => !!document.querySelector('#saL [data-a=admEnter]')), 15000);
   d = await page.evaluate(() => ({ here: document.querySelector('#safabd').innerText.includes('עסק acme'), go: [...document.querySelectorAll('#saL [data-a=admEnter]')].map((b) => b.dataset.id).sort() }));
   check('8 בתוך acme: מוצג "acme" כעסק הנוכחי, ואפשר לחזור ל-home או ללארג\' פעמי', d.here && d.go.join() === [BZ0, 'home'].sort().join(), d);
@@ -124,6 +132,10 @@ async function seedMember(biz, email, role) {
   await page.evaluate(() => { NAV = [{ v: 'settings' }]; render(0); }); await wait(page, 3000);
   for (const v of ['home', 'exp']) { await page.evaluate((x) => { NAV = [{ v: x }]; render(0); }, v); await wait(page, 400); }
   const m1 = await page.evaluate(() => ({ fab: !!document.getElementById('safab'), sa: ADM.sa, old: !!document.querySelector('[data-v="sa"]') }));
+  await page.evaluate(() => go('staff')); await wait(page, 2500);
+  const m2 = await page.evaluate(() => ({ rows: document.querySelectorAll('#main .li').length, mail: !!document.querySelector('[data-a=admStfMail]') }));
+  check('15א מנהל רגיל: אין כפתור "מייל" במסך העובדים', m2.rows > 0 && !m2.mail, m2);
+  await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await wait(page, 400);
   check('15 מנהל רגיל: הכפתור הצף לא קיים ב-DOM (וגם לא הכניסה מההגדרות)', !m1.fab && !m1.sa && !m1.old, m1);
   await shot(page, '04-מנהל-רגיל');
   // בכוח: מכריחים את הכפתור והחלון להופיע
