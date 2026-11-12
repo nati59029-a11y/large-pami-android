@@ -116,6 +116,10 @@ function onlyKeys(o, keys, label) {
 async function who(request) {
   const w = await requireStaff(request, { feature: 'orders' });
   if (!hasPerm(w, 'ord')) throw deny('no-perm', 'אין לך הרשאה להזמנות. פנה למנהל.');
+  return withBr(w);
+}
+// סניפים של העסק ושל העובד (משותף ל-who ולתמחור חשבונית – pricing.js, שם ההרשאה היא prc ולא ord)
+async function withBr(w) {
   const bd = w.biz.exists ? await getFirestore().doc('b/' + w.bizId).get() : null;
   const org = bd && bd.exists && bd.get('org') && typeof bd.get('org') === 'object' ? bd.get('org') : {};
   w.branches = (Array.isArray(org.branches) ? org.branches : []).filter((b) => b && typeof b.id === 'string');
@@ -183,6 +187,10 @@ function prodExt(w, input) {
     const v = input[k] === null || input[k] === '' ? '' : txt(String(input[k]), mx, 'bad-' + k, l);
     o[k] = v ? v : FV().delete();
   }
+  if (input.cto !== undefined) { // 12.11.2026 (תמחור חשבונית, החלטה 3): רק קרטונים סגורים ללקוח סיטונאי. false / null = מחיקה
+    if (input.cto !== null && typeof input.cto !== 'boolean') throw bad('bad-field', 'קרטונים סגורים חייב להיות כן/לא');
+    o.cto = input.cto === true ? true : FV().delete();
+  }
   if (input.home !== undefined) {
     if (input.home === null || input.home === '') o.home = FV().delete();
     else if (typeof input.home !== 'string' || !w.branches.some((b) => b.id === input.home)) throw bad('bad-br', 'סניף בית לא קיים');
@@ -191,21 +199,45 @@ function prodExt(w, input) {
   return o;
 }
 const noDel = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => !(v && v.constructor && /Delete/.test(v.constructor.name))));
-// saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
-// עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0).
-// עלות וסיטונאי – גם עובד עם ord (החלטות 00:12, 00:13).
-async function saveProduct(request) {
-  const w = await who(request);
-  const input = inputObject(request);
-  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'home', 'note', 'sku', 'sup']);
+// ניקוי קלט של מוצר – משותף ל-saveProduct ולסיום תמחור חשבונית (pricing.js piFinish), כדי שאותם כללים יחולו בשניהם.
+function prodClean(w, input) {
   const name = txt(input.name, 60, 'bad-name', 'שם המוצר', true);
   const price = money(input.price, 'מחיר');
   const barcode = input.barcode == null || input.barcode === '' ? '' : String(input.barcode).trim();
   if (barcode && !/^[0-9A-Za-z-]{3,30}$/.test(barcode)) throw bad('bad-barcode', 'ברקוד: ספרות/אותיות, 3 עד 30');
   if (input.on !== undefined && typeof input.on !== 'boolean') throw bad('bad-field', 'זמין חייב להיות כן/לא');
-  if (input.cost !== undefined && input.cost !== null) money(input.cost, 'עלות');
-  if (input.wp !== undefined && input.wp !== null) money(input.wp, 'מחיר סיטונאי');
-  const ext = prodExt(w, input);
+  const cost = input.cost !== undefined && input.cost !== null ? money(input.cost, 'עלות') : null;
+  const wp = input.wp !== undefined && input.wp !== null ? money(input.wp, 'מחיר סיטונאי') : null;
+  return { name, price, barcode, on: input.on !== false, cost, wp, noteIn: input.note !== undefined, ext: prodExt(w, input) };
+}
+// כתיבת מוצר בתוך טרנזקציה (c = prodClean). o = הנתונים הקיימים (עדכון, עם רישום שינויים ב-stockLog why:'prod') או null (מוצר חדש).
+// extra = שדות נוספים לאותה כתיבה (q למוצר חדש / q.<סניף> בעדכון). עלות וסיטונאי – רק כשנשלחו.
+function prodPut(tx, db, w, id, o, c, now, extra) {
+  const ref = db.doc('prod/' + id);
+  if (o) {
+    const ch = [];
+    if (o.name !== c.name) ch.push(`שם: ${String(o.name || '').slice(0, 60)} → ${c.name}`);
+    if (o.price !== c.price) ch.push(`מחיר: ₪${o.price} → ₪${c.price}`);
+    if ((o.barcode || '') !== c.barcode) ch.push('ברקוד');
+    if ((o.on !== false) !== c.on) ch.push(c.on ? 'זמין' : 'לא זמין');
+    if (c.ext.bp && JSON.stringify(c.ext.bp) !== JSON.stringify(o.bp || {})) ch.push('מחיר לסניף');
+    if (c.noteIn && (o.note || '') !== (typeof c.ext.note === 'string' ? c.ext.note : '')) ch.push('הערות');
+    tx.update(ref, Object.assign({ name: c.name, price: c.price, barcode: c.barcode, on: c.on, upd: now }, c.ext, extra || {}));
+    if (ch.length) tx.set(stockRef(db), { prod: id, name: c.name, br: NB, delta: 0, why: 'prod', note: ch.join('; ').slice(0, 300), by: w.uid, at: now });
+  } else {
+    tx.set(ref, Object.assign({ name: c.name, price: c.price, barcode: c.barcode, on: c.on, q: {}, at: now, by: w.uid, upd: now }, noDel(c.ext), extra || {}));
+  }
+  if (c.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: c.wp, at: now, by: w.uid });
+  if (c.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: c.cost, at: now, by: w.uid });
+}
+// saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
+// עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0).
+// עלות וסיטונאי – גם עובד עם ord (החלטות 00:12, 00:13). cto (רק קרטונים סגורים) – 12.11.2026, תוספתי.
+async function saveProduct(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'cto', 'home', 'note', 'sku', 'sup']);
+  const c = prodClean(w, input);
   const db = T.tdb();
   const now = Date.now();
   if (input.id != null) {
@@ -214,18 +246,7 @@ async function saveProduct(request) {
     await db.runTransaction(async (tx) => {
       const s = await tx.get(ref);
       if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
-      const o = s.data() || {};
-      const ch = [];
-      if (o.name !== name) ch.push(`שם: ${String(o.name || '').slice(0, 60)} → ${name}`);
-      if (o.price !== price) ch.push(`מחיר: ₪${o.price} → ₪${price}`);
-      if ((o.barcode || '') !== barcode) ch.push('ברקוד');
-      if ((o.on !== false) !== (input.on !== false)) ch.push(input.on === false ? 'לא זמין' : 'זמין');
-      if (ext.bp && JSON.stringify(ext.bp) !== JSON.stringify(o.bp || {})) ch.push('מחיר לסניף');
-      if (input.note !== undefined && (o.note || '') !== (typeof ext.note === 'string' ? ext.note : '')) ch.push('הערות');
-      tx.update(ref, Object.assign({ name, price, barcode, on: input.on !== false, upd: now }, ext));
-      if (input.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: money(input.wp, 'מחיר סיטונאי'), at: now, by: w.uid });
-      if (ch.length) tx.set(stockRef(db), { prod: id, name, br: NB, delta: 0, why: 'prod', note: ch.join('; ').slice(0, 300), by: w.uid, at: now });
-      if (input.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: money(input.cost, 'עלות'), at: now, by: w.uid });
+      prodPut(tx, db, w, id, s.data() || {}, c, now);
     });
     return { ok: true, id };
   }
@@ -240,10 +261,8 @@ async function saveProduct(request) {
     if (s.exists) { dup = true; return; }
     const q = {};
     if (br && qty) q[br] = qty;
-    tx.set(ref, Object.assign({ name, price, barcode, on: input.on !== false, q, at: now, by: w.uid, upd: now }, noDel(ext)));
-    if (input.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: money(input.wp, 'מחיר סיטונאי'), at: now, by: w.uid });
-    if (input.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: money(input.cost, 'עלות'), at: now, by: w.uid });
-    if (br && qty) tx.set(stockRef(db), { prod: id, name, br, delta: qty, why: 'in', by: w.uid, at: now });
+    prodPut(tx, db, w, id, null, c, now, { q });
+    if (br && qty) tx.set(stockRef(db), { prod: id, name: c.name, br, delta: qty, why: 'in', by: w.uid, at: now });
   });
   return { ok: true, id, dup };
 }
@@ -1592,4 +1611,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, ordProfit, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
