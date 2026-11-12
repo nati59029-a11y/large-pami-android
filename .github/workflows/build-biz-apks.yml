@@ -107,6 +107,14 @@ jobs:
           fi
       - name: Make the business app (${{ matrix.biz }})
         run: bash scripts/make-biz-app.sh "${{ matrix.biz }}"
+      # התראות לטלפון (12.11.2026): google-services.json לחבילה של העסק (com.largepami.finance.b.<bizId> / com.largepami.business),
+      # אוטומטית – כולל עסק חדש. בלי הסוד או בכשל – בונים בלי התראות (לא נכשלים). ראו scripts/fcm-config.sh
+      - name: Push notifications settings (google-services.json, automatic)
+        timeout-minutes: 6
+        continue-on-error: true
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: bash ../scripts/fcm-config.sh
       - run: npx cap sync android
       - name: Generic app – no "Large Pami" before login
         if: matrix.biz == 'business'
@@ -123,6 +131,9 @@ jobs:
         run: |
           AAPT=$(ls -d $ANDROID_HOME/build-tools/*/ | tail -1)aapt2
           $AAPT dump badging android/app/build/outputs/apk/debug/app-debug.apk | grep -E "^package:|application-label:" | tee -a $GITHUB_STEP_SUMMARY
+      # 12.11.2026: תצוגה של סמל ההתראה (צללית מהלוגו, או כלום כשנשאר הפעמון) – לבדיקה בעין
+      - uses: actions/upload-artifact@v4
+        with: { name: "notif-icon-${{ matrix.biz }}", path: app/notif-preview.png, if-no-files-found: ignore, retention-days: 14 }
       - uses: actions/upload-artifact@v4
         with: { name: "apk-${{ matrix.biz }}", path: app/android/app/build/outputs/apk/debug/app-debug.apk }
   publish:

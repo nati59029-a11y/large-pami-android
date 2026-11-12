@@ -58,6 +58,9 @@ for(const W of ["www","android/app/src/main/assets/public"]){if(!fs.existsSync(W
 console.log("BIZ APP:",pkg,nm);
 ' "$B"
 fi
+# 12.11.2026: סמל ההתראה מהלוגו של העסק (צללית + צבע), או פעמון כשהלוגו לא מתאים. התצוגה נשמרת ל-notif-preview.png
+rm -f notif-preview.png
+python3 scripts/notif-icon.py www/biz-logo.png android/app/src/main/res --preview notif-preview.png || true
 rm -f android/app/src/main/assets/live-update.properties
 grep -q 'namespace "com.largepami.finance"$' android/app/build.gradle || { echo "::error::biz app: namespace changed"; exit 1; }
 if grep -o 'android:authorities="[^"]*"' android/app/src/main/AndroidManifest.xml | grep -v 'android:authorities="${applicationId}\.'; then echo "::error::biz app: fixed provider authority"; exit 1; fi
