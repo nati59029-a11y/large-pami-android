@@ -75,6 +75,8 @@ describe('מבצעי ניוד – פישוט', () => {
     assert.equal(o([{ plan: 'pG', gift: 'g0' }, { plan: 'pG', gift: 'g0' }], null, [{ pid: 'g0', qty: 2, price: 40 }]).gift, 80);
     assert.equal(o([{ plan: 'pH', gift: 'g0' }], null).gift, 0); // חבילה בלי המתנה הזו
     assert.equal(o([{ plan: 'pG', gift: 'g0' }], null, [{ pid: 'g0', qty: 1, price: 19.99 }]).gift, 19.99); // אגורות
+    // 12.11.2026 (החלטה 9, תיקון): כמה שורות של המוצר – המתנה לוקחת את המארז היקר, בלי תלות בסדר השורות
+    for (const it of [[{ pid: 'g0', qty: 6, price: 5 }, { pid: 'g0', qty: 1, price: 6 }], [{ pid: 'g0', qty: 1, price: 6 }, { pid: 'g0', qty: 6, price: 5 }]]) assert.equal(o([{ plan: 'pG', gift: 'g0' }], null, it).gift, 6);
   });
   it('תאריכי תוקף: מבצע שפג או שעוד לא התחיל – לא חל', () => {
     assert.equal(run(['pOld'], null, 100).sug, 0);
