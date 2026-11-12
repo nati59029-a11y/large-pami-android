@@ -60,10 +60,11 @@ function hookReq(msgs) {
   return { method: 'POST', rawBody: raw, get: (h) => hd[String(h).toLowerCase()] };
 }
 function fakeRes() { return { code: 0, body: '', headersSent: false, status(c) { this.code = c; return this; }, set() { return this; }, send(b) { this.body = b; this.headersSent = true; return this; } }; }
-// Meta: אם התשובה אינה 200 – שולחת שוב (במציאות במשך שעות; כאן עד 20 ניסיונות עם המתנה קצרה שגדלה)
+// Meta: אם התשובה אינה 200 – שולחת שוב (במציאות במשך שעות; כאן עד 40 ניסיונות עם המתנה שגדלה ופיזור אקראי).
+// הפיזור חשוב: בלי פיזור כל הבקשות שנכשלו יחד מנסות שוב באותו רגע ומתנגשות שוב על מונה ההצפה (נכשל ב-CI אחרי מיזוג main, 12.11)
 async function deliver(msgs, now) {
-  for (let i = 0; i < 20; i++) {
-    if (i) await new Promise((r) => setTimeout(r, Math.min(3000, 150 * i)));
+  for (let i = 0; i < 40; i++) {
+    if (i) await new Promise((r) => setTimeout(r, Math.min(4000, 150 * i) * (0.5 + Math.random())));
     const res = fakeRes();
     try { await WA.handleHook(hookReq(msgs), res, { secret: SECRET, now }); } catch (e) { res.code = 500; }
     if (res.code === 200) return i + 1;
@@ -89,7 +90,7 @@ describe('עומס: ווצאפ, מייל ותור חשבוניות – בלי א
     const reqs = msgs.map((m) => [m]).concat(msgs.map((m) => [m])).sort(() => Math.random() - 0.5);
     const tries = [];
     for (const c of chunks(reqs, 40)) tries.push(...(await Promise.all(c.map((r) => deliver(r, now)))));
-    assert.ok(tries.every((n) => n > 0), 'כל בקשה התקבלה בסוף (אולי אחרי ניסיון חוזר)');
+    assert.ok(tries.every((n) => n > 0), 'כל בקשה התקבלה בסוף (אולי אחרי ניסיון חוזר); לא התקבלו: ' + tries.filter((n) => !n).length + ', מקסימום ניסיונות: ' + Math.max(...tries));
     const ins = await coll(`b/${A}/sec_in`);
     assert.equal(ins.length, 320, 'אין אובדן ואין כפילות');
     assert.equal(new Set(ins.map((x) => x.wamid)).size, 320);
