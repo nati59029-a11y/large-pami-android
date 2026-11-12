@@ -24,6 +24,24 @@ jobs:
       any: ${{ steps.l.outputs.any }}
     steps:
       - uses: actions/checkout@v4
+      # 12.11.2026: כל עסק פעיל עם לוגו במיתוג מקבל APK עם הסמל שלו – אוטומטית (scripts/biz-auto.py discover).
+      # קריאה בלבד מ-Firebase. בלי הסוד/המשתנה, או בכל כשל – רק העסקים שב-build-biz.json (כמו קודם).
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Businesses with a logo (auto)
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+        run: |
+          # בלי המשתנה – אותו מאגר קבצים שהאפליקציה עצמה משתמשת בו (ST_BUCKET ב-index.html)
+          [ -n "$BUCKET" ] || BUCKET=$(grep -o "^const ST_BUCKET='[^']*'" app-source/www/index.html | cut -d"'" -f2)
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ] || [ -z "$BUCKET" ]; then echo "::notice::auto businesses skipped (no secret/bucket)"; exit 0; fi
+          pip install -q pillow==10.4.0
+          umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"; trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
+          cp app-source/brands/build-biz.json "$RUNNER_TEMP/build-biz.bak"
+          python3 scripts/biz-auto.py discover "$RUNNER_TEMP/sa.json" "$BUCKET" app-source/brands || { echo "::warning::auto businesses failed – building only the listed ones"; cp "$RUNNER_TEMP/build-biz.bak" app-source/brands/build-biz.json; }
+      - uses: actions/upload-artifact@v4
+        with: { name: brands, path: app-source/brands, retention-days: 3 }
       - id: l
         run: |
           IDS=$(python3 -c 'import json,re;c=json.load(open("app-source/brands/build-biz.json"));ids=["business"]+[b["bizId"] for b in c.get("businesses",[]) if re.fullmatch(r"[a-z0-9-]{3,30}",str(b.get("bizId",""))) and b.get("bizId")!="business"];print(json.dumps(ids))')
@@ -53,6 +71,9 @@ jobs:
       - name: Copy project source
         working-directory: .
         run: rm -rf app && mkdir app && cp -a app-source/. app/
+      # הלוגואים והרשימה מהשלב list (כולל העסקים שנמצאו אוטומטית)
+      - uses: actions/download-artifact@v4
+        with: { name: brands, path: app/brands }
       # השרת של GitHub עבר ל-Python 3.14, ול-pillow 10.4.0 אין שם קובץ מוכן – נועלים Python 3.12
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
@@ -130,3 +151,12 @@ jobs:
           umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"; trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
           python3 scripts/upload-apk-to-storage.py --apk apk/app-debug.apk --version-code $((1000 + GITHUB_RUN_NUMBER)) \
             --bucket "$BUCKET" --sa "$RUNNER_TEMP/sa.json" --prefix "$([ "${{ matrix.biz }}" = business ] && echo app_releases/business/ || echo "app_releases/biz-${{ matrix.biz }}/")" --summary "$GITHUB_STEP_SUMMARY"
+      # 12.11.2026: אחרי שה-APK של העסק פורסם – דף ההזמנה ומייל ההזמנה יפנו אליו (b/<bizId>.apkTag = biz-<bizId>). לא לאפליקציה הכללית
+      - name: Point the business to its own APK (apkTag)
+        if: matrix.biz != 'business'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then echo "::notice::apkTag skipped (no secret)"; exit 0; fi
+          umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"; trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
+          python3 scripts/biz-auto.py tag "$RUNNER_TEMP/sa.json" "${{ matrix.biz }}"

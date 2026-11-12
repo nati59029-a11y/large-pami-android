@@ -354,6 +354,8 @@ html[data-ds] .scbatch .sci{width:20px;height:20px}
 html[data-ds] .scdel{min-height:44px;margin-top:4px;padding:0 12px}
 .scnote{display:flex;gap:8px;align-items:flex-start;font-weight:700}.scnote .sci{width:20px;height:20px;margin-top:1px}
 .scnote.bad{color:var(--bad)}.scnote.acc{color:var(--acc)}.scnote.ok{color:var(--inc)}
+/* כפתור צף למנהל־על: פינה שמאלית תחתונה, מעל סרגל הניווט (לא מסתיר את ה"+" האמצעי). מתחת למסכים מלאים (sheet) ולחלונות */
+/* שורת עובד: כשאין מקום (מסך צר) הכפתורים יורדים לשורה שנייה במקום לגלוש מחוץ למסך */.li.stf{flex-wrap:wrap;row-gap:8px}.li.stf .m{min-width:150px}.safab{position:fixed;left:12px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:40;width:50px;height:50px;min-height:50px;padding:0;border-radius:50%;background:var(--card);color:var(--acc);border:2px solid var(--acc);box-shadow:0 6px 16px -6px rgba(0,0,0,.55);display:grid;place-items:center;cursor:pointer}.safab svg{width:26px;height:26px}.safab:active{transform:scale(.94)}body:has(.msbar) .safab{bottom:calc(210px + env(safe-area-inset-bottom))}@media print{.safab{display:none}}
 </style>
 <script src="xlsx.full.min.js"></script>
 <script src="orders/site-backend.js"></script>
@@ -646,6 +648,7 @@ function render(dir,keep){
  if(keep)window.scrollTo(0,y);else window.scrollTo(0,0);
  if(dir){const m=$('#main');m.classList.remove('sw');void m.offsetWidth;m.classList.add('sw')}
  document.documentElement.dataset.th=themeNow();document.documentElement.dataset.fs=S.fs||1;try{bzSkin()}catch(e){dsApply()}
+ try{saFab()}catch(e){}/* כפתור צף למנהל־על */
 }
 const rerender=()=>render(0,true);
 /* החלקה לחזרה: ימין→שמאל */
@@ -5145,16 +5148,39 @@ async function fnCall(name,data){const t=await tok();let r,j=null;try{r=await fe
 /* רשימת העסקים נקראת מהשורש (b/), לא מתוך העסק הנוכחי: FSR (root=1), לא FSB */
 async function admLoad(){if(ADM.busy)return;ADM.busy=1;ADM.err='';try{const L=[];let pt='';for(let i=0;i<10;i++){const j=await fsx('/b?pageSize=100'+(pt?'&pageToken='+encodeURIComponent(pt):''),0,1);for(const d of j.documents||[]){const f=fvj({mapValue:d});L.push({id:idOf(d),name:String(f.name||''),status:f.status==='suspended'?'suspended':'active',dataRoot:f.dataRoot==='legacy'?'legacy':'b',features:f.features&&typeof f.features==='object'?f.features:{},brand:f.brand&&typeof f.brand==='object'?f.brand:null})}pt=j.nextPageToken||'';if(!pt)break}
  if(!L.some(x=>x.id===BZ0))L.push({id:BZ0,name:'לארג׳ פעמי',status:'active',dataRoot:'legacy',features:{},missing:1});
- L.sort((a,b)=>(a.name||a.id).localeCompare(b.name||b.id,'he'));ADM.L=L}catch(e){ADM.err=e.offline?e.message:'טעינת רשימת העסקים נכשלה'}finally{ADM.busy=0;if(cur().v==='sa'||cur().v==='sab'||cur().v==='brand')rerender()}}
+ L.sort((a,b)=>(a.name||a.id).localeCompare(b.name||b.id,'he'));ADM.L=L}catch(e){ADM.err=e.offline?e.message:'טעינת רשימת העסקים נכשלה'}finally{ADM.busy=0;if(cur().v==='sa'||cur().v==='sab'||cur().v==='brand')rerender();try{saFabUp()}catch(e){}}}
 async function admInfo(id){ADM.info[id]={load:1};try{const d=await fsx('/b/'+id+'/private/info',0,1),f=fvj({mapValue:d});ADM.info[id]={email:String(f.ownerEmail||''),phone:String(f.ownerPhone||''),adv:f.adv&&typeof f.adv==='object'?f.adv:{},sq:f.scanQuota&&typeof f.scanQuota==='object'?f.scanQuota:null}}catch(e){ADM.info[id]={err:1,adv:{}}}if(cur().v==='sab'&&cur().a===id)rerender()}
 function admMenu(){if(typeof isA!=='function'||!isA())return'';
- if(!ADM.chk){ADM.chk=1;bzSA().then(ok=>{ADM.sa=ok?1:0;syS();if(cur().v==='settings')rerender()})}
+ if(!ADM.chk){ADM.chk=1;bzSA().then(ok=>{ADM.sa=ok?1:0;syS();try{saFab()}catch(e){}if(cur().v==='settings')rerender()})}
  const o=(v,t,s)=>`<button class="opt" data-a="go" data-v="${v}"><span>${t}<small>${s}</small></span>${ico('chev')}</button>`,a=[];
  if(ADM.sa)a.push(o('sa','עסקים (מנהל־על)','רשימה, פתיחת עסק, תוספות, השהיה והגדרות מתקדמות'));
  if(orgOk())a.push(o('org','סניפים, בנקים וכרטיסים','מנהל המערכת: הגדרה, סימני זיהוי, השבתה'));
  if(admStaffOk())a.push(o('staff','עובדים',ADM.sa||SY.sa?'הוספה, דרגות, הרשאות, השבתה והחזרה':'השבתה והחזרה של עובדים'));/* עדכון חוזה 14: מיתוג – רק מנהל־על, מכרטיס העסק. למנהל העסק אין כניסה */
  return a.length?`<div class="sec"><h3>ניהול</h3></div>`+a.join(''):''}
 const admStaffOk=()=>isA()&&bzB();
+/* ===== כפתור צף למנהל־על (12.11.2026): מופיע בכל מסך ובכל עסק, רק אחרי שהשרת אישר שהמשתמש מנהל־על (קריאת superadmins/{uid}, שרק מנהל־על מצליח בה). למי שאינו מנהל־על הכפתור לא נוצר ב-DOM. לחיצה פותחת: העסק הנוכחי, מעבר לעסק אחר (אותה "כניסה כמנהל": רישום ביומן ואז bzSwitch), וכל מסכי מנהל־על. הכניסה מההגדרות נשארת. השרת והחוקים ממשיכים לחסום כל פעולה ממי שאינו מנהל־על ===== */
+const SAFAB_ICO='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18M5 21V8l7-4 7 4v13"/><path d="M9 21v-5h6v5M9 11h.01M15 11h.01"/></svg>';
+function saFab(){const ok=typeof isA==='function'&&isA()&&!isW();
+ if(ok&&!ADM.chk){ADM.chk=1;bzSA().then(v=>{ADM.sa=v?1:0;syS();saFab();if(cur().v==='settings')rerender()})}
+ let b=document.getElementById('safab');if(!(ok&&ADM.sa===1)){if(b){b.remove();closeSaFab()}return}
+ if(!b){b=document.createElement('button');b.id='safab';b.className='safab';b.type='button';b.dataset.a='saFab';b.setAttribute('aria-label','מנהל־על: הגדרות ומעבר בין עסקים');b.title='מנהל־על';b.innerHTML=SAFAB_ICO;document.body.appendChild(b)}}
+/* בלי חיבור בבדיקה הראשונה – בודקים שוב כשהחיבור חוזר */
+window.addEventListener('online',()=>{if(!ADM.sa){ADM.chk=0;try{saFab()}catch(e){}}});
+function closeSaFab(){const d=$('#dlg');if(d.open&&d.querySelector('#safabd'))d.close()}
+function saFabH(){const me=BZOK(SY.bizId)?SY.bizId:BZ0,L=ADM.L,cb=(L||[]).find(x=>x.id===me);
+ const row=b=>{const here=b.id===me;return`<div class="li" style="cursor:default" data-n="${esc((b.name+' '+b.id).toLowerCase())}"><div class="m"><b>${esc(b.name||b.id)}</b><small><bdi dir="ltr">${esc(b.id)}</bdi>${here?' · העסק הנוכחי':''}</small></div>${here?admTag(b):b.missing?'<small class="note">לא זמין</small>':`<button class="btn s" data-a="admEnter" data-id="${esc(b.id)}">עבור לעסק</button>`}</div>`};
+ const o=(v,a,t,s)=>`<button class="opt" data-a="saNav" data-v="${v}"${a?` data-arg="${esc(a)}"`:''}><span>${t}<small>${esc(s)}</small></span>${ico('chev')}</button>`,m=[o('sa','','כל העסקים והגדרות מנהל־על','רשימה, פתיחת עסק, תוספות, השהיה, מיתוג והגדרות מתקדמות')];
+ if(cb&&!cb.missing)m.push(o('sab',me,'כרטיס העסק הנוכחי','הגדרות, תוספות ומיתוג של '+(cb.name||me)));
+ if(orgOk())m.push(o('org','','סניפים, בנקים וכרטיסים','בעסק הנוכחי'));
+ if(admStaffOk())m.push(o('staff','','עובדים','בעסק הנוכחי: הוספה, דרגות, הרשאות, השבתה והחזרה'));
+ return`<div id="safabd"><h3 style="margin-top:0">מנהל־על</h3><p style="margin:0 0 6px">אתה נמצא כעת ב: <b>${esc(cb?cb.name||me:me)}</b></p>
+<div class="sec"><h3>מעבר לעסק</h3></div>${ADM.err?`<div class="card"><p>${esc(ADM.err)}</p><button class="btn g" data-a="saFabRe">נסה שוב</button></div>`:L?`${L.length>6?'<label class="f"><span>חיפוש לפי שם</span><input type="search" data-i="saQ" autocomplete="off"></label>':''}<div id="saL" style="max-height:42vh;overflow-y:auto">${L.map(row).join('')}</div><p class="note">המעבר נרשם ביומן של העסק, והמסך נטען מחדש בתוך העסק.</p>`:'<div class="empty">טוען…</div>'}
+<div class="sec"><h3>הגדרות מנהל־על</h3></div>${m.join('')}<button type="button" class="btn g w" data-a="closeDlg" style="margin-top:10px">סגירה</button></div>`}
+function saFabUp(){const d=$('#dlg');if(d.open&&d.querySelector('#safabd'))d.innerHTML=saFabH()}
+ACT.saFab=async()=>{if(!ADM.sa)return;dlg(saFabH());if(!ADM.L&&!ADM.err){await admLoad();saFabUp()}};
+ACT.saFabRe=async()=>{ADM.L=null;ADM.err='';saFabUp();await admLoad();saFabUp()};
+ACT.saNav=el=>{closeDlg();if(!ADM.sa)return;const v=el.dataset.v,a=el.dataset.arg;if(cur().v===v&&cur().a===a)return rerender();go(v,a)};
+INP.saQ=el=>{const q=el.value.trim().toLowerCase();$$('#saL .li').forEach(r=>{r.hidden=!!q&&!r.dataset.n.includes(q)})};
 /* ===== סניפים/בנקים: מסכי מנהל־על (חלק מליבת A1; כאן כי V/ACT/ADM מוגדרים רק בהמשך) ===== */
 /* מסך הגדרות: סניפים, בנקים וכרטיסים – מנהל־על בלבד, בעסק במבנה החדש */
 const ORGK={branches:['סניפים','סניף'],banks:['בנקים','בנק'],cards:['כרטיסי אשראי','כרטיס']},SIGK=[['txt','שם / טקסט'],['sup','ספק'],['emp','עובד'],['num','מספר (מסוף / חשבון)'],['other','אחר']];
@@ -5229,7 +5255,7 @@ $('#dlg').addEventListener('close',()=>{if($('#admTok'))$('#dlg').innerHTML=''})
 /* מסך עובדים: למנהל עסק במצב b ולמנהל־על שנכנס לעסק. אצל לארג' פעמי במצב legacy לא מוצג (bzB()=false), וניהול העובדים נשאר כמו היום */
 async function admStaffLoad(){if(ADM.sbusy)return;ADM.sbusy=1;ADM.staffErr='';try{const j=await fsx('/staff?pageSize=300'),L=(j.documents||[]).map(d=>{const f=fvj({mapValue:d});return{uid:idOf(d),name:String(f.name||''),email:String(f.email||''),role:String(f.role||''),active:f.active===true,rank:String(f.rank||''),perms:f.perms&&typeof f.perms==='object'&&!Array.isArray(f.perms)?f.perms:null,br:brArr(f.br)}});if(SY.sa){try{const i=fvj({mapValue:await fsx('/private/info')});ADM.ranks=Array.isArray(i.ranks)?i.ranks.filter(r=>r&&typeof r.id==='string'):[]}catch(e){ADM.ranks=[]}}L.sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email,'he'));ADM.staff=L}catch(e){ADM.staffErr=e.offline?e.message:'טעינת רשימת העובדים נכשלה'}finally{ADM.sbusy=0;if(cur().v==='staff')rerender()}}
 V.staff=()=>{const T='עובדים';if(!admStaffOk())return{t:T,h:'<div class="empty">המסך הזה זמין בעסקים במבנה החדש בלבד</div>'};if(!ADM.staff&&!ADM.staffErr)admStaffLoad();
- const row=u=>{const mine=u.role==='manager'||u.uid===SY.uid;return`<div class="li" style="cursor:default"><div class="m"><b>${esc(u.name||u.email||u.uid)}</b><small><bdi dir="ltr">${esc(u.email)}</bdi></small></div><span class="tag ${u.active?'t3':'t4'}">${u.active?'פעיל':'מושבת'}</span>${SY.sa&&brAll().length>1&&u.uid!==SY.uid?`<button class="btn s g" data-a="admBr" data-uid="${esc(u.uid)}">סניפים</button>`:''}${mine?'':`${SY.sa?`<button class="btn s g" data-a="admPerm" data-uid="${esc(u.uid)}">הרשאות</button>`:''}<button class="btn s g" data-a="admStf" data-uid="${esc(u.uid)}">${u.active?'השבתה':'החזרה'}</button>`}</div>`};
+ const row=u=>{const mine=u.role==='manager'||u.uid===SY.uid;return`<div class="li stf" style="cursor:default"><div class="m"><b>${esc(u.name||u.email||u.uid)}</b><small><bdi dir="ltr">${esc(u.email)}</bdi></small></div><span class="tag ${u.active?'t3':'t4'}">${u.active?'פעיל':'מושבת'}</span>${SY.sa&&u.email&&u.uid!==SY.uid&&u.active?`<button class="btn s g" data-a="admStfMail" data-uid="${esc(u.uid)}">מייל</button>`:''}${SY.sa&&brAll().length>1&&u.uid!==SY.uid?`<button class="btn s g" data-a="admBr" data-uid="${esc(u.uid)}">סניפים</button>`:''}${mine?'':`${SY.sa?`<button class="btn s g" data-a="admPerm" data-uid="${esc(u.uid)}">הרשאות</button>`:''}<button class="btn s g" data-a="admStf" data-uid="${esc(u.uid)}">${u.active?'השבתה':'החזרה'}</button>`}</div>`};
  const rk=ADM.ranks||[],rsel=v=>`<label class="f"><span>דרגה</span><select name="rank"><option value="">בלי דרגה (ההרשאות הרגילות)</option>${rk.map(r=>`<option value="${esc(r.id)}"${r.id===v?' selected':''}>${esc(r.name)}</option>`).join('')}</select></label>`;
  /* 6ה, החלטה 3: הוספת עובדים ודרגות – רק מנהל־על. מנהל העסק רואה רשימה, ומשבית/מחזיר בלבד */
  const add=SY.sa?`<form class="card" data-f="admStaffAdd"><h3 style="margin-top:0">הוספת עובד</h3>${fld('שם העובד','name','','text','required maxlength="60"')}${fld('מייל העובד','email','','email','required dir="ltr" autocomplete="off"')}${rsel('')}<button class="btn w">הוסף עובד</button><p class="note">אחרי ההוספה נשלח לעובד מייל לקביעת סיסמה.</p></form>
@@ -5241,6 +5267,9 @@ FRM.admStaffAdd=async f=>{const x=fd(f),nm=s_(x.name),em=s_(x.email),b=f.querySe
 /* 6ה: דרגות (תבנית) ומתגי הרשאה לכל עובד – מנהל־על בלבד (setBusinessRanks / setStaffPerms, נרשם ב-audit) */
 /* 6ו: "רואה הוצאות" – שלוש אפשרויות בשדה אחד (expR = true | 'own' | false) */const PME=[['all','רואה את כל ההוצאות של העסק'],['own','רואה רק את ההוצאות שהוא הזין'],['none','לא רואה הוצאות']],pmEv=v=>v===true||v===1?'all':v==='own'?'own':'none';
 const pmBoxes=p=>PMK.map(([k,t])=>k==='expR'?`<label class="f"><span>${t}</span><select name="p_expR">${PME.map(([v,l])=>`<option value="${v}"${pmEv(p&&p.expR)===v?' selected':''}>${l}</option>`).join('')}</select></label>`:`<label class="cb"><input type="checkbox" name="p_${k}" value="1"${p&&p[k]?' checked':''}> ${t}</label>`).join(''),pmRead=x=>Object.fromEntries(PMK.map(([k])=>[k,k==='expR'?(x.p_expR==='own'?'own':x.p_expR==='all'):!!x['p_'+k]]));
+/* 12.11.2026: מייל ידני לעובד (מנהל־על בלבד; השרת – sendInviteMail – בודק שוב): שם, העסק והלוגו שלו, מייל לכניסה, קישור לקביעת סיסמה, הורדת האפליקציה של העסק וגרסת המחשב. אם מערכת המייל לא זמינה – נשלח המייל הרגיל של קביעת סיסמה */
+ACT.admStfMail=el=>{if(!SY.sa)return;const u=(ADM.staff||[]).find(x=>x.uid===el.dataset.uid);if(!u||!u.email)return;
+ ask(`לשלוח ל${u.name||u.email} מייל עם פרטי הכניסה, קישור לקביעת סיסמה, הורדת האפליקציה וכניסה מהמחשב? (נשלח ל-${u.email})`,async()=>{el.disabled=true;try{const r=await invMail(u.email,SY.bizId);toast(r==='sent'?'נשלח מייל עם הפרטים ל-'+u.email:'נשלח מייל קביעת סיסמה רגיל ל-'+u.email+' (מערכת המייל המעוצב לא זמינה כרגע)')}catch(e){toast(e.offline?'אין חיבור לאינטרנט':'שליחת המייל נכשלה, נסה שוב')}finally{el.disabled=false}},'כן, שלח')};
 ACT.admPerm=el=>{const u=(ADM.staff||[]).find(x=>x.uid===el.dataset.uid);if(!u||!SY.sa)return;const p=u.perms||PMD,rk=ADM.ranks||[];
  dlg(`<h3>הרשאות: ${esc(u.name||u.email)}</h3><form data-f="admPermSave" data-uid="${esc(u.uid)}"><label class="f"><span>דרגה (ממלאת את המתגים; אפשר לשנות כל מתג)</span><select name="rank" data-c="admRk"><option value="">בלי דרגה</option>${rk.map(r=>`<option value="${esc(r.id)}"${r.id===u.rank?' selected':''}>${esc(r.name)}</option>`).join('')}</select></label>${pmBoxes(p)}${u.perms?'':'<p class="note">לעובד הזה עוד לא נקבעו מתגים: מוצגות ההרשאות שיש לו היום.</p>'}<div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 CHG.admRk=el=>{const r=(ADM.ranks||[]).find(x=>x.id===el.value),f=el.form;if(!r||!f)return;PMK.forEach(([k])=>{const c=f.querySelector('[name=p_'+k+']');if(!c)return;if(k==='expR')c.value=pmEv(r.perms&&r.perms.expR);else c.checked=!!(r.perms&&r.perms[k])})};

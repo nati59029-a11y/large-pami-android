@@ -32,6 +32,22 @@ const INVITE_SITE = defineString('INVITE_SITE', { default: '', description: 'ש�
 const DEFAULT_NAME = 'ניהול העסק';
 const EMAIL_RE = /^[^\s@<>"',;:\\()[\]]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$/;
 const SITE_RE = /^[a-z0-9-]{1,63}$/;
+// הורדת ה-APK של העסק – כמו welcome.html (apk()): biz-<bizId> = APK עם הסמל של העסק; לארג' פעמי = latest; אחר = האפליקציה הכללית
+const REPO = 'nati59029-a11y/large-pami-android';
+const APK_RE = /^https:\/\/github\.com\/nati59029-a11y\/large-pami-android\/releases\/download\/(latest|business-latest|biz-[a-z0-9-]{3,30})\/(large-pami|business|biz-[a-z0-9-]{3,30})\.apk$/;
+function apkUrl(bizId, tag) {
+  const t = /^biz-[a-z0-9-]{3,30}$/.test(String(tag || '')) && tag === 'biz-' + bizId ? tag : bizId === T.BIZ0 ? 'latest' : 'business';
+  return `https://github.com/${REPO}/releases/download/${t === 'business' ? 'business-latest' : t}/${t === 'latest' ? 'large-pami' : t}.apk`;
+}
+// שם העובד/המנהל מהמסמך שלו בעסק (staff.name / admins.name). אין – ''
+async function memberName(biz, email, who) {
+  if (who !== 'staff' && who !== 'admins') return '';
+  try {
+    const snap = await getFirestore().collection(T.bizRef(biz, who)).where('email', '==', String(email || '').trim().toLowerCase()).limit(1).get();
+    const n = snap.empty ? '' : snap.docs[0].get('name');
+    return typeof n === 'string' ? n.trim().slice(0, 60) : '';
+  } catch (e) { return ''; }
+}
 const LIMITS = [
   { key: (bizId) => 'b-' + bizId, win: 3600000, max: 10 },
   { key: (bizId, uid) => 'u-' + uid, win: 86400000, max: 40 },
@@ -90,8 +106,12 @@ const STEPS = (email) => [
 
 // ---------- בניית המייל (טהור, נבדק ביחידה) ----------
 // brand: { name, logo } – logo הוא data:image/(png|jpeg|webp);base64,… או ''. הלוגו מוטמע כקובץ מצורף (cid), לא כ-data URI.
-function buildMail({ to, from, brand, link, desktop }) {
+// person – שם העובד/המנהל (לא חובה). apk – קישור ישיר להורדת האפליקציה של העסק (רק github.com/<REPO>/releases/download/...).
+function buildMail({ to, from, brand, link, desktop, person, apk }) {
   const dk = typeof desktop === 'string' && /^https:\/\/[a-z0-9-]+\.web\.app\/$/.test(desktop) ? desktop : '';
+  const ap = typeof apk === 'string' && APK_RE.test(apk) ? apk : '';
+  const pn = headerSafe(person).slice(0, 60);
+  const hi = pn && pn !== DEFAULT_NAME ? 'שלום ' + pn + ',' : 'שלום,';
   const name = headerSafe(brand && brand.name);
   const html1 = esc(name);
   const mailTo = String(to || '');
@@ -108,20 +128,24 @@ function buildMail({ to, from, brand, link, desktop }) {
     + `<div dir="rtl" style="max-width:560px;margin:0 auto;padding:24px 16px;text-align:right">`
     + `<div style="background:#ffffff;border-radius:16px;padding:24px">${logoHtml}`
     + `<h1 style="font-size:22px;margin:0 0 12px;text-align:center">הוזמנת לאפליקציית ${html1}</h1>`
-    + `<p style="font-size:16px;line-height:1.6;margin:0 0 20px">שלום,<br>הוזמנת להצטרף לאפליקציית ${html1} עם החשבון <bdi dir="ltr">${esc(mailTo)}</bdi>.</p>`
+    + `<p style="font-size:16px;line-height:1.6;margin:0 0 16px">${esc(hi)}<br>הוזמנת להצטרף לאפליקציית ${html1} עם החשבון <bdi dir="ltr">${esc(mailTo)}</bdi>.</p>`
+    + `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;margin:0 0 20px;font-size:15px;line-height:1.8"><b>הפרטים שלך:</b><br>${pn && pn !== DEFAULT_NAME ? `שם: ${esc(pn)}<br>` : ''}העסק: ${html1}<br>מייל לכניסה: <bdi dir="ltr">${esc(mailTo)}</bdi><br>סיסמה: את הסיסמה קובעים בכפתור "קביעת סיסמה" למטה (הסיסמה לא נשלחת במייל)</div>`
     + `<p style="text-align:center;margin:0 0 24px"><a href="${esc(link)}" style="display:inline-block;background:#b8860b;color:#ffffff;text-decoration:none;font-size:18px;font-weight:bold;padding:14px 28px;border-radius:10px">קביעת סיסמה</a></p>`
     + `<p style="font-size:16px;font-weight:bold;margin:0 0 8px">איך מתחילים (בטלפון אנדרואיד):</p>`
     + `<ol style="font-size:15px;line-height:1.7;margin:0 0 20px;padding-right:20px;padding-left:0">${steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>`
+    + (ap ? `<p style="font-size:16px;font-weight:bold;margin:0 0 8px">הורדת האפליקציה:</p><p style="font-size:15px;line-height:1.7;margin:0 0 20px">אם כבר קבעתם סיסמה, אפשר להוריד את האפליקציה ישירות מהקישור: <a href="${esc(ap)}" dir="ltr">הורדת האפליקציה של ${html1}</a></p>` : '')
     + (dk ? `<p style="font-size:16px;font-weight:bold;margin:0 0 8px">התחברות ממחשב:</p><p style="font-size:15px;line-height:1.7;margin:0 0 20px">אחרי שקבעתם סיסמה, אפשר לעבוד גם מהמחשב: פתחו בדפדפן את הקישור <a href="${esc(dk)}" dir="ltr">${esc(dk)}</a> והתחברו עם אותו מייל ואותה סיסמה.</p>` : '')
     + `<p style="font-size:13px;color:#6b7280;line-height:1.6;margin:0">הקישור תקף לזמן מוגבל. אם פג תוקפו, בקשו מהמנהל לשלוח מייל חדש.<br>אם לא ציפיתם להזמנה, אפשר להתעלם מהמייל.</p>`
     + `<p style="font-size:12px;color:#9ca3af;line-height:1.5;margin:16px 0 0">אם הכפתור לא עובד, העתיקו את הקישור לדפדפן:<br><span dir="ltr" style="word-break:break-all">${esc(link)}</span></p>`
     + `</div><p style="font-size:13px;color:#6b7280;text-align:center;margin:16px 0 0">${html1}</p></div></body></html>`;
   const text = [
-    'שלום,', '',
+    hi, '',
     `הוזמנת להצטרף לאפליקציית ${name} עם החשבון ${mailTo}.`, '',
+    'הפרטים שלך:', ...(pn && pn !== DEFAULT_NAME ? ['שם: ' + pn] : []), 'העסק: ' + name, 'מייל לכניסה: ' + mailTo, 'סיסמה: קובעים בקישור שלמטה (הסיסמה לא נשלחת במייל)', '',
     'קישור לקביעת סיסמה:', link, '',
     'איך מתחילים (בטלפון אנדרואיד):',
     ...steps.map((s, i) => `${i + 1}. ${i === 0 ? 'פתחו את הקישור שלמעלה.' : s}`), '',
+    ...(ap ? ['הורדת האפליקציה (אחרי קביעת הסיסמה):', ap, ''] : []),
     ...(dk ? ['התחברות ממחשב:', 'אחרי שקבעתם סיסמה, פתחו בדפדפן את הקישור ' + dk + ' והתחברו עם אותו מייל ואותה סיסמה.', ''] : []),
     'הקישור תקף לזמן מוגבל. אם פג תוקפו, בקשו מהמנהל לשלוח מייל חדש.',
     'אם לא ציפיתם להזמנה, אפשר להתעלם מהמייל.', '', name,
@@ -221,9 +245,10 @@ async function sendInvite(request, deps) {
   }
   if (!link) return { ok: true, status: 'fallback', why: 'link' };
   const br = (await D.brand(bizId)) || {};
-  // מנהל (בעלים או admins) מקבל גם את הקישור לגרסת המחשב. עובד – לא (גרסת המחשב למנהל בלבד)
-  const desktop = who === 'staff' ? '' : `https://${site}.web.app/`;
-  const mail = buildMail({ to: email, from: smtp.from, brand: br, link, desktop });
+  // 12.11.2026 (החלטת בעל המערכת): כולם – גם עובד – מקבלים את הקישור לגרסת המחשב, את פרטי הכניסה ואת קישור ההורדה של העסק
+  const desktop = `https://${site}.web.app/`;
+  const person = await memberName(biz, email, who);
+  const mail = buildMail({ to: email, from: smtp.from, brand: br, link, desktop, person, apk: apkUrl(bizId, br.apkTag) });
   try {
     const tr = D.transport({ host: smtp.host, port: smtp.port, secure: smtp.secure, requireTLS: !smtp.secure, auth: { user: sec.user, pass: sec.pass }, connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000, logger: false, debug: false });
     await tr.sendMail(mail);
@@ -246,4 +271,4 @@ exports.sendInviteMail = onCall({ secrets: [MAIL_USER, MAIL_APP_PASSWORD], maxIn
     return { ok: true, status: 'fallback', why: 'internal' };
   }
 }));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { buildMail, welcomeLink, headerSafe, secretsOk, smtpOk, esc, sendInvite, takeRate, belongs, LIMITS, DEFAULT_NAME } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { buildMail, apkUrl, memberName, welcomeLink, headerSafe, secretsOk, smtpOk, esc, sendInvite, takeRate, belongs, LIMITS, DEFAULT_NAME } });
