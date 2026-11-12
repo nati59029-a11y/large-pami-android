@@ -5,12 +5,13 @@
 //   mapClassify(shaped) – תוצאת הסריקה האחידה (lib/classify.js) → סוג מסמך ושדות לתור.
 //   matchSup / brOf / eligOf – זיהוי ספק, סניף (40), וזכאות ל"נכנס ישר" (34–36, 4.3). eligOf נקראת גם בזמן העיבוד וגם ב"תפיסה" (secDecide).
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const scan = require('./scan');
 
 const MAX_FILE = 10 * 1024 * 1024; // כמו SCAN_MAX_FILE_MB (ברירת המחדל) – בדיקה לפני הורדה ולפני פענוח (10.3)
 const MAX_PAGES = 4;               // חשבונית: עד 4 עמודים (4.2). מעל – כרטיס "קובץ ארוך – לבדיקה ידנית", בלי זיהוי
 const PART = 700000;               // גודל חלק (base64) ב-sec_inv/{id}/p/{k} – מתחת למגבלת המסמך של Firestore
-const CAP_DEFAULT = 2000;          // תקרה אחת לעסק (35) – ברירת מחדל מוצעת באפיון (הנחה)
+const CAP_DEFAULT = 20000;         // תקרה אחת לעסק (35) – 20,000 ₪ (החלטת בעל הפרויקט, תיקון 1 לשלב 7). סכום ששווה לתקרה – ממתין
 const KEEP_DAYS = 30;              // 9.5: עותק בתור של חשבונית שאושרה / קובץ שנדחה – 30 יום
 const CLAIM_MS = 24 * 3600e3;      // 4.7(3): תפיסה שלא הושלמה משתחררת אחרי 24 שעות
 const KINDS = ['q', 'inv', 'rcpt', 'dn', 'cr', 'chk', 'unk', 'bad', 'long'];
@@ -36,6 +37,54 @@ function magicBad(buf) {
   if (buf.length >= 4 && h(4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return 'exe';
   return '';
 }
+// PDF: שם בקידוד #xx (למשל /J#61vaScript) – מפוענח לפני החיפוש (תיקון 1, ליקוי 3)
+const decNames = (t) => t.replace(/\/[^\s\/\[\]<>(){}%]+/g, (m) => (m.includes('#') ? m.replace(/#([0-9A-Fa-f]{2})/g, (z, h) => String.fromCharCode(parseInt(h, 16))) : m));
+const ACTIVE_RE = /\/(JavaScript|JS|Launch|EmbeddedFile|RichMedia|XFA)(?![A-Za-z0-9])/;
+const OBJSTM_MAX = 200, INFLATE_MAX = 30 * 1024 * 1024;
+// המילון שסביב מיקום i (איזון << >>) – כדי לקרוא /Count של עץ העמודים ולא של משהו אחר
+function dictAt(t, i) {
+  let d = 0, a = -1;
+  for (let k = i; k >= 0 && i - k < 20000; k--) {
+    if (t[k] === '>' && t[k - 1] === '>') { d++; k--; } else if (t[k] === '<' && t[k - 1] === '<') { if (d === 0) { a = k - 1; break; } d--; k--; }
+  }
+  if (a < 0) return '';
+  d = 0;
+  for (let k = a; k < t.length && k - a < 20000; k++) {
+    if (t[k] === '<' && t[k + 1] === '<') { d++; k++; } else if (t[k] === '>' && t[k + 1] === '>') { d--; k++; if (d === 0) return t.slice(a, k + 1); }
+  }
+  return '';
+}
+// אוספי אובייקטים דחוסים (/ObjStm, או כל זרם עם /N ו-/First) – נפרסים (FlateDecode) ונבדקים גם הם. מה שאי אפשר לפרוס – null (חסימה)
+function objStreams(buf, s) {
+  const out = [];
+  let total = 0;
+  const re = /stream(\r\n|\n|\r)/g;
+  let m;
+  while ((m = re.exec(s))) {
+    if (s.slice(Math.max(0, m.index - 3), m.index) === 'end') continue;
+    const o = s.lastIndexOf('obj', m.index);
+    if (o < 0) continue;
+    const dict = decNames(s.slice(o, m.index));
+    if (!(/\/Type\s*\/ObjStm(?![A-Za-z])/.test(dict) || (/\/N\s+\d/.test(dict) && /\/First\s+\d/.test(dict)))) continue;
+    if (out.length >= OBJSTM_MAX) return null;
+    const a = m.index + m[0].length;
+    const e = s.indexOf('endstream', a);
+    if (e < 0) return null;
+    let raw = buf.subarray(a, e);
+    while (raw.length && (raw[raw.length - 1] === 0x0a || raw[raw.length - 1] === 0x0d)) raw = raw.subarray(0, raw.length - 1);
+    const fm = /\/Filter\s*(\/[A-Za-z0-9]+|\[[^\]]*\])/.exec(dict);
+    const fl = fm ? (fm[1].match(/\/[A-Za-z0-9]+/g) || []) : [];
+    let txt;
+    if (!fl.length) txt = raw.toString('latin1');
+    else if (fl.length === 1 && ['/FlateDecode', '/Fl'].includes(fl[0]) && !/\/Predictor\s+([2-9]|\d\d)/.test(dict)) {
+      try { txt = zlib.inflateSync(raw, { maxOutputLength: INFLATE_MAX - total }).toString('latin1'); } catch (er) { return null; }
+    } else return null; // מסנן אחר או שרשרת מסננים – לא נבדק, לכן נחסם
+    total += txt.length;
+    if (total >= INFLATE_MAX) return null;
+    out.push(decNames(txt));
+  }
+  return out;
+}
 function inspect(buf) {
   if (!Buffer.isBuffer(buf) || !buf.length) return { ok: false, why: 'empty' };
   if (buf.length > MAX_FILE) return { ok: false, why: 'big' };
@@ -44,11 +93,23 @@ function inspect(buf) {
   const mime = scan.sniff(buf);
   if (!mime) return { ok: false, why: 'type' };
   if (mime !== 'application/pdf') return { ok: true, mime, pages: 1 };
-  const s = buf.toString('latin1');
-  if (/\/Encrypt\b/.test(s)) return { ok: false, why: 'enc' };
-  // PDF עם פקודות (JavaScript, הפעלת קובץ, קובץ מוטמע) – לא נפתח
-  if (/\/(JavaScript|JS|Launch|EmbeddedFile|RichMedia|XFA)\b/.test(s)) return { ok: false, why: 'active' };
-  const pages = (s.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length || 1;
+  const s0 = buf.toString('latin1');
+  const s = decNames(s0);
+  if (/\/Encrypt(?![A-Za-z0-9])/.test(s)) return { ok: false, why: 'enc' };
+  // PDF עם פקודות (JavaScript, הפעלת קובץ, קובץ מוטמע) – לא נפתח. נבדק גם בתוך אוספי אובייקטים דחוסים
+  if (ACTIVE_RE.test(s)) return { ok: false, why: 'active' };
+  const os = objStreams(buf, s0);
+  if (!os) return { ok: false, why: 'unv' }; // אי אפשר לאמת שאין בו פקודות – חסום (הנחה: כרטיס "התקבל קובץ שלא נקלט")
+  if (os.some((t) => ACTIVE_RE.test(t) || /\/Encrypt(?![A-Za-z0-9])/.test(t))) return { ok: false, why: 'active' };
+  // עמודים: גם /Type /Page (כולל בתוך אוספים דחוסים) וגם /Count של עץ העמודים – הגבוה מביניהם
+  let nPage = 0, nCount = 0;
+  for (const t of [s].concat(os)) {
+    nPage += (t.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
+    const re = /\/Type\s*\/Pages(?![a-zA-Z])/g;
+    let m, guard = 0;
+    while ((m = re.exec(t)) && guard++ < 500) { const c = /\/Count\s+(\d{1,7})/.exec(dictAt(t, m.index)); if (c) nCount = Math.max(nCount, Number(c[1])); }
+  }
+  const pages = Math.max(nPage, nCount) || 1;
   return pages > MAX_PAGES ? { ok: true, long: true, mime, pages } : { ok: true, mime, pages };
 }
 // קובץ מצורף במייל: שם וסוג מוצהרים. מה שאינו PDF או תמונה – נדחה בלי הורדה
@@ -116,7 +177,7 @@ function invCfgOf(snap) {
     auto: d.auto !== false,
     cap: typeof d.cap === 'number' && Number.isFinite(d.cap) && d.cap >= 0 ? d.cap : CAP_DEFAULT,
     off: obj(d.off), links: obj(d.links),
-    sups: Array.isArray(d.sups) ? d.sups : [], nb: Number.isInteger(d.nb) ? d.nb : 0, br1: typeof d.br1 === 'string' ? d.br1 : '', supH: typeof d.supH === 'string' ? d.supH : '', supAt: Number(d.supAt) || 0,
+    sups: Array.isArray(d.sups) ? d.sups : [], nb: Number.isInteger(d.nb) ? d.nb : 0, br1: typeof d.br1 === 'string' ? d.br1 : '', supH: typeof d.supH === 'string' ? d.supH : '', supAt: Number(d.supAt) || 0, supBy: typeof d.supBy === 'string' ? d.supBy : '', supDev: typeof d.supDev === 'string' ? d.supDev : '',
   };
 }
 // ---------- זכאות ל"נכנס ישר" (4.3) ----------
@@ -137,6 +198,8 @@ function eligOf(x, cfg, stop) {
   if (x && x.dup) why.push('dup');
   if (x && x.hold) why.push('hold');
   if (x && x.sus) why.push('sus');
+  // מייל שלא עבר אימות DKIM/DMARC של דומיין השולח – לעולם לא "נכנס ישר" (תיקון 1, ליקוי 2)
+  if (x && x.ua) why.push('auth');
   return why;
 }
 // כל השדות זוהו ובביטחון (4.2: "הזיהוי מלא")
@@ -150,7 +213,8 @@ function fullOf(m) {
 // מפתחות כפילות בשרת: אותו ספק + אותו מספר חשבונית; אותו ספק + אותו תאריך + אותו סכום (כמו dupOf באפליקציה)
 function dupKeys(m, sub) {
   const f = m.f || {};
-  const who = f.hp ? 'h' + f.hp : sub ? 's' + sub : '';
+  // לפי הספק כשהוא ידוע (גם כשבקובץ אחד זוהה ח.פ ובשני לא – תיקון 1, ליקוי 7), ואם לא – לפי ח.פ
+  const who = sub ? 's' + sub : f.hp ? 'h' + f.hp : '';
   const n = NINV(f.num);
   return { dk: who && n ? who + '|' + n : '', dk2: who && f.date && typeof f.total === 'number' ? who + '|' + f.date + '|' + Math.round(f.total * 100) : '' };
 }

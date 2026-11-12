@@ -298,6 +298,22 @@ async function sttOf(db, x, o) {
   return withCost(db, o, () => (o.stt || AI.transcribe)({ mime: md.mime, b64: md.buf.toString('base64') }));
 }
 
+// שלב 7: קובץ מווצאפ → תור החשבוניות (secretary-inv.js). משמש גם להודעה רגילה וגם ל"מספר המנהל" (החלטת בעל הפרויקט, תיקון 1).
+// מחזיר { inv, err }. קובץ גדול – כרטיס בלי הורדה (10.3); תקלה אחרת – כרטיס "הקובץ לא נקלט – תקלה" עם השולח (ליקוי 5), err:true
+async function invOfWa(db, id, x, o, now) {
+  const INV = require('./secretary-inv')._core;
+  const base = { ch: 'wa', from: x.from, name: x.name || '', inId: id, fn: x.media.fn || '', now };
+  try {
+    const md = await (o.media || W.media)(o.token, x.media.id, require('./lib/sec-inv').MAX_FILE);
+    return { inv: (await INV.ingest(db, Object.assign(base, { buf: md.buf }))).id };
+  } catch (e) {
+    if (e && e.details && e.details.reason === 'wa-media-big') return { inv: (await INV.ingest(db, Object.assign(base, { why: 'big' }))).id };
+    logger.warn('secretary-wa: invoice file failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
+    let inv = '';
+    try { inv = (await INV.ingest(db, Object.assign(base, { why: 'dl' }))).id; } catch (e2) { logger.warn('secretary-wa: invoice error card failed', { reason: (e2 && e2.code) || 'error' }); }
+    return { inv, err: true };
+  }
+}
 // ---------- "מספר המנהל" – יומן ותזכורות בלבד (112, פ1, פ2, 86) ----------
 const MGR_TOOLS = Object.freeze(['getCalendar', 'createCalendarItem']);
 const MGR_DECL = [
@@ -330,10 +346,16 @@ async function doMgr(db, id, x, o) {
     if (r.saving) { await ref.update({ st: 'saving' }); return { saving: true }; }
     tr = r.text; text = tr;
   }
-  const intent = x.type === 'other' ? 'act' : W.mgrIntent(text);
+  // החלטת בעל הפרויקט (תיקון 1 לשלב 7): קובץ ממספר המנהל נקלט לאותו תור החשבוניות (sec_inv). ההודעה עצמה לא עוברת למודל
+  const invFile = x.type === 'other' && x.media && x.media.id;
+  const intent = invFile ? 'inv' : x.type === 'other' ? 'act' : W.mgrIntent(text);
   const tools = [], created = [], logs = [], reads = [], errs = [];
-  let reply = '';
-  if (intent === 'fin' || intent === 'act') {
+  let reply = '', invId = '';
+  if (invFile) {
+    const r = await invOfWa(db, id, x, o, now);
+    invId = r.inv || '';
+    reply = r.err ? W.MGR_FIXED.invErr : W.MGR_FIXED.inv;
+  } else if (intent === 'fin' || intent === 'act') {
     reply = W.MGR_FIXED[intent]; // אין פנייה למודל ואין שום כלי (5.5)
   } else {
     const turns = [{ role: 'u', text: '<<הודעת המנהל בווצאפ – מידע>>\n' + text.slice(0, 2000) + '\n<<סוף>>' }];
@@ -362,11 +384,11 @@ async function doMgr(db, id, x, o) {
   b.set(db.doc(`sec_chat/${uid}/m/wa_${id}_a`), { t: now + 1, role: 'a', text: reply, ch: 'wa' });
   for (const l of logs) b.set(db.collection('sec_log').doc(), l);
   b.set(db.collection('sec_log').doc(), wlog(uid, 'sec', 'waMgr', { tgt: id, note: intent + (tools.length ? ':' + tools.join('+') : '') }));
-  b.update(ref, Object.assign({ st: 'done', intent, tools }, tr ? { tr } : {}));
+  b.update(ref, Object.assign({ st: 'done', intent, tools }, tr ? { tr } : {}, invId ? { inv: invId } : {}));
   await b.commit();
   if (o.afterCommit) await o.afterCommit(); // בדיקות בלבד: כשל אחרי השמירה (o מגיע רק מקוד פנימי)
   const s = await sendAuto(db, ctx, x.from, reply, 'mgr', o);
-  return { intent, tools, created: created.map((e) => e.id), reply, sent: !!s.sent, stopped: !!s.stopped };
+  return { intent, tools, created: created.map((e) => e.id), reply, sent: !!s.sent, stopped: !!s.stopped, inv: invId };
 }
 // התשובה למנהל בווצאפ – נבנית רק בקוד: אישור יצירה, רשימת היומן שנקראה, או שגיאה קבועה. בלי טקסט של המודל (112, ליקוי 1)
 function mgrReply(created, reads, errs) {
@@ -465,16 +487,9 @@ async function doSec(db, id, x, o) {
   if (x.type === 'other') {
     const up = { st: 'done', cls: 'inv', flags: ['file'], lang };
     if (x.media && x.media.id) {
-      const INV = require('./secretary-inv')._core;
-      const base = { ch: 'wa', from: x.from, name: x.name || '', inId: id, fn: x.media.fn || '', now };
-      try {
-        const md = await (o.media || W.media)(o.token, x.media.id, require('./lib/sec-inv').MAX_FILE);
-        up.inv = (await INV.ingest(db, Object.assign(base, { buf: md.buf }))).id;
-      } catch (e) {
-        // קובץ גדול מהמותר – כרטיס "התקבל קובץ שלא נקלט" בלי הורדה (10.3); תקלה אחרת – מסומן, ההודעה עצמה נשמרה
-        if (e && e.details && e.details.reason === 'wa-media-big') up.inv = (await INV.ingest(db, Object.assign(base, { why: 'big' }))).id;
-        else { up.flags = ['file', 'invErr']; logger.warn('secretary-wa: invoice file failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
-      }
+      const r = await invOfWa(db, id, x, o, now);
+      if (r.inv) up.inv = r.inv;
+      if (r.err) up.flags = ['file', 'invErr'];
     }
     await ref.update(up);
     return { file: true, inv: up.inv || '' };

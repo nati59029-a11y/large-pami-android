@@ -39,7 +39,8 @@ const DEV_RE = /^[A-Za-z0-9_-]{6,64}$/;
 const SUB_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const BR_RE = /^[a-z0-9_]{2,20}$/;
 const SRC_MAX = 10, SUPS_MAX = 3000, LIST_MAX = 300;
-const HOLDS = ['dup', 'dn', 'aw', 'local', 'undo'];
+const HOLDS = ['dup', 'dn', 'aw', 'local', 'undo', 'rel']; // rel – תפיסה ששוחררה (24 שעות): אולי כבר נכנסה במכשיר אחר, חוזרת רק לאישור ידני
+const RELEASED = (x) => ({ hold: 'rel', el: false, why: [...new Set(((x && x.why) || []).concat(['hold']))] });
 const ilog = (by, who, act, extra) => Object.assign(logData(by, who, act, extra), { ch: 'inv' });
 const WA = () => require('./secretary-wa')._core; // עצלן – secretary-wa.js טוען את הקובץ הזה בתוך הטיפול
 const show = (k) => String(k || '').replace(/^wa:/, '+').replace(/^m:/, '');
@@ -55,6 +56,8 @@ async function ingest(db, o) {
   const now = o.now || Date.now();
   const src = { ch: o.ch === 'mail' ? 'mail' : 'wa', from: String(o.from || '').slice(0, 200), name: String(o.name || '').slice(0, 80), in: String(o.inId || '').slice(0, 100), t: now };
   if (o.sus) src.sus = true;
+  // תיקון 1 (ליקוי 2): מייל שלא עבר אימות DKIM/DMARC של דומיין השולח (secretary-google: authOf)
+  if (src.ch === 'mail' && o.auth === false) src.ua = true;
   const fn = String(o.fn || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120);
   const chk = o.why ? { ok: false, why: o.why } : SI.inspect(o.buf);
   if (!chk.ok) {
@@ -156,9 +159,11 @@ async function workIn(id, o) {
   const cfg = SI.invCfgOf(cs);
   const s0 = (x.src || [])[0] || {};
   const skey = SI.senderKey(s0.ch, s0.from);
-  const up = { st: 'new', k: m.k, t0: m.t0, f: m.f, unsure: m.unsure, wk: FieldValue.delete() };
+  // מייל לא מאומת: השולח לא משמש לזיהוי הספק (אין 'snd'), והחשבונית לא זכאית ל"נכנס ישר" (why 'auth')
+  const ua = s0.ch === 'mail' && s0.ua === true;
+  const up = { st: 'new', k: m.k, t0: m.t0, f: m.f, unsure: m.unsure, wk: FieldValue.delete(), ua };
   if (['inv', 'rcpt', 'dn', 'cr'].includes(m.k)) {
-    const sm = SI.matchSup(m.f, cfg, skey);
+    const sm = SI.matchSup(m.f, cfg, ua ? '' : skey);
     const b = SI.brOf(sm.sub, cfg);
     Object.assign(up, sm, b, { ns: sm.sub && cfg.links[skey] !== sm.sub ? skey : '', full: SI.fullOf(m) });
     const keys = SI.dupKeys(m, sm.sub);
@@ -176,6 +181,21 @@ async function workIn(id, o) {
   const why = SI.eligOf(Object.assign({}, x, up), cfg, stop);
   Object.assign(up, { el: why.length === 0, why });
   await ref.update(up);
+  // תיקון 1 (ליקוי 7): שני קבצים של אותה חשבונית שזוהו באותו זמן – בדיקה שנייה אחרי הכתיבה; מי שמוצאת את השנייה – ממתינה
+  if (!up.dup && (up.dk || up.dk2)) {
+    for (const [fld, v] of [['dk', up.dk], ['dk2', up.dk2]]) {
+      if (!v || up.dup) continue;
+      const q = await db.collection('sec_inv').where(fld, '==', v).limit(5).get();
+      const d = q.docs.find((z) => z.id !== id && z.get('st') !== 'rej');
+      if (d) up.dup = d.id;
+    }
+    if (up.dup) { up.el = false; up.why = [...new Set(up.why.concat(['dup']))]; await ref.update({ dup: up.dup, el: false, why: up.why }); }
+  }
+  if (ua && cfg.links[skey]) {
+    // כתובת של ספק מקושר, אבל המייל לא אומת – אולי זיוף. ממתינה + התראה
+    await db.collection('sec_log').doc().set(ilog('', 'sec', 'invUnauth', { tgt: id }));
+    await notify(db, 'ua|' + id, 'חשבונית ממייל לא מאומת', 'הגיעה חשבונית במייל מהכתובת ' + show(skey) + ', אבל Gmail לא אישר שהמייל באמת נשלח ממנה. היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".', now);
+  }
   if (up.dup) {
     await db.collection('sec_log').doc().set(ilog('', 'sec', 'invDup', { tgt: id, note: up.dup }));
     await notify(db, 'dup|' + id, 'חשד לחשבונית כפולה', 'הגיעה חשבונית שנראית כמו חשבונית שכבר התקבלה. היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".', now);
@@ -199,10 +219,10 @@ function outOf(id, x, uid, now) {
     id, st: x.st, k: x.k, t: x.t || 0, fn: x.fn || '', mime: x.mime || '', size: x.size || 0, np: x.np || 0, pages: x.pages || 0,
     src: (x.src || []).slice(0, SRC_MAX).map((s) => ({ ch: s.ch, from: s.from, name: s.name || '', t: s.t || 0, sus: !!s.sus })),
     f: x.f || {}, unsure: x.unsure || [], sub: x.sub || '', subN: x.subN || '', match: x.match || '', br: x.br || '', brOk: x.brOk === true,
-    ns: x.ns || '', nsShow: show(x.ns), dup: x.dup || '', el: x.el === true, why: x.why || [], hold: x.hold || '', err: x.err || '', t0: x.t0 || '',
+    ns: x.ns || '', nsShow: show(x.ns), ua: x.ua === true, dup: x.dup || '', el: x.el === true, why: x.why || [], hold: x.hold || '', err: x.err || '', t0: x.t0 || '',
   };
   if (x.st === 'cl') Object.assign(o, { mine: x.by === uid, dev: x.by === uid ? x.dev || '' : '', clAt: x.clAt || 0, stale: now - (x.clAt || 0) > SI.CLAIM_MS });
-  if (x.st === 'ok') Object.assign(o, { okAt: x.okAt || 0, auto: x.auto === true, mineOk: x.okBy === uid, purged: x.purged === true });
+  if (x.st === 'ok') Object.assign(o, { okAt: x.okAt || 0, auto: x.auto === true, mineOk: x.okBy === uid, okDev: x.okBy === uid ? x.dev || '' : '', purged: x.purged === true });
   return o;
 }
 async function secInv(request) {
@@ -222,7 +242,7 @@ async function secInv(request) {
     for (const d of a.docs.concat(r.docs)) { if (seen.has(d.id)) continue; seen.add(d.id); const x = d.data(); if (brAllowed(g, x)) items.push(outOf(d.id, x, who.uid, now)); }
     items.sort((p, q) => q.t - p.t);
     const cfg = SI.invCfgOf(cs);
-    return { ok: true, items, cfg: { auto: cfg.auto, cap: cfg.cap, off: Object.keys(cfg.off).filter((k) => cfg.off[k] === true), supH: cfg.supH, linked: Object.keys(cfg.links).length }, stop, br: g.br };
+    return { ok: true, items, cfg: { auto: cfg.auto, cap: cfg.cap, off: Object.keys(cfg.off).filter((k) => cfg.off[k] === true), supH: cfg.supH, supAt: cfg.supAt, supMe: cfg.supBy === who.uid, supDev: cfg.supBy === who.uid ? cfg.supDev : '', linked: Object.keys(cfg.links).length }, stop, br: g.br };
   }
   if (op === 'file') {
     const id = String(input.id || '');
@@ -262,10 +282,33 @@ async function secInv(request) {
   const nb = Number.isInteger(input.nb) && input.nb >= 0 && input.nb < 100 ? input.nb : 0;
   const br1 = typeof input.br1 === 'string' && BR_RE.test(input.br1) ? input.br1 : '';
   const supH = SI.sha(JSON.stringify([sups, nb, br1])).slice(0, 16);
+  const supDev = typeof input.dev === 'string' && DEV_RE.test(input.dev) ? input.dev : '';
   const cur = SI.invCfgOf(await ref.get());
   if (cur.supH === supH) return { ok: true, same: true, supH, n: sups.length };
-  await ref.set({ sups, nb, br1, supH, supAt: now, supBy: who.uid }, { merge: true });
-  return { ok: true, supH, n: sups.length };
+  await ref.set({ sups, nb, br1, supH, supAt: now, supBy: who.uid, supDev }, { merge: true });
+  // תיקון 1 (ליקוי 8): כל מכשיר מחזיק עותק משלו של הספקים. שיוך סניף של ספק השתנה (או מספר הסניפים) – חשבוניות שממתינות מאבדות את הזכאות
+  // ל"נכנס ישר" ואת הסניף שנקבע, והסניף מחושב מחדש לפי הרשימה החדשה. נרשם ביומן מי פרסם
+  const brKey = (L, id) => { const x = L.find((z) => z && z.id === id); return x ? JSON.stringify((x.br || []).slice().sort()) : '-'; };
+  const all = cur.nb !== nb || cur.br1 !== br1;
+  const ch = new Set();
+  if (!all) for (const id of new Set(cur.sups.map((x) => x && x.id).concat(sups.map((x) => x.id)))) if (id && brKey(cur.sups, id) !== brKey(sups, id)) ch.add(id);
+  let rev = 0;
+  if (cur.supH && (all || ch.size)) {
+    const q = await db.collection('sec_inv').where('st', '==', 'new').limit(LIST_MAX).get();
+    const ncfg = { sups, nb, br1 };
+    const b = db.batch();
+    for (const d of q.docs) {
+      const x = d.data();
+      if (!x.sub || !(all || ch.has(x.sub))) continue;
+      const nbr = SI.brOf(x.sub, ncfg);
+      const why = [...new Set((x.why || []).concat(['hold']).concat(nbr.brOk ? [] : ['br']))];
+      b.update(d.ref, Object.assign({ el: false, hold: x.hold || 'local', why }, nbr));
+      rev++;
+    }
+    if (rev) await b.commit();
+  }
+  await db.collection('sec_log').doc().set(ilog(who.uid, 'mgr', 'invSups', { note: 'n=' + sups.length + (supDev ? ',dev=' + supDev : '') + (rev ? ',rev=' + rev : '') }));
+  return { ok: true, supH, n: sups.length, rev };
 }
 
 // secDecide – כל שינוי מצב בתור (4.7, 9.4). claim במצב אוטומטי בודק את כל התנאים שוב (4.3) ומסרב כשאחד לא מתקיים.
@@ -285,6 +328,8 @@ async function secDecide(request) {
   const ref = db.doc('sec_inv/' + id);
   const gone = () => new HttpsError('not-found', 'החשבונית לא נמצאה', { reason: 'not-found' });
   if (op === 'sender') {
+    // תיקון 1 (ליקוי 6): קישור שולח חל על כל העסק – כמו שאר ההגדרות, רק למנהל בלי הגבלת סניפים
+    if (g.br) throw deny('br-limited', 'אישור שולח – למנהל בלי הגבלת סניפים');
     const s = await ref.get();
     if (!s.exists || !brAllowed(g, s.data())) throw gone();
     const x = s.data();
@@ -299,6 +344,7 @@ async function secDecide(request) {
   }
   let after = null; // פעולות אחרי הטרנזקציה (התראה, יומן)
   const r = await db.runTransaction(async (tx) => {
+    after = null; // טרנזקציה שרצה שוב – מתחילים נקי
     const [s, cs, ws] = await Promise.all([tx.get(ref), op === 'claim' && mode === 'auto' ? tx.get(db.doc('sec_cfg/inv')) : null, op === 'claim' && mode === 'auto' ? tx.get(db.doc('sec_cfg/wa')) : null]);
     if (!s.exists) throw gone();
     const x = s.data();
@@ -309,6 +355,18 @@ async function secDecide(request) {
       if (x.st === 'ok') throw pre('already', 'כבר הוכנסה במכשיר אחר');
       if (x.st === 'rej') throw pre('rejected', 'החשבונית נדחתה');
       if (x.st === 'cl' && !(mineCl && x.dev === dev) && now - (x.clAt || 0) <= SI.CLAIM_MS) throw pre('already', 'כבר הוכנסה במכשיר אחר');
+      // תיקון 1 (ליקוי 1): תפיסה ישנה (מעל 24 שעות) של מכשיר אחר – ייתכן שהחשבונית כבר נכנסה שם ורק הדיווח לא יצא.
+      // מכאן רק אישור ידני עם עיכוב (hold 'rel', el:false) והתראה; השתלטות במצב אוטומטי נדחית
+      if (x.st === 'cl' && !(mineCl && x.dev === dev)) {
+        const rel = RELEASED(x);
+        after = { act: 'invRelease', x };
+        if (mode === 'auto') {
+          tx.update(ref, Object.assign({ st: 'new', by: FieldValue.delete(), dev: FieldValue.delete(), mode: FieldValue.delete(), clAt: FieldValue.delete() }, rel));
+          return { deny: ['hold'], el: false };
+        }
+        tx.update(ref, Object.assign({ st: 'cl', by: uid, dev, mode, clAt: now }, rel));
+        return { ok: true, x: Object.assign({}, x, rel) };
+      }
       if (mode === 'auto') {
         // 4.3: הבדיקה בשרת, ברגע התפיסה – סימון הזכאות מהעיבוד + כל התנאים שוב עם ההגדרות של עכשיו
         const why = SI.eligOf(x, SI.invCfgOf(cs), !!(ws.exists && ws.get('stop') && ws.get('stop').on === true));
@@ -349,10 +407,17 @@ async function secDecide(request) {
     }
     // undo: ביטול של "נכנס ישר" (4.3: "אפשרות ביטול") – חוזר ל"ממתין לאישור", לא יוכנס שוב אוטומטית
     if (x.st !== 'ok' || x.okBy !== uid) throw pre('not-mine', 'אפשר לבטל רק חשבונית שהוכנסה אצלך');
+    // תיקון 1 (ליקוי 4): ההוצאה נשמרת רק במכשיר שהכניס – ביטול רק משם (המכשיר שולח את המזהה שלו; הנחה: קריאה בלי מזהה – כמו קודם)
+    if (input.dev !== undefined && (!dev || (x.dev && x.dev !== dev))) throw pre('other-dev', 'אפשר לבטל רק במכשיר שבו החשבונית נכנסה');
     tx.update(ref, { st: 'new', hold: 'undo', el: false, why: [...new Set((x.why || []).concat(['hold']))], okAt: FieldValue.delete(), okBy: FieldValue.delete(), auto: FieldValue.delete(), purgeAt: FieldValue.delete(), by: FieldValue.delete(), dev: FieldValue.delete(), mode: FieldValue.delete(), clAt: FieldValue.delete() });
     after = { act: 'invUndo', x };
     return { ok: true };
   });
+  if (after && after.act === 'invRelease') {
+    await db.collection('sec_log').doc().set(ilog(uid, 'mgr', 'invRelease', { tgt: id, note: 'stale' }));
+    await notify(db, 'rel|' + id + '|' + now, 'חשבונית חזרה לאישור ידני', 'חשבונית שנלקחה במכשיר אחר ולא הושלמה 24 שעות חזרה ל"ממתינה לאישור". ייתכן שהיא כבר נרשמה במכשיר ההוא – כדאי לבדוק לפני שמאשרים.', now);
+    after = null;
+  }
   if (r.deny) {
     if (r.el) await ref.update({ el: false, why: r.deny }).catch(() => {});
     await db.collection('sec_log').doc().set(ilog(uid, 'mgr', 'invAutoNo', { tgt: id, note: r.deny.join(',') }));
@@ -395,7 +460,8 @@ async function retention(db, now) {
   const cl = await db.collection('sec_inv').where('st', '==', 'cl').limit(200).get();
   for (const d of cl.docs) {
     if (now - (d.get('clAt') || 0) <= SI.CLAIM_MS) continue;
-    await d.ref.update({ st: 'new', by: FieldValue.delete(), dev: FieldValue.delete(), mode: FieldValue.delete(), clAt: FieldValue.delete() });
+    // תיקון 1 (ליקוי 1): ייתכן שנכנסה במכשיר שתפס – חוזרת רק לאישור ידני (לא זכאית שוב ל"נכנס ישר")
+    await d.ref.update(Object.assign({ st: 'new', by: FieldValue.delete(), dev: FieldValue.delete(), mode: FieldValue.delete(), clAt: FieldValue.delete() }, RELEASED(d.data())));
     out.released++;
     await db.collection('sec_log').doc().set(ilog('', 'auto', 'invRelease', { tgt: d.id }));
     await notify(db, 'rel|' + d.id + '|' + now, 'חשבונית חזרה לתור', 'חשבונית שנלקחה להכנסה ולא הושלמה 24 שעות חזרה ל"ממתינה לאישור". כדאי לבדוק במסך "חשבוניות שהתקבלו" שהיא לא נכנסה כבר.', now);

@@ -416,7 +416,15 @@ async function saveMail(db, c, ctx, gid, now, o) {
   if (sus) await db.collection('sec_log').doc().set(glog('', 'sec', 'sus', { tgt: ref.id, note: fromMgr ? 'mgrMail' : '' }));
   // שלב 7: קבצים מצורפים → תור החשבוניות. לא במייל ישן מסריקת היסטוריה (רקע, בלי עלות זיהוי – הנחה). תקלה כאן לא פוגעת בקליטת המייל
   if (!o.hist && (p.att.length || (big && /^multipart\/(mixed|related)/.test(p.ctype)))) {
-    try { const r = await invFiles(db, c, gid, p, big, sus, now); if (r.ids.length || r.names.length) await ref.update(Object.assign({ inv: r.ids }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {})); } catch (e) { logger.warn('secretary-google: invoice files failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
+    try { const r = await invFiles(db, c, gid, p, big, sus, now); if (r.ids.length || r.names.length) await ref.update(Object.assign({ inv: r.ids }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {})); } catch (e) {
+      logger.warn('secretary-google: invoice files failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
+      // תיקון 1 (ליקוי 5): לא מאבדים בשקט – כרטיס "הקובץ לא נקלט – תקלה, לבדוק במייל" עם השולח, וסימון במייל עצמו
+      try {
+        const INV = require('./secretary-inv')._core;
+        const r = await INV.ingest(db, { ch: 'mail', from: p.from, name: p.name, inId: gid, idx: 99, fn: (p.files || [])[0] || '', sus, auth: p.auth === true, now, why: 'dl' });
+        await ref.update({ inv: [r.id], flags: [...new Set(flags.concat(['file', 'invErr']))] });
+      } catch (e2) { logger.warn('secretary-google: invoice error card failed', { reason: (e2 && e2.code) || 'error' }); }
+    }
   }
   return sus ? 'sus' : 'saved';
 }
@@ -430,15 +438,16 @@ async function invFiles(db, c, gid, p, big, sus, now) {
   if (!atts.length && big) atts = G.attOf(await c.struct(gid));
   const ids = [], names = atts.map((a) => a.fn).slice(0, 20);
   for (const [i, a] of atts.slice(0, INV_ATT_MAX).entries()) {
-    const base = { ch: 'mail', from: p.from, name: p.name, inId: gid, idx: i, fn: a.fn, sus, now };
+    const base = { ch: 'mail', from: p.from, name: p.name, inId: gid, idx: i, fn: a.fn, sus, auth: p.auth === true, now };
     const why = SI.badByName(a.fn, a.mime) || (a.size > SI.MAX_FILE ? 'big' : '');
     if (!why && a.mime.startsWith('image/') && a.size && a.size < INV_IMG_MIN) continue;
     let r;
     if (why) r = await INV.ingest(db, Object.assign(base, { why, size: a.size }));
     else {
-      const j = await c.att(gid, a.id);
-      const buf = Buffer.from(String(j.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-      r = await INV.ingest(db, Object.assign(base, { buf }));
+      // תיקון 1 (ליקוי 5): הורדה שנכשלה – כרטיס "הקובץ לא נקלט – תקלה" (ולא איבוד שקט; ניסיון חוזר לא קורה כי המייל כבר נשמר)
+      let buf = null;
+      try { const j = await c.att(gid, a.id); buf = Buffer.from(String(j.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'); } catch (e) { logger.warn('secretary-google: attachment download failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
+      r = await INV.ingest(db, Object.assign(base, buf ? { buf } : { why: 'dl', size: a.size }));
     }
     if (r && r.id) ids.push(r.id);
   }

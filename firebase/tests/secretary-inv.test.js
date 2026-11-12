@@ -516,3 +516,262 @@ describe('קצה לקצה: ווצאפ → תור → זיהוי (אמולטור 
     assert.equal(GM.state.requests.filter((r) => r.kind === 'classify').length, 1, 'בלי זיהוי נוסף');
   });
 });
+
+// ---------------------------------------------------------------------------------
+// שלב 7 – תיקון 1 (אחרי בדיקה עצמאית, סבב 1): בדיקה לכל ליקוי
+// ---------------------------------------------------------------------------------
+const b64u = (x) => x.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+// מייל קטן מדומה עם קובץ מצורף; ar = כותרת Authentication-Results (או בלי)
+function gmail(gid, buf, from, ar, att) {
+  const headers = [{ name: 'From', value: 'Billing <' + from + '>' }, { name: 'Subject', value: 'חשבונית' }, { name: 'Content-Type', value: 'multipart/mixed; boundary=x' }];
+  if (ar) headers.unshift({ name: 'Authentication-Results', value: ar });
+  const msg = { id: gid, threadId: 't' + gid, labelIds: ['INBOX'], internalDate: String(Date.now()), sizeEstimate: 5000, snippet: 'מצורפת חשבונית',
+    payload: { mimeType: 'multipart/mixed', headers, parts: [{ mimeType: 'text/plain', body: { data: b64u(Buffer.from('מצורפת')) } }, { mimeType: 'application/pdf', filename: 'invoice.pdf', body: { attachmentId: 'att' + gid, size: buf.length } }] } };
+  return { meta: async () => Object.assign({}, msg, { payload: { mimeType: msg.payload.mimeType, headers } }), full: async () => msg, struct: async () => msg, att: att || (async () => ({ size: buf.length, data: b64u(buf) })) };
+}
+const saveG = (c, gid) => inBiz(A, (db) => G.saveMail(db, c, { boxId: 'gmbox1', addr: 'office@a.example', mgrMails: new Set() }, gid, Date.now(), {}));
+const ARP = (dom) => 'mx.google.com; dkim=pass header.i=@' + dom + ' header.s=s1 header.b=abc; spf=pass (google.com: domain of x@' + dom + ' designates 1.2.3.4 as permitted sender) smtp.mailfrom=x@' + dom + '; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=' + dom;
+// PDF עם אוסף אובייקטים דחוס (/ObjStm, FlateDecode)
+function pdfObjStm(inner, o) {
+  const opt = o || {};
+  const data = opt.raw ? Buffer.from(inner, 'latin1') : require('node:zlib').deflateSync(Buffer.from(inner, 'latin1'));
+  const head = Buffer.from('%PDF-1.5\n1 0 obj<</Type /Catalog /Pages 2 0 R>>endobj\n' + (opt.pages || '') + '5 0 obj<</Type /ObjStm /N 1 /First 4' + (opt.raw ? '' : ' /Filter ' + (opt.filter || '/FlateDecode')) + ' /Length ' + data.length + '>>stream\n', 'latin1');
+  return Buffer.concat([head, data, Buffer.from('\nendstream\nendobj\n%uniq ' + (++SEQ) + '\ntrailer<<>>\n%%EOF', 'latin1')]);
+}
+
+describe('תיקון 1 – ליקוי 1: תפיסה ששוחררה לא חוזרת ל"נכנס ישר"', () => {
+  beforeEach(() => seed());
+  it('מכשיר א׳ תפס אוטומטית ולא דיווח 24 שעות: מכשיר ב׳ במצב אוטומטי – נדחה, והחשבונית חוזרת לאישור ידני (עיכוב, לא זכאית) עם התראה; ידני – מותר עם עיכוב; הדיווח המאוחר של א׳ – not-mine', async () => {
+    const x = await arrive(pdf(1), RAW.inv());
+    assert.equal(x.el, true);
+    assert.ok((await call('secDecide', M1, { op: 'claim', id: x.id, mode: 'auto', dev: 'devPhone01' })).ok);
+    await put(`b/${A}/sec_inv/${x.id}`, { clAt: Date.now() - 25 * 3600e3 }, true);
+    const b = await call('secDecide', M2, { op: 'claim', id: x.id, mode: 'auto', dev: 'devDesk002' });
+    assert.equal(b.reason, 'not-eligible', JSON.stringify(b));
+    const y = await get(`b/${A}/sec_inv/${x.id}`);
+    assert.equal(y.st, 'new'); assert.equal(y.el, false); assert.equal(y.hold, 'rel'); assert.ok(y.why.includes('hold'));
+    assert.ok((await coll(`b/${A}/sec_note/${M2}/n`)).some((n) => /אישור ידני/.test(n.title)), 'התראה');
+    assert.equal((await call('secDecide', M2, { op: 'claim', id: x.id, mode: 'auto', dev: 'devDesk002' })).reason, 'not-eligible', 'גם אחר כך – לא אוטומטי');
+    assert.equal((await call('secDecide', M1, { op: 'done', id: x.id, dev: 'devPhone01' })).reason, 'not-mine');
+    // השתלטות ידנית על תפיסה ישנה – מותרת, אבל מסומנת
+    const z = await arrive(pdf(1), RAW.inv({ number: 'Z1', total_with_vat: 21 }));
+    assert.ok((await call('secDecide', M1, { op: 'claim', id: z.id, mode: 'auto', dev: 'devPhone01' })).ok);
+    await put(`b/${A}/sec_inv/${z.id}`, { clAt: Date.now() - 25 * 3600e3 }, true);
+    const m = await call('secDecide', M2, { op: 'claim', id: z.id, mode: 'man', dev: 'devDesk002' });
+    assert.ok(m.ok); assert.equal(m.r.item.hold, 'rel');
+    assert.equal((await get(`b/${A}/sec_inv/${z.id}`)).el, false);
+  });
+  it('שחרור בריצה היומית – חוזרת עם עיכוב ובלי זכאות; תפיסה אוטומטית אחר כך נדחית', async () => {
+    const x = await arrive(pdf(1), RAW.inv());
+    assert.ok((await call('secDecide', M1, { op: 'claim', id: x.id, mode: 'auto', dev: 'devPhone01' })).ok);
+    await put(`b/${A}/sec_inv/${x.id}`, { clAt: Date.now() - 25 * 3600e3 }, true);
+    assert.equal((await inBiz(A, (db) => INV.retention(db, Date.now()))).released, 1);
+    const y = await get(`b/${A}/sec_inv/${x.id}`);
+    assert.equal(y.st, 'new'); assert.equal(y.el, false); assert.equal(y.hold, 'rel');
+    assert.equal((await call('secDecide', M2, { op: 'claim', id: x.id, mode: 'auto', dev: 'devDesk002' })).reason, 'not-eligible');
+  });
+});
+
+describe('תיקון 1 – ליקוי 2: מייל עם כתובת שולח מזויפת', () => {
+  beforeEach(() => seed({ inv: { links: { ['wa:' + SUP_WA]: 's1', ['m:' + SUP_MAIL]: 's1' } } }));
+  it('authOf: רק הכותרת העליונה של mx.google.com, dmarc/dkim=pass של דומיין השולח; SPF לבד, כשל, דומיין אחר או כותרת מזויפת – לא מאומת', () => {
+    const G2 = require('../functions/lib/sec-google.js');
+    assert.equal(G2.authOf(ARP('supplier.example'), SUP_MAIL), true);
+    assert.equal(G2.authOf('mx.google.com; dkim=pass header.i=@mail.supplier.example header.s=a; spf=neutral', SUP_MAIL), true, 'תת־דומיין של השולח');
+    assert.equal(G2.authOf('mx.google.com; dmarc=pass (p=NONE) header.from=supplier.example', SUP_MAIL), true);
+    assert.equal(G2.authOf('mx.google.com; spf=pass smtp.mailfrom=billing@supplier.example; dkim=none; dmarc=fail header.from=supplier.example', SUP_MAIL), false, 'SPF לבד');
+    assert.equal(G2.authOf('mx.google.com; dkim=pass header.i=@evil.example; dmarc=fail header.from=supplier.example', SUP_MAIL), false, 'חתימה של דומיין אחר');
+    assert.equal(G2.authOf('evil.example; dmarc=pass header.from=supplier.example', SUP_MAIL), false, 'לא של Google');
+    assert.equal(G2.authOf('', SUP_MAIL), false);
+    assert.equal(G2.authOf(ARP('supplier.example'), 'x@other.example'), false);
+    // כותרת מזויפת מתחת לכותרת של Google – לא נקראת (headersOf לוקח את הראשונה)
+    const p = G2.parseMsg({ id: 'g1', payload: { headers: [{ name: 'Authentication-Results', value: 'mx.google.com; dkim=none; spf=softfail; dmarc=none header.from=supplier.example' }, { name: 'Authentication-Results', value: ARP('supplier.example') }, { name: 'From', value: SUP_MAIL }] } });
+    assert.equal(p.auth, false);
+  });
+  it('From מזויף של שולח מקושר, בלי ח.פ: לא מזוהה כספק לפי השולח, לא זכאי (auth), מסומן ומתריע; אותו מייל מאומת – זכאי', async () => {
+    const st = await saveG(gmail('gfake1', pdf(1), SUP_MAIL, 'mx.google.com; spf=softfail smtp.mailfrom=x@evil.example; dkim=none; dmarc=none header.from=supplier.example'), 'gfake1');
+    assert.equal(st, 'saved');
+    const L = await coll(`b/${A}/sec_inv`);
+    assert.equal(L.length, 1); assert.equal(L[0].src[0].ua, true);
+    await inBiz(A, () => INV.workIn(L[0].id, { classify: async () => RAW.inv({ supplier_id: '', supplier: 'ספק כלשהו', number: 'F1', total_with_vat: 1900 }) }));
+    const x = Object.assign({ id: L[0].id }, await get(`b/${A}/sec_inv/${L[0].id}`));
+    assert.notEqual(x.match, 'snd'); assert.equal(x.el, false); assert.ok(x.why.includes('auth')); assert.equal(x.ua, true);
+    assert.ok((await coll(`b/${A}/sec_note/${M1}/n`)).some((n) => /לא מאומת/.test(n.title)), 'התראה');
+    const lst = await call('secInv', M1, { op: 'list' });
+    assert.equal(lst.r.items.find((i) => i.id === x.id).ua, true, 'הסימון מגיע למסך');
+    assert.equal((await call('secDecide', M1, { op: 'claim', id: x.id, mode: 'auto', dev: 'devA0001' })).reason, 'not-eligible');
+    // מאומת
+    const st2 = await saveG(gmail('gok1', pdf(1), SUP_MAIL, ARP('supplier.example')), 'gok1');
+    assert.equal(st2, 'saved', 'מייל שני');
+    const y0 = (await coll(`b/${A}/sec_inv`)).find((d) => d.id !== x.id);
+    assert.ok(!y0.src[0].ua);
+    await inBiz(A, () => INV.workIn(y0.id, { classify: async () => RAW.inv({ supplier_id: '', supplier: 'ספק דמה בע"מ', number: 'OK1', total_with_vat: 150 }) }));
+    const y = await get(`b/${A}/sec_inv/${y0.id}`);
+    assert.equal(y.match, 'snd'); assert.equal(y.el, true, JSON.stringify(y.why));
+  });
+  it('מייל לא מאומת עם ח.פ של ספק מוכר – עדיין לא "נכנס ישר"', async () => {
+    await saveG(gmail('gfake2', pdf(1), SUP_MAIL, null), 'gfake2');
+    const L = await coll(`b/${A}/sec_inv`);
+    await inBiz(A, () => INV.workIn(L[0].id, { classify: async () => RAW.inv() }));
+    const x = await get(`b/${A}/sec_inv/${L[0].id}`);
+    assert.equal(x.match, 'hp'); assert.equal(x.el, false); assert.deepEqual(x.why, ['auth']);
+  });
+});
+
+describe('תיקון 1 – ליקוי 3: בדיקת PDF שלא נעקפת', () => {
+  it('שם פקודה בקידוד #xx – נחסם', () => {
+    assert.equal(SI.inspect(pdf(1, '<</S /J#61vaScript /J#53 (app.alert(1))>>')).why, 'active');
+    assert.equal(SI.inspect(pdf(1, '<</S /#4caunch /F (cmd.exe)>>')).why, 'active');
+    assert.equal(SI.inspect(pdf(1, '<</Type /Embedded#46ile>>')).why, 'active');
+  });
+  it('פקודה בתוך אוסף אובייקטים דחוס (/ObjStm) – נחסם; גם בלי /Type אבל עם /N ו-/First', () => {
+    assert.equal(SI.inspect(pdfObjStm('3 0 <</S /JavaScript /JS (app.alert(1))>>')).why, 'active');
+    assert.equal(SI.inspect(pdfObjStm('3 0 <</S /J#61vaScript>>')).why, 'active');
+    const noType = Buffer.from(pdfObjStm('3 0 <</S /Launch>>').toString('latin1').replace('/Type /ObjStm ', ''), 'latin1');
+    assert.equal(SI.inspect(noType).why, 'active');
+    assert.equal(SI.inspect(pdfObjStm('3 0 <</Type /Page /Parent 2 0 R>>', { pages: '2 0 obj<</Type /Pages /Count 1>>endobj\n' })).ok, true, 'אוסף תקין – עובר');
+  });
+  it('מספר עמודים: עמודים בתוך אוסף דחוס, ו-/Count של עץ העמודים – לוקחים את הגבוה; מעל 4 – "קובץ ארוך"', () => {
+    let inner = ''; for (let i = 0; i < 30; i++) inner += '<</Type /Page /Parent 2 0 R>> ';
+    const a = SI.inspect(pdfObjStm(inner));
+    assert.equal(a.long, true); assert.equal(a.pages, 30);
+    const b = SI.inspect(pdfObjStm('<</Type /Pages /Kids [3 0 R] /Count 30>> <</Type /Page>>'));
+    assert.equal(b.long, true); assert.equal(b.pages, 30);
+    const c = SI.inspect(Buffer.from('%PDF-1.4\n2 0 obj<</Type /Pages /Count 12 /Kids [3 0 R]>>endobj\n3 0 obj<</Type /Page>>endobj\n%%EOF', 'latin1'));
+    assert.equal(c.pages, 12); assert.equal(c.long, true);
+    assert.equal(SI.inspect(Buffer.from('%PDF-1.4\n1 0 obj<</Type /Outlines /Count 9>>endobj\n2 0 obj<</Type /Pages /Count 1>>endobj\n3 0 obj<</Type /Page>>endobj\n%%EOF', 'latin1')).pages, 1, '/Count של תוכן העניינים לא נספר');
+  });
+  it('אוסף דחוס שאי אפשר לפרוס (מסנן אחר, נתונים פגומים) – חסום ("לא ניתן לבדוק")', () => {
+    assert.equal(SI.inspect(pdfObjStm('3 0 <<>>', { filter: '/LZWDecode' })).why, 'unv');
+    assert.equal(SI.inspect(pdfObjStm('3 0 <<>>', { filter: '[/ASCIIHexDecode /FlateDecode]' })).why, 'unv');
+    const bad = Buffer.from(pdfObjStm('3 0 <<>>').toString('latin1').replace(/stream\n[\s\S]{4}/, 'stream\nXXXX'), 'latin1');
+    assert.equal(SI.inspect(bad).why, 'unv');
+  });
+});
+
+describe('תיקון 1 – ליקוי 4: ביטול רק מהמכשיר שהכניס', () => {
+  beforeEach(() => seed());
+  it('אותו מנהל ממכשיר אחר – "אפשר לבטל רק במכשיר שבו החשבונית נכנסה", בלי שינוי; מהמכשיר שהכניס – בוטל; המזהה מגיע לרשימה', async () => {
+    const x = await arrive(pdf(1), RAW.inv());
+    await call('secDecide', M1, { op: 'claim', id: x.id, mode: 'auto', dev: 'devPhone01' });
+    await call('secDecide', M1, { op: 'done', id: x.id, dev: 'devPhone01' });
+    const l = await call('secInv', M1, { op: 'list' });
+    assert.equal(l.r.items.find((i) => i.id === x.id).okDev, 'devPhone01');
+    const u = await call('secDecide', M1, { op: 'undo', id: x.id, dev: 'devDesk002' });
+    assert.equal(u.reason, 'other-dev');
+    assert.equal((await get(`b/${A}/sec_inv/${x.id}`)).st, 'ok', 'לא השתנה');
+    assert.equal((await call('secDecide', M1, { op: 'undo', id: x.id, dev: 'bad id!' })).reason, 'other-dev', 'מזהה לא תקין');
+    assert.ok((await call('secDecide', M1, { op: 'undo', id: x.id, dev: 'devPhone01' })).ok);
+    assert.equal((await get(`b/${A}/sec_inv/${x.id}`)).st, 'new');
+  });
+});
+
+describe('תיקון 1 – ליקוי 5: קובץ שההורדה שלו נכשלה לא הולך לאיבוד', () => {
+  beforeEach(() => seed());
+  it('Gmail: הורדת הקובץ המצורף נכשלה – כרטיס "הקובץ לא נקלט – תקלה" עם השולח, מקושר למייל', async () => {
+    const c = gmail('gdl1', pdf(1), SUP_MAIL, ARP('supplier.example'), async () => { throw new Error('net'); });
+    assert.equal(await saveG(c, 'gdl1'), 'saved');
+    const L = await coll(`b/${A}/sec_inv`);
+    assert.equal(L.length, 1); assert.equal(L[0].k, 'bad'); assert.deepEqual(L[0].why, ['dl']); assert.equal(L[0].src[0].from, SUP_MAIL);
+    const m = (await coll(`b/${A}/sec_in`)).find((x) => x.ch === 'mail');
+    assert.deepEqual(m.inv, [L[0].id]);
+  });
+  it('Gmail: תקלה כללית בקבצים (למשל מבנה המייל) – כרטיס תקלה וסימון invErr במייל', async () => {
+    const buf = pdf(1);
+    const c = gmail('gdl2', buf, SUP_MAIL, null);
+    const msg = await c.full();
+    msg.sizeEstimate = 900000; // מייל גדול: רק המבנה, והמבנה נכשל
+    c.full = async () => msg; c.meta = async () => Object.assign({}, msg, { payload: { mimeType: 'multipart/mixed', headers: msg.payload.headers } });
+    c.struct = async () => { throw new Error('boom'); };
+    assert.equal(await saveG(c, 'gdl2'), 'saved');
+    const L = await coll(`b/${A}/sec_inv`);
+    assert.equal(L.length, 1); assert.equal(L[0].k, 'bad'); assert.deepEqual(L[0].why, ['dl']);
+    const m = (await coll(`b/${A}/sec_in`)).find((x) => x.ch === 'mail');
+    assert.ok(m.flags.includes('invErr'));
+  });
+  it('ווצאפ: הורדה מ-Meta נכשלה – כרטיס תקלה עם השולח, וסימון invErr בהודעה', async () => {
+    await put(`b/${A}/sec_in/mWdl`, { wamid: 'wamid.DL', ch: 'wa', from: SUP_WA, pnid: '1110001', name: 'ספק', t: Date.now(), rt: Date.now(), type: 'other', sub: 'document', media: { id: 'medDL', mime: 'application/pdf', fn: 'inv.pdf' }, own: 'sec', st: 'new', flags: [], tf: Date.now(), text: '' });
+    const wr = await inBiz(A, () => WA.workIn('mWdl', { token: 'x', media: async () => { throw new Error('meta down'); } }));
+    assert.ok(wr.inv, 'יש כרטיס');
+    const x = await get(`b/${A}/sec_inv/${wr.inv}`);
+    assert.equal(x.k, 'bad'); assert.deepEqual(x.why, ['dl']); assert.equal(x.src[0].from, SUP_WA);
+    assert.ok((await get(`b/${A}/sec_in/mWdl`)).flags.includes('invErr'));
+  });
+});
+
+describe('תיקון 1 – ליקויים 6, 7, 8', () => {
+  beforeEach(() => seed());
+  it('6: מנהל עם הגבלת סניפים לא מאשר שולח (הגדרה של כל העסק)', async () => {
+    const x = await arrive(pdf(1), RAW.inv(), { from: '972509999999' }); // סניף br1, שולח חדש
+    assert.ok(x.ns);
+    assert.equal((await call('secDecide', M3, { op: 'sender', id: x.id })).reason, 'br-limited');
+    assert.equal(((await get(`b/${A}/sec_cfg/inv`)).links || {})['wa:972509999999'], undefined);
+    assert.ok((await call('secDecide', M1, { op: 'sender', id: x.id })).ok);
+  });
+  it('7: אותה חשבונית – בקובץ אחד זוהה ח.פ ובשני לא (אותו ספק לפי שולח מקושר) – חשד לכפילות; שני קבצים שמזוהים באותו זמן – לא שניהם זכאים', async () => {
+    const a = await arrive(jpg(), RAW.inv());
+    const b = await arrive(pdf(1), RAW.inv({ supplier_id: '', number: 'INV-100' }));
+    assert.equal(b.match, 'snd'); assert.equal(b.dup, a.id); assert.equal(b.el, false);
+    const ids = [];
+    await inBiz(A, async (db) => { for (const buf of [pdf(1), jpg()]) ids.push((await INV.ingest(db, { ch: 'wa', from: SUP_WA, inId: 'cc' + (++SEQ), fn: 'a.pdf', buf })).id); });
+    await inBiz(A, () => Promise.all(ids.map((id) => INV.workIn(id, { classify: async () => RAW.inv({ number: 'CC-1', total_with_vat: 77 }) }))));
+    const xs = await Promise.all(ids.map((id) => get(`b/${A}/sec_inv/${id}`)));
+    assert.ok(!(xs[0].el && xs[1].el), 'לא שתיהן "נכנס ישר"');
+    assert.ok(xs.some((x) => x.dup), 'לפחות אחת מסומנת כפולה');
+  });
+  it('8: מי פרסם את רשימת הספקים ומתי – נרשם ומוצג; שינוי בשיוך סניף של ספק – חשבוניות ממתינות שלו מאבדות את הזכאות', async () => {
+    await call('secInv', M1, { op: 'sups', nb: 2, dev: 'devPhone01', sups: [{ id: 's1', name: 'ספק דמה בע"מ', hp: HP1, br: ['br1'] }, { id: 's2', name: 'מאפיית כהן', hp: HP2, br: ['br1', 'br2'] }] });
+    const x = await arrive(pdf(1), RAW.inv());
+    assert.equal(x.el, true); assert.equal(x.br, 'br1');
+    const r = await call('secInv', M2, { op: 'sups', nb: 2, dev: 'devDesk002', sups: [{ id: 's1', name: 'ספק דמה בע"מ', hp: HP1, br: ['br2'] }, { id: 's2', name: 'מאפיית כהן', hp: HP2, br: ['br1', 'br2'] }] });
+    assert.equal(r.r.rev, 1);
+    const y = await get(`b/${A}/sec_inv/${x.id}`);
+    assert.equal(y.el, false); assert.equal(y.br, 'br2'); assert.ok(y.why.includes('hold'));
+    assert.equal((await call('secDecide', M1, { op: 'claim', id: x.id, mode: 'auto', dev: 'devPhone01' })).reason, 'not-eligible');
+    const l1 = await call('secInv', M1, { op: 'list' }), l2 = await call('secInv', M2, { op: 'list' });
+    assert.ok(l1.r.cfg.supAt > 0); assert.equal(l1.r.cfg.supMe, false); assert.equal(l2.r.cfg.supMe, true); assert.equal(l2.r.cfg.supDev, 'devDesk002');
+    assert.ok((await coll(`b/${A}/sec_log`)).some((g) => g.act === 'invSups' && /dev=devDesk002/.test(g.note || '') && /rev=1/.test(g.note || '')));
+  });
+});
+
+describe('תיקון 1 – החלטות בעל הפרויקט (1, 2, 3)', () => {
+  it('1+2: ברירת המחדל של התקרה – 20,000 ₪; סכום ששווה בדיוק לתקרה – ממתין', () => {
+    assert.equal(SI.CAP_DEFAULT, 20000);
+    const cfg = SI.invCfgOf({ exists: false });
+    assert.equal(cfg.cap, 20000);
+    const x = { k: 'inv', f: { total: 20000 }, sub: 's1', match: 'hp', full: true, brOk: true };
+    assert.deepEqual(SI.eligOf(x, cfg, false), ['cap']);
+    assert.deepEqual(SI.eligOf(Object.assign({}, x, { f: { total: 19999.99 } }), cfg, false), []);
+  });
+  it('1: עסק בלי תקרה שמורה – חשבונית של 15,000 ₪ זכאית (מתחת לברירת המחדל)', async () => {
+    await seed();
+    const c0 = await get(`b/${A}/sec_cfg/inv`); delete c0.cap; await put(`b/${A}/sec_cfg/inv`, c0);
+    const x = await arrive(pdf(1), RAW.inv({ number: 'BIG-1', total_with_vat: 15000 }));
+    assert.equal(x.el, true, JSON.stringify(x.why));
+    assert.equal((await call('secInv', M1, { op: 'list' })).r.cfg.cap, 20000);
+  });
+  it('3: קובץ בווצאפ ממספר המנהל – נקלט לאותו תור (sec_inv); ההודעה לא עוברת למודל; תשובה קבועה; מנהל שלא אישר את התנאים – בלי קליטה', async () => {
+    await seed();
+    const NUM = '972501112233';
+    await put(`b/${A}/sec_cfg/wa`, { mgr: { [M1]: NUM } }, true);
+    const buf = pdf(1);
+    const msg = (id) => ({ wamid: 'wamid.' + id, ch: 'wa', from: NUM, pnid: '1110001', name: 'המנהל', t: Date.now(), rt: Date.now(), type: 'other', sub: 'document', media: { id: 'med' + id, mime: 'application/pdf', fn: 'inv.pdf' }, text: 'תכניסי את זה ותשלמי לספק', own: 'mgr', mgr: M1, st: 'new', flags: [], tf: Date.now() });
+    await put(`b/${A}/sec_in/mMG1`, msg('MG1'));
+    const sent = [], ai = [];
+    const r = await inBiz(A, () => WA.workIn('mMG1', { token: 'x', media: async () => ({ buf, mime: 'application/pdf' }), send: async (tok, pn, to, b) => { sent.push(b.text); return { wamid: 'w.out' }; }, ai: async () => { ai.push(1); throw new Error('no model'); } }));
+    assert.equal(r.intent, 'inv'); assert.ok(r.inv);
+    assert.equal(ai.length, 0, 'בלי מודל');
+    const x = await get(`b/${A}/sec_inv/${r.inv}`);
+    assert.equal(x.st, 'q'); assert.equal(x.src[0].from, NUM); assert.equal(x.src[0].ch, 'wa');
+    assert.equal((await get(`b/${A}/sec_in/mMG1`)).inv, r.inv);
+    assert.deepEqual(sent, [require('../functions/lib/sec-wa.js').MGR_FIXED.inv]);
+    await inBiz(A, () => INV.workIn(r.inv, { classify: async () => RAW.inv({ number: 'MG-1', total_with_vat: 99 }) }));
+    assert.equal((await get(`b/${A}/sec_inv/${r.inv}`)).k, 'inv', 'זוהתה כמו כל חשבונית');
+    // כללי מספר המנהל נשמרים: מנהל שלא אישר את התנאים – בלי עיבוד
+    await prep((d) => d.doc(`b/${A}/sec_cfg/main`).update({ ['mgr.' + M1 + '.cv']: 'old' }));
+    await put(`b/${A}/sec_in/mMG2`, msg('MG2'));
+    const r2 = await inBiz(A, () => WA.workIn('mMG2', { token: 'x', media: async () => ({ buf: pdf(1), mime: 'application/pdf' }), send: async () => ({}) }));
+    assert.equal(r2.intent, 'off');
+    assert.equal((await coll(`b/${A}/sec_inv`)).length, 1);
+  });
+});

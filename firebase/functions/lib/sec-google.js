@@ -146,6 +146,22 @@ function bodyOf(payload) {
 }
 // שלב 7: מבנה המייל בלי התוכן (מייל גדול) – רק רשימת הקבצים המצורפים
 function attOf(m) { return m && m.payload ? bodyOf(m.payload).att : []; }
+// שלב 7, תיקון 1 (ליקוי 2): האם כתובת השולח מאומתת. קובעים רק לפי כותרת Authentication-Results הראשונה (העליונה), שהוסיף שרת
+// הקליטה של Google (mx.google.com) – כותרת כזו שהשולח עצמו הכניס למייל נמצאת מתחתיה ולא נקראת. מאומת = dmarc=pass לדומיין שב-From,
+// או dkim=pass של אותו דומיין (או דומיין־אם/תת־דומיין שלו). SPF לבד – לא מספיק. כל דבר אחר (חסר, לא ברור, נכשל) – לא מאומת.
+function authOf(ar, from) {
+  const dom = String(from || '').toLowerCase().split('@')[1] || '';
+  const v = String(ar || '').replace(/\([^()]*\)/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!dom || !/^mx\.google\.com\s*;/.test(v)) return false;
+  const al = (d) => { d = String(d || '').replace(/^@/, '').replace(/[.>"';,]+$/, ''); const at = d.lastIndexOf('@'); if (at >= 0) d = d.slice(at + 1); return d.includes('.') && (d === dom || dom.endsWith('.' + d) || d.endsWith('.' + dom)); };
+  for (const c of v.split(';').slice(1)) {
+    const m = /^\s*(dmarc|dkim)\s*=\s*([a-z]+)/.exec(c);
+    if (!m || m[2] !== 'pass') continue;
+    if (m[1] === 'dmarc') { const h = /header\.from\s*=\s*([^\s;]+)/.exec(c); if (h && h[1].replace(/[.>"']+$/, '') === dom) return true; }
+    else { const h = /header\.(?:i|d)\s*=\s*([^\s;]+)/.exec(c); if (h && al(h[1])) return true; }
+  }
+  return false;
+}
 // הודעת Gmail → שדות לכרטיס (בלי מסד נתונים)
 function parseMsg(m) {
   if (!m || typeof m !== 'object' || typeof m.id !== 'string') return null;
@@ -157,7 +173,7 @@ function parseMsg(m) {
     gid: m.id.slice(0, 64), thr: typeof m.threadId === 'string' ? m.threadId.slice(0, 64) : '', from: addrOf(h.from), name: nameOf(h.from), replyTo: addrOf(h['reply-to']),
     subj: clean(decodeWords(h.subject || ''), SUBJ_MAX), mid: clean(h['message-id'] || '', 300).replace(/[\r\n\s]/g, ''), t: Number.isFinite(t) && t > 0 ? t : 0,
     labels, unsub: !!h['list-unsubscribe'], size: Number(m.sizeEstimate) || 0, snippet: clean(m.snippet || '', 300), text: b.text, cut: b.cut, files: b.files,
-    att: b.att || [], ctype: clean(h['content-type'] || '', 100).toLowerCase(),
+    att: b.att || [], ctype: clean(h['content-type'] || '', 100).toLowerCase(), auth: authOf(h['authentication-results'], addrOf(h.from)),
   };
 }
 // כותרת בקידוד =?UTF-8?B?...?= / =?UTF-8?Q?...?=
@@ -311,7 +327,7 @@ function client(u, at) {
     watch: async (topic) => (await call('POST', gm + '/watch', { topicName: topic, labelIds: ['INBOX'], labelFilterBehavior: 'include' })).j || {},
     stop: async () => { await call('POST', gm + '/stop', {}); return true; },
     history: async (start, pageToken) => (await call('GET', gm + '/history?' + form(Object.assign({ startHistoryId: String(start), historyTypes: 'messageAdded', labelId: 'INBOX', maxResults: '100' }, pageToken ? { pageToken } : {})), null, [404])),
-    meta: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=Reply-To&metadataHeaders=List-Unsubscribe&metadataHeaders=Content-Type')).j || {},
+    meta: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=Reply-To&metadataHeaders=List-Unsubscribe&metadataHeaders=Content-Type&metadataHeaders=Authentication-Results')).j || {},
     // שלב 7: מבנה המייל בלבד (שמות ומזהי הקבצים, בלי תוכן) – למייל גדול שיש בו קבצים מצורפים; והורדת קובץ מצורף אחד
     struct: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=full&fields=' + enc('id,payload(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size)))))'))).j || {},
     att: async (id, attId) => (await call('GET', gm + '/messages/' + enc(id) + '/attachments/' + enc(attId))).j || {},
@@ -330,6 +346,6 @@ function client(u, at) {
 module.exports = {
   SC, FORBIDDEN, scopesFor, grantedOk, STATE_TTL, CONNECT_HOUR, MAX_BOX_DEFAULT, MAX_BOX_LIMIT, HOOK_DATA_MAX, RUN_MAX, DAY_IN_MAX, FULL_MAX, TEXT_MAX, SUBJ_MAX, OUT_DAY, CLEAN_MAX,
   COUNT_PAGES, SCAN_TTL, CAL_PAGES, CAL_PUSH_MAX, BIG_OLD, RANGES, AI_PER_MAIL, STATE_RE,
-  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, bodyOf, attOf, decodeWords, kindOf, isInstr, mime, reSubj, rangeQ, costEstimate,
+  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, authOf, bodyOf, attOf, decodeWords, kindOf, isInstr, mime, reSubj, rangeQ, costEstimate,
   gToCal, calToG, sameEv, localOf, dayIL, urls, oauthCfg, topicName, TOPIC, exchange, refresh, revoke, client, SEC_GOOGLE_KEY, GOOGLE_CLIENT_SECRET, sv, EMAIL_RE,
 };
