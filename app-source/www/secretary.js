@@ -244,13 +244,15 @@ ACT.secTh=el=>{const a=Math.round(+el.dataset.v);if(a>=0)thSave(a)};
 ACT.secThEd=()=>{dlg(`<h3>סף התראת תזרים</h3><form data-f="secThF"><label class="f"><span>התראה כשהיתרה הצפויה נמוכה מ- (₪)</span><input class="amt" name="a" inputmode="numeric" dir="ltr" maxlength="9" value="${X.st.cfTh!=null?esc(String(X.st.cfTh)):''}"></label><div class="row"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.secThF=f=>{const v=String(f.a.value||'').replace(/[,\s₪]/g,'');if(v===''){closeDlg();return thSave(null)}if(!/^\d{1,9}$/.test(v))return toast('סכום לא תקין');closeDlg();thSave(+v)};
 const scrollEnd=()=>setTimeout(()=>{const f=document.getElementById('secForm');if(f&&f.scrollIntoView)f.scrollIntoView({block:'end'})},30);
+// 13.11.2026: קוד הסיבה כשספק ה-AI נכשל (reason מ-functions/lib/sec-ai.js), כדי שיהיה אפשר לאבחן מהמסך
+const AIR={'ai-quota':'נגמרה המכסה או אין חיוב פעיל בחשבון ה-AI','ai-rejected':'שירות ה-AI דחה את הבקשה – מפתח או מודל לא תקינים','ai-overloaded':'עומס זמני בשירות ה-AI','ai-timeout':'שירות ה-AI לא ענה בזמן','ai-network':'אין חיבור מהשרת לשירות ה-AI','ai-error':'שגיאה לא מוכרת בשירות ה-AI'};
 async function ask2(q,deep){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)return;if(q.length>2000)return toast('השאלה ארוכה מדי (עד 2,000 תווים)');
  X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';rerender();scrollEnd();
  try{const fin=secFin({pay:!!X.st.pay});const d={text:q,deep};if(fin)d.fin=fin;
   const r=await fnCall('secChat',d);
   X.msgs.push({role:'a',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null}
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
- catch(e){X.msgs.push({role:'a',text:(e&&e.message)||'השליחה נכשלה. נסו שוב.',t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
+ catch(e){const rs=e&&Object.prototype.hasOwnProperty.call(AIR,e.reason)?' (סיבה: '+AIR[e.reason]+')':'';X.msgs.push({role:'a',text:((e&&e.message)||'השליחה נכשלה. נסו שוב.')+rs,t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
  finally{X.sending=0;X.deep=0;if(cur().v==='sec')rerender();scrollEnd()}}
 window.__secAsk=ask2;
 
