@@ -317,6 +317,23 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
     try { return { m: await one('fMulti'), o: await one('fOne') }; } finally { fget = fg; IE = null; }
   });
   check('33 מסמך של 3 עמודים במסך הבדיקה: 3 תמונות עם "עמוד X מתוך 3"; מסמך של עמוד אחד – תמונה אחת בלי מספור', r33.m.imgs === 3 && /עמוד 3 מתוך 3/.test(r33.m.txt) && r33.o.imgs === 1 && !/מתוך/.test(r33.o.txt), r33);
+  // 35. "＋ קטגוריה חדשה" במסך הבדיקה: האשף הקיים, ובסיומו חוזרים לבדיקה עם הקטגוריה והספק החדשים, והסכום שהוקלד נשמר
+  const r35 = await page.evaluate(async () => {
+    const W = (ms) => new Promise((r) => setTimeout(r, ms || 150)), F = () => document.querySelector('#dlg[open] form[data-f=inbsave]');
+    S.inbox.push({ id: 'rcNc', by: 'עובד בדיקה', at: '2026-11-11T09:00:00Z', d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup1', amt: 21, date: '2026-11-11', note: 'דגים' } }); save();
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg'); ACT.inbEdit({ dataset: { id: 'rcNc' } }); await W(); let f = F();
+    const opt = [...f.elements.cat.options].some((o) => o.value === '__new'); f.elements.amt.value = '27';
+    f.elements.cat.value = '__new'; f.elements.cat.dispatchEvent(new Event('change', { bubbles: true })); await W();
+    const wiz = !!document.querySelector('#dlg[open] form[data-f=cwName]'); const nf = document.querySelector('#dlg[open] form[data-f=cwName]'); nf.elements.name.value = 'ספקי דגים'; FRM.cwName(nf); await W();
+    document.querySelector('#dlg[open] [data-a=cwBeh][data-v=sup]').click(); await W(); const sf = document.querySelector('#dlg[open] form[data-f=cwSubs]'); sf.elements.subs.value = 'דגי הים'; FRM.cwSubs(sf); await W();
+    document.querySelector('#dlg[open] [data-a=cwDone]').click(); await W(); f = F();
+    const nc = S.cats.find((c) => c.name === 'ספקי דגים'), ns = nc && S.subs.find((x) => x.cat === nc.id);
+    const back = { form: !!f, cat: f && f.elements.cat.value, sub: f && f.elements.sub && f.elements.sub.value, amt: f && f.elements.amt.value };
+    ACT.inbSaveOk(); await W(300); const no = document.querySelector('#dlg[open] [data-a=inbRegAw]:not([data-w])'); if (no) { no.click(); await W(300); }
+    const t = S.tx.find((x) => x.src === 'rcNc') || {};
+    return { opt, wiz, nc: nc && { beh: nc.beh, kind: nc.kind }, back, want: { cat: nc && nc.id, sub: ns && ns.id }, t: { cat: t.cat, sub: t.sub, amt: t.amt, creg: t.creg } };
+  });
+  check('35 "＋ קטגוריה חדשה" במסך הבדיקה: האשף נפתח, נוצרת קטגוריית ספקים עם ספק, חוזרים לבדיקה עם הקטגוריה והספק החדשים והסכום שהוקלד (27), והאישור רושם אותה שם', r35.opt && r35.wiz && r35.nc && r35.nc.beh === 'sup' && r35.nc.kind === 'exp' && r35.back.form && r35.back.cat === r35.want.cat && r35.back.sub === r35.want.sub && r35.back.amt === '27' && r35.t.cat === r35.want.cat && r35.t.sub === r35.want.sub && r35.t.amt === 27 && r35.t.creg === 'i_nl', r35);
   check('19 אין שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
   if (out) fs.writeFileSync(out, JSON.stringify({ fail, res }, null, 1));
