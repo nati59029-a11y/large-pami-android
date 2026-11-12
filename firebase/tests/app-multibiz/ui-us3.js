@@ -97,10 +97,10 @@ const rect = (page, sel) => page.evaluate((s) => { const e = document.querySelec
     check(T + '10א ידני ← אשף ההוצאה הקיים', await page.evaluate(() => A && A.step === 'cat' && A.us === 1));
     await page.click('#sheet [data-a=sheetBack]'); await H.settle(page, 300); check(T + '10ב חזרה מהאשף ← בורר הסוג', await page.evaluate(() => !!document.querySelector('#sheet [data-a=usPick]')));
     await page.click('#sheet [data-a=usExit]'); await H.settle(page, 300); check(T + '10ג סגירה', await page.evaluate(() => document.getElementById('sheet').hidden && !US));
-    // 11. כפתור "סריקה" הישן במסך עוד פותח את המסך החדש
-    await page.evaluate(() => { NAV = [{ v: 'home' }]; go('more'); }); await H.settle(page, 300);
+    // 11. כפתור "סריקה" בבית (11.11.2026: הוסר מ"עוד" למנהל) פותח את המסך החדש
+    await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await H.settle(page, 300);
     await page.evaluate(() => { const b = document.querySelector('[data-a=go][data-v=scan]'); if (b) b.click(); }); await H.settle(page, 300);
-    check(T + '11 הכפתור הישן "סריקת חשבוניות" פותח את המסך החדש', await page.evaluate(() => !!document.querySelector('#sheet [data-c=uspick]')));
+    check(T + '11 הכפתור "סריקה" בבית פותח את המסך החדש', await page.evaluate(() => !!document.querySelector('#sheet [data-c=uspick]')));
     await page.evaluate(() => usReset());
     check(T + '12 אין שגיאות JS (מנהל)', page.__errors.length === 0, page.__errors); await ctx.close();
 

@@ -18,6 +18,7 @@ const logger = require('firebase-functions/logger');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const T = require('./lib/tenant');
+const { seedLinePlans } = require('./lib/line-plans-seed');
 const R = require('./lib/roles');
 const { requireStaff, inputObject } = R;
 
@@ -193,7 +194,13 @@ async function setBusinessFeatures(request) {
   await getFirestore().doc('b/' + bizId).update(upd);
   await audit(bizId, by, 'setBusinessFeatures', Object.entries(f).map(([k, v]) => k + '=' + (v ? 'on' : 'off')).join(','));
   const biz = await T.loadBiz(bizId);
-  return { ok: true, bizId, features: biz.features };
+  // 2026-11-12: הפעלת סלולר → תוכניות הניוד מהרשימה הקבועה נטענות לעסק (פעם אחת; עריכה/הוספה/מחיקה אחר כך כרגיל)
+  let seeded;
+  if (f.cellular === true) {
+    try { seeded = await T.runInBiz({ prefix: T.bizPrefix(biz) }, () => seedLinePlans(T.tdb())); }
+    catch (e) { logger.error('setBusinessFeatures: seedLinePlans failed', { bizId, msg: String(e && e.message).slice(0, 200) }); }
+  }
+  return Object.assign({ ok: true, bizId, features: biz.features }, seeded ? { plans: seeded.added } : {});
 }
 
 // ---------- setBusinessAdv: הגדרות מתקדמות ב-b/{bizId}/private/info.adv ----------

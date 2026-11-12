@@ -106,7 +106,7 @@ const LOGO_THEMES = { a: 'כהה', b: 'בהיר', c: 'בהיר-פלדה' };
     r.hs = []; for (const w of [320, 412]) { await page.setViewportSize({ width: w, height: 700 }); r.hs.push(await page.evaluate(() => __hs())); }
     moreRes[t] = r;
   }
-  check('10 עוד: רשימה אחת, בלי אימוג׳י כאייקון, כל הפריטים והטקסטים, מגע ≥44, ניגודיות, בלי גלילה אופקית', ['a', 'b', 'c'].every((t) => { const r = moreRes[t]; return r.n >= 8 && !r.emoji && r.small.length === 0 && Math.min(...r.cr) >= 4.5 && r.hs.every((h) => h.sw <= h.iw) && !/סגירת קופה/.test(r.txt) /* 9.11.2026: סגירת קופה במסך ה-+ בלבד */ && /בקשות לעדכון האפליקציה/.test(r.txt) && /צילום העברה|חשבוניות לתשלום/.test(r.txt); }), Object.fromEntries(Object.entries(moreRes).map(([k, v]) => [k, [v.n, v.emoji, v.small, v.cr]])));
+  check('10 עוד: רשימה אחת, בלי אימוג׳י כאייקון, כל הפריטים והטקסטים, מגע ≥44, ניגודיות, בלי גלילה אופקית', ['a', 'b', 'c'].every((t) => { const r = moreRes[t]; return r.n >= 8 && !r.emoji && r.small.length === 0 && Math.min(...r.cr) >= 4.5 && r.hs.every((h) => h.sw <= h.iw) && !/סגירת קופה/.test(r.txt) /* 9.11.2026: סגירת קופה במסך ה-+ בלבד */ && /בקשות לעדכון האפליקציה/.test(r.txt) && /הוצאות קבועות/.test(r.txt) && !/צילום העברה|חשבוניות לתשלום|סנכרון ועובדים|ממתין לסיווג|סריקת חשבוניות/.test(r.txt) /* 11.11.2026: למנהל – מהבית, מ"לטיפול" ומההגדרות */; }), Object.fromEntries(Object.entries(moreRes).map(([k, v]) => [k, [v.n, v.emoji, v.small, v.cr]])));
 
   // הגדרות: אין בורר ערכות ישן; נשארים בורר העיצוב האישי וגודל הכתב
   await page.setViewportSize({ width: 390, height: 844 });
