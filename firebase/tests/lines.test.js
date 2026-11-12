@@ -391,3 +391,47 @@ describe('חבילות ניוד – מבצע בחבילה ו"סה"כ הנחה"',
     assert.equal(u.result.total, 60);
   });
 });
+
+describe('תוכניות ניוד ברירת מחדל (מהאקסל, 2026-11-12)', () => {
+  const SEEDN = require('../functions/lib/line-plans-seed.json').plans.length;
+  it('הפעלת סלולר ע"י מנהל־העל טוענת את כל התוכניות פעם אחת, עם כל השדות', async () => {
+    await seed(ALL);
+    const r = await call('setBusinessFeatures', SUPER, { bizId: A, features: { cellular: true } });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.plans, SEEDN);
+    const P = await coll(`b/${A}/lineplan`);
+    assert.equal(P.length, SEEDN);
+    assert.equal(P.filter((p) => p.sector === 'kosher').length, 13);
+    const k = P.find((p) => p.name === 'כשרה Larg');
+    assert.equal(k.carrier, 'פלאפון'); assert.equal(k.monthly, 29.9); assert.ok(k.abroadUrl.startsWith('https://')); assert.equal(k.days, 60);
+    const cfg = await get(`b/${A}/ordcfg/cell`);
+    assert.ok(cfg.seeded); assert.ok(cfg.carriers.includes('טלזר 019'));
+    // כיבוי והפעלה מחדש – לא נטען שוב
+    await call('setBusinessFeatures', SUPER, { bizId: A, features: { cellular: false } });
+    await call('setBusinessFeatures', SUPER, { bizId: A, features: { cellular: true } });
+    assert.equal((await coll(`b/${A}/lineplan`)).length, SEEDN);
+    assert.equal((await coll(`b/${B2}/lineplan`)).length, 0);
+  });
+  it('עסק קיים עם סלולר פעיל: ensureLinePlans טוען פעם אחת, לא מכפיל תוכנית קיימת, שומר חברות קיימות', async () => {
+    await call('setCellCfg', MGR, { carriers: ['חברה שלי'] });
+    let r = await call('ensureLinePlans', E1, {});
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.added, SEEDN);
+    r = await call('ensureLinePlans', MGR, {});
+    assert.equal(r.result.already, true); assert.equal(r.result.added, 0);
+    const cfg = await get(`b/${A}/ordcfg/cell`);
+    assert.equal(cfg.carriers[0], 'חברה שלי');
+  });
+  it('עריכה, שדות חדשים, מחיקה (מנהל בלבד)', async () => {
+    await call('ensureLinePlans', MGR, {});
+    const p = (await coll(`b/${A}/lineplan`)).find((x) => x.name === 'BIG TIME');
+    let r = await call('saveLinePlan', MGR, { id: p.id, name: 'BIG TIME', carrier: 'טלזר 019', sector: 'general', pair: '30 ₪', abroadUrl: 'https://x.example/a?id=123456789' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal((await get(`b/${A}/lineplan/${p.id}`)).pair, '30 ₪');
+    assert.equal((await call('saveLinePlan', MGR, { id: p.id, name: 'x', sector: 'other' })).reason, 'bad-sector');
+    assert.equal((await call('saveLinePlan', MGR, { id: p.id, name: 'x', abroadUrl: 'javascript:1' })).reason, 'bad-abroadUrl');
+    assert.equal((await call('saveLinePlan', E1, { id: p.id, del: true })).reason, 'no-perm');
+    r = await call('saveLinePlan', MGR, { id: p.id, del: true });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(await get(`b/${A}/lineplan/${p.id}`), null);
+  });
+});
