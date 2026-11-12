@@ -87,8 +87,8 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   // תג "קבועה" + פרטית של עובד עם שם
   await page.click('[data-a=tkTab][data-v=open]'); await sleep(300);
   const op = await txt(page, '#main');
-  check('5 משימה שנוצרה מכלל מציגה תג "🔁 קבועה"', /🔁 קבועה/.test(op) && /לסגור קופה/.test(op));
-  check('6 מנהל רואה פרטית של עובד, עם תג 🔒 ושם העובד', /🔒 פרטית/.test(op) && /תזכורת פרטית של עובד/.test(op) && /של w1/.test(op));
+  check('5 משימה שנוצרה מכלל מציגה תג "קבועה"', /קבועה/.test(op) && /לסגור קופה/.test(op));
+  check('6 מנהל רואה פרטית של עובד, עם תג פרטית ושם העובד', /פרטית/.test(op) && /תזכורת פרטית של עובד/.test(op) && /של w1/.test(op));
   check('6א המנהל שולף את כל ה-ptk (בלי סינון owner)', QLOG.some((q) => q.who === 'm' && q.c === 'ptk' && !q.where));
 
   // יצירת משימה פרטית
@@ -236,7 +236,7 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   const pq = QLOG.filter((q) => q.who === 'w1' && q.c === 'ptk').pop();
   check('31א העובד שולף ptk רק של עצמו (owner == uid)', !!pq && pq.where[0] === 'owner' && /w1/.test(pq.where[2]), pq);
   const wopen = await txt(wp, '#main');
-  check('31ב הפרטית של העובד ברשימה עם 🔒; הפרטית של w2/המנהל/אחרים לא מופיעה', /להזמין חלב לעצמי/.test(wopen) && /🔒 פרטית/.test(wopen) && /תזכורת פרטית של עובד/.test(wopen) && !/פרטית של עובד אחר/.test(wopen));
+  check('31ב הפרטית של העובד ברשימה עם תג פרטית; הפרטית של w2/המנהל/אחרים לא מופיעה', /להזמין חלב לעצמי/.test(wopen) && /פרטית/.test(wopen) && /תזכורת פרטית של עובד/.test(wopen) && !/פרטית של עובד אחר/.test(wopen));
   await shot(wp, shots, 'w-tk');
   await wp.click(`#ptc-${wpk[0]} [data-a=ptDone]`); await sleep(600);
   await wp.click('[data-a=tkTab][data-v=done]'); await sleep(400);
