@@ -104,6 +104,30 @@ describe('רווחיות הזמנות', () => {
     assert.equal((await call('setOrderCfg', PF1, { nc: 'zero' })).reason, 'manager-only');
     assert.equal((await call('setOrderCfg', MGR, { nc: 'all' })).reason, 'bad-nc');
   });
+  // 2026-11-12: סיכום יומי בכניסה להזמנות – paid/paidN, ו-lite לעובד בלי ordP (בלי עלות, רווח ושורות)
+  it('paid/paidN; lite: עובד בלי ordP מקבל רק n/total/paid/paidN של הסניפים שלו; בלי ord – נחסם', async () => {
+    const a = await call('createOrder', MGR, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pB', qty: 2, price: 10 }] }); // 20
+    const b = await call('createOrder', MGR, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pB', qty: 1, price: 5.5 }] }); // 5.5
+    const c = await call('createOrder', MGR, { reqId: rid(), br: 'br2', cust, items: [{ pid: 'pB', qty: 1, price: 8 }] }); // 8
+    const x = await call('createOrder', MGR, { reqId: rid(), br: 'br1', cust, items: [{ pid: 'pB', qty: 1, price: 100 }] });
+    assert.equal((await call('cancelOrder', MGR, { id: x.result.id, reason: 'בדיקה' })).status, 'OK');
+    for (const o of [a, c]) assert.equal((await call('markOrderPaid', MGR, { id: o.result.id, method: 'cash' })).status, 'OK');
+    // הזמנה ישנה ששולמה בלי paid.amt – נספר total
+    await prep((d) => d.doc(`b/${A}/ord/oOldPaid`).set({ no: 98, br: 'br1', status: 'done', total: 7, items: [{ n: 'x', qty: 1, price: 7, c: 1 }], cust: { name: 'y' }, paid: { method: 'cash' }, at: Date.now() }));
+    const m = await prof(MGR);
+    assert.equal(m.status, 'OK', m.text);
+    assert.equal(m.result.n, 4); assert.equal(m.result.total, 40.5); assert.equal(m.result.paid, 35); assert.equal(m.result.paidN, 3); assert.ok(Array.isArray(m.result.rows) && 'profit' in m.result);
+    const l = await prof(E1, { lite: true });
+    assert.equal(l.status, 'OK', l.text);
+    assert.deepEqual(l.result, { n: 3, total: 32.5, paid: 27, paidN: 2 }, 'רק br1, בלי עלות/רווח/שורות');
+    assert.deepEqual((await prof(E2, { lite: true })).result, { n: 1, total: 8, paid: 8, paidN: 1 });
+    assert.deepEqual((await prof(MGR, { lite: true })).result, { n: 4, total: 40.5, paid: 35, paidN: 3 });
+    assert.equal((await prof(E1, { lite: true, br: 'br2' })).reason, 'foreign-br');
+    assert.equal((await prof(E1)).reason, 'no-perm', 'בלי lite – עדיין רק עם ordP');
+    assert.equal((await prof(NOORD, { lite: true })).reason, 'no-perm');
+    assert.notEqual((await prof(E1, { lite: 'yes' })).status, 'OK');
+    assert.ok(b.result.id);
+  });
   it('קלט לא תקין: תאריך, תקופה ארוכה מדי, סוף לפני התחלה, שדה לא מוכר', async () => {
     assert.equal((await prof(MGR, { from: '12/11/2026' })).reason, 'bad-date');
     assert.equal((await prof(MGR, { from: '2024-01-01', to: '2026-01-01' })).reason, 'bad-date');

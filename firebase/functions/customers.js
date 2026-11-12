@@ -627,12 +627,18 @@ const mgrOnly = (w) => { if (w.role !== 'manager') throw deny('manager-only', '�
 
 // setCard({ custId, card:{num,exp?,name?,cvv?}, ordId?, slot? }) – מנהל; או עובד עם ord מתוך הזמנה שלא שולמה. דורס כרטיס קיים.
 // עובד עם ord: רק עם ordId של הזמנה פתוחה (לא שולמה) בסניף שלו שמקושרת ללקוח – הזנת כרטיס מתוך ההזמנה (00:37).
-async function ordGate(db, w, id, ordId) {
-  if (typeof ordId !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(ordId)) throw deny('need-ord', 'פרטי כרטיס לעובד – רק מתוך הזמנה שלא שולמה');
+// opt.cellAny (2026-11-12, getCard act:'copyAll'): הזמנת ניוד (o.cell קיים, ומתג cellular פעיל בעסק) – בכל סטטוס חוץ מבוטלת, גם אחרי תשלום.
+async function ordGate(db, w, id, ordId, opt) {
+  const cellAny = !!(opt && opt.cellAny);
+  if (typeof ordId !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(ordId)) throw deny('need-ord', cellAny ? 'פרטי כרטיס לעובד – רק מתוך הזמנת ניוד' : 'פרטי כרטיס לעובד – רק מתוך הזמנה שלא שולמה');
   const o = await db.doc('ord/' + ordId).get();
   if (!o.exists) throw new HttpsError('not-found', 'ההזמנה לא נמצאה', { reason: 'no-ord' });
   if (o.get('custId') !== id) throw deny('not-linked', 'הלקוח לא מקושר להזמנה הזו');
-  if (!OPEN_ST.includes(o.get('status'))) throw deny('ord-paid', 'ההזמנה כבר שולמה – פרטי הכרטיס למנהל בלבד');
+  if (cellAny) {
+    const c = o.get('cell');
+    if (!cellOn(w) || !c || typeof c !== 'object') throw deny('ord-not-cell', 'העתקת כל הפרטים – רק בהזמנת ניוד');
+    if (o.get('status') === 'cancel') throw deny('ord-cancel', 'ההזמנה בוטלה');
+  } else if (!OPEN_ST.includes(o.get('status'))) throw deny('ord-paid', 'ההזמנה כבר שולמה – פרטי הכרטיס למנהל בלבד');
   const br = o.get('br'), mine = w.staff && Array.isArray(w.staff.get('br')) ? w.staff.get('br') : null;
   // סמנטיקה זהה ל-orders.js (canBr ו-assertOrdBr): עובד בלי רשימת br במסמך staff = כל הסניפים (mine=null),
   // והזמנה בלי סניף ('' או '_' = עסק בלי סניפים) – בלי בדיקת סניף. ליקוי 3 – מיושר בכוונה, לא חסימה.
@@ -664,7 +670,8 @@ async function setCard(request) {
   return { ok: true, last4: card.num.slice(-4), slot: n };
 }
 
-// getCard({ custId, act:'view'|'copy', ordId? }) → { card:{num,exp?,name?,cvv?} } למנהל; { card:{num} } לעובד.
+// getCard({ custId, act:'view'|'copy'|'copyAll', ordId? }) → { card:{num,exp?,name?,cvv?} } למנהל; { card:{num} } לעובד.
+// copyAll (2026-11-12): לעובד – כרטיס מלא כולל CVV, רק עם ordId של הזמנת ניוד שמקושרת ללקוח, בסניף שלו, בכל סטטוס חוץ מבוטלת.
 // עובד עם ord: רק עם ordId של הזמנה שלא שולמה (new/work/wait_pay), בסניף שלו, שמקושרת ללקוח הזה (custId). נבדק בשרת.
 // כל קריאה מוצלחת נרשמת ב-cardLog לפני שהערך מוחזר.
 // מכסת פענוח לכל משתמש (ליקוי 4, הנחה): עובד 20 לדקה / 150 ליום, מנהל 60 / 500. מונה cardQ/{uid} בטרנזקציה (חוקים: סגור).
@@ -697,12 +704,19 @@ async function getCard(request) {
   onlyKeys(input, ['custId', 'act', 'ordId', 'slot']);
   const id = custIdOf(input.custId);
   const n = slotOf(input.slot);
-  if (!['view', 'copy'].includes(input.act)) throw bad('bad-act', 'פעולה לא תקינה');
+  if (!['view', 'copy', 'copyAll'].includes(input.act)) throw bad('bad-act', 'פעולה לא תקינה');
   const db = T.tdb();
-  let ordId = null;
+  const all = input.act === 'copyAll'; // 2026-11-12: "העתק פרטי לקוח" בהזמנת ניוד – כרטיס מלא כולל CVV, גם לעובד (ראו ordGate cellAny)
+  let ordId = null, pick = null;
   if (w.role !== 'manager') {
-    if (input.act !== 'copy') throw deny('manager-only', 'הצגת פרטי כרטיס – מנהל בלבד');
-    ordId = await ordGate(db, w, id, input.ordId);
+    if (input.act === 'view') throw deny('manager-only', 'הצגת פרטי כרטיס – מנהל בלבד');
+    ordId = await ordGate(db, w, id, input.ordId, { cellAny: all });
+    if (all) { // עובד: רק שדות הכרטיס שהמנהל בחר ב-ordcfg/main.copyF (נאכף כאן, לא רק בממשק)
+      const cf = await db.doc('ordcfg/main').get();
+      const F = cf.exists && Array.isArray(cf.get('copyF')) ? cf.get('copyF') : [];
+      pick = [['cnum', 'num'], ['cexp', 'exp'], ['cname', 'name'], ['ccvv', 'cvv']].filter(([k]) => F.includes(k)).map((x) => x[1]);
+      if (!pick.length) throw deny('copy-no-card', 'המנהל לא בחר פרטי אשראי להעתקה');
+    }
   } else if (input.ordId != null) {
     if (typeof input.ordId !== 'string' || !/^[A-Za-z0-9_-]{1,60}$/.test(input.ordId)) throw bad('bad-id', 'הזמנה לא תקינה');
     ordId = input.ordId;
@@ -713,8 +727,9 @@ async function getCard(request) {
   const s = await db.doc(cardPath(id, n)).get();
   if (!s.exists) throw new HttpsError('not-found', 'אין כרטיס שמור ללקוח', { reason: 'no-card' });
   const c = CARD.open(CARD_ENC_KEY.value(), w.bizId, cardAad(id, n), s.get('box'));
-  const out = w.role === 'manager' ? c : { num: c.num };
-  const log = { t: Date.now(), by: w.uid, cust: id, act: input.act, f: w.role === 'manager' ? 'all' : 'num' };
+  const full = w.role === 'manager' || all;
+  const out = pick ? Object.fromEntries(pick.filter((k) => c[k] !== undefined).map((k) => [k, c[k]])) : full ? c : { num: c.num };
+  const log = { t: Date.now(), by: w.uid, cust: id, act: input.act, f: pick ? pick.join(',') : full ? 'all' : 'num' };
   if (ordId) log.ord = ordId;
   if (n > 1) log.s = n;
   await db.collection('cardLog').add(log);

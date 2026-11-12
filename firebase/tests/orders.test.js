@@ -188,13 +188,101 @@ describe('סטטוסים, תשלום, נעילה', () => {
     assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/biz?a=1' })).status, 'OK');
     const r = await call('getPayLink', E1, { id });
     assert.equal(r.result.link, 'https://pay.example.com/biz?a=1');
-    const cfg = await get(`b/${A}/ordcfg/main`); assert.deepEqual(cfg.pay, { mode: 'link', has: true }); assert.ok(!JSON.stringify(cfg).includes('pay.example'));
+    const cfg = await get(`b/${A}/ordcfg/main`); assert.deepEqual(cfg.pay, { mode: 'link', has: true, cred: false }); assert.ok(!JSON.stringify(cfg).includes('pay.example'));
     await assertFails(db(E1).doc(`b/${A}/private/pay`).get());
     await assertFails(db(MGR).doc(`b/${A}/private/pay`).get());
     await assertSucceeds(db(E1).doc(`b/${A}/ordcfg/main`).get());
     assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'phone' })).status, 'OK');
     assert.equal((await call('getPayLink', E1, { id })).reason, 'no-pay-link');
     assert.ok((await coll(`b/${A}/audit`)).some((x) => x.act === 'setBusinessPayLink'));
+  });
+  // 2026-11-12: פרטי כניסה לאתר הסליקה – מוצפנים, מנהל־על בלבד, מוחזרים רק ב-getPayLink{auto:true}
+  it('פרטי כניסה קשורים ל-host; עדכון פרטים בלי קישור שומר קישור וספק; כשל פענוח – קישור בלי auto', async () => {
+    const PASS = 'Hh-77-pass', L = 'https://pay.example.com/biz', SUP = { id: 's1', name: 'ספק' };
+    // אין קישור קיים – עדכון פרטים בלי קישור נדחה כמו היום
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', cred: { pass: PASS } })).reason, 'bad-link');
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L, sup: SUP })).result.cred, false);
+    const u = await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', cred: { user: 'me', pass: PASS } });
+    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.cred, true); assert.deepEqual(u.result.sup, SUP);
+    assert.equal((await get(`b/${A}/private/pay`)).link, L); assert.deepEqual((await get(`b/${A}/ordcfg/main`)).pay, { mode: 'link', has: true, cred: true, sup: SUP });
+    assert.equal((await get(`b/${A}/private/payCred`)).host, 'pay.example.com');
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: '  ', cred: { pass: PASS } })).status, 'OK', 'קישור ריק – הקיים');
+    // סבב 2: קישור קיים + "בלי ספק" (sup:null) – הספק מתנקה, הקישור ופרטי הכניסה נשארים; sup שלא נשלח – הספק נשמר
+    const ns = await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', sup: null });
+    assert.equal(ns.status, 'OK', ns.text); assert.equal(ns.result.sup || null, null); assert.equal(ns.result.cred, true);
+    assert.equal((await get(`b/${A}/private/pay`)).link, L); assert.equal((await get(`b/${A}/ordcfg/main`)).pay.sup || null, null);
+    await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L, sup: SUP });
+    assert.deepEqual((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link' })).result.sup, SUP);
+    const id = await mk();
+    assert.deepEqual((await call('getPayLink', E1, { id, auto: true })).result.auto, { user: '', pass: PASS });
+    // הקישור הוחלף ישירות במסמך ל-host אחר (מצב לא צפוי) – בלי auto, כי ה-host שבתוך המוצפן שונה
+    await prep((d) => d.doc(`b/${A}/private/pay`).update({ link: 'https://evil.example.net/x' }));
+    const h = await call('getPayLink', E1, { id, auto: true });
+    assert.equal(h.status, 'OK'); assert.equal(h.result.auto, undefined); assert.ok(!h.text.includes(PASS));
+    await prep((d) => d.doc(`b/${A}/private/pay`).update({ link: L }));
+    // מוצפן פגום – הקישור חוזר בלי auto, ביומן 'auto-fail' בלי פרטים
+    const pc = await get(`b/${A}/private/payCred`);
+    await prep((d) => d.doc(`b/${A}/private/payCred`).update({ box: Object.assign({}, pc.box, { tag: Buffer.alloc(16).toString('base64') }) }));
+    const f = await call('getPayLink', E1, { id, auto: true });
+    assert.equal(f.status, 'OK', f.text); assert.equal(f.result.link, L); assert.equal(f.result.auto, undefined);
+    const lg = (await coll(`b/${A}/ord/${id}/log`)).filter((x) => x.act === 'payOpen').map((x) => x.note).sort();
+    assert.deepEqual(lg, ['auto', 'auto-fail', 'auto-host']);
+    // קישור ל-host אחר בלי cred חדש – פרטי הכניסה נמחקים
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L, cred: { pass: PASS } })).result.cred, true);
+    const o = await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://other.example.org/p' });
+    assert.equal(o.result.cred, false); assert.equal(await get(`b/${A}/private/payCred`), null);
+    assert.equal((await get(`b/${A}/ordcfg/main`)).pay.cred, false);
+    assert.ok((await coll(`b/${A}/audit`)).some((x) => x.note.endsWith(' cred:del') && x.note.includes('other.example.org')));
+    // host אחר עם cred חדש – נשמר עם ה-host החדש
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://other.example.org/p', cred: { pass: PASS } })).result.cred, true);
+    assert.equal((await get(`b/${A}/private/payCred`)).host, 'other.example.org');
+  });
+  it('פרטי כניסה לסליקה: מנהל־על בלבד; מוצפן בלי ערכים גלויים; auto רק כשמבקשים; בלי cred – נשמר; null/phone – נמחק', async () => {
+    const PASS = 'S3cr3t-Pa$$w0rd!', USER = 'shop@example.invalid';
+    const leak = (x) => { const t = typeof x === 'string' ? x : JSON.stringify(x); return t.includes(PASS) || t.includes(USER); };
+    const L = 'https://pay.example.com/biz';
+    for (const u of [MGR, E1]) {
+      const r = await call('setBusinessPayLink', u, { bizId: A, mode: 'link', link: L, cred: { user: USER, pass: PASS } });
+      assert.equal(r.reason, 'not-superadmin'); assert.ok(!leak(r.text));
+    }
+    for (const cred of [{ pass: '' }, { user: USER }, { user: 'x'.repeat(121), pass: PASS }, { pass: 'x'.repeat(201) }, { pass: 'a\nb' }, { user: 'a\u0007', pass: PASS }, { pass: PASS, evil: 1 }, 'x', [PASS]]) {
+      const r = await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L, cred });
+      assert.equal(r.reason, 'bad-cred', JSON.stringify(cred).slice(0, 40)); assert.ok(!r.text.includes(PASS));
+    }
+    const ph = await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'phone', cred: { pass: PASS } });
+    assert.equal(ph.reason, 'bad-cred'); assert.ok(!leak(ph.text));
+    const s = await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L, cred: { user: USER, pass: PASS } });
+    assert.equal(s.status, 'OK', s.text); assert.equal(s.result.cred, true); assert.ok(!leak(s.text));
+    const pc = await get(`b/${A}/private/payCred`);
+    assert.ok(pc.box && pc.box.ct && pc.box.iv && pc.box.tag && pc.by === SUPER && typeof pc.at === 'number'); assert.ok(!leak(pc));
+    const cfg = await get(`b/${A}/ordcfg/main`); assert.deepEqual(cfg.pay, { mode: 'link', has: true, cred: true }); assert.ok(!leak(cfg));
+    assert.ok(!leak(await get(`b/${A}/private/pay`)));
+    await assertFails(db(E1).doc(`b/${A}/private/payCred`).get());
+    await assertFails(db(MGR).doc(`b/${A}/private/payCred`).get());
+    const id = await mk();
+    const plain = await call('getPayLink', E1, { id });
+    assert.equal(plain.status, 'OK'); assert.equal(plain.result.auto, undefined); assert.ok(!leak(plain.text));
+    const au = await call('getPayLink', E1, { id, auto: true });
+    assert.equal(au.status, 'OK', au.text); assert.deepEqual(au.result.auto, { user: USER, pass: PASS }); assert.equal(au.result.link, L);
+    assert.equal((await call('getPayLink', E1, { id, auto: 'yes' })).reason, 'bad-field');
+    const lg = await coll(`b/${A}/ord/${id}/log`);
+    assert.deepEqual(lg.filter((x) => x.act === 'payOpen').map((x) => x.note).sort(), ['', 'auto']); assert.ok(!leak(lg));
+    // שמירה בלי cred (למשל החלפת קישור) – הפרטים הקיימים נשמרים
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L + '2' })).result.cred, true);
+    assert.equal((await get(`b/${A}/ordcfg/main`)).pay.cred, true);
+    assert.deepEqual((await call('getPayLink', E1, { id, auto: true })).result.auto, { user: USER, pass: PASS });
+    // null – מחיקה
+    const d = await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L, cred: null });
+    assert.equal(d.result.cred, false); assert.equal(await get(`b/${A}/private/payCred`), null);
+    assert.equal((await get(`b/${A}/ordcfg/main`)).pay.cred, false);
+    assert.equal((await call('getPayLink', E1, { id, auto: true })).result.auto, undefined);
+    // בלי user – רק סיסמה; מעבר לטלפון מוחק
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L, cred: { pass: PASS } })).result.cred, true);
+    assert.deepEqual((await call('getPayLink', E1, { id, auto: true })).result.auto, { user: '', pass: PASS });
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'phone' })).result.cred, false);
+    assert.equal(await get(`b/${A}/private/payCred`), null);
+    const au2 = (await coll(`b/${A}/audit`)).filter((x) => x.act === 'setBusinessPayLink').map((x) => x.note);
+    assert.ok(au2.some((x) => x.endsWith(' cred:set')) && au2.some((x) => x.endsWith(' cred:del'))); assert.ok(!leak(au2));
   });
 });
 
@@ -395,6 +483,10 @@ describe('לארג\' פעמי במצב legacy (שורש)', () => {
     assert.equal(await get(`b/largpeami/ord/${r.result.id}`), null);
     assert.equal((await call('setBusinessPayLink', SUPER, { bizId: 'largpeami', mode: 'link', link: 'https://pay.example.com/l', sup: { id: 's1', name: 'ספק' } })).status, 'OK');
     assert.equal((await call('getPayLink', LE, { id: r.result.id })).result.link, 'https://pay.example.com/l');
+    // 2026-11-12: פרטי כניסה בשורש (private/payCred), מפתח של largpeami
+    assert.equal((await call('setBusinessPayLink', SUPER, { bizId: 'largpeami', mode: 'link', link: 'https://pay.example.com/l', sup: { id: 's1', name: 'ספק' }, cred: { user: 'u1', pass: 'p1' } })).result.cred, true);
+    assert.ok((await get('private/payCred')).box);
+    assert.deepEqual((await call('getPayLink', LE, { id: r.result.id, auto: true })).result.auto, { user: 'u1', pass: 'p1' });
     assert.equal((await call('markOrderPaid', LE, { id: r.result.id, method: 'link' })).status, 'OK');
     assert.equal((await get('ordpay/' + r.result.id)).st, 'paid');
     await assertSucceeds(db(LE).doc('ord/' + r.result.id).get());
@@ -460,7 +552,7 @@ describe('לארג\' פעמי במצב legacy (שורש)', () => {
     await seed();
     await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: 'https://pay.example.com/x', sup: { id: 's1', name: 'ספק' } });
     await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'phone' });
-    assert.deepEqual((await get(`b/${A}/ordcfg/main`)).pay, { mode: 'phone', has: false });
+    assert.deepEqual((await get(`b/${A}/ordcfg/main`)).pay, { mode: 'phone', has: false, cred: false });
     const r = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust: Object.assign({ mail: '4580123456789012@x.com' }, cust), items: [{ n: 'x', qty: 1, price: 1 }] });
     assert.equal(r.reason, 'card-like');
     for (const sep of ['\u2013', '\u2014', '\u05BE', '=', '!', '\u200F', '\u200B']) {
@@ -474,3 +566,24 @@ describe('לארג\' פעמי במצב legacy (שורש)', () => {
   });
 });
 
+
+// 2026-11-12: copyF – שדות "העתק פרטי לקוח" בהזמנת ניוד (מנהל בלבד, רשימה סגורה + שדות חופשיים מוגדרים)
+describe('setOrderCfg – copyF', () => {
+  it('מנהל שומר רשימה בסדר שלו בנפרד מ-src/vat; עובד נדחה; ולידציה', async () => {
+    await prep((d) => d.doc(`b/${A}/custcfg/main`).set({ xKeys: [{ k: 'xcity', label: 'עיר' }] }));
+    await call('setOrderCfg', MGR, { vat: 17 });
+    const F = ['ccvv', 'name', 'phone', 'phs', 'tz', 'mail', 'st', 'city', 'fl', 'apt', 'bank', 'prod', 'due', 'orig', 'stat', 'note', 'od', 'lines', 'no', 'total', 'cnum', 'cexp', 'cname', 'x:xcity'];
+    const r = await call('setOrderCfg', MGR, { copyF: F });
+    assert.equal(r.status, 'OK', r.text); assert.deepEqual(r.result.copyF, F);
+    const c = await get(`b/${A}/ordcfg/main`); assert.deepEqual(c.copyF, F); assert.equal(c.vat, 17, 'הגדרות אחרות נשמרות');
+    assert.deepEqual((await call('setOrderCfg', MGR, { copyF: ['phone', 'name'] })).result.copyF, ['phone', 'name']);
+    assert.deepEqual((await get(`b/${A}/ordcfg/main`)).copyF, ['phone', 'name'], 'רשימה מוחלפת כולה');
+    assert.deepEqual((await call('setOrderCfg', MGR, { copyF: [] })).result.copyF, []);
+    for (const u of [E1, NOORD]) assert.ok(['manager-only', 'no-perm'].includes((await call('setOrderCfg', u, { copyF: ['name'] })).reason));
+    for (const v of ['name', null, ['name', 'name'], ['evil'], ['x:xnone'], ['x:XCITY'], [1], ['__proto__'], Array(41).fill('name')]) {
+      assert.equal((await call('setOrderCfg', MGR, { copyF: v })).reason, 'bad-copyf', JSON.stringify(v).slice(0, 40));
+    }
+    assert.equal((await call('setOrderCfg', MGR, { copyF: ['name'], vat: 18 })).reason, 'bad-copyf');
+    assert.deepEqual((await get(`b/${A}/ordcfg/main`)).copyF, []);
+  });
+});
