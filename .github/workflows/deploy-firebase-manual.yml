@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: "all"
+      force:
+        description: "רק ל-functions: להוסיף --force (נדרש לפונקציה עם ניסיון חוזר, כמו runImportChunk). כמו ב-deploy-functions.yml, אושר ע\"י הבעלים 11.11 ו-12.11"
+        required: false
+        type: boolean
+        default: false
       confirm:
         description: "הקלד deploy-<מה>-to-<פרויקט>, למשל deploy-functions-to-largpeami-test-f4691"
         required: true
@@ -278,7 +283,7 @@ jobs:
             const add=[];for(const x of P){if(x.constructor.name==='SecretParam'||have.has(x.name))continue;const d=(x.options||{}).default;if(d===undefined){console.error('::error::No value and no default for '+x.name);process.exit(1)}if(typeof d==='object'){console.error('::error::Param '+x.name+' has a non-literal default');process.exit(1)}add.push(x.name+'='+String(d))}
             if(add.length){fs.appendFileSync('.env.'+process.argv[1],'\\n'+add.join('\\n')+'\\n');console.log('Defaults used for: '+add.map(a=>a.split('=')[0]).join(', '))}
           " "$P")
-          firebase deploy --only "$ONLY" --project "$P" --non-interactive
+          firebase deploy --only "$ONLY" --project "$P" --non-interactive ${{ inputs.force && '--force' || '' }}
           echo "פורסמו פונקציות ל-$P" >> "$GITHUB_STEP_SUMMARY"
 
       # ---------- חוקים (צעד 3): בדיקת הסדר בשרת, ואז פרסום ----------
