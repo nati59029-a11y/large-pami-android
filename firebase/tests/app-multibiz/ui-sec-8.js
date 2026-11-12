@@ -150,7 +150,7 @@ function audit() {
 }
 
 async function show(page, scr) {
-  await page.evaluate(() => { if (document.getElementById('dlg').open) closeDlg(); go('sec'); });
+  await page.evaluate(() => { if (document.getElementById('dlg').open) closeDlg(); go('sec'); if (ACT.secSetX) ACT.secSetX(); }); // יציאה מההגדרות (X.set) לפני כל מסך
   await H.settle(page, 500);
   if (scr === 'set') { const c = await page.$('#secTabs [data-v=chat]'); if (c) { await c.click(); await H.settle(page, 500); } const b = await page.$('[data-a=secSet]'); if (b) { await b.click(); await H.settle(page, 700); } return !!b; }
   const t = await page.$(`#secTabs [data-v=${scr}]`);
