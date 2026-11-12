@@ -232,6 +232,16 @@ describe('ניוד קווים – ביטול "שולם" ותשלום חוזר', 
     assert.equal((await call('markOrderPaid', E1, { id, method: 'cash' })).result.dup, true);
     assert.equal((await coll(`b/${A}/lineLog`)).length, 2);
   });
+  it('תשלום → ביטול הזמנה (cancelOrder): אין רישום lineLog, ports של הלקוח חוזר, checkLines לא מתריע', async () => {
+    await setup();
+    const id = await paidOrder();
+    const c = await call('cancelOrder', MGR, { id, reason: 'הלקוח התחרט' });
+    assert.equal(c.status, 'OK', c.text);
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'cancel');
+    assert.equal((await coll(`b/${A}/lineLog`)).length, 0);
+    assert.deepEqual((await get(`b/${A}/cust/t${TZ}`)).ports, []);
+    assert.equal((await call('checkLines', E2, { lines: [{ phone: L1 }, { phone: L2 }] })).result.hits.length, 0);
+  });
   it('הזמנה ישנה (רישומים עם מזהה אקראי, בלי paid.pk): ביטול מנקה; רשומת ניוד אחרת של הלקוח נשארת', async () => {
     await setup();
     const id = await paidOrder();
