@@ -649,6 +649,30 @@ describe('תיקון 1 – ליקוי 3: בדיקת PDF שלא נעקפת', () =
   });
 });
 
+describe('תיקון 2 – בדיקת PDF: "obj" שמוסתר במילון לא מסתיר אוסף דחוס', () => {
+  const hide = (extra) => Buffer.from(pdfObjStm('3 0 <</S /JavaScript /JS (app.alert(1))>>').toString('latin1').replace('/Type /ObjStm ', '/Type /ObjStm ' + extra + ' '), 'latin1');
+  it('שם עם obj, מחרוזת (obj), הערה %obj, ו-(1 0 obj) / (endobj) בתוך מחרוזת – נחסם', () => {
+    assert.equal(SI.inspect(hide('/Foo /objx')).why, 'active');
+    assert.equal(SI.inspect(hide('/Foo (obj)')).why, 'active');
+    assert.equal(SI.inspect(hide('/Foo (1 0 obj)')).why, 'active');
+    assert.equal(SI.inspect(hide('/Foo (endobj)')).why, 'active');
+    assert.equal(SI.inspect(hide('/Foo (a\\) obj)')).why, 'active');
+    const cm = Buffer.from(pdfObjStm('3 0 <</S /Launch>>').toString('latin1').replace('/Type /ObjStm ', '/Type /ObjStm %obj\n'), 'latin1');
+    assert.equal(SI.inspect(cm).why, 'active');
+  });
+  it('מסנן מזויף בתוך מחרוזת אחרי המסנן האמיתי – לא נפרס כטקסט גלוי (חסום או נתפס)', () => {
+    const b = Buffer.from(pdfObjStm('3 0 <</S /JavaScript>>').toString('latin1').replace('/Filter /FlateDecode', '/Filter /FlateDecode /X (obj /Filter /DCTDecode)'), 'latin1');
+    assert.notEqual(SI.inspect(b).ok, true);
+  });
+  it('קובץ רגיל עם זרם תמונה דחוס, אורך עקיף ו-"endstream" בתוך הנתונים – עובר', () => {
+    const z = require('node:zlib');
+    const img = Buffer.concat([Buffer.from('xx endstream yy (', 'latin1'), z.deflateSync(Buffer.from('BT /F1 12 Tf (Hello) Tj ET', 'latin1'))]);
+    const head = '%PDF-1.4\n1 0 obj<</Type /Catalog /Pages 2 0 R>>endobj\n2 0 obj<</Type /Pages /Kids [3 0 R] /Count 1>>endobj\n3 0 obj<</Type /Page /Parent 2 0 R /Contents 4 0 R>>endobj\n4 0 obj<</Length 5 0 R /Filter /FlateDecode>>stream\n';
+    const buf = Buffer.concat([Buffer.from(head, 'latin1'), img, Buffer.from('\nendstream\nendobj\n5 0 obj ' + img.length + ' endobj\n%uniq ' + (++SEQ) + '\ntrailer<<>>\n%%EOF', 'latin1')]);
+    assert.deepEqual(SI.inspect(buf), { ok: true, mime: 'application/pdf', pages: 1 });
+  });
+});
+
 describe('תיקון 1 – ליקוי 4: ביטול רק מהמכשיר שהכניס', () => {
   beforeEach(() => seed());
   it('אותו מנהל ממכשיר אחר – "אפשר לבטל רק במכשיר שבו החשבונית נכנסה", בלי שינוי; מהמכשיר שהכניס – בוטל; המזהה מגיע לרשימה', async () => {

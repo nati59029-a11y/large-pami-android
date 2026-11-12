@@ -54,29 +54,83 @@ function dictAt(t, i) {
   }
   return '';
 }
-// אוספי אובייקטים דחוסים (/ObjStm, או כל זרם עם /N ו-/First) – נפרסים (FlateDecode) ונבדקים גם הם. מה שאי אפשר לפרוס – null (חסימה)
+// מילוני הזרמים לפי קריאה רציפה של הקובץ (מדלגת על מחרוזות (...), מחרוזות הקס <..> והערות %), כדי ש-"obj" או "endobj"
+// שמוסתרים בתוך מחרוזת או הערה לא יחתכו את המילון (תיקון 2, ליקוי 1 של סבב 2). אורך הזרם לפי /Length כשהוא תואם
+function streamDicts(s) {
+  const res = [], n = s.length;
+  let i = 0, depth = 0, dStart = -1, last = '';
+  const lenOf = (d) => {
+    let m = /\/Length\s+(\d+)\s+(\d+)\s+R(?![A-Za-z])/.exec(d);
+    if (m) { const r = new RegExp('(?:^|[^0-9])' + m[1] + '\\s+' + m[2] + '\\s+obj\\s*(\\d+)\\s*endobj').exec(s); return r ? Number(r[1]) : -1; }
+    m = /\/Length\s+(\d+)(?![\d\s]*R)/.exec(d);
+    return m ? Number(m[1]) : -1;
+  };
+  while (i < n) {
+    const c = s[i];
+    if (c === '%') { while (i < n && s[i] !== '\n' && s[i] !== '\r') i++; continue; }
+    if (c === '(') {
+      let d = 1; i++;
+      while (i < n && d) { const ch = s[i]; if (ch === '\\') { i += 2; continue; } if (ch === '(') d++; else if (ch === ')') d--; i++; }
+      if (d) return null; // מחרוזת שלא נסגרת עד סוף הקובץ – לא ניתן לבדוק
+      continue;
+    }
+    if (c === '<' && s[i + 1] === '<') { if (depth === 0) dStart = i; depth++; i += 2; continue; }
+    if (c === '>' && s[i + 1] === '>') { if (depth > 0) { depth--; if (depth === 0 && dStart >= 0) last = s.slice(dStart, i + 2); } i += 2; continue; }
+    if (c === '<') { const e = s.indexOf('>', i); if (e < 0) return null; i = e + 1; continue; }
+    if (depth === 0 && c === 's' && s.startsWith('stream', i) && !/[A-Za-z0-9]/.test(s[i - 1] || ' ')) {
+      const m = /^stream(\r\n|\n|\r)/.exec(s.slice(i, i + 8));
+      if (m) {
+        const a = i + m[0].length;
+        let e = -1;
+        const L = lenOf(last);
+        if (L >= 0 && /^\s*endstream/.test(s.slice(a + L, a + L + 12))) e = a + L;
+        if (e < 0) e = s.indexOf('endstream', a);
+        if (e < 0) return null;
+        res.push({ dict: last, a, e });
+        last = ''; i = s.indexOf('endstream', e) + 9; continue;
+      }
+    }
+    if (depth === 0 && c === 'e' && s.startsWith('endobj', i)) last = '';
+    i++;
+  }
+  return res;
+}
+const isObjStmDict = (d) => /\/Type\s*\/ObjStm(?![A-Za-z])/.test(d) || (/\/N\s+\d/.test(d) && /\/First\s+\d/.test(d));
+const filtersOf = (d) => { const fm = /\/Filter\s*(\/[A-Za-z0-9]+|\[[^\]]*\])/.exec(d); return fm ? (fm[1].match(/\/[A-Za-z0-9]+/g) || []) : null; };
+// אוספי אובייקטים דחוסים (/ObjStm, או כל זרם עם /N ו-/First) – נפרסים (FlateDecode) ונבדקים גם הם. מה שאי אפשר לפרוס – null (חסימה).
+// כל זרם נבדק בשתי דרכים: לפי הקריאה הרציפה (streamDicts) ולפי חיפוש לאחור לכותרת אובייקט "N G obj". אם אחת מהן מזהה אוסף – נבדק;
+// אם הן לא מסכימות על המסנן – חסום
 function objStreams(buf, s) {
   const out = [];
   let total = 0;
+  const sd = streamDicts(s);
+  if (!sd) return null;
+  const byA = new Map(sd.map((x) => [x.a, x]));
+  const hdr = /\d+\s+\d+\s+obj(?![A-Za-z])/g;
   const re = /stream(\r\n|\n|\r)/g;
   let m;
   while ((m = re.exec(s))) {
     if (s.slice(Math.max(0, m.index - 3), m.index) === 'end') continue;
-    const o = s.lastIndexOf('obj', m.index);
-    if (o < 0) continue;
-    const dict = decNames(s.slice(o, m.index));
-    if (!(/\/Type\s*\/ObjStm(?![A-Za-z])/.test(dict) || (/\/N\s+\d/.test(dict) && /\/First\s+\d/.test(dict)))) continue;
-    if (out.length >= OBJSTM_MAX) return null;
     const a = m.index + m[0].length;
-    const e = s.indexOf('endstream', a);
+    const tok = byA.get(a);
+    // כותרת האובייקט האחרונה לפני הזרם (ולא סתם המחרוזת "obj")
+    let h = -1, hm;
+    hdr.lastIndex = Math.max(0, m.index - 20000);
+    while ((hm = hdr.exec(s)) && hm.index < m.index) h = hm.index;
+    const cands = [tok ? tok.dict : '', h >= 0 ? s.slice(h, m.index) : ''].map(decNames).filter(Boolean);
+    if (!cands.some(isObjStmDict)) continue;
+    if (out.length >= OBJSTM_MAX) return null;
+    const fls = cands.map(filtersOf).filter(Boolean).map((f) => f.join(' '));
+    if (new Set(fls).size > 1) return null;
+    const fl = fls.length ? fls[0].split(' ') : [];
+    const e = tok ? tok.e : s.indexOf('endstream', a);
     if (e < 0) return null;
     let raw = buf.subarray(a, e);
     while (raw.length && (raw[raw.length - 1] === 0x0a || raw[raw.length - 1] === 0x0d)) raw = raw.subarray(0, raw.length - 1);
-    const fm = /\/Filter\s*(\/[A-Za-z0-9]+|\[[^\]]*\])/.exec(dict);
-    const fl = fm ? (fm[1].match(/\/[A-Za-z0-9]+/g) || []) : [];
+    const pred = cands.some((d) => /\/Predictor\s+([2-9]|\d\d)/.test(d));
     let txt;
     if (!fl.length) txt = raw.toString('latin1');
-    else if (fl.length === 1 && ['/FlateDecode', '/Fl'].includes(fl[0]) && !/\/Predictor\s+([2-9]|\d\d)/.test(dict)) {
+    else if (fl.length === 1 && ['/FlateDecode', '/Fl'].includes(fl[0]) && !pred) {
       try { txt = zlib.inflateSync(raw, { maxOutputLength: INFLATE_MAX - total }).toString('latin1'); } catch (er) { return null; }
     } else return null; // מסנן אחר או שרשרת מסננים – לא נבדק, לכן נחסם
     total += txt.length;
