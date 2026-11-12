@@ -32,7 +32,8 @@ async function open(browser, www, who, calls) {
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
-    const R = { getCosts: { cost: { pB: 4 } }, markOrderPaid: { ok: true }, ordProfit: PROF, setOrderCfg: { ok: true, nc: d && d.nc }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
+    if (n === 'ordProfit' && globalThis.__PFAIL) return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', message: 'שדה לא מוכר: lite', details: { reason: 'bad-field' } } }) }); // שרת ישן
+    const R = { getCosts: { cost: { pB: 4 } }, markOrderPaid: { ok: true }, ordProfit: d && d.lite ? { n: 2, total: 139, paid: 100, paidN: 1 } : Object.assign({}, PROF, { paid: 100, paidN: 1 }), setOrderCfg: { ok: true, nc: d && d.nc }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
   await H.login(page, who + '@x.co');
@@ -53,6 +54,29 @@ async function open(browser, www, who, calls) {
     await page.evaluate(() => go('ox')); await H.settle(page, 1500);
     const btn = await page.evaluate(() => !!document.querySelector('[data-v=oxProf]'));
     check('1 מנהל: כפתור "רווחיות הזמנות" ברשימת ההזמנות', btn);
+    { // 12.11.2026: סיכום בראש מסך ההזמנות (#oxday) – היום / אתמול / תאריכים; רווח למנהל; לחיצה על הרווח → מסך הרווחיות
+      const today = await page.evaluate(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }));
+      const yest = await page.evaluate(() => { const d = new Date(Date.now() - 864e5); return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }); });
+      const d0 = calls.filter((x) => x.n === 'ordProfit').pop();
+      const t0 = await page.evaluate(() => { const e = document.getElementById('oxday'); const m = document.getElementById('main'); return { t: e ? e.innerText : '', first: !!m && !!e && m.querySelector('.card') === e, prof: !!document.getElementById('oxdayR') }; });
+      await shot(page, '00-סיכום-היום');
+      check('D1 מנהל: #oxday ראשון במסך; ordProfit להיום בלי lite; הזמנות 2, הכנסות 139, שולם 100 (1 הזמנות), רווח 63.5', !!d0 && d0.d.from === today && d0.d.to === today && !d0.d.lite && t0.first && t0.prof && /139\.00/.test(t0.t) && /100\.00/.test(t0.t) && /63\.50/.test(t0.t) && /היום/.test(t0.t) && /אתמול/.test(t0.t), { d: d0 && d0.d, t0 });
+      calls.length = 0; await page.click('#oxday [data-a=oxDayK][data-k=yest]'); await H.settle(page, 500);
+      const d1 = calls.filter((x) => x.n === 'ordProfit').pop();
+      calls.length = 0; await page.click('#oxday [data-a=oxDayK][data-k=custom]'); await H.settle(page, 300);
+      await page.fill('#oxday form[data-f=oxDayF] input[name=from]', '2026-10-01'); await page.fill('#oxday form[data-f=oxDayF] input[name=to]', '2026-10-31'); await page.click('#oxday form[data-f=oxDayF] button'); await H.settle(page, 500);
+      const d2 = calls.filter((x) => x.n === 'ordProfit').pop();
+      const sm = await page.evaluate(() => { const R = document.getElementById('oxday'); const small = [...R.querySelectorAll('button, a, select, input')].filter((e) => { const r = e.getBoundingClientRect(); return r.height > 0 && r.height < 44 && !e.closest('label.f'); }).map((e) => (e.dataset.a || e.tagName) + ':' + Math.round(e.getBoundingClientRect().height)); return { small, ov: document.documentElement.scrollWidth - innerWidth }; });
+      check('D2 אתמול → ordProfit מ-אתמול עד אתמול; תאריכים → 1.10–31.10; כפתורים ≥44px ובלי גלילה רוחבית ב-360px', !!d1 && d1.d.from === yest && d1.d.to === yest && !!d2 && d2.d.from === '2026-10-01' && d2.d.to === '2026-10-31' && sm.small.length === 0 && sm.ov <= 1, { d1: d1 && d1.d, d2: d2 && d2.d, sm });
+      await page.click('#oxday [data-a=oxDayK][data-k=today]'); await H.settle(page, 500);
+      calls.length = 0; await page.click('#oxday [data-a=oxDayProf]'); await H.settle(page, 800);
+      const pv = await page.evaluate(() => cur().v); const d3 = calls.filter((x) => x.n === 'ordProfit').pop();
+      check('D3 לחיצה על הרווח → מסך "רווחיות הזמנות" לאותה תקופה', pv === 'oxProf' && !!d3 && d3.d.from === today && d3.d.to === today, { pv, d: d3 && d3.d });
+      // שרת ישן: ordProfit נדחה → חישוב מההזמנות שנטענו (o1 היום: 39, לא שולם; רווח 16) עם הערה
+      globalThis.__PFAIL = 1; await page.evaluate(() => { __ox.day.at = 0; go('ox'); }); await H.settle(page, 1200); globalThis.__PFAIL = 0;
+      const t4 = await page.evaluate(() => ({ t: (document.getElementById('oxday') || {}).innerText || '', loc: !!document.getElementById('oxdayLoc'), n: (document.getElementById('oxdayN') || {}).innerText, r: (document.getElementById('oxdayR') || {}).innerText || '' }));
+      check('D4 שרת ישן: חישוב מקומי (הזמנה אחת, 39, שולם 0, רווח 16) + "לפי ההזמנות שנטענו"', t4.loc && t4.n === '1' && /39\.00/.test(t4.t) && /16\.00/.test(t4.r) && /לפי ההזמנות שנטענו/.test(t4.t), t4);
+      await page.evaluate(() => { __ox.day.at = 0; __ox.pf = null; }); } // מסך הרווחיות נפתח שוב מההתחלה (בדיקה 4)
     await page.evaluate(() => go('oxOrd', 'o1')); await H.settle(page, 800);
     const c = await page.evaluate(() => (document.getElementById('oxprof') || {}).innerText || '');
     await shot(page, '01-כרטיס-הזמנה');
@@ -63,6 +87,8 @@ async function open(browser, www, who, calls) {
     const pd = await page.evaluate(() => ({ t: (document.getElementById('dlg') || {}).innerText || '', p: (document.getElementById('oxpaidp') || {}).innerText || '' }));
     await shot(page, '02-אחרי-תשלום');
     check('3 אחרי "שולם": "סך הכול הרווחת 16"', /סך הכול הרווחת/.test(pd.t) && /16\.00/.test(pd.p), pd);
+    const cel = await page.evaluate(() => { const c = document.getElementById('oxpaidc'), p = document.getElementById('oxpaidp'); return c && p ? { h: c.querySelector('h3').innerText, fs: parseFloat(getComputedStyle(p).fontSize), bc: getComputedStyle(c).borderTopColor, acc: (() => { const i = document.createElement('i'); i.style.color = 'var(--acc)'; document.body.appendChild(i); const v = getComputedStyle(i).color; i.remove(); return v; })(), col: getComputedStyle(p).color, cheer: (document.getElementById('oxcheer') || {}).innerText || '' } : null; });
+    check('3א חלונית חגיגית: "כל הכבוד! ההזמנה שולמה", סכום גדול (≥30px) בצבע --acc, מסגרת --acc, שורת עידוד', !!cel && cel.h === 'כל הכבוד! ההזמנה שולמה' && cel.fs >= 30 && cel.bc === cel.acc && cel.col === cel.acc && cel.cheer.length > 5, cel);
     await page.evaluate(() => closeDlg());
     calls.length = 0;
     await page.evaluate(() => go('oxProf')); await H.settle(page, 1200);
@@ -110,7 +136,11 @@ async function open(browser, www, who, calls) {
     const a2 = await page.evaluate(() => !!document.getElementById('oxprof'));
     await page.evaluate(() => go('oxProf')); await H.settle(page, 500);
     const a3 = await page.evaluate(() => document.getElementById('main').innerText);
-    check('10 עובד בלי "רווחיות הזמנות": אין כפתור, אין רווח בכרטיס, המסך חסום, ולא נקרא ordProfit', !a && !a2 && /אין לך הרשאה לרווחיות הזמנות/.test(a3) && !calls.some((x) => x.n === 'ordProfit'), { a, a2 });
+    const wd = await page.evaluate(() => { go('ox'); return 1; }); await H.settle(page, 800); void wd;
+    const wday = await page.evaluate(() => ({ t: (document.getElementById('oxday') || {}).innerText || '', r: !!document.getElementById('oxdayR') }));
+    const wl = calls.filter((x) => x.n === 'ordProfit');
+    check('D5 עובד בלי "רווחיות הזמנות": #oxday עם הזמנות/הכנסות/שולם, בלי רווח; ordProfit עם lite בלבד', /139\.00/.test(wday.t) && /100\.00/.test(wday.t) && !wday.r && !/רווח/.test(wday.t) && wl.length > 0 && wl.every((x) => x.d.lite === true), { wday, wl: wl.map((x) => x.d) });
+    check('10 עובד בלי "רווחיות הזמנות": אין כפתור, אין רווח בכרטיס, המסך חסום, ולא נקרא ordProfit עם רווח (רק lite לסיכום היום)', !a && !a2 && /אין לך הרשאה לרווחיות הזמנות/.test(a3) && !calls.some((x) => x.n === 'ordProfit' && x.d.lite !== true), { a, a2 });
     await st({ incR: false, incW: true, expR: true, expW: true, sup: true, sal: false, rep: false, ord: true, trf: false, bal: false, ordP: true }); await H.settle(page, 600);
     const b = await page.evaluate(() => { const x = !!document.querySelector('[data-v=oxProf]'); go('oxProf'); return x; }); await H.settle(page, 800);
     const b2 = await page.evaluate(() => ({ sum: !!document.getElementById('oxpfsum'), nc: !!document.querySelector('[data-c=oxNc]') }));
