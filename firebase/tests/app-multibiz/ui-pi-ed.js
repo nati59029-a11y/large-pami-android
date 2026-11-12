@@ -172,9 +172,11 @@ const inp = (i, k) => `#pil${i} input[data-k="${k}"]`;
   check('4ב "קיים אצל ספק אחר" → קישור: pid של הספק האחר, מחיר וסיטונאי מהמלאי שלו', k1.l.pid === 'pO' && /שטראוס/.test(k1.hd) && k1.price === '6' && k1.wp === '4' && k1.src === 'מהמלאי', k1);
 
   // ---- 5. הדפסה (שלב 6), צילום ----
-  await A.page.click('#pil0 [data-a=piPrP]'); const t5 = await A.page.evaluate(() => [...document.querySelectorAll('.toast')].map((x) => x.textContent).join('|'));
-  await A.page.click('#pil0 [data-a=piPrS]'); const t5b = await A.page.evaluate(() => [...document.querySelectorAll('.toast')].map((x) => x.textContent).join('|'));
-  check('5 "הדפס מחיר" / "הדפס מבצע" – כפתורים עם "בקרוב" (החיבור בשלב 6)', /מחיר.*בקרוב/.test(t5) && /מבצע.*בקרוב/.test(t5b), [t5, t5b]);
+  await A.page.click('#pil0 [data-a=piPrP]'); await sleep(200); const t5 = await A.page.evaluate(() => ({ v: cur().v, n: SHF && SHF.n }));
+  await A.page.evaluate(() => ACT.shCancel()); await sleep(200);
+  await A.page.click('#pil0 [data-a=piPrS]'); await sleep(200); const t5b = await A.page.evaluate(() => ({ v: cur().v, n: SHP && SHP.n }));
+  await A.page.evaluate(() => ACT.shCancel()); await sleep(200);
+  check('5 "הדפס מחיר" / "הדפס מבצע" – פותחים פתק ממולא במדף, וביטול חוזר לחשבונית (פירוט – ui-pi-shelf.js)', t5.v === 'shAdd' && t5.n === 'במבה 80 גרם' && t5b.v === 'shPromo' && t5b.n === 'במבה 80 גרם' && (await A.page.evaluate(() => cur().v + ':' + cur().a)) === 'piEd:i1', [t5, t5b]);
   await A.page.click('[data-a=piImgV]');
   const vw = await waitFor(A.page, () => !!document.getElementById('viewer') && !document.getElementById('viewer').hidden);
   check('5א צילום החשבונית נטען מהענן (pinv/i1/p/0) ונפתח בלחיצה', vw && calls('img').some((c) => /pinv\/i1\/p\/0/.test(c.url)));

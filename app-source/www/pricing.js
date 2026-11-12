@@ -157,9 +157,9 @@ PI.beatMs=60e3;PI.draftMs=1500;
 /* מי רואה: מנהל / מנהל־על, או עובד שהמתג prc דולק אצלו במפורש (כבוי כברירת מחדל, גם בלארג' פעמי – החלטה 5). השרת והחוקים אוכפים */
 const can=()=>{try{return(isA()||!!(SY&&SY.sa)||(isW()&&!!(SY.perms&&SY.perms.prc===true)))&&(bzF('shelf')||bzF('orders'))}catch(e){return false}};
 PI.can=can;
-/* "הדפס מחיר" / "הדפס מבצע" – החיבור למדף בשלב 6 (מחליפים את PI.prP / PI.prS) */
-PI.prP=PI.prP||(()=>toast('הדפסת פתק מחיר מהחשבונית – בקרוב'));
-PI.prS=PI.prS||(()=>toast('הדפסת דף מבצע מהחשבונית – בקרוב'));
+/* "הדפס מחיר" / "הדפס מבצע" – PI.prP / PI.prS: החיבור למדף (שלב 6), בסוף הקובץ. בלי מודול המדף (הזמנות בלבד) – הכפתורים מוסתרים */
+const shelfOk=()=>{try{return bzF('shelf')&&typeof V.shAdd==='function'&&typeof V.shPromo==='function'&&typeof FRM.shadd==='function'&&typeof FRM.shpromo==='function'&&typeof shpNew==='function'&&typeof shPrice==='function'}catch(e){return false}};
+PI.shelf=shelfOk;
 const deny=t=>({t,h:'<div class="empty">אין לך הרשאה לעדכון מחירים ומלאי</div>'});
 const fresh=lk=>!!lk&&typeof lk.t==='number'&&Date.now()-lk.t<LOCK_MS;
 const lkOther=x=>fresh(x.lk)&&x.lk.uid!==SY.uid;
@@ -293,7 +293,7 @@ function lineH(e,l,i){const dis=e.lost?' disabled':'',p=prodOf(e,i);
  const R=`<div class="pr">${fld('מחיר לצרכן כולל מע"מ',i,'price',l.price,'inputmode="decimal"')}<b class="mg" id="pim${i}">${mgH(e,i)}</b>
   ${e.ord?`${fld('מחיר סיטונאי לפני מע"מ',i,'wp',l.wp,'inputmode="decimal"')}<small class="sm" id="pis${i}" style="margin-top:-4px;margin-bottom:6px">${wsrc(l)}</small>
   <label class="cb"><input type="checkbox" data-c="piCto" data-x="${i}"${l.cto?' checked':''}${dis}>רק קרטונים סגורים</label>`:''}
-  <div class="bt"><button type="button" class="btn g s" data-a="piPrP" data-x="${i}"${dis}>הדפס מחיר</button><button type="button" class="btn g s" data-a="piPrS" data-x="${i}"${dis}>הדפס מבצע</button></div></div>`;
+  ${shelfOk()?`<div class="bt"><button type="button" class="btn g s" data-a="piPrP" data-x="${i}"${dis}>הדפס מחיר</button><button type="button" class="btn g s" data-a="piPrS" data-x="${i}"${dis}>הדפס מבצע</button></div>`:''}</div>`;
  return`<div class="pil${l.chk?' ck':''}" id="pil${i}">${L}${R}</div>`}
 /* שורה שדילגו עליה (פיקדון, דמי משלוח…): מעומעמת, עם "החזר". לא נספרת בסיום, לא נוצר ממנה מוצר ולא נוספת כמות (skip בשרת) */
 function lineX(e,l,i){if(!l.skip)return lineH(e,l,i);const dis=e.lost?' disabled':'';
@@ -361,4 +361,40 @@ FRM.piFinF=async f=>{if(!E||!E.L||E.fin)return;const e=E,x=fd(f),b=f.querySelect
   if(cur().v==='piEd'&&NAV.length>1)goBack();else{E=null;rerender()}}
  catch(y){b.disabled=false;const st=await resync(e,y);if(e.lost||st==='reloaded')closeDlg();
   toast(st==='reloaded'?e.note:st==='same'?'החיבור לחשבונית חודש – לחצו שוב על "אישור ושמירה"':(y&&y.message||'השמירה נכשלה'))}};
+
+/* ---------- שלב 6: "הדפס מחיר" / "הדפס מבצע" – פתק במודול המדף וחזרה לחשבונית ----------
+   ממלאים את SHF (פתק מחיר) / SHP (מבצע) מהשורה – שם, פירוט (מהזיכרון של המדף, אם יש), מחיר לצרכן כולל מע"מ, ברקוד – ועוברים
+   ל-shAdd / shPromo עם סימון חזרה (RT). piEd נשאר ב-NAV, ולכן הנעילה והפעימה ממשיכות; טיוטה נשמרת לפני המעבר.
+   FRM.shadd / FRM.shpromo / ACT.shCancel עטופים בלי לשנות אותם: רק כשיש סימון חזרה תקף (המסך הקודם הוא אותה חשבונית) –
+   אחרי שהפתק נכנס לטיוטה (גם אחרי "הדף מלא – המשך") או בביטול: goBack() לחשבונית ולאותה גלילה. מחיר ששונה בפתק מחיר (לא במבצע)
+   חוזר לשורה (% הרווח מחושב מחדש). מדף רגיל (בלי סימון) – בדיוק כמו קודם. */
+let RT=null;PI.rt=()=>RT;
+const rtOk=v=>{if(!RT||!E||E.id!==RT.id||RT.v!==v||cur().v!==v)return false;const p=NAV[NAV.length-2];return!!p&&p.v==='piEd'&&p.a===RT.id};
+function rtBack(r){if(RT!==r)return;RT=null;if(cur().v!==r.v)return;goBack();if(cur().v==='piEd'&&cur().a===r.id)window.scrollTo(0,r.y)}
+function toShelf(i,k){if(!E||!E.L||E.lost||E.fin||!shelfOk())return;const l=E.L[i];if(!l||l.skip)return;
+ if(E.dirty)draft(E);
+ const bc=BC_RE.test(l.bc||'')?l.bc:'',n=String(l.n||'').trim().slice(0,60),p=l.price!=null?String(l.price):'';
+ let d='';try{const m=bc&&SH.bc&&SH.bc[bc];d=m&&m.d||((SH.cat||[]).find(x=>x&&x.n===n&&x.d)||{}).d||''}catch(e){}
+ try{shSync().catch(()=>{})}catch(e){}
+ SHS={price:{},promo:{}};
+ if(k==='price')SHF={mode:'form',n,d,p,edit:-1,bc};
+ else SHP=Object.assign(shpNew(),{mode:'form',kind:'B',n,d,bc,reg:p,now:''});/* הנחה: מבצע לפריט, "מחיר רגיל" = המחיר שבשורה */
+ const v=k==='price'?'shAdd':'shPromo';RT={id:E.id,i,k,v,gen:E.gen,y:window.scrollY||0};
+ go(v,'pi')}
+PI.prP=i=>toShelf(i,'price');
+PI.prS=i=>toShelf(i,'promo');
+/* אישור הפתק: f0 מוסיף לטיוטה וקורא ל-fin מיד, או (דף מלא) פותח חלון ו-fin רץ ב"המשך" (SHW.go). הפתק נוסף = SHF/SHP הוחלף */
+function wrapF(name,v,st){const f0=FRM[name];if(typeof f0!=='function')return;
+ FRM[name]=function(){if(!rtOk(v))return f0.apply(this,arguments);
+  const r=RT,s0=st==='F'?SHF:SHP,np=st==='F'&&SHF?shPrice(SHF.p):'',w0=typeof SHW!=='undefined'?SHW:null;
+  const done=()=>{if(RT!==r)return;
+   if(np&&E&&E.id===r.id&&E.gen===r.gen&&E.L&&E.L[r.i]&&!E.lost&&!E.fin&&+np!==E.L[r.i].price){E.L[r.i].price=r2(+np);dirty()}
+   rtBack(r)};
+  const x=f0.apply(this,arguments);
+  if((st==='F'?SHF:SHP)!==s0)done();/* fin איפס את הטופס (V.shPromo יוצר SHP חדש מיד) */
+  else if(typeof SHW!=='undefined'&&SHW&&SHW!==w0&&typeof SHW.go==='function'){const g=SHW.go;SHW.go=function(){const y=g.apply(this,arguments);done();return y}}
+  return x}}
+wrapF('shadd','shAdd','F');wrapF('shpromo','shPromo','P');
+{const c0=ACT.shCancel;if(typeof c0==='function')ACT.shCancel=function(){const v=cur().v;if(!rtOk(v))return c0.apply(this,arguments);
+ const r=RT,x=c0.apply(this,arguments);rtBack(r);return x}}
 })();
