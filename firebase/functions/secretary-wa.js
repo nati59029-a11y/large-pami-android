@@ -16,7 +16,8 @@
 //   sec_snd/{wa}       כרטיס שולח (17): { wa, name, first, lastIn, n, lang, link?:{k:'cust'|'sup',id?,name}, own?, ownExp?, rh, rn, rd, rdn, mgr?, openAt?, ackAt? }
 //   sec_cfg/wa         הגדרות ווצאפ של העסק (שרת בלבד): pnid, num, link, mgr{uid:wa}, mgrReq{uid:wa}, hour, ackH{f,t}, tpls[], ack{on,text}, open{on,text},
 //                      stop{on,auto,why,at,by}, ord (בוט ההזמנות מחובר – היום false), appr{cls:n}, autoWant{cls:{by,at}}
-//   sec_cfg/wa_use     מונים: הצפה לשעה, יציאות ליום, יצירות ביומן ליום לכל מנהל, שגיאות ברצף
+//   sec_cfg/wa_use     מונים: הצפה לשעה, יציאות ליום, יצירות ביומן ליום לכל מנהל
+//   sec_cfg/wa_err     שגיאות עיבוד ברצף (עצירה אוטומטית – 33)
 // בשורש (שרת בלבד): sec_route/{phone_number_id} { biz, mgr:{wa:uid} } – הניתוב והבידוד בין עסקים; sec_waq/{biz__id} – תור העיבוד.
 //
 // אבטחה: webhook – חתימה (App Secret), גודל לפני הכול, בידוד לפי מספר. פונקציות אפליקציה – אותו שער כמו שלבים 1–4 (gate),
@@ -118,11 +119,14 @@ async function countOut(db, now) {
   });
 }
 async function errMark(db, ok, now) {
-  const ref = db.doc('sec_cfg/wa_use');
+  // מסמך נפרד ממוני ההצפה (wa_use): כל הודעה שמעובדת מעדכנת את המונה הזה, ובמסמך משותף זה התנגש עם קבלת ההודעות בעומס
+  // (בדיקת העומס, שלב 8). כתיבה רק כשהערך משתנה – עיבוד מוצלח כשהמונה כבר 0 לא כותב כלום
+  const ref = db.doc('sec_cfg/wa_err');
   const n = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
-    const v = ok ? 0 : (s.exists ? s.get('err') || 0 : 0) + 1;
-    tx.set(ref, { err: v }, { merge: true });
+    const cur = s.exists ? s.get('err') || 0 : 0;
+    const v = ok ? 0 : cur + 1;
+    if (v !== cur) tx.set(ref, { err: v }, { merge: true });
     return v;
   });
   if (!ok && n >= ERR_STOP) await autoStop(db, 'errors', now);

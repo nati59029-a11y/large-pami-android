@@ -694,12 +694,12 @@ describe('תיקונים 4–5: הודעה שלא עובדה חוזרת לתור
       return WA.work(A, id, { now, send: sendFn, ai: fakeAi, token: 'tok' });
     }
     await prep((d) => d.doc(`b/${A}/sec_cfg/wa`).set({ open: { on: true, text: 'שלום! כאן המזכירה.' } }, { merge: true }));
-    await prep((d) => d.doc(`b/${A}/sec_cfg/wa_use`).set({ err: 4 }, { merge: true }));
+    await prep((d) => d.doc(`b/${A}/sec_cfg/wa_err`).set({ err: 4 }, { merge: true }));
     await one('wamid.E1', OUT1, async () => { throw new Error('no send expected'); }, 1); // בלי שליחה אוטומטית (כבר קיבל פתיחה)
-    assert.equal((await get(`b/${A}/sec_cfg/wa_use`)).err, 0, 'עיבוד מוצלח מאפס');
-    await prep((d) => d.doc(`b/${A}/sec_cfg/wa_use`).set({ err: 3 }, { merge: true }));
+    assert.equal((await get(`b/${A}/sec_cfg/wa_err`)).err, 0, 'עיבוד מוצלח מאפס');
+    await prep((d) => d.doc(`b/${A}/sec_cfg/wa_err`).set({ err: 3 }, { merge: true }));
     await one('wamid.E2', OUT2, async () => { const e = new Error('meta'); e.code = 'unavailable'; throw e; }); // פונה חדש – פתיחה שנכשלה
-    assert.equal((await get(`b/${A}/sec_cfg/wa_use`)).err, 4, 'שליחה שנכשלה – המונה עולה ולא מתאפס');
+    assert.equal((await get(`b/${A}/sec_cfg/wa_err`)).err, 4, 'שליחה שנכשלה – המונה עולה ולא מתאפס');
   });
 });
 
