@@ -263,6 +263,31 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   // הסגירה לא תואמת כשחסרה הוצאה (בדיקה שהסימון באמת משווה)
   const r18 = await page.evaluate(() => { const z = S.zc.find((x) => x.id === 'rcZ2'); z.co.s = 150; z.co.ids = ['rcA', 'rcB', 'rcMissing']; const R = coLastR('i_nl', coMine()); z.co.s = 125; z.co.ids = ['rcA', 'rcB']; return { s: R.s, cs: R.cs, miss: R.miss }; });
   check('18 סגירה עם הוצאה שלא נמצאה במכשיר: סכום המסומנות (125) שונה מהסגירה (150) ומדווח חסר', r18.s === 125 && r18.cs === 150 && r18.miss === 1, r18);
+  // 31. פתק "הוצאת מזומן מהקופה" בקטגוריית ספק (12.11): תשלום מהקופה, לא חשבונית – "תאריך התשלום", בלי חודש תשלום לפי תנאי הספק, מספר חשבונית לא חובה;
+  // תאריך שזוהה רחוק מסגירת הקופה (2024 במקום 2026) – אזהרה והצעה לתאריך הסגירה; "שמור ואשר" שואל "תגיע חשבונית מהספק בהמשך?"
+  const r31 = await page.evaluate(async () => {
+    const W = (ms) => new Promise((r) => setTimeout(r, ms || 150)), F = () => document.querySelector('#dlg[open] form[data-f=inbsave]');
+    S.zc.push({ id: 'rcZ9', reg: 'i_nl', d: '2026-11-10', tm: '22:00' });
+    S.inbox.push({ id: 'rcSlip', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', file: 'fSlip', d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup2', amt: 55, date: '2024-11-10', ctm: '09:02', note: 'אפייה' } },
+      { id: 'rcRealInv', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', d: { cat: 'e_sup', sub: 'rcSup2', amt: 30, date: '2024-11-10' } }); save();
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg'); const cardW = !!document.querySelector('#main [data-datewarn]');
+    ACT.inbEdit({ dataset: { id: 'rcSlip' } }); await W(); let f = F();
+    const lbl = f.elements.date.closest('label').querySelector('span').textContent, warn = (f.querySelector('[data-datewarn]') || {}).textContent || '', use = f.querySelector('[data-a=inbUseRef]');
+    const o1 = { lbl, warn, useD: use && use.dataset.d, plan: !!f.elements.plan, due: !!f.elements.due, invReq: f.elements.inv ? f.elements.inv.required : null, note: !!f.querySelector('[data-regpay]'), dn: !!f.elements.dn };
+    use.click(); await W(); f = F(); const o2 = { date: f.elements.date.value, warn: !!f.querySelector('[data-datewarn]') };
+    ACT.inbSaveOk(); await W(300);
+    if (document.querySelector('#dlg[open] [data-a=inbRegNoInv]')) { document.querySelector('#dlg[open] [data-a=inbRegNoInv]').click(); await W(); }
+    const q = (document.querySelector('#dlg[open]') || {}).innerText || ''; const yes = document.querySelector('#dlg[open] [data-a=inbRegAw][data-w]'); if (yes) { yes.click(); await W(300); }
+    const t = S.tx.find((x) => x.src === 'rcSlip') || {};
+    ACT.inbEdit({ dataset: { id: 'rcRealInv' } }); await W(); const g = F();
+    const o3 = { lbl: g.elements.date.closest('label').querySelector('span').textContent, invReq: g.elements.inv && g.elements.inv.required, warn: !!g.querySelector('[data-datewarn]'), plan: !!(g.elements.plan || g.elements.due) };
+    closeDlg(); S.inbox = S.inbox.filter((x) => x.id !== 'rcRealInv'); save();
+    return { cardW, o1, o2, q: q.slice(0, 300), t: { date: t.date, plan: t.plan, due: t.due || '', aw: !!t.await, inv: t.inv, creg: t.creg, pays: (t.pays || []).map((p) => p.m + ':' + p.a + ':' + p.d) }, o3 };
+  });
+  check('31א פתק מקופה בקטגוריית ספק: "תאריך התשלום", בלי חודש/תאריך תשלום לפי תנאי הספק, מספר חשבונית לא חובה, בלי "תעודת משלוח"', r31.o1.lbl === 'תאריך התשלום' && !r31.o1.plan && !r31.o1.due && r31.o1.invReq === false && r31.o1.note && !r31.o1.dn, r31.o1);
+  check('31ב תאריך שזוהה רחוק מסגירת הקופה (10/11/2024 מול 10/11/2026): אזהרה בכרטיס ובטופס, והצעה לתאריך הסגירה שמחליפה את התאריך ומעלימה את האזהרה', r31.cardW && /סגירת הקופה/.test(r31.o1.warn) && r31.o1.useD === '2026-11-10' && r31.o2.date === '2026-11-10' && !r31.o2.warn, { o1: r31.o1, o2: r31.o2 });
+  check('31ג "שמור ואשר" שואל "תגיע חשבונית מהספק בהמשך?"; "כן" – תשלום במזומן מהקופה בתאריך הפתק שממתין לחשבונית, חודש התשלום = חודש הפתק, בלי תאריך תשלום לפי תנאים', /תגיע חשבונית מהספק בהמשך/.test(r31.q) && r31.t.aw && r31.t.date === '2026-11-10' && r31.t.plan === '2026-11' && !r31.t.due && r31.t.creg === 'i_nl' && r31.t.pays.join() === 'מזומן:55:2026-11-10', r31);
+  check('31ד חשבונית ספק אמיתית (לא מקופה) בלי שינוי: "תאריך החשבונית", מספר חשבונית חובה, בלי אזהרת תאריך', r31.o3.lbl === 'תאריך החשבונית' && r31.o3.invReq === true && !r31.o3.warn, r31.o3);
   check('19 אין שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
   if (out) fs.writeFileSync(out, JSON.stringify({ fail, res }, null, 1));
