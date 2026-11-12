@@ -203,6 +203,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('20 סגירת קופה (coAdd): אותה קופה+תאריך+סכום – חלון כפילות, לא נשמר עד אישור, ואז נשמר פעם אחת', /מקופה/.test(r7.d1) && r7.n1 === 0 && r7.n2 === 1, r7);
 
   check('21 אין שגיאות JS', page.__errors.length === 0, page.__errors);
+  // 12.11: שינוי ידני של הוצאה קיימת (פרטי תנועה / ממתין לסיווג) – אזהרה חיה + חלון באישור; "בטל את השינוי" לא משנה
+  const rE = await page.evaluate(async () => {
+    const W = (ms) => new Promise((r) => setTimeout(r, ms || 120)), ex = S.cats.find((c) => c.kind === 'exp' && c.beh === 'simple');
+    S.tx.push({ id: 'eA', t: 'exp', cat: ex.id, date: '2026-10-05', amt: 70, pays: [], kind: 'inv' }, { id: 'eB', t: 'exp', cat: ex.id, date: '2026-10-06', amt: 71, pays: [], kind: 'inv' },
+      { id: 'eP1', t: 'exp', cat: 'p_exp', date: '2026-10-07', amt: 33, pays: [], kind: 'inv' }, { id: 'eP2', t: 'exp', cat: 'p_exp', date: '2026-10-07', amt: 34, pays: [], kind: 'inv' }); save();
+    const setV = (n, v) => { const f = document.querySelector('#dlg form'); f.elements[n].value = v; f.elements[n].dispatchEvent(new Event('change', { bubbles: true })); };
+    ACT.txEdit({ dataset: { id: 'eB' } }); await W(); setV('note', 'רק הערה'); const live0 = document.querySelector('#dlg [data-dupn]').innerText;
+    setV('amt', '70'); setV('date', '2026-10-05'); await W(); const live1 = document.querySelector('#dlg [data-dupn]').innerText;
+    document.querySelector('#dlg form button:not([type=button])').click(); await W(); const d1 = document.querySelector('#dlg[open]').innerText;
+    document.querySelector('#dlg [data-a=dupDel]').click(); await W(); const b0 = S.tx.find((t) => t.id === 'eB');
+    ACT.txEdit({ dataset: { id: 'eB' } }); await W(); setV('amt', '70'); setV('date', '2026-10-05'); document.querySelector('#dlg form button:not([type=button])').click(); await W();
+    document.querySelector('#dlg [data-a=yes]').click(); await W(300); const b1 = S.tx.find((t) => t.id === 'eB');
+    ACT.txEdit({ dataset: { id: 'eP2' } }); await W(); setV('amt', '33'); await W(); const liveP = document.querySelector('#dlg [data-dupn]').innerText;
+    document.querySelector('#dlg form button').click(); await W(); const dP = !!document.querySelector('#dlg [data-a=dupDel]'); closeDlg();
+    return { live0, live1, d1: d1.slice(0, 200), b0: [b0.amt, b0.date], b1: [b1.amt, b1.date], liveP, dP, p2: S.tx.find((t) => t.id === 'eP2').amt };
+  });
+  check('22 שינוי ידני בפרטי תנועה: הערה בלבד – אין אזהרה; שינוי סכום+תאריך לכפילות – אזהרה חיה וחלון; "בטל את השינוי" לא משנה; "שמור בכל זאת" שומר',
+    !rE.live0 && /כבר קיימת/.test(rE.live1) && /בטל את השינוי/.test(rE.d1) && rE.b0.join() === '71,2026-10-06' && rE.b1.join() === '70,2026-10-05', rE);
+  check('23 שינוי ידני ב"ממתין לסיווג": שינוי סכום לכפילות – אזהרה חיה וחלון, והשינוי לא נשמר עד אישור', /כבר קיימת/.test(rE.liveP) && rE.dP && rE.p2 === 34, rE);
+
   await ctx.close(); await browser.close();
   if (out) fs.writeFileSync(out, JSON.stringify({ fail, res }, null, 1));
   console.log(fail ? `נכשלו ${fail}` : 'הכול עבר'); process.exit(fail ? 1 : 0);
