@@ -8,6 +8,8 @@
 //                         wpSrc?: 'stock'|'auto'|'man', cto? }],
 //                lk?: { uid, name, t } (בטיפול), fin?: { by, name, t, rq, add, upd, void? }, np? (חלקי הצילום), img? }
 //   pinv/{id}/p/{k} { data } – צילום החשבונית בחלקים (piImg, שלב 4)
+//   rev – גרסת השורות (סבב 1 לשלב 4): עולה בכל piDraft / piFinish. piClaim מחזיר אותה; piDraft / piFinish מקבלים את ה-rev שהמסך טען,
+//     ונדחים ב-'conflict' אם השתנה – כך מסך ישן (נעילה שפגה, מישהו אחר ערך ויצא, או אותו משתמש במכשיר אחר) לא דורס עבודה של אחר.
 //
 // חוזה השורה (תיקון סבב 1, ליקוי 1): qty ו-cost הם תמיד ביחידת מלאי (מארז; החלטה 3) – qty = מספר המארזים שנכנסים למלאי,
 //   cost = עלות מארז לפני מע"מ. ההמרה מקרטונים (קרטונים × ct, מחיר קרטון ÷ ct) נעשית במכשיר לפני השליחה (www/pricing-lines.js,
@@ -143,6 +145,12 @@ function holder(d, w, now) {
   throw pre('not-locked', 'צריך להיכנס לחשבונית מחדש');
 }
 const lockOf = (w, now) => ({ uid: w.uid, name: w.uname, t: now });
+const revOf = (d) => (Number.isInteger(d.rev) && d.rev >= 0 ? d.rev : 0);
+function revIn(input) {
+  if (!Number.isInteger(input.rev) || input.rev < 0) throw bad('bad-rev', 'גרסת החשבונית חסרה – צריך להיכנס לחשבונית מחדש');
+  return input.rev;
+}
+const conflict = () => pre('conflict', 'עובד אחר ערך את החשבונית בינתיים – צריך לטעון אותה מחדש');
 
 // ---------- זיהוי מוצר קיים: ברקוד + ספק ----------
 const normSup = (s) => String(s || '').toLowerCase().replace(/בע["'״׳]?מ/g, '').replace(/\bltd\b/g, '').replace(/[^\p{L}\p{N}]/gu, '');
@@ -261,7 +269,7 @@ async function piClaim(request) {
   const vat = await vatOf(db, w);
   const m = w.ord ? await matches(db, d, vat) : [];
   const inv = { st: d.st, src: d.src, sup: d.sup || '', supId: d.supId || '', inv: d.inv || '', date: d.date || '', by: d.by, byName: d.byName || '', at: d.at, np: Number.isInteger(d.np) ? d.np : 0, lines: Array.isArray(d.lines) ? d.lines : [] };
-  return { ok: true, id, inv, lk: d.lk, until: now + LOCK_MS, vat, ord: w.ord, m };
+  return { ok: true, id, inv, rev: revOf(d), lk: d.lk, until: now + LOCK_MS, vat, ord: w.ord, m };
 }
 
 // piBeat({ id }) – "עדיין בטיפול" (כל דקה מהמסך): מחדש את הנעילה
@@ -295,11 +303,13 @@ async function piRelease(request) {
   return { ok: true, rel };
 }
 
-// piDraft({ id, lines, sup?, inv?, date?, supId? }) – שמירת עבודה באמצע (כדי שאחר ימשיך), רק למחזיק. מחדש את הנעילה
+// piDraft({ id, rev, lines, sup?, inv?, date?, supId? }) – שמירת עבודה באמצע (כדי שאחר ימשיך), רק למחזיק ורק על הגרסה שנטענה.
+//   מחדש את הנעילה ומחזיר את הגרסה החדשה (rev)
 async function piDraft(request) {
   const w = await pw(request);
   const input = inputObject(request);
-  O.onlyKeys(input, ['id', 'lines', 'sup', 'inv', 'date', 'supId']);
+  O.onlyKeys(input, ['id', 'rev', 'lines', 'sup', 'inv', 'date', 'supId']);
+  const rev = revIn(input);
   const ref = T.tdb().doc('pinv/' + O.idOf(input.id, 'חשבונית'));
   const lines = cleanLines(input.lines, true, true);
   const h = cleanHdr(input);
@@ -307,18 +317,20 @@ async function piDraft(request) {
   await T.tdb().runTransaction(async (tx) => {
     const d = open(await tx.get(ref));
     holder(d, w, now);
-    tx.update(ref, Object.assign({ lines, n: lines.length, lk: lockOf(w, now), upd: now }, h));
+    if (revOf(d) !== rev) throw conflict();
+    tx.update(ref, Object.assign({ lines, n: lines.length, lk: lockOf(w, now), upd: now, rev: rev + 1 }, h));
   });
-  return { ok: true, until: now + LOCK_MS };
+  return { ok: true, until: now + LOCK_MS, rev: rev + 1 };
 }
 
-// piFinish({ id, reqId, lines, br?, sup?, inv?, date?, supId? }) – סיום ושמירה: מעדכן/יוצר מוצרים ומוסיף כמויות למלאי, וסוגר.
+// piFinish({ id, reqId, rev, lines, br?, sup?, inv?, date?, supId? }) – סיום ושמירה: מעדכן/יוצר מוצרים ומוסיף כמויות למלאי, וסוגר.
 async function piFinish(request) {
   const w = await pw(request);
   const input = inputObject(request);
-  O.onlyKeys(input, ['id', 'reqId', 'lines', 'br', 'sup', 'inv', 'date', 'supId']);
+  O.onlyKeys(input, ['id', 'reqId', 'rev', 'lines', 'br', 'sup', 'inv', 'date', 'supId']);
   const id = O.idOf(input.id, 'חשבונית');
   const reqId = O.reqIdOf(input);
+  const rev = revIn(input);
   const lines = cleanLines(input.lines, true, false);
   const h = cleanHdr(input);
   const act = lines.map((l, i) => ({ l, i })).filter((x) => !x.l.skip);
@@ -336,6 +348,7 @@ async function piFinish(request) {
     if (s.exists && s.get('st') === 'done' && s.get('fin') && s.get('fin').rq === reqId) { Object.assign(res, { dup: true }, s.get('fin').res || {}); return; }
     const d = open(s);
     holder(d, w, now);
+    if (revOf(d) !== rev) throw conflict();
     const sup = h.sup !== undefined ? h.sup : (d.sup || '');
     if (w.ord) {
       const v = cfg.exists ? cfg.get('vat') : null;
@@ -383,7 +396,7 @@ async function piFinish(request) {
       }
     }
     const fin = { by: w.uid, name: w.uname, t: now, rq: reqId, br: br || '', res: { added: res.added, updated: res.updated, qty: res.qty } };
-    tx.update(ref, Object.assign({ st: 'done', lines: out, n: out.length, fin, lk: FieldValue.delete(), upd: now }, h));
+    tx.update(ref, Object.assign({ st: 'done', lines: out, n: out.length, fin, lk: FieldValue.delete(), upd: now, rev: rev + 1 }, h));
   });
   return res;
 }

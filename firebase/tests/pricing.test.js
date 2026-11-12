@@ -12,7 +12,13 @@ const ALL = { scan: true, shelf: true, feedback: true, tasks: true, suppliers: t
 const MGR = 'pi_mgr', P1 = 'pi_p1', P2 = 'pi_p2', NOP = 'pi_nop', OLD = 'pi_old', SM = 'pi_smgr', SP = 'pi_sp', XM = 'pi_xmgr', SUPER = 'pi_super';
 const FN_EMU = JSON.parse(fsm.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).emulators.functions;
 const fnUrl = (n) => `http://${process.env.FUNCTIONS_EMULATOR_HOST || `${FN_EMU.host}:${FN_EMU.port}`}/${H.PROJECT_ID}/us-central1/${n}`;
+// piDraft / piFinish דורשים rev (הגרסה שהמסך טען). בבדיקות הקיימות – הגרסה הנוכחית במסמך (AUTO); בדיקת ה-rev עצמה שולחת במפורש
+const AUTO_REV = { on: true };
+async function curRev(id) {
+  let r = 0; await prep(async (d) => { for (const p of [`b/biz-pi/pinv/${id}`, `b/biz-pi-shelf/pinv/${id}`, `pinv/${id}`]) { const s = await d.doc(p).get(); if (s.exists) { r = s.get('rev') || 0; return; } } }); return r;
+}
 async function call(name, uid, data) {
+  if (AUTO_REV.on && (name === 'piDraft' || name === 'piFinish') && data && data.rev === undefined && typeof data.id === 'string') data = Object.assign({ rev: await curRev(data.id) }, data);
   const headers = { 'Content-Type': 'application/json' };
   if (uid) headers.Authorization = 'Bearer ' + H.mockToken(uid);
   const r = await fetch(fnUrl(name), { method: 'POST', headers, body: JSON.stringify({ data: data || {} }) });
@@ -244,6 +250,36 @@ describe('תמחור חשבונית ספק – שרת', () => {
     assert.equal((await call('piVoid', MGR, { id })).result.dup, true);
     assert.equal((await call('piClaim', P1, { id })).reason, 'closed');
     assert.deepEqual((await get(PFX() + 'prod/pA')).q, { br1: 4, br2: 1 });
+  });
+
+  it('rev (סבב 1 לשלב 4): piClaim מחזיר גרסה; piDraft / piFinish רק על הגרסה שנטענה – מסך ישן נדחה ב-conflict ולא דורס; בלי rev – נדחה', async () => {
+    const id = await mk();
+    const a = await call('piClaim', P1, { id });
+    assert.equal(a.result.rev, 0);
+    const d1 = await call('piDraft', P1, { id, rev: 0, lines: [Object.assign({}, LINES[0], { price: 7 })] });
+    assert.equal(d1.status, 'OK', d1.text); assert.equal(d1.result.rev, 1);
+    assert.equal((await call('piDraft', P1, { id, rev: 0, lines: LINES })).reason, 'conflict', 'גרסה ישנה – נדחה');
+    assert.equal((await call('piDraft', P1, { id, lines: LINES, rev: 'x' })).reason, 'bad-rev');
+    AUTO_REV.on = false;
+    try { assert.equal((await call('piDraft', P1, { id, lines: LINES })).reason, 'bad-rev', 'בלי rev – נדחה'); } finally { AUTO_REV.on = true; }
+    // התרחיש מהדוח: הנעילה של P1 פגה → P2 נכנס, שומר טיוטה ויוצא → P1 חוזר עם המסך הישן (rev 1)
+    await prep((d) => d.doc(PFX() + 'pinv/' + id).update({ 'lk.t': Date.now() - 31 * 60 * 1000 }));
+    const b = await call('piClaim', P2, { id });
+    assert.equal(b.status, 'OK', b.text); assert.equal(b.result.rev, 1); assert.equal(b.result.inv.lines[0].price, 7);
+    const L2 = [Object.assign({}, LINES[0], { price: 9.9 })];
+    assert.equal((await call('piDraft', P2, { id, rev: 1, lines: L2 })).result.rev, 2);
+    assert.equal((await call('piRelease', P2, { id })).result.rel, true);
+    assert.equal((await call('piDraft', P1, { id, rev: 1, lines: LINES })).reason, 'not-locked', 'P1 כבר לא מחזיק');
+    const c = await call('piClaim', P1, { id });
+    assert.equal(c.result.rev, 2, 'P1 רואה שהגרסה השתנתה'); assert.equal(c.result.inv.lines[0].price, 9.9);
+    assert.equal((await call('piDraft', P1, { id, rev: 1, lines: LINES })).reason, 'conflict', 'גם אחרי כניסה מחדש – השורות הישנות לא נשמרות');
+    assert.equal((await call('piFinish', P1, { id, reqId: rid(), rev: 1, br: 'br1', lines: L2.map((l) => Object.assign({ pid: 'pA' }, l)) })).reason, 'conflict', 'סיום על גרסה ישנה – נדחה, המלאי לא משתנה');
+    assert.deepEqual((await get(PFX() + 'prod/pA')).q, { br1: 4, br2: 1 });
+    assert.equal((await get(PFX() + 'pinv/' + id)).lines[0].price, 9.9, 'הטיוטה של P2 נשמרה');
+    const reqId = rid();
+    const f = await call('piFinish', P1, { id, reqId, rev: 2, br: 'br1', lines: L2.map((l) => Object.assign({ pid: 'pA' }, l)) });
+    assert.equal(f.status, 'OK', f.text); assert.equal((await get(PFX() + 'pinv/' + id)).rev, 3);
+    assert.equal((await call('piFinish', P1, { id, reqId, rev: 2, br: 'br1', lines: L2 })).result.dup, true, 'ניסיון חוזר אחרי הצלחה – dup (לא conflict)');
   });
 
   it('piImg (שלב 4): צילום בחלקים – מי ששלח (גם בלי prc) או מנהל; אחר / קובץ שאינו תמונה / גדול מדי – נחסם; np רק בחלק האחרון; קריאה לפי prc', async () => {

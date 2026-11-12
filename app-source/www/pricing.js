@@ -223,7 +223,7 @@ function link(e,i,p){const l=e.L[i];l.pid=p.pid;delete l.nw;
  if(l.price==null&&p.price!=null)l.price=p.price;
  if(e.ord){if((l.wp==null||l.wpSrc==='auto')&&p.wp!=null){l.wp=p.wp;l.wpSrc='stock'}if(l.cto==null&&typeof p.cto==='boolean')l.cto=p.cto}}
 function unlink(e,i){const l=e.L[i];delete l.pid;l.nw=true;if(l.wpSrc==='stock'){delete l.wp;l.wpSrc='auto';autoWp(e,l)}}
-function init(e,r){const inv=r.inv||{};e.inv=inv;e.vat=typeof r.vat==='number'?r.vat:PC.VAT0;e.ord=r.ord!==false;e.until=r.until||0;
+function init(e,r){const inv=r.inv||{};e.inv=inv;e.rev=Number.isInteger(r.rev)&&r.rev>=0?r.rev:0;e.gen=(e.gen||0)+1;e.vat=typeof r.vat==='number'?r.vat:PC.VAT0;e.ord=r.ord!==false;e.until=r.until||0;
  e.M=Array.isArray(r.m)?r.m:[];e.S0=[];e.B=[];
  e.L=[];(Array.isArray(inv.lines)?inv.lines:[]).forEach((l0,i)=>{const l={};for(const k of KEYS)if(l0&&l0[k]!=null)l[k]=l0[k];e.L[i]=l;const m=e.M[i]||{};
   e.S0[i]=m.m&&['bc','sku','name'].includes(m.k)?m.k:(m.k==='pid'?'pid':'');
@@ -231,9 +231,10 @@ function init(e,r){const inv=r.inv||{};e.inv=inv;e.vat=typeof r.vat==='number'?r
   else if(l.pid&&m.m&&m.m.pid===l.pid)link(e,i,m.m);
   if(!e.ord){delete l.wp;delete l.wpSrc;delete l.cto}else autoWp(e,l);
   e.B[i]=l.unit==='ct'?{n:l.ct?l.qty/l.ct:l.qty,cp:l.ct&&l.cost!=null?l.cost*l.ct:null}:null})}/* שורת קרטונים: מספר הקרטונים ומחיר קרטון – לשינוי כמות בקרטון */
-/* השורות לשליחה (piDraft / piFinish): רק השדות שהשרת מכיר, בלי ערכים ריקים */
-function out(e){return e.L.map(l=>{const o={};for(const k of KEYS){const v=l[k];if(v==null||v==='')continue;if(k==='nw'||k==='skip'){if(v===true)o[k]=true;continue}if(k==='cto'){if(e.ord&&typeof v==='boolean')o[k]=v;continue}
-  if((k==='wp'||k==='wpSrc')&&!e.ord)continue;if(k==='bc'&&!BC_RE.test(v))continue;o[k]=v}if(!o.n)o.n='';if(o.qty==null)o.qty=0;return o})}
+/* השורות לשליחה (piDraft / piFinish): רק השדות שהשרת מכיר, בלי ערכים ריקים. עסק בלי הזמנות (מדף בלבד) – בלי כמות, מארז וקרטון (אין מלאי) */
+const NO_STOCK=['qty','pk','ct','wp','wpSrc','cto'];
+function out(e){return e.L.map(l=>{const o={};for(const k of KEYS){const v=l[k];if(v==null||v==='')continue;if(!e.ord&&NO_STOCK.includes(k))continue;if(k==='nw'||k==='skip'){if(v===true)o[k]=true;continue}if(k==='cto'){if(e.ord&&typeof v==='boolean')o[k]=v;continue}
+  if((k==='wp'||k==='wpSrc')&&!e.ord)continue;if(k==='bc'&&!BC_RE.test(v))continue;o[k]=v}if(!o.n)o.n='';if(e.ord&&o.qty==null)o.qty=0;return o})}
 PI.out=()=>E?out(E):null;
 async function start(id){const e={id,rq:rid(),busy:1};E=e;
  try{const r=await fnc('piClaim',{id});if(E!==e){fnc('piRelease',{id}).catch(()=>{});return}/* כבר יצאו מהמסך */
@@ -241,18 +242,29 @@ async function start(id){const e={id,rq:rid(),busy:1};E=e;
  catch(x){if(E!==e)return;e.busy=0;e.err=x&&x.message||'הכניסה לחשבונית נכשלה';if(x&&x.offline)e.err='אין חיבור לאינטרנט – אי אפשר להיכנס לחשבונית';LS.at=0}
  if(E===e&&cur().v==='piEd'&&cur().a===id)rerender()}
 function beat(e){clearInterval(e.bt);e.bt=setInterval(async()=>{if(E!==e||e.fin){clearInterval(e.bt);return}
- try{await fnc('piBeat',{id:e.id})}catch(x){await lost(e,x)}},PI.beatMs)}
-/* הנעילה כבר לא אצלי. פגה ואף אחד לא נכנס (not-locked) – נכנסים שוב בשקט ושומרים את מה שבמסך */
-async function lost(e,x){const rs=x&&x.reason||'';if(!rs||(x&&x.offline))return false;
- if(rs==='not-locked'&&(e.rc=(e.rc||0)+1)<=3){try{await fnc('piClaim',{id:e.id});e.dirty=1;await draft(e);return true}catch(y){x=y}}
- if(!LOST.includes(x&&x.reason||'')&&(x&&x.reason)!=='not-locked')return false;
+ try{await fnc('piBeat',{id:e.id})}catch(x){if(await resync(e,x)==='same'&&e.dirty)draft(e)}},PI.beatMs)}
+/* סבב 1 לשלב 4 (דריסה שקטה): כל שמירה בשרת נושאת את גרסת השורות שהמסך טען (rev). הנעילה כבר לא אצלי (not-locked – פגה) או שהגרסה
+   השתנתה (conflict) – נכנסים מחדש (piClaim) וטוענים את השורות מהשרת:
+   'same'     – אף אחד לא ערך בינתיים (אותה גרסה): ממשיכים בשקט, והשינויים שבמסך נשמרים.
+   'reloaded' – מישהו אחר ערך: השורות שלו נטענות למסך עם הודעה, והשורות הישנות שבמסך לא נשלחות.
+   false      – תקלה זמנית (רשת) / לא קשור; או שהחשבונית כבר לא אצלי (בטיפול של אחר, נסגרה) – e.lost והעריכה נחסמת. */
+async function resync(e,x){const rs=x&&x.reason||'';if(!rs||(x&&x.offline))return false;
+ if((rs==='not-locked'||rs==='conflict')&&(e.rc=(e.rc||0)+1)<=5){let r=null;try{r=await fnc('piClaim',{id:e.id})}catch(y){x=y}
+  if(r){const v=Number.isInteger(r.rev)?r.rev:0;if(v===e.rev)return'same';
+   init(e,r);e.dirty=0;clearTimeout(e.dt);e.note='עובד אחר ערך את החשבונית – נטענה הגרסה שלו. בדקו את השורות לפני שממשיכים.';
+   if(E===e&&cur().v==='piEd')rerender();return'reloaded'}}
+ const r2=x&&x.reason||'';if(!LOST.includes(r2)&&r2!=='not-locked'&&r2!=='conflict')return false;
  e.lost=x.message||'החשבונית כבר לא אצלך';clearInterval(e.bt);clearTimeout(e.dt);if(E===e&&cur().v==='piEd')rerender();return false}
-async function draft(e){clearTimeout(e.dt);if(!e||!e.dirty||e.fin||e.lost||!e.L)return;e.dirty=0;
- try{await fnc('piDraft',{id:e.id,lines:out(e)})}catch(x){e.dirty=1;if(!(await lost(e,x))&&!e.lost&&E===e)e.dt=setTimeout(()=>draft(e),Math.max(PI.draftMs,5000))}}
-const dirty=()=>{if(!E||!E.L||E.lost||E.fin)return;E.dirty=1;clearTimeout(E.dt);const e=E;E.dt=setTimeout(()=>draft(e),PI.draftMs)};
+/* שמירות לשרת אחת אחרי השנייה (כל אחת מעלה את rev) */
+const chain=(e,fn)=>(e.q=(e.q||Promise.resolve()).then(fn,fn));
+function draft(e){clearTimeout(e.dt);return chain(e,()=>draft1(e))}
+async function draft1(e){if(!e.dirty||e.fin||e.lost||!e.L)return;e.dirty=0;
+ try{const r=await fnc('piDraft',{id:e.id,rev:e.rev,lines:out(e)});if(r&&Number.isInteger(r.rev))e.rev=r.rev;e.rc=0}
+ catch(x){e.dirty=1;const st=await resync(e,x);if(st==='same')return draft1(e);if(!st&&!e.lost&&E===e)e.dt=setTimeout(()=>draft(e),Math.max(PI.draftMs,5000))}}
+const dirty=()=>{if(!E||!E.L||E.lost||E.fin)return;E.dirty=1;if(E.note){E.note='';const n=document.getElementById('piNote');if(n)n.remove()}clearTimeout(E.dt);const e=E;E.dt=setTimeout(()=>draft(e),PI.draftMs)};
 /* יציאה מהמסך: piEd כבר לא ב-NAV (חזרה / לשונית). מעבר קדימה (piEd עדיין ב-NAV) – הנעילה נשארת */
 function leave(){const e=E;E=null;if(!e)return;clearInterval(e.bt);clearTimeout(e.dt);if(e.fin||e.busy||e.err)return;
- (async()=>{if(!e.lost){if(e.dirty&&e.L){try{e.dirty=0;await fnc('piDraft',{id:e.id,lines:out(e)})}catch(x){}}try{await fnc('piRelease',{id:e.id})}catch(x){}}
+ (async()=>{if(!e.lost){try{if(e.dirty&&e.L)await draft(e);else await e.q}catch(x){}if(!e.lost)try{await fnc('piRelease',{id:e.id})}catch(x){}}
   LS.at=0;try{if(cur().v==='pi')lload(true)}catch(x){}})()}
 PI.leave=leave;
 {const r0=render;render=function(){const x=r0.apply(this,arguments);try{if(E&&!NAV.some(n=>n.v==='piEd'&&n.a===E.id))leave()}catch(e){}return x}}
@@ -274,13 +286,14 @@ const fld=(lb,i,k,v,a)=>`<label class="pf"><span>${lb}</span><input data-i="piF"
 function lineH(e,l,i){const dis=e.lost?' disabled':'',p=prodOf(e,i);
  const L=`<div><div class="hd"><span class="no">${i+1}.</span>${tagH(e,i)}<button type="button" class="lkb" data-a="piSkip" data-x="${i}" data-v="1"${dis}>דלג על השורה</button></div>${l.chk?`<span class="tag t1">לבדיקה: ${esc(l.chk)}</span>`:''}
   ${fld('שם',i,'n',l.n,'maxlength="60"')}
-  <div class="g2">${fld('ברקוד',i,'bc',l.bc,'dir="ltr" inputmode="numeric" maxlength="30"')}${fld('כמות למלאי',i,'qty',l.qty,'inputmode="decimal"')}</div>
-  <div class="g3">${fld('במארז',i,'pk',l.pk,`inputmode="numeric"${p&&p.pk?` placeholder="${esc(String(p.pk))}"`:''}`)}${fld('מארזים בקרטון',i,'ct',l.ct,`inputmode="numeric"${p&&p.ct?` placeholder="${esc(String(p.ct))}"`:''}`)}${fld('עלות לפני מע"מ',i,'cost',l.cost,'inputmode="decimal"')}</div>
+  ${e.ord?'':`<div class="g2">${fld('ברקוד',i,'bc',l.bc,'dir="ltr" inputmode="numeric" maxlength="30"')}${fld('עלות לפני מע"מ',i,'cost',l.cost,'inputmode="decimal"')}</div>`}
+  ${!e.ord?'':`<div class="g2">${fld('ברקוד',i,'bc',l.bc,'dir="ltr" inputmode="numeric" maxlength="30"')}${fld('כמות למלאי',i,'qty',l.qty,'inputmode="decimal"')}</div>
+  <div class="g3">${fld('במארז',i,'pk',l.pk,`inputmode="numeric"${p&&p.pk?` placeholder="${esc(String(p.pk))}"`:''}`)}${fld('מארזים בקרטון',i,'ct',l.ct,`inputmode="numeric"${p&&p.ct?` placeholder="${esc(String(p.ct))}"`:''}`)}${fld('עלות לפני מע"מ',i,'cost',l.cost,'inputmode="decimal"')}</div>`}
   <span id="pic${i}">${cchH(e,i)}</span>${l.raw?`<small class="sm">בחשבונית: ${esc(l.raw)}</small>`:''}</div>`;
  const R=`<div class="pr">${fld('מחיר לצרכן כולל מע"מ',i,'price',l.price,'inputmode="decimal"')}<b class="mg" id="pim${i}">${mgH(e,i)}</b>
   ${e.ord?`${fld('מחיר סיטונאי לפני מע"מ',i,'wp',l.wp,'inputmode="decimal"')}<small class="sm" id="pis${i}" style="margin-top:-4px;margin-bottom:6px">${wsrc(l)}</small>
   <label class="cb"><input type="checkbox" data-c="piCto" data-x="${i}"${l.cto?' checked':''}${dis}>רק קרטונים סגורים</label>`:''}
-  <div class="bt"><button type="button" class="btn g s" data-a="piPrP" data-x="${i}">הדפס מחיר</button><button type="button" class="btn g s" data-a="piPrS" data-x="${i}">הדפס מבצע</button></div></div>`;
+  <div class="bt"><button type="button" class="btn g s" data-a="piPrP" data-x="${i}"${dis}>הדפס מחיר</button><button type="button" class="btn g s" data-a="piPrS" data-x="${i}"${dis}>הדפס מבצע</button></div></div>`;
  return`<div class="pil${l.chk?' ck':''}" id="pil${i}">${L}${R}</div>`}
 /* שורה שדילגו עליה (פיקדון, דמי משלוח…): מעומעמת, עם "החזר". לא נספרת בסיום, לא נוצר ממנה מוצר ולא נוספת כמות (skip בשרת) */
 function lineX(e,l,i){if(!l.skip)return lineH(e,l,i);const dis=e.lost?' disabled':'';
@@ -290,8 +303,8 @@ V.piEd=id=>{const T='תמחור חשבונית';if(!can())return deny(T);
  if(E.err)return{t:T,h:`<div class="card"><p><b>${esc(E.err)}</b></p><button class="btn g w" data-a="back">חזרה</button></div>`};
  if(E.busy||!E.L)return{t:T,h:'<div class="empty">נכנס לחשבונית…</div>'};
  const v=E.inv,img=(+v.np>0)||!!PI.img(E.id);
- const hdr=`<div class="card pi-hdr"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><div style="min-width:0;flex:1"><b>${esc(v.sup||'ספק לא ידוע')}</b><small>${[v.inv?'חשבונית '+esc(v.inv):'',v.date?dfmt(v.date):'',E.L.length+' שורות'].filter(Boolean).join(' · ')}</small>${v.byName?`<small>נשלחה על ידי ${esc(v.byName)}</small>`:''}</div>${img?'<button type="button" class="btn g s" data-a="piImgV">צילום החשבונית</button>':'<small class="note">אין צילום</small>'}</div>${E.ord?'':'<small class="note" style="display:block;margin-top:6px">עסק בלי הזמנות: בלי מחיר סיטונאי ובלי עדכון מלאי</small>'}</div>`;
- const lostH=E.lost?`<div class="card" style="border-color:var(--bad)"><b>${esc(E.lost)}</b><p class="note">אי אפשר להמשיך לערוך. חזרו לרשימה.</p></div>`:'';
+ const hdr=`<div class="card pi-hdr"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><div style="min-width:0;flex:1"><b>${esc(v.sup||'ספק לא ידוע')}</b><small>${[v.inv?'חשבונית '+esc(v.inv):'',v.date?dfmt(v.date):'',(E.L.length===1?'שורה אחת':E.L.length+' שורות')].filter(Boolean).join(' · ')}</small>${v.byName?`<small>נשלחה על ידי ${esc(v.byName)}</small>`:''}</div>${img?'<button type="button" class="btn g s" data-a="piImgV">צילום החשבונית</button>':'<small class="note">אין צילום</small>'}</div>${E.ord?'':'<small class="note" style="display:block;margin-top:6px">עסק בלי הזמנות: בלי מחיר סיטונאי ובלי עדכון מלאי</small>'}</div>`;
+ const lostH=E.lost?`<div class="card" style="border-color:var(--bad)"><b>${esc(E.lost)}</b><p class="note">אי אפשר להמשיך לערוך. חזרו לרשימה.</p></div>`:E.note?`<div class="card" id="piNote" role="status" style="border-color:var(--warn)"><b>${esc(E.note)}</b></div>`:'';
  return{t:T,s:v.sup||'',h:lostH+hdr+(E.L.length?E.L.map((l,i)=>lineX(E,l,i)).join(''):'<div class="empty">לא זוהו שורות בחשבונית</div>')
   +(E.lost?'':`<button type="button" class="btn w pi-fin" data-a="piFin">סיום ושמירה</button>`)}};
 
@@ -338,10 +351,14 @@ ACT.piFin=()=>{if(!E||!E.L||E.lost||E.fin)return;
  const body=E.ord?`<p>יעודכנו <b id="piSU">${s.up}</b> מוצרים קיימים · ייווצרו <b id="piSN">${s.nw}</b> מוצרים חדשים · יתווספו <b id="piSQ">${s.q}</b> יחידות למלאי.</p>`:'<p>החשבונית תיסגר. בעסק בלי הזמנות אין מלאי בענן לעדכן.</p>';
  dlg(`<h3>סיום ושמירה</h3>${body}<form data-f="piFinF">${brH}<p class="note">אחרי הסיום החשבונית יוצאת מהרשימה לכולם.</p><div class="row"><button class="btn grow">אישור ושמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.piFinF=async f=>{if(!E||!E.L||E.fin)return;const e=E,x=fd(f),b=f.querySelector('button');b.disabled=true;clearTimeout(e.dt);
- const d={id:e.id,reqId:e.rq,lines:out(e)};if(x.br)d.br=x.br;
- try{const r=await fnc('piFinish',d);e.fin=1;clearInterval(e.bt);closeDlg();
+ /* קודם הטיוטה שבדרך (כל שמירה מעלה את rev); אם בינתיים נטענה גרסה של עובד אחר – לא מסיימים, המשתמש בודק קודם */
+ const g0=e.gen;try{if(e.dirty)await draft(e);else await e.q}catch(z){}
+ if(e.lost||e.gen!==g0){closeDlg();if(e.gen!==g0)toast(e.note||'החשבונית נטענה מחדש');return}
+ const d={id:e.id,reqId:e.rq,rev:e.rev,lines:out(e)};if(x.br)d.br=x.br;
+ try{const r=await chain(e,()=>fnc('piFinish',d));e.fin=1;clearInterval(e.bt);closeDlg();
   toast(e.ord?`נשמר: ${r&&r.updated||0} עודכנו, ${r&&r.added||0} נוספו, ${r&&r.qty||0} יחידות למלאי`:'החשבונית נסגרה');
   if(LS.L)LS.L=LS.L.filter(y=>y.id!==e.id);LS.at=0;
   if(cur().v==='piEd'&&NAV.length>1)goBack();else{E=null;rerender()}}
- catch(y){b.disabled=false;const back=await lost(e,y);if(e.lost)closeDlg();toast(back?'החיבור לחשבונית חודש – נסו שוב':(y&&y.message||'השמירה נכשלה'))}};
+ catch(y){b.disabled=false;const st=await resync(e,y);if(e.lost||st==='reloaded')closeDlg();
+  toast(st==='reloaded'?e.note:st==='same'?'החיבור לחשבונית חודש – לחצו שוב על "אישור ושמירה"':(y&&y.message||'השמירה נכשלה'))}};
 })();

@@ -57,12 +57,13 @@ async function server(ctx, me) {
     if (fn === 'piClaim') {
       if (fresh30(d.lk, now) && d.lk.uid !== uid) return err(route, 'locked', 'החשבונית בטיפול של ' + d.lk.name);
       d.lk = { uid, name: NAMES[uid] || uid, t: now };
-      return ok(route, { ok: true, id: b.id, inv: { st: d.st, sup: d.sup, inv: d.inv, date: d.date, by: d.by, byName: d.byName, at: d.at, np: d.np, lines: JSON.parse(JSON.stringify(d.lines)) }, lk: d.lk, until: now + 30 * 60e3, vat: 18, ord: S.ord, m: matches(b.id, d.lines) });
+      return ok(route, { ok: true, id: b.id, inv: { st: d.st, sup: d.sup, inv: d.inv, date: d.date, by: d.by, byName: d.byName, at: d.at, np: d.np, lines: JSON.parse(JSON.stringify(d.lines)) }, rev: d.rev || 0, lk: d.lk, until: now + 30 * 60e3, vat: 18, ord: S.ord, m: matches(b.id, d.lines) });
     }
     if (!(d.lk && d.lk.uid === uid)) return fresh30(d.lk, now) ? err(route, 'locked', 'החשבונית בטיפול של ' + d.lk.name) : err(route, 'not-locked', 'צריך להיכנס לחשבונית מחדש');
     if (fn === 'piBeat') { d.lk.t = now; return ok(route, { ok: true }); }
-    if (fn === 'piDraft') { d.lines = b.lines; return ok(route, { ok: true }); }
-    if (fn === 'piFinish') { d.st = 'done'; delete d.lk; d.lines = b.lines; return ok(route, { ok: true, id: b.id, dup: false, added: 1, updated: 3, qty: 38 }); }
+    if ((fn === 'piDraft' || fn === 'piFinish') && b.rev !== (d.rev || 0)) { S.calls.push({ fn: 'conflict', uid, b }); return err(route, 'conflict', 'עובד אחר ערך את החשבונית בינתיים – צריך לטעון אותה מחדש'); }
+    if (fn === 'piDraft') { d.lines = b.lines; d.rev = (d.rev || 0) + 1; return ok(route, { ok: true, rev: d.rev }); }
+    if (fn === 'piFinish') { d.rev = (d.rev || 0) + 1; d.st = 'done'; delete d.lk; d.lines = b.lines; return ok(route, { ok: true, id: b.id, dup: false, added: 1, updated: 3, qty: 38 }); }
   });
   // Firestore: שאילתת pinv (st == 'new') וחלקי הצילום
   const fv = (v) => (v == null ? { nullValue: null } : typeof v === 'number' ? (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v }) : typeof v === 'object' ? { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fv(x)])) } } : { stringValue: String(v) });
@@ -214,6 +215,36 @@ const inp = (i, k) => `#pil${i} input[data-k="${k}"]`;
   check('7א אחרי שהראשון יצא – השני נכנס וממשיך מהטיוטה (מחיר, cto, קישור)', !rB2.dis && S.inv.i1.lk.uid === 'm2' && v2.price === '7.9' && v2.cto === true && v2.pid1 === 'pO', v2);
   await B.page.evaluate(() => goBack()); await sleep(600);
 
+  // ---- 7ב. סבב 1: דריסה שקטה. הנעילה של א' פגה → ב' נכנס, שומר טיוטה ויוצא → א' חוזר עם המסך הישן ----
+  await A.page.click('.pi-row[data-id="i1"]');
+  await waitFor(A.page, () => document.querySelectorAll('.pil').length === 4); await sleep(300);
+  await A.page.fill(inp(0, 'price'), '8.1'); await sleep(700);
+  const r0 = S.inv.i1.rev;
+  check('7ב א\' נכנס ושומר טיוטה – הגרסה (rev) עולה, piDraft נושא את הגרסה שנטענה', S.inv.i1.lines[0].price === 8.1 && calls('piDraft', 'm').slice(-1)[0].b.rev === r0 - 1, { rev: r0 });
+  await A.page.evaluate(() => clearInterval(PI.ed().bt)); // הטלפון של א' כבוי: אין piBeat
+  S.inv.i1.lk.t = T0 - 31 * 60e3; // 30 דקות בלי פעילות
+  await B.page.evaluate(() => go('piEd', 'i1'));
+  await waitFor(B.page, () => document.querySelectorAll('.pil').length === 4); await sleep(300);
+  await B.page.fill(inp(0, 'price'), '9.9'); await sleep(700);
+  await B.page.evaluate(() => goBack()); await sleep(600);
+  check('7ג ב\' נכנס אחרי התפוגה, שמר 9.9 ויצא', S.inv.i1.lines[0].price === 9.9 && !S.inv.i1.lk && S.inv.i1.rev === r0 + 1, { lk: S.inv.i1.lk, rev: S.inv.i1.rev });
+  await A.page.fill(inp(3, 'price'), '5');
+  await waitFor(A.page, () => !!document.getElementById('piNote'), null, 6000); await sleep(300);
+  const rl = await A.page.evaluate(() => ({ note: (document.getElementById('piNote') || {}).textContent || '', p0: document.querySelector('#pil0 input[data-k=price]').value, p3: document.querySelector('#pil3 input[data-k=price]').value, lost: !!PI.ed().lost }));
+  check('7ד א\' חוזר: not-locked → נכנס מחדש, רואה שהגרסה השתנתה → נטענה הגרסה של ב\' עם הודעה; השורות הישנות לא נשלחו', /עובד אחר ערך את החשבונית – נטענה הגרסה שלו/.test(rl.note) && rl.p0 === '9.9' && rl.p3 === '7.9' && !rl.lost && S.inv.i1.lines[0].price === 9.9 && S.inv.i1.lines[3].price === 7.9 && S.inv.i1.lk.uid === 'm', { rl, srv: S.inv.i1.lines.map((l) => l.price), rev: S.inv.i1.rev });
+  await sleep(1500);
+  check('7ה גם אחרי עוד זמן – הטיוטה של ב\' לא נדרסה', S.inv.i1.lines[0].price === 9.9 && S.inv.i1.lines[3].price === 7.9, S.inv.i1.lines.map((l) => l.price));
+  // אותה גרסה: התפוגה עברה, ב' נכנס ויצא בלי לשנות → א' ממשיך בשקט והשינוי שלו נשמר
+  await A.page.evaluate(() => clearInterval(PI.ed().bt));
+  S.inv.i1.lk.t = T0 - 31 * 60e3; const r1 = S.inv.i1.rev;
+  await B.page.evaluate(() => go('piEd', 'i1'));
+  await waitFor(B.page, () => document.querySelectorAll('.pil').length === 4); await sleep(300);
+  await B.page.evaluate(() => goBack()); await sleep(600);
+  await A.page.fill(inp(0, 'price'), '7.9'); await sleep(1500);
+  const sm = await A.page.evaluate(() => ({ note: !!document.getElementById('piNote'), lost: !!PI.ed().lost, p0: document.querySelector('#pil0 input[data-k=price]').value }));
+  check('7ו אף אחד לא ערך (אותה גרסה) – א\' נכנס מחדש בשקט, בלי הודעה, והשינוי שלו נשמר', !sm.note && !sm.lost && sm.p0 === '7.9' && S.inv.i1.lines[0].price === 7.9 && S.inv.i1.rev === r1 + 1 && S.inv.i1.lk.uid === 'm', { sm, rev: S.inv.i1.rev });
+  await A.page.evaluate(() => goBack()); await sleep(600);
+
   // ---- 8. סיום ושמירה ----
   await A.page.click('.pi-row[data-id="i1"]');
   await waitFor(A.page, () => document.querySelectorAll('.pil').length === 4);
@@ -265,13 +296,13 @@ const inp = (i, k) => `#pil${i} input[data-k="${k}"]`;
   const cfgS = { mode: 'new', users: { sm: 'biz-s' }, biz: { 'biz-s': { dataRoot: 'b', features: { scan: true, shelf: true }, name: 'מדף בלבד' } }, admins: { 'b/biz-s/|sm': 1 } };
   const C = await open(browser, www, cfgS, 'sm@x.co', 360);
   await C.page.evaluate(() => go('piEd', 'i3')); await waitFor(C.page, () => document.querySelectorAll('.pil').length === 1);
-  const sh = await C.page.evaluate(() => ({ wp: !!document.querySelector('#pil0 input[data-k=wp]'), cto: !!document.querySelector('#pil0 input[data-c=piCto]'), price: !!document.querySelector('#pil0 input[data-k=price]'), mg: (document.getElementById('pim0') || {}).textContent, note: document.querySelector('.pi-hdr').innerText }));
-  check('9ב עסק עם מדף בלבד: מחיר לצרכן ו-% רווח, בלי סיטונאי ובלי "רק קרטונים סגורים"', !sh.wp && !sh.cto && sh.price && /רווח/.test(sh.mg) && /בלי מחיר סיטונאי/.test(sh.note), sh);
+  const sh = await C.page.evaluate(() => ({ st: ['qty', 'pk', 'ct'].filter((k) => document.querySelector(`#pil0 input[data-k=${k}]`)), bc: !!document.querySelector('#pil0 input[data-k=bc]'), cost: !!document.querySelector('#pil0 input[data-k=cost]'), wp: !!document.querySelector('#pil0 input[data-k=wp]'), cto: !!document.querySelector('#pil0 input[data-c=piCto]'), price: !!document.querySelector('#pil0 input[data-k=price]'), mg: (document.getElementById('pim0') || {}).textContent, note: document.querySelector('.pi-hdr').innerText }));
+  check('9ב עסק עם מדף בלבד: מחיר לצרכן ו-% רווח, בלי סיטונאי, בלי "רק קרטונים סגורים", בלי כמות למלאי / במארז / מארזים בקרטון (ברקוד ועלות – כן)', !sh.st.length && sh.bc && sh.cost && !sh.wp && !sh.cto && sh.price && /רווח/.test(sh.mg) && /בלי מחיר סיטונאי/.test(sh.note), sh);
   await C.page.fill(inp(0, 'price'), '4.9'); await C.page.click('[data-a=piFin]'); await sleep(200);
   const dS = await C.page.evaluate(() => document.getElementById('dlg').innerText);
   await C.page.click('#dlg form[data-f=piFinF] button.btn:not([type])'); await sleep(600);
   const fS = calls('piFinish', 'sm')[0];
-  check('9ג מדף בלבד – סיום: הודעה בלי מלאי, piFinish בלי wp / cto', /אין מלאי בענן/.test(dS) && fS && !('wp' in fS.b.lines[0]) && !('cto' in fS.b.lines[0]) && fS.b.lines[0].price === 4.9 && !fS.b.br, fS && fS.b);
+  check('9ג מדף בלבד – סיום: הודעה בלי מלאי, piFinish בלי wp / cto / qty / pk / ct', /אין מלאי בענן/.test(dS) && fS && !['wp', 'cto', 'qty', 'pk', 'ct', 'wpSrc'].some((k) => k in fS.b.lines[0]) && fS.b.lines[0].price === 4.9 && !fS.b.br, fS && fS.b);
   check('9ד אין שגיאות JavaScript (מדף בלבד)', !C.page.__errors.length, C.page.__errors);
   await C.ctx.close();
 
