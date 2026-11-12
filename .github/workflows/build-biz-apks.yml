@@ -33,6 +33,8 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
         run: |
+          # בלי המשתנה – אותו מאגר קבצים שהאפליקציה עצמה משתמשת בו (ST_BUCKET ב-index.html)
+          [ -n "$BUCKET" ] || BUCKET=$(grep -o "^const ST_BUCKET='[^']*'" app-source/www/index.html | cut -d"'" -f2)
           if [ -z "$FIREBASE_SERVICE_ACCOUNT" ] || [ -z "$BUCKET" ]; then echo "::notice::auto businesses skipped (no secret/bucket)"; exit 0; fi
           pip install -q pillow==10.4.0
           umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"; trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
