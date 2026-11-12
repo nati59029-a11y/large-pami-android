@@ -32,8 +32,12 @@ console.log("BUSINESS APP:",pkg,nm);
 else
 echo "$B" | grep -Eq '^[a-z0-9-]{3,30}$' || { echo "::error::biz app: bad bizId '$B'"; exit 1; }
 [ "$B" != "largpeami" ] || { echo "::error::biz app: largpeami is the regular app"; exit 1; }
-[ -f "brands/$B/logo.png" ] || { echo "::error::biz app: brands/$B/logo.png is missing"; exit 1; }
+# 12.11.2026: עסק שמנהל־העל בחר לבנות בלי לוגו (noLogo ב-build-biz.json) – סמל כללי ושם העסק. כשייקבע לוגו – נבנה מחדש עם הלוגו
+if [ -f "brands/$B/logo.png" ]; then
 python3 scripts/biz-icons.py "brands/$B/logo.png" android/app/src/main/res www/biz-logo.png
+elif python3 -c 'import json,sys;c=json.load(open("brands/build-biz.json"));sys.exit(0 if any(b.get("bizId")==sys.argv[1] and b.get("noLogo") is True for b in c.get("businesses",[])) else 1)' "$B"; then
+python3 scripts/biz-icons.py --generic android/app/src/main/res www/biz-logo.png
+else echo "::error::biz app: brands/$B/logo.png is missing"; exit 1; fi
 node -e '
 const fs=require("fs"),B=process.argv[1],cfg=JSON.parse(fs.readFileSync("brands/build-biz.json","utf8"));
 const e=(cfg.businesses||[]).find(x=>x&&x.bizId===B);if(!e){console.error("::error::biz app: "+B+" is not in brands/build-biz.json");process.exit(1)}

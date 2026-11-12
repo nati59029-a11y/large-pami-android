@@ -7,6 +7,7 @@
       מוריד את הלוגו מ-Storage ל-<brands-dir>/<id>/logo.png (PNG מרובע, לפחות 192 פיקסלים) ומוסיף אותו ל-build-biz.json
       (appName = שם התצוגה במיתוג). עסק שכבר רשום ידנית ב-build-biz.json – נשאר כמו שהוא. לארג' פעמי לא נכלל (יש לו APK משלו).
       כל כשל (אין הרשאה, אין רשת, לוגו פגום) – הודעה, והבנייה ממשיכה בלי העסק הזה. לא כותב דבר ל-Firebase.
+  fail <sa.json> <bizId>   – בנייה של עסק אחד שנכשלה: apkState.st = failed
   tag  <sa.json> <bizId>
       אחרי פרסום APK של העסק (רק מ-main): כותב b/<bizId>.apkTag = 'biz-<bizId>' (updateMask – רק השדה הזה),
       כדי שדף ההזמנה ומייל ההזמנה יפנו ל-APK עם הסמל של העסק. רק אם העסק קיים.
@@ -17,6 +18,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -92,11 +94,20 @@ def discover(sa_path, bucket, brands):
             continue
         f = {k: fv(v) for k, v in (d.get('fields') or {}).items()}
         br = f.get('brand') if isinstance(f.get('brand'), dict) else {}
-        if f.get('status') == 'suspended' or br.get('logoPath') != f'b/{bid}/brand/logo':
+        if f.get('status') == 'suspended':
+            continue
+        logo = br.get('logoPath') == f'b/{bid}/brand/logo'
+        ap = f.get('apkState') if isinstance(f.get('apkState'), dict) else {}
+        # 12.11.2026: עסק בלי לוגו נבנה רק אם מנהל־העל בחר "המשך בלי לוגו" (apkState.noLogo, נכתב רק בשרת) – סמל כללי ושם העסק
+        if not logo and ap.get('noLogo') is not True:
             continue
         nm = clean_name(br.get('name') or f.get('name') or '')
         if not nm:
             print(f'::notice::{bid}: אין שם תצוגה – דולג')
+            continue
+        if not logo:
+            cfg.setdefault('businesses', []).append({'bizId': bid, 'appName': nm, 'auto': True, 'noLogo': True})
+            added.append(bid + '(no-logo)')
             continue
         try:
             data = get(f'https://storage.googleapis.com/storage/v1/b/{bucket}/o/' + urllib.parse.quote(f'b/{bid}/brand/logo', safe='') + '?alt=media', tok, raw=True)
@@ -110,26 +121,49 @@ def discover(sa_path, bucket, brands):
     print('auto businesses:', ' '.join(added) or '(none)')
 
 
-def tag(sa_path, bid):
+def tag(sa_path, bid, only_run='0'):
     if not BIZ_RE.match(bid) or bid in (BIZ0, 'business'):
         raise SystemExit('bad bizId')
     pid = json.load(open(sa_path))['project_id']
     tok = token(sa_path, 'https://www.googleapis.com/auth/cloud-platform')
     base = f'https://firestore.googleapis.com/v1/projects/{pid}/databases/(default)/documents/b/{bid}'
-    get(base, tok)  # 404 → שגיאה: לא יוצרים מסמך עסק חדש
-    body = json.dumps({'fields': {'apkTag': {'stringValue': 'biz-' + bid}}}).encode()
-    req = urllib.request.Request(base + '?updateMask.fieldPaths=apkTag&currentDocument.exists=true', data=body, method='PATCH',
+    d = get(base, tok)  # 404 → שגיאה: לא יוצרים מסמך עסק חדש
+    f = {k: fv(v) for k, v in (d.get('fields') or {}).items()}
+    ap = f.get('apkState') if isinstance(f.get('apkState'), dict) else {}
+    br = f.get('brand') if isinstance(f.get('brand'), dict) else {}
+    # 12.11.2026: גם apkState = ready – כרטיס העסק מציג "האפליקציה מוכנה" ומאפשר לשלוח הזמנה
+    st = {'st': {'stringValue': 'ready'}, 't': {'integerValue': str(int(time.time() * 1000))},
+          'noLogo': {'booleanValue': br.get('logoPath') != f'b/{bid}/brand/logo'}, 'rebuild': {'booleanValue': only_run == '1' and ap.get('rebuild') is True}}
+    patch(base, tok, {'apkTag': {'stringValue': 'biz-' + bid}, 'apkState': {'mapValue': {'fields': st}}}, ['apkTag', 'apkState'])
+    print(f'apkTag set: b/{bid} = biz-{bid} (ready)')
+
+
+def patch(base, tok, fields, paths):
+    q = '&'.join('updateMask.fieldPaths=' + urllib.parse.quote(p) for p in paths)
+    req = urllib.request.Request(base + '?' + q + '&currentDocument.exists=true', data=json.dumps({'fields': fields}).encode(), method='PATCH',
                                  headers={'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=60) as r:
         r.read()
-    print(f'apkTag set: b/{bid} = biz-{bid}')
+
+
+def fail(sa_path, bid):
+    """בנייה של עסק אחד שנכשלה: apkState.st = failed (רק השדות האלה)."""
+    if not BIZ_RE.match(bid) or bid in (BIZ0, 'business'):
+        raise SystemExit('bad bizId')
+    pid = json.load(open(sa_path))['project_id']
+    tok = token(sa_path, 'https://www.googleapis.com/auth/cloud-platform')
+    base = f'https://firestore.googleapis.com/v1/projects/{pid}/databases/(default)/documents/b/{bid}'
+    patch(base, tok, {'apkState': {'mapValue': {'fields': {'st': {'stringValue': 'failed'}, 'why': {'stringValue': 'build'}}}}}, ['apkState.st', 'apkState.why'])
+    print(f'apkState failed: b/{bid}')
 
 
 if __name__ == '__main__':
     a = sys.argv[1:]
     if len(a) == 4 and a[0] == 'discover':
         discover(a[1], a[2], a[3])
-    elif len(a) == 3 and a[0] == 'tag':
-        tag(a[1], a[2])
+    elif len(a) in (3, 4) and a[0] == 'tag':
+        tag(a[1], a[2], a[3] if len(a) == 4 else '0')
+    elif len(a) == 3 and a[0] == 'fail':
+        fail(a[1], a[2])
     else:
         raise SystemExit(__doc__)

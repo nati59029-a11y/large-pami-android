@@ -1542,7 +1542,7 @@
   },
   {
    "id": "M109",
-   "line": 6021,
+   "line": 6046,
    "snippet": "fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})})",
    "fn": "mqQ (mqLoad / mqMine)",
    "collection": "mq",
@@ -1557,7 +1557,7 @@
   },
   {
    "id": "M110",
-   "line": 6037,
+   "line": 6062,
    "snippet": "fsx('/mq/'+x.id+'/p/'+k)",
    "fn": "mqFile",
    "collection": "mq_p",
@@ -1571,7 +1571,7 @@
   },
   {
    "id": "M111",
-   "line": 6047,
+   "line": 6072,
    "snippet": "fsx('/mq/'+id+'?updateMask.fieldPaths=st&updateMask.fieldPaths=stBy&updateMask.fieldPaths=stAt&currentDocument.exists=true'",
    "fn": "mqSt",
    "collection": "mq",
@@ -1585,7 +1585,7 @@
   },
   {
    "id": "M112",
-   "line": 6049,
+   "line": 6074,
    "snippet": "fsx('/mq/'+id+'/p/'+k,{method:'DELETE'})",
    "fn": "mqSt",
    "collection": "mq_p",
@@ -1599,7 +1599,7 @@
   },
   {
    "id": "M113",
-   "line": 6061,
+   "line": 6086,
    "snippet": "fsx('/mq?documentId='+encodeURIComponent(id)",
    "fn": "mqSend",
    "collection": "mq",
@@ -1613,7 +1613,7 @@
   },
   {
    "id": "M114",
-   "line": 6064,
+   "line": 6089,
    "snippet": "fsx('/mq/'+id+'/p?documentId='+i",
    "fn": "mqSend",
    "collection": "mq_p",
@@ -1672,14 +1672,14 @@
   },
   {
    "id": "X07",
-   "line": 5256,
+   "line": 5281,
    "snippet": "/staff?pageSize=300",
    "fn": "admStaffLoad",
    "reason": "מסך ניהול חדש (ריבוי עסקים, שלב 6א). רשימת העובדים של העסק הנוכחי (FSB), list. מנהל העסק ומנהל־על; עובד אינו מגיע למסך (isA). אין לה שורה ב-rows כי אין לה עדיין בדיקת \"מותר\" בקובץ 90-coverage (הכללים מגיעים משלבים 2 ו-5); היא נבדקת מול האמולטור בקובץ tests/app-multibiz/ui-admin.js. תעבור ל-rows באיחוד (שלב 7)."
   },
   {
    "id": "X09",
-   "line": 5256,
+   "line": 5281,
    "snippet": "fsx('/private/info')",
    "fn": "admStaffLoad (6ה)",
    "reason": "מסך עובדים, מנהל־על בלבד (SY.sa): קריאת הדרגות של העסק הנוכחי מ-b/{bizId}/private/info (FSB). אותו כלל כמו X06 (מנהל־על ומנהל העסק קוראים; עובד נחסם). נבדק מול האמולטור ב-tests/perms-6e.test.js."
@@ -1742,63 +1742,63 @@
   },
   {
    "id": "X-RP2",
-   "line": 6107,
+   "line": 6132,
    "snippet": "fsx('/'+col+'/'+id+'?'+mask.join('&')+'&currentDocument.exists=true'",
    "fn": "docPatch – עדכון ptk (בוצע/החזר), rtk (כלל קבוע), rq (תשובה/תגובה)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP3",
-   "line": 6108,
+   "line": 6133,
    "snippet": "fsx('/'+col+'/'+id,{method:'DELETE'})",
    "fn": "docDel – מחיקת ptk (בעלים/מנהל) ו-rtk (מנהל)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP4",
-   "line": 6113,
+   "line": 6138,
    "snippet": "fsx(':runQuery'",
    "fn": "ptQ – רשימת ptk (עובד: owner==uid; מנהל: הכול)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP5",
-   "line": 6129,
+   "line": 6154,
    "snippet": "fsx('/rtk?pageSize=300')",
    "fn": "rcLoad – רשימת משימות קבועות (מנהל)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP6",
-   "line": 6187,
+   "line": 6212,
    "snippet": "fsx('/rtk?documentId='",
    "fn": "FRM.rcSave – יצירת משימה קבועה (מנהל)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP7",
-   "line": 6199,
+   "line": 6224,
    "snippet": "fsx(':runQuery'",
    "fn": "rqQ – רשימת בקשות (עובד: owner==uid; מנהל: st==new / st IN [done,rej])",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP8",
-   "line": 6227,
+   "line": 6252,
    "snippet": "fsx('/rq?documentId='",
    "fn": "FRM.rqNew – עובד שולח בקשה למנהל",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP9",
-   "line": 6230,
+   "line": 6255,
    "snippet": "fsx('/rq/'+id+'/c?pageSize=300'",
    "fn": "rqCmLoad – קריאת שרשור התגובות",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."
   },
   {
    "id": "X-RP10",
-   "line": 6243,
+   "line": 6268,
    "snippet": "fsx('/rq/'+id+'/c?documentId='",
    "fn": "FRM.rqCm – כתיבת תגובה בשרשור (עובד או מנהל)",
    "reason": "שלב 2 (feature/recurring-private-requests): הכלל והבדיקות של הפעולה הזו נמצאים בבדיקות החוקים של שלב 1 (ptk / rtk / rq), ולא ב-replay של האפליקציה הישנה. הממשק נבדק ב-tests/app-multibiz/ui-rq1.js (רשת מדומה). בבדיקה הכוללת מול האמולטור (שלב 3) כדאי להעביר לשורות rows."

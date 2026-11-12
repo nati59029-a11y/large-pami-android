@@ -198,3 +198,6 @@ Object.assign(exports, require('./imports'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));
+
+// אפליקציה עם סמל העסק – בנייה מיידית (12.11.2026): requestBizApk – מנהל־על בלבד, מפעיל את build-biz-apks ב-GitHub (biz-apk.js)
+Object.assign(exports, require('./biz-apk'));

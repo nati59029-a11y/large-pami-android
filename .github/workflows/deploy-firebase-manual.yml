@@ -221,6 +221,25 @@ jobs:
           [ "$C" = "200" ] || { echo "::error::שמירת ערך ל-CARD_ENC_KEY נכשלה (HTTP $C)"; exit 1; }
           echo "CARD_ENC_KEY: נוצר עכשיו (ערך אקראי, לא מודפס)" | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # אפליקציה לעסק – בנייה מיידית (12.11.2026): מפתח הגישה של GitHub (סוד GitHub בשם GH_DISPATCH_TOKEN) נכתב ל-Secret Manager
+      # דרך stdin בלבד – לא מודפס. בלי סוד GitHub: סוד חסר נוצר עם "unset" (הפונקציה requestBizApk מחזירה no-token), סוד קיים לא נדרס.
+      - name: GitHub dispatch token (requestBizApk)
+        if: inputs.what == 'functions'
+        working-directory: firebase
+        env:
+          GH_DISPATCH_TOKEN: ${{ secrets.GH_DISPATCH_TOKEN }}
+          P: ${{ inputs.project }}
+        run: |
+          set +x
+          if [ -n "$GH_DISPATCH_TOKEN" ]; then
+            echo "::add-mask::$GH_DISPATCH_TOKEN"
+            printf '%s' "$GH_DISPATCH_TOKEN" | firebase functions:secrets:set GH_DISPATCH_TOKEN --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 || { echo "::error::שמירת הסוד GH_DISPATCH_TOKEN נכשלה"; exit 1; }
+            echo "GH_DISPATCH_TOKEN עודכן ב-$P" | tee -a "$GITHUB_STEP_SUMMARY"
+          elif ! firebase functions:secrets:get GH_DISPATCH_TOKEN --project "$P" --non-interactive >/dev/null 2>&1; then
+            printf 'unset' | firebase functions:secrets:set GH_DISPATCH_TOKEN --data-file - --project "$P" --non-interactive --force >/dev/null 2>&1 || { echo "::error::יצירת הסוד GH_DISPATCH_TOKEN נכשלה"; exit 1; }
+            echo "GH_DISPATCH_TOKEN: נוצר עם ערך זמני (unset) – הבנייה המיידית לא תפעל עד שיוגדר סוד GitHub" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
       # מייל הזמנה עצמי (2026-11-08): אם הוגדרו סודות GitHub MAIL_USER ו-MAIL_APP_PASSWORD – נכתבים ל-Secret Manager של הפרויקט
       # (גרסה חדשה, דרך stdin בלבד – לא מודפסים). אם חסרים – ממשיכים: הסוד הקיים (או הזמני) נשאר, והאפליקציה נופלת למייל של Firebase.
       # INVITE_SITE = אתר גרסת המחשב (שם welcome.html), מהמשתנים DESKTOP_SITE / DESKTOP_SITE_TEST.
