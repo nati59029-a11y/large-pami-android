@@ -120,14 +120,16 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     // וסגירת קופה (closings, וחלקי הצילומים p – מקונן בתוך closings/{id})
     // והוצאות מקופה (cashout) ואישורי הפקדה (deposits, וחלקי הצילומים p – מקונן בתוך deposits/{id}) – שלב 2, וזמן הסגירה האחרונה (zlast)
     // ואוספי ימות (yemot_items, yemot_line_backups, yemot_hook_usage, yemot_lexicon – משימה 2026-11-02)
+    // משימות פרטיות (ptk), כללי משימות קבועות (rtk) ובקשות למנהל (rq, ותגובות c – מקונן בתוך rq/{id}) – 12.11.2026
     // ייבוא ברקע (impJobs – 2026-11-11, מסמך העבודה; החלקים המוצפנים ב-impQ בלי כלל = סגורים)
     // ריבוי עסקים (2026-11-05): אוספי השורש נבדקים רק עד הבלוק match /b/{bizId}, שמכיל העתק שלהם בתוך העסק
     const rootPart = t.slice(0, t.indexOf('match /b/{bizId} {'));
     const rootMatches = [...rootPart.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
     const colls = rootMatches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
     assert.ok(/match \/b\/\{bizId\} \{/.test(t), 'בלוק העסקים חסר');
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'mq', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'prod', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'mq', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'prod', 'ptk', 'rq', 'rtk', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
+    assert.match(t, /match \/rq\/\{id\} \{[\s\S]*?match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך rq');
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/p\/\{pid\} \{/, 'p (תמונות משימה) חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/supinv\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך supinv');
     assert.match(t, /match \/appreq\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך appreq');
