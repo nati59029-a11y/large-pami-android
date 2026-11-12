@@ -1352,7 +1352,7 @@ async function saveLinePlan(request) {
   needCell(w);
   const isMgr = w.role === 'manager';
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'name', 'carrier', 'days', 'on', 'details', 'monthly', 'ship', 'sim', 'promo', 'promos', 'del'].concat(PLAN_TXT.map((x) => x[0])));
+  onlyKeys(input, ['id', 'name', 'carrier', 'days', 'on', 'details', 'monthly', 'ship', 'sim', 'promo', 'promos', 'del', 'sector'].concat(PLAN_TXT.map((x) => x[0])));
   const db = T.tdb();
   // מחיקת תוכנית (2026-11-12) – מנהל העסק בלבד. הזמנות קיימות שומרות את הקווים שלהן
   if (input.del === true) {
