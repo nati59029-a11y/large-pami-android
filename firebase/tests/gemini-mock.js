@@ -29,6 +29,25 @@ const ANSWERS = {
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
 };
 
+// תמחור חשבונית ספק, שלב 2: שורות מוצרים (invlines) – 3 חשבוניות לדוגמה. ברירת המחדל: units. בבדיקה: state.invlines = 'cartons' | 'discount' | 'units' | אובייקט
+const INVLINES = {
+  // יחידות ומארזים, מחיר ליחידה, שורה אחת שהסה"כ שלה לא מתאים (לבדיקה)
+  units: { supplier: 'תבניכל בע"מ', number: '50123', date: '2026-11-10', prices_include_vat: false, lines: [
+    { name: 'כוסות קרטון 250 מ"ל', barcode: '7290000000011', sku: 'K-250', qty: 12, unit: 'pk', pack_qty: 50, carton_qty: 20, price: 9.5, discount: null, total: 114 },
+    { name: 'מפיות לבנות', barcode: null, sku: '3301', qty: 30, unit: 'u', pack_qty: null, carton_qty: null, price: 4.2, discount: null, total: 126 },
+    { name: 'צלחות קרטון', barcode: '7290000000028', sku: null, qty: 10, unit: 'pk', pack_qty: 20, carton_qty: 12, price: 6, discount: null, total: 70 },
+  ] },
+  // מחיר לקרטון: עלות מארז = מחיר קרטון ÷ carton_qty, כמות במלאי = קרטונים × carton_qty
+  cartons: { supplier: 'אריזות הדרום', number: '777', date: '2026-11-11', prices_include_vat: false, lines: [
+    { name: 'תבנית אלומיניום 30', barcode: '7290000000035', sku: 'AL30', qty: 2, unit: 'ct', pack_qty: 10, carton_qty: 24, price: 216, discount: null, total: 432 },
+    { name: 'נייר אפייה', barcode: '7290000000042', sku: 'NP', qty: 1, unit: 'ct', pack_qty: null, carton_qty: null, price: 150, discount: null, total: 150 },
+  ] },
+  // הנחה בשורה (אחוז), ומחירים כוללים מע"מ
+  discount: { supplier: 'שפע ניקיון', number: '9001', date: '2026-11-12', prices_include_vat: true, lines: [
+    { name: 'סכו"ם חד פעמי', barcode: '7290000000059', sku: 'S1', qty: 10, unit: 'pk', pack_qty: 100, carton_qty: 10, price: 11.8, discount: 10, total: 106.2 },
+    { name: 'שקיות אשפה', barcode: '', sku: 'SH-9', qty: '5', unit: 'u', pack_qty: null, carton_qty: null, price: '23,60', discount: 0, total: null },
+  ] },
+};
 // delayMs: כמה זמן שרת הדמה "חושב" לפני שהוא עונה לבקשת זיהוי (לבדיקת תקציב הזמן)
 // סריקה אחידה: תשובות classify לדוגמה, לכל סוג
 const CLASSIFY = {
@@ -46,8 +65,8 @@ const CLASSIFY = {
 };
 // המזכירה (שלב 2): בקשה עם הנחיית מערכת שמתחילה ב-SEC-CHAT-V1. התשובה נקבעת בבדיקה: state.sec = (body) => ({ calls: [{ name, args }] } | { text })
 // usage = טוקנים מדומים לכל תשובה (לבדיקת מונה העלות)
-const state = { mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+const state = { invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.invlines = null; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
@@ -55,6 +74,7 @@ function kindOf(body) {
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
   if (s.startsWith('סווג את המסמך')) return 'classify'; // סריקה אחידה – לפני כל השאר, כי ההנחיה מזכירה את כל הסוגים
+  if (s.includes('טבלת שורות המוצרים')) return 'invlines'; // לפני invoice – גם היא מתחילה ב"חשבונית מס"
   if (s.includes('אישור על העברה בנקאית')) return 'transfer';
   if (s.includes('אישור הפקדת מזומן')) return 'deposit';
   if (s.includes('פתק "הוצאת מזומן מהקופה"')) return 'cashout';
@@ -78,7 +98,8 @@ function secAnswer(body) {
 function rawAnswer(kind, body) {
   if (kind === 'sec') return secAnswer(body || {});
   if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
-  let text = JSON.stringify(kind === 'classify' ? (state.classify || CLASSIFY.invoice) : (ANSWERS[kind] || { ok: true }));
+  const inl = () => (state.invlines && typeof state.invlines === 'object' ? state.invlines : INVLINES[state.invlines] || INVLINES.units);
+  let text = JSON.stringify(kind === 'classify' ? (state.classify || CLASSIFY.invoice) : kind === 'invlines' ? inl() : (ANSWERS[kind] || { ok: true }));
   if (state.fenced) text = '```json\n' + text + '\n```';
   const parts = state.split ? [{ text: text.slice(0, 10) }, { text: text.slice(10) }] : [{ text }];
   return { candidates: [{ content: { parts, role: 'model' }, finishReason: 'STOP' }] };
@@ -121,4 +142,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { start, stop, reset, state, rawAnswer, ANSWERS, CLASSIFY, MODELS, PORT };
+module.exports = { start, stop, reset, state, rawAnswer, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };

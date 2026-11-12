@@ -9,7 +9,7 @@
 //   cat/{id}           { name, parent?, ord, upd }                                  – קטגוריה (parent ריק) / תת־קטגוריה. מנהל, דרך saveCat
 //   xfer/{id}          { prod, name, from, to, qty, why:'order'|'cancel'|'edit'|'manual', ord?, no?, by, at, reqId }  – העברה פנימית בין סניפים
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
-//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
+//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
@@ -122,6 +122,10 @@ function onlyKeys(o, keys, label) {
 async function who(request) {
   const w = await requireStaff(request, { feature: 'orders' });
   if (!hasPerm(w, 'ord')) throw deny('no-perm', 'אין לך הרשאה להזמנות. פנה למנהל.');
+  return withBr(w);
+}
+// סניפים של העסק ושל העובד (משותף ל-who ולתמחור חשבונית – pricing.js, שם ההרשאה היא prc ולא ord)
+async function withBr(w) {
   const bd = w.biz.exists ? await getFirestore().doc('b/' + w.bizId).get() : null;
   const org = bd && bd.exists && bd.get('org') && typeof bd.get('org') === 'object' ? bd.get('org') : {};
   w.branches = (Array.isArray(org.branches) ? org.branches : []).filter((b) => b && typeof b.id === 'string');
@@ -189,6 +193,10 @@ function prodExt(w, input) {
     const v = input[k] === null || input[k] === '' ? '' : txt(String(input[k]), mx, 'bad-' + k, l);
     o[k] = v ? v : FV().delete();
   }
+  if (input.cto !== undefined) { // 12.11.2026 (תמחור חשבונית, החלטה 3): רק קרטונים סגורים ללקוח סיטונאי. false / null = מחיקה
+    if (input.cto !== null && typeof input.cto !== 'boolean') throw bad('bad-field', 'קרטונים סגורים חייב להיות כן/לא');
+    o.cto = input.cto === true ? true : FV().delete();
+  }
   if (input.home !== undefined) {
     if (input.home === null || input.home === '') o.home = FV().delete();
     else if (typeof input.home !== 'string' || !w.branches.some((b) => b.id === input.home)) throw bad('bad-br', 'סניף בית לא קיים');
@@ -197,21 +205,45 @@ function prodExt(w, input) {
   return o;
 }
 const noDel = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => !(v && v.constructor && /Delete/.test(v.constructor.name))));
-// saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
-// עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0).
-// עלות וסיטונאי – גם עובד עם ord (החלטות 00:12, 00:13).
-async function saveProduct(request) {
-  const w = await who(request);
-  const input = inputObject(request);
-  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'home', 'note', 'sku', 'sup']);
+// ניקוי קלט של מוצר – משותף ל-saveProduct ולסיום תמחור חשבונית (pricing.js piFinish), כדי שאותם כללים יחולו בשניהם.
+function prodClean(w, input) {
   const name = txt(input.name, 60, 'bad-name', 'שם המוצר', true);
   const price = money(input.price, 'מחיר');
   const barcode = input.barcode == null || input.barcode === '' ? '' : String(input.barcode).trim();
   if (barcode && !/^[0-9A-Za-z-]{3,30}$/.test(barcode)) throw bad('bad-barcode', 'ברקוד: ספרות/אותיות, 3 עד 30');
   if (input.on !== undefined && typeof input.on !== 'boolean') throw bad('bad-field', 'זמין חייב להיות כן/לא');
-  if (input.cost !== undefined && input.cost !== null) money(input.cost, 'עלות');
-  if (input.wp !== undefined && input.wp !== null) money(input.wp, 'מחיר סיטונאי');
-  const ext = prodExt(w, input);
+  const cost = input.cost !== undefined && input.cost !== null ? money(input.cost, 'עלות') : null;
+  const wp = input.wp !== undefined && input.wp !== null ? money(input.wp, 'מחיר סיטונאי') : null;
+  return { name, price, barcode, on: input.on !== false, cost, wp, noteIn: input.note !== undefined, ext: prodExt(w, input) };
+}
+// כתיבת מוצר בתוך טרנזקציה (c = prodClean). o = הנתונים הקיימים (עדכון, עם רישום שינויים ב-stockLog why:'prod') או null (מוצר חדש).
+// extra = שדות נוספים לאותה כתיבה (q למוצר חדש / q.<סניף> בעדכון). עלות וסיטונאי – רק כשנשלחו.
+function prodPut(tx, db, w, id, o, c, now, extra) {
+  const ref = db.doc('prod/' + id);
+  if (o) {
+    const ch = [];
+    if (o.name !== c.name) ch.push(`שם: ${String(o.name || '').slice(0, 60)} → ${c.name}`);
+    if (o.price !== c.price) ch.push(`מחיר: ₪${o.price} → ₪${c.price}`);
+    if ((o.barcode || '') !== c.barcode) ch.push('ברקוד');
+    if ((o.on !== false) !== c.on) ch.push(c.on ? 'זמין' : 'לא זמין');
+    if (c.ext.bp && JSON.stringify(c.ext.bp) !== JSON.stringify(o.bp || {})) ch.push('מחיר לסניף');
+    if (c.noteIn && (o.note || '') !== (typeof c.ext.note === 'string' ? c.ext.note : '')) ch.push('הערות');
+    tx.update(ref, Object.assign({ name: c.name, price: c.price, barcode: c.barcode, on: c.on, upd: now }, c.ext, extra || {}));
+    if (ch.length) tx.set(stockRef(db), { prod: id, name: c.name, br: NB, delta: 0, why: 'prod', note: ch.join('; ').slice(0, 300), by: w.uid, at: now });
+  } else {
+    tx.set(ref, Object.assign({ name: c.name, price: c.price, barcode: c.barcode, on: c.on, q: {}, at: now, by: w.uid, upd: now }, noDel(c.ext), extra || {}));
+  }
+  if (c.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: c.wp, at: now, by: w.uid });
+  if (c.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: c.cost, at: now, by: w.uid });
+}
+// saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
+// עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0).
+// עלות וסיטונאי – גם עובד עם ord (החלטות 00:12, 00:13). cto (רק קרטונים סגורים) – 12.11.2026, תוספתי.
+async function saveProduct(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['id', 'name', 'price', 'barcode', 'on', 'cost', 'br', 'qty', 'reqId', 'cat', 'sub', 'bp', 'wp', 'pk', 'ct', 'cto', 'home', 'note', 'sku', 'sup']);
+  const c = prodClean(w, input);
   const db = T.tdb();
   const now = Date.now();
   if (input.id != null) {
@@ -220,18 +252,7 @@ async function saveProduct(request) {
     await db.runTransaction(async (tx) => {
       const s = await tx.get(ref);
       if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
-      const o = s.data() || {};
-      const ch = [];
-      if (o.name !== name) ch.push(`שם: ${String(o.name || '').slice(0, 60)} → ${name}`);
-      if (o.price !== price) ch.push(`מחיר: ₪${o.price} → ₪${price}`);
-      if ((o.barcode || '') !== barcode) ch.push('ברקוד');
-      if ((o.on !== false) !== (input.on !== false)) ch.push(input.on === false ? 'לא זמין' : 'זמין');
-      if (ext.bp && JSON.stringify(ext.bp) !== JSON.stringify(o.bp || {})) ch.push('מחיר לסניף');
-      if (input.note !== undefined && (o.note || '') !== (typeof ext.note === 'string' ? ext.note : '')) ch.push('הערות');
-      tx.update(ref, Object.assign({ name, price, barcode, on: input.on !== false, upd: now }, ext));
-      if (input.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: money(input.wp, 'מחיר סיטונאי'), at: now, by: w.uid });
-      if (ch.length) tx.set(stockRef(db), { prod: id, name, br: NB, delta: 0, why: 'prod', note: ch.join('; ').slice(0, 300), by: w.uid, at: now });
-      if (input.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: money(input.cost, 'עלות'), at: now, by: w.uid });
+      prodPut(tx, db, w, id, s.data() || {}, c, now);
     });
     return { ok: true, id };
   }
@@ -246,10 +267,8 @@ async function saveProduct(request) {
     if (s.exists) { dup = true; return; }
     const q = {};
     if (br && qty) q[br] = qty;
-    tx.set(ref, Object.assign({ name, price, barcode, on: input.on !== false, q, at: now, by: w.uid, upd: now }, noDel(ext)));
-    if (input.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: money(input.wp, 'מחיר סיטונאי'), at: now, by: w.uid });
-    if (input.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: money(input.cost, 'עלות'), at: now, by: w.uid });
-    if (br && qty) tx.set(stockRef(db), { prod: id, name, br, delta: qty, why: 'in', by: w.uid, at: now });
+    prodPut(tx, db, w, id, null, c, now, { q });
+    if (br && qty) tx.set(stockRef(db), { prod: id, name: c.name, br, delta: qty, why: 'in', by: w.uid, at: now });
   });
   return { ok: true, id, dup };
 }
@@ -782,6 +801,42 @@ function snapCosts(items, costs, oldItems) {
   return items;
 }
 
+// 12.11.2026 (תמחור חשבונית, שלב 5א; החלטה 3 + הבהרה): מוצר "רק קרטונים סגורים" (cto, עם ct ≥ 2) בהזמנה של לקוח סיטונאי (cust.wholesale) –
+// הכמות בשורה נשמרת במארזים (כמו תמיד) וחייבת להיות כפולה של ct. המחיר נשאר מחיר מארז, כך שסה"כ = קרטונים × ct × מחיר מארז,
+// והמלאי, הרווחיות והדוחות לא משתנים. בשורה כזו נשמר ct (מארזים בקרטון) – לתצוגה בקרטונים. לקוח רגיל / מוצר בלי ct תקין – כמו קודם.
+// עריכה: שורה שלא השתנתה (אותו מוצר ואותה כמות כמו בהזמנה הקיימת) לא נחסמת – כדי לא לחסום עריכה של הזמנות קיימות.
+const ctoOf = (p) => (p && p.cto === true && Number.isInteger(p.ct) && p.ct >= 2 ? p.ct : 0);
+async function isWs(tx, db, custId) {
+  if (!custId) return false;
+  const s = await tx.get(db.doc('cust/' + custId));
+  return s.exists && s.get('wholesale') === true;
+}
+// 12.11.2026 (החלטה 9): מתנה ממבצע (cell.lines[].gift) = מארז אחד בלבד, לא קרטון – כל קו עם מתנה בבקשה הנוכחית פוטר שורה אחת של אותו מוצר בכמות 1 (בלי ct).
+// oldCell = הניוד השמור בהזמנה: שורה ישנה שהייתה מתנה לפיו לא מקבלת פטור "שורה ישנה" – הפטור היחיד שלה הוא מתנה בבקשה הנוכחית
+// (בלי פטור כפול; ביטול הניוד/המתנה → מארז בודד נדחה, וצריך להסיר אותו או להשלים לקרטון).
+const giftCnt = (cell) => { const m = new Map(); for (const l of (cell && Array.isArray(cell.lines) ? cell.lines : [])) if (l && l.gift) m.set(l.gift, (m.get(l.gift) || 0) + 1); return m; };
+function cartons(items, prods, ws, oldItems, cell, oldCell) {
+  if (!ws) return items;
+  const was = giftCnt(oldCell); // מוצר → כמה שורות ישנות בכמות 1 היו מתנה
+  const keep = new Map(); // מוצר|כמות → כמה שורות כאלה היו בהזמנה (כל שורה ישנה פוטרת שורה אחת בלבד)
+  for (const x of oldItems || []) {
+    if (!x || !x.pid) continue;
+    if (x.qty === 1 && !x.ct && was.get(x.pid) > 0) { was.set(x.pid, was.get(x.pid) - 1); continue; }
+    keep.set(x.pid + '|' + x.qty, (keep.get(x.pid + '|' + x.qty) || 0) + 1);
+  }
+  const gift = giftCnt(cell); // מוצר → כמה קווים בבקשה הנוכחית בחרו אותו כמתנה
+  for (const it of items) {
+    const ct = it.pid ? ctoOf(prods.get(it.pid)) : 0;
+    if (!ct) continue;
+    const k = it.pid + '|' + it.qty;
+    if (Number.isInteger(it.qty / ct)) it.ct = ct;
+    else if (it.qty === 1 && gift.get(it.pid) > 0) gift.set(it.pid, gift.get(it.pid) - 1);
+    else if (keep.get(k) > 0) keep.set(k, keep.get(k) - 1);
+    else throw bad('cto-qty', `"${it.n}": ללקוח סיטונאי נמכר רק בקרטונים שלמים (${ct} מארזים בקרטון)`);
+  }
+  return items;
+}
+
 function ordAccess(w, d) {
   if (!d) throw new HttpsError('not-found', 'ההזמנה לא נמצאה', { reason: 'no-ord' });
   if (d.br && d.br !== NB && !canBr(w, d.br)) throw deny('foreign-br', 'אין לך הרשאה להזמנה של סניף אחר');
@@ -813,8 +868,10 @@ async function createOrder(request) {
     const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
     const { cell, plans } = await prepCell(tx, db, w, input, cust);
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
-    const { items } = resolveItems(w, br, raw, plain(prods), src);
+    const pd = plain(prods);
+    const { items } = resolveItems(w, br, raw, pd, src);
     snapCosts(items, costs);
+    cartons(items, pd, await isWs(tx, db, custId), null, cell);
     for (const it of items) if (it.pid && prods.get(it.pid).get('on') === false) throw pre('prod-off', `המוצר "${it.n}" לא זמין`);
     const ct = cell ? cellTotal(items, cell, plans) : { total: totalOf(items), calc: null };
     const total = ct.total;
@@ -864,14 +921,23 @@ async function updateOrder(request) {
       // מוצר ישן שנמחק מהמאגר – מדלגים עליו בהחזרה
       const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[d.br] : null;
       // שורה קיימת שנשארת עם אותו מוצר – שומרת את סניף המקור שלה, אלא אם נשלח אחר
-      const { items } = resolveItems(w, d.br, raw, plain(prods), src);
+      const pd = plain(prods);
+      const { items } = resolveItems(w, d.br, raw, pd, src);
       snapCosts(items, await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid)), oldItems);
+      cartons(items, pd, await isWs(tx, db, d.custId), oldItems, cell !== undefined ? cell : d.cell, d.cell);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
       applyMoves(tx, db, w, prods, mv, { ord: id, no: d.no }, warn);
       upd.items = items;
       const pc = items.filter((it, i) => oldItems[i] && oldItems[i].pid === it.pid && oldItems[i].price !== it.price).map((it) => `${it.n}: ₪${oldItems[items.indexOf(it)].price} → ₪${it.price}`);
       notes.push(...pc);
       out = { warn };
+    }
+    // 12.11.2026 (החלטה 9, סבב 2): רק הניוד השתנה (בלי items) – בודקים את הפריטים השמורים מול הניוד החדש, כדי שביטול המתנה לא ישאיר מארז בודד ללקוח סיטונאי.
+    // על עותק בלבד – הפריטים לא נשמרים מחדש. הזמנה בלי מוצרי cto (או לקוח לא סיטונאי) – לא נחסמת.
+    if (!raw && cell !== undefined && Array.isArray(d.items) && d.items.some((x) => x && x.pid)) {
+      const its = d.items.map((x) => Object.assign({}, x));
+      const ws = await isWs(tx, db, d.custId);
+      if (ws) cartons(its, plain(await loadProds(tx, db, its.filter((x) => x.pid).map((x) => x.pid))), ws, d.items, cell, d.cell);
     }
     // סכום: מחושב מחדש כשהפריטים או הניוד השתנו. הזמנה בלי חבילות חדשות – סכום הפריטים (כמו קודם)
     if (raw || cell !== undefined) {
@@ -1679,4 +1745,4 @@ const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, im
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכניסה לאתר הסליקה מוצפנים ב-CARD_ENC_KEY
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });

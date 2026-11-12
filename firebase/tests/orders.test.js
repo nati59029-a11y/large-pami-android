@@ -459,6 +459,122 @@ describe('מחיקת כל המלאי ושחזור (11.11.2026)', () => {
   });
 });
 
+// 12.11.2026 (תמחור חשבונית, שלב 5א): "רק קרטונים סגורים" (cto) – ללקוח סיטונאי הכמות נשמרת במארזים וחייבת להיות כפולה של ct
+describe('קרטונים סגורים ללקוח סיטונאי (cto)', () => {
+  beforeEach(() => prep(async (d) => {
+    const b = d.batch();
+    b.set(d.doc(`b/${A}/prod/pC`), { name: 'חטיף', price: 6, on: true, ct: 6, cto: true, q: { br1: 30 } });
+    b.set(d.doc(`b/${A}/prod/pC/p/cost`), { cost: 3 });
+    b.set(d.doc(`b/${A}/prod/pD`), { name: 'בלי ct', price: 6, on: true, ct: 1, cto: true, q: { br1: 30 } });
+    b.set(d.doc(`b/${A}/prod/pE`), { name: 'בלי cto', price: 6, on: true, ct: 6, q: { br1: 30 } });
+    b.set(d.doc(`b/${A}/cust/cW`), { name: 'סיטונאי', phone: '0501111111', wholesale: true });
+    b.set(d.doc(`b/${A}/cust/cR`), { name: 'רגיל', phone: '0502222222' });
+    await b.commit();
+  }));
+  const mk = (custId, items) => call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId, items });
+  it('סיטונאי: 2 קרטונים = 12 מארזים, מחיר מארז, ct נשמר בשורה, המלאי יורד 12; כמות שאינה כפולה של ct נדחית', async () => {
+    const r = await mk('cW', [{ pid: 'pC', qty: 12, price: 5 }]);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.total, 60);
+    const o = await get(`b/${A}/ord/${r.result.id}`);
+    assert.deepEqual([o.items[0].qty, o.items[0].price, o.items[0].ct, o.items[0].c], [12, 5, 6, 3]);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 18);
+    const lg = (await coll(`b/${A}/stockLog`)).filter((x) => x.ord === r.result.id);
+    assert.deepEqual(lg.map((x) => x.delta), [-12]);
+    for (const q of [5, 1, 13, 6.5]) assert.equal((await mk('cW', [{ pid: 'pC', qty: q, price: 5 }])).reason, 'cto-qty', 'qty ' + q);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 18);
+  });
+  it('לקוח רגיל / בלי לקוח / מוצר בלי ct תקין / בלי cto – כמו קודם (מארז אחד, בלי ct בשורה)', async () => {
+    for (const [cid, pid] of [['cR', 'pC'], [undefined, 'pC'], ['cW', 'pD'], ['cW', 'pE']]) {
+      const r = await mk(cid, [{ pid, qty: 5, price: 6 }]);
+      assert.equal(r.status, 'OK', `${cid}/${pid}: ${r.text}`);
+      const o = await get(`b/${A}/ord/${r.result.id}`);
+      assert.equal(o.total, 30); assert.equal(o.items[0].qty, 5); assert.equal(o.items[0].ct, undefined);
+    }
+  });
+  it('עריכה: שורה קיימת שלא השתנתה לא נחסמת; שינוי לכמות שאינה כפולה נדחה; לכפולה – נשמר עם ct, המלאי לפי ההפרש', async () => {
+    const r = await mk('cR', [{ pid: 'pC', qty: 5, price: 6 }]); // הזמנה "ישנה": הלקוח עוד לא היה סיטונאי
+    await prep((d) => d.doc(`b/${A}/ord/${r.result.id}`).update({ custId: 'cW' }));
+    const id = r.result.id;
+    assert.equal((await call('updateOrder', E1, { id, items: [{ pid: 'pC', qty: 5, price: 7 }] })).status, 'OK');
+    assert.equal((await call('updateOrder', E1, { id, items: [{ pid: 'pC', qty: 7, price: 7 }] })).reason, 'cto-qty');
+    const u = await call('updateOrder', E1, { id, items: [{ pid: 'pC', qty: 18, price: 7 }] });
+    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 126);
+    const o = await get(`b/${A}/ord/${id}`);
+    assert.deepEqual([o.items[0].qty, o.items[0].ct], [18, 6]);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 12);
+  });
+  it('עריכה: שורה ישנה שאינה קרטון שלם פוטרת רק את עצמה – 3 שורות של 5 נדחות, 2 שורות ישנות של 5 עוברות', async () => {
+    const r = await mk('cR', [{ pid: 'pC', qty: 5, price: 6 }, { pid: 'pC', qty: 5, price: 6 }]);
+    await prep((d) => d.doc(`b/${A}/ord/${r.result.id}`).update({ custId: 'cW' }));
+    const id = r.result.id, L = (n) => Array.from({ length: n }, () => ({ pid: 'pC', qty: 5, price: 6 }));
+    assert.equal((await call('updateOrder', E1, { id, items: L(3) })).reason, 'cto-qty');
+    assert.equal((await get(`b/${A}/ord/${id}`)).items.length, 2);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 20);
+    assert.equal((await call('updateOrder', E1, { id, items: L(2) })).status, 'OK');
+    assert.equal((await call('updateOrder', E1, { id, items: L(1) })).status, 'OK');
+    assert.equal((await call('updateOrder', E1, { id, items: L(2) })).reason, 'cto-qty'); // אחרי הצמצום – רק שורה ישנה אחת
+  });
+  it('החלטה 9: מתנה ממבצע (קו עם gift) במוצר cto ללקוח סיטונאי = מארז אחד, בלי ct; המלאי יורד 1; רק שורה אחת לכל קו עם מתנה', async () => {
+    await prep(async (d) => {
+      await d.doc('b/' + A).update({ features: Object.assign({}, ALL, { cellular: true }) });
+      await d.doc(`b/${A}/lineplan/lpG`).set({ name: 'מבצע מתנה', on: true, monthly: 39, promos: [{ gifts: [{ pid: 'pC', price: 0 }] }] });
+    });
+    const cell = { lines: [{ phone: '0521111111', plan: 'lpG', gift: 'pC' }] };
+    const go = (items) => call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId: 'cW', items, cell });
+    const r = await go([{ pid: 'pC', qty: 12, price: 5 }, { pid: 'pC', qty: 1, price: 5 }]);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.total, 65 - 5); // ההנחה המוצעת: מארז אחד במחיר 5 (מתנה חינם)
+    const o = await get(`b/${A}/ord/${r.result.id}`);
+    assert.deepEqual(o.items.map((x) => [x.qty, x.ct]), [[12, 6], [1, undefined]]);
+    assert.equal(o.cell.calc.gift, 5);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 30 - 13);
+    // קו אחד עם מתנה פוטר שורה אחת בלבד, ורק בכמות 1
+    assert.equal((await go([{ pid: 'pC', qty: 1, price: 5 }, { pid: 'pC', qty: 1, price: 5 }])).reason, 'cto-qty');
+    assert.equal((await go([{ pid: 'pC', qty: 2, price: 5 }])).reason, 'cto-qty');
+    // בלי קו עם מתנה – מארז בודד נדחה כמו קודם
+    assert.equal((await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId: 'cW', items: [{ pid: 'pC', qty: 1, price: 5 }] })).reason, 'cto-qty');
+    // עריכה בלי לשלוח cell (הקווים השמורים בהזמנה) – שורת המתנה נשארת מארז אחד
+    const u = await call('updateOrder', E1, { id: r.result.id, items: [{ pid: 'pC', qty: 18, price: 5 }, { pid: 'pC', qty: 1, price: 5 }] });
+    assert.equal(u.status, 'OK', u.text);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 30 - 19);
+  });
+  it('החלטה 9 (תיקון): שורת מתנה שמורה לא מקבלת גם פטור "שורה ישנה" – עריכה ל-12+1+1 נדחית; ביטול הניוד עם אותם פריטים נדחה; הנחת המתנה = המארז היקר בשני הסדרים', async () => {
+    await prep(async (d) => {
+      await d.doc('b/' + A).update({ features: Object.assign({}, ALL, { cellular: true }) });
+      await d.doc(`b/${A}/lineplan/lpG`).set({ name: 'מבצע מתנה', on: true, monthly: 39, promos: [{ gifts: [{ pid: 'pC', price: 0 }] }] });
+    });
+    const cell = { lines: [{ phone: '0521111111', plan: 'lpG', gift: 'pC' }] };
+    const go = (items) => call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId: 'cW', items, cell });
+    const r = await go([{ pid: 'pC', qty: 12, price: 5 }, { pid: 'pC', qty: 1, price: 5 }]);
+    assert.equal(r.status, 'OK', r.text);
+    const id = r.result.id, G = [{ pid: 'pC', qty: 12, price: 5 }, { pid: 'pC', qty: 1, price: 5 }];
+    // ליקוי 1: בלי פטור כפול – מארז בודד נוסף נדחה (גם בלי לשלוח cell וגם כששולחים את אותו ניוד)
+    assert.equal((await call('updateOrder', E1, { id, items: G.concat([{ pid: 'pC', qty: 1, price: 5 }]) })).reason, 'cto-qty');
+    assert.equal((await call('updateOrder', E1, { id, items: G.concat([{ pid: 'pC', qty: 1, price: 5 }]), cell })).reason, 'cto-qty');
+    // ליקוי 2: ביטול הניוד / המתנה – שורת המתנה הבודדת נדחית; הסרה שלה עוברת
+    assert.equal((await call('updateOrder', E1, { id, items: G, cell: null })).reason, 'cto-qty');
+    assert.equal((await call('updateOrder', E1, { id, items: G, cell: { lines: [{ phone: '0521111111', plan: 'lpG' }] } })).reason, 'cto-qty');
+    assert.equal((await get(`b/${A}/ord/${id}`)).items.length, 2);
+    // סבב 2: ביטול הניוד בלי items – נבדקים הפריטים השמורים; נדחה, הסכום והמלאי לא משתנים. הזמנה בלי cto – לא נחסמת
+    const o0 = await get(`b/${A}/ord/${id}`), q0 = (await get(`b/${A}/prod/pC`)).q.br1;
+    assert.equal((await call('updateOrder', E1, { id, cell: null })).reason, 'cto-qty');
+    assert.equal((await call('updateOrder', E1, { id, cell: { lines: [{ phone: '0521111111', plan: 'lpG' }] } })).reason, 'cto-qty');
+    const o1 = await get(`b/${A}/ord/${id}`);
+    assert.deepEqual([o1.total, o1.items.length, !!o1.cell, (await get(`b/${A}/prod/pC`)).q.br1], [o0.total, 2, true, q0]);
+    const r2 = await call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId: 'cW', items: [{ pid: 'pE', qty: 1, price: 6 }], cell: { lines: [{ phone: '0521111112', plan: 'lpG' }] } });
+    assert.equal(r2.status, 'OK', r2.text);
+    assert.equal((await call('updateOrder', E1, { id: r2.result.id, cell: null })).status, 'OK');
+    const u = await call('updateOrder', E1, { id, items: [G[0]], cell: null });
+    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 60);
+    // ליקוי 3: קרטון ב-5 ומתנה ב-6 – הנחה 6 (המתנה חינם) בשני הסדרים
+    for (const items of [[{ pid: 'pC', qty: 12, price: 5 }, { pid: 'pC', qty: 1, price: 6 }], [{ pid: 'pC', qty: 1, price: 6 }, { pid: 'pC', qty: 12, price: 5 }]]) {
+      const x = await go(items);
+      assert.equal(x.status, 'OK', x.text); assert.equal(x.result.total, 60); assert.equal(x.result.calc.gift, 6);
+    }
+  });
+});
+
 describe('לארג\' פעמי במצב legacy (שורש)', () => {
   const LM = 'l_mgr', LE = 'l_emp';
   async function seedL() {
