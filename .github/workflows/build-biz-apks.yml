@@ -124,7 +124,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    concurrency: { group: publish-biz, cancel-in-progress: false }
+    concurrency: { group: "publish-biz-${{ matrix.biz }}", cancel-in-progress: false } # 12.11: קבוצה לכל עסק – בקבוצה אחת GitHub ביטל את הפרסום השלישי (dfon)
     strategy:
       fail-fast: false
       matrix:
