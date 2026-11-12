@@ -42,6 +42,8 @@ const BR = `(() => {
   await H.login(page, 'm@x.co');
   await page.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden) ACT.startBlank(); }); await H.settle(page, 400);
   await page.evaluate(BR);
+  // נתוני דוגמה למסכי הניהול (רק לצילום ולבדיקה; לא נשמרים)
+  await page.evaluate(() => { try { SY.biz = Object.assign({}, SY.biz, { dataRoot: 'b' }); ADM.sa = true; ADM.L = [{ id: 'bakery1', name: 'מאפיית השחר', dataRoot: 'new', features: { scan: true, shelf: true, tasks: true } }, { id: 'cafe2', name: 'בית קפה הגפן', dataRoot: 'legacy', features: {}, suspended: true }]; ADM.staff = [{ uid: 'u1', name: 'דנה כהן', email: 'dana@x.co', role: 'staff', active: true }, { uid: 'u2', name: 'יוסי לוי', email: 'yossi@x.co', role: 'staff', active: false }]; } catch (e) { /* */ } });
   const res = {};
   for (const t of ['a', 'b', 'c']) {
     await page.evaluate((t) => { SY.biz = Object.assign({}, SY.biz, { brand: { name: 'לארג׳ פעמי', colors: {}, theme: t, base: 'dark-gold' } }); BZK = '~'; bzSkin(); try { ADM.sa = true; } catch (e) { /* */ } }, t);

@@ -359,6 +359,11 @@ html.hc[data-ds] .note,html.hc[data-ds] small{opacity:1}
 html.hc[data-ds] .top,html.hc[data-ds] .bar{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--bg)}
 html.hc[data-ds] .li,html.hc[data-ds] .opt,html.hc[data-ds] .card,html.hc[data-ds] input,html.hc[data-ds] select,html.hc[data-ds] textarea{border-width:2px}
 html.hc[data-ds] .tag{border-width:2px}
+.tile>span[aria-hidden=true]>.dsi{width:30px;height:30px;color:var(--acc)}
+.tag .dsi,.chip .dsi{width:15px;height:15px}
+h3 .dsi{width:18px;height:18px;color:var(--acc)}
+.note .dsi{width:16px;height:16px}
+html[data-ds] tr.shbad>td{background:var(--srf-0);box-shadow:inset 0 -2px 0 var(--bad)}
 </style>
 <script src="xlsx.full.min.js"></script>
 <script src="orders/site-backend.js"></script>
@@ -3176,9 +3181,9 @@ V.shImp=()=>{
  if(!SHI)return{t:'ייבוא מאקסל',s:'יצירת דפי מחירים',h:`<div class="card"><p class="note">העמודות בקובץ: שם המוצר, ספק, כמות/גודל, מחיר (שורה ראשונה כותרות).</p><button class="btn g w" data-a="shSample" style="margin-bottom:8px">הורד קובץ דוגמה</button><label class="btn w" style="cursor:pointer">העלה קובץ אקסל<input type="file" accept=".xlsx,.xls,.csv,text/csv" data-c="shimp" hidden></label></div>${SH.imp.items.length?`<div class="card"><b>ייבוא אחרון${SH.imp.name?': '+esc(SH.imp.name):''}</b><br><span class="note">${SH.imp.items.length} מוצרים · ${Math.ceil(SH.imp.items.length/20)} דפים</span>${shAct('imp')}</div>`:''}`};
  const inp=(i,f,v,w,m)=>`<input value="${esc(v)}" data-i="shir" data-r="${i}" data-fld="${f}" style="width:${w};min-height:40px;padding:0 6px;border:1.5px solid var(--line);border-radius:8px;${m||''}">`;
  return{t:'ייבוא מאקסל',s:esc(SHI.name),h:`<div class="card"><b id="shSum">${shiSum()}</b><p class="note" style="margin:6px 0">אפשר לתקן את הנתונים בטבלה. שורות בלי שם או בלי מחיר תקין לא ייכללו.</p></div>
- <div style="overflow-x:auto;margin-bottom:12px"><table style="border-collapse:collapse;min-width:560px;width:100%;font-size:.85rem"><tr style="background:var(--acc2)"><th style="padding:6px">מוצר</th><th>ספק</th><th>כמות / גודל</th><th>מחיר</th></tr>${SHI.rows.map((r,i)=>`<tr id="shr${i}" style="${shiOk(r)?'':'background:#fde8e5'}"><td>${inp(i,'n',r.n,'150px')}</td><td>${inp(i,'s',r.s,'90px')}</td><td>${inp(i,'q',r.q,'120px')}</td><td>${inp(i,'p',r.p,'70px')}</td></tr>`).join('')}</table></div>
+ <div style="overflow-x:auto;margin-bottom:12px"><table style="border-collapse:collapse;min-width:560px;width:100%;font-size:.85rem"><tr style="background:var(--acc2)"><th style="padding:6px">מוצר</th><th>ספק</th><th>כמות / גודל</th><th>מחיר</th></tr>${SHI.rows.map((r,i)=>`<tr id="shr${i}"${shiOk(r)?'':' class="shbad"'}><td>${inp(i,'n',r.n,'150px')}</td><td>${inp(i,'s',r.s,'90px')}</td><td>${inp(i,'q',r.q,'120px')}</td><td>${inp(i,'p',r.p,'70px')}</td></tr>`).join('')}</table></div>
  <div class="row"><button class="btn grow" data-a="shiGo">אישור ויצירת הדפים</button><button class="btn g grow" data-a="shiCancel">ביטול</button></div>`}};
-INP.shir=el=>{if(!SHI)return;const r=SHI.rows[+el.dataset.r];r[el.dataset.fld]=el.value;const tr=document.getElementById('shr'+el.dataset.r);if(tr)tr.style.background=shiOk(r)?'':'#fde8e5';const s=document.getElementById('shSum');if(s)s.innerHTML=shiSum()};
+INP.shir=el=>{if(!SHI)return;const r=SHI.rows[+el.dataset.r];r[el.dataset.fld]=el.value;const tr=document.getElementById('shr'+el.dataset.r);if(tr)tr.classList.toggle('shbad',!shiOk(r));const s=document.getElementById('shSum');if(s)s.innerHTML=shiSum()};
 CHG.shimp=async el=>{const f=el.files[0];el.value='';if(!f)return;try{const rows=shiParse(await readTable(f));if(!rows.length)return toast('לא נמצאו שורות בקובץ');if(rows.length>1500)return toast('הקובץ גדול מדי (עד 1500 שורות)');SHI={rows,name:f.name};rerender()}catch(e){toast('הייבוא נכשל: '+(e&&e.message||e))}};
 ACT.shiCancel=()=>{SHI=null;rerender()};
 ACT.shiGo=()=>{const items=SHI.rows.filter(shiOk).map(r=>({id:uid(),n:r.n,d:[r.s,r.q].filter(Boolean).join(', '),p:shPrice(r.p)}));if(!items.length)return toast('אין שורות תקינות');
