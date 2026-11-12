@@ -1,0 +1,98 @@
+'use strict';
+// 12.11.2026 (תמחור חשבונית, שלב 5א): "רק קרטונים סגורים" (cto) בטופס ההזמנה (orders-staff.js). לקוח סיטונאי: 1 = קרטון, תגית "קרטון (N מארזים)",
+// "מחיר למארז", הסכום = קרטונים × ct × מחיר, ונשלח לשרת במארזים. לקוח רגיל – בלי שינוי. כרטיס הזמנה ועריכה בקרטונים. 360px.
+// רשת מדומה. שימוש: node ui-ord-cto.js <www-dir> [out.json] [shots-dir]
+const fs = require('fs');
+const path = require('path');
+const H = require('./harness');
+const out = {}; let fail = 0;
+const check = (name, ok, info) => { out[name] = { ok: !!ok, info }; if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + name + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
+const ALL = Object.fromEntries(['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'].map((k) => [k, true]));
+const S = (v) => ({ stringValue: v }), N = (v) => (Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v }), M = (o) => ({ mapValue: { fields: o } }), A = (a) => ({ arrayValue: { values: a } }), B = (v) => ({ booleanValue: v });
+const doc = (p, f) => ({ document: { name: 'projects/demo-largpeami/databases/(default)/documents/b/biz-o/' + p, fields: f } });
+const ORD = [doc('ord/o2', { no: N(2), br: S('br1'), status: S('new'), total: N(70), at: N(Date.UTC(2026, 10, 12, 8)), custId: S('cW'), cust: M({ name: S('סיטונאי בע"מ'), phone: S('0501111111') }),
+  items: A([M({ pid: S('pC'), n: S('חטיף'), qty: N(12), price: N(5), ct: N(6) }), M({ pid: S('pR'), n: S('לחם'), qty: N(1), price: N(10) })]) })];
+const PROD = [doc('prod/pC', { name: S('חטיף'), price: N(6), on: B(true), ct: N(6), cto: B(true), q: M({ br1: N(30) }) }),
+  doc('prod/pR', { name: S('לחם'), price: N(10), on: B(true), ct: N(6), q: M({ br1: N(5) }) })];
+
+async function open(browser, www, calls) {
+  const cfg = { mode: 'new', users: { m: 'biz-o' }, biz: { 'biz-o': { dataRoot: 'b', features: ALL, name: 'עסק בדיקה' } }, admins: { 'b/biz-o/|m': 1 }, staff: {} };
+  const { ctx, page } = await H.newPage(browser, www, cfg, [], 'cto');
+  await ctx.route(/:8080\/.*/, async (route) => {
+    const req = route.request(); const u = new URL(req.url()); const body = req.postData() || '';
+    if (/:runQuery$/.test(u.pathname)) { let c = ''; try { c = JSON.parse(body).structuredQuery.from[0].collectionId; } catch (e) { /* */ }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(c === 'ord' ? ORD : c === 'prod' ? PROD : [{ readTime: '2026-11-12T09:00:00Z' }]) }); }
+    if (/\/ordcfg\/main$/.test(u.pathname)) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name: 'x', fields: {} }) });
+    if (/\/ord\/o2\/log/.test(u.pathname)) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ documents: [] }) });
+    return route.fallback();
+  });
+  await ctx.route(/:5001\/.*/, async (route) => {
+    const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
+    calls.push({ n, d });
+    const R = { createOrder: { id: 'o2', no: 2, total: 82, warn: [] }, updateOrder: { ok: true, total: 100, warn: [] }, saveCust: { id: 'cW' }, getCosts: { cost: {} }, getBackupKey: { key: Buffer.alloc(32, 7).toString('base64') } };
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
+  });
+  await H.login(page, 'm@x.co');
+  await page.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden && ACT.startBlank) ACT.startBlank(); });
+  await page.setViewportSize({ width: 360, height: 740 });
+  return { ctx, page };
+}
+
+(async () => {
+  const [www, outFile, shots] = process.argv.slice(2);
+  if (shots) fs.mkdirSync(shots, { recursive: true });
+  const shot = async (page, n) => { if (shots) await page.screenshot({ path: path.join(shots, n + '.png'), fullPage: true }); };
+  const browser = await H.launch();
+  const ov = (page) => page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  const calls = []; const { ctx, page } = await open(browser, www, calls);
+  await page.evaluate(() => go('ox')); await H.settle(page, 1500);
+  await page.evaluate(() => go('oxNew')); await H.settle(page, 800);
+  const lines = () => page.evaluate(() => [...document.querySelectorAll('#oxlines .card')].map((c) => c.innerText.replace(/\s+/g, ' ')));
+  const tot = () => page.evaluate(() => (document.getElementById('oxtot') || {}).textContent || '');
+  // לקוח רגיל: בלי שינוי
+  await page.evaluate(() => { const D = __ox.draft; Object.assign(D, { fn: 'דנה', ln: 'כהן', phone: '0502222222' }); ACT.oxAdd({ dataset: { id: 'pC' } }); ACT.oxAdd({ dataset: { id: 'pR' } }); });
+  await H.settle(page, 500);
+  const r0 = await lines(), t0 = await tot();
+  check('1 לקוח רגיל: בלי תגית קרטון, "מחיר ליחידה", סכום 6 + 10 = 16', !r0.some((t) => /קרטון/.test(t)) && /מחיר ליחידה/.test(r0[0]) && /16\.00/.test(t0), { r0, t0 });
+  // לקוח סיטונאי: 1 = קרטון
+  await page.evaluate(() => { const D = __ox.draft; Object.assign(D, { custId: 'cW', wholesale: true, cName: 'סיטונאי בע"מ', cSt: 'found' }); window.__oxRedraw(); });
+  await H.settle(page, 300);
+  const r1 = await lines(), t1 = await tot();
+  check('2 סיטונאי: בשורת המוצר cto – "קרטון (6 מארזים)" ו"מחיר למארז"; בשורה הרגילה לא; סכום 1×6×6 + 10 = 46', /קרטון \(6 מארזים\)/.test(r1[0]) && /מחיר למארז/.test(r1[0]) && !/קרטון/.test(r1[1]) && /46\.00/.test(t1), { r1, t1 });
+  await page.fill('#oxlines input[data-k=qty][data-n="0"]', '2'); await H.settle(page, 300);
+  const t2 = await tot();
+  check('3 2 קרטונים: סכום 2×6×6 + 10 = 82', /82\.00/.test(t2), t2);
+  await shot(page, '01-טופס-סיטונאי'); if (shots) await page.locator('#oxlines').screenshot({ path: path.join(shots, '01א-שורות.png') });
+  const o1 = await ov(page);
+  check('4 טופס ב-360px: בלי גלילה רוחבית', o1 <= 1, o1);
+  await page.fill('#oxlines input[data-k=qty][data-n="0"]', '1.5'); await H.settle(page, 200);
+  calls.length = 0; await page.evaluate(() => ACT.oxSave({ disabled: false })); await H.settle(page, 600);
+  check('5 חצי קרטון – נעצר בטופס, לא נשלח לשרת', !calls.some((x) => x.n === 'createOrder'), calls.map((x) => x.n));
+  await page.fill('#oxlines input[data-k=qty][data-n="0"]', '2'); await H.settle(page, 200);
+  calls.length = 0; await page.evaluate(() => ACT.oxSave({ disabled: false })); await H.settle(page, 1500);
+  const cr = calls.find((x) => x.n === 'createOrder');
+  check('6 שמירה: נשלח במארזים – חטיף 12 × 6 (מחיר מארז), לחם 1', cr && cr.d.items[0].pid === 'pC' && cr.d.items[0].qty === 12 && cr.d.items[0].price === 6 && cr.d.items[1].qty === 1 && cr.d.custId === 'cW', cr && cr.d);
+  // כרטיס הזמנה ועריכה
+  await page.evaluate(() => go('oxOrd', 'o2')); await H.settle(page, 800);
+  const card = await page.evaluate(() => document.getElementById('main').innerText.replace(/\s+/g, ' '));
+  check('7 כרטיס הזמנה: "2 × קרטון (6 מארזים) · ₪5.00 למארז", סה"כ שורה 60', /2 × קרטון \(6 מארזים\)/.test(card) && /למארז/.test(card) && /60\.00/.test(card), card.slice(0, 400));
+  await shot(page, '02-כרטיס-הזמנה');
+  await page.evaluate(() => ACT.oxEdit({ dataset: { id: 'o2' } })); await H.settle(page, 400);
+  const ed = await page.evaluate(() => ({ t: document.getElementById('dlg').innerText.replace(/\s+/g, ' '), q: document.querySelector('#dlg input[name=q0]').value }));
+  check('8 עריכה: כמות בקרטונים (2) עם תגית', ed.q === '2' && /קרטון \(6 מארזים\)/.test(ed.t) && /מחיר למארז/.test(ed.t), ed);
+  await shot(page, '03-עריכה');
+  await page.fill('#dlg input[name=q0]', '3');
+  calls.length = 0; await page.click('#dlg form[data-f=oxEdF] button:not([type=button])'); await H.settle(page, 1200);
+  const up = calls.find((x) => x.n === 'updateOrder');
+  check('9 עריכה ל-3 קרטונים → updateOrder עם 18 מארזים; הלחם נשאר 1', up && up.d.items[0].qty === 18 && up.d.items[1].qty === 1, up && up.d);
+  // חזרה ללקוח רגיל – השורות חוזרות לרגילות
+  await page.evaluate(() => { go('oxNew'); }); await H.settle(page, 500);
+  await page.evaluate(() => { const D = __ox.draft; if (!D.items.length) { ACT.oxAdd({ dataset: { id: 'pC' } }); } Object.assign(D, { custId: 'cW', wholesale: true }); window.__oxRedraw(); D.wholesale = false; window.__oxRedraw(); });
+  await H.settle(page, 300);
+  const r3 = await lines();
+  check('10 הלקוח כבר לא סיטונאי – בלי תגית קרטון', r3.length > 0 && !r3.some((t) => /קרטון/.test(t)), r3);
+  check('11 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
+  await ctx.close(); await browser.close();
+  if (outFile) fs.writeFileSync(outFile, JSON.stringify({ out }, null, 1));
+  console.log(fail ? `תוצאה: נכשל (${fail})` : 'תוצאה: הכול עבר'); process.exit(fail ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

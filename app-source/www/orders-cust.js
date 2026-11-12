@@ -85,7 +85,7 @@ const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|
 /* ---------- הזמנה חדשה: ת"ז ראשונה ---------- */
 /* סבב 3: פרטי לקוח שנטענו מהמערכת (כולל שם/כתובת ישנים ארוכים שאין להם שדה גלוי) נמחקים כשמחליפים לקוח – הזמנה ללקוח אחר לא יורשת אותם */
 const LDK=['name','addr'].concat(CPK,INFK);
-function dropLoaded(D){const F=D.cFrom||{};LDK.concat(['phone','mail'].filter(k=>F[k]&&String(D[k]||'').trim()===F[k])).forEach(k=>{D[k]='';document.querySelectorAll('#main input[data-i=oxD][data-k='+k+']').forEach(e=>{e.value=''})});D.cName='';D.cFrom=null;D.cInf=null;D.cBad=null;D.wholesale=false}
+function dropLoaded(D){const F=D.cFrom||{};LDK.concat(['phone','mail'].filter(k=>F[k]&&String(D[k]||'').trim()===F[k])).forEach(k=>{D[k]='';document.querySelectorAll('#main input[data-i=oxD][data-k='+k+']').forEach(e=>{e.value=''})});D.cName='';D.cFrom=null;D.cInf=null;D.cBad=null;const ws=D.wholesale===true;D.wholesale=false;if(ws&&window.__oxRedraw)window.__oxRedraw()} // 12.11.2026: סיטונאי ירד – שורות "קרטון" חוזרות לרגילות
 function fillDraft(D,c){if(D.custId&&D.custId!==c.id)dropLoaded(D);D.name='';D.addr='';splitOld(c,D);['phone','mail'].forEach(k=>{if(c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])});D.cFrom={phone:String(c.phone||''),mail:String(c.mail||''),tz:String(c.tz||''),all:allPh(c)};D.tz=c.tz||D.tz;D.custId=c.id;D.wholesale=c.wholesale===true;D.cName=c.name||'';
  D.cBad=badOf(c);D.cInf={};INFK.forEach(k=>{D.cInf[k]=String(c[k]||'');if(cell()&&c[k]&&!String(D[k]||'').trim())D[k]=String(c[k])})} // 2026-11-10: שדות המידע של הלקוח נטענים לטופס (עריכה – נשמרת ללקוח)
 const NEWB='<button type="button" class="btn g s w" data-a="ocAsNew">לקוח חדש עם אותו טלפון</button>';

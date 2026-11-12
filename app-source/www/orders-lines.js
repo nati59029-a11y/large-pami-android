@@ -73,7 +73,7 @@ const pkH=p=>{const x=[secOf(p)?'מגזר: '+SEC[secOf(p)]:'',p.carrier?'חבר�
  return `<div class="note" data-olpk role="note" style="margin:0 0 6px;padding:8px;border:1px solid var(--line,rgba(127,127,127,.35));border-radius:8px">${x.map(t=>`<div>${t}</div>`).join('')}${pfH(p)}${p.details?`<div>${esc(p.details)}</div>`:''}</div>`};
 const PKG=['monthly','ship','sim','details','promo','promos'];
 const isPkg=p=>!!p&&PKG.some(k=>p[k]!=null); // כמו בשרת (cellTotal): חבילה "חדשה" = יש לה אחד מהשדות
-const itemsAg=D=>(D.items||[]).reduce((s,it)=>s+Math.round((+String(it.qty).replace(',','.')||0)*(+String(it.price).replace(',','.')||0)*100),0);
+const itemsAg=D=>(D.items||[]).reduce((s,it)=>s+Math.round((window.__oxPk?window.__oxPk(D,it):+String(it.qty).replace(',','.')||0)*(+String(it.price).replace(',','.')||0)*100),0); // __oxPk: שורת קרטונים של סיטונאי – במארזים (12.11.2026)
 /* כמה מבצעים לחבילה (23:52): רשימה (מבנה ישן promo = רשימה עם פריט אחד). לכל קו העובד בוחר מבצע או "בלי מבצע"; ברירת מחדל – הראשון הפעיל.
    l.pr = אינדקס ברשימה או -1. אותה בחירה בשרת: LineDisc.pick */
 const prs=p=>window.LineDisc?LineDisc.promosOf(p):[];

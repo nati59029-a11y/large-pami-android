@@ -371,6 +371,53 @@ describe('מחיקת כל המלאי ושחזור (11.11.2026)', () => {
   });
 });
 
+// 12.11.2026 (תמחור חשבונית, שלב 5א): "רק קרטונים סגורים" (cto) – ללקוח סיטונאי הכמות נשמרת במארזים וחייבת להיות כפולה של ct
+describe('קרטונים סגורים ללקוח סיטונאי (cto)', () => {
+  beforeEach(() => prep(async (d) => {
+    const b = d.batch();
+    b.set(d.doc(`b/${A}/prod/pC`), { name: 'חטיף', price: 6, on: true, ct: 6, cto: true, q: { br1: 30 } });
+    b.set(d.doc(`b/${A}/prod/pC/p/cost`), { cost: 3 });
+    b.set(d.doc(`b/${A}/prod/pD`), { name: 'בלי ct', price: 6, on: true, ct: 1, cto: true, q: { br1: 30 } });
+    b.set(d.doc(`b/${A}/prod/pE`), { name: 'בלי cto', price: 6, on: true, ct: 6, q: { br1: 30 } });
+    b.set(d.doc(`b/${A}/cust/cW`), { name: 'סיטונאי', phone: '0501111111', wholesale: true });
+    b.set(d.doc(`b/${A}/cust/cR`), { name: 'רגיל', phone: '0502222222' });
+    await b.commit();
+  }));
+  const mk = (custId, items) => call('createOrder', E1, { reqId: rid(), br: 'br1', cust, custId, items });
+  it('סיטונאי: 2 קרטונים = 12 מארזים, מחיר מארז, ct נשמר בשורה, המלאי יורד 12; כמות שאינה כפולה של ct נדחית', async () => {
+    const r = await mk('cW', [{ pid: 'pC', qty: 12, price: 5 }]);
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.total, 60);
+    const o = await get(`b/${A}/ord/${r.result.id}`);
+    assert.deepEqual([o.items[0].qty, o.items[0].price, o.items[0].ct, o.items[0].c], [12, 5, 6, 3]);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 18);
+    const lg = (await coll(`b/${A}/stockLog`)).filter((x) => x.ord === r.result.id);
+    assert.deepEqual(lg.map((x) => x.delta), [-12]);
+    for (const q of [5, 1, 13, 6.5]) assert.equal((await mk('cW', [{ pid: 'pC', qty: q, price: 5 }])).reason, 'cto-qty', 'qty ' + q);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 18);
+  });
+  it('לקוח רגיל / בלי לקוח / מוצר בלי ct תקין / בלי cto – כמו קודם (מארז אחד, בלי ct בשורה)', async () => {
+    for (const [cid, pid] of [['cR', 'pC'], [undefined, 'pC'], ['cW', 'pD'], ['cW', 'pE']]) {
+      const r = await mk(cid, [{ pid, qty: 5, price: 6 }]);
+      assert.equal(r.status, 'OK', `${cid}/${pid}: ${r.text}`);
+      const o = await get(`b/${A}/ord/${r.result.id}`);
+      assert.equal(o.total, 30); assert.equal(o.items[0].qty, 5); assert.equal(o.items[0].ct, undefined);
+    }
+  });
+  it('עריכה: שורה קיימת שלא השתנתה לא נחסמת; שינוי לכמות שאינה כפולה נדחה; לכפולה – נשמר עם ct, המלאי לפי ההפרש', async () => {
+    const r = await mk('cR', [{ pid: 'pC', qty: 5, price: 6 }]); // הזמנה "ישנה": הלקוח עוד לא היה סיטונאי
+    await prep((d) => d.doc(`b/${A}/ord/${r.result.id}`).update({ custId: 'cW' }));
+    const id = r.result.id;
+    assert.equal((await call('updateOrder', E1, { id, items: [{ pid: 'pC', qty: 5, price: 7 }] })).status, 'OK');
+    assert.equal((await call('updateOrder', E1, { id, items: [{ pid: 'pC', qty: 7, price: 7 }] })).reason, 'cto-qty');
+    const u = await call('updateOrder', E1, { id, items: [{ pid: 'pC', qty: 18, price: 7 }] });
+    assert.equal(u.status, 'OK', u.text); assert.equal(u.result.total, 126);
+    const o = await get(`b/${A}/ord/${id}`);
+    assert.deepEqual([o.items[0].qty, o.items[0].ct], [18, 6]);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 12);
+  });
+});
+
 describe('לארג\' פעמי במצב legacy (שורש)', () => {
   const LM = 'l_mgr', LE = 'l_emp';
   async function seedL() {

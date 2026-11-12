@@ -9,7 +9,7 @@
 //   cat/{id}           { name, parent?, ord, upd }                                  – קטגוריה (parent ריק) / תת־קטגוריה. מנהל, דרך saveCat
 //   xfer/{id}          { prod, name, from, to, qty, why:'order'|'cancel'|'edit'|'manual', ord?, no?, by, at, reqId }  – העברה פנימית בין סניפים
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
-//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
+//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
@@ -795,6 +795,28 @@ function snapCosts(items, costs, oldItems) {
   return items;
 }
 
+// 12.11.2026 (תמחור חשבונית, שלב 5א; החלטה 3 + הבהרה): מוצר "רק קרטונים סגורים" (cto, עם ct ≥ 2) בהזמנה של לקוח סיטונאי (cust.wholesale) –
+// הכמות בשורה נשמרת במארזים (כמו תמיד) וחייבת להיות כפולה של ct. המחיר נשאר מחיר מארז, כך שסה"כ = קרטונים × ct × מחיר מארז,
+// והמלאי, הרווחיות והדוחות לא משתנים. בשורה כזו נשמר ct (מארזים בקרטון) – לתצוגה בקרטונים. לקוח רגיל / מוצר בלי ct תקין – כמו קודם.
+// עריכה: שורה שלא השתנתה (אותו מוצר ואותה כמות כמו בהזמנה הקיימת) לא נחסמת – כדי לא לחסום עריכה של הזמנות קיימות.
+const ctoOf = (p) => (p && p.cto === true && Number.isInteger(p.ct) && p.ct >= 2 ? p.ct : 0);
+async function isWs(tx, db, custId) {
+  if (!custId) return false;
+  const s = await tx.get(db.doc('cust/' + custId));
+  return s.exists && s.get('wholesale') === true;
+}
+function cartons(items, prods, ws, oldItems) {
+  if (!ws) return items;
+  const keep = new Set((oldItems || []).filter((x) => x && x.pid).map((x) => x.pid + '|' + x.qty));
+  for (const it of items) {
+    const ct = it.pid ? ctoOf(prods.get(it.pid)) : 0;
+    if (!ct) continue;
+    if (Number.isInteger(it.qty / ct)) it.ct = ct;
+    else if (!keep.has(it.pid + '|' + it.qty)) throw bad('cto-qty', `"${it.n}": ללקוח סיטונאי נמכר רק בקרטונים שלמים (${ct} מארזים בקרטון)`);
+  }
+  return items;
+}
+
 function ordAccess(w, d) {
   if (!d) throw new HttpsError('not-found', 'ההזמנה לא נמצאה', { reason: 'no-ord' });
   if (d.br && d.br !== NB && !canBr(w, d.br)) throw deny('foreign-br', 'אין לך הרשאה להזמנה של סניף אחר');
@@ -826,8 +848,10 @@ async function createOrder(request) {
     const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
     const { cell, plans } = await prepCell(tx, db, w, input, cust);
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
-    const { items } = resolveItems(w, br, raw, plain(prods), src);
+    const pd = plain(prods);
+    const { items } = resolveItems(w, br, raw, pd, src);
     snapCosts(items, costs);
+    cartons(items, pd, await isWs(tx, db, custId));
     for (const it of items) if (it.pid && prods.get(it.pid).get('on') === false) throw pre('prod-off', `המוצר "${it.n}" לא זמין`);
     const ct = cell ? cellTotal(items, cell, plans) : { total: totalOf(items), calc: null };
     const total = ct.total;
@@ -877,8 +901,10 @@ async function updateOrder(request) {
       // מוצר ישן שנמחק מהמאגר – מדלגים עליו בהחזרה
       const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[d.br] : null;
       // שורה קיימת שנשארת עם אותו מוצר – שומרת את סניף המקור שלה, אלא אם נשלח אחר
-      const { items } = resolveItems(w, d.br, raw, plain(prods), src);
+      const pd = plain(prods);
+      const { items } = resolveItems(w, d.br, raw, pd, src);
       snapCosts(items, await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid)), oldItems);
+      cartons(items, pd, await isWs(tx, db, d.custId), oldItems);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
       applyMoves(tx, db, w, prods, mv, { ord: id, no: d.no }, warn);
       upd.items = items;
