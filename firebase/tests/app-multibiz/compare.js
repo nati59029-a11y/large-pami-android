@@ -33,8 +33,10 @@ if (mode === 'legacy') {
   /* משימות פרטיות, בקשות למנהל (feature/recurring-private-requests, 12.11.2026): שאילתות runQuery חדשות על האוספים rq ו-ptk (בקשות עובד/מנהל, משימות פרטיות, נמשכות עם tkLoad ו-inbTick).
      חריג צר ומכוון: רק POST :runQuery שהאוסף שלו rq או ptk, רק בענף (ב-main אין אוספים כאלה). כל שאר הבקשות – אותו סדר ואותו גוף */
   const rpQ = (r) => { try { return r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && ['rq', 'ptk'].includes(JSON.parse(r.body).structuredQuery.from[0].collectionId); } catch (e) { return false; } };
-  let rpN = 0; for (let i = B2.length - 1; i >= 0; i--) if (rpQ(B2[i])) { rpN++; B2.splice(i, 1); }
-  console.log(`בקשות/פרטיות – שאילתות חדשות על rq ו-ptk בענף בלבד: ${rpN}`);
+  /* 12.11 (אחרי המיזוג של #37 ל-main): השאילתות האלה קיימות עכשיו גם ב-main – מוציאים אותן משני הצדדים (מספרן תלוי בזמן) */
+  let rpN = 0, rpA = 0; for (let i = B2.length - 1; i >= 0; i--) if (rpQ(B2[i])) { rpN++; B2.splice(i, 1); }
+  for (let i = A.length - 1; i >= 0; i--) if (rpQ(A[i])) { rpA++; A.splice(i, 1); }
+  console.log(`בקשות/פרטיות – שאילתות על rq ו-ptk: main ${rpA}, ענף ${rpN}`);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');
