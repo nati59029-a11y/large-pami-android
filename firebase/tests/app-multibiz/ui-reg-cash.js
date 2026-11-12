@@ -174,7 +174,9 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   // חשבונית בסכום ובתאריך אחרים מתחברת להוצאה מקופה שממתינה: הסכום, התאריך והצילום של הקופה לא משתנים
   const r21 = await page.evaluate(async () => {
     NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
-    await ACT.inbAw({ dataset: { id: 'rcE' } }); await new Promise((r) => setTimeout(r, 50)); await ACT.inbAw({ dataset: { id: 'rcF' } }); await new Promise((r) => setTimeout(r, 50));
+    // 12.11: rcE ו-rcF – אותה קופה, תאריך וסכום – מקבלים אזהרת כפילות; כאן "זה מסמך אחר – שמור בכל זאת"
+    const yes = async () => { const y = document.querySelector('#dlg[open] [data-a=yes]'); if (y) { y.click(); await new Promise((r) => setTimeout(r, 80)); } return !!y; };
+    await ACT.inbAw({ dataset: { id: 'rcE' } }); await new Promise((r) => setTimeout(r, 50)); await yes(); await ACT.inbAw({ dataset: { id: 'rcF' } }); await new Promise((r) => setTimeout(r, 50)); await yes();
     const e = S.tx.find((t) => t.src === 'rcE'), f = S.tx.find((t) => t.src === 'rcF'), X = (id) => ({ id, uid: 'w', by: 'עובד בדיקה', t: 1, reg: 'i_nl', d: '2026-11-03', tm: '', a: 80, why: 'w', dep: '', src: id, zc: '', dp: '' });
     const W0 = coWant(), h0 = [W0.rcE.h, W0.rcF.h], n0 = S.tx.length;
     awJoin(e, { inv: 'גז-100', date: '2026-11-09', amt: 100, plan: '' }, 'fInvE'); // חשבונית גדולה (100 על 80)
