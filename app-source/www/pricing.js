@@ -402,10 +402,11 @@ wrapF('shadd','shAdd','F');wrapF('shpromo','shPromo','P');
    רק למי ש-can() (מנהל / מנהל־על, או עובד עם המתג prc). מדף (V.shelf, אם המדף פעיל) – משבצת; הזמנות (V.ox, אם ההזמנות פעילות) – כפתור;
    עסק עם שניהם – בשניהם. מנהל: סעיף ב"לטיפול" (todoC / V.todo, עטיפה כמו במשימות ובבקשות) עם מונה, ו"בטיפול של X".
    עובד עם prc: גם בבית העובד (V.wk). המונה = החשבוניות הפתוחות (st:'new') – חשבונית שסיימו לטפל בה יוצאת מהשאילתה.
-   טעינה: אותה שאילתה של הרשימה (lload, שדות מעטים), רק כשמגיעים לאחד המסכים האלה, ולא יותר מפעם בדקה (מטמון קצר). */
+   טעינה: אותה שאילתה של הרשימה (lload, שדות מעטים), רק כשמגיעים לאחד המסכים האלה, ולא יותר מפעם בדקה (מטמון קצר).
+   piN(1) – מהמטמון בלבד, בלי טעינה: todoC נקראת גם ממסך ה-+ (adTiles), ושם לא טוענים. ב"לטיפול" הטעינה דרך V.todo, ואחריה ציור מחדש מעדכן גם את todoC. */
 const CNV=['shelf','ox','todo','wk','home'];let CNT=0;
-function piN(){if(!can())return null;const t=Date.now();
- if(!LS.b&&(!LS.L||t-LS.at>60e3)&&t-CNT>60e3){CNT=t;Promise.resolve(lload()).then(()=>{try{if(CNV.includes(cur().v)&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}})}
+function piN(c){if(!can())return null;const t=Date.now();
+ if(!c&&!LS.b&&(!LS.L||t-LS.at>60e3)&&t-CNT>60e3){CNT=t;Promise.resolve(lload()).then(()=>{try{if(CNV.includes(cur().v)&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}})}
  return LS.L?LS.L.length:null}
 PI.n=piN;
 const piBusy=()=>{const o=(LS.L||[]).filter(lkOther);return o.length?'בטיפול של '+[...new Set(o.map(x=>String(x.lk.name||'משתמש אחר')))].join(', '):''};
@@ -415,7 +416,7 @@ const piOpt=(sm,st)=>{const n=piN(),b=piBusy();return`<button class="opt" data-a
 {const o=V.ox;if(typeof o==='function')V.ox=function(){const r=o.apply(this,arguments);
  try{if(r&&typeof r.h==='string'&&r.h.includes('data-v="oxNew"')&&bzF('orders')&&can()){const m='<div class="row" style="margin-bottom:8px">',b=piOpt('עלות, מחיר וסיטונאי מחשבוניות ספק','margin-bottom:8px');
   if(r.h.startsWith(m)){const i=r.h.indexOf('</div>')+6;r.h=r.h.slice(0,i)+b+r.h.slice(i)}else r.h=b+r.h}}catch(e){}return r}}
-if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(this,arguments);try{const n=isA()?piN():0;r.pi=n||0;r.n+=r.pi}catch(e){r.pi=0}return r}}
+if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(this,arguments);try{const n=isA()?piN(1):0;r.pi=n||0;r.n+=r.pi}catch(e){r.pi=0}return r}}
 {const o=V.todo;if(typeof o==='function')V.todo=function(){const r=o.apply(this,arguments);
  try{if(isA()&&can()&&r&&typeof r.h==='string'){const n=piN();if(n){const sm=[n===1?'חשבונית אחת ממתינה לעדכון מחירים':n+' חשבוניות ממתינות לעדכון מחירים',piBusy()].filter(Boolean).join(' · ');
   r.h=adSec('חשבוניות לתמחור')+adOpt('pi','🧾 חשבוניות ספק לתמחור',esc(sm),n)+r.h}}}catch(e){}return r}}
