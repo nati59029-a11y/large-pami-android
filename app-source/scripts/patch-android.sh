@@ -88,6 +88,7 @@ cp android-plugin/LiveUpdateCore.java $J/LiveUpdateCore.java
 cp android-plugin/LiveUpdatePlugin.java $J/LiveUpdatePlugin.java
 cp android-plugin/ShareInPlugin.java $J/ShareInPlugin.java
 cp android-plugin/BiometricLockPlugin.java $J/BiometricLockPlugin.java
+cp android-plugin/PayBrowserPlugin.java $J/PayBrowserPlugin.java
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
@@ -103,6 +104,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(LiveUpdatePlugin.class);
         registerPlugin(ShareInPlugin.class);
         registerPlugin(BiometricLockPlugin.class);
+        registerPlugin(PayBrowserPlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them
