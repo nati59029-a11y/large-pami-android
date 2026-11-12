@@ -878,6 +878,8 @@ async function setOrderStatus(request) {
   return { ok: true, status: st };
 }
 
+const LL_PRE = 'o_'; // מזהה דטרמיניסטי ל-lineLog: o_<ordId>_<מספר הקו>
+const portK = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|');
 // markOrderPaid({ id, method, last4?, conf?, note? }) – "שולם" ידני. אחרי זה הסכום והפריטים נעולים.
 async function markOrderPaid(request) {
   const w = await who(request);
@@ -906,19 +908,22 @@ async function markOrderPaid(request) {
     if (cur === 'paid' || cur === 'out' || cur === 'done') { res = { ok: true, dup: true }; return; }
     if (!PAYABLE.includes(cur)) throw pre('bad-status', 'ההזמנה בוטלה');
     const now = Date.now();
-    Object.assign(paid, { at: now, by: w.uid, amt: s.get('total') });
+    Object.assign(paid, { at: now, by: w.uid, amt: s.get('total') }); delete paid.pk; // pk מנוסה קודם של הטרנזקציה לא נשאר
     // ניוד: כל קו נרשם ב-lineLog (בדיקת ניוד חוזר בכל הסניפים) ובהיסטוריית ports של הלקוח (רק כשהמתג פעיל)
     const cl = s.get('cell'), lines = cellOn(w) && cl && Array.isArray(cl.lines) ? cl.lines : [];
     if (lines.length) {
       const cid = s.get('custId'), cref = typeof cid === 'string' && ID_RE.test(cid) ? db.doc('cust/' + cid) : null;
       const cs = cref ? await tx.get(cref) : null;
+      const old = await tx.get(db.collection('lineLog').where('ord', '==', id)); // 12.11.2026: רישומים קודמים של ההזמנה (גם ישנים עם מזהה אקראי)
       const d0 = new Date(now).toISOString().slice(0, 10), br0 = s.get('br');
-      for (const l of lines) tx.set(db.collection('lineLog').doc(), Object.assign({ phone: l.phone, br: br0, ord: id, at: now, by: w.uid }, l.tz ? { tz: l.tz } : {}, l.plan ? { plan: l.plan } : {}, l.carrier ? { carrier: l.carrier } : {}));
+      const lid = (i) => LL_PRE + id + '_' + i, keep = new Set(lines.map((l, i) => lid(i)));
+      old.forEach((x) => { if (!keep.has(x.id)) tx.delete(x.ref); }); // אידמפוטנטי: רישום אחד לכל הזמנה+קו
+      lines.forEach((l, i) => tx.set(db.collection('lineLog').doc(lid(i)), Object.assign({ phone: l.phone, br: br0, ord: id, at: now, by: w.uid }, l.tz ? { tz: l.tz } : {}, l.plan ? { plan: l.plan } : {}, l.carrier ? { carrier: l.carrier } : {})));
       if (cs && cs.exists) {
         const op = Array.isArray(cs.get('ports')) ? cs.get('ports') : (cs.get('port') ? [{ d: cs.get('port') }] : []);
-        const k = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|'), ks = new Set(op.map(k));
-        const add = lines.map((l) => Object.assign({ d: d0, phone: l.phone }, l.tz ? { tz: l.tz } : {}, br0 && br0 !== NB ? { br: br0 } : {})).filter((r) => !ks.has(k(r)));
-        if (add.length) tx.update(cref, { ports: op.concat(add).slice(-30), upd: now });
+        const ks = new Set(op.map(portK));
+        const add = lines.map((l) => Object.assign({ d: d0, phone: l.phone }, l.tz ? { tz: l.tz } : {}, br0 && br0 !== NB ? { br: br0 } : {})).filter((r) => !ks.has(portK(r)));
+        if (add.length) { tx.update(cref, { ports: op.concat(add).slice(-30), upd: now }); paid.pk = add.map(portK); } // pk: מה נוסף ללקוח – כדי שביטול "שולם" יסיר רק אותו
       }
     }
     // 17:47: "שולם" דרך קישור הספק → הכנסה של העסק + זיכוי אצל הספק (רשומת ordpay; מכשיר המנהל קולט אותה ליומן)
@@ -948,6 +953,25 @@ async function unpayOrder(request) {
     const s = await tx.get(ref);
     ordAccess(w, s.exists ? s.data() : null);
     if (s.get('status') !== 'paid') throw pre('bad-status', 'אפשר לבטל "שולם" רק בהזמנה במצב שולם');
+    // 12.11.2026: ניוד שבוטל לא נשאר בהיסטוריה – מוחקים את רישומי lineLog של ההזמנה (כל מזהה, לפי ord) ואת מה שנוסף ל-ports של הלקוח
+    const ll = await tx.get(db.collection('lineLog').where('ord', '==', id));
+    const pd = s.get('paid') || {}, cl = s.get('cell'), lines = cl && Array.isArray(cl.lines) ? cl.lines : [];
+    const cid = s.get('custId'), cref = lines.length && typeof cid === 'string' && ID_RE.test(cid) ? db.doc('cust/' + cid) : null;
+    const cs = cref ? await tx.get(cref) : null;
+    ll.forEach((x) => tx.delete(x.ref));
+    if (cs && cs.exists && Array.isArray(cs.get('ports'))) {
+      let rm = null, brOk = () => true;
+      if (Array.isArray(pd.pk)) rm = new Set(pd.pk);
+      else if (ll.size && typeof pd.at === 'number') { // הזמנה ששולמה לפני התיקון: רק רשומה זהה לגמרי למה ש"שולם" כתב (תאריך, טלפון, ת"ז, סניף)
+        const d0 = new Date(pd.at).toISOString().slice(0, 10), br0 = s.get('br'), bv = br0 && br0 !== NB ? br0 : undefined;
+        rm = new Set(lines.map((l) => portK(Object.assign({ d: d0, phone: l.phone }, l.tz ? { tz: l.tz } : {}))));
+        brOk = (r) => r.br === bv;
+      }
+      if (rm && rm.size) { // רשומה שהמשתמש העשיר אחר כך (חברה, נויד בפועל וכו') נשארת
+        const op = cs.get('ports'), np = op.filter((r) => !(r && rm.has(portK(r)) && brOk(r) && !r.co && !r.act && !r.bph && !r.btz));
+        if (np.length !== op.length) tx.update(cref, { ports: np, upd: Date.now() });
+      }
+    }
     if (s.get('paid') && s.get('paid').sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'unpay' }, { merge: true });
     tx.update(ref, { status: 'wait_pay', paid: require('firebase-admin/firestore').FieldValue.delete(), upd: Date.now() });
     tx.set(logRef(db, id), logData(w, 'unpay', reason));
