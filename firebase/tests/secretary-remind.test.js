@@ -120,6 +120,23 @@ describe('רישום התראות: מנהל בלי רשומת עובד נרשם;
     assert.equal(toks.length, 5, 'השרת שולח גם לטלפונים של מנהל בלי רשומת עובד');
     await assertFails(db(M2).doc(`b/${A}/push_tokens/${M2}`).get()); // אין קריאה ישירה מהאפליקציה
   });
+  it('12.11.2026: טלפון אחד = משתמש אחד – עובד שנרשם בטלפון של מנהל מוציא אותו מהמנהל (עובד לא מקבל התראות של מנהל), וההפך', async () => {
+    await seed();
+    assert.equal((await call('registerPushToken', M2, { token: tok(1) })).status, 'OK');
+    assert.equal((await call('registerPushToken', M1, { token: tok(2) })).status, 'OK');
+    const r = await call('registerPushToken', E1, { token: tok(1) });
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual((await get(`b/${A}/push_tokens/${M2}`)).pushTokens, [], 'הטלפון יצא מהמנהל בלי רשומת עובד');
+    assert.deepEqual((await get(`b/${A}/staff/${E1}`)).pushTokens, [tok(1)]);
+    await call('registerPushToken', E1, { token: tok(2) });
+    assert.deepEqual((await get(`b/${A}/staff/${M1}`)).pushTokens, ['tokM1_' + 'a'.repeat(30)], 'הטלפון יצא גם ממנהל עם רשומת עובד; הטלפון האחר שלו נשאר');
+    assert.equal((await call('registerPushToken', M2, { token: tok(1) })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/staff/${E1}`)).pushTokens, [tok(2)], 'מנהל שנכנס שוב – הטלפון חוזר אליו ויוצא מהעובד');
+    assert.deepEqual((await get(`b/${A}/push_tokens/${M2}`)).pushTokens, [tok(1)]);
+    // רישום חוזר של אותו משתמש – בלי שינוי אצל אחרים
+    assert.equal((await call('registerPushToken', M2, { token: tok(1) })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/push_tokens/${M2}`)).pushTokens, [tok(1)]);
+  });
 });
 
 // ---------------------------------------------------------------------------------

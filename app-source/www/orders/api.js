@@ -222,6 +222,9 @@ export async function registerPush() {
   try {
     const C = window.Capacitor; const P = C && C.Plugins && C.Plugins.PushNotifications;
     if (!P) return 'no-plugin';
+    // 12.11.2026: רכיב ההתראות נוסף לאפליקציה. בלי הגדרות Firebase בבנייה (PushGate.ready=false) רישום היה מפיל את האפליקציה – לכן לא נוגעים
+    const G = C.Plugins.PushGate; const g = G ? await G.state() : null;
+    if (!g || g.ready !== true) return 'off';
     const perm = await P.requestPermissions();
     if (!perm || perm.receive !== 'granted') return 'denied';
     P.addListener('registration', (t) => { if (t && t.value) call(FN.registerPushToken, { token: t.value }).catch(() => {}); });

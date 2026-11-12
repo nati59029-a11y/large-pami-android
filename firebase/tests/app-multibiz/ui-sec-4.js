@@ -71,10 +71,11 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     const { ctx, page, bodies } = await open(browser, www, { w, h });
     // רכיב התראות מדומה (Capacitor PushNotifications) – כדי לבדוק שהטלפון נרשם דרך השרת
     await page.evaluate(() => {
-      const L = {}; window.__pn = [];
-      window.Capacitor = window.Capacitor || {}; window.Capacitor.Plugins = Object.assign({}, window.Capacitor.Plugins || {}, { PushNotifications: {
+      const L = {}; window.__pn = []; window.__pnL = L;
+      window.Capacitor = window.Capacitor || {}; window.Capacitor.Plugins = Object.assign({}, window.Capacitor.Plugins || {}, { PushGate: { state: async () => ({ ready: true }) }, PushNotifications: {
+        removeAllListeners: async () => { window.__pn.push('off'); }, unregister: async () => { window.__pn.push('unregister'); },
         addListener: async (e, f) => { L[e] = f; window.__pn.push('on:' + e); return { remove() {} }; },
-        checkPermissions: async () => ({ receive: 'prompt' }), requestPermissions: async () => { window.__pn.push('ask'); return { receive: 'granted' }; },
+        checkPermissions: async () => ({ receive: window.__perm || 'prompt' }), requestPermissions: async () => { window.__pn.push('ask'); window.__perm = 'granted'; return { receive: 'granted' }; },
         register: async () => { window.__pn.push('register'); setTimeout(() => L.registration && L.registration({ value: 'fcm_token_' + 'x'.repeat(30) }), 10); },
       } });
     });
@@ -87,6 +88,16 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     const pn = await page.evaluate(() => window.__pn);
     const reg = last(bodies, 'registerPushToken');
     check(`${w}: רישום הטלפון להתראות – בקשת הרשאה, רישום, ושליחת המזהה לשרת`, pn.includes('ask') && pn.includes('register') && reg && /^fcm_token_/.test(reg[1].token), { pn, reg: reg && reg[1] });
+    // 12.11.2026: לחיצה על התראה פותחת את המזכירה בלשונית ההתראות; הרשאה מתבקשת פעם אחת בלבד; יציאה מוחקת את מזהה הטלפון
+    await page.evaluate(() => { NAV = [{ v: 'home' }]; go('home'); }); await H.settle(page, 400);
+    await page.evaluate(() => window.__pnL.pushNotificationActionPerformed({ actionId: 'tap', notification: { data: { k: 'sec', v: 'notes' } } })); await H.settle(page, 700);
+    const tapV = await page.evaluate(() => NAV[NAV.length - 1].v), tapT = await txt(page);
+    check(`${w}: לחיצה על התראה – מסך המזכירה, לשונית ההתראות`, tapV === 'sec' && /חשבונית לתשלום היום/.test(tapT), { tapV, t: tapT.slice(0, 120) });
+    await page.evaluate(() => { window.secPushOff(); }); await H.settle(page, 100);
+    await page.evaluate(() => { window.secPushBoot(); }); await H.settle(page, 300);
+    const pn2 = await page.evaluate(() => window.__pn);
+    check(`${w}: יציאה – unregister; כניסה חוזרת – רישום מחדש בלי לבקש הרשאה שוב`, pn2.includes('unregister') && pn2.filter((x) => x === 'ask').length === 1 && pn2.filter((x) => x === 'register').length === 2, pn2);
+    await page.evaluate(() => { NAV = [{ v: 'home' }]; go('sec'); }); await H.settle(page, 500);
 
     // --- התראות ---
     await tab(page, 'notes');

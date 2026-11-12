@@ -244,13 +244,15 @@ ACT.secTh=el=>{const a=Math.round(+el.dataset.v);if(a>=0)thSave(a)};
 ACT.secThEd=()=>{dlg(`<h3>סף התראת תזרים</h3><form data-f="secThF"><label class="f"><span>התראה כשהיתרה הצפויה נמוכה מ- (₪)</span><input class="amt" name="a" inputmode="numeric" dir="ltr" maxlength="9" value="${X.st.cfTh!=null?esc(String(X.st.cfTh)):''}"></label><div class="row"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.secThF=f=>{const v=String(f.a.value||'').replace(/[,\s₪]/g,'');if(v===''){closeDlg();return thSave(null)}if(!/^\d{1,9}$/.test(v))return toast('סכום לא תקין');closeDlg();thSave(+v)};
 const scrollEnd=()=>setTimeout(()=>{const f=document.getElementById('secForm');if(f&&f.scrollIntoView)f.scrollIntoView({block:'end'})},30);
+// 13.11.2026: קוד הסיבה כשספק ה-AI נכשל (reason מ-functions/lib/sec-ai.js), כדי שיהיה אפשר לאבחן מהמסך
+const AIR={'ai-quota':'נגמרה המכסה או אין חיוב פעיל בחשבון ה-AI','ai-rejected':'שירות ה-AI דחה את הבקשה – מפתח או מודל לא תקינים','ai-overloaded':'עומס זמני בשירות ה-AI','ai-timeout':'שירות ה-AI לא ענה בזמן','ai-network':'אין חיבור מהשרת לשירות ה-AI','ai-error':'שגיאה לא מוכרת בשירות ה-AI'};
 async function ask2(q,deep){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)return;if(q.length>2000)return toast('השאלה ארוכה מדי (עד 2,000 תווים)');
  X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';rerender();scrollEnd();
  try{const fin=secFin({pay:!!X.st.pay});const d={text:q,deep};if(fin)d.fin=fin;
   const r=await fnCall('secChat',d);
   X.msgs.push({role:'a',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null}
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
- catch(e){X.msgs.push({role:'a',text:(e&&e.message)||'השליחה נכשלה. נסו שוב.',t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
+ catch(e){const rs=e&&Object.prototype.hasOwnProperty.call(AIR,e.reason)?' (סיבה: '+AIR[e.reason]+')':'';X.msgs.push({role:'a',text:((e&&e.message)||'השליחה נכשלה. נסו שוב.')+rs,t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
  finally{X.sending=0;X.deep=0;if(cur().v==='sec')rerender();scrollEnd()}}
 window.__secAsk=ask2;
 
@@ -500,12 +502,23 @@ ACT.secHistDel=()=>{ask('למחוק את כל ההיסטוריה שלך במזכ
  try{const r=await fnCall('secHistory',{op:'ask'});const c=r.counts||{};X.hd=r.token;
   dlg(`<h3>אישור שני – מחיקה סופית</h3><p>יימחקו: ${esc(String(c.chat||0))} הודעות בשיחה, ${esc(String(c.notes||0))} התראות ו-${esc(String(c.reports||0))} דוחות. הנתונים יימחקו מהמזכירה ואי אפשר לשחזר אותם מהאפליקציה. עותקי הגיבוי האוטומטי בשרת נמחקים לבד תוך 35 יום. המחיקה תירשם ביומן הפעולות.</p><div class="row"><button class="btn grow" data-a="secHistOk">כן, למחוק סופית</button><button class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}catch(e){err(e)}},'המשך')};
 ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disabled=true;try{const r=await fnCall('secHistory',{op:'del',token:t,sure:true});closeDlg();X.msgs=null;X.nl=null;X.rpl=null;X.rp=null;X.log=null;const d=r.deleted||{};toast('נמחק: '+(d.chat||0)+' הודעות, '+(d.notes||0)+' התראות, '+(d.reports||0)+' דוחות');rerender()}catch(e){el.disabled=false;err(e)}};
-/* ---------- רישום הטלפון להתראות (7.2): רק אם רכיב ההתראות קיים באפליקציה (Capacitor PushNotifications). בלי הרכיב – ההתראות במסך בלבד ---------- */
-const PN={done:0};
-async function pushReg(){try{if(PN.done||!ready())return;const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.PushNotifications;if(!P)return;PN.done=1;
- await P.addListener('registration',t=>{if(t&&t.value)window.fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
- await P.addListener('pushNotificationActionPerformed',()=>{X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
- let p=await P.checkPermissions();if(p.receive==='prompt'||p.receive==='prompt-with-rationale')p=await P.requestPermissions();if(p.receive==='granted')await P.register()}catch(e){}}
+/* ---------- התראות לטלפון (7.2; 12.11.2026: רכיב ההתראות נוסף לאפליקציה) ----------
+   רק באפליקציה לטלפון שנבנתה עם הגדרות Firebase (PushGate.ready). בלי זה – לא קורה כלום, וההתראות רק במסך (כמו קודם).
+   מנהל: בכניסה הראשונה – בקשת הרשאה להתראות (Android 13+), פעם אחת בלבד בטלפון. אחר כך בכל פתיחה – רישום מחדש (המזהה מתחדש לפעמים).
+   עובד: לא מתבקשת הרשאה. אם ההרשאה כבר קיימת בטלפון – נרשם על שמו, והשרת מוציא את הטלפון מהמשתמש הקודם (עובד לא מקבל התראות של מנהל).
+   יציאה מהחשבון – מזהה הטלפון נמחק (unregister), כך שהתראות לא ממשיכות להגיע אליו. לחיצה על התראה – המזכירה, לשונית ההתראות. */
+const PN={done:0,ready:0};
+async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
+ const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;
+ await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW()))window.fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
+ await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k!=='sec'||!isA())return;X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
+ let p=await P.checkPermissions();
+ if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
+  if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
+ if(p.receive==='granted')await P.register()}catch(e){}}
+window.secPushBoot=()=>{try{pushReg()}catch(e){}};
+window.secPushOff=()=>{try{const P=PN.ready&&window.Capacitor&&window.Capacitor.Plugins.PushNotifications;if(P){P.removeAllListeners().catch(()=>{});P.unregister().catch(()=>{})}PN.done=0;PN.ready=0}catch(e){}};
+try{if(isA()||isW())setTimeout(window.secPushBoot,0)}catch(e){}
 {const r0=V.sec;V.sec=()=>{const r=r0();try{if(ready())pushReg()}catch(e){}return r}}
 
 /* =====================================================================================
