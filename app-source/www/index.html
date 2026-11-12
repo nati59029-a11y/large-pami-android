@@ -4884,8 +4884,8 @@ function coSlipRe(){for(const it of(ZQ&&ZQ.L)||[])if(it.co&&it.co.ns&&it.co.ns.l
 const coDiffSig=co=>co.ok?'':[co.z,co.s,(co.bad||[]).length,co.known?1:0].join('/');
 const zcNsxOk=(c,ns,co)=>!!c&&Array.isArray(c.ids)&&(ns||[]).every(x=>c.ids.includes(x.id))&&c.d===coDiffSig(co);
 const zcNsxC=(ns,co)=>({ids:(ns||[]).map(x=>x.id),d:coDiffSig(co)});
-const zcNsxR=(ns,co)=>{ns=ns||[];if(!ns.length&&co.ok)return undefined;const r={ids:ns.map(x=>String(x.id)),a:rnd(sum(ns,x=>num(x.a))),by:fbBy(),at:Date.now()};if(!co.ok)Object.assign(r,{k:ns.length?'ns+diff':'diff',z:rnd(num(co.z)),s:rnd(num(co.s)),diff:rnd(num(co.diff))});else r.k='ns';return r};
-const coDiffMsg=co=>'בדוח Z '+ils(co.z)+', הוצאות מקופה '+ils(co.s)+', הפרש '+ils(co.diff);
+const zcNsxR=(ns,co)=>{ns=ns||[];if(!ns.length&&co.ok)return undefined;const r={ids:ns.map(x=>String(x.id)),a:rnd(sum(ns,x=>num(x.a))),by:fbBy(),at:Date.now()};if(!co.ok)Object.assign(r,{k:ns.length?'ns+diff':'diff',z:rnd(num(co.z)),s:rnd(num(co.s)),diff:rnd(num(co.diff))},co.known?{}:{nk:1});else r.k='ns';return r};
+const coDiffMsg=co=>co.known===0||co.known===false||co.nk?'בדוח Z '+ils(co.z)+', ההוצאות מקופה לא נבדקו (הטעינה נכשלה)':'בדוח Z '+ils(co.z)+', הוצאות מקופה '+ils(co.s)+', הפרש '+ils(co.diff);
 const zcNsxQ=(ns,co)=>'להמשיך ללא התאמה? '+[ns.length?ZNS+' ('+ns.length+', '+ils(sum(ns,x=>x.a))+')':'',co.ok?'':'הוצאת המזומן לא תואמת ('+coDiffMsg(co)+')'].filter(Boolean).join('; ')+'. הסגירה תירשם, ובסיכום הסגירות יופיע "נסגר ללא התאמה".';
 /* בסגירה מעובד: מה שעדיין חסר בלי צילום מהעובד (אם צירוף הצילום נכשל – הכול) */
 const zcNsRem=it=>((it.co&&it.co.ns)||[]).filter(x=>it.nsF||!(it.nsp||[]).includes(x.id));
@@ -4896,7 +4896,7 @@ ACT.zcNsx=()=>{if(!isA()||!ZC||!ZC.f||!COQ.L)return;const co=coChk(ZC.reg,ZC.f.d
  ask(zcNsxQ(co.ns,co),()=>{ZC.nsx=zcNsxC(co.ns,co);zcChkR();FRM.zcSend(document.querySelector('form[data-f="zcSend"]')||{})},'המשך ללא התאמה')};
 /* בסיכום: מה שעדיין בלי דף (לפי התשלום במכשיר – צירוף מאוחר מוריד את הסימון) */
 function zsNsx(z){const x=z&&z.nsx;if(!x||typeof x!=='object')return null;const ids=Array.isArray(x.ids)?x.ids:[],df=x.z!=null&&x.s!=null;if(!ids.length&&!df)return null;const miss=ids.filter(id=>{const p=coPay(id);return !(p&&p.file)});
- return{ids,miss,a:miss.length===ids.length?num(x.a):rnd(sum(miss,id=>num((coPay(id)||{}).a))),df:df?{z:num(x.z),s:num(x.s),diff:num(x.diff)}:null,by:s_(x.by),at:+x.at||0}}
+ return{ids,miss,a:miss.length===ids.length?num(x.a):rnd(sum(miss,id=>num((coPay(id)||{}).a))),df:df?{z:num(x.z),s:num(x.s),diff:num(x.diff),nk:x.nk?1:0}:null,by:s_(x.by),at:+x.at||0}}
 function coSched(){if(typeof COS==='undefined'||!COS||!isA())return;clearTimeout(COS.t);COS.t=setTimeout(()=>{coSync().catch(e=>{try{console.warn('cashout',e&&e.message)}catch(z){}})},3000)}
 const coWarn=d=>{const zc=gv(d,'zc'),dp=gv(d,'dp');if(zc||dp)toast('שים לב: ההוצאה מקופה כבר '+(zc?'שויכה לסגירת קופה':'')+(zc&&dp?' ו':'')+(dp?'הופקדה':'')+'. השיוך נשמר – בדוק את הסגירה או ההפקדה');return !!(zc||dp)};
 /* מחיקה מהענן: רק אם לא שויכה לסגירה ולא הופקדה (אחרת נשארת, עם אזהרה) */
