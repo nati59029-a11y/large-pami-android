@@ -27,6 +27,8 @@ sed -i 's|<application|<uses-permission android:name="android.permission.REQUEST
 sed -i 's|<application|<uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />\n    <application|' $M
 # App lock for managers (BiometricLock plugin): fingerprint/face through the system BiometricPrompt, screen lock as fallback
 sed -i 's|<application|<uses-permission android:name="android.permission.USE_BIOMETRIC" />\n    <application|' $M
+# Push notifications (12.11.2026): Android 13+ asks the user before showing notifications (the push plugin declares it too; listed here so it is never missing)
+grep -q 'android.permission.POST_NOTIFICATIONS' $M || sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <application|' $M
 grep -q 'fileprovider' $M || echo "::warning::FileProvider not found in manifest"
 # --- SHARE-TARGET BEGIN ---
 # "Share" menu of Android (WhatsApp, bank app, gallery): images and PDF, one file or many.
@@ -89,6 +91,7 @@ cp android-plugin/LiveUpdatePlugin.java $J/LiveUpdatePlugin.java
 cp android-plugin/ShareInPlugin.java $J/ShareInPlugin.java
 cp android-plugin/BiometricLockPlugin.java $J/BiometricLockPlugin.java
 cp android-plugin/PayBrowserPlugin.java $J/PayBrowserPlugin.java
+cp android-plugin/PushGatePlugin.java $J/PushGatePlugin.java
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
@@ -105,6 +108,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ShareInPlugin.class);
         registerPlugin(BiometricLockPlugin.class);
         registerPlugin(PayBrowserPlugin.class);
+        // Push: tells the screens whether this APK was built with google-services.json (without it push stays off)
+        registerPlugin(PushGatePlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them

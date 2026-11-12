@@ -500,12 +500,23 @@ ACT.secHistDel=()=>{ask('למחוק את כל ההיסטוריה שלך במזכ
  try{const r=await fnCall('secHistory',{op:'ask'});const c=r.counts||{};X.hd=r.token;
   dlg(`<h3>אישור שני – מחיקה סופית</h3><p>יימחקו: ${esc(String(c.chat||0))} הודעות בשיחה, ${esc(String(c.notes||0))} התראות ו-${esc(String(c.reports||0))} דוחות. הנתונים יימחקו מהמזכירה ואי אפשר לשחזר אותם מהאפליקציה. עותקי הגיבוי האוטומטי בשרת נמחקים לבד תוך 35 יום. המחיקה תירשם ביומן הפעולות.</p><div class="row"><button class="btn grow" data-a="secHistOk">כן, למחוק סופית</button><button class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}catch(e){err(e)}},'המשך')};
 ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disabled=true;try{const r=await fnCall('secHistory',{op:'del',token:t,sure:true});closeDlg();X.msgs=null;X.nl=null;X.rpl=null;X.rp=null;X.log=null;const d=r.deleted||{};toast('נמחק: '+(d.chat||0)+' הודעות, '+(d.notes||0)+' התראות, '+(d.reports||0)+' דוחות');rerender()}catch(e){el.disabled=false;err(e)}};
-/* ---------- רישום הטלפון להתראות (7.2): רק אם רכיב ההתראות קיים באפליקציה (Capacitor PushNotifications). בלי הרכיב – ההתראות במסך בלבד ---------- */
-const PN={done:0};
-async function pushReg(){try{if(PN.done||!ready())return;const P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.PushNotifications;if(!P)return;PN.done=1;
- await P.addListener('registration',t=>{if(t&&t.value)window.fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
- await P.addListener('pushNotificationActionPerformed',()=>{X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
- let p=await P.checkPermissions();if(p.receive==='prompt'||p.receive==='prompt-with-rationale')p=await P.requestPermissions();if(p.receive==='granted')await P.register()}catch(e){}}
+/* ---------- התראות לטלפון (7.2; 12.11.2026: רכיב ההתראות נוסף לאפליקציה) ----------
+   רק באפליקציה לטלפון שנבנתה עם הגדרות Firebase (PushGate.ready). בלי זה – לא קורה כלום, וההתראות רק במסך (כמו קודם).
+   מנהל: בכניסה הראשונה – בקשת הרשאה להתראות (Android 13+), פעם אחת בלבד בטלפון. אחר כך בכל פתיחה – רישום מחדש (המזהה מתחדש לפעמים).
+   עובד: לא מתבקשת הרשאה. אם ההרשאה כבר קיימת בטלפון – נרשם על שמו, והשרת מוציא את הטלפון מהמשתמש הקודם (עובד לא מקבל התראות של מנהל).
+   יציאה מהחשבון – מזהה הטלפון נמחק (unregister), כך שהתראות לא ממשיכות להגיע אליו. לחיצה על התראה – המזכירה, לשונית ההתראות. */
+const PN={done:0,ready:0};
+async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
+ const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;
+ await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW()))window.fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
+ await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k!=='sec'||!isA())return;X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
+ let p=await P.checkPermissions();
+ if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
+  if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
+ if(p.receive==='granted')await P.register()}catch(e){}}
+window.secPushBoot=()=>{try{pushReg()}catch(e){}};
+window.secPushOff=()=>{try{const P=PN.ready&&window.Capacitor&&window.Capacitor.Plugins.PushNotifications;if(P){P.removeAllListeners().catch(()=>{});P.unregister().catch(()=>{})}PN.done=0;PN.ready=0}catch(e){}};
+try{if(isA()||isW())setTimeout(window.secPushBoot,0)}catch(e){}
 {const r0=V.sec;V.sec=()=>{const r=r0();try{if(ready())pushReg()}catch(e){}return r}}
 
 /* =====================================================================================

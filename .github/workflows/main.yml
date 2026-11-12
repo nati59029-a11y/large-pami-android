@@ -73,6 +73,14 @@ jobs:
       - name: Separate test app (only when site_backend=test)
         if: env.SITE_BACKEND == 'test'
         run: bash scripts/make-test-app.sh
+      # Push notifications (12.11.2026): google-services.json for THIS package (com.largepami.finance), made at build time and
+      # never stored in the repo. With the secret FIREBASE_SERVICE_ACCOUNT: find the Android app in Firebase, create it if missing,
+      # download its settings (scripts/fcm-config.sh). Without the secret, in a test build, or on any failure: the build goes on
+      # WITHOUT push (the app works as before) and the run summary says so.
+      - name: Push notifications settings (google-services.json, automatic)
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: bash ../scripts/fcm-config.sh
       - name: Always-increasing versionCode
         run: sed -i "s/versionCode [0-9]*/versionCode $((1000 + GITHUB_RUN_NUMBER))/" android/app/build.gradle && grep -n "versionCode\|versionName" android/app/build.gradle
       - name: Stamp version into the app

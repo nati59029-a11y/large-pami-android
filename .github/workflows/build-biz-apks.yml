@@ -107,6 +107,12 @@ jobs:
           fi
       - name: Make the business app (${{ matrix.biz }})
         run: bash scripts/make-biz-app.sh "${{ matrix.biz }}"
+      # התראות לטלפון (12.11.2026): google-services.json לחבילה של העסק (com.largepami.finance.b.<bizId> / com.largepami.business),
+      # אוטומטית – כולל עסק חדש. בלי הסוד או בכשל – בונים בלי התראות (לא נכשלים). ראו scripts/fcm-config.sh
+      - name: Push notifications settings (google-services.json, automatic)
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: bash ../scripts/fcm-config.sh
       - run: npx cap sync android
       - name: Generic app – no "Large Pami" before login
         if: matrix.biz == 'business'
