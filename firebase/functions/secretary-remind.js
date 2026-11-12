@@ -165,6 +165,8 @@ async function remindBiz(opts) {
   for (const m of mgrs) {
     const open = await db.collection(`sec_note/${m.uid}/n`).where('typ', '==', 'win').where('st', '==', 'open').limit(200).get();
     for (const d of open.docs) {
+      // החלון נסגר – התזכורת כבר לא רלוונטית (ההודעה עצמה נשארת בתיבה). בלי זה היא נשארת פתוחה לתמיד ונקראת כל 15 דקות (הערת בודק, שלב 8)
+      if (Number.isFinite(d.get('until')) && now >= d.get('until')) { await d.ref.update({ st: 'gone', pend: false }); out.gone++; continue; }
       const ms = await db.doc('sec_in/' + String(d.get('item') || '').replace(/^win:/, '')).get();
       if (!ms.exists || !R.winOpen(ms.data())) { await d.ref.update({ st: 'gone', pend: false }); out.gone++; }
     }

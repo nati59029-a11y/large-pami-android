@@ -111,12 +111,15 @@ describe('קריטריון 4: תזכורות 7.3 על sec_in (חלון 24 השע
     await prep((d) => d.doc(`b/${A}/sec_snd/${WA2}`).set({ lastId: 'm5', lastIn: IL('2026-11-11T08:30') }, { merge: true }).then(() => d.doc(`b/${A}/sec_in/m5`).set(inMsg(WA2, 'done'))));
     await run('2026-11-12T08:31');
     assert.equal(byKey(await notes(M1), new RegExp('^win:' + WA2)).length, 0, 'חלון שכבר נסגר (08:30) – בלי תזכורת');
+    L = byKey(await notes(M1), /^win:/);
+    assert.equal(L.find((x) => x.key.startsWith('win:' + WA3)).st, 'gone', 'החלון של WA3 נסגר ב-08:00 – התזכורת נסגרת (לא נשארת פתוחה לתמיד)');
+    assert.equal(L.find((x) => x.key === 'win:' + WA1 + ':' + last).st, 'open', 'WA1 – החלון עד 09:00, עדיין פתוחה');
     // המנהל ענה (secSend מסמן replied / "טופל" מסמן handled) – התזכורת נסגרת
     await prep((d) => d.doc(`b/${A}/sec_in/m1`).update({ st: 'replied' }));
     await run('2026-11-12T08:45');
     L = byKey(await notes(M1), /^win:/);
     assert.equal(L.find((x) => x.key === 'win:' + WA1 + ':' + last).st, 'gone', 'נענתה – נסגרה');
-    assert.equal(L.find((x) => x.key.startsWith('win:' + WA3)).st, 'open', 'השנייה עדיין פתוחה');
+    assert.equal(L.find((x) => x.key.startsWith('win:' + WA3)).st, 'gone', 'השנייה נשארת סגורה');
   });
 
   it('sec_in: שעות שקטות – אם ההתראה בטלפון תצא רק אחרי סוף החלון, היא לא נשלחת (נשארת באפליקציה); ביום שאינו יום עסקים – לא נוצרת (7.4)', async () => {
