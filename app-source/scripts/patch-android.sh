@@ -81,6 +81,36 @@ XML
 RES=android/app/src/main/res
 rm -rf $RES/mipmap-anydpi-v26
 for d in android-icons/mipmap-*; do n=$(basename $d); cp $d/ic_launcher.png $RES/$n/ic_launcher.png; cp $d/ic_launcher.png $RES/$n/ic_launcher_round.png; cp $d/ic_launcher.png $RES/$n/ic_launcher_foreground.png; done
+# --- NOTIF-ICON BEGIN ---
+# Push notifications (12.11.2026): the small icon in the status bar is always a one-colour silhouette on Android.
+# Default = a bell (vector). scripts/notif-icon.py replaces it with a silhouette of the app's logo when the logo has a clear shape,
+# and sets the accent colour from the logo (make-biz-app.sh runs it again with the business logo). Used by Firebase for
+# notifications shown by the system and by the push plugin (both read these two meta-data entries).
+mkdir -p $RES/drawable
+cat > $RES/drawable/ic_stat_notify.xml <<'XML'
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.89,2 2,2zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"/>
+</vector>
+XML
+python3 scripts/notif-icon.py android-icons/mipmap-xxxhdpi/ic_launcher.png $RES --preview notif-preview.png || true
+test -f $RES/values/notif_color.xml || printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="notif_accent">#1C5A49</color>\n</resources>\n' > $RES/values/notif_color.xml
+python3 - "$M" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+if "default_notification_icon" not in s:
+    i = s.find("<application")
+    j = s.find(">", i)
+    if i < 0 or j < 0:
+        sys.exit("::error::notif icon: <application> not found")
+    meta = ('\n        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_notify" />'
+            '\n        <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notif_accent" />')
+    s = s[:j + 1] + meta + s[j + 1:]
+    open(p, "w", encoding="utf-8").write(s)
+assert s.count("default_notification_icon") == 1
+print("notif icon meta-data: OK")
+PY2
+# --- NOTIF-ICON END ---
 
 J=android/app/src/main/java/com/largepami/finance
 cp android-plugin/SaveFilePlugin.java $J/SaveFilePlugin.java

@@ -65,6 +65,10 @@ jobs:
           test -f keystore/debug.keystore || { echo "::error::keystore/debug.keystore is missing from the repo"; exit 1; }
           echo "keystore sha256:" && sha256sum keystore/debug.keystore
           keytool -list -keystore keystore/debug.keystore -storepass android | tail -3
+      # Pillow: notification icon from the logo (scripts/notif-icon.py, run by patch-android.sh). Same version as build-biz-apks.yml
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install pillow==10.4.0
       - run: npm install
       - run: node scripts/prepare.js
       - run: npx cap add android
@@ -131,6 +135,9 @@ jobs:
             --url "https://$LIVE_UPDATE_SITE.web.app/app-updates/manifest.json" \
             --native-id "$(python3 ../scripts/live-update.py native-id ../app-source)" \
             --out android/app/src/main/assets/live-update.properties
+      # 12.11.2026: תצוגה של סמל ההתראה (צללית מהלוגו, או כלום כשנשאר הפעמון) – לבדיקה בעין
+      - uses: actions/upload-artifact@v4
+        with: { name: "notif-icon", path: app/notif-preview.png, if-no-files-found: ignore, retention-days: 14 }
       - name: Use the fixed signing key
         run: mkdir -p ~/.android && cp keystore/debug.keystore ~/.android/debug.keystore
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
