@@ -66,7 +66,8 @@ async function open(browser, www, o) {
     if (n === 'secAdminWa') return ok({ ok: true, bizId: BIZ, pnid: '', num: '', link: 'coexist', hour: 30, hourDefault: 30, ackH: { f: '08:00', t: '18:00' }, tpls: [], stop: { on: false }, admins: [] });
     if (n === 'secAdminMail') {
       if (body.op === 'count') return ok(Object.assign({}, sg, { count: body.range === 'none' ? { range: 'none', n: 0, none: true } : { range: body.range, n: 1234, capped: false, per: [{ id: boxes[0].id, addr: boxes[0].addr, n: 1234 }], est: { n: 1234, aiPerMailMc: 36, aiIfSummarizedMc: 44424, nowMc: 0 } } }));
-      if (body.op === 'run') return ok(Object.assign({}, sg, { list: { id: 'cl2', n: 40, z: 1e6, counts: {} } }));
+      if (body.op === 'run') return ok(Object.assign({}, sg, { list: { id: 'cl2', n: 40, z: 1e6, counts: {} }, hist: { st: 'run', range: '6', rangeL: '6 חודשים', n: 50, dup: 0, total: 1234, t: H.T0, upd: H.T0 } }));
+      if (body.op === 'histStop') return ok(Object.assign({}, sg, { hist: { st: 'stop', range: '6', rangeL: '6 חודשים', n: 50, dup: 0, total: 1234, t: H.T0, upd: H.T0 } }));
       if (body.op === 'set') return ok(Object.assign({}, sg, { max: body.max }));
       return ok(sg);
     }
@@ -172,6 +173,11 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     await page.click('#dlg [data-a=yes]'); await H.settle(page, 500);
     const rn = last(bodies, 'secAdminMail', (b) => b.op === 'run');
     check(`${w}: סריקה נשלחת עם הטווח והמספר שאושר`, rn && rn[1].range === '6' && rn[1].confirm === 1234, rn && rn[1]);
+    // תיקון סבב 1 (1): קליטת ההיסטוריה – התקדמות ועצירה באמצע
+    const th = await txt(page);
+    check(`${w}: קליטת היסטוריה – מוצגת התקדמות וכפתור עצירה`, /קליטת היסטוריה \(6 חודשים\)/.test(th) && /50 נקלטו מתוך כ-1,234/.test(th) && !!(await page.$('[data-a=secSgHist][data-op=histStop]')), th.slice(-400));
+    await page.click('[data-a=secSgHist][data-op=histStop]'); await H.settle(page, 500);
+    check(`${w}: עצירה נשלחת לשרת, ואז מוצג "המשך הקליטה"`, !!last(bodies, 'secAdminMail', (b) => b.op === 'histStop' && b.bizId === 'biz-o') && /נעצרה/.test(await txt(page)) && !!(await page.$('[data-a=secSgHist][data-op=histGo]')));
     await page.fill('#secSgMax input[name=max]', '3'); await page.click('#secSgMax button'); await H.settle(page, 500);
     check(`${w}: מספר תיבות נשמר`, !!last(bodies, 'secAdminMail', (b) => b.op === 'set' && b.max === 3));
     check(`${w}: מנהל־על – בלי גלילה לרוחב`, (await sx(page)) <= 0, await sx(page));
