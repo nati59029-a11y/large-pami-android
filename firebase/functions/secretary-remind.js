@@ -323,7 +323,8 @@ async function dailyBiz(opts) {
   for (const p of await db.collection('sec_note').listDocuments()) out.notes += await delWhere(db, `sec_note/${p.id}/n`, c12);
   out.log = await delWhere(db, 'sec_log', c24);
   out.inbox = await require('./secretary-wa')._core.shrinkOld(db, c12); // שלב 5: הודעות ווצאפ וטיוטות בנות יותר מ-12 חודשים – רק תקציר (9.5)
-  if (out.chat || out.notes || out.log || out.inbox) await db.collection('sec_log').doc().set(logData('', 'auto', 'retention', { note: 'chat=' + out.chat + ',notes=' + out.notes + ',log=' + out.log + ',inbox=' + out.inbox }));
+  const iv = await require('./secretary-inv')._core.retention(db, now); // שלב 7: עותק בתור של חשבונית שאושרה / קובץ שנדחה – 30 יום (9.5); תפיסה שלא הושלמה – 24 שעות (4.7)
+  if (out.chat || out.notes || out.log || out.inbox || iv.purged) await db.collection('sec_log').doc().set(logData('', 'auto', 'retention', { note: 'chat=' + out.chat + ',notes=' + out.notes + ',log=' + out.log + ',inbox=' + out.inbox + (iv.purged ? ',inv=' + iv.purged : '') }));
   return out;
 }
 const runSecDaily = (opts) => forAll(dailyBiz, opts, 'daily');

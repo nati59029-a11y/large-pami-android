@@ -461,8 +461,24 @@ async function doSec(db, id, x, o) {
   }
   const lang = W.langOf(text);
   if (Object.keys(upS).length || lang !== snd.lang) await sRef.set(Object.assign({ lang }, upS), { merge: true });
-  // קובץ (תמונה/מסמך) – נשמר; קליטת חשבוניות בשלב 7. בלי טיוטה
-  if (x.type === 'other') { await ref.update({ st: 'done', cls: 'inv', flags: ['file'], lang }); return { file: true }; }
+  // קובץ (תמונה/מסמך) – נשמר, בלי טיוטה. שלב 7: הקובץ נקלט לתור החשבוניות (secretary-inv.js) – בדיקת הקובץ, טביעה, זיהוי דרך המכסה
+  if (x.type === 'other') {
+    const up = { st: 'done', cls: 'inv', flags: ['file'], lang };
+    if (x.media && x.media.id) {
+      const INV = require('./secretary-inv')._core;
+      const base = { ch: 'wa', from: x.from, name: x.name || '', inId: id, fn: x.media.fn || '', now };
+      try {
+        const md = await (o.media || W.media)(o.token, x.media.id, require('./lib/sec-inv').MAX_FILE);
+        up.inv = (await INV.ingest(db, Object.assign(base, { buf: md.buf }))).id;
+      } catch (e) {
+        // קובץ גדול מהמותר – כרטיס "התקבל קובץ שלא נקלט" בלי הורדה (10.3); תקלה אחרת – מסומן, ההודעה עצמה נשמרה
+        if (e && e.details && e.details.reason === 'wa-media-big') up.inv = (await INV.ingest(db, Object.assign(base, { why: 'big' }))).id;
+        else { up.flags = ['file', 'invErr']; logger.warn('secretary-wa: invoice file failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
+      }
+    }
+    await ref.update(up);
+    return { file: true, inv: up.inv || '' };
+  }
   // תוכן חשוד (88): נשמר, בלי טיוטה ובלי פנייה למודל
   if (W.susOf(text)) {
     await ref.update(Object.assign({ st: 'sus', flags: flags.concat(['sus']), lang }, tr ? { tr } : {}));
@@ -906,7 +922,8 @@ exports.secWaWork = onDocumentCreated({ document: 'sec_waq/{qid}', region: NEW_R
   const s = ev.data;
   const d = s && s.data ? s.data() : null;
   if (!d || typeof d.biz !== 'string' || typeof d.id !== 'string' || !ID_RE.test(d.id)) return;
-  try { await work(d.biz, d.id, {}); } finally { await s.ref.delete().catch(() => {}); }
+  // שלב 7: אותו תור משמש גם לזיהוי חשבוניות שהתקבלו (inv:true) – secretary-inv.js
+  try { if (d.inv === true) await require('./secretary-inv')._core.work(d.biz, d.id, {}); else await work(d.biz, d.id, {}); } finally { await s.ref.delete().catch(() => {}); }
 });
 exports.secInbox = onCall(wrap('secInbox', secInbox));
 exports.secSend = onCall({ secrets: [WA_ACCESS_TOKEN] }, wrap('secSend', (r) => secSend(r)));

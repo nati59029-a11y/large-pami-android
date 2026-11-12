@@ -91,7 +91,12 @@ function parseHook(body) {
         else if (m.type === 'interactive' && m.interactive) {
           const r = m.interactive.button_reply || m.interactive.list_reply || {};
           x.type = 'text'; x.text = cleanIn(r.title, 200); x.btn = cleanIn(r.id, 60);
-        } else x.sub = cleanIn(String(m.type || ''), 20); // תמונה/מסמך/מיקום… – נשמר כ"קובץ" (קליטת חשבוניות – שלב 7)
+        } else {
+          x.sub = cleanIn(String(m.type || ''), 20); // תמונה/מסמך/מיקום… – נשמר כ"קובץ"
+          // שלב 7: תמונה או מסמך – מזהה הקובץ אצל Meta (ההורדה רק בעיבוד, עם בדיקת גודל), לקליטת חשבוניות
+          const md = (m.type === 'image' || m.type === 'document') && m[m.type] && typeof m[m.type].id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(m[m.type].id) ? m[m.type] : null;
+          if (md) x.media = { id: md.id, mime: cleanIn(md.mime_type, 80), fn: cleanIn(md.filename, 120) };
+        }
         out.msgs.push(x);
       }
       for (const s of Array.isArray(v.statuses) ? v.statuses.slice(0, 50) : []) if (s && typeof s.id === 'string' && typeof s.status === 'string') out.statuses.push({ pnid, wamid: s.id, st: cleanIn(s.status, 20) });

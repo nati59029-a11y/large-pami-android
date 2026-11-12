@@ -808,12 +808,13 @@ service cloud.firestore {
       allow read: if sUser();
       allow create, update, delete: if false;
     }
-    // חשבוניות שהתקבלו: שינוי מצב רק דרך secDecide (שלב 7)
+    // חשבוניות שהתקבלו: שינוי מצב רק דרך secDecide (שלב 7). מנהל עם הגבלת סניפים (admins/{uid}.br) – לא קורא ישירות; הוא מקבל רק את הסניפים שלו דרך secInv
+    function sNoBr() { return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('br', null) == null; }
     match /sec_inv/{id} {
-      allow read: if sUser();
+      allow read: if sUser() && sNoBr();
       allow create, update, delete: if false;
       match /p/{k} {
-        allow read: if sUser();
+        allow read: if sUser() && sNoBr();
         allow create, update, delete: if false;
       }
     }
@@ -1419,12 +1420,13 @@ service cloud.firestore {
         allow read: if bsUser();
         allow create, update, delete: if false;
       }
-      // חשבוניות שהתקבלו: שינוי מצב רק דרך secDecide (שלב 7)
+      // חשבוניות שהתקבלו: שינוי מצב רק דרך secDecide (שלב 7). מנהל עם הגבלת סניפים (admins/{uid}.br) – לא קורא ישירות; הוא מקבל רק את הסניפים שלו דרך secInv
+      function bsNoBr() { return get(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid)).data.get('br', null) == null; }
       match /sec_inv/{id} {
-        allow read: if bsUser();
+        allow read: if bsUser() && bsNoBr();
         allow create, update, delete: if false;
         match /p/{k} {
-          allow read: if bsUser();
+          allow read: if bsUser() && bsNoBr();
           allow create, update, delete: if false;
         }
       }

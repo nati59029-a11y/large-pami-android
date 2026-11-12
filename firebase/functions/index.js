@@ -213,3 +213,6 @@ Object.assign(exports, require('./secretary-wa'));
 // המזכירה שלב 6 (2026-11-12): secOAuthCb (חזרה מ-Google, us-central1 בלבד – כתובת קבועה אצל Google), secMailHook (Pub/Sub – התראות Gmail),
 // secCalSync (מתוזמנת – יומן Google וחידוש התראות Gmail), secGoogle, secMail, secMailSend (מנהל העסק), secAdminMail (מנהל־על). secretary-google.js
 Object.assign(exports, require('./secretary-google'));
+// המזכירה שלב 7 (2026-11-12): secInv (רשימה, קובץ, הגדרות, רשימת ספקים), secDecide (תפיסה חד־פעמית, אישור, דחייה, עיכוב, ביטול, אישור שולח).
+// הזיהוי רץ בטריגר הקיים secWaWork (רשומת תור עם inv:true). secretary-inv.js
+Object.assign(exports, require('./secretary-inv'));

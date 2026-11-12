@@ -126,10 +126,15 @@ function htmlText(s) {
 function bodyOf(payload) {
   let plain = '', html = '';
   const files = [];
+  const att = []; // שלב 7: קבצים מצורפים להורדה (קליטת חשבוניות) – מזהה, שם, סוג וגודל מוצהרים
   const walk = (p, depth) => {
     if (!p || depth > 8) return;
     const mt = String(p.mimeType || '').toLowerCase();
-    if (p.filename) { files.push(clean(p.filename, 120)); return; }
+    if (p.filename) {
+      files.push(clean(p.filename, 120));
+      if (p.body && typeof p.body.attachmentId === 'string' && /^[A-Za-z0-9_-]{1,1000}$/.test(p.body.attachmentId) && att.length < 20) att.push({ id: p.body.attachmentId, fn: clean(p.filename, 120), mime: clean(mt, 80), size: Number(p.body.size) || 0 });
+      return;
+    }
     if (mt === 'text/plain' && !plain && p.body && p.body.data) plain = b64uDecode(p.body.data).toString('utf8');
     else if (mt === 'text/html' && !html && p.body && p.body.data) html = b64uDecode(p.body.data).toString('utf8');
     for (const c of Array.isArray(p.parts) ? p.parts.slice(0, 50) : []) walk(c, depth + 1);
@@ -137,19 +142,22 @@ function bodyOf(payload) {
   walk(payload, 0);
   const raw = plain || (html ? htmlText(html) : '');
   const text = clean(raw, TEXT_MAX + 1);
-  return { text: text.slice(0, TEXT_MAX), cut: text.length > TEXT_MAX, files: files.slice(0, 20) };
+  return { text: text.slice(0, TEXT_MAX), cut: text.length > TEXT_MAX, files: files.slice(0, 20), att };
 }
+// שלב 7: מבנה המייל בלי התוכן (מייל גדול) – רק רשימת הקבצים המצורפים
+function attOf(m) { return m && m.payload ? bodyOf(m.payload).att : []; }
 // הודעת Gmail → שדות לכרטיס (בלי מסד נתונים)
 function parseMsg(m) {
   if (!m || typeof m !== 'object' || typeof m.id !== 'string') return null;
   const h = headersOf(m.payload);
   const labels = Array.isArray(m.labelIds) ? m.labelIds.filter((x) => typeof x === 'string').slice(0, 30) : [];
-  const b = m.payload && (m.payload.parts || (m.payload.body && m.payload.body.data)) ? bodyOf(m.payload) : { text: '', cut: false, files: [] };
+  const b = m.payload && (m.payload.parts || (m.payload.body && m.payload.body.data)) ? bodyOf(m.payload) : { text: '', cut: false, files: [], att: [] };
   const t = Number(m.internalDate);
   return {
     gid: m.id.slice(0, 64), thr: typeof m.threadId === 'string' ? m.threadId.slice(0, 64) : '', from: addrOf(h.from), name: nameOf(h.from), replyTo: addrOf(h['reply-to']),
     subj: clean(decodeWords(h.subject || ''), SUBJ_MAX), mid: clean(h['message-id'] || '', 300).replace(/[\r\n\s]/g, ''), t: Number.isFinite(t) && t > 0 ? t : 0,
     labels, unsub: !!h['list-unsubscribe'], size: Number(m.sizeEstimate) || 0, snippet: clean(m.snippet || '', 300), text: b.text, cut: b.cut, files: b.files,
+    att: b.att || [], ctype: clean(h['content-type'] || '', 100).toLowerCase(),
   };
 }
 // כותרת בקידוד =?UTF-8?B?...?= / =?UTF-8?Q?...?=
@@ -303,7 +311,10 @@ function client(u, at) {
     watch: async (topic) => (await call('POST', gm + '/watch', { topicName: topic, labelIds: ['INBOX'], labelFilterBehavior: 'include' })).j || {},
     stop: async () => { await call('POST', gm + '/stop', {}); return true; },
     history: async (start, pageToken) => (await call('GET', gm + '/history?' + form(Object.assign({ startHistoryId: String(start), historyTypes: 'messageAdded', labelId: 'INBOX', maxResults: '100' }, pageToken ? { pageToken } : {})), null, [404])),
-    meta: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=Reply-To&metadataHeaders=List-Unsubscribe')).j || {},
+    meta: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=Reply-To&metadataHeaders=List-Unsubscribe&metadataHeaders=Content-Type')).j || {},
+    // שלב 7: מבנה המייל בלבד (שמות ומזהי הקבצים, בלי תוכן) – למייל גדול שיש בו קבצים מצורפים; והורדת קובץ מצורף אחד
+    struct: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=full&fields=' + enc('id,payload(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size)))))'))).j || {},
+    att: async (id, attId) => (await call('GET', gm + '/messages/' + enc(id) + '/attachments/' + enc(attId))).j || {},
     full: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=full')).j || {},
     list: async (q, pageToken, max) => (await call('GET', gm + '/messages?' + form(Object.assign({ maxResults: String(max || 500), includeSpamTrash: 'true', q: (q ? q + ' ' : '') + '-in:trash' }, pageToken ? { pageToken } : {})))).j || {},
     send: async (raw, threadId) => (await call('POST', gm + '/messages/send', Object.assign({ raw }, threadId ? { threadId } : {}))).j || {},
@@ -319,6 +330,6 @@ function client(u, at) {
 module.exports = {
   SC, FORBIDDEN, scopesFor, grantedOk, STATE_TTL, CONNECT_HOUR, MAX_BOX_DEFAULT, MAX_BOX_LIMIT, HOOK_DATA_MAX, RUN_MAX, DAY_IN_MAX, FULL_MAX, TEXT_MAX, SUBJ_MAX, OUT_DAY, CLEAN_MAX,
   COUNT_PAGES, SCAN_TTL, CAL_PAGES, CAL_PUSH_MAX, BIG_OLD, RANGES, AI_PER_MAIL, STATE_RE,
-  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, bodyOf, decodeWords, kindOf, isInstr, mime, reSubj, rangeQ, costEstimate,
+  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, bodyOf, attOf, decodeWords, kindOf, isInstr, mime, reSubj, rangeQ, costEstimate,
   gToCal, calToG, sameEv, localOf, dayIL, urls, oauthCfg, topicName, TOPIC, exchange, refresh, revoke, client, SEC_GOOGLE_KEY, GOOGLE_CLIENT_SECRET, sv, EMAIL_RE,
 };

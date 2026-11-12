@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const PORT = 9794;
 let state;
 function reset() {
-  state = { requests: [], codes: {}, rts: {}, ats: {}, revoked: [], boxes: {}, cals: {}, sent: [], trashed: [], deleted: [], n: 0, clock: Date.now(), mode: {} };
+  state = { requests: [], codes: {}, rts: {}, ats: {}, revoked: [], boxes: {}, cals: {}, sent: [], trashed: [], deleted: [], n: 0, clock: Date.now(), mode: {}, atts: {}, attGets: [] };
 }
 reset();
 const b64u = (b) => Buffer.from(b).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -39,7 +39,14 @@ function addMail(email, o) {
   const parts = [];
   if (o.text != null) parts.push({ mimeType: 'text/plain', body: { data: b64u(Buffer.from(o.text, 'utf8')) } });
   if (o.html != null) parts.push({ mimeType: 'text/html', body: { data: b64u(Buffer.from(o.html, 'utf8')) } });
-  for (const f of o.files || []) parts.push({ mimeType: 'application/pdf', filename: f, body: { attachmentId: 'a' + id } });
+  // קובץ: שם בלבד (מחרוזת), או – לבדיקות קליטת החשבוניות (שלב 7) – { name, mime, data (Buffer) } עם תוכן שאפשר להוריד
+  (o.files || []).forEach((f, i) => {
+    if (typeof f === 'string') return parts.push({ mimeType: 'application/pdf', filename: f, body: { attachmentId: 'a' + id } });
+    const att = 'a' + id + '_' + i;
+    state.atts[att] = f.data || Buffer.alloc(0);
+    parts.push({ mimeType: f.mime || 'application/pdf', filename: f.name, body: { attachmentId: att, size: f.size != null ? f.size : (f.data || Buffer.alloc(0)).length } });
+  });
+  if ((o.files || []).some((f) => typeof f !== 'string')) headers.push({ name: 'Content-Type', value: 'multipart/mixed; boundary="x"' });
   const labels = o.labels || ['INBOX', 'UNREAD'];
   b.msgs[id] = { id, threadId: 't' + id, labelIds: labels, snippet: String(o.text || '').slice(0, 100), sizeEstimate: o.size || 2000, internalDate: String(o.date || Date.now()), payload: { mimeType: 'multipart/alternative', headers, parts } };
   b.hist++;
@@ -154,6 +161,12 @@ function handle(req, res, raw) {
       x.labelIds = x.labelIds.filter((l) => l !== 'INBOX').concat(['TRASH']);
       state.trashed.push({ email: a.email, id: mm[1] });
       return json(200, { id: x.id, labelIds: x.labelIds });
+    }
+    mm = /^messages\/([A-Za-z0-9_-]+)\/attachments\/([A-Za-z0-9_-]+)$/.exec(rest);
+    if (req.method === 'GET' && mm) { // שלב 7: הורדת קובץ מצורף
+      if (!b.msgs[mm[1]] || !state.atts[mm[2]]) return json(404, { error: { code: 404 } });
+      state.attGets.push(mm[2]);
+      return json(200, { size: state.atts[mm[2]].length, data: b64u(state.atts[mm[2]]) });
     }
     mm = /^messages\/([A-Za-z0-9_-]+)$/.exec(rest);
     if (req.method === 'GET' && mm) {

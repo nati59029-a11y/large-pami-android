@@ -414,7 +414,35 @@ async function saveMail(db, c, ctx, gid, now, o) {
   if (o.hist) doc.bg = true; // רקע: מייל ישן – בלי טיוטה ובלי שליחה אוטומטית (ממילא אין כאלה למייל)
   try { await ref.create(doc); } catch (e) { if (e && e.code === 6) return 'dup'; throw e; }
   if (sus) await db.collection('sec_log').doc().set(glog('', 'sec', 'sus', { tgt: ref.id, note: fromMgr ? 'mgrMail' : '' }));
+  // שלב 7: קבצים מצורפים → תור החשבוניות. לא במייל ישן מסריקת היסטוריה (רקע, בלי עלות זיהוי – הנחה). תקלה כאן לא פוגעת בקליטת המייל
+  if (!o.hist && (p.att.length || (big && /^multipart\/(mixed|related)/.test(p.ctype)))) {
+    try { const r = await invFiles(db, c, gid, p, big, sus, now); if (r.ids.length || r.names.length) await ref.update(Object.assign({ inv: r.ids }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {})); } catch (e) { logger.warn('secretary-google: invoice files failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
+  }
   return sus ? 'sus' : 'saved';
+}
+// קבצים מצורפים של מייל אחד → secretary-inv.ingest. סוג לא מותר (zip, Office, הפעלה…) או גדול מדי – כרטיס בלי הורדה (10.3).
+// תמונה קטנה מאוד (חתימה/לוגו במייל) – מדלגים, כדי שלא תיספר במכסת הסריקה (הנחה: מתחת ל-15KB).
+const INV_ATT_MAX = 5, INV_IMG_MIN = 15000;
+async function invFiles(db, c, gid, p, big, sus, now) {
+  const INV = require('./secretary-inv')._core;
+  const SI = require('./lib/sec-inv');
+  let atts = p.att;
+  if (!atts.length && big) atts = G.attOf(await c.struct(gid));
+  const ids = [], names = atts.map((a) => a.fn).slice(0, 20);
+  for (const [i, a] of atts.slice(0, INV_ATT_MAX).entries()) {
+    const base = { ch: 'mail', from: p.from, name: p.name, inId: gid, idx: i, fn: a.fn, sus, now };
+    const why = SI.badByName(a.fn, a.mime) || (a.size > SI.MAX_FILE ? 'big' : '');
+    if (!why && a.mime.startsWith('image/') && a.size && a.size < INV_IMG_MIN) continue;
+    let r;
+    if (why) r = await INV.ingest(db, Object.assign(base, { why, size: a.size }));
+    else {
+      const j = await c.att(gid, a.id);
+      const buf = Buffer.from(String(j.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+      r = await INV.ingest(db, Object.assign(base, { buf }));
+    }
+    if (r && r.id) ids.push(r.id);
+  }
+  return { ids, names };
 }
 async function mgrMailsOf(db) { const ad = await db.collection('admins').get(); return new Set(ad.docs.map((d) => G.addrOf(d.get('email'))).filter(Boolean)); }
 // קליטה מתיבה (התראה מ-Gmail, או המשך מהריצה המתוזמנת כשנשאר פיגור).
@@ -1095,7 +1123,7 @@ exports.secMailSend = onCall({ secrets: SECRETS }, wrap('secMailSend', secMailSe
 exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdminMail));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
+  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, saveMail, invFiles, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },
 } });
