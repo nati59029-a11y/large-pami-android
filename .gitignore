@@ -20,3 +20,5 @@ firebase/migrate/*.json
 firebase/migrate/**/*.json
 # קישורים (symlink) ל-node_modules שאינם תיקייה רגילה
 node_modules
+# התראות לטלפון: google-services.json נוצר רק בזמן הבנייה (scripts/fcm-config.sh) – לעולם לא במאגר
+google-services.json

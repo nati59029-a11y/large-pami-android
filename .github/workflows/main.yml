@@ -78,6 +78,8 @@ jobs:
       # download its settings (scripts/fcm-config.sh). Without the secret, in a test build, or on any failure: the build goes on
       # WITHOUT push (the app works as before) and the run summary says so.
       - name: Push notifications settings (google-services.json, automatic)
+        timeout-minutes: 6
+        continue-on-error: true
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: bash ../scripts/fcm-config.sh

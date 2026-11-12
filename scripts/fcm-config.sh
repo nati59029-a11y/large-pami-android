@@ -20,11 +20,12 @@ printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$SA"
 trap 'rm -f "$SA"' EXIT
 LOG=$(python3 ../scripts/fcm-config.py "$SA" "$PKG" "$OUT" 2>&1); RC=$?
 echo "$LOG"
-if [ $RC -eq 2 ]; then
+if [ $RC -eq 2 ] || [ $RC -eq 3 ]; then
   rm -f "$OUT"
-  say "### התראות לטלפון: כבויות – לחשבון השירות אין הרשאה ליצור/לקרוא אפליקציות ב-Firebase"
-  echo "$LOG" | grep '^NEEDS:' >> "$SUM"
-  echo "::warning::push OFF: no permission. $(echo "$LOG" | grep '^NEEDS:' | head -1)"
+  [ $RC -eq 2 ] && say "### התראות לטלפון: כבויות – לחשבון השירות אין הרשאה ליצור/לקרוא אפליקציות ב-Firebase" \
+    || say "### התראות לטלפון: כבויות – הגעתם למכסת האפליקציות בפרויקט Firebase ($PKG לא נוצרה)"
+  echo "$LOG" | sed -n 's/^NEEDS: /מה לעשות: /p' >> "$SUM"
+  echo "::warning::push OFF ($PKG): $(echo "$LOG" | sed -n 's/^NEEDS: //p' | head -1)"
   exit 0
 fi
 if [ $RC -ne 0 ] || [ ! -s "$OUT" ]; then rm -f "$OUT"; off "כשל בהורדת ההגדרות מ-Firebase (פרטים ביומן השלב)"; fi

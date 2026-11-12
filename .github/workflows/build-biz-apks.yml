@@ -110,6 +110,8 @@ jobs:
       # התראות לטלפון (12.11.2026): google-services.json לחבילה של העסק (com.largepami.finance.b.<bizId> / com.largepami.business),
       # אוטומטית – כולל עסק חדש. בלי הסוד או בכשל – בונים בלי התראות (לא נכשלים). ראו scripts/fcm-config.sh
       - name: Push notifications settings (google-services.json, automatic)
+        timeout-minutes: 6
+        continue-on-error: true
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: bash ../scripts/fcm-config.sh

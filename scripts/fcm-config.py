@@ -8,7 +8,7 @@
   2. אם אין – יוצר אותה (כמו firebase apps:create ANDROID) ומחכה שתהיה מוכנה.
   3. מוריד את ההגדרות שלה (כמו firebase apps:sdkconfig ANDROID) ל-<out-file>.
 הקובץ לא נכנס למאגר – רק לעותק של הבנייה. לא מדפיס מפתחות.
-יציאה: 0 הצליח; 2 אין הרשאה (ההודעה אומרת בדיוק מה להוסיף); 1 כל כשל אחר.
+יציאה: 0 הצליח; 2 אין הרשאה / 3 מכסת אפליקציות (שורת NEEDS אומרת בעברית מה לעשות); 1 כל כשל אחר.
 """
 import base64
 import importlib.util
@@ -34,6 +34,10 @@ class NoPermission(Exception):
     pass
 
 
+class Quota(Exception):
+    pass
+
+
 def req(method, url, tok, body=None):
     data = json.dumps(body).encode() if body is not None else None
     r = urllib.request.Request(url, data=data, method=method,
@@ -43,6 +47,8 @@ def req(method, url, tok, body=None):
             return json.loads(x.read() or b'{}')
     except urllib.error.HTTPError as e:
         txt = e.read()[:2000].decode('utf-8', 'replace')
+        if e.code == 429 or 'RESOURCE_EXHAUSTED' in txt or re.search(r'(?i)quota|limit.*apps|maximum number', txt):
+            raise Quota('%s %s: %s' % (e.code, method, txt))
         if e.code in (401, 403):
             raise NoPermission('%s %s: %s' % (e.code, method, txt))
         raise RuntimeError('HTTP %s %s %s: %s' % (e.code, method, url.split('?')[0], txt))
@@ -68,6 +74,9 @@ def create_app(project, pkg, tok):
     for _ in range(40):
         if op.get('done'):
             if op.get('error'):
+                er = json.dumps(op['error'])
+                if 'RESOURCE_EXHAUSTED' in er or re.search(r'(?i)quota|maximum number', er):
+                    raise Quota('create: ' + er[:500])
                 raise RuntimeError('create failed: %s' % json.dumps(op['error'])[:500])
             app_id = (op.get('response') or {}).get('appId')
             if app_id:
@@ -120,13 +129,17 @@ def main(argv):
             app_id = create_app(project, pkg, tok)
             made = True
         raw = get_config(app_id, pkg, tok)
+    except Quota as e:
+        print('::warning::push: Firebase app limit (%s)' % str(e)[:300].replace('\n', ' '))
+        print('NEEDS: הגעתם למכסת האפליקציות בפרויקט %s ב-Firebase (בדרך כלל 30). אפשר: למחוק ב-Firebase Console (הגדרות הפרויקט ← האפליקציות שלך) אפליקציות של עסקים שלא בשימוש, או לבקש הגדלת מכסה מ-Firebase (רק בתוכנית Blaze).' % project)
+        return 3
     except NoPermission as e:
         disabled = 'SERVICE_DISABLED' in str(e) or 'has not been used' in str(e)
         print('::warning::push: no permission (%s)' % str(e)[:300].replace('\n', ' '))
         if disabled:
-            print('NEEDS: enable "Firebase Management API" (firebase.googleapis.com) in project %s.' % project)
+            print('NEEDS: להפעיל את "Firebase Management API" (firebase.googleapis.com) בפרויקט %s: Google Cloud Console ← APIs & Services ← Library ← לחפש Firebase Management API ← Enable.' % project)
         else:
-            print('NEEDS: Google Cloud console -> IAM & Admin -> IAM, project %s -> service account %s -> add role "Firebase Admin" (roles/firebase.admin).' % (project, email))
+            print('NEEDS: Google Cloud Console ← IAM & Admin ← IAM, בפרויקט %s ← ליד חשבון השירות %s לוחצים על העיפרון ← Add another role ← לבחור "Firebase Admin" (roles/firebase.admin) ← Save. אחר כך להפעיל שוב את הבנייה.' % (project, email))
         return 2
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, 'wb') as f:

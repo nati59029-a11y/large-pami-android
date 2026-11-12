@@ -19,7 +19,16 @@ public class PushGatePlugin extends Plugin {
     public void state(PluginCall call) {
         boolean ready = false;
         try {
-            int id = getContext().getResources().getIdentifier("google_app_id", "string", getContext().getPackageName());
+            // Business APKs: applicationId differs from the code namespace. Look the resource up in the package that
+            // really holds this app's resources (same way Firebase itself does), not by getPackageName().
+            String pkg;
+            try {
+                pkg = getContext().getResources().getResourcePackageName(R.string.app_name);
+            } catch (Exception e) {
+                pkg = getContext().getPackageName();
+            }
+            int id = getContext().getResources().getIdentifier("google_app_id", "string", pkg);
+            if (id == 0) id = getContext().getResources().getIdentifier("google_app_id", "string", getContext().getPackageName());
             ready = id != 0 && getContext().getString(id).length() > 0;
         } catch (Exception e) {
             ready = false;
