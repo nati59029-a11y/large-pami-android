@@ -278,7 +278,7 @@ FRM.oxPayF=async f=>{const id=f.dataset.id,x=fd(f),P1=PAYC[id]||{},keep=x.mode==
  if(x.mode==='link'&&!keep&&!/^https:\/\/[^\s]+\.[^\s]+/.test(x.link||''))return toast('קישור חייב להתחיל ב-https://');const b=f.querySelector('button');b.disabled=true;
  /* 12.11.2026: cred נשלח רק כשהוקלדה סיסמה; cred:null = מחיקה; בלי שינוי – לא נשלח (הקיים נשאר). הטופס מתרוקן מיד (f.reset) */
  const pw=String(x.cpass||''),cr=x.cdel?null:pw?Object.assign({pass:pw},String(x.cuser||'').trim()?{user:String(x.cuser).trim()}:{}):undefined;x.cpass='';f.querySelectorAll('[name=cuser],[name=cpass]').forEach(e=>{e.value=''});{const d=f.querySelector('[name=cdel]');if(d)d.checked=false}
- try{const P0=PAYC[id]||{},su=x.sup?(P0.sups||[]).find(s=>s.id===x.sup):null;const a={bizId:id,mode:x.mode,link:x.mode==='link'&&!keep?x.link.trim():undefined,sup:x.mode==='link'&&su?{id:su.id,name:su.name}:undefined};if(cr!==undefined)a.cred=cr;
+ try{const P0=PAYC[id]||{},su=x.sup?(P0.sups||[]).find(s=>s.id===x.sup):null;const a={bizId:id,mode:x.mode,link:x.mode==='link'&&!keep?x.link.trim():undefined,sup:x.mode==='link'&&su?{id:su.id,name:su.name}:x.mode==='link'&&keep?null:undefined}; /* סבב 2: "בלי ספק" עם קישור קיים – null (השרת מנקה); undefined = שומר */if(cr!==undefined)a.cred=cr;
   let r;try{r=await fnCall('setBusinessPayLink',a)}catch(e){if(cr!==undefined&&e.reason==='bad-field')throw new Error('שמירת פרטי הכניסה דורשת עדכון שרת. הקישור לא נשמר – נסו שוב בלי פרטי כניסה, או אחרי עדכון השרת');throw e}
   PAYC[id]=Object.assign({},P0,{mode:r.mode,has:r.has,sup:r.sup||null},typeof r.cred==='boolean'?{cred:r.cred}:{});toast('נשמר');rerender()}catch(e){err(e)}finally{b.disabled=false}};
 

@@ -207,6 +207,12 @@ describe('סטטוסים, תשלום, נעילה', () => {
     assert.equal((await get(`b/${A}/private/pay`)).link, L); assert.deepEqual((await get(`b/${A}/ordcfg/main`)).pay, { mode: 'link', has: true, cred: true, sup: SUP });
     assert.equal((await get(`b/${A}/private/payCred`)).host, 'pay.example.com');
     assert.equal((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: '  ', cred: { pass: PASS } })).status, 'OK', 'קישור ריק – הקיים');
+    // סבב 2: קישור קיים + "בלי ספק" (sup:null) – הספק מתנקה, הקישור ופרטי הכניסה נשארים; sup שלא נשלח – הספק נשמר
+    const ns = await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', sup: null });
+    assert.equal(ns.status, 'OK', ns.text); assert.equal(ns.result.sup || null, null); assert.equal(ns.result.cred, true);
+    assert.equal((await get(`b/${A}/private/pay`)).link, L); assert.equal((await get(`b/${A}/ordcfg/main`)).pay.sup || null, null);
+    await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link', link: L, sup: SUP });
+    assert.deepEqual((await call('setBusinessPayLink', SUPER, { bizId: A, mode: 'link' })).result.sup, SUP);
     const id = await mk();
     assert.deepEqual((await call('getPayLink', E1, { id, auto: true })).result.auto, { user: '', pass: PASS });
     // הקישור הוחלף ישירות במסמך ל-host אחר (מצב לא צפוי) – בלי auto, כי ה-host שבתוך המוצפן שונה
