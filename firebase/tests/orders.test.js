@@ -416,6 +416,17 @@ describe('קרטונים סגורים ללקוח סיטונאי (cto)', () => {
     assert.deepEqual([o.items[0].qty, o.items[0].ct], [18, 6]);
     assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 12);
   });
+  it('עריכה: שורה ישנה שאינה קרטון שלם פוטרת רק את עצמה – 3 שורות של 5 נדחות, 2 שורות ישנות של 5 עוברות', async () => {
+    const r = await mk('cR', [{ pid: 'pC', qty: 5, price: 6 }, { pid: 'pC', qty: 5, price: 6 }]);
+    await prep((d) => d.doc(`b/${A}/ord/${r.result.id}`).update({ custId: 'cW' }));
+    const id = r.result.id, L = (n) => Array.from({ length: n }, () => ({ pid: 'pC', qty: 5, price: 6 }));
+    assert.equal((await call('updateOrder', E1, { id, items: L(3) })).reason, 'cto-qty');
+    assert.equal((await get(`b/${A}/ord/${id}`)).items.length, 2);
+    assert.equal((await get(`b/${A}/prod/pC`)).q.br1, 20);
+    assert.equal((await call('updateOrder', E1, { id, items: L(2) })).status, 'OK');
+    assert.equal((await call('updateOrder', E1, { id, items: L(1) })).status, 'OK');
+    assert.equal((await call('updateOrder', E1, { id, items: L(2) })).reason, 'cto-qty'); // אחרי הצמצום – רק שורה ישנה אחת
+  });
 });
 
 describe('לארג\' פעמי במצב legacy (שורש)', () => {

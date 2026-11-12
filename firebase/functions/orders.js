@@ -807,12 +807,15 @@ async function isWs(tx, db, custId) {
 }
 function cartons(items, prods, ws, oldItems) {
   if (!ws) return items;
-  const keep = new Set((oldItems || []).filter((x) => x && x.pid).map((x) => x.pid + '|' + x.qty));
+  const keep = new Map(); // מוצר|כמות → כמה שורות כאלה היו בהזמנה (כל שורה ישנה פוטרת שורה אחת בלבד)
+  for (const x of oldItems || []) if (x && x.pid) keep.set(x.pid + '|' + x.qty, (keep.get(x.pid + '|' + x.qty) || 0) + 1);
   for (const it of items) {
     const ct = it.pid ? ctoOf(prods.get(it.pid)) : 0;
     if (!ct) continue;
+    const k = it.pid + '|' + it.qty;
     if (Number.isInteger(it.qty / ct)) it.ct = ct;
-    else if (!keep.has(it.pid + '|' + it.qty)) throw bad('cto-qty', `"${it.n}": ללקוח סיטונאי נמכר רק בקרטונים שלמים (${ct} מארזים בקרטון)`);
+    else if (keep.get(k) > 0) keep.set(k, keep.get(k) - 1);
+    else throw bad('cto-qty', `"${it.n}": ללקוח סיטונאי נמכר רק בקרטונים שלמים (${ct} מארזים בקרטון)`);
   }
   return items;
 }
