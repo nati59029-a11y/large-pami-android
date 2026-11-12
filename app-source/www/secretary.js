@@ -347,7 +347,7 @@ ACT.secSDel=el=>{const id=el.dataset.id;ask('למחוק את המידע הרגי
 
 /* ---------- יומן (8.2 מסך 4): רשימה (ברירת מחדל) ושבוע; שישי/שבת/חג בגוון עדין; הצעות מהמזכירה – לאישור ---------- */
 async function calLoad(){X.cb=1;try{X.cl=await fnCall('secCal',{op:'list'})}catch(e){X.cl={err:e&&e.message||'לא נטען'}}finally{X.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
-const SRC={mgr:'ידני',sec:'מהמזכירה',import:'ייבוא'};
+const SRC={mgr:'ידני',sec:'מהמזכירה',import:'ייבוא',wa:'מווצאפ'};
 function evH(e){return `<div class="secli"><p><b>${e.tm?'<bdi dir="ltr">'+esc(e.tm)+'</bdi> · ':''}${esc(e.title)}</b> ${e.rem?'<span class="sectags">תזכורת</span>':''}<span class="sectags">${e.biz?'של העסק':'אישי'}</span><span class="sectags">${esc(SRC[e.src]||'ידני')}</span></p>${e.note?`<small class="note">${esc(e.note)}</small>`:''}<div class="secrow"><button class="chip" data-a="secEvEd" data-id="${esc(e.id)}">ערוך</button><button class="chip" data-a="secEvDel" data-id="${esc(e.id)}">מחק</button></div></div>`}
 function calH(){const R=X.cl;if(!R){if(!X.cb)calLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="cal">נסה שוב</button></div>`;
  const td=R.today||todayS(),E=R.events||[],pend=E.filter(e=>e.st==='prop'),ok=E.filter(e=>e.st==='ok'&&e.d>=td),view=X.cv||'list';
@@ -520,7 +520,7 @@ css5.textContent='.secstop{border-color:var(--bad)!important;background:color-mi
 +'.sectags.w{border-color:var(--bad);color:var(--bad)}.sectags.g{border-color:var(--acc);color:var(--acc)}.sectg{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 0;min-width:0}.sectg .sectags{margin:0;white-space:normal}';
 document.head.appendChild(css5);
 const STOPW={flood:'הצפת הודעות',cap:'חריגה בתקרת העלות',errors:'שגיאות חוזרות'};
-const FL={unsure:['המזכירה לא בטוחה','w'],sus:['תוכן חשוד – בלי טיוטה','w'],chk:['לבדוק לפני שליחה','w'],over:['מעל מגבלת ההודעות','w'],saving:['מצב חיסכון – בלי עיבוד','w'],voice:['הודעה קולית','g'],file:['קובץ','g'],ord:['בוט ההזמנות','']};
+const FL={err:['לא עובדה – לענות ידנית','w'],unsure:['המזכירה לא בטוחה','w'],sus:['תוכן חשוד – בלי טיוטה','w'],chk:['לבדוק לפני שליחה','w'],over:['מעל מגבלת ההודעות','w'],saving:['מצב חיסכון – בלי עיבוד','w'],voice:['הודעה קולית','g'],file:['קובץ','g'],ord:['בוט ההזמנות','']};
 const flH=a=>(a||[]).filter(f=>FL[f]).map(f=>`<span class="sectags ${FL[f][1]}">${FL[f][0]}</span>`).join('');
 const winH=ms=>ms>0?`<span class="sectags g">נותרו ${Math.max(1,Math.floor(ms/3600e3))} שעות לחלון</span>`:'<span class="sectags w">עברו 24 שעות</span>';
 const linkL=l=>l?`<span class="sectags">${l.k==='sup'?'ספק':'לקוח'}: ${esc(l.name||'')}</span>`:'';
@@ -537,7 +537,7 @@ ACT.secStop=el=>{const on=el.dataset.on==='1';const run=async()=>{el.disabled=tr
 const WF=[['all','הכול'],['pend','ממתין לתשובה'],['unsure','לא בטוחה'],['chk','לבדוק'],['sus','חשוד']];
 async function waLoad(){X.wab=1;try{const r=await fnCall('secInbox',{op:'list'});X.wa.list=r&&Array.isArray(r.cards)?r:{err:'לא נטען'}}catch(e){X.wa.list={err:e&&e.message||'לא נטען'}}finally{X.wab=0;if(cur().v==='sec'&&!typing())rerender()}}
 function waH(){if(X.wa.cur)return waCardH();const R=X.wa.list;if(!R){if(!X.wab)waLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="wa">נסה שוב</button></div>`;
- const f=X.wa.f||'all',L=(R.cards||[]).filter(c=>f==='all'||(f==='pend'?c.pend>0:(c.flags||[]).includes(f)));
+ const f=X.wa.f||'all',L=(R.cards||[]).filter(c=>f==='all'||(f==='pend'?c.pend>0||(c.flags||[]).includes('err'):(c.flags||[]).includes(f)));
  return `${R.connected?'':'<div class="card" style="margin-bottom:8px"><p class="note" style="margin:0">ווצאפ עוד לא מחובר לעסק. מנהל המערכת מחבר את המספר.</p></div>'}
  <div class="chips" style="margin:0 0 8px">${WF.map(([k,l])=>`<button class="chip${f===k?' on':''}" data-a="secWaF" data-v="${k}" style="min-height:40px" aria-pressed="${f===k}">${l}</button>`).join('')}</div>
  <div class="card secwa" id="secWaList">${L.length?L.map(c=>`<div class="li" data-a="secWaOpen" data-wa="${esc(c.wa)}" role="button" tabindex="0"><div class="m"><b>${esc(c.name||c.show)}</b><div class="sectg">${linkL(c.link)}${c.isNew?'<span class="sectags g">שולח חדש</span>':''}</div><small><bdi dir="ltr">${esc(c.show)}</bdi> · ${esc(tm(c.lastIn))}</small><small>${esc(lastTxt(c.last))}</small><div class="sectg">${c.pend?`<span class="sectags g">${c.pend===1?'טיוטה אחת':c.pend+' טיוטות'}</span>`:''}${flH(c.flags)}${winH(c.winLeft)}</div></div></div>`).join(''):'<p class="note">אין הודעות</p>'}</div>`}

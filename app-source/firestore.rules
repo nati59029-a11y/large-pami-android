@@ -797,8 +797,11 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
     }
+    // הודעה מ"מספר המנהל" (own:'mgr') – רק המנהל ששלח אותה (פ1: היומן והשיחה האישיים של כל מנהל נפרדים)
     match /sec_in/{id} {
-      allow read: if sUser();
+      allow get: if sUser() && (resource.data.get('own', 'sec') != 'mgr' || resource.data.get('mgr', '') == request.auth.uid);
+      // שאילתה – רק כזו שמסננת לפי בעלים שאינו 'mgr' (where own in ['sec','ord']); בלי סינון – נדחית, כדי שהודעה אישית של מנהל לא תצא ברשימה
+      allow list: if sUser() && resource.data.own in ['sec', 'ord'];
       allow create, update, delete: if false;
     }
     match /sec_draft/{id} {
@@ -1405,8 +1408,11 @@ service cloud.firestore {
           allow create, update, delete: if false;
         }
       }
+      // הודעה מ"מספר המנהל" (own:'mgr') – רק המנהל ששלח אותה (פ1)
       match /sec_in/{id} {
-        allow read: if bsUser();
+        allow get: if bsUser() && (resource.data.get('own', 'sec') != 'mgr' || resource.data.get('mgr', '') == request.auth.uid);
+        // שאילתה – רק כזו שמסננת לפי בעלים שאינו 'mgr' (where own in ['sec','ord']); בלי סינון – נדחית, כדי שהודעה אישית של מנהל לא תצא ברשימה
+        allow list: if bsUser() && resource.data.own in ['sec', 'ord'];
         allow create, update, delete: if false;
       }
       match /sec_draft/{id} {

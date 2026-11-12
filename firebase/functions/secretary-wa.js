@@ -11,7 +11,7 @@
 //
 // אוספים (בתוך העסק, T.tdb(); כתיבה רק כאן):
 //   sec_in/{m<hash>}   { wamid, ch:'wa', from, pnid, name, t, rt, type:'text'|'audio'|'other', text, tr?, media?, own:'sec'|'mgr'|'ord',
-//                        st:'new'|'work'|'done'|'sus'|'over'|'saving'|'err'|'ord'|'replied'|'handled', cls?, lang?, flags[], draft?, tf (רק כשהתוכן מלא – 9.5) }
+//                        st:'new'|'work'|'done'|'sus'|'over'|'saving'|'err'|'fail'|'ord'|'replied'|'handled', rq? (ניסיונות חוזרים), ea? (זמן השגיאה), cls?, lang?, flags[], draft?, tf (רק כשהתוכן מלא – 9.5) }
 //   sec_draft/{id}     { in, wa, text, lang, cls, flags[], why[], src:'ai'|'bank', st:'pend'|'sending'|'sent'|'fail'|'done', sid?, wamid?, auto?, kind?, tf }
 //   sec_snd/{wa}       כרטיס שולח (17): { wa, name, first, lastIn, n, lang, link?:{k:'cust'|'sup',id?,name}, own?, ownExp?, rh, rn, rd, rdn, mgr?, openAt?, ackAt? }
 //   sec_cfg/wa         הגדרות ווצאפ של העסק (שרת בלבד): pnid, num, link, mgr{uid:wa}, mgrReq{uid:wa}, hour, ackH{f,t}, tpls[], ack{on,text}, open{on,text},
@@ -144,6 +144,7 @@ async function sendAuto(db, ctx, to, text, kind, o) {
     await b.commit();
     return { sent: true };
   } catch (e) {
+    o.sendFail = true;
     await db.collection('sec_log').doc().set(wlog('', 'auto', 'sendFail', { tgt: to, note: kind + ':' + String((e.details && e.details.reason) || e.code || 'error').slice(0, 30) }));
     await errMark(db, false, now);
     return { fail: true };
@@ -219,8 +220,9 @@ async function ingest(m, route, biz, now) {
     if (m.btn) doc.btn = m.btn;
     if (own === 'mgr') doc.mgr = mgrUid;
     tx.create(inRef, doc);
-    const sd = { wa: m.from, lastIn: now, n: FieldValue.increment(1), rh: h, rn: rn + 1, rd: d, rdn: rdn + 1, lastId: id };
-    if (!snd) Object.assign(sd, { first: now, lang: W.langOf(m.text), mgr: !!mgrUid });
+    // mgr מתעדכן בכל הודעה: מספר מנהל שאושר / בוטל / הוחלף – הכרטיס מוסתר או חוזר לתיבה בהתאם (ליקוי 3)
+    const sd = { wa: m.from, lastIn: now, n: FieldValue.increment(1), rh: h, rn: rn + 1, rd: d, rdn: rdn + 1, lastId: id, mgr: !!mgrUid };
+    if (!snd) Object.assign(sd, { first: now, lang: W.langOf(m.text) });
     if (m.name) sd.name = m.name;
     if (own === 'ord') Object.assign(sd, { own: 'ord', ownExp: now + W.ORD_TTL });
     const overFirst = over && (!snd || snd.overH !== h);
@@ -259,12 +261,15 @@ async function workIn(id, o) {
     return null;
   });
   if (!x) return { skip: 'taken' };
-  const oo = Object.assign({ token: o.token !== undefined ? o.token : sv(WA_ACCESS_TOKEN) }, o, { now });
+  const oo = Object.assign({ token: o.token !== undefined ? o.token : sv(WA_ACCESS_TOKEN) }, o, { now, sendFail: false });
   try {
-    return x.own === 'mgr' ? await doMgr(db, id, x, oo) : await doSec(db, id, x, oo);
+    const r = x.own === 'mgr' ? await doMgr(db, id, x, oo) : await doSec(db, id, x, oo);
+    // עיבוד שהצליח (בלי שליחה שנכשלה בו) מאפס את מונה "שגיאות ברצף" – רק שגיאות רצופות עוצרות (33; ליקוי 5)
+    if (!r.saving && !oo.sendFail) await errMark(db, true, now).catch(() => {});
+    return r;
   } catch (e) {
     const reason = String((e && e.details && e.details.reason) || (e && (e.code || e.name)) || 'error').slice(0, 40);
-    await ref.update({ st: 'err', err: reason }).catch(() => {});
+    await ref.update({ st: 'err', err: reason, ea: now }).catch(() => {});
     await db.collection('sec_log').doc().set(wlog('', 'sec', 'waErr', { tgt: id, note: reason })).catch(() => {});
     logger.error('secretary-wa: work failed', { reason });
     await errMark(db, false, now).catch(() => {});
@@ -319,7 +324,7 @@ async function doMgr(db, id, x, o) {
     tr = r.text; text = tr;
   }
   const intent = x.type === 'other' ? 'act' : W.mgrIntent(text);
-  const tools = [], created = [], logs = [];
+  const tools = [], created = [], logs = [], reads = [], errs = [];
   let reply = '';
   if (intent === 'fin' || intent === 'act') {
     reply = W.MGR_FIXED[intent]; // אין פנייה למודל ואין שום כלי (5.5)
@@ -329,19 +334,19 @@ async function doMgr(db, id, x, o) {
     for (let round = 0; round < 3; round++) {
       const r = await withCost(db, o, () => (o.ai || AI.chat)({ tier: 'fast', system, turns, tools: MGR_DECL, timeoutMs: 30000 }));
       if (r.saving) { reply = W.MGR_FIXED.off; break; }
-      if (!r.calls || !r.calls.length) { reply = String(r.text || '').trim(); break; }
+      if (!r.calls || !r.calls.length) break; // הטקסט החופשי של המודל לא נשלח למנהל לעולם – התשובה נבנית בקוד מתוצאות הכלים (ליקוי 1)
       const calls = r.calls.slice(0, 3), results = [];
       for (const c of calls) {
         if (!MGR_TOOLS.includes(c.name)) { logs.push(wlog(uid, 'sec', 'toolDenied', { tgt: id, note: String(c.name).slice(0, 40) })); results.push({ name: c.name, data: { error: 'הכלי לא קיים בערוץ הזה' } }); continue; }
         tools.push(c.name);
         logs.push(wlog(uid, 'sec', 'tool', { tgt: id, note: c.name }));
-        results.push({ name: c.name, data: c.name === 'getCalendar' ? await calRead(db, uid, c.args || {}, today) : await calCreate(db, uid, id, c.args || {}, today, now, created, logs) });
+        const data = c.name === 'getCalendar' ? await calRead(db, uid, c.args || {}, today) : await calCreate(db, uid, id, c.args || {}, today, now, created, logs);
+        if (c.name === 'getCalendar') reads.push(data); else if (data.error) errs.push(data.error);
+        results.push({ name: c.name, data });
       }
       turns.push({ role: 'call', calls }, { role: 'res', results });
     }
-    // אישור היצירה נבנה בשרת מהנתונים שנשמרו בפועל (ולא מהטקסט של המודל)
-    if (created.length) reply = created.map((e) => 'נקבע: ' + e.title + ' – ' + fmtD(e.d) + (e.tm ? ' ' + e.tm : '') + (e.off ? ' (' + e.off + ' – ההתראה תצא ביום העסקים הבא)' : '')).join('\n');
-    if (!reply) reply = 'לא הבנתי. אפשר לבקש תזכורת ("תזכירי לי מחר ב-10…") או לשאול מה יש ביומן.';
+    if (created.length || reply !== W.MGR_FIXED.off) reply = mgrReply(created, reads, errs); // רק מהנתונים שנשמרו/נקראו בפועל (ולא מהטקסט של המודל)
   }
   reply = reply.slice(0, W.DRAFT_MAX);
   const b = db.batch();
@@ -353,6 +358,18 @@ async function doMgr(db, id, x, o) {
   await b.commit();
   const s = await sendAuto(db, ctx, x.from, reply, 'mgr', o);
   return { intent, tools, created: created.map((e) => e.id), reply, sent: !!s.sent, stopped: !!s.stopped };
+}
+// התשובה למנהל בווצאפ – נבנית רק בקוד: אישור יצירה, רשימת היומן שנקראה, או שגיאה קבועה. בלי טקסט של המודל (112, ליקוי 1)
+function mgrReply(created, reads, errs) {
+  if (created.length) return created.map((e) => 'נקבע: ' + e.title + ' – ' + fmtD(e.d) + (e.tm ? ' ' + e.tm : '') + (e.off ? ' (' + e.off + ' – ההתראה תצא ביום העסקים הבא)' : '')).join('\n');
+  if (errs.length) return 'לא נקבע: ' + errs[0];
+  if (reads.length) {
+    const r = reads[reads.length - 1], ev = r.events.slice(0, 15);
+    const head = 'ביומן ' + (r.from === r.to ? 'ב-' + fmtD(r.from) : 'מ-' + fmtD(r.from) + ' עד ' + fmtD(r.to));
+    if (!ev.length) return head + ': אין אירועים ותזכורות.';
+    return head + ':\n' + ev.map((e) => '• ' + fmtD(e.d) + (e.tm ? ' ' + e.tm : '') + ' – ' + e.title + ' (' + e.kind + (e.of === 'של העסק' ? ', של העסק' : '') + ')').join('\n') + (r.events.length > ev.length ? '\nועוד ' + (r.events.length - ev.length) + ' – באפליקציה.' : '');
+  }
+  return 'לא הבנתי. אפשר לבקש תזכורת ("תזכירי לי מחר ב-10…") או לשאול מה יש ביומן.';
 }
 async function calRead(db, uid, a, today) {
   const from = typeof a.from === 'string' && K.validDay(a.from) ? a.from : today;
@@ -593,7 +610,7 @@ async function secInbox(request) {
     const [s, ins, ds, cs] = await Promise.all([db.doc('sec_snd/' + wa).get(), db.collection('sec_in').where('from', '==', wa).limit(200).get(), db.collection('sec_draft').where('wa', '==', wa).limit(200).get(), db.doc('sec_cfg/wa').get()]);
     if (!s.exists || s.get('mgr') === true) throw pre('not-found', 'השולח לא נמצא');
     const cfg = waCfgOf(cs);
-    const msgs = ins.docs.map((d) => inOut(d.id, d.data())).sort((a, b) => a.t - b.t).slice(-60);
+    const msgs = ins.docs.filter((d) => d.get('own') !== 'mgr').map((d) => inOut(d.id, d.data())).sort((a, b) => a.t - b.t).slice(-60); // הודעות אישיות של מנהל – לא בתיבה (פ1)
     const drafts = ds.docs.map((d) => draftOut(d.id, d.data(), now)).sort((a, b) => a.t - b.t).slice(-60);
     return { ok: true, card: sndOut(s.data(), now), msgs, drafts, tpls: cfg.tpls.map((x) => ({ name: x.name, label: x.label || x.name })), stop: cfg.stop };
   }
@@ -831,6 +848,39 @@ async function shrinkOld(db, cutoff) {
   return n;
 }
 
+// הודעה שלא עובדה (ליקוי 4): הטריגר רץ בלי ניסיון חוזר, ומסמך התור נמחק תמיד. לכן secRemind (כל 15 דקות) מחזיר לתור
+// הודעות שנשארו ב-new / work / err יותר מ-10 דקות, עד 3 ניסיונות. אחרי 3 – "הודעה לא עובדה": סימון בתיבה (err) והתראה למנהלים.
+// 'saving' (מצב חיסכון) לא מוחזר – זו עצירה מכוונת של העלות.
+const REQ_MAX = 3, REQ_AGE = 10 * 60000;
+async function requeue(db, bizId, now) {
+  const s = await db.collection('sec_in').where('st', 'in', ['new', 'work', 'err']).limit(100).get();
+  const out = { requeued: 0, failed: 0 };
+  for (const d of s.docs) {
+    const r = await db.runTransaction(async (tx) => {
+      const c = await tx.get(d.ref);
+      if (!c.exists) return '';
+      const x = c.data();
+      const at = Number(x.st === 'work' ? x.wk : x.st === 'err' ? x.ea || x.rt : x.rt) || 0;
+      if (!['new', 'work', 'err'].includes(x.st) || now - at <= REQ_AGE) return '';
+      const n = Number(x.rq) || 0;
+      if (n >= REQ_MAX) { tx.update(d.ref, { st: 'fail', flags: [...new Set((x.flags || []).concat(['err']))] }); return 'fail'; }
+      tx.update(d.ref, { st: 'new', rq: n + 1 });
+      return 'q' + (n + 1);
+    });
+    if (!r) continue;
+    if (r === 'fail') {
+      out.failed++;
+      await db.collection('sec_log').doc().set(wlog('', 'auto', 'waFail', { tgt: d.id })).catch(() => {});
+      await notifyMgrs(db, 'fail|' + d.id, 'הודעת ווצאפ לא עובדה', 'הודעה מ-' + W.waShow(d.get('from') || '') + ' לא עובדה אחרי ' + REQ_MAX + ' ניסיונות. היא בתיבת ההודעות עם הסימון "לא עובדה" – כדאי לענות ידנית.', now).catch(() => {});
+      continue;
+    }
+    await getFirestore().doc('sec_waq/' + bizId + '__' + d.id + '__' + r).create({ biz: bizId, id: d.id, t: now }).catch(() => {});
+    out.requeued++;
+  }
+  if (out.requeued) await db.collection('sec_log').doc().set(wlog('', 'auto', 'waRequeue', { note: String(out.requeued) })).catch(() => {});
+  return out;
+}
+
 exports.secWaHook = onRequest({ region: LEGACY_REGION, secrets: [WA_APP_SECRET, WA_VERIFY_TOKEN], timeoutSeconds: 30, memory: '256MiB', maxInstances: 5 }, async (req, res) => {
   try { await handleHook(req, res); } catch (e) {
     logger.error('secretary-wa: hook failed', { reason: 'internal', name: e && e.name, code: e && e.code });
@@ -848,4 +898,4 @@ exports.secSend = onCall({ secrets: [WA_ACCESS_TOKEN] }, wrap('secSend', (r) => 
 exports.secWaCfg = onCall(wrap('secWaCfg', secWaCfg));
 exports.secAdminWa = onCall(wrap('secAdminWa', secAdminWa));
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handleHook, ingest, work, workIn, secSend, shrinkOld, waCfgOf, syncRoute, autoStop, MGR_TOOLS, IN_SYS } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handleHook, ingest, work, workIn, secSend, shrinkOld, requeue, REQ_MAX, waCfgOf, syncRoute, autoStop, MGR_TOOLS, IN_SYS } });

@@ -121,6 +121,9 @@ async function remindBiz(opts) {
   const closGet = () => closP || (closP = db.collection('closings').orderBy('t', 'desc').limit(300).get().then((s) => s.docs.map((d) => Object.assign({ id: d.id }, d.data()))));
   const logs = [];
 
+  // 0. שלב 5: הודעות ווצאפ שלא עובדו (טריגר שנכשל / נקטע) – חוזרות לתור, ואחרי 3 ניסיונות – סימון והתראה. תקלה כאן לא עוצרת את התזכורות
+  try { const q = await require('./secretary-wa')._core.requeue(db, scope.bizId, now); if (q.requeued || q.failed) Object.assign(out, { waq: q.requeued, waFail: q.failed }); } catch (e) { logger.warn('secretary: wa requeue failed', { bizId: scope.bizId, code: e && e.code }); }
+
   // 1. יומן (sec_cal): תזכורות שהמנהל קבע ואירועים – בכל ריצה. גם אירוע מ-3 הימים האחרונים שנדחה ליום העסקים הבא
   if (mgrs.some((m) => m.nt.rt.cal)) {
     const days = [today, K.addDays(today, -1), K.addDays(today, -2), K.addDays(today, -3)];

@@ -136,16 +136,20 @@ function langOf(text) {
 const LANGS = Object.freeze({ he: 'עברית', ar: 'ערבית', ru: 'רוסית', en: 'אנגלית' });
 
 // ---------- "מספר המנהל" (112, פ1, 86): מה מותר ----------
-// יומן ותזכורות בלבד. שאלת כספים/שכר → תשובה קבועה; בקשת פעולה אחרת → תשובה קבועה. בשני המקרים – אף כלי לא מופעל ואין פנייה למודל.
-const CAL_RE = /^\s*(תזכיר[יו]?|תזכורת|הזכיר[יו]|תקבע[יו]?|קבע[יו]?|תרשמ[יו]?\s*ביומן|רשמ[יו]?\s*ביומן|מה\s*יש\s*(לי\s*)?(ב?יומן|היום|מחר|השבוע)|מתי\s*(יש\s*לי|ה?פגישה)|יומן|פגישה)/;
-const FIN_RE = /(כסף|כספ|הכנס|הוצא|רווח|הפסד|שכר|משכור|תלוש|יתר[הת]|חוב|תזרים|מחזור|קופה|בנק|מע"?מ|חשבוני|מכירות|עלויות|תקציב|הלווא|מס\s|מיסים|₪|שקל)/;
-const ACT_RE = /(שלח|תשלח|תשלחי|תעני|לענות|תעננ|תכניס|להכניס|תשלמ|לשלם|תמחק|למחוק|תעביר|להעביר|תזמינ|להזמין|ספק|עובד|לקוח|תתקשר|תודיע|תפרסמ|תאשר|לאשר|תבטל|לבטל|תשנ|לשנות)/;
+// יומן ותזכורות בלבד. רשימה סגורה: רק הודעה שמתחילה במפורש בבקשת יומן/תזכורת היא 'cal'. כל השאר (גם שפה אחרת, "תכיני דוח",
+// "אשר את ההזמנה") – תשובה קבועה, בלי שום כלי ובלי פנייה למודל (ליקוי 1, סבב 1 של שלב 5).
+// יצירה ("תזכירי לי לשלם לספק") – 'cal' גם עם מילת כספים, אלא אם זו שאלה ("כמה", "מה ה…"). קריאה ("מה יש לי היום…") עם מילת כספים – 'fin'.
+const CAL_NEW_RE = /^\s*(תזכיר[יו]?|תזכורת|הזכיר[יו]|תקבע[יו]?|קבע[יו]?|תרשמ[יו]?\s*ביומן|רשמ[יו]?\s*ביומן)(?![֐-׿])/;
+const CAL_READ_RE = /^\s*(מה\s*יש\s*(לי\s*)?(ב?יומן|היום|מחר|השבוע)|מתי\s*(יש\s*לי|ה?פגישה)|יומן|פגישה)(?![֐-׿])/;
+const FIN_RE = /(כסף|כספ|הכנס|הוצא|רווח|הפסד|שכר|משכור|תלוש|יתר[הת]|חוב|תזרים|מחזור|קופה|בנק|מע"?מ|חשבוני|מכירות|עלויות|תקציב|הלווא|מס\s|מיסים|₪|שקל|revenue|income|salar|payroll|profit|bank|balance|money|cash)/i;
+const FIN_Q_RE = /(כמה|מה\s*(ה|זה|היה|היו|יש|המצב)|מהו|מהי|האם|how\s*much|what|\?)/i;
+const ACT_RE = /(שלח|תשלח|תשלחי|תעני|לענות|תעננ|תכניס|להכניס|תשלמ|לשלם|תמחק|למחוק|תעביר|להעביר|תזמינ|להזמין|ספק|עובד|לקוח|תתקשר|תודיע|תפרסמ|תאשר|לאשר|אשר|תבטל|לבטל|תשנ|לשנות|דוח|משימ|הזמנ)/;
 function mgrIntent(text) {
   const s = String(text || '');
-  if (CAL_RE.test(s)) return 'cal';
-  if (FIN_RE.test(s)) return 'fin';
-  if (ACT_RE.test(s)) return 'act';
-  return 'cal';
+  const fin = FIN_RE.test(s);
+  if (CAL_NEW_RE.test(s)) return fin && FIN_Q_RE.test(s) ? 'fin' : 'cal';
+  if (CAL_READ_RE.test(s)) return fin ? 'fin' : ACT_RE.test(s.replace(CAL_READ_RE, '')) ? 'act' : 'cal';
+  return fin ? 'fin' : 'act';
 }
 const MGR_FIXED = Object.freeze({
   fin: 'נתוני כספים – רק באפליקציה. בווצאפ אפשר לשאול על היומן והתזכורות, ולבקש תזכורת או אירוע ביומן.',
@@ -240,6 +244,6 @@ async function media(token, mediaId, max) {
 
 module.exports = {
   BODY_MAX, MSGS_MAX, TEXT_MAX, AUDIO_MAX, DRAFT_MAX, HOUR_DEFAULT, DAY_MULT, FLOOD_HOUR, WIN_MS, MGR_DAY, OUT_DAY, ORD_TTL, ORD_BTN, NEVER_AUTO, CLS, LANGS, MGR_FIXED, TIME_RE,
-  waNum, waShow, localOf, sigOk, sameSecret, msgId, parseHook, routeOf, susOf, langOf, mgrIntent, draftCheck, numsOf, inWindow, winLeft, outsideHours, hmOf,
+  waNum, waShow, localOf, sigOk, sameSecret, msgId, parseHook, routeOf, susOf, langOf, mgrIntent, FIN_RE, draftCheck, numsOf, inWindow, winLeft, outsideHours, hmOf,
   send, media, mediaUrlOk, baseOf,
 };
