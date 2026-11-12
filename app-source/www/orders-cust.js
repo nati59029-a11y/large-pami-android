@@ -195,7 +195,7 @@ ACT.ocMergeK=async el=>{const D=O.draft,m=D&&D.p2m;if(!m||![m.a,m.b].includes(el
   const r=await sv(el);if(r&&r.id&&CS.d===D)CS={};
   if(cards.length&&D){const cid=D.custId;cdReset(null);if(r&&r.id){if(!cid)setTimeout(()=>toast('ההזמנה נשמרה, אבל הכרטיס לא נשמר: אין לקוח מקושר'),3000);
    else{const ok=[],bad=[];for(const card of cards){try{const x=await fnCall('setCard',{custId:cid,card,ordId:r.id,add:true});ok.push('****'+(x&&x.last4||''))}catch(e){bad.push(e.message||'')}}
-    setTimeout(()=>toast(bad.length?'ההזמנה נשמרה, אבל '+(ok.length?'חלק מהכרטיסים':'הכרטיס')+' לא נשמר: '+bad[0]:(ok.length>1?'הכרטיסים ':'הכרטיס ')+ok.join(', ')+' נשמר מוצפן ללקוח'),3000);C.at=0;loadL(true)}}}
+    setTimeout(()=>toast(bad.length?'ההזמנה נשמרה, אבל '+(ok.length?'חלק מהכרטיסים':'הכרטיס')+' לא נשמר: '+bad[0]:(ok.length>1?'הכרטיסים ':'הכרטיס ')+ok.join(', ')+(ok.length>1?' נשמרו מוצפנים':' נשמר מוצפן')+' ללקוח'),3000);C.at=0;loadL(true)}}}
   cards=[];return r}}
 
 /* כרטיסים שיישלחו ל-setCard עם ההזמנה: קודם המשבצת שבטופס (CD; בניוד – כרטיס לתשלום על הקו, ועוד cdMore), ואחריו בניוד כרטיס המסך המלא (CS – לתשלום ההזמנה).
