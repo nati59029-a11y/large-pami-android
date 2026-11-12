@@ -482,17 +482,17 @@ describe('סריקת היסטוריה (מנהל־על) וניקוי ספאם (מ
     assert.ok((await coll(`b/${A}/sec_note/${M1}/n`)).some((n) => /ניקוי/.test(n.title)), 'מנהל העסק קיבל "ממתין לאישור"');
   });
 
-  it('עקיפה: מנהל־על לבד מאשר – נדחה; מנהל־על שהוא גם מנהל העסק ומי שהכין את הרשימה – נדחה; עובד ומנהל של עסק אחר – נדחים', async () => {
+  it('עקיפה: מנהל־על לבד מאשר – נדחה; עובד ומנהל של עסק אחר – נדחים; מנהל־על שהוא גם מנהל העסק ושהכין את הרשימה – רשאי (הנחה א\', תיקון סבב 1)', async () => {
     const { r } = await run('all');
     const id = r.r.list.id;
     assert.equal((await call('secMail', SUPER, { bizId: A, op: 'cleanOk', id })).reason, 'not-biz-admin');
     assert.equal((await call('secMail', E1, { op: 'cleanOk', id })).reason, 'not-manager');
     assert.equal((await call('secMail', MB, { op: 'cleanOk', id })).reason, 'not-found');
     assert.ok(['foreign-biz'].includes((await call('secMail', MB, { bizId: A, op: 'cleanOk', id })).reason));
-    // מנהל־על שהוא גם מנהל העסק, שהכין את הרשימה בעצמו
+    // מנהל־על שהוא גם מנהל העסק, שהכין את הרשימה בעצמו – עובר את בדיקת ההרשאה (הנחה א'); כאן נעצר רק כי לתיבה אין עדיין הרשאת ניקוי
     const c2 = await call('secAdminMail', SUPER2, { bizId: A, op: 'count', range: 'all' });
     const r2 = await call('secAdminMail', SUPER2, { bizId: A, op: 'run', range: 'all', confirm: c2.r.count.n });
-    assert.equal((await call('secMail', SUPER2, { bizId: A, op: 'cleanOk', id: r2.r.list.id })).reason, 'same-person');
+    assert.equal((await call('secMail', SUPER2, { bizId: A, op: 'cleanOk', id: r2.r.list.id })).reason, 'need-clean-scope');
     assert.equal(GO.state.trashed.length, 0);
     assert.equal((await get(`b/${A}/sec_clean/${id}`)).st, 'pend');
   });
@@ -745,5 +745,78 @@ describe('תיקון 2+3: תיבת המייל ותיבת הווצאפ – מיו
     assert.ok(has('sec_in', [{ fieldPath: 'ch', order: 'ASCENDING' }, { fieldPath: 'rt', order: 'DESCENDING' }]));
     assert.ok(has('sec_draft', [{ fieldPath: 'st', order: 'ASCENDING' }, { fieldPath: 'wa', order: 'ASCENDING' }]));
     assert.equal(JSON.parse(fs.readFileSync(path.join(H.ROOT, 'firebase.json'), 'utf8')).firestore.indexes, 'firestore.indexes.json');
+  });
+});
+
+describe('תיקון 4 + הנחה ב\' + הנחה א\': יומן אחרי חיבור מחדש, ניתוק חשבון משותף, אישור ניקוי בפיילוט', () => {
+  const MAIL1 = 'ruti@gmail.example';
+  const nextDow = (dow) => { for (let i = 2; i < 12; i++) { const d = dayIL(Date.now() + i * 864e5); if (new Date(d + 'T12:00:00Z').getUTCDay() === dow) return d; } return ''; };
+  beforeEach(() => seed());
+
+  it('4: ניתוק וחיבור מחדש של היומן – האירועים של האפליקציה (אישי ושל העסק) מקבלים מיפוי ולא נשלחים שוב; אותו מספר אירועים ב-Google', async () => {
+    assert.equal((await connect(M1, 'cal', { email: MAIL1 })).res.code, 200);
+    const d = nextDow(3);
+    await put(`b/${A}/sec_cal/app1`, { uid: M1, st: 'ok', src: 'mgr', by: M1, t: Date.now() - 5000, title: 'להתקשר לספק', d });
+    await put(`b/${A}/sec_cal/biz1`, { uid: '', st: 'ok', src: 'mgr', by: M2, t: Date.now() - 5000, title: 'ספירת מלאי', d });
+    await call('secGoogle', M1, { op: 'calSync' });
+    const live = () => Object.values(GO.cal(MAIL1).ev).filter((e) => e.status !== 'cancelled');
+    assert.equal(live().length, 2);
+    assert.ok((await call('secGoogle', M1, { op: 'disconnect', kind: 'cal' })).ok);
+    assert.equal((await coll(`b/${A}/sec_gcal`)).length, 0, 'הניתוק מחק את המיפויים');
+    assert.equal((await connect(M1, 'cal', { email: MAIL1 })).res.code, 200);
+    const ins0 = GO.state.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/events')).length;
+    const r = await call('secGoogle', M1, { op: 'calSync' });
+    assert.ok(r.ok, r.msg);
+    assert.equal(r.r.add, 0, 'שום אירוע לא נוסף לאפליקציה');
+    assert.equal(GO.state.requests.filter((x) => x.method === 'POST' && x.path.endsWith('/events')).length, ins0, 'שום אירוע לא נשלח שוב ל-Google');
+    assert.equal(live().length, 2, 'אותו מספר אירועים ב-Google');
+    const maps = await coll(`b/${A}/sec_gcal`);
+    assert.deepEqual(maps.map((m) => m.cal).sort(), ['app1', 'biz1'], 'שני האירועים קיבלו מיפוי');
+    assert.equal((await coll(`b/${A}/sec_cal`)).length, 2);
+    // סנכרון נוסף – עדיין בלי כפילות, ועריכה באפליקציה מגיעה לאותו אירוע ב-Google
+    const b1 = await get(`b/${A}/sec_cal/biz1`);
+    await put(`b/${A}/sec_cal/biz1`, Object.assign(b1, { title: 'ספירת מלאי – עודכן', upd: Date.now() + 1000 }));
+    await call('secGoogle', M1, { op: 'calSync' });
+    assert.equal(live().length, 2);
+    assert.ok(live().some((e) => e.summary === 'ספירת מלאי – עודכן'));
+  });
+
+  it('ב\': אותו חשבון Google לתיבה וליומן – ניתוק היומן לא מבטל את האסימון אצל Google (התיבה ממשיכה לקלוט); ניתוק התיבה אחר כך – כן מבטל', async () => {
+    const SAME = 'owner@a-biz.example';
+    assert.equal((await connect(M1, 'mail', { email: SAME })).res.code, 200);
+    assert.equal((await connect(M1, 'cal', { email: SAME })).res.code, 200);
+    const n0 = GO.state.revoked.length;
+    const dc = await call('secGoogle', M1, { op: 'disconnect', kind: 'cal' });
+    assert.ok(dc.ok, dc.msg);
+    assert.equal(dc.r.revoked, false); assert.equal(dc.r.shared, true);
+    assert.equal(GO.state.revoked.length, n0, 'אין revoke אצל Google');
+    assert.equal(await get(`b/${A}/private/sec_gc_${M1}`), null, 'האסימון נמחק אצלנו');
+    assert.ok((await logs(A)).some((l) => l.act === 'gcalOff' && l.note === 'shared'));
+    GO.addMail(SAME, { subject: 'אחרי ניתוק היומן', text: 'x' });
+    assert.equal((await CORE.mailHook(GO.note(SAME))).saved, 1, 'התיבה עדיין עובדת');
+    // ועכשיו להפך: יומן מחובר שוב, ניתוק התיבה – לא מבטל; ואז ניתוק היומן – מבטל (אין שימוש נוסף)
+    assert.equal((await connect(M1, 'cal', { email: SAME })).res.code, 200);
+    const db1 = await call('secGoogle', M1, { op: 'disconnect', box: G.boxIdOf(SAME) });
+    assert.equal(db1.r.revoked, false); assert.equal(db1.r.shared, true);
+    assert.equal(GO.state.revoked.length, n0);
+    assert.equal((await call('secGoogle', M1, { op: 'calSync' })).ok, true, 'היומן עדיין עובד');
+    const dc2 = await call('secGoogle', M1, { op: 'disconnect', kind: 'cal' });
+    assert.equal(dc2.r.revoked, true, 'אין יותר שימוש בחשבון – מבטלים אצל Google');
+    assert.equal(GO.state.revoked.length, n0 + 1);
+  });
+
+  it('א\': בפיילוט עם מנהל אחד שהוא גם מנהל־על – מכין את רשימת הניקוי ומאשר אותה בעצמו; מנהל־על שאינו מנהל העסק – עדיין נדחה', async () => {
+    assert.equal((await connect(SUPER2, 'mail', { email: BOX_A, clean: true })).res.code, 200);
+    GO.addMail(BOX_A, { from: 's@s.example', subject: 'spam', labels: ['SPAM'] });
+    const c = await call('secAdminMail', SUPER2, { bizId: A, op: 'count', range: 'all' });
+    const r = await call('secAdminMail', SUPER2, { bizId: A, op: 'run', range: 'all', confirm: c.r.count.n });
+    assert.ok(r.ok, r.msg);
+    const id = r.r.list.id;
+    assert.equal((await call('secMail', SUPER, { bizId: A, op: 'cleanOk', id })).reason, 'not-biz-admin');
+    const ok = await call('secMail', SUPER2, { bizId: A, op: 'cleanOk', id });
+    assert.ok(ok.ok, ok.msg);
+    assert.equal(ok.r.trashed, 1);
+    assert.equal(GO.state.deleted.length, 0);
+    assert.equal((await logs(A)).find((l) => l.act === 'mailTrash').by, SUPER2);
   });
 });

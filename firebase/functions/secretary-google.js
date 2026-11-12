@@ -9,7 +9,7 @@
 //          בלי מודל AI (חיסכון, 3.3). תוכן מייל הוא מידע ולא הוראה (10.1); מייל עם ניסיון לתת הוראות – "חשוד", וכך גם מייל מכתובת של מנהל עם "הוראה" (29).
 //   טיוטה: רק כשהמנהל מבקש (secMail {op:'draft'}) – למודל יש כלי אחד (prepareReplyDraft). שליחה: רק secMailSend, בלחיצה של מנהל מחובר (27). אין שליחה אוטומטית של מייל.
 //   סריקת היסטוריה (28): secAdminMail (מנהל־על) – ספירה והערכת עלות, ואז הכנת רשימת ניקוי (ספאם / פרסומות / גדולים וישנים) ב-sec_clean.
-//   ניקוי: secMail {op:'cleanOk'} – רק מנהל של העסק (לא מנהל־על לבד, ולא מי שהכין את הרשימה) – העברה לאשפה של Gmail בלבד (פ3), עם רישום ב-sec_log.
+//   ניקוי: secMail {op:'cleanOk'} – רק מנהל של העסק (לא מנהל־על לבד; מנהל העסק – גם אם הכין את הרשימה) – העברה לאשפה של Gmail בלבד (פ3), עם רישום ב-sec_log.
 //   יומן: secCalSync (כל 15 דקות + "סנכרן עכשיו") – דו־כיווני ליומן האישי של כל מנהל שחיבר (70, 71); אירועי העסק – מהאפליקציה ל-Google בלבד.
 //
 // אוספים (בתוך העסק, T.tdb(); כתיבה רק כאן):
@@ -142,15 +142,28 @@ async function secGoogle(request) {
   return Object.assign({ ok: true }, await syncOne(db, who.uid, {}));
 }
 
-// ניתוק תיבה: ביטול ההרשאה אצל Google, מחיקת האסימון, הניתוב וההגדרה. המיילים שכבר נקלטו נשארים (95)
+// האם אותו חשבון Google משמש עוד חיבור (תיבה – בכל עסק, לפי טבלת הניתוב; יומן – בעסק הזה). skip – החיבור שמנתקים עכשיו.
+// הנחה ב': ביטול אסימון אצל Google (revoke) אולי מבטל את כל ההרשאות של החשבון לאפליקציה (לא מאומת) – לכן מבטלים רק כשאין שימוש נוסף, ואחרת רק מוחקים אצלנו
+async function acctInUse(db, bizId, addr, skip) {
+  if (!addr) return false;
+  const [rs, gs] = await Promise.all([getFirestore().doc('sec_mailroute/' + addr).get(), db.doc('sec_cfg/gcal').get()]);
+  if (rs.exists && !(skip.box && rs.get('biz') === bizId && rs.get('box') === skip.box)) return true;
+  return Object.entries(gcalOf(gs).u).some(([uid, v]) => v.addr === addr && uid !== skip.cal);
+}
+async function revokeUnused(db, bizId, addr, skip, token) {
+  if (await acctInUse(db, bizId, addr, skip).catch(() => true)) return 'shared';
+  return (await G.revoke(G.urls(), token)) ? 'revoked' : 'local';
+}
+// ניתוק תיבה: ביטול ההרשאה אצל Google (רק אם החשבון לא משמש חיבור נוסף), מחיקת האסימון, הניתוב וההגדרה. המיילים שכבר נקלטו נשארים (95)
 async function disconnectBox(db, bizId, box, by, who) {
   const m = mailCfgOf(await db.doc('sec_cfg/mail').get());
   const bx = m.boxes[box];
   if (!bx) throw pre('not-found', 'התיבה לא נמצאה');
-  let revoked = false;
+  let revoked = false, how = 'local';
   const tok = await loadTok(db, bizId, 'mail', box).catch(() => null);
   if (tok && tok.rt) {
-    try { const u = G.urls(), cfg = G.oauthCfg(); const c = G.client(u, await G.refresh(u, cfg, tok.rt)); await c.stop().catch(() => {}); revoked = await G.revoke(u, tok.rt); } catch (e) { /* ממשיכים: מוחקים אצלנו בכל מקרה */ }
+    try { const u = G.urls(), cfg = G.oauthCfg(); const c = G.client(u, await G.refresh(u, cfg, tok.rt)); await c.stop().catch(() => {}); } catch (e) { /* ממשיכים: מוחקים אצלנו בכל מקרה */ }
+    try { how = await revokeUnused(db, bizId, bx.addr, { box }, tok.rt); revoked = how === 'revoked'; } catch (e) { /* */ }
   }
   const rref = getFirestore().doc('sec_mailroute/' + bx.addr);
   const rs = await rref.get();
@@ -158,22 +171,23 @@ async function disconnectBox(db, bizId, box, by, who) {
   b.delete(db.doc(G.tokPath('mail', box)));
   if (rs.exists && rs.get('biz') === bizId) b.delete(rref);
   b.set(db.doc('sec_cfg/mail'), { boxes: { [box]: FieldValue.delete() } }, { merge: true });
-  b.set(db.collection('sec_log').doc(), glog(by, who, 'gmailOff', { tgt: box, note: revoked ? 'revoked' : 'local' }));
+  b.set(db.collection('sec_log').doc(), glog(by, who, 'gmailOff', { tgt: box, note: how }));
   await b.commit();
-  return { box, revoked };
+  return { box, revoked, shared: how === 'shared' };
 }
 async function disconnectCal(db, bizId, uid, by, who) {
-  let revoked = false;
+  let revoked = false, how = 'local';
+  const me = gcalOf(await db.doc('sec_cfg/gcal').get()).u[uid];
   const tok = await loadTok(db, bizId, 'cal', uid).catch(() => null);
-  if (tok && tok.rt) { try { revoked = await G.revoke(G.urls(), tok.rt); } catch (e) { /* */ } }
+  if (tok && tok.rt) { try { how = await revokeUnused(db, bizId, me ? me.addr : '', { cal: uid }, tok.rt); revoked = how === 'revoked'; } catch (e) { /* */ } }
   const maps = await db.collection('sec_gcal').where('uid', '==', uid).limit(K.CAL_MAX).get();
   for (let i = 0; i < maps.docs.length; i += 400) { const b = db.batch(); maps.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref)); await b.commit(); }
   const b = db.batch();
   b.delete(db.doc(G.tokPath('cal', uid)));
   b.set(db.doc('sec_cfg/gcal'), { u: { [uid]: FieldValue.delete() } }, { merge: true });
-  b.set(db.collection('sec_log').doc(), glog(by, who, 'gcalOff', { tgt: uid, note: revoked ? 'revoked' : 'local' }, 'cal'));
+  b.set(db.collection('sec_log').doc(), glog(by, who, 'gcalOff', { tgt: uid, note: how }, 'cal'));
   await b.commit();
-  return { revoked };
+  return { revoked, shared: how === 'shared' };
 }
 
 // =====================================================================================
@@ -459,7 +473,7 @@ function cleanOut(id, x) {
   return { id, st: x.st, t: x.t || 0, range: x.range || '', rangeL: G.RANGES[x.range] || '', n: x.n || 0, z: x.z || 0, trashed: x.trashed || 0, failed: x.failed || 0,
     items: (x.items || []).map((i) => ({ g: i.g, f: i.f || '', s: i.s || '', d: i.d || 0, z: i.z || 0, w: i.w || '', r: i.r || '' })) };
 }
-// אישור הרשימה (פ3): רק מנהל של העסק (gate – מנהל־על שאינו מנהל העסק נחסם), ולא מי שהכין את הרשימה. רק פריטים שברשימה המוצגת. אשפה בלבד
+// אישור הרשימה (פ3): רק מנהל של העסק (gate – מנהל־על שאינו מנהל העסק נחסם). מנהל העסק רשאי לאשר גם אם הוא הכין את הרשימה או שהוא גם מנהל־על (הנחה א' – פיילוט עם מנהל אחד). רק פריטים שברשימה המוצגת. אשפה בלבד
 async function cleanDecide(who, db, input, op, now) {
   const id = typeof input.id === 'string' && ID_RE.test(input.id) ? input.id : null;
   if (!id) throw bad('bad-id', 'מזהה לא תקין');
@@ -470,7 +484,6 @@ async function cleanDecide(who, db, input, op, now) {
   if (op === 'cleanOk' && L.st === 'done' && L.okBy === who.uid) return { ok: true, already: true, trashed: L.trashed || 0 };
   const stale = L.st === 'work' && now - (L.okAt || 0) > 5 * 60000; // ריצה שנקטעה – אפשר להמשיך (העברה לאשפה בטוחה להרצה חוזרת)
   if (L.st !== 'pend' && !stale) throw pre('not-pending', 'הרשימה כבר טופלה');
-  if (L.by === who.uid) throw deny('same-person', 'מי שהכין את הרשימה לא יכול לאשר אותה. האישור – של מנהל העסק.');
   if (op === 'cleanNo') {
     const b = db.batch();
     b.update(ref, { st: 'rej', noBy: who.uid, noAt: now });
@@ -717,7 +730,18 @@ async function syncOne(db, uid, o) {
     const calId = g.lp && byId[g.lp] ? g.lp : byGid[g.gid] ? byGid[g.gid].cal : '';
     if (calId) {
       const e = byId[calId], mp = byCal[calId];
-      if (!e || e.uid !== uid) continue;              // אירוע של העסק (uid ריק) – לא נמשך חזרה מ-Google (71: משותף לכל המנהלים)
+      if (!e) continue;
+      // אירוע שלנו (מזהה האפליקציה ב-lp) שחזר מ-Google בלי מיפוי – למשל אחרי ניתוק וחיבור מחדש: מקבל מיפוי ולא נשלח שוב (בלי כפילות ב-Google)
+      if (!mp && g.lp === calId) {
+        if (g.cancelled) continue; // העותק ב-Google בוטל – לא ממפים ולא מוחקים כאן את האירוע באפליקציה
+        if (e.uid === '') { // אירוע של העסק: האפליקציה קובעת – אם העותק ב-Google שונה, הדחיפה תעדכן אותו (lt:0)
+          const nm = { uid, cal: calId, gid: g.gid, at: g.gup, lt: G.sameEv(e, g) ? now : 0, biz: true };
+          ops.push((b) => b.set(db.doc('sec_gcal/' + uid + '__' + calId), nm));
+          byCal[calId] = nm;
+          continue;
+        }
+      }
+      if (e.uid !== uid) continue;              // אירוע של העסק (uid ריק) – לא נמשך חזרה מ-Google (71: משותף לכל המנהלים)
       if (mp && g.gup && g.gup <= mp.at) continue;    // השינוי שלנו שחזר
       if (g.cancelled) {
         ops.push((b) => { b.delete(db.doc('sec_cal/' + calId)); if (mp) b.delete(mp.ref); b.set(db.collection('sec_log').doc(), glog(uid, 'gcal', 'calDel', { tgt: calId, note: 'gcal' }, 'cal')); });
@@ -732,6 +756,7 @@ async function syncOne(db, uid, o) {
         byCal[calId] = Object.assign({}, mp || {}, { gid: g.gid, at: g.gup, lt: now });
         out.upd++;
       } else if (mp) ops.push((b) => b.set(mp.ref, { at: g.gup }, { merge: true }));
+      else { const nm = { uid, cal: calId, gid: g.gid, at: g.gup, lt: now, biz: false }; ops.push((b) => b.set(db.doc('sec_gcal/' + uid + '__' + calId), nm)); byCal[calId] = nm; } // אירוע אישי שלנו שחזר בלי מיפוי ולא השתנה
       continue;
     }
     if (g.cancelled || g.lp) continue; // נמחק ב-Google, או נוצר מהאפליקציה ונמחק בה – לא מחזירים
