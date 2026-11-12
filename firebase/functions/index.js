@@ -15,7 +15,7 @@ const { onCall, LEGACY_REGION } = require('./lib/region'); // onCall בשני א
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
@@ -107,7 +107,7 @@ exports.scanDocument = onCall(
 // קלט: { token }  ←  מוסיף ל-staff/{uid}.pushTokens (בלי כפילויות). מעל MAX_PUSH_TOKENS – הישן ביותר יוצא.
 // המזכירה שלב 4: מנהל בלי רשומת עובד (רק admins/{uid}) – נרשם ב-push_tokens/{uid} (אותו מבנה; שרת בלבד, אין גישה מהאפליקציה).
 // מי שיש לו staff/{uid} – בדיוק כמו קודם. מי שאין לו לא staff ולא admins (למשל מנהל־על שאינו מנהל העסק) – אותה שגיאה כמו קודם.
-// פלט: { ok: true, count, removed }
+// פלט: { ok: true, count, removed, moved } – moved = מכמה משתמשים אחרים הטלפון הוסר
 // =====================================================================================
 const TOKEN_RE = /^[A-Za-z0-9_:.\-]+$/;
 exports.registerPushToken = onCall(T.scoped(async (request) => {
@@ -126,12 +126,23 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
     let ref = staffRef, s = st;
     if (!st.exists && adm.exists) { ref = mgrRef; s = await tx.get(mgrRef); }
     else if (!st.exists) throw new HttpsError('failed-precondition', 'אין לך עדיין רשומה ברשימת העובדים (staff). המנהל צריך להוסיף אותה.', { reason: 'no-staff-doc' });
+    // התראות לטלפון (12.11.2026): טלפון אחד = משתמש אחד. אם הטלפון היה רשום למשתמש אחר בעסק (למשל עובד נכנס בטלפון שהיה של מנהל),
+    // הוא יוצא מהמשתמש הקודם – כדי שעובד לא יקבל התראות של מנהל. כל הקריאות לפני הכתיבות (חובה בטרנזקציה).
+    const others = await Promise.all(['staff', 'push_tokens'].map((c) => tx.get(db.collection(c).where('pushTokens', 'array-contains', token).limit(20))));
     const old = (Array.isArray(s.get('pushTokens')) ? s.get('pushTokens') : []).filter((t) => typeof t === 'string' && t !== token);
     const all = old.concat([token]);
     const kept = all.slice(Math.max(0, all.length - max));
+    let moved = 0;
+    for (const q of others) {
+      for (const d of q.docs) {
+        if (d.ref.path === ref.path) continue;
+        tx.update(d.ref, { pushTokens: FieldValue.arrayRemove(token) });
+        moved++;
+      }
+    }
     if (ref === mgrRef) tx.set(ref, { pushTokens: kept, upd: Date.now() });
     else tx.update(ref, { pushTokens: kept });
-    return { ok: true, count: kept.length, removed: all.length - kept.length };
+    return { ok: true, count: kept.length, removed: all.length - kept.length, moved };
   });
 }));
 
