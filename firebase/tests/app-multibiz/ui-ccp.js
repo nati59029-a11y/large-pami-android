@@ -304,23 +304,28 @@ const ORG = { v: 1, branches: [], banks: [{ id: 'bka', name: 'לאומי', last4
   check('22 צירוף דף בחלון ההשלמה: תצוגה מקדימה, p.file נשמר במכשיר, הסיבה בענן בלי סימון, coLFile/zsCoFile מציגים אותו, coVer סופר, לא "חסר דף"',
     r22.prev && /^z/.test(r22.file) && r22.img && r22.why === 'השלמה לתשלום באשראי' && r22.lf === r22.file && r22.zs === r22.file && r22.ver && !r22.miss, r22);
 
-  // 23. בלי דף – מנהל: תג + כפתור בסגירה, zcNeed, אבל אפשר לשמור (מסומנת self) והשיוך כולל את ההשלמה
+  // 23. בלי דף – מנהל: תג + כפתור בסגירה, zcNeed; (בעל העסק 12.11) לא נשמרת בשקט – רק אחרי "המשך ללא התאמה" (אישור), ואז self + nsx + תג בסיכום
   const r23 = await page.evaluate(async (a) => {
     eval(a.S); await part('iC23', 1023); const g = document.querySelector('#dlg[open] form[data-f=ccpco]'); g.elements.creg.value = 'i_nl'; g.requestSubmit(); await W(400); const t0 = toastT();
     const p = payOf('iC23'); const m = mir(p.src); COQ.L = [m]; zcSet(400);
     const co = coChk('i_nl', ZC.f.d, ZC.f.tm, ZC.f.cout, { id: '' }); const h = zcCoH();
     const it = { reg: 'i_nl', f: ZC.f, c: zcCalc(ZC.f, 'i_nl'), co, nsp: [], nw: '' }; const need = zcNeed(it);
-    const L = stub(); const n0 = S.zc.length; try { await FRM.zcSend({}); } finally { unstub(); } await W();
-    const z = S.zc[S.zc.length - 1] || {}; const out = { file: p.file || '', why: m.why, t0, ns: co.ns.length, ok: co.ok, tag: h.includes(NS) && h.includes('data-a="coSlip"'), need: need.filter((x) => x.startsWith(NS)), saved: S.zc.length === n0 + 1, ap: z.ap, ids: (z.co && z.co.ids) || [], src: p.src };
+    const L = stub(); const n0 = S.zc.length; let blk, tb, ask = '', h2 = '', zs = '', zsd = ''; try { await FRM.zcSend({}); await W(); blk = S.zc.length === n0; tb = toastT();
+      ACT.zcNsx(); await W(); ask = document.getElementById('dlg').innerText; document.querySelector('#dlg[open] [data-a=yes]').click(); await W(800); h2 = zcCoH(); } finally { unstub(); } await W();
+    const z = S.zc[S.zc.length - 1] || {};
+    window.fsx = async (q) => (/runQuery|batchGet/.test(q) ? [] : {}); try { ZS.D = {}; await zsLoad('2026-11'); const D = ZS.D['2026-11']; const row = D.L.find((x) => x.id === z.id); ZS.open = z.id; zs = row ? zsRowH(row, D) : 'none'; } finally { unstub(); ZS.open = ''; ZS.D = {}; }
+    const out = { file: p.file || '', why: m.why, t0, ns: co.ns.length, ok: co.ok, tag: h.includes(NS) && h.includes('data-a="coSlip"') && h.includes('data-a="zcNsx"'), need: need.filter((x) => x.startsWith(NS)), blk, tb, ask: ask.slice(0, 200), saved: S.zc.length === n0 + 1, ap: z.ap, ids: (z.co && z.co.ids) || [], src: p.src, nsx: z.nsx,
+      zsTag: zs.includes('נסגר ללא דף הוצאה מקופה (המשך ללא התאמה) · ' + ils(400)), zsBtn: zs.includes('data-a="coSlip"') };
     S.tx = S.tx.filter((t) => t.src !== 'zc:' + z.id); S.zc = []; save(); return out;
   }, { S: SETUP });
-  check('23 בלי דף: הסיבה בענן "… · חסר דף הוצאה מקופה", הודעה; מנהל בסגירה – תג + כפתור "צלם / צרף דף", zcNeed מציין, ובכל זאת נשמרת (ap=self) ומשייכת את ההשלמה',
-    !r23.file && /· חסר דף הוצאה מקופה$/.test(r23.why) && /בלי דף/.test(r23.t0) && r23.ns === 1 && r23.ok && r23.tag && r23.need.length === 1 && r23.saved && r23.ap === 'self' && r23.ids.includes(r23.src), r23);
+  check('23 בלי דף: הסיבה בענן "… · חסר דף הוצאה מקופה", הודעה; מנהל בסגירה – תג + "צלם / צרף דף" + "המשך ללא התאמה", zcNeed מציין; בלי צירוף לא נשמרת; אחרי "המשך ללא התאמה" (אישור) – נשמרת (self), nsx, משייכת, ובסיכום תג "נסגר ללא דף…" + כפתור צירוף',
+    !r23.file && /· חסר דף הוצאה מקופה$/.test(r23.why) && /בלי דף/.test(r23.t0) && r23.ns === 1 && r23.ok && r23.tag && r23.need.length === 1 && r23.blk && /המשך ללא התאמה/.test(r23.tb) && /להמשיך ללא התאמה\? חסר דף/.test(r23.ask) && r23.saved && r23.ap === 'self' && r23.ids.includes(r23.src)
+    && r23.nsx && r23.nsx.ids.length === 1 && r23.nsx.ids[0] === r23.src && r23.nsx.a === 400 && r23.nsx.by && r23.nsx.at > 0 && r23.zsTag && r23.zsBtn, r23);
 
   // 24. עובד: רואה את הסימון (מהסיבה בענן) + כפתור; בלי צילום ובלי הסבר – לא נשלחת; עם הסבר – נשלחת (nw)
   const r24 = await page.evaluate(async (a) => {
     eval(a.S); const p = payOf('iC23'); COQ.L = [mir(p.src)]; const role = SY.role; SY.role = 'worker'; const out = {};
-    try { zcSet(400); const h = zcCoH(); out.tag = h.includes(NS) && h.includes('data-a="coSlipW"') && h.includes('data-i="zcNw"');
+    try { zcSet(400); const h = zcCoH(); out.tag = h.includes(NS) && h.includes('data-a="coSlipW"') && h.includes('data-i="zcNw"') && !h.includes('zcNsx') && !h.includes('המשך ללא התאמה');
       let L = stub(); try { await FRM.zcSend({}); } finally { unstub(); } out.t1 = toastT(); out.c1 = !!commitOf(L);
       zcSet(400); ZC.nw = 'הדף נשאר בקופה'; L = stub(); try { await FRM.zcSend({}); } finally { unstub(); } const f = commitOf(L); out.d2 = f && JSON.parse(f.data.stringValue); out.st = f && f.st.stringValue;
     } finally { SY.role = role; } return out;
@@ -345,6 +350,52 @@ const ORG = { v: 1, branches: [], banks: [{ id: 'bka', name: 'לאומי', last4
   }, { S: SETUP });
   check('25 עובד צירף צילום: נשלחת בלי הסבר, nsp + 5 תמונות; מנהל: "חסר דף · העובד צירף צילום"; אישור – הצילום נכתב על התשלום, הסגירה נרשמת ומשייכת את ההשלמה, הסימון בענן יורד',
     r25.nsp && r25.h && r25.d && (r25.d.nsp || []).length === 1 && !r25.d.nw && r25.pics === 5 && r25.need.length === 1 && /העובד צירף צילום/.test(r25.need[0]) && /חסר דף/.test(r25.ask) && /^z/.test(r25.file) && r25.img && r25.ids.includes(r25.src) && r25.why === 'השלמה לתשלום באשראי', r25);
+
+  // 29. (בעל העסק 12.11) אישור סגירה של עובד שעדיין חסר בה דף (רק הסבר): לא מאשרים ישר – חלון "צרף / המשך ללא התאמה"; המשך – נרשמת עם nsx; צירוף מאוחר – הסיכום מציג "צורף"
+  const r29 = await page.evaluate(async (a) => {
+    eval(a.S); await part('iC29', 1029); const g = document.querySelector('#dlg[open] form[data-f=ccpco]'); g.elements.creg.value = 'i_nl'; g.requestSubmit(); await W(400); closeDlg();
+    const p = payOf('iC29'); COQ.L = [mir(p.src)]; const out = {}; const role = SY.role; SY.role = 'worker'; let doc, id;
+    try { zcSet(400); ZC.nw = 'אין דף'; const L = stub(); try { await FRM.zcSend({}); } finally { unstub(); } const f = commitOf(L); doc = { fields: f }; id = JSON.parse(L.calls.find((x) => x[0] === ':commit')[1]).writes[0].update.name.split('/').pop(); } finally { SY.role = role; }
+    const it = zcParse(doc, id); it.co = coChk(it.reg, it.f.d, it.f.tm, it.f.cout, { id: it.id, inc: it.inc, od: it.f.oD, otm: it.f.oTm }); it.need.push(...zcNsNeed(it)); ZQ.L = [it]; ZQP = [];
+    const L2 = stub(); try {
+      await ACT.zcOk({ dataset: { id } }); await W(); const d1 = document.getElementById('dlg'); out.d1 = !document.querySelector('#dlg[open] [data-a=yes]') && !!d1.querySelector('[data-a=coSlip]') && !!d1.querySelector('[data-a=zcNsxQ]'); out.n1 = S.zc.filter((x) => x.id === id).length;
+      d1.querySelector('[data-a=zcNsxQ]').click(); await W(); out.q = document.getElementById('dlg').innerText.slice(0, 200); document.querySelector('#dlg[open] [data-a=yes]').click(); await W(400);
+      out.ask = document.getElementById('dlg').innerText.slice(0, 200); document.querySelector('#dlg[open] [data-a=yes]').click(); await W(800);
+    } finally { unstub(); }
+    const z = S.zc.find((x) => x.id === id) || {}; out.saved = !!z.id; out.ap = z.ap; out.nsx = z.nsx; out.src = p.src;
+    const zs = () => { const nx = zsNsx(z); return nx ? (nx.miss.length ? 'M' : 'A') : ''; };
+    const row = { id, reg: 'i_nl', by: '', t: 0, np: 0, f: Object.assign(zcEmpty(), { d: z.d, no: z.no }), c: { tot: null, inc: 0, lvl: null, sumOk: true, dateWarn: false }, st: 'ok', tm: '', cz: null, cs: null, self: 0, why: '', dw: '', cw: '', stBy: '', stAt: 0, note: '' }, D = { C: [], P: {}, DC: [] };
+    out.s1 = zs(); out.h1 = zsRowH(row, D).includes('נסגר ללא דף הוצאה מקופה (המשך ללא התאמה) · ' + ils(400));
+    window.fsx = async () => ({}); try { out.put = await coSlipPut(p.src, window.DU); } finally { unstub(); }
+    out.s2 = zs(); const h2 = zsRowH(row, D); out.h2 = h2.includes('דף הוצאה מקופה צורף אחר כך') && !h2.includes('(המשך ללא התאמה) ·'); out.keep = !!(S.zc.find((x) => x.id === id) || {}).nsx;
+    S.tx = S.tx.filter((t) => t.src !== 'zc:' + id); S.zc = []; ZQ.L = []; COQ.L = null; ZC = null; save(); return out;
+  }, { S: SETUP });
+  check('29 אישור סגירה של עובד בלי דף (רק הסבר): חלון "צרף / המשך ללא התאמה" במקום אישור ישיר; "המשך" + אישור – נרשמת עם nsx; בסיכום "נסגר ללא דף…"; צירוף מאוחר – "צורף אחר כך", nsx נשאר',
+    r29.d1 && r29.n1 === 0 && /להמשיך ללא התאמה/.test(r29.q) && /לאשר ולהכניס/.test(r29.ask) && r29.saved && r29.ap === 'm' && r29.nsx && r29.nsx.ids[0] === r29.src && r29.nsx.a === 400 && r29.s1 === 'M' && r29.h1 && r29.put && r29.s2 === 'A' && r29.h2 && r29.keep, r29);
+
+  // 30. (בעל העסק 12.11) הוצאת מזומן לא תואמת (בלי חסר דף): מנהל – לא נשמרת בלי "המשך ללא התאמה"; אחרי המשך – nsx עם z/s/diff ותג בסיכום. אישור סגירה של עובד לא תואמת – חלון + המשך. עובד – בלי הכפתור
+  const r30 = await page.evaluate(async (a) => {
+    eval(a.S); COQ.L = []; ZL.i_nl = null; S.zc = []; const out = {}; zcSet(300); const h = zcCoH(); out.btn = h.includes('data-a="zcNsx"') && !h.includes(NS);
+    let L = stub(); const n0 = S.zc.length; try { await FRM.zcSend({}); await W(); out.blk = S.zc.length === n0; out.tb = toastT();
+      ACT.zcNsx(); await W(); out.q = document.getElementById('dlg').innerText.slice(0, 250); document.querySelector('#dlg[open] [data-a=yes]').click(); await W(800); } finally { unstub(); }
+    let z = S.zc[S.zc.length - 1] || {}; out.saved = S.zc.length === n0 + 1; out.ap = z.ap; out.nsx = z.nsx;
+    const row = (z, self) => ({ id: z.id, reg: 'i_nl', by: '', t: 0, np: 0, f: Object.assign(zcEmpty(), { d: z.d, no: z.no }), c: { tot: null, inc: 0, lvl: null, sumOk: true, dateWarn: false }, st: 'ok', tm: '', cz: 300, cs: 0, self, why: '', dw: '', cw: '', stBy: '', stAt: 0, note: '' }), D = { C: [], P: {}, DC: [] };
+    out.zs = zsRowH(row(z, 1), D).includes('נסגר ללא התאמה: בדוח Z ' + ils(300) + ', הוצאות מקופה ' + ils(0) + ', הפרש ' + ils(300));
+    S.tx = S.tx.filter((t) => t.src !== 'zc:' + z.id); S.zc = []; save();
+    const role = SY.role; SY.role = 'worker'; let doc, id;
+    try { zcSet(250); const hw = zcCoH(); out.wNo = !hw.includes('zcNsx') && !hw.includes('המשך ללא התאמה'); ZC.cw = 'לא מצאתי פתק'; L = stub(); try { await FRM.zcSend({}); } finally { unstub(); } const f = commitOf(L); doc = { fields: f }; id = JSON.parse(L.calls.find((x) => x[0] === ':commit')[1]).writes[0].update.name.split('/').pop(); out.wst = f.st.stringValue; } finally { SY.role = role; }
+    const it = zcParse(doc, id); ZQ.L = [it]; ZQP = [];
+    L = stub(); try {
+      await ACT.zcOk({ dataset: { id } }); await W(); const d1 = document.getElementById('dlg'); out.d1 = !document.querySelector('#dlg[open] [data-a=yes]') && /לא תואמת/.test(d1.innerText) && !!d1.querySelector('[data-a=zcNsxQ]') && !d1.querySelector('[data-a=coSlip]'); out.n1 = S.zc.filter((x) => x.id === id).length;
+      d1.querySelector('[data-a=zcNsxQ]').click(); await W(); document.querySelector('#dlg[open] [data-a=yes]').click(); await W(400);
+      out.ask = document.getElementById('dlg').innerText.slice(0, 120); document.querySelector('#dlg[open] [data-a=yes]').click(); await W(800);
+    } finally { unstub(); }
+    z = S.zc.find((x) => x.id === id) || {}; out.saved2 = !!z.id; out.ap2 = z.ap; out.nsx2 = z.nsx; out.zs2 = zsRowH(row(z, 0), D).includes('נסגר ללא התאמה: בדוח Z ' + ils(250));
+    S.tx = S.tx.filter((t) => t.src !== 'zc:' + id); S.zc = []; ZQ.L = []; COQ.L = null; ZC = null; save(); return out;
+  }, { S: SETUP });
+  check('30 הוצאת מזומן לא תואמת: מנהל – כפתור "המשך ללא התאמה", בלי לחיצה לא נשמרת; המשך (אישור) – נשמרת עם nsx {k:diff,z,s,diff} ותג "נסגר ללא התאמה: בדוח Z…" בסיכום; עובד – בלי הכפתור (הסבר → אישור מנהל); אישור המנהל – חלון + המשך, nsx נשמר',
+    r30.btn && r30.blk && /לא תואמת.*המשך ללא התאמה/.test(r30.tb) && /להמשיך ללא התאמה/.test(r30.q) && r30.saved && r30.ap === 'self' && r30.nsx && r30.nsx.k === 'diff' && r30.nsx.z === 300 && r30.nsx.s === 0 && r30.nsx.diff === 300 && r30.nsx.ids.length === 0 && r30.zs
+    && r30.wNo && r30.wst === 'new' && r30.d1 && r30.n1 === 0 && /לאשר ולהכניס/.test(r30.ask) && r30.saved2 && r30.ap2 === 'm' && r30.nsx2 && r30.nsx2.k === 'diff' && r30.nsx2.diff === 250 && r30.zs2, r30);
 
   // 26. מנהל מצרף דף מתוך הסגירה (כפתור "צלם / צרף דף") → לא חסר עוד, zcNeed נקי
   await page.evaluate(async (a) => { eval(a.S); await part('iC26', 1026); const g = document.querySelector('#dlg[open] form[data-f=ccpco]'); g.elements.creg.value = 'i_nl'; g.requestSubmit(); await W(400);
