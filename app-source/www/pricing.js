@@ -18,7 +18,7 @@ if(typeof ACT==='undefined'||typeof FRM==='undefined'||typeof S==='undefined')re
 const QK=LK('lp-piq'),DK=LK('lp-pidone'),IK=LK('lp-piimg');
 const PI={busy:0,cand:new Set(),log:[]};window.PI=PI;
 /* ניסיונות חוזרים: 30 שניות ועד שעה; מכסת זיהוי יומית – שעה; עד 40 ניסיונות ואז מוותרים */
-PI.dl=[30e3,60e3,120e3,300e3,600e3,1800e3,3600e3];PI.max=40;PI.wait=3000;
+PI.dl=[30e3,60e3,120e3,300e3,600e3,1800e3,3600e3];PI.max=40;PI.wait=3000;PI.tmo=120000;
 const rd=k=>{try{const v=JSON.parse(localStorage.getItem(k));return v&&typeof v==='object'?v:null}catch(e){return null}};
 const wr=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
 const qGet=()=>{const v=rd(QK);return Array.isArray(v)?v:[]};
@@ -58,7 +58,13 @@ if(typeof bqSaveOne==='function'){const o=bqSaveOne;bqSaveOne=function(it){let n
 /* חשבונית סרוקה שחוברה לתשלום בהעברה שממתין לה: הרשומה הקיימת (e) מקבלת את הקובץ. רק קובץ שהגיע מאחת מנקודות הסריקה שלמעלה (PI.cand) –
    לא אישור הוצאה של עובד (inbOk), שכבר נכנסה לתמחור בשליחה */
 if(typeof awJoin==='function'){const o=awJoin;awJoin=function(e,t,fid,fx){const r=o.apply(this,arguments);
- try{if(fid&&!fx&&PI.cand.has(fid)&&e)fromTx(Object.assign({},e,{file:fid,kind:'inv',amt:num(e.amt)>0?e.amt:num(t&&t.amt),inv:e.inv||t&&t.inv,dn:t&&t.dn,note:t&&t.note}),fid)}catch(x){}return r}}
+ try{if(fid&&!fx&&(PI.cand.has(fid)||PI.aw>0)&&e)fromTx(Object.assign({},e,{file:fid,kind:'inv',amt:num(e.amt)>0?e.amt:num(t&&t.amt),inv:e.inv||t&&t.inv,dn:t&&t.dn,note:t&&t.note}),fid)}catch(x){}return r}}
+/* מסך "סריקה" (V.scan) – "שמירה כחשבונית" (ACT.qSave), וחשבונית שהגיעה עם צילום לתשלום שממתין לה (FRM.awatt). הקובץ נוצר בתוך הפונקציה:
+   qSave – לפי הרשומות החדשות עם file; חיבור לתשלום (awOffer) – הקובץ נרשם ב-PI.cand. awatt – awJoin בזמן הקריאה (PI.aw) */
+{const o=ACT.qSave;if(typeof o==='function')ACT.qSave=async function(el){let n0=0;try{n0=S.tx.length;if(el&&el.dataset&&el.dataset.fid)PI.cand.add(el.dataset.fid)}catch(e){}
+ const r=await o.apply(this,arguments);
+ try{for(const t of S.tx.slice(n0))if(t&&t.file)fromTx(t,t.file);if(typeof AWP!=='undefined'&&AWP&&AWP.fid)PI.cand.add(AWP.fid)}catch(e){}return r}}
+{const o=FRM.awatt;if(typeof o==='function')FRM.awatt=async function(){PI.aw=(PI.aw||0)+1;try{return await o.apply(this,arguments)}finally{PI.aw--}}}
 /* עובד: ההוצאה נשלחה למנהל (inbox) → לתמחור כבר עכשיו */
 if(typeof pushItem==='function'){const o=pushItem;pushItem=async function(it){const r=await o.apply(this,arguments);
  try{const d=it&&it.data;if(isW()&&d&&!d.repl&&!d.reg&&d.kind!=='check'&&it.fileId&&num(d.amt)>0){const c=((cfgLocal()||{}).cats||[]).find(z=>z.id===d.cat);
@@ -67,7 +73,7 @@ if(typeof pushItem==='function'){const o=pushItem;pushItem=async function(it){co
 /* מנהל דחה הוצאה של עובד → החשבונית יוצאת מהתמחור (piVoid). אותו מזהה כמו אצל העובד: הקובץ שלו הוא 'o'+מזהה ההוצאה */
 if(typeof inbDrop==='function'){const o=inbDrop;inbDrop=function(id){let it=null;try{it=(S.inbox||[]).find(x=>x.id===id)||null}catch(e){}
  const r=o.apply(this,arguments);
- try{const d=it&&it.d;if(isA()&&d&&!d.repl&&!d.reg&&ID_OK(id)){const c=cat(d.cat);if(c&&c.beh==='sup')add({t:'v',rq:rqOf('o'+id)})}}catch(e){}
+ try{const d=it&&it.d;if(isA()&&d&&!d.repl&&!d.reg&&d.kind!=='check'&&it.file&&num(d.amt)>0&&ID_OK(id)){const c=cat(d.cat);if(c&&c.beh==='sup')add({t:'v',rq:rqOf('o'+id)})}}catch(e){}
  return r}}
 
 /* ---------- ביצוע (אחד בכל פעם) ---------- */
@@ -87,13 +93,15 @@ async function upImg(j,P){if(!P){try{P=await pages(j.fid)}catch(e){if(e&&e.perm)
  const pdf=P.find(p=>p.mime_type==='application/pdf'),U=(pdf?[pdf]:P).map(p=>'data:'+p.mime_type+';base64,'+p.data);
  const du=U.length===1?U[0]:'PAGES:'+JSON.stringify(U),np=Math.ceil(du.length/PI.ch);if(!np||np>IMG_MAX)return;
  for(let k=0;k<np;k++)await fnc('piImg',{id:'i'+j.rq,k,np,data:du.slice(k*PI.ch,(k+1)*PI.ch)})}
+/* מע"מ העסק (ordcfg/main.vat, כמו במודול ההזמנות) – רק לחשבונית שהמחירים בה כוללים מע"מ. לא נקרא / אין – ברירת המחדל */
+let VAT=null;async function vatOf(){if(VAT!=null)return VAT;try{const d=await fsx('/ordcfg/main');const v=d&&d.fields&&d.fields.vat?fvj(d.fields.vat):null;VAT=typeof v==='number'&&v>=0&&v<=100?v:undefined}catch(e){return undefined}return VAT}
 async function run(j){
  if(j.t==='v'){await fnc('piVoid',{id:'i'+j.rq});return}
  let P0=null;
  if(j.cr){if(j.fid)await upImg(j);return}
  if(!j.r){P0=await pages(j.fid);const parts=P0.map(p=>({inline_data:p}));
-  const txt=await shAIcall({contents:[{parts:[{text:''}].concat(parts)}],generationConfig:{responseMimeType:'application/json',temperature:0}},'srv',120000,false,'invlines');
-  const x=PricingLines.invLines(String(txt||''));j.r={sup:x.sup,inv:x.inv,date:x.date,lines:x.lines};
+  const txt=await shAIcall({contents:[{parts:[{text:''}].concat(parts)}],generationConfig:{responseMimeType:'application/json',temperature:0}},'srv',PI.tmo,false,'invlines');
+  const x=PricingLines.invLines(String(txt||''),await vatOf());j.r={sup:x.sup,inv:x.inv,date:x.date,lines:x.lines};
   const L=qGet(),k=L.findIndex(y=>y.rq===j.rq&&y.t===j.t);if(k>=0){L[k].r=j.r;qSet(L)}}
  const r=j.r,d={reqId:j.rq,sup:String(j.sup||r.sup||'').slice(0,60),inv:String(j.inv||r.inv||'').slice(0,30),date:DATE_OK(j.date)?j.date:(DATE_OK(r.date)?r.date:''),lines:(r.lines||[]).slice(0,100)};
  if(ID_OK(j.supId))d.supId=j.supId;
@@ -104,6 +112,7 @@ function kind(j,e){const rs=e&&(e.reason||e.rs)||'';
  if(e&&e.perm)return'perm';
  if(rs==='no-pinv')return j.t==='v'&&j.n<8?'tmp':'perm';
  if(PERM_RS.includes(rs))return'perm';
+ if(e&&e.ab)return'tmp'; /* הזיהוי לא ענה בזמן: השרת כבר הוריד מהמכסה – נספר כניסיון, ההמתנה גדלה (סבב 1, ליקוי 1) */
  if(e&&(e.offline||e.net))return'net';
  if(e&&(e.http===429||e.st==='RESOURCE_EXHAUSTED'))return'quota';
  if(e&&(e.http===400||e.http===401||e.http===403||e.st==='PERMISSION_DENIED'||e.st==='INVALID_ARGUMENT'))return'perm';
@@ -115,7 +124,7 @@ async function pump(){if(PI.busy||!on())return;if(typeof navigator!=='undefined'
  finally{PI.busy=0}
  try{let L=qGet();const k=L.findIndex(x=>x.rq===j.rq&&x.t===j.t);
   if(res==='ok'||res==='perm'){if(k>=0)L.splice(k,1);if(j.t==='c')markDone(j.rq)}
-  else if(k>=0){const x=L[k];x.n=(x.n||0)+(res==='net'?0:1);if(x.n>=PI.max){L.splice(k,1);if(j.t==='c')markDone(j.rq)}
+  else if(k>=0){const x=L[k];x.n=(x.n||0)+1;/* כל כשל נספר (גם רשת) – ההמתנה גדלה עד שעה, ואחרי PI.max מוותרים; בלי רשת בכלל (navigator.onLine) לא מנסים */if(x.n>=PI.max){L.splice(k,1);if(j.t==='c')markDone(j.rq)}
    else x.nx=Date.now()+(res==='quota'?3600e3:PI.dl[Math.min(Math.max(0,x.n-1),PI.dl.length-1)])}
   qSet(L)}catch(e){}
  if(res==='ok'||res==='perm')later(50)}
@@ -176,7 +185,7 @@ try{if(!document.getElementById('pi-css')){const st=document.createElement('styl
 +'.pil .cb{display:flex;align-items:center;gap:8px;font-size:.88rem;font-weight:600;margin:2px 0 4px}'
 +'.pil .bt{display:flex;gap:6px;margin-top:6px}.pil .bt .btn{flex:1;min-width:0;min-height:40px;padding:0 6px;font-size:.85rem}'
 +'.pi-row>svg{width:20px;height:20px;color:var(--mut);transform:scaleX(-1);flex:none}.pi-row[disabled]{opacity:.78;cursor:not-allowed}.pi-hdr small{display:block;color:var(--mut)}'
-+'.pi-fin{margin-top:8px}';
++'.pi-fin{margin-top:8px}.pil.sk{display:block;opacity:.55;padding:8px 10px}.pil.sk .hd{margin:0}';
 document.head.append(st)}}catch(e){}
 
 /* ---------- רשימה ---------- */
@@ -263,7 +272,7 @@ function mgH(e,i){const l=e.L[i],m=PC.marginInc(l.price,l.cost,e.vat);return m==
 const wsrc=l=>l.wpSrc==='stock'?'מהמלאי':l.wpSrc==='auto'?'חושב אוטומטית (עלות × 1.5)':l.wpSrc==='man'?'הוזן ידנית':'';
 const fld=(lb,i,k,v,a)=>`<label class="pf"><span>${lb}</span><input data-i="piF" data-x="${i}" data-k="${k}" value="${esc(money(v))}" autocomplete="off" ${a||''}${E&&E.lost?' disabled':''}></label>`;
 function lineH(e,l,i){const dis=e.lost?' disabled':'',p=prodOf(e,i);
- const L=`<div><div class="hd"><span class="no">${i+1}.</span>${tagH(e,i)}</div>${l.chk?`<span class="tag t1">לבדיקה: ${esc(l.chk)}</span>`:''}
+ const L=`<div><div class="hd"><span class="no">${i+1}.</span>${tagH(e,i)}<button type="button" class="lkb" data-a="piSkip" data-x="${i}" data-v="1"${dis}>דלג על השורה</button></div>${l.chk?`<span class="tag t1">לבדיקה: ${esc(l.chk)}</span>`:''}
   ${fld('שם',i,'n',l.n,'maxlength="60"')}
   <div class="g2">${fld('ברקוד',i,'bc',l.bc,'dir="ltr" inputmode="numeric" maxlength="30"')}${fld('כמות למלאי',i,'qty',l.qty,'inputmode="decimal"')}</div>
   <div class="g3">${fld('במארז',i,'pk',l.pk,`inputmode="numeric"${p&&p.pk?` placeholder="${esc(String(p.pk))}"`:''}`)}${fld('מארזים בקרטון',i,'ct',l.ct,`inputmode="numeric"${p&&p.ct?` placeholder="${esc(String(p.ct))}"`:''}`)}${fld('עלות לפני מע"מ',i,'cost',l.cost,'inputmode="decimal"')}</div>
@@ -273,6 +282,9 @@ function lineH(e,l,i){const dis=e.lost?' disabled':'',p=prodOf(e,i);
   <label class="cb"><input type="checkbox" data-c="piCto" data-x="${i}"${l.cto?' checked':''}${dis}>רק קרטונים סגורים</label>`:''}
   <div class="bt"><button type="button" class="btn g s" data-a="piPrP" data-x="${i}">הדפס מחיר</button><button type="button" class="btn g s" data-a="piPrS" data-x="${i}">הדפס מבצע</button></div></div>`;
  return`<div class="pil${l.chk?' ck':''}" id="pil${i}">${L}${R}</div>`}
+/* שורה שדילגו עליה (פיקדון, דמי משלוח…): מעומעמת, עם "החזר". לא נספרת בסיום, לא נוצר ממנה מוצר ולא נוספת כמות (skip בשרת) */
+function lineX(e,l,i){if(!l.skip)return lineH(e,l,i);const dis=e.lost?' disabled':'';
+ return`<div class="pil sk" id="pil${i}"><div class="hd"><span class="no">${i+1}.</span><b>${esc(l.n||l.bc||'')}</b><span class="tag">דילוג – לא ייכנס למלאי</span><button type="button" class="lkb" data-a="piSkip" data-x="${i}" data-v="0"${dis}>החזר</button></div></div>`}
 V.piEd=id=>{const T='תמחור חשבונית';if(!can())return deny(T);
  if(!E||E.id!==id){if(E)leave();start(id);return{t:T,h:'<div class="empty">נכנס לחשבונית…</div>'}}
  if(E.err)return{t:T,h:`<div class="card"><p><b>${esc(E.err)}</b></p><button class="btn g w" data-a="back">חזרה</button></div>`};
@@ -280,7 +292,7 @@ V.piEd=id=>{const T='תמחור חשבונית';if(!can())return deny(T);
  const v=E.inv,img=(+v.np>0)||!!PI.img(E.id);
  const hdr=`<div class="card pi-hdr"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><div style="min-width:0;flex:1"><b>${esc(v.sup||'ספק לא ידוע')}</b><small>${[v.inv?'חשבונית '+esc(v.inv):'',v.date?dfmt(v.date):'',E.L.length+' שורות'].filter(Boolean).join(' · ')}</small>${v.byName?`<small>נשלחה על ידי ${esc(v.byName)}</small>`:''}</div>${img?'<button type="button" class="btn g s" data-a="piImgV">צילום החשבונית</button>':'<small class="note">אין צילום</small>'}</div>${E.ord?'':'<small class="note" style="display:block;margin-top:6px">עסק בלי הזמנות: בלי מחיר סיטונאי ובלי עדכון מלאי</small>'}</div>`;
  const lostH=E.lost?`<div class="card" style="border-color:var(--bad)"><b>${esc(E.lost)}</b><p class="note">אי אפשר להמשיך לערוך. חזרו לרשימה.</p></div>`:'';
- return{t:T,s:v.sup||'',h:lostH+hdr+(E.L.length?E.L.map((l,i)=>lineH(E,l,i)).join(''):'<div class="empty">לא זוהו שורות בחשבונית</div>')
+ return{t:T,s:v.sup||'',h:lostH+hdr+(E.L.length?E.L.map((l,i)=>lineX(E,l,i)).join(''):'<div class="empty">לא זוהו שורות בחשבונית</div>')
   +(E.lost?'':`<button type="button" class="btn w pi-fin" data-a="piFin">סיום ושמירה</button>`)}};
 
 /* ---------- עריכה: פעולות ---------- */
@@ -301,6 +313,7 @@ INP.piF=el=>{if(!E||!E.L||E.lost)return;const i=+el.dataset.x,k=el.dataset.k,l=E
    if(k==='wp'){if(t)l.wpSrc='man';else delete l.wpSrc}}}
  el.classList.toggle('bad',!ok);upd(i);if(ok)dirty()};
 CHG.piCto=el=>{if(!E||!E.L||E.lost)return;const l=E.L[+el.dataset.x];if(!l)return;l.cto=!!el.checked;dirty()};
+ACT.piSkip=el=>{if(!E||!E.L||E.lost)return;const l=E.L[+el.dataset.x];if(!l)return;if(el.dataset.v==='1')l.skip=true;else delete l.skip;dirty();rerender()};
 ACT.piUnl=el=>{if(!E||E.lost)return;const i=+el.dataset.x;if(!E.L[i])return;unlink(E,i);dirty();rerender()};
 ACT.piLnk=el=>{if(!E||E.lost)return;const i=+el.dataset.x,C=cands(E,i);if(!C.length)return;
  if(C.length===1){link(E,i,C[0]);dirty();rerender();return}
@@ -313,8 +326,8 @@ ACT.piImgV=async()=>{if(!E||!E.inv)return;const id=E.id,np=+E.inv.np||0;
   return viewImg('','Invoice_'+id,du)}
  const f=PI.img(id);if(f)return viewImg(f,'Invoice_'+id);toast('אין צילום לחשבונית הזו')};
 /* סיום: בדיקה, ואז אישור קצר עם מה שיקרה במלאי */
-function sums(e){const act=e.L.filter(l=>!l.skip),up=new Set(),nw=new Set();let q=0;
- act.forEach((l,i)=>{if(l.pid)up.add(l.pid);else nw.add(l.bc?'b:'+l.bc:'n:'+i);q+=l.qty||0});return{up:up.size,nw:nw.size,q:r3(q)}}
+function sums(e){const up=new Set(),nw=new Set();let q=0;
+ e.L.forEach((l,i)=>{if(l.skip)return;if(l.pid)up.add(l.pid);else nw.add(l.bc?'b:'+l.bc:'n:'+i);q+=l.qty||0});return{up:up.size,nw:nw.size,q:r3(q)}}
 ACT.piFin=()=>{if(!E||!E.L||E.lost||E.fin)return;
  if(document.querySelector('.pil input.bad'))return toast('יש שדה עם ערך לא תקין (מסומן באדום)');
  for(let i=0;i<E.L.length;i++){const l=E.L[i];if(l.skip)continue;

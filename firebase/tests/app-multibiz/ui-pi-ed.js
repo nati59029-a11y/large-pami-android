@@ -217,6 +217,19 @@ const inp = (i, k) => `#pil${i} input[data-k="${k}"]`;
   // ---- 8. סיום ושמירה ----
   await A.page.click('.pi-row[data-id="i1"]');
   await waitFor(A.page, () => document.querySelectorAll('.pil').length === 4);
+  // 8-. "דלג על השורה" (פיקדון / דמי משלוח): מעומעמת עם "החזר", לא נספרת בסיום, נשלחת עם skip
+  await A.page.click('#pil1 [data-a=piSkip]'); await sleep(200);
+  const sk = await A.page.evaluate(() => { const r = document.getElementById('pil1'); const st = getComputedStyle(r); return { sk: r.classList.contains('sk'), op: +st.opacity, back: !!r.querySelector('[data-a=piSkip][data-v="0"]'), inputs: r.querySelectorAll('input').length, others: document.querySelectorAll('.pil:not(.sk) [data-a=piSkip][data-v="1"]').length, sw: document.documentElement.scrollWidth, W: innerWidth }; });
+  check('8- דלג על השורה: השורה מעומעמת, בלי שדות, עם "החזר"; לשאר השורות יש "דלג"; בלי גלישה ב-360', sk.sk && sk.op < 0.7 && sk.back && sk.inputs === 0 && sk.others === 3 && sk.sw <= sk.W, sk);
+  await sleep(500); const dSk = calls('piDraft', 'm').pop();
+  check('8-א הטיוטה נשמרת עם skip בשורה שדילגו עליה בלבד', dSk && dSk.b.lines[1].skip === true && !dSk.b.lines.some((l, i) => i !== 1 && l.skip), dSk && dSk.b.lines.map((l) => !!l.skip));
+  await A.page.fill(inp(2, 'price'), '19.9'); await A.page.click('[data-a=piFin]'); await sleep(200);
+  const dk = await A.page.evaluate(() => ({ u: (document.getElementById('piSU') || {}).textContent, n: (document.getElementById('piSN') || {}).textContent, q: (document.getElementById('piSQ') || {}).textContent }));
+  check('8-ב בסיום השורה לא נספרת: 2 מוצרים יעודכנו, 1 ייווצר, 32 יחידות (בלי 6 של השורה)', dk.u === '2' && dk.n === '1' && dk.q === '32', dk);
+  await A.page.evaluate(() => closeDlg());
+  await A.page.click('#pil1 [data-a=piSkip][data-v="0"]'); await sleep(200);
+  const rs = await A.page.evaluate(() => ({ sk: document.querySelectorAll('.pil.sk').length, inputs: document.querySelectorAll('#pil1 input').length }));
+  check('8-ג "החזר" – השורה חוזרת לרגילה עם השדות', rs.sk === 0 && rs.inputs > 0, rs);
   await A.page.fill(inp(2, 'price'), '');
   await A.page.click('[data-a=piFin]'); await sleep(150);
   const tv = await A.page.evaluate(() => ({ t: [...document.querySelectorAll('.toast')].map((x) => x.textContent).pop(), dlg: document.getElementById('dlg').open }));

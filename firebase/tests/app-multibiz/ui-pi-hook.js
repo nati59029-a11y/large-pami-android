@@ -15,11 +15,11 @@ const LINES = { supplier: 'ספק בדיקה בע"מ', number: '5001', date: '20
 
 // רשת מדומה לכל הקשר: M.fail = { invlines|piCreate|piVoid: true } → ניתוק
 async function mock(ctx) {
-  const M = { inv: 0, lines: 0, create: [], vd: [], img: [], fail: {} };
+  const M = { inv: 0, lines: 0, lt: 0, slow: 0, create: [], vd: [], img: [], fail: {} };
   const J = (route, o) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
   await ctx.route('**/scanDocument', async (route) => {
     let b = {}; try { b = JSON.parse(route.request().postData()).data || {}; } catch (e) { /* */ }
-    if (b.kind === 'invlines') { if (M.fail.invlines) return route.abort('internetdisconnected'); M.lines++; return J(route, { result: { text: JSON.stringify(LINES) } }); }
+    if (b.kind === 'invlines') { M.lt++; if (M.slow) await sleep(M.slow); if (M.fail.invlines) return route.abort('internetdisconnected'); M.lines++; return J(route, { result: { text: JSON.stringify(LINES) } }); }
     M.inv++; return J(route, { result: { text: JSON.stringify({ document_type: 'invoice', supplier: 'ספק בדיקה', number: String(5000 + M.inv), date: '2026-11-01', total_with_vat: 100 + M.inv }) } });
   });
   for (const fn of ['piCreate', 'piVoid', 'piImg']) await ctx.route('**/' + fn, async (route) => {
@@ -96,6 +96,7 @@ const waitQ = async (page, ms) => { const t0 = Date.now(); while (Date.now() - t
   M.fail.piCreate = true; await scanSave(page, 'DOC FAIL'); await sleep(1500);
   const s3b = await page.evaluate(() => PI.q().map((j) => ({ r: !!j.r, n: j.n })));
   check('3ב piCreate נכשל (ניתוק) – ההוצאה נשמרה, הבקשה נשארת בתור עם תוצאת הזיהוי', s3b.length === 1 && s3b[0].r && M.lines === 3, { s3b, lines: M.lines });
+  check('3ב-1 (סבב 1, ליקוי 1) גם ניתוק נספר כניסיון (n=1)', s3b.length === 1 && s3b[0].n === 1, s3b);
   M.fail.piCreate = false; await page.evaluate(() => PI.pump()); await waitQ(page);
   check('3ג ניסיון חוזר מצליח בלי זיהוי נוסף', M.create.length === 3 && M.lines === 3, { create: M.create.length, lines: M.lines });
   // שלב 4: כשל בהעלאת הצילום – החשבונית כבר נוצרה; הניסיון החוזר מעלה רק את הצילום (בלי piCreate ובלי זיהוי נוסף)
@@ -128,9 +129,49 @@ const waitQ = async (page, ms) => { const t0 = Date.now(); while (Date.now() - t
   await sleep(500); await waitQ(W.page);
   check('5 עובד שלח חשבונית ספק → piCreate אחד (מזהה = הקובץ של העובד); הוצאה שאינה ספק – לא', W.M.create.length === 1 && W.M.create[0].reqId === 'piow1abcdefgh' && W.M.create[0].inv === '777' && W.M.create[0].sup === 'ספק בדיקה', W.M.create.map((x) => ({ rq: x.reqId, inv: x.inv })));
   await W.ctx.close();
-  await page.evaluate((id) => { const c = S.cats.find((x) => x.beh === 'sup' && !x.hid && !x.off); S.inbox.push({ id, d: { cat: c.id, sub: 's1', amt: 100, date: '2026-11-01', inv: '777' } }); save(); inbDrop(id); }, wid);
+  await page.evaluate((id) => { const c = S.cats.find((x) => x.beh === 'sup' && !x.hid && !x.off); S.inbox.push({ id: id + 'c', d: { cat: c.id, sub: 's1', amt: -40, date: '2026-11-01', inv: '778' }, file: 'i' + id + 'c' }, { id: id + 'n', d: { cat: c.id, sub: 's1', amt: 40, date: '2026-11-01', inv: '779' }, file: '' }, { id, d: { cat: c.id, sub: 's1', amt: 100, date: '2026-11-01', inv: '777' }, file: 'i' + id }); save(); inbDrop(id + 'c'); inbDrop(id + 'n'); inbDrop(id); }, wid);
   await sleep(500); await waitQ(page);
-  check('5א מנהל דחה את ההוצאה → piVoid לאותה חשבונית', M.vd.length === 1 && M.vd[0].id === 'ipiow1abcdefgh', M.vd);
+  check('5א מנהל דחה את ההוצאה → piVoid לאותה חשבונית; זיכוי והוצאה בלי צילום – בלי piVoid', M.vd.length === 1 && M.vd[0].id === 'ipiow1abcdefgh', M.vd);
+
+  // ---- 7. (סבב 1, ליקוי 1) הזיהוי לא עונה בזמן: נספר כניסיון, ההמתנה גדלה – אין לולאה ----
+  await page.evaluate(() => { PI.tmo = 400; PI.dl = [60000, 120000]; }); M.slow = 1500; const lt0 = M.lt;
+  await scanSave(page, 'DOC SLOW'); await sleep(2500);
+  const t7 = await page.evaluate(() => { const j = PI.q()[0]; return j ? { n: j.n, w: j.nx - Date.now(), r: !!j.r } : null; });
+  await page.evaluate(() => PI.pump()); await sleep(300); await page.evaluate(() => PI.pump()); await sleep(1500);
+  check('7 חריגת זמן: ניסיון אחד, נספר (n=1), ניסיון הבא בעוד דקה; pump נוסף לא שולח שוב', t7 && t7.n === 1 && t7.w === 60000 && !t7.r && M.lt === lt0 + 1, { t7, att: M.lt - lt0 });
+  let now7 = await page.evaluate(() => Date.now()); await page.clock.setFixedTime(now7 + 61000); await page.evaluate(() => PI.pump()); await sleep(2000);
+  const t7b = await page.evaluate(() => { const j = PI.q()[0]; return j ? { n: j.n, w: j.nx - Date.now() } : null; });
+  check('7א אחרי ההמתנה – ניסיון שני; שוב חריגה → n=2 וההמתנה גדלה ל-2 דקות', t7b && t7b.n === 2 && t7b.w === 120000 && M.lt === lt0 + 2, { t7b, att: M.lt - lt0 });
+  M.slow = 0; await page.evaluate(() => { PI.tmo = 120000; }); now7 = await page.evaluate(() => Date.now()); await page.clock.setFixedTime(now7 + 121000);
+  const c7 = M.create.length; await page.evaluate(() => PI.pump()); await waitQ(page);
+  check('7ב הזיהוי חזר לענות – piCreate אחד, התור ריק', M.create.length === c7 + 1 && M.lt === lt0 + 3, { create: M.create.length - c7, att: M.lt - lt0 });
+  await page.evaluate(() => { PI.dl = [0]; });
+
+  // ---- 8. (סבב 1, ליקוי 2) מסך "סריקה" – "שמירה כחשבונית" (ACT.qSave); זיכוי – לא ----
+  const c8 = M.create.length;
+  const q8 = await page.evaluate(async () => {
+    const c = S.cats.find((x) => x.beh === 'sup' && !x.hid && !x.off); const cv = document.createElement('canvas'); cv.width = 400; cv.height = 500; const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 400, 500); g.fillStyle = '#000'; g.fillText('Q SAVE', 20, 50); const du = cv.toDataURL('image/jpeg', 0.9);
+    Q.push({ id: 'qa1', name: 'a.jpg', du, img: du, x: { cat: c.id, sub: 's1', newsub: '', amt: '120', date: '2026-11-01', plan: '2026-11', inv: '9001' } }, { id: 'qa2', name: 'b.jpg', du, img: du, x: { cat: c.id, sub: 's1', newsub: '', amt: '-30', date: '2026-11-01', plan: '2026-11', inv: '9002' } });
+    const n0 = S.tx.length; await ACT.qSave({ dataset: { id: 'qa1' } }); await ACT.qSave({ dataset: { id: 'qa2' } });
+    return S.tx.slice(n0).map((t) => ({ f: t.file, k: t.kind, rq: PI.rqOf(t.file) })); });
+  await sleep(500); await waitQ(page);
+  const nw8 = M.create.slice(c8).map((x) => x.reqId);
+  check('8 "שמירה כחשבונית" במסך סריקה → piCreate לחשבונית; זיכוי – לא', q8.length === 2 && nw8.length === 1 && nw8[0] === q8.find((t) => t.k === 'inv').rq && nw8[0] !== q8.find((t) => t.k === 'credit').rq && M.create.slice(c8)[0].inv === '9001', { q8, nw8 });
+
+  // ---- 9. (סבב 1, ליקוי 2) "הגיעה החשבונית" לתשלום שממתין (FRM.awatt) – עם צילום: כן; בלי צילום: לא ----
+  const aw = async (id, inv, withFile) => {
+    await page.evaluate((x) => { const c = S.cats.find((y) => y.beh === 'sup' && !y.hid && !y.off); S.tx.push({ id: x.id, t: 'exp', cat: c.id, sub: 's1', date: '2026-11-01', amt: 100, plan: '2026-11', inv: '', note: 'תשלום מראש – ממתין לחשבונית', kind: 'inv', pays: [{ id: x.id + 'p', d: '2026-11-01', a: 100, m: 'העברה' }], await: 1 }); save(); ACT.awAtt({ dataset: { id: x.id } }); }, { id });
+    await page.waitForSelector('#dlg form[data-f=awatt]');
+    await page.fill('#dlg form[data-f=awatt] input[name=inv]', inv);
+    if (withFile) await page.setInputFiles('#dlg form[data-f=awatt] input[name=f]', require('path').join(www, 'icon-192.png'));
+    await page.click('#dlg form[data-f=awatt] button.btn:not([type])'); await sleep(1500); await waitQ(page);
+    return page.evaluate((x) => { const e = S.tx.find((t) => t.id === x); return { file: e && e.file || '', aw: !!(e && e.await), rq: e && e.file ? PI.rqOf(e.file) : '' }; }, id);
+  };
+  const c9 = M.create.length; const a9 = await aw('awe1', '9101', true);
+  check('9 "הגיעה החשבונית" עם צילום → piCreate לקובץ שצורף', !!a9.file && M.create.length === c9 + 1 && M.create[c9].reqId === a9.rq && M.create[c9].inv === '9101', { a9, nw: M.create.slice(c9).map((x) => x.reqId) });
+  const c9b = M.create.length; const a9b = await aw('awe2', '9102', false);
+  check('9א "הגיעה החשבונית" בלי צילום → בלי piCreate', !a9b.file && M.create.length === c9b, { a9b, nw: M.create.length - c9b });
+  check('9ב אין שגיאות JavaScript חדשות (מנהל)', page.__errors.every((e) => errB.includes(e)), page.__errors);
   await P.ctx.close();
 
   // ---- 6. עסק בלי מדף ובלי הזמנות: לא נוצר כלום ----
