@@ -904,6 +904,20 @@ service cloud.firestore {
       allow read: if rMgr();
       allow create, update, delete: if false;
     }
+    // תמחור מחשבונית ספק (12.11.2026, functions/pricing.js): חשבוניות לתמחור. קריאה – מנהל, או עובד פעיל עם מתג prc
+    // ("עדכון מחירים ומלאי"; עובד בלי perms = כבוי – החלטה 5, גם בלארג' פעמי). כתיבה – רק השרת (נעילה, סיום, ביטול).
+    function rPrc() {
+      return rMgr() || (isActiveEmployee()
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('prc', false) == true);
+    }
+    match /pinv/{id} {
+      allow read: if rPrc();
+      allow create, update, delete: if false;
+      match /p/{k} {
+        allow read: if rPrc();
+        allow create, update, delete: if false;
+      }
+    }
 
     // ----- המזכירה העסקית (שלב 1, 2026-11-11; אפיון 9.4, 2.3, 10.6). כל כתיבה – רק השרת (functions/secretary.js). -----
     // משתמש במזכירה = מנהל אמיתי של העסק (admins/{uid}, לא מנהל־על בתוקף תפקידו) + התוספת פעילה + עסק פעיל +
@@ -1650,6 +1664,16 @@ service cloud.firestore {
       match /impJobs/{id} {
         allow read: if feat('orders') && bMgr();
         allow create, update, delete: if false;
+      }
+      // תמחור מחשבונית ספק (12.11.2026): כמו בשורש – מנהל, או עובד עם prc (dflt = כבוי); תוספת מדף או הזמנות. כתיבה – רק השרת
+      function prcOk() { return (feat('shelf') || feat('orders')) && perm('prc'); }
+      match /pinv/{id} {
+        allow read: if prcOk();
+        allow create, update, delete: if false;
+        match /p/{k} {
+          allow read: if prcOk();
+          allow create, update, delete: if false;
+        }
       }
 
       // ----- המזכירה העסקית (שלב 1, 2026-11-11; אפיון 9.4, 2.3, 10.6). כל כתיבה – רק השרת (functions/secretary.js). -----
