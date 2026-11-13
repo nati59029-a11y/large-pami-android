@@ -41,7 +41,7 @@ function add(j){try{if(!on()||!j||!j.rq)return;const L=qGet();if(L.some(x=>x.rq=
  later(PI.wait)}catch(e){}}
 PI.img=id=>{const m=rd(IK)||{};return m[id]||''};
 /* הוצאה של המנהל שנשמרה עם קובץ סרוק */
-function fromTx(t,fid){try{if(!t||!fid)return;const c=cat(t.cat);if(!c||c.beh!=='sup')return;
+function fromTx(t,fid){try{if(!t||!fid||t.noStock)return;const c=cat(t.cat);if(!c||c.beh!=='sup')return;
  if((t.kind||'inv')!=='inv'||!(num(t.amt)>0))return;
  const s=t.sub?subById(t.sub):null;
  add({t:'c',rq:rqOf(fid),fid,sup:s&&s.name||'',supId:ID_OK(t.sub)?t.sub:'',inv:s_(t.inv||'')||(t.dn?String(t.note||'').replace(/^ת\. משלוח\s*/,''):''),date:DATE_OK(t.date)?t.date:''})}catch(e){}}

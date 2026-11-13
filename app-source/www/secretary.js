@@ -703,20 +703,36 @@ ACT.secMlDone=()=>{ask('לסמן כטופל? לא תישלח תשובה.',async(
 /* ---------- רשימת ניקוי ספאם – אישור מנהל העסק (פ3) ---------- */
 ACT.secClOpen=()=>{X.ml.clean={L:null};rerender()};
 async function clLoad(){X.clb=1;try{const r=await fnCall('secMail',{op:'cleanList'});X.ml.clean.L=r&&Array.isArray(r.lists)?r.lists:[]}catch(e){X.ml.clean.L={err:e&&e.message||'לא נטען'}}finally{X.clb=0;if(cur().v==='sec'&&!typing())rerender()}}
+const clK=i=>String(i.f||'').toLowerCase().trim();
+function clGroups(l){const M=new Map();for(const i of l.items||[]){if(!i||i.r==='t')continue;const k=clK(i);let g=M.get(k);if(!g){g={k,n:0,z:0,A:[]};M.set(k,g)}g.n++;g.z+=i.z||0;g.A.push(i)}return[...M.values()].sort((a,b)=>b.z-a.z)}
+const clOff=()=>{const C=X.ml.clean;return C.off||(C.off={})},clOp=()=>{const C=X.ml.clean;return C.op||(C.op={})};
+const clList=id=>{const L=(X.ml.clean||{}).L;return Array.isArray(L)?L.find(l=>l.id===id):null};
+const clSel=l=>(l.items||[]).filter(i=>i&&i.r!=='t'&&!clOff()[i.g]).map(i=>i.g);
+function clSenderH(l,g){const key=l.id+'|'+g.k,o=!!clOp()[key],off=clOff(),all=g.A.every(i=>!off[i.g]);
+ return `<div class="card" style="margin:6px 0;padding:8px"><label class="seccl"><input type="checkbox" data-c="secClS" data-id="${esc(l.id)}" data-k="${esc(g.k)}"${all?' checked':''}><span><b><bdi dir="ltr" class="secaddr">${esc(g.k||'שולח לא ידוע')}</bdi></b><br><small class="note">${g.n} מיילים · <bdi dir="ltr">${esc(kb(g.z))}</bdi></small></span></label>
+ <div class="secrow" style="margin-top:4px"><button type="button" class="chip" data-a="secClOp" data-id="${esc(l.id)}" data-k="${esc(g.k)}" style="min-height:40px">${o?'סגירה':'פתיחה'}</button><button type="button" class="chip" data-a="secClSn" data-id="${esc(l.id)}" data-k="${esc(g.k)}" style="min-height:40px">העבר לאשפה את כל השולח</button></div>
+ ${o?g.A.map(i=>`<label class="seccl"><input type="checkbox" data-c="secClI" data-id="${esc(l.id)}" data-k="${esc(g.k)}" data-g="${esc(i.g)}"${off[i.g]?'':' checked'}><span><b>${esc(i.s||'(בלי נושא)')}</b><br><small class="note">${i.d?esc(tm(i.d))+' · ':''}<bdi dir="ltr">${esc(kb(i.z))}</bdi> · ${esc(WHY[i.w]||'')}${i.r==='f'?' · ההעברה נכשלה, אפשר לנסות שוב':''}</small></span></label>`).join(''):''}</div>`}
 function cleanH(){const C=X.ml.clean,back='<button class="btn g w" data-a="secMlBack" style="margin-bottom:8px">חזרה לתיבת המייל</button>';
  if(!C.L){if(!X.clb)clLoad();return back+'<div class="empty">טוען…</div>'}if(C.L.err)return back+`<div class="card"><p class="note">${esc(C.L.err)}</p></div>`;
  const P=C.L.filter(l=>l.st==='pend'),D=C.L.filter(l=>l.st!=='pend');
  let h=back+(P.length?'':'<div class="card"><p class="note" style="margin:0">אין רשימה שממתינה לאישור.</p></div>');
- for(const l of P){const z=l.items.reduce((s,i)=>s+(i.z||0),0);
-  h+=`<form class="card" data-f="secClOk" data-id="${esc(l.id)}" id="secCl_${esc(l.id)}" style="margin-bottom:8px"><b>רשימת ניקוי · ${esc(l.rangeL||'')}</b><p class="note" style="margin:4px 0">${l.items.length} מיילים · כ-<bdi dir="ltr">${esc(kb(z))}</bdi>. המסומנים יועברו <b>לאשפה</b> של Gmail – לא נמחקים לצמיתות, ואפשר לשחזר אותם מהאשפה ב-Gmail (שם הם נמחקים אוטומטית אחרי כחודש).</p>
+ for(const l of P){const G=clGroups(l),n=G.reduce((s,g)=>s+g.n,0),z=G.reduce((s,g)=>s+g.z,0);
+  h+=`<form class="card" data-f="secClOk" data-id="${esc(l.id)}" id="secCl_${esc(l.id)}" style="margin-bottom:8px"><b>רשימת ניקוי · ${esc(l.rangeL||'')}</b><p class="note" style="margin:4px 0">${n} מיילים מ-${G.length} שולחים · כ-<bdi dir="ltr">${esc(kb(z))}</bdi>. המסומנים יועברו <b>לאשפה</b> של Gmail – לא נמחקים לצמיתות, ואפשר לשחזר אותם מהאשפה ב-Gmail (שם הם נמחקים אוטומטית אחרי כחודש). אפשר לאשר שולח אחד בכל פעם; מה שנשאר יישאר ברשימה.</p>
   <div class="secrow" style="margin:4px 0"><button type="button" class="chip" data-a="secClAll" data-id="${esc(l.id)}" data-v="1">סמן הכול</button><button type="button" class="chip" data-a="secClAll" data-id="${esc(l.id)}" data-v="0">נקה סימון</button></div>
-  ${l.items.map(i=>`<label class="seccl"><input type="checkbox" name="g" value="${esc(i.g)}" checked><span><b>${esc(i.s||'(בלי נושא)')}</b><br><small class="note"><bdi dir="ltr" class="secaddr">${esc(i.f||'')}</bdi>${i.d?' · '+esc(tm(i.d)):''} · <bdi dir="ltr">${esc(kb(i.z))}</bdi> · ${esc(WHY[i.w]||'')}</small></span></label>`).join('')}
-  <div class="secrow" style="margin-top:8px"><button class="btn" style="flex:1">העברה לאשפה</button><button type="button" class="chip" data-a="secClNo" data-id="${esc(l.id)}" style="min-height:44px">דחיית הרשימה</button></div></form>`}
+  ${G.map(g=>clSenderH(l,g)).join('')}
+  <div class="secrow" style="margin-top:8px"><button class="btn" style="flex:1">העברה לאשפה (המסומנים)</button><button type="button" class="chip" data-a="secClNo" data-id="${esc(l.id)}" style="min-height:44px">דחיית הרשימה</button></div></form>`}
  if(D.length)h+=`<div class="sec"><h3>רשימות קודמות</h3></div><div class="card">${D.map(l=>`<p class="note" style="margin:4px 0">${esc(tm(l.t))} · ${esc(l.rangeL||'')} · ${l.st==='done'?'הועברו לאשפה '+l.trashed+(l.failed?' (נכשלו '+l.failed+')':''):l.st==='rej'?'נדחתה':'בטיפול'}</p>`).join('')}</div>`;
  return h}
-ACT.secClAll=el=>{const f=document.getElementById('secCl_'+el.dataset.id);if(f)f.querySelectorAll('input[name=g]').forEach(i=>{i.checked=el.dataset.v==='1'})};
-FRM.secClOk=f=>{const id=f.dataset.id,ids=[...f.querySelectorAll('input[name=g]:checked')].map(i=>i.value);if(!ids.length)return toast('לא סומנו מיילים');
- ask(`להעביר ${ids.length} מיילים לאשפה של Gmail? אפשר לשחזר אותם מהאשפה ב-Gmail.`,async()=>{const b=f.querySelector('button.btn');if(b)b.disabled=true;try{const r=await fnCall('secMail',{op:'cleanOk',id,ids});toast('הועברו לאשפה: '+r.trashed+(r.failed?' · נכשלו: '+r.failed:''));X.ml.clean={L:null};X.ml.list=null}catch(e){err(e)}finally{if(b)b.disabled=false;rerender()}},'העברה לאשפה')};
+/* הסימונים נשמרים במודל (לא רק ב-DOM), כי מיילים של שולח סגור לא מצוירים */
+function clSync(f){const off=clOff();f.querySelectorAll('input[data-c=secClI]').forEach(i=>{i.checked=!off[i.dataset.g]});f.querySelectorAll('input[data-c=secClS]').forEach(s=>{const l=clList(s.dataset.id);const g=l&&clGroups(l).find(x=>x.k===s.dataset.k);s.checked=!!g&&g.A.every(i=>!off[i.g])})}
+CHG.secClS=el=>{const l=clList(el.dataset.id),g=l&&clGroups(l).find(x=>x.k===el.dataset.k);if(!g)return;const off=clOff();g.A.forEach(i=>{if(el.checked)delete off[i.g];else off[i.g]=1});clSync(el.closest('form'))};
+CHG.secClI=el=>{const off=clOff();if(el.checked)delete off[el.dataset.g];else off[el.dataset.g]=1;clSync(el.closest('form'))};
+ACT.secClAll=el=>{const l=clList(el.dataset.id);if(!l)return;const off=clOff();(l.items||[]).forEach(i=>{if(el.dataset.v==='1')delete off[i.g];else off[i.g]=1});const f=document.getElementById('secCl_'+el.dataset.id);if(f)clSync(f)};
+ACT.secClOp=el=>{const o=clOp(),k=el.dataset.id+'|'+el.dataset.k;if(o[k])delete o[k];else o[k]=1;rerender()};
+function clDo(id,ids,q,btn){if(!ids.length)return toast('לא סומנו מיילים');
+ ask(q,async()=>{if(btn)btn.disabled=true;try{const r=await fnCall('secMail',{op:'cleanOk',id,ids});toast(r&&r.already?'המיילים האלה כבר הועברו לאשפה':'הועברו לאשפה: '+r.trashed+(r.failed?' · נכשלו: '+r.failed:'')+(r.st==='pend'&&r.left?' · נשארו ברשימה: '+r.left:''));X.ml.clean={L:null,off:{},op:clOp()};X.ml.list=null}catch(e){err(e)}finally{if(btn)btn.disabled=false;rerender()}},'העברה לאשפה')}
+FRM.secClOk=f=>{const l=clList(f.dataset.id);if(!l)return;const ids=clSel(l);clDo(f.dataset.id,ids,`להעביר ${ids.length} מיילים לאשפה של Gmail? אפשר לשחזר אותם מהאשפה ב-Gmail.`,f.querySelector('button.btn'))};
+ACT.secClSn=el=>{const l=clList(el.dataset.id),g=l&&clGroups(l).find(x=>x.k===el.dataset.k);if(!g)return;clDo(l.id,g.A.map(i=>i.g),`להעביר לאשפה את כל ${g.n} המיילים של ${g.k||'שולח לא ידוע'} (בלי קשר לסימונים)? אפשר לשחזר אותם מהאשפה ב-Gmail.`,el)};
 ACT.secClNo=el=>{const id=el.dataset.id;ask('לדחות את הרשימה? שום מייל לא יועבר.',async()=>{try{await fnCall('secMail',{op:'cleanNo',id});toast('הרשימה נדחתה');X.ml.clean={L:null};X.ml.list=null;rerender()}catch(e){err(e)}},'דחייה')};
 /* ---------- הגדרות: חיבורי Google ---------- */
 async function gsLoad(){X.gsb=1;try{const r=await fnCall('secGoogle',{op:'status'});X.gs=r&&r.ok?r:{err:'לא נטען'}}catch(e){X.gs={err:e&&e.message||'לא נטען'}}finally{X.gsb=0;if(cur().v==='sec'&&!typing())rerender()}}
@@ -748,6 +764,18 @@ ACT.secGRe=()=>{X.gs=null;rerender()};
 const SG={};
 const sgLoad=id=>{SG[id]=null;window.fnCall('secAdminMail',{bizId:id,op:'get'}).then(r=>{SG[id]=r&&r.ok?r:{err:'לא נטען'}}).catch(e=>{SG[id]={err:e&&e.message||'שגיאה'}}).finally(()=>{if(cur().v==='sab')rerender()})};
 const RG=[['all','הכול'],['12','12 חודשים'],['6','6 חודשים'],['1','חודש'],['none','בכלל לא']];
+const sgDate=ms=>new Date(ms).toLocaleDateString('he-IL');
+function sgInvH(id,c){const nc=+c.noCapUntil||0,on=nc>Date.now(),hi=c.histInv||{},e=esc(id);
+ return `<div class="card" style="margin-top:8px" id="secSgInv"><b>חשבוניות ממיילים ישנים</b>
+ <label class="chip" style="min-height:44px;margin-top:6px"><input type="checkbox" data-c="secSgAuto" data-id="${e}"${c.auto.on?' checked':''}> חיפוש חשבוניות ישנות בחיבור ראשון</label>
+ <p class="note" style="margin:4px 0">${c.auto.on?'כשמחברים תיבה בפעם הראשונה, נסרקים 12 חודשים אחורה בהדרגה.':'כבוי: חיבור תיבה לא מתחיל סריקה.'}</p>
+ <p class="note" style="margin:4px 0" id="secSgNc">${on?'<b>ללא הגבלה עד '+esc(sgDate(nc))+'</b>':'מוגבל: '+esc(String(hi.day||0))+' מתוך '+esc(String(hi.dayMax||30))+' היום'}, ממתינים ${esc(String(hi.wait||0))}</p>
+ <div class="row" style="align-items:flex-end"><label class="f grow"><span>ביטול הגבלת סריקה עד תאריך (עד ${esc(String(c.noCapMaxDays||31))} ימים)</span><input type="date" id="secSgNcD" dir="ltr" min="${esc(new Date().toISOString().slice(0,10))}" max="${esc(new Date(Date.now()+(c.noCapMaxDays||31)*864e5).toISOString().slice(0,10))}"></label><button class="btn" data-a="secSgNoCap" data-id="${e}">ביטול הגבלה</button></div>
+ ${on?`<button class="btn g w" data-a="secSgNoCapOff" data-id="${e}" style="margin-top:6px">החזר הגבלה</button>`:''}</div>`}
+async function sgCall(id,d,msg,el){if(el)el.disabled=true;try{const rg=(SG[id]||{}).rg;SG[id]=Object.assign(await window.fnCall('secAdminMail',Object.assign({bizId:id},d)),{rg});toast(msg)}catch(e){err(e)}finally{if(el)el.disabled=false;if(cur().v==='sab')rerender()}}
+CHG.secSgAuto=el=>sgCall(el.dataset.id,{op:'histAuto',on:!!el.checked},el.checked?'החיפוש האוטומטי הופעל':'החיפוש האוטומטי כובה',el);
+ACT.secSgNoCap=el=>{const v=(document.getElementById('secSgNcD')||{}).value||'';if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return toast('בחר תאריך');const now=Date.now(),max=now+31*864e5-6e4;let u=new Date(v+'T23:59:00').getTime();if(!(u>now))return toast('בחר תאריך עתידי');if(u>max)u=max;sgCall(el.dataset.id,{op:'histNoCap',until:u},'ההגבלה בוטלה עד '+sgDate(u),el)};
+ACT.secSgNoCapOff=el=>sgCall(el.dataset.id,{op:'histNoCap',until:0},'ההגבלה הוחזרה',el);
 {const s6=V.sab;if(s6)V.sab=id=>{const r=s6(id);try{const b=(ADM.L||[]).find(x=>x.id===id);if(!SY.sa||!b||(b.missing&&id!==BZ0)||!r||!r.h||!(b.features&&b.features.secretary===true))return r;
  if(SG[id]===undefined)sgLoad(id);const c=SG[id];let h='<div class="sec"><h3>המזכירה – Gmail</h3></div>';
  if(!c){r.h+=h+'<div class="empty">טוען…</div>';return r}if(c.err){r.h+=h+`<div class="card"><p class="note">${esc(c.err)}</p></div>`;return r}
@@ -758,7 +786,8 @@ const RG=[['all','הכול'],['12','12 חודשים'],['6','6 חודשים'],['1
  <div class="chips" role="radiogroup" style="margin:6px 0">${RG.map(([k,l])=>`<label class="chip" style="min-height:44px"><input type="radio" name="secSgR_${esc(id)}" data-c="secSgR" data-id="${esc(id)}" value="${k}"${rg===k?' checked':''}> ${l}</label>`).join('')}</div>
  <button class="btn w" data-a="secSgCount" data-id="${esc(id)}">ספירה והערכת עלות</button>
  ${ct?`<div class="secin1" id="secSgCt">${ct.none?'נבחר "בכלל לא" – אין סריקה.':`<b>${esc(Number(ct.n).toLocaleString('he-IL'))}${ct.capped?'+':''} מיילים</b> בטווח "${esc((RG.find(x=>x[0]===ct.range)||[])[1]||'')}"${(ct.per||[]).length>1?'<br>'+ct.per.map(p=>'<bdi dir="ltr" class="secaddr">'+esc(p.addr)+'</bdi>: '+p.n).join(' · '):''}<br><small class="note">עלות הסריקה עצמה: 0 (בלי מודל AI). אם יסוכם כל מייל במודל: כ-${esc(usd(ct.est&&ct.est.aiIfSummarizedMc))} (הערכה, לא מאומת).</small><button class="btn" data-a="secSgRun" data-id="${esc(id)}" style="margin-top:8px;width:100%">אישור וסריקה (${esc(String(ct.n))} מיילים)</button>`}</div>`:''}
- ${c.hist?`<div class="secin1" id="secSgHist" style="margin-top:8px">קליטת היסטוריה (${esc(c.hist.rangeL||'')}): <b>${esc(Number(c.hist.n||0).toLocaleString('he-IL'))}</b> נקלטו${c.hist.total?' מתוך כ-'+esc(Number(c.hist.total).toLocaleString('he-IL')):''} – ${c.hist.st==='run'?'בתהליך (ממשיכה כל 15 דקות)':c.hist.st==='stop'?'נעצרה':c.hist.st==='cap'?'נעצרה – העסק בתקרת העלות החודשית':'הסתיימה'}${['run','cap'].includes(c.hist.st)?`<button class="btn" data-a="secSgHist" data-id="${esc(id)}" data-op="histStop" style="margin-top:8px;width:100%">עצירת הקליטה</button>`:''}${['stop','cap'].includes(c.hist.st)?`<button class="btn" data-a="secSgHist" data-id="${esc(id)}" data-op="histGo" style="margin-top:8px;width:100%">המשך הקליטה</button>`:''}</div>`:''}
+ ${c.hist?`<div class="secin1" id="secSgHist" style="margin-top:8px">קליטת היסטוריה (${esc(c.hist.rangeL||'')})${c.hist.auto?' <span class="sectags">התחיל אוטומטית</span>':''}: <b>${esc(Number(c.hist.n||0).toLocaleString('he-IL'))}</b> נקלטו${c.hist.total?' מתוך כ-'+esc(Number(c.hist.total).toLocaleString('he-IL')):''} – ${c.hist.st==='run'?'בתהליך (ממשיכה כל 15 דקות)':c.hist.st==='stop'?'נעצרה':c.hist.st==='cap'?'נעצרה – העסק בתקרת העלות החודשית':'הסתיימה'}${['run','cap'].includes(c.hist.st)?`<button class="btn" data-a="secSgHist" data-id="${esc(id)}" data-op="histStop" style="margin-top:8px;width:100%">עצירת הקליטה</button>`:''}${['stop','cap'].includes(c.hist.st)?`<button class="btn" data-a="secSgHist" data-id="${esc(id)}" data-op="histGo" style="margin-top:8px;width:100%">המשך הקליטה</button>`:''}</div>`:''}
+ ${c.auto?sgInvH(id,c):''}
  ${(c.lists||[]).length?'<p class="note" style="margin:8px 0 0">רשימות: '+c.lists.map(l=>esc(tm(l.t))+' – '+l.n+' מיילים, '+(l.st==='pend'?'ממתינה לאישור מנהל העסק':l.st==='done'?'הועברו לאשפה '+l.trashed:l.st==='rej'?'נדחתה':'בטיפול')).join(' · ')+'</p>':''}</div>`;
  r.h+=h}catch(e){}return r}}
 CHG.secSgR=el=>{const c=SG[el.dataset.id];if(c&&!c.err){c.rg=el.value;c.count=null;rerender()}};
@@ -827,7 +856,7 @@ async function toInbox(x){const lid=lidOf(x.id),L=secL();let it=S.inbox.find(i=>
  if(x.k==='chk')d={kind:'check',amt:Math.max(0,+f.amt||0),date:'',cdate:f.cdate||'',no:String(f.no||'').replace(/\D/g,'').slice(0,20),bank:String(f.bank||'').slice(0,60),payee:String(f.payee||'').slice(0,80),cat:'',catName:'',sub:'',subName:'',note:'',inv:'',dn:false};
  else d={cat:ok?s.cat:'',sub:ok?s.id:'',subName:ok?s.name:String(f.supplier||'').slice(0,80),amt:typeof f.total==='number'?String(f.total):'',date:/^\d{4}-\d{2}-\d{2}$/.test(f.date||'')?f.date:'',inv:x.k==='dn'?'':x.k==='rcpt'?String(f.rel||''):String(f.num||''),dn:x.k==='dn',note:srcN};
  if(x.br&&brAll().some(b=>b.id===x.br))d.br=x.br;
- it={id:lid,by:'המזכירה',ow:'',at:new Date(x.t||Date.now()).toISOString(),d,file:du?'i'+lid:'',np:0,sec:x.id,secK:x.k};
+ it={id:lid,by:'המזכירה',ow:'',at:new Date(x.t||Date.now()).toISOString(),d,file:du?'i'+lid:'',np:0,sec:x.id,secK:x.k};if((x.src||[]).some(q=>q&&q.ch==='mail'))it.secM=1;if(x.noStock||x.hist)it.noStock=1;
  S.inbox.push(it);L[x.id]={s:'in',ns:x.ns||''};save();return it}
 const brNeed=it=>brMulti()&&!(it.d&&it.d.br&&brAll().some(b=>b.id===it.d.br));
 async function ivClaim(x,mode){try{const r=await fnCall('secDecide',{op:'claim',id:x.id,mode,dev:devId()});return r&&r.item||x}catch(e){if(mode==='man')toast(e&&e.reason==='already'?'החשבונית כבר הוכנסה במכשיר אחר':e&&e.message||'לא ניתן לקחת את החשבונית');IV.at=0;return null}}
@@ -852,7 +881,7 @@ async function ivAuto(){if(IV.ab)return;const L=(IV.L&&IV.L.items||[]).filter(x=
   const c=await ivClaim(x,'auto');if(!c)continue;
   const it=await toInbox(c);if(!it)continue;
   await ACT.inbOk({dataset:{id:it.id,ok:'1',aw:'1'}});
-  if(!S.inbox.some(i=>i.id===it.id))n++}}
+  if(!S.inbox.some(i=>i.id===it.id)&&!(x.hist||x.noStock))n++}}
  finally{IV.ab=0}
  if(n){IV.auto+=n;IV.at=0;await ivRec();toast(n===1?'נכנסה חשבונית אחת מהמזכירה. אפשר לבטל במסך "חשבוניות"':'נכנסו '+n+' חשבוניות מהמזכירה. אפשר לבטל במסך "חשבוניות"')}}
 /* חיבור לפעולות הקיימות: אחרי אישור / שמירה / דחייה / שיוך צ׳ק – מדווחים לשרת */
@@ -867,6 +896,7 @@ function ivCard(x){const f=x.f||{},a=ivAmt(x),s=ivSub(x),tg=[],sug=[];let act=''
  if(x.ns)tg.push(`<span class="sectags w">שולח חדש: <bdi dir="ltr">${esc(x.nsShow)}</bdi></span>`);
  if(x.ua)tg.push('<span class="sectags w">שולח לא מאומת – ייתכן שהמייל מזויף</span>');
  if(x.hold==='rel')tg.push('<span class="sectags w">נלקחה במכשיר אחר ולא הושלמה – לבדוק שלא נרשמה כבר</span>');
+ if(x.hist||x.noStock)tg.push('<span class="sectags">ממייל ישן</span>');
  if(x.dup)tg.push('<span class="sectags w">חשד לכפילות</span>');
  const ld=x.st==='new'?locDup(x):null;if(ld)tg.push('<span class="sectags w">כבר רשומה אצלך</span>');
  if(x.st==='new'&&['inv','cr','dn','rcpt'].includes(x.k)&&brMulti()&&!x.br)tg.push('<span class="sectags">ממתין לבחירת סניף</span>');
@@ -911,11 +941,18 @@ function ivSetH(){const R=IV.L;if(!R||R.err||R.br)return '';const c=R.cfg||{},of
 function ivCfH(){const C=S.secCf&&typeof S.secCf==='object'?S.secCf:{},k=Object.keys(C);if(!k.length)return '';
  return `<div class="card" id="secIvCf" style="margin-bottom:8px;border-color:var(--bad)"><b>לבדוק: ייתכן שנרשמה פעמיים</b><p class="note" style="margin:4px 0 6px">החשבוניות האלה נרשמו במכשיר הזה, אבל הדיווח לשרת התעכב יותר מ-24 שעות, ובינתיים ייתכן שנרשמו גם במכשיר אחר. בדקו ברשימת ההוצאות ומחקו כפילות אם יש.</p>${k.map(id=>{const c=C[id]||{};return `<div class="secrow"><small class="note" style="flex:1">${esc(c.sub||'')} ${c.inv?'· מס׳ '+esc(c.inv):''} · ${esc(ils(+c.amt||0))}</small><button class="chip" data-a="secIvCfOk" data-id="${esc(id)}">בדקתי</button></div>`}).join('')}</div>`}
 ACT.secIvCfOk=el=>{const C=secCf();delete C[el.dataset.id];save();rerender()};
-function invH(){const R=IV.L;if(!R){if(!IV.b)ivLoad(1);return '<div class="empty">טוען…</div>'}
+/* חלון "חשבוניות מהמייל": כל ההוצאות שנכנסו מהמזכירה במייל. טופלה = שולמה במלואה (bal) או שאין מעקב תשלום להוצאה. זיהוי מייל: t.mail (חדש) או ערוץ mail בפריט השרת של אותה הוצאה (3 ימים אחרונים); הוצאות ישנות יותר שנכנסו מהמזכירה לא ניתנות לזיהוי כמייל */
+const ivMailTx=()=>{const m=new Set((IV.L&&IV.L.items||[]).filter(x=>(x.src||[]).some(q=>q&&q.ch==='mail')).map(x=>lidOf(x.id)));return S.tx.filter(t=>t&&t.t==='exp'&&(t.mail===1||(t.src&&m.has(t.src))))};
+const ivDone=t=>!hasPay(t)||bal(t)<=0;
+function ivMailH(){const all=ivMailTx().sort((a,b)=>(b.date||'').localeCompare(a.date||'')),f=IV.mf||'un',L=f==='un'?all.filter(t=>!ivDone(t)):all,n=IV.mn||40;
+ return `<button class="btn g w" data-a="secIvMl" data-v="0" style="margin-bottom:8px">חזרה לחשבוניות</button><div class="chips" style="margin-bottom:8px"><button class="chip${f==='un'?' on':''}" data-a="secIvMf" data-v="un">לא טופלו (${all.filter(t=>!ivDone(t)).length})</button><button class="chip${f==='all'?' on':''}" data-a="secIvMf" data-v="all">הכול (${all.length})</button></div>`
+ +(L.length?L.slice(0,n).map(t=>{const d=ivDone(t);return `<div class="card" style="margin-bottom:6px"><div class="ivh"><b>${esc(t.subName||(subById(t.sub)||{}).name||'חשבונית')}</b><span class="iva">${esc(ils(t.amt))}</span></div><small class="note ivs">${esc(dfmt(t.date))}${t.inv?' · מס׳ '+esc(String(t.inv)):''}</small><div class="sectg"><span class="sectags${d?' g':' w'}">${d?'טופלה / שולמה':'לא טופלה'}</span>${t.noStock?'<span class="sectags">ממייל ישן</span>':''}</div></div>`}).join('')+(L.length>n?'<button class="btn g w" data-a="secIvMore">הצג עוד</button>':''):'<div class="card"><p class="note" style="margin:0">אין חשבוניות להצגה. מזהים רק חשבוניות שנכנסו מהמייל מעכשיו והלאה (ובשלושת הימים האחרונים).</p></div>')}
+ACT.secIvMl=el=>{IV.ml=el.dataset.v==='1';IV.mn=40;rerender()};ACT.secIvMf=el=>{IV.mf=el.dataset.v;IV.mn=40;rerender()};ACT.secIvMore=()=>{IV.mn=(IV.mn||40)+40;rerender()};
+function invH(){const R=IV.L;if(!R){if(!IV.b)ivLoad(1);return '<div class="empty">טוען…</div>'}if(IV.ml)return `<div id="secInv">${ivMailH()}</div>`;
  if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secIvRe">נסה שוב</button></div>`;
  const L=R.items||[],P=L.filter(x=>['new','cl','q','qw'].includes(x.st)),D=L.filter(x=>x.st==='ok'&&x.auto&&x.mineOk);
  let h=ivCfH()+ivSetH();
- h+=`<div class="secrow" style="margin:0 0 8px"><button class="chip" data-a="secIvRe">רענון</button>${R.br?'<small class="note">מוצגות רק חשבוניות של הסניפים שלך</small>':''}</div>`;
+ h+=`<div class="secrow" style="margin:0 0 8px"><button class="chip" data-a="secIvRe">רענון</button><button class="chip" data-a="secIvMl" data-v="1">חשבוניות מהמייל</button>${R.br?'<small class="note">מוצגות רק חשבוניות של הסניפים שלך</small>':''}</div>`;
  h+=P.length?P.map(ivCard).join(''):'<div class="card"><p class="note" style="margin:0">אין חשבוניות שממתינות. קבצים שנשלחים לווצאפ של העסק או מצורפים למייל המחובר יופיעו כאן.</p></div>';
  if(D.length)h+=`<div class="sec"><h3>נכנסו אוטומטית (3 ימים אחרונים)</h3></div>`+D.map(ivCard).join('');
  return `<div id="secInv">${h}</div>`}
