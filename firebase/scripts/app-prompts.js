@@ -8,17 +8,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { appSourceLines } = require('../tests/helpers');
 
-const NAMES = { invoice: 'OCAI_P', product: 'SHAI_P', feedback: 'FB_P', zreport: 'ZR_P', opening: 'OPN_P', deposit: 'DEP_P', cashout: 'COUT_P', transfer: 'TRF_P' };
+const NAMES = { invoice: 'OCAI_P', product: 'SHAI_P', feedback: 'FB_P', zreport: 'ZR_P', opening: 'OPN_P', deposit: 'DEP_P', cashout: 'COUT_P', transfer: 'TRF_P', invlines: 'INVL_P' };
 
+// סוף מחרוזת בגרש בודד (text מתחיל ב-'): המיקום של הגרש הסוגר, בדילוג על תווים עם \. -1 = לא נמצא
+function sqEnd(text) {
+  for (let i = 1; i < text.length; i++) { if (text[i] === '\\') i++; else if (text[i] === "'") return i; }
+  return -1;
+}
+
+// ההנחיה בתחילת שורה (const X='...';), או אחרי ; באמצע שורה קיימת (INVL_P – כדי לא להזיז מספרי שורות באפליקציה)
 function extract(lines, name) {
-  const start = lines.findIndex((l) => l.startsWith(`const ${name}=`));
+  const decl = `const ${name}=`;
+  let start = lines.findIndex((l) => l.startsWith(decl)), col = 0;
+  if (start < 0) { start = lines.findIndex((l) => l.includes(';' + decl)); if (start >= 0) col = lines[start].indexOf(';' + decl) + 1; }
   if (start < 0) throw new Error(`ההנחיה ${name} לא נמצאה בקוד האפליקציה`);
-  let text = lines[start].slice(`const ${name}=`.length);
+  let text = lines[start].slice(col + decl.length);
   let end = start;
   const q = text[0];
   if (q === "'") {
-    if (!text.endsWith("';")) throw new Error(`${name}: מבנה שורה לא צפוי`);
+    const e = sqEnd(text);
+    if (e < 0 || text[e + 1] !== ';') throw new Error(`${name}: מבנה שורה לא צפוי`);
+    text = text.slice(0, e + 2);
   } else if (q === '`') {
+    if (col) throw new Error(`${name}: תבנית באמצע שורה – לא נתמך`);
     while (!lines[end].endsWith('`;')) { end++; text += '\n' + lines[end]; }
     if (text.includes('${')) throw new Error(`${name}: יש ביטוי בתוך התבנית – לא נתמך`);
   } else throw new Error(`${name}: סוג מחרוזת לא צפוי`);
