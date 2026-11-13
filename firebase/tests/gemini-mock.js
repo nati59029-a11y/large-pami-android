@@ -65,8 +65,8 @@ const CLASSIFY = {
 };
 // המזכירה (שלב 2): בקשה עם הנחיית מערכת שמתחילה ב-SEC-CHAT-V1. התשובה נקבעת בבדיקה: state.sec = (body) => ({ calls: [{ name, args }] } | { text })
 // usage = טוקנים מדומים לכל תשובה (לבדיקת מונה העלות)
-const state = { invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.invlines = null; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+const state = { invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.invlines = null; state.gone = []; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
@@ -132,6 +132,7 @@ function start() {
         return;
       }
       if (state.delayMs) { const d = state.delayMs; send = (code, obj) => setTimeout(() => send0(code, obj), d); }
+      if (state.gone.includes(m[1])) return send(404, { error: { message: 'model not found' } }); // מודל שהוצא משימוש
       if (state.mode === 'badkey') return send(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
       if (state.mode === 'quota') return send(429, { error: { message: 'quota' } });
       if (state.mode === 'overloaded') return send(503, { error: { message: 'overloaded' } });

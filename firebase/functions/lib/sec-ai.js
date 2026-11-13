@@ -57,38 +57,68 @@ function geminiBody(o) {
   return body;
 }
 
+// 13.11.2026: מודל שהוצא משימוש (Google מחזירה 404) – בוחרים מודל זמין מהרשימה של Google (כמו בסריקה, lib/scan.js), פעם אחת, וזוכרים אותו.
+const goodModel = { fast: '', deep: '' };
+async function pickModel(base, key, tier, bad, signal) {
+  try {
+    const r = await fetch(`${base}/v1beta/models?pageSize=200`, { headers: { 'x-goog-api-key': key }, signal });
+    if (!r.ok) return '';
+    const j = await r.json();
+    const L = (j.models || []).filter((m) => m && typeof m.name === 'string' && (m.supportedGenerationMethods || []).includes('generateContent') && /gemini/.test(m.name)
+      && !/image|tts|live|audio|embed|robotics|computer|gemma|-exp|aqa|imagen|veo|learnlm|vision/.test(m.name))
+      .map((m) => {
+        const n = m.name.replace('models/', ''), v = /(\d+(?:\.\d+)?)/.exec(n);
+        const t = tier === 'deep' ? (/pro/.test(n) ? 0 : /lite/.test(n) ? 2 : 1) : (/lite/.test(n) ? 1 : /flash/.test(n) ? 0 : 2);
+        return { n, t, v: v ? parseFloat(v[1]) : 0, pv: /preview/.test(n) ? 0 : 1, lt: /latest/.test(n) ? 1 : 0 };
+      })
+      .filter((m) => !bad.includes(m.n))
+      .sort((x, y) => x.t - y.t || y.pv - x.pv || y.v - x.v || y.lt - x.lt);
+    return L.length ? L[0].n : '';
+  } catch (e) { return ''; }
+}
+
 async function gemini(o) {
   const base = str(P.base, 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
   assertSafeBase(base);
   let key = '';
   try { key = GEMINI_API_KEY.value(); } catch (e) { key = ''; }
   if (!key) throw new HttpsError('failed-precondition', 'אין מפתח AI בשרת', { reason: 'no-key' });
-  const model = modelOf(o.tier);
+  const tier = o.tier === 'deep' ? 'deep' : 'fast';
+  let model = goodModel[tier] || modelOf(o.tier);
   const ctl = new AbortController();
   const tm = setTimeout(() => ctl.abort(), o.timeoutMs || 45000);
   const out = { sent: 0 };
-  let r;
+  const body = JSON.stringify(o.rawBody || geminiBody(o));
+  const post = async (m) => {
+    try {
+      out.sent = 1;
+      return await fetch(`${base}/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body, signal: ctl.signal,
+      });
+    } catch (e) {
+      clearTimeout(tm);
+      const codes = [e && e.code, e && e.cause && e.cause.code];
+      if (codes.some((c) => ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'].includes(c))) out.sent = 0;
+      const err = new HttpsError(e && e.name === 'AbortError' ? 'deadline-exceeded' : 'unavailable', 'המזכירה לא זמינה כרגע. נסו שוב בעוד דקה.', { reason: e && e.name === 'AbortError' ? 'ai-timeout' : 'ai-network' });
+      err.sent = out.sent;
+      throw err;
+    }
+  };
+  let r = await post(model);
   try {
-    out.sent = 1;
-    r = await fetch(`${base}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(o.rawBody || geminiBody(o)), signal: ctl.signal,
-    });
-  } catch (e) {
-    clearTimeout(tm);
-    const codes = [e && e.code, e && e.cause && e.cause.code];
-    if (codes.some((c) => ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'].includes(c))) out.sent = 0;
-    const err = new HttpsError(e && e.name === 'AbortError' ? 'deadline-exceeded' : 'unavailable', 'המזכירה לא זמינה כרגע. נסו שוב בעוד דקה.', { reason: e && e.name === 'AbortError' ? 'ai-timeout' : 'ai-network' });
-    err.sent = out.sent;
-    throw err;
-  }
-  try {
+    if (r.status === 404) {
+      if (goodModel[tier] === model) goodModel[tier] = '';
+      const alt = await pickModel(base, key, tier, [model], ctl.signal);
+      if (alt) { model = alt; r = await post(model); }
+    }
     if (!r.ok) {
-      const reason = r.status === 429 ? 'ai-quota' : [500, 502, 503, 504].includes(r.status) ? 'ai-overloaded' : (r.status === 400 || r.status === 403) ? 'ai-rejected' : 'ai-error';
+      const reason = r.status === 429 ? 'ai-quota' : r.status === 404 ? 'ai-model' : [500, 502, 503, 504].includes(r.status) ? 'ai-overloaded' : (r.status === 400 || r.status === 403) ? 'ai-rejected' : 'ai-error';
       // לא מעבירים את גוף השגיאה הלאה (עלול להכיל פרטים פנימיים)
       const err = new HttpsError(reason === 'ai-quota' ? 'resource-exhausted' : 'unavailable', 'המזכירה לא זמינה כרגע. נסו שוב בעוד דקה.', { reason, status: r.status });
       err.sent = 1;
       throw err;
     }
+    if (model !== modelOf(o.tier)) goodModel[tier] = model;
     const j = await r.json();
     const c = (j.candidates || [])[0] || {};
     const parts = (c.content && c.content.parts) || [];
@@ -120,4 +150,4 @@ async function transcribe(o) {
   return { text: String(r.text || '').trim().slice(0, 4000), usage: r.usage, sent: r.sent };
 }
 
-module.exports = { chat, transcribe, STT_SYS, costMc, modelOf, geminiBody, GEMINI_API_KEY, PROVIDERS };
+module.exports = { _goodModel: goodModel, chat, transcribe, STT_SYS, costMc, modelOf, geminiBody, GEMINI_API_KEY, PROVIDERS };
