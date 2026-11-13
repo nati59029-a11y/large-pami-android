@@ -269,7 +269,9 @@ document.head.appendChild(css3);
 const TABS=[['chat','שיחה'],['wa','ווצאפ'],['notes','התראות'],['reps','דוחות'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
 const unseenN=()=>X.nl&&!X.nl.err?X.nl.unseen:((X.st&&X.st.unseen)||0);
 function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
-ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')X.fl=null;if(X.tab==='cal')X.cl=null;if(X.tab==='bank')X.rl=null;if(X.tab==='notes')X.nl=null;if(X.tab==='reps'){X.rpl=null;X.rp=null}rerender()};
+/* 13.11.2026: מעבר בין לשוניות – המידע הקודם מוצג מיד ומתעדכן ברקע (במקום "טוען…" בכל מעבר). אחרי שגיאה – טעינה רגילה */
+const swr=(o,k,b,ld)=>{const R=o[k];if(!R||R.err){o[k]=null;return}if(!X[b])ld()};
+ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')swr(X,'fl','fb',factsLoad);if(X.tab==='cal')swr(X,'cl','cb',calLoad);if(X.tab==='bank')swr(X,'rl','rb',rulesLoad);if(X.tab==='notes')swr(X,'nl','nb',notesLoad);if(X.tab==='reps'){X.rp=null;swr(X,'rpl','rb4',repsLoad)}rerender()};
 const dShort=d=>{if(!d)return '';const[y,m,x]=d.split('-').map(Number);return x+'.'+m+'.'+y};
 const hebD=d=>{try{const[y,m,x]=d.split('-').map(Number);return new Intl.DateTimeFormat('he-u-ca-hebrew',{day:'numeric',month:'long'}).format(new Date(y,m-1,x,12))}catch(e){return ''}};
 const wkD=d=>{try{const[y,m,x]=d.split('-').map(Number);return new Date(y,m-1,x,12).toLocaleDateString('he-IL',{weekday:'long'})}catch(e){return ''}};
@@ -301,7 +303,7 @@ ACT.secCOk=async el=>{const id=el.dataset.id,d={op:'approve',id};if(el.dataset.d
 ACT.secCNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secCal',{op:'reject',id});doneMsg(id,'לא נקבע.')}catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
 
 /* ---------- מידע על העסק (8.2 מסך 5) ---------- */
-async function factsLoad(){X.fb=1;try{const r=await fnCall('secFacts',{op:'list'});X.fl=r;X.facts={pend:(r.facts||[]).filter(f=>f.st==='prop').length}}catch(e){X.fl={err:e&&e.message||'לא נטען'}}finally{X.fb=0;if(cur().v==='sec'&&!typing())rerender()}}
+async function factsLoad(){X.fb=1;const s0=X.fl;let again=0;try{const r=await fnCall('secFacts',{op:'list'});if(s0&&X.fl===null){again=1;return}X.fl=r;X.facts={pend:(r.facts||[]).filter(f=>f.st==='prop').length}}catch(e){X.fl=X.fl&&!X.fl.err?X.fl:{err:e&&e.message||'לא נטען'}}finally{X.fb=0;if(again){factsLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 function factsH(S){const R=X.fl;if(!R){if(!X.fb)factsLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="facts">נסה שוב</button></div>`;
  const F=R.facts||[],TP=R.topics||{},FX=R.fixed||{},pend=F.filter(f=>f.st==='prop'),ok=F.filter(f=>f.st==='ok'&&!f.fx),fx={};F.filter(f=>f.fx).forEach(f=>fx[f.fx]=f);
  const who=f=>`<small class="note">${f.src==='chat'?'הוצע בשיחה':'נכתב ידנית'} · ${esc(tm(f.t))}${f.exp?` · ${f.expired?'פג תוקף':'בתוקף עד'} ${esc(dShort(f.exp))}`:''}</small>`;
@@ -349,7 +351,7 @@ FRM.secSEdF=async f=>{const x=fd(f);try{await fnCall('secSens',{op:'edit',id:f.d
 ACT.secSDel=el=>{const id=el.dataset.id;ask('למחוק את המידע הרגיש הזה?',async()=>{try{await fnCall('secSens',{op:'del',id});toast('נמחק');await ACT.secSShow()}catch(e){err(e)}},'מחיקה')};
 
 /* ---------- יומן (8.2 מסך 4): רשימה (ברירת מחדל) ושבוע; שישי/שבת/חג בגוון עדין; הצעות מהמזכירה – לאישור ---------- */
-async function calLoad(){X.cb=1;try{X.cl=await fnCall('secCal',{op:'list'})}catch(e){X.cl={err:e&&e.message||'לא נטען'}}finally{X.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
+async function calLoad(){X.cb=1;const s0=X.cl;let again=0;try{const r=await fnCall('secCal',{op:'list'});if(s0&&X.cl===null){again=1;return}X.cl=r}catch(e){X.cl=X.cl&&!X.cl.err?X.cl:{err:e&&e.message||'לא נטען'}}finally{X.cb=0;if(again){calLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 const SRC={mgr:'ידני',sec:'מהמזכירה',import:'ייבוא',wa:'מווצאפ'};
 function evH(e){return `<div class="secli"><p><b>${e.tm?'<bdi dir="ltr">'+esc(e.tm)+'</bdi> · ':''}${esc(e.title)}</b> ${e.rem?'<span class="sectags">תזכורת</span>':''}<span class="sectags">${e.biz?'של העסק':'אישי'}</span><span class="sectags">${esc(SRC[e.src]||'ידני')}</span>${e.offW?'<span class="sectags w">'+esc(e.offW)+'</span>':''}</p>${e.note?`<small class="note">${esc(e.note)}</small>`:''}<div class="secrow"><button class="chip" data-a="secEvEd" data-id="${esc(e.id)}">ערוך</button><button class="chip" data-a="secEvDel" data-id="${esc(e.id)}">מחק</button></div></div>`}
 function calH(){const R=X.cl;if(!R){if(!X.cb)calLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="cal">נסה שוב</button></div>`;
@@ -380,7 +382,7 @@ ACT.secEvW=async el=>{const p=X.evp;if(!p)return;X.evp=null;const d=Object.assig
 ACT.secEvDel=el=>{const id=el.dataset.id;ask('למחוק את האירוע?',async()=>{try{await fnCall('secCal',{op:'del',id});toast('נמחק');X.cl=null;rerender()}catch(e){err(e)}},'מחיקה')};
 
 /* ---------- תשובות מוכנות (בנק תשובות, 3.5) + ייבוא מהמזכירה הקודמת (99, 100) ---------- */
-async function rulesLoad(){X.rb=1;try{X.rl=await fnCall('secRules',{op:'list'})}catch(e){X.rl={err:e&&e.message||'לא נטען'}}finally{X.rb=0;if(cur().v==='sec'&&!typing())rerender()}}
+async function rulesLoad(){X.rb=1;const s0=X.rl;let again=0;try{const r=await fnCall('secRules',{op:'list'});if(s0&&X.rl===null){again=1;return}X.rl=r}catch(e){X.rl=X.rl&&!X.rl.err?X.rl:{err:e&&e.message||'לא נטען'}}finally{X.rb=0;if(again){rulesLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 function bankH(){const R=X.rl;if(!R){if(!X.rb)rulesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="bank">נסה שוב</button></div>`;
  const L=R.rules||[];
  return `<p class="note" style="margin:0 0 8px">שאלה שמתאימה לתשובה מוכנה נענית מיד, בלי עלות. תשובה עם "תנאים" (למשל "רק אם יש במלאי") עוברת למזכירה, שבודקת את התנאי.</p>
@@ -450,9 +452,9 @@ css4.textContent='.secbadge{display:inline-block;min-width:20px;padding:0 6px;bo
 document.head.appendChild(css4);
 const WDN=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
 /* ---------- התראות ---------- */
-async function notesLoad(){X.nb=1;try{const r=await fnCall('secNotes',{op:'list'});X.nl=r;const ids=(r.notes||[]).filter(n=>!n.seen).map(n=>n.id).slice(0,100);
+async function notesLoad(){X.nb=1;const s0=X.nl;let again=0;try{const r=await fnCall('secNotes',{op:'list'});if(s0&&X.nl===null){again=1;return}X.nl=r;const ids=(r.notes||[]).filter(n=>!n.seen).map(n=>n.id).slice(0,100);
  if(ids.length)fnCall('secNotes',{op:'seen',ids}).then(()=>{if(X.st)X.st.unseen=0;if(X.nl)X.nl.unseen=0}).catch(()=>{})}
- catch(e){X.nl={err:e&&e.message||'לא נטען'}}finally{X.nb=0;if(cur().v==='sec'&&!typing())rerender()}}
+ catch(e){X.nl=X.nl&&!X.nl.err?X.nl:{err:e&&e.message||'לא נטען'}}finally{X.nb=0;if(again){notesLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 const KIND={rep:'דוח',emp:'עובד',dig:'תקציר',wa:'ווצאפ'};
 function noteH(n,T){const lab=n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');const open=n.st==='open'&&n.k==='rem';
  return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><p><b>${esc(n.title)}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
@@ -464,7 +466,7 @@ function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="e
 ACT.secNDone=async el=>{el.disabled=true;try{await fnCall('secNotes',{op:'done',id:el.dataset.id});toast('סומן כטופל');X.nl=null;rerender()}catch(e){el.disabled=false;err(e)}};
 CHG.secNReps=async el=>{const n=+el.value;try{await fnCall('secNotes',{op:'reps',id:el.dataset.id,n});toast(n?'התזכורת תחזור עוד '+n+' פעמים':'החזרות בוטלו')}catch(e){err(e);X.nl=null;rerender()}};
 /* ---------- דוחות ותובנות ---------- */
-async function repsLoad(){X.rb4=1;try{X.rpl=await fnCall('secReports',{op:'list'})}catch(e){X.rpl={err:e&&e.message||'לא נטען'}}finally{X.rb4=0;if(cur().v==='sec'&&!typing())rerender()}}
+async function repsLoad(){X.rb4=1;const s0=X.rpl;let again=0;try{const r=await fnCall('secReports',{op:'list'});if(s0&&X.rpl===null){again=1;return}X.rpl=r}catch(e){X.rpl=X.rpl&&!X.rpl.err?X.rpl:{err:e&&e.message||'לא נטען'}}finally{X.rb4=0;if(again){repsLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 function repH(r){const done=new Set(r.done||[]);
  return `<div class="card secrep" id="secRep"><button class="chip" data-a="secRpBack">חזרה לרשימה</button><h3 style="margin:8px 0 0">${esc(r.title)} · ${esc(dShort(r.key.length===7?r.key+'-01':r.key))}</h3>${r.why?`<p class="note" style="margin:4px 0 0">${esc(r.why)}</p>`:''}
  ${(r.secs||[]).map(x=>`<h4>${esc(x.h)}</h4><ul>${(x.lines||[]).map(l=>`<li>${esc(String(l).replace(/^• /,''))}</li>`).join('')}</ul>`).join('')}
@@ -549,7 +551,7 @@ ACT.secStop=el=>{const on=el.dataset.on==='1';const run=async()=>{el.disabled=tr
  if(on)ask('לעצור את כל השליחה האוטומטית בווצאפ (הודעת פתיחה, "קיבלנו" ותשובות למספר המנהל)? ההודעות ימשיכו להיכנס, ושליחה בלחיצה שלך תמשיך לעבוד.',run,'עצור הכל');else run()};
 /* ---------- תיבת ההודעות ---------- */
 const WF=[['all','הכול'],['pend','ממתין לתשובה'],['unsure','לא בטוחה'],['chk','לבדוק'],['sus','חשוד']];
-async function waLoad(){X.wab=1;try{const r=await fnCall('secInbox',{op:'list'});X.wa.list=r&&Array.isArray(r.cards)?r:{err:'לא נטען'}}catch(e){X.wa.list={err:e&&e.message||'לא נטען'}}finally{X.wab=0;if(cur().v==='sec'&&!typing())rerender()}}
+async function waLoad(){X.wab=1;const s0=X.wa.list;let again=0;try{const r=await fnCall('secInbox',{op:'list'});if(s0&&X.wa.list===null){again=1;return}X.wa.list=r&&Array.isArray(r.cards)?r:{err:'לא נטען'}}catch(e){X.wa.list=X.wa.list&&!X.wa.list.err?X.wa.list:{err:e&&e.message||'לא נטען'}}finally{X.wab=0;if(again){waLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 function waH(){if(X.wa.cur)return waCardH();const R=X.wa.list;if(!R){if(!X.wab)waLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="wa">נסה שוב</button></div>`;
  const f=X.wa.f||'all',L=(R.cards||[]).filter(c=>f==='all'||(f==='pend'?c.pend>0||(c.flags||[]).includes('err'):(c.flags||[]).includes(f)));
  return `${R.connected?'':'<div class="card" style="margin-bottom:8px"><p class="note" style="margin:0">ווצאפ עוד לא מחובר לעסק. מנהל המערכת מחבר את המספר.</p></div>'}
@@ -604,7 +606,7 @@ FRM.secWaSetF=async f=>{const x=fd(f),c=X.wc||{},b=f.querySelector('button.btn')
   const num=String(x.num||'').trim(),curN=c.myNum||c.myReq||'';if(num.replace(/\D/g,'')!==curN.replace(/\D/g,''))r=await fnCall('secWaCfg',{op:'mgrNum',num});
   if(r&&r.ok&&r.stop)X.wc=r;toast(r?'נשמר':'אין שינוי')}catch(e){err(e)}finally{b.disabled=false;rerender()}};
 /* ---------- חיבור למסך: לשונית, פס "עצור הכל", החלפת עסק ---------- */
-{const t0=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='wa')X.wa={f:X.wa&&X.wa.f||'all',list:null,cur:null,card:null};t0(el)}}
+{const t0=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='wa'){X.wa={f:X.wa&&X.wa.f||'all',list:X.wa&&X.wa.list||null,cur:null,card:null};swr(X.wa,'list','wab',waLoad)}t0(el)}}
 {const r5=V.sec;V.sec=()=>{const k=keyNow();if(X.wcKey!==k){X.wcKey=k;X.wc=null;X.wa=null}
  if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&X.tab==='wa'){X.wa=X.wa||{f:'all'};const S=X.st;try{pushReg()}catch(e){}return{t:S.name||'המזכירה',s:'ווצאפ',h:stopH()+tabsH()+waH()}}
  const r=r5();try{if(r&&r.h&&r.h.includes('id="secTabs"'))r.h=stopH()+r.h}catch(e){}return r}}
@@ -663,7 +665,7 @@ const usd=mc=>'$'+((Number(mc)||0)/100000).toFixed(2);
 const WHY={spam:'ספאם',promo:'פרסומת',big:'גדול וישן'};
 const MF=[['all','הכול'],['pend','עם טיוטה'],['sus','חשוד'],['promo','פרסומות']];
 /* ---------- לשונית "מייל" ---------- */
-async function mlLoad(){X.mlb=1;try{const r=await fnCall('secMail',{op:'list'});X.ml.list=r&&Array.isArray(r.mails)?r:{err:'לא נטען'}}catch(e){X.ml.list={err:e&&e.message||'לא נטען'}}finally{X.mlb=0;if(cur().v==='sec'&&!typing())rerender()}}
+async function mlLoad(){X.mlb=1;const s0=X.ml.list;let again=0;try{const r=await fnCall('secMail',{op:'list'});if(s0&&X.ml.list===null){again=1;return}X.ml.list=r&&Array.isArray(r.mails)?r:{err:'לא נטען'}}catch(e){X.ml.list=X.ml.list&&!X.ml.list.err?X.ml.list:{err:e&&e.message||'לא נטען'}}finally{X.mlb=0;if(again){mlLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 function mailH(){const M=X.ml;if(M.clean)return cleanH();if(M.cur)return mlCardH();const R=M.list;if(!R){if(!X.mlb)mlLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="mail">נסה שוב</button></div>`;
  const f=M.f||'all',L=(R.mails||[]).filter(m=>f==='all'||(f==='pend'?m.draft&&['pend','fail'].includes(m.draft.st):f==='promo'?(m.flags||[]).some(x=>x==='promo'||x==='spam'):(m.flags||[]).includes(f)));
  let h='';
@@ -735,7 +737,7 @@ ACT.secGOff=el=>{const cal=el.dataset.k==='cal',d=cal?{op:'disconnect',kind:'cal
 ACT.secGSync=async el=>{el.disabled=true;try{const r=await fnCall('secGoogle',{op:'calSync'});toast('סונכרן'+(r&&(r.add||r.upd||r.del||r.out)?': '+[r.add?'נוספו '+r.add:'',r.upd?'עודכנו '+r.upd:'',r.del?'נמחקו '+r.del:'',r.out?'נשלחו ל-Google '+r.out:''].filter(Boolean).join(', '):''));X.gs=null;X.cl=null}catch(e){err(e)}finally{el.disabled=false;rerender()}};
 ACT.secGRe=()=>{X.gs=null;rerender()};
 /* ---------- חיבור למסך ---------- */
-{const t0=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='mail')X.ml={f:X.ml&&X.ml.f||'all',list:null,cur:null,card:null,clean:null};t0(el)}}
+{const t0=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='mail'){X.ml={f:X.ml&&X.ml.f||'all',list:X.ml&&X.ml.list||null,cur:null,card:null,clean:null};swr(X.ml,'list','mlb',mlLoad)}t0(el)}}
 {const s0=ACT.secSet;ACT.secSet=()=>{X.gs=null;s0()}}
 {const r6=V.sec;V.sec=()=>{const k=keyNow();if(X.mlKey!==k){X.mlKey=k;X.ml=null;X.gs=null}
  if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&X.tab==='mail'){X.ml=X.ml||{f:'all'};const S=X.st;return{t:S.name||'המזכירה',s:'מייל',h:stopH()+tabsH()+mailH()}}
