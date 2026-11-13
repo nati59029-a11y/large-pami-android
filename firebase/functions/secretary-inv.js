@@ -45,6 +45,10 @@ const ilog = (by, who, act, extra) => Object.assign(logData(by, who, act, extra)
 const WA = () => require('./secretary-wa')._core; // עצלן – secretary-wa.js טוען את הקובץ הזה בתוך הטיפול
 const show = (k) => String(k || '').replace(/^wa:/, '+').replace(/^m:/, '');
 
+// ביטול הגבלת הסריקה לקבצים ממייל ישן (מנהל־על, עד תאריך): sec_cfg/mail_auto.noCapUntil (ms; 0/חסר = מוגבל)
+async function noCapOn(db, now) { const s = await db.doc('sec_cfg/mail_auto').get(); return !!(s.exists && Number(s.get('noCapUntil')) > now); }
+// תחילת היום הבא בשעון ישראל (המכסה היומית מתאפסת)
+function nextDay(now) { const k = C.dayKey(now); let t = Math.ceil((now + 1) / 3600e3) * 3600e3; for (let i = 0; i < 30 && C.dayKey(t) === k; i++) t += 3600e3; return t; }
 async function stopOn(db) { const s = await db.doc('sec_cfg/wa').get(); return !!(s.exists && s.get('stop') && s.get('stop').on === true); }
 async function notify(db, key, title, body, now) { try { await WA().notifyMgrs(db, 'inv|' + key, title, body, now); } catch (e) { logger.warn('secretary-inv: notify failed', { reason: (e && e.code) || 'error' }); } }
 
@@ -58,13 +62,16 @@ async function ingest(db, o) {
   if (o.sus) src.sus = true;
   // תיקון 1 (ליקוי 2): מייל שלא עבר אימות DKIM/DMARC של דומיין השולח (secretary-google: authOf)
   if (src.ch === 'mail' && o.auth === false) src.ua = true;
+  // קובץ ממייל ישן (סריקת היסטוריה): הוצאה בלבד – בלי מלאי ובלי תמחור (noStock), בלי התראות, ותקציב סריקה נפרד (workIn)
+  if (o.hist) src.hist = true;
+  const histF = o.hist ? { hist: true, noStock: true } : {};
   const fn = String(o.fn || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120);
   const chk = o.why ? { ok: false, why: o.why } : SI.inspect(o.buf);
   if (!chk.ok) {
     // קובץ חשוד / לא נתמך: לא נשמר, לא נפתח ולא נשלח לזיהוי. כרטיס עם שם השולח
     const id = 'x' + SI.sha(src.ch + '|' + src.in + '|' + (o.idx || 0) + '|' + fn).slice(0, 40);
     const ref = db.doc('sec_inv/' + id);
-    try { await ref.create({ st: 'new', k: 'bad', why: [chk.why], t: now, src: [src], fn, size: Buffer.isBuffer(o.buf) ? o.buf.length : Number(o.size) || 0, np: 0, el: false }); } catch (e) { if (e && e.code === 6) return { id, dup: true, bad: true }; throw e; }
+    try { await ref.create(Object.assign({ st: 'new', k: 'bad', why: [chk.why], t: now, src: [src], fn, size: Buffer.isBuffer(o.buf) ? o.buf.length : Number(o.size) || 0, np: 0, el: false }, histF)); } catch (e) { if (e && e.code === 6) return { id, dup: true, bad: true }; throw e; }
     await db.collection('sec_log').doc().set(ilog('', 'sec', 'invBad', { tgt: id, note: chk.why }));
     return { id, bad: true };
   }
@@ -92,6 +99,7 @@ async function ingest(db, o) {
   }
   const doc = { st: chk.long ? 'new' : 'q', k: chk.long ? 'long' : 'q', t: now, src: [src], fn, mime: chk.mime, size: o.buf.length, np, pages: chk.pages, el: false };
   if (src.sus) doc.sus = true;
+  Object.assign(doc, histF);
   try { await ref.create(doc); } catch (e) { if (e && e.code === 6) { await add(); return { id, dup: true }; } throw e; }
   await db.collection('sec_log').doc().set(ilog('', 'sec', chk.long ? 'invLong' : 'invIn', { tgt: id, note: src.ch }));
   // בדיקות שמריצות את הזיהוי בתוך התהליך (עם מודל מדומה) – בלי תור, כדי שהטריגר באמולטור לא יתחרה בהן. רק באמולטור
@@ -144,14 +152,27 @@ async function workIn(id, o) {
   if (!data) return fail('file');
   // 109: הזיהוי עובר דרך המכסה הקיימת של העסק, קובץ = 1 (גם PDF של 4 עמודים)
   const bizId = (T.scope() || {}).bizId;
-  let usage;
-  try {
-    const caps = await scan.bizCaps(bizId, SEC_USER_DAY);
-    usage = await scan.reserveScan(SEC_SCAN_UID, caps.perUser, caps.bizDaily, 1, caps.bizKey, caps.period);
-  } catch (e) { if (e && e.code === 'resource-exhausted') return fail('quota'); throw e; }
+  // קובץ ממייל ישן: בזמן "ביטול הגבלה" של מנהל־העל (sec_cfg/mail_auto.noCapUntil) – לא נבדק ולא נספר במכסות. אחרת – מכסה מלאה: ממתין למחר (לא כרטיס "מכסה")
+  const noCap = x.hist === true && await noCapOn(db, now);
+  let usage = null;
+  if (!noCap) {
+    try {
+      const caps = await scan.bizCaps(bizId, SEC_USER_DAY);
+      usage = await scan.reserveScan(SEC_SCAN_UID, caps.perUser, caps.bizDaily, 1, caps.bizKey, caps.period);
+    } catch (e) {
+      if (e && e.code === 'resource-exhausted' && x.hist === true) {
+        await ref.update({ st: 'q', wk: FieldValue.delete(), qwt: nextDay(now) });
+        await db.collection('sec_log').doc().set(ilog('', 'sec', 'invWait', { tgt: id, note: 'hist' }));
+        return { wait: true };
+      }
+      if (e && e.code === 'resource-exhausted') return fail('quota');
+      throw e;
+    }
+  }
   let raw;
+  // סריקה אחידה (classify): כותרת המסמך בלבד – ספק, ח.פ, מספר, תאריך, סכומים, מע"מ – בלי שורות פריטים (שורות = invlines, רק מהמכשיר)
   try { raw = await (o.classify || geminiClassify)({ mimeType: x.mime, data }); } catch (e) {
-    await scan.refundScan(SEC_SCAN_UID, usage.day); // כמו בסריקה האחידה: זיהוי שנכשל לא נספר
+    if (usage) await scan.refundScan(SEC_SCAN_UID, usage.day); // כמו בסריקה האחידה: זיהוי שנכשל לא נספר
     return fail('ai');
   }
   const m = SI.mapClassify(CL.shapeClassify(raw, CL.TYPES, {}));
@@ -162,6 +183,7 @@ async function workIn(id, o) {
   // מייל לא מאומת: השולח לא משמש לזיהוי הספק (אין 'snd'), והחשבונית לא זכאית ל"נכנס ישר" (why 'auth')
   const ua = s0.ch === 'mail' && s0.ua === true;
   const up = { st: 'new', k: m.k, t0: m.t0, f: m.f, unsure: m.unsure, wk: FieldValue.delete(), ua };
+  if (x.qwt) up.qwt = FieldValue.delete();
   if (['inv', 'rcpt', 'dn', 'cr'].includes(m.k)) {
     const sm = SI.matchSup(m.f, cfg, ua ? '' : skey);
     const b = SI.brOf(sm.sub, cfg);
@@ -191,15 +213,16 @@ async function workIn(id, o) {
     }
     if (up.dup) { up.el = false; up.why = [...new Set(up.why.concat(['dup']))]; await ref.update({ dup: up.dup, el: false, why: up.why }); }
   }
+  const quiet = x.hist === true; // מייל ישן (החלטה 3): בלי שום התראה – רק רישום ב-sec_log
   if (ua && (cfg.links[skey] || up.el)) {
     // המייל לא אומת – אולי זיוף. כתובת של ספק מקושר: ממתינה + התראה. ח.פ של ספק מוכר (החלטה, שלב 8): זכאית ל"נכנס ישר" – עם התראה "שולח לא מאומת"
     await db.collection('sec_log').doc().set(ilog('', 'sec', 'invUnauth', { tgt: id, note: up.el ? 'el' : '' }));
-    await notify(db, 'ua|' + id, 'חשבונית ממייל לא מאומת', 'הגיעה חשבונית במייל מהכתובת ' + show(skey) + ', אבל Gmail לא אישר שהמייל באמת נשלח ממנה. '
+    if (!quiet) await notify(db, 'ua|' + id, 'חשבונית ממייל לא מאומת', 'הגיעה חשבונית במייל מהכתובת ' + show(skey) + ', אבל Gmail לא אישר שהמייל באמת נשלח ממנה. '
       + (up.el ? 'מספר העוסק בה תואם ספק מוכר (' + (up.subN || '') + '), ולכן היא תיכנס ישר – כדאי לבדוק שהיא אמיתית. אפשר לבטל במסך "חשבוניות שהתקבלו".' : 'היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".'), now);
   }
   if (up.dup) {
     await db.collection('sec_log').doc().set(ilog('', 'sec', 'invDup', { tgt: id, note: up.dup }));
-    await notify(db, 'dup|' + id, 'חשד לחשבונית כפולה', 'הגיעה חשבונית שנראית כמו חשבונית שכבר התקבלה. היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".', now);
+    if (!quiet) await notify(db, 'dup|' + id, 'חשד לחשבונית כפולה', 'הגיעה חשבונית שנראית כמו חשבונית שכבר התקבלה. היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".', now);
   }
   return { k: m.k, el: up.el, why };
 }
@@ -221,6 +244,7 @@ function outOf(id, x, uid, now) {
     src: (x.src || []).slice(0, SRC_MAX).map((s) => ({ ch: s.ch, from: s.from, name: s.name || '', t: s.t || 0, sus: !!s.sus })),
     f: x.f || {}, unsure: x.unsure || [], sub: x.sub || '', subN: x.subN || '', match: x.match || '', br: x.br || '', brOk: x.brOk === true,
     ns: x.ns || '', nsShow: show(x.ns), ua: x.ua === true, dup: x.dup || '', el: x.el === true, why: x.why || [], hold: x.hold || '', err: x.err || '', t0: x.t0 || '',
+    hist: x.hist === true, noStock: x.noStock === true, wait: x.st === 'q' && Number(x.qwt) > now,
   };
   if (x.st === 'cl') Object.assign(o, { mine: x.by === uid, dev: x.by === uid ? x.dev || '' : '', clAt: x.clAt || 0, stale: now - (x.clAt || 0) > SI.CLAIM_MS });
   if (x.st === 'ok') Object.assign(o, { okAt: x.okAt || 0, auto: x.auto === true, mineOk: x.okBy === uid, okDev: x.okBy === uid ? x.dev || '' : '', purged: x.purged === true });
@@ -484,6 +508,11 @@ async function requeue(db, bizId, now) {
       const c = await tx.get(d.ref);
       if (!c.exists) return '';
       const x = c.data();
+      if (x.st === 'q' && x.qwt) { // קובץ ממייל ישן שממתין למכסה של מחר: חוזר לתור בלי להגדיל את מספר הניסיונות
+        if (now < Number(x.qwt)) return '';
+        tx.update(d.ref, { st: 'q', rqAt: now, qwt: FieldValue.delete() });
+        return 'w' + now;
+      }
       const at = Number(x.st === 'qw' ? x.wk : x.rqAt || x.t) || 0;
       if (!['q', 'qw'].includes(x.st) || now - at <= INV_REQ_AGE) return '';
       const n = Number(x.rq) || 0;
@@ -499,4 +528,4 @@ async function requeue(db, bizId, now) {
   return out;
 }
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { ingest, work, workIn, secInv, secDecide, retention, requeue, INV_REQ_AGE, INV_REQ_MAX, SEC_SCAN_UID, readFile } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { ingest, work, workIn, secInv, secDecide, retention, requeue, INV_REQ_AGE, INV_REQ_MAX, SEC_SCAN_UID, SEC_USER_DAY, readFile, nextDay, noCapOn } });

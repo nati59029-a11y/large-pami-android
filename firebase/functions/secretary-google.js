@@ -20,7 +20,10 @@
 //   sec_cfg/mail_use  מונים: יציאות ליום, קליטה ליום לתיבה, ניסיונות חיבור לשעה
 //   sec_cfg/mail_scan { range, n, at, by } – הספירה האחרונה, לאישור הסריקה
 //   sec_cfg/mail_hist { st:'run'|'stop'|'cap'|'done', range, q, by, t, upd, total, n, dup, boxes:{ boxId:{ pg, end } }, lock } – תור קליטת ההיסטוריה
-//   sec_clean/{id}    רשימת ניקוי: { st:'pend'|'work'|'done'|'rej', by, t, range, items:[{g,box,f,s,d,z,w,r?}], n, z }
+//                     + invDay:{d,n} – תקציב יומי לקבצים ממיילים ישנים; auto:true – התחילה אוטומטית בחיבור תיבה; boxes.<id>.q – טווח לתיבה (גובר על q)
+//   sec_cfg/mail_auto { on (חסר=true – סריקת 12 חודשים בחיבור ראשון של תיבה), seen:{boxId:t}, init, noCapUntil (ms; 0/חסר=מוגבל), by, t, fill, fillAt } – מנהל־על בלבד
+//   sec_in.invW:true  – מייל ישן עם קבצים שממתינים לתור החשבוניות (histInvStep); invL – נעילה; invN – ניסיונות; invX – 'off'|'gone' (לא נקלט)
+//   sec_clean/{id}    רשימת ניקוי: { st:'pend'|'work'|'done'|'rej', by, t, range, items:[{g,box,f,s,d,z,w,r?}], n, z, trashed (מצטבר) } – אישור חלקי: נשארת pend עד שכל הפריטים הועברו
 //   sec_gcal/{uid}__{calId} מיפוי אירוע ↔ Google: { uid, cal, gid, at (עדכון אחרון אצל Google), lt (סנכרון אחרון מקומי), biz }
 //   private/sec_gm_{boxId}, private/sec_gc_{uid}  { box: אסימון מוצפן, at } – אף אחד מהאפליקציה (החוקים), לא מגובה
 // בשורש (שרת בלבד): sec_oauth/{sha256(state)} – בקשות חיבור פתוחות; sec_oauth/c_{sha256(אסימון האישור)} – חיבור שממתין לאישור בדף (האסימון של Google מוצפן); sec_mailroute/{כתובת} – { biz, box } (בידוד: כתובת אחת → עסק אחד).
@@ -29,7 +32,7 @@ const { onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { onMessagePublished } = require('firebase-functions/v2/pubsub');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const logger = require('firebase-functions/logger');
-const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue, FieldPath } = require('firebase-admin/firestore');
 const { onCall, LEGACY_REGION } = require('./lib/region');
 const { inputObject, requireStaff } = require('./lib/roles');
 const T = require('./lib/tenant');
@@ -343,10 +346,12 @@ async function finishConnect(st, yes, now) {
   if (!addr || addr !== st.addr) { await G.revoke(u, tok.rt); return { code: 400, title: 'החיבור לא הושלם', body: 'לא התקבלה כתובת התיבה.' }; }
   const boxId = G.boxIdOf(addr);
   const rref = getFirestore().doc('sec_mailroute/' + addr), cref = db.doc('sec_cfg/mail');
+  let existed = false;
   const res = await getFirestore().runTransaction(async (tx) => {
     const [rs, ms] = await Promise.all([tx.get(rref), tx.get(cref)]);
     if (rs.exists && rs.get('biz') !== bizId) return 'taken'; // בידוד: תיבה אחת → עסק אחד
     const m = mailCfgOf(ms);
+    existed = !!m.boxes[boxId];
     if (!m.boxes[boxId] && Object.keys(m.boxes).length >= m.max) return 'max'; // 26א – גם אם שתי בקשות חיבור רצו במקביל
     tx.set(rref, { biz: bizId, box: boxId, t: now });
     tx.set(cref, { boxes: { [boxId]: { addr, st: 'ok', at: now, by: st.uid, scopes: granted, clean: granted.includes(G.SC.modify), hist: String(prof.historyId || ''), lag: false } } }, { merge: true });
@@ -359,8 +364,47 @@ async function finishConnect(st, yes, now) {
     await cref.set({ boxes: { [boxId]: { hist: String(w.historyId || prof.historyId || ''), watchExp: Number(w.expiration) || 0 } } }, { merge: true });
   } catch (e) { await db.collection('sec_log').doc().set(glog('', 'auto', 'watchFail', { tgt: boxId })); }
   await db.collection('sec_log').doc().set(glog(st.uid, 'mgr', 'gmailOn', { tgt: boxId, note: granted.includes(G.SC.modify) ? 'clean' : 'base' }));
-  await WA.notifyMgrs(db, 'gmailon|' + boxId + '|' + now, 'חוברה תיבת Gmail', 'התיבה ' + addr + ' חוברה למזכירה של העסק, על ידי ' + mgr.label + '. אם לא ידוע לך על החיבור – אפשר לנתק בהגדרות המזכירה.', now).catch(() => {});
-  return { code: 200, title: 'תיבת ה-Gmail חוברה', body: 'מיילים חדשים ב-' + addr + ' ייכנסו לתיבת המזכירה. תשובה נשלחת רק בלחיצה שלך.' };
+  // קליטה אוטומטית של 12 החודשים האחרונים בחיבור ראשון של התיבה (לא מריצים עמוד עכשיו – הריצה המתוזמנת; בלי רשימת ניקוי)
+  let ah = '';
+  try { ah = await autoHist(db, boxId, existed, now); } catch (e) { logger.warn('secretary-google: auto hist failed', { reason: (e && e.code) || 'error' }); }
+  if (ah) await db.collection('sec_log').doc().set(glog('', 'auto', 'histAuto', { tgt: boxId, note: ah }));
+  const ahTxt = ah ? ' בנוסף, המזכירה תקלוט ברקע, בהדרגה, את המיילים מ-12 החודשים האחרונים, כולל חשבוניות ישנות.' : '';
+  await WA.notifyMgrs(db, 'gmailon|' + boxId + '|' + now, 'חוברה תיבת Gmail', 'התיבה ' + addr + ' חוברה למזכירה של העסק, על ידי ' + mgr.label + '. אם לא ידוע לך על החיבור – אפשר לנתק בהגדרות המזכירה.' + ahTxt, now).catch(() => {});
+  return { code: 200, title: 'תיבת ה-Gmail חוברה', body: 'מיילים חדשים ב-' + addr + ' ייכנסו לתיבת המזכירה. תשובה נשלחת רק בלחיצה שלך.' + ahTxt };
+}
+// ההגדרות האוטומטיות (sec_cfg/mail_auto). אתחול חד־פעמי (init): כל תיבה שכבר מחוברת או שכבר נסרקה – נחשבת "נקלטה" (בלי סריקה אוטומטית).
+// skip – תיבה שמתחברת עכשיו לראשונה (כבר נכתבה ל-sec_cfg/mail בטרנזקציה של החיבור). מחזיר null כשכבר אותחל
+function autoSeen(a, ms, hs, now, skip) {
+  if (a && a.init) return null;
+  const seen = {};
+  for (const id of Object.keys(mailCfgOf(ms).boxes)) if (id !== skip) seen[id] = now;
+  const hb = hs && hs.exists ? hs.get('boxes') : null;
+  if (hb && typeof hb === 'object') for (const id of Object.keys(hb)) if (/^gm[0-9a-f]{16}$/.test(id)) seen[id] = now;
+  return seen;
+}
+// חיבור תיבה: אם ההגדרה פעילה והתיבה לא נקלטה בעבר – עבודת קליטת היסטוריה (12 חודשים) חדשה, או הוספת התיבה לעבודה קיימת. מחזיר 'new' | 'add' | ''.
+// תיבה שחוברה כשההגדרה כבויה / שיש לה כבר מיילים ב-sec_in – מסומנת "נקלטה" בלי סריקה
+async function autoHist(db, boxId, existed, now) {
+  const had = !(await db.collection('sec_in').where('box', '==', boxId).limit(1).get()).empty;
+  const aref = db.doc('sec_cfg/mail_auto'), href = db.doc('sec_cfg/mail_hist'), mref = db.doc('sec_cfg/mail');
+  return db.runTransaction(async (tx) => {
+    const [as, ms, hs] = await Promise.all([tx.get(aref), tx.get(mref), tx.get(href)]);
+    const a = as.exists ? as.data() || {} : {};
+    const init = autoSeen(a, ms, hs, now, existed ? '' : boxId);
+    const seen = Object.assign({}, a.seen && typeof a.seen === 'object' ? a.seen : {}, init || {});
+    const was = !!seen[boxId];
+    if (init || !was) tx.set(aref, Object.assign({ seen: Object.assign({}, init || {}, was ? {} : { [boxId]: now }) }, init ? { init: now } : {}), { merge: true });
+    if (was || a.on === false || had) return '';
+    const q = G.rangeQ('12', now);
+    const j = hs.exists ? hs.data() || {} : null;
+    if (j && ['run', 'stop', 'cap'].includes(j.st)) {
+      const cur = j.boxes && typeof j.boxes === 'object' ? j.boxes[boxId] : null;
+      if (!cur || cur.end) tx.update(href, { ['boxes.' + boxId]: { pg: '', end: false, q }, upd: now });
+      return 'add';
+    }
+    tx.set(href, Object.assign({ st: 'run', range: '12', q, auto: true, by: 'auto', t: now, upd: now, total: 0, n: 0, dup: 0, boxes: { [boxId]: { pg: '', end: false, q } }, lock: 0 }, j && j.invDay ? { invDay: j.invDay } : {}));
+    return 'new';
+  });
 }
 
 // =====================================================================================
@@ -412,10 +456,12 @@ async function saveMail(db, c, ctx, gid, now, o) {
   const doc = { ch: 'mail', own: 'sec', box: ctx.boxId, gid: p.gid, thr: p.thr, mid: p.mid, from: p.from, rto: p.replyTo, name: p.name, subj: p.subj, text: big ? p.snippet : p.text,
     t: p.t || now, rt: now, type: 'text', st: sus ? 'sus' : 'done', cls: kind ? 'promo' : 'mail', flags, files: p.files, size: p.size, tf: p.t || now };
   if (o.hist) doc.bg = true; // רקע: מייל ישן – בלי טיוטה ובלי שליחה אוטומטית (ממילא אין כאלה למייל)
+  const wantInv = !!(p.att.length || (big && /^multipart\/(mixed|related)/.test(p.ctype)));
+  if (o.hist && wantInv) doc.invW = true; // מייל ישן עם קבצים: לתור החשבוניות בהדרגה (histInvStep), בלי הורדה עכשיו
   try { await ref.create(doc); } catch (e) { if (e && e.code === 6) return 'dup'; throw e; }
   if (sus) await db.collection('sec_log').doc().set(glog('', 'sec', 'sus', { tgt: ref.id, note: fromMgr ? 'mgrMail' : '' }));
-  // שלב 7: קבצים מצורפים → תור החשבוניות. לא במייל ישן מסריקת היסטוריה (רקע, בלי עלות זיהוי – הנחה). תקלה כאן לא פוגעת בקליטת המייל
-  if (!o.hist && (p.att.length || (big && /^multipart\/(mixed|related)/.test(p.ctype)))) {
+  // שלב 7: קבצים מצורפים → תור החשבוניות. מייל ישן מסריקת היסטוריה – לא כאן אלא בהדרגה, בתקציב יומי (histInvStep). תקלה כאן לא פוגעת בקליטת המייל
+  if (!o.hist && wantInv) {
     try { const r = await invFiles(db, c, gid, p, big, sus, now); if (r.ids.length || r.names.length) await ref.update(Object.assign({ inv: r.ids }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {})); } catch (e) {
       logger.warn('secretary-google: invoice files failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
       // תיקון 1 (ליקוי 5): לא מאבדים בשקט – כרטיס "הקובץ לא נקלט – תקלה, לבדוק במייל" עם השולח, וסימון במייל עצמו
@@ -431,14 +477,14 @@ async function saveMail(db, c, ctx, gid, now, o) {
 // קבצים מצורפים של מייל אחד → secretary-inv.ingest. סוג לא מותר (zip, Office, הפעלה…) או גדול מדי – כרטיס בלי הורדה (10.3).
 // תמונה קטנה מאוד (חתימה/לוגו במייל) – מדלגים, כדי שלא תיספר במכסת הסריקה (הנחה: מתחת ל-15KB).
 const INV_ATT_MAX = 5, INV_IMG_MIN = 15000;
-async function invFiles(db, c, gid, p, big, sus, now) {
+async function invFiles(db, c, gid, p, big, sus, now, hist) {
   const INV = require('./secretary-inv')._core;
   const SI = require('./lib/sec-inv');
   let atts = p.att;
   if (!atts.length && big) atts = G.attOf(await c.struct(gid));
   const ids = [], names = atts.map((a) => a.fn).slice(0, 20);
   for (const [i, a] of atts.slice(0, INV_ATT_MAX).entries()) {
-    const base = { ch: 'mail', from: p.from, name: p.name, inId: gid, idx: i, fn: a.fn, sus, auth: p.auth === true, now };
+    const base = { ch: 'mail', from: p.from, name: p.name, inId: gid, idx: i, fn: a.fn, sus, auth: p.auth === true, now, hist: hist === true };
     const why = SI.badByName(a.fn, a.mime) || (a.size > SI.MAX_FILE ? 'big' : '');
     if (!why && a.mime.startsWith('image/') && a.size && a.size < INV_IMG_MIN) continue;
     let r;
@@ -654,9 +700,12 @@ async function secMail(request) {
   return cleanDecide(who, db, input, op, now);
 }
 function cleanOut(id, x) {
+  const items = x.items || [];
   return { id, st: x.st, t: x.t || 0, range: x.range || '', rangeL: G.RANGES[x.range] || '', n: x.n || 0, z: x.z || 0, trashed: x.trashed || 0, failed: x.failed || 0,
-    items: (x.items || []).map((i) => ({ g: i.g, f: i.f || '', s: i.s || '', d: i.d || 0, z: i.z || 0, w: i.w || '', r: i.r || '' })) };
+    left: items.filter(cleanOpen).length,
+    items: items.map((i) => ({ g: i.g, f: i.f || '', s: i.s || '', d: i.d || 0, z: i.z || 0, w: i.w || '', r: i.r || '', box: i.box || '' })) };
 }
+const cleanOpen = (i) => !!i && i.r !== 't'; // החלטה 4: פריט שכבר הועבר לאשפה – מטופל, לא מועבר שוב
 // אישור הרשימה (פ3): רק מנהל של העסק (gate – מנהל־על שאינו מנהל העסק נחסם). מנהל העסק רשאי לאשר גם אם הוא הכין את הרשימה או שהוא גם מנהל־על (הנחה א' – פיילוט עם מנהל אחד). רק פריטים שברשימה המוצגת. אשפה בלבד
 async function cleanDecide(who, db, input, op, now) {
   const id = typeof input.id === 'string' && ID_RE.test(input.id) ? input.id : null;
@@ -675,14 +724,17 @@ async function cleanDecide(who, db, input, op, now) {
     await b.commit();
     return { ok: true, id };
   }
+  // החלטה 4: אישור חלקי – אפשר לאשר שולח / מיילים בודדים; הרשימה נשארת "ממתינה" עד שכל הפריטים הועברו לאשפה
   const items = Array.isArray(L.items) ? L.items : [];
-  let pick = items;
+  let want = null;
   if (input.ids !== undefined) {
     if (!Array.isArray(input.ids) || !input.ids.length || input.ids.length > G.CLEAN_MAX || input.ids.some((x) => typeof x !== 'string')) throw bad('bad-ids', 'בחירה לא תקינה');
-    const want = new Set(input.ids);
-    pick = items.filter((i) => want.has(i.g));
-    if (pick.length !== want.size) throw bad('bad-ids', 'אפשר לאשר רק מיילים מהרשימה המוצגת'); // לא מוסיפים מזהים מבחוץ
+    want = new Set(input.ids);
+    if (items.filter((i) => want.has(i.g)).length !== want.size) throw bad('bad-ids', 'אפשר לאשר רק מיילים מהרשימה המוצגת'); // לא מוסיפים מזהים מבחוץ
   }
+  const pickOf = (arr) => arr.filter((i) => cleanOpen(i) && (!want || want.has(i.g)));
+  let pick = pickOf(items);
+  if (!pick.length && want) return { ok: true, id, already: true, trashed: 0, failed: 0, left: items.filter(cleanOpen).length }; // כבר הועברו – לא פעמיים
   if (!pick.length) throw bad('bad-ids', 'לא נבחרו מיילים');
   const m = mailCfgOf(await db.doc('sec_cfg/mail').get());
   const boxes = [...new Set(pick.map((i) => i.box))];
@@ -690,12 +742,16 @@ async function cleanDecide(who, db, input, op, now) {
     if (!m.boxes[bx] || m.boxes[bx].st !== 'ok') throw pre('not-connected', 'התיבה לא מחוברת');
     if (!m.boxes[bx].clean) throw pre('need-clean-scope', 'כדי להעביר לאשפה צריך לחבר מחדש את התיבה ' + m.boxes[bx].addr + ' עם הרשאת ניקוי (בהגדרות המזכירה).');
   }
+  let cur = items, prev = 0;
   await db.runTransaction(async (tx) => {
     const c = await tx.get(ref);
     const v = c.data();
     if (v.st !== 'pend' && !(v.st === 'work' && now - (v.okAt || 0) > 5 * 60000)) throw pre('not-pending', 'הרשימה כבר טופלה');
-    tx.update(ref, { st: 'work', okBy: who.uid, okAt: now });
+    cur = Array.isArray(v.items) ? v.items : []; prev = Number(v.trashed) || 0;
+    pick = pickOf(cur); // לפי המצב העדכני (אישור מקביל שכבר הסתיים – לא מעבירים שוב)
+    if (pick.length) tx.update(ref, { st: 'work', okBy: who.uid, okAt: now });
   });
+  if (!pick.length) return { ok: true, id, already: true, trashed: 0, failed: 0, left: cur.filter(cleanOpen).length };
   const cl = {};
   for (const bx of boxes) cl[bx] = (await access(db, T.scope().bizId, 'mail', bx)).c;
   const res = {};
@@ -703,12 +759,14 @@ async function cleanDecide(who, db, input, op, now) {
   for (const it of pick) {
     try { await cl[it.box].trash(it.g); res[it.g] = 't'; ok++; } catch (e) { res[it.g] = 'f'; fail++; }
   }
+  const all = cur.map((i) => (res[i.g] ? Object.assign({}, i, { r: res[i.g] }) : i));
+  const left = all.filter(cleanOpen).length;
   const b = db.batch();
-  b.update(ref, { st: 'done', trashed: ok, failed: fail, doneAt: Date.now(), items: items.map((i) => (res[i.g] ? Object.assign({}, i, { r: res[i.g] }) : i)) });
+  b.update(ref, Object.assign({ st: left ? 'pend' : 'done', trashed: prev + ok, failed: all.filter((i) => i.r === 'f').length, items: all }, left ? {} : { doneAt: Date.now() }));
   // 10.7, 28: כל העברה לאשפה נרשמת – בלי תוכן המיילים
-  b.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'mailTrash', { tgt: id, note: 'trash ' + ok + '/' + pick.length + (fail ? ' fail ' + fail : '') }));
+  b.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'mailTrash', { tgt: id, note: 'trash ' + ok + '/' + pick.length + (fail ? ' fail ' + fail : '') + (left ? ' left ' + left : '') }));
   await b.commit();
-  return { ok: true, id, trashed: ok, failed: fail };
+  return { ok: true, id, trashed: ok, failed: fail, left, st: left ? 'pend' : 'done', total: prev + ok };
 }
 
 // =====================================================================================
@@ -785,16 +843,22 @@ async function countBox(c, q) {
   return { n, capped };
 }
 async function adminOut(db) {
-  const [ms, sc, cl, hs] = await Promise.all([db.doc('sec_cfg/mail').get(), db.doc('sec_cfg/mail_scan').get(), db.collection('sec_clean').orderBy('t', 'desc').limit(5).get(), db.doc('sec_cfg/mail_hist').get()]);
-  const m = mailCfgOf(ms), h = hs.exists ? hs.data() : null;
+  const now = Date.now();
+  const [ms, sc, cl, hs, as, wc] = await Promise.all([db.doc('sec_cfg/mail').get(), db.doc('sec_cfg/mail_scan').get(), db.collection('sec_clean').orderBy('t', 'desc').limit(5).get(), db.doc('sec_cfg/mail_hist').get(),
+    db.doc('sec_cfg/mail_auto').get(), db.collection('sec_in').where('invW', '==', true).count().get().catch(() => null)]);
+  const m = mailCfgOf(ms), h = hs.exists ? hs.data() : null, a = as.exists ? as.data() || {} : {};
+  const nc = noCapOf(a, now) ? Number(a.noCapUntil) : 0;
+  const id = h && h.invDay && h.invDay.d === dayKey(now) ? Number(h.invDay.n) || 0 : 0;
   return { ok: true, max: m.max, maxDefault: G.MAX_BOX_DEFAULT, boxes: boxesOut(m), scan: sc.exists ? sc.data() : null, ranges: G.RANGES,
-    hist: h ? { st: h.st, range: h.range || '', rangeL: G.RANGES[h.range] || '', n: h.n || 0, dup: h.dup || 0, total: h.total || 0, t: h.t || 0, upd: h.upd || 0 } : null,
+    hist: h ? { st: h.st, range: h.range || '', rangeL: G.RANGES[h.range] || '', n: h.n || 0, dup: h.dup || 0, total: h.total || 0, t: h.t || 0, upd: h.upd || 0, auto: h.auto === true } : null,
+    auto: { on: a.on !== false, by: typeof a.by === 'string' ? a.by : '', t: Number(a.t) || 0 }, noCapUntil: nc, noCapMaxDays: NOCAP_DAYS,
+    histInv: { wait: wc ? Number(wc.data().count) || 0 : 0, day: id, dayMax: HIST_INV_DAY, reserve: HIST_INV_RESERVE, free: nc > 0 },
     lists: cl.docs.map((d) => { const x = d.data(); return { id: d.id, st: x.st, t: x.t || 0, n: x.n || 0, z: x.z || 0, trashed: x.trashed || 0, rangeL: G.RANGES[x.range] || '' }; }) };
 }
 async function secAdminMail(request) {
   const input = inputObject(request);
   const who = await superIn(request);
-  const op = ['get', 'set', 'count', 'run', 'disconnect', 'histStop', 'histGo'].includes(input.op) ? input.op : null;
+  const op = ['get', 'set', 'count', 'run', 'disconnect', 'histStop', 'histGo', 'histAuto', 'histNoCap'].includes(input.op) ? input.op : null;
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const db = T.tdb(), now = Date.now();
   const audit = (note) => getFirestore().collection(`b/${who.bizId}/audit`).doc().set({ by: who.uid, t: now, act: 'secAdminMail', note: String(note).slice(0, 500) });
@@ -810,6 +874,26 @@ async function secAdminMail(request) {
     });
     await db.collection('sec_log').doc().set(glog(who.uid, 'sa', st === 'stop' ? 'histStop' : 'histGo'));
     await audit(st === 'stop' ? 'hist=stop' : 'hist=go');
+    return adminOut(db);
+  }
+  if (op === 'histAuto' || op === 'histNoCap') { // הגדרות לכל עסק (מנהל־על): סריקה אוטומטית בחיבור ראשון; ביטול הגבלת הסריקה לחשבוניות ישנות עד תאריך
+    let up, note;
+    if (op === 'histAuto') {
+      if (typeof input.on !== 'boolean') throw bad('bad-on', 'ערך לא תקין');
+      up = { on: input.on }; note = 'histAuto=' + input.on;
+    } else {
+      const u = input.until;
+      if (!(u === 0 || (Number.isInteger(u) && u > now && u <= now + NOCAP_DAYS * 864e5))) throw bad('bad-until', 'תאריך: עד ' + NOCAP_DAYS + ' יום קדימה, או 0 להחזרת ההגבלה');
+      up = { noCapUntil: u }; note = 'histNoCap=' + (u ? dayKey(u) : 'off');
+    }
+    const aref = db.doc('sec_cfg/mail_auto');
+    await db.runTransaction(async (tx) => {
+      const [as, ms, hs] = await Promise.all([tx.get(aref), tx.get(db.doc('sec_cfg/mail')), tx.get(db.doc('sec_cfg/mail_hist'))]);
+      const seen = autoSeen(as.exists ? as.data() || {} : {}, ms, hs, now, '');
+      tx.set(aref, Object.assign({}, up, { by: who.uid, t: now }, seen ? { seen, init: now } : {}), { merge: true });
+    });
+    await db.collection('sec_log').doc().set(glog(who.uid, 'sa', op, { note: note.split('=')[1] }));
+    await audit(note);
     return adminOut(db);
   }
   if (op === 'set') {
@@ -889,9 +973,11 @@ async function secAdminMail(request) {
   await audit('scan=' + range + ',n=' + S0.n + ',list=' + items.length);
   // 28: קליטת המיילים מהטווח ל-sec_in כרקע – בתור, בהדרגה (עמוד ראשון עכשיו, והשאר בריצה המתוזמנת כל 15 דקות). אפשר לעצור באמצע (histStop)
   const hb = {}; for (const [id] of boxes) hb[id] = { pg: '', end: false };
-  await db.doc('sec_cfg/mail_hist').set({ st: 'run', range, q: q || '', by: who.uid, t: now, upd: now, total: S0.n, n: 0, dup: 0, boxes: hb, lock: 0 });
+  const old = await db.doc('sec_cfg/mail_hist').get(); // התקציב היומי לחשבוניות ישנות נשמר גם כשמתחילה עבודה חדשה
+  await db.doc('sec_cfg/mail_hist').set(Object.assign({ st: 'run', range, q: q || '', by: who.uid, t: now, upd: now, total: S0.n, n: 0, dup: 0, boxes: hb, lock: 0 }, old.exists && old.get('invDay') ? { invDay: old.get('invDay') } : {}));
   await db.collection('sec_log').doc().set(glog(who.uid, 'sa', 'histStart', { note: range + ':' + S0.n }));
   await histStep(db, who.bizId, HIST_PAGE, now).catch((e) => logger.warn('secretary-google: hist step failed', { reason: (e && e.details && e.details.reason) || 'error' }));
+  await histInvStep(db, who.bizId, now).catch((e) => logger.warn('secretary-google: hist inv failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }));
   if (items.length) await WA.notifyMgrs(db, 'clean|' + ref.id, 'רשימת ניקוי מייל ממתינה לאישורך', items.length + ' מיילים (ספאם, פרסומות, גדולים וישנים) מוכנים להעברה לאשפה של Gmail. שום דבר לא יועבר בלי האישור שלך.', now).catch(() => {});
   return Object.assign(await adminOut(db), { list: { id: ref.id, n: items.length, z, counts } });
 }
@@ -939,7 +1025,8 @@ async function histStep(db, bizId, max, now) {
       if ((await ref.get()).get('st') !== 'run') { stopped = true; break; } // עצירה באמצע – בין עמודים
       let k = 0, kd = 0, j;
       try {
-        j = await c.list((job.q ? job.q + ' ' : '') + '-in:spam', bj.pg, HIST_PAGE);
+        const qq = typeof bj.q === 'string' ? bj.q : job.q; // טווח לתיבה (תיבה שנוספה אוטומטית) גובר על הטווח של העבודה
+        j = await c.list((qq ? qq + ' ' : '') + '-in:spam', bj.pg, HIST_PAGE);
         for (const x of (Array.isArray(j.messages) ? j.messages : []).slice(0, HIST_PAGE)) {
           if (!x || typeof x.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(x.id)) continue;
           let r;
@@ -976,6 +1063,111 @@ async function histStep(db, bizId, max, now) {
   if (n) await db.collection('sec_log').doc().set(glog('', 'auto', 'histIn', { note: n + '/' + dup }));
   if (fin === 'done' && job.st === 'run') await db.collection('sec_log').doc().set(glog('', 'auto', 'histDone', { note: String((job.n || 0) + n) }));
   return { st: fin, n, dup };
+}
+
+// =====================================================================================
+// חשבוניות ממיילים ישנים (החלטות 1–3, 5): מייל ישן עם קבצים נשמר עם invW:true (בלי הורדה), והקבצים נכנסים לתור החשבוניות בהדרגה.
+// תקציב: עד HIST_INV_DAY מיילים עם קבצים ביום, ועוצרים כשנשארים פחות מ-HIST_INV_RESERVE במכסת הסריקה היומית (של העסק / של משתמש המזכירה) –
+// כדי שחשבוניות חדשות לא ייחסמו. מנהל־העל יכול לבטל את ההגבלה עד תאריך (mail_auto.noCapUntil). בלי שום התראה – רק sec_log.
+// לא רץ כשקליטת ההיסטוריה עצורה (stop) או בתקרת העלות (cap). תנאי "נכנס ישר" (eligOf) – ללא שינוי.
+// =====================================================================================
+const HIST_INV_DAY = 30, HIST_INV_RESERVE = 40, HIST_INV_RUN = 20, HIST_INV_LEASE = 4 * 60000, FILL_PAGE = 300, NOCAP_DAYS = 31;
+const noCapOf = (a, now) => Number(a && a.noCapUntil) > now;
+// כמה נשאר היום במכסת הסריקה – המינימום בין משתמש המזכירה למונה העסק (בלי תקרת עסק – רק משתמש המזכירה)
+async function scanLeft(db, bizId, now) {
+  const scan = require('./lib/scan'), INV = require('./secretary-inv')._core;
+  const caps = await scan.bizCaps(bizId, INV.SEC_USER_DAY, now);
+  const day = scan.israelDay(), bkey = caps.bizKey || day;
+  const [us, bs] = await Promise.all([db.doc(scan.USAGE + '/' + INV.SEC_SCAN_UID).get(), caps.bizDaily == null ? null : db.doc(scan.USAGE + '/_biz').get()]);
+  let left = caps.perUser - (us.exists && us.get('day') === day ? Number(us.get('count')) || 0 : 0);
+  if (bs) left = Math.min(left, caps.bizDaily - (bs.exists && bs.get('day') === bkey ? Number(bs.get('count')) || 0 : 0));
+  return left;
+}
+// השלמה חד־פעמית (החלטה 5): מיילים שנקלטו בסריקת היסטוריה קודמת עם קבצים (hist+file, בלי inv/invW) → invW:true. במנות, עם נקודת המשך
+async function histFill(db, a, now) {
+  if (a.fill === 'done') return 0;
+  let q = db.collection('sec_in').where('flags', 'array-contains', 'file').orderBy(FieldPath.documentId()).limit(FILL_PAGE);
+  if (typeof a.fillAt === 'string' && a.fillAt) q = q.startAfter(a.fillAt);
+  const s = await q.get();
+  const b = db.batch();
+  let n = 0;
+  for (const d of s.docs) {
+    const x = d.data();
+    if (x.ch === 'mail' && Array.isArray(x.flags) && x.flags.includes('hist') && x.inv === undefined && x.invW === undefined && x.invX === undefined) { b.update(d.ref, { invW: true }); n++; }
+  }
+  b.set(db.doc('sec_cfg/mail_auto'), s.size < FILL_PAGE ? { fill: 'done', fillAt: FieldValue.delete(), fillT: now } : { fillAt: s.docs[s.size - 1].id }, { merge: true });
+  await b.commit();
+  if (n) await db.collection('sec_log').doc().set(glog('', 'auto', 'histFill', { note: String(n) }));
+  return n;
+}
+// מקום אחד בתקציב היומי (בטרנזקציה). free – ביטול הגבלה: נספר, לא נחסם
+async function invBudget(db, ref, now, free, k) {
+  return db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) return false;
+    const d = dayKey(now), x = s.get('invDay');
+    const n = x && x.d === d ? Number(x.n) || 0 : 0;
+    if (!free && n >= HIST_INV_DAY) return false;
+    tx.update(ref, { invDay: { d, n: n + (k || 1) } });
+    return true;
+  });
+}
+async function histInvStep(db, bizId, now) {
+  const ref = db.doc('sec_cfg/mail_hist');
+  const hs = await ref.get();
+  if (!hs.exists || ['stop', 'cap'].includes(hs.get('st'))) return null;
+  const as = await db.doc('sec_cfg/mail_auto').get();
+  const a = as.exists ? as.data() || {} : {};
+  await histFill(db, a, now).catch((e) => logger.warn('secretary-google: hist fill failed', { reason: (e && e.code) || 'error' }));
+  const free = noCapOf(a, now);
+  const out = { n: 0, files: 0, wait: '' };
+  const q = await db.collection('sec_in').where('invW', '==', true).limit(HIST_INV_RUN).get();
+  if (q.empty) return out;
+  let left = free ? Infinity : await scanLeft(db, bizId, now);
+  const m = mailCfgOf(await db.doc('sec_cfg/mail').get());
+  const cl = {};
+  const INV = require('./secretary-inv')._core;
+  for (const d of q.docs) {
+    if (left < HIST_INV_RESERVE) { out.wait = 'reserve'; break; }
+    const x = d.data(), box = x.box, bx = m.boxes[box];
+    if (!bx) { await d.ref.update({ invW: FieldValue.delete(), invL: FieldValue.delete(), invX: 'off' }); continue; } // התיבה נותקה – אין מאיפה להוריד (נרשם במייל)
+    if (bx.st !== 'ok') continue; // חיבור שפג – ממתין לחיבור מחדש
+    if (!(box in cl)) { try { cl[box] = (await access(db, bizId, 'mail', box)).c; } catch (e) { cl[box] = null; } }
+    const c = cl[box];
+    if (!c) continue;
+    const got = await db.runTransaction(async (tx) => { // תפיסה: ריצה אחת לכל מייל
+      const s = await tx.get(d.ref);
+      const v = s.exists ? s.data() : {};
+      if (v.invW !== true || Number(v.invL) > now) return false;
+      tx.update(d.ref, { invL: now + HIST_INV_LEASE });
+      return true;
+    });
+    if (!got) continue;
+    if (!(await invBudget(db, ref, now, free))) { await d.ref.update({ invL: FieldValue.delete() }); out.wait = 'day'; break; }
+    const flags = Array.isArray(x.flags) ? x.flags : [];
+    try {
+      let p = G.parseMsg(await c.meta(x.gid));
+      if (!p) { await d.ref.update({ inv: [], invW: FieldValue.delete(), invL: FieldValue.delete(), invN: FieldValue.delete() }); continue; }
+      const big = p.size > G.FULL_MAX;
+      if (!big) { const f = G.parseMsg(await c.full(x.gid)); if (f) p = f; }
+      const r = await invFiles(db, c, x.gid, p, big, x.st === 'sus', now, true);
+      await d.ref.update(Object.assign({ inv: r.ids, invW: FieldValue.delete(), invL: FieldValue.delete(), invN: FieldValue.delete() }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {}));
+      if (r.ids.length > 1) await invBudget(db, ref, now, true, r.ids.length - 1).catch(() => {}); // התקציב נספר לפי קבצים
+      out.n++; out.files += r.ids.length; left -= r.ids.length;
+    } catch (e) {
+      if (gone404(e)) { await d.ref.update({ invW: FieldValue.delete(), invL: FieldValue.delete(), invX: 'gone' }); continue; } // נמחק ב-Gmail
+      logger.warn('secretary-google: hist invoice failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
+      const n = (Number(x.invN) || 0) + 1;
+      if (n < MAIL_TRIES) { await d.ref.update({ invL: FieldValue.delete(), invN: n }); continue; }
+      // אחרי MAIL_TRIES ניסיונות – כרטיס "הקובץ לא נקלט – תקלה" (כמו במייל חדש), בלי התראה
+      try {
+        const rr = await INV.ingest(db, { ch: 'mail', from: x.from, name: x.name, inId: x.gid, idx: 99, fn: (x.files || [])[0] || '', sus: x.st === 'sus', now, why: 'dl', hist: true });
+        await d.ref.update({ inv: [rr.id], invW: FieldValue.delete(), invL: FieldValue.delete(), invN: FieldValue.delete(), flags: [...new Set(flags.concat(['file', 'invErr']))] });
+      } catch (e2) { await d.ref.update({ invL: FieldValue.delete(), invN: n }).catch(() => {}); }
+    }
+  }
+  if (out.n || out.wait) await db.collection('sec_log').doc().set(glog('', 'auto', 'histInv', { note: out.n + '/' + out.files + (out.wait ? ':' + out.wait : '') + (free ? ':free' : '') }));
+  return out;
 }
 
 // =====================================================================================
@@ -1109,6 +1301,7 @@ async function syncAll(o) {
         try { const { c } = await access(db, biz.bizId, 'mail', box); const w = await c.watch(G.topicName()); await db.doc('sec_cfg/mail').set({ boxes: { [box]: { watchExp: Number(w.expiration) || 0 } } }, { merge: true }); out.watch++; } catch (e) { out.errors++; }
       }
       try { const h = await histStep(db, biz.bizId, HIST_RUN, now); if (h) out.hist = (out.hist || 0) + h.n; } catch (e) { out.errors++; } // 28: המשך קליטת ההיסטוריה
+      try { const h = await histInvStep(db, biz.bizId, now); if (h) out.histInv = (out.histInv || 0) + h.files; } catch (e) { out.errors++; } // חשבוניות ממיילים ישנים – בהדרגה
     });
   }
   return out;
@@ -1135,7 +1328,7 @@ exports.secMailSend = onCall({ secrets: SECRETS }, wrap('secMailSend', secMailSe
 exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdminMail));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, saveMail, invFiles, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
+  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, histInvStep, histFill, autoHist, HIST_INV_DAY, HIST_INV_RESERVE, saveMail, invFiles, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },
 } });

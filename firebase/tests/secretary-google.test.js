@@ -72,6 +72,8 @@ async function seed(o) {
     const mgr = {}; for (const u of opt.consent || [M1, M2, SUPER2]) mgr[u] = { cv: ver, ca: 1, nm: 'רותי', ad: 'f' };
     b.set(d.doc(`b/${A}/sec_cfg/main`), { mode: 'all', mainUid: '', emp: true, pay: {}, mgr });
     b.set(d.doc(`b/${B}/sec_cfg/main`), { mode: 'all', mainUid: '', emp: true, pay: {}, mgr: { [MB]: { cv: ver, ca: 1 } } });
+    // קליטה אוטומטית בחיבור ראשון (ברירת מחדל: מופעלת) – כבויה בבדיקות הקיימות, כדי שלא יתווספו מיילים ישנים לספירות; נבדקת בחלק משלה (opt.auto)
+    if (!opt.auto) b.set(d.doc(`b/${A}/sec_cfg/mail_auto`), { on: false, init: 1 });
     b.set(d.doc(`b/${A}/sec_facts/fx_hours`), { topic: 'general', fx: 'hours', text: 'א׳–ה׳ 08:00–18:00', st: 'ok', pub: true, t: 1 });
     await b.commit();
   });
@@ -521,10 +523,21 @@ describe('סריקת היסטוריה (מנהל־על) וניקוי ספאם (מ
     assert.ok(GO.box(BOX_A).msgs[pick[0]].labelIds.includes('TRASH'));
     const lg = (await logs(A)).find((l) => l.act === 'mailTrash');
     assert.equal(lg.by, M1); assert.match(lg.note, /trash 4\/4/);
-    assert.equal((await get(`b/${A}/sec_clean/${id}`)).st, 'done');
+    // החלטה 4: אישור חלקי – הרשימה נשארת "ממתינה" עם 2 שלא טופלו; אישור חוזר של אותם מיילים – לא מעביר פעמיים
+    const L1 = await get(`b/${A}/sec_clean/${id}`);
+    assert.equal(L1.st, 'pend'); assert.equal(L1.trashed, 4); assert.equal(ok.r.left, 2);
     assert.ok((await call('secMail', M1, { op: 'cleanOk', id, ids: pick })).r.already);
-    assert.equal((await call('secMail', M2, { op: 'cleanOk', id })).reason, 'not-pending');
     assert.equal(GO.state.trashed.length, 4);
+    assert.equal((await call('secMail', M1, { op: 'cleanList' })).r.lists.find((x) => x.id === id).left, 2);
+    // אישור השאר (בלי ids) – רק 2 הנותרים עוברים; הרשימה נסגרת והמונה מצטבר
+    const ok2 = await call('secMail', M2, { op: 'cleanOk', id });
+    assert.ok(ok2.ok, ok2.msg); assert.equal(ok2.r.trashed, 2); assert.equal(ok2.r.left, 0); assert.equal(ok2.r.total, 6);
+    const L2 = await get(`b/${A}/sec_clean/${id}`);
+    assert.equal(L2.st, 'done'); assert.equal(L2.trashed, 6);
+    assert.equal(GO.state.trashed.length, 6);
+    assert.equal(new Set(GO.state.trashed.map((t) => t.id)).size, 6, 'אף מייל לא הועבר פעמיים');
+    assert.ok((await call('secMail', M2, { op: 'cleanOk', id })).r.already);
+    assert.equal((await call('secMail', M1, { op: 'cleanOk', id })).reason, 'not-pending');
   });
 
   it('דחיית רשימה – שום דבר לא עובר, ונרשם', async () => {
@@ -1095,5 +1108,145 @@ describe('תיקון סבב 2: מייל שנכשל קבוע לא תוקע את �
     const d2 = await call('secGoogle', MB, { op: 'disconnect', kind: 'cal' });
     assert.equal(d2.r.revoked, true);
     assert.equal(GO.state.revoked.length, n0 + 1);
+  });
+});
+
+// ---------------------------------------------------------------------------------
+describe('קליטה אוטומטית בחיבור ראשון, חשבוניות ממיילים ישנים (בתקציב יומי, בלי התראות), והגדרות מנהל־העל', () => {
+  const now = Date.now(), DAY = 864e5;
+  const pdfB = (i) => Buffer.from('%PDF-1.4\n1 0 obj<</Type /Catalog /Pages 2 0 R>>endobj\n2 0 obj<</Type /Pages /Count 1>>endobj\n3 0 obj<</Type /Page /Parent 2 0 R>>endobj\n%uniq old ' + i + '\ntrailer<<>>\n%%EOF', 'latin1');
+  const inA = async () => (await coll(`b/${A}/sec_in`)).filter((x) => x.ch === 'mail');
+  const invA = () => coll(`b/${A}/sec_inv`);
+  const bx = () => G.boxIdOf(BOX_A);
+  const inBizA = async (fn) => { const b = await T.loadBiz(A); return T.runInBiz({ bizId: A, prefix: T.bizPrefix(b), biz: b }, () => fn(T.tdb())); };
+  const notes = async () => (await coll(`b/${A}/sec_note/${M1}/n`)).concat(await coll(`b/${A}/sec_note/${M2}/n`));
+  before(() => { process.env.SEC_INV_TEST_NOQUEUE = '1'; process.env.FUNCTIONS_EMULATOR = process.env.FUNCTIONS_EMULATOR || 'true'; });
+  beforeEach(async () => {
+    await seed({ auto: true });
+    for (let i = 0; i < 3; i++) GO.addMail(BOX_A, { from: 'sup' + i + '@sup.example', subject: 'חשבונית ישנה ' + i, text: 'מצורפת', files: [{ name: 'inv' + i + '.pdf', data: pdfB(i) }], date: now - (20 + i) * DAY });
+    GO.addMail(BOX_A, { from: 'cust@x.example', subject: 'ישן בלי קובץ', text: 'שלום', date: now - 30 * DAY });
+    GO.addMail(BOX_A, { from: 'cust@x.example', subject: 'ישן מאוד', text: 'שלום', date: now - 500 * DAY });
+  });
+
+  it('חיבור ראשון: נוצרת עבודת קליטה של 12 חודשים (אוטומטית, בלי רשימת ניקוי ובלי עמוד בחיבור); הריצה המתוזמנת קולטת; הדף וההודעה מספרים על כך', async () => {
+    const { res } = await connect(M1, 'mail', { email: BOX_A });
+    assert.equal(res.code, 200); assert.match(res.body, /12 החודשים האחרונים/);
+    const j = await get(`b/${A}/sec_cfg/mail_hist`);
+    assert.equal(j.st, 'run'); assert.equal(j.auto, true); assert.equal(j.by, 'auto'); assert.equal(j.range, '12');
+    assert.equal(j.boxes[bx()].q, G.rangeQ('12', Date.now())); assert.equal(j.boxes[bx()].end, false);
+    assert.equal((await inA()).length, 0, 'לא מריצים עמוד בזמן החיבור');
+    assert.equal((await coll(`b/${A}/sec_clean`)).length, 0, 'בלי רשימת ניקוי');
+    assert.ok((await get(`b/${A}/sec_cfg/mail_auto`)).seen[bx()], 'התיבה נרשמה כ"נקלטה"');
+    assert.ok((await notes()).some((n) => /12 החודשים/.test(n.body || n.text || '')), 'ההודעה למנהלים');
+    await CORE.syncAll();
+    const L = await inA();
+    assert.equal(L.length, 4, 'רק 12 החודשים האחרונים');
+    assert.ok(!L.some((x) => x.subj === 'ישן מאוד'));
+    const adm = await call('secAdminMail', SUPER, { bizId: A, op: 'get' });
+    assert.equal(adm.r.hist.auto, true); assert.equal(adm.r.auto.on, true);
+    // חיבור חוזר של אותה תיבה – בלי עבודה חדשה
+    await put(`b/${A}/sec_cfg/mail_hist`, { st: 'done', boxes: {} });
+    const cfg = await get(`b/${A}/sec_cfg/mail`); cfg.boxes[bx()].st = 'expired'; await put(`b/${A}/sec_cfg/mail`, cfg); // חיבור מחדש מותר רק לתיבה שפג חיבורה (מספר התיבות)
+    assert.equal((await connect(M1, 'mail', { email: BOX_A })).res.code, 200);
+    assert.equal((await get(`b/${A}/sec_cfg/mail_hist`)).st, 'done');
+  });
+
+  it('מייל ישן עם קובץ: invW בלי הורדה; התור ההדרגתי מכניס לתור החשבוניות כהוצאה בלבד (hist, noStock), בלי שום התראה', async () => {
+    await connect(M1, 'mail', { email: BOX_A });
+    await inBizA((db) => CORE.histStep(db, A, 100, Date.now()));
+    let L = await inA();
+    const w = L.filter((x) => x.invW === true);
+    assert.equal(w.length, 3); assert.ok(w.every((x) => x.flags.includes('hist') && !x.inv));
+    assert.equal((await invA()).length, 0, 'בלי הורדה בזמן הקליטה');
+    const before = (await notes()).length;
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r.n, 3); assert.equal(r.files, 3);
+    const I = await invA();
+    assert.equal(I.length, 3);
+    assert.ok(I.every((x) => x.hist === true && x.noStock === true && x.src[0].hist === true));
+    L = await inA();
+    assert.ok(L.filter((x) => x.flags.includes('file')).every((x) => x.invW === undefined && Array.isArray(x.inv) && x.inv.length === 1));
+    assert.equal((await notes()).length, before, 'חשבוניות ישנות – בלי התראה');
+    assert.ok((await logs(A)).some((l) => l.act === 'histInv'));
+    assert.equal((await get(`b/${A}/sec_cfg/mail_hist`)).invDay.n, 3);
+    // ריצה חוזרת – לא נקלט פעמיים
+    assert.equal((await inBizA((db) => CORE.histInvStep(db, A, Date.now()))).n, 0);
+    assert.equal((await invA()).length, 3);
+  });
+
+  it('תקציב יומי: 30 ביום ועצירה כשנשארות פחות מ-40 במכסה; מנהל־העל מבטל את ההגבלה עד תאריך – נקלט; עצירה (stop) – לא רץ', async () => {
+    await connect(M1, 'mail', { email: BOX_A });
+    await inBizA((db) => CORE.histStep(db, A, 100, Date.now()));
+    await put(`b/${A}/sec_cfg/mail_hist`, Object.assign(await get(`b/${A}/sec_cfg/mail_hist`), { invDay: { d: dayIL(Date.now()), n: CORE.HIST_INV_DAY } }));
+    assert.equal((await inBizA((db) => CORE.histInvStep(db, A, Date.now()))).n, 0, 'התקציב היומי נגמר');
+    // יום חדש, אבל במכסת העסק נשארו פחות מ-40 (ברירת מחדל 50 לעסק)
+    await put(`b/${A}/sec_cfg/mail_hist`, Object.assign(await get(`b/${A}/sec_cfg/mail_hist`), { invDay: { d: '2000-01-01', n: 99 } }));
+    await put(`b/${A}/scan_usage/_biz`, { day: dayIL(Date.now()), count: 15 });
+    const r1 = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r1.n, 0); assert.equal(r1.wait, 'reserve');
+    assert.equal((await invA()).length, 0);
+    // הרשאות והגדרה לא תקינה
+    assert.equal((await call('secAdminMail', M1, { op: 'histNoCap', until: now + DAY })).reason, 'not-superadmin');
+    assert.equal((await call('secAdminMail', SUPER, { bizId: A, op: 'histNoCap', until: Date.now() + 40 * DAY })).reason, 'bad-until');
+    assert.equal((await call('secAdminMail', SUPER, { bizId: A, op: 'histNoCap', until: Date.now() - 1000 })).reason, 'bad-until');
+    assert.equal((await call('secAdminMail', SUPER, { bizId: A, op: 'histNoCap', until: '1' })).reason, 'bad-until');
+    const until = Date.now() + 5 * DAY;
+    const nc = await call('secAdminMail', SUPER, { bizId: A, op: 'histNoCap', until });
+    assert.ok(nc.ok, nc.msg); assert.equal(nc.r.noCapUntil, until); assert.equal(nc.r.histInv.wait, 3); assert.equal(nc.r.histInv.free, true);
+    assert.ok((await coll(`b/${A}/audit`)).some((a) => /^histNoCap=/.test(a.note)));
+    assert.ok((await logs(A)).some((l) => l.act === 'histNoCap'));
+    // עצירה של קליטת ההיסטוריה – גם תור החשבוניות לא רץ
+    await put(`b/${A}/sec_cfg/mail_hist`, Object.assign(await get(`b/${A}/sec_cfg/mail_hist`), { st: 'stop' }));
+    assert.equal(await inBizA((db) => CORE.histInvStep(db, A, Date.now())), null);
+    await put(`b/${A}/sec_cfg/mail_hist`, Object.assign(await get(`b/${A}/sec_cfg/mail_hist`), { st: 'done' }));
+    const r2 = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r2.n, 3, 'בזמן ביטול ההגבלה – לא מוגבל במרווח ולא בתקציב');
+    // החזרת ההגבלה
+    const off = await call('secAdminMail', SUPER, { bizId: A, op: 'histNoCap', until: 0 });
+    assert.equal(off.r.noCapUntil, 0); assert.equal(off.r.histInv.wait, 0);
+  });
+
+  it('הגדרה כבויה: תיבה שחוברה נחשבת "נקלטה" ולא נסרקת גם אחרי הדלקה; תיבה שכבר הייתה מחוברת לפני ההגדרה – לא נסרקת; תיבה עם מיילים – לא נסרקת', async () => {
+    await put(`b/${A}/sec_cfg/mail`, { max: 3 });
+    assert.equal((await call('secAdminMail', M1, { op: 'histAuto', on: false })).reason, 'not-superadmin');
+    assert.equal((await call('secAdminMail', SUPER, { bizId: A, op: 'histAuto', on: 'no' })).reason, 'bad-on');
+    const off = await call('secAdminMail', SUPER, { bizId: A, op: 'histAuto', on: false });
+    assert.ok(off.ok, off.msg); assert.equal(off.r.auto.on, false);
+    await connect(M1, 'mail', { email: BOX_A });
+    assert.equal(await get(`b/${A}/sec_cfg/mail_hist`), null, 'כבוי – אין סריקה');
+    assert.ok((await get(`b/${A}/sec_cfg/mail_auto`)).seen[bx()]);
+    assert.ok((await call('secAdminMail', SUPER, { bizId: A, op: 'histAuto', on: true })).ok);
+    const cfg = await get(`b/${A}/sec_cfg/mail`); cfg.boxes[bx()].st = 'expired'; await put(`b/${A}/sec_cfg/mail`, cfg);
+    assert.equal((await connect(M1, 'mail', { email: BOX_A })).res.code, 200);
+    assert.equal(await get(`b/${A}/sec_cfg/mail_hist`), null, 'כבר "נקלטה" – לא נסרקת');
+    // תיבה שנייה שכבר יש לה מיילים ב-sec_in (למשל חוברה ונותקה לפני ההגדרה) – לא נסרקת
+    GO.addMail(BOX_A2, { from: 'x@x.example', subject: 'ישן', text: 'x', date: now - 10 * DAY });
+    await put(`b/${A}/sec_in/gold`, { ch: 'mail', box: G.boxIdOf(BOX_A2), t: 1, flags: [] });
+    await connect(M1, 'mail', { email: BOX_A2 });
+    assert.equal(await get(`b/${A}/sec_cfg/mail_hist`), null);
+    assert.ok((await get(`b/${A}/sec_cfg/mail_auto`)).seen[G.boxIdOf(BOX_A2)]);
+    assert.ok((await coll(`b/${A}/audit`)).some((a) => a.note === 'histAuto=false'));
+  });
+
+  it('אתחול לעסק קיים: תיבה שכבר מחוברת לפני שההגדרה קיימת – נחשבת נקלטה; השלמה חד־פעמית של מיילים ישנים עם קבצים מסריקה קודמת', async () => {
+    await put(`b/${A}/sec_cfg/mail_auto`, { on: false, init: 1 }); // חיבור "לפני ההגדרה" – בלי סריקה
+    await connect(M1, 'mail', { email: BOX_A });
+    await prep((d) => d.doc(`b/${A}/sec_cfg/mail_auto`).delete());
+    // סריקת היסטוריה קודמת (לפני השינוי): מיילים עם קבצים בלי inv/invW
+    await inBizA((db) => CORE.histStep(db, A, 100, Date.now())); // אין עבודה – לא רץ
+    await put(`b/${A}/sec_cfg/mail_hist`, { st: 'done', boxes: { [bx()]: { pg: '', end: true } }, n: 0 });
+    const gids = Object.values(GO.box(BOX_A).msgs).filter((m) => m.payload.parts.some((p) => p.filename)).map((m) => m.id);
+    for (const g of gids) await put(`b/${A}/sec_in/${CORE.inIdOf(bx(), g)}`, { ch: 'mail', box: bx(), gid: g, from: 'sup@sup.example', name: '', subj: 'ישן', t: 1, st: 'done', flags: ['file', 'hist'], files: ['inv.pdf'] });
+    await put(`b/${A}/sec_in/gnew`, { ch: 'mail', box: bx(), gid: 'zz', t: 1, st: 'done', flags: ['file'], inv: ['fx'] }); // מייל חי – לא נוגעים
+    // האתחול (בהגדרה של מנהל־העל) מסמן את התיבה הקיימת כ"נקלטה"
+    assert.ok((await call('secAdminMail', SUPER, { bizId: A, op: 'histAuto', on: true })).ok);
+    const a = await get(`b/${A}/sec_cfg/mail_auto`);
+    assert.ok(a.seen[bx()] && a.init);
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r.n, 3, 'ההשלמה נכנסה לאותו תור');
+    assert.equal((await get(`b/${A}/sec_cfg/mail_auto`)).fill, 'done');
+    assert.deepEqual((await get(`b/${A}/sec_in/gnew`)).inv, ['fx']);
+    assert.equal((await invA()).filter((x) => x.hist).length, 3);
+    assert.ok((await logs(A)).some((l) => l.act === 'histFill' && l.note === '3'));
   });
 });

@@ -27,6 +27,7 @@ const req = (uid, data) => ({ auth: uid ? { uid, token: { email: uid + '@x.inval
 async function call(fn, uid, data) {
   try { return { ok: true, r: await C.wrap(fn, INV[fn])(req(uid, data)) }; } catch (e) { return { ok: false, code: e.code, reason: e.details && e.details.reason, why: e.details && e.details.why, msg: e.message }; }
 }
+const dayIL = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 async function inBiz(biz, fn) { const b = await T.loadBiz(biz); return T.runInBiz({ bizId: biz, prefix: T.bizPrefix(b), biz: b }, () => fn(T.tdb())); }
 
 // ---------- קבצים לדוגמה ----------
@@ -53,7 +54,7 @@ async function arrive(buf, raw, o) {
   const opt = o || {};
   const biz = opt.biz || A;
   return inBiz(biz, async (db) => {
-    const r = await INV.ingest(db, { ch: opt.ch || 'wa', from: opt.from || SUP_WA, name: 'ספק', inId: opt.inId || 'in' + (++SEQ), fn: opt.fn || 'inv.pdf', buf, why: opt.why });
+    const r = await INV.ingest(db, { ch: opt.ch || 'wa', from: opt.from || SUP_WA, name: 'ספק', inId: opt.inId || 'in' + (++SEQ), fn: opt.fn || 'inv.pdf', buf, why: opt.why, hist: opt.hist });
     if (!r.bad && !r.long && !r.dup) await INV.workIn(r.id, { classify: async () => { CLS++; if (raw instanceof Error) throw raw; return raw; } });
     return Object.assign({ id: r.id, r }, await (await db.doc('sec_inv/' + r.id).get()).data());
   });
@@ -820,5 +821,65 @@ describe('תיקון 1 – החלטות בעל הפרויקט (1, 2, 3)', () => 
     const r2 = await inBiz(A, () => WA.workIn('mMG2', { token: 'x', media: async () => ({ buf: pdf(1), mime: 'application/pdf' }), send: async () => ({}) }));
     assert.equal(r2.intent, 'off');
     assert.equal((await coll(`b/${A}/sec_inv`)).length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------------
+describe('קבצים ממייל ישן (סריקת היסטוריה): הוצאה בלבד, מכסה מלאה – ממתין למחר, ביטול הגבלה, בלי התראות', () => {
+  beforeEach(() => seed());
+  const H1 = { ch: 'mail', from: SUP_MAIL, hist: true };
+  it('קובץ ישן מסומן hist + noStock (גם כרטיס "לא נקלט"), ועובר את אותו זיהוי (כותרת בלבד) ואותם תנאי "נכנס ישר"', async () => {
+    const a = await arrive(pdf(1), RAW.inv({ number: 'OLD-1' }), H1);
+    assert.equal(a.hist, true); assert.equal(a.noStock, true); assert.equal(a.src[0].hist, true);
+    assert.equal(a.k, 'inv'); assert.equal(CLS, 1);
+    const bad = await arrive(Buffer.from('PK\x03\x04zip'), null, Object.assign({ fn: 'x.zip' }, H1));
+    assert.equal(bad.k, 'bad'); assert.equal(bad.noStock, true);
+    const L = await call('secInv', M1, { op: 'list' });
+    const it = L.r.items.find((x) => x.id === a.id);
+    assert.equal(it.hist, true); assert.equal(it.noStock, true);
+    const n = await arrive(pdf(1), RAW.inv({ number: 'NEW-1' }));
+    assert.equal(n.hist, undefined); assert.equal(L.r.items.find((x) => x.id === n.id), undefined);
+  });
+  it('מכסה מלאה: קובץ ישן נשאר בתור וממתין למחר (לא כרטיס "מכסה"); requeue לפני הזמן – לא; אחרי – חוזר בלי להגדיל ניסיונות', async () => {
+    await put(`b/${A}/private/info`, { adv: { limits: { scanDaily: 1 } } });
+    await arrive(pdf(1), RAW.inv({ number: 'N-1' }));
+    const w = await arrive(pdf(1), RAW.inv({ number: 'OLD-2' }), H1);
+    assert.equal(w.st, 'q'); assert.equal(w.err, undefined); assert.ok(w.qwt > Date.now()); assert.equal(CLS, 1, 'בלי מודל');
+    assert.notEqual(dayIL(w.qwt), dayIL(Date.now()), 'מחר');
+    assert.equal((await coll(`b/${A}/sec_log`)).filter((l) => l.act === 'invWait').length, 1);
+    // קובץ חדש (לא ישן) במכסה מלאה – כמו קודם: כרטיס "מכסה"
+    const q = await arrive(pdf(1), RAW.inv({ number: 'N-2' }));
+    assert.equal(q.err, 'quota');
+    let r = await inBiz(A, (db) => INV.requeue(db, A, w.qwt - 1000));
+    assert.equal(r.requeued, 0, 'לפני מחר – לא חוזר');
+    assert.equal((await get(`b/${A}/sec_inv/${w.id}`)).st, 'q');
+    r = await inBiz(A, (db) => INV.requeue(db, A, w.qwt + 1));
+    assert.equal(r.requeued, 1); assert.equal(r.failed, 0);
+    const x = await get(`b/${A}/sec_inv/${w.id}`);
+    // (באמולטור רשומת התור מפעילה מיד את הזיהוי מחדש – לכן לא בודקים כאן את המצב עצמו)
+    assert.ok(['q', 'qw', 'new'].includes(x.st)); assert.equal(x.rq, undefined, 'בלי להגדיל ניסיונות'); assert.equal(x.rqAt, w.qwt + 1);
+    // מחכים שהזיהוי באמולטור יסתיים, כדי שלא יתנגש בניקוי של הבדיקה הבאה
+    for (let i = 0; i < 40; i++) { const v = await get(`b/${A}/sec_inv/${w.id}`); if (v && v.st !== 'qw') break; await new Promise((ok) => setTimeout(ok, 250)); }
+    await new Promise((ok) => setTimeout(ok, 500));
+  });
+  it('ביטול הגבלה (מנהל־על, עד תאריך): קובץ ישן לא נבדק ולא נספר במכסות; קובץ חדש – עדיין כן; אחרי התאריך – חוזר להגבלה', async () => {
+    await put(`b/${A}/private/info`, { adv: { limits: { scanDaily: 1 } } });
+    await arrive(pdf(1), RAW.inv({ number: 'N-1' }));
+    await put(`b/${A}/sec_cfg/mail_auto`, { noCapUntil: Date.now() + 864e5 });
+    const a = await arrive(pdf(1), RAW.inv({ number: 'OLD-3' }), H1);
+    assert.equal(a.st, 'new'); assert.equal(a.k, 'inv'); assert.equal(CLS, 2);
+    assert.equal((await get(`b/${A}/scan_usage/_biz`)).count, 1, 'לא נספר');
+    assert.equal((await get(`b/${A}/scan_usage/_sec`)).count, 1);
+    assert.equal((await arrive(pdf(1), RAW.inv({ number: 'N-2' }))).err, 'quota', 'קובץ חדש – במכסה הרגילה');
+    await put(`b/${A}/sec_cfg/mail_auto`, { noCapUntil: Date.now() - 1 });
+    assert.equal((await arrive(pdf(1), RAW.inv({ number: 'OLD-4' }), H1)).st, 'q', 'התאריך עבר – מוגבל שוב');
+  });
+  it('חשד לכפילות / שולח לא מאומת בקובץ ישן – רק ביומן, בלי התראה', async () => {
+    await arrive(jpg(), RAW.inv());
+    const n0 = (await coll(`b/${A}/sec_note/${M1}/n`)).length;
+    const d = await arrive(pdf(1), RAW.inv({ number: 'inv 100' }), H1);
+    assert.ok(d.dup); assert.equal(d.el, false);
+    assert.equal((await coll(`b/${A}/sec_note/${M1}/n`)).length, n0, 'בלי התראה');
+    assert.ok((await coll(`b/${A}/sec_log`)).some((l) => l.act === 'invDup' && l.tgt === d.id));
   });
 });
