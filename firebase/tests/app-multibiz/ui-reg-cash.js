@@ -214,14 +214,14 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
     const same = JSON.stringify(S.inbox.find((x) => x.id === 'rcV').d) === d0, n1 = S.tx.length - n0;
     delete S.inbox.find((x) => x.id === 'rcV').rq; save(); render(1);
     const hc0 = ['2026-12', '2027-01', '2027-02'].map((m) => homeCards(m).due);
-    ACT.inbEdit({ dataset: { id: 'rcV' } }); await W8(); const g = document.querySelector('#dlg[open] form[data-f=inbsave]'); g.elements.inv.value = '123';
-    ACT.inbSaveOk(); await W8(300);
+    ACT.inbEdit({ dataset: { id: 'rcV' } }); await W8(); const g = document.querySelector('#dlg[open] form[data-f=inbsave]'); g.elements.inv && (g.elements.inv.value = '123');
+    ACT.inbSaveOk(); await W8(300); const off28 = !!document.querySelector('#dlg[open] [data-a=inbInvOk]'); if (document.querySelector('#dlg[open] [data-a=inbRegNoInv]')) { document.querySelector('#dlg[open] [data-a=inbRegNoInv]').click(); await W8(200); } const ask28 = (document.querySelector('#dlg[open]') || {}).innerText || ''; const no28 = document.querySelector('#dlg[open] [data-a=inbRegAw]:not([data-w])'); if (no28) { no28.click(); await W8(300); }
     const T = S.tx.filter((t) => t.src === 'rcV'), t = T[0] || {};
-    return { cats, bad, hasBad: cats.some((c) => bad.includes(c)), askRq, same, n1, n: T.length, inv: t.inv, creg: t.creg, pays: (t.pays || []).map((p) => [p.m, p.a]), bal: T[0] ? bal(t) : null, plan: t.plan, aw: !!t.await,
+    return { off28, ask28: /צריך חשבונית כנגד התשלום/.test(ask28), noInvF: !g.elements.inv, cats, bad, hasBad: cats.some((c) => bad.includes(c)), askRq, same, n1, n: T.length, inv: t.inv, creg: t.creg, pays: (t.pays || []).map((p) => [p.m, p.a]), bal: T[0] ? bal(t) : null, plan: t.plan, aw: !!t.await,
       owe: S.tx.filter((x) => bal(x) > 0.004).some((x) => x.id === t.id), hc: ['2026-12', '2027-01', '2027-02'].map((m) => homeCards(m).due), hc0, coa: t.coa, gone: !S.inbox.some((x) => x.id === 'rcV') };
   });
   check('27 החלון מציג רק קטגוריות פעילות (בלי מוסתרות ובלי הלוואות); ביטול באמצע (שאלת צילום חדש) לא משנה את הפריט ולא רושם הוצאה', !r27.hasBad && r27.askRq && r27.same && r27.n1 === 0, r27);
-  check('28 "שמור ואשר" בפריט מקופה (ספק, עם מספר חשבונית): הוצאה אחת, תשלום במזומן 64, יתרה 0, חודש התשלום 11/2026, לא ב"לתשלום" ולא בחודשים הבאים', r27.n === 1 && r27.inv === '123' && r27.creg === 'i_nl' && JSON.stringify(r27.pays) === JSON.stringify([['מזומן', 64]]) && r27.bal === 0 && r27.plan === '2026-11' && !r27.aw && !r27.owe && JSON.stringify(r27.hc) === JSON.stringify(r27.hc0) && r27.coa === 64 && r27.gone, r27);
+  check('28 "שמור ואשר" בפריט מקופה (ספק): אין שדה מספר חשבונית, נשאלת "צריך חשבונית כנגד התשלום"; "לא" – הוצאה אחת, תשלום במזומן 64, יתרה 0, חודש התשלום 11/2026, לא ב"לתשלום" ולא בחודשים הבאים', r27.ask28 && r27.noInvF && r27.n === 1 && r27.inv === '' && r27.creg === 'i_nl' && JSON.stringify(r27.pays) === JSON.stringify([['מזומן', 64]]) && r27.bal === 0 && r27.plan === '2026-11' && !r27.aw && !r27.owe && JSON.stringify(r27.hc) === JSON.stringify(r27.hc0) && r27.coa === 64 && r27.gone, r27);
 
   // 12.11: מסך הבדיקה – משכורת (אף פעם בלי חשבונית) וספק "לא – בלי חשבונית"
   const r29 = await page.evaluate(async () => {
@@ -263,6 +263,77 @@ const GOLD = {"w":[["gw1",{"reg":"i_nl","d":"2026-10-20","tm":"09:00","a":40,"wh
   // הסגירה לא תואמת כשחסרה הוצאה (בדיקה שהסימון באמת משווה)
   const r18 = await page.evaluate(() => { const z = S.zc.find((x) => x.id === 'rcZ2'); z.co.s = 150; z.co.ids = ['rcA', 'rcB', 'rcMissing']; const R = coLastR('i_nl', coMine()); z.co.s = 125; z.co.ids = ['rcA', 'rcB']; return { s: R.s, cs: R.cs, miss: R.miss }; });
   check('18 סגירה עם הוצאה שלא נמצאה במכשיר: סכום המסומנות (125) שונה מהסגירה (150) ומדווח חסר', r18.s === 125 && r18.cs === 150 && r18.miss === 1, r18);
+  // 31. פתק "הוצאת מזומן מהקופה" בקטגוריית ספק (12.11): תשלום מהקופה, לא חשבונית – "תאריך התשלום", בלי חודש תשלום לפי תנאי הספק, מספר חשבונית לא חובה;
+  // תאריך שזוהה רחוק מסגירת הקופה (2024 במקום 2026) – אזהרה והצעה לתאריך הסגירה; "שמור ואשר" שואל "תגיע חשבונית מהספק בהמשך?"
+  const r31 = await page.evaluate(async () => {
+    const W = (ms) => new Promise((r) => setTimeout(r, ms || 150)), F = () => document.querySelector('#dlg[open] form[data-f=inbsave]');
+    S.zc.push({ id: 'rcZ9', reg: 'i_nl', d: '2026-11-10', tm: '22:00' });
+    S.inbox.push({ id: 'rcSlip', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', file: 'fSlip', d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup2', amt: 55, date: '2024-11-10', ctm: '09:02', note: 'אפייה' } },
+      { id: 'rcRealInv', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', d: { cat: 'e_sup', sub: 'rcSup2', amt: 30, date: '2024-11-10' } }); save();
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg'); const cardW = !!document.querySelector('#main [data-datewarn]');
+    ACT.inbEdit({ dataset: { id: 'rcSlip' } }); await W(); let f = F();
+    const lbl = f.elements.date.closest('label').querySelector('span').textContent, warn = (f.querySelector('[data-datewarn]') || {}).textContent || '', use = f.querySelector('[data-a=inbUseRef]');
+    const o1 = { lbl, warn, useD: use && use.dataset.d, plan: !!f.elements.plan, due: !!f.elements.due, invReq: f.elements.inv ? f.elements.inv.required : null, note: !!f.querySelector('[data-regpay]'), dn: !!f.elements.dn };
+    use.click(); await W(); f = F(); const o2 = { date: f.elements.date.value, warn: !!f.querySelector('[data-datewarn]') };
+    ACT.inbSaveOk(); await W(300);
+    if (document.querySelector('#dlg[open] [data-a=inbRegNoInv]')) { document.querySelector('#dlg[open] [data-a=inbRegNoInv]').click(); await W(); }
+    const q = (document.querySelector('#dlg[open]') || {}).innerText || ''; const yes = document.querySelector('#dlg[open] [data-a=inbRegAw][data-w]'); if (yes) { yes.click(); await W(300); }
+    const t = S.tx.find((x) => x.src === 'rcSlip') || {};
+    ACT.inbEdit({ dataset: { id: 'rcRealInv' } }); await W(); const g = F();
+    const o3 = { lbl: g.elements.date.closest('label').querySelector('span').textContent, invReq: g.elements.inv && g.elements.inv.required, warn: !!g.querySelector('[data-datewarn]'), plan: !!(g.elements.plan || g.elements.due) };
+    closeDlg(); S.inbox = S.inbox.filter((x) => x.id !== 'rcRealInv'); save();
+    return { cardW, o1, o2, q: q.slice(0, 300), t: { date: t.date, plan: t.plan, due: t.due || '', aw: !!t.await, inv: t.inv, creg: t.creg, pays: (t.pays || []).map((p) => p.m + ':' + p.a + ':' + p.d) }, o3 };
+  });
+  check('31א פתק מקופה בקטגוריית ספק: "תאריך התשלום", בלי חודש/תאריך תשלום לפי תנאי הספק, בלי שדה מספר חשבונית, בלי "תעודת משלוח"', r31.o1.lbl === 'תאריך התשלום' && !r31.o1.plan && !r31.o1.due && r31.o1.invReq === null && r31.o1.note && !r31.o1.dn, r31.o1);
+  check('31ב תאריך שזוהה רחוק מסגירת הקופה (10/11/2024 מול 10/11/2026): אזהרה בכרטיס ובטופס, והצעה לתאריך הסגירה שמחליפה את התאריך ומעלימה את האזהרה', r31.cardW && /סגירת הקופה/.test(r31.o1.warn) && r31.o1.useD === '2026-11-10' && r31.o2.date === '2026-11-10' && !r31.o2.warn, { o1: r31.o1, o2: r31.o2 });
+  check('31ג "שמור ואשר" שואל "צריך חשבונית כנגד התשלום הזה?"; "כן" – תשלום במזומן מהקופה בתאריך הפתק שממתין לחשבונית, חודש התשלום = חודש הפתק, בלי תאריך תשלום לפי תנאים', /צריך חשבונית כנגד התשלום הזה/.test(r31.q) && r31.t.aw && r31.t.date === '2026-11-10' && r31.t.plan === '2026-11' && !r31.t.due && r31.t.creg === 'i_nl' && r31.t.pays.join() === 'מזומן:55:2026-11-10', r31);
+  check('31ד חשבונית ספק אמיתית (לא מקופה) בלי שינוי: "תאריך החשבונית", מספר חשבונית חובה, בלי אזהרת תאריך', r31.o3.lbl === 'תאריך החשבונית' && r31.o3.invReq === true && !r31.o3.warn, r31.o3);
+  // 32. בודק עצמאי סבב 1: זיכוי ספק בפריט מקופה – השדות הקודמים; תאריך ריק נחסם; משכורת מקופה – "לתשלום" נשאר בכרטיס
+  const r32 = await page.evaluate(async () => {
+    const W = (ms) => new Promise((r) => setTimeout(r, ms || 150)), F = () => document.querySelector('#dlg[open] form[data-f=inbsave]');
+    const emp = S.cats.find((c) => c.kind === 'exp' && !c.hid && !c.off && c.beh === 'emp');
+    S.inbox.push({ id: 'rcCrS', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup2', amt: -20, date: '2026-11-10', note: 'החזר' } },
+      { id: 'rcNoD', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup2', amt: 12, date: '2026-11-10', note: 'בלי תאריך' } },
+      { id: 'rcSalP', by: 'עובד בדיקה', at: '2026-11-10T09:00:00Z', d: { reg: true, creg: 'i_nl', cat: emp.id, sub: 'rcEmp9', amt: 100, date: '2026-11-10', plan: '2026-11', m: 'מזומן', note: 'משכורת' } }); save();
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg');
+    const salCard = document.querySelector('#main [data-id=rcSalP]').closest('.card').innerText;
+    ACT.inbEdit({ dataset: { id: 'rcCrS' } }); await W(); let f = F();
+    const cr = { lbl: f.elements.date.closest('label').querySelector('span').textContent, inv: f.elements.inv && f.elements.inv.required, regpay: !!f.querySelector('[data-regpay]'), plan: !!(f.elements.plan || f.elements.due) }; closeDlg();
+    ACT.inbEdit({ dataset: { id: 'rcNoD' } }); await W(); f = F(); f.elements.date.value = ''; const n0 = S.tx.length; ACT.inbSaveOk(); await W(300);
+    const nd = { n: S.tx.length - n0, still: S.inbox.some((x) => x.id === 'rcNoD'), date: S.inbox.find((x) => x.id === 'rcNoD').d.date }; closeDlg();
+    ACT.inbEdit({ dataset: { id: 'rcCrS' } }); await W(); const c0 = S.tx.length; ACT.inbSaveOk(); await W(300); const crN = S.tx.length - c0, crLeft = S.inbox.some((x) => x.id === 'rcCrS'); closeDlg();
+    S.inbox = S.inbox.filter((x) => !['rcCrS', 'rcNoD', 'rcSalP'].includes(x.id)); save();
+    return { sal: /לתשלום/.test(salCard), cr, nd, crN, crLeft };
+  });
+  check('32א זיכוי ספק בפריט מקופה (סכום שלילי) – בלי שינוי: "תאריך החשבונית", מספר חשבונית חובה, חודש/תאריך תשלום', r32.cr.lbl === 'תאריך החשבונית' && r32.cr.inv === true && !r32.cr.regpay && r32.cr.plan, r32.cr);
+  check('32ב פריט מקופה בלי תאריך: השמירה נחסמת ("חסר תאריך התשלום"), לא נרשם תשלום והפריט לא השתנה', r32.nd.n === 0 && r32.nd.still && r32.nd.date === '2026-11-10', r32.nd);
+  check('32ד זיכוי ספק מקופה בלי מספר חשבונית: "שמור ואשר" לא רושם זיכוי והפריט נשאר בתור (כמו ב-main)', r32.crN === 0 && r32.crLeft, r32);
+  check('32ג משכורת מקופה: "לתשלום" נשאר בכרטיס כמו קודם', r32.sal, r32);
+  // 33. מסך הבדיקה: מסמך עם כמה עמודים – כל העמודים מוצגים (לא רק הראשון)
+  const r33 = await page.evaluate(async () => {
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const fg = fget; fget = async (id) => id === 'fMulti' ? 'PAGES:' + JSON.stringify([png, png, png]) : id === 'fOne' ? png : fg(id);
+    const one = async (file) => { document.querySelectorAll('#inbDoc').forEach((e) => e.remove()); document.body.insertAdjacentHTML('beforeend', '<div id="inbDoc"></div>'); IE = { id: 'x' + file }; await inbDoc({ id: 'x' + file, file }); const el = document.getElementById('inbDoc'); const r = { imgs: el.querySelectorAll('.zb img').length, txt: el.innerText }; el.remove(); return r; };
+    try { return { m: await one('fMulti'), o: await one('fOne') }; } finally { fget = fg; IE = null; }
+  });
+  check('33 מסמך של 3 עמודים במסך הבדיקה: 3 תמונות עם "עמוד X מתוך 3"; מסמך של עמוד אחד – תמונה אחת בלי מספור', r33.m.imgs === 3 && /עמוד 3 מתוך 3/.test(r33.m.txt) && r33.o.imgs === 1 && !/מתוך/.test(r33.o.txt), r33);
+  // 35. "＋ קטגוריה חדשה" במסך הבדיקה: האשף הקיים, ובסיומו חוזרים לבדיקה עם הקטגוריה והספק החדשים, והסכום שהוקלד נשמר
+  const r35 = await page.evaluate(async () => {
+    const W = (ms) => new Promise((r) => setTimeout(r, ms || 150)), F = () => document.querySelector('#dlg[open] form[data-f=inbsave]');
+    S.inbox.push({ id: 'rcNc', by: 'עובד בדיקה', at: '2026-11-11T09:00:00Z', d: { reg: true, creg: 'i_nl', cat: 'e_sup', sub: 'rcSup1', amt: 21, date: '2026-11-11', note: 'דגים' } }); save();
+    NAV = [{ v: 'home' }, { v: 'todo' }]; go('inbox', 'reg'); ACT.inbEdit({ dataset: { id: 'rcNc' } }); await W(); let f = F();
+    const opt = [...f.elements.cat.options].some((o) => o.value === '__new'); f.elements.amt.value = '27';
+    f.elements.cat.value = '__new'; f.elements.cat.dispatchEvent(new Event('change', { bubbles: true })); await W();
+    const wiz = !!document.querySelector('#dlg[open] form[data-f=cwName]'); const nf = document.querySelector('#dlg[open] form[data-f=cwName]'); nf.elements.name.value = 'ספקי דגים'; FRM.cwName(nf); await W();
+    document.querySelector('#dlg[open] [data-a=cwBeh][data-v=sup]').click(); await W(); const sf = document.querySelector('#dlg[open] form[data-f=cwSubs]'); sf.elements.subs.value = 'דגי הים'; FRM.cwSubs(sf); await W();
+    document.querySelector('#dlg[open] [data-a=cwDone]').click(); await W(); f = F();
+    const nc = S.cats.find((c) => c.name === 'ספקי דגים'), ns = nc && S.subs.find((x) => x.cat === nc.id);
+    const back = { form: !!f, cat: f && f.elements.cat.value, sub: f && f.elements.sub && f.elements.sub.value, amt: f && f.elements.amt.value };
+    ACT.inbSaveOk(); await W(300); const no = document.querySelector('#dlg[open] [data-a=inbRegAw]:not([data-w])'); if (no) { no.click(); await W(300); }
+    const t = S.tx.find((x) => x.src === 'rcNc') || {};
+    return { opt, wiz, nc: nc && { beh: nc.beh, kind: nc.kind }, back, want: { cat: nc && nc.id, sub: ns && ns.id }, t: { cat: t.cat, sub: t.sub, amt: t.amt, creg: t.creg } };
+  });
+  check('35 "＋ קטגוריה חדשה" במסך הבדיקה: האשף נפתח, נוצרת קטגוריית ספקים עם ספק, חוזרים לבדיקה עם הקטגוריה והספק החדשים והסכום שהוקלד (27), והאישור רושם אותה שם', r35.opt && r35.wiz && r35.nc && r35.nc.beh === 'sup' && r35.nc.kind === 'exp' && r35.back.form && r35.back.cat === r35.want.cat && r35.back.sub === r35.want.sub && r35.back.amt === '27' && r35.t.cat === r35.want.cat && r35.t.sub === r35.want.sub && r35.t.amt === 27 && r35.t.creg === 'i_nl', r35);
   check('19 אין שגיאות JS', page.__errors.length === 0, page.__errors);
   await ctx.close(); await browser.close();
   if (out) fs.writeFileSync(out, JSON.stringify({ fail, res }, null, 1));
