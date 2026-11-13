@@ -202,8 +202,10 @@ const QS=['מה קרה היום?','תזרים לחודש','חשבוניות לת
 const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',facts:'@facts',cal:'@cal',bank:'@bank'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
 async function msgLoad(){X.mb=1;try{const r=await fnCall('secChatLoad',{limit:50});X.msgs=r&&r.msgs||[]}catch(e){X.msgs=X.msgs||[];X.msgErr=e&&e.message||'השיחה לא נטענה'}finally{X.mb=0;if(cur().v==='sec'&&!typing())rerender()}}
 const fmtAt=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
+/* 13.11.2026: סימני עיצוב שהמודל מוסיף (Markdown) – מוצגים כעיצוב ולא ככוכביות. רץ על טקסט שכבר עבר esc, ומוסיף רק <b> */
+const mdLite=t=>t.split('\n').map(l=>{if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(l))return null;const h=/^\s*#{1,6}\s+(.*)$/.exec(l);if(h)return '<b>'+h[1].replace(/\*\*/g,'')+'</b>';return l.replace(/^(\s*)[-*•]\s+/,'$1• ')}).filter(l=>l!==null).join('\n').replace(/\*\*([^*\n]+?)\*\*/g,'<b>$1</b>').replace(/__([^_\n]+?)__/g,'<b>$1</b>').replace(/\n{3,}/g,'\n\n').replace(/^\n+|\n+$/g,'');
 function bub(m,i){if(m.role!=='a')return `<div class="secmsg u">${esc(m.text)}</div>`;
- const tx=esc(m.text).replace(/\[(\d{1,2})\]/g,'<sup>$1</sup>');
+ const tx=mdLite(esc(m.text)).replace(/\[(\d{1,2})\]/g,'<sup>$1</sup>');
  const src=(m.src||[]).map((s,k)=>`<li><b>${k+1}.</b> לפי ${esc(s.l||'')}${s.at?', נכון ל-'+esc(fmtAt(s.at)):''}${SCR[s.s]&&(SCR[s.s][0]==='@'||V[SCR[s.s]])?` <button class="chip" data-a="secGo" data-v="${SCR[s.s]}" style="min-height:32px">למסך</button>`:''}</li>`).join('');
  const ideas=(m.ideas||[]).filter(x=>!(X.nr||{})[x.key]).map(x=>`<div class="card" style="margin:6px 0 0;padding:8px"><small>${esc(x.seen||'')}</small><button class="chip" data-a="secNr" data-k="${esc(x.key)}" style="min-height:40px;margin-top:4px">לא רלוונטי – לא להציע 90 יום</button></div>`).join('');
  const th=m.th&&X.st&&X.st.cfTh==null?`<div class="card" style="margin:6px 0 0;padding:8px"><small>סף מוצע להתראת תזרים: ${esc(Number(m.th).toLocaleString('he-IL'))} ₪</small><div class="row" style="margin-top:4px"><button class="chip" data-a="secTh" data-v="${esc(String(m.th))}" style="min-height:40px">לאשר את הסף</button><button class="chip" data-a="secThEd" style="min-height:40px">סף אחר</button></div></div>`:'';
