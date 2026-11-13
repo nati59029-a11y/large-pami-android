@@ -9,6 +9,7 @@
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret, defineString } = require('firebase-functions/params');
+const logger = require('firebase-functions/logger');
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 const P = {
@@ -44,7 +45,7 @@ function geminiBody(o) {
   for (const t of o.turns) {
     if (t.role === 'u') contents.push({ role: 'user', parts: [{ text: t.text }] });
     else if (t.role === 'a') contents.push({ role: 'model', parts: [{ text: t.text }] });
-    else if (t.role === 'call') contents.push({ role: 'model', parts: t.calls.map((c) => ({ functionCall: { name: c.name, args: c.args || {} } })) });
+    else if (t.role === 'call') contents.push({ role: 'model', parts: t.calls.map((c) => Object.assign({ functionCall: { name: c.name, args: c.args || {} } }, typeof c.sig === 'string' && c.sig ? { thoughtSignature: c.sig } : {})) }); // 13.11.2026: מודלים חדשים דורשים להחזיר את חתימת החשיבה של קריאת הכלי
     else if (t.role === 'res') contents.push({ role: 'user', parts: t.results.map((r) => ({ functionResponse: { name: r.name, response: { content: r.data } } })) });
   }
   const body = { systemInstruction: { parts: [{ text: o.system }] }, contents, generationConfig: o.tier === 'deep'
@@ -59,6 +60,7 @@ function geminiBody(o) {
 
 // 13.11.2026: מודל שהוצא משימוש (Google מחזירה 404) – בוחרים מודל זמין מהרשימה של Google (כמו בסריקה, lib/scan.js), פעם אחת, וזוכרים אותו.
 const goodModel = { fast: '', deep: '' };
+const noThinkCfg = new Set(); // 13.11.2026: מודלים שדוחים (400) את thinkingConfig – שולחים אליהם בלי ההגדרה
 async function pickModel(base, key, tier, bad, signal) {
   try {
     const r = await fetch(`${base}/v1beta/models?pageSize=200`, { headers: { 'x-goog-api-key': key }, signal });
@@ -88,12 +90,13 @@ async function gemini(o) {
   const ctl = new AbortController();
   const tm = setTimeout(() => ctl.abort(), o.timeoutMs || 45000);
   const out = { sent: 0 };
-  const body = JSON.stringify(o.rawBody || geminiBody(o));
+  const bodyObj = o.rawBody || geminiBody(o);
+  const bodyFor = (m) => { if (!noThinkCfg.has(m) || !bodyObj.generationConfig || !bodyObj.generationConfig.thinkingConfig) return JSON.stringify(bodyObj); const g = Object.assign({}, bodyObj.generationConfig); delete g.thinkingConfig; return JSON.stringify(Object.assign({}, bodyObj, { generationConfig: g })); };
   const post = async (m) => {
     try {
       out.sent = 1;
       return await fetch(`${base}/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body, signal: ctl.signal,
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: bodyFor(m), signal: ctl.signal,
       });
     } catch (e) {
       clearTimeout(tm);
@@ -111,7 +114,13 @@ async function gemini(o) {
       const alt = await pickModel(base, key, tier, [model], ctl.signal);
       if (alt) { model = alt; r = await post(model); }
     }
+    if (r.status === 400 && !noThinkCfg.has(model) && bodyObj.generationConfig && bodyObj.generationConfig.thinkingConfig) {
+      noThinkCfg.add(model); r = await post(model); if (!r.ok) noThinkCfg.delete(model);
+    }
     if (!r.ok) {
+      // ליומן השרת בלבד (לא למשתמש): קוד והודעה קצרה מ-Google, לאבחון
+      let gm = ''; try { const ej = await r.json(); gm = String(ej && ej.error && [ej.error.status, ej.error.message].filter(Boolean).join(': ') || '').slice(0, 300); } catch (e) { /* */ }
+      logger.warn('sec-ai: provider error', { status: r.status, model, msg: gm });
       const reason = r.status === 429 ? 'ai-quota' : r.status === 404 ? 'ai-model' : [500, 502, 503, 504].includes(r.status) ? 'ai-overloaded' : (r.status === 400 || r.status === 403) ? 'ai-rejected' : 'ai-error';
       // לא מעבירים את גוף השגיאה הלאה (עלול להכיל פרטים פנימיים)
       const err = new HttpsError(reason === 'ai-quota' ? 'resource-exhausted' : 'unavailable', 'המזכירה לא זמינה כרגע. נסו שוב בעוד דקה.', { reason, status: r.status });
@@ -123,7 +132,7 @@ async function gemini(o) {
     const c = (j.candidates || [])[0] || {};
     const parts = (c.content && c.content.parts) || [];
     const calls = parts.filter((p) => p && p.functionCall && typeof p.functionCall.name === 'string')
-      .map((p) => ({ name: p.functionCall.name, args: p.functionCall.args && typeof p.functionCall.args === 'object' ? p.functionCall.args : {} }));
+      .map((p) => Object.assign({ name: p.functionCall.name, args: p.functionCall.args && typeof p.functionCall.args === 'object' ? p.functionCall.args : {} }, typeof p.thoughtSignature === 'string' && p.thoughtSignature ? { sig: p.thoughtSignature } : {}));
     const text = parts.filter((p) => p && typeof p.text === 'string').map((p) => p.text).join('');
     const um = j.usageMetadata || {};
     return { text, calls, usage: { in: +um.promptTokenCount || 0, out: (+um.candidatesTokenCount || 0) + (+um.thoughtsTokenCount || 0) }, model, sent: 1 };
@@ -150,4 +159,4 @@ async function transcribe(o) {
   return { text: String(r.text || '').trim().slice(0, 4000), usage: r.usage, sent: r.sent };
 }
 
-module.exports = { _goodModel: goodModel, chat, transcribe, STT_SYS, costMc, modelOf, geminiBody, GEMINI_API_KEY, PROVIDERS };
+module.exports = { _goodModel: goodModel, _noThinkCfg: noThinkCfg, chat, transcribe, STT_SYS, costMc, modelOf, geminiBody, GEMINI_API_KEY, PROVIDERS };

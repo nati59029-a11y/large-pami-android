@@ -65,8 +65,8 @@ const CLASSIFY = {
 };
 // המזכירה (שלב 2): בקשה עם הנחיית מערכת שמתחילה ב-SEC-CHAT-V1. התשובה נקבעת בבדיקה: state.sec = (body) => ({ calls: [{ name, args }] } | { text })
 // usage = טוקנים מדומים לכל תשובה (לבדיקת מונה העלות)
-const state = { invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.invlines = null; state.gone = []; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+const state = { invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
@@ -92,7 +92,7 @@ function kindOf(body) {
 function secAnswer(body) {
   let r = { text: 'שלום' };
   try { if (typeof state.sec === 'function') r = state.sec(body) || r; } catch (e) { r = { text: 'mock error: ' + e.message }; }
-  const parts = r.calls && r.calls.length ? r.calls.map((c) => ({ functionCall: { name: c.name, args: c.args || {} } })) : [{ text: String(r.text || '') }];
+  const parts = r.calls && r.calls.length ? r.calls.map((c, i) => Object.assign({ functionCall: { name: c.name, args: c.args || {} } }, state.strict ? { thoughtSignature: 'SIG-' + i } : {})) : [{ text: String(r.text || '') }];
   return { candidates: [{ content: { parts, role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
 }
 function rawAnswer(kind, body) {
@@ -133,6 +133,9 @@ function start() {
       }
       if (state.delayMs) { const d = state.delayMs; send = (code, obj) => setTimeout(() => send0(code, obj), d); }
       if (state.gone.includes(m[1])) return send(404, { error: { message: 'model not found' } }); // מודל שהוצא משימוש
+      // מודל חדש (strict): דוחה thinkingBudget 0, ודוחה קריאת כלי בהיסטוריה בלי thoughtSignature
+      if (state.strict && kind === 'sec') { const tc = body.generationConfig && body.generationConfig.thinkingConfig; const noSig = (body.contents || []).some((c) => c.role === 'model' && (c.parts || []).some((p) => p.functionCall && !p.thoughtSignature));
+        if ((tc && tc.thinkingBudget === 0) || noSig) return send(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: noSig ? 'missing thought_signature' : 'thinking budget 0 not supported' } }); }
       if (state.mode === 'badkey') return send(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
       if (state.mode === 'quota') return send(429, { error: { message: 'quota' } });
       if (state.mode === 'overloaded') return send(503, { error: { message: 'overloaded' } });

@@ -553,6 +553,17 @@ describe('תקרת עלות (11.3, 83, 84) ומגבלות (10.3)', () => {
     const r = await call('secChat', M1, { text: 'שלום', fin: FIN() });
     assert.equal(r.status, 'UNAVAILABLE'); assert.equal(JSON.parse(r.text).error.details.reason, 'ai-model');
   });
+  it('מודל חדש (13.11.2026): דוחה thinkingBudget 0 וקריאת כלי בלי חתימה – נשלח שוב בלי ההגדרה, והחתימה מוחזרת', async () => {
+    await seed({ cap: 100000 });
+    GM.state.strict = true;
+    GM.state.sec = (body) => (lastIsRes(body) ? { text: 'בסדר גמור' } : { calls: [{ name: 'getTasks', args: {} }] });
+    const r = await call('secChat', M1, { text: 'מה קרה היום?', fin: FIN() });
+    assert.equal(r.status, 'OK', r.text);
+    const R = secReqs();
+    assert.ok(R.some((x) => !(x.body.generationConfig || {}).thinkingConfig), 'נשלחה בקשה בלי thinkingConfig');
+    const last = R[R.length - 1].body.contents.filter((c) => c.role === 'model').flatMap((c) => c.parts).filter((p) => p.functionCall);
+    assert.ok(last.length && last.every((p) => p.thoughtSignature === 'SIG-0'), JSON.stringify(last));
+  });
   it('גודל השאלה, קצב, וקלט לא תקין', async () => {
     await seed();
     GM.state.sec = () => ({ text: 'בסדר' });
