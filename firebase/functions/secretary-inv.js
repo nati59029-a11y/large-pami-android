@@ -456,8 +456,9 @@ async function secDecide(request) {
     const x = after.x;
     await db.collection('sec_log').doc().set(ilog(uid, after.act === 'invAuto' ? 'auto' : 'mgr', after.act, { tgt: id, note: after.why || (x.sub ? 'sub=' + x.sub : '') }));
     // 36: נכנסה (גם אוטומטית) משולח חדש – סימון שנשאר + התראה, עם ביטול בלחיצה
-    if (after.act === 'invAuto' && x.ns) await notify(db, 'ns|' + id, 'חשבונית משולח חדש', 'נכנסה חשבונית מספק ' + (x.subN || '') + ' משולח חדש: ' + show(x.ns) + ' – לבדוק. אפשר לבטל או לאשר את השולח במסך "חשבוניות שהתקבלו".', now);
-    if (after.act === 'invHold' && after.why === 'dup') await notify(db, 'dup|' + id, 'חשד לחשבונית כפולה', 'חשבונית שהגיעה נראית כמו חשבונית שכבר רשומה. היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".', now);
+    // קובץ ממייל ישן (החלטה 3): בלי שום התראה – רק הרישום ב-sec_log שלמעלה
+    if (after.act === 'invAuto' && x.ns && x.hist !== true) await notify(db, 'ns|' + id, 'חשבונית משולח חדש', 'נכנסה חשבונית מספק ' + (x.subN || '') + ' משולח חדש: ' + show(x.ns) + ' – לבדוק. אפשר לבטל או לאשר את השולח במסך "חשבוניות שהתקבלו".', now);
+    if (after.act === 'invHold' && after.why === 'dup' && x.hist !== true) await notify(db, 'dup|' + id, 'חשד לחשבונית כפולה', 'חשבונית שהגיעה נראית כמו חשבונית שכבר רשומה. היא ממתינה לבדיקה שלך במסך "חשבוניות שהתקבלו".', now);
   }
   return Object.assign({ id, op }, r);
 }
@@ -499,11 +500,13 @@ exports.secDecide = onCall(wrap('secDecide', secDecide));
 // שלב 8 (בדיקת עומס): קובץ שהזיהוי שלו נקטע (תקלה זמנית, עומס על מונה הסריקה, הפונקציה נעצרה) או שרשומת התור שלו לא נוצרה – נשאר ב-'q'/'qw'
 // ולא היה חוזר לבד (הטריגר בלי ניסיון חוזר). כאן: אחרי 10 דקות – חוזר לתור, עד 3 פעמים; אחר כך – כרטיס "הזיהוי לא הצליח – אפשר להזין ידנית".
 // נקרא מ-secRemind (כל 15 דקות), כמו requeue של ווצאפ. בטוח להרצה כפולה (טרנזקציה לכל רשומה)
-const INV_REQ_AGE = 10 * 60000, INV_REQ_MAX = 3;
+const INV_REQ_AGE = 10 * 60000, INV_REQ_MAX = 3, INV_REQ_SCAN = 300;
 async function requeue(db, bizId, now) {
   const out = { requeued: 0, failed: 0 };
-  const s = await db.collection('sec_inv').where('st', 'in', ['q', 'qw']).limit(100).get();
+  // קבצים ממייל ישן שממתינים למכסה של מחר (qwt) נקראים כאן גם הם – לכן המגבלה גבוהה יותר, והם מדולגים בלי טרנזקציה
+  const s = await db.collection('sec_inv').where('st', 'in', ['q', 'qw']).limit(INV_REQ_SCAN).get();
   for (const d of s.docs) {
+    if (d.get('st') === 'q' && Number(d.get('qwt')) > now) continue;
     const r = await db.runTransaction(async (tx) => {
       const c = await tx.get(d.ref);
       if (!c.exists) return '';

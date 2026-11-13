@@ -1136,7 +1136,13 @@ describe('קליטה אוטומטית בחיבור ראשון, חשבוניות 
     assert.equal(j.boxes[bx()].q, G.rangeQ('12', Date.now())); assert.equal(j.boxes[bx()].end, false);
     assert.equal((await inA()).length, 0, 'לא מריצים עמוד בזמן החיבור');
     assert.equal((await coll(`b/${A}/sec_clean`)).length, 0, 'בלי רשימת ניקוי');
-    assert.ok((await get(`b/${A}/sec_cfg/mail_auto`)).seen[bx()], 'התיבה נרשמה כ"נקלטה"');
+    const au = await get(`b/${A}/sec_cfg/mail_auto`);
+    assert.ok(au.seen[bx()], 'התיבה נרשמה כ"נקלטה"');
+    // החלטת בעל העסק: קליטה אוטומטית שמתחילה – ביטול הגבלה עד סוף היום (חצות הבאה בשעון ישראל)
+    const INVC = require('../functions/secretary-inv.js')._core;
+    assert.equal(au.noCapUntil, INVC.nextDay(au.seen[bx()]));
+    assert.notEqual(dayIL(au.noCapUntil), dayIL(Date.now())); assert.ok(au.noCapUntil - Date.now() <= 25 * 3600e3);
+    assert.equal((await logs(A)).filter((l) => l.act === 'histNoCapAuto').length, 1);
     assert.ok((await notes()).some((n) => /12 החודשים/.test(n.body || n.text || '')), 'ההודעה למנהלים');
     await CORE.syncAll();
     const L = await inA();
@@ -1147,8 +1153,11 @@ describe('קליטה אוטומטית בחיבור ראשון, חשבוניות 
     // חיבור חוזר של אותה תיבה – בלי עבודה חדשה
     await put(`b/${A}/sec_cfg/mail_hist`, { st: 'done', boxes: {} });
     const cfg = await get(`b/${A}/sec_cfg/mail`); cfg.boxes[bx()].st = 'expired'; await put(`b/${A}/sec_cfg/mail`, cfg); // חיבור מחדש מותר רק לתיבה שפג חיבורה (מספר התיבות)
+    await put(`b/${A}/sec_cfg/mail_auto`, Object.assign(await get(`b/${A}/sec_cfg/mail_auto`), { noCapUntil: 0 }));
     assert.equal((await connect(M1, 'mail', { email: BOX_A })).res.code, 200);
     assert.equal((await get(`b/${A}/sec_cfg/mail_hist`)).st, 'done');
+    assert.equal((await get(`b/${A}/sec_cfg/mail_auto`)).noCapUntil, 0, 'חיבור מחדש – בלי ביטול הגבלה');
+    assert.equal((await logs(A)).filter((l) => l.act === 'histNoCapAuto').length, 1);
   });
 
   it('מייל ישן עם קובץ: invW בלי הורדה; התור ההדרגתי מכניס לתור החשבוניות כהוצאה בלבד (hist, noStock), בלי שום התראה', async () => {
@@ -1174,14 +1183,16 @@ describe('קליטה אוטומטית בחיבור ראשון, חשבוניות 
     assert.equal((await invA()).length, 3);
   });
 
-  it('תקציב יומי: 30 ביום ועצירה כשנשארות פחות מ-40 במכסה; מנהל־העל מבטל את ההגבלה עד תאריך – נקלט; עצירה (stop) – לא רץ', async () => {
+  it('תקציב יומי: 40 ביום ועצירה כשנשארות פחות מ-20 במכסה; מנהל־העל מבטל את ההגבלה עד תאריך – נקלט; עצירה (stop) – לא רץ', async () => {
+    assert.equal(CORE.HIST_INV_DAY, 40); assert.equal(CORE.HIST_INV_RESERVE, 20);
     await connect(M1, 'mail', { email: BOX_A });
+    await put(`b/${A}/sec_cfg/mail_auto`, Object.assign(await get(`b/${A}/sec_cfg/mail_auto`), { noCapUntil: 0 })); // בלי הביטול האוטומטי של יום החיבור
     await inBizA((db) => CORE.histStep(db, A, 100, Date.now()));
     await put(`b/${A}/sec_cfg/mail_hist`, Object.assign(await get(`b/${A}/sec_cfg/mail_hist`), { invDay: { d: dayIL(Date.now()), n: CORE.HIST_INV_DAY } }));
     assert.equal((await inBizA((db) => CORE.histInvStep(db, A, Date.now()))).n, 0, 'התקציב היומי נגמר');
-    // יום חדש, אבל במכסת העסק נשארו פחות מ-40 (ברירת מחדל 50 לעסק)
+    // יום חדש, אבל במכסת העסק נשארו פחות מ-20 (ברירת מחדל 50 לעסק)
     await put(`b/${A}/sec_cfg/mail_hist`, Object.assign(await get(`b/${A}/sec_cfg/mail_hist`), { invDay: { d: '2000-01-01', n: 99 } }));
-    await put(`b/${A}/scan_usage/_biz`, { day: dayIL(Date.now()), count: 15 });
+    await put(`b/${A}/scan_usage/_biz`, { day: dayIL(Date.now()), count: 50 - CORE.HIST_INV_RESERVE + 1 });
     const r1 = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
     assert.equal(r1.n, 0); assert.equal(r1.wait, 'reserve');
     assert.equal((await invA()).length, 0);
@@ -1193,6 +1204,7 @@ describe('קליטה אוטומטית בחיבור ראשון, חשבוניות 
     const until = Date.now() + 5 * DAY;
     const nc = await call('secAdminMail', SUPER, { bizId: A, op: 'histNoCap', until });
     assert.ok(nc.ok, nc.msg); assert.equal(nc.r.noCapUntil, until); assert.equal(nc.r.histInv.wait, 3); assert.equal(nc.r.histInv.free, true);
+    assert.equal(nc.r.histInv.dayMax, 40); assert.equal(nc.r.histInv.reserve, 20);
     assert.ok((await coll(`b/${A}/audit`)).some((a) => /^histNoCap=/.test(a.note)));
     assert.ok((await logs(A)).some((l) => l.act === 'histNoCap'));
     // עצירה של קליטת ההיסטוריה – גם תור החשבוניות לא רץ
@@ -1248,5 +1260,21 @@ describe('קליטה אוטומטית בחיבור ראשון, חשבוניות 
     assert.deepEqual((await get(`b/${A}/sec_in/gnew`)).inv, ['fx']);
     assert.equal((await invA()).filter((x) => x.hist).length, 3);
     assert.ok((await logs(A)).some((l) => l.act === 'histFill' && l.note === '3'));
+  });
+  it('תור לא נתקע: 25 מיילים של תיבה שהחיבור שלה פג ומיילים של תיבה שנותקה – המייל של התיבה התקינה נקלט', async () => {
+    await put(`b/${A}/sec_cfg/mail`, { max: 3 });
+    await connect(M1, 'mail', { email: BOX_A });
+    await connect(M1, 'mail', { email: BOX_A2 });
+    await put(`b/${A}/sec_cfg/mail_hist`, { st: 'done', boxes: {}, n: 0 });
+    const cfg = await get(`b/${A}/sec_cfg/mail`); cfg.boxes[G.boxIdOf(BOX_A2)].st = 'expired'; await put(`b/${A}/sec_cfg/mail`, cfg);
+    for (let i = 0; i < 25; i++) await put(`b/${A}/sec_in/a${String(i).padStart(3, '0')}`, { ch: 'mail', box: G.boxIdOf(BOX_A2), gid: 'x' + i, t: 1, st: 'done', flags: ['hist', 'file'], invW: true });
+    for (let i = 0; i < 3; i++) await put(`b/${A}/sec_in/0off${i}`, { ch: 'mail', box: 'gm0000000000000000', gid: 'o' + i, t: 1, st: 'done', flags: ['hist', 'file'], invW: true });
+    const g = Object.values(GO.box(BOX_A).msgs).find((m) => m.payload.parts.some((p) => p.filename)).id;
+    await put(`b/${A}/sec_in/${CORE.inIdOf(bx(), g)}`, { ch: 'mail', box: bx(), gid: g, from: 'sup0@sup.example', t: 1, st: 'done', flags: ['hist', 'file'], invW: true });
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r.n, 1, 'התיבה התקינה מתקדמת');
+    assert.equal((await get(`b/${A}/sec_in/${CORE.inIdOf(bx(), g)}`)).invW, undefined);
+    assert.equal((await get(`b/${A}/sec_in/a000`)).invW, true, 'תיבה שפג חיבורה – ממתינה לחיבור מחדש');
+    assert.equal((await get(`b/${A}/sec_in/0off0`)).invX, 'off', 'תיבה שנותקה – מסומן');
   });
 });

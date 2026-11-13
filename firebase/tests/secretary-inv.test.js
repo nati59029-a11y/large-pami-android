@@ -874,6 +874,18 @@ describe('קבצים ממייל ישן (סריקת היסטוריה): הוצאה
     await put(`b/${A}/sec_cfg/mail_auto`, { noCapUntil: Date.now() - 1 });
     assert.equal((await arrive(pdf(1), RAW.inv({ number: 'OLD-4' }), H1)).st, 'q', 'התאריך עבר – מוגבל שוב');
   });
+  it('קובץ ישן שנכנס ישר משולח חדש, וקובץ ישן שהמכשיר עיכב כחשד לכפילות – רק ביומן, בלי התראה', async () => {
+    const x = await arrive(pdf(1), RAW.inv(), H1);
+    assert.equal(x.ns, 'm:' + SUP_MAIL); assert.equal(x.el, true); assert.equal(x.hist, true);
+    assert.ok((await call('secDecide', M1, { op: 'claim', id: x.id, mode: 'auto', dev: 'devA0001' })).ok);
+    assert.ok((await call('secDecide', M1, { op: 'done', id: x.id, dev: 'devA0001' })).r.auto);
+    const y = await arrive(pdf(1), RAW.inv({ number: 'OLD-9', total_with_vat: 77 }), H1);
+    assert.ok((await call('secDecide', M1, { op: 'hold', id: y.id, why: 'dup' })).ok);
+    assert.equal((await get(`b/${A}/sec_inv/${y.id}`)).hold, 'dup');
+    const lg = await coll(`b/${A}/sec_log`);
+    assert.ok(lg.some((l) => l.act === 'invAuto' && l.tgt === x.id)); assert.ok(lg.some((l) => l.act === 'invHold' && l.tgt === y.id));
+    for (const u of [M1, M2]) assert.equal((await coll(`b/${A}/sec_note/${u}/n`)).length, 0, 'בלי שום התראה');
+  });
   it('חשד לכפילות / שולח לא מאומת בקובץ ישן – רק ביומן, בלי התראה', async () => {
     await arrive(jpg(), RAW.inv());
     const n0 = (await coll(`b/${A}/sec_note/${M1}/n`)).length;
