@@ -119,6 +119,7 @@ function caseModel(cs) {
   };
 }
 const expected = (cs, R) => [...cs.answer.matchAll(/\{([A-Za-z]+)\.([^}]+)\}/g)].map((m) => ({ tool: m[1], v: Math.abs(getPath(R[m[1]], m[2])) }));
+const MODELS_ALL = () => GM.MODELS.map((m) => m.name.replace('models/', ''));
 const secReqs = () => GM.state.requests.filter((r) => r.kind === 'sec');
 const declNames = (req) => (((req.body.tools || [])[0] || {}).functionDeclarations || []).map((x) => x.name);
 
@@ -538,6 +539,19 @@ describe('תקרת עלות (11.3, 83, 84) ומגבלות (10.3)', () => {
     assert.equal(r.status, 'UNAVAILABLE'); assert.equal(JSON.parse(r.text).error.message, 'המזכירה לא זמינה כרגע. נסו שוב בעוד דקה.');
     assert.equal((await get(`b/${A}/sec_cfg/use`)).mc, 0, 'אין חיוב על בקשה שנכשלה בלי תשובה (העלות בפועל 0)');
     assert.equal((await coll(`b/${A}/sec_chat/${M1}/m`)).length, 0);
+  });
+  it('מודל שהוצא משימוש (404) – עוברים למודל זמין מהרשימה וזוכרים אותו; בלי מודל זמין – הסיבה ai-model', async () => {
+    await seed({ cap: 100000 });
+    GM.state.sec = () => ({ text: 'בסדר' });
+    GM.state.gone = ['gemini-2.5-flash'];
+    const ok = await call('secChat', M1, { text: 'שלום', fin: FIN() });
+    assert.equal(ok.status, 'OK', ok.text);
+    assert.deepEqual(secReqs().map((x) => x.model), ['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
+    await call('secChat', M1, { text: 'שלום', fin: FIN() });
+    assert.equal(secReqs().pop().model, 'gemini-2.5-flash-lite', 'המודל שעבד נזכר – אין שוב 404');
+    GM.state.gone = MODELS_ALL();
+    const r = await call('secChat', M1, { text: 'שלום', fin: FIN() });
+    assert.equal(r.status, 'UNAVAILABLE'); assert.equal(JSON.parse(r.text).error.details.reason, 'ai-model');
   });
   it('גודל השאלה, קצב, וקלט לא תקין', async () => {
     await seed();
