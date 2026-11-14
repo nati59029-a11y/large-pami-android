@@ -183,3 +183,38 @@ describe('store3d-extra: ניקוי – 3 סבבים אחרונים, סל מחז
     assert.equal(parts.join('').replace(/ \| /g, '').length, 250, 'שום תו לא נחתך');
   });
 });
+
+describe('שלב 13ב – סיכום למזכירה (secLatest / secText)', () => {
+  const sum = (score, o) => Object.assign({ score, nOk: 5, nIss: 3, nRev: 1, nMiss: 2, nBad: 0, cat: { p: 55, h: 90, o: 69, d: 100 }, prev: '', dScore: 0 }, o);
+  const L = [
+    ['a_1', { st: 'done', br: 'main', map: 's-main', doneAt: NOW - D1, sum: sum(78, { prev: 'a_0', dScore: 4 }) }],
+    ['a_0', { st: 'closed', br: 'main', map: 's-main', doneAt: NOW - 8 * D1, sum: sum(74) }],
+    ['w_1', { st: 'done', br: 'main', map: 'w-main', doneAt: NOW - 2 * D1, sum: sum(90, { cat: { p: 90, h: 90, o: 90, d: 90 } }) }],
+    ['n_1', { st: 'done', br: 'north', map: 's-north', doneAt: NOW - 3 * D1, sum: sum(60) }],
+    ['ad', { st: 'done', k: 'adhoc', br: 'main', map: 's-main', doneAt: NOW, sum: sum(5) }],
+    ['c_1', { st: 'cancel', br: 'main', map: 's-main', doneAt: NOW, sum: sum(6) }],
+    ['x_1', { st: 'done', br: 'main', map: 's-main', doneAt: NOW, sum: { score: 'x' } }],
+    ['b_1', { st: 'done', br: 'BAD!', map: 's-bad', doneAt: NOW, sum: sum(7) }],
+  ];
+  it('secLatest: הסבב האחרון שהסתיים לכל מפה, בלי יזום/מבוטל/בלי ציון/סניף לא תקין; לפי הסניפים המותרים', () => {
+    assert.deepEqual(X.secLatest(L, null).map((x) => x[0]), ['a_1', 'w_1', 'n_1']);
+    assert.deepEqual(X.secLatest(L, ['north']).map((x) => x[0]), ['n_1']);
+    assert.deepEqual(X.secLatest(L, []).map((x) => x[0]), []);
+    const many = Array.from({ length: 10 }, (_, i) => ['m' + i, { st: 'done', br: 'main', map: 's-m' + i, doneAt: NOW - i, sum: sum(50) }]);
+    assert.equal(X.secLatest(many, null).length, X.SEC_MAPS);
+  });
+  it('secText: ציון, שינוי, בעיות, קטגוריות חלשות (מתחת ל-70), חוסרים, משימות תיקון פתוחות בסניפים המותרים; אין נתונים – null', () => {
+    const fixes = [{ br: 'main', st: 'open' }, { br: 'north', st: 'rej' }, { br: 'main', st: 'ok' }, { br: 'main', st: 'sent' }];
+    const t = X.secText(X.secLatest(L, ['main']), fixes, { a_1: { items: [1, 2, 3], st: 'draft' } }, ['main']);
+    assert.match(t.text, /בסניפים שלך/);
+    assert.match(t.text, /חנות, סניף main, .*ציון 78 מתוך 100 \(\+4 מהסבב הקודם\); מקומות עם בעיה 3, לבדיקה 1, לא צולמו 2; קטגוריות חלשות: מחירים 55, סדר וחזית 69; רשימת חוסרים: 3 פריטים \(ממתינה לאישור\)\./);
+    assert.match(t.text, /מחסן, סניף main, .*ציון 90 מתוך 100; מקומות/);
+    assert.match(t.text, /משימות תיקון פתוחות: 2\./);
+    assert.ok(!t.text.includes('north') && !t.text.includes('60'));
+    assert.equal(t.at, NOW - D1);
+    assert.ok(t.text.length < 700, 'קצר: ' + t.text.length);
+    assert.equal(X.secText([], [], {}, null), null);
+    assert.equal(X.secText([], [{ br: 'north', st: 'open' }], {}, ['main']), null, 'משימה בסניף אחר לא נספרת');
+    assert.match(X.secText([], [{ br: 'main', st: 'open' }], {}, null).text, /משימות תיקון פתוחות: 1\./);
+  });
+});

@@ -264,3 +264,31 @@ describe('store3d: הפונקציות מיוצאות', () => {
     assert.equal(typeof m._core.runAll, 'function');
   });
 });
+
+describe('שלב 13ב – pastList (s3View past)', () => {
+  const NOW = 1800000000000, D = 86400000, U = 'uid_emp_1', O = 'uid_emp_2';
+  const r = (o) => Object.assign({ st: 'done', uids: [U], map: 's-main', mapV: 1, openAt: NOW - 10 * D, dueAt: NOW - 5 * D, nUid: { [U]: { n: 3, d: 3 }, [O]: { n: 9, d: 1 } } }, o);
+  it('רק סבבים שנסגרו (done/closed) שלו, עד 30 יום לפי doneAt (בלי – dueAt), החדש קודם, רק החלק שלו', () => {
+    const L = C.pastList([
+      ['abcdef_20261101', r({ doneAt: NOW - 3 * D })],
+      ['abcdef_20261102', r({ st: 'closed', doneAt: NOW - D })],
+      ['abcdef_20261001', r({ doneAt: NOW - 31 * D })],
+      ['abcdef_20261103', r({ st: 'cancel', doneAt: NOW - D })],
+      ['abcdef_20261104', r({ st: 'open' })],
+      ['abcdef_20261105', r({ uids: [O], doneAt: NOW - D })],
+      ['abcdef_20261106', r({ doneAt: undefined, dueAt: NOW - 2 * D })],
+      ['../bad', r({ doneAt: NOW - D })],
+      ['ad_' + 'q'.repeat(20), r({ k: 'adhoc', doneAt: NOW - 4 * D })],
+    ], U, NOW);
+    assert.deepEqual(L.map((x) => x.runId), ['abcdef_20261102', 'abcdef_20261106', 'abcdef_20261101', 'ad_' + 'q'.repeat(20)]);
+    assert.deepEqual(L[0], { runId: 'abcdef_20261102', st: 'closed', openAt: NOW - 10 * D, dueAt: NOW - 5 * D, map: 's-main', mapV: 1, n: { n: 3, d: 3 }, doneAt: NOW - D });
+    assert.equal(L[3].k, 'adhoc');
+    assert.ok(!JSON.stringify(L).includes(O), 'בלי מזהה של עובד אחר');
+  });
+  it('עד PAST_MAX (20); רשימה ריקה / לא תקינה – []', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ['abcdef_202611' + String(i).padStart(2, '0'), r({ doneAt: NOW - i * 3600000 })]);
+    assert.equal(C.pastList(many, U, NOW).length, C.PAST_MAX);
+    assert.deepEqual(C.pastList(null, U, NOW), []);
+    assert.deepEqual(C.pastList([['abcdef_20261101', null]], U, NOW), []);
+  });
+});

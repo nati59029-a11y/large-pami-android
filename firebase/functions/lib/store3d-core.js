@@ -11,6 +11,7 @@
 //   finished / timeStep   – סיום סבב, תזכורת ואיחור.
 //   moveRun               – העברת חלק של עובד בסבב לעובד אחר (מנהל) או לקיחה (עובד, כש-sub == 'any').
 //   viewRun               – מה עובד רואה מסבב (s3View), לפי s3set.show.
+//   pastList              – שלב 13ב: הסבבים שנסגרו לאחרונה של העובד (s3View בלי runId, השדה past) – רק שלו, עד 30 יום, עד 20.
 
 const crypto = require('node:crypto');
 const TK = require('./tk-time');
@@ -39,6 +40,9 @@ const SUBS = ['fixed', 'manual', 'any'];
 const SHOW = ['fix', 'score', 'recs', 'full'];
 const EVS = ['s', 'p', 'r', 'e'];
 const LIVE = ['open', 'late'];
+const DONE = ['done', 'closed'];
+const PAST_DAYS = 30;         // שלב 13ב: כמה ימים אחורה עובד רואה סבבים שנסגרו (הנחה)
+const PAST_MAX = 20;          // ועד כמה סבבים
 
 const isRunId = (s) => typeof s === 'string' && (RE.runSched.test(s) || RE.runMan.test(s) || RE.runAd.test(s));
 const intIn = (v, a, b) => (Number.isInteger(v) && v >= a && v <= b ? v : 0);
@@ -317,6 +321,17 @@ function listItem(runId, run, uid) {
   return { runId, st: run.st, openAt: run.openAt, dueAt: run.dueAt, map: run.map, mapV: run.mapV, n: (run.nUid && run.nUid[uid]) || { n: 0, d: 0 } };
 }
 // סבב אחד לעובד: רק החלק שלו, הזמנים שלו בלבד, ותוצאות לפי show. ai = [[slot, data], ...]
+// שלב 13ב: סבבים שנסגרו (done/closed, לא בוטלו) שהעובד משויך אליהם, ש-doneAt שלהם (בלי – dueAt) בתוך 30 הימים האחרונים.
+// החדשים קודם. כל פריט = listItem (החלק שלו בלבד) + doneAt + k:'adhoc' לדיווח יזום. list = [[runId, data], ...]
+function pastList(list, uid, now) {
+  const from = now - PAST_DAYS * D1;
+  const when = (r) => (Number.isInteger(r.doneAt) ? r.doneAt : Number.isInteger(r.dueAt) ? r.dueAt : 0);
+  return (list || [])
+    .filter(([id, r]) => isRunId(id) && r && DONE.includes(r.st) && Array.isArray(r.uids) && r.uids.includes(uid) && when(r) >= from)
+    .sort((a, b) => when(b[1]) - when(a[1]))
+    .slice(0, PAST_MAX)
+    .map(([id, r]) => Object.assign(listItem(id, r, uid), { doneAt: when(r) }, r.k === 'adhoc' ? { k: 'adhoc' } : {}));
+}
 function viewRun(runId, run, uid, show, ai) {
   const sh = cleanShow(show);
   const mine = new Set((run.asg && run.asg[uid]) || []);
@@ -338,8 +353,8 @@ function viewRun(runId, run, uid, show, ai) {
 }
 
 module.exports = {
-  TZ: TK.TZ, D1, MIN, OPEN_HH, MAX_W, MAX_BAYS, MAX_EV, RE, SUBS, SHOW, EVS, LIVE,
+  TZ: TK.TZ, D1, MIN, OPEN_HH, MAX_W, MAX_BAYS, MAX_EV, RE, SUBS, SHOW, EVS, LIVE, DONE, PAST_DAYS, PAST_MAX,
   isRunId, cleanF, nextOpen, decideOpen, dayKey, settingsFor, cleanAsg, uidsOf, planDeparted,
   mapProblem, baysOf, splitBays, runDoc, addEvent, workPause, finished, closeSt, remindAt, timeStep, behind,
-  moveRun, cleanShow, listItem, viewRun, partKey, takeParts,
+  moveRun, cleanShow, listItem, viewRun, pastList, partKey, takeParts,
 };

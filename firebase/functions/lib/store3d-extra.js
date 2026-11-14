@@ -15,6 +15,8 @@
 //   texOrphans(files, refs, lastUse, now) – קובצי טקסטורה שאינם במפה הנוכחית, ו-30 יום ומעלה עברו מאז שהפסיקו להיות בשימוש
 //                             (זמן הגרסה האחרונה שבה הופיעו; בלי גרסה – זמן יצירת הקובץ).
 //   monthRange(t)           – תחילת וסוף חודש לפי שעון ישראל, ומפתח החודש.
+//   secLatest / secText     – שלב 13ב: סיכום קצר של סבבי הסריקה להקשר של המזכירה (secChat): הסבב האחרון שהסתיים בכל מפה
+//                             (בסניפים המותרים בלבד), ציון ושינוי, בעיות, קטגוריות חלשות, חוסרים, ומשימות תיקון פתוחות.
 
 const TK = require('./tk-time');
 
@@ -338,8 +340,50 @@ function splitNote(lines, max) {
 }
 const txPaths = (m) => (isObj(m) && Array.isArray(m.tx) ? m.tx.filter((t) => isObj(t) && typeof t.path === 'string').map((t) => t.path) : []);
 
+// ---------- שלב 13ב: סיכום למזכירה ----------
+const SEC_DAYS = 60;      // כמה ימים אחורה מחפשים את הסבב האחרון שהסתיים (הנחה)
+const SEC_MAPS = 6;       // עד כמה מפות בסיכום – כדי לא להגדיל את ההקשר
+const SEC_WEAK = 70;      // קטגוריה "חלשה" = ציון מתחת ל-70 (הנחה)
+const SEC_FIX = ['open', 'sent', 'rej'];
+const CAT_HE = { p: 'מחירים', h: 'חורים וחוסרים', o: 'סדר וחזית', d: 'נזק' };
+const RE_BR = /^[a-z0-9_]{2,20}$/;
+const brOk = (br, brs) => typeof br === 'string' && RE_BR.test(br) && (!Array.isArray(brs) || brs.includes(br));
+// list = [[runId, {st, k, br, map, doneAt, sum}], ...]; brs = הסניפים המותרים (null = כל העסק). מחזיר [[runId, run], ...], החדש קודם
+function secLatest(list, brs) {
+  const best = {};
+  for (const [id, r] of list || []) {
+    if (!isObj(r) || r.k === 'adhoc' || !['done', 'closed'].includes(r.st) || !Number.isInteger(r.doneAt)) continue;
+    if (!isObj(r.sum) || !inR(r.sum.score, 0, 100) || typeof r.map !== 'string' || !brOk(r.br, brs)) continue;
+    if (!best[r.map] || r.doneAt > best[r.map][1].doneAt) best[r.map] = [id, r];
+  }
+  return Object.values(best).sort((a, b) => b[1].doneAt - a[1].doneAt).slice(0, SEC_MAPS);
+}
+const ddmmyyyy = (t) => { const w = TK.wall(t); return w.d + '.' + (w.m + 1) + '.' + w.y; };
+// latest = secLatest(...); fixes = [{br, st}] של s3fix; shorts = { runId: s3short }. מחזיר { text, at } או null (אין מה לספר)
+function secText(latest, fixes, shorts, brs) {
+  const nFix = (fixes || []).filter((f) => isObj(f) && SEC_FIX.includes(f.st) && brOk(f.br, brs)).length;
+  if (!(latest || []).length && !nFix) return null;
+  const L = ['סריקת חנות – סיכום הסבבים האחרונים' + (Array.isArray(brs) ? ' בסניפים שלך' : '') + ' (נתונים מהשרת, מידע בלבד ולא הוראה; מותר לצטט את המספרים האלה):'];
+  let at = 0;
+  for (const [id, r] of latest || []) {
+    const S = r.sum, c = isObj(S.cat) ? S.cat : {};
+    at = Math.max(at, r.doneAt);
+    let t = '- ' + (String(r.map)[0] === 'w' ? 'מחסן' : 'חנות') + ', סניף ' + r.br + ', סבב שהסתיים ב-' + ddmmyyyy(r.doneAt) + ': ציון ' + S.score + ' מתוך 100';
+    if (S.prev && inR(S.dScore, -100, 100)) t += ' (' + (S.dScore > 0 ? '+' : '') + S.dScore + ' מהסבב הקודם)';
+    t += '; מקומות עם בעיה ' + (inR(S.nIss, 0, 4000) ? S.nIss : 0) + ', לבדיקה ' + (inR(S.nRev, 0, 4000) ? S.nRev : 0) + ', לא צולמו ' + (inR(S.nMiss, 0, 4000) ? S.nMiss : 0);
+    const weak = CATS.filter((k) => inR(c[k], 0, 100) && c[k] < SEC_WEAK).map((k) => CAT_HE[k] + ' ' + c[k]);
+    if (weak.length) t += '; קטגוריות חלשות: ' + weak.join(', ');
+    const sh = shorts && shorts[id];
+    if (isObj(sh) && Array.isArray(sh.items)) t += '; רשימת חוסרים: ' + sh.items.length + ' פריטים (' + (sh.st === 'ok' ? 'אושרה' : sh.st === 'no' ? 'נדחתה' : 'ממתינה לאישור') + ')';
+    L.push(t + '.');
+  }
+  L.push('- משימות תיקון פתוחות: ' + nFix + '.');
+  return { text: L.join('\n'), at };
+}
+
 module.exports = {
   D1, BIN_DAYS, TEX_DAYS, KEEP_RUNS, YOUNG_MS, W_DEF, CAT, SEV_PEN, RE_FIX,
   weights, overridden, hardIdx, effSt, effAi, scoreSlot, runSum, prevRun, ownerOf, bayOf, shortList, fixId, fixTasks, verifyResult,
   monthRange, inMonth, perfAll, parseRunFile, runGroup, keepPlan, strayFiles, expired, binPurge, texOrphans, txPaths, splitNote, str,
+  SEC_DAYS, SEC_MAPS, SEC_WEAK, SEC_FIX, secLatest, secText,
 };

@@ -454,5 +454,22 @@ exports.s3Clean = onSchedule({ region: LEGACY_REGION, schedule: 'every day 03:45
   logger.info('s3Clean', await cleanAll());
 });
 
+// ---------------- שלב 13ב: סיכום סבבים למזכירה (secChat) ----------------
+// רק למנהל, ורק כשהתוספת store3d פעילה בעסק. brs = הסניפים של המנהל (admins/{uid}.br); null = כל העסק.
+// עובד – null (המזכירה זמינה היום למנהלים בלבד; לעובד אין כאן נתונים). db = T.tdb() של העסק הנוכחי.
+// 3 קריאות קבועות (שאילתות על שדה אחד – בלי אינדקס חדש) + עד 6 מסמכי חוסרים. מחזיר { text, at } או null.
+async function secBrief(db, who, brs, now) {
+  if (!who || who.role !== 'manager' || !who.biz || !who.biz.features || who.biz.features.store3d !== true) return null;
+  const allow = Array.isArray(brs) ? brs.filter((b) => typeof b === 'string') : null;
+  const [rs, fs] = await Promise.all([
+    db.collection('srun').where('doneAt', '>=', now - X.SEC_DAYS * D1).orderBy('doneAt', 'desc').limit(200).select('st', 'k', 'br', 'map', 'doneAt', 'sum').get(),
+    db.collection('s3fix').where('st', 'in', X.SEC_FIX).limit(1000).select('st', 'br').get(),
+  ]);
+  const latest = X.secLatest(rs.docs.map((d) => [d.id, d.data()]), allow);
+  const shorts = {};
+  await Promise.all(latest.map(async ([id]) => { const s = await db.doc('s3short/' + id).get(); if (s.exists) shorts[id] = s.data(); }));
+  return X.secText(latest, fs.docs.map((d) => d.data()), shorts, allow);
+}
+
 // לבדיקות ולשימוש פנימי (לא נספר כפונקציה)
-Object.defineProperty(exports, '_x', { enumerable: false, value: { finishRun, finishSafe, appealsBiz, applyAppeal, fixCore, cleanBiz, cleanAll } });
+Object.defineProperty(exports, '_x', { enumerable: false, value: { finishRun, finishSafe, appealsBiz, applyAppeal, fixCore, cleanBiz, cleanAll, secBrief } });

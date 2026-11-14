@@ -352,6 +352,40 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
     assert.equal(typeof (await get(`b/${A}/srun/${RUN}`)).sum.score, 'number', 'רשת ביטחון: הסבב סוכם');
     assert.ok(await get(`b/${A}/staff/${E2}`), 'שום דבר של העובד לא נמחק');
   });
+
+  it('שלב 13ב – סיכום למזכירה (secBrief): מנהל – כל הסניפים; מנהל עם הגבלת סניפים – רק שלו; עובד / תוספת כבויה / עסק אחר – כלום', async () => {
+    const now = Date.now();
+    const sum = (score, o) => Object.assign({ score, nOk: 5, nIss: 3, nRev: 1, nMiss: 0, nBad: 0, cat: { p: 55, h: 90, o: 80, d: 100 }, prev: '', dScore: 0 }, o);
+    const R2 = 'r1a2b3c4_20261101', ROLD = 'r8k2m4q1_20261101', ROTH = 'r5t6y7u8_20261110';
+    await adm.doc(`b/${A}/srun/${R2}`).set({ br: 'main', map: 's-main', st: 'done', k: 'sched', uids: [E1], doneAt: now - 2 * D1, sum: sum(78, { prev: ROLD, dScore: -6 }) });
+    await adm.doc(`b/${A}/srun/${ROLD}`).set({ br: 'main', map: 's-main', st: 'closed', k: 'sched', uids: [E1], doneAt: now - 9 * D1, sum: sum(84) });
+    await adm.doc(`b/${A}/srun/${ROTH}`).set({ br: 'north', map: 's-north', st: 'done', k: 'sched', uids: [E2], doneAt: now - D1, sum: sum(91, { cat: { p: 95, h: 95, o: 95, d: 95 } }) });
+    await adm.doc(`b/${A}/srun/ad_${'q'.repeat(20)}`).set({ br: 'main', map: 's-main', st: 'done', k: 'adhoc', uids: [E1], doneAt: now - 1000, sum: sum(11) });
+    await adm.doc(`b/${A}/s3short/${R2}`).set({ items: [{ n: 'במבה' }, { n: 'ביסלי' }], st: 'draft' });
+    await adm.doc(`b/${A}/s3fix/${R2}__f1-a-1_a`).set({ br: 'main', st: 'open', u: E1 });
+    await adm.doc(`b/${A}/s3fix/${ROTH}__f1-a-1_a`).set({ br: 'north', st: 'rej', u: E2 });
+    await adm.doc(`b/${A}/s3fix/${ROLD}__f1-a-1_a`).set({ br: 'main', st: 'ok', u: E1 });
+    const bizOf = (id) => T.loadBiz(id);
+    const bizA = await bizOf(A), bizB = await bizOf(B);
+    const brief = (who, brs, biz) => T.runInBiz({ bizId: biz || A, prefix: `b/${biz || A}/` }, () => XX.secBrief(T.tdb(), who, brs, now));
+    const all = await brief({ uid: MGR, role: 'manager', biz: bizA }, null);
+    assert.ok(all && all.text.includes('ציון 78 מתוך 100') && all.text.includes('(-6 מהסבב הקודם)'), all && all.text);
+    assert.ok(all.text.includes('ציון 91') && all.text.includes('סניף north'), 'כל הסניפים');
+    assert.ok(all.text.includes('קטגוריות חלשות: מחירים 55') && all.text.includes('רשימת חוסרים: 2 פריטים (ממתינה לאישור)'));
+    assert.ok(all.text.includes('משימות תיקון פתוחות: 2.'), all.text);
+    assert.ok(!all.text.includes('84') && !all.text.includes('ציון 11'), 'רק הסבב האחרון לכל מפה, בלי דיווח יזום');
+    assert.ok(!all.text.includes(E1) && !all.text.includes(E2), 'בלי מזהי עובדים');
+    assert.equal(all.at, now - D1);
+    const lim = await brief({ uid: MGR, role: 'manager', biz: bizA }, ['main']);
+    assert.ok(lim.text.includes('בסניפים שלך') && lim.text.includes('ציון 78') && !lim.text.includes('north') && !lim.text.includes('91'), lim.text);
+    assert.ok(lim.text.includes('משימות תיקון פתוחות: 1.'));
+    assert.equal(await brief({ uid: MGR, role: 'manager', biz: bizA }, ['nosuch']), null, 'סניף בלי נתונים – אין בלוק');
+    assert.equal(await brief({ uid: E1, role: 'employee', biz: bizA }, null), null, 'עובד – כלום');
+    assert.equal(await brief({ uid: MGR, role: 'manager', biz: Object.assign({}, bizA, { features: Object.assign({}, bizA.features, { store3d: false }) }) }, null), null, 'תוספת כבויה – כלום');
+    assert.equal(await brief({ uid: EB, role: 'manager', biz: bizB }, null, B), null, 'עסק אחר (התוספת כבויה שם) – כלום');
+    // עסק אחר עם התוספת פעילה – רואה רק את הנתונים שלו (כאן אין לו סבבים), לא של עסק א
+    assert.equal(await brief({ uid: EB, role: 'manager', biz: Object.assign({}, bizB, { features: Object.assign({}, bizB.features, { store3d: true }) }) }, null, B), null);
+  });
 });
 
 // ---------------- הפונקציות (אמולטור הפונקציות – רץ ב-CI) ----------------

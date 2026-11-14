@@ -11,7 +11,7 @@
 //   s3Move        – העברת החלק של עובד בסבב { runId, from, to } (מנהל), או לקיחה { runId, from, take: true } (עובד, רק כש-sub == 'any').
 //   s3Log         – אירועי זמן של עובד { qid, run, ev: s/p/r/e, at } – נרשם רק ביומן של המתקשר; qid מונע כפילות (תור בלי רשת).
 //   s3View        – הדרך היחידה של עובד לקרוא סבבים ותוצאות (חוזה 4.21): בלי runId – הסבבים הפתוחים שלו, משימות התיקון שלו
-//                   ומה אפשר לקחת; עם runId – רק החלק שלו, הזמנים שלו, ותוצאות לפי s3set.show.
+//                   ומה אפשר לקחת, ושלב 13ב – past: הסבבים שלו שנסגרו ב-30 הימים האחרונים (עד 20, רק החלק שלו); עם runId – רק החלק שלו, הזמנים שלו, ותוצאות לפי s3set.show.
 // כולן: requireStaff עם feature 'store3d' (כבויה = אין גישה), שגיאות בעברית, T.tdb() (שורש או b/{bizId}).
 // התראות: יומן s3ntf (create – התראה לא נשלחת פעמיים) + FCM לטוקנים הקיימים (staff/push_tokens). באמולטור – בלי FCM.
 
@@ -409,11 +409,15 @@ exports.s3View = onCall(T.scoped(async (request) => {
       const s = await db.collection('srun').where('st', 'in', C.LIVE).limit(200).get();
       return { runs: s.docs.map((d) => Object.assign({ runId: d.id }, d.data())) };
     }
-    const [mine, fixes, live] = await Promise.all([
+    const now = Date.now();
+    const [mine, fixes, live, past] = await Promise.all([
       db.collection('srun').where('uids', 'array-contains', uid).where('st', 'in', C.LIVE).orderBy('dueAt').limit(50).get(),
       // שלב 10: גם 'rej' (צילום האימות הראה שהבעיה עדיין קיימת) – העובד צריך לתקן ולצלם שוב
       db.collection('s3fix').where('u', '==', uid).where('st', 'in', ['open', 'sent', 'rej']).orderBy('dueAt').limit(100).get(),
       db.collection('srun').where('st', 'in', C.LIVE).limit(200).get(),
+      // שלב 13ב: סבבים שנסגרו – אותו אינדקס (uids, st, dueAt). החדשים (limitToLast); הסינון הסופי לפי doneAt ב-C.pastList
+      db.collection('srun').where('uids', 'array-contains', uid).where('st', 'in', C.DONE)
+        .where('dueAt', '>=', now - (C.PAST_DAYS + 14) * C.D1).orderBy('dueAt').limitToLast(60).get(),
     ]);
     // מה אפשר לקחת: סבבים שאני לא בהם, שהכלל שלהם (או ההגדרות של הסניף) מתיר "כל עובד יכול לקחת"
     const take = [];
@@ -434,6 +438,7 @@ exports.s3View = onCall(T.scoped(async (request) => {
       runs: mine.docs.map((d) => C.listItem(d.id, d.data(), uid)),
       fixes: fixes.docs.map((d) => Object.assign({ id: d.id }, pickFix(d.data()))),
       take,
+      past: C.pastList(past.docs.map((d) => [d.id, d.data()]), uid, now),
     };
   }
   if (!C.isRunId(input.runId)) throw bad('bad-run', 'מזהה הסבב לא תקין');
