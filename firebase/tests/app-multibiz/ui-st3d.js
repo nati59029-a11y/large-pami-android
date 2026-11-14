@@ -68,7 +68,7 @@ const tool = async (page, k) => { await page.click('[data-a=s3eTool][data-k=' + 
   check('2 מסך ראשי למנהל: מפה במרכז ולשוניות מפה/סבבים/דוחות/המלצות/הגדרות', t2.v === 'st3' && t2.main && t2.tabs.join(',') === 'מפה,סבבים,דוחות,המלצות,הגדרות', t2);
   if (shot) await A.page.screenshot({ path: shot + '-main.png' });
   await A.page.click('[data-a=st3Tab][data-k=rep]'); await sleep(200);
-  check('2א לשונית עתידית מציגה הודעה ולא נתונים', /ייפתח בשלב הבא/.test(await txt(A.page, '.s3s') || ''), await txt(A.page, '.s3s'));
+  { const t = await txt(A.page, '.s3s') || ''; check('2א לשונית דוחות (שלב 13 מחובר): מסך הדוח עם לשוניות משנה, בלי הודעת "ייפתח בשלב הבא" ובלי "דוגמה"', /מגמה/.test(t) && !/ייפתח בשלב הבא/.test(t) && !/דוגמה/.test(t), t); }
 
   // ---- 3. עורך: חדר לא חוקי נחסם, חדר חוקי, גוף, שמירה ----
   S.none = true; await A.page.evaluate(() => { S3UI.drop(); S3UI.openEditor('s'); }); await sleep(1500);
