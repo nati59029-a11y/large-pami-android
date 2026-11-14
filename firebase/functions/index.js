@@ -71,6 +71,8 @@ exports.scanDocument = onCall(
       || (kind === 'invlines' && !hasPerm(who, 'expW') && !hasPerm(who, 'prc')))) {
       throw new HttpsError('permission-denied', 'אין לך הרשאה לפעולה הזו. פנה למנהל.', { reason: 'no-perm' });
     }
+    // צילום רשימת הזמנה (ordlist, 14.11.2026): התוספת "הזמנות" והרשאת ord – בכל העסקים (גם legacy), לפני הספירה במכסה
+    if (kind === 'ordlist' && (!(who.biz && who.biz.features && who.biz.features.orders === true) || !hasPerm(who, 'ord'))) throw new HttpsError('permission-denied', 'אין לך הרשאה להזמנות. פנה למנהל.', { reason: 'no-perm' });
     const key = GEMINI_API_KEY.value();
     if (!key) throw new HttpsError('failed-precondition', 'אין מפתח לזיהוי חכם בשרת', { reason: 'no-key' });
     const limit = SCAN_DAILY_LIMIT.value();

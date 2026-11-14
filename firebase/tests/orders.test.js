@@ -803,3 +803,135 @@ describe('לקוח עסקי ומחירים – שלב 1 (14.11.2026)', () => {
     o = await get(`b/${A}/ord/${r.result.id}`); assert.equal(o.disc, undefined); assert.equal(o.gross, 20);
   });
 });
+
+describe('רשימה חופשית, חיפוש וכינויים – שלב 2 חלק ב\' (14.11.2026)', () => {
+  const M = require('./gemini-mock');
+  const CAT = JSON.parse(fsm.readFileSync(path.join(__dirname, 'prod-match-cases.json'), 'utf8')).catalog;
+  const WS = 'p0543333333';
+  before(() => M.start());
+  after(() => M.stop());
+  beforeEach(async () => {
+    M.reset();
+    await prep(async (d) => {
+      const b = d.batch();
+      for (const p of CAT) b.set(d.doc(`b/${A}/prod/${p.id}`), Object.assign({ price: 10, on: true, q: {} }, p, p.id === 'nap' ? { ct: 10 } : {}, p.id === 'bag' ? { ct: 12, cto: true } : {}));
+      b.set(d.doc(`b/${A}/cust/${WS}`), { name: 'מסעדה', phone: '0543333333', wholesale: true, at: 1, upd: 1, x: {} });
+      await b.commit();
+    });
+  });
+  const ords = () => M.state.requests.filter((r) => r.kind === 'ordparse');
+  // 10 שורות: 8 מוכרות (כולל שם ישן, ברקוד, קרטונים) ו-2 שלא ברור לאיזה מוצר הכוונה ("כפפות" – שני מוצרים, "במב" – שני גדלים)
+  const TEN = ['צלחת עמוקה', '3 שקית זבל', '5 קרטונים מפיות', 'כוסות 200 מל x2', 'ביסלי גריל 4', 'סוללות AA', 'קולה זירו 6', '7290002', 'כפפות 2', 'במב 10'].join('\n');
+
+  it('קריטריון 3: רשימה של 10 שורות, 8 מוכרות – בלי ai אין שום פנייה ל-AI; עם ai נשלחות ל-AI רק 2 השורות (נמדד בשרת המדומה)', async () => {
+    const r0 = await call('ordParse', E1, { text: TEN });
+    assert.equal(r0.status, 'OK', r0.text);
+    assert.equal(r0.result.lines.length, 10);
+    assert.equal(r0.result.need, 2); assert.equal(ords().length, 0, 'בלי ai – אין פנייה');
+    assert.ok(r0.result.est && r0.result.est.usd > 0, 'עלות משוערת לפני הפעולה');
+    const L = r0.result.lines;
+    assert.equal(L[0].pid, 'mg', 'שם ישן (כינוי) → המוצר ששמו שונה'); assert.equal(L[0].pn, 'מגשים עמוקים');
+    assert.equal(L[7].pid, 'mgf'); assert.equal(L[7].by, 'code');
+    assert.deepEqual([L[2].pid, L[2].q, L[2].conv], ['nap', 50, 10], '5 קרטונים × 10');
+    assert.deepEqual([L[3].pid, L[3].q], ['cup', 2]);
+    assert.equal(L[8].pid, null); assert.equal(L[9].pid, null);
+    assert.ok(L[8].alts.some((x) => x.id === 'gl') && L[8].alts.some((x) => x.id === 'gl2'), 'חלופות לבחירה');
+    const r1 = await call('ordParse', E1, { text: TEN, ai: true });
+    assert.equal(r1.status, 'OK', r1.text);
+    assert.equal(ords().length, 1, 'קריאת AI אחת');
+    const P = M.ordPayload(ords()[0].body);
+    assert.equal(P.length, 2, 'רק 2 שורות נשלחו ל-AI');
+    assert.deepEqual(P.map((x) => x.i), [8, 9]);
+    assert.ok(P.every((x) => x.c.length >= 2 && x.c.length <= 20), 'עד 20 מועמדים');
+    assert.ok(!JSON.stringify(P).includes('צלחת'), 'שורה שזוהתה לא נשלחה');
+    assert.equal(r1.result.ai.sent, 2); assert.equal(r1.result.ai.got, 2);
+    assert.equal(r1.result.lines[8].by, 'ai'); assert.ok(['gl', 'gl2'].includes(r1.result.lines[8].pid));
+    assert.equal((await get(`b/${A}/scan_usage/_ordai`)).count, 1, 'מונה המכסה היומית');
+  });
+
+  it('AI בוחר רק מתוך הרשימה: id שלא ברשימה של השורה נזרק; שורה בלי מועמדים לא נשלחת; תשובה לא תקינה – בלי בחירה', async () => {
+    M.state.ordparse = (P) => ({ r: P.map((l) => ({ i: l.i, id: l.i === 8 ? 'mg' : l.c[0].id })) });
+    const r = await call('ordParse', E1, { text: TEN + '\nמחשב נייד', ai: true });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.none, 1); assert.equal(M.ordPayload(ords()[0].body).length, 2, 'מחשב נייד (אין מועמדים) לא נשלח');
+    assert.equal(r.result.lines[8].pid, null, 'mg אינו מועמד של "כפפות"');
+    assert.equal(r.result.lines[10].pid, null); assert.equal(r.result.lines[10].alts.length, 0);
+    M.state.ordparse = () => 'not json';
+    const r2 = await call('ordParse', E1, { text: 'כפפות', ai: true });
+    assert.equal(r2.status, 'OK', r2.text); assert.equal(r2.result.lines[0].pid, null); assert.equal(r2.result.ai.got, 0);
+  });
+
+  it('לקוח עסקי + "רק קרטונים" (33): 3 = 3 קרטונים (cto); קנה בעבר מכריע בין שני מוצרים קרובים; צילום (lines) עובר אותה התאמה', async () => {
+    const r = await call('ordParse', E1, { text: '3 שקית זבל', custId: WS });
+    assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual([r.result.lines[0].pid, r.result.lines[0].q, r.result.lines[0].cto], ['bag', 3, true]);
+    const r0 = await call('ordParse', E1, { text: '3 שקית זבל' });
+    assert.equal(r0.result.lines[0].cto, undefined, 'לקוח רגיל – כמו קודם');
+    await prep((d) => d.doc(`b/${A}/ord/o1`).set({ no: 1, custId: WS, items: [{ pid: 'gl2', n: 'כפפות עבודה', qty: 1, price: 5 }], status: 'done', at: 1 }));
+    const r2 = await call('ordParse', E1, { text: 'כפפות', custId: WS });
+    assert.equal(r2.result.lines[0].pid, 'gl2', 'מה שהלקוח קנה בעבר'); assert.equal(r2.result.need, 0);
+    const r3 = await call('ordParse', E1, { lines: [{ name: 'צלחות עמוקות', qty: 5, unit: 'ct' }, { name: 'מפיות', qty: 2 }] });
+    assert.equal(r3.status, 'OK', r3.text);
+    assert.deepEqual(r3.result.lines.map((x) => [x.pid, x.q]), [['mg', 5], ['nap', 2]], 'מגשים בלי ct – 5 (noCt)'); assert.equal(r3.result.lines[0].noCt, true);
+  });
+
+  it('הרשאות, מכסה יומית ותוספת "זיהוי חכם"', async () => {
+    assert.equal((await call('ordParse', NOORD, { text: 'מפית' })).reason, 'no-perm');
+    assert.equal((await call('ordParse', E1, { text: '' })).reason, 'bad-text');
+    assert.equal((await call('ordParse', E1, { text: 'x'.repeat(4001) })).reason, 'bad-text');
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+    await prep((d) => d.doc(`b/${A}/scan_usage/_ordai`).set({ day, count: 30 }));
+    const q = await call('ordParse', E1, { text: 'כפפות', ai: true });
+    assert.equal(q.reason, 'ord-ai-limit'); assert.equal(ords().length, 0, 'מעבר למכסה – לא נשלח');
+    await prep((d) => d.doc(`b/${A}/scan_usage/_ordai`).set({ day: '2000-01-01', count: 30 }));
+    await prep((d) => d.doc('b/' + A).update({ features: Object.assign({}, ALL, { scan: false }) }));
+    assert.equal((await call('ordParse', E1, { text: 'כפפות', ai: true })).reason, 'feature-off');
+    assert.equal((await call('ordParse', E1, { text: 'כפפות' })).status, 'OK', 'התאמה רגילה – בלי התוספת');
+    assert.equal(ords().length, 0);
+    // רצף שנראה כמו מספר כרטיס – מוסר מהשורה ולא נשלח
+    await prep((d) => d.doc('b/' + A).update({ features: ALL }));
+    const c = await call('ordParse', E1, { text: 'כפפות 4111 1111 1111 1111', ai: true });
+    assert.equal(c.status, 'OK', c.text); assert.ok(!JSON.stringify(c.result).includes('4111')); assert.ok(!JSON.stringify(M.state.requests.map((x) => x.body)).includes('4111'));
+  });
+
+  it('צילום רשימה (scanDocument ordlist): עובד עם ord – שורות שם+כמות; בלי ord – נדחה לפני Gemini', async () => {
+    const jpg = { mimeType: 'image/jpeg', data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString('base64') };
+    const r = await call('scanDocument', E1, { kind: 'ordlist', files: [jpg] });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.data.lines.length, 3); assert.equal(M.state.requests[0].kind, 'ordlist');
+    M.reset();
+    assert.equal((await call('scanDocument', NOORD, { kind: 'ordlist', files: [jpg] })).reason, 'no-perm');
+    assert.equal(M.state.requests.length, 0);
+  });
+
+  it('שינוי שם (saveProduct): השם הקודם נשמר ככינוי, בלי כפילות; חזרה לשם ישן מוציאה אותו מהכינויים', async () => {
+    const up = (name) => call('saveProduct', E1, { id: 'mgf', name, price: 10 });
+    assert.equal((await up('מגשים שטוחים גדולים')).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/prod/mgf`)).al, ['מגשים שטוחים']);
+    await up('מגש שטוח XL');
+    assert.deepEqual((await get(`b/${A}/prod/mgf`)).al, ['מגשים שטוחים', 'מגשים שטוחים גדולים']);
+    await up('מגשים  שטוחים'); // אותו שם אחרי נרמול – יוצא מהכינויים, ו-"מגש שטוח XL" נכנס
+    assert.deepEqual((await get(`b/${A}/prod/mgf`)).al, ['מגשים שטוחים גדולים', 'מגש שטוח XL']);
+    await call('saveProduct', E1, { id: 'mgf', name: 'מגשים  שטוחים', price: 12 }); // בלי שינוי שם – בלי שינוי בכינויים
+    assert.deepEqual((await get(`b/${A}/prod/mgf`)).al, ['מגשים שטוחים גדולים', 'מגש שטוח XL']);
+    const pa = await call('ordParse', E1, { text: 'מגש שטוח XL' });
+    assert.equal(pa.result.lines[0].pid, 'mgf', 'הכינוי מזוהה מיד (האינדקס מתרענן אחרי שינוי)');
+  });
+
+  it('שינוי שם בהכנסת מלאי (stockIn nm) ומחיקת כינוי (delAlias): עובד עם ord כן, בלי ord לא', async () => {
+    const s = await call('stockIn', E1, { reqId: rid(), br: 'br1', lines: [{ pid: 'foil', qty: 2, nm: 'נייר אלומיניום' }, { pid: 'nap', qty: 1 }] });
+    assert.equal(s.status, 'OK', s.text);
+    const f = await get(`b/${A}/prod/foil`);
+    assert.equal(f.name, 'נייר אלומיניום'); assert.deepEqual(f.al, ['נייר כסף מקצועי']); assert.equal(f.q.br1, 2);
+    assert.equal((await get(`b/${A}/prod/nap`)).name, 'מפיות לבנות');
+    assert.ok((await coll(`b/${A}/stockLog`)).some((x) => x.prod === 'foil' && x.why === 'prod' && /נייר כסף/.test(x.note)));
+    assert.equal((await call('stockIn', E1, { reqId: rid(), br: 'br1', lines: [{ pid: 'foil', qty: 1, nm: 'x'.repeat(61) }] })).reason, 'bad-name');
+    assert.equal((await call('delAlias', NOORD, { pid: 'foil', al: 'נייר כסף מקצועי' })).reason, 'no-perm');
+    const d = await call('delAlias', E1, { pid: 'foil', al: 'נייר  כסף מקצועי' });
+    assert.equal(d.status, 'OK', d.text); assert.equal(d.result.removed, 1);
+    assert.deepEqual((await get(`b/${A}/prod/foil`)).al, []);
+    assert.equal((await call('delAlias', E1, { pid: 'foil', al: 'לא קיים' })).result.removed, 0);
+    assert.equal((await call('delAlias', E1, { pid: 'nope', al: 'x' })).status, 'NOT_FOUND');
+    assert.equal((await call('delAlias', E1, { pid: 'foil', al: '' })).reason, 'bad-al');
+  });
+});

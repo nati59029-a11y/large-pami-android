@@ -32,6 +32,11 @@ const { profitOf, ilDayStart } = require('./lib/ord-profit'); // 2026-11-12: ר�
 const { defineSecret } = require('firebase-functions/params');
 const CARD = require('./lib/card');
 const AC = require('./lib/ar-calc'); // 14.11.2026: לקוח עסקי ומחירים (מחיר ברירת מחדל ללקוח, מינימום, סכומי מע"מ)
+const PM = require('./lib/prod-match'); // 14.11.2026 (שלב 2 חלק ב'): כינויים (PM.key) וחיפוש מוצר לרשימה חופשית (ordParse)
+const AI = require('./lib/sec-ai');
+const { ORD_SYS } = require('./lib/prompts-ord');
+const { defineInt } = require('firebase-functions/params');
+const ORD_AI_DAILY = defineInt('ORD_AI_DAILY', { default: 30, description: 'זיהוי חכם של רשימת הזמנה (ordParse): מספר קריאות AI ביום לכל עסק (הנחה)' });
 // 2026-11-12: אותו סוד כמו ב-customers.js (defineSecret עם אותו שם – פרמטר אחד). פרטי הכניסה לאתר הסליקה מוצפנים בו.
 const CARD_ENC_KEY = defineSecret('CARD_ENC_KEY');
 const PAY_CRED = 'private/payCred';
@@ -219,9 +224,11 @@ function prodClean(w, input) {
 }
 // כתיבת מוצר בתוך טרנזקציה (c = prodClean). o = הנתונים הקיימים (עדכון, עם רישום שינויים ב-stockLog why:'prod') או null (מוצר חדש).
 // extra = שדות נוספים לאותה כתיבה (q למוצר חדש / q.<סניף> בעדכון). עלות וסיטונאי – רק כשנשלחו.
+// 14.11.2026 (שלב 2 חלק ב', תשובה 47): שינוי שם – השם הקודם נשמר בכינויים (al), בלי כפילות (PM.key). מי שקובע al בעצמו (piFinish) – לא נוגעים.
 function prodPut(tx, db, w, id, o, c, now, extra) {
   const ref = db.doc('prod/' + id);
   if (o) {
+    if (o.name && o.name !== c.name && !(extra && 'al' in extra)) extra = Object.assign({}, extra, { al: alJoin(o.al, [o.name], c.name) });
     const ch = [];
     if (o.name !== c.name) ch.push(`שם: ${String(o.name || '').slice(0, 60)} → ${c.name}`);
     if (o.price !== c.price) ch.push(`מחיר: ₪${o.price} → ₪${c.price}`);
@@ -236,6 +243,18 @@ function prodPut(tx, db, w, id, o, c, now, extra) {
   }
   if (c.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: c.wp, at: now, by: w.uid });
   if (c.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: c.cost, at: now, by: w.uid });
+}
+// כינויים (prod.al): השם החדש לא נשמר ככינוי, כינוי ששווה לשם החדש יוצא, השוואה אחרי נרמול (כמו alMerge ב-pricing.js). תקרה טכנית 200 (הנחה)
+const AL_MAX = 200;
+function alJoin(cur, add, name) {
+  const seen = new Set([PM.key(name)]), out = [];
+  for (const a of (Array.isArray(cur) ? cur : []).concat(add || [])) {
+    if (typeof a !== 'string') continue;
+    const v = a.trim().slice(0, 60), k = PM.key(v);
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push(v);
+  }
+  return out.slice(-AL_MAX);
 }
 // saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
 // עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0).
@@ -257,6 +276,7 @@ async function saveProduct(request) {
       prodPut(tx, db, w, id, s.data() || {}, c, now);
     });
     await cpAlert(db, w, cp0);
+    ixDrop(w);
     return { ok: true, id };
   }
   const reqId = reqIdOf(input);
@@ -273,10 +293,12 @@ async function saveProduct(request) {
     prodPut(tx, db, w, id, null, c, now, { q });
     if (br && qty) tx.set(stockRef(db), { prod: id, name: c.name, br, delta: qty, why: 'in', by: w.uid, at: now });
   });
+  ixDrop(w);
   return { ok: true, id, dup };
 }
 
-// stockIn({ br, lines:[{pid, qty}], reqId }) – הכנסת מלאי (הוספת כמות), כמה שורות בבת אחת. מנהל או עובד עם ord בסניף שלו.
+// stockIn({ br, lines:[{pid, qty, nm?}], reqId }) – הכנסת מלאי (הוספת כמות), כמה שורות בבת אחת. מנהל או עובד עם ord בסניף שלו.
+// nm (14.11.2026, תשובה 46) = שם חדש למוצר: הופך לשם הראשי, והשם הקודם נשמר בכינויים (al).
 async function stockIn(request) {
   const w = await who(request);
   const input = inputObject(request);
@@ -284,12 +306,13 @@ async function stockIn(request) {
   const reqId = reqIdOf(input);
   const br = brOf(w, input.br);
   if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > MAX_ITEMS) throw bad('bad-lines', `שורות: 1 עד ${MAX_ITEMS}`);
-  const sum = new Map();
+  const sum = new Map(), nms = new Map();
   for (const l of input.lines) {
     if (!l || typeof l !== 'object' || Array.isArray(l)) throw bad('bad-lines', 'שורה לא תקינה');
-    onlyKeys(l, ['pid', 'qty'], 'שורה');
+    onlyKeys(l, ['pid', 'qty', 'nm'], 'שורה');
     const pid = idOf(l.pid, 'מוצר');
     sum.set(pid, r3((sum.get(pid) || 0) + qtyOf(l.qty)));
+    if (l.nm != null && l.nm !== '') nms.set(pid, txt(l.nm, 60, 'bad-name', 'שם המוצר', true));
   }
   const db = T.tdb();
   const mark = db.doc('ordcfg/req_' + reqId);
@@ -305,12 +328,16 @@ async function stockIn(request) {
     snaps.forEach((s) => {
       const d = sum.get(s.id);
       const nq = r3(qOf(s.data(), br) + d);
-      tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now);
-      tx.set(stockRef(db), { prod: s.id, name: s.get('name') || '', br, delta: d, why: 'in', by: w.uid, at: now });
+      const o = s.data() || {}, nm = nms.get(s.id), ren = !!nm && nm !== o.name;
+      if (ren) tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now, 'name', nm, 'al', alJoin(o.al, [o.name], nm));
+      else tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now);
+      if (ren) tx.set(stockRef(db), { prod: s.id, name: nm, br: NB, delta: 0, why: 'prod', note: `שם: ${String(o.name || '').slice(0, 60)} → ${nm}`, by: w.uid, at: now });
+      tx.set(stockRef(db), { prod: s.id, name: ren ? nm : (s.get('name') || ''), br, delta: d, why: 'in', by: w.uid, at: now });
       out[s.id] = nq;
     });
     tx.set(mark, { t: now, by: w.uid, k: 'stockIn' });
   });
+  if (nms.size) ixDrop(w);
   return { ok: true, dup, q: out };
 }
 
@@ -1847,6 +1874,157 @@ async function checkLines(request) {
   return { hits };
 }
 
+// =====================================================================================
+// כינויים ורשימה חופשית (משימה 2026-11-14, שלב 2 חלק ב'; תשובות 30–54)
+// delAlias({ pid, al }) – מחיקת כינוי ממוצר (תשובה 54): מנהל או עובד עם ord. השוואה אחרי נרמול. כינוי שלא קיים – ok, removed 0.
+async function delAlias(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['pid', 'al']);
+  const id = idOf(input.pid, 'מוצר');
+  if (typeof input.al !== 'string' || !PM.key(input.al)) throw bad('bad-al', 'כינוי לא תקין');
+  const k = PM.key(input.al);
+  const db = T.tdb();
+  const ref = db.doc('prod/' + id);
+  let removed = 0;
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
+    const A = Array.isArray(s.get('al')) ? s.get('al') : [];
+    const keep = A.filter((a) => !(typeof a === 'string' && PM.key(a) === k));
+    removed = A.length - keep.length;
+    if (!removed) return;
+    const now = Date.now();
+    tx.update(ref, { al: keep, upd: now });
+    tx.set(stockRef(db), { prod: id, name: s.get('name') || '', br: NB, delta: 0, why: 'prod', note: ('כינוי נמחק: ' + input.al.trim()).slice(0, 300), by: w.uid, at: now });
+  });
+  ixDrop(w);
+  return { ok: true, removed };
+}
+
+// ordParse({ text? | lines?:[{name, qty?, unit?}], custId?, ai? }) → { lines, need, none, est, ai, quota }
+// 1. התאמה רגילה בשרת (prod-match, חינם) לכל שורה. 2. רק כש-ai:true – השורות שלא זוהו ויש להן מועמדים נשלחות ל-AI (מודל מהיר),
+//    עם עד 20 מועמדים לכל שורה. ה-AI בוחר רק מתוך הרשימה (id שלא ברשימה – נזרק). לא כותב דבר למסד, חוץ ממונה המכסה היומית.
+// בנוי כך שבוט ההזמנות (38, עתידי) יוכל לקרוא לו באותה צורה. עלות משוערת לפני הפעולה (113) – הערכה בלבד (לא מאומת).
+const OP_TEXT_MAX = 4000, OP_LINES = 60, OP_LINE_MAX = 120, OP_CAND = 20, OP_ALTS = 5;
+const OP_SURE = 0.7, OP_GAP = 0.1; // "זוהה" = ציון ≥ 0.7 והבא אחריו נמוך ממנו לפחות ב-0.1 (או ברקוד/מק"ט). (הנחה – כוונון לפי קובץ המקרים)
+const OP_TTL = 60000;
+const IX = new Map(); // bizId → { at, idx } – אינדקס מנורמל, נבנה פעם אחת לדקה בכל מופע
+function ixDrop(w) { IX.delete(w && w.bizId); }
+async function ixOf(w, db) {
+  const c = IX.get(w.bizId);
+  if (c && Date.now() - c.at < OP_TTL) return c.idx;
+  const q = await db.collection('prod').select('name', 'al', 'barcode', 'sku', 'on', 'ct', 'cto', 'pk').get();
+  const P = q.docs.map((s) => Object.assign({ id: s.id }, s.data())).filter((p) => p.on !== false && typeof p.name === 'string');
+  const idx = PM.index(P);
+  IX.set(w.bizId, { at: Date.now(), idx });
+  return idx;
+}
+const UNITS_OP = ['u', 'pk', 'ct'];
+// רצף שנראה כמו מספר כרטיס (ספרת ביקורת) – מוסר מהשורה לפני כל עיבוד, ולא נשלח ל-AI
+const opMask = (r) => { let x = r; for (let i = 0, c; i < 5 && (c = cardAt(x, true)); i++) x = x.slice(0, c[0]) + '#' + x.slice(c[1]); return x; };
+function opLines(input) {
+  if (input.lines != null) {
+    if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > OP_LINES) throw bad('bad-lines', `שורות: 1 עד ${OP_LINES}`);
+    return input.lines.map((l) => {
+      if (!l || typeof l !== 'object' || Array.isArray(l)) throw bad('bad-lines', 'שורה לא תקינה');
+      onlyKeys(l, ['name', 'qty', 'unit'], 'שורה');
+      const name = opMask(txt(String(l.name == null ? '' : l.name), OP_LINE_MAX, 'bad-lines', 'שם'));
+      const qty = l.qty == null || l.qty === '' ? null : qtyOf(l.qty);
+      return { raw: name, name, qty, unit: UNITS_OP.includes(l.unit) ? l.unit : (qty == null ? '' : 'u') };
+    }).filter((l) => l.name);
+  }
+  if (typeof input.text !== 'string' || !input.text.trim()) throw bad('bad-text', 'אין טקסט לזיהוי');
+  if (input.text.length > OP_TEXT_MAX) throw bad('bad-text', `הרשימה ארוכה מדי (עד ${OP_TEXT_MAX} תווים)`);
+  // שורה = שורה בטקסט, או פריט אחרי ";" / "," (פסיק בין ספרות – מספר עשרוני, לא מפריד)
+  const L = input.text.split(/\r?\n|;|,(?=\s*\D)/).map((x) => x.trim()).filter(Boolean);
+  if (L.length > OP_LINES) throw bad('bad-lines', `עד ${OP_LINES} שורות בכל פעם`);
+  return L.map((raw) => {
+    const r = opMask(raw.slice(0, OP_LINE_MAX));
+    const q = PM.qtyOf(r);
+    return { raw: r, name: q.name || r, qty: q.qty, unit: q.unit };
+  });
+}
+// כמות להזמנה (33): "5 קרטונים" = 5 × כמות בקרטון. לקוח עסקי + מוצר "רק קרטונים" (cto) – הכמות בקרטונים (כמו בטופס ההזמנה), עם סימון
+function opQty(l, p, ws) {
+  const n = l.qty == null ? 1 : l.qty;
+  const ct = p && Number.isInteger(p.ct) && p.ct >= 2 ? p.ct : 0;
+  if (p && ws && p.cto === true && ct) return { q: n, cto: true };
+  if (l.unit === 'ct') return ct ? { q: r3(n * ct), conv: ct } : { q: n, noCt: true };
+  return { q: n };
+}
+async function opBought(db, custId) {
+  if (!custId) return new Set();
+  const q = await db.collection('ord').where('custId', '==', custId).limit(100).get();
+  const S = new Set();
+  q.forEach((s) => { for (const it of (Array.isArray(s.get('items')) ? s.get('items') : [])) if (it && typeof it.pid === 'string') S.add(it.pid); });
+  return S;
+}
+// עלות משוערת (לא מאומת): טוקנים ≈ תווים ÷ 2.5 (עברית) + הנחיה; פלט ≈ 15 טוקנים לשורה. מחיר – SEC_PRICE_FAST (sec-ai.js)
+const opEst = (payload) => { const tin = Math.ceil(JSON.stringify(payload).length / 2.5) + 250, tout = 15 * payload.length + 20; const mc = AI.costMc('fast', { in: tin, out: tout }); return { in: tin, out: tout, usd: mc / 100000 }; };
+const OP_USAGE = 'scan_usage/_ordai';
+async function ordParse(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['text', 'lines', 'custId', 'ai']);
+  const L = opLines(input);
+  if (!L.length) throw bad('bad-text', 'אין שורות לזיהוי');
+  const db = T.tdb();
+  const custId = input.custId == null || input.custId === '' ? '' : idOf(input.custId, 'לקוח');
+  const [idx, bought, cs] = await Promise.all([ixOf(w, db), opBought(db, custId), custId ? db.doc('cust/' + custId).get() : null]);
+  const ws = !!(cs && cs.exists && cs.get('wholesale') === true);
+  const P = new Map(idx.P.map((x) => [x.id, x.p]));
+  const out = L.map((l, i) => {
+    const R = PM.search(idx, l.name, { limit: OP_CAND, bought, min: 0.3 });
+    const byS = R.slice().sort((a, b) => b.s - a.s);
+    const top = byS[0], nx = byS[1];
+    let pick = null, by = null;
+    if (top && (top.k === 'bc' || top.k === 'sku')) { pick = top; by = 'code'; } else if (top && top.s >= OP_SURE && (!nx || top.s - nx.s >= OP_GAP)) { pick = top; by = 'match'; } else if (top && top.s >= OP_SURE) {
+      const tb = byS.filter((x) => top.s - x.s < OP_GAP && x.b); // כמה מוצרים קרובים (למשל כינוי כפול) – מה שהלקוח קנה בעבר, אם רק אחד כזה
+      if (tb.length === 1) { pick = tb[0]; by = 'match'; }
+    }
+    return { i, raw: l.raw, name: l.name, qty: l.qty, unit: l.unit, pid: pick ? pick.id : null, by, s: top ? top.s : 0,
+      alts: R.slice(0, OP_ALTS).map((x) => ({ id: x.id, n: x.p.name, k: x.k, al: x.k === 'al' ? x.n : undefined, b: x.b || undefined })), _c: R };
+  });
+  const need = out.filter((x) => !x.pid && x._c.length);
+  const payload = need.map((x) => ({ i: x.i, t: x.raw, c: x._c.slice(0, OP_CAND).map((c) => Object.assign({ id: c.id, n: c.p.name }, c.k === 'al' ? { a: c.n } : {})) }));
+  const res = { need: need.length, none: out.filter((x) => !x.pid && !x._c.length).length, est: need.length ? opEst(payload) : null, ai: null, ws };
+  if (input.ai === true && need.length) {
+    if (!(w.biz && w.biz.features && w.biz.features.scan === true)) throw pre('feature-off', 'הזיהוי החכם (AI) לא מופעל בעסק שלך. אפשר לבחור את המוצרים ידנית.');
+    const limit = ORD_AI_DAILY.value(), day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+    const uref = db.doc(OP_USAGE);
+    const used = await db.runTransaction(async (tx) => {
+      const s = await tx.get(uref);
+      const n = s.exists && s.get('day') === day ? (s.get('count') || 0) : 0;
+      if (n >= limit) throw new HttpsError('resource-exhausted', `העסק הגיע למכסה היומית של זיהוי רשימות (${limit}). אפשר לבחור ידנית, או לנסות מחר.`, { reason: 'ord-ai-limit', limit });
+      tx.set(uref, { day, count: n + 1, lines: (s.exists && s.get('day') === day ? (s.get('lines') || 0) : 0) + payload.length, at: Date.now() });
+      return n + 1;
+    });
+    let r;
+    try {
+      r = await AI.chat({ tier: 'fast', system: ORD_SYS, turns: [{ role: 'u', text: JSON.stringify(payload) }], timeoutMs: 30000 });
+    } catch (e) {
+      if (!e || !e.sent) await db.runTransaction(async (tx) => { const s = await tx.get(uref); if (s.exists && s.get('day') === day && s.get('count') > 0) tx.update(uref, { count: s.get('count') - 1 }); }).catch(() => {});
+      if (e instanceof HttpsError) throw new HttpsError(e.code, 'הזיהוי החכם לא זמין כרגע. אפשר לבחור את המוצרים ידנית.', e.details);
+      throw e;
+    }
+    let j = null;
+    try { j = JSON.parse(String(r.text || '').replace(/```json|```/g, '').trim()); } catch (e) { j = null; }
+    const A = j && Array.isArray(j.r) ? j.r : [];
+    let got = 0;
+    for (const a of A) {
+      const x = a && Number.isInteger(a.i) ? out[a.i] : null;
+      if (!x || x.pid || typeof a.id !== 'string' || !x._c.some((c) => c.id === a.id)) continue; // רק מתוך המועמדים של אותה שורה
+      x.pid = a.id; x.by = 'ai'; got++;
+      if (!x.alts.some((c) => c.id === a.id)) { const c = x._c.find((y) => y.id === a.id); x.alts.unshift({ id: c.id, n: c.p.name, k: c.k }); x.alts = x.alts.slice(0, OP_ALTS); }
+    }
+    res.ai = { sent: payload.length, got, usd: AI.costMc('fast', r.usage) / 100000, model: r.model };
+    res.quota = { used, limit };
+  }
+  res.lines = out.map((x) => { const p = x.pid ? P.get(x.pid) : null; const q = opQty(x, p, ws); delete x._c; return Object.assign(x, q, p ? { pn: p.name } : {}); });
+  return res;
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -1854,8 +2032,9 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, ordProfit, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
+const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, ordProfit, saveProduct, stockIn, delAlias, ordParse, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכניסה לאתר הסליקה מוצפנים ב-CARD_ENC_KEY
-for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn } });
+const AIF = ['ordParse']; // 14.11.2026: זיהוי חכם של רשימת הזמנה – אותו מפתח Gemini של המזכירה (sec-ai.js)
+for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : {}, wrap(k, f));
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP } });
