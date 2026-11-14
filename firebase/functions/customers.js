@@ -925,10 +925,12 @@ async function setCustPrice(request) {
     if (old != null && !mgr) throw deny('manager-only', 'ללקוח כבר יש מחיר קבוע למוצר הזה. רק מנהל משנה או מוחק');
     const pc = await core.priceCtx(tx, db, '', [pid], main);
     const vm = cs.get('wholesale') === true ? 'ex' : 'inc';
-    if (!mgr && pc.cfg) {
+    // סבב 2 (ליקוי 2): לעובד – תמיד: לא 0, לא מתחת לעלות; ואם המגבלה פעילה – גם לא מתחת למינימום (מול ברירת המחדל בלי מחיר קבוע)
+    if (!mgr) {
+      if (!(p > 0)) throw bad('bad-price', 'מחיר קבוע חייב להיות גדול מ-0');
       const pd = ps.data() || {};
-      const def = AC.defPrice({ wp: pc.wp.get(pid), price: typeof pd.price === 'number' ? pd.price : 0, vm, vat: pc.vat });
-      const r = AC.priceOk({ price: p, def, cost: cost.exists ? cost.get('cost') : null, vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, vm === 'ex', pd.cat, pd.sub) });
+      const base = AC.defPrice({ wp: pc.wp.get(pid), price: typeof pd.price === 'number' ? pd.price : 0, vm, vat: pc.vat });
+      const r = AC.staffOk({ price: p, base, cost: cost.exists ? cost.get('cost') : null, vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, vm === 'ex', pd.cat, pd.sub), on: !!pc.cfg, biz: true });
       if (!r.ok) throw new HttpsError('invalid-argument', 'אין אפשרות לתת במחיר הזה' + (r.min != null ? ` (המינימום ₪${r.min})` : ''), { reason: 'price-floor', why: r.why, min: r.min });
     }
     const now = Date.now();

@@ -56,6 +56,14 @@ function priceOk(o) {
   const c = costIn(o.cost, o.vm, o.vat);
   return { ok: false, min, why: p < agUp(c) ? 'below-cost' : 'floor' };
 }
+// בדיקת מחיר של עובד בהזמנה / במחיר קבוע (סבב 2). base = ברירת המחדל *בלי* מחיר קבוע (סיטונאי / רגיל) – מחיר קבוע לא מכשיר את עצמו.
+// on = מגבלת המחיר פעילה (ordcfg/price). biz = לקוח עסקי: מתחת לעלות חסום תמיד, גם בלי מגבלה. לקוח פרטי בלי מגבלה – בלי בדיקה (כמו קודם).
+function staffOk(o) {
+  const c = costIn(o.cost, o.vm, o.vat);
+  if ((o.on || o.biz) && c != null && ag(o.price) < agUp(c)) return { ok: false, min: floorOf(o.cost, o.vm, o.vat, o.on ? o.pct : 0), why: 'below-cost' };
+  if (!o.on) return { ok: true };
+  return priceOk({ price: o.price, def: o.base, cost: o.cost, vm: o.vm, vat: o.vat, pct: o.pct });
+}
 // סכומי הזמנה מסכום השורות (total בשקלים, כמו ord.total). disc = אחוז הנחה כללית (רשות).
 // ex: net = בסיס, vat = round(net×r/100), gross = net + vat. inc: gross = בסיס, vat = round(gross×r/(100+r)), net = gross − vat.
 function totals(total, vm, vat, disc) {
@@ -80,9 +88,17 @@ function termsOfCust(c) {
   if (c.pay === 'other') return { b: 'imm', d: 0, warn: true, txt: String(c.payTxt || '') };
   return { b: 'imm', d: 0 };
 }
+// מחיר קבוע ללקוח שנשמר ביחידה אחת (cprice.vm) ונקרא בהזמנה ביחידה אחרת (הלקוח הפך מפרטי לעסקי או להפך) – המרה לפי אחוז המע"מ, באגורות
+function cpConv(p, from, to, vat) {
+  if (!isNum(p)) return null;
+  if (!from || from === to) return p;
+  return to === 'ex' ? exVat(p, vat) : sh(Math.round(ag(p) * (100 + vatOf(vat)) / 100));
+}
+// הסכום לתשלום של הזמנה: gross בהזמנה עם vm (כולל מע"מ, אחרי הנחה); הזמנה ישנה – total, כמו קודם
+function payOf(o) { return o && (o.vm === 'ex' || o.vm === 'inc') && isNum(o.gross) ? o.gross : (o && isNum(o.total) ? o.total : 0); }
 function termsTxt(t) { if (!t) return ''; return t.b === 'eom' ? 'שוטף+' + t.d : t.b === 'inv' ? t.d + ' ימים מהחשבונית' : 'מיידי'; }
 
-const api = { VAT0, ag, agUp, exVat, costIn, pctFor, floorOf, defPrice, priceOk, totals, termsOk, termsOfCust, termsTxt };
+const api = { VAT0, ag, agUp, exVat, costIn, pctFor, floorOf, defPrice, priceOk, totals, termsOk, termsOfCust, termsTxt, cpConv, payOf, staffOk };
 // שרת (Node) – module.exports; מסך ההזמנה (דפדפן) – window.ArCalc
 if (typeof module === 'object' && module.exports) module.exports = api; else root.ArCalc = api;
 })(typeof self !== 'undefined' ? self : this);

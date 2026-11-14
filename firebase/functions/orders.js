@@ -894,10 +894,29 @@ async function priceCtx(tx, db, custId, pids, cfgMain) {
   ids.forEach((p, i) => {
     const w0 = all[head.length + i * per], c0 = custId ? all[head.length + i * per + 1] : null;
     if (w0.exists && isNum(w0.get('wp'))) wp.set(p, w0.get('wp'));
-    if (c0 && c0.exists && isNum(c0.get('p'))) cp.set(p, c0.get('p'));
+    if (c0 && c0.exists && isNum(c0.get('p'))) cp.set(p, { p: c0.get('p'), vm: c0.get('vm') });
   });
   const v = cfgMain && cfgMain.exists ? cfgMain.get('vat') : null;
   return { cfg, biz, blk: !!(cs && cs.exists && cs.get('blk') === true), wp, cp, vm: biz ? 'ex' : 'inc', vat: isNum(v) && v >= 0 && v <= 100 ? v : AC.VAT0 };
+}
+// מחיר קבוע ביחידה של ההזמנה (סבב 2, ליקוי 5): נשמר עם vm; לקוח שעבר מפרטי לעסקי (או להפך) – המרה לפי אחוז המע"מ
+const cpOf = (pc, pid) => { const x = pc.cp.get(pid); return x ? AC.cpConv(x.p, x.vm, pc.vm, pc.vat) : undefined; };
+// סבב 2 (ליקוי 4): שמות (מנורמלים, ProdMatch.key) של מוצרים קיימים שתואמים לשורות החופשיות – לעובד בלבד, ורק כשיש שורה חופשית.
+// קריאה אחת של שם וכינויים (select), לפני הטרנזקציה. שורה חופשית אחרת (משלוח וכד') – כמו קודם.
+async function freeHits(db, w, raw) {
+  if (w.role === 'manager' || !raw) return null;
+  const ks = new Set(raw.filter((x) => !x.pid).map((x) => PM.key(x.n)).filter(Boolean));
+  if (!ks.size) return null;
+  const hit = new Set();
+  (await db.collection('prod').select('name', 'al').get()).docs.forEach((d) => {
+    for (const n of [d.get('name')].concat(Array.isArray(d.get('al')) ? d.get('al') : [])) { const k = typeof n === 'string' ? PM.key(n) : ''; if (k && ks.has(k)) hit.add(k); }
+  });
+  return hit.size ? hit : null;
+}
+function freeCheck(raw, hit, old) {
+  if (!hit) return;
+  const keep = new Set((old || []).filter((x) => x && !x.pid).map((x) => x.n + '|' + x.price + '|' + x.qty));
+  for (const x of raw) if (!x.pid && hit.has(PM.key(x.n)) && !keep.has(x.n + '|' + x.price + '|' + x.qty)) throw bad('use-stock', `"${x.n}": המוצר קיים במלאי – בחר את המוצר מהמלאי (לא שורה חופשית)`);
 }
 // לכל שורת מוצר: מחיר ברירת המחדל (שורה שנשלחה בלי מחיר מקבלת אותו), בדיקת מינימום לעובד, והערות "מחיר שונה מברירת המחדל" ליומן (הבהרה 29).
 // keep = "pid|מחיר" של שורות שלא השתנו בעריכה – לא נבדקות שוב (כדי לא לחסום הזמנה קיימת כשהעלות עלתה).
@@ -906,11 +925,13 @@ function priceRun(w, items, raw, pc, pd, br, costs, keep) {
   items.forEach((it, i) => {
     if (!it.pid) return;
     const p = pd.get(it.pid) || {};
-    const def = AC.defPrice({ cp: pc.cp.get(it.pid), wp: pc.wp.get(it.pid), price: brPrice(p, br), vm: pc.vm, vat: pc.vat });
+    const base = AC.defPrice({ wp: pc.wp.get(it.pid), price: brPrice(p, br), vm: pc.vm, vat: pc.vat });
+    const def = AC.defPrice({ cp: cpOf(pc, it.pid), wp: pc.wp.get(it.pid), price: brPrice(p, br), vm: pc.vm, vat: pc.vat });
     if (raw && raw[i] && raw[i].price == null) it.price = def;
     if (AC.ag(it.price) !== AC.ag(def)) notes.push(`${it.n}: ₪${def} → ₪${it.price}`);
-    if (w.role === 'manager' || !pc.cfg || (keep && keep.has(it.pid + '|' + it.price))) return;
-    const r = AC.priceOk({ price: it.price, def, cost: costs.get(it.pid), vm: pc.vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, pc.biz, p.cat, p.sub) });
+    if (w.role === 'manager' || (keep && keep.has(it.pid + '|' + it.price + '|' + it.qty))) return;
+    // סבב 2 (ליקויים 2, 3): מחיר קבוע לא מכשיר את עצמו (בודקים מול base); לקוח עסקי – לא מתחת לעלות גם בלי מגבלה
+    const r = AC.staffOk({ price: it.price, base, cost: costs.get(it.pid), vm: pc.vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, pc.vm === 'ex', p.cat, p.sub), on: !!pc.cfg, biz: pc.vm === 'ex' });
     if (r.ok) return;
     const why = r.why === 'below-cost' ? ' – מתחת לעלות' : r.why === 'no-cost' ? ` – למוצר אין עלות, אפשר רק ₪${r.min} ומעלה` : ` – המינימום ₪${r.min}`;
     throw new HttpsError('invalid-argument', `"${it.n}": אין אפשרות לתת במחיר הזה${why}`, { reason: 'price-floor', why: r.why, pid: it.pid, min: r.min });
@@ -976,6 +997,7 @@ async function createOrder(request) {
   if (input.cell !== undefined) needCell(w);
   const db = T.tdb();
   const ref = db.doc('ord/o' + reqId);
+  const fh = await freeHits(db, w, raw);
   const seq = db.doc('ordcfg/seq');
   const cfg = db.doc('ordcfg/main');
   let out = null;
@@ -993,6 +1015,7 @@ async function createOrder(request) {
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
     const pd = plain(prods);
     const { items } = resolveItems(w, br, raw, pd, src);
+    freeCheck(raw, fh, null);
     const pnotes = priceRun(w, items, raw, pc, pd, br, costs, null);
     snapCosts(items, costs);
     cartons(items, pd, await isWs(tx, db, custId), null, cell);
@@ -1012,7 +1035,7 @@ async function createOrder(request) {
     tx.set(ref, doc);
     tx.set(seq, { n: no });
     tx.set(logRef(db, ref.id), logData(w, 'create', `₪${total}${doc.cell && doc.cell.n ? ` · ${doc.cell.n} קווים לניוד${doc.cell.ack ? ' (אושר למרות ניוד קודם)' : ''}` : ''}${disc ? ` · הנחה ${disc}%` : ''}${pnotes.length ? ' · מחיר שונה: ' + pnotes.join('; ') : ''}`));
-    out = Object.assign({ id: ref.id, no, total, dup: false, warn }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
+    out = Object.assign({ id: ref.id, no, total, gross: doc.gross, dup: false, warn }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
   });
   return out;
 }
@@ -1030,6 +1053,7 @@ async function updateOrder(request) {
   if (input.cell !== undefined) needCell(w);
   const db = T.tdb();
   const ref = db.doc('ord/' + id);
+  const fh = await freeHits(db, w, raw);
   let out = null;
   await db.runTransaction(async (tx) => {
     const [s, c] = await tx.getAll(ref, db.doc('ordcfg/main'));
@@ -1055,7 +1079,8 @@ async function updateOrder(request) {
       const pd = plain(prods);
       const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
       const { items } = resolveItems(w, d.br, raw, pd, src);
-      priceRun(w, items, raw, prc, pd, d.br, costs, new Set(oldItems.filter((x) => x && x.pid).map((x) => x.pid + '|' + x.price)));
+      freeCheck(raw, fh, oldItems);
+      priceRun(w, items, raw, prc, pd, d.br, costs, new Set(oldItems.filter((x) => x && x.pid).map((x) => x.pid + '|' + x.price + '|' + x.qty)));
       snapCosts(items, costs, oldItems);
       cartons(items, pd, await isWs(tx, db, d.custId), oldItems, cell !== undefined ? cell : d.cell, d.cell);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
@@ -1305,7 +1330,8 @@ async function getPayLink(request) {
     } catch (e) { note = 'auto-fail'; } // בלי פרטי השגיאה
   }
   await db.collection(`ord/${id}/log`).add(logData(w, 'payOpen', note));
-  return auto ? { link, total: s.get('total'), auto } : { link, total: s.get('total') };
+  const amt = AC.payOf(s.data()); // סבב 2 (ליקוי 6): הסכום לתשלום – gross בהזמנה עם vm, total בהזמנה ישנה
+  return auto ? { link, total: amt, auto } : { link, total: amt };
 }
 
 // פרטי כניסה לאתר הסליקה: undefined = בלי שינוי, null = מחיקה, { user?, pass } = שמירה. הערכים לא מופיעים בשום הודעת שגיאה.
@@ -1696,7 +1722,7 @@ async function ordProfit(request) {
     && (!input.paid || isPaid(o)));
   let paidA = 0, paidN = 0;
   for (const o of L) if (isPaid(o)) { paidN++; paidA += Math.round((typeof o.paid.amt === 'number' ? o.paid.amt : (typeof o.total === 'number' ? o.total : 0)) * 100); }
-  if (lite) return { n: L.length, total: Math.round(L.reduce((a, o) => a + Math.round((typeof o.total === 'number' ? o.total : 0) * 100), 0)) / 100, paid: Math.round(paidA) / 100, paidN };
+  if (lite) return { n: L.length, total: Math.round(L.reduce((a, o) => a + Math.round(AC.payOf(o) * 100), 0)) / 100, paid: Math.round(paidA) / 100, paidN };
   const need = [...new Set(L.flatMap((o) => (Array.isArray(o.items) ? o.items : []).filter((it) => it && it.pid && typeof it.c !== 'number' && ID_RE.test(it.pid)).map((it) => it.pid)))];
   const cur = new Map();
   for (let k = 0; k < need.length; k += 300) (await db.getAll(...need.slice(k, k + 300).map((id) => db.doc(`prod/${id}/p/cost`)))).forEach((s) => { if (s.exists && typeof s.get('cost') === 'number') cur.set(s.ref.parent.parent.id, s.get('cost')); });

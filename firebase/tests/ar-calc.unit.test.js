@@ -84,4 +84,16 @@ describe('לקוח עסקי – חישובים טהורים (ar-calc)', () => {
     assert.equal(AC.termsTxt({ b: 'eom', d: 60 }), 'שוטף+60');
     assert.equal(AC.termsTxt({ b: 'inv', d: 45 }), '45 ימים מהחשבונית');
   });
+  it('סבב 2: cpConv (המרת מחיר קבוע בין vm), payOf (gross ?? total), staffOk (מחיר קבוע לא מכשיר את עצמו; עסקי – לא מתחת לעלות גם בלי מגבלה)', () => {
+    assert.equal(AC.cpConv(11.8, 'inc', 'ex', 18), 10); assert.equal(AC.cpConv(10, 'ex', 'inc', 18), 11.8); assert.equal(AC.cpConv(7, 'ex', 'ex', 18), 7); assert.equal(AC.cpConv(7, undefined, 'inc', 18), 7);
+    assert.equal(AC.payOf({ vm: 'ex', total: 100, gross: 118 }), 118); assert.equal(AC.payOf({ total: 100, gross: 1 }), 100); assert.equal(AC.payOf({ vm: 'inc', total: 100 }), 100);
+    const b = { base: 15, cost: 10, vm: 'inc', vat: 18, pct: 15 };
+    assert.equal(AC.staffOk(Object.assign({ price: 1, on: false, biz: false }, b)).ok, true); // פרטי בלי מגבלה – כמו קודם
+    assert.equal(AC.staffOk(Object.assign({ price: 9.99, on: false, biz: true }, b)).why, 'below-cost');
+    assert.equal(AC.staffOk(Object.assign({ price: 10, on: false, biz: true }, b)).ok, true);
+    assert.equal(AC.staffOk(Object.assign({ price: 11, on: true, biz: false }, b)).why, 'floor'); // גם אם 11 הוא "מחיר קבוע"
+    assert.equal(AC.staffOk(Object.assign({ price: 15, on: true, biz: false }, b)).ok, true);
+    assert.equal(AC.staffOk({ price: 5, base: 5, cost: 10, vm: 'inc', vat: 18, on: true }).why, 'below-cost'); // ברירת מחדל מתחת לעלות – חסום לעובד
+  });
 });
+

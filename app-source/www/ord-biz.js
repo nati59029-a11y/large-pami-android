@@ -59,7 +59,7 @@ function bizFind(q){const L=B.L||[],d=String(q||'').replace(/\D/g,''),t=String(q
 
 /* ---------- מחיר ברירת מחדל ללקוח ---------- */
 const vmOf=D=>D&&D.custId&&D.wholesale===true?'ex':'inc';
-function defOf(D,pid){const p=prod(pid),cp=D.custId&&B.cp[D.custId]&&B.cp[D.custId][pid];return AC.defPrice({cp:cp?cp.p:undefined,wp:typeof B.wp[pid]==='number'?B.wp[pid]:undefined,price:unitP(p,D.br),vm:vmOf(D),vat:vatP()})}
+function defOf(D,pid,noCp){const p=prod(pid),cp=!noCp&&D.custId&&B.cp[D.custId]&&B.cp[D.custId][pid];return AC.defPrice({cp:cp?AC.cpConv(cp.p,cp.vm,vmOf(D),vatP()):undefined,wp:typeof B.wp[pid]==='number'?B.wp[pid]:undefined,price:unitP(p,D.br),vm:vmOf(D),vat:vatP()})} // סבב 2: מחיר קבוע ביחידה של ההזמנה; noCp = ברירת המחדל בלי מחיר קבוע (לבדיקת מינימום)
 let applying=0;
 async function bizApply(D){if(!D||D!==O.draft)return;const my=++applying;
  try{await cfgL();if(D.custId)await cpL(D.custId);const pids=[...new Set(D.items.filter(it=>it.pid).map(it=>it.pid))];if(vmOf(D)==='ex'&&pids.length)await wpL(D,pids).catch(err);
@@ -83,12 +83,14 @@ function sumH(D){if(!D||!D.items.length)return '';const pk=window.__oxPk||((D,it
 function sumPaint(){const D=O.draft,e=document.getElementById('obsum');if(!D||!e)return;const h=sumH(D);if(h)e.outerHTML=h}
 {const nw=V.oxNew;if(nw)V.oxNew=()=>{const r=nw();try{const D=O.draft;if(!r||!r.h||!on()||!D)return r;if(!B.L)bizL().then(()=>{if(cur().v==='oxNew'&&document.getElementById('obq')&&String(document.getElementById('obq').value).trim())INP.obQ(document.getElementById('obq'))});if(B.cfg===undefined)cfgL();
   if(D.custId&&!B.c[D.custId])custL(D.custId).then(c=>{if(c&&O.draft===D&&cur().v==='oxNew')rerender()}).catch(()=>{});
-  const top=`<details${D.obq?' open':''}><summary class="note" style="min-height:44px;display:flex;align-items:center">חיפוש לקוח עסקי (שם, ע.מ, ת.ז או טלפון)</summary><label class="f"><span>שם העסק / איש קשר / ע.מ / טלפון</span><input data-i="obQ" id="obq" value="${esc(D.obq||'')}" autocomplete="off"></label><div id="obhits">${D.obq?hitsH(D.obq):''}</div><button type="button" class="btn g s w" data-a="obNew" data-v="ord">＋ לקוח עסקי חדש</button></details>`;
+  /* כפתור ולא <details>: הטופס ללקוח פרטי נשאר כמו קודם (ה-<details> הקיימים – משלוח, כרטיס – לא זזים) */
+  const top=D.obOpen||D.obq?`<div id="obbox"><label class="f"><span>חיפוש לקוח עסקי – שם העסק / איש קשר / ע.מ / טלפון</span><input data-i="obQ" id="obq" value="${esc(D.obq||'')}" autocomplete="off"></label><div id="obhits">${D.obq?hitsH(D.obq):''}</div><div class="row"><button type="button" class="btn g s grow" data-a="obNew" data-v="ord">＋ לקוח עסקי חדש</button><button type="button" class="btn g s grow" data-a="obTgl">סגור חיפוש</button></div></div>`:`<button type="button" class="btn g s w" data-a="obTgl" id="obbox">חיפוש / הקמת לקוח עסקי</button>`;
   let h=r.h.replace('<div class="card">','<div class="card">'+top);
   const inf=infoH(D);if(inf)h=h.replace('<div class="sec"><h3>מוצרים</h3>',inf+'<div class="sec"><h3>מוצרים</h3>');
   const dsc=mgr()?`<label class="f"><span>הנחה כללית על ההזמנה % (מנהל)</span><input data-i="obDisc" inputmode="decimal" value="${esc(D.disc||'')}" autocomplete="off"></label>`:'';
   h=h.replace('<button class="btn w" data-a="oxSave">',dsc+(D.items.length?sumH(D):'<div id="obsum"></div>')+'<button class="btn w" data-a="oxSave">');
   r.h=h}catch(e){}return r}}
+ACT.obTgl=()=>{const D=O.draft;if(!D)return;D.obOpen=!(D.obOpen||D.obq);if(!D.obOpen)D.obq='';rerender();if(D.obOpen)setTimeout(()=>{const e=document.getElementById('obq');if(e)e.focus()},0)};
 INP.obQ=el=>{const D=O.draft;if(!D)return;D.obq=el.value;const x=document.getElementById('obhits');if(!B.L){bizL().then(()=>{if(document.getElementById('obhits'))document.getElementById('obhits').innerHTML=hitsH(D.obq)});return}
  if(x)x.innerHTML=hitsH(el.value);
  /* ע.מ / ת"ז / טלפון מלא – חיפוש מדויק גם בשרת (גם לקוח שאינו עסקי, ולקוח ישן) */
@@ -100,14 +102,14 @@ INP.obDisc=el=>{const D=O.draft;if(!D)return;const v=num(el.value);D.disc=v>0&&v
 /* טלפון של איש קשר: אחרי החיפוש הקיים (טלפון / טלפון נוסף) – גם phx. נמצא לקוח נוסף → מצטרף לרשימת הבחירה */
 const NEWB='<button type="button" class="btn g s w" data-a="ocAsNew">לקוח חדש עם אותו טלפון</button>';
 {const f=INP.oxD;if(f)INP.oxD=el=>{f(el);const D=O.draft;if(!D||!on()||el.dataset.k!=='phone')return;const p=phN(D.phone);if(!p)return;const seq=D.phSeq;
- runQ('cust',['phx','ARRAY_CONTAINS',sv(p,'s')],10).then(async L=>{L=L.filter(c=>!c.mv);if(!L.length)return;for(let i=0;i<40&&D.cSt==='wait';i++)await new Promise(r=>setTimeout(r,150));
+ runQ('cust',['phx','ARRAY_CONTAINS',sv(p,'s')],10).then(async L=>{L=L.filter(c=>!c.mv&&Array.isArray(c.phx)&&c.phx.includes(p));if(!L.length)return;for(let i=0;i<40&&D.cSt==='wait';i++)await new Promise(r=>setTimeout(r,150));
   if(O.draft!==D||D.custId||D.phSeq!==seq||phN(D.phone)!==p)return;const H=(D.cHits||[]).slice(),add=L.filter(c=>!H.some(x=>x.id===c.id));if(!add.length)return;D.cHits=H.concat(add);D.cSt='hits';
   const s=document.getElementById('ocst');if(s)s.outerHTML=`<div role="status" id="ocst"><p class="note">לטלפון הזה כבר יש ${D.cHits.length>1?D.cHits.length+' לקוחות':'לקוח'} (גם לפי איש קשר). בחרו:</p>${D.cHits.map(c=>`<button type="button" class="li" data-a="ocPick" data-id="${esc(c.id)}"><div class="m"><b>${esc(c.name||c.bn||'')}</b>${c.wholesale===true?' '+WSTAG:''}${c.blk?' '+BLK:''}<small>${esc(c.addr||'')}</small></div></button>`).join('')}${NEWB}</div>`}).catch(()=>{})}}
 {const f=ACT.ocPick;if(f)ACT.ocPick=el=>{const D=O.draft,c=D&&(D.cHits||[]).find(x=>x.id===el.dataset.id);if(c)B.c[c.id]=c;f(el);if(D&&D===O.draft)setTimeout(()=>bizApply(D),0)}}
 /* מחיר בשורה: מינימום (הודעה מוקדמת – השרת אוכף), ושאלה "לשמור קבוע ללקוח?" (22, 23) */
 document.addEventListener('change',e=>{const el=e.target;if(!el||!el.isConnected||!el.matches||!el.matches('input[data-i="oxLn"][data-k="price"]')||!on())return;const D=O.draft;if(!D)return;const it=D.items[+el.dataset.n];if(!it||!it.pid||it.gk)return;
  const p=prod(it.pid),price=num(el.value);if(!(price>=0))return;const def=defOf(D,it.pid),vm=vmOf(D);
- if(!mgr()&&B.cfg){const c=O.cost&&typeof O.cost[it.pid]==='number'?O.cost[it.pid]:null,r=AC.priceOk({price,def,cost:c,vm,vat:vatP(),pct:AC.pctFor(B.cfg,vm==='ex',p&&p.cat,p&&p.sub)});
+ if(!mgr()&&(B.cfg||vm==='ex')){const c=O.cost&&typeof O.cost[it.pid]==='number'?O.cost[it.pid]:null,r=AC.staffOk({price,base:defOf(D,it.pid,1),cost:c,vm,vat:vatP(),pct:AC.pctFor(B.cfg,vm==='ex',p&&p.cat,p&&p.sub),on:!!B.cfg,biz:vm==='ex'});
   if(!r.ok){toast('אין אפשרות לתת במחיר הזה'+(r.why==='below-cost'?' – מתחת לעלות':r.min!=null?' (מינימום '+ils(r.min)+')':''));it.price=String(def);it.auto=1;if(window.__oxRedraw)window.__oxRedraw();sumPaint();return}}
  sumPaint();if(!D.custId||AC.ag(price)===AC.ag(def))return;const has=B.cp[D.custId]&&B.cp[D.custId][it.pid];if(has&&!mgr())return toast('ללקוח יש מחיר קבוע למוצר הזה – רק מנהל משנה אותו');
  const nm=(p&&p.name)||'';ask(`לשמור את המחיר ${ils(price)}${vm==='ex'?' (לפני מע"מ)':''} ל"${nm}" באופן קבוע ללקוח הזה?`,async()=>{try{await fnCall('setCustPrice',{custId:D.custId,pid:it.pid,p:Math.round(price*100)/100});await cpL(D.custId,1);toast('נשמר מחיר קבוע ללקוח')}catch(x){err(x)}},'כן, שמור קבוע')},true);

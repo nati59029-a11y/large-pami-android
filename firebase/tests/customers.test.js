@@ -756,4 +756,16 @@ describe('לקוח עסקי – שלב 1 (14.11.2026)', () => {
     await assertFails(db(MGR).doc(`b/${A}/aralert/x`).set({ st: 'new' }));
     await assertFails(db('m2').doc(`b/${A}/cprice/${id}_pA`).get());
   });
+  it('סבב 2: setCustPrice לעובד – גם בלי ordcfg/price: לא 0, לא מתחת לעלות (גם ללקוח פרטי); מנהל – חופשי', async () => {
+    const id = (await call('saveCust', E1, { cust: BZ, wholesale: true })).result.id;
+    await call('saveCust', E1, { cust: c1 });
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 0 })).reason, 'bad-price');
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 3.38 })).reason, 'price-floor'); // עסקי: 4 ÷ 1.18
+    assert.equal((await call('setCustPrice', E1, { custId: 't' + TZ, pid: 'pA', p: 3.99 })).reason, 'price-floor'); // פרטי: עלות 4
+    assert.equal((await call('setCustPrice', E1, { custId: 't' + TZ, pid: 'pA', p: 4 })).status, 'OK');
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 3.39 })).status, 'OK');
+    assert.equal((await call('setCustPrice', MGR, { custId: id, pid: 'pB', p: 0 })).status, 'OK');
+    assert.equal((await get(`b/${A}/cprice/${id}_pA`)).vm, 'ex'); assert.equal((await get(`b/${A}/cprice/t${TZ}_pA`)).vm, 'inc');
+  });
 });
+
