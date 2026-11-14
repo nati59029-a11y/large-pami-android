@@ -149,7 +149,7 @@ function selH(){
   h+=`<label class="cb"><input type="checkbox" data-c="s3eF" data-f="hi"${o.hi?' checked':''}> צילום עליון ותחתון (מדף גבוה)</label>`;if(o.k==='fridge')h+=`<label class="cb"><input type="checkbox" data-c="s3eF" data-f="glass"${o.glass?' checked':''}> דלת זכוכית</label>`}
  if(t==='cols')h+=`<label class="cb"><input type="checkbox" data-c="s3eF" data-f="rnd"${o.rnd?' checked':''}> עמוד עגול</label>`;
  if(t==='doors')h+=`<div class="s3row"><span>סוג:</span><select data-c="s3eF" data-f="k" style="min-height:44px">${Object.entries(DRN).map(([k,l])=>`<option value="${k}"${o.k===k?' selected':''}>${l}</option>`).join('')}</select></div>`;
- if(t!=='rooms')h+=`<div class="s3row"><button class="s3b g" data-a="s3eRot" data-d="-90">סיבוב ‎−90°</button><button class="s3b g" data-a="s3eRot" data-d="90">סיבוב ‎+90°</button></div>`;
+ if(t!=='rooms'&&t!=='cols')h+=`<div class="s3row"><button class="s3b g" data-a="s3eRot" data-d="-90">סיבוב ‎−90°</button><button class="s3b g" data-a="s3eRot" data-d="90">סיבוב ‎+90°</button></div>`;
  const fresh=E.fresh.has(t+':'+o.id);
  if(fresh)h+=`<div class="s3row"><button class="s3b g" data-a="s3eRemove">הסרה (עוד לא נשמר)</button></div>`;
  else if(U.isMgr())h+=`<div class="s3row"><button class="s3b g" style="border-color:#e57373;color:#e57373" data-a="s3eDel">מחיקה (לסל המחזור)</button></div>`;
@@ -210,7 +210,7 @@ CHG.s3eF=el=>{
  else{const F=(FIELDS[t]||[]).find(x=>x[0]===f);if(!F){E.undo.pop();return}const n=Math.round(+el.value);if(!isFinite(n)||n<F[2]||n>F[3]){E.undo.pop();E.msg=F[1].replace(/ \(.*\)/,'')+' צריך להיות בין '+F[2]+' ל-'+F[3]+'.';return rerender()}o[f]=n}
  if(t==='fx'&&o.sides===2&&!TWO.includes(o.k))o.sides=1;
  renum();re()};
-ACT.s3eRot=el=>{const o=findSel();if(!o||!('x'in o))return;snap();o.a=(((o.a||0)+(+el.dataset.d))%360+360)%360;renum();re()};
+ACT.s3eRot=el=>{const o=findSel();if(!o||!('x'in o)||E.sel.t==='cols')return;snap();o.a=(((o.a||0)+(+el.dataset.d))%360+360)%360;renum();re()};
 ACT.s3eRemove=()=>{const o=findSel(),t=E.sel&&E.sel.t;if(!o||!E.fresh.has(t+':'+o.id))return;
  if(t==='rooms'&&live(E.map.fx).some(f=>f.room===o.id)){E.msg='קודם הסירו את הגופים שבחדר.';return rerender()}
  snap();E.map[t]=E.map[t].filter(x=>x!==o);E.fresh.delete(t+':'+o.id);if(t==='doors'&&E.map.ent===o.id)delete E.map.ent;E.sel=null;renum();re()};
@@ -226,15 +226,18 @@ ACT.s3eSec=el=>{E.sec=E.sec===el.dataset.k?'':el.dataset.k;if(E.sec==='ver')E.ve
 ACT.s3eDraft=el=>{if(el.dataset.y==='1'&&E.offer){E.map=clone(E.offer.map);E.dirty=true;fit()}else dropDraft();E.offer=null;rerender()};
 
 /* ---------- שמירה (s3SaveMap) ---------- */
-const errMsg=e=>e&&e.offline?'אין חיבור לאינטרנט. השינויים שמורים בטלפון, ואפשר לנסות לשמור שוב כשיש חיבור.':((e&&e.message)||'השמירה נכשלה')+'. השינויים שמורים בטלפון.';
+const errMsg=e=>e&&e.offline?'אין חיבור לאינטרנט. השינויים שמורים בטלפון, ואפשר לנסות לשמור שוב כשיש חיבור.':((U.RS&&e&&U.RS[e.reason])||(e&&e.message)||'השמירה נכשלה')+'. השינויים שמורים בטלפון.';
 async function save(why){
  if(E.busy)return;const G0=G(),m=E.map;
  const errs=G0.validateMap(m);if(errs.length){E.msg='אי אפשר לשמור: '+errs.slice(0,3).join(' · ')+(errs.length>3?' ועוד '+(errs.length-3):'');return rerender()}
  const body=clone(m);delete body.v;delete body.upd;delete body.by;
  E.busy=1;E.msg='';rerender();
  try{
-  await window.fnCall('s3SaveMap',{mapId:mid(),baseV:E.baseV,map:body,why:why||'עריכה'});
+  const r=await U.fn('s3SaveMap',{mapId:mid(),baseV:E.baseV,map:body,why:why||'עריכה'});
   dropDraft();clearTimeout(E.tm);E.dirty=false;E.fresh=new Set();E.key='';U.drop();E.busy=0;toast('המפה נשמרה');U.load(true);
+  /* שלב 7: השרת החליף מזהי גופים (renamed) או לא שמר שדות לא מוכרים (dropped) – המפה נטענת מחדש מהשרת (E.key='' ו-U.drop), ומציגים הודעה */
+  const nr=r&&r.renamed&&typeof r.renamed==='object'?Object.keys(r.renamed).length:0,nd=r&&Array.isArray(r.dropped)?r.dropped.length:0;
+  if(nr||nd)dlg(`<h3>המפה נשמרה</h3>${nr?`<p>${nr} גופים קיבלו מהשרת מספר חדש, כדי שלא יהיו שני גופים עם אותו מספר. המפה נטענה מחדש.</p>`:''}${nd?'<p>חלק מהפרטים שהוזנו לא נשמרו בשרת.</p>':''}<button class="btn w" data-a="closeDlg">הבנתי</button>`);
   if(cur().v==='st3e')ACT.back();
  }catch(e){E.busy=0;E.msg=errMsg(e);saveDraftNow();rerender()}
 }
@@ -259,6 +262,6 @@ ACT.s3eVer=el=>{const v=+el.dataset.v;if(!Number.isInteger(v))return;
 ACT.s3eBr=async el=>{
  if(!(SY&&SY.sa)||E.busy)return;const d=U.data(),c=d&&d.cfg||{wh:false,on:true,cap:500},f=el.dataset.f,v={brId:U.brSel(),wh:!!c.wh,on:c.on!==false,cap:Number.isInteger(c.cap)?c.cap:500};
  v[f]=!v[f];E.busy=1;
- try{await window.fnCall('s3SetBranch',v);U.drop();toast('נשמר');await U.load(true)}catch(e){E.msg=errMsg(e)}
+ try{await U.fn('s3SetBranch',v);U.drop();toast('נשמר');await U.load(true)}catch(e){E.msg=errMsg(e)}
  E.busy=0;rerender()};
 })();

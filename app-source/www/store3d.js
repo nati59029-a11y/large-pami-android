@@ -10,7 +10,7 @@
 (function(){
 'use strict';
 if(typeof ACT==='undefined'||typeof V==='undefined'||typeof fvj==='undefined'||typeof fsx==='undefined')return;
-const X={d:null,at:0,busy:0,br:'',kind:'s',tab:'map',mode:'top',pick:null,h:null,seq:0,runs:null,runsAt:0,runsErr:'',busyR:0};
+const X={d:null,at:0,busy:0,br:'',kind:'s',tab:'map',mode:'top',pick:null,h:null,seq:0,runs:null,runsAt:0,runsErr:'',busyR:0,take:[]};
 const S3UI={X};window.S3UI=S3UI;
 const esc2=s=>typeof esc==='function'?esc(s):String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const keyBiz=()=>(SY&&SY.bizId||'')+'|'+(SY&&SY.uid||'');
@@ -33,7 +33,12 @@ const dec=d=>d&&d.fields?Object.fromEntries(Object.entries(d.fields).map(([k,v])
 S3UI.dec=dec;
 const msgOf=e=>e&&e.offline?'אין חיבור לאינטרנט. בדקו את החיבור ונסו שוב.':e&&e.code===403?'אין לכם הרשאה לצפות בתלת מימד בעסק הזה.':'לא הצלחנו לטעון את נתוני החנות. נסו שוב.';
 const g404=async p=>{try{return dec(await fsx(p))}catch(e){if(e&&e.code===404)return null;throw e}};
-S3UI.get=g404;
+S3UI.get=g404;S3UI.esc2=esc2;
+/* שלב 7: קריאה לפונקציית שרת. מנהל־על שעבר לעסק אחר (bzSwitch) שולח את העסק בקלט – השרת מקבל bizId רק ממנהל־על (takeBizInput) */
+S3UI.fn=(n,d)=>window.fnCall(n,(SY&&SY.sa&&SY.bizId)?Object.assign({bizId:SY.bizId},d||{}):(d||{}));
+/* שגיאות שרת (details.reason) בעברית פשוטה */
+S3UI.RS={'br-off':'התלת מימד כבוי בסניף הזה. מנהל־על צריך להפעיל אותו לפני שמירת מפה.','no-wh':'לסניף הזה אין מחסן בתלת מימד. מנהל־על צריך להפעיל מחסן.','tex-day':'הגעתם למכסת תמונות הטקסטורה להיום (200 למפה). נסו שוב מחר.','run-open':'כבר יש סבב פתוח לכלל הזה.','no-map':'אין מפה בסניף הזה.','map-deleted':'המפה של הסבב נמחקה.','no-rule':'כלל הסבב לא נמצא.','no-take':'אי אפשר לקחת חלק מהסבב הזה.','other-branch':'הסבב הזה שייך לסניף אחר.','run-closed':'הסבב כבר הסתיים.','not-assigned':'אינכם משויכים לסבב הזה.','staff-disabled':'העובד הזה מושבת.','manager-only':'רק מנהל יכול לבצע את זה.'};
+S3UI.errText=(e,d)=>e&&e.offline?'אין חיבור לאינטרנט. נסו שוב כשיש חיבור.':(e&&S3UI.RS[e.reason])||(e&&e.message)||d||'הפעולה נכשלה';
 async function load(force){
  if(!feat()||!loggedIn())return;
  const br=brSel(),k=keyBiz()+'|'+br;
@@ -47,7 +52,7 @@ async function load(force){
   if(d.maps.w&&d.maps.w.del===1)d.maps.w=null;
  }catch(e){d.err=msgOf(e)}
  if(!d.err&&d.maps.s){try{d.sum=await g404('/s3sum/s-'+br)}catch(e){}
-  if(isMgr()){try{const r=await fsx('/sround?pageSize=100');d.rounds=((r&&r.documents)||[]).map(dec).filter(x=>x&&x.br===br&&x.on===true&&x.del!==1)}catch(e){d.rounds=null}}}
+  if(isMgr()){try{const r=await fsx('/sround?pageSize=100');d.rounds=((r&&r.documents)||[]).map(x=>{const o=dec(x);if(o)o.rid=String(x.name||'').split('/').pop();return o}).filter(x=>x&&x.br===br&&x.on===true&&x.del!==1)}catch(e){d.rounds=null}}}
  X.d=d;X.at=Date.now();X.busy=0;
  const v=cur().v;if((v==='home'||v==='st3'||v==='st3e'||v==='wk')&&!typing())rerender();
 }
@@ -59,10 +64,11 @@ S3UI.dataOk=dataOk;
 async function loadRuns(force){
  if(!isW()||!feat()||X.busyR||(!force&&Date.now()-X.runsAt<60000))return;
  X.busyR=1;X.runsAt=Date.now();
- try{const r=await window.fnCall('s3View',{});X.runs=Array.isArray(r&&r.runs)?r.runs:[];X.runsErr=''}catch(e){X.runs=null;X.runsErr=e&&e.offline?'אין חיבור לאינטרנט':'לא ניתן לטעון את המשימה כרגע'}
+ try{const r=await S3UI.fn('s3View',{});X.runs=Array.isArray(r&&r.runs)?r.runs:[];X.take=Array.isArray(r&&r.take)?r.take:[];X.runsErr='';try{if(S3UI.onRuns)S3UI.onRuns(X.runs)}catch(e2){}}catch(e){X.runs=null;X.runsErr=e&&e.offline?'אין חיבור לאינטרנט':'לא ניתן לטעון את המשימה כרגע'}
  X.busyR=0;const v=cur().v;if((v==='st3'||v==='wk')&&!typing())rerender();
 }
 
+S3UI.loadRuns=loadRuns;
 /* ---------- עיצוב: כהה עם זהב ---------- */
 const css=document.createElement('style');
 css.textContent=`.s3c{display:block;width:100%;text-align:right;background:#15151a;color:#e8d9a8;border:1px solid #d4af37;border-radius:16px;padding:14px;margin:12px 0 0;font:inherit}
@@ -95,12 +101,15 @@ function homeMgr(){
  return `<div class="s3c" data-a="st3Open" role="button" tabindex="0" style="cursor:pointer"><b style="font-size:1.05rem">החנות בתלת מימד</b><small>${esc2(d.maps.s.name||'')}</small>
  <div class="s3mini" id="s3mini" aria-hidden="true"></div>
  <div class="s3k"><div><small>ציון אחרון</small><b>${sc==null?'עוד אין':sc}</b></div><div><small>הסבב הבא</small><b>${nx?esc2(when(nx)):'לא נקבע'}</b></div></div></div>`}
+/* תשובת s3View האמיתית: {runId, st, openAt, dueAt, map, mapV, n:{n,d}} (n = מקטעים שלי, d = צולמו). אין שם לסבב */
+const rprog=r=>{const o=r&&r.n&&typeof r.n==='object'?r.n:null;return o&&Number.isFinite(+o.n)&&Number.isFinite(+o.d)?`צולמו ${+o.d} מתוך ${+o.n}`:''};
+const rlate=r=>r&&r.st==='late'?' · באיחור':'';
 function homeWk(){
  if(!isW())return '';
  if(X.runs===null&&!X.runsErr)loadRuns();
  else if(Date.now()-X.runsAt>60000)loadRuns();
  const L=X.runs||[];
- if(L.length){const r=L[0];return `<button type="button" class="s3c" data-a="st3Open" style="cursor:pointer"><b style="font-size:1.05rem">המשימה שלך: ${esc2(r.name||'סבב בדיקת מדפים')}</b><small>${Number.isFinite(+r.nDone)&&Number.isFinite(+r.n)?`צולמו ${+r.nDone} מתוך ${+r.n}`:''}${r.dueAt?` · עד ${esc2(when(+r.dueAt))}`:''}</small></button>`}
+ if(L.length){const r=L[0];return `<button type="button" class="s3c" data-a="${typeof ACT.s3cOpen==='function'?'s3cOpen':'st3Open'}" data-id="${esc2(r.runId||'')}" style="cursor:pointer"><b style="font-size:1.05rem">המשימה שלך: סבב בדיקת מדפים</b><small>${esc2(rprog(r))}${r.dueAt?` · עד ${esc2(when(+r.dueAt))}`:''}${rlate(r)}</small></button>`}
  if(canDraw()){if(!dataOk()){load();return ''}if(X.d.maps.s)return `<button type="button" class="s3c" data-a="st3Open" style="cursor:pointer"><b>מפת החנות בתלת מימד</b><small>צפייה ועריכה</small></button>`;return invite()}
  return ''}
 const homeH=()=>{try{if(!feat()||!loggedIn())return '';return isW()?homeWk():(isMgr()?homeMgr():'')}catch(e){return ''}};
@@ -128,8 +137,8 @@ function workerTask(){
  if(X.runs===null&&!X.runsErr)loadRuns();
  if(X.runsErr)return `<div class="s3info">${esc2(X.runsErr)}</div>`;
  if(X.runs===null)return `<div class="s3info">טוען את המשימה…</div>`;
- if(!X.runs.length)return `<div class="s3info">אין לך משימה פתוחה כרגע.</div>`;
- return X.runs.map(r=>`<div class="s3info"><b>${esc2(r.name||'סבב בדיקת מדפים')}</b><br>${Number.isFinite(+r.nDone)&&Number.isFinite(+r.n)?`צולמו ${+r.nDone} מתוך ${+r.n}`:''}${r.dueAt?` · עד ${esc2(when(+r.dueAt))}`:''}</div>`).join('')}
+ if(!X.runs.length)return `<div class="s3info">אין לך משימה פתוחה כרגע.</div>`+(typeof S3UI.takeHtml==='function'?S3UI.takeHtml(X.take):'');
+ return X.runs.map(r=>`<div class="s3info"><b>סבב בדיקת מדפים</b><br>${esc2(rprog(r))}${r.dueAt?` · עד ${esc2(when(+r.dueAt))}`:''}${rlate(r)}<div class="s3row"><button class="s3b" data-a="s3cOpen" data-id="${esc2(r.runId||'')}">${(r.n&&+r.n.d>0)?'המשך צילום':'התחל צילום'}</button></div></div>`).join('')+(typeof S3UI.takeHtml==='function'?S3UI.takeHtml(X.take):'')}
 V.st3=()=>{const T='החנות בתלת מימד';
  if(!loggedIn()||!feat())return{t:T,h:'<div class="empty">תלת מימד לא מופעל בעסק הזה</div>'};
  if(!dataOk()){load();return{t:T,h:'<div class="empty">טוען…</div>'}}

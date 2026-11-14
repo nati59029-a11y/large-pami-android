@@ -11,7 +11,7 @@ const DOCS = 'projects/demo-largpeami/databases/(default)/documents/b/biz-s/';
 const mkMap = () => ({ br: 'main', kind: 's', name: 'חנות הבדיקה', v: 3, seq: 1, grid: 50, numDir: 'rtl', ent: 'd1', src: 'manual', upd: 1763100000000, by: 'm',
   rooms: [{ id: 'r1', name: 'אולם', p: [0, 0, 1000, 0, 1000, 800, 0, 800], h: 300 }], walls: [], cols: [], doors: [{ id: 'd1', x: 500, y: 800, w: 180, a: 0, k: 'ent' }],
   fx: [{ id: 'f1', k: 'gon', x: 500, y: 400, w: 200, d: 90, h: 180, a: 0, sides: 2, bays: 2, lvl: 5, hi: false, room: 'r1', num: 1 }], syms: [] });
-const S = { map: mkMap(), none: false, calls: [], reads: [], fnFail: '', runs: [{ runId: 'r_1', name: 'סבב ירקות', n: 12, nDone: 5, dueAt: Date.UTC(2026, 10, 8) }] };
+const S = { map: mkMap(), none: false, calls: [], reads: [], fnFail: '', runs: [{ runId: 'r_1', st: 'open', openAt: Date.UTC(2026, 10, 7), dueAt: Date.UTC(2026, 10, 8), map: 's-main', mapV: 3, n: { n: 12, d: 5 } }] };
 const ALL = { store3d: true };
 async function server(ctx) {
   const doc = (name, o) => ({ name: DOCS + name, fields: Object.fromEntries(Object.entries(o).map(([k, v]) => [k, enc(v)])), createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
@@ -149,10 +149,10 @@ const tool = async (page, k) => { await page.click('[data-a=s3eTool][data-k=' + 
   const showWk = async (page) => { await page.evaluate(() => { WS = 'home'; NAV = [{ v: 'wk' }]; render(0); }); await sleep(1500); await page.evaluate(() => rerender()); await sleep(300); };
   let W = await open(browser, www, cM(), 'w@x.co', { sup: true }); await showWk(W.page);
   const w1 = await W.page.evaluate(() => { const c = document.querySelector('#main .s3c'); return { txt: c ? c.innerText.replace(/\s+/g, ' ') : '' }; });
-  check('10 עובד בלי s3m: רואה את המשימה שלו (שם הסבב וכמה צולמו), בלי כפתורי עריכה', /סבב ירקות/.test(w1.txt) && /5 מתוך 12/.test(w1.txt), w1);
-  await W.page.click('#main .s3c'); await sleep(1500);
+  check('10 עובד בלי s3m: רואה את המשימה שלו (סבב בדיקת מדפים וכמה צולמו, לפי תשובת s3View האמיתית), בלי כפתורי עריכה', /סבב בדיקת מדפים/.test(w1.txt) && /5 מתוך 12/.test(w1.txt), w1);
+  await W.page.evaluate(() => go('st3')); await sleep(1500);
   const w2 = await W.page.evaluate(() => ({ v: cur().v, tabs: [...document.querySelectorAll('.s3tabs button')].length, edit: !!document.querySelector('[data-a=st3Edit]'), task: (document.querySelector('.s3s') || {}).innerText }));
-  check('10א עובד בלי s3m: אין לשוניות ואין "עריכת המפה"; המשימה מוצגת', w2.v === 'st3' && w2.tabs === 0 && !w2.edit && /סבב ירקות/.test(w2.task || ''), w2);
+  check('10א עובד בלי s3m: אין לשוניות ואין "עריכת המפה"; המשימה מוצגת', w2.v === 'st3' && w2.tabs === 0 && !w2.edit && /סבב בדיקת מדפים/.test(w2.task || ''), w2);
   check('10ב אין שגיאות JavaScript (עובד)', !W.page.__errors.length, W.page.__errors);
   await W.ctx.close();
   S.runs = [];
