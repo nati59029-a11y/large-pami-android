@@ -78,15 +78,34 @@ describe('sec-ord: מחיר, קרטונים, מלאי', () => {
     assert.equal(l.st, 'pick');
     assert.equal(l.opts.find((o) => o.id === 'p2').pr, 1500);
   });
-  it('קרטונים: סיטונאי + cto + כמות לא כפולה של ct → אזהרה, הכמות לא משתנה', () => {
+  it('קרטונים: סיטונאי + cto + כמות לא כפולה של ct → אזהרה וחסימה, הכמות לא משתנה', () => {
     const l = L('מגבונים לחים', 13, WS);
-    assert.equal(l.ctw, 12); assert.equal(l.qty, 13); assert.equal(l.st, 'ok');
-    assert.equal(L('מגבונים לחים', 24, WS).ctw, undefined);
+    assert.equal(l.ctw, 12); assert.equal(l.qty, 13); assert.equal(l.st, 'ok'); assert.equal(l.block, true);
+    const d = O.build([{ txt: 'מגבונים לחים', qty: 13 }], P, WS);
+    assert.equal(d.block, true); assert.equal(d.nBlock, 1);
+    const ok = L('מגבונים לחים', 24, WS);
+    assert.equal(ok.ctw, undefined); assert.equal(ok.block, false);
     assert.equal(L('מגבונים לחים', 13, RUN).ctw, undefined); // לקוח רגיל – כמו orders.js
+    assert.equal(L('מגבונים לחים', 13, RUN).block, false);
   });
-  it('אזל: q ≤ 0 → out:true, בלי כמות בפלט ללקוח, לא נכנס לסה"כ', () => {
+  it('מחיר 0 (price:0 או wp:0) → לבירור (price0), חוסם, לא נשלח ללקוח', () => {
+    const PZ = [{ id: 'z1', name: 'שקית', price: 0, on: true }, { id: 'z2', name: 'קופסה', price: 5, wp: 0, on: true }, { id: 'z3', name: 'קופסה גדולה', price: 0, on: true }];
+    for (const [t, c] of [['שקית', RUN], ['קופסה', WS]]) {
+      const l = O.line({ txt: t, qty: 1 }, PZ, c);
+      assert.equal(l.st, 'ask'); assert.equal(l.why, 'price0'); assert.equal(l.block, true); assert.equal(l.pr, undefined);
+    }
+    assert.equal(O.line({ txt: 'קופסה', qty: 1 }, PZ, RUN).pr, 500);
+    const d = O.build([{ txt: 'קופסה', qty: 1 }], [PZ[2], { id: 'z4', name: 'קופסה קטנה', price: 3, on: true }], RUN); // pick: גדולה / קטנה
+    assert.equal(d.lines[0].st, 'pick');
+    assert.equal(d.lines[0].opts.find((o) => o.id === 'z3').pr, null);
+    assert.ok(!/"pr":0/.test(JSON.stringify(O.safeView(d))));
+  });
+  it('אזל: q ≤ 0 → out:true, חוסם, בלי כמות בפלט ללקוח, לא נכנס לסה"כ', () => {
     const d = O.build([{ txt: 'מגבונים לחים', qty: 1 }], P, { cust: {}, br: 'b2' });
     assert.equal(d.lines[0].out, true); assert.equal(d.total, 0);
+    assert.equal(d.lines[0].block, true); assert.equal(d.block, true); assert.equal(d.nBlock, 1); // טיוטה עם פריט שאזל בלבד – חסומה
+    assert.equal(L('מגבונים לחים', 1, { cust: {}, br: 'b9' }).out, true); // סניף שלא מופיע ב-q = 0 (כמו qOf)
+    assert.equal(L('מגבונים לחים', 1, { cust: {}, br: '_' }).out, true);
     assert.equal(L('סכין חד פעמי', 1).out, true);
     assert.equal(L('מגבונים לחים', 1).out, undefined); // b1: 10
     assert.equal(L('צלחת עמוקה', 1).out, undefined); // בלי q – לא נבדק
@@ -105,10 +124,13 @@ describe('sec-ord: סה"כ, כמות, תצוגה', () => {
     assert.equal(ok.total, 30); assert.equal(ok.block, false);
   });
   it('כמות 0 / שלילית / לא מספר → נדחית (ask, why=qty)', () => {
-    for (const q of [0, -2, 'abc', NaN, Infinity, null, undefined, '', 100001, {}]) {
+    for (const q of [0, -2, 'abc', NaN, Infinity, null, undefined, '', 100001, {}, 0.0004, '0.0001']) {
       const l = L('צלחת עמוקה', q);
       assert.equal(l.st, 'ask', String(q)); assert.equal(l.why, 'qty'); assert.equal(l.block, true); assert.equal(l.sum, undefined);
+      assert.equal(l.qty, null);
+      assert.equal(O.safeView({ lines: [l] }).lines[0].qty, null);
     }
+    assert.equal(O.qtyOk(0.0005), 0.001);
     assert.equal(L('צלחת עמוקה', '2').qty, 2);
     assert.equal(L('צלחת עמוקה', 1.5).sum, 2250);
   });

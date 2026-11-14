@@ -2,10 +2,12 @@
 // המזכירה – שלב ג, שלב 1 (14.11.2026): טיוטת הזמנה מטקסט חופשי. פונקציות טהורות בלבד – בלי Firestore, בלי רשת, בלי AI.
 // מוצר (כמו prod/{id} ב-orders.js): { id, name, price, bp?:{<br>:מחיר}, on, cto?:bool, ct?:מארזים בקרטון, sku?, barcode?, q?, wp? }
 //   – מחירים בקטלוג בשקלים; כאן הכול מומר לאגורות שלמות. wp נקרא מ-prod/{id}/p/ws ומצורף על ידי הקורא.
-//   – q: מספר, או אובייקט { <br>|'_': כמות } כמו ב-prod. לא נמסר = לא בודקים מלאי.
+//   – q: אובייקט { <br>|'_': כמות } כמו ב-prod. לא נמסר = לא בודקים מלאי; נמסר – כמו qOf ב-orders.js (סניף חסר = 0 = אזל).
+//   – עסק בלי סניפים: הקורא מעביר br = '_'.
 // לקוח: { wholesale?: true }. סניף: br.
 // שורה מהטקסט: { txt, qty, unit? }. המחיר תמיד מהמוצר – לעולם לא מהטקסט.
 // תוצאה לשורה: st = 'ok' (התאמה אחת בטוחה) | 'pick' (עד 3 אפשרויות opts) | 'ask' (לבירור). pick/ask חוסמים אישור (block).
+// גם שורת ok חוסמת אם: אזל (out), כמות לא בקרטונים שלמים ללקוח סיטונאי (ctw – createOrder דוחה cto-qty).
 
 const MAX_OPTS = 3;
 const MAX_QTY = 100000;
@@ -73,24 +75,19 @@ function priceOf(p, cust, br) {
 // כמות: מספר (או מחרוזת מספרית) גדול מ-0 ועד 100,000; אחרת null
 function qtyOk(v) {
   const n = typeof v === 'number' ? v : (typeof v === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(v) ? Number(v) : NaN);
-  if (!Number.isFinite(n) || n <= 0 || n > MAX_QTY) return null;
-  return Math.round(n * 1000) / 1000;
+  if (!Number.isFinite(n) || n > MAX_QTY) return null;
+  const q = Math.round(n * 1000) / 1000; // כמו qtyOf ב-orders.js: הבדיקה אחרי העיגול
+  return q > 0 ? q : null;
 }
 
-// מלאי: אזל אם q נמסר והכמות (בסניף, או '_', או סכום) ≤ 0
+// מלאי: אזל אם q נמסר והכמות בסניף ≤ 0. qOf – העתק מדויק של orders.js (סניף שלא מופיע / לא מספר = 0)
+const qOf = (p, br) => { const q = p && p.q && typeof p.q === 'object' ? p.q[br] : 0; return typeof q === 'number' ? q : 0; };
 function isOut(p, br) {
-  const q = p && p.q;
-  if (q == null) return false;
-  if (typeof q === 'number') return !(q > 0);
-  if (typeof q !== 'object') return false;
-  let v;
-  if (br && q[br] != null) v = Number(q[br]);
-  else if (q._ != null) v = Number(q._);
-  else v = Object.values(q).reduce((a, x) => a + (Number(x) > 0 ? Number(x) : 0), 0);
-  return !(v > 0);
+  if (!p || p.q == null) return false;
+  return !(qOf(p, br) > 0);
 }
 
-// קרטונים (כמו ctoOf ב-orders.js): רק ללקוח סיטונאי ומוצר cto עם ct ≥ 2 – כמות שאינה כפולה של ct = אזהרה. הכמות לא משתנה.
+// קרטונים (כמו ctoOf ב-orders.js): רק ללקוח סיטונאי ומוצר cto עם ct ≥ 2 – כמות שאינה כפולה של ct = אזהרה וחסימה. הכמות לא משתנה.
 const ctoOf = (p) => (p && p.cto === true && Number.isInteger(p.ct) && p.ct >= 2 ? p.ct : 0);
 
 // התאמה לקטלוג. מחזיר { st, p?, opts? }
@@ -120,7 +117,7 @@ function line(it, prods, ctx) {
   const x = it || {};
   const txt = String(x.txt == null ? '' : x.txt).slice(0, 200);
   const unit = x.unit == null ? '' : String(x.unit).slice(0, 30);
-  const out = { txt, qty: x.qty, unit, st: 'ask', block: true };
+  const out = { txt, qty: null, unit, st: 'ask', block: true };
   const qty = qtyOk(x.qty);
   if (qty == null) { out.why = 'qty'; return out; }
   out.qty = qty;
@@ -128,20 +125,21 @@ function line(it, prods, ctx) {
   if (m.st === 'ok') {
     const pr = priceOf(m.p, o.cust, o.br);
     if (pr == null) { out.why = 'price'; return out; }
+    if (pr <= 0) { out.why = 'price0'; return out; } // לא שולחים ללקוח מחיר 0 (גם wp:0) – לבירור
     Object.assign(out, { st: 'ok', block: false, id: m.p.id, name: m.p.name, pr, sum: Math.round(pr * qty) });
     const ws = !!(o.cust && o.cust.wholesale === true);
     const ct = ws ? ctoOf(m.p) : 0;
-    if (ct && !Number.isInteger(qty / ct)) out.ctw = ct;
-    if (isOut(m.p, o.br)) out.out = true;
+    if (ct && !Number.isInteger(qty / ct)) { out.ctw = ct; out.block = true; }
+    if (isOut(m.p, o.br)) { out.out = true; out.block = true; } // החלטה 5: אזל – לא נכנס בלי אישור
     return out;
   }
   out.st = m.st;
-  out.opts = (m.opts || []).map((p) => ({ id: p.id, name: p.name, pr: priceOf(p, o.cust, o.br) }));
+  out.opts = (m.opts || []).map((p) => { const pr = priceOf(p, o.cust, o.br); return { id: p.id, name: p.name, pr: pr > 0 ? pr : null }; });
   if (m.st === 'ask') out.why = 'none';
   return out;
 }
 
-// טיוטה מלאה: total באגורות רק משורות ok שלא אזלו; block = יש שורה pick/ask
+// טיוטה מלאה: total באגורות רק משורות ok שלא אזלו; block = יש שורה חוסמת (pick/ask/אזל/קרטון)
 function build(items, prods, ctx) {
   const lines = (Array.isArray(items) ? items : []).slice(0, 100).map((it) => line(it, prods, ctx));
   const total = lines.reduce((s, l) => s + (l.st === 'ok' && !l.out ? l.sum : 0), 0);
@@ -153,12 +151,12 @@ function build(items, prods, ctx) {
 function safeView(d) {
   const src = d || {};
   const lines = (Array.isArray(src.lines) ? src.lines : []).map((l) => {
-    const v = { txt: l.txt, qty: l.qty, unit: l.unit, st: l.st };
-    if (l.st === 'ok') { v.name = l.name; v.pr = l.pr; v.sum = l.sum; }
+    const v = { txt: l.txt, qty: typeof l.qty === 'number' && Number.isFinite(l.qty) && l.qty > 0 ? l.qty : null, unit: l.unit, st: l.st };
+    if (l.st === 'ok' && l.pr > 0) { v.name = l.name; v.pr = l.pr; v.sum = l.sum; }
     if (l.out) v.out = true;
     if (l.ctw) v.ctw = l.ctw;
     if (l.why) v.why = l.why;
-    if (Array.isArray(l.opts)) v.opts = l.opts.map((p) => ({ name: p.name, pr: p.pr }));
+    if (Array.isArray(l.opts)) v.opts = l.opts.map((p) => ({ name: p.name, pr: p.pr > 0 ? p.pr : null }));
     return v;
   });
   return { lines, total: Number.isInteger(src.total) ? src.total : 0, block: !!src.block };
