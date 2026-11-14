@@ -64,7 +64,7 @@ S3UI.dataOk=dataOk;
 async function loadRuns(force){
  if(!isW()||!feat()||X.busyR||(!force&&Date.now()-X.runsAt<60000))return;
  X.busyR=1;X.runsAt=Date.now();
- try{const r=await S3UI.fn('s3View',{});X.runs=Array.isArray(r&&r.runs)?r.runs:[];X.take=Array.isArray(r&&r.take)?r.take:[];X.runsErr='';try{if(S3UI.onRuns)S3UI.onRuns(X.runs)}catch(e2){}}catch(e){X.runs=null;X.runsErr=e&&e.offline?'אין חיבור לאינטרנט':'לא ניתן לטעון את המשימה כרגע'}
+ try{const r=await S3UI.fn('s3View',{});X.runs=Array.isArray(r&&r.runs)?r.runs:[];X.take=Array.isArray(r&&r.take)?r.take:[];X.fixes=Array.isArray(r&&r.fixes)?r.fixes:[];X.runsErr='';try{if(S3UI.onRuns)S3UI.onRuns(X.runs)}catch(e2){}}catch(e){X.runs=null;X.runsErr=e&&e.offline?'אין חיבור לאינטרנט':'לא ניתן לטעון את המשימה כרגע'}
  X.busyR=0;const v=cur().v;if((v==='st3'||v==='wk')&&!typing())rerender();
 }
 
@@ -123,7 +123,7 @@ ACT.st3Build=el=>{try{localStorage.removeItem(hideKey())}catch(e){}const k=el&&e
 
 /* ---------- המסך הראשי ---------- */
 const TABS=[['map','מפה'],['rounds','סבבים'],['rep','דוחות'],['recs','המלצות'],['set','הגדרות']];
-const tabsFor=()=>TABS.filter(([k])=>k==='map'||isMgr());
+const tabsFor=()=>TABS.filter(([k])=>k==='map'||isMgr()||(k==='rep'&&isW())).map(t=>t[0]==='rep'&&!isMgr()?['rep','הדוח שלי']:t);
 function pickInfo(){const b=X.pick;if(!b)return 'הקישו על מדף במפה כדי לבחור אותו.';return `גוף ${esc2(b.num||'')}${b.name?' ('+esc2(b.name)+')':''} · צד ${b.s==='a'?'ראשי':'שני'} · מקטע ${esc2(b.n)}`+(typeof S3UI.cardOpen==='function'?`<div class="row s3row"><button class="btn s" data-a="s3kOpen">כרטיס המדף</button></div>`:'')}
 function mapPane(d){
  const kind=X.kind==='w'&&d.maps.w?'w':'s',m=d.maps[kind];
@@ -149,7 +149,7 @@ V.st3=()=>{const T='החנות בתלת מימד';
  const tb=tabsFor();if(!tb.some(t=>t[0]===X.tab))X.tab='map';
  if(tb.length>1)h+=`<div class="s3tabs" role="tablist">${tb.map(([k,l])=>`<button role="tab" aria-selected="${X.tab===k}" class="chip ${X.tab===k?'on':''}" data-a="st3Tab" data-k="${k}">${l}</button>`).join('')}</div>`;
  let body;
- if(X.tab==='map'){body=mapPane(d);if(isW())body=workerTask()+body}
+ if(X.tab==='map'){body=mapPane(d);if(isW())body=workerTask()+(typeof S3UI.fixHtml==='function'?S3UI.fixHtml():'')+body}
  else{const nm=(TABS.find(t=>t[0]===X.tab)||[])[1]||'';body=typeof S3UI.tabHtml==='function'?S3UI.tabHtml(X.tab,d):'';if(!body)body=`<p class="note s3note">המסך "${esc2(nm)}" ייפתח בשלב הבא של הפיתוח.</p>`}
  return{t:T,s:(L.find(b=>b.id===d.br)||{}).name||'',h:`<div class="card s3s">${h}${body}</div>`}};
 ACT.st3Retry=()=>{X.d=null;X.at=0;rerender()};
@@ -189,5 +189,5 @@ function after(){
 }
 {const r0=window.render;if(typeof r0==='function')window.render=function(){/* אלמנט המיני יוצא מהדף לפני הציור (בלי להעביר צומת תוך כדי החלפת התוכן), וחוזר ב-after() */try{const n=X.mn&&X.mn.node;if(n&&n.parentNode)n.parentNode.removeChild(n)}catch(e){}const r=r0.apply(this,arguments);try{after()}catch(e){}return r}}
 /* יציאה / החלפת עסק: ניקוי המטמון */
-{const k0=()=>keyBiz();let last=k0();setInterval(()=>{const k=k0();if(k!==last){last=k;X.d=null;X.at=0;X.runs=null;X.runsAt=0;X.runsErr='';X.br='';unmount();unmini();try{if(window.Store3D&&Store3D.clearCache)Store3D.clearCache()}catch(e){}}},3000)}
+{const k0=()=>keyBiz();let last=k0();setInterval(()=>{const k=k0();if(k!==last){last=k;X.d=null;X.at=0;X.runs=null;X.fixes=null;X.runsAt=0;X.runsErr='';X.br='';unmount();unmini();try{if(window.Store3D&&Store3D.clearCache)Store3D.clearCache()}catch(e){}}},3000)}
 })();

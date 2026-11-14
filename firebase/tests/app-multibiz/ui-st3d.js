@@ -152,14 +152,14 @@ const tool = async (page, k) => { await page.click('[data-a=s3eTool][data-k=' + 
   check('10 עובד בלי s3m: רואה את המשימה שלו (סבב בדיקת מדפים וכמה צולמו, לפי תשובת s3View האמיתית), בלי כפתורי עריכה', /סבב בדיקת מדפים/.test(w1.txt) && /5 מתוך 12/.test(w1.txt), w1);
   await W.page.evaluate(() => go('st3')); await sleep(1500);
   const w2 = await W.page.evaluate(() => ({ v: cur().v, tabs: [...document.querySelectorAll('.s3tabs button')].length, edit: !!document.querySelector('[data-a=st3Edit]'), task: (document.querySelector('.s3s') || {}).innerText }));
-  check('10א עובד בלי s3m: אין לשוניות ואין "עריכת המפה"; המשימה מוצגת', w2.v === 'st3' && w2.tabs === 0 && !w2.edit && /סבב בדיקת מדפים/.test(w2.task || ''), w2);
+  check('10א עובד בלי s3m: רק לשונית "הדוח שלי" (בלי לשוניות מנהל) ואין "עריכת המפה"; המשימה מוצגת', w2.v === 'st3' && w2.tabs === 2 && /הדוח שלי/.test(w2.task || "") && !w2.edit && /סבב בדיקת מדפים/.test(w2.task || ''), w2);
   check('10ב אין שגיאות JavaScript (עובד)', !W.page.__errors.length, W.page.__errors);
   await W.ctx.close();
   S.runs = [];
   W = await open(browser, www, cM(), 'w@x.co', { s3m: true }); await showWk(W.page);
   await W.page.click('#main .s3c'); await sleep(1500);
   const w3 = await W.page.evaluate(() => ({ tabs: [...document.querySelectorAll('.s3tabs button')].length, edit: !!document.querySelector('[data-a=st3Edit]'), none: (document.querySelector('.s3s') || {}).innerText }));
-  check('10ג עובד עם s3m: רואה "עריכת המפה", בלי לשוניות מנהל; בלי משימה – "אין לך משימה פתוחה"', w3.edit && w3.tabs === 0 && /אין לך משימה פתוחה/.test(w3.none || ''), w3);
+  check('10ג עובד עם s3m: רואה "עריכת המפה", בלי לשוניות מנהל; בלי משימה – "אין לך משימה פתוחה"', w3.edit && w3.tabs === 2 && /אין לך משימה פתוחה/.test(w3.none || ''), w3);
   await W.page.click('[data-a=st3Edit]'); await sleep(1500);
   await W.page.evaluate(() => { S3UI.E.sel = { t: 'rooms', id: S3UI.E.map.rooms[0].id }; rerender(); }); await sleep(300);
   check('10ד עובד עם s3m: בעורך אין מחיקה לפריט שנשמר (מותרת למנהל בלבד), אין סל מחזור ואין סניף', !(await W.page.$('[data-a=s3eDel]')) && !(await W.page.$('[data-a=s3eSec][data-k=bin]')) && !(await W.page.$('[data-a=s3eSec][data-k=br]')), null);
