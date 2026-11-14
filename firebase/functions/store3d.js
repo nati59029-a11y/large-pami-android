@@ -83,10 +83,13 @@ async function pushTo(db, uids, msg, send) {
 }
 // מתעד ב-s3ntf/{key} (create) ושולח. כבר קיים = כבר נשלח → לא שולחים שוב. send: לבדיקות; באמולטור בלי send – בלי FCM.
 async function notify(ctx, key, kind, to, now) {
-  const list = [...new Set(to.filter((u) => typeof u === 'string' && C.RE.uid.test(u)))].slice(0, 20);
-  if (!list.length) return false;
+  // שלב 12 (תיקון סבב 1): רק משתמש פעיל (staff.active או admins) – עובד שהושבת לא מקבל תזכורת, איחור, משימת תיקון וכו'
+  if (!Array.isArray(to) || !to.length) return false;
   const ref = ctx.db.doc('s3ntf/' + key);
-  if ((await ref.get()).exists) return false;
+  if ((await ref.get()).exists) return false; // כבר נשלח – בלי קריאות נוספות
+  const on = await activeOf(ctx.db, to);
+  const list = [...new Set(to.filter((u) => on.has(u)))].slice(0, 20);
+  if (!list.length) return false;
   try { await ref.create({ at: now, kind, to: list }); } catch (e) { if (isExists(e)) return false; throw e; }
   const send = ctx.send || (process.env.FUNCTIONS_EMULATOR === 'true' ? null : fcmSend);
   if (send) await pushTo(ctx.db, list, Object.assign({ kind }, PUSH[kind]), send);

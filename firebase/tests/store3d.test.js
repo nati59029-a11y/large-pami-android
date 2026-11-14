@@ -187,6 +187,21 @@ describe('s3Rounds – פתיחת סבבים, תזכורות ואיחור (לי�
     assert.equal(sent.filter((s) => s.kind === 'late').length, 2, 'עובד + מנהל, פעם אחת');
   });
 
+  it('שלב 12: עובד שהושבת באמצע סבב פתוח לא מקבל תזכורת ולא התראת איחור (גם לא לטלפון שלו)', async () => {
+    await adm.doc(`b/${A}/sround/${RID}`).set(RULE({ asg: [{ u: E1, z: ['f1'] }, { u: E2, z: [] }] }));
+    await run(SUN + 60000);
+    const id = `b/${A}/srun/${RID}_20261115`;
+    const r0 = await get(id);
+    assert.ok(r0.uids.includes(E2), 'E2 בסבב');
+    await adm.doc(`b/${A}/staff/${E2}`).update({ active: false }); // הושבת – הטוקן נשאר ב-staff
+    sent.length = 0;
+    await run(r0.dueAt - D1 + 60000);
+    assert.deepEqual((await get(`b/${A}/s3ntf/${RID}_20261115_remind`)).to, [E1]);
+    await run(r0.dueAt + 60000);
+    assert.deepEqual((await get(`b/${A}/s3ntf/${RID}_20261115_late`)).to.sort(), [E1, MGR].sort());
+    assert.ok(!sent.some((x) => x.tokens.some((t) => t.startsWith('tok_' + E2 + '_'))), 'לא נשלח לטלפון של E2');
+  });
+
   it('סבב ידני ב-04:00 ואחריו המועד המתוזמן ב-06:00 באותו יום: לא נפתח סבב שני (המועד מדולג); אחרי שהסבב הסתיים – המועד הבא נפתח', async () => {
     await adm.doc(`b/${A}/sround/${RID}`).set(RULE({ f: { k: 'week', dow: 6 } })); // שבת 14.11.2026
     const db = T.prefixed(adm, `b/${A}/`);
