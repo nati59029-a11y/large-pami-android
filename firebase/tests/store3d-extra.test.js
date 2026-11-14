@@ -81,7 +81,7 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
     await adm.doc(`b/${A}/s3appeal/${aid}`).set(d);
     return aid;
   };
-  const appeals = () => XX.appealsBiz({ db, now: Date.now(), send });
+  const appeals = (o) => XX.appealsBiz(Object.assign({ db, now: Date.now(), send }, o));
 
   before(async () => {
     env = await H.getEnv();
@@ -161,6 +161,33 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
     assert.equal((await get(`b/${A}/smap/s-main/bay/f1-a-1`)).notes.length, 1, 'note:false – בלי הערה');
   });
 
+  it('תיקון סבב 1: כשל באמצע ההשלמה של ערעור – לא מסומן כמטופל, והריצה הבאה משלימה (ציון, s3sum, חוסרים, משימה); אחר כך מסומן sv', async () => {
+    GM.state.shelf = HOLE;
+    await shelf(E1, photo({ run: RUN1 }));
+    const run0 = await get(`b/${A}/srun/${RUN1}`);
+    assert.deepEqual([run0.sum.score, (await get(`b/${A}/s3short/${RUN1}`)).items.map((i) => i.why)], [80, ['miss', 'hole']]);
+    const aid = await appeal(RUN1, 'f1-a-1_a', '0', { note: false });
+    let fail = true;
+    const inject = async () => { if (fail) throw new Error('simulated failure'); };
+    assert.equal(await appeals({ inject }), 0, 'נכשל באמצע');
+    assert.deepEqual((await get(`b/${A}/srun/${RUN1}/ai/f1-a-1_a`)).ovr, { 0: 'acc' }, 'הטרנזקציה הראשונה נכתבה');
+    assert.equal((await get(`b/${A}/srun/${RUN1}`)).sum.score, 80, 'הסיכום עוד לא עודכן');
+    assert.equal((await get(`b/${A}/s3appeal/${aid}`)).sv, undefined, 'לא מסומן כמטופל');
+    fail = false;
+    assert.equal(await appeals({ inject }), 1, 'הריצה הבאה משלימה');
+    assert.equal((await get(`b/${A}/srun/${RUN1}`)).sum.score, 88, 'בלי hole: p50 h100 o100 d100 → 87.5 → 88');
+    assert.deepEqual((await get(`b/${A}/s3short/${RUN1}`)).items.map((i) => i.why), ['miss'], 's3short מתעדכן אחרי ערעור (עוד draft)');
+    assert.deepEqual([(await get(`b/${A}/s3sum/s-main`)).score, (await get(`b/${A}/s3sum/s-main`)).b['f1-a-1'].n], [88, 1]);
+    assert.deepEqual((await get(`b/${A}/s3fix/${RUN1}__f1-a-1_a`)).iks, [1]);
+    assert.equal(typeof (await get(`b/${A}/s3appeal/${aid}`)).sv, 'number', 'מסומן כמטופל רק עכשיו');
+    assert.equal(await appeals(), 0);
+    // אחרי שהמנהל אישר את רשימת החוסרים – ערעור נוסף לא משנה אותה
+    await adm.doc(`b/${A}/s3short/${RUN1}`).update({ st: 'ok', okBy: MGR, okAt: Date.now() });
+    await appeal(RUN1, 'f1-a-1_a', 'all', { note: false });
+    assert.equal(await appeals(), 1);
+    assert.deepEqual((await get(`b/${A}/s3short/${RUN1}`)).items.map((i) => i.why), ['miss']);
+  });
+
   it('s3Fix: משימה ידנית m_<qid> + התראה; qid חוזר = dup; עובד לא פעיל / מקום לא קיים נדחים; הכרעה רק ב-sent; ביטול', async () => {
     const q = qid();
     const inp = { qid: q, map: 's-main', slot: 'f1-a-2_a', u: E1, man: 'לסדר את הכוסות לפי גודל' };
@@ -176,6 +203,14 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
     assert.equal(await err(XX.fixCore(db, { uid: MGR, bizId: A }, Object.assign({}, inp, { qid: qid(), u: E2 }), Date.now(), { send })), 'staff-disabled');
     assert.equal(await err(XX.fixCore(db, { uid: MGR, bizId: A }, Object.assign({}, inp, { qid: qid(), slot: 'f9-a-1_a' }), Date.now(), { send })), 'bad-slot');
     assert.equal(await err(XX.fixCore(db, { uid: MGR, bizId: A }, Object.assign({}, inp, { qid: qid(), man: '' }), Date.now(), { send })), 'bad-man');
+    // תיקון סבב 1: עובד ששויך לסניף אחר – המשימה הולכת למנהל
+    await adm.doc(`b/${A}/staff/${E1}`).update({ br: ['other'] });
+    const q2 = qid();
+    const r2 = await XX.fixCore(db, { uid: MGR, bizId: A }, Object.assign({}, inp, { qid: q2 }), Date.now(), { send });
+    assert.deepEqual([r2.u, r2.toMgr, (await get(`b/${A}/s3fix/m_${q2}`)).u], [MGR, true, MGR]);
+    assert.equal((await XX.fixCore(db, { uid: MGR, bizId: A }, Object.assign({}, inp, { qid: q2 }), Date.now(), { send })).dup, true, 'qid חוזר – dup');
+    await adm.doc(`b/${A}/staff/${E1}`).update({ br: ['main'] });
+    assert.equal((await XX.fixCore(db, { uid: MGR, bizId: A }, Object.assign({}, inp, { qid: qid() }), Date.now(), { send })).u, E1, 'משויך לסניף – אצלו');
     assert.equal(await err(XX.fixCore(db, { uid: MGR, bizId: A }, { fixTaskId: 'm_' + q, decide: 'ok' }, Date.now(), {})), 'fix-not-sent');
     assert.equal((await XX.fixCore(db, { uid: MGR, bizId: A }, { fixTaskId: 'm_' + q, cancel: true }, Date.now(), {})).st, 'cancel');
     assert.deepEqual([(await get(`b/${A}/s3fix/m_${q}`)).cBy, await err(XX.fixCore(db, { uid: MGR, bizId: A }, { fixTaskId: 'm_' + q, cancel: true }, Date.now(), {}))], [MGR, 'fix-closed']);
@@ -237,7 +272,9 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
       fx: [fx('f1', { sides: 2 }), fx('f2', { hi: true, lvl: 7, x: 600 }), fx('f3', { x: 800, del: 1, delAt: NOW - 31 * D1, delBy: MGR }), fx('f4', { x: 900, del: 1, delAt: NOW - 29 * D1, delBy: MGR })],
       tx: [{ id: 't1', path: `b/${A}/store3d/main/tex/s-main/t1_1.jpg`, w: 512, h: 512 }],
     }));
-    await adm.doc(`b/${A}/smap/s-main/ver/000002`).set({ m: { tx: [{ id: 't8', path: `b/${A}/store3d/main/tex/s-main/t8_1.jpg`, w: 512, h: 512 }] }, v: 2, at: 1, by: MGR });
+    await adm.doc(`b/${A}/smap/s-main/ver/000002`).set({ m: { tx: [{ id: 't8', path: `b/${A}/store3d/main/tex/s-main/t8_1.jpg`, w: 512, h: 512 }] }, v: 2, at: NOW - 10 * D1, by: MGR });
+    await adm.doc(`b/${A}/smap/s-main/ver/000001`).set({ m: { tx: [{ id: 't7', path: `b/${A}/store3d/main/tex/s-main/t7_1.jpg`, w: 512, h: 512 }] }, v: 1, at: NOW - 31 * D1, by: MGR });
+    await adm.doc(`b/${A}/smap/w-main`).set(MAP({ kind: 'w', name: 'מחסן' }));
     await adm.doc(`b/${A}/sround/oldrule1`).set({ br: 'main', map: 's-main', name: 'ישן', on: false, del: 1, delAt: NOW - 31 * D1, delBy: MGR, upd: 1, by: MGR });
     await adm.doc(`b/${A}/sround/newrule1`).set({ br: 'main', map: 's-main', name: 'חדש', on: false, del: 1, delAt: NOW - 29 * D1, delBy: MGR, upd: 1, by: MGR });
     await adm.doc(`b/${A}/sround/liverule`).set({ br: 'main', map: 's-main', name: 'חי', on: true, upd: 1, by: MGR });
@@ -255,11 +292,21 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
       await adm.doc(`b/${A}/srun/${r}/ph/f1-a-1_a`).set({ p, th: t, w: 1200, h: 900, sz: 4000, tsz: 900, src: 'photo', by: E1, at: 1, rx: 1, qid: 'q', rt: 0 });
       await new Promise((ok) => setTimeout(ok, 15));
     }
+    // תיקון סבב 1: 3 סבבי מחסן חדשים יותר ודיווח יזום – באותו מקום צילום ובאותה תיקיית run/; לא דוחקים את סבבי החנות
+    const wruns = ['w7w7w7w7_20261101', 'w7w7w7w7_20261108', 'w7w7w7w7_20261115', 'ad_adhocadhocadhoc01'];
+    for (const r of wruns) {
+      const p = `b/${A}/store3d/main/run/${r}/f1-a-1_a_1.jpg`;
+      await bucket.file(p).save(Buffer.from('x'), { resumable: false });
+      await bucket.file(p.replace('.jpg', '_t.jpg')).save(Buffer.from('x'), { resumable: false });
+      await adm.doc(`b/${A}/srun/${r}`).set({ br: 'main', map: r.startsWith('ad_') ? 's-main' : 'w-main', k: r.startsWith('ad_') ? 'adhoc' : 'sched', st: 'done', n: 1, nDone: 1, openAt: 1, dueAt: 2, doneAt: 2 });
+      await adm.doc(`b/${A}/srun/${r}/ph/f1-a-1_a`).set({ p, th: p.replace('.jpg', '_t.jpg'), w: 1200, h: 900, sz: 4000, tsz: 900, src: 'photo', by: E1, at: 1, rx: 1, qid: 'q', rt: 0 });
+      await new Promise((ok) => setTimeout(ok, 15));
+    }
     await adm.doc(`b/${A}/srun/${runs[0]}/ai/f1-a-1_a`).set({ st: 'ok', conf: 1, iss: [], model: 'm', at: 1, ver: 1 });
     await adm.doc(`b/${A}/s3sum/s-main`).set({ b: { 'f1-a-1': { s: 'ok', r: runs[0], t: 1, n: 0, th: `b/${A}/store3d/main/run/${runs[0]}/f1-a-1_a_1_t.jpg` } }, upd: 1 });
     // קובץ תועה בסבב שנשמר
     await bucket.file(`b/${A}/store3d/main/run/${runs[4]}/f1-a-1_a_2.jpg`).save(Buffer.from('x'), { resumable: false });
-    for (const t of ['t1', 't8', 't9']) await bucket.file(`b/${A}/store3d/main/tex/s-main/${t}_1.jpg`).save(Buffer.from('x'), { resumable: false });
+    for (const t of ['t1', 't7', 't8', 't9']) await bucket.file(`b/${A}/store3d/main/tex/s-main/${t}_1.jpg`).save(Buffer.from('x'), { resumable: false });
 
     const out = await inBiz(() => XX.cleanBiz({ bizId: A, now: NOW, bucket, send }));
     assert.ok(Object.values(out).every((v) => v !== -1), JSON.stringify(out));
@@ -271,15 +318,17 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
     assert.deepEqual(await ids(`b/${A}/s3draft`), ['newxdraftxxxxxxxxx1']);
     assert.deepEqual(await ids(`b/${A}/s3qid`), ['newxqidxxxxxxxxxxx1']);
     const left = await files('main/run/');
-    assert.deepEqual(left.map((f) => f.split('/run/')[1]), runs.slice(2).flatMap((r) => [`${r}/f1-a-1_a_1.jpg`, `${r}/f1-a-1_a_1_t.jpg`]), '3 הסבבים האחרונים נשארו; התועה נמחק');
+    assert.deepEqual(left.map((f) => f.split('/run/')[1]), runs.slice(2).concat(wruns).sort().flatMap((r) => [`${r}/f1-a-1_a_1.jpg`, `${r}/f1-a-1_a_1_t.jpg`]),
+      '3 הסבבים האחרונים של החנות נשארו, וגם המחסן והדיווח היזום; התועה נמחק');
     const ph0 = await get(`b/${A}/srun/${runs[0]}/ph/f1-a-1_a`), ph4 = await get(`b/${A}/srun/${runs[4]}/ph/f1-a-1_a`);
     assert.deepEqual([ph0.gone, ph0.p, ph0.th, ph0.w], [true, undefined, undefined, 1200], 'הטקסט נשאר, בלי נתיב');
     assert.deepEqual([ph4.gone, typeof ph4.p], [undefined, 'string']);
     assert.ok(await get(`b/${A}/srun/${runs[0]}/ai/f1-a-1_a`), 'תוצאת הטקסט נשמרת תמיד');
     assert.equal((await get(`b/${A}/s3sum/s-main`)).b['f1-a-1'].th, undefined, 's3sum לא מצביע על מוקטנת שנמחקה');
-    assert.deepEqual((await files('main/tex/')).map((f) => f.split('/tex/')[1]), ['s-main/t1_1.jpg', 's-main/t8_1.jpg'], 't9 יתומה נמחקה; t1 במפה, t8 בגרסה');
+    assert.deepEqual((await files('main/tex/')).map((f) => f.split('/tex/')[1]), ['s-main/t1_1.jpg', 's-main/t8_1.jpg'], 't9 יתומה ו-t7 (בגרסה שהוחלפה לפני 31 יום) נמחקו; t1 במפה, t8 בגרסה מלפני 10 ימים');
     const audit = (await adm.collection(`b/${A}/audit`).where('act', '==', 's3Clean').get()).docs.map((d) => d.data());
-    assert.equal(audit.length, 1);
+    assert.deepEqual([audit.length, audit[0].part, audit[0].parts], [1, 1, 1]);
+    assert.match(audit[0].note, /tex s-main\/t7_1\.jpg/);
     assert.match(audit[0].note, /smap\/s-main: fx f3/);
     assert.match(audit[0].note, /sround\/oldrule1/);
     // ריצה שנייה – אין עוד מה למחוק, בלי רשומת audit נוספת

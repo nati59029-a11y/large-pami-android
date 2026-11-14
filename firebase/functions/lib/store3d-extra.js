@@ -9,9 +9,11 @@
 //   fixTasks(entries, run, runId, now, due) – משימות תיקון אוטומטיות (s3fix) למקומות עם בעיה קשה, לעובד שהמקטע שלו.
 //   verifyResult(fix, origKinds, ai) – תוצאת צילום אימות: ok / rej / sent (לבדיקת מנהל) / null (תמונה לא שמישה – בלי שינוי).
 //   perfAll(month, runs, fixes, appeals) – סיכומי ביצועי עובדים לחודש (s3perf), מחושבים מחדש מהנתונים (אידמפוטנטי).
-//   keepPlan(files, now)    – שמירת 3 סבבים אחרונים לכל מקום צילום: אילו קבצים של סבבים ישנים יותר נמחקים.
+//   keepPlan(files, now, keep, groupOf) – שמירת 3 סבבים אחרונים לכל מפה + מקום צילום (חנות ומחסן של אותו סניף בנפרד; דיווחים
+//                             יזומים בשמירה נפרדת משלהם – תיקון סבב 1): אילו קבצים של סבבים ישנים יותר נמחקים.
 //   binPurge(map, now)      – סל המחזור במפה: רק פריטים עם del:1 ש-delAt שלהם לפני 30 יום ומעלה. פריט חי לעולם לא נבחר.
-//   texOrphans(files, refs, now) – קובצי טקסטורה שאינם במפה ובאף גרסה שמורה, ונוצרו לפני 30 יום ומעלה.
+//   texOrphans(files, refs, lastUse, now) – קובצי טקסטורה שאינם במפה הנוכחית, ו-30 יום ומעלה עברו מאז שהפסיקו להיות בשימוש
+//                             (זמן הגרסה האחרונה שבה הופיעו; בלי גרסה – זמן יצירת הקובץ).
 //   monthRange(t)           – תחילת וסוף חודש לפי שעון ישראל, ומפתח החודש.
 
 const TK = require('./tk-time');
@@ -240,21 +242,33 @@ function parseRunFile(name) {
   const m = RE_RUNFILE.exec(String(name));
   return m ? { runId: m[1], slot: m[2], n: +m[3], thumb: !!m[4] } : null;
 }
-function keepPlan(files, now, keep) {
+// הקבוצה של סבב (תיקון סבב 1): המפה שלו (חנות s-<br> ומחסן w-<br> משתפים את תיקיית run/ של הסניף, ושמות המקומות חוזרים בשתיהן),
+// ובנפרד סבבים רגילים ודיווחים יזומים (ad_), כדי שדיווחים יזומים לא ידחקו החוצה תמונות של סבבים.
+// runMap = { runId: mapId } (מ-srun.map). סבב בלי מפה ידועה – null: הקבצים שלו לא נבחרים למחיקה.
+function runGroup(runId, runMap) {
+  const m = runMap && typeof runMap[runId] === 'string' ? runMap[runId] : '';
+  if (!/^[sw]-[a-z0-9_]{2,20}$/.test(m)) return null;
+  return m + '|' + (/^ad_/.test(runId) ? 'ad' : 'run');
+}
+function keepPlan(files, now, keep, runMap) {
   const K = inR(keep, 1, 50) ? keep : KEEP_RUNS;
-  const bySlot = new Map();
+  const byKey = new Map();
   for (const f of files || []) {
     const p = parseRunFile(f && f.name);
     if (!p || !Number.isFinite(f.t)) continue;
-    if (!bySlot.has(p.slot)) bySlot.set(p.slot, new Map());
-    const runs = bySlot.get(p.slot);
+    const g = runGroup(p.runId, runMap);
+    if (!g) continue;
+    const key = g + '|' + p.slot;
+    if (!byKey.has(key)) byKey.set(key, new Map());
+    const runs = byKey.get(key);
     const r = runs.get(p.runId) || { t: 0, names: [] };
     r.t = Math.max(r.t, f.t);
     r.names.push({ name: f.name, t: f.t });
     runs.set(p.runId, r);
   }
   const drop = [];
-  for (const [slot, runs] of bySlot) {
+  for (const [key, runs] of byKey) {
+    const slot = key.split('|')[2];
     const L = [...runs.entries()].sort((a, b) => b[1].t - a[1].t || (a[0] < b[0] ? 1 : -1));
     for (const [runId, r] of L.slice(K)) {
       const names = r.names.filter((x) => x.t <= now - YOUNG_MS).map((x) => x.name).sort();
@@ -277,11 +291,16 @@ function binPurge(map, now) {
   if (!isObj(map)) return { map: null, purged: {}, n: 0 };
   const out = Object.assign({}, map), purged = {};
   let n = 0;
+  // תיקון סבב 1: טקסטורה שחדר שנשאר במפה (חי, או בסל ועוד לא נמחק סופית) מפנה אליה – לא נמחקת
+  const keepRooms = (Array.isArray(map.rooms) ? map.rooms : []).filter((r) => !expired(r, now));
+  const usedTex = new Set();
+  for (const r of keepRooms) if (isObj(r) && isObj(r.tex)) for (const k of ['w', 'f', 'c']) if (typeof r.tex[k] === 'string') usedTex.add(r.tex[k]);
   for (const list of LISTS) {
     if (!Array.isArray(map[list])) continue;
-    const gone = map[list].filter((o) => expired(o, now));
+    const gone = map[list].filter((o) => expired(o, now) && !(list === 'tx' && usedTex.has(o.id)));
     if (!gone.length) continue;
-    out[list] = map[list].filter((o) => !expired(o, now));
+    const g = new Set(gone);
+    out[list] = map[list].filter((o) => !g.has(o));
     purged[list] = gone.map((o) => o.id);
     n += gone.length;
   }
@@ -292,14 +311,35 @@ function binPurge(map, now) {
 
 // ---------- טקסטורות יתומות ----------
 // files = [{ name, t }] בתיקיית tex/{mapId}/; refs = Set של נתיבים שמופיעים ב-tx של המפה (כולל סל המחזור) ושל כל גרסה שמורה.
-function texOrphans(files, refs, now) {
+// refs = נתיבים במפה הנוכחית (כולל סל המחזור) – לא נמחקים. lastUse = Map(נתיב → זמן הגרסה האחרונה שבה הופיע, ver.at = הרגע שבו
+// הגרסה הזו הוחלפה). "30 יום" נספרים מהרגע שהטקסטורה הפסיקה להיות בשימוש (תיקון סבב 1); בלי גרסה – מזמן יצירת הקובץ.
+function texOrphans(files, refs, lastUse, now) {
   const R = refs instanceof Set ? refs : new Set(refs || []);
-  return (files || []).filter((f) => f && /\/tex\/[sw]-[a-z0-9_]{2,20}\/t[0-9]{1,4}_[0-9]{1,2}\.jpg$/.test(f.name) && !R.has(f.name) && Number.isFinite(f.t) && f.t <= now - TEX_DAYS * D1).map((f) => f.name);
+  const U = lastUse instanceof Map ? lastUse : new Map();
+  return (files || []).filter((f) => {
+    if (!f || !/\/tex\/[sw]-[a-z0-9_]{2,20}\/t[0-9]{1,4}_[0-9]{1,2}\.jpg$/.test(f.name) || R.has(f.name) || !Number.isFinite(f.t)) return false;
+    const t = Math.max(f.t, U.has(f.name) ? U.get(f.name) : 0);
+    return t <= now - TEX_DAYS * D1;
+  }).map((f) => f.name);
+}
+// רשומות audit: שורות היומן מחולקות לחלקים של עד max תווים, בלי לחתוך שורה (שורה ארוכה מדי לבדה – מתפצלת לחתיכות). תיקון סבב 1
+function splitNote(lines, max) {
+  const M = inR(max, 50, 100000) ? max : 1500, out = [];
+  let cur = '';
+  for (const l0 of lines || []) {
+    for (let l = String(l0); l.length;) {
+      const piece = l.slice(0, M); l = l.slice(M);
+      if (cur && cur.length + 3 + piece.length > M) { out.push(cur); cur = ''; }
+      cur = cur ? cur + ' | ' + piece : piece;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
 }
 const txPaths = (m) => (isObj(m) && Array.isArray(m.tx) ? m.tx.filter((t) => isObj(t) && typeof t.path === 'string').map((t) => t.path) : []);
 
 module.exports = {
   D1, BIN_DAYS, TEX_DAYS, KEEP_RUNS, YOUNG_MS, W_DEF, CAT, SEV_PEN, RE_FIX,
   weights, overridden, hardIdx, effSt, effAi, scoreSlot, runSum, prevRun, ownerOf, bayOf, shortList, fixId, fixTasks, verifyResult,
-  monthRange, inMonth, perfAll, parseRunFile, keepPlan, strayFiles, expired, binPurge, texOrphans, txPaths, str,
+  monthRange, inMonth, perfAll, parseRunFile, runGroup, keepPlan, strayFiles, expired, binPurge, texOrphans, txPaths, splitNote, str,
 };

@@ -15,7 +15,8 @@
 //     30 יום ומעלה: רכיבים במפה (עם גרסה קודמת ב-ver ו-v+1, כמו כל שמירה) וכללי סבב.  4. תמונות: 3 סבבים אחרונים לכל מקום צילום;
 //     ישנים יותר – ph.gone=true והקבצים נמחקים (התוצאות בטקסט נשארות תמיד); קבצים תועים שלא שייכים ל-ph.  5. טקסטורות שאינן במפה
 //     ובאף גרסה, בנות 30 יום ומעלה.  6. טיוטות (s3draft) בנות 30 יום ומעלה, s3qid שפג תוקפו (exp).
-//     כל מחיקה נרשמת ביומן השרת (logger) ובסיכום ב-b/{bizId}/audit (act 's3Clean'). מפה שלמה שנמחקה (smap.del) – לא נמחקת סופית.
+//     כל מחיקה שהצליחה נרשמת ביומן השרת (logger) וב-b/{bizId}/audit (act 's3Clean'; רשימה ארוכה – כמה רשומות). מפה שלמה שנמחקה
+//     (smap.del) – לא נמחקת סופית. תיקון סבב 1: 3 סבבים אחרונים לכל מפה + מקום (חנות ומחסן בנפרד), ודיווחים יזומים בשמירה נפרדת.
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -68,8 +69,14 @@ async function finishRun(db, runId, now, o) {
       if (!cur || cur === runId) tx.set(sref, { score: sum.score, upd: now }, { merge: true });
     });
   }
+  // רשימת חוסרים: נוצרת בסיום; כל עוד המנהל לא החליט (st 'draft') – מתעדכנת (למשל אחרי ערעור שביטל בעיית low/hole). תיקון סבב 1
   const items = X.shortList(entries);
-  if (items.length) { try { await db.doc('s3short/' + runId).create({ items, st: 'draft' }); } catch (e) { if (!isExists(e)) throw e; } }
+  const shref = db.doc('s3short/' + runId);
+  await db.runTransaction(async (tx) => {
+    const sh = await tx.get(shref);
+    if (!sh.exists) { if (items.length) tx.create(shref, { items, st: 'draft' }); return; }
+    if (sh.get('st') === 'draft' && JSON.stringify(sh.get('items') || []) !== JSON.stringify(items)) tx.update(shref, { items });
+  });
   const tasks = X.fixTasks(entries, run, runId, now, dueOf(S));
   const made = [];
   for (const t of tasks) {
@@ -91,15 +98,16 @@ async function applyAppeal(ctx, aid, a) {
   if (!C.isRunId(a.run) || !C.RE.slot.test(a.slot || '') || !RE_IK.test(a.ik || '') || aid !== `${a.run}__${a.slot}__${a.ik}`) return false;
   const aiRef = db.doc(`srun/${a.run}/ai/${a.slot}`), runRef = db.doc('srun/' + a.run);
   const bay = X.bayOf(a.slot);
-  const changed = await db.runTransaction(async (tx) => {
+  const res = await db.runTransaction(async (tx) => {
     const [ai, rs] = await Promise.all([tx.get(aiRef), tx.get(runRef)]);
-    if (!ai.exists || !rs.exists) return false;
+    if (!ai.exists || !rs.exists) return 'skip';
     const d = ai.data(), run = rs.data();
     const iss = Array.isArray(d.iss) ? d.iss : [];
-    if (a.ik !== 'all' && +a.ik >= iss.length) return false;
+    if (a.ik !== 'all' && +a.ik >= iss.length) return 'skip';
     const ovr = Object.assign({}, d.ovr);
-    if (ovr[a.ik] === 'acc') return false; // כבר טופל
-    if (!(a.ik in ovr) && Object.keys(ovr).length >= 31) return false;
+    // ovr כבר נכתב (ריצה קודמת שנכשלה אחרי הטרנזקציה): לא כותבים שוב, וממשיכים להשלמה (afterAppeal) – תיקון סבב 1
+    if (ovr[a.ik] === 'acc') return 'ok';
+    if (!(a.ik in ovr) && Object.keys(ovr).length >= 31) return 'skip';
     const reads = [C.RE.br.test(run.br || '') ? tx.get(db.doc('s3set/' + run.br)) : null];
     const noteOn = a.note === true && C.RE.map.test(run.map || '');
     if (noteOn) reads.push(tx.get(db.doc(`smap/${run.map}/bay/${bay}`)));
@@ -118,16 +126,20 @@ async function applyAppeal(ctx, aid, a) {
         if (bd.exists) tx.update(bd.ref, { notes: nn }); else tx.set(bd.ref, { notes: nn, upd: a.decAt, by: a.decBy });
       } else if (t && !dup && notes.length >= 20) logger.warn('store3d: appeal note skipped – 20 notes', { bay });
     }
-    return true;
+    return 'ok';
   });
-  if (!changed) return false;
-  await afterAppeal(ctx, a, bay);
-  return true;
+  // השלמה (סיכום, s3sum, חוסרים, משימת התיקון). כשל = שגיאה, והערעור לא מסומן כמטופל – הריצה הבאה תשלים
+  if (res === 'ok') await afterAppeal(ctx, a, bay);
+  // סימון "טופל" (sv) – רק אחרי שהכל הושלם (או שהערעור לא רלוונטי: אין תוצאה / אינדקס לא קיים)
+  await db.doc('s3appeal/' + aid).update({ sv: ctx.now });
+  return res === 'ok';
 }
 // אחרי ערעור שהתקבל: סיכום הסבב, s3sum של המקטע (אם הוא עדיין מהסבב הזה), ומשימת התיקון של המקום
+// כל השלבים בטוחים להרצה חוזרת. שגיאה נזרקת הלאה (תיקון סבב 1) – לא נבלעת.
 async function afterAppeal(ctx, a, bay) {
   const db = ctx.db, now = ctx.now;
-  try {
+  if (ctx.inject) await ctx.inject('afterAppeal', a); // לבדיקות בלבד: הדמיית כשל באמצע
+  {
     const run = (await db.doc('srun/' + a.run).get()).data() || {};
     if (DONE.includes(run.st)) await finishRun(db, a.run, now, ctx);
     if (C.RE.map.test(run.map || '')) {
@@ -151,18 +163,16 @@ async function afterAppeal(ctx, a, bay) {
       if (!left.length) tx.update(fref, { st: 'cancel', cBy: a.decBy, cAt: Number.isInteger(a.decAt) ? a.decAt : now });
       else if (left.length !== (f.get('iks') || []).length) tx.update(fref, { iks: left });
     });
-  } catch (e) {
-    logger.error('store3d: after appeal failed', { run: a.run, code: e && e.code });
   }
 }
-// ctx = { db, now, send }. ערעורים שהוכרעו ביומיים האחרונים (שאילתה על שדה אחד); מה שכבר טופל – מדולג מהר
+// ctx = { db, now, send }. ערעורים שהוכרעו ב-7 הימים האחרונים (שאילתה על שדה אחד); מה שכבר סומן כמטופל (sv) – מדולג
 async function appealsBiz(ctx) {
-  const s = await ctx.db.collection('s3appeal').where('decAt', '>=', ctx.now - 2 * D1).limit(500).get();
+  const s = await ctx.db.collection('s3appeal').where('decAt', '>=', ctx.now - 7 * D1).limit(500).get();
   let n = 0;
   for (const d of s.docs) {
     const a = d.data();
-    if (a.st !== 'acc') continue;
-    try { if (await applyAppeal(ctx, d.id, a)) n++; } catch (e) { logger.error('store3d: appeal failed', { aid: d.id, code: e && e.code }); }
+    if (a.st !== 'acc' || Number.isInteger(a.sv)) continue;
+    try { if (await applyAppeal(ctx, d.id, a)) n++; } catch (e) { logger.error('store3d: appeal failed – will retry', { aid: d.id, code: e && e.code, msg: e && e.message }); }
   }
   return n;
 }
@@ -203,20 +213,24 @@ async function fixCore(db, who, input, now, deps) {
   try { A.checkSlot(input.slot, ms.data()); } catch (e) { throw bad('bad-slot', e.message); }
   await mapLib().branchOk(db, who.bizId, br, kind);
   if (!(await core().activeOf(db, [input.u])).has(input.u)) throw bad('staff-disabled', 'העובד שנבחר לא פעיל', 'failed-precondition');
+  // תיקון סבב 1: עובד ששויך לסניפים (staff.br) ואינו משויך לסניף של המפה – המשימה הולכת למנהל שפתח אותה
+  const st0 = await db.doc('staff/' + input.u).get();
+  const brs = st0.exists && Array.isArray(st0.get('br')) ? st0.get('br') : null;
+  const u = brs && !brs.includes(br) ? who.uid : input.u;
   const days = dd || dueOf(await setOf(db, br));
   const id = 'm_' + input.qid, ref = db.doc('s3fix/' + id);
   const res = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     if (s.exists) {
       const f = s.data();
-      if (f.u !== input.u || f.slot !== input.slot || f.map !== mapId) throw bad('bad-qid', 'מזהה השליחה כבר שימש למשימה אחרת');
-      return { ok: true, fixTaskId: id, st: f.st, dueAt: f.dueAt, dup: true };
+      if (f.u !== u || f.slot !== input.slot || f.map !== mapId) throw bad('bad-qid', 'מזהה השליחה כבר שימש למשימה אחרת');
+      return { ok: true, fixTaskId: id, st: f.st, dueAt: f.dueAt, u, toMgr: u !== input.u, dup: true };
     }
-    const doc = { slot: input.slot, map: mapId, br, iks: [], man, by: who.uid, u: input.u, st: 'open', at: now, dueAt: now + days * D1 };
+    const doc = { slot: input.slot, map: mapId, br, iks: [], man, by: who.uid, u, st: 'open', at: now, dueAt: now + days * D1 };
     tx.create(ref, doc);
-    return { ok: true, fixTaskId: id, st: 'open', dueAt: doc.dueAt };
+    return { ok: true, fixTaskId: id, st: 'open', dueAt: doc.dueAt, u, toMgr: u !== input.u };
   });
-  if (!res.dup) await core().notify({ db, send }, id + '_fix', 'fix', [input.u], now);
+  if (!res.dup) await core().notify({ db, send }, id + '_fix', 'fix', [u], now);
   return res;
 }
 exports.s3Fix = onCall(T.scoped(async (request) => {
@@ -287,7 +301,10 @@ async function stepBin(c, maps, log) {
     try {
       const vs = await c.db.collection(`smap/${m.id}/ver`).select().get();
       const del = M.prune(vs.docs.map((d) => d.id), M.KEEP_VERS);
-      if (del.length) { const b = c.db.batch(); for (const id of del) b.delete(c.db.doc(`smap/${m.id}/ver/${id}`)); await b.commit(); }
+      if (del.length) {
+        const b = c.db.batch(); for (const id of del) b.delete(c.db.doc(`smap/${m.id}/ver/${id}`)); await b.commit();
+        log.push(`smap/${m.id}/ver: ${del.join(',')} (מעבר ל-${M.KEEP_VERS} גרסאות)`); // תיקון סבב 1: גם מחיקת גרסאות נרשמת
+      }
     } catch (e) { logger.warn('s3Clean: prune failed', { code: e && e.code }); }
   }
   const rules = await c.db.collection('sround').where('del', '==', 1).get();
@@ -305,7 +322,13 @@ async function stepPhotos(c, brs, log) {
   const thumbsGone = new Map(); // mapId → Set(נתיבי מוקטנות שנמחקו)
   for (const br of brs) {
     const files = await listFiles(c.bucket, `b/${c.bizId}/store3d/${br}/run/`);
-    const plan = X.keepPlan(files, c.now);
+    // תיקון סבב 1: המפה של כל סבב (חנות ומחסן משתפים את תיקיית run/ של הסניף). סבב בלי מסמך – הקבצים שלו לא נמחקים
+    const runMap = {};
+    for (const id of new Set(files.map((f) => (X.parseRunFile(f.name) || {}).runId).filter((x) => C.isRunId(x)))) {
+      const r = await runOf(id);
+      if (r && C.RE.map.test(r.map || '') && r.br === br) runMap[id] = r.map;
+    }
+    const plan = X.keepPlan(files, c.now, X.KEEP_RUNS, runMap);
     const dropped = new Set();
     for (const d of plan.drop) {
       if (!C.isRunId(d.runId)) continue;
@@ -316,10 +339,12 @@ async function stepPhotos(c, brs, log) {
         // קודם המסמך (gone, בלי נתיב), ואחר כך הקבצים – אף פעם לא נשאר נתיב לקובץ שנמחק
         try { await pref.update({ gone: true, p: FieldValue.delete(), th: FieldValue.delete() }, { lastUpdateTime: ph.updateTime }); } catch (e) { if (e && e.code === 9) continue; throw e; }
       }
-      for (const f of d.names) if (await delFile(c.bucket, f)) { n++; dropped.add(f); }
+      let k = 0;
+      for (const f of d.names) if (await delFile(c.bucket, f)) { n++; k++; dropped.add(f); }
       const run = await runOf(d.runId);
-      if (run && C.RE.map.test(run.map || '')) { if (!thumbsGone.has(run.map)) thumbsGone.set(run.map, new Set()); for (const f of d.names) thumbsGone.get(run.map).add(f); }
-      log.push(`run ${d.runId} ${d.slot}: ${d.names.length} קבצים (ישן מ-3 הסבבים האחרונים)`);
+      if (run && C.RE.map.test(run.map || '')) { if (!thumbsGone.has(run.map)) thumbsGone.set(run.map, new Set()); for (const f of d.names) if (dropped.has(f)) thumbsGone.get(run.map).add(f); }
+      // תיקון סבב 1: שורת יומן רק על מה שנמחק בפועל
+      if (k) log.push(`run ${d.runId} ${d.slot}: ${k} קבצים (ישן מ-3 הסבבים האחרונים)` + (k < d.names.length ? ` – ${d.names.length - k} נכשלו` : ''));
     }
     // קבצים תועים בסבבים שנשמרו: יותר מזוג אחד (תמונה + מוקטנת) לאותו מקום באותו סבב, או קובץ בודד
     const groups = new Map();
@@ -361,10 +386,15 @@ async function stepTex(c, brs, log) {
     for (const f of files) { const m = /\/tex\/([sw]-[a-z0-9_]{2,20})\//.exec(f.name); if (m) { if (!byMap.has(m[1])) byMap.set(m[1], []); byMap.get(m[1]).push(f); } }
     for (const [mapId, L] of byMap) {
       if (!L.some((f) => Number.isFinite(f.t) && f.t <= c.now - X.TEX_DAYS * D1)) continue;
-      const [ms, vs] = await Promise.all([c.db.doc('smap/' + mapId).get(), c.db.collection(`smap/${mapId}/ver`).select('m.tx').get()]);
+      const [ms, vs] = await Promise.all([c.db.doc('smap/' + mapId).get(), c.db.collection(`smap/${mapId}/ver`).select('m.tx', 'at').get()]);
       const refs = new Set(X.txPaths(ms.exists ? ms.data() : null));
-      for (const v of vs.docs) for (const p of X.txPaths(v.get('m'))) refs.add(p);
-      for (const f of X.texOrphans(L, refs, c.now)) if (await delFile(c.bucket, f)) { n++; log.push('tex ' + f.split('/tex/')[1]); }
+      // תיקון סבב 1: "30 יום" מהרגע שהטקסטורה הפסיקה להיות בשימוש = זמן הגרסה האחרונה שבה הופיעה (ver.at – מתי הגרסה הוחלפה)
+      const lastUse = new Map();
+      for (const v of vs.docs) {
+        const at = Number.isInteger(v.get('at')) ? v.get('at') : c.now; // בלי זמן – כאילו בשימוש עכשיו (לא נמחק)
+        for (const p of X.txPaths(v.get('m'))) lastUse.set(p, Math.max(lastUse.get(p) || 0, at));
+      }
+      for (const f of X.texOrphans(L, refs, lastUse, c.now)) if (await delFile(c.bucket, f)) { n++; log.push('tex ' + f.split('/tex/')[1]); }
     }
   }
   return n;
@@ -373,8 +403,10 @@ async function stepTex(c, brs, log) {
 async function stepTemp(c, log) {
   let n = 0;
   const dr = await c.db.collection('s3draft').where('at', '<=', c.now - 30 * D1).limit(200).get();
-  for (const d of dr.docs) { await d.ref.delete(); n++; }
-  if (dr.size) log.push(`s3draft: ${dr.size}`);
+  let k = 0;
+  for (const d of dr.docs) { try { await d.ref.delete(); k++; } catch (e) { logger.warn('s3Clean: draft delete failed', { code: e && e.code }); } }
+  n += k;
+  if (k) log.push(`s3draft: ${k}`);
   const q = await c.db.collection('s3qid').where('exp', '<=', c.now).limit(500).get();
   if (q.size) { const b = c.db.batch(); q.docs.forEach((d) => b.delete(d.ref)); await b.commit(); n += q.size; log.push(`s3qid: ${q.size}`); }
   return n;
@@ -396,8 +428,12 @@ async function cleanBiz(o) {
   await step('temp', () => stepTemp(c, log));
   if (log.length) {
     logger.info('s3Clean: deleted', { biz: c.bizId, log });
+    // תיקון סבב 1: בלי חיתוך – רשימה ארוכה מתפצלת לכמה רשומות (כל אחת עד 1500 תווים, part = מספר הרשומה)
+    const parts = X.splitNote(log, 1500);
     try {
-      await getFirestore().collection(`b/${c.bizId}/audit`).doc().set({ by: 'system', t: c.now, act: 's3Clean', note: log.join(' | ').slice(0, 1500) });
+      const b = getFirestore().batch();
+      parts.forEach((note, i) => b.set(getFirestore().collection(`b/${c.bizId}/audit`).doc(), { by: 'system', t: c.now, act: 's3Clean', note, part: i + 1, parts: parts.length }));
+      await b.commit();
     } catch (e) { logger.error('s3Clean: audit failed', { biz: c.bizId, code: e && e.code }); }
   }
   return out;

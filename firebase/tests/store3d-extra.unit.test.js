@@ -117,10 +117,32 @@ describe('store3d-extra: ניקוי – 3 סבבים אחרונים, סל מחז
     for (let i = 1; i <= 5; i++) { files.push(F(`r8k2m4q1_2026110${i}`, 'f1-a-1_a', 1, NOW - (10 - i) * D1), F(`r8k2m4q1_2026110${i}`, 'f1-a-1_a', 1, NOW - (10 - i) * D1, 1)); }
     files.push(F('r8k2m4q1_20261101', 'f2-a-1_a', 1, NOW - 9 * D1), F('r8k2m4q1_20261101', 'f2-a-1_a', 1, NOW - 9 * D1, 1));
     files.push({ name: P + 'r8k2m4q1_20261101/readme.txt', t: 0 });
-    const plan = X.keepPlan(files, NOW);
+    const RM = {}; for (let i = 1; i <= 5; i++) RM[`r8k2m4q1_2026110${i}`] = 's-main';
+    const plan = X.keepPlan(files, NOW, 3, RM);
     assert.deepEqual(plan.drop.map((d) => [d.runId, d.slot, d.names.length]), [['r8k2m4q1_20261102', 'f1-a-1_a', 2], ['r8k2m4q1_20261101', 'f1-a-1_a', 2]]);
     const young = [1, 2, 3, 4].map((i) => F(`r8k2m4q1_2026110${i}`, 'f1-a-1_a', 1, NOW - i * 3600000));
-    assert.deepEqual(X.keepPlan(young, NOW).drop, [], 'כל הקבצים מהיממה האחרונה');
+    assert.deepEqual(X.keepPlan(young, NOW, 3, RM).drop, [], 'כל הקבצים מהיממה האחרונה');
+    assert.deepEqual(X.keepPlan(files, NOW, 3, {}).drop, [], 'סבב בלי מפה ידועה – לא נמחק');
+  });
+  it('תיקון סבב 1: חנות ומחסן של אותו סניף עם אותו מקום צילום – כל אחד שומר 3 סבבים משלו', () => {
+    const files = [], RM = {};
+    // 3 סבבי חנות ישנים, ואחריהם 3 סבבי מחסן חדשים יותר – כולם f1-a-1_a בתיקיית run/ המשותפת
+    for (let i = 1; i <= 6; i++) {
+      const id = `r8k2m4q1_2026110${i}`;
+      RM[id] = i <= 3 ? 's-main' : 'w-main';
+      files.push(F(id, 'f1-a-1_a', 1, NOW - (10 - i) * D1), F(id, 'f1-a-1_a', 1, NOW - (10 - i) * D1, 1));
+    }
+    assert.deepEqual(X.keepPlan(files, NOW, 3, RM).drop, [], 'אף סבב לא נמחק');
+    files.push(F('r8k2m4q1_20261107', 'f1-a-1_a', 1, NOW - 2 * D1), F('r8k2m4q1_20261107', 'f1-a-1_a', 1, NOW - 2 * D1, 1));
+    RM.r8k2m4q1_20261107 = 's-main';
+    assert.deepEqual(X.keepPlan(files, NOW, 3, RM).drop.map((d) => d.runId), ['r8k2m4q1_20261101'], 'סבב רביעי בחנות – רק הישן של החנות');
+  });
+  it('החלטת מתאם: דיווחים יזומים בשמירה נפרדת – לא דוחקים החוצה תמונות של סבבים', () => {
+    const files = [], RM = {};
+    for (let i = 1; i <= 3; i++) { const id = `r8k2m4q1_2026110${i}`; RM[id] = 's-main'; files.push(F(id, 'f1-a-1_a', 1, NOW - (20 - i) * D1)); }
+    const ads = [1, 2, 3, 4, 5].map((i) => `ad_q${i}xxxxxxxxxxxxxxxxx`);
+    ads.forEach((id, i) => { RM[id] = 's-main'; files.push(F(id, 'f1-a-1_a', 1, NOW - (10 - i) * D1)); });
+    assert.deepEqual(X.keepPlan(files, NOW, 3, RM).drop.map((d) => d.runId), [ads[1], ads[0]], '3 הסבבים נשארו; מהיזומים – 3 האחרונים');
   });
   it('קבצים תועים: לא ph.p ולא ph.th, ישנים מיום', () => {
     const L = [F('r8k2m4q1_20261101', 'f1-a-1_a', 1, NOW - 2 * D1), F('r8k2m4q1_20261101', 'f1-a-1_a', 2, NOW - 2 * D1), F('r8k2m4q1_20261101', 'f1-a-1_a', 2, NOW - 2 * D1, 1), F('r8k2m4q1_20261101', 'f1-a-1_a', 3, NOW)];
@@ -143,6 +165,21 @@ describe('store3d-extra: ניקוי – 3 סבבים אחרונים, סל מחז
     const T = 'b/biz-x/store3d/main/tex/s-main/';
     const files = [{ name: T + 't1_1.jpg', t: NOW - 90 * D1 }, { name: T + 't2_1.jpg', t: NOW - 90 * D1 }, { name: T + 't3_1.jpg', t: NOW - 90 * D1 }, { name: T + 't4_1.jpg', t: NOW - 5 * D1 }, { name: T + 'x.png', t: 0 }];
     const refs = new Set(X.txPaths({ tx: [{ id: 't1', path: T + 't1_1.jpg', del: 1 }] }).concat(X.txPaths({ tx: [{ id: 't2', path: T + 't2_1.jpg' }] })));
-    assert.deepEqual(X.texOrphans(files, refs, NOW), [T + 't3_1.jpg']);
+    assert.deepEqual(X.texOrphans(files, refs, new Map(), NOW), [T + 't3_1.jpg'], 't1, t2 מופנות');
+    assert.deepEqual(X.texOrphans(files, new Set([T + 't1_1.jpg']), new Map(), NOW), [T + 't2_1.jpg', T + 't3_1.jpg'], 'בלי גרסה – לפי זמן היצירה');
+    const lu = new Map([[T + 't2_1.jpg', NOW - 10 * D1]]);
+    assert.deepEqual(X.texOrphans(files, new Set([T + 't1_1.jpg']), lu, NOW), [T + 't3_1.jpg'], 't2 הופיעה בגרסה שהוחלפה לפני 10 ימים – נשארת');
+    lu.set(T + 't2_1.jpg', NOW - 31 * D1);
+    assert.deepEqual(X.texOrphans(files, new Set([T + 't1_1.jpg']), lu, NOW), [T + 't2_1.jpg', T + 't3_1.jpg']);
+  });
+  it('תיקון סבב 1: טקסטורה שחדר שנשאר מפנה אליה לא נמחקת מסל המחזור; split של audit בלי חיתוך', () => {
+    const old = { del: 1, delAt: NOW - 40 * D1, delBy: 'u_mgr001' };
+    const map = { rooms: [{ id: 'r1', tex: { w: 't1' } }, Object.assign({ id: 'r2', tex: { f: 't2' } }, old, { delAt: NOW - 5 * D1 }), Object.assign({ id: 'r3', tex: { c: 't3' } }, old)],
+      tx: ['t1', 't2', 't3', 't4'].map((id) => Object.assign({ id, path: id }, old)) };
+    const r = X.binPurge(map, NOW);
+    assert.deepEqual(r.purged, { rooms: ['r3'], tx: ['t3', 't4'] }, 't1 מחדר חי, t2 מחדר בסל שעוד לא נמחק – נשארות');
+    const parts = X.splitNote(['a'.repeat(60), 'b'.repeat(60), 'c'.repeat(130)], 100);
+    assert.deepEqual(parts.map((x) => x.length), [60, 60, 100, 30]);
+    assert.equal(parts.join('').replace(/ \| /g, '').length, 250, 'שום תו לא נחתך');
   });
 });
