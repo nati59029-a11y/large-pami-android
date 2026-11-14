@@ -902,6 +902,11 @@ service cloud.firestore {
       allow read: if rMgr();
       allow create, update, delete: if false;
     }
+    // 14.11.2026 (שלב 3 חלק ב'): פרטי העסק למסמכים (arcfg/main) – עובד עם הזמנות ומנהל קוראים. מונים (seq_*), מזהי בקשה (req_*) ולוגו – אף אחד. כתיבה – רק השרת (ar.js)
+    match /arcfg/{docId} {
+      allow get: if rOrd() && docId == 'main';
+      allow list, create, update, delete: if false;
+    }
     // fb/ord-card: יומן צפייה/העתקה של פרטי כרטיס – מנהל קורא
     match /cardLog/{id} {
       allow read: if rMgr();
@@ -1663,6 +1668,11 @@ service cloud.firestore {
       match /aralert/{id} {
         allow read: if feat('orders') && bMgr();
         allow create, update, delete: if false;
+      }
+      // 14.11.2026 (שלב 3 חלק ב'): פרטי העסק למסמכים (arcfg/main) – עובד עם הזמנות ומנהל קוראים. מונים, מזהי בקשה ולוגו – אף אחד. כתיבה – רק השרת (ar.js)
+      match /arcfg/{docId} {
+        allow get: if ordOk() && docId == 'main';
+        allow list, create, update, delete: if false;
       }
       // ניוד קווים (fb/ord-lines): תוכניות – קריאה לעובד ord רק כשמתג cellular פעיל; כתיבה – רק השרת (saveLinePlan).
       // lineLog – אין גישה מהאפליקציה בכלל (הבדיקה דרך checkLines בשרת). בנק/ת"ז בעל כרטיס – בתוך ord.cell, אותן הרשאות כמו ההזמנה (07:38)

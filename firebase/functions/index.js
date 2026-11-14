@@ -215,6 +215,8 @@ Object.assign(exports, require('./pricing'));
 
 // מסמכים ללקוח (14.11.2026, שלב 3 חלק א'): arFile – קישור עם אסימון לקובץ PDF (onRequest, us-central1 בלבד). ar-file.js
 Object.assign(exports, require('./ar-file'));
+// אישור הזמנה (14.11.2026, שלב 3 חלק ב'): arOc (מספור רץ נפרד + קובץ + שליחה אוטומטית לפי סימון הלקוח), arPdf, arSend, setArCfg. ar.js
+Object.assign(exports, require('./ar'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
