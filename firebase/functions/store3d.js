@@ -167,7 +167,8 @@ async function openRun(ctx, ruleRef, rid, p, runId, k, next, ut) {
 // התראות אחרי הכנת כלל ופתיחה
 async function afterOpen(ctx, rid, p, opened) {
   const mg = await managers(ctx);
-  for (const u of p.dep.moved) await notify(ctx, u + '_' + rid + '_left', 'left', mg.concat([p.cfg.subU]), ctx.now);
+  // left – רק כשבאמת נפתח סבב שבו המחליף נכנס (לא במועד שדולג / לא נפתח) – תיקון סבב 2
+  if (opened && opened.runId) for (const u of p.dep.moved) await notify(ctx, u + '_' + rid + '_left', 'left', mg.concat([p.cfg.subU]), ctx.now);
   for (const u of p.dep.stuck) await notify(ctx, u + '_' + rid + '_err', 'err', mg, ctx.now);
   if (opened && opened.runId) await notify(ctx, opened.runId + '_new', 'new', opened.doc.uids.filter((u) => p.active.has(u)), ctx.now);
 }
@@ -325,6 +326,9 @@ exports.s3Move = onCall(T.scoped(async (request) => {
       if (!from) throw bad('not-in-run', CORE_TXT['not-in-run'][1], 'failed-precondition');
     }
     if (take) {
+      // תיקון סבב 2: אותו תנאי כמו ברשימת take של s3View – עובד עם שיוך לסניפים לוקח רק מסבב של סניף שלו
+      const myBr = myBranches(who);
+      if (myBr && !myBr.includes(run.br)) throw bad('other-branch', 'הסבב שייך לסניף אחר', 'permission-denied');
       const [rule, set] = await Promise.all([
         C.RE.rid.test(run.rid || '') ? tx.get(db.doc('sround/' + run.rid)) : null,
         C.RE.br.test(run.br || '') ? tx.get(db.doc('s3set/' + run.br)) : null,
@@ -335,7 +339,8 @@ exports.s3Move = onCall(T.scoped(async (request) => {
     let patch;
     try { patch = C.moveRun(run, from, to); } catch (e) { throw coreErr(e); }
     tx.update(ref, patch);
-    return { ok: true, uids: patch.uids };
+    // תיקון סבב 2: רק מנהל מקבל את uids (מזהי עובדים); עובד שלוקח – רק ok
+    return who.role === 'manager' ? { ok: true, uids: patch.uids } : { ok: true };
   });
   const ctx = { db, now, mgrs: null, sets: {} };
   await notify(ctx, input.runId + '_move_' + from, 'move', [to].concat(await managers(ctx)), now);
@@ -402,8 +407,7 @@ exports.s3View = onCall(T.scoped(async (request) => {
     // מה אפשר לקחת: סבבים שאני לא בהם, שהכלל שלהם (או ההגדרות של הסניף) מתיר "כל עובד יכול לקחת"
     const take = [];
     const ctx = { db, sets: {} }, rules = {};
-    const brs = who.staff && who.staff.exists ? who.staff.get('br') : null;
-    const myBr = Array.isArray(brs) ? brs.filter((b) => typeof b === 'string') : null;
+    const myBr = myBranches(who);
     for (const d of live.docs) {
       const r = d.data();
       if (Array.isArray(r.uids) && r.uids.includes(uid)) continue;
@@ -434,6 +438,12 @@ exports.s3View = onCall(T.scoped(async (request) => {
   const show = set && set.exists ? set.get('show') : null;
   return { run: C.viewRun(s.id, run, uid, show, ai.docs.map((d) => [d.id, d.data()])) };
 }));
+// הסניפים של עובד (staff.br). בלי שיוך / מנהל – null = כל הסניפים של העסק
+function myBranches(who) {
+  if (!who || who.role === 'manager') return null;
+  const brs = who.staff && who.staff.exists ? who.staff.get('br') : null;
+  return Array.isArray(brs) ? brs.filter((b) => typeof b === 'string') : null;
+}
 function pickFix(f) {
   const o = {};
   for (const k of ['run', 'slot', 'map', 'br', 'iks', 'man', 'st', 'at', 'dueAt']) if (f[k] !== undefined) o[k] = f[k];

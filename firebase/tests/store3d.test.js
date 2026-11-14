@@ -194,8 +194,11 @@ describe('s3Rounds – פתיחת סבבים, תזכורות ואיחור (לי�
     const rs = await db.doc('sround/' + RID).get();
     const m = await R.openRun(ctx, rs.ref, RID, await R.prepRule(ctx, rs.data()), RID + '_m' + ctx.now, 'manual', 0, rs.updateTime);
     assert.ok(m.runId, JSON.stringify(m));
+    await adm.doc(`b/${A}/staff/${E1}`).update({ active: false }); // הושבת אחרי הסבב הידני; יש מחליף קבוע
+    await adm.doc(`b/${A}/s3set/main`).set({ sub: 'fixed', subU: SUB });
     const out = await run(at(2026, 11, 14, 6, 5));
     assert.equal(out[A].skipped, 1, JSON.stringify(out));
+    assert.equal(await get(`b/${A}/s3ntf/${E1}_${RID}_left`), null, 'מועד שדולג – בלי התראת left');
     assert.deepEqual(await runs(), [m.runId]);
     const rule = await get(`b/${A}/sround/${RID}`);
     assert.deepEqual([rule.lastRun, rule.last, rule.next], [m.runId, at(2026, 11, 14, 6), at(2026, 11, 21, 6)]);
@@ -340,6 +343,8 @@ describe('s3Run / s3Move / s3Log / s3View (אמולטור הפונקציות)', 
     await adm.doc(`b/${A}/s3set/main`).set({ sub: 'any' });
     const t = await call('s3Move', E1, { runId, from: E2, take: true });
     assert.equal(t.status, 'OK', t.text);
+    assert.deepEqual(t.result, { ok: true }, 'עובד שלוקח לא מקבל uids');
+    assert.ok(Array.isArray(m.result.uids), 'מנהל כן מקבל uids');
     d = await get(`b/${A}/srun/${runId}`);
     assert.deepEqual(d.uids, [SUB, E1]);
   });
@@ -372,8 +377,14 @@ describe('s3Run / s3Move / s3Log / s3View (אמולטור הפונקציות)', 
     assert.equal(tk.length, 1);
     assert.deepEqual(tk[0].parts.map((x) => [x.n, x.bays]), [[6, 6], [8, 6]]);
     assert.ok(!JSON.stringify(tk).includes(E1) && !JSON.stringify(tk).includes(E2), JSON.stringify(tk));
+    // עובד עם שיוך לסניף אחר – לא רואה ולא לוקח (אותו תנאי בשני המקומות)
+    await adm.doc(`b/${A}/staff/${SUB}`).update({ br: ['other'] });
+    assert.deepEqual((await call('s3View', SUB, {})).result.take, []);
+    assert.equal((await call('s3Move', SUB, { runId, fromH: tk[0].parts[0].h, take: true })).reason, 'other-branch');
+    await adm.doc(`b/${A}/staff/${SUB}`).update({ br: ['main'] });
     const g = await call('s3Move', SUB, { runId, fromH: tk[0].parts[0].h, take: true });
     assert.equal(g.status, 'OK', g.text);
+    assert.deepEqual(g.result, { ok: true });
     assert.deepEqual((await get(`b/${A}/srun/${runId}`)).uids, [E2, SUB]);
     assert.equal((await call('s3Move', SUB, { runId, fromH: '0123456789abcdef', take: true })).reason, 'not-in-run');
   });
