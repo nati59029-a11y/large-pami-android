@@ -843,7 +843,7 @@ service cloud.firestore {
         || br in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.br;
     }
     match /ordcfg/{docId} {
-      allow get: if rOrd() && docId in ['main', 'seq'];
+      allow get: if rOrd() && docId in ['main', 'seq', 'price'];
       allow list, create, update, delete: if false;
     }
     match /prod/{id} {
@@ -892,6 +892,15 @@ service cloud.firestore {
     match /custcfg/{docId} {
       allow get: if rOrd() && docId == 'main';
       allow list, create, update, delete: if false;
+    }
+    // 14.11.2026 (לקוח עסקי ומחירים, שלב 1): מחיר קבוע ללקוח – כולם עם הזמנות קוראים (26); התראות מחירון – מנהל. כתיבה – רק השרת (customers.js / orders.js)
+    match /cprice/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+    }
+    match /aralert/{id} {
+      allow read: if rMgr();
+      allow create, update, delete: if false;
     }
     // fb/ord-card: יומן צפייה/העתקה של פרטי כרטיס – מנהל קורא
     match /cardLog/{id} {
@@ -1595,7 +1604,7 @@ service cloud.firestore {
       function ordOk() { return feat('orders') && perm('ord'); }
       function brOk(br) { return bMgr() || myStaff().get('br', null) == null || br in myStaff().br; }
       match /ordcfg/{docId} {
-        allow get: if ordOk() && (docId in ['main', 'seq'] || (docId == 'cell' && feat('cellular')));
+        allow get: if ordOk() && (docId in ['main', 'seq', 'price'] || (docId == 'cell' && feat('cellular')));
         allow list, create, update, delete: if false;
       }
       match /prod/{id} {
@@ -1645,6 +1654,15 @@ service cloud.firestore {
       match /custcfg/{docId} {
         allow get: if ordOk() && docId == 'main';
         allow list, create, update, delete: if false;
+      }
+      // 14.11.2026 (שלב 1): מחיר קבוע ללקוח (cprice) – עובד עם ord ומנהל קוראים; התראות מחירון (aralert) – מנהל. כתיבה – רק השרת
+      match /cprice/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+      }
+      match /aralert/{id} {
+        allow read: if feat('orders') && bMgr();
+        allow create, update, delete: if false;
       }
       // ניוד קווים (fb/ord-lines): תוכניות – קריאה לעובד ord רק כשמתג cellular פעיל; כתיבה – רק השרת (saveLinePlan).
       // lineLog – אין גישה מהאפליקציה בכלל (הבדיקה דרך checkLines בשרת). בנק/ת"ז בעל כרטיס – בתוך ord.cell, אותן הרשאות כמו ההזמנה (07:38)

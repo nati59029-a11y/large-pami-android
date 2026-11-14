@@ -123,12 +123,13 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     // משימות פרטיות (ptk), כללי משימות קבועות (rtk) ובקשות למנהל (rq, ותגובות c – מקונן בתוך rq/{id}) – 12.11.2026
     // ייבוא ברקע (impJobs – 2026-11-11, מסמך העבודה; החלקים המוצפנים ב-impQ בלי כלל = סגורים)
     // תמחור חשבונית ספק (pinv, וחלקי התמונה p – מקונן בתוך pinv/{id}) – 12.11.2026
+    // מחיר קבוע ללקוח (cprice) והתראות מחירון (aralert) – 14.11.2026
     // ריבוי עסקים (2026-11-05): אוספי השורש נבדקים רק עד הבלוק match /b/{bizId}, שמכיל העתק שלהם בתוך העסק
     const rootPart = t.slice(0, t.indexOf('match /b/{bizId} {'));
     const rootMatches = [...rootPart.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
     const colls = rootMatches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
     assert.ok(/match \/b\/\{bizId\} \{/.test(t), 'בלוק העסקים חסר');
-    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'bk', 'c', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'm', 'mq', 'n', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'pinv', 'prod', 'ptk', 'rq', 'rtk', 'sec_cal', 'sec_cfg', 'sec_chat', 'sec_draft', 'sec_facts', 'sec_facts_sensitive', 'sec_in', 'sec_inv', 'sec_log', 'sec_mirror', 'sec_note', 'sec_rep', 'sec_rules', 'sec_usage', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
+    assert.deepEqual(colls.sort(), ['admins', 'app_backup_status', 'appreq', 'aralert', 'bk', 'c', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cprice', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'm', 'mq', 'n', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'pinv', 'prod', 'ptk', 'rq', 'rtk', 'sec_cal', 'sec_cfg', 'sec_chat', 'sec_draft', 'sec_facts', 'sec_facts_sensitive', 'sec_in', 'sec_inv', 'sec_log', 'sec_mirror', 'sec_note', 'sec_rep', 'sec_rules', 'sec_usage', 'shelf', 'staff', 'stockLog', 'superadmins', 'supinv', 'tasks', 'users', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/rq\/\{id\} \{[\s\S]*?match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך rq');
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/p\/\{pid\} \{/, 'p (תמונות משימה) חייב להיות מקונן בתוך tasks');
