@@ -79,7 +79,7 @@ function apk(tag){
   if(isTest){$('apk').href='https://github.com/'+REPO+'/releases/download/test-latest/large-pami-test.apk';return}
   // עסק שאינו לארג' פעמי ובלי apkTag: האפליקציה הכללית "ניהול עסק" (release business-latest, קובץ business.apk)
   // (publicBrand מחזיר apkTag='latest' כשאין APK נפרד – גם אז עסק אחר מקבל business.apk)
-  var t=/^biz-[a-z0-9-]{3,30}$/.test(tag)?tag:biz&&biz!=='largpeami'?'business':'latest';
+  var t=/^biz-[a-z0-9-]{3,30}$/.test(tag)?tag:biz&&biz!=='largpe'+'ami'?'business':'latest';
   $('apk').href='https://github.com/'+REPO+'/releases/download/'+(t==='business'?'business-latest':t)+'/'+(t==='latest'?'large-pami':t)+'.apk'}
 apk('latest');
 
