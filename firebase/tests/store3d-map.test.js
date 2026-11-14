@@ -125,6 +125,15 @@ describe('store3d-map – הליבה מול האמולטור (Firestore + Storag
     assert.equal((await C.saveMap(db, mgr, { mapId: 's-br2', baseV: 0, map: MAP({ br: 'br2' }) }, 1800000000000)).v, 1);
   });
 
+  it('תיקון סבב 1 – seq: עובד עם s3m שולח seq:9999 ו-f9999 → נשמר כ-f3 (renamed); אחריו מנהל מוסיף גוף בהצלחה', async () => {
+    await C.saveMap(db, mgr, { mapId: 's-main', baseV: 0, map: MAP() }, 1800000000000);
+    const a = await C.saveMap(db, drw, { mapId: 's-main', baseV: 1, map: MAP({ seq: 9999, fx: [fx('f1'), fx('f2', { x: 600 }), fx('f9999', { x: 800 })] }) }, 1800000001000);
+    assert.deepEqual([a.v, a.seq, a.renamed], [2, 3, { f9999: 'f3' }]);
+    const b = await C.saveMap(db, mgr, { mapId: 's-main', baseV: 2, map: MAP({ fx: [fx('f1'), fx('f2', { x: 600 }), fx('f3', { x: 800 }), fx('f4', { x: 900 })] }) }, 1800000002000);
+    assert.deepEqual([b.v, b.seq, b.renamed], [3, 4, {}]);
+    assert.deepEqual((await get(`b/${A}/smap/s-main`)).fx.map((f) => f.id), ['f1', 'f2', 'f3', 'f4']);
+  });
+
   it('setBranch: כותב s3br ו-audit; סניף לא קיים / קלט לא תקין – נדחים', async () => {
     const r = await C.setBranch(db, { uid: SUPER, bizId: A }, { brId: 'main', wh: true, cap: 900, on: true }, 1800000000000);
     assert.deepEqual(r, { ok: true, brId: 'main', wh: true, cap: 900, on: true, upd: 1800000000000 });
@@ -154,6 +163,14 @@ describe('store3d-map – הליבה מול האמולטור (Firestore + Storag
     assert.equal(await err(C.putTex(db, drw, { qid: qid(), mapId: 's-main', img: jpeg(300, 300).toString('base64') }, 1, bucket)), 'bad-size');
     assert.equal(await err(C.putTex(db, drw, { qid: qid(), mapId: 's-zz', img: IMG }, 1, bucket)), 'no-branch');
     assert.equal(await err(C.putTex(db, drw, { qid: 'short', mapId: 's-main', img: IMG }, 1, bucket)), 'bad-qid');
+    // תיקון סבב 1: תלת מימד כבוי בסניף – נחסם; תקרה יומית למפה
+    await adm.doc(`b/${A}/s3br/main`).set({ wh: false, cap: 500, on: false, upd: 1, by: SUPER });
+    assert.equal(await err(C.putTex(db, drw, { qid: qid(), mapId: 's-main', img: IMG }, Date.now(), bucket)), 'br-off');
+    assert.equal(await err(C.putTex(db, drw, { qid: qid(), mapId: 'w-main', img: IMG }, Date.now(), bucket)), 'br-off');
+    await adm.doc(`b/${A}/s3br/main`).delete();
+    assert.equal(await err(C.putTex(db, drw, { qid: qid(), mapId: 'w-main', img: IMG }, Date.now(), bucket)), 'no-wh');
+    assert.equal(await err(C.putTex(db, drw, { qid: qid(), mapId: 's-main', img: IMG }, Date.now(), bucket, { maxDay: 2 })), 'tex-day', 'כבר 2 קבצים ב-24 השעות האחרונות');
+    assert.equal((await C.putTex(db, drw, { qid: qid(), mapId: 's-main', img: IMG }, Date.now(), bucket, { maxDay: 3 })).texId, 't3');
     // הטקסטורה נכנסת למפה בשמירה הבאה
     const v = (await C.saveMap(db, drw, { mapId: 's-main', baseV: 0, map: MAP({ tx: [{ id: r.texId, path: r.path, w: 512, h: 512 }] }) }, 1800000003000)).v;
     assert.equal(v, 1);

@@ -4,10 +4,13 @@
 //     נעילה: baseV חייב להיות שווה ל-v הנוכחי (מפה חדשה = 0), אחרת "המפה השתנתה בטלפון אחר. טענו מחדש."
 //     בטרנזקציה אחת: הגרסה הקודמת נשמרת ב-smap/{mapId}/ver/{v קודם, 6 ספרות}, והמפה החדשה נכתבת עם v+1, upd, by (השרת קובע).
 //     בדיקת תקינות לפי חוזה 4.3, עד 800KB. אחרי השמירה – נשארות 30 גרסאות אחרונות. שחזור גרסה = שמירה חדשה (why: 'שחזור').
+//     תיקון סבב 1: seq – רק של השרת; גוף חדש עם מזהה מחוץ לטווח מקבל מזהה חדש (renamed); מגבלות על פריטים חיים, ולסל המחזור
+//     תקרה נפרדת – מעבר לה המחוקים הישנים מוסרים סופית (purged).
 //   s3SetBranch { brId, wh, cap, on } – מנהל־על בלבד. כותב s3br/{brId} ורשומת audit ב-b/{bizId}/audit (כמו setBusinessOrg).
 //   s3PutTex { qid, mapId, img } – מנהל או s3m. תמונת טקסטורה (JPEG, כל צלע 256/512/1024, עד 600,000 בתים) נשמרת ב-Storage תחת
 //     b/{bizId}/store3d/{brId}/tex/{mapId}/{texId}_1.jpg ומחזירה { texId, path, w, h }. בלי AI ובלי מכסה. qid – ניסיון חוזר מחזיר
 //     את אותה תשובה (s3qid). הטקסטורה נכנסת למפה רק בשמירה הבאה (tx[] ב-s3SaveMap).
+//     תיקון סבב 1: נחסם כשהתלת מימד כבוי בסניף (br-off) או מחסן בלי wh; עד 200 העלאות ב-24 שעות לכל מפה (tex-day, הנחה).
 // כולן: requireStaff עם feature 'store3d', inputObject, T.scoped, שגיאות בעברית.
 
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -45,28 +48,35 @@ function mapIdOf(input) {
   return input.mapId;
 }
 
+// הסניף קיים בעסק, התלת מימד פעיל בו, ומחסן (w-) רק כש-wh (משותף ל-s3SaveMap ול-s3PutTex)
+async function branchOk(db, bizId, br, kind) {
+  const [ids, brDoc] = await Promise.all([branchesOf(bizId), db.doc('s3br/' + br).get()]);
+  if (!ids.includes(br)) throw bad('no-branch', 'הסניף לא קיים בעסק', 'failed-precondition');
+  const cfg = M.brCfg(brDoc.exists ? brDoc.data() : null);
+  if (!cfg.on) throw bad('br-off', 'התלת מימד כבוי בסניף הזה. מנהל המערכת יכול להפעיל אותו בהגדרות הסניף.', 'failed-precondition');
+  if (kind === 'w' && !cfg.wh) throw bad('no-wh', 'לסניף הזה אין מחסן. מנהל המערכת יכול להפעיל מחסן בהגדרות הסניף.', 'failed-precondition');
+  return cfg;
+}
+
 // ---------------- s3SaveMap ----------------
 // הליבה, לבדיקות מול אמולטור Firestore בלי אמולטור הפונקציות. who = { uid, mgr, bizId }; db = T.tdb() של העסק.
 async function saveMap(db, who, input, now) {
   const mapId = mapIdOf(input), br = mapId.slice(2), kind = mapId.charAt(0);
   let clean;
   try { clean = M.cleanMap(input.map, { bizId: who.bizId, mapId }); } catch (e) { throw toHttps(e); }
-  const [ids, brDoc] = await Promise.all([branchesOf(who.bizId), db.doc('s3br/' + br).get()]);
-  if (!ids.includes(br)) throw bad('no-branch', 'הסניף לא קיים בעסק', 'failed-precondition');
-  const cfg = M.brCfg(brDoc.exists ? brDoc.data() : null);
-  if (!cfg.on) throw bad('br-off', 'התלת מימד כבוי בסניף הזה. מנהל המערכת יכול להפעיל אותו בהגדרות הסניף.', 'failed-precondition');
-  if (kind === 'w' && !cfg.wh) throw bad('no-wh', 'לסניף הזה אין מחסן. מנהל המערכת יכול להפעיל מחסן בהגדרות הסניף.', 'failed-precondition');
+  await branchOk(db, who.bizId, br, kind);
   const ref = db.doc('smap/' + mapId);
   const res = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     const old = s.exists ? s.data() : null;
     try {
       const v = M.checkLock(old, input.baseV);
-      const doc = Object.assign(M.finalCheck(M.mergeDel(old, clean.map, { mgr: who.mgr, uid: who.uid, now }), old), { v, upd: now, by: who.uid });
+      const fin = M.finalCheck(M.mergeDel(old, clean.map, { mgr: who.mgr, uid: who.uid, now }), old);
+      const doc = Object.assign(fin.map, { v, upd: now, by: who.uid });
       if (M.bytesOf(doc) > M.MAX_BYTES) throw M.fail('too-big', 'המפה גדולה מדי (עד 800KB). מחקו פריטים שלא צריך או חלקו לשתי מפות.');
       if (old) tx.set(db.doc('smap/' + mapId + '/ver/' + M.verId(old.v)), M.verDoc(old, { uid: who.uid, now }, input.why));
       tx.set(ref, doc);
-      return { ok: true, mapId, v, upd: now, seq: doc.seq, dropped: clean.dropped };
+      return { ok: true, mapId, v, upd: now, seq: doc.seq, dropped: clean.dropped, renamed: fin.renamed, purged: fin.purged };
     } catch (e) { throw toHttps(e); }
   });
   // 30 גרסאות אחרונות – הישנות נמחקות (לא חלק מהטרנזקציה; כשל כאן לא מבטל את השמירה, וינוקה בשמירה הבאה)
@@ -109,8 +119,9 @@ exports.s3SetBranch = onCall(T.scoped(async (request) => {
 }));
 
 // ---------------- s3PutTex ----------------
-// bucket: לבדיקות; ברירת מחדל – ה-bucket של הפרויקט
-async function putTex(db, who, input, now, bucket) {
+// bucket, opts.maxDay: לבדיקות; ברירת מחדל – ה-bucket של הפרויקט ו-M.TEX_DAY (200) העלאות ב-24 שעות לכל מפה
+async function putTex(db, who, input, now, bucket, opts) {
+  const maxDay = opts && Number.isInteger(opts.maxDay) ? opts.maxDay : M.TEX_DAY;
   if (typeof input.qid !== 'string' || !M.RE.qid.test(input.qid)) throw bad('bad-qid', 'מזהה השליחה לא תקין');
   const mapId = mapIdOf(input), br = mapId.slice(2);
   const qref = db.doc('s3qid/' + input.qid);
@@ -122,9 +133,13 @@ async function putTex(db, who, input, now, bucket) {
   }
   let img;
   try { img = M.decodeTex(input.img); } catch (e) { throw toHttps(e); }
-  if (!(await branchesOf(who.bizId)).includes(br)) throw bad('no-branch', 'הסניף לא קיים בעסק', 'failed-precondition');
+  await branchOk(db, who.bizId, br, mapId.charAt(0));
   const bk = bucket || getStorage().bucket();
   const [files, ms] = await Promise.all([bk.getFiles({ prefix: M.texDir(who.bizId, br, mapId) }), db.doc('smap/' + mapId).get()]);
+  // תקרת עלות (הנחה, תיקון סבב 1): עד 200 העלאות ב-24 השעות האחרונות לכל מפה, לפי זמן יצירת הקבצים בתיקייה
+  if (M.recentCount(files[0].map((f) => f.metadata && f.metadata.timeCreated), now) >= maxDay) {
+    throw bad('tex-day', `הגעתם למספר המרבי של צילומי טקסטורה למפה הזו היום (${maxDay}). נסו שוב מחר.`, 'resource-exhausted');
+  }
   let n = M.nextTexN(files[0].map((f) => f.name), ms.exists ? ms.get('tx') : null), path = '';
   // ifGenerationMatch: 0 = רק אם הקובץ לא קיים. שתי העלאות במקביל לא דורסות זו את זו – השנייה מקבלת את המספר הבא.
   for (let i = 0; i < 5 && !path; i++, n++) {

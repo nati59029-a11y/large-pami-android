@@ -5,7 +5,8 @@
 //                                שדות לא מוכרים לא נשמרים (נרשמים ב-dropped). v, upd, by, delAt, delBy – השרת קובע, לא הלקוח.
 //   mergeDel(old, map, who)    – כללי מחיקה (סל מחזור, ע5): שינוי del בפריט או במפה – מנהל בלבד; פריט שמור שחסר במפה החדשה
 //                                = מחיקה: מנהל – נשמר עם del:1 (לא נעלם), עובד – שגיאה. delAt/delBy נקבעים בשרת.
-//   finalCheck(map, old)       – אחרי המיזוג: גבולות רשימות, חדר חי אחד לפחות, גוף בחדר קיים, 2000 מקטעים, מזהה גוף שלא חוזר.
+//   finalCheck(map, old)       – אחרי המיזוג: סל מחזור (תקרה נפרדת, הישנים מוסרים), גבולות על פריטים חיים, חדר חי אחד לפחות,
+//                                גוף בחדר קיים, 2000 מקטעים, seq של השרת בלבד, מזהה גוף חדש בטווח oseq+1..oseq+400 (אחרת – מזהה חדש).
 //   checkLock(old, baseV)      – נעילה מפני שמירה כפולה: baseV חייב להיות שווה ל-v הנוכחי (0 = מפה חדשה).
 //   verId / prune              – מזהה גרסה (000012) ומה למחוק כדי להשאיר 30 גרסאות אחרונות.
 //   branchIds / cleanBranch    – סניפים קיימים (org.branches, או main) וקלט s3SetBranch.
@@ -19,6 +20,7 @@ const MAX_BAYS = 2000;
 const MAXC = 10000, MIN_AREA = 10000; // 100 מטר; מ"ר אחד בסמ"ר
 const TEX_MAX = 600000;       // טקסטורה (5.1)
 const TEX_SIDES = [256, 512, 1024];
+const TEX_DAY = 200;          // העלאות טקסטורה ב-24 שעות לכל מפה (הנחה, תיקון סבב 1)
 const DEF_BR = Object.freeze({ wh: false, cap: 500, on: true }); // בלי מסמך s3br (4.1)
 const LISTS = ['rooms', 'walls', 'cols', 'doors', 'fx', 'syms', 'tx'];   // רכיבים עם id ו-del*
 const LIMIT = { rooms: 20, walls: 100, cols: 100, doors: 40, fx: 400, syms: 40, tx: 60, uz: 50 };
@@ -141,12 +143,13 @@ function cleanItem(list, o, ctx, errs) {
     else if (o.del !== 0) errs.push(`${label}: del – 0 או 1`);
   }
   for (const k of Object.keys(o)) if (!(k in sc) && !['id', 'del', 'delAt', 'delBy'].includes(k)) ctx.drop(list + '.' + k);
+  if (list === 'tx' && out.path && !out.path.endsWith('/' + out.id + '_' + out.path.split('_').pop())) errs.push(`${label}: המזהה לא תואם לנתיב הקובץ`);
   if (list === 'fx' && out.sides === 2 && out.k && !TWO.includes(out.k)) errs.push(`${label}: לסוג הזה יש רק צד אחד`);
   return out;
 }
 
 // הקלט של s3SaveMap. ctx = { bizId, mapId }. מחזיר { map, dropped } או זורק fail('bad-map', הודעה, { errs }).
-const TOP_SERVER = ['v', 'upd', 'by', 'delAt', 'delBy']; // השרת קובע – לא נקראים מהלקוח
+const TOP_SERVER = ['v', 'upd', 'by', 'delAt', 'delBy', 'seq']; // השרת קובע – לא נקראים מהלקוח (seq – תיקון סבב 1)
 function cleanMap(input, c) {
   if (!isObj(input)) throw fail('bad-map', 'המפה לא תקינה', { errs: ['המפה חסרה'] });
   const kind = c.mapId.charAt(0), br = c.mapId.slice(2);
@@ -156,7 +159,7 @@ function cleanMap(input, c) {
   const m = { br, kind };
   if (input.br !== br) errs.push('הסניף במפה לא מתאים למזהה המפה');
   if (input.kind !== kind) errs.push('סוג המפה (חנות/מחסן) לא מתאים למזהה המפה');
-  const top = { name: S(1, 40), grid: E([25, 50, 100]), numDir: E(['rtl', 'ltr']), src: E(['manual', 'draft']), seq: I(0, 9999, false) };
+  const top = { name: S(1, 40), grid: E([25, 50, 100]), numDir: E(['rtl', 'ltr']), src: E(['manual', 'draft']) };
   for (const k of Object.keys(top)) {
     if (input[k] === undefined || input[k] === null) { if (top[k].req) errs.push('חסר השדה ' + k); continue; }
     try { m[k] = field(top[k], input[k], ctx); } catch (e) { errs.push(k + ' – ' + (typeof e === 'string' ? e : 'לא תקין')); }
@@ -170,7 +173,8 @@ function cleanMap(input, c) {
     const v = input[list];
     if (v === undefined || v === null) { if (list !== 'tx' && list !== 'uz') m[list] = []; continue; }
     if (!Array.isArray(v)) { errs.push(NAME[list] + ': צריכה להיות רשימה'); continue; }
-    if (v.length > LIMIT[list] * 2) { errs.push(`יותר מדי ${NAME[list]} (עד ${LIMIT[list]})`); continue; }
+    // גבול קלט גס בלבד: עד L חיים + L בסל המחזור + חדשים. הגבולות האמיתיים – ב-finalCheck (תיקון סבב 1)
+    if (v.length > LIMIT[list] * 3) { errs.push(`יותר מדי ${NAME[list]} (עד ${LIMIT[list]})`); continue; }
     const out = [], seen = new Set();
     for (const o of v) {
       const x = cleanItem(list, o, ctx, errs);
@@ -225,10 +229,32 @@ function mergeDel(old, map, who) {
 const live = (a) => (Array.isArray(a) ? a : []).filter((o) => isObj(o) && o.del !== 1);
 const idNum = (id) => parseInt(String(id).slice(1), 10) || 0;
 function bayCount(map) { return live(map.fx).reduce((s, f) => s + (f.sides === 2 ? 2 : 1) * (inR(f.bays, 1, 30) ? f.bays : 0), 0); }
-// מחזיר את המפה עם seq ו-ent מעודכנים. זורק fail('bad-map' / 'id-reuse').
-function finalCheck(map, old) {
+const NEW_SPAN = 400;          // מזהה גוף חדש: oseq+1 עד oseq+400 (תיקון סבב 1)
+// סל המחזור (החלטת מתאם, תיקון סבב 1): המגבלות של 4.3 חלות על פריטים חיים בלבד. לפריטים מחוקים – תקרה נפרדת, שווה למגבלה.
+// מעבר לתקרה – המחוקים הישנים ביותר (לפי delAt) מוסרים סופית כבר בשמירה הזו. הם כבר מחוקים, ולכן לא נמחק נתון חי.
+// מחזיר { map, purged: { list: [ids] } }
+function trimBin(map) {
+  const out = Object.assign({}, map), purged = {};
+  for (const list of LISTS) {
+    const L = Array.isArray(map[list]) ? map[list] : null;
+    if (!L) continue;
+    const dead = L.filter((o) => o.del === 1);
+    if (dead.length <= LIMIT[list]) continue;
+    const drop = new Set(dead.slice().sort((a, b) => (a.delAt || 0) - (b.delAt || 0) || (a.id < b.id ? -1 : 1)).slice(0, dead.length - LIMIT[list]).map((o) => o.id));
+    out[list] = L.filter((o) => !(o.del === 1 && drop.has(o.id)));
+    purged[list] = [...drop];
+  }
+  return { map: out, purged };
+}
+// אחרי המיזוג: סל מחזור, מגבלות (על חיים), חדרים, גופים, מקטעים, מזהי גופים, seq, ent.
+// seq שהלקוח שלח – לא נקרא בכלל. השרת מחשב אותו מהמונה השמור ומהמזהים. גוף חדש עם מזהה מחוץ ל-oseq+1..oseq+400
+// לא חוסם את השמירה: השרת נותן לו מזהה חדש ומחזיר renamed {ישן: חדש}.
+// מחזיר { map, renamed, purged }. זורק fail('bad-map').
+function finalCheck(map0, old) {
+  const t = trimBin(map0), map = t.map;
   const errs = [];
-  for (const list of LISTS.concat(['uz'])) if (Array.isArray(map[list]) && map[list].length > LIMIT[list]) errs.push(`יותר מ-${LIMIT[list]} ${NAME[list]} במפה`);
+  for (const list of LISTS) if (live(map[list]).length > LIMIT[list]) errs.push(`יותר מ-${LIMIT[list]} ${NAME[list]} במפה`);
+  if (Array.isArray(map.uz) && map.uz.length > LIMIT.uz) errs.push(`יותר מ-${LIMIT.uz} ${NAME.uz} במפה`);
   const rooms = live(map.rooms);
   if (!rooms.length) errs.push('במפה אין אף חדר');
   for (const r of rooms) { const e = polyErr(r.p); if (e) errs.push(`חדר "${r.name || r.id}": ${e}`); }
@@ -236,17 +262,24 @@ function finalCheck(map, old) {
   for (const f of live(map.fx)) if (!rid.has(f.room)) errs.push(`גוף ${f.num || f.id}: החדר שלו לא קיים`);
   if (bayCount(map) > MAX_BAYS) errs.push(`יותר מ-${MAX_BAYS} מקטעים במפה`);
   if (errs.length) throw fail('bad-map', 'המפה לא תקינה: ' + errs.slice(0, 3).join(' · ') + (errs.length > 3 ? ` ועוד ${errs.length - 3}` : ''), { errs: errs.slice(0, 20) });
-  // מזהה גוף לא חוזר לשימוש (1.1): גוף חדש חייב מספר גדול מ-seq השמור
   const o0 = isObj(old) ? old : null;
-  const oseq = o0 && inR(o0.seq, 0, 9999) ? o0.seq : 0;
-  const had = new Set((o0 && Array.isArray(o0.fx) ? o0.fx : []).map((f) => f && f.id));
-  for (const f of map.fx) if (!had.has(f.id) && idNum(f.id) <= oseq) throw fail('id-reuse', 'מזהה הגוף ' + f.id + ' כבר היה בשימוש במפה. טענו את המפה מחדש ונסו שוב.');
-  const out = Object.assign({}, map);
-  out.seq = Math.max(oseq, inR(map.seq, 0, 9999) ? map.seq : 0, ...map.fx.map((f) => idNum(f.id)));
-  if (out.seq > 9999) throw fail('bad-map', 'נגמרו המזהים במפה');
-  // הכניסה הראשית חייבת להיות דלת קיימת; אחרת – לא נשמרת
-  if (out.ent && !(map.doors || []).some((d) => d.id === out.ent)) delete out.ent;
-  return out;
+  const oldFx = o0 && Array.isArray(o0.fx) ? o0.fx.filter((f) => isObj(f) && typeof f.id === 'string') : [];
+  const oseq = Math.max(o0 && inR(o0.seq, 0, 9999) ? o0.seq : 0, 0, ...oldFx.map((f) => idNum(f.id)));
+  const had = new Set(oldFx.map((f) => f.id));
+  const ok = (f) => !had.has(f.id) && idNum(f.id) > oseq && idNum(f.id) <= oseq + NEW_SPAN;
+  let top = Math.max(oseq, ...map.fx.filter(ok).map((f) => idNum(f.id)));
+  const renamed = {};
+  const fx = map.fx.map((f) => {
+    if (had.has(f.id) || ok(f)) return f;
+    top += 1;
+    if (f.id !== 'f' + top) renamed[f.id] = 'f' + top;
+    return Object.assign({}, f, { id: 'f' + top });
+  });
+  if (top > 9999) throw fail('bad-map', 'נגמרו המזהים במפה');
+  const out = Object.assign({}, map, { fx, seq: top });
+  // הכניסה הראשית חייבת להיות דלת קיימת ולא מחוקה; אחרת – לא נשמרת
+  if (out.ent && !(map.doors || []).some((d) => d.id === out.ent && d.del !== 1)) delete out.ent;
+  return { map: out, renamed, purged: t.purged };
 }
 
 // ---------- נעילה, גודל, גרסאות ----------
@@ -337,8 +370,15 @@ function nextTexN(names, mapTx) {
   return n + 1;
 }
 
+// כמה קבצים נוצרו ב-24 השעות שלפני now (times = timeCreated של Storage, מחרוזת ISO או מספר)
+function recentCount(times, now) {
+  let n = 0;
+  for (const t of times || []) { const ms = typeof t === 'number' ? t : Date.parse(t); if (Number.isFinite(ms) && ms > now - 86400000 && ms <= now + 600000) n++; }
+  return n;
+}
+
 module.exports = {
-  MAX_BYTES, KEEP_VERS, MAX_BAYS, TEX_MAX, TEX_SIDES, DEF_BR, LISTS, LIMIT, RE, STALE,
-  polyErr, cleanMap, mergeDel, finalCheck, checkLock, bytesOf, verId, verDoc, prune, bayCount,
+  MAX_BYTES, KEEP_VERS, MAX_BAYS, TEX_MAX, TEX_SIDES, TEX_DAY, recentCount, DEF_BR, LISTS, LIMIT, RE, STALE,
+  polyErr, cleanMap, mergeDel, trimBin, finalCheck, NEW_SPAN, checkLock, bytesOf, verId, verDoc, prune, bayCount,
   branchIds, cleanBranch, brCfg, jpegSize, decodeTex, texDir, texPath, nextTexN, fail,
 };

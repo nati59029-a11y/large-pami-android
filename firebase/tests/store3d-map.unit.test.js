@@ -113,13 +113,73 @@ describe('store3d-map: בדיקות אחרי המיזוג (finalCheck)', () => {
     const tooMany = Array.from({ length: 401 }, (_, i) => fx('f' + (i + 1), { bays: 1 }));
     assert.equal(code(() => M.finalCheck(clean(MAP({ fx: tooMany })).map, null)), 'bad-map');
   });
-  it('מזהה גוף לא חוזר לשימוש; seq = המקסימום; ent לדלת שלא קיימת – לא נשמר', () => {
+  it('seq של הלקוח לא נקרא; גוף חדש מחוץ ל-oseq+1..oseq+400 מקבל מזהה חדש (renamed); ent לדלת שלא קיימת או מחוקה – לא נשמר', () => {
     const old = SAVED({ seq: 5 });
-    assert.equal(code(() => M.finalCheck(clean(MAP({ fx: [fx('f1'), fx('f2'), fx('f4')] })).map, old)), 'id-reuse');
-    const ok = M.finalCheck(clean(MAP({ seq: 3, fx: [fx('f1'), fx('f2'), fx('f6')] })).map, old);
-    assert.equal(ok.seq, 6);
-    assert.equal(M.finalCheck(clean(MAP({ seq: 1 })).map, null).seq, 2, 'seq לפחות כמו המזהה הגבוה');
-    assert.equal(M.finalCheck(clean(MAP({ ent: 'd7' })).map, null).ent, undefined);
+    const a = M.finalCheck(M.mergeDel(old, clean(MAP({ seq: 9999, fx: [fx('f1'), fx('f2'), fx('f4')] })).map, MGR), old);
+    assert.deepEqual([a.map.seq, a.renamed], [6, { f4: 'f6' }], 'f4 <= oseq – מזהה חדש');
+    assert.deepEqual(a.map.fx.map((f) => f.id), ['f1', 'f2', 'f6']);
+    const b = M.finalCheck(clean(MAP({ fx: [fx('f1'), fx('f2'), fx('f6')] })).map, old);
+    assert.deepEqual([b.map.seq, b.renamed], [6, {}]);
+    const c = M.finalCheck(clean(MAP({ fx: [fx('f1'), fx('f2'), fx('f405'), fx('f406'), fx('f9999')] })).map, old);
+    assert.deepEqual([c.renamed, c.map.seq, c.map.fx.map((f) => f.id)], [{ f9999: 'f407' }, 407, ['f1', 'f2', 'f405', 'f406', 'f407']], 'f405 בטווח (5+400); f406 מחוץ לטווח אבל מקבל את אותו מספר; f9999 – f407');
+    assert.equal(M.finalCheck(clean(MAP({ seq: 1 })).map, null).map.seq, 2, 'seq לפחות כמו המזהה הגבוה');
+    assert.equal(M.finalCheck(clean(MAP({ ent: 'd7' })).map, null).map.ent, undefined);
+    assert.equal(M.finalCheck(clean(MAP({ doors: [{ id: 'd1', x: 0, y: 500, w: 180, a: 0, k: 'ent', del: 1 }] })).map, null).map.ent, undefined, 'דלת מחוקה');
+    assert.equal(M.finalCheck(clean(MAP()).map, null).map.ent, 'd1');
+  });
+  it('התקפת seq: עובד עם s3m שולח seq:9999 ו-f9999 – נשמר עם מזהה תקין; אחריו מנהל מוסיף גוף בהצלחה', () => {
+    const old = SAVED();
+    const e = M.finalCheck(M.mergeDel(old, clean(MAP({ seq: 9999, fx: [fx('f1'), fx('f2', { x: 600 }), fx('f9999')] })).map, EMP), old);
+    assert.deepEqual([e.map.seq, e.renamed], [3, { f9999: 'f3' }]);
+    const saved = Object.assign(e.map, { v: 5 });
+    const m = M.finalCheck(M.mergeDel(saved, clean(MAP({ fx: [fx('f1'), fx('f2', { x: 600 }), fx('f3'), fx('f4')] })).map, MGR), saved);
+    assert.deepEqual([m.map.seq, m.renamed, m.map.fx.length], [4, {}, 4]);
+  });
+});
+
+describe('store3d-map: מגבלות על פריטים חיים, סל מחזור עם תקרה נפרדת (החלטת מתאם, תיקון סבב 1)', () => {
+  const BIG = { id: 'r1', name: 'אולם', p: [0, 0, 9000, 0, 9000, 9000, 0, 9000], h: 300 };
+  const fxN = (a, b, o) => Array.from({ length: b - a + 1 }, (_, i) => fx('f' + (a + i), Object.assign({ x: 100 + (i % 80) * 100, y: 100 + Math.floor(i / 80) * 100, bays: 1 }, o)));
+  const texP = (id) => `b/${BIZ}/store3d/main/tex/${MID}/${id}_1.jpg`;
+  it('מנהל מחליף 300 גופים ב-150 חדשים: נשמר – 150 חיים, 300 בסל המחזור', () => {
+    const old = SAVED({ seq: 300, rooms: [BIG], fx: fxN(1, 300) });
+    const r = M.finalCheck(M.mergeDel(old, clean(MAP({ rooms: [BIG], fx: fxN(301, 450) })).map, MGR), old);
+    assert.equal(r.map.fx.filter((f) => f.del !== 1).length, 150);
+    assert.equal(r.map.fx.filter((f) => f.del === 1).length, 300);
+    assert.deepEqual([r.map.seq, r.renamed, r.purged], [450, {}, {}]);
+  });
+  it('שוב: עוד 150 חדשים – 450 בסל, מעל התקרה (400): 50 המחוקים הישנים ביותר (לפי delAt) מוסרים סופית', () => {
+    const dead = fxN(1, 300).map((f, i) => Object.assign(f, { del: 1, delAt: 1700000000000 + i, delBy: 's3_mgr1' }));
+    const old = SAVED({ seq: 450, rooms: [BIG], fx: dead.concat(fxN(301, 450)) });
+    const r = M.finalCheck(M.mergeDel(old, clean(MAP({ rooms: [BIG], fx: dead.concat(fxN(451, 600)) })).map, MGR), old);
+    assert.equal(r.map.fx.filter((f) => f.del !== 1).length, 150);
+    assert.equal(r.map.fx.filter((f) => f.del === 1).length, 400);
+    assert.deepEqual(r.purged.fx, fxN(1, 50).map((f) => f.id), 'הישנים ביותר');
+    assert.ok(r.map.fx.every((f) => f.id !== 'f1'));
+  });
+  it('צילום מחדש של טקסטורה במפה מלאה (60): הישנה לסל, החדשה נכנסת; גם כשהסל מלא – הישנה ביותר בסל מוסרת', () => {
+    const tx = Array.from({ length: 60 }, (_, i) => ({ id: 't' + (i + 1), path: texP('t' + (i + 1)), w: 512, h: 512 }));
+    const old = SAVED({ tx });
+    const next = tx.map((t) => (t.id === 't1' ? Object.assign({}, t, { del: 1 }) : t)).concat([{ id: 't61', path: texP('t61'), w: 512, h: 512 }]);
+    const r = M.finalCheck(M.mergeDel(old, clean(MAP({ tx: next })).map, MGR), old);
+    assert.deepEqual([r.map.tx.filter((t) => t.del !== 1).length, r.map.tx.filter((t) => t.del === 1).length], [60, 1]);
+    const dead = Array.from({ length: 60 }, (_, i) => ({ id: 't' + (100 + i), path: texP('t' + (100 + i)), w: 512, h: 512, del: 1, delAt: 1700000000000 + i, delBy: 's3_mgr1' }));
+    const old2 = SAVED({ tx: tx.concat(dead) });
+    const r2 = M.finalCheck(M.mergeDel(old2, clean(MAP({ tx: next.concat(dead) })).map, MGR), old2);
+    assert.deepEqual([r2.map.tx.filter((t) => t.del !== 1).length, r2.map.tx.filter((t) => t.del === 1).length, r2.purged.tx], [60, 60, ['t100']]);
+  });
+  it('עדיין: יותר מ-60 טקסטורות חיות / 400 גופים חיים – נדחה', () => {
+    const tx = Array.from({ length: 61 }, (_, i) => ({ id: 't' + (i + 1), path: texP('t' + (i + 1)), w: 512, h: 512 }));
+    assert.equal(code(() => M.finalCheck(clean(MAP({ tx })).map, null)), 'bad-map');
+  });
+  it('טקסטורה: המזהה חייב להתאים לנתיב הקובץ', () => {
+    assert.equal(code(() => clean(MAP({ tx: [{ id: 't1', path: texP('t7'), w: 512, h: 512 }] }))), 'bad-map');
+    assert.equal(code(() => clean(MAP({ tx: [{ id: 't7', path: texP('t7'), w: 512, h: 512 }] }))), 'OK');
+  });
+  it('תקרת העלאות טקסטורה: ספירה של 24 השעות האחרונות', () => {
+    const now = 1800000000000;
+    assert.equal(M.recentCount([new Date(now - 1000).toISOString(), new Date(now - 86400000 - 1).toISOString(), now - 5, 'bad', undefined], now), 2);
+    assert.equal(M.TEX_DAY, 200);
   });
 });
 
