@@ -172,7 +172,7 @@ ACT.oxSave=async el=>{const D=draft();custJoin(D);let items;try{if(hasBr()&&!D.b
  if(D.ship){const sp={};SHK.forEach(([k])=>{const v=String(D.ship[k]||'').trim();if(v)sp[k]=v});if(Object.keys(sp).length){if(!sp.st)return toast('כתובת משלוח: חסר רחוב ומספר');cust.ship=sp}}
  el.disabled=true;try{const r=await fnCall('createOrder',{reqId:D.req,br:hasBr()?D.br:undefined,cust,custId:D.custId||undefined,items,note:D.note||undefined,cell:D.cellOut});O.draft=null;
   toast(`הזמנה #${r.no} נשמרה · ${ils(r.gross!=null?r.gross:r.total)}`);if(r.warn&&r.warn.length)setTimeout(()=>toast('שים לב: אין מספיק במלאי – '+r.warn.map(w=>w.n+(hasBr()?' ב'+bn(w.br):'')).join(', ')),2700);
-  await load(true);NAV.pop();go('oxOrd',r.id);return r}catch(e){el.disabled=false;err(e)}}; // מחזיר את ההזמנה שנשמרה (לכרטיס מטופס ההזמנה)
+  await load(true);NAV.pop();{const i=NAV.map(x=>x.v).lastIndexOf('ox');if(i>=0){NAV.length=i+1;render(0)}else go('ox')}return r}catch(e){el.disabled=false;err(e)}}; // מחזיר את ההזמנה שנשמרה (לכרטיס מטופס ההזמנה)
 
 /* ---------- כרטיס הזמנה ---------- */
 V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return loading(T)}const o=O.L.find(x=>x.id===id);if(!o)return{t:T,h:'<div class="empty">ההזמנה לא נמצאה</div>'};
@@ -476,9 +476,10 @@ const ncOf=()=>O.cfg&&O.cfg.nc==='zero'?'zero':'skip';
 /* אותה נוסחה כמו בשרת (functions/lib/ord-profit.js, profitOf), באגורות */
 const ordProfitOf=o=>{let cost=0,skip=0,miss=0;const nc=ncOf();for(const it of o.items||[]){if(!it)continue;const qt=typeof it.qty==='number'?it.qty:0,pr=typeof it.price==='number'?it.price:0,c=typeof it.c==='number'?it.c:(it.pid?costOf(it.pid):null);if(c==null){miss++;if(nc!=='zero')skip+=Math.round(qt*pr*100)}else cost+=Math.round(qt*c*100)}const t0=Math.round((typeof o.total==='number'?o.total:0)*100),vm=(o.vm==='ex'||o.vm==='inc')&&typeof o.gross==='number',total=vm?Math.round(o.gross*100):t0;if(vm&&skip)skip=t0?Math.round(skip*total/t0):0;return{total,cost,profit:total-skip-cost,miss}}; // סבב 2: כמו ord-profit.js (gross בהזמנה עם vm)
 const exV=a=>ils(r2(a/(1+vatP()/100)));
+const vatSplit=(o,p)=>{const v=typeof o.vr==='number'&&o.vr>=0&&o.vr<=100?o.vr:vatP(),ex=r2(p/(1+v/100));return{ex,vat:r2(p-ex)}}; // סבב משוב 1: רווח לפני מע"מ + מע"מ (סכומם = הרווח כולל מע"מ)
 const missH=n=>n?`<p class="note" style="margin:4px 0 0">חסר מחיר עלות ב-${n} שורות – ${ncOf()==='zero'?'נחשבו בעלות 0':'לא נספרו ברווח'}</p>`:'';
 const noC=(o,r)=>ncOf()!=='zero'&&r.miss>0&&r.miss>=(o.items||[]).filter(Boolean).length,NOC='<p class="note" style="margin:4px 0 0">אין מחיר עלות לאף פריט בהזמנה – אי אפשר לחשב רווח.</p>';
-const profH=o=>{if(!prOk()||o.status==='cancel')return'';const r=ordProfitOf(o);if(noC(o,r))return`<div class="card" id="oxprof">${NOC}</div>`;return`<div class="card" id="oxprof"><div class="row" style="justify-content:space-between"><span>עלות</span><b>${ils(r.cost/100)}</b></div><div class="row" style="justify-content:space-between;margin-top:4px"><b>רווח</b><b class="amt ${r.profit<0?'neg':'pos'}">${ils(r.profit/100)}</b></div><p class="note" style="margin:4px 0 0">לפני מע"מ: ${exV(r.profit/100)}</p>${missH(r.miss)}</div>`};
+const profH=o=>{if(!prOk()||o.status==='cancel')return'';const r=ordProfitOf(o);if(noC(o,r))return`<div class="card" id="oxprof">${NOC}</div>`;return`<div class="card" id="oxprof"><div class="row" style="justify-content:space-between"><span>עלות</span><b>${ils(r.cost/100)}</b></div><div class="row" style="justify-content:space-between;margin-top:4px"><b>רווח (לפני מע"מ)</b><b class="amt ${r.profit<0?'neg':'pos'}">${ils(vatSplit(o,r.profit/100).ex)}</b></div><p class="note" style="margin:4px 0 0">מע"מ: ${ils(vatSplit(o,r.profit/100).vat)}</p>${missH(r.miss)}</div>`};
 /* 12.11.2026: חלונית חגיגית אחרי "שולם" – בצבעי האפליקציה (--acc/--card), סכום גדול עם מונה שעולה מ-0 (מכבד "הפחתת תנועה"), ושורת עידוד מתחלפת.
    הפסד / אין עלות – טקסט ניטרלי בלי עידוד. #oxpaidp מכיל בסוף את הסכום */
 const CHEER=['עבודה מצוינת – ככה בונים עסק.','עוד הזמנה מוצלחת. כל הכבוד!','יפה מאוד! הלקוחות מרגישים את השירות שלך.','עוד צעד קדימה. ממשיכים ככה!','מכירה טובה. תודה על ההשקעה!'];
@@ -487,11 +488,11 @@ const countUp=(el,to)=>{const fin=ils(to);let rm=false;try{rm=matchMedia('(prefe
  let t0=null,n=0;const D=800;el.textContent=ils(0);const st=t=>{if(!el.isConnected)return;n++;if(t0==null)t0=t;const k=Math.min(1,Math.max((t-t0)/D,n/60));if(k>=1){el.textContent=fin;return}const e=1-Math.pow(1-k,3);el.textContent=ils(Math.round(to*e*100)/100);requestAnimationFrame(st)};requestAnimationFrame(st);
  setTimeout(()=>{if(el.isConnected)el.textContent=fin},D+400)}; // ביטחון: הערך הסופי תמיד מוצג
 const paidProf=id=>{if(!prOk())return;const o=(O.L||[]).find(x=>x.id===id);if(!o)return;const r=ordProfitOf(o);if(noC(o,r))return dlg(`<h3>ההזמנה שולמה</h3>${NOC}<button class="btn w" data-a="closeDlg">סגור</button>`);
- const p=r.profit/100,good=p>0;
+ const vs=vatSplit(o,r.profit/100),p=vs.ex,good=p>0;
  dlg(`<div class="card" id="oxpaidc" style="border:2px solid var(--acc);background:var(--card);text-align:center;margin:0 0 10px;padding:18px 12px"><h3 style="margin:0 0 6px;color:var(--acc)">${good?'כל הכבוד! ההזמנה שולמה':'ההזמנה שולמה'}</h3>
  <p class="note" style="margin:0">${good?'סך הכול הרווחת':p<0?'סך הכול הפסד בהזמנה':'סך הכול רווח'}</p><b id="oxpaidp" class="${p<0?'neg':''}" style="display:block;font-size:2.2rem;line-height:1.2;margin:4px 0;${p<0?'':'color:var(--acc)'}">${ils(p)}</b>
  ${good?`<p style="margin:6px 0 0;font-weight:600" id="oxcheer">${esc(cheer())}</p>`:''}</div>
- <p class="note" style="margin:4px 0">מכירה ${ils(r.total/100)} · עלות ${ils(r.cost/100)} · לפני מע"מ ${exV(p)}</p>${missH(r.miss)}<button class="btn w" data-a="closeDlg">סגור</button>`);
+ <p class="note" style="margin:4px 0">מכירה ${ils(r.total/100)} · עלות ${ils(r.cost/100)} · רווח לפני מע"מ · מע"מ: ${ils(vs.vat)}</p>${missH(r.miss)}<button class="btn w" data-a="closeDlg">סגור</button>`);
  if(good)countUp(document.getElementById('oxpaidp'),p)};
 const ilD=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'});
 const dAdd=(d,n)=>{const[y,m,x]=d.split('-').map(Number);return new Date(Date.UTC(y,m-1,x+n)).toISOString().slice(0,10)};
