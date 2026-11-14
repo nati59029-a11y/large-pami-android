@@ -1057,10 +1057,13 @@ async function mailWorkIn(id, o) {
   }
 }
 // שלב ג/3: טיוטת הזמנה פנימית sec_ord/{mailId} – למנהל בלבד (st:'mgr'). לא נשלחת ללקוח, לא יוצרת הזמנה ולא לקוח, ואין שום כתיבה ל-cust.
-// sec_ord: { in, ch:'mail', thr, to (השולח המקורי – From), custId? | cands?[≤3 {id,name,bn}] | custNew?{bn,vat,ct,phone,city,st},
-//   lines (SO.build מול הקטלוג), total (אגורות), nBlock (שורות חוסמות + blk), blk:['br'|'cust'|'phone'], br, ver:1, st:'mgr', t }
+// sec_ord: { in, ch:'mail', thr, to (השולח המקורי – From), custId? (רק זיהוי מאומת) | cands?[≤3 {id,name,bn}] (+idBy:'vat'|'mail' כשזה כרטיס שזוהה בלי אימות)
+//   | custNew?{bn,vat,ct,phone,city,st}, phoneHint? (טלפון מהמייל – הצעה, חוסם עד אישור), lines (SO.build מול הקטלוג), total (אגורות),
+//   nBlock (שורות חוסמות + blk), blk:['br'|'cust'|'phone'], br, brDef?:true (סניף ברירת מחדל – המנהל יכול לשנות), catCut?:true (הקטלוג נחתך ב-300), ver:1, st:'mgr', t }
 // תוספת בלבד: מסמך קיים לא נדרס (טריגר עלול לרוץ פעמיים). אין כלל Firestore לאוסף – נסגר בכלל האחרון; נקרא רק בשרת.
-const ORD_CANDS = 3;
+// סבב 1 (בודק): זיהוי מאומת = כתובת השולח זהה ל-mail שבכרטיס + x.auth===true (DKIM/DMARC). אחרת (ח.פ מהמייל, From מזויף) – מועמד בלבד,
+//   מחיר רגיל (p/ws לא נקרא), טלפון הכרטיס לא נלקח, וחסימת 'cust' עד אישור המנהל.
+const ORD_CANDS = 3, ORD_CAT = 300, ORD_BN_MIN = 3;
 const custLive = (s) => s.docs.filter((d) => !d.get('mv')); // mv = לקוח שהועבר/אוחד – לא מועמד
 const candOf = (d) => ({ id: d.id, name: String(d.get('name') || '').slice(0, 80), bn: String(d.get('bn') || '').slice(0, 80) });
 // זיהוי לקוח – קריאה בלבד: vat → mail (השולח) → שם עסק (מועמדים, המנהל בוחר) → כרטיס חדש
@@ -1068,10 +1071,10 @@ async function ordCust(db, c, from) {
   for (const [f, v] of [['vat', c.vat], ['mail', from]]) {
     if (!v) continue;
     const L = custLive(await db.collection('cust').where(f, '==', v).limit(ORD_CANDS + 2).get());
-    if (L.length === 1) return { cust: L[0] };
+    if (L.length === 1) return { cust: L[0], by: f };
     if (L.length > 1) return { cands: L.slice(0, ORD_CANDS).map(candOf) }; // כמה לקוחות עם אותו מזהה – המנהל בוחר
   }
-  if (c.bn) {
+  if (c.bn && SO.norm(c.bn).length >= ORD_BN_MIN) { // שם קצר מדי – מועמדים אקראיים
     const seen = new Map();
     for (const f of ['bn', 'name']) {
       if (seen.size >= ORD_CANDS) break;
@@ -1090,18 +1093,23 @@ async function ordDraft(db, id, x, ord, biz, now) {
   const c = ord.cust || {};
   const from = G.addrOf(x.from);
   const who = await ordCust(db, c, from);
-  const ws = !!(who.cust && who.cust.get('wholesale') === true);
-  // סניף: אין בהגדרות העסק סניף ברירת מחדל – עסק בלי סניפים = '_' (כמו NB ב-orders.js); יש סניפים = המנהל בוחר (חוסם)
+  const cm = who.cust && typeof who.cust.get('mail') === 'string' ? who.cust.get('mail').trim().toLowerCase() : '';
+  const ok = !!(who.cust && x.auth === true && from && cm === from); // זיהוי מאומת
+  const ws = ok && who.cust.get('wholesale') === true;
+  // סניף (החלטת מתאם לפי החלטה 3): אין בקוד הגדרה מפורשת של סניף ברירת מחדל – הסניף הפעיל הראשון ב-org.branches (כמו brDef() בממשק), brDef:true.
+  // עסק בלי סניפים = '_' (כמו NB ב-orders.js). יש סניפים אבל אף אחד לא פעיל – br ריק וחוסם
   const bd = biz && biz.exists ? await getFirestore().doc('b/' + biz.bizId).get() : null;
   const org = bd && bd.exists && bd.get('org') && typeof bd.get('org') === 'object' ? bd.get('org') : {};
-  const hasBr = (Array.isArray(org.branches) ? org.branches : []).some((b) => b && typeof b.id === 'string');
-  const br = hasBr ? '' : '_';
-  // קטלוג – אותה מגבלה כמו stockOf (300), מוצר כבוי לא נכנס. סניף לא ידוע – לא בודקים מלאי (אחרת הכול "אזל")
-  const s = await db.collection('prod').select('name', 'price', 'bp', 'on', 'cto', 'ct', 'sku', 'barcode', 'q').limit(300).get();
-  const prods = s.docs.filter((d) => d.get('on') !== false).map((d) => { const p = Object.assign({}, d.data(), { id: d.id }); if (!br) delete p.q; return p; });
+  const brs = (Array.isArray(org.branches) ? org.branches : []).filter((b) => b && typeof b.id === 'string' && b.id);
+  const b0 = brs.find((b) => b.on !== false);
+  const br = !brs.length ? '_' : b0 ? b0.id : '';
+  // קטלוג – אותה מגבלה כמו stockOf (300), מוצר כבוי לא נכנס. נחתך – catCut. סניף לא ידוע – לא בודקים מלאי (אחרת הכול "אזל")
+  const s = await db.collection('prod').select('name', 'price', 'bp', 'on', 'cto', 'ct', 'sku', 'barcode', 'q').limit(ORD_CAT + 1).get();
+  const catCut = s.size > ORD_CAT;
+  const prods = s.docs.slice(0, ORD_CAT).filter((d) => d.get('on') !== false).map((d) => { const p = Object.assign({}, d.data(), { id: d.id }); if (!br) delete p.q; return p; });
   const ctx = { cust: ws ? { wholesale: true } : null, br };
   let b = SO.build(ord.lines, prods, ctx);
-  if (ws) { // מחיר סיטונאי (prod/{id}/p/ws) – רק ללקוח סיטונאי מזוהה, ורק למוצרים שהותאמו
+  if (ws) { // מחיר סיטונאי (prod/{id}/p/ws) – רק ללקוח סיטונאי בזיהוי מאומת, ורק למוצרים שהותאמו
     const ids = [...new Set(b.lines.flatMap((l) => [l.id].concat((l.opts || []).map((o) => o.id))).filter(Boolean))];
     if (ids.length) {
       const wsd = await db.getAll(...ids.map((i) => db.doc('prod/' + i + '/p/ws')));
@@ -1110,13 +1118,18 @@ async function ordDraft(db, id, x, ord, biz, now) {
       b = SO.build(ord.lines, prods, ctx);
     }
   }
-  const phone = who.cust ? who.cust.get('phone') : who.custNew ? who.custNew.phone : c.phone;
+  const has = (v) => typeof v === 'string' && !!v.trim();
+  // טלפון: רק מכרטיס מאומת, או מכרטיס חדש (שהמנהל מאשר ממילא). אחרת טלפון מהמייל = הצעה בלבד, וחוסם עד אישור
+  const phone = ok ? who.cust.get('phone') : who.custNew ? who.custNew.phone : '';
+  const phoneHint = !has(phone) && has(c.phone) ? c.phone : '';
+  const cands = who.cands || (who.cust && !ok ? [candOf(who.cust)] : null);
   const blk = [];
   if (!br) blk.push('br');
-  if (who.cands) blk.push('cust');
-  if (!(typeof phone === 'string' && phone.trim())) blk.push('phone'); // אין הזמנה בלי טלפון (החלטה 4)
+  if (cands) blk.push('cust');
+  if (!has(phone)) blk.push('phone'); // אין הזמנה בלי טלפון (החלטה 4)
   const doc = Object.assign({ in: id, ch: 'mail', thr: x.thr || '', to: from },
-    who.cust ? { custId: who.cust.id } : {}, who.cands ? { cands: who.cands } : {}, who.custNew ? { custNew: who.custNew } : {},
+    ok ? { custId: who.cust.id } : {}, cands ? { cands } : {}, who.cust && !ok ? { idBy: who.by } : {}, who.custNew ? { custNew: who.custNew } : {},
+    phoneHint ? { phoneHint } : {}, catCut ? { catCut: true } : {}, brs.length && br ? { brDef: true } : {},
     { lines: b.lines, total: b.total, nBlock: b.nBlock + blk.length, blk, br, ver: 1, st: 'mgr', t: now });
   try { await ref.create(doc); } catch (e) { if (e && e.code === 6) return 'exists'; throw e; }
   return 'new';
