@@ -68,28 +68,41 @@ function checkSlot(slot, map) {
 }
 
 // ---------- מכסה (4.15) ----------
-// b = מסמך s3use/b_{br} (או null), u = s3use/u_{uid} (או null), cap = s3br.cap, k = מספר תמונות, userMax = בלם יומי.
-// month / day = מפתחות לפי שעון ישראל. מחזיר { b, u, warn, usage } לכתיבה, או זורק fail('s3-month-limit' | 's3-user-day').
+// b = מסמך s3use/b_{br} (או null), u = s3use/u_{uid} (או null). o = { k, cap, month, day, now, userMax, a?, adhocMax? }.
+// דיווח יזום (החלטת המשתמש, תיקון סבב 1): o.adhocMax (20) = מונה יומי נפרד לעובד, s3use/a_{uid} = o.a, בנוסף למכסה החודשית.
+//   מנהל – בלי המונה הזה (adhocMax = null). מחזיר { b, u, a?, warn, usage } לכתיבה, או זורק fail('s3-month-limit' | 's3-user-day' | 's3-adhoc-day').
+const dayN = (doc, day) => (isObj(doc) && doc.d === day && inR(doc.n, 0, 100000) ? doc.n : 0);
 function quotaStep(b, u, o) {
   const k = o.k, cap = inR(o.cap, 0, 100000) ? o.cap : 500;
   const n0 = isObj(b) && b.m === o.month && inR(b.n, 0, 100000) ? b.n : 0;
   const w80 = isObj(b) && b.m === o.month && typeof b.w80 === 'string' ? b.w80 : '';
-  const un0 = isObj(u) && u.d === o.day && inR(u.n, 0, 100000) ? u.n : 0;
+  const un0 = dayN(u, o.day);
+  const lim = Number.isInteger(o.adhocMax);
+  const an0 = lim ? dayN(o.a, o.day) : 0;
   if (n0 + k > cap) throw fail('s3-month-limit', `נגמרה המכסה החודשית של הסניף (${n0} מתוך ${cap} תמונות). התמונות נשמרות בטלפון ויישלחו כשהמכסה תוגדל או בחודש הבא.`);
   if (un0 + k > o.userMax) throw fail('s3-user-day', `שלחת היום יותר מ-${o.userMax} תמונות. נסו שוב מחר.`);
+  if (lim && an0 + k > o.adhocMax) throw fail('s3-adhoc-day', `אפשר לשלוח עד ${o.adhocMax} דיווחים יזומים ביום. נסו שוב מחר.`);
   const n = n0 + k;
   const warn = n >= 0.8 * cap && w80 !== o.month;
-  return {
+  const out = {
     b: { m: o.month, n, cap, w80: warn ? o.month : w80, upd: o.now },
     u: { d: o.day, n: un0 + k, upd: o.now },
     warn,
     usage: { m: o.month, n, cap, w80: n >= 0.8 * cap },
   };
+  if (lim) out.a = { d: o.day, n: an0 + k, upd: o.now };
+  return out;
 }
-// החזרה בכשל: רק המונה החודשי של הסניף, ורק באותו חודש. הבלם היומי לעובד לא מוחזר (נגד לולאת שליחה תקועה).
+// החזרה (רק כשהבקשה לא הגיעה ל-AI או נדחתה ממנו בלי חיוב – החלטת המשתמש, תיקון סבב 1): המונה החודשי של הסניף, באותו חודש.
+// הבלם היומי לעובד לא מוחזר (נגד לולאת שליחה תקועה).
 function refundStep(b, month, k, now) {
   if (!isObj(b) || b.m !== month || !inR(b.n, 0, 100000)) return null;
   return { n: Math.max(0, b.n - k), upd: now };
+}
+// החזרה במונה יומי (דיווח יזום), באותו יום
+function refundDay(doc, day, k, now) {
+  if (!isObj(doc) || doc.d !== day || !inR(doc.n, 0, 100000)) return null;
+  return { n: Math.max(0, doc.n - k), upd: now };
 }
 
 // ---------- בדיקת מדף: תשובת המודל ----------
@@ -288,6 +301,6 @@ const validAt = (t, now) => Number.isInteger(t) && t >= MIN_T && t <= MAX_T && t
 
 module.exports = {
   ISSUE_KINDS, PRICE_KINDS, STATUSES, DONE_ST, LOW_CONF, IMG, THUMB, DRAFT, RE_SLOT,
-  decodeJpeg, checkSlot, quotaStep, refundStep, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  ADHOC_DAY: 20, decodeJpeg, checkSlot, quotaStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
   israelMonth, validAt, fail,
 };

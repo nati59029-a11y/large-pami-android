@@ -24,6 +24,7 @@ const MAP = { fx: [fx('f1', { sides: 2, bays: 3 }), fx('f2', { hi: true }), fx('
 describe('store3d-ai – תמונות ומקום צילום', () => {
   it('decodeJpeg: JPEG תקין עובר; PNG, קטן מדי, גדול מדי, מידות חורגות – נדחים', () => {
     const ok = A.decodeJpeg(jpeg(1200, 900, 2000).toString('base64'), A.IMG);
+    assert.equal(A.decodeJpeg('data:image/jpeg;base64,' + jpeg(1200, 900, 2000).toString('base64'), A.IMG).w, 1200, 'עם התחילית ובלעדיה');
     assert.deepEqual([ok.w, ok.h], [1200, 900]);
     assert.equal(A.decodeJpeg('data:image/jpeg;base64,' + jpeg(512, 384, 600).toString('base64'), A.THUMB).w, 512);
     const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(2000)]);
@@ -57,11 +58,18 @@ describe('store3d-ai – מכסה', () => {
     assert.equal(code(() => A.quotaStep(null, { d: '2026-11-14', n: 400 }, o({ cap: 1000 }))), 's3-user-day');
     assert.equal(A.quotaStep(null, { d: '2026-11-13', n: 400 }, o()).u.n, 1, 'יום חדש');
     assert.equal(code(() => A.quotaStep(null, null, o({ cap: 0 }))), 's3-month-limit', 'תקרה 0 = חסום');
+    // דיווח יזום של עובד (תיקון סבב 1): מונה יומי נפרד
+    assert.deepEqual(A.quotaStep(null, null, o({ adhocMax: 20, a: { d: '2026-11-14', n: 19 } })).a, { d: '2026-11-14', n: 20, upd: 5 });
+    assert.equal(code(() => A.quotaStep(null, null, o({ adhocMax: 20, a: { d: '2026-11-14', n: 20 } }))), 's3-adhoc-day');
+    assert.equal(A.quotaStep(null, null, o({ adhocMax: 20, a: { d: '2026-11-13', n: 20 } })).a.n, 1, 'יום חדש');
+    assert.equal(A.quotaStep(null, null, o({ a: { d: '2026-11-14', n: 99 } })).a, undefined, 'בלי adhocMax (מנהל / סבב) – אין מונה');
   });
   it('refundStep: רק באותו חודש, לא מתחת ל-0', () => {
     assert.deepEqual(A.refundStep({ m: '2026-11', n: 5 }, '2026-11', 2, 9), { n: 3, upd: 9 });
     assert.deepEqual(A.refundStep({ m: '2026-11', n: 1 }, '2026-11', 3, 9), { n: 0, upd: 9 });
     assert.equal(A.refundStep({ m: '2026-12', n: 5 }, '2026-11', 1, 9), null);
+    assert.deepEqual(A.refundDay({ d: '2026-11-14', n: 5 }, '2026-11-14', 1, 9), { n: 4, upd: 9 });
+    assert.equal(A.refundDay({ d: '2026-11-13', n: 5 }, '2026-11-14', 1, 9), null);
   });
 });
 

@@ -4,6 +4,7 @@
 //   1. הליבה (shelfCore, draftCore) מול Firestore ו-Storage של האמולטור: תקין נכתב, שבור מחזיר מכסה, עובד זר נדחה, מכסה מלאה עוצרת,
 //      אזהרה ב-80% (פעם אחת), תמונה עם אדם לא נשמרת, מחסן בלי מחירים, טיוטה עם אזורים לא בטוחים, qid חוזר, צילום חוזר, סיום סבב.
 //   2. הפונקציות דרך אמולטור הפונקציות: מי רשאי, עסק עם store3d כבוי, qid של תמונה ב-s3Log (סוג פעולה אחר) – נדחה.
+process.env.SCAN_RETRY_WAIT_MS = process.env.SCAN_RETRY_WAIT_MS || '10'; // 503 מהדמה – בלי המתנה ארוכה (נקרא בטעינת lib/scan.js)
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fsm = require('node:fs');
@@ -105,7 +106,7 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.deepEqual(await files(), [dir + 'f1-a-1_a_1.jpg', dir + 'f1-a-1_a_1_t.jpg']);
     assert.equal((await bucket.file(ph.p).getMetadata())[0].contentType, 'image/jpeg');
     const ai = await get(`b/${A}/srun/${RUN}/ai/f1-a-1_a`);
-    assert.deepEqual([ai.st, ai.iss.length, ai.ver, ai.recs.length, typeof ai.model], ['issue', 3, 1, 2, 'string']);
+    assert.deepEqual([ai.st, ai.iss.length, ai.ver, ai.recs.length, typeof ai.model], ['issue', 3, require(path.join(FN, 'lib', 'prompts-shelf.js')).VERSION, 2, 'string']);
     const run = await get(`b/${A}/srun/${RUN}`);
     assert.deepEqual([run.nDone, run.nUid[E1], run.st], [1, { n: 4, d: 1 }, 'open']);
     const sum = await get(`b/${A}/s3sum/s-main`);
@@ -137,22 +138,43 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal(GM.state.requests.length, 1);
   });
 
-  it('שבור מחזיר מכסה: shelf-broken / לא JSON / 429 מ-Gemini – אין ph/ai/קובץ, המונה החודשי חוזר, s3qid נמחק; אותו qid עובר אחר כך', async () => {
+  it('החזרת מכסה (החלטת המשתמש): Gemini ענה – גם שבור / לא JSON – נספר; 429 / עמוס / ניתוק – מוחזר. בכל כשל: אין ph/ai/קובץ, s3qid נמחק, ואותו qid עובר אחר כך', async () => {
     const inp = photo();
-    for (const [mode, shelfAns, reason] of [['ok', 'shelf-broken', 'bad-answer'], ['garbage', null, 'bad-answer'], ['ok', 'not json at all', 'bad-answer'], ['quota', null, 'gemini-quota']]) {
+    let expectN = 0;
+    for (const [mode, shelfAns, reason, charged] of [['ok', 'shelf-broken', 'bad-answer', true], ['garbage', null, 'bad-answer', true], ['ok', 'not json at all', 'bad-answer', true],
+      ['quota', null, 'gemini-quota', false], ['overloaded', null, 'overloaded', false], ['hangup', null, 'network', false]]) {
       GM.reset(); GM.state.mode = mode; GM.state.shelf = shelfAns;
       assert.equal(await err(shelf(E1, inp)), reason, mode + '/' + shelfAns);
       assert.ok(GM.state.requests.length >= 1, 'נשלח ל-Gemini');
-      assert.equal((await use()).n, 0, 'המכסה החודשית הוחזרה');
+      if (charged) expectN++;
+      assert.equal((await use()).n, expectN, charged ? 'Gemini ענה – נספר' : 'לא הגיע ל-AI / נדחה בלי חיוב – מוחזר');
       assert.equal(await get(`b/${A}/s3qid/${inp.qid}`), null);
     }
-    assert.equal((await get(`b/${A}/s3use/u_${E1}`)).n, 4, 'הבלם היומי לעובד לא מוחזר');
+    assert.equal((await get(`b/${A}/s3use/u_${E1}`)).n, 6, 'הבלם היומי לעובד לא מוחזר');
     assert.deepEqual(await ids(`b/${A}/srun/${RUN}/ph`), []);
     assert.deepEqual(await ids(`b/${A}/srun/${RUN}/ai`), []);
     assert.deepEqual(await files(), []);
     GM.reset();
     assert.equal((await shelf(E1, inp)).st, 'issue');
-    assert.equal((await use()).n, 1);
+    assert.equal((await use()).n, expectN + 1);
+  });
+
+  it('תיקון סבב 1: שתי שמירות מקבילות לאותו מקום צילום – כל אחת בקובץ משלה, אף קובץ של בקשה אחרת לא נמחק, ph מצביע על קובץ קיים', async () => {
+    const [a, b] = await Promise.all([shelf(E1, photo()), shelf(MGR, photo())]);
+    assert.deepEqual([a.st, b.st], ['issue', 'issue']);
+    const ph = await get(`b/${A}/srun/${RUN}/ph/f1-a-1_a`);
+    const L = await files();
+    assert.ok(L.includes(ph.p) && L.includes(ph.th), 'הקבצים של ph קיימים: ' + L.join(','));
+    assert.equal(L.length, 2, 'הצילום הישן נמחק, הנוכחי נשאר');
+    assert.equal((await get(`b/${A}/s3sum/s-main`)).b['f1-a-1'].th, ph.th);
+    assert.equal((await get(`b/${A}/srun/${RUN}`)).nDone, 1);
+  });
+
+  it('תיקון סבב 1: תקרת 99 צילומים חוזרים – נבדקת לפני המכסה ולפני Gemini', async () => {
+    await bucket.file(`b/${A}/store3d/main/run/${RUN}/f1-a-1_a_99.jpg`).save(Buffer.from('x'), { resumable: false });
+    assert.equal(await err(shelf(E1, photo())), 'too-many');
+    assert.equal(GM.state.requests.length, 0);
+    assert.equal(await use(), null);
   });
 
   it('תמונה עם אדם לא נשמרת: אין קובץ ב-Storage, ph.person, תוצאה person, לא נספר "צולם"; נספר במכסה', async () => {
@@ -171,6 +193,23 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal((await shelf(E1, photo())).st, 'ok');
     assert.equal((await get(`b/${A}/srun/${RUN}`)).nDone, 1);
     assert.equal((await get(`b/${A}/srun/${RUN}/ph/f1-a-1_a`)).person, undefined);
+  });
+
+  it('תיקון סבב 1: צילום עם אדם אחרי צילום תקין – הצילום הקודם (ph, ai, קבצים, s3sum) נשאר; נספר במכסה', async () => {
+    await shelf(E1, photo());
+    const ph0 = await get(`b/${A}/srun/${RUN}/ph/f1-a-1_a`), sum0 = (await get(`b/${A}/s3sum/s-main`)).b['f1-a-1'];
+    const f0 = await files();
+    GM.state.shelf = { st: 'person' };
+    const q = photo();
+    const r = await shelf(E1, q);
+    assert.deepEqual([r.st, r.kept], ['person', true]);
+    assert.deepEqual(await get(`b/${A}/srun/${RUN}/ph/f1-a-1_a`), ph0);
+    assert.equal((await get(`b/${A}/srun/${RUN}/ai/f1-a-1_a`)).st, 'issue');
+    assert.deepEqual((await get(`b/${A}/s3sum/s-main`)).b['f1-a-1'], sum0);
+    assert.deepEqual(await files(), f0, 'הקבצים הקודמים לא נמחקו');
+    assert.equal((await get(`b/${A}/srun/${RUN}`)).nDone, 1);
+    assert.equal((await use()).n, 2);
+    assert.deepEqual([(await shelf(E1, q)).dup, (await shelf(E1, q)).kept], [true, true]);
   });
 
   it('צילום חוזר: קובץ חדש (_2), הקודם נמחק, nDone לא עולה פעמיים; מדף גבוה – s3sum לפי הגרוע מבין עליון ותחתון', async () => {
@@ -208,6 +247,17 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.deepEqual((await get(`b/${A}/srun/ad_${inp.qid}/ai/f1-a-1_a`)).iss.map((i) => i.k), ['fallen']);
     assert.equal((await use()).n, 1);
     assert.equal(await err(X.shelfCore(db, W(E2, { brs: ['other'] }), photo({ mode: 'adhoc', map: 's-main' }), Date.now(), deps())), 'other-branch');
+    // דיווח יזום של עובד: מונה יומי נפרד (20; כאן 2), בנוסף למכסה החודשית; מנהל – בלי המונה הזה
+    GM.state.shelf = 'shelf-clean';
+    const adh = (u) => shelf(u, photo({ mode: 'adhoc', map: 's-main' }), { adhocMax: 2 });
+    await adh(E2);
+    assert.equal((await get(`b/${A}/s3use/a_${E2}`)).n, 2);
+    const nReq = GM.state.requests.length;
+    assert.equal(await err(adh(E2)), 's3-adhoc-day');
+    assert.equal(GM.state.requests.length, nReq, 'בלי Gemini');
+    assert.equal((await adh(MGR)).st, 'ok', 'מנהל לא מוגבל');
+    assert.equal(await get(`b/${A}/s3use/a_${MGR}`), null);
+    assert.equal((await use()).n, 3, 'הדיווחים היזומים נספרים גם במכסה החודשית');
     await adm.doc(`b/${A}/s3br/main`).set({ wh: true, cap: 500, on: false, upd: 1, by: MGR });
     assert.equal(await err(shelf(E1, photo())), 'br-off');
   });
@@ -250,7 +300,7 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     const q2 = qid();
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: q2, br: 'main', kind: 's', imgs: [IMG, IMG, IMG] }, Date.now(), deps())), 'bad-answer');
     assert.equal((await get(`b/${A}/s3draft/${q2}`)).st, 'fail');
-    assert.equal((await use()).n, 2, '3 התמונות הוחזרו');
+    assert.equal((await use()).n, 5, 'Gemini ענה (טיוטה שבורה) – 3 התמונות נספרות (החלטת המשתמש)');
     assert.equal(await get(`b/${A}/s3qid/${q2}`), null);
     GM.state.mapdraft = 'mapdraft-unsure';
     const u = await X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps());
@@ -258,6 +308,11 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 'w', imgs: [IMG] }, Date.now(), deps())), 'no-wh');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [] }, Date.now(), deps())), 'bad-img-count');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'zz', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'no-branch');
+    assert.equal(await err(X.draftCore(db, W(DR, { brs: ['other'] }), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'other-branch');
+    GM.state.mode = 'quota';
+    const before = (await use()).n;
+    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [IMG, IMG] }, Date.now(), deps())), 'gemini-quota');
+    assert.equal((await use()).n, before, '429 – מוחזר');
   });
 });
 

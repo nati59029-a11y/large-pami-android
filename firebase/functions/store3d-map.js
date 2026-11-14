@@ -39,6 +39,15 @@ function toHttps(e) {
   return bad(e.code, e.message, CODE[e.code], e.errs ? { errs: e.errs } : null);
 }
 const canDraw = (who) => who.role === 'manager' || hasPerm(who, 's3m');
+// שלב 8, תיקון סבב 1: עובד ששויך לסניפים (staff.br) פועל רק בסניפים שלו – אותו תנאי כמו myBranches ב-store3d.js. מנהל / בלי שיוך = null
+function myBranches(who) {
+  if (!who || who.role === 'manager') return null;
+  const brs = who.staff && who.staff.exists ? who.staff.get('br') : null;
+  return Array.isArray(brs) ? brs.filter((b) => typeof b === 'string') : null;
+}
+function brAllowed(who, br) {
+  if (who.brs && !who.brs.includes(br)) throw bad('other-branch', 'הסניף הזה לא משויך אליך', 'permission-denied');
+}
 async function branchesOf(bizId) {
   const s = await getFirestore().doc('b/' + bizId).get();
   return M.branchIds(s.exists ? s.get('org') : null);
@@ -62,6 +71,7 @@ async function branchOk(db, bizId, br, kind) {
 // הליבה, לבדיקות מול אמולטור Firestore בלי אמולטור הפונקציות. who = { uid, mgr, bizId }; db = T.tdb() של העסק.
 async function saveMap(db, who, input, now) {
   const mapId = mapIdOf(input), br = mapId.slice(2), kind = mapId.charAt(0);
+  brAllowed(who, br);
   let clean;
   try { clean = M.cleanMap(input.map, { bizId: who.bizId, mapId }); } catch (e) { throw toHttps(e); }
   await branchOk(db, who.bizId, br, kind);
@@ -93,7 +103,7 @@ exports.s3SaveMap = onCall(T.scoped(async (request) => {
   const who = await requireStaff(request, { feature: 'store3d' });
   if (!canDraw(who)) throw bad('not-s3m', 'שמירת מפה מותרת למנהל או לעובד עם הרשאת "שרטוט מפה"', 'permission-denied');
   const input = inputObject(request);
-  return saveMap(T.tdb(), { uid: who.uid, mgr: who.role === 'manager', bizId: who.bizId }, input, Date.now());
+  return saveMap(T.tdb(), { uid: who.uid, mgr: who.role === 'manager', bizId: who.bizId, brs: myBranches(who) }, input, Date.now());
 }));
 
 // ---------------- s3SetBranch (מנהל־על) ----------------
@@ -124,6 +134,7 @@ async function putTex(db, who, input, now, bucket, opts) {
   const maxDay = opts && Number.isInteger(opts.maxDay) ? opts.maxDay : M.TEX_DAY;
   if (typeof input.qid !== 'string' || !M.RE.qid.test(input.qid)) throw bad('bad-qid', 'מזהה השליחה לא תקין');
   const mapId = mapIdOf(input), br = mapId.slice(2);
+  brAllowed(who, br);
   const qref = db.doc('s3qid/' + input.qid);
   const same = (q) => q.get('k') === 'tex' && q.get('uid') === who.uid && q.get('res') && String(q.get('res').path || '').startsWith(M.texDir(who.bizId, br, mapId));
   const q0 = await qref.get();
@@ -171,7 +182,7 @@ async function putTex(db, who, input, now, bucket, opts) {
 exports.s3PutTex = onCall(T.scoped(async (request) => {
   const who = await requireStaff(request, { feature: 'store3d' });
   if (!canDraw(who)) throw bad('not-s3m', 'צילום טקסטורות מותר למנהל או לעובד עם הרשאת "שרטוט מפה"', 'permission-denied');
-  return putTex(T.tdb(), { uid: who.uid, bizId: who.bizId }, inputObject(request), Date.now());
+  return putTex(T.tdb(), { uid: who.uid, bizId: who.bizId, brs: myBranches(who) }, inputObject(request), Date.now());
 }));
 
 // לבדיקות בלבד (לא נספר כפונקציה)

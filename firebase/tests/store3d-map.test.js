@@ -81,6 +81,14 @@ describe('store3d-map – הליבה מול האמולטור (Firestore + Storag
     assert.equal((await get(`b/${A}/smap/s-main`)).v, 3);
   });
 
+  it('שלב 8, תיקון סבב 1: עובד s3m ששויך לסניפים (staff.br) – שמירת מפה וטקסטורה רק בסניפים שלו; מנהל לא מוגבל', async () => {
+    const other = Object.assign({}, drw, { brs: ['other'] }), mine = Object.assign({}, drw, { brs: ['main'] });
+    assert.equal(await err(C.saveMap(db, other, { mapId: 's-main', baseV: 0, map: MAP() }, 1800000000000)), 'other-branch');
+    assert.equal(await err(C.putTex(db, other, { qid: qid(), mapId: 's-main', img: IMG }, Date.now(), bucket)), 'other-branch');
+    assert.equal((await C.saveMap(db, mine, { mapId: 's-main', baseV: 0, map: MAP() }, 1800000000000)).v, 1);
+    assert.equal((await C.saveMap(db, Object.assign({}, mgr, { brs: null }), { mapId: 's-main', baseV: 1, map: MAP() }, 1800000001000)).v, 2);
+  });
+
   it('30 גרסאות אחרונות בלבד', async () => {
     let v = 0;
     for (let i = 0; i < 33; i++) v = (await C.saveMap(db, mgr, { mapId: 's-main', baseV: v, map: MAP({ name: 'גרסה ' + i }) }, 1800000000000 + i)).v;
