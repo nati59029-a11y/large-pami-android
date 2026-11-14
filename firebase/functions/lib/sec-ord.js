@@ -5,7 +5,7 @@
 //   – q: אובייקט { <br>|'_': כמות } כמו ב-prod. לא נמסר = לא בודקים מלאי; נמסר – כמו qOf ב-orders.js (סניף חסר = 0 = אזל).
 //   – עסק בלי סניפים: הקורא מעביר br = '_'.
 // לקוח: { wholesale?: true }. סניף: br.
-// שורה מהטקסט: { txt, qty, unit? }. המחיר תמיד מהמוצר – לעולם לא מהטקסט.
+// שורה מהטקסט: { txt, qty, unit?, pid? (בחירת המנהל) }. המחיר תמיד מהמוצר – לעולם לא מהטקסט.
 // תוצאה לשורה: st = 'ok' (התאמה אחת בטוחה) | 'pick' (עד 3 אפשרויות opts) | 'ask' (לבירור). pick/ask חוסמים אישור (block).
 // גם שורת ok חוסמת אם: אזל (out), כמות לא בקרטונים שלמים ללקוח סיטונאי (ctw – createOrder דוחה cto-qty).
 
@@ -121,20 +121,28 @@ function line(it, prods, ctx) {
   const qty = qtyOk(x.qty);
   if (qty == null) { out.why = 'qty'; return out; }
   out.qty = qty;
-  const m = match(txt, prods);
+  // שלב 4: שורה שהמנהל בחר לה מוצר (pid) – רק המוצר הזה, אם הוא עדיין פעיל ברשימה; אחרת לבירור (why:'gone'). pid נשמר בשורה
+  let m;
+  if (typeof x.pid === 'string' && x.pid) {
+    out.pid = x.pid;
+    const p = (Array.isArray(prods) ? prods : []).find((q) => isProd(q) && q.id === x.pid);
+    if (!p) { out.why = 'gone'; out.opts = []; return out; }
+    m = { st: 'ok', p };
+  } else m = match(txt, prods);
   if (m.st === 'ok') {
     const pr = priceOf(m.p, o.cust, o.br);
     if (pr == null) { out.why = 'price'; return out; }
     if (pr <= 0) { out.why = 'price0'; return out; } // לא שולחים ללקוח מחיר 0 (גם wp:0) – לבירור
     Object.assign(out, { st: 'ok', block: false, id: m.p.id, name: m.p.name, pr, sum: Math.round(pr * qty) });
     const ws = !!(o.cust && o.cust.wholesale === true);
+    if (ws && num(m.p.wp) != null) out.ex = true; // מחיר סיטונאי = לפני מע"מ (pricing.js); מחיר לצרכן = כולל מע"מ
     const ct = ws ? ctoOf(m.p) : 0;
     if (ct && !Number.isInteger(qty / ct)) { out.ctw = ct; out.block = true; }
     if (isOut(m.p, o.br)) { out.out = true; out.block = true; } // החלטה 5: אזל – לא נכנס בלי אישור
     return out;
   }
   out.st = m.st;
-  out.opts = (m.opts || []).map((p) => { const pr = priceOf(p, o.cust, o.br); return { id: p.id, name: p.name, pr: pr > 0 ? pr : null }; });
+  out.opts = (m.opts || []).map((p) => { const pr = priceOf(p, o.cust, o.br); const r = { id: p.id, name: p.name, pr: pr > 0 ? pr : null }; if (pr > 0 && o.cust && o.cust.wholesale === true && num(p.wp) != null) r.ex = true; return r; });
   if (m.st === 'ask') out.why = 'none';
   return out;
 }
@@ -147,16 +155,16 @@ function build(items, prods, ctx) {
   return { lines, total, block: nBlock > 0, nBlock };
 }
 
-// תצוגה בטוחה ללקוח: רשימה לבנה של שדות. אין q, אין עלות, אין wp (המחיר pr כבר נקבע לפי סוג הלקוח).
+// תצוגה בטוחה ללקוח: רשימה לבנה של שדות. אין q, אין עלות, אין wp (המחיר pr כבר נקבע לפי סוג הלקוח), אין מזהי מוצר (id/pid). ex = המחיר לפני מע"מ
 function safeView(d) {
   const src = d || {};
   const lines = (Array.isArray(src.lines) ? src.lines : []).map((l) => {
     const v = { txt: l.txt, qty: typeof l.qty === 'number' && Number.isFinite(l.qty) && l.qty > 0 ? l.qty : null, unit: l.unit, st: l.st };
-    if (l.st === 'ok' && l.pr > 0) { v.name = l.name; v.pr = l.pr; v.sum = l.sum; }
+    if (l.st === 'ok' && l.pr > 0) { v.name = l.name; v.pr = l.pr; v.sum = l.sum; if (l.ex) v.ex = true; }
     if (l.out) v.out = true;
     if (l.ctw) v.ctw = l.ctw;
     if (l.why) v.why = l.why;
-    if (Array.isArray(l.opts)) v.opts = l.opts.map((p) => ({ name: p.name, pr: p.pr > 0 ? p.pr : null }));
+    if (Array.isArray(l.opts)) v.opts = l.opts.map((p) => Object.assign({ name: p.name, pr: p.pr > 0 ? p.pr : null }, p.pr > 0 && p.ex ? { ex: true } : {}));
     return v;
   });
   return { lines, total: Number.isInteger(src.total) ? src.total : 0, block: !!src.block };

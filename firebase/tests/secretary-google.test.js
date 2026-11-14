@@ -2137,4 +2137,271 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     assert.equal(GO.state.sent.length, 0, 'שום דבר לא נשלח ללקוח');
   });
 
+  // ---------- שלב ג/4: פעולות מנהל על טיוטת ההזמנה (ordGet / ordEdit / ordCust / ordSend) ----------
+  describe('שלב ג/4: פעולות מנהל על sec_ord', () => {
+    const ordOf = (id) => get(`b/${A}/sec_ord/${id}`);
+    const sec = (uid, d) => call('secMail', uid, d);
+    const L0 = [{ txt: 'כוס', qty: 3 }, { txt: 'צלחת עמוקה', qty: 10 }, { txt: 'משהו שלא קיים בכלל', qty: 1 }, { txt: 'מגבת מטבח', qty: 2 }];
+    let sq = 0;
+    const go = async (from, cust, o) => {
+      const opt = o || {};
+      AIR = { text: 'שלום, קיבלנו את ההזמנה ונחזור אליך.', cls: 'order', qk: 'הזמנה', facts: [], order: { lines: opt.lines || L0, cust } };
+      const n = await mail(Object.assign({ subject: 'הזמנה ' + (++sq), text: 'הזמנה', from }, opt.mail || {}));
+      const r = await work(n);
+      assert.equal(r.aw, 'draft', JSON.stringify(r));
+      return n;
+    };
+    const ordSetup = async () => {
+      await prep(async (d) => {
+        const b = d.batch(), P = `b/${A}/`;
+        b.update(d.doc('b/' + A), { 'features.orders': true });
+        b.set(d.doc(P + 'prod/p1'), { name: 'צלחת עמוקה', price: 10, on: true, q: { _: 4321 } });
+        b.set(d.doc(P + 'prod/p1/p/ws'), { wp: 7 });
+        b.set(d.doc(P + 'prod/p3'), { name: 'כוס זכוכית', price: 5, on: true, q: { _: 4321 } });
+        b.set(d.doc(P + 'prod/p3/p/ws'), { wp: 3 });
+        b.set(d.doc(P + 'prod/p4'), { name: 'כוס פלסטיק', price: 2, on: true, q: { _: 4321 } });
+        b.set(d.doc(P + 'prod/p5'), { name: 'כוס קרמיקה', price: 4, on: true, q: { _: 4321 } });
+        b.set(d.doc(P + 'prod/p6'), { name: 'מגבת מטבח', price: 9, on: true, q: { _: 0 } });
+        b.set(d.doc(P + 'prod/p9'), { name: 'מגש כבוי', price: 8, on: false, q: { _: 4321 } });
+        b.set(d.doc(P + 'cust/cws'), { name: 'סיטון', bn: 'סיטון בעמ', vat: '513333333', mail: 'buy@ws.example', phone: '0506666666', wholesale: true, at: 1 });
+        b.set(d.doc(P + 'cust/cmail'), { name: 'דנה', mail: 'dana@shop.example', phone: '0502222222', at: 1 });
+        b.set(d.doc(P + 'cust/cn1'), { name: 'רוזה 1', bn: 'קפה רוזה תל אביב', phone: '0503333331', wholesale: true, at: 1 });
+        b.set(d.doc(P + 'cust/cn2'), { name: 'רוזה 2', bn: 'קפה רוזה חיפה', phone: '0503333332', at: 1 });
+        await b.commit();
+      });
+      await setRep({ auto: true });
+    };
+    const vatOff = (s) => s.replace(/(לפני|כולל|כוללים) מע"מ/g, '');
+
+    it('הרשאות: עובד → permission-denied בכל 4 הפעולות; מנהל מעסק אחר לא מגיע לטיוטה; בלי תוספת ההזמנות – נחסם', async () => {
+      await ordSetup();
+      const n = await go('Dana <dana@shop.example>', {});
+      const o0 = await ordOf(n);
+      const ops = [{ op: 'ordGet', id: n }, { op: 'ordEdit', id: n, ver: 1, ops: [{ k: 'qty', i: 1, qty: 2 }] }, { op: 'ordCust', id: n, card: { phone: '0501231234' } }, { op: 'ordSend', id: n, ver: 1 }];
+      for (const d of ops) {
+        const r = await sec(E1, d);
+        assert.equal(r.code, 'permission-denied', d.op + ': ' + JSON.stringify(r));
+        const r0 = await sec(null, d);
+        assert.ok(!r0.ok && ['unauthenticated', 'permission-denied'].includes(r0.code), d.op + ' בלי התחברות: ' + JSON.stringify(r0));
+      }
+      // מנהל של עסק B (גם עם תוספת ההזמנות והמזכירה) – העסק נקבע מהחשבון שלו, ולא מגיע למסמך של A
+      for (const d of ops) assert.equal((await sec(MB, d)).reason, 'feature-off', d.op);
+      await prep((d) => d.doc('b/' + B).update({ 'features.orders': true }));
+      for (const d of ops) { const r = await sec(MB, d); assert.ok(!r.ok && r.code !== 'ok' && ['not-found'].includes(r.reason), d.op + ': ' + JSON.stringify(r)); }
+      assert.deepEqual(await ordOf(n), o0, 'sec_ord לא השתנה');
+      assert.equal(GO.state.sent.length, 0);
+      assert.equal((await coll(`b/${A}/cust`)).length, 4, 'לא נוצר לקוח');
+    });
+
+    it('ordGet: תצוגת מנהל + טקסט בטוח; sec_ord חסר נבנה מחדש מ-ord של הטיוטה; מייל בלי הזמנה – no-order', async () => {
+      await ordSetup();
+      const n = await go('Dana <dana@shop.example>', {});
+      const o1 = await ordOf(n);
+      const g = await sec(M1, { op: 'ordGet', id: n });
+      assert.ok(g.ok, JSON.stringify(g));
+      assert.equal(g.r.ord.ver, 1); assert.equal(g.r.ord.custId, 'cmail'); assert.equal(g.r.ord.phone, '0502222222'); assert.equal(g.r.ord.lines.length, 4);
+      assert.ok(!/p[0-9]\b|4321/.test(g.r.ord.text), 'בטקסט אין מזהי מוצר ומלאי');
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n}`).delete());
+      const g2 = await sec(M1, { op: 'ordGet', id: n });
+      assert.ok(g2.ok, JSON.stringify(g2));
+      const o2 = await ordOf(n);
+      assert.deepEqual(Object.assign({}, o2, { t: 0 }), Object.assign({}, o1, { t: 0 }), 'נבנה מחדש זהה');
+      assert.ok((await logs(A)).some((l) => l.act === 'ordRebuild' && l.tgt === n));
+      AIR = { text: 'שלום, אנחנו פתוחים ' + HOURS + '.', cls: 'hours', qk: 'שעות', facts: ['hours'] };
+      const m = await mail({ subject: 'שעות?', text: 'מתי?' }); await work(m);
+      assert.equal((await sec(M1, { op: 'ordGet', id: m })).reason, 'no-order');
+    });
+
+    it('ordEdit: ver ישן נדחה; pid לא באפשרויות ולא פעיל נדחה; מחיר בקלט מתעלם; בחירת מועמד סיטונאי → wp; סניף; טלפון; מחיקה', async () => {
+      await ordSetup();
+      const n = await go('Rosa <x@rosa.example>', { bn: 'קפה רוזה', phone: '0504444444' });
+      const o = await ordOf(n);
+      assert.deepEqual(o.blk, ['cust', 'phone']); assert.equal(o.lines[0].st, 'pick'); assert.equal(o.lines[0].opts.length, 3);
+      assert.ok(!o.lines[0].opts.some((p) => p.id === 'p1'));
+      const ed = (ver, ops) => sec(M1, { op: 'ordEdit', id: n, ver, ops });
+      assert.equal((await ed(2, [{ k: 'qty', i: 1, qty: 2 }])).reason, 'stale', 'גרסה לא תואמת');
+      assert.equal((await ed(1, [{ k: 'pick', i: 0, pid: 'p9' }])).reason, 'bad-pid', 'מוצר כבוי שאינו באפשרויות');
+      assert.equal((await ed(1, [{ k: 'pick', i: 0, pid: 'nope' }])).reason, 'bad-pid', 'מוצר שלא קיים');
+      assert.equal((await ed(1, [{ k: 'qty', i: 1, qty: -3 }])).reason, 'bad-qty');
+      assert.equal((await ed(1, [{ k: 'del', i: 9 }])).reason, 'bad-line');
+      assert.equal((await ed(1, [{ k: 'cust', cid: 'cmail' }])).reason, 'bad-cust', 'רק מהמועמדים');
+      assert.equal((await ed(1, [{ k: 'br', br: 'tlv' }])).reason, 'bad-br', 'עסק בלי סניפים');
+      assert.equal((await ordOf(n)).ver, 1, 'שינוי שנדחה לא נשמר');
+      // בחירה מהאפשרויות + כמות, עם "מחיר" בקלט – מתעלם
+      const r1 = await ed(1, [{ k: 'pick', i: 0, pid: 'p3', pr: 1, price: 0.01, sum: 1 }, { k: 'qty', i: 0, qty: 4, pr: 1 }]);
+      assert.ok(r1.ok, JSON.stringify(r1));
+      let v = await ordOf(n);
+      assert.equal(v.ver, 2); assert.equal(v.lines[0].st, 'ok'); assert.equal(v.lines[0].pid, 'p3'); assert.equal(v.lines[0].pr, 500, 'מחיר מהקטלוג'); assert.equal(v.lines[0].sum, 2000);
+      assert.equal(v.lines[1].pr, 1000, 'עדיין לא סיטונאי');
+      // מוצר פעיל שאינו באפשרויות – מותר
+      assert.ok((await ed(2, [{ k: 'pick', i: 2, pid: 'p1' }])).ok);
+      assert.equal((await ed(2, [{ k: 'qty', i: 0, qty: 1 }])).reason, 'stale', 'ver ישן אחרי שינוי');
+      // בחירת מועמד סיטונאי – זהות מאושרת על ידי המנהל → wp; הטלפון מהכרטיס; החסימות נעלמות
+      const r2 = await ed(3, [{ k: 'cust', cid: 'cn1' }]);
+      assert.ok(r2.ok, JSON.stringify(r2));
+      v = await ordOf(n);
+      assert.equal(v.custId, 'cn1'); assert.equal(v.cands, undefined); assert.equal(v.custBy, M1);
+      assert.equal(v.lines[0].pr, 300, 'wp לסיטונאי שנבחר'); assert.equal(v.lines[0].ex, true); assert.equal(v.lines[1].pr, 700); assert.equal(v.lines[2].pr, 700);
+      assert.deepEqual(v.blk, []); assert.equal(r2.r.ord.phone, '0503333331');
+      assert.equal(v.lines[3].out, true, 'מגבת – אזל'); assert.equal(v.nBlock, 1);
+      // מחיקה
+      assert.ok((await ed(4, [{ k: 'del', i: 3 }])).ok);
+      v = await ordOf(n);
+      assert.equal(v.lines.length, 3); assert.equal(v.nBlock, 0); assert.equal(v.total, 300 * 4 + 700 * 10 + 700 * 1);
+      // סניפים: הסניף חייב להיות פעיל; בחירה מבטלת brDef
+      await prep((d) => d.doc('b/' + A).update({ org: { branches: [{ id: 'old', name: 'סגור', on: false }, { id: 'tlv', name: 'תל אביב' }, { id: 'hfa', name: 'חיפה' }] } }));
+      const n2 = await go('Dana <dana@shop.example>', {}, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      assert.equal((await ordOf(n2)).brDef, true);
+      assert.equal((await sec(M1, { op: 'ordEdit', id: n2, ver: 1, ops: [{ k: 'br', br: 'old' }] })).reason, 'bad-br');
+      assert.ok((await sec(M1, { op: 'ordEdit', id: n2, ver: 1, ops: [{ k: 'br', br: 'hfa' }] })).ok);
+      const v2 = await ordOf(n2);
+      assert.equal(v2.br, 'hfa'); assert.equal(v2.brDef, undefined); assert.equal(v2.lines[0].pr, 1000, 'לקוח רגיל – בלי wp'); assert.ok(!JSON.stringify(v2).includes('700'));
+      // אישור טלפון מהמייל
+      const n3 = await go('Rosa <y@rosa.example>', { bn: 'קפה רוזה', phone: '0504444444' }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      assert.ok((await sec(M1, { op: 'ordEdit', id: n3, ver: 1, ops: [{ k: 'cust', cid: 'cn2' }] })).ok);
+      const v3 = await ordOf(n3);
+      assert.equal(v3.lines[0].pr, 1000, 'מועמד שאינו סיטונאי – מחיר רגיל'); assert.ok(!JSON.stringify(v3).includes('700'));
+      const n4 = await go('New <n4@new.example>', { bn: 'חדש', phone: '0504444455' }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      // custNew עם טלפון – לא חוסם; טלפון מהמייל בלי כרטיס: מועמד מזויף (From זר) עם phoneHint
+      const n5 = await go('Buy <buy@ws.example>', { phone: '0505555555' }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }], mail: { noAuth: true } });
+      const o5 = await ordOf(n5);
+      assert.deepEqual(o5.blk, ['br', 'cust', 'phone'].filter((k) => o5.blk.includes(k)));
+      assert.equal(o5.phoneHint, '0505555555');
+      assert.ok((await sec(M1, { op: 'ordEdit', id: n5, ver: 1, ops: [{ k: 'phone' }] })).ok);
+      const v5 = await ordOf(n5);
+      assert.equal(v5.phone, '0505555555'); assert.equal(v5.phoneHint, undefined); assert.ok(!v5.blk.includes('phone')); assert.ok(v5.blk.includes('cust'));
+      assert.equal(v5.lines[0].pr, 1000, 'From מזויף – עדיין מחיר רגיל');
+      assert.equal((await sec(M1, { op: 'ordEdit', id: n4, ver: 1, ops: [{ k: 'phone' }] })).reason, 'bad-phone', 'אין phoneHint');
+      assert.equal(GO.state.sent.length, 0);
+    });
+
+    it('ordCust: שמירה דרך customers.js – נכשל בלי שדות חובה; לקוח עסקי נשמר עם wholesale ו-src:sec; custId על sec_ord, ביטול חסימות, wp', async () => {
+      await ordSetup();
+      const n = await go('New <n@new.example>', { bn: 'חדשים בעמ', vat: '598765432', city: 'חיפה', ct: 'רון' }, { lines: [{ txt: 'צלחת עמוקה', qty: 2 }] });
+      assert.deepEqual((await ordOf(n)).blk, ['phone']);
+      const before = (await coll(`b/${A}/cust`)).length;
+      const cc = (card, ws) => sec(M1, Object.assign({ op: 'ordCust', id: n, card }, ws === undefined ? {} : { ws }));
+      assert.equal((await cc({})).reason, 'bad-cust', 'בלי טלפון');
+      assert.equal((await cc({ phone: '123' })).reason, 'bad-phone', 'phoneOf');
+      assert.equal((await cc({ phone: '0509990000' })).reason, 'bad-addr', 'BIZ_REQ: כתובת');
+      assert.equal((await cc({ phone: '0509990000', st: 'הרצל 1' })).reason, 'bad-pay', 'BIZ_REQ: תנאי תשלום');
+      assert.equal((await cc({ phone: '0509990000', st: 'הרצל 1', pay: 'n30', tz: '123456782' })).reason, 'bad-field', 'ת"ז לא מתקבלת');
+      assert.equal((await cc({ phone: '0509990000', st: 'הרצל 1', pay: 'n30', vat: '12' })).reason, 'bad-vat');
+      assert.equal((await coll(`b/${A}/cust`)).length, before, 'שום לקוח לא נשמר');
+      assert.equal((await ordOf(n)).ver, 1);
+      const r = await cc({ phone: '050-999-0000', st: 'הרצל 1', pay: 'n30' });
+      assert.ok(r.ok, JSON.stringify(r));
+      assert.equal(r.r.custId, 'p0509990000'); assert.equal(r.r.created, true);
+      const c = await get(`b/${A}/cust/p0509990000`);
+      assert.equal(c.wholesale, true); assert.equal(c.src, 'sec'); assert.equal(c.bn, 'חדשים בעמ'); assert.equal(c.name, 'חדשים בעמ'); assert.equal(c.vat, '598765432');
+      assert.equal(c.ct, 'רון'); assert.equal(c.city, 'חיפה'); assert.equal(c.phone, '0509990000'); assert.equal(c.by, M1); assert.equal(c.mail, undefined, 'מייל רק אם המנהל כתב');
+      const v = await ordOf(n);
+      assert.equal(v.custId, 'p0509990000'); assert.equal(v.custNew, undefined); assert.deepEqual(v.blk, []); assert.equal(v.ver, 2);
+      assert.equal(v.lines[0].pr, 700, 'לקוח עסקי שאושר – wp');
+      assert.equal((await cc({ phone: '0509990000' })).reason, 'has-cust');
+      assert.ok((await logs(A)).some((l) => l.act === 'ordCust' && l.tgt === n));
+      // לקוח קיים עם אותו טלפון – לא נדרס (fill), רק נבחר; ws:false – בלי סימון עסקי
+      const n2 = await go('Other <o@new.example>', { bn: 'דנה אחרת', phone: '0502222222' }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      await prep((d) => d.doc(`b/${A}/cust/p0502222222`).set({ name: 'דנה קיימת', phone: '0502222222', at: 1 }));
+      const r2 = await sec(M1, { op: 'ordCust', id: n2, card: { name: 'שם חדש' }, ws: false });
+      assert.ok(r2.ok, JSON.stringify(r2)); assert.equal(r2.r.custId, 'p0502222222'); assert.equal(r2.r.created, false);
+      const c2 = await get(`b/${A}/cust/p0502222222`);
+      assert.equal(c2.name, 'דנה קיימת', 'לא נדרס'); assert.equal(c2.wholesale, undefined); assert.equal(c2.bn, 'דנה אחרת', 'שדה ריק התמלא');
+      assert.equal((await ordOf(n2)).lines[0].pr, 1000);
+    });
+
+    it('ordSend: נחסם עם cust/br, "עצור הכל", מענה כבוי, תשובה בשרשור; שולח טבלה נכונה לכתובת to בלבד; לחיצה כפולה לא שולחת פעמיים; בלי q/wp/מזהים', async () => {
+      await ordSetup();
+      const snd = (id, ver, ex) => sec(M1, Object.assign({ op: 'ordSend', id, ver }, ex || {}));
+      // לקוח לא נבחר (מועמדים) – חוסם
+      const nc = await go('Rosa <x@rosa.example>', { bn: 'קפה רוזה', phone: '0504444444' });
+      const rc = await snd(nc, 1);
+      assert.equal(rc.reason, 'blocked'); assert.ok(/לקוח/.test(rc.msg));
+      // סניף לא נבחר (אין סניף פעיל) – חוסם
+      await prep((d) => d.doc('b/' + A).update({ org: { branches: [{ id: 'old', name: 'סגור', on: false }] } }));
+      const nb = await go('Dana <dana@shop.example>', {}, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      assert.deepEqual((await ordOf(nb)).blk, ['br']);
+      assert.equal((await snd(nb, 1)).reason, 'blocked');
+      await prep((d) => d.doc('b/' + A).update({ org: { branches: [] } }));
+      // הטיוטה לשליחה: לקוח חדש בלי טלפון (מבקשת טלפון), שורות ok / pick / ask / אזל
+      const n = await go('New Buyer <nb@new.example>', { bn: 'קונה חדש' }, { mail: { thread: 'thr-ord' } });
+      const o = await ordOf(n);
+      assert.deepEqual(o.blk, ['phone']);
+      // "עצור הכל"
+      await sec(M1, { op: 'stop', on: true });
+      let r = await snd(n, 1); assert.equal(r.reason, 'blocked'); assert.ok(/עצור הכל/.test(r.msg));
+      await sec(M1, { op: 'stop', on: false });
+      // מתג המענה במייל כבוי
+      await setRep({ auto: false });
+      r = await snd(n, 1); assert.equal(r.reason, 'blocked'); assert.ok(/המענה במייל כבוי/.test(r.msg));
+      await setRep({ auto: true });
+      assert.equal((await snd(n, 2)).reason, 'stale');
+      // תשובה ב-Gmail בשרשור אחרי המייל
+      const nt = await go('Dana <dana@shop.example>', {}, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }], mail: { thread: 'thr-done', date: Date.now() - 60000 } });
+      GO.addSent(BOX_A, 'thr-done', Date.now());
+      r = await snd(nt, 1); assert.equal(r.reason, 'blocked'); assert.ok(/כבר נשלחה תשובה/.test(r.msg), r.msg);
+      // תשובת טקסט שכבר נשלחה דרך המזכירה
+      const nd = await go('Dana <dana@shop.example>', {}, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      assert.ok((await call('secMailSend', M1, { id: nd, sendId: 'send-' + nd.slice(1, 12) })).ok);
+      assert.equal((await snd(nd, 1)).reason, 'blocked');
+      assert.equal(GO.state.sent.length, 1, 'רק תשובת הטקסט נשלחה');
+      // שליחה: לחיצה כפולה במקביל – מייל אחד; "to" בקלט מתעלם
+      const [a, b] = await Promise.all([snd(n, 1, { to: 'evil@x.example' }), snd(n, 1)]);
+      assert.ok(a.ok || b.ok, JSON.stringify([a, b]));
+      assert.equal(GO.state.sent.length, 2, 'נשלח פעם אחת');
+      const again = await snd(n, 1);
+      assert.ok(again.ok && again.r.already, JSON.stringify(again));
+      assert.equal(GO.state.sent.length, 2, 'לחיצה חוזרת לא שולחת');
+      const s = GO.state.sent[1];
+      assert.ok(/^To: nb@new\.example\r?$/m.test(s.raw), 'הנמען – to של sec_ord');
+      assert.ok(!s.raw.includes('evil@'));
+      assert.equal(s.threadId, 'thr-ord', 'באותו שרשור');
+      const t = body(1);
+      assert.ok(t.includes('2. צלחת עמוקה | כמות: 10 | מחיר: 10.00 ₪ | סה"כ: 100.00 ₪'), t);
+      assert.ok(t.includes('1. "כוס" | כמות: 3 – נא לבחור'), t);
+      assert.ok(/א\) כוס \S+ – \d\.00 ₪/.test(t), t);
+      assert.ok(t.includes('3. "משהו שלא קיים בכלל" | כמות: 1 – לבירור'), t);
+      assert.ok(t.includes('4. מגבת מטבח – אזל כרגע'), t);
+      assert.ok(t.includes('סה"כ: 100.00 ₪ (המחירים כוללים מע"מ)'), t);
+      assert.ok(t.includes('נא לשלוח מספר טלפון'), t);
+      assert.ok(!/4321|p[0-9]\b|7\.00|3\.00|wp|"q"/.test(t), 'אין מלאי, מזהים או wp: ' + t);
+      const v = await ordOf(n);
+      assert.equal(v.st, 'sent'); assert.ok(v.gmid); assert.equal(v.sentVer, 1); assert.equal(v.sentBy, M1);
+      assert.equal((await draftOf(n)).st, 'done', 'תשובת הטקסט לא תישלח בנוסף');
+      assert.equal((await get(`b/${A}/sec_in/${n}`)).st, 'replied');
+      assert.ok((await logs(A)).some((l) => l.act === 'ordSend' && l.tgt === n));
+      assert.equal((await sec(M1, { op: 'ordEdit', id: n, ver: 1, ops: [{ k: 'qty', i: 1, qty: 1 }] })).reason, 'not-pending');
+      assert.equal((await snd(n, 2)).reason, 'not-pending');
+      // סיטונאי מאומת – wp, "לפני מע"מ"
+      const nw = await go('Buy <buy@ws.example>', { vat: '513333333' }, { lines: [{ txt: 'צלחת עמוקה', qty: 10 }] });
+      assert.ok((await snd(nw, 1)).ok);
+      const tw = body(2);
+      assert.ok(tw.includes('מחיר: 7.00 ₪ | סה"כ: 70.00 ₪') && tw.includes('(המחירים לפני מע"מ)'), tw);
+      assert.ok(!tw.includes('טלפון'), 'יש טלפון בכרטיס – לא מבקשים');
+      assert.ok(vatOff(tw).length > 0);
+    });
+
+    it('ordSend: מכסת היוצאים ותקלה ב-Gmail מחזירות לטיוטה (בלי שליחה); "sending" ישן – ייתכן שנשלח, לא שולחים שוב', async () => {
+      await ordSetup();
+      const n = await go('Dana <dana@shop.example>', {}, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      await prep((d) => d.doc(`b/${A}/sec_cfg/mail_use`).set({ od: dayIL(Date.now()), odn: G.OUT_DAY }, { merge: true }));
+      const r = await sec(M1, { op: 'ordSend', id: n, ver: 1 });
+      assert.equal(r.reason, 'out-limit', JSON.stringify(r));
+      assert.equal((await ordOf(n)).st, 'mgr'); assert.equal(GO.state.sent.length, 0);
+      await prep((d) => d.doc(`b/${A}/sec_cfg/mail_use`).set({ odn: 0 }, { merge: true }));
+      GO.state.mode['/gmail/v1/users/me/messages/send'] = 'fail';
+      const rf = await sec(M1, { op: 'ordSend', id: n, ver: 1 });
+      delete GO.state.mode['/gmail/v1/users/me/messages/send'];
+      assert.ok(!rf.ok, JSON.stringify(rf));
+      const vf = await ordOf(n);
+      assert.equal(vf.st, 'mgr', 'תקלה ב-Gmail – חוזר לטיוטה'); assert.equal(vf.gmid, undefined);
+      assert.ok((await logs(A)).some((l) => l.act === 'sendFail' && l.tgt === n));
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n}`).update({ st: 'sending', sAt: Date.now() - 120000, sBy: M1 }));
+      assert.equal((await sec(M1, { op: 'ordSend', id: n, ver: 1 })).reason, 'maybe-sent');
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n}`).update({ st: 'mgr', gmid: 'g1' }));
+      assert.equal((await sec(M1, { op: 'ordSend', id: n, ver: 1 })).reason, 'maybe-sent');
+      assert.equal(GO.state.sent.length, 0);
+    });
+  });
+
 });

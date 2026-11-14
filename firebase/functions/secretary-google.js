@@ -58,6 +58,7 @@ const G = require('./lib/sec-google');
 const SO = require('./lib/sec-ord');
 const TK = require('./lib/tk-time');
 const C = require('./secretary')._core;
+const CUS = require('./customers')._core;
 const WA = require('./secretary-wa')._core;
 const { gate, logData, bad, deny, pre, wrap, dayKey, hourKey } = C;
 
@@ -753,7 +754,7 @@ async function mailTask(db, id, x, task, now) {
 // =====================================================================================
 // secMail – מנהל העסק: תיבת המייל, טיוטה, דיוק (refine), "טופל", מענה אוטומטי (הגדרות, רשימה, כיבוי, הצעות לכלל), ורשימות ניקוי הספאם (פ3)
 // =====================================================================================
-const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo'];
+const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend'];
 async function secMail(request) {
   const input = inputObject(request);
   const { who, db } = await gate(request, { consent: true });
@@ -828,6 +829,7 @@ async function secMail(request) {
     return { ok: true, draft: draftOut(id, Object.assign({}, ds.data(), up, { an: [] })) };
   }
   if (['repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo'].includes(op)) return autoOp(who, db, input, op, now);
+  if (ORD_OPS.includes(op)) return ordOp(who, db, input, op, now);
   if (op === 'done') {
     const { id } = await mailDoc(db, input);
     const dRef = db.doc('sec_draft/' + id);
@@ -1087,6 +1089,36 @@ async function ordCust(db, c, from) {
   for (const k of ['bn', 'vat', 'ct', 'phone', 'city', 'st']) if (typeof c[k] === 'string' && c[k]) custNew[k] = c[k];
   return { custNew };
 }
+// סניפי העסק (org.branches). עסק בלי מסמך / בלי סניפים – []
+async function ordBrs(biz) {
+  const bd = biz && biz.exists ? await getFirestore().doc('b/' + biz.bizId).get() : null;
+  const org = bd && bd.exists && bd.get('org') && typeof bd.get('org') === 'object' ? bd.get('org') : {};
+  return (Array.isArray(org.branches) ? org.branches : []).filter((b) => b && typeof b.id === 'string' && b.id);
+}
+const PROD_F = ['name', 'price', 'bp', 'on', 'cto', 'ct', 'sku', 'barcode', 'q'];
+const prodOf = (d, br) => { const p = { id: d.id }; for (const k of PROD_F) if (d.get(k) !== undefined) p[k] = d.get(k); if (!br) delete p.q; return p; };
+// שורות מול הקטלוג (SO.build). ws – רק ללקוח סיטונאי שזהותו אושרה (זיהוי מאומת או בחירת/אישור מנהל). pid שהמנהל בחר – נקרא גם אם מחוץ ל-300
+async function ordCalc(db, items, br, ws) {
+  // קטלוג – אותה מגבלה כמו stockOf (300), מוצר כבוי לא נכנס. נחתך – catCut. סניף לא ידוע – לא בודקים מלאי (אחרת הכול "אזל")
+  const s = await db.collection('prod').select(...PROD_F).limit(ORD_CAT + 1).get();
+  const catCut = s.size > ORD_CAT;
+  const prods = s.docs.slice(0, ORD_CAT).filter((d) => d.get('on') !== false).map((d) => prodOf(d, br));
+  const have = new Set(prods.map((p) => p.id));
+  const pins = [...new Set((items || []).map((l) => l && l.pid).filter((v) => typeof v === 'string' && ID_RE.test(v) && !have.has(v)))];
+  if (pins.length) for (const d of await db.getAll(...pins.map((i) => db.doc('prod/' + i)))) if (d.exists && d.get('on') !== false) prods.push(prodOf(d, br));
+  const ctx = { cust: ws ? { wholesale: true } : null, br };
+  let b = SO.build(items, prods, ctx);
+  if (ws) { // מחיר סיטונאי (prod/{id}/p/ws) – רק למוצרים שהותאמו
+    const ids = [...new Set(b.lines.flatMap((l) => [l.id].concat((l.opts || []).map((o) => o.id))).filter(Boolean))];
+    if (ids.length) {
+      const wsd = await db.getAll(...ids.map((i) => db.doc('prod/' + i + '/p/ws')));
+      const wp = new Map(wsd.filter((d) => d.exists).map((d) => [d.ref.parent.parent.id, d.get('wp')]));
+      prods.forEach((p) => { if (wp.has(p.id)) p.wp = wp.get(p.id); });
+      b = SO.build(items, prods, ctx);
+    }
+  }
+  return { b, catCut };
+}
 async function ordDraft(db, id, x, ord, biz, now) {
   const ref = db.doc('sec_ord/' + id);
   if ((await ref.get()).exists) return 'exists';
@@ -1098,26 +1130,10 @@ async function ordDraft(db, id, x, ord, biz, now) {
   const ws = ok && who.cust.get('wholesale') === true;
   // סניף (החלטת מתאם לפי החלטה 3): אין בקוד הגדרה מפורשת של סניף ברירת מחדל – הסניף הפעיל הראשון ב-org.branches (כמו brDef() בממשק), brDef:true.
   // עסק בלי סניפים = '_' (כמו NB ב-orders.js). יש סניפים אבל אף אחד לא פעיל – br ריק וחוסם
-  const bd = biz && biz.exists ? await getFirestore().doc('b/' + biz.bizId).get() : null;
-  const org = bd && bd.exists && bd.get('org') && typeof bd.get('org') === 'object' ? bd.get('org') : {};
-  const brs = (Array.isArray(org.branches) ? org.branches : []).filter((b) => b && typeof b.id === 'string' && b.id);
+  const brs = await ordBrs(biz);
   const b0 = brs.find((b) => b.on !== false);
   const br = !brs.length ? '_' : b0 ? b0.id : '';
-  // קטלוג – אותה מגבלה כמו stockOf (300), מוצר כבוי לא נכנס. נחתך – catCut. סניף לא ידוע – לא בודקים מלאי (אחרת הכול "אזל")
-  const s = await db.collection('prod').select('name', 'price', 'bp', 'on', 'cto', 'ct', 'sku', 'barcode', 'q').limit(ORD_CAT + 1).get();
-  const catCut = s.size > ORD_CAT;
-  const prods = s.docs.slice(0, ORD_CAT).filter((d) => d.get('on') !== false).map((d) => { const p = Object.assign({}, d.data(), { id: d.id }); if (!br) delete p.q; return p; });
-  const ctx = { cust: ws ? { wholesale: true } : null, br };
-  let b = SO.build(ord.lines, prods, ctx);
-  if (ws) { // מחיר סיטונאי (prod/{id}/p/ws) – רק ללקוח סיטונאי בזיהוי מאומת, ורק למוצרים שהותאמו
-    const ids = [...new Set(b.lines.flatMap((l) => [l.id].concat((l.opts || []).map((o) => o.id))).filter(Boolean))];
-    if (ids.length) {
-      const wsd = await db.getAll(...ids.map((i) => db.doc('prod/' + i + '/p/ws')));
-      const wp = new Map(wsd.filter((d) => d.exists).map((d) => [d.ref.parent.parent.id, d.get('wp')]));
-      prods.forEach((p) => { if (wp.has(p.id)) p.wp = wp.get(p.id); });
-      b = SO.build(ord.lines, prods, ctx);
-    }
-  }
+  const { b, catCut } = await ordCalc(db, ord.lines, br, ws);
   const has = (v) => typeof v === 'string' && !!v.trim();
   // טלפון: רק מכרטיס מאומת, או מכרטיס חדש (שהמנהל מאשר ממילא). אחרת טלפון מהמייל = הצעה בלבד, וחוסם עד אישור
   const phone = ok ? who.cust.get('phone') : who.custNew ? who.custNew.phone : '';
@@ -1133,6 +1149,245 @@ async function ordDraft(db, id, x, ord, biz, now) {
     { lines: b.lines, total: b.total, nBlock: b.nBlock + blk.length, blk, br, ver: 1, st: 'mgr', t: now });
   try { await ref.create(doc); } catch (e) { if (e && e.code === 6) return 'exists'; throw e; }
   return 'new';
+}
+// =====================================================================================
+// שלב ג/4: פעולות מנהל על טיוטת ההזמנה (secMail, אחרי gate – מנהל העסק בלבד, עם הסכמה). עדיין אין יצירת הזמנה ואין טיפול בתשובת הלקוח.
+//   ordGet {id} – תצוגת מנהל (אם sec_ord חסר ולטיוטה יש ord – נבנה מחדש). ordEdit {id, ver, ops} – בחירת מוצר/כמות/מחיקה/סניף/לקוח מהמועמדים/אישור טלפון.
+//   ordCust {id, card, ws?} – שמירת כרטיס לקוח חדש דרך customers.js (saveCore). ordSend {id, ver} – טיוטת ההזמנה ללקוח בשרשור (כתובת to של sec_ord בלבד).
+// מחיר לעולם לא מתקבל מהקלט – תמיד חישוב מחדש מהקטלוג (ordCalc). ver – נגד דריסה מקבילה (כל שינוי: ver+1).
+// custId על sec_ord = זהות מאושרת (זיהוי מאומת, או בחירת/אישור מנהל) – רק אז מחיר סיטונאי, ורק ללקוח wholesale.
+// =====================================================================================
+const ORD_OPS = ['ordGet', 'ordEdit', 'ordCust', 'ordSend'];
+const ORD_MAX_OPS = 30;
+const CARD_K = ['name', 'phone', 'mail', 'bn', 'vat', 'ct', 'pay', 'payTxt', 'st', 'city'];
+const ORD_NO = { cust: 'צריך לבחור לקוח (או לאשר כרטיס חדש)', br: 'צריך לבחור סניף', empty: 'אין שורות בהזמנה', stop: '"עצור הכל" מופעל',
+  off: 'המענה במייל כבוי', box: 'תיבת המייל לא מחוברת', to: 'אין כתובת תקינה ללקוח', thread: 'כבר נשלחה תשובה בשרשור הזה', thrErr: 'לא ניתן היה לבדוק את השרשור ב-Gmail' };
+const has = (v) => typeof v === 'string' && !!v.trim();
+async function ordLoad(db, input) {
+  const { id, x } = await mailDoc(db, input);
+  const ref = db.doc('sec_ord/' + id);
+  const s = await ref.get();
+  return { id, x, ref, o: s.exists ? s.data() : null };
+}
+const verOf = (v) => { if (!Number.isInteger(v) || v < 1) throw bad('bad-ver', 'גרסה לא תקינה'); return v; };
+// זהות, טלפון וחסימות לפי המצב הנוכחי (לקוח נבחר / כרטיס חדש / טלפון שהמנהל אישר)
+async function ordState(db, o) {
+  const cs = o.custId ? await db.doc('cust/' + o.custId).get() : null;
+  const cust = cs && cs.exists && !cs.get('mv') ? cs.data() : null;
+  const ws = !!(cust && cust.wholesale === true);
+  const phone = has(o.phone) ? o.phone : cust && has(cust.phone) ? cust.phone : o.custNew && has(o.custNew.phone) ? o.custNew.phone : '';
+  const blk = [];
+  if (!o.br) blk.push('br');
+  if (o.cands && !o.custId) blk.push('cust');
+  if (!phone) blk.push('phone');
+  return { ws, phone, blk, custName: cust ? String(cust.bn || cust.name || '').slice(0, 80) : '' };
+}
+async function ordRecalc(db, o) {
+  const st = await ordState(db, o);
+  const items = (o.lines || []).map((l) => Object.assign({ txt: l.txt, qty: l.qty, unit: l.unit }, l.pid ? { pid: l.pid } : {}));
+  const { b, catCut } = await ordCalc(db, items, o.br, st.ws);
+  return { lines: b.lines, total: b.total, nBlock: b.nBlock + st.blk.length, blk: st.blk, catCut };
+}
+// שמירה עם בדיקת גרסה בטרנזקציה. up – השדות החדשים (FieldValue.delete() למחיקה)
+async function ordSave(db, ref, ver, up, now) {
+  await db.runTransaction(async (tx) => {
+    const v = (await tx.get(ref)).data();
+    if (!v) throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
+    if (v.ver !== ver) throw pre('stale', 'הטיוטה עודכנה בינתיים. טענו אותה מחדש.');
+    if (v.st !== 'mgr') throw pre('not-pending', 'הטיוטה כבר נשלחה ללקוח');
+    tx.update(ref, Object.assign(up, { ver: ver + 1, upd: now }));
+  });
+}
+async function ordOut(db, id, o, brs) {
+  const st = await ordState(db, o);
+  const v = SO.safeView(o);
+  return { id, to: o.to || '', st: o.st, ver: o.ver, t: o.t || 0, custId: o.custId || '', custName: st.custName, cands: o.cands || [], idBy: o.idBy || '', custNew: o.custNew || null,
+    phone: st.phone, phoneHint: o.phoneHint || '', br: o.br || '', brDef: o.brDef === true, catCut: o.catCut === true, brs: brs.filter((b) => b.on !== false).map((b) => ({ id: b.id, name: String(b.name || '').slice(0, 60) })),
+    lines: o.lines || [], total: o.total || 0, nBlock: o.nBlock || 0, blk: o.blk || [], sentAt: o.sentAt || 0, stuck: maybeSent(o, Date.now()),
+    text: ordText(v, !st.phone) };
+}
+// גוף המייל ללקוח – רק מתוך SO.safeView (אין q, עלות, wp ללא-סיטונאי, מזהי מוצר). מחירים: לצרכן = כולל מע"מ, סיטונאי (ex) = לפני מע"מ (המוסכמה ב-pricing.js)
+function ordText(v, askPhone) {
+  const m = (a) => (a / 100).toFixed(2) + ' ₪';
+  const pr = [];
+  v.lines.forEach((l) => { if (l.st === 'ok' && !l.out && l.pr) pr.push(!!l.ex); if (l.st === 'pick') (l.opts || []).forEach((p) => { if (p.pr) pr.push(!!p.ex); }); });
+  const mixed = pr.includes(true) && pr.includes(false);
+  const pm = (a, ex) => m(a) + (mixed ? (ex ? ' (לפני מע"מ)' : ' (כולל מע"מ)') : '');
+  const L = ['שלום,', '', 'להלן טיוטת ההזמנה שלך לבדיקה:', ''];
+  let open = false;
+  v.lines.forEach((l, i) => {
+    const n = (i + 1) + '. ';
+    const q = l.qty ? ' | כמות: ' + l.qty + (l.unit ? ' ' + l.unit : '') : '';
+    if (l.st === 'ok' && l.out) { L.push(n + l.name + ' – אזל כרגע'); open = true; } else if (l.st === 'ok' && l.pr) {
+      L.push(n + l.name + q + ' | מחיר: ' + pm(l.pr, l.ex) + ' | סה"כ: ' + pm(l.sum, l.ex));
+      if (l.ctw) { L.push('   יש להזמין בכפולות של ' + l.ctw + ' (קרטון שלם)'); open = true; }
+    } else if (l.st === 'pick' && l.opts && l.opts.length) {
+      L.push(n + '"' + l.txt + '"' + q + ' – נא לבחור אחת מהאפשרויות:');
+      l.opts.slice(0, SO.MAX_OPTS).forEach((p, j) => L.push('   ' + 'אבג'[j] + ') ' + p.name + (p.pr ? ' – ' + pm(p.pr, p.ex) : '')));
+      open = true;
+    } else { L.push(n + '"' + l.txt + '"' + q + ' – לבירור' + (l.why === 'qty' ? ' (הכמות לא ברורה)' : '')); open = true; }
+  });
+  L.push('');
+  if (v.total > 0) L.push('סה"כ: ' + m(v.total) + (mixed || !pr.length ? '' : pr[0] ? ' (המחירים לפני מע"מ)' : ' (המחירים כוללים מע"מ)') + (open ? ' – לא כולל שורות לבחירה, לבירור או שאזלו' : ''));
+  if (askPhone) L.push('', 'כדי להשלים את ההזמנה, נא לשלוח מספר טלפון ליצירת קשר.');
+  L.push('', 'לאישור ההזמנה – השיבו למייל הזה. לשינוי – כתבו מה לשנות.');
+  return L.join('\n');
+}
+async function ordOp(who, db, input, op, now) {
+  T.requireFeature(who.biz, 'orders');
+  let { id, x, ref, o } = await ordLoad(db, input);
+  if (op === 'ordGet') {
+    if (!o) { // נבנה מחדש מ-ord שעל הטיוטה (ordDraft אידמפוטנטי – לא דורס מסמך קיים)
+      const ds = await db.doc('sec_draft/' + id).get();
+      const ord = ds.exists && ds.get('ch') === 'mail' ? ds.get('ord') : null;
+      if (!ord || typeof ord !== 'object') throw pre('no-order', 'אין טיוטת הזמנה למייל הזה');
+      await ordDraft(db, id, x, ord, who.biz, now);
+      o = (await ref.get()).data();
+      await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordRebuild', { tgt: id }));
+    }
+    return { ok: true, ord: await ordOut(db, id, o, await ordBrs(who.biz)) };
+  }
+  if (!o) throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
+  if (op === 'ordSend') return ordSend(who, db, input, id, x, ref, o, now);
+  if (o.st !== 'mgr') throw pre('not-pending', 'הטיוטה כבר נשלחה ללקוח');
+  const brs = await ordBrs(who.biz);
+  if (op === 'ordEdit') {
+    const ver = verOf(input.ver);
+    if (o.ver !== ver) throw pre('stale', 'הטיוטה עודכנה בינתיים. טענו אותה מחדש.');
+    if (!Array.isArray(input.ops) || !input.ops.length || input.ops.length > ORD_MAX_OPS) throw bad('bad-ops', 'שינויים: 1 עד ' + ORD_MAX_OPS);
+    const n = Object.assign({}, o, { lines: (o.lines || []).map((l) => Object.assign({}, l)) });
+    const del = new Set();
+    const lineAt = (i) => { if (!Number.isInteger(i) || i < 0 || i >= n.lines.length) throw bad('bad-line', 'שורה לא קיימת'); return n.lines[i]; };
+    for (const op1 of input.ops) { // שדות לא מוכרים (למשל מחיר) – מתעלמים. המחיר תמיד מהקטלוג
+      if (!op1 || typeof op1 !== 'object' || Array.isArray(op1)) throw bad('bad-ops', 'שינוי לא תקין');
+      const k = op1.k;
+      if (k === 'pick') {
+        const l = lineAt(op1.i);
+        const pid = typeof op1.pid === 'string' && ID_RE.test(op1.pid) ? op1.pid : null;
+        if (!pid) throw bad('bad-pid', 'מוצר לא תקין');
+        if (!((l.opts || []).some((p) => p.id === pid) || l.id === pid)) {
+          const ps = await db.doc('prod/' + pid).get();
+          if (!ps.exists || ps.get('on') === false || !has(ps.get('name'))) throw bad('bad-pid', 'המוצר לא קיים בקטלוג או לא פעיל');
+        }
+        l.pid = pid;
+      } else if (k === 'qty') {
+        const q = SO.qtyOk(op1.qty);
+        if (q == null) throw bad('bad-qty', 'כמות לא תקינה');
+        lineAt(op1.i).qty = q;
+      } else if (k === 'del') {
+        lineAt(op1.i); n.lines.splice(op1.i, 1);
+      } else if (k === 'br') {
+        const ok = brs.length ? brs.some((b) => b.id === op1.br && b.on !== false) : op1.br === '_';
+        if (!ok) throw bad('bad-br', 'הסניף לא קיים או לא פעיל');
+        n.br = op1.br; del.add('brDef');
+      } else if (k === 'cust') {
+        if (n.custId || !Array.isArray(n.cands) || !n.cands.some((c) => c.id === op1.cid)) throw bad('bad-cust', 'אפשר לבחור רק לקוח מהמועמדים');
+        const cs = await db.doc('cust/' + op1.cid).get();
+        if (!cs.exists || cs.get('mv')) throw pre('no-cust', 'הלקוח לא נמצא');
+        n.custId = op1.cid; n.custBy = who.uid; delete n.cands; del.add('cands').add('idBy').add('custNew');
+      } else if (k === 'phone') {
+        if (!has(n.phoneHint)) throw bad('bad-phone', 'אין טלפון מהמייל לאישור');
+        n.phone = n.phoneHint; del.add('phoneHint');
+      } else throw bad('bad-ops', 'שינוי לא מוכר');
+    }
+    for (const k of del) delete n[k];
+    const r = await ordRecalc(db, n);
+    const up = { lines: r.lines, total: r.total, nBlock: r.nBlock, blk: r.blk, br: n.br };
+    for (const k of ['custId', 'custBy', 'phone']) if (n[k] !== undefined && n[k] !== o[k]) up[k] = n[k];
+    for (const k of del) if (o[k] !== undefined) up[k] = FieldValue.delete();
+    if (r.catCut !== (o.catCut === true)) up.catCut = r.catCut ? true : FieldValue.delete();
+    await ordSave(db, ref, ver, up, now);
+    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordEdit', { tgt: id, note: input.ops.map((p) => String(p.k)).join('+').slice(0, 100) }));
+    return { ok: true, ord: await ordOut(db, id, (await ref.get()).data(), brs) };
+  }
+  // ordCust: כרטיס לקוח חדש = custNew + תיקוני המנהל, נשמר דרך customers.js (אותן בדיקות, BIZ_REQ ללקוח עסקי, phoneOf, מזהה p{טלפון}).
+  // fill:true – כמו שמירה מתוך הזמנה: לקוח קיים עם אותו טלפון לא נדרס (רק שדות ריקים מתמלאים). ת"ז לא מתקבלת כאן. מייל – רק אם המנהל כתב אותו בכרטיס
+  if (o.custId) throw pre('has-cust', 'כבר נבחר לקוח להזמנה');
+  const card = input.card;
+  if (!card || typeof card !== 'object' || Array.isArray(card)) throw bad('bad-card', 'פרטי לקוח חסרים');
+  for (const k of Object.keys(card)) if (!CARD_K.includes(k)) throw bad('bad-field', 'שדה לא מוכר: ' + String(k).slice(0, 30));
+  if (input.ws !== undefined && typeof input.ws !== 'boolean') throw bad('bad-field', 'סיטונאי: כן/לא');
+  const c = {};
+  for (const k of CARD_K) { const v = card[k] !== undefined ? card[k] : (o.custNew || {})[k]; if (v !== undefined && v !== '') c[k] = v; }
+  const ws = input.ws !== undefined ? input.ws : !!(c.bn || c.vat); // כרטיס עסקי (שם עסק / ח.פ) = לקוח עסקי (wholesale), אלא אם המנהל סימן אחרת
+  const ver0 = o.ver;
+  const sv = await CUS.saveCore(who, Object.assign({ cust: c, fill: true }, ws ? { wholesale: true } : {}), { src: 'sec' });
+  const n = Object.assign({}, o, { custId: sv.id, custBy: who.uid });
+  delete n.cands; delete n.custNew; delete n.idBy;
+  const r = await ordRecalc(db, n);
+  const up = { custId: sv.id, custBy: who.uid, lines: r.lines, total: r.total, nBlock: r.nBlock, blk: r.blk };
+  for (const k of ['cands', 'custNew', 'idBy']) if (o[k] !== undefined) up[k] = FieldValue.delete();
+  await ordSave(db, ref, ver0, up, now);
+  await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordCust', { tgt: id, note: (sv.created ? 'new' : 'fill') + (ws ? ':ws' : '') }));
+  return { ok: true, custId: sv.id, created: sv.created === true, ord: await ordOut(db, id, (await ref.get()).data(), brs) };
+}
+// ordSend: טיוטת ההזמנה ללקוח, בשרשור, לכתובת to של sec_ord בלבד. חוסמים: לקוח/סניף לא נבחרו, אין שורות, "עצור הכל", המענה במייל כבוי,
+// תיבה לא מחוברת, תשובה כבר נשלחה בשרשור (גם ישירות מ-Gmail – sentAfter), מכסת היוצאים (outTake). טלפון חסר לא חוסם – הטיוטה מבקשת אותו.
+// כפילות: כמו secMailSend – מעבר מ-'mgr' ל-'sending' בטרנזקציה, maybeSent (gmid / sending), ver חד־פעמי (אותו ver שוב אחרי שליחה = already)
+async function ordSend(who, db, input, id, x, ref, o, now) {
+  const ver = verOf(input.ver);
+  if (o.st === 'sent') { if (o.sentVer === ver) return { ok: true, already: true, id }; throw pre('not-pending', 'טיוטת ההזמנה כבר נשלחה'); }
+  if (maybeSent(o, now)) throw pre('maybe-sent', MAYBE_SENT);
+  if (o.st === 'sending') throw pre('in-progress', 'השליחה כבר בדרך');
+  if (o.ver !== ver) throw pre('stale', 'הטיוטה עודכנה בינתיים. טענו אותה מחדש.');
+  const dRef = db.doc('sec_draft/' + id);
+  const [ws, rs, ms, ds] = await Promise.all([db.doc('sec_cfg/wa').get(), db.doc('sec_cfg/mail_rep').get(), db.doc('sec_cfg/mail').get(), dRef.get()]);
+  const st = await ordState(db, o);
+  const no = [];
+  for (const k of ['cust', 'br']) if ((o.blk || []).includes(k) || st.blk.includes(k)) no.push(k);
+  if (!(o.lines || []).length) no.push('empty');
+  if (WA.waCfgOf(ws).stop.on) no.push('stop');
+  if (!repOf(rs).auto) no.push('off');
+  const bx = mailCfgOf(ms).boxes[x.box];
+  if (!bx || bx.st !== 'ok') no.push('box');
+  const to = G.addrOf(o.to);
+  if (!to) no.push('to');
+  if (x.st === 'replied' || (ds.exists && ['sent', 'sending'].includes(ds.get('st')))) no.push('thread');
+  if (!no.length && x.thr) {
+    const t = await db.collection('sec_draft').where('thr', '==', x.thr).limit(30).get();
+    if (t.docs.some((d) => d.id !== id && d.get('ch') === 'mail' && ['sent', 'sending'].includes(d.get('st')))) no.push('thread');
+  }
+  let gc = null;
+  if (!no.length && x.thr) {
+    try { gc = (await access(db, who.bizId, 'mail', x.box)).c; if (G.sentAfter(await gc.thread(x.thr), x.t, x.gid)) no.push('thread'); } catch (e) { no.push('thrErr'); }
+  }
+  if (no.length) {
+    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordSendNo', { tgt: id, note: no.join('+') }));
+    throw new HttpsError('failed-precondition', 'אי אפשר לשלוח: ' + no.map((k) => ORD_NO[k]).join('; '), { reason: 'blocked', no });
+  }
+  const text = ordText(SO.safeView(o), !st.phone);
+  await db.runTransaction(async (tx) => {
+    const v = (await tx.get(ref)).data();
+    if (!v) throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
+    if (v.st === 'sent') throw pre('not-pending', 'טיוטת ההזמנה כבר נשלחה');
+    if (maybeSent(v, now)) throw pre('maybe-sent', MAYBE_SENT);
+    if (v.st === 'sending') throw pre('in-progress', 'השליחה כבר בדרך');
+    if (v.ver !== ver) throw pre('stale', 'הטיוטה עודכנה בינתיים. טענו אותה מחדש.');
+    if (v.st !== 'mgr') throw pre('not-pending', 'הטיוטה כבר טופלה');
+    tx.update(ref, { st: 'sending', sAt: now, sBy: who.uid, sVer: ver });
+  });
+  if (!(await outTake(db, now))) { await ref.update({ st: 'mgr' }); throw new HttpsError('resource-exhausted', 'הגעתם למספר המיילים היוצאים המרבי להיום.', { reason: 'out-limit' }); }
+  let res;
+  try {
+    const c = gc || (await access(db, who.bizId, 'mail', x.box)).c;
+    res = await c.send(G.mime({ to, subj: G.reSubj(x.subj || ''), text, inReplyTo: x.mid }), x.thr || '');
+  } catch (e) {
+    await ref.update({ st: 'mgr' });
+    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'sendFail', { tgt: id, note: 'ord:' + String((e.details && e.details.reason) || 'error').slice(0, 30) }));
+    if (e instanceof HttpsError) throw e;
+    throw new HttpsError('unavailable', 'השליחה נכשלה. נסו שוב בעוד דקה.', { reason: 'google-error' });
+  }
+  const gmid = String((res && res.id) || '').slice(0, 64);
+  const dOpen = ds.exists && ['pend', 'fail'].includes(ds.get('st'));
+  await sentWrite(db, ref, gmid, now, () => {
+    const b = db.batch();
+    b.update(ref, { st: 'sent', sentAt: now, sentBy: who.uid, sentVer: ver, gmid, text });
+    b.set(db.doc('sec_in/' + id), { st: 'replied' }, { merge: true });
+    if (dOpen) b.update(dRef, { st: 'done', doneBy: who.uid, doneAt: now, oSent: true }); // תשובת הטקסט לא תישלח בנוסף בשרשור
+    b.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'ordSend', { tgt: id, note: 'v' + ver + ':' + x.box }));
+    return b;
+  });
+  return { ok: true, id, sent: true };
 }
 // שלב ג (0א): אחרי שליחה מוצלחת ב-Gmail – עד 3 ניסיונות לכתוב "נשלח" (build בונה batch חדש בכל ניסיון). נכשל – שומרים לפחות gmid (סימן שהמייל יצא)
 async function sentWrite(db, dRef, gmid, now, build) {
