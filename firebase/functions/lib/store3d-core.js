@@ -6,11 +6,13 @@
 //   decideOpen(rid, rule, now) – האם לפתוח עכשיו, ומזהה הסבב הקבוע <rid>_<YYYYMMDD> (יום המועד) – ריצה כפולה = אותו מזהה = בלי כפילות.
 //   baysOf(map) / splitBays(bays, asg) – רשימת המקטעים מהגופים, וחלוקה לעובדים (z = חדרים/גופים; z ריק = כל השאר, בחלוקה מאוזנת).
 //   planDeparted(...)     – עובד מושבת/שעזב: העברה למחליף הקבוע (sub == 'fixed'), אחרת שגיאה (staff-disabled / sub-disabled).
+//                           ה-asg המוחזר חל רק על הסבב שנפתח – הכלל של המנהל לא משתנה (תיקון סבב 1, החלטת המתאם).
 //   addEvent / workPause  – יומן הזמנים של עובד (התחלה, הפסקה, המשך, סיום) ודקות עבודה והפסקה.
 //   finished / timeStep   – סיום סבב, תזכורת ואיחור.
 //   moveRun               – העברת חלק של עובד בסבב לעובד אחר (מנהל) או לקיחה (עובד, כש-sub == 'any').
 //   viewRun               – מה עובד רואה מסבב (s3View), לפי s3set.show.
 
+const crypto = require('node:crypto');
 const TK = require('./tk-time');
 
 const D1 = 86400000, MIN = 60000;
@@ -272,8 +274,16 @@ function timeStep(run, now) {
   if (now >= remindAt(r)) return { kind: 'remind' };
   return {};
 }
-// מי עוד לא סיים את החלק שלו
-const behind = (run) => (Array.isArray(run.uids) ? run.uids : []).filter((u) => { const x = run.nUid && run.nUid[u]; return x && x.n > 0 && x.d < x.n; });
+// מי עוד לא סיים את החלק שלו: יש לו מקומות שלא צולמו, והוא לא רשם סיום (האירוע האחרון ביומן שלו = e) – תיקון סבב 1
+const lastIsEnd = (run, u) => { const l = run.tlog && run.tlog[u]; return Array.isArray(l) && l.length > 0 && l[l.length - 1].k === 'e'; };
+const behind = (run) => (Array.isArray(run.uids) ? run.uids : []).filter((u) => { const x = run.nUid && run.nUid[u]; return x && x.n > 0 && x.d < x.n && !lastIsEnd(run, u); });
+// מזהה עקיף לחלק של עובד בסבב (לרשימת "אפשר לקחת" – בלי uid של עובד אחר): 16 תווים hex מ-sha256(runId|uid)
+const partKey = (runId, uid) => crypto.createHash('sha256').update(String(runId) + '|' + String(uid), 'utf8').digest('hex').slice(0, 16);
+// החלקים בסבב שאפשר לקחת: { h, n (מקומות צילום), d (צולמו), bays (מספר מקטעים) }
+const takeParts = (runId, run) => (Array.isArray(run.uids) ? run.uids : []).map((u) => {
+  const x = (run.nUid && run.nUid[u]) || { n: 0, d: 0 };
+  return { h: partKey(runId, u), n: x.n, d: x.d, bays: Array.isArray(run.asg && run.asg[u]) ? run.asg[u].length : 0 };
+});
 
 // ---------- העברה / לקיחה ----------
 // מחזיר את השדות לעדכון בסבב. היומן של from נשאר (היסטוריה), אבל הוא יוצא מ-uids.
@@ -331,5 +341,5 @@ module.exports = {
   TZ: TK.TZ, D1, MIN, OPEN_HH, MAX_W, MAX_BAYS, MAX_EV, RE, SUBS, SHOW, EVS, LIVE,
   isRunId, cleanF, nextOpen, decideOpen, dayKey, settingsFor, cleanAsg, uidsOf, planDeparted,
   mapProblem, baysOf, splitBays, runDoc, addEvent, workPause, finished, closeSt, remindAt, timeStep, behind,
-  moveRun, cleanShow, listItem, viewRun,
+  moveRun, cleanShow, listItem, viewRun, partKey, takeParts,
 };

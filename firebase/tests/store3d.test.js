@@ -10,6 +10,7 @@ const fsm = require('node:fs');
 const path = require('node:path');
 const H = require('./helpers');
 const TK = require('../functions/lib/tk-time');
+const T = require('../functions/lib/tenant');
 
 const A = 'biz-s3a', B = 'biz-s3b';
 const MGR = 's3_mgr1', E1 = 's3_emp1', E2 = 's3_emp2', OFF = 's3_off1', SUB = 's3_sub1', EB = 's3_empb';
@@ -89,6 +90,7 @@ describe('s3Rounds – פתיחת סבבים, תזכורות ואיחור (לי�
     await run(at(2026, 11, 18, 22));
     assert.deepEqual(await runs(), [RID + '_20261115']);
     assert.equal(sent.filter((s) => s.kind === 'new').length, 1);
+    await adm.doc(`b/${A}/srun/${RID}_20261115`).update({ st: 'done', doneAt: SUN + D1 }); // הסבב הקודם הסתיים
     await run(at(2026, 11, 22, 6, 1));
     assert.deepEqual(await runs(), [RID + '_20261115', RID + '_20261122']);
   });
@@ -102,7 +104,9 @@ describe('s3Rounds – פתיחת סבבים, תזכורות ואיחור (לי�
     assert.deepEqual(await runs(), ['drule01_20261111']);
     await run(at(2026, 11, 13, 23));
     assert.deepEqual(await runs(), ['drule01_20261111'], 'לא לפני 3 ימים');
+    await adm.doc(`b/${A}/srun/drule01_20261111`).update({ st: 'closed', doneAt: at(2026, 11, 13, 23) });
     await run(at(2026, 11, 14, 6, 1));
+    await adm.doc(`b/${A}/srun/drule01_20261114`).update({ st: 'done', doneAt: at(2026, 11, 15, 9) });
     await run(at(2026, 12, 1, 6, 1)); // כל 3 ימים: המועד (17.11) עבר בלי ריצה – סבב אחד, עם התאריך של המועד
     assert.deepEqual(await runs(), ['drule01_20261111', 'drule01_20261114', 'drule01_20261117', 'mrule01_20261201']);
     assert.equal((await get(`b/${A}/sround/hrule01`)).next, undefined, 'ידני – בלי מועד');
@@ -119,13 +123,13 @@ describe('s3Rounds – פתיחת סבבים, תזכורות ואיחור (לי�
     assert.deepEqual((await get(`b/${A}/s3ntf/${RID}_20261115_new`)).to, [E1, E2]);
   });
 
-  it('עובד שהושבת + מחליף קבוע (s3set): הכלל עובר למחליף לכל הסבבים הבאים, הסבב אצלו (subFrom), התראת left למנהל ולמחליף', async () => {
+  it('עובד שהושבת + מחליף קבוע (s3set): בסבב שנפתח החלק אצל המחליף (subFrom), הכלל של המנהל לא משתנה, התראת left למנהל ולמחליף', async () => {
     await adm.doc(`b/${A}/s3set/main`).set({ sub: 'fixed', subU: SUB, due: 3 });
     await adm.doc(`b/${A}/sround/${RID}`).set(RULE({ asg: [{ u: OFF, z: ['f1'] }, { u: E1, z: [] }] }));
     await run(SUN + 60000);
     const rule = await get(`b/${A}/sround/${RID}`);
-    assert.deepEqual(rule.asg, [{ u: SUB, z: ['f1'] }, { u: E1, z: [] }]);
-    assert.deepEqual([rule.uids, rule.err], [[SUB, E1], '']);
+    assert.deepEqual(rule.asg, [{ u: OFF, z: ['f1'] }, { u: E1, z: [] }], 'asg של המנהל נשאר כמו שהוא');
+    assert.deepEqual([rule.uids, rule.err], [[OFF, E1, SUB], '']);
     const r = await get(`b/${A}/srun/${RID}_20261115`);
     assert.deepEqual([r.uids, r.subFrom, r.dueAt - r.openAt], [[SUB, E1], { [OFF]: SUB }, 3 * D1]);
     assert.deepEqual((await get(`b/${A}/s3ntf/${OFF}_${RID}_left`)).to.sort(), [MGR, SUB].sort());
@@ -168,7 +172,7 @@ describe('s3Rounds – פתיחת סבבים, תזכורות ואיחור (לי�
     await run(SUN + 60000);
     const id = `b/${A}/srun/${RID}_20261115`;
     const r0 = await get(id);
-    await adm.doc(id).update({ [`nUid.${E2}`]: { n: 8, d: 8 } }); // E2 סיים את שלו
+    await adm.doc(id).update({ [`tlog.${E2}`]: [{ k: 's', t: r0.openAt + 1000 }, { k: 'e', t: r0.openAt + 2000 }] }); // E2 רשם סיום – לא מקבל תזכורת ולא התראת איחור
     await run(r0.dueAt - D1 - 60000);
     assert.equal(await get(`b/${A}/s3ntf/${RID}_20261115_remind`), null);
     await run(r0.dueAt - D1 + 60000);
@@ -181,6 +185,61 @@ describe('s3Rounds – פתיחת סבבים, תזכורות ואיחור (לי�
     assert.equal((await get(id)).st, 'late');
     assert.deepEqual((await get(`b/${A}/s3ntf/${RID}_20261115_late`)).to.sort(), [E1, MGR].sort());
     assert.equal(sent.filter((s) => s.kind === 'late').length, 2, 'עובד + מנהל, פעם אחת');
+  });
+
+  it('סבב ידני ב-04:00 ואחריו המועד המתוזמן ב-06:00 באותו יום: לא נפתח סבב שני (המועד מדולג); אחרי שהסבב הסתיים – המועד הבא נפתח', async () => {
+    await adm.doc(`b/${A}/sround/${RID}`).set(RULE({ f: { k: 'week', dow: 6 } })); // שבת 14.11.2026
+    const db = T.prefixed(adm, `b/${A}/`);
+    const ctx = { db, now: at(2026, 11, 14, 4), mgrs: null, sets: {} };
+    const rs = await db.doc('sround/' + RID).get();
+    const m = await R.openRun(ctx, rs.ref, RID, await R.prepRule(ctx, rs.data()), RID + '_m' + ctx.now, 'manual', 0, rs.updateTime);
+    assert.ok(m.runId, JSON.stringify(m));
+    const out = await run(at(2026, 11, 14, 6, 5));
+    assert.equal(out[A].skipped, 1, JSON.stringify(out));
+    assert.deepEqual(await runs(), [m.runId]);
+    const rule = await get(`b/${A}/sround/${RID}`);
+    assert.deepEqual([rule.lastRun, rule.last, rule.next], [m.runId, at(2026, 11, 14, 6), at(2026, 11, 21, 6)]);
+    await run(at(2026, 11, 14, 6, 10));
+    assert.deepEqual(await runs(), [m.runId]);
+    // סבב קודם באיחור – גם כן לא נפתח סבב נוסף
+    await run(at(2026, 11, 21, 6, 1));
+    assert.equal((await get(`b/${A}/srun/${m.runId}`)).st, 'late');
+    assert.deepEqual(await runs(), [m.runId]);
+    await adm.doc(`b/${A}/srun/${m.runId}`).update({ st: 'closed', doneAt: at(2026, 11, 21, 7) });
+    await run(at(2026, 11, 28, 6, 1));
+    assert.deepEqual(await runs(), [m.runId, RID + '_20261128'].sort());
+  });
+
+  it('uids מתעדכן גם בכלל כבוי, ובכלל שבסל המחזור מתרוקן', async () => {
+    await adm.doc(`b/${A}/sround/${RID}`).set(RULE());
+    await run(SUN - 3600000);
+    assert.deepEqual((await get(`b/${A}/sround/${RID}`)).uids, [E1]);
+    await adm.doc(`b/${A}/sround/${RID}`).update({ asg: [{ u: E2, z: [] }], on: false, upd: SUN - 1800000 });
+    await run(SUN - 600000);
+    assert.deepEqual((await get(`b/${A}/sround/${RID}`)).uids, [E2]);
+    await adm.doc(`b/${A}/sround/${RID}`).update({ del: 1, delAt: SUN - 300000, delBy: MGR, upd: SUN - 300000 });
+    await run(SUN + 60000);
+    assert.deepEqual((await get(`b/${A}/sround/${RID}`)).uids, []);
+    assert.deepEqual(await runs(), [], 'כבוי / בסל – לא נפתח');
+  });
+
+  it('כתיבה לכלל רק אם לא השתנה מאז הקריאה: המנהל ערך בינתיים – השרת מדלג ולא דורס, והריצה הבאה מעדכנת', async () => {
+    await adm.doc(`b/${A}/sround/${RID}`).set(RULE());
+    const db = T.prefixed(adm, `b/${A}/`);
+    const stale = await db.doc('sround/' + RID).get();
+    await adm.doc(`b/${A}/sround/${RID}`).update({ asg: [{ u: E2, z: [] }], upd: ED + 1000 }); // עריכה של המנהל אחרי הקריאה
+    const ctx = { db, now: SUN - 3600000, mgrs: null, sets: {} };
+    assert.equal(await R.ruleStep(ctx, stale), 'changed');
+    let rule = await get(`b/${A}/sround/${RID}`);
+    assert.deepEqual([rule.asg, rule.uids, rule.next], [[{ u: E2, z: [] }], undefined, undefined]);
+    // בזמן הפתיחה: גם הטרנזקציה מזהה שהכלל השתנה ולא פותחת לפי הקריאה הישנה
+    const stale2 = await db.doc('sround/' + RID).get();
+    await adm.doc(`b/${A}/sround/${RID}`).update({ asg: [{ u: E1, z: [] }], upd: ED + 2000 });
+    assert.equal(await R.ruleStep(Object.assign({}, ctx, { now: SUN + 60000 }), stale2), 'changed');
+    assert.deepEqual(await runs(), []);
+    await run(SUN + 2 * 60000);
+    rule = await get(`b/${A}/sround/${RID}`);
+    assert.deepEqual([rule.uids, (await get(`b/${A}/srun/${RID}_20261115`)).uids], [[E1], [E1]]);
   });
 
   it('לארג\' פעמי במצב legacy (בשורש) – כשהתוספת מופעלת; כבויה – לא', async () => {
@@ -307,5 +366,15 @@ describe('s3Run / s3Move / s3Log / s3View (אמולטור הפונקציות)', 
     assert.equal((await call('s3View', EB, {})).reason, 'feature-off');
     const mv = (await call('s3View', MGR, { runId })).result.run;
     assert.equal(mv.tlog[E2].length, 1);
+    // "כל עובד יכול לקחת": הרשימה בלי מזהי משתמש של עובדים אחרים; לקיחה לפי המזהה העקיף
+    await adm.doc(`b/${A}/s3set/main`).set({ show: ['fix'], sub: 'any' });
+    const tk = (await call('s3View', SUB, {})).result.take;
+    assert.equal(tk.length, 1);
+    assert.deepEqual(tk[0].parts.map((x) => [x.n, x.bays]), [[6, 6], [8, 6]]);
+    assert.ok(!JSON.stringify(tk).includes(E1) && !JSON.stringify(tk).includes(E2), JSON.stringify(tk));
+    const g = await call('s3Move', SUB, { runId, fromH: tk[0].parts[0].h, take: true });
+    assert.equal(g.status, 'OK', g.text);
+    assert.deepEqual((await get(`b/${A}/srun/${runId}`)).uids, [E2, SUB]);
+    assert.equal((await call('s3Move', SUB, { runId, fromH: '0123456789abcdef', take: true })).reason, 'not-in-run');
   });
 });

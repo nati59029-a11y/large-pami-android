@@ -195,6 +195,8 @@ describe('store3d: זמנים, סיום, תזכורת ואיחור', () => {
     const short = { st: 'open', openAt: open, dueAt: open + D1 };
     assert.equal(C.remindAt(short), open + D1 / 2);
     assert.deepEqual(C.behind({ uids: [U1, U2, U3], nUid: { [U1]: { n: 3, d: 3 }, [U2]: { n: 2, d: 1 }, [U3]: { n: 0, d: 0 } } }), [U2]);
+    const ended = { uids: [U1, U2], nUid: { [U1]: { n: 3, d: 0 }, [U2]: { n: 2, d: 0 } }, tlog: { [U1]: [{ k: 's', t: 1 }, { k: 'e', t: 2 }], [U2]: [{ k: 'e', t: 1 }, { k: 'r', t: 2 }] } };
+    assert.deepEqual(C.behind(ended), [U2], 'מי שרשם סיום לא מקבל תזכורת; מי שהמשיך אחרי סיום – כן');
   });
 });
 
@@ -213,6 +215,15 @@ describe('store3d: העברה ומה עובד רואה', () => {
     assert.deepEqual([m.asg[U2], m.nUid[U2], m.uids], [['f2-a-1', 'f1-a-1', 'f1-a-2'], { n: 4, d: 1 }, [U2]]);
     assert.throws(() => C.moveRun(run, U1, U1), { code: 'same' });
     assert.throws(() => C.moveRun(run, U3, U1), { code: 'not-in-run' });
+  });
+  it('takeParts / partKey: בלי uid, מזהה עקיף קבוע ושונה לכל עובד ולכל סבב', () => {
+    const t = C.takeParts('r8k2m4q1_20261115', run);
+    assert.deepEqual(t.map((x) => [x.n, x.d, x.bays]), [[2, 1, 2], [2, 0, 1]]);
+    assert.ok(t.every((x) => /^[0-9a-f]{16}$/.test(x.h)));
+    assert.ok(!JSON.stringify(t).includes(U1) && !JSON.stringify(t).includes(U2));
+    assert.equal(t[0].h, C.partKey('r8k2m4q1_20261115', U1));
+    assert.notEqual(C.partKey('r8k2m4q1_20261115', U1), C.partKey('r8k2m4q1_20261122', U1));
+    assert.notEqual(t[0].h, t[1].h);
   });
   it('viewRun: רק המקטעים שלו, הזמנים שלו בלבד; ברירת מחדל fix בלבד (בלי ציון, המלצות, מוצרים)', () => {
     const ai = [

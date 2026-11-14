@@ -1,9 +1,11 @@
 'use strict';
 // סריקת חנות בתלת מימד – שלב 5 (14.11.2026): סבבים בשרת. הלוגיקה הטהורה ב-lib/store3d-core.js (בדיקות יחידה).
 //   s3Rounds (מתוזמנת, כל 5 דקות, שעון ישראל, us-central1 בלבד) – לכל עסק ש-store3d מופעל אצלו (ולארג' פעמי במצב legacy – בשורש):
-//     1. כללי סבב פעילים (sround, on == true, לא בסל): עובד מושבת/שעזב → החלק שלו עובר למחליף הקבוע (התראה left), אחרת err בכלל
-//        והתראה למנהל; uids (מי מהעובדים קורא את הכלל) ו-next (המועד הבא) מתעדכנים; כשהגיע המועד – נפתח סבב (srun) עם מזהה קבוע
-//        <rid>_<YYYYMMDD>, ב-create בתוך טרנזקציה: ריצה כפולה או שתי ריצות במקביל לא יוצרות כפילות.
+//     1. כללי סבב (sround): כלל פעיל – כשהגיע המועד נפתח סבב (srun) עם מזהה קבוע <rid>_<YYYYMMDD>, ב-create בתוך טרנזקציה:
+//        ריצה כפולה או שתי ריצות במקביל לא יוצרות כפילות, וכשהסבב הקודם של הכלל עוד פתוח/באיחור – המועד מדולג (תיקון סבב 1).
+//        עובד מושבת/שעזב → בסבב שנפתח החלק שלו אצל המחליף הקבוע (התראה left); אחרת err בכלל והתראה למנהל.
+//        השרת לא משנה את asg של הכלל (החלטת המתאם). uids (מי קורא את הכלל) מתעדכן בכל כלל – גם כבוי; בכלל שבסל – ריק.
+//        כל כתיבה לכלל – רק אם לא נערך מאז הקריאה (lastUpdateTime / טרנזקציה).
 //     2. סבבים פתוחים: תזכורת לעובד (24 שעות לפני המועד), ובמועד – st = 'late', התראה לעובד שלא סיים ולמנהל.
 //   s3Run (מנהל)  – פתיחה ידנית { rid } (מזהה <rid>_m<זמן>) או ביטול { runId, cancel: true }.
 //   s3Move        – העברת החלק של עובד בסבב { runId, from, to } (מנהל), או לקיחה { runId, from, take: true } (עובד, רק כש-sub == 'any').
@@ -53,7 +55,7 @@ const PUSH = {
   late: { title: 'סבב סריקה באיחור', body: 'עבר המועד של סבב הסריקה, והוא עוד לא הסתיים.' },
   done: { title: 'סבב סריקה הסתיים', body: 'סבב סריקת המדפים הסתיים. אפשר לראות את התוצאות באפליקציה.' },
   move: { title: 'סבב סריקה הועבר', body: 'חלק מסבב סריקה הועבר. פתחו את האפליקציה כדי לראות.' },
-  left: { title: 'סבבים הועברו למחליף', body: 'עובד שהושבת – הסבבים הבאים שלו הועברו למחליף הקבוע.' },
+  left: { title: 'סבב הועבר למחליף', body: 'עובד שהושבת – החלק שלו בסבבים עובר למחליף הקבוע.' },
   err: { title: 'בעיה בסבב סריקה', body: 'יש בעיה בכלל סבב (עובד לא פעיל או מפה חסרה). פתחו את הגדרות הסבבים.' },
 };
 const BAD_TOKEN = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument'];
@@ -108,31 +110,43 @@ async function setOf(ctx, br) {
   return ctx.sets[br];
 }
 
-// הכנת כלל לפני פתיחה: עובדים לא פעילים (העברה למחליף / שגיאה), uids
+// הכנת כלל לפני פתיחה. תיקון סבב 1 (החלטת המתאם): השרת לא משנה את sround.asg – ההחלפה במחליף (dep.asg) חלה רק על הסבב שנפתח.
+// uids של הכלל נגזר מה-asg של המנהל + המחליף (חוזה 4.7).
 async function prepRule(ctx, r) {
   const cfg = C.settingsFor(r, await setOf(ctx, r.br));
   const act = await activeOf(ctx.db, C.cleanAsg(r.asg).map((a) => a.u).concat(cfg.subU ? [cfg.subU] : []));
   const dep = C.planDeparted(r.asg, (u) => act.has(u), cfg.sub, cfg.subU);
-  const asg = dep.asg || r.asg;
-  return { cfg, dep, asg, uids: C.uidsOf(asg, cfg.subU), active: act };
+  return { cfg, dep, asg: dep.asg || r.asg, uids: C.uidsOf(r.asg, cfg.subU), active: act };
+}
+// כתיבה לכלל רק אם לא השתנה מאז הקריאה (המנהל ערך בינתיים – מדלגים, והריצה הבאה מחשבת מחדש)
+async function updIf(snap, upd) {
+  try { await snap.ref.update(upd, { lastUpdateTime: snap.updateTime }); return true; } catch (e) { if (e && e.code === 9) return false; throw e; }
 }
 
-// פתיחת סבב בטרנזקציה. מחזיר { runId, doc } / { exists: true } / { err } / { open: runId } (ידני: כבר יש סבב פתוח לכלל).
-// next: בסבב מתוזמן – המועד שעליו הוחלט; אם בינתיים הכלל השתנה או נפתח (ריצה מקבילה) – לא פותחים.
-async function openRun(ctx, ruleRef, rid, p, runId, k, next) {
+// פתיחת סבב בטרנזקציה. מחזיר { runId, doc } / { exists: true } / { changed: true } / { err } /
+//   { open: runId } (ידני: כבר יש סבב פתוח לכלל) / { skip: runId } (מתוזמן: הסבב הקודם עוד פתוח – המועד הזה מדולג).
+// next: בסבב מתוזמן – המועד שעליו הוחלט; אם בינתיים הכלל נפתח (ריצה מקבילה) – לא פותחים.
+// ut: updateTime של הכלל כפי שנקרא (p חושב ממנו); המנהל ערך בינתיים – { changed } ומנסים בריצה הבאה.
+async function openRun(ctx, ruleRef, rid, p, runId, k, next, ut) {
   const db = ctx.db, now = ctx.now;
   const runRef = db.doc('srun/' + runId);
   return db.runTransaction(async (tx) => {
     const [rs, ex] = await Promise.all([tx.get(ruleRef), tx.get(runRef)]);
     if (ex.exists) return { exists: true };
     if (!rs.exists || rs.get('del') === 1) return { err: 'gone' };
+    if (ut && !rs.updateTime.isEqual(ut)) return { changed: true };
     const r = rs.data();
     if (k === 'sched' && C.nextOpen(r) !== next) return { exists: true };
     if (!C.RE.br.test(r.br || '') || !C.RE.map.test(r.map || '')) return { err: 'no-map' };
     const reads = [tx.get(db.doc('smap/' + r.map))];
-    if (k === 'manual' && C.isRunId(r.lastRun)) reads.push(tx.get(db.doc('srun/' + r.lastRun)));
+    if (C.isRunId(r.lastRun)) reads.push(tx.get(db.doc('srun/' + r.lastRun)));
     const [ms, prev] = await Promise.all(reads);
-    if (prev && prev.exists && C.LIVE.includes(prev.get('st'))) return { open: r.lastRun };
+    if (prev && prev.exists && C.LIVE.includes(prev.get('st'))) {
+      if (k === 'manual') return { open: r.lastRun };
+      // תיקון סבב 1: לא פותחים סבב שני לאותו כלל. המועד מדולג (last = המועד), והבא – לפי התדירות
+      tx.update(ruleRef, { last: next, next: C.nextOpen(Object.assign({}, r, { last: next })) || FieldValue.delete() });
+      return { skip: r.lastRun };
+    }
     const map = ms.exists ? ms.data() : null;
     const mp = C.mapProblem(map, r.br);
     if (mp) return { err: mp };
@@ -145,7 +159,6 @@ async function openRun(ctx, ruleRef, rid, p, runId, k, next) {
     const upd = { last: now, lastRun: runId, uids: p.uids, err: p.dep.err };
     const nx = C.nextOpen(Object.assign({}, r, { last: now }));
     upd.next = nx || FieldValue.delete(); // ידני – בלי מועד (השדה נמחק, לא 0)
-    if (p.dep.asg) upd.asg = p.dep.asg;
     tx.update(ruleRef, upd);
     return { runId, doc };
   });
@@ -163,28 +176,35 @@ async function afterOpen(ctx, rid, p, opened) {
 // כלל אחד. מחזיר 'opened' / 'exists' / 'early' / 'off' / 'manual' / 'err' / 'bad'
 async function ruleStep(ctx, snap) {
   const r = snap.data() || {};
-  if (r.del === 1) return 'off';
+  // תיקון סבב 1: uids מתעדכן גם בכלל כבוי, ובכלל שבסל המחזור מתרוקן (אף עובד לא קורא אותו)
+  if (r.del === 1) { if (Array.isArray(r.uids) && r.uids.length) await updIf(snap, { uids: [] }); return 'off'; }
   if (!C.RE.br.test(r.br || '')) return 'bad';
+  if (r.on !== true) {
+    const u = C.uidsOf(r.asg, C.settingsFor(r, await setOf(ctx, r.br)).subU);
+    if (!sameArr(u, r.uids)) await updIf(snap, { uids: u });
+    return 'off';
+  }
   const p = await prepRule(ctx, r);
   const d = C.decideOpen(snap.id, r, ctx.now);
   let res = null, mapErr = '';
   if (d.go) {
-    res = await openRun(ctx, snap.ref, snap.id, p, d.runId, 'sched', d.next);
+    res = await openRun(ctx, snap.ref, snap.id, p, d.runId, 'sched', d.next, snap.updateTime);
+    if (res.changed) return 'changed';
     if (res.err && res.err !== 'gone') mapErr = res.err;
   }
-  if (!res || (!res.runId && !res.exists)) {
-    // לא נפתח סבב (וגם ריצה מקבילה לא פתחה אותו עכשיו): רק מה שהשתנה (אין כתיבה בכל 5 דקות)
+  if (!res || (!res.runId && !res.exists && !res.skip)) {
+    // לא נפתח סבב (וגם ריצה מקבילה לא פתחה אותו עכשיו): רק מה שהשתנה (אין כתיבה בכל 5 דקות), ורק אם הכלל לא נערך בינתיים
     const upd = {};
-    if (p.dep.asg) upd.asg = p.dep.asg;
     if (!sameArr(p.uids, r.uids)) upd.uids = p.uids;
     const err = p.dep.err || mapErr;
     if ((r.err || '') !== err) upd.err = err;
     if (d.next !== (r.next || 0)) upd.next = d.next || FieldValue.delete();
-    if (Object.keys(upd).length) await snap.ref.update(upd);
+    if (Object.keys(upd).length && !(await updIf(snap, upd))) return 'changed';
     if (mapErr) await notify(ctx, d.runId + '_err', 'err', await managers(ctx), ctx.now);
   }
   await afterOpen(ctx, snap.id, p, res);
   if (res && res.runId) return 'opened';
+  if (res && res.skip) return 'skipped';
   if (res && res.exists) return 'exists';
   if (mapErr || p.dep.err) return 'err';
   return d.why;
@@ -211,7 +231,7 @@ async function runBiz(opts) {
   const ctx = { db: T.tdb(), now: o.now || Date.now(), send: o.send, mgrs: null, sets: {} };
   const out = {};
   const inc = (k) => { if (k) out[k] = (out[k] || 0) + 1; };
-  const rules = await ctx.db.collection('sround').where('on', '==', true).get();
+  const rules = await ctx.db.collection('sround').get(); // כל הכללים – גם כבויים ומחוקים (uids)
   for (const s of rules.docs) {
     try { inc(await ruleStep(ctx, s)); } catch (e) { logger.error('s3Rounds: rule failed', { rule: s.id, name: e && e.name, code: e && e.code }); inc('error'); }
   }
@@ -266,7 +286,8 @@ exports.s3Run = onCall(T.scoped(async (request) => {
   if (!C.RE.br.test(r.br || '')) throw bad('no-map', ERR_TXT['no-map'], 'failed-precondition');
   const ctx = { db, now, mgrs: null, sets: {} };
   const p = await prepRule(ctx, r);
-  const res = await openRun(ctx, ref, input.rid, p, input.rid + '_m' + now, 'manual');
+  const res = await openRun(ctx, ref, input.rid, p, input.rid + '_m' + now, 'manual', 0, rs.updateTime);
+  if (res.changed) throw bad('busy', 'הכלל השתנה בדיוק עכשיו. נסו שוב.', 'aborted');
   if (res.open) throw bad('run-open', 'יש כבר סבב פתוח לכלל הזה. סיימו או בטלו אותו קודם.', 'failed-precondition');
   if (res.exists) throw bad('busy', 'נסו שוב בעוד רגע', 'aborted');
   if (res.err) {
@@ -284,18 +305,25 @@ exports.s3Move = onCall(T.scoped(async (request) => {
   const input = inputObject(request);
   const take = input.take === true;
   if (!C.isRunId(input.runId)) throw bad('bad-run', 'מזהה הסבב לא תקין');
-  if (typeof input.from !== 'string' || !C.RE.uid.test(input.from)) throw bad('bad-user', 'העובד לא תקין');
+  // לקיחה: from = uid, או fromH = המזהה העקיף מרשימת take של s3View (בלי לחשוף uid של עובד אחר)
+  const byH = take && input.from === undefined && typeof input.fromH === 'string' && /^[0-9a-f]{16}$/.test(input.fromH);
+  if (!byH && (typeof input.from !== 'string' || !C.RE.uid.test(input.from))) throw bad('bad-user', 'העובד לא תקין');
   const to = take ? who.uid : input.to;
   if (!take && who.role !== 'manager') throw bad('manager-only', 'רק מנהל יכול להעביר סבב לעובד אחר', 'permission-denied');
   if (typeof to !== 'string' || !C.RE.uid.test(to)) throw bad('bad-user', 'העובד לא תקין');
   const db = T.tdb(), now = Date.now();
   if (!(await activeOf(db, [to])).has(to)) throw bad('staff-disabled', 'העובד שנבחר לא פעיל', 'failed-precondition');
   const ref = db.doc('srun/' + input.runId);
+  let from = input.from;
   const res = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     if (!s.exists) throw bad('no-run', 'הסבב לא נמצא', 'not-found');
     const run = s.data();
     if (!C.LIVE.includes(run.st)) throw bad('run-closed', 'הסבב כבר הסתיים או בוטל', 'failed-precondition');
+    if (byH) {
+      from = (Array.isArray(run.uids) ? run.uids : []).find((u) => C.partKey(input.runId, u) === input.fromH);
+      if (!from) throw bad('not-in-run', CORE_TXT['not-in-run'][1], 'failed-precondition');
+    }
     if (take) {
       const [rule, set] = await Promise.all([
         C.RE.rid.test(run.rid || '') ? tx.get(db.doc('sround/' + run.rid)) : null,
@@ -305,12 +333,12 @@ exports.s3Move = onCall(T.scoped(async (request) => {
       if (cfg.sub !== 'any') throw bad('no-take', 'בסבב הזה רק המנהל מעביר עבודה בין עובדים', 'permission-denied');
     }
     let patch;
-    try { patch = C.moveRun(run, input.from, to); } catch (e) { throw coreErr(e); }
+    try { patch = C.moveRun(run, from, to); } catch (e) { throw coreErr(e); }
     tx.update(ref, patch);
     return { ok: true, uids: patch.uids };
   });
   const ctx = { db, now, mgrs: null, sets: {} };
-  await notify(ctx, input.runId + '_move_' + input.from, 'move', [to].concat(await managers(ctx)), now);
+  await notify(ctx, input.runId + '_move_' + from, 'move', [to].concat(await managers(ctx)), now);
   return res;
 }));
 
@@ -374,14 +402,18 @@ exports.s3View = onCall(T.scoped(async (request) => {
     // מה אפשר לקחת: סבבים שאני לא בהם, שהכלל שלהם (או ההגדרות של הסניף) מתיר "כל עובד יכול לקחת"
     const take = [];
     const ctx = { db, sets: {} }, rules = {};
+    const brs = who.staff && who.staff.exists ? who.staff.get('br') : null;
+    const myBr = Array.isArray(brs) ? brs.filter((b) => typeof b === 'string') : null;
     for (const d of live.docs) {
       const r = d.data();
       if (Array.isArray(r.uids) && r.uids.includes(uid)) continue;
       if (!C.RE.br.test(r.br || '')) continue;
+      if (myBr && !myBr.includes(r.br)) continue; // רק סבבים של הסניפים שלו (בלי שיוך לסניפים – כל הסניפים של העסק)
       if (C.RE.rid.test(r.rid || '') && !(r.rid in rules)) { const x = await db.doc('sround/' + r.rid).get(); rules[r.rid] = x.exists ? x.data() : {}; }
       const cfg = C.settingsFor(rules[r.rid] || {}, await setOf(ctx, r.br));
       if (cfg.sub !== 'any') continue;
-      take.push({ runId: d.id, st: r.st, map: r.map, dueAt: r.dueAt, from: (r.uids || []).map((u) => ({ u, n: (r.nUid && r.nUid[u]) || { n: 0, d: 0 } })) });
+      // תיקון סבב 1: בלי מזהי משתמש של עובדים אחרים – לכל חלק מזהה עקיף (h), מספר מדפים והתקדמות
+      take.push({ runId: d.id, st: r.st, br: r.br, map: r.map, dueAt: r.dueAt, parts: C.takeParts(d.id, r) });
     }
     return {
       runs: mine.docs.map((d) => C.listItem(d.id, d.data(), uid)),
