@@ -33,7 +33,7 @@ async function open(browser, www, o) {
   const lists = [{ id: 'cl1', st: 'pend', t: now - 600e3, range: '12', rangeL: '12 חודשים', n: 3, z: 9e6, trashed: 0, failed: 0,
     items: [{ g: 'mA', f: 'spam@x.example', s: 'זכית בפרס', d: now - 864e5, z: 3000, w: 'spam' }, { g: 'mB', f: 'deals@shop.example', s: 'מבצע', d: now - 5 * 864e5, z: 4000, w: 'promo' }, { g: 'mC', f: 'big@files.example', s: 'קובץ גדול', d: now - 400 * 864e5, z: 8.9e6, w: 'big' }] }];
   const gs = { ok: true, configured: true, max: 2, boxes, cal: { connected: false } };
-  const sg = { ok: true, max: 2, maxDefault: 1, boxes, scan: null, ranges: {}, lists: [{ id: 'cl1', st: 'pend', t: now - 600e3, n: 3, z: 9e6, trashed: 0, rangeL: '12 חודשים' }] };
+  const sg = { ok: true, auto: { on: true, by: 'x', t: 1 }, noCapUntil: 0, noCapMaxDays: 31, histInv: { wait: 7, day: 12, dayMax: 30, reserve: 40, free: false }, max: 2, maxDefault: 1, boxes, scan: null, ranges: {}, lists: [{ id: 'cl1', st: 'pend', t: now - 600e3, n: 3, z: 9e6, trashed: 0, rangeL: '12 חודשים' }] };
   const { ctx, page } = await H.newPage(browser, www, cfg, [], who);
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop();
@@ -51,7 +51,7 @@ async function open(browser, www, o) {
       if (body.op === 'write') { draft1 = { id: ID1, to: 'yossi@client.example', subj: 'Re: שאלה על שעות', text: body.text, src: 'mgr', st: 'pend', flags: [], why: [], t: now }; return ok({ ok: true, draft: draft1 }); }
       if (body.op === 'done') return ok({ ok: true, id: body.id });
       if (body.op === 'cleanList') return ok({ ok: true, lists });
-      if (body.op === 'cleanOk') { lists[0].st = 'done'; lists[0].trashed = body.ids.length; return ok({ ok: true, id: body.id, trashed: body.ids.length, failed: 0 }); }
+      if (body.op === 'cleanOk') { lists[0].items.forEach((i) => { if (body.ids.includes(i.g)) i.r = 't'; }); const left = lists[0].items.filter((i) => i.r !== 't').length; lists[0].st = left ? 'pend' : 'done'; lists[0].trashed = (lists[0].trashed || 0) + body.ids.length; return ok({ ok: true, id: body.id, trashed: body.ids.length, failed: 0, left, st: lists[0].st, total: 3 }); }
       if (body.op === 'cleanNo') { lists[0].st = 'rej'; return ok({ ok: true, id: body.id }); }
     }
     if (n === 'secMailSend') { if (draft1) draft1.st = 'sent'; return ok({ ok: true, id: body.id }); }
@@ -69,6 +69,8 @@ async function open(browser, www, o) {
       if (body.op === 'run') return ok(Object.assign({}, sg, { list: { id: 'cl2', n: 40, z: 1e6, counts: {} }, hist: { st: 'run', range: '6', rangeL: '6 חודשים', n: 50, dup: 0, total: 1234, t: H.T0, upd: H.T0 } }));
       if (body.op === 'histStop') return ok(Object.assign({}, sg, { hist: { st: 'stop', range: '6', rangeL: '6 חודשים', n: 50, dup: 0, total: 1234, t: H.T0, upd: H.T0 } }));
       if (body.op === 'set') return ok(Object.assign({}, sg, { max: body.max }));
+      if (body.op === 'histAuto') { sg.auto.on = body.on; return ok(sg); }
+      if (body.op === 'histNoCap') { sg.noCapUntil = body.until; sg.histInv.free = !!body.until; return ok(sg); }
       return ok(sg);
     }
     if (n === 'secAdminGet') return ok({ bizId: BIZ, on: true, mode: 'all', mainUid: '', emp: false, empDefault: false, pay: { m: false }, sens: {}, capCents: 5000, rate: { hour: 40, day: 200 }, rateDefault: { hour: 40, day: 200 }, admins: [{ uid: 'm', email: 'm@x.co' }], consent: {}, consentVer: 'v' });
@@ -125,15 +127,23 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     await page.evaluate(() => { const X = window.__sec; X.ml.cur = null; X.ml.card = null; X.ml.list = null; rerender(); }); await H.settle(page, 500);
     await page.click('[data-a=secClOpen]'); await H.settle(page, 600);
     const tc = await txt(page);
-    check(`${w}: רשימת ניקוי – פריטים עם שולח, גודל וסיבה; "לאשפה" ולא מחיקה לצמיתות; אפשר לדחות`, /זכית בפרס/.test(tc) && /גדול וישן/.test(tc) && /לאשפה/.test(tc) && /לא נמחקים לצמיתות/.test(tc) && !!(await page.$('[data-a=secClNo]')), tc.slice(0, 400));
+    check(`${w}: רשימת ניקוי – שולחים עם מספר וגודל; "לאשפה" ולא מחיקה לצמיתות; אפשר לדחות`, /spam@x\.example/.test(tc) && /\d+(\.\d+)? MB/.test(tc) && /לאשפה/.test(tc) && /לא נמחקים לצמיתות/.test(tc) && !!(await page.$('[data-a=secClNo]')), tc.slice(0, 400));
     check(`${w}: רשימת ניקוי – בלי גלילה לרוחב`, (await sx(page)) <= 0, await sx(page));
     if (shots) await page.screenshot({ path: path.join(shots, `sec6-clean-${w}.png`), fullPage: true });
-    await page.uncheck('#secCl_cl1 input[value=mB]');
+    check(`${w}: רשימת ניקוי מקובצת לפי שולח – שורה לכל שולח, ופריטים לא מצוירים עד פתיחה`, (await page.$$('#secCl_cl1 [data-a=secClSn]')).length === 3 && !(await page.$('#secCl_cl1 input[data-c=secClI]')) && /big@files\.example/.test(await page.innerText('#secCl_cl1')));
+    await page.click('#secCl_cl1 [data-a=secClOp][data-k="deals@shop.example"]'); await H.settle(page, 300);
+    await page.uncheck('#secCl_cl1 input[data-g=mB]');
     await page.click('#secCl_cl1 button.btn'); await H.settle(page, 300);
     check(`${w}: העברה לאשפה – שואל קודם`, /להעביר 2 מיילים לאשפה/.test(await dlgText(page)) && !last(bodies, 'secMail', (b) => b.op === 'cleanOk'));
     await page.click('#dlg [data-a=yes]'); await H.settle(page, 600);
     const co = last(bodies, 'secMail', (b) => b.op === 'cleanOk');
     check(`${w}: נשלחים רק המיילים שסומנו מהרשימה המוצגת`, co && co[1].id === 'cl1' && JSON.stringify(co[1].ids.slice().sort()) === JSON.stringify(['mA', 'mC']), co && co[1]);
+    check(`${w}: אחרי אישור חלקי – מוצג רק השולח שנשאר, והרשימה נשארה`, !!(await page.$('#secCl_cl1 input[data-k="deals@shop.example"]')) && !(await page.$('#secCl_cl1 input[data-k="spam@x.example"]')));
+    await page.click('#secCl_cl1 [data-a=secClSn]'); await H.settle(page, 300);
+    check(`${w}: "כל השולח" – שואל קודם`, /להעביר לאשפה את כל 1 המיילים של deals@shop\.example/.test(await dlgText(page)));
+    await page.click('#dlg [data-a=yes]'); await H.settle(page, 600);
+    const c2 = last(bodies, 'secMail', (b) => b.op === 'cleanOk');
+    check(`${w}: "כל השולח" – נשלחים כל המיילים של השולח בלבד`, c2 && JSON.stringify(c2[1].ids) === JSON.stringify(['mB']), c2 && c2[1]);
     // --- יומן: אירוע מיומן Google עם אזהרת שבת ---
     await page.evaluate(() => { const X = window.__sec; X.ml.clean = null; }); await page.click('#secTabs [data-v=cal]'); await H.settle(page, 600);
     const tcal = await txt(page);
@@ -179,6 +189,14 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     await page.click('[data-a=secSgHist][data-op=histStop]'); await H.settle(page, 500);
     check(`${w}: עצירה נשלחת לשרת, ואז מוצג "המשך הקליטה"`, !!last(bodies, 'secAdminMail', (b) => b.op === 'histStop' && b.bizId === 'biz-o') && /נעצרה/.test(await txt(page)) && !!(await page.$('[data-a=secSgHist][data-op=histGo]')));
     await page.fill('#secSgMax input[name=max]', '3'); await page.click('#secSgMax button'); await H.settle(page, 500);
+    check(`${w}: מנהל־על – מצב הגבלה: מוגבל 12 מתוך 30, ממתינים 7`, /מוגבל: 12 מתוך 30 היום, ממתינים 7/.test(await txt(page)));
+    await page.uncheck('input[data-c=secSgAuto]'); await H.settle(page, 400);
+    check(`${w}: מתג חיפוש אוטומטי נשלח לשרת`, !!last(bodies, 'secAdminMail', (b) => b.op === 'histAuto' && b.on === false && b.bizId === 'biz-o'));
+    await page.fill('#secSgNcD', new Date(Date.now() + 10 * 864e5).toISOString().slice(0, 10)); await page.click('[data-a=secSgNoCap]'); await H.settle(page, 500);
+    const nc = last(bodies, 'secAdminMail', (b) => b.op === 'histNoCap');
+    check(`${w}: ביטול הגבלה עד תאריך – נשלח ms עתידי, ומוצג "ללא הגבלה עד"`, nc && nc[1].until > Date.now() && /ללא הגבלה עד/.test(await txt(page)), nc && nc[1]);
+    await page.click('[data-a=secSgNoCapOff]'); await H.settle(page, 500);
+    check(`${w}: "החזר הגבלה" – until:0`, !!last(bodies, 'secAdminMail', (b) => b.op === 'histNoCap' && b.until === 0));
     check(`${w}: מספר תיבות נשמר`, !!last(bodies, 'secAdminMail', (b) => b.op === 'set' && b.max === 3));
     check(`${w}: מנהל־על – בלי גלילה לרוחב`, (await sx(page)) <= 0, await sx(page));
     if (shots) await page.screenshot({ path: path.join(shots, `sec6-admin-${w}.png`), fullPage: true });
