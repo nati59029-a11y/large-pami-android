@@ -162,6 +162,7 @@ describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית ע
     assert.deepEqual(G.greetFix('שלום יוסי, אנחנו פתוחים', 'דנה לוי'), { text: 'שלום, אנחנו פתוחים', gen: true });
     assert.deepEqual(G.greetFix('שלום יוסי, אנחנו פתוחים', ''), { text: 'שלום, אנחנו פתוחים', gen: true }, 'שם לא ידוע');
     assert.deepEqual(G.greetFix('היי יוסי כהן!\nתודה', 'Yossi Cohen'), { text: 'שלום!\nתודה', gen: true });
+    for (const s of ['שלום וברכה לך, אנחנו פתוחים', 'שלום לכולם ולכולן, אנחנו פתוחים', 'Hello and welcome, we are open']) assert.deepEqual(G.greetFix(s, ''), { text: s, gen: false }, 'ביטוי רגיל לא נחתך: ' + s);
     assert.deepEqual(G.greetFix('Hi Dana,\nWe are open', 'dana smith'), { text: 'Hi Dana,\nWe are open', gen: false });
     assert.deepEqual(G.greetFix('Dear John, ok', 'Dana'), { text: 'Hello, ok', gen: true });
     for (const t of ['שלום, אנחנו פתוחים', 'שלום רב, אנחנו פתוחים', 'שלום לכולם!', 'אנחנו פתוחים {{hours}}', 'Hello there, we are open', 'שלום אנחנו פתוחים א׳–ה׳ 8–18. תודה!'])

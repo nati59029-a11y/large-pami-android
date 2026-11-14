@@ -267,13 +267,17 @@ function fileList(files) {
 // החלטה (ד): לפני שליחה אוטומטית – שם בפתיחה של התבנית ("שלום יוסי,") חייב להתאים לשם הפונה. שם לא ידוע או לא מתאים → פנייה כללית ("שלום,").
 // מחזיר { text, gen } (gen=true כשהוחלף לפנייה כללית)
 const GREET_RE = /^(\s*)(שלום|היי|הי|בוקר טוב|ערב טוב|צהריים טובים|hi|hello|hey|dear)([ \t]+)([^\s,!.:;?\d{}]{2,20}(?:[ \t]+[^\s,!.:;?\d{}]{2,20})?)(?=[ \t]*(?:[,!.:;]|\r?\n|$))/i;
-const NOT_NAME = new Set(['רב', 'רבה', 'לך', 'לכם', 'לכן', 'לכולם', 'וברכה', 'וברכות', 'ותודה', 'חברים', 'לקוח', 'לקוחה', 'לקוחות', 'יקר', 'יקרה', 'יקרים', 'שוב', 'וטוב', 'רב לך',
+const NOT_NAME = new Set(['רב', 'רבה', 'לך', 'לכם', 'לכן', 'לכולם', 'וברכה', 'וברכות', 'ותודה', 'חברים', 'לקוח', 'לקוחה', 'לקוחות', 'יקר', 'יקרה', 'יקרים', 'שוב', 'וטוב', 'רב לך', 'ולכולן', 'ולכולם', 'לכולן', 'וכל', 'לכל', 'וחג', 'חג', 'שמח', 'ומבורך', 'ושנה',
+  'and', 'welcome', 'back', 'to', 'from', 'folks', 'guys', 'colleagues',
   'there', 'all', 'everyone', 'sir', 'madam', 'customer', 'friend', 'friends', 'team', 'again']);
 const nameToks = (s) => String(s || '').toLowerCase().replace(/["'`<>()[\]]/g, ' ').split(/\s+/).filter((t) => t.length >= 2);
 function greetFix(text, name) {
   const t = String(text || '');
   const m = GREET_RE.exec(t);
-  if (!m || NOT_NAME.has(m[4].toLowerCase())) return { text: t, gen: false };
+  if (!m) return { text: t, gen: false };
+  // מילה שאינה שם (או מילת חיבור "ו..." כמילה השנייה) – זה לא שם פרטי, לא נוגעים בטקסט
+  const toks = m[4].toLowerCase().split(/[ \t]+/);
+  if (NOT_NAME.has(m[4].toLowerCase()) || toks.some((w) => NOT_NAME.has(w)) || (toks.length === 2 && /^ו/.test(toks[1]))) return { text: t, gen: false };
   const want = nameToks(m[4]), have = nameToks(name);
   if (have.length && want.every((w) => have.includes(w))) return { text: t, gen: false };
   const gen = /[a-z]/i.test(m[2]) ? 'Hello' : 'שלום';
