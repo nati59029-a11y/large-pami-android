@@ -1846,11 +1846,13 @@ exports.secCalSync = onSchedule({ region: LEGACY_REGION, schedule: 'every 15 min
   const r = await syncAll();
   logger.info('secretary-google: sync done', r);
 });
-// שלב ב: תור הטיוטות האוטומטיות (sec_mailq). בלי ניסיון חוזר (מייל שנתקע – mailRequeue בריצה המתוזמנת); רשומת התור נמחקת תמיד
+// שלב ב: תור הטיוטות האוטומטיות (sec_mailq). בלי ניסיון חוזר (מייל שנתקע – mailRequeue בריצה המתוזמנת); רשומת תור תקינה נמחקת אחרי הטיפול
 exports.secMailWork = onDocumentCreated({ document: 'sec_mailq/{qid}', region: NEW_REGION, retry: false, timeoutSeconds: 120, memory: '256MiB', maxInstances: 3, secrets: [...SECRETS, AI.GEMINI_API_KEY] }, async (ev) => {
   const s = ev.data;
   const d = s && s.data ? s.data() : null;
-  try { if (d && typeof d.biz === 'string' && typeof d.id === 'string' && /^g[0-9a-f]{40}$/.test(d.id)) await mailWork(d.biz, d.id, {}); } catch (e) {
+  // בלי רשומה תקינה – יוצאים בלי למחוק (כמו secWaWork): מחיקה של רשומה ריקה מפעילה שוב את הטריגר באמולטור ויוצרת לולאה
+  if (!d || typeof d.biz !== 'string' || typeof d.id !== 'string' || !/^g[0-9a-f]{40}$/.test(d.id)) return;
+  try { await mailWork(d.biz, d.id, {}); } catch (e) {
     logger.error('secretary-google: mail work failed', { reason: (e && e.details && e.details.reason) || 'internal', name: e && e.name });
   } finally { await s.ref.delete().catch(() => {}); }
 });
