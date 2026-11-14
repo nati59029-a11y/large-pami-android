@@ -44,9 +44,15 @@ function init(){
  E.map=m?clone(m):blank();E.baseV=m&&Number.isInteger(m.v)?m.v:0;
  for(const k of KEYS)if(!Array.isArray(E.map[k]))E.map[k]=[];
  if(!E.map.grid)E.map.grid=50;
- E.fresh=new Set();E.undo=[];E.tool='sel';E.pts=[];E.sel=null;E.msg='';E.sec='';E.dirty=false;E.vers=null;
+ E.fresh=new Set();E.undo=[];E.tool='sel';E.pts=[];E.sel=null;E.msg='';E.sec='';E.dirty=false;E.vers=null;E.wiz=null;
  const dr=readDraft();E.offer=dr&&dr.baseV===E.baseV&&JSON.stringify(dr.map)!==JSON.stringify(E.map)?dr:null;
  fit()}
+/* שלב 11 (אשף ההקמה): טעינת טיוטה (מפה שעוד לא נשמרה) לעורך. כל הפריטים "חדשים" (אפשר להסיר אותם), baseV=0. מי שקורא: store3d-wizard.js */
+U.edLoad=(map,kind,wiz)=>{E.kind=kind==='w'?'w':'s';E.map=clone(map);for(const k of KEYS)if(!Array.isArray(E.map[k]))E.map[k]=[];if(!Array.isArray(E.map.uz))E.map.uz=[];if(!E.map.grid)E.map.grid=50;
+ E.baseV=0;E.fresh=new Set();for(const t of KEYS)for(const o of E.map[t])if(o&&o.id)E.fresh.add(t+':'+o.id);
+ E.undo=[];E.tool='sel';E.pts=[];E.sel=null;E.msg='';E.sec='';E.dirty=true;E.vers=null;E.offer=null;E.wiz=wiz||{};E.key=U.mapIdOf(E.kind)+'|'+(SY&&SY.bizId||'');
+ renum();fit();saveDraftNow();if(cur().v!=='st3e')go('st3e');else rerender()};
+U.edTouch=()=>{touch();rerender()};U.edDraw=()=>draw();U.edFit=()=>{fit();draw()};
 function renum(){const G0=G();if(!G0)return;const by=new Map(G0.autoNumber(E.map).map(o=>[o.id,o.num]));for(const f of E.map.fx)if(by.has(f.id))f.num=by.get(f.id)}
 function nextId(t,p){let n=0;const re=new RegExp('^'+p+'([0-9]+)$');for(const o of E.map[t]){const m=re.exec(o.id||'');if(m)n=Math.max(n,+m[1])}return p+(n+1)}
 const roomAt=(x,y)=>live(E.map.rooms).find(r=>G().pointInPoly(x,y,r.p));
@@ -84,26 +90,31 @@ function hit(x,y){
  return null}
 
 /* ---------- ציור המפה (SVG בס"מ) ---------- */
+/* צבעי השרטוט נלקחים מטוקני העיצוב של האפליקציה (לא צבעים קשיחים) */
+function tk(){const cs=getComputedStyle(document.documentElement),g=(k,d)=>(cs.getPropertyValue('--'+k)||'').trim()||d;return{line:g('line','#888'),card:g('card','#222'),ink:g('ink','#eee'),mut:g('mut','#999'),acc:g('acc','#c80'),acc2:g('acc2','#444'),onacc:g('onacc','#fff'),inc:g('inc','#3a3'),bad:g('bad','#e55'),warn:g('warn','#ca3')}}
 function planSvg(){
- const m=E.map;if(!m)return '';const el=document.getElementById('s3pl'),rw=el?el.clientWidth:340,rh=el?el.clientHeight:380,vw=E.vw,vh=vw*(rh/Math.max(rw,1));
+ const m=E.map,K=tk();if(!m)return '';const el=document.getElementById('s3pl'),rw=el?el.clientWidth:340,rh=el?el.clientHeight:380,vw=E.vw,vh=vw*(rh/Math.max(rw,1));
  const px=vw/Math.max(rw,1),fs=Math.max(18,px*13),sel=E.sel;let s='';
  const g=m.grid||50;let gs=g;while(gs/px<10)gs*=2;
  const x0=Math.floor(Math.max(0,E.vx)/gs)*gs,x1=Math.min(10000,E.vx+vw),y0=Math.floor(Math.max(0,E.vy)/gs)*gs,y1=Math.min(10000,E.vy+vh);
- let n=0;for(let x=x0;x<=x1&&n<200;x+=gs,n++)s+=`<line x1="${x}" y1="${Math.max(0,E.vy)}" x2="${x}" y2="${y1}" stroke="#2c2c36" stroke-width="${px}"/>`;
- n=0;for(let y=y0;y<=y1&&n<200;y+=gs,n++)s+=`<line x1="${Math.max(0,E.vx)}" y1="${y}" x2="${x1}" y2="${y}" stroke="#2c2c36" stroke-width="${px}"/>`;
+ let n=0;for(let x=x0;x<=x1&&n<200;x+=gs,n++)s+=`<line x1="${x}" y1="${Math.max(0,E.vy)}" x2="${x}" y2="${y1}" stroke="${K.line}" stroke-opacity=".6" stroke-width="${px}"/>`;
+ n=0;for(let y=y0;y<=y1&&n<200;y+=gs,n++)s+=`<line x1="${Math.max(0,E.vx)}" y1="${y}" x2="${x1}" y2="${y}" stroke="${K.line}" stroke-opacity=".6" stroke-width="${px}"/>`;
  const isS=(t,id)=>sel&&sel.t===t&&sel.id===id;
  for(const r of live(m.rooms)){const pts=[];for(let i=0;i+1<r.p.length;i+=2)pts.push(r.p[i]+','+r.p[i+1]);const c=G().centroid(r.p);
-  s+=`<polygon points="${pts.join(' ')}" fill="${isS('rooms',r.id)?'#3a3320':'#23232b'}" stroke="#d4af37" stroke-width="${px*(isS('rooms',r.id)?4:2)}"/><text x="${c[0]}" y="${c[1]}" fill="#8e8466" font-size="${fs}" text-anchor="middle">${esc2(r.name)}</text>`}
- for(const w of live(m.walls)){if(w.p&&w.p.length===4)s+=`<line x1="${w.p[0]}" y1="${w.p[1]}" x2="${w.p[2]}" y2="${w.p[3]}" stroke="#d4af37" stroke-width="${Math.max(w.t||10,px*2)}"/>`}
- for(const o of live(m.cols)){const sw=isS('cols',o.id)?px*4:px;s+=o.rnd?`<ellipse cx="${o.x}" cy="${o.y}" rx="${o.w/2}" ry="${o.d/2}" fill="#8a8a95" stroke="#f1d77a" stroke-width="${sw}"/>`:`<rect x="${o.x-o.w/2}" y="${o.y-o.d/2}" width="${o.w}" height="${o.d}" fill="#8a8a95" stroke="#f1d77a" stroke-width="${sw}"/>`}
- for(const f of live(m.fx)){const sw=isS('fx',f.id)?px*4:px*1.5,col=f.k==='fridge'?'#5b8fb0':f.k==='wall'?'#a8794a':f.k==='gon'?'#6f9a5d':'#9a7fb5';
-  s+=`<g transform="translate(${f.x} ${f.y}) rotate(${f.a||0})"><rect x="${-f.w/2}" y="${-f.d/2}" width="${f.w}" height="${f.d}" fill="${col}" fill-opacity=".75" stroke="${isS('fx',f.id)?'#fff':'#f1d77a'}" stroke-width="${sw}"/><line x1="${-f.w/2}" y1="${f.d/2}" x2="${f.w/2}" y2="${f.d/2}" stroke="#fff" stroke-width="${px*3}"/></g><text x="${f.x}" y="${f.y+fs*.35}" fill="#fff" font-size="${fs}" font-weight="700" text-anchor="middle">${f.num||''}</text>`}
- for(const o of live(m.doors)){const col={ent:'#4caf50',in:'#d4af37',emg:'#e57373',wh:'#64b5f6'}[o.k]||'#d4af37';
+  s+=`<polygon points="${pts.join(' ')}" fill="${isS('rooms',r.id)?K.acc2:K.card}" stroke="${K.acc}" stroke-width="${px*(isS('rooms',r.id)?4:2)}"/><text x="${c[0]}" y="${c[1]}" fill="${K.mut}" font-size="${fs}" text-anchor="middle">${esc2(r.name)}</text>`}
+ for(const w of live(m.walls)){if(w.p&&w.p.length===4)s+=`<line x1="${w.p[0]}" y1="${w.p[1]}" x2="${w.p[2]}" y2="${w.p[3]}" stroke="${K.acc}" stroke-width="${Math.max(w.t||10,px*2)}"/>`}
+ for(const o of live(m.cols)){const sw=isS('cols',o.id)?px*4:px;s+=o.rnd?`<ellipse cx="${o.x}" cy="${o.y}" rx="${o.w/2}" ry="${o.d/2}" fill="${K.mut}" stroke="${K.ink}" stroke-width="${sw}"/>`:`<rect x="${o.x-o.w/2}" y="${o.y-o.d/2}" width="${o.w}" height="${o.d}" fill="${K.mut}" stroke="${K.ink}" stroke-width="${sw}"/>`}
+ for(const f of live(m.fx)){const sw=isS('fx',f.id)?px*4:px*1.5,col=f.k==='fridge'?K.inc:f.k==='wall'?K.warn:f.k==='gon'?K.acc:K.mut;
+  s+=`<g transform="translate(${f.x} ${f.y}) rotate(${f.a||0})"><rect x="${-f.w/2}" y="${-f.d/2}" width="${f.w}" height="${f.d}" fill="${col}" fill-opacity=".75" stroke="${K.ink}" stroke-width="${sw}"/><line x1="${-f.w/2}" y1="${f.d/2}" x2="${f.w/2}" y2="${f.d/2}" stroke="${K.ink}" stroke-width="${px*3}"/></g><text x="${f.x}" y="${f.y+fs*.35}" fill="${K.ink}" stroke="${K.card}" stroke-width="${px*.8}" paint-order="stroke" font-size="${fs}" font-weight="700" text-anchor="middle">${f.num||''}</text>`}
+ for(const o of live(m.doors)){const col={ent:K.inc,in:K.acc,emg:K.bad,wh:K.warn}[o.k]||K.acc;
   s+=`<g transform="translate(${o.x} ${o.y}) rotate(${o.a||0})"><line x1="${-o.w/2}" y1="0" x2="${o.w/2}" y2="0" stroke="${col}" stroke-width="${isS('doors',o.id)?px*9:px*6}" stroke-linecap="round"/></g>`}
- for(const o of live(m.syms)){s+=`<circle cx="${o.x}" cy="${o.y}" r="${isS('syms',o.id)?px*17:px*13}" fill="#15151a" stroke="#d4af37" stroke-width="${px*2}"/><text x="${o.x}" y="${o.y+fs*.35}" fill="#f1d77a" font-size="${fs*.8}" text-anchor="middle">${esc2((SYN[o.k]||'?').slice(0,1))}</text>`}
+ for(const o of live(m.syms)){s+=`<circle cx="${o.x}" cy="${o.y}" r="${isS('syms',o.id)?px*17:px*13}" fill="${K.card}" stroke="${K.acc}" stroke-width="${px*2}"/><text x="${o.x}" y="${o.y+fs*.35}" fill="${K.ink}" font-size="${fs*.8}" text-anchor="middle">${esc2((SYN[o.k]||'?').slice(0,1))}</text>`}
  if(E.pts.length){const pp=[];for(let i=0;i+1<E.pts.length;i+=2)pp.push(E.pts[i]+','+E.pts[i+1]);
-  s+=`<polyline points="${pp.join(' ')}" fill="none" stroke="#fff" stroke-width="${px*2}" stroke-dasharray="${px*6} ${px*4}"/>`;
-  for(let i=0;i+1<E.pts.length;i+=2)s+=`<circle cx="${E.pts[i]}" cy="${E.pts[i+1]}" r="${px*(i?6:9)}" fill="${i?'#d4af37':'#4caf50'}"/>`}
+  s+=`<polyline points="${pp.join(' ')}" fill="none" stroke="${K.ink}" stroke-width="${px*2}" stroke-dasharray="${px*6} ${px*4}"/>`;
+  for(let i=0;i+1<E.pts.length;i+=2)s+=`<circle cx="${E.pts[i]}" cy="${E.pts[i+1]}" r="${px*(i?6:9)}" fill="${i?K.acc:K.inc}"/>`}
+ /* שלב 11: אזורים לא ודאיים מטיוטת ה-AI – מסגרת מקווקווה, בולטת עד שהמנהל עבר עליהם (x,y = פינה, w,d = מידות) */
+ for(let i=0;i<(Array.isArray(m.uz)?m.uz.length:0);i++){const z=m.uz[i];if(!z||!isFinite(z.x))continue;const cur2=E.wiz&&E.wiz.zi===i;
+  s+=`<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.d}" fill="${z.ok?'none':K.warn}" fill-opacity=".18" stroke="${z.ok?K.inc:K.warn}" stroke-width="${px*(cur2?5:2.5)}" stroke-dasharray="${px*8} ${px*5}"/><text x="${z.x+z.w/2}" y="${z.y+z.d/2+fs*.35}" fill="${K.ink}" stroke="${K.card}" stroke-width="${px*.8}" paint-order="stroke" font-size="${fs}" font-weight="700" text-anchor="middle">${z.ok?'✓':'?'}${i+1}</text>`}
  return `<svg viewBox="${E.vx} ${E.vy} ${vw} ${vh}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="display:block;touch-action:none">${s}</svg>`}
 function draw(){const el=document.getElementById('s3pl');if(el)el.innerHTML=planSvg()}
 U.afterEd=()=>{if(cur().v==='st3e')draw()};
@@ -132,60 +143,62 @@ const FIELDS={fx:[['w','אורך (ס"מ)',30,2000],['d','עומק (ס"מ)',20,30
  rooms:[['h','גובה תקרה (ס"מ)',200,600]],doors:[['w','רוחב (ס"מ)',60,500]],cols:[['w','רוחב (ס"מ)',10,300],['d','עומק (ס"מ)',10,300]],syms:[]};
 function optsH(){
  const t=E.tool,sl=(id,cur2,m)=>`<select data-c="${id}" aria-label="סוג" style="min-height:44px">${Object.entries(m).map(([k,l])=>`<option value="${k}"${cur2===k?' selected':''}>${l}</option>`).join('')}</select>`;
- if(t==='room')return `<p class="s3note">הקישו על המפה כדי להוסיף פינות (לפחות 3). ${E.pts.length/2} פינות.</p><div class="s3row"><button class="s3b" data-a="s3eClose">סגרו את החדר</button><button class="s3b g" data-a="s3ePtUndo">בטלו פינה</button><button class="s3b g" data-a="s3ePtClr">נקו</button></div>`;
- if(t==='fx')return `<div class="s3row"><span>סוג הגוף:</span>${sl('s3eFxK',E.fxk,FXN)}</div><p class="s3note">הקישו על המקום בתוך החדר.</p>`;
- if(t==='door')return `<div class="s3row"><span>סוג הדלת:</span>${sl('s3eDrK',E.drk,DRN)}</div><p class="s3note">הקישו על המקום בקיר.</p>`;
- if(t==='sym')return `<div class="s3row"><span>סמל:</span>${sl('s3eSyK',E.syk,SYN)}</div><p class="s3note">הקישו על המקום במפה.</p>`;
- if(t==='col')return '<p class="s3note">הקישו על המקום של העמוד.</p>';
- if(t==='move')return `<p class="s3note">${findSel()?'הקישו על המקום החדש של הפריט שנבחר.':'קודם בחרו פריט (כלי "בחירה").'}</p>`;
- return '<p class="s3note">הקישו על פריט במפה כדי לבחור אותו. גרירה מזיזה את המפה, צביטה מקרבת.</p>'}
+ if(t==='room')return `<p class="note s3note">הקישו על המפה כדי להוסיף פינות (לפחות 3). ${E.pts.length/2} פינות.</p><div class="row s3row"><button class="btn" data-a="s3eClose">סגרו את החדר</button><button class="btn g" data-a="s3ePtUndo">בטלו פינה</button><button class="btn g" data-a="s3ePtClr">נקו</button></div>`;
+ if(t==='fx')return `<div class="row s3row"><span>סוג הגוף:</span>${sl('s3eFxK',E.fxk,FXN)}</div><p class="note s3note">הקישו על המקום בתוך החדר.</p>`;
+ if(t==='door')return `<div class="row s3row"><span>סוג הדלת:</span>${sl('s3eDrK',E.drk,DRN)}</div><p class="note s3note">הקישו על המקום בקיר.</p>`;
+ if(t==='sym')return `<div class="row s3row"><span>סמל:</span>${sl('s3eSyK',E.syk,SYN)}</div><p class="note s3note">הקישו על המקום במפה.</p>`;
+ if(t==='col')return '<p class="note s3note">הקישו על המקום של העמוד.</p>';
+ if(t==='move')return `<p class="note s3note">${findSel()?'הקישו על המקום החדש של הפריט שנבחר.':'קודם בחרו פריט (כלי "בחירה").'}</p>`;
+ return '<p class="note s3note">הקישו על פריט במפה כדי לבחור אותו. גרירה מזיזה את המפה, צביטה מקרבת.</p>'}
 function selH(){
  const o=findSel();if(!E.sel||!o)return '';const t=E.sel.t,F=FIELDS[t]||[];
  const nm=t==='fx'?`${FXN[o.k]||'גוף'} מספר ${o.num||''}`:t==='rooms'?'חדר':t==='doors'?'דלת – '+(DRN[o.k]||''):t==='syms'?'סמל – '+(SYN[o.k]||''):'עמוד';
  let h=`<div class="s3info"><b>${esc2(nm)}</b>`;
  if(t==='fx'||t==='rooms')h+=`<label class="f" style="display:block;margin-top:6px"><span>${t==='fx'?'שם חופשי (לא חובה)':'שם החדר'}</span><input data-c="s3eF" data-f="name" maxlength="${t==='fx'?30:30}" value="${esc2(o.name||'')}"></label>`;
- h+=`<div class="s3row">${F.map(([f,l,a,b])=>`<label class="f" style="flex:1;min-width:110px"><span>${l}</span><input type="number" inputmode="numeric" min="${a}" max="${b}" data-c="s3eF" data-f="${f}" value="${+o[f]||''}"></label>`).join('')}</div>`;
+ h+=`<div class="row s3row">${F.map(([f,l,a,b])=>`<label class="f" style="flex:1;min-width:110px"><span>${l}</span><input type="number" inputmode="numeric" min="${a}" max="${b}" data-c="s3eF" data-f="${f}" value="${+o[f]||''}"></label>`).join('')}</div>`;
  if(t==='fx'){if(TWO.includes(o.k))h+=`<label class="cb"><input type="checkbox" data-c="s3eF" data-f="sides2"${o.sides===2?' checked':''}> שני צדדים</label>`;
   h+=`<label class="cb"><input type="checkbox" data-c="s3eF" data-f="hi"${o.hi?' checked':''}> צילום עליון ותחתון (מדף גבוה)</label>`;if(o.k==='fridge')h+=`<label class="cb"><input type="checkbox" data-c="s3eF" data-f="glass"${o.glass?' checked':''}> דלת זכוכית</label>`}
  if(t==='cols')h+=`<label class="cb"><input type="checkbox" data-c="s3eF" data-f="rnd"${o.rnd?' checked':''}> עמוד עגול</label>`;
- if(t==='doors')h+=`<div class="s3row"><span>סוג:</span><select data-c="s3eF" data-f="k" style="min-height:44px">${Object.entries(DRN).map(([k,l])=>`<option value="${k}"${o.k===k?' selected':''}>${l}</option>`).join('')}</select></div>`;
- if(t!=='rooms'&&t!=='cols')h+=`<div class="s3row"><button class="s3b g" data-a="s3eRot" data-d="-90">סיבוב ‎−90°</button><button class="s3b g" data-a="s3eRot" data-d="90">סיבוב ‎+90°</button></div>`;
+ if(t==='doors')h+=`<div class="row s3row"><span>סוג:</span><select data-c="s3eF" data-f="k" style="min-height:44px">${Object.entries(DRN).map(([k,l])=>`<option value="${k}"${o.k===k?' selected':''}>${l}</option>`).join('')}</select></div>`;
+ if(t!=='rooms'&&t!=='cols')h+=`<div class="row s3row"><button class="btn g" data-a="s3eRot" data-d="-90">סיבוב ‎−90°</button><button class="btn g" data-a="s3eRot" data-d="90">סיבוב ‎+90°</button></div>`;
  const fresh=E.fresh.has(t+':'+o.id);
- if(fresh)h+=`<div class="s3row"><button class="s3b g" data-a="s3eRemove">הסרה (עוד לא נשמר)</button></div>`;
- else if(U.isMgr())h+=`<div class="s3row"><button class="s3b g" style="border-color:#e57373;color:#e57373" data-a="s3eDel">מחיקה (לסל המחזור)</button></div>`;
- else h+=`<p class="s3note">מחיקה של פריט שכבר נשמר מותרת למנהל בלבד.</p>`;
+ if(fresh)h+=`<div class="row s3row"><button class="btn g" data-a="s3eRemove">הסרה (עוד לא נשמר)</button></div>`;
+ else if(U.isMgr())h+=`<div class="row s3row"><button class="btn g" style="border-color:var(--bad);color:var(--bad)" data-a="s3eDel">מחיקה (לסל המחזור)</button></div>`;
+ else h+=`<p class="note s3note">מחיקה של פריט שכבר נשמר מותרת למנהל בלבד.</p>`;
  return h+'</div>'}
 function binH(){
  const L=[];for(const t of KEYS)for(const o of E.map[t])if(o&&o.del===1)L.push([t,o]);
- if(!L.length)return '<p class="s3note">סל המחזור ריק.</p>';
- return L.map(([t,o])=>`<div class="s3info"><b>${TN[t]}${t==='fx'?' '+(o.num||o.id):o.name?' '+esc2(o.name):''}</b><small style="color:#bfae7a"> נמחק ${o.delAt?esc2(new Date(o.delAt).toLocaleDateString('he-IL')):''}</small><div class="s3row"><button class="s3b g" data-a="s3eRestore" data-t="${t}" data-id="${esc2(o.id)}">שחזור</button></div></div>`).join('')}
+ if(!L.length)return '<p class="note s3note">סל המחזור ריק.</p>';
+ return L.map(([t,o])=>`<div class="s3info"><b>${TN[t]}${t==='fx'?' '+(o.num||o.id):o.name?' '+esc2(o.name):''}</b><small> נמחק ${o.delAt?esc2(new Date(o.delAt).toLocaleDateString('he-IL')):''}</small><div class="row s3row"><button class="btn g" data-a="s3eRestore" data-t="${t}" data-id="${esc2(o.id)}">שחזור</button></div></div>`).join('')}
 function verH(){
- if(E.vers==null){loadVers();return '<p class="s3note">טוען גרסאות…</p>'}
- if(E.vers.err)return `<p class="s3note">${esc2(E.vers.err)}</p>`;
- if(!E.vers.L.length)return '<p class="s3note">עוד אין גרסאות קודמות. גרסה נשמרת בכל שמירה של שינוי.</p>';
- return E.vers.L.map(v=>`<div class="s3info"><b>גרסה ${v.v}</b> · ${esc2(v.at?new Date(v.at).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'')}${v.why?' · '+esc2(v.why):''}<div class="s3row"><button class="s3b g" data-a="s3eVer" data-v="${v.v}">שחזר את הגרסה הזו</button></div></div>`).join('')}
+ if(E.vers==null){loadVers();return '<p class="note s3note">טוען גרסאות…</p>'}
+ if(E.vers.err)return `<p class="note s3note">${esc2(E.vers.err)}</p>`;
+ if(!E.vers.L.length)return '<p class="note s3note">עוד אין גרסאות קודמות. גרסה נשמרת בכל שמירה של שינוי.</p>';
+ return E.vers.L.map(v=>`<div class="s3info"><b>גרסה ${v.v}</b> · ${esc2(v.at?new Date(v.at).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'')}${v.why?' · '+esc2(v.why):''}<div class="row s3row"><button class="btn g" data-a="s3eVer" data-v="${v.v}">שחזר את הגרסה הזו</button></div></div>`).join('')}
 function brH(){
  const d=U.data(),c=d&&d.cfg||{wh:false,on:true,cap:500},br=U.brSel();
- return `<p class="s3note">הגדרות הסניף "${esc2((U.brs().find(b=>b.id===br)||{}).name||br)}" (מנהל־על בלבד).</p>
- <div class="s3row"><button class="chip ${c.wh?'on':''}" data-a="s3eBr" data-f="wh" aria-pressed="${!!c.wh}">${c.wh?'יש מחסן':'אין מחסן'}</button><button class="chip ${c.on!==false?'on':''}" data-a="s3eBr" data-f="on" aria-pressed="${c.on!==false}">${c.on!==false?'תלת מימד פעיל בסניף':'תלת מימד כבוי בסניף'}</button></div>
- <p class="s3note">מכסת בדיקות חודשית לסניף: ${+c.cap||0} (שינוי המכסה יתווסף בהגדרות).</p>`}
+ return `<p class="note s3note">הגדרות הסניף "${esc2((U.brs().find(b=>b.id===br)||{}).name||br)}" (מנהל־על בלבד).</p>
+ <div class="row s3row"><button class="chip ${c.wh?'on':''}" data-a="s3eBr" data-f="wh" aria-pressed="${!!c.wh}">${c.wh?'יש מחסן':'אין מחסן'}</button><button class="chip ${c.on!==false?'on':''}" data-a="s3eBr" data-f="on" aria-pressed="${c.on!==false}">${c.on!==false?'תלת מימד פעיל בסניף':'תלת מימד כבוי בסניף'}</button></div>
+ <p class="note s3note">מכסת בדיקות חודשית לסניף: ${+c.cap||0} (שינוי המכסה יתווסף בהגדרות).</p>`}
 V.st3e=()=>{const T='עריכת המפה';
  if(!U.feat()||!U.canDraw())return{t:T,h:'<div class="empty">אין לכם הרשאה לעריכת מפה בעסק הזה</div>'};
  if(!U.dataOk()){U.load();return{t:T,h:'<div class="empty">טוען…</div>'}}
- if(U.data().err)return{t:T,h:`<div class="s3s"><p style="margin:0">${esc2(U.data().err)}</p></div>`};
+ if(U.data().err)return{t:T,h:`<div class="card s3s"><p style="margin:0">${esc2(U.data().err)}</p></div>`};
  const d=U.data();if(E.kind==='w'&&!d.cfg.wh)E.kind='s';
  if(E.key!==U.mapIdOf(E.kind)+'|'+(SY&&SY.bizId||''))init();
  let h='';
- if(d.cfg.wh)h+=`<div class="chips" style="margin:0 0 8px"><button class="chip ${E.kind==='s'?'on':''}" data-a="s3eKind" data-k="s">החנות</button><button class="chip ${E.kind==='w'?'on':''}" data-a="s3eKind" data-k="w">המחסן</button></div>`;
- if(E.offer)h+=`<div class="s3info">יש שינויים שלא נשמרו מהפעם הקודמת (${esc2(new Date(E.offer.at).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}))}).<div class="s3row"><button class="s3b" data-a="s3eDraft" data-y="1">המשיכו מהם</button><button class="s3b g" data-a="s3eDraft" data-y="0">התעלמו מהם</button></div></div>`;
- h+=`<div class="s3tabs" role="toolbar">${TOOLS.map(([k,l])=>`<button class="${E.tool===k?'on':''}" data-a="s3eTool" data-k="${k}" aria-pressed="${E.tool===k}">${l}</button>`).join('')}</div>${optsH()}`;
- if(E.msg)h+=`<div class="s3info" role="alert" style="border:1px solid #e57373;color:#ffb4a8;margin-bottom:8px">${esc2(E.msg)}</div>`;
+ if(typeof U.wizPanel==='function'&&E.map&&(E.wiz||(Array.isArray(E.map.uz)&&E.map.uz.length)))h+=U.wizPanel();
+ if(d.cfg.wh&&!E.wiz)h+=`<div class="chips" style="margin:0 0 8px"><button class="chip ${E.kind==='s'?'on':''}" data-a="s3eKind" data-k="s">החנות</button><button class="chip ${E.kind==='w'?'on':''}" data-a="s3eKind" data-k="w">המחסן</button></div>`;
+ if(E.offer)h+=`<div class="s3info">יש שינויים שלא נשמרו מהפעם הקודמת (${esc2(new Date(E.offer.at).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}))}).<div class="row s3row"><button class="btn" data-a="s3eDraft" data-y="1">המשיכו מהם</button><button class="btn g" data-a="s3eDraft" data-y="0">התעלמו מהם</button></div></div>`;
+ h+=`<div class="s3tabs" role="toolbar">${TOOLS.map(([k,l])=>`<button class="chip ${E.tool===k?'on':''}" data-a="s3eTool" data-k="${k}" aria-pressed="${E.tool===k}">${l}</button>`).join('')}</div>${optsH()}`;
+ if(E.msg)h+=`<div class="s3info s3err" role="alert" style="margin-bottom:8px">${esc2(E.msg)}</div>`;
  h+=`<div class="s3main" id="s3pl" style="touch-action:none;height:min(52vh,420px)"></div>
- <div class="s3row"><button class="s3b g" data-a="s3eZoom" data-d="0.7" aria-label="קרב">＋</button><button class="s3b g" data-a="s3eZoom" data-d="1.4" aria-label="הרחק">－</button><button class="s3b g" data-a="s3eFit">הכול</button><button class="s3b g" data-a="s3eUndo"${E.undo.length?'':' disabled'}>בטל פעולה</button></div>${selH()}
- <div class="s3row" style="margin-top:12px"><button class="s3b" data-a="s3eSave"${E.busy?' disabled':''}>${E.busy?'שומר…':'שמירה'}</button>${E.dirty?'<span class="s3note" style="margin:0">יש שינויים שלא נשמרו</span>':''}</div>
- <div class="s3tabs" style="margin-top:12px"><button class="${E.sec==='ver'?'on':''}" data-a="s3eSec" data-k="ver">גרסאות קודמות</button>${U.isMgr()?`<button class="${E.sec==='bin'?'on':''}" data-a="s3eSec" data-k="bin">סל מחזור</button>`:''}${SY&&SY.sa?`<button class="${E.sec==='br'?'on':''}" data-a="s3eSec" data-k="br">סניף ומחסן</button>`:''}</div>`;
+ <div class="row s3row"><button class="btn g" data-a="s3eZoom" data-d="0.7" aria-label="קרב">＋</button><button class="btn g" data-a="s3eZoom" data-d="1.4" aria-label="הרחק">－</button><button class="btn g" data-a="s3eFit">הכול</button><button class="btn g" data-a="s3eUndo"${E.undo.length?'':' disabled'}>בטל פעולה</button></div>${selH()}
+ ${typeof U.wizZones==='function'&&E.map&&(E.wiz||(Array.isArray(E.map.uz)&&E.map.uz.length))?U.wizZones():''}
+ <div class="row s3row" style="margin-top:12px"><button class="btn" data-a="s3eSave"${E.busy||(typeof U.wizGate==='function'&&U.wizGate(E.map))?' disabled':''}>${E.busy?'שומר…':'שמירה'}</button>${E.dirty?'<span class="note s3note" style="margin:0">יש שינויים שלא נשמרו</span>':''}</div>
+ <div class="s3tabs" style="margin-top:12px"><button class="chip ${E.sec==='ver'?'on':''}" data-a="s3eSec" data-k="ver">גרסאות קודמות</button>${U.isMgr()?`<button class="chip ${E.sec==='bin'?'on':''}" data-a="s3eSec" data-k="bin">סל מחזור</button>`:''}${SY&&SY.sa?`<button class="chip ${E.sec==='br'?'on':''}" data-a="s3eSec" data-k="br">סניף ומחסן</button>`:''}</div>`;
  if(E.sec==='ver')h+=verH();else if(E.sec==='bin'&&U.isMgr())h+=binH();else if(E.sec==='br'&&SY&&SY.sa)h+=brH();
- return{t:T,s:E.map?E.map.name:'',h:`<div class="s3s">${h}</div>`}};
+ return{t:T,s:E.map?E.map.name:'',h:`<div class="card s3s">${h}</div>`}};
 U.openEditor=k=>{E.kind=k==='w'?'w':'s';if(cur().v!=='st3e')go('st3e')};
 
 /* ---------- פעולות ---------- */
@@ -229,19 +242,21 @@ ACT.s3eDraft=el=>{if(el.dataset.y==='1'&&E.offer){E.map=clone(E.offer.map);E.dir
 const errMsg=e=>e&&e.offline?'אין חיבור לאינטרנט. השינויים שמורים בטלפון, ואפשר לנסות לשמור שוב כשיש חיבור.':((U.RS&&e&&U.RS[e.reason])||(e&&e.message)||'השמירה נכשלה')+'. השינויים שמורים בטלפון.';
 async function save(why){
  if(E.busy)return;const G0=G(),m=E.map;
+ const zg=typeof U.wizGate==='function'?U.wizGate(m):'';if(zg){E.msg=zg;return rerender()}
  const errs=G0.validateMap(m);if(errs.length){E.msg='אי אפשר לשמור: '+errs.slice(0,3).join(' · ')+(errs.length>3?' ועוד '+(errs.length-3):'');return rerender()}
- const body=clone(m);delete body.v;delete body.upd;delete body.by;
- E.busy=1;E.msg='';rerender();
+ const body=clone(m);delete body.v;delete body.upd;delete body.by;if(typeof U.wizPrep==='function')U.wizPrep(body);
+ const wz=!!E.wiz;E.busy=1;E.msg='';rerender();
  try{
   const r=await U.fn('s3SaveMap',{mapId:mid(),baseV:E.baseV,map:body,why:why||'עריכה'});
   dropDraft();clearTimeout(E.tm);E.dirty=false;E.fresh=new Set();E.key='';U.drop();E.busy=0;toast('המפה נשמרה');U.load(true);
   /* שלב 7: השרת החליף מזהי גופים (renamed) או לא שמר שדות לא מוכרים (dropped) – המפה נטענת מחדש מהשרת (E.key='' ו-U.drop), ומציגים הודעה */
   const nr=r&&r.renamed&&typeof r.renamed==='object'?Object.keys(r.renamed).length:0,nd=r&&Array.isArray(r.dropped)?r.dropped.length:0;
   if(nr||nd)dlg(`<h3>המפה נשמרה</h3>${nr?`<p>${nr} גופים קיבלו מהשרת מספר חדש, כדי שלא יהיו שני גופים עם אותו מספר. המפה נטענה מחדש.</p>`:''}${nd?'<p>חלק מהפרטים שהוזנו לא נשמרו בשרת.</p>':''}<button class="btn w" data-a="closeDlg">הבנתי</button>`);
+  if(wz&&typeof U.wizDone==='function')U.wizDone();
   if(cur().v==='st3e')ACT.back();
  }catch(e){E.busy=0;E.msg=errMsg(e);saveDraftNow();rerender()}
 }
-ACT.s3eSave=()=>save('עריכה');
+ACT.s3eSave=()=>save(E.wiz?'טיוטת AI':'עריכה');
 
 /* ---------- גרסאות קודמות ---------- */
 const pad6=n=>String(n).padStart(6,'0');

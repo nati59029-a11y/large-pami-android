@@ -91,7 +91,7 @@ const pick = async (page, sel, file) => { await page.setInputFiles(sel, file); a
   await W.page.evaluate(() => { document.querySelector('.s3cc button').click(); }); await sleep(200);
   let o = await noOverflow(W.page); check('2ד בלי גלישה ב-360px', o.sw <= o.W && !o.bad.length, o);
   if (shots) await shot(W.page, fp(shots, 'capture'));
-  const btn = await W.page.evaluate(() => [...document.querySelectorAll('.s3s .s3b, .s3cc button')].filter((b) => b.getBoundingClientRect().height < 43).map((b) => b.innerText));
+  const btn = await W.page.evaluate(() => [...document.querySelectorAll('.s3s .btn, .s3cc button')].filter((b) => b.getBoundingClientRect().height < 43).map((b) => b.innerText));
   check('2ה כל הכפתורים לפחות 44px', !btn.length, btn);
 
   // ---- צילום: תקינה, חשוכה, לא חדה ----
@@ -103,7 +103,7 @@ const pick = async (page, sel, file) => { await page.setInputFiles(sel, file); a
   check('3ב הודעה "ממתינים לשליחה" מוצגת, בלי כישלון סופי', q2.qn >= 2 && q2.qf === 0 && /ממתינים לשליחה/.test(q2.txt), q2);
   // מקטע הבא נבחר אוטומטית; חשוכה
   await pick(W.page, 'input[data-c=s3cPick]', await mkImg(W.page, 'dark'));
-  const d1 = await W.page.evaluate(() => ({ t: (document.querySelector('.s3warn[role=alert]') || {}).innerText, keep: !!document.querySelector('[data-a=s3cKeep]'), again: !!document.querySelector('label.s3b input[data-c=s3cPick]') }));
+  const d1 = await W.page.evaluate(() => ({ t: (document.querySelector('.s3warn[role=alert]') || {}).innerText, keep: !!document.querySelector('[data-a=s3cKeep]'), again: !!document.querySelector('label.btn input[data-c=s3cPick]') }));
   check('3ג תמונה חשוכה: "צלמו שוב" מיידי (חשוכה מדי) ואפשרות "שמרו בכל זאת"', /חשוכה/.test(d1.t || '') && d1.keep && d1.again, d1);
   if (shots) await shot(W.page, fp(shots, 'retake'));
   await pick(W.page, 'input[data-c=s3cPick]', await mkImg(W.page, 'blur'));

@@ -96,6 +96,8 @@ async function addEv(k){const t=Date.now();C.tl=mergeTl(C.tl,[{k,t}]);lsS('s3t:'
 
 /* ---------- תור שליחה ---------- */
 const b64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]||'');r.onerror=()=>rej(r.error);r.readAsDataURL(b)});
+/* שלב 11: עזרים לאשף ולכרטיס המדף (הקטנה, בדיקת חדות/חשיכה, base64, מזהה בקשה) */
+U.prep=prep;U.badOf=badOf;U.b64=b64;U.qid=qid;U.blobOf=blobOf;U.decode=decode;
 const PERM=/^(bad-|not-|no-|too-|full$|run-closed|feature-off|stale)/;
 function mark(run,slot,v){if(run!==C.rid||!slot)return;if(v)C.loc[slot]=v;else delete C.loc[slot];lsS('s3d:'+run,C.loc)}
 async function flush(){
@@ -184,54 +186,54 @@ ACT.s3cMap=()=>go('st3');
 
 /* ---------- המסך ---------- */
 const CSS=document.createElement('style');
-CSS.textContent=`.s3cc{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.s3cc button{min-width:44px;min-height:44px;border-radius:10px;border:2px solid #3a3320;background:#1e1e25;color:#e8d9a8;font:inherit;font-weight:700;padding:0 8px;cursor:pointer}
-.s3cc button.ok{border-color:#3fa66b;color:#9fe0b8}.s3cc button.q{border-color:#d4af37;color:#f1d77a}.s3cc button.miss{border-color:#c0504d;border-style:dashed;color:#f0a3a1}.s3cc button.warn{border-color:#e08a2e;color:#f5c58a}.s3cc button.cur{background:#d4af37;color:#141414;border-style:solid}
-.s3g{background:#1e1e25;border-radius:10px;padding:6px 10px;margin:8px 0}.s3g .hd{display:flex;width:100%;justify-content:space-between;align-items:center;min-height:44px;background:none;border:0;color:#e8d9a8;font:inherit;font-weight:700;cursor:pointer;text-align:right}
-.s3bar{height:8px;background:#2a2a32;border-radius:6px;overflow:hidden;margin:6px 0}.s3bar i{display:block;height:100%;background:#d4af37}.s3warn{background:#3a1a1a;color:#f5b5b3;border-radius:10px;padding:8px 10px;margin:8px 0}
-.s3s label.s3b{display:flex;align-items:center;justify-content:center;flex:1;min-width:130px;text-align:center}.s3pv{max-width:100%;max-height:150px;border-radius:8px;display:block;margin:6px 0}`;
+CSS.textContent=`.s3cc{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.s3cc button{min-width:44px;min-height:44px;border-radius:var(--r-m,10px);border:2px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:700;padding:0 8px;cursor:pointer}
+.s3cc button.ok{border-color:var(--inc);color:var(--inc)}.s3cc button.q{border-color:var(--acc);color:var(--acc)}.s3cc button.miss{border-color:var(--bad);border-style:dashed;color:var(--bad)}.s3cc button.warn{border-color:var(--warn);color:var(--warn)}.s3cc button.cur{background:var(--acc);border-color:var(--acc);border-style:solid;color:var(--onacc)}
+.s3g{background:var(--bg);border:1px solid var(--line);border-radius:var(--r-m,10px);padding:6px 10px;margin:8px 0}.s3g .hd{display:flex;width:100%;justify-content:space-between;align-items:center;min-height:44px;background:none;border:0;color:var(--ink);font:inherit;font-weight:700;cursor:pointer;text-align:right}
+.s3bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden;margin:6px 0}.s3bar i{display:block;height:100%;background:var(--acc)}
+.s3s label.btn{flex:1;min-width:130px}.s3pv{max-width:100%;max-height:150px;border-radius:var(--r-m,8px);display:block;margin:6px 0}`;
 document.head.appendChild(CSS);
 function chips(g){return `<div class="s3cc">${g.L.map(s=>`<button type="button" class="${stOf(s.slot)==='ok'?'ok':stOf(s.slot)==='q'?'q':stOf(s.slot)==='miss'?'miss':'warn'} ${s.slot===C.cur?'cur':''}" data-a="s3cSel" data-s="${s.slot}" aria-label="${esc2(lbl(s))}">${s.n}${s.l==='t'?' ע':s.l==='b'?' ת':''}${g.L.some(x=>x.s==='b')?(s.s==='b'?' ב':' א'):''}</button>`).join('')}</div>`}
 function curCard(){
  const sl=slotOf(C.cur),c=counts();
  if(!sl)return `<div class="s3info">${c.m?'כל המקטעים שנשארו כבר נבחרו.':'כל המקטעים צולמו. אפשר ללחוץ "סיימתי".'}</div>`;
  let h=`<div class="s3info"><b>${esc2(lbl(sl))}</b><br>${esc2(guide(sl))}`;
- const st=stOf(sl.slot);if(st==='person')h+=`<div class="s3warn">בתמונה הקודמת היה אדם והיא לא נשמרה. צלמו שוב בלי אנשים.</div>`;
+ const st=stOf(sl.slot);if(st==='person')h+=`<div class="ban s3warn">בתמונה הקודמת היה אדם והיא לא נשמרה. צלמו שוב בלי אנשים.</div>`;
  h+=`</div>`;
- if(C.pend)h+=`<div class="s3warn" role="alert"><b>${C.pend.bad==='blur'?'התמונה לא חדה מספיק. צלמו שוב, והחזיקו את הטלפון יציב.':'התמונה חשוכה מדי. הדליקו אור או התקרבו, וצלמו שוב.'}</b><img class="s3pv" src="${C.pend.url}" alt="התמונה שצולמה"></div>
-  <div class="s3row"><label class="s3b">צלמו שוב<input type="file" accept="image/*" capture="environment" data-c="s3cPick" hidden></label><button class="s3b g" style="flex:1" data-a="s3cKeep">שמרו בכל זאת</button></div>`;
+ if(C.pend)h+=`<div class="ban s3warn" role="alert"><b>${C.pend.bad==='blur'?'התמונה לא חדה מספיק. צלמו שוב, והחזיקו את הטלפון יציב.':'התמונה חשוכה מדי. הדליקו אור או התקרבו, וצלמו שוב.'}</b><img class="s3pv" src="${C.pend.url}" alt="התמונה שצולמה"></div>
+  <div class="row s3row"><label class="btn">צלמו שוב<input type="file" accept="image/*" capture="environment" data-c="s3cPick" hidden></label><button class="btn g" style="flex:1" data-a="s3cKeep">שמרו בכל זאת</button></div>`;
  else{const L=sideOf(sl);
-  h+=`<div class="s3row"><label class="s3b">צלמו תמונה<input type="file" accept="image/*" capture="environment" data-c="s3cPick" hidden></label>${sl.l==='a'&&L.length>1?`<label class="s3b g">סרטון לכל הצד (${L.length} מקטעים)<input type="file" accept="video/*" capture="environment" data-c="s3cVid" hidden></label>`:''}<button class="s3b g" data-a="s3cSkip">דלגו למקטע הבא</button></div>`;
-  if(sl.l==='a'&&L.length>1)h+=`<p class="s3note">בסרטון: התחילו ממקטע ${L[0].n} והמשיכו לפי המספור, לאט ובלי לעצור. המכשיר ישלוף תמונה חדה לכל מקטע, והסרטון לא נשמר.</p>`}
+  h+=`<div class="row s3row"><label class="btn">צלמו תמונה<input type="file" accept="image/*" capture="environment" data-c="s3cPick" hidden></label>${sl.l==='a'&&L.length>1?`<label class="btn g">סרטון לכל הצד (${L.length} מקטעים)<input type="file" accept="video/*" capture="environment" data-c="s3cVid" hidden></label>`:''}<button class="btn g" data-a="s3cSkip">דלגו למקטע הבא</button></div>`;
+  if(sl.l==='a'&&L.length>1)h+=`<p class="note s3note">בסרטון: התחילו ממקטע ${L[0].n} והמשיכו לפי המספור, לאט ובלי לעצור. המכשיר ישלוף תמונה חדה לכל מקטע, והסרטון לא נשמר.</p>`}
  return h}
 V.st3c=()=>{const T='צילום מדפים';
  if(!loggedIn()||!U.feat())return{t:T,h:'<div class="empty">תלת מימד לא מופעל בעסק הזה</div>'};
- if(C.own!==me()||!C.rid)return{t:T,h:`<div class="s3s"><p style="margin:0">לא נבחר סבב.</p><button class="s3b" style="margin-top:10px" data-a="s3cMap">למפת החנות</button></div>`};
- if(C.err)return{t:T,h:`<div class="s3s"><p style="margin:0">${esc2(C.err)}</p><button class="s3b" style="margin-top:10px" data-a="s3cOpen" data-id="${esc2(C.rid)}">נסו שוב</button></div>`};
+ if(C.own!==me()||!C.rid)return{t:T,h:`<div class="card s3s"><p style="margin:0">לא נבחר סבב.</p><button class="btn" style="margin-top:10px" data-a="s3cMap">למפת החנות</button></div>`};
+ if(C.err)return{t:T,h:`<div class="card s3s"><p style="margin:0">${esc2(C.err)}</p><button class="btn" style="margin-top:10px" data-a="s3cOpen" data-id="${esc2(C.rid)}">נסו שוב</button></div>`};
  if(!C.run)return{t:T,h:'<div class="empty">טוען את הסבב…</div>'};
  const c=counts(),ts=tState(),R=C.run,off=navigator.onLine===false;
- let h=`<div class="s3s">`;
- if(off)h+=`<div class="s3off" role="status">אין חיבור – התמונות נשמרות בטלפון ויישלחו כשיש רשת</div>`;
- if(C.cache)h+=`<div class="s3off" role="status">מוצגים נתונים שנשמרו בטלפון</div>`;
- if(C.qn)h+=`<div class="s3off" role="status">${C.qn===1?'פריט אחד ממתין':C.qn+' פריטים ממתינים'} לשליחה${off?'':` <button class="s3b g" style="min-height:36px" data-a="s3cFlush">שלחו עכשיו</button>`}</div>`;
- if(C.qf)h+=`<div class="s3warn" role="alert">${C.qf===1?'פריט אחד לא נשלח':C.qf+' פריטים לא נשלחו'}${C.qfm?': '+esc2(C.qfm):''}<div class="s3row"><button class="s3b" data-a="s3cRetry">נסו שוב</button><button class="s3b g" data-a="s3cDrop">הסירו</button></div></div>`;
+ let h=`<div class="card s3s">`;
+ if(off)h+=`<div class="ban s3off" role="status">אין חיבור – התמונות נשמרות בטלפון ויישלחו כשיש רשת</div>`;
+ if(C.cache)h+=`<div class="ban s3off" role="status">מוצגים נתונים שנשמרו בטלפון</div>`;
+ if(C.qn)h+=`<div class="ban s3off" role="status">${C.qn===1?'פריט אחד ממתין':C.qn+' פריטים ממתינים'} לשליחה${off?'':` <button class="btn g s" data-a="s3cFlush">שלחו עכשיו</button>`}</div>`;
+ if(C.qf)h+=`<div class="ban s3warn" role="alert">${C.qf===1?'פריט אחד לא נשלח':C.qf+' פריטים לא נשלחו'}${C.qfm?': '+esc2(C.qfm):''}<div class="row s3row"><button class="btn" data-a="s3cRetry">נסו שוב</button><button class="btn g" data-a="s3cDrop">הסירו</button></div></div>`;
  h+=`<b>צולמו ${c.d} מתוך ${c.n} מקטעים</b>${R.dueAt?` · עד ${esc2(dm(+R.dueAt))}`:''}${R.st==='late'?' · באיחור':''}<div class="s3bar"><i style="width:${c.n?Math.round(100*c.d/c.n):0}%"></i></div>`;
- if(c.m&&c.d)h+=`<p class="s3note" style="margin:0 0 6px">חסרים ${c.m} מקטעים (מסומנים באדום בהמשך).</p>`;
+ if(c.m&&c.d)h+=`<p class="note s3note" style="margin:0 0 6px">חסרים ${c.m} מקטעים (מסומנים באדום בהמשך).</p>`;
  const TN={s:'התחלה',p:'הפסקה',r:'המשך',e:'סיום'};
  h+=`<div class="s3info"><b>${ts==='idle'?'עוד לא התחלתם':ts==='work'?'בעבודה':ts==='pause'?'בהפסקה':'סיימתם את הסבב'}</b>${C.tl.length?` · זמן עבודה ${workMin()} דקות`:''}${C.tl.length?`<br><small>${C.tl.map(e=>TN[e.k]+' '+hm(e.t)).join(' · ')}</small>`:''}
-  <div class="s3row">${ts==='idle'?`<button class="s3b" data-a="s3cEv" data-k="s">התחלתי</button>`:ts==='work'?`<button class="s3b g" data-a="s3cEv" data-k="p">הפסקה</button><button class="s3b" data-a="s3cEv" data-k="e">סיימתי</button>`:ts==='pause'?`<button class="s3b" data-a="s3cEv" data-k="r">המשך</button><button class="s3b g" data-a="s3cEv" data-k="e">סיימתי</button>`:`<button class="s3b g" data-a="s3cEv" data-k="s">המשך לעבוד</button>`}</div></div>`;
+  <div class="row s3row">${ts==='idle'?`<button class="btn" data-a="s3cEv" data-k="s">התחלתי</button>`:ts==='work'?`<button class="btn g" data-a="s3cEv" data-k="p">הפסקה</button><button class="btn" data-a="s3cEv" data-k="e">סיימתי</button>`:ts==='pause'?`<button class="btn" data-a="s3cEv" data-k="r">המשך</button><button class="btn g" data-a="s3cEv" data-k="e">סיימתי</button>`:`<button class="btn g" data-a="s3cEv" data-k="s">המשך לעבוד</button>`}</div></div>`;
  if(C.busy)h+=`<div class="s3info" role="status" id="s3cvp">${esc2(C.vp||C.msg||'רגע…')}</div>`;
  else{h+=curCard();if(C.msg)h+=`<div class="s3info" role="status">${esc2(C.msg)}</div>`}
- h+=`<p class="s3note">מסלול מומלץ לפי מספור הגופים, מהכניסה. אפשר ללחוץ על כל מקטע ולצלם אותו.</p>`;
+ h+=`<p class="note s3note">מסלול מומלץ לפי מספור הגופים, מהכניסה. אפשר ללחוץ על כל מקטע ולצלם אותו.</p>`;
  for(const g of C.groups){const gd=g.L.filter(s=>doneOf(s.slot)).length,o=C.open===g.fx;
   h+=`<div class="s3g"><button class="hd" data-a="s3cGrp" data-f="${g.fx}" aria-expanded="${o}"><span>גוף ${esc2(g.num||g.fx)}${g.name?' ('+esc2(g.name)+')':''}${g.glass?' · מקרר':''}</span><span>${gd}/${g.L.length}</span></button>${o?chips(g):''}</div>`}
- h+=`<div class="s3row"><button class="s3b g" data-a="s3cMap">מפת החנות</button></div></div>`;
+ h+=`<div class="row s3row"><button class="btn g" data-a="s3cMap">מפת החנות</button></div></div>`;
  return{t:T,h}};
 /* יציאה מהמסך: שחרור זיכרון של תמונה שמחכה להחלטה */
 {const r0=window.render;if(typeof r0==='function')window.render=function(){const r=r0.apply(this,arguments);try{if(cur().v!=='st3c'&&C.pend)dropPend()}catch(e){}return r}}
 
 /* ---------- לקיחת חלק מסבב (כשכל עובד יכול לקחת) ---------- */
 U.takeHtml=L=>{const T=(Array.isArray(L)?L:[]).filter(r=>r&&Array.isArray(r.parts)&&r.parts.length);if(!T.length)return '';
- return `<div class="s3info"><b>אפשר לקחת חלק מסבב פתוח</b>${T.map(r=>r.parts.map(p=>`<div class="s3row"><span style="flex:1">${+p.n} מקטעים${Number.isFinite(+p.d)?` (צולמו ${+p.d})`:''}${r.dueAt?` · עד ${esc2(dm(+r.dueAt))}`:''}</span><button class="s3b g" data-a="s3cTake" data-run="${esc2(r.runId)}" data-h="${esc2(p.h)}">קחו את החלק</button></div>`).join('')).join('')}</div>`};
+ return `<div class="s3info"><b>אפשר לקחת חלק מסבב פתוח</b>${T.map(r=>r.parts.map(p=>`<div class="row s3row"><span style="flex:1">${+p.n} מקטעים${Number.isFinite(+p.d)?` (צולמו ${+p.d})`:''}${r.dueAt?` · עד ${esc2(dm(+r.dueAt))}`:''}</span><button class="btn g" data-a="s3cTake" data-run="${esc2(r.runId)}" data-h="${esc2(p.h)}">קחו את החלק</button></div>`).join('')).join('')}</div>`};
 ACT.s3cTake=el=>{const run=el.dataset.run,h=el.dataset.h;ask('לקחת את החלק הזה? הוא יעבור אליכם.',async()=>{
  try{await U.fn('s3Move',{runId:run,fromH:h,take:true});toast('החלק עבר אליכם');U.X.runsAt=0;U.loadRuns(true)}catch(e){toast(U.errText(e,'לא הצלחנו לקחת את החלק'))}},'כן, קחו')};
 
@@ -246,15 +248,15 @@ function mgLoad(force){
  U.fn('s3View',{}).then(r=>{C.mg=Array.isArray(r&&r.runs)?r.runs:[];C.mgErr=''}).catch(e=>{C.mg=null;C.mgErr=U.errText(e,'לא הצלחנו לטעון את הסבבים.')}).finally(()=>{C.mgBusy=0;if(cur().v==='st3'&&!typing())rerender()})}
 function runCard(r){
  const ws=(Array.isArray(r.uids)?r.uids:[]).map(u=>{const n=r.nUid&&r.nUid[u]||{n:0,d:0},w=r.work&&r.work[u],p=r.pause&&r.pause[u],tl=(r.tlog&&r.tlog[u])||[],l=tl[tl.length-1];
-  return `<div class="s3row" style="justify-content:space-between"><span>${esc2(nameOf(u))}: ${+n.d||0}/${+n.n||0}${Number.isFinite(+w)?` · עבודה ${+w} ד׳`:''}${+p>0?` · הפסקה ${+p} ד׳`:''}${l?` · ${{s:'התחיל',p:'בהפסקה',r:'חזר',e:'סיים'}[l.k]||''}`:' · עוד לא התחיל'}</span>${C.staff&&C.staff.length>1?`<button class="s3b g" style="min-height:44px" data-a="s3cMove" data-run="${esc2(r.runId)}" data-from="${esc2(u)}">העבר</button>`:''}</div>`}).join('');
- return `<div class="s3info"><b>${esc2(RST[r.st]||r.st||'')}</b> · ${+r.nDone||0}/${+r.n||0} מקטעים${r.dueAt?` · עד ${esc2(dm(+r.dueAt))}`:''}${ws}<div class="s3row"><button class="s3b g" data-a="s3cCancel" data-run="${esc2(r.runId)}">בטלו את הסבב</button></div></div>`}
+  return `<div class="row s3row" style="justify-content:space-between"><span>${esc2(nameOf(u))}: ${+n.d||0}/${+n.n||0}${Number.isFinite(+w)?` · עבודה ${+w} ד׳`:''}${+p>0?` · הפסקה ${+p} ד׳`:''}${l?` · ${{s:'התחיל',p:'בהפסקה',r:'חזר',e:'סיים'}[l.k]||''}`:' · עוד לא התחיל'}</span>${C.staff&&C.staff.length>1?`<button class="btn g" style="min-height:44px" data-a="s3cMove" data-run="${esc2(r.runId)}" data-from="${esc2(u)}">העבר</button>`:''}</div>`}).join('');
+ return `<div class="s3info"><b>${esc2(RST[r.st]||r.st||'')}</b> · ${+r.nDone||0}/${+r.n||0} מקטעים${r.dueAt?` · עד ${esc2(dm(+r.dueAt))}`:''}${ws}<div class="row s3row"><button class="btn g" data-a="s3cCancel" data-run="${esc2(r.runId)}">בטלו את הסבב</button></div></div>`}
 function mgHtml(d){
  mgLoad();let h=`<b>סבבים פתוחים</b>`;
- if(C.mgErr)h+=`<div class="s3info">${esc2(C.mgErr)} <button class="s3b g" style="min-height:44px" data-a="s3cMgr">נסו שוב</button></div>`;
+ if(C.mgErr)h+=`<div class="s3info">${esc2(C.mgErr)} <button class="btn g" style="min-height:44px" data-a="s3cMgr">נסו שוב</button></div>`;
  else if(C.mg===null)h+=`<div class="s3info">טוען…</div>`;
  else{const L=C.mg.filter(r=>!d||!r.br||r.br===d.br);h+=L.length?L.map(runCard).join(''):`<div class="s3info">אין סבבים פתוחים כרגע.</div>`}
  const R=(d&&d.rounds)||[];h+=`<p style="margin:14px 0 0"><b>פתיחת סבב עכשיו</b></p>`;
- h+=R.length?R.map(r=>`<div class="s3info"><b>${esc2(r.name||'סבב')}</b> · ${esc2(FK[r.f&&r.f.k]||'')}${r.next?` · הבא ${esc2(dm(+r.next))}`:''}${r.err?`<div class="s3warn">${esc2(ERRS[r.err]||'יש בעיה בכלל הזה')}</div>`:''}<div class="s3row"><button class="s3b g" data-a="s3cNow" data-rid="${esc2(r.rid||'')}">פתחו סבב עכשיו</button></div></div>`).join(''):`<div class="s3info">עוד אין כללי סבב לסניף הזה.</div>`;
+ h+=R.length?R.map(r=>`<div class="s3info"><b>${esc2(r.name||'סבב')}</b> · ${esc2(FK[r.f&&r.f.k]||'')}${r.next?` · הבא ${esc2(dm(+r.next))}`:''}${r.err?`<div class="ban s3warn">${esc2(ERRS[r.err]||'יש בעיה בכלל הזה')}</div>`:''}<div class="row s3row"><button class="btn g" data-a="s3cNow" data-rid="${esc2(r.rid||'')}">פתחו סבב עכשיו</button></div></div>`).join(''):`<div class="s3info">עוד אין כללי סבב לסניף הזה.</div>`;
  return h}
 {const t0=U.tabHtml;U.tabHtml=(tab,d)=>tab==='rounds'?mgHtml(d):(typeof t0==='function'?t0(tab,d):'')}
 ACT.s3cMgr=()=>{C.mgAt=0;mgLoad(true);rerender()};

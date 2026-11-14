@@ -56,7 +56,7 @@ const tool = async (page, k) => { await page.click('[data-a=s3eTool][data-k=' + 
   // ---- 1. בית המנהל, יש מפה ----
   let A = await open(browser, www, cM(), 'm@x.co');
   await A.page.evaluate(() => rerender()); await sleep(1500);
-  const h1 = await A.page.evaluate(() => { const m = document.getElementById('main').innerHTML; const c = document.querySelector('#main .s3c'); return { hero: m.indexOf('id="hmain"'), card: m.indexOf('class="s3c"'), hacts: m.indexOf('class="chips hacts"'), txt: c ? c.innerText.replace(/\s+/g, ' ') : '', mini: !!document.getElementById('s3mini'), canvas: !!document.querySelector('#s3mini canvas'), msg: (document.querySelector('#s3mini .s3d-msg') || {}).innerText || '' }; });
+  const h1 = await A.page.evaluate(() => { const m = document.getElementById('main').innerHTML; const c = document.querySelector('#main .s3c'); return { hero: m.indexOf('id="hmain"'), card: m.indexOf('s3c"'), hacts: m.indexOf('class="chips hacts"'), txt: c ? c.innerText.replace(/\s+/g, ' ') : '', mini: !!document.getElementById('s3mini'), canvas: !!document.querySelector('#s3mini canvas'), msg: (document.querySelector('#s3mini .s3d-msg') || {}).innerText || '' }; });
   check('1 בית מנהל עם מפה: החלון מופיע אחרי כרטיס ההכנסות ולפני הכפתורים, עם שם המפה, ציון "עוד אין" וסבב הבא', h1.card > h1.hero && h1.hero >= 0 && h1.card < h1.hacts && /חנות הבדיקה/.test(h1.txt) && /עוד אין/.test(h1.txt) && /הסבב הבא/.test(h1.txt) && h1.mini, h1);
   check('1א המפה המיני נטענת (קנבס) או הודעה בעברית כשאין WebGL; אין "דוגמה" בחלון האמיתי', (h1.canvas || /WebGL|תלת מימד/.test(h1.msg)) && !/דוגמה/.test(h1.txt), h1);
   let o = await noOverflow(A.page); check('1ב בלי גלישה ב-360px', o.sw <= o.W && !o.bad.length, o);
