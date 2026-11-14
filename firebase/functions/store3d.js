@@ -347,7 +347,9 @@ exports.s3Move = onCall(T.scoped(async (request) => {
     return who.role === 'manager' ? { ok: true, uids: patch.uids } : { ok: true };
   });
   const ctx = { db, now, mgrs: null, sets: {} };
-  await notify(ctx, input.runId + '_move_' + from, 'move', [to].concat(await managers(ctx)), now);
+  // שלב 12: גם העובד שהחלק שלו הועבר או נלקח מקבל התראה (אם עדיין פעיל), כדי שלא ימשיך לצלם חלק שכבר לא שלו
+  const fromOn = from !== to && (await activeOf(db, [from])).has(from);
+  await notify(ctx, input.runId + '_move_' + from, 'move', [to].concat(fromOn ? [from] : [], await managers(ctx)), now);
   return res;
 }));
 

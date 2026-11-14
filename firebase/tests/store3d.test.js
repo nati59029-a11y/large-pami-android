@@ -339,7 +339,7 @@ describe('s3Run / s3Move / s3Log / s3View (אמולטור הפונקציות)', 
     assert.equal(m.status, 'OK', m.text);
     let d = await get(`b/${A}/srun/${runId}`);
     assert.deepEqual([d.uids, d.subFrom, d.asg[SUB]], [[E2, SUB], { [E1]: SUB }, ['f1-a-1', 'f1-a-2', 'f1-a-3', 'f1-b-1', 'f1-b-2', 'f1-b-3']]);
-    assert.ok(await get(`b/${A}/s3ntf/${runId}_move_${E1}`));
+    assert.deepEqual((await get(`b/${A}/s3ntf/${runId}_move_${E1}`)).to.slice().sort(), [SUB, E1, MGR].sort(), 'שלב 12: גם מי שהחלק שלו הועבר');
     await adm.doc(`b/${A}/s3set/main`).set({ sub: 'any' });
     const t = await call('s3Move', E1, { runId, from: E2, take: true });
     assert.equal(t.status, 'OK', t.text);
@@ -347,6 +347,7 @@ describe('s3Run / s3Move / s3Log / s3View (אמולטור הפונקציות)', 
     assert.ok(Array.isArray(m.result.uids), 'מנהל כן מקבל uids');
     d = await get(`b/${A}/srun/${runId}`);
     assert.deepEqual(d.uids, [SUB, E1]);
+    assert.deepEqual((await get(`b/${A}/s3ntf/${runId}_move_${E2}`)).to.slice().sort(), [E1, E2, MGR].sort(), 'שלב 12: לקיחה – גם העובד שהחלק נלקח ממנו');
   });
 
   it('s3View: עובד רואה רק את הסבבים שלו, רק את החלק והזמנים שלו, ולפי show; לא משויך – נחסם; מנהל – הכל', async () => {
