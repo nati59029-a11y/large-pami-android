@@ -1044,6 +1044,7 @@ async function mailWorkIn(id, o) {
     r.logs.forEach(([act, note]) => b.set(db.collection('sec_log').doc(), glog('', 'sec', act, { tgt: id, note })));
     b.set(db.collection('sec_log').doc(), glog('', 'sec', 'draft', { tgt: id, note: 'mail:auto' + (r.flags.length ? ':' + r.flags.join('+') : '') }));
     try { await b.commit(); } catch (e) { if (e && e.code === 6) return fin('skip', 'has-draft'); throw e; }
+    if (ord) { try { await ordDraft(db, id, x, ord, biz, now); } catch (e) { logger.warn('secretary-google: order draft failed', { reason: (e && e.code) || 'error' }); } }
     const a = ord ? { no: ['order'] } : await tryAuto(db, id, Object.assign({}, x, task ? { task } : {}), r, rep, now);
     const out = await fin(a.sent ? 'auto' : 'draft');
     return Object.assign(out, { draft: id, task, auto: a.sent ? a.rule : '', no: a.no || [] });
@@ -1054,6 +1055,71 @@ async function mailWorkIn(id, o) {
     await ref.update({ aw: 'err', awAt: now }).catch(() => {});
     return { aw: 'err' };
   }
+}
+// שלב ג/3: טיוטת הזמנה פנימית sec_ord/{mailId} – למנהל בלבד (st:'mgr'). לא נשלחת ללקוח, לא יוצרת הזמנה ולא לקוח, ואין שום כתיבה ל-cust.
+// sec_ord: { in, ch:'mail', thr, to (השולח המקורי – From), custId? | cands?[≤3 {id,name,bn}] | custNew?{bn,vat,ct,phone,city,st},
+//   lines (SO.build מול הקטלוג), total (אגורות), nBlock (שורות חוסמות + blk), blk:['br'|'cust'|'phone'], br, ver:1, st:'mgr', t }
+// תוספת בלבד: מסמך קיים לא נדרס (טריגר עלול לרוץ פעמיים). אין כלל Firestore לאוסף – נסגר בכלל האחרון; נקרא רק בשרת.
+const ORD_CANDS = 3;
+const custLive = (s) => s.docs.filter((d) => !d.get('mv')); // mv = לקוח שהועבר/אוחד – לא מועמד
+const candOf = (d) => ({ id: d.id, name: String(d.get('name') || '').slice(0, 80), bn: String(d.get('bn') || '').slice(0, 80) });
+// זיהוי לקוח – קריאה בלבד: vat → mail (השולח) → שם עסק (מועמדים, המנהל בוחר) → כרטיס חדש
+async function ordCust(db, c, from) {
+  for (const [f, v] of [['vat', c.vat], ['mail', from]]) {
+    if (!v) continue;
+    const L = custLive(await db.collection('cust').where(f, '==', v).limit(ORD_CANDS + 2).get());
+    if (L.length === 1) return { cust: L[0] };
+    if (L.length > 1) return { cands: L.slice(0, ORD_CANDS).map(candOf) }; // כמה לקוחות עם אותו מזהה – המנהל בוחר
+  }
+  if (c.bn) {
+    const seen = new Map();
+    for (const f of ['bn', 'name']) {
+      if (seen.size >= ORD_CANDS) break;
+      const s = await db.collection('cust').where(f, '>=', c.bn).where(f, '<', c.bn + '').limit(ORD_CANDS * 3).get();
+      for (const d of custLive(s)) if (seen.size < ORD_CANDS && !seen.has(d.id)) seen.set(d.id, candOf(d));
+    }
+    if (seen.size) return { cands: [...seen.values()] };
+  }
+  const custNew = {};
+  for (const k of ['bn', 'vat', 'ct', 'phone', 'city', 'st']) if (typeof c[k] === 'string' && c[k]) custNew[k] = c[k];
+  return { custNew };
+}
+async function ordDraft(db, id, x, ord, biz, now) {
+  const ref = db.doc('sec_ord/' + id);
+  if ((await ref.get()).exists) return 'exists';
+  const c = ord.cust || {};
+  const from = G.addrOf(x.from);
+  const who = await ordCust(db, c, from);
+  const ws = !!(who.cust && who.cust.get('wholesale') === true);
+  // סניף: אין בהגדרות העסק סניף ברירת מחדל – עסק בלי סניפים = '_' (כמו NB ב-orders.js); יש סניפים = המנהל בוחר (חוסם)
+  const bd = biz && biz.exists ? await getFirestore().doc('b/' + biz.bizId).get() : null;
+  const org = bd && bd.exists && bd.get('org') && typeof bd.get('org') === 'object' ? bd.get('org') : {};
+  const hasBr = (Array.isArray(org.branches) ? org.branches : []).some((b) => b && typeof b.id === 'string');
+  const br = hasBr ? '' : '_';
+  // קטלוג – אותה מגבלה כמו stockOf (300), מוצר כבוי לא נכנס. סניף לא ידוע – לא בודקים מלאי (אחרת הכול "אזל")
+  const s = await db.collection('prod').select('name', 'price', 'bp', 'on', 'cto', 'ct', 'sku', 'barcode', 'q').limit(300).get();
+  const prods = s.docs.filter((d) => d.get('on') !== false).map((d) => { const p = Object.assign({}, d.data(), { id: d.id }); if (!br) delete p.q; return p; });
+  const ctx = { cust: ws ? { wholesale: true } : null, br };
+  let b = SO.build(ord.lines, prods, ctx);
+  if (ws) { // מחיר סיטונאי (prod/{id}/p/ws) – רק ללקוח סיטונאי מזוהה, ורק למוצרים שהותאמו
+    const ids = [...new Set(b.lines.flatMap((l) => [l.id].concat((l.opts || []).map((o) => o.id))).filter(Boolean))];
+    if (ids.length) {
+      const wsd = await db.getAll(...ids.map((i) => db.doc('prod/' + i + '/p/ws')));
+      const wp = new Map(wsd.filter((d) => d.exists).map((d) => [d.ref.parent.parent.id, d.get('wp')]));
+      prods.forEach((p) => { if (wp.has(p.id)) p.wp = wp.get(p.id); });
+      b = SO.build(ord.lines, prods, ctx);
+    }
+  }
+  const phone = who.cust ? who.cust.get('phone') : who.custNew ? who.custNew.phone : c.phone;
+  const blk = [];
+  if (!br) blk.push('br');
+  if (who.cands) blk.push('cust');
+  if (!(typeof phone === 'string' && phone.trim())) blk.push('phone'); // אין הזמנה בלי טלפון (החלטה 4)
+  const doc = Object.assign({ in: id, ch: 'mail', thr: x.thr || '', to: from },
+    who.cust ? { custId: who.cust.id } : {}, who.cands ? { cands: who.cands } : {}, who.custNew ? { custNew: who.custNew } : {},
+    { lines: b.lines, total: b.total, nBlock: b.nBlock + blk.length, blk, br, ver: 1, st: 'mgr', t: now });
+  try { await ref.create(doc); } catch (e) { if (e && e.code === 6) return 'exists'; throw e; }
+  return 'new';
 }
 // שלב ג (0א): אחרי שליחה מוצלחת ב-Gmail – עד 3 ניסיונות לכתוב "נשלח" (build בונה batch חדש בכל ניסיון). נכשל – שומרים לפחות gmid (סימן שהמייל יצא)
 async function sentWrite(db, dRef, gmid, now, build) {
@@ -1917,7 +1983,7 @@ exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdmi
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, histInvStep, histFill, autoHist, HIST_INV_DAY, HIST_INV_RESERVE, saveMail, invFiles, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
-  mailWork, mailRequeue, tryAuto, autoGive, learnSend, repOf, REP_CAP_DEFAULT, REP_CAP_MAX, AUTO_DAY, LOOP_MS, stripName,
+  mailWork, mailRequeue, ordDraft, tryAuto, autoGive, learnSend, repOf, REP_CAP_DEFAULT, REP_CAP_MAX, AUTO_DAY, LOOP_MS, stripName,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },
 } });

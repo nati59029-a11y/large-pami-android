@@ -2046,4 +2046,74 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     assert.equal((await draftOf(n3)).ord, undefined, 'סוג שאינו order – ord לא נשמר גם אם המודל החזיר');
   });
 
+  it('שלב ג/3: sec_ord – זיהוי לקוח (vat / מייל / שם→מועמדים / חדש), בלי כתיבה ל-cust, wp רק לסיטונאי, מוצר כבוי לא נכנס, טלפון חסר וסניף חוסמים, ריצה כפולה לא דורסת, סגור לאפליקציה', async () => {
+    const ordOf = (id) => get(`b/${A}/sec_ord/${id}`);
+    const L1 = [{ txt: 'צלחת עמוקה', qty: 10 }, { txt: 'כוס זכוכית', qty: 2 }];
+    const go = async (subject, from, cust, lines) => {
+      AIR = { text: 'שלום, קיבלנו את ההזמנה ונחזור אליך.', cls: 'order', qk: 'הזמנה', facts: [], order: { lines: lines || L1, cust } };
+      const n = await mail({ subject, text: 'הזמנה: 10 צלחות עמוקות, 2 כוסות זכוכית', from });
+      const r = await work(n);
+      assert.equal(r.aw, 'draft', JSON.stringify(r));
+      return n;
+    };
+    await prep(async (d) => {
+      const b = d.batch(), P = `b/${A}/`;
+      b.set(d.doc(P + 'prod/p1'), { name: 'צלחת עמוקה', price: 10, on: true, q: { _: 50 } });
+      b.set(d.doc(P + 'prod/p1/p/ws'), { wp: 7 });
+      b.set(d.doc(P + 'prod/p2'), { name: 'כוס זכוכית', price: 5, on: false, q: { _: 50 } });
+      b.set(d.doc(P + 'prod/p2/p/ws'), { wp: 3 });
+      b.set(d.doc(P + 'cust/cvat'), { name: 'יוסי', bn: 'מסעדת הים', vat: '512345678', ct: 'יוסי', phone: '0501111111', wholesale: true, at: 1 });
+      b.set(d.doc(P + 'cust/cmail'), { name: 'דנה', mail: 'dana@shop.example', phone: '0502222222', at: 1 });
+      for (const [k, bn] of [['cn1', 'קפה רוזה תל אביב'], ['cn2', 'קפה רוזה חיפה'], ['cn3', 'קפה רוזה ירושלים'], ['cn4', 'קפה רוזה אילת']]) b.set(d.doc(P + 'cust/' + k), { name: 'בעלים ' + k, bn, phone: '0503333333', at: 1 });
+      b.set(d.doc(P + 'cust/cmv'), { name: 'ישן', bn: 'קפה רוזה ישן', mv: 'cn1', at: 1 });
+      await b.commit();
+    });
+    const custBefore = JSON.stringify(await coll(`b/${A}/cust`));
+    // 0. עסק בלי תוספת ההזמנות – אין sec_ord
+    const n0 = await go('הזמנה 0', 'R <r0@rest.example>', { vat: '512345678' });
+    assert.equal(await ordOf(n0), null, 'בלי התוספת – אין sec_ord');
+    await prep((d) => d.doc('b/' + A).update({ 'features.orders': true }));
+    // 1. vat → לקוח סיטונאי: מחיר wp, המוצר הכבוי לא נכנס (לבירור)
+    const n1 = await go('הזמנה 1', 'Rest <r1@rest.example>', { vat: '512345678', bn: 'שם אחר' });
+    const o1 = await ordOf(n1);
+    assert.equal(o1.custId, 'cvat'); assert.equal(o1.cands, undefined); assert.equal(o1.custNew, undefined);
+    assert.equal(o1.in, n1); assert.equal(o1.ch, 'mail'); assert.equal(o1.to, 'r1@rest.example'); assert.equal(o1.st, 'mgr'); assert.equal(o1.ver, 1); assert.equal(o1.br, '_');
+    assert.equal(o1.lines[0].st, 'ok'); assert.equal(o1.lines[0].id, 'p1'); assert.equal(o1.lines[0].pr, 700, 'סיטונאי – wp');
+    assert.equal(o1.lines[1].st, 'ask', 'מוצר כבוי לא נכנס'); assert.ok(!JSON.stringify(o1.lines[1]).includes('p2'));
+    assert.equal(o1.total, 7000); assert.deepEqual(o1.blk, []); assert.equal(o1.nBlock, 1);
+    assert.equal(typeof o1.thr, 'string'); assert.equal(typeof o1.t, 'number');
+    // 2. מייל השולח → לקוח רגיל: מחיר רגיל, wp לא דולף
+    const n2 = await go('הזמנה 2', 'Dana <Dana@Shop.example>', {});
+    const o2 = await ordOf(n2);
+    assert.equal(o2.custId, 'cmail'); assert.equal(o2.lines[0].pr, 1000); assert.equal(o2.total, 10000);
+    assert.ok(!/"wp"|700/.test(JSON.stringify(o2)), 'לא-סיטונאי לא מקבל wp'); assert.deepEqual(o2.blk, []);
+    // 3. שם עסק → עד 3 מועמדים, בלי custId; mv לא מועמד; בחירת לקוח חוסמת
+    const n3 = await go('הזמנה 3', 'Rosa <x@rosa.example>', { bn: 'קפה רוזה', phone: '0504444444' });
+    const o3 = await ordOf(n3);
+    assert.equal(o3.custId, undefined); assert.equal(o3.custNew, undefined);
+    assert.equal(o3.cands.length, 3); assert.ok(o3.cands.every((c) => /^cn\d$/.test(c.id) && c.bn.startsWith('קפה רוזה')), JSON.stringify(o3.cands));
+    assert.deepEqual(o3.blk, ['cust']); assert.equal(o3.lines[0].pr, 1000);
+    // 4. לא נמצא → כרטיס חדש מנוקה; אין טלפון → חוסם
+    const n4 = await go('הזמנה 4', 'New <n@new.example>', { bn: 'חדשים בעמ', vat: '598765432', city: 'חיפה', ct: 'רון' });
+    const o4 = await ordOf(n4);
+    assert.deepEqual(o4.custNew, { bn: 'חדשים בעמ', vat: '598765432', ct: 'רון', city: 'חיפה' });
+    assert.equal(o4.custId, undefined); assert.equal(o4.cands, undefined);
+    assert.deepEqual(o4.blk, ['phone']); assert.equal(o4.nBlock, 2);
+    // 5. אין שום כתיבה ל-cust
+    assert.equal(JSON.stringify(await coll(`b/${A}/cust`)), custBefore, 'cust לא השתנה');
+    // 6. ריצה כפולה – לא דורסת
+    const r6 = await work(n1);
+    assert.equal(r6.skip || r6.why ? 'skip' : r6.aw, 'skip', JSON.stringify(r6));
+    const again = await (async () => { const b = await T.loadBiz(A); return T.runInBiz({ bizId: A, prefix: T.bizPrefix(b), biz: b }, () => CORE.ordDraft(T.tdb(), n1, { from: 'z@z.example' }, { lines: [{ txt: 'סכין', qty: 1 }], cust: {} }, b, Date.now())); })();
+    assert.equal(again, 'exists');
+    assert.deepEqual(await ordOf(n1), o1, 'המסמך הקיים לא נדרס');
+    // 7. עסק עם סניפים (אין סניף ברירת מחדל בהגדרות) – br ריק וחוסם; המלאי לא נבדק (לא "אזל" שקרי)
+    await prep((d) => d.doc('b/' + A).update({ org: { branches: [{ id: 'tlv', name: 'תל אביב' }] } }));
+    const o7 = await ordOf(await go('הזמנה 7', 'Dana <dana@shop.example>', {}));
+    assert.equal(o7.br, ''); assert.deepEqual(o7.blk, ['br']); assert.equal(o7.lines[0].out, undefined); assert.equal(o7.lines[0].st, 'ok');
+    // 8. אין כלל שפותח את sec_ord מהאפליקציה – גם למנהל
+    await assertFails(env.authenticatedContext(M1, { email: M1 + '@x.invalid' }).firestore().doc(`b/${A}/sec_ord/${n1}`).get());
+    assert.equal(GO.state.sent.length, 0, 'שום דבר לא נשלח ללקוח');
+  });
+
 });
