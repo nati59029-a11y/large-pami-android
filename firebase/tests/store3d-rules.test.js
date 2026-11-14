@@ -306,6 +306,45 @@ describe('store3d – חוקי Firestore בתוך עסק: כתיבה', () => {
     await assertFails(fs(MGR).doc(P + 's3short/rule0001_20261201').set({ items: [], st: 'draft' }));
   });
 
+  // עדכון 7ב: המסמכים המדויקים שהמסכים של שלבים 11 ו-13 שולחים (store3d-wizard.js, store3d-report.js), ושדות שרת חדשים
+  it('7ב – המסמכים שהמסכים שולחים: כלל סבב מהאשף, החלפת s3set מלאה, הכרעת ערעור ואישור חוסרים', async () => {
+    // אשף ההקמה (שלב 11): מזהה r + 10 תווים, עובד אחד עם z ריק, due, בלי sub/subU; תדירות לפי הסוג
+    const wiz = (f) => ({ br: 'main', map: 's-main', name: 'סבב שבועי', f, asg: [{ u: RESP, z: [] }], due: 2, on: true, upd: now(), by: MGR });
+    await assertSucceeds(fs(MGR).doc(P + 'sround/rk2m4q1x9za').set(wiz({ k: 'week', dow: 3 })));
+    await assertSucceeds(fs(MGR).doc(P + 'sround/rk2m4q1x9zb').set(wiz({ k: 'days', n: 7 })));
+    await assertSucceeds(fs(MGR).doc(P + 'sround/rk2m4q1x9zc').set(wiz({ k: 'month', dom: 1 })));
+    await assertSucceeds(fs(MGR).doc(P + 'sround/rk2m4q1x9zd').set(wiz({ k: 'manual' })));
+    await assertFails(fs(MGR).doc(P + 'sround/rk2m4q1x9ze').set(wiz({ k: 'week' })), 'שבועי בלי יום');
+    // הגדרות (שלב 13): החלפת מסמך מלאה (בלי מיזוג) – גם כשהמחליף הקבוע (subU) יורד
+    const s0 = okSet(MGR, { show: ['fix'], cats: [], sub: 'manual' }); delete s0.subU;
+    await assertSucceeds(fs(MGR).doc(P + 's3set/main').set(s0));
+    await assertSucceeds(fs(MGR).doc(P + 's3set/main').set(okSet(MGR, { sub: 'fixed', subU: RESP, show: ['fix', 'score', 'recs', 'full'], upd: now() + 1 })));
+    await assertFails(fs(MGR).doc(P + 's3set/main').set(okSet(MGR, { numDir: 'up' })), 'numDir לא תקין');
+    // הכרעת ערעור: דחייה בלי note ועם תגובה ריקה (כמו המסך)
+    const a = P + 's3appeal/' + RUN + '__' + SLOT + '__1';
+    await assertSucceeds(fs(MGR).doc(a).update({ st: 'rej', dec: '', decBy: MGR, decAt: now() }));
+    // אישור חוסרים: drop רשימת מספרים
+    await assertSucceeds(fs(MGR).doc(P + 's3short/' + RUN).update({ st: 'no', drop: [], okBy: MGR, okAt: now() }));
+  });
+
+  it('7ב – שדות שרת חדשים חסומים ללקוח: s3appeal.sv; s3use/a_{uid} – קריאה למנהל בלבד; s3draft עם conf/notes – אותה הרשאת קריאה', async () => {
+    // sv – רק השרת (סימון שהערעור טופל עד הסוף): לא ביצירה, לא בהכרעה
+    await assertFails(fs(RESP).doc(P + 's3appeal/' + AID0).set(okAppeal(RESP, { sv: now() })), 'sv ביצירה');
+    const a = P + 's3appeal/' + RUN + '__' + SLOT + '__1';
+    await assertFails(fs(MGR).doc(a).update({ st: 'acc', decBy: MGR, decAt: now(), sv: now() }), 'sv בהכרעה');
+    await prep((d) => d.doc(a).update({ st: 'acc', decBy: MGR, decAt: now(), sv: now() }));
+    await assertFails(fs(MGR).doc(a).update({ sv: now() + 5 }), 'שינוי sv אחרי הכרעה');
+    // מונה דיווחים יזומים לעובד
+    await prep((d) => d.doc(P + 's3use/a_' + RESP).set({ d: '2026-11-14', n: 3, upd: now() }));
+    for (const u of [MGR, SUPER]) await assertSucceeds(fs(u).doc(P + 's3use/a_' + RESP).get(), u);
+    for (const u of [RESP, S3M, FOR, OMGR]) await assertFails(fs(u).doc(P + 's3use/a_' + RESP).get(), u);
+    for (const u of [MGR, SUPER, RESP]) await assertFails(fs(u).doc(P + 's3use/a_' + RESP).set({ d: '2026-11-14', n: 0, upd: now() }), u);
+    // טיוטה עם conf / notes – הקריאה לא השתנתה (מנהל, s3m, היוצר)
+    await prep((d) => d.doc(P + 's3draft/draft-0000000000000002').set({ br: 'main', kind: 's', by: RESP, at: now(), st: 'ok', n: 2, conf: 0.7, notes: 'קנה מידה לפי דלת' }));
+    for (const u of [MGR, S3M, RESP]) await assertSucceeds(fs(u).doc(P + 's3draft/draft-0000000000000002').get(), u);
+    for (const u of [FOR, OEMP]) await assertFails(fs(u).doc(P + 's3draft/draft-0000000000000002').get(), u);
+  });
+
   it('עובד מושבת עם s3m – נחסם בכל (קריאה וכתיבה)', async () => {
     for (const p of ['smap/' + MAP, 'smap/' + MAP + '/ver/000001', 's3sum/' + MAP, 's3draft/draft-0000000000000001']) await assertFails(fs(DIS).doc(P + p).get());
     // כתיבה: ערעור (גם כשהוא ברשימת uids של הסבב), הגדרות, מקטע, כלל סבב, אישור חוסרים, המפה
@@ -404,7 +443,7 @@ describe('store3d – חוקי Storage', () => {
   });
   it('קריאה: חברי העסק (מנהל־על, מנהל, עובדים) – רק JPEG בגודל המותר ובנתיבים המוגדרים; עובד מושבת, עסק אחר, אורח – נחסמים', async () => {
     const wrong = [];
-    for (const k of ['full', 'thumb', 'tex', 'draft', 'fix', 'fixT']) {
+    for (const k of ['full', 'thumb', 'tex', 'fix', 'fixT']) {
       for (const u of [SUPER, MGR, S3M, RESP, FOR, DIS, OMGR, OEMP, null]) {
         const want = [SUPER, MGR, S3M, RESP, FOR].includes(u);
         const got = await st(u).ref(files[k]).getMetadata().then(() => true, () => false);
@@ -413,6 +452,8 @@ describe('store3d – חוקי Storage', () => {
     }
     assert.deepEqual(wrong, []);
     for (const k of ['bigThumb', 'png', 'stray']) await assertFails(st(MGR).ref(files[k]).getMetadata(), k);
+    // עדכון 7ב: תמונות טיוטת המפה לא נשמרות בשרת – הנתיב draft/ סגור לקריאה לכולם (גם מנהל־על)
+    for (const u of [SUPER, MGR, S3M, RESP]) await assertFails(st(u).ref(files.draft).getMetadata(), 'draft ' + u);
     await assertFails(st(MGR).ref(files.otherBiz).getMetadata());
     await assertSucceeds(st(OMGR).ref(files.otherBiz).getMetadata());
   });
