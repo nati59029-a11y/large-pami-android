@@ -213,7 +213,7 @@ function humanOf(p, o) {
   if (x.fromMgr) return 'self';
   if (x.sus) return 'sus';
   if (x.hist) return 'hist';
-  if (x.inv) return 'inv';
+  // החלטה (ג) 14.11: מייל עם קובץ מצורף כן נחשב "מייל מאדם" – מקבל טיוטה לאישור / משימה עם התווית "יש קובץ מצורף", אבל לעולם לא נשלח לבד (autoBlock: 'file')
   if (p.t && x.now && x.now - p.t > OLD_MS) return 'old';
   return '';
 }
@@ -239,7 +239,45 @@ function autoBlock(o) {
   if (r.stk) why.push('stock');
   if (!x.t || o.now - x.t > OLD_MS) why.push('old');
   if (x.st === 'replied' || x.hd === true) why.push('replied');
+  // ליקוי 1 (סבב 1): הנמען של תשובה אוטומטית נלקח מכותרות המייל הנכנס – רק משולח מאומת (DKIM/DMARC, sec_in.auth מ-parseMsg),
+  // ורק כש-Reply-To (אם יש) באותו דומיין כמו From. מייל ישן בלי השדה auth = לא מאומת. שליחה ידנית לא מושפעת
+  if (x.auth !== true) why.push('auth');
+  if (x.rto && domOf(x.rto) !== domOf(x.from)) why.push('rto');
   return why;
+}
+const domOf = (a) => { const v = addrOf(a); return v ? v.split('@')[1] : ''; };
+// הסבר בעברית לכל סיבה שבגללה תשובה אוטומטית לא נשלחה (sec_draft.an → anL לתצוגה). המייל נשאר טיוטה לאישור המנהל
+const AUTO_WHY = Object.freeze({
+  stop: '"עצור הכל" פעיל', off: 'המענה האוטומטי במייל כבוי', held: 'המענה האוטומטי נעצר אחרי 100 תשובות ביום – צריך להפעיל שוב בהגדרות',
+  ruleOff: 'התשובה המוכנה לא מאושרת לשליחה אוטומטית', notHuman: 'לא מייל מאדם', sus: 'מייל חשוד', file: 'יש קובץ מצורף', big: 'מייל גדול או חתוך',
+  never: 'נושא רגיש (תלונה, החזר, הנחה, תשלום וכו׳)', risk: 'המזכירה זיהתה נושא רגיש', cls: 'סוג הפנייה לא מתאים לתשובה המוכנה', unsure: 'המזכירה לא בטוחה בתשובה',
+  stock: 'התשובה תלויה במלאי', old: 'מייל ישן', replied: 'כבר נענה', auth: 'לא ניתן לאמת שהמייל באמת נשלח מהכתובת שמופיעה בו',
+  rto: 'כתובת "השב אל" שונה מהכתובת של השולח', src: 'חסר נתון חי ב"מידע על העסק"', box: 'תיבת המייל לא מחוברת', to: 'אין כתובת תקינה לתשובה',
+  thread: 'כבר נשלחה תשובה בשרשור הזה', loop: 'כבר נשלחה תשובה אוטומטית לשולח הזה בעשר הדקות האחרונות', day: 'הגענו ל-100 תשובות אוטומטיות היום',
+  dup: 'כבר טופל', out: 'הגענו למכסת המיילים היוצאים היום', fail: 'השליחה נכשלה',
+});
+const autoWhyL = (an) => (Array.isArray(an) ? an : []).map((k) => AUTO_WHY[k] || '').filter(Boolean);
+// החלטה (ג): שמות וסוגי הקבצים המצורפים כטקסט לסיווג (בלי התוכן). שם קובץ הוא מידע מצד שלישי – מנוקה ומוגבל
+function fileList(files) {
+  return (Array.isArray(files) ? files : []).filter((f) => typeof f === 'string' && f.trim()).slice(0, 10).map((f) => {
+    const n = taskLine(f, 100), m = /\.([A-Za-z0-9]{1,8})$/.exec(n);
+    return n + ' (סוג: ' + (m ? m[1].toUpperCase() : 'לא ידוע') + ')';
+  });
+}
+// החלטה (ד): לפני שליחה אוטומטית – שם בפתיחה של התבנית ("שלום יוסי,") חייב להתאים לשם הפונה. שם לא ידוע או לא מתאים → פנייה כללית ("שלום,").
+// מחזיר { text, gen } (gen=true כשהוחלף לפנייה כללית)
+const GREET_RE = /^(\s*)(שלום|היי|הי|בוקר טוב|ערב טוב|צהריים טובים|hi|hello|hey|dear)([ \t]+)([^\s,!.:;?\d{}]{2,20}(?:[ \t]+[^\s,!.:;?\d{}]{2,20})?)(?=[ \t]*(?:[,!.:;]|\r?\n|$))/i;
+const NOT_NAME = new Set(['רב', 'רבה', 'לך', 'לכם', 'לכן', 'לכולם', 'וברכה', 'וברכות', 'ותודה', 'חברים', 'לקוח', 'לקוחה', 'לקוחות', 'יקר', 'יקרה', 'יקרים', 'שוב', 'וטוב', 'רב לך',
+  'there', 'all', 'everyone', 'sir', 'madam', 'customer', 'friend', 'friends', 'team', 'again']);
+const nameToks = (s) => String(s || '').toLowerCase().replace(/["'`<>()[\]]/g, ' ').split(/\s+/).filter((t) => t.length >= 2);
+function greetFix(text, name) {
+  const t = String(text || '');
+  const m = GREET_RE.exec(t);
+  if (!m || NOT_NAME.has(m[4].toLowerCase())) return { text: t, gen: false };
+  const want = nameToks(m[4]), have = nameToks(name);
+  if (have.length && want.every((w) => have.includes(w))) return { text: t, gen: false };
+  const gen = /[a-z]/i.test(m[2]) ? 'Hello' : 'שלום';
+  return { text: m[1] + gen + t.slice(m[0].length), gen: true };
 }
 // כותרת משימה ממייל: מנוקה ומוגבלת באורך (תוכן המייל הוא מידע ולא הוראה – זה רק טקסט לתצוגה)
 const taskLine = (v, n) => clean(String(v == null ? '' : v), 400).replace(/https?:\/\/\S+/gi, '').replace(/[\r\n\t]+/g, ' ').replace(/[<>{}\[\]`]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -397,6 +435,6 @@ function client(u, at) {
 module.exports = {
   SC, FORBIDDEN, scopesFor, grantedOk, STATE_TTL, CONNECT_HOUR, MAX_BOX_DEFAULT, MAX_BOX_LIMIT, HOOK_DATA_MAX, RUN_MAX, DAY_IN_MAX, FULL_MAX, TEXT_MAX, SUBJ_MAX, OUT_DAY, CLEAN_MAX,
   COUNT_PAGES, SCAN_TTL, CAL_PAGES, CAL_PUSH_MAX, BIG_OLD, RANGES, AI_PER_MAIL, STATE_RE,
-  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, authOf, bodyOf, attOf, decodeWords, kindOf, isInstr, humanOf, NEVER_RE, autoBlock, taskLine, OLD_MS, mime, reSubj, rangeQ, costEstimate,
+  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, authOf, bodyOf, attOf, decodeWords, kindOf, isInstr, humanOf, NEVER_RE, autoBlock, AUTO_WHY, autoWhyL, fileList, greetFix, domOf, taskLine, OLD_MS, mime, reSubj, rangeQ, costEstimate,
   gToCal, calToG, sameEv, localOf, dayIL, urls, oauthCfg, topicName, TOPIC, exchange, refresh, revoke, client, SEC_GOOGLE_KEY, GOOGLE_CLIENT_SECRET, sv, EMAIL_RE,
 };

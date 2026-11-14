@@ -1303,7 +1303,11 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     const cap = ((await get(`b/${A}/sec_cfg/mail_rep`)) || {}).cap;
     await setRep({ cap: 0 });
     const subject = o.subject || 'שעות פתיחה';
-    GO.addMail(BOX_A, Object.assign({ from: 'Yossi Cohen <c' + (++seq) + '@cust.example>', subject, text: 'שלום, מתי אתם פתוחים?' }, o, { subject }));
+    const m0 = Object.assign({ from: 'Yossi Cohen <c' + (++seq) + '@cust.example>', subject, text: 'שלום, מתי אתם פתוחים?' }, o, { subject });
+    // שולח מאומת (DKIM/DMARC של Google) – אלא אם הבדיקה מבקשת אחרת (o.noAuth)
+    const dom = G.addrOf(m0.from).split('@')[1];
+    if (!o.noAuth) m0.headers = [{ name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.i=@' + dom + '; dmarc=pass (p=NONE) header.from=' + dom }].concat(o.headers || []);
+    GO.addMail(BOX_A, m0);
     await CORE.mailHook(GO.note(BOX_A));
     await setRep({ cap: cap === undefined ? 30 : cap });
     const x = (await inA()).filter((m) => m.subj === subject).sort((a, b) => b.rt - a.rt || (a.id < b.id ? 1 : -1))[0];
@@ -1339,12 +1343,14 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     await CORE.mailHook(GO.note(BOX_A));
     const L = await inA(), by = (s) => L.find((m) => m.subj === s);
     assert.equal(by('שאלה').hum, true); assert.equal(by('שאלה').aw, 'q'); assert.equal(by('שאלה').hw, undefined);
-    const want = { 'מבצע': 'cat', 'עדכון': 'cat', 'רשימה': 'list', 'המוני': 'bulk', 'מחוץ למשרד': 'auto', 'אישור': 'noreply', 'החזרה': 'noreply', 'מהמנהל': 'self', 'חשוד': 'sus', 'קובץ': 'inv', 'ישן': 'old' };
+    assert.equal(by('קובץ').hum, true, 'החלטה (ג): מייל עם קובץ – מאדם, בתור לטיוטה'); assert.equal(by('קובץ').aw, 'q'); assert.ok(by('קובץ').flags.includes('file'));
+    assert.equal(by('שאלה').auth, false, 'בלי Authentication-Results – לא מאומת (נשמר ב-sec_in)');
+    const want = { 'מבצע': 'cat', 'עדכון': 'cat', 'רשימה': 'list', 'המוני': 'bulk', 'מחוץ למשרד': 'auto', 'אישור': 'noreply', 'החזרה': 'noreply', 'מהמנהל': 'self', 'חשוד': 'sus', 'ישן': 'old' };
     for (const [s, hw] of Object.entries(want)) { assert.equal(by(s).hum, false, s); assert.equal(by(s).hw, hw, s); assert.equal(by(s).aw, undefined, s); }
     if (!live) {
       const q = await coll('sec_mailq');
-      assert.equal(q.length, 1, 'רשומה אחת בתור – רק למייל מאדם');
-      assert.equal(q[0].id, by('שאלה').id); assert.equal(q[0].biz, A);
+      assert.equal(q.length, 2, 'בתור – רק מיילים מאדם (כולל מייל עם קובץ)');
+      assert.deepEqual(q.map((v) => v.id).sort(), [by('שאלה').id, by('קובץ').id].sort()); assert.ok(q.every((v) => v.biz === A));
     }
     assert.equal(gmSecReqs().length, 0, 'הקליטה עצמה בלי AI (ה-hook נשאר מהיר)');
     assert.equal(GO.state.sent.length, 0);
@@ -1499,8 +1505,7 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     assert.deepEqual(off.q.sort(), ['מה שעות הפתיחה', 'מה שעות הפתיחה שלכם'].sort());
     const ol = await call('secMail', M1, { op: 'offers' });
     assert.equal(ol.r.offers.length, 1); assert.equal(ol.r.offers[0].learn, off.learn);
-    // תבנית בלי נתון חי / עם נתון שלא קיים – נדחית
-    assert.equal((await call('secMail', M1, { op: 'ruleOk', learn: off.learn, a: 'תודה, נחזור אליך' })).reason, 'bad-tpl');
+    // תבנית עם נתון שלא קיים – נדחית (בלי נתון חי – מותר, החלטה א; נבדק בבדיקה נפרדת)
     assert.equal((await call('secMail', M1, { op: 'ruleOk', learn: off.learn, a: 'פתוחים {{addr}}' })).reason, 'bad-tpl');
     const ok = await call('secMail', M1, { op: 'ruleOk', learn: off.learn });
     assert.ok(ok.ok, ok.msg);
@@ -1728,5 +1733,166 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       await assertFails(dbu(u).doc('sec_mailq/y').set({ biz: A, id: 'x' }));
       if (u !== SUPER) await assertFails(dbu(u).doc(`b/${A}/sec_cfg/mail_rep`).get()); // מנהל־על קורא את sec_cfg (כמו היום)
     }
+  });
+
+  // ---------- תיקון סבב 1 (בדיקת שרת שלב ב) + החלטות המשתמש ----------
+  const inBizT = async (fn) => { const bz = await T.loadBiz(A); return T.runInBiz({ bizId: A, prefix: T.bizPrefix(bz), biz: bz }, () => fn(T.tdb())); };
+  const toOf = (i) => /^To: (.*)$/m.exec(raw(i).split('\r\n\r\n')[0])[1];
+
+  it('ליקוי 1: שליחה אוטומטית רק לשולח מאומת (DKIM/DMARC) וכש-Reply-To באותו דומיין; מייל ישן בלי השדה – לא מאומת; נשאר טיוטה עם סיבה בעברית', async () => {
+    await addRule('r1');
+    await setRep({ auto: true });
+    // בלי אימות
+    const a = await mail({ subject: 'שעות פתיחה', noAuth: true });
+    assert.equal((await get(`b/${A}/sec_in/${a}`)).auth, false);
+    const ra = await work(a);
+    assert.equal(ra.aw, 'draft'); assert.deepEqual(ra.no, ['auth']); assert.equal(GO.state.sent.length, 0);
+    const g = await call('secMail', M1, { op: 'get', id: a });
+    assert.deepEqual(g.r.draft.an, ['auth']); assert.match(g.r.draft.anL[0], /לא ניתן לאמת/);
+    assert.equal(g.r.draft.st, 'pend');
+    // Reply-To לכתובת זרה – לא נשלח (גם כשה-From מאומת)
+    const b = await mail({ subject: 'שעות פתיחה', replyTo: 'victim@evil.example' });
+    assert.equal((await get(`b/${A}/sec_in/${b}`)).auth, true, 'מאומת – נשמר ב-sec_in');
+    const rb = await work(b);
+    assert.deepEqual(rb.no, ['rto']); assert.equal(GO.state.sent.length, 0);
+    assert.match((await call('secMail', M1, { op: 'get', id: b })).r.draft.anL[0], /השב אל/);
+    // מייל ישן (לפני התיקון) בלי השדה auth – לא מאומת
+    const c = await mail({ subject: 'שעות פתיחה' });
+    { const v = await get(`b/${A}/sec_in/${c}`); delete v.id; delete v.auth; await put(`b/${A}/sec_in/${c}`, v); }
+    assert.deepEqual((await work(c)).no, ['auth']);
+    assert.equal(GO.state.sent.length, 0);
+    // Reply-To באותו דומיין – נשלח, אל ה-Reply-To
+    const d0 = await mail({ subject: 'שעות פתיחה', replyTo: 'Office <office@cust.example>' });
+    assert.equal((await work(d0)).aw, 'auto');
+    assert.equal(GO.state.sent.length, 1); assert.equal(toOf(0), 'office@cust.example');
+    // שליחה ידנית של הטיוטה החסומה – לא מושפעת
+    assert.ok((await call('secMailSend', M1, { id: a, sendId: 'send-au01-abcd' })).ok);
+  });
+
+  it('ליקוי 2: המתג "מענה אוטומטי במייל" ו-held נקראים מחדש לפני השליחה – כיבוי / עצירה בזמן קריאת המודל עוצרים את השליחה', async () => {
+    await addRule('r1');
+    await setRep({ auto: true });
+    const ai = (f) => async () => { await f(); return { calls: [{ name: 'prepareReplyDraft', args: AIR }], usage: {} }; };
+    const a = await mail({ subject: 'שעות פתיחה' });
+    const ra = await work(a, { ai: ai(() => setRep({ auto: false })) });
+    assert.ok(ra.no.includes('off'), JSON.stringify(ra)); assert.equal(GO.state.sent.length, 0);
+    assert.equal((await draftOf(a)).st, 'pend');
+    await setRep({ auto: true });
+    const b = await mail({ subject: 'שעות פתיחה' });
+    const rb = await work(b, { ai: ai(() => setRep({ held: { why: 'day', at: Date.now() } })) });
+    assert.ok(rb.no.includes('held'), JSON.stringify(rb)); assert.equal(GO.state.sent.length, 0);
+    // tryAuto ישיר עם הגדרות ישנות (auto:true) כשבמסד כבוי – לפי המסד
+    await put(`b/${A}/sec_cfg/mail_rep`, { cap: 30, auto: false });
+    const c = await mail({ subject: 'שעות פתיחה' });
+    await work(c);
+    const x = await get(`b/${A}/sec_in/${c}`);
+    const rc = await inBizT((db) => CORE.tryAuto(db, c, x, Object.assign({}, AIR, { why: [], fm: { hours: HOURS } }), { cap: 30, auto: true, held: null }, Date.now()));
+    assert.ok(rc.no.includes('off'), JSON.stringify(rc)); assert.equal(GO.state.sent.length, 0);
+  });
+
+  it('הערה: שליחה שנחסמה (כפולה / מכסת יוצאים / תקלה) לא נספרת במכסת ה-100 ולא תופסת את חלון 10 הדקות', async () => {
+    await addRule('r1');
+    await setRep({ auto: true });
+    const use = async () => (await get(`b/${A}/sec_cfg/mail_use`)) || {};
+    // מכסת יוצאים
+    await put(`b/${A}/sec_cfg/mail_use`, { od: dayIL(Date.now()), odn: G.OUT_DAY });
+    const from = 'Same <same@cust.example>';
+    const a = await mail({ subject: 'שעות פתיחה', from });
+    assert.deepEqual((await work(a)).no, ['out']);
+    let u = await use();
+    assert.equal((u.au || {}).n || 0, 0, 'לא נספר'); assert.equal(Object.keys(u.lp || {}).length, 0, 'חלון 10 הדקות לא נתפס');
+    await put(`b/${A}/sec_cfg/mail_use`, {});
+    const b = await mail({ subject: 'שעות פתיחה', from });
+    assert.equal((await work(b)).aw, 'auto', 'אותו שולח מיד אחרי – נשלח (לא loop)');
+    assert.equal((await use()).au.n, 1);
+    // כפולה: tryAuto שוב על מייל שכבר נשלח (אחרי 20 דקות – לא loop)
+    const x = await get(`b/${A}/sec_in/${b}`);
+    const again = await inBizT((db) => CORE.tryAuto(db, b, Object.assign({}, x, { st: 'done' }), Object.assign({}, AIR, { why: [], fm: { hours: HOURS } }), {}, Date.now() + 20 * 60000));
+    assert.deepEqual(again.no, ['dup']);
+    u = await use();
+    assert.equal(u.au.n, 1, 'הכפולה לא נספרה');
+    // תקלה בשליחה
+    GO.state.mode['/gmail/v1/users/me/messages/send'] = 'fail';
+    const c = await mail({ subject: 'שעות פתיחה' });
+    assert.deepEqual((await work(c)).no, ['fail']);
+    delete GO.state.mode['/gmail/v1/users/me/messages/send'];
+    assert.equal((await use()).au.n, 1, 'תקלה לא נספרה');
+  });
+
+  it('החלטה (ב): אחרי 100 ביום – עצירה שנשארת גם למחרת, עד הפעלה ידנית; הפעלה ידנית מאפסת את מונה היום ומאפשרת לשלוח', async () => {
+    await addRule('r1');
+    await setRep({ auto: true });
+    await put(`b/${A}/sec_cfg/mail_use`, { au: { d: dayIL(Date.now()), n: 99 } });
+    assert.equal((await work(await mail({ subject: 'שעות פתיחה' }))).aw, 'auto');
+    assert.equal((await get(`b/${A}/sec_cfg/mail_rep`)).held.why, 'day');
+    // למחרת (יום חדש, מונה חדש) – עדיין עצור
+    const next = await mail({ subject: 'שעות פתיחה' });
+    const rn = await work(next, { now: Date.now() + 25 * 3600e3 });
+    assert.ok(rn.no.includes('held'), JSON.stringify(rn)); assert.equal(GO.state.sent.length, 1);
+    assert.equal((await get(`b/${A}/sec_cfg/mail_rep`)).held.why, 'day', 'בלי חזרה אוטומטית');
+    // הפעלה ידנית
+    assert.ok((await call('secMail', M1, { op: 'repSet', auto: true })).ok);
+    assert.equal((await get(`b/${A}/sec_cfg/mail_use`)).au.n, 0);
+    assert.equal((await work(await mail({ subject: 'שעות פתיחה' }))).aw, 'auto', 'אחרי הפעלה ידנית – נשלח שוב');
+    assert.equal((await get(`b/${A}/sec_cfg/mail_rep`)).held, undefined);
+    // הפעלה בלי עצירה קודמת – לא נוגעת במונה
+    assert.ok((await call('secMail', M1, { op: 'repSet', auto: true })).ok);
+    assert.equal((await get(`b/${A}/sec_cfg/mail_use`)).au.n, 1);
+  });
+
+  it('החלטה (א): כלל בלי נתון חי – נשלח אוטומטית (טקסט קבוע); אישור כלל ולמידה בלי נתון חי – מותרים; נתון חסר בכלל עם נתון – עדיין חוסם', async () => {
+    await addRule('r1', { a: 'שלום, תודה על פנייתך! נשמח לעזור – אפשר להתקשר אלינו בכל שעה.', facts: [] });
+    await setRep({ auto: true });
+    const id = await mail({ subject: 'שעות פתיחה' });
+    assert.equal((await work(id)).aw, 'auto');
+    assert.equal(body(0), 'שלום, תודה על פנייתך! נשמח לעזור – אפשר להתקשר אלינו בכל שעה.');
+    await call('secMail', M1, { op: 'ruleAuto', id: 'r1', on: false });
+    assert.ok((await call('secMail', M1, { op: 'ruleAuto', id: 'r1', on: true })).ok, 'אישור מחדש של כלל בלי נתון חי');
+    // למידה: פעמיים אותה שאלה, תשובה בלי נתון חי → הצעה → אישור עם תשובה בלי נתון
+    await prep((d) => d.doc(`b/${A}/sec_rules/r1`).delete());
+    AIR = { text: 'שלום, תודה על הפנייה. נחזור אליך בהקדם.', cls: 'cust', qk: 'האם אפשר להזמין מראש', facts: [] };
+    for (const [s, k] of [['הזמנה מראש', '1'], ['להזמין מראש?', '2']]) { const i = await mail({ subject: s }); await work(i); assert.ok((await call('secMailSend', M1, { id: i, sendId: 'send-nf0' + k + '-abcd' })).ok); }
+    const off = (await call('secMail', M1, { op: 'offers' })).r.offers[0];
+    assert.ok(off, 'הצעה גם בלי נתון חי'); assert.deepEqual(off.facts, []);
+    assert.equal(off.preview, off.a);
+    const ok = await call('secMail', M1, { op: 'ruleOk', learn: off.learn, a: 'שלום, תודה! אפשר להזמין מראש בטלפון.' });
+    assert.ok(ok.ok, ok.msg); assert.deepEqual(ok.r.rule.facts, []);
+    // כלל עם נתון חי שחסר – עדיין src
+    await addRule('r9', { a: 'שלום, הכתובת: {{addr}}', q: ['איפה אתם'], facts: ['addr'], cls: '' });
+    AIR = { text: 'שלום', cls: 'hours', qk: 'איפה אתם', facts: [] };
+    const r9 = await work(await mail({ subject: 'איפה אתם' }));
+    assert.ok(r9.no.includes('src'), JSON.stringify(r9));
+  });
+
+  it('החלטה (ג): מייל עם קובץ מצורף – טיוטה לאישור + משימה עם "יש קובץ מצורף", סיווג לפי הטקסט ושמות/סוגי הקבצים; לעולם לא נשלח לבד', async () => {
+    await addRule('r1');
+    await setRep({ auto: true });
+    AIR = Object.assign({}, AIR, { task: { title: 'לבדוק את ההזמנה המצורפת', why: 'לקוח שלח טופס הזמנה' } });
+    const id = await mail({ subject: 'שעות פתיחה', text: 'מצרף טופס הזמנה, ומתי אתם פתוחים?', files: ['טופס-הזמנה.pdf', 'תמונה.JPG'] });
+    const x = await get(`b/${A}/sec_in/${id}`);
+    assert.equal(x.hum, true); assert.ok(x.flags.includes('file'));
+    const r = await work(id);
+    assert.equal(r.aw, 'draft'); assert.ok(r.no.includes('file'), JSON.stringify(r));
+    assert.equal(GO.state.sent.length, 0, 'לא נשלח לבד');
+    const req = JSON.stringify(gmSecReqs().slice(-1)[0].body.contents);
+    assert.match(req, /קבצים מצורפים/); assert.match(req, /טופס-הזמנה\.pdf \(סוג: PDF\)/); assert.match(req, /תמונה\.JPG \(סוג: JPG\)/);
+    const dr = await draftOf(id);
+    assert.equal(dr.st, 'pend'); assert.ok(dr.flags.includes('file'), 'התווית "יש קובץ מצורף"');
+    assert.ok((await call('secMail', M1, { op: 'get', id })).r.draft.anL.includes('יש קובץ מצורף'));
+    const t = await get(`b/${A}/tasks/m-${id}`);
+    assert.ok(t, 'משימה'); assert.match(t.txt, /יש קובץ מצורף/);
+  });
+
+  it('החלטה (ד): שם בתבנית שלא מתאים לפונה / שם לא ידוע – פנייה כללית; שם מתאים – נשאר', async () => {
+    await addRule('r1', { a: 'שלום יוסי, אנחנו פתוחים {{hours}}. תודה!' });
+    await setRep({ auto: true });
+    assert.equal((await work(await mail({ subject: 'שעות פתיחה', from: 'Dana <dana@cust.example>' }))).aw, 'auto');
+    assert.equal(body(0), 'שלום, אנחנו פתוחים ' + HOURS + '. תודה!');
+    assert.equal((await work(await mail({ subject: 'שעות פתיחה', from: 'nobody@cust.example' }))).aw, 'auto');
+    assert.equal(body(1), 'שלום, אנחנו פתוחים ' + HOURS + '. תודה!', 'שם לא ידוע');
+    const k = await mail({ subject: 'שעות פתיחה', from: 'יוסי כהן <yk@cust.example>' });
+    assert.equal((await work(k)).aw, 'auto');
+    assert.equal(body(2), 'שלום יוסי, אנחנו פתוחים ' + HOURS + '. תודה!');
+    assert.equal((await draftOf(k)).greet, undefined);
   });
 });

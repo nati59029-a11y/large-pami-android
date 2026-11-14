@@ -114,11 +114,12 @@ describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית ע
     const cases = [[{ labels: ['SPAM'] }, {}, 'spam'], [{ labels: ['INBOX', 'CATEGORY_SOCIAL'] }, {}, 'cat'], [{ labels: ['INBOX', 'CATEGORY_FORUMS'] }, {}, 'cat'],
       [{ unsub: true }, {}, 'list'], [{ listId: true }, {}, 'list'], [{ prec: 'junk' }, {}, 'bulk'], [{ prec: 'list' }, {}, 'bulk'], [{ autoSub: 'auto-generated' }, {}, 'auto'],
       [{ from: '' }, {}, 'nofrom'], [{ from: 'noreply@x.example' }, {}, 'noreply'], [{ from: 'do-not-reply@x.example' }, {}, 'noreply'], [{ from: 'postmaster@x.example' }, {}, 'noreply'],
-      [{ from: 'bounces+abc@x.example' }, {}, 'noreply'], [{}, { fromMgr: true }, 'self'], [{}, { sus: true }, 'sus'], [{}, { hist: true }, 'hist'], [{}, { inv: true }, 'inv'],
+      [{ from: 'bounces+abc@x.example' }, {}, 'noreply'], [{}, { fromMgr: true }, 'self'], [{}, { sus: true }, 'sus'], [{}, { hist: true }, 'hist'],
       [{ t: 1 }, { now: 1 + 49 * 3600e3 }, 'old']];
     for (const [p, o, why] of cases) assert.equal(G.humanOf(P(p), o), why, JSON.stringify([p, o]));
     assert.equal(G.humanOf(P({ autoSub: 'no' }), {}), '', 'Auto-Submitted: no – מאדם');
     assert.equal(G.humanOf(P({ prec: 'first-class' }), {}), '');
+    assert.equal(G.humanOf(P({}), { inv: true }), '', 'החלטה (ג): מייל עם קובץ מצורף – מאדם (טיוטה / משימה), השליחה האוטומטית נחסמת ב-autoBlock');
   });
   it('parseMsg קורא List-Id / Precedence / Auto-Submitted; mime מסמן תשובה אוטומטית רק כשמבקשים', () => {
     const p = G.parseMsg({ id: 'm1', payload: { headers: [{ name: 'From', value: 'a@b.example' }, { name: 'List-Id', value: '<x>' }, { name: 'Precedence', value: 'Bulk' }, { name: 'Auto-Submitted', value: 'auto-replied' }] } });
@@ -134,7 +135,7 @@ describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית ע
   });
   it('autoBlock: כל תנאי "אף פעם" לבד מחזיר את הסיבה שלו; מקרה תקין – ריק', () => {
     const now = 10 * 3600e3;
-    const base = () => ({ stop: false, on: true, held: false, rule: { on: true, auto: true, cls: 'hours' }, x: { hum: true, st: 'done', flags: [], files: [], subj: 'שעות פתיחה', text: 'מתי פתוחים?', t: now - 1000 }, r: { cls: 'hours', risk: false, unsure: false, why: [] }, neverCls: W.NEVER_AUTO, now });
+    const base = () => ({ stop: false, on: true, held: false, rule: { on: true, auto: true, cls: 'hours' }, x: { hum: true, st: 'done', flags: [], files: [], subj: 'שעות פתיחה', text: 'מתי פתוחים?', t: now - 1000, auth: true, from: 'dana@cust.example', rto: '' }, r: { cls: 'hours', risk: false, unsure: false, why: [] }, neverCls: W.NEVER_AUTO, now });
     assert.deepEqual(G.autoBlock(base()), []);
     const mods = [
       ['stop', (o) => { o.stop = true; }], ['off', (o) => { o.on = false; }], ['held', (o) => { o.held = true; }],
@@ -145,9 +146,31 @@ describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית ע
       ['risk', (o) => { o.r.risk = true; }], ['risk', (o) => { o.r.cls = 'price'; o.rule.cls = ''; }], ['cls', (o) => { o.r.cls = 'cust'; }],
       ['unsure', (o) => { o.r.unsure = true; }], ['unsure', (o) => { o.r.why = ['x']; }], ['stock', (o) => { o.r.stk = true; }],
       ['old', (o) => { o.x.t = now - 49 * 3600e3; }], ['old', (o) => { o.x.t = 0; }], ['replied', (o) => { o.x.st = 'replied'; }], ['replied', (o) => { o.x.hd = true; }],
+      // ליקוי 1: שולח לא מאומת (גם מייל ישן בלי השדה), Reply-To בדומיין אחר
+      ['auth', (o) => { o.x.auth = false; }], ['auth', (o) => { delete o.x.auth; }], ['auth', (o) => { o.x.auth = 'true'; }],
+      ['rto', (o) => { o.x.rto = 'attacker@evil.example'; }], ['rto', (o) => { o.x.rto = 'x@sub.cust.example'; }],
     ];
     for (const [why, f] of mods) { const o = base(); f(o); assert.deepEqual(G.autoBlock(o), [why], why + ' ' + f.toString()); }
+    { const o = base(); o.x.rto = 'Other <office@CUST.example>'; assert.deepEqual(G.autoBlock(o), [], 'Reply-To באותו דומיין – מותר'); }
+    assert.deepEqual(G.autoWhyL(['auth', 'rto', 'nope']), [G.AUTO_WHY.auth, G.AUTO_WHY.rto]);
+    for (const k of ['stop', 'off', 'held', 'ruleOff', 'notHuman', 'sus', 'file', 'big', 'never', 'risk', 'cls', 'unsure', 'stock', 'old', 'replied', 'auth', 'rto', 'src', 'box', 'to', 'thread', 'loop', 'day', 'dup', 'out', 'fail'])
+      assert.ok(/[א-ת]/.test(G.AUTO_WHY[k] || ''), 'סיבה בעברית: ' + k);
     for (const c of W.NEVER_AUTO) { const o = base(); o.r.cls = c; o.rule.cls = c; assert.ok(G.autoBlock(o).includes('risk'), c); }
+  });
+  it('greetFix (החלטה ד): שם בפתיחה חייב להתאים לשם הפונה; לא ידוע / לא מתאים – פנייה כללית', () => {
+    assert.deepEqual(G.greetFix('שלום יוסי, אנחנו פתוחים', 'יוסי כהן'), { text: 'שלום יוסי, אנחנו פתוחים', gen: false });
+    assert.deepEqual(G.greetFix('שלום יוסי, אנחנו פתוחים', 'דנה לוי'), { text: 'שלום, אנחנו פתוחים', gen: true });
+    assert.deepEqual(G.greetFix('שלום יוסי, אנחנו פתוחים', ''), { text: 'שלום, אנחנו פתוחים', gen: true }, 'שם לא ידוע');
+    assert.deepEqual(G.greetFix('היי יוסי כהן!\nתודה', 'Yossi Cohen'), { text: 'שלום!\nתודה', gen: true });
+    assert.deepEqual(G.greetFix('Hi Dana,\nWe are open', 'dana smith'), { text: 'Hi Dana,\nWe are open', gen: false });
+    assert.deepEqual(G.greetFix('Dear John, ok', 'Dana'), { text: 'Hello, ok', gen: true });
+    for (const t of ['שלום, אנחנו פתוחים', 'שלום רב, אנחנו פתוחים', 'שלום לכולם!', 'אנחנו פתוחים {{hours}}', 'Hello there, we are open', 'שלום אנחנו פתוחים א׳–ה׳ 8–18. תודה!'])
+      assert.equal(G.greetFix(t, '').gen, false, t);
+  });
+  it('fileList (החלטה ג): שמות וסוגי קבצים, מנוקים ומוגבלים', () => {
+    assert.deepEqual(G.fileList(['inv.pdf', '<b>x</b>.DOCX', 'noext', 5, '']), ['inv.pdf (סוג: PDF)', 'bx/b.DOCX (סוג: DOCX)', 'noext (סוג: לא ידוע)']);
+    assert.equal(G.fileList(Array.from({ length: 20 }, (v, i) => i + '.pdf')).length, 10);
+    assert.deepEqual(G.fileList(undefined), []);
   });
   it('תבנית: factMap רק עובדות פעילות, ציבוריות ולא פגות; fillTpl – חסר נתון = null; tplOf מחליף טקסט מדויק; cleanQk בלי פרטים אישיים; taskLine', () => {
     const fm = K.factMap([{ id: 'fx_hours', fx: 'hours', text: 'א–ה 8–18', st: 'ok', pub: true }, { id: 'f1', text: 'חניה חינם', st: 'ok', pub: true }, { id: 'f2', text: 'פנימי', st: 'ok' },
