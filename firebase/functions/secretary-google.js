@@ -55,6 +55,7 @@ const AI = require('./lib/sec-ai');
 const K = require('./lib/sec-know');
 const W = require('./lib/sec-wa');
 const G = require('./lib/sec-google');
+const SO = require('./lib/sec-ord');
 const TK = require('./lib/tk-time');
 const C = require('./secretary')._core;
 const WA = require('./secretary-wa')._core;
@@ -628,10 +629,13 @@ const MAIL_SYS = ['SEC-CHAT-V1 MAIL-IN', 'את המזכירה העסקית. צר
   'הכלי היחיד: prepareReplyDraft. קראי לו פעם אחת. הטיוטה בשפת המייל. מותר להשתמש רק במידע שמופיע תחת "מידע לפונים מבחוץ", במחירון ובמלאי (אם מופיע). כשאת משתמשת בפריט מידע – העתיקי את הטקסט שלו כמו שהוא.',
   'אם אין מספיק מידע, או שאת לא בטוחה – unsure:true, וטיוטה קצרה ומנומסת. אל תמציאי מחירים, חובות או התחייבויות.',
   'בנוסף החזירי: cls – סוג הפנייה; qk – השאלה בתמצית, כללית, בלי שמות, מספרים או פרטים אישיים (עד 12 מילים); facts – המזהים (שבסוגריים המרובעים) של פריטי המידע שהתשובה מבוססת עליהם;',
-  'risk:true אם יש תלונה, בקשת הנחה / מחיר מיוחד / החזר / התחייבות, עניין משפטי או כל דבר רגיש; task – רק אם המייל דורש פעולה פנימית של העסק מעבר לתשובה: title קצר (עד 8 מילים) ו-why קצר.'].join('\n');
+  'risk:true אם יש תלונה, בקשת הנחה / מחיר מיוחד / החזר / התחייבות, עניין משפטי או כל דבר רגיש; task – רק אם המייל דורש פעולה פנימית של העסק מעבר לתשובה: title קצר (עד 8 מילים) ו-why קצר.',
+  'order – רק כשהמייל הוא הזמנה מפורשת (cls:order): lines – שורה לכל פריט (txt – שם הפריט כמו שכתוב, qty – רק כמות שכתובה במפורש, אחרת השמיטי; unit), cust – פרטי המזמין רק אם כתובים. אל תמציאי כמויות ואל תעתיקי מחירים מהמייל.'].join('\n');
 const MAIL_DECL = [{ name: 'prepareReplyDraft', description: 'מכינה טיוטת תשובה למייל (לא שולחת). המנהל מאשר את השליחה.', parameters: { type: 'object', properties: {
   text: { type: 'string' }, unsure: { type: 'boolean' }, cls: { type: 'string', enum: Object.keys(W.CLS) }, qk: { type: 'string' }, facts: { type: 'array', items: { type: 'string' } }, risk: { type: 'boolean' },
-  task: { type: 'object', properties: { title: { type: 'string' }, why: { type: 'string' } } } }, required: ['text'] } }];
+  task: { type: 'object', properties: { title: { type: 'string' }, why: { type: 'string' } } },
+  order: { type: 'object', properties: { lines: { type: 'array', items: { type: 'object', properties: { txt: { type: 'string' }, qty: { type: 'number' }, unit: { type: 'string' } } } },
+    cust: { type: 'object', properties: { bn: { type: 'string' }, vat: { type: 'string' }, ct: { type: 'string' }, phone: { type: 'string' }, city: { type: 'string' }, st: { type: 'string' } } } } } }, required: ['text'] } }];
 function mailOut(id, x, dr) {
   return { id, from: x.from || '', name: x.name || '', subj: x.subj || x.sum || '', snip: String(x.text || x.sum || '').replace(/\s+/g, ' ').slice(0, 140), t: x.t || 0, st: x.st || '', flags: x.flags || [], box: x.box || '',
     hum: x.hum === true, aw: x.aw || '', task: x.task || '',
@@ -695,7 +699,7 @@ async function aiDraft(db, x, o) {
     r = await (o.ai || AI.chat)({ tier: 'fast', system: MAIL_SYS, turns, tools: MAIL_DECL, timeoutMs: 30000 });
   } catch (e) { await C.settle(db, '_mail', mt, -mt.reserved, false).catch(() => {}); throw e; }
   await C.settle(db, '_mail', mt, AI.costMc('fast', r.usage || {}) - mt.reserved, false).catch(() => {});
-  const out = { text: '', unsure: false, cls: '', qk: '', facts: [], risk: false, task: null, logs: [], fm: pub.fm, stk: !!stock };
+  const out = { text: '', unsure: false, cls: '', qk: '', facts: [], risk: false, task: null, ord: null, logs: [], fm: pub.fm, stk: !!stock };
   for (const cc of (r.calls || []).slice(0, 3)) {
     if (cc.name !== 'prepareReplyDraft') { out.logs.push(['toolDenied', String(cc.name).slice(0, 40)]); continue; } // אין שום כלי אחר בערוץ הזה
     if (out.text) continue;
@@ -708,6 +712,7 @@ async function aiDraft(db, x, o) {
     out.risk = a.risk === true;
     const tt = a.task && typeof a.task === 'object' ? G.taskLine(a.task.title, 80) : '';
     if (tt) out.task = { title: tt, why: G.taskLine(a.task.why, 120) };
+    out.ord = SO.aiOrder(a.order); // שלב ג/2: מנוקה תמיד; נשמר רק ב-mailWorkIn (סוג order + תוספת ההזמנות)
     out.logs.push(['tool', 'prepareReplyDraft']);
   }
   if (!out.text) { out.unsure = true; out.text = 'תודה על פנייתך, נחזור אליך בהקדם.'; out.cls = out.cls || 'other'; }
@@ -1030,13 +1035,16 @@ async function mailWorkIn(id, o) {
     if (r.saving) { took = false; await capTake(db, rep.cap, now, true).catch(() => {}); return fin('saving'); }
     let task = '';
     try { task = await mailTask(db, id, x, r.task, now); } catch (e) { logger.warn('secretary-google: mail task failed', { reason: (e && e.code) || 'error' }); }
-    const doc = Object.assign(draftBase(id, x, now), aiDoc(r), { src: 'ai', by: '', ad: true }, task ? { task } : {});
+    // שלב ג/2: הזמנה מזוהה – רק בסוג order ובעסק עם תוספת ההזמנות. נשמרת על הטיוטה (ord) ולא נשלחת לבד (an: order). אחרת – כמו קודם
+    const biz = (T.scope() || {}).biz;
+    const ord = r.ord && r.cls === 'order' && biz && biz.features && biz.features.orders === true ? r.ord : null;
+    const doc = Object.assign(draftBase(id, x, now), aiDoc(r), { src: 'ai', by: '', ad: true }, task ? { task } : {}, ord ? { ord, an: ['order'] } : {});
     const b = db.batch();
     b.create(db.doc('sec_draft/' + id), doc);
     r.logs.forEach(([act, note]) => b.set(db.collection('sec_log').doc(), glog('', 'sec', act, { tgt: id, note })));
     b.set(db.collection('sec_log').doc(), glog('', 'sec', 'draft', { tgt: id, note: 'mail:auto' + (r.flags.length ? ':' + r.flags.join('+') : '') }));
     try { await b.commit(); } catch (e) { if (e && e.code === 6) return fin('skip', 'has-draft'); throw e; }
-    const a = await tryAuto(db, id, Object.assign({}, x, task ? { task } : {}), r, rep, now);
+    const a = ord ? { no: ['order'] } : await tryAuto(db, id, Object.assign({}, x, task ? { task } : {}), r, rep, now);
     const out = await fin(a.sent ? 'auto' : 'draft');
     return Object.assign(out, { draft: id, task, auto: a.sent ? a.rule : '', no: a.no || [] });
   } catch (e) {

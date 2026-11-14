@@ -143,3 +143,46 @@ describe('sec-ord: סה"כ, כמות, תצוגה', () => {
     assert.equal(v.total, 1020); assert.equal(v.block, true);
   });
 });
+
+describe('שלב 2: aiOrder – ניקוי השדה order מהמודל (פלט לא אמין)', () => {
+  it('קלט תקין: שורות וכמויות, פרטי לקוח; ע.מ וטלפון מנורמלים', () => {
+    const r = O.aiOrder({ lines: [{ txt: ' צלחת   עמוקה ', qty: 10, unit: 'יח' }, { txt: 'כוסות', qty: 2.5 }], cust: { bn: 'מסעדת הים', vat: '51-234567-8', ct: 'דנה', phone: '+972 50-123-4567', city: 'חיפה', st: 'הנמל 3' } });
+    assert.deepEqual(r, { lines: [{ txt: 'צלחת עמוקה', qty: 10, unit: 'יח' }, { txt: 'כוסות', qty: 2.5, unit: '' }], cust: { bn: 'מסעדת הים', ct: 'דנה', city: 'חיפה', st: 'הנמל 3', vat: '512345678', phone: '0501234567' } });
+  });
+  it('לא אובייקט / בלי שורות עם טקסט → null', () => {
+    for (const v of [null, undefined, 'x', 5, [], {}, { lines: 'x' }, { lines: [{ txt: '' }, { qty: 3 }, null, 7, { txt: '   ' }] }]) assert.equal(O.aiOrder(v), null, JSON.stringify(v));
+  });
+  it('כמות: רק מספר חיובי עד 100,000; אחרת null (לא ממציאים)', () => {
+    const q = (qty) => O.aiOrder({ lines: [{ txt: 'צלחת', qty }] }).lines[0].qty;
+    assert.equal(q(3), 3); assert.equal(q(0.0001), null); assert.equal(q(0), null); assert.equal(q(-4), null); assert.equal(q(1e6), null);
+    assert.equal(q(NaN), null); assert.equal(q(Infinity), null); assert.equal(q('10'), null); assert.equal(q(undefined), null); assert.equal(q({}), null);
+  });
+  it('זדוני: 500 שורות → 50; טקסט ארוך → 120; יחידה → 20; תווי בקרה/כיוון נמחקים; שדות לא מוכרים (מחיר) לא נשמרים', () => {
+    const lines = Array.from({ length: 500 }, (_, i) => ({ txt: 'פריט ' + i + ' ' + 'א'.repeat(1000), qty: 1, unit: 'יחידה'.repeat(20), pr: 1, price: 0.01, id: 'p1' }));
+    const r = O.aiOrder({ lines, cust: { bn: 'ב'.repeat(500) + '‮', x: 'y', wholesale: true } });
+    assert.equal(r.lines.length, 50);
+    assert.ok(r.lines.every((l) => l.txt.length <= 120 && l.unit.length <= 20 && Object.keys(l).sort().join() === 'qty,txt,unit'));
+    assert.equal(r.cust.bn.length, 80); assert.deepEqual(Object.keys(r.cust), ['bn']);
+    const c = O.aiOrder({ lines: [{ txt: 'צלחת\u0000‮עמוקה\n\tגדולה' }] });
+    assert.equal(c.lines[0].txt, 'צלחת עמוקה גדולה');
+  });
+  it('מחיר בטקסט נמחק (₪, ש"ח, שקלים, NIS)', () => {
+    const t = (txt) => O.aiOrder({ lines: [{ txt, qty: 1 }] });
+    assert.equal(t('צלחת עמוקה ב-5 ₪').lines[0].txt, 'צלחת עמוקה ב-');
+    assert.equal(t('כוסות 12.90 ש"ח ליחידה').lines[0].txt, 'כוסות ליחידה');
+    assert.equal(t('מגבונים 3 שקלים').lines[0].txt, 'מגבונים');
+    assert.equal(t('₪ 7 סכין').lines[0].txt, 'סכין');
+    assert.equal(t('NIS 4.5 מפיות 10 nis').lines[0].txt, 'מפיות');
+    assert.equal(t('₪5'), null, 'רק מחיר – אין שורה');
+    assert.equal(t('צלחת 24 ס"מ').lines[0].txt, 'צלחת 24 ס"מ', 'מספר שאינו מחיר נשאר');
+  });
+  it('ע.מ: רק 9 ספרות; טלפון: רק ישראלי תקין – אחרת נמחקים', () => {
+    const c = (cust) => O.aiOrder({ lines: [{ txt: 'צלחת' }], cust }).cust;
+    for (const vat of ['12345678', '1234567890', '51234567a', 'ABCDEFGHI', 123, '', null, { a: 1 }]) assert.equal(c({ vat }).vat, undefined, String(vat));
+    assert.equal(c({ vat: 512345678 }).vat, '512345678');
+    for (const phone of ['123', '0123456789', '05012345', 'call me', '+1 212 555 0100', null, ['0501234567']]) assert.equal(c({ phone }).phone, undefined, String(phone));
+    assert.equal(c({ phone: '501234567' }).phone, '0501234567');
+    assert.equal(c({ phone: '03-1234567' }).phone, '031234567');
+    assert.deepEqual(O.aiOrder({ lines: [{ txt: 'צלחת' }], cust: 'x' }).cust, {});
+  });
+});

@@ -153,7 +153,7 @@ describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית ע
     for (const [why, f] of mods) { const o = base(); f(o); assert.deepEqual(G.autoBlock(o), [why], why + ' ' + f.toString()); }
     { const o = base(); o.x.rto = 'Other <office@CUST.example>'; assert.deepEqual(G.autoBlock(o), [], 'Reply-To באותו דומיין – מותר'); }
     assert.deepEqual(G.autoWhyL(['auth', 'rto', 'nope']), [G.AUTO_WHY.auth, G.AUTO_WHY.rto]);
-    for (const k of ['stop', 'off', 'held', 'ruleOff', 'notHuman', 'sus', 'file', 'big', 'never', 'risk', 'cls', 'unsure', 'stock', 'old', 'replied', 'auth', 'rto', 'src', 'box', 'to', 'thread', 'thrErr', 'loop', 'day', 'dup', 'out', 'fail'])
+    for (const k of ['stop', 'off', 'held', 'ruleOff', 'notHuman', 'sus', 'file', 'big', 'never', 'risk', 'cls', 'unsure', 'stock', 'old', 'replied', 'auth', 'rto', 'src', 'box', 'to', 'thread', 'thrErr', 'loop', 'day', 'dup', 'out', 'fail', 'order'])
       assert.ok(/[א-ת]/.test(G.AUTO_WHY[k] || ''), 'סיבה בעברית: ' + k);
     for (const c of W.NEVER_AUTO) { const o = base(); o.r.cls = c; o.rule.cls = c; assert.ok(G.autoBlock(o).includes('risk'), c); }
   });

@@ -162,4 +162,40 @@ function safeView(d) {
   return { lines, total: Number.isInteger(src.total) ? src.total : 0, block: !!src.block };
 }
 
-module.exports = { norm, stem, toks, ed1, priceOf, qtyOk, isOut, ctoOf, match, line, build, safeView, MAX_OPTS };
+// שלב 2: ניקוי השדה order שהמודל החזיר (prepareReplyDraft). הפלט של המודל לא אמין – תוכן המייל יכול לנסות להשתלט עליו.
+// { lines:[{txt,qty,unit}], cust:{bn,vat,ct,phone,city,st} } → אותו מבנה מנוקה, או null אם אין אף שורה עם טקסט.
+// מחירים לא נשמרים: אין שדה מחיר, וסכום עם ₪/ש"ח/NIS נמחק מהטקסט (המחיר תמיד מהקטלוג – line/priceOf).
+const AI_LINES = 50, AI_TXT = 120, AI_UNIT = 20, AI_CUST = 80;
+const PRICE_RE = /(?:₪|nis|ils)\s*\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s*(?:₪|ש["״']?ח|שקל(?:ים)?|nis\b|ils\b)/gi;
+function aiStr(v, n) {
+  if (typeof v !== 'string') return '';
+  return v.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n).trim();
+}
+// טלפון ישראלי – כמו phoneOf ב-customers.js, בלי לזרוק: לא תקין = ''
+function aiPhone(v) {
+  let p = String(typeof v === 'string' || typeof v === 'number' ? v : '').trim().replace(/[\s\-().]/g, '');
+  if (/^\+?972\d{8,9}$/.test(p)) p = '0' + p.replace(/^\+?972/, '');
+  if (/^5\d{8}$/.test(p)) p = '0' + p;
+  return /^0(5\d{8}|7\d{8}|[23489]\d{7})$/.test(p) ? p : '';
+}
+function aiOrder(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  const lines = [];
+  for (const it of (Array.isArray(o.lines) ? o.lines : []).slice(0, AI_LINES)) {
+    if (!it || typeof it !== 'object') continue;
+    const txt = aiStr(aiStr(it.txt, 400).replace(PRICE_RE, ' '), AI_TXT);
+    if (!txt) continue;
+    lines.push({ txt, qty: qtyOk(typeof it.qty === 'number' ? it.qty : null), unit: aiStr(it.unit, AI_UNIT) });
+  }
+  if (!lines.length) return null;
+  const c = o.cust && typeof o.cust === 'object' && !Array.isArray(o.cust) ? o.cust : {};
+  const cust = {};
+  for (const k of ['bn', 'ct', 'city', 'st']) { const v = aiStr(c[k], AI_CUST); if (v) cust[k] = v; }
+  const vat = typeof c.vat === 'string' || typeof c.vat === 'number' ? String(c.vat).trim().replace(/[\s-]/g, '') : '';
+  if (/^\d{9}$/.test(vat)) cust.vat = vat;
+  const ph = aiPhone(c.phone);
+  if (ph) cust.phone = ph;
+  return { lines, cust };
+}
+
+module.exports = { norm, stem, toks, ed1, priceOf, qtyOk, isOut, ctoOf, match, line, build, safeView, MAX_OPTS, aiOrder, aiPhone, AI_LINES, AI_TXT };
