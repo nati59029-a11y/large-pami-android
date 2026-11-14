@@ -56,6 +56,11 @@ function paint(path){const c=document.createElement('canvas'),g=c.getContext('2d
 const load=p=>{window.__loads.push(p);return new Promise(r=>setTimeout(r,2+Math.random()*8)).then(()=>paint(p)).then(b=>{if(!b)throw new Error('404');return b})};
 window.__load=load;
 const $=id=>document.getElementById(id);
+/* עיצוב האפליקציה: טוענים את כללי ה-CSS האמיתיים מ-index.html (טוקני ds וכפתורים) לפני כללי הדף, כדי שהמקרא ייראה כמו באפליקציה. ?ds=b|c לערכה אחרת */
+document.documentElement.dataset.ds=/^[abc]$/.test(q.get('ds')||'')?q.get('ds'):'a';
+window.__dsReady=fetch('../index.html').then(r=>r.text()).then(t=>{const st=document.createElement('style');st.id='app-css';
+ st.textContent=(t.match(/<style[^>]*>[\s\S]*?<\/style>/gi)||[]).map(x=>x.replace(/^<style[^>]*>|<\/style>$/gi,'')).join('\n').replace(/url\((['"]?)(?![a-z]+:|\/|\.\.)/gi,'url($1../');
+ document.head.insertBefore(st,document.head.firstChild);return true}).catch(()=>false);
 if(!MINI){
  document.body.insertAdjacentHTML('afterbegin','<div id="bar"><b>דוגמה</b><button id="top">מלמעלה</button><button id="walk">הליכה</button><input id="q" size="5" placeholder="חיפוש"><button id="go">חפש</button></div><div id="view"></div><div id="info"></div>');
  Store3D.open($('view'),map,{sample:true,sum,load,mode:q.get('mode')==='walk'?'walk':'top',onPick:b=>{$('info').textContent=b?('נבחר '+b.id+' · מצב '+(b.st||'-')):''}}).then(h=>{

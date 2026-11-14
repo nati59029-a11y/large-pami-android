@@ -10,7 +10,9 @@
              frames(bool), walkTo(x,y) (ס"מ בתוכנית), resize(), pause(), resume(), destroy(), stats()
      mini(el, map, sum, opts)            -> {update(map,sum), destroy(), stats(), handle} – אותה סצנה, ברזולוציה מוקטנת ובסיבוב איטי.
         נטען רק כשהחלון נראה במסך (IntersectionObserver), נעצר כשהוא יוצא, ומשחרר זיכרון אחרי 15 שניות מחוץ למסך או כשהאלמנט הוסר.
-     STAT                                -> צבעי המצב והשמות בעברית (למקרא במסכים)
+     STAT                                -> צבעי המצב, הסמלים והשמות בעברית (למקרא במסכים): {c, t, y: סמל, f: צבע הסמל}
+     badge(k, px)                        -> קנבס של תג המצב (אותו ציור כמו בתלת מימד), למקרא במסכים אחרים
+   סימון מצב: פס דק בשפת המדף (כמו פס תוויות, נראה גם מלמעלה) + תג עגול עם סמל מעל המקטע (גודל קבוע במסך). frames(bool) מסתיר/מציג את שניהם.
      clearCache()                        -> ניקוי מטמון התמונות בזיכרון (יציאה / החלפת עסק)
    bay שמוחזר ב-onPick: {id, fx, s, n, lv:[...], lvHit, num, name, k, st}
    מראה: קירות/רצפה/תקרה מקבלים טקסטורה מ-smap.tx[] לפי rooms[].tex {w,f,c}; חזית כל מקטע מקבלת את התמונה המוקטנת האחרונה (s3sum.b[id].th).
@@ -36,9 +38,25 @@ async function open(el,map,opts){
   try{return makeView(T,el,map,opts)}catch(e){console.error(e);return fail('init','לא ניתן להפעיל את תצוגת התלת מימד במכשיר הזה.')}
 }
 
-/* ---- צבעי מצב (חוזה 4.11: s3sum.b[].s) ---- */
-const STAT={ok:{c:0x2fa84f,t:'תקין'},iss:{c:0xf08c1a,t:'בעיה'},miss:{c:0xd8342c,t:'לא צולם / לא ברור'},rev:{c:0x3b82f6,t:'לבדיקה'},out:{c:0x8a8f96,t:'לא בסבב'}};
+/* ---- מצב מקטע (חוזה 4.11: s3sum.b[].s) – המקום היחיד שבו מוגדרים צבעי המצב, הסמלים והשמות (בתלת מימד ובמקרא).
+   c: צבע הפס והתג – פלטה מאופקת, ניגודיות ≥3:1 מול מדף לבן (#eef0f2): ירוק 4.6, ענבר 3.2, אדום 5.8, סגול 4.9, אפור 3.4.
+   y: סמל התג – המצב מובן גם בלי להבחין בצבע. f: צבע הסמל, ניגודיות ≥3.6:1 מול c (ענבר עם סמל כהה 4.7).
+   ל"לא בסבב" אין תג – רק פס אפור. RING: טבעת לבנה וקו כהה סביב התג, כדי שייראה גם על מדף לבן וגם על תמונה כהה. ---- */
+const STAT={ok:{c:0x2f7a4f,y:'✓',f:0xffffff,t:'תקין'},iss:{c:0xb7791f,y:'!',f:0x1b1b1f,t:'בעיה'},miss:{c:0xb42318,y:'✕',f:0xffffff,t:'לא צולם / לא ברור'},rev:{c:0x7c4dcc,y:'?',f:0xffffff,t:'לבדיקה'},out:{c:0x7d838b,y:'',f:0,t:'לא בסבב'}};
+const RING={i:0xffffff,o:0x1b1b1f},BDG=['ok','iss','miss','rev'];
 const hex=c=>'#'+c.toString(16).padStart(6,'0');
+/* תג מצב כקנבס (px×px): עיגול בצבע המצב עם טבעת, והסמל מצויר בקווים (לא תלוי בגופן של המכשיר). ל-out – פס אפור קצר */
+function badge(k,px){const S=STAT[k]||STAT.out,c=document.createElement('canvas');c.width=c.height=px;const g=c.getContext('2d'),m=px/2,u=px/64;
+  if(!S.y){g.fillStyle=hex(S.c);g.fillRect(4*u,26*u,56*u,12*u);return c}
+  g.fillStyle=hex(RING.o);g.globalAlpha=.6;g.beginPath();g.arc(m,m,31.5*u,0,7);g.fill();g.globalAlpha=1;
+  g.fillStyle=hex(RING.i);g.beginPath();g.arc(m,m,29*u,0,7);g.fill();
+  g.fillStyle=hex(S.c);g.beginPath();g.arc(m,m,24.5*u,0,7);g.fill();
+  g.strokeStyle=g.fillStyle=hex(S.f);g.lineWidth=7*u;g.lineCap=g.lineJoin='round';g.beginPath();
+  if(k==='ok'){g.moveTo(20*u,33*u);g.lineTo(28*u,41*u);g.lineTo(44*u,24*u);g.stroke()}
+  else if(k==='miss'){g.moveTo(23*u,23*u);g.lineTo(41*u,41*u);g.moveTo(41*u,23*u);g.lineTo(23*u,41*u);g.stroke()}
+  else if(k==='iss'){g.moveTo(m,19*u);g.lineTo(m,35*u);g.stroke();g.beginPath();g.arc(m,44*u,4.2*u,0,7);g.fill()}
+  else{g.lineWidth=6.5*u;g.arc(m,27*u,8*u,Math.PI*1.1,Math.PI*2.3);g.lineTo(m,36*u);g.stroke();g.beginPath();g.arc(m,45*u,4*u,0,7);g.fill()}
+  return c}
 
 /* ---- טעינת תמונות מ-Storage: מטמון משותף לכל התצוגות (Blob בזיכרון, עד ~48MB), עד 4 הורדות במקביל ---- */
 const okPath=p=>typeof p==='string'&&p.length>0&&p.length<=300&&/^b\/[^/]+\/store3d\/[A-Za-z0-9_./-]+\.jpg$/.test(p)&&p.indexOf('..')<0;
@@ -103,12 +121,17 @@ function makeView(T,el,map0,opts){
     inst:keep(new T.MeshLambertMaterial({color:0xffffff})),/* צבע לכל מופע */
     shelf:keep(new T.MeshLambertMaterial({color:0xeef0f2})),
     glass:keep(new T.MeshLambertMaterial({color:0xbfe6ff,transparent:true,opacity:.22,depthWrite:false})),
-    stat:keep(new T.MeshBasicMaterial({color:0xffffff})),/* מסגרות מצב – צבע לכל מופע, בלי הצללה */
+    stat:keep(new T.MeshBasicMaterial({color:0xffffff})),/* פסי מצב – צבע לכל מופע, בלי הצללה */
     pick:keep(new T.MeshBasicMaterial({visible:false})),
     sel:keep(new T.MeshBasicMaterial({color:0xd4af37,transparent:true,opacity:.28,depthWrite:false})),
     selLine:keep(new T.LineBasicMaterial({color:0xffd24a})),
     blink:keep(new T.MeshBasicMaterial({color:0xffd24a,transparent:true,opacity:.5,depthWrite:false})),
   };
+  /* תגי מצב: חומר נקודות אחד לכל מצב (4 קריאות ציור לכל החנות), בגודל קבוע בפיקסלים – לא נעלמים כשמתרחקים */
+  const BM={};for(const k of BDG){const t=keep(new T.CanvasTexture(badge(k,64)));t.colorSpace=T.SRGBColorSpace;
+    BM[k]=keep(new T.PointsMaterial({map:t,size:16,sizeAttenuation:false,transparent:true,alphaTest:.04,depthWrite:false}))}
+  /* גודל התג במסך (פיקסלים): בהליכה – קריא; מלמעלה – קטן, ו"תקין" קטן עוד יותר כדי לא להעמיס. במיני (חלון הבית) – רק תגי חריגה; "תקין" מסומן בפס בלבד */
+  function bdgSize(){for(const k of BDG)BM[k].size=MINI?8:mode==='top'?(k==='ok'?11:14):(k==='ok'?20:22);BM.ok.visible=!MINI}
   const BOX=keep(new T.BoxGeometry(1,1,1)),CYL=keep(new T.CylinderGeometry(.5,.5,1,16));
   const TILE=2;/* רצפה ותקרה מצולמות: כל עותק של התמונה מכסה 2×2 מ' (הנחה) */
 
@@ -248,8 +271,8 @@ function makeView(T,el,map0,opts){
     return best==null?(d.a||0)*Math.PI/180:best}
   function disposeTree(o){o.traverse(n=>{if(n.geometry&&n.geometry!==BOX&&n.geometry!==CYL)n.geometry.dispose();if(n.isInstancedMesh)n.dispose()})}
 
-  /* ---- מצב המקטעים מ-s3sum: מסגרת צבעונית דקה + פס עליון (נראה גם מלמעלה), ותמונות המדפים על החזיתות ---- */
-  let sum=opts.sum||null,showFrames=opts.frames!==false,dynG=null,statG=null;
+  /* ---- מצב המקטעים מ-s3sum: פס דק בשפת המדף + תג עם סמל מעל המקטע, ותמונות המדפים על החזיתות ---- */
+  let sum=opts.sum||null,showFrames=opts.frames!==false,dynG=null,statG=null,bdgN={};
   const ph={atl:[],geo:[],want:0,ok:0,fail:0,skip:0,cell:0,byId:new Map()};
   /* תמונות שמגיעות ברצף: מציירים מחדש לכל היותר פעם ב-300ms (העלאת אטלס לכרטיס הגרפי יקרה) */
   let soonT=0;const soon=()=>{if(!soonT)soonT=setTimeout(()=>{soonT=0;invalidate()},300)};
@@ -263,17 +286,20 @@ function makeView(T,el,map0,opts){
   function clearDyn(){if(dynG){scene.remove(dynG);disposeTree(dynG)}for(const a of ph.atl){a.tex.dispose();a.mat.dispose()}ph.atl=[];ph.byId=new Map();dynG=statG=null;bl=null;hiClear()}
   function buildDyn(){
     clearDyn();if(!model)return;dynG=new T.Group();statG=new T.Group();statG.visible=showFrames;dynG.add(statG);
-    const B=sumB(),fr=[],frC=[],list=[];ph.want=ph.ok=ph.fail=ph.skip=0;
+    const B=sumB(),fr=[],frC=[],list=[],bp={};for(const k of BDG)bp[k]=[];ph.want=ph.ok=ph.fail=ph.skip=0;
     for(const o of pickBays){const e=B&&B[o.b.id];if(!e)continue;const st=STAT[e.s]?e.s:'';
-      if(st){const{b,f}=o,n=o.n,bw=b.w/100,lx=b.lx/100,lz=b.ly/100,H=f.h/100,t=.03,col=STAT[st].c,
-          F=(x,y,z,sx,sy,sz)=>{put(fr,o.x0,0,o.z0,o.c,o.s,x,y,z,sx,sy,sz);frC.push(col)};
-        if(f.k==='table'||f.k==='bin'){const zb=f.sides===2?0:lz-n*f.d/100,zm=(lz+zb)/2,dz=Math.abs(lz-zb),y=H+.004;
-          F(lx,y,lz-n*t/2,bw,.008,t);F(lx,y,zb+n*t/2,bw,.008,t);F(lx-bw/2+t/2,y,zm,t,.008,dz);F(lx+bw/2-t/2,y,zm,t,.008,dz)}
-        else{const z=lz+n*.022,y0=f.k==='fridge'?.15:.1,dd=Math.min(f.d/100/(f.sides===2?2:1),.3);
-          F(lx-bw/2+t/2,H/2,z,t,H,.012);F(lx+bw/2-t/2,H/2,z,t,H,.012);F(lx,H-t/2,z,bw,t,.012);F(lx,y0,z,bw,t,.012);
-          F(lx,H+.012,lz-n*dd/2,bw*.96,.024,dd)/* פס עליון – נראה במבט מלמעלה */}}
+      if(st){const{b,f}=o,n=o.n,bw=b.w/100*.96,lx=b.lx/100,lz=b.ly/100,H=f.h/100,col=STAT[st].c,
+          F=(x,y,z,sx,sy,sz)=>{put(fr,o.x0,0,o.z0,o.c,o.s,x,y,z,sx,sy,sz);frC.push(col)};let by,bz;
+        if(f.k==='table'||f.k==='bin'){const zb=f.sides===2?0:lz-n*f.d/100,dz=Math.abs(lz-zb);
+          F(lx,H+.005,lz-n*.02,bw,.01,.04);/* פס בשפה הקדמית של המשטח */by=H+.16;bz=lz-n*Math.min(dz/2,.2)}
+        else{F(lx,H-.02,lz+n*.022,bw,.036,.012);/* פס תוויות בשפה העליונה של החזית */
+          F(lx,H+.006,lz-n*.03,bw,.012,.06);/* ושפה דקה מלמעלה – נראית במבט מלמעלה */by=H+.17;bz=lz-n*.06}
+        if(bp[st])bp[st].push(o.x0+o.c*lx+o.s*bz,by,o.z0-o.s*lx+o.c*bz)}
       if(okPath(e.th))list.push({o,th:e.th})}
     const sm=inst(BOX,M.stat,fr,frC);if(sm)statG.add(sm);
+    bdgN={};for(const k of BDG){const a=bp[k];bdgN[k]=a.length/3;if(!a.length)continue;
+      const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(a,3));g.computeBoundingSphere();
+      const p=new T.Points(g,BM[k]);p.renderOrder=3;statG.add(p)}
     /* תמונות: אטלס (קנבס אחד לכמה תמונות) – גודל התא לפי מספר התמונות, כדי שהזיכרון יישאר קטן גם עם מאות מקטעים */
     const N=list.length;ph.want=N;
     if(N){const cell0=N<=192?128:N<=768?64:32,cell=MINI?cell0/2:cell0,per=(ATLAS/cell)**2;ph.cell=cell;
@@ -314,20 +340,20 @@ function makeView(T,el,map0,opts){
       const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(P,3));geo.setAttribute('uv',new T.Float32BufferAttribute([0,0,1,0,1,1,0,1],2));geo.setIndex([0,1,2,0,2,3]);
       g0.add(new T.Mesh(geo,new T.MeshBasicMaterial({map:t,side:T.DoubleSide})));invalidate()}).catch(()=>{})}
 
-  /* ---- מקרא וכפתור הסתרת המסגרות (לא במצב מיני) ---- */
-  let legend=null;
+  /* ---- מקרא וכפתור הסתרת סימוני המצב (לא במצב מיני). עיצוב מטוקני האפליקציה (ds): --glass, --line, --ink, --r-m, --elev-2, וכפתור "btn s g" ---- */
+  let legend=null;const frTxt=()=>showFrames?'הסתר סימונים':'הצג סימונים';
   function drawLegend(){if(MINI||opts.legend===false)return;const B=sumB();
     if(!B||!Object.keys(B).length){if(legend){legend.remove();legend=null}return}
     if(!legend){legend=document.createElement('div');legend.className='s3d-legend';legend.dir='rtl';
-      legend.style.cssText='position:absolute;bottom:8px;left:8px;right:8px;z-index:2;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;background:rgba(20,20,24,.82);border:1px solid #6b5a22;border-radius:10px;padding:4px 8px;color:#eee;font:12px/1.4 sans-serif;pointer-events:none';
+      legend.style.cssText='position:absolute;bottom:8px;left:8px;right:8px;z-index:2;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;background:var(--glass);-webkit-backdrop-filter:blur(var(--blur));backdrop-filter:blur(var(--blur));border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--elev-2);padding:6px 10px;color:var(--ink);font-family:var(--font-ui);font-size:.8rem;font-weight:600;line-height:1.3;pointer-events:none';
       el.appendChild(legend);overlay.push(legend)}
     legend.innerHTML='';
-    for(const k of['ok','iss','miss','rev','out']){const s=document.createElement('span');s.style.cssText='display:inline-flex;align-items:center;gap:4px;white-space:nowrap';
-      const d=document.createElement('i');d.style.cssText='display:inline-block;width:10px;height:10px;border-radius:2px;background:'+hex(STAT[k].c);s.append(d,STAT[k].t);legend.appendChild(s)}
-    const btn=document.createElement('button');btn.type='button';btn.className='s3d-frames';btn.textContent=showFrames?'הסתר מסגרות':'הצג מסגרות';
-    btn.style.cssText='margin-inline-start:auto;pointer-events:auto;background:#24242c;color:#f1d77a;border:1px solid #d4af37;border-radius:8px;padding:3px 8px;font:12px sans-serif';
+    for(const k of['ok','iss','miss','rev','out']){const s=document.createElement('span');s.className='s3d-lg';s.dataset.s=k;s.style.cssText='display:inline-flex;align-items:center;gap:5px;white-space:nowrap';
+      const d=badge(k,36);d.setAttribute('aria-hidden','true');d.style.cssText='width:18px;height:18px;flex:none';s.append(d,STAT[k].t);legend.appendChild(s)}
+    const btn=document.createElement('button');btn.type='button';btn.className='btn s g s3d-frames';btn.textContent=frTxt();btn.setAttribute('aria-pressed',String(!showFrames));
+    btn.style.cssText='flex:none;margin-inline-start:auto;pointer-events:auto';
     btn.onclick=e=>{e.stopPropagation();setFrames(!showFrames)};legend.appendChild(btn)}
-  function setFrames(v){showFrames=!!v;if(statG)statG.visible=showFrames;const b=legend&&legend.querySelector('.s3d-frames');if(b)b.textContent=showFrames?'הסתר מסגרות':'הצג מסגרות';invalidate()}
+  function setFrames(v){showFrames=!!v;if(statG)statG.visible=showFrames;const b=legend&&legend.querySelector('.s3d-frames');if(b){b.textContent=frTxt();b.setAttribute('aria-pressed',String(!showFrames))}invalidate()}
 
   /* ---- מצלמה ומצבים ---- */
   let mode=MINI?'top':opts.mode==='walk'?'walk':'top';
@@ -341,7 +367,7 @@ function makeView(T,el,map0,opts){
     if(!G.inAnyRoom(model,x,y)&&model.rooms[0]){const c=G.centroid(model.rooms[0].p);x=c[0];y=c[1]}
     [x,y]=G.resolveCircle(x,y,25,model.segs);walk.x=x/100;walk.z=y/100;walk.yaw=Math.atan2(e.ly,e.lx);walk.pitch=-.05;
   }
-  function applyMode(){wallsG.scale.y=mode==='top'?(MINI?.55:.35):1;ceilG.visible=mode==='walk';if(mode!=='walk')hiClear();else hiUpdate();placeCam()}
+  function applyMode(){bdgSize();wallsG.scale.y=mode==='top'?(MINI?.55:.35):1;ceilG.visible=mode==='walk';if(mode!=='walk')hiClear();else hiUpdate();placeCam()}
   function placeCam(){
     if(mode==='top'){const c=Math.cos(top.pitch),fx=Math.cos(top.yaw),fz=Math.sin(top.yaw);
       cam.position.set(top.tx-fx*c*top.dist,Math.sin(top.pitch)*top.dist,top.tz-fz*c*top.dist);cam.lookAt(top.tx,0,top.tz)}
@@ -459,7 +485,7 @@ function makeView(T,el,map0,opts){
     stats:()=>{const st={};for(const k in STAT)st[k]=0;const B=sumB();if(B)for(const o of pickBays){const s=stOf(o.b.id);if(s)st[s]++}
       return{three:THREE_VER,mini:MINI,buildMs:+buildMs.toFixed(1),fx:model.fx.length,bays:model.bays.length,instances,calls:renderer.info.render.calls,tris:renderer.info.render.triangles,
         skip:model.skip.slice(),cam:cam.position.toArray().map(v=>+v.toFixed(2)),walk:[+walk.x.toFixed(2),+walk.z.toFixed(2)],mode,frames,paused,
-        tex:Object.assign({},texSt),photos:{want:ph.want,ok:ph.ok,fail:ph.fail,cell:ph.cell,atlases:ph.atl.length,hi:hi.g?hi.g.children.length:0},stat:st,framesOn:showFrames,blink:!!bl,px:renderer.getPixelRatio()}},
+        tex:Object.assign({},texSt),photos:{want:ph.want,ok:ph.ok,fail:ph.fail,cell:ph.cell,atlases:ph.atl.length,hi:hi.g?hi.g.children.length:0},stat:st,badges:Object.assign({},bdgN),badgePx:BM.ok.size,framesOn:showFrames,blink:!!bl,px:renderer.getPixelRatio()}},
     destroy(){if(dead)return;dead=true;if(raf)cancelAnimationFrame(raf);clearTimeout(hi.t);clearTimeout(soonT);
       cv.removeEventListener('pointerdown',onDown);cv.removeEventListener('pointermove',onMove);cv.removeEventListener('pointerup',onUp);cv.removeEventListener('pointercancel',onUp);
       cv.removeEventListener('wheel',onWheel);cv.removeEventListener('webglcontextlost',onLost);cv.removeEventListener('webglcontextrestored',onRestored);
@@ -493,6 +519,6 @@ function mini(el,map,sum,o){
     get handle(){return h}};
   return api}
 
-window.Store3D={version:THREE_VER,supported,preload,open,mini,STAT,clearCache};
+window.Store3D={version:THREE_VER,supported,preload,open,mini,STAT,badge,clearCache};
 window.S3View=window.Store3D;
 })();
