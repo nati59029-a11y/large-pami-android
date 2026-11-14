@@ -1945,6 +1945,30 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       const c = await mail({ subject: 'מתי אתם פתוחים בשישי', text: 'שאלה אחרת לגמרי' });
       await put(`b/${A}/sec_draft/${c}`, { ch: 'mail', in: c, st: 'pend', text: 'x', to: 'c@cust.example', subj: 'x', box: bx(), t: 1 });
       assert.equal((await call('secMailSend', M1, { id: c, sendId: 'send-g005-abcd', mark: true })).reason, 'not-stuck');
+      // מסלול ידני: Gmail הצליח אבל גם "נשלח" וגם gmid לא נכתבו – 'sending' עם sBy=uid ובלי gmid. עד 60 שניות – "בדרך"; אחר כך maybe-sent, לא שליחה; מותר לסמן
+      await put(`b/${A}/sec_draft/${c}`, { ch: 'mail', in: c, st: 'sending', sBy: M1, sid: 'send-g006-abcd', sAt: Date.now() - 10000, text: 'x', to: 'c@cust.example', subj: 'x', box: bx(), t: 1 });
+      assert.equal((await call('secMailSend', M1, { id: c, sendId: 'send-g007-abcd' })).reason, 'in-progress');
+      assert.equal((await call('secMailSend', M1, { id: c, sendId: 'send-g007-abcd', mark: true })).reason, 'not-stuck', 'לפני 60 שניות – עוד לא תקועה');
+      await prep((d) => d.doc(`b/${A}/sec_draft/${c}`).update({ sAt: Date.now() - 61000 }));
+      const n2 = GO.state.sent.length;
+      const s2 = await call('secMailSend', M1, { id: c, sendId: 'send-g008-abcd' });
+      assert.equal(s2.ok, false); assert.equal(s2.reason, 'maybe-sent');
+      assert.equal(GO.state.sent.length, n2, 'אין שליחה חוזרת');
+      const g2 = await call('secMail', M1, { op: 'get', id: c });
+      assert.ok(g2.ok, g2.msg); assert.equal(g2.r.draft.stuck, true, 'הממשק מציג "לסמן כנשלח" ולא "שלח"');
+      const mk2 = await call('secMailSend', M1, { id: c, sendId: 'send-g008-abcd', mark: true });
+      assert.ok(mk2.ok, mk2.msg);
+      const dc = await draftOf(c);
+      assert.equal(dc.st, 'sent'); assert.equal(dc.mk, true);
+      // תקלה ב-Gmail עצמו – 'fail' (לא תקוע), ואפשר לשלוח שוב בלחיצה
+      const f = await mail({ subject: 'שאלה על משלוח', text: 'יש משלוחים?' });
+      await put(`b/${A}/sec_draft/${f}`, { ch: 'mail', in: f, st: 'pend', text: 'כן', to: 'f@cust.example', subj: 'x', box: bx(), t: 1 });
+      GO.state.mode['/gmail/v1/users/me/messages/send'] = 'fail';
+      const sf = await call('secMailSend', M1, { id: f, sendId: 'send-g009-abcd' });
+      delete GO.state.mode['/gmail/v1/users/me/messages/send'];
+      assert.equal(sf.ok, false); assert.equal((await draftOf(f)).st, 'fail');
+      assert.equal((await call('secMailSend', M1, { id: f, sendId: 'send-g010-abcd', mark: true })).reason, 'not-stuck');
+      assert.ok((await call('secMailSend', M1, { id: f, sendId: 'send-g010-abcd' })).ok, 'אחרי תקלה ב-Gmail – שליחה חוזרת מותרת');
     } finally { WB.prototype.commit = orig; }
   });
 

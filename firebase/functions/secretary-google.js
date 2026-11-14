@@ -639,7 +639,7 @@ function mailOut(id, x, dr) {
 }
 function draftOut(id, x) {
   return { id, to: x.to || '', subj: x.subj || '', text: x.text || x.sum || '', src: x.src || '', st: x.st || 'pend', flags: x.flags || [], why: x.why || [], t: x.t || 0,
-    cls: x.cls || '', clsL: W.CLS[x.cls] || '', qk: x.qk || '', facts: x.facts || [], risk: x.risk === true, ad: x.ad === true, am: x.am === true, rule: x.rule || '', an: x.an || [], anL: G.autoWhyL(x.an), task: x.task || '', sentAt: x.sentAt || 0 };
+    cls: x.cls || '', clsL: W.CLS[x.cls] || '', qk: x.qk || '', facts: x.facts || [], risk: x.risk === true, ad: x.ad === true, am: x.am === true, rule: x.rule || '', an: x.an || [], anL: G.autoWhyL(x.an), task: x.task || '', sentAt: x.sentAt || 0, stuck: maybeSent(x, Date.now()) };
 }
 async function mailDoc(db, input) {
   const id = typeof input.id === 'string' && /^g[0-9a-f]{40}$/.test(input.id) ? input.id : null;
@@ -1286,14 +1286,16 @@ async function autoOp(who, db, input, op, now) {
 // secMailSend – שליחה מה-Gmail של העסק, רק בלחיצה של מנהל מחובר (27, 10.2). "עצור הכל" לא חוסם לחיצה ידנית (31).
 // קלט: { id (טיוטה), sendId (חד־פעמי, נגד שליחה כפולה), text? (עריכה), mark? (שלב ג 0א: סימון ידני "נשלח" לטיוטה שאולי כבר יצאה – בלי שליחה) }. הנמען, הנושא והתיבה – רק מהטיוטה בשרת. כל שדה אחר – נדחה.
 // =====================================================================================
-// שלב ג (0א): טיוטה שאולי כבר יצאה מ-Gmail – יש gmid, או שהשליחה האוטומטית לא הסתיימה (sending + sBy:'auto'). לא שולחים שוב; המנהל יכול לסמן "נשלח"
-const maybeSent = (v) => !!(v && v.st !== 'sent' && (v.gmid || (v.st === 'sending' && v.sBy === 'auto')));
+// שלב ג (0א): טיוטה שאולי כבר יצאה מ-Gmail – יש gmid, או שהשליחה לא הסתיימה: 'sending' אוטומטי, או 'sending' ידני יותר מ-60 שניות
+// (Gmail שנכשל מעביר ל-'fail', כך ש-'sending' ישן = אולי נשלח וכתיבת "נשלח" נכשלה). לא שולחים שוב; המנהל יכול לסמן "נשלח"
+const SENDING_MS = 60000;
+const maybeSent = (v, now) => !!(v && v.st !== 'sent' && (v.gmid || (v.st === 'sending' && (v.sBy === 'auto' || now - (Number(v.sAt) || 0) >= SENDING_MS))));
 const MAYBE_SENT = 'ייתכן שהמייל כבר נשלח. בדקו בתיקייה "נשלח" ב-Gmail. אם הוא שם – סמנו "נשלח".';
 async function markSent(db, dRef, id, who, now) {
   await db.runTransaction(async (tx) => {
     const v = (await tx.get(dRef)).data();
     if (!v || v.st === 'sent') throw pre('not-pending', 'המייל כבר מסומן כנשלח');
-    if (!maybeSent(v) && !(v.st === 'sending' && now - (v.sAt || 0) >= 60000)) throw pre('not-stuck', 'אפשר לסמן "נשלח" רק לטיוטה שהשליחה שלה לא הסתיימה');
+    if (!maybeSent(v, now)) throw pre('not-stuck', 'אפשר לסמן "נשלח" רק לטיוטה שהשליחה שלה לא הסתיימה');
     tx.update(dRef, { st: 'sent', sentAt: now, sentBy: who.uid, mk: true });
     tx.set(db.doc('sec_in/' + id), { st: 'replied' }, { merge: true });
     tx.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'mailMark', { tgt: id }));
@@ -1318,7 +1320,7 @@ async function secMailSend(request) {
     if (input.mark !== true) throw bad('bad-input', 'mark');
     return markSent(db, dRef, id, who, now);
   }
-  if (maybeSent(dr)) throw pre('maybe-sent', MAYBE_SENT);
+  if (maybeSent(dr, now)) throw pre('maybe-sent', MAYBE_SENT);
   const bx = mailCfgOf(ms).boxes[dr.box];
   if (!bx || bx.st !== 'ok') throw pre('not-connected', 'התיבה לא מחוברת. אפשר לחבר מחדש בהגדרות המזכירה.');
   let text = dr.text, edited = false;
@@ -1330,8 +1332,8 @@ async function secMailSend(request) {
   await db.runTransaction(async (tx) => {
     const v = (await tx.get(dRef)).data();
     if (v.st === 'sent') throw pre('not-pending', 'המייל כבר נשלח');
-    if (maybeSent(v)) throw pre('maybe-sent', MAYBE_SENT);
-    if (v.st === 'sending' && now - (v.sAt || 0) < 60000) throw pre('in-progress', 'השליחה כבר בדרך');
+    if (maybeSent(v, now)) throw pre('maybe-sent', MAYBE_SENT);
+    if (v.st === 'sending') throw pre('in-progress', 'השליחה כבר בדרך');
     if (!['pend', 'fail', 'sending'].includes(v.st)) throw pre('not-pending', 'הטיוטה כבר טופלה');
     tx.update(dRef, { st: 'sending', sid: input.sendId, sAt: now, sBy: who.uid });
   });
