@@ -754,7 +754,7 @@ async function mailTask(db, id, x, task, now) {
 // =====================================================================================
 // secMail – מנהל העסק: תיבת המייל, טיוטה, דיוק (refine), "טופל", מענה אוטומטי (הגדרות, רשימה, כיבוי, הצעות לכלל), ורשימות ניקוי הספאם (פ3)
 // =====================================================================================
-const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend'];
+const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend', 'ordReset'];
 async function secMail(request) {
   const input = inputObject(request);
   const { who, db } = await gate(request, { consent: true });
@@ -1157,7 +1157,7 @@ async function ordDraft(db, id, x, ord, biz, now) {
 // מחיר לעולם לא מתקבל מהקלט – תמיד חישוב מחדש מהקטלוג (ordCalc). ver – נגד דריסה מקבילה (כל שינוי: ver+1).
 // custId על sec_ord = זהות מאושרת (זיהוי מאומת, או בחירת/אישור מנהל) – רק אז מחיר סיטונאי, ורק ללקוח wholesale.
 // =====================================================================================
-const ORD_OPS = ['ordGet', 'ordEdit', 'ordCust', 'ordSend'];
+const ORD_OPS = ['ordGet', 'ordEdit', 'ordCust', 'ordSend', 'ordReset'];
 const ORD_MAX_OPS = 30;
 const CARD_K = ['name', 'phone', 'mail', 'bn', 'vat', 'ct', 'pay', 'payTxt', 'st', 'city'];
 const ORD_NO = { cust: 'צריך לבחור לקוח (או לאשר כרטיס חדש)', br: 'צריך לבחור סניף', empty: 'אין שורות בהזמנה', stop: '"עצור הכל" מופעל',
@@ -1206,7 +1206,16 @@ async function ordOut(db, id, o, brs) {
     lines: o.lines || [], total: o.total || 0, nBlock: o.nBlock || 0, blk: o.blk || [], sentAt: o.sentAt || 0, stuck: maybeSent(o, Date.now()),
     text: ordText(v, !st.phone) };
 }
-// גוף המייל ללקוח – רק מתוך SO.safeView (אין q, עלות, wp ללא-סיטונאי, מזהי מוצר). מחירים: לצרכן = כולל מע"מ, סיטונאי (ex) = לפני מע"מ (המוסכמה ב-pricing.js)
+// סבב 1 (בודק): הטקסט החופשי של הלקוח לא מצוטט כמו שהוא – הנמען (From) לא מאומת, ואסור שהעסק ישלח מהתיבה שלו קישור/מייל/טלפון שמישהו שתל.
+// יש בטקסט קישור, דומיין, מייל או טלפון (או שאין בו אות) – "פריט לבירור" במקום הציטוט
+const TXT_BAD = [/(?:https?|ftp):\/\//i, /\bwww\./i, /@/, /[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/i, /\d[\d\s\-().+]{5,}\d/, /[<>{}[\]\\|]/];
+function custTxt(t) {
+  const v = typeof t === 'string' ? t.replace(/\s+/g, ' ').trim() : '';
+  if (!v || !/[א-תa-z]/i.test(v) || TXT_BAD.some((r) => r.test(v))) return '';
+  return v;
+}
+// גוף המייל ללקוח – רק מתוך SO.safeView (אין q, עלות, wp ללא-סיטונאי, מזהי מוצר). מחירים: לצרכן = כולל מע"מ, סיטונאי (ex) = לפני מע"מ (המוסכמה ב-pricing.js).
+// מעורב (סיטונאי שלחלק מהמוצרים אין wp) – תווית לכל מחיר ושני סכומי ביניים, בלי סה"כ מאוחד
 function ordText(v, askPhone) {
   const m = (a) => (a / 100).toFixed(2) + ' ₪';
   const pr = [];
@@ -1214,21 +1223,27 @@ function ordText(v, askPhone) {
   const mixed = pr.includes(true) && pr.includes(false);
   const pm = (a, ex) => m(a) + (mixed ? (ex ? ' (לפני מע"מ)' : ' (כולל מע"מ)') : '');
   const L = ['שלום,', '', 'להלן טיוטת ההזמנה שלך לבדיקה:', ''];
-  let open = false;
+  let open = false, sEx = 0, sIn = 0;
   v.lines.forEach((l, i) => {
     const n = (i + 1) + '. ';
-    const q = l.qty ? ' | כמות: ' + l.qty + (l.unit ? ' ' + l.unit : '') : '';
+    const u = custTxt(l.unit);
+    const q = l.qty ? ' | כמות: ' + l.qty + (u ? ' ' + u : '') : '';
+    const t = custTxt(l.txt);
+    const tq = t ? '"' + t + '"' : 'פריט לבירור';
     if (l.st === 'ok' && l.out) { L.push(n + l.name + ' – אזל כרגע'); open = true; } else if (l.st === 'ok' && l.pr) {
       L.push(n + l.name + q + ' | מחיר: ' + pm(l.pr, l.ex) + ' | סה"כ: ' + pm(l.sum, l.ex));
+      if (l.ex) sEx += l.sum; else sIn += l.sum;
       if (l.ctw) { L.push('   יש להזמין בכפולות של ' + l.ctw + ' (קרטון שלם)'); open = true; }
     } else if (l.st === 'pick' && l.opts && l.opts.length) {
-      L.push(n + '"' + l.txt + '"' + q + ' – נא לבחור אחת מהאפשרויות:');
+      L.push(n + tq + q + ' – נא לבחור אחת מהאפשרויות:');
       l.opts.slice(0, SO.MAX_OPTS).forEach((p, j) => L.push('   ' + 'אבג'[j] + ') ' + p.name + (p.pr ? ' – ' + pm(p.pr, p.ex) : '')));
       open = true;
-    } else { L.push(n + '"' + l.txt + '"' + q + ' – לבירור' + (l.why === 'qty' ? ' (הכמות לא ברורה)' : '')); open = true; }
+    } else { L.push(n + tq + q + (t ? ' – לבירור' : '') + (l.why === 'qty' ? ' (הכמות לא ברורה)' : '')); open = true; }
   });
   L.push('');
-  if (v.total > 0) L.push('סה"כ: ' + m(v.total) + (mixed || !pr.length ? '' : pr[0] ? ' (המחירים לפני מע"מ)' : ' (המחירים כוללים מע"מ)') + (open ? ' – לא כולל שורות לבחירה, לבירור או שאזלו' : ''));
+  const tail = open ? ' – לא כולל שורות לבחירה, לבירור או שאזלו' : '';
+  if (sEx && sIn) L.push('סה"כ פריטים במחיר לפני מע"מ: ' + m(sEx), 'סה"כ פריטים במחיר כולל מע"מ: ' + m(sIn) + tail);
+  else if (v.total > 0) L.push('סה"כ: ' + m(v.total) + (mixed || !pr.length ? '' : pr[0] ? ' (המחירים לפני מע"מ)' : ' (המחירים כוללים מע"מ)') + tail);
   if (askPhone) L.push('', 'כדי להשלים את ההזמנה, נא לשלוח מספר טלפון ליצירת קשר.');
   L.push('', 'לאישור ההזמנה – השיבו למייל הזה. לשינוי – כתבו מה לשנות.');
   return L.join('\n');
@@ -1248,7 +1263,17 @@ async function ordOp(who, db, input, op, now) {
     return { ok: true, ord: await ordOut(db, id, o, await ordBrs(who.biz)) };
   }
   if (!o) throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
-  if (op === 'ordSend') return ordSend(who, db, input, id, x, ref, o, now);
+  if (op === 'ordSend') return input.mark !== undefined ? ordMark(who, db, input, id, ref, now) : ordSend(who, db, input, id, x, ref, o, now);
+  // ordReset: חזרה לעריכה רק אחרי כישלון ודאי של Gmail ('fail'). לא ממצב "ייתכן שנשלח" (שם – רק סימון "נשלח")
+  if (op === 'ordReset') {
+    await db.runTransaction(async (tx) => {
+      const v = (await tx.get(ref)).data();
+      if (!v || v.st !== 'fail' || maybeSent(v, now)) throw pre('not-failed', 'אפשר להחזיר לעריכה רק טיוטה שהשליחה שלה נכשלה');
+      tx.update(ref, { st: 'mgr', upd: now });
+      tx.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'ordReset', { tgt: id }));
+    });
+    return { ok: true, id };
+  }
   if (o.st !== 'mgr') throw pre('not-pending', 'הטיוטה כבר נשלחה ללקוח');
   const brs = await ordBrs(who.biz);
   if (op === 'ordEdit') {
@@ -1279,6 +1304,8 @@ async function ordOp(who, db, input, op, now) {
       } else if (k === 'br') {
         const ok = brs.length ? brs.some((b) => b.id === op1.br && b.on !== false) : op1.br === '_';
         if (!ok) throw bad('bad-br', 'הסניף לא קיים או לא פעיל');
+        // מנהל עם הגבלת סניפים (admins/{uid}.br – כמו brLimited ב-gate): רק סניף מהרשימה שלו. orders.js לא מגביל מנהלים (mine=null); כאן מחמירים
+        if (!who.superadmin && brs.length) { const mb = (await db.doc('admins/' + who.uid).get()).get('br'); if (Array.isArray(mb) && !mb.includes(op1.br)) throw deny('br-denied', 'אין לך הרשאה לסניף הזה'); }
         n.br = op1.br; del.add('brDef');
       } else if (k === 'cust') {
         if (n.custId || !Array.isArray(n.cands) || !n.cands.some((c) => c.id === op1.cid)) throw bad('bad-cust', 'אפשר לבחור רק לקוח מהמועמדים');
@@ -1300,8 +1327,9 @@ async function ordOp(who, db, input, op, now) {
     await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordEdit', { tgt: id, note: input.ops.map((p) => String(p.k)).join('+').slice(0, 100) }));
     return { ok: true, ord: await ordOut(db, id, (await ref.get()).data(), brs) };
   }
-  // ordCust: כרטיס לקוח חדש = custNew + תיקוני המנהל, נשמר דרך customers.js (אותן בדיקות, BIZ_REQ ללקוח עסקי, phoneOf, מזהה p{טלפון}).
-  // fill:true – כמו שמירה מתוך הזמנה: לקוח קיים עם אותו טלפון לא נדרס (רק שדות ריקים מתמלאים). ת"ז לא מתקבלת כאן. מייל – רק אם המנהל כתב אותו בכרטיס
+  // ordCust: כרטיס לקוח חדש = custNew + תיקוני המנהל, נשמר דרך customers.js (saveCore: אותן בדיקות, BIZ_REQ ללקוח עסקי, phoneOf, מזהה p{טלפון}).
+  // סבב 1 (בודק): רק יצירה (so.onlyNew). כבר יש לקוח עם הטלפון – לא משנים בו כלום ולא מקשרים: הוא נוסף כמועמד (cands) לבחירה מפורשת (ordEdit k:'cust').
+  // wholesale – רק אם המנהל שלח ws:true (לא נגזר משם עסק/ח.פ מהמייל). ת"ז לא מתקבלת כאן. מייל – רק אם המנהל כתב אותו בכרטיס
   if (o.custId) throw pre('has-cust', 'כבר נבחר לקוח להזמנה');
   const card = input.card;
   if (!card || typeof card !== 'object' || Array.isArray(card)) throw bad('bad-card', 'פרטי לקוח חסרים');
@@ -1309,18 +1337,49 @@ async function ordOp(who, db, input, op, now) {
   if (input.ws !== undefined && typeof input.ws !== 'boolean') throw bad('bad-field', 'סיטונאי: כן/לא');
   const c = {};
   for (const k of CARD_K) { const v = card[k] !== undefined ? card[k] : (o.custNew || {})[k]; if (v !== undefined && v !== '') c[k] = v; }
-  const ws = input.ws !== undefined ? input.ws : !!(c.bn || c.vat); // כרטיס עסקי (שם עסק / ח.פ) = לקוח עסקי (wholesale), אלא אם המנהל סימן אחרת
+  const ws = input.ws === true;
   const ver0 = o.ver;
-  const sv = await CUS.saveCore(who, Object.assign({ cust: c, fill: true }, ws ? { wholesale: true } : {}), { src: 'sec' });
+  let sv;
+  try {
+    sv = await CUS.saveCore(who, Object.assign({ cust: c, fill: true }, ws ? { wholesale: true } : {}), { src: 'sec', onlyNew: true });
+  } catch (e) {
+    if (!(e && e.details && e.details.reason === 'cust-exists')) throw e;
+    const cs = typeof e.details.id === 'string' && ID_RE.test(e.details.id) ? await db.doc('cust/' + e.details.id).get() : null;
+    if (!cs || !cs.exists || cs.get('mv')) throw pre('cust-exists', 'כבר יש לקוח עם הטלפון הזה');
+    const cands = [candOf(cs)].concat((o.cands || []).filter((x1) => x1.id !== cs.id)).slice(0, ORD_CANDS);
+    const n = Object.assign({}, o, { cands });
+    const r = await ordRecalc(db, n);
+    await ordSave(db, ref, ver0, { cands, lines: r.lines, total: r.total, nBlock: r.nBlock, blk: r.blk }, now);
+    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordCust', { tgt: id, note: 'exists' }));
+    return { ok: true, exists: true, custId: '', cand: candOf(cs), ord: await ordOut(db, id, (await ref.get()).data(), brs) };
+  }
+  if (sv.created !== true) throw pre('cust-exists', 'כבר יש לקוח עם הטלפון הזה'); // הגנה נוספת – לא אמור לקרות עם onlyNew
   const n = Object.assign({}, o, { custId: sv.id, custBy: who.uid });
   delete n.cands; delete n.custNew; delete n.idBy;
   const r = await ordRecalc(db, n);
   const up = { custId: sv.id, custBy: who.uid, lines: r.lines, total: r.total, nBlock: r.nBlock, blk: r.blk };
   for (const k of ['cands', 'custNew', 'idBy']) if (o[k] !== undefined) up[k] = FieldValue.delete();
   await ordSave(db, ref, ver0, up, now);
-  await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordCust', { tgt: id, note: (sv.created ? 'new' : 'fill') + (ws ? ':ws' : '') }));
-  return { ok: true, custId: sv.id, created: sv.created === true, ord: await ordOut(db, id, (await ref.get()).data(), brs) };
+  await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordCust', { tgt: id, note: 'new' + (ws ? ':ws' : '') }));
+  return { ok: true, custId: sv.id, created: true, ord: await ordOut(db, id, (await ref.get()).data(), brs) };
 }
+// סימון ידני "נשלח" לטיוטת הזמנה שאולי כבר יצאה (gmid / sending ישן) – כמו markSent של שלב 0. רק במצב maybeSent
+async function ordMark(who, db, input, id, ref, now) {
+  if (input.mark !== true) throw bad('bad-input', 'mark');
+  const dRef = db.doc('sec_draft/' + id);
+  await db.runTransaction(async (tx) => {
+    const [v, d] = [(await tx.get(ref)).data(), await tx.get(dRef)];
+    if (!v || v.st === 'sent') throw pre('not-pending', 'טיוטת ההזמנה כבר מסומנת כנשלחה');
+    if (!maybeSent(v, now)) throw pre('not-stuck', 'אפשר לסמן "נשלח" רק לטיוטה שהשליחה שלה לא הסתיימה');
+    tx.update(ref, { st: 'sent', sentAt: now, sentBy: who.uid, sentVer: v.sVer || v.ver, mk: true });
+    tx.set(db.doc('sec_in/' + id), { st: 'replied' }, { merge: true });
+    if (d.exists && ['pend', 'fail'].includes(d.get('st'))) tx.update(dRef, { st: 'done', doneBy: who.uid, doneAt: now, oSent: true });
+    tx.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'ordMark', { tgt: id }));
+  });
+  return { ok: true, id, marked: true };
+}
+// השוואה יציבה (סדר המפתחות במפה שחוזרת מ-Firestore אינו בהכרח סדר הכתיבה)
+const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((y) => [y, x[y]])) : x));
 // ordSend: טיוטת ההזמנה ללקוח, בשרשור, לכתובת to של sec_ord בלבד. חוסמים: לקוח/סניף לא נבחרו, אין שורות, "עצור הכל", המענה במייל כבוי,
 // תיבה לא מחוברת, תשובה כבר נשלחה בשרשור (גם ישירות מ-Gmail – sentAfter), מכסת היוצאים (outTake). טלפון חסר לא חוסם – הטיוטה מבקשת אותו.
 // כפילות: כמו secMailSend – מעבר מ-'mgr' ל-'sending' בטרנזקציה, maybeSent (gmid / sending), ver חד־פעמי (אותו ver שוב אחרי שליחה = already)
@@ -1330,6 +1389,18 @@ async function ordSend(who, db, input, id, x, ref, o, now) {
   if (maybeSent(o, now)) throw pre('maybe-sent', MAYBE_SENT);
   if (o.st === 'sending') throw pre('in-progress', 'השליחה כבר בדרך');
   if (o.ver !== ver) throw pre('stale', 'הטיוטה עודכנה בינתיים. טענו אותה מחדש.');
+  if (!['mgr', 'fail'].includes(o.st)) throw pre('not-pending', 'הטיוטה כבר טופלה');
+  // סבב 1 (בודק): חישוב מחדש מהקטלוג ומהלקוח (wholesale עדכני) לפני השליחה. שונה ממה שהמנהל ראה – נשמר כגרסה חדשה, ולא שולחים
+  const rc = await ordRecalc(db, o);
+  if (canon(rc.lines) !== canon(o.lines || []) || rc.total !== o.total || canon(rc.blk) !== canon(o.blk || []) || rc.nBlock !== o.nBlock) {
+    await db.runTransaction(async (tx) => {
+      const v = (await tx.get(ref)).data();
+      if (!v || v.ver !== ver || !['mgr', 'fail'].includes(v.st)) return;
+      tx.update(ref, { lines: rc.lines, total: rc.total, nBlock: rc.nBlock, blk: rc.blk, st: 'mgr', ver: ver + 1, upd: now });
+    });
+    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordSendNo', { tgt: id, note: 'recalc' }));
+    throw pre('stale', 'המחירים או הפריטים בקטלוג השתנו – הטיוטה עודכנה. בדקו אותה ושלחו שוב.');
+  }
   const dRef = db.doc('sec_draft/' + id);
   const [ws, rs, ms, ds] = await Promise.all([db.doc('sec_cfg/wa').get(), db.doc('sec_cfg/mail_rep').get(), db.doc('sec_cfg/mail').get(), dRef.get()]);
   const st = await ordState(db, o);
@@ -1355,15 +1426,16 @@ async function ordSend(who, db, input, id, x, ref, o, now) {
     await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordSendNo', { tgt: id, note: no.join('+') }));
     throw new HttpsError('failed-precondition', 'אי אפשר לשלוח: ' + no.map((k) => ORD_NO[k]).join('; '), { reason: 'blocked', no });
   }
-  const text = ordText(SO.safeView(o), !st.phone);
+  const text = ordText(SO.safeView(Object.assign({}, o, rc)), !st.phone);
   await db.runTransaction(async (tx) => {
-    const v = (await tx.get(ref)).data();
+    const [v, dv] = [(await tx.get(ref)).data(), (await tx.get(dRef)).data()];
     if (!v) throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
+    if (dv && (['sent', 'sending'].includes(dv.st) || maybeSent(dv, now))) throw new HttpsError('failed-precondition', 'אי אפשר לשלוח: ' + ORD_NO.thread, { reason: 'blocked', no: ['thread'] }); // מול secMailSend במקביל
     if (v.st === 'sent') throw pre('not-pending', 'טיוטת ההזמנה כבר נשלחה');
     if (maybeSent(v, now)) throw pre('maybe-sent', MAYBE_SENT);
     if (v.st === 'sending') throw pre('in-progress', 'השליחה כבר בדרך');
     if (v.ver !== ver) throw pre('stale', 'הטיוטה עודכנה בינתיים. טענו אותה מחדש.');
-    if (v.st !== 'mgr') throw pre('not-pending', 'הטיוטה כבר טופלה');
+    if (!['mgr', 'fail'].includes(v.st)) throw pre('not-pending', 'הטיוטה כבר טופלה');
     tx.update(ref, { st: 'sending', sAt: now, sBy: who.uid, sVer: ver });
   });
   if (!(await outTake(db, now))) { await ref.update({ st: 'mgr' }); throw new HttpsError('resource-exhausted', 'הגעתם למספר המיילים היוצאים המרבי להיום.', { reason: 'out-limit' }); }
@@ -1372,7 +1444,7 @@ async function ordSend(who, db, input, id, x, ref, o, now) {
     const c = gc || (await access(db, who.bizId, 'mail', x.box)).c;
     res = await c.send(G.mime({ to, subj: G.reSubj(x.subj || ''), text, inReplyTo: x.mid }), x.thr || '');
   } catch (e) {
-    await ref.update({ st: 'mgr' });
+    await ref.update({ st: 'fail' }); // נכשל ב-Gmail: אפשר לנסות שוב (ordSend) או לחזור לעריכה (ordReset)
     await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'sendFail', { tgt: id, note: 'ord:' + String((e.details && e.details.reason) || 'error').slice(0, 30) }));
     if (e instanceof HttpsError) throw e;
     throw new HttpsError('unavailable', 'השליחה נכשלה. נסו שוב בעוד דקה.', { reason: 'google-error' });
@@ -1632,6 +1704,8 @@ async function autoOp(who, db, input, op, now) {
 // (Gmail שנכשל מעביר ל-'fail', כך ש-'sending' ישן = אולי נשלח וכתיבת "נשלח" נכשלה). לא שולחים שוב; המנהל יכול לסמן "נשלח"
 const SENDING_MS = 60000;
 const maybeSent = (v, now) => !!(v && v.st !== 'sent' && (v.gmid || (v.st === 'sending' && (v.sBy === 'auto' || now - (Number(v.sAt) || 0) >= SENDING_MS))));
+const ordBusy = (o, now) => !!(o && (['sending', 'sent'].includes(o.st) || maybeSent(o, now)));
+const ORDER_SENT = 'טיוטת ההזמנה כבר נשלחה ללקוח בשרשור הזה (או שהשליחה בדרך) – תשובת הטקסט לא תישלח בנוסף.';
 const MAYBE_SENT = 'ייתכן שהמייל כבר נשלח. בדקו בתיקייה "נשלח" ב-Gmail. אם הוא שם – סמנו "נשלח".';
 async function markSent(db, dRef, id, who, now) {
   await db.runTransaction(async (tx) => {
@@ -1663,6 +1737,9 @@ async function secMailSend(request) {
     return markSent(db, dRef, id, who, now);
   }
   if (maybeSent(dr, now)) throw pre('maybe-sent', MAYBE_SENT);
+  // סבב 1 (שלב ג/4): טיוטת ההזמנה של אותו מייל כבר נשלחה / בדרך / ייתכן שנשלחה – לא שולחים גם את תשובת הטקסט באותו שרשור
+  const oRef = db.doc('sec_ord/' + id);
+  if (ordBusy((await oRef.get()).data(), now)) throw pre('order-sent', ORDER_SENT);
   const bx = mailCfgOf(ms).boxes[dr.box];
   if (!bx || bx.st !== 'ok') throw pre('not-connected', 'התיבה לא מחוברת. אפשר לחבר מחדש בהגדרות המזכירה.');
   let text = dr.text, edited = false;
@@ -1672,7 +1749,8 @@ async function secMailSend(request) {
     edited = t !== dr.text; text = t;
   }
   await db.runTransaction(async (tx) => {
-    const v = (await tx.get(dRef)).data();
+    const [v, ov] = [(await tx.get(dRef)).data(), (await tx.get(oRef)).data()];
+    if (ordBusy(ov, now)) throw pre('order-sent', ORDER_SENT);
     if (v.st === 'sent') throw pre('not-pending', 'המייל כבר נשלח');
     if (maybeSent(v, now)) throw pre('maybe-sent', MAYBE_SENT);
     if (v.st === 'sending') throw pre('in-progress', 'השליחה כבר בדרך');

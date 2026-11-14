@@ -267,6 +267,7 @@ async function upsert(tx, db, w, o, opts) {
   let moved = false;
   if (!base && ps && ps.exists && !ps.get('mv') && empty(ps.get('tz'))) { base = Object.assign({}, ps.data()); moved = true; }
   const ws = opts.wholesale;
+  if (base && opts.onlyNew) throw new HttpsError('already-exists', 'כבר יש לקוח עם הפרטים האלה', { reason: 'cust-exists', id: s.exists ? (s.get('mv') || id) : ps.get('mv') || ps.id }); // המזכירה (saveCore so.onlyNew): לקוח קיים לא משתנה
   if (base && ws === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
   if (ws === true && !(base && base.wholesale === true)) needBiz(base, o, opts.fill);
   flagFix(base, o, opts.cell, opts.fill);
@@ -375,7 +376,8 @@ async function saveCust(request) {
   return saveCore(w, inputObject(request));
 }
 // שלב ג/4 (המזכירה): הליבה של saveCust – אותן בדיקות ואותה כתיבה. w = מי ששומר (uid, role, bizId, biz), בתוך הקשר העסק (T.tdb).
-// so.src – מקור הלקוח החדש (ברירת מחדל: כמו saveCust – 'order' ב-fill, אחרת 'manual'). saveCust עצמו לא משתנה.
+// so.src – מקור הלקוח החדש (ברירת מחדל: כמו saveCust – 'order' ב-fill, אחרת 'manual'). so.onlyNew – רק יצירה: לקוח קיים (גם mv) → already-exists/cust-exists
+//   בתוך הטרנזקציה, בלי שום כתיבה (רק upsert; לא בשימוש עם id/asNew). saveCust עצמו לא משתנה.
 async function saveCore(w, input, so) {
   onlyKeys(input, ['cust', 'fill', 'wholesale', 'id', 'asNew']);
   const mgr = w.role === 'manager';
@@ -398,7 +400,7 @@ async function saveCore(w, input, so) {
   let r;
   // עריכה של שדות עסקיים: pay שאינו 'other' מוחק את הפירוט הישן
   if (input.fill !== true && o.pay && o.pay !== 'other') o.payTxt = '';
-  const opts = { fill: input.fill === true, wholesale: input.wholesale, src: (so && so.src) || (input.fill === true ? 'order' : 'manual'), mgr, cell: cellOn(w) };
+  const opts = { fill: input.fill === true, wholesale: input.wholesale, src: (so && so.src) || (input.fill === true ? 'order' : 'manual'), mgr, cell: cellOn(w), onlyNew: !!(so && so.onlyNew) };
   await db.runTransaction(async (tx) => {
     r = id ? await upsertId(tx, db, w, id, o, opts) : (input.asNew && !o.tz) ? await createNew(tx, db, w, o, opts) : await upsert(tx, db, w, o, opts);
   });
