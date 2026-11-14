@@ -212,8 +212,11 @@ async function secRules(request) {
   const col = db.collection('sec_rules');
   if (op === 'list') {
     const s = await col.limit(K.RULES_MAX).get();
-    return { ok: true, rules: s.docs.map((d) => ({ id: d.id, q: d.get('q') || [], a: d.get('a') || '', cond: d.get('cond') || '', on: d.get('on') !== false, src: d.get('src') || 'mgr', t: d.get('t') || 0 })).sort((x, y) => y.t - x.t) };
+    // שלב ב: auto (נשלח לבד במייל), autoOff (כובה – בידי המנהל או אחרי עריכה, עד אישור), facts (נתון חי), ch (ערוץ: all/mail/wa; חסר = all), cls
+    return { ok: true, rules: s.docs.map((d) => ({ id: d.id, q: d.get('q') || [], a: d.get('a') || '', cond: d.get('cond') || '', on: d.get('on') !== false, src: d.get('src') || 'mgr', t: d.get('t') || 0,
+      auto: d.get('auto') === true, autoOff: d.get('autoOff') === true, offWhy: d.get('offWhy') || '', facts: Array.isArray(d.get('facts')) ? d.get('facts') : [], ch: ['mail', 'wa'].includes(d.get('ch')) ? d.get('ch') : 'all', cls: d.get('cls') || '' })).sort((x, y) => y.t - x.t) };
   }
+  if (input.ch !== undefined && !['all', 'mail', 'wa'].includes(input.ch)) throw bad('bad-ch', 'ערוץ: all / mail / wa');
   await rate(db, who.uid, 'kn', KN_HOUR);
   const now = Date.now(), b = db.batch();
   let id;
@@ -223,11 +226,14 @@ async function secRules(request) {
     if (op === 'add') {
       if ((await col.select().limit(K.RULES_MAX).get()).size >= K.RULES_MAX) throw pre('too-many', 'הגעתם למספר התשובות המרבי (' + K.RULES_MAX + ')');
       id = col.doc().id;
-      b.set(col.doc(id), Object.assign(r, { src: 'mgr', by: who.uid, t: now, upd: now }));
+      b.set(col.doc(id), Object.assign(r, { src: 'mgr', by: who.uid, t: now, upd: now }, input.ch ? { ch: input.ch } : {}));
     } else {
       id = idOf(input.id);
-      if (!(await col.doc(id).get()).exists) throw pre('not-found', 'התשובה לא נמצאה');
-      b.update(col.doc(id), Object.assign(r, { by: who.uid, upd: now }));
+      const cur = await col.doc(id).get();
+      if (!cur.exists) throw pre('not-found', 'התשובה לא נמצאה');
+      // שלב ב (החלטה 14.11): עריכת התשובה בכלל אוטומטי מכבה את השליחה האוטומטית עד שהמנהל מאשר שוב (secMail ruleAuto)
+      const off = cur.get('auto') === true && cur.get('a') !== r.a ? { autoOff: true, offWhy: 'edit' } : {};
+      b.update(col.doc(id), Object.assign(r, { by: who.uid, upd: now }, input.ch ? { ch: input.ch } : {}, off));
     }
     log(b, db, who.uid, op === 'add' ? 'ruleAdd' : 'ruleEdit', { tgt: id });
   } else {

@@ -449,6 +449,41 @@ describe('בנק תשובות (3.5): עונה בלי AI, ונספר במונה',
 });
 
 // ---------------------------------------------------------------------------------
+describe('בנק תשובות – שדות של מענה אוטומטי למייל (14.11): רשימה, ערוץ, עריכה מכבה כלל אוטומטי, נתון חי בצ\'אט', () => {
+  it('list מחזיר auto/autoOff/facts/ch/cls (כלל ישן – ברירות מחדל); ch נבדק; עריכת התשובה בכלל אוטומטי → autoOff עד אישור; עריכת כלל רגיל – כמו היום', async () => {
+    await seed();
+    const add = await call('secRules', M1, { op: 'add', q: ['שעות פתיחה'], a: 'פתוחים 8–18' });
+    assert.equal(add.status, 'OK', add.text);
+    assert.equal((await call('secRules', M1, { op: 'add', q: ['x'], a: 'y', ch: 'sms' })).reason, 'bad-ch');
+    const m = await call('secRules', M1, { op: 'add', q: ['חניה'], a: 'יש', ch: 'mail' });
+    assert.equal((await get(`b/${A}/sec_rules/${m.result.id}`)).ch, 'mail');
+    await prep((d) => d.doc(`b/${A}/sec_rules/au1`).set({ q: ['מתי פתוחים'], a: 'פתוחים {{hours}}', cond: '', on: true, src: 'learn', auto: true, facts: ['hours'], ch: 'all', cls: 'hours', t: 2 }));
+    let L = (await call('secRules', M1, { op: 'list' })).result.rules;
+    const o = L.find((r) => r.id === add.result.id), au = L.find((r) => r.id === 'au1');
+    assert.deepEqual([o.auto, o.autoOff, o.facts, o.ch, o.cls], [false, false, [], 'all', '']);
+    assert.deepEqual([au.auto, au.autoOff, au.facts, au.ch, au.cls], [true, false, ['hours'], 'all', 'hours']);
+    // עריכה בלי שינוי בתשובה (רק ניסוחים) – לא מכבה
+    await call('secRules', M1, { op: 'edit', id: 'au1', q: ['מתי פתוחים', 'שעות'], a: 'פתוחים {{hours}}' });
+    assert.equal((await get(`b/${A}/sec_rules/au1`)).autoOff, undefined);
+    await call('secRules', M1, { op: 'edit', id: 'au1', q: ['מתי פתוחים'], a: 'פתוחים {{hours}}!' });
+    const r = await get(`b/${A}/sec_rules/au1`);
+    assert.equal(r.autoOff, true); assert.equal(r.offWhy, 'edit'); assert.equal(r.auto, true); assert.deepEqual(r.facts, ['hours']);
+    await call('secRules', M1, { op: 'edit', id: add.result.id, q: ['שעות פתיחה'], a: 'פתוחים 9–17' });
+    assert.equal((await get(`b/${A}/sec_rules/${add.result.id}`)).autoOff, undefined, 'כלל רגיל – בלי שינוי');
+  });
+  it('צ\'אט: כלל עם נתון חי – ממולא מ"מידע על העסק"; נתון חסר – למודל (לא מוצג {{...}})', async () => {
+    await seed();
+    await call('secFacts', M1, { op: 'fixed', key: 'hours', text: 'א–ה 8–18' });
+    await prep((d) => d.doc(`b/${A}/sec_rules/au1`).set({ q: ['שעות פתיחה'], a: 'פתוחים {{hours}}', cond: '', on: true, auto: true, facts: ['hours'], t: 2 }));
+    const r = await call('secChat', M1, { text: 'שעות פתיחה' });
+    assert.equal(r.result.mode, 'bank'); assert.equal(r.result.reply, 'פתוחים א–ה 8–18');
+    await prep((d) => d.doc(`b/${A}/sec_rules/au2`).set({ q: ['כתובת'], a: 'אנחנו ב-{{addr}}', cond: '', on: true, t: 2 }));
+    GM.state.sec = () => ({ text: 'תשובה מהמודל' });
+    const r2 = await call('secChat', M1, { text: 'כתובת' });
+    assert.equal(r2.result.mode, 'ok'); assert.ok(!String(r2.result.reply).includes('{{'));
+  });
+});
+
 describe('יומן (7.1, 71, 72): אישי + של העסק; הצעה נוצרת רק באישור; שישי/שבת/חג לפי הגדרת המנהל', () => {
   it('הצעה מהשיחה = כרטיס; לא מופיעה ביומן עד אישור; אישור – נוצרת; מנהל אחר לא רואה ולא מאשר', async () => {
     await seed();

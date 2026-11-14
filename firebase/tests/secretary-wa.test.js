@@ -290,6 +290,35 @@ describe('פונה מבחוץ: כרטיס, טיוטה, סימונים (17, 5, 24
   });
 });
 
+describe('מענה אוטומטי למייל (14.11) – בווצאפ רק ch ותיקון הסוג: כלל ישן עובד כמו היום, כלל של מייל בלבד לא משמש, כלל עם נתון חי ממולא ולא נשלח לבד', () => {
+  beforeEach(() => seed());
+  const put = (p, d) => prep((db) => db.doc(p).set(d));
+  it('כלל ישן (בלי ch/cls): התשובה השמורה בלי AI, והסוג "אחר" (לא תמיד "שעות"); כלל ch:mail – לא כאן; נתון חי – ממולא; נתון חסר – למודל; אין שליחה לבד', async () => {
+    await put(`b/${A}/sec_rules/old1`, { q: ['איפה החנות'], a: 'רחוב הרצל 1', cond: '', on: true, src: 'mgr', t: 1 });
+    await hook(waBody(PN_A, [txt(CUST, 'wamid.R1', 'איפה החנות?')]));
+    let x = await processed(A, 'wamid.R1');
+    let d = await get(`b/${A}/sec_draft/${W.msgId('wamid.R1')}`);
+    assert.equal(d.src, 'bank'); assert.equal(d.text, 'רחוב הרצל 1'); assert.equal(x.cls, 'other', 'תיקון: לא "שעות" לכל כלל');
+    assert.equal(secReqs().length, 0);
+    await put(`b/${A}/sec_rules/m1`, { q: ['יש חניה'], a: 'כן – רק במייל', cond: '', on: true, ch: 'mail', t: 1 });
+    await hook(waBody(PN_A, [txt(CUST, 'wamid.R2', 'יש חניה?')]));
+    await processed(A, 'wamid.R2');
+    assert.notEqual((await get(`b/${A}/sec_draft/${W.msgId('wamid.R2')}`)).src, 'bank', 'כלל של מייל בלבד – לא בווצאפ');
+    assert.equal(secReqs().length, 1);
+    await put(`b/${A}/sec_rules/t1`, { q: ['שעות פתיחה'], a: 'אנחנו פתוחים {{hours}}', cond: '', on: true, ch: 'all', auto: true, facts: ['hours'], cls: 'hours', t: 1 });
+    await hook(waBody(PN_A, [txt(CUST, 'wamid.R3', 'שעות פתיחה?')]));
+    x = await processed(A, 'wamid.R3');
+    d = await get(`b/${A}/sec_draft/${W.msgId('wamid.R3')}`);
+    assert.equal(d.src, 'bank'); assert.equal(d.text, 'אנחנו פתוחים א׳–ה׳ 08:00–18:00'); assert.equal(x.cls, 'hours'); assert.equal(d.st, 'pend');
+    await put(`b/${A}/sec_rules/t2`, { q: ['כתובת הסניף'], a: 'אנחנו ב-{{addr}}', cond: '', on: true, ch: 'all', auto: true, facts: ['addr'], t: 1 });
+    await hook(waBody(PN_A, [txt(CUST, 'wamid.R4', 'כתובת הסניף?')]));
+    await processed(A, 'wamid.R4');
+    d = await get(`b/${A}/sec_draft/${W.msgId('wamid.R4')}`);
+    assert.notEqual(d.src, 'bank'); assert.ok(!d.text.includes('{{'), 'נתון חסר – לא נשלח טקסט עם מקום ריק');
+    assert.equal(WM.sends().length, 0, 'בווצאפ – אין שליחה לבד של כלל');
+  });
+});
+
 describe('secSend – שליחה רק בלחיצה של מנהל; ניסיונות עקיפה', () => {
   let did;
   beforeEach(async () => {
