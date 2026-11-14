@@ -126,7 +126,8 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal(await err(shelf(E1, photo({ slot: 'f2-a-1_t' }))), 'not-assigned');
     assert.equal(await err(shelf(E1, photo({ slot: 'f1-a-3_a' }))), 'bad-slot');
     assert.equal(await err(shelf(E2, photo({ slot: 'f2-a-1_a' }))), 'bad-slot', 'מדף גבוה – עליון/תחתון');
-    assert.equal(await err(shelf(E1, photo({ mode: 'verify' }))), 'bad-mode');
+    assert.equal(await err(shelf(E1, photo({ mode: 'verify' }))), 'bad-fix', 'שלב 10: verify בלי מזהה משימה');
+    assert.equal(await err(shelf(E1, photo({ mode: 'garbage' }))), 'bad-mode');
     assert.equal(await err(shelf(E1, photo({ img: jpeg(1200, 900, 3000).toString('base64').replace(/^\/9j/, 'iVBO') }))), 'bad-img');
     assert.equal(GM.state.requests.length, 0);
     assert.equal(await use(), null);

@@ -6,7 +6,8 @@
 //   mergeDel(old, map, who)    – כללי מחיקה (סל מחזור, ע5): שינוי del בפריט או במפה – מנהל בלבד; פריט שמור שחסר במפה החדשה
 //                                = מחיקה: מנהל – נשמר עם del:1 (לא נעלם), עובד – שגיאה. delAt/delBy נקבעים בשרת.
 //   finalCheck(map, old)       – אחרי המיזוג: סל מחזור (תקרה נפרדת, הישנים מוסרים), גבולות על פריטים חיים, חדר חי אחד לפחות,
-//                                גוף בחדר קיים, 2000 מקטעים, seq של השרת בלבד, מזהה גוף חדש בטווח oseq+1..oseq+400 (אחרת – מזהה חדש).
+//                                גוף בחדר קיים, 2000 מקטעים, seq של השרת בלבד, מזהה גוף חדש בטווח oseq+1..oseq+k, כש-k = מספר הגופים
+//                                החדשים בשמירה (אחרת – מזהה פנוי בטווח). שלב 10: seq עולה רק לפי גופים שנוספו בפועל.
 //   checkLock(old, baseV)      – נעילה מפני שמירה כפולה: baseV חייב להיות שווה ל-v הנוכחי (0 = מפה חדשה).
 //   verId / prune              – מזהה גרסה (000012) ומה למחוק כדי להשאיר 30 גרסאות אחרונות.
 //   branchIds / cleanBranch    – סניפים קיימים (org.branches, או main) וקלט s3SetBranch.
@@ -247,7 +248,7 @@ function trimBin(map) {
   return { map: out, purged };
 }
 // אחרי המיזוג: סל מחזור, מגבלות (על חיים), חדרים, גופים, מקטעים, מזהי גופים, seq, ent.
-// seq שהלקוח שלח – לא נקרא בכלל. השרת מחשב אותו מהמונה השמור ומהמזהים. גוף חדש עם מזהה מחוץ ל-oseq+1..oseq+400
+// seq שהלקוח שלח – לא נקרא בכלל. השרת מחשב אותו מהמונה השמור ומהמזהים. גוף חדש עם מזהה מחוץ ל-oseq+1..oseq+k (k = גופים חדשים)
 // לא חוסם את השמירה: השרת נותן לו מזהה חדש ומחזיר renamed {ישן: חדש}.
 // מחזיר { map, renamed, purged }. זורק fail('bad-map').
 function finalCheck(map0, old) {
@@ -266,15 +267,22 @@ function finalCheck(map0, old) {
   const oldFx = o0 && Array.isArray(o0.fx) ? o0.fx.filter((f) => isObj(f) && typeof f.id === 'string') : [];
   const oseq = Math.max(o0 && inR(o0.seq, 0, 9999) ? o0.seq : 0, 0, ...oldFx.map((f) => idNum(f.id)));
   const had = new Set(oldFx.map((f) => f.id));
-  const ok = (f) => !had.has(f.id) && idNum(f.id) > oseq && idNum(f.id) <= oseq + NEW_SPAN;
-  let top = Math.max(oseq, ...map.fx.filter(ok).map((f) => idNum(f.id)));
+  // שלב 10: הטווח המותר הוא בדיוק מספר הגופים החדשים בשמירה (k), ולא 400 קבוע – seq עולה רק לפי גופים שנוספו בפועל.
+  // גוף חדש מחוץ לטווח מקבל את המזהה הפנוי הקטן בטווח, כך ש-seq החדש = oseq + k תמיד.
+  const k = map.fx.filter((f) => !had.has(f.id)).length;
+  const span = Math.min(k, NEW_SPAN);
+  const ok = (f) => !had.has(f.id) && idNum(f.id) > oseq && idNum(f.id) <= oseq + span;
+  const used = new Set(map.fx.filter(ok).map((f) => idNum(f.id)));
+  let next = oseq;
   const renamed = {};
   const fx = map.fx.map((f) => {
     if (had.has(f.id) || ok(f)) return f;
-    top += 1;
-    if (f.id !== 'f' + top) renamed[f.id] = 'f' + top;
-    return Object.assign({}, f, { id: 'f' + top });
+    do next += 1; while (used.has(next));
+    used.add(next);
+    if (f.id !== 'f' + next) renamed[f.id] = 'f' + next;
+    return Object.assign({}, f, { id: 'f' + next });
   });
+  const top = Math.max(oseq, ...used);
   if (top > 9999) throw fail('bad-map', 'נגמרו המזהים במפה');
   const out = Object.assign({}, map, { fx, seq: top });
   // הכניסה הראשית חייבת להיות דלת קיימת ולא מחוקה; אחרת – לא נשמרת

@@ -121,11 +121,25 @@ describe('store3d-map: בדיקות אחרי המיזוג (finalCheck)', () => {
     const b = M.finalCheck(clean(MAP({ fx: [fx('f1'), fx('f2'), fx('f6')] })).map, old);
     assert.deepEqual([b.map.seq, b.renamed], [6, {}]);
     const c = M.finalCheck(clean(MAP({ fx: [fx('f1'), fx('f2'), fx('f405'), fx('f406'), fx('f9999')] })).map, old);
-    assert.deepEqual([c.renamed, c.map.seq, c.map.fx.map((f) => f.id)], [{ f9999: 'f407' }, 407, ['f1', 'f2', 'f405', 'f406', 'f407']], 'f405 בטווח (5+400); f406 מחוץ לטווח אבל מקבל את אותו מספר; f9999 – f407');
+    // שלב 10: הטווח = מספר הגופים החדשים (3) ולא 400 – seq עולה רק לפי גופים שנוספו בפועל
+    assert.deepEqual([c.renamed, c.map.seq, c.map.fx.map((f) => f.id)], [{ f405: 'f6', f406: 'f7', f9999: 'f8' }, 8, ['f1', 'f2', 'f6', 'f7', 'f8']], 'שלושה גופים חדשים – f6..f8');
+    const d = M.finalCheck(clean(MAP({ fx: [fx('f1'), fx('f2'), fx('f8'), fx('f7'), fx('f9999')] })).map, old);
+    assert.deepEqual([d.renamed, d.map.seq], [{ f9999: 'f6' }, 8], 'f7, f8 בטווח (5+3); f9999 – המזהה הפנוי f6');
     assert.equal(M.finalCheck(clean(MAP({ seq: 1 })).map, null).map.seq, 2, 'seq לפחות כמו המזהה הגבוה');
     assert.equal(M.finalCheck(clean(MAP({ ent: 'd7' })).map, null).map.ent, undefined);
     assert.equal(M.finalCheck(clean(MAP({ doors: [{ id: 'd1', x: 0, y: 500, w: 180, a: 0, k: 'ent', del: 1 }] })).map, null).map.ent, undefined, 'דלת מחוקה');
     assert.equal(M.finalCheck(clean(MAP()).map, null).map.ent, 'd1');
+  });
+  it('שלב 10: עובד עם s3m לא יכול להקפיץ את seq – מזהה f(oseq+400) עם גוף חדש אחד מקדם את seq ב-1 בלבד; 25 שמירות כאלה = +25', () => {
+    let old = SAVED();
+    for (let i = 0; i < 25; i++) {
+      const o = Number.isInteger(old.seq) ? old.seq : 2;
+      const L = old.fx.concat([fx('f' + (o + 400), { x: 100 + (i % 9) * 100, y: 100 + Math.floor(i / 9) * 100 })]);
+      const e = M.finalCheck(M.mergeDel(old, clean(MAP({ seq: 9999, fx: L })).map, EMP), old);
+      assert.equal(e.map.seq, o + 1);
+      old = Object.assign(e.map, { v: (old.v || 1) + 1 });
+    }
+    assert.equal(old.seq, 27);
   });
   it('התקפת seq: עובד עם s3m שולח seq:9999 ו-f9999 – נשמר עם מזהה תקין; אחריו מנהל מוסיף גוף בהצלחה', () => {
     const old = SAVED();

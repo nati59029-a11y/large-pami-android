@@ -58,6 +58,7 @@ const PUSH = {
   left: { title: 'סבב הועבר למחליף', body: 'עובד שהושבת – החלק שלו בסבבים עובר למחליף הקבוע.' },
   err: { title: 'בעיה בסבב סריקה', body: 'יש בעיה בכלל סבב (עובד לא פעיל או מפה חסרה). פתחו את הגדרות הסבבים.' },
   w80: { title: 'מכסת סריקת החנות: 80%', body: 'הסניף ניצל 80% ממכסת התמונות החודשית. אפשר לבקש ממנהל המערכת להגדיל אותה.' }, // שלב 8 (store3d-ai.js)
+  fix: { title: 'משימת תיקון במדף', body: 'יש לך משימת תיקון. פתחו את האפליקציה כדי לראות מה לתקן ולצלם אימות.' }, // שלב 10 (store3d-extra.js)
 };
 const BAD_TOKEN = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument'];
 async function fcmSend(tokens, msg) {
@@ -241,6 +242,8 @@ async function runBiz(opts) {
   for (const s of runs.docs) {
     try { inc(await runStep(ctx, s)); } catch (e) { logger.error('s3Rounds: run failed', { run: s.id, name: e && e.name, code: e && e.code }); inc('error'); }
   }
+  // שלב 10: ערעורים שהמנהל קיבל – ציון מחדש, הערה קבועה, משימת התיקון (store3d-extra.js)
+  try { const n = await require('./store3d-extra')._x.appealsBiz(ctx); if (n) out.appeals = n; } catch (e) { logger.error('s3Rounds: appeals failed', { code: e && e.code }); inc('error'); }
   return out;
 }
 
@@ -385,6 +388,7 @@ exports.s3Log = onCall(T.scoped(async (request) => {
   });
   if (!res.dup && (res.st === 'done' || res.st === 'closed')) {
     const ctx = { db, now, mgrs: null, sets: {} };
+    await require('./store3d-extra')._x.finishSafe(db, input.run, now, {}); // שלב 10: סיכום, ציון, חוסרים, משימות תיקון
     await notify(ctx, input.run + '_done', 'done', await managers(ctx), now);
   }
   return res;
@@ -402,7 +406,8 @@ exports.s3View = onCall(T.scoped(async (request) => {
     }
     const [mine, fixes, live] = await Promise.all([
       db.collection('srun').where('uids', 'array-contains', uid).where('st', 'in', C.LIVE).orderBy('dueAt').limit(50).get(),
-      db.collection('s3fix').where('u', '==', uid).where('st', 'in', ['open', 'sent']).orderBy('dueAt').limit(100).get(),
+      // שלב 10: גם 'rej' (צילום האימות הראה שהבעיה עדיין קיימת) – העובד צריך לתקן ולצלם שוב
+      db.collection('s3fix').where('u', '==', uid).where('st', 'in', ['open', 'sent', 'rej']).orderBy('dueAt').limit(100).get(),
       db.collection('srun').where('st', 'in', C.LIVE).limit(200).get(),
     ]);
     // מה אפשר לקחת: סבבים שאני לא בהם, שהכלל שלהם (או ההגדרות של הסניף) מתיר "כל עובד יכול לקחת"
@@ -452,4 +457,4 @@ function pickFix(f) {
 }
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { runAll, runBiz, ruleStep, runStep, openRun, prepRule, notify } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { runAll, runBiz, ruleStep, runStep, openRun, prepRule, notify, activeOf } });

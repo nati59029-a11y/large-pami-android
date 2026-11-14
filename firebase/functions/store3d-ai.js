@@ -3,7 +3,7 @@
 // ו-lib/prompts-mapdraft.js (שלב 6). אותו דפוס כמו scanDocument: הרשאה ← בדיקת קלט ← הזמנת מכסה בטרנזקציה ← Gemini ← החזרה בכשל.
 //   shelfCheck { qid, mode: 'run' | 'adhoc', run?, map?, slot, at, src, rt?, img, th, txt? }
 //     run   – רק העובד שהמקטע משויך לו בסבב open/late (או מנהל). adhoc – דיווח יזום של כל הצוות (map חובה), נספר במכסה,
-//             ונפתח לו סבב יזום ad_<qid> (k:'adhoc', st:'done'). verify (צילום אימות תיקון) – בשלב 10.
+//             ונפתח לו סבב יזום ad_<qid> (k:'adhoc', st:'done'). verify { fix } – צילום אימות של משימת תיקון (שלב 10, verifyCore).
 //     תמונה עם אדם (תשובת המודל st:'person') – הקובץ לא נשמר ב-Storage; נשמר רק ph עם person:true ותוצאה person.
 //     מחסן (w-) – noprice/pricepos/promoexp נמחקים בשרת גם אם המודל החזיר אותם. הערות קבועות (bay.notes), "מה אמור להיות" (bay.exp),
 //     סוג החנות, קטגוריות, הצילום הקודם ותאריך היום – נשלחים כהקשר (רק מהשרת, לא מהלקוח). pid – לפי bay.exp או שם זהה בקטלוג (prod).
@@ -33,6 +33,7 @@ const A = require('./lib/store3d-ai');
 const C = require('./lib/store3d-core');
 const PS = require('./lib/prompts-shelf');
 const PM = require('./lib/prompts-mapdraft');
+const X = require('./lib/store3d-extra');
 
 if (!getApps().length) initializeApp();
 
@@ -54,6 +55,10 @@ function toHttps(e) {
 }
 const mapLib = () => require('./store3d-map')._map;   // branchOk – בדיקת סניף משותפת (קיים, פעיל, מחסן)
 const notify = (...a) => require('./store3d')._core.notify(...a);
+const extra = () => require('./store3d-extra')._x;   // finishSafe – סיכום סבב, חוסרים, משימות תיקון (שלב 10)
+// שלב 10, לפי החלטת המשתמש "ענה = נספר": no-answer (תשובה 200 בלי תוכן – למשל חסימת בטיחות) = Gemini ענה, הבדיקה נספרת.
+// gemini-error (שגיאת 4xx אחרת) – נשאר מוחזר.
+const answered = (e) => !!(e && e.details && e.details.reason === 'no-answer');
 
 async function managers(db) { return (await db.collection('admins').get()).docs.map((d) => d.id).filter((u) => C.RE.uid.test(u)); }
 // הסניפים של עובד (staff.br). מנהל / בלי שיוך – null = כל הסניפים (כמו ב-store3d.js)
@@ -153,8 +158,8 @@ async function delFiles(bucket, paths) {
 // בדיקת קלט (בלי מסד). מחזיר את הערכים הנקיים או זורק.
 function shelfInput(input, now) {
   if (typeof input.qid !== 'string' || !C.RE.qid.test(input.qid)) throw bad('bad-qid', 'מזהה השליחה לא תקין');
-  if (input.mode === 'verify') throw bad('bad-mode', 'צילום אימות של תיקון עוד לא זמין בגרסה הזו', 'failed-precondition');
-  if (input.mode !== 'run' && input.mode !== 'adhoc') throw bad('bad-mode', 'סוג השליחה לא תקין');
+  if (input.mode !== 'run' && input.mode !== 'adhoc' && input.mode !== 'verify') throw bad('bad-mode', 'סוג השליחה לא תקין');
+  if (input.mode === 'verify' && (typeof input.fix !== 'string' || !X.RE_FIX.test(input.fix))) throw bad('bad-fix', 'מזהה משימת התיקון לא תקין');
   if (typeof input.slot !== 'string' || !A.RE_SLOT.test(input.slot)) throw bad('bad-slot', 'מקום הצילום לא תקין');
   if (!A.validAt(input.at, now)) throw bad('bad-time', 'השעה שנשלחה מהטלפון לא תקינה. בדקו את השעון בטלפון.');
   if (input.src !== 'photo' && input.src !== 'video') throw bad('bad-src', 'מקור התמונה לא תקין');
@@ -165,12 +170,21 @@ function shelfInput(input, now) {
   if (input.mode === 'adhoc' && (typeof input.map !== 'string' || !C.RE.map.test(input.map))) throw bad('bad-map-id', 'מזהה המפה לא תקין');
   let img, th;
   try { img = A.decodeJpeg(input.img, A.IMG, 'התמונה'); th = A.decodeJpeg(input.th, A.THUMB, 'התמונה המוקטנת'); } catch (e) { throw toHttps(e); }
-  return { qid: input.qid, mode: input.mode, slot: input.slot, at: input.at, src: input.src, rt, img, th };
+  return { qid: input.qid, mode: input.mode, slot: input.slot, at: input.at, src: input.src, rt, img, th, fix: input.fix };
+}
+// שלב 10: qid חוזר של בקשה שהצליחה – dup גם כשתקרת הצילומים (99) כבר מלאה (לפני הבדיקה too-many). null = אין תשובה שמורה
+async function savedRes(db, who, qid, q) {
+  const s = await db.doc('s3qid/' + qid).get();
+  if (!s.exists) return null;
+  const d = s.data();
+  if (d.k !== q.k || d.uid !== who.uid || (d.run || '') !== (q.run || '') || (d.slot || '') !== (q.slot || '')) throw bad('bad-qid', 'מזהה השליחה כבר שימש לפעולה אחרת');
+  return d.res ? Object.assign({}, d.res, { dup: true }) : null;
 }
 
 // who = { uid, mgr, bizId, brs }; deps = { base, key, bucket, send, userMax }
 async function shelfCore(db, who, input, now, deps) {
   const x = shelfInput(input, now);
+  if (x.mode === 'verify') return verifyCore(db, who, x, now, deps);
   const bucket = deps.bucket || getStorage().bucket();
   // ---- הרשאה ומקום הצילום (קריאות בלבד, לפני המכסה) ----
   let runId, run = null, mapId, owner;
@@ -217,9 +231,13 @@ async function shelfCore(db, who, input, now, deps) {
   const dir = runDir(who.bizId, br, runId);
   // תיקון סבב 1: תקרת הצילומים החוזרים נבדקת לפני המכסה ולפני Gemini
   let n0 = await nextN(bucket, dir, x.slot);
-  if (n0 > MAX_N) throw bad('too-many', 'יותר מדי צילומים חוזרים למקום הזה בסבב', 'resource-exhausted');
-  // ---- מכסה ----
   const K = x.mode === 'run' ? 'photo' : 'adhoc';
+  if (n0 > MAX_N) {
+    const dup = await savedRes(db, who, x.qid, { k: K, run: runId, slot: x.slot });
+    if (dup) return dup;
+    throw bad('too-many', 'יותר מדי צילומים חוזרים למקום הזה בסבב', 'resource-exhausted');
+  }
+  // ---- מכסה ----
   const adhoc = K === 'adhoc' && !who.mgr; // דיווח יזום של עובד: עד 20 ביום (החלטת המשתמש). מנהל – בלי המונה הזה
   const rv = await reserve(db, who, x.qid, { k: K, run: runId, slot: x.slot }, { br, cap: cfg.cap, k: 1, now, userMax: deps.userMax, adhocMax: adhoc ? (deps.adhocMax || A.ADHOC_DAY) : undefined });
   if (rv.dup) return Object.assign({}, rv.dup, { dup: true });
@@ -229,6 +247,7 @@ async function shelfCore(db, who, input, now, deps) {
   // ---- Gemini ----
   let resp;
   try { resp = await ask(deps, PS.buildShelfPrompt(ctx), [x.img.b64], TIMES.shelf); } catch (e) {
+    if (answered(e)) charged = true;
     return back(e instanceof HttpsError ? e : bad('internal', 'שגיאה בבדיקת התמונה', 'internal'));
   }
   charged = true;
@@ -243,6 +262,8 @@ async function shelfCore(db, who, input, now, deps) {
   }
   const cl = A.cleanShelf(resp.obj, { wh: kind === 'w', recN: ctx.recN, cats: S.cats, catMode: ctx.catMode, exp, catalog });
   const ai = Object.assign(cl.ai, { model: resp.model, at: now, ver: PS.VERSION });
+  const sc = X.scoreSlot(ai, S.w); // שלב 10: ציון המקום לפי המשקלות של הסניף ("לבדיקה" ואזהרות לא מורידים)
+  if (sc) ai.sc = sc;
   // ---- Storage: רק כשאין אדם בתמונה ----
   let p = '', tp = '';
   if (ai.st !== 'person') {
@@ -324,7 +345,112 @@ async function shelfCore(db, who, input, now, deps) {
   // צילום חוזר לאותו מקום דורס את המסמך; הקובץ הקודם נמחק (4.9)
   if (kept) return Object.assign(out, { kept: true });
   if (oldPh && p) await delFiles(bucket, [oldPh.p, oldPh.th].filter((q) => q && q !== p && q !== tp));
+  // שלב 10: סבב שהסתיים (או דיווח יזום) – סיכום וציון, רשימת חוסרים, משימות תיקון
+  if (fin || x.mode === 'adhoc') await extra().finishSafe(db, runId, now, { send: deps.send });
   if (fin) await notify({ db, send: deps.send }, runId + '_done', 'done', await managers(db), now);
+  return out;
+}
+
+// ---------------- צילום אימות של משימת תיקון (shelfCheck mode 'verify', שלב 10) ----------------
+// רק העובד שהמשימה שלו (s3fix.u), במשימה פתוחה / שנדחתה / שממתינה; slot חייב להיות של המשימה. נספר במכסה (חוזה 4.12).
+// תוצאה: ok (הבעיות המקוריות נעלמו) / rej (אחת מהן עדיין קיימת) / sent (ה-AI לא בטוח, או משימה ידנית – המנהל מכריע ב-s3Fix).
+// תמונה עם אדם או לא קריאה – לא נשמרת, והמשימה לא משתנה. הקבצים: b/{biz}/store3d/{br}/fix/{fixTaskId}_{n}.jpg (+_t).
+async function verifyCore(db, who, x, now, deps) {
+  const bucket = deps.bucket || getStorage().bucket();
+  const fref = db.doc('s3fix/' + x.fix);
+  const fs = await fref.get();
+  if (!fs.exists) throw bad('no-fix', 'משימת התיקון לא נמצאה', 'not-found');
+  const f = fs.data();
+  if (f.u !== who.uid) throw bad('not-assigned', 'משימת התיקון הזו לא שלך', 'permission-denied');
+  const OPEN = ['open', 'rej', 'sent'];
+  if (!OPEN.includes(f.st)) throw bad('fix-closed', 'משימת התיקון כבר נסגרה', 'failed-precondition');
+  if (f.slot !== x.slot) throw bad('bad-slot', 'מקום הצילום לא שייך למשימה', 'invalid-argument');
+  const mapId = f.map, br = String(mapId || '').slice(2), kind = String(mapId || '').charAt(0);
+  if (!C.RE.map.test(mapId || '')) throw bad('no-map', 'המפה של המשימה לא תקינה', 'failed-precondition');
+  const ms = await db.doc('smap/' + mapId).get();
+  const map = ms.exists ? ms.data() : null;
+  if (!map || map.del === 1) throw bad('no-map', 'המפה לא נמצאה (או שנמחקה)', 'failed-precondition');
+  let sl;
+  try { sl = A.checkSlot(x.slot, map); } catch (e) { throw toHttps(e); }
+  const cfg = await mapLib().branchOk(db, who.bizId, br, kind);
+  const [set, bayDoc, orig] = await Promise.all([db.doc('s3set/' + br).get(), db.doc(`smap/${mapId}/bay/${sl.bay}`).get(),
+    C.isRunId(f.run) ? db.doc(`srun/${f.run}/ai/${x.slot}`).get() : null]);
+  const S = set.exists ? set.data() : {}, B = bayDoc.exists ? bayDoc.data() : {};
+  const O = orig && orig.exists ? orig.data() : null;
+  const origKinds = O && Array.isArray(f.iks) ? f.iks.map((i) => O.iss && O.iss[i] && O.iss[i].k).filter(Boolean) : [];
+  const exp = Array.isArray(B.exp) ? B.exp : [];
+  const ctx = {
+    kind, storeType: S.stype, today: scan.israelDay(new Date(now)), recN: 0, cats: S.cats, catMode: S.catMode || 'mix',
+    notes: (Array.isArray(B.notes) ? B.notes : []).map((n) => n && n.t), expected: exp.map((e) => e && e.n),
+    prev: O ? { date: Number.isInteger(O.at) ? scan.israelDay(new Date(O.at)) : '', cat: O.cat || '', prods: (O.prods || []).map((p) => p && p.n) } : null,
+    hi: sl.lv === 't' ? 'top' : sl.lv === 'b' ? 'bottom' : null, cctv: false,
+  };
+  if (!deps.key) throw bad('no-key', 'אין מפתח לזיהוי חכם בשרת', 'failed-precondition');
+  const dir = `b/${who.bizId}/store3d/${br}/fix/`;
+  const q = { k: 'verify', slot: x.slot };
+  if (f.run) q.run = f.run;
+  let n0 = await nextN(bucket, dir, x.fix);
+  if (n0 > MAX_N) {
+    const dup = await savedRes(db, who, x.qid, q);
+    if (dup) return dup;
+    throw bad('too-many', 'יותר מדי צילומי אימות למשימה הזו', 'resource-exhausted');
+  }
+  const rv = await reserve(db, who, x.qid, q, { br, cap: cfg.cap, k: 1, now, userMax: deps.userMax });
+  if (rv.dup) return Object.assign({}, rv.dup, { dup: true });
+  await warn80(db, br, rv.qs, now, deps.send);
+  let charged = false;
+  const back = async (e) => { await release(db, who, x.qid, { br, k: 1, qs: rv.qs, charged, now: Date.now() }); throw e; };
+  let resp;
+  try { resp = await ask(deps, PS.buildShelfPrompt(ctx), [x.img.b64], TIMES.shelf); } catch (e) {
+    if (answered(e)) charged = true;
+    return back(e instanceof HttpsError ? e : bad('internal', 'שגיאה בבדיקת התמונה', 'internal'));
+  }
+  charged = true;
+  if (A.shelfBroken(resp.obj)) return back(bad('bad-answer', 'התשובה מהבדיקה החכמה לא נקראה. התמונה נשארת בטלפון ותישלח שוב.', 'internal'));
+  const cl = A.cleanShelf(resp.obj, { wh: kind === 'w', recN: 0, cats: S.cats, catMode: ctx.catMode, exp, catalog: new Map() });
+  const ai = cl.ai;
+  const fixSt = X.verifyResult(f, origKinds, ai); // null = תמונה לא שמישה (אדם / לא קריאה) – לא נשמרת
+  let p = '', tp = '';
+  const saved = [];
+  if (fixSt) {
+    try {
+      for (let i = 0; i < SAVE_TRIES && !p; i++, n0++) {
+        if (n0 > MAX_N) break;
+        const fp = `${dir}${x.fix}_${n0}.jpg`, ft = `${dir}${x.fix}_${n0}_t.jpg`;
+        if (!(await saveJpeg(bucket, fp, x.img.buf))) continue;
+        saved.push(fp);
+        if (!(await saveJpeg(bucket, ft, x.th.buf))) { await delFiles(bucket, [fp]); saved.pop(); continue; }
+        saved.push(ft);
+        p = fp; tp = ft;
+      }
+    } catch (e) {
+      logger.warn('shelfCheck verify: save failed', { code: e && e.code });
+      await delFiles(bucket, saved);
+      return back(bad('save-failed', 'שמירת התמונה נכשלה. נסו שוב.', 'unavailable'));
+    }
+    if (!p) { await delFiles(bucket, saved); return back(bad('busy', 'נסו שוב בעוד רגע', 'aborted')); }
+  }
+  const out = { st: ai.st, iss: ai.iss.map((i) => { const o = { k: i.k, sev: i.sev, t: i.t }; if (i.box) o.box = i.box; return o; }), usage: rv.qs.usage, fix: x.fix, fixSt: fixSt || f.st };
+  if (cl.t) out.t = cl.t;
+  const res = { st: ai.st, iss: ai.iss.map((i) => ({ k: i.k, sev: i.sev })), usage: rv.qs.usage, fix: x.fix, fixSt: fixSt || f.st };
+  let old = null;
+  try {
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(fref);
+      if (!s.exists || !OPEN.includes(s.get('st')) || s.get('u') !== who.uid) throw bad('fix-closed', 'משימת התיקון כבר נסגרה', 'failed-precondition');
+      if (fixSt) {
+        old = { vp: s.get('vp'), vth: s.get('vth') };
+        const patch = { vp: p, vth: tp, vst: ai.st, st: fixSt };
+        if (fixSt === 'ok' || fixSt === 'rej') patch.doneAt = now;
+        tx.update(fref, patch);
+      }
+      tx.update(db.doc('s3qid/' + x.qid), { res });
+    });
+  } catch (e) {
+    await delFiles(bucket, saved);
+    return back(e instanceof HttpsError ? e : (logger.error('shelfCheck verify: write failed', { code: e && e.code }), bad('save-failed', 'שמירת התוצאה נכשלה. נסו שוב.', 'unavailable')));
+  }
+  if (old) await delFiles(bucket, [old.vp, old.vth].filter((v) => typeof v === 'string' && v && v !== p && v !== tp));
   return out;
 }
 
@@ -359,6 +485,7 @@ async function draftCore(db, who, input, now, deps) {
   };
   let resp;
   try { resp = await ask(deps, PM.buildMapDraftPrompt({ kind, storeType: S.stype, cctv: input.cctv === true, n }), imgs.map((d) => d.b64), TIMES.draft); } catch (e) {
+    if (answered(e)) charged = true;
     return back(e instanceof HttpsError ? e : bad('internal', 'שגיאה ביצירת הטיוטה', 'internal'));
   }
   charged = true;

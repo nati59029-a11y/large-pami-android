@@ -154,6 +154,9 @@ function start() {
         if ((tc && tc.thinkingBudget === 0) || noSig) return send(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: noSig ? 'missing thought_signature' : 'thinking budget 0 not supported' } }); }
       if (state.mode === 'badkey') return send(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
       if (state.mode === 'quota') return send(429, { error: { message: 'quota' } });
+      // שלב 10: תשובה 200 בלי תוכן (חסימת בטיחות) → no-answer; שגיאת 400 שאינה מפתח → gemini-error
+      if (state.mode === 'noanswer') return send(200, { candidates: [], promptFeedback: { blockReason: 'SAFETY' } });
+      if (state.mode === 'badreq') return send(400, { error: { message: 'bad request' } });
       if (state.mode === 'overloaded') return send(503, { error: { message: 'overloaded' } });
       return send(200, rawAnswer(kind, body));
     });
