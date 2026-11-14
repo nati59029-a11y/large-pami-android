@@ -13,7 +13,7 @@ const A = 'biz-s3', OFF = 'biz-s3-off', O = 'biz-s3-oth';
 const SUPER = 's3_super', MGR = 's3_mgr', S3M = 's3_draw', RESP = 's3_resp', FOR = 's3_foreign', DIS = 's3_dis', OLD = 's3_old';
 const OMGR = 's3_omgr', OEMP = 's3_oemp', FMGR = 's3_fmgr';
 // בשורש (לארג' פעמי במצב legacy)
-const RMGR = 's3_rmgr', RS3M = 's3_rdraw', RRESP = 's3_rresp', RFOR = 's3_rfor';
+const RMGR = 's3_rmgr', RS3M = 's3_rdraw', RRESP = 's3_rresp', RFOR = 's3_rfor', RDIS = 's3_rdis';
 const NONE = { incR: false, incW: false, expR: false, expW: false, sup: false, sal: false, rep: false, ord: false, trf: false, bal: false, ordP: false, prc: false, s3m: false };
 const DRAW = Object.assign({}, NONE, { s3m: true });
 const RUN = 'rule0001_20261116', RID = 'rule0001', SLOT = 'f1-a-1_a', MAP = 's-main';
@@ -72,7 +72,7 @@ async function seed(rootFeature) {
     b.set(d.doc(`b/${O}/staff/${OEMP}`), { name: 'עובד אחר', role: 'employee', active: true, perms: DRAW });
     for (const [u, z, role, active] of [[MGR, A, 'admin', true], [S3M, A, 'worker', true], [RESP, A, 'worker', true], [FOR, A, 'worker', true], [DIS, A, 'worker', false], [OLD, A, 'worker', true],
       [FMGR, OFF, 'admin', true], [OMGR, O, 'admin', true], [OEMP, O, 'worker', true],
-      [RMGR, 'largpeami', 'admin', true], [RS3M, 'largpeami', 'worker', true], [RRESP, 'largpeami', 'worker', true], [RFOR, 'largpeami', 'worker', true]]) {
+      [RMGR, 'largpeami', 'admin', true], [RS3M, 'largpeami', 'worker', true], [RRESP, 'largpeami', 'worker', true], [RFOR, 'largpeami', 'worker', true], [RDIS, 'largpeami', 'worker', false]]) {
       b.set(d.doc('users/' + u), { bizId: z, role, active, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
     }
     // שורש: לארג' פעמי במצב legacy
@@ -82,6 +82,7 @@ async function seed(rootFeature) {
     b.set(d.doc('staff/' + RS3M), { name: 'משרטט', role: 'employee', active: true, perms: DRAW });
     b.set(d.doc('staff/' + RRESP), { name: 'אחראי', role: 'employee', active: true });
     b.set(d.doc('staff/' + RFOR), { name: 'זר', role: 'employee', active: true });
+    b.set(d.doc('staff/' + RDIS), { name: 'מושבת', role: 'employee', active: false, perms: DRAW });
     seedS3(b, d, `b/${A}/`, RESP, FOR);
     seedS3(b, d, `b/${OFF}/`, RESP, FOR);
     seedS3(b, d, '', RRESP, RFOR);
@@ -157,6 +158,15 @@ describe('store3d – חוקי Firestore בתוך עסק: מטריצת קריא�
     await assertSucceeds(fs(MGR).collection(P + 'srun').get());
     await assertSucceeds(fs(RESP).collection(P + `srun/${RUN}/ph`).get());
     await assertFails(fs(RESP).collection(P + `srun/${RUN}/ai`).get());
+  });
+  it('s3perf – שליפת רשימה (חוזה 4.16): עובד על עצמו – מותר; על עובד אחר – נחסם; מנהל ומנהל־על – מותר; מושבת ועסק אחר – נחסמים', async () => {
+    await assertSucceeds(fs(RESP).collection(P + `s3perf/${RESP}/m`).get());
+    await assertFails(fs(RESP).collection(P + `s3perf/${FOR}/m`).get());
+    await assertFails(fs(S3M).collection(P + `s3perf/${RESP}/m`).get());
+    for (const u of [MGR, SUPER]) { await assertSucceeds(fs(u).collection(P + `s3perf/${RESP}/m`).get(), u); await assertSucceeds(fs(u).collection(P + `s3perf/${FOR}/m`).get(), u); }
+    for (const u of [DIS, OMGR, OEMP, null]) await assertFails(fs(u).collection(P + `s3perf/${RESP}/m`).get(), String(u));
+    await assertFails(fs(RESP).doc(P + `s3perf/${RESP}/m/bad`).get(), 'מזהה חודש לא תקין');
+    await assertFails(fs(RESP).collectionGroup('m').get(), 'collectionGroup');
   });
   it('תוספת כבויה: אף אחד בעסק (גם המנהל) לא קורא ולא כותב', async () => {
     for (const p of ['s3set/main', 'smap/' + MAP, 'sround/' + RID, 's3sum/' + MAP, 'srun/' + RUN]) await assertFails(fs(FMGR).doc(`b/${OFF}/${p}`).get());
@@ -245,7 +255,13 @@ describe('store3d – חוקי Firestore בתוך עסק: כתיבה', () => {
     await assertFails(r.update({ del: true, delAt: now(), delBy: MGR, upd: now(), by: MGR }));
     await assertSucceeds(r.update({ del: 1, delAt: now(), delBy: MGR, upd: now(), by: MGR }));
     await assertFails(r.update({ delAt: now() + 1000, upd: now(), by: MGR }), 'שינוי delAt בלי שינוי del');
+    // כלל בסל המחזור: אין עריכה ואין "נגיעה" – רק שחזור
+    await assertFails(fs(MGR).doc(P + 'sround/delrule1').update({ name: 'עריכה בסל', upd: now(), by: MGR }), 'עריכה בסל');
+    await assertFails(fs(MGR).doc(P + 'sround/delrule1').update({ on: true, upd: now(), by: MGR }), 'הפעלה בסל');
+    await assertFails(fs(MGR).doc(P + 'sround/delrule1').update({ upd: now(), by: MGR }), 'נגיעה בסל');
+    await assertFails(fs(MGR).doc(P + 'sround/delrule1').update({ del: 0, name: 'שחזור+עריכה', upd: now(), by: MGR }), 'שחזור עם עריכה');
     await assertSucceeds(fs(MGR).doc(P + 'sround/delrule1').update({ del: 0, upd: now(), by: MGR }));
+    await assertSucceeds(fs(MGR).doc(P + 'sround/delrule1').update({ name: 'אחרי שחזור', upd: now(), by: MGR }), 'עריכה אחרי שחזור');
     await assertFails(fs(MGR).doc(P + 'sround/oldrule1').update({ del: 0, upd: now(), by: MGR }), 'אחרי 30 יום');
     await assertFails(r.delete());
   });
@@ -285,11 +301,22 @@ describe('store3d – חוקי Firestore בתוך עסק: כתיבה', () => {
     await assertFails(fs(MGR).doc(p).update({ st: 'ok', drop: Array.from({ length: 201 }, (_, i) => i), okBy: MGR, okAt: now() }));
     await assertFails(fs(RESP).doc(p).update({ st: 'ok', okBy: RESP, okAt: now() }));
     await assertSucceeds(fs(MGR).doc(p).update({ st: 'ok', drop: [0], okBy: MGR, okAt: now() }));
+    await assertFails(fs(MGR).doc(p).update({ st: 'no', okBy: MGR, okAt: now() }), 'שינוי החלטה שכבר ניתנה');
+    await assertFails(fs(MGR).doc(p).update({ drop: [0, 1], okBy: MGR, okAt: now() }), 'שינוי השמטות אחרי אישור');
     await assertFails(fs(MGR).doc(P + 's3short/rule0001_20261201').set({ items: [], st: 'draft' }));
   });
 
   it('עובד מושבת עם s3m – נחסם בכל (קריאה וכתיבה)', async () => {
     for (const p of ['smap/' + MAP, 'smap/' + MAP + '/ver/000001', 's3sum/' + MAP, 's3draft/draft-0000000000000001']) await assertFails(fs(DIS).doc(P + p).get());
+    // כתיבה: ערעור (גם כשהוא ברשימת uids של הסבב), הגדרות, מקטע, כלל סבב, אישור חוסרים, המפה
+    await prep((d) => d.doc(P + 'srun/' + RUN).update({ uids: [RESP, DIS] }));
+    await assertFails(fs(DIS).doc(P + 's3appeal/' + AID0).set(okAppeal(DIS)), 'ערעור');
+    await assertFails(fs(DIS).doc(P + 's3set/main').set(okSet(DIS)), 's3set');
+    await assertFails(fs(DIS).doc(P + 'smap/' + MAP + '/bay/f1-a-2').set({ cat: 'x', upd: now(), by: DIS }), 'bay');
+    await assertFails(fs(DIS).doc(P + 'sround/disrule1').set(okRound(DIS)), 'sround');
+    await assertFails(fs(DIS).doc(P + 's3short/' + RUN).update({ st: 'ok', okBy: DIS, okAt: now() }), 's3short');
+    await assertFails(fs(DIS).doc(P + 'smap/' + MAP).update({ name: 'x', upd: now(), by: DIS }), 'smap');
+    await assertFails(fs(DIS).collection(P + `s3perf/${DIS}/m`).get(), 's3perf list');
   });
 });
 
@@ -299,22 +326,32 @@ describe('store3d – מסלול השורש (לארג\' פעמי במצב legacy
     for (const u of [RMGR, RS3M, RRESP]) for (const p of ['s3set/main', 'smap/' + MAP, 's3sum/' + MAP]) await assertFails(fs(u).doc(p).get(), u + ' ' + p);
     await assertFails(fs(RMGR).doc('s3set/main').set(okSet(RMGR)));
   });
-  it('התוספת מופעלת: אותה מטריצה עם התפקידים בשורש (מנהל, s3m, אחראי, זר, עסק אחר)', async () => {
+  it('התוספת מופעלת: אותה מטריצה (19 אוספים) עם התפקידים בשורש (מנהל, s3m, אחראי, זר, מושבת, עסק אחר)', async () => {
     await seed(true);
+    const RSTAFF = [RMGR, RS3M, RRESP, RFOR, SUPER];
     const rows = [
-      ['s3set/main', [RMGR, RS3M, RRESP, RFOR, SUPER]],
-      ['smap/' + MAP, [RMGR, RS3M, RRESP, RFOR, SUPER]],
+      ['s3br/main', RSTAFF],
+      ['s3set/main', RSTAFF],
+      ['smap/' + MAP, RSTAFF],
       ['smap/' + MAP + '/ver/000001', [RMGR, RS3M, SUPER]],
+      ['smap/' + MAP + '/bay/f1-a-1', RSTAFF],
+      ['s3draft/draft-0000000000000001', [RMGR, RS3M, RRESP, SUPER]],
       ['sround/' + RID, [RMGR, RRESP, SUPER]],
       ['srun/' + RUN, [RMGR, SUPER]],
-      ['srun/' + RUN + '/ph/' + SLOT, [RMGR, RS3M, RRESP, RFOR, SUPER]],
+      ['srun/' + RUN + '/ph/' + SLOT, RSTAFF],
       ['srun/' + RUN + '/ai/' + SLOT, [RMGR, SUPER]],
+      ['s3sum/' + MAP, RSTAFF],
       ['s3fix/' + RUN + '__' + SLOT, [RMGR, RRESP, SUPER]],
+      ['s3appeal/' + RUN + '__' + SLOT + '__1', [RMGR, RRESP, SUPER]],
+      ['s3short/' + RUN, [RMGR, SUPER]],
+      ['s3use/b_main', [RMGR, SUPER]],
       ['s3perf/' + RRESP + '/m/2026-11', [RMGR, RRESP, SUPER]],
+      ['s3perf/' + RFOR + '/m/2026-11', [RMGR, RFOR, SUPER]],
       ['s3qid/' + 'q'.repeat(16), []],
+      ['s3ntf/' + RUN + '_new', []],
     ];
     for (const [p, ok] of rows) {
-      for (const u of [RMGR, RS3M, RRESP, RFOR, SUPER, MGR, OMGR, null]) {
+      for (const u of [RMGR, RS3M, RRESP, RFOR, RDIS, SUPER, MGR, OMGR, null]) {
         const r = fs(u).doc(p).get();
         if (ok.includes(u)) await assertSucceeds(r, u + ' ' + p); else await assertFails(r, u + ' ' + p);
       }
@@ -329,6 +366,14 @@ describe('store3d – מסלול השורש (לארג\' פעמי במצב legacy
     await assertFails(fs(RFOR).doc(`s3appeal/${RUN}__${SLOT}__2`).set(okAppeal(RFOR, { ik: '2' })));
     await assertSucceeds(fs(RMGR).doc('s3appeal/' + AID0).update({ st: 'rej', decBy: RMGR, decAt: now() }));
     for (const p of ['s3br/main', 'srun/' + RUN, 's3sum/' + MAP, 's3use/b_main']) await assertFails(fs(RMGR).doc(p).set({ x: 1 }), p);
+    // s3perf – שליפת רשימה בשורש
+    await assertSucceeds(fs(RRESP).collection(`s3perf/${RRESP}/m`).get());
+    await assertFails(fs(RRESP).collection(`s3perf/${RFOR}/m`).get());
+    for (const u of [RMGR, SUPER]) await assertSucceeds(fs(u).collection(`s3perf/${RRESP}/m`).get(), u);
+    for (const u of [RDIS, MGR, null]) await assertFails(fs(u).collection(`s3perf/${RRESP}/m`).get(), String(u));
+    // עובד מושבת בשורש – לא כותב
+    await assertFails(fs(RDIS).doc(`s3appeal/${RUN}__${SLOT}__3`).set(okAppeal(RDIS, { ik: '3' })));
+    await assertFails(fs(RDIS).doc('s3set/main').set(okSet(RDIS)));
   });
 });
 
