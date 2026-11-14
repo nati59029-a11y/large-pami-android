@@ -1068,8 +1068,9 @@ async function tryAuto(db, id, x, r, rep0, now) {
   // החלטה (א): כלל בלי נתון חי – מותר (הטקסט הקבוע של הכלל). כלל עם נתון חי – הנתון חייב להיות קיים, ציבורי ובתוקף; אחרת לא שולחים
   const filled = K.tplKeys(rule.a).length ? K.fillTpl(rule.a, r.fm) : String(rule.a).trim();
   if (!filled) no.push('src');
-  // החלטה (ד): שם בפתיחה של התבנית חייב להתאים לשם הפונה; לא ידוע / לא מתאים – פנייה כללית
-  const gr = filled ? G.greetFix(filled, x.name) : { text: null, gen: false };
+  // החלטה (ד): שם/ביטוי בפתיחה שלא תואם לפונה – לא שולחים לבד (הטקסט לא משתנה)
+  const gr = filled ? G.greetFix(filled, x.name) : { text: null, hold: false };
+  if (gr.hold) no.push('greet');
   const text = gr.text;
   const bx = mailCfgOf(ms).boxes[x.box];
   if (!bx || bx.st !== 'ok') no.push('box');
@@ -1102,7 +1103,7 @@ async function tryAuto(db, id, x, r, rep0, now) {
     return { fail: true, no: ['fail'] };
   }
   const b = db.batch();
-  b.update(dRef, Object.assign({ st: 'sent', sentAt: now, sentBy: 'auto', text, dt: r.text, src: 'rule', rule: rule.id, am: true, gmid: String((res && res.id) || '').slice(0, 64), an: FieldValue.delete() }, gr.gen ? { greet: 'gen' } : {}));
+  b.update(dRef, Object.assign({ st: 'sent', sentAt: now, sentBy: 'auto', text, dt: r.text, src: 'rule', rule: rule.id, am: true, gmid: String((res && res.id) || '').slice(0, 64), an: FieldValue.delete() }));
   b.set(iRef, { st: 'replied' }, { merge: true });
   b.update(db.doc('sec_rules/' + rule.id), { an: FieldValue.increment(1), lastAt: now });
   b.set(db.collection('sec_log').doc(), glog('', 'auto', 'mailAuto', { tgt: id, note: rule.id + ':' + x.box }));

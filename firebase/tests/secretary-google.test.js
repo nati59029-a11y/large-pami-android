@@ -1883,16 +1883,19 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     assert.ok(t, 'משימה'); assert.match(t.txt, /יש קובץ מצורף/);
   });
 
-  it('החלטה (ד): שם בתבנית שלא מתאים לפונה / שם לא ידוע – פנייה כללית; שם מתאים – נשאר', async () => {
+  it('החלטה (ד): שם בתבנית שלא מתאים לפונה / שם לא ידוע – לא נשלח לבד והטקסט לא משתנה; שם מתאים – נשלח', async () => {
     await addRule('r1', { a: 'שלום יוסי, אנחנו פתוחים {{hours}}. תודה!' });
     await setRep({ auto: true });
-    assert.equal((await work(await mail({ subject: 'שעות פתיחה', from: 'Dana <dana@cust.example>' }))).aw, 'auto');
-    assert.equal(body(0), 'שלום, אנחנו פתוחים ' + HOURS + '. תודה!');
-    assert.equal((await work(await mail({ subject: 'שעות פתיחה', from: 'nobody@cust.example' }))).aw, 'auto');
-    assert.equal(body(1), 'שלום, אנחנו פתוחים ' + HOURS + '. תודה!', 'שם לא ידוע');
+    const d1 = await mail({ subject: 'שעות פתיחה', from: 'Dana <dana@cust.example>' });
+    const r1 = await work(d1);
+    assert.equal(r1.aw, 'draft'); assert.ok(r1.no.includes('greet'), JSON.stringify(r1));
+    assert.ok((await call('secMail', M1, { op: 'get', id: d1 })).r.draft.anL.some((s) => /לא תואם לפונה/.test(s)));
+    const r2 = await work(await mail({ subject: 'שעות פתיחה', from: 'nobody@cust.example' }));
+    assert.equal(r2.aw, 'draft'); assert.ok(r2.no.includes('greet'), 'שם לא ידוע');
+    assert.equal(GO.state.sent.length, 0, 'לא נשלח לבד');
     const k = await mail({ subject: 'שעות פתיחה', from: 'יוסי כהן <yk@cust.example>' });
     assert.equal((await work(k)).aw, 'auto');
-    assert.equal(body(2), 'שלום יוסי, אנחנו פתוחים ' + HOURS + '. תודה!');
-    assert.equal((await draftOf(k)).greet, undefined);
+    assert.equal(body(0), 'שלום יוסי, אנחנו פתוחים ' + HOURS + '. תודה!');
   });
+
 });

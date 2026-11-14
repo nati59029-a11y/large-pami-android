@@ -157,16 +157,19 @@ describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית ע
       assert.ok(/[א-ת]/.test(G.AUTO_WHY[k] || ''), 'סיבה בעברית: ' + k);
     for (const c of W.NEVER_AUTO) { const o = base(); o.r.cls = c; o.rule.cls = c; assert.ok(G.autoBlock(o).includes('risk'), c); }
   });
-  it('greetFix (החלטה ד): שם בפתיחה חייב להתאים לשם הפונה; לא ידוע / לא מתאים – פנייה כללית', () => {
-    assert.deepEqual(G.greetFix('שלום יוסי, אנחנו פתוחים', 'יוסי כהן'), { text: 'שלום יוסי, אנחנו פתוחים', gen: false });
-    assert.deepEqual(G.greetFix('שלום יוסי, אנחנו פתוחים', 'דנה לוי'), { text: 'שלום, אנחנו פתוחים', gen: true });
-    assert.deepEqual(G.greetFix('שלום יוסי, אנחנו פתוחים', ''), { text: 'שלום, אנחנו פתוחים', gen: true }, 'שם לא ידוע');
-    assert.deepEqual(G.greetFix('היי יוסי כהן!\nתודה', 'Yossi Cohen'), { text: 'שלום!\nתודה', gen: true });
-    for (const s of ['שלום וברכה לך, אנחנו פתוחים', 'שלום לכולם ולכולן, אנחנו פתוחים', 'Hello and welcome, we are open']) assert.deepEqual(G.greetFix(s, ''), { text: s, gen: false }, 'ביטוי רגיל לא נחתך: ' + s);
-    assert.deepEqual(G.greetFix('Hi Dana,\nWe are open', 'dana smith'), { text: 'Hi Dana,\nWe are open', gen: false });
-    assert.deepEqual(G.greetFix('Dear John, ok', 'Dana'), { text: 'Hello, ok', gen: true });
-    for (const t of ['שלום, אנחנו פתוחים', 'שלום רב, אנחנו פתוחים', 'שלום לכולם!', 'אנחנו פתוחים {{hours}}', 'Hello there, we are open', 'שלום אנחנו פתוחים א׳–ה׳ 8–18. תודה!'])
-      assert.equal(G.greetFix(t, '').gen, false, t);
+  it('greetFix (החלטה ד): הטקסט לא משתנה; שם/ביטוי לא מוכר בפתיחה → hold (טיוטה לאישור)', () => {
+    const H = (t, n) => G.greetFix(t, n);
+    assert.deepEqual(H('שלום יוסי, אנחנו פתוחים', 'יוסי כהן'), { text: 'שלום יוסי, אנחנו פתוחים', hold: false });
+    assert.deepEqual(H('שלום יוסי, אנחנו פתוחים', 'דנה לוי'), { text: 'שלום יוסי, אנחנו פתוחים', hold: true });
+    assert.deepEqual(H('שלום יוסי, אנחנו פתוחים', ''), { text: 'שלום יוסי, אנחנו פתוחים', hold: true }, 'שם לא ידוע');
+    assert.equal(H('Hi Dana,\nWe are open', 'dana smith').hold, false);
+    assert.equal(H('Dear John, ok', 'Dana').hold, true);
+    for (const t of ['שלום, אנחנו פתוחים', 'שלום רב, אנחנו פתוחים', 'שלום לכולם!', 'אנחנו פתוחים {{hours}}', 'Hello there, we are open', 'שלום אנחנו פתוחים א׳–ה׳ 8–18. תודה!',
+      'שלום וברכה לך, אנחנו פתוחים', 'שלום לכולם ולכולן, אנחנו פתוחים', 'Hello and welcome, we are open'])
+      assert.deepEqual(H(t, ''), { text: t, hold: false }, t);
+    for (const t of ['שלום וברוכים הבאים, x', 'שלום וקבלת שבת, x', 'שלום וסליחה, x', 'שלום ורב תודות, x', 'Hi thanks, x', 'Hello please, x', 'Hello world, x', 'שלום ורד, x'])
+      assert.deepEqual(H(t, ''), { text: t, hold: true }, 'לא נחתך, ולא נשלח לבד: ' + t);
+    assert.equal(H('שלום ורד, x', 'ורד לוי').hold, false);
   });
   it('fileList (החלטה ג): שמות וסוגי קבצים, מנוקים ומוגבלים', () => {
     assert.deepEqual(G.fileList(['inv.pdf', '<b>x</b>.DOCX', 'noext', 5, '']), ['inv.pdf (סוג: PDF)', 'bx/b.DOCX (סוג: DOCX)', 'noext (סוג: לא ידוע)']);

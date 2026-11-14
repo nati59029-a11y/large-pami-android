@@ -254,7 +254,7 @@ const AUTO_WHY = Object.freeze({
   stock: 'התשובה תלויה במלאי', old: 'מייל ישן', replied: 'כבר נענה', auth: 'לא ניתן לאמת שהמייל באמת נשלח מהכתובת שמופיעה בו',
   rto: 'כתובת "השב אל" שונה מהכתובת של השולח', src: 'חסר נתון חי ב"מידע על העסק"', box: 'תיבת המייל לא מחוברת', to: 'אין כתובת תקינה לתשובה',
   thread: 'כבר נשלחה תשובה בשרשור הזה', loop: 'כבר נשלחה תשובה אוטומטית לשולח הזה בעשר הדקות האחרונות', day: 'הגענו ל-100 תשובות אוטומטיות היום',
-  dup: 'כבר טופל', out: 'הגענו למכסת המיילים היוצאים היום', fail: 'השליחה נכשלה',
+  dup: 'כבר טופל', greet: 'בפתיחת התשובה מופיע שם או ביטוי שלא תואם לפונה – כדאי לבדוק לפני שליחה', out: 'הגענו למכסת המיילים היוצאים היום', fail: 'השליחה נכשלה',
 });
 const autoWhyL = (an) => (Array.isArray(an) ? an : []).map((k) => AUTO_WHY[k] || '').filter(Boolean);
 // החלטה (ג): שמות וסוגי הקבצים המצורפים כטקסט לסיווג (בלי התוכן). שם קובץ הוא מידע מצד שלישי – מנוקה ומוגבל
@@ -264,8 +264,8 @@ function fileList(files) {
     return n + ' (סוג: ' + (m ? m[1].toUpperCase() : 'לא ידוע') + ')';
   });
 }
-// החלטה (ד): לפני שליחה אוטומטית – שם בפתיחה של התבנית ("שלום יוסי,") חייב להתאים לשם הפונה. שם לא ידוע או לא מתאים → פנייה כללית ("שלום,").
-// מחזיר { text, gen } (gen=true כשהוחלף לפנייה כללית)
+// החלטה (ד), עודכנה 14.11 ("עצירה לאישור"): הטקסט לעולם לא משתנה. מילה אחרי הברכה בפתיחה ("שלום יוסי,") שאינה ביטוי ברכה מוכר
+// ואינה חלק משם הפונה → לא שולחים אוטומטית, הטיוטה נשארת לאישור המנהל (סיבה 'greet'). מחזיר { text, hold }
 const GREET_RE = /^(\s*)(שלום|היי|הי|בוקר טוב|ערב טוב|צהריים טובים|hi|hello|hey|dear)([ \t]+)([^\s,!.:;?\d{}]{2,20}(?:[ \t]+[^\s,!.:;?\d{}]{2,20})?)(?=[ \t]*(?:[,!.:;]|\r?\n|$))/i;
 const NOT_NAME = new Set(['רב', 'רבה', 'לך', 'לכם', 'לכן', 'לכולם', 'וברכה', 'וברכות', 'ותודה', 'חברים', 'לקוח', 'לקוחה', 'לקוחות', 'יקר', 'יקרה', 'יקרים', 'שוב', 'וטוב', 'רב לך', 'ולכולן', 'ולכולם', 'לכולן', 'וכל', 'לכל', 'וחג', 'חג', 'שמח', 'ומבורך', 'ושנה',
   'and', 'welcome', 'back', 'to', 'from', 'folks', 'guys', 'colleagues',
@@ -274,14 +274,11 @@ const nameToks = (s) => String(s || '').toLowerCase().replace(/["'`<>()[\]]/g, '
 function greetFix(text, name) {
   const t = String(text || '');
   const m = GREET_RE.exec(t);
-  if (!m) return { text: t, gen: false };
-  // מילה שאינה שם (או מילת חיבור "ו..." כמילה השנייה) – זה לא שם פרטי, לא נוגעים בטקסט
-  const toks = m[4].toLowerCase().split(/[ \t]+/);
-  if (NOT_NAME.has(m[4].toLowerCase()) || toks.some((w) => NOT_NAME.has(w)) || (toks.length === 2 && /^ו/.test(toks[1]))) return { text: t, gen: false };
-  const want = nameToks(m[4]), have = nameToks(name);
-  if (have.length && want.every((w) => have.includes(w))) return { text: t, gen: false };
-  const gen = /[a-z]/i.test(m[2]) ? 'Hello' : 'שלום';
-  return { text: m[1] + gen + t.slice(m[0].length), gen: true };
+  if (!m) return { text: t, hold: false };
+  const have = nameToks(name);
+  // כל מילה אחרי הברכה חייבת להיות ביטוי ברכה מוכר או חלק משם הפונה; אחרת – לא נוגעים בטקסט ולא שולחים לבד (טיוטה לאישור)
+  const ok = nameToks(m[4]).every((w) => NOT_NAME.has(w) || have.includes(w));
+  return { text: t, hold: !ok };
 }
 // כותרת משימה ממייל: מנוקה ומוגבלת באורך (תוכן המייל הוא מידע ולא הוראה – זה רק טקסט לתצוגה)
 const taskLine = (v, n) => clean(String(v == null ? '' : v), 400).replace(/https?:\/\/\S+/gi, '').replace(/[\r\n\t]+/g, ' ').replace(/[<>{}\[\]`]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
