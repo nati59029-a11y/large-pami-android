@@ -811,3 +811,82 @@ describe('יחידה: חתימה, פענוח, ניתוב, כוונת המנהל'
     assert.deepEqual(p.msgs.map((m) => [m.wamid, m.type]), [['w1', 'text'], ['w3', 'other']]);
   });
 });
+
+// ---------------------------------------------------------------------------------
+// מסמכים ללקוח (14.11.2026, שלב 3 חלק א'): sec-wa.send מורחב בתוספת בלבד – תבנית עם מסמך (כותרת) ופרמטרים,
+// ו-lib/ar-send.js sendWa – כפוף ל"עצור הכל" ולמונה היציאות. מול wa-mock בלבד (127.0.0.1:9795) – אין פנייה ל-Meta.
+describe('מסמכים: תבנית ווטסאפ עם מסמך (ar-send) מול wa-mock, ועצירה ב-stop', () => {
+  let S, envSave;
+  const LINK = 'http://127.0.0.1:5001/demo-largpeami/us-central1/arFile?t=' + 'a'.repeat(43);
+  const TPL = { name: 'order_doc', lang: 'he', params: ['יוסי כהן', 'אישור הזמנה 1042', '₪746.24'] };
+  const inBiz = (fn) => T.runInBiz({ bizId: A, prefix: 'b/' + A + '/' }, () => fn(T.tdb()));
+  before(() => {
+    S = require('../functions/lib/ar-send.js');
+    // בתהליך הבדיקה (לא בתוך האמולטור) – מכוונים את sec-wa לשרת הדמה בלבד. baseOf חוסם כל כתובת אחרת במצב הזה
+    envSave = { e: process.env.FUNCTIONS_EMULATOR, b: process.env.WA_GRAPH_BASE };
+    process.env.FUNCTIONS_EMULATOR = 'true'; process.env.WA_GRAPH_BASE = 'http://127.0.0.1:' + WM.PORT;
+  });
+  after(() => {
+    if (envSave.e === undefined) delete process.env.FUNCTIONS_EMULATOR; else process.env.FUNCTIONS_EMULATOR = envSave.e;
+    if (envSave.b === undefined) delete process.env.WA_GRAPH_BASE; else process.env.WA_GRAPH_BASE = envSave.b;
+  });
+  beforeEach(() => seed());
+
+  it('W.send: תבנית עם כותרת מסמך ופרמטרים – המבנה שנשלח ל-Meta; תבנית בלי תוספות – בדיוק כמו קודם (בלי components)', async () => {
+    const r = await W.send('tok', PN_A, CUST, { tpl: Object.assign({}, TPL, { doc: { link: LINK, filename: 'אישור-הזמנה-1042.pdf' } }) });
+    assert.equal(r.wamid, 'wamid.OUT1');
+    const [q] = WM.sends();
+    assert.equal(q.path, `/v21.0/${PN_A}/messages`); assert.equal(q.auth, 'Bearer tok');
+    assert.equal(q.body.type, 'template'); assert.equal(q.body.to, CUST); assert.equal(q.body.template.name, 'order_doc');
+    assert.deepEqual(q.body.template.components, [
+      { type: 'header', parameters: [{ type: 'document', document: { link: LINK, filename: 'אישור-הזמנה-1042.pdf' } }] },
+      { type: 'body', parameters: TPL.params.map((t) => ({ type: 'text', text: t })) },
+    ]);
+    await W.send('tok', PN_A, CUST, { tpl: { name: 'follow_up', lang: 'he' } });
+    assert.deepEqual(WM.sends()[1].body.template, { name: 'follow_up', language: { code: 'he' } });
+    await W.send('tok', PN_A, CUST, { text: 'שלום' });
+    assert.deepEqual(WM.sends()[2].body.text, { body: 'שלום', preview_url: false });
+  });
+  it('W.send: קישור מסמך לא תקין (לא שרת מקומי באמולטור / פרטי כניסה / file:) נדחה לפני שליחה; פרמטר עם שורה חדשה מנוקה', async () => {
+    for (const link of ['https://evil.invalid/x.pdf', 'http://u:p@127.0.0.1/x.pdf', 'file:///etc/passwd', 'nope']) {
+      await assert.rejects(W.send('tok', PN_A, CUST, { tpl: { name: 'order_doc', doc: { link } } }), (e) => e.details && e.details.reason === 'bad-doc-link', link);
+    }
+    assert.equal(WM.sends().length, 0);
+    assert.equal(W.paramTxt('שורה\nשנייה\t     רווחים'), 'שורה שנייה   רווחים');
+    assert.throws(() => W.tplComps({ params: Array(11).fill('x') }), (e) => e.details.reason === 'bad-tpl-params');
+  });
+  it('ar-send.sendWa: נשלח מהמספר העסקי, נרשם ביומן, ומחזיר רשומה ל-sent[]', async () => {
+    const r = await inBiz((db) => S.sendWa(db, { to: '054-1234567', tpl: TPL, link: LINK, fileName: 'doc.pdf', by: M1, token: 'tok' }));
+    assert.equal(r.ok, true); assert.equal(r.ch, 'wa'); assert.equal(r.to, CUST); assert.equal(r.id, 'wamid.OUT1');
+    assert.equal(WM.sends().length, 1); assert.equal(WM.sends()[0].body.template.components[0].parameters[0].document.filename, 'doc.pdf');
+    assert.ok((await logsOf(A)).some((l) => l.act === 'arSend' && l.tgt === CUST && l.note === 'auto'));
+    assert.equal((await get(`b/${A}/sec_cfg/wa_use`)).odn, 1, 'מונה היציאות הקיים של העסק');
+  });
+  it('ar-send.sendWa: "עצור הכל" פעיל – שליחה אוטומטית נעצרת (אין בקשה ל-Meta); שליחה בלחיצה – עוברת (החלטה 31)', async () => {
+    assert.equal((await call('secWaCfg', M1, { op: 'stop', on: true })).status, 'OK');
+    const r = await inBiz((db) => S.sendWa(db, { to: CUST, tpl: TPL, link: LINK, by: 'auto', token: 'tok' }));
+    assert.deepEqual([r.ok, r.why], [false, 'stopped']);
+    assert.equal(WM.sends().length, 0);
+    assert.ok((await logsOf(A)).some((l) => l.act === 'arStopped'));
+    const m = await inBiz((db) => S.sendWa(db, { to: CUST, tpl: TPL, link: LINK, by: M1, auto: false, token: 'tok' }));
+    assert.equal(m.ok, true); assert.equal(WM.sends().length, 1);
+  });
+  it('ar-send.sendWa: בלי תבנית / בלי מספר עסקי / מעל מונה היציאות / Meta נכשלת – לא נשלח, עם סיבה', async () => {
+    assert.equal((await inBiz((db) => S.sendWa(db, { to: CUST, link: LINK, token: 'tok' }))).why, 'no-tpl');
+    assert.equal((await inBiz((db) => S.sendWa(db, { to: 'abc', tpl: TPL, link: LINK, token: 'tok' }))).why, 'bad-to');
+    assert.equal((await inBiz((db) => S.sendWa(db, { to: CUST, tpl: TPL, link: 'https://x.invalid/a', token: 'tok' }))).why, 'bad-link');
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+    await prep((d) => d.doc(`b/${A}/sec_cfg/wa_use`).set({ od: day, odn: W.OUT_DAY }));
+    assert.equal((await inBiz((db) => S.sendWa(db, { to: CUST, tpl: TPL, link: LINK, token: 'tok' }))).why, 'limit');
+    assert.equal(WM.sends().length, 0);
+    await prep((d) => d.doc(`b/${A}/sec_cfg/wa_use`).set({ od: day, odn: 0 }));
+    WM.state.mode = 'fail';
+    const f = await inBiz((db) => S.sendWa(db, { to: CUST, tpl: TPL, link: LINK, token: 'tok' }));
+    assert.deepEqual([f.ok, f.why], [false, 'wa-rejected']);
+    assert.ok((await logsOf(A)).some((l) => l.act === 'sendFail' && /^ar:/.test(l.note)));
+    await prep((d) => d.doc(`b/${A}/sec_cfg/wa`).update({ pnid: '' }));
+    WM.state.mode = 'ok';
+    assert.equal((await inBiz((db) => S.sendWa(db, { to: CUST, tpl: TPL, link: LINK, token: 'tok' }))).why, 'no-wa');
+    assert.ok(!(await logsOf(A)).some((l) => /tok/.test(JSON.stringify(l))), 'המפתח לא נכתב ליומן');
+  });
+});

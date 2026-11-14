@@ -211,6 +211,9 @@ Object.assign(exports, require('./orders'));
 // תמחור מחשבונית ספק (12.11.2026): pinv – piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg (צילום, שלב 4)
 Object.assign(exports, require('./pricing'));
 
+// מסמכים ללקוח (14.11.2026, שלב 3 חלק א'): arFile – קישור עם אסימון לקובץ PDF (onRequest, us-central1 בלבד). ar-file.js
+Object.assign(exports, require('./ar-file'));
+
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
 
