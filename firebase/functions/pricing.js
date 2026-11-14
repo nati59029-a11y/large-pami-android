@@ -361,6 +361,7 @@ async function piFinish(request) {
   const ref = db.doc('pinv/' + id);
   const now = Date.now();
   let res = null;
+  const cp0 = w.ord ? await O.cpPre(db, act.filter((x) => x.l.pid && (x.l.wp != null || x.l.price != null)).map((x) => x.l.pid)) : null; // 14.11.2026: התראה על מחיר קבוע ללקוח
   await db.runTransaction(async (tx) => {
     // טרנזקציה יכולה לרוץ שוב (התנגשות) – כל מה שמשתנה בתוכה מתחיל מחדש בכל ניסיון
     res = { ok: true, id, dup: false, added: 0, updated: 0, qty: 0 };
@@ -423,6 +424,7 @@ async function piFinish(request) {
     const fin = { by: w.uid, name: w.uname, t: now, rq: reqId, br: br || '', res: { added: res.added, updated: res.updated, qty: res.qty } };
     tx.update(ref, Object.assign({ st: 'done', lines: out, n: out.length, fin, lk: FieldValue.delete(), upd: now, rev: rev + 1 }, h));
   });
+  if (cp0 && !res.dup) await O.cpAlert(db, w, cp0);
   return res;
 }
 

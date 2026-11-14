@@ -703,3 +703,103 @@ describe('setOrderCfg – copyF', () => {
     assert.deepEqual((await get(`b/${A}/ordcfg/main`)).copyF, []);
   });
 });
+
+// 14.11.2026 (משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1): מחיר ברירת מחדל ללקוח, מינימום מחיר בשרת, חסימה, vm/net/vat/gross, הנחה כללית
+describe('לקוח עסקי ומחירים – שלב 1 (14.11.2026)', () => {
+  const WS = 'p0541111111', PR = 'p0542222222';
+  async function seedBiz(extra) {
+    await prep(async (d) => {
+      const b = d.batch();
+      b.set(d.doc(`b/${A}/cust/${WS}`), Object.assign({ name: 'מסעדה', bn: 'מסעדה', phone: '0541111111', wholesale: true, at: 1, upd: 1, x: {} }, extra || {}));
+      b.set(d.doc(`b/${A}/cust/${PR}`), { name: 'פרטי', phone: '0542222222', at: 1, upd: 1, x: {} });
+      b.set(d.doc(`b/${A}/prod/pA/p/ws`), { wp: 6 });
+      b.set(d.doc(`b/${A}/ordcfg/price`), { pct: 15 });
+      await b.commit();
+    });
+  }
+  const mk = (u, custId, items, x) => call('createOrder', u, Object.assign({ reqId: rid(), br: 'br1', cust, custId, items }, x || {}));
+  it('עובד מתחת למינימום / מתחת לעלות / בלי עלות – נדחה עם reason price-floor; בדיוק במינימום – עובר; מנהל עוקף; בלי ordcfg/price – כמו קודם', async () => {
+    await seedBiz();
+    // לקוח פרטי: pA עלות 4 כולל מע"מ, 15% → מינימום 4.60
+    let r = await mk(E1, PR, [{ pid: 'pA', qty: 1, price: 4.59 }]);
+    assert.equal(r.status, 'INVALID_ARGUMENT'); assert.equal(r.reason, 'price-floor', r.text); assert.match(r.text, /אין אפשרות לתת במחיר הזה/);
+    assert.equal((await mk(E1, PR, [{ pid: 'pA', qty: 1, price: 3.99 }])).reason, 'price-floor');
+    assert.equal((await mk(E1, '', [{ pid: 'pA', qty: 1, price: 4.59 }])).reason, 'price-floor'); // גם בלי לקוח מקושר
+    r = await mk(E1, PR, [{ pid: 'pA', qty: 1, price: 4.6 }]); assert.equal(r.status, 'OK', r.text);
+    assert.equal((await mk(MGR, PR, [{ pid: 'pA', qty: 1, price: 1 }])).status, 'OK');
+    // pB בלי עלות: עובד לא מוריד מתחת למחיר הרגיל (הנחה)
+    assert.equal((await mk(E1, PR, [{ pid: 'pB', qty: 1, price: 7 }])).reason, 'price-floor');
+    assert.equal((await mk(E1, PR, [{ pid: 'pB', qty: 1, price: 7.5 }])).status, 'OK');
+    // לקוח עסקי: היחידה לפני מע"מ – 4 ÷ 1.18 × 1.15 = 3.90
+    assert.equal((await mk(E1, WS, [{ pid: 'pA', qty: 1, price: 3.89 }])).reason, 'price-floor');
+    assert.equal((await mk(E1, WS, [{ pid: 'pA', qty: 1, price: 3.9 }])).status, 'OK');
+    // שורה חופשית – בלי מינימום
+    assert.equal((await mk(E1, PR, [{ n: 'משלוח', qty: 1, price: 0 }])).status, 'OK');
+    await prep((d) => d.doc(`b/${A}/ordcfg/price`).delete());
+    assert.equal((await mk(E1, PR, [{ pid: 'pA', qty: 1, price: 1 }])).status, 'OK');
+  });
+  it('סדר מחיר לשורה בלי מחיר: קבוע ← סיטונאי ← רגיל (עסקי בלי סיטונאי = רגיל ÷ 1.18); vm/vr/net/vat/gross; שולם = gross', async () => {
+    await seedBiz();
+    let r = await mk(E1, WS, [{ pid: 'pA', qty: 2 }, { pid: 'pB', qty: 1 }]);
+    assert.equal(r.status, 'OK', r.text);
+    let o = await get(`b/${A}/ord/${r.result.id}`);
+    assert.deepEqual(o.items.map((x) => x.price), [6, 6.36]);
+    assert.equal(o.total, 18.36); assert.equal(o.vm, 'ex'); assert.equal(o.vr, 18); assert.equal(o.net, 18.36); assert.equal(o.vat, 3.3); assert.equal(o.gross, 21.66);
+    await prep((d) => d.doc(`b/${A}/cprice/${WS}_pB`).set({ cust: WS, pid: 'pB', p: 5 }));
+    await prep((d) => d.doc(`b/${A}/cprice/${PR}_pA`).set({ cust: PR, pid: 'pA', p: 9 }));
+    r = await mk(E1, WS, [{ pid: 'pB', qty: 1 }]); assert.equal((await get(`b/${A}/ord/${r.result.id}`)).items[0].price, 5);
+    // מחיר קבוע מתחת לברירת המחדל – עובד שולח אותו בדיוק ועובר (הוא ברירת המחדל של הלקוח)
+    assert.equal((await mk(E1, WS, [{ pid: 'pB', qty: 1, price: 5 }])).status, 'OK');
+    // פרטי: מחיר רגיל, או קבוע שלו; vm inc, gross = total
+    r = await mk(E1, PR, [{ pid: 'pA', qty: 1 }, { pid: 'pB', qty: 1 }]);
+    o = await get(`b/${A}/ord/${r.result.id}`);
+    assert.deepEqual(o.items.map((x) => x.price), [9, 7.5]); assert.equal(o.vm, 'inc'); assert.equal(o.gross, 16.5); assert.equal(o.net, 13.98); assert.equal(o.vat, 2.52);
+    // יומן: מחיר שונה מברירת המחדל נרשם (מי, מתי, ממחיר למחיר)
+    r = await mk(E1, PR, [{ pid: 'pB', qty: 1, price: 8 }]);
+    const lg = await coll(`b/${A}/ord/${r.result.id}/log`); assert.match(lg[0].note, /לחם: ₪7.5 → ₪8/);
+    // תשלום: עסקי – gross
+    r = await mk(E1, WS, [{ pid: 'pA', qty: 1 }]);
+    assert.equal((await call('markOrderPaid', E1, { id: r.result.id, method: 'cash' })).status, 'OK');
+    assert.equal((await get(`b/${A}/ord/${r.result.id}`)).paid.amt, 7.08);
+  });
+  it('לקוח חסום: עובד לא פותח הזמנה, מנהל כן', async () => {
+    await seedBiz({ blk: true });
+    assert.equal((await mk(E1, WS, [{ pid: 'pA', qty: 1 }])).reason, 'cust-blocked');
+    assert.equal((await mk(MGR, WS, [{ pid: 'pA', qty: 1 }])).status, 'OK');
+  });
+  it('updateOrder נאכף כמו יצירה; שורה שלא השתנתה לא נחסמת (גם אם העלות עלתה); סכומים מתעדכנים', async () => {
+    await seedBiz();
+    const id = (await mk(E1, PR, [{ pid: 'pA', qty: 1, price: 5 }])).result.id;
+    assert.equal((await call('updateOrder', E1, { id, items: [{ pid: 'pA', qty: 1, price: 4.5 }] })).reason, 'price-floor');
+    await prep((d) => d.doc(`b/${A}/prod/pA/p/cost`).set({ cost: 6 }));
+    let r = await call('updateOrder', E1, { id, items: [{ pid: 'pA', qty: 1, price: 5 }, { n: 'משלוח', qty: 1, price: 10 }] });
+    assert.equal(r.status, 'OK', r.text);
+    const o = await get(`b/${A}/ord/${id}`); assert.equal(o.total, 15); assert.equal(o.gross, 15); assert.equal(o.net, 12.71);
+    r = await call('updateOrder', E1, { id, items: [{ pid: 'pA', qty: 1, price: 6.5 }] }); assert.equal(r.reason, 'price-floor'); // 6 × 1.15 = 6.90
+    assert.equal((await call('updateOrder', MGR, { id, items: [{ pid: 'pA', qty: 1, price: 6.5 }] })).status, 'OK');
+  });
+  it('הזמנה ישנה בלי vm: עריכה שומרת אותה כמו קודם (בלי שדות חדשים)', async () => {
+    await seedBiz();
+    await prep((d) => d.doc(`b/${A}/ord/old1`).set({ no: 7, src: 'staff', br: 'br1', cust, items: [{ pid: 'pA', n: 'עוגה', qty: 1, price: 3 }], total: 3, status: 'new', by: E1, at: 1, upd: 1 }));
+    const r = await call('updateOrder', E1, { id: 'old1', items: [{ pid: 'pA', qty: 1, price: 3 }], note: 'x' });
+    assert.equal(r.status, 'OK', r.text);
+    const o = await get(`b/${A}/ord/old1`);
+    for (const k of ['vm', 'vr', 'net', 'vat', 'gross', 'disc']) assert.equal(o[k], undefined, k);
+    assert.equal(o.total, 3); assert.equal(o.items[0].price, 3);
+    assert.equal((await call('updateOrder', MGR, { id: 'old1', disc: 5 })).reason, 'no-vm');
+    assert.equal((await call('markOrderPaid', E1, { id: 'old1', method: 'cash' })).status, 'OK');
+    assert.equal((await get(`b/${A}/ord/old1`)).paid.amt, 3);
+  });
+  it('הנחה כללית: עובד – נדחה; מנהל עד המגבלה; gross אחרי הנחה; עריכה משנה', async () => {
+    await seedBiz({}); await prep((d) => d.doc(`b/${A}/ordcfg/price`).set({ pct: 15, disc: 5 }));
+    assert.equal((await mk(E1, PR, [{ pid: 'pA', qty: 1, price: 10 }], { disc: 5 })).reason, 'manager-only');
+    assert.equal((await mk(MGR, PR, [{ pid: 'pA', qty: 1, price: 10 }], { disc: 6 })).reason, 'disc-limit');
+    assert.equal((await mk(MGR, PR, [{ pid: 'pA', qty: 1, price: 10 }], { disc: 'x' })).reason, 'bad-disc');
+    const r = await mk(MGR, PR, [{ pid: 'pA', qty: 2, price: 10 }], { disc: 5 });
+    assert.equal(r.status, 'OK', r.text);
+    let o = await get(`b/${A}/ord/${r.result.id}`); assert.equal(o.total, 20); assert.equal(o.disc, 5); assert.equal(o.gross, 19);
+    assert.equal((await call('updateOrder', E1, { id: r.result.id, disc: 0 })).reason, 'manager-only');
+    assert.equal((await call('updateOrder', MGR, { id: r.result.id, disc: 0 })).status, 'OK');
+    o = await get(`b/${A}/ord/${r.result.id}`); assert.equal(o.disc, undefined); assert.equal(o.gross, 20);
+  });
+});

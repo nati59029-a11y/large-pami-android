@@ -31,6 +31,7 @@ const LD = require('./lib/line-discount');
 const { profitOf, ilDayStart } = require('./lib/ord-profit'); // 2026-11-12: רווחיות הזמנות
 const { defineSecret } = require('firebase-functions/params');
 const CARD = require('./lib/card');
+const AC = require('./lib/ar-calc'); // 14.11.2026: לקוח עסקי ומחירים (מחיר ברירת מחדל ללקוח, מינימום, סכומי מע"מ)
 // 2026-11-12: אותו סוד כמו ב-customers.js (defineSecret עם אותו שם – פרמטר אחד). פרטי הכניסה לאתר הסליקה מוצפנים בו.
 const CARD_ENC_KEY = defineSecret('CARD_ENC_KEY');
 const PAY_CRED = 'private/payCred';
@@ -249,11 +250,13 @@ async function saveProduct(request) {
   if (input.id != null) {
     const id = idOf(input.id, 'מוצר');
     const ref = db.doc('prod/' + id);
+    const cp0 = await cpPre(db, [id]); // 14.11.2026: התראה למנהל אם המחירון השתנה ויש מחיר קבוע ללקוח
     await db.runTransaction(async (tx) => {
       const s = await tx.get(ref);
       if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
       prodPut(tx, db, w, id, s.data() || {}, c, now);
     });
+    await cpAlert(db, w, cp0);
     return { ok: true, id };
   }
   const reqId = reqIdOf(input);
@@ -842,17 +845,107 @@ function ordAccess(w, d) {
   if (d.br && d.br !== NB && !canBr(w, d.br)) throw deny('foreign-br', 'אין לך הרשאה להזמנה של סניף אחר');
 }
 
+// =====================================================================================
+// 14.11.2026 (משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1): מחיר ברירת מחדל ללקוח ומינימום מחיר – נאכף כאן, בשרת.
+//   ordcfg/price  { pct?, pp?, cat?:{<catId>:X}, disc?, upd }  – מגבלות המחיר (מנהל, setPriceCfg). המסמך קיים = המגבלה פעילה; חסר = בלי מינימום (כמו קודם).
+//   cprice/{custId}_{pid}  { cust, pid, p?, n, vm, h:[{f,t,by,at}], by, at, del? } – מחיר קבוע ללקוח (customers.js). p חסר = נמחק (ההיסטוריה נשמרת).
+//   aralert/p_{pid}  { t:'cp', pid, n, from, to, cnt, custs, st:'new'|'done', at, by } – המחירון השתנה ויש ללקוחות מחיר קבוע (מנהל).
+//   ord (+) { vm:'ex'|'inc', vr, net, vat, gross, disc? } – הזמנה חדשה: vm לפי סוג הלקוח, vr = אחוז המע"מ, סכומים בשקלים. total לא משתנה (סכום השורות).
+// סדר המחיר לשורה בלי מחיר: מחיר קבוע ← סיטונאי ← רגיל (לקוח עסקי בלי סיטונאי: רגיל ÷ (1+מע"מ), החלטה 7). מנהל עוקף את המינימום.
+// =====================================================================================
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+async function priceCtx(tx, db, custId, pids, cfgMain) {
+  const ids = [...new Set(pids)];
+  const head = [db.doc('ordcfg/price')].concat(custId ? [db.doc('cust/' + custId)] : []);
+  const tail = ids.flatMap((p) => [db.doc(`prod/${p}/p/ws`)].concat(custId ? [db.doc(`cprice/${custId}_${p}`)] : []));
+  const all = await tx.getAll(...head, ...tail);
+  const cfg = all[0].exists ? all[0].data() : null;
+  const cs = custId ? all[1] : null;
+  const biz = !!(cs && cs.exists && cs.get('wholesale') === true);
+  const wp = new Map(), cp = new Map();
+  const per = custId ? 2 : 1;
+  ids.forEach((p, i) => {
+    const w0 = all[head.length + i * per], c0 = custId ? all[head.length + i * per + 1] : null;
+    if (w0.exists && isNum(w0.get('wp'))) wp.set(p, w0.get('wp'));
+    if (c0 && c0.exists && isNum(c0.get('p'))) cp.set(p, c0.get('p'));
+  });
+  const v = cfgMain && cfgMain.exists ? cfgMain.get('vat') : null;
+  return { cfg, biz, blk: !!(cs && cs.exists && cs.get('blk') === true), wp, cp, vm: biz ? 'ex' : 'inc', vat: isNum(v) && v >= 0 && v <= 100 ? v : AC.VAT0 };
+}
+// לכל שורת מוצר: מחיר ברירת המחדל (שורה שנשלחה בלי מחיר מקבלת אותו), בדיקת מינימום לעובד, והערות "מחיר שונה מברירת המחדל" ליומן (הבהרה 29).
+// keep = "pid|מחיר" של שורות שלא השתנו בעריכה – לא נבדקות שוב (כדי לא לחסום הזמנה קיימת כשהעלות עלתה).
+function priceRun(w, items, raw, pc, pd, br, costs, keep) {
+  const notes = [];
+  items.forEach((it, i) => {
+    if (!it.pid) return;
+    const p = pd.get(it.pid) || {};
+    const def = AC.defPrice({ cp: pc.cp.get(it.pid), wp: pc.wp.get(it.pid), price: brPrice(p, br), vm: pc.vm, vat: pc.vat });
+    if (raw && raw[i] && raw[i].price == null) it.price = def;
+    if (AC.ag(it.price) !== AC.ag(def)) notes.push(`${it.n}: ₪${def} → ₪${it.price}`);
+    if (w.role === 'manager' || !pc.cfg || (keep && keep.has(it.pid + '|' + it.price))) return;
+    const r = AC.priceOk({ price: it.price, def, cost: costs.get(it.pid), vm: pc.vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, pc.biz, p.cat, p.sub) });
+    if (r.ok) return;
+    const why = r.why === 'below-cost' ? ' – מתחת לעלות' : r.why === 'no-cost' ? ` – למוצר אין עלות, אפשר רק ₪${r.min} ומעלה` : ` – המינימום ₪${r.min}`;
+    throw new HttpsError('invalid-argument', `"${it.n}": אין אפשרות לתת במחיר הזה${why}`, { reason: 'price-floor', why: r.why, pid: it.pid, min: r.min });
+  });
+  return notes;
+}
+// הנחה כללית על ההזמנה (27, 28): אחוז 0–100 (עד שתי ספרות), מנהל בלבד, עד ordcfg/price.disc אם הוגדר. 0 / null = בלי הנחה
+function discIn(v) {
+  if (v === undefined) return undefined;
+  if (v === null || v === 0) return 0;
+  if (!isNum(v) || v < 0 || v > 100 || Math.abs(Math.round(v * 100) - v * 100) > 1e-6) throw bad('bad-disc', 'הנחה כללית: אחוז בין 0 ל-100');
+  return v;
+}
+function discOk(w, disc, pc) {
+  if (!disc) return;
+  if (w.role !== 'manager') throw deny('manager-only', 'הנחה כללית על ההזמנה – מנהל בלבד');
+  if (pc.cfg && isNum(pc.cfg.disc) && disc > pc.cfg.disc) throw bad('disc-limit', `הנחה כללית: עד ${pc.cfg.disc}%`);
+}
+const sums = (total, vm, vr, disc) => { const t = AC.totals(total, vm, vr, disc); return { net: t.net, vat: t.vat, gross: t.gross }; };
+// 14.11.2026 (תשובה 24): המחירון השתנה (סיטונאי / מחיר רגיל) ויש ללקוחות מחיר קבוע למוצר → התראה למנהל (aralert/p_{pid}, נדרסת בכל שינוי).
+// cpPre – קריאה לפני הכתיבה; cpAlert – אחריה, משווה ויוצר התראה. כישלון לא מפיל את הפעולה עצמה (רק נרשם ביומן).
+async function cpPre(db, pids) {
+  const ids = [...new Set(pids)].filter((p) => typeof p === 'string' && ID_RE.test(p)).slice(0, 200);
+  const m = new Map();
+  if (!ids.length) return m;
+  const s = await db.getAll(...ids.flatMap((p) => [db.doc('prod/' + p), db.doc(`prod/${p}/p/ws`)]));
+  ids.forEach((p, i) => { const a = s[2 * i], b = s[2 * i + 1]; m.set(p, { price: a.exists && isNum(a.get('price')) ? a.get('price') : null, wp: b.exists && isNum(b.get('wp')) ? b.get('wp') : null, n: a.exists ? String(a.get('name') || '') : '' }); });
+  return m;
+}
+async function cpAlert(db, w, pre) {
+  try {
+    if (!pre || !pre.size) return 0;
+    const now = await cpPre(db, [...pre.keys()]);
+    let n = 0;
+    for (const [pid, a] of pre) {
+      const b = now.get(pid);
+      if (!b || (a.price === b.price && a.wp === b.wp)) continue;
+      const q = await db.collection('cprice').where('pid', '==', pid).limit(100).get();
+      const L = q.docs.filter((x) => isNum(x.get('p')));
+      if (!L.length) continue;
+      await db.doc('aralert/p_' + pid).set({ t: 'cp', pid, n: b.n.slice(0, 80), from: { price: a.price, wp: a.wp }, to: { price: b.price, wp: b.wp }, cnt: L.length, custs: L.slice(0, 20).map((x) => x.get('cust')), st: 'new', at: Date.now(), by: w.uid });
+      n++;
+    }
+    return n;
+  } catch (e) {
+    logger.warn('orders: cpAlert failed', { name: e && e.name, code: e && e.code });
+    return 0;
+  }
+}
+
 // createOrder({ reqId, br?, cust, items, note? }) → { id, no, total, warn: [{pid, br, q, n}] }
 async function createOrder(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['reqId', 'br', 'cust', 'custId', 'items', 'note', 'total', 'cell']); // custId = לקוח מקושר (cust/{id}); total נשלח? מתעלמים – השרת מחשב
+  onlyKeys(input, ['reqId', 'br', 'cust', 'custId', 'items', 'note', 'total', 'cell', 'disc']); // custId = לקוח מקושר (cust/{id}); total נשלח? מתעלמים – השרת מחשב
   const reqId = reqIdOf(input);
   const br = brOf(w, input.br);
   const cust = cleanCust(input.cust);
   const raw = rawItems(input.items);
   const note = input.note == null ? '' : txt(input.note, 300, 'bad-note', 'הערה');
   const custId = input.custId == null || input.custId === '' ? '' : idOf(input.custId, 'לקוח');
+  const disc = discIn(input.disc);
   if (input.cell !== undefined) needCell(w);
   const db = T.tdb();
   const ref = db.doc('ord/o' + reqId);
@@ -866,10 +959,14 @@ async function createOrder(request) {
     if (wb.exists && wb.get('cust') !== custId) throw deny('ws-not-linked', 'מחיר הסיטונאי נטען ללקוח אחר. בחרו שוב את הלקוח');
     const prods = await loadProds(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
     const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
+    const pc = await priceCtx(tx, db, custId, raw.filter((x) => x.pid).map((x) => x.pid), c);
+    if (pc.blk && w.role !== 'manager') throw deny('cust-blocked', 'הלקוח חסום. רק מנהל יכול לפתוח לו הזמנה');
+    discOk(w, disc, pc);
     const { cell, plans } = await prepCell(tx, db, w, input, cust);
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
     const pd = plain(prods);
     const { items } = resolveItems(w, br, raw, pd, src);
+    const pnotes = priceRun(w, items, raw, pc, pd, br, costs, null);
     snapCosts(items, costs);
     cartons(items, pd, await isWs(tx, db, custId), null, cell);
     for (const it of items) if (it.pid && prods.get(it.pid).get('on') === false) throw pre('prod-off', `המוצר "${it.n}" לא זמין`);
@@ -880,13 +977,14 @@ async function createOrder(request) {
     const now = Date.now();
     const warn = [];
     applyMoves(tx, db, w, prods, moves(br, items), { ord: ref.id, no }, warn, reqId);
-    const doc = { no, src: 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now };
+    const doc = Object.assign({ no, src: 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now }, { vm: pc.vm, vr: pc.vat }, sums(total, pc.vm, pc.vat, disc));
+    if (disc) doc.disc = disc;
     if (note) doc.note = note;
     if (custId) doc.custId = custId;
     if (cell && cell.n + Object.keys(cell).length > 2) doc.cell = cell;
     tx.set(ref, doc);
     tx.set(seq, { n: no });
-    tx.set(logRef(db, ref.id), logData(w, 'create', `₪${total}${doc.cell && doc.cell.n ? ` · ${doc.cell.n} קווים לניוד${doc.cell.ack ? ' (אושר למרות ניוד קודם)' : ''}` : ''}`));
+    tx.set(logRef(db, ref.id), logData(w, 'create', `₪${total}${doc.cell && doc.cell.n ? ` · ${doc.cell.n} קווים לניוד${doc.cell.ack ? ' (אושר למרות ניוד קודם)' : ''}` : ''}${disc ? ` · הנחה ${disc}%` : ''}${pnotes.length ? ' · מחיר שונה: ' + pnotes.join('; ') : ''}`));
     out = Object.assign({ id: ref.id, no, total, dup: false, warn }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
   });
   return out;
@@ -896,8 +994,9 @@ async function createOrder(request) {
 async function updateOrder(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'items', 'cust', 'note', 'total', 'cell']);
+  onlyKeys(input, ['id', 'items', 'cust', 'note', 'total', 'cell', 'disc']);
   const id = idOf(input.id, 'הזמנה');
+  const disc = discIn(input.disc);
   const raw = input.items === undefined ? null : rawItems(input.items);
   const cust = input.cust === undefined ? null : cleanCust(input.cust);
   const note = input.note === undefined ? null : txt(input.note, 300, 'bad-note', 'הערה');
@@ -910,6 +1009,11 @@ async function updateOrder(request) {
     ordAccess(w, s.exists ? s.data() : null);
     const d = s.data();
     if (!PAYABLE.includes(d.status)) throw pre('locked', d.status === 'cancel' ? 'ההזמנה בוטלה' : 'ההזמנה שולמה – אי אפשר לשנות פריטים או סכום');
+    // 14.11.2026: מחיר ברירת מחדל ומינימום – כמו ביצירה. הזמנה עם vm שומרת את אופן המחירים ואחוז המע"מ שלה; הזמנה ישנה בלי vm – בלי שדות חדשים
+    const prc = await priceCtx(tx, db, typeof d.custId === 'string' && ID_RE.test(d.custId) ? d.custId : '', raw ? raw.filter((x) => x.pid).map((x) => x.pid) : [], c);
+    if (d.vm === 'ex' || d.vm === 'inc') prc.vm = d.vm;
+    if (isNum(d.vr)) prc.vat = d.vr;
+    if (disc !== undefined && disc !== (d.disc || 0)) { if (!d.vm) throw bad('no-vm', 'הנחה כללית – רק בהזמנה שנוצרה מהגרסה הזו ואילך'); discOk(w, disc, prc); if (!disc && w.role !== 'manager') throw deny('manager-only', 'הנחה כללית על ההזמנה – מנהל בלבד'); }
     const pc0 = await prepCell(tx, db, w, input, cust || d.cust || {}, d.cell && d.cell.calc ? d.cell : null);
     let cell = pc0.cell;
     const upd = { upd: Date.now() };
@@ -922,8 +1026,10 @@ async function updateOrder(request) {
       const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[d.br] : null;
       // שורה קיימת שנשארת עם אותו מוצר – שומרת את סניף המקור שלה, אלא אם נשלח אחר
       const pd = plain(prods);
+      const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
       const { items } = resolveItems(w, d.br, raw, pd, src);
-      snapCosts(items, await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid)), oldItems);
+      priceRun(w, items, raw, prc, pd, d.br, costs, new Set(oldItems.filter((x) => x && x.pid).map((x) => x.pid + '|' + x.price)));
+      snapCosts(items, costs, oldItems);
       cartons(items, pd, await isWs(tx, db, d.custId), oldItems, cell !== undefined ? cell : d.cell, d.cell);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
       applyMoves(tx, db, w, prods, mv, { ord: id, no: d.no }, warn);
@@ -949,6 +1055,12 @@ async function updateOrder(request) {
       if (raw || ct.total !== d.total || ct.calc || (d.cell && d.cell.calc)) upd.total = ct.total;
       if (upd.total !== undefined && upd.total !== d.total) notes.push(`סכום ₪${d.total} → ₪${upd.total}`);
       out = Object.assign(out || {}, { total: ct.total }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
+    }
+    if (d.vm && (upd.total !== undefined || (disc !== undefined && disc !== (d.disc || 0)))) {
+      const dd = disc !== undefined ? disc : d.disc;
+      Object.assign(upd, sums(upd.total !== undefined ? upd.total : d.total, prc.vm, prc.vat, dd));
+      if (disc !== undefined && disc !== (d.disc || 0)) { upd.disc = disc ? disc : FV().delete(); notes.push(`הנחה ${d.disc || 0}% → ${disc}%`); }
+      out = Object.assign(out || {}, { gross: upd.gross });
     }
     if (cust) upd.cust = cust;
     if (note !== null) upd.note = note;
@@ -1010,7 +1122,8 @@ async function markOrderPaid(request) {
     if (cur === 'paid' || cur === 'out' || cur === 'done') { res = { ok: true, dup: true }; return; }
     if (!PAYABLE.includes(cur)) throw pre('bad-status', 'ההזמנה בוטלה');
     const now = Date.now();
-    Object.assign(paid, { at: now, by: w.uid, amt: s.get('total') }); delete paid.pk; // pk מנוסה קודם של הטרנזקציה לא נשאר
+    // 14.11.2026: הזמנה עם vm (מהגרסה הזו) – הסכום לתשלום הוא gross (כולל מע"מ והנחה). הזמנה ישנה – total, כמו קודם
+    Object.assign(paid, { at: now, by: w.uid, amt: s.get('vm') && isNum(s.get('gross')) ? s.get('gross') : s.get('total') }); delete paid.pk; // pk מנוסה קודם של הטרנזקציה לא נשאר
     // ניוד: כל קו נרשם ב-lineLog (בדיקת ניוד חוזר בכל הסניפים) ובהיסטוריית ports של הלקוח (רק כשהמתג פעיל)
     const cl = s.get('cell'), lines = cellOn(w) && cl && Array.isArray(cl.lines) ? cl.lines : [];
     if (lines.length) {
@@ -1745,4 +1858,4 @@ const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, im
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכניסה לאתר הסליקה מוצפנים ב-CARD_ENC_KEY
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn } });
