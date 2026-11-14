@@ -64,6 +64,7 @@ jobs:
         run: |
           case "$GITHUB_REF" in
             refs/heads/feature/multi-business|refs/heads/main) ;;
+            refs/heads/claude/business-customer-orders-9ewgbt) [ "$P" = "largpeami-test-f4691" ] && [ "$PC" = "largpeami-test-f4691" ] || { echo "::error::מהענף הזה מותר לפרסם רק לפרויקט הבדיקה largpeami-test-f4691 (החלטה 5, 14.11)"; exit 1; } ;;
             *) echo "::error::מותר להפעיל רק מ-feature/multi-business או מ-main"; exit 1 ;;
           esac
           case "$P" in largpeami|largpeami-test-f4691) ;; *) echo "::error::פרויקט לא מוכר"; exit 1 ;; esac
