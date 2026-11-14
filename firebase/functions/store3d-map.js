@@ -175,4 +175,4 @@ exports.s3PutTex = onCall(T.scoped(async (request) => {
 }));
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_map', { enumerable: false, value: { saveMap, setBranch, putTex } });
+Object.defineProperty(exports, '_map', { enumerable: false, value: { saveMap, setBranch, putTex, branchOk } });

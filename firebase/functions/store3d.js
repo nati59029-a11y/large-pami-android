@@ -57,6 +57,7 @@ const PUSH = {
   move: { title: 'סבב סריקה הועבר', body: 'חלק מסבב סריקה הועבר. פתחו את האפליקציה כדי לראות.' },
   left: { title: 'סבב הועבר למחליף', body: 'עובד שהושבת – החלק שלו בסבבים עובר למחליף הקבוע.' },
   err: { title: 'בעיה בסבב סריקה', body: 'יש בעיה בכלל סבב (עובד לא פעיל או מפה חסרה). פתחו את הגדרות הסבבים.' },
+  w80: { title: 'מכסת סריקת החנות: 80%', body: 'הסניף ניצל 80% ממכסת התמונות החודשית. אפשר לבקש ממנהל המערכת להגדיל אותה.' }, // שלב 8 (store3d-ai.js)
 };
 const BAD_TOKEN = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument'];
 async function fcmSend(tokens, msg) {
@@ -360,7 +361,7 @@ exports.s3Log = onCall(T.scoped(async (request) => {
   const res = await db.runTransaction(async (tx) => {
     const [q, s] = await Promise.all([tx.get(qref), tx.get(ref)]);
     if (q.exists) {
-      if (q.get('uid') !== uid || q.get('run') !== input.run) throw bad('bad-qid', 'מזהה השליחה כבר שימש לפעולה אחרת');
+      if (q.get('k') !== 'event' || q.get('uid') !== uid || q.get('run') !== input.run) throw bad('bad-qid', 'מזהה השליחה כבר שימש לפעולה אחרת');
       return Object.assign({}, q.get('res'), { dup: true });
     }
     if (!s.exists) throw bad('no-run', 'הסבב לא נמצא', 'not-found');
