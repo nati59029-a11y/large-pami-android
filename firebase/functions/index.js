@@ -8,6 +8,7 @@
 //   publishLineItem, getLineState (עובד/מנהל), removeLineItem, listLineFiles (מנהל) – תוכן שלוחות הקו (yemot-line.js).
 //   previewVoice (עובד/מנהל) – "שמע קודם" בקול המשוכפל (ElevenLabs, yemot-line.js + lib/voice.js).
 //   recurringTasks (מתוזמנת, לא נקראת ממשתמש) – משימות קבועות (recurring.js).
+//   s3Rounds (מתוזמנת), s3Run, s3Move, s3Log, s3View – סבבי סריקת חנות בתלת מימד (store3d.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -235,6 +236,10 @@ Object.assign(exports, require('./secretary-inv'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));
+
+// סריקת חנות בתלת מימד – שלב 5 (14.11.2026): s3Rounds (מתוזמנת כל 5 דקות – פתיחת סבבים, תזכורות, איחור, העברה למחליף),
+// s3Run (פתיחה ידנית/ביטול – מנהל), s3Move (העברה/לקיחה), s3Log (אירועי זמן), s3View (מה עובד רואה). store3d.js + lib/store3d-core.js
+Object.assign(exports, require('./store3d'));
 
 // אפליקציה עם סמל העסק – בנייה מיידית (12.11.2026): requestBizApk – מנהל־על בלבד, מפעיל את build-biz-apks ב-GitHub (biz-apk.js)
 Object.assign(exports, require('./biz-apk'));
