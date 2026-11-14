@@ -181,7 +181,8 @@ ACT.ocMergeK=async el=>{const D=O.draft,m=D&&D.p2m;if(!m||![m.a,m.b].includes(el
   // 12.11.2026: מסך כרטיס אשראי מלא לפני סיום ההזמנה (לא חובה). קודם בדיקה מקדימה – שגיאה בטופס מוצגת בטופס ולא אחרי מסך הכרטיס.
   // עסק עם ניוד: תמיד (גם בקישור, וגם אם במשבצת שבטופס הוקלד כרטיס – שם זה כרטיס לתשלום על הקו; כאן כרטיס לתשלום ההזמנה, מצב נפרד CS).
   // בלי ניוד: רק כשאין קישור סליקה; מדלגים אם כבר הוקלד כרטיס במשבצת או שללקוח כבר 3 כרטיסים (אותו CD). אחרי "סיום הזמנה" (cdOk) – לא שוב
-  if(D&&on()&&ocOn()&&!D.cdOk&&(cell()||(!cards.length&&payM()!=='link'))){const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId);
+  // משוב סבב 2 (החלטות 13, 18): לקוח בשוטף – בלי מסך הכרטיס לתשלום ההזמנה (בעסק עם ניוד המשבצת שבטופס – לתשלום על הקו – נשארת)
+  if(D&&on()&&ocOn()&&!D.cdOk&&(cell()||(!cards.length&&payM()!=='link'))&&!(window.__onTerms&&window.__onTerms(D.custId))){const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId);
    if(cell()||!(c&&cardsOf(c).length>=3)){const m=window.__oxPre?window.__oxPre():'';if(m)return toast(m);const tz=dig(D.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');if(CD.d!==D)cdReset(D);if(cell()&&CS.d!==D)CS={d:D};go('ocCardStep');return}}
   if(D&&on()){const tz=dig(D.tz);if(tz&&!tzOk(tz.padStart(9,'0')))return toast('ת.ז לא תקינה');
    const p=phN(D.phone);if(p&&String(D.name||'').trim()&&D.items&&D.items.length){const c={};if(!NP.some(k=>String(D[k]||'').trim()))c.name=D.name.trim();c.phone=p;if(tz)c.tz=tz;
@@ -309,7 +310,8 @@ FRM.ocCardF=async f=>{const v=fd(f);const card={num:v.num};['exp','name','cvv'].
 // 12.11.2026: הזמנת ניוד מקושרת ללקוח (לא מבוטלת, גם אחרי תשלום) → "העתק פרטי לקוח"
 {const oo=V.oxOrd;if(oo)V.oxOrd=id=>{const r=oo(id);unshow();if(!r||!r.h||!on())return r;const o=(O.L||[]).find(x=>x.id===id);if(!o||!o.custId)return r;
   if(!C.L&&!C.busy)loadL();const c=(C.L||[]).find(x=>x.id===o.custId);let h='';
-  if(['new','work','wait_pay'].includes(o.status)){const K=cardsOf(c);
+  const K0=cardsOf(c); // משוב סבב 2: לקוח בשוטף בלי כרטיס שמור – בלי המשבצת "כרטיס אשראי" (אין לו תשלום באשראי). יש כרטיס שמור – כמו קודם
+  if(['new','work','wait_pay'].includes(o.status)&&(K0.length||!(o.shp||window.__onTerms&&window.__onTerms(o.custId)))){const K=K0;
    h+=`<div class="sec"><h3>כרטיס אשראי</h3></div><div class="card" id="ocordcard">${K.length?'<p class="note" style="margin:0">ההעתקה נרשמת ביומן.</p>'+K.map(k=>`<p class="note" style="margin:8px 0 0">כרטיס ****${esc(k.last4||'')} שמור</p><button class="btn g w" style="margin-top:6px" data-a="ocCardCopy" data-id="${esc(o.custId)}" data-ord="${esc(o.id)}"${sAt(k.s)}>העתק מספר כרטיס${K.length>1?' ****'+esc(k.last4||''):''}</button>`).join('')
     :`<p class="note" style="margin:0">${c?'אין כרטיס שמור':'…'}</p>`}</div>`}
   if(cell()&&o.status!=='cancel')h+=`<div class="card" id="occopy" style="margin-top:8px"><button class="btn w" data-a="ocCopyAll" data-id="${esc(o.id)}">העתק פרטי לקוח</button><p class="note" style="margin:6px 0 0">לפי השדות שהמנהל בחר, כולל פרטי אשראי אם נבחרו. ההעתקה נרשמת ביומן, והלוח מתנקה אחרי 45 שניות.</p></div>`;

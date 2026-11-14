@@ -37,6 +37,12 @@ async function bizL(force){if(B.busy||(!force&&B.L&&Date.now()-B.at<30000))retur
 async function cfgL(force){if(B.cfg!==undefined&&!force)return B.cfg;try{B.cfg=await get1('/ordcfg/price')}catch(e){B.cfg=null}return B.cfg}
 async function cpL(cid,force){if(!cid)return {};if(B.cp[cid]&&!force)return B.cp[cid];const m={};try{(await runQ('cprice',['cust','EQUAL',sv(cid,'s')],1000)).forEach(x=>{if(typeof x.p==='number')m[x.pid]=x})}catch(e){}B.cp[cid]=m;return m}
 async function custL(id,force){if(!force&&B.c[id])return B.c[id];const c=await get1('/cust/'+id);if(c)B.c[id]=c;return c}
+/* משוב סבב 2 (14.11.2026, החלטה 13): לקוח בשוטף = תנאי תשלום שאינם "מיידי" (כולל לקוח ישן עם שוטף+30/60/90). משמש את orders-staff.js ו-orders-cust.js
+   (בלי כרטיס אשראי לתשלום ההזמנה, בלי "תשלום בטלפון"/"לתשלום", "נשלח" במקום "ממתין לתשלום"). לקוח שעוד לא נטען – לפי רשימת הלקוחות אם יש, אחרת false (כמו היום); נטען ברקע, וכרטיס הזמנה מצויר מחדש אם התברר שהוא בשוטף. השרת בודק שוב */
+const TL={};
+window.__onTerms=id=>{if(!id||typeof id!=='string')return false;const c=B.c[id]||((window.__oc&&window.__oc.L)||[]).find(x=>x.id===id);
+ if(!B.c[id]&&!TL[id]){TL[id]=1;custL(id).then(x=>{if(x&&AC.termsOfCust(x).b!=='imm'&&cur().v==='oxOrd'&&!document.querySelector('#dlg[open]'))rerender()}).catch(()=>{})}
+ return !!c&&AC.termsOfCust(c).b!=='imm'};
 /* סיטונאי: מנהל – כל המחירים (בעמודים); עובד – רק מוצרי ההזמנה, ללקוח העסקי שמקושר לטיוטה (reqId), כמו "החל מחיר סיטונאי" */
 async function wpL(D,pids){const need=pids.filter(p=>!(p in B.wp));if(!need.length)return;
  if(mgr()){if(B.wpAll)return;let a;for(let g=0;g<200;g++){const r=await fnCall('getWsPrices',a?{after:a}:{});Object.assign(B.wp,r&&r.wp||{});if(!r||!r.next)break;a=r.next}B.wpAll=1;need.forEach(p=>{if(!(p in B.wp))B.wp[p]=null});return}

@@ -1009,3 +1009,108 @@ describe('רשימה חופשית, חיפוש וכינויים – שלב 2 חל
     assert.equal((await call('delAlias', E1, { pid: 'foil', al: '' })).reason, 'bad-al');
   });
 });
+
+// 14.11.2026 (משוב בעל הפרויקט, סבב 2 – סעיף 5, החלטות 13–16): לקוח בשוטף – "נשלח" ← ממתין לתשלום (shp), נעילה, שולם ← הושלם
+describe('לקוח בשוטף – נשלח, נעילה ושולם (משוב סבב 2)', () => {
+  const ST = ['new', 'work', 'wait_pay', 'paid', 'out', 'done', 'cancel'];
+  const OK = { new: ['work', 'wait_pay'], work: ['wait_pay', 'new'], wait_pay: ['work'], paid: ['out', 'done'], out: ['done'], done: [], cancel: [] };
+  async function seedT() {
+    await prep(async (d) => {
+      const b = d.batch();
+      b.set(d.doc(`b/${A}/cust/cT`), { name: 'שוטף 30', bn: 'חברה', phone: '0541111111', terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} });
+      b.set(d.doc(`b/${A}/cust/cV`), { name: 'שוטף מהחשבונית', phone: '0541111112', terms: { b: 'inv', d: 45 }, at: 1, upd: 1, x: {} });
+      b.set(d.doc(`b/${A}/cust/cN`), { name: 'ישן שוטף+60', phone: '0541111113', pay: 'n60', at: 1, upd: 1, x: {} });
+      b.set(d.doc(`b/${A}/cust/cI`), { name: 'עסקי מיידי', bn: 'מיידי', phone: '0541111114', terms: { b: 'imm', d: 0 }, at: 1, upd: 1, x: {} });
+      b.set(d.doc(`b/${A}/cust/cP`), { name: 'פרטי', phone: '0541111115', pay: 'cash', at: 1, upd: 1, x: {} });
+      await b.commit();
+    });
+  }
+  const mk = async (custId) => { const r = await call('createOrder', E1, Object.assign({ reqId: rid(), br: 'br1', cust, items: [{ pid: 'pA', qty: 1, price: 10 }] }, custId ? { custId } : {})); assert.equal(r.status, 'OK', r.text); return r.result.id; };
+  const setSt = (id, status) => prep((d) => d.doc(`b/${A}/ord/${id}`).update({ status }));
+  it('בשוטף: בטיפול ← "נשלח" = ממתין לתשלום + shp; שליחה כפולה – בלי שינוי; יומן ship', async () => {
+    await seedT();
+    const id = await mk('cT');
+    await setSt(id, 'work');
+    const r = await call('setOrderStatus', E1, { id, status: 'out' });
+    assert.equal(r.status, 'OK', r.text); assert.deepEqual(r.result, { ok: true, status: 'wait_pay' });
+    const o = await get(`b/${A}/ord/${id}`);
+    assert.equal(o.status, 'wait_pay'); assert.equal(o.shp.by, E1); assert.equal(typeof o.shp.at, 'number'); assert.equal(o.paid, undefined);
+    const r2 = await call('setOrderStatus', E1, { id, status: 'out' });
+    assert.deepEqual(r2.result, { ok: true, status: 'wait_pay', dup: true });
+    assert.equal((await get(`b/${A}/ord/${id}`)).shp.at, o.shp.at);
+    const lg = await coll(`b/${A}/ord/${id}/log`);
+    assert.equal(lg.filter((x) => x.act === 'ship').length, 1); assert.equal(lg.find((x) => x.act === 'ship').note, 'work→wait_pay');
+  });
+  it('אחרי "נשלח": עריכה נעולה (עובד ומנהל, גם הערה בלבד), אין חזרה לבטיפול, המלאי לא משתנה', async () => {
+    await seedT();
+    const id = await mk('cV');
+    await setSt(id, 'work');
+    assert.equal((await call('setOrderStatus', E1, { id, status: 'out' })).status, 'OK');
+    const q0 = (await get(`b/${A}/prod/pA`)).q.br1;
+    for (const u of [E1, MGR]) {
+      assert.equal((await call('updateOrder', u, { id, items: [{ pid: 'pA', qty: 2, price: 10 }] })).reason, 'locked');
+      assert.equal((await call('updateOrder', u, { id, note: 'x' })).reason, 'locked');
+      assert.equal((await call('setOrderStatus', u, { id, status: 'work' })).reason, 'locked');
+    }
+    const o = await get(`b/${A}/ord/${id}`);
+    assert.equal(o.status, 'wait_pay'); assert.equal(o.total, 10); assert.equal((await get(`b/${A}/prod/pA`)).q.br1, q0);
+  });
+  it('נשלח ושולם ← ישר "הושלם", נספר כשולם בסיכום; מנהל מבטל "שולם" ← ממתין לתשלום וה-shp נשאר; עובד – לא', async () => {
+    await seedT();
+    const id = await mk('cT');
+    await setSt(id, 'work');
+    await call('setOrderStatus', E1, { id, status: 'out' });
+    const p = await call('markOrderPaid', E1, { id, method: 'transfer' });
+    assert.deepEqual(p.result, { ok: true, dup: false });
+    let o = await get(`b/${A}/ord/${id}`);
+    assert.equal(o.status, 'done'); assert.equal(o.paid.amt, 10); assert.equal(o.paid.method, 'transfer'); assert.ok(o.shp);
+    assert.deepEqual((await call('markOrderPaid', E1, { id, method: 'cash' })).result, { ok: true, dup: true });
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+    const s = await call('ordProfit', MGR, { from: day, to: day, lite: true });
+    assert.equal(s.status, 'OK', s.text); assert.equal(s.result.paidN, 1); assert.equal(s.result.paid, 10);
+    assert.equal((await call('unpayOrder', E1, { id, reason: 'x' })).reason, 'manager-only');
+    assert.equal((await call('unpayOrder', MGR, { id, reason: 'טעות' })).status, 'OK');
+    o = await get(`b/${A}/ord/${id}`);
+    assert.equal(o.status, 'wait_pay'); assert.equal(o.paid, undefined); assert.ok(o.shp);
+    // הזמנה רגילה שהושלמה (בלי shp) – ביטול "שולם" נדחה כמו קודם
+    const id2 = await mk('cP');
+    await call('markOrderPaid', E1, { id: id2, method: 'cash' }); await call('setOrderStatus', E1, { id: id2, status: 'done' });
+    assert.equal((await call('unpayOrder', MGR, { id: id2, reason: 'x' })).reason, 'bad-status');
+  });
+  it('לקוח ישן שוטף+60 (pay:n60): נשלח עובד; גם מממתין לתשלום בלי shp. מחדשה – לא', async () => {
+    await seedT();
+    const id = await mk('cN');
+    assert.equal((await call('setOrderStatus', E1, { id, status: 'out' })).reason, 'bad-status');
+    await setSt(id, 'wait_pay');
+    assert.equal((await call('setOrderStatus', E1, { id, status: 'out' })).status, 'OK');
+    assert.ok((await get(`b/${A}/ord/${id}`)).shp);
+  });
+  it('השוואה: לקוח עסקי מיידי, פרטי, ובלי לקוח – טבלת המעברים זהה להיום, "שולם" ← paid, בלי shp', async () => {
+    await seedT();
+    for (const c of ['cI', 'cP', null]) {
+      for (const from of ST) for (const to of ST) {
+        const id = await mk(c);
+        await setSt(id, from);
+        const r = await call('setOrderStatus', E1, { id, status: to });
+        assert.equal(r.status === 'OK', OK[from].includes(to), `${c} ${from}→${to}: ${r.text}`);
+        if (r.status === 'OK') assert.deepEqual(r.result, { ok: true, status: to });
+        assert.equal((await get(`b/${A}/ord/${id}`)).shp, undefined);
+      }
+      const id = await mk(c);
+      await setSt(id, 'work');
+      assert.equal((await call('markOrderPaid', E1, { id, method: 'cash' })).status, 'OK');
+      assert.equal((await get(`b/${A}/ord/${id}`)).status, 'paid');
+    }
+  });
+  it('בשוטף: כל שאר המעברים כמו היום (רק work/wait_pay → out משתנים)', async () => {
+    await seedT();
+    for (const from of ST) for (const to of ST) {
+      const id = await mk('cT');
+      await setSt(id, from);
+      const r = await call('setOrderStatus', E1, { id, status: to });
+      const ship = to === 'out' && (from === 'work' || from === 'wait_pay');
+      assert.equal(r.status === 'OK', ship || OK[from].includes(to), `${from}→${to}: ${r.text}`);
+      assert.equal((await get(`b/${A}/ord/${id}`)).status, r.status !== 'OK' ? from : ship ? 'wait_pay' : to);
+    }
+  });
+});

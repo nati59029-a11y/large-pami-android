@@ -9,7 +9,7 @@
 //   cat/{id}           { name, parent?, ord, upd }                                  – קטגוריה (parent ריק) / תת־קטגוריה. מנהל, דרך saveCat
 //   xfer/{id}          { prod, name, from, to, qty, why:'order'|'cancel'|'edit'|'manual', ord?, no?, by, at, reqId }  – העברה פנימית בין סניפים
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
-//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
+//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, shp?:{at,by}, by, byName, at, upd, cancel? }  – shp: "נשלח" ללקוח בשוטף (משוב סבב 2)
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
@@ -53,6 +53,9 @@ const STATUSES = ['new', 'work', 'wait_pay', 'paid', 'out', 'done', 'cancel'];
 // מעברים ב-setOrderStatus. 'paid' רק דרך markOrderPaid, 'cancel' רק דרך cancelOrder, ביטול "שולם" רק unpayOrder (מנהל).
 const NEXT = { new: ['work', 'wait_pay'], work: ['wait_pay', 'new'], wait_pay: ['work'], paid: ['out', 'done'], out: ['done'], done: [], cancel: [] };
 const PAYABLE = ['new', 'work', 'wait_pay'];
+// 14.11.2026 (משוב סבב 2, החלטות 13–16): לקוח בשוטף (תנאי תשלום שאינם מיידי) – "נשלח" (בקשה status:'out' מ-work, או מ-wait_pay בלי shp)
+// נרשם כ-status:'wait_pay' + shp:{at,by}. הזמנה עם shp נעולה לעריכה, לא חוזרת ל"בטיפול", ואחרי "שולם" עוברת ישר ל-done. הזמנה בלי shp – כמו קודם.
+const SHIP_FROM = ['work', 'wait_pay'];
 const PAY_METHODS = ['link', 'phone', 'cash', 'transfer', 'other'];
 const MAX_ITEMS = 50;
 const MAX_IMPORT = 200;
@@ -1070,6 +1073,7 @@ async function updateOrder(request) {
     ordAccess(w, s.exists ? s.data() : null);
     const d = s.data();
     if (!PAYABLE.includes(d.status)) throw pre('locked', d.status === 'cancel' ? 'ההזמנה בוטלה' : 'ההזמנה שולמה – אי אפשר לשנות פריטים או סכום');
+    if (d.shp) throw pre('locked', 'ההזמנה נשלחה – אי אפשר לשנות פריטים, סכום או פרטים. תיקון – בזיכוי'); // משוב סבב 2 (החלטה 16)
     // 14.11.2026: מחיר ברירת מחדל ומינימום – כמו ביצירה. הזמנה עם vm שומרת את אופן המחירים ואחוז המע"מ שלה; הזמנה ישנה בלי vm – בלי שדות חדשים
     const prc = await priceCtx(tx, db, typeof d.custId === 'string' && ID_RE.test(d.custId) ? d.custId : '', raw ? raw.filter((x) => x.pid).map((x) => x.pid) : [], c);
     if (d.vm === 'ex' || d.vm === 'inc') prc.vm = d.vm;
@@ -1143,15 +1147,32 @@ async function setOrderStatus(request) {
   if (!STATUSES.includes(st)) throw bad('bad-status', 'סטטוס לא מוכר');
   const db = T.tdb();
   const ref = db.doc('ord/' + id);
+  let res = null;
   await db.runTransaction(async (tx) => {
+    res = null;
     const s = await tx.get(ref);
     ordAccess(w, s.exists ? s.data() : null);
     const cur = s.get('status');
+    const shp = s.get('shp');
+    // משוב סבב 2: "נשלח" ללקוח בשוטף – התנאים נקראים מהלקוח בתוך הטרנזקציה (לא מהמכשיר)
+    if (st === 'out' && cur === 'wait_pay' && shp) { res = { ok: true, status: 'wait_pay', dup: true }; return; }
+    if (st === 'out' && SHIP_FROM.includes(cur) && !shp) {
+      const cid = s.get('custId');
+      const cs = typeof cid === 'string' && ID_RE.test(cid) ? await tx.get(db.doc('cust/' + cid)) : null;
+      if (cs && cs.exists && AC.termsOfCust(cs.data()).b !== 'imm') {
+        const now = Date.now();
+        tx.update(ref, { status: 'wait_pay', shp: { at: now, by: w.uid }, upd: now });
+        tx.set(logRef(db, id), logData(w, 'ship', cur + '→wait_pay'));
+        res = { ok: true, status: 'wait_pay' };
+        return;
+      }
+    }
     if (!(NEXT[cur] || []).includes(st)) throw pre('bad-status', 'אי אפשר לעבור מהסטטוס הנוכחי לסטטוס הזה');
+    if (shp && st === 'work') throw pre('locked', 'ההזמנה נשלחה – אי אפשר להחזיר אותה לטיפול');
     tx.update(ref, { status: st, upd: Date.now() });
     tx.set(logRef(db, id), logData(w, 'status', cur + '→' + st));
   });
-  return { ok: true, status: st };
+  return res || { ok: true, status: st };
 }
 
 const LL_PRE = 'o_'; // מזהה דטרמיניסטי ל-lineLog: o_<ordId>_<מספר הקו>
@@ -1209,7 +1230,7 @@ async function markOrderPaid(request) {
       paid.sup = { id: sup.id, name: sup.name || '' };
       tx.set(db.doc('ordpay/' + id), { ord: id, no: s.get('no'), br: s.get('br'), amt: paid.amt, at: now, sup: paid.sup, st: 'paid', upd: now });
     }
-    tx.update(ref, { status: 'paid', paid, upd: now });
+    tx.update(ref, { status: s.get('shp') ? 'done' : 'paid', paid, upd: now }); // משוב סבב 2 (החלטה 15): הזמנה שנשלחה ושולמה – ישר "הושלם"
     tx.set(logRef(db, id), logData(w, 'paid', `${paid.method} ₪${paid.amt}${paid.last4 ? ' ****' + paid.last4 : ''}${paid.conf ? ' אישור ' + paid.conf : ''}`));
     res = { ok: true, dup: false };
   });
@@ -1253,7 +1274,8 @@ async function unpayOrder(request) {
   await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     ordAccess(w, s.exists ? s.data() : null);
-    if (s.get('status') !== 'paid') throw pre('bad-status', 'אפשר לבטל "שולם" רק בהזמנה במצב שולם');
+    // משוב סבב 2: הזמנה שנשלחה (shp) ושולמה עוברת ישר ל-done – גם בה מנהל יכול לבטל "שולם" (חוזרת ל"ממתין לתשלום", ה-shp נשאר)
+    if (s.get('status') !== 'paid' && !(s.get('status') === 'done' && s.get('shp') && s.get('paid'))) throw pre('bad-status', 'אפשר לבטל "שולם" רק בהזמנה במצב שולם');
     const undo = await linesUndo(tx, db, id, s); // 12.11.2026: ניוד שבוטל לא נשאר בהיסטוריה
     undo();
     if (s.get('paid') && s.get('paid').sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'unpay' }, { merge: true });
