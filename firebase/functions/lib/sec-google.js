@@ -254,8 +254,14 @@ const AUTO_WHY = Object.freeze({
   stock: 'התשובה תלויה במלאי', old: 'מייל ישן', replied: 'כבר נענה', auth: 'לא ניתן לאמת שהמייל באמת נשלח מהכתובת שמופיעה בו',
   rto: 'כתובת "השב אל" שונה מהכתובת של השולח', src: 'חסר נתון חי ב"מידע על העסק"', box: 'תיבת המייל לא מחוברת', to: 'אין כתובת תקינה לתשובה',
   thread: 'כבר נשלחה תשובה בשרשור הזה', loop: 'כבר נשלחה תשובה אוטומטית לשולח הזה בעשר הדקות האחרונות', day: 'הגענו ל-100 תשובות אוטומטיות היום',
+  thrErr: 'לא ניתן היה לבדוק את השרשור ב-Gmail',
   dup: 'כבר טופל', greet: 'בפתיחת התשובה מופיע שם או ביטוי שלא תואם לפונה – כדאי לבדוק לפני שליחה', out: 'הגענו למכסת המיילים היוצאים היום', fail: 'השליחה נכשלה',
 });
+// שלב ג (0ב): תשובה שנשלחה ישירות מ-Gmail (לא דרך המזכירה) – הודעה עם התווית SENT בשרשור, שנשלחה אחרי המייל הנכנס (t). gid – המייל הנכנס עצמו
+function sentAfter(thread, t, gid) {
+  const ms = thread && Array.isArray(thread.messages) ? thread.messages : [];
+  return ms.some((m) => m && m.id !== gid && Array.isArray(m.labelIds) && m.labelIds.includes('SENT') && Number(m.internalDate) > (Number(t) || 0));
+}
 const autoWhyL = (an) => (Array.isArray(an) ? an : []).map((k) => AUTO_WHY[k] || '').filter(Boolean);
 // החלטה (ג): שמות וסוגי הקבצים המצורפים כטקסט לסיווג (בלי התוכן). שם קובץ הוא מידע מצד שלישי – מנוקה ומוגבל
 function fileList(files) {
@@ -423,6 +429,8 @@ function client(u, at) {
     att: async (id, attId) => (await call('GET', gm + '/messages/' + enc(id) + '/attachments/' + enc(attId))).j || {},
     full: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=full')).j || {},
     list: async (q, pageToken, max) => (await call('GET', gm + '/messages?' + form(Object.assign({ maxResults: String(max || 500), includeSpamTrash: 'true', q: (q ? q + ' ' : '') + '-in:trash' }, pageToken ? { pageToken } : {})))).j || {},
+    // שלב ג (0ב): השרשור – רק מזהים, תוויות ותאריכים (format=minimal, בלי תוכן)
+    thread: async (id) => (await call('GET', gm + '/threads/' + enc(id) + '?format=minimal')).j || {},
     send: async (raw, threadId) => (await call('POST', gm + '/messages/send', Object.assign({ raw }, threadId ? { threadId } : {}))).j || {},
     trash: async (id) => (await call('POST', gm + '/messages/' + enc(id) + '/trash', {})).j || {},
     calPrimary: async () => (await call('GET', cal)).j || {},
@@ -436,6 +444,6 @@ function client(u, at) {
 module.exports = {
   SC, FORBIDDEN, scopesFor, grantedOk, STATE_TTL, CONNECT_HOUR, MAX_BOX_DEFAULT, MAX_BOX_LIMIT, HOOK_DATA_MAX, RUN_MAX, DAY_IN_MAX, FULL_MAX, TEXT_MAX, SUBJ_MAX, OUT_DAY, CLEAN_MAX,
   COUNT_PAGES, SCAN_TTL, CAL_PAGES, CAL_PUSH_MAX, BIG_OLD, RANGES, AI_PER_MAIL, STATE_RE,
-  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, authOf, bodyOf, attOf, decodeWords, kindOf, isInstr, humanOf, NEVER_RE, autoBlock, AUTO_WHY, autoWhyL, fileList, greetFix, domOf, taskLine, OLD_MS, mime, reSubj, rangeQ, costEstimate,
+  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, authOf, bodyOf, attOf, decodeWords, kindOf, isInstr, humanOf, NEVER_RE, autoBlock, AUTO_WHY, autoWhyL, sentAfter, fileList, greetFix, domOf, taskLine, OLD_MS, mime, reSubj, rangeQ, costEstimate,
   gToCal, calToG, sameEv, localOf, dayIL, urls, oauthCfg, topicName, TOPIC, exchange, refresh, revoke, client, SEC_GOOGLE_KEY, GOOGLE_CLIENT_SECRET, sv, EMAIL_RE,
 };

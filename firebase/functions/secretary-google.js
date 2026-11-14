@@ -1047,6 +1047,15 @@ async function mailWorkIn(id, o) {
     return { aw: 'err' };
   }
 }
+// שלב ג (0א): אחרי שליחה מוצלחת ב-Gmail – עד 3 ניסיונות לכתוב "נשלח" (build בונה batch חדש בכל ניסיון). נכשל – שומרים לפחות gmid (סימן שהמייל יצא)
+async function sentWrite(db, dRef, gmid, now, build) {
+  for (let i = 0; i < 3; i++) {
+    try { await build().commit(); return true; } catch (e) { if (i < 2) await new Promise((ok) => setTimeout(ok, 300 * (i + 1))); }
+  }
+  logger.warn('secretary-google: sent write failed', { tgt: dRef.id });
+  await dRef.update({ gmid: gmid || 'x', gAt: now }).catch(() => {});
+  return false;
+}
 // השליחה האוטומטית: רק תבנית של כלל מאושר + נתון חי מ"מידע על העסק" (K.fillTpl) – לעולם לא הטקסט שהמודל כתב (r.text נשמר רק כ-dt).
 // כל תנאי "אף פעם" נבדק כאן בקוד: G.autoBlock, מקור הנתונים, תיבה מחוברת, שרשור שכבר נענה, הגנת לולאה ומכסה, כפילות (autoAt בטרנזקציה, pend→sending), OUT_DAY
 async function tryAuto(db, id, x, r, rep0, now) {
@@ -1080,6 +1089,14 @@ async function tryAuto(db, id, x, r, rep0, now) {
     const t = await db.collection('sec_draft').where('thr', '==', x.thr).limit(30).get();
     if (t.docs.some((d) => d.id !== id && d.get('ch') === 'mail' && ['sent', 'sending'].includes(d.get('st')))) no.push('thread'); // כבר נענה בשרשור
   }
+  // שלב ג (0ב): תשובה ישירה מ-Gmail (לא דרך המזכירה) – קריאת השרשור רק כאן, כשנמצא כלל וכל שאר התנאים עברו. תקלה בבדיקה – לא שולחים
+  let gc = null;
+  if (!no.length && x.thr) {
+    try {
+      gc = (await access(db, T.scope().bizId, 'mail', x.box)).c;
+      if (G.sentAfter(await gc.thread(x.thr), x.t, x.gid)) no.push('thread');
+    } catch (e) { no.push('thrErr'); }
+  }
   if (no.length) return blocked(no);
   const key = G.sha(rule.id + '|' + to).slice(0, 20);
   const lim = await autoTake(db, key, now);
@@ -1094,7 +1111,7 @@ async function tryAuto(db, id, x, r, rep0, now) {
   if (!(await outTake(db, now))) { await dRef.update({ st: 'pend' }); await give(); return blocked(['out']); }
   let res;
   try {
-    const { c } = await access(db, T.scope().bizId, 'mail', x.box);
+    const c = gc || (await access(db, T.scope().bizId, 'mail', x.box)).c;
     res = await c.send(G.mime({ to, subj: G.reSubj(x.subj || ''), text, inReplyTo: x.mid, auto: true }), x.thr || '');
   } catch (e) {
     await dRef.update({ st: 'pend', flags: FieldValue.arrayUnion('autoFail') }).catch(() => {});
@@ -1102,14 +1119,18 @@ async function tryAuto(db, id, x, r, rep0, now) {
     await db.collection('sec_log').doc().set(glog('', 'auto', 'autoFail', { tgt: id, note: String((e && e.details && e.details.reason) || 'error').slice(0, 30) }));
     return { fail: true, no: ['fail'] };
   }
-  const b = db.batch();
-  b.update(dRef, Object.assign({ st: 'sent', sentAt: now, sentBy: 'auto', text, dt: r.text, src: 'rule', rule: rule.id, am: true, gmid: String((res && res.id) || '').slice(0, 64), an: FieldValue.delete() }));
-  b.set(iRef, { st: 'replied' }, { merge: true });
-  b.update(db.doc('sec_rules/' + rule.id), { an: FieldValue.increment(1), lastAt: now });
-  b.set(db.collection('sec_log').doc(), glog('', 'auto', 'mailAuto', { tgt: id, note: rule.id + ':' + x.box }));
-  await b.commit();
+  // שלב ג (0א): המייל כבר יצא – כתיבת "נשלח" עם ניסיון חוזר. אם עדיין נכשלה: לפחות gmid; הטיוטה נשארת 'sending' (sBy:'auto') ו-secMailSend לא ישלח אותה שוב
+  const gmid = String((res && res.id) || '').slice(0, 64);
+  const ok = await sentWrite(db, dRef, gmid, now, () => {
+    const b = db.batch();
+    b.update(dRef, Object.assign({ st: 'sent', sentAt: now, sentBy: 'auto', text, dt: r.text, src: 'rule', rule: rule.id, am: true, gmid, an: FieldValue.delete() }));
+    b.set(iRef, { st: 'replied' }, { merge: true });
+    b.update(db.doc('sec_rules/' + rule.id), { an: FieldValue.increment(1), lastAt: now });
+    b.set(db.collection('sec_log').doc(), glog('', 'auto', 'mailAuto', { tgt: id, note: rule.id + ':' + x.box }));
+    return b;
+  });
   if (lim.last) await holdAuto(db, 'day', now);
-  return { sent: true, rule: rule.id };
+  return Object.assign({ sent: true, rule: rule.id }, ok ? {} : { wErr: true });
 }
 // החזרה לתור (הטריגר רץ בלי ניסיון חוזר): מייל שנשאר ב-q / work יותר מ-10 דקות – חוזר לתור, עד AW_TRIES פעמים; אחר כך 'err' (אפשר לבקש טיוטה בלחיצה)
 async function mailRequeue(db, now) {
@@ -1263,12 +1284,26 @@ async function autoOp(who, db, input, op, now) {
 
 // =====================================================================================
 // secMailSend – שליחה מה-Gmail של העסק, רק בלחיצה של מנהל מחובר (27, 10.2). "עצור הכל" לא חוסם לחיצה ידנית (31).
-// קלט: { id (טיוטה), sendId (חד־פעמי, נגד שליחה כפולה), text? (עריכה) }. הנמען, הנושא והתיבה – רק מהטיוטה בשרת. כל שדה אחר – נדחה.
+// קלט: { id (טיוטה), sendId (חד־פעמי, נגד שליחה כפולה), text? (עריכה), mark? (שלב ג 0א: סימון ידני "נשלח" לטיוטה שאולי כבר יצאה – בלי שליחה) }. הנמען, הנושא והתיבה – רק מהטיוטה בשרת. כל שדה אחר – נדחה.
 // =====================================================================================
+// שלב ג (0א): טיוטה שאולי כבר יצאה מ-Gmail – יש gmid, או שהשליחה האוטומטית לא הסתיימה (sending + sBy:'auto'). לא שולחים שוב; המנהל יכול לסמן "נשלח"
+const maybeSent = (v) => !!(v && v.st !== 'sent' && (v.gmid || (v.st === 'sending' && v.sBy === 'auto')));
+const MAYBE_SENT = 'ייתכן שהמייל כבר נשלח. בדקו בתיקייה "נשלח" ב-Gmail. אם הוא שם – סמנו "נשלח".';
+async function markSent(db, dRef, id, who, now) {
+  await db.runTransaction(async (tx) => {
+    const v = (await tx.get(dRef)).data();
+    if (!v || v.st === 'sent') throw pre('not-pending', 'המייל כבר מסומן כנשלח');
+    if (!maybeSent(v) && !(v.st === 'sending' && now - (v.sAt || 0) >= 60000)) throw pre('not-stuck', 'אפשר לסמן "נשלח" רק לטיוטה שהשליחה שלה לא הסתיימה');
+    tx.update(dRef, { st: 'sent', sentAt: now, sentBy: who.uid, mk: true });
+    tx.set(db.doc('sec_in/' + id), { st: 'replied' }, { merge: true });
+    tx.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'mailMark', { tgt: id }));
+  });
+  return { ok: true, id, marked: true };
+}
 async function secMailSend(request) {
   const input = inputObject(request);
   const { who, db } = await gate(request, { consent: true });
-  for (const k of Object.keys(input)) if (!['id', 'sendId', 'text'].includes(k)) throw bad('bad-input', 'שדה לא מוכר: ' + String(k).slice(0, 30));
+  for (const k of Object.keys(input)) if (!['id', 'sendId', 'text', 'mark'].includes(k)) throw bad('bad-input', 'שדה לא מוכר: ' + String(k).slice(0, 30));
   const id = typeof input.id === 'string' && /^g[0-9a-f]{40}$/.test(input.id) ? input.id : null;
   if (!id) throw bad('bad-id', 'מזהה לא תקין');
   if (typeof input.sendId !== 'string' || !SEND_ID_RE.test(input.sendId)) throw bad('bad-send-id', 'מזהה שליחה לא תקין');
@@ -1279,6 +1314,11 @@ async function secMailSend(request) {
   if (!dr || dr.ch !== 'mail') throw pre('not-found', 'הטיוטה לא נמצאה');
   if (dr.st === 'sent' && dr.sid === input.sendId) return { ok: true, already: true, id };
   if (!['pend', 'fail', 'sending'].includes(dr.st)) throw pre('not-pending', dr.st === 'sent' ? 'המייל כבר נשלח' : 'הטיוטה כבר טופלה');
+  if (input.mark !== undefined) {
+    if (input.mark !== true) throw bad('bad-input', 'mark');
+    return markSent(db, dRef, id, who, now);
+  }
+  if (maybeSent(dr)) throw pre('maybe-sent', MAYBE_SENT);
   const bx = mailCfgOf(ms).boxes[dr.box];
   if (!bx || bx.st !== 'ok') throw pre('not-connected', 'התיבה לא מחוברת. אפשר לחבר מחדש בהגדרות המזכירה.');
   let text = dr.text, edited = false;
@@ -1290,6 +1330,7 @@ async function secMailSend(request) {
   await db.runTransaction(async (tx) => {
     const v = (await tx.get(dRef)).data();
     if (v.st === 'sent') throw pre('not-pending', 'המייל כבר נשלח');
+    if (maybeSent(v)) throw pre('maybe-sent', MAYBE_SENT);
     if (v.st === 'sending' && now - (v.sAt || 0) < 60000) throw pre('in-progress', 'השליחה כבר בדרך');
     if (!['pend', 'fail', 'sending'].includes(v.st)) throw pre('not-pending', 'הטיוטה כבר טופלה');
     tx.update(dRef, { st: 'sending', sid: input.sendId, sAt: now, sBy: who.uid });
@@ -1306,11 +1347,14 @@ async function secMailSend(request) {
     if (e instanceof HttpsError) throw e;
     throw new HttpsError('unavailable', 'השליחה נכשלה. נסו שוב בעוד דקה.', { reason: 'google-error' });
   }
-  const b = db.batch();
-  b.update(dRef, { st: 'sent', sentAt: now, sentBy: who.uid, gmid: String((r && r.id) || '').slice(0, 64), text, edited });
-  b.set(db.doc('sec_in/' + id), { st: 'replied' }, { merge: true });
-  b.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'mailSend', { tgt: id, note: (edited ? 'edited' : 'text') + ':' + dr.box }));
-  await b.commit();
+  const gmid = String((r && r.id) || '').slice(0, 64);
+  await sentWrite(db, dRef, gmid, now, () => {
+    const b = db.batch();
+    b.update(dRef, { st: 'sent', sentAt: now, sentBy: who.uid, gmid, text, edited });
+    b.set(db.doc('sec_in/' + id), { st: 'replied' }, { merge: true });
+    b.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'mailSend', { tgt: id, note: (edited ? 'edited' : 'text') + ':' + dr.box }));
+    return b;
+  });
   // שלב ב: למידה – בפעם השנייה של אותו סוג שאלה עם אותו סגנון תשובה מוחזרת הצעה להפוך לכלל אוטומטי (תקלה כאן לא פוגעת בשליחה)
   let offerRule = null;
   try { offerRule = await learnSend(db, id, dr, text, edited, who.uid, now); } catch (e) { logger.warn('secretary-google: learn failed', { reason: (e && e.code) || 'error' }); }

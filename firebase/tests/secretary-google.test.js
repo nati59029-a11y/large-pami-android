@@ -1898,4 +1898,85 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     assert.equal(body(0), 'שלום יוסי, אנחנו פתוחים ' + HOURS + '. תודה!');
   });
 
+  // שלב ג (0א): המייל יצא ב-Gmail אבל כתיבת "נשלח" נכשלה – ניסיון חוזר; אם עדיין נכשלה: gmid נשמר, אין שליחה חוזרת, והמנהל מסמן "נשלח"
+  it('שלב ג 0א: כתיבת "נשלח" נכשלה אחרי שליחה – ניסיון חוזר; gmid נשמר; אין שליחה כפולה; סימון ידני "נשלח"', async () => {
+    const WB = require(require.resolve('firebase-admin/firestore', { paths: [require('node:path').join(__dirname, '../functions')] })).WriteBatch;
+    const orig = WB.prototype.commit;
+    let failN = 0, base = 0;
+    WB.prototype.commit = function (...a) { if (failN > 0 && GO.state.sent.length > base) { failN--; return Promise.reject(new Error('test: commit failed')); } return orig.apply(this, a); };
+    try {
+      await addRule('r1');
+      await setRep({ auto: true });
+      // 2 כישלונות – הניסיון השלישי מצליח
+      const a = await mail({ subject: 'שעות פתיחה' });
+      base = GO.state.sent.length; failN = 2;
+      assert.equal((await work(a)).aw, 'auto');
+      assert.equal(failN, 0);
+      const da = await draftOf(a);
+      assert.equal(da.st, 'sent'); assert.ok(da.gmid); assert.equal(GO.state.sent.length, 1);
+      // 3 כישלונות – הטיוטה נשארת 'sending' (auto) עם gmid
+      const b = await mail({ subject: 'שעות פתיחה' });
+      base = GO.state.sent.length; failN = 3;
+      await work(b);
+      failN = 0;
+      const db0 = await draftOf(b);
+      assert.equal(db0.st, 'sending'); assert.equal(db0.sBy, 'auto'); assert.ok(db0.gmid, 'gmid נשמר'); assert.equal(GO.state.sent.length, 2);
+      // לחיצה ידנית – גם אחרי יותר מ-60 שניות – לא שולחת שוב
+      await prep((d) => d.doc(`b/${A}/sec_draft/${b}`).update({ sAt: Date.now() - 5 * 60000 }));
+      const s1 = await call('secMailSend', M1, { id: b, sendId: 'send-g001-abcd' });
+      assert.equal(s1.ok, false); assert.equal(s1.reason, 'maybe-sent');
+      assert.equal(GO.state.sent.length, 2, 'אין שליחה כפולה ללקוח');
+      // 'sending' של שליחה אוטומטית בלי gmid (נקטע באמצע) – גם לא נשלח שוב
+      await prep((d) => d.doc(`b/${A}/sec_draft/${b}`).update({ gmid: '' }));
+      assert.equal((await call('secMailSend', M1, { id: b, sendId: 'send-g002-abcd' })).reason, 'maybe-sent');
+      assert.equal(GO.state.sent.length, 2);
+      // סימון ידני – רק מנהל (אותו gate), בלי שליחה
+      assert.equal((await call('secMailSend', E1, { id: b, sendId: 'send-g003-abcd', mark: true })).ok, false);
+      assert.equal((await call('secMailSend', M1, { id: b, sendId: 'send-g003-abcd', mark: 'yes' })).reason, 'bad-input');
+      const mk = await call('secMailSend', M1, { id: b, sendId: 'send-g003-abcd', mark: true });
+      assert.ok(mk.ok, mk.msg); assert.equal(mk.r.marked, true);
+      const db1 = await draftOf(b);
+      assert.equal(db1.st, 'sent'); assert.equal(db1.mk, true); assert.equal(db1.sentBy, M1);
+      assert.equal((await get(`b/${A}/sec_in/${b}`)).st, 'replied');
+      assert.ok((await logs(A)).some((l) => l.act === 'mailMark' && l.tgt === b));
+      assert.equal(GO.state.sent.length, 2);
+      assert.equal((await call('secMailSend', M1, { id: b, sendId: 'send-g004-abcd', mark: true })).reason, 'not-pending');
+      // טיוטה רגילה שממתינה – אי אפשר לסמן "נשלח" (רק תקועה)
+      const c = await mail({ subject: 'מתי אתם פתוחים בשישי', text: 'שאלה אחרת לגמרי' });
+      await put(`b/${A}/sec_draft/${c}`, { ch: 'mail', in: c, st: 'pend', text: 'x', to: 'c@cust.example', subj: 'x', box: bx(), t: 1 });
+      assert.equal((await call('secMailSend', M1, { id: c, sendId: 'send-g005-abcd', mark: true })).reason, 'not-stuck');
+    } finally { WB.prototype.commit = orig; }
+  });
+
+  // שלב ג (0ב): תשובה שנשלחה ישירות מ-Gmail בשרשור (SENT אחרי המייל הנכנס) – לא שולחים אוטומטית; Gmail נקרא רק כשיש כלל מתאים
+  it('שלב ג 0ב: תשובה ישירה מ-Gmail בשרשור – לא שולחים (thread); SENT ישן יותר – שולחים; בלי כלל – בלי קריאה לשרשור', async () => {
+    await setRep({ auto: true });
+    const thrReqs = () => GO.state.requests.filter((r) => /\/threads\//.test(r.path));
+    // בלי כלל מתאים – אין קריאה ל-Gmail
+    const n0 = await mail({ subject: 'שעות פתיחה', thread: 'thr-n' });
+    await work(n0);
+    assert.equal(thrReqs().length, 0, 'בלי כלל – לא קוראים את השרשור');
+    await addRule('r1');
+    // תשובה ישירה מ-Gmail אחרי המייל
+    const a = await mail({ subject: 'שעות פתיחה', thread: 'thr-g', date: Date.now() - 60000 });
+    GO.addSent(BOX_A, 'thr-g', Date.now() - 30000);
+    const ra = await work(a);
+    assert.ok(ra.no.includes('thread'), JSON.stringify(ra));
+    assert.equal(GO.state.sent.length, 0);
+    assert.ok(thrReqs().some((r) => r.query.format === 'minimal'), 'format=minimal');
+    assert.ok((await draftOf(a)).an.includes('thread'));
+    // SENT ישן (לפני המייל הנכנס) – לא חוסם
+    GO.addSent(BOX_A, 'thr-o', Date.now() - 5 * 60000);
+    const b = await mail({ subject: 'שעות פתיחה', thread: 'thr-o', date: Date.now() - 60000 });
+    assert.equal((await work(b)).aw, 'auto');
+    assert.equal(GO.state.sent.length, 1);
+    // תקלה בקריאת השרשור – לא שולחים
+    GO.state.mode['/gmail/v1/users/me/threads/thr-e'] = 'fail';
+    const e = await mail({ subject: 'שעות פתיחה', thread: 'thr-e', from: 'Other <other@cust2.example>' });
+    const re = await work(e);
+    delete GO.state.mode['/gmail/v1/users/me/threads/thr-e'];
+    assert.ok(re.no.includes('thrErr'), JSON.stringify(re));
+    assert.equal(GO.state.sent.length, 1);
+  });
+
 });

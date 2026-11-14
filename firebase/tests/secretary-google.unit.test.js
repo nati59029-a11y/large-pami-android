@@ -153,7 +153,7 @@ describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית ע
     for (const [why, f] of mods) { const o = base(); f(o); assert.deepEqual(G.autoBlock(o), [why], why + ' ' + f.toString()); }
     { const o = base(); o.x.rto = 'Other <office@CUST.example>'; assert.deepEqual(G.autoBlock(o), [], 'Reply-To באותו דומיין – מותר'); }
     assert.deepEqual(G.autoWhyL(['auth', 'rto', 'nope']), [G.AUTO_WHY.auth, G.AUTO_WHY.rto]);
-    for (const k of ['stop', 'off', 'held', 'ruleOff', 'notHuman', 'sus', 'file', 'big', 'never', 'risk', 'cls', 'unsure', 'stock', 'old', 'replied', 'auth', 'rto', 'src', 'box', 'to', 'thread', 'loop', 'day', 'dup', 'out', 'fail'])
+    for (const k of ['stop', 'off', 'held', 'ruleOff', 'notHuman', 'sus', 'file', 'big', 'never', 'risk', 'cls', 'unsure', 'stock', 'old', 'replied', 'auth', 'rto', 'src', 'box', 'to', 'thread', 'thrErr', 'loop', 'day', 'dup', 'out', 'fail'])
       assert.ok(/[א-ת]/.test(G.AUTO_WHY[k] || ''), 'סיבה בעברית: ' + k);
     for (const c of W.NEVER_AUTO) { const o = base(); o.r.cls = c; o.rule.cls = c; assert.ok(G.autoBlock(o).includes('risk'), c); }
   });
@@ -194,5 +194,13 @@ describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית ע
     assert.ok(K.cleanQk('א'.repeat(300)).length <= 120);
     assert.equal(G.taskLine('לבדוק\n<b>משלוח</b> https://x.example/a {{x}}', 80), 'לבדוק bמשלוח/b x');
     assert.equal(G.taskLine('א'.repeat(200), 80).length, 80);
+  });
+  it('שלב ג 0ב: sentAfter – תשובה עם SENT בשרשור אחרי המייל הנכנס; לא המייל עצמו; קלט חסר – false', () => {
+    const t = 1000, m = (id, labelIds, d) => ({ id, labelIds, internalDate: String(d) });
+    assert.equal(G.sentAfter({ messages: [m('in', ['INBOX'], t), m('s1', ['SENT'], t + 5)] }, t, 'in'), true);
+    assert.equal(G.sentAfter({ messages: [m('s0', ['SENT'], t - 5), m('in', ['INBOX'], t)] }, t, 'in'), false, 'SENT לפני המייל');
+    assert.equal(G.sentAfter({ messages: [m('in', ['SENT', 'INBOX'], t + 5)] }, t, 'in'), false, 'המייל הנכנס עצמו');
+    assert.equal(G.sentAfter({ messages: [m('x', ['INBOX'], t + 9)] }, t, 'in'), false);
+    assert.equal(G.sentAfter(null, t, 'in'), false); assert.equal(G.sentAfter({}, t, 'in'), false); assert.equal(G.sentAfter({ messages: [null, { id: 'y' }] }, t, 'in'), false);
   });
 });
