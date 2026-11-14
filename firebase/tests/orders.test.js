@@ -814,7 +814,35 @@ describe('לקוח עסקי ומחירים – שלב 1 (14.11.2026)', () => {
     await prep((d) => d.doc(`b/${A}/ordcfg/price`).set({ pct: 15 }));
     await prep((d) => d.doc(`b/${A}/cprice/${WS}_pA`).set({ cust: WS, pid: 'pA', p: 3.5, vm: 'ex' })); // מנהל קבע 3.50 (מתחת ל-3.90)
     const r = await mk(E1, WS, [{ pid: 'pA', qty: 1 }]);
-    assert.equal(r.reason, 'price-floor'); assert.match(r.text, /3\.9/);
+    assert.equal(r.reason, 'price-floor'); assert.match(r.text, /3\.9/); // רשומה ישנה בלי mg – כמו עובד (מחמיר)
+  });
+  it('סבב 3 (החלטה 8): מחיר קבוע שמנהל שמר (mg) – מאושר לעובד גם מתחת למינימום ולעלות; שעובד שמר – נבדק כרגיל', async () => {
+    await seedBiz();
+    // מנהל שמר 3.00 (מתחת למינימום 3.90 ומתחת לעלות 3.39)
+    await prep((d) => d.doc(`b/${A}/cprice/${WS}_pA`).set({ cust: WS, pid: 'pA', p: 3, vm: 'ex', mg: true }));
+    let r = await mk(E1, WS, [{ pid: 'pA', qty: 1 }]); assert.equal(r.status, 'OK', r.text);
+    assert.equal((await get(`b/${A}/ord/${r.result.id}`)).items[0].price, 3);
+    assert.equal((await mk(E1, WS, [{ pid: 'pA', qty: 1, price: 3 }])).status, 'OK');
+    assert.equal((await mk(E1, WS, [{ pid: 'pA', qty: 1, price: 3.5 }])).status, 'OK'); // מעל המחיר שהמנהל אישר
+    assert.equal((await mk(E1, WS, [{ pid: 'pA', qty: 1, price: 2.99 }])).reason, 'price-floor'); // מתחתיו – נבדק כרגיל
+    // בעריכה – אותו דבר
+    assert.equal((await call('updateOrder', E1, { id: r.result.id, items: [{ pid: 'pA', qty: 2, price: 3 }] })).status, 'OK');
+    // עובד שמר (mg:false) – נבדק כרגיל
+    await prep((d) => d.doc(`b/${A}/cprice/${WS}_pA`).set({ cust: WS, pid: 'pA', p: 3, vm: 'ex', mg: false }));
+    assert.equal((await mk(E1, WS, [{ pid: 'pA', qty: 1 }])).reason, 'price-floor');
+    // דרך setCustPrice: מנהל שומר → mg:true, ועובד יכול להשתמש
+    await prep((d) => d.doc(`b/${A}/cprice/${WS}_pA`).delete());
+    assert.equal((await call('setCustPrice', MGR, { custId: WS, pid: 'pA', p: 2.5 })).status, 'OK');
+    assert.equal((await get(`b/${A}/cprice/${WS}_pA`)).mg, true);
+    assert.equal((await mk(E1, WS, [{ pid: 'pA', qty: 1 }])).status, 'OK');
+  });
+  it('סבב 3: לקוח עסקי, מוצר בלי עלות – עובד לא נותן מחיר 0 (גם בלי ordcfg/price); מנהל – מותר; פרטי בלי הגדרה – כמו קודם', async () => {
+    await seedBiz(); await prep((d) => d.doc(`b/${A}/ordcfg/price`).delete());
+    const r = await mk(E1, WS, [{ pid: 'pB', qty: 1, price: 0 }]);
+    assert.equal(r.reason, 'price-floor'); assert.match(r.text, /במחיר 0/);
+    assert.equal((await mk(E1, WS, [{ pid: 'pB', qty: 1, price: 1 }])).status, 'OK');
+    assert.equal((await mk(MGR, WS, [{ pid: 'pB', qty: 1, price: 0 }])).status, 'OK');
+    assert.equal((await mk(E1, PR, [{ pid: 'pB', qty: 1, price: 0 }])).status, 'OK');
   });
   it('סבב 2: מחיר קבוע ב-vm אחר – המרה לפי מע"מ (פרטי→עסקי ועסקי→פרטי)', async () => {
     await seedBiz();
@@ -825,14 +853,17 @@ describe('לקוח עסקי ומחירים – שלב 1 (14.11.2026)', () => {
     r = await mk(E1, PR, [{ pid: 'pA', qty: 1 }]); assert.equal(r.status, 'OK', r.text);
     assert.equal((await get(`b/${A}/ord/${r.result.id}`)).items[0].price, 5.9);
   });
-  it('סבב 2: שורה חופשית בשם של מוצר קיים – עובד נדחה (use-stock), גם בעריכה; משלוח – כמו קודם; מנהל – מותר; שורה ישנה שלא השתנתה – עוברת', async () => {
+  it('סבב 2+3: שורה חופשית בשם של מוצר קיים – עובד נדחה (use-stock) בלקוח עסקי, גם בעריכה; לקוח פרטי – כמו קודם; משלוח – כמו קודם; מנהל – מותר; שורה ישנה שלא השתנתה – עוברת', async () => {
     await seedBiz();
-    assert.equal((await mk(E1, PR, [{ n: 'עוגה', qty: 1, price: 0 }])).reason, 'use-stock');
-    assert.equal((await mk(E1, PR, [{ n: ' עוגה ', qty: 1, price: 1 }])).reason, 'use-stock');
+    assert.equal((await mk(E1, WS, [{ n: 'עוגה', qty: 1, price: 0 }])).reason, 'use-stock');
+    assert.equal((await mk(E1, WS, [{ n: ' עוגה ', qty: 1, price: 1 }])).reason, 'use-stock');
     await prep((d) => d.doc(`b/${A}/prod/pB`).update({ al: ['כיכר'] }));
-    assert.equal((await mk(E1, PR, [{ n: 'כיכר', qty: 1, price: 1 }])).reason, 'use-stock');
-    assert.equal((await mk(E1, PR, [{ n: 'משלוח', qty: 1, price: 0 }])).status, 'OK');
-    const m = await mk(MGR, PR, [{ n: 'עוגה', qty: 1, price: 1 }]); assert.equal(m.status, 'OK');
+    assert.equal((await mk(E1, WS, [{ n: 'כיכר', qty: 1, price: 1 }])).reason, 'use-stock');
+    assert.equal((await mk(E1, WS, [{ n: 'משלוח', qty: 1, price: 0 }])).status, 'OK');
+    // סבב 3: לקוח פרטי / בלי לקוח – כמו לפני המשימה
+    assert.equal((await mk(E1, PR, [{ n: 'עוגה', qty: 1, price: 1 }])).status, 'OK');
+    assert.equal((await mk(E1, '', [{ n: 'כיכר', qty: 1, price: 1 }])).status, 'OK');
+    const m = await mk(MGR, WS, [{ n: 'עוגה', qty: 1, price: 1 }]); assert.equal(m.status, 'OK');
     assert.equal((await call('updateOrder', E1, { id: m.result.id, items: [{ n: 'עוגה', qty: 1, price: 1 }, { n: 'משלוח', qty: 1, price: 5 }] })).status, 'OK');
     assert.equal((await call('updateOrder', E1, { id: m.result.id, items: [{ n: 'עוגה', qty: 1, price: 0.5 }] })).reason, 'use-stock');
   });

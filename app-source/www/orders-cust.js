@@ -269,7 +269,7 @@ V.ocCard=id=>{const T='לקוח';if(!on())return{t:T,h:'<div class="empty">אי�
  ${biz?H('פרטי העסק',1)+biz:''}${H('פרטי קשר',1)}${con||'<p class="note">אין פרטים</p>'}${xs?H('שדות נוספים',1)+xs:''}${inf?H('פרטים נוספים',1)+inf:''}</div>
  ${P.length?`<div class="card" style="margin-top:8px">${H('קווים מנויידים ('+P.length+')',1)}${P.map(portH).join('')}</div>`:''}
  <div class="row" style="margin-top:8px"><button class="btn grow" data-a="ocEdit" data-id="${esc(c.id)}">עריכת כל הפרטים</button>${mgr()?`<button class="btn g grow" data-a="ocWs" data-id="${esc(c.id)}">${c.wholesale===true?'הפוך ללקוח רגיל':'סמן כלקוח עסקי (סיטונאי)'}</button>`:''}</div>
- ${mgr()?cardMgrH(c):''}<div class="sec"><h3>הזמנות</h3></div>${L.length?L.map(o=>`<button class="li" data-a="go" data-v="oxOrd" data-arg="${esc(o.id)}"><div class="m"><b>#${o.no}</b><small>${new Date(o.at).toLocaleDateString('he-IL')}</small></div><b class="a">${ils(o.total)}</b></button>`).join(''):`<p class="note">${O.L?'אין הזמנות':'טוען…'}</p>`}`}};
+ ${mgr()?cardMgrH(c):''}<div class="sec"><h3>הזמנות</h3></div>${L.length?L.map(o=>`<button class="li" data-a="go" data-v="oxOrd" data-arg="${esc(o.id)}"><div class="m"><b>#${o.no}</b><small>${new Date(o.at).toLocaleDateString('he-IL')}</small></div><b class="a">${ils((o.vm==='ex'||o.vm==='inc')&&typeof o.gross==='number'?o.gross:o.total)}</b></button>`).join(''):`<p class="note">${O.L?'אין הזמנות':'טוען…'}</p>`}`}};
 function fnLoadOrders(){/* V.ox טוען את ההזמנות כשאין עדיין */try{V.ox()}catch(e){}setTimeout(()=>{if(cur().v==='ocCard'&&!typing())rerender()},1500)}
 ACT.ocWs=async el=>{const c=(C.L||[]).find(x=>x.id===el.dataset.id);if(!c)return;const to=c.wholesale!==true;
  if(to){if(!C.cfg)await cfgLoad();C.wsMark=c.id;C.ea=!!(c.addr||AP.some(k=>c[k]));return dlg(cForm(c))} // סבב 1: סימון כעסקי – ממלאים את כל פרטי העסק
@@ -332,7 +332,7 @@ function cpVal(k,o,c){const u=Object.assign({},o.cust||{}),t=v=>String(v==null?'
  if(INFK.includes(k))return t(c[k]);
  if(k==='lines')return ((o.cell&&o.cell.lines)||[]).map((l,i)=>'\n  קו '+(i+1)+': '+[t(l.phone),l.tz?'ת.ז '+t(l.tz):'',t(l.carrier)].filter(Boolean).join(', ')).join('');
  if(k==='no')return o.no!=null?'#'+o.no:'';
- if(k==='total')return typeof o.total==='number'?ils(o.total):'';
+ if(k==='total')return (o.vm==='ex'||o.vm==='inc')&&typeof o.gross==='number'?ils(o.gross):typeof o.total==='number'?ils(o.total):''; // סבב 3: לתשלום (gross ?? total)
  if(k.startsWith('x:'))return t(c.x&&c.x[k.slice(2)]);return ''}
 ACT.ocCopyAll=async el=>{const o=(O.L||[]).find(x=>x.id===el.dataset.id);if(!o||!o.custId)return;el.disabled=true;
  try{if(!C.cfg)await cfgLoad();const c=await getC(o.custId).catch(()=>null)||(C.L||[]).find(x=>x.id===o.custId)||null;const F=cpSel(),wantC=F.some(k=>CPC.includes(k)),out=[];let warn='',cards=[];

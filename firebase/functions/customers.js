@@ -20,7 +20,7 @@
 //              blk חסום (עובד לא פותח לו הזמנה), lim מסגרת אשראי (רק נשמר – האזהרה משלב 4), phx: כל הטלפונים לזיהוי (השרת בונה בכל שמירה) }
 //   terms אחרי ההקמה, blk ו-lim – מנהל בלבד. בהקמה עובד בוחר terms (ברירת מחדל מיידי).
 //   findCust – חיפוש מדויק בשרת (טלפון כולל אנשי קשר, ע.מ, ת"ז). חיפוש לפי שם – במכשיר.
-//   cprice/{custId}_{pid} – מחיר קבוע ללקוח: setCustPrice (עובד עם ord בתוך המגבלה, ומנהל), delCustPrice (מנהל). ordcfg/price – setPriceCfg (מנהל).
+//   cprice/{custId}_{pid} – מחיר קבוע ללקוח: setCustPrice (עובד עם ord בתוך המגבלה, ומנהל), delCustPrice (מנהל). mg = true כשמנהל שמר (סבב 3). ordcfg/price – setPriceCfg (מנהל).
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { onCall } = require('./lib/region'); // שני אזורים (europe-west1 + us-central1) – lib/region.js
@@ -935,7 +935,8 @@ async function setCustPrice(request) {
     }
     const now = Date.now();
     const h = (cur.exists && Array.isArray(cur.get('h')) ? cur.get('h') : []).concat([{ f: old, t: p, by: w.uid, at: now }]).slice(-20);
-    tx.set(ref, { cust: cid, pid, p, n: String(ps.get('name') || '').slice(0, 80), vm, h, by: w.uid, at: now });
+    // סבב 3 (החלטה 8): mg = מנהל שמר (מאושר לעובד גם מתחת למינימום); עובד – false
+    tx.set(ref, { cust: cid, pid, p, n: String(ps.get('name') || '').slice(0, 80), vm, mg: mgr, h, by: w.uid, at: now });
     out = { ok: true, p, vm };
   });
   return out;

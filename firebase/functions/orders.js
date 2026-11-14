@@ -875,7 +875,8 @@ function ordAccess(w, d) {
 // =====================================================================================
 // 14.11.2026 (משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1): מחיר ברירת מחדל ללקוח ומינימום מחיר – נאכף כאן, בשרת.
 //   ordcfg/price  { pct?, pp?, cat?:{<catId>:X}, disc?, upd }  – מגבלות המחיר (מנהל, setPriceCfg). המסמך קיים = המגבלה פעילה; חסר = בלי מינימום (כמו קודם).
-//   cprice/{custId}_{pid}  { cust, pid, p?, n, vm, h:[{f,t,by,at}], by, at, del? } – מחיר קבוע ללקוח (customers.js). p חסר = נמחק (ההיסטוריה נשמרת).
+//   cprice/{custId}_{pid}  { cust, pid, p?, n, vm, mg?, h:[{f,t,by,at}], by, at, del? } – מחיר קבוע ללקוח (customers.js). p חסר = נמחק (ההיסטוריה נשמרת).
+//     mg (סבב 3, החלטה 8) = true כשמנהל שמר – מאושר לעובד גם מתחת למינימום. חסר (רשומה ישנה) / false = עובד שמר – נבדק כרגיל.
 //   aralert/p_{pid}  { t:'cp', pid, n, from, to, cnt, custs, st:'new'|'done', at, by } – המחירון השתנה ויש ללקוחות מחיר קבוע (מנהל).
 //   ord (+) { vm:'ex'|'inc', vr, net, vat, gross, disc? } – הזמנה חדשה: vm לפי סוג הלקוח, vr = אחוז המע"מ, סכומים בשקלים. total לא משתנה (סכום השורות).
 // סדר המחיר לשורה בלי מחיר: מחיר קבוע ← סיטונאי ← רגיל (לקוח עסקי בלי סיטונאי: רגיל ÷ (1+מע"מ), החלטה 7). מנהל עוקף את המינימום.
@@ -894,19 +895,27 @@ async function priceCtx(tx, db, custId, pids, cfgMain) {
   ids.forEach((p, i) => {
     const w0 = all[head.length + i * per], c0 = custId ? all[head.length + i * per + 1] : null;
     if (w0.exists && isNum(w0.get('wp'))) wp.set(p, w0.get('wp'));
-    if (c0 && c0.exists && isNum(c0.get('p'))) cp.set(p, { p: c0.get('p'), vm: c0.get('vm') });
+    if (c0 && c0.exists && isNum(c0.get('p'))) cp.set(p, { p: c0.get('p'), vm: c0.get('vm'), mg: c0.get('mg') === true });
   });
   const v = cfgMain && cfgMain.exists ? cfgMain.get('vat') : null;
   return { cfg, biz, blk: !!(cs && cs.exists && cs.get('blk') === true), wp, cp, vm: biz ? 'ex' : 'inc', vat: isNum(v) && v >= 0 && v <= 100 ? v : AC.VAT0 };
 }
 // מחיר קבוע ביחידה של ההזמנה (סבב 2, ליקוי 5): נשמר עם vm; לקוח שעבר מפרטי לעסקי (או להפך) – המרה לפי אחוז המע"מ
 const cpOf = (pc, pid) => { const x = pc.cp.get(pid); return x ? AC.cpConv(x.p, x.vm, pc.vm, pc.vat) : undefined; };
+// סבב 3 (החלטה 8): מחיר קבוע שמנהל שמר (mg) – לבדיקת העובד; אחר – undefined
+const mcpOf = (pc, pid) => { const x = pc.cp.get(pid); return x && x.mg ? cpOf(pc, pid) : undefined; };
 // סבב 2 (ליקוי 4): שמות (מנורמלים, ProdMatch.key) של מוצרים קיימים שתואמים לשורות החופשיות – לעובד בלבד, ורק כשיש שורה חופשית.
 // קריאה אחת של שם וכינויים (select), לפני הטרנזקציה. שורה חופשית אחרת (משלוח וכד') – כמו קודם.
-async function freeHits(db, w, raw) {
+// סבב 3: רק ללקוח עסקי (לקוח פרטי – כמו לפני המשימה; התוכנית לא דורשת). לכן קודם בודקים את הלקוח (קריאה אחת), ורק ללקוח עסקי קוראים את המוצרים.
+//   custId – ביצירה; ordRef – בעריכה (הלקוח ו-vm של ההזמנה). ההחלטה הסופית בטרנזקציה: freeCheck רק כש-vm = 'ex'.
+//   לא שאילתה ממוקדת: ההתאמה אחרי נרמול (PM.key), ואין במוצר שדה מנורמל לשאילתה. לא המטמון ixOf: הוא מסנן מוצרים כבויים ומתעדכן רק במופע שכתב (עד דקה).
+async function freeHits(db, w, raw, custId, ordRef) {
   if (w.role === 'manager' || !raw) return null;
   const ks = new Set(raw.filter((x) => !x.pid).map((x) => PM.key(x.n)).filter(Boolean));
   if (!ks.size) return null;
+  let vm = null;
+  if (ordRef) { const o = await ordRef.get(); if (!o.exists) return null; custId = typeof o.get('custId') === 'string' && ID_RE.test(o.get('custId')) ? o.get('custId') : ''; vm = o.get('vm'); }
+  if (vm !== 'ex') { if (!custId) return null; const c = await db.doc('cust/' + custId).get(); if (!c.exists || c.get('wholesale') !== true) return null; }
   const hit = new Set();
   (await db.collection('prod').select('name', 'al').get()).docs.forEach((d) => {
     for (const n of [d.get('name')].concat(Array.isArray(d.get('al')) ? d.get('al') : [])) { const k = typeof n === 'string' ? PM.key(n) : ''; if (k && ks.has(k)) hit.add(k); }
@@ -931,9 +940,10 @@ function priceRun(w, items, raw, pc, pd, br, costs, keep) {
     if (AC.ag(it.price) !== AC.ag(def)) notes.push(`${it.n}: ₪${def} → ₪${it.price}`);
     if (w.role === 'manager' || (keep && keep.has(it.pid + '|' + it.price + '|' + it.qty))) return;
     // סבב 2 (ליקויים 2, 3): מחיר קבוע לא מכשיר את עצמו (בודקים מול base); לקוח עסקי – לא מתחת לעלות גם בלי מגבלה
-    const r = AC.staffOk({ price: it.price, base, cost: costs.get(it.pid), vm: pc.vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, pc.vm === 'ex', p.cat, p.sub), on: !!pc.cfg, biz: pc.vm === 'ex' });
+    // סבב 3 (החלטה 8): mcp = מחיר קבוע שמנהל שמר – מאושר לעובד
+    const r = AC.staffOk({ price: it.price, base, mcp: mcpOf(pc, it.pid), cost: costs.get(it.pid), vm: pc.vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, pc.vm === 'ex', p.cat, p.sub), on: !!pc.cfg, biz: pc.vm === 'ex' });
     if (r.ok) return;
-    const why = r.why === 'below-cost' ? ' – מתחת לעלות' : r.why === 'no-cost' ? ` – למוצר אין עלות, אפשר רק ₪${r.min} ומעלה` : ` – המינימום ₪${r.min}`;
+    const why = r.why === 'zero' ? ' – אי אפשר לתת במחיר 0' : r.why === 'below-cost' ? ' – מתחת לעלות' : r.why === 'no-cost' ? ` – למוצר אין עלות, אפשר רק ₪${r.min} ומעלה` : ` – המינימום ₪${r.min}`;
     throw new HttpsError('invalid-argument', `"${it.n}": אין אפשרות לתת במחיר הזה${why}`, { reason: 'price-floor', why: r.why, pid: it.pid, min: r.min });
   });
   return notes;
@@ -997,7 +1007,7 @@ async function createOrder(request) {
   if (input.cell !== undefined) needCell(w);
   const db = T.tdb();
   const ref = db.doc('ord/o' + reqId);
-  const fh = await freeHits(db, w, raw);
+  const fh = await freeHits(db, w, raw, custId, null);
   const seq = db.doc('ordcfg/seq');
   const cfg = db.doc('ordcfg/main');
   let out = null;
@@ -1015,7 +1025,7 @@ async function createOrder(request) {
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
     const pd = plain(prods);
     const { items } = resolveItems(w, br, raw, pd, src);
-    freeCheck(raw, fh, null);
+    freeCheck(raw, pc.vm === 'ex' ? fh : null, null);
     const pnotes = priceRun(w, items, raw, pc, pd, br, costs, null);
     snapCosts(items, costs);
     cartons(items, pd, await isWs(tx, db, custId), null, cell);
@@ -1053,7 +1063,7 @@ async function updateOrder(request) {
   if (input.cell !== undefined) needCell(w);
   const db = T.tdb();
   const ref = db.doc('ord/' + id);
-  const fh = await freeHits(db, w, raw);
+  const fh = await freeHits(db, w, raw, '', ref);
   let out = null;
   await db.runTransaction(async (tx) => {
     const [s, c] = await tx.getAll(ref, db.doc('ordcfg/main'));
@@ -1079,7 +1089,7 @@ async function updateOrder(request) {
       const pd = plain(prods);
       const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
       const { items } = resolveItems(w, d.br, raw, pd, src);
-      freeCheck(raw, fh, oldItems);
+      freeCheck(raw, prc.vm === 'ex' ? fh : null, oldItems);
       priceRun(w, items, raw, prc, pd, d.br, costs, new Set(oldItems.filter((x) => x && x.pid).map((x) => x.pid + '|' + x.price + '|' + x.qty)));
       snapCosts(items, costs, oldItems);
       cartons(items, pd, await isWs(tx, db, d.custId), oldItems, cell !== undefined ? cell : d.cell, d.cell);

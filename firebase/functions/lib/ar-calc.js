@@ -58,7 +58,11 @@ function priceOk(o) {
 }
 // בדיקת מחיר של עובד בהזמנה / במחיר קבוע (סבב 2). base = ברירת המחדל *בלי* מחיר קבוע (סיטונאי / רגיל) – מחיר קבוע לא מכשיר את עצמו.
 // on = מגבלת המחיר פעילה (ordcfg/price). biz = לקוח עסקי: מתחת לעלות חסום תמיד, גם בלי מגבלה. לקוח פרטי בלי מגבלה – בלי בדיקה (כמו קודם).
+// סבב 3 (החלטה 8): mcp = מחיר קבוע ש*מנהל* שמר ללקוח (ביחידת ההזמנה) – מאושר לעובד גם מתחת למינימום / לעלות, וכך גם מחיר גבוה ממנו.
+// מחיר קבוע שעובד שמר (או רשומה ישנה בלי סימון) – לא נשלח כ-mcp ונבדק כרגיל. לקוח עסקי: מחיר 0 חסום לעובד כשברירת המחדל גדולה מ-0 (גם למוצר בלי עלות).
 function staffOk(o) {
+  if (isNum(o.mcp) && ag(o.price) >= ag(o.mcp)) return { ok: true, mgr: true };
+  if (o.biz && ag(o.price) <= 0 && ag(isNum(o.base) ? o.base : 0) > 0) return { ok: false, min: o.base, why: 'zero' };
   const c = costIn(o.cost, o.vm, o.vat);
   if ((o.on || o.biz) && c != null && ag(o.price) < agUp(c)) return { ok: false, min: floorOf(o.cost, o.vm, o.vat, o.on ? o.pct : 0), why: 'below-cost' };
   if (!o.on) return { ok: true };

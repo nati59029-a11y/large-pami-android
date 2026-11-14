@@ -95,5 +95,15 @@ describe('לקוח עסקי – חישובים טהורים (ar-calc)', () => {
     assert.equal(AC.staffOk(Object.assign({ price: 15, on: true, biz: false }, b)).ok, true);
     assert.equal(AC.staffOk({ price: 5, base: 5, cost: 10, vm: 'inc', vat: 18, on: true }).why, 'below-cost'); // ברירת מחדל מתחת לעלות – חסום לעובד
   });
+  it('סבב 3: staffOk – מחיר קבוע של מנהל (mcp) מאושר גם מתחת לעלות; עסקי – מחיר 0 חסום גם בלי עלות', () => {
+    const b = { base: 15, cost: 10, vm: 'inc', vat: 18, pct: 15, on: true, biz: true };
+    assert.equal(AC.staffOk(Object.assign({ price: 5, mcp: 5 }, b)).ok, true);
+    assert.equal(AC.staffOk(Object.assign({ price: 6, mcp: 5 }, b)).ok, true);
+    assert.equal(AC.staffOk(Object.assign({ price: 4.99, mcp: 5 }, b)).why, 'below-cost');
+    assert.equal(AC.staffOk(Object.assign({ price: 0, mcp: 0 }, b)).ok, true);
+    assert.equal(AC.staffOk({ price: 0, base: 6, vm: 'ex', vat: 18, on: false, biz: true }).why, 'zero');
+    assert.equal(AC.staffOk({ price: 0.5, base: 6, vm: 'ex', vat: 18, on: false, biz: true }).ok, true);
+    assert.equal(AC.staffOk({ price: 0, base: 6, vm: 'inc', vat: 18, on: false, biz: false }).ok, true); // פרטי בלי מגבלה – כמו קודם
+  });
 });
 
