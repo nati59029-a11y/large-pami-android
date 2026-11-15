@@ -549,6 +549,9 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
   it('ליקוי 4: מכסת פענוח – עובד 20 בדקה, החריגה נדחית בעברית ונרשמת ביומן; מנהל 60 בדקה', async () => {
     await call('saveCust', MGR, { cust: c1 }); await call('setCard', MGR, { custId: 't' + TZ, card: CARD });
     const id = 't' + TZ; await mkOrd('oQ', 'new', 'br1', id);
+    // המכסה לדקה נספרת לפי דקה בשעון: אם הדקה עומדת להתחלף, מחכים לחדשה (אחרת המונה מתאפס באמצע והבדיקה נכשלת במקרה)
+    const fresh = async () => { const s = Date.now() % 60000; if (s > 54000) await new Promise((ok) => setTimeout(ok, 60200 - s)); };
+    await fresh();
     for (let i = 0; i < 20; i++) assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' })).status, 'OK', 'i=' + i);
     const r = await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' });
     assert.equal(r.reason, 'card-quota', r.text); assert.match(r.text, /מכסת/); assert.ok(!leak(r.text));
@@ -557,6 +560,7 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     const d = new Date().toISOString().slice(0, 10);
     await prep((x) => x.doc(`b/${A}/cardQ/${E1}`).set({ m: 0, mn: 0, d, dn: 150 }));
     assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' })).reason, 'card-quota');
+    await fresh();
     await prep((x) => x.doc(`b/${A}/cardQ/${MGR}`).set({ m: Math.floor(Date.now() / 60000), mn: 59, d, dn: 59 }));
     assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).status, 'OK');
     assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).reason, 'card-quota');

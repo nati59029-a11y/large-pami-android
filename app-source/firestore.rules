@@ -1037,6 +1037,13 @@ service cloud.firestore {
         allow read, create, update, delete: if false;
       }
     }
+    // כללים אישיים של מנהל ויומן "נשלח לבד" (15.11.2026, "תגובה למזכירה"): רק דרך השרת (secLearn) – אף אחד מהאפליקציה
+    match /sec_mrule/{id} {
+      allow read, create, update, delete: if false;
+    }
+    match /sec_mlog/{id} {
+      allow read, create, update, delete: if false;
+    }
 
     // ----- סריקת חנות בתלת מימד – store3d (14.11.2026; חוזה: משימות/2026-11-14_סריקת-חנות-תלת-מימד/תוצרים/0-חוזה-נתונים.md) -----
     // התוספת כבויה כברירת מחדל בכל עסק, גם בלארג' פעמי (כמו secretary). כבויה = אין גישה לאף אוסף של התוספת (s3br, s3set, smap, sround, srun ועוד).
@@ -2027,6 +2034,13 @@ service cloud.firestore {
         match /n/{id} {
           allow read, create, update, delete: if false;
         }
+      }
+      // כללים אישיים של מנהל ויומן "נשלח לבד" (15.11.2026): רק דרך השרת (secLearn)
+      match /sec_mrule/{id} {
+        allow read, create, update, delete: if false;
+      }
+      match /sec_mlog/{id} {
+        allow read, create, update, delete: if false;
       }
 
       // ----- store3d בתוך העסק (14.11.2026): אותם אוספים ותנאים כמו בשורש (הבדיקות המשותפות s3* מוגדרות שם), -----

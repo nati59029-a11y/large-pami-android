@@ -305,7 +305,57 @@ function buildReport(o) {
   return { kind: 'm', title: 'הדוח החודשי', secs, ideas, src, why: o.why || '' };
 }
 
+// ---------- "תזכירי לי שוב" (15.11.2026, סעיף 7) ----------
+// תצוגת יום ושעה: "יום ראשון 15.11, 12:00" (קבוע – גם כשקוראים את ההתראה מחר). במכשיר: היום/מחר בזמן הציור
+const WD_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+function dayHm(day, tm) {
+  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return '';
+  return 'יום ' + WD_HE[wdOf(day)] + ' ' + (+day.slice(8, 10)) + '.' + (+day.slice(5, 7)) + (tm && HM_RE.test(tm) ? ', ' + tm : '');
+}
+// רגע → "היום 12:00" / "מחר 08:00" / "יום ראשון 15.11, 12:00" (שעון ישראל, ביחס ל-now)
+function whenL(at, now) {
+  const a = il(at), t = il(now);
+  if (a.day === t.day) return 'היום ' + a.hm;
+  if (a.day === K.addDays(t.day, 1)) return 'מחר ' + a.hm;
+  return dayHm(a.day, a.hm);
+}
+const SNZ_MAX = 60 * 864e5, SNZ_MIN = 60e3;
+const snzOk = (at, now) => Number.isFinite(at) && at >= now + SNZ_MIN && at <= now + SNZ_MAX;
+// "מחר בבוקר" = יום העסקים הבא ב-08:00 (הנחה בסעיף 7)
+const snzMorning = (now) => nextBizMorning(now);
+// פענוח ניסוח פשוט בעברית (בלי מודל): "תשלחי שוב בעוד שעה", "בעוד 3 שעות", "בעוד 20 דקות", "בעוד שעתיים", "מחר בבוקר", "מחר ב-9:30",
+// "היום ב-16:00". משפט שיש בו עוד משהו מלבד הזמן ומילות "שוב/תזכירי/תשלחי" – לא מפוענח (null), כדי לא לנחש הוראה אחרת.
+const NUMW = { אחת: 1, אחד: 1, שתי: 2, שתיים: 2, שני: 2, שניים: 2, שלוש: 3, שלושה: 3, ארבע: 4, ארבעה: 4, חמש: 5, חמישה: 5, שש: 6, שישה: 6, שבע: 7, שבעה: 7, שמונה: 8, תשע: 9, תשעה: 9, עשר: 10, עשרה: 10, עשרים: 20, שלושים: 30, ארבעים: 40, חמישים: 50 };
+const UNIT = [['רבע שעה', 15], ['חצי שעה', 30], ['שעה וחצי', 90], ['שעתיים', 120], ['יומיים', 2880], ['דקות', 1], ['דקה', 1], ['שעות', 60], ['שעה', 60], ['ימים', 1440], ['יום', 1440]];
+const REL_RE = new RegExp('בעוד\\s+(?:(\\d{1,3}|' + Object.keys(NUMW).join('|') + ')\\s*)?(' + UNIT.map((u) => u[0].replace(' ', '\\s+')).join('|') + ')(?![א-ת])');
+const AT_RE = /(מחר|היום)\s+(?:ב\s*[-־–]?\s*|בשעה\s*)(\d{1,2})(?:[:.](\d{2}))?(?!\d)/;
+const MORN_RE = /מחר\s+(?:ב)?בוקר/;
+const FILL_RE = /(?:^|\s)(?:תשלחי|תשלח|שלחי|לשלוח|תזכירי|תזכיר|להזכיר|הזכירי|תחזירי|להחזיר|תתריעי|להתריע|שוב|לי|אותה|אותו|את|זה|זאת|ההתראה|התראה|התזכורת|תזכורת|בבקשה|אפשר|רק|עוד\s+פעם|פעם\s+נוספת)(?=\s|$)/g;
+function snoozeOf(text, now) {
+  let t = String(text || '').replace(/["'״׳!?.,]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 80) return null;
+  let at = null, m;
+  if ((m = REL_RE.exec(t))) {
+    const u = UNIT.find((x) => new RegExp('^' + x[0].replace(' ', '\\s+') + '$').test(m[2]));
+    const n = m[1] ? (/^\d+$/.test(m[1]) ? +m[1] : NUMW[m[1]]) : 1;
+    if (!u || !(n > 0) || (m[1] && ['רבע שעה', 'חצי שעה', 'שעה וחצי', 'שעתיים', 'יומיים'].includes(u[0]))) return null;
+    at = now + n * u[1] * 60e3;
+  } else if ((m = MORN_RE.exec(t))) {
+    at = snzMorning(now);
+  } else if ((m = AT_RE.exec(t))) {
+    const h = +m[2], mi = m[3] ? +m[3] : 0;
+    if (h > 23 || mi > 59) return null;
+    const d = m[1] === 'מחר' ? K.addDays(il(now).day, 1) : il(now).day;
+    at = ilMs(d, String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0'));
+  } else return null;
+  const rest = t.replace(m[0], ' ').replace(FILL_RE, ' ').replace(FILL_RE, ' ').trim();
+  if (rest) return null;
+  at = Math.ceil(at / 60e3) * 60e3; // עיגול כלפי מעלה: "בעוד דקה" כשיש שניות – לא פחות מדקה (snzOk)
+  return snzOk(at, now) ? { at, l: whenL(at, now) } : null;
+}
+
 module.exports = {
   TZ, MORNING, TYPES, NO_REPEAT, DEF, EMP_MIN, il, ilMs, wdOf, bizOnOrAfter, prevBizDay, nextBizMorning, ntOf, readNt, wkWarn, inQuiet, pushAtOf,
   cashDiff, finItems, notRej, monthlyOf, finCands, invCands, winCand, winOpen, WIN_MS, WIN_LEAD, INV_WAIT, taskCands, closeCands, REG, backupCands, factCands, calAt, weeklyDue, monthlyDue, buildReport, ils, prevMon,
+  dayHm, whenL, snoozeOf, snzOk, snzMorning, SNZ_MAX, SNZ_MIN,
 };

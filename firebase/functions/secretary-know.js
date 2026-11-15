@@ -92,6 +92,7 @@ async function secFacts(request) {
       f = { topic: p.topic, text: p.text };
       if (input.exp === undefined && p.exp) input.exp = p.exp >= today ? p.exp : '';
     }
+    const raw = op === 'approve' ? await col.doc(id).get() : null; // 15.11.2026: באיזו הודעה בשיחה הכרטיס (mid) ומי הציע
     const exp = readExp(input.exp, today);
     const conflict = K.conflictsOf({ id, topic: f.topic, text: f.text }, L);
     if (conflict.length && input.force !== true) return { ok: false, conflict, fact: f }; // מציגה את שתיהן ושואלת (49)
@@ -101,6 +102,7 @@ async function secFacts(request) {
     if (input.pub === true) doc.pub = true;
     if (op === 'add') b.set(col.doc(id), doc); else b.update(col.doc(id), Object.assign(doc, { okBy: who.uid, exp: exp || FieldValue.delete() }));
     for (const r of rp) b.update(col.doc(r), { st: 'old', oldBy: id, upd: now });
+    if (raw && raw.exists && raw.get('mid')) await C.cardMark(db, b, raw.get('by'), raw.get('mid'), id, { st: 'ok' });
     log(b, db, who.uid, op === 'add' ? 'factAdd' : 'factOk', { tgt: id, note: rp.length ? 'replaced ' + rp.length : '' });
     out = { id, replaced: rp };
   } else if (op === 'edit') {
@@ -118,6 +120,7 @@ async function secFacts(request) {
     const s = await col.doc(id).get();
     if (!s.exists) throw pre('not-found', 'העובדה לא נמצאה');
     if (op === 'reject' && s.get('st') !== 'prop') throw pre('not-pending', 'ההצעה כבר טופלה');
+    if (op === 'reject' && s.get('mid')) await C.cardMark(db, b, s.get('by'), s.get('mid'), id, { st: 'no' });
     b.delete(col.doc(id)); // מחיקה בלחיצה מפורשת של המנהל במסך (8.2: "ערוך"/"מחק"); הצעה שבוטלה – נמחקת
     log(b, db, who.uid, op === 'del' ? 'factDel' : 'factNo', { tgt: id });
     out = { id };
@@ -293,13 +296,14 @@ async function secCal(request) {
     if (!x || (x.uid !== '' && x.uid !== who.uid)) throw pre('not-found', 'האירוע לא נמצא');
     if (op === 'approve' || op === 'reject') {
       if (x.st !== 'prop') throw pre('not-pending', 'ההצעה כבר טופלה');
-      if (op === 'reject') { b.delete(col.doc(id)); log(b, db, who.uid, 'calNo', { tgt: id }); }
+      if (op === 'reject') { if (x.mid) await C.cardMark(db, b, x.by, x.mid, id, { st: 'no' }); b.delete(col.doc(id)); log(b, db, who.uid, 'calNo', { tgt: id }); }
       else {
         // אפשר לאשר בתאריך אחר (היום החלופי שהוצע)
         const d = input.d !== undefined ? input.d : x.d;
         if (typeof d !== 'string' || !K.validDay(d) || d < today) throw bad('bad-date', 'תאריך לא תקין או שעבר');
         const w = offCheck(d); if (w.ok === false) return w;
         b.update(col.doc(id), { st: 'ok', d, uid: x.to === 'biz' ? '' : who.uid, to: FieldValue.delete(), okBy: who.uid, okAt: now, keepOff: w.keepOff ? true : FieldValue.delete() });
+        if (x.mid) await C.cardMark(db, b, x.by, x.mid, id, d !== x.d ? { st: 'ok', okD: d } : { st: 'ok' });
         log(b, db, who.uid, 'calOk', { tgt: id, note: x.to === 'biz' ? 'biz' : 'me' });
       }
     } else if (op === 'edit') {
