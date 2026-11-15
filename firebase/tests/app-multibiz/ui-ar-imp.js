@@ -72,6 +72,19 @@ async function open(browser, www, who, calls) {
     const v = await view(page, 'arImp'); await shot(page, 'm-01-מסך-ייבוא');
     check('m 2 מסך הייבוא: בחירת סוג וקובץ, ייבואים קודמים (פעיל עם "ביטול קבוצה", מבוטל בלי), 360px בלי גלילה לרוחב',
       v.file && /ייבואים קודמים/.test(v.t) && /חשבוניות\.xlsx/.test(v.t) && /בוטל/.test(v.t) && v.voids === 1 && v.ov <= 0 && calls.some((c) => c.n === 'arImpList'), { voids: v.voids, ov: v.ov });
+    // קובץ דוגמה (החלטה 15.11.2026): הכפתור מוריד קובץ לפי הסוג שנבחר; הקובץ עצמו נקלט והעמודות מזוהות לבד.
+    // בדפדפן הבדיקה אין את ספריית האקסל (xlsx.full.min.js נוצר בבנייה) – לכן נבדק המסלול החלופי CSV (גיליון הנתונים בלבד). באפליקציה: xlsx עם גיליון "הסבר"
+    await page.selectOption('#aiK', 'inv');
+    const tpl = await page.evaluate(async () => { let got = null; const o = window.saveFile; window.saveFile = async (n, d) => { got = { n, d: typeof d === 'string' ? d : new TextDecoder().decode(d) }; };
+      try { document.querySelector('[data-a=aiTpl]').click(); await new Promise((r) => setTimeout(r, 300)); } finally { window.saveFile = o; }
+      if (!got) return null; return { n: got.n, xlsx: typeof XLSX !== 'undefined', rows: typeof XLSX === 'undefined' ? parseCsv(got.d.replace(/^\ufeff/, '')) : null, d: got.d }; });
+    check('m 2ב קובץ דוגמה לחשבוניות: "דוגמה לייבוא – חשבוניות", הכותרות כולל "תאריך לתשלום", 2 שורות דוגמה',
+      !!tpl && /^דוגמה לייבוא – חשבוניות\.(csv|xlsx)$/.test(tpl.n) && !!tpl.rows && tpl.rows[0].join() === 'מספר לקוח,ע.מ / ח.פ,טלפון,שם הלקוח,מספר מסמך,תאריך,סכום,תאריך לתשלום' && tpl.rows.filter((r) => r.some((c) => String(c).trim())).length === 3,
+      tpl && { n: tpl.n, rows: tpl.rows && tpl.rows.slice(0, 2) });
+    if (tpl && tpl.rows) { await page.setInputFiles('[data-c=aiFile]', { name: 'דוגמה.csv', mimeType: 'text/csv', buffer: Buffer.from(tpl.d, 'utf8') }); await H.settle(page, 1000);
+      const mt = await page.evaluate(() => [...document.querySelectorAll('#dlg form[data-f=aiMapF] select')].map((s) => s.value));
+      check('m 2ג קובץ הדוגמה נקלט: כל העמודות מזוהות לבד', JSON.stringify(mt) === JSON.stringify(['xc', 'vat', 'phone', 'name', 'no', 'd', 'amt', 'due']), mt);
+      await page.evaluate(() => closeDlg()); await view(page, 'arImp'); }
     // קובץ CSV: 30 שורות, השנייה עם תאריך שגוי
     const csv = ['מספר לקוח,שם לקוח,מספר חשבונית,תאריך,סכום,הערות'].concat(Array.from({ length: 30 }, (_, i) => `1001,מאפיית השקד,${100 + i},${i === 1 ? '31/02/2025' : '01/09/2025'},"1,180.00",x`)).join('\n');
     await page.selectOption('#aiK', 'inv');

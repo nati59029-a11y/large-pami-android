@@ -253,6 +253,12 @@ describe('קריטריון: קובץ דוגמה מיובא, היתרות = הק�
     assert.match(h, /^h[0-9a-f]{16}$/);
     const d2 = await get(`b/${A}/ardoc/x_inv_${h}`);
     assert.equal(d2.ext, '2025/101'); assert.equal(d2.open, 59050 - 9050, 'הזיכוי 900 הוקצה לחשבונית 2025/101');
+    // החלטה 15.11.2026: חוב מיובא בלי "תאריך לתשלום" – המועד לפי תנאי התשלום של הלקוח (שוטף+30 מ-15.9.2025 = 31.10.2025, שישי → ראשון 2.11)
+    assert.equal(d2.due, '2025-11-02'); assert.equal(d2.dueT, 1); assert.equal(d1.dueT, undefined, 'מועד מהקובץ – לא מחושב');
+    assert.equal((await get(`b/${A}/ardoc/x_inv_104`)).due, '2025-10-05', 'לקוח בלי תנאי תשלום – מיידי (1.10.2025 ערב יום כיפור → ראשון 5.10)');
+    const ob1 = await get(`b/${A}/ardoc/x_ob_p0548000001`);
+    assert.equal(ob1.due, require('../functions/lib/ar-doc').dueFor({ b: 'eom', d: 30 }, ob1.d)); assert.equal(ob1.dueT, 1);
+    assert.equal((await get(`b/${A}/ardoc/x_rc_500`)).due, undefined, 'זכות – בלי מועד');
     assert.equal((await get(`b/${A}/ardoc/x_inv_103`)).k, 'cr', 'חשבונית שלילית = זכות');
     assert.equal((await get(`b/${A}/ardoc/x_rc_502`)).k, 'dr', 'קבלה שלילית = חובה');
     assert.equal((await get(`b/${A}/ardoc/x_ob_p0548000002`)).k, 'cr');

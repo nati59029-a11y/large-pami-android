@@ -22,6 +22,13 @@
 // (ar.js monBuild – לא חשבונית מס), ושליחה לפי cust.snd (ברירת מחדל מייל). arrem/st_{לקוח}_{YYYY-MM} – פעם אחת. תלוי רק ב"מסמכים פעילים".
 //
 // arcfg/rem { on, hour, b, steps[], mon, cap, txt, sum, upd, by } – setRemCfg (ar.js, מנהל). אוסף arrem – שרת בלבד (אין כלל קריאה באפליקציה).
+//
+// החלטות בעל הפרויקט (15.11.2026, אחרי שלבים 5–6):
+// • תזכורות גם על חובות מיובאים: חשבונית ישנה (t:'old', k:'dr') ויתרת פתיחה (t:'ob', k:'dr') – כמו חשבונית מס. המועד שלהן נקבע בייבוא
+//   (תאריך לתשלום מהקובץ, ובלעדיו – לפי תנאי התשלום של הלקוח, ar-import.js). בהודעה: המספר המקורי / "יתרת פתיחה".
+// • ניסיון חוזר לשליחה שנכשלה: כשל זמני (RETRY – שגיאת שרת המייל או הגדרות מייל חסרות) – שלבי החשבוניות משתחררים, המונה היומי
+//   יורד, והריצה הבאה (כעבור 15 דקות) מנסה שוב, עד TRY_MAX ניסיונות ביום ללקוח (lock.tries). כל עוד יש ניסיון חוזר פתוח – היום לא מסומן done
+//   והסיכום היומי למנהל מחכה. אחרי TRY_MAX – נשאר "לא נשלח", והשלב ינוסה שוב ביום העסקים הבא. כתובת חסרה / לא תקינה – בלי ניסיון חוזר.
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const logger = require('firebase-functions/logger');
@@ -37,14 +44,21 @@ const S = require('./lib/ar-send');
 
 if (!getApps().length) initializeApp();
 
-const HOUR0 = 9, CAP0 = 200, MAX_INV = 5000, LAST_HOUR = 20;
+const HOUR0 = 9, CAP0 = 200, MAX_INV = 5000, LAST_HOUR = 20, TRY_MAX = 3;
+const RETRY = ['send', 'no-smtp', 'no-secrets'];
+// מסמך חובה שמקבל תזכורת: חשבונית מס, או חוב מיובא (חשבונית ישנה / יתרת פתיחה)
+const remDoc = (x) => x.t === 'inv' || ((x.t === 'old' || x.t === 'ob') && x.k === 'dr');
+const OTN = { inv: 'חשבונית', rc: 'קבלה', cr: 'חשבונית זיכוי' };
+const docName = (x) => (x.t === 'ob' ? 'יתרת פתיחה' : x.t === 'old' ? `${OTN[x.ot] || 'חשבונית'} ${x.ext || x.no}` : `חשבונית ${x.no}`);
 const TXT0 = 'שלום {שם},\nתזכורת ידידותית: לפי הרישומים שלנו יתרה פתוחה לתשלום בסך {סכום}.\n{פירוט}\nאם התשלום כבר בוצע – תודה, ואפשר להתעלם מההודעה.\n{קישור}\n{עסק}';
 const WHO = 'arRemind';
 const isBizS = (s) => { const [y, m, d] = s.split('-').map(Number); return TK.tkBiz({ y, m: m - 1, d }); };
 const dd = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
 const daysBetween = (a, b) => Math.round((Date.UTC(...b.split('-').map((v, i) => (i === 1 ? v - 1 : +v))) - Date.UTC(...a.split('-').map((v, i) => (i === 1 ? v - 1 : +v)))) / 864e5);
 const exists = (e) => e && (e.code === 6 || /ALREADY_EXISTS|already exists/i.test(String(e.message)));
-const dueOf = (x) => x.dueX || x.due || '';
+const dueOf = (x) => x.dueX || x.due || x.dueV || '';
+// תיקון בודק (סבב 1): חוב מיובא שנשמר בלי מועד (יובא לפני 15.11.2026) – המועד מחושב בזמן התזכורת לפי תנאי התשלום של הלקוח (בזיכרון בלבד, לא נכתב)
+const fillDue = (x, c) => { if (x.t !== 'inv' && !AC.ymdOk(x.dueX || x.due) && c) { const v = ARD.dueFor(AC.termsOfCust(c), x.d); if (AC.ymdOk(v)) x.dueV = v; } return x; };
 
 // נוסח ההודעה: {שם} {סכום} {פירוט} {עסק} {קישור}. שורות ריקות כפולות (בלי קישור) מצטמצמות
 function msgOf(txt, v) {
@@ -54,7 +68,7 @@ function msgOf(txt, v) {
 function detailOf(list, today) {
   return list.slice(0, 30).map((x) => {
     const due = dueOf(x), late = daysBetween(due, today);
-    return `• חשבונית ${x.no}${x.draft ? ' (טיוטה – לא מסמך רשמי)' : ''} מיום ${dd(x.d)}: ${PDF.moneyAg(x.open)}, לתשלום עד ${dd(due)}${late > 0 ? ` (באיחור ${late} ימים)` : late === 0 ? ' (היום)' : ''}`;
+    return `• ${docName(x)}${x.draft ? ' (טיוטה – לא מסמך רשמי)' : ''} מיום ${dd(x.d)}: ${PDF.moneyAg(x.open)}, לתשלום עד ${dd(due)}${late > 0 ? ` (באיחור ${late} ימים)` : late === 0 ? ' (היום)' : ''}`;
   }).join('\n') + (list.length > 30 ? `\nועוד ${list.length - 30} חשבוניות – בפירוט המצורף` : '');
 }
 
@@ -70,7 +84,7 @@ async function remind(db, w, cfg, rc, now, today, deps, res) {
   const by = new Map();
   for (const s of q.docs) {
     const x = Object.assign({ id: s.id }, s.data());
-    if (x.t !== 'inv' || x.void || typeof x.cust !== 'string' || !x.cust || !AC.ymdOk(dueOf(x))) continue;
+    if (!remDoc(x) || x.void || typeof x.cust !== 'string' || !x.cust || (x.t === 'inv' && !AC.ymdOk(dueOf(x)))) continue;
     if (!by.has(x.cust)) by.set(x.cust, []);
     by.get(x.cust).push(x);
   }
@@ -82,8 +96,10 @@ async function remind(db, w, cfg, rc, now, today, deps, res) {
   }
   let link = '';
   try { const p = await db.doc('private/pay').get(); if (p.exists && p.get('mode') === 'link' && typeof p.get('link') === 'string') link = p.get('link'); } catch (e) { /* בלי קישור */ }
+  // מועד לחוב מיובא בלי מועד – לפי תנאי הלקוח; בלי מועד גם אז (אין לקוח / תאריך שגוי) – לא נכנס
+  for (const cid of cids) { const L = by.get(cid).map((x) => fillDue(x, custs.get(cid))).filter((x) => AC.ymdOk(dueOf(x))); if (L.length) by.set(cid, L); else by.delete(cid); }
   const owe = [];
-  for (const cid of cids) {
+  for (const cid of cids.filter((k) => by.has(k))) {
     const list = by.get(cid).sort((a, b) => dueOf(a).localeCompare(dueOf(b)) || a.no - b.no);
     const c = custs.get(cid);
     const bal0 = ARD.arOf(c).bal;
@@ -104,20 +120,24 @@ async function remind(db, w, cfg, rc, now, today, deps, res) {
       cl = await db.runTransaction(async (tx) => {
         const all = await tx.getAll(lock, cnt, ...sRefs, ...iRefs);
         const [ls, ns] = all, ex = all.slice(2, 2 + sRefs.length), iv = all.slice(2 + sRefs.length);
-        if (ls.exists) return { why: 'dup' };
+        // ניסיון חוזר: נעילה של היום עם כשל זמני ופחות מ-TRY_MAX ניסיונות – מותר לנסות שוב (השלבים שוחררו אחרי הכשל)
+        const r0 = ls.exists ? ls.get('r') : null, tries = ls.exists ? ls.get('tries') || 1 : 0;
+        if (ls.exists && !(r0 && r0.ok === false && RETRY.includes(r0.why) && tries < TRY_MAX)) return { why: 'dup' };
         const n = ns.exists && ns.get('d') === today ? ns.get('n') || 0 : 0;
         if (n >= cap) return { why: 'cap' };
         const go = want.filter((v, i) => !ex[i].exists && iv[i].exists && iv[i].get('open') > 0 && !iv[i].get('void'));
         if (!go.length) return { why: 'none' };
-        tx.create(lock, { cust: cid, d: today, at: now, st: go.map((v) => v.x.id + '_' + v.k) });
+        const prev = ls.exists ? { r: r0, st: ls.get('st') || [], at: ls.get('at') || now } : null;
+        if (ls.exists) tx.update(lock, { at: now, st: go.map((v) => v.x.id + '_' + v.k), tries: tries + 1, r: FieldValue.delete() });
+        else tx.create(lock, { cust: cid, d: today, at: now, st: go.map((v) => v.x.id + '_' + v.k), tries: 1 });
         for (const v of go) tx.create(db.doc(`arrem/${v.x.id}_${v.k}`), { inv: v.x.id, no: v.x.no, k: v.k, cust: cid, d: today, at: now, open: v.x.open });
         tx.set(cnt, { d: today, n: n + 1 }, { merge: true });
-        return { go };
+        return { go, tries: tries + 1, prev };
       });
     } catch (e) { if (exists(e)) { res.dup = (res.dup || 0) + 1; continue; } throw e; }
     if (!cl.go) { res[cl.why] = (res[cl.why] || 0) + 1; if (cl.why === 'cap') res.stop = 'cap'; continue; }
     // כל החשבוניות הפתוחות של הלקוח – אחרי בדיקה חוזרת (מה שנסגר בינתיים לא נכנס)
-    const live = (await db.getAll(...list.map((x) => db.doc('ardoc/' + x.id)))).filter((s) => s.exists && s.get('open') > 0 && !s.get('void')).map((s) => Object.assign({ id: s.id }, s.data()));
+    const live = (await db.getAll(...list.map((x) => db.doc('ardoc/' + x.id)))).filter((s) => s.exists && s.get('open') > 0 && !s.get('void')).map((s) => fillDue(Object.assign({ id: s.id }, s.data()), c));
     if (!live.length) { await lock.update({ r: { ok: false, why: 'paid', to: '', n: 0, amt: 0 } }); res.paid = (res.paid || 0) + 1; continue; } // הכול שולם בינתיים – לא שולחים
     const open = live.reduce((s, x) => s + x.open, 0);
     // הסכום לתשלום = min(החשבוניות הפתוחות, cust.ar.bal) – נקרא שוב לפני השליחה (קבלה עם זכות שנכנסה בינתיים)
@@ -137,17 +157,28 @@ async function remind(db, w, cfg, rc, now, today, deps, res) {
     }
     if (r && r.why === 'rate') { // מכסת המייל לשעה – מבטלים את הנעילה ומנסים בריצה הבאה
       const b = db.batch();
-      b.delete(lock); for (const v of cl.go) b.delete(db.doc(`arrem/${v.x.id}_${v.k}`)); b.update(cnt, { n: FieldValue.increment(-1) });
+      // תיקון בודק (סבב 1): בניסיון חוזר – הנעילה חוזרת למצב הכשל הקודם (אותו tries), כדי שמכסת המייל לא תאפס את מונה הניסיונות
+      if (cl.prev) b.update(lock, { r: cl.prev.r, st: cl.prev.st, at: cl.prev.at, tries: cl.tries - 1 }); else b.delete(lock);
+      for (const v of cl.go) b.delete(db.doc(`arrem/${v.x.id}_${v.k}`)); b.update(cnt, { n: FieldValue.increment(-1) });
       await b.commit();
       res.stop = 'rate';
       continue;
     }
     await lock.update({ r: { ok: !!(r && r.ok), why: (r && r.why) || '', to: (r && r.to) || to, n: live.length, amt: sum }, name });
-    if (r && r.ok) res.sent = (res.sent || 0) + 1; else res.fail = (res.fail || 0) + 1;
+    if (r && r.ok) { res.sent = (res.sent || 0) + 1; continue; }
+    res.fail = (res.fail || 0) + 1;
+    // כשל זמני – משחררים את השלבים (כדי שאפשר יהיה לשלוח אותם שוב) ומחזירים את המונה; עוד ניסיון היום רק אם לא הגענו ל-TRY_MAX
+    if (r && RETRY.includes(r.why)) {
+      const b = db.batch();
+      for (const v of cl.go) b.delete(db.doc(`arrem/${v.x.id}_${v.k}`));
+      b.update(cnt, { n: FieldValue.increment(-1) });
+      await b.commit();
+      if (cl.tries < TRY_MAX) res.retry = (res.retry || 0) + 1;
+    }
   }
   // סיכום יומי למנהל – פעם אחת ביום, רק אחרי שכל ההודעות של היום יצאו (לא כשנעצרנו בגלל מכסת המייל)
-  if (rc.sum !== false && res.stop !== 'rate') await daily(db, w, cfg, now, today, owe, send, res);
-  if (!res.stop) await db.doc(`arrem/n_${today}`).set({ d: today, done: true }, { merge: true });
+  if (rc.sum !== false && res.stop !== 'rate' && !res.retry) await daily(db, w, cfg, now, today, owe, send, res);
+  if (!res.stop && !res.retry) await db.doc(`arrem/n_${today}`).set({ d: today, done: true }, { merge: true });
 }
 
 async function daily(db, w, cfg, now, today, owe, send, res) {
@@ -247,4 +278,4 @@ exports.arRemind = onSchedule({ region: LEGACY_REGION, schedule: 'every 15 minut
 });
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { runAll, runBiz, msgOf, detailOf, TXT0, HOUR0, CAP0 } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { runAll, runBiz, msgOf, detailOf, TXT0, HOUR0, CAP0, TRY_MAX, remDoc } });
