@@ -11,6 +11,8 @@
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
 //   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, shp?:{at,by}, by, byName, at, upd, cancel? }  – shp: "נשלח" ללקוח בשוטף (משוב סבב 2); cancel.rs: בביטול הזמנה שנשלחה – האם המלאי הוחזר (החלטה 21)
 //   ord/{id}           + pk?: סימוני ליקוט ואישור הלקוח (משוב סבב 3) – ראו ord-pick.js; כאן רק החסימה ב-setOrderStatus
+//   ord/{id}           + inv?: { id, no, t:'inv'|'ir', draft } – חשבונית של ההזמנה (שלב 4, lib/ar-doc.js), paid.rc – קבלה שנרשמה ב"שולם". רק כש-arcfg/main.on;
+//                        מתג כבוי / הזמנה ישנה בלי vm – בלי שום שינוי. setOrderStatus ו-markOrderPaid מחזירים ar:{…} רק כשהופק מסמך.
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
@@ -35,6 +37,8 @@ const CARD = require('./lib/card');
 const AC = require('./lib/ar-calc'); // 14.11.2026: לקוח עסקי ומחירים (מחיר ברירת מחדל ללקוח, מינימום, סכומי מע"מ)
 const PM = require('./lib/prod-match'); // 14.11.2026 (שלב 2 חלק ב'): כינויים (PM.key) וחיפוש מוצר לרשימה חופשית (ordParse)
 const AI = require('./lib/sec-ai');
+const ARD = require('./lib/ar-doc'); // 15.11.2026 (שלב 4): חשבונית ב"נשלח" / "שולם" / "יצא" – רק כש-arcfg/main.on
+const AR_SEC = [defineSecret('WA_ACCESS_TOKEN')].concat(require('./lib/ar-send').MAIL_SECRETS); // שליחת המסמך ללקוח אחרי ההפקה (ar.js afterIssue)
 const { ORD_SYS } = require('./lib/prompts-ord');
 const { defineInt } = require('firebase-functions/params');
 const ORD_AI_DAILY = defineInt('ORD_AI_DAILY', { default: 30, description: 'זיהוי חכם של רשימת הזמנה (ordParse): מספר קריאות AI ביום לכל עסק (הנחה)' });
@@ -1076,6 +1080,7 @@ async function updateOrder(request) {
     const d = s.data();
     if (!PAYABLE.includes(d.status)) throw pre('locked', d.status === 'cancel' ? 'ההזמנה בוטלה' : 'ההזמנה שולמה – אי אפשר לשנות פריטים או סכום');
     if (d.shp) throw pre('locked', 'ההזמנה נשלחה – אי אפשר לשנות פריטים, סכום או פרטים. תיקון – בזיכוי'); // משוב סבב 2 (החלטה 16)
+    if (d.inv) throw pre('locked', 'להזמנה יש חשבונית – אי אפשר לשנות אותה. תיקון – בזיכוי'); // שלב 4
     if (input.ver !== undefined && d.upd !== input.ver) throw pre('stale', 'ההזמנה השתנתה בינתיים. טענו אותה מחדש ונסו שוב');
     // 14.11.2026: מחיר ברירת מחדל ומינימום – כמו ביצירה. הזמנה עם vm שומרת את אופן המחירים ואחוז המע"מ שלה; הזמנה ישנה בלי vm – בלי שדות חדשים
     const prc = await priceCtx(tx, db, typeof d.custId === 'string' && ID_RE.test(d.custId) ? d.custId : '', raw ? raw.filter((x) => x.pid).map((x) => x.pid) : [], c);
@@ -1170,21 +1175,39 @@ async function setOrderStatus(request) {
       const cid = s.get('custId');
       const cs = typeof cid === 'string' && ID_RE.test(cid) ? await tx.get(db.doc('cust/' + cid)) : null;
       if (cs && cs.exists && AC.termsOfCust(cs.data()).b !== 'imm') {
+        const ar = await ARD.planOrder(tx, db, w, s, 'ship'); // שלב 4 (החלטה 22): חשבונית מס ללקוח בשוטף – באותה טרנזקציה
         const now = Date.now();
         tx.update(ref, { status: 'wait_pay', shp: { at: now, by: w.uid }, upd: now });
         tx.set(logRef(db, id), logData(w, 'ship', cur + '→wait_pay'));
         forced();
         res = { ok: true, status: 'wait_pay' };
+        arDoc(tx, db, w, id, ar, res);
         return;
       }
     }
     if (!(NEXT[cur] || []).includes(st)) throw pre('bad-status', 'אי אפשר לעבור מהסטטוס הנוכחי לסטטוס הזה');
     if (shp && st === 'work') throw pre('locked', 'ההזמנה נשלחה – אי אפשר להחזיר אותה לטיפול');
+    const ar = cur === 'paid' && (st === 'out' || st === 'done') ? await ARD.planOrder(tx, db, w, s, 'out') : null; // שלב 4: לקוח עסקי ששילם – חשבונית מס קבלה כשהסחורה יוצאת
     tx.update(ref, { status: st, upd: Date.now() });
     tx.set(logRef(db, id), logData(w, 'status', cur + '→' + st));
     forced();
+    if (ar) { res = { ok: true, status: st }; arDoc(tx, db, w, id, ar, res); }
   });
+  await arAfter(w, res);
   return res || { ok: true, status: st };
+}
+// שלב 4: כתיבת המסמך שתוכנן (planOrder) באותה טרנזקציה, ורישום ביומן ההזמנה. res.ar – רק כשיש מסמך (מתג כבוי – התשובה כמו קודם)
+function arDoc(tx, db, w, id, ar, res) {
+  if (!ar) return;
+  const r = ar.write();
+  if (!r) return;
+  res.ar = r;
+  if (r.id) tx.set(logRef(db, id), logData(w, 'ardoc', `${{ inv: 'חשבונית מס', ir: 'חשבונית מס קבלה', rc: 'קבלה' }[r.t] || r.t} #${r.no}${r.draft ? ' (טיוטה)' : ''}`));
+}
+// אחרי הטרנזקציה: קובץ PDF ושליחה ללקוח (ar.js). כשל כאן לא מבטל את המסמך ולא את הפעולה – המסמך זמין להפקה ולשליחה מהכרטיס
+async function arAfter(w, res) {
+  if (!res || !res.ar || !res.ar.id) return;
+  try { res.ar.sent = await require('./ar')._core.afterIssue(w, res.ar.id); } catch (e) { logger.error('orders: ar after failed', { name: e && e.name, code: e && e.code, msg: String(e && e.message).slice(0, 200) }); }
 }
 
 const LL_PRE = 'o_'; // מזהה דטרמיניסטי ל-lineLog: o_<ordId>_<מספר הקו>
@@ -1193,9 +1216,10 @@ const portK = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|');
 async function markOrderPaid(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'method', 'last4', 'conf', 'note']);
+  onlyKeys(input, ['id', 'method', 'last4', 'conf', 'note', 'proofId']); // proofId (שלב 4): אסמכתא לקבלה על חשבונית פתוחה (עובד – חובה, החלטה 25)
   const id = idOf(input.id, 'הזמנה');
   if (!PAY_METHODS.includes(input.method)) throw bad('bad-method', 'בחרו אמצעי תשלום');
+  if (input.proofId !== undefined && (typeof input.proofId !== 'string' || !/^[A-Za-z0-9_-]{8,40}$/.test(input.proofId))) throw bad('bad-proof', 'אסמכתא לא תקינה');
   const paid = { method: input.method };
   if (input.last4 != null && input.last4 !== '') {
     if (typeof input.last4 !== 'string' || !/^\d{4}$/.test(input.last4)) throw bad('bad-last4', '4 ספרות אחרונות: בדיוק 4 ספרות');
@@ -1218,7 +1242,9 @@ async function markOrderPaid(request) {
     if (!PAYABLE.includes(cur)) throw pre('bad-status', 'ההזמנה בוטלה');
     const now = Date.now();
     // 14.11.2026: הזמנה עם vm (מהגרסה הזו) – הסכום לתשלום הוא gross (כולל מע"מ והנחה). הזמנה ישנה – total, כמו קודם
-    Object.assign(paid, { at: now, by: w.uid, amt: s.get('vm') && isNum(s.get('gross')) ? s.get('gross') : s.get('total') }); delete paid.pk; // pk מנוסה קודם של הטרנזקציה לא נשאר
+    Object.assign(paid, { at: now, by: w.uid, amt: s.get('vm') && isNum(s.get('gross')) ? s.get('gross') : s.get('total') }); delete paid.pk; delete paid.rc; // pk/rc מנוסה קודם של הטרנזקציה לא נשארים
+    // שלב 4: חשבונית פתוחה → קבלה; לקוח פרטי → חשבונית מס קבלה (החלטה 22). מתג כבוי – null, בלי שום קריאה נוספת שמשנה משהו
+    const ar = await ARD.planOrder(tx, db, w, s, 'paid', Object.assign({}, paid, input.proofId ? { proofId: input.proofId } : {}));
     // ניוד: כל קו נרשם ב-lineLog (בדיקת ניוד חוזר בכל הסניפים) ובהיסטוריית ports של הלקוח (רק כשהמתג פעיל)
     const cl = s.get('cell'), lines = cellOn(w) && cl && Array.isArray(cl.lines) ? cl.lines : [];
     if (lines.length) {
@@ -1242,10 +1268,13 @@ async function markOrderPaid(request) {
       paid.sup = { id: sup.id, name: sup.name || '' };
       tx.set(db.doc('ordpay/' + id), { ord: id, no: s.get('no'), br: s.get('br'), amt: paid.amt, at: now, sup: paid.sup, st: 'paid', upd: now });
     }
+    res = { ok: true, dup: false };
+    if (ar) { const r = ar.write(); if (r && r.t === 'rc' && r.id) paid.rc = r.id; } // לפני עדכון ההזמנה – כדי ש-paid.rc יישמר
     tx.update(ref, { status: s.get('shp') ? 'done' : 'paid', paid, upd: now }); // משוב סבב 2 (החלטה 15): הזמנה שנשלחה ושולמה – ישר "הושלם"
     tx.set(logRef(db, id), logData(w, 'paid', `${paid.method} ₪${paid.amt}${paid.last4 ? ' ****' + paid.last4 : ''}${paid.conf ? ' אישור ' + paid.conf : ''}`));
-    res = { ok: true, dup: false };
+    if (ar && ar.res) { res.ar = ar.res; if (ar.res.id) tx.set(logRef(db, id), logData(w, 'ardoc', `${{ ir: 'חשבונית מס קבלה', rc: 'קבלה' }[ar.res.t] || ar.res.t} #${ar.res.no}${ar.res.draft ? ' (טיוטה)' : ''}`)); }
   });
+  await arAfter(w, res);
   return res;
 }
 
@@ -1288,6 +1317,8 @@ async function unpayOrder(request) {
     ordAccess(w, s.exists ? s.data() : null);
     // משוב סבב 2: הזמנה שנשלחה (shp) ושולמה עוברת ישר ל-done – גם בה מנהל יכול לבטל "שולם" (חוזרת ל"ממתין לתשלום", ה-shp נשאר)
     if (s.get('status') !== 'paid' && !(s.get('status') === 'done' && s.get('shp') && s.get('paid'))) throw pre('bad-status', 'אפשר לבטל "שולם" רק בהזמנה במצב שולם');
+    // שלב 4: התשלום נרשם בקבלה / בחשבונית מס קבלה – ביטול רק דרך המסמכים (ביטול קבלה / זיכוי), לא כאן
+    if ((s.get('paid') && s.get('paid').rc) || (s.get('inv') && s.get('inv').t === 'ir')) throw pre('locked', 'התשלום נרשם בקבלה או בחשבונית מס קבלה. לביטול: "ביטול קבלה" (מנהל) או זיכוי');
     const undo = await linesUndo(tx, db, id, s); // 12.11.2026: ניוד שבוטל לא נשאר בהיסטוריה
     undo();
     if (s.get('paid') && s.get('paid').sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'unpay' }, { merge: true });
@@ -2112,5 +2143,6 @@ const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, im
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכניסה לאתר הסליקה מוצפנים ב-CARD_ENC_KEY
 const AIF = ['ordParse']; // 14.11.2026: זיהוי חכם של רשימת הזמנה – אותו מפתח Gemini של המזכירה (sec-ai.js)
-for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP } });
+const ARF = ['setOrderStatus', 'markOrderPaid']; // 15.11.2026 (שלב 4): מפיקות חשבונית/קבלה ושולחות ללקוח (PDF + ווטסאפ/מייל)
+for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : ARF.includes(k) ? { secrets: AR_SEC, timeoutSeconds: 120, memory: '512MiB' } : {}, wrap(k, f));
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData } });

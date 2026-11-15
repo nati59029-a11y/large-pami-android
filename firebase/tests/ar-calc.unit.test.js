@@ -107,3 +107,55 @@ describe('לקוח עסקי – חישובים טהורים (ar-calc)', () => {
   });
 });
 
+
+// שלב 4 (15.11.2026): חשבוניות – סכומי מסמך באגורות, מועד תשלום, מספור
+describe('שלב 4 – חשבוניות (ar-calc)', () => {
+  const TK = require('../functions/lib/tk-time');
+  const isB = (s) => { const [y, m, d] = s.split('-').map(Number); return TK.tkBiz({ y, m: m - 1, d }); };
+  it('טבלת מע"מ: ex / inc / פטור, מע"מ פעם אחת ברמת המסמך, עיגול חצי למעלה (גם 0.005)', () => {
+    // ex: 3×89.90 + 12×6.25 = 344.70, הנחה 5% = 17.235 → 17.24, לפני מע"מ 327.46, מע"מ 58.9428 → 58.94, לתשלום 386.40
+    assert.deepEqual(AC.docSums([{ q: 3, p: 89.9 }, { q: 12, p: 6.25 }], 'ex', 18, 5), { sum: 34470, dsc: 1724, net: 32746, vat: 5894, gross: 38640 });
+    // ex: מע"מ ברמת המסמך ולא לכל שורה: 3 שורות של 0.10 → 0.30, מע"מ 0.054 → 0.05 (ולא 3×0.02 = 0.06)
+    assert.deepEqual(AC.docSums([{ q: 1, p: 0.1 }, { q: 1, p: 0.1 }, { q: 1, p: 0.1 }], 'ex', 18), { sum: 30, dsc: 0, net: 30, vat: 5, gross: 35 });
+    // 0.005: לפני מע"מ 0.25 × 18% = 0.045 → 0.05 (חצי אגורה למעלה); 24.75 × 18% = 4.455 → 4.46
+    assert.equal(AC.docSums([{ q: 1, p: 0.25 }], 'ex', 18).vat, 5);
+    assert.equal(AC.docSums([{ q: 1, p: 24.75 }], 'ex', 18).vat, 446);
+    // inc: 665.70 כולל, מתוכם מע"מ 66570×18/118 = 10154.7 → 101.55
+    assert.deepEqual(AC.docSums([{ q: 3, p: 89.9 }, { q: 2, p: 145.5 }, { q: 12, p: 6.25 }, { q: 1.5, p: 20 }], 'inc', 18), { sum: 66570, dsc: 0, net: 56415, vat: 10155, gross: 66570 });
+    // פטור (r = 0): בלי מע"מ, גם ב-ex
+    assert.deepEqual(AC.docSums([{ q: 2, p: 10.5 }], 'ex', 0), { sum: 2100, dsc: 0, net: 2100, vat: 0, gross: 2100 });
+    assert.deepEqual(AC.docSums([{ q: 2, p: 10.5 }], 'inc', 0), { sum: 2100, dsc: 0, net: 2100, vat: 0, gross: 2100 });
+    // שורה שלילית (שורת התאמה) – סימטרי: totals עם סכום שלילי
+    assert.deepEqual(AC.totals(-0.25, 'ex', 18), { net: -0.25, vat: -0.05, gross: -0.3 });
+    // שלמים בלבד
+    for (const x of Object.values(AC.docSums([{ q: 1.333, p: 7.77 }], 'ex', 17))) assert.ok(Number.isInteger(x));
+  });
+  it('dueOf: מיידי, ימים מהחשבונית, שוטף (כפולות 30 = סוף חודש), גבולות חודש ופברואר', () => {
+    assert.equal(AC.dueOf({ b: 'imm', d: 0 }, '2026-11-17'), '2026-11-17');
+    assert.equal(AC.dueOf({ b: 'inv', d: 30 }, '2027-01-31'), '2027-03-02');
+    assert.equal(AC.dueOf({ b: 'eom', d: 0 }, '2026-10-05'), '2026-10-31');
+    assert.equal(AC.dueOf({ b: 'eom', d: 60 }, '2026-11-15'), '2027-01-31'); // כמו dueCalc: שוטף+60 על נובמבר = 31.1
+    assert.equal(AC.dueOf({ b: 'eom', d: 30 }, '2027-01-10'), '2027-02-28');
+    assert.equal(AC.dueOf({ b: 'eom', d: 30 }, '2028-01-31'), '2028-02-29'); // שנה מעוברת
+    assert.equal(AC.dueOf({ b: 'eom', d: 90 }, '2026-12-01'), '2027-03-31');
+    assert.equal(AC.dueOf({ b: 'eom', d: 15 }, '2027-01-31'), '2027-02-15'); // שוטף+N שאינו כפולה של 30 = סוף החודש + N ימים
+    assert.equal(AC.dueOf({ b: 'eom', d: 45 }, '2026-10-05'), '2026-12-15');
+    assert.equal(AC.dueOf({ b: 'inv', d: 0 }, 'not-a-date'), '');
+    assert.equal(AC.dueOf(null, '2026-11-17'), '2026-11-17'); // בלי תנאים = מיידי
+  });
+  it('dueOf עם ימי עסקים (החלטה 10): שישי / שבת / ראש השנה / פסח עוברים ליום העסקים הבא', () => {
+    assert.equal(AC.dueOf({ b: 'eom', d: 0 }, '2026-10-05', isB), '2026-11-01'); // 31.10.2026 שבת → ראשון 1.11
+    assert.equal(AC.dueOf({ b: 'inv', d: 0 }, '2026-11-20', isB), '2026-11-22'); // שישי → ראשון
+    assert.equal(AC.dueOf({ b: 'inv', d: 10 }, '2026-09-01', isB), '2026-09-14'); // 11.9 ערב ראש השנה (שישי), 12–13 ראש השנה → 14.9
+    assert.equal(AC.dueOf({ b: 'inv', d: 1 }, '2027-04-20', isB), '2027-04-29'); // 21.4 ערב פסח, פסח וחול המועד עד 22 בניסן → 29.4
+    assert.equal(AC.dueOf({ b: 'eom', d: 0 }, '2027-04-05', isB), '2027-05-02'); // 30.4 שישי (אחרי פסח) → ראשון 2.5
+    assert.equal(AC.dueOf({ b: 'eom', d: 30 }, '2027-01-10', isB), '2027-02-28'); // ראשון – יום עסקים, בלי דחייה
+  });
+  it('nextNo: סדרה חדשה מתחילה מ-start (או 1); אחרי זה – רצוף', () => {
+    assert.equal(AC.nextNo(null), 1);
+    assert.equal(AC.nextNo(null, 3401), 3401);
+    assert.equal(AC.nextNo(3401, 3401), 3402);
+    assert.equal(AC.nextNo(7, 1), 8);
+    assert.equal(AC.nextNo(5, 100), 100); // start גבוה מהמונה (לא אמור לקרות – setArOff חוסם אחרי שהסדרה התחילה)
+  });
+});

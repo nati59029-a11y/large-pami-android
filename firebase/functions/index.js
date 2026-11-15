@@ -72,7 +72,7 @@ exports.scanDocument = onCall(
       throw new HttpsError('permission-denied', 'אין לך הרשאה לפעולה הזו. פנה למנהל.', { reason: 'no-perm' });
     }
     // צילום רשימת הזמנה (ordlist, 14.11.2026): התוספת "הזמנות" והרשאת ord – בכל העסקים (גם legacy), לפני הספירה במכסה
-    if (kind === 'ordlist' && (!(who.biz && who.biz.features && who.biz.features.orders === true) || !hasPerm(who, 'ord'))) throw new HttpsError('permission-denied', 'אין לך הרשאה להזמנות. פנה למנהל.', { reason: 'no-perm' });
+    if ((kind === 'ordlist' || kind === 'payproof') && (!(who.biz && who.biz.features && who.biz.features.orders === true) || !hasPerm(who, 'ord'))) throw new HttpsError('permission-denied', 'אין לך הרשאה להזמנות. פנה למנהל.', { reason: 'no-perm' });
     const key = GEMINI_API_KEY.value();
     if (!key) throw new HttpsError('failed-precondition', 'אין מפתח לזיהוי חכם בשרת', { reason: 'no-key' });
     const limit = SCAN_DAILY_LIMIT.value();
@@ -218,6 +218,7 @@ Object.assign(exports, require('./pricing'));
 // מסמכים ללקוח (14.11.2026, שלב 3 חלק א'): arFile – קישור עם אסימון לקובץ PDF (onRequest, us-central1 בלבד). ar-file.js
 Object.assign(exports, require('./ar-file'));
 // אישור הזמנה (14.11.2026, שלב 3 חלק ב'): arOc (מספור רץ נפרד + קובץ + שליחה אוטומטית לפי סימון הלקוח), arPdf, arSend, setArCfg. ar.js
+// חשבוניות, קבלות וזיכויים (15.11.2026, שלב 4): arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff. ar.js + lib/ar-doc.js
 Object.assign(exports, require('./ar'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)

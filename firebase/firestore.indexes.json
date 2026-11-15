@@ -4,24 +4,112 @@
       "collectionGroup": "sec_in",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "ch", "order": "ASCENDING" },
-        { "fieldPath": "t", "order": "DESCENDING" }
+        {
+          "fieldPath": "ch",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "t",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "sec_in",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "ch", "order": "ASCENDING" },
-        { "fieldPath": "rt", "order": "DESCENDING" }
+        {
+          "fieldPath": "ch",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "sec_draft",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "st", "order": "ASCENDING" },
-        { "fieldPath": "wa", "order": "ASCENDING" }
+        {
+          "fieldPath": "st",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "wa",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ardoc",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cust",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "open",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ardoc",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cust",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "d",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ardoc",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cust",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "d",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ardoc",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "open",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "d",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ardoc",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "t",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "d",
+          "order": "DESCENDING"
+        }
       ]
     }
   ],

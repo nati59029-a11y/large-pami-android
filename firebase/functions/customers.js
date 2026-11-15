@@ -539,6 +539,9 @@ async function mergeCust(request) {
     const scs = cs.length ? await tx.getAll(...cs.map((x) => db.doc(cardPath(s, x.s)))) : [];
     const os = await tx.get(db.collection('ord').where('custId', '==', s).limit(MAX_MERGE_ORD + 1));
     if (os.size > MAX_MERGE_ORD) throw pre('merge-ords', 'אי אפשר לאחד: ללקוח יותר מ-400 הזמנות.');
+    // שלב 4 (15.11.2026): ללקוח שמסומן mv יש חשבוניות/קבלות (ardoc) – לא מאחדים, אחרת הכרטסת והיתרה (cust.ar) נשברות
+    const ds = await tx.get(db.collection('ardoc').where('cust', '==', s).limit(1));
+    if (!ds.empty) throw pre('merge-ardoc', 'אי אפשר לאחד: ללקוח הזה יש חשבוניות או קבלות. בחרו אותו כלקוח שנשאר, או שייכו את ההזמנה ללקוח אחד.');
     const up = {};
     const SKIP = ['x', 'ports', 'phs', 'phx', 'cards', 'card', 'last4', 'at', 'upd', 'by', 'src', 'mv', 'phone', 'tz', 'wholesale'];
     for (const [kk, v] of Object.entries(B)) if (!SKIP.includes(kk) && empty(A[kk]) && !empty(v)) up[kk] = v;
@@ -874,6 +877,8 @@ async function wipeCusts(request) {
   onlyKeys(input, ['reqId', 'confirm']);
   if (typeof input.reqId !== 'string' || !REQ_RE.test(input.reqId)) throw bad('bad-req', 'מזהה בקשה לא תקין');
   const db = T.tdb();
+  // שלב 4 (15.11.2026): יש חשבוניות/קבלות – לא מוחקים לקוחות (מחיקה ושחזור מגיבוי ישברו את הכרטסת)
+  if (!(await db.collection('ardoc').limit(1).get()).empty) throw pre('has-ardoc', 'אי אפשר למחוק את כל הלקוחות: כבר הופקו חשבוניות או קבלות.');
   const r = await core.wipeAll(db, w, input, 'cust', 'custBak', db.doc('custcfg/req_' + input.reqId), 'הלקוחות');
   if (!r.dup && r.n) await db.collection('cardLog').add({ t: Date.now(), by: w.uid, act: 'wipe', n: r.n });
   return r;

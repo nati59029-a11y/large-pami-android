@@ -37,6 +37,7 @@ const TPL_RE = /^[a-z0-9_]{1,100}$/;
 const LOGO_MAX = 400 * 1024; // אורך ה-data URL (Firestore – עד 1MB למסמך)
 const CHS = ['wa', 'mail', 'both'];
 const CFG_TXT = { name: 80, bn: 20, addr: 160, phone: 30, foot: 1500 };
+const WT_KEYS = ['oc', 'inv', 'ir', 'rc', 'cr', 'st'];
 
 const ilDay = (now) => new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const fileOf = (id, ed) => `oc_${id}_${ed}`;
@@ -316,7 +317,7 @@ async function setArCfg(request) {
     return { ok: true, snd };
   }
   mgr(w);
-  onlyKeys(input, ['on', 'name', 'bn', 'addr', 'phone', 'mail', 'foot', 'wt', 'logo']);
+  onlyKeys(input, ['on', 'name', 'bn', 'addr', 'phone', 'mail', 'foot', 'wt', 'logo', 'z']); // z (שלב 4): לכל סניף – "מה ששולם בקופה כבר נספר בדוח Z" (החלטה 6)
   const up = {};
   if (input.on !== undefined) { if (typeof input.on !== 'boolean') throw bad('bad-cfg', 'מסמכים פעילים: כן/לא'); up.on = input.on; }
   for (const [k, n] of Object.entries(CFG_TXT)) if (input[k] !== undefined) up[k] = txtIn(input[k], n, k);
@@ -328,10 +329,21 @@ async function setArCfg(request) {
   if (input.wt !== undefined) {
     const x = input.wt;
     if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad('bad-cfg', 'תבנית ווטסאפ לא תקינה');
-    onlyKeys(x, ['oc'], 'תבנית');
-    const oc = x.oc == null ? '' : String(x.oc).trim();
-    if (oc && !TPL_RE.test(oc)) throw bad('bad-tpl', 'שם תבנית: אותיות אנגליות קטנות, ספרות וקו תחתון');
-    up.wt = { oc };
+    onlyKeys(x, WT_KEYS, 'תבנית'); // שלב 4: גם חשבונית (inv), חשבונית מס קבלה (ir), קבלה (rc), זיכוי (cr), סיכום חודשי (st)
+    const cur = (await cfgOf(db)).wt || {};
+    const wt = {};
+    for (const k of WT_KEYS) {
+      const v = x[k] === undefined ? (k === 'oc' ? '' : cur[k] || '') : x[k] == null ? '' : String(x[k]).trim();
+      if (v && !TPL_RE.test(v)) throw bad('bad-tpl', 'שם תבנית: אותיות אנגליות קטנות, ספרות וקו תחתון');
+      if (v || k === 'oc') wt[k] = v;
+    }
+    up.wt = wt;
+  }
+  if (input.z !== undefined) {
+    const x = input.z;
+    if (!x || typeof x !== 'object' || Array.isArray(x) || Object.keys(x).length > 50) throw bad('bad-cfg', 'דוח Z לפי סניף – לא תקין');
+    for (const [k, v] of Object.entries(x)) if (!/^([a-z0-9_]{2,20}|_)$/.test(k) || typeof v !== 'boolean') throw bad('bad-cfg', 'דוח Z לפי סניף – לא תקין');
+    up.z = x;
   }
   if (input.logo !== undefined) {
     if (input.logo === '' || input.logo === null) { await db.doc('arcfg/logo').delete(); up.logo = false; }
@@ -346,6 +358,588 @@ async function setArCfg(request) {
   return { ok: true };
 }
 
+// =====================================================================================
+// שלב 4 (15.11.2026): חשבוניות מס, קבלות וזיכויים – "טיוטה – לא מסמך רשמי" עד שמנהל־העל מדליק את arcfg/off.on.
+// הספר עצמו (מספור, יתרה, הקצאות, docUpd) – lib/ar-doc.js. כאן: הרשאות, קלט, PDF ושליחה.
+//   arIssue    – חשבונית ידנית מהזמנה (מנהל / עובד עם הזמנות בסניף). הזמנה ישנה בלי vm – רק עם בחירה מפורשת.
+//   arReceipt  – קבלה ללקוח: תשלום חלקי, בחירת חשבוניות, עודף = זכות. עובד – רק עם אסמכתא שהעלה (arProof), גם במזומן (החלטה 25).
+//   arCredit   – חשבונית זיכוי (מלא / שורות / סכום) עם הפניה לחשבונית; "החזרה למלאי" כבויה כברירת מחדל (החלטה 11). מנהל ועובד עם הזמנות (73).
+//   arVoidRc   – ביטול קבלה (מנהל, עם סיבה): המספר נשמר, ההקצאות מבוטלות, קובץ חדש עם "מבוטל" ליד המקור (הנוהל – לא מאומת).
+//   arProof / arProofGet – אסמכתא בחלקים (עד 5MB, jpeg/png/pdf). צפייה: מנהל ומי שהעלה. לא נשלחת ללקוח ולא נכתבת ליומן.
+//   arMonthly  – מסמך סיכום חודשי ללקוח (לא חשבונית מס – החלטה 23). ידני בשלב הזה.
+//   arDoc      – קובץ המסמך (pdf), שליחה בלחיצה (send), שינוי מועד תשלום לחשבונית (due – מנהל, 79).
+//   setArOff   – מנהל־על בלבד: on (רשמי), bt (עוסק מורשה / חברה / פטור), start (מספר התחלה לסדרה הרשמית), amin (סף מספר הקצאה).
+// =====================================================================================
+const ARD = require('./lib/ar-doc');
+const DT = { inv: 'חשבונית מס', ir: 'חשבונית מס קבלה', rc: 'קבלה', cr: 'חשבונית מס זיכוי', st: 'סיכום חשבוניות' };
+const DT_PATUR = { inv: 'חשבון עסקה', ir: 'חשבון עסקה / קבלה', cr: 'זיכוי' }; // עוסק פטור – לא מוציא חשבונית מס (לא מאומת – לבדיקה עם רואה החשבון)
+const PAYN = { cash: 'מזומן', transfer: 'העברה בנקאית', chq: 'צ׳ק', card: 'אשראי', other: 'אחר' };
+const titleOf = (doc) => (doc.bt === 'patur' && DT_PATUR[doc.t]) || DT[doc.t] || '';
+const docName = (doc, v) => `${titleOf(doc)} ${doc.no}${v ? ' (מבוטל)' : ''}.pdf`;
+const shDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
+const ag2 = (a) => PDF.moneyAg(a);
+const AMT_MAX = 100000000; // ₪1,000,000 באגורות לקבלה / זיכוי אחד (הנחה)
+
+async function bizOf(db, w, cfg) {
+  const biz = { name: cfg.name || '', bn: cfg.bn || '', addr: cfg.addr || '', phone: cfg.phone || '', mail: cfg.mail || '', foot: cfg.foot || '', logo: await logoOf(db, w.bizId) };
+  if (!biz.name) { try { const b = await require('./public-brand')._core.brandOf(w.bizId); biz.name = (b && b.name) || ''; } catch (e) { /* */ } }
+  return biz;
+}
+// מסמך PDF מ-ardoc. התוכן קבוע – בנייה חוזרת נותנת אותו מסמך. isVoid – עותק עם "מבוטל" (ביטול קבלה)
+async function docRender(db, w, doc, cfg, isVoid) {
+  const base = { t: doc.t === 'rc' ? 'rc' : doc.t, no: doc.no, d: doc.d, draft: !!doc.draft, biz: await bizOf(db, w, cfg), cust: doc.custSnap || {}, vm: doc.vm, rate: doc.rate, title: titleOf(doc) + (isVoid ? ' – מבוטל' : '') };
+  const notes = [];
+  if (doc.t === 'rc') {
+    const p = doc.pay || {};
+    const det = [p.chq ? `צ׳ק ${p.chq.no} · ${p.chq.bank} · פירעון ${shDate(p.chq.d)}` : '', p.last4 ? '****' + p.last4 : '', p.conf ? 'אישור ' + p.conf : ''].filter(Boolean).join(' · ');
+    base.table = { head: ['אמצעי תשלום', 'פרטים', 'סכום'], rows: [[PAYN[p.m] || 'אחר', det, ag2(doc.gross)]], num: [2] };
+    base.sums = [['סה״כ שולם', doc.gross / 100]];
+    const al = await db.collection('aralloc').where('rc', '==', doc.id || '').get().catch(() => null);
+    const inv = al ? al.docs.map((s) => s.data()).filter((a) => !a.void).map((a) => `${a.inv.replace(/^inv[DO]/, '')} (${ag2(a.amt)})`) : [];
+    if (inv.length) notes.push('עבור חשבוניות: ' + inv.join(', '));
+  } else {
+    base.lines = (doc.lines || []).map((l) => ({ n: l.n, q: l.q, p: l.p, u: l.u || '' }));
+    if (doc.disc) base.disc = doc.disc;
+    if (doc.terms) base.terms = doc.terms;
+    if (doc.t === 'inv') base.due = doc.dueX || doc.due || '';
+    if (doc.t === 'cr' && doc.ref) notes.push(`זיכוי לחשבונית ${doc.ref.replace(/^(inv|ir)[DO]/, '')}`);
+    if (doc.t === 'ir' && doc.pay) notes.push('שולם: ' + (PAYN[doc.pay.m] || 'אחר') + (doc.pay.last4 ? ' ****' + doc.pay.last4 : ''));
+    const k = PDF.calc(base);
+    if (k.gross !== doc.gross) throw pre('sum-mismatch', 'סכום המסמך לא תואם. פנו למנהל');
+  }
+  if (doc.alloc) notes.push('מספר הקצאה: ' + doc.alloc);
+  if (doc.note) notes.push(String(doc.note));
+  if (isVoid && doc.void) notes.push(`המסמך בוטל ב-${shDate(ARD.ilDay(doc.void.at))}. סיבה: ${doc.void.why || ''}`);
+  if (notes.length) base.note = notes.join('\n');
+  return PDF.render(base);
+}
+async function docBuf(db, w, doc, cfg, isVoid) {
+  const f = ARD.fileOf(doc.id, isVoid);
+  try { const [b] = await getStorage().bucket().file(AF.pathOf(w.bizId, f)).download(); return b; } catch (e) { /* עוד לא נוצר – בונים */ }
+  const b = await docRender(db, w, doc, cfg, isVoid);
+  await AF.put(w.bizId, f, b);
+  return b;
+}
+async function docOf(db, id) {
+  if (typeof id !== 'string' || !OC.ID_RE.test(id)) throw bad('bad-id', 'מסמך לא תקין');
+  const s = await db.doc('ardoc/' + id).get();
+  if (!s.exists) throw new HttpsError('not-found', 'המסמך לא נמצא', { reason: 'no-doc' });
+  return Object.assign({ id: s.id }, s.data());
+}
+function docAccess(w, doc) { if (doc.br && doc.br !== NB && w.mine && !w.mine.includes(doc.br)) throw deny('foreign-br', 'אין לך הרשאה למסמך של סניף אחר'); }
+async function sendDoc(db, w, doc, ch, to, auto, buf, cfg, isVoid) {
+  const now = Date.now();
+  const amt = ag2(doc.gross);
+  const nm = (doc.custSnap && doc.custSnap.name) || '';
+  const title = titleOf(doc);
+  if (ch === 'wa') {
+    const wt = cfg.wt || {};
+    const tpl = [wt[doc.t], doc.t === 'ir' ? wt.inv : ''].find((x) => TPL_RE.test(String(x || ''))) || '';
+    if (!tpl) return { ch: 'wa', to: String(to || '').slice(0, 30), at: now, ok: false, why: 'no-tpl' };
+    const lk = await AF.mkLink({ biz: w.bizId, id: ARD.fileOf(doc.id, isVoid), n: docName(doc, isVoid) });
+    return S.sendWa(db, { to, tpl: { name: tpl, lang: 'he', params: [nm, String(doc.no), amt] }, link: lk.url, fileName: docName(doc, isVoid), auto, by: w.uid, token: sv(WA_ACCESS_TOKEN), now });
+  }
+  const text = `שלום ${nm},\nמצורף/ת ${title} מס׳ ${doc.no} על סך ${amt}.${doc.draft ? '\n(טיוטה – לא מסמך רשמי)' : ''}\n${cfg.name || ''}`;
+  return S.sendMail(w.bizId, { to, subject: `${title} ${doc.no}${cfg.name ? ' – ' + cfg.name : ''}`, text, replyTo: cfg.mail, fromName: cfg.name || '', pdf: buf, fileName: docName(doc, isVoid), by: w.uid, now });
+}
+async function docRecord(db, id, recs) {
+  if (!recs.length) return;
+  const ref = db.doc('ardoc/' + id);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) return;
+    ARD.docUpd(tx, ref, { sent: (Array.isArray(s.get('sent')) ? s.get('sent') : []).concat(recs).slice(-SENT_MAX), upd: Date.now() });
+  });
+}
+// אחרי הפקה (גם מ-orders.js): קובץ, ושליחה אוטומטית לפי סימון הלקוח (cust.snd.inv / snd.rc) – גם בתקופת הטיוטה (החלטה 24). "עצור הכל" עוצר.
+async function afterIssue(w, id, opts) {
+  const db = T.tdb();
+  const doc = await docOf(db, id);
+  const cfg = await cfgOf(db);
+  const buf = await docBuf(db, w, doc, cfg, !!(opts && opts.isVoid));
+  const recs = [];
+  const c = doc.cust ? await custOf(db, { custId: doc.cust }) : null;
+  const snd = c && c.snd && typeof c.snd === 'object' ? c.snd : null;
+  const want = snd && CHS.includes(snd.ch) && (doc.t === 'rc' ? snd.rc === true : doc.t === 'ir' ? (snd.inv === true || snd.rc === true) : snd.inv === true);
+  if (want) {
+    for (const [ch, to] of targets(snd, { cust: doc.custSnap || {} }, c)) {
+      const r = to ? await sendDoc(db, w, doc, ch, to, true, buf, cfg, !!(opts && opts.isVoid)) : { ch, to: '', at: Date.now(), ok: false, why: 'no-to' };
+      recs.push(Object.assign({}, r, { auto: true, by: w.uid }));
+    }
+    await docRecord(db, id, recs);
+  }
+  return recs;
+}
+// עובד בלי הרשאה לסניף ההזמנה – נדחה; הזמנה בלי סניף / עסק בלי סניפים – כמו בהזמנות
+const markRef = (db, reqId) => db.doc('arcfg/req_' + reqId);
+function markHit(m, k, key) {
+  if (!m.exists) return null;
+  if (m.get('k') !== k || (key && m.get('key') !== key)) throw bad('bad-req', 'מזהה הבקשה כבר שימש לפעולה אחרת');
+  return Object.assign({}, m.get('r') || {}, { dup: true });
+}
+function agIn(v, label) {
+  if (!isNum(v) || v <= 0) throw bad('bad-amt', label + ': סכום גדול מ-0');
+  const a = Math.round(v * 100);
+  if (Math.abs(v * 100 - a) > 1e-6 || a > AMT_MAX) throw bad('bad-amt', label + ': עד שתי ספרות אחרי הנקודה, ועד ₪1,000,000');
+  return a;
+}
+
+// ---------- arIssue({ reqId, ord, t?, vm?, alloc?, skipAlloc? }) ----------
+async function arIssue(request) {
+  const w = await OC.who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId', 'ord', 't', 'vm', 'alloc', 'skipAlloc']);
+  const reqId = reqIdOf(input);
+  const ordId = idOf(input.ord, 'הזמנה');
+  if (input.t != null && input.t !== 'inv' && input.t !== 'ir') throw bad('bad-type', 'סוג מסמך: חשבונית מס או חשבונית מס קבלה');
+  if (input.vm != null && input.vm !== 'ex' && input.vm !== 'inc') throw bad('bad-vm', 'בחרו: מחירים כוללים מע"מ או לפני מע"מ');
+  if (input.alloc != null && input.alloc !== '' && (typeof input.alloc !== 'string' || !/^\d{1,20}$/.test(input.alloc))) throw bad('bad-alloc', 'מספר הקצאה: ספרות בלבד, עד 20');
+  if (input.skipAlloc !== undefined && typeof input.skipAlloc !== 'boolean') throw bad('bad-field', 'skipAlloc: כן/לא');
+  const db = T.tdb();
+  const oref = db.doc('ord/' + ordId);
+  let res = null;
+  await db.runTransaction(async (tx) => {
+    res = null;
+    const [m, s] = await tx.getAll(markRef(db, reqId), oref);
+    const d = s.exists ? s.data() : null;
+    access(w, d);
+    const hit = markHit(m, 'arIssue', ordId); if (hit) { res = hit; return; }
+    const B = await new ARD.Book(tx, db, w).init();
+    needOn(B.cfg);
+    if (d.status === 'cancel') throw pre('cancelled', 'ההזמנה בוטלה');
+    if (d.inv && d.inv.id) throw pre('has-inv', 'להזמנה כבר יש חשבונית');
+    const paid = !!d.paid && ['paid', 'out', 'done'].includes(d.status);
+    const t = input.t || (paid ? 'ir' : 'inv');
+    if (t === 'ir' && !paid) throw pre('not-paid', 'חשבונית מס קבלה – רק להזמנה ששולמה');
+    if (t === 'inv' && paid) throw pre('paid', 'ההזמנה שולמה – מפיקים חשבונית מס קבלה');
+    const vm = d.vm || input.vm || (d.oc && d.oc.vm) || null;
+    if (!vm) throw pre('need-vm', 'הזמנה ישנה: בחרו אם המחירים כוללים מע"מ');
+    const dd = d.vm ? d : Object.assign({}, d, { vm, vr: d.oc && isNum(d.oc.vr) ? d.oc.vr : undefined, gross: undefined });
+    const c = typeof d.custId === 'string' && OC.ID_RE.test(d.custId) ? await B.needCust(d.custId) : null;
+    if (t === 'inv' && !(c && c.data)) throw pre('need-cust', 'חשבונית מס (לתשלום בהמשך) – רק להזמנה עם לקוח');
+    await B.needSeq(t);
+    const open = t === 'inv' ? await B.openDocs(c.id) : [];
+    const ob = ARD.ordBody(B, dd, ordId, c, t);
+    if (ob.err) throw pre(ob.err, 'סכום החשבונית לא תואם להזמנה. פנו למנהל');
+    if (ob.body.alq) {
+      if (input.alloc) { ob.body.alloc = input.alloc; delete ob.body.alq; } else if (input.skipAlloc !== true) throw pre('need-alloc', 'נדרש מספר הקצאה מרשות המסים. הקלידו אותו, או בחרו לדלג');
+    } else if (input.alloc) ob.body.alloc = input.alloc;
+    if (t === 'ir') ob.body.pay = ARD.payOf(d.paid);
+    ob.body.req = reqId;
+    const r = B.issue(t, ob.body);
+    if (t === 'inv') B.offset(r, open);
+    B.flush();
+    tx.update(oref, { inv: { id: r.id, no: r.d.no, t, draft: r.d.draft } });
+    tx.set(logRef(db, ordId), { t: B.now, by: w.uid, act: 'ardoc', note: `${DT[t]} #${r.d.no}${r.d.draft ? ' (טיוטה)' : ''}` });
+    res = { t, id: r.id, no: r.d.no, draft: r.d.draft, gross: r.d.gross, due: r.d.due || '' };
+    tx.set(markRef(db, reqId), { k: 'arIssue', key: ordId, r: res, t: B.now, by: w.uid });
+  }, { maxAttempts: 50 });
+  if (!res.dup) { try { res.sent = await afterIssue(w, res.id); } catch (e) { logger.error('ar: arIssue after failed', { name: e && e.name, msg: String(e && e.message).slice(0, 200) }); } }
+  return res;
+}
+
+// ---------- arReceipt({ reqId, cust, amt, method, chq?, last4?, conf?, note?, proofId?, alloc?:[{inv, amt}] }) ----------
+async function arReceipt(request) {
+  const w = await OC.who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId', 'cust', 'amt', 'method', 'chq', 'last4', 'conf', 'note', 'proofId', 'alloc']);
+  const reqId = reqIdOf(input);
+  const cid = idOf(input.cust, 'לקוח');
+  const amt = agIn(input.amt, 'סכום');
+  if (!ARD.PAYM.includes(input.method)) throw bad('bad-method', 'אמצעי תשלום: מזומן, העברה, צ׳ק, אשראי או אחר');
+  const pay = { method: input.method };
+  if (input.method === 'chq') {
+    const q = input.chq;
+    if (!q || typeof q !== 'object' || Array.isArray(q)) throw bad('bad-chq', 'צ׳ק: מספר, בנק ותאריך פירעון');
+    onlyKeys(q, ['no', 'bank', 'd'], 'צ׳ק');
+    if (typeof q.no !== 'string' || !/^\d{1,12}$/.test(q.no)) throw bad('bad-chq', 'מספר צ׳ק: ספרות בלבד');
+    if (typeof q.bank !== 'string' || !q.bank.trim() || q.bank.length > 40) throw bad('bad-chq', 'בנק: עד 40 תווים');
+    if (!AC.ymdOk(q.d)) throw bad('bad-chq', 'תאריך פירעון לא תקין');
+    pay.chq = { no: q.no, bank: txtIn(q.bank, 40, 'בנק'), d: q.d };
+  } else if (input.chq != null) throw bad('bad-chq', 'פרטי צ׳ק – רק בתשלום בצ׳ק');
+  if (input.last4 != null && input.last4 !== '') { if (typeof input.last4 !== 'string' || !/^\d{4}$/.test(input.last4)) throw bad('bad-last4', '4 ספרות'); pay.last4 = input.last4; }
+  if (input.conf != null && input.conf !== '') { if (typeof input.conf !== 'string' || !/^[0-9A-Za-z-]{1,20}$/.test(input.conf)) throw bad('bad-conf', 'מספר אישור / אסמכתא: ספרות ואותיות, עד 20'); pay.conf = input.conf; }
+  if (input.note != null && input.note !== '') pay.note = txtIn(input.note, 200, 'הערה');
+  let want = null;
+  if (input.alloc != null) {
+    if (!Array.isArray(input.alloc) || input.alloc.length > 50) throw bad('bad-alloc', 'בחירת חשבוניות לא תקינה');
+    want = input.alloc.map((x) => {
+      if (!x || typeof x !== 'object') throw bad('bad-alloc', 'בחירת חשבוניות לא תקינה');
+      onlyKeys(x, ['inv', 'amt'], 'הקצאה');
+      return { inv: idOf(x.inv, 'חשבונית'), amt: agIn(x.amt, 'סכום לחשבונית') };
+    });
+    if (new Set(want.map((x) => x.inv)).size !== want.length) throw bad('bad-alloc', 'אותה חשבונית פעמיים');
+    if (want.reduce((s, x) => s + x.amt, 0) > amt) throw bad('bad-alloc', 'הסכום לחשבוניות גדול מסכום הקבלה');
+  }
+  const db = T.tdb();
+  let res = null;
+  await db.runTransaction(async (tx) => {
+    res = null;
+    const m = await tx.get(markRef(db, reqId));
+    const hit = markHit(m, 'arReceipt', cid); if (hit) { res = hit; return; }
+    const B = await new ARD.Book(tx, db, w).init();
+    needOn(B.cfg);
+    const c = await B.needCust(cid);
+    if (!c.data || c.data.mv) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+    await B.needSeq('rc');
+    const open = await B.openDocs(cid);
+    const pf = await ARD.proofPlan(B, input.proofId);
+    if (!pf.ok && (w.role !== 'manager' || input.proofId)) throw pre(pf.why || 'need-proof', ARD.PROOF_MSG[pf.why] || ARD.PROOF_MSG['need-proof']);
+    const invs = open.filter((x) => x.d.t === 'inv' && !x.d.void && x.d.open > 0);
+    let plan;
+    if (want) {
+      plan = want.map((x) => {
+        const v = invs.find((y) => y.id === x.inv);
+        if (!v) throw pre('bad-alloc', `חשבונית ${x.inv} לא פתוחה אצל הלקוח הזה`);
+        if (x.amt > v.d.open) throw pre('bad-alloc', `לחשבונית ${v.d.no} נשארו לתשלום ${ag2(v.d.open)}`);
+        return [v, x.amt];
+      });
+    } else plan = invs.slice().sort((a, b) => String(a.d.dueX || a.d.due || a.d.d).localeCompare(String(b.d.dueX || b.d.due || b.d.d))).map((v) => [v, v.d.open]);
+    const r = B.issue('rc', { cust: cid, custSnap: ARD.custSnap(c.data), lines: [], vm: 'inc', rate: 0, net: amt, vat: 0, gross: amt, pay: ARD.payOf(pay), req: reqId, ...(pf.ok ? { proof: pf.id } : {}) });
+    for (const [v, a] of plan) { if (r.d.open <= 0) break; B.alloc(r, v, a); }
+    if (pf.ok) pf.use(r.id);
+    B.flush();
+    res = { id: r.id, no: r.d.no, draft: r.d.draft, gross: amt, left: r.d.open, alloc: B.allocs.map((a) => ({ inv: a.inv, amt: a.amt })), bal: c.ar.bal };
+    tx.set(markRef(db, reqId), { k: 'arReceipt', key: cid, r: res, t: B.now, by: w.uid });
+  }, { maxAttempts: 50 });
+  if (!res.dup) { try { res.sent = await afterIssue(w, res.id); } catch (e) { logger.error('ar: arReceipt after failed', { name: e && e.name, msg: String(e && e.message).slice(0, 200) }); } }
+  return res;
+}
+
+// ---------- arCredit({ reqId, inv, mode:'full'|'lines'|'amt', lines?:[{i,q}], amt?, restock?, reason }) ----------
+async function arCredit(request) {
+  const w = await OC.who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId', 'inv', 'mode', 'lines', 'amt', 'restock', 'reason']);
+  const reqId = reqIdOf(input);
+  const invId = idOf(input.inv, 'חשבונית');
+  if (!['full', 'lines', 'amt'].includes(input.mode)) throw bad('bad-mode', 'זיכוי: מלא, לפי שורות או סכום');
+  if (input.restock !== undefined && typeof input.restock !== 'boolean') throw bad('bad-field', 'החזרה למלאי: כן או לא');
+  if (input.restock === true && input.mode === 'amt') throw bad('bad-field', 'החזרה למלאי – רק בזיכוי מלא או לפי שורות');
+  const reason = txtIn(input.reason, 200, 'סיבה');
+  if (!reason) throw bad('bad-reason', 'כתבו סיבה לזיכוי');
+  let li = null, amt = 0;
+  if (input.mode === 'lines') {
+    if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > 500) throw bad('bad-lines', 'בחרו שורות לזיכוי');
+    li = input.lines.map((x) => {
+      if (!x || typeof x !== 'object') throw bad('bad-lines', 'שורה לא תקינה');
+      onlyKeys(x, ['i', 'q'], 'שורה');
+      if (!Number.isInteger(x.i) || x.i < 0 || !isNum(x.q) || x.q <= 0) throw bad('bad-lines', 'שורה לא תקינה');
+      return { i: x.i, q: Math.round(x.q * 1000) / 1000 };
+    });
+    if (new Set(li.map((x) => x.i)).size !== li.length) throw bad('bad-lines', 'אותה שורה פעמיים');
+  } else if (input.lines != null) throw bad('bad-lines', 'שורות – רק בזיכוי לפי שורות');
+  if (input.mode === 'amt') amt = agIn(input.amt, 'סכום הזיכוי'); else if (input.amt != null) throw bad('bad-amt', 'סכום – רק בזיכוי לפי סכום');
+  const db = T.tdb();
+  let res = null;
+  await db.runTransaction(async (tx) => {
+    res = null;
+    const m = await tx.get(markRef(db, reqId));
+    const hit = markHit(m, 'arCredit', invId); if (hit) { res = hit; return; }
+    const B = await new ARD.Book(tx, db, w).init();
+    needOn(B.cfg);
+    const x = await B.needDoc(invId);
+    if (!x || !['inv', 'ir'].includes(x.d.t)) throw new HttpsError('not-found', 'החשבונית לא נמצאה', { reason: 'no-doc' });
+    docAccess(w, x.d);
+    const prev = await tx.get(db.collection('ardoc').where('ref', '==', invId));
+    const prevG = prev.docs.reduce((s, p) => s + (p.get('t') === 'cr' ? p.get('gross') || 0 : 0), 0);
+    const prevAmt = prev.docs.some((p) => p.get('t') === 'cr' && !Array.isArray(p.get('li')));
+    const used = new Map();
+    prev.docs.forEach((p) => (p.get('li') || []).forEach((l) => used.set(l.i, (used.get(l.i) || 0) + l.q)));
+    const L = x.d.lines || [];
+    let mode = input.mode, sel = li;
+    if (mode === 'full') {
+      if (!prev.size) sel = L.map((l, i) => ({ i, q: l.q }));
+      else if (!prevAmt) sel = L.map((l, i) => ({ i, q: Math.round((l.q - (used.get(i) || 0)) * 1000) / 1000 })).filter((l) => l.q > 0);
+      else { mode = 'amt'; amt = x.d.gross - prevG; }
+      if (sel && !sel.length) throw pre('nothing-left', 'כבר זוכו כל השורות של החשבונית');
+    }
+    let lines, vm = x.d.vm, disc = x.d.disc || 0;
+    if (mode === 'amt') {
+      lines = [{ n: `זיכוי לחשבונית ${x.d.no}`, q: 1, p: amt / 100 }]; vm = 'inc'; disc = 0;
+    } else {
+      lines = sel.map((s) => {
+        const l = L[s.i];
+        if (!l) throw bad('bad-lines', 'שורה לא קיימת בחשבונית');
+        if (s.q > Math.round((l.q - (used.get(s.i) || 0)) * 1000) / 1000 + 1e-9 || (l.q < 0)) throw pre('too-much', `בשורה "${l.n}" אפשר לזכות עד ${Math.max(0, l.q - (used.get(s.i) || 0))}`);
+        return Object.assign({ n: l.n, q: s.q, p: l.p, u: '' }, l.pid ? { pid: l.pid } : {}, l.fr ? { fr: l.fr } : {});
+      });
+    }
+    const sm = AC.docSums(lines, vm, x.d.rate, disc);
+    if (sm.gross <= 0) throw pre('bad-amt', 'סכום הזיכוי חייב להיות גדול מ-0');
+    if (prevG + sm.gross > x.d.gross) throw pre('too-much', `אפשר לזכות עד ${ag2(Math.max(0, x.d.gross - prevG))} בחשבונית הזו`);
+    const back = input.restock === true ? lines.filter((l) => l.pid) : [];
+    const prods = back.length ? await OC.loadProds(tx, db, back.map((l) => l.pid)) : null;
+    if (x.d.cust) await B.needCust(x.d.cust);
+    await B.needSeq('cr');
+    const body = { cust: x.d.cust || '', custSnap: x.d.custSnap, lines, vm, rate: x.d.rate, net: sm.net, vat: sm.vat, gross: sm.gross, ord: x.d.ord || [], br: x.d.br || NB, ref: invId, note: 'סיבה: ' + reason, req: reqId };
+    if (disc) body.disc = disc;
+    if (mode !== 'amt') body.li = sel;
+    if (back.length) body.rs = true;
+    const r = B.issue('cr', body);
+    if (x.d.t === 'inv' && !x.d.void) B.alloc(r, x, r.d.gross);
+    B.flush();
+    if (back.length) {
+      const br = x.d.br || NB;
+      OC.applyMoves(tx, db, w, prods, back.filter((l) => prods.has(l.pid)).map((l) => ({ pid: l.pid, br, delta: l.q, why: 'credit' })), { ord: (x.d.ord || [])[0] || '', cr: r.id });
+    }
+    for (const o of x.d.ord || []) tx.set(logRef(db, o), { t: B.now, by: w.uid, act: 'ardoc', note: `${DT.cr} #${r.d.no} לחשבונית ${x.d.no}${back.length ? ' · הוחזר למלאי' : ''}` });
+    res = { id: r.id, no: r.d.no, draft: r.d.draft, gross: r.d.gross, left: r.d.open, rs: !!back.length };
+    tx.set(markRef(db, reqId), { k: 'arCredit', key: invId, r: res, t: B.now, by: w.uid });
+  }, { maxAttempts: 50 });
+  if (!res.dup) { try { res.sent = await afterIssue(w, res.id); } catch (e) { logger.error('ar: arCredit after failed', { name: e && e.name, msg: String(e && e.message).slice(0, 200) }); } }
+  return res;
+}
+
+// ---------- arVoidRc({ reqId, id, reason }) – מנהל ----------
+async function arVoidRc(request) {
+  const w = await OC.who(request);
+  mgr(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['reqId', 'id', 'reason']);
+  const reqId = reqIdOf(input);
+  const id = idOf(input.id, 'קבלה');
+  const reason = txtIn(input.reason, 200, 'סיבה');
+  if (!reason) throw bad('bad-reason', 'כתבו סיבה לביטול');
+  const db = T.tdb();
+  let res = null;
+  await db.runTransaction(async (tx) => {
+    res = null;
+    const m = await tx.get(markRef(db, reqId));
+    const hit = markHit(m, 'arVoidRc', id); if (hit) { res = hit; return; }
+    const B = await new ARD.Book(tx, db, w).init();
+    const x = await B.needDoc(id);
+    if (!x || x.d.t !== 'rc') throw new HttpsError('not-found', 'הקבלה לא נמצאה', { reason: 'no-doc' });
+    if (x.d.void) { res = { id, dup: true }; return; }
+    const al = await tx.get(db.collection('aralloc').where('rc', '==', id));
+    const live = al.docs.filter((a) => !a.get('void'));
+    const invs = [];
+    for (const a of live) invs.push([a, await B.needDoc(a.get('inv'))]);
+    const c = x.d.cust ? await B.needCust(x.d.cust) : null;
+    // קבלה שנרשמה ב"שולם" של הזמנה (paid.rc) – ההזמנה חוזרת ל"ממתין לתשלום"
+    const oid = (x.d.ord || [])[0];
+    const os = oid ? await tx.get(db.doc('ord/' + oid)) : null;
+    const back = os && os.exists && os.get('paid') && os.get('paid').rc === id ? os : null;
+    let sum = 0;
+    for (const [a, v] of invs) {
+      const amt = a.get('amt');
+      sum += amt;
+      if (v) B.set(v, { open: v.d.open + amt, st: ARD.stOf('inv', v.d.open + amt, v.d.gross) });
+      tx.update(a.ref, { void: true, voidAt: B.now, voidBy: w.uid });
+    }
+    if (c && c.data) { c.ar.bal += x.d.gross; c.ar.open += sum; c.ar.cr -= x.d.open; c.dirty = true; }
+    B.set(x, { open: 0, st: 'void', void: { at: B.now, by: w.uid, why: reason } });
+    B.flush();
+    if (back) {
+      const pd = back.get('paid');
+      tx.update(back.ref, { status: 'wait_pay', paid: require('firebase-admin/firestore').FieldValue.delete(), upd: B.now });
+      if (pd && pd.sup) tx.set(db.doc('ordpay/' + oid), { st: 'void', upd: B.now, why: 'unpay' }, { merge: true });
+      tx.set(logRef(db, oid), { t: B.now, by: w.uid, act: 'unpay', note: `ביטול קבלה #${x.d.no}: ${reason}` });
+    }
+    res = { id, no: x.d.no, reopened: invs.map(([a]) => a.get('inv')), ord: back ? oid : '' };
+    tx.set(markRef(db, reqId), { k: 'arVoidRc', key: id, r: res, t: B.now, by: w.uid });
+  }, { maxAttempts: 50 });
+  if (!res.dup) { try { await afterIssue(w, id, { isVoid: true }); } catch (e) { logger.error('ar: arVoidRc after failed', { name: e && e.name, msg: String(e && e.message).slice(0, 200) }); } }
+  return res;
+}
+
+// ---------- arProof({ id?, k, np, data }) / arProofGet({ id }) ----------
+// arproof/{id} { by, np, at, done, mime, size, used? } + arproof/{id}/p/{k} { data } – אף אחד לא קורא מהאפליקציה (החוקים). עד 5MB אחרי פענוח.
+const PF_CH = 700000, PF_MAX = 10, PF_BYTES = 5 * 1024 * 1024;
+const PF_HEAD = /^data:(image\/jpeg|image\/png|application\/pdf);base64,/;
+const PF_CHARS = /^[A-Za-z0-9+/=]*$/;
+function sniffMime(b) {
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b.length > 4 && b.slice(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  return '';
+}
+async function arProof(request) {
+  const w = await OC.who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['id', 'k', 'np', 'data']);
+  const { k, np } = input;
+  let data = input.data;
+  if (!Number.isInteger(np) || np < 1 || np > PF_MAX) throw bad('proof-big', 'הקובץ גדול מדי (עד 5MB)');
+  if (!Number.isInteger(k) || k < 0 || k >= np) throw bad('bad-part', 'חלק לא תקין');
+  if (typeof data !== 'string' || !data.length || data.length > PF_CH) throw bad('proof-big', 'חלק בקובץ גדול מדי');
+  let mime = '';
+  if (k === 0) { const h = PF_HEAD.exec(data); if (!h) throw bad('bad-proof', 'רק תמונה (JPEG / PNG) או PDF'); mime = h[1]; data = data.slice(h[0].length); }
+  if (!PF_CHARS.test(data)) throw bad('bad-proof', 'הקובץ לא תקין');
+  const db = T.tdb();
+  let id = input.id;
+  if (id == null) {
+    if (k !== 0) throw bad('bad-part', 'מתחילים מהחלק הראשון');
+    id = 'p' + crypto.randomBytes(12).toString('hex');
+    await db.doc('arproof/' + id).create({ by: w.uid, np, at: Date.now(), done: false, mime });
+  } else {
+    id = idOf(id, 'אסמכתא');
+    const s = await db.doc('arproof/' + id).get();
+    if (!s.exists) throw new HttpsError('not-found', 'האסמכתא לא נמצאה', { reason: 'no-proof' });
+    if (s.get('by') !== w.uid) throw deny('proof-owner', 'רק מי שהתחיל להעלות ממשיך');
+    if (s.get('done')) throw pre('proof-done', 'האסמכתא כבר הועלתה');
+    if (s.get('np') !== np) throw bad('bad-part', 'מספר החלקים השתנה');
+    if (k === 0) await s.ref.update({ mime });
+  }
+  const ref = db.doc('arproof/' + id);
+  await ref.collection('p').doc(String(k)).set({ data });
+  if (k !== np - 1) return { ok: true, id, k, np };
+  // החלק האחרון: כל החלקים קיימים, גודל אחרי פענוח עד 5MB, ותוכן הקובץ מתאים לסוג (לא רק הכותרת)
+  const parts = await ref.collection('p').get();
+  const m = new Map(parts.docs.map((p) => [p.id, p.get('data')]));
+  for (let i = 0; i < np; i++) if (typeof m.get(String(i)) !== 'string') throw pre('proof-missing', 'חסר חלק בקובץ. העלו שוב');
+  const all = Array.from({ length: np }, (_, i) => m.get(String(i))).join('');
+  const size = Math.floor(all.length * 3 / 4) - (all.endsWith('==') ? 2 : all.endsWith('=') ? 1 : 0);
+  if (size > PF_BYTES) throw bad('proof-big', 'הקובץ גדול מ-5MB');
+  const s0 = await ref.get();
+  const head = Buffer.from(all.slice(0, 16), 'base64');
+  if (sniffMime(head) !== s0.get('mime')) throw bad('bad-proof', 'תוכן הקובץ לא תואם לסוג שלו');
+  await ref.update({ done: true, size, doneAt: Date.now() });
+  return { ok: true, id, k, np, done: true, size };
+}
+async function arProofGet(request) {
+  const w = await OC.who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['id']);
+  const id = idOf(input.id, 'אסמכתא');
+  const db = T.tdb();
+  const s = await db.doc('arproof/' + id).get();
+  if (!s.exists || !s.get('done')) throw new HttpsError('not-found', 'האסמכתא לא נמצאה', { reason: 'no-proof' });
+  if (w.role !== 'manager' && s.get('by') !== w.uid) throw deny('proof-owner', 'האסמכתא זמינה למנהל ולמי שהעלה אותה');
+  const parts = await s.ref.collection('p').get();
+  const m = new Map(parts.docs.map((p) => [p.id, p.get('data')]));
+  const np = s.get('np');
+  return { id, mime: s.get('mime'), size: s.get('size'), used: s.get('used') || '', data: `data:${s.get('mime')};base64,` + Array.from({ length: np }, (_, i) => m.get(String(i)) || '').join('') };
+}
+
+// ---------- arDoc({ id, op:'pdf'|'send'|'due', ch?, to?, reqId?, due? }) ----------
+async function arDoc(request) {
+  const w = await OC.who(request);
+  const input = inputObject(request);
+  const op = input.op;
+  if (!['pdf', 'send', 'due'].includes(op)) throw bad('bad-op', 'פעולה לא מוכרת');
+  onlyKeys(input, op === 'pdf' ? ['id', 'op'] : op === 'send' ? ['id', 'op', 'ch', 'to', 'reqId'] : ['id', 'op', 'due']);
+  const db = T.tdb();
+  const doc = await docOf(db, input.id);
+  docAccess(w, doc);
+  const cfg = await cfgOf(db);
+  needOn(cfg);
+  const isVoid = !!doc.void;
+  if (op === 'pdf') { const b = await docBuf(db, w, doc, cfg, isVoid); return { id: doc.id, no: doc.no, t: doc.t, name: docName(doc, isVoid), b64: b.toString('base64'), void: isVoid }; }
+  if (op === 'due') {
+    mgr(w);
+    if (doc.t !== 'inv') throw pre('bad-type', 'מועד תשלום – רק בחשבונית מס');
+    if (!AC.ymdOk(input.due) || input.due < doc.d) throw bad('bad-due', 'תאריך לא תקין (לא לפני תאריך החשבונית)');
+    const ref = db.doc('ardoc/' + doc.id);
+    await db.runTransaction(async (tx) => { await tx.get(ref); ARD.docUpd(tx, ref, { dueX: input.due, upd: Date.now() }); });
+    return { ok: true, due: input.due };
+  }
+  const reqId = reqIdOf(input);
+  if (input.ch !== 'wa' && input.ch !== 'mail') throw bad('bad-ch', 'בחרו ווטסאפ או מייל');
+  const to = input.to == null || input.to === '' ? '' : String(input.to).trim().slice(0, 254);
+  const mark = markRef(db, reqId);
+  try { await mark.create({ k: 'arDocSend', key: doc.id, t: Date.now(), by: w.uid }); } catch (e) {
+    if (e && (e.code === 6 || /already exists/i.test(String(e.message)))) { const ms = await mark.get(); markHit(ms, 'arDocSend', doc.id); return Object.assign({}, ms.get('r') || { sent: [] }, { dup: true }); }
+    throw e;
+  }
+  const c = doc.cust ? await custOf(db, { custId: doc.cust }) : null;
+  const buf = await docBuf(db, w, doc, cfg, isVoid);
+  const recs = [];
+  for (const [ch, t] of targets({}, { cust: doc.custSnap || {} }, c, input.ch, to)) {
+    const r = t ? await sendDoc(db, w, doc, ch, t, false, buf, cfg, isVoid) : { ch, to: '', at: Date.now(), ok: false, why: 'no-to' };
+    recs.push(Object.assign({}, r, { auto: false, by: w.uid }));
+  }
+  await docRecord(db, doc.id, recs);
+  const r = { id: doc.id, no: doc.no, sent: recs };
+  await mark.update({ r });
+  return r;
+}
+
+// ---------- arMonthly({ cust, ym:'YYYY-MM', ch?, to?, reqId? }) – מסמך סיכום חודשי (לא חשבונית מס, החלטה 23) ----------
+async function arMonthly(request) {
+  const w = await OC.who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['cust', 'ym', 'ch', 'to', 'reqId']);
+  const cid = idOf(input.cust, 'לקוח');
+  if (typeof input.ym !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(input.ym)) throw bad('bad-ym', 'חודש לא תקין');
+  if (input.ch != null && input.ch !== 'wa' && input.ch !== 'mail') throw bad('bad-ch', 'בחרו ווטסאפ או מייל');
+  const db = T.tdb();
+  const cfg = await cfgOf(db);
+  needOn(cfg);
+  const cs = await db.doc('cust/' + cid).get();
+  if (!cs.exists || cs.get('mv')) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+  const c = cs.data();
+  const [y, mo] = input.ym.split('-').map(Number);
+  const from = input.ym + '-01', to = AC.ymdAdd(`${y}-${String(mo).padStart(2, '0')}-01`, new Date(Date.UTC(y, mo, 0)).getUTCDate() - 1);
+  const q = await db.collection('ardoc').where('cust', '==', cid).where('d', '>=', from).where('d', '<=', to).get();
+  const L = q.docs.map((s) => Object.assign({ id: s.id }, s.data())).filter((x) => ['inv', 'ir', 'cr'].includes(x.t)).sort((a, b) => a.d.localeCompare(b.d) || a.no - b.no);
+  if (!L.length) throw pre('no-docs', 'אין חשבוניות ללקוח בחודש הזה');
+  const sgn = (x) => (x.t === 'cr' ? -x.gross : x.gross);
+  const rows = L.map((x) => [shDate(x.d), titleOf(x), String(x.no), ag2(sgn(x)), x.t === 'inv' ? ag2(x.open) : '']);
+  const tot = L.reduce((s, x) => s + sgn(x), 0), open = L.reduce((s, x) => s + (x.t === 'inv' ? x.open : 0), 0);
+  const ar = ARD.arOf(c);
+  const doc = { t: 'st', d: ARD.ilDay(Date.now()), draft: L.some((x) => x.draft), title: `סיכום חשבוניות – ${String(mo).padStart(2, '0')}/${y}`, biz: await bizOf(db, w, cfg), cust: ARD.custSnap(c),
+    table: { head: ['תאריך', 'מסמך', 'מס׳', 'סכום', 'יתרה לתשלום'], rows, num: [3, 4] },
+    sums: [['סה״כ החודש', tot / 100], ['מזה פתוח לתשלום', open / 100], ['יתרת החשבון כעת', ar.bal / 100]],
+    note: 'מסמך סיכום בלבד – לא חשבונית מס. החשבוניות עצמן נשלחו בנפרד.' };
+  const buf = await PDF.render(doc);
+  const f = `sum_${cid}_${input.ym}`;
+  await AF.put(w.bizId, f, buf);
+  const sref = db.doc(`arsum/${cid}_${input.ym}`);
+  await sref.set({ cust: cid, ym: input.ym, n: L.length, tot, open, at: Date.now(), by: w.uid, f }, { merge: true });
+  const out = { name: `סיכום חשבוניות ${input.ym}.pdf`, b64: buf.toString('base64'), n: L.length, tot, open, sent: [] };
+  if (input.ch) {
+    const reqId = reqIdOf(input);
+    const mark = markRef(db, reqId);
+    try { await mark.create({ k: 'arMonthly', key: cid + '_' + input.ym, t: Date.now(), by: w.uid }); } catch (e) { if (e && (e.code === 6 || /already exists/i.test(String(e.message)))) return Object.assign(out, { dup: true }); throw e; }
+    const fake = { id: '', no: `${String(mo).padStart(2, '0')}/${y}`, t: 'st', gross: tot, custSnap: doc.cust, draft: doc.draft, bt: 'osek' };
+    for (const [ch, t] of targets({}, { cust: doc.cust }, c, input.ch, input.to ? String(input.to).trim().slice(0, 254) : '')) {
+      let r;
+      if (!t) r = { ch, to: '', at: Date.now(), ok: false, why: 'no-to' };
+      else if (ch === 'wa') {
+        const tpl = cfg.wt && TPL_RE.test(String(cfg.wt.st || '')) ? cfg.wt.st : '';
+        if (!tpl) r = { ch, to: t, at: Date.now(), ok: false, why: 'no-tpl' };
+        else { const lk = await AF.mkLink({ biz: w.bizId, id: f, n: out.name }); r = await S.sendWa(db, { to: t, tpl: { name: tpl, lang: 'he', params: [doc.cust.name, fake.no, ag2(tot)] }, link: lk.url, fileName: out.name, auto: false, by: w.uid, token: sv(WA_ACCESS_TOKEN), now: Date.now() }); }
+      } else r = await S.sendMail(w.bizId, { to: t, subject: `${doc.title}${cfg.name ? ' – ' + cfg.name : ''}`, text: `שלום ${doc.cust.name},\nמצורף ${doc.title}.\n${cfg.name || ''}`, replyTo: cfg.mail, fromName: cfg.name || '', pdf: buf, fileName: out.name, by: w.uid, now: Date.now() });
+      out.sent.push(Object.assign({}, r, { by: w.uid }));
+    }
+    await mark.update({ r: { sent: out.sent } });
+    await sref.update({ sent: out.sent.slice(-SENT_MAX) });
+  }
+  return out;
+}
+
+// ---------- setArOff – מנהל־על בלבד ----------
+async function setArOff(request) {
+  const w = await OC.who(request);
+  if (!w.uid || !(await T.isSuper(w.uid))) throw deny('not-superadmin', 'הפעולה מותרת למנהל המערכת בלבד');
+  const input = inputObject(request);
+  onlyKeys(input, ['bizId', 'on', 'bt', 'start', 'amin']);
+  const db = T.tdb();
+  const up = {};
+  if (input.on !== undefined) { if (typeof input.on !== 'boolean') throw bad('bad-cfg', 'רשמי: כן/לא'); up.on = input.on; }
+  if (input.bt !== undefined) { if (!ARD.BTS.includes(input.bt)) throw bad('bad-cfg', 'סוג העסק: עוסק מורשה, חברה או פטור'); up.bt = input.bt; }
+  if (input.amin !== undefined) { if (input.amin !== null && (!isNum(input.amin) || input.amin < 0 || input.amin > 1e8)) throw bad('bad-cfg', 'סף מספר הקצאה לא תקין'); up.amin = input.amin === null ? 0 : input.amin; }
+  if (input.start !== undefined) {
+    const x = input.start;
+    if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad('bad-cfg', 'מספרי התחלה לא תקינים');
+    onlyKeys(x, ARD.TYPES, 'מספרי התחלה');
+    const seqs = await Promise.all(Object.keys(x).map((t) => db.doc(`arcfg/seq_${t}O`).get()));
+    Object.keys(x).forEach((t, i) => {
+      if (!Number.isInteger(x[t]) || x[t] < 1 || x[t] > 1e9) throw bad('bad-cfg', 'מספר התחלה: מספר שלם חיובי');
+      if (seqs[i].exists) throw pre('seq-started', 'כבר הופקו מסמכים רשמיים בסדרה הזו – אי אפשר לשנות את מספר ההתחלה');
+      up['start.' + t] = x[t];
+    });
+  }
+  if (!Object.keys(up).length) throw bad('bad-cfg', 'אין מה לשמור');
+  const ref = db.doc('arcfg/off');
+  const s = await ref.get();
+  const now = Date.now();
+  if (!s.exists) await ref.set({}, { merge: true });
+  await ref.update(Object.assign(up, { upd: now, by: w.uid }));
+  return { ok: true };
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -354,7 +948,7 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { arOc, arPdf, arSend, setArCfg };
-const SENDS = ['arOc', 'arSend']; // שולחות: סוד ווטסאפ + סודות המייל
+const FNS = { arOc, arPdf, arSend, setArCfg, arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff };
+const SENDS = ['arOc', 'arSend', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arDoc', 'arMonthly']; // שולחות: סוד ווטסאפ + סודות המייל
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(SENDS.includes(k) ? { secrets: [WA_ACCESS_TOKEN].concat(S.MAIL_SECRETS), timeoutSeconds: 120, memory: '512MiB' } : { memory: '512MiB' }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, sniffMime } });

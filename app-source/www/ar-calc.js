@@ -102,7 +102,38 @@ function cpConv(p, from, to, vat) {
 function payOf(o) { return o && (o.vm === 'ex' || o.vm === 'inc') && isNum(o.gross) ? o.gross : (o && isNum(o.total) ? o.total : 0); }
 function termsTxt(t) { if (!t) return ''; return t.b === 'eom' ? 'שוטף+' + t.d : t.b === 'inv' ? t.d + ' ימים מהחשבונית' : 'מיידי'; }
 
-const api = { VAT0, ag, agUp, exVat, costIn, pctFor, floorOf, defPrice, priceOk, totals, termsOk, termsOfCust, termsTxt, cpConv, payOf, staffOk };
+// ---------- שלב 4: חשבוניות, קבלות וזיכויים ----------
+// סכומי מסמך באגורות (שלמים) משורות [{q,p}] (p בשקלים ביחידת המסמך). אותו חישוב כמו totals ו-ar-pdf.calc:
+// ex: net = Σround(q×p×100), vat = round(net×r/100) פעם אחת ברמת המסמך, gross = net + vat. inc: gross = Σשורות, vat = round(gross×r/(100+r)), net = gross − vat.
+// פטור (r = 0): vat = 0. המע"מ וההנחה – עיגול חצי כלפי מעלה לפי ערך מוחלט (rnd, סימטרי גם לסכום שלילי). → { sum, dsc, net, vat, gross } באגורות
+function docSums(lines, vm, rate, disc) {
+  // שורה = Math.round(q×p×100) – בדיוק כמו ar-pdf.calc ו-linesOf (ar.js), כדי שהסכום השמור יהיה הסכום המודפס
+  const sum = (Array.isArray(lines) ? lines : []).reduce((s, l) => s + Math.round(Number(l.q) * Number(l.p) * 100), 0);
+  const t = totals(sum / 100, vm, rate, disc);
+  return { sum, dsc: t.dsc ? ag(t.dsc) : 0, net: ag(t.net), vat: ag(t.vat), gross: ag(t.gross) };
+}
+// תאריכים 'YYYY-MM-DD' (בלי אזור זמן – חישוב לוח שנה בלבד)
+const p2 = (n) => String(n).padStart(2, '0');
+const ymdOk = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && ymdAdd(s, 0) === s;
+function ymdAdd(s, k) { const [y, m, d] = s.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1, d + k)); return t.getUTCFullYear() + '-' + p2(t.getUTCMonth() + 1) + '-' + p2(t.getUTCDate()); }
+function monEnd(y, m0) { const t = new Date(Date.UTC(y, m0 + 1, 0)); return t.getUTCFullYear() + '-' + p2(t.getUTCMonth() + 1) + '-' + p2(t.getUTCDate()); }
+// מועד תשלום לחשבונית (77–81, החלטה 10): terms = { b:'imm'|'eom'|'inv', d }, d = תאריך החשבונית. זהה ל-dueCalc של הספקים באפליקציה:
+// מיידי = d; ימים מהחשבונית = d + N; שוטף + כפולה של 30 = סוף החודש + N/30 חודשים (שוטף+60 על נובמבר = 31.1); שוטף+N אחר = סוף החודש + N ימים.
+// אחר כך: מועד שנופל ביום שאינו יום עסקים (isBiz('YYYY-MM-DD') = false: שישי, שבת, חג) עובר ליום העסקים הבא. isBiz חסר = בלי דחייה.
+function dueOf(terms, d, isBiz) {
+  if (!ymdOk(d)) return '';
+  const t = termsOk(terms) ? terms : { b: 'imm', d: 0 };
+  let r;
+  if (t.b === 'inv') r = ymdAdd(d, t.d);
+  else if (t.b === 'eom') { const [y, m] = d.split('-').map(Number); r = t.d % 30 === 0 ? monEnd(y, m - 1 + t.d / 30) : ymdAdd(monEnd(y, m - 1), t.d); }
+  else r = d;
+  if (typeof isBiz === 'function') for (let i = 0; i < 60 && !isBiz(r); i++) r = ymdAdd(r, 1);
+  return r;
+}
+// המספר הבא בסדרה: n = המונה (המספר האחרון שהופק, או null כשאין עדיין מסמך בסדרה); start = מספר ההתחלה שמנהל־העל קבע (סדרה רשמית בלבד)
+function nextNo(n, start) { const s = Number.isInteger(start) && start > 0 ? start : 1; return Number.isInteger(n) && n > 0 ? Math.max(n + 1, s) : s; }
+
+const api = { VAT0, ag, agUp, exVat, costIn, pctFor, floorOf, defPrice, priceOk, totals, termsOk, termsOfCust, termsTxt, cpConv, payOf, staffOk, docSums, dueOf, ymdOk, ymdAdd, nextNo };
 // שרת (Node) – module.exports; מסך ההזמנה (דפדפן) – window.ArCalc
 if (typeof module === 'object' && module.exports) module.exports = api; else root.ArCalc = api;
 })(typeof self !== 'undefined' ? self : this);
