@@ -401,7 +401,13 @@ async function docRender(db, w, doc, cfg, isVoid) {
     base.table = { head: ['אמצעי תשלום', 'פרטים', 'סכום'], rows: [[PAYN[p.m] || 'אחר', det, ag2(doc.gross)]], num: [2] };
     base.sums = [['סה״כ שולם', doc.gross / 100]];
     const al = await db.collection('aralloc').where('rc', '==', doc.id || '').get().catch(() => null);
-    const inv = al ? al.docs.map((s) => s.data()).filter((a) => !a.void).map((a) => `${a.inv.replace(/^inv[DO]/, '').replace(/^x_[a-z]+_/, '')} (${ag2(a.amt)})`) : [];
+    const live = al ? al.docs.map((s) => s.data()).filter((a) => !a.void) : [];
+    // שלב 6, תיקון סבב 1 (ליקוי 2): מסמך מיובא – המספר המקורי (ext); יתרת פתיחה – "יתרת פתיחה" (לא המזהה הפנימי)
+    const xs = live.filter((a) => /^x_/.test(a.inv));
+    const xd = {};
+    if (xs.length) { const ss = await db.getAll(...xs.map((a) => db.doc('ardoc/' + a.inv))).catch(() => []); ss.forEach((q) => { if (q.exists) xd[q.id] = q.get('t') === 'ob' ? 'יתרת פתיחה' : String(q.get('ext') || q.get('no') || ''); }); }
+    const lbl = (id) => (/^x_ob_/.test(id) ? 'יתרת פתיחה' : /^x_/.test(id) ? (xd[id] || 'מסמך מיובא') : id.replace(/^inv[DO]/, ''));
+    const inv = live.map((a) => `${lbl(a.inv)} (${ag2(a.amt)})`);
     if (inv.length) notes.push('עבור חשבוניות: ' + inv.join(', '));
   } else {
     base.lines = (doc.lines || []).map((l) => ({ n: l.n, q: l.q, p: l.p, u: l.u || '' }));

@@ -37,6 +37,7 @@ const MSG = {
   'bad-date': 'תאריך לא תקין', 'future': 'תאריך עתידי', 'bad-amt': 'סכום לא תקין', 'zero': 'סכום 0', 'no-no': 'חסר מספר מסמך', 'bad-no': 'מספר מסמך ארוך מדי',
   'no-key': 'חסר פרט לזיהוי הלקוח (מספר לקוח / ע.מ / טלפון / שם)', 'no-cust': 'הלקוח לא נמצא – ייבאו קודם את הלקוחות', 'cust-many': 'כמה לקוחות מתאימים – הוסיפו מספר לקוח או ע.מ',
   'dup-file': 'מופיע פעמיים בקובץ', 'bad-due': 'תאריך לתשלום לא תקין', 'too-many-v': 'המסמך יובא ובוטל יותר מדי פעמים',
+  'dup-diff': 'מספר מסמך כפול עם נתונים שונים (לקוח / סכום / תאריך) – בדקו את הקובץ',
 };
 
 // ---------- פונקציות טהורות (גם לבדיקות) ----------
@@ -67,7 +68,7 @@ function agOf(v) {
   let s = String(v == null ? '' : v).replace(/[\s ‎‏₪$]|ש"ח|ש״ח|nis|ils/gi, '');
   if (!s) return null;
   let neg = false;
-  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); if (/^-|-$/.test(s)) return null; } // תיקון סבב 1 (הערה): "(-5)" – לא חד משמעי
   if (/^-/.test(s)) { neg = !neg; s = s.slice(1); } else if (/-$/.test(s)) { neg = !neg; s = s.slice(0, -1); }
   if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g, '');
   else if (/^\d+,\d{1,2}$/.test(s)) s = s.replace(',', '.');
@@ -89,17 +90,18 @@ function parseRow(kind, r, today) {
   const no = strOf(r.no, 40);
   if (kind !== 'ob' && !no) return { ok: false, why: 'no-no' };
   if (no.length > 30) return { ok: false, why: 'bad-no' };
-  let d = '';
+  let d = '', dd = false;
   if (r.d != null && String(r.d).trim() !== '') { d = dateOf(r.d); if (!d) return { ok: false, why: 'bad-date' }; } else if (kind !== 'ob') return { ok: false, why: 'bad-date' };
-  else d = today;
+  else { d = today; dd = true; } // יתרה בלי תאריך – היום (בהשוואה לייבוא קודם התאריך לא נבדק)
   if (d > today) return { ok: false, why: 'future' };
-  let a;
+  let a, side = null;
   const has = (x) => x != null && String(x).trim() !== '';
   if (has(r.amt)) { a = agOf(r.amt); if (a == null) return { ok: false, why: 'bad-amt' }; }
-  else if (has(r.dr) || has(r.cr)) { const x = has(r.dr) ? agOf(r.dr) : 0, y = has(r.cr) ? agOf(r.cr) : 0; if (x == null || y == null) return { ok: false, why: 'bad-amt' }; a = x - y; }
+  else if (has(r.dr) || has(r.cr)) { const x = has(r.dr) ? agOf(r.dr) : 0, y = has(r.cr) ? agOf(r.cr) : 0; if (x == null || y == null) return { ok: false, why: 'bad-amt' }; a = x - y; side = a >= 0 ? 'dr' : 'cr'; } // תיקון סבב 1 (ליקוי 1): עמודות חובה / זכות – הצד לפי העמודה, בכל סוג מסמך
   else return { ok: false, why: 'bad-amt' };
   if (a === 0) return { ok: false, why: 'zero' };
-  const o = { ok: true, no, d, ag: Math.abs(a), k: sideOf(kind, a) };
+  if (Math.abs(a) > AG_MAX) return { ok: false, why: 'bad-amt' };
+  const o = { ok: true, no, d, ag: Math.abs(a), k: side || sideOf(kind, a), ...(dd ? { dd: true } : {}) };
   const ref = strOf(r.ref, 30);
   if (ref && kind !== 'ob') o.ref = ref;
   if (has(r.due) && o.k === 'dr') { const u = dateOf(r.due); if (!u) return { ok: false, why: 'bad-due' }; o.due = u; }
@@ -134,6 +136,16 @@ async function findCust(db, ck, cache) {
 }
 const baseId = (kind, p, cid) => (kind === 'ob' ? 'x_ob_' + cid : `x_${kind}_${keyOf(p.no)}`);
 
+// תיקון סבב 1 (ליקויים 3, 4): המזהה הפנוי בשרשרת x_… → _v2.._v9 (אחרי ביטול), וזהות המסמך הקיים.
+// get(id) → נתוני המסמך או null. מחזיר { st:'dup' } (אותו מסמך כבר יובא), { st:'new', id }, או { why } (שגיאה בשורה)
+const same = (x, r) => x.cust === r.cust && x.gross === r.ag && x.k === r.k && (x.d === r.d || (r.dd === true && x.t === 'ob'));
+async function slotOf(get, r) {
+  let id = r.id, x = await get(id), v = 1;
+  while (x && x.void && v < 9) { v++; id = r.id + '_v' + v; x = await get(id); }
+  if (x && !x.void) return same(x, r) ? { st: 'dup' } : { why: 'dup-diff' };
+  if (x) return { why: 'too-many-v' };
+  return { st: 'new', id };
+}
 async function who(request) {
   const w = await OC.who(request);
   if (w.role !== 'manager') throw deny('manager-only', 'ייבוא מתוכנה קודמת – מנהל בלבד');
@@ -182,10 +194,10 @@ async function arImp(request) {
       await db.doc('arcfg/impmap').set({ [kind]: clean, upd: Date.now() }, { merge: true });
     }
     const ok = rows.filter((r) => r.ok);
-    const ss = ok.length ? await db.getAll(...ok.map((r) => db.doc('ardoc/' + r.id))) : [];
-    ss.forEach((s, j) => { if (s.exists && !s.get('void')) ok[j].st = 'dup'; });
-    const nw = ok.filter((r) => r.st !== 'dup');
-    return { rows: rows.map(pub), n: rows.length, add: nw.length, dup: ok.length - nw.length, bad: rows.length - ok.length, sum: nw.reduce((s, r) => s + (r.k === 'dr' ? r.ag : -r.ag), 0) };
+    const get = async (id) => { const s = await db.doc('ardoc/' + id).get(); return s.exists ? s.data() : null; };
+    for (const r of ok) { const z = await slotOf(get, r); if (z.why) { r.ok = false; r.why = z.why; } else r.st = z.st; }
+    const ok2 = rows.filter((r) => r.ok), nw = ok2.filter((r) => r.st !== 'dup');
+    return { rows: rows.map(pub), n: rows.length, add: nw.length, dup: ok2.length - nw.length, bad: rows.length - ok2.length, sum: nw.reduce((s, r) => s + (r.k === 'dr' ? r.ag : -r.ag), 0) };
   }
   if (typeof input.batch !== 'string' || !BATCH_RE.test(input.batch)) throw bad('bad-batch', 'מזהה קבוצה חסר');
   const batch = input.batch, name = strOf(input.name, 80);
@@ -200,11 +212,10 @@ async function arImp(request) {
     // קריאות: המזהה (ומזהי _v2.. אם המקור בוטל), הלקוחות, המסמכים הפתוחים שלהם, וחשבונית ההפניה
     for (const r of L) {
       if (!r.ok) continue;
-      let id = r.id, s = await B.needDoc(id), v = 1;
-      while (s && s.d.void && v < 9) { v++; id = r.id + '_v' + v; s = await B.needDoc(id); }
-      if (s && !s.d.void) { r.st = 'dup'; continue; }
-      if (s) { r.ok = false; r.why = 'too-many-v'; continue; }
-      r.id = id;
+      const z = await slotOf(async (id) => { const x = await B.needDoc(id); return x ? x.d : null; }, r);
+      if (z.why) { r.ok = false; r.why = z.why; continue; }
+      if (z.st === 'dup') { r.st = 'dup'; continue; }
+      r.id = z.id;
       const c = await B.needCust(r.cust);
       if (!c.data || c.data.mv) { r.ok = false; r.why = 'no-cust'; }
     }
@@ -315,4 +326,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { arImp, arImpVoid, arImpList };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall({ memory: '512MiB', timeoutSeconds: 120 }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { dateOf, agOf, keyOf, sideOf, parseRow, MSG } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { dateOf, agOf, keyOf, sideOf, parseRow, slotOf, MSG } });

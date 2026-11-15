@@ -128,6 +128,40 @@ describe('פונקציות טהורות: תאריכים וסכומים', () => {
     assert.equal(parseRow('inv', { no: '1', d: '1/1/2025', amt: '0', name: 'x' }, t).why, 'zero');
     assert.equal(parseRow('inv', { no: '1', d: '1/1/2025', amt: '5' }, t).why, 'no-key');
   });
+  it('תיקון סבב 1 (ליקוי 1): כל צירוף של סוג מסמך × עמודת סכום / חובה / זכות – הצד נכון. בעמודות חובה / זכות הצד לפי העמודה', () => {
+    const { parseRow } = IMP(), t = '2026-11-15';
+    const E = { // [עמודה, ערך] → צד צפוי לכל סוג
+      'amt=100': { ob: 'dr', inv: 'dr', rc: 'cr', cr: 'cr' }, 'amt=-100': { ob: 'cr', inv: 'cr', rc: 'dr', cr: 'cr' },
+      'dr=100': { ob: 'dr', inv: 'dr', rc: 'dr', cr: 'dr' }, 'cr=100': { ob: 'cr', inv: 'cr', rc: 'cr', cr: 'cr' },
+      'dr=-100': { ob: 'cr', inv: 'cr', rc: 'cr', cr: 'cr' }, 'cr=-100': { ob: 'dr', inv: 'dr', rc: 'dr', cr: 'dr' } };
+    let n = 0;
+    for (const [fv, want] of Object.entries(E)) for (const k of ['ob', 'inv', 'rc', 'cr']) {
+      const [f, v] = fv.split('='); const r = parseRow(k, { no: '1', d: '1/1/2025', name: 'x', [f]: v }, t);
+      assert.equal(r.k, want[k], `${k} ${fv}`); assert.equal(r.ag, 10000); n++;
+    }
+    assert.equal(n, 24);
+    assert.equal(parseRow('rc', { no: '1', d: '1/1/2025', name: 'x', dr: '', cr: '500' }, t).k, 'cr', 'קבלה בעמודת זכות = זכות');
+    assert.equal(parseRow('rc', { no: '1', d: '1/1/2025', name: 'x', dr: '700', cr: '200' }, t).ag, 50000);
+    assert.equal(parseRow('inv', { no: '1', d: '1/1/2025', name: 'x', dr: '9,999,999', cr: '-9,999,999' }, t).why, 'bad-amt', 'תקרה גם אחרי החיסור');
+    assert.equal(IMP().agOf('(-5)'), null);
+  });
+  it('תיקון סבב 1 (ליקויים 3, 4): slotOf – אותו מסמך = כבר יובא; פרטים שונים = שגיאה; אחרי ביטול – _v2.._v9', async () => {
+    const { slotOf } = IMP();
+    const r = { id: 'x_inv_1', cust: 'c1', ag: 100, k: 'dr', d: '2025-01-01' };
+    const db = (m) => async (id) => m[id] || null;
+    const x = { cust: 'c1', gross: 100, k: 'dr', d: '2025-01-01', t: 'old' };
+    assert.deepEqual(await slotOf(db({}), r), { st: 'new', id: 'x_inv_1' });
+    assert.deepEqual(await slotOf(db({ x_inv_1: x }), r), { st: 'dup' });
+    for (const ch of [{ cust: 'c2' }, { gross: 101 }, { k: 'cr' }, { d: '2025-01-02' }]) assert.deepEqual(await slotOf(db({ x_inv_1: Object.assign({}, x, ch) }), r), { why: 'dup-diff' }, JSON.stringify(ch));
+    const V = Object.assign({}, x, { void: { at: 1 } });
+    assert.deepEqual(await slotOf(db({ x_inv_1: V }), r), { st: 'new', id: 'x_inv_1_v2' });
+    assert.deepEqual(await slotOf(db({ x_inv_1: V, x_inv_1_v2: x }), r), { st: 'dup' });
+    assert.deepEqual(await slotOf(db({ x_inv_1: V, x_inv_1_v2: Object.assign({}, x, { gross: 5 }) }), r), { why: 'dup-diff' });
+    const all = {}; all.x_inv_1 = V; for (let v = 2; v <= 9; v++) all['x_inv_1_v' + v] = V;
+    assert.deepEqual(await slotOf(db(all), r), { why: 'too-many-v' });
+    // יתרת פתיחה בלי תאריך בקובץ (= היום): ייבוא חוזר ביום אחר – עדיין "כבר יובא"
+    assert.deepEqual(await slotOf(db({ x_ob_c1: Object.assign({}, x, { t: 'ob', d: '2025-06-01' }) }), Object.assign({}, r, { id: 'x_ob_c1', dd: true })), { st: 'dup' });
+  });
 });
 
 describe('הרשאות', () => {
@@ -181,11 +215,11 @@ const SAMPLE = {
   ob: [{ xc: '1001', amt: '1,000.10' }, { vat: '515000002', dr: '0', cr: '250.25' }, { phone: '054-8000003', amt: '99.99' }],
   inv: [{ xc: '1001', no: 'A-100', d: '01/09/2025', amt: '1,180.00', due: '31/10/2025' }, { xc: '1001', no: '2025/101', d: '2025-09-15', amt: 590.5 },
     { vat: '515000002', no: '102', d: '20.09.25', amt: '2,360.33' }, { name: 'קיוסק רמי', no: '103', d: 45930, amt: '-50.00' }, { xc: '1003', no: '104', d: '1-10-2025', amt: '117.01' }],
-  rc: [{ xc: '1001', no: '500', d: '05/10/2025', amt: '1,180.00', ref: 'A-100' }, { vat: '515000002', no: '501', d: '2025-10-06', amt: '1000' }, { xc: '1003', no: '502', d: '07/10/2025', amt: '(30.00)' }],
+  rc: [{ xc: '1001', no: '500', d: '05/10/2025', amt: '1,180.00', ref: 'A-100' }, { vat: '515000002', no: '501', d: '2025-10-06', amt: '1000' }, { xc: '1003', no: '502', d: '07/10/2025', amt: '(30.00)' }, { xc: '1003', no: '503', d: '08/10/2025', dr: '', cr: '40.00' }],
   cr: [{ xc: '1001', no: '900', d: '10/10/2025', amt: '-90.50', ref: '2025/101' }, { name: 'מסעדת הגפן', no: '901', d: '11/10/2025', amt: '60.33' }],
 };
 // סכום הקובץ באגורות (חובה − זכות), מחושב ידנית
-const SAMPLE_SUM = (100010 - 25025 + 9999) + (118000 + 59050 + 236033 - 5000 + 11701) - (118000 + 100000 - 3000) - (9050 + 6033);
+const SAMPLE_SUM = (100010 - 25025 + 9999) + (118000 + 59050 + 236033 - 5000 + 11701) - (118000 + 100000 - 3000 + 4000) - (9050 + 6033); // 503: קבלה בעמודת "זכות" (תיקון סבב 1)
 
 describe('קריטריון: קובץ דוגמה מיובא, היתרות = הקובץ עד האגורה, ייבוא שני = 0 חדשים', () => {
   it('לקוחות + יתרות + חשבוניות + קבלות + זיכויים; זיהוי לפי מספר לקוח / ע.מ / טלפון / שם; הקצאה לפי מספר חשבונית', async () => {
@@ -205,7 +239,8 @@ describe('קריטריון: קובץ דוגמה מיובא, היתרות = הק�
     // פירוט לפי לקוח
     assert.equal((await get(`b/${A}/cust/p0548000001`)).ar.bal, 100010 + 118000 + 59050 - 118000 - 9050);
     assert.equal((await get(`b/${A}/cust/p0548000002`)).ar.bal, -25025 + 236033 - 100000 - 6033);
-    assert.equal((await get(`b/${A}/cust/p0548000003`)).ar.bal, 9999 - 5000 + 11701 + 3000);
+    assert.equal((await get(`b/${A}/cust/p0548000003`)).ar.bal, 9999 - 5000 + 11701 + 3000 - 4000);
+    assert.equal((await get(`b/${A}/ardoc/x_rc_503`)).k, 'cr', 'קבלה בעמודת זכות = זכות');
     // מסמכים: מזהה x_{סוג}_{מספר}, מספר מקורי, "מסמך מיובא", בלי קובץ
     const d1 = await get(`b/${A}/ardoc/x_inv_A-100`);
     assert.equal(d1.t, 'old'); assert.equal(d1.ot, 'inv'); assert.equal(d1.ext, 'A-100'); assert.equal(d1.note, 'מסמך מיובא'); assert.equal(d1.d, '2025-09-01'); assert.equal(d1.due, '2025-10-31');
@@ -234,6 +269,16 @@ describe('קריטריון: קובץ דוגמה מיובא, היתרות = הק�
       assert.equal(r.add, 0, k); assert.equal(r.dup, SAMPLE[k].length, k);
     }
     assert.equal((await all('ardoc')).length, nDocs); assert.equal((await all('aralloc')).length, nAl);
+    assert.equal(await totalBal(), SAMPLE_SUM);
+    // תיקון סבב 1 (ליקוי 3): אותו מספר עם לקוח / סכום / תאריך שונים – שגיאה בשורה, לא "כבר יובא"
+    const diff = [{ xc: '1001', no: 'A-100', d: '01/09/2025', amt: '1,180.00' }, { xc: '1002', no: 'A-100', d: '01/09/2025', amt: '1,180.00' }, { xc: '1001', no: 'A-100', d: '01/09/2025', amt: '1,180.01' }, { xc: '1001', no: 'A-100', d: '02/09/2025', amt: '1,180.00' }];
+    const pvd = []; // כל שורה בקובץ נפרד (באותו קובץ – "מופיע פעמיים בקובץ")
+    for (const row of diff) pvd.push(await ok(call('arImp', MGR, { kind: 'inv', dry: true, rows: [row] })));
+    assert.deepEqual(pvd.map((p) => (p.rows[0].ok ? p.rows[0].st : p.rows[0].why)), ['dup', 'dup-diff', 'dup-diff', 'dup-diff']);
+    assert.ok(pvd[1].rows[0].msg.includes('מספר מסמך כפול עם נתונים שונים'));
+    assert.deepEqual(pvd.map((p) => [p.add, p.dup, p.bad]), [[0, 1, 0], [0, 0, 1], [0, 0, 1], [0, 0, 1]]);
+    const rd = await imp('inv', diff.slice(1, 2));
+    assert.equal(rd.add, 0); assert.equal(rd.bad, 1); assert.equal(rd.rows[0].why, 'dup-diff');
     assert.equal(await totalBal(), SAMPLE_SUM);
     // תוצרים נוספים: הכנסות לא נרשמות (אין tx), ו-arDoc על מסמך מיובא נדחה (אין קובץ)
     assert.equal((await call('arDoc', MGR, { id: 'x_inv_A-100', op: 'pdf' })).reason, 'imported');
@@ -308,6 +353,11 @@ describe('ביטול קבוצה = void, ושילוב עם קבלות וחשבו�
     assert.equal(n2.gross, 90000); assert.equal(n2.open, 90000 - 70000, 'הזכות שחזרה לקבלה קוזזה');
     assert.equal(await balanced('p0548000001'), 30000 - 100000 + 90000);
     assert.equal((await imp('ob', [{ xc: '1001', amt: '900' }])).add, 0, 'ייבוא חוזר של הקובץ המתוקן = 0');
+    // תיקון סבב 1 (ליקוי 4): התצוגה המקדימה בודקת גם _v2 – תואמת לייבוא בפועל
+    const pv2 = await ok(call('arImp', MGR, { kind: 'ob', dry: true, rows: [{ xc: '1001', amt: '900' }] }));
+    assert.equal(pv2.add, 0); assert.equal(pv2.dup, 1); assert.equal(pv2.sum, 0);
+    const pv3 = await ok(call('arImp', MGR, { kind: 'ob', dry: true, rows: [{ xc: '1001', amt: '1000' }] }));
+    assert.equal(pv3.rows[0].why, 'dup-diff', 'הקובץ המקורי (1000) מול המתוקן שיובא (900)');
     // זכות פתיחה מיובאת מחדש (_v2) נשארת זכות פתוחה (אין חוב לקזז)
     await imp('ob', [{ xc: '1002', amt: '-200' }]);
     assert.equal((await get(`b/${A}/ardoc/x_ob_p0548000002_v2`)).open, 20000);
@@ -320,6 +370,22 @@ describe('ביטול קבוצה = void, ושילוב עם קבלות וחשבו�
     const list = await ok(call('arImpList', MGR, {}));
     assert.equal(list.batches.find((b) => b.id === ob.batch).st, 'void');
     assert.equal(list.batches.find((b) => b.id === ob2.batch).st, 'ok');
+  });
+
+  it('תיקון סבב 1 (ליקוי 2): PDF של קבלה חדשה על חוב מיובא – המספר המקורי ו"יתרת פתיחה", בלי מזהה פנימי', async () => {
+    const { extract } = require('./pdf-text');
+    await sampleCusts();
+    await prep((d) => d.doc(`b/${A}/arcfg/seq_rcD`).set({ n: 700 })); // Storage לא מתנקה בין בדיקות – מספר קבלה חדש
+    await imp('ob', [{ xc: '1001', amt: '100' }]);
+    await imp('inv', [{ xc: '1001', no: '2025/101', d: '2025-01-01', amt: '50' }]);
+    const rc = await ok(call('arReceipt', MGR, { reqId: rid(), cust: 'p0548000001', amt: 150, method: 'cash' }));
+    assert.equal(rc.alloc.length, 2);
+    const p = await ok(call('arDoc', MGR, { id: rc.id, op: 'pdf' }));
+    const txt = extract(Buffer.from(p.b64, 'base64')).flat().join('\n');
+    const heb = (w) => txt.includes(w) || txt.includes([...w].reverse().join(''));
+    assert.ok(txt.includes('2025/101') || txt.includes('101/2025'), txt);
+    assert.ok(heb('יתרת פתיחה') || heb('פתיחה'), txt);
+    assert.ok(!/x_|p0548000001|h[0-9a-f]{16}/.test(txt), txt);
   });
 
   it('ביטול קבוצה גדולה במנות של 25 (left)', async () => {
