@@ -10,6 +10,7 @@ const BIZ = 'biz-o';
 const FEAT = { scan: true, tasks: true, orders: true, suppliers: true, cashClose: true, secretary: true };
 const NT = { wd: 0, wh: 8, mh: 8, md: 0, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3, rt: {} };
 const ID1 = 'g' + '1'.repeat(40), ID2 = 'g' + '2'.repeat(40), ID3 = 'g' + '3'.repeat(40);
+const X3 = { stuck: false }; // סבב 2: טיוטת מייל רגילה במצב "ייתכן שנשלח"
 const XSS = '<img src=x onerror="window.__xss=1">';
 
 async function open(browser, www, w, h) {
@@ -27,7 +28,7 @@ async function open(browser, www, w, h) {
     { id: ID3, from: 'dan@client.example', name: 'דן', subj: 'שאלה על שעות', snip: 'מתי פתוח?', t: now - 7200e3, st: 'new', flags: [], box: boxes[0].id, draft: { st: 'pend', src: 'ai' } },
   ];
   const ord = { id: ID1, to: 'yossi@client.example', st: 'mgr', ver: 3, t: now, custId: '', custName: '', cands: [{ id: 'c1', name: 'יוסי כהן', bn: 'כהן שיווק' }, { id: 'c2', name: 'יוסי לוי', bn: '' }], idBy: 'mail', custNew: { name: 'יוסי ' + XSS, phone: '0501234567' },
-    phone: '', phoneHint: '0501234567', br: '', brDef: false, catCut: false, brs: [{ id: 'b1', name: 'צפון' }, { id: 'b2', name: 'דרום' }], lines: [
+    phone: '', phoneHint: '0501234567', custPh: false, br: '', brDef: false, catCut: false, brs: [{ id: 'b1', name: 'צפון' }, { id: 'b2', name: 'דרום' }], lines: [
       { st: 'ok', name: 'חלב 3%', txt: 'חלב', qty: 10, unit: 'קרטון', pr: 5000, sum: 50000 },
       { st: 'pick', txt: 'גבינה', qty: 2, unit: 'יח', opts: [{ id: 'p1', name: 'גבינה לבנה 5%', pr: 800 }, { id: 'p2', name: 'גבינה צהובה', pr: 1500 }] },
       { st: 'ok', name: 'שוקו', txt: 'שוקו', qty: 5, out: true },
@@ -48,7 +49,7 @@ async function open(browser, www, w, h) {
       if (body.op === 'repGet') return ok({ ok: true, auto: true, cap: 100, drafts: 0, sent: 0, autoDay: 100, held: null });
       if (body.op === 'get') {
         const m = mails.find((x) => x.id === body.id);
-        const d = m.id === ID3 ? { id: ID3, to: m.from, subj: 'Re', text: 'פתוחים 8–18', src: 'ai', st: 'pend', flags: [], why: [], an: [], anL: [], t: now } : m.id === ID1 ? { id: ID1, to: m.from, subj: 'Re: הזמנה', text: 'טיוטה', src: 'ai', st: 'pend', flags: [], why: [], an: ['order'], anL: [], t: now, oRe: '' }
+        const d = m.id === ID3 ? { id: ID3, to: m.from, subj: 'Re', text: 'פתוחים 8–18', src: 'ai', st: X3.stuck ? 'sending' : 'pend', stuck: !!X3.stuck, flags: [], why: [], an: [], anL: [], t: now } : m.id === ID1 ? { id: ID1, to: m.from, subj: 'Re: הזמנה', text: 'טיוטה', src: 'ai', st: 'pend', flags: [], why: [], an: ['order'], anL: [], t: now, oRe: '' }
           : { id: ID2, to: m.from, subj: 'Re: Re: הזמנה', text: 'תשובה', src: 'ai', st: 'pend', flags: [], why: [], an: ['order'], anL: [], t: now, oRe: ID1 };
         return ok({ ok: true, mail: Object.assign({}, m, { text: m.snip, files: [], rto: '' }), draft: d });
       }
@@ -63,7 +64,7 @@ async function open(browser, www, w, h) {
         }
         ord.ver++; return ok({ ok: true, ord });
       }
-      if (body.op === 'ordPhone') { ord.phone = ord.phoneHint; ord.phoneHint = ''; ord.ver++; return ok({ ok: true, custId: ord.custId, ord }); }
+      if (body.op === 'ordPhone') { ord.phone = ord.phoneHint || ord.phone; ord.phoneHint = ''; ord.custPh = true; ord.ver++; return ok({ ok: true, custId: ord.custId, ord }); }
       if (body.op === 'ordCust') { ord.custId = 'p0501234567'; ord.custName = body.card.name; ord.ver++; return ok({ ok: true, created: true, custId: ord.custId, ord }); }
       if (body.op === 'ordSend') { if (body.mark) { ord.st = 'sent'; return ok({ ok: true, marked: true }); } ord.st = 'sent'; return ok({ ok: true, id: body.id }); }
       if (body.op === 'ordAuto') {
@@ -117,6 +118,7 @@ const small = (page) => page.evaluate(() => [...document.querySelectorAll('#secO
     check('בחירת סניף', e && e[1].ops[0].br === 'b1' && e[1].ver === 4, e && e[1]);
     await page.click('[data-a=secOrdOp][data-k=phone]'); await H.settle(page, 400);
     check('אישור טלפון', !!last(bodies, 'secMail', (b) => b.op === 'ordEdit' && b.ops[0].k === 'phone'));
+    check('סבב 2: אחרי "אישור הטלפון" – "עדכן בכרטיס הלקוח" נשאר (הכרטיס עדיין בלי טלפון)', !!(await page.$('[data-a=secOrdPhone]')) && /0501234567/.test(await txt(page)));
     await page.click('[data-a=secOrdOp][data-k=pick][data-i="1"][data-pid=p2]'); await H.settle(page, 400);
     e = last(bodies, 'secMail', (b) => b.op === 'ordEdit' && b.ops[0].k === 'pick');
     check('בחירת מוצר מאפשרות: i ו-pid', e && e[1].ops[0].i === 1 && e[1].ops[0].pid === 'p2', e && e[1]);
@@ -160,8 +162,9 @@ const small = (page) => page.evaluate(() => [...document.querySelectorAll('#secO
     const c = last(bodies, 'secMail', (b) => b.op === 'ordCust');
     check('ordCust: card + ws:true, בלי שדות שלא מולאו', c && c[1].ws === true && c[1].card.bn === 'דנה בע"מ' && c[1].card.vat === '123456789' && c[1].card.name === 'דנה' && c[1].card.pay === undefined, c && c[1]);
     // סבב שיפורים (1): לקוח נבחר + טלפון מהמייל – "עדכן בכרטיס הלקוח" (שואל קודם, ואז ordPhone עם id ו-ver)
-    Object.assign(ord, { st: 'mgr', custId: 'c1', custName: 'יוסי כהן', cands: [], phone: '', phoneHint: '0507778888', ver: 20 });
+    Object.assign(ord, { st: 'mgr', custId: 'c1', custName: 'יוסי כהן', cands: [], phone: '', phoneHint: '0507778888', custPh: false, ver: 20, oPrev: ID2 });
     await page.click('[data-a=secOrdRe]'); await H.settle(page, 500);
+    check('סבב 2: הזמנה חדשה בשרשור ישן – שורה קטנה + פתיחת ההזמנה הקודמת', /הזמנה חדשה בשרשור של הזמנה קודמת/.test(await txt(page)) && !!(await page.$(`#secOrd [data-a=secOrdOrig][data-id=${ID2}]`)));
     check('לקוח נבחר: כפתור "עדכן בכרטיס הלקוח" ליד הטלפון מהמייל (וגם "אישור הטלפון")', !!(await page.$('[data-a=secOrdPhone]')) && !!(await page.$('[data-a=secOrdOp][data-k=phone]')) && /0507778888/.test(await txt(page)));
     check('כפתור העדכון בגובה 44px לפחות', (await small(page)).length === 0, await small(page));
     await page.click('[data-a=secOrdPhone]'); await H.settle(page, 300);
@@ -206,6 +209,15 @@ const small = (page) => page.evaluate(() => [...document.querySelectorAll('#secO
     check('בהגדרות: כפתור שליחה לבד של הזמנות', !!(await page.$('[data-a=secOaOpen]')));
     await page.click('[data-a=secOaOpen]'); await H.settle(page, 600);
     check('מהגדרות נפתח חלון שליחה לבד', /ממתינים לאישורך/.test(await txt(page)));
+    // סבב 2: "ייתכן שנשלח" גם בטיוטת מייל רגילה – אותה הודעה בולטת
+    X3.stuck = true;
+    await page.click('[data-a=secMlBack]'); await H.settle(page, 300);
+    await page.click('#secTabs [data-v=mail]'); await H.settle(page, 500);
+    await page.click(`[data-a=secMlOpen][data-id=${ID3}]`); await H.settle(page, 500);
+    const st3 = await page.evaluate(() => { const e = document.getElementById('secMlStuck'); return e ? e.innerText : ''; });
+    check('טיוטת מייל רגילה תקועה: הודעה בולטת (לא ידוע אם יצאה, "נשלח" ב-Gmail עם הכתובת, לסמן כנשלח) לפני הכפתור', /לא ידוע אם התשובה יצאה/.test(st3) && /"נשלח"/.test(st3) && /dan@client\.example/.test(st3) && /לסמן כנשלח/.test(st3) && await page.evaluate(() => { const a = document.getElementById('secMlStuck'), b = document.querySelector('[data-a=secMlMark]'); return !!(a && b && a.getAttribute('role') === 'alert' && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)); }), st3.slice(0, 200));
+    check('טיוטת מייל תקועה: בלי כפתור שליחה, בלי גלילה לרוחב', !(await page.$('[data-a=secMlSend]')) && (await sx(page)) <= 0);
+    if (shots) await page.screenshot({ path: path.join(shots, 'sec9-mail-stuck-360.png'), fullPage: true });
     check('בלי שגיאות JS (כל הבדיקה)', page.__errors.length === 0, page.__errors);
     await ctx.close();
   }

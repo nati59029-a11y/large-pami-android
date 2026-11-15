@@ -1297,7 +1297,7 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
   const body = (i) => Buffer.from(raw(i).split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString('utf8');
   const draftOf = (id) => get(`b/${A}/sec_draft/${id}`);
   const setRep = (o) => prep((d) => d.doc(`b/${A}/sec_cfg/mail_rep`).set(o, { merge: true }));
-  let seq = 0;
+  let seq = 0, live = null;
   // מייל נכנס דרך הקליטה הרגילה, בלי תור (תקרה 0 בזמן הקליטה – כדי שהטריגר באמולטור הפונקציות ב-CI לא יעבד במקביל), ואז מסומן לתור ומעובד כאן
   async function mail(o) {
     const cap = ((await get(`b/${A}/sec_cfg/mail_rep`)) || {}).cap;
@@ -1309,8 +1309,12 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     if (!o.noAuth) m0.headers = [{ name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.i=@' + dom + '; dmarc=pass (p=NONE) header.from=' + dom }].concat(o.headers || []);
     GO.addMail(BOX_A, m0);
     await CORE.mailHook(GO.note(BOX_A));
-    await setRep({ cap: cap === undefined ? 30 : cap });
     const x = (await inA()).filter((m) => m.subj === subject).sort((a, b) => b.rt - a.rt || (a.id < b.id ? 1 : -1))[0];
+    // סבב שיפורים (תיקון מירוץ ב-CI): הטריגר באמולטור הפונקציות רץ באיחור – מחכים שיסיים (מוחק את רשומת התור) לפני שמחזירים את התקרה.
+    // אחרת הוא לוקח את המייל אחרי שהתקרה חזרה, מנסה טיוטה בתהליך האמולטור (בלי המודל המדומה), והמייל לא מעובד כאן ("תקרה יומית" נכשלה כך)
+    if (live === null) live = await fnLive();
+    if (live) for (let i = 0; i < 150 && (await get('sec_mailq/' + A + '__' + x.id)); i++) await sleep(100);
+    await setRep({ cap: cap === undefined ? 30 : cap });
     if (x.hum) await prep((d) => d.doc(`b/${A}/sec_in/${x.id}`).update({ aw: 'q', awAt: Date.now(), awN: 0 }));
     return x.id;
   }
@@ -1404,7 +1408,7 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     const ids = [await mail({ subject: 's1' }), await mail({ subject: 's2' }), await mail({ subject: 's3' }), await mail({ subject: 's4' })];
     for (const id of ids) await work(id);
     assert.equal(gmSecReqs().length, 2, 'רק 2 טיוטות אוטומטיות');
-    assert.equal((await get(`b/${A}/sec_in/${ids[2]}`)).aw, 'cap');
+    assert.equal((await get(`b/${A}/sec_in/${ids[2]}`)).aw, 'cap', JSON.stringify(await Promise.all(ids.map(async (i) => (await get(`b/${A}/sec_in/${i}`)).aw))));
     assert.equal((await logs(A)).filter((l) => l.act === 'draftCap').length, 1, 'נרשם פעם אחת');
     const notes = await coll(`b/${A}/sec_note/${M1}/n`);
     assert.equal(notes.filter((n) => /תקרת הטיוטות/.test(n.title)).length, 1);
@@ -2722,6 +2726,11 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.equal(q.r.ordRe.res, 'chg'); assert.ok(!q.r.ordRe.auto);
       assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === n && /risk/.test(x.note)), 'סוג רגיש');
       assert.equal(GO.state.sent.length, s0, 'שום דבר לא נשלח לבד');
+      // סבב 2 (החלטת בעל הפרויקט): שינוי שלא נשלח לבד – התראה אחת שכוללת את הסיבה (בלי "לא נשלחה לבד" נפרדת)
+      const nb = await notes();
+      const chg = nb.filter((b) => b.includes('ביקש שינוי'));
+      assert.equal(chg.length, 1, JSON.stringify(nb)); assert.ok(chg[0].includes('לא נשלחה לבד: המייל נראה רגיש'), chg[0]);
+      assert.equal(nb.filter((b) => /^טיוטת ההזמנה של .* לא נשלחה לבד/.test(b)).length, 2, 'רק שתי ההתראות של המיילים המקוריים (גדול, קובץ): ' + JSON.stringify(nb));
     });
 
     it('שלב ג/7: בקשת שינוי מלקוח מאושר – הגרסה המעודכנת נשלחת לבד בשרשור; לקוח לא מאושר – למנהל', async () => {
@@ -2795,6 +2804,29 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       // טיוטה שכבר נשלחה – not-pending
       await prep((d) => d.doc(`b/${A}/sec_ord/${n}`).update({ st: 'sent' }));
       assert.equal((await sec(M1, { op: 'ordPhone', id: n, ver: 2 })).reason, 'not-pending');
+      // סבב 2: אחרי "אישור הטלפון" (לטיוטה בלבד) – עדיין אפשר לעדכן את הכרטיס (custPh:false), מהטלפון שאושר
+      await prep((d) => d.doc(`b/${A}/cust/t223456789`).set({ name: 'בלי טלפון 2', mail: 'np2@shop.example', at: 1 }));
+      const n3 = await go('NP2 <np2@shop.example>', { phone: '0507779999' }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      assert.equal((await sec(M1, { op: 'ordGet', id: n3 })).r.ord.custPh, false);
+      assert.ok((await sec(M1, { op: 'ordEdit', id: n3, ver: 1, ops: [{ k: 'phone' }] })).ok);
+      const g3 = await sec(M1, { op: 'ordGet', id: n3 });
+      assert.equal(g3.r.ord.phoneHint, ''); assert.equal(g3.r.ord.phone, '0507779999'); assert.equal(g3.r.ord.custPh, false);
+      const r3 = await sec(M1, { op: 'ordPhone', id: n3, ver: 2 });
+      assert.ok(r3.ok, JSON.stringify(r3));
+      assert.equal((await get(`b/${A}/cust/t223456789`)).phone, '0507779999'); assert.equal(r3.r.ord.custPh, true);
+      // סבב 2: המספר כבר שייך ללקוח אחר (טלפון ראשי / טלפון נוסף / מזהה p{טלפון}) – נחסם בלי כתיבה
+      await prep(async (d) => {
+        await d.doc(`b/${A}/cust/t323456789`).set({ name: 'בלי טלפון 3', mail: 'np3@shop.example', at: 1 });
+        await d.doc(`b/${A}/cust/cws`).update({ phs: ['0508881111'] });
+        await d.doc(`b/${A}/cust/p0508882222`).set({ name: 'לפי מזהה', at: 1 });
+      });
+      for (const ph of ['0502222222', '0508881111', '0508882222']) {
+        const n4 = await go('NP3 <np3@shop.example>', { phone: ph }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+        const r4 = await sec(M1, { op: 'ordPhone', id: n4, ver: 1 });
+        assert.equal(r4.reason, 'phone-taken', ph + ' ' + JSON.stringify(r4)); assert.match(r4.msg, /המספר כבר שייך ללקוח אחר/);
+        assert.equal((await get(`b/${A}/cust/t323456789`)).phone, undefined, ph);
+        assert.equal((await ordOf(n4)).phoneHint, ph, 'הטיוטה לא השתנתה');
+      }
       assert.equal(GO.state.sent.length, 0);
     });
 
@@ -2816,6 +2848,7 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.ok(v, 'נוצרה טיוטת הזמנה חדשה');
       assert.equal(v.st, 'mgr'); assert.equal(v.ver, 1); assert.equal(v.thr, 'thr-n1'); assert.equal(v.custId, 'cmail'); assert.equal(v.oPrev, n);
       assert.equal(v.lines[0].qty, 3); assert.equal(v.total, 3000);
+      assert.equal((await sec(M1, { op: 'ordGet', id: m })).r.ord.oPrev, n, 'המסך מקבל את ההזמנה הקודמת');
       const d = await draftOf(m);
       assert.ok(d.an.includes('order')); assert.ok(!d.oRe, 'לא תשובה לטיוטה');
       assert.equal((await ordOf(n)).st, 'ordered', 'הטיוטה הקודמת לא השתנתה');

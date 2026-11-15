@@ -1059,7 +1059,7 @@ async function mailWorkIn(id, o) {
     if (so) {
       let q = { res: 'mgr', why: 'err' };
       try { q = await ordReply(db, id, x, so, r, now); } catch (e) { logger.warn('secretary-google: order reply failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
-      if (q.res === 'chg') { const oa = await ordAutoTry(db, so.id, x, r, now, { quiet: true }).catch(() => ({ no: ['err'] })); q.auto = !!oa.sent; if (oa.sent) q.sent = true; } // שלב ג/7
+      if (q.res === 'chg') { const oa = await ordAutoTry(db, so.id, x, r, now, { quiet: true }).catch(() => ({ no: ['err'] })); q.auto = !!oa.sent; if (oa.sent) q.sent = true; else if (Array.isArray(oa.no) && oa.no.length) q.autoNo = oa.no; } // שלב ג/7
       await ordReNote(db, id, so, q, now).catch(() => {});
       const out = await fin(q.sent ? 'auto' : 'draft');
       return Object.assign(out, { draft: id, task, auto: '', no: ['order'], ordRe: q });
@@ -1200,7 +1200,7 @@ async function ordState(db, o) {
   if (!o.br) blk.push('br');
   if (o.cands && !o.custId) blk.push('cust');
   if (!phone) blk.push('phone');
-  return { ws, phone, blk, custName: cust ? String(cust.bn || cust.name || '').slice(0, 80) : '' };
+  return { ws, phone, blk, custName: cust ? String(cust.bn || cust.name || '').slice(0, 80) : '', custPh: !!(cust && has(cust.phone)) };
 }
 async function ordRecalc(db, o) {
   const st = await ordState(db, o);
@@ -1418,7 +1418,7 @@ const CFM_NO = { stop: '"עצור הכל" מופעל', off: 'המענה במיי
 async function ordReNote(db, id, so, q, now) {
   let body;
   if (q.res === 'ordered') body = 'הלקוח אישר את טיוטת ההזמנה – נוצרה הזמנה מס׳ ' + (q.no || '') + '.' + (q.sent ? ' נשלח ללקוח מייל אישור.' : ' מייל האישור לא נשלח (' + (q.sendNo || []).map((k) => CFM_NO[k] || k).join(', ') + ') – אפשר לשלוח אותו מתיבת המייל.');
-  else if (q.res === 'chg') body = 'הלקוח ביקש שינוי בהזמנה – הטיוטה עודכנה' + (q.lines ? ' לפי הבקשה' : '') + (q.auto ? ' ונשלחה אליו לבד (לקוח שאושר לשליחה לבד).' : ' וממתינה לבדיקה ולשליחה שלך.');
+  else if (q.res === 'chg') body = 'הלקוח ביקש שינוי בהזמנה – הטיוטה עודכנה' + (q.lines ? ' לפי הבקשה' : '') + (q.auto ? ' ונשלחה אליו לבד (לקוח שאושר לשליחה לבד).' : ' וממתינה לבדיקה ולשליחה שלך.' + (q.autoNo ? ' לא נשלחה לבד: ' + q.autoNo.map((k) => OA_NO[k] || ORD_NO[k] || k).join(', ') + '.' : ''));
   else if (q.res === 'cancel') body = 'הלקוח ביטל את טיוטת ההזמנה. לא נוצרה הזמנה.';
   else body = ORD_RE_WHY[q.why] || ORD_RE_WHY.err;
   await db.collection('sec_log').doc().set(glog('', 'sec', 'ordRe', { tgt: id, note: (so.id + ':' + q.res + (q.why ? ':' + q.why : '') + (q.err ? ':' + q.err : '')).slice(0, 120) }));
@@ -1488,7 +1488,7 @@ async function ordAutoOp(who, db, input, now) {
   return { ok: true, custId: c, on: act === 'on' };
 }
 // oid – sec_ord (מזהה המייל המקורי); x – המייל שנכנס עכשיו (המקורי, או תשובת השינוי של הלקוח)
-// opt.quiet – תשובת שינוי של לקוח: ההתראה "נשלחה לבד" לא נשלחת, כי ordReNote כבר מודיע על אותו אירוע (סבב שיפורים: בלי כפל התראות)
+// opt.quiet – תשובת שינוי של לקוח: התראות "נשלחה לבד" / "לא נשלחה לבד" לא נשלחות, כי ordReNote מודיע על אותו אירוע – כולל הסיבה (סבב שיפורים: בלי כפל התראות)
 async function ordAutoTry(db, oid, x, r, now, opt) {
   const ref = db.doc('sec_ord/' + oid);
   const [s, as] = await Promise.all([ref.get(), db.doc('sec_cfg/ord_auto').get()]);
@@ -1516,7 +1516,7 @@ async function ordAutoTry(db, oid, x, r, now, opt) {
   const name = String(cs.exists ? cs.get('bn') || cs.get('name') || '' : '').slice(0, 80);
   const nope = async (why) => {
     await db.collection('sec_log').doc().set(glog('', 'auto', 'ordAutoNo', { tgt: oid, note: why.join('+').slice(0, 60) }));
-    await WA.notifyMgrs(db, 'ordautono|' + oid + '|' + o.ver, 'טיוטת הזמנה לא נשלחה לבד', 'טיוטת ההזמנה של ' + (name || 'הלקוח') + ' לא נשלחה לבד (' + why.map((k) => OA_NO[k] || ORD_NO[k] || k).join(', ') + ') – ממתינה לבדיקה ולשליחה שלך.', now).catch(() => {});
+    if (!(opt && opt.quiet)) await WA.notifyMgrs(db, 'ordautono|' + oid + '|' + o.ver, 'טיוטת הזמנה לא נשלחה לבד', 'טיוטת ההזמנה של ' + (name || 'הלקוח') + ' לא נשלחה לבד (' + why.map((k) => OA_NO[k] || ORD_NO[k] || k).join(', ') + ') – ממתינה לבדיקה ולשליחה שלך.', now).catch(() => {});
     return { no: why };
   };
   if (no.length) return nope(no);
@@ -1535,7 +1535,7 @@ async function ordAutoTry(db, oid, x, r, now, opt) {
   return { sent: true };
 }
 const OA_NO = { st: 'הטיוטה כבר טופלה', held: 'המענה האוטומטי נעצר להיום', risk: 'המייל נראה רגיש (בקשת הנחה, תלונה וכד׳)', from: 'השולח לא אומת', ask: 'יש בטיוטה שורות לבחירה/לבירור, פריט שאזל או פרט חסר',
-  cust: 'כרטיס הלקוח לא נמצא', big: 'מייל גדול, חתוך או חשוד', file: 'יש קובץ מצורף', day: 'הגעתם למספר השליחות האוטומטיות להיום', loop: 'נשלחה ללקוח הזה טיוטה לבד בדקות האחרונות', stale: 'המחירים בקטלוג השתנו – הטיוטה עודכנה', 'out-limit': 'מכסת המיילים היוצאים להיום', 'google-error': 'תקלה ב-Gmail' };
+  cust: 'כרטיס הלקוח לא נמצא', big: 'מייל גדול, חתוך או חשוד', file: 'יש קובץ מצורף', day: 'הגעתם למספר השליחות האוטומטיות להיום', loop: 'נשלחה ללקוח הזה טיוטה לבד בדקות האחרונות', stale: 'המחירים בקטלוג השתנו – הטיוטה עודכנה', 'out-limit': 'מכסת המיילים היוצאים להיום', 'google-error': 'תקלה ב-Gmail', err: 'תקלה בבדיקה' };
 // שמירה עם בדיקת גרסה בטרנזקציה. up – השדות החדשים (FieldValue.delete() למחיקה)
 async function ordSave(db, ref, ver, up, now) {
   await db.runTransaction(async (tx) => {
@@ -1550,7 +1550,7 @@ async function ordOut(db, id, o, brs) {
   const st = await ordState(db, o);
   const v = SO.safeView(o);
   return { id, to: o.to || '', st: o.st, ver: o.ver, t: o.t || 0, custId: o.custId || '', custName: st.custName, cands: o.cands || [], idBy: o.idBy || '', custNew: o.custNew || null,
-    phone: st.phone, phoneHint: o.phoneHint || '', br: o.br || '', brDef: o.brDef === true, catCut: o.catCut === true, brs: brs.filter((b) => b.on !== false).map((b) => ({ id: b.id, name: String(b.name || '').slice(0, 60) })),
+    phone: st.phone, phoneHint: o.phoneHint || '', custPh: st.custPh, oPrev: o.oPrev || '', br: o.br || '', brDef: o.brDef === true, catCut: o.catCut === true, brs: brs.filter((b) => b.on !== false).map((b) => ({ id: b.id, name: String(b.name || '').slice(0, 60) })),
     lines: o.lines || [], total: o.total || 0, nBlock: o.nBlock || 0, blk: o.blk || [], sentAt: o.sentAt || 0, stuck: !ordEnd(o) && maybeSent(o, Date.now()),
     text: ordText(v, !st.phone) };
 }
@@ -1682,11 +1682,16 @@ async function ordOp(who, db, input, op, now) {
     const ver = verOf(input.ver);
     if (o.ver !== ver) throw pre('stale', 'הטיוטה עודכנה בינתיים. טענו אותה מחדש.');
     if (!o.custId || !ID_RE.test(o.custId)) throw pre('no-cust', 'צריך לבחור לקוח לפני עדכון הכרטיס');
-    if (!has(o.phoneHint)) throw bad('bad-phone', 'אין טלפון מהמייל לעדכון');
-    const phone = CUS.phoneOf(o.phoneHint);
+    // המקור: הטלפון מהמייל (phoneHint), או הטלפון שהמנהל כבר אישר ממנו לטיוטה (o.phone – נכתב רק ב-ordEdit k:'phone')
+    const src = has(o.phoneHint) ? o.phoneHint : has(o.phone) ? o.phone : '';
+    if (!src) throw bad('bad-phone', 'אין טלפון מהמייל לעדכון');
+    const phone = CUS.phoneOf(src);
     const cs = await db.doc('cust/' + o.custId).get();
     if (!cs.exists || cs.get('mv')) throw pre('no-cust', 'הלקוח לא נמצא');
     if (has(cs.get('phone'))) throw pre('has-phone', 'בכרטיס הלקוח כבר יש טלפון – הוא לא שונה');
+    // המספר כבר בכרטיס של לקוח אחר (טלפון ראשי, טלפון נוסף, או מזהה p{טלפון}) – לא כותבים
+    const [q1, q2, pd] = await Promise.all([db.collection('cust').where('phone', '==', phone).limit(5).get(), db.collection('cust').where('phs', 'array-contains', phone).limit(5).get(), db.doc('cust/p' + phone).get()]);
+    if ([...q1.docs, ...q2.docs, ...(pd.exists ? [pd] : [])].some((d) => d.id !== o.custId && !d.get('mv'))) throw pre('phone-taken', 'המספר כבר שייך ללקוח אחר – הכרטיס לא עודכן');
     await CUS.saveCore(who, { id: o.custId, cust: { phone }, fill: true }, { src: 'sec' });
     const n = Object.assign({}, o);
     delete n.phoneHint;
