@@ -6,7 +6,8 @@
 <title>בדיקת צילום 360 בטלפון – דוגמה</title>
 <!-- דף בדיקה למפתחים בלבד (שלב 18ו). לא מחובר לאפליקציה.
      מצב "מדומה" (ברירת מחדל): המצלמה והחיישן מזויפים – הסצנה נוצרת בקוד הדף (לא צילום אמיתי, לא נתוני העסק), והטלפון "מסתובב" לבד אל כל נקודת יעד.
-     ?real=1 – מצלמה וחיישן אמיתיים (לבדיקה בטלפון דרך דפדפן) · ?noise=0.3 – רעש חיישן במעלות · ?auto=1 – מתחיל מיד -->
+     ?real=1 – מצלמה וחיישן אמיתיים (לבדיקה בטלפון דרך דפדפן) · ?noise=0.3 – רעש חיישן במעלות · ?auto=1 – מתחיל מיד
+     מצב סרטון: בוחרים "סרטון" במסך ולוחצים "הקלטה"; הטלפון המדומה מסתובב ברצף (vspeed, ברירת מחדל 40°/ש'); spin – סיבוב קבוע מהיר. -->
 <style>
  html,body{margin:0;background:#121216;color:#eee;font-family:sans-serif}
  .page{padding:12px;max-width:760px;margin:0 auto}
@@ -39,11 +40,16 @@ function mockCam(w,h,fovL){const c=document.createElement('canvas');c.width=w;c.
  return{el:c,w,h,draw(q){const m=M.qToMat(q),d=im.data,yaw=M.yawPitch(q).yaw,gn=1+.1*Math.sin(yaw*D);
   for(let v=0;v<h;v++)for(let u=0;u<w;u++){const cx=(u+.5-w/2)/f,cy=-(v+.5-h/2)/f,dx=m[0]*cx+m[1]*cy-m[2],dy=m[3]*cx+m[4]*cy-m[5],dz=m[6]*cx+m[7]*cy-m[8],n=Math.hypot(dx,dy,dz),s=scene(dx/n,dy/n,dz/n),i=(v*w+u)*4;
    d[i]=s[0]*gn;d[i+1]=s[1]*gn;d[i+2]=s[2]*gn;d[i+3]=255}x.putImageData(im,0,0)}}}
-/* חיישן מזויף: "המשתמש" מסתובב אל היעד הבא במהירות קבועה ונעצר עליו */
-function mockSensor(cam,opt){opt=opt||{};return(cb,api)=>{let yaw=opt.yaw0||20,pitch=-8,last='',t=0;const sp=opt.speed||240,silent=!!opt.silent;
- const id=setInterval(()=>{if(silent)return;const tg=api.target();if(tg){const dy=M.wrap180(tg.yaw-yaw),dp=tg.pitch-pitch,L=Math.hypot(dy,dp),st=sp*.016;
+/* חיישן מזויף. מצב נקודות: "המשתמש" מסתובב אל היעד הבא במהירות קבועה ונעצר עליו.
+   מצב סרטון (אחרי "הקלטה"): מסתובב ברצף בלי לעצור (vspeed מעלות לשנייה בזמן אמיתי), שורה אחרי שורה לפי סדר היעדים, עם רעידה קטנה של היד */
+function mockSensor(cam,opt){opt=opt||{};return(cb,api)=>{let yaw=opt.yaw0||20,pitch=-8,last='',t=0,tp=performance.now(),vy=1,vp=0,ph=0;const sp=opt.speed||240,vsp=opt.vspeed||40,silent=!!opt.silent;
+ const id=setInterval(()=>{if(silent)return;const now=performance.now(),dt=Math.min(.25,(now-tp)/1000);tp=now;const s=api.state?api.state():{},tg=api.target();
+  if(opt.spin)yaw+=opt.spin*dt;/* סיבוב קבוע (מעלות לשנייה), בלי קשר ליעדים – לבדיקת "לאט יותר" */
+  else if(s.mode==='video'){if(s.rec&&tg){const dy=M.wrap180(tg.yaw-yaw),dp=tg.pitch-pitch,L=Math.hypot(dy,dp),st=vsp*dt;
+    if(L>st){vy=dy/L;vp=dp/L}yaw+=vy*st;pitch=Math.max(-90,Math.min(90,pitch+vp*st));ph+=dt}}
+  else if(tg){const dy=M.wrap180(tg.yaw-yaw),dp=tg.pitch-pitch,L=Math.hypot(dy,dp),st=sp*.016;
    if(L>st){yaw+=dy/L*st;pitch+=dp/L*st}else{yaw=tg.yaw;pitch=tg.pitch}}
-  const nz=()=>NOISE?(Math.random()-.5)*2*NOISE:0,a=-yaw+nz(),b=90+pitch+nz(),g=nz(),k=a.toFixed(3)+b.toFixed(3)+g.toFixed(3);
+  const wob=s.mode==='video'?Math.sin(ph*2.1)*.8:0,nz=()=>NOISE?(Math.random()-.5)*2*NOISE:0,a=-yaw+nz(),b=90+pitch+wob+nz(),g=nz(),k=a.toFixed(3)+b.toFixed(3)+g.toFixed(3);
   const q=M.oriToQuat(a,b,g,0);if(k!==last){cam.draw(q);last=k}t++;cb({alpha:a,beta:b,gamma:g,angle:0})},16);
  return()=>clearInterval(id)}}
 function b64(blob){return new Promise(r=>{const f=new FileReader();f.onload=()=>r(String(f.result).split(',')[1]);f.readAsDataURL(blob)})}
@@ -54,6 +60,7 @@ async function errOf(blob,yawRef){const b=await createImageBitmap(blob),W=b.widt
   e+=Math.abs(d[i]-s[0])+Math.abs(d[i+1]-s[1])+Math.abs(d[i+2]-s[2]);n+=3}}return e/n}
 /* הרצה (גם מ-Playwright): מחזיר סיכום, או null אם בוטל */
 window.__run=async function(o){o=o||{};let opts={};
+ if(o.mode)try{localStorage.setItem('lp-s3pc-mode',o.mode)}catch(e){}
  if(!o.real){const cam=mockCam(o.w||360,o.h||480,o.fovL||62);opts.mock={camera:cam,sensor:mockSensor(cam,o)};}
  if(o.fov)opts.fov=o.fov;
  const t0=performance.now(),r=await S3PanoCap.start(document.body,opts);if(!r)return null;

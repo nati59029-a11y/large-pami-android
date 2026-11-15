@@ -1,10 +1,11 @@
 'use strict';
 // בדיקת דפדפן לשלב 18ו (צילום 360 בטלפון): צילום מדומה מלא ב-360x760 + מצבי שגיאה. הסצנה נוצרת בקוד דף הבדיקה (pano-cap.html), לא נכנסת לאפליקציה.
-// הרצה: node app-source/www/store3d-dev/check-pano-cap.js [פלט.jpg] [צילום-מסך.png] [תוצאות.json]   (דורש playwright + Chromium)
+// הרצה: node app-source/www/store3d-dev/check-pano-cap.js [פלט.jpg] [צילום-מסך.png] [תוצאות.json] [פלט-סרטון.jpg] [צילום-מסך-סרטון.png]   (דורש playwright + Chromium)
 const http = require('http'), fs = require('fs'), path = require('path');
 const { chromium } = require('playwright');
 const ROOT = path.resolve(__dirname, '..');
 const [outJpg, shot, outJson] = [process.argv[2] || 'pano-cap-out.jpg', process.argv[3] || 'pano-cap-360.png', process.argv[4]];
+const [vidJpg, vidShot] = [process.argv[5] || 'pano-cap-video.jpg', process.argv[6] || 'pano-cap-video.png'];
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 const srv = http.createServer((req, res) => {
   const p = path.normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/\\])+/, '');
@@ -93,6 +94,61 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await errCase('מצלמה אמיתית בלי אירועי deviceorientation: הודעה בעברית ו-null', null, { real: true }, /חיישן הכיוון/);
   await errCase('הרשאת מצלמה נדחתה: הודעה בעברית ו-null', () => { navigator.mediaDevices.getUserMedia = () => Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' })); }, { real: true }, /אין הרשאה למצלמה/);
   await errCase('אין מצלמה בכלל: הודעה בעברית ו-null', () => { Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true }); }, { real: true }, /אין גישה למצלמה/);
+
+  /* ---------- 4. מצב סרטון (אחרי כל בדיקות מצב הנקודות, כי הבחירה נשמרת בטלפון) ---------- */
+  const pv = await open();
+  await pv.evaluate(() => { window.__res = undefined; window.__cnts = []; window.__run({ b64: true, vspeed: 40 }).then((r) => (window.__res = r || 'null'), (e) => (window.__res = 'err:' + e.message));
+    const iv = setInterval(() => { const c = document.querySelector('.s3pc-cnt'); if (c) { const t = c.textContent; if (window.__cnts[window.__cnts.length - 1] !== t) window.__cnts.push(t); } if (window.__res) clearInterval(iv); }, 30); });
+  await pv.waitForFunction(() => { const b = document.querySelector('.s3pc [data-k=mv]'); return b && !b.disabled && document.querySelector('.s3pc-cnt').textContent; }, null, { timeout: 15000 });
+  const def = await pv.evaluate(() => document.querySelector('.s3pc [data-k=mp]').getAttribute('aria-pressed'));
+  await pv.click('.s3pc [data-k=mv]');
+  const vui = await pv.evaluate(() => { const q = (s) => document.querySelector(s), d = q('.s3pc-bar [data-k=d]');
+    return { def: null, ins: q('.s3pc-ins').textContent, cnt: q('.s3pc-cnt').textContent, d: d.textContent, rHidden: q('.s3pc-bar [data-k=r]').hidden, map: !q('.s3pc-map').hidden, ls: localStorage.getItem('lp-s3pc-mode'),
+      seg: [...document.querySelectorAll('.s3pc-seg button')].map((b) => ({ t: b.textContent, p: b.getAttribute('aria-pressed'), h: Math.round(b.getBoundingClientRect().height) })) }; });
+  vui.def = def;
+  check('בחירת מצב: ברירת מחדל "נקודות"; "סרטון" מציג הנחיה, מפת כיסוי, כפתור "הקלטה", ונשמר בטלפון', def === 'true' && vui.ins.includes('סיבוב אחד באמצע, סיבוב אחד למעלה וסיבוב אחד למטה') && /כוסו 0 מתוך \d+/.test(vui.cnt) && vui.d === 'הקלטה' && vui.rHidden && vui.map && vui.ls === 'video' && vui.seg[1].p === 'true' && vui.seg.every((b) => b.h >= 40), vui);
+  await pv.click('.s3pc-bar [data-k=d]');
+  await pv.waitForFunction(() => { const c = document.querySelector('.s3pc-cnt'); return c && /כוסו ([6-9]|\d\d)/.test(c.textContent); }, null, { timeout: 90000 });
+  const vui2 = await pv.evaluate(() => { const q = (s) => document.querySelector(s); return { d: q('.s3pc-bar [data-k=d]').textContent, segDis: [...document.querySelectorAll('.s3pc-seg button')].map((b) => b.disabled), hint: q('.s3pc-hint').textContent, overflow: document.documentElement.scrollWidth > innerWidth,
+    bar: [...q('.s3pc-bar').querySelectorAll('button')].filter((b) => !b.hidden).map((b) => Math.round(b.getBoundingClientRect().height)) }; });
+  await pv.screenshot({ path: vidShot });
+  check('בזמן הקלטה: כפתור "סיום", אי אפשר להחליף מצב, כפתורים בגובה 44 לפחות, בלי גלישה לרוחב', vui2.d === 'סיום' && vui2.segDis[0] && !vui2.overflow && vui2.bar.every((h) => h >= 44), vui2);
+  await pv.waitForFunction(() => window.__res, null, { timeout: 300000 });
+  const vres = await pv.evaluate(() => window.__res), cnts = await pv.evaluate(() => window.__cnts);
+  if (typeof vres !== 'object') check('מצב סרטון: הקלטה מדומה הסתיימה', false, vres);
+  else {
+    const { fullB64, ...rest } = vres; R.video = rest; fs.writeFileSync(vidJpg, Buffer.from(fullB64, 'base64'));
+    const lastCnt = cnts[cnts.length - 1] || '', m = /כוסו (\d+) מתוך (\d+)/.exec(lastCnt);
+    check('מצב סרטון: כיסוי מלא וסיום אוטומטי', m && m[1] === m[2], lastCnt);
+    check('מצב סרטון: meta.mode=video ומספר פריימים סביר (לכל היותר אחד לכל נקודה)', vres.meta.mode === 'video' && vres.meta.n >= 20 && m && vres.meta.n <= +m[2], vres.meta);
+    check('מצב סרטון: 4096×2048, JPEG עד 2.5MB, קטנה 1024×512 עד 150KB', (vres.w === 4096 || vres.w === 2048) && vres.full.w === vres.w && vres.full.h === vres.w / 2 && vres.type === 'image/jpeg' && vres.fullBytes <= 2500000 && vres.sm.w === 1024 && vres.smBytes <= 150000, { full: vres.full, bytes: vres.fullBytes, sm: vres.smBytes });
+    const pe = R.full ? R.full.err : null;
+    check('מצב סרטון: שגיאה מול הסצנה בסדר גודל של מצב הנקודות', vres.err < 12 && (pe == null || vres.err <= Math.max(pe * 1.6, pe + 2)), { video: vres.err, pts: pe });
+    if (R.full) check('מצב הנקודות מחזיר meta.mode=pts', R.full.meta.mode === 'pts', R.full.meta.mode);
+  }
+  await pv.close();
+  /* מהר מדי: אזהרה ואין דגימה; הבחירה "סרטון" נשמרה מהפעם הקודמת */
+  const pf = await open();
+  await pf.evaluate(() => { window.__res = undefined; window.__run({ spin: 150 }).then((r) => (window.__res = r === null ? 'null' : 'value')); });
+  await pf.waitForFunction(() => { const b = document.querySelector('.s3pc [data-k=mv]'); return b && document.querySelector('.s3pc-cnt').textContent; }, null, { timeout: 15000 });
+  const kept = await pf.evaluate(() => document.querySelector('.s3pc [data-k=mv]').getAttribute('aria-pressed'));
+  await pf.click('.s3pc-bar [data-k=d]');
+  await pf.waitForFunction(() => /לאט יותר/.test(document.querySelector('.s3pc-hint').textContent), null, { timeout: 5000 }).catch(() => {});
+  await sleep(1500);
+  const fast = await pf.evaluate(() => ({ hint: document.querySelector('.s3pc-hint').textContent, warn: document.querySelector('.s3pc-hint').classList.contains('warn'), cnt: document.querySelector('.s3pc-cnt').textContent }));
+  check('הבחירה האחרונה נשמרה; סיבוב מהיר (150°/ש\'): "לאט יותר" ואף פריים לא נשמר', kept === 'true' && fast.hint === 'לאט יותר' && fast.warn && /כוסו 0 /.test(fast.cnt), { kept, ...fast });
+  await pf.evaluate(() => S3PanoCap.close()); await pf.close();
+  /* סיום ידני באמצע: חורים מתמלאים, תוצאה תקינה */
+  const pm = await open();
+  await pm.evaluate(() => { window.__res = undefined; window.__run({ vspeed: 40 }).then((r) => (window.__res = r || 'null'), (e) => (window.__res = 'err:' + e.message)); });
+  await pm.waitForFunction(() => { const b = document.querySelector('.s3pc [data-k=d]'); return b && document.querySelector('.s3pc-cnt').textContent; }, null, { timeout: 15000 });
+  await pm.click('.s3pc-bar [data-k=d]');
+  await pm.waitForFunction(() => /כוסו ([5-9]|1\d)/.test(document.querySelector('.s3pc-cnt').textContent), null, { timeout: 60000 });
+  await pm.click('.s3pc-bar [data-k=d]');
+  await pm.waitForFunction(() => window.__res, null, { timeout: 120000 });
+  const mres = await pm.evaluate(() => window.__res);
+  check('מצב סרטון: סיום ידני באמצע מחבר את מה שיש (חורים ממולאים)', typeof mres === 'object' && mres.meta.mode === 'video' && mres.meta.n >= 2 && mres.meta.n < 20 && mres.full.w === mres.w, typeof mres === 'object' ? mres.meta : mres);
+  await pm.close();
 
   check('אין שגיאות JS', errors.length === 0, errors.slice(0, 5));
   await browser.close(); srv.close();

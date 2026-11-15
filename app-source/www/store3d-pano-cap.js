@@ -1,9 +1,11 @@
 /* store3d-pano-cap.js – שלב 18ו (משימה 2026-11-14_סריקת-חנות-תלת-מימד): צילום 360 מודרך בטלפון, והחיבור לתמונת equirectangular – הכול בטלפון.
    נטען בדפדפן כ-window.S3PanoCap, וב-Node דרך require (רק החלק המתמטי S3PanoCap._m, לבדיקות יחידה).
-   S3PanoCap.start(el, opts) -> Promise<{full:Blob, sm:Blob, w, h, meta:{n, fovH, fovL, yawRef, dev, ms}} | null>   (null = ביטול או שגיאה, אחרי הודעה בעברית)
+   S3PanoCap.start(el, opts) -> Promise<{full:Blob, sm:Blob, w, h, meta:{n, mode:'pts'|'video', fovH, fovL, yawRef, dev, ms}} | null>   (null = ביטול או שגיאה, אחרי הודעה בעברית)
    S3PanoCap.close() – סוגר מסך פתוח (ל"חזרה" של אנדרואיד) ומחזיר true אם היה פתוח; S3PanoCap.isOpen().
      opts.fov   – שדה ראייה של הצלע הארוכה במעלות (לא חובה; אחרת: כיול שנשמר בטלפון, אחרת 65°, ואחרי הצילום כיול אוטומטי מהחפיפה)
      opts.mock  – לבדיקות בלבד: {camera:{el, w, h, stop?}, sensor:(cb, api)=>stopFn, angle?}. cb מקבל {alpha, beta, gamma, angle}.
+   שני מצבים במסך (הבחירה האחרונה נשמרת בטלפון): "נקודות" – עוצרים על כל נקודת יעד; "סרטון" – לוחצים "הקלטה" ומסתובבים ברצף, והאפליקציה דוגמת פריימים מהמצלמה החיה
+     (כל ~120ms, רק כשהסיבוב איטי מספיק), ושומרת לכל נקודת יעד רק את הפריים החד והקרוב ביותר אליה – כך הזיכרון חסום. החיבור זהה בשני המצבים.
    מצלמה: getUserMedia בתוך ה-WebView (כמו "צילום רציף" ב-index.html; ההרשאה CAMERA כבר ב-patch-android.sh). חיישן: אירוע deviceorientation (בלי הרשאת Android).
    מוסכמות: עולם x=מזרח, y=צפון, z=למעלה (כמו W3C DeviceOrientation, אבל alpha יחסי – לא צפון אמיתי). מצלמה: x ימינה במסך, y למעלה במסך, מסתכלת ל-z-.
    equirect: מרכז התמונה (u=0.5) = כיוון הפריים הראשון (yawRef); ימינה בתמונה = סיבוב עם כיוון השעון (מבט מלמעלה); שורה עליונה = זנית. */
@@ -13,7 +15,9 @@ const D=Math.PI/180;
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 /* ספי פתיחה – (לא מאומת) – לכוונון אחרי בדיקה בטלפון */
 const FOV_DEF=65/* צלע ארוכה, מצלמה ראשית רגילה */,OVERLAP=.3,AIM_TOL=5,STAB_MS=300,STAB_DEG=1.2,FRAME_MAX=1280,FEATHER_POW=2,
-  FULL_MAX=2500000,SM_MAX=150000,FOV_KEY='lp-s3pc-fovL';
+  FULL_MAX=2500000,SM_MAX=150000,FOV_KEY='lp-s3pc-fovL',
+  /* מצב סרטון: מרווח דגימה, מהירות זוויתית מרבית (מעלות לשנייה), הצלע הארוכה של ההקטנה לציון החדות */
+  VID_MS=120,VID_SPD=60,VID_SM=160,MODE_KEY='lp-s3pc-mode';
 
 /* ---------------- מתמטיקה טהורה ---------------- */
 /* קווטרניון [w,x,y,z] */
@@ -121,8 +125,29 @@ function estFov(frames,def,yawRef){
  for(let f=best-2;f<=best+2+1e-9;f+=.5){const s=score(f);if(s<bs){bs=s;best=f}}
  return{fovL:best,score:bs,base}}
 
-const M={qMul,qNorm,qAxis,oriToQuat,qToMat,qAngle,camFwd,dirOf,yawPitch,wrap180,angDir,fovOf,fovLongOf,pickTargets,projToFrame,eqDir,eqToFrame,footprint,makePano,estFov,
-  C:{FOV_DEF,OVERLAP,AIM_TOL,STAB_MS,STAB_DEG,FRAME_MAX,FULL_MAX,SM_MAX}};
+/* ---------------- מצב סרטון: מתמטיקה טהורה ---------------- */
+/* אינטרפולציה כדורית בין שני קווטרניונים (t בין 0 ל-1) */
+function qSlerp(a,b,t){let d=a[0]*b[0]+a[1]*b[1]+a[2]*b[2]+a[3]*b[3],c=b;if(d<0){d=-d;c=[-b[0],-b[1],-b[2],-b[3]]}
+ if(d>.9995)return qNorm([0,1,2,3].map(i=>a[i]+(c[i]-a[i])*t));
+ const th=Math.acos(d),s=Math.sin(th),k0=Math.sin((1-t)*th)/s,k1=Math.sin(t*th)/s;return[0,1,2,3].map(i=>a[i]*k0+c[i]*k1)}
+/* כיוון ברגע t מתוך היסטוריית חיישן [{t,q}] ממוינת: slerp בין שני הערכים שסביב t; אחרת הערך הקרוב (האחרון שהתקבל) */
+function oriAt(h,t){const n=h.length;if(!n)return null;if(t>=h[n-1].t)return h[n-1].q;if(t<=h[0].t)return h[0].q;
+ let i=n-2;while(i>0&&h[i].t>t)i--;const a=h[i],b=h[i+1],dt=b.t-a.t;return dt>0?qSlerp(a.q,b.q,(t-a.t)/dt):b.q}
+/* מהירות זוויתית (מעלות לשנייה) סביב הרגע t, על חלון של כ-win ms */
+function angSpeed(h,t,win){win=win||150;if(h.length<2)return 0;let j=h.length-1;while(j>0&&h[j].t>t)j--;const b=h[j];let i=j;while(i>0&&b.t-h[i].t<win)i--;
+ const a=h[i],dt=b.t-a.t;return dt>=30?qAngle(a.q,b.q)/dt*1000:0}
+/* ציון חדות זול: וריאנס של הלפלסיאן על גווני אפור (data = RGBA קטן, ~160px) */
+function lapVar(d,w,h){if(w<3||h<3)return 0;const g=new Float32Array(w*h);for(let i=0,j=0;i<g.length;i++,j+=4)g[i]=d[j]*.299+d[j+1]*.587+d[j+2]*.114;
+ let s=0,s2=0,n=0;for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x,l=4*g[i]-g[i-1]-g[i+1]-g[i-w]-g[i+w];s+=l;s2+=l*l;n++}
+ return s2/n-(s/n)**2}
+/* רדיוס הקליטה של כל נקודת יעד = מחצית המרחק לנקודה הקרובה אליה */
+function vidRadii(T){const ds=T.map(t=>dirOf(t.yaw,t.pitch));return ds.map((d,i)=>{let m=180;for(let j=0;j<ds.length;j++)if(j!==i)m=Math.min(m,angDir(d,ds[j]));return m/2})}
+/* לאילו נקודות יעד הפריים (כיוון מבט fwd, חדות sharp) טוב יותר ממה שכבר נשמר. ציון = חדות × קרבה למרכז הנקודה. best[i]={s,...} או null */
+function vidPick(fwd,TD,R,best,sharp){const out=[];for(let i=0;i<TD.length;i++){const a=angDir(fwd,TD[i]);if(a>=R[i])continue;
+  const s=sharp*(1-.6*(a/R[i])**2);if(!best[i]||s>best[i].s)out.push({i,s,a})}return out}
+
+const M={qMul,qNorm,qAxis,oriToQuat,qToMat,qAngle,camFwd,dirOf,yawPitch,wrap180,angDir,fovOf,fovLongOf,pickTargets,projToFrame,eqDir,eqToFrame,footprint,makePano,estFov,qSlerp,oriAt,angSpeed,lapVar,vidRadii,vidPick,
+  C:{FOV_DEF,OVERLAP,AIM_TOL,STAB_MS,STAB_DEG,FRAME_MAX,FULL_MAX,SM_MAX,VID_MS,VID_SPD,VID_SM}};
 if(typeof document==='undefined')return{_m:M};
 
 /* ---------------- דפדפן: מסך הצילום ---------------- */
@@ -146,6 +171,12 @@ const CSS=`.s3pc{position:fixed;inset:0;z-index:10050;background:#000;color:#f3e
 .s3pc .s3pc-pb{height:8px;border-radius:4px;background:#333;overflow:hidden;margin:12px 0 4px}
 .s3pc .s3pc-pb i{display:block;height:100%;width:0;background:#d4af37}
 .s3pc .s3pc-card button{margin-top:14px;width:100%}
+.s3pc .s3pc-seg{display:flex;gap:6px;justify-content:center;margin:6px auto 2px;max-width:300px}
+.s3pc .s3pc-seg button{min-height:40px;padding:4px 8px;font-size:14px}
+.s3pc .s3pc-seg button[aria-pressed=true]{background:#d4af37;color:#17140a;font-weight:700}
+.s3pc .s3pc-map{display:block;margin:4px auto 0;width:144px;height:72px;border:1px solid rgba(212,175,55,.5);border-radius:6px;background:rgba(0,0,0,.35)}
+.s3pc .s3pc-map[hidden],.s3pc button[hidden]{display:none}
+.s3pc .s3pc-hint.warn{color:#ffb199;font-weight:700}
 @media (min-width:600px){.s3pc .s3pc-ins{font-size:15px}.s3pc .s3pc-bar{justify-content:center}.s3pc .s3pc-bar button{flex:0 1 200px}}`;
 function css(){if(document.getElementById('s3pc-css'))return;const s=document.createElement('style');s.id='s3pc-css';s.textContent=CSS;document.head.appendChild(s)}
 const lsG=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
@@ -192,13 +223,15 @@ function start(el,opts){
   const mock=opts.mock||null,host=el&&el.appendChild?el:document.body;
   const R=document.createElement('div');R.className='s3pc';R.setAttribute('role','dialog');R.setAttribute('aria-label','צילום 360');
   R.innerHTML=`<div class="s3pc-camw"></div><canvas class="s3pc-ov"></canvas><div class="s3pc-fl"></div>
-<div class="s3pc-top"><div class="s3pc-ins">עמדו במקום אחד, סובבו את הטלפון סביב העדשה, צלמו כשהחנות ריקה מאנשים</div><div class="s3pc-cnt"></div><div class="s3pc-hint" aria-live="polite"></div></div>
+<div class="s3pc-top"><div class="s3pc-ins"></div><div class="s3pc-seg" role="group" aria-label="סוג צילום"><button type="button" data-k="mp">נקודות</button><button type="button" data-k="mv">סרטון</button></div><div class="s3pc-cnt"></div><canvas class="s3pc-map" width="288" height="144" aria-label="מפת כיסוי" hidden></canvas><div class="s3pc-hint" aria-live="polite"></div></div>
 <div class="s3pc-bar"><button type="button" data-k="x">ביטול</button><button type="button" data-k="r" disabled>צלם שוב את האחרונה</button><button type="button" class="s3pc-pri" data-k="d" disabled>סיום</button></div>
 <div class="s3pc-msg"><div class="s3pc-card"><b></b><div class="s3pc-mt"></div><div class="s3pc-pb" hidden><i></i></div><button type="button" data-k="c" hidden>סגירה</button></div></div>`;
   host.appendChild(R);
   const $=s=>R.querySelector(s),ov=$('canvas.s3pc-ov'),cnt=$('.s3pc-cnt'),hint=$('.s3pc-hint'),msg=$('.s3pc-msg'),fl=$('.s3pc-fl');
-  const S={done:false,stream:null,camEl:null,cw:0,ch:0,stopSensor:null,q:null,hist:[],frames:[],T:[],TD:[],yaw0:null,fovL:0,fw:0,fh:0,raf:0,busy:false,last:0,xArm:0,phase:'init'};
-  function cleanup(){if(S.raf)cancelAnimationFrame(S.raf);S.raf=0;try{S.stopSensor&&S.stopSensor()}catch(e){}S.stopSensor=null;
+  const S={done:false,stream:null,camEl:null,cw:0,ch:0,stopSensor:null,q:null,hist:[],frames:[],T:[],TD:[],yaw0:null,fovL:0,fw:0,fh:0,raf:0,busy:false,last:0,xArm:0,phase:'init',
+   mode:lsG(MODE_KEY)==='video'?'video':'pts',rec:false,vh:[],best:[],R:[],lastS:0,fast:0,vfc:0,sc:null};
+  const ins=$('.s3pc-ins'),map=$('canvas.s3pc-map');
+  function cleanup(){if(S.raf)cancelAnimationFrame(S.raf);S.raf=0;if(S.vfc){try{S.camEl.cancelVideoFrameCallback(S.vfc)}catch(e){}S.vfc=0}try{S.stopSensor&&S.stopSensor()}catch(e){}S.stopSensor=null;
    try{S.stream&&S.stream.getTracks().forEach(t=>t.stop())}catch(e){}S.stream=null;try{mock&&mock.camera&&mock.camera.stop&&mock.camera.stop()}catch(e){}
    if(S.camEl&&S.camEl.tagName==='VIDEO'){try{S.camEl.srcObject=null}catch(e){}}window.removeEventListener('resize',size)}
   function finish(v){if(S.done)return;S.done=true;if(cur===finish)cur=null;cleanup();R.remove();resolve(v)}
@@ -207,13 +240,46 @@ function start(el,opts){
   function fail(text){cleanup();S.phase='err';showMsg('אי אפשר לצלם 360',text,{close:true})}
   R.addEventListener('click',e=>{const b=e.target.closest('button[data-k]');if(!b||b.disabled)return;const k=b.dataset.k;
    if(k==='c')return finish(null);
-   if(k==='x'){if(S.phase!=='cap'||S.frames.length<3||Date.now()-S.xArm<2500)return finish(null);S.xArm=Date.now();b.textContent='לבטל? הקישו שוב';setTimeout(()=>{if(!S.done)b.textContent='ביטול'},2500);return}
+   if(k==='mp'||k==='mv'){if(S.phase==='cap'&&!started()){S.mode=k==='mv'?'video':'pts';lsS(MODE_KEY,S.mode);upd()}return}
+   if(S.mode==='video'&&k==='d'&&S.phase==='cap'){if(!S.rec)startRec();else if(nGot()>=2)run();return}
+   if(k==='x'){if(S.phase!=='cap'||nGot()<3||Date.now()-S.xArm<2500)return finish(null);S.xArm=Date.now();b.textContent='לבטל? הקישו שוב';setTimeout(()=>{if(!S.done)b.textContent='ביטול'},2500);return}
    if(k==='r'&&S.phase==='cap'){const f=S.frames.pop();if(f)S.T[f.ti].got=false;S.last=Date.now()+750;upd();return}
    if(k==='d'&&S.phase==='cap'&&S.frames.length>=2)return run()});
   function size(){const r=R.getBoundingClientRect(),dp=Math.min(2,window.devicePixelRatio||1);ov.width=Math.max(1,Math.round(r.width*dp));ov.height=Math.max(1,Math.round(r.height*dp))}
   function nextT(){return S.T.findIndex(t=>!t.got)}
-  function upd(){const n=S.frames.length,tot=S.T.length;cnt.textContent='צולמו '+n+' מתוך '+tot;
-   $('[data-k=r]').disabled=!n;$('[data-k=d]').disabled=n<2;$('[data-k=d]').textContent=n>=tot?'חיבור':'סיום'}
+  function nGot(){return S.mode==='video'?S.T.filter(t=>t.got).length:S.frames.length}
+  function started(){return S.mode==='video'?S.rec:S.frames.length>0}
+  function upd(){const n=nGot(),tot=S.T.length,v=S.mode==='video',st=started();
+   ins.textContent=v?'הקליטו לאט: סיבוב אחד באמצע, סיבוב אחד למעלה וסיבוב אחד למטה':'עמדו במקום אחד, סובבו את הטלפון סביב העדשה, צלמו כשהחנות ריקה מאנשים';
+   for(const[k,on]of[['mp',!v],['mv',v]]){const b=$('[data-k='+k+']');b.setAttribute('aria-pressed',on?'true':'false');b.disabled=st&&!on}
+   map.hidden=!v;$('[data-k=r]').hidden=v;
+   const d=$('[data-k=d]');
+   if(v){cnt.textContent='כוסו '+n+' מתוך '+tot;d.textContent=S.rec?'סיום':'הקלטה';d.disabled=S.rec&&n<2;return}
+   cnt.textContent='צולמו '+n+' מתוך '+tot;
+   $('[data-k=r]').disabled=!n;d.disabled=n<2;d.textContent=n>=tot?'חיבור':'סיום'}
+  /* ---- מצב סרטון ---- */
+  function startRec(){if(!S.q)return;S.rec=true;S.yaw0=yawPitch(S.q).yaw;S.best=S.T.map(()=>null);S.R=vidRadii(S.T);S.T.forEach(t=>t.got=false);S.lastS=0;upd()}
+  /* דגימת פריים מהמצלמה החיה; t = רגע הפריים (performance.now) */
+  function sample(t){const now=performance.now();if(S.busy||now-S.lastS<VID_MS||!S.TD.length)return;S.lastS=now;
+   const lv=S.vh[S.vh.length-1];if(!lv||t-lv.t>250)return;/* החיישן לא עדכן לאחרונה – הכיוון של הפריים לא ידוע */
+   if(angSpeed(S.vh,t)>VID_SPD){S.fast=now;return}
+   const q=oriAt(S.vh,t);if(!q)return;
+   const k=VID_SM/Math.max(S.cw,S.ch),sw=Math.max(8,Math.round(S.cw*k)),sh=Math.max(8,Math.round(S.ch*k));
+   if(!S.sc){S.sc=cv(sw,sh);S.scx=S.sc.getContext('2d',{willReadFrequently:true})}
+   let sharp;try{S.scx.drawImage(S.camEl,0,0,sw,sh);sharp=lapVar(S.scx.getImageData(0,0,sw,sh).data,sw,sh)}catch(e){return}
+   const c=vidPick(camFwd(q),S.TD,S.R,S.best,sharp);if(!c.length)return;
+   const kb=Math.min(1,FRAME_MAX/Math.max(S.cw,S.ch)),w=Math.round(S.cw*kb),h=Math.round(S.ch*kb),big=cv(w,h);
+   try{big.getContext('2d').drawImage(S.camEl,0,0,w,h)}catch(e){return}
+   const rec={blob:null,q,ti:c[0].i,w,h,yaw:yawPitch(q).yaw,t:Date.now()};S.busy=true;
+   blobOf(big,.9).then(b=>{big.width=big.height=1;S.busy=false;if(!b||S.done||!S.rec)return;rec.blob=b;
+    for(const x of c)if(!S.best[x.i]||x.s>S.best[x.i].s){S.best[x.i]={s:x.s,rec};S.T[x.i].got=true}upd();
+    if(S.phase==='cap'&&S.T.every(t=>t.got))setTimeout(()=>{if(S.phase==='cap')run()},350)})}
+  /* כל פריים נשמר פעם אחת, לפי סדר נקודות היעד (הראשון קובע את מרכז התמונה) */
+  function vidFrames(){const seen=new Set(),out=[];for(const b of S.best)if(b&&!seen.has(b.rec)){seen.add(b.rec);out.push(b.rec)}return out}
+  function drawMap(){const g=map.getContext('2d'),w=map.width,h=map.height,y0=S.yaw0!=null?S.yaw0:S.base||0;g.clearRect(0,0,w,h);const P=10,X=y=>P+(wrap180(y)+180)/360*(w-2*P),Y=p=>P+(90-p)/180*(h-2*P);
+   g.strokeStyle='rgba(212,175,55,.35)';g.lineWidth=1;g.beginPath();g.moveTo(0,h/2);g.lineTo(w,h/2);g.stroke();
+   S.T.forEach(t=>{g.beginPath();g.arc(X(t.yaw),Y(t.pitch),7,0,Math.PI*2);if(t.got){g.fillStyle='rgba(108,196,154,.95)';g.fill()}else{g.lineWidth=2;g.strokeStyle='rgba(255,255,255,.7)';g.stroke()}});
+   if(S.q){const yp=yawPitch(S.q);g.beginPath();g.arc(X(yp.yaw-y0),Y(yp.pitch),5,0,Math.PI*2);g.fillStyle='#d4af37';g.fill()}}
   function stable(now){const h=S.hist;if(!h.length||now-h[0].t<STAB_MS)return 0;let mx=0;for(let i=h.length-1;i>=0&&now-h[i].t<=STAB_MS;i--)mx=Math.max(mx,qAngle(h[i].q,S.q));return mx<=STAB_DEG?1:0}
   function grab(ti){S.busy=true;const k=Math.min(1,FRAME_MAX/Math.max(S.cw,S.ch)),w=Math.round(S.cw*k),h=Math.round(S.ch*k),c=cv(w,h),q=S.q.slice();
    try{c.getContext('2d').drawImage(S.camEl,0,0,w,h)}catch(e){S.busy=false;return}
@@ -233,7 +299,7 @@ function start(el,opts){
     const p=projToFrame(m,S.TD[i],f,cx,cy);if(!p||p[0]<-40||p[0]>Wd+40||p[1]<-40||p[1]>Hd+40)return;
     g.beginPath();g.arc(p[0],p[1],(t.got?7:i===ni?20:9)*dp,0,Math.PI*2);
     if(t.got){g.fillStyle='rgba(108,196,154,.85)';g.fill()}else if(i===ni){g.lineWidth=4*dp;g.strokeStyle='#d4af37';g.stroke();g.fillStyle='rgba(212,175,55,.25)';g.fill()}else{g.lineWidth=2*dp;g.strokeStyle='rgba(255,255,255,.75)';g.stroke()}});
-   const tol=Math.min(AIM_TOL,S.fw*.12),on=aim>=0&&best<=tol,st=on&&stable(Date.now());
+   const vid=S.mode==='video',tol=Math.min(AIM_TOL,S.fw*.12),on=!vid&&aim>=0&&best<=tol,st=on&&stable(Date.now());
    /* כוונת */
    g.beginPath();g.arc(cx,cy,26*dp,0,Math.PI*2);g.lineWidth=3*dp;g.strokeStyle=on?'#fff':'rgba(212,175,55,.9)';g.stroke();
    g.beginPath();g.moveTo(cx-8*dp,cy);g.lineTo(cx+8*dp,cy);g.moveTo(cx,cy-8*dp);g.lineTo(cx,cy+8*dp);g.lineWidth=2*dp;g.stroke();
@@ -244,23 +310,26 @@ function start(el,opts){
     const p=z<0?[x*f/-z,-y*f/-z]:[x,-y],L=Math.hypot(p[0],p[1]);
     if(z>=0||Math.abs(p[0])>Wd/2-30*dp||Math.abs(p[1])>Hd/2-30*dp){const ux=p[0]/(L||1),uy=p[1]/(L||1),r=Math.min(Wd,Hd)*.3,ax=cx+ux*r,ay=cy+uy*r;
      g.save();g.translate(ax,ay);g.rotate(Math.atan2(uy,ux));g.beginPath();g.moveTo(18*dp,0);g.lineTo(-10*dp,-13*dp);g.lineTo(-4*dp,0);g.lineTo(-10*dp,13*dp);g.closePath();g.fillStyle='#d4af37';g.fill();g.restore()}}
-   let h='';if(ni<0)h='כל הנקודות צולמו';else if(on)h=S.busy?'שומר…':'החזיקו יציב…';else{
+   let h='',warn=false;
+   if(vid){drawMap();if(S.rec&&!S.vfcOn)sample(now);warn=S.rec&&now-S.fast<700}
+   if(vid&&!S.rec)h='לחצו "הקלטה" והתחילו להסתובב לאט';else if(warn)h='לאט יותר';else if(ni<0)h=vid?'הכיסוי מלא':'כל הנקודות צולמו';else if(on)h=S.busy?'שומר…':'החזיקו יציב…';else{
     const d=S.TD[ni],x=m[0]*d[0]+m[3]*d[1]+m[6]*d[2],y=m[1]*d[0]+m[4]*d[1]+m[7]*d[2];h=Math.abs(x)>=Math.abs(y)?(x>0?'סובבו ימינה אל העיגול הזהוב':'סובבו שמאלה אל העיגול הזהוב'):(y>0?'הטו למעלה אל העיגול הזהוב':'הטו למטה אל העיגול הזהוב')}
-   if(hint.textContent!==h)hint.textContent=h;
-   if(st&&!S.busy&&Date.now()-S.last>250&&S.camEl&&(S.camEl.videoWidth||S.camEl.width))grab(aim)}
+   if(hint.textContent!==h)hint.textContent=h;hint.classList.toggle('warn',warn);
+   if(!vid&&st&&!S.busy&&Date.now()-S.last>250&&S.camEl&&(S.camEl.videoWidth||S.camEl.width))grab(aim)}
   function onOri(e){if(S.done||e==null||e.alpha==null||e.beta==null||e.gamma==null)return;
-   const ang=e.angle!=null?e.angle:mock&&mock.angle!=null?mock.angle:screenAngle();S.q=oriToQuat(+e.alpha,+e.beta,+e.gamma,ang);const t=Date.now();S.hist.push({t,q:S.q});
+   const ang=e.angle!=null?e.angle:mock&&mock.angle!=null?mock.angle:screenAngle();S.q=oriToQuat(+e.alpha,+e.beta,+e.gamma,ang);const t=Date.now(),pt=performance.now();S.hist.push({t,q:S.q});
+   S.vh.push({t:pt,q:S.q});while(S.vh.length>2&&pt-S.vh[0].t>1000)S.vh.shift();
    while(S.hist.length&&t-S.hist[0].t>STAB_MS+400)S.hist.shift()}
-  const api={target:()=>{const i=nextT();if(i<0||!S.T.length)return null;const y0=S.yaw0!=null?S.yaw0:S.base!=null?S.base:0;return{yaw:S.T[i].yaw+y0,pitch:S.T[i].pitch,i}},state:()=>({phase:S.phase,n:S.frames.length,tot:S.T.length})};
+  const api={target:()=>{const i=nextT();if(i<0||!S.T.length)return null;const y0=S.yaw0!=null?S.yaw0:S.base!=null?S.base:0;return{yaw:S.T[i].yaw+y0,pitch:S.T[i].pitch,i}},state:()=>({phase:S.phase,n:nGot(),tot:S.T.length,mode:S.mode,rec:S.rec})};
   async function run(){if(S.phase!=='cap')return;
    S.phase='stitch';if(S.busy){for(let i=0;i<50&&S.busy;i++)await new Promise(r=>setTimeout(r,50))}
-   const frames=S.frames.filter(f=>f.blob);cleanup();if(frames.length<2)return fail('צולמו פחות משתי תמונות.');
+   const frames=(S.mode==='video'?vidFrames():S.frames).filter(f=>f.blob);cleanup();if(frames.length<2)return fail('צולמו פחות משתי תמונות.');
    const pb=$('.s3pc-pb i');showMsg('מחבר את התמונות…','זה לוקח כמה שניות. אל תסגרו את האפליקציה.',{pb:true});
    const t0=Date.now();
    try{const r=await stitch(frames,{fovL:S.fovL,fixedFov:!!opts.fov,maxTex:opts.maxTex,width:opts.width},p=>{pb.style.width=Math.round(p*100)+'%';$('.s3pc-mt').textContent='מחבר את התמונות… '+Math.round(p*100)+'%'});
     if(!r.full||!r.sm)throw new Error('encode');
     if(!opts.fov&&r.cal&&r.fovL!==S.fovL)lsS(FOV_KEY,String(Math.round(r.fovL*10)/10));
-    finish({full:r.full,sm:r.sm,w:r.w,h:r.h,meta:{n:frames.length,fovH:Math.round(r.fovH*10)/10,fovL:Math.round(r.fovL*10)/10,yawRef:Math.round(frames[0].yaw*100)/100,dev:mock?'mock':devName(),ms:Date.now()-t0}})}
+    finish({full:r.full,sm:r.sm,w:r.w,h:r.h,meta:{n:frames.length,mode:S.mode==='video'?'video':'pts',fovH:Math.round(r.fovH*10)/10,fovL:Math.round(r.fovL*10)/10,yawRef:Math.round(frames[0].yaw*100)/100,dev:mock?'mock':devName(),ms:Date.now()-t0}})}
    catch(e){fail('החיבור נכשל (ייתכן שאין מספיק זיכרון בטלפון). נסו שוב.')}}
   /* מכשיר אמיתי: בקשת הרשאת חיישן (אם הדפדפן דורש) חייבת לצאת מיד, בזמן שהלחיצה של המשתמש עוד "טרייה"; לא נכשלים לפי התשובה – רק אם לא מגיעים אירועים */
   let perm=null;
@@ -279,6 +348,9 @@ function start(el,opts){
     if(!v.videoWidth)return fail('המצלמה לא נפתחה. נסו שוב.');S.cw=v.videoWidth;S.ch=v.videoHeight}
    if(S.done)return cleanup();
    S.camEl.classList.add('s3pc-cam');$('.s3pc-camw').appendChild(S.camEl);
+   /* מצב סרטון: דגימה לפי פריימי הווידאו (אם יש), עם זמן הצילום של הפריים; אחרת מתוך הלולאה (rAF + זמן) */
+   if(typeof S.camEl.requestVideoFrameCallback==='function'){S.vfcOn=true;const vf=(now,md)=>{if(S.done)return;S.vfc=S.camEl.requestVideoFrameCallback(vf);
+    if(S.phase==='cap'&&S.mode==='video'&&S.rec){let t=md&&md.captureTime;if(!(t>now-400&&t<=now+5))t=now;sample(t)}};S.vfc=S.camEl.requestVideoFrameCallback(vf)}
    /* חיישן כיוון (במכשיר אמיתי המאזין נרשם כבר בהתחלה, למטה) */
    if(mock)S.stopSensor=mock.sensor(onOri,api);
    for(let i=0;i<40&&!S.q&&!S.done;i++)await new Promise(r=>setTimeout(r,50));

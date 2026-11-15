@@ -144,3 +144,74 @@ describe('סיבוב סינתטי: צילום מכיוונים ידועים וח
     assert.equal(black, 0); assert.ok(err(S, 20) < 6);
   });
 });
+
+describe('מצב סרטון', () => {
+  it('slerp: קצוות, אמצע וזווית יחסית; גם כשהסימן הפוך', () => {
+    const a = qLook(0, 0), b = qLook(40, 10);
+    near(M.qAngle(M.qSlerp(a, b, 0), a), 0, 1e-4); near(M.qAngle(M.qSlerp(a, b, 1), b), 0, 1e-4);
+    const m = M.qSlerp(a, b, 0.25), full = M.qAngle(a, b);
+    near(M.qAngle(a, m), full * 0.25, 1e-6); near(M.qAngle(m, b), full * 0.75, 1e-6); near(Math.hypot(...m), 1, 1e-9);
+    const nb = b.map((v) => -v), m2 = M.qSlerp(a, nb, 0.5); near(M.qAngle(m2, M.qSlerp(a, b, 0.5)), 0, 1e-4);
+    near(M.qAngle(M.qSlerp(a, qLook(0.01, 0), 0.5), qLook(0.005, 0)), 0, 1e-4); // כמעט זהים: בלי חלוקה באפס
+  });
+  it('כיוון ברגע הפריים: אינטרפולציה בין שני ערכי חיישן, ואחרת האחרון', () => {
+    const h = [{ t: 100, q: qLook(0, 0) }, { t: 120, q: qLook(2, 0) }, { t: 140, q: qLook(4, 0) }];
+    near(M.yawPitch(M.oriAt(h, 130)).yaw, 3, 1e-3);
+    near(M.yawPitch(M.oriAt(h, 125)).yaw, 2.5, 1e-3);
+    near(M.yawPitch(M.oriAt(h, 300)).yaw, 4, 1e-9); // אחרי הערך האחרון – האחרון
+    near(M.yawPitch(M.oriAt(h, 50)).yaw, 0, 1e-9);
+    assert.equal(M.oriAt([], 10), null);
+  });
+  it('סף מהירות: 30°/ש\' עובר, 100°/ש\' נחסם', () => {
+    const mk = (sp) => Array.from({ length: 20 }, (_, i) => ({ t: i * 16, q: qLook(sp * i * 0.016, 0) }));
+    const s1 = M.angSpeed(mk(30), 400), s2 = M.angSpeed(mk(100), 400);
+    near(s1, 30, 1); near(s2, 100, 2);
+    assert.ok(s1 < M.C.VID_SPD && s2 > M.C.VID_SPD);
+    assert.equal(M.angSpeed([{ t: 0, q: qLook(0, 0) }], 10), 0); // ערך אחד – אין מהירות
+  });
+  it('ציון חדות: פריים חד מקבל יותר מאותו פריים מטושטש', () => {
+    const w = 160, h = 120, d = render(qLook(10, 5), 65, w, h), bl = new Uint8ClampedArray(d.length);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let c = 0; c < 4; c++) { // טשטוש תנועה אופקי (9 פיקסלים)
+      let s = 0, n = 0; for (let k = -4; k <= 4; k++) { const xx = x + k; if (xx >= 0 && xx < w) { s += d[(y * w + xx) * 4 + c]; n++; } } bl[(y * w + x) * 4 + c] = s / n;
+    }
+    const a = M.lapVar(d, w, h), b = M.lapVar(bl, w, h);
+    assert.ok(a > b * 2, `חד ${a.toFixed(1)} מול מטושטש ${b.toFixed(1)}`);
+  });
+  it('בחירת הפריים הטוב לכל נקודה: רק בתוך מחצית המרווח, ושומרים את החד/הקרוב ביותר', () => {
+    const fv = M.fovOf(62, 360, 480), T = M.pickTargets(fv.fw, fv.fh), R = M.vidRadii(T), TD = T.map((t) => M.dirOf(t.yaw, t.pitch));
+    const sp = 360 / T.filter((t) => t.row === 0).length;
+    near(R[0], sp / 2, 1e-6, 'רדיוס בשורת האופק = מחצית המרווח');
+    assert.ok(R.every((r) => r > 5 && r < 46));
+    const best = T.map(() => null), offer = (yaw, pitch, sharp) => {
+      const c = M.vidPick(M.camFwd(qLook(yaw, pitch)), TD, R, best, sharp);
+      for (const x of c) best[x.i] = { s: x.s, yaw, sharp }; return c.map((x) => x.i);
+    };
+    assert.deepEqual(offer(0, 0, 100), [0]);
+    assert.deepEqual(offer(2, 0, 50), [], 'פחות חד – לא מחליף');
+    assert.deepEqual(offer(1, 0, 300), [0], 'חד יותר – מחליף'); assert.equal(best[0].sharp, 300);
+    assert.deepEqual(offer(sp / 2 + 0.5, 0, 1e6).includes(0), false, 'מחוץ למחצית המרווח – לא נחשב לנקודה 0');
+    const c = M.vidPick(M.camFwd(qLook(R[0] * 0.9, 0)), TD, R, T.map(() => null), 300)[0], c0 = M.vidPick(M.camFwd(qLook(0, 0)), TD, R, T.map(() => null), 300)[0];
+    assert.ok(c0.s > c.s, 'באותה חדות – הקרוב למרכז עדיף');
+    // רדיוסים לא חופפים: כיוון אחד שייך לכל היותר לשתי נקודות
+    for (let i = 0; i < 2000; i++) { const z = rnd() * 2 - 1, a = rnd() * 2 * Math.PI, r = Math.sqrt(1 - z * z), d = [r * Math.sin(a), r * Math.cos(a), z];
+      assert.ok(TD.filter((t, j) => M.angDir(d, t) < R[j]).length <= 2); }
+  });
+  it('סיבוב רציף מדומה (שלוש שורות + תקרה ורצפה, רעש קטן): בחירה אוטומטית וחיבור עם שגיאה דומה למצב הנקודות', () => {
+    const w = 120, h = 160, fovL = 62, fv = M.fovOf(fovL, w, h), T = M.pickTargets(fv.fw, fv.fh), R = M.vidRadii(T), TD = T.map((t) => M.dirOf(t.yaw, t.pitch)), best = T.map(() => null);
+    const rows = [...new Set(T.map((t) => t.pitch))];
+    let n = 0;
+    for (const p of rows) { // 40°/ש', דגימה כל 120ms ⇒ 4.8° בין דגימות
+      const len = Math.abs(p) > 89 ? 1 : 380;
+      for (let a = 0; a <= len; a += 4.8) {
+        const q = qLook(a + (rnd() - 0.5) * 0.6, p + 1.5 * Math.sin(a * D * 3) + (rnd() - 0.5) * 0.6, (rnd() - 0.5) * 2);
+        const sharp = 100 + rnd() * 20; n++;
+        for (const x of M.vidPick(M.camFwd(q), TD, R, best, sharp)) best[x.i] = { s: x.s, q };
+      }
+    }
+    assert.ok(best.every(Boolean), 'כיסוי מלא');
+    const frames = [...new Set(best)].map((b) => ({ data: render(b.q, fovL, w, h), w, h, q: b.q }));
+    assert.ok(frames.length <= T.length && n > frames.length * 5, 'נשמר רק פריים לכל נקודה');
+    const S = stitch(frames, fovL, 512), e = err(S);
+    assert.ok(e < 6, 'שגיאה ' + e.toFixed(2));
+  });
+});
