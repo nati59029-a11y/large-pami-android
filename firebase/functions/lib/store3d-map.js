@@ -12,6 +12,7 @@
 //   verId / prune              – מזהה גרסה (000012) ומה למחוק כדי להשאיר 30 גרסאות אחרונות.
 //   branchIds / cleanBranch    – סניפים קיימים (org.branches, או main) וקלט s3SetBranch.
 //   decodeTex / jpegSize / texPath / nextTexN – תמונת טקסטורה: JPEG בלבד, עד 600,000 בתים, כל צלע 256/512/1024.
+//   שלב 18א: decodePano / cleanPt / inMap / wallBlocks / autoNb / linkNb / nextPid / panoDayStep – נקודות סיור 360.
 
 const { sniff } = require('./scan');
 
@@ -385,8 +386,132 @@ function recentCount(times, now) {
   return n;
 }
 
+// ---------- סיור 360 (s3PutPano / s3DelPano) – שלב 18א (15.11.2026) ----------
+// נקודה = smap/{mapId}/pano/{pid}: { x, y (ס"מ), yaw (0–359.9), nb [pid], full, sm (נתיבים), w, h, sz, ver, by, at, upd, del?, delAt?, delBy? }.
+// קבצים: b/{biz}/store3d/{br}/pano/{mapId}/{pid}_{ver}.jpg (מלאה) ו-{pid}_{ver}_s.jpg (קטנה). החלפת תמונה = ver+1.
+const PANO_MAX = 3000000;      // מלאה, אחרי פענוח
+const PANO_SM_MAX = 200000;    // קטנה
+const PANO_W = [2048, 4096];   // רוחב המלאה; גובה = חצי (2:1)
+const PANO_SM = { w: 1024, h: 512 };
+const PANO_LIMIT = 40;         // נקודות פעילות למפה (הנחת מתאם)
+const PANO_DAY = 60;           // העלאות תמונה ביום לסניף (הנחת מתאם), s3use/p_{br}
+const NB_DIST = 800;           // חיבור אוטומטי: עד 8 מטר
+const NB_AUTO = 8;             // עד 8 שכנות אוטומטיות (הקרובות)
+const NB_MAX = 12;             // עד 12 שכנות לנקודה
+RE.pano = /^p[0-9]{1,4}$/;
+
+// תמונה אחת (base64, אפשר עם data:image/jpeg;base64,). max בבתים; kb – לטקסט ההודעה. מחזיר { buf, w, h } או זורק.
+function decodeJpeg(img, max, what, kb) {
+  if (typeof img !== 'string' || !img) throw fail('bad-img', 'חסרה ' + what);
+  const b64 = img.replace(/^data:image\/jpeg;base64,/, '');
+  if (b64.length > Math.ceil(max / 3) * 4) throw fail('too-big', `${what} גדולה מדי (עד ${kb})`);
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64) || b64.length % 4 !== 0) throw fail('bad-img', what + ' לא בפורמט base64');
+  const buf = Buffer.from(b64, 'base64');
+  if (!buf.length) throw fail('bad-img', what + ' ריקה');
+  if (buf.length > max) throw fail('too-big', `${what} גדולה מדי (עד ${kb})`);
+  if (sniff(buf) !== 'image/jpeg') throw fail('bad-type', 'מותרת רק תמונת JPEG');
+  const sz = jpegSize(buf);
+  if (!sz) throw fail('bad-img', 'לא הצלחנו לקרוא את מידות ה' + what);
+  return { buf, w: sz.w, h: sz.h };
+}
+// full: יחס 2:1 בדיוק, רוחב 2048 או 4096, עד 3MB. sm: 1024×512, עד 200KB.
+function decodePano(full, sm) {
+  const f = decodeJpeg(full, PANO_MAX, 'תמונת 360', '3MB');
+  if (f.w !== f.h * 2) throw fail('bad-ratio', 'תמונת 360 חייבת להיות ביחס 2:1 (רוחב כפול מהגובה)');
+  if (!PANO_W.includes(f.w)) throw fail('bad-size', 'רוחב תמונת 360 צריך להיות 2048 או 4096 פיקסלים');
+  const s = decodeJpeg(sm, PANO_SM_MAX, 'תמונה קטנה', '200KB');
+  if (s.w !== PANO_SM.w || s.h !== PANO_SM.h) throw fail('bad-size', 'התמונה הקטנה צריכה להיות 1024×512 פיקסלים');
+  return { full: f, sm: s };
+}
+// קלט הנקודה. מחזיר { id|null, x, y, yaw, nb|null } (nb null = לא נשלח → חיבור אוטומטי), או זורק fail('bad-pt' | 'bad-nb').
+function cleanPt(i) {
+  const o = isObj(i) ? i : {};
+  let id = null;
+  if (o.id !== undefined && o.id !== null && o.id !== '') {
+    if (typeof o.id !== 'string' || !RE.pano.test(o.id)) throw fail('bad-pt', 'מזהה הנקודה לא תקין');
+    id = o.id;
+  }
+  const num = (v, a, b) => typeof v === 'number' && Number.isFinite(v) && v >= a && v <= b;
+  if (!num(o.x, 0, MAXC) || !num(o.y, 0, MAXC)) throw fail('bad-pt', 'מיקום הנקודה לא תקין');
+  if (!num(o.yaw, 0, 360)) throw fail('bad-pt', 'הכיוון צריך להיות בין 0 ל-360 מעלות');
+  const yaw = Math.round(o.yaw * 10) / 10 % 360;
+  let nb = null;
+  if (o.nb !== undefined && o.nb !== null) {
+    if (!Array.isArray(o.nb) || o.nb.length > NB_MAX || !o.nb.every((v) => typeof v === 'string' && RE.pano.test(v))) throw fail('bad-nb', `רשימת השכנות לא תקינה (עד ${NB_MAX} נקודות)`);
+    nb = [...new Set(o.nb)].filter((v) => v !== id);
+  }
+  return { id, x: Math.round(o.x), y: Math.round(o.y), yaw, nb };
+}
+// הנקודה בתוך חדר חי של המפה (כולל על הקיר עצמו)
+function inPoly(p, x, y) {
+  const n = p.length / 2;
+  let ins = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = p[2 * i], yi = p[2 * i + 1], xj = p[2 * j], yj = p[2 * j + 1];
+    if (orient(xi, yi, xj, yj, x, y) === 0 && onSeg(xi, yi, xj, yj, x, y)) return true;
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) ins = !ins;
+  }
+  return ins;
+}
+function inMap(map, x, y) {
+  return live(isObj(map) ? map.rooms : null).some((r) => polyShape(r.p) && inPoly(r.p, x, y));
+}
+// קיר חי (walls) חוצה את הקו a→b, ולא בפתח של דלת חיה (מרכז הדלת במרחק עד חצי רוחבה מנקודת החיתוך). קו חופף לקיר = חסום.
+function wallBlocks(map, a, b) {
+  const m = isObj(map) ? map : {};
+  const doors = live(m.doors).filter((d) => inR(d.x, 0, MAXC) && inR(d.y, 0, MAXC) && inR(d.w, 1, 2000));
+  for (const w of live(m.walls)) {
+    const p = w.p;
+    if (!Array.isArray(p) || p.length !== 4 || !p.every((v) => typeof v === 'number' && Number.isFinite(v))) continue;
+    if (!segsCross(a.x, a.y, b.x, b.y, p[0], p[1], p[2], p[3])) continue;
+    const den = (b.x - a.x) * (p[3] - p[1]) - (b.y - a.y) * (p[2] - p[0]);
+    if (den === 0) return true;
+    const t = ((p[0] - a.x) * (p[3] - p[1]) - (p[1] - a.y) * (p[2] - p[0])) / den;
+    const ix = a.x + t * (b.x - a.x), iy = a.y + t * (b.y - a.y);
+    if (!doors.some((d) => Math.hypot(d.x - ix, d.y - iy) <= d.w / 2)) return true;
+  }
+  return false;
+}
+// שכנות אוטומטיות: נקודות פעילות אחרות עד 8 מ', בלי קיר באמצע, הקרובות קודם, עד 8. pts = [{ id, x, y }]
+function autoNb(pt, pts, map) {
+  return (pts || []).filter((q) => q && q.id !== pt.id)
+    .map((q) => ({ id: q.id, d: Math.hypot(q.x - pt.x, q.y - pt.y), q }))
+    .filter((o) => o.d <= NB_DIST && !wallBlocks(map, pt, o.q))
+    .sort((a, b) => a.d - b.d || (a.id < b.id ? -1 : 1)).slice(0, NB_AUTO).map((o) => o.id);
+}
+// קישור דו-כיווני: לנקודה pid יש שכנות nb. pts = שאר הנקודות הפעילות [{ id, nb }]. מחזיר { id: nb חדש } רק למי שהשתנה.
+// שכנה שכבר מלאה (12) – לא מקבלת קישור חוזר.
+function linkNb(pid, nb, pts) {
+  const want = new Set(nb || []), out = {};
+  for (const q of pts || []) {
+    if (!q || q.id === pid) continue;
+    const cur = Array.isArray(q.nb) ? q.nb.filter((v) => typeof v === 'string') : [];
+    const has = cur.includes(pid);
+    if (want.has(q.id) && !has && cur.length < NB_MAX) out[q.id] = cur.concat([pid]);
+    else if (!want.has(q.id) && has) out[q.id] = cur.filter((v) => v !== pid);
+  }
+  return out;
+}
+const panoDir = (bizId, br, mapId) => `b/${bizId}/store3d/${br}/pano/${mapId}/`;
+const panoPath = (bizId, br, mapId, pid, ver, small) => panoDir(bizId, br, mapId) + pid + '_' + ver + (small ? '_s' : '') + '.jpg';
+// המזהה הבא: גדול מכל נקודה קיימת (כולל מחוקות)
+function nextPid(ids) {
+  let n = 0;
+  for (const id of ids || []) if (typeof id === 'string' && RE.pano.test(id)) n = Math.max(n, idNum(id));
+  return n + 1;
+}
+// בלם יומי (אותו מבנה כמו s3use/d_{br}): s3use/p_{br} = { d: יום בשעון ישראל, n, upd }
+function panoDayStep(doc, day, now, max) {
+  const lim = inR(max, 0, 100000) ? max : PANO_DAY;
+  const n0 = isObj(doc) && doc.d === day && inR(doc.n, 0, 100000) ? doc.n : 0;
+  if (n0 + 1 > lim) throw fail('pano-day', `הגעתם ל-${lim} העלאות 360 היום בסניף הזה. נסו שוב מחר.`);
+  return { d: day, n: n0 + 1, upd: now };
+}
+
 module.exports = {
   MAX_BYTES, KEEP_VERS, MAX_BAYS, TEX_MAX, TEX_SIDES, TEX_DAY, recentCount, DEF_BR, LISTS, LIMIT, RE, STALE,
   polyErr, cleanMap, mergeDel, trimBin, finalCheck, NEW_SPAN, checkLock, bytesOf, verId, verDoc, prune, bayCount,
   branchIds, cleanBranch, brCfg, jpegSize, decodeTex, texDir, texPath, nextTexN, fail,
+  PANO_MAX, PANO_SM_MAX, PANO_W, PANO_SM, PANO_LIMIT, PANO_DAY, NB_DIST, NB_AUTO, NB_MAX,
+  decodePano, cleanPt, inMap, wallBlocks, autoNb, linkNb, panoDir, panoPath, nextPid, panoDayStep,
 };

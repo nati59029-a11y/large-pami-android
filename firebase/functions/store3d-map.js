@@ -11,6 +11,7 @@
 //     b/{bizId}/store3d/{brId}/tex/{mapId}/{texId}_1.jpg ומחזירה { texId, path, w, h }. בלי AI ובלי מכסה. qid – ניסיון חוזר מחזיר
 //     את אותה תשובה (s3qid). הטקסטורה נכנסת למפה רק בשמירה הבאה (tx[] ב-s3SaveMap).
 //     תיקון סבב 1: נחסם כשהתלת מימד כבוי בסניף (br-off) או מחסן בלי wh; עד 200 העלאות ב-24 שעות לכל מפה (tex-day, הנחה).
+//   s3PutPano / s3DelPano – שלב 18א (15.11.2026), סיור 360. ראו את ההערות ליד הפונקציות למטה.
 // כולן: requireStaff עם feature 'store3d', inputObject, T.scoped, שגיאות בעברית.
 
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -22,6 +23,7 @@ const { onCall } = require('./lib/region');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const T = require('./lib/tenant');
 const M = require('./lib/store3d-map');
+const scan = require('./lib/scan');
 
 if (!getApps().length) initializeApp();
 
@@ -32,6 +34,7 @@ const CODE = {
   'bad-map': 'invalid-argument', 'bad-base': 'invalid-argument', 'too-big': 'invalid-argument', 'bad-img': 'invalid-argument',
   'bad-type': 'invalid-argument', 'bad-size': 'invalid-argument', 'bad-br': 'invalid-argument', 'bad-cap': 'invalid-argument',
   'bad-input': 'invalid-argument', stale: 'failed-precondition', 'id-reuse': 'failed-precondition', 'del-mgr': 'permission-denied',
+  'bad-ratio': 'invalid-argument', 'bad-pt': 'invalid-argument', 'bad-nb': 'invalid-argument', 'pano-day': 'resource-exhausted',
 };
 // שגיאה של הליבה (fail) → HttpsError עם reason; כל שגיאה אחרת עוברת כמו שהיא
 function toHttps(e) {
@@ -185,5 +188,170 @@ exports.s3PutTex = onCall(T.scoped(async (request) => {
   return putTex(T.tdb(), { uid: who.uid, bizId: who.bizId, brs: myBranches(who) }, inputObject(request), Date.now());
 }));
 
+// ---------------- s3PutPano / s3DelPano (שלב 18א – סיור 360) ----------------
+// ניקוי הקבצים של הבקשה הזו בלבד (תיקון סבב 1 של הבודק): items = [{ path, gen }] – רק קובץ שהבקשה הזו כתבה (נתיב שנתפס בנעילה,
+// ו-generation שחזר מהשמירה), רק עם ifGenerationMatch שלו, ולעולם לא נתיב שמופיע ב-full/sm של מסמך הנקודה הנוכחי (הגנה כפולה).
+// בספק (קריאת המסמך נכשלה, אין generation) – לא מוחקים; קובץ שנשאר יתום נמחק ב-s3Clean אחרי 30 יום.
+async function dropOwn(bk, ref, items) {
+  let cur = null;
+  try { const s = await ref.get(); cur = s.exists ? s.data() : null; } catch (e) { return; }
+  for (const it of items) {
+    if (!it || !it.path || !it.gen) continue;
+    if (cur && (cur.full === it.path || cur.sm === it.path)) continue;
+    try { await bk.file(it.path).delete({ ifGenerationMatch: it.gen }); } catch (x) { /* ינוקה ב-s3Clean אחרי 30 יום */ }
+  }
+}
+// נעילה על נתיב (תיקון סבב 1): s3qid/pano_{mapId}_{pid}_{ver} נוצר ב-create (נכשל אם קיים) לפני ההעלאה, כך שרק בקשה אחת כותבת לנתיב,
+// גם אם ifGenerationMatch: 0 לא נאכף (באמולטור). המזהה לא תואם את תבנית ה-qid (יש בו _), ולכן לא מתנגש בו. נמחק ב-s3Clean לפי exp.
+async function claimPath(db, who, mapId, pid, ver, now) {
+  try {
+    await db.doc(`s3qid/pano_${mapId}_${pid}_${ver}`).create({ k: 'pano-lock', uid: who.uid, at: now, exp: now + QID_DAYS * D1 });
+    return true;
+  } catch (e) { if (isExists(e)) return false; throw e; }
+}
+// מצב המפה והנקודות (לבדיקה לפני ההעלאה ושוב בתוך הטרנזקציה). ms = smap, ps = הנקודות (QuerySnapshot). מחזיר { map, pts, old }.
+function panoState(ms, ps, pid, pt) {
+  if (!ms.exists || ms.get('del') === 1) throw bad('no-map', 'המפה לא קיימת. שמרו את המפה לפני שמוסיפים נקודות 360.', 'failed-precondition');
+  const map = ms.data();
+  if (!M.inMap(map, pt.x, pt.y)) throw bad('out-of-map', 'הנקודה מחוץ לחדרי המפה');
+  const all = ps.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const pts = all.filter((d) => d.del !== 1 && d.id !== pid);
+  const old = pid ? all.find((d) => d.id === pid) || null : null;
+  return { map, pts, old, ids: all.map((d) => d.id) };
+}
+// s3PutPano { qid, mapId, id?, x, y, yaw, nb?, full?, sm? } – מנהל או s3m (כמו s3PutTex). בלי AI ובלי מכסת AI.
+//   חדשה (בלי id): full + sm חובה; השרת נותן מזהה p{n}. החלפה (עם id): full + sm → גרסה חדשה (ver+1), הקבצים הקודמים נשארים
+//   ונמחקים ב-s3Clean 30 יום אחרי ההחלפה. עם id ובלי תמונות – עדכון מיקום / כיוון / שכנות בלבד (לא נספר בבלם היומי).
+//   x, y בס"מ בתוך חדר חי של המפה; yaw 0–360; nb – אם לא נשלח: חיבור אוטומטי (M.autoNb). הקישור דו-כיווני (M.linkNb).
+//   עד 40 נקודות פעילות למפה; עד 60 העלאות תמונה ביום לסניף (s3use/p_{br}, בטרנזקציה). qid חוזר → אותה תשובה עם dup: true.
+//   מחזיר { ok, mapId, id, ver, full, sm, w, h, x, y, yaw, nb, linked }.
+// opts.maxDay / opts.maxPts – לבדיקות; ברירת מחדל M.PANO_DAY (60) ו-M.PANO_LIMIT (40)
+async function putPano(db, who, input, now, bucket, opts) {
+  const maxDay = opts && Number.isInteger(opts.maxDay) ? opts.maxDay : M.PANO_DAY;
+  const maxPts = opts && Number.isInteger(opts.maxPts) ? opts.maxPts : M.PANO_LIMIT;
+  if (typeof input.qid !== 'string' || !M.RE.qid.test(input.qid)) throw bad('bad-qid', 'מזהה השליחה לא תקין');
+  const mapId = mapIdOf(input), br = mapId.slice(2);
+  brAllowed(who, br);
+  const qref = db.doc('s3qid/' + input.qid);
+  const same = (q) => q.get('k') === 'pano' && q.get('uid') === who.uid && q.get('res') && q.get('res').mapId === mapId;
+  const dupOf = (q) => { if (!same(q)) throw bad('bad-qid', 'מזהה השליחה כבר שימש לפעולה אחרת'); return Object.assign({}, q.get('res'), { dup: true }); };
+  const q0 = await qref.get();
+  if (q0.exists) return dupOf(q0);
+  let pt, img = null;
+  const hasImg = (input.full !== undefined && input.full !== null) || (input.sm !== undefined && input.sm !== null);
+  try {
+    pt = M.cleanPt(input);
+    if (!hasImg && !pt.id) throw M.fail('bad-img', 'חסרה תמונת 360');
+    if (hasImg) img = M.decodePano(input.full, input.sm);
+  } catch (e) { throw toHttps(e); }
+  await branchOk(db, who.bizId, br, mapId.charAt(0));
+  const mref = db.doc('smap/' + mapId), pcol = db.collection('smap/' + mapId + '/pano'), dref = db.doc('s3use/p_' + br);
+  const day = scan.israelDay(new Date(now));
+  // בדיקות לפני ההעלאה (כדי לא להעלות 3MB לשווא). אותן בדיקות שוב בתוך הטרנזקציה.
+  const check = (ms, ps, dd, pid) => {
+    const st = panoState(ms, ps, pid, pt);
+    if (pid && !st.old) throw bad('no-pano', 'הנקודה לא קיימת', 'not-found');
+    if (st.old && st.old.del === 1) throw bad('pano-gone', 'הנקודה נמחקה', 'failed-precondition');
+    if (!pid && st.pts.length >= maxPts) throw bad('pano-limit', `אפשר עד ${maxPts} נקודות 360 במפה. מחקו נקודה שלא צריך.`, 'resource-exhausted');
+    if (pt.nb) { const ok = new Set(st.pts.map((q) => q.id)); if (!pt.nb.every((n) => ok.has(n))) throw bad('bad-nb', 'אחת מהנקודות המקושרות לא קיימת'); }
+    let dayDoc = null;
+    if (hasImg) { try { dayDoc = M.panoDayStep(dd.exists ? dd.data() : null, day, now, maxDay); } catch (e) { throw toHttps(e); } }
+    return Object.assign(st, { dayDoc });
+  };
+  const [ms0, ps0, dd0] = await Promise.all([mref.get(), pcol.get(), dref.get()]);
+  const st0 = check(ms0, ps0, dd0, pt.id);
+  const bk = bucket || getStorage().bucket();
+  let pid = pt.id, ver = st0.old ? (Number.isInteger(st0.old.ver) ? st0.old.ver : 0) : 0, full = '', sm = '', mine = [];
+  if (img) {
+    // לכל נתיב: קודם נעילה (claimPath), ואז שמירה עם ifGenerationMatch: 0. נתיב תפוס / 412 → מזהה / גרסה הבאים.
+    let n = pt.id ? 0 : M.nextPid(st0.ids) - 1;
+    const save = async (p, buf) => { const f = bk.file(p); await f.save(buf, { resumable: false, contentType: 'image/jpeg', preconditionOpts: { ifGenerationMatch: 0 } }); return f.metadata && f.metadata.generation; };
+    for (let i = 0; i < 10 && !full; i++) {
+      if (pt.id) ver += 1; else { n += 1; pid = 'p' + n; ver = 1; }
+      if (n > 9999 || ver > 9999) throw bad('pano-full', 'נגמרו המזהים לנקודות 360 במפה הזו', 'resource-exhausted');
+      if (!(await claimPath(db, who, mapId, pid, ver, now))) continue;
+      const pf = M.panoPath(who.bizId, br, mapId, pid, ver), ps = M.panoPath(who.bizId, br, mapId, pid, ver, true);
+      let gf;
+      try {
+        gf = await save(pf, img.full.buf);
+      } catch (e) {
+        if (e && (e.code === 412 || e.code === '412')) continue;
+        logger.warn('s3PutPano: save failed', { code: e && e.code });
+        throw bad('save-failed', 'שמירת התמונה נכשלה. נסו שוב.', 'unavailable');
+      }
+      try {
+        mine = [{ path: pf, gen: gf }, { path: ps, gen: await save(ps, img.sm.buf) }];
+      } catch (e) {
+        await dropOwn(bk, pcol.doc(pid), [{ path: pf, gen: gf }]);
+        if (e && (e.code === 412 || e.code === '412')) continue;
+        logger.warn('s3PutPano: save failed', { code: e && e.code });
+        throw bad('save-failed', 'שמירת התמונה נכשלה. נסו שוב.', 'unavailable');
+      }
+      full = pf; sm = ps;
+    }
+    if (!full) throw bad('busy', 'נסו שוב בעוד רגע', 'aborted');
+  }
+  let res;
+  try {
+    res = await db.runTransaction(async (tx) => {
+      const [q, ms, ps, dd] = await Promise.all([tx.get(qref), tx.get(mref), tx.get(pcol), tx.get(dref)]);
+      if (q.exists) return { dup: dupOf(q) };
+      const st = check(ms, ps, dd, pt.id);
+      if (!pt.id && ps.docs.some((d) => d.id === pid)) throw bad('busy', 'נסו שוב בעוד רגע', 'aborted');
+      const o = st.old;
+      if (img && o && Number.isInteger(o.ver) && o.ver >= ver) throw bad('busy', 'הנקודה הוחלפה בטלפון אחר. טענו מחדש.', 'aborted');
+      // שכנות: נשלחו – כמו שהן; לא נשלחו – בהחלפה באותו מקום נשארות הקודמות, אחרת חיבור אוטומטי (עד 8 מ', בלי קיר באמצע)
+      const ids = new Set(st.pts.map((x) => x.id));
+      const nb = pt.nb ? pt.nb : (o && o.x === pt.x && o.y === pt.y && Array.isArray(o.nb) ? o.nb.filter((x) => ids.has(x)) : M.autoNb({ id: pid, x: pt.x, y: pt.y }, st.pts, st.map));
+      const doc = { x: pt.x, y: pt.y, yaw: pt.yaw, nb, by: who.uid, upd: now };
+      if (img) Object.assign(doc, { full, sm, w: img.full.w, h: img.full.h, sz: img.full.buf.length, ver, at: now });
+      else Object.assign(doc, { full: o.full, sm: o.sm, w: o.w, h: o.h, sz: o.sz, ver: o.ver, at: o.at });
+      tx.set(pcol.doc(pid), doc);
+      const ch = M.linkNb(pid, nb, st.pts);
+      for (const id of Object.keys(ch)) tx.update(pcol.doc(id), { nb: ch[id], upd: now });
+      if (st.dayDoc) tx.set(dref, st.dayDoc);
+      const r = { ok: true, mapId, id: pid, ver: doc.ver, full: doc.full, sm: doc.sm, w: doc.w, h: doc.h, x: doc.x, y: doc.y, yaw: doc.yaw, nb, linked: Object.keys(ch) };
+      tx.set(qref, { k: 'pano', uid: who.uid, res: r, at: now, exp: now + QID_DAYS * D1 });
+      return { r };
+    });
+  } catch (e) {
+    if (full) await dropOwn(bk, pcol.doc(pid), mine);
+    throw e;
+  }
+  if (res.dup) { if (full) await dropOwn(bk, pcol.doc(pid), mine); return res.dup; }
+  return res.r;
+}
+exports.s3PutPano = onCall({ memory: '512MiB' }, T.scoped(async (request) => {
+  const who = await requireStaff(request, { feature: 'store3d' });
+  if (!canDraw(who)) throw bad('not-s3m', 'העלאת נקודות 360 מותרת למנהל או לעובד עם הרשאת "שרטוט מפה"', 'permission-denied');
+  return putPano(T.tdb(), { uid: who.uid, bizId: who.bizId, brs: myBranches(who) }, inputObject(request), Date.now());
+}));
+
+// מחיקה רכה (del:1, delAt, delBy) – מנהל בלבד, כמו מחיקת פריט במפה. הקבצים והמסמך נמחקים סופית ב-s3Clean אחרי 30 יום.
+// הנקודה יוצאת גם מרשימות השכנות של שאר הנקודות. מחיקה חוזרת – { ok, dup: true }.
+async function delPano(db, who, input, now) {
+  const mapId = mapIdOf(input), br = mapId.slice(2);
+  if (typeof input.id !== 'string' || !M.RE.pano.test(input.id)) throw bad('bad-pt', 'מזהה הנקודה לא תקין');
+  brAllowed(who, br);
+  await branchOk(db, who.bizId, br, mapId.charAt(0));
+  const pcol = db.collection('smap/' + mapId + '/pano'), ref = pcol.doc(input.id);
+  return db.runTransaction(async (tx) => {
+    const ps = await tx.get(pcol);
+    const d = ps.docs.find((x) => x.id === input.id);
+    if (!d) throw bad('no-pano', 'הנקודה לא קיימת', 'not-found');
+    if (d.get('del') === 1) return { ok: true, mapId, id: input.id, delAt: d.get('delAt'), dup: true };
+    tx.update(ref, { del: 1, delAt: now, delBy: who.uid, upd: now });
+    const pts = ps.docs.filter((x) => x.id !== input.id && x.get('del') !== 1).map((x) => ({ id: x.id, nb: x.get('nb') }));
+    const ch = M.linkNb(input.id, [], pts);
+    for (const id of Object.keys(ch)) tx.update(pcol.doc(id), { nb: ch[id], upd: now });
+    return { ok: true, mapId, id: input.id, delAt: now };
+  });
+}
+exports.s3DelPano = onCall(T.scoped(async (request) => {
+  const who = await requireStaff(request, { feature: 'store3d' });
+  if (who.role !== 'manager') throw bad('del-mgr', 'מחיקת נקודת 360 – למנהל בלבד', 'permission-denied');
+  return delPano(T.tdb(), { uid: who.uid, bizId: who.bizId, brs: myBranches(who) }, inputObject(request), Date.now());
+}));
+
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_map', { enumerable: false, value: { saveMap, setBranch, putTex, branchOk } });
+Object.defineProperty(exports, '_map', { enumerable: false, value: { saveMap, setBranch, putTex, branchOk, putPano, delPano, myBranches } });

@@ -1233,6 +1233,11 @@ service cloud.firestore {
         allow read: if s3On() && (rMgr() || r3S3m());
         allow create, update, delete: if false;
       }
+      // שלב 18א (15.11.2026): נקודות סיור 360 – קריאה כמו המפה; כתיבה רק דרך השרת (s3PutPano / s3DelPano)
+      match /pano/{pid} {
+        allow read: if s3On() && r3Staff();
+        allow create, update, delete: if false;
+      }
       match /bay/{bayId} {
         allow read: if s3On() && r3Staff();
         allow create: if s3On() && rMgr() && s3BayIds(mapId, bayId)
@@ -2140,6 +2145,11 @@ service cloud.firestore {
         allow create, update, delete: if false;
         match /ver/{vid} {
           allow read: if feat('store3d') && (bMgr() || b3s3m());
+          allow create, update, delete: if false;
+        }
+        // שלב 18א: נקודות סיור 360 – קריאה כמו המפה; כתיבה רק דרך השרת (s3PutPano / s3DelPano)
+        match /pano/{pid} {
+          allow read: if feat('store3d') && bStaff();
           allow create, update, delete: if false;
         }
         match /bay/{bayId} {
