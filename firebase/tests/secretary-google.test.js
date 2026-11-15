@@ -2626,6 +2626,8 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       await sentOrd('thr-cap'); // הטיוטה הזו ניצלה את התקרה
       const { r } = await reply('thr-cap', { reply: 'ok' });
       assert.equal(r.ordRe && r.ordRe.res, 'ordered', JSON.stringify(r));
+      // סבב 1: מכתובת אחרת באותו שרשור – לא פטור
+      assert.equal((await reply('thr-cap', { reply: 'ok' }, { from: 'Other <o@other.example>' })).r.aw, 'cap');
       const n2 = await mail({ subject: 'שאלה אחרי התקרה', text: 'שאלה', from: 'Q <q@q.example>' });
       assert.equal((await work(n2)).aw, 'cap', 'מייל רגיל – עדיין בתקרה');
     });
@@ -2681,6 +2683,9 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === a4.n && /ask/.test(x.note)));
       const a5 = await orderMail(DANA, null, { air: { risk: true } });
       assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === a5.n && /risk/.test(x.note)));
+      // סבב 1: בקשת הנחה בטקסט – רגיש גם בלי סימון המודל
+      const a5b = await orderMail(DANA, null, { mail: { text: 'הזמנה, ואבקש 15% הנחה כמו שסיכמנו' } });
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === a5b.n && /risk/.test(x.note)));
       assert.equal(GO.state.sent.length, s0 + 1);
       // כיבוי – לא נשלח ולא שואלים שוב
       assert.ok((await oa(M1, { act: 'off', custId: 'cmail' })).ok);
@@ -2690,6 +2695,14 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.ok((await sec(M1, { op: 'ordSend', id: a6.n, ver: 1 })).ok);
       l = await oa(M1, { act: 'list' });
       assert.equal(l.r.on.length, 0); assert.equal(l.r.ask.length, 0, 'אחרי כיבוי – לא שואלים שוב');
+      // סבב 1: הפעלה בלי הצעה קודמת – נחסמת (החלטה 6)
+      assert.equal((await oa(M1, { act: 'on', custId: 'cn2' })).reason, 'no-offer');
+      // סבב 1: לקוח שהמנהל קישר (מועמד) כשהשולח כתובת אחרת – אין הצעה לשלוח לבד
+      const nr = await go('Rosa <x@rosa.example>', { bn: 'קפה רוזה' }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      assert.ok((await sec(M1, { op: 'ordEdit', id: nr, ver: 1, ops: [{ k: 'cust', cid: 'cn2' }] })).ok);
+      assert.ok((await sec(M1, { op: 'ordSend', id: nr, ver: 2 })).ok);
+      assert.equal((await oa(M1, { act: 'list' })).r.ask.length, 0, 'כתובת שונה מהכרטיס – אין הצעה');
+      assert.equal((await oa(M1, { act: 'on', custId: 'cn2' })).reason, 'no-offer');
     });
 
     it('שלב ג/7: בקשת שינוי מלקוח מאושר – הגרסה המעודכנת נשלחת לבד בשרשור; לקוח לא מאושר – למנהל', async () => {

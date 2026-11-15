@@ -1028,7 +1028,8 @@ async function mailWorkIn(id, o) {
     if (!G.addrOf(x.rto || x.from)) return fin('skip', 'no-reply-to');
     if (!rep.cap) return fin('skip', 'off');
     const so = await ordThread(db, id, x); // שלב ג/5: תשובה בשרשור של טיוטת הזמנה
-    const cap = so ? { ok: true } : await capTake(db, rep.cap, now); // החלטת המשתמש (15.11): תשובת לקוח להזמנה – בלי תקרת הטיוטות
+    const free = !!(so && ['sent', 'mgr'].includes(so.o.st) && G.addrOf(x.from) && G.addrOf(x.from) === G.addrOf(so.o.to)); // סבב 1: רק תשובת הלקוח עצמו לטיוטה פתוחה
+    const cap = free ? { ok: true } : await capTake(db, rep.cap, now); // החלטת המשתמש (15.11): תשובת לקוח להזמנה – בלי תקרת הטיוטות
     if (!cap.ok) {
       if (cap.first) {
         await db.collection('sec_log').doc().set(glog('', 'auto', 'draftCap', { note: String(rep.cap) }));
@@ -1036,7 +1037,7 @@ async function mailWorkIn(id, o) {
       }
       return fin('cap');
     }
-    took = !so;
+    took = !free;
     const r = await aiDraft(db, x, { now, ai: o.ai, so: so ? so.o : null });
     if (r.saving) { if (took) await capTake(db, rep.cap, now, true).catch(() => {}); took = false; return fin('saving'); }
     let task = '';
@@ -1429,6 +1430,9 @@ async function oaAsk(db, id, o, now) {
   const c = typeof o.custId === 'string' && ID_RE.test(o.custId) ? o.custId : '';
   if (!c) return false;
   const ref = db.doc('sec_cfg/ord_auto');
+  const cs = await db.doc('cust/' + c).get(); // סבב 1: לא מציעים כשהטיוטה נשלחה לכתובת שאינה המייל שבכרטיס
+  const cm = cs.exists && !cs.get('mv') && typeof cs.get('mail') === 'string' ? cs.get('mail').trim().toLowerCase() : '';
+  if (!cm || cm !== G.addrOf(o.to)) return false;
   const name = (await ordState(db, o)).custName;
   const did = await db.runTransaction(async (tx) => {
     const v = oaOf(await tx.get(ref));
@@ -1463,6 +1467,7 @@ async function ordAutoOp(who, db, input, now) {
   await db.runTransaction(async (tx) => {
     const v = oaOf(await tx.get(ref));
     if (act === 'on') {
+      if (!v.on[c] && !v.ask[c] && !v.no[c]) throw pre('no-offer', 'אפשר להפעיל שליחה לבד רק ללקוח שכבר שלחת לו טיוטה ידנית'); // החלטה 6
       if (!v.on[c] && Object.keys(v.on).length >= OA_MAX) throw pre('too-many', 'הגעתם למספר הלקוחות המרבי לשליחה לבד (' + OA_MAX + ')');
       v.on[c] = { at: now, by: who.uid, name }; delete v.ask[c]; delete v.no[c];
     } else { // off / no – לא שולחים לבד ולא שואלים שוב
@@ -1486,10 +1491,17 @@ async function ordAutoTry(db, oid, x, r, now) {
   if (repOf(await db.doc('sec_cfg/mail_rep').get()).held) no.push('held');
   if (r && r.risk) no.push('risk');
   const from = G.addrOf(x.from);
-  if (x.auth !== true || !from || from !== G.addrOf(o.to)) no.push('from');
-  if (o.nBlock || (o.blk || []).length || !(o.lines || []).length || o.lines.some(lineBad)) no.push('ask');
   const cs = await db.doc('cust/' + o.custId).get();
   if (!cs.exists || cs.get('mv')) no.push('cust');
+  // סבב 1: השולח חייב להיות גם המייל שבכרטיס (custId יכול להגיע מבחירת מנהל, גם כשהשולח כתובת אחרת)
+  const cm = cs.exists && typeof cs.get('mail') === 'string' ? cs.get('mail').trim().toLowerCase() : '';
+  if (x.auth !== true || !from || from !== G.addrOf(o.to) || from !== cm || (x.rto && G.addrOf(x.rto) !== from)) no.push('from');
+  if (o.nBlock || (o.blk || []).length || !(o.lines || []).length || o.lines.some(lineBad)) no.push('ask');
+  // סבב 1: אותן בדיקות "רגיש" כמו בשליחה אוטומטית לפי כלל – מילים רגישות (הנחה/החזר/תלונה…), סוג פנייה רגיש, מייל גדול/חתוך, קובץ מצורף, חשוד
+  const fl = Array.isArray(x.flags) ? x.flags : [];
+  if (G.NEVER_RE.test(String(x.subj || '') + '\n' + String(x.text || '')) || (r && W.NEVER_AUTO.includes(r.cls) && r.cls !== 'other')) no.push('risk');
+  if (fl.includes('big') || fl.includes('cut') || fl.includes('sus') || x.st === 'sus') no.push('big');
+  if (hasFile(x)) no.push('file');
   const key = G.sha('ord|' + o.custId).slice(0, 20);
   let lim = null;
   if (!no.length) { lim = await autoTake(db, key, now); if (lim.why) { if (lim.why === 'day') await holdAuto(db, 'day', now); no.push(lim.why); } }
@@ -1500,8 +1512,8 @@ async function ordAutoTry(db, oid, x, r, now) {
     return { no: why };
   };
   if (no.length) return nope(no);
-  const xo = x.gid && oid === inIdOf(x.box, x.gid) ? x : (await db.doc('sec_in/' + oid).get()).data();
   try {
+    const xo = x.gid && oid === inIdOf(x.box, x.gid) ? x : (await db.doc('sec_in/' + oid).get()).data(); // סבב 1: בתוך try – תקלה מחזירה את מקום הלולאה
     if (!xo) throw pre('not-found', 'המייל המקורי לא נמצא');
     await ordSend({ uid: 'auto', bizId: T.scope().bizId }, db, { ver: o.ver }, oid, xo, ref, o, now);
   } catch (e) {
@@ -1515,7 +1527,7 @@ async function ordAutoTry(db, oid, x, r, now) {
   return { sent: true };
 }
 const OA_NO = { st: 'הטיוטה כבר טופלה', held: 'המענה האוטומטי נעצר להיום', risk: 'המייל נראה רגיש (בקשת הנחה, תלונה וכד׳)', from: 'השולח לא אומת', ask: 'יש בטיוטה שורות לבחירה/לבירור, פריט שאזל או פרט חסר',
-  cust: 'כרטיס הלקוח לא נמצא', day: 'הגעתם למספר השליחות האוטומטיות להיום', loop: 'נשלחה ללקוח הזה טיוטה לבד בדקות האחרונות', stale: 'המחירים בקטלוג השתנו – הטיוטה עודכנה', 'out-limit': 'מכסת המיילים היוצאים להיום', 'google-error': 'תקלה ב-Gmail' };
+  cust: 'כרטיס הלקוח לא נמצא', big: 'מייל גדול, חתוך או חשוד', file: 'יש קובץ מצורף', day: 'הגעתם למספר השליחות האוטומטיות להיום', loop: 'נשלחה ללקוח הזה טיוטה לבד בדקות האחרונות', stale: 'המחירים בקטלוג השתנו – הטיוטה עודכנה', 'out-limit': 'מכסת המיילים היוצאים להיום', 'google-error': 'תקלה ב-Gmail' };
 // שמירה עם בדיקת גרסה בטרנזקציה. up – השדות החדשים (FieldValue.delete() למחיקה)
 async function ordSave(db, ref, ver, up, now) {
   await db.runTransaction(async (tx) => {
