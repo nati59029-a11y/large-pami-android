@@ -174,6 +174,8 @@ function parseMsg(m) {
     subj: clean(decodeWords(h.subject || ''), SUBJ_MAX), mid: clean(h['message-id'] || '', 300).replace(/[\r\n\s]/g, ''), t: Number.isFinite(t) && t > 0 ? t : 0,
     labels, unsub: !!h['list-unsubscribe'], size: Number(m.sizeEstimate) || 0, snippet: clean(m.snippet || '', 300), text: b.text, cut: b.cut, files: b.files,
     att: b.att || [], ctype: clean(h['content-type'] || '', 100).toLowerCase(), auth: authOf(h['authentication-results'], addrOf(h.from)),
+    // שלב ב (מענה אוטומטי): כותרות של דיוור / מענה אוטומטי – לזיהוי "מייל מאדם" (humanOf)
+    listId: !!h['list-id'], prec: clean(h.precedence || '', 30).toLowerCase(), autoSub: clean(h['auto-submitted'] || '', 60).toLowerCase(),
   };
 }
 // כותרת בקידוד =?UTF-8?B?...?= / =?UTF-8?Q?...?=
@@ -194,6 +196,99 @@ function kindOf(p) {
 const INSTR_RE = /(^|[\s,.:;!?"'(])(ה?מזכיר[הת]|שלח[יו]?|תשלח[יו]?|העבר[יו]?|תעביר[יו]?|מחק[יו]?|תמחק[יו]?|שלמ[יו]?|תשלמ[יו]?|תזכיר[יו]?|הזכיר[יו]?|תקבע[יו]?|קבע[יו]?|אשר[יו]?|תאשר[יו]?|בטל[יו]?|תבטל[יו]?|תכניס[יו]?|הכניס[יו]?|תעננ?[יו]?|ענ[יו]|תרשמ[יו]?|רשמ[יו]?|תוסיפ[יו]?|הוסיפ[יו]?|forward|send|delete|pay|remind|schedule|approve|transfer|reply)(?=$|[\s,.:;!?"')])/i;
 const isInstr = (s) => INSTR_RE.test(String(s || ''));
 
+// ---------- שלב ב: מענה אוטומטי למיילים (החלטות 14.11) ----------
+// "מייל מאדם" – בקוד, בלי מודל AI. מחזיר '' למייל מאדם, אחרת את הסיבה (נשמרת ב-sec_in.hw). רק למייל מאדם נוצרת טיוטה אוטומטית.
+const NOREPLY_RE = /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?|bounces?[-+.].*|.*[-+.]bounces?|notifications?-?noreply)$/i;
+const OLD_MS = 48 * 3600e3;       // מייל ישן מ-48 שעות – בלי טיוטה אוטומטית ובלי שליחה אוטומטית
+function humanOf(p, o) {
+  const x = o || {};
+  const L = Array.isArray(p && p.labels) ? p.labels : [];
+  if (L.includes('SPAM') || L.includes('TRASH')) return 'spam';
+  if (['CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_SOCIAL', 'CATEGORY_FORUMS'].some((l) => L.includes(l))) return 'cat';
+  if (p.unsub || p.listId) return 'list';
+  if (/^(bulk|list|junk)$/.test(p.prec || '')) return 'bulk';
+  if (p.autoSub && p.autoSub !== 'no') return 'auto';
+  if (!p.from) return 'nofrom';
+  if (NOREPLY_RE.test(p.from.split('@')[0])) return 'noreply';
+  if (x.fromMgr) return 'self';
+  if (x.sus) return 'sus';
+  if (x.hist) return 'hist';
+  // החלטה (ג) 14.11: מייל עם קובץ מצורף כן נחשב "מייל מאדם" – מקבל טיוטה לאישור / משימה עם התווית "יש קובץ מצורף", אבל לעולם לא נשלח לבד (autoBlock: 'file')
+  if (p.t && x.now && x.now - p.t > OLD_MS) return 'old';
+  return '';
+}
+// "אף פעם לא אוטומטי" לפי התוכן (עברית + אנגלית): תלונה, החזר, הנחה / מחיר מיוחד, התחייבות, משפטי, ביטול, חוב / תשלום / חשבונית.
+// התאמה רחבה בכוונה: טעות כאן רק משאירה טיוטה לאישור המנהל
+const NEVER_RE = /(תלונ|מתלונ|לא מרוצ|החזר|זיכוי|הנח[הת]|מחיר מיוחד|הצעת מחיר|תחייב|אחריות|עו"ד|עו״ד|עורך דין|עורכת דין|תביע|משפט|ביטול|לבטל|פיצוי|נזק|חוב|תשלום|לשלם|שילמתי|חשבונית|זעם|מאוכזב|refund|complain|discount|special price|quote|quotation|commit|lawyer|attorney|legal|lawsuit|\bsue\b|cancel|compensat|damage|guarantee|warrant|invoice|payment|debt|chargeback|disappoint)/i;
+// מטריצת "אף פעם" שאפשר לבדוק בלי מסד נתונים. מחזירה את כל הסיבות (ריק = מותר לעבור לבדיקות הבאות: מקור הנתונים, שרשור, לולאה, מכסה)
+function autoBlock(o) {
+  const why = [];
+  const x = o.x || {}, r = o.r || {}, rule = o.rule || {}, fl = Array.isArray(x.flags) ? x.flags : [];
+  if (o.stop) why.push('stop');
+  if (!o.on) why.push('off');
+  if (o.held) why.push('held');
+  if (rule.on === false || rule.auto !== true || rule.autoOff === true) why.push('ruleOff');
+  if (x.hum !== true) why.push('notHuman');
+  if (x.st === 'sus' || fl.includes('sus')) why.push('sus');
+  if (fl.includes('file') || (Array.isArray(x.files) && x.files.length)) why.push('file');
+  if (fl.includes('big') || fl.includes('cut')) why.push('big');
+  if (NEVER_RE.test(String(x.subj || '') + '\n' + String(x.text || ''))) why.push('never');
+  if (r.risk === true || (o.neverCls || []).includes(r.cls)) why.push('risk');
+  if (rule.cls && r.cls !== rule.cls) why.push('cls');
+  if (r.unsure === true || (Array.isArray(r.why) && r.why.length)) why.push('unsure');
+  if (r.stk) why.push('stock');
+  if (!x.t || o.now - x.t > OLD_MS) why.push('old');
+  if (x.st === 'replied' || x.hd === true) why.push('replied');
+  // ליקוי 1 (סבב 1): הנמען של תשובה אוטומטית נלקח מכותרות המייל הנכנס – רק משולח מאומת (DKIM/DMARC, sec_in.auth מ-parseMsg),
+  // ורק כש-Reply-To (אם יש) באותו דומיין כמו From. מייל ישן בלי השדה auth = לא מאומת. שליחה ידנית לא מושפעת
+  if (x.auth !== true) why.push('auth');
+  if (x.rto && domOf(x.rto) !== domOf(x.from)) why.push('rto');
+  return why;
+}
+const domOf = (a) => { const v = addrOf(a); return v ? v.split('@')[1] : ''; };
+// הסבר בעברית לכל סיבה שבגללה תשובה אוטומטית לא נשלחה (sec_draft.an → anL לתצוגה). המייל נשאר טיוטה לאישור המנהל
+const AUTO_WHY = Object.freeze({
+  stop: '"עצור הכל" פעיל', off: 'המענה האוטומטי במייל כבוי', held: 'המענה האוטומטי נעצר אחרי 100 תשובות ביום – צריך להפעיל שוב בהגדרות',
+  ruleOff: 'התשובה המוכנה לא מאושרת לשליחה אוטומטית', notHuman: 'לא מייל מאדם', sus: 'מייל חשוד', file: 'יש קובץ מצורף', big: 'מייל גדול או חתוך',
+  never: 'נושא רגיש (תלונה, החזר, הנחה, תשלום וכו׳)', risk: 'המזכירה זיהתה נושא רגיש', cls: 'סוג הפנייה לא מתאים לתשובה המוכנה', unsure: 'המזכירה לא בטוחה בתשובה',
+  stock: 'התשובה תלויה במלאי', old: 'מייל ישן', replied: 'כבר נענה', auth: 'לא ניתן לאמת שהמייל באמת נשלח מהכתובת שמופיעה בו',
+  rto: 'כתובת "השב אל" שונה מהכתובת של השולח', src: 'חסר נתון חי ב"מידע על העסק"', box: 'תיבת המייל לא מחוברת', to: 'אין כתובת תקינה לתשובה',
+  thread: 'כבר נשלחה תשובה בשרשור הזה', loop: 'כבר נשלחה תשובה אוטומטית לשולח הזה בעשר הדקות האחרונות', day: 'הגענו ל-100 תשובות אוטומטיות היום',
+  thrErr: 'לא ניתן היה לבדוק את השרשור ב-Gmail', order: 'מייל הזמנה – ההזמנה ממתינה לבדיקה שלך',
+  dup: 'כבר טופל', greet: 'בפתיחת התשובה מופיע שם או ביטוי שלא תואם לפונה – כדאי לבדוק לפני שליחה', out: 'הגענו למכסת המיילים היוצאים היום', fail: 'השליחה נכשלה',
+});
+// שלב ג (0ב): תשובה שנשלחה ישירות מ-Gmail (לא דרך המזכירה) – הודעה עם התווית SENT בשרשור, שנשלחה אחרי המייל הנכנס (t). gid – המייל הנכנס עצמו
+function sentAfter(thread, t, gid) {
+  const ms = thread && Array.isArray(thread.messages) ? thread.messages : [];
+  return ms.some((m) => m && m.id !== gid && Array.isArray(m.labelIds) && m.labelIds.includes('SENT') && Number(m.internalDate) > (Number(t) || 0));
+}
+const autoWhyL = (an) => (Array.isArray(an) ? an : []).map((k) => AUTO_WHY[k] || '').filter(Boolean);
+// החלטה (ג): שמות וסוגי הקבצים המצורפים כטקסט לסיווג (בלי התוכן). שם קובץ הוא מידע מצד שלישי – מנוקה ומוגבל
+function fileList(files) {
+  return (Array.isArray(files) ? files : []).filter((f) => typeof f === 'string' && f.trim()).slice(0, 10).map((f) => {
+    const n = taskLine(f, 100), m = /\.([A-Za-z0-9]{1,8})$/.exec(n);
+    return n + ' (סוג: ' + (m ? m[1].toUpperCase() : 'לא ידוע') + ')';
+  });
+}
+// החלטה (ד), עודכנה 14.11 ("עצירה לאישור"): הטקסט לעולם לא משתנה. מילה אחרי הברכה בפתיחה ("שלום יוסי,") שאינה ביטוי ברכה מוכר
+// ואינה חלק משם הפונה → לא שולחים אוטומטית, הטיוטה נשארת לאישור המנהל (סיבה 'greet'). מחזיר { text, hold }
+const GREET_RE = /^(\s*)(שלום|היי|הי|בוקר טוב|ערב טוב|צהריים טובים|hi|hello|hey|dear)([ \t]+)([^\s,!.:;?\d{}]{2,20}(?:[ \t]+[^\s,!.:;?\d{}]{2,20})?)(?=[ \t]*(?:[,!.:;]|\r?\n|$))/i;
+const NOT_NAME = new Set(['רב', 'רבה', 'לך', 'לכם', 'לכן', 'לכולם', 'וברכה', 'וברכות', 'ותודה', 'חברים', 'לקוח', 'לקוחה', 'לקוחות', 'יקר', 'יקרה', 'יקרים', 'שוב', 'וטוב', 'רב לך', 'ולכולן', 'ולכולם', 'לכולן', 'וכל', 'לכל', 'וחג', 'חג', 'שמח', 'ומבורך', 'ושנה',
+  'and', 'welcome', 'back', 'to', 'from', 'folks', 'guys', 'colleagues',
+  'there', 'all', 'everyone', 'sir', 'madam', 'customer', 'friend', 'friends', 'team', 'again']);
+const nameToks = (s) => String(s || '').toLowerCase().replace(/["'`<>()[\]]/g, ' ').split(/\s+/).filter((t) => t.length >= 2);
+function greetFix(text, name) {
+  const t = String(text || '');
+  const m = GREET_RE.exec(t);
+  if (!m) return { text: t, hold: false };
+  const have = nameToks(name);
+  // כל מילה אחרי הברכה חייבת להיות ביטוי ברכה מוכר או חלק משם הפונה; אחרת – לא נוגעים בטקסט ולא שולחים לבד (טיוטה לאישור)
+  const ok = nameToks(m[4]).every((w) => NOT_NAME.has(w) || have.includes(w));
+  return { text: t, hold: !ok };
+}
+// כותרת משימה ממייל: מנוקה ומוגבלת באורך (תוכן המייל הוא מידע ולא הוראה – זה רק טקסט לתצוגה)
+const taskLine = (v, n) => clean(String(v == null ? '' : v), 400).replace(/https?:\/\/\S+/gi, '').replace(/[\r\n\t]+/g, ' ').replace(/[<>{}\[\]`]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
+
 // ---------- מייל יוצא (RFC 2822) – כותרות בלי שורות חדשות (נגד הזרקת כותרות) ----------
 const hdr = (v) => String(v == null ? '' : v).replace(/[\r\n]+/g, ' ').trim();
 const encWord = (s) => (/^[\x20-\x7e]*$/.test(s) ? s : '=?UTF-8?B?' + Buffer.from(s, 'utf8').toString('base64') + '?=');
@@ -202,6 +297,7 @@ function mime(o) {
   if (!to) throw new HttpsError('invalid-argument', 'כתובת הנמען לא תקינה', { reason: 'bad-to' });
   const subj = hdr(o.subj).slice(0, SUBJ_MAX);
   const lines = ['To: ' + to, 'Subject: ' + encWord(subj), 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64'];
+  if (o.auto) lines.push('Auto-Submitted: auto-replied'); // שלב ב: תשובה אוטומטית מסומנת (RFC 3834) – מונע לולאה מול מענה אוטומטי של הצד השני
   const mid = hdr(o.inReplyTo).replace(/\s/g, '');
   if (/^<[^<>\s]{3,300}>$/.test(mid)) lines.push('In-Reply-To: ' + mid, 'References: ' + mid);
   const body = Buffer.from(String(o.text || '').replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
@@ -327,12 +423,14 @@ function client(u, at) {
     watch: async (topic) => (await call('POST', gm + '/watch', { topicName: topic, labelIds: ['INBOX'], labelFilterBehavior: 'include' })).j || {},
     stop: async () => { await call('POST', gm + '/stop', {}); return true; },
     history: async (start, pageToken) => (await call('GET', gm + '/history?' + form(Object.assign({ startHistoryId: String(start), historyTypes: 'messageAdded', labelId: 'INBOX', maxResults: '100' }, pageToken ? { pageToken } : {})), null, [404])),
-    meta: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=Reply-To&metadataHeaders=List-Unsubscribe&metadataHeaders=Content-Type&metadataHeaders=Authentication-Results')).j || {},
+    meta: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=Reply-To&metadataHeaders=List-Unsubscribe&metadataHeaders=Content-Type&metadataHeaders=Authentication-Results&metadataHeaders=List-Id&metadataHeaders=Precedence&metadataHeaders=Auto-Submitted')).j || {},
     // שלב 7: מבנה המייל בלבד (שמות ומזהי הקבצים, בלי תוכן) – למייל גדול שיש בו קבצים מצורפים; והורדת קובץ מצורף אחד
     struct: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=full&fields=' + enc('id,payload(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size)))))'))).j || {},
     att: async (id, attId) => (await call('GET', gm + '/messages/' + enc(id) + '/attachments/' + enc(attId))).j || {},
     full: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=full')).j || {},
     list: async (q, pageToken, max) => (await call('GET', gm + '/messages?' + form(Object.assign({ maxResults: String(max || 500), includeSpamTrash: 'true', q: (q ? q + ' ' : '') + '-in:trash' }, pageToken ? { pageToken } : {})))).j || {},
+    // שלב ג (0ב): השרשור – רק מזהים, תוויות ותאריכים (format=minimal, בלי תוכן)
+    thread: async (id) => (await call('GET', gm + '/threads/' + enc(id) + '?format=minimal')).j || {},
     send: async (raw, threadId) => (await call('POST', gm + '/messages/send', Object.assign({ raw }, threadId ? { threadId } : {}))).j || {},
     trash: async (id) => (await call('POST', gm + '/messages/' + enc(id) + '/trash', {})).j || {},
     calPrimary: async () => (await call('GET', cal)).j || {},
@@ -346,6 +444,6 @@ function client(u, at) {
 module.exports = {
   SC, FORBIDDEN, scopesFor, grantedOk, STATE_TTL, CONNECT_HOUR, MAX_BOX_DEFAULT, MAX_BOX_LIMIT, HOOK_DATA_MAX, RUN_MAX, DAY_IN_MAX, FULL_MAX, TEXT_MAX, SUBJ_MAX, OUT_DAY, CLEAN_MAX,
   COUNT_PAGES, SCAN_TTL, CAL_PAGES, CAL_PUSH_MAX, BIG_OLD, RANGES, AI_PER_MAIL, STATE_RE,
-  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, authOf, bodyOf, attOf, decodeWords, kindOf, isInstr, mime, reSubj, rangeQ, costEstimate,
+  newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, authOf, bodyOf, attOf, decodeWords, kindOf, isInstr, humanOf, NEVER_RE, autoBlock, AUTO_WHY, autoWhyL, sentAfter, fileList, greetFix, domOf, taskLine, OLD_MS, mime, reSubj, rangeQ, costEstimate,
   gToCal, calToG, sameEv, localOf, dayIL, urls, oauthCfg, topicName, TOPIC, exchange, refresh, revoke, client, SEC_GOOGLE_KEY, GOOGLE_CLIENT_SECRET, sv, EMAIL_RE,
 };

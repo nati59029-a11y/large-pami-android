@@ -1038,6 +1038,211 @@ service cloud.firestore {
       }
     }
 
+    // ----- סריקת חנות בתלת מימד – store3d (14.11.2026; חוזה: משימות/2026-11-14_סריקת-חנות-תלת-מימד/תוצרים/0-חוזה-נתונים.md) -----
+    // התוספת כבויה כברירת מחדל בכל עסק, גם בלארג' פעמי (כמו secretary). כבויה = אין גישה לאף אוסף של התוספת (s3br, s3set, smap, sround, srun ועוד).
+    // השרת (Admin SDK, functions/) כותב כל מה שרגיש: מפה וגרסאות (s3SaveMap – גם לעובד עם מתג s3m "שרטוט מפה"), סבבים,
+    // תמונות, תוצאות AI, סיכומים, מונים, ביצועים, משימות תיקון. הלקוח כותב ישירות רק: s3set (מנהל), smap/{mapId}/bay (מנהל),
+    // sround (מנהל), s3appeal (יצירה – עובד בסבב או מנהל; הכרעה – מנהל), s3short (אישור – מנהל). מחיקה (delete) – לאף לקוח.
+    // פונקציות בדיקה משותפות לשני המסלולים (בשורש ובתוך b/{bizId}). "מי" = request.auth.uid; זמן = מילישניות (כמו nowOk).
+    function s3Now(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
+    function s3Uid(v) { return v is string && v.matches('^[A-Za-z0-9_-]{6,128}$'); }
+    function s3Str(v, a, b) { return v is string && v.size() >= a && v.size() <= b; }
+    function s3Int(v, a, b) { return v is int && v >= a && v <= b; }
+    function s3BrRe() { return '^[a-z0-9_]{2,20}$'; }
+    function s3MapRe() { return '^[sw]-[a-z0-9_]{2,20}$'; }
+    function s3RunRe() { return '^([a-z0-9]{6,20}_[0-9]{8}|[a-z0-9]{6,20}_m[0-9]{13}|ad_[A-Za-z0-9-]{16,40})$'; }
+    function s3SlotRe() { return '^f[0-9]{1,4}-[ab]-[0-9]{1,2}_[atb]$'; }
+    // s3set/{brId} – הגדרות מנהל (חוזה 4.2): בדיוק השדות המותרים, משקלות שסכומם 100, show כולל תמיד fix
+    function s3SetOk(d) {
+      return d.keys().hasOnly(['w', 'show', 'recN', 'stype', 'catMode', 'cats', 'sub', 'subU', 'due', 'numDir', 'upd', 'by'])
+        && d.keys().hasAll(['w', 'show', 'recN', 'stype', 'catMode', 'cats', 'sub', 'due', 'numDir', 'upd', 'by'])
+        && d.w is map && d.w.keys().hasOnly(['p', 'h', 'o', 'd']) && d.w.keys().hasAll(['p', 'h', 'o', 'd'])
+        && s3Int(d.w.p, 0, 100) && s3Int(d.w.h, 0, 100) && s3Int(d.w.o, 0, 100) && s3Int(d.w.d, 0, 100)
+        && d.w.p + d.w.h + d.w.o + d.w.d == 100
+        && d.show is list && d.show.size() >= 1 && d.show.size() <= 4
+        && d.show.hasOnly(['fix', 'score', 'recs', 'full']) && 'fix' in d.show
+        && s3Int(d.recN, 0, 10) && s3Str(d.stype, 0, 40) && d.catMode in ['list', 'ai', 'mix']
+        && d.cats is list && d.cats.size() <= 150
+        && d.sub in ['fixed', 'manual', 'any']
+        && (!d.keys().hasAny(['subU']) || d.subU == '' || s3Uid(d.subU))
+        && s3Int(d.due, 1, 14) && d.numDir in ['rtl', 'ltr']
+        && s3Now(d.upd) && d.by == request.auth.uid;
+    }
+    // smap/{mapId}/bay/{bayId} – נתוני מקטע שהמנהל כותב (חוזה 4.5). catSug/catConf – רק השרת. תוכן האיברים ברשימות – השרת מנקה.
+    function s3BayIds(mapId, bayId) {
+      return mapId.matches('^[sw]-[a-z0-9_]{2,20}$') && bayId.matches('^f[0-9]{1,4}-[ab]-[0-9]{1,2}$');
+    }
+    function s3BayOk(d) {
+      return (!d.keys().hasAny(['cat']) || s3Str(d.cat, 0, 30))
+        && (!d.keys().hasAny(['exp']) || (d.exp is list && d.exp.size() <= 60))
+        && (!d.keys().hasAny(['notes']) || (d.notes is list && d.notes.size() <= 20))
+        && s3Now(d.upd) && d.by == request.auth.uid;
+    }
+    // בעדכון (sround, bay) upd חייב להשתנות – כדי שעדכון לא ישתמש שוב בזמן של עדכון קודם.
+    // sround/{rid} – כלל סבב (חוזה 4.7). שדות השרת (uids, next, last, lastRun, err) – לא ברשימות, ולכן חסומים ללקוח.
+    function s3FOk(f) {
+      return f is map && f.keys().hasOnly(['k', 'dow', 'dom', 'n']) && f.keys().hasAll(['k'])
+        && f.k in ['week', 'month', 'days', 'manual']
+        && (!f.keys().hasAny(['dow']) || s3Int(f.dow, 0, 6))
+        && (!f.keys().hasAny(['dom']) || s3Int(f.dom, 1, 28))
+        && (!f.keys().hasAny(['n']) || s3Int(f.n, 1, 90))
+        && (f.k != 'week' || f.keys().hasAny(['dow']))
+        && (f.k != 'month' || f.keys().hasAny(['dom']))
+        && (f.k != 'days' || f.keys().hasAny(['n']));
+    }
+    function s3RoundOk(d) {
+      return d.keys().hasAll(['br', 'map', 'name', 'f', 'asg', 'on', 'upd', 'by'])
+        && d.br is string && d.br.matches(s3BrRe())
+        && d.map is string && (d.map == 's-' + d.br || d.map == 'w-' + d.br)
+        && s3Str(d.name, 1, 40) && s3FOk(d.f)
+        && d.asg is list && d.asg.size() >= 1 && d.asg.size() <= 10
+        && (!d.keys().hasAny(['sub']) || d.sub in ['fixed', 'manual', 'any'])
+        && (!d.keys().hasAny(['subU']) || d.subU == '' || s3Uid(d.subU))
+        && (!d.keys().hasAny(['due']) || s3Int(d.due, 1, 14))
+        && d.on is bool && s3Now(d.upd) && d.by == request.auth.uid;
+    }
+    function s3RoundNew(d) {
+      return d.keys().hasOnly(['br', 'map', 'name', 'f', 'asg', 'sub', 'subU', 'due', 'on', 'upd', 'by']) && s3RoundOk(d);
+    }
+    // שינוי סימון המחיקה (סל מחזור, ע5): (א) מחיקה – del ל-1 עם delAt עכשווי ו-delBy = המשתמש; (ב) ביטול מחיקה – del ל-0,
+    // רק בתוך 30 יום מ-delAt (delAt/delBy נשארים או נמחקים שניהם). בלי שינוי ב-del – אסור לגעת ב-delAt/delBy.
+    function s3DelChg(nw, od) {
+      return !nw.diff(od).affectedKeys().hasAny(['del', 'delAt', 'delBy'])
+        || (od.get('del', 0) != 1 && nw.get('del', 0) is int && nw.get('del', 0) == 1
+            && s3Now(nw.get('delAt', 0)) && nw.get('delBy', '') == request.auth.uid)
+        || (od.get('del', 0) == 1 && nw.get('del', 1) is int && nw.get('del', 1) == 0
+            && od.get('delAt', 0) is int && request.time.toMillis() < od.get('delAt', 0) + 2592000000
+            && (!nw.diff(od).affectedKeys().hasAny(['delAt', 'delBy']) || !nw.keys().hasAny(['delAt', 'delBy'])));
+    }
+    // כלל שנמצא בסל המחזור (del == 1): אין עריכה – רק שחזור (del ל-0, לפי s3DelChg).
+    function s3RoundUpd(nw, od) {
+      return nw.diff(od).affectedKeys().hasOnly(['br', 'map', 'name', 'f', 'asg', 'sub', 'subU', 'due', 'on', 'del', 'delAt', 'delBy', 'upd', 'by'])
+        && nw.diff(od).affectedKeys().hasAny(['upd']) && s3RoundOk(nw) && s3DelChg(nw, od)
+        && (od.get('del', 0) != 1 || (nw.diff(od).affectedKeys().hasOnly(['del', 'delAt', 'delBy', 'upd', 'by'])
+            && nw.diff(od).affectedKeys().hasAny(['del'])));
+    }
+    // s3appeal/{aid} – ערעור (חוזה 4.13): מזהה = run__slot__ik (ערעור אחד לבעיה), מצב התחלתי open
+    function s3ApNew(d, aid) {
+      return d.keys().hasOnly(['run', 'slot', 'ik', 'by', 'txt', 'at', 'st'])
+        && d.keys().hasAll(['run', 'slot', 'ik', 'by', 'txt', 'at', 'st'])
+        && d.run is string && d.run.matches(s3RunRe())
+        && d.slot is string && d.slot.matches(s3SlotRe())
+        && d.ik is string && d.ik.matches('^([0-9]{1,2}|all)$')
+        && d.by == request.auth.uid && s3Now(d.at) && d.st == 'open' && s3Str(d.txt, 1, 300)
+        && aid == d.run + '__' + d.slot + '__' + d.ik;
+    }
+    function s3ApDec(nw, od) {
+      return nw.diff(od).affectedKeys().hasOnly(['st', 'dec', 'decBy', 'decAt', 'note'])
+        && od.get('st', '') == 'open' && nw.st in ['acc', 'rej']
+        && nw.get('decBy', '') == request.auth.uid && s3Now(nw.get('decAt', 0))
+        && (!nw.keys().hasAny(['dec']) || s3Str(nw.dec, 0, 300))
+        && (!nw.keys().hasAny(['note']) || nw.note is bool);
+    }
+    // s3short/{runId} – אישור רשימת חוסרים (חוזה 4.14). אין שליחה לספק. החלטה (ok/no) ניתנת פעם אחת – רק מ-draft.
+    function s3ShOk(nw, od) {
+      return nw.diff(od).affectedKeys().hasOnly(['st', 'drop', 'okBy', 'okAt'])
+        && od.get('st', 'draft') == 'draft' && nw.st in ['ok', 'no']
+        && (!nw.keys().hasAny(['drop']) || (nw.drop is list && nw.drop.size() <= 200))
+        && nw.get('okBy', '') == request.auth.uid && s3Now(nw.get('okAt', 0));
+    }
+
+    // מסלול השורש – רק ללארג' פעמי במצב legacy, כמו sOn() של המזכירה: b/largpeami קיים, dataRoot legacy, פעיל, ו-features.store3d.
+    function s3On() { return exists(/databases/$(database)/documents/b/largpeami) && get(/databases/$(database)/documents/b/largpeami).data.get('dataRoot', '') == 'legacy' && get(/databases/$(database)/documents/b/largpeami).data.get('status', '') == 'active' && get(/databases/$(database)/documents/b/largpeami).data.get('features', {}).get('store3d', false) == true; }
+    // צוות = מנהל / מנהל־על / עובד פעיל. s3m = עובד פעיל עם perms.s3m == true (בלי perms = כבוי). הקריאה ל-staff/{uid} זהה לזו של isActiveEmployee.
+    function r3Staff() { return rMgr() || isActiveEmployee(); }
+    function r3S3m() {
+      return isActiveEmployee() && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('perms', {}).get('s3m', false) == true;
+    }
+    match /s3br/{brId} {
+      allow read: if s3On() && r3Staff();
+      allow create, update, delete: if false;
+    }
+    match /s3set/{brId} {
+      allow read: if s3On() && r3Staff();
+      allow create, update: if s3On() && rMgr() && brId.matches(s3BrRe()) && s3SetOk(request.resource.data);
+      allow delete: if false;
+    }
+    match /smap/{mapId} {
+      allow read: if s3On() && r3Staff();
+      allow create, update, delete: if false;
+      match /ver/{vid} {
+        allow read: if s3On() && (rMgr() || r3S3m());
+        allow create, update, delete: if false;
+      }
+      match /bay/{bayId} {
+        allow read: if s3On() && r3Staff();
+        allow create: if s3On() && rMgr() && s3BayIds(mapId, bayId)
+          && request.resource.data.keys().hasOnly(['cat', 'exp', 'notes', 'upd', 'by']) && s3BayOk(request.resource.data);
+        allow update: if s3On() && rMgr() && s3BayIds(mapId, bayId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cat', 'exp', 'notes', 'upd', 'by'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasAny(['upd']) && s3BayOk(request.resource.data);
+        allow delete: if false;
+      }
+    }
+    match /s3draft/{id} {
+      allow read: if s3On() && (rMgr() || r3S3m() || (isActiveEmployee() && resource.data.get('by', '') == request.auth.uid));
+      allow create, update, delete: if false;
+    }
+    match /sround/{rid} {
+      allow read: if s3On() && (rMgr() || (isActiveEmployee() && request.auth.uid in resource.data.get('uids', [])));
+      allow create: if s3On() && rMgr() && rid.matches('^[a-z0-9]{6,20}$') && s3RoundNew(request.resource.data);
+      allow update: if s3On() && rMgr() && s3RoundUpd(request.resource.data, resource.data);
+      allow delete: if false;
+    }
+    // סבב: מנהל בלבד. עובד – רק דרך הפונקציה s3View (חוזה 4.21). ph (התמונות על המדפים) – כל הצוות; ai – מנהל בלבד.
+    match /srun/{runId} {
+      allow read: if s3On() && rMgr();
+      allow create, update, delete: if false;
+      match /ph/{slot} {
+        allow read: if s3On() && r3Staff();
+        allow create, update, delete: if false;
+      }
+      match /ai/{slot} {
+        allow read: if s3On() && rMgr();
+        allow create, update, delete: if false;
+      }
+    }
+    match /s3sum/{mapId} {
+      allow read: if s3On() && r3Staff();
+      allow create, update, delete: if false;
+    }
+    match /s3fix/{id} {
+      allow read: if s3On() && (rMgr() || (isActiveEmployee() && resource.data.get('u', '') == request.auth.uid));
+      allow create, update, delete: if false;
+    }
+    match /s3appeal/{aid} {
+      allow read: if s3On() && (rMgr() || (isActiveEmployee() && resource.data.get('by', '') == request.auth.uid));
+      allow create: if s3On() && s3ApNew(request.resource.data, aid)
+        && exists(/databases/$(database)/documents/srun/$(request.resource.data.run))
+        && (rMgr() || (isActiveEmployee()
+            && request.auth.uid in get(/databases/$(database)/documents/srun/$(request.resource.data.run)).data.get('uids', [])));
+      allow update: if s3On() && rMgr() && s3ApDec(request.resource.data, resource.data);
+      allow delete: if false;
+    }
+    match /s3short/{runId} {
+      allow read: if s3On() && rMgr();
+      allow update: if s3On() && rMgr() && s3ShOk(request.resource.data, resource.data);
+      allow create, delete: if false;
+    }
+    match /s3use/{key} {
+      allow read: if s3On() && rMgr();
+      allow create, update, delete: if false;
+    }
+    // ביצועי עובד: לפי ה-uid שבנתיב (חוזה 4.16). אין collectionGroup.
+    match /s3perf/{uid}/m/{month} {
+      // get – עם בדיקת מזהה החודש; list (שליפת הרשימה של עובד אחד) – בלי, כי בשליפה אין מזהה מסמך לבדוק
+      allow get: if s3On() && month.matches('^[0-9]{4}-[0-9]{2}$') && (rMgr() || (isSelf(uid) && isActiveEmployee()));
+      allow list: if s3On() && (rMgr() || (isSelf(uid) && isActiveEmployee()));
+      allow create, update, delete: if false;
+    }
+    // יומן מניעת כפילות ויומן התראות – רק השרת
+    match /s3qid/{id} {
+      allow read, create, update, delete: if false;
+    }
+    match /s3ntf/{id} {
+      allow read, create, update, delete: if false;
+    }
+
     // users: שיוך המשתמש לעסק (bizId, role). המשתמש קורא רק את שלו. כתיבה – רק השרת.
     match /users/{userId} {
       allow get: if isSelf(userId);
@@ -1822,6 +2027,95 @@ service cloud.firestore {
         match /n/{id} {
           allow read, create, update, delete: if false;
         }
+      }
+
+      // ----- store3d בתוך העסק (14.11.2026): אותם אוספים ותנאים כמו בשורש (הבדיקות המשותפות s3* מוגדרות שם), -----
+      // עם התפקידים של העסק. "צוות" = bStaff() + feat('store3d'). s3m = עובד פעיל עם perms.s3m == true (pv – בלי perms = כבוי).
+      function b3s3m() { return bEmp() && pv('s3m') == true; }
+      match /s3br/{brId} {
+        allow read: if feat('store3d') && bStaff();
+        allow create, update, delete: if false;
+      }
+      match /s3set/{brId} {
+        allow read: if feat('store3d') && bStaff();
+        allow create, update: if feat('store3d') && bMgr() && brId.matches(s3BrRe()) && s3SetOk(request.resource.data);
+        allow delete: if false;
+      }
+      match /smap/{mapId} {
+        allow read: if feat('store3d') && bStaff();
+        allow create, update, delete: if false;
+        match /ver/{vid} {
+          allow read: if feat('store3d') && (bMgr() || b3s3m());
+          allow create, update, delete: if false;
+        }
+        match /bay/{bayId} {
+          allow read: if feat('store3d') && bStaff();
+          allow create: if feat('store3d') && bMgr() && s3BayIds(mapId, bayId)
+            && request.resource.data.keys().hasOnly(['cat', 'exp', 'notes', 'upd', 'by']) && s3BayOk(request.resource.data);
+          allow update: if feat('store3d') && bMgr() && s3BayIds(mapId, bayId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cat', 'exp', 'notes', 'upd', 'by'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasAny(['upd']) && s3BayOk(request.resource.data);
+          allow delete: if false;
+        }
+      }
+      match /s3draft/{id} {
+        allow read: if feat('store3d') && (bMgr() || b3s3m() || (bEmp() && resource.data.get('by', '') == request.auth.uid));
+        allow create, update, delete: if false;
+      }
+      match /sround/{rid} {
+        allow read: if feat('store3d') && (bMgr() || (bEmp() && request.auth.uid in resource.data.get('uids', [])));
+        allow create: if feat('store3d') && bMgr() && rid.matches('^[a-z0-9]{6,20}$') && s3RoundNew(request.resource.data);
+        allow update: if feat('store3d') && bMgr() && s3RoundUpd(request.resource.data, resource.data);
+        allow delete: if false;
+      }
+      match /srun/{runId} {
+        allow read: if feat('store3d') && bMgr();
+        allow create, update, delete: if false;
+        match /ph/{slot} {
+          allow read: if feat('store3d') && bStaff();
+          allow create, update, delete: if false;
+        }
+        match /ai/{slot} {
+          allow read: if feat('store3d') && bMgr();
+          allow create, update, delete: if false;
+        }
+      }
+      match /s3sum/{mapId} {
+        allow read: if feat('store3d') && bStaff();
+        allow create, update, delete: if false;
+      }
+      match /s3fix/{id} {
+        allow read: if feat('store3d') && (bMgr() || (bEmp() && resource.data.get('u', '') == request.auth.uid));
+        allow create, update, delete: if false;
+      }
+      match /s3appeal/{aid} {
+        allow read: if feat('store3d') && (bMgr() || (bEmp() && resource.data.get('by', '') == request.auth.uid));
+        allow create: if feat('store3d') && s3ApNew(request.resource.data, aid)
+          && exists(/databases/$(database)/documents/b/$(bizId)/srun/$(request.resource.data.run))
+          && (bMgr() || (bEmp()
+              && request.auth.uid in get(/databases/$(database)/documents/b/$(bizId)/srun/$(request.resource.data.run)).data.get('uids', [])));
+        allow update: if feat('store3d') && bMgr() && s3ApDec(request.resource.data, resource.data);
+        allow delete: if false;
+      }
+      match /s3short/{runId} {
+        allow read: if feat('store3d') && bMgr();
+        allow update: if feat('store3d') && bMgr() && s3ShOk(request.resource.data, resource.data);
+        allow create, delete: if false;
+      }
+      match /s3use/{key} {
+        allow read: if feat('store3d') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /s3perf/{uid}/m/{month} {
+        allow get: if feat('store3d') && month.matches('^[0-9]{4}-[0-9]{2}$') && (bMgr() || (isSelf(uid) && bEmp()));
+        allow list: if feat('store3d') && (bMgr() || (isSelf(uid) && bEmp()));
+        allow create, update, delete: if false;
+      }
+      match /s3qid/{id} {
+        allow read, create, update, delete: if false;
+      }
+      match /s3ntf/{id} {
+        allow read, create, update, delete: if false;
       }
 
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')

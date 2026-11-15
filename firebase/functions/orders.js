@@ -1016,7 +1016,13 @@ async function createOrder(request) {
   const custId = input.custId == null || input.custId === '' ? '' : idOf(input.custId, 'לקוח');
   const disc = discIn(input.disc);
   if (input.cell !== undefined) needCell(w);
-  const db = T.tdb();
+  return createCore(T.tdb(), w, { reqId, br, cust, raw, note, custId, input, disc });
+}
+// 15.11.2026 (המזכירה, שלב ג/6): גוף הטרנזקציה של createOrder – בלי בדיקת הרשאות ובלי ניקוי קלט (הקורא אחראי לשניהם).
+// w = היוצר: { uid, name, branches, activeBr, mine, biz? } (by/byName בהזמנה). p = { reqId, br, cust, raw, note, custId, input, src?, sec? }.
+// לא נחשף כ-callable/HTTP – רק דרך _core (כמו saveCore ב-customers.js). createOrder עצמה לא השתנתה: src:'staff', בלי sec.
+async function createCore(db, w, p) {
+  const { reqId, br, cust, raw, note, custId, input, disc } = p;
   const ref = db.doc('ord/o' + reqId);
   const fh = await freeHits(db, w, raw, custId, null);
   const seq = db.doc('ordcfg/seq');
@@ -1048,8 +1054,9 @@ async function createOrder(request) {
     const now = Date.now();
     const warn = [];
     applyMoves(tx, db, w, prods, moves(br, items), { ord: ref.id, no }, warn, reqId);
-    const doc = Object.assign({ no, src: 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now }, { vm: pc.vm, vr: pc.vat }, sums(total, pc.vm, pc.vat, disc));
+    const doc = Object.assign({ no, src: p.src || 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now }, { vm: pc.vm, vr: pc.vat }, sums(total, pc.vm, pc.vat, disc));
     if (disc) doc.disc = disc;
+    if (p.sec) doc.sec = p.sec;
     if (note) doc.note = note;
     if (custId) doc.custId = custId;
     if (cell && cell.n + Object.keys(cell).length > 2) doc.cell = cell;
@@ -2201,4 +2208,4 @@ const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכנ
 const AIF = ['ordParse']; // 14.11.2026: זיהוי חכם של רשימת הזמנה – אותו מפתח Gemini של המזכירה (sec-ai.js)
 const ARF = ['setOrderStatus', 'markOrderPaid']; // 15.11.2026 (שלב 4): מפיקות חשבונית/קבלה ושולחות ללקוח (PDF + ווטסאפ/מייל)
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : ARF.includes(k) ? { secrets: AR_SEC, timeoutSeconds: 120, memory: '512MiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin } });

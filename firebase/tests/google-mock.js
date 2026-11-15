@@ -36,6 +36,8 @@ function addMail(email, o) {
   const headers = [{ name: 'From', value: o.from || 'Someone <someone@example.invalid>' }, { name: 'Subject', value: o.subject || '' }, { name: 'Message-ID', value: '<' + id + '@mail.example.invalid>' }];
   if (o.unsub) headers.push({ name: 'List-Unsubscribe', value: '<mailto:u@example.invalid>' });
   if (o.replyTo) headers.push({ name: 'Reply-To', value: o.replyTo });
+  for (const h of o.headers || []) headers.push(h); // שלב ב: כותרות נוספות (List-Id, Precedence, Auto-Submitted)
+  const thr = o.thread || '';
   const parts = [];
   if (o.text != null) parts.push({ mimeType: 'text/plain', body: { data: b64u(Buffer.from(o.text, 'utf8')) } });
   if (o.html != null) parts.push({ mimeType: 'text/html', body: { data: b64u(Buffer.from(o.html, 'utf8')) } });
@@ -48,9 +50,15 @@ function addMail(email, o) {
   });
   if ((o.files || []).some((f) => typeof f !== 'string')) headers.push({ name: 'Content-Type', value: 'multipart/mixed; boundary="x"' });
   const labels = o.labels || ['INBOX', 'UNREAD'];
-  b.msgs[id] = { id, threadId: 't' + id, labelIds: labels, snippet: String(o.text || '').slice(0, 100), sizeEstimate: o.size || 2000, internalDate: String(o.date || Date.now()), payload: { mimeType: 'multipart/alternative', headers, parts } };
+  b.msgs[id] = { id, threadId: thr || 't' + id, labelIds: labels, snippet: String(o.text || '').slice(0, 100), sizeEstimate: o.size || 2000, internalDate: String(o.date || Date.now()), payload: { mimeType: 'multipart/alternative', headers, parts } };
   b.hist++;
-  b.history.push({ id: String(b.hist), messagesAdded: [{ message: { id, threadId: 't' + id, labelIds: labels } }] });
+  b.history.push({ id: String(b.hist), messagesAdded: [{ message: { id, threadId: thr || 't' + id, labelIds: labels } }] });
+  return id;
+}
+// שלב ג (0ב): תשובה שנשלחה ישירות מ-Gmail (תווית SENT) בשרשור – בלי רישום בהיסטוריה (לא נקלטת כמייל נכנס)
+function addSent(email, thread, date) {
+  const id = 'm' + (++state.n).toString(16).padStart(6, '0');
+  box(email).msgs[id] = { id, threadId: thread, labelIds: ['SENT'], snippet: '', sizeEstimate: 500, internalDate: String(date || Date.now()), payload: { mimeType: 'text/plain', headers: [] } };
   return id;
 }
 // התראת Pub/Sub כמו ש-Gmail שולחת (base64 של JSON)
@@ -168,6 +176,12 @@ function handle(req, res, raw) {
       state.attGets.push(mm[2]);
       return json(200, { size: state.atts[mm[2]].length, data: b64u(state.atts[mm[2]]) });
     }
+    mm = /^threads\/([A-Za-z0-9_-]+)$/.exec(rest);
+    if (req.method === 'GET' && mm) { // שלב ג (0ב): שרשור (format=minimal – מזהים, תוויות ותאריך בלבד)
+      const ms = Object.values(b.msgs).filter((x) => x.threadId === mm[1]);
+      if (!ms.length) return json(404, { error: { code: 404 } });
+      return json(200, { id: mm[1], messages: ms.map((x) => ({ id: x.id, threadId: x.threadId, labelIds: x.labelIds, internalDate: x.internalDate })) });
+    }
     mm = /^messages\/([A-Za-z0-9_-]+)$/.exec(rest);
     if (req.method === 'GET' && mm) {
       const x = b.msgs[mm[1]];
@@ -214,4 +228,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { start, stop, reset, get state() { return state; }, code, addMail, note, box, cal, calAdd, calEdit, calCancel, PORT };
+module.exports = { start, stop, reset, get state() { return state; }, code, addMail, addSent, note, box, cal, calAdd, calEdit, calCancel, PORT };

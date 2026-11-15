@@ -62,7 +62,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal']); // sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn']); // sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -118,7 +118,8 @@ async function gate(request, opts) {
   const brLimited = !who.superadmin && Array.isArray(adm.get('br'));
   // מידע רגיש (10.8): המתג העסקי (ניתוח עובדים ומידע רגיש) + הרשאה אישית של המנהל + בלי הגבלת סניפים
   const sensOn = cfg.emp === true && cfg.sens[who.uid] === true && !brLimited;
-  return { who, cfg, me, consented, db, brLimited, sensOn };
+  const brs = brLimited ? adm.get('br').filter((b) => typeof b === 'string') : null; // שלב 13ב (סריקת חנות): הסניפים המותרים
+  return { who, cfg, me, consented, db, brLimited, sensOn, brs };
 }
 
 // secState: מה האפליקציה צריכה כדי להציג כפתור, כרטיס, הסכמה ואשף. לא דורש הסכמה (כדי להציג את מסך ההסכמה).
@@ -383,7 +384,7 @@ const CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g;
 // secChat({ text, deep?, fin? }) – צ'אט עם כלים. הכלים נקבעים כאן לפי ערוץ (app) והרשאות – לא לפי בקשת המודל (5.5)
 async function secChat(request) {
   const input = inputObject(request);
-  const { who, cfg, me, db, brLimited, sensOn } = await gate(request, { consent: true });
+  const { who, cfg, me, db, brLimited, sensOn, brs } = await gate(request, { consent: true });
   if (typeof input.text !== 'string') throw bad('bad-text', 'כתבו שאלה');
   if (input.text.length > CHAT_MAX) throw bad('too-long', 'השאלה ארוכה מדי (עד ' + CHAT_MAX + ' תווים)');
   const text = input.text.replace(CTRL, '').trim();
@@ -413,12 +414,19 @@ async function secChat(request) {
   const cards = []; // שלב 3: כרטיסי אישור (עובדה / אירוע) שהכלים propose* יצרו
   let reply = null, mode = 'ok', mt = null, usage = { in: 0, out: 0 }, sent = 0, denied = [], offered = [];
   let bank = null, bankCond = [];
+  let s3 = null; // שלב 13ב: סיכום סבבי סריקת החנות שנכנס להקשר (ומשמש מקור לבדיקת המספרים)
   if (!pol.sensitive && !deep) {
     // בנק תשובות (3.5): לפני כל פנייה למודל. התאמה בלי תנאים = התשובה השמורה, בלי AI ובלי עלות (נספר ב-sec_usage.bank).
     // "חשבי לעומק" – תמיד למודל. כלל עם תנאים – עובר למודל כמידע (עד 40)
     const rs = await db.collection('sec_rules').limit(SK.RULES_MAX).get();
     const m = SK.bankMatch(text, rs.docs.map((d) => Object.assign({ id: d.id }, d.data())));
     bank = m.hit; bankCond = m.cond;
+    // שלב ב (מייל): כלל עם נתון חי ({{hours}}) – ממולא מ"מידע על העסק"; חסר נתון – כאילו אין התאמה (עובר למודל)
+    if (bank && SK.hasTpl(bank.rule.a)) {
+      const fs = await db.collection('sec_facts').limit(SK.FACTS_MAX + 10).get();
+      const t = SK.fillTpl(bank.rule.a, SK.factMap(fs.docs, SK.dayOf(Date.now())));
+      bank = t ? { rule: Object.assign({}, bank.rule, { a: t }), q: bank.q } : null;
+    }
   }
   if (pol.sensitive) {
     // שאלה שמבקשת מסקנה לפי מצב בריאותי/משפחתי (6.3 כלל 3): תשובה קבועה, בלי מודל ובלי עלות
@@ -457,7 +465,9 @@ async function secChat(request) {
     turns.push({ role: 'u', text });
     const finNote = brLimited ? 'למנהל הזה יש הגבלת סניפים, ולכן אין לו בצ\'אט נתוני כספים ונתוני העסק. אם שואלים על כספים, משימות, קופה או הזמנות – עני בנימוס: "' + ST.TXT.brLimited + '"' : fin ? (finFrom === 'device' ? 'מהמכשיר של המנהל, נכון ל-' + ST.fmtAt(fin.at) : 'מהמראה בענן, נכון ל-' + ST.fmtAt(mirrorAt) + (stale ? ' (ישן מ-3 ימים – אמרי זאת)' : '')) : (!cfg.mirror ? 'המראה כבוי ואין נתונים מהמכשיר' : 'אין נתוני כספים');
     const bankNote = bankCond.length ? JSON.stringify(bankCond.map((r) => ({ q: r.q, a: r.a, cond: r.cond }))).slice(0, 12000) : '';
-    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote });
+    // שלב 13ב: סיכום סבבי סריקת החנות (רק כשהתוספת פעילה; מנהל עם הגבלת סניפים – רק הסניפים שלו). כשל – בלי הסיכום, השיחה ממשיכה
+    s3 = await require('./store3d-extra')._x.secBrief(db, who, brs, now).catch((e) => { logger.warn('secChat: store3d brief failed', { code: e && e.code }); return null; });
+    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote }) + (s3 ? '\n' + s3.text : '');
     let final = null, refused = false;
     try {
       for (let round = 0; round < MAX_ROUNDS && final === null && !refused; round++) {
@@ -496,7 +506,9 @@ async function secChat(request) {
   let srcs = [], nums = [], unverified = [];
   if (mode === 'ok') {
     const pp = ST.applyPolicy(reply, pol, results);
-    const v = ST.verify(pp.text, results, text);
+    // שלב 13ב: מספרים מסיכום הסריקה מקבלים מקור (אחרון – תוצאות הכלים קודמות)
+    const pool = s3 ? results.concat([{ name: 'store3d', data: { text: s3.text }, src: { k: 'store3d', l: 'סיכום סבבי סריקת החנות · נתוני הענן', at: s3.at, atText: ST.fmtAt(s3.at), s: '' } }]) : results;
+    const v = ST.verify(pp.text, pool, text);
     srcs = v.srcs; nums = v.nums; unverified = v.unverified;
     // שלב 3: תשובה מתוך "מידע על העסק", מידע רגיש או יומן – המקור מוצג גם כשאין בה מספרים
     for (const r of results) if (['getBusinessFacts', 'getSensitiveInfo', 'getCalendar'].includes(r.name) && !r.data.error && !srcs.some((x) => x.k === r.src.k && x.l === r.src.l)) srcs.push(r.src);
