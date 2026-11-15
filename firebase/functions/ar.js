@@ -1007,7 +1007,8 @@ async function arMonthly(request) {
 //                 { get:true } – ההגדרות וסיכומי 7 הימים האחרונים (arrem/sum_*), כי לאוספים האלה אין קריאה מהאפליקציה.
 // המנוע עצמו – ar-remind.js (arRemind, מתוזמנת).
 // =====================================================================================
-const LTN = { inv: 'חשבונית מס', ir: 'חשבונית מס קבלה', rc: 'קבלה', cr: 'זיכוי' };
+const LTN = { inv: 'חשבונית מס', ir: 'חשבונית מס קבלה', rc: 'קבלה', cr: 'זיכוי', ob: 'יתרת פתיחה (מיובא)', old: 'מסמך מיובא' };
+const LXN = { inv: 'חשבונית (מיובא)', rc: 'קבלה (מיובא)', cr: 'זיכוי (מיובא)' }; // שלב 6: old לפי הסוג המקורי (ot)
 const agS = (a) => (a ? ag2(a) : '');
 // PDF של כרטסת / יתרה פתוחה. L = מסמכי הלקוח (ardoc). opts: { from, to, open }
 async function stmtBuild(db, w, cfg, c, L, opts) {
@@ -1018,15 +1019,16 @@ async function stmtBuild(db, w, cfg, c, L, opts) {
   const draft = L.some((x) => x.draft);
   let doc;
   if (o.open) {
-    const inv = L.filter((x) => x.t === 'inv' && !x.void && x.open > 0).sort((a, b) => String(a.dueX || a.due).localeCompare(String(b.dueX || b.due)) || a.no - b.no);
+    // שלב 6: גם חוב מיובא (ob/old)
+    const inv = L.filter((x) => ARD.isDr(x) && !x.void && x.open > 0).sort((a, b) => String(a.dueX || a.due).localeCompare(String(b.dueX || b.due)) || a.no - b.no);
     const sum = inv.reduce((s, x) => s + x.open, 0);
     doc = { t: 'st', d, draft, title: 'פירוט יתרה פתוחה', biz, cust,
-      table: { head: ['תאריך', 'חשבונית', 'לתשלום עד', 'סכום', 'יתרה לתשלום'], rows: inv.map((x) => [shDate(x.d), String(x.no), shDate(x.dueX || x.due), ag2(x.gross), ag2(x.open)]), num: [3, 4] },
+      table: { head: ['תאריך', 'חשבונית', 'לתשלום עד', 'סכום', 'יתרה לתשלום'], rows: inv.map((x) => [shDate(x.d), x.t === 'ob' ? 'יתרת פתיחה' : String(x.no), shDate(x.dueX || x.due), ag2(x.gross), ag2(x.open)]), num: [3, 4] },
       sums: [['סה״כ לתשלום', sum / 100]].concat(ARD.arOf(c).cr > 0 ? [['יתרת זכות (תקוזז)', ARD.arOf(c).cr / 100]] : []), note: o.note || '' };
     return { buf: await PDF.render(doc), doc, sum, n: inv.length, name: 'פירוט יתרה.pdf' };
   }
   const lg = AC.ledger(L, o.from, o.to);
-  const rows = (o.from ? [[shDate(o.from), 'יתרת פתיחה', '', '', ag2(lg.open)]] : []).concat(lg.rows.map((r) => [shDate(r.d), `${LTN[r.t] || ''} ${r.no}`, agS(r.dr), agS(r.cr), ag2(r.bal)]));
+  const rows = (o.from ? [[shDate(o.from), 'יתרת פתיחה', '', '', ag2(lg.open)]] : []).concat(lg.rows.map((r) => [shDate(r.d), `${(r.t === 'old' && LXN[r.ot]) || LTN[r.t] || ''} ${r.no || ''}`.trim(), agS(r.dr), agS(r.cr), ag2(r.bal)]));
   doc = { t: 'st', d, draft, title: 'כרטסת לקוח' + (o.from || o.to ? ` ${shDate(o.from) || '…'} – ${shDate(o.to) || shDate(d)}` : ''), biz, cust,
     table: { head: ['תאריך', 'מסמך', 'חובה', 'זכות', 'יתרה'], rows, num: [2, 3, 4] },
     sums: [['סה״כ חובה', lg.dr / 100], ['סה״כ זכות', lg.cr / 100], ['יתרה לסוף התקופה', lg.end / 100]],

@@ -165,13 +165,15 @@ function remStages(due, d, today, rc, isBiz) {
 }
 
 // כרטסת (104): שורות חובה / זכות ויתרה מצטברת ממסמכי הלקוח (ardoc), באגורות – אותו חישוב כמו cust.ar.bal (lib/ar-doc.js):
-// חובה: חשבונית מס, חשבונית מס קבלה, החזר כסף בזיכוי (rf). זכות: קבלה שלא בוטלה, חשבונית מס קבלה, זיכוי.
+// חובה: חשבונית מס, חשבונית מס קבלה, החזר כסף בזיכוי (rf). זכות: קבלה שלא בוטלה, חשבונית מס קבלה, זיכוי. מיובא (ob/old, שלב 6) – לפי k.
 // from / to (YYYY-MM-DD, רשות): השורות שבטווח; open = היתרה לפני from. bal = היתרה אחרי כל המסמכים (בלי קשר לטווח).
 function ledger(docs, from, to) {
-  const L = (Array.isArray(docs) ? docs : []).filter((x) => x && ['inv', 'ir', 'rc', 'cr'].includes(x.t) && Number.isInteger(x.gross) && !(x.t === 'rc' && x.void))
-    .map((x) => ({ id: x.id || '', t: x.t, no: x.no, d: String(x.d || ''), at: isNum(x.at) ? x.at : 0,
-      dr: x.t === 'inv' || x.t === 'ir' ? x.gross : x.t === 'cr' && x.rf && Number.isInteger(x.rf.amt) ? x.rf.amt : 0,
-      cr: x.t === 'inv' ? 0 : x.gross }))
+  // שלב 6: מסמך מיובא (ob יתרת פתיחה / old מסמך ישן) – חובה או זכות לפי k; מבוטל (ביטול קבוצה) לא נספר – כמו cust.ar.bal
+  const imp = (x) => x.t === 'ob' || x.t === 'old';
+  const L = (Array.isArray(docs) ? docs : []).filter((x) => x && (['inv', 'ir', 'rc', 'cr'].includes(x.t) || (imp(x) && !x.void)) && Number.isInteger(x.gross) && !(x.t === 'rc' && x.void))
+    .map((x) => Object.assign({ id: x.id || '', t: x.t, no: x.no, d: String(x.d || ''), at: isNum(x.at) ? x.at : 0,
+      dr: imp(x) ? (x.k === 'dr' ? x.gross : 0) : x.t === 'inv' || x.t === 'ir' ? x.gross : x.t === 'cr' && x.rf && Number.isInteger(x.rf.amt) ? x.rf.amt : 0,
+      cr: imp(x) ? (x.k === 'cr' ? x.gross : 0) : x.t === 'inv' ? 0 : x.gross }, x.ot ? { ot: x.ot } : {}))
     .sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.at - b.at || (a.no || 0) - (b.no || 0)));
   let bal = 0, open = 0, dr = 0, cr = 0;
   const rows = [];

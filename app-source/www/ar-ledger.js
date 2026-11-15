@@ -19,7 +19,9 @@ const err=e=>toast(e&&e.message||'הפעולה נכשלה');
 const rid=()=>{const a=new Uint8Array(12);crypto.getRandomValues(a);return 'r'+[...a].map(x=>x.toString(36).padStart(2,'0')).join('').slice(0,22)};
 const ag=a=>ils((a||0)/100);
 const dd=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d||''));return m?`${m[3]}/${m[2]}/${m[1].slice(2)}`:''};
-const TN={inv:'חשבונית מס',ir:'חשבונית מס קבלה',rc:'קבלה',cr:'זיכוי'};
+const TN={inv:'חשבונית מס',ir:'חשבונית מס קבלה',rc:'קבלה',cr:'זיכוי',ob:'יתרת פתיחה',old:'מסמך מיובא'};
+/* שלב 6 (ar-import.js): מסמך מיובא – ob / old, צד לפי k; old מוצג ונסנן לפי הסוג המקורי (ot) */
+const XN={inv:'חשבונית (מיובא)',rc:'קבלה (מיובא)',cr:'זיכוי (מיובא)'},isX=x=>x.t==='ob'||x.t==='old',isDr=x=>x.t==='inv'||(isX(x)&&x.k==='dr'),isCrd=x=>['rc','cr'].includes(x.t)||(isX(x)&&x.k==='cr'),tnOf=r=>(r.t==='old'&&XN[r.ot])||TN[r.t]||r.t||'',tOf=r=>r.t==='old'?r.ot:r.t;
 const redraw=v=>{const a=document.activeElement;if(cur().v===v&&!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))&&!document.querySelector('#dlg[open]'))rerender()};
 const today=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'});
 const lateOf=due=>{if(!due)return 0;const a=Date.parse(due+'T00:00:00Z'),b=Date.parse(today()+'T00:00:00Z');return Math.round((b-a)/864e5)};
@@ -34,15 +36,15 @@ const TABS=[['all','חשבוניות'],['open','פתוחות'],['rc','קבלות
 
 /* ---------- כרטיס חשבון: לשוניות ---------- */
 async function loadC(cid){try{const [L,c]=await Promise.all([runQ('ardoc',['cust','EQUAL',{stringValue:cid}],1000),fsx('/cust/'+cid).catch(()=>null)]);S.c[cid]=L;S.cu[cid]=c?dec(c):{}}catch(e){S.c[cid]=[];S.cu[cid]=S.cu[cid]||{}}}
-function rowL(x){const sg=x.t==='cr'||x.t==='rc'?-1:1;const h=window.__arInv&&window.__arInv.rowH;if(h)return h(x);
- return `<div class="li"><div class="grow"><b>${esc(TN[x.t]||x.t)} #${esc(x.no)}</b><br><small class="note">${dd(x.d)}</small></div><b dir="ltr">${ag(sg*x.gross)}</b></div>`}
-function ledH(cid,L){const f=S.f[cid]||{},lg=AC.ledger(L,f.from||'',f.to||'');const rows=lg.rows.filter(r=>!f.t||f.t===r.t||(f.t==='inv'&&r.t==='ir'));
+function rowL(x){const sg=isCrd(x)?-1:1;const h=window.__arInv&&window.__arInv.rowH;if(h)return h(x);
+ return `<div class="li"><div class="grow"><b>${esc(tnOf(x))}${x.no!==''&&x.no!=null?' #'+esc(x.no):''}</b><br><small class="note">${dd(x.d)}</small></div><b dir="ltr">${ag(sg*x.gross)}</b></div>`}
+function ledH(cid,L){const f=S.f[cid]||{},lg=AC.ledger(L,f.from||'',f.to||'');const rows=lg.rows.filter(r=>!f.t||f.t===tOf(r)||(f.t==='inv'&&r.t==='ir'));
  const td='style="padding:6px 4px;white-space:normal"',tn='class="n" style="padding:6px 4px"';
  return `<form class="card" data-f="arLedF"><input type="hidden" name="cid" value="${esc(cid)}"><div class="row" style="gap:6px;align-items:end"><label class="f grow" style="margin:0"><span>מתאריך</span><input type="date" name="from" value="${esc(f.from||'')}"></label><label class="f grow" style="margin:0"><span>עד תאריך</span><input type="date" name="to" value="${esc(f.to||'')}"></label></div>
   <div class="row" style="gap:6px;align-items:end;margin-top:6px"><label class="f grow" style="margin:0"><span>סוג מסמך</span><select name="t"><option value="">הכול</option><option value="inv"${f.t==='inv'?' selected':''}>חשבוניות</option><option value="rc"${f.t==='rc'?' selected':''}>קבלות</option><option value="cr"${f.t==='cr'?' selected':''}>זיכויים</option></select></label><button class="btn g">סינון</button></div></form>
   <div class="tw" id="arled"><table style="font-size:.78rem;table-layout:fixed"><thead><tr><th ${td}>תאריך</th><th ${td}>מסמך</th><th ${tn}>חובה</th><th ${tn}>זכות</th><th ${tn}>יתרה</th></tr></thead><tbody>
   ${f.from?`<tr><td ${td}>${dd(f.from)}</td><td ${td}>יתרת פתיחה</td><td ${tn}></td><td ${tn}></td><td ${tn} dir="ltr">${ag(lg.open)}</td></tr>`:''}
-  ${rows.map(r=>`<tr><td ${td}>${dd(r.d)}</td><td ${td}>${esc((TN[r.t]||'')+' '+r.no)}</td><td ${tn} dir="ltr">${r.dr?ag(r.dr):''}</td><td ${tn} dir="ltr">${r.cr?ag(r.cr):''}</td><td ${tn} dir="ltr">${ag(r.bal)}</td></tr>`).join('')||`<tr><td colspan="5" ${td}>אין תנועות בטווח</td></tr>`}
+  ${rows.map(r=>`<tr><td ${td}>${dd(r.d)}</td><td ${td}>${esc((tnOf(r)+' '+(r.no||'')).trim())}</td><td ${tn} dir="ltr">${r.dr?ag(r.dr):''}</td><td ${tn} dir="ltr">${r.cr?ag(r.cr):''}</td><td ${tn} dir="ltr">${ag(r.bal)}</td></tr>`).join('')||`<tr><td colspan="5" ${td}>אין תנועות בטווח</td></tr>`}
   </tbody></table></div><p class="note" style="margin:6px 0">סה״כ חובה ${ag(lg.dr)} · סה״כ זכות ${ag(lg.cr)} · יתרה לסוף התקופה <b dir="ltr">${ag(lg.end)}</b></p>
   <div class="row"><button class="btn g grow" data-a="arLedPdf" data-id="${esc(cid)}">PDF</button><button class="btn g grow" data-a="arLedXls" data-id="${esc(cid)}">Excel</button><button class="btn g grow" data-a="arLedSend" data-id="${esc(cid)}">שליחה ללקוח</button></div>`}
 V.arLed=cid=>{const T='כרטיס חשבון';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};
@@ -52,12 +54,12 @@ V.arLed=cid=>{const T='כרטיס חשבון';if(!on())return{t:T,h:'<div class=
  if(S.c[cid]===undefined){S.c[cid]=null;loadC(cid).then(()=>redraw('arLed'));return{t:T,h:'<div class="empty">טוען…</div>'}}
  if(S.c[cid]===null)return{t:T,h:'<div class="empty">טוען…</div>'};
  const L=S.c[cid],c=S.cu[cid]||{},a=c.ar||{},tab=S.tab[cid]||'all',nm=c.bn||c.name||'';
- const open=L.filter(x=>x.t==='inv'&&x.open>0&&!x.void);
+ const open=L.filter(x=>isDr(x)&&x.open>0&&!x.void);
  let h=`<div class="card"><b>${esc(nm)}</b><div class="row" style="justify-content:space-between;margin-top:6px"><span>יתרה לתשלום</span><b dir="ltr" id="arbal">${ag(a.bal||0)}</b></div>
   <p class="note" style="margin:4px 0 0">${open.length} חשבוניות פתוחות${a.cr>0?' · יתרת זכות '+ag(a.cr):''}${open.length&&lateOf(open.map(x=>x.dueX||x.due).sort()[0])>0?' · <b style="color:var(--bad)">באיחור</b>':''}</p></div>
   <div class="chips scroll-x nw" role="tablist" style="margin:8px 0">${TABS.map(([k,l])=>`<button class="chip ${tab===k?'on':''}" role="tab" aria-selected="${tab===k}" data-a="arLedT" data-id="${esc(cid)}" data-k="${k}">${l}</button>`).join('')}</div>`;
  if(tab==='led')h+=ledH(cid,L);
- else{const P=tab==='open'?open:tab==='rc'?L.filter(x=>x.t==='rc'):L.filter(x=>['inv','ir','cr'].includes(x.t));
+ else{const P=tab==='open'?open:tab==='rc'?L.filter(x=>tOf(x)==='rc'):L.filter(x=>['inv','ir','cr'].includes(x.t)||(isX(x)&&tOf(x)!=='rc'));
   h+=P.length?P.slice().sort((x,y)=>(y.at||0)-(x.at||0)).slice(0,200).map(rowL).join(''):'<div class="empty">אין מסמכים</div>'}
  if(mgr()){const rm=c.rem||{};h+=`<div class="sec"><h3>תזכורות וסיכום חודשי ללקוח</h3></div><form class="card" data-f="arCRemF"><input type="hidden" name="cid" value="${esc(cid)}">
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="on"${rm.on===false?'':' checked'}> תזכורות תשלום ללקוח</label>
@@ -70,7 +72,7 @@ FRM.arLedF=f=>{const x=fd(f);if(x.from&&x.to&&x.from>x.to)return toast('טווח
 ACT.arLedPdf=async el=>{const cid=el.dataset.id,f=S.f[cid]||{};el.disabled=true;try{const r=await fnCall('arStatement',Object.assign({cust:cid},f.from?{from:f.from}:{},f.to?{to:f.to}:{}));await dxShareDU('data:application/pdf;base64,'+r.b64,'כרטסת')}catch(e){err(e)}finally{el.disabled=false}};
 ACT.arLedXls=el=>{const cid=el.dataset.id,f=S.f[cid]||{},L=S.c[cid]||[],lg=AC.ledger(L,f.from||'',f.to||''),c=S.cu[cid]||{};
  const rows=[['תאריך','מסמך','מספר','חובה','זכות','יתרה']];if(f.from)rows.push([f.from,'יתרת פתיחה','','','',lg.open/100]);
- lg.rows.filter(r=>!f.t||f.t===r.t||(f.t==='inv'&&r.t==='ir')).forEach(r=>rows.push([r.d,TN[r.t]||r.t,r.no,r.dr/100,r.cr/100,r.bal/100]));
+ lg.rows.filter(r=>!f.t||f.t===tOf(r)||(f.t==='inv'&&r.t==='ir')).forEach(r=>rows.push([r.d,tnOf(r),r.no,r.dr/100,r.cr/100,r.bal/100]));
  xlsOrCsv('כרטסת-'+String(c.bn||c.name||cid).replace(/[\\/:*?"<>|]/g,'').slice(0,40),{'כרטסת':rows})};
 ACT.arLedSend=el=>{const cid=el.dataset.id;dlg(`<h3>שליחת כרטסת ללקוח</h3><form data-f="arLedSF"><input type="hidden" name="cid" value="${esc(cid)}"><input type="hidden" name="q" value="${rid()}">
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="radio" name="what" value="led" checked> כרטסת (לפי הסינון)</label><label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="radio" name="what" value="open"> פירוט יתרה פתוחה בלבד</label>
@@ -98,7 +100,7 @@ V.arDebt=()=>{const T='דוח חובות לקוחות';if(!on())return{t:T,h:'<d
   ${G.length?'<button class="btn g w" style="margin-top:8px" data-a="arDebtXls">Excel</button>':''}<button class="btn g s w" style="margin-top:6px" data-a="arDebtRe">רענן</button>`;
  return{t:T,s:'חשבוניות פתוחות לפי לקוח',h}};
 function debtRows(){const q=S.df,nq=String(q.q||'').trim().toLowerCase(),M=new Map();
- for(const x of S.debt||[]){const isInv=x.t==='inv';if(q.t==='inv'?!isInv:!['rc','cr'].includes(x.t))continue;if(q.from&&x.d<q.from)continue;if(q.to&&x.d>q.to)continue;
+ for(const x of S.debt||[]){const isInv=isDr(x);if(q.t==='inv'?!isInv:!isCrd(x))continue;if(q.from&&x.d<q.from)continue;if(q.to&&x.d>q.to)continue;
   const nm=String((x.custSnap&&x.custSnap.name)||x.cust||'');if(nq&&!nm.toLowerCase().includes(nq))continue;
   const k=x.cust||'?';const g=M.get(k)||{cust:k,name:nm,open:0,n:0,due:''};g.open+=x.open;g.n++;const du=x.dueX||x.due||'';if(isInv&&du&&(!g.due||du<g.due))g.due=du;M.set(k,g)}
  return [...M.values()].map(g=>Object.assign(g,{late:lateOf(g.due)})).sort((a,b)=>b.open-a.open)}

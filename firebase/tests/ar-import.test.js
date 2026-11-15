@@ -65,6 +65,10 @@ async function balanced(cid) {
   const a = (c && c.ar) || { bal: 0, open: 0, cr: 0 };
   assert.deepEqual({ bal: a.bal, open: a.open, cr: a.cr }, { bal, open, cr }, 'יתרה מחושבת מחדש = cust.ar ' + cid);
   assert.equal(bal, open - cr);
+  // שלב 5 + 6: הכרטסת (ArCalc.ledger – גם במכשיר) מכירה את ob/old: היתרה בכרטסת = cust.ar.bal, גם אחרי ביטול קבוצה
+  const lg = require('../functions/lib/ar-calc').ledger(docs);
+  assert.equal(lg.bal, a.bal, 'כרטסת = cust.ar.bal ' + cid);
+  assert.equal(lg.dr - lg.cr, a.bal);
   return a.bal;
 }
 async function totalBal() { let s = 0; for (const c of await all('cust')) if (c.ar) s += await balanced(c.id); return s; }
