@@ -115,6 +115,8 @@ function planSvg(){
  /* שלב 11: אזורים לא ודאיים מטיוטת ה-AI – מסגרת מקווקווה, בולטת עד שהמנהל עבר עליהם (x,y = פינה, w,d = מידות) */
  for(let i=0;i<(Array.isArray(m.uz)?m.uz.length:0);i++){const z=m.uz[i];if(!z||!isFinite(z.x))continue;const cur2=E.wiz&&E.wiz.zi===i;
   s+=`<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.d}" fill="${z.ok?'none':K.warn}" fill-opacity=".18" stroke="${z.ok?K.inc:K.warn}" stroke-width="${px*(cur2?5:2.5)}" stroke-dasharray="${px*8} ${px*5}"/><text x="${z.x+z.w/2}" y="${z.y+z.d/2+fs*.35}" fill="${K.ink}" stroke="${K.card}" stroke-width="${px*.8}" paint-order="stroke" font-size="${fs}" font-weight="700" text-anchor="middle">${z.ok?'✓':'?'}${i+1}</text>`}
+ /* שלב 18ד: נקודות 360 (store3d-pano-ui.js) */
+ if(U.pano&&E.tool==='pano')try{s+=U.pano.svg(px,fs,K)}catch(e){}
  return `<svg viewBox="${E.vx} ${E.vy} ${vw} ${vh}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="display:block;touch-action:none">${s}</svg>`}
 function draw(){const el=document.getElementById('s3pl');if(el)el.innerHTML=planSvg()}
 U.afterEd=()=>{if(cur().v==='st3e')draw()};
@@ -133,7 +135,7 @@ U.afterEd=()=>{if(cur().v==='st3e')draw()};
   if(P.size===1){const dx=e.clientX-g.x0,dy=e.clientY-g.y0;if(!g.moved&&Math.hypot(dx,dy)>8)g.moved=true;
    if(g.moved){const sc=E.vw/t.getBoundingClientRect().width;E.vx=g.vx-dx*sc;E.vy=g.vy-dy*sc;draw()}}});
  const up=e=>{if(!P.has(e.pointerId))return;const was=P.size,gg=g;P.delete(e.pointerId);if(!P.size)g=null;
-  if(e.type==='pointerup'&&was===1&&gg&&!gg.moved&&!gg.pinch&&el()){const[x,y]=toCm(e.clientX,e.clientY);addAt(x,y);touch();rerender()}};
+  if(e.type==='pointerup'&&was===1&&gg&&!gg.moved&&!gg.pinch&&el()){const[x,y]=toCm(e.clientX,e.clientY);if(E.tool==='pano'&&U.pano){U.pano.tap(x,y);rerender();return}addAt(x,y);touch();rerender()}};
  /* החלקה לחזרה של האפליקציה (index.html) לא תופעל על גרירת המפה */window.addEventListener('touchend',e=>{if(e.target&&e.target.closest&&e.target.closest('#s3pl'))e.stopImmediatePropagation()},true);
  document.addEventListener('pointerup',up);document.addEventListener('pointercancel',up)}
 
@@ -142,6 +144,7 @@ const TOOLS=[['sel','בחירה'],['room','חדר'],['fx','גוף'],['door','ד�
 const FIELDS={fx:[['w','אורך (ס"מ)',30,2000],['d','עומק (ס"מ)',20,300],['h','גובה (ס"מ)',30,300],['bays','מקטעים לכל צד',1,30],['lvl','קומות מדף',1,12]],
  rooms:[['h','גובה תקרה (ס"מ)',200,600]],doors:[['w','רוחב (ס"מ)',60,500]],cols:[['w','רוחב (ס"מ)',10,300],['d','עומק (ס"מ)',10,300]],syms:[]};
 function optsH(){
+ if(E.tool==='pano'&&U.pano)return U.pano.opts();
  const t=E.tool,sl=(id,cur2,m)=>`<select data-c="${id}" aria-label="סוג" style="min-height:44px">${Object.entries(m).map(([k,l])=>`<option value="${k}"${cur2===k?' selected':''}>${l}</option>`).join('')}</select>`;
  if(t==='room')return `<p class="note s3note">הקישו על המפה כדי להוסיף פינות (לפחות 3). ${E.pts.length/2} פינות.</p><div class="row s3row"><button class="btn" data-a="s3eClose">סגרו את החדר</button><button class="btn g" data-a="s3ePtUndo">בטלו פינה</button><button class="btn g" data-a="s3ePtClr">נקו</button></div>`;
  if(t==='fx')return `<div class="row s3row"><span>סוג הגוף:</span>${sl('s3eFxK',E.fxk,FXN)}</div><p class="note s3note">הקישו על המקום בתוך החדר.</p>`;
@@ -190,7 +193,8 @@ V.st3e=()=>{const T='עריכת המפה';
  if(typeof U.wizPanel==='function'&&E.map&&(E.wiz||(Array.isArray(E.map.uz)&&E.map.uz.length)))h+=U.wizPanel();
  if(d.cfg.wh&&!E.wiz)h+=`<div class="chips" style="margin:0 0 8px"><button class="chip ${E.kind==='s'?'on':''}" data-a="s3eKind" data-k="s">החנות</button><button class="chip ${E.kind==='w'?'on':''}" data-a="s3eKind" data-k="w">המחסן</button></div>`;
  if(E.offer)h+=`<div class="s3info">יש שינויים שלא נשמרו מהפעם הקודמת (${esc2(new Date(E.offer.at).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}))}).<div class="row s3row"><button class="btn" data-a="s3eDraft" data-y="1">המשיכו מהם</button><button class="btn g" data-a="s3eDraft" data-y="0">התעלמו מהם</button></div></div>`;
- h+=`<div class="s3tabs" role="toolbar">${TOOLS.map(([k,l])=>`<button class="chip ${E.tool===k?'on':''}" data-a="s3eTool" data-k="${k}" aria-pressed="${E.tool===k}">${l}</button>`).join('')}</div>${optsH()}`;
+ const TL=U.pano&&U.pano.ok()?TOOLS.concat([['pano','נקודות 360']]):TOOLS;if(E.tool==='pano'&&!(U.pano&&U.pano.ok()))E.tool='sel';
+ h+=`<div class="s3tabs" role="toolbar">${TL.map(([k,l])=>`<button class="chip ${E.tool===k?'on':''}" data-a="s3eTool" data-k="${k}" aria-pressed="${E.tool===k}">${l}</button>`).join('')}</div>${optsH()}`;
  if(E.msg)h+=`<div class="s3info s3err" role="alert" style="margin-bottom:8px">${esc2(E.msg)}</div>`;
  h+=`<div class="s3main" id="s3pl" style="touch-action:none;height:min(52vh,420px)"></div>
  <div class="row s3row"><button class="btn g" data-a="s3eZoom" data-d="0.7" aria-label="קרב">＋</button><button class="btn g" data-a="s3eZoom" data-d="1.4" aria-label="הרחק">－</button><button class="btn g" data-a="s3eFit">הכול</button><button class="btn g" data-a="s3eUndo"${E.undo.length?'':' disabled'}>בטל פעולה</button></div>${selH()}
@@ -203,7 +207,7 @@ U.openEditor=k=>{E.kind=k==='w'?'w':'s';if(cur().v!=='st3e')go('st3e')};
 
 /* ---------- פעולות ---------- */
 const re=()=>{touch();rerender()};
-ACT.s3eTool=el=>{E.tool=el.dataset.k;E.msg='';if(E.tool!=='room')E.pts=[];rerender()};
+ACT.s3eTool=el=>{E.tool=el.dataset.k;E.msg='';if(E.tool!=='room')E.pts=[];if(E.tool==='pano')E.sel=null;if(U.pano)U.pano.tool(E.tool==='pano');rerender()};
 ACT.s3eKind=el=>{E.kind=el.dataset.k==='w'?'w':'s';E.key='';rerender()};
 CHG.s3eFxK=el=>{if(FXD[el.value])E.fxk=el.value};CHG.s3eDrK=el=>{if(DRN[el.value])E.drk=el.value};CHG.s3eSyK=el=>{if(SYN[el.value])E.syk=el.value};
 ACT.s3eZoom=el=>{const c=E.vw/2,r=document.getElementById('s3pl'),ar=r?r.clientHeight/Math.max(r.clientWidth,1):1,nv=clampN(E.vw*(+el.dataset.d),300,14000);E.vx+=c-nv/2;E.vy+=c*ar-nv*ar/2;E.vw=nv;draw()};

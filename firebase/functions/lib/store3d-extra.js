@@ -14,6 +14,7 @@
 //   binPurge(map, now)      – סל המחזור במפה: רק פריטים עם del:1 ש-delAt שלהם לפני 30 יום ומעלה. פריט חי לעולם לא נבחר.
 //   texOrphans(files, refs, lastUse, now) – קובצי טקסטורה שאינם במפה הנוכחית, ו-30 יום ומעלה עברו מאז שהפסיקו להיות בשימוש
 //                             (זמן הגרסה האחרונה שבה הופיעו; בלי גרסה – זמן יצירת הקובץ).
+//   panoClean(files, docs, now) – שלב 18א: קובצי 360 של גרסאות קודמות ונקודות שנמחקו לפני 30 יום ומעלה.
 //   monthRange(t)           – תחילת וסוף חודש לפי שעון ישראל, ומפתח החודש.
 //   secLatest / secText     – שלב 13ב: סיכום קצר של סבבי הסריקה להקשר של המזכירה (secChat): הסבב האחרון שהסתיים בכל מפה
 //                             (בסניפים המותרים בלבד), ציון ושינוי, בעיות, קטגוריות חלשות, חוסרים, ומשימות תיקון פתוחות.
@@ -327,6 +328,28 @@ function texOrphans(files, refs, lastUse, now) {
     return t <= now - TEX_DAYS * D1;
   }).map((f) => f.name);
 }
+// שלב 18א – סיור 360. files = [{ name, t }] בתיקייה pano/{mapId}/; docs = Map(pid → מסמך הנקודה). מחזיר { files: [שמות], docs: [pid] }:
+//   קובץ של הגרסה הנוכחית של נקודה פעילה – לא נמחק לעולם. גרסה קודמת – 30 יום אחרי ההחלפה (at של הגרסה הנוכחית).
+//   נקודה שנמחקה (del:1) לפני 30 יום ומעלה – כל הקבצים שלה, והמסמך (רק אחרי שכל הקבצים נמחקו – ב-s3Clean).
+//   קובץ בלי מסמך, או של גרסה שלא נכנסה (העלאה שנכשלה) – 30 יום אחרי שנוצר. קובץ צעיר מיום – לא נמחק.
+const RE_PANO_F = /\/pano\/[sw]-[a-z0-9_]{2,20}\/(p[0-9]{1,4})_([0-9]{1,4})(_s)?\.jpg$/;
+function panoClean(files, docs, now) {
+  const D = docs instanceof Map ? docs : new Map();
+  const old = now - BIN_DAYS * D1;
+  const gone = (d) => isObj(d) && d.del === 1 && Number.isInteger(d.delAt) && d.delAt <= old;
+  const out = [];
+  for (const f of files || []) {
+    const m = f && RE_PANO_F.exec(f.name);
+    if (!m || !Number.isFinite(f.t) || f.t > now - YOUNG_MS) continue;
+    const d = D.get(m[1]), ver = +m[2];
+    if (!isObj(d)) { if (f.t <= old) out.push(f.name); continue; }
+    if (gone(d)) { out.push(f.name); continue; }
+    if (d.del === 1 || ver === d.ver) continue;
+    const t = ver < d.ver && Number.isInteger(d.at) ? Math.max(f.t, d.at) : (ver < d.ver ? now : f.t);
+    if (t <= old) out.push(f.name);
+  }
+  return { files: out, docs: [...D.keys()].filter((k) => gone(D.get(k))) };
+}
 // רשומות audit: שורות היומן מחולקות לחלקים של עד max תווים, בלי לחתוך שורה (שורה ארוכה מדי לבדה – מתפצלת לחתיכות). תיקון סבב 1
 function splitNote(lines, max) {
   const M = inR(max, 50, 100000) ? max : 1500, out = [];
@@ -402,6 +425,6 @@ function secText(latest, fixes, shorts, brs, partial) {
 module.exports = {
   D1, BIN_DAYS, TEX_DAYS, KEEP_RUNS, YOUNG_MS, W_DEF, CAT, SEV_PEN, RE_FIX,
   weights, overridden, hardIdx, effSt, effAi, scoreSlot, runSum, prevRun, ownerOf, bayOf, shortList, fixId, fixTasks, verifyResult,
-  monthRange, inMonth, perfAll, parseRunFile, runGroup, keepPlan, strayFiles, expired, binPurge, texOrphans, txPaths, splitNote, str,
+  monthRange, inMonth, perfAll, parseRunFile, runGroup, keepPlan, strayFiles, expired, binPurge, texOrphans, panoClean, txPaths, splitNote, str,
   SEC_DAYS, SEC_MAPS, SEC_WEAK, SEC_FIX, SEC_BRS, secPlan, secLatest, secText,
 };
