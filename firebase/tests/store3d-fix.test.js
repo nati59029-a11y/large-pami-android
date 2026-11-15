@@ -84,7 +84,7 @@ describe('mapFix – הליבה מול האמולטור (Firestore + gemini-mock
     assert.ok(pt.includes(JSON.stringify(TXT)));
     assert.match(pt, /סוג החנות: "כלים חד-פעמיים"/);
     assert.match(pt, /"name":"מדפי קיר שמאל"/, 'הטיוטה הנוכחית בהנחיה');
-    assert.ok(pt.includes('סקיצה שהמשתמש שרטט (כללים מחייבים למבנה, כשהיא ברורה): {"lines":[[0,0,700,0]]}.'));
+    assert.ok(pt.includes('סקיצה שהמשתמש שרטט (כללים מחייבים למבנה, כשהיא ברורה): {"w":700,"l":1400,"rooms":[],"rows":[[100,100,600,100]]}.'));
     const d = await get(`b/${A}/s3draft/${q}`);
     assert.deepEqual([d.st, d.by, d.br, d.kind, d.fix, d.from, d.n, d.m.fx[0].k, d.notes], ['ok', DR, 'main', 's', 1, from, 0, 'fridge', r.notes]);
     assert.equal(d.sk, undefined, 'הסקיצה לא נשמרת');
