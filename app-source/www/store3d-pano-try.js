@@ -4,13 +4,13 @@
    נטען אחרי store3d.js, store3d-pano.js ו-store3d-pano-cap.js. */
 (function(){
 'use strict';
-if(typeof V==='undefined'||typeof V.st3!=='function'||typeof ACT==='undefined'||!window.S3UI)return;
+if(typeof V==='undefined'||typeof ACT==='undefined'||!window.S3UI)return;
 const U=window.S3UI;
 const ok=()=>{try{return U.feat()&&U.canDraw()&&!!window.S3PanoCap&&!!window.S3Pano}catch(e){return false}};
-const r0=V.st3;
-V.st3=function(){const r=r0.apply(this,arguments);
-  try{if(r&&typeof r.h==='string'&&ok())r.h+=`<div class="card s3s" style="margin-top:12px"><b>ניסוי: צילום 360</b><p class="note s3note" style="margin:6px 0 10px">עומדים במקום אחד, מסובבים את הטלפון לפי הנקודות, ורואים את החנות כמו בסיור. זה ניסוי בלבד: שום דבר לא נשמר.</p><button class="btn" data-a="s3pTry">התחלת ניסוי</button></div>`}catch(e){}
-  return r};
+const CARD=`<div class="card s3s" style="margin-top:12px"><b>ניסוי: צילום 360</b><p class="note s3note" style="margin:6px 0 10px">עומדים במקום אחד, מסובבים את הטלפון (בנקודות או בסרטון), ורואים את החנות כמו בסיור. זה ניסוי בלבד: שום דבר לא נשמר.</p><button class="btn" data-a="s3pTry">התחלת ניסוי</button></div>`;
+/* גם במסך התלת מימד וגם באשף ההקמה (כשעוד אין מפה, האפליקציה מגיעה ישר לאשף) */
+for(const k of ['st3','st3w']){const r0=V[k];if(typeof r0!=='function')continue;
+  V[k]=function(){const r=r0.apply(this,arguments);try{if(r&&typeof r.h==='string'&&ok())r.h+=CARD}catch(e){}return r}}
 let busy=false;
 function layer(){const d=document.createElement('div');d.dir='rtl';d.style.cssText='position:fixed;inset:0;z-index:9999;background:#111114';document.body.appendChild(d);return d}
 function bar(el,res,again,done){const b=document.createElement('div');

@@ -10,6 +10,7 @@
 //   recurringTasks (מתוזמנת, לא נקראת ממשתמש) – משימות קבועות (recurring.js).
 //   s3Rounds (מתוזמנת), s3Run, s3Move, s3Log, s3View – סבבי סריקת חנות בתלת מימד (store3d.js).
 //   s3SaveMap, s3SetBranch (מנהל־על), s3PutTex – המפה של סריקת החנות: שמירה עם נעילה וגרסאות, הגדרות סניף, טקסטורות (store3d-map.js).
+//   s3PutPano, s3DelPano – נקודות סיור 360 (שלב 18א, store3d-map.js).
 //   shelfCheck, mapDraft – בדיקת מדף וטיוטת מפה דרך Gemini, עם מכסה חודשית לסניף (store3d-ai.js).
 //   s3Fix, s3Clean – משימות תיקון, ניקוי יומי וביצועי עובדים (store3d-extra.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
@@ -245,7 +246,7 @@ Object.assign(exports, require('./recurring'));
 // s3Run (פתיחה ידנית/ביטול – מנהל), s3Move (העברה/לקיחה), s3Log (אירועי זמן), s3View (מה עובד רואה). store3d.js + lib/store3d-core.js
 Object.assign(exports, require('./store3d'));
 // שלב 5ב (14.11.2026): s3SaveMap (מנהל / s3m; נעילה לפי baseV, גרסאות, 30 אחרונות), s3SetBranch (מנהל־על, audit), s3PutTex (טקסטורה ל-Storage).
-// store3d-map.js + lib/store3d-map.js
+// store3d-map.js + lib/store3d-map.js. שלב 18א (15.11.2026): s3PutPano (נקודת 360 – מנהל / s3m), s3DelPano (מחיקה רכה – מנהל).
 Object.assign(exports, require('./store3d-map'));
 // שלב 8 (14.11.2026): shelfCheck (בדיקת מדף – עובד אחראי בסבב / דיווח יזום), mapDraft (טיוטת מפה – מנהל / s3m). Gemini, מכסה חודשית לסניף
 // (s3use, אזהרה ב-80%) ובלם יומי לעובד, החזרה בכשל, תמונה עם אדם לא נשמרת. store3d-ai.js + lib/store3d-ai.js
