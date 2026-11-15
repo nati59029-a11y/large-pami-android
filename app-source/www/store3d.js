@@ -64,7 +64,7 @@ S3UI.dataOk=dataOk;
 async function loadRuns(force){
  if(!isW()||!feat()||X.busyR||(!force&&Date.now()-X.runsAt<60000))return;
  X.busyR=1;X.runsAt=Date.now();
- try{const r=await S3UI.fn('s3View',{});X.runs=Array.isArray(r&&r.runs)?r.runs:[];X.take=Array.isArray(r&&r.take)?r.take:[];X.fixes=Array.isArray(r&&r.fixes)?r.fixes:[];X.runsErr='';try{if(S3UI.onRuns)S3UI.onRuns(X.runs)}catch(e2){}}catch(e){X.runs=null;X.runsErr=e&&e.offline?'אין חיבור לאינטרנט':'לא ניתן לטעון את המשימה כרגע'}
+ try{const r=await S3UI.fn('s3View',{});X.runs=Array.isArray(r&&r.runs)?r.runs:[];X.take=Array.isArray(r&&r.take)?r.take:[];X.fixes=Array.isArray(r&&r.fixes)?r.fixes:[];X.past=Array.isArray(r&&r.past)?r.past:[];X.runsErr='';try{if(S3UI.onRuns)S3UI.onRuns(X.runs)}catch(e2){}}catch(e){X.runs=null;X.runsErr=e&&e.offline?'אין חיבור לאינטרנט':'לא ניתן לטעון את המשימה כרגע'}
  X.busyR=0;const v=cur().v;if((v==='st3'||v==='wk')&&!typing())rerender();
 }
 

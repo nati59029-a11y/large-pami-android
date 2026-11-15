@@ -308,6 +308,7 @@ ACT.s3rCapSave=()=>{const d=U.data(),cap=Math.round(+(document.getElementById('s
 function repMgr(d){
  rlGo();
  let h=`<div class="s3tabs" role="tablist">${SUBS().map(([k,l])=>`<button role="tab" aria-selected="${R.sub===k}" class="chip ${R.sub===k?'on':''}" data-a="s3rSub" data-k="${k}">${l}</button>`).join('')}</div>`;
+ h+=secBtn();
  if(R.runsErr)return h+`<div class="s3info">${esc2(R.runsErr)} <button class="btn g s" data-a="s3rRetryRuns">נסו שוב</button></div>`;
  if(R.runs===null&&R.sub!=='set')return h+'<div class="s3info">טוענים את הסבבים…</div>';
  if(R.sub==='trend')h+=trendH(mine());else if(R.sub==='wk')h+=wkH();else if(R.sub==='br')h+=brH();else if(R.sub==='short')h+=shH();else if(R.sub==='fix')h+=fxH();else h+=runH(d);
@@ -327,7 +328,16 @@ function repWk(d){
   else if(typeof v==='string')h+=`<div class="s3info">${v==='offline'?'אין חיבור לאינטרנט.':'לא הצלחנו לטעון את התוצאות.'}</div>`;
   else{const A=Object.entries(v.ai||{}).map(([slot,a])=>Object.assign({slot},a)),rows=probRows(A);
    h+=`<div class="s3info"><b>סבב עד ${esc2(dd(r.dueAt))}</b>${v.sum&&Number.isFinite(+v.sum.score)?kgH(['ציון הסבב',+v.sum.score]):''}<small class="note"><br>${rows.length?'מדפים שלך עם בעיות: '+rows.length:'עוד אין בעיות במדפים שצולמו.'}</small></div>`+rows.map(a=>shelfRow(a,r.runId,r.map,null,false,true)).join('')}}
+ h+=pastH();
  return h+fixCards('')}
+/* סבבים שנסגרו (s3View.past, החדש קודם; בשרת ישן השדה חסר = רשימה ריקה) */
+function pastH(){
+ const P=Array.isArray(X.past)?X.past:[];
+ let h=`<h4 style="margin:14px 0 4px">הסבבים הקודמים שלי</h4>`;
+ if(!P.length)return h+`<div class="s3info">עוד אין סבבים קודמים ב-30 הימים האחרונים.</div>`;
+ return h+P.map(r=>{const n=r.n||{},ad=r.k==='adhoc';return `<div class="s3info" data-past="${esc2(r.runId||'')}"><b>${ad?'דיווח יזום':'סבב'} · ${esc2(dd(r.doneAt||r.dueAt))}</b>${ad?' <span class="chip on" style="min-height:0;padding:2px 8px">יזום</span>':''}<small class="note"><br>${Number.isFinite(+n.n)?'צולמו '+(+n.d||0)+' מתוך '+(+n.n)+' מקטעים':''}</small></div>`}).join('')}
+/* כפתור "שאלו את המזכירה" – למנהל בלבד, כשהמזכירה פעילה בעסק (פותח את המזכירה הקיימת, ACT.secOpen) */
+function secBtn(){try{if(!U.isMgr()||typeof ACT==='undefined'||typeof ACT.secOpen!=='function')return '';const b=SY&&SY.biz;if(!(b&&b.features&&b.features.secretary===true))return '';return `<div class="row s3row" style="margin-top:8px"><button class="btn g" data-a="secOpen" style="min-height:44px">שאלו את המזכירה על הדוחות</button></div>`}catch(e){return ''}}
 /* ---------- משימות התיקון של העובד + צילום אימות ---------- */
 function fixCards(head){
  const F=Array.isArray(X.fixes)?X.fixes:[];if(!F.length)return head?'':`<h4 style="margin:14px 0 4px">משימות תיקון</h4><div class="s3info">אין לך משימות תיקון.</div>`;

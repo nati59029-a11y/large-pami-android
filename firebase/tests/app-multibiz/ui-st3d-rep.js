@@ -1,6 +1,6 @@
 'use strict';
 // סריקת חנות בתלת מימד, שלב 13 (14.11.2026): דוחות, מגמה, עובדים, סניפים, חוסרים, תיקונים וערעורים, המלצות, הגדרות, PDF, משימת תיקון של עובד וצילום אימות, ורענון ההדמיה אחרי דיווח יזום.
-// רשת מדומה (בלי אמולטור ובלי Gemini), 360px. store3d-report.js נטען ידנית אחרי ההתחברות (עד שה-index.html מחובר). שימוש: node ui-st3d-rep.js <www-dir> [out.json] [shot-prefix]
+// רשת מדומה (בלי אמולטור ובלי Gemini), 360px. store3d-report.js מחובר ב-index.html. שימוש: node ui-st3d-rep.js <www-dir> [out.json] [shot-prefix]
 const fs = require('fs'); const path = require('path'); const H = require('./harness');
 let fail = 0; const res = []; const check = (n, ok, info) => { if (!ok) fail++; res.push({ n, ok: !!ok, info }); console.log((ok ? 'עבר  ' : 'נכשל ') + n + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 500) : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -22,7 +22,7 @@ const AI = {
     'f1-a-2_a': { st: 'issue', conf: .7, iss: [{ k: 'face', sev: 1, conf: .7, t: 'החזית לא גלויה' }, { k: 'pricepos', sev: 1, warn: true, t: 'מחיר רחוק מהמוצר' }] },
     'f2-a-1_a': { st: 'review', conf: .4, iss: [] }, 'f2-a-2_a': { st: 'ok', conf: .9, iss: [] } },
   run_1: { 'f1-a-1_a': { st: 'issue', conf: .8, iss: [{ k: 'noprice', sev: 2, t: 'אין מחיר' }] }, 'f1-a-2_a': { st: 'ok', iss: [] }, 'f2-a-1_a': { st: 'ok', iss: [] }, 'f2-a-2_a': { st: 'issue', iss: [{ k: 'low', sev: 2, t: 'נגמר' }] } } };
-const S = { score: 80, writes: [], calls: [], reads: [], setDoc: null, short: { items: [{ n: 'מוצר א', c: 'חטיפים', bay: 'f1-a-1', why: 'low' }, { n: 'מוצר ב', c: 'חטיפים', bay: 'f1-a-2', why: 'miss' }, { n: 'מוצר ג', c: 'שתייה', bay: 'f2-a-1', why: 'hole' }], st: 'draft' }, jpg: '' };
+const S = { past: [{ runId: 'run_p2', st: 'done', openAt: D(2026, 11, 8), dueAt: D(2026, 11, 10), doneAt: D(2026, 11, 9), map: 's-main', n: { n: 3, d: 3 } }, { runId: 'ad_1', st: 'done', k: 'adhoc', openAt: D(2026, 11, 5), doneAt: D(2026, 11, 5), map: 's-main', n: { n: 1, d: 1 } }], score: 80, writes: [], calls: [], reads: [], setDoc: null, short: { items: [{ n: 'מוצר א', c: 'חטיפים', bay: 'f1-a-1', why: 'low' }, { n: 'מוצר ב', c: 'חטיפים', bay: 'f1-a-2', why: 'miss' }, { n: 'מוצר ג', c: 'שתייה', bay: 'f2-a-1', why: 'hole' }], st: 'draft' }, jpg: '' };
 const FIX = { f_m1: { run: 'run_2', slot: 'f1-a-1_a', map: 's-main', br: 'main', iks: [0], st: 'sent', u: 'w', by: 'ai', at: D(2026, 11, 12), dueAt: D(2026, 11, 14), vth: TH('run_2', 'f1-a-1_a'), vst: 'ok' }, f_m2: { run: 'run_2', slot: 'f1-a-2_a', map: 's-main', br: 'main', iks: [0], st: 'open', u: 'w', by: 'ai', at: D(2026, 11, 12), dueAt: D(2026, 11, 14) } };
 const APP = { 'run_2__f1-a-1_a__0': { run: 'run_2', slot: 'f1-a-1_a', ik: '0', by: 'w', txt: 'המחיר כן קיים על המדף', at: D(2026, 11, 13), st: 'open' } };
 const mon = () => { const d = new Date(); d.setDate(15); const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).formatToParts(d); return p.find((x) => x.type === 'year').value + '-' + p.find((x) => x.type === 'month').value; };
@@ -36,6 +36,7 @@ async function server(ctx) {
       S.writes.push({ m: rq.method(), p, id: u.searchParams.get('documentId'), mask: u.searchParams.getAll('updateMask.fieldPaths'), f });
       if (/^s3set\//.test(p)) S.setDoc = f; if (/^s3short\//.test(p)) Object.assign(S.short, f);
       return j(route, 200, { name: DOCS + p, fields: b.fields || {} }); }
+    if (p === 'smap/s-main/ver') return j(route, 200, { documents: [doc('smap/s-main/ver/000001', { v: 1, at: D(2026, 11, 3), by: 'system', why: 'ניקוי' }), doc('smap/s-main/ver/000002', { v: 2, at: D(2026, 11, 4), by: 'm', why: 'עריכה' })] });
     if (p === 'smap/s-main') return j(route, 200, doc(p, mapDoc())); if (/^smap\/|^s3br\//.test(p)) return nf(route);
     if (p === 's3sum/s-main') return j(route, 200, doc(p, sumDoc()));
     if (p === 'sround') return j(route, 200, { documents: [] });
@@ -62,7 +63,7 @@ async function server(ctx) {
   await ctx.route('**/s3View', (route) => { const b = rec(route, 's3View');
     if (b.runId === 'run_open') return ok(route, { run: { runId: 'run_open', st: 'open', map: 's-main', openAt: D(2026, 11, 13), dueAt: D(2026, 11, 16), bays: ['f1-a-1'], ai: { 'f1-a-1_a': { st: 'issue', iss: [{ k: 'noprice', sev: 2, t: 'אין מחיר על המדף' }] } }, sum: { score: 77 } } });
     if (b.runId === 'run_2') return ok(route, { run: { runId: 'run_2', st: 'done', map: 's-main', ai: { 'f1-a-2_a': { st: 'issue', iss: [{ k: 'face', sev: 1, t: 'החזית לא גלויה' }] } } } });
-    ok(route, { runs: [{ runId: 'run_open', st: 'open', openAt: D(2026, 11, 13), dueAt: D(2026, 11, 16), map: 's-main', n: { n: 3, d: 1 } }], fixes: [Object.assign({ id: 'f_m2' }, FIX.f_m2)], take: [] }); });
+    ok(route, { runs: [{ runId: 'run_open', st: 'open', openAt: D(2026, 11, 13), dueAt: D(2026, 11, 16), map: 's-main', n: { n: 3, d: 1 } }], fixes: [Object.assign({ id: 'f_m2' }, FIX.f_m2)], take: [], past: S.past }); });
 }
 async function open(browser, www, cfg, email, report) {
   const { ctx, page } = await H.newPage(browser, www, cfg, [], email); await page.setViewportSize({ width: 360, height: 760 });
@@ -70,7 +71,6 @@ async function open(browser, www, cfg, email, report) {
   await server(ctx); await H.login(page, email);
   await page.evaluate(() => { const sh = document.getElementById('sheet'); if (sh && !sh.hidden && typeof ACT.startBlank === 'function') ACT.startBlank(); });
   await H.settle(page, 400);
-  if (report) await page.addScriptTag({ content: fs.readFileSync(path.join(www, 'store3d-report.js'), 'utf8') });
   return { ctx, page };
 }
 const txt = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return e ? e.innerText.replace(/\s+/g, ' ').trim() : null; }, sel);
@@ -83,7 +83,7 @@ const goTab = async (page, tab, sub) => { await page.evaluate(([t, s]) => { S3UI
   const [www, out, shots] = process.argv.slice(2);
   if (shots) fs.mkdirSync(path.dirname(shots), { recursive: true });
   S.jpg = ''; const browser = await H.launch();
-  const cM = () => ({ mode: 'new', users: { m: 'biz-s', w: 'biz-s' }, biz: { 'biz-s': { dataRoot: 'b', features: { store3d: true }, name: 'עסק בדיקה' } }, admins: { 'b/biz-s/|m': 1 }, staff: { 'b/biz-s/|w': 1 } });
+  const cM = () => ({ mode: 'new', users: { m: 'biz-s', w: 'biz-s' }, biz: { 'biz-s': { dataRoot: 'b', features: { store3d: true, secretary: true }, name: 'עסק בדיקה' } }, admins: { 'b/biz-s/|m': 1 }, staff: { 'b/biz-s/|w': 1 } });
   // ---- 0. בדיקה סטטית: בלי צבעי hex קשיחים ----
   const src = fs.readFileSync(path.join(www, 'store3d-report.js'), 'utf8');
   check('0 בקובץ הדוחות אין צבעי hex קשיחים (עיצוב לפי טוקנים)', !/#[0-9a-fA-F]{3,8}\b/.test(src.replace(/#s3r\w*/g, '')), (src.match(/#[0-9a-fA-F]{3,8}\b/g) || []).slice(0, 5));
@@ -93,6 +93,8 @@ const goTab = async (page, tab, sub) => { await page.evaluate(([t, s]) => { S3UI
   // ---- 1. דוח סבב ----
   await goTab(pg, 'rep');
   let t = await txt(pg, '#main');
+  check('11 מנהל: כפתור "שאלו את המזכירה" קיים ופותח את המזכירה (secOpen)', await pg.evaluate(() => { const b = document.querySelector('#main [data-a=secOpen]'); return !!b && /המזכירה/.test(b.innerText); }));
+  check('11א מנהל: אין את רשימת "הסבבים הקודמים שלי" של העובד', !(await pg.$('[data-past]')));
   check('1 דוח: ציון 82, שינוי +6, מדפים תקינים, פסי קטגוריות, ובלי נתוני דוגמה', /ציון 82/.test(t) && /\+6/.test(t) && /מדפים תקינים 1 מתוך 4/.test(t) && /מחירים 70/.test(t) && /חורים ומוצרים שנגמרו 85/.test(t), t.slice(0, 400));
   check('1א בעיות לפי מדף: גוף 1 מקטע 1 ראשון (חומרה), "נשארה מהסבב הקודם" / "חדשה", "טופלו 1", אזהרה אינה בעיה', /בעיות לפי מדף \(3\)/.test(t) && /נשארה מהסבב הקודם/.test(t) && /חדשה/.test(t) && /טופלו: 1/.test(t) && /לבדיקה/.test(t) && /נתוני מכירות לפי מוצר: לא זמין/.test(t), t.slice(300, 1400));
   await shot(pg, fp(shots, 'דוח'));
@@ -163,6 +165,9 @@ const goTab = async (page, tab, sub) => { await page.evaluate(([t, s]) => { S3UI
   const img = await pg.evaluate((b) => b, S.jpg); await pg.setInputFiles('input[data-c=s3kPick]', { name: 'a.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(await pg.evaluate(() => { const c = document.createElement('canvas'); c.width = 1200; c.height = 900; const x = c.getContext('2d'); for (let i = 0; i < 60; i++) for (let j = 0; j < 45; j++) { x.fillStyle = `rgb(${(i * 37 + j * 11) % 256},${(i * 17 + j * 53) % 256},${(i * 71 + j * 29) % 256})`; x.fillRect(i * 20, j * 20, 20, 20); } return c.toDataURL('image/jpeg', .9).split(',')[1]; }), 'base64') }); await sleep(3500);
   const sc1 = await pg.evaluate(() => ({ os: window.__os, d: S3UI.data() && S3UI.data().sum && S3UI.data().sum.score }));
   check('8 אחרי דיווח יזום: הסיכום נטען מחדש וההדמיה נפתחת עם הציון החדש', sc0 === 80 && sc1.d === 90 && sc1.os === 90, { sc0, sc1 });
+  await pg.evaluate(() => { go('st3e'); }); await sleep(1200); await pg.evaluate(() => { const b = document.querySelector('[data-a=s3eSec][data-k=ver]'); if (b) b.click(); }); await sleep(1200);
+  t = await txt(pg, '#main');
+  check('13 גרסאות קודמות: by=system מוצג "ניקוי אוטומטי", ובגרסה אחרת לא', /גרסה 1 · ניקוי אוטומטי/.test(t) && !/גרסה 2 · ניקוי אוטומטי/.test(t), t.slice(0, 400));
   await M.ctx.close();
   // ---- 9. עובד ----
   const Wk = await open(browser, www, cM(), 'w@x.co', true); const wp = Wk.page;
@@ -179,6 +184,11 @@ const goTab = async (page, tab, sub) => { await page.evaluate(([t, s]) => { S3UI
   S.writes.length = 0; await wp.click('[data-a=s3rAppeal][data-slot="f1-a-1_a"][data-ik="0"]'); await sleep(300); await wp.fill('#s3rat', 'המחיר קיים'); await wp.click('[data-a=s3rApGo]'); await sleep(800);
   check('9ד עובד מערער: POST ל-s3appeal עם by=w', S.writes.some((w) => w.m === 'POST' && w.id === 'run_open__f1-a-1_a__0' && w.f.by === 'w'), S.writes);
   const ovw = await noOverflow(wp); check('9ה 360px: אין גלישה לרוחב אצל העובד', ovw.sw <= ovw.W + 1 && !ovw.bad.length, ovw);
+  check('12 עובד: "הסבבים הקודמים שלי" מציג 2 סבבים מ-past (החדש קודם) והדיווח היזום מסומן', await wp.evaluate(() => { const e = [...document.querySelectorAll('#main [data-past]')]; return e.length === 2 && e[0].dataset.past === 'run_p2' && /סבב/.test(e[0].innerText) && /דיווח יזום/.test(e[1].innerText) && /יזום/.test(e[1].querySelector('.chip').innerText); }), t.slice(0, 600));
+  check('12א עובד: אין כפתור "שאלו את המזכירה"', !(await wp.$('#main [data-a=secOpen]')));
+  await shot(wp, fp(shots, 'הדוח-שלי'));
+  S.past = []; await wp.evaluate(() => { S3UI.X.runsAt = 0; S3UI.loadRuns(true); }); await sleep(1200);
+  check('12ב עובד בלי past: הודעה בעברית ובלי נתוני דוגמה', /עוד אין סבבים קודמים/.test(await txt(wp, '#main')) && !(await wp.$('[data-past]')));
   await Wk.ctx.close();
   // ---- 10. תוסף כבוי ----
   const Off = await open(browser, www, Object.assign(cM(), { biz: { 'biz-s': { dataRoot: 'b', features: {}, name: 'x' } } }), 'm@x.co', true); const rq = [];

@@ -174,7 +174,7 @@ function verH(){
  if(E.vers==null){loadVers();return '<p class="note s3note">טוען גרסאות…</p>'}
  if(E.vers.err)return `<p class="note s3note">${esc2(E.vers.err)}</p>`;
  if(!E.vers.L.length)return '<p class="note s3note">עוד אין גרסאות קודמות. גרסה נשמרת בכל שמירה של שינוי.</p>';
- return E.vers.L.map(v=>`<div class="s3info"><b>גרסה ${v.v}</b> · ${esc2(v.at?new Date(v.at).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'')}${v.why?' · '+esc2(v.why):''}<div class="row s3row"><button class="btn g" data-a="s3eVer" data-v="${v.v}">שחזר את הגרסה הזו</button></div></div>`).join('')}
+ return E.vers.L.map(v=>`<div class="s3info"><b>גרסה ${v.v}</b> · ${v.by==='system'?'ניקוי אוטומטי · ':''}${esc2(v.at?new Date(v.at).toLocaleString('he-IL',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'}):'')}${v.why?' · '+esc2(v.why):''}<div class="row s3row"><button class="btn g" data-a="s3eVer" data-v="${v.v}">שחזר את הגרסה הזו</button></div></div>`).join('')}
 function brH(){
  const d=U.data(),c=d&&d.cfg||{wh:false,on:true,cap:500},br=U.brSel();
  return `<p class="note s3note">הגדרות הסניף "${esc2((U.brs().find(b=>b.id===br)||{}).name||br)}" (מנהל־על בלבד).</p>
