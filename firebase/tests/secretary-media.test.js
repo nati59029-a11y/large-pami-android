@@ -274,6 +274,7 @@ describe('שלב 2: op:"see" – סרטון דרך sec_tmp', () => {
     assert.equal((await call(M1, { op: 'see', kind: 'video', path: p })).reason, 'media-off');
     assert.equal(await exists(p), false, 'סוג כבוי: הקובץ נמחק');
     assert.equal(seeReqs().length, 0);
+    await put(`b/${A}/sec_cfg/media`, { aud: 120, img: true, vid: 60 }); // סוג פעיל – אחרת השער מחזיר media-off לפני בדיקת הקובץ
     assert.equal((await call(M1, { op: 'see', kind: 'video', path: tmp(M1) })).reason, 'no-file');
   });
   it('תיקון סבב 1: סרטון שנדחה בשער (לפני הסכמה, bad-kind, bad-op) – נמחק מיד; WAV/סרטון מזויף נדחה כארוך', async () => {
