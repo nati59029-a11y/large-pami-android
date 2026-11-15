@@ -12,7 +12,9 @@ const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
 async function get(p) { let v = null; await prep(async (d) => { const s = await d.doc(p).get(); v = s.exists ? s.data() : null; }); return v; }
 async function coll(p) { let v = []; await prep(async (d) => { v = (await d.collection(p).get()).docs.map((x) => Object.assign({ id: x.id }, x.data())); }); return v; }
 const inBiz = async (fn) => { const b = await T.loadBiz(A); return T.runInBiz({ bizId: A, prefix: T.bizPrefix(b), biz: b }, () => fn(T.tdb())); };
-const make = (o) => inBiz((db) => CORE.ordCreateFromSec(db, o));
+// sec_ord/{mailId} חייב להתקיים (נעילה lk) – נוצר מהטיוטה אם חסר; קיים – לא נדרס (ordId/lk נשמרים)
+async function ensureSo(o) { if (o && typeof o.in === 'string' && /^[A-Za-z0-9_-]+$/.test(o.in)) await prep(async (d) => { const r = d.doc(`b/${A}/sec_ord/${o.in}`); if (!(await r.get()).exists) await r.set(o); }); }
+const make = async (o) => { await ensureSo(o); return inBiz((db) => CORE.ordCreateFromSec(db, o)); };
 async function fails(o, reason) {
   let err = null;
   try { await make(o); } catch (e) { err = e; }
@@ -73,13 +75,14 @@ describe('שלב ג/6: הזמנה מהמזכירה (ordCreateFromSec)', () => {
     assert.equal(lg.length, 1); assert.equal(lg[0].by, 'sec'); assert.equal(lg[0].act, 'create');
   });
 
-  it('reqId כפול (אותו מייל ואותה גרסה) – הזמנה אחת, המלאי יורד פעם אחת; גרסה אחרת = reqId אחר', async () => {
+  it('reqId כפול (אותו מייל ואותה גרסה) – הזמנה אחת, המלאי יורד פעם אחת; גרסה אחרת אחרי ביטול ordId (איפוס) = reqId אחר', async () => {
     const a = await make(secOrd());
     const b = await make(secOrd());
     assert.equal(b.dup, true); assert.equal(b.id, a.id);
     assert.equal((await coll(`b/${A}/ord`)).length, 1);
     assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 3);
     assert.equal((await get(`b/${A}/ordcfg/seq`)).n, 1);
+    await prep((d) => d.doc(`b/${A}/sec_ord/${MAIL}`).update({ ordId: null }));
     const c = await make(secOrd({ ver: 2 }));
     assert.notEqual(c.id, a.id); assert.equal(c.id, 'osec' + MAIL + 'v2');
   });
@@ -155,11 +158,10 @@ describe('שלב ג/6: הזמנה מהמזכירה (ordCreateFromSec)', () => {
     await fails(secOrd({ ver: 3, ordId: a.id }), 'already-ordered');
     assert.equal((await coll(`b/${A}/ord`)).length, 1);
     assert.equal((await make(secOrd())).dup, true, 'אותו reqId – dup');
-    // כתיבה ל-sec_ord שנכשלה (המסמך לא היה קיים) – ההזמנה נוצרה; הקריאה הבאה עם אותו reqId משלימה
+    // כתיבת ordId ל-sec_ord שנכשלה (מדומה: ordId/st נמחקו ו-lk נשאר) – ההזמנה קיימת; הקריאה הבאה עם אותו reqId מחזירה dup ומשלימה
     await seed();
     const c = await make(secOrd());
-    assert.equal(await get(`b/${A}/sec_ord/${MAIL}`), null);
-    await prep((d) => d.doc(`b/${A}/sec_ord/${MAIL}`).set(secOrd()));
+    await prep((d) => d.doc(`b/${A}/sec_ord/${MAIL}`).set(Object.assign(secOrd(), { lk: { reqId: 'sec' + MAIL + 'v1', at: Date.now() } })));
     assert.equal((await make(secOrd())).dup, true);
     const so2 = await get(`b/${A}/sec_ord/${MAIL}`);
     assert.equal(so2.ordId, c.id); assert.equal(so2.st, 'ordered');
@@ -182,5 +184,33 @@ describe('שלב ג/6: הזמנה מהמזכירה (ordCreateFromSec)', () => {
     await fails(secOrd({ custId: 'cX' }), 'ord-blocked');
     assert.equal((await coll(`b/${A}/ord`)).length, 0);
     assert.equal((await coll(`b/${XB}/ord`)).length, 0);
+  });
+
+  it('החלטת מתאם: שתי גרסאות במקביל – הזמנה אחת בלבד, השנייה busy או already-ordered; נעילה ישנה / של אותו reqId לא חוסמת; שגיאה משחררת', async () => {
+    await ensureSo(secOrd());
+    const rs = await Promise.all([1, 2, 3].map((v) => make(secOrd({ ver: v })).then((r) => ({ r }), (e) => ({ reason: e.details && e.details.reason }))));
+    assert.equal(rs.filter((x) => x.r && !x.r.dup).length, 1, JSON.stringify(rs));
+    for (const x of rs) if (!x.r) assert.ok(['busy', 'already-ordered'].includes(x.reason), JSON.stringify(x));
+    assert.equal((await coll(`b/${A}/ord`)).length, 1);
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 3);
+    const so = await get(`b/${A}/sec_ord/${MAIL}`);
+    assert.ok(so.ordId); assert.equal(so.lk, undefined, 'הנעילה נמחקה');
+    // נעילה טרייה של reqId אחר – busy; ישנה (מעל 120 שניות) – לא חוסמת; של אותו reqId – לא חוסמת
+    await seed();
+    const S = `b/${A}/sec_ord/${MAIL}`;
+    await prep((d) => d.doc(S).set(Object.assign(secOrd(), { lk: { reqId: 'secOTHERv9', at: Date.now() } })));
+    await fails(secOrd(), 'busy');
+    await prep((d) => d.doc(S).update({ lk: { reqId: 'secOTHERv9', at: Date.now() - 121000 } }));
+    assert.equal((await make(secOrd())).dup, false);
+    await seed();
+    await prep((d) => d.doc(S).set(Object.assign(secOrd(), { lk: { reqId: 'sec' + MAIL + 'v1', at: Date.now() } })));
+    assert.equal((await make(secOrd())).dup, false);
+    // שגיאה בתוך createCore (טיוטת סיטונאי של לקוח אחר ← ws-not-linked) – הנעילה משתחררת
+    await seed();
+    await prep((d) => d.doc(`b/${A}/ordcfg/wsb_sec${MAIL}v1`).set({ cust: 'c2' }));
+    await ensureSo(secOrd());
+    let err = null; try { await make(secOrd()); } catch (e) { err = e; }
+    assert.equal(err && err.details && err.details.reason, 'ws-not-linked');
+    assert.equal((await get(S)).lk, undefined, 'הנעילה שוחררה אחרי שגיאה');
   });
 });

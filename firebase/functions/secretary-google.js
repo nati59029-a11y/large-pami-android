@@ -1197,7 +1197,9 @@ async function ordRecalc(db, o) {
 //     כתיבה שנכשלה – ההזמנה קיימת, והקריאה הבאה עם אותו reqId מחזירה dup ומשלימה את הכתיבה.
 // (3) "אזל" נבדק בסניף שממנו createCore מוריד מלאי: סניף מקור קבוע (ordcfg/main.src[br]) אם הוגדר, אחרת סניף ההזמנה –
 //     ואז from:br מפורש בשורה, כדי ש-resolveItems לא יעביר בשקט מסניף אחר ("לפי המלאי").
+// (4) החלטת מתאם: נעילה lk:{reqId,at} בטרנזקציה על sec_ord לפני createCore – reqId אחר בתוך 120 שניות = 'busy'. מוסרת בהצלחה ובשגיאה. sec_ord חייב להתקיים.
 const SEC_BY = { uid: 'sec', name: 'המזכירה' };
+const SEC_LK_MS = 120000; // נעילת יצירה על sec_ord (lk) – אחרי 2 דקות נחשבת נטושה
 async function ordCreateFromSec(db, o) {
   const ORD = require('./orders')._core;
   if (!o || typeof o !== 'object') throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
@@ -1207,7 +1209,7 @@ async function ordCreateFromSec(db, o) {
   const reqId = 'sec' + mailId + 'v' + o.ver;
   if (!mailId || !Number.isInteger(o.ver) || o.ver < 1 || reqId.length > 40) throw bad('bad-req', 'מזהה הטיוטה לא תקין');
   const sRef = db.doc('sec_ord/' + mailId);
-  const mark = (id) => sRef.update({ ordId: id, st: 'ordered', upd: Date.now() }).catch((e) => { logger.warn('secretary-google: sec_ord mark failed', { reason: (e && e.code) || 'error' }); });
+  const mark = (id) => sRef.update({ ordId: id, st: 'ordered', upd: Date.now(), lk: FieldValue.delete() }).catch((e) => { logger.warn('secretary-google: sec_ord mark failed', { reason: (e && e.code) || 'error' }); });
   const [ex, so] = await db.getAll(db.doc('ord/o' + reqId), sRef);
   if (ex.exists) {
     if (!so.exists || so.get('ordId') !== ex.id) await mark(ex.id);
@@ -1235,7 +1237,22 @@ async function ordCreateFromSec(db, o) {
   const cust = ORD.cleanCust({ name: st.custName || (o.custNew && o.custNew.bn) || '', phone: st.phone }); // טלפון/שם חסר – bad-phone/bad-name
   const raw = ORD.rawItems(items);
   const custId = o.custId ? ORD.idOf(o.custId, 'לקוח') : '';
-  const r = await ORD.createCore(db, w, { reqId, br, cust, raw, note: '', custId, input: {}, src: 'mail', sec: { in: mailId, ch: 'mail' } });
+  // נעילה על הטיוטה (בלי לשנות את createCore): שתי גרסאות במקביל לא יוצרות שתי הזמנות. נעילה של אותו reqId לא חוסמת את עצמה (ניסיון חוזר)
+  await db.runTransaction(async (tx) => {
+    const v = await tx.get(sRef);
+    if (!v.exists) throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
+    if (v.get('ordId')) throw pre('already-ordered', 'מהטיוטה הזו כבר נוצרה הזמנה');
+    const lk = v.get('lk');
+    if (lk && typeof lk === 'object' && lk.reqId !== reqId && Date.now() - (Number(lk.at) || 0) < SEC_LK_MS) throw pre('busy', 'ההזמנה מהטיוטה הזו נוצרת כרגע');
+    tx.update(sRef, { lk: { reqId, at: Date.now() } });
+  });
+  let r;
+  try {
+    r = await ORD.createCore(db, w, { reqId, br, cust, raw, note: '', custId, input: {}, src: 'mail', sec: { in: mailId, ch: 'mail' } });
+  } catch (e) {
+    await sRef.update({ lk: FieldValue.delete() }).catch(() => {});
+    throw e;
+  }
   await mark(r.id);
   return r;
 }
