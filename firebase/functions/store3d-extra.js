@@ -462,20 +462,28 @@ exports.s3Clean = onSchedule({ region: LEGACY_REGION, schedule: 'every day 03:45
 const SEC_RUNS = 200;
 async function secBrief(db, who, brs, now) {
   if (!who || who.role !== 'manager' || !who.biz || !who.biz.features || who.biz.features.store3d !== true) return null;
-  const allow = Array.isArray(brs) ? brs.filter((b) => typeof b === 'string' && C.RE.br.test(b)).slice(0, 30) : null;
-  if (allow && !allow.length) return null; // מנהל מוגבל בלי סניף תקין – אין מה להציג
-  let rq = db.collection('srun');
-  if (allow) rq = rq.where('br', 'in', allow);
-  let fq = db.collection('s3fix').where('st', 'in', X.SEC_FIX);
-  if (allow) fq = fq.where('br', 'in', allow); // שני תנאי שוויון – בלי אינדקס מורכב
-  const [rs, fc] = await Promise.all([
-    rq.where('doneAt', '>=', now - X.SEC_DAYS * D1).orderBy('doneAt', 'desc').limit(SEC_RUNS).select('st', 'k', 'br', 'map', 'doneAt', 'sum').get(),
-    fq.count().get(),
+  // תיקון סבב 3: כל שאילתה עד 30 צירופים של in (X.secPlan) – גם למנהל עם הרבה סניפים
+  const plan = X.secPlan(brs);
+  if (!plan.runs.length) return null; // מנהל מוגבל בלי סניף תקין – אין מה להציג
+  const allow = Array.isArray(brs) ? plan.runs.flat() : null;
+  const from = now - X.SEC_DAYS * D1;
+  const [rss, fcs] = await Promise.all([
+    Promise.all(plan.runs.map((g) => {
+      let q = db.collection('srun');
+      if (g) q = q.where('br', 'in', g);
+      return q.where('doneAt', '>=', from).orderBy('doneAt', 'desc').limit(SEC_RUNS).select('st', 'k', 'br', 'map', 'doneAt', 'sum').get();
+    })),
+    Promise.all(plan.fix.map((g) => {
+      let q = db.collection('s3fix').where('st', 'in', X.SEC_FIX);
+      if (g) q = q.where('br', 'in', g); // שני תנאי שוויון – בלי אינדקס מורכב; 3 × עד 10 = עד 30 צירופים
+      return q.count().get();
+    })),
   ]);
-  const latest = X.secLatest(rs.docs.map((d) => [d.id, d.data()]), allow);
+  const latest = X.secLatest(rss.flatMap((rs) => rs.docs.map((d) => [d.id, d.data()])), allow);
+  const nFix = fcs.reduce((n, fc) => n + fc.data().count, 0);
   const shorts = {};
   await Promise.all(latest.map(async ([id]) => { const s = await db.doc('s3short/' + id).get(); if (s.exists) shorts[id] = s.data(); }));
-  return X.secText(latest, fc.data().count, shorts, allow, rs.size >= SEC_RUNS);
+  return X.secText(latest, nFix, shorts, allow, plan.cut || rss.some((rs) => rs.size >= SEC_RUNS));
 }
 
 // לבדיקות ולשימוש פנימי (לא נספר כפונקציה)

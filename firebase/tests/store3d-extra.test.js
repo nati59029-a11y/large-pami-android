@@ -380,6 +380,10 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
     assert.ok(lim.text.includes('בסניפים שלך') && lim.text.includes('ציון 78') && !lim.text.includes('north') && !lim.text.includes('91'), lim.text);
     assert.ok(lim.text.includes('משימות תיקון פתוחות: 1.'));
     assert.equal(await brief({ uid: MGR, role: 'manager', biz: bizA }, ['nosuch']), null, 'סניף בלי נתונים – אין בלוק');
+    // תיקון סבב 3: מנהל מוגבל עם 12 סניפים (מעבר ל-10) – בלי שגיאת "יותר מ-30 צירופים", וכל הנתונים של הסניפים שלו נספרים
+    const many = ['main', 'north'].concat(Array.from({ length: 10 }, (_, i) => 'x' + i));
+    const big = await brief({ uid: MGR, role: 'manager', biz: bizA }, many);
+    assert.ok(big && big.text.includes('ציון 78') && big.text.includes('ציון 91') && big.text.includes('משימות תיקון פתוחות: 2.'), big && big.text);
     assert.equal(await brief({ uid: E1, role: 'employee', biz: bizA }, null), null, 'עובד – כלום');
     assert.equal(await brief({ uid: MGR, role: 'manager', biz: Object.assign({}, bizA, { features: Object.assign({}, bizA.features, { store3d: false }) }) }, null), null, 'תוספת כבויה – כלום');
     assert.equal(await brief({ uid: EB, role: 'manager', biz: bizB }, null, B), null, 'עסק אחר (התוספת כבויה שם) – כלום');

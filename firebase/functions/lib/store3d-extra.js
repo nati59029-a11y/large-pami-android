@@ -359,6 +359,17 @@ function secLatest(list, brs) {
   return Object.values(best).sort((a, b) => b[1].doneAt - a[1].doneAt).slice(0, SEC_MAPS);
 }
 const ddmmyyyy = (t) => { const w = TK.wall(t); return w.d + '.' + (w.m + 1) + '.' + w.y; };
+// תיקון סבב 3: תכנון השאילתות של secBrief. Firestore מגביל שאילתה ל-30 צירופים של תנאי in (מכפלת אורכי הרשימות),
+// ולכן: סבבים – קבוצות של עד 30 סניפים (br in); משימות תיקון – st in (3) × קבוצות של עד 10 סניפים = עד 30.
+// עד SEC_BRS סניפים (מעבר – cut, והסיכום מסומן "חלקי"). brs = null (כל העסק) → שאילתה אחת לכל סוג, בלי br.
+const SEC_BRS = 60;
+const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+function secPlan(brs) {
+  if (!Array.isArray(brs)) return { runs: [null], fix: [null], cut: false };
+  const all = [...new Set(brs.filter((b) => brOk(b, null)))];
+  const a = all.slice(0, SEC_BRS);
+  return { runs: chunk(a, 30), fix: chunk(a, Math.floor(30 / SEC_FIX.length)), cut: all.length > a.length };
+}
 // latest = secLatest(...); fixes = מספר משימות התיקון הפתוחות (כבר מסונן), או [{br, st}] של s3fix; shorts = { runId: s3short };
 // partial = true – ייתכן שחסרים סבבים (הגענו למגבלת הקריאה). מחזיר { text, at } או null (אין מה לספר)
 function secText(latest, fixes, shorts, brs, partial) {
@@ -389,5 +400,5 @@ module.exports = {
   D1, BIN_DAYS, TEX_DAYS, KEEP_RUNS, YOUNG_MS, W_DEF, CAT, SEV_PEN, RE_FIX,
   weights, overridden, hardIdx, effSt, effAi, scoreSlot, runSum, prevRun, ownerOf, bayOf, shortList, fixId, fixTasks, verifyResult,
   monthRange, inMonth, perfAll, parseRunFile, runGroup, keepPlan, strayFiles, expired, binPurge, texOrphans, txPaths, splitNote, str,
-  SEC_DAYS, SEC_MAPS, SEC_WEAK, SEC_FIX, secLatest, secText,
+  SEC_DAYS, SEC_MAPS, SEC_WEAK, SEC_FIX, SEC_BRS, secPlan, secLatest, secText,
 };

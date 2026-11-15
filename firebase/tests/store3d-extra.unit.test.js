@@ -228,3 +228,26 @@ describe('שלב 13ב – סיכום למזכירה (secLatest / secText)', () =
     assert.equal(X.secText([], -3, {}, null), null);
   });
 });
+
+describe('תיקון סבב 3 – secPlan: כל שאילתה עד 30 צירופים של in', () => {
+  const brs = (n) => Array.from({ length: n }, (_, i) => 'b' + i);
+  const combos = (st, g) => (st ? st.length : 1) * (g ? g.length : 1);
+  it('כל העסק – שאילתה אחת לכל סוג, בלי br', () => {
+    assert.deepEqual(X.secPlan(null), { runs: [null], fix: [null], cut: false });
+  });
+  for (const n of [1, 10, 11, 30, 31, 60]) {
+    it(`מנהל עם ${n} סניפים – כל הסניפים מכוסים, ובכל שאילתה עד 30 צירופים`, () => {
+      const p = X.secPlan(brs(n));
+      assert.deepEqual(p.runs.flat(), brs(n)); assert.deepEqual(p.fix.flat(), brs(n));
+      assert.ok(p.runs.every((g) => combos(null, g) <= 30), 'סבבים');
+      assert.ok(p.fix.every((g) => combos(X.SEC_FIX, g) <= 30), 'משימות: st in × br in');
+      assert.equal(p.cut, false);
+    });
+  }
+  it('יותר מ-SEC_BRS סניפים – נחתך ומסומן cut; כפילויות וסניף לא תקין מסוננים; ריק – אין שאילתות', () => {
+    const p = X.secPlan(brs(X.SEC_BRS + 5));
+    assert.equal(p.runs.flat().length, X.SEC_BRS); assert.equal(p.cut, true);
+    assert.deepEqual(X.secPlan(['main', 'main', 'BAD!', 7]).fix, [['main']]);
+    assert.deepEqual(X.secPlan([]), { runs: [], fix: [], cut: false });
+  });
+});
