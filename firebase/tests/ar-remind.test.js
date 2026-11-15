@@ -203,6 +203,81 @@ describe('תיקון סבב 1 (בודק 5): יתרת זכות, טיוטה, לא 
   });
 });
 
+describe('החלטות 15.11.2026: תזכורות על חובות מיובאים, ניסיון חוזר לשליחה שנכשלה', () => {
+  beforeEach(async () => { await seed(); });
+  const old = (id, cust, d, due, open, x) => Object.assign({ t: 'old', k: 'dr', ot: 'inv', ext: '2025/' + id, no: '2025/' + id, ser: 'X', d, ...(due ? { due } : {}), cust, custSnap: snap('לקוח ' + cust, cust === 'c1' ? 'c1@x.invalid' : ''),
+    lines: [], vm: 'inc', rate: 0, net: open, vat: 0, gross: open, open, st: 'open', draft: false, bt: 'osek', br: '_', ord: [], by: MGR, at: 1, imp: 'b1', note: 'מסמך מיובא' }, x || {});
+  it('חשבונית מיובאת ויתרת פתיחה מקבלות תזכורת עם המספר המקורי / "יתרת פתיחה"; זכות מיובאת – לא', async () => {
+    await put('x_inv_101', old('101', 'c1', '2026-11-01', '2026-12-10', 5000));
+    await put('x_ob_c1', old('ob', 'c1', '2026-10-31', '2026-12-10', 3000, { t: 'ob', ot: 'ob', ext: '', no: '' }));
+    await put('x_rc_9', old('9', 'c4', '2026-11-01', '2026-12-10', 2000, { k: 'cr', ot: 'rc', st: 'ok' }));
+    const m = mailer();
+    await run(at('2026-12-07', 10), m);
+    assert.deepEqual(m.cust().map((x) => x.to), ['c1@x.invalid']);
+    const t = m.cust()[0].text;
+    assert.match(t, /• חשבונית 2025\/101 מיום 01\/11\/2026/); assert.match(t, /• יתרת פתיחה מיום 31\/10\/2026/); assert.match(t, /בסך ₪80\.00/);
+    assert.ok(R.remDoc({ t: 'inv' }) && R.remDoc({ t: 'ob', k: 'dr' }) && !R.remDoc({ t: 'old', k: 'cr' }) && !R.remDoc({ t: 'rc' }));
+  });
+  it('שליחה שנכשלה (send) – ניסיון חוזר בריצה הבאה, עד 3 ביום; הסיכום היומי מחכה; ביום העסקים הבא – שוב', async () => {
+    await put('invD1', inv('invD1', 'c1', '2026-11-20', '2026-12-10', 11800, { draft: false }));
+    const m = mailer((a) => (a.to === 'c1@x.invalid' ? 'send' : ''));
+    const o1 = (await run(at('2026-12-07', 10), m))[A];
+    assert.equal(o1.fail, 1); assert.equal(o1.retry, 1);
+    assert.equal((await adm.doc(`${P}arrem/invD1_b`).get()).exists, false, 'השלב שוחרר');
+    assert.equal((await adm.doc(`${P}arrem/n_2026-12-07`).get()).get('done'), undefined, 'היום לא סומן done');
+    assert.equal((await adm.doc(`${P}arrem/sum_2026-12-07`).get()).exists, false, 'הסיכום מחכה');
+    const o2 = (await run(at('2026-12-07', 10, 15), m))[A];
+    assert.equal(o2.retry, 1);
+    const o3 = (await run(at('2026-12-07', 10, 30), m))[A];
+    assert.equal(o3.fail, 1); assert.equal(o3.retry, undefined, 'אחרי 3 ניסיונות – לא עוד');
+    const lk = await adm.doc(`${P}arrem/c_c1_2026-12-07`).get();
+    assert.equal(lk.get('tries'), 3); assert.equal(lk.get('r').why, 'send');
+    assert.equal(m.L.filter((x) => x.to === 'c1@x.invalid').length, 3);
+    assert.equal((await adm.doc(`${P}arrem/sum_2026-12-07`).get()).exists, true, 'אחרי שהניסיונות נגמרו – סיכום יומי');
+    assert.equal((await adm.doc(`${P}arrem/n_2026-12-07`).get()).get('n'), 0, 'כשלים לא נספרים בתקרה');
+    await run(at('2026-12-07', 10, 45), m);
+    assert.equal(m.L.filter((x) => x.to === 'c1@x.invalid').length, 3, 'באותו יום – לא עוד');
+    const ok2 = mailer();
+    await run(at('2026-12-08', 10), ok2);
+    assert.deepEqual(ok2.cust().map((x) => x.to), ['c1@x.invalid'], 'ביום העסקים הבא – השלב נשלח');
+  });
+  it('תיקון בודק: מכסת המייל (rate) בניסיון חוזר לא מאפסת את מונה הניסיונות; חוב מיובא ישן בלי מועד – מועד לפי תנאי הלקוח', async () => {
+    await put('invD1', inv('invD1', 'c1', '2026-11-20', '2026-12-10', 11800, { draft: false }));
+    let k = 0;
+    const seq = ['send', 'rate', 'send', 'rate', 'send', 'send'];
+    const m = mailer((a) => (a.to === 'c1@x.invalid' ? seq[k++] || '' : ''));
+    for (let i = 0; i < 6; i++) await run(at('2026-12-07', 10, i * 5), m);
+    const lk = await adm.doc(`${P}arrem/c_c1_2026-12-07`).get();
+    assert.equal(lk.get('tries'), 3, 'רק 3 ניסיונות שליחה נספרו'); assert.equal(lk.get('r').why, 'send');
+    assert.equal(m.L.filter((x) => x.to === 'c1@x.invalid' && x.why === 'send').length, 3, 'בדיוק 3 כשלי שליחה');
+    assert.equal(k, 5, 'אחרי 3 ניסיונות – לא עוד (2 עצירות מכסה באמצע)');
+    // חוב מיובא בלי due (יובא לפני 15.11): c4 בשוטף+30, תאריך 15.10.2026 → מועד 30.11.2026 (ראשון) → בתאריך 7.12 – תזכורת
+    await seed();
+    await put('x_inv_77', old('77', 'c4', '2026-10-15', undefined, 4000, { custSnap: snap('לקוח c4', 'c4@x.invalid') }));
+    const m2 = mailer();
+    await run(at('2026-12-07', 10), m2);
+    assert.deepEqual(m2.cust().map((x) => x.to), ['c4@x.invalid']);
+    assert.match(m2.cust()[0].text, /חשבונית 2025\/77 .*לתשלום עד 30\/11\/2026/);
+    assert.equal((await adm.doc(`${P}ardoc/x_inv_77`).get()).get('due'), undefined, 'לא נכתב למסמך');
+  });
+  it('ניסיון חוזר מצליח: כשל ראשון ואז הצלחה – הודעה אחת שנשלחה, ולא עוד באותו יום; כתובת לא תקינה (bad-to) – בלי ניסיון חוזר', async () => {
+    await put('invD1', inv('invD1', 'c1', '2026-11-20', '2026-12-10', 11800, { draft: false }));
+    await put('invD4', inv('invD4', 'c4', '2026-11-20', '2026-12-10', 11800, { draft: false }));
+    let k = 0;
+    const m = mailer((a) => (a.to === 'c1@x.invalid' && k++ === 0 ? 'send' : a.to === 'c4@x.invalid' ? 'bad-to' : ''));
+    const o1 = (await run(at('2026-12-07', 10), m))[A];
+    assert.equal(o1.retry, 1, JSON.stringify(o1));
+    await run(at('2026-12-07', 10, 15), m);
+    await run(at('2026-12-07', 10, 30), m);
+    assert.equal(m.cust().filter((x) => x.to === 'c1@x.invalid').length, 1);
+    assert.equal(m.L.filter((x) => x.to === 'c4@x.invalid').length, 1, 'bad-to – פעם אחת');
+    const lk = await adm.doc(`${P}arrem/c_c1_2026-12-07`).get();
+    assert.equal(lk.get('r').ok, true); assert.equal(lk.get('tries'), 2);
+    assert.equal((await adm.doc(`${P}arrem/invD1_b`).get()).exists, true);
+    assert.equal((await adm.doc(`${P}arrem/n_2026-12-07`).get()).get('done'), true);
+  });
+});
+
 describe('סיכום חודשי אוטומטי (invM)', () => {
   beforeEach(async () => { await seed({ rem: false }); });
   it('ביום העסקים הראשון בחודש – ללקוח עם invM בלבד, פעם אחת, על החודש הקודם', async () => {
