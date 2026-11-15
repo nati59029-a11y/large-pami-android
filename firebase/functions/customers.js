@@ -380,6 +380,9 @@ async function update(tx, db, w, o, opts, st) {
   const { id, ref, base, moved, pref, pcs, pcref, now } = st;
   const ws = opts.wholesale;
   if (moved) {
+    // שלב 4, תיקון סבב 1 (ליקוי 1): ללקוח לפי טלפון יש חשבוניות/קבלות (ardoc) – לא עוברים ל-t{tz}, אחרת המסמכים נשארים על המזהה הישן והיתרה (cust.ar) נשברת
+    const ds = await tx.get(db.collection('ardoc').where('cust', '==', 'p' + o.phone).limit(1));
+    if (!ds.empty) throw pre('move-ardoc', 'אי אפשר להוסיף ת.ז ללקוח הזה: כבר הופקו לו חשבוניות או קבלות. הלקוח נשאר לפי מספר הטלפון.');
     const d = Object.assign({}, base, { tz: o.tz, upd: now, by: w.uid });
     delete d.mv;
     const up = merge(base, o, opts.fill) || {};

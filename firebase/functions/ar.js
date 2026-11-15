@@ -400,6 +400,7 @@ async function docRender(db, w, doc, cfg, isVoid) {
   } else {
     base.lines = (doc.lines || []).map((l) => ({ n: l.n, q: l.q, p: l.p, u: l.u || '' }));
     if (doc.disc) base.disc = doc.disc;
+    if (doc.adj) base.adj = doc.adj;
     if (doc.terms) base.terms = doc.terms;
     if (doc.t === 'inv') base.due = doc.dueX || doc.due || '';
     if (doc.t === 'cr' && doc.ref) notes.push(`זיכוי לחשבונית ${doc.ref.replace(/^(inv|ir)[DO]/, '')}`);
@@ -598,7 +599,19 @@ async function arReceipt(request) {
     const r = B.issue('rc', { cust: cid, custSnap: ARD.custSnap(c.data), lines: [], vm: 'inc', rate: 0, net: amt, vat: 0, gross: amt, pay: ARD.payOf(pay), req: reqId, ...(pf.ok ? { proof: pf.id } : {}) });
     for (const [v, a] of plan) { if (r.d.open <= 0) break; B.alloc(r, v, a); }
     if (pf.ok) pf.use(r.id);
+    // תיקון סבב 1 (הערה 2): קבלה שסוגרת במלואה את החשבונית של הזמנה – ההזמנה עוברת ל"שולם" / "הושלם" (נשלחה), כמו "שולם".
+    // paid.rc = הקבלה, כך שביטול הקבלה מחזיר אותה ל"ממתין לתשלום". הזמנה עם קווים (cell) נשארת כמו היום – "שולם" ידני (ניוד)
+    const shut = [...new Set(B.allocs.filter((a) => a.rc === r.id).map((a) => B.docs[a.inv]).filter((v) => v && v.d.open === 0).flatMap((v) => (v.d.ord || []).map((o) => o + '|' + v.id)))];
+    const oss = shut.length ? await tx.getAll(...shut.map((k) => db.doc('ord/' + k.split('|')[0]))) : [];
     B.flush();
+    oss.forEach((os, i) => {
+      const iv = shut[i].split('|')[1], inv = os.exists ? os.get('inv') : null, cl = os.exists ? os.get('cell') : null;
+      if (!os.exists || !OC.PAYABLE.includes(os.get('status')) || !inv || inv.id !== iv || (cl && Array.isArray(cl.lines) && cl.lines.length)) return;
+      const amt0 = os.get('vm') && isNum(os.get('gross')) ? os.get('gross') : os.get('total');
+      const paid = { method: OC.PAY_METHODS.includes(input.method) ? input.method : 'other', at: B.now, by: w.uid, amt: amt0, rc: r.id, note: `${DT.rc} #${r.d.no}` };
+      tx.update(os.ref, { status: os.get('shp') ? 'done' : 'paid', paid, upd: B.now });
+      tx.set(logRef(db, os.id), { t: B.now, by: w.uid, act: 'paid', note: `${DT.rc} #${r.d.no} סגרה את החשבונית` });
+    });
     res = { id: r.id, no: r.d.no, draft: r.d.draft, gross: amt, left: r.d.open, alloc: B.allocs.map((a) => ({ inv: a.inv, amt: a.amt })), bal: c.ar.bal };
     tx.set(markRef(db, reqId), { k: 'arReceipt', key: cid, r: res, t: B.now, by: w.uid });
   }, { maxAttempts: 50 });
@@ -666,6 +679,18 @@ async function arCredit(request) {
       });
     }
     const sm = AC.docSums(lines, vm, x.d.rate, disc);
+    // תיקון סבב 1 (ליקוי 2): זיכוי שסוגר את כל השורות שנשארו (מלא, או לפי שורות עד הסוף) מזכה בדיוק את היתרה: gross − זיכויים קודמים.
+    // עיגול המע"מ/ההנחה בכל זיכוי בנפרד יכול להשאיר אגורה פתוחה (או לחסום ב-too-much). ההפרש נשמר ב-adj (אגורות) ומודפס כ"התאמת עיגול",
+    // ו-net/vat הם היתרה המדויקת של החשבונית – כך שסך הזיכויים = החשבונית גם בלפני מע"מ וגם במע"מ.
+    if (mode !== 'amt' && !prevAmt && L.every((l, i) => !(l.q > 0) || Math.round((l.q - (used.get(i) || 0) - ((sel.find((s) => s.i === i) || {}).q || 0)) * 1000) / 1000 <= 0)) {
+      const pN = prev.docs.reduce((s, p) => s + (p.get('t') === 'cr' ? p.get('net') || 0 : 0), 0);
+      const pV = prev.docs.reduce((s, p) => s + (p.get('t') === 'cr' ? p.get('vat') || 0 : 0), 0);
+      const adj = (x.d.gross - prevG) - sm.gross;
+      if (adj) {
+        if (Math.abs(adj) > 100) throw pre('sum-mismatch', 'סכום הזיכוי לא תואם ליתרת החשבונית. פנו למנהל');
+        sm.net = x.d.net - pN; sm.vat = x.d.vat - pV; sm.gross = x.d.gross - prevG; sm.adj = adj;
+      }
+    }
     if (sm.gross <= 0) throw pre('bad-amt', 'סכום הזיכוי חייב להיות גדול מ-0');
     if (prevG + sm.gross > x.d.gross) throw pre('too-much', `אפשר לזכות עד ${ag2(Math.max(0, x.d.gross - prevG))} בחשבונית הזו`);
     const back = input.restock === true ? lines.filter((l) => l.pid) : [];
@@ -674,6 +699,7 @@ async function arCredit(request) {
     await B.needSeq('cr');
     const body = { cust: x.d.cust || '', custSnap: x.d.custSnap, lines, vm, rate: x.d.rate, net: sm.net, vat: sm.vat, gross: sm.gross, ord: x.d.ord || [], br: x.d.br || NB, ref: invId, note: 'סיבה: ' + reason, req: reqId };
     if (disc) body.disc = disc;
+    if (sm.adj) body.adj = sm.adj;
     if (mode !== 'amt') body.li = sel;
     if (back.length) body.rs = true;
     const r = B.issue('cr', body);
@@ -717,9 +743,10 @@ async function arVoidRc(request) {
     for (const a of live) invs.push([a, await B.needDoc(a.get('inv'))]);
     const c = x.d.cust ? await B.needCust(x.d.cust) : null;
     // קבלה שנרשמה ב"שולם" של הזמנה (paid.rc) – ההזמנה חוזרת ל"ממתין לתשלום"
-    const oid = (x.d.ord || [])[0];
-    const os = oid ? await tx.get(db.doc('ord/' + oid)) : null;
-    const back = os && os.exists && os.get('paid') && os.get('paid').rc === id ? os : null;
+    // תיקון סבב 1 (הערה 2): גם הזמנות של החשבוניות שהקבלה סגרה (arReceipt מכרטיס הלקוח) – לפי paid.rc
+    const oids = [...new Set([(x.d.ord || [])[0]].concat(...invs.map(([, v]) => (v && v.d.ord) || [])).filter(Boolean))];
+    const oss = oids.length ? await tx.getAll(...oids.map((o) => db.doc('ord/' + o))) : [];
+    const backs = oss.filter((os) => os.exists && os.get('paid') && os.get('paid').rc === id);
     let sum = 0;
     for (const [a, v] of invs) {
       const amt = a.get('amt');
@@ -730,13 +757,13 @@ async function arVoidRc(request) {
     if (c && c.data) { c.ar.bal += x.d.gross; c.ar.open += sum; c.ar.cr -= x.d.open; c.dirty = true; }
     B.set(x, { open: 0, st: 'void', void: { at: B.now, by: w.uid, why: reason } });
     B.flush();
-    if (back) {
-      const pd = back.get('paid');
+    for (const back of backs) {
+      const oid = back.id, pd = back.get('paid');
       tx.update(back.ref, { status: 'wait_pay', paid: require('firebase-admin/firestore').FieldValue.delete(), upd: B.now });
       if (pd && pd.sup) tx.set(db.doc('ordpay/' + oid), { st: 'void', upd: B.now, why: 'unpay' }, { merge: true });
       tx.set(logRef(db, oid), { t: B.now, by: w.uid, act: 'unpay', note: `ביטול קבלה #${x.d.no}: ${reason}` });
     }
-    res = { id, no: x.d.no, reopened: invs.map(([a]) => a.get('inv')), ord: back ? oid : '' };
+    res = { id, no: x.d.no, reopened: invs.map(([a]) => a.get('inv')), ord: backs.length ? backs[0].id : '' };
     tx.set(markRef(db, reqId), { k: 'arVoidRc', key: id, r: res, t: B.now, by: w.uid });
   }, { maxAttempts: 50 });
   if (!res.dup) { try { await afterIssue(w, id, { isVoid: true }); } catch (e) { logger.error('ar: arVoidRc after failed', { name: e && e.name, msg: String(e && e.message).slice(0, 200) }); } }
@@ -934,6 +961,11 @@ async function setArOff(request) {
   if (!Object.keys(up).length) throw bad('bad-cfg', 'אין מה לשמור');
   const ref = db.doc('arcfg/off');
   const s = await ref.get();
+  // תיקון סבב 1 (הערה 4): אחרי שהופק מסמך רשמי אחד – אין חזרה לטיוטה (המספור הרשמי חייב להמשיך ברצף)
+  if (up.on === false && s.exists && s.get('on') === true) {
+    const ss = await Promise.all(ARD.TYPES.map((t) => db.doc(`arcfg/seq_${t}O`).get()));
+    if (ss.some((x) => x.exists)) throw pre('official-started', 'כבר הופקו מסמכים רשמיים – אי אפשר לחזור למצב טיוטה');
+  }
   const now = Date.now();
   if (!s.exists) await ref.set({}, { merge: true });
   await ref.update(Object.assign(up, { upd: now, by: w.uid }));

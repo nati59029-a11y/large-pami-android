@@ -347,11 +347,14 @@ describe('מסמך קבוע, הרשאות וחוקים', () => {
     const id3 = await order(WS); assert.equal((await ship(id3)).ar.no, 3402);
     assert.equal((await get(`b/${A}/ardoc/invD1`)).draft, true, 'מסמך שהופק כטיוטה נשאר טיוטה');
     assert.equal((await call('setArOff', SUPER, { bizId: A, start: { inv: 9000 } })).reason, 'seq-started');
-    await ok(call('setArOff', SUPER, { bizId: A, on: false, bt: 'patur' }));
+    // תיקון סבב 1 (הערה 4): אחרי מסמך רשמי – אין חזרה לטיוטה
+    assert.equal((await call('setArOff', SUPER, { bizId: A, on: false, bt: 'patur' })).reason, 'official-started');
+    assert.equal((await get(`b/${A}/arcfg/off`)).on, true);
+    await ok(call('setArOff', SUPER, { bizId: A, bt: 'patur' }));
     const id4 = await order(PR, [{ pid: 'pA', qty: 1, price: 89.9 }], E1);
     const p = await ok(call('markOrderPaid', E1, { id: id4, method: 'cash' }));
     const ir = await get(`b/${A}/ardoc/${p.ar.id}`);
-    assert.equal(ir.rate, 0); assert.equal(ir.vat, 0); assert.equal(ir.gross, 8990); assert.equal(ir.bt, 'patur'); assert.equal(ir.ser, 'D');
+    assert.equal(ir.rate, 0); assert.equal(ir.vat, 0); assert.equal(ir.gross, 8990); assert.equal(ir.bt, 'patur'); assert.equal(ir.ser, 'O');
     await balanced(WS);
   });
   it('חוקים: ardoc / aralloc – עובד עם הזמנות ומנהל קוראים, בלי כתיבה; arproof – אף אחד; arDoc due – מנהל בלבד', async () => {
@@ -464,5 +467,89 @@ describe('arIssue, סיכום חודשי ועומס מספור', () => {
       assert.equal((await get(`b/${A}/arcfg/seq_${t}D`)).n, 25);
     }
     for (const c of custs.slice(0, 5)) await balanced(c);
+  });
+});
+
+// תיקון סבב 1 אחרי בודק (15.11.2026)
+describe('תיקון סבב 1 – ליקויים 1, 2, 4 והערות 2, 4', () => {
+  it('ליקוי 1: לקוח לפי טלפון עם חשבונית – הוספת ת"ז נחסמת (move-ardoc), שום דבר לא זז, והיתרה נשארת מאוזנת; בלי מסמכים – המעבר עובד כמו קודם', async () => {
+    const P = 'p0545555555', T1 = 't000000018';
+    await prep(async (d) => { await d.doc(`b/${A}/cust/${P}`).set({ name: 'יוסי', phone: '0545555555', terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} }); });
+    const cr = await ok(call('createOrder', MGR, { reqId: rid(), br: 'br1', cust: { name: 'יוסי', phone: '0545555555' }, custId: P, items: [{ pid: 'pA', qty: 1, price: 89.9 }] }));
+    await ship(cr.id, MGR);
+    const before0 = await get(`b/${A}/cust/${P}`);
+    const sv = await call('saveCust', MGR, { id: P, cust: { tz: '000000018', name: 'יוסי', phone: '0545555555' } });
+    assert.equal(sv.reason, 'move-ardoc', sv.text);
+    assert.match(sv.text, /אי אפשר להוסיף ת\.ז/);
+    // גם בלי id (upsert לפי טלפון + ת"ז) – נחסם
+    assert.equal((await call('saveCust', MGR, { cust: { tz: '000000018', name: 'יוסי', phone: '0545555555' } })).reason, 'move-ardoc');
+    assert.equal(await get(`b/${A}/cust/${T1}`), null, 'לא נוצר לקוח t');
+    assert.deepEqual(await get(`b/${A}/cust/${P}`), before0, 'הלקוח הישן לא השתנה');
+    await ok(call('arReceipt', MGR, { reqId: rid(), cust: P, amt: 50, method: 'cash' }));
+    const a = await balanced(P); assert.equal(a.bal, 8990 - 5000);
+    // לקוח בלי מסמכים – המעבר p→t עובד כמו קודם
+    await prep(async (d) => { await d.doc(`b/${A}/cust/p0546666666`).set({ name: 'רון', phone: '0546666666', at: 1, upd: 1, x: {} }); });
+    const m = await ok(call('saveCust', MGR, { id: 'p0546666666', cust: { tz: '000000026', name: 'רון', phone: '0546666666' } }));
+    assert.equal(m.id, 't000000026'); assert.equal((await get(`b/${A}/cust/p0546666666`)).mv, 't000000026');
+  });
+  it('ליקוי 2: זיכוי מלא אחרי זיכוי לפי שורות סוגר את החשבונית בדיוק – גם כשהעיגול משאיר אגורה וגם כשהוא עובר אגורה; שורת "התאמת עיגול" ב-PDF', async () => {
+    for (const [pr, why] of [[12.35, 'חסר'], [12.25, 'עודף']]) {
+      await seed();
+      const id = await order(WS, [{ pid: 'pA', qty: 1, price: pr }, { pid: 'pB', qty: 1, price: pr }]);
+      const r = await ship(id, MGR);
+      const inv = await get(`b/${A}/ardoc/${r.ar.id}`);
+      const c1 = await ok(call('arCredit', MGR, { reqId: rid(), inv: r.ar.id, mode: 'lines', lines: [{ i: 0, q: 1 }], reason: 'x' }));
+      const naive = 2 * c1.gross - inv.gross; // בלי התיקון: הזיכוי השני היה שווה לראשון
+      assert.notEqual(naive, 0, why + ': המקרה אכן בודק עיגול');
+      const c2 = await ok(call('arCredit', MGR, { reqId: rid(), inv: r.ar.id, mode: 'full', reason: 'x' }));
+      assert.equal(c1.gross + c2.gross, inv.gross, why);
+      const x = await get(`b/${A}/ardoc/${r.ar.id}`); assert.equal(x.open, 0, why); assert.equal(x.st, 'paid', why);
+      const d2 = await get(`b/${A}/ardoc/${c2.id}`), d1 = await get(`b/${A}/ardoc/${c1.id}`);
+      assert.equal(d2.adj, inv.gross - c1.gross - (c1.gross), why + ': adj = ההפרש');
+      assert.equal(d1.net + d2.net, inv.net, why + ' net'); assert.equal(d1.vat + d2.vat, inv.vat, why + ' vat');
+      assert.equal(d2.net + d2.vat, d2.gross);
+      assert.deepEqual(d2.li, [{ i: 1, q: 1 }], 'השורות שנשארו נשמרות לתיעוד');
+      // ה-PDF נבנה (docRender בודק שהסכום המודפס = gross) וכולל "התאמת עיגול"
+      const k = require('../functions/lib/ar-pdf').calc({ lines: d2.lines, vm: d2.vm, rate: d2.rate, adj: d2.adj });
+      assert.equal(k.gross, d2.gross); assert.equal(k.adj, d2.adj);
+      assert.equal((await call('arDoc', MGR, { id: c2.id, op: 'pdf' })).status, 'OK');
+      assert.equal((await call('arCredit', MGR, { reqId: rid(), inv: r.ar.id, mode: 'full', reason: 'x' })).reason, 'nothing-left');
+      await balanced(WS);
+    }
+    // זיכוי לפי שורות שמכסה את כל מה שנשאר – אותו כלל
+    await seed();
+    const id = await order(WS, [{ pid: 'pA', qty: 1, price: 12.35 }, { pid: 'pB', qty: 1, price: 12.35 }]);
+    const r = await ship(id, MGR);
+    await ok(call('arCredit', MGR, { reqId: rid(), inv: r.ar.id, mode: 'lines', lines: [{ i: 0, q: 1 }], reason: 'x' }));
+    await ok(call('arCredit', MGR, { reqId: rid(), inv: r.ar.id, mode: 'lines', lines: [{ i: 1, q: 1 }], reason: 'x' }));
+    assert.equal((await get(`b/${A}/ardoc/${r.ar.id}`)).open, 0);
+    const a = await balanced(WS); assert.equal(a.bal, 0);
+  });
+  it('ליקוי 4: תשלום בקישור / בטלפון נשמר עם via (ומודפס כאשראי); מזומן ואשראי – בלי via', async () => {
+    const ARD = require('../functions/lib/ar-doc');
+    assert.deepEqual(ARD.payOf({ method: 'link' }), { m: 'card', via: 'link' });
+    assert.deepEqual(ARD.payOf({ method: 'phone', last4: '1234' }), { m: 'card', via: 'phone', last4: '1234' });
+    assert.deepEqual(ARD.payOf({ method: 'cash' }), { m: 'cash' });
+    assert.deepEqual(ARD.payOf({ method: 'card' }), { m: 'card' });
+    const id = await order(PR, [{ pid: 'pA', qty: 1, price: 89.9 }], E1);
+    const p = await ok(call('markOrderPaid', E1, { id, method: 'link' }));
+    const ir = await get(`b/${A}/ardoc/${p.ar.id}`);
+    assert.deepEqual(ir.pay, { m: 'card', via: 'link' });
+    assert.equal((await call('arDoc', MGR, { id: p.ar.id, op: 'pdf' })).status, 'OK');
+  });
+  it('הערה 2: קבלה מכרטיס הלקוח שסוגרת את החשבונית – ההזמנה עוברת ל"הושלם" עם paid.rc; קבלה חלקית – לא; ביטול הקבלה מחזיר ל"ממתין לתשלום"', async () => {
+    const id = await order(WS); const r = await ship(id, MGR);
+    const inv = await get(`b/${A}/ardoc/${r.ar.id}`);
+    await ok(call('arReceipt', MGR, { reqId: rid(), cust: WS, amt: 10, method: 'transfer' }));
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'wait_pay', 'חלקי – ההזמנה לא זזה');
+    const rc = await ok(call('arReceipt', MGR, { reqId: rid(), cust: WS, amt: (inv.gross - 1000) / 100, method: 'chq', chq: { no: '123', bank: 'לאומי', d: '2026-12-01' } }));
+    const o = await get(`b/${A}/ord/${id}`);
+    assert.equal(o.status, 'done'); assert.equal(o.paid.rc, rc.id); assert.equal(o.paid.method, 'other'); assert.equal(o.paid.amt, (await get(`b/${A}/ord/${id}`)).gross);
+    assert.equal((await call('markOrderPaid', MGR, { id, method: 'transfer' })).result.dup, true);
+    await balanced(WS);
+    await ok(call('arVoidRc', MGR, { reqId: rid(), id: rc.id, reason: 'הצ׳ק חזר' }));
+    const o2 = await get(`b/${A}/ord/${id}`);
+    assert.equal(o2.status, 'wait_pay'); assert.equal(o2.paid, undefined);
+    const a = await balanced(WS); assert.equal(a.bal, inv.gross - 1000);
   });
 });

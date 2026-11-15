@@ -138,15 +138,26 @@ async function open(browser, www, who, calls, arOn) {
       const inc = await page.evaluate(() => { const f = window.__arInc.incOf, op = new Set(['oLink']);
         const d = (x) => Object.assign({ id: 'x', t: 'inv', no: 1, d: '2026-11-12', gross: 11800, br: 'br1', ord: ['o1'], custSnap: { name: 'ל' }, draft: true }, x);
         return { inv: f(d({}), op, {}), cr: f(d({ t: 'cr', gross: 1180 }), op, {}), irZ: f(d({ t: 'ir', br: 'br2', pay: { m: 'cash' } }), op, { br2: true }), irNoZ: f(d({ t: 'ir', pay: { m: 'cash' } }), op, { br2: true }), irZtr: f(d({ t: 'ir', br: 'br2', pay: { m: 'transfer' } }), op, { br2: true }), crIrZ: f(d({ t: 'cr', br: 'br2', ref: 'irD3' }), op, { br2: true }),
-          link: f(d({ ord: ['oLink'] }), op, {}), crLink: f(d({ t: 'cr', ord: ['oLink'] }), op, {}), rc: f(d({ t: 'rc' }), op, {}), nb: f(d({ br: '_' }), op, {}) }; });
-      check('m 10 הכנסות (incOf): חשבונית = +118 בתאריך החשבונית ובסניף; זיכוי = −11.80; חשבונית מס קבלה במזומן בסניף עם דוח Z – לא (בהעברה – כן); קישור ספק – לא (הזיכוי כן); קבלה – לא',
-        inc.inv && inc.inv.amt === 118 && inc.inv.date === '2026-11-12' && inc.inv.br === 'br1' && inc.inv.cat === 'c_ordinc' && /טיוטה/.test(inc.inv.note) && inc.cr.amt === -11.8 && inc.irZ === null && inc.irNoZ && inc.irNoZ.amt === 118 && inc.irZtr && inc.irZtr.amt === 118 && inc.crIrZ === null && inc.link === null && inc.crLink && inc.rc === null && inc.nb.br === undefined, inc);
+          link: f(d({ ord: ['oLink'] }), op, {}), crLink: f(d({ t: 'cr', ord: ['oLink'] }), op, {}), rc: f(d({ t: 'rc' }), op, {}), nb: f(d({ br: '_' }), op, {}),
+          irZcard: f(d({ t: 'ir', br: 'br2', pay: { m: 'card' } }), op, { br2: true }), irZlink: f(d({ t: 'ir', br: 'br2', pay: { m: 'card', via: 'link' } }), op, { br2: true }), irZphone: f(d({ t: 'ir', br: 'br2', pay: { m: 'card', via: 'phone' } }), op, { br2: true }) }; });
+      // תיקון סבב 1: קישור ספק – החשבונית נספרת (החלטה 6; הקישור מקוזז ב-arop_, ראו 10ב); דוח Z – רק מזומן / אשראי בקופה, לא קישור / טלפון (via)
+      check('m 10 הכנסות (incOf): חשבונית = +118 בתאריך החשבונית ובסניף; זיכוי = −11.80; חשבונית מס קבלה במזומן / אשראי בקופה בסניף עם דוח Z – לא (בהעברה, בקישור ובטלפון – כן); הזמנה מקישור ספק – החשבונית כן (aro); קבלה – לא',
+        inc.inv && inc.inv.amt === 118 && inc.inv.date === '2026-11-12' && inc.inv.br === 'br1' && inc.inv.cat === 'c_ordinc' && /טיוטה/.test(inc.inv.note) && inc.inv.aro === 'o1' && inc.cr.amt === -11.8 && inc.cr.aro === undefined && inc.irZ === null && inc.irNoZ && inc.irNoZ.amt === 118 && inc.irZtr && inc.irZtr.amt === 118 && inc.crIrZ === null && inc.link && inc.link.amt === 118 && inc.link.aro === 'oLink' && inc.crLink && inc.rc === null && inc.nb.br === undefined
+        && inc.irZcard === null && inc.irZlink && inc.irZlink.amt === 118 && inc.irZphone && inc.irZphone.amt === 118, inc);
       // סנכרון בפועל ביומן המנהל (S.tx): חשבונית = תנועת הכנסה אחת; קבלה – לא; הרצה שנייה – בלי שינוי
       const sy = await page.evaluate(async () => { const a = await window.__arInc.arInc(); const b = await window.__arInc.arInc();
         return { a, b, tx: S.tx.filter((t) => String(t.id).indexOf('ar_') === 0).map((t) => [t.id, t.amt, t.date, t.br || '', t.cat, !!t.x]).sort() }; });
       // (הסנכרון כבר רץ לבד במעבר בין מסכי ההזמנות – לכן a יכול להיות 0)
       check('m 10א arInc (רץ לבד במסכי ההזמנות): ar_invD1 ו-ar_invD2 (₪73.16, בתאריך החשבונית, br1, הכנסות מהזמנות), בלי הקבלה; הרצה חוזרת – 0 שינויים',
         [0, 2].includes(sy.a) && sy.b === 0 && JSON.stringify(sy.tx) === JSON.stringify([['ar_invD1', 73.16, '2026-11-12', 'br1', 'c_ordinc', false], ['ar_invD2', 73.16, '2026-11-13', 'br1', 'c_ordinc', false]]), sy);
+      // תיקון סבב 1 (ליקוי 3): הזמנה o8 (של invD1) שולמה גם בקישור הספק – op_o8 נשאר (הזכות אצל הספק), ונוצר קיזוז arop_o8 = −73.16 בתאריך התשלום
+      const ko = await page.evaluate(async () => { S.tx.push({ id: 'op_o8', t: 'inc', cat: 'c_ordinc', sub: 's_ordlink', date: '2026-11-10', amt: 73.16, note: 'הזמנה #8', off: { sub: 'sSUP' }, ordp: 'o8', br: 'br1' });
+        const a = await window.__arInc.arInc(); const b = await window.__arInc.arInc();
+        const op = S.tx.find((t) => t.id === 'op_o8'), k = S.tx.find((t) => t.id === 'arop_o8');
+        const r1 = { a, b, op: [op.amt, !!op.x, op.off && op.off.sub], k: k && [k.amt, k.date, k.br, k.cat, !!k.off, !!k.x], net: S.tx.filter((t) => !t.x && t.t === 'inc' && /^(op|arop|ar)_/.test(t.id)).reduce((s, t) => s + t.amt, 0) };
+        op.x = 1; const c = await window.__arInc.arInc(); return Object.assign(r1, { c, kx: !!k.x }); });
+      check('m 10ב הזמנה עם חשבונית ששולמה בקישור: arop_o8 −73.16 (2026-11-10, br1, בלי off), op_o8 לא השתנה (הזכות אצל הספק נשארת), ההכנסה = רק החשבוניות; op בוטל → גם הקיזוז מבוטל; הרצה חוזרת – 0',
+        [0, 1].includes(ko.a) && ko.b === 0 && JSON.stringify(ko.op) === JSON.stringify([73.16, false, 'sSUP']) && JSON.stringify(ko.k) === JSON.stringify([-73.16, '2026-11-10', 'br1', 'c_ordinc', false, false]) && Math.abs(ko.net - 146.32) < 0.001 && ko.kx === true, ko);
     }
     const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
     check(who + ' 11 בלי שגיאות JS', errs.length === 0, errs.slice(0, 3));

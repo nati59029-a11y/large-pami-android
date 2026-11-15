@@ -245,12 +245,15 @@ async function planOrder(tx, db, w, s, kind, pay) {
     return (this.res = { t, id: r.id, no: r.d.no, draft: r.d.draft, gross: r.d.gross, due: r.d.due || '' });
   } };
 }
-// אמצעי התשלום בקבלה. method של "שולם" בהזמנה: link/phone = אשראי
+// אמצעי התשלום בקבלה. method של "שולם" בהזמנה: link/phone = אשראי, והדרך המקורית נשמרת ב-via (תיקון סבב 1, ליקוי 4):
+// "דוח Z" (ar-inc.js) מדלג רק על מה שנגבה בקופה – תשלום בקישור / בטלפון לא עובר בקופה, ולכן נרשם כהכנסה (הנחה)
 const PAYM = ['cash', 'transfer', 'chq', 'card', 'other'];
 function payOf(p) {
   p = p || {};
-  const m = PAYM.includes(p.method) ? p.method : (p.method === 'link' || p.method === 'phone') ? 'card' : 'other';
+  const rem = p.method === 'link' || p.method === 'phone';
+  const m = PAYM.includes(p.method) ? p.method : rem ? 'card' : 'other';
   const o = { m };
+  if (rem) o.via = p.method;
   if (p.last4) o.last4 = String(p.last4);
   if (p.conf) o.conf = String(p.conf);
   if (p.note) o.note = String(p.note).slice(0, 200);

@@ -134,7 +134,9 @@ function calc(doc) {
   const rate = isNum(doc.rate) && doc.rate >= 0 && doc.rate <= 100 ? doc.rate : C.VAT0;
   const vm = doc.vm === 'ex' ? 'ex' : 'inc';
   const tt = C.totals(sumAg / 100, vm, rate, doc.disc);
-  return { rows, sum: sumAg, vm, rate, dsc: tt.dsc ? -C.ag(tt.dsc) : 0, net: C.ag(tt.net), vat: C.ag(tt.vat), gross: C.ag(tt.gross) };
+  // adj (אגורות, זיכוי שסוגר חשבונית – ar.js arCredit): "התאמת עיגול" שמתווספת לסכום לתשלום
+  const adj = Number.isInteger(doc.adj) && Math.abs(doc.adj) <= 100 ? doc.adj : 0;
+  return { rows, sum: sumAg, vm, rate, dsc: tt.dsc ? -C.ag(tt.dsc) : 0, net: C.ag(tt.net), vat: C.ag(tt.vat), gross: C.ag(tt.gross) + adj, adj };
 }
 function docErr(reason) { const e = new Error('ar-pdf: ' + reason); e.reason = reason; return e; }
 
@@ -283,8 +285,9 @@ async function render(docIn, opts) {
   if (!hasTable) {
     const rateTxt = (Math.round(k.rate * 100) / 100) + '%';
     if (k.dsc) sums.push(['סה״כ', moneyAg(k.sum)], ['הנחה', moneyAg(k.dsc)]);
-    if (k.vm === 'ex') sums.push(['סה״כ לפני מע״מ', moneyAg(k.net)], ['מע״מ ' + rateTxt, moneyAg(k.vat)], ['לתשלום', moneyAg(k.gross), true]);
-    else { if (!k.dsc) sums.push(['סה״כ', moneyAg(k.sum)]); sums.push(['מתוכם מע״מ ' + rateTxt, moneyAg(k.vat)], ['לתשלום', moneyAg(k.gross), true]); }
+    const aj = k.adj ? [['התאמת עיגול', moneyAg(k.adj)]] : [];
+    if (k.vm === 'ex') sums.push(['סה״כ לפני מע״מ', moneyAg(k.net)], ['מע״מ ' + rateTxt, moneyAg(k.vat)], ...aj, ['לתשלום', moneyAg(k.gross), true]);
+    else { if (!k.dsc) sums.push(['סה״כ', moneyAg(k.sum)]); sums.push(['מתוכם מע״מ ' + rateTxt, moneyAg(k.vat)], ...aj, ['לתשלום', moneyAg(k.gross), true]); }
   } else if (Array.isArray(doc.sums)) {
     doc.sums.slice(0, 10).forEach((s, i, a) => { if (Array.isArray(s) && isNum(s[1])) sums.push([clean(s[0], 40), money(s[1]), i === a.length - 1]); });
   }
