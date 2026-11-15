@@ -14,6 +14,7 @@
      badge(k, px)                        -> קנבס של תג המצב (אותו ציור כמו בתלת מימד), למקרא במסכים אחרים
    סימון מצב: פס דק בשפת המדף (כמו פס תוויות, נראה גם מלמעלה) + תג עגול עם סמל מעל המקטע (גודל קבוע במסך). frames(bool) מסתיר/מציג את שניהם.
      clearCache()                        -> ניקוי מטמון התמונות בזיכרון (יציאה / החלפת עסק)
+     blob(path)                          -> Promise<Blob> – אותה טעינה מ-Storage (okPath + מטמון), לסיור 360
    bay שמוחזר ב-onPick: {id, fx, s, n, lv:[...], lvHit, num, name, k, st}
    מראה: קירות מקבלים את הצילום מ-smap.tx[] לפי rooms[].tex {w,f,c}; הרצפה והתקרה לא נמתחות מהצילום: מהצילום נדגם רק צבע ממוצע – רצפה = אריח עץ מצויר (לוחות 20×120 ס"מ) בצבע הזה, תקרה = צבע חלק בהיר; חזית כל מקטע מקבלת את התמונה המוקטנת האחרונה (s3sum.b[id].th).
    בלי צילום: מדף מתכת לבן ריק, רצפה בהירה (במחסן – בטון אפור), קיר בהיר. אין תמונות דוגמה ואין מוצרים מומצאים.
@@ -538,6 +539,8 @@ function mini(el,map,sum,o){
     get handle(){return h}};
   return api}
 
-window.Store3D={version:THREE_VER,supported,preload,open,mini,STAT,badge,clearCache};
+/* שלב 18ה: אותה טעינה (מטמון משותף, בדיקת נתיב okPath, עד 4 הורדות) גם לסיור 360 */
+const blob=p=>getBlob(p,defLoad,()=>true);
+window.Store3D={version:THREE_VER,supported,preload,open,mini,STAT,badge,clearCache,blob};
 window.S3View=window.Store3D;
 })();
