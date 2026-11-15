@@ -63,10 +63,11 @@ async function candRules(db, ch, item) {
   for (const r of pre0) { if (out.length >= L.PROMPT_MAX) break; if (await ownerOk(db, r.uid, ch, cache)) out.push(r); }
   return out;
 }
-// השיחה: רק הכללים של המנהל עצמו, פעילים, בלי כלל בטיחות
+// השיחה: רק הכללים של המנהל עצמו, פעילים, בלי כלל בטיחות. גם הנחיות שנכתבו על התראה (act 'info', סבב 2 ליקוי 3) – כדי שהמזכירה תזכור אותן בשיחה
 async function chatRules(db, uid) {
   const s = await db.collection('sec_mrule').where('uid', '==', uid).limit(L.MAX_RULES + 5).get();
-  return s.docs.map(ruleOf).filter((r) => r.ch === 'chat' && r.on !== false && !r.safe).sort((a, b) => (a.t || 0) - (b.t || 0)).slice(0, L.PROMPT_MAX).map((r) => r.instr);
+  return s.docs.map(ruleOf).filter((r) => (r.ch === 'chat' || (r.ch === 'note' && r.act === 'info')) && r.on !== false && !r.safe)
+    .sort((a, b) => (a.t || 0) - (b.t || 0)).slice(0, L.PROMPT_MAX).map((r) => (r.ch === 'note' ? 'לגבי התראות: ' : '') + r.instr);
 }
 // התראות: כלל השתקה של המנהל שמתאים להתראה (בקוד, בלי AI). התראות בטיחות – לעולם לא. cache – לכל ריצה
 async function muteRule(db, uid, note, cache) {
@@ -74,7 +75,7 @@ async function muteRule(db, uid, note, cache) {
   const k = 'm|' + uid;
   if (!cache || !Object.hasOwn(cache, k)) {
     const s = await db.collection('sec_mrule').where('uid', '==', uid).limit(L.MAX_RULES + 5).get();
-    const list = s.docs.map(ruleOf).filter((r) => r.ch === 'note' && r.act === 'mute' && r.on !== false);
+    const list = s.docs.map(ruleOf).filter((r) => r.ch === 'note' && r.act === 'mute' && r.on !== false && !r.safe);
     if (cache) cache[k] = list; else return pickMute(list, note);
   }
   return pickMute(cache[k], note);
@@ -92,26 +93,35 @@ async function muted(db, rule, note, now) {
 }
 
 // ---------- אחרי שליחה לבד / כשלון (נקרא מ-secretary-google.js ו-secretary-wa.js) ----------
+// סבב 2 (ליקוי 5): המונים (fails, hits) מתעדכנים בטרנזקציה – קריאה טרייה של הכלל, כך שכשלונות במקביל לא "מאבדים" עדכון והכיבוי אחרי 3 מובטח
 async function afterSend(db, rule, o) {
   const now = o.now || Date.now();
-  const b = db.batch();
-  b.update(db.doc('sec_mrule/' + rule.id), { hits: FieldValue.increment(1), fails: 0, lastAt: now });
-  b.set(db.collection('sec_mlog').doc(), { t: now, by: rule.uid, rule: rule.id, ri: String(rule.instr || '').slice(0, 120), ch: o.ch, tgt: o.tgt || '', to: L.maskTo(o.to), st: 'sent', why: [] });
-  b.set(db.collection('sec_log').doc(), Object.assign(logData(rule.uid, 'auto', 'mrSend', { tgt: o.tgt, note: rule.id }), { ch: o.ch }));
-  await b.commit();
+  const ref = db.doc('sec_mrule/' + rule.id);
+  const hits = await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    const h = s.exists ? (Number(s.get('hits')) || 0) : (Number(rule.hits) || 0);
+    if (s.exists) tx.update(ref, { hits: h + 1, fails: 0, lastAt: now });
+    tx.set(db.collection('sec_mlog').doc(), { t: now, by: rule.uid, rule: rule.id, ri: String(rule.instr || '').slice(0, 120), ch: o.ch, tgt: o.tgt || '', to: L.maskTo(o.to), st: 'sent', why: [] });
+    tx.set(db.collection('sec_log').doc(), Object.assign(logData(rule.uid, 'auto', 'mrSend', { tgt: o.tgt, note: rule.id }), { ch: o.ch }));
+    return h;
+  });
   // שלוש השליחות הראשונות של כל כלל – התראה לבעל הכלל (החלטה 5)
-  if ((Number(rule.hits) || 0) < L.NOTIFY_FIRST) {
+  if (hits < L.NOTIFY_FIRST) {
     await require('./secretary-wa')._core.notifyMgrs(db, 'mrsent|' + rule.id + '|' + now, 'נשלח לבד לפי הכלל שלך', 'לפי הכלל "' + String(rule.instr || '').slice(0, 120) + '" נשלחה לבד תשובה ב' + (o.ch === 'mail' ? 'מייל' : 'ווצאפ') + ' אל ' + L.maskTo(o.to) + '. אפשר לראות את היומן ולכבות את הכלל במסך "הכללים שלי".', now, rule.uid).catch(() => {});
   }
 }
 async function afterFail(db, rule, o) {
   const now = o.now || Date.now();
-  const nx = L.failNext(rule);
-  const b = db.batch();
-  b.update(db.doc('sec_mrule/' + rule.id), Object.assign({ fails: nx.fails, lastAt: now }, nx.off ? { auto: false, offWhy: 'fail', autoOffAt: now } : {}));
-  b.set(db.collection('sec_mlog').doc(), { t: now, by: rule.uid, rule: rule.id, ri: String(rule.instr || '').slice(0, 120), ch: o.ch, tgt: o.tgt || '', to: L.maskTo(o.to), st: 'fail', why: ['fail'] });
-  b.set(db.collection('sec_log').doc(), Object.assign(logData(rule.uid, 'auto', nx.off ? 'mrOff' : 'mrFail', { tgt: o.tgt, note: rule.id }), { ch: o.ch }));
-  await b.commit();
+  const ref = db.doc('sec_mrule/' + rule.id);
+  const nx = await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    const n = L.failNext(s.exists ? s.data() : rule);
+    const off = n.off && s.exists && s.get('auto') === true; // כובים פעם אחת (מי שהגיע ל-3 ראשון); אחרי כן רק נרשם הכשלון
+    if (s.exists) tx.update(ref, Object.assign({ fails: n.fails, lastAt: now }, off ? { auto: false, offWhy: 'fail', autoOffAt: now } : {}));
+    tx.set(db.collection('sec_mlog').doc(), { t: now, by: rule.uid, rule: rule.id, ri: String(rule.instr || '').slice(0, 120), ch: o.ch, tgt: o.tgt || '', to: L.maskTo(o.to), st: 'fail', why: ['fail'] });
+    tx.set(db.collection('sec_log').doc(), Object.assign(logData(rule.uid, 'auto', off ? 'mrOff' : 'mrFail', { tgt: o.tgt, note: rule.id }), { ch: o.ch }));
+    return { fails: n.fails, off };
+  });
   await require('./secretary-wa')._core.notifyMgrs(db, (nx.off ? 'mroff|' : 'mrfail|') + rule.id + '|' + now, nx.off ? 'כלל הפסיק לשלוח לבד' : 'שליחה לבד נכשלה',
     (nx.off ? 'אחרי ' + L.FAIL_MAX + ' כשלונות ברצף הכלל "' + String(rule.instr || '').slice(0, 120) + '" חזר לשאול לפני כל שליחה. אפשר להפעיל "לבד" מחדש במסך "הכללים שלי".' : 'השליחה לבד לפי הכלל "' + String(rule.instr || '').slice(0, 120) + '" נכשלה. התשובה נשארה טיוטה ומחכה לך.'), now, rule.uid).catch(() => {});
 }
@@ -175,7 +185,7 @@ function propOut(r, item) {
   const clsL = CLS_L();
   const opts = r.ch === 'mail' || r.ch === 'wa'
     ? [['cls', item.cls && item.cls !== 'other' ? 'פניות מסוג "' + (clsL[item.cls] || item.cls) + '"' : ''], ['from', item.from ? 'רק מהשולח הזה' : ''], ['all', 'כל ההודעות ב' + (r.ch === 'mail' ? 'מייל' : 'ווצאפ')]].filter((x) => x[1])
-    : r.ch === 'note' ? [['fam', 'התראות דומות לזו'], ['typ', 'כל ההתראות מהסוג הזה']] : [];
+    : r.ch === 'note' && r.act === 'mute' ? [['fam', 'התראות דומות לזו'], ['typ', item.typ && !L.SHARED_TYP.includes(String(item.typ)) ? 'כל ההתראות מהסוג הזה' : '']].filter((x) => x[1]) : [];
   return { ch: r.ch, act: r.act, instr: r.instr, safe: r.safe || '', safeL: r.safe ? L.SAFE_L[r.safe] : '', opts: opts.map(([v, l]) => ({ v, l })), canAuto: L.OUT_CHS.includes(r.ch) && !r.safe };
 }
 function ruleOut(r, now) {
@@ -275,6 +285,8 @@ async function secLearn(request) {
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const g = await gate(request, { consent: true });
   const { who, cfg, db, brLimited } = g;
+  // מנהל־על עם הגבלת סניפים: בשיחה הוא לא "מוגבל" (gate), אבל כלל מייל/ווצאפ שלו לא יפעל (ownerOk) – לכן גם לא נוצר (הערה 3 בסבב 1)
+  const outLimited = brLimited || g.hasBr === true;
   const now = Date.now();
   const col = db.collection('sec_mrule');
   // "מול העיניים" – פועל גם כשהכללים האישיים כבויים (אז בלי ניתוב)
@@ -284,7 +296,7 @@ async function secLearn(request) {
   if (op === 'list') {
     const [s, ws] = await Promise.all([col.where('uid', '==', who.uid).limit(L.MAX_RULES + 5).get(), db.doc('sec_cfg/wa').get()]);
     const st = ws.exists && ws.get('stop') && typeof ws.get('stop') === 'object' ? ws.get('stop') : {};
-    return { ok: true, rules: s.docs.map((d) => ruleOut(ruleOf(d), now)).sort((a, b) => b.t - a.t), max: L.MAX_RULES, brLimited, stop: st.on === true };
+    return { ok: true, rules: s.docs.map((d) => ruleOut(ruleOf(d), now)).sort((a, b) => b.t - a.t), max: L.MAX_RULES, brLimited: outLimited, stop: st.on === true };
   }
   if (op === 'log') {
     // כל מנהלי העסק רואים את כל מה שנשלח לבד (החלטה 4) – קריאה בלבד, עם שם בעל הכלל
@@ -322,7 +334,7 @@ async function secLearn(request) {
     const k = input.k;
     if (!K_OK.includes(k)) throw bad('bad-k', 'סוג הודעה לא מוכר');
     // מנהל עם הגבלת סניפים – לא יוצר כללים על מייל וווצאפ (ערוצים של כל העסק; החלטה 3)
-    if (brLimited && L.OUT_CHS.includes(k)) throw deny('branch-limited', 'כללים על מייל וווצאפ זמינים רק למנהל בלי הגבלת סניפים');
+    if (outLimited && L.OUT_CHS.includes(k)) throw deny('branch-limited', 'כללים על מייל וווצאפ זמינים רק למנהל בלי הגבלת סניפים');
     const instr = readInstr(input.text);
     const it = await itemOf(db, who, k, input.id);
     // 15.11.2026: הוראת ניתוב ("חשבוניות מהיום – לבטיפול") בתגובה על שיחה, התראה או פריט ב"מול העיניים" – כלל ניתוב

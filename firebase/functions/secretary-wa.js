@@ -13,7 +13,7 @@
 //   sec_in/{m<hash>}   { wamid, ch:'wa', from, pnid, name, t, rt, type:'text'|'audio'|'other', text, tr?, media?, own:'sec'|'mgr'|'ord',
 //                        st:'new'|'work'|'done'|'sus'|'over'|'saving'|'err'|'fail'|'ord'|'replied'|'handled', rq? (ניסיונות חוזרים), ea? (זמן השגיאה), cls?, lang?, flags[], draft?, tf (רק כשהתוכן מלא – 9.5) }
 //   sec_draft/{id}     { in, wa, text, lang, cls, flags[], why[], src:'ai'|'bank', st:'pend'|'sending'|'sent'|'fail'|'done', sid?, wamid?, auto?, kind?, tf }
-//   sec_snd/{wa}       כרטיס שולח (17): { wa, name, first, lastIn, n, lang, link?:{k:'cust'|'sup',id?,name}, own?, ownExp?, rh, rn, rd, rdn, mgr?, openAt?, ackAt? }
+//   sec_snd/{wa}       כרטיס שולח (17): { wa, name, first, lastIn, n, lang, link?:{k:'cust'|'sup',id?,name}, own?, ownExp?, rh, rn, rd, rdn, mgr?, openAt?, ackAt?, mrA?:{h,n} (שליחות לבד לפי כלל אישי בשעה) }
 //   sec_cfg/wa         הגדרות ווצאפ של העסק (שרת בלבד): pnid, num, link, mgr{uid:wa}, mgrReq{uid:wa}, hour, ackH{f,t}, tpls[], ack{on,text}, open{on,text},
 //                      stop{on,auto,why,at,by}, ord (בוט ההזמנות מחובר – היום false), appr{cls:n}, autoWant{cls:{by,at}}
 //   sec_cfg/wa_use     מונים: הצפה לשעה, יציאות ליום, יצירות ביומן ליום לכל מנהל
@@ -594,21 +594,40 @@ async function tryMrAutoWa(db, id, x, d, o) {
   if (!cfg.pnid) extra.push('notConnected');
   const fl = d.flags || [];
   const no = ML().autoNo({ learn: C.cfgOf(cs, '').learn, stop: cfg.stop.on, owner: await MLC().ownerOk(db, rule.uid, 'wa'), rule, match: d.pm,
-    safeIn: !!ML().safeOf(x.text || x.tr || ''), safeOut: !!ML().safeOf(d.text, true), cls: d.cls, chk: fl.includes('chk'), unsure: fl.includes('unsure'), extra });
+    inText: String(x.text || x.tr || ''), outText: String(d.text || ''), cls: d.cls, chk: fl.includes('chk'), unsure: fl.includes('unsure'), extra });
   const blocked = async (why) => {
     await dRef.update({ mrNo: why.slice(0, 12) }).catch(() => {});
     await db.collection('sec_log').doc().set(wlog('', 'auto', 'mrNo', { tgt: id, note: rule.id + ':' + why.join('+') }));
     return { no: why };
   };
   if (no.length) return blocked(no);
+  // הגנה מלולאה (סבב 2; כבויה – WA_LOOP_MAX=0 לפי החלטת המשתמש 15.11): עד ML().WA_LOOP_MAX תשובות לבד לאותו שולח בשעה (מונה בטרנזקציה על sec_snd – שדה חדש mrA, בלי לשנות שדות קיימים).
+  // המקום נשמר לפני השליחה ומשוחרר אם לא נשלח (תפוס / מכסה / כשלון), כך שנספרות רק שליחות שיצאו
+  const sRef = db.doc('sec_snd/' + x.from), hb = Math.floor(now / ML().WA_LOOP_MS);
+  const loopOk = await db.runTransaction(async (tx) => {
+    const v = await tx.get(sRef);
+    if (!v.exists) return false; // אין כרטיס שולח – גם אין חלון 24 שעות; לא שולחים לבד
+    const a = v.exists && v.get('mrA') && typeof v.get('mrA') === 'object' ? v.get('mrA') : {};
+    const n = a.h === hb ? (Number(a.n) || 0) : 0;
+    if (ML().WA_LOOP_MAX > 0 && n >= ML().WA_LOOP_MAX) return false; // 0 = בלי הגבלה (החלטת המשתמש 15.11)
+    tx.set(sRef, { mrA: { h: hb, n: n + 1 } }, { merge: true });
+    return true;
+  });
+  if (!loopOk) return blocked(['waLoop']);
+  const loopGive = () => db.runTransaction(async (tx) => {
+    const v = await tx.get(sRef);
+    const a = v.exists && v.get('mrA') && typeof v.get('mrA') === 'object' ? v.get('mrA') : {};
+    if (a.h === hb && Number(a.n) > 0) tx.set(sRef, { mrA: { h: hb, n: Number(a.n) - 1 } }, { merge: true });
+  }).catch(() => {});
   const took = await db.runTransaction(async (tx) => { const v = (await tx.get(dRef)).data(); if (!v || v.st !== 'pend') return false; tx.update(dRef, { st: 'sending', sid: 'mrauto-' + id.slice(0, 40), sAt: now, sBy: 'auto' }); return true; });
-  if (!took) return blocked(['dup']);
-  if (!(await countOut(db, now))) { await dRef.update({ st: 'pend' }); return blocked(['out']); }
+  if (!took) { await loopGive(); return blocked(['dup']); }
+  if (!(await countOut(db, now))) { await dRef.update({ st: 'pend' }); await loopGive(); return blocked(['out']); }
   let r;
   try {
     r = await (o.send || W.send)(o.token, cfg.pnid, x.from, { text: d.text });
   } catch (e) {
     o.sendFail = true;
+    await loopGive();
     await dRef.update({ st: 'pend', flags: FieldValue.arrayUnion('autoFail'), mrNo: ['fail'] }).catch(() => {});
     await errMark(db, false, now).catch(() => {});
     await MLC().afterFail(db, rule, { ch: 'wa', tgt: id, to: x.from, now }).catch(() => {});

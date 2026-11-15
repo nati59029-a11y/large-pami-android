@@ -137,6 +137,13 @@ describe('secLearn: הרשאות, שמירה, בעלות וכללי בטיחות
     assert.equal((await call(M1, { op: 'save', k: 'wa', id: 'w1', text: 'תעני בקצרה' })).reason, 'branch-limited');
     assert.equal((await call(M1, { op: 'save', k: 'chat', id: 'c1', text: 'תעני בקצרה' })).ok, true);
   });
+  it('סבב 2: מנהל־על עם הגבלת סניפים – גם הוא לא יוצר כלל מייל/ווצאפ (שלא יפעל לעולם)', async () => {
+    await seed({ consent: [M1, M2, SUPER] });
+    await put(`b/${A}/admins/${SUPER}`, { email: 'super@ln-owner.example', br: ['br1'] });
+    await put(`b/${A}/sec_draft/w1`, { in: 'i1', wa: CUST, text: 'טיוטה', cls: 'hours', flags: [], why: [], src: 'ai', st: 'pend', t: 1 });
+    const r = await call(SUPER, { op: 'save', k: 'wa', id: 'w1', text: 'תעני בקצרה' });
+    assert.equal(r.reason, 'branch-limited', JSON.stringify(r));
+  });
 });
 
 describe('החלה: שיחה והשתקת התראות', () => {
@@ -168,6 +175,30 @@ describe('החלה: שיחה והשתקת התראות', () => {
     assert.equal((await notes(M1)).length, 2, 'התראת בטיחות לא מושתקת');
     assert.equal((await get(`b/${A}/sec_mrule/${s.r.id}`)).hits, 1);
     assert.ok((await coll(`b/${A}/sec_log`)).some((x) => x.act === 'mrMute'));
+  });
+  it('סבב 2: הנחיה על התראה (לא השתקה) נכנסת להנחיות בשיחה של אותו מנהל בלבד', async () => {
+    const s = await call(M1, { op: 'save', k: 'note', id: 'n1', text: 'בפעם הבאה תבדקי קודם מול הקופה' });
+    assert.ok(s.ok, s.msg); assert.equal(s.r.rule.act, 'info');
+    GM.state.sec = () => ({ text: 'בסדר.' });
+    const chat = (u) => require('../functions/secretary.js').secChat.run(req(u, { text: 'מה המצב בעסק?' }));
+    await chat(M1); await chat(M2);
+    const sys = GM.state.requests.filter((x) => x.kind === 'sec').map((x) => x.body.systemInstruction.parts[0].text);
+    assert.match(sys[0], /הנחיות קבועות מהמנהל[\s\S]*לגבי התראות: בפעם הבאה תבדקי קודם מול הקופה/);
+    assert.doesNotMatch(sys[1], /תבדקי קודם מול הקופה/);
+  });
+  it('סבב 2: "כל ההתראות מהסוג הזה" על התראת ווצאפ/מייל – רק התראות דומות; התראות חיבור ואבטחה – תמיד; כלל מסומן בטיחות לא משתיק', async () => {
+    const s = await call(M1, { op: 'save', k: 'note', id: 'n1', text: 'אל תתריעי לי על זה', sc: 'typ' });
+    assert.ok(s.ok, s.msg);
+    assert.deepEqual((await get(`b/${A}/sec_mrule/${s.r.id}`)).scope, { typ: 'wa', fam: 'unsure' });
+    const now = Date.now();
+    await inBiz((d) => WA.notifyMgrs(d, 'unsure|x2', 'לא בטוחה', 'y', now));
+    for (const k of ['gmailon|b1|1', 'gcalon|u|1', 'gexp|g1', 'mailgap|b1|d', 'mailskip|b1|g', 'clean|c1']) await inBiz((d) => WA.notifyMgrs(d, k, 'אבטחה', 'z', now));
+    assert.equal((await notes(M1)).length, 7, 'רק "unsure" הושתקה');
+    // כלל השתקה שסומן כבטיחות (למשל "אל תתריעי לי על תשלומים") – לא משתיק
+    await prep((d) => d.doc(`b/${A}/sec_mrule/${s.r.id}`).delete());
+    await put(`b/${A}/sec_mrule/sm1`, { uid: M1, ch: 'note', act: 'mute', instr: 'אל תתריעי לי על תשלומים', scope: { typ: 'wa', fam: 'unsure' }, safe: 'pay', on: true, t: 1 });
+    await inBiz((d) => WA.notifyMgrs(d, 'unsure|x3', 'לא בטוחה', 'y', now));
+    assert.equal((await notes(M1)).length, 8);
   });
 });
 
@@ -278,6 +309,33 @@ describe('ווצאפ: הנחיה בטיוטה, אישור, "לעשות את זה
     assert.equal(r.auto, false); assert.equal(r.offWhy, 'fail'); assert.equal(r.fails, 3);
     assert.equal((await coll(`b/${A}/sec_mlog`)).filter((x) => x.st === 'fail').length, 3);
     assert.ok((await notes(M1)).some((n) => n.title === 'כלל הפסיק לשלוח לבד'));
+  });
+  it('סבב 2: שפה אחרת, ביטויי כסף/מחיקה בשורשים, הודעה אוטומטית ולולאה – לא נשלח', async () => {
+    await put(`b/${A}/sec_mrule/${RID}`, { appr: 1, auto: true, scope: {} }, true);
+    const fs = fakeSend();
+    const blocked = async (text, why, args) => { AI_ARGS = args || {}; const m = await msg(text, fs); assert.equal(m.d.st, 'pend', why); assert.ok((m.d.mrNo || []).includes(why), why + ' ' + JSON.stringify(m.d.mrNo)); };
+    await blocked('Когда вы открыты?', 'lang');
+    await blocked('متى تفتحون؟', 'lang');
+    await blocked('מתי פתוחים?', 'lang', { text: 'Мы открыты с 8 до 18' });
+    await blocked('מתי פתוחים?', 'safeOut', { text: 'הכסף יועבר אליך מחר' });
+    await blocked('מתי פתוחים?', 'safeOut', { text: 'מחקתי את הפרטים שלך' });
+    await blocked('תחזירו לי כסף', 'safeIn');
+    await blocked('תסירו אותי מהרשימה', 'safeIn');
+    await blocked('This is an automated message. Do not reply.', 'bot');
+    assert.equal(fs.S.length, 0);
+    // בלי הגבלה לאותו שולח (החלטת המשתמש 15.11): גם הרביעית בשעה יוצאת
+    for (let i = 0; i < 4; i++) { AI_ARGS = {}; const m = await msg('מתי פתוחים? ' + i, fs); assert.equal(m.d.st, 'sent', 'שליחה ' + i); }
+    assert.equal(fs.S.length, 4);
+  });
+  it('סבב 2: כשלונות במקביל – המונה לא מאבד עדכונים והכלל נכבה פעם אחת', async () => {
+    await put(`b/${A}/sec_mrule/${RID}`, { appr: 1, auto: true, fails: 0 }, true);
+    const rule = Object.assign({ id: RID }, await get(`b/${A}/sec_mrule/${RID}`));
+    await Promise.all([1, 2, 3, 4].map((i) => inBiz((d) => LC.afterFail(d, rule, { ch: 'wa', tgt: 'c' + i, to: CUST, now: Date.now() }))));
+    const r = await get(`b/${A}/sec_mrule/${RID}`);
+    assert.equal(r.fails, 4); assert.equal(r.auto, false); assert.equal(r.offWhy, 'fail');
+    const lg = await coll(`b/${A}/sec_log`);
+    assert.equal(lg.filter((x) => x.act === 'mrOff').length, 1);
+    assert.equal(lg.filter((x) => x.act === 'mrFail').length, 3);
   });
   it('תכונה כבויה בעסק (learn:false): בלי כללים בבקשה למודל ובלי שליחה לבד', async () => {
     await put(`b/${A}/sec_mrule/${RID}`, { appr: 1, auto: true }, true);

@@ -19,6 +19,52 @@ describe('sec-learn: כללי הבטיחות הקבועים (בקוד)', () => {
   });
 });
 
+describe('sec-learn: כללי הבטיחות – סבב 2 (שורשים, כל הגופים, שפות אחרות)', () => {
+  // כל הדוגמאות מדוח הבדיקה (סבב 1, ליקויים 1–2) ועוד – חייבות להיחסם
+  const BLOCK = [
+    'הכסף יועבר אליך מחר', "I've wired the money", "We'll send you a refund today", 'מחקתי את הפרטים שלך', 'הפרטים שלך הוסרו מהמערכת',
+    'Please transfer the funds', 'תחזירו לי כסף', 'איך משלמים?', 'שלמתי כבר?', 'תסירו אותי מהרשימה',
+    'הסכום הועבר לחשבונך', 'תועבר אליך העברה', 'נעביר לך את הסכום', 'החזרנו לך את הכסף', 'ההחזר יגיע תוך שבוע', 'קיבלת זיכוי', 'זיכיתי אותך',
+    'שילמתי אתמול', 'הוא שילם', 'מי משלם?', 'ישולם בסוף החודש', 'we have paid', 'payment received', 'please reimburse me', 'we sent the money',
+    'נמחקו כל הנתונים', 'למחוק את החשבון', 'מחיקה של הכרטיס', 'הוסרת מהרשימה', 'please remove my details', 'erase everything', 'unsubscribe me', 'deleted your account',
+    'מה הסיסמא?', 'שלחי קוד אימות', 'מה מספר תעודת הזהות', 'what is your PIN', 'send the OTP', 'IBAN please', 'My ID number is', 'enter the verification code',
+    'card number please', 'bank account details', 'credit card', 'פרטי הבנק שלך', 'מספר החשבון 12-345-678901',
+  ];
+  // הודעות רגילות – לא נחסמות
+  const OK = [
+    'תודה, נחזור אליך מחר', 'נעביר את הפנייה למנהל', 'העברתי את ההודעה לצוות', 'נחזיר לך תשובה עד הערב', 'מה שעות הפתיחה?', 'ההזמנה מוכנה לאיסוף',
+    'יש לכם לחם מלא?', 'שבוע טוב, תודה רבה', 'בשבוע שעבר הייתי אצלכם', 'הכל מושלם, תודה', 'המסר התקבל', 'שלום וברכה', 'אפשר להתקשר ל-050-1234567',
+    'We are open Sunday to Thursday', 'Thanks, see you tomorrow', 'What time do you close?',
+  ];
+  it('כל הדוגמאות נחסמות – בהודעה נכנסת ובטקסט יוצא', () => {
+    for (const t of BLOCK) { assert.ok(L.safeOf(t), 'in: ' + t); assert.ok(L.safeOf(t, true), 'out: ' + t); }
+  });
+  it('הודעות רגילות לא נחסמות', () => {
+    for (const t of OK) { assert.equal(L.safeOf(t), '', t); assert.equal(L.safeOf(t, true), '', t); }
+  });
+  it('ליקוי 1: ערבית, רוסית וכתב אחר – אין שליחה לבד (lang); עברית ואנגלית – מותר', () => {
+    for (const t of ['Пришлите пароль', 'أرسل لي كلمة السر', 'Мы переведём вам деньги завтра', 'سنحول لك المال غدا', 'שלום, Здравствуйте']) assert.equal(L.langBad(t), true, t);
+    for (const t of ['שלום, מה שעות הפתיחה?', 'Hello, are you open?', 'Café 50 ₪ 😊']) assert.equal(L.langBad(t), false, t);
+    const ok = { learn: true, stop: false, owner: true, rule: { on: true, auto: true }, match: { auto: true }, cls: 'hours' };
+    assert.ok(L.autoNo(Object.assign({}, ok, { inText: 'Пришлите пароль', outText: 'שלום' })).includes('lang'));
+    assert.ok(L.autoNo(Object.assign({}, ok, { inText: 'שלום', outText: 'سنحول لك المال غدا' })).includes('lang'));
+    assert.ok(L.autoNo(Object.assign({}, ok, { inText: 'איך משלמים?', outText: 'שלום' })).includes('safeIn'));
+    assert.ok(L.autoNo(Object.assign({}, ok, { inText: 'שלום', outText: 'הכסף יועבר אליך מחר' })).includes('safeOut'));
+    assert.ok(L.autoNo(Object.assign({}, ok, { inText: 'This is an automated message, do not reply', outText: 'שלום' })).includes('bot'));
+    assert.deepEqual(L.autoNo(Object.assign({}, ok, { inText: 'מה שעות הפתיחה?', outText: 'אנחנו פתוחים א–ה 7:00–19:00' })), []);
+    assert.ok(L.NO_L.lang && L.NO_L.bot && L.NO_L.waLoop);
+  });
+  it('ליקוי 4: התראות אבטחה וחיבור לא מושתקות; השתקה בסוג המשותף "wa" – רק לפי משפחה', () => {
+    for (const k of ['gmailon|b|1', 'gcalon|u|1', 'gexp|x', 'mailgap|b|d', 'mailskip|b|g', 'mailover|b|d', 'maillag|b|d', 'histcap|1', 'clean|x']) assert.equal(L.noteMutable({ key: k }), false, k);
+    const r = L.cleanRule({ ch: 'note', instr: 'אל תתריעי לי על זה', sc: 'typ', item: { typ: 'wa', key: 'unsure|abc' } });
+    assert.deepEqual(r.scope, { typ: 'wa', fam: 'unsure' });
+    assert.deepEqual(L.cleanRule({ ch: 'note', instr: 'אל תתריעי לי על זה', sc: 'typ', item: { typ: 'cal', key: 'cal:1:2' } }).scope, { typ: 'cal' });
+    // כלל ישן בלי משפחה על הסוג המשותף – לא משתיק כלום
+    const old = [{ id: 'o', ch: 'note', act: 'mute', scope: { typ: 'wa' }, on: true }];
+    assert.deepEqual(L.prefilter(old, { ch: 'note', typ: 'wa', key: 'unsure|1' }), []);
+  });
+});
+
 describe('sec-learn: כלל חדש', () => {
   it('cleanRule: ערוץ, פעולה, תחום וסימון בטיחות – נקבעים בקוד', () => {
     const m = L.cleanRule({ ch: 'mail', instr: '  תעני לו   בנימוס  ', sc: 'cls', item: { cls: 'hours', from: 'A@x.com' } });
