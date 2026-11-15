@@ -183,7 +183,7 @@ const fakeMic = (page, deny, badStart) => page.evaluate(([d, bs]) => {
     await page.click('[data-a=secTkOk][data-id=tk1]'); await H.settle(page, 1200);
     const nl = o.log.slice(L0), post = nl.find((r) => r.method === 'POST' && /\/tasks\?documentId=/.test(r.url)), img = nl.find((r) => r.method === 'PATCH' && /\/tasks\/[^/]+\/p\/m1/.test(r.url));
     const pf = post && JSON.parse(post.body).fields;
-    check('אישור משימה: POST /tasks עם הטקסט, mi=1, משויכת למנהל; ואז PATCH p/m1 עם התמונה', pf && pf.txt.stringValue === 'למלא את המדף' && pf.mi.integerValue === '1' && pf.to.arrayValue.values[0].stringValue === 'm' && img && /data:image\/jpeg/.test(img.body), pf && Object.keys(pf));
+    check('אישור משימה: POST /tasks עם הטקסט, mi=1, לכל הצוות (בלי רשימת עובדים: בלי to); ואז PATCH p/m1 עם התמונה', pf && pf.txt.stringValue === 'למלא את המדף' && pf.mi.integerValue === '1' && !pf.to && img && /data:image\/jpeg/.test(img.body), pf && Object.keys(pf));
     check('mark ok נשלח אחרי יצירת המשימה, והכרטיס "אושר"', !!last(o.bodies, 'secMedia', (b) => b.op === 'mark' && b.cid === 'tk1' && b.st === 'ok') && (await page.evaluate(() => document.querySelector('[data-card=tk1]').dataset.st)) === 'ok');
     // "בטל"
     o.R.see = { ok: true, id: 'img4', reply: 'עוד תמונה.', cards: [{ id: 'tk2', k: 'task', txt: 'לנקות' }], pct: 12, saving: false };

@@ -1545,7 +1545,11 @@ ACT.secTkOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||
  /* מזהה המשימה נגזר מהכרטיס: אישור חוזר (למשל אחרי שהסימון בשרת נכשל) לא יוצר משימה שנייה – הקיימת מזוהה (409) */
  el.disabled=true;const now=Date.now(),tid='sec'+String(id).replace(/[^A-Za-z0-9]/g,''),nm=fbBy();let dup=0;
  const fields={owner:sv(SY.uid),by:sv(nm),role:sv('a'),txt:sv(txt),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),open:sv('1'),pr:sv(''),img:sv(''),sub:iv(0),doneBy:sv(''),note:sv(''),ok:iv(0),late:sv(''),
-  to:{arrayValue:{values:[sv(SY.uid)]}},toN:{arrayValue:{values:[sv(nm)]}},ow:sv(SY.uid),owN:sv(nm),clt:iv(now),np:iv(0),wp:iv(0),mi:iv(du?1:0)};/* המשימה משויכת למנהל עצמו (לא לכל הצוות) */
+  mi:iv(du?1:0)};
+ /* 15.11.2026 (החלטת בעל הפרויקט): משימה מהמזכירה – לכל העובדים. יש רשימת עובדים (עד 30) – כולם נמענים; אחרת משימה ישנה לכל הצוות (בלי to), כמו FRM.tkAdd */
+ if(typeof tkStaffLoad==='function'&&typeof TKST!=='undefined'&&!TKST.L){try{await tkStaffLoad()}catch(e){}}
+ const SL=typeof TKST!=='undefined'&&Array.isArray(TKST.L)?TKST.L:null;
+ if(SL&&SL.length&&SL.length<=30)Object.assign(fields,{to:{arrayValue:{values:SL.map(z=>sv(z.uid))}},toN:{arrayValue:{values:SL.map(z=>sv(z.name))}},ow:sv(SL.length===1?SL[0].uid:''),owN:sv(SL.length===1?SL[0].name:''),clt:iv(SL.length===1?now:0),np:iv(0),wp:iv(0)});
  try{await fsx('/tasks?documentId='+encodeURIComponent(tid),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e&&e.code===409)dup=1;else{el.disabled=false;return toast(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה')}}
  if(du&&!dup){try{await tkPutImg(tid,'m1',du)}catch(e){toast('המשימה נוצרה, אבל התמונה לא הועלתה');try{await tkPatch(tid,{mi:0})}catch(e2){}}}
  try{await scMark(id,mid,'ok')}catch(e){}
