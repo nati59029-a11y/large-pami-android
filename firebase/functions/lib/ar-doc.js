@@ -3,14 +3,16 @@
 // מספור, יתרת לקוח והקצאות – תמיד בתוך טרנזקציה אחת של Firestore (Book). בלי PDF ובלי שליחה (אלה ב-ar.js, אחרי הטרנזקציה).
 //
 //   ardoc/{t}{D|O}{no}  { t, ser, no, d, cust, custSnap, lines:[{n,q,p,u?,pid?,fr?}], vm, rate, disc?, net, vat, gross, due?, terms?, ord:[], br,
-//                         ref?, li?, draft, bt, alloc?, alq?, pay?, proof?, req?, note?, by, at, f }  – תוכן קבוע. סכומים באגורות (שלמים, תמיד חיוביים).
+//                         ref?, li?, rf?, draft, bt, alloc?, alq?, pay?, proof?, req?, note?, by, at, f }  – תוכן קבוע. סכומים באגורות (שלמים, תמיד חיוביים).
 //                       + שדות שמותר לשנות (רק דרך docUpd): open (אגורות: בחשבונית – יתרה לתשלום; בקבלה/זיכוי – זכות שעוד לא הוקצתה),
 //                         st ('open'|'part'|'paid' בחשבונית, 'paid' ב-ir, 'ok'|'void' בקבלה ובזיכוי), sent[], void {at,by,why}, dueX (מועד שמנהל שינה), upd.
 //   aralloc/{id}        { rc (הקבלה או הזיכוי), inv, amt (אגורות), cust, at, by, void? } – איזה תשלום/זיכוי סגר איזו חשבונית.
 //   arcfg/seq_{t}{D|O}  { n } – המספר האחרון שהופק בכל סדרה. D = טיוטה, O = רשמי (רק כש-arcfg/off.on – מנהל־על). רשמי מתחיל מ-arcfg/off.start[t].
 //   cust/{id}.ar        { bal, open, cr, at } – באגורות: bal = חובה − זכות; open = סכום החשבוניות הפתוחות; cr = זכות שלא הוקצתה. תמיד bal = open − cr.
 //
-// חובה: inv.gross, ir.gross. זכות: rc.gross (שלא בוטלה), ir.gross, cr.gross. מסמך לא נמחק ולא משתנה – רק docUpd, שמאפשר רק את השדות שלמעלה.
+//   rf (בזיכוי בלבד, החלטה 31): { m, amt, via? } – החזר כסף ללקוח באמצעי התשלום (אגורות). נקבע ביצירה, וסוגר מיד את הזכות שנשארה מהזיכוי (open=0);
+//   ביתרה הוא חובה: bal += rf.amt. המערכת רק רושמת – זיכוי האשראי עצמו נעשה במסוף.
+// חובה: inv.gross, ir.gross, cr.rf.amt. זכות: rc.gross (שלא בוטלה), ir.gross, cr.gross. מסמך לא נמחק ולא משתנה – רק docUpd, שמאפשר רק את השדות שלמעלה.
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const AC = require('./ar-calc');
@@ -151,6 +153,17 @@ class Book {
     for (const k of Object.keys(patch)) if (!MUT.includes(k)) throw new Error('ar-doc: immutable field ' + k);
     Object.assign(x.d, patch);
     if (!x.isNew) Object.assign(x.patch, patch);
+  }
+  // החלטה 31: החזר כסף על זיכוי חדש – רק הזכות שנשארה אחרי שהזיכוי סגר את החוב של החשבונית (כלומר רק מה ששולם בפועל)
+  refund(src, m, via) {
+    if (!src.isNew || src.d.t !== 'cr') throw new Error('ar-doc: bad refund');
+    const a = src.d.open;
+    if (!(a > 0)) return 0;
+    src.d.rf = Object.assign({ m, amt: a }, via ? { via } : {});
+    this.set(src, { open: 0 });
+    const c = src.d.cust ? this.custs[src.d.cust] : null;
+    if (c) { c.ar.cr -= a; c.ar.bal += a; c.dirty = true; }
+    return a;
   }
   // זכות פתוחה של הלקוח (קבלות / זיכויים) מקוזזת אוטומטית בחשבונית חדשה (101–102)
   offset(inv, open) {

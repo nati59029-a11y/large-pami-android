@@ -27,7 +27,10 @@ function sub(){let c=S.cats.find(x=>x.id===OPC);if(!c){c={id:OPC,kind:'inc',name
 function incOf(d,op,z){if(!d||!['inv','ir','cr'].includes(d.t)||!Number.isInteger(d.gross))return null;
  const br=d.br||NB,o=(Array.isArray(d.ord)?d.ord:[])[0]||'',zz=z&&z[br]===true,p=d.pay||{};
  if(d.t==='ir'&&zz&&['cash','card'].includes(p.m)&&!p.via)return null;
- if(d.t==='cr'&&zz&&/^ir[DO]/.test(String(d.ref||'')))return null;
+ // החלטה 31: זיכוי עם החזר כסף – ההחזר עצמו לא נרשם (רק הזיכוי, בסכום שלילי). בסניף "דוח Z": החזר מזומן / אשראי בקופה (בלי via) כבר בדוח Z – לא נרשם;
+ // החזר שלא בקופה (העברה, צ׳ק, אחר, או אשראי בקישור / בטלפון) – נרשם. זיכוי בלי החזר – כמו קודם
+ if(d.t==='cr'&&zz&&d.rf&&typeof d.rf==='object'){if(['cash','card'].includes(d.rf.m)&&!d.rf.via)return null}
+ else if(d.t==='cr'&&zz&&/^ir[DO]/.test(String(d.ref||'')))return null;
  const sn=(d.custSnap&&d.custSnap.name)||'';
  const f={t:'inc',cat:OPC,date:String(d.d||''),amt:Math.round((d.t==='cr'?-d.gross:d.gross))/100,note:`${TN[d.t]} #${d.no}${d.draft?' (טיוטה)':''}${sn?' · '+sn:''}`.slice(0,200),ardoc:d.id};
  if(d.t!=='cr'&&o)f.aro=o;

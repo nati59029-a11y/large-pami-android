@@ -86,7 +86,7 @@ FRM.arPaidF=async f=>{const x=fd(f),b=f.querySelector('button'),file=f.querySele
 
 /* ---------- כרטיס הלקוח: יתרה, מסמכים, קבלה, סיכום חודשי ---------- */
 function rowH(x){const sg=x.t==='cr'||x.t==='rc'?-1:1;
- return `<div class="li" data-a="arDocV" data-id="${esc(x.id)}" style="cursor:pointer"><div class="grow"><b>${esc(TN[x.t]||x.t)} #${esc(x.no)}</b>${x.draft?' <small style="color:var(--bad)">טיוטה</small>':''}<br><small class="note">${dd(x.d)}${x.t==='inv'?' · לתשלום עד '+dd(x.dueX||x.due):''}${STN[x.st]?' · '+STN[x.st]:''}</small></div>
+ return `<div class="li" data-a="arDocV" data-id="${esc(x.id)}" style="cursor:pointer"><div class="grow"><b>${esc(TN[x.t]||x.t)} #${esc(x.no)}</b>${x.draft?' <small style="color:var(--bad)">טיוטה</small>':''}<br><small class="note">${dd(x.d)}${x.t==='inv'?' · לתשלום עד '+dd(x.dueX||x.due):''}${STN[x.st]?' · '+STN[x.st]:''}${x.t==='cr'&&refTx(x.ref)?' · '+esc(refTx(x.ref)):''}</small></div>
   <div style="text-align:left"><b dir="ltr">${ag(sg*x.gross)}</b>${x.t==='inv'&&x.open>0&&x.open<x.gross?`<br><small class="note">פתוח ${ag(x.open)}</small>`:''}${(x.t==='rc'||x.t==='cr')&&x.open>0&&!x.void?`<br><small class="note">זכות ${ag(x.open)}</small>`:''}</div></div>`}
 {const f=V.ocCard;if(f)V.ocCard=id=>{const r=f(id);try{if(!r||!r.h||!on()||!live())return r;
  if(!D.c[id]){docsL(id).then(()=>redraw('ocCard'));return r}
@@ -95,7 +95,7 @@ function rowH(x){const sg=x.t==='cr'||x.t==='rc'?-1:1;
   <div class="row" style="margin-top:8px"><button class="btn grow" data-a="arRc" data-id="${esc(id)}">רישום תשלום (קבלה)</button><button class="btn g grow" data-a="arMon" data-id="${esc(id)}">סיכום חודשי</button></div></div>
   ${L.length?L.slice(0,40).map(rowH).join(''):'<div class="empty">אין עדיין מסמכים</div>'}`}catch(e){}return r}}
 ACT.arDocV=el=>{const x=docOf(el.dataset.id);if(!x)return;const p=x.pay||{};
- dlg(`<h3>${esc(TN[x.t])} #${esc(x.no)} ${x.draft?DRAFT:''}</h3><p class="note" style="margin-top:0">${dd(x.d)} · ${ag(x.gross)}${x.t==='inv'?' · לתשלום עד '+dd(x.dueX||x.due)+' · '+(STN[x.st]||''):''}${x.t==='rc'?' · '+(PAYN[p.m]||'')+(p.chq?` · צ׳ק ${esc(p.chq.no)} (${esc(p.chq.bank)}, ${dd(p.chq.d)})`:''):''}${x.void?' · <b style="color:var(--bad)">מבוטלת</b>: '+esc(x.void.why||''):''}${x.ref?' · לחשבונית '+esc(String(x.ref).replace(/^(inv|ir)[DO]/,'')):''}</p>
+ dlg(`<h3>${esc(TN[x.t])} #${esc(x.no)} ${x.draft?DRAFT:''}</h3>${x.t==='cr'&&refTx(x.ref)?`<p style="margin:0 0 6px;font-size:1.05em"><b style="color:var(--acc)">${esc(refTx(x.ref))}</b></p>`:''}${x.t==='cr'&&rfTx(x.rf)?`<p style="margin:0 0 6px"><b>${esc(rfTx(x.rf))}</b></p>`:''}<p class="note" style="margin-top:0">${dd(x.d)} · ${ag(x.gross)}${x.t==='inv'?' · לתשלום עד '+dd(x.dueX||x.due)+' · '+(STN[x.st]||''):''}${x.t==='rc'?' · '+(PAYN[p.m]||'')+(p.chq?` · צ׳ק ${esc(p.chq.no)} (${esc(p.chq.bank)}, ${dd(p.chq.d)})`:''):''}${x.void?' · <b style="color:var(--bad)">מבוטלת</b>: '+esc(x.void.why||''):''}</p>
   <div class="row"><button class="btn g grow" data-a="arDShare" data-id="${esc(x.id)}">שיתוף</button><button class="btn g grow" data-a="arDSend" data-id="${esc(x.id)}" data-ch="wa">ווטסאפ</button><button class="btn g grow" data-a="arDSend" data-id="${esc(x.id)}" data-ch="mail">מייל</button></div>
   ${['inv','ir'].includes(x.t)?`<button class="btn g w" style="margin-top:8px" data-a="arCr" data-id="${esc(x.id)}">זיכוי</button>`:''}
   ${x.t==='inv'&&mgr()?`<form data-f="arDueF" class="row" style="margin-top:8px;align-items:end"><input type="hidden" name="id" value="${esc(x.id)}"><label class="f grow" style="margin:0"><span>מועד תשלום</span><input type="date" name="due" value="${esc(x.dueX||x.due||'')}" min="${esc(x.d)}"></label><button class="btn g">שנה</button></form>`:''}
@@ -126,21 +126,63 @@ FRM.arRcF=async f=>{const x=fd(f),b=f.querySelector('button:not([type])'),file=f
  const p={reqId:x.q,cust:x.cust,amt:Math.round(amt*100)/100,method:x.method};if(x.method==='chq')p.chq={no:String(x.cno||''),bank:String(x.cbank||''),d:String(x.cd||'')};if(x.conf)p.conf=x.conf;if(alloc.length)p.alloc=alloc.map(a=>({inv:a.inv,amt:Math.round(a.amt*100)/100}));
  b.disabled=true;try{if(file)p.proofId=await proofUp(file);const r=await fnCall('arReceipt',p);closeDlg();toast(`קבלה #${r.no} הופקה${r.draft?' (טיוטה)':''}${r.left>0?' · זכות '+ag(r.left):''}`);await docsL(x.cust,true);try{AD.R.c[x.cust]=undefined}catch(e){}rerender()}catch(e){b.disabled=false;err(e)}};
 
-/* זיכוי: מלא / לפי שורות / סכום; "החזרה למלאי" כבויה כברירת מחדל (החלטה 11) */
-ACT.arCr=async el=>{const id=el.dataset.id;let x=docOf(id);if(!x){try{const d=await fsx('/ardoc/'+id);x=d?dec(d):null}catch(e){x=null}}if(!x)return toast('המסמך לא נמצא');
- closeDlg();dlg(`<h3>זיכוי ל${esc(TN[x.t])} #${esc(x.no)}</h3><form data-f="arCrF"><input type="hidden" name="id" value="${esc(x.id)}"><input type="hidden" name="q" value="${rid()}">
-  <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="radio" name="mode" value="full" checked> זיכוי מלא (${ag(x.gross)})</label>
-  <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="radio" name="mode" value="lines"> לפי שורות</label>
-  ${(x.lines||[]).map((l,i)=>`<label class="row" style="gap:8px;align-items:center"><span class="grow">${esc(l.n)} <small class="note">(${esc(l.q)} × ${ils(l.p)})</small></span><input name="l_${i}" inputmode="decimal" placeholder="0" style="width:70px"></label>`).join('')}
-  <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="radio" name="mode" value="amt"> סכום (כולל מע"מ): <input name="amt" inputmode="decimal" style="width:100px"></label>
+/* זיכוי (החלטה 29): החשבונית לא מבוטלת. כל הפריטים שבחשבונית – לכל פריט "+" / "−" עד הכמות שנקנתה פחות מה שכבר זוכה; הסכום מתעדכן תוך כדי.
+   "החזרה למלאי" כבויה כברירת מחדל (החלטה 11). זיכוי לפי סכום (בלי פריטים) – נשאר כאפשרות משנית. השרת בודק שוב את הכמויות (arCredit) */
+const r3=n=>Math.round(n*1000)/1000;
+// החלטה 31: החזר כסף באמצעי התשלום המקורי – המערכת רק רושמת (זיכוי האשראי עצמו – במסוף, כמו היום)
+const RFN={card:'זיכוי באשראי',cash:'החזר מזומן',transfer:'החזר בהעברה בנקאית',chq:'החזר בצ׳ק',other:'החזר – אחר'};
+const rfTx=rf=>rf&&Number.isInteger(rf.amt)?`הוחזר ללקוח: ${RFN[rf.m]||RFN.other}, ${ag(rf.amt)}`:'';
+const refTx=ref=>{const m=/^(inv|ir)([DO])(\d+)$/.exec(String(ref||''));return m?`זיכוי ל${TN[m[1]]} מספר ${m[3]}${m[2]==='D'?' (טיוטה)':''}`:''};
+let CR=null;
+function crSum(){if(!CR)return;const f=document.querySelector('#dlg form[data-f=arCrF]');if(!f)return;const x=CR.x,L=x.lines||[];
+ L.forEach((l,i)=>{const q=CR.q[i]||0,e=f.querySelector(`[data-cq="${i}"]`),h=f.querySelector(`[name=l_${i}]`);if(e)e.textContent=String(q);if(h)h.value=String(q);
+  const m=f.querySelector(`[data-a=arCrM][data-i="${i}"]`),p=f.querySelector(`[data-a=arCrP][data-i="${i}"]`);if(m)m.disabled=!(q>0);if(p)p.disabled=!(q<CR.left[i])});
+ const sel=L.map((l,i)=>({n:l.n,q:CR.q[i]||0,p:l.p})).filter(l=>l.q>0);const AC=window.ArCalc;
+ let s=sel.length&&AC?AC.docSums(sel,x.vm,x.rate,x.disc||0):{net:0,vat:0,gross:0};
+ // זיכוי שמכסה את כל מה שנשאר = בדיוק היתרה (כמו בשרת – adj)
+ if(sel.length&&!CR.pAmt&&L.every((l,i)=>!(l.q>0)||r3(CR.left[i]-(CR.q[i]||0))<=0))s={net:x.net-CR.pN,vat:x.vat-CR.pV,gross:x.gross-CR.pG};
+ const amt=+String((f.querySelector('[name=amt]')||{}).value||'').replace(/[^\d.]/g,'');
+ const box=f.querySelector('#arCrSum');if(box)box.innerHTML=sel.length?(x.vm==='ex'?`<div class="row" style="justify-content:space-between"><span>לפני מע"מ</span><b dir="ltr">${ag(s.net)}</b></div><div class="row" style="justify-content:space-between"><span>מע"מ</span><b dir="ltr">${ag(s.vat)}</b></div>`:'')+`<div class="row" style="justify-content:space-between"><span>סה"כ זיכוי${x.vm==='ex'?'':' (כולל מע"מ)'}</span><b dir="ltr">${ag(s.gross)}</b></div>${x.vm==='ex'?'':`<small class="note">מתוכם מע"מ ${ag(s.vat)}</small>`}`:(amt>0?`<div class="row" style="justify-content:space-between"><span>זיכוי לפי סכום (כולל מע"מ)</span><b dir="ltr">${ils(amt)}</b></div>`:'<small class="note">עוד לא נבחר פריט לזיכוי</small>');
+ // החזר כסף (החלטה 31): רק על מה ששולם – בחשבונית מס הזיכוי קודם סוגר את החוב הפתוח, ורק העודף מוחזר
+ const g=sel.length?s.gross:Math.round(amt*100),bk=!!f.querySelector('[name=rk][value=back]:checked'),rA=Math.max(0,g-(x.t==='inv'?Math.max(0,x.open||0):0));
+ const rs=f.querySelector('[name=rm]'),rw=f.querySelector('#arCrRm');if(rw)rw.hidden=!bk;
+ if(box&&bk&&g>0)box.innerHTML+=rA>0?`<div class="row" style="justify-content:space-between"><span>יוחזר ללקוח (${esc(RFN[rs&&rs.value]||'')})</span><b dir="ltr">${ag(rA)}</b></div>`:'<p class="note" style="margin:4px 0 0;color:var(--bad)">החשבונית לא שולמה – הזיכוי רק מוריד את החוב, ואין כסף להחזיר.</p>';
+ const b=f.querySelector('button:not([type])');if(b)b.disabled=!(sel.length||amt>0)||(bk&&!(rA>0))}
+ACT.arCr=async el=>{const id=el.dataset.id;let x=null;try{const d=await fsx('/ardoc/'+id);x=d?dec(d):null}catch(e){x=null}if(!x)x=docOf(id);if(!x)return toast('המסמך לא נמצא');
+ // אמצעי התשלום של החשבונית המקורית: חשבונית מס קבלה – pay; חשבונית מס – הקבלות שהוקצו לה (aralloc)
+ let src=[];if(x.t==='ir'){if(x.pay)src=[x.pay.m]}else{try{for(const a of (await runQ('aralloc',['inv','EQUAL',{stringValue:x.id}],100)).filter(a=>!a.void&&/^rc/.test(a.rc||''))){let d=docOf(a.rc);if(!d){try{const z=await fsx('/ardoc/'+a.rc);d=z?dec(z):null}catch(e){}}if(d&&d.pay&&!d.void)src.push(d.pay.m)}}catch(e){}}
+ src=[...new Set(src.filter(m=>RFN[m]))];
+ let prev=[];try{prev=(await runQ('ardoc',['ref','EQUAL',{stringValue:x.id}],300)).filter(p=>p.t==='cr')}catch(e){return err(e)}
+ const used={};prev.forEach(p=>(Array.isArray(p.li)?p.li:[]).forEach(l=>{used[l.i]=r3((used[l.i]||0)+(+l.q||0))}));
+ const L=x.lines||[];CR={x,q:{},used,left:L.map((l,i)=>Math.max(0,r3((+l.q||0)-(used[i]||0)))),pAmt:prev.some(p=>!Array.isArray(p.li)),
+  pG:prev.reduce((s,p)=>s+(p.gross||0),0),pN:prev.reduce((s,p)=>s+(p.net||0),0),pV:prev.reduce((s,p)=>s+(p.vat||0),0)};
+ const rest=Math.max(0,x.gross-CR.pG);
+ closeDlg();dlg(`<h3>זיכוי ל${esc(TN[x.t])} #${esc(x.no)}</h3>${x.draft?DRAFT:''}<p class="note" style="margin:4px 0 8px">החשבונית לא מבוטלת. לחצו + על כל פריט שמזכים.${CR.pG?` כבר זוכו ${ag(CR.pG)}, נשאר לזכות עד ${ag(rest)}.`:''}</p><form data-f="arCrF"><input type="hidden" name="id" value="${esc(x.id)}"><input type="hidden" name="q" value="${rid()}">
+  ${L.map((l,i)=>`<div class="row" style="gap:6px;align-items:center;min-height:48px;border-bottom:1px solid var(--line);flex-wrap:nowrap"><span class="grow" style="min-width:0;overflow-wrap:anywhere">${esc(l.n)}<br><small class="note">${ils(l.p)} · נקנו ${esc(l.q)}${used[i]?' · זוכו '+esc(used[i]):''}</small></span>
+   <input type="hidden" name="l_${i}" value="0"><button type="button" class="btn g" style="min-width:44px;min-height:44px;padding:0" data-a="arCrM" data-i="${i}" aria-label="פחות" disabled>−</button><b data-cq="${i}" style="min-width:30px;text-align:center" dir="ltr">0</b><button type="button" class="btn g" style="min-width:44px;min-height:44px;padding:0" data-a="arCrP" data-i="${i}" aria-label="עוד אחד"${CR.left[i]>0?'':' disabled'}>+</button></div>`).join('')}
+  ${CR.left.some(v=>v>0)?'<button type="button" class="btn g s" style="margin-top:8px" data-a="arCrAll">הכול</button>':'<p class="note">כל הפריטים כבר זוכו.</p>'}
+  <div class="card" id="arCrSum" style="margin:8px 0"></div>
+  <details style="margin-bottom:8px"><summary style="min-height:44px;line-height:44px">זיכוי לפי סכום (בלי פריטים)</summary><label class="f"><span>סכום (כולל מע"מ, ₪)</span><input name="amt" inputmode="decimal" style="width:120px"></label></details>
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="rs"> החזרה למלאי</label>
+  <div class="card" style="margin:8px 0"><b>מה עושים עם הזיכוי?</b>
+   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="radio" name="rk" value="cr" checked> זיכוי ללקוח <small class="note">(יתרת זכות – תקוזז בחשבונית הבאה)</small></label>
+   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="radio" name="rk" value="back"> החזר כסף <small class="note">(רק על מה ששולם)</small></label>
+   <label class="f" id="arCrRm" hidden><span>אמצעי ההחזר${src.length>1?' – שולם בכמה אמצעים, בחרו':src.length?' – כמו התשלום המקורי':' – לא ידוע, בחרו'}</span><select name="rm">${Object.entries(RFN).map(([k,l])=>`<option value="${k}"${k===(src[0]||'cash')?' selected':''}>${l}</option>`).join('')}</select></label></div>
   <label class="f"><span>סיבה (חובה)</span><input name="why" required maxlength="200"></label>
-  <div class="row"><button class="btn r grow">הפק זיכוי</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
-FRM.arCrF=async f=>{const x=fd(f),b=f.querySelector('button:not([type])');const p={reqId:x.q,inv:x.id,mode:x.mode,reason:String(x.why||'').trim()};if(!p.reason)return toast('כתבו סיבה');
- if(x.mode==='lines'){p.lines=Object.keys(x).filter(k=>/^l_\d+$/.test(k)&&+x[k]>0).map(k=>({i:+k.slice(2),q:+x[k]}));if(!p.lines.length)return toast('הקלידו כמות לזיכוי בשורה אחת לפחות')}
- if(x.mode==='amt'){p.amt=Math.round(+String(x.amt||'').replace(/[^\d.]/g,'')*100)/100;if(!(p.amt>0))return toast('סכום לא תקין')}
- if(x.rs&&x.mode!=='amt')p.restock=true;
- b.disabled=true;try{const r=await fnCall('arCredit',p);closeDlg();toast(`זיכוי #${r.no} הופק${r.draft?' (טיוטה)':''}${r.rs?' · הוחזר למלאי':''}`);for(const k of Object.keys(D.c))D.c[k]=undefined;rerender()}catch(e){b.disabled=false;err(e)}};
+  <div class="row"><button class="btn r grow" disabled>הפק זיכוי</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`);
+ const fm=document.querySelector('#dlg form[data-f=arCrF]');if(fm)fm.onchange=crSum;
+ const a=document.querySelector('#dlg [name=amt]');if(a)a.oninput=()=>{if(+String(a.value||'').replace(/[^\d.]/g,'')>0)CR.q={};crSum()};crSum()};
+const crAdd=(i,d)=>{if(!CR||!(i>=0))return;const q=CR.q[i]||0,mx=CR.left[i]||0;CR.q[i]=Math.max(0,Math.min(mx,r3(d>0?q+Math.min(1,mx-q):q-1)));if(CR.q[i]>0){const a=document.querySelector('#dlg [name=amt]');if(a)a.value=''}crSum()};
+ACT.arCrP=el=>crAdd(+el.dataset.i,1);
+ACT.arCrM=el=>crAdd(+el.dataset.i,-1);
+ACT.arCrAll=()=>{if(!CR)return;CR.left.forEach((v,i)=>{CR.q[i]=v});const a=document.querySelector('#dlg [name=amt]');if(a)a.value='';crSum()};
+FRM.arCrF=async f=>{const x=fd(f),b=f.querySelector('button:not([type])');const p={reqId:x.q,inv:x.id,reason:String(x.why||'').trim()};
+ p.lines=Object.keys(x).filter(k=>/^l_\d+$/.test(k)&&+x[k]>0).map(k=>({i:+k.slice(2),q:+x[k]})).sort((a,c)=>a.i-c.i);
+ if(p.lines.length)p.mode='lines';else{delete p.lines;p.amt=Math.round(+String(x.amt||'').replace(/[^\d.]/g,'')*100)/100;if(!(p.amt>0))return toast('לחצו + על פריט לזיכוי');p.mode='amt'}
+ if(!p.reason)return toast('כתבו סיבה');
+ if(x.rs&&p.mode!=='amt')p.restock=true;
+ if(x.rk==='back')p.refund={m:RFN[x.rm]?x.rm:'cash'};
+ b.disabled=true;try{const r=await fnCall('arCredit',p);CR=null;closeDlg();toast(`זיכוי #${r.no} הופק${r.draft?' (טיוטה)':''}${r.rs?' · הוחזר למלאי':''}${r.rf?' · '+rfTx(r.rf):''}`);for(const k of Object.keys(D.c))D.c[k]=undefined;rerender()}catch(e){b.disabled=false;err(e)}};
 
 /* סיכום חודשי (לא חשבונית מס – החלטה 23): הפקה ושיתוף, או שליחה */
 ACT.arMon=el=>{const cid=el.dataset.id,d=new Date(),ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');

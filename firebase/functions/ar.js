@@ -378,6 +378,11 @@ const titleOf = (doc) => (doc.bt === 'patur' && DT_PATUR[doc.t]) || DT[doc.t] ||
 const docName = (doc, v) => `${titleOf(doc)} ${doc.no}${v ? ' (מבוטל)' : ''}.pdf`;
 const shDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
 const ag2 = (a) => PDF.moneyAg(a);
+// "זיכוי לחשבונית מס מספר 12" / "... לחשבונית מס קבלה מספר 7 (טיוטה)" – מהמזהה של חשבונית החיוב ({t}{D|O}{no}, ar-doc.docId)
+// החלטה 31: "הוחזר ללקוח: זיכוי באשראי, ₪X" – על מסמך הזיכוי
+const RFN = { card: 'זיכוי באשראי', cash: 'החזר מזומן', transfer: 'החזר בהעברה בנקאית', chq: 'החזר בצ׳ק', other: 'החזר – אחר' };
+const rfTxt = (rf) => (rf && Number.isInteger(rf.amt) ? `הוחזר ללקוח: ${RFN[rf.m] || RFN.other}, ${ag2(rf.amt)}` : '');
+const refTxt = (ref, bt) => { const m = /^(inv|ir)([DO])(\d+)$/.exec(String(ref || '')); return m ? `זיכוי ל${titleOf({ t: m[1], bt })} מספר ${m[3]}${m[2] === 'D' ? ' (טיוטה)' : ''}` : ''; };
 const AMT_MAX = 100000000; // ₪1,000,000 באגורות לקבלה / זיכוי אחד (הנחה)
 
 async function bizOf(db, w, cfg) {
@@ -403,7 +408,9 @@ async function docRender(db, w, doc, cfg, isVoid) {
     if (doc.adj) base.adj = doc.adj;
     if (doc.terms) base.terms = doc.terms;
     if (doc.t === 'inv') base.due = doc.dueX || doc.due || '';
-    if (doc.t === 'cr' && doc.ref) notes.push(`זיכוי לחשבונית ${doc.ref.replace(/^(inv|ir)[DO]/, '')}`);
+    // החלטה 29: שורה בולטת עם המספר המודפס של חשבונית החיוב (וסימון טיוטה כשהיא מסדרת הטיוטה)
+    if (doc.t === 'cr' && doc.ref) base.refTxt = refTxt(doc.ref, doc.bt);
+    if (doc.t === 'cr' && doc.rf) base.rfTxt = rfTxt(doc.rf);
     if (doc.t === 'ir' && doc.pay) notes.push('שולם: ' + (PAYN[doc.pay.m] || 'אחר') + (doc.pay.last4 ? ' ****' + doc.pay.last4 : ''));
     const k = PDF.calc(base);
     if (k.gross !== doc.gross) throw pre('sum-mismatch', 'סכום המסמך לא תואם. פנו למנהל');
@@ -619,11 +626,13 @@ async function arReceipt(request) {
   return res;
 }
 
-// ---------- arCredit({ reqId, inv, mode:'full'|'lines'|'amt', lines?:[{i,q}], amt?, restock?, reason }) ----------
+// ---------- arCredit({ reqId, inv, mode:'full'|'lines'|'amt', lines?:[{i,q}], amt?, restock?, reason, refund?:{m} }) ----------
+// refund (החלטה 31): החזר כסף באמצעי התשלום (cash / card / transfer / chq / other) במקום יתרת זכות. רק על מה ששולם: בחשבונית מס הזיכוי קודם סוגר
+// את החוב הפתוח, ורק העודף מוחזר; בלי עודף – nothing-paid. אמצעי התשלום של החשבונית המקורית: ir.pay / הקבלות שהוקצו לה (via עובר מהם באשראי)
 async function arCredit(request) {
   const w = await OC.who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['reqId', 'inv', 'mode', 'lines', 'amt', 'restock', 'reason']);
+  onlyKeys(input, ['reqId', 'inv', 'mode', 'lines', 'amt', 'restock', 'reason', 'refund']);
   const reqId = reqIdOf(input);
   const invId = idOf(input.inv, 'חשבונית');
   if (!['full', 'lines', 'amt'].includes(input.mode)) throw bad('bad-mode', 'זיכוי: מלא, לפי שורות או סכום');
@@ -631,6 +640,13 @@ async function arCredit(request) {
   if (input.restock === true && input.mode === 'amt') throw bad('bad-field', 'החזרה למלאי – רק בזיכוי מלא או לפי שורות');
   const reason = txtIn(input.reason, 200, 'סיבה');
   if (!reason) throw bad('bad-reason', 'כתבו סיבה לזיכוי');
+  let rfm = '';
+  if (input.refund != null) {
+    if (typeof input.refund !== 'object' || Array.isArray(input.refund)) throw bad('bad-field', 'החזר כסף: אמצעי תשלום');
+    onlyKeys(input.refund, ['m'], 'החזר');
+    if (!Object.prototype.hasOwnProperty.call(RFN, input.refund.m)) throw bad('bad-field', 'החזר כסף: מזומן, אשראי, העברה, צ׳ק או אחר');
+    rfm = input.refund.m;
+  }
   let li = null, amt = 0;
   if (input.mode === 'lines') {
     if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > 500) throw bad('bad-lines', 'בחרו שורות לזיכוי');
@@ -658,7 +674,7 @@ async function arCredit(request) {
     const prevG = prev.docs.reduce((s, p) => s + (p.get('t') === 'cr' ? p.get('gross') || 0 : 0), 0);
     const prevAmt = prev.docs.some((p) => p.get('t') === 'cr' && !Array.isArray(p.get('li')));
     const used = new Map();
-    prev.docs.forEach((p) => (p.get('li') || []).forEach((l) => used.set(l.i, (used.get(l.i) || 0) + l.q)));
+    prev.docs.forEach((p) => (p.get('t') === 'cr' ? p.get('li') || [] : []).forEach((l) => used.set(l.i, Math.round(((used.get(l.i) || 0) + l.q) * 1000) / 1000)));
     const L = x.d.lines || [];
     let mode = input.mode, sel = li;
     if (mode === 'full') {
@@ -693,6 +709,16 @@ async function arCredit(request) {
     }
     if (sm.gross <= 0) throw pre('bad-amt', 'סכום הזיכוי חייב להיות גדול מ-0');
     if (prevG + sm.gross > x.d.gross) throw pre('too-much', `אפשר לזכות עד ${ag2(Math.max(0, x.d.gross - prevG))} בחשבונית הזו`);
+    // אמצעי התשלום של החשבונית המקורית (לסימון via בהחזר באשראי) – קריאות לפני הכתיבות
+    let srcPay = [];
+    if (rfm) {
+      if (x.d.t === 'ir') srcPay = x.d.pay ? [x.d.pay] : [];
+      else {
+        const al = (await tx.get(db.collection('aralloc').where('inv', '==', invId))).docs.map((s) => s.data()).filter((a) => !a.void && /^rc/.test(a.rc || ''));
+        const rs = al.length ? await tx.getAll(...[...new Set(al.map((a) => a.rc))].map((k) => db.doc('ardoc/' + k))) : [];
+        srcPay = rs.filter((s) => s.exists && !s.get('void') && s.get('pay')).map((s) => s.get('pay'));
+      }
+    }
     const back = input.restock === true ? lines.filter((l) => l.pid) : [];
     const prods = back.length ? await OC.loadProds(tx, db, back.map((l) => l.pid)) : null;
     if (x.d.cust) await B.needCust(x.d.cust);
@@ -704,13 +730,18 @@ async function arCredit(request) {
     if (back.length) body.rs = true;
     const r = B.issue('cr', body);
     if (x.d.t === 'inv' && !x.d.void) B.alloc(r, x, r.d.gross);
+    if (rfm) {
+      const sv = srcPay.filter((p) => p.m === rfm);
+      const via = rfm === 'card' && sv.length && sv.every((p) => p.via && p.via === sv[0].via) ? sv[0].via : '';
+      if (!B.refund(r, rfm, via)) throw pre('nothing-paid', 'החשבונית לא שולמה – הזיכוי רק מוריד את החוב, ואין כסף להחזיר. בחרו "זיכוי ללקוח"');
+    }
     B.flush();
     if (back.length) {
       const br = x.d.br || NB;
       OC.applyMoves(tx, db, w, prods, back.filter((l) => prods.has(l.pid)).map((l) => ({ pid: l.pid, br, delta: l.q, why: 'credit' })), { ord: (x.d.ord || [])[0] || '', cr: r.id });
     }
-    for (const o of x.d.ord || []) tx.set(logRef(db, o), { t: B.now, by: w.uid, act: 'ardoc', note: `${DT.cr} #${r.d.no} לחשבונית ${x.d.no}${back.length ? ' · הוחזר למלאי' : ''}` });
-    res = { id: r.id, no: r.d.no, draft: r.d.draft, gross: r.d.gross, left: r.d.open, rs: !!back.length };
+    for (const o of x.d.ord || []) tx.set(logRef(db, o), { t: B.now, by: w.uid, act: 'ardoc', note: `${DT.cr} #${r.d.no} לחשבונית ${x.d.no}${back.length ? ' · הוחזר למלאי' : ''}${r.d.rf ? ' · ' + rfTxt(r.d.rf) : ''}` });
+    res = Object.assign({ id: r.id, no: r.d.no, draft: r.d.draft, gross: r.d.gross, left: r.d.open, rs: !!back.length }, r.d.rf ? { rf: r.d.rf } : {});
     tx.set(markRef(db, reqId), { k: 'arCredit', key: invId, r: res, t: B.now, by: w.uid });
   }, { maxAttempts: 50 });
   if (!res.dup) { try { res.sent = await afterIssue(w, res.id); } catch (e) { logger.error('ar: arCredit after failed', { name: e && e.name, msg: String(e && e.message).slice(0, 200) }); } }
@@ -983,4 +1014,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 const FNS = { arOc, arPdf, arSend, setArCfg, arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff };
 const SENDS = ['arOc', 'arSend', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arDoc', 'arMonthly']; // שולחות: סוד ווטסאפ + סודות המייל
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(SENDS.includes(k) ? { secrets: [WA_ACCESS_TOKEN].concat(S.MAIL_SECRETS), timeoutSeconds: 120, memory: '512MiB' } : { memory: '512MiB' }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, sniffMime } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, sniffMime, refTxt, rfTxt } });

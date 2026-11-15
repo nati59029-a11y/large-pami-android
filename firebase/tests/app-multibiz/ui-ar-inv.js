@@ -23,6 +23,8 @@ const SNAP = M({ name: S('חברת שוטף בע"מ'), phone: S('0541111111'), m
 const ARDOC = [doc('ardoc/invD1', { t: S('inv'), ser: S('D'), no: N(1), d: S('2026-11-12'), due: S('2026-12-31'), cust: S('cT'), custSnap: SNAP, lines: LINES, vm: S('ex'), rate: N(18), net: N(6200), vat: N(1116), gross: N(7316), open: N(7316), st: S('open'), draft: B(true), br: S('br1'), ord: A([S('o8')]), at: N(T2), upd: N(T2) }),
   doc('ardoc/invD2', { t: S('inv'), ser: S('D'), no: N(2), d: S('2026-11-13'), due: S('2026-12-31'), cust: S('cT'), custSnap: SNAP, lines: LINES, vm: S('ex'), rate: N(18), net: N(6200), vat: N(1116), gross: N(7316), open: N(5184), st: S('part'), draft: B(true), br: S('br1'), ord: A([]), at: N(T2 + 1), upd: N(T2) }),
   doc('ardoc/rcD1', { t: S('rc'), ser: S('D'), no: N(1), d: S('2026-11-13'), cust: S('cT'), custSnap: SNAP, lines: A([]), vm: S('inc'), rate: N(0), net: N(2132), vat: N(0), gross: N(2132), open: N(0), st: S('ok'), draft: B(true), br: S('_'), ord: A([]), pay: M({ m: S('transfer') }), proof: S('pAAAAAAAAAA'), at: N(T2 + 2), upd: N(T2) })];
+// החלטה 29/31: זיכוי קודם על invD1 – 3 כוסות (₪17.70), עם החזר מזומן. מוחזר רק בשאילתה מסוננת (ref / cust), לא ברשימה הכללית של arInc
+const CRS = [doc('ardoc/crD9', { t: S('cr'), ser: S('D'), no: N(9), d: S('2026-11-14'), cust: S('cT'), custSnap: SNAP, lines: A([M({ n: S('כוס'), q: N(3), p: N(5) })]), vm: S('ex'), rate: N(18), net: N(1500), vat: N(270), gross: N(1770), open: N(0), st: S('ok'), draft: B(true), br: S('br1'), ord: A([S('o8')]), ref: S('invD1'), li: A([M({ i: N(1), q: N(3) })]), rf: M({ m: S('cash'), amt: N(1770) }), at: N(T2 - 5), upd: N(T2) })];
 const PROD = [doc('prod/pA', { name: S('עוגה'), price: N(12), on: B(true), q: M({ br1: N(5) }) }), doc('prod/pB', { name: S('כוס'), price: N(5), on: B(true), q: M({ br1: N(50) }) })];
 const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(300, 9)]);
 
@@ -35,11 +37,11 @@ async function open(browser, www, who, calls, arOn) {
     const req = route.request(); const u = new URL(req.url()); const body = req.postData() || '';
     const J = (st, b) => route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify(b) });
     if (/:runQuery$/.test(u.pathname)) { let c = '', w = null; try { const q = JSON.parse(body).structuredQuery; c = q.from[0].collectionId; w = q.where; } catch (e) { /* */ }
-      if (c === 'ardoc') { let L = ARDOC; const f = w && w.fieldFilter; if (f) L = L.filter((d) => { const v = d.document.fields[f.field.fieldPath]; return v && v.stringValue === f.value.stringValue; }); calls.push({ n: 'q:ardoc', d: f ? f.field.fieldPath : '' }); return J(200, L); }
+      if (c === 'ardoc') { let L = ARDOC; const f = w && w.fieldFilter; if (f) L = ARDOC.concat(CRS).filter((d) => { const v = d.document.fields[f.field.fieldPath]; return v && v.stringValue === f.value.stringValue; }); calls.push({ n: 'q:ardoc', d: f ? f.field.fieldPath : '' }); return J(200, L); }
       return J(200, c === 'ord' ? ORD : c === 'prod' ? PROD : c === 'cust' ? CUST : [{ readTime: '2026-11-03T09:00:00Z' }]); }
     if (/\/arcfg\/main$/.test(u.pathname)) return arOn ? J(200, { name: 'x', fields: { on: B(true), name: S('עסק'), wt: M({ oc: S('order_doc') }), z: M({ br2: B(true) }) } }) : J(404, { error: { code: 404 } });
     if (/\/arcfg\/off$/.test(u.pathname)) return J(404, { error: { code: 404 } });
-    const dm = /\/ardoc\/([^/]+)$/.exec(u.pathname); if (dm) { const d = ARDOC.find((x) => x.document.name.endsWith('/' + dm[1])); return d ? J(200, d.document) : J(404, { error: { code: 404 } }); }
+    const dm = /\/ardoc\/([^/]+)$/.exec(u.pathname); if (dm) { const d = ARDOC.concat(CRS).find((x) => x.document.name.endsWith('/' + dm[1])); return d ? J(200, d.document) : J(404, { error: { code: 404 } }); }
     const cm = /\/cust\/([^/]+)$/.exec(u.pathname); if (cm) { const d = CUST.find((x) => x.document.name.endsWith('/' + cm[1])); return d ? J(200, d.document) : J(404, { error: { code: 404 } }); }
     if (/\/ordcfg\/main$/.test(u.pathname)) return J(200, { name: 'x', fields: { pay: M({ mode: S('phone') }), src: M({ br1: S('stock') }) } });
     if (/\/ord\/o\d\/log/.test(u.pathname)) return J(200, { documents: [] });
@@ -113,12 +115,45 @@ async function open(browser, www, who, calls, arOn) {
     await view(page, 'ocCard', 'cT'); await page.click('[data-a=arDocV][data-id=invD1]'); await H.settle(page, 300);
     const dv = await page.evaluate(() => { const d = document.querySelector('#dlg'); return { cr: !!d.querySelector('[data-a=arCr]'), due: !!d.querySelector('form[data-f=arDueF]') }; });
     check(who + ' 6 מסמך: זיכוי זמין; שינוי מועד תשלום – ' + (who === 'm' ? 'מנהל רואה' : 'עובד לא רואה'), dv.cr && dv.due === (who === 'm'), dv);
-    await page.click('#dlg [data-a=arCr]'); await H.settle(page, 500); await shot(page, who + '-04-זיכוי');
-    const rsOff = await page.evaluate(() => !document.querySelector('#dlg input[name=rs]').checked);
-    await page.check('#dlg input[name=mode][value=lines]'); await page.fill('#dlg input[name=l_1]', '2'); await page.fill('#dlg input[name=why]', 'שבורות');
+    await page.click('#dlg [data-a=arCr]'); await H.settle(page, 800); await shot(page, who + '-04-זיכוי');
+    // החלטה 29: +/− לכל פריט, עד (נקנה − זוכה); הסכום מתעדכן; "הפק זיכוי" פעיל רק כשנבחר משהו
+    const st = () => page.evaluate(() => { const d = document.querySelector('#dlg'), q = (i) => +d.querySelector(`[data-cq="${i}"]`).textContent;
+      return { q0: q(0), q1: q(1), p0: d.querySelector('[data-a=arCrP][data-i="0"]').disabled, p1: d.querySelector('[data-a=arCrP][data-i="1"]').disabled, m1: d.querySelector('[data-a=arCrM][data-i="1"]').disabled,
+        sub: d.querySelector('form[data-f=arCrF] button:not([type])').disabled, sum: d.querySelector('#arCrSum').innerText, t: d.innerText, ov: document.documentElement.scrollWidth - innerWidth }; });
+    const s0 = await st();
+    const rsOff = await page.evaluate(() => !document.querySelector('#dlg input[name=rs]').checked && document.querySelector('#dlg input[name=rk][value=cr]').checked);
+    check(who + ' 7 חלון הזיכוי: כל הפריטים עם מחיר, נקנו וזוכו (כוס: נקנו 10 · זוכו 3); כמות 0, "−" כבוי, "הפק זיכוי" כבוי; "החזרה למלאי" כבויה; "זיכוי ללקוח" מסומן; בלי גלילה לרוחב ב-360',
+      /עוגה/.test(s0.t) && /נקנו 10 · זוכו 3/.test(s0.t) && /נקנו 1/.test(s0.t) && s0.q0 === 0 && s0.q1 === 0 && s0.m1 && s0.sub && rsOff && s0.ov <= 0, s0);
+    // לחיצה דרך ה-DOM: כפתור כבוי לא מגיב (כמו אצבע על כפתור כבוי)
+    await page.evaluate(() => { const b = (i) => document.querySelector(`#dlg [data-a=arCrP][data-i="${i}"]`); for (let k = 0; k < 9; k++) b(1).click(); b(0).click(); b(0).click(); });
+    const s1 = await st();
+    check(who + ' 7א גבול: 9 לחיצות "+" על כוס – נעצר ב-7 (10 − 3), "+" כבוי; עוגה – 1 מתוך 1; הסכום = כל היתרה ₪55.46 (73.16 − 17.70); "הפק זיכוי" פעיל', s1.q1 === 7 && s1.p1 && s1.q0 === 1 && s1.p0 && /55\.46/.test(s1.sum) && !s1.sub && s1.ov <= 0, s1);
+    await page.click('#dlg [data-a=arCrM][data-i="0"]'); for (let k = 0; k < 5; k++) await page.click('#dlg [data-a=arCrM][data-i="1"]');
+    const s2 = await st();
+    check(who + ' 7ב "−": כוס 2, עוגה 0; הסכום לפני מע"מ ₪10.00, מע"מ ₪1.80, סה"כ ₪11.80', s2.q1 === 2 && s2.q0 === 0 && /10\.00/.test(s2.sum) && /1\.80/.test(s2.sum) && /11\.80/.test(s2.sum) && !s2.sub, s2);
+    // החלטה 31: "החזר כסף" על חשבונית שלא שולמה – הודעה, והכפתור כבוי
+    await page.check('#dlg input[name=rk][value=back]'); await H.settle(page, 200);
+    const s3 = await st(); const rmV = await page.evaluate(() => !document.querySelector('#arCrRm').hidden);
+    check(who + ' 7ג החזר כסף על חשבונית מס שלא שולמה: אמצעי ההחזר מוצג, "לא שולמה", "הפק זיכוי" כבוי', rmV && /לא שולמה/.test(s3.sum) && s3.sub, s3.sum);
+    await page.check('#dlg input[name=rk][value=cr]'); await page.fill('#dlg input[name=why]', 'שבורות'); await shot(page, who + '-04א-זיכוי-כמויות');
     n0 = calls.length; await page.click('#dlg form[data-f=arCrF] button:not([type])'); await H.settle(page, 800);
     const crc = calls.slice(n0).find((x) => x.n === 'arCredit');
-    check(who + ' 7 זיכוי לפי שורות: "החזרה למלאי" כבויה; arCredit {mode:lines, lines:[{i:1,q:2}]} בלי restock', rsOff && crc && crc.d.mode === 'lines' && JSON.stringify(crc.d.lines) === JSON.stringify([{ i: 1, q: 2 }]) && crc.d.restock === undefined && crc.d.reason === 'שבורות' && crc.d.inv === 'invD1', { rsOff, d: crc && crc.d });
+    check(who + ' 7ד הפקה: arCredit {mode:lines, lines:[{i:1,q:2}]} בלי restock ובלי refund', crc && crc.d.mode === 'lines' && JSON.stringify(crc.d.lines) === JSON.stringify([{ i: 1, q: 2 }]) && crc.d.restock === undefined && crc.d.refund === undefined && crc.d.reason === 'שבורות' && crc.d.inv === 'invD1', crc && crc.d);
+    if (who === 'm') {
+      // החזר כסף על invD2 (שולמה חלקית: ₪21.32 מתוך ₪73.16): "הכול" – יוחזר רק מה ששולם, באמצעי שנבחר
+      await page.evaluate(() => ACT.arCr({ dataset: { id: 'invD2' } })); await H.settle(page, 800);
+      await page.click('#dlg [data-a=arCrAll]'); await page.check('#dlg input[name=rk][value=back]'); await page.selectOption('#dlg select[name=rm]', 'card'); await H.settle(page, 200);
+      const s4 = await st();
+      check('m 7ה החזר כסף בחשבונית ששולמה חלקית: "יוחזר ללקוח (זיכוי באשראי) ₪21.32"', /יוחזר ללקוח \(זיכוי באשראי\)/.test(s4.sum) && /21\.32/.test(s4.sum) && /73\.16/.test(s4.sum) && !s4.sub && s4.ov <= 0, s4.sum);
+      await page.fill('#dlg input[name=why]', 'בוטל'); n0 = calls.length; await page.click('#dlg form[data-f=arCrF] button:not([type])'); await H.settle(page, 800);
+      const rf = calls.slice(n0).find((x) => x.n === 'arCredit');
+      check('m 7ו arCredit עם refund {m:card} ושתי השורות במלואן', rf && JSON.stringify(rf.d.refund) === JSON.stringify({ m: 'card' }) && JSON.stringify(rf.d.lines) === JSON.stringify([{ i: 0, q: 1 }, { i: 1, q: 10 }]), rf && rf.d);
+      // מסמך הזיכוי במסך: שורת הפניה בולטת + "הוחזר ללקוח"
+      await view(page, 'ocCard', 'cT'); await page.click('[data-a=arDocV][data-id=crD9]'); await H.settle(page, 300);
+      const cv = await page.evaluate(() => document.querySelector('#dlg').innerText);
+      check('m 7ז מסמך זיכוי: "זיכוי לחשבונית מס מספר 1 (טיוטה)" ו"הוחזר ללקוח: החזר מזומן, ₪17.70"', /זיכוי לחשבונית מס מספר 1 \(טיוטה\)/.test(cv) && /הוחזר ללקוח: החזר מזומן, \S*17\.70/.test(cv), cv.slice(0, 300));
+      await page.evaluate(() => closeDlg());
+    }
     if (who === 'm') {
       const g = await view(page, 'arCfg'); await shot(page, 'm-05-הגדרות');
       check('m 8 הגדרות: "חשבוניות וקבלות" – תבניות ווטסאפ ו"דוח Z" לכל סניף (יהודה הנשיא מסומן)', /חשבוניות וקבלות/.test(g.t) && /דוח Z/.test(g.t) && await page.evaluate(() => document.querySelector('input[name=z_br2]').checked && !document.querySelector('input[name=z_br1]').checked), g.ov);
@@ -144,6 +179,14 @@ async function open(browser, www, who, calls, arOn) {
       check('m 10 הכנסות (incOf): חשבונית = +118 בתאריך החשבונית ובסניף; זיכוי = −11.80; חשבונית מס קבלה במזומן / אשראי בקופה בסניף עם דוח Z – לא (בהעברה, בקישור ובטלפון – כן); הזמנה מקישור ספק – החשבונית כן (aro); קבלה – לא',
         inc.inv && inc.inv.amt === 118 && inc.inv.date === '2026-11-12' && inc.inv.br === 'br1' && inc.inv.cat === 'c_ordinc' && /טיוטה/.test(inc.inv.note) && inc.inv.aro === 'o1' && inc.cr.amt === -11.8 && inc.cr.aro === undefined && inc.irZ === null && inc.irNoZ && inc.irNoZ.amt === 118 && inc.irZtr && inc.irZtr.amt === 118 && inc.crIrZ === null && inc.link && inc.link.amt === 118 && inc.link.aro === 'oLink' && inc.crLink && inc.rc === null && inc.nb.br === undefined
         && inc.irZcard === null && inc.irZlink && inc.irZlink.amt === 118 && inc.irZphone && inc.irZphone.amt === 118, inc);
+      // החלטה 31: זיכוי עם החזר כסף – נרשם רק הזיכוי (שלילי); בסניף דוח Z – החזר מזומן / אשראי בקופה לא נרשם, בקישור / העברה – נרשם
+      const rfi = await page.evaluate(() => { const f = window.__arInc.incOf, op = new Set(), z = { br2: true };
+        const d = (x) => Object.assign({ id: 'c', t: 'cr', no: 2, d: '2026-11-12', gross: 1180, br: 'br2', ord: ['o1'], ref: 'irD1', custSnap: { name: 'ל' }, draft: true }, x);
+        const a = (x) => { const r = f(d(x), op, z); return r ? r.amt : null; };
+        return { cash: a({ rf: { m: 'cash', amt: 1180 } }), card: a({ rf: { m: 'card', amt: 1180 } }), link: a({ rf: { m: 'card', amt: 1180, via: 'link' } }), tr: a({ rf: { m: 'transfer', amt: 1180 } }),
+          noZ: f(d({ br: 'br1', rf: { m: 'cash', amt: 1180 } }), op, z).amt, plain: a({}) }; });
+      check('m 10ג החזר כסף (incOf): רק הזיכוי −11.80; דוח Z – מזומן/אשראי בקופה לא, קישור/העברה כן; סניף בלי דוח Z – כן; זיכוי בלי החזר – כמו קודם',
+        rfi.cash === null && rfi.card === null && rfi.link === -11.8 && rfi.tr === -11.8 && rfi.noZ === -11.8 && rfi.plain === null, rfi);
       // סנכרון בפועל ביומן המנהל (S.tx): חשבונית = תנועת הכנסה אחת; קבלה – לא; הרצה שנייה – בלי שינוי
       const sy = await page.evaluate(async () => { const a = await window.__arInc.arInc(); const b = await window.__arInc.arInc();
         return { a, b, tx: S.tx.filter((t) => String(t.id).indexOf('ar_') === 0).map((t) => [t.id, t.amt, t.date, t.br || '', t.cat, !!t.x]).sort() }; });

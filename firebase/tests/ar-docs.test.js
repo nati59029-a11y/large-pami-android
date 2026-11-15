@@ -80,7 +80,9 @@ async function balanced(cid) {
   for (const x of docs) {
     if (x.t === 'inv') { bal += x.gross; open += x.open; assert.equal(x.gross - al.filter((a) => a.inv === x.id).reduce((s, a) => s + a.amt, 0), x.open, 'חשבונית ' + x.id); }
     if (x.t === 'ir') { bal += x.gross - x.gross; assert.equal(x.open, 0); }
-    if ((x.t === 'rc' && !x.void) || x.t === 'cr') { bal -= x.gross; cr += x.open; assert.equal(x.gross - al.filter((a) => a.rc === x.id).reduce((s, a) => s + a.amt, 0), x.open, 'זכות ' + x.id); }
+    // החלטה 31: החזר כסף (cr.rf) = חובה שסוגרת את הזכות שנשארה מהזיכוי
+    const rf = x.t === 'cr' && x.rf ? x.rf.amt : 0;
+    if ((x.t === 'rc' && !x.void) || x.t === 'cr') { bal -= x.gross - rf; cr += x.open; assert.equal(x.gross - al.filter((a) => a.rc === x.id).reduce((s, a) => s + a.amt, 0) - rf, x.open, 'זכות ' + x.id); }
     if (x.t === 'rc' && x.void) assert.equal(x.open, 0);
     for (const k of ['gross', 'net', 'vat', 'open']) assert.ok(Number.isInteger(x[k]), k + ' שלם');
   }
@@ -292,6 +294,88 @@ describe('זיכוי (72, 73, החלטה 11)', () => {
     assert.equal((await get(`b/${A}/ardoc/invD1`)).st, 'paid');
     assert.equal((await call('arCredit', MGR, { reqId: rid(), inv: 'invD1', mode: 'amt', amt: 1, reason: 'x' })).reason, 'too-much');
     const a = await balanced(WS); assert.equal(a.bal, 0);
+  });
+  it('החלטה 29: זיכוי לפי כמויות – 2 מתוך 5, ועוד 3 שמשלימים; חריגה נדחית; זיכוי שסוגר את כל החשבונית = בדיוק היתרה; החשבונית לא מבוטלת; שורת הפניה ב-PDF', async () => {
+    const { extract } = require('./pdf-text');
+    const PDF = require('../functions/lib/ar-pdf');
+    const AR = require('../functions/ar.js')._core;
+    // קובצי ה-PDF נשמרים ב-Storage לפי מזהה המסמך, ו-Storage לא מתנקה בין הבדיקות – מספור זיכויים נפרד, כדי לבדוק את הקובץ החדש ולא קובץ crD1 ישן
+    await prep((d) => d.doc(`b/${A}/arcfg/seq_crD`).set({ n: 500 }));
+    const id = await order(WS, [{ pid: 'pA', qty: 1, price: 12.35 }, { pid: 'pB', qty: 5, price: 6.25 }]);
+    const r = await ship(id, E1);
+    const inv0 = await get(`b/${A}/ardoc/${r.ar.id}`);
+    const cr = (q) => call('arCredit', E1, { reqId: rid(), inv: r.ar.id, mode: 'lines', lines: [{ i: 1, q }], reason: 'החזרה' });
+    // 2 מתוך 5
+    const c1 = await ok(cr(2));
+    assert.equal(c1.gross, 1475); // 2×6.25 = 12.50 + 18%
+    assert.deepEqual((await get(`b/${A}/ardoc/${c1.id}`)).li, [{ i: 1, q: 2 }]);
+    await balanced(WS);
+    // עוד 4 – יותר מה-3 שנשארו – נדחה; אחר כך 3 – עובר (2 + 3 = 5)
+    const x4 = await cr(4); assert.equal(x4.reason, 'too-much'); assert.match(x4.text, /עד 3/);
+    const c2 = await ok(cr(3)); assert.equal(c2.gross, Math.round(3 * 625 * 1.18));
+    await balanced(WS);
+    // השורה זוכתה במלואה – גם 1 נדחה; 0 / שלילי – נדחה
+    assert.equal((await cr(1)).reason, 'too-much');
+    assert.equal((await cr(0)).reason, 'bad-lines');
+    // החשבונית המקורית לא בוטלה: התוכן זהה, רק open / st
+    const inv1 = await get(`b/${A}/ardoc/${r.ar.id}`);
+    assert.equal(content(inv1), content(inv0)); assert.equal(inv1.void, undefined); assert.equal(inv1.st, 'part');
+    assert.equal(inv1.open, inv0.gross - c1.gross - c2.gross);
+    // זיכוי השורה האחרונה שנשארה – סוגר את כל החשבונית בדיוק (gross − prevG, adj לעיגול)
+    const c3 = await ok(call('arCredit', E1, { reqId: rid(), inv: r.ar.id, mode: 'lines', lines: [{ i: 0, q: 1 }], reason: 'החזרה' }));
+    assert.equal(c1.gross + c2.gross + c3.gross, inv0.gross);
+    const inv2 = await get(`b/${A}/ardoc/${r.ar.id}`); assert.equal(inv2.open, 0); assert.equal(inv2.st, 'paid'); assert.equal(inv2.void, undefined);
+    const ds = await Promise.all([c1, c2, c3].map((c) => get(`b/${A}/ardoc/${c.id}`)));
+    assert.equal(ds.reduce((s, d) => s + d.net, 0), inv0.net); assert.equal(ds.reduce((s, d) => s + d.vat, 0), inv0.vat);
+    assert.equal((await call('arCredit', E1, { reqId: rid(), inv: r.ar.id, mode: 'full', reason: 'x' })).reason, 'nothing-left');
+    const a = await balanced(WS); assert.equal(a.bal, 0);
+    // שורת ההפניה: המספר המודפס של חשבונית החיוב, עם סימון טיוטה
+    assert.equal(AR.refTxt(ds[0].ref, ds[0].bt), `זיכוי לחשבונית מס מספר ${inv0.no} (טיוטה)`);
+    assert.equal(AR.refTxt('irO3401', ''), 'זיכוי לחשבונית מס קבלה מספר 3401');
+    for (const c of [c1, c3]) {
+      const f = await ok(call('arDoc', E1, { id: c.id, op: 'pdf' }));
+      const pg = extract(Buffer.from(f.b64, 'base64'))[0];
+      assert.ok(pg.some((l) => l.includes(PDF.visual(`זיכוי לחשבונית מס מספר ${inv0.no} (טיוטה)`))), pg.join('\n'));
+    }
+  });
+  it('החלטה 31: החזר כסף – מזומן וזיכוי באשראי על חשבונית מס קבלה (bal=0, via עובר מהתשלום); על חשבונית מס לא משולמת – נדחה; חלקית – רק מה ששולם; PDF והרשאות', async () => {
+    const { extract } = require('./pdf-text');
+    const PDF = require('../functions/lib/ar-pdf');
+    await prep((d) => d.doc(`b/${A}/arcfg/seq_crD`).set({ n: 600 })); // ראו למעלה – קובצי PDF ישנים
+    // לקוח פרטי, חשבונית מס קבלה במזומן – החזר מזומן על 1 מתוך 2 (עובד)
+    const p1 = await order(PR, [{ pid: 'pA', qty: 2, price: 89.9 }], E1);
+    const ir1 = (await ok(call('markOrderPaid', E1, { id: p1, method: 'cash' }))).ar.id;
+    assert.equal((await call('arCredit', E1, { reqId: rid(), inv: ir1, mode: 'lines', lines: [{ i: 0, q: 1 }], reason: 'x', refund: { m: 'bitcoin' } })).reason, 'bad-field');
+    assert.equal((await call('arCredit', NOORD, { reqId: rid(), inv: ir1, mode: 'lines', lines: [{ i: 0, q: 1 }], reason: 'x', refund: { m: 'cash' } })).reason, 'no-perm');
+    const c1 = await ok(call('arCredit', E1, { reqId: rid(), inv: ir1, mode: 'lines', lines: [{ i: 0, q: 1 }], reason: 'החזרה', refund: { m: 'cash' } }));
+    assert.deepEqual(c1.rf, { m: 'cash', amt: 8990 }); assert.equal(c1.left, 0);
+    const d1 = await get(`b/${A}/ardoc/${c1.id}`); assert.deepEqual(d1.rf, { m: 'cash', amt: 8990 }); assert.equal(d1.open, 0);
+    let a = await balanced(PR); assert.equal(a.bal, 0); assert.equal(a.cr, 0);
+    const pg = extract(Buffer.from((await ok(call('arDoc', E1, { id: c1.id, op: 'pdf' }))).b64, 'base64'))[0];
+    assert.ok(pg.some((l) => l.includes('₪89.90') && l.includes(PDF.visual('הוחזר ללקוח')) && l.includes(PDF.visual('החזר מזומן'))), pg.join('\n'));
+    // חשבונית מס קבלה בקישור – זיכוי באשראי (מנהל), via:'link' עובר מהתשלום
+    const p2 = await order(PR, [{ pid: 'pB', qty: 4, price: 6.25 }], E1);
+    const ir2 = (await ok(call('markOrderPaid', E1, { id: p2, method: 'link' }))).ar.id;
+    const c2 = await ok(call('arCredit', MGR, { reqId: rid(), inv: ir2, mode: 'full', reason: 'בוטל', refund: { m: 'card' } }));
+    assert.deepEqual(c2.rf, { m: 'card', amt: 2500, via: 'link' });
+    a = await balanced(PR); assert.equal(a.bal, 0);
+    // חשבונית מס לא משולמת – אין כסף להחזיר; בלי החזר – הזיכוי מוריד את החוב כמו קודם
+    const o3 = await order(WS, [{ pid: 'pA', qty: 1, price: 100 }]); const inv3 = (await ship(o3, E1)).ar.id;
+    const n3 = await call('arCredit', E1, { reqId: rid(), inv: inv3, mode: 'amt', amt: 10, reason: 'x', refund: { m: 'cash' } });
+    assert.equal(n3.reason, 'nothing-paid'); assert.match(n3.text, /לא שולמה/);
+    // שולם ₪30 (העברה) מתוך ₪118: זיכוי ₪20 עם החזר – נדחה (רק מוריד את החוב); זיכוי מלא עם החזר – מוחזר בדיוק מה ששולם
+    await ok(call('arReceipt', MGR, { reqId: rid(), cust: WS, amt: 30, method: 'transfer', alloc: [{ inv: inv3, amt: 30 }] }));
+    assert.equal((await call('arCredit', E1, { reqId: rid(), inv: inv3, mode: 'amt', amt: 20, reason: 'x', refund: { m: 'transfer' } })).reason, 'nothing-paid');
+    const c3 = await ok(call('arCredit', E1, { reqId: rid(), inv: inv3, mode: 'full', reason: 'החזרה', refund: { m: 'transfer' } }));
+    assert.equal(c3.gross, 11800); assert.deepEqual(c3.rf, { m: 'transfer', amt: 3000 });
+    assert.equal((await get(`b/${A}/ardoc/${inv3}`)).open, 0);
+    a = await balanced(WS); assert.equal(a.bal, 0); assert.equal(a.cr, 0);
+    // זיכוי בלי החזר על חשבונית מס קבלה – כמו קודם: זכות פתוחה
+    const p4 = await order(PR, [{ pid: 'pB', qty: 1, price: 6.25 }], E1);
+    const ir4 = (await ok(call('markOrderPaid', E1, { id: p4, method: 'cash' }))).ar.id;
+    const c4 = await ok(call('arCredit', E1, { reqId: rid(), inv: ir4, mode: 'full', reason: 'x' }));
+    assert.equal(c4.rf, undefined); assert.equal(c4.left, 625);
+    a = await balanced(PR); assert.equal(a.bal, -625);
   });
   it('זיכוי לחשבונית מס קבלה (שולמה) – זכות פתוחה ללקוח; זיכוי מלא בלי זיכויים קודמים = בדיוק סכום החשבונית', async () => {
     const p = await order(WI); await ok(call('markOrderPaid', E1, { id: p, method: 'cash' }));

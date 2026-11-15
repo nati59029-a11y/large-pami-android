@@ -9,75 +9,7 @@ const zlib = require('node:zlib');
 const path = require('node:path');
 const P = require(path.join(__dirname, '..', 'functions', 'lib', 'ar-pdf.js'));
 
-// ---------- חילוץ טקסט מ-PDF של pdfkit (מינימלי) ----------
-function objects(buf) {
-  const s = buf.toString('latin1');
-  const out = {};
-  const re = /(\d+) 0 obj\s*/g;
-  let m;
-  while ((m = re.exec(s))) {
-    const id = +m[1], start = re.lastIndex;
-    const end = s.indexOf('endobj', start);
-    let dict = s.slice(start, end), stream = null;
-    const si = dict.indexOf('stream');
-    if (si >= 0 && /\/Length (\d+)/.test(dict.slice(0, si))) {
-      const len = +/\/Length (\d+)/.exec(dict.slice(0, si))[1];
-      let ds = start + si + 6; if (s[ds] === '\r') ds++; if (s[ds] === '\n') ds++;
-      stream = buf.subarray(ds, ds + len);
-      if (/\/FlateDecode/.test(dict.slice(0, si))) stream = zlib.inflateSync(stream);
-      dict = dict.slice(0, si);
-    }
-    out[id] = { dict, stream };
-  }
-  return out;
-}
-function cmapOf(stream) {
-  const s = stream.toString('latin1'), map = {};
-  const hex = (h) => { let r = ''; for (let i = 0; i < h.length; i += 4) r += String.fromCharCode(parseInt(h.slice(i, i + 4), 16)); return r; };
-  for (const b of s.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) for (const x of b[1].matchAll(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>/g)) map[parseInt(x[1], 16)] = hex(x[2]);
-  for (const b of s.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
-    for (const x of b[1].matchAll(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*(\[[^\]]*\]|<[0-9a-fA-F]+>)/g)) {
-      const a = parseInt(x[1], 16), z = parseInt(x[2], 16);
-      if (x[3][0] === '[') [...x[3].matchAll(/<([0-9a-fA-F]+)>/g)].forEach((y, i) => { map[a + i] = hex(y[1]); });
-      else { const base = parseInt(x[3].slice(1, -1), 16); for (let c = a; c <= z; c++) map[c] = String.fromCharCode(base + c - a); }
-    }
-  }
-  return map;
-}
-// → [[שורה חזותית, …] לכל עמוד]
-function extract(buf) {
-  const ob = objects(buf);
-  const fonts = {}; // שם משאב → מפה
-  for (const o of Object.values(ob)) {
-    const fr = /\/Font\s*<<([^>]*)>>/.exec(o.dict);
-    if (!fr) continue;
-    for (const x of fr[1].matchAll(/\/(\w+)\s+(\d+) 0 R/g)) {
-      const f = ob[+x[2]], tu = f && /\/ToUnicode (\d+) 0 R/.exec(f.dict);
-      if (tu) fonts[x[1]] = cmapOf(ob[+tu[1]].stream);
-    }
-  }
-  const pages = [];
-  const kids = Object.values(ob).find((o) => /\/Type \/Pages/.test(o.dict));
-  const order = [...kids.dict.matchAll(/(\d+) 0 R/g)].map((x) => +x[1]);
-  for (const pid of order) {
-    const cs = /\/Contents (\d+) 0 R/.exec(ob[pid].dict);
-    const st = ob[+cs[1]].stream.toString('latin1');
-    const items = [];
-    let font = null, x = 0, y = 0;
-    for (const tk of st.matchAll(/\/(\w+) [\d.]+ Tf|1 0 0 1 (-?[\d.]+) (-?[\d.]+) Tm|\[([^\]]*)\] TJ/g)) {
-      if (tk[1]) font = fonts[tk[1]];
-      else if (tk[2] != null) { x = +tk[2]; y = +tk[3]; }
-      else if (tk[4] != null && font) {
-        const str = [...tk[4].matchAll(/<([0-9a-fA-F]+)>/g)].map((h) => { let r = ''; for (let i = 0; i < h[1].length; i += 4) r += font[parseInt(h[1].slice(i, i + 4), 16)] || '?'; return r; }).join('');
-        items.push({ x, y: Math.round(y), str });
-      }
-    }
-    const rows = new Map();
-    for (const it of items) { if (!rows.has(it.y)) rows.set(it.y, []); rows.get(it.y).push(it); }
-    pages.push([...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, r]) => r.sort((a, b) => a.x - b.x).map((i) => i.str).join('')));
-  }
-  return pages;
-}
+const { extract } = require('./pdf-text'); // חילוץ טקסט מה-PDF (הועבר לקובץ עזר משותף)
 const has = (lines, s) => lines.some((l) => l.includes(s));
 const rev = (s) => Array.from(s).reverse().join('');
 
@@ -184,6 +116,15 @@ describe('ar-pdf: קובץ PDF – חילוץ טקסט מהקובץ עצמו', (
     const last = pages[pages.length - 1];
     assert.ok(last.some((l) => l.startsWith('₪826.00') && l.endsWith(P.visual('לתשלום'))), 'לתשלום = 700 + 18% = 826');
     assert.ok(has(pages[0], P.visual('חשבונית מס')));
+  });
+  it('החלטה 29: זיכוי – שורת הפניה "זיכוי לחשבונית מס מספר N" (עם טיוטה); בלי refTxt – אין שורה', async () => {
+    const base = { t: 'cr', no: 4, d: '2026-11-15', draft: true, biz: BIZ, cust: { name: 'א' }, vm: 'ex', rate: 18, lines: [{ n: 'כוס', q: 2, p: 6.25 }] };
+    const pg = extract(await P.render(Object.assign({ refTxt: 'זיכוי לחשבונית מס מספר 12 (טיוטה)' }, base)))[0];
+    assert.ok(has(pg, '(הטויט) 12 רפסמ סמ תינובשחל יוכיז'), pg.join('\n'));
+    assert.ok(has(pg, P.visual('חשבונית מס זיכוי')));
+    const pg2 = extract(await P.render(Object.assign({ refTxt: 'זיכוי לחשבונית מס קבלה מספר 7' }, base, { draft: false })))[0];
+    assert.ok(has(pg2, '7 רפסמ הלבק סמ תינובשחל יוכיז'), pg2.join('\n'));
+    assert.ok(!extract(await P.render(base))[0].some((l) => l.includes(rev('זיכוי לחשבונית'))));
   });
   it('טבלה כללית (קבלה / כרטסת) עם סיכומים', async () => {
     const pg = extract(await P.render({ t: 'rc', no: 3, d: '2026-11-14', biz: BIZ, cust: { name: 'א' }, table: { head: ['תאריך', 'אמצעי', 'סכום'], rows: [['14/11/2026', 'העברה', 500], ['14/11/2026', 'צ׳ק 1234', 734.5]], num: [2] }, sums: [['סה״כ שולם', 1234.5]] }))[0];

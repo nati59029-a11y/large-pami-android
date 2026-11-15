@@ -243,6 +243,10 @@ async function render(docIn, opts) {
   for (const s of [cust.bn ? 'ע.מ / ח.פ ' + clean(cust.bn, 20) : '', clean(cust.addr, 160), cust.phone ? 'טל׳ ' + clean(cust.phone, 30) : '', clean(cust.mail, 80)]) {
     if (!s) continue; P.text(s, { size: 9, color: COL.mute, x: L, w: W, y }); y += 13;
   }
+  // זיכוי (החלטה 29): "זיכוי לחשבונית מס מספר N" – שורה בולטת מעל הטבלה
+  if (doc.refTxt) { y += 4; P.text(clean(doc.refTxt, 80), { b: true, size: 12, color: COL.gold, x: L, w: W, y }); y += 18; }
+  // החזר כסף (החלטה 31): "הוחזר ללקוח: זיכוי באשראי, ₪X"
+  if (doc.rfTxt) { P.text(clean(doc.rfTxt, 80), { b: true, size: 11, x: L, w: W, y }); y += 16; }
   const meta = [doc.terms ? 'תנאי תשלום: ' + clean(doc.terms, 60) : '', dateTxt(doc.due) ? 'לתשלום עד: ' + dateTxt(doc.due) : ''].filter(Boolean).join('   |   ');
   if (meta) { P.text(meta, { size: 9, x: L, w: W, y }); y += 13; }
   y += 8;
