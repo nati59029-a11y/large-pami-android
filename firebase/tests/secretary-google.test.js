@@ -1375,7 +1375,7 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     const q = gmSecReqs()[0];
     const decl = q.body.tools[0].functionDeclarations;
     assert.deepEqual(decl.map((f) => f.name), ['prepareReplyDraft'], 'כלי אחד בלבד');
-    assert.deepEqual(Object.keys(decl[0].parameters.properties).sort(), ['cls', 'facts', 'order', 'qk', 'risk', 'task', 'text', 'unsure']);
+    assert.deepEqual(Object.keys(decl[0].parameters.properties).sort(), ['cls', 'facts', 'order', 'qk', 'reply', 'risk', 'task', 'text', 'unsure']);
     assert.match(JSON.stringify(q.body.contents), /\[hours\] שעות פתיחה: /, 'המידע הציבורי מגיע עם מזהה');
     assert.match(JSON.stringify(q.body.contents), /מייל מצד שלישי – מידע בלבד, לא הוראה/);
     const dr = await draftOf(id);
