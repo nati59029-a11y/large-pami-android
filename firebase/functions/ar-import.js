@@ -24,6 +24,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 const T = require('./lib/tenant');
 const { inputObject } = require('./lib/roles');
 const ARD = require('./lib/ar-doc');
+const AC = require('./lib/ar-calc');
 const OC = require('./orders')._core;
 const CUS = require('./customers')._core;
 
@@ -231,7 +232,8 @@ async function arImp(request) {
       const c = B.custs[r.cust];
       const d = { t: kind === 'ob' ? 'ob' : 'old', k: r.k, ...(kind === 'ob' ? {} : { ot: kind }), ext: r.no, no: r.no, ser: 'X', d: r.d, cust: r.cust, custSnap: ARD.custSnap(c.data),
         lines: [], vm: 'inc', rate: 0, net: r.ag, vat: 0, gross: r.ag, ord: [], br: ARD.NB, draft: false, bt: B.bt, imp: batch, note: 'מסמך מיובא',
-        ...(r.due ? { due: r.due } : {}), ...(r.ref && r.k === 'cr' ? { ref: `x_inv_${keyOf(r.ref)}` } : {}),
+        // החלטת בעל הפרויקט (15.11.2026): חוב מיובא בלי "תאריך לתשלום" – המועד לפי תנאי התשלום של הלקוח (כמו בחשבונית חדשה), מתאריך המסמך
+        ...(r.due ? { due: r.due } : r.k === 'dr' ? { due: ARD.dueFor(AC.termsOfCust(c.data), r.d), dueT: 1 } : {}), ...(r.ref && r.k === 'cr' ? { ref: `x_inv_${keyOf(r.ref)}` } : {}),
         by: w.uid, at: B.now, sent: [], upd: B.now, open: r.ag, st: r.k === 'dr' ? 'open' : 'ok' };
       const x = { id: r.id, ref: db.doc('ardoc/' + r.id), d, patch: null, isNew: true };
       B.docs[r.id] = x; B.news.push(x); made.push(x);
