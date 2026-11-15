@@ -378,8 +378,8 @@ function start(el,opts){
   function nGot(){return S.mode==='video'?S.T.filter(t=>t.got).length:S.frames.length}
   function started(){return S.mode==='video'?S.rec:S.frames.length>0}
   function upd(){const n=nGot(),tot=S.T.length,v=S.mode==='video',st=started();
-   ins.textContent=v?'הקליטו לאט: סיבוב אחד באמצע, סיבוב אחד למעלה וסיבוב אחד למטה':'עמדו במקום אחד, סובבו את הטלפון סביב העדשה, צלמו כשהחנות ריקה מאנשים';
-   tip.textContent='החזיקו את הטלפון קרוב לגוף והסתובבו עם כל הגוף; עצמים קרובים מאוד עלולים להיראות כפולים';tip.hidden=st;
+   ins.textContent=v?'הקליטו לאט: סיבוב אחד באמצע, סיבוב אחד למעלה וסיבוב אחד למטה':'עמדו במקום אחד, סובבו את הטלפון סביב המצלמה עצמה – לא סביב הגוף. צלמו כשהחנות ריקה מאנשים';
+   tip.textContent='סובבו את הטלפון סביב המצלמה עצמה, לא סביב הגוף; עצמים קרובים מאוד עלולים להיראות כפולים';tip.hidden=st;
    for(const[k,on]of[['mp',!v],['mv',v]]){const b=$('[data-k='+k+']');b.setAttribute('aria-pressed',on?'true':'false');b.disabled=st&&!on}
    map.hidden=!v;$('[data-k=r]').hidden=v;
    const d=$('[data-k=d]');
