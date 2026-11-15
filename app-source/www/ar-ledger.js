@@ -110,20 +110,20 @@ ACT.arDebtXls=()=>{const G=debtRows(),rows=[['לקוח','מסמכים פתוחי
 
 /* ---------- הגדרות: תזכורות תשלום (מנהל) ---------- */
 const TXT0='שלום {שם},\nתזכורת ידידותית: לפי הרישומים שלנו יתרה פתוחה לתשלום בסך {סכום}.\n{פירוט}\nאם התשלום כבר בוצע – תודה, ואפשר להתעלם מההודעה.\n{קישור}\n{עסק}';
-{const f=V.arCfg;if(f)V.arCfg=()=>{const r=f();try{if(r&&r.h&&on()&&mgr()&&live())r.h+=`<div class="row" style="margin-top:8px"><button class="btn g grow" data-a="go" data-v="arRemCfg">תזכורות תשלום</button><button class="btn g grow" data-a="go" data-v="arDebt">דוח חובות</button></div>`}catch(e){}return r}}
+{const f=V.arCfg;if(f)V.arCfg=()=>{const r=f();try{if(r&&r.h&&on()&&mgr())r.h+=live()?`<div class="row" style="margin-top:8px"><button class="btn g grow" data-a="go" data-v="arRemCfg">תזכורות תשלום</button><button class="btn g grow" data-a="go" data-v="arDebt">דוח חובות</button></div>`:`<button class="btn g w" style="margin-top:8px" data-a="go" data-v="arRemCfg">תזכורות תשלום – נוסח והגדרות</button>`}catch(e){}return r}}
 const WHY={'no-to':'אין מייל','no-secrets':'מייל לא מוגדר בשרת','no-smtp':'מייל לא מוגדר בשרת','rate':'מכסת מייל','send':'שליחה נכשלה','bad-to':'מייל לא תקין'};
 V.arRemCfg=()=>{const T='תזכורות תשלום';if(!on()||!mgr())return{t:T,h:'<div class="empty">למנהל בלבד</div>'};
  if(R.cfg===undefined){AD.cfgL().then(()=>redraw('arRemCfg'));return{t:T,h:'<div class="empty">טוען…</div>'}}
- if(!live())return{t:T,h:'<div class="empty">קודם מפעילים "מסמכים פעילים" בהגדרות אישור הזמנה</div>'};
  if(S.rem===undefined){S.rem=null;fnCall('setRemCfg',{get:true}).then(r=>{S.rem=r||{cfg:{},sums:[]};redraw('arRemCfg')},e=>{S.rem={cfg:{},sums:[],err:1};redraw('arRemCfg')});return{t:T,h:'<div class="empty">טוען…</div>'}}
  if(S.rem===null)return{t:T,h:'<div class="empty">טוען…</div>'};
  const c=S.rem.cfg||{},st=Array.isArray(c.steps)?c.steps:[0,3,7,30];
- let h=`<form class="card" data-f="arRemF"><p class="note" style="margin-top:0">תזכורת נשלחת במייל ללקוח עם חשבונית פתוחה, רק ביום עסקים (לא בשישי, בשבת ובחג – עוברת ליום העסקים הבא). הודעה אחת ללקוח ביום, עם כל החשבוניות הפתוחות שלו. ווטסאפ – אחרי שתאושר תבנית ב-Meta.</p>
+ let h=(live()?'':'<div class="card" style="border-color:var(--gold)"><b>התזכורות עדיין לא נשלחות</b><p class="note" style="margin:4px 0 0">אפשר כבר עכשיו לקבוע את הנוסח וההגדרות. התזכורות יתחילו לצאת רק אחרי שמפעילים "מסמכים פעילים" בהגדרות אישור הזמנה.</p></div>')+`<form class="card" data-f="arRemF"><p class="note" style="margin-top:0">תזכורת נשלחת במייל ללקוח עם חשבונית פתוחה, רק ביום עסקים (לא בשישי, בשבת ובחג – עוברת ליום העסקים הבא). הודעה אחת ללקוח ביום, עם כל החשבוניות הפתוחות שלו. ווטסאפ – אחרי שתאושר תבנית ב-Meta.</p>
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="on"${c.on?' checked':''}> <b>לשלוח תזכורות תשלום</b></label>
   <div class="row" style="gap:6px"><label class="f grow"><span>שעת שליחה (6–19)</span><input name="hour" inputmode="numeric" value="${Number.isInteger(c.hour)?c.hour:9}" dir="ltr"></label><label class="f grow"><span>ימים לפני המועד</span><input name="b" inputmode="numeric" value="${Number.isInteger(c.b)?c.b:3}" dir="ltr"></label></div>
   <label class="f"><span>ימים אחרי המועד (0 = ביום המועד), מופרדים בפסיק</span><input name="steps" value="${esc(st.join(', '))}" dir="ltr"></label>
   <div class="row" style="gap:6px"><label class="f grow"><span>חזרה כל X ימים (0 = בלי)</span><input name="mon" inputmode="numeric" value="${Number.isInteger(c.mon)?c.mon:30}" dir="ltr"></label><label class="f grow"><span>תקרה יומית</span><input name="cap" inputmode="numeric" value="${Number.isInteger(c.cap)?c.cap:200}" dir="ltr"></label></div>
-  <label class="f"><span>נוסח ההודעה – {שם} {סכום} {פירוט} {קישור} {עסק}</span><textarea name="txt" rows="7" maxlength="1500" placeholder="${esc(TXT0)}">${esc(c.txt||'')}</textarea></label>
+  <label class="f"><span>נוסח ההודעה. אפשר לשנות כל מילה. המילים בסוגריים מתחלפות לבד: {שם} שם הלקוח · {סכום} היתרה לתשלום · {פירוט} רשימת החשבוניות · {קישור} קישור לתשלום · {עסק} שם העסק</span><textarea name="txt" id="arRemTxt" rows="9" maxlength="1500">${esc(c.txt||TXT0)}</textarea></label>
+  <div class="row" style="gap:6px;margin-bottom:8px"><button type="button" class="btn g grow" data-a="arRemPv">תצוגה מקדימה</button><button type="button" class="btn g grow" data-a="arRemTx0">חזרה לנוסח המקורי</button></div>
   <label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="sum"${c.sum===false?'':' checked'}> סיכום יומי למנהל במייל</label><p class="note" style="margin:0 0 8px">למי נשלח ומי עדיין חייב – למייל העסק שבהגדרות אישור הזמנה.</p>
   <button class="btn w">שמור</button></form>`;
  const sums=(S.rem.sums||[]).slice().sort((a,b)=>String(b.d).localeCompare(String(a.d)));
@@ -132,7 +132,15 @@ V.arRemCfg=()=>{const T='תזכורות תשלום';if(!on()||!mgr())return{t:T,
  return{t:T,h}};
 FRM.arRemF=async f=>{const x=fd(f),b=f.querySelector('button');const n=(v,d)=>{const s=String(v==null?'':v).trim();return s===''?d:+s};
  const steps=String(x.steps||'').split(/[,\s]+/).filter(Boolean).map(Number);if(steps.some(v=>!Number.isInteger(v)))return toast('ימים אחרי המועד: מספרים שלמים');
- const p={on:!!x.on,sum:!!x.sum,hour:n(x.hour,9),b:n(x.b,3),steps,mon:n(x.mon,30),cap:n(x.cap,200),txt:String(x.txt||'')};
- b.disabled=true;try{await fnCall('setRemCfg',p);S.rem=undefined;toast('נשמר');rerender()}catch(e){err(e)}finally{b.disabled=false}};
-window.__arLed={S,debtRows};
+ const t0=String(x.txt||'').replace(/\r\n?/g,'\n').trim();
+ const p={on:!!x.on,sum:!!x.sum,hour:n(x.hour,9),b:n(x.b,3),steps,mon:n(x.mon,30),cap:n(x.cap,200),txt:t0===TXT0?'':t0}; // הנוסח המקורי נשמר ריק – כך עדכון עתידי של ברירת המחדל יגיע גם אליו
+ const save=async()=>{b.disabled=true;try{await fnCall('setRemCfg',p);S.rem=undefined;toast('נשמר');rerender()}catch(e){err(e)}finally{b.disabled=false}};
+ if(t0&&!/\{סכום\}/.test(t0))return ask('בנוסח אין {סכום} – הלקוח לא יראה בהודעה כמה הוא חייב. לשמור בכל זאת?',save,'כן, לשמור');
+ return save()};
+// תצוגה מקדימה של הנוסח – עם ערכי דוגמה בסוגריים מרובעים (לא נתוני העסק), כמו msgOf בשרת (ar-remind.js)
+const remPv=t=>{const v={'שם':'[שם הלקוח]','סכום':'[₪1,170.00]','פירוט':'• חשבונית [1001] מיום [01/11/2026]: [₪1,170.00], לתשלום עד [30/11/2026]','קישור':'[לתשלום: קישור]','עסק':'[שם העסק]'};
+ return (String(t||'').trim()||TXT0).replace(/\{(שם|סכום|פירוט|עסק|קישור)\}/g,(_,k)=>v[k]).replace(/\n{3,}/g,'\n\n').trim()};
+ACT.arRemPv=()=>{const ta=document.getElementById('arRemTxt');dlg(`<h3>כך תיראה ההודעה</h3><p class="note" style="margin-top:0">בסוגריים מרובעים – דוגמה בלבד. בהודעה האמיתית יופיעו הפרטים של הלקוח.</p><div class="card" style="white-space:pre-wrap">${esc(remPv(ta?ta.value:''))}</div><button class="btn w" data-a="closeDlg">סגור</button>`)};
+ACT.arRemTx0=()=>{const ta=document.getElementById('arRemTxt');if(ta){ta.value=TXT0;toast('הנוסח המקורי הוחזר – לא לשכוח לשמור')}};
+window.__arLed={S,debtRows,remPv};
 })();

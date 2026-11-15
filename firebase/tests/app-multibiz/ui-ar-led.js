@@ -69,6 +69,11 @@ async function open(browser, www, who, calls, arOn) {
     await page.evaluate(() => go('ox')); await H.settle(page, 1500);
     const o = await view(page, 'ox'), c = await view(page, 'ocCard', 'cT');
     check('0 מתג כבוי: אין "דוח חובות" במסך ההזמנות, אין "כרטיס חשבון" בכרטיס הלקוח, אין שאילתת ardoc', !o.debt && !c.led && !calls.some((x) => x.n === 'q:ardoc'), { o: o.debt, c: c.led, calls: calls.map((x) => x.n) });
+    // החלטה 15.11.2026: גם כשהמסמכים כבויים, מנהל יכול לקבוע את נוסח התזכורת מראש (עם הודעה שהתזכורות עוד לא נשלחות)
+    const cf0 = await view(page, 'arCfg'), rc0 = await view(page, 'arRemCfg');
+    const ta0 = await page.evaluate(() => { const t = document.getElementById('arRemTxt'); return t ? t.value : null; });
+    check('0ב מתג כבוי: "תזכורות תשלום – נוסח והגדרות" בהגדרות, ובמסך – "עדיין לא נשלחות" והנוסח השמור לעריכה, בלי גלילה לרוחב',
+      /תזכורות תשלום – נוסח והגדרות/.test(cf0.t) && /התזכורות עדיין לא נשלחות/.test(rc0.t) && ta0 === 'שלום {שם}' && rc0.ov <= 0, { t: rc0.t.slice(0, 120), ta0: (ta0 || '').slice(0, 30), ov: rc0.ov });
     check('0א בלי שגיאות JS', !log.some((x) => /pageerror|TypeError|ReferenceError/.test(x)), log.filter((x) => /pageerror/.test(x)).slice(0, 3));
     await ctx.close(); }
 
@@ -132,9 +137,21 @@ async function open(browser, www, who, calls, arOn) {
       await shot(page, 'm-05-הגדרות-תזכורות-360');
       check('m 8 הגדרות תזכורות: נטען מהשרת (setRemCfg get), סיכום אחרון עם "לא נשלח – אין מייל", בלי גלילה לרוחב', /תזכורות תשלום/.test(r.t) && /אין מייל/.test(r.t) && calls.some((x) => x.n === 'setRemCfg' && x.d.get === true) && r.ov <= 0, r.t.slice(0, 200));
       const v = await page.evaluate(() => ({ h: document.querySelector('form[data-f=arRemF] [name=hour]').value, s: document.querySelector('form[data-f=arRemF] [name=steps]').value }));
-      await page.fill('form[data-f=arRemF] [name=steps]', '0, 3, 10'); n0 = calls.length; await page.click('form[data-f=arRemF] button'); await H.settle(page, 800);
+      // החלטה 15.11.2026: נוסח מלא לעריכה, תצוגה מקדימה, חזרה לנוסח המקורי; נוסח בלי {סכום} – שאלת אישור לפני שמירה
+      await page.click('[data-a=arRemPv]'); await H.settle(page, 300);
+      const pv = await page.evaluate(() => { const d = document.querySelector('#dlg'); return d && d.open ? d.innerText : ''; });
+      check('m 8ג תצוגה מקדימה: הנוסח עם ערכי דוגמה בסוגריים', /כך תיראה ההודעה/.test(pv) && /שלום \[שם הלקוח\]/.test(pv), pv.slice(0, 120));
+      await page.evaluate(() => closeDlg());
+      await page.fill('form[data-f=arRemF] [name=steps]', '0, 3, 10'); n0 = calls.length; await page.click('form[data-f=arRemF] button:not([type=button])'); await H.settle(page, 500);
+      const ask1 = await page.evaluate(() => { const d = document.querySelector('#dlg'); return d && d.open ? d.innerText : ''; });
+      const sv0 = calls.slice(n0).find((x) => x.n === 'setRemCfg' && !x.d.get);
+      check('m 8ד נוסח בלי {סכום} – שאלה לפני שמירה, ולא נשמר עד אישור', /אין \{סכום\}/.test(ask1) && !sv0, ask1.slice(0, 100));
+      await page.click('#dlg [data-a=yes]'); await H.settle(page, 800);
       const sv = calls.slice(n0).find((x) => x.n === 'setRemCfg' && !x.d.get);
       check('m 8א שמירה: {on, sum, hour 8, b 2, steps [0,3,10], mon 0, cap 50, txt}', v.h === '8' && v.s === '0, 5' && sv && JSON.stringify(sv.d) === JSON.stringify({ on: true, sum: true, hour: 8, b: 2, steps: [0, 3, 10], mon: 0, cap: 50, txt: 'שלום {שם}' }), { v, d: sv && sv.d });
+      await view(page, 'arRemCfg'); await page.click('[data-a=arRemTx0]'); n0 = calls.length; await page.click('form[data-f=arRemF] button:not([type=button])'); await H.settle(page, 800);
+      const sv2 = calls.slice(n0).find((x) => x.n === 'setRemCfg' && !x.d.get);
+      check('m 8ה "חזרה לנוסח המקורי" ושמירה – נשמר ריק (ברירת המחדל), בלי שאלה', !!sv2 && sv2.d.txt === '', sv2 && sv2.d.txt);
       const cf = await view(page, 'arCfg');
       check('m 8ב הגדרות אישור הזמנה: כפתורי "תזכורות תשלום" ו"דוח חובות"', /תזכורות תשלום/.test(cf.t) && cf.debt, '');
     } else check('w 8 עובד – הגדרות תזכורות: למנהל בלבד', /למנהל בלבד/.test(r.t) && !calls.some((x) => x.n === 'setRemCfg'), r.t.slice(0, 80));
