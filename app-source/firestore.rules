@@ -843,7 +843,7 @@ service cloud.firestore {
         || br in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.br;
     }
     match /ordcfg/{docId} {
-      allow get: if rOrd() && docId in ['main', 'seq'];
+      allow get: if rOrd() && docId in ['main', 'seq', 'price'];
       allow list, create, update, delete: if false;
     }
     match /prod/{id} {
@@ -871,6 +871,11 @@ service cloud.firestore {
       allow read: if rOrd() && rBrOk(resource.data.br);
       allow create, update, delete: if false;
     }
+    // 14.11.2026 (משוב סבב 3, ליקוט): "להזמין מספקים" – עובד עם הזמנות לפי סניף ההזמנה, ומנהל. כתיבה – רק השרת (ord-pick.js)
+    match /supord/{id} {
+      allow read: if rOrd() && rBrOk(resource.data.br);
+      allow create, update, delete: if false;
+    }
     // fb/ord-catalog: קטגוריות (כולם עם הזמנות קוראים) והעברות פנימיות (לפי סניף המקור או היעד). כתיבה – רק השרת.
     match /cat/{id} {
       allow read: if rOrd();
@@ -892,6 +897,31 @@ service cloud.firestore {
     match /custcfg/{docId} {
       allow get: if rOrd() && docId == 'main';
       allow list, create, update, delete: if false;
+    }
+    // 14.11.2026 (לקוח עסקי ומחירים, שלב 1): מחיר קבוע ללקוח – כולם עם הזמנות קוראים (26); התראות מחירון – מנהל. כתיבה – רק השרת (customers.js / orders.js)
+    match /cprice/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+    }
+    match /aralert/{id} {
+      allow read: if rMgr();
+      allow create, update, delete: if false;
+    }
+    // 14.11.2026 (שלב 3 חלק ב'): פרטי העסק למסמכים (arcfg/main) – עובד עם הזמנות ומנהל קוראים. מונים (seq_*), מזהי בקשה (req_*) ולוגו – אף אחד. כתיבה – רק השרת (ar.js)
+    // 15.11.2026 (שלב 4): arcfg/off (רשמי/טיוטה, סוג העסק, מספרי התחלה – מנהל־על כותב דרך setArOff) – מנהל קורא
+    match /arcfg/{docId} {
+      allow get: if (rOrd() && docId == 'main') || (rMgr() && docId == 'off');
+      allow list, create, update, delete: if false;
+    }
+    // 15.11.2026 (שלב 4): חשבוניות, קבלות וזיכויים (ardoc) והקצאות (aralloc) – עובד עם הזמנות ומנהל קוראים (106). כתיבה – רק השרת (ar.js, lib/ar-doc.js).
+    // אסמכתאות (arproof) וסיכומים חודשיים (arsum) – בלי כלל = אף אחד מהאפליקציה
+    match /ardoc/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
+    }
+    match /aralloc/{id} {
+      allow read: if rOrd();
+      allow create, update, delete: if false;
     }
     // fb/ord-card: יומן צפייה/העתקה של פרטי כרטיס – מנהל קורא
     match /cardLog/{id} {
@@ -1800,7 +1830,7 @@ service cloud.firestore {
       function ordOk() { return feat('orders') && perm('ord'); }
       function brOk(br) { return bMgr() || myStaff().get('br', null) == null || br in myStaff().br; }
       match /ordcfg/{docId} {
-        allow get: if ordOk() && (docId in ['main', 'seq'] || (docId == 'cell' && feat('cellular')));
+        allow get: if ordOk() && (docId in ['main', 'seq', 'price'] || (docId == 'cell' && feat('cellular')));
         allow list, create, update, delete: if false;
       }
       match /prod/{id} {
@@ -1829,6 +1859,11 @@ service cloud.firestore {
         allow read: if ordOk() && brOk(resource.data.br);
         allow create, update, delete: if false;
       }
+      // 14.11.2026 (משוב סבב 3, ליקוט): "להזמין מספקים" – עובד עם ord לפי סניף ההזמנה, ומנהל. כתיבה – רק השרת (ord-pick.js)
+      match /supord/{id} {
+        allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+      }
       // fb/ord-catalog: קטגוריות והעברות פנימיות. מחיר סיטונאי (prod/{id}/p/ws) – תחת p/{k}, מנהל בלבד; עובד מקבל דרך getWsPrices.
       match /cat/{id} {
         allow read: if ordOk();
@@ -1850,6 +1885,30 @@ service cloud.firestore {
       match /custcfg/{docId} {
         allow get: if ordOk() && docId == 'main';
         allow list, create, update, delete: if false;
+      }
+      // 14.11.2026 (שלב 1): מחיר קבוע ללקוח (cprice) – עובד עם ord ומנהל קוראים; התראות מחירון (aralert) – מנהל. כתיבה – רק השרת
+      match /cprice/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+      }
+      match /aralert/{id} {
+        allow read: if feat('orders') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // 14.11.2026 (שלב 3 חלק ב'): פרטי העסק למסמכים (arcfg/main) – עובד עם הזמנות ומנהל קוראים. מונים, מזהי בקשה ולוגו – אף אחד. כתיבה – רק השרת (ar.js)
+      // 15.11.2026 (שלב 4): arcfg/off – מנהל קורא (מנהל־על כותב דרך setArOff)
+      match /arcfg/{docId} {
+        allow get: if (ordOk() && docId == 'main') || (feat('orders') && bMgr() && docId == 'off');
+        allow list, create, update, delete: if false;
+      }
+      // 15.11.2026 (שלב 4): חשבוניות, קבלות וזיכויים (ardoc) והקצאות (aralloc) – עובד עם ord ומנהל קוראים (106). כתיבה – רק השרת. arproof / arsum – אף אחד
+      match /ardoc/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
+      }
+      match /aralloc/{id} {
+        allow read: if ordOk();
+        allow create, update, delete: if false;
       }
       // ניוד קווים (fb/ord-lines): תוכניות – קריאה לעובד ord רק כשמתג cellular פעיל; כתיבה – רק השרת (saveLinePlan).
       // lineLog – אין גישה מהאפליקציה בכלל (הבדיקה דרך checkLines בשרת). בנק/ת"ז בעל כרטיס – בתוך ord.cell, אותן הרשאות כמו ההזמנה (07:38)

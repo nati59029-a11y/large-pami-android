@@ -74,7 +74,9 @@ ACT.secOpen=()=>{if(cur().v!=='sec')go('sec')};
  const S=X.st,rows=(S.rows||[]).map(x=>`<div class="note" style="margin-top:4px">${esc(x.t||'')}</div>`).join('');
  const sub=!S.consented?'לפני שמתחילים – אישור תנאי השימוש':!S.setupDone?'הגדרה ראשונה: שם ואופן פנייה':'שאלו אותי על העסק – כספים, ספקים, עובדים ומשימות';
  const card=`<button type="button" class="card" id="secHome" data-a="secOpen" style="display:flex;gap:12px;align-items:center;width:100%;text-align:right;cursor:pointer;margin-top:12px;min-height:56px;color:var(--ink)"><span class="secav">${SVG}</span><span style="flex:1;min-width:0"><b>${esc(S.name||'המזכירה העסקית')}</b><small class="note" style="display:block">${esc(sub)}</small>${rows}</span></button>`;
- if(/<div class="chips hacts"/.test(r.h))r.h=r.h.replace(/(<div class="chips hacts")/,card+'$1');else r.h+=card}catch(e){}return r}}
+ if(/<div class="chips hacts"/.test(r.h))r.h=r.h.replace(/(<div class="chips hacts")/,card+'$1');else r.h+=card;
+ /* 15.11.2026: התראות חדשות מהמזכירה – פס בולט בראש הבית, לחיצה פותחת ישר את לשונית ההתראות */
+ const un=S.consented&&S.setupDone?+S.unseen||0:0;if(un>0)r.h=`<button type="button" class="ban" id="secNBan" data-a="secNotesGo" style="border-color:var(--acc);margin:10px 0"><span style="color:var(--acc);flex:none">${typeof icd==='function'?icd('bell'):''}</span><span style="flex:1;min-width:0"><b>${un===1?'יש התראה חדשה מהמזכירה':'יש '+un+' התראות חדשות מהמזכירה'}</b><small class="note" style="display:block">לחיצה – פתיחת ההתראות</small></span><span class="secbadge" style="flex:none">${un}</span></button>`+r.h}catch(e){}return r}}
 
 /* ---------- מסך המזכירה ---------- */
 const DENY={'not-main-manager':'בעסק הזה המזכירה זמינה רק למנהל הראשי.','not-biz-admin':'המזכירה זמינה למנהלי העסק בלבד.','not-manager':'המזכירה זמינה למנהלי העסק בלבד.','feature-off':'המזכירה לא מופעלת בעסק הזה.','biz-suspended':'החשבון מושהה – פנה לספק.'};
@@ -451,7 +453,8 @@ ACT.secSaChat=el=>{const id=el.dataset.id,u=el.dataset.u;ask('לצפות בשי�
 const css4=document.createElement('style');
 css4.textContent='.secbadge{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:var(--acc);color:var(--card);font-size:.75rem;line-height:20px;text-align:center}'
 +'.secnew{border-inline-start:3px solid var(--acc)!important}.secrep h4{margin:12px 0 4px}.secrep ul{margin:0;padding-inline-start:18px}.secrep li{overflow-wrap:anywhere}'
-+'.secnt select,.secnt input[type=time]{min-height:40px;max-width:100%}.secnt .row{flex-wrap:wrap}';
++'.secnt select,.secnt input[type=time]{min-height:40px;max-width:100%}.secnt .row{flex-wrap:wrap}'
++'.secnb{display:block;width:100%;padding:0;margin:0;border:0;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}.secclamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}';
 document.head.appendChild(css4);
 const WDN=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
 /* ---------- התראות ---------- */
@@ -459,13 +462,40 @@ async function notesLoad(){X.nb=1;const s0=X.nl;let again=0;try{const r=await fn
  if(ids.length)fnCall('secNotes',{op:'seen',ids}).then(()=>{if(X.st)X.st.unseen=0;if(X.nl)X.nl.unseen=0}).catch(()=>{})}
  catch(e){X.nl=X.nl&&!X.nl.err?X.nl:{err:e&&e.message||'לא נטען'}}finally{X.nb=0;if(again){notesLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 const KIND={rep:'דוח',emp:'עובד',dig:'תקציר',wa:'ווצאפ'};
-function noteH(n,T){const lab=n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');const open=n.st==='open'&&n.k==='rem';
- return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><p><b>${esc(n.title)}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
- <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note" style="margin:4px 0 0">${esc(n.body)}</p>`:''}
- <div class="secrow">${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
+/* 15.11.2026: התראות ישנות של סגירת קופה נשמרו עם מזהה הקופה (i_nl) ותאריך בכתיב מחשב – בתצוגה: שם הסניף (ZREG) ויום בשבוע + תאריך */
+const ZN=g=>{try{return typeof ZREG!=='undefined'&&ZREG[g]?ZREG[g].n:''}catch(e){return ''}};
+const dayL=d=>{const t=new Date(d+'T12:00:00Z');return isNaN(t)?d:'יום '+WDN[t.getUTCDay()]+' '+(+d.slice(8,10))+'.'+(+d.slice(5,7))};
+const nFix=(s,n)=>{s=String(s||'').replace(/(קופה )?\b(i_[a-z]{2})\b/g,(m,a,g)=>ZN(g)?'סניף '+ZN(g):m);if(n&&n.typ==='close')s=s.replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m,d)=>dayL(d));return s};
+const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');
+function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
+ return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><button type="button" class="secnb" data-a="secNOpen" data-id="${esc(n.id)}" aria-label="כל הפרטים: ${esc(nFix(n.title,n))}"><p><b>${esc(nFix(n.title,n))}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
+ <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
+ <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
 function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="notes">נסה שוב</button></div>`;
- const L=R.notes||[];if(!L.length)return '<div class="empty">אין התראות</div>';
- return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
+ const L=R.notes||[];pnShown();if(!L.length)return '<div class="empty">אין התראות</div>';
+ return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">לחיצה על התראה – כל הפרטים. תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
+/* 15.11.2026: פרטי התראה – הכותרת, הסוג, מתי נוצרה ומתי נשלחה לאחרונה, כמה פעמים, המצב, כל הטקסט, ומה אפשר לעשות */
+function noteDlg(id){const R=X.nl,n=R&&!R.err&&(R.notes||[]).find(x=>x.id===id);if(!n)return toast('ההתראה לא נמצאה');const T=R.types||{},open=n.st==='open'&&n.k==='rem',body=nFix(n.body,n);
+ const st=n.st==='done'?'טופל':n.st==='gone'?'כבר לא רלוונטי':n.k==='rem'?'פתוחה – עוד לא סומנה כטופלה'+(n.rep?' · תחזור עוד '+n.rep+' פעמים':' · לא תחזור שוב'):'פתוחה';
+ const row=(k,v)=>`<p class="note" style="margin:4px 0"><b>${k}:</b> ${esc(v)}</p>`;
+ const todo=n.typ==='close'&&!/מה לעשות/.test(body)?'\nמה לעשות:\n• לבקש מהעובד בסניף לשלוח סגירת קופה, או לפתוח את מסך סגירת הקופה ולהכניס אותה.\n• אם יש הפרש מזומן – לבדוק את הסגירה במסך סגירת הקופה ולברר עם העובד.':'';
+ dlg(`<h3 style="overflow-wrap:anywhere">${esc(nFix(n.title,n))}</h3>${row('סוג',nLab(n,T)||'התראה')}${row('נוצרה',tm(n.t||n.at))}${n.n>1?row('נשלחה',n.n+' פעמים (לאחרונה '+tm(n.at)+')'):''}${row('מצב',st)}
+ ${body||todo?`<div class="card" style="margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere" id="secNBody">${esc(body+todo)}</div>`:''}
+ ${n.typ==='close'&&typeof V.zc==='function'?'<button class="btn w" data-a="secNZc" style="margin-top:8px">פתיחת מסך סגירת הקופה</button>':''}${n.k==='rep'&&n.ref?`<button class="btn w" data-a="secNRp" data-id="${esc(n.ref)}" style="margin-top:8px">פתיחת הדוח</button>`:''}${open?`<button class="btn g w" data-a="secNDoneD" data-id="${esc(n.id)}" style="margin-top:8px">סמן כטופל</button>`:''}<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`)}
+ACT.secNOpen=el=>noteDlg(el.dataset.id);
+ACT.secNZc=()=>{closeDlg();go('zc')};
+ACT.secNRp=el=>{closeDlg();ACT.secRpOpen(el)};
+ACT.secNDoneD=el=>{closeDlg();ACT.secNDone(el)};
+ACT.secNotesGo=()=>{X.tab='notes';X.set=0;X.edit=0;X.rp=null;X.nl=null;go('sec')};
+/* 15.11.2026: לחיצה על התראה בטלפון – "לפתוח את ההתראות" נשמר לדקה (גם בזיכרון הטלפון, למקרה שהמסך נטען מחדש) ומוחל שוב עד שרשימת ההתראות באמת מוצגת:
+   בפתיחה מאפס האירוע יכול להגיע לפני שההרשאות, העסק או המזכירה נטענו, ומסך שנפתח בדרך מסתיר את המזכירה. כשההתראה אחת – גם פרטיה נפתחים. */
+const PNK='lp-pn-open',PNI={t:0,id:''},PNW=[600,1500,3000,6000,10000,20000];
+const pnEnd=()=>{PNI.t=0;PNI.id='';try{localStorage.removeItem(PNK)}catch(e){}};
+function pnTry(){if(!PNI.t)return;if(Date.now()-PNI.t>60000){pnEnd();return}if(!isA())return;
+ if(cur().v!=='sec'||X.tab!=='notes'||X.set||X.edit){try{ACT.secNotesGo()}catch(e){}}}
+function pnShown(){if(!PNI.t||cur().v!=='sec')return;const id=PNI.id;pnEnd();if(id&&(X.nl.notes||[]).some(x=>x.id===id))setTimeout(()=>{if(cur().v==='sec'&&X.tab==='notes')noteDlg(id)},0)}
+function pnTap(id){PNI.t=Date.now();PNI.id=typeof id==='string'&&/^[A-Za-z0-9_:.-]{1,200}$/.test(id)?id:'';try{localStorage.setItem(PNK,JSON.stringify(PNI))}catch(e){}pnTry();PNW.forEach(ms=>setTimeout(pnTry,ms))}
+try{const o=JSON.parse(localStorage.getItem(PNK)||'null');if(o&&+o.t&&Date.now()-o.t<60000){PNI.t=+o.t;PNI.id=String(o.id||'');PNW.forEach(ms=>setTimeout(pnTry,ms))}else if(o)localStorage.removeItem(PNK)}catch(e){}
 ACT.secNDone=async el=>{el.disabled=true;try{await fnCall('secNotes',{op:'done',id:el.dataset.id});toast('סומן כטופל');X.nl=null;rerender()}catch(e){el.disabled=false;err(e)}};
 CHG.secNReps=async el=>{const n=+el.value;try{await fnCall('secNotes',{op:'reps',id:el.dataset.id,n});toast(n?'התזכורת תחזור עוד '+n+' פעמים':'החזרות בוטלו')}catch(e){err(e);X.nl=null;rerender()}};
 /* ---------- דוחות ותובנות ---------- */
@@ -516,7 +546,7 @@ const PN={done:0,ready:0};
 async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
  const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;
  await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW()))fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
- await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}if(d.k!=='sec'||!isA())return;X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
+ await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}if(d.k==='sec')pnTap(d.id)});
  let p=await P.checkPermissions();
  if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
   if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
@@ -675,7 +705,7 @@ const WHY={spam:'ספאם',promo:'פרסומת',big:'גדול וישן'};
 const MF=[['all','הכול'],['pend','עם טיוטה'],['sus','חשוד'],['promo','פרסומות']];
 /* ---------- לשונית "מייל" ---------- */
 async function mlLoad(){X.mlb=1;const s0=X.ml.list;let again=0;try{const r=await fnCall('secMail',{op:'list'});if(s0&&X.ml.list===null){again=1;return}X.ml.list=r&&Array.isArray(r.mails)?r:{err:'לא נטען'}}catch(e){X.ml.list=X.ml.list&&!X.ml.list.err?X.ml.list:{err:e&&e.message||'לא נטען'}}finally{X.mlb=0;if(again){mlLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
-function mailH(){const M=X.ml;if(M.clean)return cleanH();if(M.au)return autoH();if(M.cur)return mlCardH();const R=M.list;if(!R){if(!X.mlb)mlLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="mail">נסה שוב</button></div>`;
+function mailH(){const M=X.ml;if(M.clean)return cleanH();if(M.au)return autoH();if(M.oa)return oaH();if(M.cur)return mlCardH();const R=M.list;if(!R){if(!X.mlb)mlLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="mail">נסה שוב</button></div>`;
  const f=M.f||'all',L=(R.mails||[]).filter(m=>f==='all'||(f==='pend'?m.draft&&['pend','fail'].includes(m.draft.st):f==='promo'?(m.flags||[]).some(x=>x==='promo'||x==='spam'):(m.flags||[]).includes(f)));
  let h='';
  if(R.cleanN)h+=`<div class="card secwarn" id="secClPend" style="margin-bottom:8px"><b>רשימת ניקוי ממתינה לאישורך (${R.cleanN})</b><p class="note" style="margin:4px 0 8px">מנהל המערכת הכין רשימת מיילים לפינוי. שום מייל לא יועבר לאשפה בלי האישור שלך.</p><button class="btn w" data-a="secClOpen">לצפייה ואישור</button></div>`;
@@ -685,16 +715,19 @@ function mailH(){const M=X.ml;if(M.clean)return cleanH();if(M.au)return autoH();
  h+=`<div class="chips" style="margin:0 0 8px">${MF.map(([k,l])=>`<button class="chip${f===k?' on':''}" data-a="secMlF" data-v="${k}" style="min-height:40px" aria-pressed="${f===k}">${l}</button>`).join('')}</div>`;
  return h+`<div class="card secml" id="secMlList">${L.length?L.map(m=>`<div class="li" data-a="secMlOpen" data-id="${esc(m.id)}" role="button" tabindex="0"><div class="m"><b>${esc(m.subj||'(בלי נושא)')}</b><small><bdi dir="ltr" class="secaddr">${esc(m.name||m.from)}</bdi> · ${esc(tm(m.t))}</small><small>${esc(m.snip)}</small><div class="sectg">${m.st==='replied'?'<span class="sectags g">נענה ✓</span>':m.draft&&['pend','fail'].includes(m.draft.st)?'<span class="sectags g">טיוטה ממתינה</span>':''}${m.draft&&m.draft.am?'<span class="sectags g">אוטומטי</span>':''}${m.task?'<span class="sectags">נפתחה משימה</span>':''}${mflH(m.flags)}</div></div></div>`).join(''):'<p class="note">אין מיילים</p>'}</div>`}
 ACT.secMlF=el=>{X.ml.f=el.dataset.v;rerender()};
-ACT.secMlOpen=el=>{X.ml.cur=el.dataset.id;X.ml.card=null;rerender()};
-ACT.secMlBack=()=>{X.ml.au=null;X.ml.of=null;X.rep=null;X.ml.cur=null;X.ml.card=null;X.ml.clean=null;X.ml.list=null;X.ml.w=0;rerender()};
+ACT.secMlOpen=el=>{X.ml.cur=el.dataset.id;X.ml.card=null;X.ml.ord=null;rerender()};
+ACT.secMlBack=()=>{X.ml.oa=null;X.ml.ord=null;X.ml.au=null;X.ml.of=null;X.rep=null;X.ml.cur=null;X.ml.card=null;X.ml.clean=null;X.ml.list=null;X.ml.w=0;rerender()};
 async function mlCardLoad(){const id=X.ml.cur;X.ml.cb=1;try{const r=await fnCall('secMail',{op:'get',id});if(X.ml.cur===id)X.ml.card=r&&r.mail?r:{err:'לא נטען'}}catch(e){X.ml.card={err:e&&e.message||'לא נטען'}}finally{X.ml.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
 function mlCardH(){const R=X.ml.card,back='<button class="btn g w" data-a="secMlBack" style="margin-bottom:8px">חזרה לתיבת המייל</button>';
  if(!R){if(!X.ml.cb)mlCardLoad();return back+'<div class="empty">טוען…</div>'}if(R.err)return back+`<div class="card"><p class="note">${esc(R.err)}</p></div>`;
  const m=R.mail,d=R.draft,fl=m.flags||[],sus=m.st==='sus';
- let h=back+`<div class="card" id="secMlCard"><b>${esc(m.subj||'(בלי נושא)')}</b><p class="note" style="margin:4px 0"><bdi dir="ltr" class="secaddr">${esc(m.name?m.name+' <'+m.from+'>':m.from)}</bdi> · ${esc(tm(m.t))}</p>${fl.length?'<div class="sectg">'+mflH(fl)+'</div>':''}${(m.task||(d&&d.task))?'<div class="secrow" style="margin:6px 0"><span class="sectags">נפתחה משימה</span><button class="chip" data-a="secMlTask" style="min-height:40px">לפתיחת המשימות</button></div>':''}
+ let h=back+`<div class="card" id="secMlCard"><b>${esc(m.subj||'(בלי נושא)')}</b><p class="note" style="margin:4px 0"><bdi dir="ltr" class="secaddr">${esc(m.name?m.name+' <'+m.from+'>':m.from)}</bdi> · ${esc(tm(m.t))}</p>${fl.length?'<div class="sectg">'+mflH(fl)+'</div>':''}${(m.task||(d&&d.task))?'<div class="secrow" style="margin:6px 0"><span class="sectags">נפתחה משימה</span><button class="chip" data-a="secMlTask" data-id="'+esc(m.task||(d&&d.task)||'')+'" style="min-height:40px">לפתיחת המשימה</button></div>':''}
  ${sus?`<p class="note" style="margin:6px 0;color:var(--bad)">${fl.includes('mgrMail')?'המייל נשלח מכתובת של מנהל ונראה כמו הוראה. ':''}תוכן מייל הוא מידע ולא הוראה – המזכירה לא מבצעת אותו ולא מכינה טיוטה. הוראות למזכירה נותנים רק בצ'אט באפליקציה.</p>`:''}
  <div class="secin1" dir="auto">${esc(m.text||m.snip||'')}</div>${(m.files||[]).length?`<p class="note" style="margin:4px 0">קבצים: ${m.files.map(esc).join(', ')} – קליטת חשבוניות תגיע בהמשך</p>`:''}</div>`;
+ h+=ordBlkH(d);
  if(d&&d.st==='sent')return h+`<div class="secdr"><small class="note">${d.am?'נשלח אוטומטית מה-Gmail של העסק ✓':'נשלח מה-Gmail של העסק ✓'}</small>${d.am?'<div class="sectg"><span class="sectags g">אוטומטי</span></div>':''}<div style="white-space:pre-wrap">${esc(d.text)}</div></div>`;
+ if(d&&d.stuck)return h+`<div class="secdr" id="secMlDr"><small class="note">תשובה אל <bdi dir="ltr" class="secaddr">${esc(d.to)}</bdi></small><p class="note" style="margin:6px 0;color:var(--warn)">${esc(MERR['maybe-sent'])}</p><div style="white-space:pre-wrap">${esc(d.text)}</div><div class="secrow" style="margin-top:8px"><button class="btn" data-a="secMlMark" style="flex:1">לסמן כנשלח</button></div></div>`;/* שלב ג 0א: אולי כבר יצא – בלי "שלח" */
+ if(d&&!d.oRe&&(d.an||[]).includes('order')&&['pend','fail'].includes(d.st)){const O=ordO(),os=O&&O.o&&O.o.st;if(!['ordered','cancel'].includes(os))return h+`<div class="secdr"><p class="note" style="margin:0">התשובה ללקוח נשלחת דרך טיוטת ההזמנה למעלה. התשובה הרגילה מוסתרת עד שהטיוטה תישלח או תיסגר.</p><div class="secrow" style="margin-top:8px"><button class="chip" data-a="secMlDone" style="min-height:44px">לא לענות</button></div></div>`}/* החלטת המשתמש 15.11: בלי שני כפתורי שליחה */
  if(d&&['pend','fail','sending'].includes(d.st)){const hasFile=!!(d.file||(d.flags||[]).includes('file')||(m.files||[]).length||(m.flags||[]).includes('file')),an=(d.anL||[]).length?`<div class="secin1" style="margin:6px 0"><b>למה לא נשלחה אוטומטית</b><ul style="margin:4px 0 0;padding-inline-start:18px">${d.anL.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul></div>`:'';const why=(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:'';
   return h+`<div class="secdr" id="secMlDr"><small class="note">תשובה אל <bdi dir="ltr" class="secaddr">${esc(d.to)}</bdi> · ${d.src==='ai'?'טיוטה מהמזכירה':'נכתבה על ידך'}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+mflH(d.flags)+'</div>':''}${hasFile?'<div class="sectg"><span class="sectags w">📎 יש קובץ מצורף</span></div>':''}${an}${why}
   <textarea class="secin" id="secMlTx" maxlength="5000" aria-label="תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secMlSend" style="flex:1">שלח מה-Gmail של העסק</button><button class="chip" data-a="secMlDone">לא לענות</button></div>
@@ -706,22 +739,103 @@ ACT.secMlW=()=>{X.ml.w=1;rerender()};ACT.secMlWx=()=>{X.ml.w=0;rerender()};
 FRM.secMlW=async f=>{const t=String(fd(f).text||'').trim();if(!t)return toast('כתבו תשובה');const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('secMail',{op:'write',id:X.ml.cur,text:t});X.ml.w=0;if(X.ml.card)X.ml.card.draft=r.draft}catch(e){merr(e)}finally{b.disabled=false;rerender()}};
 ACT.secMlSend=el=>{const c=X.ml.card,d=c&&c.draft;if(!d)return;d._sid=d._sid||sid();/* אותו מזהה בכל ניסיון חוזר – השרת לא ישלח פעמיים (10.2) */
  const t=document.getElementById('secMlTx'),v=t?t.value.trim():d.text;if(!v)return toast('התשובה ריקה');const data={id:X.ml.cur,sendId:d._sid};if(v!==d.text)data.text=v;
- const run=async()=>{el.disabled=true;try{const r=await fnCall('secMailSend',data);toast(r&&r.already?'כבר נשלח':'נשלח מה-Gmail של העסק');X.ml.card=null;X.ml.list=null;X.rep=null;if(r&&r.offerRule)setTimeout(()=>offerDlg(r.offerRule),50)}catch(e){merr(e)}finally{el.disabled=false;rerender()}};
+ const run=async()=>{el.disabled=true;try{const r=await fnCall('secMailSend',data);toast(r&&r.already?'כבר נשלח':'נשלח מה-Gmail של העסק');X.ml.card=null;X.ml.list=null;X.rep=null;if(r&&r.offerRule)setTimeout(()=>offerDlg(r.offerRule),50)}catch(e){if(e&&e.reason==='maybe-sent')return setTimeout(mlMarkAsk,50);merr(e)}finally{el.disabled=false;rerender()}};
  ask('לשלוח את התשובה אל '+d.to+' מה-Gmail של העסק?'+((d.flags||[]).includes('chk')?' בטיוטה יש מידע שכדאי לבדוק ('+(d.why||[]).join(', ')+').':''),run,'שלח')};
+/* שלב ג 0א: סימון ידני "נשלח" לטיוטה שאולי כבר יצאה מ-Gmail (בלי שליחה) */
+function mlMarkAsk(){const c=X.ml.card,d=c&&c.draft;if(!d)return;d._sid=d._sid||sid();ask(MERR['maybe-sent']+' לסמן כנשלח?',async()=>{try{await fnCall('secMailSend',{id:X.ml.cur,sendId:d._sid,mark:true});toast('סומן כנשלח');X.ml.card=null;X.ml.list=null}catch(e){merr(e)}finally{rerender()}},'סמן נשלח')}
+ACT.secMlMark=()=>mlMarkAsk();
 ACT.secMlDone=()=>{ask('לסמן כטופל? לא תישלח תשובה.',async()=>{try{await fnCall('secMail',{op:'done',id:X.ml.cur});toast('סומן כטופל');X.ml.cur=null;X.ml.card=null;X.ml.list=null;rerender()}catch(e){merr(e)}},'טופל')};
+/* ---------- שלב ג/8: טיוטת הזמנה מהמייל (secMail: ordGet/ordEdit/ordCust/ordSend/ordReset) + "שליחה לבד" (ordAuto) ---------- */
+const ORDST={mgr:'ממתינה לך',sending:'נשלחת…',sent:'נשלח ללקוח – ממתין לתשובה',fail:'השליחה נכשלה',ordered:'הלקוח אישר – נוצרה הזמנה',cancel:'הלקוח ביטל'};
+const ORDNO={cust:'צריך לבחור לקוח (או לאשר כרטיס חדש)',br:'צריך לבחור סניף',empty:'אין שורות בהזמנה'};
+const ORDPAY=[['','—'],['cash','מזומן'],['n30','שוטף + 30'],['n60','שוטף + 60'],['n90','שוטף + 90'],['credit','אשראי'],['transfer','העברה בנקאית'],['other','אחר']];
+const ordM=a=>(Number(a||0)/100).toFixed(2)+' ₪';
+const ordO=()=>{const O=X.ml&&X.ml.ord;return O&&O.id===X.ml.cur?O:null};
+const ordBlk=o=>{const b=[];if(!o.custId)b.push('cust');if(!o.br)b.push('br');if(!(o.lines||[]).length)b.push('empty');return b};
+async function ordLoad(){const id=X.ml.cur,O=X.ml.ord;O.busy=1;try{const r=await fnCall('secMail',{op:'ordGet',id});if(X.ml.cur===id){O.o=r&&r.ord?r.ord:null;O.err=O.o?'':'לא נטען'}}catch(e){O.err=e&&e.message||'לא נטען'}finally{O.busy=0;if(cur().v==='sec'&&!typing())rerender()}}
+ACT.secOrdOpen=()=>{X.ml.ord={id:X.ml.cur,o:null,err:'',busy:0};ordLoad();rerender()};
+ACT.secOrdRe=()=>{const O=ordO();if(!O)return;O.o=null;O.err='';ordLoad();rerender()};
+ACT.secOrdOrig=el=>{X.ml.cur=el.dataset.id;X.ml.card=null;X.ml.ord=null;X.ml.w=0;rerender()};
+function ordErr(e){const r=e&&e.reason;if(r==='stale'){toast(e.message||'הטיוטה עודכנה – נטענה מחדש');return ACT.secOrdRe()}if(r==='maybe-sent'){ordMarkAsk();return ACT.secOrdRe()}toast(e&&e.message||'הפעולה נכשלה')}
+async function ordEdit(ops,el){const O=ordO();if(!O||!O.o)return;if(el)el.disabled=true;try{const r=await fnCall('secMail',{op:'ordEdit',id:O.id,ver:O.o.ver,ops});if(r&&r.ord)O.o=r.ord}catch(e){ordErr(e)}finally{if(el)el.disabled=false;rerender()}}
+ACT.secOrdOp=el=>{const d=el.dataset,k=d.k,op={k};if(d.i!==undefined)op.i=+d.i;if(k==='pick')op.pid=d.pid;if(k==='cust')op.cid=d.cid;if(k==='br')op.br=d.br;const run=()=>ordEdit([op],el);if(k==='del')ask('למחוק את השורה מההזמנה?',run,'מחק');else run()};
+CHG.secOrdQty=el=>{const q=+String(el.value).replace(',','.');if(!(q>0)){toast('כמות לא תקינה');return rerender()}ordEdit([{k:'qty',i:+el.dataset.i,qty:q}],el)};
+CHG.secOrdBr=el=>{if(el.value)ordEdit([{k:'br',br:el.value}],el)};
+FRM.secOrdCust=async f=>{const O=ordO();if(!O||!O.o)return;const v=fd(f),card={},ws=!!v.ws,t=k=>String(v[k]||'').trim();for(const k of['name','phone','mail','st','city'])if(t(k))card[k]=t(k);if(ws)for(const k of['bn','vat','ct','pay','payTxt'])if(t(k))card[k]=t(k);const b=f.querySelector('button');b.disabled=true;try{const r=await fnCall('secMail',{op:'ordCust',id:O.id,card,ws});if(r&&r.ord)O.o=r.ord;toast(r&&r.exists?'כבר יש לקוח עם הטלפון הזה – הוא נוסף לבחירה':'הלקוח נשמר')}catch(e){ordErr(e)}finally{b.disabled=false;rerender()}};
+ACT.secOrdSend=el=>{const O=ordO();if(!O||!O.o)return;const o=O.o;ask('לשלוח את טיוטת ההזמנה אל '+o.to+' מה-Gmail של העסק? הלקוח יקבל את הטקסט שמופיע בתצוגה המקדימה.',async()=>{el.disabled=true;try{const r=await fnCall('secMail',{op:'ordSend',id:O.id,ver:o.ver});toast(r&&r.already?'כבר נשלח':'הטיוטה נשלחה ללקוח');X.ml.list=null}catch(e){if(e&&e.reason==='maybe-sent'){ordMarkAsk();return ACT.secOrdRe()}ordErr(e)}finally{el.disabled=false;ACT.secOrdRe()}},'שלח')};
+function ordMarkAsk(){const O=ordO();if(!O)return;ask(MERR['maybe-sent']+' לסמן כנשלח?',async()=>{try{await fnCall('secMail',{op:'ordSend',id:O.id,mark:true});toast('סומן כנשלח');X.ml.list=null}catch(e){merr(e)}finally{ACT.secOrdRe()}},'סמן נשלח')}
+ACT.secOrdMark=()=>ordMarkAsk();
+ACT.secOrdReset=async el=>{const O=ordO();if(!O)return;el.disabled=true;try{await fnCall('secMail',{op:'ordReset',id:O.id})}catch(e){merr(e)}finally{ACT.secOrdRe()}};
+function ordLineH(l,i,ed){const q=ed?`<label class="f"><small class="note">כמות</small><input type="number" inputmode="decimal" min="0" step="any" data-c="secOrdQty" data-i="${i}" value="${l.qty?esc(String(l.qty)):''}" style="min-height:44px" aria-label="כמות בשורה ${i+1}"></label><button class="chip" data-a="secOrdOp" data-k="del" data-i="${i}" style="min-height:44px">מחק שורה</button>`:'';
+ let b;const u=l.unit?' '+esc(l.unit):'',tag=(c,t)=>`<span class="sectags ${c}">${t}</span>`;
+ if(l.st==='ok'&&l.out)b=`<b>${esc(l.name||l.txt||'')}</b> ${tag('w','אזל')}`;
+ else if(l.st==='ok'&&l.pr>0)b=`<b>${esc(l.name||'')}</b>${l.qty?` · ${esc(String(l.qty))}${u}`:''}<br><small class="note">מחיר ${ordM(l.pr)}${l.ex?' (לפני מע"מ)':''} · סה"כ ${ordM(l.sum)}${l.ctw?' · בכפולות של '+esc(String(l.ctw))+' (קרטון)':''}</small>`;
+ else if(l.st==='pick'&&(l.opts||[]).length)b=`<b dir="auto">${esc(l.txt||'')}</b>${l.qty?` · ${esc(String(l.qty))}${u}`:''} ${tag('g','לבחירה')}<div class="secrow" style="flex-wrap:wrap;margin-top:4px">${l.opts.map(p=>`<button class="chip" data-a="secOrdOp" data-k="pick" data-i="${i}" data-pid="${esc(p.id)}" style="min-height:44px"${ed?'':' disabled'}>${esc(p.name)}${p.pr?' · '+ordM(p.pr):''}</button>`).join('')}</div>`;
+ else b=`<b dir="auto">${esc(l.txt||'')}</b>${l.qty?` · ${esc(String(l.qty))}${u}`:''} ${tag('w','לבירור')}${l.why==='qty'?'<small class="note"> הכמות לא ברורה</small>':''}`;
+ return `<div class="secli">${b}<div>${q}</div></div>`}
+function ordCustH(o){const n=o.custNew||{},tx=(k,lb,ex)=>`<label class="f"><span>${lb}</span><input class="secin" name="${k}" maxlength="80" dir="auto" value="${esc(n[k]||'')}" style="min-height:44px"${ex||''}></label>`;
+ return `<form data-f="secOrdCust" id="secOrdCustF">${o.custNew?'<p class="note" style="margin:4px 0">המזכירה הכינה כרטיס מהמייל. בדקו, תקנו ואשרו:</p>':'<p class="note" style="margin:4px 0">פרטי לקוח חדש:</p>'}${tx('name','שם')}${tx('phone','טלפון',' type="tel" dir="ltr"')}${tx('mail','מייל',' dir="ltr"')}${tx('st','רחוב ומספר')}${tx('city','עיר')}
+ <label class="chip" style="min-height:44px;width:100%;justify-content:flex-start"><input type="checkbox" name="ws" value="1"${n.bn||n.vat?' checked':''}> לקוח עסקי (מחירי סיטונאי)</label>
+ <div class="secin1" style="margin:4px 0">${tx('bn','שם העסק')}${tx('vat','ע.מ (9 ספרות)',' inputmode="numeric" dir="ltr"')}${tx('ct','איש קשר')}<label class="f"><span>תנאי תשלום</span><select class="secin" name="pay" style="min-height:44px">${ORDPAY.map(p=>`<option value="${p[0]}"${n.pay===p[0]?' selected':''}>${p[1]}</option>`).join('')}</select></label>${tx('payTxt','פירוט תנאי תשלום (כשנבחר "אחר")')}<small class="note">שדות העסק נשמרים רק אם סימנתם "לקוח עסקי".</small></div>
+ <button class="btn w" style="min-height:44px">אישור והוספת הלקוח</button></form>`}
+function ordBlkH(d){if(!d||!(d.an||[]).includes('order'))return '';
+ if(d.oRe)return `<div class="secdr"><span class="sectags g">תשובה לטיוטת הזמנה</span><p class="note" style="margin:6px 0">הלקוח השיב על טיוטת ההזמנה שנשלחה לו.</p><button class="chip" data-a="secOrdOrig" data-id="${esc(d.oRe)}" style="min-height:44px">פתיחת המייל המקורי</button></div>`;
+ const O=ordO();if(!O)return `<div class="secdr" id="secOrd"><b>טיוטת הזמנה</b><p class="note" style="margin:4px 0 8px">המזכירה זיהתה במייל הזמנה והכינה טיוטה.</p><button class="btn w" data-a="secOrdOpen">פתיחת טיוטת ההזמנה</button></div>`;
+ const hd='<b>טיוטת הזמנה</b>';
+ if(!O.o)return `<div class="secdr" id="secOrd">${hd}${O.err?`<p class="note">${esc(O.err)}</p><button class="chip" data-a="secOrdRe" style="min-height:44px">נסה שוב</button>`:'<div class="empty">טוען…</div>'}</div>`;
+ const o=O.o,ed=o.st==='mgr',fail=o.st==='fail',stuck=o.stuck===true,blk=ed||fail?ordBlk(o):[],lab=stuck?'ייתכן שנשלח':ORDST[o.st]||o.st;
+ let h=`<div class="secdr" id="secOrd">${hd} <span class="sectags ${o.st==='ordered'||o.st==='sent'?'g':fail||stuck?'w':''}">${esc(lab)}</span>`;
+ if(stuck)h+=`<p class="note" style="margin:6px 0;color:var(--warn)">${esc(MERR['maybe-sent'])}</p>`;
+ h+=`<p style="margin:6px 0 2px"><small class="note">אל <bdi dir="ltr" class="secaddr">${esc(o.to)}</bdi></small></p>`;
+ /* לקוח */
+ if(o.custId)h+=`<p style="margin:4px 0"><b>לקוח:</b> ${esc(o.custName||'נבחר')}</p>`;
+ else if(ed){h+='<p style="margin:4px 0"><b>לקוח:</b> <span class="sectags w">לא נבחר</span></p>';
+  if((o.cands||[]).length)h+=`<small class="note">${o.idBy==='phone'?'זוהה לפי טלפון':o.idBy==='mail'?'זוהה לפי כתובת המייל':'ייתכן שזה אחד מהלקוחות האלה'} – בחרו:</small><div class="secrow" style="flex-wrap:wrap;margin:4px 0">${o.cands.map(c=>`<button class="chip" data-a="secOrdOp" data-k="cust" data-cid="${esc(c.id)}" style="min-height:44px">${esc(c.name||'')}${c.bn?' · '+esc(c.bn):''}</button>`).join('')}</div>`;
+  h+=(o.cands||[]).length?`<details style="margin:4px 0"><summary style="min-height:44px">לקוח חדש (במקום המועמדים)</summary>${ordCustH(o)}</details>`:ordCustH(o)}
+ /* טלפון */
+ if(ed||fail){if(o.phone)h+=`<p style="margin:4px 0"><b>טלפון:</b> <bdi dir="ltr">${esc(o.phone)}</bdi></p>`;
+  else if(o.phoneHint)h+=`<div class="secrow" style="margin:4px 0;flex-wrap:wrap"><span><b>טלפון מהמייל:</b> <bdi dir="ltr">${esc(o.phoneHint)}</bdi></span><button class="chip" data-a="secOrdOp" data-k="phone" style="min-height:44px"${ed?'':' disabled'}>אישור הטלפון</button></div>`;
+  else h+='<p class="note" style="margin:4px 0">אין טלפון – בטקסט ללקוח יתווסף בקשה לשלוח מספר.</p>'}
+ /* סניף */
+ if(ed||fail){const B=o.brs||[];if(B.length)h+=`<label class="f" style="display:block;margin:4px 0"><span><b>סניף</b>${o.brDef&&o.br?' <small class="note">(ברירת מחדל – ודאו שזה הסניף הנכון)</small>':''}</span><select class="secin" data-c="secOrdBr" aria-label="סניף" style="min-height:44px"${ed?'':' disabled'}>${o.br?'':'<option value="">בחרו סניף…</option>'}${B.map(b=>`<option value="${esc(b.id)}"${b.id===o.br?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`;
+  else if(!o.br&&ed)h+='<button class="chip" data-a="secOrdOp" data-k="br" data-br="_" style="min-height:44px">אישור (עסק בלי סניפים)</button>'}
+ if(o.catCut)h+='<p class="note" style="margin:4px 0;color:var(--warn)">חלק מהקטלוג לא נבדק (קטלוג גדול) – בדקו את השורות.</p>';
+ /* שורות */
+ h+=`<div style="margin-top:6px"><b>שורות</b>${(o.lines||[]).length?(o.lines||[]).map((l,i)=>ordLineH(l,i,ed)).join(''):'<p class="note" style="margin:4px 0">אין שורות</p>'}</div>`;
+ h+=`<p style="margin:6px 0"><b>סה"כ (שורות עם מחיר): ${ordM(o.total)}</b>${o.nBlock?` <small class="note">· ${esc(String(o.nBlock))} שורות לבחירה/לבירור/אזלו לא נספרו</small>`:''}</p>`;
+ if(blk.length)h+=`<div class="secin1" style="margin:6px 0"><b>לא ניתן לשלוח עדיין</b><ul style="margin:4px 0 0;padding-inline-start:18px">${blk.map(k=>'<li>'+esc(ORDNO[k]||k)+'</li>').join('')}</ul></div>`;
+ if(o.text)h+=`<details style="margin:6px 0"${ed?' open':''}><summary style="min-height:44px"><b>הטקסט שיישלח ללקוח</b></summary><div class="secin1" dir="auto" style="white-space:pre-wrap">${esc(o.text)}</div></details>`;
+ if(ed)h+=`<div class="secrow"><button class="btn" data-a="secOrdSend" style="flex:1;min-height:44px"${blk.length?' disabled':''}>שלח ללקוח מה-Gmail של העסק</button></div><small class="note">הטיוטה יוצאת רק בלחיצה שלך. המחירים תמיד מהקטלוג.</small>`;
+ else if(fail&&!stuck)h+=`<p class="note" style="margin:6px 0;color:var(--bad)">השליחה הקודמת נכשלה.</p><div class="secrow" style="flex-wrap:wrap"><button class="btn" data-a="secOrdSend" style="flex:1;min-height:44px"${blk.length?' disabled':''}>נסה לשלוח שוב</button><button class="chip" data-a="secOrdReset" style="min-height:44px">חזרה לעריכה</button></div>`;
+ else if(stuck)h+=`<div class="secrow"><button class="btn" data-a="secOrdMark" style="flex:1;min-height:44px">סמן נשלח</button></div>`;
+ else if(o.st==='sending')h+='<p class="note" style="margin:6px 0">השליחה בדרך…</p>';
+ return h+`<div class="secrow" style="margin-top:6px"><button class="chip" data-a="secOrdRe" style="min-height:44px">רענון</button></div></div>`}
+/* שליחה לבד של הזמנות לכל לקוח (ordAuto) */
+async function oaLoad(){const A=X.ml.oa;X.oab=1;try{const r=await fnCall('secMail',{op:'ordAuto',act:'list'});if(X.ml&&X.ml.oa===A){A.on=r.on||[];A.ask=r.ask||[];A.load=0;A.err=''}}catch(e){if(X.ml&&X.ml.oa===A){A.load=0;A.err=e&&e.message||'לא נטען'}}finally{X.oab=0;if(cur().v==='sec'&&!typing())rerender()}}
+function oaH(){const A=X.ml.oa,back='<button class="btn g w" data-a="secMlBack" style="margin-bottom:8px">חזרה לתיבת המייל</button>';
+ if(A.load){if(!X.oab)oaLoad();return back+'<div class="empty">טוען…</div>'}if(A.err)return back+`<div class="card"><p class="note">${esc(A.err)}</p><button class="btn g w" data-a="secOaOpen">נסה שוב</button></div>`;
+ const row=(c,b)=>`<div class="secli"><p><b>${esc(c.name||'לקוח')}</b>${c.at?' <small class="note">· '+esc(fmtAt(c.at))+'</small>':''}</p><div class="secrow" style="flex-wrap:wrap">${b}</div></div>`,btn=(a,c,t,cl)=>`<button class="${cl||'chip'}" data-a="secOaAct" data-act="${a}" data-id="${esc(c.custId)}" style="min-height:44px">${t}</button>`;
+ return back+`<div class="card"><b>שליחה לבד של הזמנות</b><p class="note" style="margin:4px 0 0">טיוטת הזמנה נשלחת ללקוח בלי לחכות לך רק אם היא נקייה (בלי שורות לבחירה, לבירור או אזלו), המחירים מהקטלוג, והלקוח מאומת (המייל שנשלח הוא המייל שבכרטיס הלקוח). בכל מקרה אחר הטיוטה נשארת לאישורך. אפשר לכבות בכל רגע.</p></div>
+ <div class="sec"><h3>ממתינים לאישורך</h3></div><div class="card" id="secOaAsk">${(A.ask||[]).length?A.ask.map(c=>row(c,btn('on',c,'אשר שליחה לבד','btn')+btn('no',c,'לא'))).join(''):'<p class="note" style="margin:0">אין לקוחות שממתינים לאישור. אחרי שליחה ידנית של טיוטה נקייה המזכירה תציע שליחה לבד.</p>'}</div>
+ <div class="sec"><h3>נשלח לבד</h3></div><div class="card" id="secOaOn">${(A.on||[]).length?A.on.map(c=>row(c,btn('off',c,'כבה'))).join(''):'<p class="note" style="margin:0">אין לקוחות עם שליחה לבד</p>'}</div>`}
+ACT.secOaOpen=()=>{X.set=0;X.tab='mail';X.ml=X.ml||{f:'all'};X.ml.cur=null;X.ml.card=null;X.ml.clean=null;X.ml.au=null;X.ml.oa={load:1};rerender()};
+ACT.secOaAct=async el=>{const d=el.dataset;el.disabled=true;try{await fnCall('secMail',{op:'ordAuto',act:d.act,custId:d.id});toast(d.act==='on'?'השליחה לבד הופעלה ללקוח':d.act==='off'?'השליחה לבד כובתה':'לא נשלח לבד, לא נשאל שוב');X.ml.oa={load:1}}catch(e){merr(e)}finally{el.disabled=false;rerender()}};
 /* ---------- סבב ממשק שלב ב: דיוק טיוטה, מענה אוטומטי, הצעות כללים, "נשלח אוטומטית", עצירה ---------- */
-const MERR={'no-draft':'אין טיוטה למייל הזה','not-pending':'הטיוטה כבר לא ממתינה (נשלחה או טופלה)','sus':'המייל מסומן כחשוד – אי אפשר להכין לו טיוטה','saving':'הטיוטה בשמירה כרגע, נסו שוב בעוד רגע','bad-note':'ההנחיה חייבת להיות באורך 1 עד 500 תווים','not-auto':'הכלל הזה אינו אוטומטי','src-missing':'אי אפשר להפעיל: מקור המידע של הכלל חסר בבנק המידע','bad-tpl':'התבנית חייבת לכלול שדה קיים וציבורי בסוגריים מסולסלים, למשל {{hours}}'};
+const MERR={'maybe-sent':'ייתכן שהמייל כבר נשלח – בדקו בתיקייה "נשלח" ב-Gmail. אם הוא שם, אל תשלחו שוב.','not-stuck':'אפשר לסמן "נשלח" רק לטיוטה שהשליחה שלה לא הסתיימה','no-draft':'אין טיוטה למייל הזה','not-pending':'הטיוטה כבר לא ממתינה (נשלחה או טופלה)','sus':'המייל מסומן כחשוד – אי אפשר להכין לו טיוטה','saving':'הטיוטה בשמירה כרגע, נסו שוב בעוד רגע','bad-note':'ההנחיה חייבת להיות באורך 1 עד 500 תווים','not-auto':'הכלל הזה אינו אוטומטי','src-missing':'אי אפשר להפעיל: מקור המידע של הכלל חסר בבנק המידע','bad-tpl':'התבנית חייבת לכלול שדה קיים וציבורי בסוגריים מסולסלים, למשל {{hours}}'};
 const merr=e=>toast(e&&e.reason&&MERR[e.reason]||e&&e.message||'הפעולה נכשלה');
 const REPW={cap:'הגעת לתקרת הטיוטות האוטומטיות להיום'};
 async function repLoad(){X.repb=1;try{const r=await fnCall('secMail',{op:'repGet'});X.rep=r&&typeof r.auto==='boolean'?r:{err:'לא נטען'}}catch(e){X.rep={err:e&&e.message||'לא נטען'}}finally{X.repb=0;if(cur().v==='sec'&&!typing())rerender()}}
 function repSetH(inner){const r=X.rep;if(!r){if(!X.repb)repLoad();return '<div class="empty">טוען…</div>'}if(r.err)return `<div class="card" style="margin-bottom:8px"><p class="note" style="margin:0 0 6px">${esc(r.err)}</p><button class="chip" data-a="secMlRepRe" style="min-height:40px">נסה שוב</button></div>`;return inner(r)}
 const heldH=r=>r.held?`<div class="card secwarn" id="secMlHeld" style="margin-bottom:8px" role="status"><b>המענה האוטומטי במייל נעצר</b><p class="note" style="margin:4px 0 8px">אחרי ${esc(String(r.autoDay||100))} תשובות אוטומטיות ביום המזכירה עצרה את עצמה${r.held.at?' ('+esc(fmtAt(r.held.at))+')':''}. העצירה נשארת עד שתפעילו מחדש ידנית. עד אז כל תשובה יוצאת רק בלחיצה שלך.</p><button class="btn w" data-a="secMlRepOn">הפעל שוב</button></div>`:'';
-function repPanelH(full){return repSetH(r=>`${heldH(r)}<div class="card" id="secMlRep" style="margin-bottom:8px"><label class="chip" style="min-height:44px;width:100%;justify-content:flex-start"><input type="checkbox" data-c="secMlAuto"${r.auto?' checked':''}> מענה אוטומטי במייל</label><p class="note" style="margin:4px 0 0">${r.auto?'שאלה שמתאימה לכלל אוטומטי נענית בלי לחכות לך (רק לשולח מאומת, בלי קובץ מצורף). ':'כבוי: כל תשובה יוצאת רק בלחיצה שלך. '}${r.cap?'היום: '+esc(String(r.drafts||0))+' טיוטות מתוך '+esc(String(r.cap))+', '+esc(String(r.sent||0))+' נשלחו אוטומטית.':'טיוטות אוטומטיות כבויות על ידי מנהל המערכת.'}</p>${full?'<div class="secrow" style="margin-top:8px"><button class="chip" data-a="secMlAu" style="min-height:44px">נשלח אוטומטית</button></div>':''}</div>`)}
-function mailSetH(){return `<div class="card" style="margin-top:8px"><b>מענה אוטומטי במייל</b><div style="margin-top:6px">${repPanelH(false)}</div><div class="secrow"><button class="chip" data-a="secStop" data-on="${X.wc&&X.wc.stop&&X.wc.stop.on?0:1}" style="min-height:44px">${X.wc&&X.wc.stop&&X.wc.stop.on?'ביטול "עצור הכל"':'⏸ עצור הכל (ווצאפ ומייל)'}</button></div></div>`}
+function repPanelH(full){return repSetH(r=>`${heldH(r)}<div class="card" id="secMlRep" style="margin-bottom:8px"><label class="chip" style="min-height:44px;width:100%;justify-content:flex-start"><input type="checkbox" data-c="secMlAuto"${r.auto?' checked':''}> מענה אוטומטי במייל</label><p class="note" style="margin:4px 0 0">${r.auto?'שאלה שמתאימה לכלל אוטומטי נענית בלי לחכות לך (רק לשולח מאומת, בלי קובץ מצורף). ':'כבוי: כל תשובה יוצאת רק בלחיצה שלך. '}${r.cap?'היום: '+esc(String(r.drafts||0))+' טיוטות מתוך '+esc(String(r.cap))+', '+esc(String(r.sent||0))+' נשלחו אוטומטית.':'טיוטות אוטומטיות כבויות על ידי מנהל המערכת.'}</p>${full?'<div class="secrow" style="margin-top:8px"><button class="chip" data-a="secMlAu" style="min-height:44px">נשלח אוטומטית</button><button class="chip" data-a="secOaOpen" style="min-height:44px">שליחה לבד של הזמנות</button></div>':''}</div>`)}
+function mailSetH(){return `<div class="card" style="margin-top:8px"><b>מענה אוטומטי במייל</b><div style="margin-top:6px">${repPanelH(false)}</div><div class="secrow"><button class="chip" data-a="secOaOpen" style="min-height:44px">שליחה לבד של הזמנות</button></div><div class="secrow"><button class="chip" data-a="secStop" data-on="${X.wc&&X.wc.stop&&X.wc.stop.on?0:1}" style="min-height:44px">${X.wc&&X.wc.stop&&X.wc.stop.on?'ביטול "עצור הכל"':'⏸ עצור הכל (ווצאפ ומייל)'}</button></div></div>`}
 CHG.secMlAuto=async el=>{const on=!!el.checked;el.disabled=true;try{const r=await fnCall('secMail',{op:'repSet',auto:on});X.rep=r;toast(on?'המענה האוטומטי הופעל':'המענה האוטומטי כובה')}catch(e){merr(e);X.rep=null}finally{rerender()}};
 ACT.secMlRepOn=async el=>{el.disabled=true;try{X.rep=await fnCall('secMail',{op:'repSet',auto:true});toast('המענה האוטומטי הופעל מחדש')}catch(e){merr(e)}finally{rerender()}};
 ACT.secMlRepRe=()=>{X.rep=null;rerender()};
-ACT.secMlTask=()=>{go('tk')};
+/* מעבר למשימה שנפתחה מהמייל (tasks/m-<מזהה המייל>): לשונית הפתוחות, גלילה לכרטיס וסימון; סגורה / לא נמצאה – הודעה (דפוס ACT.tkGoIt) */
+ACT.secMlTask=el=>{const id=String(el.dataset.id||(X.ml.cur?'m-'+X.ml.cur:''));TKT='open';go('tk');if(!id)return;let n=0;
+ const look=()=>{const c=document.getElementById('tkc-'+id),t=tkGet(id);if(c){c.scrollIntoView({block:'start'});c.style.outline='2px solid var(--acc)';setTimeout(()=>{c.style.outline=''},2500);return}
+  if((t&&t.st==='done')||++n>=10)return toast(t&&t.st==='done'?'המשימה כבר סגורה':'המשימה לא נמצאה ברשימת הפתוחות');setTimeout(look,300)};setTimeout(look,200)};
 ACT.secMlRefine=async el=>{const t=document.getElementById('secMlNote'),note=t?t.value.trim():'';if(!note)return toast('כתבו הנחיה לדיוק');if(note.length>500)return toast(MERR['bad-note']);
  el.disabled=true;try{const r=await fnCall('secMail',{op:'refine',id:X.ml.cur,note});if(X.ml.card&&r&&r.draft){X.ml.card.draft=r.draft;toast('הטיוטה עודכנה – קראו ואשרו לפני שליחה')}}catch(e){merr(e)}finally{el.disabled=false;rerender()}};
 /* הצעות כללים: תבנית התשובה מוצגת במלואה וניתנת לעריכה (היא עלולה לכלול פרטים אישיים מהתשובה שנשלחה) */

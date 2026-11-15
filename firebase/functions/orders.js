@@ -9,11 +9,17 @@
 //   cat/{id}           { name, parent?, ord, upd }                                  – קטגוריה (parent ריק) / תת־קטגוריה. מנהל, דרך saveCat
 //   xfer/{id}          { prod, name, from, to, qty, why:'order'|'cancel'|'edit'|'manual', ord?, no?, by, at, reqId }  – העברה פנימית בין סניפים
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
-//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, by, byName, at, upd, cancel? }
+//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, shp?:{at,by}, by, byName, at, upd, cancel? }  – shp: "נשלח" ללקוח בשוטף (משוב סבב 2); cancel.rs: בביטול הזמנה שנשלחה – האם המלאי הוחזר (החלטה 21)
+//   ord/{id}           + pk?: סימוני ליקוט ואישור הלקוח (משוב סבב 3) – ראו ord-pick.js; כאן רק החסימה ב-setOrderStatus
+//   ord/{id}           + inv?: { id, no, t:'inv'|'ir', draft } – חשבונית של ההזמנה (שלב 4, lib/ar-doc.js), paid.rc – קבלה שנרשמה ב"שולם". רק כש-arcfg/main.on;
+//                        מתג כבוי / הזמנה ישנה בלי vm – בלי שום שינוי. setOrderStatus ו-markOrderPaid מחזירים ar:{…} רק כשהופק מסמך.
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
+//                        15.11.2026 (החלטה 32, חלק א) – תוספות ב-pay, רק כשאינן ברירת מחדל: kind:'both' (פרטי אשראי וגם קישור), after:true (חיוב אחרי ליקוט),
+//                        mg (אחוז מרווח למסגרת, ברירת מחדל 10), chg:'auto' (נשמר בלבד – בלי חיבור לחברת הסליקה מתנהג כמו 'man'). עסק בלי השדות – כמו קודם
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
-//   private/pay        { link, mode, at, by }                                       – רק השרת (setBusinessPayLink, מנהל־על)
+//   private/pay        { link, mode, at, by, kind?, after?, mg?, chg? }             – רק השרת (setBusinessPayLink, מנהל־על)
+//   ord/{id}           + auth?: { amt, due, mg, via:'link'|'call', last4?, at, by } – "המסגרת אושרה" (orderAuth ב-ord-pick.js); paid.fr – המסגרת שמולה חויב
 //   private/payCred    { box, at, by }                                              – 2026-11-12: פרטי כניסה לאתר הסליקה, מוצפנים (CARD.seal, AAD 'private/payCred'). ב-ordcfg/main.pay רק cred:true/false
 //
 // מלאי בין סניפים (החלטת המשתמש 16:39, אפשרות ב): הזמנה בסניף A, שורה שמקורה בסניף B → ב-B יורד (xout), ב-A העברה נכנסת (xin)
@@ -31,6 +37,14 @@ const LD = require('./lib/line-discount');
 const { profitOf, ilDayStart } = require('./lib/ord-profit'); // 2026-11-12: רווחיות הזמנות
 const { defineSecret } = require('firebase-functions/params');
 const CARD = require('./lib/card');
+const AC = require('./lib/ar-calc'); // 14.11.2026: לקוח עסקי ומחירים (מחיר ברירת מחדל ללקוח, מינימום, סכומי מע"מ)
+const PM = require('./lib/prod-match'); // 14.11.2026 (שלב 2 חלק ב'): כינויים (PM.key) וחיפוש מוצר לרשימה חופשית (ordParse)
+const AI = require('./lib/sec-ai');
+const ARD = require('./lib/ar-doc'); // 15.11.2026 (שלב 4): חשבונית ב"נשלח" / "שולם" / "יצא" – רק כש-arcfg/main.on
+const AR_SEC = [defineSecret('WA_ACCESS_TOKEN')].concat(require('./lib/ar-send').MAIL_SECRETS); // שליחת המסמך ללקוח אחרי ההפקה (ar.js afterIssue)
+const { ORD_SYS } = require('./lib/prompts-ord');
+const { defineInt } = require('firebase-functions/params');
+const ORD_AI_DAILY = defineInt('ORD_AI_DAILY', { default: 30, description: 'זיהוי חכם של רשימת הזמנה (ordParse): מספר קריאות AI ביום לכל עסק (הנחה)' });
 // 2026-11-12: אותו סוד כמו ב-customers.js (defineSecret עם אותו שם – פרמטר אחד). פרטי הכניסה לאתר הסליקה מוצפנים בו.
 const CARD_ENC_KEY = defineSecret('CARD_ENC_KEY');
 const PAY_CRED = 'private/payCred';
@@ -47,6 +61,9 @@ const STATUSES = ['new', 'work', 'wait_pay', 'paid', 'out', 'done', 'cancel'];
 // מעברים ב-setOrderStatus. 'paid' רק דרך markOrderPaid, 'cancel' רק דרך cancelOrder, ביטול "שולם" רק unpayOrder (מנהל).
 const NEXT = { new: ['work', 'wait_pay'], work: ['wait_pay', 'new'], wait_pay: ['work'], paid: ['out', 'done'], out: ['done'], done: [], cancel: [] };
 const PAYABLE = ['new', 'work', 'wait_pay'];
+// 14.11.2026 (משוב סבב 2, החלטות 13–16): לקוח בשוטף (תנאי תשלום שאינם מיידי) – "נשלח" (בקשה status:'out' מ-work, או מ-wait_pay בלי shp)
+// נרשם כ-status:'wait_pay' + shp:{at,by}. הזמנה עם shp נעולה לעריכה, לא חוזרת ל"בטיפול", ואחרי "שולם" עוברת ישר ל-done. הזמנה בלי shp – כמו קודם.
+const SHIP_FROM = ['work', 'wait_pay'];
 const PAY_METHODS = ['link', 'phone', 'cash', 'transfer', 'other'];
 const MAX_ITEMS = 50;
 const MAX_IMPORT = 200;
@@ -218,9 +235,11 @@ function prodClean(w, input) {
 }
 // כתיבת מוצר בתוך טרנזקציה (c = prodClean). o = הנתונים הקיימים (עדכון, עם רישום שינויים ב-stockLog why:'prod') או null (מוצר חדש).
 // extra = שדות נוספים לאותה כתיבה (q למוצר חדש / q.<סניף> בעדכון). עלות וסיטונאי – רק כשנשלחו.
+// 14.11.2026 (שלב 2 חלק ב', תשובה 47): שינוי שם – השם הקודם נשמר בכינויים (al), בלי כפילות (PM.key). מי שקובע al בעצמו (piFinish) – לא נוגעים.
 function prodPut(tx, db, w, id, o, c, now, extra) {
   const ref = db.doc('prod/' + id);
   if (o) {
+    if (o.name && o.name !== c.name && !(extra && 'al' in extra)) extra = Object.assign({}, extra, { al: alJoin(o.al, [o.name], c.name) });
     const ch = [];
     if (o.name !== c.name) ch.push(`שם: ${String(o.name || '').slice(0, 60)} → ${c.name}`);
     if (o.price !== c.price) ch.push(`מחיר: ₪${o.price} → ₪${c.price}`);
@@ -236,6 +255,18 @@ function prodPut(tx, db, w, id, o, c, now, extra) {
   if (c.wp != null) tx.set(db.doc(`prod/${id}/p/ws`), { wp: c.wp, at: now, by: w.uid });
   if (c.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: c.cost, at: now, by: w.uid });
 }
+// כינויים (prod.al): השם החדש לא נשמר ככינוי, כינוי ששווה לשם החדש יוצא, השוואה אחרי נרמול (כמו alMerge ב-pricing.js). תקרה טכנית 200 (הנחה)
+const AL_MAX = 200;
+function alJoin(cur, add, name) {
+  const seen = new Set([PM.key(name)]), out = [];
+  for (const a of (Array.isArray(cur) ? cur : []).concat(add || [])) {
+    if (typeof a !== 'string') continue;
+    const v = a.trim().slice(0, 60), k = PM.key(v);
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push(v);
+  }
+  return out.slice(-AL_MAX);
+}
 // saveProduct({ id?, name, price, barcode?, on?, cost?, br?, qty? }) – מוצר חדש: מנהל או עובד עם ord (עם כמות פתיחה לסניף).
 // עריכת מוצר קיים (שם/מחיר/ברקוד/זמין) – מנהל או עובד עם ord (החלטה 18:56), נרשם ב-stockLog (why:'prod', delta 0).
 // עלות וסיטונאי – גם עובד עם ord (החלטות 00:12, 00:13). cto (רק קרטונים סגורים) – 12.11.2026, תוספתי.
@@ -249,11 +280,14 @@ async function saveProduct(request) {
   if (input.id != null) {
     const id = idOf(input.id, 'מוצר');
     const ref = db.doc('prod/' + id);
+    const cp0 = await cpPre(db, [id]); // 14.11.2026: התראה למנהל אם המחירון השתנה ויש מחיר קבוע ללקוח
     await db.runTransaction(async (tx) => {
       const s = await tx.get(ref);
       if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
       prodPut(tx, db, w, id, s.data() || {}, c, now);
     });
+    await cpAlert(db, w, cp0);
+    ixDrop(w);
     return { ok: true, id };
   }
   const reqId = reqIdOf(input);
@@ -270,10 +304,12 @@ async function saveProduct(request) {
     prodPut(tx, db, w, id, null, c, now, { q });
     if (br && qty) tx.set(stockRef(db), { prod: id, name: c.name, br, delta: qty, why: 'in', by: w.uid, at: now });
   });
+  ixDrop(w);
   return { ok: true, id, dup };
 }
 
-// stockIn({ br, lines:[{pid, qty}], reqId }) – הכנסת מלאי (הוספת כמות), כמה שורות בבת אחת. מנהל או עובד עם ord בסניף שלו.
+// stockIn({ br, lines:[{pid, qty, nm?}], reqId }) – הכנסת מלאי (הוספת כמות), כמה שורות בבת אחת. מנהל או עובד עם ord בסניף שלו.
+// nm (14.11.2026, תשובה 46) = שם חדש למוצר: הופך לשם הראשי, והשם הקודם נשמר בכינויים (al).
 async function stockIn(request) {
   const w = await who(request);
   const input = inputObject(request);
@@ -281,12 +317,13 @@ async function stockIn(request) {
   const reqId = reqIdOf(input);
   const br = brOf(w, input.br);
   if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > MAX_ITEMS) throw bad('bad-lines', `שורות: 1 עד ${MAX_ITEMS}`);
-  const sum = new Map();
+  const sum = new Map(), nms = new Map();
   for (const l of input.lines) {
     if (!l || typeof l !== 'object' || Array.isArray(l)) throw bad('bad-lines', 'שורה לא תקינה');
-    onlyKeys(l, ['pid', 'qty'], 'שורה');
+    onlyKeys(l, ['pid', 'qty', 'nm'], 'שורה');
     const pid = idOf(l.pid, 'מוצר');
     sum.set(pid, r3((sum.get(pid) || 0) + qtyOf(l.qty)));
+    if (l.nm != null && l.nm !== '') nms.set(pid, txt(l.nm, 60, 'bad-name', 'שם המוצר', true));
   }
   const db = T.tdb();
   const mark = db.doc('ordcfg/req_' + reqId);
@@ -302,12 +339,16 @@ async function stockIn(request) {
     snaps.forEach((s) => {
       const d = sum.get(s.id);
       const nq = r3(qOf(s.data(), br) + d);
-      tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now);
-      tx.set(stockRef(db), { prod: s.id, name: s.get('name') || '', br, delta: d, why: 'in', by: w.uid, at: now });
+      const o = s.data() || {}, nm = nms.get(s.id), ren = !!nm && nm !== o.name;
+      if (ren) tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now, 'name', nm, 'al', alJoin(o.al, [o.name], nm));
+      else tx.update(s.ref, new FieldPath('q', br), nq, 'upd', now);
+      if (ren) tx.set(stockRef(db), { prod: s.id, name: nm, br: NB, delta: 0, why: 'prod', note: `שם: ${String(o.name || '').slice(0, 60)} → ${nm}`, by: w.uid, at: now });
+      tx.set(stockRef(db), { prod: s.id, name: ren ? nm : (s.get('name') || ''), br, delta: d, why: 'in', by: w.uid, at: now });
       out[s.id] = nq;
     });
     tx.set(mark, { t: now, by: w.uid, k: 'stockIn' });
   });
+  if (nms.size) ixDrop(w);
   return { ok: true, dup, q: out };
 }
 
@@ -842,20 +883,148 @@ function ordAccess(w, d) {
   if (d.br && d.br !== NB && !canBr(w, d.br)) throw deny('foreign-br', 'אין לך הרשאה להזמנה של סניף אחר');
 }
 
+// =====================================================================================
+// 14.11.2026 (משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1): מחיר ברירת מחדל ללקוח ומינימום מחיר – נאכף כאן, בשרת.
+//   ordcfg/price  { pct?, pp?, cat?:{<catId>:X}, disc?, upd }  – מגבלות המחיר (מנהל, setPriceCfg). המסמך קיים = המגבלה פעילה; חסר = בלי מינימום (כמו קודם).
+//   cprice/{custId}_{pid}  { cust, pid, p?, n, vm, mg?, h:[{f,t,by,at}], by, at, del? } – מחיר קבוע ללקוח (customers.js). p חסר = נמחק (ההיסטוריה נשמרת).
+//     mg (סבב 3, החלטה 8) = true כשמנהל שמר – מאושר לעובד גם מתחת למינימום. חסר (רשומה ישנה) / false = עובד שמר – נבדק כרגיל.
+//   aralert/p_{pid}  { t:'cp', pid, n, from, to, cnt, custs, st:'new'|'done', at, by } – המחירון השתנה ויש ללקוחות מחיר קבוע (מנהל).
+//   ord (+) { vm:'ex'|'inc', vr, net, vat, gross, disc? } – הזמנה חדשה: vm לפי סוג הלקוח, vr = אחוז המע"מ, סכומים בשקלים. total לא משתנה (סכום השורות).
+// סדר המחיר לשורה בלי מחיר: מחיר קבוע ← סיטונאי ← רגיל (לקוח עסקי בלי סיטונאי: רגיל ÷ (1+מע"מ), החלטה 7). מנהל עוקף את המינימום.
+// =====================================================================================
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+async function priceCtx(tx, db, custId, pids, cfgMain) {
+  const ids = [...new Set(pids)];
+  const head = [db.doc('ordcfg/price')].concat(custId ? [db.doc('cust/' + custId)] : []);
+  const tail = ids.flatMap((p) => [db.doc(`prod/${p}/p/ws`)].concat(custId ? [db.doc(`cprice/${custId}_${p}`)] : []));
+  const all = await tx.getAll(...head, ...tail);
+  const cfg = all[0].exists ? all[0].data() : null;
+  const cs = custId ? all[1] : null;
+  const biz = !!(cs && cs.exists && cs.get('wholesale') === true);
+  const wp = new Map(), cp = new Map();
+  const per = custId ? 2 : 1;
+  ids.forEach((p, i) => {
+    const w0 = all[head.length + i * per], c0 = custId ? all[head.length + i * per + 1] : null;
+    if (w0.exists && isNum(w0.get('wp'))) wp.set(p, w0.get('wp'));
+    if (c0 && c0.exists && isNum(c0.get('p'))) cp.set(p, { p: c0.get('p'), vm: c0.get('vm'), mg: c0.get('mg') === true });
+  });
+  const v = cfgMain && cfgMain.exists ? cfgMain.get('vat') : null;
+  return { cfg, biz, blk: !!(cs && cs.exists && cs.get('blk') === true), wp, cp, vm: biz ? 'ex' : 'inc', vat: isNum(v) && v >= 0 && v <= 100 ? v : AC.VAT0 };
+}
+// מחיר קבוע ביחידה של ההזמנה (סבב 2, ליקוי 5): נשמר עם vm; לקוח שעבר מפרטי לעסקי (או להפך) – המרה לפי אחוז המע"מ
+const cpOf = (pc, pid) => { const x = pc.cp.get(pid); return x ? AC.cpConv(x.p, x.vm, pc.vm, pc.vat) : undefined; };
+// סבב 3 (החלטה 8): מחיר קבוע שמנהל שמר (mg) – לבדיקת העובד; אחר – undefined
+const mcpOf = (pc, pid) => { const x = pc.cp.get(pid); return x && x.mg ? cpOf(pc, pid) : undefined; };
+// סבב 2 (ליקוי 4): שמות (מנורמלים, ProdMatch.key) של מוצרים קיימים שתואמים לשורות החופשיות – לעובד בלבד, ורק כשיש שורה חופשית.
+// קריאה אחת של שם וכינויים (select), לפני הטרנזקציה. שורה חופשית אחרת (משלוח וכד') – כמו קודם.
+// סבב 3: רק ללקוח עסקי (לקוח פרטי – כמו לפני המשימה; התוכנית לא דורשת). לכן קודם בודקים את הלקוח (קריאה אחת), ורק ללקוח עסקי קוראים את המוצרים.
+//   custId – ביצירה; ordRef – בעריכה (הלקוח ו-vm של ההזמנה). ההחלטה הסופית בטרנזקציה: freeCheck רק כש-vm = 'ex'.
+//   לא שאילתה ממוקדת: ההתאמה אחרי נרמול (PM.key), ואין במוצר שדה מנורמל לשאילתה. לא המטמון ixOf: הוא מסנן מוצרים כבויים ומתעדכן רק במופע שכתב (עד דקה).
+async function freeHits(db, w, raw, custId, ordRef) {
+  if (w.role === 'manager' || !raw) return null;
+  const ks = new Set(raw.filter((x) => !x.pid).map((x) => PM.key(x.n)).filter(Boolean));
+  if (!ks.size) return null;
+  let vm = null;
+  if (ordRef) { const o = await ordRef.get(); if (!o.exists) return null; custId = typeof o.get('custId') === 'string' && ID_RE.test(o.get('custId')) ? o.get('custId') : ''; vm = o.get('vm'); }
+  if (vm !== 'ex') { if (!custId) return null; const c = await db.doc('cust/' + custId).get(); if (!c.exists || c.get('wholesale') !== true) return null; }
+  const hit = new Set();
+  (await db.collection('prod').select('name', 'al').get()).docs.forEach((d) => {
+    for (const n of [d.get('name')].concat(Array.isArray(d.get('al')) ? d.get('al') : [])) { const k = typeof n === 'string' ? PM.key(n) : ''; if (k && ks.has(k)) hit.add(k); }
+  });
+  return hit.size ? hit : null;
+}
+function freeCheck(raw, hit, old) {
+  if (!hit) return;
+  const keep = new Set((old || []).filter((x) => x && !x.pid).map((x) => x.n + '|' + x.price + '|' + x.qty));
+  for (const x of raw) if (!x.pid && hit.has(PM.key(x.n)) && !keep.has(x.n + '|' + x.price + '|' + x.qty)) throw bad('use-stock', `"${x.n}": המוצר קיים במלאי – בחר את המוצר מהמלאי (לא שורה חופשית)`);
+}
+// לכל שורת מוצר: מחיר ברירת המחדל (שורה שנשלחה בלי מחיר מקבלת אותו), בדיקת מינימום לעובד, והערות "מחיר שונה מברירת המחדל" ליומן (הבהרה 29).
+// keep = "pid|מחיר" של שורות שלא השתנו בעריכה – לא נבדקות שוב (כדי לא לחסום הזמנה קיימת כשהעלות עלתה).
+function priceRun(w, items, raw, pc, pd, br, costs, keep) {
+  const notes = [];
+  items.forEach((it, i) => {
+    if (!it.pid) return;
+    const p = pd.get(it.pid) || {};
+    const base = AC.defPrice({ wp: pc.wp.get(it.pid), price: brPrice(p, br), vm: pc.vm, vat: pc.vat });
+    const def = AC.defPrice({ cp: cpOf(pc, it.pid), wp: pc.wp.get(it.pid), price: brPrice(p, br), vm: pc.vm, vat: pc.vat });
+    if (raw && raw[i] && raw[i].price == null) it.price = def;
+    if (AC.ag(it.price) !== AC.ag(def)) notes.push(`${it.n}: ₪${def} → ₪${it.price}`);
+    if (w.role === 'manager' || (keep && keep.has(it.pid + '|' + it.price + '|' + it.qty))) return;
+    // סבב 2 (ליקויים 2, 3): מחיר קבוע לא מכשיר את עצמו (בודקים מול base); לקוח עסקי – לא מתחת לעלות גם בלי מגבלה
+    // סבב 3 (החלטה 8): mcp = מחיר קבוע שמנהל שמר – מאושר לעובד
+    const r = AC.staffOk({ price: it.price, base, mcp: mcpOf(pc, it.pid), cost: costs.get(it.pid), vm: pc.vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, pc.vm === 'ex', p.cat, p.sub), on: !!pc.cfg, biz: pc.vm === 'ex' });
+    if (r.ok) return;
+    const why = r.why === 'zero' ? ' – אי אפשר לתת במחיר 0' : r.why === 'below-cost' ? ' – מתחת לעלות' : r.why === 'no-cost' ? ` – למוצר אין עלות, אפשר רק ₪${r.min} ומעלה` : ` – המינימום ₪${r.min}`;
+    throw new HttpsError('invalid-argument', `"${it.n}": אין אפשרות לתת במחיר הזה${why}`, { reason: 'price-floor', why: r.why, pid: it.pid, min: r.min });
+  });
+  return notes;
+}
+// הנחה כללית על ההזמנה (27, 28): אחוז 0–100 (עד שתי ספרות), מנהל בלבד, עד ordcfg/price.disc אם הוגדר. 0 / null = בלי הנחה
+function discIn(v) {
+  if (v === undefined) return undefined;
+  if (v === null || v === 0) return 0;
+  if (!isNum(v) || v < 0 || v > 100 || Math.abs(Math.round(v * 100) - v * 100) > 1e-6) throw bad('bad-disc', 'הנחה כללית: אחוז בין 0 ל-100');
+  return v;
+}
+function discOk(w, disc, pc) {
+  if (!disc) return;
+  if (w.role !== 'manager') throw deny('manager-only', 'הנחה כללית על ההזמנה – מנהל בלבד');
+  if (pc.cfg && isNum(pc.cfg.disc) && disc > pc.cfg.disc) throw bad('disc-limit', `הנחה כללית: עד ${pc.cfg.disc}%`);
+}
+const sums = (total, vm, vr, disc) => { const t = AC.totals(total, vm, vr, disc); return { net: t.net, vat: t.vat, gross: t.gross }; };
+// 14.11.2026 (תשובה 24): המחירון השתנה (סיטונאי / מחיר רגיל) ויש ללקוחות מחיר קבוע למוצר → התראה למנהל (aralert/p_{pid}, נדרסת בכל שינוי).
+// cpPre – קריאה לפני הכתיבה; cpAlert – אחריה, משווה ויוצר התראה. כישלון לא מפיל את הפעולה עצמה (רק נרשם ביומן).
+async function cpPre(db, pids) {
+  const ids = [...new Set(pids)].filter((p) => typeof p === 'string' && ID_RE.test(p)).slice(0, 200);
+  const m = new Map();
+  if (!ids.length) return m;
+  const s = await db.getAll(...ids.flatMap((p) => [db.doc('prod/' + p), db.doc(`prod/${p}/p/ws`)]));
+  ids.forEach((p, i) => { const a = s[2 * i], b = s[2 * i + 1]; m.set(p, { price: a.exists && isNum(a.get('price')) ? a.get('price') : null, wp: b.exists && isNum(b.get('wp')) ? b.get('wp') : null, n: a.exists ? String(a.get('name') || '') : '' }); });
+  return m;
+}
+async function cpAlert(db, w, pre) {
+  try {
+    if (!pre || !pre.size) return 0;
+    const now = await cpPre(db, [...pre.keys()]);
+    let n = 0;
+    for (const [pid, a] of pre) {
+      const b = now.get(pid);
+      if (!b || (a.price === b.price && a.wp === b.wp)) continue;
+      const q = await db.collection('cprice').where('pid', '==', pid).limit(100).get();
+      const L = q.docs.filter((x) => isNum(x.get('p')));
+      if (!L.length) continue;
+      await db.doc('aralert/p_' + pid).set({ t: 'cp', pid, n: b.n.slice(0, 80), from: { price: a.price, wp: a.wp }, to: { price: b.price, wp: b.wp }, cnt: L.length, custs: L.slice(0, 20).map((x) => x.get('cust')), st: 'new', at: Date.now(), by: w.uid });
+      n++;
+    }
+    return n;
+  } catch (e) {
+    logger.warn('orders: cpAlert failed', { name: e && e.name, code: e && e.code });
+    return 0;
+  }
+}
+
 // createOrder({ reqId, br?, cust, items, note? }) → { id, no, total, warn: [{pid, br, q, n}] }
 async function createOrder(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['reqId', 'br', 'cust', 'custId', 'items', 'note', 'total', 'cell']); // custId = לקוח מקושר (cust/{id}); total נשלח? מתעלמים – השרת מחשב
+  onlyKeys(input, ['reqId', 'br', 'cust', 'custId', 'items', 'note', 'total', 'cell', 'disc']); // custId = לקוח מקושר (cust/{id}); total נשלח? מתעלמים – השרת מחשב
   const reqId = reqIdOf(input);
   const br = brOf(w, input.br);
   const cust = cleanCust(input.cust);
   const raw = rawItems(input.items);
   const note = input.note == null ? '' : txt(input.note, 300, 'bad-note', 'הערה');
   const custId = input.custId == null || input.custId === '' ? '' : idOf(input.custId, 'לקוח');
+  const disc = discIn(input.disc);
   if (input.cell !== undefined) needCell(w);
-  const db = T.tdb();
+  return createCore(T.tdb(), w, { reqId, br, cust, raw, note, custId, input, disc });
+}
+// 15.11.2026 (המזכירה, שלב ג/6): גוף הטרנזקציה של createOrder – בלי בדיקת הרשאות ובלי ניקוי קלט (הקורא אחראי לשניהם).
+// w = היוצר: { uid, name, branches, activeBr, mine, biz? } (by/byName בהזמנה). p = { reqId, br, cust, raw, note, custId, input, src?, sec? }.
+// לא נחשף כ-callable/HTTP – רק דרך _core (כמו saveCore ב-customers.js). createOrder עצמה לא השתנתה: src:'staff', בלי sec.
+async function createCore(db, w, p) {
+  const { reqId, br, cust, raw, note, custId, input, disc } = p;
   const ref = db.doc('ord/o' + reqId);
+  const fh = await freeHits(db, w, raw, custId, null);
   const seq = db.doc('ordcfg/seq');
   const cfg = db.doc('ordcfg/main');
   let out = null;
@@ -866,10 +1035,15 @@ async function createOrder(request) {
     if (wb.exists && wb.get('cust') !== custId) throw deny('ws-not-linked', 'מחיר הסיטונאי נטען ללקוח אחר. בחרו שוב את הלקוח');
     const prods = await loadProds(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
     const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
+    const pc = await priceCtx(tx, db, custId, raw.filter((x) => x.pid).map((x) => x.pid), c);
+    if (pc.blk && w.role !== 'manager') throw deny('cust-blocked', 'הלקוח חסום. רק מנהל יכול לפתוח לו הזמנה');
+    discOk(w, disc, pc);
     const { cell, plans } = await prepCell(tx, db, w, input, cust);
     const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[br] : null;
     const pd = plain(prods);
     const { items } = resolveItems(w, br, raw, pd, src);
+    freeCheck(raw, pc.vm === 'ex' ? fh : null, null);
+    const pnotes = priceRun(w, items, raw, pc, pd, br, costs, null);
     snapCosts(items, costs);
     cartons(items, pd, await isWs(tx, db, custId), null, cell);
     for (const it of items) if (it.pid && prods.get(it.pid).get('on') === false) throw pre('prod-off', `המוצר "${it.n}" לא זמין`);
@@ -880,14 +1054,16 @@ async function createOrder(request) {
     const now = Date.now();
     const warn = [];
     applyMoves(tx, db, w, prods, moves(br, items), { ord: ref.id, no }, warn, reqId);
-    const doc = { no, src: 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now };
+    const doc = Object.assign({ no, src: p.src || 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now }, { vm: pc.vm, vr: pc.vat }, sums(total, pc.vm, pc.vat, disc));
+    if (disc) doc.disc = disc;
+    if (p.sec) doc.sec = p.sec;
     if (note) doc.note = note;
     if (custId) doc.custId = custId;
     if (cell && cell.n + Object.keys(cell).length > 2) doc.cell = cell;
     tx.set(ref, doc);
     tx.set(seq, { n: no });
-    tx.set(logRef(db, ref.id), logData(w, 'create', `₪${total}${doc.cell && doc.cell.n ? ` · ${doc.cell.n} קווים לניוד${doc.cell.ack ? ' (אושר למרות ניוד קודם)' : ''}` : ''}`));
-    out = Object.assign({ id: ref.id, no, total, dup: false, warn }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
+    tx.set(logRef(db, ref.id), logData(w, 'create', `₪${total}${doc.cell && doc.cell.n ? ` · ${doc.cell.n} קווים לניוד${doc.cell.ack ? ' (אושר למרות ניוד קודם)' : ''}` : ''}${disc ? ` · הנחה ${disc}%` : ''}${pnotes.length ? ' · מחיר שונה: ' + pnotes.join('; ') : ''}`));
+    out = Object.assign({ id: ref.id, no, total, gross: doc.gross, dup: false, warn }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
   });
   return out;
 }
@@ -896,20 +1072,31 @@ async function createOrder(request) {
 async function updateOrder(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'items', 'cust', 'note', 'total', 'cell']);
+  onlyKeys(input, ['id', 'items', 'cust', 'note', 'total', 'cell', 'disc', 'ver']); // ver (משוב סבב 3, רשות): ord.upd שהמסך מכיר – השתנתה בינתיים → stale (מסך הליקוט)
   const id = idOf(input.id, 'הזמנה');
+  if (input.ver !== undefined && (typeof input.ver !== 'number' || !Number.isFinite(input.ver))) throw bad('bad-field', 'ver לא תקין');
+  const disc = discIn(input.disc);
   const raw = input.items === undefined ? null : rawItems(input.items);
   const cust = input.cust === undefined ? null : cleanCust(input.cust);
   const note = input.note === undefined ? null : txt(input.note, 300, 'bad-note', 'הערה');
   if (input.cell !== undefined) needCell(w);
   const db = T.tdb();
   const ref = db.doc('ord/' + id);
+  const fh = await freeHits(db, w, raw, '', ref);
   let out = null;
   await db.runTransaction(async (tx) => {
     const [s, c] = await tx.getAll(ref, db.doc('ordcfg/main'));
     ordAccess(w, s.exists ? s.data() : null);
     const d = s.data();
     if (!PAYABLE.includes(d.status)) throw pre('locked', d.status === 'cancel' ? 'ההזמנה בוטלה' : 'ההזמנה שולמה – אי אפשר לשנות פריטים או סכום');
+    if (d.shp) throw pre('locked', 'ההזמנה נשלחה – אי אפשר לשנות פריטים, סכום או פרטים. תיקון – בזיכוי'); // משוב סבב 2 (החלטה 16)
+    if (d.inv) throw pre('locked', 'להזמנה יש חשבונית – אי אפשר לשנות אותה. תיקון – בזיכוי'); // שלב 4
+    if (input.ver !== undefined && d.upd !== input.ver) throw pre('stale', 'ההזמנה השתנתה בינתיים. טענו אותה מחדש ונסו שוב');
+    // 14.11.2026: מחיר ברירת מחדל ומינימום – כמו ביצירה. הזמנה עם vm שומרת את אופן המחירים ואחוז המע"מ שלה; הזמנה ישנה בלי vm – בלי שדות חדשים
+    const prc = await priceCtx(tx, db, typeof d.custId === 'string' && ID_RE.test(d.custId) ? d.custId : '', raw ? raw.filter((x) => x.pid).map((x) => x.pid) : [], c);
+    if (d.vm === 'ex' || d.vm === 'inc') prc.vm = d.vm;
+    if (isNum(d.vr)) prc.vat = d.vr;
+    if (disc !== undefined && disc !== (d.disc || 0)) { if (!d.vm) throw bad('no-vm', 'הנחה כללית – רק בהזמנה שנוצרה מהגרסה הזו ואילך'); discOk(w, disc, prc); if (!disc && w.role !== 'manager') throw deny('manager-only', 'הנחה כללית על ההזמנה – מנהל בלבד'); }
     const pc0 = await prepCell(tx, db, w, input, cust || d.cust || {}, d.cell && d.cell.calc ? d.cell : null);
     let cell = pc0.cell;
     const upd = { upd: Date.now() };
@@ -922,8 +1109,11 @@ async function updateOrder(request) {
       const src = c.exists && c.get('src') && typeof c.get('src') === 'object' ? c.get('src')[d.br] : null;
       // שורה קיימת שנשארת עם אותו מוצר – שומרת את סניף המקור שלה, אלא אם נשלח אחר
       const pd = plain(prods);
+      const costs = await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid));
       const { items } = resolveItems(w, d.br, raw, pd, src);
-      snapCosts(items, await loadCosts(tx, db, raw.filter((x) => x.pid).map((x) => x.pid)), oldItems);
+      freeCheck(raw, prc.vm === 'ex' ? fh : null, oldItems);
+      priceRun(w, items, raw, prc, pd, d.br, costs, new Set(oldItems.filter((x) => x && x.pid).map((x) => x.pid + '|' + x.price + '|' + x.qty)));
+      snapCosts(items, costs, oldItems);
       cartons(items, pd, await isWs(tx, db, d.custId), oldItems, cell !== undefined ? cell : d.cell, d.cell);
       const mv = invert(moves(d.br, oldItems.filter((x) => !x.pid || prods.has(x.pid))), 'edit').concat(moves(d.br, items).map((x) => Object.assign(x, { why: x.why === 'order' ? 'order' : x.why })));
       applyMoves(tx, db, w, prods, mv, { ord: id, no: d.no }, warn);
@@ -950,6 +1140,12 @@ async function updateOrder(request) {
       if (upd.total !== undefined && upd.total !== d.total) notes.push(`סכום ₪${d.total} → ₪${upd.total}`);
       out = Object.assign(out || {}, { total: ct.total }, ct.calc ? { calc: ct.calc, hint: ct.hint || null } : {});
     }
+    if (d.vm && (upd.total !== undefined || (disc !== undefined && disc !== (d.disc || 0)))) {
+      const dd = disc !== undefined ? disc : d.disc;
+      Object.assign(upd, sums(upd.total !== undefined ? upd.total : d.total, prc.vm, prc.vat, dd));
+      if (disc !== undefined && disc !== (d.disc || 0)) { upd.disc = disc ? disc : FV().delete(); notes.push(`הנחה ${d.disc || 0}% → ${disc}%`); }
+      out = Object.assign(out || {}, { gross: upd.gross });
+    }
     if (cust) upd.cust = cust;
     if (note !== null) upd.note = note;
     if (cell !== undefined) { upd.cell = cell && cell.n + Object.keys(cell).length > 2 ? cell : FV().delete(); notes.push('פרטי ניוד'); }
@@ -963,32 +1159,88 @@ async function updateOrder(request) {
 async function setOrderStatus(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'status']);
+  onlyKeys(input, ['id', 'status', 'force']); // force (משוב סבב 3): מנהל עוקף "הלקוח עוד לא אישר את השינויים"
   const id = idOf(input.id, 'הזמנה');
   const st = input.status;
+  if (input.force !== undefined && input.force !== true) throw bad('bad-field', 'force לא תקין');
   if (!STATUSES.includes(st)) throw bad('bad-status', 'סטטוס לא מוכר');
   const db = T.tdb();
   const ref = db.doc('ord/' + id);
+  let res = null;
   await db.runTransaction(async (tx) => {
+    res = null;
     const s = await tx.get(ref);
     ordAccess(w, s.exists ? s.data() : null);
     const cur = s.get('status');
+    const shp = s.get('shp');
+    // משוב סבב 2: "נשלח" ללקוח בשוטף – התנאים נקראים מהלקוח בתוך הטרנזקציה (לא מהמכשיר)
+    if (st === 'out' && cur === 'wait_pay' && shp) { res = { ok: true, status: 'wait_pay', dup: true }; return; }
+    // משוב סבב 3 (סעיף 6, החלטה 20): יש שינויים בליקוט שהלקוח עוד לא אישר (pk.st 'chg', ord-pick.js) – אין "נשלח" / "ממתין לתשלום" / "יצא" / "הושלם".
+    // מנהל עוקף רק עם force:true (נרשם ביומן). הזמנה בלי pk או עם pk.st 'ok' – כמו קודם.
+    const pk = s.get('pk');
+    const pkHold = !!(pk && pk.st === 'chg' && ['out', 'wait_pay', 'done'].includes(st) && st !== cur);
+    if (pkHold && !(w.role === 'manager' && input.force === true)) throw pre('pick-chg', 'יש שינויים במוצרים שהלקוח עוד לא אישר. התקשרו ללקוח וסמנו "הלקוח אישר את השינויים"');
+    const forced = () => { if (pkHold) tx.set(logRef(db, id), logData(w, 'pickforce', 'מנהל עקף אישור לקוח לשינויים')); }; // אחרי כל הקריאות (טרנזקציה)
+    if (st === 'out' && SHIP_FROM.includes(cur) && !shp) {
+      const cid = s.get('custId');
+      const cs = typeof cid === 'string' && ID_RE.test(cid) ? await tx.get(db.doc('cust/' + cid)) : null;
+      if (cs && cs.exists && AC.termsOfCust(cs.data()).b !== 'imm') {
+        const ar = await ARD.planOrder(tx, db, w, s, 'ship'); // שלב 4 (החלטה 22): חשבונית מס ללקוח בשוטף – באותה טרנזקציה
+        const now = Date.now();
+        tx.update(ref, { status: 'wait_pay', shp: { at: now, by: w.uid }, upd: now });
+        tx.set(logRef(db, id), logData(w, 'ship', cur + '→wait_pay'));
+        forced();
+        res = { ok: true, status: 'wait_pay' };
+        arDoc(tx, db, w, id, ar, res);
+        return;
+      }
+    }
     if (!(NEXT[cur] || []).includes(st)) throw pre('bad-status', 'אי אפשר לעבור מהסטטוס הנוכחי לסטטוס הזה');
+    if (shp && st === 'work') throw pre('locked', 'ההזמנה נשלחה – אי אפשר להחזיר אותה לטיפול');
+    const ar = cur === 'paid' && (st === 'out' || st === 'done') ? await ARD.planOrder(tx, db, w, s, 'out') : null; // שלב 4: לקוח עסקי ששילם – חשבונית מס קבלה כשהסחורה יוצאת
     tx.update(ref, { status: st, upd: Date.now() });
     tx.set(logRef(db, id), logData(w, 'status', cur + '→' + st));
+    forced();
+    if (ar) { res = { ok: true, status: st }; arDoc(tx, db, w, id, ar, res); }
   });
-  return { ok: true, status: st };
+  await arAfter(w, res);
+  return res || { ok: true, status: st };
+}
+// שלב 4: כתיבת המסמך שתוכנן (planOrder) באותה טרנזקציה, ורישום ביומן ההזמנה. res.ar – רק כשיש מסמך (מתג כבוי – התשובה כמו קודם)
+function arDoc(tx, db, w, id, ar, res) {
+  if (!ar) return;
+  const r = ar.write();
+  if (!r) return;
+  res.ar = r;
+  if (r.id) tx.set(logRef(db, id), logData(w, 'ardoc', `${{ inv: 'חשבונית מס', ir: 'חשבונית מס קבלה', rc: 'קבלה' }[r.t] || r.t} #${r.no}${r.draft ? ' (טיוטה)' : ''}`));
+}
+// אחרי הטרנזקציה: קובץ PDF ושליחה ללקוח (ar.js). כשל כאן לא מבטל את המסמך ולא את הפעולה – המסמך זמין להפקה ולשליחה מהכרטיס
+async function arAfter(w, res) {
+  if (!res || !res.ar || !res.ar.id) return;
+  try { res.ar.sent = await require('./ar')._core.afterIssue(w, res.ar.id); } catch (e) { logger.error('orders: ar after failed', { name: e && e.name, code: e && e.code, msg: String(e && e.message).slice(0, 200) }); }
 }
 
 const LL_PRE = 'o_'; // מזהה דטרמיניסטי ל-lineLog: o_<ordId>_<מספר הקו>
 const portK = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|');
-// markOrderPaid({ id, method, last4?, conf?, note? }) – "שולם" ידני. אחרי זה הסכום והפריטים נעולים.
+// החלטה 32, תיקון סבב 1 (ליקוי 2): חותמת ההזמנה בסיום הליקוט – pk.fin = { due: הסכום לתשלום, k: הפריטים (שם, כמות, מחיר, מוצר) }.
+// נכתבת כש-pk.st נהיה 'ok' (orderPick בלי שינויים / orderPickOk). "חויב" (amt) על הזמנה שהשתנתה מאז → pick-old עד ליקוט מחדש.
+// אותו חישוב בדיוק במסך (orders-staff.js, pkKey). הזמנה ישנה בלי pk.fin – בלי בדיקה הזו (רק pk.st, כמו קודם)
+const pickKey = (items) => JSON.stringify((Array.isArray(items) ? items : []).map((x) => [String((x && x.n) || '').slice(0, 80), x ? x.qty : null, x ? x.price : null, (x && x.pid) || '']));
+const pickFin = (d) => ({ due: AC.payOf(d), k: pickKey(d && d.items) });
+// markOrderPaid({ id, method, last4?, conf?, note?, amt? }) – "שולם" ידני. אחרי זה הסכום והפריטים נעולים.
+// amt (החלטה 32, חלק א – "חויב" מול מסגרת): רק method 'link', רק אחרי ליקוט (pk.st 'ok') ומסגרת מאושרת (ord.auth), רק הסכום הסופי (אחרת amt-mismatch),
+// ורק בתוך המסגרת (אחרת over-auth – קישור חדש ללקוח). בלי amt – כמו קודם.
+// תיקון סבב 1: עסק עם "חיוב אחרי ליקוט" (private/pay.after) – method 'link' בלי amt נדחה (use-charge); שאר האמצעים כמו קודם.
+// הזמנה שהשתנתה אחרי סיום הליקוט (pk.fin) – amt נדחה (pick-old) עד ליקוט מחדש.
 async function markOrderPaid(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'method', 'last4', 'conf', 'note']);
+  onlyKeys(input, ['id', 'method', 'last4', 'conf', 'note', 'proofId', 'amt']); // proofId (שלב 4): אסמכתא לקבלה על חשבונית פתוחה (עובד – חובה, החלטה 25)
   const id = idOf(input.id, 'הזמנה');
   if (!PAY_METHODS.includes(input.method)) throw bad('bad-method', 'בחרו אמצעי תשלום');
+  const amtIn = input.amt === undefined ? undefined : money(input.amt, 'סכום החיוב');
+  if (amtIn !== undefined && input.method !== 'link') throw bad('bad-method', 'חיוב מול מסגרת – בקישור לתשלום בלבד');
+  if (input.proofId !== undefined && (typeof input.proofId !== 'string' || !/^[A-Za-z0-9_-]{8,40}$/.test(input.proofId))) throw bad('bad-proof', 'אסמכתא לא תקינה');
   const paid = { method: input.method };
   if (input.last4 != null && input.last4 !== '') {
     if (typeof input.last4 !== 'string' || !/^\d{4}$/.test(input.last4)) throw bad('bad-last4', '4 ספרות אחרונות: בדיוק 4 ספרות');
@@ -1009,8 +1261,32 @@ async function markOrderPaid(request) {
     const cur = s.get('status');
     if (cur === 'paid' || cur === 'out' || cur === 'done') { res = { ok: true, dup: true }; return; }
     if (!PAYABLE.includes(cur)) throw pre('bad-status', 'ההזמנה בוטלה');
+    if (amtIn === undefined && paid.method === 'link' && pp.exists && pp.get('after') === true) throw pre('use-charge', "בעסק הזה החיוב בקישור נעשה דרך 'חויב' אחרי הליקוט");
+    // החלטה 36: עסק עם "חיוב אחרי ליקוט" – כל רישום תשלום (גם מזומן/העברה/טלפון/אחר) רק אחרי שהליקוט הסתיים (pk.st 'ok') ולא השתנה מאז (pk.fin).
+    // לקוח בשוטף – כמו קודם. "חויב" (amt) נבדק למטה עם הקודים שלו. קבלה מכרטיס הלקוח (arReceipt) לא עוברת כאן – כסף שהתקבל בפועל נרשם כמו קודם
+    if (amtIn === undefined && pp.exists && pp.get('after') === true) {
+      const cid = s.get('custId'), cs0 = typeof cid === 'string' && ID_RE.test(cid) ? await tx.get(db.doc('cust/' + cid)) : null;
+      if (!(cs0 && cs0.exists && AC.termsOfCust(cs0.data()).b !== 'imm')) {
+        const pk = s.get('pk');
+        if (!pk || pk.st !== 'ok') throw pre('pay-pick', 'אפשר לרשום תשלום רק אחרי שהליקוט הסתיים');
+        if (pk.fin && typeof pk.fin === 'object') { const f = pickFin(s.data()); if (f.k !== pk.fin.k || agor(f.due) !== agor(pk.fin.due)) throw pre('pick-old', 'ההזמנה השתנתה אחרי הליקוט – יש ללקט מחדש לפני רישום התשלום'); }
+      }
+    }
+    delete paid.fr;
+    if (amtIn !== undefined) { // החלטה 32: "חויב" – הסכום הסופי, אחרי ליקוט, בתוך המסגרת
+      const due = AC.payOf(s.data()), au = s.get('auth'), pk = s.get('pk');
+      if (!au || !isNum(au.amt)) throw pre('no-auth', 'אין להזמנה מסגרת מאושרת. קודם "המסגרת אושרה"');
+      if (!pk || pk.st !== 'ok') throw pre(pk ? 'pick-chg' : 'no-pick', pk ? 'יש שינויים שהלקוח עוד לא אישר' : 'החיוב – רק אחרי סיום הליקוט');
+      if (pk.fin && typeof pk.fin === 'object') { const f = pickFin(s.data()); if (f.k !== pk.fin.k || agor(f.due) !== agor(pk.fin.due)) throw pre('pick-old', 'ההזמנה השתנתה אחרי הליקוט – יש ללקט מחדש'); }
+      if (agor(amtIn) !== agor(due)) throw pre('amt-mismatch', `הסכום הסופי של ההזמנה הוא ₪${due}. אפשר לסמן "חויב" רק על הסכום הסופי`);
+      if (agor(due) > agor(au.amt)) throw pre('over-auth', 'הסכום חורג מהמסגרת – יש לשלוח ללקוח קישור חדש');
+      paid.fr = au.amt;
+    }
     const now = Date.now();
-    Object.assign(paid, { at: now, by: w.uid, amt: s.get('total') }); delete paid.pk; // pk מנוסה קודם של הטרנזקציה לא נשאר
+    // 14.11.2026: הזמנה עם vm (מהגרסה הזו) – הסכום לתשלום הוא gross (כולל מע"מ והנחה). הזמנה ישנה – total, כמו קודם
+    Object.assign(paid, { at: now, by: w.uid, amt: s.get('vm') && isNum(s.get('gross')) ? s.get('gross') : s.get('total') }); delete paid.pk; delete paid.rc; // pk/rc מנוסה קודם של הטרנזקציה לא נשארים
+    // שלב 4: חשבונית פתוחה → קבלה; לקוח פרטי → חשבונית מס קבלה (החלטה 22). מתג כבוי – null, בלי שום קריאה נוספת שמשנה משהו
+    const ar = await ARD.planOrder(tx, db, w, s, 'paid', Object.assign({}, paid, input.proofId ? { proofId: input.proofId } : {}));
     // ניוד: כל קו נרשם ב-lineLog (בדיקת ניוד חוזר בכל הסניפים) ובהיסטוריית ports של הלקוח (רק כשהמתג פעיל)
     const cl = s.get('cell'), lines = cellOn(w) && cl && Array.isArray(cl.lines) ? cl.lines : [];
     if (lines.length) {
@@ -1034,10 +1310,13 @@ async function markOrderPaid(request) {
       paid.sup = { id: sup.id, name: sup.name || '' };
       tx.set(db.doc('ordpay/' + id), { ord: id, no: s.get('no'), br: s.get('br'), amt: paid.amt, at: now, sup: paid.sup, st: 'paid', upd: now });
     }
-    tx.update(ref, { status: 'paid', paid, upd: now });
-    tx.set(logRef(db, id), logData(w, 'paid', `${paid.method} ₪${paid.amt}${paid.last4 ? ' ****' + paid.last4 : ''}${paid.conf ? ' אישור ' + paid.conf : ''}`));
     res = { ok: true, dup: false };
+    if (ar) { const r = ar.write(); if (r && r.t === 'rc' && r.id) paid.rc = r.id; } // לפני עדכון ההזמנה – כדי ש-paid.rc יישמר
+    tx.update(ref, { status: s.get('shp') ? 'done' : 'paid', paid, upd: now }); // משוב סבב 2 (החלטה 15): הזמנה שנשלחה ושולמה – ישר "הושלם"
+    tx.set(logRef(db, id), logData(w, 'paid', `${paid.method} ₪${paid.amt}${paid.last4 ? ' ****' + paid.last4 : ''}${paid.conf ? ' אישור ' + paid.conf : ''}${paid.fr != null ? ' (מסגרת ₪' + paid.fr + ')' : ''}`));
+    if (ar && ar.res) { res.ar = ar.res; if (ar.res.id) tx.set(logRef(db, id), logData(w, 'ardoc', `${{ ir: 'חשבונית מס קבלה', rc: 'קבלה' }[ar.res.t] || ar.res.t} #${ar.res.no}${ar.res.draft ? ' (טיוטה)' : ''}`)); }
   });
+  await arAfter(w, res);
   return res;
 }
 
@@ -1078,7 +1357,10 @@ async function unpayOrder(request) {
   await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
     ordAccess(w, s.exists ? s.data() : null);
-    if (s.get('status') !== 'paid') throw pre('bad-status', 'אפשר לבטל "שולם" רק בהזמנה במצב שולם');
+    // משוב סבב 2: הזמנה שנשלחה (shp) ושולמה עוברת ישר ל-done – גם בה מנהל יכול לבטל "שולם" (חוזרת ל"ממתין לתשלום", ה-shp נשאר)
+    if (s.get('status') !== 'paid' && !(s.get('status') === 'done' && s.get('shp') && s.get('paid'))) throw pre('bad-status', 'אפשר לבטל "שולם" רק בהזמנה במצב שולם');
+    // שלב 4: התשלום נרשם בקבלה / בחשבונית מס קבלה – ביטול רק דרך המסמכים (ביטול קבלה / זיכוי), לא כאן
+    if ((s.get('paid') && s.get('paid').rc) || (s.get('inv') && s.get('inv').t === 'ir')) throw pre('locked', 'התשלום נרשם בקבלה או בחשבונית מס קבלה. לביטול: "ביטול קבלה" (מנהל) או זיכוי');
     const undo = await linesUndo(tx, db, id, s); // 12.11.2026: ניוד שבוטל לא נשאר בהיסטוריה
     undo();
     if (s.get('paid') && s.get('paid').sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'unpay' }, { merge: true });
@@ -1092,9 +1374,10 @@ async function unpayOrder(request) {
 async function cancelOrder(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'reason']);
+  onlyKeys(input, ['id', 'reason', 'restock']);
   const id = idOf(input.id, 'הזמנה');
   const reason = txt(input.reason, 200, 'bad-reason', 'סיבת ביטול', true);
+  if (input.restock !== undefined && typeof input.restock !== 'boolean') throw bad('bad-field', 'החזרה למלאי: כן או לא');
   const db = T.tdb();
   const ref = db.doc('ord/' + id);
   let res = null;
@@ -1104,16 +1387,21 @@ async function cancelOrder(request) {
     const d = s.data();
     if (d.status === 'cancel') { res = { ok: true, dup: true }; return; }
     if (d.status === 'done') throw pre('bad-status', 'הזמנה שהושלמה לא מבוטלת');
+    // החלטה 21 (משוב סבב 2): הזמנה עם חשבונית (inv, שלב 4) – לאף אחד, רק זיכוי. הזמנה שנשלחה (shp) – מנהל בלבד, והמלאי חוזר רק עם restock:true.
+    // הזמנה שלא נשלחה – כמו קודם (restock לא משנה כלום, המלאי חוזר תמיד)
+    if (d.inv) throw pre('locked', 'להזמנה יש חשבונית – אי אפשר לבטל אותה. תיקון – בזיכוי');
+    if (d.shp && w.role !== 'manager') throw pre('locked', 'ההזמנה נשלחה – רק מנהל יכול לבטל אותה');
+    const back = !d.shp || input.restock === true;
     if (d.status === 'paid') mgr(w); // 18:56: "יצא למשלוח" – גם עובד; "שולם" (לפני משלוח) – מנהל, כמו קודם
     const items = Array.isArray(d.items) ? d.items : [];
     const prods = await loadProds(tx, db, items.filter((x) => x.pid).map((x) => x.pid));
     const undo = ['paid', 'out'].includes(d.status) ? await linesUndo(tx, db, id, s) : null; // 12.11.2026: ביטול הזמנה ששולמה מבטל גם את הניוד
     if (undo) undo();
-    applyMoves(tx, db, w, prods, invert(moves(d.br, items.filter((x) => !x.pid || prods.has(x.pid)))), { ord: id, no: d.no });
+    if (back) applyMoves(tx, db, w, prods, invert(moves(d.br, items.filter((x) => !x.pid || prods.has(x.pid)))), { ord: id, no: d.no });
     if (['paid', 'out'].includes(d.status) && d.paid && d.paid.sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'cancel' }, { merge: true });
     const now = Date.now();
-    tx.update(ref, { status: 'cancel', cancel: { at: now, by: w.uid, reason, from: d.status }, upd: now });
-    tx.set(logRef(db, id), logData(w, 'cancel', reason));
+    tx.update(ref, { status: 'cancel', cancel: Object.assign({ at: now, by: w.uid, reason, from: d.status }, d.shp ? { rs: back } : {}), upd: now });
+    tx.set(logRef(db, id), logData(w, 'cancel', reason + (d.shp ? (back ? ' · הוחזר למלאי' : ' · בלי החזרה למלאי') : '')));
     res = { ok: true, dup: false };
   });
   return res;
@@ -1143,12 +1431,15 @@ async function markOrderCalled(request) {
 // getPayLink({ id, auto? }) – מחזיר את קישור הסליקה לפתיחה מיידית (האפליקציה לא מציגה אותו). רק להזמנה שעוד לא שולמה.
 // 2026-11-12: auto:true (רק מהאפליקציה, לפתיחה בדפדפן הפנימי) – אם מנהל־העל שמר פרטי כניסה, מוחזרים גם auto:{user,pass} לצורך מילוי.
 // בלי auto – אין שדה auto בתשובה. היומן: note 'auto' בלבד, בלי הערכים.
+// 15.11.2026 (החלטה 32): send:true – הקישור נשלח ללקוח (ווטסאפ/SMS/שיתוף מהמכשיר); ביומן 'paySend' במקום 'payOpen'.
+// בעסק עם "חיוב אחרי ליקוט" (private/pay.after) מוחזר גם fr – המסגרת (ArCalc.frameOf). בלי after – התשובה כמו קודם.
 async function getPayLink(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'auto']);
+  onlyKeys(input, ['id', 'auto', 'send']);
   const id = idOf(input.id, 'הזמנה');
   if (input.auto !== undefined && typeof input.auto !== 'boolean') throw bad('bad-field', 'auto: true או false');
+  if (input.send !== undefined && typeof input.send !== 'boolean') throw bad('bad-field', 'send: true או false');
   const db = T.tdb();
   const [s, p, c] = await Promise.all([db.doc('ord/' + id).get(), db.doc('private/pay').get(), input.auto === true ? db.doc(PAY_CRED).get() : null]);
   ordAccess(w, s.exists ? s.data() : null);
@@ -1164,8 +1455,10 @@ async function getPayLink(request) {
       note = auto ? 'auto' : 'auto-host';
     } catch (e) { note = 'auto-fail'; } // בלי פרטי השגיאה
   }
-  await db.collection(`ord/${id}/log`).add(logData(w, 'payOpen', note));
-  return auto ? { link, total: s.get('total'), auto } : { link, total: s.get('total') };
+  await db.collection(`ord/${id}/log`).add(logData(w, input.send === true ? 'paySend' : 'payOpen', note));
+  const amt = AC.payOf(s.data()); // סבב 2 (ליקוי 6): הסכום לתשלום – gross בהזמנה עם vm, total בהזמנה ישנה
+  const fr = p.get('after') === true ? { fr: AC.frameOf(amt, p.get('mg')) } : {};
+  return Object.assign(auto ? { link, total: amt, auto } : { link, total: amt }, fr);
 }
 
 // פרטי כניסה לאתר הסליקה: undefined = בלי שינוי, null = מחיקה, { user?, pass } = שמירה. הערכים לא מופיעים בשום הודעת שגיאה.
@@ -1181,14 +1474,17 @@ function credOf(v) {
   return { user: user.trim(), pass: v.pass };
 }
 
-// setBusinessPayLink({ bizId, mode: 'link'|'phone', link?, sup?, cred? }) – מנהל־על בלבד. https בלבד, עד 500 תווים.
+// setBusinessPayLink({ bizId, mode: 'link'|'phone', link?, sup?, cred?, kind?, after?, mg?, chg? }) – מנהל־על בלבד. https בלבד, עד 500 תווים.
+// 15.11.2026 (החלטה 32, חלק א): kind – אמצעי הגבייה: 'phone' (פרטי אשראי, mode 'phone') / 'link' / 'both' (שניהם, mode 'link'). after – חיוב רק אחרי ליקוט
+// (רק עם קישור). mg – מרווח למסגרת 0–50 (ברירת מחדל 10). chg – 'man' / 'auto' (נשמר; בלי חיבור API מתנהג כמו ידני).
+// שדה שלא נשלח – נשמר הקודם (אפליקציה ישנה ששולחת רק mode לא מאפסת), חוץ מ-mode 'phone' שמאפס after ו-kind.
 // 2026-11-12: cred – פרטי כניסה לאתר (ראו credOf). רק במצב link; מעבר ל-phone מוחק אותם. בלי cred – הקיימים נשמרים.
 async function setBusinessPayLink(request) {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'צריך להתחבר לאפליקציה', { reason: 'not-signed-in' });
   if (!(await T.isSuper(uid))) throw deny('not-superadmin', 'הפעולה מותרת למנהל המערכת בלבד');
   const input = inputObject(request);
-  onlyKeys(input, ['bizId', 'mode', 'link', 'sup', 'cred']);
+  onlyKeys(input, ['bizId', 'mode', 'link', 'sup', 'cred', 'kind', 'after', 'mg', 'chg']);
   const bizId = input.bizId;
   if (typeof bizId !== 'string' || !T.BIZ_RE.test(bizId)) throw bad('bad-biz', 'מזהה עסק לא תקין');
   const biz = await T.loadBiz(bizId);
@@ -1221,6 +1517,19 @@ async function setBusinessPayLink(request) {
   }
   const cred = credOf(input.cred);
   if (cred && input.mode !== 'link') throw bad('bad-cred', 'פרטי כניסה – רק לקישור תשלום');
+  // החלטה 32: אמצעי גבייה, חיוב אחרי ליקוט, מרווח ואופן חיוב
+  const o0 = old.exists ? old.data() : {};
+  if (input.kind !== undefined && !['phone', 'link', 'both'].includes(input.kind)) throw bad('bad-kind', 'אמצעי גבייה: פרטי אשראי, קישור לתשלום או שניהם');
+  const kind = input.kind !== undefined ? input.kind : input.mode === 'link' && o0.kind === 'both' ? 'both' : input.mode;
+  if ((kind === 'phone') !== (input.mode === 'phone')) throw bad('bad-kind', 'אמצעי הגבייה לא תואם (פרטי אשראי = בלי קישור)');
+  if (input.after !== undefined && typeof input.after !== 'boolean') throw bad('bad-field', 'חיוב אחרי ליקוט: כן או לא');
+  if (input.after === true && input.mode !== 'link') throw bad('bad-after', 'חיוב אחרי ליקוט – רק עם קישור לתשלום');
+  const after = input.mode === 'link' && (input.after !== undefined ? input.after : o0.after === true);
+  const mgOk = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 50 && Math.abs(Math.round(v * 100) - v * 100) < 1e-6;
+  if (input.mg !== undefined && !mgOk(input.mg)) throw bad('bad-mg', 'אחוז מרווח: מספר בין 0 ל-50');
+  const mg = input.mg !== undefined ? input.mg : mgOk(o0.mg) ? o0.mg : AC.MG0;
+  if (input.chg !== undefined && !['man', 'auto'].includes(input.chg)) throw bad('bad-chg', 'אופן חיוב: ידני או אוטומטי');
+  const chg = input.chg !== undefined ? input.chg : o0.chg === 'auto' ? 'auto' : 'man';
   const host = link ? new URL(link).hostname.toLowerCase() : '';
   const had = oldCred.exists;
   // פרטי הכניסה קשורים ל-host (בתוך המוצפן, ו-host גלוי לצדו להחלטה כאן). קישור ל-host אחר בלי cred חדש – הישנים נמחקים
@@ -1229,13 +1538,14 @@ async function setBusinessPayLink(request) {
   const hasCred = !!box || (cred === undefined && input.mode === 'link' && had && !del);
   const now = Date.now();
   const b = db.batch();
-  b.set(payRef, { mode: input.mode, link, sup, at: now, by: uid });
+  b.set(payRef, { mode: input.mode, link, sup, at: now, by: uid, kind, after, mg, chg });
   if (box) b.set(credRef, { box, host, at: now, by: uid });
   else if (del) b.delete(credRef);
-  b.set(db.doc(pfx + 'ordcfg/main'), { pay: Object.assign({ mode: input.mode, has: !!link, cred: hasCred }, sup ? { sup } : {}), upd: now }, { mergeFields: ['pay', 'upd'] }); // pay מוחלף כולו (בלי sup ישן)
-  b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') + (sup ? ' sup=' + sup.id : '') + (box ? ' cred:set' : del ? ' cred:del' : '') });
+  const ext = Object.assign(kind === 'both' ? { kind } : {}, after ? { after } : {}, mg !== AC.MG0 ? { mg } : {}, chg !== 'man' ? { chg } : {}); // החלטה 32 – רק מה שאינו ברירת מחדל
+  b.set(db.doc(pfx + 'ordcfg/main'), { pay: Object.assign({ mode: input.mode, has: !!link, cred: hasCred }, sup ? { sup } : {}, ext), upd: now }, { mergeFields: ['pay', 'upd'] }); // pay מוחלף כולו (בלי sup ישן)
+  b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') + (sup ? ' sup=' + sup.id : '') + (box ? ' cred:set' : del ? ' cred:del' : '') + (kind === 'both' ? ' kind=both' : '') + (after ? ' after' : '') + (mg !== AC.MG0 ? ' mg=' + mg : '') + (chg !== 'man' ? ' chg=' + chg : '') });
   await b.commit();
-  return { ok: true, bizId, mode: input.mode, has: !!link, sup, cred: hasCred };
+  return { ok: true, bizId, mode: input.mode, has: !!link, sup, cred: hasCred, kind, after, mg, chg };
 }
 
 // 2026-11-12: copyF – השדות (וסדרם) ב"העתק פרטי לקוח" של הזמנת ניוד. רשימה סגורה + 'x:'+מפתח של שדה חופשי מ-custcfg/main.xKeys.
@@ -1556,7 +1866,7 @@ async function ordProfit(request) {
     && (!input.paid || isPaid(o)));
   let paidA = 0, paidN = 0;
   for (const o of L) if (isPaid(o)) { paidN++; paidA += Math.round((typeof o.paid.amt === 'number' ? o.paid.amt : (typeof o.total === 'number' ? o.total : 0)) * 100); }
-  if (lite) return { n: L.length, total: Math.round(L.reduce((a, o) => a + Math.round((typeof o.total === 'number' ? o.total : 0) * 100), 0)) / 100, paid: Math.round(paidA) / 100, paidN };
+  if (lite) return { n: L.length, total: Math.round(L.reduce((a, o) => a + Math.round(AC.payOf(o) * 100), 0)) / 100, paid: Math.round(paidA) / 100, paidN };
   const need = [...new Set(L.flatMap((o) => (Array.isArray(o.items) ? o.items : []).filter((it) => it && it.pid && typeof it.c !== 'number' && ID_RE.test(it.pid)).map((it) => it.pid)))];
   const cur = new Map();
   for (let k = 0; k < need.length; k += 300) (await db.getAll(...need.slice(k, k + 300).map((id) => db.doc(`prod/${id}/p/cost`)))).forEach((s) => { if (s.exists && typeof s.get('cost') === 'number') cur.set(s.ref.parent.parent.id, s.get('cost')); });
@@ -1734,6 +2044,157 @@ async function checkLines(request) {
   return { hits };
 }
 
+// =====================================================================================
+// כינויים ורשימה חופשית (משימה 2026-11-14, שלב 2 חלק ב'; תשובות 30–54)
+// delAlias({ pid, al }) – מחיקת כינוי ממוצר (תשובה 54): מנהל או עובד עם ord. השוואה אחרי נרמול. כינוי שלא קיים – ok, removed 0.
+async function delAlias(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['pid', 'al']);
+  const id = idOf(input.pid, 'מוצר');
+  if (typeof input.al !== 'string' || !PM.key(input.al)) throw bad('bad-al', 'כינוי לא תקין');
+  const k = PM.key(input.al);
+  const db = T.tdb();
+  const ref = db.doc('prod/' + id);
+  let removed = 0;
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    if (!s.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
+    const A = Array.isArray(s.get('al')) ? s.get('al') : [];
+    const keep = A.filter((a) => !(typeof a === 'string' && PM.key(a) === k));
+    removed = A.length - keep.length;
+    if (!removed) return;
+    const now = Date.now();
+    tx.update(ref, { al: keep, upd: now });
+    tx.set(stockRef(db), { prod: id, name: s.get('name') || '', br: NB, delta: 0, why: 'prod', note: ('כינוי נמחק: ' + input.al.trim()).slice(0, 300), by: w.uid, at: now });
+  });
+  ixDrop(w);
+  return { ok: true, removed };
+}
+
+// ordParse({ text? | lines?:[{name, qty?, unit?}], custId?, ai? }) → { lines, need, none, est, ai, quota }
+// 1. התאמה רגילה בשרת (prod-match, חינם) לכל שורה. 2. רק כש-ai:true – השורות שלא זוהו ויש להן מועמדים נשלחות ל-AI (מודל מהיר),
+//    עם עד 20 מועמדים לכל שורה. ה-AI בוחר רק מתוך הרשימה (id שלא ברשימה – נזרק). לא כותב דבר למסד, חוץ ממונה המכסה היומית.
+// בנוי כך שבוט ההזמנות (38, עתידי) יוכל לקרוא לו באותה צורה. עלות משוערת לפני הפעולה (113) – הערכה בלבד (לא מאומת).
+const OP_TEXT_MAX = 4000, OP_LINES = 60, OP_LINE_MAX = 120, OP_CAND = 20, OP_ALTS = 5;
+const OP_SURE = 0.7, OP_GAP = 0.1; // "זוהה" = ציון ≥ 0.7 והבא אחריו נמוך ממנו לפחות ב-0.1 (או ברקוד/מק"ט). (הנחה – כוונון לפי קובץ המקרים)
+const OP_TTL = 60000;
+const IX = new Map(); // bizId → { at, idx } – אינדקס מנורמל, נבנה פעם אחת לדקה בכל מופע
+function ixDrop(w) { IX.delete(w && w.bizId); }
+async function ixOf(w, db) {
+  const c = IX.get(w.bizId);
+  if (c && Date.now() - c.at < OP_TTL) return c.idx;
+  const q = await db.collection('prod').select('name', 'al', 'barcode', 'sku', 'on', 'ct', 'cto', 'pk').get();
+  const P = q.docs.map((s) => Object.assign({ id: s.id }, s.data())).filter((p) => p.on !== false && typeof p.name === 'string');
+  const idx = PM.index(P);
+  IX.set(w.bizId, { at: Date.now(), idx });
+  return idx;
+}
+const UNITS_OP = ['u', 'pk', 'ct'];
+// רצף שנראה כמו מספר כרטיס (ספרת ביקורת) – מוסר מהשורה לפני כל עיבוד, ולא נשלח ל-AI
+const opMask = (r) => { let x = r; for (let i = 0, c; i < 5 && (c = cardAt(x, true)); i++) x = x.slice(0, c[0]) + '#' + x.slice(c[1]); return x; };
+function opLines(input) {
+  if (input.lines != null) {
+    if (!Array.isArray(input.lines) || !input.lines.length || input.lines.length > OP_LINES) throw bad('bad-lines', `שורות: 1 עד ${OP_LINES}`);
+    return input.lines.map((l) => {
+      if (!l || typeof l !== 'object' || Array.isArray(l)) throw bad('bad-lines', 'שורה לא תקינה');
+      onlyKeys(l, ['name', 'qty', 'unit'], 'שורה');
+      const name = opMask(txt(String(l.name == null ? '' : l.name), OP_LINE_MAX, 'bad-lines', 'שם'));
+      const qty = l.qty == null || l.qty === '' ? null : qtyOf(l.qty);
+      return { raw: name, name, qty, unit: UNITS_OP.includes(l.unit) ? l.unit : (qty == null ? '' : 'u') };
+    }).filter((l) => l.name);
+  }
+  if (typeof input.text !== 'string' || !input.text.trim()) throw bad('bad-text', 'אין טקסט לזיהוי');
+  if (input.text.length > OP_TEXT_MAX) throw bad('bad-text', `הרשימה ארוכה מדי (עד ${OP_TEXT_MAX} תווים)`);
+  // שורה = שורה בטקסט, או פריט אחרי ";" / "," (פסיק בין ספרות – מספר עשרוני, לא מפריד)
+  const L = input.text.split(/\r?\n|;|,(?=\s*\D)/).map((x) => x.trim()).filter(Boolean);
+  if (L.length > OP_LINES) throw bad('bad-lines', `עד ${OP_LINES} שורות בכל פעם`);
+  return L.map((raw) => {
+    const r = opMask(raw.slice(0, OP_LINE_MAX));
+    const q = PM.qtyOf(r);
+    return { raw: r, name: q.name || r, qty: q.qty, unit: q.unit };
+  });
+}
+// כמות להזמנה (33): "5 קרטונים" = 5 × כמות בקרטון. לקוח עסקי + מוצר "רק קרטונים" (cto) – הכמות בקרטונים (כמו בטופס ההזמנה), עם סימון
+function opQty(l, p, ws) {
+  const n = l.qty == null ? 1 : l.qty;
+  const ct = p && Number.isInteger(p.ct) && p.ct >= 2 ? p.ct : 0;
+  if (p && ws && p.cto === true && ct) return { q: n, cto: true };
+  if (l.unit === 'ct') return ct ? { q: r3(n * ct), conv: ct } : { q: n, noCt: true };
+  return { q: n };
+}
+async function opBought(db, custId) {
+  if (!custId) return new Set();
+  const q = await db.collection('ord').where('custId', '==', custId).limit(100).get();
+  const S = new Set();
+  q.forEach((s) => { for (const it of (Array.isArray(s.get('items')) ? s.get('items') : [])) if (it && typeof it.pid === 'string') S.add(it.pid); });
+  return S;
+}
+// עלות משוערת (לא מאומת): טוקנים ≈ תווים ÷ 2.5 (עברית) + הנחיה; פלט ≈ 15 טוקנים לשורה. מחיר – SEC_PRICE_FAST (sec-ai.js)
+const opEst = (payload) => { const tin = Math.ceil(JSON.stringify(payload).length / 2.5) + 250, tout = 15 * payload.length + 20; const mc = AI.costMc('fast', { in: tin, out: tout }); return { in: tin, out: tout, usd: mc / 100000 }; };
+const OP_USAGE = 'scan_usage/_ordai';
+async function ordParse(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['text', 'lines', 'custId', 'ai']);
+  const L = opLines(input);
+  if (!L.length) throw bad('bad-text', 'אין שורות לזיהוי');
+  const db = T.tdb();
+  const custId = input.custId == null || input.custId === '' ? '' : idOf(input.custId, 'לקוח');
+  const [idx, bought, cs] = await Promise.all([ixOf(w, db), opBought(db, custId), custId ? db.doc('cust/' + custId).get() : null]);
+  const ws = !!(cs && cs.exists && cs.get('wholesale') === true);
+  const P = new Map(idx.P.map((x) => [x.id, x.p]));
+  const out = L.map((l, i) => {
+    const R = PM.search(idx, l.name, { limit: OP_CAND, bought, min: 0.3 });
+    const byS = R.slice().sort((a, b) => b.s - a.s);
+    const top = byS[0], nx = byS[1];
+    let pick = null, by = null;
+    if (top && (top.k === 'bc' || top.k === 'sku')) { pick = top; by = 'code'; } else if (top && top.s >= OP_SURE && (!nx || top.s - nx.s >= OP_GAP)) { pick = top; by = 'match'; } else if (top && top.s >= OP_SURE) {
+      const tb = byS.filter((x) => top.s - x.s < OP_GAP && x.b); // כמה מוצרים קרובים (למשל כינוי כפול) – מה שהלקוח קנה בעבר, אם רק אחד כזה
+      if (tb.length === 1) { pick = tb[0]; by = 'match'; }
+    }
+    return { i, raw: l.raw, name: l.name, qty: l.qty, unit: l.unit, pid: pick ? pick.id : null, by, s: top ? top.s : 0,
+      alts: R.slice(0, OP_ALTS).map((x) => ({ id: x.id, n: x.p.name, k: x.k, al: x.k === 'al' ? x.n : undefined, b: x.b || undefined })), _c: R };
+  });
+  const need = out.filter((x) => !x.pid && x._c.length);
+  const payload = need.map((x) => ({ i: x.i, t: x.raw, c: x._c.slice(0, OP_CAND).map((c) => Object.assign({ id: c.id, n: c.p.name }, c.k === 'al' ? { a: c.n } : {})) }));
+  const res = { need: need.length, none: out.filter((x) => !x.pid && !x._c.length).length, est: need.length ? opEst(payload) : null, ai: null, ws };
+  if (input.ai === true && need.length) {
+    if (!(w.biz && w.biz.features && w.biz.features.scan === true)) throw pre('feature-off', 'הזיהוי החכם (AI) לא מופעל בעסק שלך. אפשר לבחור את המוצרים ידנית.');
+    const limit = ORD_AI_DAILY.value(), day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+    const uref = db.doc(OP_USAGE);
+    const used = await db.runTransaction(async (tx) => {
+      const s = await tx.get(uref);
+      const n = s.exists && s.get('day') === day ? (s.get('count') || 0) : 0;
+      if (n >= limit) throw new HttpsError('resource-exhausted', `העסק הגיע למכסה היומית של זיהוי רשימות (${limit}). אפשר לבחור ידנית, או לנסות מחר.`, { reason: 'ord-ai-limit', limit });
+      tx.set(uref, { day, count: n + 1, lines: (s.exists && s.get('day') === day ? (s.get('lines') || 0) : 0) + payload.length, at: Date.now() });
+      return n + 1;
+    });
+    let r;
+    try {
+      r = await AI.chat({ tier: 'fast', system: ORD_SYS, turns: [{ role: 'u', text: JSON.stringify(payload) }], timeoutMs: 30000 });
+    } catch (e) {
+      if (!e || !e.sent) await db.runTransaction(async (tx) => { const s = await tx.get(uref); if (s.exists && s.get('day') === day && s.get('count') > 0) tx.update(uref, { count: s.get('count') - 1 }); }).catch(() => {});
+      if (e instanceof HttpsError) throw new HttpsError(e.code, 'הזיהוי החכם לא זמין כרגע. אפשר לבחור את המוצרים ידנית.', e.details);
+      throw e;
+    }
+    let j = null;
+    try { j = JSON.parse(String(r.text || '').replace(/```json|```/g, '').trim()); } catch (e) { j = null; }
+    const A = j && Array.isArray(j.r) ? j.r : [];
+    let got = 0;
+    for (const a of A) {
+      const x = a && Number.isInteger(a.i) ? out[a.i] : null;
+      if (!x || x.pid || typeof a.id !== 'string' || !x._c.some((c) => c.id === a.id)) continue; // רק מתוך המועמדים של אותה שורה
+      x.pid = a.id; x.by = 'ai'; got++;
+      if (!x.alts.some((c) => c.id === a.id)) { const c = x._c.find((y) => y.id === a.id); x.alts.unshift({ id: c.id, n: c.p.name, k: c.k }); x.alts = x.alts.slice(0, OP_ALTS); }
+    }
+    res.ai = { sent: payload.length, got, usd: AI.costMc('fast', r.usage) / 100000, model: r.model };
+    res.quota = { used, limit };
+  }
+  res.lines = out.map((x) => { const p = x.pid ? P.get(x.pid) : null; const q = opQty(x, p, ws); delete x._c; return Object.assign(x, q, p ? { pn: p.name } : {}); });
+  return res;
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -1741,8 +2202,10 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, ordProfit, saveProduct, stockIn, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
+const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, importProducts, transferStock, getWsPrices, getCosts, ordProfit, saveProduct, stockIn, delAlias, ordParse, stockSet, wipeStock, restoreStock, createOrder, updateOrder, setOrderStatus, markOrderPaid, unpayOrder, cancelOrder, markOrderCalled, getPayLink, setBusinessPayLink, setOrderCfg };
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכניסה לאתר הסליקה מוצפנים ב-CARD_ENC_KEY
-for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+const AIF = ['ordParse']; // 14.11.2026: זיהוי חכם של רשימת הזמנה – אותו מפתח Gemini של המזכירה (sec-ai.js)
+const ARF = ['setOrderStatus', 'markOrderPaid']; // 15.11.2026 (שלב 4): מפיקות חשבונית/קבלה ושולחות ללקוח (PDF + ווטסאפ/מייל)
+for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : ARF.includes(k) ? { secrets: AR_SEC, timeoutSeconds: 120, memory: '512MiB' } : {}, wrap(k, f));
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin } });

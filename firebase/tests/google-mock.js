@@ -55,6 +55,12 @@ function addMail(email, o) {
   b.history.push({ id: String(b.hist), messagesAdded: [{ message: { id, threadId: thr || 't' + id, labelIds: labels } }] });
   return id;
 }
+// שלב ג (0ב): תשובה שנשלחה ישירות מ-Gmail (תווית SENT) בשרשור – בלי רישום בהיסטוריה (לא נקלטת כמייל נכנס)
+function addSent(email, thread, date) {
+  const id = 'm' + (++state.n).toString(16).padStart(6, '0');
+  box(email).msgs[id] = { id, threadId: thread, labelIds: ['SENT'], snippet: '', sizeEstimate: 500, internalDate: String(date || Date.now()), payload: { mimeType: 'text/plain', headers: [] } };
+  return id;
+}
 // התראת Pub/Sub כמו ש-Gmail שולחת (base64 של JSON)
 const note = (email) => Buffer.from(JSON.stringify({ emailAddress: email, historyId: box(email).hist })).toString('base64');
 function cal(email) { if (!state.cals[email]) state.cals[email] = { seq: 0, ev: {} }; return state.cals[email]; }
@@ -170,6 +176,12 @@ function handle(req, res, raw) {
       state.attGets.push(mm[2]);
       return json(200, { size: state.atts[mm[2]].length, data: b64u(state.atts[mm[2]]) });
     }
+    mm = /^threads\/([A-Za-z0-9_-]+)$/.exec(rest);
+    if (req.method === 'GET' && mm) { // שלב ג (0ב): שרשור (format=minimal – מזהים, תוויות ותאריך בלבד)
+      const ms = Object.values(b.msgs).filter((x) => x.threadId === mm[1]);
+      if (!ms.length) return json(404, { error: { code: 404 } });
+      return json(200, { id: mm[1], messages: ms.map((x) => ({ id: x.id, threadId: x.threadId, labelIds: x.labelIds, internalDate: x.internalDate })) });
+    }
     mm = /^messages\/([A-Za-z0-9_-]+)$/.exec(rest);
     if (req.method === 'GET' && mm) {
       const x = b.msgs[mm[1]];
@@ -216,4 +228,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { start, stop, reset, get state() { return state; }, code, addMail, note, box, cal, calAdd, calEdit, calCancel, PORT };
+module.exports = { start, stop, reset, get state() { return state; }, code, addMail, addSent, note, box, cal, calAdd, calEdit, calCancel, PORT };

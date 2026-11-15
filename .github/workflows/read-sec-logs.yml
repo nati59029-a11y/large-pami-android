@@ -1,0 +1,33 @@
+name: Read secretary function logs (read-only)
+# Reads only. Lists errors/warnings of the secretary functions (sec*) from the last 24 hours.
+# Prints time, function, severity and a short masked message (emails/numbers hidden). Changes nothing.
+on:
+  push:
+    branches: ["claude/secretary-email-server-check-sr908b"]
+    paths: [".github/workflows/read-sec-logs.yml"]
+permissions:
+  contents: read
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read logs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          umask 077
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          trap 'rm -f "$RUNNER_TEMP/sa.json"' EXIT
+          PROJECT=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["project_id"])' "$RUNNER_TEMP/sa.json")
+          gcloud auth activate-service-account --key-file="$RUNNER_TEMP/sa.json" --quiet
+          BASE='resource.type="cloud_run_revision" AND resource.labels.service_name:"sec" AND timestamp>="'$(date -u -d '-24 hours' +%Y-%m-%dT%H:%M:%SZ)'"'
+          mask() { sed -E 's/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/<email>/g; s/[0-9]{6,}/<num>/g' | cut -c1-220; }
+          echo "== Requests per function (24h) =="
+          gcloud logging read "$BASE AND log_id(\"run.googleapis.com/requests\")" --project "$PROJECT" --limit 2000 \
+            --format='value(resource.labels.service_name,httpRequest.status)' | sort | uniq -c | sort -rn
+          echo "== Errors/warnings (24h, newest first, max 60) =="
+          gcloud logging read "$BASE AND severity>=WARNING" --project "$PROJECT" --limit 60 \
+            --format='value(timestamp,resource.labels.service_name,severity,textPayload,jsonPayload.message,httpRequest.status)' | mask
+          echo "== Count by function and severity =="
+          gcloud logging read "$BASE AND severity>=WARNING" --project "$PROJECT" --limit 1000 \
+            --format='value(resource.labels.service_name,severity)' | sort | uniq -c | sort -rn

@@ -14,6 +14,13 @@
 // סיטונאי (22:10): ברירת מחדל = רגיל. הייבוא מתעלם ממנו.
 // 2026-11-09 (החלטת המשתמש 2): עובד פעיל עם ord רשאי לפתוח לקוח עסקי (wholesale:true בלקוח שנוצר באותה קריאה).
 // הפיכת לקוח קיים רגיל לעסקי, וביטול סימון – מנהל בלבד (נבדק כאן, בטרנזקציה).
+// 14.11.2026 (משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1) – תוספות בלבד:
+//   cust (+) { cts:[{n,ph,mail}] אנשי קשר (כל טלפון מזהה את הלקוח), addrs:[{k,nm,st,city}] סניפי הלקוח (בוחרים בכל הזמנה),
+//              terms:{b:'imm'|'eom'|'inv',d} תנאי תשלום (כמו בספקים; לקוח ישן בלי terms – ArCalc.termsOfCust לפי pay, ו-pay לא נמחק),
+//              blk חסום (עובד לא פותח לו הזמנה), lim מסגרת אשראי (רק נשמר – האזהרה משלב 4), phx: כל הטלפונים לזיהוי (השרת בונה בכל שמירה) }
+//   terms אחרי ההקמה, blk ו-lim – מנהל בלבד. בהקמה עובד בוחר terms (ברירת מחדל מיידי).
+//   findCust – חיפוש מדויק בשרת (טלפון כולל אנשי קשר, ע.מ, ת"ז). חיפוש לפי שם – במכשיר.
+//   cprice/{custId}_{pid} – מחיר קבוע ללקוח: setCustPrice (עובד עם ord בתוך המגבלה, ומנהל), delCustPrice (מנהל). mg = true כשמנהל שמר (סבב 3). ordcfg/price – setPriceCfg (מנהל).
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { onCall } = require('./lib/region'); // שני אזורים (europe-west1 + us-central1) – lib/region.js
@@ -24,6 +31,7 @@ const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const core = require('./orders')._core;
 const { defineSecret } = require('firebase-functions/params');
 const CARD = require('./lib/card');
+const AC = require('./lib/ar-calc');
 // fb/ord-card: מפתח הצפנה לפרטי כרטיס (Secret Manager). באמולטור – ערך דמה מ-functions/.secret.local
 const CARD_ENC_KEY = defineSecret('CARD_ENC_KEY');
 // סבב 2 (החלטה 1): עד 3 כרטיסים מוצפנים ללקוח. מקום 1 = cust/{id}/p/card (הכרטיס הקיים, AAD 'cust/{id}' – בלי שינוי, תאימות מלאה);
@@ -67,6 +75,8 @@ const FLAG = [['bph', 30, 'טלפון (לא תקין)'], ['btz', 20, 'ת.ז (ל�
 const FLAG_KEYS = FLAG.map((x) => x[0]);
 const PACT = ['y', 'n', 'u']; // נויד בפועל: כן / לא / לא ידוע
 const BIZF = ['bn', 'vat', 'ct', 'pay', 'payTxt']; // לקוח עסקי
+const NBF = ['cts', 'addrs', 'terms', 'blk', 'lim']; // 14.11.2026: לקוח עסקי (שלב 1) – מושווים כ-JSON, לא כערך פשוט
+const MAX_CTS = 10, MAX_ADDRS = 20, MAX_PHX = 15;
 const PAYS = ['cash', 'n30', 'n60', 'n90', 'credit', 'transfer', 'other'];
 const FIELDS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port'].concat(core.CPART_KEYS, BIZF, INFO_KEYS, FLAG_KEYS);
 const CKEYS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports', 'phs'].concat(core.CPART_KEYS, INFO_KEYS, FLAG_KEYS);
@@ -161,7 +171,7 @@ function needBiz(base, o, fill) {
     if (k === 'x' || v === undefined) continue;
     if (fill) { if (empty(f[k]) && !empty(v)) f[k] = v; } else if (v === '') delete f[k]; else f[k] = v;
   }
-  for (const [k, r, l] of BIZ_REQ) if (empty(f[k])) throw bad(r, 'לקוח עסקי: ' + l + ' – חובה');
+  for (const [k, r, l] of BIZ_REQ) if (empty(f[k]) && !(k === 'pay' && f.terms && typeof f.terms === 'object')) throw bad(r, 'לקוח עסקי: ' + l + ' – חובה'); // 14.11.2026: terms במקום pay
   if (f.pay === 'other' && empty(f.payTxt)) throw bad('bad-pay', 'לקוח עסקי: פירוט תנאי התשלום – חובה');
 }
 // מנקה פרטי לקוח. keys = מפתחות השדות החופשיים המותרים (custcfg). name/phone חובה רק כשיוצרים לקוח בלי ת"ז.
@@ -184,6 +194,7 @@ function clean(c, keys, brs, byId, imp) {
   else if (!empty(c.payTxt)) throw bad('bad-pay', 'פירוט תנאי תשלום – רק כשנבחר "אחר"');
   if (!empty(c.phone)) o.phone = phoneOf(c.phone);
   if (!empty(c.tz)) o.tz = tzOf(c.tz);
+  bizClean(c, o);
   if (c.phs != null) o.phs = core.phsOf(Array.isArray(c.phs) ? c.phs.map(phoneOf) : c.phs, o.phone); // 2026-11-10: עד 3 טלפונים נוספים; [] בעריכה = מחיקה
   if (!empty(c.mail)) o.mail = mailOf(c.mail);
   if (!o.addr && !empty(c.addr)) o.addr = txt(c.addr, 150, 'bad-addr', 'כתובת');
@@ -227,6 +238,83 @@ function clean(c, keys, brs, byId, imp) {
   if (!o.tz && !o.phone && !byId && !(imp && o.name)) throw bad('bad-cust', 'צריך ת.ז או טלפון');
   return o;
 }
+// 14.11.2026: שדות לקוח עסקי חדשים. [] / '' = מחיקה בעריכה. מפתח כתובת (k) נשמר כדי שהזמנה תפנה לאותה כתובת
+function bizClean(c, o) {
+  if (c.cts != null) {
+    if (!Array.isArray(c.cts) || c.cts.length > MAX_CTS) throw bad('bad-cts', `אנשי קשר: עד ${MAX_CTS}`);
+    o.cts = [];
+    for (const x of c.cts) {
+      if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad('bad-cts', 'איש קשר לא תקין');
+      onlyKeys(x, ['n', 'ph', 'mail'], 'איש קשר');
+      const r = {};
+      if (!empty(x.n)) r.n = txt(x.n, 60, 'bad-cts', 'שם איש הקשר');
+      if (!empty(x.ph)) r.ph = phoneOf(x.ph);
+      if (!empty(x.mail)) r.mail = mailOf(x.mail);
+      if (r.n || r.ph || r.mail) o.cts.push(r);
+    }
+  }
+  if (c.addrs != null) {
+    if (!Array.isArray(c.addrs) || c.addrs.length > MAX_ADDRS) throw bad('bad-addrs', `כתובות: עד ${MAX_ADDRS}`);
+    o.addrs = [];
+    const ks = new Set();
+    for (const x of c.addrs) {
+      if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad('bad-addrs', 'כתובת לא תקינה');
+      onlyKeys(x, ['k', 'nm', 'st', 'city'], 'כתובת');
+      const r = { st: txt(x.st, 80, 'bad-addrs', 'רחוב ומספר', true) };
+      let k = x.k;
+      if (k == null || k === '') { do { k = 'a' + Math.random().toString(36).slice(2, 8); } while (ks.has(k)); }
+      if (typeof k !== 'string' || !/^[a-z0-9]{1,12}$/.test(k) || ks.has(k)) throw bad('bad-addrs', 'מזהה כתובת לא תקין');
+      ks.add(k); r.k = k;
+      if (!empty(x.nm)) r.nm = txt(x.nm, 40, 'bad-addrs', 'שם הסניף');
+      if (!empty(x.city)) r.city = txt(x.city, 40, 'bad-addrs', 'עיר');
+      o.addrs.push(r);
+    }
+  }
+  if (c.terms != null) {
+    const t = c.terms;
+    if (!t || typeof t !== 'object' || Array.isArray(t)) throw bad('bad-terms', 'תנאי תשלום לא תקינים');
+    onlyKeys(t, ['b', 'd'], 'תנאי תשלום');
+    const v = { b: t.b, d: t.b === 'imm' ? 0 : t.d };
+    if (!AC.termsOk(v)) throw bad('bad-terms', 'תנאי תשלום: מיידי, שוטף+ימים או ימים מהחשבונית (0–365)');
+    o.terms = v;
+  }
+  if (c.blk !== undefined) { if (typeof c.blk !== 'boolean') throw bad('bad-field', 'חסום: כן/לא'); o.blk = c.blk; }
+  if (c.lim !== undefined) {
+    if (c.lim === null || c.lim === '') o.lim = '';
+    else if (typeof c.lim !== 'number' || !Number.isFinite(c.lim) || c.lim < 0 || c.lim > 100000000) throw bad('bad-lim', 'מסגרת אשראי: מספר חיובי');
+    else o.lim = Math.round(c.lim * 100) / 100;
+  }
+}
+// terms אחרי ההקמה, blk, lim – מנהל בלבד (76–79, 12, 13). base = הרשומה הקיימת (null = לקוח חדש)
+function bizGuard(base, o, mgr, opts) {
+  if (mgr) return;
+  const J = (v) => JSON.stringify(v === undefined ? null : v);
+  if (o.blk !== undefined && (base ? base.blk === true : false) !== o.blk) throw deny('manager-only', 'חסימת לקוח – מנהל בלבד');
+  if (o.lim !== undefined && J(base && typeof base.lim === 'number' ? base.lim : '') !== J(o.lim)) throw deny('manager-only', 'מסגרת אשראי – מנהל בלבד');
+  if (base && o.terms !== undefined && J(base.terms) !== J(o.terms)) throw deny('manager-only', 'שינוי תנאי תשלום אחרי ההקמה – מנהל בלבד');
+  // 14.11.2026 (משוב סבב 2, תיקון אחרי בדיקה): לקוח בלי terms – התנאים לפי pay הישן. עובד לא משנה אותם דרך pay בלקוח קיים
+  // (כך עובד לא יכול להפוך לקוח ל"בשוטף" ולסמן "נשלח" בלי תשלום). pay ששומר על אותם תנאים (למשל cash→transfer) – מותר כמו קודם.
+  // fill לא דורס pay קיים – אז אין שינוי. ייבוא (src:'import') – מנהל בלבד (importCusts / imports.js), בלי שינוי
+  const op = opts || {};
+  if (base && o.pay !== undefined && op.src !== 'import' && !(op.fill && !empty(base.pay))) {
+    const a = AC.termsOfCust(base), b = AC.termsOfCust(Object.assign({}, base, { pay: o.pay }, o.terms !== undefined ? { terms: o.terms } : {}));
+    if (a.b !== b.b || a.d !== b.d) throw deny('manager-only', 'שינוי תנאי תשלום – מנהל בלבד');
+  }
+}
+const nbEmpty = (v) => v === '' || v === false || (Array.isArray(v) && !v.length);
+// כל הטלפונים שמזהים את הלקוח: הראשי, הנוספים ואנשי הקשר. נבנה בשרת בכל שמירה (שאילתת array-contains ב-findCust)
+function phxOf(d) {
+  const L = [d.phone].concat(Array.isArray(d.phs) ? d.phs : [], Array.isArray(d.cts) ? d.cts.map((x) => x && x.ph) : []);
+  return L.filter((p, i) => typeof p === 'string' && p && L.indexOf(p) === i).slice(0, MAX_PHX);
+}
+// אחרי מיזוג השדות: phx מתעדכן לפי הרשומה הסופית (u יכול להכיל FieldValue.delete)
+function phxUp(base, u) {
+  const f = Object.assign({}, base);
+  for (const [k, v] of Object.entries(u)) { if (v instanceof FieldValue) delete f[k]; else f[k] = v; }
+  const nx = phxOf(f), ox = Array.isArray(base.phx) ? base.phx : [];
+  if (JSON.stringify(nx) === JSON.stringify(ox)) return;
+  if (nx.length) u.phx = nx; else if (base.phx) u.phx = FieldValue.delete();
+}
 const idFor = (o) => (o.tz ? 't' + o.tz : 'p' + o.phone);
 async function xKeys(db) {
   const s = await db.doc('custcfg/main').get();
@@ -248,6 +336,12 @@ function merge(old, o, fill) {
     const nx = (fill ? op.concat(o.phs) : o.phs).filter((p, i, A) => p !== main && A.indexOf(p) === i).slice(0, core.MAX_PHS);
     if (JSON.stringify(nx) !== JSON.stringify(op)) up.phs = nx.length ? nx : FieldValue.delete();
   }
+  for (const k of NBF) { // 14.11.2026
+    if (o[k] === undefined) continue;
+    const ov = old[k], has = !(ov === undefined || ov === null || nbEmpty(ov));
+    if (fill) { if (!has && !nbEmpty(o[k])) up[k] = o[k]; continue; }
+    if (nbEmpty(o[k])) { if (has || ov === true) up[k] = FieldValue.delete(); } else if (JSON.stringify(ov) !== JSON.stringify(o[k])) up[k] = o[k];
+  }
   if (o.x) {
     const ox = old.x && typeof old.x === 'object' ? old.x : {};
     for (const [k, v] of Object.entries(o.x)) if (fill ? empty(ox[k]) : ox[k] !== v) up['x.' + k] = v;
@@ -267,7 +361,9 @@ async function upsert(tx, db, w, o, opts) {
   let moved = false;
   if (!base && ps && ps.exists && !ps.get('mv') && empty(ps.get('tz'))) { base = Object.assign({}, ps.data()); moved = true; }
   const ws = opts.wholesale;
+  if (base && opts.onlyNew) throw new HttpsError('already-exists', 'כבר יש לקוח עם הפרטים האלה', { reason: 'cust-exists', id: s.exists ? (s.get('mv') || id) : ps.get('mv') || ps.id }); // המזכירה (saveCore so.onlyNew): לקוח קיים לא משתנה
   if (base && ws === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
+  bizGuard(base, o, opts.mgr, opts);
   if (ws === true && !(base && base.wholesale === true)) needBiz(base, o, opts.fill);
   flagFix(base, o, opts.cell, opts.fill);
   if (!base) {
@@ -285,11 +381,16 @@ async function update(tx, db, w, o, opts, st) {
   const { id, ref, base, moved, pref, pcs, pcref, now } = st;
   const ws = opts.wholesale;
   if (moved) {
+    // שלב 4, תיקון סבב 1 (ליקוי 1): ללקוח לפי טלפון יש חשבוניות/קבלות (ardoc) – לא עוברים ל-t{tz}, אחרת המסמכים נשארים על המזהה הישן והיתרה (cust.ar) נשברת
+    const ds = await tx.get(db.collection('ardoc').where('cust', '==', 'p' + o.phone).limit(1));
+    if (!ds.empty) throw pre('move-ardoc', 'אי אפשר להוסיף ת.ז ללקוח הזה: כבר הופקו לו חשבוניות או קבלות. הלקוח נשאר לפי מספר הטלפון.');
     const d = Object.assign({}, base, { tz: o.tz, upd: now, by: w.uid });
     delete d.mv;
     const up = merge(base, o, opts.fill) || {};
     for (const [k, v] of Object.entries(up)) { if (k.startsWith('x.')) { d.x = Object.assign({}, d.x || {}); d.x[k.slice(2)] = v; } else d[k] = v; }
     if (up.phs instanceof FieldValue) delete d.phs;
+    for (const k of NBF) if (d[k] instanceof FieldValue) delete d[k];
+    const px = phxOf(d); if (px.length) d.phx = px; else delete d.phx;
     if (typeof ws === 'boolean') d.wholesale = ws;
     const cards = [], nums = []; // כל הכרטיסים (עד 3) מפוענחים ומוצפנים מחדש לנתיב החדש, באותו מקום
     (pcs || []).forEach((cs, i) => {
@@ -311,6 +412,7 @@ async function update(tx, db, w, o, opts, st) {
   const u = merge(base, o, opts.fill) || {};
   if (typeof ws === 'boolean' && (base.wholesale === true) !== ws) u.wholesale = ws;
   if (!Object.keys(u).length) return { id, created: false, same: true };
+  phxUp(base, u);
   if (!base.x || typeof base.x !== 'object') { // מסמך ישן בלי x – יוצרים את המפה לפני עדכון נקודתי
     const xs = {};
     for (const k of Object.keys(u)) if (k.startsWith('x.')) { xs[k.slice(2)] = u[k]; delete u[k]; }
@@ -323,11 +425,14 @@ function newDoc(o, w, opts, now) {
   const d = Object.assign({ x: {} }, o, { at: now, upd: now, by: w.uid, src: opts.src });
   for (const k of NEWK) if (d[k] === '') delete d[k];
   if (Array.isArray(d.phs)) { d.phs = d.phs.filter((p) => p !== d.phone); if (!d.phs.length) delete d.phs; }
+  for (const k of NBF) if (nbEmpty(d[k])) delete d[k];
+  const px = phxOf(d); if (px.length) d.phx = px;
   delete d.__note;
   return d;
 }
 // לקוח נוסף עם אותו טלפון (asNew, בלי ת"ז): מזהה אקראי c{20}, לא תלוי בת"ז/טלפון. גם שורת ייבוא בלי טלפון/ת"ז תקינים
 async function createNew(tx, db, w, o, opts) {
+  bizGuard(null, o, opts.mgr);
   if (opts.wholesale === true) needBiz(null, o, false);
   flagFix(null, o, opts.cell, false);
   if (!o.name && o.bn) o.name = o.bn;
@@ -362,6 +467,7 @@ async function upsertId(tx, db, w, id, o, opts) {
   if (o.tz && !empty(base.tz) && base.tz !== o.tz) throw bad('tz-fixed', 'אי אפשר לשנות ת.ז של לקוח');
   if (ts && ts.exists && base.tz !== o.tz) throw bad('tz-taken', 'כבר יש לקוח עם הת.ז הזו. בחרו אותו.');
   if (opts.wholesale === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
+  bizGuard(base, o, opts.mgr, opts);
   if (opts.wholesale === true && base.wholesale !== true) needBiz(base, o, opts.fill);
   flagFix(base, o, opts.cell, opts.fill);
   return update(tx, db, w, o, opts, { id, ref, base, moved: false, now: Date.now() });
@@ -372,7 +478,12 @@ async function upsertId(tx, db, w, id, o, opts) {
 // wholesale:true – עובד: רק בלקוח שנוצר עכשיו (פתיחת לקוח עסקי); מנהל: תמיד. wholesale:false – מנהל בלבד.
 async function saveCust(request) {
   const w = await who(request);
-  const input = inputObject(request);
+  return saveCore(w, inputObject(request));
+}
+// שלב ג/4 (המזכירה): הליבה של saveCust – אותן בדיקות ואותה כתיבה. w = מי ששומר (uid, role, bizId, biz), בתוך הקשר העסק (T.tdb).
+// so.src – מקור הלקוח החדש (ברירת מחדל: כמו saveCust – 'order' ב-fill, אחרת 'manual'). so.onlyNew – רק יצירה: לקוח קיים (גם mv) → already-exists/cust-exists
+//   בתוך הטרנזקציה, בלי שום כתיבה (רק upsert; לא בשימוש עם id/asNew). saveCust עצמו לא משתנה.
+async function saveCore(w, input, so) {
   onlyKeys(input, ['cust', 'fill', 'wholesale', 'id', 'asNew']);
   const mgr = w.role === 'manager';
   if (input.wholesale !== undefined) {
@@ -382,7 +493,7 @@ async function saveCust(request) {
   if (input.asNew !== undefined && input.asNew !== true) throw bad('bad-field', 'asNew: true בלבד');
   const id = input.id == null || input.id === '' ? null : custIdOf(input.id);
   if (id && input.asNew) throw bad('bad-field', 'לקוח קיים או חדש – לא שניהם');
-  onlyKeys(input.cust || {}, CKEYS.concat(BIZF), 'פרטי לקוח');
+  onlyKeys(input.cust || {}, CKEYS.concat(BIZF, NBF), 'פרטי לקוח');
   const db = T.tdb();
   if (input.cust && input.cust.ports !== undefined && !cellOn(w)) throw deny('feature-off', 'ניודים – התוספת "סלולר" כבויה בעסק הזה');
   if (hasInfo(input.cust) && !cellOn(w)) throw deny('feature-off', 'שדות המידע (בנק, מוצר, סטטוס…) – רק כשהתוספת "סלולר" פעילה');
@@ -394,7 +505,7 @@ async function saveCust(request) {
   let r;
   // עריכה של שדות עסקיים: pay שאינו 'other' מוחק את הפירוט הישן
   if (input.fill !== true && o.pay && o.pay !== 'other') o.payTxt = '';
-  const opts = { fill: input.fill === true, wholesale: input.wholesale, src: input.fill === true ? 'order' : 'manual', mgr, cell: cellOn(w) };
+  const opts = { fill: input.fill === true, wholesale: input.wholesale, src: (so && so.src) || (input.fill === true ? 'order' : 'manual'), mgr, cell: cellOn(w), onlyNew: !!(so && so.onlyNew) };
   await db.runTransaction(async (tx) => {
     r = id ? await upsertId(tx, db, w, id, o, opts) : (input.asNew && !o.tz) ? await createNew(tx, db, w, o, opts) : await upsert(tx, db, w, o, opts);
   });
@@ -437,8 +548,11 @@ async function mergeCust(request) {
     const scs = cs.length ? await tx.getAll(...cs.map((x) => db.doc(cardPath(s, x.s)))) : [];
     const os = await tx.get(db.collection('ord').where('custId', '==', s).limit(MAX_MERGE_ORD + 1));
     if (os.size > MAX_MERGE_ORD) throw pre('merge-ords', 'אי אפשר לאחד: ללקוח יותר מ-400 הזמנות.');
+    // שלב 4 (15.11.2026): ללקוח שמסומן mv יש חשבוניות/קבלות (ardoc) – לא מאחדים, אחרת הכרטסת והיתרה (cust.ar) נשברות
+    const ds = await tx.get(db.collection('ardoc').where('cust', '==', s).limit(1));
+    if (!ds.empty) throw pre('merge-ardoc', 'אי אפשר לאחד: ללקוח הזה יש חשבוניות או קבלות. בחרו אותו כלקוח שנשאר, או שייכו את ההזמנה ללקוח אחד.');
     const up = {};
-    const SKIP = ['x', 'ports', 'phs', 'cards', 'card', 'last4', 'at', 'upd', 'by', 'src', 'mv', 'phone', 'tz', 'wholesale'];
+    const SKIP = ['x', 'ports', 'phs', 'phx', 'cards', 'card', 'last4', 'at', 'upd', 'by', 'src', 'mv', 'phone', 'tz', 'wholesale'];
     for (const [kk, v] of Object.entries(B)) if (!SKIP.includes(kk) && empty(A[kk]) && !empty(v)) up[kk] = v;
     if (!empty(A.note) && !empty(B.note) && A.note !== B.note) {
       const n = A.note + ' | ' + B.note;
@@ -467,12 +581,14 @@ async function mergeCust(request) {
     });
     if (!flip) {
       if (list.length !== cd.length) Object.assign(up, cardsUp(list));
+      phxUp(A, up); // 14.11.2026: טלפונים לזיהוי – לפי הרשומה המאוחדת
       tx.update(dd.ref, Object.assign(up, { upd: now, by: w.uid }));
     } else { // הנתונים של keep (עם ההשלמות) נכתבים במלואם למסמך הת"ז; הכרטיסים – אלה שבמסמך היעד בפועל
       const full = Object.assign({}, A, up, { upd: now, by: w.uid });
       delete full.mv; CARDF.forEach((f) => delete full[f]);
       const l = list.slice().sort((p, q) => p.s - q.s);
       if (l.length) Object.assign(full, { cards: l, card: true, last4: l[0].last4 });
+      const px = phxOf(full); if (px.length) full.phx = px; else delete full.phx;
       tx.set(dd.ref, full);
     }
     tx.update(sd.ref, Object.assign({ mv: d, upd: now, by: w.uid }, cs.length ? { card: FieldValue.delete(), cards: FieldValue.delete(), last4: FieldValue.delete() } : {}));
@@ -770,6 +886,8 @@ async function wipeCusts(request) {
   onlyKeys(input, ['reqId', 'confirm']);
   if (typeof input.reqId !== 'string' || !REQ_RE.test(input.reqId)) throw bad('bad-req', 'מזהה בקשה לא תקין');
   const db = T.tdb();
+  // שלב 4 (15.11.2026): יש חשבוניות/קבלות – לא מוחקים לקוחות (מחיקה ושחזור מגיבוי ישברו את הכרטסת)
+  if (!(await db.collection('ardoc').limit(1).get()).empty) throw pre('has-ardoc', 'אי אפשר למחוק את כל הלקוחות: כבר הופקו חשבוניות או קבלות.');
   const r = await core.wipeAll(db, w, input, 'cust', 'custBak', db.doc('custcfg/req_' + input.reqId), 'הלקוחות');
   if (!r.dup && r.n) await db.collection('cardLog').add({ t: Date.now(), by: w.uid, act: 'wipe', n: r.n });
   return r;
@@ -784,8 +902,141 @@ async function restoreCusts(request) {
   if (!r.dup && r.n) await db.collection('cardLog').add({ t: Date.now(), by: w.uid, act: 'restore', n: r.n });
   return r;
 }
-const FNS = { setCustCfg, wipeCusts, restoreCusts };
+// ---------- 14.11.2026 (שלב 1): זיהוי לקוח ומחירים ללקוח ----------
+// findCust({ q }) → { list:[{id,name,bn,phone,vat,wholesale,blk}] } – עובד עם ord ומנהל. חיפוש מדויק: טלפון (ראשי, נוספים, אנשי קשר – phx,
+// וגם phone/phs ללקוח ישן שעוד לא נשמר מאז), ע.מ / ח.פ (vat), ת"ז (t{tz}). חיפוש לפי שם (גם חלקי ועם שגיאת כתיב) – במכשיר.
+async function findCust(request) {
+  await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['q']);
+  if (typeof input.q !== 'string' || input.q.trim().length < 2 || input.q.length > 60) throw bad('bad-q', 'חיפוש: 2 עד 60 תווים');
+  const db = T.tdb();
+  const d = input.q.replace(/[\s-]/g, '');
+  const found = new Map();
+  const add = (snap) => { if (snap && snap.exists && !snap.get('mv') && !found.has(snap.id)) found.set(snap.id, snap); };
+  const jobs = [];
+  let ph = null;
+  try { ph = phoneOf(d); } catch (e) { /* לא טלפון */ }
+  if (ph) for (const [f, op] of [['phx', 'array-contains'], ['phone', '=='], ['phs', 'array-contains']]) jobs.push(db.collection('cust').where(f, op, ph).limit(10).get().then((q) => q.docs.forEach(add)));
+  if (/^\d{9}$/.test(d)) jobs.push(db.collection('cust').where('vat', '==', d).limit(10).get().then((q) => q.docs.forEach(add)));
+  if (/^\d{5,9}$/.test(d)) { let z = null; try { z = tzOf(d); } catch (e) { /* לא ת"ז */ } if (z) jobs.push(db.doc('cust/t' + z).get().then(add)); }
+  await Promise.all(jobs);
+  const list = [...found.values()].slice(0, 20).map((x) => ({ id: x.id, name: String(x.get('name') || ''), bn: String(x.get('bn') || ''), phone: String(x.get('phone') || ''), vat: String(x.get('vat') || ''), wholesale: x.get('wholesale') === true, blk: x.get('blk') === true }));
+  return { list };
+}
+const PID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+const pidOf = (v) => { if (typeof v !== 'string' || !PID_RE.test(v)) throw bad('bad-id', 'מוצר לא תקין'); return v; };
+const priceOf = (v) => { if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1000000) throw bad('bad-price', 'מחיר: מספר בין 0 ל-1,000,000'); return Math.round(v * 100) / 100; };
+// setCustPrice({ custId, pid, p }) – מחיר קבוע ללקוח (22, 23, 25). עובד עם ord: רק בתוך מגבלת המחיר, ולא משנה מחיר קבוע קיים (26 – רק מנהל עורך).
+// מנהל – תמיד. היחידה: לקוח עסקי – לפני מע"מ, פרטי – כולל מע"מ (vm נשמר). כל שינוי נרשם ב-h (מי, מתי, ממחיר למחיר – הבהרה 29; 20 אחרונים).
+async function setCustPrice(request) {
+  const w = await who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId', 'pid', 'p']);
+  const cid = custIdOf(input.custId), pid = pidOf(input.pid), p = priceOf(input.p);
+  const mgr = w.role === 'manager';
+  const db = T.tdb();
+  const ref = db.doc(`cprice/${cid}_${pid}`);
+  let out = null;
+  await db.runTransaction(async (tx) => {
+    const [cs, ps, cost, cur, main] = await tx.getAll(db.doc('cust/' + cid), db.doc('prod/' + pid), db.doc(`prod/${pid}/p/cost`), ref, db.doc('ordcfg/main'));
+    if (!cs.exists || cs.get('mv')) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+    if (!ps.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
+    const old = cur.exists && typeof cur.get('p') === 'number' ? cur.get('p') : null;
+    if (old === p) { out = { ok: true, same: true, p }; return; }
+    if (old != null && !mgr) throw deny('manager-only', 'ללקוח כבר יש מחיר קבוע למוצר הזה. רק מנהל משנה או מוחק');
+    const pc = await core.priceCtx(tx, db, '', [pid], main);
+    const vm = cs.get('wholesale') === true ? 'ex' : 'inc';
+    // סבב 2 (ליקוי 2): לעובד – תמיד: לא 0, לא מתחת לעלות; ואם המגבלה פעילה – גם לא מתחת למינימום (מול ברירת המחדל בלי מחיר קבוע)
+    if (!mgr) {
+      if (!(p > 0)) throw bad('bad-price', 'מחיר קבוע חייב להיות גדול מ-0');
+      const pd = ps.data() || {};
+      const base = AC.defPrice({ wp: pc.wp.get(pid), price: typeof pd.price === 'number' ? pd.price : 0, vm, vat: pc.vat });
+      const r = AC.staffOk({ price: p, base, cost: cost.exists ? cost.get('cost') : null, vm, vat: pc.vat, pct: AC.pctFor(pc.cfg, vm === 'ex', pd.cat, pd.sub), on: !!pc.cfg, biz: true });
+      if (!r.ok) throw new HttpsError('invalid-argument', 'אין אפשרות לתת במחיר הזה' + (r.min != null ? ` (המינימום ₪${r.min})` : ''), { reason: 'price-floor', why: r.why, min: r.min });
+    }
+    const now = Date.now();
+    const h = (cur.exists && Array.isArray(cur.get('h')) ? cur.get('h') : []).concat([{ f: old, t: p, by: w.uid, at: now }]).slice(-20);
+    // סבב 3 (החלטה 8): mg = מנהל שמר (מאושר לעובד גם מתחת למינימום); עובד – false
+    tx.set(ref, { cust: cid, pid, p, n: String(ps.get('name') || '').slice(0, 80), vm, mg: mgr, h, by: w.uid, at: now });
+    out = { ok: true, p, vm };
+  });
+  return out;
+}
+// delCustPrice({ custId, pid }) – מנהל. המסמך לא נמחק: p יורד, del = זמן, וההיסטוריה (h) נשמרת
+async function delCustPrice(request) {
+  const w = await who(request); mgrOnly(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['custId', 'pid']);
+  const cid = custIdOf(input.custId), pid = pidOf(input.pid);
+  const db = T.tdb();
+  const ref = db.doc(`cprice/${cid}_${pid}`);
+  let out = { ok: true, dup: true };
+  await db.runTransaction(async (tx) => {
+    const cur = await tx.get(ref);
+    if (!cur.exists || typeof cur.get('p') !== 'number') return;
+    const now = Date.now();
+    const h = (Array.isArray(cur.get('h')) ? cur.get('h') : []).concat([{ f: cur.get('p'), t: null, by: w.uid, at: now }]).slice(-20);
+    tx.update(ref, { p: FieldValue.delete(), del: now, h, by: w.uid, at: now });
+    out = { ok: true, dup: false };
+  });
+  return out;
+}
+// setPriceCfg({ pct?, pp?, cat?, disc? }) – מנהל. pct = X% לעסק (מינימום = עלות × (1+X%)), cat = X לקטגוריה/תת־קטגוריה, pp = מגבלה נפרדת ללקוח פרטי,
+// disc = הנחה כללית מקסימלית על הזמנה (%). null = הסרה. המסמך נשמר במלואו (מה שלא נשלח – נשאר). קיום המסמך = המגבלה פעילה.
+// off:true – מכבה את המגבלה (המסמך עובר ל-ordcfg/price_off, לשחזור; בלי מחיקה).
+const pctIn = (v, label) => { if (v === null) return null; if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1000 || Math.abs(Math.round(v * 100) - v * 100) > 1e-6) throw bad('bad-pct', label + ': אחוז בין 0 ל-1000'); return v; };
+async function setPriceCfg(request) {
+  const w = await who(request); mgrOnly(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['pct', 'pp', 'cat', 'disc', 'off']);
+  const db = T.tdb();
+  const ref = db.doc('ordcfg/price'), offRef = db.doc('ordcfg/price_off');
+  if (input.off !== undefined) {
+    if (input.off !== true) throw bad('bad-field', 'off: true בלבד');
+    await db.runTransaction(async (tx) => { const s = await tx.get(ref); if (s.exists) { tx.set(offRef, Object.assign({}, s.data(), { offAt: Date.now(), by: w.uid })); tx.delete(ref); } });
+    return { ok: true, off: true };
+  }
+  const up = {};
+  for (const [k, l] of [['pct', 'אחוז מעל העלות'], ['pp', 'אחוז ללקוח פרטי'], ['disc', 'הנחה כללית']]) if (input[k] !== undefined) up[k] = pctIn(input[k], l);
+  if (up.disc != null && up.disc > 100) throw bad('bad-pct', 'הנחה כללית: עד 100%');
+  if (input.cat !== undefined) {
+    if (input.cat !== null && (typeof input.cat !== 'object' || Array.isArray(input.cat))) throw bad('bad-cat', 'אחוז לקטגוריה לא תקין');
+    const m = {};
+    const ent = Object.entries(input.cat || {});
+    if (ent.length > 300) throw bad('bad-cat', 'עד 300 קטגוריות');
+    for (const [k, v] of ent) { if (!PID_RE.test(k)) throw bad('bad-cat', 'קטגוריה לא תקינה'); if (v !== null && v !== '') m[k] = pctIn(v, 'אחוז לקטגוריה'); }
+    up.cat = m;
+  }
+  let res = null;
+  await db.runTransaction(async (tx) => {
+    const [s, o] = await tx.getAll(ref, offRef);
+    const base = s.exists ? s.data() : (o.exists ? o.data() : {});
+    const d = {};
+    for (const k of ['pct', 'pp', 'disc', 'cat']) { const v = up[k] !== undefined ? up[k] : base[k]; if (v !== null && v !== undefined) d[k] = v; }
+    d.upd = Date.now(); d.by = w.uid;
+    tx.set(ref, d);
+    res = d;
+  });
+  if (w.biz && w.biz.exists) await getFirestore().collection(`b/${w.bizId}/audit`).add({ by: w.uid, t: Date.now(), act: 'setPriceCfg', note: JSON.stringify(Object.assign({}, res, { upd: undefined, by: undefined })).slice(0, 500) });
+  const cfg = { cat: res.cat || {} };
+  for (const k of ['pct', 'pp', 'disc']) if (res[k] != null) cfg[k] = res[k];
+  return { ok: true, cfg };
+}
+// ackPriceAlert({ id }) – מנהל מסמן שטיפל בהתראה (המסמך נשאר, st:'done')
+async function ackPriceAlert(request) {
+  const w = await who(request); mgrOnly(w);
+  const input = inputObject(request);
+  onlyKeys(input, ['id']);
+  if (typeof input.id !== 'string' || !/^p_[A-Za-z0-9_-]{1,40}$/.test(input.id)) throw bad('bad-id', 'התראה לא תקינה');
+  const ref = T.tdb().doc('aralert/' + input.id);
+  const s = await ref.get();
+  if (!s.exists) throw new HttpsError('not-found', 'ההתראה לא נמצאה', { reason: 'no-alert' });
+  await ref.update({ st: 'done', doneBy: w.uid, doneAt: Date.now() });
+  return { ok: true };
+}
+const FNS = { setCustCfg, wipeCusts, restoreCusts, findCust, setCustPrice, delCustPrice, setPriceCfg, ackPriceAlert };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(['wipeCusts', 'restoreCusts'].includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f)); // 11.11.2026: אלפי לקוחות
 const SFNS = { saveCust, importCusts, setCard, getCard, delCard, mergeCust }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY], ...(k === 'importCusts' ? { timeoutSeconds: 540, memory: '512MiB' } : {}) }, wrap(k, f)); // ייבוא גדול: 60 שניות לא מספיקות (10.11)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, custRows, CARD_ENC_KEY, MAX_ROWS, tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, saveCore, custRows, CARD_ENC_KEY, MAX_ROWS, tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });
