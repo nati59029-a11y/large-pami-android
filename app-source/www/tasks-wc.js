@@ -4,7 +4,10 @@
    אין כאן קריאות fsx: כתיבה לשרת רק דרך tkPatch / FRM.tkAdd / ACT.ptDone הקיימים.
    נשמר במכשיר (לכל עסק ומשתמש): lp-rem-<uid> תזכורות, lp-snz-<uid> דחיות, lp-tk-dt-<uid> "בוצע היום", lp-tk-ndv-<uid> "ראיתי" לתזכורת מנהל,
    lp-tk-mn-<uid> הודעת בוקר; lp-tk-flt סינון, lp-tk-tpl תבניות מנהל.
-   התראות: @capacitor/local-notifications, רק אם התוסף קיים (APK ישן / דפדפן – הכול בתוך האפליקציה בלבד). */
+   התראות: @capacitor/local-notifications, רק אם התוסף קיים (APK ישן / דפדפן – הכול בתוך האפליקציה בלבד).
+   סבב 2: שדות חדשים במשימה ובמשימה פרטית – dl (יעד בפועל), pri, cat, est, ck/ckd (רשימת סימון), sa ("התחלתי").
+   מוצגים לעריכה רק כשהכללים החדשים פורסמו: גלאי rv/tk2 (tkRv ב-index.html) – נשמר במכשיר לכל עסק ל-6 שעות (lp-tk-rv), ומתרענן ב"רענן".
+   ביציאה מהחשבון (syOut ← W.out): מבטלים את ההתראות המקומיות ומוחקים מהמכשיר את התזכורות, הדחיות, התבניות והסינון. */
 (function(){'use strict';
 if(typeof V==='undefined'||typeof V.tk!=='function'||typeof tkIL==='undefined'||typeof tkDl!=='function')return;
 const W={},H=36e5,MIN=6e4,ND_GAP=30*MIN,MID=7000001;
@@ -43,16 +46,19 @@ function doneToday(){const t0=day0(0),me=SY.uid,by=String(fbBy()||'').toLowerCas
 const ndSeen=()=>rd(KU('lp-tk-ndv'),{});
 const ndNew=t=>!!(t&&t.st==='open'&&t.nd>0&&!fbAdmin()&&tkSee(t)&&(!t.ow||t.ow===SY.uid)&&ndSeen()[t.id]!==t.nd);
 /* ---- סינון וחיפוש ---- */
-const FLK=()=>LK('lp-tk-flt'),fl=()=>{const f=rd(FLK(),{});return{q:typeof f.q==='string'?f.q.slice(0,60):'',c:typeof f.c==='string'?f.c:''}};
-const FC=[['','הכול'],['mine','שלי'],['mgr','מהמנהל'],['prv','פרטיות'],['late','באיחור'],['today','להיום'],['week','השבוע']];
-function pass(x,F,now){if(F.q){const s=[x.txt,x.by,x.owN,(x.toN||[]).join(' ')].join(' ').toLowerCase();if(!s.includes(F.q.toLowerCase()))return false}
+const FLK=()=>LK('lp-tk-flt'),fl=()=>{const f=rd(FLK(),{});return{q:typeof f.q==='string'?f.q.slice(0,60):'',c:typeof f.c==='string'?f.c:'',t:typeof f.t==='string'?f.t.slice(0,30):''}};
+const FC=[['','הכול'],['mine','שלי'],['mgr','מהמנהל'],['urg','דחוף'],['prv','פרטיות'],['late','באיחור'],['today','להיום'],['week','השבוע']];
+function pass(x,F,now){if(F.q){const s=[x.txt,x.by,x.owN,x.cat,(x.toN||[]).join(' ')].join(' ').toLowerCase();if(!s.includes(F.q.toLowerCase()))return false}
+ if(F.t&&(x.k==='r'||(x.cat||'')!==F.t))return false;
  const rem=x.k==='r',dl=rem?x.at:tkDl(x);
- switch(F.c){case'mine':return rem||(x.pv?x.owner===SY.uid:(x.ow===SY.uid||x.owner===SY.uid));case'mgr':return !rem&&!x.pv&&x.role==='a';case'prv':return rem||!!x.pv;
+ switch(F.c){case'mine':return rem||(x.pv?x.owner===SY.uid:(x.ow===SY.uid||x.owner===SY.uid));case'mgr':return !rem&&!x.pv&&x.role==='a';case'prv':return rem||!!x.pv;case'urg':return !rem&&x.pri==='h';
   case'late':return rem?x.at<now:x.pv?(x.st!=='done'&&now>dl)||x.late==='1':tkIsLate(x);case'today':return dl<day0(1);case'week':return dl<wkEnd()}return true}
-W.flt=L=>{const F=fl();if(!on()||(!F.q&&!F.c))return L;const now=Date.now();return L.filter(x=>pass(x,F,now))};
+W.flt=L=>{const F=fl();if(!on()||(!F.q&&!F.c&&!F.t))return L;const now=Date.now();return L.filter(x=>pass(x,F,now))};
 W.fbar=tab=>{if(!on()||!['my','open','late','done','wait'].includes(tab))return '';const F=fl();
  return `<div class="chips" style="flex-wrap:nowrap;overflow-x:auto;margin:-4px 0 8px;padding-bottom:2px">${FC.map(c=>`<button class="chip ${F.c===c[0]?'on':''}" data-a="tkwF" data-v="${c[0]}" style="flex:none;min-height:36px;padding:0 12px">${c[1]}</button>`).join('')}</div>
+ ${(()=>{const C=cats();if(F.t&&!C.includes(F.t))C.unshift(F.t);return C.length?`<label class="f" style="margin:0 0 8px"><span>נושא</span><select data-c="tkwT" aria-label="סינון לפי נושא"><option value="">כל הנושאים</option>${C.map(c=>`<option value="${esc(c)}" ${c===F.t?'selected':''}>${esc(c)}</option>`).join('')}</select></label>`:''})()}
  <label class="f" style="margin:0 0 10px"><input type="search" data-i="tkwQ" value="${esc(F.q)}" maxlength="60" placeholder="חיפוש במשימות…" aria-label="חיפוש במשימות" style="width:100%"></label>`};
+CHG.tkwT=el=>{const F=fl();F.t=String(el.value||'').slice(0,30);wr(FLK(),F);tkRe()};
 ACT.tkwF=el=>{const F=fl();F.c=el.dataset.v||'';wr(FLK(),F);tkRe()};
 let qT=0;INP.tkwQ=el=>{clearTimeout(qT);qT=setTimeout(()=>{const F=fl();F.q=String(el.value||'').slice(0,60);wr(FLK(),F);tkRe();const n=document.querySelector('input[data-i=tkwQ]');if(n){n.focus();try{n.setSelectionRange(n.value.length,n.value.length)}catch(e){}}},300)};
 /* ---- פריטי "היום שלי" ---- */
@@ -65,7 +71,7 @@ function items(){const me=SY.uid,adm=fbAdmin(),out=[],now=Date.now(),sz=snzL();
 const grpOf=(ms,now)=>!(ms<Infinity)?'nd':ms<now?'late':ms<day0(1)?'today':ms<day0(2)?'tom':ms<wkEnd()?'week':'later';
 const GR=[['mgr','תזכורת מהמנהל','var(--bad)'],['late','באיחור / הגיע הזמן','var(--bad)'],['today','היום',''],['tom','מחר',''],['week','השבוע',''],['later','בהמשך',''],['nd','בלי תאריך','']];
 W.myCount=()=>{if(!on())return 0;const now=Date.now();return items().filter(x=>!x.sz&&(x.nd||x.at<day0(1))).length};
-W.tabs=(adm,L,PL)=>{if(!on())return [];if(!W.d0){W.d0=1;if(!adm&&TKT==='open')TKT='my'}
+W.tabs=(adm,L,PL)=>{if(!on())return [];W.rvChk(0);if(!W.d0){W.d0=1;if(!adm&&TKT==='open')TKT='my'}
  return [['my',icd('clock')+' היום שלי',W.myCount()]].concat(adm?[['team',icd('users')+' צוות',0]]:[])};
 const remCard=r=>{const did=esc(r.id),sz=snzL()['r:'+r.id];
  return `<div class="card" id="rmc-${did}"><div style="white-space:pre-wrap;font-weight:700">${esc(r.txt)}</div><div style="margin:6px 0"><span class="tag t2">${icd('bell')} תזכורת</span>${r.rp?` <span class="tag t1">${icd('refresh')} ${esc(rpTx(r))}</span>`:''}${sz?` <span class="tag t1">${icd('clock')} נדחתה עד ${esc(whenTx(sz))}</span>`:''}</div>
@@ -90,23 +96,24 @@ function teamView(){const S=TKST.L,L=TK.L||[],now=Date.now(),t0=day0(0),m30=now-
  const op=(a,v,t,n)=>`<button class="opt" data-a="${a}" ${v?`data-v="${v}"`:''}><span>${t}</span><b style="color:${n?'var(--acc)':'var(--mut)'}">${n}</b></button>`;
  let h=`<div class="card"><h3 style="margin:0 0 8px">${icd('bell')} דורש ממני</h3>${op('tkwTab','wait','משימות שממתינות לאישור',p.w)}${op('tkwTab','wait','תגובות חדשות במשימות',p.c)}${op('go','rq','בקשות חדשות מעובדים',q)}${op('tkwTab','open','משימות שאף עובד לא תפס',fr)}</div>`;
  if(!S)return h+`<p class="note">${TKST.busy||!TKST.t?'טוען רשימת עובדים…':'לא ניתן לטעון את רשימת העובדים.'}</p>`;
- const st={};S.forEach(s=>st[s.uid]={s,o:0,l:0,d:0,n30:0,ok30:0});
+ const st={};S.forEach(s=>st[s.uid]={s,o:0,l:0,d:0,n30:0,ok30:0,w:0});
  const byEm={};S.forEach(s=>{if(s.em)byEm[s.em]=s.uid});
  L.forEach(t=>{if(t.st==='done'||t.st==='wait'){const u=t.ow&&st[t.ow]?t.ow:byEm[String(t.doneBy||'').toLowerCase()];const r=u&&st[u];if(!r)return;if(t.sub>=t0)r.d++;if(t.st==='done'&&t.sub>=m30){r.n30++;if(!tkIsLate(t))r.ok30++}return}
-  const us=t.ow?[t.ow]:tkNew(t)?t.to:[];us.forEach(u=>{const r=st[u];if(!r)return;r.o++;if(tkLateNow(t))r.l++})});
+  const us=t.ow?[t.ow]:tkNew(t)?t.to:[];us.forEach(u=>{const r=st[u];if(!r)return;r.o++;if(tkLateNow(t))r.l++;if(t.sa>0&&t.st==='open'&&t.ow===u)r.w++})});
  const rows=Object.values(st).sort((a,b)=>(b.l-a.l)||(b.o-a.o)||a.s.name.localeCompare(b.s.name,'he'));
  const k=(lb,v,c)=>`<div style="flex:1;min-width:60px;text-align:center"><b style="display:block;font-size:1.1rem;${c?'color:'+c:''}">${v}</b><small class="note">${lb}</small></div>`;
- h+=`<div class="mh"><span>העובדים</span><span>${rows.length}</span></div>`+(rows.length?rows.map(r=>`<div class="card" style="padding:10px 12px"><div style="font-weight:700;margin-bottom:6px">${esc(r.s.name)}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${k('פתוחות',r.o)}${k('באיחור',r.l,r.l?'var(--bad)':'')}${k('בוצעו היום',r.d,r.d?'var(--inc)':'')}${k('בזמן (30 יום)',r.n30?Math.round(r.ok30*100/r.n30)+'%':'–')}</div></div>`).join(''):'<p class="note">אין עובדים פעילים.</p>');
+ h+=`<div class="mh"><span>העובדים</span><span>${rows.length}</span></div>`+(rows.length?rows.map(r=>`<div class="card" style="padding:10px 12px"><div style="font-weight:700;margin-bottom:6px">${esc(r.s.name)}</div><div style="display:flex;gap:4px;flex-wrap:wrap">${k('פתוחות',r.o)}${k('באיחור',r.l,r.l?'var(--bad)':'')}${k('בוצעו היום',r.d,r.d?'var(--inc)':'')}${k('בזמן (30 יום)',r.n30?Math.round(r.ok30*100/r.n30)+'%':'–')}${k('בעבודה',r.w,r.w?'var(--acc)':'')}</div></div>`).join(''):'<p class="note">אין עובדים פעילים.</p>');
  return h+'<p class="note">מחושב מהמשימות שנטענו במכשיר. "בזמן" – מתוך המשימות שבוצעו ב-30 הימים האחרונים.</p>'}
 ACT.tkwTab=el=>{TKT=el.dataset.v||'open';rerender()};
 W.view=(tab,card)=>{if(!on())return '';return tab==='team'?(fbAdmin()?teamView():''):myView(card)};
 /* ---- תגיות ופעולות בכרטיס משימה ---- */
-W.tag=t=>{if(!on())return '';let s=inMy&&inMy.k==='t'?srcTag(inMy)+' ':'';
+W.tag=t=>{if(!on())return '';let s=(inMy&&inMy.k==='t'?srcTag(inMy)+' ':'')+xTags(t);
+ if(t.sa>0&&t.st==='open')s+=`<span class="tag t3">${icd('clock')} ${t.ow===SY.uid?'התחלתי ב-':'בעבודה אצל '+esc(t.owN||'עובד')+' מ-'}${hhmm(t.sa)}</span> `;
  if(t.nd>0&&t.st==='open'){if(fbAdmin())s+=`<span class="tag t2">${icd('bell')} נשלחה תזכורת · ${hhmm(t.nd)}</span> `;else if(ndNew(t))s+=`<span class="tag t4">${icd('bell')} תזכורת מהמנהל · ${hhmm(t.nd)}</span> `}return s};
-W.act=t=>{if(!on()||t.st!=='open')return '';const did=esc(t.id);
- if(fbAdmin())return tkNew(t)?`<button class="btn g" data-a="tkwNd" data-id="${did}">${icd('bell')} הזכר לעובד</button>`:'';
- return ndNew(t)?`<button class="btn g" data-a="tkwNdSeen" data-id="${did}">ראיתי את התזכורת</button>`:''};
-W.ptTag=p=>{if(!on())return '';const s=inMy?srcTag(inMy)+' ':'',z=p.st!=='done'&&snzL()['p:'+p.id];return s+(z?`<span class="tag t1">${icd('clock')} נדחתה עד ${esc(whenTx(z))}</span>`:'')};
+W.act=t=>{if(!on()||t.st!=='open')return '';const did=esc(t.id),sa=rvNew()&&t.ow===SY.uid&&!(t.sa>0)?`<button class="btn g" data-a="tkwSa" data-id="${did}">▶ התחלתי</button>`:'';
+ if(fbAdmin())return sa+(tkNew(t)?`<button class="btn g" data-a="tkwNd" data-id="${did}">${icd('bell')} הזכר לעובד</button>`:'');
+ return sa+(ndNew(t)?`<button class="btn g" data-a="tkwNdSeen" data-id="${did}">ראיתי את התזכורת</button>`:'')};
+W.ptTag=p=>{if(!on())return '';const s=(inMy?srcTag(inMy)+' ':'')+xTags(p)+(p.st!=='done'&&p.dl>=0?`<span class="tag t1">${icd('clock')} ${p.dl>0?'יעד: '+esc(whenTx(p.dl)):'בלי יעד'}</span> `:''),z=p.st!=='done'&&snzL()['p:'+p.id];return s+(z?`<span class="tag t1">${icd('clock')} נדחתה עד ${esc(whenTx(z))}</span>`:'')};
 W.ptAct=p=>on()&&p.st!=='done'&&p.owner===SY.uid?`<button class="btn g" data-a="tkwSnz" data-k="p" data-id="${esc(p.id)}">${icd('clock')} דחה</button>`:'';
 ACT.tkwNd=el=>{const t=tkGet(el.dataset.id);if(!t||!fbAdmin())return;const ago=Date.now()-(t.nd||0);
  if(t.nd&&ago<ND_GAP)return toast('כבר נשלחה תזכורת לפני '+Math.max(1,Math.round(ago/MIN))+' דקות. אפשר שוב בעוד '+Math.ceil((ND_GAP-ago)/MIN)+' דקות');
@@ -174,12 +181,13 @@ const hid=s=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))|0;return
 let sT=0;W.sched=()=>{clearTimeout(sT);sT=setTimeout(()=>{schedNow().catch(()=>{})},1200)};
 async function schedNow(){if(!LN()||!SY.uid)return;const P=await lnSetup();if(!P||!(await lnPerm(false)))return;const b=LK(''),u=SY.uid;
  let pend=[];try{pend=((await P.getPending())||{}).notifications||[]}catch(e){}
- const old=pend.filter(n=>n&&n.extra&&n.extra.lp==='wc'&&n.extra.b===b&&n.extra.u===u).map(n=>({id:n.id}));if(old.length)try{await P.cancel({notifications:old})}catch(e){}
+ /* גם התראות של משתמש אחר שהתחבר קודם במכשיר הזה (אם הביטול ביציאה לא הספיק) */
+ const old=pend.filter(n=>n&&n.extra&&n.extra.lp==='wc'&&((n.extra.b===b&&n.extra.u===u)||n.extra.u!==u)).map(n=>({id:n.id}));if(old.length)try{await P.cancel({notifications:old})}catch(e){}
  if(!on())return;const now=Date.now(),L=[],sz=snzL();
  remL().forEach(r=>{let ts=occ(r,now,4);const s=sz['r:'+r.id];if(s>now)ts=[s].concat(ts.filter(x=>x>s&&x!==r.at)).slice(0,4);/* הדחייה מחליפה את המופע הנוכחי */ts.forEach((at,i)=>L.push(nt(r.nid*8+i,'תזכורת',r.txt,at,{k:'r',id:r.id})))});
  (PT.L||[]).forEach(p=>{const s=sz['p:'+p.id];if(p.st!=='done'&&p.owner===u&&s>now)L.push(nt(hid(p.id),'משימה שנדחתה חזרה',p.txt,s,{k:'p',id:p.id}))});
  const m=mnCfg();if(m.on){const at=nextOcc({rp:'d',hm:m.hm},now);if(at)L.push(nt(MID,'בוקר טוב',mornTxt(),at,{k:'m'}))}
- if(L.length)try{await P.schedule({notifications:L.slice(0,64)})}catch(e){}}
+ const L2=L.slice(0,64);wr(KU('lp-ln-ids'),L2.map(n=>n.id));if(L2.length)try{await P.schedule({notifications:L2})}catch(e){}}
 /* ---- התראה בתוך האפליקציה: תזכורת מהמנהל, ותזכורות שהגיע זמנן כשאין התראות בטלפון ---- */
 const SHN=new Set();
 function wcAlert(){if(!on()||fbAdmin())return;const d=$('#dlg');if(d&&d.open)return;const now=Date.now();
@@ -192,24 +200,111 @@ ACT.tkwAlGo=()=>{ndMark(W.al||[]);closeDlg();TKT='my';W.d0=1;if(cur().v!=='tk')g
 /* ---- תבניות משימה (מנהל, במכשיר) ---- */
 const TPK=()=>LK('lp-tk-tpl'),tplL=()=>{const a=rd(TPK(),[]);return Array.isArray(a)?a.filter(x=>x&&typeof x.txt==='string').slice(0,20):[]};
 W.tplBar=()=>{if(!on()||!fbAdmin())return '';const a=tplL();
- return `<details style="margin:2px 0 8px"><summary style="cursor:pointer;color:var(--acc);font-weight:600">${icd('doc')} תבניות${a.length?' ('+a.length+')':''}</summary><div style="margin-top:6px">${a.map((t,i)=>`<div style="border:1px solid var(--line);border-radius:10px;padding:8px;margin:0 0 6px"><div style="white-space:pre-wrap;max-height:3em;overflow:hidden;font-weight:600">${esc(t.txt)}</div><small class="note">${t.to&&t.to.length?esc(tplNames(t)):'כל העובדים'}${t.np?' · '+t.np+' תמונות':''}</small><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn g" data-a="tkwTplFill" data-i="${i}">מלא טופס</button><button type="button" class="btn" data-a="tkwTplSend" data-i="${i}">שלח מתבנית</button><button type="button" class="btn g" data-a="tkwTplDel" data-i="${i}" aria-label="מחק תבנית">${icd('trash')}</button></div></div>`).join('')||'<p class="note" style="margin:0 0 6px">אין עדיין תבניות.</p>'}<button type="button" class="btn g" data-a="tkwTplSave">שמור את הטופס כתבנית</button><p class="note" style="margin:4px 0 0">התבניות נשמרות רק במכשיר הזה.</p></div></details>`};
+ return `<details style="margin:2px 0 8px"><summary style="cursor:pointer;color:var(--acc);font-weight:600">${icd('doc')} תבניות${a.length?' ('+a.length+')':''}</summary><div style="margin-top:6px">${a.map((t,i)=>`<div style="border:1px solid var(--line);border-radius:10px;padding:8px;margin:0 0 6px"><div style="white-space:pre-wrap;max-height:3em;overflow:hidden;font-weight:600">${esc(t.txt)}</div><small class="note">${t.to&&t.to.length?esc(tplNames(t)):'כל העובדים'}${t.np?' · '+t.np+' תמונות':''}${t.pri==='h'?' · דחוף':''}${t.cat?' · '+esc(t.cat):''}${t.ck&&t.ck.length?' · רשימה '+t.ck.length:''}</small><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><button type="button" class="btn g" data-a="tkwTplFill" data-i="${i}">מלא טופס</button><button type="button" class="btn" data-a="tkwTplSend" data-i="${i}">שלח מתבנית</button><button type="button" class="btn g" data-a="tkwTplDel" data-i="${i}" aria-label="מחק תבנית">${icd('trash')}</button></div></div>`).join('')||'<p class="note" style="margin:0 0 6px">אין עדיין תבניות.</p>'}<button type="button" class="btn g" data-a="tkwTplSave">שמור את הטופס כתבנית</button><p class="note" style="margin:4px 0 0">התבניות נשמרות רק במכשיר הזה.</p></div></details>`};
 const tplNames=t=>{const S=TKST.L||[];return (t.to||[]).map(u=>{const s=S.find(z=>z.uid===u);return s?s.name:null}).filter(Boolean).join(', ')||'עובדים שאינם פעילים'};
 const tkForm=()=>document.querySelector('form[data-f=tkAdd]');
 ACT.tkwTplSave=()=>{const f=tkForm();if(!f)return;const txt=String(f.elements.txt.value||'').trim().slice(0,500);if(!txt)return toast('כתוב קודם את המשימה בטופס');
  if(f.elements.prv&&f.elements.prv.checked)return toast('תבנית נשמרת רק למשימה לעובדים, לא למשימה פרטית');
  const S=TKST.L,sel=S&&S.length?tkSelInit():null,all=!S||!S.length||sel.size===S.length,a=tplL();if(a.length>=20)return toast('אפשר לשמור עד 20 תבניות. מחק תבנית ישנה');
- a.unshift({txt,to:all?[]:[...sel],np:+TKN.np||0});wr(TPK(),a.slice(0,20));toast('✓ התבנית נשמרה');tkRe()};
+ const o={txt,to:all?[]:[...sel],np:+TKN.np||0};if(rvNew()){const c=fxClean();if(['td','tm','none'].includes(FX.dk))o.dk=FX.dk;if(FX.pri)o.pri=FX.pri;if(c.cat)o.cat=c.cat;if(FX.est>0)o.est=FX.est;if(c.ck.length)o.ck=c.ck}
+ a.unshift(o);wr(TPK(),a.slice(0,20));toast('✓ התבנית נשמרה');tkRe()};
 function tplFill(i){const t=tplL()[i],f=tkForm();if(!t||!f)return null;if(f.elements.prv&&f.elements.prv.checked){f.elements.prv.checked=false;tkPrvSync()}
  const S=TKST.L||[],act=(t.to||[]).filter(u=>S.some(z=>z.uid===u));
- f.elements.txt.value=t.txt;TKN.np=Math.min(3,Math.max(0,+t.np||0));TKN.sel=S.length?new Set(t.to&&t.to.length?act:S.map(z=>z.uid)):null;tkRe();return{t,miss:t.to&&t.to.length&&!act.length}}
+ f.elements.txt.value=t.txt;TKN.np=Math.min(3,Math.max(0,+t.np||0));if(rvNew()){const z=FX0();if(['td','tm','none'].includes(t.dk))z.dk=t.dk;if(['h','l'].includes(t.pri))z.pri=t.pri;z.cat=String(t.cat||'').slice(0,30);z.est=EST.some(e=>e[0]===+t.est)?+t.est:0;z.ck=(Array.isArray(t.ck)?t.ck:[]).map(x=>String(x).slice(0,120)).slice(0,20);z.more=!!(z.cat||z.est||z.ck.length);FX=z}TKN.sel=S.length?new Set(t.to&&t.to.length?act:S.map(z=>z.uid)):null;tkRe();return{t,miss:t.to&&t.to.length&&!act.length}}
 ACT.tkwTplFill=el=>{const r=tplFill(+el.dataset.i);if(!r)return;if(r.miss)toast('העובדים שבתבנית אינם פעילים – בחר נמענים');const n=tkForm();if(n){n.scrollIntoView({block:'start'});n.elements.txt.focus()}};
 ACT.tkwTplSend=el=>{const i=+el.dataset.i,t=tplL()[i];if(!t)return;
  ask('לשלוח את המשימה "'+t.txt.slice(0,60)+(t.txt.length>60?'…':'')+'" ל'+(t.to&&t.to.length?tplNames(t):'כל העובדים')+'?',()=>{const r=tplFill(i),f=tkForm();if(!r||!f)return;if(r.miss)return toast('העובדים שבתבנית אינם פעילים – בחר נמענים ושלח מהטופס');FRM.tkAdd(f)},'שלח')};
 ACT.tkwTplDel=el=>{const i=+el.dataset.i;ask('למחוק את התבנית?',()=>{const a=tplL();a.splice(i,1);wr(TPK(),a);tkRe()},'מחק')};
+/* ---- סבב 2: גלאי גרסת הכללים (rv) ---- */
+const RVK=()=>LK('lp-tk-rv'),RVT=6*H;let rvB=0;
+const rvC=()=>{const c=rd(RVK(),null);return c&&typeof c==='object'&&(c.v===0||c.v===1)?c:null};
+const rvNew=()=>{const c=rvC();return !!(c&&c.v===1)};
+const rvSet=v=>{const c=rvC(),ch=!c||c.v!==v;wr(RVK(),{v,t:Date.now()});if(ch)tkRe()};
+W.rv=rvNew;
+W.rvChk=f=>{if(!on()||rvB||typeof tkRv!=='function')return;const c=rvC(),n=Date.now();if(!f&&c&&n-c.t<RVT&&c.t<=n)return;rvB=1;
+ tkRv().then(v=>{if(v===0||v===1)rvSet(v)}).catch(()=>{}).then(()=>{rvB=0})};
+/* ---- סבב 2: תגיות, פס צבע ורשימת סימון בכרטיס ---- */
+const EST=[[0,'בלי'],[15,'15 דק׳'],[30,'30 דק׳'],[60,'שעה'],[120,'שעתיים']];
+const estTx=m=>{const e=EST.find(x=>x[0]===m);return e?e[1]:m>=60?(Math.round(m/6)/10)+' שע׳':m+' דק׳'};
+const ckN=x=>{const n=(x.ck||[]).length,s=new Set((x.ckd||[]).filter(i=>i>=0&&i<n));return[s.size,n,s]};
+function xTags(x){let s='';if(x.pri==='h')s+=`<span class="tag t4">${icd('warn')} דחוף</span> `;else if(x.pri==='l')s+='<span class="tag" style="color:var(--mut)">נמוכה</span> ';
+ if(x.cat)s+=`<span class="tag t2">${esc(x.cat)}</span> `;if(x.est>0)s+=`<span class="tag t1">${icd('clock')} ${esc(estTx(x.est))}</span> `;
+ const c=ckN(x);if(c[1])s+=`<span class="tag ${c[0]===c[1]?'t3':'t1'}">☑ ${c[0]}/${c[1]}</span> `;return s}
+W.bar=x=>!on()?'':x.pri==='h'?';border-inline-start:5px solid var(--bad)':x.pri==='l'?';border-inline-start:5px solid var(--mut)':'';
+const ckCan=x=>rvNew()&&(x.pv?(x.st!=='done'&&(x.owner===SY.uid||fbAdmin())):(x.st==='open'&&(fbAdmin()||x.ow===SY.uid||(!tkNew(x)&&!x.ow))));
+const ckO=new Set();
+W.ckH=x=>{if(!on())return '';const c=ckN(x);if(!c[1])return '';const k=(x.pv?'p':'t'),can=ckCan(x),did=esc(x.id);
+ return `<details class="tkck" style="margin:0 0 6px" ${ckO.has(k+':'+x.id)?'open':''}><summary data-a="tkwCkTog" data-k="${k}" data-id="${did}" style="cursor:pointer;font-weight:600;color:var(--acc)">רשימת סימון ${c[0]}/${c[1]}</summary><div style="display:grid;gap:4px;margin-top:6px">${x.ck.map((t,i)=>{const d=c[2].has(i);
+  return can?`<button type="button" class="opt" data-a="tkwCk" data-k="${k}" data-id="${did}" data-n="${i}" aria-pressed="${d}" style="justify-content:flex-start;gap:8px;text-align:start;min-height:40px"><span aria-hidden="true">${d?'☑':'☐'}</span><span style="${d?'text-decoration:line-through;opacity:.7':''};white-space:pre-wrap">${esc(t)}</span></button>`
+  :`<div style="display:flex;gap:8px"><span aria-hidden="true">${d?'☑':'☐'}</span><span style="${d?'text-decoration:line-through;opacity:.7':''};white-space:pre-wrap">${esc(t)}</span></div>`}).join('')}</div></details>`};
+ACT.tkwCkTog=el=>{const d=el.parentElement,k=el.dataset.k+':'+el.dataset.id;if(!d)return;d.open=!d.open;if(d.open)ckO.add(k);else ckO.delete(k)};
+let ckQ=Promise.resolve();
+ACT.tkwCk=el=>{const k=el.dataset.k,id=el.dataset.id,n=+el.dataset.n,x=k==='p'?(typeof ptGet==='function'?ptGet(id):null):tkGet(id);if(!x||!ckCan(x))return;
+ const prev=(x.ckd||[]).slice(),s=new Set(prev);if(s.has(n))s.delete(n);else s.add(n);const nx=[...s].filter(i=>i>=0&&i<(x.ck||[]).length).sort((a,b)=>a-b);
+ x.ckd=nx;ckO.add(k+':'+id);tkSave();tkRe();
+ ckQ=ckQ.then(()=>k==='p'?docPatch('ptk',id,{ckd:nx}):tkPatch(id,{ckd:nx})).catch(e=>{x.ckd=prev;tkSave();tkRe();toast(tkErr(e))})};
+W.ckWarn=t=>{if(!on())return '';const c=ckN(t);return c[1]&&c[0]<c[1]?'שים לב: סומנו '+c[0]+' מתוך '+c[1]+' פריטים ברשימה. ':''};
+ACT.tkwSa=el=>{const t=tkGet(el.dataset.id);if(!t||!rvNew())return;tkDo(()=>tkPatch(t.id,{sa:Date.now()}),'✓ סומן שהתחלת לעבוד על המשימה')};
+/* ---- סבב 2: הטופס – יעד, עדיפות, משך, נושא, רשימת סימון (מצב בזיכרון, כדי שרענון לא ימחק) ---- */
+const FX0=()=>({dk:'d3',d:'',tm:'',est:0,pri:'',cat:'',ck:[],more:0});let FX=FX0();
+const NOTE72='<p class="note" style="margin:2px 0 8px">3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p>';
+function cats(){const m=new Set();(TK.L||[]).concat(PT.L||[]).forEach(x=>{if(x&&x.cat)m.add(x.cat)});tplL().forEach(t=>{if(t.cat)m.add(String(t.cat).slice(0,30))});return [...m].slice(0,30).sort((a,b)=>a.localeCompare(b,'he'))}
+const fxClean=()=>({cat:String(FX.cat||'').trim().slice(0,30),ck:(FX.ck||[]).map(x=>String(x||'').trim().slice(0,120)).filter(Boolean).slice(0,20)});
+W.fold=tab=>on()&&tab==='my'&&!W.fo;
+ACT.tkwFold=()=>{W.fo=1;rerender();setTimeout(()=>{const t=document.querySelector('form[data-f=tkAdd] textarea');if(t){t.scrollIntoView({block:'center'});t.focus()}},60)};
+W.formX=()=>{if(!on())return '';
+ if(!rvNew())return '<p class="note" style="margin:4px 0 2px">יעד לביצוע: '+NOTE72.replace(/^<p[^>]*>|<\/p>$/g,'')+'</p><p class="note" style="margin:0 0 8px">יעד גמיש, עדיפות, נושא ורשימת סימון – יופעל אחרי עדכון השרת.</p>';
+ const ch=(a,v,t,o)=>`<button type="button" class="chip ${o?'on':''}" data-a="${a}" data-v="${esc(String(v))}" aria-pressed="${!!o}" style="min-height:36px;padding:0 12px">${t}</button>`;
+ const DK=[['td','היום 23:59'],['tm','מחר'],['at','תאריך ושעה'],['d3','3 ימי עסקים'],['none','בלי יעד']];
+ let h=`<div class="f" style="margin:6px 0 2px"><span>יעד לביצוע</span><div class="chips" style="margin:4px 0">${DK.map(d=>ch('tkwDk',d[0],d[1],FX.dk===d[0])).join('')}</div></div>`;
+ if(FX.dk==='at')h+=`<div class="row" style="gap:8px"><label class="f grow"><span>תאריך</span><input type="date" data-i="tkwD" value="${esc(FX.d)}"></label><label class="f grow"><span>שעה</span><input type="time" data-i="tkwTm" value="${esc(FX.tm)}"></label></div>`;
+ if(FX.dk==='d3')h+=NOTE72;
+ h+=`<div class="f" style="margin:2px 0"><span>עדיפות</span><div class="chips" style="margin:4px 0">${[['h','דחוף'],['','רגילה'],['l','נמוכה']].map(p=>ch('tkwPri',p[0],p[1],FX.pri===p[0])).join('')}</div></div>`;
+ const c=fxClean(),sm=[FX.est>0?estTx(FX.est):'',c.cat,c.ck.length?c.ck.length+' פריטים':''].filter(Boolean).join(' · ');
+ h+=`<button type="button" class="btn g" data-a="tkwMore" aria-expanded="${!!FX.more}" style="margin:4px 0 8px;min-height:40px">${FX.more?'▴':'▾'} משך, נושא ורשימת סימון${sm?' ('+esc(sm)+')':''}</button>`;
+ if(FX.more){const C=cats();
+  h+=`<div class="f" style="margin:2px 0"><span>משך משוער</span><div class="chips" style="margin:4px 0">${EST.map(e=>ch('tkwEst',e[0],e[1],FX.est===e[0])).join('')}</div></div>
+  <label class="f"><span>נושא</span><input data-i="tkwCat" list="tkwCats" maxlength="30" value="${esc(FX.cat)}" placeholder="למשל: מלאי, קופה, ניקיון" autocomplete="off"></label><datalist id="tkwCats">${C.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist>
+  <div class="f"><span>רשימת סימון${FX.ck.length?' ('+FX.ck.length+'/20)':''}</span>${FX.ck.map((v,i)=>`<div class="row" style="gap:6px;margin:4px 0;flex-wrap:nowrap"><input data-i="tkwCkI" data-n="${i}" value="${esc(v)}" maxlength="120" placeholder="פריט ${i+1}" aria-label="פריט ${i+1}" style="flex:1;min-width:0"><button type="button" class="btn g" data-a="tkwCkDel" data-n="${i}" aria-label="הסר פריט ${i+1}" style="flex:none;min-height:40px;padding:0 12px">✕</button></div>`).join('')}${FX.ck.length<20?'<button type="button" class="btn g" data-a="tkwCkAdd" style="min-height:40px;margin:4px 0 8px">+ הוסף פריט</button>':''}<p class="note" style="margin:0 0 8px">הרשימה לא חוסמת "בוצע" – רק מזכירה.</p></div>`}
+ return h};
+ACT.tkwDk=el=>{FX.dk=el.dataset.v;if(FX.dk==='at'&&!FX.d){const t=Date.now()+2*H,r=t-(t%(15*MIN))+15*MIN;FX.d=ymd(r);FX.tm=hhmm(r)}tkRe()};
+ACT.tkwPri=el=>{FX.pri=el.dataset.v||'';tkRe()};
+ACT.tkwEst=el=>{FX.est=+el.dataset.v||0;tkRe()};
+ACT.tkwMore=()=>{FX.more=FX.more?0:1;tkRe()};
+ACT.tkwCkAdd=()=>{if(FX.ck.length>=20)return;FX.ck.push('');FX.more=1;tkRe();setTimeout(()=>{const a=document.querySelectorAll('form[data-f=tkAdd] [data-i=tkwCkI]');if(a.length)a[a.length-1].focus()},40)};
+ACT.tkwCkDel=el=>{FX.ck.splice(+el.dataset.n,1);tkRe()};
+INP.tkwD=el=>{FX.d=String(el.value||'')};INP.tkwTm=el=>{FX.tm=String(el.value||'')};INP.tkwCat=el=>{FX.cat=String(el.value||'').slice(0,30)};
+INP.tkwCkI=el=>{const i=+el.dataset.n;if(i>=0&&i<FX.ck.length)FX.ck[i]=String(el.value||'').slice(0,120)};
+/* FRM.tkAdd: השדות לשליחה (בפורמט Firestore). כללים ישנים / לא ידוע – בלי שדות חדשים */
+W.fx=()=>{if(!on())return null;const X={msg:'',f:()=>({}),done:()=>{FX=FX0();W.fo=0},
+  old:(e,fl0)=>{if(!e||e.code!==403)return false;const ks=['dl','pri','cat','est','ck','ckd'].filter(k=>k in fl0);if(!ks.length)return false;rvSet(0);
+   if('dl' in fl0){const x=new Error('rules');x.tkw='השרת עוד לא עודכן ליעד גמיש, ולכן המשימה לא נשלחה. אפשר לשלוח שוב עם יעד של 3 ימי עסקים.';throw x}
+   ks.forEach(k=>delete fl0[k]);X.msg='✓ המשימה נוספה (בלי עדיפות, נושא ורשימה – יופעלו אחרי עדכון השרת)';return true}};
+ if(!rvNew())return X;
+ const now=Date.now();let dl=null;
+ if(FX.dk==='td')dl=atDay(0,23,59);else if(FX.dk==='tm')dl=atDay(1,23,59);else if(FX.dk==='none')dl=0;
+ else if(FX.dk==='at'){const dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(FX.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(FX.tm||'');if(!dm||!tm){X.err='בחר תאריך ושעה ליעד';return X}
+  dl=tkIL.at(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);if(dl<=now){X.err='היעד שנבחר כבר עבר. בחר זמן עתידי';return X}if(dl>now+399*864e5){X.err='אפשר לקבוע יעד עד שנה קדימה';return X}}
+ const c=fxClean();
+ X.f=()=>{const o={};if(dl!==null)o.dl=iv(Math.max(0,dl));if(FX.pri==='h'||FX.pri==='l')o.pri=sv(FX.pri);if(c.cat)o.cat=sv(c.cat);if(FX.est>0&&FX.est<=1440)o.est=iv(FX.est);
+  if(c.ck.length){o.ck={arrayValue:{values:c.ck.map(sv)}};o.ckd={arrayValue:{}}}return o};
+ return X};
+/* ---- יציאה מהחשבון: ביטול ההתראות המקומיות ומחיקת המפתחות של המשתמש מהמכשיר (טלפון משותף). לא זורק שגיאות ---- */
+W.out=u=>{const k=x=>LK(x+'-'+(u||''));clearTimeout(sT);
+ try{const P=LN();if(P){const ids=rd(k('lp-ln-ids'),[]);if(Array.isArray(ids)&&ids.length)Promise.resolve(P.cancel({notifications:ids.map(id=>({id}))})).catch(()=>{});
+  Promise.resolve(P.getPending()).then(r=>{const a=((r&&r.notifications)||[]).filter(n=>n&&n.extra&&n.extra.lp==='wc').map(n=>({id:n.id}));if(a.length)return P.cancel({notifications:a})}).catch(()=>{})}}catch(e){}
+ ['lp-rem','lp-snz','lp-tk-dt','lp-tk-ndv','lp-tk-mn','lp-ln-ids'].forEach(x=>{try{localStorage.removeItem(k(x))}catch(e){}});
+ ['lp-tk-flt','lp-tk-tpl','lp-tk-rv'].forEach(x=>{try{localStorage.removeItem(LK(x))}catch(e){}});
+ FX=FX0();W.fo=0};
 /* ---- חיבור לקוד הקיים ---- */
 {const o=tkPatch;tkPatch=async function(id,ob){const r=await o.apply(this,arguments);try{if(ob&&ob.doneBy&&(ob.st==='done'||ob.st==='wait')&&ob.doneBy===fbBy()){const t=tkGet(id);logDone('t',id,t?t.txt:'')}}catch(e){}return r}}
 {const o=tkLoad;tkLoad=async function(){const r=await o.apply(this,arguments);try{W.sched();if(lnQ)lnAct()}catch(e){}return r}}
 {const o=tkAlert;tkAlert=async function(){await o.apply(this,arguments);try{wcAlert()}catch(e){}}}
+{const o=ACT.tkRefresh;if(o)ACT.tkRefresh=function(){W.rvChk(1);return o.apply(this,arguments)}}
+{const o=ACT.tkTab;if(o)ACT.tkTab=function(){W.fo=0;return o.apply(this,arguments)}}
+/* רענון המסך לא מאבד את הפוקוס בשדות החדשים של הטופס (נושא, פריט ברשימה, תאריך) */
+{const o=tkRe;tkRe=function(){const a=document.activeElement,k=a&&a.dataset&&a.dataset.i&&/^tkw(Cat|CkI|D|Tm)$/.test(a.dataset.i)?[a.dataset.i,a.dataset.n||'',a.selectionStart]:null;const r=o.apply(this,arguments);
+ if(k){const n=document.querySelector(`form[data-f=tkAdd] [data-i="${k[0]}"]${k[1]?`[data-n="${k[1]}"]`:''}`);if(n&&document.activeElement!==n){n.focus();try{if(k[2]!=null)n.setSelectionRange(k[2],k[2])}catch(e){}}}return r}}
 ['tkGoIt','tkGoAl','tkGoWait'].forEach(k=>{const o=ACT[k];if(o)ACT[k]=function(){W.d0=1;return o.apply(this,arguments)}});
 setTimeout(()=>{try{if(on()){W.sched();wcAlert()}}catch(e){}},6000);
 setTimeout(()=>{try{if(LN())lnSetup()}catch(e){}},500);

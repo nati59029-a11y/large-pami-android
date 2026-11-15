@@ -514,6 +514,27 @@ const REPLAY = {
   } },
   // ACT.tkwNd (tasks-wc.js): "הזכר לעובד" – מנהל כותב nd (עכשיו) ו-ndN (שמו) במשימה פתוחה
   M115: { run: async (uid) => [await tkPatch(uid, 't_open', { nd: Date.now(), ndN: uid })] },
+  // ---- מרכז עבודה סבב 2 ----
+  // tkRv: GET /rv/tk2 – המסמך לא קיים; צוות מקבל 404 ("כללים חדשים"), אחרים 403
+  M116: { allowed: () => [404], run: async (uid) => [await fsx(uid, '/rv/tk2')] },
+  // ACT.tkwSa: המטפל מסמן "התחלתי" (sa = עכשיו)
+  M117: { run: async (uid, env) => {
+    await bypass(env, (db) => db.doc('tasks/t_open').update({ ow: uid, owN: uid, clt: Date.now() }));
+    return [await tkPatch(uid, 't_open', { sa: Date.now() })];
+  } },
+  // ACT.tkwCk: סימון פריטים (ckd – מערך מספרים) במשימה ישנה שלא נתפסה – כמו tkPatch באפליקציה
+  M118: { run: async (uid, env) => {
+    await bypass(env, (db) => db.doc('tasks/t_open').update({ ck: ['א', 'ב', 'ג'], ckd: [] }));
+    return [await fsx(uid, '/tasks/t_open?updateMask.fieldPaths=ckd&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { ckd: { arrayValue: { values: [iv(0), iv(2)] } } } }) })];
+  } },
+  // FRM.tkAdd עם השדות החדשים (W.fx ב-tasks-wc.js): dl, pri, cat, est, ck, ckd ריק
+  M119: { run: async (uid, env, role) => {
+    const now = Date.now(); const adm = role === 'manager' || role === 'managerAdminsOnly';
+    const fields = { owner: sv(uid), by: sv(uid), role: sv(adm ? 'a' : 'w'), txt: sv('ספירת מלאי'), cr: iv(now), due: iv(now + 4 * 86400000), st: sv('open'), open: sv('1'),
+      pr: sv(''), img: sv(''), sub: iv(0), doneBy: sv(''), note: sv(''), ok: iv(0), late: sv(''),
+      dl: iv(now + 5 * 3600000), pri: sv('h'), cat: sv('מלאי'), est: iv(30), ck: { arrayValue: { values: [sv('מדף 1'), sv('מדף 2')] } }, ckd: { arrayValue: {} } };
+    return [await fsx(uid, '/tasks?documentId=' + encodeURIComponent(fresh('t')), { method: 'POST', body: JSON.stringify({ fields }) })];
+  } },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,

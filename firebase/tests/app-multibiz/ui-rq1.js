@@ -226,6 +226,9 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   // משימות: כפתור בקשה, פרטית של עובד, לשונית בוצעו
   task('t-w1', { txt: S('משימה רגילה לעובד'), ow: S('w1') }); DB.tasks['t-w1'].txt = S('משימה רגילה לעובד');
   await wp.evaluate(() => { go('tk'); }); await sleep(900);
+  // מרכז עבודה סבב 2: ב"היום שלי" (ברירת המחדל לעובד) הטופס מקופל לכפתור "+ משימה חדשה"
+  check('30א "היום שלי": הטופס מקופל לכפתור "+ משימה חדשה", והרשימה מופיעה מיד', await wp.evaluate(() => TKT === 'my' && !!document.querySelector('[data-a=tkwFold]') && document.querySelector('form[data-f=tkAdd]').hidden));
+  await wp.click('[data-a=tkwFold]'); await sleep(300);
   const wt1 = await txt(wp, '#main');
   check('30 מסך המשימות של העובד: כפתור "בקשה למנהל", תיבת "משימה פרטית", לשונית בוצעו', /בקשה למנהל/.test(wt1) && /משימה פרטית \(רק אני והמנהל\)/.test(wt1) && /בוצעו/.test(wt1) && !/קבועות/.test(wt1) && !/ממתין לטיפול\s*\(/.test(wt1), wt1.slice(0, 300));
   await wp.fill('form[data-f=tkAdd] textarea', 'להזמין חלב לעצמי'); await wp.check('form[data-f=tkAdd] input[name=prv]');
