@@ -765,6 +765,8 @@ FRM.secOrdCust=async f=>{const O=ordO();if(!O||!O.o)return;const v=fd(f),card={}
 ACT.secOrdSend=el=>{const O=ordO();if(!O||!O.o)return;const o=O.o;ask('לשלוח את טיוטת ההזמנה אל '+o.to+' מה-Gmail של העסק? הלקוח יקבל את הטקסט שמופיע בתצוגה המקדימה.',async()=>{el.disabled=true;try{const r=await fnCall('secMail',{op:'ordSend',id:O.id,ver:o.ver});toast(r&&r.already?'כבר נשלח':'הטיוטה נשלחה ללקוח');X.ml.list=null}catch(e){if(e&&e.reason==='maybe-sent'){ordMarkAsk();return ACT.secOrdRe()}ordErr(e)}finally{el.disabled=false;ACT.secOrdRe()}},'שלח')};
 function ordMarkAsk(){const O=ordO();if(!O)return;ask(MERR['maybe-sent']+' לסמן כנשלח?',async()=>{try{await fnCall('secMail',{op:'ordSend',id:O.id,mark:true});toast('סומן כנשלח');X.ml.list=null}catch(e){merr(e)}finally{ACT.secOrdRe()}},'סמן נשלח')}
 ACT.secOrdMark=()=>ordMarkAsk();
+/* סבב שיפורים: הטלפון מהמייל לכרטיס הלקוח (ordPhone) – רק בלחיצה ואחרי אישור */
+ACT.secOrdPhone=el=>{const O=ordO();if(!O||!O.o)return;const o=O.o;ask('לעדכן את הטלפון '+o.phoneHint+' בכרטיס הלקוח '+(o.custName||'')+'?',async()=>{el.disabled=true;try{const r=await fnCall('secMail',{op:'ordPhone',id:O.id,ver:o.ver});if(r&&r.ord)O.o=r.ord;toast('הטלפון עודכן בכרטיס הלקוח')}catch(e){ordErr(e)}finally{el.disabled=false;rerender()}},'עדכן')};
 ACT.secOrdReset=async el=>{const O=ordO();if(!O)return;el.disabled=true;try{await fnCall('secMail',{op:'ordReset',id:O.id})}catch(e){merr(e)}finally{ACT.secOrdRe()}};
 function ordLineH(l,i,ed){const q=ed?`<label class="f"><small class="note">כמות</small><input type="number" inputmode="decimal" min="0" step="any" data-c="secOrdQty" data-i="${i}" value="${l.qty?esc(String(l.qty)):''}" style="min-height:44px" aria-label="כמות בשורה ${i+1}"></label><button class="chip" data-a="secOrdOp" data-k="del" data-i="${i}" style="min-height:44px">מחק שורה</button>`:'';
  let b;const u=l.unit?' '+esc(l.unit):'',tag=(c,t)=>`<span class="sectags ${c}">${t}</span>`;
@@ -785,7 +787,7 @@ function ordBlkH(d){if(!d||!(d.an||[]).includes('order'))return '';
  if(!O.o)return `<div class="secdr" id="secOrd">${hd}${O.err?`<p class="note">${esc(O.err)}</p><button class="chip" data-a="secOrdRe" style="min-height:44px">נסה שוב</button>`:'<div class="empty">טוען…</div>'}</div>`;
  const o=O.o,ed=o.st==='mgr',fail=o.st==='fail',stuck=o.stuck===true,blk=ed||fail?ordBlk(o):[],lab=stuck?'ייתכן שנשלח':ORDST[o.st]||o.st;
  let h=`<div class="secdr" id="secOrd">${hd} <span class="sectags ${o.st==='ordered'||o.st==='sent'?'g':fail||stuck?'w':''}">${esc(lab)}</span>`;
- if(stuck)h+=`<p class="note" style="margin:6px 0;color:var(--warn)">${esc(MERR['maybe-sent'])}</p>`;
+ if(stuck)h+=`<div class="secin1" id="secOrdStuck" role="alert" style="border-color:var(--warn);white-space:normal"><b style="color:var(--warn)">לא ידוע אם טיוטת ההזמנה יצאה ללקוח</b><p class="note" style="margin:4px 0">השליחה התחילה ולא הסתיימה כרגיל (למשל בגלל תקלה או ניתוק), ולכן המזכירה לא שולחת שוב – כדי שהלקוח לא יקבל את הטיוטה פעמיים.</p><b>מה לעשות:</b><ol style="margin:4px 0 0;padding-inline-start:18px"><li>פתחו את Gmail של העסק ובדקו בתיקייה "נשלח" אם יש מייל אל <bdi dir="ltr">${esc(o.to)}</bdi>.</li><li>אם הוא שם – לחצו "סמן נשלח" למטה.</li><li>אם הוא לא שם – שלחו ללקוח את הטקסט שמופיע כאן בעצמכם מ-Gmail, ואז לחצו "סמן נשלח".</li></ol></div>`;
  h+=`<p style="margin:6px 0 2px"><small class="note">אל <bdi dir="ltr" class="secaddr">${esc(o.to)}</bdi></small></p>`;
  /* לקוח */
  if(o.custId)h+=`<p style="margin:4px 0"><b>לקוח:</b> ${esc(o.custName||'נבחר')}</p>`;
@@ -794,7 +796,7 @@ function ordBlkH(d){if(!d||!(d.an||[]).includes('order'))return '';
   h+=(o.cands||[]).length?`<details style="margin:4px 0"><summary style="min-height:44px">לקוח חדש (במקום המועמדים)</summary>${ordCustH(o)}</details>`:ordCustH(o)}
  /* טלפון */
  if(ed||fail){if(o.phone)h+=`<p style="margin:4px 0"><b>טלפון:</b> <bdi dir="ltr">${esc(o.phone)}</bdi></p>`;
-  else if(o.phoneHint)h+=`<div class="secrow" style="margin:4px 0;flex-wrap:wrap"><span><b>טלפון מהמייל:</b> <bdi dir="ltr">${esc(o.phoneHint)}</bdi></span><button class="chip" data-a="secOrdOp" data-k="phone" style="min-height:44px"${ed?'':' disabled'}>אישור הטלפון</button></div>`;
+  else if(o.phoneHint)h+=`<div class="secrow" style="margin:4px 0;flex-wrap:wrap"><span><b>טלפון מהמייל:</b> <bdi dir="ltr">${esc(o.phoneHint)}</bdi></span><button class="chip" data-a="secOrdOp" data-k="phone" style="min-height:44px"${ed?'':' disabled'}>אישור הטלפון</button>${ed&&o.custId?'<button class="chip" data-a="secOrdPhone" style="min-height:44px">עדכן בכרטיס הלקוח</button>':''}</div>${ed&&!o.custId?'<small class="note">כדי לשמור את הטלפון בכרטיס הלקוח – בחרו לקוח קודם.</small>':''}`;
   else h+='<p class="note" style="margin:4px 0">אין טלפון – בטקסט ללקוח יתווסף בקשה לשלוח מספר.</p>'}
  /* סניף */
  if(ed||fail){const B=o.brs||[];if(B.length)h+=`<label class="f" style="display:block;margin:4px 0"><span><b>סניף</b>${o.brDef&&o.br?' <small class="note">(ברירת מחדל – ודאו שזה הסניף הנכון)</small>':''}</span><select class="secin" data-c="secOrdBr" aria-label="סניף" style="min-height:44px"${ed?'':' disabled'}>${o.br?'':'<option value="">בחרו סניף…</option>'}${B.map(b=>`<option value="${esc(b.id)}"${b.id===o.br?' selected':''}>${esc(b.name)}</option>`).join('')}</select></label>`;
@@ -804,7 +806,7 @@ function ordBlkH(d){if(!d||!(d.an||[]).includes('order'))return '';
  h+=`<div style="margin-top:6px"><b>שורות</b>${(o.lines||[]).length?(o.lines||[]).map((l,i)=>ordLineH(l,i,ed)).join(''):'<p class="note" style="margin:4px 0">אין שורות</p>'}</div>`;
  h+=`<p style="margin:6px 0"><b>סה"כ (שורות עם מחיר): ${ordM(o.total)}</b>${o.nBlock?` <small class="note">· ${esc(String(o.nBlock))} שורות לבחירה/לבירור/אזלו לא נספרו</small>`:''}</p>`;
  if(blk.length)h+=`<div class="secin1" style="margin:6px 0"><b>לא ניתן לשלוח עדיין</b><ul style="margin:4px 0 0;padding-inline-start:18px">${blk.map(k=>'<li>'+esc(ORDNO[k]||k)+'</li>').join('')}</ul></div>`;
- if(o.text)h+=`<details style="margin:6px 0"${ed?' open':''}><summary style="min-height:44px"><b>הטקסט שיישלח ללקוח</b></summary><div class="secin1" dir="auto" style="white-space:pre-wrap">${esc(o.text)}</div></details>`;
+ if(o.text)h+=`<details style="margin:6px 0"${ed||stuck?' open':''}><summary style="min-height:44px"><b>הטקסט שיישלח ללקוח</b></summary><div class="secin1" dir="auto" style="white-space:pre-wrap">${esc(o.text)}</div></details>`;
  if(ed)h+=`<div class="secrow"><button class="btn" data-a="secOrdSend" style="flex:1;min-height:44px"${blk.length?' disabled':''}>שלח ללקוח מה-Gmail של העסק</button></div><small class="note">הטיוטה יוצאת רק בלחיצה שלך. המחירים תמיד מהקטלוג.</small>`;
  else if(fail&&!stuck)h+=`<p class="note" style="margin:6px 0;color:var(--bad)">השליחה הקודמת נכשלה.</p><div class="secrow" style="flex-wrap:wrap"><button class="btn" data-a="secOrdSend" style="flex:1;min-height:44px"${blk.length?' disabled':''}>נסה לשלוח שוב</button><button class="chip" data-a="secOrdReset" style="min-height:44px">חזרה לעריכה</button></div>`;
  else if(stuck)h+=`<div class="secrow"><button class="btn" data-a="secOrdMark" style="flex:1;min-height:44px">סמן נשלח</button></div>`;

@@ -63,6 +63,7 @@ async function open(browser, www, w, h) {
         }
         ord.ver++; return ok({ ok: true, ord });
       }
+      if (body.op === 'ordPhone') { ord.phone = ord.phoneHint; ord.phoneHint = ''; ord.ver++; return ok({ ok: true, custId: ord.custId, ord }); }
       if (body.op === 'ordCust') { ord.custId = 'p0501234567'; ord.custName = body.card.name; ord.ver++; return ok({ ok: true, created: true, custId: ord.custId, ord }); }
       if (body.op === 'ordSend') { if (body.mark) { ord.st = 'sent'; return ok({ ok: true, marked: true }); } ord.st = 'sent'; return ok({ ok: true, id: body.id }); }
       if (body.op === 'ordAuto') {
@@ -101,6 +102,7 @@ const small = (page) => page.evaluate(() => [...document.querySelectorAll('#secO
     let t = await txt(page);
     check('טעינה: ordGet עם מזהה בלבד', g && g[1].id === ID1, g && g[1]);
     check('מוצגים: מועמדים, כרטיס חדש, טלפון לאישור, שורות, אזל, לבירור, לבחירה, סה"כ, טקסט שיישלח, חסימות', /יוסי כהן/.test(t) && /יוסי לוי/.test(t) && /0501234567/.test(t) && /חלב 3%/.test(t) && /אזל/.test(t) && /לבירור/.test(t) && /לבחירה/.test(t) && /500\.00 ₪/.test(t) && /הטקסט שיישלח/.test(t) && /צריך לבחור לקוח/.test(t) && /צריך לבחור סניף/.test(t), t.slice(0, 300));
+    check('סבב שיפורים (1): טלפון מהמייל בלי לקוח שנבחר – הסבר, בלי כפתור "עדכן בכרטיס הלקוח"', /בחרו לקוח קודם/.test(t) && !(await page.$('[data-a=secOrdPhone]')));
     check('תוכן מהלקוח מוצג כטקסט (אין הרצה)', !(await page.evaluate(() => window.__xss)) && !(await page.$('#secOrd img')));
     check('שליחה חסומה כל עוד אין לקוח וסניף', await page.evaluate(() => document.querySelector('[data-a=secOrdSend]').disabled));
     check('אין מזהי מוצר בטקסט הנראה', !/\bp1\b|\bp2\b/.test(t));
@@ -138,6 +140,11 @@ const small = (page) => page.evaluate(() => [...document.querySelectorAll('#secO
     await page.click('[data-a=secOrdRe]'); await H.settle(page, 500);
     t = await txt(page);
     check('stuck: "ייתכן שנשלח" + סמן נשלח (ללא כפתור שליחה)', /ייתכן שנשלח/.test(t) && !!(await page.$('[data-a=secOrdMark]')) && !(await page.$('[data-a=secOrdSend]')));
+    const stk = await page.evaluate(() => { const e = document.getElementById('secOrdStuck'); return e ? e.innerText : ''; });
+    check('סבב שיפורים (3): הודעה בולטת – לא ידוע אם יצא, לבדוק ב"נשלח" ב-Gmail (עם הכתובת), ואז לסמן ידנית', /לא ידוע אם/.test(stk) && /"נשלח"/.test(stk) && /Gmail/.test(stk) && /yossi@client\.example/.test(stk) && /סמן נשלח/.test(stk), stk.slice(0, 300));
+    check('סבב שיפורים (3): ההודעה לפני כפתור "סמן נשלח", עם role=alert, והטקסט ללקוח פתוח', await page.evaluate(() => { const a = document.getElementById('secOrdStuck'), b = document.querySelector('[data-a=secOrdMark]'); return !!(a && b && a.getAttribute('role') === 'alert' && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) && document.querySelector('#secOrd details[open]')); }));
+    check('stuck: בלי גלילה לרוחב, כפתורים 44px', (await sx(page)) <= 0 && (await small(page)).length === 0, await small(page));
+    if (shots) await page.screenshot({ path: path.join(shots, 'sec9-stuck-360.png'), fullPage: true });
     await page.click('[data-a=secOrdMark]'); await H.settle(page, 300);
     await page.click('#dlg [data-a=yes]'); await H.settle(page, 500);
     check('סמן נשלח: ordSend mark:true', !!last(bodies, 'secMail', (b) => b.op === 'ordSend' && b.mark === true));
@@ -152,6 +159,17 @@ const small = (page) => page.evaluate(() => [...document.querySelectorAll('#secO
     await page.click('#secOrdCustF button'); await H.settle(page, 500);
     const c = last(bodies, 'secMail', (b) => b.op === 'ordCust');
     check('ordCust: card + ws:true, בלי שדות שלא מולאו', c && c[1].ws === true && c[1].card.bn === 'דנה בע"מ' && c[1].card.vat === '123456789' && c[1].card.name === 'דנה' && c[1].card.pay === undefined, c && c[1]);
+    // סבב שיפורים (1): לקוח נבחר + טלפון מהמייל – "עדכן בכרטיס הלקוח" (שואל קודם, ואז ordPhone עם id ו-ver)
+    Object.assign(ord, { st: 'mgr', custId: 'c1', custName: 'יוסי כהן', cands: [], phone: '', phoneHint: '0507778888', ver: 20 });
+    await page.click('[data-a=secOrdRe]'); await H.settle(page, 500);
+    check('לקוח נבחר: כפתור "עדכן בכרטיס הלקוח" ליד הטלפון מהמייל (וגם "אישור הטלפון")', !!(await page.$('[data-a=secOrdPhone]')) && !!(await page.$('[data-a=secOrdOp][data-k=phone]')) && /0507778888/.test(await txt(page)));
+    check('כפתור העדכון בגובה 44px לפחות', (await small(page)).length === 0, await small(page));
+    await page.click('[data-a=secOrdPhone]'); await H.settle(page, 300);
+    check('עדכון כרטיס – שואל קודם עם המספר ושם הלקוח, בלי קריאה לשרת', /0507778888/.test(await dlgText(page)) && /יוסי כהן/.test(await dlgText(page)) && !last(bodies, 'secMail', (b) => b.op === 'ordPhone'));
+    await page.click('#dlg [data-a=yes]'); await H.settle(page, 500);
+    const ph = last(bodies, 'secMail', (b) => b.op === 'ordPhone');
+    t = await txt(page);
+    check('ordPhone עם id ו-ver בלבד; אחרי העדכון – הטלפון מוצג בלי כפתור', ph && ph[1].id === ID1 && ph[1].ver === 20 && Object.keys(ph[1]).sort().join() === 'id,op,ver' && /טלפון:\s*0507778888/.test(t) && !(await page.$('[data-a=secOrdPhone]')), ph && ph[1]);
     check('בלי שגיאות JS (כרטיס הזמנה)', page.__errors.length === 0, page.__errors);
     // תשובת לקוח (oRe)
     await page.click('[data-a=secMlBack]'); await H.settle(page, 400);

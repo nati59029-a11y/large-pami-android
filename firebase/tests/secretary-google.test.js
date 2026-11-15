@@ -2751,6 +2751,135 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       const q2 = await reply('thr-a8', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 3 }] } });
       assert.equal(q2.r.ordRe.res, 'chg'); assert.ok(!q2.r.ordRe.auto);
       assert.equal((await ordOf(n2)).st, 'mgr');
+      // סבב שיפורים (4): שינוי שנשלח לבד – התראה אחת בלבד (ordre), בלי התראה נוספת "טיוטת ההזמנה נשלחה לבד"
+      const nb = await notes();
+      assert.equal(nb.filter((b) => b.includes('ונשלחה אליו לבד')).length, 1, JSON.stringify(nb));
+      assert.equal(nb.filter((b) => b.includes('טיוטת ההזמנה נשלחה לבד')).length, 0, 'בלי כפל התראות');
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAuto' && x.tgt === n), 'הרישום ביומן נשאר');
+    });
+
+    // ---------- סבב שיפורים (15.11) ----------
+    it('סבב שיפורים (1): ordPhone – טלפון מהמייל לכרטיס הלקוח, רק בלחיצת מנהל, דרך customers.js; לא דורס טלפון קיים; בלי לקוח / ver ישן / מספר לא תקין – נדחה', async () => {
+      await ordSetup();
+      await prep((d) => d.doc(`b/${A}/cust/t123456789`).set({ name: 'בלי טלפון', mail: 'np@shop.example', at: 1, src: 'manual' }));
+      const n = await go('NP <np@shop.example>', { phone: '050-777 8888' }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      let o = await ordOf(n);
+      assert.equal(o.custId, 't123456789'); assert.equal(o.phoneHint, '0507778888'); assert.deepEqual(o.blk, ['phone']);
+      assert.equal((await get(`b/${A}/cust/t123456789`)).phone, undefined, 'לא עדכון אוטומטי');
+      // הרשאות וקלט
+      assert.equal((await sec(E1, { op: 'ordPhone', id: n, ver: 1 })).code, 'permission-denied');
+      assert.equal((await sec(M1, { op: 'ordPhone', id: n, ver: 9 })).reason, 'stale');
+      assert.equal((await sec(M1, { op: 'ordPhone', id: n })).reason, 'bad-ver');
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n}`).update({ phoneHint: '12345' }));
+      assert.equal((await sec(M1, { op: 'ordPhone', id: n, ver: 1 })).reason, 'bad-phone', 'מספר לא תקין');
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n}`).update({ phoneHint: '0507778888' }));
+      assert.equal((await get(`b/${A}/cust/t123456789`)).phone, undefined);
+      // עדכון
+      const r = await sec(M1, { op: 'ordPhone', id: n, ver: 1 });
+      assert.ok(r.ok, JSON.stringify(r));
+      const c = await get(`b/${A}/cust/t123456789`);
+      assert.equal(c.phone, '0507778888'); assert.equal(c.name, 'בלי טלפון'); assert.equal(c.mail, 'np@shop.example'); assert.equal(c.src, 'manual'); assert.equal(c.by, M1);
+      o = await ordOf(n);
+      assert.equal(o.phoneHint, undefined); assert.deepEqual(o.blk, []); assert.equal(o.ver, 2);
+      assert.equal(r.r.ord.phone, '0507778888'); assert.equal(r.r.ord.phoneHint, '');
+      const lg = (await logs(A)).filter((x) => x.act === 'ordPhone');
+      assert.equal(lg.length, 1); assert.ok(!JSON.stringify(lg).includes('0507778888'), 'המספר לא ביומן');
+      assert.equal((await sec(M1, { op: 'ordPhone', id: n, ver: 2 })).reason, 'bad-phone', 'אין יותר טלפון לעדכון');
+      // כרטיס שכבר יש בו טלפון – לא נדרס
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n}`).update({ phoneHint: '0501112222' }));
+      assert.equal((await sec(M1, { op: 'ordPhone', id: n, ver: 2 })).reason, 'has-phone');
+      assert.equal((await get(`b/${A}/cust/t123456789`)).phone, '0507778888');
+      // בלי לקוח שנבחר (מועמדים) – no-cust
+      const n2 = await go('Rosa <x@rosa.example>', { bn: 'קפה רוזה', phone: '0504444444' }, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }] });
+      assert.equal((await sec(M1, { op: 'ordPhone', id: n2, ver: 1 })).reason, 'no-cust');
+      // טיוטה שכבר נשלחה – not-pending
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n}`).update({ st: 'sent' }));
+      assert.equal((await sec(M1, { op: 'ordPhone', id: n, ver: 2 })).reason, 'not-pending');
+      assert.equal(GO.state.sent.length, 0);
+    });
+
+    it('סבב שיפורים (2): הזמנה חדשה בשרשור של טיוטה סגורה → טיוטת הזמנה חדשה (בדיקות רגילות); אישור/שינוי/ביטול בשרשור סגור – כמו קודם', async () => {
+      await ordSetup();
+      const n = await sentOrd('thr-n1');
+      assert.equal((await reply('thr-n1', { reply: 'ok' })).r.ordRe.res, 'ordered');
+      const L0n = (await coll(`b/${A}/sec_ord`)).length;
+      // אישור נוסף / שינוי – כמו קודם: התראה למנהל, בלי טיוטה חדשה
+      assert.equal((await reply('thr-n1', { reply: 'ok' })).r.ordRe.why, 'dup');
+      assert.equal((await reply('thr-n1', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 9 }] } })).r.ordRe.why, 'ordered');
+      assert.equal((await coll(`b/${A}/sec_ord`)).length, L0n);
+      // הזמנה חדשה (other + שורות)
+      const s0 = GO.state.sent.length;
+      const { m, r } = await reply('thr-n1', { reply: 'other', order: { lines: [{ txt: 'צלחת עמוקה', qty: 3 }], cust: {} } });
+      assert.equal(r.ordRe, undefined, JSON.stringify(r)); assert.equal(r.aw, 'draft');
+      assert.match(JSON.stringify(gmSecReqs().slice(-1)[0].body.contents), /הטיוטה הזו כבר סגורה/, 'המודל יודע שהטיוטה סגורה');
+      const v = await ordOf(m);
+      assert.ok(v, 'נוצרה טיוטת הזמנה חדשה');
+      assert.equal(v.st, 'mgr'); assert.equal(v.ver, 1); assert.equal(v.thr, 'thr-n1'); assert.equal(v.custId, 'cmail'); assert.equal(v.oPrev, n);
+      assert.equal(v.lines[0].qty, 3); assert.equal(v.total, 3000);
+      const d = await draftOf(m);
+      assert.ok(d.an.includes('order')); assert.ok(!d.oRe, 'לא תשובה לטיוטה');
+      assert.equal((await ordOf(n)).st, 'ordered', 'הטיוטה הקודמת לא השתנתה');
+      assert.ok(!(await logs(A)).some((x) => x.act === 'ordRe' && x.tgt === m), 'לא טופל כתשובה');
+      assert.equal(GO.state.sent.length, s0, 'לא נשלח לבד (הלקוח לא אושר לשליחה לבד)');
+      // שליחה ידנית של הטיוטה החדשה – התשובות להזמנה הקודמת בשרשור לא חוסמות; תשובת הלקוח הבאה – לטיוטה החדשה
+      const s = await sec(M1, { op: 'ordSend', id: m, ver: 1 });
+      assert.ok(s.ok, JSON.stringify(s));
+      const q = await reply('thr-n1', { reply: 'ok' });
+      assert.equal(q.r.ordRe.res, 'ordered', JSON.stringify(q.r));
+      assert.equal((await ordOf(m)).st, 'ordered');
+      assert.equal((await ords()).length, 2);
+      // אחרי ביטול – הזמנה חדשה נפתחת גם כן
+      const n3 = await sentOrd('thr-n3');
+      assert.equal((await reply('thr-n3', { reply: 'cancel' })).r.ordRe.res, 'cancel');
+      const z = await reply('thr-n3', { order: { lines: [{ txt: 'צלחת עמוקה', qty: 2 }], cust: {} } });
+      assert.equal(z.r.ordRe, undefined); assert.equal((await ordOf(z.m)).oPrev, n3);
+      // מייל שאינו הזמנה בשרשור סגור – כמו קודם (התראה, בלי טיוטה חדשה)
+      const y = await reply('thr-n3', { cls: 'hours', reply: 'other' });
+      assert.equal(y.r.ordRe && y.r.ordRe.why, 'st'); assert.equal(await ordOf(y.m), null);
+    });
+
+    it('סבב שיפורים (2): הזמנה חדשה בשרשור סגור – לא פטורה מתקרת הטיוטות; לקוח שאושר לשליחה לבד – נשלחת לבד לפי הכללים הרגילים', async () => {
+      await ordSetup();
+      await sentOrd('thr-n5');
+      assert.equal((await reply('thr-n5', { reply: 'ok' })).r.ordRe.res, 'ordered');
+      await sentOrd('thr-n6');
+      assert.equal((await reply('thr-n6', { reply: 'ok' })).r.ordRe.res, 'ordered');
+      // תקרת הטיוטות: הזמנה חדשה בשרשור סגור נספרת כמו כל מייל (הפטור – רק לתשובה לטיוטה פתוחה)
+      await setRep({ cap: 1 }); // כבר הוכנו היום טיוטות – התקרה מלאה
+      const c = await reply('thr-n6', { reply: 'other', order: { lines: [{ txt: 'צלחת עמוקה', qty: 1 }], cust: {} } });
+      assert.equal(c.r.aw, 'cap', JSON.stringify(c.r));
+      assert.equal(await ordOf(c.m), null);
+      await setRep({ cap: 30 });
+      // לקוח שאושר לשליחה לבד – הטיוטה החדשה נשלחת לבד (ordAutoTry הרגיל)
+      assert.ok((await oa(M1, { act: 'on', custId: 'cmail' })).ok);
+      const s0 = GO.state.sent.length;
+      const a = await reply('thr-n5', { reply: 'other', order: { lines: [{ txt: 'צלחת עמוקה', qty: 1 }], cust: {} } });
+      assert.equal(a.r.aw, 'auto', JSON.stringify(a.r)); assert.equal(GO.state.sent.length, s0 + 1);
+      assert.equal((await ordOf(a.m)).sentBy, 'auto');
+      assert.ok(GO.state.sent[s0].raw.includes('In-Reply-To: ' + (await get(`b/${A}/sec_in/${a.m}`)).mid), 'תשובה למייל ההזמנה החדש');
+    });
+
+    it('סבב שיפורים (5): NEVER_AUTO – הרשימה קבועה, וכל סוג בה (חוץ מ-other) חוסם שליחה לבד של טיוטת הזמנה', async () => {
+      const NA = require('../functions/lib/sec-wa.js').NEVER_AUTO;
+      assert.deepEqual([...NA].sort(), ['complaint', 'debt', 'other', 'pay', 'price', 'refund']);
+      await ordSetup();
+      // כל הטיוטות נשלחות ידנית לפני האישור (אחרי האישור – טיוטה נקייה מקורית נשלחת לבד)
+      const cl = NA.filter((k) => k !== 'other');
+      const ns = {};
+      for (const cls of cl.concat('ok')) ns[cls] = await sentOrd('thr-nv-' + cls);
+      assert.ok((await oa(M1, { act: 'on', custId: 'cmail' })).ok);
+      // טיוטת הזמנה מקורית נוצרת רק בסוג order; סוג רגיש מגיע בתשובת שינוי של הלקוח
+      for (const cls of cl) {
+        const s0 = GO.state.sent.length;
+        const q = await reply('thr-nv-' + cls, { reply: 'change', cls, order: { lines: [{ txt: 'צלחת עמוקה', qty: 5 }] } });
+        assert.equal(q.r.ordRe.res, 'chg', cls); assert.ok(!q.r.ordRe.auto, cls);
+        assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === ns[cls] && /risk/.test(x.note)), cls);
+        assert.equal(GO.state.sent.length, s0, cls + ': לא נשלח לבד');
+      }
+      // ביקורת: אותה תשובה בסוג שאינו רגיש – נשלחת לבד (הבדיקה באמת מבחינה)
+      const n = ns.ok;
+      const q = await reply('thr-nv-ok', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 5 }] } });
+      assert.equal(q.r.ordRe.auto, true, JSON.stringify(q.r)); assert.equal((await ordOf(n)).sentBy, 'auto');
     });
   });
 
