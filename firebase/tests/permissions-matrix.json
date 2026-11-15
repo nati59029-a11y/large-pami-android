@@ -438,6 +438,21 @@
         "create-other-folder":  "DDDDD"
       }
     },
+    "sec_tmp/{uid}/": {
+      "source": "קול, תמונה וסרטון למזכירה (15.11.2026, 01-תוכנית.md סעיף 2.1): סרטון בדרך לשרת, נמחק מיד אחרי העיבוד",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "יצירה ומחיקה: רק התיקייה של עצמו; רק סרטון עד 12MB; בלי קריאה ובלי דריסה" },
+      "ops": {
+        "create-own":           "DDDDA",
+        "create-own-too-big":   "DDDDD",
+        "create-own-bad-type":  "DDDDD",
+        "create-own-bad-name":  "DDDDD",
+        "create-other":         "DDDDD",
+        "read-own":             "DDDDD",
+        "list-own":             "DDDDD",
+        "delete-own":           "DDDDA",
+        "delete-other":         "DDDDD"
+      }
+    },
     "_not_in_table": {
       "source": "3.3 – Storage: 'כל השאר: אף אחד'",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },

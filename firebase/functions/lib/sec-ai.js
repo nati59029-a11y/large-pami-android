@@ -159,4 +159,15 @@ async function transcribe(o) {
   return { text: String(r.text || '').trim().slice(0, 4000), usage: r.usage, sent: r.sent };
 }
 
-module.exports = { _goodModel: goodModel, _noThinkCfg: noThinkCfg, chat, transcribe, STT_SYS, costMc, modelOf, geminiBody, GEMINI_API_KEY, PROVIDERS };
+// 15.11.2026 (קול, תמונה וסרטון למזכירה – secretary-media.js): קריאה אחת עם קובץ (תמונה/סרטון) והנחיה ייעודית, בלי כלים.
+// { system, mime, b64, text, timeoutMs } → { text (JSON גולמי), usage, sent }. התשובה מתבקשת כ-JSON (responseMimeType)
+async function see(o) {
+  const name = str(P.provider, 'gemini');
+  if (name !== 'gemini') throw new HttpsError('failed-precondition', 'ספק AI לא מוגדר', { reason: 'no-provider' });
+  const rawBody = { systemInstruction: { parts: [{ text: o.system }] }, contents: [{ role: 'user', parts: [{ inlineData: { mimeType: o.mime, data: o.b64 } }, { text: o.text }] }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } } };
+  const r = await gemini({ tier: 'fast', rawBody, timeoutMs: o.timeoutMs || 90000 });
+  return { text: String(r.text || ''), usage: r.usage, sent: r.sent };
+}
+
+module.exports = { _goodModel: goodModel, _noThinkCfg: noThinkCfg, chat, transcribe, see, STT_SYS, costMc, modelOf, geminiBody, GEMINI_API_KEY, PROVIDERS };
