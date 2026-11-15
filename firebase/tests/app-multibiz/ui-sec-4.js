@@ -28,6 +28,8 @@ async function open(browser, www, o) {
     { id: 'n1', k: 'rem', typ: 'invDue', title: 'חשבונית לתשלום היום', body: 'חשבונית 501 של ספק החלב – יתרה 1,200 ₪', at: now - 60000, seen: false, st: 'open', rep: 3, n: 1 },
     { id: 'n2', k: 'emp', typ: 'emp', title: 'הפרש בקופה – דוד כהן', body: 'הפרש מספר 2 החודש בקופה של דוד כהן: 120 ₪, 80 ₪.\nמה לא ידוע: טעות ספירה. הפרש בקופה אינו הוכחה לגניבה.', at: now - 120000, seen: false, st: 'open', rep: 0, n: 1 },
     { id: 'n3', k: 'rep', typ: 'w', title: 'הדוח השבועי', body: 'חשבוניות לתשלום השבוע: 2 חשבוניות', at: now - 3600e3, seen: true, st: 'open', rep: 0, n: 1, ref: 'w_m_1' },
+    // 15.11.2026: התראת סגירת קופה ישנה – נשמרה עם מזהה הקופה ותאריך בכתיב מחשב (בתצוגה: שם הסניף ויום בשבוע)
+    { id: 'n4', k: 'rem', typ: 'close', title: 'סגירות קופה של 2026-11-12', body: '• קופה i_nl: לא נשלחה סגירה', at: now - 7200e3, t: now - 2 * 864e5, seen: true, st: 'open', rep: 2, n: 2 },
   ];
   const report = { id: 'w_m_1', kind: 'w', title: 'הדוח השבועי', key: addD(-1), t: now - 3600e3, why: '', src: 'נתוני הכספים מהמראה בענן, נכון ל-11.11 20:00',
     secs: [{ h: 'חשבוניות לתשלום השבוע', lines: ['2 חשבוניות, סך 1,500 ₪', '• ספק החלב – 1,200 ₪ עד ' + addD(2)] }, { h: 'משימות פתוחות', lines: ['5 פתוחות, מהן 1 באיחור'] }],
@@ -166,6 +168,39 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     const hd = last(bodies, 'secHistory', (b) => b.op === 'del');
     check(`${w}: מחיקה – רק אחרי האישור השני, עם קוד האישור`, hd && hd[1].token === 'tok123' && hd[1].sure === true, hd && hd[1]);
     check(`${w}: בלי שגיאות JS`, page.__errors.length === 0, page.__errors);
+    await ctx.close();
+  }
+  // --- 15.11.2026: פס בולט בבית, לחיצה על התראה בפתיחה מאפס (מסך הבית נטען אחרי הלחיצה), פרטי התראה, שם הסניף במקום מזהה ---
+  {
+    const { ctx, page } = await open(browser, www, { w: 360, h: 740 });
+    await page.evaluate(() => {
+      const L = {}; window.__pnL = L;
+      window.Capacitor = window.Capacitor || {}; window.Capacitor.Plugins = Object.assign({}, window.Capacitor.Plugins || {}, { PushGate: { state: async () => ({ ready: true }) }, PushNotifications: {
+        removeAllListeners: async () => {}, unregister: async () => {}, addListener: async (e, f) => { L[e] = f; return { remove() {} }; },
+        checkPermissions: async () => ({ receive: 'granted' }), requestPermissions: async () => ({ receive: 'granted' }), register: async () => {} } });
+      window.secPushBoot();
+    });
+    await page.evaluate(() => { NAV = [{ v: 'home' }]; go('home'); }); await H.settle(page, 700);
+    const ban = await page.evaluate(() => { const b = document.getElementById('secNBan'); return b ? b.innerText : ''; });
+    check('בית: פס בולט "יש 2 התראות חדשות מהמזכירה"', /יש 2 התראות חדשות מהמזכירה/.test(ban), ban);
+    await page.click('#secNBan'); await H.settle(page, 700);
+    const bv = await page.evaluate(() => NAV[NAV.length - 1].v), bt = await txt(page);
+    check('בית: לחיצה על הפס – ישר ללשונית ההתראות', bv === 'sec' && /חשבונית לתשלום היום/.test(bt), { bv, t: bt.slice(0, 120) });
+    check('רשימה: שם הסניף ויום בשבוע במקום i_nl ו-2026-11-12', /סניף נחל לכיש/.test(bt) && /יום חמישי 12\.11/.test(bt) && !/i_nl/.test(bt), bt.slice(0, 600));
+    await page.click('.secnb[data-id=n4]'); await H.settle(page, 400);
+    const d1 = await dlgText(page);
+    check('לחיצה על התראה ברשימה – חלון פרטים: סוג, נוצרה, כמה פעמים, מצב, מה לעשות', /סגירת קופה חסרה או עם הפרש/.test(d1) && /נוצרה/.test(d1) && /נשלחה:\s*2 פעמים/.test(d1) && /תחזור עוד 2 פעמים/.test(d1) && /סניף נחל לכיש/.test(d1) && /מה לעשות/.test(d1) && !!(await page.$('#dlg [data-a=secNZc]')), d1.slice(0, 400));
+    await page.click('#dlg [data-a=secNZc]'); await H.settle(page, 500);
+    check('"פתיחת מסך סגירת הקופה" – מסך סגירת הקופה', (await page.evaluate(() => NAV[NAV.length - 1].v)) === 'zc');
+    // פתיחה מאפס: הלחיצה מגיעה, ואחריה האפליקציה מציגה את הבית (כמו טעינה/כניסה) – ההתראות נפתחות שוב בכל זאת, עם פרטי ההתראה שנשלחה
+    await page.evaluate(() => { window.__pnL.pushNotificationActionPerformed({ actionId: 'tap', notification: { data: { k: 'sec', v: 'notes', id: 'n4' } } }); NAV = [{ v: 'home' }]; render(0); });
+    await H.settle(page, 2500);
+    const cv = await page.evaluate(() => NAV[NAV.length - 1].v), d2 = await dlgText(page);
+    check('לחיצה על התראה בטלפון ואחריה מסך הבית – בסוף לשונית ההתראות, ופרטי ההתראה פתוחים', cv === 'sec' && /סניף נחל לכיש/.test(d2) && /מה לעשות/.test(d2), { cv, d: d2.slice(0, 160) });
+    await page.evaluate(() => closeDlg()); await page.evaluate(() => { NAV = [{ v: 'home' }]; go('home'); }); await H.settle(page, 3500);
+    check('אחרי שההתראות הוצגו – אין חזרה כפויה למזכירה', (await page.evaluate(() => NAV[NAV.length - 1].v)) === 'home');
+    check('בלי גלילה לרוחב ובלי שגיאות JS', (await sx(page)) <= 0 && page.__errors.length === 0, page.__errors);
+    if (shots) await page.screenshot({ path: path.join(shots, 'sec4-banner-360.png'), fullPage: true });
     await ctx.close();
   }
   await browser.close();

@@ -74,7 +74,9 @@ ACT.secOpen=()=>{if(cur().v!=='sec')go('sec')};
  const S=X.st,rows=(S.rows||[]).map(x=>`<div class="note" style="margin-top:4px">${esc(x.t||'')}</div>`).join('');
  const sub=!S.consented?'לפני שמתחילים – אישור תנאי השימוש':!S.setupDone?'הגדרה ראשונה: שם ואופן פנייה':'שאלו אותי על העסק – כספים, ספקים, עובדים ומשימות';
  const card=`<button type="button" class="card" id="secHome" data-a="secOpen" style="display:flex;gap:12px;align-items:center;width:100%;text-align:right;cursor:pointer;margin-top:12px;min-height:56px;color:var(--ink)"><span class="secav">${SVG}</span><span style="flex:1;min-width:0"><b>${esc(S.name||'המזכירה העסקית')}</b><small class="note" style="display:block">${esc(sub)}</small>${rows}</span></button>`;
- if(/<div class="chips hacts"/.test(r.h))r.h=r.h.replace(/(<div class="chips hacts")/,card+'$1');else r.h+=card}catch(e){}return r}}
+ if(/<div class="chips hacts"/.test(r.h))r.h=r.h.replace(/(<div class="chips hacts")/,card+'$1');else r.h+=card;
+ /* 15.11.2026: התראות חדשות מהמזכירה – פס בולט בראש הבית, לחיצה פותחת ישר את לשונית ההתראות */
+ const un=S.consented&&S.setupDone?+S.unseen||0:0;if(un>0)r.h=`<button type="button" class="ban" id="secNBan" data-a="secNotesGo" style="border-color:var(--acc);margin:10px 0"><span style="color:var(--acc);flex:none">${typeof icd==='function'?icd('bell'):''}</span><span style="flex:1;min-width:0"><b>${un===1?'יש התראה חדשה מהמזכירה':'יש '+un+' התראות חדשות מהמזכירה'}</b><small class="note" style="display:block">לחיצה – פתיחת ההתראות</small></span><span class="secbadge" style="flex:none">${un}</span></button>`+r.h}catch(e){}return r}}
 
 /* ---------- מסך המזכירה ---------- */
 const DENY={'not-main-manager':'בעסק הזה המזכירה זמינה רק למנהל הראשי.','not-biz-admin':'המזכירה זמינה למנהלי העסק בלבד.','not-manager':'המזכירה זמינה למנהלי העסק בלבד.','feature-off':'המזכירה לא מופעלת בעסק הזה.','biz-suspended':'החשבון מושהה – פנה לספק.'};
@@ -451,7 +453,8 @@ ACT.secSaChat=el=>{const id=el.dataset.id,u=el.dataset.u;ask('לצפות בשי�
 const css4=document.createElement('style');
 css4.textContent='.secbadge{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:var(--acc);color:var(--card);font-size:.75rem;line-height:20px;text-align:center}'
 +'.secnew{border-inline-start:3px solid var(--acc)!important}.secrep h4{margin:12px 0 4px}.secrep ul{margin:0;padding-inline-start:18px}.secrep li{overflow-wrap:anywhere}'
-+'.secnt select,.secnt input[type=time]{min-height:40px;max-width:100%}.secnt .row{flex-wrap:wrap}';
++'.secnt select,.secnt input[type=time]{min-height:40px;max-width:100%}.secnt .row{flex-wrap:wrap}'
++'.secnb{display:block;width:100%;padding:0;margin:0;border:0;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}.secclamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}';
 document.head.appendChild(css4);
 const WDN=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
 /* ---------- התראות ---------- */
@@ -459,13 +462,40 @@ async function notesLoad(){X.nb=1;const s0=X.nl;let again=0;try{const r=await fn
  if(ids.length)fnCall('secNotes',{op:'seen',ids}).then(()=>{if(X.st)X.st.unseen=0;if(X.nl)X.nl.unseen=0}).catch(()=>{})}
  catch(e){X.nl=X.nl&&!X.nl.err?X.nl:{err:e&&e.message||'לא נטען'}}finally{X.nb=0;if(again){notesLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 const KIND={rep:'דוח',emp:'עובד',dig:'תקציר',wa:'ווצאפ'};
-function noteH(n,T){const lab=n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');const open=n.st==='open'&&n.k==='rem';
- return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><p><b>${esc(n.title)}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
- <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note" style="margin:4px 0 0">${esc(n.body)}</p>`:''}
- <div class="secrow">${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
+/* 15.11.2026: התראות ישנות של סגירת קופה נשמרו עם מזהה הקופה (i_nl) ותאריך בכתיב מחשב – בתצוגה: שם הסניף (ZREG) ויום בשבוע + תאריך */
+const ZN=g=>{try{return typeof ZREG!=='undefined'&&ZREG[g]?ZREG[g].n:''}catch(e){return ''}};
+const dayL=d=>{const t=new Date(d+'T12:00:00Z');return isNaN(t)?d:'יום '+WDN[t.getUTCDay()]+' '+(+d.slice(8,10))+'.'+(+d.slice(5,7))};
+const nFix=(s,n)=>{s=String(s||'').replace(/(קופה )?\b(i_[a-z]{2})\b/g,(m,a,g)=>ZN(g)?'סניף '+ZN(g):m);if(n&&n.typ==='close')s=s.replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m,d)=>dayL(d));return s};
+const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');
+function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
+ return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><button type="button" class="secnb" data-a="secNOpen" data-id="${esc(n.id)}" aria-label="כל הפרטים: ${esc(nFix(n.title,n))}"><p><b>${esc(nFix(n.title,n))}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
+ <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
+ <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
 function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="notes">נסה שוב</button></div>`;
- const L=R.notes||[];if(!L.length)return '<div class="empty">אין התראות</div>';
- return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
+ const L=R.notes||[];pnShown();if(!L.length)return '<div class="empty">אין התראות</div>';
+ return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">לחיצה על התראה – כל הפרטים. תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
+/* 15.11.2026: פרטי התראה – הכותרת, הסוג, מתי נוצרה ומתי נשלחה לאחרונה, כמה פעמים, המצב, כל הטקסט, ומה אפשר לעשות */
+function noteDlg(id){const R=X.nl,n=R&&!R.err&&(R.notes||[]).find(x=>x.id===id);if(!n)return toast('ההתראה לא נמצאה');const T=R.types||{},open=n.st==='open'&&n.k==='rem',body=nFix(n.body,n);
+ const st=n.st==='done'?'טופל':n.st==='gone'?'כבר לא רלוונטי':n.k==='rem'?'פתוחה – עוד לא סומנה כטופלה'+(n.rep?' · תחזור עוד '+n.rep+' פעמים':' · לא תחזור שוב'):'פתוחה';
+ const row=(k,v)=>`<p class="note" style="margin:4px 0"><b>${k}:</b> ${esc(v)}</p>`;
+ const todo=n.typ==='close'&&!/מה לעשות/.test(body)?'\nמה לעשות:\n• לבקש מהעובד בסניף לשלוח סגירת קופה, או לפתוח את מסך סגירת הקופה ולהכניס אותה.\n• אם יש הפרש מזומן – לבדוק את הסגירה במסך סגירת הקופה ולברר עם העובד.':'';
+ dlg(`<h3 style="overflow-wrap:anywhere">${esc(nFix(n.title,n))}</h3>${row('סוג',nLab(n,T)||'התראה')}${row('נוצרה',tm(n.t||n.at))}${n.n>1?row('נשלחה',n.n+' פעמים (לאחרונה '+tm(n.at)+')'):''}${row('מצב',st)}
+ ${body||todo?`<div class="card" style="margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere" id="secNBody">${esc(body+todo)}</div>`:''}
+ ${n.typ==='close'&&typeof V.zc==='function'?'<button class="btn w" data-a="secNZc" style="margin-top:8px">פתיחת מסך סגירת הקופה</button>':''}${n.k==='rep'&&n.ref?`<button class="btn w" data-a="secNRp" data-id="${esc(n.ref)}" style="margin-top:8px">פתיחת הדוח</button>`:''}${open?`<button class="btn g w" data-a="secNDoneD" data-id="${esc(n.id)}" style="margin-top:8px">סמן כטופל</button>`:''}<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`)}
+ACT.secNOpen=el=>noteDlg(el.dataset.id);
+ACT.secNZc=()=>{closeDlg();go('zc')};
+ACT.secNRp=el=>{closeDlg();ACT.secRpOpen(el)};
+ACT.secNDoneD=el=>{closeDlg();ACT.secNDone(el)};
+ACT.secNotesGo=()=>{X.tab='notes';X.set=0;X.edit=0;X.rp=null;X.nl=null;go('sec')};
+/* 15.11.2026: לחיצה על התראה בטלפון – "לפתוח את ההתראות" נשמר לדקה (גם בזיכרון הטלפון, למקרה שהמסך נטען מחדש) ומוחל שוב עד שרשימת ההתראות באמת מוצגת:
+   בפתיחה מאפס האירוע יכול להגיע לפני שההרשאות, העסק או המזכירה נטענו, ומסך שנפתח בדרך מסתיר את המזכירה. כשההתראה אחת – גם פרטיה נפתחים. */
+const PNK='lp-pn-open',PNI={t:0,id:''},PNW=[600,1500,3000,6000,10000,20000];
+const pnEnd=()=>{PNI.t=0;PNI.id='';try{localStorage.removeItem(PNK)}catch(e){}};
+function pnTry(){if(!PNI.t)return;if(Date.now()-PNI.t>60000){pnEnd();return}if(!isA())return;
+ if(cur().v!=='sec'||X.tab!=='notes'||X.set||X.edit){try{ACT.secNotesGo()}catch(e){}}}
+function pnShown(){if(!PNI.t||cur().v!=='sec')return;const id=PNI.id;pnEnd();if(id&&(X.nl.notes||[]).some(x=>x.id===id))setTimeout(()=>{if(cur().v==='sec'&&X.tab==='notes')noteDlg(id)},0)}
+function pnTap(id){PNI.t=Date.now();PNI.id=typeof id==='string'&&/^[A-Za-z0-9_:.-]{1,200}$/.test(id)?id:'';try{localStorage.setItem(PNK,JSON.stringify(PNI))}catch(e){}pnTry();PNW.forEach(ms=>setTimeout(pnTry,ms))}
+try{const o=JSON.parse(localStorage.getItem(PNK)||'null');if(o&&+o.t&&Date.now()-o.t<60000){PNI.t=+o.t;PNI.id=String(o.id||'');PNW.forEach(ms=>setTimeout(pnTry,ms))}else if(o)localStorage.removeItem(PNK)}catch(e){}
 ACT.secNDone=async el=>{el.disabled=true;try{await fnCall('secNotes',{op:'done',id:el.dataset.id});toast('סומן כטופל');X.nl=null;rerender()}catch(e){el.disabled=false;err(e)}};
 CHG.secNReps=async el=>{const n=+el.value;try{await fnCall('secNotes',{op:'reps',id:el.dataset.id,n});toast(n?'התזכורת תחזור עוד '+n+' פעמים':'החזרות בוטלו')}catch(e){err(e);X.nl=null;rerender()}};
 /* ---------- דוחות ותובנות ---------- */
@@ -516,7 +546,7 @@ const PN={done:0,ready:0};
 async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
  const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;
  await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW()))fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
- await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}if(d.k!=='sec'||!isA())return;X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
+ await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}if(d.k==='sec')pnTap(d.id)});
  let p=await P.checkPermissions();
  if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
   if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
