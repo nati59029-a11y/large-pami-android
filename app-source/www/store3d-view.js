@@ -120,10 +120,15 @@ function makeView(T,el,map0,opts){
     floor:keep(new T.MeshLambertMaterial({map:floorTex})),
     ceil:keep(new T.MeshBasicMaterial({map:ceilTex,color:0xe2e2de})),/* תקרה בלי הצללה: מהתאורה בה היא נראית כהה מדי */
     wall:keep(new T.MeshLambertMaterial({color:0xefebe4})),
+    wallC:keep(new T.MeshLambertMaterial({color:0xefebe4,vertexColors:true})),/* קירות: צבע לכל קודקוד – כהה מעט ליד הרצפה (אפוי, בלי צל בזמן אמת) */
+    peg:keep(new T.MeshLambertMaterial({color:0xffffff,map:canvasTex(32,32,(g,w,h)=>{g.fillStyle='#fff';g.fillRect(0,0,w,h);g.fillStyle='#7d838b';g.beginPath();g.arc(w/2,h/2,3,0,7);g.fill()},1)})),/* לוח גב מחורר */
+    lamp:keep(new T.MeshBasicMaterial({color:0xfffbe6,fog:false})),/* פסי תאורה בתקרה (זוהרים, בלי הצללה) */
+    soft:keep(new T.MeshBasicMaterial({map:canvasTex(64,64,(g,w,h)=>{const d=g.createImageData(w,h),sm=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t)};
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){const a=Math.min(sm(Math.min(x+.5,w-x-.5)/(w*.5)),sm(Math.min(y+.5,h-y-.5)/(h*.5))),i=4*(y*w+x);d.data[i+3]=Math.round(255*a)}g.putImageData(d,0,0)},0),color:0x000000,transparent:true,opacity:.3,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2})),/* כתם צל רך מזויף על הרצפה */
     inst:keep(new T.MeshLambertMaterial({color:0xffffff})),/* צבע לכל מופע */
     shelf:keep(new T.MeshLambertMaterial({color:0xeef0f2})),
     glass:keep(new T.MeshLambertMaterial({color:0xbfe6ff,transparent:true,opacity:.22,depthWrite:false})),
-    stat:keep(new T.MeshBasicMaterial({color:0xffffff})),/* פסי מצב – צבע לכל מופע, בלי הצללה */
+    stat:keep(new T.MeshBasicMaterial({color:0xffffff,fog:false})),/* פסי מצב – צבע לכל מופע, בלי הצללה */
     pick:keep(new T.MeshBasicMaterial({visible:false})),
     sel:keep(new T.MeshBasicMaterial({color:0xd4af37,transparent:true,opacity:.28,depthWrite:false})),
     selLine:keep(new T.LineBasicMaterial({color:0xffd24a})),
@@ -131,7 +136,7 @@ function makeView(T,el,map0,opts){
   };
   /* תגי מצב: חומר נקודות אחד לכל מצב (4 קריאות ציור לכל החנות), בגודל קבוע בפיקסלים – לא נעלמים כשמתרחקים */
   const BM={};for(const k of BDG){const t=keep(new T.CanvasTexture(badge(k,64)));t.colorSpace=T.SRGBColorSpace;
-    BM[k]=keep(new T.PointsMaterial({map:t,size:16,sizeAttenuation:false,transparent:true,alphaTest:.04,depthWrite:false}))}
+    BM[k]=keep(new T.PointsMaterial({map:t,size:16,sizeAttenuation:false,fog:false,transparent:true,alphaTest:.04,depthWrite:false}))}
   /* גודל התג במסך (פיקסלים): בהליכה – קריא; מלמעלה – קטן, ו"תקין" קטן עוד יותר כדי לא להעמיס. במיני (חלון הבית) – רק תגי חריגה; "תקין" מסומן בפס בלבד */
   function bdgSize(){for(const k of BDG)BM[k].size=MINI?8:mode==='top'?(k==='ok'?11:14):(k==='ok'?20:22);BM.ok.visible=!MINI}
   const BOX=keep(new T.BoxGeometry(1,1,1)),CYL=keep(new T.CylinderGeometry(.5,.5,1,16));
@@ -159,7 +164,7 @@ function makeView(T,el,map0,opts){
       g.fillStyle='rgba(0,0,0,.22)';for(let r=0;r<6;r++){g.fillRect(0,r*rh,w,1);for(let k=0;k<2;k++)g.fillRect(((k*pl+(r%2)*pl/2)%w),r*rh,1,rh)}
     },1);t.repeat.set(TILE/2.4,TILE/1.2);woodC.set(key,t);return t}
   function texMat(id,kind){const t=id&&txById.get(id);if(!t)return null;const k=t.path+':'+kind;let m=tmats.get(k);if(m)return m;
-    const base=kind==='f'?M.floor:kind==='c'?M.ceil:M.wall;m=keep(base.clone());tmats.set(k,m);
+    const base=kind==='f'?M.floor:kind==='c'?M.ceil:M.wallC;m=keep(base.clone());tmats.set(k,m);
     loadTex(t).then(tx=>{if(dead)return;
       if(kind==='w'){m.map=tx;m.color.set(0xffffff)}
       else{const a=avgColor(tx.image);
@@ -169,19 +174,24 @@ function makeView(T,el,map0,opts){
   const texAr=id=>{const t=id&&txById.get(id);return t&&t.w>0&&t.h>0?t.w/t.h:1};
 
   /* קירות כגיאומטריה אחת לכל חומר: התמונה מכסה את כל גובה הקיר וחוזרת לאורכו לפי יחס הרוחב/גובה שלה (בלי עיוות) */
-  function wallGeo(list){const P=[],N=[],U=[],I=[];
-    const quad=(a,b,c,d,n,uv)=>{const k=P.length/3;for(const p of[a,b,c,d])P.push(p[0],p[1],p[2]);for(let i=0;i<4;i++)N.push(n[0],n[1],n[2]);U.push(...uv);I.push(k,k+1,k+2,k,k+2,k+3)};
+  function wallGeo(list){const P=[],N=[],U=[],I=[],C=[];
+    const quad=(a,b,c,d,n,uv,sh)=>{const k=P.length/3;for(const p of[a,b,c,d])P.push(p[0],p[1],p[2]);for(let i=0;i<4;i++)N.push(n[0],n[1],n[2]);U.push(...uv);
+      const s0=sh?sh[0]:1,s1=sh?sh[1]:1;C.push(s0,s0,s0,s0,s0,s0,s1,s1,s1,s1,s1,s1);I.push(k,k+1,k+2,k,k+2,k+3)};
+    /* פאה אורכית: רצועה תחתונה (0–0.6 מ', כהה יותר) ורצועה עליונה, עם מעבר חלק */
+    const side=(a,b,h,n,ru)=>{const m=Math.min(.6,h),f=m/h,lerp=(p,y)=>[p[0],y,p[2]];
+      quad(lerp(a,0),lerp(b,0),lerp(b,m),lerp(a,m),n,[0,0,ru,0,ru,f,0,f],[.62,.93]);
+      if(h>m)quad(lerp(a,m),lerp(b,m),lerp(b,h),lerp(a,h),n,[0,f,ru,f,ru,1,0,1],[.93,1])};
     for(const w of list){const dx=w.x2-w.x1,dz=w.z2-w.z1,L=Math.hypot(dx,dz);if(L<1e-3)continue;
       const ux=dx/L,uz=dz/L,nx=-uz,nz=ux,ht=w.t/2,h=w.h,ru=(L+w.t)/(h*w.ar);
       const ax=w.x1-ux*ht,az=w.z1-uz*ht,bx=w.x2+ux*ht,bz=w.z2+uz*ht;
       const A=[ax+nx*ht,0,az+nz*ht],B=[bx+nx*ht,0,bz+nz*ht],A2=[ax-nx*ht,0,az-nz*ht],B2=[bx-nx*ht,0,bz-nz*ht],up=p=>[p[0],h,p[2]];
-      quad(A,B,up(B),up(A),[nx,0,nz],[0,0,ru,0,ru,1,0,1]);
-      quad(B2,A2,up(A2),up(B2),[-nx,0,-nz],[0,0,ru,0,ru,1,0,1]);
+      side(A,B,h,[nx,0,nz],ru);
+      side(B2,A2,h,[-nx,0,-nz],ru);
       quad(up(A),up(B),up(B2),up(A2),[0,1,0],[0,0,1,0,1,.02,0,.02]);
       quad(B,B2,up(B2),up(B),[ux,0,uz],[0,0,.02,0,.02,1,0,1]);
       quad(A2,A,up(A),up(A2),[-ux,0,-uz],[0,0,.02,0,.02,1,0,1])}
     const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(P,3));g.setAttribute('normal',new T.Float32BufferAttribute(N,3));
-    g.setAttribute('uv',new T.Float32BufferAttribute(U,2));g.setIndex(I);g.computeBoundingSphere();return g}
+    g.setAttribute('uv',new T.Float32BufferAttribute(U,2));g.setAttribute('color',new T.Float32BufferAttribute(C,3));g.setIndex(I);g.computeBoundingSphere();return g}
 
   let model=null,root=null,wallsG=null,ceilG=null,floorG=null,pickMesh=null,pickBays=[],pickMat=[],buildMs=0,instances=0;
   const sel=new T.Group();sel.visible=false;sel.renderOrder=5;
@@ -227,7 +237,19 @@ function makeView(T,el,map0,opts){
     const maxH=model.rooms.reduce((m,r)=>Math.max(m,r.h),300)/100;
     for(const w of model.inner){const s=w.s,mx=(s[0]+s[2])/2,my=(s[1]+s[3])/2,r=model.rooms.find(q=>G.pointInPoly(mx,my,q.p)),id=r?(roomTex.get(r.id)||{}).w:null;
       addW(id,{x1:s[0]/100,z1:s[1]/100,x2:s[2]/100,z2:s[3]/100,h:maxH,t:w.t/100,ar:texAr(id)})}
-    for(const[k,list]of wg)wallsG.add(new T.Mesh(wallGeo(list),k?texMat(k,'w'):M.wall));
+    for(const[k,list]of wg)wallsG.add(new T.Mesh(wallGeo(list),k?texMat(k,'w'):M.wallC));
+    /* תאורה אפויה: פסי תאורה זוהרים בתקרה (מופע אחד), וכתמי צל רכים על הרצפה מתחת לגופים ולאורך הקירות (מופע אחד) – בלי צללים בזמן אמת */
+    {const lp=[],sh=[],PL=keep(new T.PlaneGeometry(1,1).rotateX(-Math.PI/2));
+      for(const r of model.rooms){let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9;const n=r.p.length/2;
+        for(let i=0;i<n;i++){x0=Math.min(x0,r.p[2*i]);x1=Math.max(x1,r.p[2*i]);z0=Math.min(z0,r.p[2*i+1]);z1=Math.max(z1,r.p[2*i+1])}
+        const cnt=Math.max(1,Math.round((x1-x0)/300)),rows=Math.max(1,Math.round((z1-z0)/240));
+        for(let i=0;i<cnt;i++)for(let j=0;j<rows;j++){const x=x0+(i+.5)*(x1-x0)/cnt,z=z0+(j+.5)*(z1-z0)/rows;
+          if(G.pointInPoly(x,z,r.p)&&G.pointInPoly(x-70,z,r.p)&&G.pointInPoly(x+70,z,r.p))boxM(lp,x/100,r.h/100-.012,z/100,0,1.4,.024,.16)}}
+      const lm=inst(BOX,M.lamp,lp);if(lm)ceilG.add(lm);
+      for(const f of model.fx)boxM(sh,f.x/100,.003,f.y/100,-f.a*Math.PI/180,f.w/100+.8,1,f.d/100+.8);
+      for(const w of[...model.walls.map(q=>q.s),...model.inner.map(q=>q.s)]){const dx=(w[2]-w[0])/100,dz=(w[3]-w[1])/100,L=Math.hypot(dx,dz);if(L<.05)continue;
+        boxM(sh,(w[0]+w[2])/200,.002,(w[1]+w[3])/200,-Math.atan2(dz,dx),L+.5,1,.9)}
+      const sm=inst(PL,M.soft,sh);if(sm){sm.renderOrder=1;floorG.add(sm)}}
     /* עמודים */
     const cb=[],cc=[];for(const c of model.cols)boxM(c.rnd?cc:cb,c.x/100,maxH/2,c.y/100,0,c.w/100,maxH,c.d/100);
     for(const [g,l] of [[BOX,cb],[CYL,cc]]){const m=inst(g,M.wall,l);if(m)wallsG.add(m)}
@@ -247,16 +269,16 @@ function makeView(T,el,map0,opts){
       lb.position.set(x,y.k==='cash'?1.75:2.4,z);root.add(lb)}
     const cm=inst(BOX,M.inst,cs,csC);if(cm)root.add(cm);
     /* גופים: מדפי מתכת לבנים ריקים (התמונה האמיתית מוצגת על החזית כשיש), זכוכית, ומשטחי בחירה לכל מקטע */
-    const body=[],bodyC=[],shelf=[],glass=[],pick=[];pickBays=[];
+    const body=[],bodyC=[],pegs=[],shelf=[],glass=[],pick=[];pickBays=[];
     for(const f of model.fx){
       const W=f.w/100,D=f.d/100,H=f.h/100;
       const ry=-f.a*Math.PI/180,fc=Math.cos(ry),fs=Math.sin(ry),fx0=f.x/100,fz0=f.y/100;
       const L=(a,x,y,z,sx,sy,sz)=>put(a,fx0,0,fz0,fc,fs,x,y,z,sx,sy,sz);
       const B=(x,y,z,sx,sy,sz,col)=>{L(body,x,y,z,sx,sy,sz);bodyC.push(col)};
       if(f.k==='gon'||f.k==='wall'||f.k==='stand'){
-        const two=f.sides===2,metal=0xdfe2e6,back=0xe9ebee;
+        const two=f.sides===2,metal=0xdfe2e6;
         B(0,.05,0,W,.1,D,0xc4c8cd);
-        B(0,(H+.1)/2,two?0:-D/2+.015,W,H-.1,.03,back);
+        L(pegs,0,(H+.1)/2,two?0:-D/2+.015,W,H-.1,.03);/* לוח גב מחורר */
         for(let i=0;i<=f.bays;i++)B(-W/2+i*W/f.bays+(i===0?.02:i===f.bays?-.02:0),H/2,0,.04,H,D,metal);
         const sides=two?[[.015,D/2],[-.015,-D/2]]:[[-D/2+.03,D/2]],gap=(H-.15)/f.lvl;
         sides.forEach(([z0,z1])=>{for(let j=0;j<f.lvl;j++){const y=.1+j*gap;
@@ -275,7 +297,7 @@ function makeView(T,el,map0,opts){
       for(const b of f.bayList){L(pick,b.lx/100,H/2,b.ly/100,b.w/100,H,.06);pickBays.push({b,f,c:fc,s:fs,x0:fx0,z0:fz0,n:b.s==='b'?-1:1})}
     }
     const add=m=>{if(m)root.add(m);return m};
-    add(inst(BOX,M.inst,body,bodyC));add(inst(BOX,M.shelf,shelf));
+    add(inst(BOX,M.inst,body,bodyC));add(inst(BOX,M.peg,pegs));add(inst(BOX,M.shelf,shelf));
     const gm=add(inst(BOX,M.glass,glass));if(gm)gm.renderOrder=2;
     pickMat=pick;pickMesh=add(inst(BOX,M.pick,pick));
     scene.add(root);
@@ -327,7 +349,7 @@ function makeView(T,el,map0,opts){
       const inset=.5/ATLAS;
       for(let a=0;a*per<N;a++){const c=document.createElement('canvas');c.width=c.height=ATLAS;
         const tex=new T.CanvasTexture(c);tex.colorSpace=T.SRGBColorSpace;tex.anisotropy=aniso;
-        const mat=new T.MeshBasicMaterial({map:tex,alphaTest:.5,side:T.DoubleSide});
+        const mat=new T.MeshBasicMaterial({map:tex,alphaTest:.5,side:T.DoubleSide,fog:false});
         const items=list.slice(a*per,(a+1)*per),P=[],U=[],I=[];
         items.forEach((it,i)=>{const cx=i%(ATLAS/cell),cy=Math.floor(i/(ATLAS/cell)),q=quadOf(it.o,.012),k=P.length/3;
           for(const p of q.p)P.push(p[0],p[1],p[2]);
@@ -430,7 +452,7 @@ function makeView(T,el,map0,opts){
     if(!G.inAnyRoom(model,x,y)&&model.rooms[0]){const c=G.centroid(model.rooms[0].p);x=c[0];y=c[1]}
     [x,y]=G.resolveCircle(x,y,25,model.segs);walk.x=x/100;walk.z=y/100;walk.yaw=Math.atan2(e.ly,e.lx);walk.pitch=-.05;
   }
-  function applyMode(){bdgSize();wallsG.scale.y=mode==='top'?(MINI?.55:.35):1;ceilG.visible=mode==='walk';if(mode!=='walk')hiClear(),slClear();else hiUpdate();placeCam()}
+  function applyMode(){bdgSize();scene.fog=mode==='walk'&&!MINI?new T.Fog(0xdcdad4,14,70):null;/* ערפל עדין לעומק בהליכה בלבד; תמונות, תגים וסימונים לא מושפעים */wallsG.scale.y=mode==='top'?(MINI?.55:.35):1;ceilG.visible=mode==='walk';if(mode!=='walk')hiClear(),slClear();else hiUpdate();placeCam()}
   function placeCam(){
     if(mode==='top'){const c=Math.cos(top.pitch),fx=Math.cos(top.yaw),fz=Math.sin(top.yaw);
       cam.position.set(top.tx-fx*c*top.dist,Math.sin(top.pitch)*top.dist,top.tz-fz*c*top.dist);cam.lookAt(top.tx,0,top.tz)}
