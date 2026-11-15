@@ -4,7 +4,7 @@
      שמירת ההזמנה → saveCust עם fill (ממלא רק שדות ריקים – כך מצרפים פרטים חדשים ללקוח קיים), id של הלקוח שנבחר, וההזמנה מקושרת ללקוח.
    - לקוח עסקי (= סיטונאי): שם העסק, ע.מ, איש קשר, טלפון, כתובת, עיר, תנאי תשלום. עובד ומנהל פותחים לקוח עסקי חדש; הפיכת לקוח קיים / ביטול – מנהל (נבדק בשרת).
    - מסכים: V.ocList (לקוחות), V.ocCard (כרטיס לקוח + היסטוריית הזמנות), ייבוא Excel/CSV עם התאמת עמודות, שדות חופשיים (מנהל).
-   - סיטונאי (22:10): ברירת מחדל רגיל; רק מנהל מסמן, בכרטיס הלקוח. הייבוא מתעלם. בטיוטת ההזמנה: draft.wholesale (לשימוש ענף הקטלוג).
+   - סיטונאי (22:10): ברירת מחדל רגיל; רק מנהל מסמן, בכרטיס הלקוח. הייבוא מתעלם (15.11.2026, שלב 6 – תשובה 114: עמודת "לקוח עסקי" עם "כן" כן מסמנת). בטיוטת ההזמנה: draft.wholesale (לשימוש ענף הקטלוג).
    - אשראי: fb/ord-card – מספר מלא/תוקף/שם/CVV מוצפנים בשרת (customers.js setCard/getCard/delCard); בלקוח נשמרות 4 ספרות + card:true.
    - אשראי (22:04, לעמודות שלא סומנו כ'מספר כרטיס מלא'): רק 4 ספרות. עמודת מספר כרטיס מלא בייבוא נחתכת כאן ל-4 האחרונות לפני השליחה (והשרת חותך שוב).
    כל כתיבה – דרך השרת (functions/customers.js). קריאה – cust, custcfg לפי החוקים. */
@@ -429,14 +429,19 @@ FRM.ocCfgF=async f=>{cfRead();const L=C.cf.filter(k=>String(k.label).trim()).map
  try{const r=await fnCall('setCustCfg',{xKeys:L});C.cfg={xKeys:r.xKeys};closeDlg();toast('נשמר')}catch(e){b.disabled=false;err(e)}};
 
 /* ---------- ייבוא לקוחות (מנהל) ---------- */
-const MAPF=[['fn','שם פרטי'],['ln','שם משפחה'],['name','שם מלא'],['phone','טלפון'],['tz','ת.ז'],['mail','מייל'],['st','רחוב ומספר'],['city','עיר'],['fl','קומה'],['apt','דירה'],['addr','כתובת מלאה'],['last4','4 ספרות אחרונות'],['port','תאריך ניוד'],['pph','טלפון ניוד'],['ptz','ת.ז ניוד'],['pbr','סניף הניוד'],['cnum','מספר כרטיס מלא (מוצפן)'],['cexp','תוקף כרטיס'],['cname','שם בעל הכרטיס'],['ccvv','CVV'],['pco','חברת ניוד'],['pact','נויד בפועל']].concat(INF.map(([k,l])=>[k,l]));
+/* 15.11.2026 (שלב 6, תשובה 114): לקוח עסקי בייבוא – שם העסק, ע.מ, איש קשר, תנאי תשלום, סימון עסקי ומספר הלקוח בתוכנה הקודמת (xc – לזיהוי במסמכים מיובאים). לקוח קיים – רק שדות ריקים מתמלאים */
+const BIZM=[['bn','שם העסק'],['vat','ע.מ / ח.פ'],['ct','איש קשר'],['terms','תנאי תשלום'],['ws','לקוח עסקי / סיטונאי (כן)'],['xc','מספר לקוח בתוכנה הקודמת']];
+const termsOf=v=>{const t=String(v==null?'':v).replace(/\s+/g,'');let m;if(/^(מיידי|מידי|מזומן|אשראי|העברה|imm)$/i.test(t))return{b:'imm',d:0};if((m=/^שוטף\+?(\d{0,3})(?:יום|ימים)?$/.exec(t))&&+(m[1]||0)<=365)return{b:'eom',d:+(m[1]||0)};if((m=/^(?:נטו|net)?\+?(\d{1,3})(?:יום|ימים|days?)?$/i.exec(t))&&+m[1]<=365)return +m[1]?{b:'inv',d:+m[1]}:{b:'imm',d:0};return null};
+const MAPF=[['fn','שם פרטי'],['ln','שם משפחה'],['name','שם מלא'],['phone','טלפון'],['tz','ת.ז'],['mail','מייל'],['st','רחוב ומספר'],['city','עיר'],['fl','קומה'],['apt','דירה'],['addr','כתובת מלאה'],['last4','4 ספרות אחרונות'],['port','תאריך ניוד'],['pph','טלפון ניוד'],['ptz','ת.ז ניוד'],['pbr','סניף הניוד'],['cnum','מספר כרטיס מלא (מוצפן)'],['cexp','תוקף כרטיס'],['cname','שם בעל הכרטיס'],['ccvv','CVV'],['pco','חברת ניוד'],['pact','נויד בפועל']].concat(BIZM,INF.map(([k,l])=>[k,l]));
 const CELLK=['port','pph','ptz','pbr','pco','pact'].concat(INFK); // 2026-11-10: רק בעסק עם cellular
 const MK='lp-ocmap';
 ACT.ocImp=()=>{dlg(`<h3>ייבוא לקוחות</h3><p class="note">קובץ Excel או CSV. השורה הראשונה – כותרות. אחר כך בוחרים איזו עמודה היא מה.</p>
  <label class="btn w" style="display:flex;align-items:center;justify-content:center">בחירת קובץ<input type="file" accept=".xlsx,.xls,.csv,text/csv" data-c="ocFile" hidden></label>
- <p class="note">עמודה שתסומן "מספר כרטיס מלא (מוצפן)" (וגם תוקף, שם, CVV) – נשמרת מוצפנת בשרת. מספר כרטיס בכל עמודה אחרת – נשמרות רק 4 הספרות האחרונות. עמודת "סיטונאי" – לא מיובאת (מסמנים ידנית).</p><button type="button" class="btn g w" data-a="closeDlg">ביטול</button>`)};
+ <p class="note">עמודה שתסומן "מספר כרטיס מלא (מוצפן)" (וגם תוקף, שם, CVV) – נשמרת מוצפנת בשרת. מספר כרטיס בכל עמודה אחרת – נשמרות רק 4 הספרות האחרונות. עמודת "לקוח עסקי / סיטונאי" עם "כן" מסמנת לקוח עסקי (גם ע.מ, איש קשר, תנאי תשלום ומספר לקוח בתוכנה הקודמת). לקוח קיים – רק שדות ריקים מתמלאים.</p><button type="button" class="btn g w" data-a="closeDlg">ביטול</button>`)};
 // 2026-11-10: כל 24 הכותרות של קובץ הלקוחות מזוהות (פרטי בנק לפני "פרטי", חברת ניוד / נויד בפועל לפני "ניוד", מספר כרטיס → מוצפן)
-const guess=(h)=>{const s=String(h||'').replace(/["'\s.]/g,'');return /בנק/.test(s)?'bank':/חברתניוד|חברהמניידת|ספק/.test(s)?'pco':/נוידבפועל|ניודבפועל|נוידה?$/.test(s)?'pact':/^מוצר|^פריט/.test(s)?'prod':/לתשלום|סכום/.test(s)?'due':/^מקור/.test(s)?'orig':/^סטטוס/.test(s)?'stat':/^הער/.test(s)?'note':/תאריךהזמנה|^הזמנה/.test(s)?'od':/^(מספר)?כרטיס(אשראי)?$|מספרכרטיס/.test(s)?'cnum':/סניף/.test(s)&&!/בנק/.test(s)?'pbr':/ניוד/.test(s)?(/טל|נייד|phone/i.test(s.replace('ניוד',''))?'pph':/זהות|תז/.test(s)?'ptz':'port'):/cvv|קודאבטחה|ספרותבגב/i.test(s)?'ccvv':/תוקף|exp/i.test(s)?'cexp':/בעלהכרטיס|holder/i.test(s)?'cname':/פרטי/.test(s)?'fn':/משפחה/.test(s)?'ln':/שם/.test(s)?'name':/^עיר|ישוב|יישוב|city/i.test(s)?'city':/קומה/.test(s)?'fl':/דירה/.test(s)?'apt':/רחוב|street/i.test(s)?'st':/טל|נייד|phone/i.test(s)?'phone':/זהות|תז|^id$/i.test(s)?'tz':/מייל|דואל|mail/i.test(s)?'mail':/כתובת|addr/i.test(s)?'addr':/4|אחרונות|last/i.test(s)?'last4':''};
+const guessB=s=>/שםהעסק|שםעסק/.test(s)?'bn':/^(עמ|חפ|עמ\/חפ|חפ\/עמ|עמחפ|עוסקמורשה|מספרעוסק|מספרעוסקמורשה)$/.test(s)?'vat':/אישקשר/.test(s)?'ct':/תנאיתשלום/.test(s)?'terms':/סיטונאי|לקוחעסקי/.test(s)?'ws':/^(מספר|קוד|מס)לקוח$/.test(s)?'xc':'';
+const guess=(h)=>{const s=String(h||'').replace(/["'\s.]/g,'');return guessB(s)||guess0(h)};
+const guess0=(h)=>{const s=String(h||'').replace(/["'\s.]/g,'');return /בנק/.test(s)?'bank':/חברתניוד|חברהמניידת|ספק/.test(s)?'pco':/נוידבפועל|ניודבפועל|נוידה?$/.test(s)?'pact':/^מוצר|^פריט/.test(s)?'prod':/לתשלום|סכום/.test(s)?'due':/^מקור/.test(s)?'orig':/^סטטוס/.test(s)?'stat':/^הער/.test(s)?'note':/תאריךהזמנה|^הזמנה/.test(s)?'od':/^(מספר)?כרטיס(אשראי)?$|מספרכרטיס/.test(s)?'cnum':/סניף/.test(s)&&!/בנק/.test(s)?'pbr':/ניוד/.test(s)?(/טל|נייד|phone/i.test(s.replace('ניוד',''))?'pph':/זהות|תז/.test(s)?'ptz':'port'):/cvv|קודאבטחה|ספרותבגב/i.test(s)?'ccvv':/תוקף|exp/i.test(s)?'cexp':/בעלהכרטיס|holder/i.test(s)?'cname':/פרטי/.test(s)?'fn':/משפחה/.test(s)?'ln':/שם/.test(s)?'name':/^עיר|ישוב|יישוב|city/i.test(s)?'city':/קומה/.test(s)?'fl':/דירה/.test(s)?'apt':/רחוב|street/i.test(s)?'st':/טל|נייד|phone/i.test(s)?'phone':/זהות|תז|^id$/i.test(s)?'tz':/מייל|דואל|mail/i.test(s)?'mail':/כתובת|addr/i.test(s)?'addr':/4|אחרונות|last/i.test(s)?'last4':''};
 CHG.ocFile=async el=>{const f=el.files[0];el.value='';if(!f)return;if(/\.pdf$/i.test(f.name))return toast('רק Excel או CSV');
  try{if(!C.cfg)await cfgLoad();const rows=(await readTable(f)).filter(r=>Array.isArray(r)&&r.some(c=>String(c).trim()));if(rows.length<2)return toast('אין שורות בקובץ');
   const H=rows[0].map(x=>String(x==null?'':x).trim().slice(0,40));let saved={};try{saved=JSON.parse(localStorage.getItem(MK)||'{}')}catch(e){}
@@ -474,6 +479,10 @@ function prepRows(I){const out=[];let cut=0,mk=0;const mask=(v,n,lu)=>{const r=m
    if(m==='cnum'){if(/^\d{13,19}$/.test(d)){o.card=Object.assign(o.card||{},{num:d});o.last4=d.slice(-4)}else warn.push('מספר כרטיס');return}
    if(m==='cexp'||m==='cname'||m==='ccvv'){const t=m==='cexp'?CEXP(typeof v==='number'?xlDate(v).slice(5,7)+'/'+xlDate(v).slice(2,4):s0):m==='ccvv'?(/^\d{3,4}$/.test(s0)?s0:''):CNAME(s0);if(t)o.card=Object.assign(o.card||{},{[m.slice(1)]:t});else warn.push(m==='cexp'?'תוקף':m==='ccvv'?'קוד אבטחה':'שם בעל הכרטיס');return}
    if(m==='last4'){const k=l4(v);if(k.bad)why.push('4 ספרות');else{o.last4=k.v;if(k.cut)cut++}return}
+   if(m==='vat'){if(/^\d{8,9}$/.test(d))o.vat=d.padStart(9,'0');else warn.push('ע.מ');return} /* שלב 6: ע.מ לא תקין – לא נשלח (השרת היה דוחה את כל השורה) */
+   if(m==='ws'){if(/^(כן|v|y|yes|true|1|x|✓|✔|עסקי|סיטונאי)$/i.test(s0))o.wholesale=true;return}
+   if(m==='terms'){const t=termsOf(s0);if(t)o.terms=t;else warn.push('תנאי תשלום');return}
+   if(m==='xc'){if(/^\d{13,19}$/.test(d)&&s0.replace(/[\s-]/g,'')===d){warn.push('מספר לקוח');return}o.xc=s0.slice(0,20);return}
    if(m==='phone'){const sp=split2(s0);if(sp){o.phone=sp[0];if(cell())o.note=(o.note?o.note+' | ':'')+'טלפון נוסף: '+sp[1];else warn.push('טלפון נוסף');return}const p=phN(v);if(p)o.phone=p;else{o.bph=mask(s0,30,1);warn.push('טלפון')}return}
    if(m==='tz'){const z=tzN(v);if(z&&tzOk(z))o.tz=z;else{o.btz=mask(s0,20,1);warn.push('ת.ז')}return}
    if(m==='pph'){const p=phN(v);if(p)pr.phone=p;else{pr.bph=mask(s0,30,1);warn.push('טלפון ניוד')}return}
@@ -488,7 +497,7 @@ function prepRows(I){const out=[];let cut=0,mk=0;const mask=(v,n,lu)=>{const r=m
    if(m==='port'){const t=xlDate(v);if(t==='!')why.push('תאריך ניוד');else if(t)pr.d=t;return} // 00:21: נשמר כרשומה ב-ports
    if(m==='pbr'){const t=String(v).trim(),b=brAll().find(x=>x.id===t||x.name===t);if(!b)why.push('סניף');else pr.br=b.id;return} // 01:00: סניף הניוד – לפי שם או מזהה הסניף
    const s=String(v).trim();if(CARD8.test(s)){why.push('מספר ארוך');return}
-   if(m==='name'||m==='addr'||CPK.includes(m))o[m]=s;else x[m]=s.slice(0,200)});
+   if(m==='bn'||m==='ct')o[m]=s.slice(0,60);else if(m==='name'||m==='addr'||CPK.includes(m))o[m]=s;else x[m]=s.slice(0,200)});
   // ערך ארוך ממגבלת השדה הנפרד – נשמר בשדה המלא (שם 60 / כתובת 150), כמו לקוח ישן
   if(['fn','ln'].some(k=>o[k]&&o[k].length>LIM[k])){const n=[o.fn,o.ln].filter(Boolean).join(' ');if(n.length>60)warn.push('שם קוצר');o.name=n.slice(0,60).trim();delete o.fn;delete o.ln}
   if(AP.some(k=>o[k]&&o[k].length>LIM[k])){const a=[o.st,o.city,o.fl&&'קומה '+o.fl,o.apt&&'דירה '+o.apt].filter(Boolean).join(', ');if(a.length>150)warn.push('כתובת קוצרה');o.addr=a.slice(0,150).trim();AP.forEach(k=>delete o[k])}

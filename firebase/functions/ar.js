@@ -401,7 +401,13 @@ async function docRender(db, w, doc, cfg, isVoid) {
     base.table = { head: ['אמצעי תשלום', 'פרטים', 'סכום'], rows: [[PAYN[p.m] || 'אחר', det, ag2(doc.gross)]], num: [2] };
     base.sums = [['סה״כ שולם', doc.gross / 100]];
     const al = await db.collection('aralloc').where('rc', '==', doc.id || '').get().catch(() => null);
-    const inv = al ? al.docs.map((s) => s.data()).filter((a) => !a.void).map((a) => `${a.inv.replace(/^inv[DO]/, '')} (${ag2(a.amt)})`) : [];
+    const live = al ? al.docs.map((s) => s.data()).filter((a) => !a.void) : [];
+    // שלב 6, תיקון סבב 1 (ליקוי 2): מסמך מיובא – המספר המקורי (ext); יתרת פתיחה – "יתרת פתיחה" (לא המזהה הפנימי)
+    const xs = live.filter((a) => /^x_/.test(a.inv));
+    const xd = {};
+    if (xs.length) { const ss = await db.getAll(...xs.map((a) => db.doc('ardoc/' + a.inv))).catch(() => []); ss.forEach((q) => { if (q.exists) xd[q.id] = q.get('t') === 'ob' ? 'יתרת פתיחה' : String(q.get('ext') || q.get('no') || ''); }); }
+    const lbl = (id) => (/^x_ob_/.test(id) ? 'יתרת פתיחה' : /^x_/.test(id) ? (xd[id] || 'מסמך מיובא') : id.replace(/^inv[DO]/, ''));
+    const inv = live.map((a) => `${lbl(a.inv)} (${ag2(a.amt)})`);
     if (inv.length) notes.push('עבור חשבוניות: ' + inv.join(', '));
   } else {
     base.lines = (doc.lines || []).map((l) => ({ n: l.n, q: l.q, p: l.p, u: l.u || '' }));
@@ -433,6 +439,7 @@ async function docOf(db, id) {
   if (typeof id !== 'string' || !OC.ID_RE.test(id)) throw bad('bad-id', 'מסמך לא תקין');
   const s = await db.doc('ardoc/' + id).get();
   if (!s.exists) throw new HttpsError('not-found', 'המסמך לא נמצא', { reason: 'no-doc' });
+  if (['ob', 'old'].includes(s.get('t'))) throw pre('imported', 'מסמך מיובא מתוכנה קודמת – אין לו קובץ'); // שלב 6: בלי PDF
   return Object.assign({ id: s.id }, s.data());
 }
 function docAccess(w, doc) { if (doc.br && doc.br !== NB && w.mine && !w.mine.includes(doc.br)) throw deny('foreign-br', 'אין לך הרשאה למסמך של סניף אחר'); }
@@ -604,7 +611,7 @@ async function arReceipt(request) {
     const open = await B.openDocs(cid);
     const pf = await ARD.proofPlan(B, input.proofId);
     if (!pf.ok && (w.role !== 'manager' || input.proofId)) throw pre(pf.why || 'need-proof', ARD.PROOF_MSG[pf.why] || ARD.PROOF_MSG['need-proof']);
-    const invs = open.filter((x) => x.d.t === 'inv' && !x.d.void && x.d.open > 0);
+    const invs = open.filter((x) => ARD.isDr(x.d) && !x.d.void && x.d.open > 0); // שלב 6: גם חוב מיובא (ob/old)
     let plan;
     if (want) {
       plan = want.map((x) => {
@@ -930,6 +937,43 @@ async function arDoc(request) {
 }
 
 // ---------- arMonthly({ cust, ym:'YYYY-MM', ch?, to?, reqId? }) – מסמך סיכום חודשי (לא חשבונית מס, החלטה 23) ----------
+// שלב 5: הבנייה והשליחה הופרדו (monBuild / monSend), כדי שגם ar-remind.js (סיכום אוטומטי בתחילת החודש ללקוח עם invM) ישתמש בהן. ההתנהגות לא השתנתה.
+async function monBuild(db, w, cfg, c, cid, ym) {
+  const [y, mo] = ym.split('-').map(Number);
+  const from = ym + '-01', to = AC.ymdAdd(`${y}-${String(mo).padStart(2, '0')}-01`, new Date(Date.UTC(y, mo, 0)).getUTCDate() - 1);
+  const q = await db.collection('ardoc').where('cust', '==', cid).where('d', '>=', from).where('d', '<=', to).get();
+  const L = q.docs.map((s) => Object.assign({ id: s.id }, s.data())).filter((x) => ['inv', 'ir', 'cr'].includes(x.t)).sort((a, b) => a.d.localeCompare(b.d) || a.no - b.no);
+  if (!L.length) throw pre('no-docs', 'אין חשבוניות ללקוח בחודש הזה');
+  const sgn = (x) => (x.t === 'cr' ? -x.gross : x.gross);
+  const rows = L.map((x) => [shDate(x.d), titleOf(x), String(x.no), ag2(sgn(x)), x.t === 'inv' ? ag2(x.open) : '']);
+  const tot = L.reduce((s, x) => s + sgn(x), 0), open = L.reduce((s, x) => s + (x.t === 'inv' ? x.open : 0), 0);
+  const ar = ARD.arOf(c);
+  const doc = { t: 'st', d: ARD.ilDay(Date.now()), draft: L.some((x) => x.draft), title: `סיכום חשבוניות – ${String(mo).padStart(2, '0')}/${y}`, biz: await bizOf(db, w, cfg), cust: ARD.custSnap(c),
+    table: { head: ['תאריך', 'מסמך', 'מס׳', 'סכום', 'יתרה לתשלום'], rows, num: [3, 4] },
+    sums: [['סה״כ החודש', tot / 100], ['מזה פתוח לתשלום', open / 100], ['יתרת החשבון כעת', ar.bal / 100]],
+    note: 'מסמך סיכום בלבד – לא חשבונית מס. החשבוניות עצמן נשלחו בנפרד.' };
+  const buf = await PDF.render(doc);
+  const f = `sum_${cid}_${ym}`;
+  await AF.put(w.bizId, f, buf);
+  const sref = db.doc(`arsum/${cid}_${ym}`);
+  await sref.set({ cust: cid, ym, n: L.length, tot, open, at: Date.now(), by: w.uid, f }, { merge: true });
+  return { buf, doc, f, sref, mo, y, name: `סיכום חשבוניות ${ym}.pdf`, n: L.length, tot, open };
+}
+async function monSend(db, w, cfg, c, m, list, auto) {
+  const out = [];
+  for (const [ch, t] of list) {
+    let r;
+    if (!t) r = { ch, to: '', at: Date.now(), ok: false, why: 'no-to' };
+    else if (ch === 'wa') {
+      const tpl = cfg.wt && TPL_RE.test(String(cfg.wt.st || '')) ? cfg.wt.st : '';
+      if (!tpl) r = { ch, to: t, at: Date.now(), ok: false, why: 'no-tpl' };
+      else { const lk = await AF.mkLink({ biz: w.bizId, id: m.f, n: m.name }); r = await S.sendWa(db, { to: t, tpl: { name: tpl, lang: 'he', params: [m.doc.cust.name, `${String(m.mo).padStart(2, '0')}/${m.y}`, ag2(m.tot)] }, link: lk.url, fileName: m.name, auto, by: w.uid, token: sv(WA_ACCESS_TOKEN), now: Date.now() }); }
+    } else r = await S.sendMail(w.bizId, { to: t, subject: `${m.doc.title}${cfg.name ? ' – ' + cfg.name : ''}`, text: `שלום ${m.doc.cust.name},\nמצורף ${m.doc.title}.\n${cfg.name || ''}`, replyTo: cfg.mail, fromName: cfg.name || '', pdf: m.buf, fileName: m.name, by: w.uid, now: Date.now() });
+    out.push(Object.assign({}, r, { by: w.uid }, auto ? { auto: true } : {}));
+  }
+  await m.sref.update({ sent: out.slice(-SENT_MAX) });
+  return out;
+}
 async function arMonthly(request) {
   const w = await OC.who(request);
   const input = inputObject(request);
@@ -943,44 +987,159 @@ async function arMonthly(request) {
   const cs = await db.doc('cust/' + cid).get();
   if (!cs.exists || cs.get('mv')) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
   const c = cs.data();
-  const [y, mo] = input.ym.split('-').map(Number);
-  const from = input.ym + '-01', to = AC.ymdAdd(`${y}-${String(mo).padStart(2, '0')}-01`, new Date(Date.UTC(y, mo, 0)).getUTCDate() - 1);
-  const q = await db.collection('ardoc').where('cust', '==', cid).where('d', '>=', from).where('d', '<=', to).get();
-  const L = q.docs.map((s) => Object.assign({ id: s.id }, s.data())).filter((x) => ['inv', 'ir', 'cr'].includes(x.t)).sort((a, b) => a.d.localeCompare(b.d) || a.no - b.no);
-  if (!L.length) throw pre('no-docs', 'אין חשבוניות ללקוח בחודש הזה');
-  const sgn = (x) => (x.t === 'cr' ? -x.gross : x.gross);
-  const rows = L.map((x) => [shDate(x.d), titleOf(x), String(x.no), ag2(sgn(x)), x.t === 'inv' ? ag2(x.open) : '']);
-  const tot = L.reduce((s, x) => s + sgn(x), 0), open = L.reduce((s, x) => s + (x.t === 'inv' ? x.open : 0), 0);
-  const ar = ARD.arOf(c);
-  const doc = { t: 'st', d: ARD.ilDay(Date.now()), draft: L.some((x) => x.draft), title: `סיכום חשבוניות – ${String(mo).padStart(2, '0')}/${y}`, biz: await bizOf(db, w, cfg), cust: ARD.custSnap(c),
-    table: { head: ['תאריך', 'מסמך', 'מס׳', 'סכום', 'יתרה לתשלום'], rows, num: [3, 4] },
-    sums: [['סה״כ החודש', tot / 100], ['מזה פתוח לתשלום', open / 100], ['יתרת החשבון כעת', ar.bal / 100]],
-    note: 'מסמך סיכום בלבד – לא חשבונית מס. החשבוניות עצמן נשלחו בנפרד.' };
-  const buf = await PDF.render(doc);
-  const f = `sum_${cid}_${input.ym}`;
-  await AF.put(w.bizId, f, buf);
-  const sref = db.doc(`arsum/${cid}_${input.ym}`);
-  await sref.set({ cust: cid, ym: input.ym, n: L.length, tot, open, at: Date.now(), by: w.uid, f }, { merge: true });
-  const out = { name: `סיכום חשבוניות ${input.ym}.pdf`, b64: buf.toString('base64'), n: L.length, tot, open, sent: [] };
+  const m = await monBuild(db, w, cfg, c, cid, input.ym);
+  const out = { name: m.name, b64: m.buf.toString('base64'), n: m.n, tot: m.tot, open: m.open, sent: [] };
   if (input.ch) {
     const reqId = reqIdOf(input);
     const mark = markRef(db, reqId);
     try { await mark.create({ k: 'arMonthly', key: cid + '_' + input.ym, t: Date.now(), by: w.uid }); } catch (e) { if (e && (e.code === 6 || /already exists/i.test(String(e.message)))) return Object.assign(out, { dup: true }); throw e; }
-    const fake = { id: '', no: `${String(mo).padStart(2, '0')}/${y}`, t: 'st', gross: tot, custSnap: doc.cust, draft: doc.draft, bt: 'osek' };
-    for (const [ch, t] of targets({}, { cust: doc.cust }, c, input.ch, input.to ? String(input.to).trim().slice(0, 254) : '')) {
+    out.sent = await monSend(db, w, cfg, c, m, targets({}, { cust: m.doc.cust }, c, input.ch, input.to ? String(input.to).trim().slice(0, 254) : ''), false);
+    await mark.update({ r: { sent: out.sent } });
+  }
+  return out;
+}
+
+// =====================================================================================
+// שלב 5 (15.11.2026): כרטסת ותזכורות תשלום.
+//   arStatement – כרטסת ללקוח (104–105): PDF עם תאריך, מסמך, חובה, זכות, יתרה מצטברת, בטווח תאריכים; או "יתרה פתוחה" (open:true – רק החשבוניות הפתוחות).
+//                 מנהל ועובד עם הזמנות (106). שליחה ללקוח במייל / ווטסאפ (ווטסאפ רק עם תבנית wt.st מאושרת), עם מזהה בקשה.
+//   setRemCfg   – מנהל בלבד: הגדרות התזכורות (arcfg/rem), וללקוח – כיבוי תזכורות / ימים לפני (cust.rem) וסיכום חודשי אוטומטי (cust.invM).
+//                 { get:true } – ההגדרות וסיכומי 7 הימים האחרונים (arrem/sum_*), כי לאוספים האלה אין קריאה מהאפליקציה.
+// המנוע עצמו – ar-remind.js (arRemind, מתוזמנת).
+// =====================================================================================
+const LTN = { inv: 'חשבונית מס', ir: 'חשבונית מס קבלה', rc: 'קבלה', cr: 'זיכוי', ob: 'יתרת פתיחה (מיובא)', old: 'מסמך מיובא' };
+const LXN = { inv: 'חשבונית (מיובא)', rc: 'קבלה (מיובא)', cr: 'זיכוי (מיובא)' }; // שלב 6: old לפי הסוג המקורי (ot)
+const agS = (a) => (a ? ag2(a) : '');
+// PDF של כרטסת / יתרה פתוחה. L = מסמכי הלקוח (ardoc). opts: { from, to, open }
+async function stmtBuild(db, w, cfg, c, L, opts) {
+  const o = opts || {};
+  const cust = ARD.custSnap(c);
+  const biz = await bizOf(db, w, cfg);
+  const d = ARD.ilDay(Date.now());
+  const draft = L.some((x) => x.draft);
+  let doc;
+  if (o.open) {
+    // שלב 6: גם חוב מיובא (ob/old)
+    const inv = L.filter((x) => ARD.isDr(x) && !x.void && x.open > 0).sort((a, b) => String(a.dueX || a.due).localeCompare(String(b.dueX || b.due)) || a.no - b.no);
+    const sum = inv.reduce((s, x) => s + x.open, 0);
+    doc = { t: 'st', d, draft, title: 'פירוט יתרה פתוחה', biz, cust,
+      table: { head: ['תאריך', 'חשבונית', 'לתשלום עד', 'סכום', 'יתרה לתשלום'], rows: inv.map((x) => [shDate(x.d), x.t === 'ob' ? 'יתרת פתיחה' : String(x.no), shDate(x.dueX || x.due), ag2(x.gross), ag2(x.open)]), num: [3, 4] },
+      sums: [['סה״כ לתשלום', sum / 100]].concat(ARD.arOf(c).cr > 0 ? [['יתרת זכות (תקוזז)', ARD.arOf(c).cr / 100]] : []), note: o.note || '' };
+    return { buf: await PDF.render(doc), doc, sum, n: inv.length, name: 'פירוט יתרה.pdf' };
+  }
+  const lg = AC.ledger(L, o.from, o.to);
+  const rows = (o.from ? [[shDate(o.from), 'יתרת פתיחה', '', '', ag2(lg.open)]] : []).concat(lg.rows.map((r) => [shDate(r.d), `${(r.t === 'old' && LXN[r.ot]) || LTN[r.t] || ''} ${r.no || ''}`.trim(), agS(r.dr), agS(r.cr), ag2(r.bal)]));
+  doc = { t: 'st', d, draft, title: 'כרטסת לקוח' + (o.from || o.to ? ` ${shDate(o.from) || '…'} – ${shDate(o.to) || shDate(d)}` : ''), biz, cust,
+    table: { head: ['תאריך', 'מסמך', 'חובה', 'זכות', 'יתרה'], rows, num: [2, 3, 4] },
+    sums: [['סה״כ חובה', lg.dr / 100], ['סה״כ זכות', lg.cr / 100], ['יתרה לסוף התקופה', lg.end / 100]],
+    note: 'יתרה חיובית = הלקוח חייב. מסמך מידע – לא חשבונית מס.' };
+  return { buf: await PDF.render(doc), doc, lg, name: 'כרטסת.pdf' };
+}
+async function custDocs(db, cid) {
+  const q = await db.collection('ardoc').where('cust', '==', cid).get();
+  return q.docs.map((s) => Object.assign({ id: s.id }, s.data()));
+}
+// ---------- arStatement({ cust, from?, to?, open?, ch?, dest?, reqId? }) – dest = נמען אחר (לא חובה); to = עד תאריך ----------
+async function arStatement(request) {
+  const w = await OC.who(request);
+  const input = inputObject(request);
+  onlyKeys(input, ['cust', 'from', 'to', 'open', 'ch', 'dest', 'reqId']);
+  const cid = idOf(input.cust, 'לקוח');
+  for (const k of ['from', 'to']) if (input[k] != null && input[k] !== '' && !AC.ymdOk(input[k])) throw bad('bad-date', 'תאריך לא תקין');
+  if (input.from && input.to && input.from > input.to) throw bad('bad-date', 'טווח תאריכים לא תקין');
+  if (input.open !== undefined && typeof input.open !== 'boolean') throw bad('bad-field', 'open: כן/לא');
+  if (input.ch != null && input.ch !== 'wa' && input.ch !== 'mail') throw bad('bad-ch', 'בחרו ווטסאפ או מייל');
+  const db = T.tdb();
+  const cfg = await cfgOf(db);
+  needOn(cfg);
+  const cs = await db.doc('cust/' + cid).get();
+  if (!cs.exists || cs.get('mv')) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+  const c = cs.data();
+  const st = await stmtBuild(db, w, cfg, c, await custDocs(db, cid), { from: input.from || '', to: input.to || '', open: input.open === true });
+  const out = { name: st.name, b64: st.buf.toString('base64'), bal: ARD.arOf(c).bal, sent: [] };
+  if (st.lg) Object.assign(out, { end: st.lg.end, calc: st.lg.bal });
+  if (input.ch) {
+    const reqId = reqIdOf(input);
+    const mark = markRef(db, reqId);
+    try { await mark.create({ k: 'arStatement', key: cid, t: Date.now(), by: w.uid }); } catch (e) {
+      if (e && (e.code === 6 || /already exists/i.test(String(e.message)))) { const ms = await mark.get(); markHit(ms, 'arStatement', cid); return Object.assign(out, ms.get('r') || {}, { dup: true }); }
+      throw e;
+    }
+    const f = `stm_${cid}_${Date.now()}`;
+    await AF.put(w.bizId, f, st.buf);
+    for (const [ch, t] of targets({}, { cust: st.doc.cust }, c, input.ch, input.dest ? String(input.dest).trim().slice(0, 254) : '')) {
       let r;
       if (!t) r = { ch, to: '', at: Date.now(), ok: false, why: 'no-to' };
       else if (ch === 'wa') {
         const tpl = cfg.wt && TPL_RE.test(String(cfg.wt.st || '')) ? cfg.wt.st : '';
         if (!tpl) r = { ch, to: t, at: Date.now(), ok: false, why: 'no-tpl' };
-        else { const lk = await AF.mkLink({ biz: w.bizId, id: f, n: out.name }); r = await S.sendWa(db, { to: t, tpl: { name: tpl, lang: 'he', params: [doc.cust.name, fake.no, ag2(tot)] }, link: lk.url, fileName: out.name, auto: false, by: w.uid, token: sv(WA_ACCESS_TOKEN), now: Date.now() }); }
-      } else r = await S.sendMail(w.bizId, { to: t, subject: `${doc.title}${cfg.name ? ' – ' + cfg.name : ''}`, text: `שלום ${doc.cust.name},\nמצורף ${doc.title}.\n${cfg.name || ''}`, replyTo: cfg.mail, fromName: cfg.name || '', pdf: buf, fileName: out.name, by: w.uid, now: Date.now() });
+        else { const lk = await AF.mkLink({ biz: w.bizId, id: f, n: st.name }); r = await S.sendWa(db, { to: t, tpl: { name: tpl, lang: 'he', params: [st.doc.cust.name, st.doc.title, ag2(out.bal)] }, link: lk.url, fileName: st.name, auto: false, by: w.uid, token: sv(WA_ACCESS_TOKEN), now: Date.now() }); }
+      } else r = await S.sendMail(w.bizId, { to: t, subject: `${st.doc.title}${cfg.name ? ' – ' + cfg.name : ''}`, text: `שלום ${st.doc.cust.name},\nמצורף/ת ${st.doc.title}.${st.doc.draft ? '\n(כולל מסמכי טיוטה – לא רשמיים)' : ''}\n${cfg.name || ''}`, replyTo: cfg.mail, fromName: cfg.name || '', pdf: st.buf, fileName: st.name, by: w.uid, now: Date.now() });
       out.sent.push(Object.assign({}, r, { by: w.uid }));
     }
     await mark.update({ r: { sent: out.sent } });
-    await sref.update({ sent: out.sent.slice(-SENT_MAX) });
   }
   return out;
+}
+
+// ---------- setRemCfg ----------
+//   עסק:  { on?, hour?, b?, steps?, mon?, cap?, txt?, sum? }  → arcfg/rem (merge)
+//   לקוח: { cust, rem?:{ on, b? } | null, invM?:boolean }    → cust.rem / cust.invM
+//   קריאה: { get:true } → { cfg, sums:[arrem/sum_* של 7 הימים האחרונים] }
+const REM_TXT = 1500;
+async function setRemCfg(request) {
+  const w = await OC.who(request);
+  mgr(w);
+  const input = inputObject(request);
+  const db = T.tdb();
+  const now = Date.now();
+  if (input.get === true) {
+    onlyKeys(input, ['get']);
+    const s = await db.doc('arcfg/rem').get();
+    const days = Array.from({ length: 7 }, (_, i) => ARD.ilDay(now - i * 864e5));
+    const ss = await db.getAll(...days.map((d) => db.doc('arrem/sum_' + d)));
+    return { cfg: s.exists ? s.data() : {}, sums: ss.filter((x) => x.exists).map((x) => x.data()) };
+  }
+  if (input.cust !== undefined) {
+    onlyKeys(input, ['cust', 'rem', 'invM']);
+    const cid = idOf(input.cust, 'לקוח');
+    const up = {};
+    if (input.rem !== undefined) {
+      const x = input.rem;
+      if (x === null) up.rem = require('firebase-admin/firestore').FieldValue.delete();
+      else {
+        if (typeof x !== 'object' || Array.isArray(x)) throw bad('bad-rem', 'הגדרת תזכורות לא תקינה');
+        onlyKeys(x, ['on', 'b'], 'תזכורות');
+        if (typeof x.on !== 'boolean') throw bad('bad-rem', 'תזכורות ללקוח: כן/לא');
+        if (x.b != null && !(Number.isInteger(x.b) && x.b >= 0 && x.b <= 60)) throw bad('bad-rem', 'ימים לפני המועד: 0–60');
+        up.rem = x.b == null ? { on: x.on } : { on: x.on, b: x.b };
+      }
+    }
+    if (input.invM !== undefined) { if (typeof input.invM !== 'boolean') throw bad('bad-field', 'סיכום חודשי אוטומטי: כן/לא'); up.invM = input.invM; }
+    if (!Object.keys(up).length) throw bad('bad-cfg', 'אין מה לשמור');
+    const ref = db.doc('cust/' + cid);
+    const s = await ref.get();
+    if (!s.exists || s.get('mv')) throw new HttpsError('not-found', 'הלקוח לא נמצא', { reason: 'no-cust' });
+    await ref.update(Object.assign(up, { remBy: w.uid, remAt: now }));
+    return { ok: true };
+  }
+  onlyKeys(input, ['on', 'hour', 'b', 'steps', 'mon', 'cap', 'txt', 'sum']);
+  const up = {};
+  if (input.on !== undefined) { if (typeof input.on !== 'boolean') throw bad('bad-cfg', 'תזכורות: כן/לא'); up.on = input.on; }
+  if (input.sum !== undefined) { if (typeof input.sum !== 'boolean') throw bad('bad-cfg', 'סיכום יומי: כן/לא'); up.sum = input.sum; }
+  if (input.hour !== undefined) { if (!Number.isInteger(input.hour) || input.hour < 6 || input.hour > 19) throw bad('bad-cfg', 'שעת שליחה: 6–19 (לא שולחים אחרי 20:00)'); up.hour = input.hour; }
+  if (input.b !== undefined) { if (!Number.isInteger(input.b) || input.b < 0 || input.b > 60) throw bad('bad-cfg', 'ימים לפני המועד: 0–60'); up.b = input.b; }
+  if (input.steps !== undefined) {
+    const x = input.steps;
+    if (!Array.isArray(x) || x.length > 8 || !x.every((v) => Number.isInteger(v) && v >= 0 && v <= 365)) throw bad('bad-cfg', 'ימים אחרי המועד: עד 8 מספרים, 0–365');
+    up.steps = [...new Set(x)].sort((a, b) => a - b);
+  }
+  if (input.mon !== undefined) { if (!(input.mon === 0 || (Number.isInteger(input.mon) && input.mon >= 7 && input.mon <= 90))) throw bad('bad-cfg', 'תזכורת חוזרת: 0 (בלי) או 7–90 ימים'); up.mon = input.mon; }
+  if (input.cap !== undefined) { if (!Number.isInteger(input.cap) || input.cap < 1 || input.cap > 1000) throw bad('bad-cfg', 'תקרה יומית: 1–1000'); up.cap = input.cap; }
+  if (input.txt !== undefined) up.txt = txtIn(input.txt, REM_TXT, 'נוסח');
+  if (!Object.keys(up).length) throw bad('bad-cfg', 'אין מה לשמור');
+  await db.doc('arcfg/rem').set(Object.assign(up, { upd: now, by: w.uid }), { merge: true });
+  return { ok: true };
 }
 
 // ---------- setArOff – מנהל־על בלבד ----------
@@ -1027,7 +1186,7 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { arOc, arPdf, arSend, setArCfg, arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff };
-const SENDS = ['arOc', 'arSend', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arDoc', 'arMonthly']; // שולחות: סוד ווטסאפ + סודות המייל
+const FNS = { arOc, arPdf, arSend, setArCfg, arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff, arStatement, setRemCfg };
+const SENDS = ['arOc', 'arSend', 'arIssue', 'arReceipt', 'arCredit', 'arVoidRc', 'arDoc', 'arMonthly', 'arStatement']; // שולחות: סוד ווטסאפ + סודות המייל
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(SENDS.includes(k) ? { secrets: [WA_ACCESS_TOKEN].concat(S.MAIL_SECRETS), timeoutSeconds: 120, memory: '512MiB' } : { memory: '512MiB' }, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, sniffMime, refTxt, rfTxt } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { sigOf, linesOf, fileOf, ilDay, afterIssue, docRender, sniffMime, refTxt, rfTxt, cfgOf, bizOf, stmtBuild, monBuild, monSend, targets, custOf, WA_ACCESS_TOKEN } });

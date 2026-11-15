@@ -19,6 +19,7 @@
 //              terms:{b:'imm'|'eom'|'inv',d} תנאי תשלום (כמו בספקים; לקוח ישן בלי terms – ArCalc.termsOfCust לפי pay, ו-pay לא נמחק),
 //              blk חסום (עובד לא פותח לו הזמנה), lim מסגרת אשראי (רק נשמר – האזהרה משלב 4), phx: כל הטלפונים לזיהוי (השרת בונה בכל שמירה) }
 //   terms אחרי ההקמה, blk ו-lim – מנהל בלבד. בהקמה עובד בוחר terms (ברירת מחדל מיידי).
+//   15.11.2026 (שלב 6): xc – מספר הלקוח בתוכנה הקודמת (טקסט עד 20, רק מייבוא). מזהה את הלקוח בייבוא מסמכים (ar-import.js).
 //   findCust – חיפוש מדויק בשרת (טלפון כולל אנשי קשר, ע.מ, ת"ז). חיפוש לפי שם – במכשיר.
 //   cprice/{custId}_{pid} – מחיר קבוע ללקוח: setCustPrice (עובד עם ord בתוך המגבלה, ומנהל), delCustPrice (מנהל). mg = true כשמנהל שמר (סבב 3). ordcfg/price – setPriceCfg (מנהל).
 
@@ -78,8 +79,10 @@ const BIZF = ['bn', 'vat', 'ct', 'pay', 'payTxt']; // לקוח עסקי
 const NBF = ['cts', 'addrs', 'terms', 'blk', 'lim']; // 14.11.2026: לקוח עסקי (שלב 1) – מושווים כ-JSON, לא כערך פשוט
 const MAX_CTS = 10, MAX_ADDRS = 20, MAX_PHX = 15;
 const PAYS = ['cash', 'n30', 'n60', 'n90', 'credit', 'transfer', 'other'];
-const FIELDS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port'].concat(core.CPART_KEYS, BIZF, INFO_KEYS, FLAG_KEYS);
+const FIELDS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'xc'].concat(core.CPART_KEYS, BIZF, INFO_KEYS, FLAG_KEYS);
 const CKEYS = ['name', 'phone', 'tz', 'mail', 'addr', 'last4', 'port', 'x', 'ports', 'phs'].concat(core.CPART_KEYS, INFO_KEYS, FLAG_KEYS);
+// שלב 6 (ייבוא מתוכנה קודמת, תשובה 114): בייבוא גם שדות לקוח עסקי, תנאי תשלום ו-xc (מספר הלקוח בתוכנה הקודמת – לזיהוי במסמכים מיובאים, ar-import.js)
+const CKEYS_IMP = CKEYS.concat(['bn', 'vat', 'ct', 'terms', 'xc']);
 const NEWK = INFO_KEYS.concat(FLAG_KEYS);
 const hasInfo = (c) => !!c && typeof c === 'object' && (INFO_KEYS.some((k) => c[k] !== undefined) || (Array.isArray(c.ports) && c.ports.some((p) => p && typeof p === 'object' && (p.co !== undefined || p.act !== undefined))));
 // טקסט חופשי בלי בדיקת ספרות (פרטי בנק); plain + חסימת מספר כרטיס (שאר שדות המידע והערכים הלא תקינים)
@@ -189,6 +192,7 @@ function clean(c, keys, brs, byId, imp) {
   if (!empty(c.bn)) o.bn = txt(c.bn, 60, 'bad-bn', 'שם העסק');
   if (!empty(c.vat)) { const v = String(c.vat).replace(/[\s-]/g, ''); if (!/^\d{9}$/.test(v)) throw bad('bad-vat', 'ע.מ: 9 ספרות'); o.vat = v; }
   if (!empty(c.ct)) o.ct = txt(c.ct, 60, 'bad-ct', 'איש קשר');
+  if (!empty(c.xc)) o.xc = txt(String(c.xc), 20, 'bad-xc', 'מספר לקוח בתוכנה הקודמת'); // שלב 6
   if (!empty(c.pay)) { if (!PAYS.includes(c.pay)) throw bad('bad-pay', 'תנאי תשלום לא תקינים'); o.pay = c.pay; }
   if (o.pay === 'other') o.payTxt = txt(c.payTxt, 60, 'bad-pay', 'תנאי תשלום', true);
   else if (!empty(c.payTxt)) throw bad('bad-pay', 'פירוט תנאי תשלום – רק כשנבחר "אחר"');
@@ -364,7 +368,7 @@ async function upsert(tx, db, w, o, opts) {
   if (base && opts.onlyNew) throw new HttpsError('already-exists', 'כבר יש לקוח עם הפרטים האלה', { reason: 'cust-exists', id: s.exists ? (s.get('mv') || id) : ps.get('mv') || ps.id }); // המזכירה (saveCore so.onlyNew): לקוח קיים לא משתנה
   if (base && ws === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
   bizGuard(base, o, opts.mgr, opts);
-  if (ws === true && !(base && base.wholesale === true)) needBiz(base, o, opts.fill);
+  if (ws === true && !(base && base.wholesale === true) && opts.src !== 'import') needBiz(base, o, opts.fill); // שלב 6: ייבוא לא דורש את כל השדות (משלימים בכרטיס)
   flagFix(base, o, opts.cell, opts.fill);
   if (!base) {
     if (!o.name && o.bn) o.name = o.bn; // לקוח עסקי חדש: השם המוצג = שם העסק (בלקוח קיים השם לא נדרס)
@@ -433,7 +437,7 @@ function newDoc(o, w, opts, now) {
 // לקוח נוסף עם אותו טלפון (asNew, בלי ת"ז): מזהה אקראי c{20}, לא תלוי בת"ז/טלפון. גם שורת ייבוא בלי טלפון/ת"ז תקינים
 async function createNew(tx, db, w, o, opts) {
   bizGuard(null, o, opts.mgr);
-  if (opts.wholesale === true) needBiz(null, o, false);
+  if (opts.wholesale === true && opts.src !== 'import') needBiz(null, o, false);
   flagFix(null, o, opts.cell, false);
   if (!o.name && o.bn) o.name = o.bn;
   if (!o.name) throw bad('bad-name', 'שם הלקוח – חובה');
@@ -599,8 +603,9 @@ async function mergeCust(request) {
   return out;
 }
 
-// importCusts({ reqId, rows:[{name,phone,tz,mail,addr,last4,port,x}] }) – מנהל בלבד, עד 200 שורות למנה.
-// לקוח קיים (לפי t{tz}/p{phone}) – רק שדות ריקים מתמלאים (ייבוא חוזר לא יוצר כפולים ולא דורס). wholesale – לא מיובא (22:10).
+// importCusts({ reqId, rows:[{name,phone,tz,mail,addr,last4,port,x,bn,vat,ct,terms,xc,wholesale}] }) – מנהל בלבד, עד 200 שורות למנה.
+// לקוח קיים (לפי t{tz}/p{phone}) – רק שדות ריקים מתמלאים (ייבוא חוזר לא יוצר כפולים ולא דורס).
+// שלב 6 (114): wholesale:true מסמן לקוח עסקי, terms ממלא תנאי תשלום ריקים. סימון קיים לא מבוטל בייבוא.
 // שורה שגויה לא עוצרת את המנה – מוחזרת ב-bad עם מספר השורה והסיבה (בלי הערך עצמו).
 async function importCusts(request) {
   const w = await who(request);
@@ -629,7 +634,8 @@ async function custRows(w, db, rows, hk) {
     const row = rows[i];
     try {
       if (!row || typeof row !== 'object' || Array.isArray(row)) throw bad('bad-row', 'שורה לא תקינה');
-      const r0 = Object.assign({}, row); delete r0.wholesale; delete r0.ws; // מתעלמים מעמודת סיטונאי
+      // שלב 6 (תשובה 114, גובר על 22:10): wholesale:true מסמן לקוח עסקי (רק מסמן – לא מבטל סימון קיים). ws – מתעלמים כמו קודם
+      const r0 = Object.assign({}, row); const ws = r0.wholesale === true; delete r0.wholesale; delete r0.ws;
       // עמודה חופשית שמכילה מספר כרטיס מלא (13–19 ספרות) – נחתכת ל-4 ספרות ונשמרת כ-last4 בלבד (22:04)
       if (r0.x && typeof r0.x === 'object' && !Array.isArray(r0.x)) {
         r0.x = Object.assign({}, r0.x);
@@ -645,7 +651,7 @@ async function custRows(w, db, rows, hk) {
       const cl = (r0.cards || []).concat(r0.card == null ? [] : [r0.card]).map((c) => CARD.cleanCard(c)).filter((c, j, A) => A.findIndex((q) => q.num === c.num) === j);
       delete r0.card; delete r0.cards;
       if (cl.length) r0.last4 = cl[0].num.slice(-4);
-      onlyKeys(r0, CKEYS, 'שורה');
+      onlyKeys(r0, CKEYS_IMP, 'שורה');
       const o = clean(r0, keys, brs, false, true);
       const keyed = !!(o.tz || o.phone); // בלי טלפון/ת"ז תקינים – לקוח חדש נפרד (c{20}), בלי איחוד
       const id = keyed ? idFor(o) : null;
@@ -654,7 +660,8 @@ async function custRows(w, db, rows, hk) {
       if (hk && hk.prior.has(i)) { was(hk.prior.get(i)); continue; } // בוצעה בניסיון קודם
       if (hk && hk.fail) hk.fail(i);
       let prior = null;
-      const opts = { fill: true, src: 'import', cell: cellOn(w) };
+      const opts = { fill: true, src: 'import', cell: cellOn(w), mgr: true }; // ייבוא – מנהל בלבד (importCusts / imports.js)
+      if (ws) opts.wholesale = true;
       // כרטיסים חדשים נכנסים למקומות הפנויים בלבד (קיים לא נדרס). 2026-11-10 (סעיף 1): כפילות = אותו מספר מלא בלבד.
       // כרטיס שמור עם אותן 4 ספרות מפוענח בזיכרון להשוואה (לא נרשם ולא מוחזר) – כך ייבוא חוזר לא מכפיל, ושני כרטיסים שונים עם אותן 4 ספרות נשמרים שניהם
       let skip = 0, added = 0;
