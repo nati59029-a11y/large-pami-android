@@ -37,6 +37,7 @@ async function server(ctx, mgr) {
   const ok = (route, r) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: r }) });
   const bad = (route, reason, msg) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'FAILED_PRECONDITION', message: msg || 'שגיאה', details: { reason } } }) });
   await ctx.route('**/mapDraft', (route) => { const b = rec(route, 'mapDraft'); if (S.fnFail.draft) return bad(route, S.fnFail.draft, S.fnFail.draftMsg || 'שגיאה'); ok(route, { draftId: b.qid, st: 'ok', n: (b.imgs || []).length, conf: 0.55, drop: 0, usage: { m: '2026-11', n: 1, cap: 500, w80: false }, m: draftMap(), scale: { ref: '', conf: 0 }, notes: 'המידות הן הערכה, בלי מטר בתמונות.' }); });
+  await ctx.route('**/mapFix', (route) => { const b = rec(route, 'mapFix'); if (S.fnFail.fix) return bad(route, S.fnFail.fix, S.fnFail.fixMsg || 'שגיאה'); S.fixN = (S.fixN || 0) + 1; ok(route, { draftId: b.qid, st: 'ok', conf: 0.7, drop: 0, fix: true, m: Object.assign(draftMap(), { fixN: S.fixN, fixTxt: b.txt }), scale: { ref: '', conf: 0 }, notes: 'תוקן לפי הבקשה.' }); });
   await ctx.route('**/s3PutTex', (route) => { const b = rec(route, 's3PutTex'); S.tn = (S.tn || 0) + 1; ok(route, { texId: 't' + S.tn, path: 'b/biz-s/store3d/main/tex/s-main/t' + S.tn + '_1.jpg', w: 1024, h: 512 }); });
   await ctx.route('**/s3SaveMap', (route) => { const b = rec(route, 's3SaveMap'); S.none = false; S.map = Object.assign({}, b.map, { v: 1, upd: 1763200000000, by: 'm' }); ok(route, { ok: true, v: 1, renamed: {}, dropped: [], purged: {} }); });
   await ctx.route('**/shelfCheck', (route) => { const b = rec(route, 'shelfCheck'); if (S.fnFail.shelf) return bad(route, S.fnFail.shelf, 'הגעתם למכסה'); ok(route, S.adhoc); });
@@ -163,6 +164,35 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   check('2א סיכום הטיוטה: חדרים, גופים, אזורים לא ודאיים (2), רמת ביטחון (הערכה) וכפתור "עברו על הטיוטה"', /הטיוטה מוכנה/.test(s2) && /אזורים לא ודאיים 2/.test(s2) && /55%/.test(s2) && /עברו על הטיוטה/.test(s2), s2.slice(0, 260));
   await shot(A.page, fp(shots, 'שלב2-טיוטה'));
   check('2ב הטיוטה עוד לא נשמרה (אין s3SaveMap)', !S.calls.some((c) => c.fn === 's3SaveMap'));
+
+  // ---- 2ד. תיקונים בכתב (שלב 20ג): mapFix ----
+  {
+    check('2ד1 mapDraft נשלח עם imgs וגם sketch וגם info יחד (כך גם כשהתמונות הן פריימים מסרטון: addVids דוחף ל-W.imgs)', !!md && md.b.imgs.length === 3 && !!md.b.sketch && !!md.b.info);
+    const fx = await A.page.evaluate(() => ({ ta: !!document.getElementById('s3wFix'), btn: !!document.querySelector('[data-a=s3wFix]'), t: document.querySelector('#main').innerText.replace(/\s+/g, ' ') }));
+    check('2ד2 מסך הטיוטה: תיבת "תיקונים בכתב", כפתור "תקנו את הטיוטה" והערה שלא נספר במכסה', fx.ta && fx.btn && /תיקונים בכתב/.test(fx.t) && /תקנו את הטיוטה/.test(fx.t) && /לא נספר במכסה החודשית/.test(fx.t), fx.t.slice(0, 200));
+    check('2ד3 מסך התיקונים ב-360px בלי גלישה', (await noOverflow(A.page)).bad.length === 0, await noOverflow(A.page));
+    await A.page.fill('#s3wFix', 'המקרר נמצא בקיר השמאלי, יש 4 שורות מדפים ולא 3');
+    if (fp(shots, 'x')) await A.page.screenshot({ path: process.env.FIXSHOT || fp(shots, 'שלב2-תיקון-בכתב'), fullPage: true });
+    const nf = () => S.calls.filter((c) => c.fn === 'mapFix');
+    const m0 = await A.page.evaluate(() => JSON.stringify(S3UI.W.draft.m)), id0 = await A.page.evaluate(() => S3UI.W.draft.id);
+    await A.page.fill('#s3wFix', 'א'); await A.page.click('[data-a=s3wFix]'); await sleep(500);
+    check('2ד4 טקסט קצר מדי (תו אחד): נחסם בהודעה, בלי קריאה לשרת', nf().length === 0 && /בין 2 ל-1000/.test(await txt(A.page, '#main')));
+    await A.page.fill('#s3wFix', 'המקרר נמצא בקיר השמאלי, יש 4 שורות מדפים ולא 3');
+    S.fnFail.fix = 'bad-answer'; S.fnFail.fixMsg = 'תשובת ה-AI נקטעה. נסו שוב.';
+    await A.page.click('[data-a=s3wFix]'); await sleep(1200);
+    const f1 = nf()[0], e1 = await A.page.evaluate(() => ({ same: JSON.stringify(S3UI.W.draft.m), ta: document.getElementById('s3wFix').value, step: S3UI.W.step }));
+    check('2ד5 כשל: הטיוטה הקודמת נשארת, ההודעה מוצגת, והתיבה שומרת את הטקסט', nf().length === 1 && e1.same === m0 && e1.step === 2 && /נקטעה/.test(await txt(A.page, '#main')) && /4 שורות/.test(e1.ta), { n: nf().length, ta: e1.ta });
+    S.fnFail.fix = '';
+    await A.page.click('[data-a=s3wFix]'); await sleep(1500);
+    const f2 = nf()[1], d1 = await A.page.evaluate(() => ({ fixN: S3UI.W.draft.m.fixN, id: S3UI.W.draft.id, n: S3UI.W.draft.n, ta: document.getElementById('s3wFix').value, t: document.querySelector('#main').innerText }));
+    check('2ד6 ניסיון חוזר אחרי כשל: אותו qid; הצלחה מחליפת את הטיוטה, שומרת n, ומנקה את התיבה', f1 && f2 && f1.b.qid === f2.b.qid && d1.fixN === 1 && d1.n === 3 && d1.ta === '' && /הטיוטה מוכנה/.test(d1.t), { q1: f1 && f1.b.qid, q2: f2 && f2.b.qid, d1 });
+    check('2ד7 גוף הבקשה: txt, m (הטיוטה הנוכחית), br, kind, from (מזהה הטיוטה), sk (הסקיצה) ובלי תמונות', f2.b.txt === 'המקרר נמצא בקיר השמאלי, יש 4 שורות מדפים ולא 3' && JSON.stringify(f2.b.m) === m0 && f2.b.br === 'main' && f2.b.kind === 's' && f2.b.from === id0 && JSON.stringify(f2.b.sk) === JSON.stringify(md.b.sketch) && !('imgs' in f2.b) && /^[A-Za-z0-9-]{16,40}$/.test(f2.b.qid), Object.keys(f2.b));
+    await A.page.fill('#s3wFix', 'להוסיף מקרר שני');
+    await A.page.click('[data-a=s3wFix]'); await sleep(1500);
+    const f3 = nf()[2], d2 = await A.page.evaluate(() => ({ fixN: S3UI.W.draft.m.fixN, id: S3UI.W.draft.id }));
+    check('2ד8 תיקון שני: qid חדש, נשלחת הטיוטה המתוקנת הקודמת, והטיוטה מוחלפת שוב (בלי הגבלה)', nf().length === 3 && f3.b.qid !== f2.b.qid && f3.b.txt === 'להוסיף מקרר שני' && f3.b.m.fixN === 1 && f3.b.from === d1.id && d2.fixN === 2, { q: f3.b.qid, d2 });
+    S.calls = S.calls.filter((c) => c.fn !== 'mapFix');
+  }
 
   // ---- 3. תקנו: העורך עם לוח האזורים הלא ודאיים ----
   await A.page.click('[data-a=s3wEdit]'); await sleep(1200);

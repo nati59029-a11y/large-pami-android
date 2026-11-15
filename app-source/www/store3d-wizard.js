@@ -39,7 +39,7 @@ function qLoad(v){W.q=Q0();W.sk=SK0();if(!v)return;
   for(const f of ['ent','cash'])if(nArr(k[f],2))K[f]=k[f].slice();K.gen=k.gen?1:0}
  if(!['a','b'].includes(W.q.path))W.q.path=''}
 const revoke=()=>{for(const i of W.imgs)try{URL.revokeObjectURL(i.url)}catch(e){}for(const k of ['w','f','c'])if(W.tex[k]&&W.tex[k].url)try{URL.revokeObjectURL(W.tex[k].url)}catch(e){}};
-function reset(kind){revoke();W.own=me();W.kind=kind==='w'?'w':'s';W.br=U.brSel();W.step=1;W.imgs=[];W.tex={w:null,f:null,c:null};W.busy='';W.msg='';W.qid='';W.draft=null;W.staff=null;W.staffErr='';W.rule=null;W.rid='';W.made=0;W.runMsg='';W.det=0;W.qSeen=0;
+function reset(kind){revoke();W.own=me();W.kind=kind==='w'?'w':'s';W.br=U.brSel();W.step=1;W.imgs=[];W.tex={w:null,f:null,c:null};W.busy='';W.msg='';W.qid='';W.draft=null;W.fixTxt='';W.fixQid='';W.fixMsg='';W.staff=null;W.staffErr='';W.rule=null;W.rid='';W.made=0;W.runMsg='';W.det=0;W.qSeen=0;
  const v=lsRead();qLoad(v);if(v)for(const k of ['w','f','c'])if(v.tex[k]&&typeof v.tex[k].path==='string')W.tex[k]={texId:v.tex[k].texId,path:v.tex[k].path,w:v.tex[k].w,h:v.tex[k].h,url:''}}
 U.openWizard=k=>{const kind=k==='w'?'w':'s';if(W.own!==me()||W.kind!==kind||W.br!==U.brSel())reset(kind);if(cur().v!=='st3w')go('st3w')};
 
@@ -197,11 +197,34 @@ async function makeDraft(){
   if(r&&!needs(r)&&r.draftId){const dd=await U.get('/s3draft/'+r.draftId);if(dd&&dd.m)r=Object.assign({},r,{m:dd.m})}
   if(!r||!needs(r))throw new Error('התשובה מהשרת חסרה. נסו שוב.');
   W.draft={m:r.m,conf:typeof r.conf==='number'?r.conf:null,notes:String(r.notes||''),n:+r.n||W.imgs.length,drop:+r.drop||0,usage:r.usage||null,id:r.draftId||''};
-  W.busy='';W.msg='';W.det=0;rerender()}
+  W.busy='';W.msg='';W.det=0;W.fixTxt='';W.fixQid='';W.fixMsg='';rerender()}
  catch(e){W.busy='';W.step=1;W.msg=draftErr(e);rerender()}}
 /* bad-answer: השרת שולח סיבה מפורטת בעברית (נקטעה / בלי חדרים / לא נספרה במכסה) – מציגים אותה במקום הנוסח הכללי.
    בלי הודעה בעברית מהשרת (fnCall מחליף אותה ב"הפעולה נכשלה, נסה שוב") – הנוסח הכללי של S3UI.RS */
 const draftErr=e=>e&&!e.offline&&e.reason==='bad-answer'&&/[\u0590-\u05FF]/.test(e.message||'')&&!/^הפעולה נכשלה, נסה שוב$/.test(e.message)?e.message:U.errText(e,'לא הצלחנו לבנות טיוטה. נסו שוב.');
+/* תיקונים בכתב (שלב 20ג): mapFix מקבל את הטיוטה הנוכחית + טקסט, ומחזיר טיוטה מתוקנת. בלי הגבלה, לא נספר במכסה החודשית.
+   qid חדש לכל ניסיון תיקון חדש; אחרי כשל (למשל רשת) אותו טקסט ואותו qid – ניסיון חוזר בטוח */
+const fixErr=e=>e&&!e.offline&&e.reason==='too-big'?'הטיוטה גדולה מדי לתיקון בכתב. עברו עליה בעורך ותקנו שם.':draftErr(e).replace(/^לא הצלחנו לבנות טיוטה\. נסו שוב\.$/,'לא הצלחנו לתקן את הטיוטה. נסו שוב.');
+async function fixDraft(){
+ const d=W.draft;if(W.busy||!d)return;
+ const ta=document.getElementById('s3wFix');if(ta)W.fixTxt=String(ta.value||'').slice(0,1000);
+ const t=String(W.fixTxt||'').trim();
+ if(t.length<2||t.length>1000){W.fixMsg='כתבו מה לתקן, בין 2 ל-1000 תווים.';return rerender()}
+ if(navigator.onLine===false){W.fixMsg='אין חיבור לאינטרנט. תיקון הטיוטה דורש רשת.';return rerender()}
+ const qb=qBuild();
+ W.fixMsg='';W.busy='מתקנים את הטיוטה… זה יכול לקחת עד דקה או שתיים. אל תסגרו את האפליקציה.';rerender();
+ try{
+  if(W.fixQid&&W.fixQtxt!==t)W.fixQid='';if(!W.fixQid)W.fixQid=U.qid();W.fixQtxt=t;
+  const body={qid:W.fixQid,br:W.br||U.brSel(),kind:W.kind,m:d.m,txt:t};if(qb&&!qb.err&&qb.sketch)body.sk=qb.sketch;if(d.id)body.from=d.id;
+  let r=await U.fn('mapFix',body);
+  if(r&&r.st==='fail')throw Object.assign(new Error(r.err||'לא הצלחנו לתקן את הטיוטה.'),{reason:''});
+  if(r&&!needs(r)&&r.draftId){const dd=await U.get('/s3draft/'+r.draftId);if(dd&&dd.m)r=Object.assign({},r,{m:dd.m})}
+  if(!r||!needs(r))throw new Error('התשובה מהשרת חסרה. נסו שוב.');
+  W.draft={m:r.m,conf:typeof r.conf==='number'?r.conf:null,notes:String(r.notes||''),n:d.n,drop:+r.drop||0,usage:null,id:r.draftId||''};
+  W.fixTxt='';W.fixQid='';W.fixMsg='';W.busy='';rerender()}
+ catch(e){W.busy='';W.fixMsg=fixErr(e);rerender()}}
+ACT.s3wFix=()=>fixDraft();
+CHG.s3wFixT=el=>{W.fixTxt=String(el.value||'').slice(0,1000)};
 /* "בנו טיוטה" בפעם הראשונה – קודם מסך "פרטים על החנות" (לא חובה, אבל מומלץ). משם "בנו טיוטה" שולח */
 ACT.s3wDraft=()=>{if(!W.det&&!W.qSeen&&!W.busy){W.det=1;W.qSeen=1;W.msg='';rerender();window.scrollTo(0,0);return}makeDraft()};
 ACT.s3wBack1=()=>{W.draft=null;W.step=1;W.msg='';rerender()};
@@ -444,7 +467,8 @@ function step2(){
  return stepper(2)+`<b>הטיוטה מוכנה</b><div class="kg" style="margin-top:8px"><div class="k"><small>חדרים</small><b>${L(m.rooms)}</b></div><div class="k"><small>גופים (מדפים, מקררים…)</small><b>${L(m.fx)}</b></div><div class="k"><small>אזורים לא ודאיים</small><b>${z}</b></div><div class="k"><small>רמת ביטחון (הערכת המודל)</small><b>${d.conf==null?'לא ידוע':Math.round(d.conf*100)+'%'}</b></div></div>
  ${empty?`<div class="ban s3warn">ה-AI לא הצליח לזהות חדרים או מדפים. אפשר לצלם עוד תמונות מזוויות אחרות, או להמשיך ולצייר ידנית בעורך.</div>`:''}
  <p class="note s3note">${d.drop?`${d.drop} פריטים לא תקינים הוסרו מהטיוטה. `:''}הטיוטה עדיין לא נשמרה. בשלב הבא עוברים עליה במפה, מתקנים, ומאשרים.</p>
- <div class="row s3row"><button class="btn grow" data-a="s3wEdit">עברו על הטיוטה</button><button class="btn g" data-a="s3wBack1">צלמו עוד</button></div>`}
+ <div class="s3info"><b>תיקונים בכתב</b><br><small>אפשר לכתוב מה לא נכון, והמערכת תתקן את הטיוטה. למשל: "המקרר נמצא בקיר השמאלי, יש 4 שורות מדפים ולא 3".</small><textarea id="s3wFix" data-c="s3wFixT" rows="3" maxlength="1000" style="width:100%;margin-top:6px"${W.busy?' disabled':''}>${esc2(W.fixTxt||'')}</textarea><p class="note s3note" style="margin:4px 0">התיקון לא נספר במכסה החודשית. אפשר לתקן כמה פעמים.</p>${W.busy?`<div class="s3info" role="status">${esc2(W.busy)}</div>`:''}${W.fixMsg?`<div class="ban s3warn" role="alert">${esc2(W.fixMsg)}</div>`:''}<div class="row s3row"><button class="btn g" data-a="s3wFix"${W.busy?' disabled':''}>תקנו את הטיוטה</button></div></div>
+ <div class="row s3row"><button class="btn grow" data-a="s3wEdit"${W.busy?' disabled':''}>עברו על הטיוטה</button><button class="btn g" data-a="s3wBack1"${W.busy?' disabled':''}>צלמו עוד</button></div>`}
 function step3(){
  return stepper(3)+`<b>הטיוטה בעריכה</b><p class="note s3note">עברו על המפה ועל האזורים הלא ודאיים, ואז שמרו.</p><div class="row s3row"><button class="btn grow" data-a="s3wEdit">חזרה לעריכה</button><button class="btn g" data-a="s3wAgain">התחילו מחדש</button></div>`}
 function step5(){
