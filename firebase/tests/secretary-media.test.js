@@ -137,7 +137,8 @@ describe('שלב 1: op:"stt" – תמלול', () => {
     const r = await call(M1, { op: 'stt', mime: 'audio/wav', b64: b64(F.wav(10)) });
     assert.equal(r.ok, true, r.msg);
     assert.equal(r.r.text, 'כמה הכנסות היו היום'); assert.equal(r.r.sec, 10);
-    assert.equal(await useMc(), AI.costMc('fast', { in: 1000, out: 200 }));
+    // מחיר אודיו (לא מאומת): שרת הדמה לא מחזיר פירוט לפי סוג – כל הקלט נספר כאודיו (שמרני)
+    assert.equal(await useMc(), AI.costMc('fast', { in: 1000, out: 200, aud: 1000 }));
     assert.equal(seeReqs().length, 1);
     assert.equal(seeReqs()[0].body.tools, undefined, 'בלי כלים');
     assert.deepEqual(await coll(`b/${A}/sec_chat/${M1}/m`), []);
@@ -244,7 +245,7 @@ describe('שלב 2: op:"see" – סרטון דרך sec_tmp', () => {
     assert.equal(await exists(p), false, 'הקובץ הזמני נמחק');
     assert.deepEqual(r.r.cards.map((c) => c.k), ['task']); assert.equal(r.r.cls, 'other');
     assert.equal(seeReqs()[0].body.contents[0].parts[0].inlineData.mimeType, 'video/webm');
-    assert.equal(await useMc(), AI.costMc('fast', { in: 1000, out: 200 }));
+    assert.equal(await useMc(), AI.costMc('fast', { in: 1000, out: 200, aud: 32 * 20 })); // אודיו של סרטון – הערכה 32 טוקנים לשנייה
     assert.equal((await coll(`b/${A}/sec_chat/${M1}/m`)).find((x) => x.role === 'u').via, 'video');
     await assertNoFileContent();
   });
@@ -274,6 +275,28 @@ describe('שלב 2: op:"see" – סרטון דרך sec_tmp', () => {
     assert.equal(await exists(p), false, 'סוג כבוי: הקובץ נמחק');
     assert.equal(seeReqs().length, 0);
     assert.equal((await call(M1, { op: 'see', kind: 'video', path: tmp(M1) })).reason, 'no-file');
+  });
+  it('תיקון סבב 1: סרטון שנדחה בשער (לפני הסכמה, bad-kind, bad-op) – נמחק מיד; WAV/סרטון מזויף נדחה כארוך', async () => {
+    let p = await upload(tmp(M1), F.webm(5));
+    assert.equal((await call(M1, { op: 'see', kind: 'gif', path: p })).reason, 'bad-kind');
+    assert.equal(await exists(p), false);
+    p = await upload(tmp(M1), F.webm(5));
+    assert.equal((await call(M1, { op: 'zzz', kind: 'video', path: p })).reason, 'bad-op');
+    assert.equal(await exists(p), false);
+    await put(`b/${A}/sec_cfg/main`, { mgr: { [M1]: { cv: 'old' } } }, true);
+    p = await upload(tmp(M1), F.webm(5));
+    const pOther = await upload(tmp(M2), F.webm(5));
+    assert.equal((await call(M1, { op: 'see', kind: 'video', path: p })).reason, 'no-consent');
+    assert.equal(await exists(p), false, 'לפני הסכמה: הקובץ של המשתמש עצמו נמחק');
+    assert.equal((await call(M1, { op: 'see', kind: 'video', path: pOther })).reason, 'no-consent');
+    assert.equal(await exists(pOther), true, 'קובץ של משתמש אחר – לא נוגעים');
+    // זיופים (M2 עדיין אחרי הסכמה)
+    assert.equal((await call(M2, { op: 'stt', b64: b64(F.wavFake(300, 'data')) })).reason, 'too-long');
+    assert.equal((await call(M2, { op: 'stt', b64: b64(F.wavFake(600, 'rate')) })).reason, 'bad-audio');
+    p = await upload(tmp(M2), F.webm(300, { duration: true, claim: 10 }));
+    assert.equal((await call(M2, { op: 'see', kind: 'video', path: p })).reason, 'too-long');
+    assert.equal(await exists(p), false);
+    assert.equal(seeReqs().length, 0);
   });
   it('נתיב של משתמש אחר או של עסק אחר – נדחה, והקובץ שלו לא נגעים בו', async () => {
     await put(`b/${A}/sec_cfg/media`, { aud: 120, img: true, vid: 60 });

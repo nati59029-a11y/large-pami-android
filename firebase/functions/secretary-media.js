@@ -24,6 +24,9 @@
 // שגיאות (details.reason): media-off, too-long, too-short, too-big, bad-audio, bad-image, bad-video, no-file, bad-path, bad-kind, bad-op, no-card,
 //   rate-limit, no-consent ועוד כמו בצ'אט. ההודעה (message) בעברית – אפשר להציג כמו שהיא.
 // שינוי מול התוכנית: סוגי סרטון נוספים (3gp, mov) – בגלל סרטון מהגלריה; התשובה כוללת גם umid (מזהה הודעת המשתמש).
+// תיקון סבב 1: WAV – PCM/float, מונו או סטריאו, קצב דגימה מוכר (8000–48000), 8/16/24/32 ביט, כותרת עקבית; האורך לפי כל הקובץ.
+//   סרטון: האורך = המקסימום מכל הכותרות וזמני הדגימות. MP4 מקוטע (moof – למשל MediaRecorder עם video/mp4) נדחה: באפליקציה להקליט webm.
+//   סרטון שנדחה (גם לפני השער: bad-op, bad-kind, no-consent) – נמחק מיד אם הנתיב ב-sec_tmp של המשתמש המחובר עצמו.
 // ==============================================================================================
 //
 // אבטחה ופרטיות: אין כלים במסלול התמונה/הסרטון; טקסט או דיבור בתוך הקובץ – מידע בלבד; הכיתוב עובר ST.policyOf;
@@ -83,18 +86,26 @@ function ownTmpPath(who, p) {
 }
 
 // ---------- זיהוי סוג ואורך לפי התוכן ----------
-// WAV: RIFF/WAVE, PCM; אורך = גודל data / byteRate
+// WAV: RIFF/WAVE, PCM. תיקון סבב 1 (בדיקה עצמאית): השדות בכותרת חייבים להיות עקביים זה עם זה (byteRate = sampleRate × blockAlign,
+// blockAlign = channels × bits / 8), בטווחים מוכרים, והאורך = המקסימום בין גודל ה-data המוצהר לבין מה שנשאר בקובץ אחרי תחילת ה-data
+// (מה שנשלח ל-AI הוא כל הקובץ – לכן סופרים את כולו). כך אי אפשר "לקצר" הקלטה בכותרת מזויפת.
+const WAV_RATES = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000];
 function wavInfo(buf) {
   if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return null;
-  let pos = 12, byteRate = 0, fmt = 0, data = -1;
+  let pos = 12, f = null, data = -1, dataAt = -1;
   while (pos + 8 <= buf.length) {
     const id = buf.toString('ascii', pos, pos + 4), size = buf.readUInt32LE(pos + 4), body = pos + 8;
-    if (id === 'fmt ' && body + 16 <= buf.length) { fmt = buf.readUInt16LE(body); byteRate = buf.readUInt32LE(body + 8); }
-    else if (id === 'data') { data = Math.min(size, buf.length - body); break; }
+    if (id === 'fmt ') {
+      if (f || size < 16 || body + 16 > buf.length) return null;
+      f = { fmt: buf.readUInt16LE(body), ch: buf.readUInt16LE(body + 2), rate: buf.readUInt32LE(body + 4), byteRate: buf.readUInt32LE(body + 8), align: buf.readUInt16LE(body + 12), bits: buf.readUInt16LE(body + 14) };
+    } else if (id === 'data') { data = size; dataAt = body; break; }
     pos = body + size + (size % 2);
   }
-  if (![1, 3, 0xfffe].includes(fmt) || byteRate <= 0 || data < 0) return null;
-  return { sec: data / byteRate, bytes: buf.length };
+  if (!f || dataAt < 0) return null;
+  if (![1, 3, 0xfffe].includes(f.fmt) || f.ch < 1 || f.ch > 2 || !WAV_RATES.includes(f.rate) || ![8, 16, 24, 32].includes(f.bits)) return null;
+  if (f.align !== f.ch * f.bits / 8 || f.byteRate !== f.rate * f.align) return null;
+  const bytes = Math.max(data, buf.length - dataAt);
+  return { sec: bytes / f.byteRate, bytes: buf.length };
 }
 function imgMime(b) {
   if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
@@ -110,7 +121,8 @@ function vidMime(b) {
   }
   return '';
 }
-// MP4 / MOV / 3GP: moov → mvhd (duration / timescale)
+// MP4 / MOV / 3GP. תיקון סבב 1: האורך = המקסימום מכל המקורות – mvhd, ולכל מסלול tkhd, mdhd וסכום זמני הדגימות (stts) –
+// כדי שכותרת אחת מזויפת לא תקצר את הסרטון. קובץ מקוטע (moof) – נדחה (null): האורך האמיתי שלו לא נמצא בכותרות האלה.
 function isoSec(b) {
   const boxes = (from, to, cb) => {
     let p = from;
@@ -119,24 +131,55 @@ function isoSec(b) {
       const type = b.toString('ascii', p + 4, p + 8);
       if (size === 1) { if (p + 16 > to) return; size = Number(b.readBigUInt64BE(p + 8)); hdr = 16; } else if (size === 0) size = to - p;
       if (size < hdr) return;
-      if (cb(type, p + hdr, Math.min(p + size, to)) === false) return;
+      cb(type, p + hdr, Math.min(p + size, to));
       p += size;
     }
   };
-  let out = null;
+  let best = -1, mvTs = 0, frag = false;
+  const add = (du, ts) => { if (ts > 0 && du >= 0 && Number.isFinite(du)) best = Math.max(best, du / ts); };
+  const full = (s, e, v0, v1) => (b[s] === 1 ? (s + v1 <= e) : (s + v0 <= e));
   boxes(0, b.length, (t, s, e) => {
-    if (t !== 'moov') return true;
+    if (t === 'moof') frag = true;
+    if (t !== 'moov') return;
     boxes(s, e, (t2, s2, e2) => {
-      if (t2 !== 'mvhd' || s2 + 32 > e2) return true;
-      const v = b[s2];
-      const ts = v === 1 ? b.readUInt32BE(s2 + 20) : b.readUInt32BE(s2 + 12);
-      const du = v === 1 ? Number(b.readBigUInt64BE(s2 + 24)) : b.readUInt32BE(s2 + 16);
-      if (ts > 0) out = du / ts;
-      return false;
+      if (t2 === 'mvex') frag = true;
+      if (t2 === 'mvhd' && full(s2, e2, 20, 32)) {
+        const v = b[s2];
+        mvTs = v === 1 ? b.readUInt32BE(s2 + 20) : b.readUInt32BE(s2 + 12);
+        add(v === 1 ? Number(b.readBigUInt64BE(s2 + 24)) : b.readUInt32BE(s2 + 16), mvTs);
+      }
     });
-    return false;
+    boxes(s, e, (t2, s2, e2) => {
+      if (t2 !== 'trak') return;
+      let mdTs = 0;
+      boxes(s2, e2, (t3, s3, e3) => {
+        if (t3 === 'tkhd' && full(s3, e3, 24, 36)) add(b[s3] === 1 ? Number(b.readBigUInt64BE(s3 + 28)) : b.readUInt32BE(s3 + 20), mvTs);
+        if (t3 !== 'mdia') return;
+        boxes(s3, e3, (t4, s4, e4) => {
+          if (t4 === 'mdhd' && full(s4, e4, 20, 32)) {
+            const v = b[s4];
+            mdTs = v === 1 ? b.readUInt32BE(s4 + 20) : b.readUInt32BE(s4 + 12);
+            add(v === 1 ? Number(b.readBigUInt64BE(s4 + 24)) : b.readUInt32BE(s4 + 16), mdTs);
+          }
+        });
+        boxes(s3, e3, (t4, s4, e4) => {
+          if (t4 !== 'minf') return;
+          boxes(s4, e4, (t5, s5, e5) => {
+            if (t5 !== 'stbl') return;
+            boxes(s5, e5, (t6, s6, e6) => {
+              if (t6 !== 'stts' || s6 + 8 > e6) return;
+              const n = b.readUInt32BE(s6 + 4);
+              let sum = 0;
+              for (let k = 0; k < n && s6 + 8 + k * 8 + 8 <= e6; k++) sum += b.readUInt32BE(s6 + 8 + k * 8) * b.readUInt32BE(s6 + 12 + k * 8);
+              add(sum, mdTs);
+            });
+          });
+        });
+      });
+    });
   });
-  return out;
+  if (frag) return null;
+  return best >= 0 ? best : null;
 }
 // WebM (EBML): Info.Duration אם קיים; אחרת (MediaRecorder לא כותב משך) – הזמן המרבי של בלוק באשכולות (Cluster)
 function vint(b, p, keep) {
@@ -187,8 +230,9 @@ function webmSec(b) {
       p = e.end;
     }
   }
-  if (dur > 0) return (dur * scale) / 1e9;
-  return maxT >= 0 ? (maxT * scale) / 1e9 : null;
+  // תיקון סבב 1: המקסימום בין Duration המוצהר לזמן הבלוק המרבי (Duration מזויף קצר לא מקצר את הסרטון)
+  const m = Math.max(dur > 0 ? dur : -1, maxT);
+  return m >= 0 ? (m * scale) / 1e9 : null;
 }
 const vidSec = (buf, mime) => (mime === 'video/webm' ? webmSec(buf) : isoSec(buf));
 
@@ -228,6 +272,14 @@ async function pctNow(db) {
   return { pct: x.pct, saving: !!x.saving };
 }
 
+// עלות עם מחיר אודיו (15.11.2026, לא מאומת: המחיר ושהפירוט מוחזר תמיד): אם Gemini החזיר פירוט לפי סוג (usage.aud) – לפיו;
+// אחרת הערכה שמרנית: בתמלול – כל הקלט אודיו; בסרטון – 32 טוקנים לשנייה (קצב האודיו של Gemini, לא מאומת), עד גודל הקלט
+function audCost(usage, fallbackAud) {
+  const u = Object.assign({ in: 0, out: 0 }, usage || {});
+  if (!Number.isFinite(+u.aud)) u.aud = Math.min(+u.in || 0, Math.max(0, Math.ceil(fallbackAud || 0)));
+  return AI.costMc('fast', u);
+}
+
 // ---------- op:'stt' ----------
 async function stt(g, input, med) {
   const { who, cfg, db } = g;
@@ -245,7 +297,7 @@ async function stt(g, input, med) {
     await settle(db, who.uid, mt, -mt.reserved, false).catch(() => {});
     throw e;
   }
-  const mc = AI.costMc('fast', r.usage || {});
+  const mc = audCost(r.usage, (r.usage && r.usage.in) || 0);
   const u = await settle(db, who.uid, mt, mc - mt.reserved, false);
   const b = db.batch();
   logMedia(b, db, who.uid, 'k=aud,s=' + Math.round(info.sec) + ',kb=' + Math.round(buf.length / 1024) + ',mc=' + mc);
@@ -299,7 +351,7 @@ async function see(g, input, med, vidPath, bucket) {
       throw e;
     }
     buf = null;
-    mc = AI.costMc('fast', r.usage || {});
+    mc = audCost(r.usage, kind === 'video' ? 32 * sec : 0);
     u = await settle(db, who.uid, mt, mc - mt.reserved, false);
     parsed = parseSee(r.text);
     if (kind === 'video') parsed.cls = 'other';
@@ -344,20 +396,33 @@ async function mark(g, input) {
 }
 
 // secMedia – נקודת כניסה אחת. op נבדק לפני כל דבר; הקובץ הזמני של סרטון נמחק תמיד (finally)
+// תיקון סבב 1: נתיב סרטון זמני של המשתמש המחובר עצמו (לפי request.auth.uid, בכל עסק / legacy) – נמחק גם כשהבקשה נדחית
+// לפני השער או בשער (bad-op, bad-kind, no-consent, עסק מושהה...). קובץ של משתמש אחר – לא נוגעים בו
+const TMP_NAME_RE = /^[A-Za-z0-9_-]{8,64}(\.(webm|mp4|3gp|mov))?$/;
+function selfTmpPath(request, input) {
+  const uid = request && request.auth && request.auth.uid;
+  const p = input && input.path;
+  if (typeof uid !== 'string' || !uid || typeof p !== 'string' || p.length > 300) return null;
+  const m = /^(b\/[a-z0-9-]{3,30}\/)?sec_tmp\/([^/]+)\/([^/]+)$/.exec(p);
+  return m && m[2] === uid && TMP_NAME_RE.test(m[3]) ? p : null;
+}
 async function secMedia(request, opts) {
   const input = inputObject(request);
-  if (!['stt', 'see', 'mark'].includes(input.op)) throw bad('bad-op', 'פעולה לא מוכרת');
-  if (input.op === 'see' && !['image', 'video'].includes(input.kind)) throw bad('bad-kind', 'סוג קובץ לא מוכר');
-  const g = await gate(request, { consent: true });
-  if (input.op === 'mark') return mark(g, input);
   const bucket = bucketOf(opts && opts.bucket);
-  const vidPath = input.op === 'see' && input.kind === 'video' ? ownTmpPath(g.who, input.path) : null;
+  const early = selfTmpPath(request, input);
+  let vidPath = null;
   try {
+    if (!['stt', 'see', 'mark'].includes(input.op)) throw bad('bad-op', 'פעולה לא מוכרת');
+    if (input.op === 'see' && !['image', 'video'].includes(input.kind)) throw bad('bad-kind', 'סוג קובץ לא מוכר');
+    const g = await gate(request, { consent: true });
+    if (input.op === 'mark') return await mark(g, input);
+    vidPath = input.op === 'see' && input.kind === 'video' ? ownTmpPath(g.who, input.path) : null;
     const med = mediaOf(await g.db.doc('sec_cfg/media').get());
     if (input.op === 'stt') return await stt(g, input, med);
     return await see(g, input, med, vidPath, bucket);
   } finally {
-    if (vidPath) await delTmp(bucket, vidPath);
+    const p = vidPath || early;
+    if (p) await delTmp(bucket, p);
   }
 }
 
@@ -392,7 +457,7 @@ exports.secMediaClean = onSchedule({ region: LEGACY_REGION, schedule: 'every 30 
 });
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  wavInfo, imgMime, vidMime, isoSec, webmSec, vidSec, parseSee, seeSys, ownTmpPath, runMediaClean,
+  wavInfo, imgMime, vidMime, isoSec, webmSec, vidSec, parseSee, seeSys, ownTmpPath, selfTmpPath, audCost, runMediaClean,
   AUD_MAX_BYTES, IMG_MAX_BYTES, VID_MAX_BYTES, TMP_MAX_AGE,
   call: { secMedia: (bucket) => wrap('secMedia', (r) => secMedia(r, { bucket })) },
 } });

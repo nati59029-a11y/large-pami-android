@@ -20,6 +20,8 @@ const P = {
   // מחיר משוער בדולרים למיליון טוקנים: "קלט/פלט" לכל מודל. הערכה בלבד (לא מאומת) – משמשת לתקרת העלות
   priceFast: defineString('SEC_PRICE_FAST', { default: '0.30/2.50', description: 'מחיר משוער $ למיליון טוקנים, קלט/פלט – מודל מהיר (לא מאומת)' }),
   priceDeep: defineString('SEC_PRICE_DEEP', { default: '1.25/10', description: 'מחיר משוער $ למיליון טוקנים, קלט/פלט – מודל איכותי (לא מאומת)' }),
+  // 15.11.2026 (קול, תמונה וסרטון): קלט אודיו יקר מטקסט. ברירת מחדל שמרנית (לא מאומת: המחיר בפועל); ספירה גבוהה מדי עדיפה על נמוכה מדי בתקרה
+  priceAudio: defineString('SEC_PRICE_AUDIO_IN', { default: '1.00', description: 'מחיר משוער $ למיליון טוקנים של קלט אודיו (לא מאומת)' }),
 };
 const str = (p, d) => { try { const v = p.value(); return typeof v === 'string' && v.trim() ? v.trim() : d; } catch (e) { return d; } };
 
@@ -30,11 +32,14 @@ function assertSafeBase(base) {
   }
 }
 
-// עלות משוערת במילי־סנט (1/1000 סנט), מספר שלם. usage = { in, out } טוקנים
+// עלות משוערת במילי־סנט (1/1000 סנט), מספר שלם. usage = { in, out, aud? } טוקנים. aud (15.11.2026) = חלק מ-in שהוא אודיו – במחיר האודיו
+// (המחיר הגבוה מבין מחיר האודיו למחיר הקלט של המודל). בלי aud – כמו קודם
 function costMc(tier, usage) {
   const [pin, pout] = str(tier === 'deep' ? P.priceDeep : P.priceFast, tier === 'deep' ? '1.25/10' : '0.30/2.50').split('/').map(Number);
   const u = usage || {};
-  const usd = ((+u.in || 0) * (pin || 0) + (+u.out || 0) * (pout || 0)) / 1e6;
+  const tin = +u.in || 0, aud = Math.min(tin, Math.max(0, +u.aud || 0));
+  const paud = Math.max(Number(str(P.priceAudio, '1.00')) || 1, pin || 0);
+  const usd = ((tin - aud) * (pin || 0) + aud * paud + (+u.out || 0) * (pout || 0)) / 1e6;
   return Math.ceil(usd * 100 * 1000);
 }
 const modelOf = (tier) => (tier === 'deep' ? str(P.deep, 'gemini-2.5-pro') : str(P.fast, 'gemini-2.5-flash'));
@@ -135,7 +140,10 @@ async function gemini(o) {
       .map((p) => Object.assign({ name: p.functionCall.name, args: p.functionCall.args && typeof p.functionCall.args === 'object' ? p.functionCall.args : {} }, typeof p.thoughtSignature === 'string' && p.thoughtSignature ? { sig: p.thoughtSignature } : {}));
     const text = parts.filter((p) => p && typeof p.text === 'string').map((p) => p.text).join('');
     const um = j.usageMetadata || {};
-    return { text, calls, usage: { in: +um.promptTokenCount || 0, out: (+um.candidatesTokenCount || 0) + (+um.thoughtsTokenCount || 0) }, model, sent: 1 };
+    const usage = { in: +um.promptTokenCount || 0, out: (+um.candidatesTokenCount || 0) + (+um.thoughtsTokenCount || 0) };
+    // 15.11.2026: טוקנים של אודיו בקלט, אם Gemini מחזיר פירוט לפי סוג (promptTokensDetails; לא מאומת שתמיד מוחזר)
+    if (Array.isArray(um.promptTokensDetails)) { const a = um.promptTokensDetails.filter((x) => x && x.modality === 'AUDIO').reduce((n, x) => n + (+x.tokenCount || 0), 0); usage.aud = a; }
+    return { text, calls, usage, model, sent: 1 };
   } finally { clearTimeout(tm); }
 }
 

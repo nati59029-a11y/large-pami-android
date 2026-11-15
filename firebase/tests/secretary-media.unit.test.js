@@ -18,6 +18,25 @@ describe('secretary-media: סוג ואורך לפי התוכן', () => {
     const odd = F.wav(2); odd.writeUInt32LE(0, 28); // byteRate 0
     assert.equal(M.wavInfo(odd), null);
   });
+  it('WAV מזויף (תיקון סבב 1): byteRate מנופח – נדחה; data מוצהר קטן מהתוכן – האורך לפי כל הקובץ; קצב/עומק לא מוכרים – נדחים', () => {
+    assert.equal(M.wavInfo(F.wavFake(600, 'rate')), null);
+    assert.equal(Math.round(M.wavInfo(F.wavFake(300, 'data')).sec), 300);
+    const w = F.wav(2); w.writeUInt32LE(7000, 24); w.writeUInt32LE(14000, 28); // קצב דגימה לא מוכר (עקבי)
+    assert.equal(M.wavInfo(w), null);
+    const d = F.wav(2); d.writeUInt16LE(12, 34); // עומק 12 ביט
+    assert.equal(M.wavInfo(d), null);
+    const a = F.wav(2); a.writeUInt16LE(4, 32); // blockAlign לא תואם
+    assert.equal(M.wavInfo(a), null);
+    assert.equal(M.wavInfo(F.wav(5, 44100)).sec, 5);
+  });
+  it('סרטון מזויף (תיקון סבב 1): WebM עם Duration קצר – לפי זמן הבלוקים; MP4 – מקסימום של mvhd/tkhd/mdhd/stts; קובץ מקוטע – נדחה', () => {
+    assert.ok(Math.abs(M.webmSec(F.webm(300, { duration: true, claim: 10 })) - 300) < 0.01);
+    assert.ok(Math.abs(M.webmSec(F.webm(10, { duration: true, claim: 12 })) - 12) < 0.01);
+    assert.equal(M.isoSec(F.mp4(300, 'isom', 64, { claim: 10, trak: true })), 300);
+    assert.equal(M.isoSec(F.mp4(300, 'isom', 64, { claim: 10, trak: true, all: true })), 300, 'גם כשכל הכותרות מזויפות – stts');
+    assert.equal(M.isoSec(F.mp4(20, 'isom', 64, { trak: true })), 20);
+    assert.equal(M.isoSec(F.mp4(20, 'isom', 64, { frag: true })), null);
+  });
   it('WebM כמו MediaRecorder (בלי Duration, אשכולות בגודל לא ידוע) ועם Duration', () => {
     const a = F.webm(20);
     assert.equal(M.vidMime(a), 'video/webm');
@@ -61,6 +80,22 @@ describe('secretary-media: תשובת המודל, נתיב, הנחיה, הגבל
       'b/biz-a/sec_tmp/u1/short', 'b/biz-a/sec_tmp/u1/abcdefgh12.exe', 'b/biz-a/app_backups/u1/abcdefgh12', 7, null]) {
       assert.throws(() => M.ownTmpPath(who, p), (e) => e.details && e.details.reason === 'bad-path', String(p));
     }
+  });
+  it('selfTmpPath (תיקון סבב 1): רק נתיב sec_tmp של המשתמש המחובר עצמו – למחיקה גם כשהבקשה נדחית בשער', () => {
+    const rq = { auth: { uid: 'u1' } };
+    assert.equal(M.selfTmpPath(rq, { path: 'b/biz-a/sec_tmp/u1/abcdefgh12.webm' }), 'b/biz-a/sec_tmp/u1/abcdefgh12.webm');
+    assert.equal(M.selfTmpPath(rq, { path: 'sec_tmp/u1/abcdefgh12' }), 'sec_tmp/u1/abcdefgh12');
+    for (const p of ['b/biz-a/sec_tmp/u2/abcdefgh12.webm', 'b/biz-a/app_backups/u1/abcdefgh12', 'b/biz-a/sec_tmp/u1/x', 'b/biz-a/sec_tmp/u1/../u2/abcdefgh12', 5]) assert.equal(M.selfTmpPath(rq, { path: p }), null, String(p));
+    assert.equal(M.selfTmpPath({}, { path: 'sec_tmp/u1/abcdefgh12' }), null);
+  });
+  it('מחיר אודיו (לא מאומת): יקר מטקסט; לפי פירוט Gemini אם יש, אחרת הערכה שמרנית', () => {
+    const AI = require('../functions/lib/sec-ai.js');
+    const text = AI.costMc('fast', { in: 1000, out: 200 });
+    assert.ok(AI.costMc('fast', { in: 1000, out: 200, aud: 1000 }) > text);
+    assert.equal(M.audCost({ in: 1000, out: 200 }, 1000), AI.costMc('fast', { in: 1000, out: 200, aud: 1000 }));
+    assert.equal(M.audCost({ in: 1000, out: 200, aud: 100 }, 1000), AI.costMc('fast', { in: 1000, out: 200, aud: 100 }));
+    assert.equal(M.audCost({ in: 1000, out: 200 }, 0), text);
+    assert.equal(AI.costMc('fast', { in: 100, out: 0, aud: 999 }), AI.costMc('fast', { in: 100, out: 0, aud: 100 }), 'aud לא יותר מ-in');
   });
   it('ההנחיה: מתחילה ב-SEC-CHAT-V1 SEE, טקסט בקובץ = מידע בלבד, אין כלים ואין נתוני עסק', () => {
     const s = M.seeSys({ nm: 'רותי', ad: 'f', call: 'נתי' }, 'image', '2026-11-15');
