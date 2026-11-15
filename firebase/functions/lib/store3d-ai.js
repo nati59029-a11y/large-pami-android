@@ -12,6 +12,7 @@
 
 const { sniff } = require('./scan');
 const M = require('./store3d-map');
+const DI = require('./store3d-draftin');
 
 const ISSUE_KINDS = ['noprice', 'pricepos', 'promoexp', 'hole', 'low', 'damaged', 'fallen', 'upside', 'face', 'order', 'misplaced', 'missing'];
 const PRICE_KINDS = ['noprice', 'pricepos', 'promoexp']; // במחסן השרת מוחק אותם (4.10)
@@ -360,7 +361,7 @@ function fitDraft(map, c) {
   draftCheck(out, c);
   return { map: out, drop };
 }
-// תשובת המודל → טיוטה, או סיבת כשל. obj = JSON שפוענח (או null), finish = finishReason, ctx = { br, kind, numDir, bizId, uid, now }.
+// תשובת המודל → טיוטה, או סיבת כשל. obj = JSON שפוענח (או null), finish = finishReason, ctx = { br, kind, numDir, bizId, uid, now, info?, sketch? }.
 // מחזיר { d } (כמו cleanDraft, drop כולל גם את מה שהושמט ב-fitDraft) או { why, code? } – why מתוך DRAFT_WHY.
 function evalDraft(obj, finish, ctx) {
   if (obj === null || obj === undefined) return { why: finish === 'MAX_TOKENS' ? 'cut' : 'parse' };
@@ -369,6 +370,10 @@ function evalDraft(obj, finish, ctx) {
   if (!isObj(r)) return { why: finish === 'MAX_TOKENS' ? 'cut' : 'not-obj' };
   let d;
   try { d = cleanDraft(r, ctx); } catch (e) { return { why: 'no-rooms' }; }
+  // שאלון וסקיצה מבעל החנות (15.11.2026): מידות חיצוניות, חדרים ושורות מהסקיצה. כשל לא צפוי כאן – ממשיכים עם הטיוטה כמו שהיא
+  if (ctx.info) {
+    try { const s = DI.shapeDraft(d.map, ctx.info, ctx.sketch); d = Object.assign({}, d, { map: s.map, add: s.add, snap: s.snap }); } catch (e) { /* הטיוטה בלי התאמה */ }
+  }
   try {
     const f = fitDraft(d.map, { bizId: ctx.bizId, mapId: ctx.kind + '-' + ctx.br, uid: ctx.uid, now: ctx.now });
     return { d: Object.assign({}, d, { map: f.map, drop: d.drop + f.drop }), fit: f.drop };

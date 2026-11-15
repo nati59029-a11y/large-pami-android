@@ -430,6 +430,39 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     const last = GM.state.requests[GM.state.requests.length - 1];
     assert.deepEqual([last.kind, last.body.generationConfig.maxOutputTokens], ['s3shelf', undefined]);
   });
+  it('mapDraft עם שאלון וסקיצה (15.11.2026): קלט לא תקין נדחה לפני המכסה ו-Gemini; תקין – בהנחיה, בטיוטה (מידות, חדרים, שורות) וב-s3draft; בלי השדות – כמו קודם', async () => {
+    const dd = async () => { const x = await get(`b/${A}/s3use/d_main`); return x ? x.n : 0; };
+    const INFO = { w: 1400, l: 1500, rooms: 2, rows: 3, ent: 'd', cash: 'r', note: 'קופה ליד הכניסה' };
+    const SK = { rooms: [[0, 0, 1400, 0, 1400, 1000, 0, 1000], [0, 1000, 1400, 1000, 1400, 1500, 0, 1500]], rows: [[600, 300, 600, 1100], [1100, 300, 1100, 900], [200, 1250, 1200, 1250]], rt: ['s', 'w'], rk: ['gon', 'gon', 'fridge'], ent: [700, 1500], cash: [1200, 1400] };
+    const draft = (extra, q) => X.draftCore(db, W(MGR), Object.assign({ qid: q || qid(), br: 'main', kind: 's', imgs: [IMG] }, extra), Date.now(), deps());
+    const un = async () => ((await use()) || {}).n || 0;
+    const n0 = GM.state.requests.length, u0 = await un(), d0 = await dd();
+    for (const bad of [{ info: { w: 50 } }, { info: 'x' }, { info: INFO, sketch: { rooms: [[0, 0, 5000, 0, 5000, 5000]] } }, { sketch: SK }, { info: INFO, sketch: Object.assign({}, SK, { rk: ['gon'] }) }, { info: Object.assign({ zz: 1 }, INFO) }])
+      assert.equal(await err(draft(bad)), 'bad-info', JSON.stringify(bad).slice(0, 60));
+    assert.deepEqual([GM.state.requests.length - n0, await un(), await dd()], [0, u0, d0], 'בלי Gemini ובלי מכסה');
+    GM.state.mapdraftSeq = ['mapdraft-ok'];
+    const q1 = qid();
+    const r = await draft({ info: INFO, sketch: SK }, q1);
+    assert.equal(r.st, 'ok');
+    const pr = JSON.stringify(GM.state.requests[GM.state.requests.length - 1].body);
+    assert.match(pr, /מחייבים/); assert.match(pr, /רוחב 14 מטר/); assert.match(pr, /חדר 2 \(מחסן\)/); assert.match(pr, /הכניסה הראשית בנקודה \(700,1500\)/);
+    assert.deepEqual(r.m.rooms.map((x) => x.p), SK.rooms);
+    assert.deepEqual(r.m.rooms.map((x) => x.name), ['אולם מכירות', 'מחסן']);
+    assert.ok(r.m.fx.some((f) => f.k === 'fridge' && f.x === 700 && f.y === 1250));
+    assert.ok(r.m.fx.every((f) => f.x >= 0 && f.x <= 1400 && f.y >= 0 && f.y <= 1500));
+    const doc = await get(`b/${A}/s3draft/${q1}`);
+    assert.deepEqual(doc.info, INFO);
+    assert.deepEqual(doc.sk.rooms.map((x) => x.p), SK.rooms, 'Firestore: מערך של {p} (בלי מערך בתוך מערך)');
+    assert.deepEqual([doc.sk.rk, doc.sk.ent], [SK.rk, SK.ent]);
+    // בלי השדות (גרסת אפליקציה ישנה) – בלי info/sk ב-s3draft, וההנחיה בלי "נתונים מבעל החנות"
+    GM.state.mapdraftSeq = ['mapdraft-ok'];
+    const q2 = qid();
+    assert.equal((await draft({}, q2)).st, 'ok');
+    const pr2 = JSON.stringify(GM.state.requests[GM.state.requests.length - 1].body);
+    assert.doesNotMatch(pr2, /מבעל החנות/);
+    const doc2 = await get(`b/${A}/s3draft/${q2}`);
+    assert.deepEqual([doc2.info, doc2.sk], [undefined, undefined]);
+  });
 });
 
 // ---------------- הפונקציות (אמולטור הפונקציות – רץ ב-CI) ----------------

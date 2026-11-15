@@ -253,3 +253,100 @@ describe('store3d-ai – טיוטת מפה: סיבת כשל, השמטה חלקי
     assert.equal(code(() => A.fitDraft(m, cc)), 'no-rooms');
   });
 });
+
+// שאלון וסקיצה מבעל החנות (15.11.2026): בדיקת קלט, הנחיה, והתאמת הטיוטה למידות ולסקיצה
+describe('store3d-draftin – שאלון וסקיצה לטיוטת מפה', () => {
+  const DI = require(path.join(FN, 'lib', 'store3d-draftin.js'));
+  const ectx = { br: 'main', kind: 's', numDir: 'rtl', bizId: 'biz-x', uid: 'u_mgr1', now: 1 };
+  const cc = { bizId: 'biz-x', mapId: 's-main', uid: 'u_mgr1', now: 1 };
+  const INFO = { w: 1400, l: 1500, rooms: 2, rows: 3, ent: 'd', cash: 'r', note: 'קופה ליד הכניסה' };
+  const SK = { rooms: [[0, 0, 1400, 0, 1400, 1000, 0, 1000], [0, 1000, 1400, 1000, 1400, 1500, 0, 1500]], rows: [[600, 300, 600, 1100], [1100, 300, 1100, 900], [200, 1250, 1200, 1250]] };
+  it('draftInput: בלי שדות (גרסה ישנה) = null; קלט תקין עובר; ריק = null', () => {
+    assert.deepEqual(DI.draftInput({ qid: 'x' }), { info: null, sketch: null });
+    assert.deepEqual(DI.draftInput({ info: null, sketch: null }), { info: null, sketch: null });
+    const v = DI.draftInput({ info: INFO, sketch: SK });
+    assert.deepEqual(v.info, INFO); assert.deepEqual(v.sketch, SK);
+    assert.deepEqual(DI.draftInput({ info: { ent: '', note: '   ' } }), { info: null, sketch: null });
+    assert.deepEqual(DI.draftInput({ info: { rows: 0 } }).info, { rows: 0 });
+    assert.deepEqual(DI.draftInput({ info: { w: 1400, l: 1500 }, sketch: { rooms: [], rows: [] } }).sketch, null);
+  });
+  it('draftInput: זבל נדחה ב-bad-info (סוגים, טווחים, מפתחות זרים, מחוץ למידות, מצולע חוצה, גודל, סקיצה בלי מידות)', () => {
+    const bad = (inp) => code(() => DI.draftInput(inp));
+    for (const info of ['x', [1], { w: 150 }, { w: 10001 }, { l: 1500.5 }, { w: '1400' }, { rooms: 0 }, { rooms: 7 }, { rows: 31 }, { rows: -1 }, { ent: 'n' }, { cash: 3 }, { note: 'א'.repeat(201) }, { note: 5 }, { zz: 1 }, { __proto__x: 1 }])
+      assert.equal(bad({ info }), 'bad-info', JSON.stringify(info));
+    const I = { w: 1400, l: 1500 };
+    for (const sketch of ['x', { rooms: 'x' }, { zz: [] }, { rooms: [[0, 0, 100, 0]] }, { rooms: [[0, 0, 1500, 0, 1500, 900, 0, 900]] }, { rooms: [[0, 0, 500, 500, 500, 0, 0, 500]] },
+      { rooms: Array(7).fill([0, 0, 500, 0, 500, 500]) }, { rows: [[0, 0, 10, 10]] }, { rows: [[0, 0, 100]] }, { rows: [[0, 0, 100, 1600]] }, { rows: Array(31).fill([0, 0, 100, 0]) }, { rows: [[0, 0, 100.5, 0]] }])
+      assert.equal(bad({ info: I, sketch }), 'bad-info', JSON.stringify(sketch).slice(0, 80));
+    assert.equal(bad({ sketch: SK }), 'bad-info', 'סקיצה בלי מידות');
+    assert.equal(bad({ info: { rooms: 2 }, sketch: SK }), 'bad-info', 'סקיצה בלי רוחב ואורך');
+    assert.equal(bad({ info: I, sketch: { rows: Array(30).fill([0, 0, 1000, 1000]), rooms: Array(6).fill(Array(40).fill(1000)) } }), 'bad-info', 'מעל 4000 תווים');
+    assert.equal(bad({ info: Object.assign({}, I, { note: 'x' }), sketch: { rows: [[0, 0, 0, 0]] } }), 'bad-info', 'שורה באורך 0');
+  });
+  it('buildMapDraftPrompt: בלי שאלון – זהה לגרסה הקודמת; עם שאלון – מידות, חדרים, שורות, כניסה וקופה כמחייבים; ההערה מנוקה', () => {
+    const base = PM.buildMapDraftPrompt({ kind: 's', n: 3 });
+    assert.equal(PM.buildMapDraftPrompt({ kind: 's', n: 3, info: null, sketch: null }), base);
+    assert.doesNotMatch(base, /מבעל החנות/);
+    const p = PM.buildMapDraftPrompt({ kind: 's', n: 3, info: Object.assign({}, INFO, { note: 'הערה "}{ עם\nשורה' }), sketch: SK });
+    assert.ok(p.startsWith(PM.mapdraft), 'אותה התחלה (המודל המדומה מזהה לפיה)');
+    assert.match(p, /מחייבים/); assert.match(p, /רוחב 14 מטר/); assert.match(p, /אורך 15 מטר/); assert.match(p, /בדיוק 2/);
+    assert.match(p, /חדר 2: \[0,1000,1400,1000,1400,1500,0,1500\]/); assert.match(p, /\[200,1250,1200,1250\]/);
+    assert.match(p, /הכניסה הראשית למטה/); assert.match(p, /הקופה בצד ימין/);
+    assert.doesNotMatch(p.split('הערת בעל החנות')[1], /["{}\n]/);
+    const q = PM.buildMapDraftPrompt({ kind: 's', info: { rows: 8, w: 2000, l: 1000 } });
+    assert.match(q, /בערך 8/); assert.match(q, /רוחב 20 מטר/); assert.doesNotMatch(q, /הכניסה הראשית/);
+  });
+  it('evalDraft עם שאלון: הטיוטה נמתחת למידות, החדרים מהסקיצה, גופים מוצמדים לשורות, שורה בלי גוף = גונדולה + uz; עוברת draftCheck', () => {
+    const plain = A.evalDraft(FX('mapdraft-ok'), 'STOP', ectx).d;
+    const v = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: INFO, sketch: SK }));
+    assert.ok(v.d, JSON.stringify(v));
+    const m = v.d.map;
+    assert.deepEqual(m.rooms.map((r) => r.p), SK.rooms);
+    assert.deepEqual(m.rooms.map((r) => r.id), ['r1', 'r2']);
+    assert.equal(m.walls.length, 0);
+    assert.deepEqual([v.d.snap, v.d.add], [2, 1]);
+    const g = m.fx.find((f) => f.name === 'גונדולה מרכזית');
+    assert.deepEqual([g.x, g.y, g.w, g.a % 180], [600, 700, 800, 90]);
+    const added = m.fx[m.fx.length - 1];
+    assert.deepEqual([added.k, added.sides, added.x, added.y, added.w, added.bays, added.room], ['gon', 2, 700, 1250, 1000, 10, 'r2']);
+    assert.equal(m.fx.length, plain.map.fx.length + 1);
+    assert.deepEqual(m.fx.map((f) => f.num), m.fx.map((f, i) => i + 1));
+    assert.equal(m.seq, m.fx.length);
+    assert.match(m.uz[m.uz.length - 1].txt, /שורה מהשרטוט/);
+    for (const f of m.fx) assert.ok(f.x >= 0 && f.x <= 1400 && f.y >= 0 && f.y <= 1500, f.id);
+    A.draftCheck(m, cc);
+  });
+  it('שאלות ההמשך על הסקיצה: סוג חדר, סוג שורה, נקודת כניסה וקופה – נבדקים, נכנסים להנחיה וגוברים בטיוטה', () => {
+    const sk = Object.assign({}, SK, { rt: ['s', 'w'], rk: ['gon', 'gon', 'fridge'], ent: [700, 1500], cash: [1200, 1400] });
+    const v = DI.draftInput({ info: { w: 1400, l: 1500 }, sketch: sk });
+    assert.deepEqual(v.sketch, sk);
+    const I = { w: 1400, l: 1500 }, bad = (x) => code(() => DI.draftInput({ info: I, sketch: Object.assign({}, SK, x) }));
+    for (const x of [{ rt: ['s'] }, { rt: ['s', 'q'] }, { rk: ['gon', 'gon'] }, { rk: ['gon', 'gon', 'bin'] }, { ent: [1, 2, 3] }, { ent: [1500, 0] }, { cash: ['1', 2] }, { rt: 's' }]) assert.equal(bad(x), 'bad-info', JSON.stringify(x));
+    assert.deepEqual(DI.draftInput({ info: I, sketch: { ent: [0, 0] } }).sketch, { rooms: [], rows: [], ent: [0, 0] }, 'רק כניסה');
+    const p = PM.buildMapDraftPrompt({ kind: 's', info: I, sketch: sk });
+    assert.match(p, /חדר 2 \(מחסן\)/); assert.match(p, /\[200,1250,1200,1250\] fridge/); assert.match(p, /הכניסה הראשית בנקודה \(700,1500\)/); assert.match(p, /הקופה בנקודה \(1200,1400\)/);
+    const m = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: I, sketch: sk })).d.map;
+    assert.deepEqual(m.rooms.map((r) => r.name), ['אולם מכירות', 'מחסן']);
+    const fr = m.fx[m.fx.length - 1];
+    assert.deepEqual([fr.k, fr.sides, fr.glass, fr.d], ['fridge', 1, true, 80]);
+    assert.deepEqual(m.syms.filter((y) => y.k === 'ent').map((y) => [y.x, y.y]), [[700, 1500]]);
+    assert.deepEqual(m.syms.filter((y) => y.k === 'cash').map((y) => [y.x, y.y]), [[1200, 1400]]);
+    A.draftCheck(m, cc);
+    // שורה שה-AI זיהה כגונדולה ובעל החנות אמר "מדף קיר" – הופכת למדף קיר חד-צדדי
+    const m2 = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: I, sketch: Object.assign({}, SK, { rk: ['wall', 'gon', 'gon'] }) })).d.map;
+    const g = m2.fx.find((f) => f.name === 'גונדולה מרכזית');
+    assert.deepEqual([g.k, g.sides], ['wall', 1]);
+    A.draftCheck(m2, cc);
+  });
+  it('shapeDraft: רק מידות (בלי סקיצה) – החדרים ממלאים בדיוק את המלבן; הטיוטה המקורית לא משתנה', () => {
+    const d = A.cleanDraft(FX('mapdraft-ok'), ectx), before = JSON.stringify(d.map);
+    const s = DI.shapeDraft(d.map, { w: 2100, l: 700 }, null);
+    assert.equal(JSON.stringify(d.map), before);
+    assert.deepEqual(s.map.rooms[0].p, [0, 0, 2100, 0, 2100, 700, 0, 700]);
+    const wl = s.map.fx.find((f) => f.name === 'קיר אחורי');   // a=0 – האורך לאורך x, פי 3
+    assert.deepEqual([wl.x, wl.y, wl.w, wl.d], [1050, 15, 1800, 40]);
+    A.draftCheck(s.map, cc);
+    const v = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: { rows: 3 } }));
+    assert.deepEqual(v.d.map.rooms[0].p, [0, 0, 700, 0, 700, 1400, 0, 1400], 'בלי מידות – בלי מתיחה');
+  });
+});

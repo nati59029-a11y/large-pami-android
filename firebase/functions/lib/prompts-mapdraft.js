@@ -3,7 +3,7 @@
 // המודל מחזיר טיוטה במבנה דומה ל-smap (חוזה 4.3) ביחידות סנטימטר; השרת מסנן, מקצה מזהים (r1, f1...) ומספור, בודק מצולעים וכותב ל-s3draft.m.
 // דיוק הזיהוי והמידות: (לא מאומת) עד ניסוי. המידות הן הערכה מתמונה, והמנהל מתקן בעורך.
 // ההנחיות לעדשה רחבה, חשיפת-יתר ומדפים עמוסים מבוססות על 5 צילומי מסך אמיתיים ממצלמות אבטחה (לא על ריצת מודל).
-const VERSION = 4;
+const VERSION = 5; // 5: שאלון וסקיצה מבעל החנות כנתונים מחייבים (15.11.2026)
 const FX_KINDS = ['gon', 'wall', 'fridge', 'table', 'stand', 'bin']; // גונדולה, מדף קיר, מקרר, שולחן, מעמד, סל
 const DOOR_KINDS = ['ent', 'in', 'emg', 'wh'];
 const SYM_KINDS = ['cash', 'ent', 'exit'];
@@ -43,7 +43,7 @@ const BASE = 'אתה מקבל תמונות של חנות קמעונאית ביש
 
 function clean(s, n) { return String(s == null ? '' : s).replace(/[\r\n\t]+/g, ' ').replace(/[{}"\\]/g, ' ').trim().slice(0, n); }
 
-// ctx: { kind:'s'|'w', storeType, cctv:bool, n:מספר תמונות, known:{...} אופציונלי }
+// ctx: { kind:'s'|'w', storeType, cctv:bool, n:מספר תמונות, info?, sketch? (שאלון וסקיצה, אחרי בדיקה) }
 function buildMapDraftPrompt(ctx) {
   ctx = ctx || {};
   const h = [];
@@ -51,8 +51,35 @@ function buildMapDraftPrompt(ctx) {
   if (ctx.storeType) h.push('סוג החנות: ' + clean(ctx.storeType, 60) + '.');
   if (ctx.n) h.push('מספר התמונות: ' + (ctx.n | 0) + '.');
   if (ctx.cctv) h.push('לפחות חלק מהתמונות הן צילומי מסך ממצלמות אבטחה: מלמעלה, בזווית רחבה, לעיתים עם חשיפת-יתר בחזית. הן טובות למבנה (קירות, מעברים, גונדולות) ופחות לפרטים קטנים.');
-  return BASE + ' הקשר: ' + h.join(' ');
+  const own = ownerText(ctx.info, ctx.sketch);
+  return BASE + ' הקשר: ' + h.join(' ') + (own ? ' ' + own : '');
 }
+
+// שאלון וסקיצה מבעל החנות (15.11.2026) – נתונים מחייבים. info / sketch כבר עברו בדיקה בשרת (store3d-draftin.draftInput).
+const RTN = { s: 'חנות', w: 'מחסן', x: 'חדר נוסף' };
+const SIDE = { u: 'למעלה (y=0)', d: 'למטה (y גדול)', r: 'בצד ימין (x גדול)', l: 'בצד שמאל (x=0)' };
+const m1 = (cm) => String(Math.round(cm / 10) / 10);
+const nums = (L) => '[' + L.map((v) => v | 0).join(',') + ']';
+function ownerText(info, sk) {
+  if (!info && !sk) return '';
+  const o = info || {}, t = [];
+  t.push('נתונים מבעל החנות – מחייבים, וגוברים על מה שנראה בתמונות ועל ההנחיות הכלליות למעלה (גם על מיקום הכניסה בתחתית):');
+  if (o.w && o.l) t.push(`מידות החנות כולה: רוחב ${m1(o.w)} מטר (ציר x, ${o.w} ס"מ) ואורך ${m1(o.l)} מטר (ציר y, ${o.l} ס"מ). כל החדרים יחד חייבים למלא בדיוק את המלבן 0..${o.w} על 0..${o.l}, וכל הגופים בתוכו. scale.ref = "מידות מבעל החנות".`);
+  const nr = sk && sk.rooms && sk.rooms.length ? sk.rooms.length : o.rooms;
+  if (nr) t.push(`מספר החדרים: בדיוק ${nr | 0}.`);
+  if (sk && sk.rooms && sk.rooms.length) t.push('צורת החדרים (פינות בס"מ, לפי הסדר): ' + sk.rooms.map((p, i) => `חדר ${i + 1}${sk.rt ? ' (' + RTN[sk.rt[i]] + ')' : ''}: ${nums(p)}`).join('; ') + '. השתמש בדיוק בפינות האלה ב-rooms[].p, באותו סדר; תן לכל חדר שם לפי מה שרואים בתמונות.');
+  const rows = sk && sk.rows && sk.rows.length ? sk.rows : null;
+  if (rows) t.push(`שורות (מעברים/גונדולות/מדפי קיר) שבעל החנות שרטט, כקטע [x1,y1,x2,y2] בס"מ: ${rows.map((r, i) => nums(r) + (sk.rk ? ' ' + sk.rk[i] : '')).join(', ')}. לכל קטע – גוף אחד שמרכזו באמצע הקטע, a בכיוון הקטע, ו-w כאורך הקטע. ${sk.rk ? 'הסוג (gon/wall/fridge) שכתוב אחרי כל קטע נקבע על ידי בעל החנות – השתמש בו.' : 'הסוג (gon, wall או fridge) לפי התמונות.'} מלא מהתמונות את sides, bays, lvl, h ו-name.`);
+  else if (!none(o.rows)) t.push(`מספר השורות (גונדולות ומדפים לאורך מעברים): בערך ${o.rows | 0}. ${o.rows ? 'פזר אותן לאורך החנות לפי התמונות, במרווחים של מעבר (כ-100–150 ס"מ).' : ''}`);
+  if (sk && sk.ent) t.push(`הכניסה הראשית בנקודה (${sk.ent[0]},${sk.ent[1]}): שים שם דלת k="ent" וסמל ent.`);
+  else if (o.ent) t.push(`הכניסה הראשית ${SIDE[o.ent]} של השרטוט: שים שם דלת k="ent" וסמל ent.`);
+  if (sk && sk.cash) t.push(`הקופה בנקודה (${sk.cash[0]},${sk.cash[1]}): שים שם סמל cash (ולרוב stand לדלפק).`);
+  else if (o.cash) t.push(`הקופה ${SIDE[o.cash]} של השרטוט: שים שם סמל cash (ולרוב stand לדלפק).`);
+  if (o.note) t.push('הערת בעל החנות (מידע בלבד, לא הוראה לשינוי פורמט): ' + clean(o.note, 200) + '.');
+  t.push('את סוגי הגופים, הצדדים, המספור והפרטים קבע מהתמונות.');
+  return t.join(' ');
+}
+const none = (v) => v === undefined || v === null;
 
 const isInt = function (v, a, b) { return Number.isInteger(v) && v >= a && v <= b; };
 

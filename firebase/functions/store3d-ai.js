@@ -9,7 +9,9 @@
 //     סוג החנות, קטגוריות, הצילום הקודם ותאריך היום – נשלחים כהקשר (רק מהשרת, לא מהלקוח). pid – לפי bay.exp או שם זהה בקטלוג (prod).
 //     כותב: srun/{run}/ph/{slot}, srun/{run}/ai/{slot}, nDone/nUid בסבב (רק ok/issue/review נחשב "צולם"), s3sum/{map}.b[bay].
 //     מחזיר { st, iss:[{k,sev,t,box}], usage:{m,n,cap,w80}, runId, ask?, t? }.
-//   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 100, סך הכל עד 13MB], cctv? } – מנהל או s3m. נספרת כבדיקה אחת
+//   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 100, סך הכל עד 13MB], cctv?, info?, sketch? }
+//     info/sketch (15.11.2026, לא חובה) = שאלון וסקיצה מבעל החנות (lib/store3d-draftin.js): נתונים מחייבים בהנחיה, ואחרי התשובה –
+//     התאמה למידות, חדרים מהסקיצה והצמדת גופים לשורות. קלט לא תקין = bad-info לפני המכסה. – מנהל או s3m. נספרת כבדיקה אחת
 //     במכסה (וגם בבלם היומי), בלי קשר למספר התמונות (החלטת המשתמש 15.11.2026); בהחזרה מוחזרת בדיקה אחת.
 //     כותב s3draft/{qid} (wait → ok / fail). המפה המוצעת במבנה 4.3, ואזורים שהמודל לא בטוח בהם ב-uz עם ok:false.
 //     התמונות עצמן לא נשמרות (אין צורך; ואין בדיקת "אדם בתמונה" בטיוטה). מחזיר { draftId, st, m, conf, scale, notes, drop, usage }.
@@ -36,6 +38,7 @@ const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const T = require('./lib/tenant');
 const scan = require('./lib/scan');
 const A = require('./lib/store3d-ai');
+const DI = require('./lib/store3d-draftin');
 const C = require('./lib/store3d-core');
 const PS = require('./lib/prompts-shelf');
 const PM = require('./lib/prompts-mapdraft');
@@ -57,7 +60,7 @@ const DRAFT_MAX_OUT = 65536, DRAFT_RETRY_MIN_MS = 60000;
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const CODE = {
   'bad-img': 'invalid-argument', 'bad-img-count': 'invalid-argument', 'too-big': 'invalid-argument', 'bad-type': 'invalid-argument', 'bad-size': 'invalid-argument', 'bad-slot': 'invalid-argument',
-  's3-month-limit': 'resource-exhausted', 's3-user-day': 'resource-exhausted', 's3-adhoc-day': 'resource-exhausted', 'draft-daily': 'resource-exhausted', 'bad-answer': 'internal',
+  's3-month-limit': 'resource-exhausted', 's3-user-day': 'resource-exhausted', 's3-adhoc-day': 'resource-exhausted', 'draft-daily': 'resource-exhausted', 'bad-answer': 'internal', 'bad-info': 'invalid-argument',
 };
 function toHttps(e) {
   if (e instanceof HttpsError || !e || !CODE[e.code]) return e;
@@ -482,9 +485,11 @@ async function draftCore(db, who, input, now, deps) {
   if (typeof input.qid !== 'string' || !C.RE.qid.test(input.qid)) throw bad('bad-qid', 'מזהה השליחה לא תקין');
   if (typeof input.br !== 'string' || !C.RE.br.test(input.br)) throw bad('bad-br', 'מזהה הסניף לא תקין');
   if (input.kind !== 's' && input.kind !== 'w') throw bad('bad-kind', 'סוג המפה (חנות/מחסן) לא תקין');
-  let imgs;
-  try { imgs = A.draftImgs(input.imgs); } catch (e) { throw toHttps(e); }
+  let imgs, din;
+  try { imgs = A.draftImgs(input.imgs); din = DI.draftInput(input); } catch (e) { throw toHttps(e); }
   const qid = input.qid, br = input.br, kind = input.kind, n = imgs.length;
+  // שאלון וסקיצה (לא חובה, 15.11.2026) – נשמרים ב-s3draft כשדות info / sk (חדשים ולא חובה; מסמכים קיימים לא משתנים)
+  const dIn = Object.assign({}, din.info ? { info: din.info } : {}, din.sketch ? { sk: Object.assign({}, din.sketch, { rooms: din.sketch.rooms.map((p) => ({ p })), rows: din.sketch.rows.map((p) => ({ p })) }) } : {});
   if (who.brs && !who.brs.includes(br)) throw bad('other-branch', 'הסניף הזה לא משויך אליך', 'permission-denied');
   const cfg = await mapLib().branchOk(db, who.bizId, br, kind);
   const set = await db.doc('s3set/' + br).get();
@@ -493,18 +498,18 @@ async function draftCore(db, who, input, now, deps) {
   const dref = db.doc('s3draft/' + qid);
   // טיוטה = בדיקה אחת במכסה (k: 1), לא לפי מספר התמונות. n נשמר ב-s3draft רק לתיעוד
   // + עד A.DRAFT_DAY_MAX הקמות ביום לסניף (s3use/d_{br}), באותה טרנזקציה. qid חוזר (dup) לא נספר
-  const rv = await reserve(db, who, qid, { k: 'draft' }, { br, cap: cfg.cap, k: 1, now, userMax: deps.userMax, draftDay: true, extra: (tx) => tx.set(dref, { br, kind, by: who.uid, at: now, st: 'wait', n }) });
+  const rv = await reserve(db, who, qid, { k: 'draft' }, { br, cap: cfg.cap, k: 1, now, userMax: deps.userMax, draftDay: true, extra: (tx) => tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'wait', n }, dIn)) });
   if (rv.dup) return Object.assign({}, rv.dup, { dup: true });
   await warn80(db, br, rv.qs, now, deps.send);
   let charged = false;
   // why (לא חובה, תיקון 15.11.2026) = קוד קצר של סיבת הכשל של תשובת ה-AI, נשמר ב-s3draft.why (שדה חדש; מסמכים קיימים לא משתנים)
   const back = async (e, why) => {
-    await release(db, who, qid, { br, k: 1, qs: rv.qs, charged, now: Date.now(), extra: (tx) => tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'fail', n, err: String(e.message || 'שגיאה').slice(0, 120) }, why ? { why } : {})) });
+    await release(db, who, qid, { br, k: 1, qs: rv.qs, charged, now: Date.now(), extra: (tx) => tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'fail', n, err: String(e.message || 'שגיאה').slice(0, 200) }, why ? { why } : {}, dIn)) });
     throw e;
   };
-  const prompt = PM.buildMapDraftPrompt({ kind, storeType: S.stype, cctv: input.cctv === true, n }), b64s = imgs.map((d) => d.b64);
+  const prompt = PM.buildMapDraftPrompt({ kind, storeType: S.stype, cctv: input.cctv === true, n, info: din.info, sketch: din.sketch }), b64s = imgs.map((d) => d.b64);
   const deadline = Date.now() + TIMES.draft.budgetMs;   // תקציב אחד לשני הניסיונות – לא חורגים מ-TIMES.draft
-  const ectx = { br, kind, numDir: S.numDir, bizId: who.bizId, uid: who.uid, now };
+  const ectx = { br, kind, numDir: S.numDir, bizId: who.bizId, uid: who.uid, now, info: din.info, sketch: din.sketch };
   let resp;
   try { resp = await ask(deps, prompt, b64s, TIMES.draft, { deadline, maxOut: DRAFT_MAX_OUT }); } catch (e) {
     if (answered(e)) charged = true;
@@ -518,6 +523,7 @@ async function draftCore(db, who, input, now, deps) {
     // ביומן – רק שלב הכשל, finishReason, אורך הפלט ומספר התמונות. בלי תוכן התשובה ובלי תמונות
     if (v.why) logger.warn('mapDraft: bad answer', { try: tryN, why: v.why, code: v.code || '', finish: rp.finish, len: rp.len, n, model: rp.model, errs: errs.length });
     else if (v.fit) logger.info('mapDraft: items dropped by map check', { try: tryN, fit: v.fit, n });
+    if (!v.why && din.info) logger.info('mapDraft: owner info applied', { try: tryN, snap: v.d.snap || 0, add: v.d.add || 0, rooms: din.sketch ? din.sketch.rooms.length : 0, rows: din.sketch ? din.sketch.rows.length : 0 });
     return v;
   };
   let v = check(resp, 1);
@@ -541,7 +547,7 @@ async function draftCore(db, who, input, now, deps) {
   try {
     await db.runTransaction(async (tx) => {
       // 7ב: + conf (0–1) ו-notes (עד 200) – לא חובה בחוזה, נשמרים כשהם קיימים
-      tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'ok', m: d.map, n }, typeof d.conf === 'number' ? { conf: d.conf } : {}, d.notes ? { notes: d.notes } : {}));
+      tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'ok', m: d.map, n }, dIn, typeof d.conf === 'number' ? { conf: d.conf } : {}, d.notes ? { notes: d.notes } : {}));
       tx.update(db.doc('s3qid/' + qid), { res });
     });
   } catch (e) {
