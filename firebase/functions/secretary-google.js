@@ -1062,7 +1062,7 @@ async function mailWorkIn(id, o) {
     // שלב ג/2: הזמנה מזוהה – רק בסוג order ובעסק עם תוספת ההזמנות. נשמרת על הטיוטה (ord) ולא נשלחת לבד (an: order). אחרת – כמו קודם
     const biz = (T.scope() || {}).biz;
     const ord = !so && r.ord && r.cls === 'order' && biz && biz.features && biz.features.orders === true ? r.ord : null;
-    const doc = Object.assign(draftBase(id, x, now), aiDoc(r), { src: 'ai', by: '', ad: true }, task ? { task } : {}, ord ? { ord, an: ['order'] } : {}, so ? { an: ['order'], oRe: so.id } : {});
+    const doc = Object.assign(draftBase(id, x, now), aiDoc(r), { src: 'ai', by: '', ad: true }, task ? { task } : {}, ord ? { ord, an: ['order'], mrAsk: false } : {}, so ? { an: ['order'], oRe: so.id } : {});
     const b = db.batch();
     b.create(db.doc('sec_draft/' + id), doc);
     r.logs.forEach(([act, note]) => b.set(db.collection('sec_log').doc(), glog('', 'sec', act, { tgt: id, note })));
@@ -1082,7 +1082,7 @@ async function mailWorkIn(id, o) {
     // 15.11.2026: כלל אישי של מנהל קודם לכלל העסקי – רק במייל שאינו הזמנה (טיוטת הזמנה נשלחת לבד רק דרך ordAutoTry). לא נשלח לבד → בדיקת הכלל העסקי הקיים (tryAuto)
     else if (r.mr && r.mrRule && r.mrRule.auto === true) ma = await tryMrAuto(db, id, Object.assign({}, x, task ? { task } : {}), r, now).catch((e) => { logger.warn('secretary-google: mr auto failed', { reason: (e && e.code) || 'error' }); return { no: ['fail'] }; });
     const a = ord ? (oa && oa.sent ? { sent: true, rule: 'ord' } : { no: ['order'] }) : ma && ma.sent ? { sent: true, rule: 'mr:' + r.mr } : await tryAuto(db, id, Object.assign({}, x, task ? { task } : {}), r, rep, now);
-    if (!a.sent && r.mrAsk) await MLC().askNote(db, r.mrRule, now);
+    if (!a.sent && !ord && r.mrAsk) await MLC().askNote(db, r.mrRule, now); // מייל הזמנה – כלל אישי לא שולח בו לבד, ולכן גם לא שואלים (בודק המיזוג, הערה 1)
     const out = await fin(a.sent ? 'auto' : 'draft');
     return Object.assign(out, { draft: id, task, auto: a.sent ? a.rule : '', no: a.no || [], mrNo: ma && !ma.sent ? ma.no || [] : [] });
   } catch (e) {
