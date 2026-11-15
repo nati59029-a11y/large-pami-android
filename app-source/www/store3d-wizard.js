@@ -10,7 +10,7 @@
 const U=window.S3UI;
 if(!U||typeof ACT==='undefined'||typeof V==='undefined'||typeof CHG==='undefined'||typeof go==='undefined')return;
 const esc2=U.esc2;
-const MAXI=40,MAXB=6000000,STEPS=['צלמו','טיוטה','תקנו','שמרו','סבב'];
+const MAXI=100,MAXB=13e6,STEPS=['צלמו','טיוטה','תקנו','שמרו','סבב'];
 const TK={w:'קירות',f:'רצפה',c:'תקרה'};
 const DOW=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
 const W={own:'',kind:'s',br:'',step:1,imgs:[],tex:{w:null,f:null,c:null},busy:'',msg:'',qid:'',draft:null,staff:null,staffErr:'',rule:null,rid:'',made:0,runMsg:''};
@@ -90,6 +90,64 @@ async function addImgs(files){
   if(f.type&&!/^image\//.test(f.type)){bad++;continue}
   try{const p=await small(f);if(total()+p.blob.size>MAXB){full=2;break}W.imgs.push({blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h});W.qid=''}catch(e){bad++}}
  W.busy='';W.msg=(full===1?`אפשר עד ${MAXI} תמונות. `:full===2?'התמונות הגיעו לגודל המרבי. מחקו תמונה כדי להוסיף. ':'')+(bad?`${bad} קבצים לא נקלטו (לא תמונה, או שלא ניתן היה לקרוא אותם). `:'');rerender()}
+/* ---------- סרטון: עיבוד בטלפון. פריימים חדים נבחרים ועוברים דרך small() כמו תמונות מהגלריה ---------- */
+const VMAX=60,VSTEP=.75,VWIN=2,VERR='לא הצלחנו לקרוא את הסרטון. נסו לצלם שוב, או בחרו תמונות.';
+const vwait=(v,ev,ms)=>new Promise((ok,no)=>{let t;const f=()=>{clear();ok()},e=()=>{clear();no(new Error('v'))},clear=()=>{clearTimeout(t);v.removeEventListener(ev,f);v.removeEventListener('error',e)};
+ t=setTimeout(e,ms);v.addEventListener(ev,f);v.addEventListener('error',e)});
+async function vopen(file){
+ const url=URL.createObjectURL(file),v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.style.display='none';
+ const done=()=>{try{v.removeAttribute('src');v.load()}catch(e){}URL.revokeObjectURL(url)};
+ try{v.src=url;await vwait(v,'loadeddata',15000);
+  if(!isFinite(v.duration)){v.currentTime=1e7;await vwait(v,'seeked',8000);v.currentTime=0;await vwait(v,'seeked',8000)}
+  if(!(v.duration>0)||!v.videoWidth||!v.videoHeight)throw new Error('v');
+  return{v,done}}catch(e){done();throw e}}
+const vseek=async(v,t)=>{v.currentTime=t;await vwait(v,'seeked',8000)};
+/* חדות = סכום ריבועי ההפרשים בין פיקסלים שכנים (בגווני אפור), בקנה מידה קבוע */
+function vgray(v,c){const w=c.width,h=c.height,x=c.getContext('2d',{willReadFrequently:true});x.drawImage(v,0,0,w,h);const d=x.getImageData(0,0,w,h).data,g=new Uint8Array(w*h);
+ for(let i=0;i<g.length;i++)g[i]=(d[i*4]*77+d[i*4+1]*150+d[i*4+2]*29)>>8;
+ let s=0;for(let y=0;y<h-1;y++)for(let i=y*w,e=i+w-1;i<e;i++){const a=g[i]-g[i+1],b=g[i]-g[i+w];s+=a*a+b*b}
+ return{g,s:s/(w*h)}}
+const vdiff=(a,b)=>{let s=0;for(let i=0;i<a.length;i++)s+=Math.abs(a[i]-b[i]);return s/a.length};
+/* מכל חלון של 2 שניות: המועמדת החדה ביותר, בלי כמעט-כפילות של התמונה שנבחרה לפניה */
+function vpick(C,prev){const out=[];let last=prev;
+ const W2=new Map();for(const c of C){const k=Math.floor(c.t/VWIN);(W2.get(k)||W2.set(k,[]).get(k)).push(c)}
+ for(const k of [...W2.keys()].sort((a,b)=>a-b)){const L=W2.get(k).slice().sort((a,b)=>b.s-a.s);
+  const c=L.find(x=>!last||vdiff(x.g,last)>=3);if(c){out.push(c);last=c.g}}
+ return out}
+const vsel=(P,n)=>{if(P.length<=n)return P;if(n<=1)return n?[P[P.length>>1]]:[];return Array.from({length:n},(_,i)=>P[Math.round(i*(P.length-1)/(n-1))])};
+const vprog=(i,n,p)=>{W.busy=`מעבד סרטון ${i+1} מתוך ${n}… ${Math.round(p*100)}%`;rerender()};
+async function addVids(files){
+ const vf=files.filter(f=>!f.type||/^video\//.test(f.type));
+ if(!vf.length){W.msg='הקובץ שנבחר אינו סרטון.';return rerender()}
+ const n=vf.length,cv=document.createElement('canvas');cv.width=160;W.vcancel=false;W.vid=true;W.msg='';let err=0,long=0,full=0,last=-1,P=[],prev=null;
+ try{
+  /* שלב 1: ניתוח – רק מערכים קטנים נשמרים, בלי הפריימים עצמם */
+  for(let i=0;i<n&&!W.vcancel;i++){let o;
+   try{o=await vopen(vf[i])}catch(e){err++;continue}
+   try{const v=o.v,dur=Math.min(v.duration,VMAX);if(v.duration>VMAX+.5)long++;cv.height=Math.max(1,Math.round(160*v.videoHeight/v.videoWidth));
+    const C=[];for(let t=VSTEP/2,k=0;t<dur&&!W.vcancel;t+=VSTEP,k++){await vseek(v,Math.min(t,Math.max(0,dur-.05)));const r=vgray(v,cv);C.push({t,s:r.s,g:r.g});
+     const p=Math.round(k*VSTEP/dur*50);if(p!==last){last=p;vprog(i,n,p/100)}}
+    const sel=vpick(C,prev);if(sel.length)prev=sel[sel.length-1].g;for(const c of sel)P.push({i,t:c.t,s:c.s});
+    if(!C.length)err++}
+   catch(e){err++}finally{o.done()}}
+  const room=MAXI-W.imgs.length;if(P.length>room)full=1;P=vsel(P,room);
+  /* שלב 2: חילוץ הפריימים שנבחרו ברזולוציה מלאה והעברה דרך small() */
+  const by=new Map();P.forEach((x,k)=>{(by.get(x.i)||by.set(x.i,[]).get(x.i)).push(x)});let done=0;
+  for(const [i,L] of by){if(W.vcancel)break;let o;try{o=await vopen(vf[i])}catch(e){err++;continue}
+   try{const v=o.v,c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+    for(const x of L){if(W.vcancel)break;await vseek(v,Math.min(x.t,Math.max(0,v.duration-.05)));c.getContext('2d').drawImage(v,0,0);
+     const b=await U.blobOf(c,.92);if(!b)throw new Error('x');const p=await small(b);
+     if(total()+p.blob.size>MAXB){full=2;break}
+     W.imgs.push({blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h});W.qid='';done++;vprog(i,n,.5+.5*done/P.length)}
+    c.width=c.height=0}
+   catch(e){err++}finally{o.done()}
+   if(full===2)break}
+ }catch(e){err++}
+ cv.width=cv.height=0;
+ W.vid=false;W.busy='';
+ W.msg=(W.vcancel?'העיבוד בוטל. ':'')+(long?'הסרטון ארוך מדקה, לקחנו רק את הדקה הראשונה. ':'')+(full===1?`אפשר עד ${MAXI} תמונות, בחרנו מהסרטונים בפיזור שווה. `:full===2?'התמונות הגיעו לגודל המרבי. ':'')+(err?VERR:'');W.vcancel=false;rerender()}
+CHG.s3wVid=async el=>{const L=[...(el.files||[])];el.value='';if(!L.length||W.busy)return;W.busy='מעבד סרטון…';rerender();await addVids(L)};
+ACT.s3wVidX=()=>{W.vcancel=true};
 CHG.s3wPick=async el=>{const L=[...(el.files||[])];el.value='';if(!L.length||W.busy)return;await addImgs(L)};
 ACT.s3wRm=el=>{const i=+el.dataset.i,x=W.imgs[i];if(!x)return;try{URL.revokeObjectURL(x.url)}catch(e){}W.imgs.splice(i,1);W.qid='';W.msg='';rerender()};
 CHG.s3wTex=async el=>{
@@ -162,13 +220,13 @@ const texRow=k=>{const t=W.tex[k];return `<div class="s3info"><div class="row" s
  <div class="row s3row">${t&&t.url?`<img src="${t.url}" alt="תצוגה מקדימה של ${TK[k]}" style="width:56px;height:56px;object-fit:cover;border-radius:var(--r-m,10px);border:1px solid var(--line)">`:''}<label class="btn s ${t?'g':''}">${t?'צלמו שוב':'צלמו '+TK[k]}<input type="file" accept="image/*" capture="environment" data-c="s3wTex" data-k="${k}" hidden></label>${t?`<button class="btn s g" data-a="s3wTexRm" data-k="${k}">הסירו</button>`:''}</div></div>`};
 function step1(d){
  const off=navigator.onLine===false;
- let h=stepper(1)+`<b>צלמו את החנות</b><p class="note s3note">עברו בחנות וצלמו מכל הכיוונים: את הקירות, המעברים, המדפים והכניסה. כשיש יותר זוויות, הטיוטה מדויקת יותר. המערכת בונה לבד טיוטה של המפה, ואתם עוברים עליה ומאשרים לפני שהיא נשמרת. אפשר עד ${MAXI} תמונות.</p>`;
+ let h=stepper(1)+`<b>צלמו את החנות</b><p class="note s3note">עברו בחנות וצלמו מכל הכיוונים: את הקירות, המעברים, המדפים והכניסה. כשיש יותר זוויות, הטיוטה מדויקת יותר. המערכת בונה לבד טיוטה של המפה, ואתם עוברים עליה ומאשרים לפני שהיא נשמרת. אפשר עד ${MAXI} תמונות, או סרטון קצר (עד דקה) שממנו נבחרות התמונות החדות.</p>`;
  if(off)h+=`<div class="ban s3off" role="status">אין חיבור לאינטרנט. אפשר לצלם, אבל יצירת הטיוטה דורשת רשת.</div>`;
- h+=`<div class="row s3row"><label class="btn">צלמו תמונה<input type="file" accept="image/*" capture="environment" data-c="s3wPick" hidden></label><label class="btn g">בחרו מהגלריה<input type="file" accept="image/*" multiple data-c="s3wPick" hidden></label></div>`;
+ h+=`<div class="row s3row"><label class="btn">צלמו תמונה<input type="file" accept="image/*" capture="environment" data-c="s3wPick" hidden></label><label class="btn g">בחרו מהגלריה<input type="file" accept="image/*" multiple data-c="s3wPick" hidden></label><label class="btn g">העלו סרטון<input type="file" accept="video/*" multiple data-c="s3wVid" hidden></label><label class="btn g">צלמו סרטון<input type="file" accept="video/*" capture="environment" data-c="s3wVid" hidden></label></div>`;
  h+=thumbs();
  h+=`<p class="s3note" aria-live="polite">${W.imgs.length?`${W.imgs.length} תמונות · בערך ${mb(total())}MB מתוך ${mb(MAXB)}MB`:'עוד לא צולמו תמונות.'}</p>`;
  h+=`<div class="s3info"><b>תמונות לצבע ולמראה (לא חובה)</b><br><small>תמונה של קיר, של הרצפה ושל התקרה, כדי שהתלת מימד ייראה כמו החנות שלכם. כל תמונה נשלחת מיד.</small>${['w','f','c'].map(texRow).join('')}</div>`;
- if(W.busy)h+=`<div class="s3info" role="status">${esc2(W.busy)}</div>`;
+ if(W.busy)h+=`<div class="s3info" role="status">${esc2(W.busy)}${W.vid?` <button class="btn s g" data-a="s3wVidX">ביטול</button>`:''}</div>`;
  if(W.msg)h+=`<div class="ban s3warn" role="alert">${esc2(W.msg)}</div>`;
  h+=`<div class="row s3row"><button class="btn grow" data-a="s3wDraft"${W.imgs.length&&!W.busy?'':' disabled'}>בנו טיוטה</button><button class="btn g" data-a="s3wManual">ציור ידני במקום</button></div>`;
  return h}
@@ -202,7 +260,7 @@ function step5(){
  if(W.busy)h+=`<div class="s3info" role="status">${esc2(W.busy)}</div>`;
  if(W.msg)h+=`<div class="ban s3warn" role="alert">${esc2(W.msg)}</div>`;
  return h+`<div class="row s3row"><button class="btn grow" data-a="s3wMake"${W.busy?' disabled':''}>קבעו סבב</button><button class="btn g" data-a="s3wEnd">דלגו</button></div>`}
-V.st3w=()=>{const T='הקמת החנות בתלת מימד';
+V.st3w=()=>{const T='הקמת תלת מימד';
  if(!loggedIn()||!U.feat())return{t:T,h:'<div class="empty">תלת מימד לא מופעל בעסק הזה</div>'};
  if(!U.canDraw())return{t:T,h:'<div class="empty">אין לכם הרשאה להקים מפה בעסק הזה</div>'};
  if(W.own!==me())reset(W.kind);

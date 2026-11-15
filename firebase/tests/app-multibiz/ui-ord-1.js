@@ -82,6 +82,8 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   await page.click('[data-a=oxSave]'); await H.settle(page, 600);
   const co = calls.find((c) => c.n === 'createOrder');
   check('3 שמירה: createOrder עם br1, פריט pB מסניף br2, reqId, בלי total', !!co && co.d.br === 'br1' && co.d.items[0].pid === 'pB' && co.d.items[0].from === 'br2' && /^r[0-9a-z]{8,}/.test(co.d.reqId) && co.d.total === undefined, co && co.d);
+  const vAfter = await page.evaluate(() => cur().v); await shot('03-אחרי-שמירה'); // 14.11: אחרי שמירת הזמנה חדשה – חוזרים לרשימת ההזמנות
+  check('3א אחרי שמירה: חוזרים לרשימת ההזמנות (לא לכרטיס ההזמנה)', vAfter === 'ox', vAfter);
   // 4. כרטיס הזמנה + לתשלום
   const cd = await screen('כרטיס-הזמנה', () => goV('oxOrd', 'o1'));
   await page.click('[data-a=oxPay]'); await H.settle(page, 800);

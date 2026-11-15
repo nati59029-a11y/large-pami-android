@@ -7,7 +7,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore } = require('firebase-admin/firestore');
 const T = require('./tenant');
 // prompts.js נוצר אוטומטית מהאפליקציה; ההנחיה של recipe קיימת רק בשרת (prompts-recipe.js)
-const PROMPTS = Object.assign({}, require('./prompts'), require('./prompts-recipe'), require('./prompts-classify'));
+const PROMPTS = Object.assign({}, require('./prompts'), require('./prompts-recipe'), require('./prompts-classify'), { ordlist: require('./prompts-ord').ordlist }, { payproof: require('./prompts-ar').payproof });
 
 // ---------- סוגי זיהוי (מה האפליקציה מזהה היום) ----------
 // invoice  = ocrAI  (חשבונית / תעודת משלוח), עד 4 עמודים, temperature 0
@@ -38,10 +38,14 @@ const KINDS = Object.freeze({
   // invlines = שורות המוצרים מחשבונית ספק (תמחור חשבונית ספק, שלב 2; הנחיה INVL_P מהאפליקציה), עד 4 עמודים.
   // תשובה ארוכה (טבלה) – 60 שניות למודל (הנחה), באותו תקציב כולל של חשבונית
   invlines: { minFiles: 1, maxFiles: 4, temperature: 0, pro: false, timeoutMs: 60000, budgetMs: 100000 },
+  // ordlist = צילום רשימת הזמנה (שלב 2 חלק ב', 14.11.2026): שורות שם + כמות, עד 3 תמונות. ההתאמה למוצרים – ordParse (orders.js). הרשאת ord (index.js)
+  ordlist: { minFiles: 1, maxFiles: 3, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
+  // payproof = אסמכתת תשלום של לקוח (שלב 4, 15.11.2026): צ'ק / העברה / אשראי / מזומן – קובץ אחד. הרשאת ord (index.js)
+  payproof: { minFiles: 1, maxFiles: 1, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
 });
 // בדיקת סוג הזיהוי מול רשימה קבועה בלבד. Object.hasOwn ולא KINDS[kind], כי KINDS[kind] "מוצא" גם שמות
 // שכל אובייקט ב-JavaScript מכיר מעצמו (__proto__, constructor, toString…) – פרצה שהבודק מצא בסבב 1.
-const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening', 'deposit', 'cashout', 'transfer', 'recipe', 'classify', 'invlines']);
+const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening', 'deposit', 'cashout', 'transfer', 'recipe', 'classify', 'invlines', 'ordlist', 'payproof']);
 function isKind(kind) {
   return typeof kind === 'string' && KIND_NAMES.includes(kind) && Object.hasOwn(KINDS, kind) && Object.hasOwn(PROMPTS, kind);
 }
@@ -51,7 +55,7 @@ function kindCfg(kind) {
 }
 // כמה זמן הטלפון מחכה לתשובה מ-scanDocument (לפי קוד האפליקציה בשלב 4, כפי שהועבר מהמתאם): חשבונית ומוצר 120 שניות, משוב 150.
 // סגירת קופה (zreport, opening): 120 שניות (zcAI באפליקציה). אישור הפקדה (deposit): 120 שניות (dpScan). פתק הוצאה מקופה (cashout): 120 שניות (coScan). מתכון (recipe): 150.
-const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000, classify: 120000, invlines: 120000 };
+const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000, classify: 120000, invlines: 120000, ordlist: 120000, payproof: 120000 };
 
 // באמולטור בלבד: אפשר לקצר את כל הזמנים באותו יחס (SCAN_TIME_SCALE), כדי שבדיקות התקציב לא יחכו 100 שניות.
 // מחוץ לאמולטור היחס תמיד 1.

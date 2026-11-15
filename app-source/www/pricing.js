@@ -148,7 +148,7 @@ try{window.addEventListener('online',()=>later(1000));setInterval(()=>{if(qGet()
 if(typeof V==='undefined'||typeof ACT==='undefined'||typeof INP==='undefined'||!window.PI||typeof PricingCalc==='undefined')return;
 const PC=PricingCalc,PI=window.PI,LOCK_MS=30*60e3;
 const BC_RE=/^[0-9A-Za-z-]{3,30}$/,ID_OK=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(v);
-const KEYS=['n','bc','sku','qty','unit','pk','ct','cost','raw','chk','pid','nw','skip','price','wp','wpSrc','cto'];
+const KEYS=['n','bc','sku','qty','unit','pk','ct','cost','raw','chk','pid','nw','skip','price','wp','wpSrc','cto','nm'];/* nm – "שם במלאי" (שלב 2, 2026-11-14): שינוי שם; השם הקודם נשמר בשרת ככינוי */
 const fnc=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return fnCall(n,d)};
 const rid=()=>{const a=new Uint8Array(12);crypto.getRandomValues(a);return 'r'+[...a].map(x=>x.toString(36).padStart(2,'0')).join('').slice(0,22)};
 const r2=x=>Math.round(x*100)/100,r3=x=>Math.round(x*1000)/1000;
@@ -226,13 +226,13 @@ function unlink(e,i){const l=e.L[i];delete l.pid;l.nw=true;if(l.wpSrc==='stock')
 function init(e,r){const inv=r.inv||{};e.inv=inv;e.rev=Number.isInteger(r.rev)&&r.rev>=0?r.rev:0;e.gen=(e.gen||0)+1;e.vat=typeof r.vat==='number'?r.vat:PC.VAT0;e.ord=r.ord!==false;e.until=r.until||0;
  e.M=Array.isArray(r.m)?r.m:[];e.S0=[];e.B=[];
  e.L=[];(Array.isArray(inv.lines)?inv.lines:[]).forEach((l0,i)=>{const l={};for(const k of KEYS)if(l0&&l0[k]!=null)l[k]=l0[k];e.L[i]=l;const m=e.M[i]||{};
-  e.S0[i]=m.m&&['bc','sku','name'].includes(m.k)?m.k:(m.k==='pid'?'pid':'');
-  if(!l.pid&&!l.nw&&m.m&&['bc','sku','name'].includes(m.k))link(e,i,m.m);/* הצעה – מקושרת כברירת מחדל; אפשר לבטל ("מוצר חדש") */
+  e.S0[i]=m.m&&['bc','sku','name','al'].includes(m.k)?m.k:(m.k==='pid'?'pid':'');
+  if(!l.pid&&!l.nw&&m.m&&['bc','sku','name','al'].includes(m.k))link(e,i,m.m);/* הצעה – מקושרת כברירת מחדל; אפשר לבטל ("מוצר חדש") */
   else if(l.pid&&m.m&&m.m.pid===l.pid)link(e,i,m.m);
-  if(!e.ord){delete l.wp;delete l.wpSrc;delete l.cto}else autoWp(e,l);
+  if(!e.ord){delete l.wp;delete l.wpSrc;delete l.cto;delete l.nm}else autoWp(e,l);
   e.B[i]=l.unit==='ct'?{n:l.ct?l.qty/l.ct:l.qty,cp:l.ct&&l.cost!=null?l.cost*l.ct:null}:null})}/* שורת קרטונים: מספר הקרטונים ומחיר קרטון – לשינוי כמות בקרטון */
 /* השורות לשליחה (piDraft / piFinish): רק השדות שהשרת מכיר, בלי ערכים ריקים. עסק בלי הזמנות (מדף בלבד) – בלי כמות, מארז וקרטון (אין מלאי) */
-const NO_STOCK=['qty','pk','ct','wp','wpSrc','cto'];
+const NO_STOCK=['qty','pk','ct','wp','wpSrc','cto','nm'];
 function out(e){return e.L.map(l=>{const o={};for(const k of KEYS){const v=l[k];if(v==null||v==='')continue;if(!e.ord&&NO_STOCK.includes(k))continue;if(k==='nw'||k==='skip'){if(v===true)o[k]=true;continue}if(k==='cto'){if(e.ord&&typeof v==='boolean')o[k]=v;continue}
   if((k==='wp'||k==='wpSrc')&&!e.ord)continue;if(k==='bc'&&!BC_RE.test(v))continue;o[k]=v}if(!o.n)o.n='';if(e.ord&&o.qty==null)o.qty=0;return o})}
 PI.out=()=>E?out(E):null;
@@ -271,10 +271,10 @@ PI.leave=leave;
 try{document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&E&&E.dirty)draft(E)})}catch(e){}
 
 /* ---------- עריכה: תצוגה ---------- */
-const TAGS={bc:'מוצר קיים',pid:'מוצר קיים',sku:'הותאם לפי קוד ספק',name:'הותאם לפי שם – לבדוק'};
+const TAGS={bc:'מוצר קיים',pid:'מוצר קיים',sku:'הותאם לפי קוד ספק',name:'הותאם לפי שם – לבדוק',al:'הותאם לפי שם קודם – לבדוק'};
 function tagH(e,i){const l=e.L[i],m=e.M[i]||{},p=prodOf(e,i),C=cands(e,i),dis=e.lost?' disabled':'';
  if(l.pid){const k=m.m&&m.m.pid===l.pid?(e.S0[i]||'pid'):'oth';
-  const t=k==='oth'?`<span class="tag t3">מוצר קיים${p&&p.sup?' · ספק: '+esc(p.sup):''}</span>`:`<span class="tag ${k==='name'?'t1':'t3'}">${TAGS[k]||'מוצר קיים'}</span>`;
+  const t=k==='oth'?`<span class="tag t3">מוצר קיים${p&&p.sup?' · ספק: '+esc(p.sup):''}</span>`:`<span class="tag ${k==='name'||k==='al'?'t1':'t3'}">${TAGS[k]||'מוצר קיים'}</span>`;
   return t+(p&&p.name&&p.name!==l.n?`<small class="sm">במלאי: ${esc(p.name)}</small>`:'')+`<button type="button" class="lkb" data-a="piUnl" data-x="${i}"${dis}>בטל התאמה – מוצר חדש</button>`}
  const o=(m.oth||[])[0];
  return(o&&!l.nw?`<span class="tag t1">קיים אצל ספק אחר: ${esc(o.sup||'')}</span>`:'')+'<span class="tag t2">מוצר חדש</span>'+(C.length?`<button type="button" class="lkb" data-a="piLnk" data-x="${i}"${dis}>קשר למוצר קיים</button>`:'')}
@@ -286,6 +286,7 @@ const fld=(lb,i,k,v,a)=>`<label class="pf"><span>${lb}</span><input data-i="piF"
 function lineH(e,l,i){const dis=e.lost?' disabled':'',p=prodOf(e,i);
  const L=`<div><div class="hd"><span class="no">${i+1}.</span>${tagH(e,i)}<button type="button" class="lkb" data-a="piSkip" data-x="${i}" data-v="1"${dis}>דלג על השורה</button></div>${l.chk?`<span class="tag t1">לבדיקה: ${esc(l.chk)}</span>`:''}
   ${fld('שם',i,'n',l.n,'maxlength="60"')}
+  ${e.ord?`${fld('שם במלאי',i,'nm',l.nm,`maxlength="60" placeholder="${esc(p&&p.name||l.n||'')}"`)}<small class="sm" style="margin-top:-4px">${p?'שינוי כאן משנה את השם במלאי. השם הקודם יישמר ככינוי ויזוהה גם בהמשך':'אפשר לתת למוצר שם אחר במלאי. השם מהחשבונית יישמר ככינוי'}${p&&Array.isArray(p.al)&&p.al.length?' · כינויים: '+esc(p.al.slice(0,5).join(', ')):''}</small>`:''}
   ${e.ord?'':`<div class="g2">${fld('ברקוד',i,'bc',l.bc,'dir="ltr" inputmode="numeric" maxlength="30"')}${fld('עלות לפני מע"מ',i,'cost',l.cost,'inputmode="decimal"')}</div>`}
   ${!e.ord?'':`<div class="g2">${fld('ברקוד',i,'bc',l.bc,'dir="ltr" inputmode="numeric" maxlength="30"')}${fld('כמות למלאי',i,'qty',l.qty,'inputmode="decimal"')}</div>
   <div class="g3">${fld('במארז',i,'pk',l.pk,`inputmode="numeric"${p&&p.pk?` placeholder="${esc(String(p.pk))}"`:''}`)}${fld('מארזים בקרטון',i,'ct',l.ct,`inputmode="numeric"${p&&p.ct?` placeholder="${esc(String(p.ct))}"`:''}`)}${fld('עלות לפני מע"מ',i,'cost',l.cost,'inputmode="decimal"')}</div>`}
@@ -317,6 +318,7 @@ function upd(i){if(!E||!E.L[i])return;const l=E.L[i],q=(k)=>document.querySelect
  for(const k of ['wp','qty','cost']){const x=q(k);if(x&&!isOn(x))x.value=money(l[k])}}
 INP.piF=el=>{if(!E||!E.L||E.lost)return;const i=+el.dataset.x,k=el.dataset.k,l=E.L[i];if(!l)return;const v=String(el.value||''),t=v.trim(),n=PC.num(t);let ok=true;
  if(k==='n')l.n=v.slice(0,60);
+ else if(k==='nm'){if(t)l.nm=v.slice(0,60);else delete l.nm}
  else if(k==='bc'){ok=!t||BC_RE.test(t);if(ok){if(t)l.bc=t;else delete l.bc}}
  else if(k==='pk'||k==='ct'){ok=!t||(n!=null&&Number.isInteger(n)&&n>0&&n<=100000);if(ok){if(t)l[k]=n;else delete l[k];
    const B=E.B[i];if(k==='ct'&&B&&t){l.qty=r3(B.n*n);if(B.cp!=null){const c=PC.packCost(B.cp,n);if(c!=null)l.cost=c}autoWp(E,l)}}}

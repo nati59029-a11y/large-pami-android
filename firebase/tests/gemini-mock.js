@@ -25,6 +25,8 @@ const ANSWERS = {
   // פתק "הוצאת מזומן מהקופה" (הצילום לדוגמה מ-20.10.2026, יהודה הנשיא)
   transfer: { document_type: 'bank_transfer', transfers: [{ amount: 1234.56, date: '2026-11-02', payee_name: 'ספק דמה בע"מ', payee_account: { bank: '12', branch: '345', account: '67890' }, reference: 'R-1001' }] },
   cashout: { register: '6346053', store: 'לארג\' פעמי-יהודה הנשיא', date: '2026-10-20', time: '09:02', amount: 4650 },
+  // צילום רשימת הזמנה (ordlist, 14.11.2026)
+  ordlist: { lines: [{ name: 'צלחות עמוקות', qty: 5, unit: 'ct' }, { name: 'מפיות', qty: 2, unit: null }, { name: 'כוס חד פעמית', qty: null, unit: null }] },
   recipe: { title: 'עוגת שמרים', text: 'עוגת שמרים. המצרכים: שתי כוסות קמח. אופן ההכנה: לערבב ולאפות.' },
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
 };
@@ -65,6 +67,8 @@ const CLASSIFY = {
 };
 // המזכירה (שלב 2): בקשה עם הנחיית מערכת שמתחילה ב-SEC-CHAT-V1. התשובה נקבעת בבדיקה: state.sec = (body) => ({ calls: [{ name, args }] } | { text })
 // usage = טוקנים מדומים לכל תשובה (לבדיקת מונה העלות)
+// רשימת הזמנה חופשית (ordParse, 14.11.2026): הנחיית מערכת שמתחילה ב-ORD-PARSE-V1. state.ordparse = (payload) => ({ r:[{i,id}] }) | null.
+// בלי – בוחר את המועמד הראשון בכל שורה. payload = מה שהשרת שלח (השורות שלא זוהו + המועמדים) – נשמר ב-requests לבדיקה
 // סריקת חנות בתלת מימד (שלב 8): תשובות בדיקת מדף וטיוטת מפה – מקובצי הדוגמה של שלב 6 (tests/fixtures/store3d-*.json).
 // ברירת מחדל: shelf-ok / mapdraft-ok. בבדיקה: state.shelf / state.mapdraft = שם דוגמה ('shelf-broken'), אובייקט, או מחרוזת גולמית.
 const FIXTURES = {};
@@ -79,17 +83,19 @@ function s3Answer(kind) {
   delete o._example; delete o._meta;
   return JSON.stringify(o);
 }
-const state = { shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+const state = { ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
   if (typeof si === 'string' && si.startsWith('SEC-CHAT-V1')) return 'sec';
+  if (typeof si === 'string' && si.startsWith('ORD-PARSE-V1')) return 'ordparse';
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
   if (s.startsWith('אתה בודק מדפים')) return 's3shelf';   // prompts-shelf.js (שלב 6)
   if (s.startsWith('אתה מקבל תמונות של חנות')) return 's3draft'; // prompts-mapdraft.js (שלב 6)
   if (s.startsWith('סווג את המסמך')) return 'classify'; // סריקה אחידה – לפני כל השאר, כי ההנחיה מזכירה את כל הסוגים
+  if (s.includes('רשימת הזמנה של מוצרים')) return 'ordlist';
   if (s.includes('טבלת שורות המוצרים')) return 'invlines'; // לפני invoice – גם היא מתחילה ב"חשבונית מס"
   if (s.includes('אישור על העברה בנקאית')) return 'transfer';
   if (s.includes('אישור הפקדת מזומן')) return 'deposit';
@@ -111,8 +117,17 @@ function secAnswer(body) {
   const parts = r.calls && r.calls.length ? r.calls.map((c, i) => Object.assign({ functionCall: { name: c.name, args: c.args || {} } }, state.strict ? { thoughtSignature: 'SIG-' + i } : {})) : [{ text: String(r.text || '') }];
   return { candidates: [{ content: { parts, role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
 }
+function ordPayload(body) { try { return JSON.parse(body.contents[0].parts[0].text); } catch (e) { return []; } }
+function ordAnswer(body) {
+  const P = ordPayload(body);
+  let r = null;
+  try { if (typeof state.ordparse === 'function') r = state.ordparse(P); } catch (e) { r = null; }
+  if (!r) r = { r: P.map((l) => ({ i: l.i, id: l.c && l.c[0] ? l.c[0].id : null })) };
+  return { candidates: [{ content: { parts: [{ text: typeof r === 'string' ? r : JSON.stringify(r) }], role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
+}
 function rawAnswer(kind, body) {
   if (kind === 'sec') return secAnswer(body || {});
+  if (kind === 'ordparse') return ordAnswer(body || {});
   if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
   const inl = () => (state.invlines && typeof state.invlines === 'object' ? state.invlines : INVLINES[state.invlines] || INVLINES.units);
   let text = kind === 's3shelf' || kind === 's3draft' ? s3Answer(kind) : JSON.stringify(kind === 'classify' ? (state.classify || CLASSIFY.invoice) : kind === 'invlines' ? inl() : (ANSWERS[kind] || { ok: true }));
@@ -165,4 +180,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };
+module.exports = { ordPayload, start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };
