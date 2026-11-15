@@ -208,3 +208,48 @@ describe('store3d-ai – טיוטת מפה (קובצי הדוגמה של שלב 
     passesSave(d.map);
   });
 });
+
+describe('store3d-ai – טיוטת מפה: סיבת כשל, השמטה חלקית (תיקון 15.11.2026)', () => {
+  const ectx = { br: 'main', kind: 's', numDir: 'rtl', bizId: 'biz-x', uid: 'u_mgr1', now: 1 };
+  const cc = { bizId: 'biz-x', mapId: 's-main', uid: 'u_mgr1', now: 1 };
+  it('evalDraft: לא JSON = parse; לא JSON עם MAX_TOKENS = cut; לא אובייקט = not-obj; בלי חדר = no-rooms; תקינה = d', () => {
+    assert.deepEqual(A.evalDraft(null, 'STOP', ectx), { why: 'parse' });
+    assert.deepEqual(A.evalDraft(null, 'MAX_TOKENS', ectx), { why: 'cut' });
+    assert.deepEqual(A.evalDraft(null, '', ectx), { why: 'parse' });
+    assert.equal(A.evalDraft(['a', 'b'], 'STOP', ectx).why, 'not-obj');
+    assert.equal(A.evalDraft(FX('mapdraft-broken'), 'STOP', ectx).why, 'no-rooms');
+    const v = A.evalDraft(FX('mapdraft-ok'), 'STOP', ectx);
+    assert.deepEqual([v.why, v.d.drop, v.d.map.fx.length, v.fit], [undefined, 0, 5, 0]);
+    // מודל שעטף את התשובה במערך של אובייקט אחד – מתקבל
+    assert.equal(A.evalDraft([FX('mapdraft-ok')], 'STOP', ectx).d.map.rooms.length, 1);
+  });
+  it('draftMsg: הודעה בעברית לכל סיבה, ותמיד "לא נספרה במכסה"; סיבה לא מוכרת – נוסח כללי', () => {
+    for (const w of Object.keys(A.DRAFT_WHY)) { const m = A.draftMsg(w); assert.match(m, /לא נספרה במכסה/); assert.match(m, /[\u0590-\u05FF]/); assert.doesNotMatch(m, /JSON|MAX_TOKENS|finish/i); }
+    assert.match(A.draftMsg('cut'), /נקטעה/);
+    assert.equal(A.draftMsg('zzz'), A.draftMsg('map'));
+  });
+  it('fitDraft: גופים וחדר שלא עוברים את בדיקת השמירה מושמטים (drop), גוף של חדר שהושמט עובר לחדר הראשון; התוצאה עוברת את draftCheck', () => {
+    const d = A.cleanDraft(FX('mapdraft-ok'), ectx);
+    const m = JSON.parse(JSON.stringify(d.map));
+    // חדר עם קירות חוצים (נכשל ב-finalCheck), גוף לא תקין ל-cleanMap (sides 3), גוף תקין בחדר הפסול, ואזור עם txt ארוך מדי
+    m.rooms.push({ id: 'r2', name: 'פסול', p: [0, 0, 500, 500, 500, 0, 0, 500], h: 300 });
+    m.fx.push(Object.assign({}, m.fx[0], { id: 'f6', num: 6, sides: 3 }));
+    m.fx.push(Object.assign({}, m.fx[0], { id: 'f7', num: 7, room: 'r2' }));
+    m.uz.push({ x: 1, y: 1, w: 100, d: 100, txt: 'א'.repeat(81), ok: false });
+    assert.throws(() => A.draftCheck(m, cc));
+    const f = A.fitDraft(m, cc);
+    assert.equal(f.drop, 3, 'חדר + גוף + אזור');
+    assert.deepEqual(f.map.rooms.map((r) => r.id), ['r1']);
+    assert.deepEqual(f.map.fx.map((x) => [x.id, x.num, x.room]), [1, 2, 3, 4, 5, 6].map((i) => ['f' + i, i, 'r1']), 'מספור מחדש, f7 עבר ל-r1');
+    assert.deepEqual([f.map.seq, f.map.uz.length], [6, 3]);
+    A.draftCheck(f.map, cc);
+    // טיוטה תקינה – בלי שינוי
+    const ok = A.fitDraft(d.map, cc);
+    assert.deepEqual([ok.drop, ok.map === d.map], [0, true]);
+  });
+  it('fitDraft / evalDraft: כשלא נשאר אף חדר תקין – no-rooms (הטיוטה נדחית)', () => {
+    const d = A.cleanDraft(FX('mapdraft-ok'), ectx);
+    const m = Object.assign({}, d.map, { name: '' });   // שם המפה לא תקין – כל פריט נכשל
+    assert.equal(code(() => A.fitDraft(m, cc)), 'no-rooms');
+  });
+});

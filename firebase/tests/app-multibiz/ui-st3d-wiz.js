@@ -36,7 +36,7 @@ async function server(ctx, mgr) {
   const rec = (route, fn) => { let b = {}; try { b = JSON.parse(route.request().postData()).data || {}; } catch (e) { /* */ } S.calls.push({ fn, b }); return b; };
   const ok = (route, r) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: r }) });
   const bad = (route, reason, msg) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'FAILED_PRECONDITION', message: msg || 'שגיאה', details: { reason } } }) });
-  await ctx.route('**/mapDraft', (route) => { const b = rec(route, 'mapDraft'); if (S.fnFail.draft) return bad(route, S.fnFail.draft, 'שגיאה'); ok(route, { draftId: b.qid, st: 'ok', n: (b.imgs || []).length, conf: 0.55, drop: 0, usage: { m: '2026-11', n: 1, cap: 500, w80: false }, m: draftMap(), scale: { ref: '', conf: 0 }, notes: 'המידות הן הערכה, בלי מטר בתמונות.' }); });
+  await ctx.route('**/mapDraft', (route) => { const b = rec(route, 'mapDraft'); if (S.fnFail.draft) return bad(route, S.fnFail.draft, S.fnFail.draftMsg || 'שגיאה'); ok(route, { draftId: b.qid, st: 'ok', n: (b.imgs || []).length, conf: 0.55, drop: 0, usage: { m: '2026-11', n: 1, cap: 500, w80: false }, m: draftMap(), scale: { ref: '', conf: 0 }, notes: 'המידות הן הערכה, בלי מטר בתמונות.' }); });
   await ctx.route('**/s3PutTex', (route) => { const b = rec(route, 's3PutTex'); S.tn = (S.tn || 0) + 1; ok(route, { texId: 't' + S.tn, path: 'b/biz-s/store3d/main/tex/s-main/t' + S.tn + '_1.jpg', w: 1024, h: 512 }); });
   await ctx.route('**/s3SaveMap', (route) => { const b = rec(route, 's3SaveMap'); S.none = false; S.map = Object.assign({}, b.map, { v: 1, upd: 1763200000000, by: 'm' }); ok(route, { ok: true, v: 1, renamed: {}, dropped: [], purged: {} }); });
   await ctx.route('**/shelfCheck', (route) => { const b = rec(route, 'shelfCheck'); if (S.fnFail.shelf) return bad(route, S.fnFail.shelf, 'הגעתם למכסה'); ok(route, S.adhoc); });
@@ -92,6 +92,18 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   check('1ג טקסטורת קיר: s3PutTex עם mapId ומזהה, JPEG שכל צלע שלו 256/512/1024, והתמונה מסומנת "נשלח"', !!tex && tex.b.mapId === 's-main' && /^[A-Za-z0-9-]{16,40}$/.test(tex.b.qid) && dims && dims.every((x) => [256, 512, 1024].includes(x)) && /נשלח/.test(await txt(A.page, '#main')), { dims, mapId: tex && tex.b.mapId });
   check('1ד שלב 1 ב-360px בלי גלישה', (await noOverflow(A.page)).bad.length === 0, await noOverflow(A.page));
   await shot(A.page, fp(shots, 'שלב1'));
+
+  // ---- 2-. תשובת AI שבורה (תיקון 15.11.2026): המסך מציג את הסיבה המפורטת מהשרת, ובלעדיה – את הנוסח הכללי ----
+  S.fnFail.draft = 'bad-answer'; S.fnFail.draftMsg = 'תשובת ה-AI נקטעה באמצע, כנראה בגלל הרבה תמונות ופרטים. נסו שוב עם פחות תמונות (למשל 20–25). ההקמה הזו לא נספרה במכסה.';
+  await A.page.click('[data-a=s3wDraft]'); await sleep(2000);
+  const sb = await txt(A.page, '#main'), stB = await A.page.evaluate(() => S3UI.W.step);
+  check('2- bad-answer: מוצגת הסיבה מהשרת (נקטעה, לא נספרה במכסה) ולא הנוסח הכללי; חוזרים לשלב 1', /נקטעה באמצע/.test(sb) && /לא נספרה במכסה/.test(sb) && !/לא החזיר תשובה שאפשר להשתמש בה/.test(sb) && stB === 1, { stB, t: sb.slice(0, 300) });
+  check('2-א הודעת השגיאה ב-360px בלי גלישה', (await noOverflow(A.page)).bad.length === 0, await noOverflow(A.page));
+  await shot(A.page, fp(shots, 'שלב2-שגיאת-AI'));
+  S.fnFail.draftMsg = 'internal';
+  await A.page.click('[data-a=s3wDraft]'); await sleep(2000);
+  check('2-ב bad-answer בלי הודעה בעברית (שרת ישן) – הנוסח הכללי', /לא החזיר תשובה שאפשר להשתמש בה/.test(await txt(A.page, '#main')));
+  S.fnFail.draft = ''; S.fnFail.draftMsg = ''; S.calls = S.calls.filter((c) => c.fn !== 'mapDraft');
 
   // ---- 2. טיוטה ----
   await A.page.click('[data-a=s3wDraft]'); await sleep(2500);

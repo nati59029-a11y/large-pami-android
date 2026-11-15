@@ -294,6 +294,7 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     const rq = GM.state.requests[0];
     assert.equal(rq.kind, 's3draft');
     assert.equal(rq.body.contents[0].parts.length, 3, 'הנחיה + 2 תמונות');
+    assert.equal(rq.body.generationConfig.maxOutputTokens, 65536, 'maxOutputTokens מפורש לטיוטה (תיקון 15.11.2026)');
     assert.match(rq.body.contents[0].parts[0].text, /מצלמות אבטחה/);
     const d = await get(`b/${A}/s3draft/${q}`);
     assert.deepEqual([d.st, d.by, d.n, d.br, d.kind, d.m.src, d.m.fx.length], ['ok', DR, 2, 'main', 's', 'draft', 5]);
@@ -305,8 +306,9 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     GM.state.mapdraft = 'mapdraft-broken';
     const q2 = qid();
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: q2, br: 'main', kind: 's', imgs: [IMG, IMG, IMG] }, Date.now(), deps())), 'bad-answer');
-    assert.equal((await get(`b/${A}/s3draft/${q2}`)).st, 'fail');
-    assert.equal((await use()).n, 2, 'Gemini ענה (טיוטה שבורה) – הטיוטה נספרת כבדיקה אחת (החלטת המשתמש)');
+    assert.deepEqual([(await get(`b/${A}/s3draft/${q2}`)).st, (await get(`b/${A}/s3draft/${q2}`)).why], ['fail', 'no-rooms']);
+    assert.equal(GM.state.requests.length, 3, 'שבורה – ניסיון חוזר אחד (תיקון 15.11.2026)');
+    assert.equal((await use()).n, 1, 'שבורה גם בניסיון החוזר – ההקמה לא נספרת (החלטת המשתמש 15.11.2026)');
     assert.equal(await get(`b/${A}/s3qid/${q2}`), null);
     GM.state.mapdraft = 'mapdraft-unsure';
     const u = await X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps());
@@ -329,7 +331,7 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'zz', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'no-branch');
     assert.equal(await err(X.draftCore(db, W(DR, { brs: ['other'] }), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'other-branch');
     // עד כאן 5 הקמות היום בסניף (התקרה היומית, 15.11.2026) – מאפסים את המונה היומי כדי לבדוק כאן רק את החזרת המכסה החודשית
-    assert.equal((await get(`b/${A}/s3use/d_main`)).n, 5);
+    assert.equal((await get(`b/${A}/s3use/d_main`)).n, 4, 'הטיוטה השבורה לא נספרה בתקרה היומית');
     await adm.doc(`b/${A}/s3use/d_main`).delete();
     GM.state.mode = 'quota';
     const before = (await use()).n;
@@ -375,6 +377,58 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal((await draft()).st, 'ok', 'אחרי כשל – אפשר הקמה נוספת');
     assert.equal((await dd('main')).n, 5);
     assert.equal(await err(draft()), 'draft-daily');
+  });
+
+  it('mapDraft (תיקון 15.11.2026): קטועה → ניסיון חוזר → הצלחה נספרת 1; שבורה פעמיים → bad-answer עם סיבה, לא נספרת; פריטים פסולים מושמטים; בדיקת מדף בלי maxOutputTokens', async () => {
+    const dd = async () => { const x = await get(`b/${A}/s3use/d_main`); return x ? x.n : 0; };
+    const draft = (q) => X.draftCore(db, W(MGR), { qid: q || qid(), br: 'main', kind: 's', imgs: [IMG, IMG] }, Date.now(), deps());
+    // 1. תשובה קטועה (MAX_TOKENS), ואז תקינה – הצלחה, נספרת פעם אחת בדיוק
+    GM.state.mapdraftSeq = [{ cut: 'mapdraft-ok' }, 'mapdraft-ok'];
+    const q1 = qid();
+    const r1 = await draft(q1);
+    assert.deepEqual([r1.st, r1.usage.n, r1.drop, GM.state.requests.length], ['ok', 1, 0, 2]);
+    assert.deepEqual([(await use()).n, await dd(), (await get(`b/${A}/s3use/u_${MGR}`)).n], [1, 1, 1]);
+    assert.ok(GM.state.requests.every((x) => x.body.generationConfig.maxOutputTokens === 65536));
+    assert.equal((await get(`b/${A}/s3draft/${q1}`)).why, undefined, 'הצלחה – בלי why');
+    // qid חוזר – dup, בלי Gemini ובלי מכסה (בלי שינוי)
+    assert.equal((await draft(q1)).dup, true);
+    assert.deepEqual([GM.state.requests.length, (await use()).n, await dd()], [2, 1, 1]);
+    // 2. קטועה פעמיים – bad-answer עם הסיבה המפורטת; המכסה החודשית והתקרה היומית לא משתנות
+    GM.state.mapdraftSeq = [{ cut: 'mapdraft-ok' }, { cut: 'mapdraft-ok' }];
+    const q2 = qid();
+    let e2 = null;
+    try { await draft(q2); } catch (e) { e2 = e; }
+    assert.deepEqual([e2.code, e2.details.reason, e2.details.why], ['internal', 'bad-answer', 'cut']);
+    assert.match(e2.message, /נקטעה/); assert.match(e2.message, /לא נספרה במכסה/);
+    assert.equal(GM.state.requests.length, 4, 'ניסיון חוזר אחד בלבד');
+    assert.deepEqual([(await use()).n, await dd()], [1, 1], 'שבורה – לא נספרת');
+    const f2 = await get(`b/${A}/s3draft/${q2}`);
+    assert.deepEqual([f2.st, f2.why], ['fail', 'cut']);
+    assert.equal(await get(`b/${A}/s3qid/${q2}`), null, 'אפשר לנסות שוב עם אותו qid');
+    // לא JSON ואז בלי חדר – הסיבה של הניסיון האחרון
+    GM.state.mapdraftSeq = ['not json at all', 'mapdraft-broken'];
+    let e3 = null;
+    try { await draft(); } catch (e) { e3 = e; }
+    assert.deepEqual([e3.details.reason, e3.details.why], ['bad-answer', 'no-rooms']);
+    assert.deepEqual([(await use()).n, await dd()], [1, 1]);
+    // 3. שבורה ואז תקינה – נספרת 1
+    GM.state.mapdraftSeq = ['not json at all', 'mapdraft-ok'];
+    assert.equal((await draft()).st, 'ok');
+    assert.deepEqual([(await use()).n, await dd()], [2, 2]);
+    // 4. גוף עם חדר שלא קיים ומקרר דו-צדדי וגוף פסול – cleanDraft מסנן; חדר פסול (קירות חוצים) לצד חדר תקין – מושמט, הטיוטה נשמרת
+    const okAns = GM.fixture('mapdraft-ok');
+    const part = JSON.parse(JSON.stringify(okAns)); delete part._example; delete part._meta;
+    part.rooms.push({ name: 'פסול', p: [0, 0, 500, 500, 500, 0, 0, 500], h: 300 });
+    part.fx.push({ k: 'shelf', x: 1, y: 1, w: 100, d: 50, h: 100, a: 0, sides: 1, bays: 1, lvl: 1, room: 'x' });
+    GM.state.mapdraftSeq = [part];
+    const n0 = GM.state.requests.length;
+    const r4 = await draft();
+    assert.deepEqual([r4.st, r4.drop, r4.m.rooms.length, GM.state.requests.length - n0], ['ok', 2, 1, 1], 'חדר + גוף הושמטו, בלי ניסיון חוזר');
+    assert.deepEqual([(await use()).n, await dd()], [3, 3]);
+    // 5. בדיקת מדף – בלי maxOutputTokens (לא השתנתה)
+    await shelf(E1, photo());
+    const last = GM.state.requests[GM.state.requests.length - 1];
+    assert.deepEqual([last.kind, last.body.generationConfig.maxOutputTokens], ['s3shelf', undefined]);
   });
 });
 

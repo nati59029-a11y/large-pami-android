@@ -179,7 +179,10 @@ async function makeDraft(){
   if(!r||!needs(r))throw new Error('התשובה מהשרת חסרה. נסו שוב.');
   W.draft={m:r.m,conf:typeof r.conf==='number'?r.conf:null,notes:String(r.notes||''),n:+r.n||W.imgs.length,drop:+r.drop||0,usage:r.usage||null,id:r.draftId||''};
   W.busy='';W.msg='';rerender()}
- catch(e){W.busy='';W.step=1;W.msg=U.errText(e,'לא הצלחנו לבנות טיוטה. נסו שוב.');rerender()}}
+ catch(e){W.busy='';W.step=1;W.msg=draftErr(e);rerender()}}
+/* bad-answer: השרת שולח סיבה מפורטת בעברית (נקטעה / בלי חדרים / לא נספרה במכסה) – מציגים אותה במקום הנוסח הכללי.
+   בלי הודעה בעברית מהשרת (fnCall מחליף אותה ב"הפעולה נכשלה, נסה שוב") – הנוסח הכללי של S3UI.RS */
+const draftErr=e=>e&&!e.offline&&e.reason==='bad-answer'&&/[\u0590-\u05FF]/.test(e.message||'')&&!/^הפעולה נכשלה, נסה שוב$/.test(e.message)?e.message:U.errText(e,'לא הצלחנו לבנות טיוטה. נסו שוב.');
 ACT.s3wDraft=()=>makeDraft();
 ACT.s3wBack1=()=>{W.draft=null;W.step=1;W.msg='';rerender()};
 ACT.s3wEdit=()=>{
