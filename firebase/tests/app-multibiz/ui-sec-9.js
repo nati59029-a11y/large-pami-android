@@ -95,6 +95,7 @@ const small = (page) => page.evaluate(() => [...document.querySelectorAll('#secO
     await page.click('#secTabs [data-v=mail]'); await H.settle(page, 600);
     await page.click(`[data-a=secMlOpen][data-id=${ID1}]`); await H.settle(page, 500);
     check('כרטיס מייל עם סיבת order – כפתור "פתיחת טיוטת ההזמנה", ועדיין בלי קריאה לשרת', !!(await page.$('[data-a=secOrdOpen]')) && !last(bodies, 'secMail', (b) => b.op === 'ordGet'));
+    check('החלטת המשתמש: במייל הזמנה – אין כפתור שליחה רגיל (רק דרך טיוטת ההזמנה), ויש "לא לענות"', !(await page.$('[data-a=secMlSend]')) && !(await page.$('#secMlTx')) && !!(await page.$('[data-a=secMlDone]')));
     await page.click('[data-a=secOrdOpen]'); await H.settle(page, 600);
     const g = last(bodies, 'secMail', (b) => b.op === 'ordGet');
     let t = await txt(page);
