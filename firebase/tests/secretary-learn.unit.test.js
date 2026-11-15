@@ -167,6 +167,26 @@ describe('sec-learn: כללי ניתוב, "מאז הכניסה הקודמת" ו�
     assert.deepEqual(L.routeOf("מעכשיו חשבוניות שוב לצ'אט"), { kind: 'inv', dest: 'chat' });
     for (const t of ['כמה חשבוניות בטיפול?', 'חשבוניות בטיפול', 'מה בטיפול היום', 'תזכירי לי מחר להתקשר', '']) assert.equal(L.routeOf(t), null, t);
   });
+  // תיקון סבב 1: בקשות רגילות לא נתפסות כהוראת ניתוב
+  it('routeOf: רק עם "מעכשיו" + יעד מפורש אחרי סוג הפריט; "טיפול" אחרי שם עצם או בשלילה – לא יעד', () => {
+    for (const t of [
+      'תשימי לי תזכורת מחר בבוקר לטיפול ברכב',
+      'תכניסי תזכורת ליום שלישי לטיפול שיניים',
+      'תציג לי את החשבוניות שבטיפול',
+      "תציג לי את כל החשבוניות בצ'אט",
+      "מעכשיו כל החשבוניות שלא בטיפול לצ'אט",
+      'מעכשיו תזכירי לי כל יום על טיפול ברכב',
+      'תמיד תשימי לי תזכורת לטיפול שיניים',
+      'מעכשיו חשבוניות למסך טיפול ברכב',
+      "למה תמיד החשבוניות בצ'אט",
+      'מעכשיו לטיפול – חשבוניות',
+    ]) assert.equal(L.routeOf(t), null, t);
+    assert.deepEqual(L.routeOf('חשבוניות מהיום – למסך לטיפול'), { kind: 'inv', dest: 'hold' });
+    assert.deepEqual(L.routeOf('מעכשיו תזכורות רק בלשונית שלהן'), { kind: 'rem', dest: 'tab' });
+    assert.deepEqual(L.routeOf('מהיום חשבוניות לטיפול באפליקציה'), { kind: 'inv', dest: 'hold' });
+    assert.deepEqual(L.routeOf('חשבוניות מהיום – לבטיפול'), { kind: 'inv', dest: 'hold' });
+    assert.deepEqual(L.routeOf("מכאן והלאה התראות בצ'אט"), { kind: 'note', dest: 'chat' });
+  });
   it('routeRule / routesOf / applyRoutes: האחרון גובר, כבוי לא חל, ברירת מחדל – הכול בצ\'אט', () => {
     const r = L.routeRule('חשבוניות מהיום – לבטיפול', { kind: 'inv', dest: 'hold' });
     assert.deepEqual(r, { ch: 'route', act: 'route', instr: 'חשבוניות מהיום – לבטיפול', scope: { kind: 'inv' }, dest: 'hold', safe: '' });
@@ -218,6 +238,10 @@ describe('sec-remind: snoozeOf, dayHm, whenL', () => {
       ['"שוב בעוד יומיים!"', '2026-11-17 11:00', 'יום שלישי 17.11, 11:00'],
     ];
     for (const [t, want, l] of cases) { const r = RM.snoozeOf(t, now); assert.equal(hm(r), want, t); if (l) assert.equal(r.l, l, t); }
+  });
+  it('"בעוד דקה" כשיש שניות – לא נדחה (עיגול כלפי מעלה)', () => {
+    const r = RM.snoozeOf('בעוד דקה', now + 30e3);
+    assert.ok(r && r.at >= now + 30e3 + 60e3 && r.at % 60e3 === 0);
   });
   it('"מחר בבוקר" בחמישי – יום העסקים הבא (ראשון) 08:00', () => {
     assert.equal(hm(RM.snoozeOf('מחר בבוקר', IL('2026-11-19T15:00'))), '2026-11-22 08:00');

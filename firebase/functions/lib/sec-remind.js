@@ -350,7 +350,7 @@ function snoozeOf(text, now) {
   } else return null;
   const rest = t.replace(m[0], ' ').replace(FILL_RE, ' ').replace(FILL_RE, ' ').trim();
   if (rest) return null;
-  at = Math.floor(at / 60e3) * 60e3;
+  at = Math.ceil(at / 60e3) * 60e3; // עיגול כלפי מעלה: "בעוד דקה" כשיש שניות – לא פחות מדקה (snzOk)
   return snzOk(at, now) ? { at, l: whenL(at, now) } : null;
 }
 

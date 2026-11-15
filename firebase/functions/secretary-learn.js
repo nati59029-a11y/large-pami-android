@@ -196,14 +196,15 @@ function ruleOut(r, now) {
 }
 
 // כלל ניתוב חדש: עד MAX_RULES; כלל ניתוב קודם לאותו סוג – מכובה (לא נמחק), כדי שהאחרון יגבר. מוסיף ל-batch
-async function saveRoute(db, b, uid, r, src, now) {
+// rid (מכרטיס בשיחה): מזהה קבוע לכלל + create – לחיצה כפולה במקביל נכשלת ב-commit ולא יוצרת כלל שני
+async function saveRoute(db, b, uid, r, src, now, rid) {
   const col = db.collection('sec_mrule');
   const mine = await col.where('uid', '==', uid).limit(L.MAX_RULES + 5).get();
   if (mine.size >= L.MAX_RULES) throw pre('too-many', 'הגעתם למספר הכללים המרבי (' + L.MAX_RULES + '). אפשר למחוק כלל ישן במסך "הכללים שלי".');
   for (const d of mine.docs) if (d.get('ch') === 'route' && d.get('on') !== false && (d.get('scope') || {}).kind === r.scope.kind) b.update(d.ref, { on: false, offWhy: 'replaced', upd: now });
-  const id = col.doc().id;
+  const id = rid || col.doc().id;
   const doc = Object.assign({ uid }, r, { on: true, auto: false, appr: 0, fails: 0, hits: 0, ask: { st: 'none', at: 0 }, src, t: now, upd: now, v: 1 });
-  b.set(col.doc(id), doc);
+  if (rid) b.create(col.doc(id), doc); else b.set(col.doc(id), doc);
   log(b, db, uid, 'mrRoute', { tgt: id, note: r.scope.kind + ':' + r.dest });
   return { id, rule: ruleOut(Object.assign({ id }, doc), now) };
 }
@@ -331,9 +332,12 @@ async function secLearn(request) {
     }
     const r = L.routeRule(c.instr || '', { kind: c.kind, dest: c.dest });
     if (!r) throw bad('bad-text', 'ההוראה לא תקינה');
-    const out = await saveRoute(db, b, who.uid, r, { k: 'chat', id: mid }, now);
+    const out = await saveRoute(db, b, who.uid, r, { k: 'chat', id: mid }, now, cid);
     await C.cardMark(db, b, who.uid, mid, cid, { st: 'ok', rid: out.id });
-    await b.commit();
+    try { await b.commit(); } catch (e) {
+      if (e && (e.code === 6 || /ALREADY_EXISTS|already exists/i.test(String(e.message)))) throw pre('not-pending', 'ההצעה כבר טופלה');
+      throw e;
+    }
     return { ok: true, st: 'ok', id: out.id, rule: out.rule };
   }
 

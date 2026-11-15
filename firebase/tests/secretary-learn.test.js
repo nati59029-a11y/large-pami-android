@@ -459,13 +459,16 @@ describe('צ\'אט נקי ו"מול העיניים": מצב כרטיסים, צ\'
     const body = JSON.stringify(GM.state.requests.filter((x) => x.kind === 'sec')[0].body.contents);
     assert.match(body, /הודעה 4/, 'המזכירה זוכרת את השיחה הקודמת');
   });
-  it('הוראת ניתוב בשיחה: בלי מודל, כרטיס; אישור יוצר כלל (מהכרטיס בשרת) ומסמן "ok"; כרטיס שהוכרע – לא שוב; ביטול – "no" בלי כלל', async () => {
-    GM.state.sec = () => ({ text: 'לא אמור להגיע למודל' });
+  it('הוראת ניתוב בשיחה: המזכירה עונה כרגיל + כרטיס הצעה; אישור יוצר כלל (מהכרטיס בשרת) ומסמן "ok"; לחיצה כפולה – כלל אחד; ביטול – "no" בלי כלל', async () => {
+    GM.state.sec = () => ({ text: 'בסדר, אפשר לאשר בכרטיס.' });
     const r = await SECM().secChat.run(req(M1, { text: "חשבוניות מהיום – לקטגוריה 'בטיפול' באפליקציה" }));
-    assert.equal(r.mode, 'route'); assert.equal(GM.state.requests.filter((x) => x.kind === 'sec').length, 0);
-    const c = r.cards[0];
+    assert.equal(r.mode, 'ok'); assert.equal(r.reply, 'בסדר, אפשר לאשר בכרטיס.'); assert.equal(GM.state.requests.filter((x) => x.kind === 'sec').length, 1, 'התשובה מהמודל – לא במקומה כרטיס');
+    const c = r.cards.find((x) => x.k === 'route');
     assert.equal(c.k, 'route'); assert.equal(c.kind, 'inv'); assert.equal(c.dest, 'hold');
-    assert.equal((await call(M1, { op: 'route', mid: r.id, cid: c.id })).ok, true);
+    // שתי לחיצות במקביל – כלל אחד בלבד
+    const two = await Promise.all([call(M1, { op: 'route', mid: r.id, cid: c.id }), call(M1, { op: 'route', mid: r.id, cid: c.id })]);
+    assert.equal(two.filter((x) => x.ok === true).length, 1, JSON.stringify(two));
+    assert.equal(two.filter((x) => x.reason === 'not-pending').length, 1, JSON.stringify(two));
     const R = await rules();
     assert.equal(R.length, 1); assert.equal(R[0].ch, 'route'); assert.equal(R[0].dest, 'hold'); assert.equal(R[0].uid, M1);
     assert.equal((await get(`b/${A}/sec_chat/${M1}/m/${r.id}`)).cards[0].st, 'ok');
@@ -478,6 +481,9 @@ describe('צ\'אט נקי ו"מול העיניים": מצב כרטיסים, צ\'
     // שאלה על "בטיפול" – לא הוראה
     GM.state.sec = () => ({ text: 'שתיים.' });
     assert.equal((await SECM().secChat.run(req(M1, { text: 'כמה חשבוניות בטיפול?' }))).mode, 'ok');
+    // תיקון סבב 1: בקשה רגילה עם "לטיפול" – תשובה רגילה, בלי כרטיס ניתוב
+    const r3 = await SECM().secChat.run(req(M1, { text: 'תשימי לי תזכורת מחר בבוקר לטיפול ברכב' }));
+    assert.equal(r3.mode, 'ok'); assert.equal(r3.cards.filter((x) => x.k === 'route').length, 0);
   });
   it('ניתוב בתגובה על פריט ב"מול העיניים" (feed): save יוצר כלל ניתוב; כלל חדש לאותו סוג מכבה את הקודם (לא מוחק)', async () => {
     const p = await call(M1, { op: 'reply', k: 'feed', id: 'inv', text: 'חשבוניות מהיום – לבטיפול' });

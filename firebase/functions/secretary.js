@@ -446,9 +446,9 @@ async function secChat(request) {
   let reply = null, mode = 'ok', mt = null, usage = { in: 0, out: 0 }, sent = 0, denied = [], offered = [];
   let bank = null, bankCond = [];
   let s3 = null; // שלב 13ב: סיכום סבבי סריקת החנות שנכנס להקשר (ומשמש מקור לבדיקת המספרים)
-  // 15.11.2026 (סעיף 6): הוראת ניתוב ("חשבוניות מהיום – לבטיפול") – בלי מודל: כרטיס אישור; הכלל נשמר רק ב"אשר" (secLearn op:'route')
+  // 15.11.2026 (סעיף 6, תיקון סבב 1): הוראת ניתוב ("חשבוניות מהיום – למסך לטיפול") – המזכירה עונה כרגיל, וכרטיס הניתוב מצורף כהצעה נוספת; הכלל נשמר רק ב"אשר" (secLearn op:'route')
   const rt = cfg.learn && !pol.sensitive ? LR().routeOf(text) : null;
-  if (!pol.sensitive && !deep && !rt) {
+  if (!pol.sensitive && !deep) {
     // בנק תשובות (3.5): לפני כל פנייה למודל. התאמה בלי תנאים = התשובה השמורה, בלי AI ובלי עלות (נספר ב-sec_usage.bank).
     // "חשבי לעומק" – תמיד למודל. כלל עם תנאים – עובר למודל כמידע (עד 40)
     const rs = await db.collection('sec_rules').limit(SK.RULES_MAX).get();
@@ -461,14 +461,7 @@ async function secChat(request) {
       bank = t ? { rule: Object.assign({}, bank.rule, { a: t }), q: bank.q } : null;
     }
   }
-  if (rt) {
-    await meter(db, who.uid, tier, false, cfg.rate); // קצב בלבד – אין עלות
-    const K0 = LR();
-    reply = 'להעביר מעכשיו ' + K0.RK[rt.kind] + ' ל' + (rt.dest === 'hold' ? 'מסך "לטיפול" באפליקציה' : rt.dest === 'tab' ? 'לשונית שלהן בלבד (לא בצ\'אט)' : '"מול העיניים" בצ\'אט') + '? אחרי האישור זה יישמר ב"הכללים שלי", ואפשר למחוק בכל רגע.';
-    mode = 'route';
-    cards.push({ k: 'route', id: 'rt' + require('node:crypto').randomBytes(8).toString('hex'), kind: rt.kind, dest: rt.dest, instr: text.slice(0, 300) });
-    logs.push(['route', rt.kind + ':' + rt.dest]);
-  } else if (pol.sensitive) {
+  if (pol.sensitive) {
     // שאלה שמבקשת מסקנה לפי מצב בריאותי/משפחתי (6.3 כלל 3): תשובה קבועה, בלי מודל ובלי עלות
     await meter(db, who.uid, tier, false, cfg.rate);
     reply = ST.TXT.sensitive; mode = 'policy';
@@ -580,6 +573,11 @@ async function secChat(request) {
   if (stale) am.stale = true;
   if (ideas.length) am.ideas = ideas;
   if (th) am.th = th.suggestedThreshold;
+  // הצעת כלל ניתוב – בנוסף לתשובה (לא במקומה). לא בתור עם מידע רגיש (ההוראה נשמרת בכרטיס בטקסט גלוי)
+  if (rt && !sensUsed) {
+    cards.splice(Math.min(cards.length, 7), 0, { k: 'route', id: 'rt' + require('node:crypto').randomBytes(8).toString('hex'), kind: rt.kind, dest: rt.dest, instr: text.slice(0, 300) });
+    logs.push(['route', rt.kind + ':' + rt.dest]);
+  }
   if (cards.length) am.cards = cards.slice(0, 8);
   if (mode === 'bank') {
     am.src = [{ k: 'bank', l: 'בנק התשובות – "' + String(bank.q).slice(0, 60) + '"', at: bank.rule.upd || bank.rule.t || now, s: 'bank' }];
