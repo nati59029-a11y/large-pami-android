@@ -172,6 +172,20 @@ describe('משימות (tasks)', () => {
     });
   }
 
+  it('"הזכר לעובד" (nd/ndN, מרכז עבודה סבב 1): מנהל כותב; עובד – גם הנמען – לא', async () => {
+    const n = Date.now();
+    await assertSucceeds(mgr.doc('tasks/t_open').update({ nd: n, ndN: 'u_mgr' }));
+    await assertFails(emp.doc('tasks/t_open').update({ nd: n + 1, ndN: 'u_emp' }));
+    await assertFails(emp.doc('tasks/t_open').update({ nd: 0 }));
+    const id = fresh('t');
+    await assertSucceeds(mgr.doc('tasks/' + id).set(newTask('u_mgr', { role: 'a', to: ['u_emp'], toN: ['עובד'], ow: 'u_emp', owN: 'עובד', clt: n, np: 0, wp: 0, mi: 0 })));
+    await assertSucceeds(mgr.doc('tasks/' + id).update({ nd: n, ndN: 'u_mgr' }));
+    await assertFails(emp.doc('tasks/' + id).update({ nd: n + 5, ndN: 'u_emp' }));
+    // אחרי התזכורת העובד ממשיך לסמן בוצע כרגיל
+    const d = Date.now();
+    await assertSucceeds(emp.doc('tasks/' + id).update({ st: 'done', open: '', sub: d, ok: d, doneBy: 'u_emp', late: '' }));
+  });
+
   it('מנהל יכול הכול: יצירה (גם "של מנהל" ועם תמונה), קריאה, עדכון, אישור ומחיקה', async () => {
     await assertSucceeds(mgr.doc('tasks/' + fresh('t')).set(newTask('u_mgr', { role: 'a', pr: '1' })));
     await assertSucceeds(mgr.collection('tasks').get());
