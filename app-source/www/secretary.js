@@ -1,4 +1,4 @@
-/* SEC:1+2+3+4+5+6+7+9+10 – המזכירה העסקית. SEC:10 (15.11.2026): צ'אט נקי בכל כניסה, "צ'אט קודם", "מול העיניים", מצב כרטיסים שנשמר, כללי ניתוב ולשונית "בטיפול". שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
+/* SEC:1+2+3+4+5+6+7+9+10 – המזכירה העסקית. SEC:10 (15.11.2026): צ'אט נקי בכל כניסה, "צ'אט קודם", "מול העיניים", מצב כרטיסים שנשמר, כללי ניתוב (למסך "לטיפול" באפליקציה). שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
    שלב 2: secFin – נתוני הכספים לצ'אט ולמראה, מחושבים בפונקציות של מסכי האפליקציה עצמם (monthIncome, monthExpense, monthOwner, catTotal,
    inv/bal/dueOf, bsum, homeCards, dueStats, cfDebits, cfMonths) – אין כאן נוסחה כספית שנייה; מראה לענן אחרי כל שמירה (לכל היותר פעם ב-3 דקות);
    מסך הצ'אט (מקורות, "נכון ל-", "חשבי לעומק", אחוז ניצול, סף תזרים, "לא רלוונטי", מתג המראה).
@@ -85,7 +85,7 @@ const ACTS={consent:'אישור תנאי השימוש',setup:'הגדרת שם ו
  sensRead:'צפייה במידע הרגיש',sensTool:'המזכירה קראה מידע רגיש',sensAdd:'נשמר מידע רגיש',sensEdit:'מידע רגיש נערך',sensDel:'מידע רגיש נמחק',
  ruleAdd:'נוספה תשובה מוכנה',ruleEdit:'תשובה מוכנה נערכה',ruleDel:'תשובה מוכנה נמחקה',bank:'נענתה שאלה מתשובה מוכנה (בלי AI)',import:'ייבוא מהמזכירה הקודמת',
  calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
- notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
+ notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',remSnooze:'נקבע "תזכירי לי שוב" להתראה',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 V.sec=()=>{const T='המזכירה';
  if(!elig())return{t:T,h:'<div class="empty">המזכירה לא מופעלת בעסק הזה</div>'};
@@ -274,7 +274,7 @@ css3.textContent='.sectabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.
 document.head.appendChild(css3);
 const TABS=[['chat','שיחה'],['wa','ווצאפ'],['notes','התראות'],['reps','דוחות'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
 const unseenN=()=>X.nl&&!X.nl.err?X.nl.unseen:((X.st&&X.st.unseen)||0);
-function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.filter(([k])=>k!=='hold'||holdOn()).map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
+function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
 /* 13.11.2026: מעבר בין לשוניות – המידע הקודם מוצג מיד ומתעדכן ברקע (במקום "טוען…" בכל מעבר). אחרי שגיאה – טעינה רגילה */
 const swr=(o,k,b,ld)=>{const R=o[k];if(!R||R.err){o[k]=null;return}if(!X[b])ld()};
 ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')swr(X,'fl','fb',factsLoad);if(X.tab==='cal')swr(X,'cl','cb',calLoad);if(X.tab==='bank')swr(X,'rl','rb',rulesLoad);if(X.tab==='notes')swr(X,'nl','nb',notesLoad);if(X.tab==='reps'){X.rp=null;swr(X,'rpl','rb4',repsLoad)}rerender()};
@@ -474,12 +474,40 @@ const KIND={rep:'דוח',emp:'עובד',dig:'תקציר',wa:'ווצאפ'};
 /* 15.11.2026: התראות ישנות של סגירת קופה נשמרו עם מזהה הקופה (i_nl) ותאריך בכתיב מחשב – בתצוגה: שם הסניף (ZREG) ויום בשבוע + תאריך */
 const ZN=g=>{try{return typeof ZREG!=='undefined'&&ZREG[g]?ZREG[g].n:''}catch(e){return ''}};
 const dayL=d=>{const t=new Date(d+'T12:00:00Z');return isNaN(t)?d:'יום '+WDN[t.getUTCDay()]+' '+(+d.slice(8,10))+'.'+(+d.slice(5,7))};
-const nFix=(s,n)=>{s=String(s||'').replace(/(קופה )?\b(i_[a-z]{2})\b/g,(m,a,g)=>ZN(g)?'סניף '+ZN(g):m);if(n&&n.typ==='close')s=s.replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m,d)=>dayL(d));return s};
+const nFix=(s,n)=>{s=String(s||'').replace(/(קופה )?\b(i_[a-z]{2})\b/g,(m,a,g)=>ZN(g)?'סניף '+ZN(g):m);if(n&&n.typ==='close')s=s.replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m,d)=>dayL(d));if(n&&n.typ==='cal')s=calFix(s,n);return s};
+/* 15.11.2026 (סעיף 7): תזכורת יומן – "2026-11-15 12:00" (התראות ישנות) או "יום ראשון 15.11, 12:00" (חדשות) → "היום 12:00" / "מחר 12:00" /
+   "יום ראשון 15.11, 12:00", לפי היום בזמן הציור (שעון ישראל) */
+const ilDay=ms=>{try{return new Date(ms).toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'})}catch(e){return new Date(ms).toISOString().slice(0,10)}};
+const dDiff=(a,b)=>Math.round((Date.parse(a+'T12:00:00Z')-Date.parse(b+'T12:00:00Z'))/864e5);
+function calL(d,t){const k=dDiff(d,ilDay(Date.now()));return k===0||k===1||k===-1?['אתמול','היום','מחר'][k+1]+(t?' '+t:''):dayL(d)+(t?', '+t:'')}
+function calFix(s,n){let m=/^(\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2}))?/.exec(s);if(m)return calL(m[1],m[2]||'')+s.slice(m[0].length);
+ m=/^יום [א-ת]+ (\d{1,2})\.(\d{1,2})(?:, (\d{2}:\d{2}))?/.exec(s);if(!m)return s;
+ const a=ilDay(n.at||Date.now());let y=+a.slice(0,4);const iso=yy=>yy+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0');
+ if(dDiff(iso(y),a)>180)y--;else if(dDiff(iso(y),a)<-180)y++;const d=iso(y);return isNaN(Date.parse(d+'T12:00:00Z'))?s:calL(d,m[3]||'')+s.slice(m[0].length)}
+/* 15.11.2026 (סעיף 7): "תזכירי לי שוב" – בכרטיס (נפתח בלחיצה) ובחלון הפרטים. השרת קובע את הזמן ושולח שוב (גם לטלפון, גם בשעות השקטות) */
+const SNZ=[['h1','שוב בעוד שעה'],['h3','בעוד 3 שעות'],['mo','מחר בבוקר'],['pick','לבחור מתי']];
+const snzH=(id,d)=>`<div class="secrow secsnz" role="group" aria-label="תזכירי לי שוב">${SNZ.map(([v,l])=>`<button type="button" class="chip" data-a="secSnz" data-v="${v}" data-id="${esc(id)}"${d?' data-d="1"':''} style="min-height:44px">${l}</button>`).join('')}</div>`;
+const snzCan=n=>n&&n.st!=='gone';
+async function snzDo(id,o,el){if(el)el.disabled=true;
+ try{const r=await fnCall('secNotes',Object.assign({op:'snooze',id},o));if(document.getElementById('dlg').open)closeDlg();X.snz='';toast('אזכיר לך שוב '+(r&&r.l||''));X.nl=null;try{eyStale()}catch(e){}rerender()}
+ catch(e){if(el)el.disabled=false;err(e)}}
+const dtl=ms=>{const d=new Date(ms),z=x=>String(x).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+'T'+z(d.getHours())+':'+z(d.getMinutes())};
+ACT.secSnz=el=>{const id=el.dataset.id,v=el.dataset.v;if(!id)return;
+ if(v==='h1'||v==='h3')return snzDo(id,{at:Date.now()+(v==='h1'?1:3)*3600e3},el);
+ if(v==='mo')return snzDo(id,{when:'morning'},el);
+ const t0=Math.ceil((Date.now()+3600e3)/9e5)*9e5;
+ dlg(`<h3>מתי להזכיר שוב?</h3><form data-f="secSnzF" data-id="${esc(id)}"><label class="f"><span>תאריך ושעה</span><input type="datetime-local" name="at" dir="ltr" required value="${dtl(t0)}" min="${dtl(Date.now()+60e3)}" max="${dtl(Date.now()+60*864e5)}" style="min-height:44px"></label>
+ <p class="note" style="margin:4px 0 8px">ההתראה תחזור בזמן הזה, גם לטלפון – גם בשעות השקטות. עד 60 יום קדימה.</p>
+ <div class="row"><button class="btn grow">קביעה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+ACT.secSnzT=el=>{const id=el.dataset.id;X.snz=X.snz===id?'':id;rerender()};
+FRM.secSnzF=f=>{const id=f.dataset.id,at=new Date(String(f.at.value||'')).getTime();
+ if(!Number.isFinite(at)||at<Date.now()+60e3||at>Date.now()+60*864e5)return toast('אפשר לבחור זמן מעכשיו ועד 60 יום קדימה');
+ return snzDo(id,{at},f.querySelector('button:not([type=button])'))};
 const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');
 function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
  return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><button type="button" class="secnb" data-a="secNOpen" data-id="${esc(n.id)}" aria-label="כל הפרטים: ${esc(nFix(n.title,n))}"><p><b>${esc(nFix(n.title,n))}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
  <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
- <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${mrBtnH('note',n.id)}${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
+ <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${mrBtnH('note',n.id)}${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}${snzCan(n)?`<button type="button" class="chip" data-a="secSnzT" data-id="${esc(n.id)}" aria-expanded="${X.snz===n.id}">⏰ תזכירי לי שוב</button>`:''}</div>${snzCan(n)&&X.snz===n.id?snzH(n.id):''}</div>`}
 function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="notes">נסה שוב</button></div>`;
  const L=R.notes||[];pnShown();if(!L.length)return '<div class="empty">אין התראות</div>';
  return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">לחיצה על התראה – כל הפרטים. תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
@@ -490,7 +518,7 @@ function noteDlg(id){const R=X.nl,n=R&&!R.err&&(R.notes||[]).find(x=>x.id===id);
  const todo=n.typ==='close'&&!/מה לעשות/.test(body)?'\nמה לעשות:\n• לבקש מהעובד בסניף לשלוח סגירת קופה, או לפתוח את מסך סגירת הקופה ולהכניס אותה.\n• אם יש הפרש מזומן – לבדוק את הסגירה במסך סגירת הקופה ולברר עם העובד.':'';
  dlg(`<h3 style="overflow-wrap:anywhere">${esc(nFix(n.title,n))}</h3>${row('סוג',nLab(n,T)||'התראה')}${row('נוצרה',tm(n.t||n.at))}${n.n>1?row('נשלחה',n.n+' פעמים (לאחרונה '+tm(n.at)+')'):''}${row('מצב',st)}
  ${body||todo?`<div class="card" style="margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere" id="secNBody">${esc(body+todo)}</div>`:''}
- ${n.typ==='close'&&typeof V.zc==='function'?'<button class="btn w" data-a="secNZc" style="margin-top:8px">פתיחת מסך סגירת הקופה</button>':''}${n.k==='rep'&&n.ref?`<button class="btn w" data-a="secNRp" data-id="${esc(n.ref)}" style="margin-top:8px">פתיחת הדוח</button>`:''}${open?`<button class="btn g w" data-a="secNDoneD" data-id="${esc(n.id)}" style="margin-top:8px">סמן כטופל</button>`:''}<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`)}
+ ${n.typ==='close'&&typeof V.zc==='function'?'<button class="btn w" data-a="secNZc" style="margin-top:8px">פתיחת מסך סגירת הקופה</button>':''}${n.k==='rep'&&n.ref?`<button class="btn w" data-a="secNRp" data-id="${esc(n.ref)}" style="margin-top:8px">פתיחת הדוח</button>`:''}${snzCan(n)?`<p class="note" style="margin:10px 0 2px"><b>תזכירי לי שוב:</b></p>${snzH(n.id,1)}`:''}${open?`<button class="btn g w" data-a="secNDoneD" data-id="${esc(n.id)}" style="margin-top:8px">סמן כטופל</button>`:''}<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`)}
 ACT.secNOpen=el=>noteDlg(el.dataset.id);
 ACT.secNZc=()=>{closeDlg();go('zc')};
 ACT.secNRp=el=>{closeDlg();ACT.secRpOpen(el)};
@@ -1090,7 +1118,7 @@ window.__secInv=IV;
    ===================================================================================== */
 const mrOn=()=>!!(X.st&&X.st.learn!==false);
 const MRCH={chat:'שיחה',note:'התראות',mail:'מייל',wa:'ווצאפ',feed:'מול העיניים',route:'ניתוב'};
-const MREX={feed:['מעכשיו להעביר את אלה ל"בטיפול"','מעכשיו רק בלשונית שלהן, לא בצ\'אט'],chat:['מעכשיו תעני לי בקצרה','תמיד תתחילי בשורה התחתונה'],note:['אל תתריעי לי על התראות כאלה'],mail:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע'],wa:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע']};
+const MREX={feed:['מעכשיו להעביר את אלה למסך "לטיפול"','מעכשיו רק בלשונית שלהן, לא בצ\'אט'],chat:['מעכשיו תעני לי בקצרה','תמיד תתחילי בשורה התחתונה'],note:['אל תתריעי לי על התראות כאלה','תשלחי שוב בעוד שעה'],mail:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע'],wa:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע']};
 const MRERR={'branch-limited':'כללים על מייל וווצאפ זמינים רק למנהל בלי הגבלת סניפים','learn-off':'הכללים האישיים כבויים בעסק הזה','too-many':'הגעתם למספר הכללים המרבי (50). אפשר למחוק כלל ישן במסך "הכללים שלי".','need-approval':'קודם צריך לאשר פעם אחת תשובה לפי הכלל הזה','safe-rule':'כלל בטיחות – תמיד באישור שלך','not-pending':'הטיוטה כבר נשלחה או טופלה'};
 const mrErr=e=>toast(e&&e.reason&&MRERR[e.reason]||e&&e.message||'הפעולה נכשלה');
 function mrBtnH(k,id){if(!id||!mrOn()||(X.st.brLimited&&(k==='mail'||k==='wa')))return '';
@@ -1105,6 +1133,7 @@ ACT.secMrEx=el=>{const t=document.getElementById('secMrT');if(t){t.value=el.data
 FRM.secMrF=async f=>{const p=X.mrp;if(!p)return;const text=String(f.t.value||'').trim();if(!text)return toast('כתבו מה לעשות');if(text.length>300)return toast('עד 300 תווים');
  const b=document.getElementById('secMrGo');if(b){b.disabled=true;b.textContent=p.k==='mail'||p.k==='wa'?'מכינה טיוטה…':'רגע…'}
  try{const r=await fnCall('secLearn',{op:'reply',k:p.k,id:p.id,text});p.text=text;p.prop=r.prop;
+  if(r.snz){closeDlg();X.mrp=null;toast('אזכיר לך שוב '+r.snz.l);X.nl=null;try{eyStale()}catch(e){}rerender();return}
   if(r.draft){if(p.k==='mail'&&X.ml&&X.ml.card)X.ml.card.draft=r.draft;if(p.k==='wa'&&X.wa&&X.wa.card){const L=X.wa.card.drafts||[],i=L.findIndex(x=>x.id===r.draft.id);if(i>=0)L[i]=Object.assign({},L[i],r.draft)}}
   mrPropDlg(p,!!r.draft);rerender()}
  catch(e){mrErr(e);if(b){b.disabled=false;b.textContent='שליחה'}}};
@@ -1149,7 +1178,7 @@ function mrH(){const back='<button class="btn g w" data-a="secMrBack" style="mar
  const L=R.rules;
  const log=R.log.length?R.log.map(x=>`<div class="secli"><p dir="auto">${x.st==='sent'?'נשלח ✓':'נכשל'} · ${esc(MRCH[x.ch]||x.ch)} · <bdi dir="ltr">${esc(x.to)}</bdi></p><small class="note">${esc(tm(x.t))} · ${x.mine?'לפי הכלל שלי':'לפי הכלל של '+esc(x.by)}${x.ri?': "'+esc(x.ri)+'"':''}</small></div>`).join(''):'<p class="note">עוד לא נשלח שום דבר לבד.</p>';
  return back+stopH()+`<div class="card" id="secMr"><p class="note" style="margin:0 0 6px">הכללים שלך גוברים על ברירת המחדל של המזכירה, אבל לא על כללי הבטיחות: תשלום או העברת כסף, מחיקת נתונים ושליחת סיסמאות או פרטים רגישים – תמיד באישור שלך. "עצור הכל" עוצר גם את השליחה לבד.</p>${R.br?'<p class="note" style="margin:0 0 6px">למנהל עם הגבלת סניפים אין כללים על מייל וווצאפ.</p>':''}
- ${L.length?L.map(mrRuleH).join(''):'<p class="note" style="margin:0">עוד אין כללים. בכל הודעה של המזכירה יש כפתור "↩ תגובה".</p>'}<p class="note" style="margin:6px 0 0">כלל ניתוב (למשל "חשבוניות מהיום – לבטיפול") קובע מה מופיע ב"מול העיניים" בצ'אט. בלי כלל – הכול שם.</p><small class="note" style="display:block;margin-top:6px">${L.length} מתוך ${R.max} כללים</small></div>
+ ${L.length?L.map(mrRuleH).join(''):'<p class="note" style="margin:0">עוד אין כללים. בכל הודעה של המזכירה יש כפתור "↩ תגובה".</p>'}<p class="note" style="margin:6px 0 0">כלל ניתוב (למשל "חשבוניות מהיום – למסך לטיפול") קובע מה מופיע ב"מול העיניים" בצ'אט ומה עובר למסך "לטיפול" באפליקציה. בלי כלל – הכול בצ'אט.</p><small class="note" style="display:block;margin-top:6px">${L.length} מתוך ${R.max} כללים</small></div>
  <div class="sec"><h3>נשלח לבד</h3></div><div class="card" id="secMrLog">${log}</div>`}
 CHG.secMrOn=async el=>{const on=!!el.checked;el.disabled=true;try{await fnCall('secLearn',{op:'set',id:el.dataset.id,on});toast(on?'הכלל פעיל':'הכלל כובה')}catch(e){el.checked=!on;mrErr(e)}finally{X.mrl=null;eyStale();rerender()}};
 CHG.secMrAu=el=>{const on=!!el.checked,id=el.dataset.id;const run=async()=>{el.disabled=true;try{await fnCall('secLearn',{op:'auto',id,on});toast(on?'מעכשיו לבד':'מעכשיו אשאל לפני כל שליחה')}catch(e){mrErr(e)}finally{X.mrl=null;rerender()}};
@@ -1160,23 +1189,23 @@ window.__secMr=()=>X.mrl;
 
 /* =====================================================================================
    SEC:10 – צ'אט נקי ו"מול העיניים" (15.11.2026; משימות/2026-11-15_התראות-ותגובה-למזכירה/00-בקשה.md סעיף 6):
-   - בכל כניסה לצ'אט (מסך אחר → המזכירה, או לשונית אחרת → "שיחה") המסך נקי. השיחה הקודמת – בלשונית "צ'אט קודם" (קריאה בלבד, בדפים).
+   - בכל כניסה למסך המזכירה (ממסך אחר) הצ'אט נקי. מעבר בין הלשוניות של המזכירה (למשל ליומן וחזרה) לא מנקה (החלטת המשתמש 15.11). השיחה הקודמת – בלשונית "צ'אט קודם" (קריאה בלבד, בדפים).
      שום הודעה לא נמחקת, והמזכירה ממשיכה לקבל את ההיסטוריה בשרת (secChat) – רק התצוגה השתנתה.
    - בראש הצ'אט "מול העיניים": כל מה שפתוח (הצעות לאישור, טיוטות, התראות שלא טופלו, חשבוניות שהתקבלו, תזכורות קרובות) ומה שהמזכירה עשתה
      מאז הכניסה הקודמת. קריאה אחת לשרת (secLearn op:'eyes'), הכניסה נרשמת בשרת לכל מנהל. כל שורה – לחיצה למקום שלה, אישור במקום כשיש, ו"↩ תגובה".
-   - כללי ניתוב ("חשבוניות מהיום – לבטיפול"): כרטיס אישור בשיחה / תגובה על פריט; פריטים מסוג שנותב מופיעים בלשונית "בטיפול" (או רק בלשונית שלהם).
+   - כללי ניתוב ("חשבוניות מהיום – למסך לטיפול"): כרטיס אישור בשיחה / תגובה על פריט; פריטים מסוג שנותב מופיעים במסך "לטיפול" הקיים
+     באפליקציה (V.todo, סעיף "מהמזכירה"; החלטת המשתמש 15.11 – לא לשונית במזכירה) או רק בלשונית שלהם.
    ===================================================================================== */
 const css10=document.createElement('style');
 css10.textContent='.secey{margin:0 0 8px}.secey .secli{padding:8px 0}.secey .secli p{margin:0 0 2px}.secey .secrow .chip{min-height:44px}.secey .eyh{display:flex;justify-content:space-between;align-items:center;gap:8px}'
 +'.secey .secday{margin:10px 0 2px}.secdone b{color:var(--acc)}#secPrev .secday{text-align:center;font-size:.85rem}';
 document.head.appendChild(css10);
-TABS.splice(1,0,['prev',"צ'אט קודם"]);TABS.splice(2,0,['hold','בטיפול']);
-const RKL={inv:'חשבוניות',rem:'תזכורות',note:'התראות',draft:'טיוטות תשובה',appr:'הצעות לאישור'},RDL={hold:'לשונית "בטיפול"',tab:"רק בלשונית שלהן (לא בצ'אט)",chat:'"מול העיניים" בצ\'אט'};
+TABS.splice(1,0,['prev',"צ'אט קודם"]);
+const RKL={inv:'חשבוניות',rem:'תזכורות',note:'התראות',draft:'טיוטות תשובה',appr:'הצעות לאישור'},RDL={hold:'מסך "לטיפול" באפליקציה',tab:"רק בלשונית שלהן (לא בצ'אט)",chat:'"מול העיניים" בצ\'אט'};
 const rtL=c=>'מעכשיו '+(RKL[c.kind]||'פריטים')+' ← '+(RDL[c.dest]||'');
-const holdOn=()=>!!(X.ey&&X.ey.holdOn)||X.tab==='hold';
 /* ---------- "מול העיניים" ---------- */
 async function eyLoad(visit){if(X.eyb){X.eyQ=1;return}X.eyb=1;
- try{const r=await fnCall('secLearn',{op:'eyes',visit:!!visit});X.ey=r&&Array.isArray(r.open)?r:{err:'לא נטען'}}
+ try{const r=await fnCall('secLearn',{op:'eyes',visit:!!visit});X.ey=r&&Array.isArray(r.open)?r:{err:'לא נטען'};if(Array.isArray(X.ey.hold)){TD.key=keyNow();TD.L=X.ey.hold;TD.at=Date.now()}}
  catch(e){X.ey=X.ey&&!X.ey.err?X.ey:{err:e&&e.message||'לא נטען'}}
  finally{X.eyb=0;if(X.eyQ){X.eyQ=0;eyLoad(false);return}if(cur().v==='sec'&&!typing())rerender()}}
 /* אחרי פעולה (אישור, "טופל", כלל חדש) – המידע הקיים נשאר על המסך ומתעדכן ברקע */
@@ -1196,7 +1225,7 @@ function eyH(){const R=X.ey,hd='<div class="eyh"><b>מול העיניים</b>';
  return `<div class="card secey" id="secEyes">${hd}${O.length?`<span class="secbadge">${esc(String(R.openN||O.length))}</span>`:''}</div>
  <div id="secEyOpen">${O.length?O.slice(0,on).map(x=>eyRow(x)).join(''):'<p class="note" style="margin:4px 0">אין כרגע משהו פתוח ✓</p>'}</div>
  ${O.length>EYN?`<button class="chip" data-a="secEyMore" data-v="o" style="min-height:44px">${X.eyAll?'פחות':'עוד ('+(O.length-EYN)+')'}</button>`:''}
- ${H.length?`<button class="chip" data-a="secTab" data-v="hold" style="min-height:44px;margin-inline-start:6px">בטיפול (${H.length})</button>`:''}
+ ${H.length?`<button class="chip" data-a="go" data-v="todo" style="min-height:44px;margin-inline-start:6px">במסך "לטיפול" (${H.length})</button>`:''}
  <div class="secday">מה עשיתי מאז הכניסה הקודמת<small class="note">${esc(tm(R.since))}</small></div>
  <div id="secEyDid">${D.length?D.slice(0,dn).map(x=>eyRow(x,1)).join(''):'<p class="note" style="margin:4px 0">לא עשיתי משהו חדש מאז.</p>'}</div>
  ${D.length>EYD?`<button class="chip" data-a="secEyMore" data-v="d" style="min-height:44px">${X.didAll?'פחות':'עוד ('+((R.didN||D.length)-EYD)+')'}</button>`:''}</div>`}
@@ -1229,21 +1258,37 @@ function prevH(){const P=X.pc||(X.pc={L:[],b:0,more:true,err:'',ld:0});
  ${P.more&&P.L.length?`<button class="btn g w" data-a="secPcMore"${P.b?' disabled':''} style="margin-bottom:8px">הודעות קודמות</button>`:''}
  <div id="secPrev">${h||'<div class="empty">אין שיחה קודמת</div>'}</div>${P.err?`<p class="note">${esc(P.err)}</p>`:''}`}
 ACT.secPcMore=()=>{pcLoad();rerender()};
-/* ---------- "בטיפול": מה שנותב לכאן בכלל אישי ---------- */
-function holdH(){const R=X.ey;if(!R){if(!X.eyb)eyLoad(false);return '<div class="empty">טוען…</div>'}
- if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secEyRe">נסה שוב</button></div>`;
- const H=R.hold||[];
- return `<p class="note" style="margin:0 0 6px">כאן מופיע מה שביקשת להעביר ל"בטיפול" (ולא ל"מול העיניים" בצ'אט). את כללי הניתוב רואים ומוחקים ב"הכללים שלי".</p>
- <div class="card secey" id="secHold">${H.length?H.map(x=>eyRow(x)).join(''):'<p class="note" style="margin:0">אין כרגע פריטים בטיפול.</p>'}</div>`}
+/* ---------- מסך "לטיפול" באפליקציה (V.todo): מה שנותב לשם בכלל אישי ----------
+   secLearn eyes hold:true – בלי כלל "לטיפול" השרת עונה מיד (קריאת הכללים בלבד). לא יותר מפעם בדקה, ורק למי שהמזכירה פתוחה לו. */
+const TD={L:[],at:0,b:0,key:''};
+const tdOn=()=>{try{return elig()&&ready()&&!!X.st.setupDone}catch(e){return false}};
+function tdLoad(force){const k=keyNow();if(TD.key!==k){TD.key=k;TD.L=[];TD.at=0}
+ if(!tdOn()||TD.b||(!force&&Date.now()-TD.at<60000))return;TD.b=1;TD.at=Date.now();const s0=TD.L.map(x=>x.id).join();
+ fnCall('secLearn',{op:'eyes',hold:true}).then(r=>{if(TD.key===keyNow())TD.L=r&&Array.isArray(r.hold)?r.hold:[]}).catch(()=>{})
+  .finally(()=>{TD.b=0;try{if(TD.L.map(x=>x.id).join()!==s0&&['todo','home'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}})}
+const tdN=()=>tdOn()&&TD.key===keyNow()?TD.L.length:0;
+function tdRow(x){const g=x.go||{};return `<button class="opt" data-a="secTdGo" data-tab="${esc(g.tab||'')}"${g.id?` data-id="${esc(g.id)}"`:''}${g.wa?` data-wa="${esc(g.wa)}"`:''}><span>${esc(x.title)}<small>${esc([EYK[x.k]||'',x.sub||''].filter(Boolean).join(' · '))}</small></span>${ico('chev')}</button>`}
+if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(this,arguments);try{r.sec=tdN();r.n+=r.sec}catch(e){r.sec=0}return r}}
+{const o=V.todo;if(typeof o==='function')V.todo=function(){const r=o.apply(this,arguments);
+ try{if(r&&typeof r.h==='string'&&isA()&&tdOn()){tdLoad(false);const L=TD.L;if(L.length)r.h=adSec('מהמזכירה – לטיפול')+L.slice(0,EYN*3).map(tdRow).join('')+`<p class="note" style="margin:4px 0 8px">הגיעו לכאן לפי כלל ניתוב שלך. אפשר לשנות ב"הכללים שלי" במזכירה.</p>`+r.h}}catch(e){}return r}}
+ACT.secTdGo=el=>{const t=el.dataset.tab,id=el.dataset.id||'',wa=el.dataset.wa||'';TD.at=0;
+ if(t==='notes'){if(id)pnTap(id);else ACT.secNotesGo();return}
+ X.set=0;X.edit=0;X.mrv=0;
+ if(t==='set'){X.mrv=1;X.mrl=null;go('sec');return}
+ if(TABS.some(x=>x[0]===t))ACT.secTab({dataset:{v:t}});
+ if(t==='wa'&&wa&&X.wa){X.wa.cur=wa;X.wa.card=null}
+ if(t==='mail'&&id&&X.ml){X.ml.cur=id;X.ml.card=null}
+ go('sec')};
 /* ---------- כניסה לצ'אט = מסך נקי ---------- */
 function chatEnter(){if(X.sending)return;X.msgs=[];X.msgErr='';X.ey=null;X.eyV=1;X.eyAll=0;X.didAll=0}
-{const t10=ACT.secTab;ACT.secTab=el=>{const v=el.dataset.v,was=X.tab||'chat';if(v==='chat'&&was!=='chat')chatEnter();if(v==='prev')X.pc=null;if(v==='hold')eyStale();t10(el)}}
+/* מעבר בין לשוניות לא מנקה את הצ'אט (15.11): חזרה ל"שיחה" – "מול העיניים" מתעדכן ברקע */
+{const t10=ACT.secTab;ACT.secTab=el=>{const v=el.dataset.v,was=X.tab||'chat';if(v==='chat'&&was!=='chat'&&X.ey&&!X.ey.err)eyStale();if(v==='prev')X.pc=null;t10(el)}}
 {const r0=window.render;if(typeof r0==='function')window.render=function(){const r=r0.apply(this,arguments);try{X.pvw=cur().v}catch(e){}return r}}
-{const r10=V.sec;V.sec=()=>{try{if(X.pvw!=='sec'){X.pvw='sec';if((X.tab||'chat')==='chat')chatEnter()}}catch(e){}
- if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&(X.tab==='prev'||X.tab==='hold')){const S0=X.st;
-  return{t:S0.name||'המזכירה',s:X.tab==='prev'?"צ'אט קודם":'בטיפול',h:stopH()+tabsH()+(X.tab==='prev'?prevH():holdH())}}
+{const r10=V.sec;V.sec=()=>{try{if(X.pvw!=='sec'){X.pvw='sec';chatEnter()}}catch(e){}
+ if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='prev'){const S0=X.st;
+  return{t:S0.name||'המזכירה',s:"צ'אט קודם",h:stopH()+tabsH()+prevH()}}
  return r10()}}
-window.__secEy=()=>X.ey;
+window.__secEy=()=>X.ey;window.__secTd=TD;
 
 window.__sec=X;
 })();

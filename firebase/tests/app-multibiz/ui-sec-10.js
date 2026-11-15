@@ -5,7 +5,9 @@
 //  - "↩ תגובה" על כל שורה ב"מול העיניים", על כל תשובה בשיחה ובכל הודעה של המזכירה ב"צ'אט קודם".
 //  - כרטיס "לקבוע תזכורת?" → אשר → "אושר ✓" בלי כפתורים; יציאה וחזרה לצ'אט – המסך שוב נקי; ב"צ'אט קודם" – מצב הכרטיסים מהשרת
 //    ("אושר ✓" / "בוטל" בלי כפתורים, ממתין – עם כפתורים), "הודעות קודמות" (before), כרטיס ניתוב → secLearn route.
-//  - כלל ניתוב: לשונית "בטיפול" עם הפריטים שנותבו; במסך "הכללים שלי" – כלל ניתוב עם מחיקה.
+//  - מעבר בין הלשוניות (יומן וחזרה) לא מנקה את הצ'אט; רק כניסה למסך המזכירה מנקה (החלטת המשתמש 15.11).
+//  - כלל ניתוב "לטיפול": הפריטים במסך "לטיפול" הקיים באפליקציה (סעיף "מהמזכירה", secLearn eyes hold:true), לחיצה פותחת אותם במזכירה;
+//    אין לשונית "בטיפול" במזכירה; במסך "הכללים שלי" – כלל ניתוב עם מחיקה.
 //  - תכונת הכללים כבויה: "מול העיניים" כן, "תגובה" לא.
 //  - בלי גלילה לרוחב, מטרות לחיצה 44px, תוכן זדוני מוצג כטקסט, בלי שגיאות JS. צילום אחד לכל מסך (רק אם ניתנה תיקייה).
 // שימוש: node ui-sec-10.js <www-dir> [shots-dir]
@@ -53,8 +55,12 @@ async function open(browser, www, o) {
       { k: 'inv', id: 'i:v2', t: now - 50e3, title: 'התקבלה חשבונית – תנובה', go: { tab: 'inv' }, r: { k: 'feed', id: 'inv' } },
     ], didN: 4,
     hold: hold ? [{ k: 'inv', id: 'i:v3', t: now - 20e3, title: 'חשבונית מחכה לאישור – שטראוס', go: { tab: 'inv' }, r: { k: 'feed', id: 'inv' } }] : [], holdOn: !!hold, routes: hold ? { inv: 'hold' } : {} });
-  const notes = [{ id: 'n1', k: 'rem', typ: 'invDue', title: 'תזכורת: לשלם לספק החלב', body: 'היום', at: now - 400e3, t: now - 400e3, seen: true, st: 'open', rep: 1, n: 1 }];
-  const rules = [{ id: 'r9', ch: 'route', act: 'route', instr: 'חשבוניות מהיום – לבטיפול', scopeL: 'חשבוניות ← בטיפול', on: true, auto: false, safe: '', safeL: '', canAuto: false, appr: 0, hits: 0, fails: 0, offWhy: '', lastAt: 0, t: now - 3e6 }];
+  const notes = [{ id: 'n1', k: 'rem', typ: 'invDue', title: 'תזכורת: לשלם לספק החלב', body: 'היום', at: now - 400e3, t: now - 400e3, seen: true, st: 'open', rep: 1, n: 1 },
+    { id: 'c1', k: 'rem', typ: 'cal', title: 'תזכורת: להתקשר לרואה החשבון', body: '2026-11-03 12:00\nלהביא את הקבלות', at: now - 300e3, t: now - 300e3, seen: true, st: 'open', rep: 0, n: 1 },
+    { id: 'c2', k: 'rem', typ: 'cal', title: 'ביומן: פגישה', body: '2026-11-04 09:00', at: now - 200e3, t: now - 200e3, seen: true, st: 'open', rep: 0, n: 1 },
+    { id: 'c3', k: 'rem', typ: 'cal', title: 'תזכורת: ספירת מלאי', body: 'יום ראשון 8.11, 12:00', at: now - 100e3, t: now - 100e3, seen: true, st: 'open', rep: 0, n: 1 },
+    { id: 'g1', k: 'rem', typ: 'cal', title: 'ביומן: אירוע שבוטל', body: '2026-11-02', at: now - 50e3, t: now - 50e3, seen: true, st: 'gone', rep: 0, n: 1 }];
+  const rules = [{ id: 'r9', ch: 'route', act: 'route', instr: 'חשבוניות מהיום – לבטיפול', scopeL: 'חשבוניות ← מסך "לטיפול" באפליקציה', on: true, auto: false, safe: '', safeL: '', canAuto: false, appr: 0, hits: 0, fails: 0, offWhy: '', lastAt: 0, t: now - 3e6 }];
   const S = { hold: !!o.hold };
   const { ctx, page } = await H.newPage(browser, www, cfg, [], who);
   await ctx.route(/:5001\/.*/, async (route) => {
@@ -66,9 +72,10 @@ async function open(browser, www, o) {
     if (n === 'secChatLoad') return ok(body.before ? { ok: true, msgs: page2, more: false } : { ok: true, msgs: page1, more: true });
     if (n === 'secChat') return ok({ ok: true, id: 'a9', reply: 'לקבוע תזכורת?', mode: 'ok', src: [], cards: [{ k: 'cal', id: 'k7', title: 'להתקשר לספק', d: DAY, tm: '09:00', to: 'me', rem: true }], pct: 11, saving: false });
     if (n === 'secCal') return ok(body.op === 'list' ? { ok: true, events: [], we: 'warn', today: '2026-11-03' } : { ok: true, id: body.id });
-    if (n === 'secNotes') return ok(body.op === 'list' ? { ok: true, notes, unseen: 0, types: TYPES } : { ok: true });
+    if (n === 'secNotes') return ok(body.op === 'list' ? { ok: true, notes, unseen: 0, types: TYPES } : body.op === 'snooze' ? { ok: true, id: body.id, at: body.at || now + 75600e3, l: body.when === 'morning' ? 'מחר 08:00' : 'היום 12:00' } : { ok: true });
     if (n === 'secLearn') {
-      if (body.op === 'eyes') return ok(ey(S.hold));
+      if (body.op === 'eyes') return ok(body.hold ? { ok: true, now, hold: S.hold ? ey(true).hold : [], holdOn: !!S.hold } : ey(S.hold));
+      if (body.op === 'reply' && /בעוד שעה/.test(body.text || '')) return ok({ ok: true, snz: { at: now + 3600e3, l: 'היום 12:00' } });
       if (body.op === 'route') return ok({ ok: true, st: body.no ? 'no' : 'ok', id: 'r9' });
       if (body.op === 'list') return ok({ ok: true, rules, max: 50, brLimited: false, stop: false });
       if (body.op === 'log') return ok({ ok: true, items: [] });
@@ -123,10 +130,14 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
     // ---- לחיצה על שורה → המקום שלה ----
     await page.click('#secEyOpen .secli[data-ey="n:n1"] .secrow [data-a=secEyGo]'); await H.settle(page, 1500);
     check('לחיצה על התראה ב"מול העיניים" → לשונית ההתראות ופרטי ההתראה', await page.evaluate(() => window.__sec.tab === 'notes') && /לשלם לספק החלב/.test(await page.evaluate(() => (document.getElementById('dlg').open ? document.getElementById('dlg').innerText : ''))));
-    // ---- חזרה לצ'אט – שוב נקי ----
+    // ---- מעבר ליומן וחזרה – הצ'אט נשאר; כניסה מחדש למסך – נקי ----
+    await tab(page, 'cal'); await tab(page, 'chat');
+    check('מעבר ליומן וחזרה ל"שיחה": הצ\'אט הנוכחי נשאר (השאלה והכרטיס "אושר ✓")', (await page.$$('#secChat .secmsg.u')).length === 1 && /אושר ✓/.test(await txt(page, '#secChat [data-card=k7]')));
+    check('חזרה ללשונית: "מול העיניים" מתעדכן ברקע בלי לרשום כניסה (visit:false)', last(bodies, 'secLearn', (b) => b.op === 'eyes')[1].visit === false);
+    await tab(page, 'cal'); await enter(page);
+    check('כניסה מחדש למסך המזכירה (גם כשהלשונית האחרונה הייתה יומן): הצ\'אט נקי', await page.evaluate(() => window.__sec.msgs.length === 0));
     await tab(page, 'chat');
-    check('חזרה ללשונית "שיחה": המסך שוב נקי (בלי השאלה והכרטיס הקודמים)', (await page.$$('#secChat .secmsg.u')).length === 0 && !(await page.$('#secChat [data-card=k7]')));
-    check('חזרה לצ\'אט: "מול העיניים" נטען שוב עם visit:true', last(bodies, 'secLearn', (b) => b.op === 'eyes')[1].visit === true);
+    check('כניסה מחדש: אין את השאלה והכרטיס הקודמים, ו"מול העיניים" נטען עם visit:true', (await page.$$('#secChat .secmsg.u')).length === 0 && !(await page.$('#secChat [data-card=k7]')) && last(bodies, 'secLearn', (b) => b.op === 'eyes')[1].visit === true);
     // ---- צ'אט קודם ----
     await tab(page, 'prev');
     const pv = await page.evaluate(() => { const q = (id) => document.querySelector('#secPrev [data-card=' + id + ']'); const f = (id) => { const c = q(id); return c ? { st: c.dataset.st || '', t: c.innerText, btn: c.querySelectorAll('button').length } : null; }; return { k1: f('k1'), k2: f('k2'), k3: f('k3'), rt: f('rt0123456789abcdef'), form: !!document.getElementById('secForm') }; });
@@ -141,21 +152,67 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
     await page.click('[data-a=secPcMore]'); await H.settle(page, 700);
     const mo = last(bodies, 'secChatLoad');
     check('"הודעות קודמות": secChatLoad עם before = ההודעה הוותיקה; ההודעות נוספו למעלה', mo && mo[1].before === H.T0 - 5e6 && /תשובה ישנה/.test(await txt(page, '#secPrev')) && !(await page.$('[data-a=secPcMore]')), mo && mo[1]);
-    // ---- בטיפול ----
-    check('בלי כלל ניתוב – אין לשונית "בטיפול"', !(await page.$('#secTabs [data-v=hold]')));
+    // ---- ניתוב "לטיפול" → המסך "לטיפול" באפליקציה ----
+    check('אין לשונית "בטיפול" במזכירה', !(await page.$('#secTabs [data-v=hold]')));
+    await page.evaluate(() => { if (document.getElementById('dlg').open) closeDlg(); go('todo'); }); await H.settle(page, 900);
+    check('בלי כלל ניתוב: "לטיפול" בלי סעיף "מהמזכירה"', await page.evaluate(() => cur().v === 'todo') && !/מהמזכירה/.test(await txt(page, '#main')));
+    await page.evaluate(() => { window.__secTd.at = 0; go('home'); go('todo'); }); await H.settle(page, 900);
+    check('מסך "לטיפול" (מטמון פג): נשאל השרת secLearn eyes hold:true', !!last(bodies, 'secLearn', (b) => b.op === 'eyes' && b.hold === true));
     S.hold = true;
-    await tab(page, 'chat'); // כניסה ללשונית השיחה – "מול העיניים" נטען מחדש (עכשיו עם כלל ניתוב)
-    await page.waitForSelector('#secTabs [data-v=hold]', { timeout: 3000 }).catch(() => {});
-    await tab(page, 'hold');
-    check('כלל ניתוב: לשונית "בטיפול" עם הפריט שנותב ו"↩ תגובה"', /שטראוס/.test(await txt(page, '#secHold')) && !!(await page.$('#secHold [data-a=secMrReply]')));
-    await shot(page, shots, 'hold');
+    await enter(page); await tab(page, 'chat');
+    check('כלל ניתוב: ב"מול העיניים" כפתור למסך "לטיפול" (1)', /במסך "לטיפול" \(1\)/.test(await txt(page, '#secEyes')));
+    await page.click('#secEyes [data-a=go][data-v=todo]'); await H.settle(page, 900);
+    const td = await txt(page, '#main');
+    check('מסך "לטיפול": סעיף "מהמזכירה – לטיפול" עם הפריט שנותב', await page.evaluate(() => cur().v === 'todo') && /מהמזכירה – לטיפול/.test(td) && /שטראוס/.test(td), td.slice(0, 300));
+    await shot(page, shots, 'todo');
+    check('מסך "לטיפול": מטרות לחיצה 44px', (await small(page, '#main [data-a=secTdGo]')).length === 0);
+    await page.click('#main [data-a=secTdGo]'); await H.settle(page, 900);
+    check('לחיצה על פריט ב"לטיפול" → המזכירה, לשונית החשבוניות', await page.evaluate(() => cur().v === 'sec' && window.__sec.tab === 'inv'));
     // ---- הכללים שלי: כלל ניתוב ----
     await page.evaluate(() => ACT.secMrOpen()); await H.settle(page, 900);
     const mr = await txt(page, '#secMr');
-    check('"הכללים שלי": כלל ניתוב (ניתוב, חשבוניות ← בטיפול) עם מחיקה', /ניתוב/.test(mr) && /חשבוניות ← בטיפול/.test(mr) && !!(await page.$('#secMr [data-id=r9] [data-a=secMrDel]')), mr.slice(0, 200));
+    check('"הכללים שלי": כלל ניתוב (ניתוב, חשבוניות ← מסך "לטיפול") עם מחיקה', /ניתוב/.test(mr) && /חשבוניות ← מסך "לטיפול" באפליקציה/.test(mr) && !!(await page.$('#secMr [data-id=r9] [data-a=secMrDel]')), mr.slice(0, 200));
     check('בלי גלילה לרוחב (360px)', await noHs(page));
     check('תוכן זדוני מוצג כטקסט', !(await page.evaluate(() => window.__xss === 1 || !!document.querySelector('img[src="x"]'))));
     check('בלי שגיאות JS', page.__errors.length === 0, page.__errors.slice(0, 3));
+    await ctx.close();
+  }
+  {
+    // ---- סעיף 7: "תזכירי לי שוב" ותצוגת תזכורת יומן ----
+    const { ctx, page, bodies } = await open(browser, www, {});
+    await enter(page); await tab(page, 'notes');
+    const nt = await txt(page, '#secNotes');
+    check('תזכורת יומן: "היום 12:00" / "מחר 09:00" / "יום ראשון 8.11, 12:00" (לא "2026-11-03 12:00")', /היום 12:00/.test(nt) && /מחר 09:00/.test(nt) && /יום ראשון 8\.11, 12:00/.test(nt) && !/2026-11-0[34]/.test(nt), nt.slice(0, 400));
+    check('בכרטיס: "⏰ תזכירי לי שוב" (לא בהתראה שכבר לא רלוונטית)', !!(await page.$('#secNotes [data-a=secSnzT][data-id=n1]')) && !(await page.$('#secNotes [data-a=secSnzT][data-id=g1]')));
+    await page.click('#secNotes [data-a=secSnzT][data-id=c1]'); await H.settle(page, 300);
+    const row = await page.$$eval('#secNotes .secsnz [data-a=secSnz]', (b) => b.map((x) => x.innerText));
+    check('בכרטיס: 4 אפשרויות – שוב בעוד שעה, בעוד 3 שעות, מחר בבוקר, לבחור מתי', JSON.stringify(row) === JSON.stringify(['שוב בעוד שעה', 'בעוד 3 שעות', 'מחר בבוקר', 'לבחור מתי']), row);
+    check('בכרטיס: מטרות לחיצה 44px', (await small(page, '#secNotes .secsnz .chip')).length === 0, await small(page, '#secNotes .secsnz .chip'));
+    check('בכרטיס: בלי גלילה לרוחב (360px)', await noHs(page));
+    await shot(page, shots, 'snooze-card');
+    const T = await page.evaluate(() => Date.now());
+    await page.click('#secNotes .secsnz [data-a=secSnz][data-v=h1]'); await H.settle(page, 600);
+    let z = last(bodies, 'secNotes', (b) => b.op === 'snooze');
+    check('"שוב בעוד שעה" → secNotes snooze עם at = עוד שעה', z && z[1].id === 'c1' && z[1].at === T + 3600e3, z && z[1]);
+    await page.click('#secNotes [data-a=secNOpen][data-id=n1]'); await H.settle(page, 400);
+    check('בחלון הפרטים: 4 האפשרויות', (await page.$$('#dlg .secsnz [data-a=secSnz]')).length === 4);
+    await shot(page, shots, 'snooze-dlg');
+    await page.click('#dlg .secsnz [data-a=secSnz][data-v=mo]'); await H.settle(page, 600);
+    z = last(bodies, 'secNotes', (b) => b.op === 'snooze');
+    check('"מחר בבוקר" → when:morning (השרת קובע את יום העסקים הבא 08:00), החלון נסגר', z && z[1].id === 'n1' && z[1].when === 'morning' && !z[1].at && !(await page.evaluate(() => document.getElementById('dlg').open)), z && z[1]);
+    await page.click('#secNotes [data-a=secNOpen][data-id=c2]'); await H.settle(page, 400);
+    await page.click('#dlg .secsnz [data-a=secSnz][data-v=pick]'); await H.settle(page, 400);
+    check('"לבחור מתי": תאריך ושעה', !!(await page.$('#dlg form[data-f=secSnzF] input[type=datetime-local]')));
+    await page.fill('#dlg input[name=at]', '2026-11-05T10:30'); await page.click('#dlg form[data-f=secSnzF] button:not([type=button])'); await H.settle(page, 600);
+    z = last(bodies, 'secNotes', (b) => b.op === 'snooze');
+    const want = await page.evaluate(() => new Date('2026-11-05T10:30').getTime());
+    check('"לבחור מתי" → at לפי הבחירה', z && z[1].id === 'c2' && z[1].at === want, z && z[1]);
+    // ↩ תגובה "תשלחי שוב בעוד שעה"
+    await page.click('#secNotes [data-a=secMrReply][data-id=c3]'); await H.settle(page, 300);
+    await page.fill('#secMrT', 'תשלחי שוב בעוד שעה'); await page.click('#secMrGo'); await H.settle(page, 600);
+    const rp = last(bodies, 'secLearn', (b) => b.op === 'reply');
+    check('↩ תגובה "תשלחי שוב בעוד שעה" → secLearn reply על ההתראה; החלון נסגר בלי הצעת כלל', rp && rp[1].k === 'note' && rp[1].id === 'c3' && !(await page.evaluate(() => document.getElementById('dlg').open)), rp && rp[1]);
+    check('סעיף 7: בלי שגיאות JS', page.__errors.length === 0, page.__errors.slice(0, 3));
     await ctx.close();
   }
   {

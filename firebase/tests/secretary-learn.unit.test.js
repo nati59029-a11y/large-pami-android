@@ -161,6 +161,7 @@ describe('sec-learn: "לעשות את זה מעכשיו לבד?" ושליחה ל
 describe('sec-learn: כללי ניתוב, "מאז הכניסה הקודמת" ותזכורות בפיד', () => {
   it('routeOf: הוראת ניתוב מזוהה; שאלה או משפט בלי הוראה – לא', () => {
     assert.deepEqual(L.routeOf("חשבוניות מהיום – לקטגוריה 'בטיפול' באפליקציה"), { kind: 'inv', dest: 'hold' });
+    assert.deepEqual(L.routeOf('מעכשיו חשבוניות למסך לטיפול'), { kind: 'inv', dest: 'hold' });
     assert.deepEqual(L.routeOf('מעכשיו תזכורות רק בלשונית היומן'), { kind: 'rem', dest: 'tab' });
     assert.deepEqual(L.routeOf('מעכשיו התראות לא בצ׳אט'), { kind: 'note', dest: 'tab' });
     assert.deepEqual(L.routeOf("מעכשיו חשבוניות שוב לצ'אט"), { kind: 'inv', dest: 'chat' });
@@ -170,7 +171,7 @@ describe('sec-learn: כללי ניתוב, "מאז הכניסה הקודמת" ו�
     const r = L.routeRule('חשבוניות מהיום – לבטיפול', { kind: 'inv', dest: 'hold' });
     assert.deepEqual(r, { ch: 'route', act: 'route', instr: 'חשבוניות מהיום – לבטיפול', scope: { kind: 'inv' }, dest: 'hold', safe: '' });
     assert.equal(L.routeRule('x', { kind: 'zzz', dest: 'hold' }), null);
-    assert.equal(L.scopeL(r), 'חשבוניות ← בטיפול');
+    assert.equal(L.scopeL(r), 'חשבוניות ← מסך "לטיפול" באפליקציה');
     const R = L.routesOf([Object.assign({}, r, { t: 1 }), { ch: 'route', scope: { kind: 'inv' }, dest: 'tab', on: true, t: 2 }, { ch: 'route', scope: { kind: 'rem' }, dest: 'hold', on: false, t: 3 }, { ch: 'chat', instr: 'קצר', t: 4 }]);
     assert.deepEqual(R, { inv: 'tab' });
     const items = [{ k: 'inv', id: 1 }, { k: 'rem', id: 2 }, { k: 'note', id: 3 }];
@@ -190,5 +191,45 @@ describe('sec-learn: כללי ניתוב, "מאז הכניסה הקודמת" ו�
     assert.equal(L.remLine({ title: 'פגישה', d: '2026-11-15', tm: '14:30' }, '2026-11-15', '08:00'), 'ביומן: פגישה – היום 14:30');
     assert.equal(L.relDay('2026-11-18', '2026-11-15'), 'יום רביעי 18.11');
     assert.equal(L.relDay('bad', '2026-11-15'), '');
+  });
+});
+
+// 15.11.2026 (סעיף 7): "תזכירי לי שוב" – פענוח ניסוח בעברית בלי מודל, ותצוגת יום ושעה בתזכורת יומן
+describe('sec-remind: snoozeOf, dayHm, whenL', () => {
+  const RM = require('../functions/lib/sec-remind.js');
+  const IL = (s) => Date.parse(s + ':00+02:00');
+  const now = IL('2026-11-15T11:00'); // ראשון
+  const hm = (r) => r && RM.il(r.at).day + ' ' + RM.il(r.at).hm;
+  it('ניסוחים מוכרים → זמן נכון (שעון ישראל), עם תווית', () => {
+    const cases = [
+      ['תשלחי שוב בעוד שעה', '2026-11-15 12:00', 'היום 12:00'],
+      ['בעוד 3 שעות', '2026-11-15 14:00', 'היום 14:00'],
+      ['בעוד שלוש שעות', '2026-11-15 14:00'],
+      ['בעוד שעתיים', '2026-11-15 13:00'],
+      ['תזכירי לי בעוד 20 דקות', '2026-11-15 11:20'],
+      ['בעוד חצי שעה', '2026-11-15 11:30'],
+      ['בעוד רבע שעה', '2026-11-15 11:15'],
+      ['בעוד שעה וחצי', '2026-11-15 12:30'],
+      ['מחר בבוקר', '2026-11-16 08:00', 'מחר 08:00'],
+      ['תזכירי לי שוב מחר בבוקר', '2026-11-16 08:00'],
+      ['מחר ב-9:30', '2026-11-16 09:30'],
+      ['מחר בשעה 14', '2026-11-16 14:00'],
+      ['היום ב-16:00', '2026-11-15 16:00'],
+      ['"שוב בעוד יומיים!"', '2026-11-17 11:00', 'יום שלישי 17.11, 11:00'],
+    ];
+    for (const [t, want, l] of cases) { const r = RM.snoozeOf(t, now); assert.equal(hm(r), want, t); if (l) assert.equal(r.l, l, t); }
+  });
+  it('"מחר בבוקר" בחמישי – יום העסקים הבא (ראשון) 08:00', () => {
+    assert.equal(hm(RM.snoozeOf('מחר בבוקר', IL('2026-11-19T15:00'))), '2026-11-22 08:00');
+  });
+  it('לא מנחשים: הוראה אחרת, זמן שעבר, מעל 60 יום, שעה לא קיימת, טקסט ארוך', () => {
+    for (const t of ['אל תתריעי לי על התראות כאלה', 'בעוד שעה תתקשרי לספק', 'היום ב-8:00', 'בעוד 90 ימים', 'מחר ב-25:00', 'בעוד 3 שעתיים', '', 'בעוד שעה '.repeat(10)]) assert.equal(RM.snoozeOf(t, now), null, t);
+  });
+  it('dayHm / whenL', () => {
+    assert.equal(RM.dayHm('2026-11-15', '12:00'), 'יום ראשון 15.11, 12:00');
+    assert.equal(RM.dayHm('2026-11-15'), 'יום ראשון 15.11');
+    assert.equal(RM.whenL(IL('2026-11-15T12:00'), now), 'היום 12:00');
+    assert.equal(RM.whenL(IL('2026-11-16T08:00'), now), 'מחר 08:00');
+    assert.equal(RM.whenL(IL('2026-11-20T09:05'), now), 'יום שישי 20.11, 09:05');
   });
 });

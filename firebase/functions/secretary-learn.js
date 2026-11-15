@@ -211,7 +211,8 @@ async function saveRoute(db, b, uid, r, src, now) {
 // ===================================================================================
 // "מול העיניים" (15.11.2026, סעיף 6): קריאה אחת בכניסה לצ'אט – כל מה שפתוח (הצעות לאישור, טיוטות, התראות שלא טופלו, חשבוניות שהתקבלו,
 // תזכורות ואירועים קרובים שהמזכירה קבעה) + מה שהיא עשתה מאז הכניסה הקודמת. visit:true – נרשמת כניסה (sec_cfg/visit, שרת בלבד).
-// ניתוב לפי כללי המנהל (ch:'route'): בטיפול → hold; רק בלשונית → לא מוצג כאן. שום נתון קיים לא משתנה (חוץ מרשומת הכניסה)
+// ניתוב לפי כללי המנהל (ch:'route'): "לטיפול" → hold (מוצג במסך "לטיפול" הקיים באפליקציה); רק בלשונית → לא מוצג כאן. שום נתון קיים לא משתנה (חוץ מרשומת הכניסה)
+// hold:true – בקשה של מסך "לטיפול": קודם רק הכללים; אין כלל "לטיפול" → תשובה מיידית בלי שאר השאילתות. לא נרשמת כניסה
 // ===================================================================================
 const EY_OPEN = 30, EY_DID = 30, EY_DAYS = 7;
 const DRAFT_KIND = { open: 'הודעת פתיחה', ack: '"קיבלנו"' };
@@ -223,7 +224,12 @@ async function eyes(g, input, now) {
   const vref = db.doc('sec_cfg/visit');
   const vs = await vref.get();
   const rec = vs.exists && vs.get(who.uid) && typeof vs.get(who.uid) === 'object' ? vs.get(who.uid) : {};
-  const visit = input.visit === true;
+  const holdOnly = input.hold === true;
+  if (holdOnly) {
+    const rs0 = cfg.learn ? await db.collection('sec_mrule').where('uid', '==', who.uid).limit(L.MAX_RULES + 5).get().catch(() => ({ docs: [] })) : { docs: [] };
+    if (!Object.values(L.routesOf(rs0.docs.map((d) => d.data()))).includes('hold')) return { ok: true, now, hold: [], holdOn: false };
+  }
+  const visit = input.visit === true && !holdOnly;
   const since = L.sinceOf(rec, now, visit);
   const brOk = (x) => !brs || (typeof x.br === 'string' && brs.includes(x.br));
   const out3 = !brLimited; // טיוטות מייל/ווצאפ – ערוצים של כל העסק; מנהל עם הגבלת סניפים לא רואה אותן כאן
@@ -271,6 +277,7 @@ async function eyes(g, input, now) {
   const o = L.applyRoutes(open, routes), dd = L.applyRoutes(did, routes);
   const hold = o.hold.concat(dd.hold.filter((x) => !o.hold.some((y) => y.id === x.id))).slice(0, EY_OPEN);
   if (visit) await vref.set({ [who.uid]: { chat: now, prev: since } }, { merge: true });
+  if (holdOnly) return { ok: true, now, hold, holdOn: true };
   return { ok: true, since, now, today, open: o.feed.slice(0, EY_OPEN), openN: o.feed.length, did: dd.feed.slice(0, EY_DID), didN: dd.feed.length, hold, holdOn: Object.values(routes).includes('hold'), routes };
 }
 
@@ -337,6 +344,15 @@ async function secLearn(request) {
     if (outLimited && L.OUT_CHS.includes(k)) throw deny('branch-limited', 'כללים על מייל וווצאפ זמינים רק למנהל בלי הגבלת סניפים');
     const instr = readInstr(input.text);
     const it = await itemOf(db, who, k, input.id);
+    // 15.11.2026 (סעיף 7): "תשלחי שוב בעוד שעה" בתגובה על התראה – קובעת מיד (בלי מודל, בלי כלל). גם ב"שמירה" – לא נשמר ככלל
+    if (k === 'note') {
+      const RM = require('./lib/sec-remind');
+      const sz = RM.snoozeOf(instr, now);
+      if (sz) {
+        const out = await require('./secretary-remind')._core.snooze(db, who.uid, it.ref.id, sz.at, now, 'reply');
+        return { ok: true, snz: { at: out.at, l: out.l } };
+      }
+    }
     // 15.11.2026: הוראת ניתוב ("חשבוניות מהיום – לבטיפול") בתגובה על שיחה, התראה או פריט ב"מול העיניים" – כלל ניתוב
     const rt = ['chat', 'note', 'feed'].includes(k) ? L.routeOf(instr) : null;
     const r = rt ? L.routeRule(instr, rt) : L.cleanRule({ ch: it.ch, instr, sc: scOf(input.sc), item: it.item });

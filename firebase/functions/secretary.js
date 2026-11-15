@@ -464,7 +464,7 @@ async function secChat(request) {
   if (rt) {
     await meter(db, who.uid, tier, false, cfg.rate); // קצב בלבד – אין עלות
     const K0 = LR();
-    reply = 'להעביר מעכשיו ' + K0.RK[rt.kind] + ' ל' + (rt.dest === 'hold' ? 'לשונית "בטיפול"' : rt.dest === 'tab' ? 'לשונית שלהן בלבד (לא בצ\'אט)' : '"מול העיניים" בצ\'אט') + '? אחרי האישור זה יישמר ב"הכללים שלי", ואפשר למחוק בכל רגע.';
+    reply = 'להעביר מעכשיו ' + K0.RK[rt.kind] + ' ל' + (rt.dest === 'hold' ? 'מסך "לטיפול" באפליקציה' : rt.dest === 'tab' ? 'לשונית שלהן בלבד (לא בצ\'אט)' : '"מול העיניים" בצ\'אט') + '? אחרי האישור זה יישמר ב"הכללים שלי", ואפשר למחוק בכל רגע.';
     mode = 'route';
     cards.push({ k: 'route', id: 'rt' + require('node:crypto').randomBytes(8).toString('hex'), kind: rt.kind, dest: rt.dest, instr: text.slice(0, 300) });
     logs.push(['route', rt.kind + ':' + rt.dest]);

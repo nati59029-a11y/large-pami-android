@@ -149,7 +149,7 @@ async function remindBiz(opts) {
       for (const m of mgrs) {
         if (!m.nt.rt.cal || (e.uid && e.uid !== m.uid)) continue;
         const title = (e.rem ? 'תזכורת: ' : 'ביומן: ') + String(e.title || '').slice(0, 100);
-        const body = e.d + (e.tm ? ' ' + e.tm : '') + (w.moved ? ' (נפל ביום שאינו יום עסקים – הועבר לבוקר יום העסקים הבא)' : '') + (e.note ? '\n' + e.note : '');
+        const body = R.dayHm(e.d, e.tm) + (w.moved ? ' (נפל ביום שאינו יום עסקים – הועבר לבוקר יום העסקים הבא)' : '') + (e.note ? '\n' + e.note : '');
         if (await addNote(db, m, { k: 'rem', typ: 'cal', key: 'cal:' + d.id + ':' + e.d + ':' + (e.tm || ''), title, body, at: w.at, ref: d.id }, now, false)) out.notes++;
       }
     }
@@ -375,9 +375,28 @@ const runSecDaily = (opts) => forAll(dailyBiz, opts, 'daily');
 // =====================================================================================
 // secNotes – רשימת ההתראות של המנהל + פעולות על תזכורת (76: לשנות מספר חזרות או לבטל; "טופל")
 // =====================================================================================
+// "תזכירי לי שוב" (15.11.2026, סעיף 7): ההתראה של המנהל עצמו (sec_note/{uid}) חוזרת ברגע שבחר – באפליקציה ובטלפון.
+// זמן שהמנהל בחר במפורש יוצא בזמן הזה גם בשעות השקטות (pushAt = at). עד אז היא לא ברשימה (at בעתיד). התראה שנסגרה (טופלה) – נפתחת מחדש;
+// התראה שכבר לא רלוונטית (gone) – לא. חזרות (rep): אם נשארו – הבאה ביום העסקים שאחרי הזמן שנבחר (לא לפניו). עד 60 יום, לפחות דקה קדימה.
+// מחזיר { at, l }. גם מ"↩ תגובה" על התראה (secLearn, "תשלחי שוב בעוד שעה")
+async function snooze(db, uid, id, at, now, by) {
+  if (!R.snzOk(at, now)) throw bad('bad-at', 'אפשר לבחור זמן מעכשיו ועד 60 יום קדימה');
+  const ref = db.doc(`sec_note/${uid}/n/${id}`);
+  const s = await ref.get();
+  if (!s.exists) throw pre('not-found', 'ההתראה לא נמצאה');
+  const x = s.data();
+  if (x.st === 'gone') throw pre('gone', 'ההתראה הזו כבר לא רלוונטית');
+  if (Number.isFinite(x.until) && at >= x.until) throw pre('too-late', 'בזמן הזה כבר יהיה מאוחר מדי לטפל בזה');
+  const b = db.batch();
+  b.update(ref, { st: 'open', at, pushAt: at, pend: true, seen: false, n: (x.n || 1) + 1, snz: at, nextAt: x.rep > 0 ? R.nextBizMorning(at) : FieldValue.delete() });
+  b.set(db.collection('sec_log').doc(), logData(uid, 'mgr', 'remSnooze', { tgt: id, note: by + ':' + new Date(at).toISOString().slice(0, 16) }));
+  await b.commit();
+  return { at, l: R.whenL(at, now) };
+}
+
 async function secNotes(request) {
   const input = inputObject(request);
-  const op = ['list', 'seen', 'done', 'reps'].includes(input.op) ? input.op : null;
+  const op = ['list', 'seen', 'done', 'reps', 'snooze'].includes(input.op) ? input.op : null;
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const { who, db } = await gate(request, { consent: true });
   const col = db.collection(`sec_note/${who.uid}/n`);
@@ -403,6 +422,12 @@ async function secNotes(request) {
   }
   const id = typeof input.id === 'string' && ID_RE.test(input.id) ? input.id : null;
   if (!id) throw bad('bad-id', 'מזהה לא תקין');
+  if (op === 'snooze') {
+    // 15.11.2026 (סעיף 7): "תזכירי לי שוב" – at (ms) או when:'morning' (יום העסקים הבא 08:00)
+    const at = input.when === 'morning' ? R.snzMorning(now) : (Number.isFinite(input.at) ? Math.floor(input.at / 60e3) * 60e3 : NaN);
+    const out = await snooze(db, who.uid, id, at, now, 'app');
+    return { ok: true, id, at: out.at, l: out.l };
+  }
   const ref = col.doc(id);
   const s = await ref.get();
   if (!s.exists) throw pre('not-found', 'ההתראה לא נמצאה');
@@ -501,4 +526,4 @@ exports.secDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 04:1
   if (r.errors.length) throw new Error('secretary daily: ' + r.errors.length + ' errors');
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { runRemind, remindBiz, runSecDaily, dailyBiz, pushText, tokensOf, nid, monthsAgo } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, tokensOf, nid, monthsAgo } });

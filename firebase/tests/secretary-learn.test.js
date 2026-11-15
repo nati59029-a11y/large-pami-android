@@ -514,8 +514,15 @@ describe('צ\'אט נקי ו"מול העיניים": מצב כרטיסים, צ\'
     // בלי visit – אותו "מאז", בלי כתיבה
     const e2 = await call(M1, { op: 'eyes' });
     assert.equal(e2.r.since, e.r.since); assert.equal((await get(`b/${A}/sec_cfg/visit`))[M1].chat, v.chat);
-    // ניתוב: חשבוניות ל"בטיפול"
+    // מסך "לטיפול" באפליקציה (hold:true): בלי כלל "לטיפול" – רשימה ריקה מיד, בלי לרשום כניסה
+    const h0 = await call(M1, { op: 'eyes', hold: true, visit: true });
+    assert.deepEqual(h0.r.hold, []); assert.equal(h0.r.holdOn, false); assert.equal(h0.r.open, undefined);
+    assert.equal((await get(`b/${A}/sec_cfg/visit`))[M1].chat, v.chat);
+    // ניתוב: חשבוניות ל"לטיפול" (המסך הקיים באפליקציה; גם הניסוח הישן "בטיפול" מזוהה)
     await call(M1, { op: 'save', k: 'feed', id: 'inv', text: 'חשבוניות מהיום – לבטיפול' });
+    const h1 = await call(M1, { op: 'eyes', hold: true, visit: true });
+    assert.ok(h1.r.hold.some((x) => x.id === 'i:iv1') && h1.r.holdOn === true && h1.r.open === undefined);
+    assert.equal((await get(`b/${A}/sec_cfg/visit`))[M1].chat, v.chat);
     const e3 = await call(M1, { op: 'eyes' });
     assert.ok(!e3.r.open.some((x) => x.k === 'inv') && e3.r.hold.some((x) => x.id === 'i:iv1') && e3.r.holdOn === true);
     // מנהל ב׳ – בלי הניתוב של מנהל א׳, ובלי ההצעה האישית שלו ביומן
@@ -525,5 +532,65 @@ describe('צ\'אט נקי ו"מול העיניים": מצב כרטיסים, צ\'
     await put(`b/${A}/sec_cfg/main`, { learn: false }, true);
     assert.equal((await call(M1, { op: 'eyes' })).ok, true);
     assert.equal((await call(M1, { op: 'list' })).reason, 'learn-off');
+  });
+});
+
+// 15.11.2026 (סעיף 7): "תזכירי לי שוב" – secNotes op:'snooze' ו"תשלחי שוב בעוד שעה" בתגובה על התראה
+describe('"תזכירי לי שוב": קביעה, בדיקות תקינות, תגובה בעברית ושליחה בזמן גם בשעות השקטות', () => {
+  beforeEach(() => seed());
+  const NOTES = () => require('../functions/secretary-remind.js');
+  const RMc = () => require('../functions/secretary-remind.js')._core;
+  const RL = () => require('../functions/lib/sec-remind.js');
+  async function sn(uid, data) { try { return { ok: true, r: await NOTES().secNotes.run(req(uid, data)) }; } catch (e) { return { ok: false, reason: e.details && e.details.reason, msg: e.message }; } }
+
+  it('snooze: הזמן נשמר (גם pushAt – שעות שקטות לא מעכבות), ההתראה נעלמת מהרשימה עד אז; תקינות: עבר, מעל 60 יום, של מנהל אחר, לא רלוונטית', async () => {
+    const t0 = Date.now(), at = t0 + 3600e3;
+    const r = await sn(M1, { op: 'snooze', id: 'n1', at });
+    assert.equal(r.ok, true, r.msg);
+    const want = Math.floor(at / 60e3) * 60e3;
+    assert.equal(r.r.at, want); assert.match(r.r.l, /^(היום|מחר) \d{2}:\d{2}$/);
+    const x = await get(`b/${A}/sec_note/${M1}/n/n1`);
+    assert.equal(x.at, want); assert.equal(x.pushAt, want); assert.equal(x.pend, true); assert.equal(x.seen, false); assert.equal(x.st, 'open'); assert.equal(x.n, 2); assert.equal(x.snz, want);
+    assert.equal(x.nextAt, undefined, 'בלי חזרות – אין nextAt');
+    assert.ok(!(await sn(M1, { op: 'list' })).r.notes.some((y) => y.id === 'n1'), 'עד הזמן שנבחר – לא ברשימה');
+    assert.ok((await coll(`b/${A}/sec_log`)).some((l) => l.act === 'remSnooze' && l.tgt === 'n1'));
+    for (const bad of [Date.now() - 1000, Date.now() + 61 * 864e5, 'x', null]) assert.equal((await sn(M1, { op: 'snooze', id: 'n1', at: bad })).reason, 'bad-at', String(bad));
+    assert.equal((await sn(M2, { op: 'snooze', id: 'n1', at })).reason, 'not-found', 'התראה של מנהל אחר – כאילו לא קיימת');
+    await put(`b/${A}/sec_note/${M1}/n/g1`, { k: 'rem', typ: 'cal', key: 'cal:g', title: 'x', body: '', t: 1, at: 1, st: 'gone', seen: true, n: 1, rep: 0 });
+    assert.equal((await sn(M1, { op: 'snooze', id: 'g1', at })).reason, 'gone');
+    await put(`b/${A}/sec_note/${M1}/n/w1`, { k: 'rem', typ: 'win', key: 'win:x', title: 'x', body: '', t: 1, at: 1, st: 'open', seen: true, n: 1, rep: 0, until: t0 + 1800e3 });
+    assert.equal((await sn(M1, { op: 'snooze', id: 'w1', at })).reason, 'too-late');
+    // תזכורת שטופלה ועם חזרות – נפתחת מחדש; החזרה הבאה אחרי הזמן שנבחר; "מחר בבוקר" = יום העסקים הבא 08:00
+    await put(`b/${A}/sec_note/${M1}/n/r1`, { k: 'rem', typ: 'invDue', key: 'invDue:r', title: 'תזכורת: לשלם', body: '', t: 1, at: 1, st: 'done', seen: true, n: 1, rep: 2 });
+    const m = await sn(M1, { op: 'snooze', id: 'r1', when: 'morning' });
+    const y = await get(`b/${A}/sec_note/${M1}/n/r1`);
+    assert.equal(y.st, 'open'); assert.equal(y.at, RL().nextBizMorning(Date.now())); assert.equal(m.r.at, y.at); assert.equal(RL().il(y.at).hm, '08:00');
+    assert.equal(y.nextAt, RL().nextBizMorning(y.at)); assert.equal(y.rep, 2);
+  });
+
+  it('↩ תגובה "תשלחי שוב בעוד שעה" על התראה – נקבע מיד, בלי כלל; ניסוח אחר – כלל כרגיל; בזמן שנבחר נשלח לטלפון גם בשעות השקטות', async () => {
+    const t0 = Date.now();
+    const r = await call(M1, { op: 'reply', k: 'note', id: 'n1', text: 'תשלחי שוב בעוד שעה' });
+    assert.equal(r.ok, true, r.msg); assert.ok(r.r.snz && Math.abs(r.r.snz.at - (t0 + 3600e3)) < 120e3, JSON.stringify(r.r));
+    const x = await get(`b/${A}/sec_note/${M1}/n/n1`);
+    assert.equal(x.at, r.r.snz.at); assert.equal(x.pend, true);
+    const s = await call(M1, { op: 'save', k: 'note', id: 'n1', text: 'תזכירי לי שוב מחר ב-9:30' });
+    assert.equal(s.ok, true); assert.equal(RL().il(s.r.snz.at).hm, '09:30');
+    assert.equal((await rules()).length, 0, 'לא נשמר כלל');
+    const p = await call(M1, { op: 'reply', k: 'note', id: 'n1', text: 'אל תתריעי לי על התראות כאלה' });
+    assert.ok(p.ok && p.r.prop && !p.r.snz, 'ניסוח רגיל – הצעת כלל כמו קודם');
+    // שעות שקטות כל היום + טוקן: בזמן שנבחר – נשלח
+    await put(`b/${A}/sec_cfg/main`, { mgr: { [M1]: { nt: { q: { on: true, f: '00:00', t: '23:59' } } } } }, true);
+    await put(`b/${A}/staff/${M1}`, { name: 'מנהל', role: 'manager', active: true, pushTokens: ['tokL1_' + 'a'.repeat(30)] });
+    const at = (await get(`b/${A}/sec_note/${M1}/n/n1`)).at;
+    const PUSH = [];
+    const send = async (tokens, msg, meta) => { PUSH.push({ msg, meta }); return tokens.map((t) => ({ token: t, ok: true })); };
+    const biz = await T.loadBiz(A);
+    await RMc().runRemind({ now: at - 120e3, bizzes: [biz], send });
+    assert.ok(!PUSH.some((q) => q.meta.uid === M1), 'לפני הזמן – לא נשלח');
+    await RMc().runRemind({ now: at + 60e3, bizzes: [biz], send });
+    const q = PUSH.find((z) => z.meta.uid === M1);
+    assert.ok(q, 'בזמן שנבחר – נשלח, גם בשעות השקטות'); assert.match(q.msg.body, /^\(שוב\)/);
+    assert.equal((await get(`b/${A}/sec_note/${M1}/n/n1`)).pend, false);
   });
 });
