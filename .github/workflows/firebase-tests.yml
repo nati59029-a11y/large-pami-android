@@ -24,7 +24,8 @@ jobs:
       # ייבוא ברקע (11.11.2026): היומן המלא (כולל יומני הפונקציות באמולטור) נבדק שאין בו מספרי כרטיס מהקבצים המדומים ואין CVV
       - run: |
           set -o pipefail
-          npm run test:multibiz 2>&1 | tee "$RUNNER_TEMP/multibiz.log"
+          # כשנכשל – הבדיקות שנכשלו מודפסות בסוף היומן (היומן ארוך, וקל לפספס אותן באמצע)
+          npm run test:multibiz 2>&1 | tee "$RUNNER_TEMP/multibiz.log" || { echo "===== FAILED TESTS ====="; grep -n -A40 "not ok" "$RUNNER_TEMP/multibiz.log" | grep -v "^[0-9]*-  *at " | tail -400; exit 1; }
           node scripts/scan-log-for-cards.js "$RUNNER_TEMP/multibiz.log"
       - run: npm run test:migrate
   # 7: בדיקות הדפדפן (ui-*, b-emulator, extra, scenario+compare) מול האמולטור, ב-Chromium. לא מפרסם דבר.
