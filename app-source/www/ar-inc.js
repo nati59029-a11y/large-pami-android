@@ -23,16 +23,20 @@ const cfg=()=>AD.R.cfg||{};
 function sub(){let c=S.cats.find(x=>x.id===OPC);if(!c){c={id:OPC,kind:'inc',name:'הכנסות מהזמנות',beh:'simple'};S.cats.push(c)}
  let u=S.subs.find(x=>x.id===SUB);if(!u){u={id:SUB,cat:OPC,name:'חשבוניות'};S.subs.push(u)}return u.id}
 // הפונקציה הטהורה (גם לבדיקות): האם המסמך נספר כהכנסה, ובאיזה סכום. z = arcfg/main.z. (הפרמטר השני – לא בשימוש מאז תיקון סבב 1; נשאר לתאימות)
-// aro = ההזמנה של חשבונית / חשבונית מס קבלה – לפיה מקוזזת ההכנסה מהקישור (arop_)
-function incOf(d,op,z){if(!d||!['inv','ir','cr'].includes(d.t)||!Number.isInteger(d.gross))return null;
+// irRec (זיכוי בלי החזר על חשבונית מס קבלה) = האם החשבונית עצמה נרשמה כהכנסה. aro = ההזמנה של חשבונית / חשבונית מס קבלה – לפיה מקוזזת ההכנסה מהקישור (arop_)
+function incOf(d,op,z,irRec){if(!d||!['inv','ir','cr'].includes(d.t)||!Number.isInteger(d.gross))return null;
  const br=d.br||NB,o=(Array.isArray(d.ord)?d.ord:[])[0]||'',zz=z&&z[br]===true,p=d.pay||{};
  if(d.t==='ir'&&zz&&['cash','card'].includes(p.m)&&!p.via)return null;
- // החלטה 31: זיכוי עם החזר כסף – ההחזר עצמו לא נרשם (רק הזיכוי, בסכום שלילי). בסניף "דוח Z": החזר מזומן / אשראי בקופה (בלי via) כבר בדוח Z – לא נרשם;
- // החזר שלא בקופה (העברה, צ׳ק, אחר, או אשראי בקישור / בטלפון) – נרשם. זיכוי בלי החזר – כמו קודם
- if(d.t==='cr'&&zz&&d.rf&&typeof d.rf==='object'){if(['cash','card'].includes(d.rf.m)&&!d.rf.via)return null}
- else if(d.t==='cr'&&zz&&/^ir[DO]/.test(String(d.ref||'')))return null;
+ // החלטה 31: זיכוי עם החזר כסף – ההחזר עצמו לא נרשם (רק הזיכוי, בסכום שלילי). בסניף "דוח Z": החזר מזומן / אשראי בקופה (בלי via) כבר בדוח Z –
+ // לא נרשם רק החלק שהוחזר בקופה: נרשם −(gross − rf.amt), ודילוג מלא רק כשכל הזיכוי הוחזר בקופה (תיקון סבב 1, בודק 4ב: חשבונית מס ששולמה חלקית).
+ // החזר שלא בקופה (העברה, צ׳ק, אחר, או אשראי בקישור / בטלפון) – נרשם במלואו.
+ // זיכוי בלי החזר על חשבונית מס קבלה בסניף "דוח Z" – כמו החשבונית: לא נרשם אם החשבונית לא נרשמה (מזומן / אשראי בקופה). irRec = true – החשבונית
+ // נרשמה (קישור / טלפון / העברה…) ולכן גם הזיכוי נרשם (תיקון סבב 1, בודק 4ב). irRec לא ידוע – כמו קודם (לא נרשם)
+ let g=d.gross;
+ if(d.t==='cr'&&zz&&d.rf&&typeof d.rf==='object'){if(['cash','card'].includes(d.rf.m)&&!d.rf.via){g=d.gross-(Number.isInteger(d.rf.amt)?Math.max(0,d.rf.amt):d.gross);if(g<=0)return null}}
+ else if(d.t==='cr'&&zz&&/^ir[DO]/.test(String(d.ref||''))&&irRec!==true)return null;
  const sn=(d.custSnap&&d.custSnap.name)||'';
- const f={t:'inc',cat:OPC,date:String(d.d||''),amt:Math.round((d.t==='cr'?-d.gross:d.gross))/100,note:`${TN[d.t]} #${d.no}${d.draft?' (טיוטה)':''}${sn?' · '+sn:''}`.slice(0,200),ardoc:d.id};
+ const f={t:'inc',cat:OPC,date:String(d.d||''),amt:Math.round((d.t==='cr'?-g:g))/100,note:`${TN[d.t]} #${d.no}${d.draft?' (טיוטה)':''}${sn?' · '+sn:''}`.slice(0,200),ardoc:d.id};
  if(d.t!=='cr'&&o)f.aro=o;
  if(br!==NB)f.br=br;return f}
 // קיזוז ההכנסה מהקישור (טהור, גם לבדיקות): op = תנועת op_<ord> פעילה, inv = תנועת ar_ פעילה של חשבונית ההזמנה → תנועת arop_ (או null)
@@ -46,7 +50,10 @@ async function arInc(){if(B||!isA()||!bzF('orders')||typeof S==='undefined'||!S)
   const op=new Set();
   /* 2,000 המסמכים האחרונים (לפי upd) – מסמך ישן יותר כבר נקלט בסנכרון קודם */
   const L=await runQ('ardoc',2000,'upd');
-  for(const d of L){const id='ar_'+d.id,t=S.tx.find(x=>x.id===id),f=incOf(d,op,c.z||{});
+  const byId=new Map(L.map(d=>[d.id,d]));
+  // זיכוי על חשבונית מס קבלה: האם החשבונית נרשמה – לפי המסמך (אם נטען), אחרת לפי היומן (ar_<ref> פעיל)
+  const irRec=d=>{if(d.t!=='cr'||!d.ref)return undefined;const r=byId.get(d.ref);if(r)return incOf(r,op,c.z||{})!==null;const t=S.tx.find(x=>x.id==='ar_'+d.ref);return !!(t&&!t.x)};
+  for(const d of L){const id='ar_'+d.id,t=S.tx.find(x=>x.id===id),f=incOf(d,op,c.z||{},irRec(d));
    if(!f){if(t&&!t.x){t.x=1;n++}continue}
    f.sub=sub();
    if(!t){S.tx.push(Object.assign({id},f));n++}

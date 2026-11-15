@@ -142,7 +142,11 @@ async function open(browser, www, who, calls, arOn) {
     if (who === 'm') {
       // החזר כסף על invD2 (שולמה חלקית: ₪21.32 מתוך ₪73.16): "הכול" – יוחזר רק מה ששולם, באמצעי שנבחר
       await page.evaluate(() => ACT.arCr({ dataset: { id: 'invD2' } })); await H.settle(page, 800);
-      await page.click('#dlg [data-a=arCrAll]'); await page.check('#dlg input[name=rk][value=back]'); await page.selectOption('#dlg select[name=rm]', 'card'); await H.settle(page, 200);
+      await page.click('#dlg [data-a=arCrAll]'); await page.check('#dlg input[name=rk][value=back]'); await H.settle(page, 200);
+      // תיקון סבב 1 (בודק 4ב, הערה 2): אמצעי התשלום המקורי לא ידוע – שום אמצעי לא מסומן מראש, ו"הפק זיכוי" כבוי עד שבוחרים
+      const u0 = await page.evaluate(() => ({ v: document.querySelector('#dlg select[name=rm]').value, lbl: document.querySelector('#arCrRm').innerText, sub: document.querySelector('#dlg form[data-f=arCrF] button:not([type])').disabled }));
+      check('m 7ה0 אמצעי לא ידוע: "בחרו…" מסומן (ריק), "הפק זיכוי" כבוי', u0.v === '' && /לא ידוע/.test(u0.lbl) && u0.sub, u0);
+      await page.selectOption('#dlg select[name=rm]', 'card'); await H.settle(page, 200);
       const s4 = await st();
       check('m 7ה החזר כסף בחשבונית ששולמה חלקית: "יוחזר ללקוח (זיכוי באשראי) ₪21.32"', /יוחזר ללקוח \(זיכוי באשראי\)/.test(s4.sum) && /21\.32/.test(s4.sum) && /73\.16/.test(s4.sum) && !s4.sub && s4.ov <= 0, s4.sum);
       await page.fill('#dlg input[name=why]', 'בוטל'); n0 = calls.length; await page.click('#dlg form[data-f=arCrF] button:not([type])'); await H.settle(page, 800);
@@ -183,10 +187,18 @@ async function open(browser, www, who, calls, arOn) {
       const rfi = await page.evaluate(() => { const f = window.__arInc.incOf, op = new Set(), z = { br2: true };
         const d = (x) => Object.assign({ id: 'c', t: 'cr', no: 2, d: '2026-11-12', gross: 1180, br: 'br2', ord: ['o1'], ref: 'irD1', custSnap: { name: 'ל' }, draft: true }, x);
         const a = (x) => { const r = f(d(x), op, z); return r ? r.amt : null; };
+        // תיקון סבב 1 (בודק 4ב): חשבונית מס ₪118, שולמו ₪30, זיכוי מלא + החזר מזומן בקופה (rf.amt=3000) → נרשם −88 (רק מה שלא עבר בקופה); נטו 118 − 88 = 30
+        const inv = f(d({ id: 'i', t: 'inv', gross: 11800, ref: undefined }), op, z), part = f(d({ gross: 11800, ref: 'invD7', rf: { m: 'cash', amt: 3000 } }), op, z);
+        // תיקון סבב 1 (בודק 4ב, הערה 3): זיכוי בלי החזר על חשבונית מס קבלה – כמו החשבונית: נרשמה (קישור / טלפון) → −11.80; לא נרשמה / לא ידוע → לא
+        const irL = f(d({ t: 'ir', id: 'irD1', gross: 1180, pay: { m: 'card', via: 'link' } }), op, z), irC = f(d({ t: 'ir', id: 'irD1', gross: 1180, pay: { m: 'cash' } }), op, z);
+        const crRec = f(d({}), op, z, irL !== null), crNo = f(d({}), op, z, irC !== null);
         return { cash: a({ rf: { m: 'cash', amt: 1180 } }), card: a({ rf: { m: 'card', amt: 1180 } }), link: a({ rf: { m: 'card', amt: 1180, via: 'link' } }), tr: a({ rf: { m: 'transfer', amt: 1180 } }),
-          noZ: f(d({ br: 'br1', rf: { m: 'cash', amt: 1180 } }), op, z).amt, plain: a({}) }; });
+          noZ: f(d({ br: 'br1', rf: { m: 'cash', amt: 1180 } }), op, z).amt, plain: a({}), inv: inv && inv.amt, part: part && part.amt, net: Math.round(((inv && inv.amt) + (part && part.amt)) * 100) / 100,
+          irL: irL && irL.amt, irC, crRec: crRec && crRec.amt, crNo }; });
       check('m 10ג החזר כסף (incOf): רק הזיכוי −11.80; דוח Z – מזומן/אשראי בקופה לא, קישור/העברה כן; סניף בלי דוח Z – כן; זיכוי בלי החזר – כמו קודם',
         rfi.cash === null && rfi.card === null && rfi.link === -11.8 && rfi.tr === -11.8 && rfi.noZ === -11.8 && rfi.plain === null, rfi);
+      check('m 10ג1 דוח Z, החזר חלקי בקופה: חשבונית מס +118, זיכוי מלא עם החזר מזומן ₪30 → −88, נטו 30', rfi.inv === 118 && rfi.part === -88 && rfi.net === 30, rfi);
+      check('m 10ג2 דוח Z, זיכוי בלי החזר על חשבונית מס קבלה: שולמה בקישור (נרשמה +11.80) → −11.80; שולמה במזומן בקופה (לא נרשמה) → לא', rfi.irL === 11.8 && rfi.crRec === -11.8 && rfi.irC === null && rfi.crNo === null, rfi);
       // סנכרון בפועל ביומן המנהל (S.tx): חשבונית = תנועת הכנסה אחת; קבלה – לא; הרצה שנייה – בלי שינוי
       const sy = await page.evaluate(async () => { const a = await window.__arInc.arInc(); const b = await window.__arInc.arInc();
         return { a, b, tx: S.tx.filter((t) => String(t.id).indexOf('ar_') === 0).map((t) => [t.id, t.amt, t.date, t.br || '', t.cat, !!t.x]).sort() }; });
