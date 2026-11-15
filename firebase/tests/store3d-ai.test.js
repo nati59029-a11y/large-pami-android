@@ -328,10 +328,53 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [] }, Date.now(), deps())), 'bad-img-count');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'zz', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'no-branch');
     assert.equal(await err(X.draftCore(db, W(DR, { brs: ['other'] }), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'other-branch');
+    // עד כאן 5 הקמות היום בסניף (התקרה היומית, 15.11.2026) – מאפסים את המונה היומי כדי לבדוק כאן רק את החזרת המכסה החודשית
+    assert.equal((await get(`b/${A}/s3use/d_main`)).n, 5);
+    await adm.doc(`b/${A}/s3use/d_main`).delete();
     GM.state.mode = 'quota';
     const before = (await use()).n;
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(5).fill(IMG) }, Date.now(), deps())), 'gemini-quota');
     assert.equal((await use()).n, before, '429 – מוחזרת בדיקה אחת בדיוק (5 תמונות, לא 5 בדיקות)');
+  });
+
+  it('mapDraft: עד 5 הקמות ביום לסניף (החלטת המשתמש 15.11.2026) – השישית נדחית לפני Gemini; כשל מחזיר; qid חוזר לא נספר; יום חדש מתאפס; סניף אחר לא מושפע', async () => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const dd = (br) => get(`b/${A}/s3use/d_${br}`);
+    const draft = (q, br) => X.draftCore(db, W(MGR), { qid: q || qid(), br: br || 'main', kind: 's', imgs: [IMG] }, Date.now(), deps());
+    await adm.doc('b/' + A).update({ org: { branches: [{ id: 'main', name: 'ראשי', on: true }, { id: 'br2', name: 'שני', on: true }] } });
+    // יום חדש: מסמך מאתמול עם 5 – לא חוסם, ומתחילים מ-1
+    await adm.doc(`b/${A}/s3use/d_main`).set({ d: '2026-01-01', n: 5, upd: 1 });
+    const q1 = qid();
+    assert.equal((await draft(q1)).st, 'ok');
+    assert.deepEqual([(await dd('main')).d, (await dd('main')).n], [today, 1], 'יום חדש מאפס את המונה');
+    // qid חוזר (dup) – לא נספר
+    assert.equal((await draft(q1)).dup, true);
+    assert.equal((await dd('main')).n, 1, 'qid חוזר לא נספר');
+    for (let i = 2; i <= 5; i++) assert.equal((await draft()).st, 'ok', 'הקמה ' + i);
+    assert.equal((await dd('main')).n, 5);
+    // השישית – נדחית לפני Gemini, בלי מכסה חודשית ובלי s3draft / s3qid
+    const nReq = GM.state.requests.length, b6 = (await use()).n, q6 = qid();
+    let e6 = null;
+    try { await draft(q6); } catch (e) { e6 = e; }
+    assert.equal(e6 && e6.details && e6.details.reason, 'draft-daily');
+    assert.equal(e6.code, 'resource-exhausted');
+    assert.match(e6.message, /5 הקמות היום בסניף הזה/);
+    assert.deepEqual([GM.state.requests.length, (await use()).n, (await dd('main')).n], [nReq, b6, 5]);
+    assert.equal(await get(`b/${A}/s3draft/${q6}`), null);
+    assert.equal(await get(`b/${A}/s3qid/${q6}`), null);
+    // סניף אחר – לא מושפע
+    assert.equal((await draft(null, 'br2')).st, 'ok');
+    assert.equal((await dd('br2')).n, 1);
+    assert.equal((await dd('main')).n, 5);
+    // כשל של Gemini לפני תשובה (429) – המונה היומי חוזר ב-1, ואחריו אפשר הקמה נוספת
+    await adm.doc(`b/${A}/s3use/d_main`).set({ d: today, n: 4, upd: 1 });
+    GM.state.mode = 'quota';
+    assert.equal(await err(draft()), 'gemini-quota');
+    assert.equal((await dd('main')).n, 4, 'כשל מחזיר את המונה היומי');
+    GM.state.mode = 'ok';
+    assert.equal((await draft()).st, 'ok', 'אחרי כשל – אפשר הקמה נוספת');
+    assert.equal((await dd('main')).n, 5);
+    assert.equal(await err(draft()), 'draft-daily');
   });
 });
 

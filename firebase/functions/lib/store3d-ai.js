@@ -4,6 +4,7 @@
 //   decodeJpeg(b64, lim)        – תמונה מהטלפון: base64 של JPEG בלבד (לפי התוכן, scan.sniff), גודל ומידות לפי הגבולות.
 //   checkSlot(slot, map)        – מקום הצילום קיים במפה: הגוף לא מחוק, הצד והמקטע בטווח, וגובה הצילום (a / t+b) לפי hi.
 //   quotaStep(...)              – הזמנת מכסה: חודשית לסניף (s3use/b_{br}) + בלם יומי לעובד (s3use/u_{uid}), אזהרה ב-80%.
+//   draftDayStep(...)           – עד DRAFT_DAY_MAX (5) הקמות (mapDraft) ביום לסניף (s3use/d_{br}).
 //   shelfBroken / cleanShelf    – תשובת המודל לבדיקת מדף: "שבורה" (נדחית, המכסה מוחזרת) או מסוננת לשדות ai (4.10).
 //                                 גם תשובה תקינה במבנה מסוננת כאן: סוגים, טווחים, מחסן בלי מחירים, conf<0.6 = אזהרה, מספר המלצות.
 //   cleanDraft                  – תשובת המודל לטיוטת מפה → מפה במבנה 4.3 (מזהים, מספור, חדר לכל גוף, uz עם ok:false).
@@ -90,8 +91,8 @@ function quotaStep(b, u, o) {
   const un0 = dayN(u, o.day);
   const lim = Number.isInteger(o.adhocMax);
   const an0 = lim ? dayN(o.a, o.day) : 0;
-  if (n0 + k > cap) throw fail('s3-month-limit', `נגמרה המכסה החודשית של הסניף (${n0} מתוך ${cap} תמונות). התמונות נשמרות בטלפון ויישלחו כשהמכסה תוגדל או בחודש הבא.`);
-  if (un0 + k > o.userMax) throw fail('s3-user-day', `שלחת היום יותר מ-${o.userMax} תמונות. נסו שוב מחר.`);
+  if (n0 + k > cap) throw fail('s3-month-limit', `נגמרה המכסה החודשית של הסניף (${n0} מתוך ${cap} בדיקות). התמונות נשמרות בטלפון ויישלחו כשהמכסה תוגדל או בחודש הבא.`);
+  if (un0 + k > o.userMax) throw fail('s3-user-day', `שלחת היום יותר מ-${o.userMax} בדיקות. נסו שוב מחר.`);
   if (lim && an0 + k > o.adhocMax) throw fail('s3-adhoc-day', `אפשר לשלוח עד ${o.adhocMax} דיווחים יזומים ביום. נסו שוב מחר.`);
   const n = n0 + k;
   const warn = n >= 0.8 * cap && w80 !== o.month;
@@ -110,7 +111,16 @@ function refundStep(b, month, k, now) {
   if (!isObj(b) || b.m !== month || !inR(b.n, 0, 100000)) return null;
   return { n: Math.max(0, b.n - k), upd: now };
 }
-// החזרה במונה יומי (דיווח יזום), באותו יום
+// הקמות (mapDraft) ביום לסניף (החלטת המשתמש 15.11.2026): s3use/d_{br} = { d: יום בשעון ישראל, n, upd }. יום חדש = מתחילים מ-0.
+// doc = המסמך הקיים (או null). מחזיר את המסמך החדש לכתיבה, או זורק fail('draft-daily'). בהחזרה – refundDay (אותו מבנה).
+const DRAFT_DAY_MAX = 5;
+function draftDayStep(doc, day, now, max) {
+  const lim = inR(max, 0, 100000) ? max : DRAFT_DAY_MAX;
+  const n0 = dayN(doc, day);
+  if (n0 + 1 > lim) throw fail('draft-daily', `הגעתם ל-${lim} הקמות היום בסניף הזה. נסו שוב מחר.`);
+  return { d: day, n: n0 + 1, upd: now };
+}
+// החזרה במונה יומי (דיווח יזום, הקמות), באותו יום
 function refundDay(doc, day, k, now) {
   if (!isObj(doc) || doc.d !== day || !inR(doc.n, 0, 100000)) return null;
   return { n: Math.max(0, doc.n - k), upd: now };
@@ -312,6 +322,6 @@ const validAt = (t, now) => Number.isInteger(t) && t >= MIN_T && t <= MAX_T && t
 
 module.exports = {
   ISSUE_KINDS, PRICE_KINDS, STATUSES, DONE_ST, LOW_CONF, IMG, THUMB, DRAFT, RE_SLOT,
-  ADHOC_DAY: 20, decodeJpeg, draftImgs, checkSlot, quotaStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  ADHOC_DAY: 20, DRAFT_DAY_MAX, decodeJpeg, draftImgs, checkSlot, quotaStep, draftDayStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
   israelMonth, validAt, fail,
 };

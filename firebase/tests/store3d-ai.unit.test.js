@@ -90,6 +90,19 @@ describe('store3d-ai – מכסה', () => {
     assert.deepEqual(A.refundDay({ d: '2026-11-14', n: 5 }, '2026-11-14', 1, 9), { n: 4, upd: 9 });
     assert.equal(A.refundDay({ d: '2026-11-13', n: 5 }, '2026-11-14', 1, 9), null);
   });
+  it('draftDayStep: עד 5 הקמות ביום לסניף, יום חדש מתאפס, החזרה לא מתחת ל-0', () => {
+    const D = '2026-11-15';
+    assert.equal(A.DRAFT_DAY_MAX, 5);
+    assert.deepEqual(A.draftDayStep(null, D, 7), { d: D, n: 1, upd: 7 });
+    assert.deepEqual(A.draftDayStep({ d: D, n: 4 }, D, 7), { d: D, n: 5, upd: 7 }, 'החמישית עוברת');
+    let e = null;
+    try { A.draftDayStep({ d: D, n: 5 }, D, 7); } catch (x) { e = x; }
+    assert.equal(e && e.code, 'draft-daily', 'השישית נדחית');
+    assert.match(e.message, /5 הקמות היום בסניף הזה/);
+    assert.deepEqual(A.draftDayStep({ d: '2026-11-14', n: 5 }, D, 7), { d: D, n: 1, upd: 7 }, 'יום חדש');
+    assert.equal(A.draftDayStep({ d: D, n: 'x' }, D, 7).n, 1, 'מסמך פגום = 0');
+    assert.deepEqual(A.refundDay({ d: D, n: 0 }, D, 1, 9), { n: 0, upd: 9 }, 'לא מתחת ל-0');
+  });
 });
 
 describe('store3d-ai – תשובת בדיקת מדף (קובצי הדוגמה של שלב 6)', () => {
