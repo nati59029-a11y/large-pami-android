@@ -292,9 +292,9 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   }
   { // 13 (2026-11-10, סעיף 2): עסק עם ניוד – "+ כרטיס אשראי נוסף" בטופס ההזמנה (עד 3); בלי ניוד – אין כפתור
-    await fresh(); await page.click('#occd summary'); await H.settle(page, 200);
+    await fresh(); if (CELLON) { await page.click('#occd summary'); await H.settle(page, 200); }
     const hasAdd = !!(await page.$('[data-a=ocCdAdd]'));
-    if (!CELLON) check('13 בלי ניוד: אין "+ כרטיס אשראי נוסף"', !hasAdd);
+    if (!CELLON) check('13 בלי ניוד: אין משבצת אשראי באמצע הטופס (משוב סבב 1) ואין "+ כרטיס אשראי נוסף"', !hasAdd && !(await page.$('#occd')));
     else {
       await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0529998877'); await H.settle(page, 400);
       await page.fill('input[data-i=ocCd][data-k=num]', '4580123456789012');
