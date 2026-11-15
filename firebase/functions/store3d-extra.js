@@ -16,7 +16,7 @@
 //     ישנים יותר – ph.gone=true והקבצים נמחקים (התוצאות בטקסט נשארות תמיד); קבצים תועים שלא שייכים ל-ph.  5. טקסטורות שאינן במפה
 //     ובאף גרסה, בנות 30 יום ומעלה.  6. טיוטות (s3draft) בנות 30 יום ומעלה, s3qid שפג תוקפו (exp).
 //     כל מחיקה שהצליחה נרשמת ביומן השרת (logger) וב-b/{bizId}/audit (act 's3Clean'; רשימה ארוכה – כמה רשומות). מפה שלמה שנמחקה
-//     (smap.del) – לא נמחקת סופית. תיקון סבב 1: 3 סבבים אחרונים לכל מפה + מקום (חנות ומחסן בנפרד), ודיווחים יזומים בשמירה נפרדת.
+//     (smap.del) – לא נמחקת סופית. שלב 18א: 7. סיור 360 – גרסאות קודמות ונקודות שנמחקו, 30 יום אחרי (stepPano). תיקון סבב 1: 3 סבבים אחרונים לכל מפה + מקום (חנות ומחסן בנפרד), ודיווחים יזומים בשמירה נפרדת.
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -399,6 +399,32 @@ async function stepTex(c, brs, log) {
   }
   return n;
 }
+// 7. שלב 18א – סיור 360: קובצי גרסאות קודמות (30 יום אחרי ההחלפה) ונקודות שנמחקו לפני 30 יום ומעלה (קבצים, ואחריהם המסמך).
+// נקודה פעילה והגרסה הנוכחית שלה – לא נמחקות. שום דבר מחוץ ל-pano/ ול-smap/{mapId}/pano לא נקרא ולא נמחק כאן.
+async function stepPano(c, brs, log) {
+  let n = 0;
+  for (const br of brs) {
+    const files = await listFiles(c.bucket, `b/${c.bizId}/store3d/${br}/pano/`);
+    const byMap = new Map();
+    for (const f of files) { const m = /\/pano\/([sw]-[a-z0-9_]{2,20})\//.exec(f.name); if (m) { if (!byMap.has(m[1])) byMap.set(m[1], []); byMap.get(m[1]).push(f); } }
+    for (const mapId of [`s-${br}`, `w-${br}`]) if (!byMap.has(mapId)) byMap.set(mapId, []);
+    for (const [mapId, L] of byMap) {
+      const ps = await c.db.collection(`smap/${mapId}/pano`).get();
+      if (!ps.size && !L.length) continue;
+      const docs = new Map(ps.docs.map((d) => [d.id, d.data()]));
+      const plan = X.panoClean(L, docs, c.now);
+      const failed = new Set();
+      for (const f of plan.files) {
+        if (await delFile(c.bucket, f)) { n++; log.push('pano ' + f.split('/pano/')[1]); } else failed.add(/^(p[0-9]{1,4})_/.exec(f.slice(f.lastIndexOf('/') + 1))[1]); // רק שם הקובץ (סניף יכול להיקרא p2_north)
+      }
+      for (const pid of plan.docs) {
+        if (failed.has(pid)) continue;
+        try { await c.db.doc(`smap/${mapId}/pano/${pid}`).delete(); n++; log.push(`pano ${mapId}/${pid}`); } catch (e) { logger.warn('s3Clean: pano doc delete failed', { code: e && e.code }); }
+      }
+    }
+  }
+  return n;
+}
 // 6. טיוטות ישנות ו-s3qid שפג תוקפו (זמניים לפי החוזה)
 async function stepTemp(c, log) {
   let n = 0;
@@ -426,6 +452,7 @@ async function cleanBiz(o) {
   await step('photos', () => stepPhotos(c, brs, log));
   await step('tex', () => stepTex(c, brs, log));
   await step('temp', () => stepTemp(c, log));
+  await step('pano', () => stepPano(c, brs, log));
   if (log.length) {
     logger.info('s3Clean: deleted', { biz: c.bizId, log });
     // תיקון סבב 1: בלי חיתוך – רשימה ארוכה מתפצלת לכמה רשומות (כל אחת עד 1500 תווים, part = מספר הרשומה)

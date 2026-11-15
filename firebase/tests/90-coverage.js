@@ -127,14 +127,14 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     // פרטי העסק למסמכים, מונים ומזהי בקשה (arcfg) – 14.11.2026, שלב 3 חלק ב'
     // "להזמין מספקים" מתוך מסך הליקוט (supord) – 14.11.2026, משוב סבב 3
     // חשבוניות, קבלות וזיכויים (ardoc) והקצאות (aralloc) – 15.11.2026, שלב 4
-    // סריקת חנות בתלת מימד – store3d (14.11.2026): s3br, s3set, smap (ver, bay מקוננים), s3draft, sround, srun (ph, ai מקוננים), s3sum, s3fix, s3appeal, s3short, s3use, s3perf, s3qid, s3ntf
+    // סריקת חנות בתלת מימד – store3d (14.11.2026): s3br, s3set, smap (ver, bay מקוננים), s3draft, sround, srun (ph, ai מקוננים), s3sum, s3fix, s3appeal, s3short, s3use, s3perf, s3qid, s3ntf; שלב 18א: pano מקונן בתוך smap (סיור 360)
     // המזכירה – כללים אישיים ויומן "נשלח לבד" (sec_mrule, sec_mlog – 15.11.2026, שרת בלבד)
     // ריבוי עסקים (2026-11-05): אוספי השורש נבדקים רק עד הבלוק match /b/{bizId}, שמכיל העתק שלהם בתוך העסק
     const rootPart = t.slice(0, t.indexOf('match /b/{bizId} {'));
     const rootMatches = [...rootPart.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
     const colls = rootMatches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
     assert.ok(/match \/b\/\{bizId\} \{/.test(t), 'בלוק העסקים חסר');
-    assert.deepEqual(colls.sort(), ['admins', 'ai', 'app_backup_status', 'appreq', 'aralert', 'aralloc', 'arcfg', 'ardoc', 'bay', 'bk', 'c', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cprice', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'm', 'mq', 'n', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'ph', 'pinv', 'prod', 'ptk', 'rq', 'rtk', 's3appeal', 's3br', 's3draft', 's3fix', 's3ntf', 's3perf', 's3qid', 's3set', 's3short', 's3sum', 's3use', 'sec_cal', 'sec_cfg', 'sec_chat', 'sec_draft', 'sec_facts', 'sec_facts_sensitive', 'sec_in', 'sec_inv', 'sec_log', 'sec_mirror', 'sec_mlog', 'sec_mrule', 'sec_note', 'sec_rep', 'sec_rules', 'sec_usage', 'shelf', 'smap', 'sround', 'srun', 'staff', 'stockLog', 'superadmins', 'supinv', 'supord', 'tasks', 'users', 'ver', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
+    assert.deepEqual(colls.sort(), ['admins', 'ai', 'app_backup_status', 'appreq', 'aralert', 'aralloc', 'arcfg', 'ardoc', 'bay', 'bk', 'c', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cprice', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'm', 'mq', 'n', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'pano', 'ph', 'pinv', 'prod', 'ptk', 'rq', 'rtk', 's3appeal', 's3br', 's3draft', 's3fix', 's3ntf', 's3perf', 's3qid', 's3set', 's3short', 's3sum', 's3use', 'sec_cal', 'sec_cfg', 'sec_chat', 'sec_draft', 'sec_facts', 'sec_facts_sensitive', 'sec_in', 'sec_inv', 'sec_log', 'sec_mirror', 'sec_mlog', 'sec_mrule', 'sec_note', 'sec_rep', 'sec_rules', 'sec_usage', 'shelf', 'smap', 'sround', 'srun', 'staff', 'stockLog', 'superadmins', 'supinv', 'supord', 'tasks', 'users', 'ver', 'xfer', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/rq\/\{id\} \{[\s\S]*?match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך rq');
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/p\/\{pid\} \{/, 'p (תמונות משימה) חייב להיות מקונן בתוך tasks');
@@ -145,6 +145,7 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     assert.match(t, /match \/deposits\/\{id\} \{[\s\S]*match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך deposits');
     assert.match(t, /match \/pinv\/\{id\} \{[\s\S]*?match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך pinv');
     assert.match(t, /match \/smap\/\{mapId\} \{[\s\S]*?match \/ver\/\{vid\} \{[\s\S]*?match \/bay\/\{bayId\} \{/, 'ver ו-bay חייבים להיות מקוננים בתוך smap (store3d)');
+    assert.match(t, /match \/smap\/\{mapId\} \{[\s\S]*?match \/pano\/\{pid\} \{[\s\S]*?match \/bay\/\{bayId\} \{/, 'pano חייב להיות מקונן בתוך smap (שלב 18א)');
     assert.match(t, /match \/srun\/\{runId\} \{[\s\S]*?match \/ph\/\{slot\} \{[\s\S]*?match \/ai\/\{slot\} \{/, 'ph ו-ai חייבים להיות מקוננים בתוך srun (store3d)');
     // המזכירה (2026-11-11): m מקונן בתוך sec_chat, p בתוך sec_inv
     assert.match(t, /match \/sec_chat\/\{uid\} \{\s*allow read, create, update, delete: if false;\s*match \/m\/\{id\} \{/, 'm חייב להיות מקונן בתוך sec_chat');
