@@ -295,7 +295,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const lgc = await page.evaluate(() => ({ brand: !!document.querySelector('[data-v=brand]'), enter: !!document.querySelector('[data-a=admEnter]'), sus: !!document.querySelector('[data-a=admSus]'), feat: [...document.querySelectorAll('[data-a=admFeat]')].map((e) => e.dataset.k).join(','), adv: !!document.querySelector('form[data-f=admAdv]'), tok: !!document.querySelector('[data-a=admTok]'), txt: document.querySelector('#main').innerText.slice(0, 160) }));
   await shot(page, '12-כרטיס-לארג-פעמי', true);
   // 12.11.2026: בעסק legacy – רק המתגים של התוספות שכבויות בו כברירת מחדל (סלולר, המזכירה); השרת (setBusinessFeatures) תומך בהן גם ב-legacy
-  check('31 כרטיס לארג\' פעמי (legacy): "כניסה כמנהל" + מתגי סלולר והמזכירה בלבד, בלי פעולות שהשרת דוחה (השהיה, adv, אסימון, מיתוג)', lgc.enter && !lgc.sus && lgc.feat === 'cellular,secretary' && !lgc.adv && !lgc.tok && !lgc.brand, lgc);
+  check('31 כרטיס לארג\' פעמי (legacy): "כניסה כמנהל" + מתגי סלולר, המזכירה וסריקת החנות בלבד, בלי פעולות שהשרת דוחה (השהיה, adv, אסימון, מיתוג)', lgc.enter && !lgc.sus && lgc.feat === 'cellular,secretary,store3d' && !lgc.adv && !lgc.tok && !lgc.brand, lgc);
   await page.click('[data-a=admFeat][data-k=secretary]'); await wait(page, 2000);
   const lsec = await page.evaluate(() => { const e = document.querySelector('[data-a=admFeat][data-k=secretary]'); return e ? e.textContent : ''; });
   check('31ב לארג\' פעמי: הפעלת המזכירה מהכרטיס – המתג "פעיל"', lsec === 'פעיל', lsec);

@@ -147,6 +147,9 @@ describe('store3d-extra: ניקוי – 3 סבבים אחרונים, סל מחז
   it('קבצים תועים: לא ph.p ולא ph.th, ישנים מיום', () => {
     const L = [F('r8k2m4q1_20261101', 'f1-a-1_a', 1, NOW - 2 * D1), F('r8k2m4q1_20261101', 'f1-a-1_a', 2, NOW - 2 * D1), F('r8k2m4q1_20261101', 'f1-a-1_a', 2, NOW - 2 * D1, 1), F('r8k2m4q1_20261101', 'f1-a-1_a', 3, NOW)];
     assert.deepEqual(X.strayFiles(L, { p: L[1].name, th: L[2].name }, NOW), [L[0].name]);
+    // שלב 14: מסמך ph חסר – לא נמחק כלום
+    assert.deepEqual(X.strayFiles(L, null, NOW), []);
+    assert.deepEqual(X.strayFiles(L, undefined, NOW), []);
   });
   it('סל המחזור: נמחק סופית רק פריט עם del:1 ש-delAt לפני 30 יום ומעלה; פריט חי ופריט שנמחק לאחרונה נשארים', () => {
     const map = { v: 4, ent: 'd2', rooms: [{ id: 'r1' }], doors: [{ id: 'd1', del: 1, delAt: NOW - 31 * D1, delBy: 'u_mgr001' }, { id: 'd2' }],

@@ -37,6 +37,9 @@ const COPY = [
   'yemot_promos', 'yemot_state', 'yemot_usage', 'yemot_test', 'voice_usage', 'scan_usage',
   'audit_log', 'table_bases', // אוספים שנמצאו בבדיקה 7.11 – הועברו בהחלטת המשתמש
   'ord', 'prod', 'stockLog', 'ordcfg', 'ordpay', 'private', // הזמנות שלב 1 (2026-11-08): לארג' פעמי ב-legacy כותב לשורש, באותם שמות כמו ב-b/{bizId}
+  // סריקת חנות בתלת מימד (שלב 14, 15.11.2026): ב-legacy האוספים בשורש, באותם שמות כמו ב-b/{bizId}. תתי-האוספים (ver, bay, ph, ai, m) מועתקים עם ההורה.
+  // קובצי התמונות כבר תחת b/largpeami/store3d/ ב-Storage בכל מצב, ולכן הנתיבים שבמסמכים נשארים נכונים אחרי ההעברה.
+  's3br', 's3set', 'smap', 's3draft', 'sround', 'srun', 's3sum', 's3fix', 's3appeal', 's3short', 's3use', 's3perf', 's3qid', 's3ntf',
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [

@@ -282,6 +282,9 @@ function keepPlan(files, now, keep, runMap) {
 // קבצים "יתומים" בסבב שנשמר: קבצים של מקום צילום שאינם ph.p / ph.th שלו (למשל שמירה שנכשלה באמצע), ישנים מיום.
 // files = [{ name, t }] של סבב ומקום אחד; ph = מסמך ph (או null)
 function strayFiles(files, ph, now) {
+  // שלב 14 (החלטה): מסמך ph חסר = לא מוחקים. אי אפשר להבחין בין שמירה שנכשלה לבין מסמך שאבד (ושעשוי לחזור מגיבוי);
+  // קובץ יתום כזה יימחק ממילא כשהסבב ייצא מ-3 הסבבים האחרונים (keepPlan)
+  if (!isObj(ph)) return [];
   const keep = new Set(isObj(ph) ? [ph.p, ph.th].filter((x) => typeof x === 'string') : []);
   return (files || []).filter((f) => f && !keep.has(f.name) && Number.isFinite(f.t) && f.t <= now - YOUNG_MS).map((f) => f.name);
 }
