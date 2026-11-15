@@ -267,6 +267,7 @@ async function upsert(tx, db, w, o, opts) {
   let moved = false;
   if (!base && ps && ps.exists && !ps.get('mv') && empty(ps.get('tz'))) { base = Object.assign({}, ps.data()); moved = true; }
   const ws = opts.wholesale;
+  if (base && opts.onlyNew) throw new HttpsError('already-exists', 'כבר יש לקוח עם הפרטים האלה', { reason: 'cust-exists', id: s.exists ? (s.get('mv') || id) : ps.get('mv') || ps.id }); // המזכירה (saveCore so.onlyNew): לקוח קיים לא משתנה
   if (base && ws === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
   if (ws === true && !(base && base.wholesale === true)) needBiz(base, o, opts.fill);
   flagFix(base, o, opts.cell, opts.fill);
@@ -372,7 +373,12 @@ async function upsertId(tx, db, w, id, o, opts) {
 // wholesale:true – עובד: רק בלקוח שנוצר עכשיו (פתיחת לקוח עסקי); מנהל: תמיד. wholesale:false – מנהל בלבד.
 async function saveCust(request) {
   const w = await who(request);
-  const input = inputObject(request);
+  return saveCore(w, inputObject(request));
+}
+// שלב ג/4 (המזכירה): הליבה של saveCust – אותן בדיקות ואותה כתיבה. w = מי ששומר (uid, role, bizId, biz), בתוך הקשר העסק (T.tdb).
+// so.src – מקור הלקוח החדש (ברירת מחדל: כמו saveCust – 'order' ב-fill, אחרת 'manual'). so.onlyNew – רק יצירה: לקוח קיים (גם mv) → already-exists/cust-exists
+//   בתוך הטרנזקציה, בלי שום כתיבה (רק upsert; לא בשימוש עם id/asNew). saveCust עצמו לא משתנה.
+async function saveCore(w, input, so) {
   onlyKeys(input, ['cust', 'fill', 'wholesale', 'id', 'asNew']);
   const mgr = w.role === 'manager';
   if (input.wholesale !== undefined) {
@@ -394,7 +400,7 @@ async function saveCust(request) {
   let r;
   // עריכה של שדות עסקיים: pay שאינו 'other' מוחק את הפירוט הישן
   if (input.fill !== true && o.pay && o.pay !== 'other') o.payTxt = '';
-  const opts = { fill: input.fill === true, wholesale: input.wholesale, src: input.fill === true ? 'order' : 'manual', mgr, cell: cellOn(w) };
+  const opts = { fill: input.fill === true, wholesale: input.wholesale, src: (so && so.src) || (input.fill === true ? 'order' : 'manual'), mgr, cell: cellOn(w), onlyNew: !!(so && so.onlyNew) };
   await db.runTransaction(async (tx) => {
     r = id ? await upsertId(tx, db, w, id, o, opts) : (input.asNew && !o.tz) ? await createNew(tx, db, w, o, opts) : await upsert(tx, db, w, o, opts);
   });
@@ -788,4 +794,4 @@ const FNS = { setCustCfg, wipeCusts, restoreCusts };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(['wipeCusts', 'restoreCusts'].includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : {}, wrap(k, f)); // 11.11.2026: אלפי לקוחות
 const SFNS = { saveCust, importCusts, setCard, getCard, delCard, mergeCust }; // צריכות את מפתח הכרטיסים
 for (const [k, f] of Object.entries(SFNS)) exports[k] = onCall({ secrets: [CARD_ENC_KEY], ...(k === 'importCusts' ? { timeoutSeconds: 540, memory: '512MiB' } : {}) }, wrap(k, f)); // ייבוא גדול: 60 שניות לא מספיקות (10.11)
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, custRows, CARD_ENC_KEY, MAX_ROWS, tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, saveCore, custRows, CARD_ENC_KEY, MAX_ROWS, tzOf, last4Of, phoneOf, clean, idFor, portKey, cardsOf, flagFix } });

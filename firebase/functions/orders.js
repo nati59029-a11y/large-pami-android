@@ -854,7 +854,13 @@ async function createOrder(request) {
   const note = input.note == null ? '' : txt(input.note, 300, 'bad-note', 'הערה');
   const custId = input.custId == null || input.custId === '' ? '' : idOf(input.custId, 'לקוח');
   if (input.cell !== undefined) needCell(w);
-  const db = T.tdb();
+  return createCore(T.tdb(), w, { reqId, br, cust, raw, note, custId, input });
+}
+// 15.11.2026 (המזכירה, שלב ג/6): גוף הטרנזקציה של createOrder – בלי בדיקת הרשאות ובלי ניקוי קלט (הקורא אחראי לשניהם).
+// w = היוצר: { uid, name, branches, activeBr, mine, biz? } (by/byName בהזמנה). p = { reqId, br, cust, raw, note, custId, input, src?, sec? }.
+// לא נחשף כ-callable/HTTP – רק דרך _core (כמו saveCore ב-customers.js). createOrder עצמה לא השתנתה: src:'staff', בלי sec.
+async function createCore(db, w, p) {
+  const { reqId, br, cust, raw, note, custId, input } = p;
   const ref = db.doc('ord/o' + reqId);
   const seq = db.doc('ordcfg/seq');
   const cfg = db.doc('ordcfg/main');
@@ -880,7 +886,8 @@ async function createOrder(request) {
     const now = Date.now();
     const warn = [];
     applyMoves(tx, db, w, prods, moves(br, items), { ord: ref.id, no }, warn, reqId);
-    const doc = { no, src: 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now };
+    const doc = { no, src: p.src || 'staff', br, cust, items, total, status: 'new', by: w.uid, byName: w.name, at: now, upd: now };
+    if (p.sec) doc.sec = p.sec;
     if (note) doc.note = note;
     if (custId) doc.custId = custId;
     if (cell && cell.n + Object.keys(cell).length > 2) doc.cell = cell;
@@ -1745,4 +1752,4 @@ const FNS = { setCellCfg, saveLinePlan, ensureLinePlans, checkLines, saveCat, im
 const BIG = ['wipeStock', 'restoreStock']; // 11.11.2026: אלפי מוצרים – 60 שניות לא מספיקות
 const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכניסה לאתר הסליקה מוצפנים ב-CARD_ENC_KEY
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, createCore, cleanCust, rawItems, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf } });
