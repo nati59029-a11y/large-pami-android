@@ -1188,6 +1188,35 @@ async function ordRecalc(db, o) {
   const { b, catCut } = await ordCalc(db, items, o.br, st.ws);
   return { lines: b.lines, total: b.total, nBlock: b.nBlock + st.blk.length, blk: st.blk, catCut };
 }
+// שלב ג/6 (15.11.2026): יצירת הזמנה אמיתית (ord) מטיוטת המזכירה – פנימי בלבד (_core), עדיין לא מחובר לתשובת הלקוח.
+// דרך createCore של orders.js (אותה טרנזקציה: מספור, מלאי, עלות, קרטונים, reqId אידמפוטנטי). by:'sec', src:'mail', status תמיד 'new'.
+// reqId = 'sec' + mailId + 'v' + ver – אותה גרסה פעמיים = הזמנה אחת. מחיר – לעולם לא מ-sec_ord: חישוב מחדש מהקטלוג (ordCalc, wp רק ללקוח סיטונאי מאושר)
+// לאותם מוצרים שבטיוטה (pid נעוץ). שורה חוסמת כלשהי (pick/ask/אזל/קרטון/מוצר שנעלם) או חסימת לקוח/סניף/טלפון – שגיאה, ושום דבר לא נוצר.
+const SEC_BY = { uid: 'sec', name: 'המזכירה' };
+async function ordCreateFromSec(db, o) {
+  const ORD = require('./orders')._core;
+  if (!o || typeof o !== 'object') throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
+  const biz = (T.scope() || {}).biz;
+  if (!biz || !biz.features || biz.features.orders !== true) throw pre('feature-off', 'תוספת ההזמנות כבויה בעסק הזה');
+  const mailId = typeof o.in === 'string' && ID_RE.test(o.in) ? o.in : '';
+  const reqId = 'sec' + mailId + 'v' + o.ver;
+  if (!mailId || !Number.isInteger(o.ver) || o.ver < 1 || reqId.length > 40) throw bad('bad-req', 'מזהה הטיוטה לא תקין');
+  const st = await ordState(db, o);
+  if (st.blk.length) throw pre('ord-blocked', 'הטיוטה חסומה: ' + st.blk.join(','));
+  const src = Array.isArray(o.lines) ? o.lines : [];
+  if (!src.length) throw pre('ord-blocked', ORD_NO.empty);
+  if (src.some((l) => !l || l.st !== 'ok' || l.out || l.block || typeof l.id !== 'string')) throw pre('ord-blocked', 'יש בטיוטה שורה חוסמת');
+  const { b } = await ordCalc(db, src.map((l) => ({ txt: l.txt, qty: l.qty, unit: l.unit, pid: l.id })), o.br, st.ws);
+  if (b.nBlock || b.lines.some((l) => l.st !== 'ok' || l.out || l.block)) throw pre('ord-blocked', 'יש בטיוטה שורה חוסמת (לפי הקטלוג הנוכחי)');
+  const items = b.lines.filter((l) => l.st === 'ok' && !l.out && !l.block).map((l) => ({ pid: l.id, qty: l.qty, price: l.pr / 100 }));
+  const cust = ORD.cleanCust({ name: st.custName || (o.custNew && o.custNew.bn) || '', phone: st.phone }); // טלפון/שם חסר – bad-phone/bad-name
+  const raw = ORD.rawItems(items);
+  const brs = await ordBrs(biz);
+  const w = Object.assign({}, SEC_BY, { biz, branches: brs, activeBr: brs.filter((x) => x.on !== false).map((x) => x.id), mine: null });
+  const br = ORD.brOf(w, o.br);
+  const custId = o.custId ? ORD.idOf(o.custId, 'לקוח') : '';
+  return ORD.createCore(db, w, { reqId, br, cust, raw, note: '', custId, input: {}, src: 'mail', sec: { in: mailId, ch: 'mail' } });
+}
 // שמירה עם בדיקת גרסה בטרנזקציה. up – השדות החדשים (FieldValue.delete() למחיקה)
 async function ordSave(db, ref, ver, up, now) {
   await db.runTransaction(async (tx) => {
@@ -2329,7 +2358,7 @@ exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdmi
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, histInvStep, histFill, autoHist, HIST_INV_DAY, HIST_INV_RESERVE, saveMail, invFiles, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
-  mailWork, mailRequeue, ordDraft, tryAuto, autoGive, learnSend, repOf, REP_CAP_DEFAULT, REP_CAP_MAX, AUTO_DAY, LOOP_MS, stripName,
+  mailWork, mailRequeue, ordDraft, ordCreateFromSec, tryAuto, autoGive, learnSend, repOf, REP_CAP_DEFAULT, REP_CAP_MAX, AUTO_DAY, LOOP_MS, stripName,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },
 } });
