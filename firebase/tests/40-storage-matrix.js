@@ -10,8 +10,11 @@ const H = require('./helpers');
 const BIN = { contentType: 'application/octet-stream' };
 const APK = { contentType: 'application/vnd.android.package-archive' };
 const MB50 = 50 * 1024 * 1024;
+const MB12 = 12 * 1024 * 1024;
+const WEBM = { contentType: 'video/webm;codecs=vp8,opus' };
 let seq = 0;
 const fresh = () => `b_${Date.now()}_${++seq}.bin`;
+const freshV = () => `v${Date.now()}x${++seq}.webm`;
 // ב-SDK, put מחזיר "משימת העלאה"; ממירים אותה להבטחה רגילה
 const up = (ref, data, meta) => new Promise((res, rej) => ref.put(data, meta).then(res, rej));
 // הורדת התוכן בדיוק כמו באפליקציה: REST, ?alt=media, "Authorization: Firebase <token>" (בלי כניסה: בלי הכותרת).
@@ -50,6 +53,18 @@ const OPS = {
     'delete-apk':          (st) => st.ref('app_releases/latest/large-pami.apk').delete(),
     'create-other-folder': (st) => up(st.ref('app_releases/evil/large-pami.apk'), new Uint8Array([80, 75]), APK),
   },
+  // קול, תמונה וסרטון למזכירה (15.11.2026): סרטון זמני בדרך לשרת – רק מנהל, רק לתיקייה של עצמו, רק סרטון עד 12MB; בלי קריאה
+  'sec_tmp/{uid}/': {
+    'create-own':          (st, me) => up(st.ref(`sec_tmp/${me}/${freshV()}`), new Uint8Array([26, 69, 223, 163]), WEBM),
+    'create-own-too-big':  (st, me) => up(st.ref(`sec_tmp/${me}/${freshV()}`), new Uint8Array(MB12 + 1), WEBM),
+    'create-own-bad-type': (st, me) => up(st.ref(`sec_tmp/${me}/${freshV()}`), new Uint8Array([255, 216, 255]), { contentType: 'image/jpeg' }),
+    'create-own-bad-name': (st, me) => up(st.ref(`sec_tmp/${me}/x.exe`), new Uint8Array([26, 69, 223, 163]), WEBM),
+    'create-other':        (st) => up(st.ref(`sec_tmp/${H.OTHER}/${freshV()}`), new Uint8Array([26, 69, 223, 163]), WEBM),
+    'read-own':            (st, me) => st.ref(`sec_tmp/${me}/seedvideo1.webm`).getMetadata(),
+    'list-own':            (st, me) => st.ref(`sec_tmp/${me}`).listAll(),
+    'delete-own':          async (st, me) => { const r = st.ref(`sec_tmp/${me}/${freshV()}`); await up(r, new Uint8Array([26, 69, 223, 163]), WEBM); return r.delete(); },
+    'delete-other':        (st) => st.ref(`sec_tmp/${H.OTHER}/seedvideo1.webm`).delete(),
+  },
   _not_in_table: {
     'read-other-path':   (st) => st.ref('products/p1.jpg').getMetadata(),
     'create-other-path': (st) => up(st.ref('products/' + fresh()), new Uint8Array([1]), { contentType: 'image/jpeg' }),
@@ -83,6 +98,16 @@ describe('Storage – תיקייה × תפקיד × פעולה (טבלה 20.3)',
     const st = H.ctxFor(env, 'employee').storage();
     await assertSucceeds(up(st.ref(`app_backups/u_emp/${fresh()}`), new Uint8Array(MB50), BIN));
     H.record('special', { key: 'storage-50mb-boundary' });
+  });
+
+  // sec_tmp: בדיוק 12MB מותר; דריסה של קובץ קיים (גם של עצמו) – אסורה; mp4 מותר
+  it('sec_tmp: סרטון של בדיוק 12MB ו-mp4 – מותרים למנהל; דריסת קובץ קיים – נחסמת', async () => {
+    const st = H.ctxFor(env, 'manager').storage();
+    await assertSucceeds(up(st.ref(`sec_tmp/u_mgr/${freshV()}`), new Uint8Array(MB12), WEBM));
+    const p = `sec_tmp/u_mgr/${freshV().replace('.webm', '.mp4')}`;
+    await assertSucceeds(up(st.ref(p), new Uint8Array([0, 0, 0, 24]), { contentType: 'video/mp4' }));
+    await assertFails(up(st.ref(p), new Uint8Array([0, 0, 0, 25]), { contentType: 'video/mp4' }));
+    H.record('special', { key: 'storage-sec-tmp-boundary-no-overwrite' });
   });
 
   // עדכוני APK: מנהל "כמו היום" (רק admins, בלי staff) קורא; עובד שהושבת באמצע נחסם מיד.

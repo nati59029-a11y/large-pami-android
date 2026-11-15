@@ -277,6 +277,14 @@ const ST_OPS = {
   },
 };
 
+// קול, תמונה וסרטון למזכירה (15.11.2026): סרטון זמני – יצירה ומחיקה רק למנהל (ומנהל־על) בתיקייה של עצמו; קריאה – לאף אחד (רק השרת)
+const WEBM = { contentType: 'video/webm' };
+ST_OPS['Storage b/{bizId}/sec_tmp/{uid}/'] = {
+  get: { allow: NONE, run: async (s, biz, uid) => { await prepSt((a) => up(a.ref(`${P(biz)}/sec_tmp/${uid}/seedvideo1.webm`), new Uint8Array([1]), WEBM)); return s.ref(`${P(biz)}/sec_tmp/${uid}/seedvideo1.webm`).getMetadata(); } },
+  create: { allow: M, run: (s, biz, uid) => up(s.ref(`${P(biz)}/sec_tmp/${uid}/${fresh('v')}.webm`), new Uint8Array([26, 69, 223, 163]), WEBM) },
+  delete: { allow: M, run: async (s, biz, uid) => { const f = fresh('v') + '.webm'; await prepSt((a) => up(a.ref(`${P(biz)}/sec_tmp/${uid}/${f}`), new Uint8Array([1]), WEBM)); return s.ref(`${P(biz)}/sec_tmp/${uid}/${f}`).delete(); } },
+};
+
 const TALLY = { allow: 0, deny: 0, foreignDeny: 0, cells: 0 };
 const PAIRS = new Map(); // אוסף|פעולה → {deny, allow}
 
@@ -309,7 +317,8 @@ describe('ריבוי עסקים – טבלת בידוד: אוסף × פעולה 
       'staff|create', 'staff|update', 'staff|delete', 'app_backup_status|create', 'app_backup_status|update', 'app_backup_status|delete',
       'chunks|update', 'tasks/c|update', 'appreq/p|update', 'mq/p|update', 'closings/p|update', 'deposits/p|update', 'yemot_lexicon|list', 'yemot_lexicon|delete',
       'yemot_items|get', 'yemot_items|list', 'yemot_items|create', 'yemot_items|update', 'yemot_items|delete',
-      'private|get', 'private|list', 'private|create', 'private|update', 'private|delete', 'audit|update', 'audit|delete']);
+      'private|get', 'private|list', 'private|create', 'private|update', 'private|delete', 'audit|update', 'audit|delete',
+      'Storage b/{bizId}/sec_tmp/{uid}/|get']);
     assert.deepEqual(closed.filter((k) => !ok.has(k)), [], 'פעולה בלי אף בדיקת "מותר" שלא ברשימת הסגורות-בכוונה');
     assert.equal(TALLY.foreignDeny, TALLY.cells / 7 * 2, 'בכל תא: מנהל ועובד של העסק השני נחסמו');
   });
