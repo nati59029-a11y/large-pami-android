@@ -2717,6 +2717,16 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.equal(v.st, 'sent'); assert.equal(v.ver, 2); assert.equal(v.sentBy, 'auto');
       assert.ok(body(s0).includes('כמות: 4 | מחיר: 7.00 ₪'), body(s0));
       assert.ok(GO.state.sent[s0].raw.includes('In-Reply-To: ' + (await get(`b/${A}/sec_in/${m}`)).mid));
+      // סבב 2: לקוח מופעל, אבל המייל בכרטיס השתנה (השולח כבר לא המייל שבכרטיס) – השינוי לא נשלח לבד
+      const n9 = await sentOrd('thr-a9', [{ txt: 'צלחת עמוקה', qty: 2 }], 'Buy <buy@ws.example>');
+      await prep((d) => d.doc(`b/${A}/sec_cfg/mail_use`).set({ lp: {} }, { merge: true })); // בלי חסימת הלולאה מהשליחה הקודמת
+      await prep((d) => d.doc(`b/${A}/cust/cws`).update({ mail: 'new@ws.example' }));
+      const s9 = GO.state.sent.length;
+      const q9 = await reply('thr-a9', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 6 }] } }, { from: 'Buy <buy@ws.example>' });
+      assert.equal(q9.r.ordRe.res, 'chg'); assert.ok(!q9.r.ordRe.auto);
+      assert.equal(GO.state.sent.length, s9, 'לא נשלח');
+      assert.equal((await ordOf(n9)).st, 'mgr');
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === n9 && /from/.test(x.note)));
       // לקוח לא מאושר – שינוי חוזר למנהל
       const n2 = await sentOrd('thr-a8');
       const q2 = await reply('thr-a8', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 3 }] } });
