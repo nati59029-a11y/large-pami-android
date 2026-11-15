@@ -210,6 +210,8 @@ Object.assign(exports, require('./invite-mail'));
 
 // מערכת הזמנות – שלב 1 (2026-11-08): מוצרים ומלאי לכל סניף, הזמנות עובד, תשלום ידני וקישור סליקה (orders.js)
 Object.assign(exports, require('./orders'));
+// מסך טיפול/ליקוט (14.11.2026, משוב סבב 3): orderPick, orderPickOk, supOrdSet – ord-pick.js
+Object.assign(exports, require('./ord-pick'));
 // תמחור מחשבונית ספק (12.11.2026): pinv – piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg (צילום, שלב 4)
 Object.assign(exports, require('./pricing'));
 

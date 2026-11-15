@@ -10,6 +10,7 @@
 //   xfer/{id}          { prod, name, from, to, qty, why:'order'|'cancel'|'edit'|'manual', ord?, no?, by, at, reqId }  – העברה פנימית בין סניפים
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
 //   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, shp?:{at,by}, by, byName, at, upd, cancel? }  – shp: "נשלח" ללקוח בשוטף (משוב סבב 2); cancel.rs: בביטול הזמנה שנשלחה – האם המלאי הוחזר (החלטה 21)
+//   ord/{id}           + pk?: סימוני ליקוט ואישור הלקוח (משוב סבב 3) – ראו ord-pick.js; כאן רק החסימה ב-setOrderStatus
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
@@ -1141,9 +1142,10 @@ async function updateOrder(request) {
 async function setOrderStatus(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'status']);
+  onlyKeys(input, ['id', 'status', 'force']); // force (משוב סבב 3): מנהל עוקף "הלקוח עוד לא אישר את השינויים"
   const id = idOf(input.id, 'הזמנה');
   const st = input.status;
+  if (input.force !== undefined && input.force !== true) throw bad('bad-field', 'force לא תקין');
   if (!STATUSES.includes(st)) throw bad('bad-status', 'סטטוס לא מוכר');
   const db = T.tdb();
   const ref = db.doc('ord/' + id);
@@ -1156,6 +1158,12 @@ async function setOrderStatus(request) {
     const shp = s.get('shp');
     // משוב סבב 2: "נשלח" ללקוח בשוטף – התנאים נקראים מהלקוח בתוך הטרנזקציה (לא מהמכשיר)
     if (st === 'out' && cur === 'wait_pay' && shp) { res = { ok: true, status: 'wait_pay', dup: true }; return; }
+    // משוב סבב 3 (סעיף 6, החלטה 20): יש שינויים בליקוט שהלקוח עוד לא אישר (pk.st 'chg', ord-pick.js) – אין "נשלח" / "ממתין לתשלום" / "יצא" / "הושלם".
+    // מנהל עוקף רק עם force:true (נרשם ביומן). הזמנה בלי pk או עם pk.st 'ok' – כמו קודם.
+    const pk = s.get('pk');
+    const pkHold = !!(pk && pk.st === 'chg' && ['out', 'wait_pay', 'done'].includes(st) && st !== cur);
+    if (pkHold && !(w.role === 'manager' && input.force === true)) throw pre('pick-chg', 'יש שינויים במוצרים שהלקוח עוד לא אישר. התקשרו ללקוח וסמנו "הלקוח אישר את השינויים"');
+    const forced = () => { if (pkHold) tx.set(logRef(db, id), logData(w, 'pickforce', 'מנהל עקף אישור לקוח לשינויים')); }; // אחרי כל הקריאות (טרנזקציה)
     if (st === 'out' && SHIP_FROM.includes(cur) && !shp) {
       const cid = s.get('custId');
       const cs = typeof cid === 'string' && ID_RE.test(cid) ? await tx.get(db.doc('cust/' + cid)) : null;
@@ -1163,6 +1171,7 @@ async function setOrderStatus(request) {
         const now = Date.now();
         tx.update(ref, { status: 'wait_pay', shp: { at: now, by: w.uid }, upd: now });
         tx.set(logRef(db, id), logData(w, 'ship', cur + '→wait_pay'));
+        forced();
         res = { ok: true, status: 'wait_pay' };
         return;
       }
@@ -1171,6 +1180,7 @@ async function setOrderStatus(request) {
     if (shp && st === 'work') throw pre('locked', 'ההזמנה נשלחה – אי אפשר להחזיר אותה לטיפול');
     tx.update(ref, { status: st, upd: Date.now() });
     tx.set(logRef(db, id), logData(w, 'status', cur + '→' + st));
+    forced();
   });
   return res || { ok: true, status: st };
 }

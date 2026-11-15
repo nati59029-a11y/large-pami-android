@@ -197,7 +197,7 @@ V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return
  ${nx?`<div class="sec"><h3>שינוי סטטוס</h3></div><div class="row">${nx}</div>`:''}
  ${(!lk||mgr())&&!o.inv&&o.status!=='done'&&o.status!=='cancel'&&(o.status!=='paid'||mgr())?`<button class="btn g w" style="margin-top:14px" data-a="oxCancel" data-id="${esc(o.id)}">ביטול הזמנה</button>`:''}
  <div class="sec"><h3>היסטוריה</h3></div>${lg?lg.map(x=>`<div class="note" style="padding:6px 0;border-bottom:1px solid var(--line)">${tm(x.t)} · ${esc(LOGW[x.act]||x.act)}${x.note?' · '+esc(x.note):''}</div>`).join('')||'<p class="note">אין</p>':'<p class="note">טוען…</p>'}`}};
-const LOGW={create:'נוצרה',edit:'נערכה',status:'סטטוס',ship:'נשלח',paid:'סומן שולם',unpay:'בוטל "שולם"',cancel:'בוטלה',called:'חייגו ללקוח',payOpen:'נפתח דף התשלום'};
+const LOGW={create:'נוצרה',edit:'נערכה',status:'סטטוס',ship:'נשלח',paid:'סומן שולם',unpay:'בוטל "שולם"',cancel:'בוטלה',called:'חייגו ללקוח',payOpen:'נפתח דף התשלום',pick:'ליקוט',pickok:'הלקוח אישר את השינויים',pickforce:'מנהל עקף אישור לקוח'}; // pick* – ord-pick.js (משוב סבב 3)
 async function logLoad(id){try{const r=await fsx('/ord/'+id+'/log?pageSize=100');O.log[id]=((r&&r.documents)||[]).map(dec).sort((a,b)=>b.t-a.t)}catch(e){O.log[id]=[]}if(cur().v==='oxOrd'&&!typing())rerender()}
 async function after(id){O.log[id]=undefined;await load(true)}
 ACT.oxStat=async el=>{el.disabled=true;try{await fnCall('setOrderStatus',{id:el.dataset.id,status:el.dataset.s});toast('הסטטוס עודכן');await after(el.dataset.id)}catch(e){el.disabled=false;err(e)}};
@@ -556,5 +556,5 @@ const dayH=()=>{const D=DAY();if(!D.b&&(!D.r||!D.at||D.br!==(OBR||'')))setTimeou
 ACT.oxDayK=el=>{const D=DAY();D.k=el.dataset.k;if(D.k!=='custom'){[D.from,D.to]=pfRange(D.k);D.r=null;dayLoad()}else rerender()};
 FRM.oxDayF=f=>{const x=fd(f),D=DAY(),ok=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'');if(!ok(x.from)||!ok(x.to))return toast('בחר תאריכים');if(x.to<x.from)return toast('תאריך הסיום לפני תאריך ההתחלה');if(dAdd(x.from,366)<x.to)return toast('תקופה של עד שנה');D.from=x.from;D.to=x.to;D.r=null;dayLoad()};
 ACT.oxDayProf=()=>{if(!prOk())return;const D=DAY(),P=PF();P.k=D.k==='today'||D.k==='yest'?D.k:'custom';P.from=D.from;P.to=D.to;P.br=OBR||'';P.r=null;P.err='';P.b=0;go('oxProf')};
-window.__ox=O;window.__payMode=payMode;window.__oxMgr=mgr;window.__opSync=opSync;window.__brXfer=brXfer;window.__ordProfitOf=ordProfitOf;
+window.__ox=O;window.__oxAfter=after;/* ord-pick.js (משוב סבב 3) */window.__payMode=payMode;window.__oxMgr=mgr;window.__opSync=opSync;window.__brXfer=brXfer;window.__ordProfitOf=ordProfitOf;
 })();

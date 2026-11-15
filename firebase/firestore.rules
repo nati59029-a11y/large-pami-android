@@ -871,6 +871,11 @@ service cloud.firestore {
       allow read: if rOrd() && rBrOk(resource.data.br);
       allow create, update, delete: if false;
     }
+    // 14.11.2026 (משוב סבב 3, ליקוט): "להזמין מספקים" – עובד עם הזמנות לפי סניף ההזמנה, ומנהל. כתיבה – רק השרת (ord-pick.js)
+    match /supord/{id} {
+      allow read: if rOrd() && rBrOk(resource.data.br);
+      allow create, update, delete: if false;
+    }
     // fb/ord-catalog: קטגוריות (כולם עם הזמנות קוראים) והעברות פנימיות (לפי סניף המקור או היעד). כתיבה – רק השרת.
     match /cat/{id} {
       allow read: if rOrd();
@@ -1635,6 +1640,11 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
       match /stockLog/{id} {
+        allow read: if ordOk() && brOk(resource.data.br);
+        allow create, update, delete: if false;
+      }
+      // 14.11.2026 (משוב סבב 3, ליקוט): "להזמין מספקים" – עובד עם ord לפי סניף ההזמנה, ומנהל. כתיבה – רק השרת (ord-pick.js)
+      match /supord/{id} {
         allow read: if ordOk() && brOk(resource.data.br);
         allow create, update, delete: if false;
       }
