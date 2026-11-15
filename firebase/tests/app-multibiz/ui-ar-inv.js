@@ -25,6 +25,9 @@ const ARDOC = [doc('ardoc/invD1', { t: S('inv'), ser: S('D'), no: N(1), d: S('20
   doc('ardoc/rcD1', { t: S('rc'), ser: S('D'), no: N(1), d: S('2026-11-13'), cust: S('cT'), custSnap: SNAP, lines: A([]), vm: S('inc'), rate: N(0), net: N(2132), vat: N(0), gross: N(2132), open: N(0), st: S('ok'), draft: B(true), br: S('_'), ord: A([]), pay: M({ m: S('transfer') }), proof: S('pAAAAAAAAAA'), at: N(T2 + 2), upd: N(T2) })];
 // החלטה 29/31: זיכוי קודם על invD1 – 3 כוסות (₪17.70), עם החזר מזומן. מוחזר רק בשאילתה מסוננת (ref / cust), לא ברשימה הכללית של arInc
 const CRS = [doc('ardoc/crD9', { t: S('cr'), ser: S('D'), no: N(9), d: S('2026-11-14'), cust: S('cT'), custSnap: SNAP, lines: A([M({ n: S('כוס'), q: N(3), p: N(5) })]), vm: S('ex'), rate: N(18), net: N(1500), vat: N(270), gross: N(1770), open: N(0), st: S('ok'), draft: B(true), br: S('br1'), ord: A([S('o8')]), ref: S('invD1'), li: A([M({ i: N(1), q: N(3) })]), rf: M({ m: S('cash'), amt: N(1770) }), at: N(T2 - 5), upd: N(T2) })];
+// החלטה 37: קבלה rcD2 (לקוח אחר) שהוקצתה ל-invD1, שעליה זיכוי עם החזר כסף (crD9) – "ביטול קבלה" מושבת. מוחזרת רק בשאילתה מסוננת
+CRS.push(doc('ardoc/rcD2', { t: S('rc'), ser: S('D'), no: N(2), d: S('2026-11-13'), cust: S('cX'), custSnap: SNAP, lines: A([]), vm: S('inc'), rate: N(0), net: N(1000), vat: N(0), gross: N(1000), open: N(0), st: S('ok'), draft: B(true), br: S('_'), ord: A([]), pay: M({ m: S('cash') }), at: N(T2 + 3), upd: N(T2) }));
+const ALLOC = [doc('aralloc/a1', { rc: S('rcD2'), inv: S('invD1'), amt: N(1000), at: N(T2) })];
 const PROD = [doc('prod/pA', { name: S('עוגה'), price: N(12), on: B(true), q: M({ br1: N(5) }) }), doc('prod/pB', { name: S('כוס'), price: N(5), on: B(true), q: M({ br1: N(50) }) })];
 const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(300, 9)]);
 
@@ -38,6 +41,7 @@ async function open(browser, www, who, calls, arOn) {
     const J = (st, b) => route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify(b) });
     if (/:runQuery$/.test(u.pathname)) { let c = '', w = null; try { const q = JSON.parse(body).structuredQuery; c = q.from[0].collectionId; w = q.where; } catch (e) { /* */ }
       if (c === 'ardoc') { let L = ARDOC; const f = w && w.fieldFilter; if (f) L = ARDOC.concat(CRS).filter((d) => { const v = d.document.fields[f.field.fieldPath]; return v && v.stringValue === f.value.stringValue; }); calls.push({ n: 'q:ardoc', d: f ? f.field.fieldPath : '' }); return J(200, L); }
+      if (c === 'aralloc' && w && w.fieldFilter && w.fieldFilter.field.fieldPath === 'rc') return J(200, ALLOC.filter((d) => d.document.fields.rc.stringValue === w.fieldFilter.value.stringValue));
       return J(200, c === 'ord' ? ORD : c === 'prod' ? PROD : c === 'cust' ? CUST : [{ readTime: '2026-11-03T09:00:00Z' }]); }
     if (/\/arcfg\/main$/.test(u.pathname)) return arOn ? J(200, { name: 'x', fields: { on: B(true), name: S('עסק'), wt: M({ oc: S('order_doc') }), z: M({ br2: B(true) }) } }) : J(404, { error: { code: 404 } });
     if (/\/arcfg\/off$/.test(u.pathname)) return J(404, { error: { code: 404 } });
@@ -168,11 +172,23 @@ async function open(browser, www, who, calls, arOn) {
       const rl = await view(page, 'arRcList');
       check('m 9 "קבלות שהופקו": קבלה #1 ברשימה', /קבלה #1/.test(rl.t), rl.t.slice(0, 200));
       await page.click('[data-a=arDocV][data-id=rcD1]'); await H.settle(page, 300);
-      check('m 9א קבלה: "אסמכתא" ו"ביטול קבלה" למנהל', await page.evaluate(() => !!document.querySelector('#dlg [data-a=arPfV]') && !!document.querySelector('#dlg [data-a=arVoid]')));
+      await H.settle(page, 500);
+      check('m 9א קבלה: "אסמכתא" ו"ביטול קבלה" (פעיל) למנהל', await page.evaluate(() => !!document.querySelector('#dlg [data-a=arPfV]') && !!document.querySelector('#dlg [data-a=arVoid]') && !document.querySelector('#dlg [data-a=arVoid]').disabled && document.getElementById('arVoidN').style.display === 'none'));
       await page.click('#dlg [data-a=arVoid]'); await H.settle(page, 300); await page.fill('#dlg input[name=why]', 'הצ׳ק חזר');
       n0 = calls.length; await page.click('#dlg form[data-f=arVoidF] button'); await H.settle(page, 800);
       const vc = calls.slice(n0).find((x) => x.n === 'arVoidRc');
       check('m 9ב ביטול קבלה → arVoidRc עם סיבה', vc && vc.d.id === 'rcD1' && vc.d.reason === 'הצ׳ק חזר', vc && vc.d);
+      // 9ג. החלטה 37: קבלה שעל החשבונית שלה הוחזר כסף – "ביטול קבלה" מושבת עם הסבר
+      await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } });
+      const rl2 = await view(page, 'arRcList');
+      await page.click('[data-a=arDocV][data-id=rcD2]'); await H.settle(page, 800);
+      n0 = calls.length;
+      const v37 = await page.evaluate(() => { const b = document.querySelector('#dlg [data-a=arVoid]'), n = document.getElementById('arVoidN'); if (b) { b.click(); } const st = { b: !!b, off: !!(b && b.disabled), note: n && n.style.display !== 'none' ? n.innerText : '', form: !!document.querySelector('#dlg form[data-f=arVoidF]'), ow: document.documentElement.scrollWidth - innerWidth };
+        if (b) ACT.arVoid(b); st.form2 = !!document.querySelector('#dlg form[data-f=arVoidF]'); return st; });
+      await shot(page, 'm-09ג-ביטול-קבלה-חסום');
+      check('m 9ג החלטה 37: קבלה שהוחזר כסף על החשבונית שלה – "ביטול קבלה" מושבת, "הוחזר כסף על החשבונית – אי אפשר לבטל את הקבלה. תיקון – בזיכוי", לחיצה לא פותחת את החלון, בלי גלילה לרוחב',
+        /קבלה #2/.test(rl2.t) && v37.b && v37.off && v37.note === 'הוחזר כסף על החשבונית – אי אפשר לבטל את הקבלה. תיקון – בזיכוי' && !v37.form && !v37.form2 && v37.ow <= 0 && !calls.slice(n0).some((x) => x.n === 'arVoidRc'), v37);
+      await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } });
       // סנכרון הכנסות – הפונקציה הטהורה
       const inc = await page.evaluate(() => { const f = window.__arInc.incOf, op = new Set(['oLink']);
         const d = (x) => Object.assign({ id: 'x', t: 'inv', no: 1, d: '2026-11-12', gross: 11800, br: 'br1', ord: ['o1'], custSnap: { name: 'ל' }, draft: true }, x);

@@ -29,7 +29,7 @@ async function runQ(coll,f,lim){const sq={from:[{collectionId:coll}],limit:lim||
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>dec(x.document))}
 const D={c:{},rc:undefined,off:undefined};
 async function docsL(cid,force){if(!force&&D.c[cid])return D.c[cid];try{D.c[cid]=(await runQ('ardoc',['cust','EQUAL',{stringValue:cid}],300)).sort((a,b)=>(b.at||0)-(a.at||0))}catch(e){D.c[cid]=[]}return D.c[cid]}
-const docOf=id=>{for(const L of Object.values(D.c))for(const x of L)if(x.id===id)return x;return (D.rc||[]).find(x=>x.id===id)||null};
+const docOf=id=>{for(const L of Object.values(D.c))for(const x of L||[])if(x.id===id)return x;return (D.rc||[]).find(x=>x.id===id)||null};
 const live=()=>!!(R.cfg&&R.cfg.on);
 
 /* ---------- העלאת אסמכתא (arProof): תמונה מוקטנת במכשיר, PDF כמו שהוא; עד 5MB, בחלקים ---------- */
@@ -99,8 +99,13 @@ ACT.arDocV=el=>{const x=docOf(el.dataset.id);if(!x)return;const p=x.pay||{};
   <div class="row"><button class="btn g grow" data-a="arDShare" data-id="${esc(x.id)}">שיתוף</button><button class="btn g grow" data-a="arDSend" data-id="${esc(x.id)}" data-ch="wa">ווטסאפ</button><button class="btn g grow" data-a="arDSend" data-id="${esc(x.id)}" data-ch="mail">מייל</button></div>
   ${['inv','ir'].includes(x.t)?`<button class="btn g w" style="margin-top:8px" data-a="arCr" data-id="${esc(x.id)}">זיכוי</button>`:''}
   ${x.t==='inv'&&mgr()?`<form data-f="arDueF" class="row" style="margin-top:8px;align-items:end"><input type="hidden" name="id" value="${esc(x.id)}"><label class="f grow" style="margin:0"><span>מועד תשלום</span><input type="date" name="due" value="${esc(x.dueX||x.due||'')}" min="${esc(x.d)}"></label><button class="btn g">שנה</button></form>`:''}
-  ${x.t==='rc'&&mgr()&&!x.void?`<div class="row" style="margin-top:8px">${x.proof?`<button class="btn g grow" data-a="arPfV" data-id="${esc(x.proof)}">אסמכתא</button>`:''}<button class="btn r grow" data-a="arVoid" data-id="${esc(x.id)}">ביטול קבלה</button></div>`:''}
-  <button class="btn g w" style="margin-top:8px" data-a="closeDlg">סגירה</button>`)};
+  ${x.t==='rc'&&mgr()&&!x.void?`<div class="row" style="margin-top:8px">${x.proof?`<button class="btn g grow" data-a="arPfV" data-id="${esc(x.proof)}">אסמכתא</button>`:''}<button class="btn r grow" id="arVoidB" data-a="arVoid" data-id="${esc(x.id)}">ביטול קבלה</button></div><p class="note" id="arVoidN" style="display:none;margin:6px 0 0"></p>`:''}
+  <button class="btn g w" style="margin-top:8px" data-a="closeDlg">סגירה</button>`);
+ if(x.t==='rc'&&mgr()&&!x.void)rcRf(x.id).then(h=>{const b=document.getElementById('arVoidB'),n=document.getElementById('arVoidN');if(!h||!b||b.dataset.id!==x.id)return;b.disabled=true;if(n){n.textContent=RCRF;n.style.display=''}})};
+/* החלטה 37: על חשבונית שהקבלה הוקצתה אליה יש זיכוי עם החזר כסף (rf) – ביטול הקבלה מושבת (השרת דוחה: rc-refunded). שגיאת קריאה – הכפתור נשאר והשרת מכריע */
+const RCRF='הוחזר כסף על החשבונית – אי אפשר לבטל את הקבלה. תיקון – בזיכוי';
+async function rcRf(id){try{const inv=[...new Set((await runQ('aralloc',['rc','EQUAL',{stringValue:id}],100)).filter(a=>!a.void).map(a=>a.inv).filter(Boolean))];
+ for(const v of inv)if((await runQ('ardoc',['ref','EQUAL',{stringValue:v}],100)).some(d=>d.t==='cr'&&!d.void&&d.rf))return true}catch(e){}return false}
 FRM.arDueF=async f=>{const x=fd(f);try{await fnCall('arDoc',{id:x.id,op:'due',due:x.due});const d=docOf(x.id);if(d)d.dueX=x.due;closeDlg();toast('מועד התשלום עודכן');rerender()}catch(e){err(e)}};
 ACT.arPfV=async el=>{try{const r=await fnCall('arProofGet',{id:el.dataset.id});if(/^data:image\//.test(r.data))dlg(`<h3>אסמכתא</h3><img src="${esc(r.data)}" style="max-width:100%"><button class="btn g w" style="margin-top:8px" data-a="closeDlg">סגירה</button>`);else await dxShareDU(r.data,'אסמכתא')}catch(e){err(e)}};
 
@@ -195,7 +200,7 @@ V.arRcList=()=>{const T='קבלות שהופקו';if(!on()||!mgr())return{t:T,h:
  if(D.rc===undefined){D.rc=null;runQ('ardoc',['t','EQUAL',{stringValue:'rc'}],500).then(L=>{D.rc=L.sort((a,b)=>(b.at||0)-(a.at||0));redraw('arRcList')},()=>{D.rc=[];redraw('arRcList')});return{t:T,h:'<div class="empty">טוען…</div>'}}
  if(D.rc===null)return{t:T,h:'<div class="empty">טוען…</div>'};
  return{t:T,h:D.rc.length?D.rc.slice(0,200).map(x=>`<div class="li" data-a="arDocV" data-id="${esc(x.id)}" style="cursor:pointer"><div class="grow"><b>קבלה #${esc(x.no)}</b>${x.draft?' <small style="color:var(--bad)">טיוטה</small>':''}${x.void?' <small style="color:var(--bad)">מבוטלת</small>':''}<br><small class="note">${dd(x.d)} · ${esc((x.custSnap&&x.custSnap.name)||'')} · ${esc(PAYN[(x.pay||{}).m]||'')}</small></div><b dir="ltr">${ag(x.gross)}</b></div>`).join(''):'<div class="empty">אין קבלות</div>'}};
-ACT.arVoid=el=>{const id=el.dataset.id;closeDlg();dlg(`<h3>ביטול קבלה</h3><p class="note" style="margin-top:0">המספר נשמר, הקבלה מסומנת "מבוטל", והחשבוניות שנסגרו בה נפתחות שוב. (הנוהל המשפטי – לא מאומת, לבדיקה עם רואה החשבון.)</p><form data-f="arVoidF"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="q" value="${rid()}"><label class="f"><span>סיבה (חובה)</span><input name="why" required maxlength="200"></label><div class="row"><button class="btn r grow">בטל קבלה</button><button type="button" class="btn g grow" data-a="closeDlg">חזרה</button></div></form>`)};
+ACT.arVoid=el=>{if(el.disabled)return;const id=el.dataset.id;closeDlg();dlg(`<h3>ביטול קבלה</h3><p class="note" style="margin-top:0">המספר נשמר, הקבלה מסומנת "מבוטל", והחשבוניות שנסגרו בה נפתחות שוב. (הנוהל המשפטי – לא מאומת, לבדיקה עם רואה החשבון.)</p><form data-f="arVoidF"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="q" value="${rid()}"><label class="f"><span>סיבה (חובה)</span><input name="why" required maxlength="200"></label><div class="row"><button class="btn r grow">בטל קבלה</button><button type="button" class="btn g grow" data-a="closeDlg">חזרה</button></div></form>`)};
 FRM.arVoidF=async f=>{const x=fd(f),b=f.querySelector('button');b.disabled=true;try{await fnCall('arVoidRc',{reqId:x.q,id:x.id,reason:String(x.why||'').trim()});closeDlg();toast('הקבלה בוטלה');D.rc=undefined;for(const k of Object.keys(D.c))D.c[k]=undefined;rerender()}catch(e){b.disabled=false;err(e)}};
 
 /* ---------- הגדרות: תבניות ווטסאפ לחשבוניות, דוח Z לכל סניף (מנהל); מנהל־על – רשמי, סוג עסק, מספרי התחלה, סף הקצאה ---------- */

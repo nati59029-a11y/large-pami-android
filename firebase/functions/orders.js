@@ -1255,6 +1255,16 @@ async function markOrderPaid(request) {
     if (cur === 'paid' || cur === 'out' || cur === 'done') { res = { ok: true, dup: true }; return; }
     if (!PAYABLE.includes(cur)) throw pre('bad-status', 'ההזמנה בוטלה');
     if (amtIn === undefined && paid.method === 'link' && pp.exists && pp.get('after') === true) throw pre('use-charge', "בעסק הזה החיוב בקישור נעשה דרך 'חויב' אחרי הליקוט");
+    // החלטה 36: עסק עם "חיוב אחרי ליקוט" – כל רישום תשלום (גם מזומן/העברה/טלפון/אחר) רק אחרי שהליקוט הסתיים (pk.st 'ok') ולא השתנה מאז (pk.fin).
+    // לקוח בשוטף – כמו קודם. "חויב" (amt) נבדק למטה עם הקודים שלו. קבלה מכרטיס הלקוח (arReceipt) לא עוברת כאן – כסף שהתקבל בפועל נרשם כמו קודם
+    if (amtIn === undefined && pp.exists && pp.get('after') === true) {
+      const cid = s.get('custId'), cs0 = typeof cid === 'string' && ID_RE.test(cid) ? await tx.get(db.doc('cust/' + cid)) : null;
+      if (!(cs0 && cs0.exists && AC.termsOfCust(cs0.data()).b !== 'imm')) {
+        const pk = s.get('pk');
+        if (!pk || pk.st !== 'ok') throw pre('pay-pick', 'אפשר לרשום תשלום רק אחרי שהליקוט הסתיים');
+        if (pk.fin && typeof pk.fin === 'object') { const f = pickFin(s.data()); if (f.k !== pk.fin.k || agor(f.due) !== agor(pk.fin.due)) throw pre('pick-old', 'ההזמנה השתנתה אחרי הליקוט – יש ללקט מחדש לפני רישום התשלום'); }
+      }
+    }
     delete paid.fr;
     if (amtIn !== undefined) { // החלטה 32: "חויב" – הסכום הסופי, אחרי ליקוט, בתוך המסגרת
       const due = AC.payOf(s.data()), au = s.get('auth'), pk = s.get('pk');

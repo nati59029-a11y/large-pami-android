@@ -365,6 +365,7 @@ async function setArCfg(request) {
 //   arReceipt  – קבלה ללקוח: תשלום חלקי, בחירת חשבוניות, עודף = זכות. עובד – רק עם אסמכתא שהעלה (arProof), גם במזומן (החלטה 25).
 //   arCredit   – חשבונית זיכוי (מלא / שורות / סכום) עם הפניה לחשבונית; "החזרה למלאי" כבויה כברירת מחדל (החלטה 11). מנהל ועובד עם הזמנות (73).
 //   arVoidRc   – ביטול קבלה (מנהל, עם סיבה): המספר נשמר, ההקצאות מבוטלות, קובץ חדש עם "מבוטל" ליד המקור (הנוהל – לא מאומת).
+//                החלטה 37: נדחה (rc-refunded) כשעל חשבונית שהקבלה הוקצתה אליה יש זיכוי עם החזר כסף.
 //   arProof / arProofGet – אסמכתא בחלקים (עד 5MB, jpeg/png/pdf). צפייה: מנהל ומי שהעלה. לא נשלחת ללקוח ולא נכתבת ליומן.
 //   arMonthly  – מסמך סיכום חודשי ללקוח (לא חשבונית מס – החלטה 23). ידני בשלב הזה.
 //   arDoc      – קובץ המסמך (pdf), שליחה בלחיצה (send), שינוי מועד תשלום לחשבונית (due – מנהל, 79).
@@ -772,6 +773,11 @@ async function arVoidRc(request) {
     const live = al.docs.filter((a) => !a.get('void'));
     const invs = [];
     for (const a of live) invs.push([a, await B.needDoc(a.get('inv'))]);
+    // החלטה 37: על אחת החשבוניות של הקבלה יש זיכוי עם החזר כסף (cr.rf) – אי אפשר לבטל את הקבלה (הכסף כבר הוחזר מתוכה). תיקון – בזיכוי
+    for (const iv of [...new Set(live.map((a) => a.get('inv')))]) {
+      const crs = await tx.get(db.collection('ardoc').where('ref', '==', iv));
+      if (crs.docs.some((p) => p.get('t') === 'cr' && !p.get('void') && p.get('rf'))) throw pre('rc-refunded', 'הוחזר כסף על החשבונית – אי אפשר לבטל את הקבלה. תיקון – בזיכוי');
+    }
     const c = x.d.cust ? await B.needCust(x.d.cust) : null;
     // קבלה שנרשמה ב"שולם" של הזמנה (paid.rc) – ההזמנה חוזרת ל"ממתין לתשלום"
     // תיקון סבב 1 (הערה 2): גם הזמנות של החשבוניות שהקבלה סגרה (arReceipt מכרטיס הלקוח) – לפי paid.rc

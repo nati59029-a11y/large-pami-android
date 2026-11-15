@@ -1,6 +1,6 @@
 'use strict';
 // 15.11.2026 (החלטה 32, חלק א): אמצעי גבייה וחיוב אחרי ליקוט – מסגרת בכרטיס ההזמנה ("שלח קישור ללקוח" / "אמלא בשיחה" / "המסגרת אושרה"),
-// "חויב" בסוף הליקוט בתוך המסגרת, "חורג מהמסגרת", לקוח בשוטף בלי מסגרת, ותאימות (קישור / טלפון / שניהם) – 360px. השרת מדומה (השרת האמיתי – ord-auth.test.js).
+// "חויב" בסוף הליקוט בתוך המסגרת, החלטות 35 (מסגרת בלי שדה סכום) ו-36 ("סמן שולם" מושבת עד סוף הליקוט), "חורג מהמסגרת", לקוח בשוטף בלי מסגרת, ותאימות (קישור / טלפון / שניהם) – 360px. השרת מדומה (השרת האמיתי – ord-auth.test.js).
 // שימוש: node ui-ord-auth.js <www-dir> [out.json] [shots-dir]
 const fs = require('fs');
 const path = require('path');
@@ -68,6 +68,7 @@ async function open(browser, www, who, calls, S, PAY) {
   const ov = (page) => page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   const txt = (page) => page.evaluate(() => document.getElementById('main').innerText);
   const has = (page, sel) => page.evaluate((s) => !!document.querySelector(s), sel);
+  const paidSt = (page) => page.evaluate(() => { const b = document.querySelector('[data-a=oxPaid]'), n = document.getElementById('oxpaygate'); return b ? (b.disabled ? 'off:' + (n ? n.innerText : '') : 'on') : 'none'; });
   for (const who of ['w', 'm']) {
     const calls = [], S = { ord: freshOrd() };
     const { ctx, page, log } = await open(browser, www, who, calls, S, { mode: 'link', has: true, after: true });
@@ -79,6 +80,9 @@ async function open(browser, www, who, calls, S, PAY) {
     check(who + ' 1 חיוב אחרי ליקוט: מסגרת ₪47 (42.50 + 10%), "שלח קישור" / "אמלא בשיחה" / "המסגרת אושרה", בלי "לתשלום", בלי גלילה לרוחב',
       /מסגרת לאישור/.test(t1) && /47/.test(await page.evaluate(() => document.getElementById('oxfr').innerText)) && await has(page, '[data-a=oxAuthSend]') && await has(page, '[data-a=oxAuthCall]') && await has(page, '[data-a=oxAuthOk]') && !(await page.evaluate(() => [...document.querySelectorAll('[data-a=oxPay]')].some((b) => b.innerText.trim() === 'לתשלום'))) && await ov(page) <= 0 && await has(page, '[data-a=oxPaid]'),
       { ov: await ov(page) });
+    const ps1 = await paidSt(page); let kk = calls.length; await page.evaluate(() => { document.querySelector('[data-a=oxPaid]').click(); ACT.oxPaid(document.querySelector('[data-a=oxPaid]')); }); await H.settle(page, 300);
+    const dlg1 = await has(page, '#dlg form[data-f=oxPaidF]'); await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } });
+    check(who + ' 1ב החלטה 36: לפני הליקוט "סמן שולם" מושבת עם "אפשר לרשום תשלום רק אחרי שהליקוט הסתיים"', ps1 === 'off:אפשר לרשום תשלום רק אחרי שהליקוט הסתיים.' && !dlg1 && !since(kk, 'markOrderPaid').length, { ps1, dlg1 });
     if (who === 'w') await shot(page, 'מסגרת-בכרטיס-360');
     // 2. שלח קישור ללקוח
     let k = calls.length; await page.click('[data-a=oxAuthSend]'); await H.settle(page, 600);
@@ -92,14 +96,14 @@ async function open(browser, www, who, calls, S, PAY) {
       { g: g && g.d, op: op.map((x) => x.slice(0, 60)) });
     // 3. "המסגרת אושרה"
     await page.click('[data-a=oxAuthOk]'); await H.settle(page, 300);
-    const f3 = await page.evaluate(() => { const f = document.querySelector('#dlg form[data-f=oxAuthF]'); return f ? { amt: f.amt.value, via: f.via.value, ml: f.last4.maxLength } : null; });
+    const f3 = await page.evaluate(() => { const f = document.querySelector('#dlg form[data-f=oxAuthF]'); return f ? { amt: f.amt.value, type: f.amt.type, vis: [...f.querySelectorAll('input:not([type=hidden])')].map((x) => x.name), fr: (document.getElementById('oxauthfr') || {}).innerText, via: f.via.value, ml: f.last4.maxLength, ow: document.documentElement.scrollWidth - innerWidth } : null; });
     if (who === 'w') await shot(page, 'המסגרת-אושרה-360');
     await page.fill('#dlg input[name=last4]', '12a4'); k = calls.length; await page.click('#dlg form[data-f=oxAuthF] button.btn:not(.g)'); await H.settle(page, 300);
     const bad4 = since(k, 'orderAuth').length;
     await page.fill('#dlg input[name=last4]', '1234'); await page.click('#dlg form[data-f=oxAuthF] button.btn:not(.g)'); await H.settle(page, 1500);
     const a3 = since(k, 'orderAuth');
-    check(who + ' 3 "המסגרת אושרה": סכום 47 מוכן, "קישור" נבחר אחרי שליחה, 4 ספרות בלבד (12a4 לא נשלח), orderAuth {amt:47, via:link, last4}',
-      !!f3 && f3.amt === '47' && f3.via === 'link' && f3.ml === 4 && bad4 === 0 && a3.length === 1 && a3[0].d.amt === 47 && a3[0].d.via === 'link' && a3[0].d.last4 === '1234', { f3, a3: a3.map((x) => x.d) });
+    check(who + ' 3 "המסגרת אושרה" (החלטה 35): בלי שדה סכום – מוצג ₪47 המחושב, "קישור" נבחר אחרי שליחה, 4 ספרות בלבד (12a4 לא נשלח), orderAuth {amt:47, via:link, last4}',
+      !!f3 && f3.amt === '47' && f3.type === 'hidden' && JSON.stringify(f3.vis) === '["last4"]' && /47/.test(f3.fr || '') && f3.ow <= 0 && f3.via === 'link' && f3.ml === 4 && bad4 === 0 && a3.length === 1 && a3[0].d.amt === 47 && a3[0].d.via === 'link' && a3[0].d.last4 === '1234', { f3, a3: a3.map((x) => x.d) });
     // 4. אחרי אישור, לפני ליקוט – בלי "חויב"
     await card('o1'); const t4 = await txt(page);
     check(who + ' 4 מסגרת אושרה לפני ליקוט: "מסגרת אושרה: ₪47", ****1234, "החיוב – בסוף הליקוט", בלי "חויב"', /מסגרת אושרה/.test(t4) && /1234/.test(t4) && /בסוף הליקוט/.test(t4) && !(await has(page, '[data-a=oxCharged]')), { t: t4.slice(0, 0) });
@@ -121,7 +125,8 @@ async function open(browser, www, who, calls, S, PAY) {
       /חורג מהמסגרת/.test(t6) && /קישור חדש/.test(t6) && /58/.test(await page.evaluate(() => document.getElementById('oxfr').innerText)) && !(await has(page, '[data-a=oxCharged]')) && await has(page, '[data-a=oxAuthSend]'), {});
     // 7. לקוח בשוטף – בלי מסגרת ובלי קישור
     await page.evaluate(() => { window.__onTermsOrig = window.__onTerms; window.__onTerms = (c) => c === 'cT'; }); await card('o5');
-    check(who + ' 7 לקוח בשוטף: בלי מסגרת, בלי "לתשלום"/"שלח קישור"', !(await has(page, '#oxauth')) && !(await has(page, '[data-a=oxPay]')) && !(await has(page, '[data-a=oxAuthSend]')), {});
+    const ps7 = await paidSt(page);
+    check(who + ' 7 לקוח בשוטף: בלי מסגרת, בלי "לתשלום"/"שלח קישור"; "סמן שולם" פעיל כמו היום (החלטה 36 לא חלה)', !(await has(page, '#oxauth')) && !(await has(page, '[data-a=oxPay]')) && !(await has(page, '[data-a=oxAuthSend]')) && ps7 === 'on', { ps7 });
     await page.evaluate(() => { window.__onTerms = window.__onTermsOrig; });
     // 7ב. תיקון סבב 1: "סמן שולם" בעסק עם חיוב אחרי ליקוט – בלי "אשראי בקישור"
     await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } }); await card('o3'); await page.click('[data-a=oxPaid]'); await H.settle(page, 300);
@@ -131,14 +136,15 @@ async function open(browser, www, who, calls, S, PAY) {
     // 7ג. תיקון סבב 1: נוסף מוצר אחרי הליקוט – "ההזמנה השתנתה אחרי הליקוט – יש ללקט מחדש", בלי "חויב"; "ליקוט מחדש" ← ליקוט ← "חויב ₪48.50"
     await card('o6'); const t7 = await txt(page);
     if (who === 'w') await shot(page, 'השתנתה-אחרי-ליקוט-360');
-    const ov7 = await ov(page), c7 = await has(page, '[data-a=oxCharged]'), g7 = await has(page, '[data-a=oxPkGo]');
+    const ov7 = await ov(page), c7 = await has(page, '[data-a=oxCharged]'), g7 = await has(page, '[data-a=oxPkGo]'), ps7c = await paidSt(page);
     await page.click('[data-a=oxPkGo]'); await H.settle(page, 500);
     const inPick = await page.evaluate(() => cur().v === 'oxPick' && !!document.querySelector('[data-a=oxPkAll]'));
     k = calls.length; await page.click('[data-a=oxPkAll]'); await page.click('[data-a=oxPkDone]'); await H.settle(page, 1800);
     const p7 = since(k, 'orderPick');
-    await card('o6'); const t7b = await txt(page);
+    await card('o6'); const t7b = await txt(page); const ps7d = await paidSt(page);
     check(who + ' 7ג שינוי אחרי ליקוט: הודעה + "ליקוט מחדש" בלי "חויב"; אחרי ליקוט מחדש – "חויב ₪48.50"',
-      /השתנתה אחרי הליקוט/.test(t7) && /ללקט מחדש/.test(t7) && !c7 && g7 && inPick && p7.length === 1 && p7[0].d.l.length === 4 && /48\.50/.test(t7b) && !/השתנתה אחרי הליקוט/.test(t7b) && await has(page, '[data-a=oxCharged]') && ov7 <= 0, { c7, g7, inPick, p7: p7.length, ov7 });
+      /^off:ההזמנה השתנתה אחרי הליקוט/.test(ps7c) && ps7d === 'on' &&
+      /השתנתה אחרי הליקוט/.test(t7) && /ללקט מחדש/.test(t7) && !c7 && g7 && inPick && p7.length === 1 && p7[0].d.l.length === 4 && /48\.50/.test(t7b) && !/השתנתה אחרי הליקוט/.test(t7b) && await has(page, '[data-a=oxCharged]') && ov7 <= 0, { c7, g7, inPick, p7: p7.length, ov7, ps7c, ps7d });
     const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
     check(who + ' 8 בלי שגיאות JS', errs.length === 0, errs.slice(0, 3));
     await ctx.close();
@@ -151,6 +157,8 @@ async function open(browser, www, who, calls, S, PAY) {
     const r = await page.evaluate(() => ({ pay: [...document.querySelectorAll('[data-a=oxPay]')].some((b) => b.innerText.trim() === 'לתשלום'), tel: /תשלום בטלפון/.test(document.getElementById('main').innerText), auth: !!document.getElementById('oxauth'), kind: window.__payKind() }));
     const exp = { link: { pay: true, tel: false, auth: false, kind: 'link' }, phone: { pay: false, tel: true, auth: false, kind: 'phone' }, both: { pay: true, tel: true, auth: false, kind: 'both' }, 'both-after': { pay: false, tel: true, auth: true, kind: 'both' } }[nm];
     if (nm === 'both-after') await shot(page, 'שניהם-עם-מסגרת-360');
+    const ps9 = await page.evaluate(() => { const b = document.querySelector('[data-a=oxPaid]'); return b ? (b.disabled ? 'off' : 'on') : 'none'; });
+    check('9ג החלטה 36 – ' + nm + ': "סמן שולם" ' + (PAY.after ? 'מושבת לפני הליקוט' : 'פעיל כמו היום'), ps9 === (PAY.after ? 'off' : 'on'), { ps9 });
     if (nm === 'link') { // תיקון סבב 1: עסק בלי "אחרי ליקוט" – "אשראי בקישור" נשאר ומסומן, כמו היום
       await page.click('[data-a=oxPaid]'); await H.settle(page, 300);
       const pm = await page.evaluate(() => [...document.querySelectorAll('#dlg select[name=method] option')].map((x) => x.value + (x.selected ? '*' : '')));

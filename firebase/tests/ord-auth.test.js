@@ -149,22 +149,39 @@ describe('מסגרת – "המסגרת אושרה"', () => {
     await setPay({ mg: 20 });
     assert.equal((await call('getPayLink', E1, { id })).result.fr, 51);
   });
-  it('אימות: מתחת לסכום ההזמנה, מספר כרטיס, via, סכום; הרשאות; לקוח בשוטף; הזמנה ששולמה', async () => {
+  it('החלטה 35: בלי amt השרת מחשב ושומר את המסגרת; amt ישן (לפני שינוי בהזמנה / במרווח) נדחה; 4 ספרות – רשות', async () => {
     const id = await mk();
-    assert.equal((await call('orderAuth', E1, { id, amt: 42.49, via: 'link' })).reason, 'auth-low');
-    assert.equal((await call('orderAuth', E1, { id, amt: 42.5, via: 'call' })).status, 'OK', 'בדיוק הסכום – מותר');
+    const r = await call('orderAuth', E1, { id, via: 'call' });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.auth.amt, 47);
+    let o = await get(`b/${A}/ord/${id}`);
+    assert.equal(o.auth.amt, 47); assert.equal(o.auth.due, 42.5); assert.equal(o.auth.mg, 10); assert.equal(o.auth.last4, undefined);
+    const it = keep(o); it[0].qty = 3; // 52.5 → 58
+    assert.equal((await call('updateOrder', E1, { id, items: it })).status, 'OK');
+    const st = await call('orderAuth', E1, { id, amt: 47, via: 'link' });
+    assert.equal(st.reason, 'auth-amt', 'מסך ישן עם המסגרת הקודמת'); assert.match(st.text, /58/);
+    assert.equal((await get(`b/${A}/ord/${id}`)).auth.amt, 47, 'לא השתנה');
+    assert.equal((await call('orderAuth', E1, { id, amt: 58, via: 'link', last4: '4321' })).status, 'OK');
+    await setPay({ mg: 20 }); // 52.5 × 1.2 = 63
+    assert.equal((await call('orderAuth', E1, { id, amt: 58, via: 'link' })).reason, 'auth-amt');
+    assert.equal((await call('orderAuth', E1, { id, via: 'link' })).result.auth.amt, 63);
+    o = await get(`b/${A}/ord/${id}`); assert.equal(o.auth.amt, 63); assert.equal(o.auth.mg, 20);
+  });
+  it('אימות: סכום שונה מהמסגרת המחושבת, מספר כרטיס, via, סכום; הרשאות; לקוח בשוטף; הזמנה ששולמה', async () => {
+    const id = await mk();
+    // החלטה 35: רק המסגרת המחושבת (47) – גם לא סכום ההזמנה עצמו ולא סכום גבוה יותר
+    for (const a of [42.49, 42.5, 48, 0]) { const r = await call('orderAuth', E1, { id, amt: a, via: 'link' }); assert.equal(r.reason, 'auth-amt', a + ': ' + r.text); assert.match(r.text, /47/); }
+    assert.equal((await get(`b/${A}/ord/${id}`)).auth, undefined, 'לא נרשמה מסגרת');
     assert.equal((await call('orderAuth', E1, { id, amt: 47, via: 'call', last4: '4580 1234 5678 9012' })).reason, 'card-like');
     assert.equal((await call('orderAuth', E1, { id, amt: 47, via: 'call', last4: '4580123456789012' })).reason, 'card-like');
     assert.equal((await call('orderAuth', E1, { id, amt: 47, via: 'call', last4: '12a4' })).reason, 'bad-last4');
     assert.equal((await call('orderAuth', E1, { id, amt: 47, via: 'sms' })).reason, 'bad-via');
-    assert.equal((await call('orderAuth', E1, { id, amt: 0, via: 'call' })).reason, 'bad-price');
     assert.equal((await call('orderAuth', E1, { id, amt: '47', via: 'call' })).reason, 'bad-price');
     assert.equal((await call('orderAuth', E1, { id, amt: 47, via: 'call', card: '4580123456789012' })).reason, 'bad-field');
     assert.equal((await call('orderAuth', E2, { id, amt: 47, via: 'call' })).reason, 'foreign-br');
     assert.notEqual((await call('orderAuth', NOORD, { id, amt: 47, via: 'call' })).status, 'OK');
     assert.equal((await call('orderAuth', null, { id, amt: 47, via: 'call' })).status, 'UNAUTHENTICATED');
-    assert.equal((await call('orderAuth', MGR, { id, amt: 48, via: 'call' })).status, 'OK');
-    assert.equal((await get(`b/${A}/ord/${id}`)).auth.amt, 48, 'אישור חוזר מחליף');
+    assert.equal((await call('orderAuth', MGR, { id, via: 'link' })).status, 'OK');
+    assert.equal((await get(`b/${A}/ord/${id}`)).auth.via, 'link', 'אישור חוזר מחליף');
     assert.ok(!JSON.stringify(await get(`b/${A}/ord/${id}`)).includes('4580'), 'מספר הכרטיס לא נשמר');
     // לקוח בשוטף (החלטות 13, 18) – בלי מסגרת
     const t = await mk();
@@ -174,7 +191,8 @@ describe('מסגרת – "המסגרת אושרה"', () => {
     await prep((d) => d.doc(`b/${A}/cust/c1`).update({ pay: 'cash' }));
     assert.equal((await call('orderAuth', E1, { id: t, amt: 47, via: 'call' })).status, 'OK');
     // הזמנה ששולמה / בוטלה
-    await call('markOrderPaid', E1, { id: t, method: 'cash' });
+    await call('orderPick', E1, { id: t, reqId: rid(), l: allOk(3) }); // החלטה 36: תשלום רק אחרי הליקוט
+    assert.equal((await call('markOrderPaid', E1, { id: t, method: 'cash' })).status, 'OK');
     assert.equal((await call('orderAuth', E1, { id: t, amt: 47, via: 'call' })).reason, 'bad-status');
   });
 });
@@ -214,7 +232,7 @@ describe('"חויב" בסוף הליקוט – בתוך המסגרת / מעל ה
   });
   it('מעל המסגרת ← over-auth; מסגרת חדשה (קישור חדש) ← חויב', async () => {
     const id = await mk();
-    await call('orderAuth', E1, { id, amt: 43, via: 'link' });
+    await call('orderAuth', E1, { id, via: 'link' }); // 47
     const o0 = await get(`b/${A}/ord/${id}`);
     const it = keep(o0); it[0].qty = 3; // 52.5
     assert.equal((await call('updateOrder', E1, { id, items: it })).status, 'OK');
@@ -230,7 +248,7 @@ describe('"חויב" בסוף הליקוט – בתוך המסגרת / מעל ה
 
 describe('תיקון סבב 1 – "סמן שולם" בקישור בעסק עם חיוב אחרי ליקוט, ושינוי אחרי הליקוט', () => {
   beforeEach(() => setPay({ after: true }));
-  it('קישור בלי amt ← use-charge (גם מנהל); מזומן / העברה / טלפון / אחר – כמו היום', async () => {
+  it('קישור בלי amt ← use-charge (גם מנהל); מזומן / העברה / טלפון / אחר – רק אחרי הליקוט (החלטה 36)', async () => {
     const id = await mk();
     for (const u of [E1, MGR]) {
       const r = await call('markOrderPaid', u, { id, method: 'link' });
@@ -240,12 +258,16 @@ describe('תיקון סבב 1 – "סמן שולם" בקישור בעסק עם �
     assert.equal((await get(`b/${A}/ord/${id}`)).status, 'work', 'לא נרשם תשלום');
     for (const m of ['cash', 'transfer', 'phone', 'other']) {
       const o = await mk();
+      const r0 = await call('markOrderPaid', E1, { id: o, method: m });
+      assert.equal(r0.reason, 'pay-pick', m + ': ' + r0.text);
+      assert.equal((await call('orderPick', E1, { id: o, reqId: rid(), l: allOk(3) })).result.st, 'ok');
       const r = await call('markOrderPaid', E1, { id: o, method: m });
       assert.equal(r.status, 'OK', m + ': ' + r.text);
       assert.equal((await get(`b/${A}/ord/${o}`)).paid.method, m);
     }
   });
   it('תרחיש הבודק: ליקוט ok ← updateOrder מוסיף מוצר ← חויב נדחה (pick-old) ← ליקוט מחדש ← חויב עובר', async () => {
+    await setPay({ after: true, mg: 50 }); // מסגרת 30
     const id = await mk([{ pid: 'pA', qty: 2, price: 10 }]); // 20
     assert.equal((await call('orderAuth', E1, { id, amt: 30, via: 'link' })).status, 'OK');
     assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: allOk(1) })).result.st, 'ok');
@@ -264,8 +286,9 @@ describe('תיקון סבב 1 – "סמן שולם" בקישור בעסק עם �
     assert.equal(o.paid.amt, 25); assert.equal(o.paid.fr, 30);
   });
   it('שינוי מחיר בלבד אחרי הליקוט ← pick-old; אחרי "הלקוח אישר" החותמת מהפריטים אחרי ההורדה; הזמנה ישנה בלי fin – לא נחסמת', async () => {
+    await setPay({ after: true, mg: 50 }); // מסגרת 64
     const id = await mk();
-    await call('orderAuth', E1, { id, amt: 60, via: 'call' });
+    assert.equal((await call('orderAuth', E1, { id, via: 'call' })).result.auth.amt, 64);
     await call('orderPick', E1, { id, reqId: rid(), l: allOk(3) });
     const it = keep(await get(`b/${A}/ord/${id}`)); it[0].price = 11; // 44.5
     assert.equal((await call('updateOrder', E1, { id, items: it })).status, 'OK');
@@ -281,12 +304,65 @@ describe('תיקון סבב 1 – "סמן שולם" בקישור בעסק עם �
     assert.equal((await paidLink(E1, id, 37)).status, 'OK');
     // הזמנה ישנה: pk.st 'ok' בלי fin – שינוי אחרי הליקוט לא חוסם (כמו קודם)
     const old = await mk();
-    await call('orderAuth', E1, { id: old, amt: 60, via: 'call' });
+    await call('orderAuth', E1, { id: old, via: 'call' });
     await call('orderPick', E1, { id: old, reqId: rid(), l: allOk(3) });
     const pk0 = (await get(`b/${A}/ord/${old}`)).pk; delete pk0.fin;
     await prep((d) => d.doc(`b/${A}/ord/${old}`).update({ pk: pk0 }));
     const it2 = keep(await get(`b/${A}/ord/${old}`)); it2[0].qty = 3; // 52.5
     assert.equal((await call('updateOrder', E1, { id: old, items: it2 })).status, 'OK');
     assert.equal((await paidLink(E1, old, 52.5)).status, 'OK');
+  });
+});
+
+describe('החלטה 36 – כל רישום תשלום בעסק עם "חיוב אחרי ליקוט" רק אחרי הליקוט', () => {
+  beforeEach(() => setPay({ after: true }));
+  it('בלי ליקוט / ליקוט עם שינויים ← pay-pick (גם מנהל, גם עם אסמכתא); אחרי ליקוט ← עובר', async () => {
+    const id = await mk();
+    for (const u of [E1, MGR]) {
+      const r = await call('markOrderPaid', u, { id, method: 'cash' });
+      assert.equal(r.reason, 'pay-pick', r.text); assert.match(r.text, /אפשר לרשום תשלום רק אחרי שהליקוט הסתיים/);
+    }
+    const p = await call('orderPick', E1, { id, reqId: rid(), l: [{ i: 0, ok: true }, { i: 1, ok: false, act: 'rm' }, { i: 2, ok: true }] });
+    assert.equal(p.result.st, 'chg');
+    assert.equal((await call('markOrderPaid', MGR, { id, method: 'transfer' })).reason, 'pay-pick', 'ליקוט לא הסתיים');
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'work');
+    const o1 = await get(`b/${A}/ord/${id}`);
+    assert.equal((await call('updateOrder', E1, { id, items: [keep(o1)[0], keep(o1)[2]], ver: p.result.upd })).status, 'OK');
+    assert.equal((await call('orderPickOk', E1, { id })).status, 'OK');
+    const r = await call('markOrderPaid', E1, { id, method: 'transfer', conf: 'A1' });
+    assert.equal(r.status, 'OK', r.text);
+    const o = await get(`b/${A}/ord/${id}`); assert.equal(o.status, 'paid'); assert.equal(o.paid.amt, 35); assert.equal(o.paid.method, 'transfer');
+  });
+  it('שינוי אחרי סיום הליקוט ← pick-old עד ליקוט מחדש; הזמנה ישנה בלי fin – רק pk.st', async () => {
+    const id = await mk();
+    await call('orderPick', E1, { id, reqId: rid(), l: allOk(3) });
+    const it = keep(await get(`b/${A}/ord/${id}`)); it[0].price = 11;
+    assert.equal((await call('updateOrder', E1, { id, items: it })).status, 'OK');
+    const r = await call('markOrderPaid', E1, { id, method: 'cash' });
+    assert.equal(r.reason, 'pick-old', r.text); assert.match(r.text, /יש ללקט מחדש/);
+    await call('orderPick', E1, { id, reqId: rid(), l: allOk(3) });
+    assert.equal((await call('markOrderPaid', E1, { id, method: 'cash' })).status, 'OK');
+    // ישנה: pk.st 'ok' בלי fin – שינוי לא חוסם
+    const old = await mk();
+    await call('orderPick', E1, { id: old, reqId: rid(), l: allOk(3) });
+    const pk0 = (await get(`b/${A}/ord/${old}`)).pk; delete pk0.fin;
+    await prep((d) => d.doc(`b/${A}/ord/${old}`).update({ pk: pk0 }));
+    const it2 = keep(await get(`b/${A}/ord/${old}`)); it2[0].qty = 3;
+    assert.equal((await call('updateOrder', E1, { id: old, items: it2 })).status, 'OK');
+    assert.equal((await call('markOrderPaid', E1, { id: old, method: 'phone' })).status, 'OK');
+  });
+  it('לקוח בשוטף – כמו היום (בלי ליקוט); עסק בלי "אחרי ליקוט" – כמו היום', async () => {
+    const t = await mk();
+    await prep(async (d) => { await d.doc(`b/${A}/cust/c1`).set({ name: 'עסק', phone: '0501234567', wholesale: true, pay: 'n30' }); await d.doc(`b/${A}/ord/${t}`).update({ custId: 'c1' }); });
+    assert.equal((await call('markOrderPaid', E1, { id: t, method: 'transfer' })).status, 'OK', 'שוטף');
+    const im = await mk();
+    await prep(async (d) => { await d.doc(`b/${A}/cust/c2`).set({ name: 'מיידי', phone: '0501234568', pay: 'cash' }); await d.doc(`b/${A}/ord/${im}`).update({ custId: 'c2' }); });
+    assert.equal((await call('markOrderPaid', E1, { id: im, method: 'cash' })).reason, 'pay-pick', 'לקוח מיידי – נחסם');
+    await setPay({ after: false });
+    for (const m of ['cash', 'transfer', 'phone', 'other', 'link']) {
+      const o = await mk();
+      const r = await call('markOrderPaid', E1, { id: o, method: m });
+      assert.equal(r.status, 'OK', m + ': ' + r.text);
+    }
   });
 });

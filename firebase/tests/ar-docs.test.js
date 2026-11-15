@@ -377,6 +377,26 @@ describe('זיכוי (72, 73, החלטה 11)', () => {
     assert.equal(c4.rf, undefined); assert.equal(c4.left, 625);
     a = await balanced(PR); assert.equal(a.bal, -625);
   });
+  it('החלטה 37: ביטול קבלה אחרי החזר כסף על החשבונית שלה – נדחה (rc-refunded); זיכוי בלי החזר – הביטול כמו קודם', async () => {
+    const o3 = await order(WS, [{ pid: 'pA', qty: 1, price: 100 }]); const inv3 = (await ship(o3, E1)).ar.id;
+    const r3 = await ok(call('arReceipt', MGR, { reqId: rid(), cust: WS, amt: 30, method: 'transfer', alloc: [{ inv: inv3, amt: 30 }] }));
+    const o4 = await order(WS, [{ pid: 'pA', qty: 1, price: 50 }]); const inv4 = (await ship(o4, E1)).ar.id;
+    const r4 = await ok(call('arReceipt', MGR, { reqId: rid(), cust: WS, amt: 20, method: 'cash', alloc: [{ inv: inv4, amt: 20 }] }));
+    // זיכוי בלי החזר על inv4 – ביטול הקבלה עובר כמו קודם
+    await ok(call('arCredit', E1, { reqId: rid(), inv: inv4, mode: 'amt', amt: 5, reason: 'הנחה' }));
+    await ok(call('arVoidRc', MGR, { reqId: rid(), id: r4.id, reason: 'טעות' }));
+    assert.equal((await get(`b/${A}/ardoc/${r4.id}`)).st, 'void');
+    // החזר כסף על inv3 – ביטול הקבלה שלה נחסם, ושום דבר לא משתנה
+    const c3 = await ok(call('arCredit', E1, { reqId: rid(), inv: inv3, mode: 'full', reason: 'החזרה', refund: { m: 'transfer' } }));
+    assert.deepEqual(c3.rf, { m: 'transfer', amt: 3000 });
+    const before = await balanced(WS);
+    const v = await call('arVoidRc', MGR, { reqId: rid(), id: r3.id, reason: 'טעות' });
+    assert.equal(v.reason, 'rc-refunded', v.text);
+    assert.match(v.text, /הוחזר כסף על החשבונית/); assert.match(v.text, /בזיכוי/);
+    const rc3 = await get(`b/${A}/ardoc/${r3.id}`); assert.equal(rc3.void, undefined); assert.notEqual(rc3.st, 'void');
+    assert.ok((await all('aralloc')).filter((x) => x.rc === r3.id).every((x) => !x.void), 'ההקצאה לא בוטלה');
+    const a = await balanced(WS); assert.equal(a.bal, before.bal); assert.equal(a.cr, before.cr);
+  });
   it('זיכוי לחשבונית מס קבלה (שולמה) – זכות פתוחה ללקוח; זיכוי מלא בלי זיכויים קודמים = בדיוק סכום החשבונית', async () => {
     const p = await order(WI); await ok(call('markOrderPaid', E1, { id: p, method: 'cash' }));
     const ir = await ok(call('setOrderStatus', E1, { id: p, status: 'out' }));

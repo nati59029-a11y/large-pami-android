@@ -202,16 +202,18 @@ async function supOrdSet(request) {
   return { ok: true };
 }
 
-// orderAuth({ id, amt, via:'link'|'call', last4? }) – "המסגרת אושרה". עובד עם ord בסניף או מנהל.
-//   רק בעסק עם קישור + "חיוב אחרי ליקוט" (private/pay), רק בהזמנה פתוחה שלא נשלחה, לא ללקוח בשוטף (החלטות 13, 18), והמסגרת לא נמוכה מסכום ההזמנה.
+// orderAuth({ id, via:'link'|'call', last4?, amt? }) – "המסגרת אושרה". עובד עם ord בסניף או מנהל.
+//   רק בעסק עם קישור + "חיוב אחרי ליקוט" (private/pay), רק בהזמנה פתוחה שלא נשלחה, לא ללקוח בשוטף (החלטות 13, 18).
+//   החלטה 35 (15.11.2026): המסגרת = ArCalc.frameOf(סכום ההזמנה, מרווח העסק) – מחושבת ונשמרת בשרת. amt שנשלח ושונה ממנה נדחה (auth-amt), לא מתעלמים –
+//   כך אפליקציה ישנה (ששולחת את הסכום שהוצג) עובדת, וסכום שהוקלד ידנית או הזמנה שהשתנתה בינתיים לא נרשמים בשקט.
 //   אישור חוזר (קישור חדש אחרי חריגה) מחליף את הקודם; ההיסטוריה ביומן. 4 ספרות בלבד – אין מספר כרטיס.
 async function orderAuth(request) {
   const w = await C.who(request);
   const input = inputObject(request);
   C.onlyKeys(input, ['id', 'amt', 'via', 'last4']);
   const id = C.idOf(input.id, 'הזמנה');
-  const amt = C.money(input.amt, 'סכום המסגרת');
-  if (!(amt > 0)) throw C.bad('bad-price', 'סכום המסגרת: יותר מ-0');
+  // החלטה 35: המסגרת מחושבת בשרת (frameOf על סכום ההזמנה והמרווח של העסק). amt רשות (תאימות לאפליקציה ישנה) – אם נשלח ושונה מהמחושבת → auth-amt
+  const amtIn = input.amt === undefined || input.amt === null || input.amt === '' ? undefined : C.money(input.amt, 'סכום המסגרת');
   if (!['link', 'call'].includes(input.via)) throw C.bad('bad-via', 'בחרו: קישור ללקוח או מילוי בשיחה');
   let last4 = '';
   if (input.last4 != null && input.last4 !== '') {
@@ -233,7 +235,9 @@ async function orderAuth(request) {
     const cs = typeof cid === 'string' && C.ID_RE.test(cid) ? await tx.get(db.doc('cust/' + cid)) : null;
     if (cs && cs.exists && AC.termsOfCust(cs.data()).b !== 'imm') throw C.pre('terms', 'לקוח בשוטף – בלי מסגרת אשראי');
     const due = AC.payOf(d);
-    if (AC.ag(amt) < AC.ag(due)) throw C.pre('auth-low', `המסגרת (₪${amt}) נמוכה מסכום ההזמנה (₪${due})`);
+    const amt = AC.frameOf(due, p.get('mg'));
+    if (!(amt > 0)) throw C.pre('bad-price', 'סכום ההזמנה: יותר מ-0');
+    if (amtIn !== undefined && AC.ag(amtIn) !== AC.ag(amt)) throw C.pre('auth-amt', `המסגרת של ההזמנה היא ₪${amt} (מחושבת לבד). רעננו את ההזמנה ונסו שוב`);
     const now = Date.now();
     const auth = Object.assign({ amt, due, mg: AC.mgOf(p.get('mg')), via: input.via, at: now, by: w.uid }, last4 ? { last4 } : {});
     tx.update(ref, { auth, upd: now });
