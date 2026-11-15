@@ -12,6 +12,7 @@
 //   s3SaveMap, s3SetBranch (מנהל־על), s3PutTex – המפה של סריקת החנות: שמירה עם נעילה וגרסאות, הגדרות סניף, טקסטורות (store3d-map.js).
 //   s3PutPano, s3DelPano – נקודות סיור 360 (שלב 18א, store3d-map.js).
 //   shelfCheck, mapDraft – בדיקת מדף וטיוטת מפה דרך Gemini, עם מכסה חודשית לסניף (store3d-ai.js).
+//   mapFix – תיקון טיוטת מפה בכתב דרך Gemini, בלי מכסה (רק הבלם היומי לעובד) (store3d-fix.js).
 //   s3Fix, s3Clean – משימות תיקון, ניקוי יומי וביצועי עובדים (store3d-extra.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
@@ -267,6 +268,9 @@ Object.assign(exports, require('./store3d-map'));
 // שלב 8 (14.11.2026): shelfCheck (בדיקת מדף – עובד אחראי בסבב / דיווח יזום), mapDraft (טיוטת מפה – מנהל / s3m). Gemini, מכסה חודשית לסניף
 // (s3use, אזהרה ב-80%) ובלם יומי לעובד, החזרה בכשל, תמונה עם אדם לא נשמרת. store3d-ai.js + lib/store3d-ai.js
 Object.assign(exports, require('./store3d-ai'));
+// שלב 20ג (15.11.2026): mapFix (תיקון טיוטה בכתב – מנהל / s3m). טקסט בלבד, בלי תמונות; לא נספר במכסה (החלטת המשתמש), רק בלם 400 ביום לעובד.
+// store3d-fix.js + lib/store3d-fix.js
+Object.assign(exports, require('./store3d-fix'));
 // שלב 10 (14.11.2026): s3Fix (משימת תיקון ידנית / ביטול / הכרעה – מנהל), s3Clean (מתוזמנת יומית: סל מחזור אחרי 30 יום, 3 סבבים אחרונים
 // של תמונות לכל מקום, טקסטורות יתומות, ביצועי עובדים). סיום סבב (ציון, חוסרים, משימות תיקון) וערעורים – store3d-extra.js + lib/store3d-extra.js
 Object.assign(exports, require('./store3d-extra'));
