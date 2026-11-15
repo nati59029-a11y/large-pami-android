@@ -644,7 +644,7 @@ function mailOut(id, x, dr) {
 }
 function draftOut(id, x) {
   return { id, to: x.to || '', subj: x.subj || '', text: x.text || x.sum || '', src: x.src || '', st: x.st || 'pend', flags: x.flags || [], why: x.why || [], t: x.t || 0,
-    cls: x.cls || '', clsL: W.CLS[x.cls] || '', qk: x.qk || '', facts: x.facts || [], risk: x.risk === true, ad: x.ad === true, am: x.am === true, rule: x.rule || '', an: x.an || [], anL: G.autoWhyL(x.an), task: x.task || '', sentAt: x.sentAt || 0, stuck: maybeSent(x, Date.now()) };
+    cls: x.cls || '', clsL: W.CLS[x.cls] || '', qk: x.qk || '', facts: x.facts || [], risk: x.risk === true, ad: x.ad === true, am: x.am === true, rule: x.rule || '', an: x.an || [], anL: G.autoWhyL(x.an), task: x.task || '', oRe: x.oRe || '', sentAt: x.sentAt || 0, stuck: maybeSent(x, Date.now()) };
 }
 async function mailDoc(db, input) {
   const id = typeof input.id === 'string' && /^g[0-9a-f]{40}$/.test(input.id) ? input.id : null;
