@@ -213,4 +213,17 @@ describe('שלב ג/6: הזמנה מהמזכירה (ordCreateFromSec)', () => {
     assert.equal(err && err.details && err.details.reason, 'ws-not-linked');
     assert.equal((await get(S)).lk, undefined, 'הנעילה שוחררה אחרי שגיאה');
   });
+
+  it('השלמה: נעילה ישנה (121 שניות) של reqId שההזמנה שלו נוצרה בלי ordId – גרסה אחרת מקבלת already-ordered, אין הזמנה שנייה, ordId מושלם', async () => {
+    const S = `b/${A}/sec_ord/${MAIL}`;
+    const a = await make(secOrd());
+    // מדמה קריסה אחרי createCore ולפני הכתיבה: ordId/st חסרים ו-lk ישן נשאר
+    await prep((d) => d.doc(S).set(Object.assign(secOrd(), { lk: { reqId: 'sec' + MAIL + 'v1', at: Date.now() - 121000 } })));
+    await fails(secOrd({ ver: 2 }), 'already-ordered');
+    assert.equal((await coll(`b/${A}/ord`)).length, 1);
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 3);
+    const so = await get(S);
+    assert.equal(so.ordId, a.id); assert.equal(so.st, 'ordered'); assert.equal(so.lk, undefined);
+    await fails(secOrd({ ver: 3 }), 'already-ordered');
+  });
 });

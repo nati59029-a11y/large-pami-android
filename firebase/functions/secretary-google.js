@@ -1238,14 +1238,22 @@ async function ordCreateFromSec(db, o) {
   const raw = ORD.rawItems(items);
   const custId = o.custId ? ORD.idOf(o.custId, 'לקוח') : '';
   // נעילה על הטיוטה (בלי לשנות את createCore): שתי גרסאות במקביל לא יוצרות שתי הזמנות. נעילה של אותו reqId לא חוסמת את עצמה (ניסיון חוזר)
-  await db.runTransaction(async (tx) => {
+  // lk של reqId אחר (גם ישן) שההזמנה שלו כבר נוצרה (קריסה לפני כתיבת ordId) – משלימים ordId/st ומוחקים lk, ואז already-ordered
+  const lt = await db.runTransaction(async (tx) => {
     const v = await tx.get(sRef);
     if (!v.exists) throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
     if (v.get('ordId')) throw pre('already-ordered', 'מהטיוטה הזו כבר נוצרה הזמנה');
     const lk = v.get('lk');
-    if (lk && typeof lk === 'object' && lk.reqId !== reqId && Date.now() - (Number(lk.at) || 0) < SEC_LK_MS) throw pre('busy', 'ההזמנה מהטיוטה הזו נוצרת כרגע');
+    const other = lk && typeof lk === 'object' && lk.reqId !== reqId;
+    if (other && typeof lk.reqId === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(lk.reqId)) {
+      const lo = await tx.get(db.doc('ord/o' + lk.reqId));
+      if (lo.exists) { tx.update(sRef, { ordId: lo.id, st: 'ordered', upd: Date.now(), lk: FieldValue.delete() }); return 'fixed'; }
+    }
+    if (other && Date.now() - (Number(lk.at) || 0) < SEC_LK_MS) throw pre('busy', 'ההזמנה מהטיוטה הזו נוצרת כרגע');
     tx.update(sRef, { lk: { reqId, at: Date.now() } });
+    return 'locked';
   });
+  if (lt === 'fixed') throw pre('already-ordered', 'מהטיוטה הזו כבר נוצרה הזמנה'); // אחרי ה-commit – ההשלמה נשמרת
   let r;
   try {
     r = await ORD.createCore(db, w, { reqId, br, cust, raw, note: '', custId, input: {}, src: 'mail', sec: { in: mailId, ch: 'mail' } });
