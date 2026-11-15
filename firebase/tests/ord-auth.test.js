@@ -227,3 +227,66 @@ describe('"חויב" בסוף הליקוט – בתוך המסגרת / מעל ה
     assert.equal((await get(`b/${A}/ord/${id}`)).paid.fr, 58);
   });
 });
+
+describe('תיקון סבב 1 – "סמן שולם" בקישור בעסק עם חיוב אחרי ליקוט, ושינוי אחרי הליקוט', () => {
+  beforeEach(() => setPay({ after: true }));
+  it('קישור בלי amt ← use-charge (גם מנהל); מזומן / העברה / טלפון / אחר – כמו היום', async () => {
+    const id = await mk();
+    for (const u of [E1, MGR]) {
+      const r = await call('markOrderPaid', u, { id, method: 'link' });
+      assert.equal(r.reason, 'use-charge', r.text);
+      assert.match(r.text, /חויב/);
+    }
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'work', 'לא נרשם תשלום');
+    for (const m of ['cash', 'transfer', 'phone', 'other']) {
+      const o = await mk();
+      const r = await call('markOrderPaid', E1, { id: o, method: m });
+      assert.equal(r.status, 'OK', m + ': ' + r.text);
+      assert.equal((await get(`b/${A}/ord/${o}`)).paid.method, m);
+    }
+  });
+  it('תרחיש הבודק: ליקוט ok ← updateOrder מוסיף מוצר ← חויב נדחה (pick-old) ← ליקוט מחדש ← חויב עובר', async () => {
+    const id = await mk([{ pid: 'pA', qty: 2, price: 10 }]); // 20
+    assert.equal((await call('orderAuth', E1, { id, amt: 30, via: 'link' })).status, 'OK');
+    assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: allOk(1) })).result.st, 'ok');
+    const f0 = (await get(`b/${A}/ord/${id}`)).pk.fin;
+    assert.equal(f0.due, 20); assert.equal(typeof f0.k, 'string');
+    const o0 = await get(`b/${A}/ord/${id}`);
+    assert.equal((await call('updateOrder', E1, { id, items: keep(o0).concat([{ pid: 'pC', qty: 1, price: 5 }]) })).status, 'OK');
+    const r1 = await paidLink(E1, id, 25);
+    assert.equal(r1.reason, 'pick-old', r1.text);
+    assert.match(r1.text, /יש ללקט מחדש/);
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'work');
+    assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: allOk(2) })).result.st, 'ok');
+    const r2 = await paidLink(E1, id, 25);
+    assert.equal(r2.status, 'OK', r2.text);
+    const o = await get(`b/${A}/ord/${id}`);
+    assert.equal(o.paid.amt, 25); assert.equal(o.paid.fr, 30);
+  });
+  it('שינוי מחיר בלבד אחרי הליקוט ← pick-old; אחרי "הלקוח אישר" החותמת מהפריטים אחרי ההורדה; הזמנה ישנה בלי fin – לא נחסמת', async () => {
+    const id = await mk();
+    await call('orderAuth', E1, { id, amt: 60, via: 'call' });
+    await call('orderPick', E1, { id, reqId: rid(), l: allOk(3) });
+    const it = keep(await get(`b/${A}/ord/${id}`)); it[0].price = 11; // 44.5
+    assert.equal((await call('updateOrder', E1, { id, items: it })).status, 'OK');
+    assert.equal((await paidLink(E1, id, 44.5)).reason, 'pick-old');
+    // הורדה בליקוט + "הלקוח אישר" – החותמת נלקחת אחרי ההורדה, ולכן חויב עובר
+    const rq = rid();
+    const p = await call('orderPick', E1, { id, reqId: rq, l: [{ i: 0, ok: true }, { i: 1, ok: false, act: 'rm' }, { i: 2, ok: true }] });
+    assert.equal(p.result.st, 'chg');
+    const o1 = await get(`b/${A}/ord/${id}`);
+    assert.equal((await call('updateOrder', E1, { id, items: [keep(o1)[0], keep(o1)[2]], ver: p.result.upd })).status, 'OK');
+    assert.equal((await call('orderPickOk', E1, { id })).status, 'OK');
+    assert.equal((await get(`b/${A}/ord/${id}`)).pk.fin.due, 37);
+    assert.equal((await paidLink(E1, id, 37)).status, 'OK');
+    // הזמנה ישנה: pk.st 'ok' בלי fin – שינוי אחרי הליקוט לא חוסם (כמו קודם)
+    const old = await mk();
+    await call('orderAuth', E1, { id: old, amt: 60, via: 'call' });
+    await call('orderPick', E1, { id: old, reqId: rid(), l: allOk(3) });
+    const pk0 = (await get(`b/${A}/ord/${old}`)).pk; delete pk0.fin;
+    await prep((d) => d.doc(`b/${A}/ord/${old}`).update({ pk: pk0 }));
+    const it2 = keep(await get(`b/${A}/ord/${old}`)); it2[0].qty = 3; // 52.5
+    assert.equal((await call('updateOrder', E1, { id: old, items: it2 })).status, 'OK');
+    assert.equal((await paidLink(E1, old, 52.5)).status, 'OK');
+  });
+});

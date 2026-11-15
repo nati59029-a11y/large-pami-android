@@ -218,7 +218,7 @@ ACT.oxPay=async el=>{el.disabled=true;const PB=window.Capacitor&&Capacitor.Plugi
   if(PB){const a=r.auto||{};const p=PB.open({url:u,user:String(a.user||''),pass:String(a.pass||'')});r.auto=null;await p}else window.open(u,'_system');
   O.log[el.dataset.id]=undefined;setTimeout(rerender,600)}catch(e){err(e)}finally{el.disabled=false}};
 ACT.oxPaid=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);if(!o)return;
- dlg(`<h3>סימון שולם · ${ils(amtOf(o))}</h3><form data-f="oxPaidF"><input type="hidden" name="id" value="${esc(id)}"><label class="f"><span>אמצעי תשלום</span><select name="method" required>${PM.map(([k,l])=>`<option value="${k}"${k===(payMode()==='link'?'link':'phone')?' selected':''}>${l}</option>`).join('')}</select></label>
+ dlg(`<h3>סימון שולם · ${ils(amtOf(o))}</h3><form data-f="oxPaidF"><input type="hidden" name="id" value="${esc(id)}"><label class="f"><span>אמצעי תשלום</span><select name="method" required>${PM.filter(([k])=>!(k==='link'&&afterOn())).map(([k,l])=>`<option value="${k}"${k===(payMode()==='link'&&!afterOn()?'link':'phone')?' selected':''}>${l}</option>`).join('')}</select></label>
  <label class="f"><span>4 ספרות אחרונות של הכרטיס (רשות)</span><input name="last4" inputmode="numeric" maxlength="4" pattern="\\d{4}" autocomplete="off"></label><label class="f"><span>מספר אישור (רשות)</span><input name="conf" maxlength="20" autocomplete="off" dir="ltr"></label>
  <p class="note">לא מקלידים כאן מספר כרטיס מלא, תוקף או קוד – זה נדחה.</p><div class="row"><button class="btn grow">שולם</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.oxPaidF=async f=>{const x=fd(f),b=f.querySelector('button');if(x.last4&&!/^\d{4}$/.test(x.last4))return toast('4 ספרות בדיוק');b.disabled=true;
@@ -227,6 +227,9 @@ FRM.oxPaidF=async f=>{const x=fd(f),b=f.querySelector('button');if(x.last4&&!/^\
    המסגרת = סכום ההזמנה × (1+מרווח), מעוגלת לשקל למעלה (ArCalc.frameOf). העובד מקליד אותה באתר הסליקה כעסקת מסגרת/אישור בלבד.
    "חויב" רק כשהליקוט הסתיים (pk.st 'ok') והסכום הסופי בתוך המסגרת; השרת אוכף (markOrderPaid {method:'link', amt}). לקוח בשוטף – לא מגיע לכאן (np) */
 const agr=x=>Math.round(x*100);
+/* תיקון סבב 1 (ליקוי 2): חותמת סיום הליקוט (pk.fin) – אותו חישוב כמו pickKey בשרת (orders.js). שונה → "חויב" חסום עד ליקוט מחדש. הזמנה בלי fin – כמו קודם */
+const pkKey=items=>JSON.stringify((Array.isArray(items)?items:[]).map(x=>[String(x&&x.n||'').slice(0,80),x?x.qty:null,x?x.price:null,x&&x.pid||'']));
+const pkOld=o=>{const f=o.pk&&o.pk.fin;return !!(f&&typeof f==='object'&&(f.k!==pkKey(o.items)||agr(+f.due||0)!==agr(amtOf(o))))};
 const AV={};let AM=null; // AV – איך העובד בחר (קישור/שיחה) לכל הזמנה; AM – ההודעה עם הקישור, בזיכרון בלבד עד סגירת החלון
 function authH(o){const A=amtOf(o),au=o.auth&&typeof o.auth.amt==='number'?o.auth:null,id=esc(o.id),fr=frOf(A);
  if(!au||agr(A)>agr(au.amt))return `<div class="card" id="oxauth">${au?`<p style="margin:0 0 6px;color:var(--bad)"><b>הסכום חורג מהמסגרת (${ils(au.amt)})</b> – יש לשלוח ללקוח קישור חדש</p>`:''}<p class="note" style="margin:0 0 6px">חיוב אחרי ליקוט: קודם מאשרים מסגרת (אישור בלבד, בלי חיוב). החיוב – בסוף הליקוט, לפי מה שיש בפועל.</p>
@@ -235,6 +238,7 @@ function authH(o){const A=amtOf(o),au=o.auth&&typeof o.auth.amt==='number'?o.aut
   <button class="btn g w" style="margin-top:8px" data-a="oxAuthOk" data-id="${id}">המסגרת אושרה</button>${payCfg().chg==='auto'?'<p class="note" style="margin:6px 0 0">חיוב אוטומטי דורש חיבור לחברת הסליקה – בינתיים ידני.</p>':''}</div>`;
  const inf=[au.last4?'****'+esc(au.last4):'',au.via==='link'?'קישור ללקוח':'בשיחה',tm(au.at)].filter(Boolean).join(' · ');
  if(!(o.pk&&o.pk.st==='ok'))return `<div class="card" id="oxauth"><b>מסגרת אושרה: ${ils(au.amt)}</b><p class="note" style="margin:4px 0 0">${inf}. החיוב – בסוף הליקוט, לפי הסכום הסופי.</p></div>`;
+ if(pkOld(o))return `<div class="card" id="oxauth" style="border-color:var(--acc)"><p style="margin:0 0 6px;color:var(--bad)"><b>ההזמנה השתנתה אחרי הליקוט – יש ללקט מחדש</b></p><p class="note" style="margin:0 0 6px">מסגרת אושרה: ${ils(au.amt)} · ${inf}. "חויב" יופיע אחרי ליקוט מחדש.</p><button type="button" class="btn w" data-a="oxPkGo" data-id="${id}" data-v="oxPick" data-arg="${id}">ליקוט מחדש</button></div>`;
  return `<div class="card" id="oxauth" style="border-color:var(--acc)"><div class="row" style="justify-content:space-between"><span>סכום סופי</span><b class="amt">${ils(A)}</b></div><div class="row" style="justify-content:space-between"><span>מסגרת שאושרה</span><b>${ils(au.amt)}</b></div><small class="note">${inf}</small>
   <p style="margin:8px 0 6px"><b>לחייב ${ils(A)} באתר הסליקה</b> (בתוך המסגרת שאושרה).</p><button class="btn g w" data-a="oxPay" data-id="${id}">פתיחת אתר הסליקה</button><button class="btn w" style="margin-top:8px" data-a="oxCharged" data-id="${id}">חויב ${ils(A)}</button></div>`}
 const intl=p=>{const d=String(p||'').replace(/\D/g,'');return /^0\d{8,9}$/.test(d)?'972'+d.slice(1):d};
@@ -262,7 +266,7 @@ ACT.oxAuthOk=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);if(!o)re
 FRM.oxAuthF=async f=>{const x=fd(f),a=num(x.amt),b=f.querySelector('button');if(!(a>0))return toast('סכום לא תקין');if(x.last4&&!/^\d{4}$/.test(x.last4))return toast('4 ספרות בדיוק');b.disabled=true;
  try{await fnCall('orderAuth',{id:x.id,amt:Math.round(a*100)/100,via:x.via==='link'?'link':'call',last4:x.last4||undefined});closeDlg();toast('נרשם: המסגרת אושרה');await after(x.id)}catch(e){b.disabled=false;err(e)}};
 ACT.oxCharged=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);if(!o)return;const A=amtOf(o);
- ask(`לסמן שחויב ${ils(A)} באתר הסליקה?`,async()=>{try{const r=await fnCall('markOrderPaid',{id,method:'link',amt:A});toast('נרשם: חויב '+ils(A)+(r&&r.ar&&r.ar.no?' · מסמך #'+r.ar.no:''));await after(id);paidProf(id)}catch(e){err(e)}},'כן, חויב')};
+ ask(`לסמן שחויב ${ils(A)} באתר הסליקה?`,async()=>{try{const r=await fnCall('markOrderPaid',{id,method:'link',amt:A});toast('נרשם: חויב '+ils(A)+(r&&r.ar&&r.ar.no?' · מסמך #'+r.ar.no:''));await after(id);paidProf(id)}catch(e){err(e);if(e&&e.reason==='pick-old')await after(id)}},'כן, חויב')};
 const reasonDlg=(ttl,fn,ok,ex)=>{dlg(`<h3>${esc(ttl)}</h3><form data-f="oxWhy"><label class="f"><span>סיבה (חובה)</span><input name="r" required maxlength="200"></label>${ex||''}<div class="row"><button class="btn r grow">${ok}</button><button type="button" class="btn g grow" data-a="closeDlg">חזרה</button></div></form>`);O.why=fn};
 FRM.oxWhy=async f=>{const r=fd(f).r.trim();if(!r)return;const b=f.querySelector('button');b.disabled=true;try{await O.why(r,f);closeDlg()}catch(e){b.disabled=false;err(e)}};
 ACT.oxCancel=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);

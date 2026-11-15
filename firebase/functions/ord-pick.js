@@ -5,7 +5,8 @@
 // כאן: שמירת הסימונים, צילום ההזמנה לפני השינויים (לסיכום "לפני/אחרי"), רשימת "להזמין מספקים", ו"הלקוח אישר את השינויים".
 //
 // נתונים (תוספות בלבד, בלי מיגרציה; הזמנה ישנה בלי pk מתנהגת כמו קודם):
-//   ord/{id}.pk = { st:'ok'|'chg', rq, l:[{ i, ok, act?:'rm'|'rep'|'ord', rep?:{pid,n}, so?, sup?, qty?, eta? }], sum:{ it:[{pid?,n,qty,price}], t, g? }, by, at, okBy?, okAt? }
+//   ord/{id}.pk = { st:'ok'|'chg', rq, l:[{ i, ok, act?:'rm'|'rep'|'ord', rep?:{pid,n}, so?, sup?, qty?, eta? }], sum:{ it:[{pid?,n,qty,price}], t, g? }, by, at, okBy?, okAt?, fin? }
+//     fin (החלטה 32, תיקון סבב 1) = { due, k } – חותמת ההזמנה כש-st נהיה 'ok' (C.pickFin). "חויב" על הזמנה שהשתנתה מאז נדחה (pick-old) עד ליקוט מחדש.
 //     i = מיקום השורה ב-sum.it (ההזמנה לפני השינויים). st 'chg' = יש שינויים שהלקוח עוד לא אישר; 'ok' = הכול במלאי או שהלקוח אישר.
 //     כש-st === 'chg' השרת חוסם "נשלח" / "ממתין לתשלום" / "יצא למשלוח" / "הושלם" (setOrderStatus ב-orders.js). מנהל עוקף עם force:true.
 //   supord/{ordId}_p_{pid} (שורה ידנית: {ordId}_n_{sha1(שם)}) = { ord, no, br, pid?, n, qty, sup, eta?, cust?, st:'open'|'ord'|'done'|'void', by, at, upd, sby? }
@@ -148,6 +149,7 @@ async function orderPick(request) {
     for (const x of oldSo) { const e = SO.get(x); if (e && e.exists && e.get('st') === 'open') tx.set(e.ref, { st: 'void', upd: now, sby: w.uid }, { merge: true }); }
     const st = out.every((x) => x.ok) ? 'ok' : 'chg';
     const pk = { st, rq: reqId, l: out, sum: Object.assign({ it: base, t: again && old.sum ? old.sum.t : d.total }, again && old.sum ? (typeof old.sum.g === 'number' ? { g: old.sum.g } : {}) : (d.vm && typeof d.gross === 'number' ? { g: d.gross } : {})), by: w.uid, at: now };
+    if (st === 'ok') pk.fin = C.pickFin(d); // תיקון סבב 1: הכול במלאי – הפריטים כפי שהם עכשיו הם מה שלוקט
     tx.update(ref, { pk, upd: now });
     const cnt = (a) => out.filter((x) => x.act === a).length;
     tx.set(logRef(db, id), logData(w, 'pick', st === 'ok' ? 'הכול במלאי' : [`${out.filter((x) => x.ok).length} במלאי`, cnt('rm') && `${cnt('rm')} להוריד`, cnt('rep') && `${cnt('rep')} מוצר דומה`, cnt('ord') && `${cnt('ord')} להזמין מספק`].filter(Boolean).join(' · ')));
@@ -174,7 +176,7 @@ async function orderPickOk(request) {
     if (pk.st === 'ok') { res = { ok: true, dup: true }; return; }
     if (s.get('status') === 'cancel') throw C.pre('locked', 'ההזמנה בוטלה');
     const now = Date.now();
-    tx.update(ref, { 'pk.st': 'ok', 'pk.okBy': w.uid, 'pk.okAt': now, upd: now });
+    tx.update(ref, { 'pk.st': 'ok', 'pk.okBy': w.uid, 'pk.okAt': now, 'pk.fin': C.pickFin(s.data()), upd: now }); // תיקון סבב 1: אחרי ההורדה/ההחלפה – זה מה שלוקט
     tx.set(logRef(db, id), logData(w, 'pickok', ''));
     res = { ok: true, dup: false };
   });

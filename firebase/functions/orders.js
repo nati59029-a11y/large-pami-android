@@ -1215,9 +1215,16 @@ async function arAfter(w, res) {
 
 const LL_PRE = 'o_'; // מזהה דטרמיניסטי ל-lineLog: o_<ordId>_<מספר הקו>
 const portK = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|');
+// החלטה 32, תיקון סבב 1 (ליקוי 2): חותמת ההזמנה בסיום הליקוט – pk.fin = { due: הסכום לתשלום, k: הפריטים (שם, כמות, מחיר, מוצר) }.
+// נכתבת כש-pk.st נהיה 'ok' (orderPick בלי שינויים / orderPickOk). "חויב" (amt) על הזמנה שהשתנתה מאז → pick-old עד ליקוט מחדש.
+// אותו חישוב בדיוק במסך (orders-staff.js, pkKey). הזמנה ישנה בלי pk.fin – בלי בדיקה הזו (רק pk.st, כמו קודם)
+const pickKey = (items) => JSON.stringify((Array.isArray(items) ? items : []).map((x) => [String((x && x.n) || '').slice(0, 80), x ? x.qty : null, x ? x.price : null, (x && x.pid) || '']));
+const pickFin = (d) => ({ due: AC.payOf(d), k: pickKey(d && d.items) });
 // markOrderPaid({ id, method, last4?, conf?, note?, amt? }) – "שולם" ידני. אחרי זה הסכום והפריטים נעולים.
 // amt (החלטה 32, חלק א – "חויב" מול מסגרת): רק method 'link', רק אחרי ליקוט (pk.st 'ok') ומסגרת מאושרת (ord.auth), רק הסכום הסופי (אחרת amt-mismatch),
 // ורק בתוך המסגרת (אחרת over-auth – קישור חדש ללקוח). בלי amt – כמו קודם.
+// תיקון סבב 1: עסק עם "חיוב אחרי ליקוט" (private/pay.after) – method 'link' בלי amt נדחה (use-charge); שאר האמצעים כמו קודם.
+// הזמנה שהשתנתה אחרי סיום הליקוט (pk.fin) – amt נדחה (pick-old) עד ליקוט מחדש.
 async function markOrderPaid(request) {
   const w = await who(request);
   const input = inputObject(request);
@@ -1247,11 +1254,13 @@ async function markOrderPaid(request) {
     const cur = s.get('status');
     if (cur === 'paid' || cur === 'out' || cur === 'done') { res = { ok: true, dup: true }; return; }
     if (!PAYABLE.includes(cur)) throw pre('bad-status', 'ההזמנה בוטלה');
+    if (amtIn === undefined && paid.method === 'link' && pp.exists && pp.get('after') === true) throw pre('use-charge', "בעסק הזה החיוב בקישור נעשה דרך 'חויב' אחרי הליקוט");
     delete paid.fr;
     if (amtIn !== undefined) { // החלטה 32: "חויב" – הסכום הסופי, אחרי ליקוט, בתוך המסגרת
       const due = AC.payOf(s.data()), au = s.get('auth'), pk = s.get('pk');
       if (!au || !isNum(au.amt)) throw pre('no-auth', 'אין להזמנה מסגרת מאושרת. קודם "המסגרת אושרה"');
       if (!pk || pk.st !== 'ok') throw pre(pk ? 'pick-chg' : 'no-pick', pk ? 'יש שינויים שהלקוח עוד לא אישר' : 'החיוב – רק אחרי סיום הליקוט');
+      if (pk.fin && typeof pk.fin === 'object') { const f = pickFin(s.data()); if (f.k !== pk.fin.k || agor(f.due) !== agor(pk.fin.due)) throw pre('pick-old', 'ההזמנה השתנתה אחרי הליקוט – יש ללקט מחדש'); }
       if (agor(amtIn) !== agor(due)) throw pre('amt-mismatch', `הסכום הסופי של ההזמנה הוא ₪${due}. אפשר לסמן "חויב" רק על הסכום הסופי`);
       if (agor(due) > agor(au.amt)) throw pre('over-auth', 'הסכום חורג מהמסגרת – יש לשלוח ללקוח קישור חדש');
       paid.fr = au.amt;
@@ -2182,4 +2191,4 @@ const SEC = ['getPayLink', 'setBusinessPayLink']; // 2026-11-12: פרטי הכנ
 const AIF = ['ordParse']; // 14.11.2026: זיהוי חכם של רשימת הזמנה – אותו מפתח Gemini של המזכירה (sec-ai.js)
 const ARF = ['setOrderStatus', 'markOrderPaid']; // 15.11.2026 (שלב 4): מפיקות חשבונית/קבלה ושולחות ללקוח (PDF + ווטסאפ/מייל)
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall(BIG.includes(k) ? { timeoutSeconds: 540, memory: '512MiB' } : SEC.includes(k) ? { secrets: [CARD_ENC_KEY] } : AIF.includes(k) ? { secrets: [AI.GEMINI_API_KEY], timeoutSeconds: 60, memory: '512MiB' } : ARF.includes(k) ? { secrets: AR_SEC, timeoutSeconds: 120, memory: '512MiB' } : {}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { who, withBr, prodClean, prodPut, stockRef, qOf, r3, money, qtyOf, idOf, reqIdOf, onlyKeys, brOf, hasBranches, NB, ID_RE, bad, deny, pre, prodRows, prodBr, MAX_IMPORT, wipeAll, restoreAll, phsOf, MAX_PHS, custParts, CPART_KEYS, NAME_MAX, ADDR_MAX, digRun, cardLike, cardAt, NEXT, STATUSES, PAYABLE, PAY_METHODS, WS_SHOW, txt, totalOf, moves, invert, resolveItems, brPrice, catIdOf, priceCtx, cpPre, cpAlert, discIn, alJoin, opLines, opQty, OP_SURE, OP_GAP, applyMoves, loadProds, ordAccess, logRef, logData, pickFin } });

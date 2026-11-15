@@ -15,11 +15,14 @@ const doc = (p, o) => ({ document: { name: 'projects/demo-largpeami/databases/(d
 const T1 = Date.UTC(2026, 10, 14, 8, 0, 0);
 const PROD = [['pA', 'עוגה', 10, 3], ['pB', 'לחם', 7.5, 0], ['pC', 'מפית', 5, 10, 'ספק המפיות'], ['pD', 'מפית דומה', 6, 10]].map(([id, name, price, q, sup]) => doc('prod/' + id, Object.assign({ name, price, on: true, q: { br1: q } }, sup ? { sup } : {})));
 const IT3 = () => [{ pid: 'pA', n: 'עוגה', qty: 2, price: 10 }, { pid: 'pB', n: 'לחם', qty: 1, price: 7.5 }, { pid: 'pC', n: 'מפית', qty: 3, price: 5 }];
+const pkKey = (items) => JSON.stringify(items.map((x) => [String(x.n || '').slice(0, 80), x.qty, x.price, x.pid || ''])); // כמו pickKey בשרת
 function freshOrd() {
   const o = (id, no, status, items, x) => Object.assign({ id, no, br: 'br1', status, items, total: items.reduce((s, it) => s + it.qty * it.price, 0), at: T1, upd: T1, cust: { name: 'לקוח ' + no, phone: '0541111111' } }, x || {});
   return { o1: o('o1', 1, 'work', IT3()),
     o3: o('o3', 3, 'work', [{ pid: 'pA', n: 'עוגה', qty: 3, price: 10 }, { pid: 'pB', n: 'לחם', qty: 1, price: 7.5 }, { pid: 'pC', n: 'מפית', qty: 3, price: 5 }], { auth: { amt: 43, due: 42.5, mg: 10, via: 'link', at: T1, by: 'w' }, pk: { st: 'ok', l: [{ i: 0, ok: true }, { i: 1, ok: true }, { i: 2, ok: true }], sum: { it: IT3(), t: 42.5 }, by: 'w', at: T1 } }),
-    o5: o('o5', 5, 'work', IT3(), { custId: 'cT' }) };
+    o5: o('o5', 5, 'work', IT3(), { custId: 'cT' }),
+    // תיקון סבב 1: לוקט (fin של 3 המוצרים), ואחר כך נוסף מוצר – "חויב" חסום עד ליקוט מחדש
+    o6: o('o6', 6, 'work', IT3().concat([{ pid: 'pD', n: 'מפית דומה', qty: 1, price: 6 }]), { auth: { amt: 60, due: 42.5, mg: 10, via: 'call', at: T1, by: 'w' }, pk: { st: 'ok', l: [{ i: 0, ok: true }, { i: 1, ok: true }, { i: 2, ok: true }], sum: { it: IT3(), t: 42.5 }, by: 'w', at: T1, fin: { due: 42.5, k: pkKey(IT3()) } } }) };
 }
 
 async function open(browser, www, who, calls, S, PAY) {
@@ -46,7 +49,7 @@ async function open(browser, www, who, calls, S, PAY) {
     else if (n === 'ordProfit') R = { n: 0, total: 0, paid: 0, paidN: 0 };
     else if (n === 'getPayLink' && o) R = Object.assign({ link: 'https://pay.example.com/biz', total: o.total }, PAY.after ? { fr: Math.ceil(o.total * 1.1 - 1e-9) } : {});
     else if (n === 'orderAuth' && o) { o.auth = Object.assign({ amt: d.amt, due: o.total, mg: 10, via: d.via, at: Date.now(), by: who }, d.last4 ? { last4: d.last4 } : {}); R = { ok: true, auth: o.auth }; }
-    else if (n === 'orderPick' && o) { o.pk = { st: 'ok', rq: d.reqId, l: d.l, sum: { it: o.items.map((x) => Object.assign({}, x)), t: o.total }, by: 'w', at: Date.now() }; R = { ok: true, st: 'ok', applied: false, so: [], upd: 777 }; }
+    else if (n === 'orderPick' && o) { o.pk = { st: 'ok', rq: d.reqId, l: d.l, sum: { it: o.items.map((x) => Object.assign({}, x)), t: o.total }, by: 'w', at: Date.now(), fin: { due: o.total, k: pkKey(o.items) } }; R = { ok: true, st: 'ok', applied: false, so: [], upd: 777 }; }
     else if (n === 'markOrderPaid' && o) { o.status = 'paid'; o.paid = { method: d.method, amt: o.total, at: Date.now(), by: who }; R = { ok: true, dup: false }; }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R }) });
   });
@@ -120,6 +123,22 @@ async function open(browser, www, who, calls, S, PAY) {
     await page.evaluate(() => { window.__onTermsOrig = window.__onTerms; window.__onTerms = (c) => c === 'cT'; }); await card('o5');
     check(who + ' 7 לקוח בשוטף: בלי מסגרת, בלי "לתשלום"/"שלח קישור"', !(await has(page, '#oxauth')) && !(await has(page, '[data-a=oxPay]')) && !(await has(page, '[data-a=oxAuthSend]')), {});
     await page.evaluate(() => { window.__onTerms = window.__onTermsOrig; });
+    // 7ב. תיקון סבב 1: "סמן שולם" בעסק עם חיוב אחרי ליקוט – בלי "אשראי בקישור"
+    await page.evaluate(() => { try { closeDlg(); } catch (e) { /* */ } }); await card('o3'); await page.click('[data-a=oxPaid]'); await H.settle(page, 300);
+    const pm = await page.evaluate(() => [...document.querySelectorAll('#dlg select[name=method] option')].map((x) => x.value + (x.selected ? '*' : '')));
+    await page.evaluate(() => closeDlg());
+    check(who + ' 7ב "סמן שולם" בחיוב אחרי ליקוט: בלי "אשראי בקישור" (טלפון מסומן), מזומן/העברה/אחר נשארים', JSON.stringify(pm) === JSON.stringify(['phone*', 'cash', 'transfer', 'other']), { pm });
+    // 7ג. תיקון סבב 1: נוסף מוצר אחרי הליקוט – "ההזמנה השתנתה אחרי הליקוט – יש ללקט מחדש", בלי "חויב"; "ליקוט מחדש" ← ליקוט ← "חויב ₪48.50"
+    await card('o6'); const t7 = await txt(page);
+    if (who === 'w') await shot(page, 'השתנתה-אחרי-ליקוט-360');
+    const ov7 = await ov(page), c7 = await has(page, '[data-a=oxCharged]'), g7 = await has(page, '[data-a=oxPkGo]');
+    await page.click('[data-a=oxPkGo]'); await H.settle(page, 500);
+    const inPick = await page.evaluate(() => cur().v === 'oxPick' && !!document.querySelector('[data-a=oxPkAll]'));
+    k = calls.length; await page.click('[data-a=oxPkAll]'); await page.click('[data-a=oxPkDone]'); await H.settle(page, 1800);
+    const p7 = since(k, 'orderPick');
+    await card('o6'); const t7b = await txt(page);
+    check(who + ' 7ג שינוי אחרי ליקוט: הודעה + "ליקוט מחדש" בלי "חויב"; אחרי ליקוט מחדש – "חויב ₪48.50"',
+      /השתנתה אחרי הליקוט/.test(t7) && /ללקט מחדש/.test(t7) && !c7 && g7 && inPick && p7.length === 1 && p7[0].d.l.length === 4 && /48\.50/.test(t7b) && !/השתנתה אחרי הליקוט/.test(t7b) && await has(page, '[data-a=oxCharged]') && ov7 <= 0, { c7, g7, inPick, p7: p7.length, ov7 });
     const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
     check(who + ' 8 בלי שגיאות JS', errs.length === 0, errs.slice(0, 3));
     await ctx.close();
@@ -132,6 +151,12 @@ async function open(browser, www, who, calls, S, PAY) {
     const r = await page.evaluate(() => ({ pay: [...document.querySelectorAll('[data-a=oxPay]')].some((b) => b.innerText.trim() === 'לתשלום'), tel: /תשלום בטלפון/.test(document.getElementById('main').innerText), auth: !!document.getElementById('oxauth'), kind: window.__payKind() }));
     const exp = { link: { pay: true, tel: false, auth: false, kind: 'link' }, phone: { pay: false, tel: true, auth: false, kind: 'phone' }, both: { pay: true, tel: true, auth: false, kind: 'both' }, 'both-after': { pay: false, tel: true, auth: true, kind: 'both' } }[nm];
     if (nm === 'both-after') await shot(page, 'שניהם-עם-מסגרת-360');
+    if (nm === 'link') { // תיקון סבב 1: עסק בלי "אחרי ליקוט" – "אשראי בקישור" נשאר ומסומן, כמו היום
+      await page.click('[data-a=oxPaid]'); await H.settle(page, 300);
+      const pm = await page.evaluate(() => [...document.querySelectorAll('#dlg select[name=method] option')].map((x) => x.value + (x.selected ? '*' : '')));
+      await page.evaluate(() => closeDlg());
+      check('9ב תאימות link: "סמן שולם" עם "אשראי בקישור" מסומן, כמו היום', JSON.stringify(pm) === JSON.stringify(['link*', 'phone', 'cash', 'transfer', 'other']), { pm });
+    }
     const errs = log.filter((x) => /pageerror|TypeError|ReferenceError/.test(x));
     check('9 תאימות ' + nm + ': ' + JSON.stringify(exp), JSON.stringify(r) === JSON.stringify(exp) && !errs.length && await ov(page) <= 0, { r, errs: errs.slice(0, 2) });
     await ctx.close();

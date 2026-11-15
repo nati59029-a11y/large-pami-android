@@ -137,6 +137,8 @@ function sumV(o){const pk=o.pk,B=pk.sum||{it:[]},c=o.cust||{},chg=pk.st==='chg';
  <button type="button" class="btn g w" data-a="oxPkBack" style="margin-top:6px">חזרה להזמנה</button>`}}
 ACT.oxPkOk=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('orderPickOk',{id});toast('נרשם: הלקוח אישר את השינויים');await after(id);back()}catch(e){el.disabled=false;err(e)}};
 ACT.oxPkRe=el=>{const o=ordOf(el.dataset.id);if(!o)return;delete PS[o.id];sess(o);rerender()};
+// תיקון סבב 1 (החלטה 32): "ההזמנה השתנתה אחרי הליקוט" – ליקוט חדש מהכרטיס או מהסיכום
+ACT.oxPkGo=el=>{const o=ordOf(el.dataset.id);if(!o||!canPick(o))return toast('אי אפשר לטפל בהזמנה במצב הזה');delete PS[o.id];sess(o);if(cur().v==='oxPick')rerender();else ACT.go(el)};
 
 /* ---------- כרטיס ההזמנה: כניסה לליקוט, מצב השינויים, וחסימת "נשלח" עד אישור ---------- */
 {const f=V.oxOrd;if(f)V.oxOrd=id=>{const r=f(id);try{if(!r||!r.h||!on())return r;const o=ordOf(id);if(!o)return r;const pk=o.pk;let h='';
