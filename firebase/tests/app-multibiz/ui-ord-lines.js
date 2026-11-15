@@ -292,9 +292,9 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
   check('8 בלי שגיאות JS', page.__errors.length === 0, page.__errors);
   }
   { // 13 (2026-11-10, סעיף 2): עסק עם ניוד – "+ כרטיס אשראי נוסף" בטופס ההזמנה (עד 3); בלי ניוד – אין כפתור
-    await fresh(); await page.click('#occd summary'); await H.settle(page, 200);
+    await fresh(); if (CELLON) { await page.click('#occd summary'); await H.settle(page, 200); }
     const hasAdd = !!(await page.$('[data-a=ocCdAdd]'));
-    if (!CELLON) check('13 בלי ניוד: אין "+ כרטיס אשראי נוסף"', !hasAdd);
+    if (!CELLON) check('13 בלי ניוד: אין משבצת אשראי באמצע הטופס (משוב סבב 1) ואין "+ כרטיס אשראי נוסף"', !hasAdd && !(await page.$('#occd')));
     else {
       await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0529998877'); await H.settle(page, 400);
       await page.fill('input[data-i=ocCd][data-k=num]', '4580123456789012');
@@ -325,7 +325,7 @@ const ORG = M({ v: N(1), branches: A([M({ id: S('br1'), name: S('נחל לכיש
     const k0 = calls.length; await page.click('[data-a=ocFinish]'); await H.settle(page, 1500);
     const a = calls.slice(k0), ci = a.findIndex((c) => c.n === 'createOrder'), si = a.findIndex((c) => c.n === 'setCard'), sd = si >= 0 ? a[si].d : null;
     const st = await page.evaluate(() => ({ v: cur().v, d: window.__ox.draft, /* טיוטה ריקה חדשה מותרת */ ls: JSON.stringify(localStorage).includes('4580123456789012') }));
-    check('14א "סיום הזמנה" עם כרטיס: createOrder ואחריו setCard {ordId, add, num, exp}; עוברים לכרטיס ההזמנה; לא נשמר באחסון', ci >= 0 && si > ci && !!sd && sd.ordId === 'o1' && sd.add === true && sd.card.num === '4580123456789012' && sd.card.exp === '07/28' && st.v === 'oxOrd' && (!st.d || !st.d.items.length) && !JSON.stringify(st.d || {}).includes('4580') && !st.ls, { ci, si, st, sd: sd && { ordId: sd.ordId, add: sd.add } });
+    check('14א "סיום הזמנה" עם כרטיס: createOrder ואחריו setCard {ordId, add, num, exp}; חוזרים לרשימת ההזמנות; לא נשמר באחסון', ci >= 0 && si > ci && !!sd && sd.ordId === 'o1' && sd.add === true && sd.card.num === '4580123456789012' && sd.card.exp === '07/28' && st.v === 'ox' && (!st.d || !st.d.items.length) && !JSON.stringify(st.d || {}).includes('4580') && !st.ls, { ci, si, st, sd: sd && { ordId: sd.ordId, add: sd.add } });
     { // 14ג (ניוד): המשבצת שבטופס = כרטיס לקו (הערה בולטת), המסך המלא = כרטיס להזמנה (נפרד, ריק). שניהם נשלחים: קודם המשבצת ואחריה המסך; אותו מספר בשניהם – נחסם במסך
       await fresh(); await page.fill('input[data-k=fn]', 'רות'); await page.fill('input[data-k=ln]', 'כהן'); await page.fill('input[data-k=phone]', '0529998869'); await H.settle(page, 300);
       await page.click('#occd summary'); await H.settle(page, 150); await page.fill('input[data-i=ocCd][data-k=num]', '4111111111111111'); await page.fill('#oxq', 'לחם'); await page.click('[data-a=oxAdd]'); await H.settle(page, 200);

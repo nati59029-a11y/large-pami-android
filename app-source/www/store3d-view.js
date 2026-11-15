@@ -15,7 +15,7 @@
    סימון מצב: פס דק בשפת המדף (כמו פס תוויות, נראה גם מלמעלה) + תג עגול עם סמל מעל המקטע (גודל קבוע במסך). frames(bool) מסתיר/מציג את שניהם.
      clearCache()                        -> ניקוי מטמון התמונות בזיכרון (יציאה / החלפת עסק)
    bay שמוחזר ב-onPick: {id, fx, s, n, lv:[...], lvHit, num, name, k, st}
-   מראה: קירות/רצפה/תקרה מקבלים טקסטורה מ-smap.tx[] לפי rooms[].tex {w,f,c}; חזית כל מקטע מקבלת את התמונה המוקטנת האחרונה (s3sum.b[id].th).
+   מראה: קירות מקבלים את הצילום מ-smap.tx[] לפי rooms[].tex {w,f,c}; הרצפה והתקרה לא נמתחות מהצילום: מהצילום נדגם רק צבע ממוצע – רצפה = אריח עץ מצויר (לוחות 20×120 ס"מ) בצבע הזה, תקרה = צבע חלק בהיר; חזית כל מקטע מקבלת את התמונה המוקטנת האחרונה (s3sum.b[id].th).
    בלי צילום: מדף מתכת לבן ריק, רצפה בהירה (במחסן – בטון אפור), קיר בהיר. אין תמונות דוגמה ואין מוצרים מומצאים.
    מוסכמת צירים: x בתוכנית = x בתלת מימד, y בתוכנית = z, גובה = y. יחידות בתלת מימד: מטרים. */
 (function(){
@@ -142,9 +142,28 @@ function makeView(T,el,map0,opts){
       const c=document.createElement('canvas');c.width=pot(img.width,TEXMAX);c.height=pot(img.height,TEXMAX);c.getContext('2d').drawImage(img,0,0,c.width,c.height);closeImg(img);
       const tx=keep(new T.CanvasTexture(c));tx.colorSpace=T.SRGBColorSpace;tx.wrapS=tx.wrapT=T.RepeatWrapping;tx.anisotropy=aniso;tx.userData.ar=img.width/img.height||1;texSt.ok++;return tx});
     p.catch(()=>{texSt.fail++});texP.set(t.path,p);return p}
+  /* רצפה ותקרה: לא מותחים את הצילום (מעוות, ובתקרה מלא פנסים). דוגמים ממנו רק צבע ממוצע (קנבס 16×16 מהתמונה המוקטנת) ומציירים
+     אריח עץ חוזר (לוחות 20×120 ס"מ, פסי הפרדה עדינים, גוון משתנה) לרצפה, וצבע חלק בהיר לתקרה. טקסטורה אחת לכל צבע (מטמון). דגימה נכשלה – חומר ברירת המחדל */
+  const woodC=new Map();
+  function avgColor(img){try{const c=document.createElement('canvas');c.width=c.height=16;const g=c.getContext('2d');g.drawImage(img,0,0,16,16);
+    const d=g.getImageData(0,0,16,16).data;let r=0,gg=0,b=0,n=0;for(let i=0;i<d.length;i+=4){r+=d[i];gg+=d[i+1];b+=d[i+2];n++}
+    return n?[r/n,gg/n,b/n]:null}catch(e){return null}}
+  function woodTex(rgb){const q=rgb.map(v=>Math.max(0,Math.min(255,Math.round(v/8)*8))),key=q.join(',');let t=woodC.get(key);if(t)return t;
+    /* אריח 2.4×1.2 מ' (256×128): 6 שורות לוחות ברוחב 20 ס"מ, אורך לוח 120 ס"מ, מקצה מוסט בחצי לוח בכל שורה שנייה */
+    t=canvasTex(256,128,(g,w,h)=>{const rh=h/6,pl=w/2;
+      for(let r=0;r<6;r++)for(let k=0;k<2;k++){const x0=k*pl+(r%2)*pl/2,sh=(((r*7+k*13+r*k*5)%9)-4)*.035,f=1+sh;
+        g.fillStyle=`rgb(${Math.min(255,q[0]*f)|0},${Math.min(255,q[1]*f)|0},${Math.min(255,q[2]*f)|0})`;
+        for(const x of[x0,x0-w])g.fillRect(x,r*rh,pl,rh)}
+      g.fillStyle='rgba(0,0,0,.22)';for(let r=0;r<6;r++){g.fillRect(0,r*rh,w,1);for(let k=0;k<2;k++)g.fillRect(((k*pl+(r%2)*pl/2)%w),r*rh,1,rh)}
+    },1);t.repeat.set(TILE/2.4,TILE/1.2);woodC.set(key,t);return t}
   function texMat(id,kind){const t=id&&txById.get(id);if(!t)return null;const k=t.path+':'+kind;let m=tmats.get(k);if(m)return m;
     const base=kind==='f'?M.floor:kind==='c'?M.ceil:M.wall;m=keep(base.clone());tmats.set(k,m);
-    loadTex(t).then(tx=>{if(dead)return;m.map=tx;m.color.set(kind==='c'?0xe8e8e4:0xffffff);m.needsUpdate=true;invalidate()}).catch(()=>{});return m}
+    loadTex(t).then(tx=>{if(dead)return;
+      if(kind==='w'){m.map=tx;m.color.set(0xffffff)}
+      else{const a=avgColor(tx.image);
+        if(kind==='f'){if(!a)return;m.map=woodTex(a);m.color.set(0xffffff)}
+        else{m.map=null;if(a)m.color.setRGB(...a.map(v=>(v+(255-v)*.75)/255)).convertSRGBToLinear();else m.color.set(0xffffff)}}
+      m.needsUpdate=true;invalidate()}).catch(()=>{});return m}
   const texAr=id=>{const t=id&&txById.get(id);return t&&t.w>0&&t.h>0?t.w/t.h:1};
 
   /* קירות כגיאומטריה אחת לכל חומר: התמונה מכסה את כל גובה הקיר וחוזרת לאורכו לפי יחס הרוחב/גובה שלה (בלי עיוות) */

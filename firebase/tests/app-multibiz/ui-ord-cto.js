@@ -108,7 +108,7 @@ async function open(browser, www, calls) {
   const w4 = await page.evaluate(() => __ox.draft.items.map((i) => !!i.chk));
   check('15 כמות 0 בשורת cto – לא מסומנת', !w4[0], w4);
   // החלטה 9 (12.11): שורת מתנה ממבצע (gk) במוצר cto ללקוח סיטונאי = מארז אחד, לא קרטון. ההנחה המוצעת במסך – לפי מארזים, כמו בשרת
-  await page.evaluate(() => { const D = __ox.draft; D.items.length = 0; Object.assign(D, { fn: 'דנה', ln: 'כהן', phone: '0502222222', custId: 'cW', wholesale: true }); ACT.oxAdd({ dataset: { id: 'pC' } }); D.items[0].price = '5';
+  await page.evaluate(() => { const D = __ox.draft; D.items.length = 0; Object.assign(D, { fn: 'דנה', ln: 'כהן', phone: '0502222222', custId: 'cW', wholesale: true }); ACT.oxAdd({ dataset: { id: 'pC' } }); D.items[0].price = '5'; D.items[0].auto = 0; /* 14.11 (שלב 1): מחיר שהוקלד ידנית = auto 0, כמו INP.oxLn – אחרת מחיר לקוח עסקי (לפני מע"מ) מוחל לבד */
     D.items.push({ pid: 'pC', qty: '1', price: '6', auto: 1, from: '', gk: 'k1' }); window.__oxRedraw(); });
   await H.settle(page, 300);
   const g1 = await lines(), gt = await tot();

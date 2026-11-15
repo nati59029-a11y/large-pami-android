@@ -309,6 +309,8 @@ const OPS = {
   yemot_items: serverOnly('yemot_items'),
   yemot_line_backups: serverOnly('yemot_line_backups'),
   yemot_hook_usage: serverOnly('yemot_hook_usage'),
+  cprice: serverOnly('cprice'), // 14.11.2026: קריאה לעובד עם הזמנות ולמנהל; כתיבה רק בשרת
+  aralert: serverOnly('aralert'), // 14.11.2026: קריאה למנהל; כתיבה רק בשרת
   _not_in_table: {
     'get-orders':    (db) => db.doc('orders/o1').get(),
     'list-orders':   (db) => db.collection('orders').get(),
