@@ -323,10 +323,9 @@ describe('ווצאפ: הנחיה בטיוטה, אישור, "לעשות את זה
     await blocked('תסירו אותי מהרשימה', 'safeIn');
     await blocked('This is an automated message. Do not reply.', 'bot');
     assert.equal(fs.S.length, 0);
-    // לולאה: 3 תשובות לבד לאותו שולח בשעה – הרביעית לא
-    for (let i = 0; i < 3; i++) { AI_ARGS = {}; const m = await msg('מתי פתוחים? ' + i, fs); assert.equal(m.d.st, 'sent', 'שליחה ' + i); }
-    await blocked('מתי פתוחים? 4', 'waLoop');
-    assert.equal(fs.S.length, 3);
+    // בלי הגבלה לאותו שולח (החלטת המשתמש 15.11): גם הרביעית בשעה יוצאת
+    for (let i = 0; i < 4; i++) { AI_ARGS = {}; const m = await msg('מתי פתוחים? ' + i, fs); assert.equal(m.d.st, 'sent', 'שליחה ' + i); }
+    assert.equal(fs.S.length, 4);
   });
   it('סבב 2: כשלונות במקביל – המונה לא מאבד עדכונים והכלל נכבה פעם אחת', async () => {
     await put(`b/${A}/sec_mrule/${RID}`, { appr: 1, auto: true, fails: 0 }, true);

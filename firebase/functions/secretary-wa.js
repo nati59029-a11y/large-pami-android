@@ -601,7 +601,7 @@ async function tryMrAutoWa(db, id, x, d, o) {
     return { no: why };
   };
   if (no.length) return blocked(no);
-  // הגנה מלולאה (סבב 2): עד ML().WA_LOOP_MAX תשובות לבד לאותו שולח בשעה (מונה בטרנזקציה על sec_snd – שדה חדש mrA, בלי לשנות שדות קיימים).
+  // הגנה מלולאה (סבב 2; כבויה – WA_LOOP_MAX=0 לפי החלטת המשתמש 15.11): עד ML().WA_LOOP_MAX תשובות לבד לאותו שולח בשעה (מונה בטרנזקציה על sec_snd – שדה חדש mrA, בלי לשנות שדות קיימים).
   // המקום נשמר לפני השליחה ומשוחרר אם לא נשלח (תפוס / מכסה / כשלון), כך שנספרות רק שליחות שיצאו
   const sRef = db.doc('sec_snd/' + x.from), hb = Math.floor(now / ML().WA_LOOP_MS);
   const loopOk = await db.runTransaction(async (tx) => {
@@ -609,7 +609,7 @@ async function tryMrAutoWa(db, id, x, d, o) {
     if (!v.exists) return false; // אין כרטיס שולח – גם אין חלון 24 שעות; לא שולחים לבד
     const a = v.exists && v.get('mrA') && typeof v.get('mrA') === 'object' ? v.get('mrA') : {};
     const n = a.h === hb ? (Number(a.n) || 0) : 0;
-    if (n >= ML().WA_LOOP_MAX) return false;
+    if (ML().WA_LOOP_MAX > 0 && n >= ML().WA_LOOP_MAX) return false; // 0 = בלי הגבלה (החלטת המשתמש 15.11)
     tx.set(sRef, { mrA: { h: hb, n: n + 1 } }, { merge: true });
     return true;
   });
