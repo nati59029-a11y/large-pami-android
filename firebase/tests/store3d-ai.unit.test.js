@@ -41,6 +41,25 @@ describe('store3d-ai – תמונות ומקום צילום', () => {
     assert.deepEqual(A.checkSlot('f2-a-1_t', MAP), { bay: 'f2-a-1', fx: 'f2', lv: 't', hi: true });
     for (const s of ['f1-a-4_a', 'f2-b-1_t', 'f2-a-1_a', 'f1-a-1_t', 'f3-a-1_a', 'f9-a-1_a', 'x']) assert.equal(code(() => A.checkSlot(s, MAP)), 'bad-slot', s);
   });
+  it('draftImgs (15.11.2026): עד 100 תמונות עוברות, 101 נדחות; סך הכל מעל 13,000,000 בתים נדחה; אותה דחיסה לכל תמונה', () => {
+    assert.deepEqual([A.DRAFT.maxImgs, A.DRAFT.maxTotal, A.DRAFT.img.max, A.DRAFT.img.longMax], [100, 13000000, 1500000, 1600]);
+    const small = jpeg(1200, 900, 2000).toString('base64');
+    assert.equal(A.draftImgs(Array(100).fill(small)).length, 100, '100 תמונות');
+    assert.equal(code(() => A.draftImgs(Array(101).fill(small))), 'bad-img-count', '101 תמונות');
+    assert.equal(code(() => A.draftImgs([])), 'bad-img-count');
+    assert.equal(code(() => A.draftImgs('x')), 'bad-img-count');
+    // 13,000,000 בתים בדיוק – עובר; בית אחד יותר – נדחה
+    const big = jpeg(1200, 900, 1500000 - 45);
+    const per = big.length, last = 13000000 - 8 * per;
+    assert.ok(per <= 1500000 && last >= 1000 && last <= 1500000);
+    const tail = jpeg(1200, 900, last - jpeg(1200, 900).length);
+    assert.equal(tail.length, last);
+    const B64 = big.toString('base64');
+    assert.equal(A.draftImgs(Array(8).fill(B64).concat([tail.toString('base64')])).length, 9, 'בדיוק 13,000,000');
+    const tail1 = jpeg(1200, 900, last + 1 - jpeg(1200, 900).length).toString('base64');
+    assert.equal(code(() => A.draftImgs(Array(8).fill(B64).concat([tail1]))), 'too-big', '13,000,001 בתים');
+    assert.equal(code(() => A.draftImgs([jpeg(1200, 900, 1500001).toString('base64')])), 'too-big', 'תמונה בודדת מעל 1.5MB – כמו קודם');
+  });
 });
 
 describe('store3d-ai – מכסה', () => {
@@ -53,7 +72,7 @@ describe('store3d-ai – מכסה', () => {
     r = A.quotaStep(r.b, null, o());
     assert.deepEqual([r.b.n, r.warn, r.b.w80], [9, false, '2026-11'], 'אזהרה רק פעם אחת בחודש');
     assert.equal(code(() => A.quotaStep({ m: '2026-11', n: 10 }, null, o())), 's3-month-limit');
-    assert.equal(code(() => A.quotaStep({ m: '2026-11', n: 8 }, null, o({ k: 3 }))), 's3-month-limit', 'טיוטה עם 3 תמונות כשנשארו 2');
+    assert.equal(code(() => A.quotaStep({ m: '2026-11', n: 8 }, null, o({ k: 3 }))), 's3-month-limit', 'k גדול מהיתרה (k = 3 כשנשארו 2)');
     assert.equal(A.quotaStep({ m: '2026-10', n: 10, w80: '2026-10' }, null, o()).b.n, 1, 'חודש חדש');
     assert.equal(code(() => A.quotaStep(null, { d: '2026-11-14', n: 400 }, o({ cap: 1000 }))), 's3-user-day');
     assert.equal(A.quotaStep(null, { d: '2026-11-13', n: 400 }, o()).u.n, 1, 'יום חדש');

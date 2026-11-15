@@ -285,10 +285,11 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal(await err(shelf(E1, photo({ slot: 'f1-b-1_a' }), { userMax: 2 })), 's3-user-day');
   });
 
-  it('mapDraft: טיוטה תקינה עם אזורים לא בטוחים (uz, ok:false) ב-s3draft; נספר לפי מספר התמונות; שבורה – fail והחזרת מכסה', async () => {
+  it('mapDraft: טיוטה תקינה עם אזורים לא בטוחים (uz, ok:false) ב-s3draft; נספרת כבדיקה אחת (לא לפי מספר התמונות); שבורה – fail; כשל לפני תשובה – מוחזרת בדיקה אחת', async () => {
     const q = qid();
     const r = await X.draftCore(db, W(DR), { qid: q, br: 'main', kind: 's', imgs: [IMG, IMG], cctv: true }, Date.now(), deps());
-    assert.deepEqual([r.draftId, r.st, r.n, r.usage.n, r.drop], [q, 'ok', 2, 2, 0]);
+    assert.deepEqual([r.draftId, r.st, r.n, r.usage.n, r.drop], [q, 'ok', 2, 1, 0], '2 תמונות = בדיקה אחת במכסה');
+    assert.equal((await get(`b/${A}/s3use/u_${DR}`)).n, 1, 'גם הבלם היומי – 1');
     assert.ok(r.m.uz.length === 3 && r.m.uz.every((u) => u.ok === false));
     const rq = GM.state.requests[0];
     assert.equal(rq.kind, 's3draft');
@@ -305,19 +306,32 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     const q2 = qid();
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: q2, br: 'main', kind: 's', imgs: [IMG, IMG, IMG] }, Date.now(), deps())), 'bad-answer');
     assert.equal((await get(`b/${A}/s3draft/${q2}`)).st, 'fail');
-    assert.equal((await use()).n, 5, 'Gemini ענה (טיוטה שבורה) – 3 התמונות נספרות (החלטת המשתמש)');
+    assert.equal((await use()).n, 2, 'Gemini ענה (טיוטה שבורה) – הטיוטה נספרת כבדיקה אחת (החלטת המשתמש)');
     assert.equal(await get(`b/${A}/s3qid/${q2}`), null);
     GM.state.mapdraft = 'mapdraft-unsure';
     const u = await X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps());
     assert.deepEqual([u.conf, u.m.fx.length, u.m.uz.length], [0.3, 0, 1]);
+    // 15.11.2026: טיוטה עם 5 תמונות – המונה החודשי והבלם היומי עולים ב-1 בלבד
+    const b5 = (await use()).n, u5 = (await get(`b/${A}/s3use/u_${MGR}`)).n;
+    const r5 = await X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(5).fill(IMG) }, Date.now(), deps());
+    assert.deepEqual([r5.n, r5.usage.n, (await use()).n, (await get(`b/${A}/s3use/u_${MGR}`)).n], [5, b5 + 1, b5 + 1, u5 + 1]);
+    // תקרה: 100 תמונות – עד 13,000,000 בתים; 101 תמונות / מעל 13MB – נדחה לפני המכסה ולפני Gemini
+    const nReq = GM.state.requests.length, b101 = (await use()).n;
+    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(101).fill(IMG) }, Date.now(), deps())), 'bad-img-count');
+    const BIG = jpeg(1200, 900, 1490000).toString('base64');
+    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(9).fill(BIG) }, Date.now(), deps())), 'too-big', '9 × 1.49MB > 13MB');
+    assert.deepEqual([GM.state.requests.length, (await use()).n], [nReq, b101]);
+    const r100 = await X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(100).fill(IMG) }, Date.now(), deps());
+    assert.deepEqual([r100.st, r100.n, r100.usage.n], ['ok', 100, b101 + 1]);
+    assert.equal(GM.state.requests[GM.state.requests.length - 1].body.contents[0].parts.length, 101, 'הנחיה + 100 תמונות');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 'w', imgs: [IMG] }, Date.now(), deps())), 'no-wh');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [] }, Date.now(), deps())), 'bad-img-count');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'zz', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'no-branch');
     assert.equal(await err(X.draftCore(db, W(DR, { brs: ['other'] }), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'other-branch');
     GM.state.mode = 'quota';
     const before = (await use()).n;
-    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [IMG, IMG] }, Date.now(), deps())), 'gemini-quota');
-    assert.equal((await use()).n, before, '429 – מוחזר');
+    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(5).fill(IMG) }, Date.now(), deps())), 'gemini-quota');
+    assert.equal((await use()).n, before, '429 – מוחזרת בדיקה אחת בדיוק (5 תמונות, לא 5 בדיקות)');
   });
 });
 
