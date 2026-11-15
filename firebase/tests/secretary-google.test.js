@@ -2705,6 +2705,25 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.equal((await oa(M1, { act: 'on', custId: 'cn2' })).reason, 'no-offer');
     });
 
+    it('שלב ג/7: לא נשלח לבד – מייל גדול, קובץ מצורף, תשובת שינוי מסוג רגיש (תלונה)', async () => {
+      await ordSetup();
+      const DANA = 'Dana <dana@shop.example>';
+      await sentOrd('thr-b1');
+      const n = await sentOrd('thr-b2'); // לפני האישור – נשלחת ידנית
+      assert.ok((await oa(M1, { act: 'on', custId: 'cmail' })).ok);
+      const s0 = GO.state.sent.length;
+      const big = await orderMail(DANA, null, { mail: { size: 50000000 } });
+      assert.equal(big.r.aw, 'draft');
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === big.n && /big/.test(x.note)), 'גדול');
+      const fil = await orderMail(DANA, null, { mail: { files: ['הזמנה.pdf'] } });
+      assert.equal(fil.r.aw, 'draft');
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === fil.n && /file/.test(x.note)), 'קובץ');
+      const q = await reply('thr-b2', { reply: 'change', cls: 'complaint', order: { lines: [{ txt: 'צלחת עמוקה', qty: 5 }] } });
+      assert.equal(q.r.ordRe.res, 'chg'); assert.ok(!q.r.ordRe.auto);
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === n && /risk/.test(x.note)), 'סוג רגיש');
+      assert.equal(GO.state.sent.length, s0, 'שום דבר לא נשלח לבד');
+    });
+
     it('שלב ג/7: בקשת שינוי מלקוח מאושר – הגרסה המעודכנת נשלחת לבד בשרשור; לקוח לא מאושר – למנהל', async () => {
       await ordSetup();
       const n = await sentOrd('thr-a7', [{ txt: 'צלחת עמוקה', qty: 2 }], 'Buy <buy@ws.example>');
