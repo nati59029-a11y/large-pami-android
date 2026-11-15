@@ -14,6 +14,7 @@
      badge(k, px)                        -> קנבס של תג המצב (אותו ציור כמו בתלת מימד), למקרא במסכים אחרים
    סימון מצב: פס דק בשפת המדף (כמו פס תוויות, נראה גם מלמעלה) + תג עגול עם סמל מעל המקטע (גודל קבוע במסך). frames(bool) מסתיר/מציג את שניהם.
      clearCache()                        -> ניקוי מטמון התמונות בזיכרון (יציאה / החלפת עסק)
+     opts.loadPh(run,slot)               -> Promise<{th,p}|null> – מסמך ph של מקום צילום (שלב 19א; בלי זה אין תמונה לכל מקום צילום)
      blob(path)                          -> Promise<Blob> – אותה טעינה מ-Storage (okPath + מטמון), לסיור 360
    bay שמוחזר ב-onPick: {id, fx, s, n, lv:[...], lvHit, num, name, k, st}
    מראה: קירות מקבלים את הצילום מ-smap.tx[] לפי rooms[].tex {w,f,c}; הרצפה והתקרה לא נמתחות מהצילום: מהצילום נדגם רק צבע ממוצע – רצפה = אריח עץ מצויר (לוחות 20×120 ס"מ) בצבע הזה, תקרה = צבע חלק בהיר; חזית כל מקטע מקבלת את התמונה המוקטנת האחרונה (s3sum.b[id].th).
@@ -88,7 +89,7 @@ const closeImg=i=>{try{i&&i.close&&i.close()}catch(e){}};
 
 function makeView(T,el,map0,opts){
   const G=window.S3G,MINI=!!opts.mini,dpr0=Math.min(window.devicePixelRatio||1,2),dpr=MINI?Math.min(dpr0,1):dpr0;
-  const TEXMAX=MINI?256:1024,ATLAS=MINI?512:1024,HI_N=MINI?0:6,load=typeof opts.load==='function'?opts.load:defLoad;
+  const TEXMAX=MINI?256:1024,ATLAS=MINI?512:1024,HI_N=MINI?0:6,load=typeof opts.load==='function'?opts.load:defLoad,PH=!MINI&&typeof opts.loadPh==='function'?opts.loadPh:null;
   const renderer=new T.WebGLRenderer({antialias:MINI||dpr<2,powerPreference:MINI?'low-power':'default'});
   renderer.setPixelRatio(dpr);
   const cv=renderer.domElement;cv.style.cssText='display:block;width:100%;height:100%;touch-action:none;outline:none'+(MINI?';pointer-events:none':'');
@@ -303,7 +304,7 @@ function makeView(T,el,map0,opts){
     if(f.k==='table'||f.k==='bin'){const zb0=f.sides===2?0:lz-n*f.d/100,zf=lz-n*.02,zb=zb0+n*.02,y=H+off;q=[[xa,y,zf],[xb,y,zf],[xb,y,zb],[xa,y,zb]];asp=W/Math.max(.05,Math.abs(zf-zb))}
     else{const y0=f.k==='fridge'?.15:.1,y1=f.k==='fridge'?H-.1:H-.03,z=lz+n*off;q=[[xa,y0,z],[xb,y0,z],[xb,y1,z],[xa,y1,z]];asp=W/(y1-y0)}
     return{p:q.map(([x,y,z])=>[o.x0+o.c*x+o.s*z,y,o.z0-o.s*x+o.c*z]),asp}}
-  function clearDyn(){if(dynG){scene.remove(dynG);disposeTree(dynG)}for(const a of ph.atl){a.tex.dispose();a.mat.dispose()}ph.atl=[];ph.byId=new Map();dynG=statG=null;bl=null;hiClear()}
+  function clearDyn(){if(dynG){scene.remove(dynG);disposeTree(dynG)}for(const a of ph.atl){a.tex.dispose();a.mat.dispose()}ph.atl=[];ph.byId=new Map();dynG=statG=null;bl=null;hiClear();slClear()}
   function buildDyn(){
     clearDyn();if(!model)return;dynG=new T.Group();statG=new T.Group();statG.visible=showFrames;dynG.add(statG);
     const B=sumB(),fr=[],frC=[],list=[],bp={};for(const k of BDG)bp[k]=[];ph.want=ph.ok=ph.fail=ph.skip=0;
@@ -351,7 +352,8 @@ function makeView(T,el,map0,opts){
     hi.cache.set(it.th,p);
     while(hi.cache.size>HI_N*2){const[k,v]=hi.cache.entries().next().value;hi.cache.delete(k);v.then(t=>{if(!hi.g||!hi.g.children.some(m=>m.material.map===t))t.dispose()}).catch(()=>{})}
     return p}
-  function hiUpdate(){hi.at=performance.now();if(dead||!HI_N||mode!=='walk'||!ph.byId.size){if(hi.g)hiClear(),invalidate();return}
+  function hiUpdate(){hi.at=performance.now();if(dead||!HI_N||mode!=='walk'||!ph.byId.size){if(hi.g)hiClear(),invalidate();slClear();return}
+    slUpdate();
     const cand=[];for(const it of ph.byId.values()){const b=it.o.b,dx=walk.x-b.x/100,dz=walk.z-b.y/100,d=Math.hypot(dx,dz);
       if(d<4.5&&dx*b.nx+dz*b.ny>0)cand.push([d,it])}
     cand.sort((a,b)=>a[0]-b[0]);const pickd=cand.slice(0,HI_N).map(c=>c[1]),key=pickd.map(i=>i.o.b.id).join(',');
@@ -359,6 +361,47 @@ function makeView(T,el,map0,opts){
     for(const it of pickd)hiTex(it).then(t=>{if(dead||hi.g!==g0)return;const q=quadOf(it.o,.016),P=[];for(const p of q.p)P.push(p[0],p[1],p[2]);
       const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(P,3));geo.setAttribute('uv',new T.Float32BufferAttribute([0,0,1,0,1,1,0,1],2));geo.setIndex([0,1,2,0,2,3]);
       g0.add(new T.Mesh(geo,new T.MeshBasicMaterial({map:t,side:T.DoubleSide})));invalidate()}).catch(()=>{})}
+
+  /* ---- שלב 19א: תמונה לכל מקום צילום (opts.loadPh(run,slot) -> Promise<{th,p,person,gone}|null>). בלי loadPh – לא קורה כלום.
+     עד 6 מ': th של כל מקום צילום (בגוף גבוה חצי עליון וחצי תחתון). עד 1.8 מ' אחרי 0.5 שנ' במקום: p מוקטנת ל-1024, לכל היותר 4 בזיכרון, ומשוחררות כשמתרחקים.
+     מסמך חסר / אדם בתמונה / שגיאה: לא מציירים כלום והתמונה הקיימת נשארת. מצב מיני ומבט עליון: אין קריאות. ---- */
+  const sl={g:null,sig:'',cache:new Map(),docs:new Map(),want:new Set(),calls:0,fkey:'',fok:false,t:0};
+  const slRun=id=>{const B=sumB(),e=B&&B[id],r=e&&e.r;return typeof r==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(r)?r:''};
+  function slDoc(run,slot){const k=run+'|'+slot;let p=sl.docs.get(k);if(p)return p;sl.calls++;
+    p=Promise.resolve().then(()=>PH(run,slot)).then(o=>o&&typeof o==='object'&&!o.person&&!o.gone?o:null,()=>null);sl.docs.set(k,p);return p}
+  function slClear(){clearTimeout(sl.t);sl.t=0;sl.fkey='';sl.fok=false;sl.sig='';sl.want=new Set();
+    if(sl.g){scene.remove(sl.g);sl.g.traverse(n=>{if(n.geometry)n.geometry.dispose();if(n.material)n.material.dispose()});sl.g=null}
+    for(const[k,e]of sl.cache){if(e.t)e.t.dispose();e.dead=1;sl.cache.delete(k)}}
+  function slTex(sp){const k=sp.k;let e=sl.cache.get(k);if(e)return e.p;e={p:null,t:null,full:sp.full,dead:0};
+    e.p=slDoc(sp.run,sp.slot).then(o=>{const path=o&&o[sp.full?'p':'th'];if(!okPath(path))return null;return getBlob(path,load,alive)}).then(b=>{return b?decode(b):null}).then(img=>{
+      if(!img)return null;if(dead||e.dead||!sl.want.has(k)){closeImg(img);if(sl.cache.get(k)===e)sl.cache.delete(k);return null}
+      const c=document.createElement('canvas'),s=pot(Math.max(img.width,img.height),sp.full?1024:512);c.width=c.height=s;drawCover(c.getContext('2d'),img,0,0,s,s,sp.asp);closeImg(img);
+      const t=new T.CanvasTexture(c);t.colorSpace=T.SRGBColorSpace;t.anisotropy=aniso;e.t=t;return t}).catch(()=>null);
+    sl.cache.set(k,e);return e.p}
+  /* חצי עליון/תחתון של משטח התמונה: פינות q = [שמאל-תחתון, ימין-תחתון, ימין-עליון, שמאל-עליון] */
+  function halfQ(q,l){if(l==='a')return q;const m=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2];const ml=m(q[0],q[3]),mr=m(q[1],q[2]);
+    return l==='t'?[ml,mr,q[2],q[3]]:[q[0],q[1],mr,ml]}
+  function slUpdate(){if(!PH)return;
+    const near=[],close=[];
+    for(const it of ph.byId.values()){const b=it.o.b;if(!slRun(b.id)||!Array.isArray(b.lv))continue;const dx=walk.x-b.x/100,dz=walk.z-b.y/100,d=Math.hypot(dx,dz);
+      if(dx*b.nx+dz*b.ny<=0)continue;if(d<6)near.push([d,it]);if(d<1.8)close.push([d,it])}
+    near.sort((a,b)=>a[0]-b[0]);close.sort((a,b)=>a[0]-b[0]);
+    const mk=(it,l,full)=>{const id=it.o.b.id,run=slRun(id),slot=id+'_'+l,two=it.o.b.lv.length>1;
+      return{k:run+'|'+slot+'|'+(full?'p':'th'),run,slot,l,full,it,asp:it.asp*(two?2:1),off:full?.024:.02}};
+    const specs=[];
+    for(const[,it]of near){if(specs.length>=HI_N*2)break;if(it.o.b.lv.length>1)for(const l of it.o.b.lv)specs.push(mk(it,l,false))}
+    /* תמונה מלאה: רק אחרי עמידה של חצי שנייה מול אותם מקטעים. לכל היותר 4 מקומות צילום (טקסטורות) בו זמנית */
+    const fk=close.slice(0,2).map(c=>c[1].o.b.id).join(',');
+    if(fk!==sl.fkey){sl.fkey=fk;sl.fok=false;clearTimeout(sl.t);sl.t=0;if(fk)sl.t=setTimeout(()=>{sl.t=0;if(!dead&&mode==='walk'){sl.fok=true;slUpdate()}},500)}
+    if(sl.fok){const full=[];for(const[,it]of close.slice(0,2))for(const l of it.o.b.lv)if(full.length<4)full.push(mk(it,l,true));specs.push(...full)}
+    const sig=specs.map(s=>s.k).join(',');if(sig===sl.sig)return;sl.sig=sig;sl.want=new Set(specs.map(s=>s.k));
+    if(sl.g){scene.remove(sl.g);sl.g.traverse(n=>{if(n.geometry)n.geometry.dispose();if(n.material)n.material.dispose()})}
+    sl.g=new T.Group();scene.add(sl.g);const g0=sl.g;
+    /* שחרור: תמונות מלאות שכבר לא רצויות מיד; מוקטנות – נשארות עד 12 במטמון */
+    let keep=0;for(const[k,e]of[...sl.cache].reverse()){if(sl.want.has(k))continue;if(e.full||++keep>12){if(e.t)e.t.dispose();e.dead=1;sl.cache.delete(k)}}
+    for(const sp of specs)slTex(sp).then(t=>{if(!t||dead||sl.g!==g0)return;const q=halfQ(quadOf(sp.it.o,sp.off).p,sp.l),P=[];for(const p of q)P.push(p[0],p[1],p[2]);
+      const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(P,3));geo.setAttribute('uv',new T.Float32BufferAttribute([0,0,1,0,1,1,0,1],2));geo.setIndex([0,1,2,0,2,3]);
+      g0.add(new T.Mesh(geo,new T.MeshBasicMaterial({map:t,side:T.DoubleSide})));invalidate()})}
 
   /* ---- מקרא וכפתור הסתרת סימוני המצב (לא במצב מיני). עיצוב מטוקני האפליקציה (ds): --glass, --line, --ink, --r-m, --elev-2, וכפתור "btn s g" ---- */
   let legend=null;const frTxt=()=>showFrames?'הסתר סימונים':'הצג סימונים';
@@ -387,7 +430,7 @@ function makeView(T,el,map0,opts){
     if(!G.inAnyRoom(model,x,y)&&model.rooms[0]){const c=G.centroid(model.rooms[0].p);x=c[0];y=c[1]}
     [x,y]=G.resolveCircle(x,y,25,model.segs);walk.x=x/100;walk.z=y/100;walk.yaw=Math.atan2(e.ly,e.lx);walk.pitch=-.05;
   }
-  function applyMode(){bdgSize();wallsG.scale.y=mode==='top'?(MINI?.55:.35):1;ceilG.visible=mode==='walk';if(mode!=='walk')hiClear();else hiUpdate();placeCam()}
+  function applyMode(){bdgSize();wallsG.scale.y=mode==='top'?(MINI?.55:.35):1;ceilG.visible=mode==='walk';if(mode!=='walk')hiClear(),slClear();else hiUpdate();placeCam()}
   function placeCam(){
     if(mode==='top'){const c=Math.cos(top.pitch),fx=Math.cos(top.yaw),fz=Math.sin(top.yaw);
       cam.position.set(top.tx-fx*c*top.dist,Math.sin(top.pitch)*top.dist,top.tz-fz*c*top.dist);cam.lookAt(top.tx,0,top.tz)}
@@ -505,8 +548,8 @@ function makeView(T,el,map0,opts){
     stats:()=>{const st={};for(const k in STAT)st[k]=0;const B=sumB();if(B)for(const o of pickBays){const s=stOf(o.b.id);if(s)st[s]++}
       return{three:THREE_VER,mini:MINI,buildMs:+buildMs.toFixed(1),fx:model.fx.length,bays:model.bays.length,instances,calls:renderer.info.render.calls,tris:renderer.info.render.triangles,
         skip:model.skip.slice(),cam:cam.position.toArray().map(v=>+v.toFixed(2)),walk:[+walk.x.toFixed(2),+walk.z.toFixed(2)],mode,frames,paused,
-        tex:Object.assign({},texSt),photos:{want:ph.want,ok:ph.ok,fail:ph.fail,cell:ph.cell,atlases:ph.atl.length,hi:hi.g?hi.g.children.length:0},stat:st,badges:Object.assign({},bdgN),badgePx:BM.ok.size,framesOn:showFrames,blink:!!bl,px:renderer.getPixelRatio()}},
-    destroy(){if(dead)return;dead=true;if(raf)cancelAnimationFrame(raf);clearTimeout(hi.t);clearTimeout(soonT);
+        tex:Object.assign({},texSt),photos:{want:ph.want,ok:ph.ok,fail:ph.fail,cell:ph.cell,atlases:ph.atl.length,hi:hi.g?hi.g.children.length:0},slots:{on:!!PH,calls:sl.calls,th:sl.g?sl.g.children.length-[...sl.cache.values()].filter(e=>e.full&&e.t).length:0,full:[...sl.cache.values()].filter(e=>e.full&&e.t).length},stat:st,badges:Object.assign({},bdgN),badgePx:BM.ok.size,framesOn:showFrames,blink:!!bl,px:renderer.getPixelRatio()}},
+    destroy(){if(dead)return;dead=true;if(raf)cancelAnimationFrame(raf);clearTimeout(hi.t);clearTimeout(soonT);clearTimeout(sl.t);
       cv.removeEventListener('pointerdown',onDown);cv.removeEventListener('pointermove',onMove);cv.removeEventListener('pointerup',onUp);cv.removeEventListener('pointercancel',onUp);
       cv.removeEventListener('wheel',onWheel);cv.removeEventListener('webglcontextlost',onLost);cv.removeEventListener('webglcontextrestored',onRestored);
       document.removeEventListener('visibilitychange',onVis);if(ro)ro.disconnect();else window.removeEventListener('resize',resize);
