@@ -62,7 +62,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn']); // sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_mrule', 'sec_mlog']); // sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6; sec_mrule (כללים אישיים של מנהל), sec_mlog (יומן "נשלח לבד") – 15.11.2026. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -87,6 +87,8 @@ function cfgOf(snap, bizId) {
     nr: obj(d.nr),
     // קצב הודעות לכל מנהל (10.3, 89): מנהל־על קובע לכל עסק; בלי הגדרה – ברירת המחדל
     rate: { hour: Number.isInteger(d.rate && d.rate.hour) ? d.rate.hour : RATE_HOUR, day: Number.isInteger(d.rate && d.rate.day) ? d.rate.day : RATE_DAY },
+    // 15.11.2026 ("תגובה למזכירה"): כללים אישיים של מנהל – פעיל כברירת מחדל (החלטת בעל הפרויקט); learn:false במסמך = כבוי בעסק
+    learn: d.learn !== false,
   };
 }
 const empDefault = (bizId) => bizId === T.BIZ0;
@@ -119,19 +121,20 @@ async function gate(request, opts) {
   // מידע רגיש (10.8): המתג העסקי (ניתוח עובדים ומידע רגיש) + הרשאה אישית של המנהל + בלי הגבלת סניפים
   const sensOn = cfg.emp === true && cfg.sens[who.uid] === true && !brLimited;
   const brs = brLimited ? adm.get('br').filter((b) => typeof b === 'string') : null; // שלב 13ב (סריקת חנות): הסניפים המותרים
-  return { who, cfg, me, consented, db, brLimited, sensOn, brs };
+  return { who, cfg, me, consented, db, brLimited, sensOn, brs, hasBr: Array.isArray(adm.get('br')) }; // hasBr – גם מנהל־על (secretary-learn: כללי מייל/ווצאפ)
 }
 
 // secState: מה האפליקציה צריכה כדי להציג כפתור, כרטיס, הסכמה ואשף. לא דורש הסכמה (כדי להציג את מסך ההסכמה).
 async function secState(request) {
   inputObject(request);
-  const { who, cfg, me, consented, sensOn } = await gate(request);
+  const { who, cfg, me, consented, sensOn, brLimited } = await gate(request);
   const out = {
     ok: true, bizId: who.bizId, mode: cfg.mode, isMain: cfg.mode === 'main',
     consented, consentAt: consented && Number.isFinite(me.ca) ? me.ca : null, consentVer: CONSENT_VER,
     name: typeof me.nm === 'string' ? me.nm : '', addr: me.ad === 'f' ? 'f' : me.ad === 'm' ? 'm' : '', call: typeof me.call === 'string' ? me.call : '',
     pay: cfg.pay[who.uid] === true, emp: cfg.emp === true,
     sens: sensOn, we: me.we === 'accept' ? 'accept' : 'warn', // שלב 3: מידע רגיש; פגישה בשישי/שבת/חג (72)
+    learn: cfg.learn, brLimited, // 15.11.2026: "תגובה למזכירה" – כללים אישיים (פעיל כברירת מחדל); מנהל עם הגבלת סניפים – בלי כללים על מייל/ווצאפ
     rows: [], // כרטיס הבית מתמלא בהדרגה (11): ממתינים / חשבוניות / תזכורות – נוספים רק בשלבים שבונים אותם
   };
   out.setupDone = !!(out.name && out.addr);
@@ -359,8 +362,35 @@ async function secChatLoad(request) {
   const { who, db, sensOn } = await gate(request, { consent: true });
   const lim = input.limit === undefined ? 50 : input.limit;
   if (!Number.isInteger(lim) || lim < 1 || lim > 200) throw bad('bad-limit', 'מספר הודעות: 1 עד 200');
-  const s = await db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc').limit(lim).get();
-  return { ok: true, msgs: s.docs.map((d) => msgOut(d.id, d.data(), msgText(d, who, sensOn))).reverse() };
+  // 15.11.2026 (צ'אט נקי): "צ'אט קודם" נטען בדפים – before = זמן ההודעה הוותיקה ביותר שכבר מוצגת
+  if (input.before !== undefined && !(Number.isInteger(input.before) && input.before > 0)) throw bad('bad-before', 'ערך לא תקין');
+  let q = db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc');
+  if (input.before !== undefined) q = q.where('t', '<', input.before);
+  const s = await q.limit(lim).get();
+  const msgs = s.docs.map((d) => msgOut(d.id, d.data(), msgText(d, who, sensOn))).reverse();
+  await cardStates(db, msgs);
+  return { ok: true, msgs, more: s.size === lim };
+}
+// כרטיס אישור (עובדה / אירוע) מהודעה ישנה, שנשמרה לפני שמצב הכרטיס נרשם בהודעה: המצב נגזר מההצעה עצמה –
+// עדיין 'prop' = ממתין; אושרה = 'ok'; לא קיימת (בוטלה או נמחקה) = 'gone' ("כבר טופל"). קריאה בלבד – ההודעה לא משתנה
+async function cardStates(db, msgs) {
+  const need = [];
+  for (const m of msgs) for (const c of Array.isArray(m.cards) ? m.cards : []) if (c && !c.st && (c.k === 'fact' || c.k === 'cal') && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(c.id)) need.push(c);
+  if (!need.length) return;
+  const snaps = await db.getAll(...need.slice(0, 100).map((c) => db.doc((c.k === 'fact' ? 'sec_facts/' : 'sec_cal/') + c.id)));
+  snaps.forEach((sn, i) => { const c = need[i]; if (!sn.exists) c.st = 'gone'; else if (sn.get('st') !== 'prop') { c.st = 'ok'; if (c.k === 'cal' && sn.get('d') && sn.get('d') !== c.d) c.okD = sn.get('d'); } });
+}
+// מצב כרטיס בהודעה (15.11.2026): אחרי אישור / ביטול – נרשם על ההודעה עצמה, כך שהכרטיס מוצג "אושר ✓" / "בוטל" בלי כפתורים גם אחרי טעינה מחדש.
+// נוסף ל-batch של הפעולה (אותה כתיבה). רק כרטיס שעוד לא הוכרע. uid = בעל השיחה
+async function cardMark(db, b, uid, mid, cid, patch) {
+  if (typeof uid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(uid) || typeof mid !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(mid) || typeof cid !== 'string') return null;
+  const ref = db.doc(`sec_chat/${uid}/m/${mid}`);
+  const s = await ref.get();
+  if (!s.exists || !Array.isArray(s.get('cards'))) return null;
+  let hit = null;
+  const cards = s.get('cards').map((c) => { if (c && c.id === cid && !c.st && !hit) { hit = Object.assign({}, c, patch, { stAt: Date.now() }); return hit; } return c; });
+  if (hit) b.update(ref, { cards });
+  return hit;
 }
 // טקסט של הודעה: הודעה עם מידע רגיש – מפוענחת רק כש-sensOn (מתג עסקי + הרשאה אישית); אחרת hidden (ברירת מחדל: הנוסח הכללי; null = לא נשלחת)
 function msgText(d, who, sensOn, hidden) {
@@ -380,6 +410,7 @@ function msgOut(id, x, text) {
   return o;
 }
 
+const LR = () => require('./lib/sec-learn');
 const CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g;
 // secChat({ text, deep?, fin? }) – צ'אט עם כלים. הכלים נקבעים כאן לפי ערוץ (app) והרשאות – לא לפי בקשת המודל (5.5)
 async function secChat(request) {
@@ -415,6 +446,8 @@ async function secChat(request) {
   let reply = null, mode = 'ok', mt = null, usage = { in: 0, out: 0 }, sent = 0, denied = [], offered = [];
   let bank = null, bankCond = [];
   let s3 = null; // שלב 13ב: סיכום סבבי סריקת החנות שנכנס להקשר (ומשמש מקור לבדיקת המספרים)
+  // 15.11.2026 (סעיף 6, תיקון סבב 1): הוראת ניתוב ("חשבוניות מהיום – למסך לטיפול") – המזכירה עונה כרגיל, וכרטיס הניתוב מצורף כהצעה נוספת; הכלל נשמר רק ב"אשר" (secLearn op:'route')
+  const rt = cfg.learn && !pol.sensitive ? LR().routeOf(text) : null;
   if (!pol.sensitive && !deep) {
     // בנק תשובות (3.5): לפני כל פנייה למודל. התאמה בלי תנאים = התשובה השמורה, בלי AI ובלי עלות (נספר ב-sec_usage.bank).
     // "חשבי לעומק" – תמיד למודל. כלל עם תנאים – עובר למודל כמידע (עד 40)
@@ -467,7 +500,9 @@ async function secChat(request) {
     const bankNote = bankCond.length ? JSON.stringify(bankCond.map((r) => ({ q: r.q, a: r.a, cond: r.cond }))).slice(0, 12000) : '';
     // שלב 13ב: סיכום סבבי סריקת החנות (רק כשהתוספת פעילה; מנהל עם הגבלת סניפים – רק הסניפים שלו). כשל – בלי הסיכום, השיחה ממשיכה
     s3 = await require('./store3d-extra')._x.secBrief(db, who, brs, now).catch((e) => { logger.warn('secChat: store3d brief failed', { code: e && e.code }); return null; });
-    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote }) + (s3 ? '\n' + s3.text : '');
+    // 15.11.2026: ההנחיות הקבועות של המנהל הזה בלבד (sec_mrule, ערוץ השיחה) – גוברות על ברירת המחדל בסגנון, לא על הכללים המחייבים. כשל – בלי ההנחיות
+    const mr = cfg.learn ? await require('./secretary-learn')._core.chatRules(db, who.uid).catch(() => []) : [];
+    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote, mr }) + (s3 ? '\n' + s3.text : '');
     let final = null, refused = false;
     try {
       for (let round = 0; round < MAX_ROUNDS && final === null && !refused; round++) {
@@ -538,6 +573,11 @@ async function secChat(request) {
   if (stale) am.stale = true;
   if (ideas.length) am.ideas = ideas;
   if (th) am.th = th.suggestedThreshold;
+  // הצעת כלל ניתוב – בנוסף לתשובה (לא במקומה). לא בתור עם מידע רגיש (ההוראה נשמרת בכרטיס בטקסט גלוי)
+  if (rt && !sensUsed) {
+    cards.splice(Math.min(cards.length, 7), 0, { k: 'route', id: 'rt' + require('node:crypto').randomBytes(8).toString('hex'), kind: rt.kind, dest: rt.dest, instr: text.slice(0, 300) });
+    logs.push(['route', rt.kind + ':' + rt.dest]);
+  }
   if (cards.length) am.cards = cards.slice(0, 8);
   if (mode === 'bank') {
     am.src = [{ k: 'bank', l: 'בנק התשובות – "' + String(bank.q).slice(0, 60) + '"', at: bank.rule.upd || bank.rule.t || now, s: 'bank' }];
@@ -546,6 +586,9 @@ async function secChat(request) {
   { const sealed = am.sealed; delete am.sealed; b.set(aa, sealed ? Object.assign({}, am, sealed) : am); } // התשובה עכשיו (למנהל עם הרשאה) – בטקסט; במסד – מוצפנת
   for (const l of logs) b.set(db.collection('sec_log').doc(), logData(who.uid, l[0] === 'tool' || l[0] === 'toolDenied' || l[0] === 'sensTool' ? 'sec' : 'auto', l[0], { tgt: l[2], note: [l[1], l[3]].filter(Boolean).join(' ') }));
   await b.commit();
+  // 15.11.2026: ההצעות (עובדה / אירוע) יודעות באיזו הודעה הכרטיס שלהן – כדי לרשום עליה "אושר" / "בוטל" (גם כשמאשרים מלשונית אחרת). כשל – לא עוצר את התשובה
+  const props = (am.cards || []).filter((c) => c.k === 'fact' || c.k === 'cal');
+  if (props.length) { const b2 = db.batch(); for (const c of props) b2.update(db.doc((c.k === 'fact' ? 'sec_facts/' : 'sec_cal/') + c.id), { mid: aa.id }); await b2.commit().catch((e) => logger.warn('secChat: card mid failed', { code: e && e.code })); }
   return { ok: true, id: aa.id, reply, mode, deep, src: am.src, cards: am.cards || [], nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied, brLimited };
 }
 function argNote(a, name) {
@@ -874,6 +917,8 @@ Object.defineProperty(exports, '_core', { enumerable: false, value: {
   usageOf, DEFAULT_CAP_CENTS, reserveOf, PREFS_HOUR, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
   // לשלב 3 (secretary-know.js): אותו שער הרשאה ואותו יומן
   gate, logData, hourKey, bad, deny, pre, wrap,
+  // 15.11.2026 (צ'אט נקי): מצב כרטיס אישור בהודעה
+  cardMark,
   // שלב 5 (secretary-wa.js): אותו מונה עלות (11.3) לעיבוד הודעות ווצאפ ולתמלול
   meter, settle,
 } });

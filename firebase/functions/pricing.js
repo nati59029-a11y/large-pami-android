@@ -32,6 +32,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 const T = require('./lib/tenant');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const PC = require('./lib/pricing-calc');
+const PM = require('./lib/prod-match');
 const O = require('./orders')._core;
 
 const { bad, deny, pre } = O;
@@ -41,9 +42,24 @@ const BC_RE = /^[0-9A-Za-z-]{3,30}$/;
 const DATE_RE = /^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const UNITS = ['u', 'pk', 'ct'];
 const WP_SRC = ['stock', 'auto', 'man'];
-const LINE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'chk', 'pid', 'nw', 'skip', 'price', 'wp', 'wpSrc', 'cto'];
+const LINE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'chk', 'pid', 'nw', 'skip', 'price', 'wp', 'wpSrc', 'cto', 'nm'];
 const CREATE_KEYS = ['n', 'bc', 'sku', 'qty', 'unit', 'pk', 'ct', 'cost', 'raw', 'chk']; // piCreate: שדות זיהוי בלבד (ליקוי 2)
 const NAME_MAX = 60; // כמו שם מוצר ב-saveProduct (prodClean) – ליקוי 5
+// שינוי שם וכינויים (משימה 2026-11-14, שלב 2 חלק א'; תשובות 46–54): בשורה nm = "שם במלאי". piFinish: השם החדש הופך לראשי,
+//   והשם הקודם במלאי + השם בחשבונית נשמרים בכינויים (prod.al) – בלי כפילות (השוואה אחרי נרמול, PM.key). כינוי ששווה לשם החדש יוצא
+//   מהרשימה (הוא עכשיו השם הראשי). מוצר חדש עם nm שונה מהשם בחשבונית – השם בחשבונית נשמר ככינוי. בלי nm – שום דבר לא משתנה.
+//   matches(): שורה בלי ברקוד שהשם שלה הוא כינוי של מוצר (של אותו ספק, או מוצר בלי ספק) – הצעה k:'al' ("לבדוק"), כמו התאמת שם.
+const AL_MAX = 200; // תקרה טכנית בלבד (גודל המסמך). מעבר לה – הכינויים הישנים ביותר יוצאים
+function alMerge(cur, add, name) {
+  const nk = PM.key(name), seen = new Set([nk]), out = [];
+  for (const a of (Array.isArray(cur) ? cur : []).concat(add)) {
+    if (typeof a !== 'string') continue;
+    const v = a.trim().slice(0, NAME_MAX), k = PM.key(v);
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push(v);
+  }
+  return out.slice(-AL_MAX);
+}
 
 // ---------- הרשאות ----------
 function feats(w) {
@@ -100,6 +116,7 @@ function cleanLine(l, i, strict) {
     if (typeof l[k] === 'boolean') { if (l[k] || k === 'cto') o[k] = l[k]; } else fail('bad-field', 'סימון חייב להיות כן/לא');
   }
   if (l.pid != null && l.pid !== '') { if (typeof l.pid === 'string' && O.ID_RE.test(l.pid)) o.pid = l.pid; else fail('bad-id', 'מוצר לא תקין'); }
+  if (l.nm != null && l.nm !== '') { if (typeof l.nm === 'string') { const v = soft(l.nm, NAME_MAX); if (v) o.nm = v; } else fail('bad-field', 'שם במלאי לא תקין'); }
   return o;
 }
 function cleanLines(v, strict, allowEmpty, keys) {
@@ -159,11 +176,11 @@ const normName = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu
 const SUP_SCAN = 2000; // שורות בלי ברקוד: מוצרי הספק נטענים להשוואת שם מנורמל
 // התאמה לכל שורה: { m: מוצר מוצע | null, k, oth: אותו ברקוד אצל ספק אחר }.
 //   k: 'pid' (המשתמש בחר / כבר מקושר) | 'bc' (ברקוד + אותו ספק; nosup = למוצר אין ספק רשום) | 'sku' (בלי ברקוד: קוד פריט של אותו ספק)
-//      | 'name' (בלי ברקוד: שם מנורמל של אותו ספק – לבדוק) | 'otherSup' (רק אצל ספק אחר – לא מוצע) | '' (אין / המשתמש בחר "מוצר חדש", nw)
+//      | 'name' (בלי ברקוד: שם מנורמל של אותו ספק – לבדוק) | 'al' (בלי ברקוד: שם קודם / כינוי של מוצר של אותו ספק או בלי ספק – לבדוק) | 'otherSup' (רק אצל ספק אחר – לא מוצע) | '' (אין / המשתמש בחר "מוצר חדש", nw)
 //   ההצעה לא נשמרת: piFinish מעדכן רק pid שהמסך שלח (המשתמש יכול לבטל ולהגדיר כמוצר חדש).
 async function matches(db, d, vat) {
   const L = Array.isArray(d.lines) ? d.lines : [];
-  const byBc = new Map(), bySku = new Map(), byName = new Map(), byId = new Map();
+  const byBc = new Map(), bySku = new Map(), byName = new Map(), byId = new Map(), byAl = new Map();
   const add = (m, k, s) => { if (!m.has(k)) m.set(k, []); if (!m.get(k).some((x) => x.id === s.id)) m.get(k).push(s); };
   const q = async (field, vals, m, key) => {
     const u = [...new Set(vals.filter(Boolean))];
@@ -174,12 +191,16 @@ async function matches(db, d, vat) {
   const noBc = L.filter((l) => !l.bc && !l.pid && !l.nw);
   await q('barcode', L.map((l) => l.bc), byBc);
   await q('sku', noBc.map((l) => l.sku), bySku);
+  const alAdd = (s) => { const A = s.get('al'); if (Array.isArray(A)) for (const a of A) if (typeof a === 'string' && PM.key(a)) add(byAl, PM.key(a), s); };
+  // כינויים: אותו טקסט בדיוק (array-contains-any, עד 30 בכל שאילתה) + כינויים של מוצרי הספק (למטה) אחרי נרמול
+  const alN = [...new Set(noBc.map((l) => l.n).filter(Boolean))];
+  for (let k = 0; k < alN.length; k += 30) (await db.collection('prod').where('al', 'array-contains-any', alN.slice(k, k + 30)).get()).forEach(alAdd);
   if (sup0 && noBc.some((l) => l.n)) {
     // שם מנורמל: השם המדויק + מוצרי הספק (השם כמו בחשבונית, עם / בלי "בע\"מ"). ספק שנרשם במלאי בכתיב אחר – רק לפי שם מדויק
     await q('name', noBc.map((l) => l.n), byName, normName);
     const base = String(d.sup).replace(/\s*בע["'״׳]?מ\.?\s*$/, '').trim();
     const sv = [...new Set([d.sup, base].concat(['בע"מ', 'בע״מ', 'בעמ', "בע'מ"].map((x) => base + ' ' + x)))];
-    (await db.collection('prod').where('sup', 'in', sv).limit(SUP_SCAN).get()).forEach((s) => add(byName, normName(s.get('name')), s));
+    (await db.collection('prod').where('sup', 'in', sv).limit(SUP_SCAN).get()).forEach((s) => { add(byName, normName(s.get('name')), s); alAdd(s); });
   }
   const pids = [...new Set(L.map((l) => l.pid).filter(Boolean))];
   if (pids.length) (await db.getAll(...pids.map((p) => db.doc('prod/' + p)))).forEach((s) => { if (s.exists) byId.set(s.id, s); });
@@ -196,6 +217,7 @@ async function matches(db, d, vat) {
       m = (l.sku && (bySku.get(l.sku) || []).find(sameSup)) || null;
       if (m) k = 'sku';
       else if (l.n && (m = (byName.get(normName(l.n)) || []).find(sameSup) || null)) k = 'name';
+      else if (l.n && (m = ((A) => A.find(sameSup) || A.find((s) => !s.get('sup')) || null)(byAl.get(PM.key(l.n)) || []))) k = 'al';
     }
     return { m, k, nosup, oth: oth.filter((s) => !m || s.id !== m.id).slice(0, 5) };
   });
@@ -212,7 +234,7 @@ async function matches(db, d, vat) {
   const view = (s) => {
     const x = s.data() || {};
     const c = cost.has(s.id) ? cost.get(s.id) : null;
-    const o = { pid: s.id, name: x.name || '', price: isNum(x.price) ? x.price : null, barcode: x.barcode || '', sup: x.sup || '', on: x.on !== false,
+    const o = { pid: s.id, name: x.name || '', al: Array.isArray(x.al) ? x.al.filter((a) => typeof a === 'string').slice(0, 20) : [], price: isNum(x.price) ? x.price : null, barcode: x.barcode || '', sup: x.sup || '', on: x.on !== false,
       pk: x.pk || null, ct: x.ct || null, cto: x.cto === true, q: x.q && typeof x.q === 'object' ? x.q : {}, cost: c, costx: c == null ? null : PC.noVat(c, vat),
       wp: wp.has(s.id) ? wp.get(s.id) : null };
     return o;
@@ -339,6 +361,7 @@ async function piFinish(request) {
   const ref = db.doc('pinv/' + id);
   const now = Date.now();
   let res = null;
+  const cp0 = w.ord ? await O.cpPre(db, act.filter((x) => x.l.pid && (x.l.wp != null || x.l.price != null)).map((x) => x.l.pid)) : null; // 14.11.2026: התראה על מחיר קבוע ללקוח
   await db.runTransaction(async (tx) => {
     // טרנזקציה יכולה לרוץ שוב (התנגשות) – כל מה שמשתנה בתוכה מתחיל מחדש בכל ניסיון
     res = { ok: true, id, dup: false, added: 0, updated: 0, qty: 0 };
@@ -374,16 +397,19 @@ async function piFinish(request) {
             if (!p || !p.exists) throw new HttpsError('not-found', 'המוצר לא נמצא', { reason: 'no-prod' });
             const o = p.data() || {};
             const price = l.price != null ? l.price : o.price;
-            const c = O.prodClean(w, Object.assign({ name: o.name, price, barcode: o.barcode || l.bc || '', on: o.on !== false }, ext, !o.sup && supOk ? { sup: supOk } : {}));
+            const name = l.nm && l.nm !== o.name ? l.nm : o.name; // שינוי שם (שלב 2): השם הקודם והשם בחשבונית – לכינויים
+            const c = O.prodClean(w, Object.assign({ name, price, barcode: o.barcode || l.bc || '', on: o.on !== false }, ext, !o.sup && supOk ? { sup: supOk } : {}));
             const extra = qty ? { [`q.${br}`]: O.r3(O.qOf(o, br) + qty) } : {};
+            if (name !== o.name) extra.al = alMerge(o.al, [o.name, l.n], c.name);
             O.prodPut(tx, db, w, l.pid, o, c, now, extra);
             if (qty) tx.set(O.stockRef(db), { prod: l.pid, name: c.name, br, delta: qty, why: 'pinv', note: `חשבונית ${d.inv || ''} ${sup}`.trim().slice(0, 300), pinv: id, by: w.uid, at: now });
             res.updated++;
           } else {
             const nid = 'p' + crypto.createHash('sha1').update(id + '|' + i).digest('hex').slice(0, 24);
             const sku = l.sku && O.digRun(l.sku) < 8 ? { sku: l.sku } : {};
-            const c = O.prodClean(w, Object.assign({ name: l.n, price: l.price, barcode: l.bc || '', on: true }, ext, supOk ? { sup: supOk } : {}, sku));
-            O.prodPut(tx, db, w, nid, null, c, now, { q: qty ? { [br]: qty } : {}, src: 'pinv' });
+            const c = O.prodClean(w, Object.assign({ name: l.nm || l.n, price: l.price, barcode: l.bc || '', on: true }, ext, supOk ? { sup: supOk } : {}, sku));
+            const al = l.nm ? alMerge([], [l.n], c.name) : [];
+            O.prodPut(tx, db, w, nid, null, c, now, Object.assign({ q: qty ? { [br]: qty } : {}, src: 'pinv' }, al.length ? { al } : {}));
             if (qty) tx.set(O.stockRef(db), { prod: nid, name: c.name, br, delta: qty, why: 'pinv', note: `חשבונית ${d.inv || ''} ${sup}`.trim().slice(0, 300), pinv: id, by: w.uid, at: now });
             out[i].pid = nid; // נשמר בחשבונית הסגורה – איזה מוצר נוצר
             res.added++;
@@ -398,6 +424,7 @@ async function piFinish(request) {
     const fin = { by: w.uid, name: w.uname, t: now, rq: reqId, br: br || '', res: { added: res.added, updated: res.updated, qty: res.qty } };
     tx.update(ref, Object.assign({ st: 'done', lines: out, n: out.length, fin, lk: FieldValue.delete(), upd: now, rev: rev + 1 }, h));
   });
+  if (cp0 && !res.dup) await O.cpAlert(db, w, cp0);
   return res;
 }
 
@@ -460,4 +487,4 @@ const wrap = (name, fn) => T.scoped(async (request) => {
 });
 const FNS = { piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall({}, wrap(k, f));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanLine, cleanLines, soft, normSup, matches, LOCK_MS, MAX_LINES, IMG_CH, IMG_MAX } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { cleanLine, cleanLines, soft, normSup, matches, alMerge, LOCK_MS, MAX_LINES, IMG_CH, IMG_MAX } });

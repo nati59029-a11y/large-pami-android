@@ -9,6 +9,11 @@ const { profitOf, ilDayStart } = require('../functions/lib/ord-profit');
 
 const ORD = { total: 95, items: [{ pid: 'p1', qty: 2, price: 20, c: 12 }, { pid: 'p2', qty: 1, price: 10 }, { pid: 'p3', qty: 1, price: 50 }, { n: 'x', qty: 1, price: 5, c: 1 }] };
 describe('רווח של הזמנה', () => {
+  it('סבב 2: הזמנה עם vm – ההכנסה gross (אחרי הנחה, כולל מע"מ); שורה בלי עלות יורדת באותו יחס; הזמנה ישנה – total', () => {
+    assert.deepEqual(profitOf({ vm: 'ex', total: 100, gross: 118, items: [{ pid: 'a', qty: 1, price: 100, c: 59 }] }, null, 'skip'), { total: 11800, cost: 5900, profit: 5900, miss: 0 });
+    assert.deepEqual(profitOf({ vm: 'inc', total: 100, gross: 90, disc: 10, items: [{ pid: 'a', qty: 1, price: 50, c: 20 }, { pid: 'b', qty: 1, price: 50 }] }, null, 'skip'), { total: 9000, cost: 2000, profit: 2500, miss: 1 });
+    assert.equal(profitOf({ total: 100, gross: 50, items: [] }, null, 'skip').total, 10000);
+  });
   it('skip: שורה בלי עלות (גם לא נוכחית) יורדת מהסכום ונספרת ב-miss; עלות נוכחית לשורה ישנה בלי c', () => {
     assert.deepEqual(profitOf(ORD, new Map([['p2', 3]]), 'skip'), { total: 9500, cost: 2800, profit: 1700, miss: 1 });
   });
