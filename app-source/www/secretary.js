@@ -1303,7 +1303,7 @@ async function eyLoad(visit){if(X.eyb){X.eyQ=1;return}X.eyb=1;
  finally{X.eyb=0;if(X.eyQ){X.eyQ=0;eyLoad(false);return}if(cur().v==='sec'&&!typing())rerender()}}
 /* אחרי פעולה (אישור, "טופל", כלל חדש) – המידע הקיים נשאר על המסך ומתעדכן ברקע */
 function eyStale(){if(!X.ey||X.ey.err)X.ey=null;eyLoad(false)}
-const EYK={appr:'לאישור',draft:'טיוטה',note:'התראה',inv:'חשבונית',rem:'תזכורת'};
+const EYK={appr:'לאישור',media:'מהשיחה',draft:'טיוטה',note:'התראה',inv:'חשבונית',rem:'תזכורת'};
 const EYN=4,EYD=3;
 function eyGoA(x){const g=x.go||{};return ` data-tab="${esc(g.tab||'')}"${g.id?` data-id="${esc(g.id)}"`:''}${g.wa?` data-wa="${esc(g.wa)}"`:''}`}
 function eyRow(x,dn){const a=x.act,id=a&&esc(a.id);
@@ -1511,9 +1511,11 @@ function vidShrink(v,dur){return new Promise((ok,no)=>{/* הקטנה במכשי�
 /* ---------- כרטיסי "לסריקה" ו"פתח משימה" ---------- */
 const cardMsg=id=>(X.msgs||[]).concat(X.pc&&X.pc.L||[]).find(m=>(m.cards||[]).some(c=>c.id===id));
 const scMark=(id,mid,st)=>fnCall('secMedia',{op:'mark',mid,cid:id,st});
+/* כרטיס מדיה גם כשההודעה לא נטענה בשיחה – מתוך "מול העיניים" (act: k, id, mid, doc, txt, via) */
+const mdCard=id=>{const c=allCards().find(x=>x.id===id);if(c)return c;const a=((X.ey&&X.ey.open)||[]).map(x=>x.act).find(a=>a&&a.id===id&&(a.k==='scan'||a.k==='task'));return a?{id:a.id,k:a.k,doc:a.doc,txt:a.txt,eyVia:a.via}:null};
 ACT.secScNo=async el=>{const id=el.dataset.id,mid=el.dataset.mid||(cardMsg(id)||{}).id||'';el.disabled=true;
  try{await scMark(id,mid,'no');if(X.media)delete X.media[mid];doneSt(id,'no')}catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
-ACT.secScOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=allCards().find(x=>x.id===id),du=(X.media||{})[mid];
+ACT.secScOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=mdCard(id),du=(X.media||{})[mid];
  if(!c||!du)return toast(AGAIN);
  const z=c.doc==='z',sup=z?null:(cat('e_sup')&&!cat('e_sup').hid?cat('e_sup'):catsOf('exp').find(x=>x.beh==='sup'));
  if(z&&(typeof zcNew!=='function'||!V.zc))return toast('מסך סגירת הקופה לא זמין');
@@ -1523,17 +1525,18 @@ ACT.secScOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||
  delete X.media[mid];doneSt(id,'ok');
  if(z){if(!ZC)ZC=zcNew();const i=ZC.z.findIndex(x=>!x);ZC.z[i<0?0:i]=du;ZC.sent=0;go('zc')}
  else{openAdd({type:'exp',cat:sup.id});A.step='scan';A.pg=[du];A.hi=[du];A.fid=null;sheetDraw();ACT.scanGo()}};
-ACT.secTkOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=allCards().find(x=>x.id===id);
+ACT.secTkOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=mdCard(id);
  if(!c)return toast(AGAIN);const du=(X.media||{})[mid]||'',txt=String(c.txt||'').trim().slice(0,500);
- if(!du&&(!m||m.mvia!=='video'))return toast(AGAIN);
+ if(!du&&!(m&&m.mvia==='video')&&c.eyVia!=='video')return toast(AGAIN);
  if(!txt||typeof fsx!=='function'||typeof tkDue!=='function'||!isA())return toast('אי אפשר לפתוח משימה כאן');
- el.disabled=true;const now=Date.now(),tid=uid(),nm=fbBy();
+ /* מזהה המשימה נגזר מהכרטיס: אישור חוזר (למשל אחרי שהסימון בשרת נכשל) לא יוצר משימה שנייה – הקיימת מזוהה (409) */
+ el.disabled=true;const now=Date.now(),tid='sec'+String(id).replace(/[^A-Za-z0-9]/g,''),nm=fbBy();let dup=0;
  const fields={owner:sv(SY.uid),by:sv(nm),role:sv('a'),txt:sv(txt),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),open:sv('1'),pr:sv(''),img:sv(''),sub:iv(0),doneBy:sv(''),note:sv(''),ok:iv(0),late:sv(''),
   to:{arrayValue:{values:[sv(SY.uid)]}},toN:{arrayValue:{values:[sv(nm)]}},ow:sv(SY.uid),owN:sv(nm),clt:iv(now),np:iv(0),wp:iv(0),mi:iv(du?1:0)};/* המשימה משויכת למנהל עצמו (לא לכל הצוות) */
- try{await fsx('/tasks?documentId='+encodeURIComponent(tid),{method:'POST',body:JSON.stringify({fields})})}catch(e){el.disabled=false;return toast(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה')}
- if(du){try{await tkPutImg(tid,'m1',du)}catch(e){toast('המשימה נוצרה, אבל התמונה לא הועלתה');try{await tkPatch(tid,{mi:0})}catch(e2){}}}
+ try{await fsx('/tasks?documentId='+encodeURIComponent(tid),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e&&e.code===409)dup=1;else{el.disabled=false;return toast(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה')}}
+ if(du&&!dup){try{await tkPutImg(tid,'m1',du)}catch(e){toast('המשימה נוצרה, אבל התמונה לא הועלתה');try{await tkPatch(tid,{mi:0})}catch(e2){}}}
  try{await scMark(id,mid,'ok')}catch(e){}
- if(X.media)delete X.media[mid];doneSt(id,'ok');toast('✓ המשימה נוספה');try{await tkLoad()}catch(e){}
+ if(X.media)delete X.media[mid];doneSt(id,'ok');toast(dup?'✓ המשימה כבר נפתחה':'✓ המשימה נוספה');try{await tkLoad()}catch(e){}
  if(cur().v==='sec')rerender()};
 
 window.__sec=X;

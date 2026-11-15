@@ -418,7 +418,7 @@ function msgOut(id, x, text) {
   const o = { id, t: x.t || null, role: x.role === 'a' ? 'a' : 'u', text: text !== undefined ? text : typeof x.text === 'string' ? x.text : '' };
   if (x.sens === true) o.sens = true;
   if (Array.isArray(x.src)) o.src = x.src.slice(0, 12);
-  for (const k of ['asOf', 'mode', 'deep', 'stale', 'ideas', 'th', 'cards', 'via']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
+  for (const k of ['asOf', 'mode', 'deep', 'stale', 'ideas', 'th', 'cards', 'via', 'mvia']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
   return o;
 }
 

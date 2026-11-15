@@ -37,7 +37,7 @@ async function open(browser, www, media, opt) {
     if (n === 'secMedia') {
       if (body.op === 'stt') return R.sttErr ? route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: R.sttErr, details: { reason: 'media-off' } } }) }) : ok({ ok: true, text: R.stt });
       if (body.op === 'see') return ok(R.see || { ok: true, id: 'img1', reply: 'זו חשבונית.', cards: [], pct: 12, saving: false });
-      if (body.op === 'mark') return ok({ ok: true });
+      if (body.op === 'mark') return R.markFail ? route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { message: 'x', status: 'INTERNAL' } }) }) : ok({ ok: true });
     }
     if (n === 'secChat') return ok({ ok: true, id: 'a1', reply: 'ענו: ' + body.text, mode: 'ok', src: [], cards: [], pct: 11, saving: false });
     return ok({});
@@ -160,6 +160,23 @@ const fakeMic = (page, deny) => page.evaluate((d) => {
     await page.evaluate(() => { window.__sec.ey = { open: [{ id: 'e1', k: 'appr', title: 'מסמך לסריקה', sub: 'חשבונית', act: { k: 'scan', id: 'sc9', mid: 'img9' } }], did: [], hold: [], since: Date.now() }; rerender(); });
     await H.settle(page, 400);
     check('"מול העיניים": כרטיס scan פתוח עם כפתורי לסריקה/בטל', !!(await page.$('#secEyOpen [data-a=secScOk][data-id=sc9][data-mid=img9]')) && !!(await page.$('#secEyOpen [data-a=secScNo][data-id=sc9]')));
+    // "מול העיניים": כרטיס משימה מסרטון (ההודעה לא נטענה בשיחה) – נפתח מהשורה; אישור חוזר אחרי שהסימון נכשל לא משכפל משימה
+    const posts = [];
+    await o.ctx.route(/:8080\/.*\/tasks\?documentId=/, async (route) => {
+      const id = new URL(route.request().url()).searchParams.get('documentId'); const dup = posts.some((x) => x.id === id && x.st === 200);
+      posts.push({ id, st: dup ? 409 : 200, body: route.request().postData() || '' });
+      if (dup) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 409, message: 'Document already exists', status: 'ALREADY_EXISTS' } }) });
+      return route.fallback();
+    });
+    const eyTk = () => page.evaluate(() => { window.__sec.ey = { open: [{ id: 'md:tk7', k: 'media', title: 'לפתוח משימה? לבדוק את המקרר', act: { k: 'task', id: 'tk7', mid: 'vid7', txt: 'לבדוק את המקרר', via: 'video' }, r: { k: 'chat', id: 'vid7' } }], did: [], hold: [], since: Date.now() }; window.__toasts.length = 0; rerender(); });
+    o.R.markFail = true; await eyTk(); await H.settle(page, 300);
+    check('"מול העיניים": שורת משימה מהשיחה עם "פתח משימה"', !!(await page.$('#secEyOpen [data-a=secTkOk][data-id=tk7][data-mid=vid7]')) && /מהשיחה/.test(await txt(page, '#secEyOpen')));
+    await page.click('#secEyOpen [data-a=secTkOk][data-id=tk7]'); await H.settle(page, 900);
+    await eyTk(); await H.settle(page, 300);
+    o.R.markFail = false;
+    await page.click('#secEyOpen [data-a=secTkOk][data-id=tk7]'); await H.settle(page, 900);
+    const p7 = posts.filter((x) => x.id === 'sectk7');
+    check('אישור חוזר: אותו מזהה משימה (נגזר מהכרטיס), השני נענה 409 ולא נוצרה משימה שנייה; "המשימה כבר נפתחה" ו-mark ok', p7.length === 2 && p7[0].st === 200 && p7[1].st === 409 && JSON.parse(p7[0].body).fields.txt.stringValue === 'לבדוק את המקרר' && JSON.parse(p7[0].body).fields.mi.integerValue === '0' && /כבר נפתחה/.test(await toasts(page)) && !!last(o.bodies, 'secMedia', (b) => b.op === 'mark' && b.cid === 'tk7' && b.st === 'ok'), posts);
     // --- תמונות כבויות / סרטון כבוי / קול כבוי ---
     await ctxClose(o);
   }

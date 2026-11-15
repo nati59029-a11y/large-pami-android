@@ -332,6 +332,36 @@ describe('שלב 2: op:"mark" ו-secMediaClean', () => {
     assert.equal((await call(M2, { op: 'mark', mid: r.r.id, cid: tk.id, st: 'ok' })).reason, 'no-card');
     assert.ok((await coll(`b/${A}/sec_log`)).some((x) => x.act === 'mediaCard' && x.note === 'scan:ok'));
   });
+  it('"מול העיניים": כרטיסי מדיה פתוחים מוצגים (mc), נעלמים אחרי הכרעה; הודעה מלפני יותר מ-24 שעות – לא מוצגת', async () => {
+    const LC = require('../functions/secretary-learn.js')._core;
+    const eyes = async () => (await LC.call.secLearn(req(M1, { op: 'eyes' }))).open.filter((x) => x.k === 'media');
+    SEE = { cls: 'inv', conf: 0.9, reply: 'חשבונית.', task: 'לבדוק את הסכום' };
+    const r = await call(M1, { op: 'see', kind: 'image', b64: b64(F.jpg()) });
+    const [sc, tk] = r.r.cards;
+    assert.equal((await get(`b/${A}/sec_chat/${M1}/m/${r.r.id}`)).mc, true);
+    let ey = await eyes();
+    assert.deepEqual(ey.map((x) => x.act.k).sort(), ['scan', 'task']);
+    const es = ey.find((x) => x.act.k === 'scan'), et = ey.find((x) => x.act.k === 'task');
+    assert.equal(es.title, 'חשבונית מחכה לסריקה'); assert.deepEqual(es.act, { k: 'scan', id: sc.id, mid: r.r.id, doc: 'inv', via: 'image' });
+    assert.match(et.title, /^לפתוח משימה\? לבדוק את הסכום/); assert.equal(et.act.txt, 'לבדוק את הסכום'); assert.equal(et.act.mid, r.r.id);
+    assert.deepEqual(es.r, { k: 'chat', id: r.r.id });
+    // מנהל אחר לא רואה
+    assert.equal((await LC.call.secLearn(req(M2, { op: 'eyes' }))).open.filter((x) => x.k === 'media').length, 0);
+    await call(M1, { op: 'mark', mid: r.r.id, cid: sc.id, st: 'ok' });
+    ey = await eyes();
+    assert.deepEqual(ey.map((x) => x.act.k), ['task']);
+    assert.equal((await get(`b/${A}/sec_chat/${M1}/m/${r.r.id}`)).mc, true);
+    await call(M1, { op: 'mark', mid: r.r.id, cid: tk.id, st: 'no' });
+    assert.equal((await get(`b/${A}/sec_chat/${M1}/m/${r.r.id}`)).mc, false);
+    assert.equal((await eyes()).length, 0);
+    // סרטון: כרטיס משימה עם via video; הודעה ישנה (25 שעות) – לא מוצגת
+    await put(`b/${A}/sec_chat/${M1}/m/old1`, { t: Date.now() - 25 * 3600e3, role: 'a', text: 'x', mvia: 'image', mc: true, cards: [{ id: 'tk0123456789abcdef', k: 'task', txt: 'ישן' }] });
+    await put(`b/${A}/sec_chat/${M1}/m/v1`, { t: Date.now() - 3600e3, role: 'a', text: 'x', mvia: 'video', mc: true, cards: [{ id: 'tkfedcba9876543210', k: 'task', txt: 'מהסרטון' }] });
+    ey = await eyes();
+    assert.equal(ey.length, 1); assert.equal(ey[0].act.via, 'video'); assert.equal(ey[0].act.txt, 'מהסרטון');
+    // תשובה לתמונה נטענת עם mvia (משימה מסרטון אחרי טעינה מחדש)
+    assert.equal((await http('secChatLoad', M1, {})).result.msgs.find((x) => x.id === 'v1').mvia, 'video');
+  });
   it('הניקוי: קובץ בן 5 דקות נשאר, בן 21 דקות נמחק (legacy ו-b/<עסק>); קבצים מחוץ ל-sec_tmp לא נמחקים', async () => {
     const pa = await upload(`b/${A}/sec_tmp/${M1}/cleanAAAA01.webm`, F.webm(2));
     const pl = await upload(`sec_tmp/${M1}/cleanLLLL01.webm`, F.webm(2));
