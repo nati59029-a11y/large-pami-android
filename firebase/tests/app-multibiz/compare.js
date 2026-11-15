@@ -37,6 +37,13 @@ if (mode === 'legacy') {
   let rpN = 0, rpA = 0; for (let i = B2.length - 1; i >= 0; i--) if (rpQ(B2[i])) { rpN++; B2.splice(i, 1); }
   for (let i = A.length - 1; i >= 0; i--) if (rpQ(A[i])) { rpA++; A.splice(i, 1); }
   console.log(`בקשות/פרטיות – שאילתות על rq ו-ptk: main ${rpA}, ענף ${rpN}`);
+  /* תלוי בזמן (14.11.2026, נקודת שמירה 1 של store3d): שאילתת site_income_daily (נשלחת רק אם המנהל כבר מזוהה ברגע הקריאה) ושאילתת fb (מיקומה ברצף משתנה
+     לפי תזמון המשיכות ברקע) מופיעות או חסרות, ובסדר שונה, גם בין שתי ריצות של main מול main (הוכח בהרצה כפולה). חריג צר: רק POST :runQuery על שני האוספים האלה,
+     מוצאים משני הצדדים (הספירה מודפסת). כל שאר הבקשות – אותו סדר ואותו גוף כמו קודם */
+  const tdQ = (r) => { try { return r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && ['site_income_daily', 'fb'].includes(JSON.parse(r.body).structuredQuery.from[0].collectionId); } catch (e) { return false; } };
+  let tdA = 0, tdB = 0; for (let i = B2.length - 1; i >= 0; i--) if (tdQ(B2[i])) { tdB++; B2.splice(i, 1); }
+  for (let i = A.length - 1; i >= 0; i--) if (tdQ(A[i])) { tdA++; A.splice(i, 1); }
+  console.log(`תלוי בזמן – שאילתות על site_income_daily ו-fb: main ${tdA}, ענף ${tdB}`);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');

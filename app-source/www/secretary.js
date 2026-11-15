@@ -515,13 +515,19 @@ ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disab
 const PN={done:0,ready:0};
 async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
  const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;
- await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW()))window.fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
- await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k!=='sec'||!isA())return;X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
+ await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW()))fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
+ await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}if(d.k!=='sec'||!isA())return;X.tab='notes';X.nl=null;try{go('sec')}catch(e){}});
  let p=await P.checkPermissions();
  if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
   if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
  if(p.receive==='granted')await P.register()}catch(e){}}
 window.secPushBoot=()=>{try{pushReg()}catch(e){}};
+/* 15.11.2026 (סריקת חנות, שלב 12): בקשת הרשאה בכניסה לתכונה (החלטת המשתמש) – גם לעובד, שעד עכשיו לא התבקש, ולכן באנדרואיד 13+ לא קיבל
+   התראות על סבב חדש, תזכורת, איחור ומשימת תיקון. פעם אחת בטלפון (אותו סימון כמו אצל מנהל). store3d קורא לזה דרך עטיפה ב-index.html. */
+async function pushAsk(){if(PN.asking)return;PN.asking=1;try{if(!(isA()||isW()))return;let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}if(asked)return;
+ if(!PN.done)await pushReg();if(!PN.ready)return;const P=window.Capacitor.Plugins.PushNotifications;let p=await P.checkPermissions();
+ if(p.receive==='prompt'||p.receive==='prompt-with-rationale'){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions();if(p.receive==='granted')await P.register()}}catch(e){}finally{PN.asking=0}}
+window.secPushAsk=()=>{try{pushAsk()}catch(e){}};
 window.secPushOff=()=>{try{const P=PN.ready&&window.Capacitor&&window.Capacitor.Plugins.PushNotifications;if(P){P.removeAllListeners().catch(()=>{});P.unregister().catch(()=>{})}PN.done=0;PN.ready=0}catch(e){}};
 try{if(isA()||isW())setTimeout(window.secPushBoot,0)}catch(e){}
 {const r0=V.sec;V.sec=()=>{const r=r0();try{if(ready())pushReg()}catch(e){}return r}}

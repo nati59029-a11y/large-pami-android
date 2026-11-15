@@ -1,5 +1,7 @@
 const fs=require('fs'),path=require('path');
 fs.copyFileSync('node_modules/xlsx/dist/xlsx.full.min.js','www/xlsx.full.min.js');
+// store3d-dev (דפי בדיקה למפתחים) לא נכנס לאפליקציה: נמחק רק בעותק של הבנייה (app/), לא ב-app-source.
+if(!/[\\/]app-source$/.test(process.cwd()))fs.rmSync('www/store3d-dev',{recursive:true,force:true});
 // לשונית "הזמנות אתר" (שלב 1): לאיזה שרת היא מחוברת. ברירת המחדל וכל בנייה מ-main: כבויה ('off').
 {const v=process.env.SITE_BACKEND||'',isMain=process.env.GITHUB_REF==='refs/heads/main',sb=!isMain&&['emulator','test'].includes(v)?v:'off';
  if(sb==='test'&&/[\\/]app-source$/.test(process.cwd()))throw new Error('SITE_BACKEND=test: run prepare.js in the build copy (app/), not in app-source');

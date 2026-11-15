@@ -599,3 +599,46 @@ describe('השיחה נשמרת רק דרך השרת, ונקראת דרך secCha
     for (const [fn, data] of [['secChat', { text: 'היי' }], ['secChatLoad', {}], ['secMirrorPut', { fin: FIN() }], ['secPrefs', { op: 'mirror', on: true }]]) assert.equal((await call(fn, M1, data)).reason, 'no-consent', fn);
   });
 });
+
+describe('שלב 13ב (סריקת חנות): סיכום הסבבים בהקשר של secChat', () => {
+  const RUNA = 'r1a2b3c4_20261101', RUNB = 'r5t6y7u8_20261102';
+  const SUM = (score) => ({ score, nOk: 5, nIss: 3, nRev: 0, nMiss: 0, nBad: 0, cat: { p: 55, h: 90, o: 90, d: 90 }, prev: '', dScore: 0 });
+  async function s3seed(on) {
+    await seed();
+    await prep(async (d) => {
+      await d.doc('b/' + A).update({ 'features.store3d': on });
+      await d.doc(`b/${A}/srun/${RUNA}`).set({ br: 'b1', map: 's-b1', st: 'done', k: 'sched', uids: [E1], doneAt: NOW - 864e5, sum: SUM(78) });
+      await d.doc(`b/${A}/srun/${RUNB}`).set({ br: 'b2', map: 's-b2', st: 'done', k: 'sched', uids: [E1], doneAt: NOW - 2 * 864e5, sum: SUM(64) });
+      await d.doc(`b/${B}/srun/${RUNA}`).set({ br: 'b1', map: 's-b1', st: 'done', k: 'sched', uids: ['x_emp_b'], doneAt: NOW - 864e5, sum: SUM(33) });
+    });
+    GM.reset();
+    GM.state.sec = () => ({ text: 'הציון האחרון הוא 78.' });
+  }
+  const sys = () => secReqs()[0].body.systemInstruction.parts[0].text;
+  it('תוספת פעילה: מנהל מקבל את כל הסניפים של העסק שלו (לא של עסק אחר); המספר מהסיכום מקבל מקור ולא מסומן "לא אומת"', async () => {
+    await s3seed(true);
+    const r = await call('secChat', M1, { text: 'מה המצב בסריקת החנות?', fin: FIN() });
+    assert.equal(r.status, 'OK', r.text);
+    assert.match(sys(), /ציון 78 מתוך 100/); assert.match(sys(), /ציון 64 מתוך 100/);
+    assert.ok(!sys().includes('ציון 33'), 'בלי נתונים של עסק אחר');
+    assert.ok(!sys().includes(E1), 'בלי מזהי עובדים');
+    assert.ok(r.result.reply.includes('78 [') && !r.result.reply.includes('לא אומת'), r.result.reply);
+    assert.ok(r.result.src.some((x) => x.k === 'store3d'));
+    assert.equal((await call('secChat', E1, { text: 'מה הציון שלי?' })).reason, 'not-manager', 'עובד – המזכירה חסומה (אין לו הקשר)');
+  });
+  it('מנהל עם הגבלת סניפים – רק הסניף שלו', async () => {
+    await s3seed(true);
+    await prep((d) => d.doc(`b/${A}/admins/${M1}`).set({ email: 'x', br: ['b1'] }));
+    const r = await call('secChat', M1, { text: 'מה המצב בסריקת החנות?' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.match(sys(), /בסניפים שלך/); assert.match(sys(), /ציון 78/);
+    assert.ok(!sys().includes('ציון 64') && !sys().includes('סניף b2'), sys());
+  });
+  it('תוספת כבויה – אין בלוק סריקה בהקשר', async () => {
+    await s3seed(false);
+    const r = await call('secChat', M1, { text: 'מה המצב בסריקת החנות?', fin: FIN() });
+    assert.equal(r.status, 'OK', r.text);
+    assert.ok(!sys().includes('סריקת חנות'), 'אין בלוק');
+    assert.ok(r.result.reply.includes('לא אומת'), 'בלי הסיכום – המספר לא מאומת');
+  });
+});

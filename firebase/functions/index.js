@@ -8,6 +8,10 @@
 //   publishLineItem, getLineState (עובד/מנהל), removeLineItem, listLineFiles (מנהל) – תוכן שלוחות הקו (yemot-line.js).
 //   previewVoice (עובד/מנהל) – "שמע קודם" בקול המשוכפל (ElevenLabs, yemot-line.js + lib/voice.js).
 //   recurringTasks (מתוזמנת, לא נקראת ממשתמש) – משימות קבועות (recurring.js).
+//   s3Rounds (מתוזמנת), s3Run, s3Move, s3Log, s3View – סבבי סריקת חנות בתלת מימד (store3d.js).
+//   s3SaveMap, s3SetBranch (מנהל־על), s3PutTex – המפה של סריקת החנות: שמירה עם נעילה וגרסאות, הגדרות סניף, טקסטורות (store3d-map.js).
+//   shelfCheck, mapDraft – בדיקת מדף וטיוטת מפה דרך Gemini, עם מכסה חודשית לסניף (store3d-ai.js).
+//   s3Fix, s3Clean – משימות תיקון, ניקוי יומי וביצועי עובדים (store3d-extra.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
 const { HttpsError } = require('firebase-functions/v2/https');
@@ -236,6 +240,19 @@ Object.assign(exports, require('./secretary-inv'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));
+
+// סריקת חנות בתלת מימד – שלב 5 (14.11.2026): s3Rounds (מתוזמנת כל 5 דקות – פתיחת סבבים, תזכורות, איחור, העברה למחליף),
+// s3Run (פתיחה ידנית/ביטול – מנהל), s3Move (העברה/לקיחה), s3Log (אירועי זמן), s3View (מה עובד רואה). store3d.js + lib/store3d-core.js
+Object.assign(exports, require('./store3d'));
+// שלב 5ב (14.11.2026): s3SaveMap (מנהל / s3m; נעילה לפי baseV, גרסאות, 30 אחרונות), s3SetBranch (מנהל־על, audit), s3PutTex (טקסטורה ל-Storage).
+// store3d-map.js + lib/store3d-map.js
+Object.assign(exports, require('./store3d-map'));
+// שלב 8 (14.11.2026): shelfCheck (בדיקת מדף – עובד אחראי בסבב / דיווח יזום), mapDraft (טיוטת מפה – מנהל / s3m). Gemini, מכסה חודשית לסניף
+// (s3use, אזהרה ב-80%) ובלם יומי לעובד, החזרה בכשל, תמונה עם אדם לא נשמרת. store3d-ai.js + lib/store3d-ai.js
+Object.assign(exports, require('./store3d-ai'));
+// שלב 10 (14.11.2026): s3Fix (משימת תיקון ידנית / ביטול / הכרעה – מנהל), s3Clean (מתוזמנת יומית: סל מחזור אחרי 30 יום, 3 סבבים אחרונים
+// של תמונות לכל מקום, טקסטורות יתומות, ביצועי עובדים). סיום סבב (ציון, חוסרים, משימות תיקון) וערעורים – store3d-extra.js + lib/store3d-extra.js
+Object.assign(exports, require('./store3d-extra'));
 
 // אפליקציה עם סמל העסק – בנייה מיידית (12.11.2026): requestBizApk – מנהל־על בלבד, מפעיל את build-biz-apks ב-GitHub (biz-apk.js)
 Object.assign(exports, require('./biz-apk'));
