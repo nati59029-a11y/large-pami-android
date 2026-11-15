@@ -20,7 +20,7 @@ const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 /* ספי פתיחה – (לא מאומת) – לכוונון אחרי בדיקה בטלפון */
 const FOV_DEF=65/* צלע ארוכה, מצלמה ראשית רגילה */,OVERLAP=.3,AIM_TOL=5,STAB_MS=300,STAB_DEG=1.2,FRAME_MAX=1280,
   /* ערבוב צר: רוחב רצועת המעבר סביב קו התפר (מעלות). יישור עדין: טווח חיפוש (מעלות), רזולוציית החפיפה (מעלות לפיקסל), גודל ההקטנה לניתוח */
-  BLEND_DEG=1.5,AL_MAX=3,AL_RES=.25,AL_SM=400,
+  BLEND_DEG=1.5,AL_MAX=5/* היה 3: בחומר אמיתי (חניון 1814) רוב הזוגות נפלו על קצה הטווח */,AL_RES=.25,AL_SM=400,
   /* תזוזה של הטלפון (לא רק סיבוב): תאוצה ליניארית ממוצעת (מ'/ש²) שמעליה מוצגת אזהרה */
   MOVE_ACC=1.3,
   FULL_MAX=2500000,SM_MAX=150000,FOV_KEY='lp-s3pc-fovL',
@@ -135,6 +135,24 @@ function estFov(frames,def,yawRef){
  for(let f=best-2;f<=best+2+1e-9;f+=.5){const s=score(f);if(s<bs){bs=s;best=f}}
  return{fovL:best,score:bs,base}}
 
+/* כיול שדה ראייה לפי ההזזה בין זוגות שכנים (שלב 18, חומר אמיתי): שדה ראייה שגוי מזיז את התוכן בכל זוג לאותו כיוון – לאורך הקו בין שני הפריימים –
+   וההזזות לא מתקזזות סביב המעגל (בניגוד לסטיית חיישן). מודדים את החציון של ההזזה הזו בכמה ערכים, ומוצאים בקו ישר את הערך שבו היא אפס.
+   frames כמו ב-estFov. מחזיר {fovL, sh:[[fov,חציון במעלות]...], n} או null. */
+function estFovShift(frames,def){
+ if(!frames||frames.length<3)return null;const G=frames.map(fr=>fr.g||grayOf(fr.data,fr.w,fr.h)),fw=frames.map(fr=>camFwd(fr.q));
+ const P=[];for(let i=0;i<frames.length;i++)for(let j=i+1;j<frames.length;j++){const a=angDir(fw[i],fw[j]);/* רק שכנים באותה שורה: בין שורות ההזזה מוטה (תקרה/רצפה קרובות – פרלקסה) */if(a>8&&a<.75*def&&Math.abs(fw[i][2]-fw[j][2])<.2)P.push([i,j])}
+ {const Hz=P.filter(([i,j])=>Math.abs(fw[i][2])<.35&&Math.abs(fw[j][2])<.35);/* עדיפות לשורת האופק – הכי רחוקה מהתקרה והרצפה */if(Hz.length>=5)P.splice(0,P.length,...Hz)}
+ if(P.length<3)return null;
+ const med=fovL=>{const F=frames.map((fr,k)=>{const c=fovOf(fovL,fr.w,fr.h);return{g:G[k],w:fr.w,h:fr.h,f:c.f,m:qToMat(fr.q)}}),v=[];
+  for(const[i,j]of P){const c=nrm([fw[i][0]+fw[j][0],fw[i][1]+fw[j][1],fw[i][2]+fw[j][2]]),r=alPair(F[i],F[j],c,{max:8,res:.4,n:40});if(!r||r.ncc<.6)continue;
+   const t=[fw[j][0]-fw[i][0],fw[j][1]-fw[i][1],fw[j][2]-fw[i][2]],t1=t[0]*r.e1[0]+t[1]*r.e1[1]+t[2]*r.e1[2],t2=t[0]*r.e2[0]+t[1]*r.e2[1]+t[2]*r.e2[2],tn=Math.hypot(t1,t2)||1;
+   v.push((r.s[0]*t1+r.s[1]*t2)/tn/D)}
+  if(v.length<3)return null;v.sort((a,b)=>a-b);const q=Math.floor(v.length/4),mid=v.slice(q,v.length-q)/* ממוצע של החצי האמצעי */;return{m:mid.reduce((x,y)=>x+y,0)/mid.length,n:v.length}};
+ const sh=[],lo=def*.75,hi=Math.min(110,def*1.35);let a=def-3,b=def+3,ma=med(a),mb=med(b);if(!ma||!mb)return null;sh.push([a,ma.m],[b,mb.m]);
+ for(let it=0;it<3;it++){const k=(mb.m-ma.m)/(b-a);if(!(Math.abs(k)>1e-3))return null;const z=clamp(a-ma.m/k,lo,hi),mz=med(z);if(!mz)break;sh.push([z,mz.m]);
+  if(Math.abs(mz.m)<.15)return{fovL:z,sh,n:mz.n};if(Math.abs(z-a)<Math.abs(z-b)){b=z;mb=mz}else{a=z;ma=mz}}
+ const best=sh.reduce((x,y)=>Math.abs(y[1])<Math.abs(x[1])?y:x);return Math.abs(best[1])<.6?{fovL:best[0],sh,n:P.length}:null}
+
 /* ---------------- יישור עדין אחרי הצילום ----------------
    החיישן סוטה מעט בין פריימים, ולכן אותו עצם נופל בשני פריימים חופפים במקומות קצת שונים. לכל זוג חופף: מקרינים את שניהם לרשת קטנה
    באזור החפיפה (AL_RES מעלות לפיקסל, אפור, מטושטש מעט), ומחפשים (גס ואז עדין) הזזה של עד AL_MAX מעלות שממקסמת התאמה (NCC) של הגרדיאנטים
@@ -245,7 +263,7 @@ function vidRadii(T){const ds=T.map(t=>dirOf(t.yaw,t.pitch));return ds.map((d,i)
 function vidPick(fwd,TD,R,best,sharp){const out=[];for(let i=0;i<TD.length;i++){const a=angDir(fwd,TD[i]);if(a>=R[i])continue;
   const s=sharp*(1-.6*(a/R[i])**2);if(!best[i]||s>best[i].s)out.push({i,s,a})}return out}
 
-const M={qMul,qNorm,qAxis,oriToQuat,qToMat,qAngle,camFwd,dirOf,yawPitch,wrap180,angDir,fovOf,fovLongOf,pickTargets,projToFrame,eqDir,eqToFrame,footprint,makePano,estFov,qSlerp,oriAt,angSpeed,lapVar,vidRadii,vidPick,qFromVec,grayOf,alPatch,alPair,align,crc32,zipStore,
+const M={qMul,qNorm,qAxis,oriToQuat,qToMat,qAngle,camFwd,dirOf,yawPitch,wrap180,angDir,fovOf,fovLongOf,pickTargets,projToFrame,eqDir,eqToFrame,footprint,makePano,estFov,estFovShift,qSlerp,oriAt,angSpeed,lapVar,vidRadii,vidPick,qFromVec,grayOf,alPatch,alPair,align,crc32,zipStore,
   C:{FOV_DEF,OVERLAP,AIM_TOL,STAB_MS,STAB_DEG,FRAME_MAX,FULL_MAX,SM_MAX,VID_MS,VID_SPD,VID_SM,BLEND_DEG,AL_MAX,AL_RES,AL_SM,MOVE_ACC}};
 if(typeof document==='undefined')return{_m:M};
 
@@ -305,7 +323,7 @@ async function stitch(frames,o,onP){
  /* עותקים קטנים: לכיול שדה הראייה מהחפיפה ולמדידת הסטייה בין פריימים */
  const lo=[];for(const fr of frames){const d=await decodeBlob(fr.blob);try{const k=AL_SM/Math.max(d.w,d.h),w=Math.max(8,Math.round(d.w*k)),h=Math.max(8,Math.round(d.h*k));lo.push({data:pixels(d.src,w,h),w,h,q:fr.q})}finally{d.close()}}
  onP(.06);await tick();
- if(!o.fixedFov){cal=estFov(lo,fovL,yawRef);if(cal&&cal.score<cal.base*.92)fovL=cal.fovL;onP(.11);await tick()}
+ if(!o.fixedFov){cal=estFovShift(lo,fovL);if(cal)fovL=cal.fovL;else{cal=estFov(lo,fovL,yawRef);if(cal&&cal.score<cal.base*.92)fovL=cal.fovL}onP(.11);await tick()}
  /* יישור עדין; אם נכשל מכל סיבה – ממשיכים עם הכיוונים שנמדדו */
  let qs=frames.map(f=>f.q),al=null;
  if(!o.noAlign){try{al=align(lo,fovL);qs=al.qs}catch(e){al=null}}
@@ -445,7 +463,7 @@ function start(el,opts){
    const t0=Date.now();
    const r6=a=>a.map(x=>Math.round(x*1e6)/1e6);
    const keep=r=>{raw={frames:frames.map(f=>({blob:f.blob})),meta:{kind:'s3pano-raw',v:1,created:new Date().toISOString(),mode:S.mode==='video'?'video':'pts',n:frames.length,ua:navigator.userAgent||'',dev:mock?'mock':devName(),
-     screenAngle:screenAngle(),video:{w:S.cw,h:S.ch},fovL0:S.fovL,fixedFov:!!opts.fov,fovL:r?Math.round(r.fovL*100)/100:null,fovH:r?Math.round(r.fovH*100)/100:null,cal:r&&r.cal?{fovL:r.cal.fovL,score:r.cal.score,base:r.cal.base}:null,
+     screenAngle:screenAngle(),video:{w:S.cw,h:S.ch},fovL0:S.fovL,fixedFov:!!opts.fov,fovL:r?Math.round(r.fovL*100)/100:null,fovH:r?Math.round(r.fovH*100)/100:null,cal:r&&r.cal?{fovL:r.cal.fovL,score:r.cal.score,base:r.cal.base,sh:r.cal.sh,n:r.cal.n}:null,
      out:r?{w:r.w,h:r.h}:null,ok:!!r,ms:Date.now()-t0,blendDeg:BLEND_DEG,align:r&&r.al?{pairs:r.al.pairs,used:r.al.used,ms:r.al.ms,maxDeg:AL_MAX}:null,yawRef:frames[0].yaw,
      conv:'q=[w,x,y,z] מצלמה→עולם; עולם x=מזרח y=צפון z=למעלה (alpha יחסי); מצלמה x=ימין y=למעלה מבט ל-z-. qFix=סיבוב(fixDeg, וקטור בעולם, מעלות)·q',
      frames:frames.map((f,i)=>({file:'frame-'+String(i).padStart(2,'0')+'.jpg',w:f.w,h:f.h,ti:f.ti,t:f.t,yaw:Math.round(f.yaw*1000)/1000,q:r6(f.q),qFix:r&&r.qs?r6(r.qs[i]):null,fixDeg:r&&r.al?r.al.fix[i]:null}))}}};
