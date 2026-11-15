@@ -21,6 +21,15 @@ function bar(el,res,again,done){const b=document.createElement('div');
   mk('צילום חדש',again);
   /* באפליקציה (isNat) – תמיד, דרך outSave; בדפדפן – רק כשיש navigator.share עם קבצים */
   if(U.canShare&&U.canShare(res.full))mk('שיתוף התמונה',()=>U.shareJpg(res.full,'pano360.jpg'));
+  /* חומר גולמי (התמונות המקוריות + נתוני החיישן, zip) – לשיפור החיבור על צילום אמיתי. נשמר רק בזיכרון, של הצילום האחרון */
+  if(window.S3PanoCap&&typeof S3PanoCap.lastRaw==='function')mk('שליחת חומר גולמי',async()=>{try{
+    const z=await S3PanoCap.lastRaw();if(!z){if(typeof toast==='function')toast('אין חומר גולמי לצילום הזה');return}
+    const name='pano360-raw.zip';
+    if(typeof isNat==='function'&&isNat()&&typeof outSave==='function'){await outSave({name,data:new Uint8Array(await z.arrayBuffer()),mime:'application/zip'},'share');return}
+    const f=new File([z],name,{type:'application/zip'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:name});return}
+    const u=URL.createObjectURL(z),x=document.createElement('a');x.href=u;x.download=name;document.body.appendChild(x);x.click();x.remove();setTimeout(()=>URL.revokeObjectURL(u),5000);
+  }catch(e){if(!(e&&e.name==='AbortError')&&typeof toast==='function')toast('השליחה נכשלה: '+(e&&e.message||e))}});
   b.style.bottom='calc(70px + env(safe-area-inset-bottom,0px))';el.appendChild(b)}
 async function run(){if(busy)return;busy=true;const el=layer();let h=null;
   const close=()=>{if(closeCur!==close)return;closeCur=null;try{if(h)h.destroy()}catch(e){}try{S3PanoCap.close()}catch(e){}el.remove();busy=false};closeCur=close;
