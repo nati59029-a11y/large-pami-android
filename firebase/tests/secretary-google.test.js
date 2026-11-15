@@ -2497,6 +2497,110 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.ok(t3.includes('סה"כ פריטים במחיר לפני מע"מ: 70.00 ₪') && t3.includes('סה"כ פריטים במחיר כולל מע"מ: 10.00 ₪'), t3);
       assert.ok(!/סה"כ: 80/.test(t3) && !t3.includes('\nסה"כ: '), 'אין סה"כ מאוחד: ' + t3);
     });
+
+    // ---------- שלב ג/5: תשובת הלקוח לטיוטת ההזמנה ----------
+    let rq = 0;
+    const T0 = () => Date.now() - 600000;
+    const sentOrd = async (thr, lines, from) => {
+      const n = await go(from || 'Dana <dana@shop.example>', {}, { lines: lines || [{ txt: 'צלחת עמוקה', qty: 2 }], mail: { thread: thr, date: T0() } });
+      const s = await sec(M1, { op: 'ordSend', id: n, ver: 1 });
+      assert.ok(s.ok, JSON.stringify(s));
+      GO.addSent(BOX_A, thr, T0() + 1000); // טיוטת ההזמנה בשרשור (הדמה לא מוסיפה שליחה לשרשור)
+      return n;
+    };
+    const reply = async (thr, air, o) => {
+      AIR = Object.assign({ text: 'תודה רבה!', cls: 'order', qk: 'תשובה להזמנה', facts: [] }, air);
+      const m = await mail(Object.assign({ subject: 'Re: הזמנה ' + (++rq), text: 'תשובה', from: 'Dana <dana@shop.example>', thread: thr }, o || {}));
+      return { m, r: await work(m) };
+    };
+    const ords = async () => (await coll(`b/${A}/ord`)).filter((o) => o.src === 'mail');
+    const notes = async () => (await coll(`b/${A}/sec_note/${M1}/n`)).map((x) => x.body || '');
+
+    it('שלב ג/5: אישור מהשולח המקורי → הזמנה אחת + מייל אישור עם מספר הזמנה בשרשור; אישור כפול – בלי הזמנה ובלי מייל נוסף', async () => {
+      await ordSetup();
+      const n = await sentOrd('thr-c1');
+      assert.equal(GO.state.sent.length, 1);
+      const { m, r } = await reply('thr-c1', { reply: 'ok' });
+      assert.equal(r.ordRe.res, 'ordered', JSON.stringify(r)); assert.equal(r.ordRe.sent, true); assert.equal(r.aw, 'auto');
+      const L = await ords();
+      assert.equal(L.length, 1); assert.equal(L[0].status, 'new'); assert.equal(L[0].src, 'mail');
+      const v = await ordOf(n);
+      assert.equal(v.st, 'ordered'); assert.equal(v.ordId, L[0].id); assert.equal(v.cf.in, m); assert.ok(v.cf.gmid);
+      assert.equal(GO.state.sent.length, 2);
+      const s = GO.state.sent[1];
+      assert.ok(/^To: dana@shop\.example\r?$/m.test(s.raw)); assert.equal(s.threadId, 'thr-c1');
+      assert.ok(body(1).includes('מספר הזמנה: ' + L[0].no), body(1));
+      const d = await draftOf(m);
+      assert.equal(d.st, 'sent'); assert.equal(d.src, 'ord'); assert.equal(d.sentBy, 'auto');
+      assert.equal((await get(`b/${A}/sec_in/${m}`)).st, 'replied');
+      assert.ok((await notes()).some((b) => b.includes('נוצרה הזמנה מס׳ ' + L[0].no)), 'התראה למנהל');
+      // אישור נוסף – אין הזמנה שנייה, אין מייל, הטיוטה נשארת למנהל
+      const r2 = await reply('thr-c1', { reply: 'ok' });
+      assert.equal(r2.r.ordRe.why, 'dup'); assert.equal(r2.r.aw, 'draft');
+      assert.equal((await ords()).length, 1); assert.equal(GO.state.sent.length, 2);
+      assert.equal((await draftOf(r2.m)).st, 'pend');
+      assert.equal((await coll(`b/${A}/sec_ord`)).length, 1, 'תשובה בשרשור לא פותחת טיוטת הזמנה חדשה');
+    });
+
+    it('שלב ג/5: חסימות – שולח אחר / בלי אימות / "עצור הכל" / שורות לבירור / לא ברור / טיוטה שלא נשלחה → למנהל, בלי הזמנה ובלי שליחה', async () => {
+      await ordSetup();
+      const n = await sentOrd('thr-c2');
+      for (const [o, why] of [[{ from: 'Evil <evil@x.example>' }, 'from'], [{ noAuth: true }, 'from']]) {
+        const { r } = await reply('thr-c2', { reply: 'ok' }, o);
+        assert.equal(r.ordRe.why, why, JSON.stringify(r));
+      }
+      await sec(M1, { op: 'stop', on: true });
+      assert.equal((await reply('thr-c2', { reply: 'ok' })).r.ordRe.why, 'stop');
+      await sec(M1, { op: 'stop', on: false });
+      assert.equal((await reply('thr-c2', { reply: 'other' })).r.ordRe.why, 'other');
+      assert.equal((await reply('thr-c2', {})).r.ordRe.why, 'other', 'בלי reply – other');
+      // שולח אחר לא יכול לבטל או לשנות
+      assert.equal((await reply('thr-c2', { reply: 'cancel' }, { from: 'Evil <evil@x.example>' })).r.ordRe.why, 'from');
+      assert.equal((await ordOf(n)).st, 'sent');
+      // שורות לבחירה/לבירור
+      await sentOrd('thr-c3', L0);
+      assert.equal((await reply('thr-c3', { reply: 'ok' })).r.ordRe.why, 'ask');
+      // טיוטה שעוד לא נשלחה
+      await go('Dana <dana@shop.example>', {}, { lines: [{ txt: 'צלחת עמוקה', qty: 1 }], mail: { thread: 'thr-c4', date: T0() } });
+      assert.equal((await reply('thr-c4', { reply: 'ok' })).r.ordRe.why, 'st');
+      assert.equal((await ords()).length, 0); assert.equal(GO.state.sent.length, 2, 'רק שתי טיוטות ההזמנה נשלחו');
+      assert.equal((await coll(`b/${A}/sec_ord`)).length, 3);
+      assert.ok((await logs(A)).some((l) => l.act === 'ordRe' && /from/.test(l.note)));
+    });
+
+    it('שלב ג/5: שינוי → גרסה חדשה למנהל (מחושבת מהקטלוג) ושליחה חוזרת בשרשור; ביטול; שינוי/ביטול בהזמנה קיימת → למנהל בלבד', async () => {
+      await ordSetup();
+      const n = await sentOrd('thr-c5');
+      const { m, r } = await reply('thr-c5', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 5 }] } });
+      assert.equal(r.ordRe.res, 'chg', JSON.stringify(r));
+      let v = await ordOf(n);
+      assert.equal(v.st, 'mgr'); assert.equal(v.ver, 2); assert.equal(v.total, 5000); assert.equal(v.lines[0].qty, 5);
+      assert.equal(v.prev.ver, 1); assert.equal(v.chg.in, m); assert.equal(v.gmid, undefined);
+      assert.equal((await ords()).length, 0);
+      assert.ok((await notes()).some((b) => b.includes('ביקש שינוי')));
+      const s2 = await sec(M1, { op: 'ordSend', id: n, ver: 2 });
+      assert.ok(s2.ok, JSON.stringify(s2));
+      const mid = (await get(`b/${A}/sec_in/${m}`)).mid;
+      const raw2 = GO.state.sent[GO.state.sent.length - 1].raw;
+      assert.ok(raw2.includes('In-Reply-To: ' + mid), 'תשובה למייל השינוי');
+      assert.equal((await get(`b/${A}/sec_in/${m}`)).st, 'replied');
+      assert.equal((await draftOf(m)).st, 'done');
+      // ביטול
+      assert.equal((await reply('thr-c5', { reply: 'cancel' })).r.ordRe.res, 'cancel');
+      v = await ordOf(n);
+      assert.equal(v.st, 'cancel');
+      assert.equal((await sec(M1, { op: 'ordSend', id: n, ver: 2 })).reason, 'not-pending');
+      assert.equal((await reply('thr-c5', { reply: 'ok' })).r.ordRe.why, 'st');
+      assert.equal((await ords()).length, 0);
+      // הזמנה שכבר נוצרה – שינוי/ביטול לא משנים אותה
+      const n6 = await sentOrd('thr-c6');
+      assert.equal((await reply('thr-c6', { reply: 'ok' })).r.ordRe.res, 'ordered');
+      for (const a of ['cancel', 'change']) assert.equal((await reply('thr-c6', { reply: a, order: { lines: [{ txt: 'צלחת עמוקה', qty: 9 }] } })).r.ordRe.why, 'ordered');
+      const o6 = await ordOf(n6);
+      assert.equal(o6.st, 'ordered'); assert.equal(o6.ver, 1);
+      const L = await ords();
+      assert.equal(L.length, 1); assert.equal(L[0].status, 'new');
+    });
   });
 
 });
