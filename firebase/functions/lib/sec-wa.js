@@ -218,17 +218,51 @@ async function gfetch(url, opt, timeoutMs) {
   try { return await fetch(url, Object.assign({}, opt, { signal: ctl.signal, redirect: 'error' })); } catch (e) { throw waErr(e && e.name === 'AbortError' ? 'wa-timeout' : 'wa-network'); } finally { clearTimeout(tm); }
 }
 // payload: { text } או { tpl: { name, lang } }. מחזיר { wamid }
+// תוספת (14.11.2026, מסמכים – שלב 3): tpl.params (פרמטרים לגוף התבנית) ו-tpl.doc { link, filename } (כותרת מסמך),
+// ו-{ doc: { link, filename, caption } } – הודעת מסמך בתוך חלון 24 השעות. בלי השדות החדשים – בדיוק כמו קודם.
 async function send(token, pnid, to, payload) {
   if (!token) throw new HttpsError('failed-precondition', 'ווצאפ לא מחובר בשרת', { reason: 'no-wa-token' });
   if (!/^\d{5,25}$/.test(String(pnid)) || !waNum(to)) throw new HttpsError('invalid-argument', 'נמען לא תקין', { reason: 'bad-to' });
   const body = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to) };
-  if (payload.tpl) Object.assign(body, { type: 'template', template: { name: payload.tpl.name, language: { code: payload.tpl.lang || 'he' } } });
+  if (payload.tpl) {
+    Object.assign(body, { type: 'template', template: { name: payload.tpl.name, language: { code: payload.tpl.lang || 'he' } } });
+    const comps = tplComps(payload.tpl);
+    if (comps.length) body.template.components = comps;
+  } else if (payload.doc) Object.assign(body, { type: 'document', document: docOf(payload.doc, true) });
   else Object.assign(body, { type: 'text', text: { body: String(payload.text).slice(0, DRAFT_MAX), preview_url: false } });
   const r = await gfetch(`${baseOf()}/${verOf()}/${pnid}/messages`, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) { try { await r.arrayBuffer(); } catch (e) { /* */ } throw waErr(r.status === 429 ? 'wa-quota' : 'wa-rejected', r.status); } // בלי גוף השגיאה (עלול להכיל פרטים)
   let j = null; try { j = await r.json(); } catch (e) { j = null; }
   const id = j && Array.isArray(j.messages) && j.messages[0] && typeof j.messages[0].id === 'string' ? j.messages[0].id.slice(0, 300) : '';
   return { wamid: id };
+}
+// ---------- מסמך בהודעה (תוספת, 14.11.2026) ----------
+// קישור למסמך: רק https (ובאמולטור – רק http://127.0.0.1/localhost), בלי שם משתמש/סיסמה. Meta מורידה את הקובץ מהקישור.
+const DOC_PARAMS = 10, PARAM_MAX = 1000, FNAME_MAX = 120, CAPTION_MAX = 1000;
+function docLinkOk(u) {
+  let x; try { x = new URL(String(u || '')); } catch (e) { return false; }
+  if (x.username || x.password || String(u).length > 2000) return false;
+  if (process.env.FUNCTIONS_EMULATOR === 'true') return x.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(x.hostname);
+  return x.protocol === 'https:';
+}
+// פרמטר בתבנית: Meta לא מקבלת שורה חדשה, טאב או יותר מ-4 רווחים ברצף (לא מאומת מול השירות האמיתי) – מנקים
+const paramTxt = (v) => String(v == null ? '' : v).replace(CTRL, '').replace(/[\r\n\t]+/g, ' ').replace(/ {4,}/g, '   ').trim().slice(0, PARAM_MAX);
+function docOf(d, withCaption) {
+  if (!d || !docLinkOk(d.link)) throw new HttpsError('invalid-argument', 'קישור המסמך לא תקין', { reason: 'bad-doc-link' });
+  const o = { link: String(d.link) };
+  const fn = paramTxt(d.filename).replace(/[\\/]/g, '-').slice(0, FNAME_MAX);
+  if (fn) o.filename = fn;
+  if (withCaption && d.caption) o.caption = String(d.caption).replace(CTRL, '').slice(0, CAPTION_MAX);
+  return o;
+}
+function tplComps(tpl) {
+  const comps = [];
+  if (tpl.doc) comps.push({ type: 'header', parameters: [{ type: 'document', document: docOf(tpl.doc, false) }] });
+  if (Array.isArray(tpl.params) && tpl.params.length) {
+    if (tpl.params.length > DOC_PARAMS) throw new HttpsError('invalid-argument', 'יותר מדי פרמטרים בתבנית', { reason: 'bad-tpl-params' });
+    comps.push({ type: 'body', parameters: tpl.params.map((v) => ({ type: 'text', text: paramTxt(v) || '-' })) });
+  }
+  return comps;
 }
 // הורדת קובץ (הודעה קולית): קודם הכתובת מ-Meta, ואז הקובץ – רק אם הכתובת בשרתי Meta ובגודל מותר
 async function media(token, mediaId, max) {
@@ -253,4 +287,5 @@ module.exports = {
   BODY_MAX, MSGS_MAX, TEXT_MAX, AUDIO_MAX, DRAFT_MAX, HOUR_DEFAULT, DAY_MULT, FLOOD_HOUR, WIN_MS, MGR_DAY, OUT_DAY, ORD_TTL, ORD_BTN, NEVER_AUTO, CLS, LANGS, MGR_FIXED, TIME_RE,
   waNum, waShow, localOf, sigOk, sameSecret, msgId, parseHook, routeOf, susOf, langOf, mgrIntent, FIN_RE, draftCheck, numsOf, inWindow, winLeft, outsideHours, hmOf,
   send, media, mediaUrlOk, baseOf,
+  docLinkOk, tplComps, paramTxt, // תוספת 14.11.2026 – מסמכים (lib/ar-send.js)
 };

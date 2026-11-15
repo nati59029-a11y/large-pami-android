@@ -14,7 +14,12 @@ function profitOf(o, cur, nc) {
     const c = typeof it.c === 'number' ? it.c : (it.pid && cur && typeof cur.get(it.pid) === 'number' ? cur.get(it.pid) : null);
     if (c == null) { miss++; if (nc !== 'zero') skip += Math.round(qty * price * 100); } else cost += Math.round(qty * c * 100);
   }
-  const total = Math.round((typeof o.total === 'number' ? o.total : 0) * 100);
+  // 14.11.2026 (סבב 2, ליקוי 7): הזמנה עם vm – ההכנסה היא gross (כולל מע"מ ואחרי הנחה כללית), כמו העלות (כולל מע"מ). כך גם הזמנה עסקית
+  // (מחירים לפני מע"מ) וגם הנחה כללית נספרות נכון. שורה בלי עלות שלא נספרת יורדת באותו יחס (gross ÷ total). הזמנה ישנה – בדיוק כמו קודם.
+  const t0 = Math.round((typeof o.total === 'number' ? o.total : 0) * 100);
+  const vm = (o.vm === 'ex' || o.vm === 'inc') && typeof o.gross === 'number';
+  const total = vm ? Math.round(o.gross * 100) : t0;
+  if (vm && skip) skip = t0 ? Math.round(skip * total / t0) : 0;
   return { total, cost, profit: total - skip - cost, miss };
 }
 
