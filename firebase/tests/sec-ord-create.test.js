@@ -226,4 +226,19 @@ describe('שלב ג/6: הזמנה מהמזכירה (ordCreateFromSec)', () => {
     assert.equal(so.ordId, a.id); assert.equal(so.st, 'ordered'); assert.equal(so.lk, undefined);
     await fails(secOrd({ ver: 3 }), 'already-ordered');
   });
+
+  it('שלב ג/5 סבב 1: אישור לקוח (opt.sent) – רק טיוטה שעדיין sent באותה גרסה; מזהה מייל באורך אמיתי – reqId מקוצר', async () => {
+    const o = secOrd({ st: 'sent', sentVer: 1 });
+    const S = `b/${A}/sec_ord/${MAIL}`;
+    const stale = async () => { let err = null; try { await inBiz((db) => CORE.ordCreateFromSec(db, o, { sent: true })); } catch (e) { err = e; } assert.equal(err && err.details && err.details.reason, 'stale'); };
+    await prep((d) => d.doc(S).set(Object.assign({}, o, { st: 'cancel' }))); await stale();
+    await prep((d) => d.doc(S).set(Object.assign({}, o, { st: 'mgr', ver: 2 }))); await stale();
+    assert.equal((await coll(`b/${A}/ord`)).length, 0);
+    await prep((d) => d.doc(S).set(o));
+    assert.ok((await inBiz((db) => CORE.ordCreateFromSec(db, o, { sent: true }))).id);
+    const M2 = 'g' + 'b'.repeat(40);
+    const r2 = await make(secOrd({ in: M2 }));
+    assert.ok(/^osec[0-9a-f]{28}v1$/.test(r2.id), r2.id);
+    assert.equal((await make(secOrd({ in: M2 }))).dup, true, 'אותו מייל ואותה גרסה – dup');
+  });
 });

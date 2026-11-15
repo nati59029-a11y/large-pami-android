@@ -2578,6 +2578,11 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       assert.equal(v.prev.ver, 1); assert.equal(v.chg.in, m); assert.equal(v.gmid, undefined);
       assert.equal((await ords()).length, 0);
       assert.ok((await notes()).some((b) => b.includes('ביקש שינוי')));
+      // סבב 1 (ליקוי 2): טיוטת ההזמנה בדרך כתשובה למייל השינוי – תשובת הטקסט של אותו מייל חסומה
+      const P5 = `b/${A}/sec_ord/${n}`;
+      await prep((d) => d.doc(P5).update({ st: 'sending', sAt: Date.now(), sBy: M1, sVer: 2 }));
+      assert.equal((await call('secMailSend', M1, { id: m, sendId: 'send-' + m.slice(1, 12) })).reason, 'order-sent');
+      await prep(async (d) => { const v = (await d.doc(P5).get()).data(); delete v.sAt; delete v.sBy; delete v.sVer; await d.doc(P5).set(Object.assign(v, { st: 'mgr' })); });
       const s2 = await sec(M1, { op: 'ordSend', id: n, ver: 2 });
       assert.ok(s2.ok, JSON.stringify(s2));
       const mid = (await get(`b/${A}/sec_in/${m}`)).mid;
@@ -2596,6 +2601,19 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       const n6 = await sentOrd('thr-c6');
       assert.equal((await reply('thr-c6', { reply: 'ok' })).r.ordRe.res, 'ordered');
       for (const a of ['cancel', 'change']) assert.equal((await reply('thr-c6', { reply: a, order: { lines: [{ txt: 'צלחת עמוקה', qty: 9 }] } })).r.ordRe.why, 'ordered');
+      // סבב 1 (ליקוי 1): הזמנה נוצרת כרגע (lk טרי) – ביטול/שינוי לא נכתבים
+      const n7 = await sentOrd('thr-c7');
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n7}`).update({ lk: { reqId: 'secXv1', at: Date.now() } }));
+      assert.equal((await reply('thr-c7', { reply: 'cancel' })).r.ordRe.why, 'st');
+      assert.equal((await ordOf(n7)).st, 'sent');
+      // סבב 1 (ליקוי 3): שינוי → שליחה שנתקעה (ייתכן שנשלח) → סימון "נשלח" מסמן את מייל השינוי
+      const n8 = await sentOrd('thr-c8');
+      const c8 = await reply('thr-c8', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 3 }] } });
+      assert.equal(c8.r.ordRe.res, 'chg');
+      await prep((d) => d.doc(`b/${A}/sec_ord/${n8}`).update({ st: 'sending', sAt: Date.now() - 3600000, sBy: M1, sVer: 2 }));
+      assert.ok((await sec(M1, { op: 'ordSend', id: n8, mark: true })).ok);
+      assert.equal((await get(`b/${A}/sec_in/${c8.m}`)).st, 'replied');
+      assert.equal((await draftOf(c8.m)).st, 'done');
       const o6 = await ordOf(n6);
       assert.equal(o6.st, 'ordered'); assert.equal(o6.ver, 1);
       const L = await ords();

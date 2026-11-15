@@ -1212,7 +1212,7 @@ const SEC_BY = { uid: 'sec', name: 'המזכירה' };
 // שלב ג/5 (תיקון): מזהה מייל אמיתי (g + 40 תווים) ארוך מדי ל-reqId (עד 40) – אז טביעה קבועה (sha256, 28 תווים) של המזהה. קצר – כמו קודם
 const secReq = (mailId, ver) => { const r = 'sec' + mailId + 'v' + ver; return r.length <= 40 ? r : 'sec' + require('crypto').createHash('sha256').update(mailId, 'utf8').digest('hex').slice(0, 28) + 'v' + ver; };
 const SEC_LK_MS = 120000; // נעילת יצירה על sec_ord (lk) – אחרי 2 דקות נחשבת נטושה
-async function ordCreateFromSec(db, o) {
+async function ordCreateFromSec(db, o, opt) {
   const ORD = require('./orders')._core;
   if (!o || typeof o !== 'object') throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
   const biz = (T.scope() || {}).biz;
@@ -1255,6 +1255,8 @@ async function ordCreateFromSec(db, o) {
     const v = await tx.get(sRef);
     if (!v.exists) throw pre('not-found', 'טיוטת ההזמנה לא נמצאה');
     if (v.get('ordId')) throw pre('already-ordered', 'מהטיוטה הזו כבר נוצרה הזמנה');
+    // שלב ג/5 סבב 1: אישור לקוח – רק אם הטיוטה עדיין 'sent' באותה גרסה שנשלחה (שינוי/ביטול שנכתבו בינתיים גוברים)
+    if (opt && opt.sent && (v.get('st') !== 'sent' || v.get('ver') !== o.ver || v.get('sentVer') !== o.ver)) throw pre('stale', 'הטיוטה השתנתה מאז שנשלחה ללקוח');
     const lk = v.get('lk');
     const other = lk && typeof lk === 'object' && lk.reqId !== reqId;
     if (other && typeof lk.reqId === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(lk.reqId)) {
@@ -1300,6 +1302,7 @@ async function ordThread(db, id, x) {
   }
   return null;
 }
+const lkLive = (v) => !!(v.lk && typeof v.lk === 'object' && Date.now() - (Number(v.lk.at) || 0) < SEC_LK_MS); // הזמנה נוצרת כרגע מהטיוטה
 const lineBad = (l) => !l || l.st !== 'ok' || !!l.out || !!l.block || !!l.ctw || typeof l.id !== 'string';
 async function ordReply(db, id, x, so, r, now) {
   const o = so.o, ans = r.ans || 'other';
@@ -1312,7 +1315,7 @@ async function ordReply(db, id, x, so, r, now) {
   if (ans === 'cancel') {
     const ok = await db.runTransaction(async (tx) => {
       const v = (await tx.get(so.ref)).data();
-      if (!v || v.st !== 'sent') return false;
+      if (!v || v.st !== 'sent' || lkLive(v)) return false;
       tx.update(so.ref, { st: 'cancel', cIn: id, cAt: now, upd: now });
       return true;
     });
@@ -1323,7 +1326,7 @@ async function ordReply(db, id, x, so, r, now) {
   if (WA.waCfgOf(await db.doc('sec_cfg/wa').get()).stop.on) return q({ res: 'mgr', why: 'stop' });
   if (o.sentVer !== o.ver || o.nBlock || (o.blk || []).length || !(o.lines || []).length || o.lines.some(lineBad)) return q({ res: 'mgr', why: 'ask' });
   let c;
-  try { c = await ordCreateFromSec(db, o); } catch (e) { return q({ res: 'mgr', why: 'ord', err: String((e && e.details && e.details.reason) || (e && e.code) || 'error').slice(0, 30) }); }
+  try { c = await ordCreateFromSec(db, o, { sent: true }); } catch (e) { return q({ res: 'mgr', why: 'ord', err: String((e && e.details && e.details.reason) || (e && e.code) || 'error').slice(0, 30) }); }
   await db.collection('sec_log').doc().set(glog('', 'sec', 'ordCustOk', { tgt: so.id, note: id + ':' + c.id + (c.dup ? ':dup' : '') }));
   return q(Object.assign({ res: 'ordered', ordId: c.id, no: c.no || 0, dup: !!c.dup }, await cfmSend(db, id, x, so, c, now)));
 }
@@ -1339,7 +1342,7 @@ async function ordChg(db, id, so, r, now) {
   if (!st.phone && ph) up.phoneHint = ph; // הצעה בלבד – המנהל מאשר
   const ok = await db.runTransaction(async (tx) => {
     const v = (await tx.get(so.ref)).data();
-    if (!v || v.st !== 'sent' || v.ver !== o.ver) return false;
+    if (!v || v.st !== 'sent' || v.ver !== o.ver || lkLive(v)) return false;
     tx.update(so.ref, Object.assign(up, { st: 'mgr', ver: v.ver + 1, upd: now, chg: { in: id, t: now },
       prev: { ver: v.ver, lines: v.lines || [], total: v.total || 0, text: String(v.text || '').slice(0, 4000) },
       gmid: FieldValue.delete(), sAt: FieldValue.delete(), sBy: FieldValue.delete(), sVer: FieldValue.delete() })); // אחרת maybeSent חוסם את השליחה הבאה
@@ -1587,13 +1590,16 @@ async function ordOp(who, db, input, op, now) {
 // סימון ידני "נשלח" לטיוטת הזמנה שאולי כבר יצאה (gmid / sending ישן) – כמו markSent של שלב 0. רק במצב maybeSent
 async function ordMark(who, db, input, id, ref, now) {
   if (input.mark !== true) throw bad('bad-input', 'mark');
-  const dRef = db.doc('sec_draft/' + id);
   await db.runTransaction(async (tx) => {
-    const [v, d] = [(await tx.get(ref)).data(), await tx.get(dRef)];
+    const v = (await tx.get(ref)).data();
+    // שלב ג/5 סבב 1: אחרי בקשת שינוי – השליחה ענתה על מייל השינוי (tid), כמו ב-ordSend
+    const tid = v && v.chg && typeof v.chg.in === 'string' && ID_RE.test(v.chg.in) ? v.chg.in : id;
+    const dRef = db.doc('sec_draft/' + tid);
+    const d = await tx.get(dRef);
     if (!v || v.st === 'sent' || ordEnd(v)) throw pre('not-pending', 'טיוטת ההזמנה כבר מסומנת כנשלחה או טופלה');
     if (!maybeSent(v, now)) throw pre('not-stuck', 'אפשר לסמן "נשלח" רק לטיוטה שהשליחה שלה לא הסתיימה');
     tx.update(ref, { st: 'sent', sentAt: now, sentBy: who.uid, sentVer: v.sVer || v.ver, mk: true });
-    tx.set(db.doc('sec_in/' + id), { st: 'replied' }, { merge: true });
+    tx.set(db.doc('sec_in/' + tid), { st: 'replied' }, { merge: true });
     if (d.exists && ['pend', 'fail'].includes(d.get('st'))) tx.update(dRef, { st: 'done', doneBy: who.uid, doneAt: now, oSent: true });
     tx.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'ordMark', { tgt: id }));
   });
@@ -1964,8 +1970,10 @@ async function secMailSend(request) {
   }
   if (maybeSent(dr, now)) throw pre('maybe-sent', MAYBE_SENT);
   // סבב 1 (שלב ג/4): טיוטת ההזמנה של אותו מייל כבר נשלחה / בדרך / ייתכן שנשלחה – לא שולחים גם את תשובת הטקסט באותו שרשור
-  const oRef = db.doc('sec_ord/' + id);
-  if (ordBusy((await oRef.get()).data(), now)) throw pre('order-sent', ORDER_SENT);
+  // שלב ג/5 סבב 1: גם טיוטת הזמנה שעונה בשרשור על המייל הזה אחרי בקשת שינוי (dr.oRe, chg.in === id)
+  const oRefs = [db.doc('sec_ord/' + id)].concat(typeof dr.oRe === 'string' && ID_RE.test(dr.oRe) && dr.oRe !== id ? [db.doc('sec_ord/' + dr.oRe)] : []);
+  const oBusy = (L) => L.some((v, i) => (i === 0 || !!(v && v.chg && v.chg.in === id)) && ordBusy(v, now));
+  if (oBusy((await db.getAll(...oRefs)).map((d) => d.data()))) throw pre('order-sent', ORDER_SENT);
   const bx = mailCfgOf(ms).boxes[dr.box];
   if (!bx || bx.st !== 'ok') throw pre('not-connected', 'התיבה לא מחוברת. אפשר לחבר מחדש בהגדרות המזכירה.');
   let text = dr.text, edited = false;
@@ -1975,8 +1983,9 @@ async function secMailSend(request) {
     edited = t !== dr.text; text = t;
   }
   await db.runTransaction(async (tx) => {
-    const [v, ov] = [(await tx.get(dRef)).data(), (await tx.get(oRef)).data()];
-    if (ordBusy(ov, now)) throw pre('order-sent', ORDER_SENT);
+    const v = (await tx.get(dRef)).data();
+    const ovs = []; for (const r of oRefs) ovs.push((await tx.get(r)).data());
+    if (oBusy(ovs)) throw pre('order-sent', ORDER_SENT);
     if (v.st === 'sent') throw pre('not-pending', 'המייל כבר נשלח');
     if (maybeSent(v, now)) throw pre('maybe-sent', MAYBE_SENT);
     if (v.st === 'sending') throw pre('in-progress', 'השליחה כבר בדרך');
