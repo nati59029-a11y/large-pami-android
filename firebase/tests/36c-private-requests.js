@@ -229,6 +229,34 @@ describe('משימות פרטיות, קבועות ובקשות (שורש)', () =
     await assertFails(emp.doc('rq/q_emp2').delete());
   });
 
+  it('rq סבב 3: סוג פנייה k ביצירה (עובד); ערך לא חוקי נדחה; הבעלים לא משנה k/ph/tk', async () => {
+    for (const k of ['', 'q', 's', 'b', 'u']) await assertSucceeds(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { k })));
+    await assertFails(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { k: 'x' })));
+    await assertFails(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { k: 1 })));
+    await assertFails(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { ph: 'r' })));
+    await assertFails(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { tk: 't1' })));
+    await assertFails(emp.doc('rq/q_emp').update({ k: 's' }));
+    await assertFails(emp.doc('rq/q_emp').update({ ph: 'w' }));
+    await assertFails(emp.doc('rq/q_emp').update({ tk: 't1' }));
+    await assertFails(emp.doc('rq/q_emp').update({ ph: 'r', cAt: Date.now(), cBy: 'u_emp', st: 'new' }));
+  });
+
+  it('rq סבב 3: מנהל כותב ph (\'\'/r/w) ו-tk (מחרוזת עד 128); ערכים לא חוקיים נדחים; k ו-st חדש – לא', async () => {
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ ph: 'r' }));
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ ph: 'w', tk: 'task_abc' }));
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ ph: '' }));
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ tk: 'א'.repeat(128) }));
+    await assertFails(mgr.doc('rq/q_emp').update({ tk: 'א'.repeat(129) }));
+    await assertFails(mgr.doc('rq/q_emp').update({ tk: 5 }));
+    await assertFails(mgr.doc('rq/q_emp').update({ ph: 'x' }));
+    await assertFails(mgr.doc('rq/q_emp').update({ ph: 'd' }));
+    await assertFails(mgr.doc('rq/q_emp').update({ k: 's' }));
+    await assertFails(mgr.doc('rq/q_emp').update({ st: 'wip' }));
+    await assertFails(emp2.doc('rq/q_emp').update({ ph: 'r' }));
+    await assertFails(off.doc('rq/q_emp').update({ ph: 'r' }));
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ st: 'done', ans: 'בוצע', aBy: 'u_mgr', aAt: Date.now(), ph: 'w' }));
+  });
+
   it('rq/c: תגובות – בעלים ומנהל בשמם; עובד אחר לא; בלי עדכון; מחיקה רק מנהל', async () => {
     await assertSucceeds(emp.doc('rq/q_emp/c/' + fresh('c')).set(cm('u_emp')));
     await assertSucceeds(mgr.doc('rq/q_emp/c/' + fresh('c')).set(cm('u_mgr')));

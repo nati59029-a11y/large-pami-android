@@ -157,7 +157,10 @@ const noOverflow = (page) => page.evaluate(() => document.documentElement.scroll
   const pn = LOG.filter((l) => l.m === 'POST' && l.col === 'tasks').pop();
   check('26 יצירה: dl = היום 23:59 שעון ישראל, pri h, cat, est 60, ck 2, ckd ריק, due עדיין 72 ש\'', pn && pn.f.dl.integerValue === String(Date.UTC(2026, 10, 3, 21, 59)) && pn.f.pri.stringValue === 'h' && pn.f.cat.stringValue === 'מלאי' && pn.f.est.integerValue === '60' && pn.f.ck.arrayValue.values.map((v) => v.stringValue).join() === 'חלב,גבינות' && !(pn.f.ckd.arrayValue.values || []).length && +pn.f.due.integerValue > T0 + 3 * D1 - 1 && !('sa' in pn.f), pn && pn.f);
   await sleep(400);
-  check('27 אחרי שליחה: עוברים ל"פתוחות" (כמו היום) והשדות החדשים התאפסו', await wp.evaluate(() => TKT === 'open' && document.querySelector('[data-a=tkwDk].on').dataset.v === 'd3' && !document.querySelector('[data-a=tkwPri].on[data-v=h]') && document.querySelector('form[data-f=tkAdd] textarea').value === ''));
+  // סבב 3: יצירה מתוך "היום שלי" – נשארים ב"היום שלי" (הטופס מתקפל שוב); משאר הלשוניות – עוברים ל"פתוחות" כמו קודם
+  check('27 אחרי שליחה מ"היום שלי": נשארים ב"היום שלי", הטופס מקופל', await wp.evaluate(() => TKT === 'my' && document.querySelector('form[data-f=tkAdd]').hidden && !!document.querySelector('[data-a=tkwFold]')));
+  await wp.click('[data-a=tkwFold]'); await sleep(200);
+  check('27א השדות החדשים התאפסו', await wp.evaluate(() => document.querySelector('[data-a=tkwDk].on').dataset.v === 'd3' && !document.querySelector('[data-a=tkwPri].on[data-v=h]') && document.querySelector('form[data-f=tkAdd] textarea').value === ''));
   // פרטית עם "בלי יעד"
   await wp.fill('form[data-f=tkAdd] textarea', 'פרטית בלי יעד'); await wp.check('form[data-f=tkAdd] input[name=prv]');
   await wp.click('[data-a=tkwDk][data-v=none]'); await wp.click('form[data-f=tkAdd] button.btn.w');
@@ -165,7 +168,7 @@ const noOverflow = (page) => page.evaluate(() => document.documentElement.scroll
   const pp = Object.values(DB.ptk).find((x) => x.txt.stringValue === 'פרטית בלי יעד');
   check('28 משימה פרטית: dl=0 ("בלי יעד")', pp && pp.dl.integerValue === '0', pp);
   // תאריך+שעה שעבר – נחסם בטופס
-  await sleep(800); await wp.fill('form[data-f=tkAdd] textarea', 'יעד שעבר');
+  await sleep(800); check('28א גם אחרי פרטית מ"היום שלי" – נשארים ב"היום שלי"', await wp.evaluate(() => TKT === 'my')); await wp.click('[data-a=tkwFold]'); await sleep(200); await wp.fill('form[data-f=tkAdd] textarea', 'יעד שעבר');
   await wp.click('[data-a=tkwDk][data-v=at]'); await sleep(100); await wp.fill('input[data-i=tkwD]', '2026-11-02'); await wp.fill('input[data-i=tkwTm]', '09:00');
   const n1 = LOG.filter((l) => l.m === 'POST').length; await wp.click('form[data-f=tkAdd] button.btn.w'); await sleep(400);
   check('29 תאריך+שעה שעבר: לא נשלח (הודעה)', LOG.filter((l) => l.m === 'POST').length === n1);

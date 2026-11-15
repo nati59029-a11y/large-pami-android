@@ -493,4 +493,4 @@ exports.secDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 04:1
   if (r.errors.length) throw new Error('secretary daily: ' + r.errors.length + ' errors');
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { runRemind, remindBiz, runSecDaily, dailyBiz, pushText, tokensOf, nid, monthsAgo } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { runRemind, remindBiz, runSecDaily, dailyBiz, pushText, tokensOf, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN – גם ל-tasks-nudge.js (tkNudge)

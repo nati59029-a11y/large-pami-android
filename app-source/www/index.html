@@ -3812,7 +3812,7 @@ CHG.tkSmW=el=>{TKS.who=String(el.value||'').toLowerCase();tkRe()};
 const tkGet=id=>(TK.L||[]).find(t=>t.id===id);
 /* מרכז עבודה (סבב 2): X = השדות החדשים מהטופס (tasks-wc.js; רק כשהכללים החדשים פורסמו). 403 עם שדות חדשים ← כללים ישנים: שולחים שוב בלי השדות, רק אם היעד לא שונה מ-72 שעות */
 FRM.tkAdd=async f=>{const x=fd(f),txt=String(x.txt||'').trim().slice(0,500);if(!txt)return toast('כתוב מה צריך לעשות');const X=window.TKW&&TKW.fx?TKW.fx():null;if(X&&X.err)return toast(X.err);const b=f.querySelector('button.w');if(b)b.disabled=true;
- if(x.prv){const pn=Date.now(),pid=uid(),pf={owner:sv(SY.uid),by:sv(fbBy()),txt:sv(txt),cr:iv(pn),due:iv(tkDue(pn)),st:sv('open'),sub:iv(0),late:sv('')};if(X)Object.assign(pf,X.f(pn));try{try{await fsx('/ptk?documentId='+encodeURIComponent(pid),{method:'POST',body:JSON.stringify({fields:pf})})}catch(e){if(!(X&&X.old(e,pf)))throw e;await fsx('/ptk?documentId='+encodeURIComponent(pid),{method:'POST',body:JSON.stringify({fields:pf})})}toast(X&&X.msg||'✓ המשימה הפרטית נוספה');f.reset();if(X)X.done();tkPrvSync();TKT='open'}catch(e){toast(e.tkw||tkErr(e))}finally{if(b)b.disabled=false}
+ if(x.prv){const pn=Date.now(),pid=uid(),pf={owner:sv(SY.uid),by:sv(fbBy()),txt:sv(txt),cr:iv(pn),due:iv(tkDue(pn)),st:sv('open'),sub:iv(0),late:sv('')};if(X)Object.assign(pf,X.f(pn));try{try{await fsx('/ptk?documentId='+encodeURIComponent(pid),{method:'POST',body:JSON.stringify({fields:pf})})}catch(e){if(!(X&&X.old(e,pf)))throw e;await fsx('/ptk?documentId='+encodeURIComponent(pid),{method:'POST',body:JSON.stringify({fields:pf})})}toast(X&&X.msg||'✓ המשימה הפרטית נוספה');f.reset();if(X)X.done();tkPrvSync();TKT=TKT==='my'?'my':'open'}catch(e){toast(e.tkw||tkErr(e))}finally{if(b)b.disabled=false}
   try{await tkLoad()}catch(e){}return rerender()}
  const now=Date.now(),id=uid(),adm=fbAdmin();
  const fields={owner:sv(SY.uid),by:sv(fbBy()),role:sv(adm?'a':'w'),txt:sv(txt),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),open:sv('1'),pr:sv(adm&&x.pr?'1':''),img:sv(''),sub:iv(0),doneBy:sv(''),note:sv(''),ok:iv(0),late:sv('')};if(X)Object.assign(fields,X.f(now));
@@ -3825,7 +3825,7 @@ FRM.tkAdd=async f=>{const x=fd(f),txt=String(x.txt||'').trim().slice(0,500);if(!
    Object.assign(fields,{to:{arrayValue:{values:pk.map(z=>sv(z.uid))}},toN:{arrayValue:{values:pk.map(z=>sv(z.name))}},ow:sv(one?pk[0].uid:''),owN:sv(one?pk[0].name:''),clt:iv(one?now:0),np:iv(TKN.np),wp:iv(0),mi:iv(ims.length)})}
   else if(ims.length)fields.mi=iv(ims.length)}
  let ok=false;
- try{try{await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(!(X&&X.old(e,fields)))throw e;await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})})}ok=true;toast(X&&X.msg||'✓ המשימה נוספה');f.reset();if(X)X.done();TKT='open'}catch(e){toast(e.tkw||tkErr(e))}finally{if(b)b.disabled=false}
+ try{try{await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(!(X&&X.old(e,fields)))throw e;await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})})}ok=true;toast(X&&X.msg||'✓ המשימה נוספה');f.reset();if(X)X.done(id);TKT=TKT==='my'?'my':'open'}catch(e){toast(e.tkw||tkErr(e))}finally{if(b)b.disabled=false}
  if(ok&&ims.length){let n=0;try{for(const u of ims){await tkPutImg(id,'m'+(n+1),u);n++}}catch(e){toast('המשימה נוצרה, אבל רק '+n+' מתוך '+ims.length+' תמונות הועלו. '+tkErr(e));try{await tkPatch(id,{mi:n})}catch(e2){}}}
  if(ok){TKN.imgs=[];TKN.np=0;TKN.sel=null}
  /* tkRe (ולא rerender): בכישלון הטקסט שהוקלד נשאר בטופס */
@@ -6390,7 +6390,7 @@ FRM.rcSave=async f=>{rcSync();const F=RCF,S=TKST.L||[],txt=F.txt.trim().slice(0,
  try{if(F.id)await docPatch('rtk',F.id,o);else await fsx('/rtk?documentId='+encodeURIComponent(uid()),{method:'POST',body:JSON.stringify({fields:Object.fromEntries(Object.entries(Object.assign({owner:SY.uid,by:fbBy(),cr:Date.now()},o)).map(([k,v])=>[k,fsV(v)]))})});
   closeDlg();toast('✓ נשמר');RC.t=0;await rcLoad()}catch(e){toast(tkErr(e));if(b)b.disabled=false}};
 /* ---- בקשות למנהל ---- */
-const RQ={L:[],at:0,b:0,mine:[],mat:0,mb:0,hl:[],hat:0,hb:0},RQF=['owner','by','txt','t','st','ans','aBy','aAt','cAt','cBy','cT','cN'],RQS={new:['ממתין לטיפול','t1'],done:['טופל','t3'],rej:['נדחה','t4']};
+const RQ={L:[],at:0,b:0,mine:[],mat:0,mb:0,hl:[],hat:0,hb:0},RQF=['owner','by','txt','t','st','ans','aBy','aAt','cAt','cBy','cT','cN','k','ph','tk'],RQS={new:['ממתין לטיפול','t1'],done:['טופל','t3'],rej:['נדחה','t4']};
 let RQT='new';
 /* מעקב נקרא (במכשיר): לכל בקשה מתי העובד צפה בה לאחרונה. "תשובה חדשה" = המנהל ענה/הגיב אחרי הצפייה האחרונה */
 const RQSEEN=LK('lp-rq-seen');let RQSN=(()=>{try{return JSON.parse(localStorage.getItem(RQSEEN))||{}}catch(e){return{}}})();
@@ -6400,7 +6400,7 @@ const rqSig=()=>RQ.L.map(x=>x.id+':'+x.cAt).join();
 const rqN=()=>bzF('tasks')?RQ.L.length:0;
 async function rqQ(fld,op,val,lim){const sq={from:[{collectionId:'rq'}],select:{fields:RQF.map(f=>({fieldPath:f}))},where:{fieldFilter:{field:{fieldPath:fld},op,value:Array.isArray(val)?{arrayValue:{values:val.map(sv)}}:sv(val)}},limit:lim};
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});
- return(r||[]).filter(x=>x.document).map(x=>{const d=x.document,f=fvj({mapValue:d})||{};return{id:idOf(d),owner:String(f.owner||''),by:String(f.by||''),txt:String(f.txt||''),t:+f.t||0,st:String(f.st||''),ans:String(f.ans||''),aBy:String(f.aBy||''),aAt:+f.aAt||0,cAt:+f.cAt||0,cBy:String(f.cBy||''),cT:String(f.cT||''),cN:String(f.cN||'')}}).filter(x=>idOk(x.id))}
+ return(r||[]).filter(x=>x.document).map(x=>{const d=x.document,f=fvj({mapValue:d})||{};return{id:idOf(d),owner:String(f.owner||''),by:String(f.by||''),txt:String(f.txt||''),t:+f.t||0,st:String(f.st||''),ans:String(f.ans||''),aBy:String(f.aBy||''),aAt:+f.aAt||0,cAt:+f.cAt||0,cBy:String(f.cBy||''),cT:String(f.cT||''),cN:String(f.cN||''),k:String(f.k||''),ph:String(f.ph||''),tk:String(f.tk||'')}}).filter(x=>idOk(x.id))}
 /* מנהל: הבקשות הממתינות (st == new). נקרא גם מ-inbTick (q=1: בלי ציור מחדש, inbTick מחליט) */
 async function rqLoad(q){if(!isA()||RQ.b||!fbRole()||!bzF('tasks'))return;RQ.b=1;RQ.at=Date.now();try{RQ.L=(await rqQ('st','EQUAL','new',200)).sort((a,b)=>(a.cAt||a.t)-(b.cAt||b.t))}catch(e){}finally{RQ.b=0}if(!q&&['rq','todo','home'].includes(cur().v))rqRe()}
 async function rqHLoad(){if(!isA()||RQ.hb)return;RQ.hb=1;RQ.hat=Date.now();try{RQ.hl=(await rqQ('st','IN',['done','rej'],100)).sort((a,b)=>(b.aAt||b.t)-(a.aAt||a.t))}catch(e){}finally{RQ.hb=0}if(cur().v==='rq')rqRe()}
@@ -6412,7 +6412,7 @@ const rqGet=id=>RQ.L.concat(RQ.hl,RQ.mine).find(x=>x.id===id);
 const rqBtn=()=>{if(isW()&&!RQ.mb&&(!RQ.mat||Date.now()-RQ.mat>60000))rqMine().catch(()=>{});const n=RQ.mine.filter(rqUnread).length;
  return `<button class="opt" data-a="go" data-v="rq" style="margin-top:8px"><span>${icd('pen')} בקשה למנהל<small>כתיבה למנהל, ומעקב אחרי התשובות</small></span>${n?'<span class="tag t2">'+icd('dot')+' תשובה חדשה</span>':''}${ico('chev')}</button>`};
 const rqCardH=(x,adm)=>{const st=RQS[x.st]||[esc(x.st),''],un=!adm&&rqUnread(x),did=esc(x.id);
- return `<div class="card" style="${un?'border-color:var(--acc)':''}"><div style="white-space:pre-wrap;font-weight:700">${esc(x.txt)}</div><div style="margin:6px 0"><span class="tag ${st[1]}">${st[0]}</span>${un?'<span class="tag t2">'+icd('dot')+' תשובה חדשה</span>':''}${adm&&x.st==='new'&&x.cAt&&x.cBy===x.owner?'<span class="tag t2">'+icd('chat')+' תגובת עובד</span>':''}</div>
+ return `<div class="card" style="${un?'border-color:var(--acc)':''}"><div style="white-space:pre-wrap;font-weight:700">${esc(x.txt)}</div><div style="margin:6px 0">${(window.TKW&&TKW.rqTag&&TKW.rqTag(x,adm))||`<span class="tag ${st[1]}">${st[0]}</span>`}${un?'<span class="tag t2">'+icd('dot')+' תשובה חדשה</span>':''}${adm&&x.st==='new'&&x.cAt&&x.cBy===x.owner?'<span class="tag t2">'+icd('chat')+' תגובת עובד</span>':''}</div>
  <p class="note" style="margin:0">${adm?esc(x.by||'עובד')+' · ':''}נשלחה: ${tkDT(x.t)}</p>${x.ans?`<p style="white-space:pre-wrap;margin:6px 0 0"><b>תשובת המנהל${x.aBy?' ('+esc(x.aBy)+')':''}:</b> ${esc(x.ans)}</p>`:''}${x.cT?`<p class="note" style="margin:4px 0 0;${un?'color:var(--acc);font-weight:700':''}">${icd('chat')} ${esc(x.cN||'')}${x.cN?': ':''}${esc(x.cT)}</p>`:''}
  <div class="row" style="margin-top:10px"><button class="btn${adm&&x.st==='new'?'':' g'}" data-a="rqThread" data-id="${did}">${adm?''+icd('chat')+' שרשור ותשובה':''+icd('chat')+' שרשור'}</button></div></div>`};
 V.rq=()=>{if(!fbRole()||!bzF('tasks'))return{t:'בקשה למנהל',s:'',h:'<div class="card"><p class="note">המסך הזה לא זמין.</p></div>'};
@@ -6422,12 +6422,13 @@ V.rq=()=>{if(!fbRole()||!bzF('tasks'))return{t:'בקשה למנהל',s:'',h:'<di
   ${L.length?L.map(x=>rqCardH(x,1)).join(''):`<p class="note">${RQT==='new'?'אין בקשות שממתינות לטיפול.':RQ.hb?'טוען…':'עוד אין בקשות שטופלו.'}</p>`}<button class="btn g w" data-a="rqRefresh" style="margin-top:8px">רענן</button>`}}
  if(!isW())return{t:'בקשה למנהל',s:'',h:'<div class="card"><p class="note">המסך הזה לעובדים ולמנהל בלבד.</p></div>'};
  if(!RQ.mb&&(!RQ.mat||Date.now()-RQ.mat>20000))rqMine().catch(()=>{});
- return{t:'בקשה למנהל',s:'כתיבה למנהל ומעקב אחרי תשובות',h:`<form class="card" data-f="rqNew"><label class="f"><span>מה תרצה לבקש מהמנהל?</span><textarea name="txt" maxlength="1000" required placeholder="כתוב כאן את הבקשה"></textarea></label><button class="btn w">שלח למנהל</button></form>
+ return{t:'בקשה למנהל',s:'כתיבה למנהל ומעקב אחרי תשובות',h:`<form class="card" data-f="rqNew"><label class="f"><span>מה תרצה לבקש מהמנהל?</span><textarea name="txt" maxlength="1000" required placeholder="כתוב כאן את הבקשה"></textarea></label>${window.TKW&&TKW.rqKindH?TKW.rqKindH():''}<button class="btn w">שלח למנהל</button></form>
   <div class="sec"><h3>הבקשות שלי</h3><button class="btn s g" data-a="rqRefresh">רענן</button></div>${RQ.mine.length?RQ.mine.map(x=>rqCardH(x,0)).join(''):'<p class="note">עוד לא שלחת בקשות.</p>'}`}};
 ACT.rqTab=el=>{RQT=el.dataset.v;if(RQT==='done')RQ.hat=0;rerender()};
 ACT.rqRefresh=()=>{RQ.at=0;RQ.mat=0;RQ.hat=0;if(isA()){rqLoad();if(RQT==='done')rqHLoad()}else rqMine();toast('מרענן...')};
 FRM.rqNew=async f=>{const txt=String(fd(f).txt||'').trim().slice(0,1000);if(!txt)return toast('כתוב את הבקשה');const b=f.querySelector('button');if(b)b.disabled=true;
- try{await fsx('/rq?documentId='+encodeURIComponent(uid()),{method:'POST',body:JSON.stringify({fields:{owner:sv(SY.uid),by:sv(fbBy()),txt:sv(txt),t:iv(Date.now()),st:sv('new'),ans:sv('')}})});toast('✓ הבקשה נשלחה למנהל');f.reset()}catch(e){toast(tkErr(e))}finally{if(b)b.disabled=false}
+ const rid=uid(),rf={owner:sv(SY.uid),by:sv(fbBy()),txt:sv(txt),t:iv(Date.now()),st:sv('new'),ans:sv('')},rk=window.TKW&&TKW.rqK?TKW.rqK(f):'';if(rk)rf.k=sv(rk);
+ try{try{await fsx('/rq?documentId='+encodeURIComponent(rid),{method:'POST',body:JSON.stringify({fields:rf})})}catch(e){if(!(rk&&e.code===403))throw e;TKW.rvOld();delete rf.k;await fsx('/rq?documentId='+encodeURIComponent(rid),{method:'POST',body:JSON.stringify({fields:rf})})}toast('✓ הבקשה נשלחה למנהל');f.reset()}catch(e){toast(tkErr(e))}finally{if(b)b.disabled=false}
  RQ.mb=0;await rqMine()};
 /* שרשור: נטען רק כשפותחים, בחלון (dlg) – כך שרענון המסך לא מוחק טקסט שמוקלד */
 async function rqCmLoad(id){const L=[];let pt='';do{const r=await fsx('/rq/'+id+'/c?pageSize=300'+(pt?'&pageToken='+encodeURIComponent(pt):''));((r&&r.documents)||[]).forEach(d=>L.push({id:idOf(d),uid:gv(d,'uid'),by:gv(d,'by'),txt:gv(d,'txt'),t:gi(d,'t')}));pt=(r&&r.nextPageToken)||''}while(pt);return L.sort((a,b)=>a.t-b.t)}

@@ -85,6 +85,9 @@ for (const E of ENVS) {
       await bad({ ck: Array.from({ length: 21 }, (_, i) => 'p' + i) });
       await bad({ ck: ['א'.repeat(121)] });
       await bad({ ck: [''] });
+      await bad({ ck: ['א\nב'] });       // שורה חדשה בתוך פריט (סבב 3: tkCkOk בלי חזרה מקוננת)
+      await bad({ ck: ['א', ''] });
+      await bad({ ck: ['א', 5] });
       await bad({ ck: CK3, ckd: [0] }); // ckd ריק ביצירה
       await bad({ sa: t });              // "התחלתי" לא ביצירה
       await bad({ nd: t }, E.mgr);       // "הזכר לעובד" לא ביצירה

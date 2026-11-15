@@ -153,7 +153,10 @@ service cloud.firestore {
     // נספר כשני פריטים – כך עדיין מוגבל ל-20 × 120; ערך שאינו מחרוזת נקרא באפליקציה כטקסט ריק). ckd: מספרים שלמים מתוך 0..(מספר הפריטים פחות 1), בלי כפילויות. (בלי לולאות – מגבלת 1000 ביטויים.)
     function tkCkOk(l) {
       return l is list && l.size() <= 20
-        && (l.size() == 0 || l.join('\n').matches('^[^\\n]{1,120}(\\n[^\\n]{1,120}){0,19}$'));
+        // בלי חזרה מקוננת (RE2 בשרת מגביל את גודל הביטוי): כל פריט – מחרוזת (השוואת הרשימה), בלי שורה חדשה, לא ריק, עד 120 תווים
+        && (l.size() == 0 || (l.join('\n').split('\n') == l
+          && !('' in l)
+          && !l.join('\n').matches('(?s).*[^\\n]{121}.*')));
     }
     function tkCkdOk(l, n) {
       return l is list && l.size() <= n && (n == 0 || (l.toSet().size() == l.size() && l.hasOnly([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19][0:n])));
@@ -465,11 +468,14 @@ service cloud.firestore {
           && (!aff().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN)));
       }
       function mgrUpd() {
-        return aff().hasOnly(['st', 'ans', 'aBy', 'aAt', 'cAt', 'cBy', 'cT', 'cN'])
+        return aff().hasOnly(['st', 'ans', 'aBy', 'aAt', 'cAt', 'cBy', 'cT', 'cN', 'ph', 'tk'])
           && nw().st in ['new', 'done', 'rej']
           && nw().ans is string && nw().ans.size() <= 500
           && (!aff().hasAny(['aBy']) || isMyName(nw().aBy))
           && (!aff().hasAny(['aAt']) || nowOk(nw().aAt))
+          // סבב 3: שלב בתוך 'new' (ph: '' נשלחה, 'r' נקראה, 'w' בטיפול) ומזהה המשימה שנוצרה מהבקשה (tk)
+          && (!aff().hasAny(['ph']) || nw().ph in ['', 'r', 'w'])
+          && (!aff().hasAny(['tk']) || (nw().tk is string && nw().tk.size() <= 128))
           && cmOk();
       }
       function ownUpd() {
@@ -481,11 +487,13 @@ service cloud.firestore {
       allow read: if isManager() || (isActiveEmployee() && resource.data.owner == request.auth.uid);
       allow create: if isStaff()
         && nw().keys().hasAll(['owner', 'by', 'txt', 't', 'st', 'ans'])
-        && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans'])
+        && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans', 'k'])
         && nw().owner == request.auth.uid
         && isMyName(nw().by)
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 1000
         && nw().st == 'new' && nw().ans == ''
+        // סבב 3: סוג פנייה (''/'q' בקשה, 's' שאלה, 'b' תקלה, 'u' עדכון) – אופציונלי
+        && nw().get('k', '') in ['', 'q', 's', 'b', 'u']
         && nowOk(nw().t);
       allow update: if (isManager() && mgrUpd())
         || (isActiveEmployee() && od().owner == request.auth.uid && ownUpd());
@@ -1714,11 +1722,14 @@ service cloud.firestore {
             && (!aff().hasAny(['cN']) || (nw().cN is string && nw().cN.size() <= 100 && isMyName(nw().cN)));
         }
         function mgrUpd() {
-          return aff().hasOnly(['st', 'ans', 'aBy', 'aAt', 'cAt', 'cBy', 'cT', 'cN'])
+          return aff().hasOnly(['st', 'ans', 'aBy', 'aAt', 'cAt', 'cBy', 'cT', 'cN', 'ph', 'tk'])
             && nw().st in ['new', 'done', 'rej']
             && nw().ans is string && nw().ans.size() <= 500
             && (!aff().hasAny(['aBy']) || isMyName(nw().aBy))
             && (!aff().hasAny(['aAt']) || nowOk(nw().aAt))
+            // סבב 3: שלב בתוך 'new' (ph: '' נשלחה, 'r' נקראה, 'w' בטיפול) ומזהה המשימה שנוצרה מהבקשה (tk)
+            && (!aff().hasAny(['ph']) || nw().ph in ['', 'r', 'w'])
+            && (!aff().hasAny(['tk']) || (nw().tk is string && nw().tk.size() <= 128))
             && cmOk();
         }
         function ownUpd() {
@@ -1730,11 +1741,13 @@ service cloud.firestore {
         allow read: if feat('tasks') && (bMgr() || (bEmp() && resource.data.owner == request.auth.uid));
         allow create: if feat('tasks') && (bStaff()
           && nw().keys().hasAll(['owner', 'by', 'txt', 't', 'st', 'ans'])
-          && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans'])
+          && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans', 'k'])
           && nw().owner == request.auth.uid
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 1000
           && nw().st == 'new' && nw().ans == ''
+          // סבב 3: סוג פנייה (''/'q' בקשה, 's' שאלה, 'b' תקלה, 'u' עדכון) – אופציונלי
+          && nw().get('k', '') in ['', 'q', 's', 'b', 'u']
           && nowOk(nw().t));
         allow update: if feat('tasks') && ((bMgr() && mgrUpd())
           || (bEmp() && od().owner == request.auth.uid && ownUpd()));

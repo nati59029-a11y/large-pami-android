@@ -203,7 +203,7 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   check('25א העובד שולף רק את שלו: owner == uid', !!mineQ && mineQ.where[0] === 'owner' && /w1/.test(mineQ.where[2]), mineQ);
   await wp.click('[data-a=go][data-v=rq]'); await sleep(700);
   const wr = await txt(wp, '#main');
-  check('26 מסך הבקשות של העובד: טופס, רשימה עם מצב ותשובה; לא רואה בקשה של עובד אחר', /הבקשות שלי/.test(wr) && /בקשה ישנה שנענתה/.test(wr) && /טופל/.test(wr) && /תשובת המנהל.*בוצע/.test(wr) && !/עובד אחר/.test(wr), wr.slice(0, 300));
+  check('26 מסך הבקשות של העובד: טופס, רשימה עם מצב ותשובה; לא רואה בקשה של עובד אחר', /הבקשות שלי/.test(wr) && /בקשה ישנה שנענתה/.test(wr) && /טופל|אושרה/.test(wr) /* סבב 3: בכללים החדשים – "אושרה" לבקשה */ && /תשובת המנהל.*בוצע/.test(wr) && !/עובד אחר/.test(wr), wr.slice(0, 300));
   await shot(wp, shots, 'w-rq');
   await wp.fill('form[data-f=rqNew] textarea', 'צריך עוד שקיות'); await wp.click('form[data-f=rqNew] button.btn.w'); await waitFor(async () => Object.keys(DB.rq).length === 4);
   const nid = Object.keys(DB.rq).find((k) => !['r1', 'r2', 'r3'].includes(k)), nf = DB.rq[nid] || {};
