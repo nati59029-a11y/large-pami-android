@@ -203,7 +203,7 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   check('25א העובד שולף רק את שלו: owner == uid', !!mineQ && mineQ.where[0] === 'owner' && /w1/.test(mineQ.where[2]), mineQ);
   await wp.click('[data-a=go][data-v=rq]'); await sleep(700);
   const wr = await txt(wp, '#main');
-  check('26 מסך הבקשות של העובד: טופס, רשימה עם מצב ותשובה; לא רואה בקשה של עובד אחר', /הבקשות שלי/.test(wr) && /בקשה ישנה שנענתה/.test(wr) && /טופל/.test(wr) && /תשובת המנהל.*בוצע/.test(wr) && !/עובד אחר/.test(wr), wr.slice(0, 300));
+  check('26 מסך הבקשות של העובד: טופס, רשימה עם מצב ותשובה; לא רואה בקשה של עובד אחר', /הבקשות שלי/.test(wr) && /בקשה ישנה שנענתה/.test(wr) && /טופל|אושרה/.test(wr) /* סבב 3: בכללים החדשים – "אושרה" לבקשה */ && /תשובת המנהל.*בוצע/.test(wr) && !/עובד אחר/.test(wr), wr.slice(0, 300));
   await shot(wp, shots, 'w-rq');
   await wp.fill('form[data-f=rqNew] textarea', 'צריך עוד שקיות'); await wp.click('form[data-f=rqNew] button.btn.w'); await waitFor(async () => Object.keys(DB.rq).length === 4);
   const nid = Object.keys(DB.rq).find((k) => !['r1', 'r2', 'r3'].includes(k)), nf = DB.rq[nid] || {};
@@ -226,6 +226,9 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   // משימות: כפתור בקשה, פרטית של עובד, לשונית בוצעו
   task('t-w1', { txt: S('משימה רגילה לעובד'), ow: S('w1') }); DB.tasks['t-w1'].txt = S('משימה רגילה לעובד');
   await wp.evaluate(() => { go('tk'); }); await sleep(900);
+  // מרכז עבודה סבב 2: ב"היום שלי" (ברירת המחדל לעובד) הטופס מקופל לכפתור "+ משימה חדשה"
+  check('30א "היום שלי": הטופס מקופל לכפתור "+ משימה חדשה", והרשימה מופיעה מיד', await wp.evaluate(() => TKT === 'my' && !!document.querySelector('[data-a=tkwFold]') && document.querySelector('form[data-f=tkAdd]').hidden));
+  await wp.click('[data-a=tkwFold]'); await sleep(300);
   const wt1 = await txt(wp, '#main');
   check('30 מסך המשימות של העובד: כפתור "בקשה למנהל", תיבת "משימה פרטית", לשונית בוצעו', /בקשה למנהל/.test(wt1) && /משימה פרטית \(רק אני והמנהל\)/.test(wt1) && /בוצעו/.test(wt1) && !/קבועות/.test(wt1) && !/ממתין לטיפול\s*\(/.test(wt1), wt1.slice(0, 300));
   await wp.fill('form[data-f=tkAdd] textarea', 'להזמין חלב לעצמי'); await wp.check('form[data-f=tkAdd] input[name=prv]');
