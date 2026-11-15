@@ -48,7 +48,7 @@ function pushText(notes) {
 const BAD_TOKEN = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument'];
 async function fcmSend(tokens, msg) {
   const { getMessaging } = require('firebase-admin/messaging');
-  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: { k: 'sec', v: 'notes' }, android: { priority: 'high' } });
+  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: Object.assign({ k: 'sec', v: 'notes' }, msg.id ? { id: String(msg.id) } : {}), android: { priority: 'high' } });
   return r.responses.map((x, i) => ({ token: tokens[i], ok: x.success, code: x.error && x.error.code }));
 }
 async function tokensOf(db, uid) {
@@ -292,7 +292,9 @@ async function remindBiz(opts) {
     try {
       const toks = await tokensOf(db, m.uid);
       if (toks.length) {
-        const res = await (opts.send || fcmSend)(toks, pushText(due.map((d) => d.data())), { uid: m.uid, bizId: scope.bizId });
+        // 15.11.2026: התראה אחת – גם המזהה שלה (רק מזהה, בלי תוכן), כדי שהלחיצה תפתח את פרטי ההתראה
+        const msg = pushText(due.map((d) => d.data())); if (due.length === 1) msg.id = due[0].id;
+        const res = await (opts.send || fcmSend)(toks, msg, { uid: m.uid, bizId: scope.bizId });
         sent = res.filter((x) => x.ok).length;
         await dropTokens(db, m.uid, res.filter((x) => !x.ok && BAD_TOKEN.includes(x.code)).map((x) => x.token));
       }
@@ -376,7 +378,7 @@ async function secNotes(request) {
     const s = await col.orderBy('at', 'desc').limit(80).get();
     const L = s.docs.filter((d) => (d.get('at') || 0) <= now).slice(0, 60).map((d) => {
       const x = d.data();
-      const o = { id: d.id, k: x.k, typ: x.typ || '', title: x.title || '', body: x.body || '', at: x.at || 0, seen: x.seen === true, st: x.st || 'open', rep: x.rep || 0, n: x.n || 1 };
+      const o = { id: d.id, k: x.k, typ: x.typ || '', title: x.title || '', body: x.body || '', at: x.at || 0, t: x.t || 0, seen: x.seen === true, st: x.st || 'open', rep: x.rep || 0, n: x.n || 1 };
       if (x.ref && x.k === 'rep') o.ref = x.ref;
       return o;
     });
