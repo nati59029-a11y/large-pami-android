@@ -83,6 +83,9 @@ jobs:
       - name: extra (mocked network)
         if: always()
         run: node tests/app-multibiz/extra.js ../app-source/www ../out/extra.json
+      - name: ui-mgmt (super-admin management screen, mocked network)
+        if: always()
+        run: node tests/app-multibiz/ui-mgmt.js ../app-source/www ../out/ui-mgmt.json ../out/shots-mgmt
       - name: scenario + compare (branch vs main)
         if: always()
         run: |
