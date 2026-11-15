@@ -16,6 +16,9 @@
      clearCache()                        -> ניקוי מטמון התמונות בזיכרון (יציאה / החלפת עסק)
      opts.loadPh(run,slot)               -> Promise<{th,p}|null> – מסמך ph של מקום צילום (שלב 19א; בלי זה אין תמונה לכל מקום צילום)
      blob(path)                          -> Promise<Blob> – אותה טעינה מ-Storage (okPath + מטמון), לסיור 360
+   הליכה (19ג): ג'ויסטיק HTML בשמאל למטה (רק בהליכה; האצה ובלימה עד 1.3 מ'/ש', גובה עיניים 1.6 מ', התנגשות S3G.moveWithCollision), חצי מקלדת (למעלה/למטה = קדימה/אחורה, ימינה/שמאלה = סיבוב), גרירה על הקנבס כמו קודם (מסתכלת וגם מזיזה קדימה), בלי נדנוד ראש.
+   setMode(m, instant): מעבר מעופף ~900ms בין מבט עליון לגובה העיניים (בשני הכיוונים); instant=true – בלי אנימציה.
+   stats() (19ד): fps (רק בציור רציף), dprDrop (ירד ל-dpr 1 אחרי <28 FPS במשך 2 שניות), textures/geometries (three), downloaded {files,mb} (הורדות מ-Storage, מצטבר), gpuMB (הערכה: רוחב×גובה×4×1.33 לכל טקסטורה), joy.
    bay שמוחזר ב-onPick: {id, fx, s, n, lv:[...], lvHit, num, name, k, st}
    מראה: קירות מקבלים את הצילום מ-smap.tx[] לפי rooms[].tex {w,f,c}; הרצפה והתקרה לא נמתחות מהצילום: מהצילום נדגם רק צבע ממוצע – רצפה = אריח עץ מצויר (לוחות 20×120 ס"מ) בצבע הזה, תקרה = צבע חלק בהיר; חזית כל מקטע מקבלת את התמונה המוקטנת האחרונה (s3sum.b[id].th).
    בלי צילום: מדף מתכת לבן ריק, רצפה בהירה (במחסן – בטון אפור), קיר בהיר. אין תמונות דוגמה ואין מוצרים מומצאים.
@@ -63,7 +66,7 @@ function badge(k,px){const S=STAT[k]||STAT.out,c=document.createElement('canvas'
 /* ---- טעינת תמונות מ-Storage: מטמון משותף לכל התצוגות (Blob בזיכרון, עד ~48MB), עד 4 הורדות במקביל ---- */
 const okPath=p=>typeof p==='string'&&p.length>0&&p.length<=300&&/^b\/[^/]+\/store3d\/[A-Za-z0-9_./-]+\.jpg$/.test(p)&&p.indexOf('..')<0;
 function defLoad(p){if(typeof window.abkSt!=='function')return Promise.reject(new Error('no-loader'));return window.abkSt('/'+encodeURIComponent(p)+'?alt=media').then(r=>r.blob())}
-const BC=new Map(),NEG=new Map(),BC_MAX=48e6;let bcBytes=0,active=0;const waitq=[];
+const BC=new Map(),NEG=new Map(),BC_MAX=48e6;let bcBytes=0,active=0;const DL={n:0,bytes:0};const waitq=[];
 const slot=()=>new Promise(r=>{if(active<4){active++;r()}else waitq.push(r)});
 const release=()=>{const n=waitq.shift();if(n)n();else active--};
 function trim(){for(const[k,e]of BC){if(bcBytes<=BC_MAX)break;if(e.n){BC.delete(k);bcBytes-=e.n}}}
@@ -73,7 +76,7 @@ function getBlob(path,load,alive){
   const ng=NEG.get(path);if(ng&&Date.now()-ng<60000)return Promise.reject(new Error('recent-fail'));
   const e={p:null,n:0};
   e.p=slot().then(()=>{if(!alive())throw Object.assign(new Error('cancel'),{cancel:1});return load(path)}).finally(release)
-    .then(b=>{if(!(b instanceof Blob)||!b.size)throw new Error('blob');e.n=b.size;bcBytes+=b.size;trim();return b},
+    .then(b=>{if(!(b instanceof Blob)||!b.size)throw new Error('blob');e.n=b.size;bcBytes+=b.size;DL.n++;DL.bytes+=b.size;trim();return b},
       err=>{if(BC.get(path)===e)BC.delete(path);if(!err||!err.cancel)NEG.set(path,Date.now());throw err});
   BC.set(path,e);return e.p}
 function clearCache(){BC.clear();NEG.clear();bcBytes=0}
@@ -91,7 +94,7 @@ function makeView(T,el,map0,opts){
   const G=window.S3G,MINI=!!opts.mini,dpr0=Math.min(window.devicePixelRatio||1,2),dpr=MINI?Math.min(dpr0,1):dpr0;
   const TEXMAX=MINI?256:1024,ATLAS=MINI?512:1024,HI_N=MINI?0:6,load=typeof opts.load==='function'?opts.load:defLoad,PH=!MINI&&typeof opts.loadPh==='function'?opts.loadPh:null;
   const renderer=new T.WebGLRenderer({antialias:MINI||dpr<2,powerPreference:MINI?'low-power':'default'});
-  renderer.setPixelRatio(dpr);
+  renderer.setPixelRatio(dpr);let pr=dpr;
   const cv=renderer.domElement;cv.style.cssText='display:block;width:100%;height:100%;touch-action:none;outline:none'+(MINI?';pointer-events:none':'');
   el.appendChild(cv);
   const scene=new T.Scene();scene.background=new T.Color(0x23262c);
@@ -452,12 +455,20 @@ function makeView(T,el,map0,opts){
     if(!G.inAnyRoom(model,x,y)&&model.rooms[0]){const c=G.centroid(model.rooms[0].p);x=c[0];y=c[1]}
     [x,y]=G.resolveCircle(x,y,25,model.segs);walk.x=x/100;walk.z=y/100;walk.yaw=Math.atan2(e.ly,e.lx);walk.pitch=-.05;
   }
-  function applyMode(){bdgSize();scene.fog=mode==='walk'&&!MINI?new T.Fog(0xdcdad4,14,70):null;/* ערפל עדין לעומק בהליכה בלבד; תמונות, תגים וסימונים לא מושפעים */wallsG.scale.y=mode==='top'?(MINI?.55:.35):1;ceilG.visible=mode==='walk';if(mode!=='walk')hiClear(),slClear();else hiUpdate();placeCam()}
+  function applyMode(){bdgSize();scene.fog=mode==='walk'&&!MINI?new T.Fog(0xdcdad4,14,70):null;/* ערפל עדין לעומק בהליכה בלבד; תמונות, תגים וסימונים לא מושפעים */wallsG.scale.y=wallsS();ceilG.visible=mode==='walk'&&!fly;joyShow();if(mode!=='walk')hiClear(),slClear();else hiUpdate();placeCam()}
+  const wallsS=()=>mode==='top'?(MINI?.55:.35):1;
+  /* תנוחת מצלמה (מיקום ויעד) לכל מצב – משמשת גם למעבר המעופף בין מבט עליון לגובה העיניים */
+  function pose(m){
+    if(m==='top'){const c=Math.cos(top.pitch),fx=Math.cos(top.yaw),fz=Math.sin(top.yaw);return{p:[top.tx-fx*c*top.dist,Math.sin(top.pitch)*top.dist,top.tz-fz*c*top.dist],l:[top.tx,0,top.tz]}}
+    const c=Math.cos(walk.pitch);return{p:[walk.x,1.6,walk.z],l:[walk.x+Math.cos(walk.yaw)*c,1.6+Math.sin(walk.pitch),walk.z+Math.sin(walk.yaw)*c]}}
+  /* מעבר מעופף ~900ms (שלב 19ג): fly={t0,from:{p,l},s0 (גובה קירות התחלתי)} */
+  let fly=null;const FLY_MS=900;
   function placeCam(){
-    if(mode==='top'){const c=Math.cos(top.pitch),fx=Math.cos(top.yaw),fz=Math.sin(top.yaw);
-      cam.position.set(top.tx-fx*c*top.dist,Math.sin(top.pitch)*top.dist,top.tz-fz*c*top.dist);cam.lookAt(top.tx,0,top.tz)}
-    else{const c=Math.cos(walk.pitch);cam.position.set(walk.x,1.6,walk.z);cam.lookAt(walk.x+Math.cos(walk.yaw)*c,1.6+Math.sin(walk.pitch),walk.z+Math.sin(walk.yaw)*c)}
-  }
+    let P=pose(mode);
+    if(fly){const q=Math.min(1,(performance.now()-fly.t0)/FLY_MS),e=ease(q),mix=(a,b)=>a.map((v,i)=>v+(b[i]-v)*e);
+      P={p:mix(fly.from.p,P.p),l:mix(fly.from.l,P.l)};wallsG.scale.y=fly.s0+(wallsS()-fly.s0)*e;
+      if(q>=1){fly=null;wallsG.scale.y=wallsS();ceilG.visible=mode==='walk'}else invalidate()}
+    cam.position.set(P.p[0],P.p[1],P.p[2]);cam.lookAt(P.l[0],P.l[1],P.l[2])}
   function walkBy(fwd,side){const fx=Math.cos(walk.yaw),fz=Math.sin(walk.yaw),tx=walk.x+fx*fwd-fz*side,tz=walk.z+fz*fwd+fx*side;
     const r=G.moveWithCollision(walk.x*100,walk.z*100,tx*100,tz*100,25,model.segs);walk.x=r[0]/100;walk.z=r[1]/100}
 
@@ -467,7 +478,36 @@ function makeView(T,el,map0,opts){
   function goTo(x,z){const now=performance.now();
     if(mode==='walk'){const d=Math.hypot(x-walk.x,z-walk.z);if(d<.15)return;tw={k:'walk',t0:now,dur:Math.min(1600,350+d*260),sx:walk.x,sz:walk.z,tx:x,tz:z,sy:walk.yaw,ty:Math.atan2(z-walk.z,x-walk.x)}}
     else tw={k:'top',t0:now,dur:500,sx:top.tx,sz:top.tz,tx:x,tz:z};invalidate()}
+  /* ---- הליכה אמיתית (19ג): האצה ובלימה (עד 1.3 מ'/ש'), ג'ויסטיק + חצים. גרירה על הקנבס נשארת כמו קודם. בלי נדנוד ראש ---- */
+  const WSPD=1.3,ACC=3.2,BRK=5,vel={f:0,s:0},key={f:0,t:0},joy={x:0,y:0};let joyEl=null,joyKnob=null,joyId=null;
+  function walkTick(dt){
+    let tf=Math.max(-1,Math.min(1,joy.y+key.f)),ts=joy.x;const m=Math.hypot(tf,ts);if(m>1){tf/=m;ts/=m}
+    if(key.t)walk.yaw+=key.t*1.8*dt;
+    if(tf||ts)tw=null;
+    const ap=(v,t)=>{const a=(t===0||Math.sign(t)!==Math.sign(v)&&v!==0?BRK:Math.abs(t)<Math.abs(v)?BRK:ACC)*dt,d=t-v;return Math.abs(d)<=a?t:v+Math.sign(d)*a};
+    vel.f=ap(vel.f,tf*WSPD);vel.s=ap(vel.s,ts*WSPD);
+    if(!vel.f&&!vel.s)return false;
+    const x0=walk.x,z0=walk.z,want=Math.hypot(vel.f,vel.s)*dt;walkBy(vel.f*dt,vel.s*dt);
+    if(Math.hypot(walk.x-x0,walk.z-z0)<want*.3){vel.f=vel.s=0}/* נתקעים בקיר/מדף – עוצרים (בלי "לדחוף" לאורך זמן) */
+    return true}
+  function joyShow(){if(joyEl)joyEl.style.display=mode==='walk'&&!MINI?'block':'none';if(mode!=='walk'){joy.x=joy.y=0;key.f=key.t=0;vel.f=vel.s=0}}
+  function mkJoy(){joyEl=document.createElement('div');joyEl.className='s3d-joy';joyEl.dir='ltr';joyEl.setAttribute('role','group');joyEl.setAttribute('aria-label','ג׳ויסטיק הליכה');
+    joyEl.style.cssText='position:absolute;left:14px;bottom:84px;width:104px;height:104px;border-radius:50%;z-index:2;display:none;touch-action:none;user-select:none;-webkit-user-select:none;background:rgba(20,20,24,.55);border:2px solid #d4af37;box-shadow:0 2px 10px rgba(0,0,0,.5)';
+    const lb=document.createElement('div');lb.textContent='הליכה';lb.dir='rtl';lb.style.cssText='position:absolute;left:0;right:0;top:-22px;text-align:center;color:#e8d9a8;font:bold 13px sans-serif;text-shadow:0 1px 3px #000;pointer-events:none';
+    joyKnob=document.createElement('div');joyKnob.style.cssText='position:absolute;left:30px;top:30px;width:44px;height:44px;border-radius:50%;background:#d4af37;border:2px solid #1b1b1f;pointer-events:none';
+    joyEl.append(lb,joyKnob);el.appendChild(joyEl);overlay.push(joyEl);
+    const setJ=e=>{const r=joyEl.getBoundingClientRect(),R=r.width/2-22;let dx=e.clientX-(r.left+r.width/2),dy=e.clientY-(r.top+r.height/2);const d=Math.hypot(dx,dy);if(d>R){dx*=R/d;dy*=R/d}
+      joyKnob.style.transform='translate('+dx+'px,'+dy+'px)';joy.x=dx/R;joy.y=-dy/R;invalidate()};
+    const end=e=>{if(joyId!==e.pointerId)return;joyId=null;joy.x=joy.y=0;joyKnob.style.transform='';invalidate()};
+    joyEl.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();joyId=e.pointerId;try{joyEl.setPointerCapture(e.pointerId)}catch(_){}tw=null;setJ(e)});
+    joyEl.addEventListener('pointermove',e=>{if(joyId===e.pointerId)setJ(e)});
+    joyEl.addEventListener('pointerup',end);joyEl.addEventListener('pointercancel',end);joyEl.addEventListener('lostpointercapture',end)}
+  function onKey(e,dn){if(MINI||mode!=='walk'||paused||!el.isConnected)return;const t=e.target&&e.target.tagName;if(t==='INPUT'||t==='TEXTAREA'||t==='SELECT')return;
+    const v=dn?1:0;let h=1;if(e.key==='ArrowUp')key.f=v;else if(e.key==='ArrowDown')key.f=-v;else if(e.key==='ArrowLeft')key.t=-v;else if(e.key==='ArrowRight')key.t=v;else h=0;
+    if(h){e.preventDefault();invalidate()}}
+  const kd=e=>onKey(e,1),ku=e=>onKey(e,0);
   function step(now){let more=false;
+    {const dt=Math.min(.05,last?(now-last)/1000:.016);if(mode==='walk'&&!MINI&&(walkTick(dt)||joy.x||joy.y||key.f||key.t))more=true}
     if(tw){const p=Math.min(1,(now-tw.t0)/tw.dur),e=ease(p);
       if(tw.k==='walk'){walk.yaw=angLerp(tw.sy,tw.ty,Math.min(1,p*2.5));const tx=tw.sx+(tw.tx-tw.sx)*e,tz=tw.sz+(tw.tz-tw.sz)*e;
         const r=G.moveWithCollision(walk.x*100,walk.z*100,tx*100,tz*100,25,model.segs);walk.x=r[0]/100;walk.z=r[1]/100}
@@ -477,13 +517,24 @@ function makeView(T,el,map0,opts){
     if(MINI&&!paused){top.yaw+=Math.min(.1,(now-(last||now))/1000)*.16;more=true}
     return more}
 
+  /* ---- מדידה והגנת ביצועים (19ד): FPS נמדד רק בפריימים רצופים (פער >250ms = ציור לפי דרישה, לא נספר).
+     פחות מ-28 FPS במשך 2 שניות רצופות -> רזולוציה 1 (dpr 1) עד סוף התצוגה ---- */
+  const perf={prev:0,fps:0,w0:0,wn:0,drop:false};
+  function perfTick(now){const d=now-perf.prev;perf.prev=now;if(!(d>0&&d<250)){perf.w0=0;return}
+    const f=1000/d;perf.fps=perf.fps?perf.fps*.9+f*.1:f;
+    if(!perf.w0){perf.w0=now;perf.wn=0;return}perf.wn++;
+    if(now-perf.w0>=2000){const avg=perf.wn*1000/(now-perf.w0);perf.w0=now;perf.wn=0;/* ממוצע חלון של 2 שניות רצופות */
+      if(avg<28&&pr>1&&!MINI){pr=1;renderer.setPixelRatio(1);perf.drop=true;resize()}}}
+  const gpuMB=()=>{let b=0;const add=t=>{const i=t&&t.image;if(i&&i.width)b+=i.width*i.height*4*1.33};
+    for(const o of disp)if(o.isTexture)add(o);for(const a of ph.atl)add(a.tex);for(const e of sl.cache.values())add(e.t);
+    if(hi.g)for(const m of hi.g.children)add(m.material.map);return+(b/1048576).toFixed(1)};
   /* ---- ציור לפי דרישה (חוסך סוללה): מציירים רק כשמשהו השתנה; במיני – עד 24 פריימים בשנייה ---- */
   let raf=0,paused=false,lost=false,frames=0;
   function frame(now){raf=0;if(paused||lost||dead)return;
     if(MINI&&last&&now-last<40){raf=requestAnimationFrame(frame);return}
     const more=step(now);last=now;
     for(const a of ph.atl)if(a.dirty){a.dirty=false;a.tex.needsUpdate=true}
-    placeCam();renderer.render(scene,cam);frames++;
+    placeCam();renderer.render(scene,cam);frames++;perfTick(now);
     if(mode==='walk'&&HI_N){clearTimeout(hi.t);hi.t=setTimeout(hiUpdate,250);if(now-hi.at>700)hiUpdate()}
     if(more)invalidate()}
   function invalidate(){if(!raf&&!paused&&!lost&&!dead)raf=requestAnimationFrame(frame)}
@@ -549,6 +600,7 @@ function makeView(T,el,map0,opts){
     cv.addEventListener('wheel',onWheel,{passive:false})}
   cv.addEventListener('webglcontextlost',onLost,false);cv.addEventListener('webglcontextrestored',onRestored,false);
   document.addEventListener('visibilitychange',onVis);
+  if(!MINI){mkJoy();window.addEventListener('keydown',kd);window.addEventListener('keyup',ku)}
   const ro=window.ResizeObserver?new ResizeObserver(resize):null;if(ro)ro.observe(el);else window.addEventListener('resize',resize);
 
   let curMap=null;
@@ -556,7 +608,8 @@ function makeView(T,el,map0,opts){
   resize();setMap(map0);drawLegend();
 
   return{
-    setMode(m){if(MINI)return;mode=m==='walk'?'walk':'top';tw=null;applyMode();invalidate()},
+    setMode(m,instant){if(MINI)return;const nm=m==='walk'?'walk':'top';if(nm===mode&&!fly)return;const f0=pose(mode),s0=wallsG.scale.y;mode=nm;tw=null;fly=null;applyMode();
+      if(!instant){fly={t0:performance.now(),from:f0,s0};ceilG.visible=false}invalidate()},
     getMode:()=>mode,
     setMap,
     setSum(s){sum=s||null;buildDyn();drawLegend();if(selId)select(selId,true);invalidate()},
@@ -570,11 +623,11 @@ function makeView(T,el,map0,opts){
     stats:()=>{const st={};for(const k in STAT)st[k]=0;const B=sumB();if(B)for(const o of pickBays){const s=stOf(o.b.id);if(s)st[s]++}
       return{three:THREE_VER,mini:MINI,buildMs:+buildMs.toFixed(1),fx:model.fx.length,bays:model.bays.length,instances,calls:renderer.info.render.calls,tris:renderer.info.render.triangles,
         skip:model.skip.slice(),cam:cam.position.toArray().map(v=>+v.toFixed(2)),walk:[+walk.x.toFixed(2),+walk.z.toFixed(2)],mode,frames,paused,
-        tex:Object.assign({},texSt),photos:{want:ph.want,ok:ph.ok,fail:ph.fail,cell:ph.cell,atlases:ph.atl.length,hi:hi.g?hi.g.children.length:0},slots:{on:!!PH,calls:sl.calls,th:sl.g?sl.g.children.length-[...sl.cache.values()].filter(e=>e.full&&e.t).length:0,full:[...sl.cache.values()].filter(e=>e.full&&e.t).length},stat:st,badges:Object.assign({},bdgN),badgePx:BM.ok.size,framesOn:showFrames,blink:!!bl,px:renderer.getPixelRatio()}},
+        tex:Object.assign({},texSt),photos:{want:ph.want,ok:ph.ok,fail:ph.fail,cell:ph.cell,atlases:ph.atl.length,hi:hi.g?hi.g.children.length:0},slots:{on:!!PH,calls:sl.calls,th:sl.g?sl.g.children.length-[...sl.cache.values()].filter(e=>e.full&&e.t).length:0,full:[...sl.cache.values()].filter(e=>e.full&&e.t).length},stat:st,badges:Object.assign({},bdgN),badgePx:BM.ok.size,framesOn:showFrames,blink:!!bl,px:renderer.getPixelRatio(),fps:+perf.fps.toFixed(1),dprDrop:perf.drop,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,downloaded:{files:DL.n,mb:+(DL.bytes/1048576).toFixed(2)},gpuMB:gpuMB(),joy:!!joyEl&&joyEl.style.display==='block'}},
     destroy(){if(dead)return;dead=true;if(raf)cancelAnimationFrame(raf);clearTimeout(hi.t);clearTimeout(soonT);clearTimeout(sl.t);
       cv.removeEventListener('pointerdown',onDown);cv.removeEventListener('pointermove',onMove);cv.removeEventListener('pointerup',onUp);cv.removeEventListener('pointercancel',onUp);
       cv.removeEventListener('wheel',onWheel);cv.removeEventListener('webglcontextlost',onLost);cv.removeEventListener('webglcontextrestored',onRestored);
-      document.removeEventListener('visibilitychange',onVis);if(ro)ro.disconnect();else window.removeEventListener('resize',resize);
+      document.removeEventListener('visibilitychange',onVis);window.removeEventListener('keydown',kd);window.removeEventListener('keyup',ku);if(ro)ro.disconnect();else window.removeEventListener('resize',resize);
       clearDyn();for(const p of hi.cache.values())p.then(t=>t.dispose()).catch(()=>{});hi.cache.clear();
       if(root)disposeTree(root);for(const o of disp)o.dispose&&o.dispose();
       renderer.dispose();try{renderer.forceContextLoss()}catch(e){}cv.remove();overlay.forEach(o=>o.remove());if(lostBox)lostBox.remove();

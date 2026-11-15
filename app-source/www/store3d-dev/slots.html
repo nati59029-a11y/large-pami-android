@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>בדיקת תמונה לכל מקום צילום (19א) – דוגמה</title>
 <!-- דף בדיקה למפתחים בלבד (שלב 19א, check18.js). לא מחובר לאפליקציה. מפה עם גופים גבוהים (lv:['t','b']); כל התמונות נוצרות בקוד הדף (קנבס) ומסומנות "דוגמה".
-     ?mini=1 – מצב מיני · ?noph=1 – בלי loadPh (התנהגות ישנה) -->
+     ?mini=1 – מצב מיני · ?noph=1 – בלי loadPh (התנהגות ישנה) · ?n=60 – מספר גופים (19ד: ~100 מקטעים) · ?mode=top – פתיחה במבט עליון -->
 <style>html,body{margin:0;background:#121216}#view{position:fixed;inset:0}</style>
 </head>
 <body>
@@ -16,7 +16,7 @@
 (function(){
 'use strict';
 const q=new URLSearchParams(location.search),MINI=q.get('mini')==='1',NOPH=q.get('noph')==='1';
-const map=S3G.sampleMap(12),P='b/demo/store3d/main/',model=(map.fx.forEach(f=>{if(f.hi)f.a=0}),S3G.buildModel(map)),sum={b:{},upd:1763100000000};
+const map=S3G.sampleMap(+q.get('n')||12),P='b/demo/store3d/main/',model=(map.fx.forEach(f=>{if(f.hi)f.a=0}),S3G.buildModel(map)),sum={b:{},upd:1763100000000};
 model.bays.forEach(b=>{sum.b[b.id]={s:'ok',r:'demo_20261114',t:1763100000000,n:0,th:P+'run/demo_20261114/'+b.id+'_'+b.lv[0]+'_t.jpg'}});
 window.__sum=sum;window.__model=model;window.__phCalls=[];window.__loads=[];
 /* שקופיות בדיקה: ‏person ו-gone לפי שם המקום; מקום ללא מסמך (null) */
@@ -28,7 +28,7 @@ function paint(path){const m=/\/([^/]+)_([atb])_(t|p)\.jpg$/.exec(path);if(!m)re
 const load=p=>{window.__loads.push(p);return Promise.resolve().then(()=>paint(p)).then(b=>{if(!b)throw new Error('404');return b})};
 const loadPh=(run,slot)=>{window.__phCalls.push(run+'/'+slot);const sp=window.__special[slot];if(sp==='missing')return Promise.resolve(null);if(sp==='err')return Promise.reject(new Error('x'));
  const bid=slot.slice(0,-2),l=slot.slice(-1);if(sp==='bad')return Promise.resolve({th:'../../x.jpg',p:'b/x/store3d/../y.jpg'});return Promise.resolve({th:P+'run/'+run+'/'+bid+'_'+l+'_t.jpg',p:P+'run/'+run+'/'+bid+'_'+l+'_p.jpg',person:sp==='person'})};
-const o={sample:true,sum,load,mode:'walk'};if(!NOPH&&!MINI)o.loadPh=loadPh;
+const o={sample:true,sum,load,mode:q.get('mode')==='top'?'top':'walk'};if(!NOPH&&!MINI)o.loadPh=loadPh;
 if(MINI){const m=Store3D.mini(document.getElementById('view'),map,sum,{load,loadPh,sample:true});window.__m=m}
 else Store3D.open(document.getElementById('view'),map,o).then(h=>{window.__h=h});
 })();
