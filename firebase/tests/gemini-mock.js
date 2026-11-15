@@ -96,8 +96,8 @@ function kindOf(body) {
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
   if (s.startsWith('אתה בודק מדפים')) return 's3shelf';   // prompts-shelf.js (שלב 6)
-  if (s.startsWith('אתה מקבל תמונות של חנות')) return 's3draft';
-  if (s.startsWith('אתה מקבל טיוטת מפה של חנות')) return 's3fix'; // lib/store3d-fix.js (שלב 20ג) // prompts-mapdraft.js (שלב 6)
+  if (s.startsWith('אתה מקבל תמונות של חנות')) return 's3draft'; // prompts-mapdraft.js (שלב 6)
+  if (s.startsWith('אתה מקבל טיוטת מפה של חנות')) return 's3fix'; // lib/store3d-fix.js (שלב 20ג)
   if (s.startsWith('סווג את המסמך')) return 'classify'; // סריקה אחידה – לפני כל השאר, כי ההנחיה מזכירה את כל הסוגים
   if (s.includes('רשימת הזמנה של מוצרים')) return 'ordlist';
   if (s.includes('טבלת שורות המוצרים')) return 'invlines'; // לפני invoice – גם היא מתחילה ב"חשבונית מס"

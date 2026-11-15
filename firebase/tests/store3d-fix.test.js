@@ -19,6 +19,7 @@ const FN = path.join(__dirname, '..', 'functions');
 let qn = 0;
 const qid = () => 'f' + Date.now().toString(36) + '-' + (qn++).toString().padStart(12, '0');
 const AI = require(path.join(FN, 'lib', 'store3d-ai.js'));
+const F = require(path.join(FN, 'lib', 'store3d-fix.js'));
 const ans = () => { const o = JSON.parse(JSON.stringify(GM.fixture('mapdraft-ok'))); delete o._example; delete o._meta; return o; };
 // הטיוטה הנוכחית – כמו ש-mapDraft מחזיר (אותה בדיקה)
 const DRAFT = () => AI.evalDraft(ans(), 'STOP', { br: 'main', kind: 's', numDir: 'rtl', bizId: A, uid: MGR, now: Date.now() }).d.map;
@@ -123,8 +124,19 @@ describe('mapFix – הליבה מול האמולטור (Firestore + gemini-mock
     assert.equal(await get(`b/${A}/s3qid/${q}`), null, 'אפשר לנסות שוב עם אותו qid');
     assert.equal(await un(MGR), 1, 'הבלם היומי לא מוחזר');
     GM.state.mapfixSeq = [{ cut: 'mapdraft-ok' }, { cut: 'mapdraft-ok' }];
-    assert.equal(await err(fix(MGR)), 'bad-answer');
-    assert.equal((await get(`b/${A}/s3draft/${q}`)).why, 'no-rooms');
+    const q2 = qid();
+    let e2 = null;
+    try { await fix(MGR, { qid: q2 }); } catch (x) { e2 = x; }
+    assert.deepEqual([e2.details.reason, e2.details.why], ['bad-answer', 'cut']);
+    assert.equal(e2.message, F.fixMsg('cut'));
+    const f2 = await get(`b/${A}/s3draft/${q2}`);
+    assert.deepEqual([f2.st, f2.why], ['fail', 'cut']);
+    assert.equal(await get(`b/${A}/s3qid/${q2}`), null);
+    // שליחה חוזרת תוך פחות מ-5 דקות כשהקודמת עדיין בעבודה – busy, בלי Gemini ובלי בלם
+    const qb = qid(), nb = GM.state.requests.length, ub = await un(MGR);
+    await adm.doc(`b/${A}/s3qid/${qb}`).set({ k: 'fix', uid: MGR, at: Date.now() - 60000, exp: Date.now() + 86400000 });
+    assert.equal(await err(fix(MGR, { qid: qb })), 'busy');
+    assert.deepEqual([GM.state.requests.length, await un(MGR)], [nb, ub]);
     GM.state.mapfixSeq = ['not json at all', 'mapdraft-ok'];
     assert.equal((await fix(MGR, { qid: q })).st, 'ok', 'אותו qid אחרי כשל');
     const part = ans();
