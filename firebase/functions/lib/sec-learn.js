@@ -21,34 +21,66 @@ const NOTIFY_FIRST = 3;                             // התראה לבעל הכ�
 const MONEY_CLS = Object.freeze(['pay', 'debt']);   // סוגי פנייה של תשלום / חוב – כלל בטיחות קבוע: לא נשלחים לבד
 
 // ---------- כללי הבטיחות הקבועים ----------
-// על ההוראה של המנהל ועל ההודעה הנכנסת (מה מבקשים): פעולה כספית, מחיקה, סיסמה / קוד / פרטים רגישים
-const SAFE_IN = Object.freeze({
-  pay: /(תשלמ|לשלם|שלמי(?![\u0590-\u05FF])|תשלום|תשלומים|העבי?ר[יו]?\s+(?:לו\s+|לה\s+|להם\s+|לי\s+)?(?:את\s+)?(?:ה)?(?:כסף|סכום|תשלום|העברה)|העברת\s*כסף|העברה\s*בנקאית|הוראת\s*קבע|כרטיס\s*אשראי|מספר\s*(?:ה)?כרטיס|פרטי\s*(?:ה)?אשראי|\bIBAN\b|\bbit\b|פייבוקס|paybox|ביט\s+ל|תחזיר[יו]?\s+(?:לו|לה|להם)?\s*(?:את\s*)?(?:ה)?כסף|\bpay\b|payment|money\s*transfer|wire\s*transfer|bank\s*transfer|credit\s*card)/i,
-  del: /(תמחק|למחוק|מחקי|מחיקת|תמחוק|להסיר\s+(?:את\s+)?(?:ה)?(?:נתונ|פרט|רשומ|לקוח|ספק|עובד)|\bdelete\b|\berase\b|\bremove\s+(?:my|the|all)\s+data)/i,
-  secret: /(סיסמ|קוד\s*(?:ה)?(?:אימות|כניסה|גישה|סודי)|קוד\s*חד[\s־-]*פעמי|\bOTP\b|\bPIN\b|תעודת\s*זהות|ת["״׳']ז(?![\u0590-\u05FF])|מספר\s*(?:ה)?זהות|פרטי\s*(?:ה)?בנק|מספר\s*(?:ה)?חשבון|חשבון\s*(?:ה)?בנק|\bpassword|\bpasscode|verification\s*code|login\s*code|\bID\s*number|bank\s*account|account\s*number|social\s*security)/i,
+// סבב 2 (ליקויים 1–2): אכיפה שמרנית לפי שורשים וגזעים, ולא לפי ביטויים מדויקים. אותם ביטויים על ההוראה של המנהל, על ההודעה הנכנסת
+// ועל הטקסט היוצא. זיהוי שגוי רק משאיר טיוטה לאישור ידני – וזה בסדר. בשפה שאינה עברית או אנגלית אין בדיקה בקוד, ולכן אין שליחה לבד (langBad).
+// ב = מילה עברית שלפניה אות או אותיות תחילית (ו, ה, ש, כ, ל, ב, מ) – נתפסת בלי עוגן כי ההתאמה היא בתוך הטקסט
+const HE = '[\\u0590-\\u05FF]';
+const NOT_FWD = '(?!' + HE + '*\\s+(?:לך\\s+|לכם\\s+)?(?:את\\s+)?(?:ה)?(?:פני|הודע|בקש|שאל|מייל|מכתב|ל?מנהל|ל?צוות|ל?מחלק|הלאה|תשוב|טלפון|שיחה|אליך|אליכם))';
+const SAFE_RE = Object.freeze({
+  pay: new RegExp([
+    'כסף', 'כספ(?!ת)', 'מזומן',
+    // העברה: העביר/העבר(ה|נו|תי)/הועבר/יועבר/תועבר/נעביר/תעביר/אעביר/להעביר – לא "נעביר את הפנייה למנהל"
+    '(?:הו|יו|תו|מו|לה|ה|נ|ת|א|י)עבי?ר' + NOT_FWD, 'מעביר' + NOT_FWD,
+    // החזר / זיכוי: החזר(נו|תי)/הוחזר/יוחזר/נחזיר/תחזיר(ו|י) לי – לא "נחזור אליך" ולא "נחזיר לך תשובה"
+    '(?:הו|יו|תו|מו|לה|ה|נ|ת|א|י)חזי?ר' + NOT_FWD, 'זיכ(?:וי|ינו|יתי|ית|תה|ה|ו)', 'יזוכ', 'תזוכ', 'זוכ(?:ה|ית|ינו)(?!' + HE + ')',
+    // תשלום: תשלום/תשלמ/לשלם/משלמ/שילמ/שלמתי/שולם/ישולם/ישלם/נשלם/אשלם – לא "שלום", "מושלם", "שלמה"
+    'תשלו?[מם]', 'לשלם', 'משל[מם]', 'שיל[מם]', 'שלמת', 'שלמנו', 'ישולם', 'שולם(?!' + HE + ')', 'ישלם', 'נשלם', 'אשלם', 'שלמי(?!' + HE + ')', 'שלמו(?!' + HE + ')',
+    'חיוב', 'לחייב', 'חויב', 'חייבנו', 'חייבתי', 'אשראי', 'הוראת\\s*קבע', 'פייבוקס', 'ביט\\s+ל', 'צ[\'׳]ק(?!' + HE + ')', 'שיק(?!' + HE + ')', 'עמלה', 'קנס',
+    '\\bpay', '\\bpaid\\b', 'refund', 'reimburs', '\\bwir(?:e|ed|es|ing)\\b', 'transfer', '\\bfunds?\\b', '\\bmoney\\b', '\\bcash\\b', 'credit\\s*card', 'debit\\s*card',
+    '\\bcharg(?:e|ed|es|ing)\\b', 'chargeback', '\\bIBAN\\b', '\\bbit\\b', 'paypal', 'venmo', '\\bdeposit',
+  ].join('|'), 'i'),
+  del: new RegExp([
+    // מחיקה: מחק/מחוק/מחיק/נמחק – מחקתי, מחקנו, נמחקו, למחוק, מחיקה
+    'מחק', 'מחוק', 'מחיק',
+    // הסרה: הסר/הוסר/יוסר/תוסר/להסיר/נסיר/תסיר(ו) – לא "מסר" (הודעה)
+    '(?:הו|יו|תו|לה|ה|נ|ת|א|י)סי?ר(?!ט)', 'מסיר', 'הסרה', 'השמד', 'למחות(?!' + HE + ')',
+    '\\bdelet', '\\bremov', '\\beras', '\\bunsubscrib', '\\bwip(?:e|ed|ing)\\b', '\\bpurg', 'forget\\s+(?:me|my)', '\\bGDPR\\b',
+  ].join('|'), 'i'),
+  secret: new RegExp([
+    'סיסמ', 'קוד\\s*(?:ה)?(?:אימות|כניסה|גישה|סודי|זיהוי|חד|SMS|OTP)', 'קוד\\s*שקיבלת', 'אימות\\s*דו', 'תעודת\\s*(?:ה)?זהות', 'ת["״׳\'.]\\s?ז(?!' + HE + ')', 'מספר\\s*(?:ה)?זהות',
+    'מספר\\s*(?:ה)?(?:כרטיס|חשבון)', 'פרטי\\s*(?:ה)?(?:בנק|כרטיס|חשבון)', 'בנק(?!וד|ל)', 'דרכון', 'שלוש\\s*(?:ה)?ספרות', '3\\s*(?:ה)?ספרות',
+    'passw', 'passcode', '\\bpin\\b', '\\bOTP\\b', '\\b2FA\\b', '(?:verification|security|login|access|one[-\\s]?time)\\s*code', 'one[-\\s]?time\\s*pass', '\\bCVV', '\\bCVC',
+    '\\bSSN\\b', 'social\\s*security', '\\bID\\s*(?:number|no\\b|card)', 'identity\\s*(?:number|card)', 'passport', 'card\\s*(?:number|details)', 'account\\s*(?:number|details)',
+    'routing\\s*number', 'sort\\s*code', '\\bbank', 'credentials',
+  ].join('|'), 'i'),
 });
-// על הטקסט היוצא (מה נשלח בפועל): התחייבות להעברת כסף, מספר כרטיס / חשבון / ת"ז, סיסמה או קוד, אישור מחיקה
-const SAFE_OUT = Object.freeze({
-  pay: /(העבר(?:נו|תי|נא|ה)?\s+(?:לך|לכם|אליך|אליכם)|נעביר\s+(?:לך|לכם)|נחזיר\s+(?:לך|לכם)\s+(?:את\s*)?(?:ה)?(?:כסף|סכום|\d)|זיכינו\s+(?:אותך|את)|העברה\s*בנקאית|כרטיס\s*אשראי|\bIBAN\b|we\s+(?:will\s+)?(?:transfer|refund|wire)|we\s+(?:have\s+)?(?:transferred|refunded|wired))/i,
-  del: /(מחקנו|נמחק(?:ו|ה)?(?![\u0590-\u05FF])|נמחוק|deleted\s+your|we\s+(?:will\s+)?(?:delete|erase))/i,
-  secret: /(סיסמ|קוד\s*(?:ה)?(?:אימות|כניסה|גישה|סודי)|\bOTP\b|\bPIN\b|תעודת\s*זהות|ת["״׳'.]\s?ז(?![\u0590-\u05FF])|password|passcode|verification\s*code)/i,
-});
-// מספרים שנראים כמו כרטיס אשראי / חשבון בנק / ת"ז (9 ספרות ומעלה ברצף, כולל רווחים ומקפים) – בטקסט יוצא
+// תאימות: אותם ביטויים בשני הכיוונים
+const SAFE_IN = SAFE_RE;
+const SAFE_OUT = SAFE_RE;
+// מספרים שנראים כמו כרטיס אשראי / חשבון בנק / ת"ז (9 ספרות ומעלה ברצף, כולל רווחים ומקפים)
 const LONG_NUM = /(?:\d[ -]?){8,18}\d/;
 const IL_PHONE = /^(?:0|972)?5\d{8}$|^(?:0|972)?[2-489]\d{7}$/; // טלפון ישראלי – לא נחשב "פרטים רגישים"
 function longNumOut(text) {
   const m = String(text || '').match(new RegExp(LONG_NUM.source, 'g')) || [];
   return m.some((x) => { const d = x.replace(/\D/g, ''); return d.length >= 9 && !IL_PHONE.test(d); });
 }
-// מחזיר 'pay' | 'del' | 'secret' | '' (הראשון שנמצא)
-function safeOf(text, out) {
+// מחזיר 'pay' | 'del' | 'secret' | '' (הראשון שנמצא). out נשמר לתאימות – הבדיקה זהה בשני הכיוונים
+function safeOf(text) {
   const t = String(text || '');
-  const R = out ? SAFE_OUT : SAFE_IN;
-  for (const k of ['pay', 'del', 'secret']) if (R[k].test(t)) return k;
-  if (out && longNumOut(t)) return 'secret';
+  for (const k of ['pay', 'del', 'secret']) if (SAFE_RE[k].test(t)) return k;
+  if (longNumOut(t)) return 'secret';
   return '';
 }
+// ליקוי 1: אותיות בכתב שאינו עברי ואינו לטיני (ערבית, קירילית ועוד) – אין בהן בדיקה בקוד, ולכן אין שליחה לבד. 2 אותיות ומעלה = "משמעותי"
+const FOREIGN = /(?![\p{Script=Hebrew}\p{Script=Latin}])\p{L}/gu;
+const foreignOf = (text) => (String(text || '').match(FOREIGN) || []).length >= 2;
+const langBad = (...texts) => texts.some(foreignOf);
 const SAFE_L = Object.freeze({ pay: 'תשלום או העברת כסף', del: 'מחיקת נתונים', secret: 'סיסמה, קוד או פרטים אישיים רגישים' });
+// ההודעה נראית אוטומטית (מענה אוטומטי של עסק אחר, בוט) – לא עונים לבד, כדי לא להיכנס ללולאה (הערה 1 בסבב 1)
+const BOT_RE = /(מענה\s*אוטומטי|הודעה\s*אוטומטית|תשובה\s*אוטומטית|זוהי\s*הודעה|אין\s*להשיב|נא\s*לא\s*להשיב|לא\s*לענות\s*להודעה|auto[-\s]?reply|automatic(?:ally)?\s*(?:reply|response|message|generated)|out\s*of\s*(?:the\s*)?office|do\s*not\s*reply|no[-\s]?reply|this\s*is\s*an\s*automated)/i;
+const botLike = (text) => BOT_RE.test(String(text || ''));
+const WA_LOOP_MAX = 3;                              // ווצאפ: עד 3 תשובות לבד לאותו שולח בשעה
+const WA_LOOP_MS = 36e5;
 
 // ---------- ניקוי ----------
 const CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g;
@@ -65,8 +97,10 @@ function actOf(ch, instr) {
 }
 // מפתח ההתראה → "משפחה" (החלק שלפני | או :), כדי להשתיק התראות דומות ולא את כל ההתראות מאותו סוג
 const keyFam = (key) => String(key || '').split(/[|:]/)[0].slice(0, 40);
-// התראות בטיחות – לעולם לא מושתקות (עצירה, מכסה, כשלון, שליחה לבד, שאלת "לבד?")
-const SAFE_NOTE = /^(stop|mailheld|fail|autofail|autoFail|mrfail|mrsent|mrask|mroff|draftcap|over|mailerr)$/;
+// התראות בטיחות – לעולם לא מושתקות (עצירה, מכסה, כשלון, שליחה לבד, שאלת "לבד?", חיבור / ניתוק / פקיעה של Google, מיילים שלא נקלטו, אישור העברה לאשפה)
+const SAFE_NOTE = /^(stop|mailheld|fail|autofail|autoFail|mrfail|mrsent|mrask|mroff|draftcap|over|mailerr|gmailon|gcalon|gexp|mailgap|mailskip|mailover|maillag|histcap|clean)$/;
+// סוגי התראה כלליים שמשותפים לכמה ערוצים (notifyMgrs נותן typ 'wa' גם להתראות מייל ו-Google) – השתקה רק לפי משפחה, אף פעם לא "כל הסוג"
+const SHARED_TYP = Object.freeze(['wa']);
 const noteMutable = (n) => !SAFE_NOTE.test(keyFam(n && n.key));
 
 // sc: 'cls' (רק פניות מאותו סוג), 'from' (רק מאותו שולח), 'all' (כל ההודעות בערוץ), 'fam' (התראות דומות), 'typ' (כל ההתראות מהסוג)
@@ -78,7 +112,7 @@ function scopeOf(ch, sc, item) {
     return it.cls && it.cls !== 'other' ? { cls: it.cls } : (it.from ? { from: hashTo(it.from) } : {});
   }
   if (ch === 'note') {
-    if (sc === 'typ' && it.typ) return { typ: String(it.typ).slice(0, 40) };
+    if (sc === 'typ' && it.typ && !SHARED_TYP.includes(String(it.typ))) return { typ: String(it.typ).slice(0, 40) };
     return { typ: String(it.typ || '').slice(0, 40), fam: keyFam(it.key) };
   }
   return {};
@@ -94,7 +128,7 @@ function cleanRule(o) {
 }
 const scopeL = (r, clsL) => {
   const s = r.scope || {};
-  if (r.ch === 'note') return s.fam ? 'התראות דומות' : 'כל ההתראות מהסוג הזה';
+  if (r.ch === 'note') return r.act === 'info' ? 'הנחיה בשיחה' : s.fam ? 'התראות דומות' : 'כל ההתראות מהסוג הזה';
   if (r.ch === 'chat') return 'כל השיחות';
   if (s.cls) return 'פניות מסוג "' + ((clsL || {})[s.cls] || s.cls) + '"';
   if (s.from) return 'רק מהשולח הזה';
@@ -113,6 +147,7 @@ function prefilter(rules, item) {
     if (s.cls && it.cls && s.cls !== it.cls) return false;
     if (it.ch === 'note') {
       if (s.typ && s.typ !== String(it.typ || '')) return false;
+      if (!s.fam && SHARED_TYP.includes(String(s.typ || ''))) return false; // כלל ישן / לא תקין: "כל הסוג" בסוג משותף – לא משתיק כלום
       if (s.fam && s.fam !== keyFam(it.key)) return false;
     }
     return true;
@@ -145,7 +180,8 @@ function askOk(r, now) {
   if (a.st === 'no' && now - (Number(a.at) || 0) < ASK_AGAIN_MS) return false;
   return true;
 }
-// כל התנאים לשליחה לבד, בקוד. o: { learn, stop, owner (ownerOk), rule, safeIn, safeOut, match (pickMatch), chk, unsure, cls, extra[] }
+// כל התנאים לשליחה לבד, בקוד. o: { learn, stop, owner (ownerOk), rule, safeIn, safeOut, inText, outText, match (pickMatch), chk, unsure, cls, extra[] }
+// inText / outText – הטקסט הנכנס והיוצא: כללי הבטיחות, שפה שאי אפשר לבדוק בה, והודעה שנראית אוטומטית – נבדקים כאן
 // מחזיר רשימת סיבות (ריקה = מותר)
 function autoNo(o) {
   const why = [];
@@ -156,8 +192,10 @@ function autoNo(o) {
   if (r.safe) why.push('safeRule');
   if (!o.owner) why.push('perm');
   if (!o.match || o.match.auto !== true) why.push(o.match && o.match.why === 'cls' ? 'cls' : 'conf');
-  if (o.safeIn) why.push('safeIn');
-  if (o.safeOut) why.push('safeOut');
+  if (o.safeIn || (o.inText !== undefined && safeOf(o.inText))) why.push('safeIn');
+  if (o.safeOut || (o.outText !== undefined && safeOf(o.outText))) why.push('safeOut');
+  if ((o.inText !== undefined || o.outText !== undefined) && langBad(o.inText, o.outText)) why.push('lang');
+  if (o.inText !== undefined && botLike(o.inText)) why.push('bot');
   if (MONEY_CLS.includes(o.cls)) why.push('money');
   if (o.chk) why.push('chk');
   if (o.unsure) why.push('unsure');
@@ -168,6 +206,7 @@ const NO_L = Object.freeze({
   learnOff: 'התכונה "כללים אישיים" כבויה בעסק', stop: '"עצור הכל" פעיל', ruleOff: 'הכלל לא מוגדר "לבד"', safeRule: 'כלל בטיחות – תמיד באישור',
   perm: 'בעל הכלל כבר לא מורשה (הוסר, הוגבל לסניפים או לא אישר את התנאים)', conf: 'המזכירה לא בטוחה שהכלל מתאים', cls: 'סוג הפנייה לא מתאים לכלל',
   safeIn: 'הפנייה עוסקת בתשלום, מחיקה או פרטים רגישים – תמיד באישור', safeOut: 'בתשובה יש תשלום, מחיקה או פרטים רגישים – תמיד באישור', money: 'פנייה על תשלום או חוב – תמיד באישור',
+  lang: 'שפה שהמזכירה לא יכולה לבדוק בה את כללי הבטיחות – תמיד באישור', bot: 'ההודעה נראית כמו מענה אוטומטי', waLoop: 'כבר נשלחו לבד ' + WA_LOOP_MAX + ' תשובות לשולח הזה בשעה האחרונה',
   chk: 'בטיוטה יש מידע שכדאי לבדוק', unsure: 'המזכירה לא בטוחה בתשובה', window: 'עברו 24 שעות מההודעה האחרונה של הפונה', voice: 'הודעה קולית – התמליל עלול לטעות',
   repOff: 'המענה האוטומטי במייל כבוי', held: 'המענה האוטומטי במייל נעצר להיום', sus: 'תוכן חשוד', file: 'יש קובץ מצורף', auth: 'לא ניתן לאמת את השולח',
   notConnected: 'הערוץ לא מחובר', dup: 'כבר טופל', out: 'הגענו למכסת ההודעות היוצאות היום', day: 'הגענו ל-100 תשובות אוטומטיות במייל היום', loop: 'כבר נשלחה תשובה לשולח הזה בעשר הדקות האחרונות',
@@ -186,6 +225,6 @@ function maskTo(v) {
 
 module.exports = {
   CHS, OUT_CHS, MAX_RULES, INSTR_MAX, PROMPT_MAX, AUTO_MIN, FAIL_MAX, ASK_AGAIN_MS, NOTIFY_FIRST, MONEY_CLS,
-  SAFE_IN, SAFE_OUT, SAFE_L, safeOf, longNumOut, clean, hashTo, norm, MUTE_RE, actOf, keyFam, noteMutable, scopeOf, cleanRule, scopeL,
+  SAFE_IN, SAFE_OUT, SAFE_RE, SAFE_L, safeOf, longNumOut, foreignOf, langBad, botLike, WA_LOOP_MAX, WA_LOOP_MS, SHARED_TYP, SAFE_NOTE, clean, hashTo, norm, MUTE_RE, actOf, keyFam, noteMutable, scopeOf, cleanRule, scopeL,
   prefilter, rulesBlock, pickMatch, askOk, autoNo, NO_L, noL, failNext, maskTo,
 };

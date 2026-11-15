@@ -121,7 +121,7 @@ async function gate(request, opts) {
   // מידע רגיש (10.8): המתג העסקי (ניתוח עובדים ומידע רגיש) + הרשאה אישית של המנהל + בלי הגבלת סניפים
   const sensOn = cfg.emp === true && cfg.sens[who.uid] === true && !brLimited;
   const brs = brLimited ? adm.get('br').filter((b) => typeof b === 'string') : null; // שלב 13ב (סריקת חנות): הסניפים המותרים
-  return { who, cfg, me, consented, db, brLimited, sensOn, brs };
+  return { who, cfg, me, consented, db, brLimited, sensOn, brs, hasBr: Array.isArray(adm.get('br')) }; // hasBr – גם מנהל־על (secretary-learn: כללי מייל/ווצאפ)
 }
 
 // secState: מה האפליקציה צריכה כדי להציג כפתור, כרטיס, הסכמה ואשף. לא דורש הסכמה (כדי להציג את מסך ההסכמה).

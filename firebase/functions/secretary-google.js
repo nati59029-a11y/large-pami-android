@@ -1148,7 +1148,7 @@ async function tryMrAuto(db, id, x, r, now) {
   if (!bx || bx.st !== 'ok') base.push('notConnected');
   if (!G.addrOf(to)) base.push('to');
   const no = ML().autoNo({ learn: C.cfgOf(cs, '').learn, stop: WA.waCfgOf(ws).stop.on, owner: await MLC().ownerOk(db, rule.uid, 'mail'), rule, match: r.mrPick || null,
-    safeIn: !!ML().safeOf(String(x.subj || '') + '\n' + String(x.text || '')), safeOut: !!ML().safeOf(r.text, true), cls: r.cls, chk: false, unsure: false, extra: base });
+    inText: String(x.subj || '') + '\n' + String(x.text || ''), outText: String(r.text || ''), cls: r.cls, chk: false, unsure: false, extra: base });
   if (!no.length && x.thr) {
     const t = await db.collection('sec_draft').where('thr', '==', x.thr).limit(30).get();
     if (t.docs.some((d) => d.id !== id && d.get('ch') === 'mail' && ['sent', 'sending'].includes(d.get('st')))) no.push('thread');

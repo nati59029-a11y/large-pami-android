@@ -1101,7 +1101,7 @@ FRM.secMrF=async f=>{const p=X.mrp;if(!p)return;const text=String(f.t.value||'')
   mrPropDlg(p,!!r.draft);rerender()}
  catch(e){mrErr(e);if(b){b.disabled=false;b.textContent='שליחה'}}};
 function mrPropDlg(p,drafted){const o=p.prop||{};
- const did=p.k==='mail'||p.k==='wa'?(drafted?'הכנתי טיוטה חדשה לפי ההוראה. היא לא נשלחה – בדקו אותה ושלחו בלחיצה.':''):p.k==='chat'?'אחרי השמירה אענה כך בשאלות הבאות.':o.act==='mute'?'אחרי השמירה לא אתריע לך על התראות כאלה (התראות בטיחות – תמיד).':'אחרי השמירה אזכור את ההוראה.';
+ const did=p.k==='mail'||p.k==='wa'?(drafted?'הכנתי טיוטה חדשה לפי ההוראה. היא לא נשלחה – בדקו אותה ושלחו בלחיצה.':''):p.k==='chat'?'אחרי השמירה אענה כך בשאלות הבאות.':o.act==='mute'?'אחרי השמירה לא אתריע לך על התראות כאלה (התראות בטיחות – תמיד).':'אחרי השמירה אזכור את ההוראה בשיחות איתך. ההתראות עצמן לא ישתנו.';
  dlg(`<h3>לשמור ככלל קבוע?</h3>${did?`<p style="margin:0 0 6px">${esc(did)}</p>`:''}<div class="secin1" dir="auto" style="white-space:pre-wrap;margin:4px 0 8px">${esc(o.instr||p.text)}</div>
  ${o.safe?`<div class="card secwarn" style="margin:0 0 8px;padding:8px" id="secMrSafe"><b>תמיד באישור</b><p class="note" style="margin:4px 0 0">ההוראה נוגעת ב${esc(o.safeL)}. אפשר לשמור אותה, אבל המזכירה לא תעשה את זה לבד – תמיד תכין ותחכה לאישור שלך.</p></div>`:''}
  ${(o.opts||[]).length?`<p class="note" style="margin:0 0 4px">על מה הכלל חל?</p><div class="chips" role="radiogroup" id="secMrSc">${o.opts.map((x,i)=>`<label class="chip" style="min-height:44px"><input type="radio" name="secMrSc" value="${esc(x.v)}"${i?'':' checked'}> ${esc(x.l)}</label>`).join('')}</div>`:''}
