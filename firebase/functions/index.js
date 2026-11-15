@@ -224,6 +224,10 @@ Object.assign(exports, require('./ar-file'));
 // אישור הזמנה (14.11.2026, שלב 3 חלק ב'): arOc (מספור רץ נפרד + קובץ + שליחה אוטומטית לפי סימון הלקוח), arPdf, arSend, setArCfg. ar.js
 // חשבוניות, קבלות וזיכויים (15.11.2026, שלב 4): arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff. ar.js + lib/ar-doc.js
 Object.assign(exports, require('./ar'));
+// כרטסת ותזכורות (15.11.2026, שלב 5): arStatement, setRemCfg (ar.js); arRemind – מתוזמנת כל 15 דקות (ar-remind.js)
+Object.assign(exports, require('./ar-remind'));
+// ייבוא מתוכנה קודמת (15.11.2026, שלב 6): arImp (תצוגה מקדימה / ייבוא במנות של 25), arImpVoid (ביטול קבוצה = void), arImpList. ar-import.js
+Object.assign(exports, require('./ar-import'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
@@ -247,6 +251,8 @@ Object.assign(exports, require('./secretary-google'));
 // המזכירה שלב 7 (2026-11-12): secInv (רשימה, קובץ, הגדרות, רשימת ספקים), secDecide (תפיסה חד־פעמית, אישור, דחייה, עיכוב, ביטול, אישור שולח).
 // הזיהוי רץ בטריגר הקיים secWaWork (רשומת תור עם inv:true). secretary-inv.js
 Object.assign(exports, require('./secretary-inv'));
+// "תגובה למזכירה" (15.11.2026): secLearn – תגובה על הודעה של המזכירה, כללים אישיים לכל מנהל, "לעשות את זה מעכשיו לבד?", יומן "נשלח לבד". secretary-learn.js + lib/sec-learn.js
+Object.assign(exports, require('./secretary-learn'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));

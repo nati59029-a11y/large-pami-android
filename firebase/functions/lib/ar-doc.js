@@ -59,6 +59,10 @@ function ordLines(d) {
   if (tot !== sum) lines.push({ n: 'התאמה לפי מחיר החבילה', q: 1, p: (tot - sum) / 100, u: '' });
   return lines;
 }
+// שלב 6 (ייבוא מתוכנה קודמת, ar-import.js): ob = יתרת פתיחה, old = מסמך ישן. k:'dr' חובה (כמו חשבונית) / k:'cr' זכות (כמו קבלה/זיכוי).
+// הם משתתפים בהקצאות כמו חשבונית / קבלה, כך שקבלה חדשה סוגרת חוב מיובא, וזכות מיובאת מקוזזת בחשבונית הבאה.
+const isDr = (d) => !!d && (d.t === 'inv' || ((d.t === 'ob' || d.t === 'old') && d.k === 'dr'));
+const isCr = (d) => !!d && (d.t === 'rc' || d.t === 'cr' || ((d.t === 'ob' || d.t === 'old') && d.k === 'cr'));
 const stOf = (t, open, gross) => (t === 'inv' ? (open <= 0 ? 'paid' : open < gross ? 'part' : 'open') : t === 'ir' ? 'paid' : 'ok');
 
 // ---------- Book: כל הקריאות קודם (init / needSeq / needCust / openDocs / needDoc), אחר כך issue / alloc, ובסוף flush (כל הכתיבות) ----------
@@ -140,7 +144,7 @@ class Book {
   alloc(src, inv, amt) {
     const a = Math.min(amt, src.d.open, inv.d.open);
     if (!(a > 0)) return 0;
-    if (inv.d.t !== 'inv' || !['rc', 'cr'].includes(src.d.t) || src.d.cust !== inv.d.cust) throw new Error('ar-doc: bad alloc');
+    if (!isDr(inv.d) || !isCr(src.d) || src.d.cust !== inv.d.cust) throw new Error('ar-doc: bad alloc');
     this.set(src, { open: src.d.open - a });
     this.set(inv, { open: inv.d.open - a, st: stOf('inv', inv.d.open - a, inv.d.gross) });
     const c = this.custs[inv.d.cust];
@@ -168,7 +172,7 @@ class Book {
   // זכות פתוחה של הלקוח (קבלות / זיכויים) מקוזזת אוטומטית בחשבונית חדשה (101–102)
   offset(inv, open) {
     let n = 0;
-    for (const s of open) { if (inv.d.open <= 0) break; if (['rc', 'cr'].includes(s.d.t) && s.d.open > 0 && !s.d.void) n += this.alloc(s, inv, s.d.open); }
+    for (const s of open) { if (inv.d.open <= 0) break; if (isCr(s.d) && s.d.open > 0 && !s.d.void) n += this.alloc(s, inv, s.d.open); }
     return n;
   }
   flush() {
@@ -285,4 +289,4 @@ async function proofPlan(B, id) {
   return { ok: true, id, use: (rcId) => B.extra.push(() => B.tx.update(s.ref, { used: rcId, usedAt: B.now })) };
 }
 
-module.exports = { PROOF_MSG, Book, TYPES, MUT, BTS, PAYM, docUpd, custSnap, ordLines, ordBody, needAlloc, planOrder, proofPlan, payOf, dueFor, isBiz, ilDay, docId, fileOf, arOf, stOf, NB };
+module.exports = { PROOF_MSG, Book, TYPES, MUT, BTS, PAYM, docUpd, custSnap, ordLines, ordBody, needAlloc, planOrder, proofPlan, payOf, dueFor, isBiz, ilDay, docId, fileOf, arOf, stOf, isDr, isCr, NB };

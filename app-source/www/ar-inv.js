@@ -19,6 +19,9 @@ const rid=()=>{const a=new Uint8Array(12);crypto.getRandomValues(a);return 'r'+[
 const ag=a=>ils((a||0)/100);
 const dd=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d||''));return m?`${m[3]}/${m[2]}/${m[1].slice(2)}`:''};
 const TN={inv:'חשבונית מס',ir:'חשבונית מס קבלה',rc:'קבלה',cr:'חשבונית מס זיכוי'};
+/* שלב 6 (ar-import.js): מסמך מיובא מתוכנה קודמת – ob יתרת פתיחה, old מסמך ישן (ot = הסוג המקורי). k:'dr' חובה / 'cr' זכות. בלי קובץ (אין שיתוף/שליחה) */
+const XN={inv:'חשבונית',rc:'קבלה',cr:'זיכוי'},isX=x=>x.t==='ob'||x.t==='old',isDr=x=>x.t==='inv'||(isX(x)&&x.k==='dr'),isCrd=x=>x.t==='rc'||x.t==='cr'||(isX(x)&&x.k==='cr');
+const tn=x=>x.t==='ob'?'יתרת פתיחה':x.t==='old'?(XN[x.ot]||'מסמך')+' (מיובא)':(TN[x.t]||x.t);
 const PAYN={cash:'מזומן',transfer:'העברה בנקאית',chq:'צ׳ק',card:'אשראי',other:'אחר'};
 const STN={open:'פתוחה',part:'שולמה חלקית',paid:'שולמה',void:'מבוטלת'};
 const DRAFT='<span class="tag" style="color:var(--bad)">טיוטה – לא מסמך רשמי</span>';
@@ -85,9 +88,9 @@ FRM.arPaidF=async f=>{const x=fd(f),b=f.querySelector('button'),file=f.querySele
  try{const pf=await proofUp(file);const r=await fnCall('markOrderPaid',{id:x.id,method:x.method,proofId:pf});closeDlg();toast('סומן שולם'+(r&&r.ar&&r.ar.no?' · קבלה #'+r.ar.no:''));const o=ordOf(x.id);if(o)O.log[x.id]=undefined;try{await window.__oxAfter(x.id)}catch(e){rerender()}}catch(e){b.disabled=false;err(e)}};
 
 /* ---------- כרטיס הלקוח: יתרה, מסמכים, קבלה, סיכום חודשי ---------- */
-function rowH(x){const sg=x.t==='cr'||x.t==='rc'?-1:1;
- return `<div class="li" data-a="arDocV" data-id="${esc(x.id)}" style="cursor:pointer"><div class="grow"><b>${esc(TN[x.t]||x.t)} #${esc(x.no)}</b>${x.draft?' <small style="color:var(--bad)">טיוטה</small>':''}<br><small class="note">${dd(x.d)}${x.t==='inv'?' · לתשלום עד '+dd(x.dueX||x.due):''}${STN[x.st]?' · '+STN[x.st]:''}${x.t==='cr'&&refTx(x.ref)?' · '+esc(refTx(x.ref)):''}</small></div>
-  <div style="text-align:left"><b dir="ltr">${ag(sg*x.gross)}</b>${x.t==='inv'&&x.open>0&&x.open<x.gross?`<br><small class="note">פתוח ${ag(x.open)}</small>`:''}${(x.t==='rc'||x.t==='cr')&&x.open>0&&!x.void?`<br><small class="note">זכות ${ag(x.open)}</small>`:''}</div></div>`}
+function rowH(x){const sg=isCrd(x)?-1:1;
+ return `<div class="li" data-a="arDocV" data-id="${esc(x.id)}" style="cursor:pointer"><div class="grow"><b>${esc(tn(x))}${x.no!==''&&x.no!=null?' #'+esc(x.no):''}</b>${x.draft?' <small style="color:var(--bad)">טיוטה</small>':''}${x.void?' <small style="color:var(--bad)">מבוטל</small>':''}<br><small class="note">${dd(x.d)}${x.t==='inv'||(isX(x)&&x.due)?' · לתשלום עד '+dd(x.dueX||x.due):''}${STN[x.st]?' · '+STN[x.st]:''}${x.t==='cr'&&refTx(x.ref)?' · '+esc(refTx(x.ref)):''}</small></div>
+  <div style="text-align:left"><b dir="ltr">${ag(sg*x.gross)}</b>${isDr(x)&&x.open>0&&x.open<x.gross?`<br><small class="note">פתוח ${ag(x.open)}</small>`:''}${isCrd(x)&&x.open>0&&!x.void?`<br><small class="note">זכות ${ag(x.open)}</small>`:''}</div></div>`}
 {const f=V.ocCard;if(f)V.ocCard=id=>{const r=f(id);try{if(!r||!r.h||!on()||!live())return r;
  if(!D.c[id]){docsL(id).then(()=>redraw('ocCard'));return r}
  const L=D.c[id],c=R.c[id]||{},a=c.ar||{};
@@ -95,8 +98,8 @@ function rowH(x){const sg=x.t==='cr'||x.t==='rc'?-1:1;
   <div class="row" style="margin-top:8px"><button class="btn grow" data-a="arRc" data-id="${esc(id)}">רישום תשלום (קבלה)</button><button class="btn g grow" data-a="arMon" data-id="${esc(id)}">סיכום חודשי</button></div></div>
   ${L.length?L.slice(0,40).map(rowH).join(''):'<div class="empty">אין עדיין מסמכים</div>'}`}catch(e){}return r}}
 ACT.arDocV=el=>{const x=docOf(el.dataset.id);if(!x)return;const p=x.pay||{};
- dlg(`<h3>${esc(TN[x.t])} #${esc(x.no)} ${x.draft?DRAFT:''}</h3>${x.t==='cr'&&refTx(x.ref)?`<p style="margin:0 0 6px;font-size:1.05em"><b style="color:var(--acc)">${esc(refTx(x.ref))}</b></p>`:''}${x.t==='cr'&&rfTx(x.rf)?`<p style="margin:0 0 6px"><b>${esc(rfTx(x.rf))}</b></p>`:''}<p class="note" style="margin-top:0">${dd(x.d)} · ${ag(x.gross)}${x.t==='inv'?' · לתשלום עד '+dd(x.dueX||x.due)+' · '+(STN[x.st]||''):''}${x.t==='rc'?' · '+(PAYN[p.m]||'')+(p.chq?` · צ׳ק ${esc(p.chq.no)} (${esc(p.chq.bank)}, ${dd(p.chq.d)})`:''):''}${x.void?' · <b style="color:var(--bad)">מבוטלת</b>: '+esc(x.void.why||''):''}</p>
-  <div class="row"><button class="btn g grow" data-a="arDShare" data-id="${esc(x.id)}">שיתוף</button><button class="btn g grow" data-a="arDSend" data-id="${esc(x.id)}" data-ch="wa">ווטסאפ</button><button class="btn g grow" data-a="arDSend" data-id="${esc(x.id)}" data-ch="mail">מייל</button></div>
+ dlg(`<h3>${esc(tn(x))}${x.no!==''&&x.no!=null?' #'+esc(x.no):''} ${x.draft?DRAFT:''}</h3>${isX(x)?'<p class="note" style="margin:0 0 6px">מסמך מיובא מתוכנה קודמת – בלי קובץ</p>':''}${x.t==='cr'&&refTx(x.ref)?`<p style="margin:0 0 6px;font-size:1.05em"><b style="color:var(--acc)">${esc(refTx(x.ref))}</b></p>`:''}${x.t==='cr'&&rfTx(x.rf)?`<p style="margin:0 0 6px"><b>${esc(rfTx(x.rf))}</b></p>`:''}<p class="note" style="margin-top:0">${dd(x.d)} · ${ag(x.gross)}${x.t==='inv'?' · לתשלום עד '+dd(x.dueX||x.due)+' · '+(STN[x.st]||''):''}${x.t==='rc'?' · '+(PAYN[p.m]||'')+(p.chq?` · צ׳ק ${esc(p.chq.no)} (${esc(p.chq.bank)}, ${dd(p.chq.d)})`:''):''}${x.void?' · <b style="color:var(--bad)">מבוטלת</b>: '+esc(x.void.why||''):''}</p>
+  ${isX(x)?'':`<div class="row"><button class="btn g grow" data-a="arDShare" data-id="${esc(x.id)}">שיתוף</button><button class="btn g grow" data-a="arDSend" data-id="${esc(x.id)}" data-ch="wa">ווטסאפ</button><button class="btn g grow" data-a="arDSend" data-id="${esc(x.id)}" data-ch="mail">מייל</button></div>`}
   ${['inv','ir'].includes(x.t)?`<button class="btn g w" style="margin-top:8px" data-a="arCr" data-id="${esc(x.id)}">זיכוי</button>`:''}
   ${x.t==='inv'&&mgr()?`<form data-f="arDueF" class="row" style="margin-top:8px;align-items:end"><input type="hidden" name="id" value="${esc(x.id)}"><label class="f grow" style="margin:0"><span>מועד תשלום</span><input type="date" name="due" value="${esc(x.dueX||x.due||'')}" min="${esc(x.d)}"></label><button class="btn g">שנה</button></form>`:''}
   ${x.t==='rc'&&mgr()&&!x.void?`<div class="row" style="margin-top:8px">${x.proof?`<button class="btn g grow" data-a="arPfV" data-id="${esc(x.proof)}">אסמכתא</button>`:''}<button class="btn r grow" id="arVoidB" data-a="arVoid" data-id="${esc(x.id)}">ביטול קבלה</button></div><p class="note" id="arVoidN" style="display:none;margin:6px 0 0"></p>`:''}
@@ -110,14 +113,14 @@ FRM.arDueF=async f=>{const x=fd(f);try{await fnCall('arDoc',{id:x.id,op:'due',du
 ACT.arPfV=async el=>{try{const r=await fnCall('arProofGet',{id:el.dataset.id});if(/^data:image\//.test(r.data))dlg(`<h3>אסמכתא</h3><img src="${esc(r.data)}" style="max-width:100%"><button class="btn g w" style="margin-top:8px" data-a="closeDlg">סגירה</button>`);else await dxShareDU(r.data,'אסמכתא')}catch(e){err(e)}};
 
 /* קבלה: סכום, אמצעי תשלום, צ'ק, אסמכתא (עובד – חובה), בחירת חשבוניות (בלי בחירה – מהמוקדמת); עודף = זכות */
-ACT.arRc=async el=>{const cid=el.dataset.id;const L=(await docsL(cid,true)).filter(x=>x.t==='inv'&&x.open>0&&!x.void).sort((a,b)=>String(a.dueX||a.due).localeCompare(String(b.dueX||b.due)));
+ACT.arRc=async el=>{const cid=el.dataset.id;const L=(await docsL(cid,true)).filter(x=>isDr(x)&&x.open>0&&!x.void).sort((a,b)=>String(a.dueX||a.due).localeCompare(String(b.dueX||b.due)));
  dlg(`<h3>רישום תשלום (קבלה)</h3><form data-f="arRcF"><input type="hidden" name="cust" value="${esc(cid)}"><input type="hidden" name="q" value="${rid()}">
   ${proofBox(!mgr())}<button type="button" class="btn g s" data-a="arRcAI">זהה פרטים מהצילום</button>
   <label class="f"><span>סכום (₪)</span><input name="amt" inputmode="decimal" required></label>
   <label class="f"><span>אמצעי תשלום</span><select name="method">${Object.entries(PAYN).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></label>
   <div class="row"><label class="f grow"><span>מס׳ צ׳ק</span><input name="cno" inputmode="numeric" maxlength="12" dir="ltr"></label><label class="f grow"><span>בנק</span><input name="cbank" maxlength="40"></label><label class="f grow"><span>פירעון</span><input type="date" name="cd"></label></div>
   <label class="f"><span>אסמכתא / מספר אישור (רשות)</span><input name="conf" maxlength="20" dir="ltr"></label>
-  ${L.length?`<p style="margin:8px 0 4px"><b>על אילו חשבוניות?</b> <small class="note">בלי סימון – מהמוקדמת. עודף נשמר כזכות.</small></p>${L.map(x=>`<label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="i_${esc(x.id)}"> #${esc(x.no)} · ${dd(x.d)} · פתוח ${ag(x.open)} <input name="a_${esc(x.id)}" inputmode="decimal" placeholder="${(x.open/100).toFixed(2)}" style="width:90px"></label>`).join('')}`:'<p class="note">אין חשבוניות פתוחות – הסכום יישמר כזכות.</p>'}
+  ${L.length?`<p style="margin:8px 0 4px"><b>על אילו חשבוניות?</b> <small class="note">בלי סימון – מהמוקדמת. עודף נשמר כזכות.</small></p>${L.map(x=>`<label class="row" style="gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="i_${esc(x.id)}"> ${isX(x)?esc(tn(x))+' ':''}${x.no!==''?'#'+esc(x.no):''} · ${dd(x.d)} · פתוח ${ag(x.open)} <input name="a_${esc(x.id)}" inputmode="decimal" placeholder="${(x.open/100).toFixed(2)}" style="width:90px"></label>`).join('')}`:'<p class="note">אין חשבוניות פתוחות – הסכום יישמר כזכות.</p>'}
   <div class="row"><button class="btn grow">הפק קבלה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 ACT.arRcAI=async el=>{const f=el.closest('form'),file=f&&f.querySelector('[name=pf]').files[0];if(!file)return toast('קודם צלמו את האסמכתא');el.disabled=true;
  try{const o=await proofAI(file);const set=(n,v)=>{const i=f.querySelector(`[name=${n}]`);if(i&&v!=null&&v!=='')i.value=v};

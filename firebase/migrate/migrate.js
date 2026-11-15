@@ -50,7 +50,7 @@ const COPY = [
   'impJobs', 'push_tokens', 'fn_rate', 'lineplan', 'lineLog', 'wv',
   // המזכירה העסקית: SEC_COLLS ב-functions/secretary.js + sec_ord (הזמנות מהמייל, secretary-google.js)
   'sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log',
-  'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_ord',
+  'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_ord', 'sec_mrule', 'sec_mlog', // sec_mrule/sec_mlog: #67 (צ'אט נקי), מוזג ל-main 15.11 אחרי ההעברה
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [
