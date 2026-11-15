@@ -235,7 +235,7 @@ describe('מנהל עם הגבלת סניפים: אין לו נתוני כל ה�
     const r = await call('secChat', M1, { text: 'כמה הכנסות?', fin: FIN() });
     assert.equal(r.status, 'OK', r.text);
     assert.equal(r.result.brLimited, true);
-    assert.deepEqual(declNames(secReqs()[0]), ['loanCalc', 'refuseOffTopic']);
+    assert.deepEqual(declNames(secReqs()[0]), ['loanCalc', 'getAppHelp', 'refuseOffTopic']);
     assert.deepEqual(r.result.tools, []); assert.deepEqual(r.result.denied.sort(), ['getMonthSummary', 'getTasks']);
     assert.ok(!JSON.stringify(secReqs().map((x) => x.body)).includes('152340.5'), 'שום נתון כספי (מהמכשיר או מהמראה) לא הגיע למודל');
     assert.match(secReqs()[0].body.systemInstruction.parts[0].text, /רק למנהל בלי הגבלת סניפים/);
@@ -284,7 +284,7 @@ describe('רק נושאי עסק; ערוץ והרשאות (5.5) נאכפים ב�
     assert.equal(r.result.reply, ST.TXT.offTopic);
     assert.deepEqual(r.result.tools, []);
     assert.equal(secReqs().length, 1, 'לא ממשיכים לעוד סבב אחרי סירוב');
-    assert.match(secReqs()[0].body.systemInstruction.parts[0].text, /רק נושאי העסק/);
+    assert.match(secReqs()[0].body.systemInstruction.parts[0].text, /כל מה שקשור לעסק[\s\S]*getAppHelp/);
   });
   it('מנהל בלי מתג שכר: getPayroll לא נמסר למודל, ובקשה שלו – לא מופעלת ונרשמת', async () => {
     await seed({ cfg: { pay: { [M2]: true } } });

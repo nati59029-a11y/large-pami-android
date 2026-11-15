@@ -178,6 +178,11 @@ function secFin(o){o=o||{};
   if(o.pay){f.pay={};const emp=t=>(cat(t.cat)||{}).beh==='emp';
    for(let i=0;i<=MONTHS;i++){const m=addMon(m0,-i),G={};L.filter(t=>t.t==='exp'&&emp(t)&&pmon(t)===m).forEach(t=>{const n=String(subName(t)).slice(0,60);G[n]=rnd((G[n]||0)+num(t.amt))});
     const r=Object.entries(G);if(r.length)f.pay[m]=r}}
+  /* 15.11.2026: o.rec – הפעולות האחרונות שנרשמו (רק לשאלה בצ'אט, לא למראה): מהאחרונה שנרשמה (t.ts), 30 יום, עד 80.
+     [זמן רישום, תאריך, i/e, קטגוריה, שם, סכום, מס' חשבונית, אמצעי תשלום, שולם] – כדי לענות על "לאיזה ספק הכנסתי עכשיו חשבונית של 50 באשראי" */
+  if(o.rec){const lo=now-30*864e5,tsOf=t=>{const x=t.ts?Date.parse(t.ts):NaN;return Number.isFinite(x)?x:0},key=t=>tsOf(t)||Date.parse((t.date||'')+'T12:00:00')||0;
+   f.rec=L.filter(t=>(t.t==='exp'||t.t==='inc')&&key(t)>=lo).sort((x,y)=>key(y)-key(x)).slice(0,80).map(t=>{const P=(t.pays||[]).filter(p=>p&&!p.crof);
+    return [Math.round(tsOf(t)),t.date||'',t.t==='inc'?'i':'e',String((cat(t.cat)||{}).name||'').slice(0,40),String(subName(t)).slice(0,60),rnd(num(t.amt)),String(t.inv||'').slice(0,30),[...new Set(P.map(p=>p.m).filter(Boolean))].join(', ').slice(0,40),rnd(sum(P,p=>num(p.a)))]})}
   return f}
  catch(e){try{console.warn('secFin',e&&e.message)}catch(z){}return null}
  finally{BRSEL=sB;P=sP}}
@@ -199,7 +204,14 @@ css2.textContent='.secmsg{max-width:88%;padding:10px 12px;border-radius:14px;mar
 +'.secmsg.a{margin-inline-end:auto;border-color:var(--acc)}.secmsg.u{margin-inline-start:auto}.secmsg sup{color:var(--acc);font-weight:700;font-size:.72em;margin-inline-start:1px}'
 +'.secsrc{margin-top:8px;font-size:.85rem}.secsrc summary{cursor:pointer;color:var(--acc);min-height:32px;display:flex;align-items:center}.secsrc li{margin:4px 0}'
 +'.secbar{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:.85rem;margin:0 0 6px}.secin{width:100%;min-height:72px;resize:vertical;font:inherit;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);box-sizing:border-box}'
-+'.secwarn{border-color:var(--acc)!important}';
++'.secwarn{border-color:var(--acc)!important}'
+/* 15.11.2026: "כותבת" בולט ומונפש – המילה נכתבת שוב ושוב, שלוש נקודות קופצות והבועה פועמת */
++'.sectyp{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.05rem;color:var(--acc);border-width:2px;white-space:normal;animation:secPulse 1.6s ease-in-out infinite}'
++'.sectypt{display:inline-block;animation:secTw 1.8s steps(7,end) infinite}.sectypd{display:inline-flex;gap:5px}.sectypd i{display:block;width:9px;height:9px;border-radius:50%;background:var(--acc);animation:secDot 1s ease-in-out infinite}.sectypd i:nth-child(2){animation-delay:.15s}.sectypd i:nth-child(3){animation-delay:.3s}'
++'@keyframes secDot{0%,80%,100%{transform:translateY(0);opacity:.35}40%{transform:translateY(-7px);opacity:1}}'
++'@keyframes secTw{0%{clip-path:inset(0 0 0 100%)}65%,100%{clip-path:inset(0 0 0 0)}}'
++'@keyframes secPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--acc) 40%,transparent)}50%{box-shadow:0 0 0 7px color-mix(in srgb,var(--acc) 0%,transparent)}}'
++'@media(prefers-reduced-motion:reduce){.sectyp,.sectypt,.sectypd i{animation:none!important;clip-path:none!important}}';
 document.head.appendChild(css2);
 const QS=['מה קרה היום?','תזרים לחודש','חשבוניות לתשלום השבוע'];
 const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',facts:'@facts',cal:'@cal',bank:'@bank'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
@@ -218,9 +230,9 @@ function chatH(S){const pct=Number.isFinite(S.pct)?S.pct:null,fin=!!secFinOk();
  const warn=S.saving?`<div class="card secwarn" id="secSaving"><small>${S.saving==='day'?'הגעתם לתקרת השימוש היומית – אפשר להמשיך מחר.':'הגעתם לתקרת השימוש החודשית – המזכירה במצב חיסכון עד תחילת החודש או הגדלת התקרה.'}</small></div>`:pct>=80?`<div class="card secwarn"><small>ניצלתם ${pct}% מתקרת השימוש החודשית.</small></div>`:'';
  const hi=S.call?`שלום ${esc(S.call)}! `:'שלום! ';
  const L=X.msgs||[];
- const body=X.mb&&!L.length?'<div class="empty">טוען…</div>':(L.length?L.map(bub).join(''):`<div class="secmsg a">${hi}אני ${esc(S.name)}. אפשר לשאול אותי על הכספים, הספקים, העובדים, המשימות וההזמנות של העסק, על המידע ששמרתם על העסק ועל היומן.</div>`)+(X.msgErr?`<p class="note">${esc(X.msgErr)}</p>`:'');
- const busy=X.sending?`<div class="secmsg a" id="secWait"><small>${X.deep?'חושבת לעומק…':'כותבת…'}</small></div>`:'';
- return bar+warn+eyH()+`<div id="secChat">${body}${busy}</div>
+ const body=X.mb&&!L.length?'<div class="empty">טוען…</div>':(L.length?L.map(bub).join(''):`<div class="secmsg a">${hi}אני ${esc(S.name)}. אפשר לשאול אותי על הכספים, הספקים, העובדים, המשימות וההזמנות של העסק, על היומן, על כל שאלה בניהול העסק – וגם איך עושים משהו באפליקציה או מה לעשות כשמשהו לא עובד.</div>`)+(X.msgErr?`<p class="note">${esc(X.msgErr)}</p>`:'');
+ const busy=X.sending?`<div class="secmsg a sectyp" id="secWait" role="status" aria-live="polite"><span class="sectypt">${X.deep?'חושבת לעומק':'כותבת'}</span><span class="sectypd" aria-hidden="true"><i></i><i></i><i></i></span></div>`:'';
+ return bar+warn+`<div id="secChat">${body}${busy}</div>
  <div class="chips" style="margin:10px 0 6px">${QS.map(q=>`<button class="chip" data-a="secQ" data-v="${esc(q)}" style="min-height:40px">${esc(q)}</button>`).join('')}</div>
  <form data-f="secAskF" id="secForm"><textarea class="secin" name="q" maxlength="2000" placeholder="כתבו שאלה על העסק…" aria-label="שאלה למזכירה">${esc(X.draft||'')}</textarea>
  <div class="row" style="margin-top:8px"><button class="btn grow" name="go" value="n"${X.sending?' disabled':''}>שליחה</button><button class="btn g grow" name="go" value="d"${X.sending?' disabled':''} title="מודל איכותי – עולה יותר בתקרה">חשבי לעומק</button></div></form>
@@ -254,7 +266,7 @@ const scrollEnd=()=>setTimeout(()=>{const f=document.getElementById('secForm');i
 const AIR={'ai-quota':'נגמרה המכסה או אין חיוב פעיל בחשבון ה-AI','ai-rejected':'שירות ה-AI דחה את הבקשה – מפתח או מודל לא תקינים','ai-model':'מודל ה-AI לא נמצא בשירות','ai-overloaded':'עומס זמני בשירות ה-AI','ai-timeout':'שירות ה-AI לא ענה בזמן','ai-network':'אין חיבור מהשרת לשירות ה-AI','ai-error':'שגיאה לא מוכרת בשירות ה-AI'};
 async function ask2(q,deep){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)return;if(q.length>2000)return toast('השאלה ארוכה מדי (עד 2,000 תווים)');
  X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';rerender();scrollEnd();
- try{const fin=secFin({pay:!!X.st.pay});const d={text:q,deep};if(fin)d.fin=fin;
+ try{const fin=secFin({pay:!!X.st.pay,rec:true});const d={text:q,deep};if(fin)d.fin=fin;/* 15.11.2026: לשאלות על תקלות – גרסה ומצב חיבור בלבד */try{const vc=typeof APP_VC!=='undefined'?String(APP_VC):'';d.app={on:navigator.onLine!==false};if(/^\d{1,7}$/.test(vc))d.app.v=vc}catch(e){}
   const r=await fnCall('secChat',d);
   X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null;eyStale()}
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
@@ -274,7 +286,7 @@ css3.textContent='.sectabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.
 document.head.appendChild(css3);
 const TABS=[['chat','שיחה'],['wa','ווצאפ'],['notes','התראות'],['reps','דוחות'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
 const unseenN=()=>X.nl&&!X.nl.err?X.nl.unseen:((X.st&&X.st.unseen)||0);
-function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
+function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='eyes'&&X.ey&&!X.ey.err&&(X.ey.openN||(X.ey.open||[]).length)?` <span class="secbadge">${X.ey.openN||X.ey.open.length}</span>`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
 /* 13.11.2026: מעבר בין לשוניות – המידע הקודם מוצג מיד ומתעדכן ברקע (במקום "טוען…" בכל מעבר). אחרי שגיאה – טעינה רגילה */
 const swr=(o,k,b,ld)=>{const R=o[k];if(!R||R.err){o[k]=null;return}if(!X[b])ld()};
 ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')swr(X,'fl','fb',factsLoad);if(X.tab==='cal')swr(X,'cl','cb',calLoad);if(X.tab==='bank')swr(X,'rl','rb',rulesLoad);if(X.tab==='notes')swr(X,'nl','nb',notesLoad);if(X.tab==='reps'){X.rp=null;swr(X,'rpl','rb4',repsLoad)}rerender()};
@@ -368,9 +380,31 @@ ACT.secSDel=el=>{const id=el.dataset.id;ask('למחוק את המידע הרגי
 async function calLoad(){X.cb=1;const s0=X.cl;let again=0;try{const r=await fnCall('secCal',{op:'list'});if(s0&&X.cl===null){again=1;return}X.cl=r}catch(e){X.cl=X.cl&&!X.cl.err?X.cl:{err:e&&e.message||'לא נטען'}}finally{X.cb=0;if(again){calLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 const SRC={mgr:'ידני',sec:'מהמזכירה',import:'ייבוא',wa:'מווצאפ'};
 function evH(e){return `<div class="secli"><p><b>${e.tm?'<bdi dir="ltr">'+esc(e.tm)+'</bdi> · ':''}${esc(e.title)}</b> ${e.rem?'<span class="sectags">תזכורת</span>':''}<span class="sectags">${e.biz?'של העסק':'אישי'}</span><span class="sectags">${esc(SRC[e.src]||'ידני')}</span>${e.offW?'<span class="sectags w">'+esc(e.offW)+'</span>':''}</p>${e.note?`<small class="note">${esc(e.note)}</small>`:''}<div class="secrow"><button class="chip" data-a="secEvEd" data-id="${esc(e.id)}">ערוך</button><button class="chip" data-a="secEvDel" data-id="${esc(e.id)}">מחק</button></div></div>`}
+/* 15.11.2026: לוח שנה חודשי (ברירת המחדל) – יום עם אירוע/תזכורת מסומן, לחיצה על יום מציגה את מה שבו */
+const ymd=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+function monH(R,td){const E=(R.events||[]).filter(e=>e.st==='ok'),m=X.cm||td.slice(0,7),sel=X.cd&&X.cd.slice(0,7)===m?X.cd:(m===td.slice(0,7)?td:m+'-01');
+ const[y,mm]=m.split('-').map(Number),first=new Date(y,mm-1,1,12),n=new Date(y,mm,0).getDate(),by={};E.forEach(e=>{(by[e.d]=by[e.d]||[]).push(e)});
+ let cells='';for(let i=0;i<first.getDay();i++)cells+='<span></span>';
+ for(let k=1;k<=n;k++){const d=m+'-'+String(k).padStart(2,'0'),L=by[d]||[];cells+=`<button type="button" class="seccd${d===td?' td':''}${d===sel?' sel':''}${isOff(d)?' off':''}${d<td?' past':''}" data-a="secCd" data-v="${d}" aria-label="${esc(wkD(d)+' '+dShort(d))}${L.length?', '+L.length+(L.length===1?' אירוע':' אירועים'):''}"><b>${k}</b>${L.length?`<i>${L.length>1?L.length:''}</i>`:'<i class="z"></i>'}</button>`}
+ const L=(by[sel]||[]).slice().sort((a,b)=>(a.tm||'').localeCompare(b.tm||''));
+ return `<div class="card seccal" id="secMon"><div class="seccalh"><button class="chip" data-a="secCm" data-v="-1" aria-label="החודש הקודם">›</button><b>${esc(first.toLocaleDateString('he-IL',{month:'long',year:'numeric'}))}</b><button class="chip" data-a="secCm" data-v="1" aria-label="החודש הבא">‹</button></div>
+ <div class="seccalg">${['א','ב','ג','ד','ה','ו','ש'].map(c=>`<span class="wd">${c}</span>`).join('')}${cells}</div>
+ ${sel!==td?`<button class="chip" data-a="secCd" data-v="${td}" style="margin-top:8px">חזרה להיום</button>`:''}</div>
+ <div class="card" style="margin-top:8px" id="secMonDay"><div class="secday">${esc(wkD(sel))} ${esc(dShort(sel))}<small class="note">${esc(hebD(sel))}${isOff(sel)?' · יום לא עסקים':''}</small></div>${L.length?L.map(evH).join(''):'<p class="note" style="margin:0">אין אירועים או תזכורות ביום הזה</p>'}${sel>=td?`<button class="chip" data-a="secEvAdd" data-d="${sel}" style="margin-top:8px">+ אירוע או תזכורת ביום הזה</button>`:''}</div>`}
+ACT.secCd=el=>{X.cd=el.dataset.v;X.cm=X.cd.slice(0,7);rerender()};
+ACT.secCm=el=>{const[y,m]=(X.cm||todayS().slice(0,7)).split('-').map(Number);X.cm=ymd(new Date(y,m-1+(+el.dataset.v||0),1,12)).slice(0,7);X.cd='';rerender()};
+const css3c=document.createElement('style');
+css3c.textContent='.seccalh{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}.seccalh b{font-size:1.15rem}.seccalh .chip{min-width:48px;justify-content:center;font-size:1.3rem}'
++'.seccalg{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}.seccalg .wd{text-align:center;font-size:.8rem;font-weight:700;opacity:.7;padding:2px 0}'
++'.seccd{min-height:48px;padding:2px 0;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer}'
++'.seccd b{font-size:1rem}.seccd.off{background:color-mix(in srgb,var(--acc) 8%,var(--card))}.seccd.past{opacity:.55}.seccd.td{border:2px solid var(--acc)}.seccd.td b{color:var(--acc)}'
++'.seccd i{display:block;min-width:9px;height:9px;padding:0 3px;border-radius:9px;background:var(--acc);color:var(--onacc,#fff);font-style:normal;font-size:.62rem;line-height:9px;font-weight:800;box-sizing:border-box}.seccd i.z{visibility:hidden}'
++'.seccd.sel{background:var(--acc);border-color:var(--acc);opacity:1}.seccd.sel b{color:var(--onacc,#fff)}.seccd.sel i{background:var(--onacc,#fff);color:var(--acc)}';
+document.head.appendChild(css3c);
 function calH(){const R=X.cl;if(!R){if(!X.cb)calLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="cal">נסה שוב</button></div>`;
- const td=R.today||todayS(),E=R.events||[],pend=E.filter(e=>e.st==='prop'),ok=E.filter(e=>e.st==='ok'&&e.d>=td),view=X.cv||'list';
- let h=`<div class="secrow" style="margin:0 0 8px"><button class="btn" data-a="secEvAdd" style="flex:1">+ אירוע</button><button class="chip${view==='list'?' on':''}" data-a="secCv" data-v="list">רשימה</button><button class="chip${view==='week'?' on':''}" data-a="secCv" data-v="week">שבוע</button></div>`;
+ const td=R.today||todayS(),E=R.events||[],pend=E.filter(e=>e.st==='prop'),ok=E.filter(e=>e.st==='ok'&&e.d>=td),view=X.cv||'month';
+ let h=`<div class="secrow" style="margin:0 0 8px"><button class="btn" data-a="secEvAdd" style="flex:1">+ אירוע</button><button class="chip${view==='month'?' on':''}" data-a="secCv" data-v="month">חודש</button><button class="chip${view==='list'?' on':''}" data-a="secCv" data-v="list">רשימה</button><button class="chip${view==='week'?' on':''}" data-a="secCv" data-v="week">שבוע</button></div>`;
+ if(view==='month'){if(pend.length)h+=`<div class="card secwarn" style="margin-bottom:8px"><b>המזכירה הציעה (${pend.length})</b>${pend.map(e=>cardH({k:'cal',id:e.id,title:e.title,d:e.d,tm:e.tm,to:e.to,rem:e.rem,warn:e.off&&R.we!=='accept'?{kind:e.off,next:nextBiz(e.d)}:null})).join('')}</div>`;return h+monH(R,td)}
  const soon=ok.slice(0,3);h+=`<div class="card" id="secSoon"><b>קרוב</b>${soon.length?soon.map(e=>`<div class="note" style="margin-top:4px">${esc(dShort(e.d))}${e.tm?' <bdi dir="ltr">'+esc(e.tm)+'</bdi>':''} – ${esc(e.title)}</div>`).join(''):'<p class="note" style="margin:4px 0 0">אין אירועים קרובים</p>'}</div>`;
  if(pend.length)h+=`<div class="card secwarn" style="margin-top:8px"><b>המזכירה הציעה (${pend.length})</b>${pend.map(e=>cardH({k:'cal',id:e.id,title:e.title,d:e.d,tm:e.tm,to:e.to,rem:e.rem,warn:e.off&&R.we!=='accept'?{kind:e.off,next:nextBiz(e.d)}:null})).join('')}</div>`;
  const days=[];if(view==='week'){for(let i=0;i<7;i++){const[y,m,x]=td.split('-').map(Number);const d=new Date(y,m-1,x+i,12);days.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))}}
@@ -385,7 +419,7 @@ function evForm(e){e=e||{};return `<h3>${e.id?'עריכת אירוע':'אירו�
  <label class="f"><span>הערה (לא חובה)</span><input name="note" maxlength="500" autocomplete="off" value="${esc(e.note||'')}"></label>
  ${e.id?'':`<label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:6px"><input type="checkbox" name="biz" value="1"> של העסק (כל המנהלים רואים)</label><label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:6px"><input type="checkbox" name="rem" value="1"> תזכורת (התראה בשעה שנקבעה)</label>`}
  <div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`}
-ACT.secEvAdd=()=>dlg(evForm());
+ACT.secEvAdd=el=>{const d=el&&el.dataset&&el.dataset.d;dlg(evForm(d?{d}:undefined))};
 ACT.secEvEd=el=>{const e=((X.cl||{}).events||[]).find(z=>z.id===el.dataset.id);if(e)dlg(evForm(e))};
 async function evSave(d){const r=await fnCall('secCal',d);if(r&&r.ok===false&&r.warn){const w=r.warn;
   dlg(`<h3>${esc(w.kind)}</h3><p>${w.rem?'התזכורת':'האירוע'} נופל${w.rem?'ת':''} ב${esc(w.kind)} (${esc(dShort(w.d))}). ${w.rem?'להשאיר בזמנה':'להשאיר'} או להעביר ל${esc(wkD(w.next))} ${esc(dShort(w.next))}?</p><div class="secrow"><button class="chip" data-a="secEvW" data-m="move">להעביר ל-${esc(dShort(w.next))}</button><button class="chip" data-a="secEvW" data-m="keep">להשאיר</button><button class="chip" data-a="closeDlg">ביטול</button></div>`);X.evp={d,next:w.next};return}
@@ -1284,14 +1318,14 @@ const css10=document.createElement('style');
 css10.textContent='.secey{margin:0 0 8px}.secey .secli{padding:8px 0}.secey .secli p{margin:0 0 2px}.secey .secrow .chip{min-height:44px}.secey .eyh{display:flex;justify-content:space-between;align-items:center;gap:8px}'
 +'.secey .secday{margin:10px 0 2px}.secdone b{color:var(--acc)}#secPrev .secday{text-align:center;font-size:.85rem}';
 document.head.appendChild(css10);
-TABS.splice(1,0,['prev',"צ'אט קודם"]);
-const RKL={inv:'חשבוניות',rem:'תזכורות',note:'התראות',draft:'טיוטות תשובה',appr:'הצעות לאישור'},RDL={hold:'מסך "לטיפול" באפליקציה',tab:"רק בלשונית שלהן (לא בצ'אט)",chat:'"מול העיניים" בצ\'אט'};
+TABS.splice(1,0,['eyes','מול העיניים'],['prev',"צ'אט קודם"]);/* 15.11.2026: "מול העיניים" עבר ללשונית משלו – הצ'אט נפתח ריק בכל כניסה */
+const RKL={inv:'חשבוניות',rem:'תזכורות',note:'התראות',draft:'טיוטות תשובה',appr:'הצעות לאישור'},RDL={hold:'מסך "לטיפול" באפליקציה',tab:"רק בלשונית שלהן (לא בצ'אט)",chat:'לשונית "מול העיניים"'};
 const rtL=c=>'מעכשיו '+(RKL[c.kind]||'פריטים')+' ← '+(RDL[c.dest]||'');
 /* ---------- "מול העיניים" ---------- */
-async function eyLoad(visit){if(X.eyb){X.eyQ=1;return}X.eyb=1;
+async function eyLoad(visit){if(X.eyb){X.eyQ=X.eyQ===2||visit?2:1;return}X.eyb=1;
  try{const r=await fnCall('secLearn',{op:'eyes',visit:!!visit});X.ey=r&&Array.isArray(r.open)?r:{err:'לא נטען'};if(Array.isArray(X.ey.hold)){TD.key=keyNow();TD.L=X.ey.hold;TD.at=Date.now()}}
  catch(e){X.ey=X.ey&&!X.ey.err?X.ey:{err:e&&e.message||'לא נטען'}}
- finally{X.eyb=0;if(X.eyQ){X.eyQ=0;eyLoad(false);return}if(cur().v==='sec'&&!typing())rerender()}}
+ finally{X.eyb=0;if(X.eyQ){const v=X.eyQ===2;X.eyQ=0;eyLoad(v);return}if(cur().v==='sec'&&!typing())rerender()}}
 /* אחרי פעולה (אישור, "טופל", כלל חדש) – המידע הקיים נשאר על המסך ומתעדכן ברקע */
 function eyStale(){if(!X.ey||X.ey.err)X.ey=null;eyLoad(false)}
 const EYK={appr:'לאישור',draft:'טיוטה',note:'התראה',inv:'חשבונית',rem:'תזכורת'};
@@ -1366,11 +1400,15 @@ ACT.secTdGo=el=>{const t=el.dataset.tab,id=el.dataset.id||'',wa=el.dataset.wa||'
 /* ---------- כניסה לצ'אט = מסך נקי ---------- */
 function chatEnter(){if(X.sending)return;X.msgs=[];X.msgErr='';X.ey=null;X.eyV=1;X.eyAll=0;X.didAll=0}
 /* מעבר בין לשוניות לא מנקה את הצ'אט (15.11): חזרה ל"שיחה" – "מול העיניים" מתעדכן ברקע */
-{const t10=ACT.secTab;ACT.secTab=el=>{const v=el.dataset.v,was=X.tab||'chat';if(v==='chat'&&was!=='chat'&&X.ey&&!X.ey.err)eyStale();if(v==='prev')X.pc=null;t10(el)}}
+{const t10=ACT.secTab;ACT.secTab=el=>{const v=el.dataset.v,was=X.tab||'chat';if(v==='eyes'){if(X.eyV){X.eyV=0;eyLoad(true)}else if(was!=='eyes'&&X.ey&&!X.ey.err)eyStale()}if(v==='prev')X.pc=null;t10(el)}}
 {const r0=window.render;if(typeof r0==='function')window.render=function(){const r=r0.apply(this,arguments);try{X.pvw=cur().v}catch(e){}return r}}
 {const r10=V.sec;V.sec=()=>{try{if(X.pvw!=='sec'){X.pvw='sec';chatEnter()}}catch(e){}
  if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='prev'){const S0=X.st;
   return{t:S0.name||'המזכירה',s:"צ'אט קודם",h:stopH()+tabsH()+prevH()}}
+ if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='eyes'){const S0=X.st;
+  return{t:S0.name||'המזכירה',s:'מול העיניים',h:stopH()+tabsH()+eyH()}}
+ /* מספר הפריטים הפתוחים ללשונית – נטען ברקע (בלי לסמן "ביקור") */
+ try{if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.ey&&!X.eyb)eyLoad(false)}catch(e){}
  return r10()}}
 window.__secEy=()=>X.ey;window.__secTd=TD;
 
