@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>בדיקת סיור 360 – תמונות סינתטיות</title>
+<!-- דף בדיקה למפתחים בלבד (שלב 18ב). התמונות נוצרות בקוד, אינן נתוני העסק. -->
+<style>html,body{margin:0;height:100%;background:#121216}#v{position:absolute;inset:0}</style>
+</head>
+<body>
+<div id="v"></div>
+<script src="../store3d-geo.js"></script>
+<script src="../store3d-view.js"></script>
+<script src="../store3d-pano.js"></script>
+<script>
+(function(){
+'use strict';
+const PTS=[{id:'A',x:300,y:300,yaw:0,c:'#27506e',nb:['B']},{id:'B',x:600,y:300,yaw:90,c:'#6e3a27',nb:['A','C']},{id:'C',x:600,y:600,yaw:180,c:'#2f6e3a',nb:['B']}];
+const blobs={};
+function mk(p,w){return new Promise(res=>{const h=w/2,c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');
+  g.fillStyle=p.c;g.fillRect(0,0,w,h);const k=w/360;
+  g.strokeStyle='rgba(255,255,255,.35)';g.lineWidth=2*k/4;
+  for(let a=0;a<=360;a+=30){g.beginPath();g.moveTo(a*k,0);g.lineTo(a*k,h);g.stroke()}
+  for(let a=0;a<=180;a+=30){g.beginPath();g.moveTo(0,a*k);g.lineTo(w,a*k);g.stroke()}
+  g.fillStyle='#fff';g.textAlign='center';g.font='bold '+(7*k)+'px sans-serif';
+  g.fillText('נקודה '+p.id,w/2,h/2-12*k);
+  g.font=(4*k)+'px sans-serif';
+  for(let b=0;b<360;b+=45){const u=(((b-p.yaw)%360)+540)%360-180,x=w/2+u*k;g.fillText(['צפון','צפון-מזרח','מזרח','דרום-מזרח','דרום','דרום-מערב','מערב','צפון-מערב'][b/45],x,h/2+4*k)}
+  for(const q of PTS)if(p.nb.includes(q.id)){const b=Math.atan2(q.x-p.x,-(q.y-p.y))*180/Math.PI,u=(((b-p.yaw)%360)+540)%360-180;
+    g.fillStyle='#d4af37';g.fillRect(w/2+u*k-3*k,h/2+8*k,6*k,20*k);g.fillStyle='#000';g.font='bold '+(5*k)+'px sans-serif';g.fillText(q.id,w/2+u*k,h/2+22*k)}
+  c.toBlob(b=>{c.width=c.height=1;res(b)},'image/jpeg',.8)})}
+window.__ready=(async()=>{
+  for(const p of PTS){blobs['f/'+p.id]=await mk(p,4096);blobs['s/'+p.id]=await mk(p,1024)}
+  const tour={start:'A',pts:PTS.map(p=>({id:p.id,x:p.x,y:p.y,yaw:p.yaw,full:'f/'+p.id,sm:'s/'+p.id,nb:p.nb}))};
+  window.__loads=[];
+  const h=await S3Pano.open(document.getElementById('v'),tour,{
+    load:path=>{window.__loads.push(path);return new Promise(r=>setTimeout(()=>r(blobs[path]),path[0]==='f'?150:20))},
+    map:{rooms:[{id:'r',p:[0,0,900,0,900,800,0,800]}],walls:[{id:'w',p:[450,0,450,300]}]},
+    tags:[{x:450,y:300,k:'ok'},{x:300,y:150,k:'iss'},{x:600,y:450,k:'miss'}],
+    onError:(c,t)=>{window.__err=[c,t]},onClose:()=>{window.__closed=true}});
+  window.__pano=h;return !!h})();
+})();
+</script>
+</body>
+</html>
