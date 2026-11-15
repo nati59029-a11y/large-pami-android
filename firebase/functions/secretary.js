@@ -62,7 +62,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn']); // sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_mrule', 'sec_mlog']); // sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6; sec_mrule (כללים אישיים של מנהל), sec_mlog (יומן "נשלח לבד") – 15.11.2026. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -87,6 +87,8 @@ function cfgOf(snap, bizId) {
     nr: obj(d.nr),
     // קצב הודעות לכל מנהל (10.3, 89): מנהל־על קובע לכל עסק; בלי הגדרה – ברירת המחדל
     rate: { hour: Number.isInteger(d.rate && d.rate.hour) ? d.rate.hour : RATE_HOUR, day: Number.isInteger(d.rate && d.rate.day) ? d.rate.day : RATE_DAY },
+    // 15.11.2026 ("תגובה למזכירה"): כללים אישיים של מנהל – פעיל כברירת מחדל (החלטת בעל הפרויקט); learn:false במסמך = כבוי בעסק
+    learn: d.learn !== false,
   };
 }
 const empDefault = (bizId) => bizId === T.BIZ0;
@@ -125,13 +127,14 @@ async function gate(request, opts) {
 // secState: מה האפליקציה צריכה כדי להציג כפתור, כרטיס, הסכמה ואשף. לא דורש הסכמה (כדי להציג את מסך ההסכמה).
 async function secState(request) {
   inputObject(request);
-  const { who, cfg, me, consented, sensOn } = await gate(request);
+  const { who, cfg, me, consented, sensOn, brLimited } = await gate(request);
   const out = {
     ok: true, bizId: who.bizId, mode: cfg.mode, isMain: cfg.mode === 'main',
     consented, consentAt: consented && Number.isFinite(me.ca) ? me.ca : null, consentVer: CONSENT_VER,
     name: typeof me.nm === 'string' ? me.nm : '', addr: me.ad === 'f' ? 'f' : me.ad === 'm' ? 'm' : '', call: typeof me.call === 'string' ? me.call : '',
     pay: cfg.pay[who.uid] === true, emp: cfg.emp === true,
     sens: sensOn, we: me.we === 'accept' ? 'accept' : 'warn', // שלב 3: מידע רגיש; פגישה בשישי/שבת/חג (72)
+    learn: cfg.learn, brLimited, // 15.11.2026: "תגובה למזכירה" – כללים אישיים (פעיל כברירת מחדל); מנהל עם הגבלת סניפים – בלי כללים על מייל/ווצאפ
     rows: [], // כרטיס הבית מתמלא בהדרגה (11): ממתינים / חשבוניות / תזכורות – נוספים רק בשלבים שבונים אותם
   };
   out.setupDone = !!(out.name && out.addr);
@@ -467,7 +470,9 @@ async function secChat(request) {
     const bankNote = bankCond.length ? JSON.stringify(bankCond.map((r) => ({ q: r.q, a: r.a, cond: r.cond }))).slice(0, 12000) : '';
     // שלב 13ב: סיכום סבבי סריקת החנות (רק כשהתוספת פעילה; מנהל עם הגבלת סניפים – רק הסניפים שלו). כשל – בלי הסיכום, השיחה ממשיכה
     s3 = await require('./store3d-extra')._x.secBrief(db, who, brs, now).catch((e) => { logger.warn('secChat: store3d brief failed', { code: e && e.code }); return null; });
-    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote }) + (s3 ? '\n' + s3.text : '');
+    // 15.11.2026: ההנחיות הקבועות של המנהל הזה בלבד (sec_mrule, ערוץ השיחה) – גוברות על ברירת המחדל בסגנון, לא על הכללים המחייבים. כשל – בלי ההנחיות
+    const mr = cfg.learn ? await require('./secretary-learn')._core.chatRules(db, who.uid).catch(() => []) : [];
+    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote, mr }) + (s3 ? '\n' + s3.text : '');
     let final = null, refused = false;
     try {
       for (let round = 0; round < MAX_ROUNDS && final === null && !refused; round++) {

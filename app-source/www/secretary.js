@@ -1,4 +1,4 @@
-/* SEC:1+2+3+4+5+6+7 – המזכירה העסקית. שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
+/* SEC:1+2+3+4+5+6+7+9 – המזכירה העסקית. שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
    שלב 2: secFin – נתוני הכספים לצ'אט ולמראה, מחושבים בפונקציות של מסכי האפליקציה עצמם (monthIncome, monthExpense, monthOwner, catTotal,
    inv/bal/dueOf, bsum, homeCards, dueStats, cfDebits, cfMonths) – אין כאן נוסחה כספית שנייה; מראה לענן אחרי כל שמירה (לכל היותר פעם ב-3 דקות);
    מסך הצ'אט (מקורות, "נכון ל-", "חשבי לעומק", אחוז ניצול, סף תזרים, "לא רלוונטי", מתג המראה).
@@ -212,7 +212,7 @@ function bub(m,i){if(m.role!=='a')return `<div class="secmsg u">${esc(m.text)}</
  const ideas=(m.ideas||[]).filter(x=>!(X.nr||{})[x.key]).map(x=>`<div class="card" style="margin:6px 0 0;padding:8px"><small>${esc(x.seen||'')}</small><button class="chip" data-a="secNr" data-k="${esc(x.key)}" style="min-height:40px;margin-top:4px">לא רלוונטי – לא להציע 90 יום</button></div>`).join('');
  const th=m.th&&X.st&&X.st.cfTh==null?`<div class="card" style="margin:6px 0 0;padding:8px"><small>סף מוצע להתראת תזרים: ${esc(Number(m.th).toLocaleString('he-IL'))} ₪</small><div class="row" style="margin-top:4px"><button class="chip" data-a="secTh" data-v="${esc(String(m.th))}" style="min-height:40px">לאשר את הסף</button><button class="chip" data-a="secThEd" style="min-height:40px">סף אחר</button></div></div>`:'';
  const cards=(m.cards||[]).map(cardH).join('');
- return `<div class="secmsg a${m.stale?' secwarn':''}">${tx}${cards}${src?`<details class="secsrc"><summary>מקורות (${(m.src||[]).length})</summary><ol style="margin:4px 0;padding-inline-start:18px;list-style:none">${src}</ol></details>`:''}${ideas}${th}</div>`}
+ return `<div class="secmsg a${m.stale?' secwarn':''}">${tx}${cards}${src?`<details class="secsrc"><summary>מקורות (${(m.src||[]).length})</summary><ol style="margin:4px 0;padding-inline-start:18px;list-style:none">${src}</ol></details>`:''}${ideas}${th}${m.id&&m.mode!=='policy'?`<div class="secrow">${mrBtnH('chat',m.id)}</div>`:''}</div>`}
 function chatH(S){const pct=Number.isFinite(S.pct)?S.pct:null,fin=!!secFinOk();
  const bar=`<div class="secbar" id="secBar"><span>${fin?'נתוני הכספים: מהמכשיר, נכונים ל-'+esc(fmtAt(Date.now())):S.mirror===false?'מראה הכספים כבוי':S.mirrorAt?'נתוני הכספים נכונים ל-'+esc(fmtAt(S.mirrorAt)):'אין נתוני כספים במכשיר הזה'}</span>${pct!=null?`<span id="secPct">ניצול החודש: <bdi dir="ltr">${pct}%</bdi></span>`:''}<button class="chip" data-a="secSet" style="min-height:36px;margin-inline-start:auto">הגדרות</button></div>`;
  const warn=S.saving?`<div class="card secwarn" id="secSaving"><small>${S.saving==='day'?'הגעתם לתקרת השימוש היומית – אפשר להמשיך מחר.':'הגעתם לתקרת השימוש החודשית – המזכירה במצב חיסכון עד תחילת החודש או הגדלת התקרה.'}</small></div>`:pct>=80?`<div class="card secwarn"><small>ניצלתם ${pct}% מתקרת השימוש החודשית.</small></div>`:'';
@@ -230,6 +230,7 @@ function setH(S){return `<div class="card"><b>מראה הכספים בענן</b>
  <label class="chip" style="min-height:44px;width:100%;justify-content:flex-start"><input type="checkbox" data-c="secMir"${S.mirror!==false?' checked':''}> פעיל${S.mirrorAt?' · עודכן '+esc(fmtAt(S.mirrorAt)):''}</label></div>
  <div class="card" style="margin-top:8px"><b>סף התראת תזרים</b><p class="note" style="margin:4px 0 8px">${S.cfTh!=null?'הסף שאישרת: '+esc(Number(S.cfTh).toLocaleString('he-IL'))+' ₪':'עדיין לא נקבע. המזכירה תציע סף כשתשאלו על התזרים.'}</p><button class="chip" data-a="secThEd" style="min-height:40px">${S.cfTh!=null?'שינוי':'קביעת סף'}</button></div>
  <div class="card" style="margin-top:8px"><b>פגישה בשישי, בשבת או בחג</b><p class="note" style="margin:4px 0 8px">מה לעשות כשאירוע נקבע ליום שאינו יום עסקים.</p><div class="chips" role="radiogroup"><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="warn"${S.we!=='accept'?' checked':''}> להזהיר ולהציע יום אחר</label><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="accept"${S.we==='accept'?' checked':''}> לקבל בלי הערה</label></div></div>
+ ${mrSetH()}
  ${waSetH()}
  ${mailSetH()}
  ${gSetH()}
@@ -255,7 +256,7 @@ async function ask2(q,deep){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)retur
  X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';rerender();scrollEnd();
  try{const fin=secFin({pay:!!X.st.pay});const d={text:q,deep};if(fin)d.fin=fin;
   const r=await fnCall('secChat',d);
-  X.msgs.push({role:'a',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null}
+  X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null}
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
  catch(e){const rs=e&&Object.prototype.hasOwnProperty.call(AIR,e.reason)?' (סיבה: '+AIR[e.reason]+')':'';X.msgs.push({role:'a',text:((e&&e.message)||'השליחה נכשלה. נסו שוב.')+rs,t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
  finally{X.sending=0;X.deep=0;if(cur().v==='sec')rerender();scrollEnd()}}
@@ -470,7 +471,7 @@ const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');
 function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
  return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><button type="button" class="secnb" data-a="secNOpen" data-id="${esc(n.id)}" aria-label="כל הפרטים: ${esc(nFix(n.title,n))}"><p><b>${esc(nFix(n.title,n))}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
  <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
- <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
+ <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${mrBtnH('note',n.id)}${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
 function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="notes">נסה שוב</button></div>`;
  const L=R.notes||[];pnShown();if(!L.length)return '<div class="empty">אין התראות</div>';
  return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">לחיצה על התראה – כל הפרטים. תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
@@ -486,13 +487,13 @@ ACT.secNOpen=el=>noteDlg(el.dataset.id);
 ACT.secNZc=()=>{closeDlg();go('zc')};
 ACT.secNRp=el=>{closeDlg();ACT.secRpOpen(el)};
 ACT.secNDoneD=el=>{closeDlg();ACT.secNDone(el)};
-ACT.secNotesGo=()=>{X.tab='notes';X.set=0;X.edit=0;X.rp=null;X.nl=null;go('sec')};
+ACT.secNotesGo=()=>{X.tab='notes';X.set=0;X.edit=0;X.mrv=0;X.rp=null;X.nl=null;go('sec')};
 /* 15.11.2026: לחיצה על התראה בטלפון – "לפתוח את ההתראות" נשמר לדקה (גם בזיכרון הטלפון, למקרה שהמסך נטען מחדש) ומוחל שוב עד שרשימת ההתראות באמת מוצגת:
    בפתיחה מאפס האירוע יכול להגיע לפני שההרשאות, העסק או המזכירה נטענו, ומסך שנפתח בדרך מסתיר את המזכירה. כשההתראה אחת – גם פרטיה נפתחים. */
 const PNK='lp-pn-open',PNI={t:0,id:''},PNW=[600,1500,3000,6000,10000,20000];
 const pnEnd=()=>{PNI.t=0;PNI.id='';try{localStorage.removeItem(PNK)}catch(e){}};
 function pnTry(){if(!PNI.t)return;if(Date.now()-PNI.t>60000){pnEnd();return}if(!isA())return;
- if(cur().v!=='sec'||X.tab!=='notes'||X.set||X.edit){try{ACT.secNotesGo()}catch(e){}}}
+ if(cur().v!=='sec'||X.tab!=='notes'||X.set||X.edit||X.mrv){try{ACT.secNotesGo()}catch(e){}}}
 function pnShown(){if(!PNI.t||cur().v!=='sec')return;const id=PNI.id;pnEnd();if(id&&(X.nl.notes||[]).some(x=>x.id===id))setTimeout(()=>{if(cur().v==='sec'&&X.tab==='notes')noteDlg(id)},0)}
 function pnTap(id){PNI.t=Date.now();PNI.id=typeof id==='string'&&/^[A-Za-z0-9_:.-]{1,200}$/.test(id)?id:'';try{localStorage.setItem(PNK,JSON.stringify(PNI))}catch(e){}pnTry();PNW.forEach(ms=>setTimeout(pnTry,ms))}
 try{const o=JSON.parse(localStorage.getItem(PNK)||'null');if(o&&+o.t&&Date.now()-o.t<60000){PNI.t=+o.t;PNI.id=String(o.id||'');PNW.forEach(ms=>setTimeout(pnTry,ms))}else if(o)localStorage.removeItem(PNK)}catch(e){}
@@ -602,11 +603,11 @@ ACT.secWaBack=()=>{X.wa.cur=null;X.wa.card=null;X.wa.list=null;rerender()};
 /* ---------- כרטיס שולח + טיוטות ---------- */
 async function waCardLoad(){const wa=X.wa.cur;X.wa.cb=1;try{const r=await fnCall('secInbox',{op:'get',wa});if(X.wa.cur===wa)X.wa.card=r&&r.card?r:{err:'לא נטען'}}catch(e){X.wa.card={err:e&&e.message||'לא נטען'}}finally{X.wa.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
 function drH(d,open,tpls){
- if(d.st==='sent')return `<div class="secdr"><small class="note">נשלח ✓</small><div style="white-space:pre-wrap">${esc(d.sum||d.text)}</div></div>`;
+ if(d.st==='sent')return `<div class="secdr"><small class="note">${d.am?'נשלח לבד לפי הכלל ✓':'נשלח ✓'}</small><div style="white-space:pre-wrap">${esc(d.sum||d.text)}</div></div>`;
  if(d.st==='done')return '<div class="secdr" style="opacity:.75"><small class="note">טופל בלי לענות</small></div>';
  const why=(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:'';
  const head=`<small class="note">טיוטת תשובה${d.src==='bank'?' (מתשובה מוכנה)':''}${d.lang&&d.lang!=='he'?' · בשפת הפונה':''}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+flH(d.flags)+'</div>':''}${why}`;
- if(open)return `<div class="secdr" data-id="${esc(d.id)}">${head}<textarea class="secin" id="secDr_${esc(d.id)}" maxlength="2000" aria-label="טיוטת תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" style="flex:1">שלח</button><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button></div></div>`;
+ if(open)return `<div class="secdr" data-id="${esc(d.id)}">${head}${mrInfoH(d)}<textarea class="secin" id="secDr_${esc(d.id)}" maxlength="2000" aria-label="טיוטת תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" style="flex:1">שלח</button><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button>${mrBtnH('wa',d.id)}</div></div>`;
  return `<div class="secdr" data-id="${esc(d.id)}">${head}<div style="white-space:pre-wrap;margin-top:4px">${esc(d.text)}</div><p class="note" style="margin:6px 0">עברו 24 שעות מההודעה האחרונה של הפונה. אפשר לשלוח רק הודעת תבנית מאושרת.</p>${(tpls||[]).length?`<div class="secrow"><select id="secTpl_${esc(d.id)}" aria-label="תבנית">${tpls.map(t=>`<option value="${esc(t.name)}">${esc(t.label)}</option>`).join('')}</select><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" data-t="1">שלח תבנית</button></div>`:'<p class="note" style="margin:0">אין תבניות מאושרות. מנהל המערכת מוסיף אותן.</p>'}<div class="secrow"><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button></div></div>`}
 function waCardH(){const R=X.wa.card,back='<button class="btn g w" data-a="secWaBack" style="margin-bottom:8px">חזרה לתיבת ההודעות</button>';
  if(!R){if(!X.wa.cb)waCardLoad();return back+'<div class="empty">טוען…</div>'}if(R.err)return back+`<div class="card"><p class="note">${esc(R.err)}</p></div>`;
@@ -726,9 +727,9 @@ function mlCardH(){const R=X.ml.card,back='<button class="btn g w" data-a="secMl
  <div class="secin1" dir="auto">${esc(m.text||m.snip||'')}</div>${(m.files||[]).length?`<p class="note" style="margin:4px 0">קבצים: ${m.files.map(esc).join(', ')} – קליטת חשבוניות תגיע בהמשך</p>`:''}</div>`;
  if(d&&d.st==='sent')return h+`<div class="secdr"><small class="note">${d.am?'נשלח אוטומטית מה-Gmail של העסק ✓':'נשלח מה-Gmail של העסק ✓'}</small>${d.am?'<div class="sectg"><span class="sectags g">אוטומטי</span></div>':''}<div style="white-space:pre-wrap">${esc(d.text)}</div></div>`;
  if(d&&['pend','fail','sending'].includes(d.st)){const hasFile=!!(d.file||(d.flags||[]).includes('file')||(m.files||[]).length||(m.flags||[]).includes('file')),an=(d.anL||[]).length?`<div class="secin1" style="margin:6px 0"><b>למה לא נשלחה אוטומטית</b><ul style="margin:4px 0 0;padding-inline-start:18px">${d.anL.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul></div>`:'';const why=(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:'';
-  return h+`<div class="secdr" id="secMlDr"><small class="note">תשובה אל <bdi dir="ltr" class="secaddr">${esc(d.to)}</bdi> · ${d.src==='ai'?'טיוטה מהמזכירה':'נכתבה על ידך'}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+mflH(d.flags)+'</div>':''}${hasFile?'<div class="sectg"><span class="sectags w">📎 יש קובץ מצורף</span></div>':''}${an}${why}
+  return h+`<div class="secdr" id="secMlDr"><small class="note">תשובה אל <bdi dir="ltr" class="secaddr">${esc(d.to)}</bdi> · ${d.src==='ai'?'טיוטה מהמזכירה':'נכתבה על ידך'}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+mflH(d.flags)+'</div>':''}${hasFile?'<div class="sectg"><span class="sectags w">📎 יש קובץ מצורף</span></div>':''}${an}${why}${mrInfoH(d)}
   <textarea class="secin" id="secMlTx" maxlength="5000" aria-label="תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secMlSend" style="flex:1">שלח מה-Gmail של העסק</button><button class="chip" data-a="secMlDone">לא לענות</button></div>
-  <div class="secrow" style="margin-top:8px"><input class="secin" id="secMlNote" maxlength="500" dir="auto" placeholder="לדייק: הנחיה קצרה לשינוי הטיוטה" aria-label="הנחיה לדיוק הטיוטה" style="flex:1 1 100%;min-height:44px"><button class="chip" data-a="secMlRefine" style="min-height:44px">לדייק</button></div><small class="note">המייל יוצא רק בלחיצה שלך. לשינוי חופשי – ערכו את התשובה למעלה ושלחו.</small></div>`}
+  <div class="secrow" style="margin-top:8px"><input class="secin" id="secMlNote" maxlength="500" dir="auto" placeholder="לדייק: הנחיה קצרה לשינוי הטיוטה" aria-label="הנחיה לדיוק הטיוטה" style="flex:1 1 100%;min-height:44px"><button class="chip" data-a="secMlRefine" style="min-height:44px">לדייק</button>${mrBtnH('mail',X.ml.cur)}</div><small class="note">המייל יוצא רק בלחיצה שלך. לשינוי חופשי – ערכו את התשובה למעלה ושלחו.</small></div>`}
  if(X.ml.w)return h+`<form class="secdr" data-f="secMlW"><small class="note">תשובה משלך</small><textarea class="secin" name="text" maxlength="5000" aria-label="תשובה" dir="auto"></textarea><div class="secrow"><button class="btn" style="flex:1">שמירת טיוטה</button><button type="button" class="chip" data-a="secMlWx">ביטול</button></div></form>`;
  return h+`<div class="secrow" style="margin-top:8px">${sus?'':'<button class="btn" data-a="secMlDraft" style="flex:1">טיוטה מהמזכירה</button>'}<button class="chip" data-a="secMlW" style="min-height:44px">לכתוב בעצמי</button><button class="chip" data-a="secMlDone" style="min-height:44px">טופל</button></div>`}
 ACT.secMlDraft=async el=>{el.disabled=true;try{const r=await fnCall('secMail',{op:'draft',id:X.ml.cur});if(X.ml.card)X.ml.card.draft=r.draft}catch(e){merr(e)}finally{el.disabled=false;rerender()}};
@@ -1073,6 +1074,78 @@ ACT.secIvOn=async el=>{try{const r=await fnCall('secInv',{op:'cfg',sub:el.datase
 {const h7=V.home;if(h7)V.home=()=>{const r=h7();try{const n=ivPend();if(n&&r&&r.h&&r.h.includes('id="secHome"'))r.h=r.h.replace(/(id="secHome"[\s\S]*?<small class="note" style="display:block">[^<]*<\/small>)/,'$1<div class="note" style="margin-top:4px" id="secHomeInv">'+(n===1?'חשבונית אחת ממתינה לאישור':n+' חשבוניות ממתינות לאישור')+'</div>')}catch(e){}return r}}
 {const t7=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='inv'){IV.at=0}t7(el)}}
 window.__secInv=IV;
+
+/* =====================================================================================
+   SEC:9 – "תגובה למזכירה" (15.11.2026): כפתור "תגובה" על כל הודעה של המזכירה (תשובה בשיחה, התראה, טיוטת מייל, טיוטת ווצאפ),
+   הצעה לשמור את ההוראה ככלל אישי, השאלה "לעשות את זה מעכשיו לבד?" בטיוטה, ומסך "הכללים שלי" (פעיל / לבד / מחיקה) עם יומן "נשלח לבד".
+   הכול דרך secLearn בשרת. כללי הבטיחות (תשלום, מחיקה, סיסמאות ופרטים רגישים – תמיד באישור) נאכפים בשרת; כאן רק תצוגה.
+   ===================================================================================== */
+const mrOn=()=>!!(X.st&&X.st.learn!==false);
+const MRCH={chat:'שיחה',note:'התראות',mail:'מייל',wa:'ווצאפ'};
+const MREX={chat:['מעכשיו תעני לי בקצרה','תמיד תתחילי בשורה התחתונה'],note:['אל תתריעי לי על התראות כאלה'],mail:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע'],wa:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע']};
+const MRERR={'branch-limited':'כללים על מייל וווצאפ זמינים רק למנהל בלי הגבלת סניפים','learn-off':'הכללים האישיים כבויים בעסק הזה','too-many':'הגעתם למספר הכללים המרבי (50). אפשר למחוק כלל ישן במסך "הכללים שלי".','need-approval':'קודם צריך לאשר פעם אחת תשובה לפי הכלל הזה','safe-rule':'כלל בטיחות – תמיד באישור שלך','not-pending':'הטיוטה כבר נשלחה או טופלה'};
+const mrErr=e=>toast(e&&e.reason&&MRERR[e.reason]||e&&e.message||'הפעולה נכשלה');
+function mrBtnH(k,id){if(!id||!mrOn()||(X.st.brLimited&&(k==='mail'||k==='wa')))return '';
+ return `<button type="button" class="chip" data-a="secMrReply" data-k="${esc(k)}" data-id="${esc(id)}" style="min-height:44px" aria-label="תגובה למזכירה – להגיד לה מה לעשות">↩ תגובה</button>`}
+ACT.secMrReply=el=>{const k=el.dataset.k,id=el.dataset.id;if(!MRCH[k]||!id)return;X.mrp={k,id};
+ dlg(`<h3>תגובה למזכירה</h3><p class="note" style="margin:0 0 6px">כתבו מה לעשות${k==='mail'||k==='wa'?' – אכין טיוטה חדשה לפי ההוראה (היא לא תישלח בלי לחיצה שלך)':''}. אחר כך אפשר לשמור את ההוראה ככלל קבוע.</p>
+ <form data-f="secMrF"><textarea class="secin" name="t" id="secMrT" maxlength="300" dir="auto" aria-label="מה לעשות" placeholder="למשל: ${esc(MREX[k][0])}"></textarea>
+ <div class="chips" style="margin:6px 0">${MREX[k].map(x=>`<button type="button" class="chip" data-a="secMrEx" data-v="${esc(x)}" style="min-height:44px">${esc(x)}</button>`).join('')}</div>
+ <p class="note" style="margin:0 0 8px">תשלום או העברת כסף, מחיקת נתונים ושליחת סיסמאות או פרטים רגישים – תמיד באישור שלך, גם אם תכתבו אחרת.</p>
+ <div class="row"><button class="btn grow" id="secMrGo">שליחה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+ACT.secMrEx=el=>{const t=document.getElementById('secMrT');if(t){t.value=el.dataset.v;t.focus()}};
+FRM.secMrF=async f=>{const p=X.mrp;if(!p)return;const text=String(f.t.value||'').trim();if(!text)return toast('כתבו מה לעשות');if(text.length>300)return toast('עד 300 תווים');
+ const b=document.getElementById('secMrGo');if(b){b.disabled=true;b.textContent=p.k==='mail'||p.k==='wa'?'מכינה טיוטה…':'רגע…'}
+ try{const r=await fnCall('secLearn',{op:'reply',k:p.k,id:p.id,text});p.text=text;p.prop=r.prop;
+  if(r.draft){if(p.k==='mail'&&X.ml&&X.ml.card)X.ml.card.draft=r.draft;if(p.k==='wa'&&X.wa&&X.wa.card){const L=X.wa.card.drafts||[],i=L.findIndex(x=>x.id===r.draft.id);if(i>=0)L[i]=Object.assign({},L[i],r.draft)}}
+  mrPropDlg(p,!!r.draft);rerender()}
+ catch(e){mrErr(e);if(b){b.disabled=false;b.textContent='שליחה'}}};
+function mrPropDlg(p,drafted){const o=p.prop||{};
+ const did=p.k==='mail'||p.k==='wa'?(drafted?'הכנתי טיוטה חדשה לפי ההוראה. היא לא נשלחה – בדקו אותה ושלחו בלחיצה.':''):p.k==='chat'?'אחרי השמירה אענה כך בשאלות הבאות.':o.act==='mute'?'אחרי השמירה לא אתריע לך על התראות כאלה (התראות בטיחות – תמיד).':'אחרי השמירה אזכור את ההוראה.';
+ dlg(`<h3>לשמור ככלל קבוע?</h3>${did?`<p style="margin:0 0 6px">${esc(did)}</p>`:''}<div class="secin1" dir="auto" style="white-space:pre-wrap;margin:4px 0 8px">${esc(o.instr||p.text)}</div>
+ ${o.safe?`<div class="card secwarn" style="margin:0 0 8px;padding:8px" id="secMrSafe"><b>תמיד באישור</b><p class="note" style="margin:4px 0 0">ההוראה נוגעת ב${esc(o.safeL)}. אפשר לשמור אותה, אבל המזכירה לא תעשה את זה לבד – תמיד תכין ותחכה לאישור שלך.</p></div>`:''}
+ ${(o.opts||[]).length?`<p class="note" style="margin:0 0 4px">על מה הכלל חל?</p><div class="chips" role="radiogroup" id="secMrSc">${o.opts.map((x,i)=>`<label class="chip" style="min-height:44px"><input type="radio" name="secMrSc" value="${esc(x.v)}"${i?'':' checked'}> ${esc(x.l)}</label>`).join('')}</div>`:''}
+ ${o.canAuto?'<p class="note" style="margin:6px 0">אחרי שתאשרו פעם אחת תשובה לפי הכלל, בפעם הבאה אשאל אם לעשות את זה מעכשיו לבד.</p>':''}
+ <div class="row" style="margin-top:8px"><button class="btn grow" data-a="secMrSave">שמירה ככלל</button><button type="button" class="btn g grow" data-a="closeDlg">רק הפעם</button></div>`)}
+ACT.secMrSave=async el=>{const p=X.mrp;if(!p||!p.text)return;const c=document.querySelector('input[name="secMrSc"]:checked');el.disabled=true;
+ try{await fnCall('secLearn',{op:'save',k:p.k,id:p.id,text:p.text,sc:c?c.value:''});closeDlg();toast('נשמר. אפשר לראות ולכבות ב"הכללים שלי" (בהגדרות).');X.mrl=null;
+  if(p.k==='note')X.nl=null;if(p.k==='mail'&&X.ml)X.ml.card=null;if(p.k==='wa'&&X.wa)X.wa.card=null;X.mrp=null;rerender()}
+ catch(e){el.disabled=false;mrErr(e)}};
+/* בטיוטה: לפי איזו הנחיה נכתבה, "לעשות את זה מעכשיו לבד?" (רק לבעל הכלל), ולמה לא נשלחה לבד */
+function mrInfoH(d){if(!d)return '';let h='';
+ if(d.mr&&d.mrI)h+=`<p class="note" style="margin:4px 0" dir="auto">לפי ההנחיה${d.mrBy&&SY&&d.mrBy===SY.uid?' שלך':' של מנהל'}: "${esc(d.mrI)}"</p>`;
+ if(d.mrAsk&&d.mr&&SY&&d.mrBy===SY.uid)h+=`<div class="card secwarn" style="margin:6px 0;padding:8px" id="secMrAsk"><b>לעשות את זה מעכשיו לבד?</b><p class="note" style="margin:4px 0 6px">בפעמים הבאות אכתוב תשובה לפי ההנחיה ואשלח אותה לבד – רק כשאני בטוחה שהיא מתאימה ורק אם עברה את כל בדיקות הבטיחות. כל שליחה נרשמת ב"הכללים שלי", ואפשר לכבות בכל רגע.</p><div class="secrow"><button class="btn" data-a="secMrAuto" data-id="${esc(d.mr)}" data-d="${esc(d.id)}" data-on="1" style="flex:1;min-height:44px">כן, מעכשיו לבד</button><button class="chip" data-a="secMrAuto" data-id="${esc(d.mr)}" data-d="${esc(d.id)}" data-on="0" style="min-height:44px">לא, תמיד לשאול</button></div></div>`;
+ if((d.mrNoL||[]).length)h+=`<details class="secsrc"><summary>למה לא נשלח לבד</summary><ul style="margin:4px 0;padding-inline-start:18px">${d.mrNoL.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul></details>`;
+ return h}
+const mrDraftUpd=(dId,f)=>{const a=[];if(X.ml&&X.ml.card&&X.ml.card.draft)a.push(X.ml.card.draft);if(X.wa&&X.wa.card)a.push(...(X.wa.card.drafts||[]));a.filter(d=>d&&d.id===dId).forEach(f)};
+ACT.secMrAuto=el=>{const id=el.dataset.id,dId=el.dataset.d,on=el.dataset.on==='1';
+ const run=async()=>{el.disabled=true;try{await fnCall('secLearn',{op:'auto',id,on,never:!on,d:dId});mrDraftUpd(dId,d=>{d.mrAsk=false});X.mrl=null;toast(on?'מעכשיו אעשה את זה לבד. אפשר לכבות ב"הכללים שלי".':'בסדר, אמשיך לשאול לפני כל שליחה.')}catch(e){mrErr(e)}finally{el.disabled=false;rerender()}};
+ if(on)ask('מעכשיו פניות שמתאימות לכלל ייענו לבד, בלי לחכות לך (בכפוף לבדיקות הבטיחות ול"עצור הכל"). להמשיך?',run,'כן, לבד');else run()};
+/* ---------- מסך "הכללים שלי" ---------- */
+function mrSetH(){if(!mrOn())return '';return `<div class="card" style="margin-top:8px" id="secMrSet"><b>הכללים שלי</b><p class="note" style="margin:4px 0 8px">הוראות שנתת למזכירה בכפתור "תגובה", ומה היא שלחה לבד לפיהן.</p><button class="chip" data-a="secMrOpen" style="min-height:44px">לכללים ולשליחות לבד</button></div>`}
+ACT.secMrOpen=()=>{X.mrv=1;X.set=0;X.mrl=null;rerender()};
+ACT.secMrBack=()=>{X.mrv=0;X.set=1;rerender()};
+async function mrLoad(){X.mrb=1;try{const[a,b]=await Promise.all([fnCall('secLearn',{op:'list'}),fnCall('secLearn',{op:'log'})]);X.mrl={rules:a.rules||[],max:a.max||50,br:!!a.brLimited,log:b.items||[]}}catch(e){X.mrl={err:e&&e.message||'לא נטען'}}finally{X.mrb=0;if(cur().v==='sec'&&!typing())rerender()}}
+const MRSAFE={pay:'תשלום או העברת כסף',del:'מחיקת נתונים',secret:'סיסמה או פרטים רגישים'};
+function mrRuleH(r){const out=r.ch==='mail'||r.ch==='wa';
+ const st=r.safe?`<span class="sectags w">תמיד באישור – ${esc(r.safeL||MRSAFE[r.safe]||'')}</span>`:r.auto?'<span class="sectags g">שולחת לבד</span>':r.offWhy==='fail'?'<span class="sectags w">הופסק אחרי 3 כשלונות ברצף</span>':'';
+ return `<div class="secli" data-id="${esc(r.id)}"><p dir="auto"><b>${esc(r.instr)}</b></p><div class="sectg"><span class="sectags">${esc(MRCH[r.ch]||'')}</span><span class="sectags">${esc(r.scopeL||'')}</span>${r.act==='mute'?'<span class="sectags">השתקה</span>':''}${st}${r.on?'':'<span class="sectags">כבוי</span>'}</div>
+ <small class="note">${out?'אושר '+r.appr+' · ':''}${r.act==='mute'?'הושתקו ':'הופעל לבד '}${r.hits}${r.lastAt?' · לאחרונה '+esc(tm(r.lastAt)):''}${r.asked?' · ביקשת לשאול תמיד':''}</small>
+ <div class="secrow"><label class="chip" style="min-height:44px"><input type="checkbox" data-c="secMrOn" data-id="${esc(r.id)}"${r.on?' checked':''}> פעיל</label>${out&&!r.safe?`<label class="chip" style="min-height:44px"${!r.canAuto&&!r.auto?' title="קודם צריך לאשר פעם אחת תשובה לפי הכלל"':''}><input type="checkbox" data-c="secMrAu" data-id="${esc(r.id)}"${r.auto?' checked':''}${(!r.canAuto&&!r.auto)||!r.on?' disabled':''}> לבד</label>`:''}<button class="chip" data-a="secMrDel" data-id="${esc(r.id)}" style="min-height:44px">מחיקה</button></div>
+ ${out&&!r.safe&&!r.canAuto&&!r.auto?'<small class="note">"לבד" יתאפשר אחרי שתאשרו פעם אחת תשובה לפי הכלל.</small>':''}</div>`}
+function mrH(){const back='<button class="btn g w" data-a="secMrBack" style="margin-bottom:8px">חזרה להגדרות</button>';
+ const R=X.mrl;if(!R){if(!X.mrb)mrLoad();return back+stopH()+'<div class="empty">טוען…</div>'}if(R.err)return back+`<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secMrOpen">נסה שוב</button></div>`;
+ const L=R.rules;
+ const log=R.log.length?R.log.map(x=>`<div class="secli"><p dir="auto">${x.st==='sent'?'נשלח ✓':'נכשל'} · ${esc(MRCH[x.ch]||x.ch)} · <bdi dir="ltr">${esc(x.to)}</bdi></p><small class="note">${esc(tm(x.t))} · ${x.mine?'לפי הכלל שלי':'לפי הכלל של '+esc(x.by)}${x.ri?': "'+esc(x.ri)+'"':''}</small></div>`).join(''):'<p class="note">עוד לא נשלח שום דבר לבד.</p>';
+ return back+stopH()+`<div class="card" id="secMr"><p class="note" style="margin:0 0 6px">הכללים שלך גוברים על ברירת המחדל של המזכירה, אבל לא על כללי הבטיחות: תשלום או העברת כסף, מחיקת נתונים ושליחת סיסמאות או פרטים רגישים – תמיד באישור שלך. "עצור הכל" עוצר גם את השליחה לבד.</p>${R.br?'<p class="note" style="margin:0 0 6px">למנהל עם הגבלת סניפים אין כללים על מייל וווצאפ.</p>':''}
+ ${L.length?L.map(mrRuleH).join(''):'<p class="note" style="margin:0">עוד אין כללים. בכל הודעה של המזכירה יש כפתור "↩ תגובה".</p>'}<small class="note" style="display:block;margin-top:6px">${L.length} מתוך ${R.max} כללים</small></div>
+ <div class="sec"><h3>נשלח לבד</h3></div><div class="card" id="secMrLog">${log}</div>`}
+CHG.secMrOn=async el=>{const on=!!el.checked;el.disabled=true;try{await fnCall('secLearn',{op:'set',id:el.dataset.id,on});toast(on?'הכלל פעיל':'הכלל כובה')}catch(e){el.checked=!on;mrErr(e)}finally{X.mrl=null;rerender()}};
+CHG.secMrAu=el=>{const on=!!el.checked,id=el.dataset.id;const run=async()=>{el.disabled=true;try{await fnCall('secLearn',{op:'auto',id,on});toast(on?'מעכשיו לבד':'מעכשיו אשאל לפני כל שליחה')}catch(e){mrErr(e)}finally{X.mrl=null;rerender()}};
+ if(on){el.checked=false;ask('מעכשיו פניות שמתאימות לכלל ייענו לבד, בלי לחכות לך (בכפוף לבדיקות הבטיחות ול"עצור הכל"). להמשיך?',run,'כן, לבד')}else run()};
+ACT.secMrDel=el=>{const id=el.dataset.id;ask('למחוק את הכלל? המזכירה תפסיק לפעול לפיו.',async()=>{try{await fnCall('secLearn',{op:'del',id});toast('הכלל נמחק')}catch(e){mrErr(e)}finally{X.mrl=null;rerender()}},'מחיקה')};
+{const r9=V.sec;V.sec=()=>{if(elig()&&ready()&&X.st&&X.st.setupDone&&X.mrv&&!X.set&&!X.edit&&mrOn())return {t:X.st.name||'המזכירה',s:'הכללים שלי',h:mrH()};return r9()}}
+window.__secMr=()=>X.mrl;
 
 window.__sec=X;
 })();

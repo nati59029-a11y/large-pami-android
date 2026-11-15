@@ -73,7 +73,7 @@ async function managersOf(db, cfg) {
     if (me.cv !== C.CONSENT_VER) continue;
     if (cfg.mode === 'main' && cfg.mainUid !== d.id) continue;
     const brs = Array.isArray(d.get('br')) ? d.get('br').filter((b) => typeof b === 'string') : null; // שלב 8: הסניפים עצמם (לתזכורת החשבוניות)
-    out.push({ uid: d.id, br: !!brs, brs, me, nt: R.ntOf(me) });
+    out.push({ uid: d.id, br: !!brs, brs, me, nt: R.ntOf(me), learn: cfg.learn });
   }
   return { list: out, ids: new Set(s.docs.map((d) => d.id)) };
 }
@@ -89,6 +89,13 @@ async function loadFin(db, cfg) {
 
 // יצירת התראה – מזהה קבוע (uid+key): ריצה כפולה לא יוצרת כפילות
 async function addNote(db, m, n, now, autoDay) {
+  // 15.11.2026: המנהל השתיק התראות כאלה בכלל אישי ("אל תתריעי לי על זה") – לא נוצרת התראה (נספר בכלל ונרשם ביומן). התראות בטיחות לא מושתקות
+  if (m.learn !== false) {
+    const LC = require('./secretary-learn')._core;
+    m._mc = m._mc || {};
+    const mu = await LC.muteRule(db, m.uid, n, m._mc).catch(() => null);
+    if (mu) { await LC.muted(db, mu, n, now); return false; }
+  }
   const ref = db.doc(`sec_note/${m.uid}/n/${nid(m.uid, n.key)}`);
   const at = n.at || now;
   // תזכורת אוטומטית ביום שאינו יום עסקים – גם התראת הטלפון מחכה ליום העסקים הבא בבוקר (7.4)
@@ -357,6 +364,7 @@ async function dailyBiz(opts) {
   for (const p of await db.collection('sec_chat').listDocuments()) out.chat += await delWhere(db, `sec_chat/${p.id}/m`, c12);
   for (const p of await db.collection('sec_note').listDocuments()) out.notes += await delWhere(db, `sec_note/${p.id}/n`, c12);
   out.log = await delWhere(db, 'sec_log', c24);
+  out.log += await delWhere(db, 'sec_mlog', c24); // 15.11.2026: יומן "נשלח לבד" – כמו sec_log, 24 חודשים
   out.inbox = await require('./secretary-wa')._core.shrinkOld(db, c12); // שלב 5: הודעות ווצאפ וטיוטות בנות יותר מ-12 חודשים – רק תקציר (9.5)
   const iv = await require('./secretary-inv')._core.retention(db, now); // שלב 7: עותק בתור של חשבונית שאושרה / קובץ שנדחה – 30 יום (9.5); תפיסה שלא הושלמה – 24 שעות (4.7)
   if (out.chat || out.notes || out.log || out.inbox || iv.purged) await db.collection('sec_log').doc().set(logData('', 'auto', 'retention', { note: 'chat=' + out.chat + ',notes=' + out.notes + ',log=' + out.log + ',inbox=' + out.inbox + (iv.purged ? ',inv=' + iv.purged : '') }));
