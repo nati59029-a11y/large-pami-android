@@ -4,7 +4,7 @@
    S3PanoCap.close() – סוגר מסך פתוח (ל"חזרה" של אנדרואיד) ומחזיר true אם היה פתוח; S3PanoCap.isOpen().
      opts.fov   – שדה ראייה של הצלע הארוכה במעלות (לא חובה; אחרת: כיול שנשמר בטלפון, אחרת 65°, ואחרי הצילום כיול אוטומטי מהחפיפה)
      opts.mock  – לבדיקות בלבד: {camera:{el, w, h, stop?}, sensor:(cb, api)=>stopFn, angle?, motion?:(cb)=>stopFn}. cb מקבל {alpha, beta, gamma, angle}; motion: cb({acceleration:{x,y,z}}).
-     opts.noAlign – לבדיקות: בלי יישור עדין.
+     opts.noAlign – לבדיקות: בלי יישור עדין (וגם בלי עיוות מקומי). opts.noWarp – בלי עיוות מקומי ליד התפרים.
    S3PanoCap.lastRaw() -> Promise<Blob|null>: zip של הצילום האחרון (פריימים + meta.json), לשיפור החיבור. בזיכרון בלבד; משתחרר כשמתחיל צילום חדש.
    שלב 18 (תיקון "רוחות"): אחרי הצילום – יישור עדין של הכיוונים לפי החפיפה (align), וערבוב צר סביב קו התפר במקום ערבוב שקוף רחב;
      בזמן הצילום – אזהרה אם מד התאוצה מראה שהטלפון זז (ולא רק מסתובב).
@@ -23,6 +23,8 @@ const FOV_DEF=65/* צלע ארוכה, מצלמה ראשית רגילה */,OVERLA
   BLEND_DEG=1.5,AL_MAX=5/* היה 3: בחומר אמיתי (חניון 1814) רוב הזוגות נפלו על קצה הטווח */,AL_RES=.25,AL_SM=400,
   /* תזוזה של הטלפון (לא רק סיבוב): תאוצה ליניארית ממוצעת (מ'/ש²) שמעליה מוצגת אזהרה */
   MOVE_ACC=1.3,
+  /* עיוות מקומי ליד התפרים (שלב 18, אחרי היישור): טווח מדידה (מעלות), רדיוס ההשפעה (מעלות), גודל רשת העיוות לפריים */
+  WP_MAX=6,WP_SIG=8/* כוונן על שני צילומי חניון אמיתיים */,WP_GW=12,WP_GH=16,
   FULL_MAX=2500000,SM_MAX=150000,FOV_KEY='lp-s3pc-fovL',
   /* מצב סרטון: מרווח דגימה, מהירות זוויתית מרבית (מעלות לשנייה), הצלע הארוכה של ההקטנה לציון החדות */
   VID_MS=120,VID_SPD=60,VID_SM=160,MODE_KEY='lp-s3pc-mode';
@@ -82,11 +84,12 @@ function makePano(W,H,yawRef){
  for(let i=3;i<col.length;i+=4)col[i]=255;
  /* מעבר על טביעת הרגל; fn(i, r,g,b, weight) */
  function each(fr,step,fn){
-  const m=qToMat(fr.q),c=fovOf(fr.fovL,fr.w,fr.h),f=c.f,w=fr.w,h=fr.h,hw=w/2,hh=h/2,d=fr.data,fp=footprint(m,f,w,h,W,H,yawRef),ex=c.fw/2,ey=c.fh/2;
+  const m=qToMat(fr.q),c=fovOf(fr.fovL,fr.w,fr.h),f=c.f,w=fr.w,h=fr.h,hw=w/2,hh=h/2,d=fr.data,wp=fr.warp||null,fp=footprint(m,f,w,h,W,H,yawRef),ex=c.fw/2,ey=c.fh/2;
   for(let y=fp.y0;y<=fp.y1;y+=step){const sl=sLa[y],cl=cLa[y];
    for(let xx=fp.x0;xx<=fp.x1;xx+=step){const x=((xx%W)+W)%W,d0=cl*sLo[x],d1=cl*cLo[x];
     const z=m[2]*d0+m[5]*d1+m[8]*sl;if(z>=-1e-6)continue;const iz=-f/z;
-    const u=hw+(m[0]*d0+m[3]*d1+m[6]*sl)*iz,v=hh-(m[1]*d0+m[4]*d1+m[7]*sl)*iz;
+    let u=hw+(m[0]*d0+m[3]*d1+m[6]*sl)*iz,v=hh-(m[1]*d0+m[4]*d1+m[7]*sl)*iz;if(wp){const gx=clamp(u/w*(WP_GW-1),0,WP_GW-1.001),gy=clamp(v/h*(WP_GH-1),0,WP_GH-1.001),x0=gx|0,y0=gy|0,tx=gx-x0,ty=gy-y0,k=y0*WP_GW+x0,K=k+WP_GW;
+     u+=((wp.u[k]*(1-tx)+wp.u[k+1]*tx)*(1-ty)+(wp.u[K]*(1-tx)+wp.u[K+1]*tx)*ty)*w;v+=((wp.v[k]*(1-tx)+wp.v[k+1]*tx)*(1-ty)+(wp.v[K]*(1-tx)+wp.v[K+1]*tx)*ty)*h}
     const nx=Math.abs(u-hw)/hw,ny=Math.abs(v-hh)/hh;if(nx>=1||ny>=1)continue;const ke=Math.min((1-nx)*ex,(1-ny)*ey)/* מרחק (בקירוב, מעלות) משפת הפריים */;
     const fx=u-.5,fy=v-.5,ix=fx<0?0:fx>w-1.001?w-2:Math.floor(fx),iy=fy<0?0:fy>h-1.001?h-2:Math.floor(fy),ax=clamp(fx-ix,0,1),ay=clamp(fy-iy,0,1);
     const p=(iy*w+ix)*4,q=p+w*4,w00=(1-ax)*(1-ay),w10=ax*(1-ay),w01=(1-ax)*ay,w11=ax*ay;
@@ -226,6 +229,30 @@ function align(frames,fovL,opt){
  const qs=frames.map((fr,i)=>qNorm(qMul(qFromVec(om[i]),fr.q)));
  return{qs,fix:om.map(v=>v.map(x=>Math.round(x/D*1000)/1000)),pairs:pairs.length,used,ms:Date.now()-t0}}
 
+/* עיוות מקומי: אחרי היישור נשארות סטיות שאינן סיבוב (פרלקסה כשהסיבוב לא סביב העדשה, עיוות עדשה). לכל זוג חופף מודדים את ההזזה
+   בכמה נקודות לאורך אזור החפיפה (alPair, טווח קטן), וכל פריים "נמתח" חצי מהדרך לקראת השני – רק סביב הנקודה (גאוסיאן, WP_SIG),
+   ודועך לאפס הרחק מהתפר. התוצאה לכל פריים: רשת WP_GW×WP_GH של הזזות (בשבר מרוחב/גובה הפריים) שהפונקציה each מוסיפה לפני הדגימה.
+   frames: [{data|g, w, h}] קטנים, qs: כיוונים מתוקנים. opt.sign – לבדיקות. מחזיר {warps:[{u,v}|null], pts, ms} */
+function warpFields(frames,qs,fovL,opt){
+ opt=opt||{};const t0=Date.now(),n=frames.length,sgn=opt.sign||1,F=frames.map((fr,i)=>{const c=fovOf(fovL,fr.w,fr.h);return{g:fr.g||grayOf(fr.data,fr.w,fr.h),w:fr.w,h:fr.h,f:c.f,fw:c.fw,fh:c.fh,m:qToMat(qs[i])}}),fw=qs.map(camFwd);
+ const C=frames.map(()=>[]);let pts=0;
+ const proj=(Fi,d)=>projToFrame(Fi.m,d,Fi.f,Fi.w/2,Fi.h/2),inF=(Fi,p,mg)=>p&&p[0]>=mg&&p[1]>=mg&&p[0]<=Fi.w-mg&&p[1]<=Fi.h-mg;
+ for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){const a=angDir(fw[i],fw[j]);if(a>.85*Math.max(F[i].fh,F[j].fh)||a<.5)continue;
+  const c0=nrm([fw[i][0]+fw[j][0],fw[i][1]+fw[j][1],fw[i][2]+fw[j][2]]),ax=nrm(cross(c0,nrm([fw[j][0]-fw[i][0],fw[j][1]-fw[i][1],fw[j][2]-fw[i][2]])))/* לאורך התפר */;
+  for(let k=-3;k<=3;k++){const t=k*5*D,c=nrm([c0[0]*Math.cos(t)+ax[0]*Math.sin(t),c0[1]*Math.cos(t)+ax[1]*Math.sin(t),c0[2]*Math.cos(t)+ax[2]*Math.sin(t)]);
+   const pi=proj(F[i],c),pj=proj(F[j],c);if(!inF(F[i],pi,4)||!inF(F[j],pj,4))continue;
+   const r=alPair(F[i],F[j],c,{max:opt.max||WP_MAX,res:.25,n:28,e0:1});if(!r||r.w<=.05)continue;
+   const sv=[r.s[0]*r.e1[0]+r.s[1]*r.e2[0],r.s[0]*r.e1[1]+r.s[1]*r.e2[1],r.s[0]*r.e1[2]+r.s[1]*r.e2[2]];
+   for(const[q,Fq,sg]of[[i,F[i],-.5*sgn],[j,F[j],.5*sgn]]){const p0=proj(Fq,c),p1=proj(Fq,nrm([c[0]+sg*sv[0],c[1]+sg*sv[1],c[2]+sg*sv[2]]));if(!p0||!p1)continue;
+    C[q].push({du:(p1[0]-p0[0])/Fq.w,dv:(p1[1]-p0[1])/Fq.h,w:r.w,d:c})}pts++}}
+ const warps=frames.map((fr,q)=>{const L=C[q];if(!L.length)return null;const Fq=F[q],m=Fq.m,u=new Float32Array(WP_GW*WP_GH),v=new Float32Array(WP_GW*WP_GH),s2=2*((opt.sig||WP_SIG)*D)**2;
+  for(let gy=0;gy<WP_GH;gy++)for(let gx=0;gx<WP_GW;gx++){const px=gx/(WP_GW-1)*Fq.w,py=gy/(WP_GH-1)*Fq.h,cx=(px-Fq.w/2)/Fq.f,cy=-(py-Fq.h/2)/Fq.f;
+   const d=nrm([m[0]*cx+m[1]*cy-m[2],m[3]*cx+m[4]*cy-m[5],m[6]*cx+m[7]*cy-m[8]]);let su=0,sv2=0,sw=.25/* דעיכה לאפס הרחק מנקודות המדידה */;
+   for(const c of L){const a=angDir(d,c.d)*D,g=c.w*Math.exp(-a*a/s2);su+=g*c.du;sv2+=g*c.dv;sw+=g}
+   u[gy*WP_GW+gx]=su/sw;v[gy*WP_GW+gx]=sv2/sw}
+  return{u,v}});
+ return{warps,pts,ms:Date.now()-t0}}
+
 /* zip פשוט (בלי דחיסה, "store") – files: [{name, data:Uint8Array}] ⇒ Uint8Array */
 const CRC_T=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
 function crc32(u){let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=CRC_T[(c^u[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
@@ -263,8 +290,8 @@ function vidRadii(T){const ds=T.map(t=>dirOf(t.yaw,t.pitch));return ds.map((d,i)
 function vidPick(fwd,TD,R,best,sharp){const out=[];for(let i=0;i<TD.length;i++){const a=angDir(fwd,TD[i]);if(a>=R[i])continue;
   const s=sharp*(1-.6*(a/R[i])**2);if(!best[i]||s>best[i].s)out.push({i,s,a})}return out}
 
-const M={qMul,qNorm,qAxis,oriToQuat,qToMat,qAngle,camFwd,dirOf,yawPitch,wrap180,angDir,fovOf,fovLongOf,pickTargets,projToFrame,eqDir,eqToFrame,footprint,makePano,estFov,estFovShift,qSlerp,oriAt,angSpeed,lapVar,vidRadii,vidPick,qFromVec,grayOf,alPatch,alPair,align,crc32,zipStore,
-  C:{FOV_DEF,OVERLAP,AIM_TOL,STAB_MS,STAB_DEG,FRAME_MAX,FULL_MAX,SM_MAX,VID_MS,VID_SPD,VID_SM,BLEND_DEG,AL_MAX,AL_RES,AL_SM,MOVE_ACC}};
+const M={qMul,qNorm,qAxis,oriToQuat,qToMat,qAngle,camFwd,dirOf,yawPitch,wrap180,angDir,fovOf,fovLongOf,pickTargets,projToFrame,eqDir,eqToFrame,footprint,makePano,estFov,estFovShift,qSlerp,oriAt,angSpeed,lapVar,vidRadii,vidPick,qFromVec,grayOf,alPatch,alPair,align,warpFields,crc32,zipStore,
+  C:{FOV_DEF,OVERLAP,AIM_TOL,STAB_MS,STAB_DEG,FRAME_MAX,FULL_MAX,SM_MAX,VID_MS,VID_SPD,VID_SM,BLEND_DEG,AL_MAX,AL_RES,AL_SM,MOVE_ACC,WP_MAX,WP_SIG,WP_GW,WP_GH}};
 if(typeof document==='undefined')return{_m:M};
 
 /* ---------------- דפדפן: מסך הצילום ---------------- */
@@ -327,16 +354,17 @@ async function stitch(frames,o,onP){
  /* יישור עדין; אם נכשל מכל סיבה – ממשיכים עם הכיוונים שנמדדו */
  let qs=frames.map(f=>f.q),al=null;
  if(!o.noAlign){try{al=align(lo,fovL);qs=al.qs}catch(e){al=null}}
+ let wf=null;if(!o.noAlign&&!o.noWarp){try{wf=warpFields(lo,qs,fovL)}catch(e){wf=null}}
  lo.length=0;onP(.16);await tick();
  const P=makePano(W,H,yawRef);
- for(let i=0;i<frames.length;i++){const fr=frames[i],d=await decodeBlob(fr.blob);try{P.add({data:pixels(d.src,d.w,d.h),w:d.w,h:d.h,q:qs[i],fovL})}finally{d.close()}onP(.16+.7*(i+1)/frames.length);await tick()}
+ for(let i=0;i<frames.length;i++){const fr=frames[i],d=await decodeBlob(fr.blob);try{P.add({data:pixels(d.src,d.w,d.h),w:d.w,h:d.h,q:qs[i],fovL,warp:wf?wf.warps[i]:null})}finally{d.close()}onP(.16+.7*(i+1)/frames.length);await tick()}
  P.fill();onP(.9);await tick();
  const big=cv(W,H);big.getContext('2d').putImageData(new ImageData(P.col,W,H),0,0);
  let full=null;for(const q of[.85,.78,.7,.62,.55]){full=await blobOf(big,q);if(full&&full.size<=FULL_MAX)break}
  const sc=cv(1024,512),sx=sc.getContext('2d');sx.imageSmoothingQuality='high';sx.drawImage(big,0,0,1024,512);big.width=big.height=1;
  let sm=null;for(const q of[.8,.72,.64,.56,.48,.4]){sm=await blobOf(sc,q);if(sm&&sm.size<=SM_MAX)break}
  onP(1);const fw=fovOf(fovL,frames[0].w,frames[0].h).fw;
- return{full,sm,w:W,h:H,fovL,fovH:fw,cal,qs,al}}
+ return{full,sm,w:W,h:H,fovL,fovH:fw,cal,qs,al,wf:wf?{pts:wf.pts,ms:wf.ms}:null}}
 
 let cur=null,raw=null/* חומר גולמי של הצילום האחרון בלבד (בזיכרון): {frames, meta} */;
 /* zip של הצילום האחרון: הפריימים (JPEG כפי שנשמרו) + meta.json (כיוון לכל פריים, שדה ראייה, ממדי וידאו, דגם, התיקונים). null אם אין. */
@@ -464,10 +492,10 @@ function start(el,opts){
    const r6=a=>a.map(x=>Math.round(x*1e6)/1e6);
    const keep=r=>{raw={frames:frames.map(f=>({blob:f.blob})),meta:{kind:'s3pano-raw',v:1,created:new Date().toISOString(),mode:S.mode==='video'?'video':'pts',n:frames.length,ua:navigator.userAgent||'',dev:mock?'mock':devName(),
      screenAngle:screenAngle(),video:{w:S.cw,h:S.ch},fovL0:S.fovL,fixedFov:!!opts.fov,fovL:r?Math.round(r.fovL*100)/100:null,fovH:r?Math.round(r.fovH*100)/100:null,cal:r&&r.cal?{fovL:r.cal.fovL,score:r.cal.score,base:r.cal.base,sh:r.cal.sh,n:r.cal.n}:null,
-     out:r?{w:r.w,h:r.h}:null,ok:!!r,ms:Date.now()-t0,blendDeg:BLEND_DEG,align:r&&r.al?{pairs:r.al.pairs,used:r.al.used,ms:r.al.ms,maxDeg:AL_MAX}:null,yawRef:frames[0].yaw,
+     out:r?{w:r.w,h:r.h}:null,ok:!!r,ms:Date.now()-t0,blendDeg:BLEND_DEG,align:r&&r.al?{pairs:r.al.pairs,used:r.al.used,ms:r.al.ms,maxDeg:AL_MAX}:null,warp:r&&r.wf?{pts:r.wf.pts,ms:r.wf.ms,maxDeg:WP_MAX,sigDeg:WP_SIG}:null,yawRef:frames[0].yaw,
      conv:'q=[w,x,y,z] מצלמה→עולם; עולם x=מזרח y=צפון z=למעלה (alpha יחסי); מצלמה x=ימין y=למעלה מבט ל-z-. qFix=סיבוב(fixDeg, וקטור בעולם, מעלות)·q',
      frames:frames.map((f,i)=>({file:'frame-'+String(i).padStart(2,'0')+'.jpg',w:f.w,h:f.h,ti:f.ti,t:f.t,yaw:Math.round(f.yaw*1000)/1000,q:r6(f.q),qFix:r&&r.qs?r6(r.qs[i]):null,fixDeg:r&&r.al?r.al.fix[i]:null}))}}};
-   try{const r=await stitch(frames,{fovL:S.fovL,fixedFov:!!opts.fov,maxTex:opts.maxTex,width:opts.width,noAlign:!!opts.noAlign},p=>{pb.style.width=Math.round(p*100)+'%';$('.s3pc-mt').textContent='מחבר את התמונות… '+Math.round(p*100)+'%'});
+   try{const r=await stitch(frames,{fovL:S.fovL,fixedFov:!!opts.fov,maxTex:opts.maxTex,width:opts.width,noAlign:!!opts.noAlign,noWarp:!!opts.noWarp},p=>{pb.style.width=Math.round(p*100)+'%';$('.s3pc-mt').textContent='מחבר את התמונות… '+Math.round(p*100)+'%'});
     try{keep(r)}catch(e){}if(!r.full||!r.sm)throw new Error('encode');
     if(!opts.fov&&r.cal&&r.fovL!==S.fovL)lsS(FOV_KEY,String(Math.round(r.fovL*10)/10));
     finish({full:r.full,sm:r.sm,w:r.w,h:r.h,meta:{n:frames.length,mode:S.mode==='video'?'video':'pts',fovH:Math.round(r.fovH*10)/10,fovL:Math.round(r.fovL*10)/10,yawRef:Math.round(frames[0].yaw*100)/100,dev:mock?'mock':devName(),ms:Date.now()-t0}})}
