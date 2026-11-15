@@ -12,6 +12,10 @@
 //     רשימה פנימית "להזמין מספקים" (לפי ספק). לא נשלח לספק ולא משנה מלאי. כשהסחורה מגיעה – "הכנסת מלאי" הקיים.
 // סדר הקריאות מהמסך: orderPick (סימונים + צילום "לפני") ← updateOrder (רק כשיש הורדה/החלפה) ← orderPickOk (אחרי שיחה עם הלקוח).
 // orderPick חוזר על עצמו בלי נזק עם אותו reqId: אם הפריטים עוד לא שונו – הסימונים מתעדכנים; אם כבר שונו – מוחזר applied:true ולא נוגעים.
+//
+// 15.11.2026 (החלטה 32, חלק א – חיוב אחרי ליקוט, בלי חיבור לחברת הסליקה): orderAuth = "המסגרת אושרה".
+//   ord/{id}.auth = { amt, due, mg, via:'link'|'call', last4?, at, by } (תוספת בלבד). העובד הכניס באתר הסליקה עסקת מסגרת/אישור בלבד
+//   (סכום ההזמנה × (1+מרווח), ArCalc.frameOf). בסוף הליקוט – "חויב" = markOrderPaid { method:'link', amt: הסכום הסופי } (orders.js), רק בתוך המסגרת.
 
 const { HttpsError } = require('firebase-functions/v2/https');
 const { onCall } = require('./lib/region');
@@ -21,7 +25,8 @@ const { inputObject } = require('./lib/roles');
 const C = require('./orders')._core;
 const FV = () => require('firebase-admin/firestore').FieldValue; // who, idOf, reqIdOf, onlyKeys, txt, qtyOf, bad, deny, pre, NB
 
-const OPEN = ['new', 'work', 'wait_pay']; // כמו PAYABLE ב-orders.js – אחרי "שולם" / ביטול / "נשלח" אין ליקוט
+const OPEN = ['new', 'work', 'wait_pay'];
+const AC = require('./lib/ar-calc'); // כמו PAYABLE ב-orders.js – אחרי "שולם" / ביטול / "נשלח" אין ליקוט
 const ACTS = ['rm', 'rep', 'ord'];
 const SO_ST = ['open', 'ord', 'done', 'void'];
 const ETA_RE = /^20\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -195,6 +200,47 @@ async function supOrdSet(request) {
   return { ok: true };
 }
 
+// orderAuth({ id, amt, via:'link'|'call', last4? }) – "המסגרת אושרה". עובד עם ord בסניף או מנהל.
+//   רק בעסק עם קישור + "חיוב אחרי ליקוט" (private/pay), רק בהזמנה פתוחה שלא נשלחה, לא ללקוח בשוטף (החלטות 13, 18), והמסגרת לא נמוכה מסכום ההזמנה.
+//   אישור חוזר (קישור חדש אחרי חריגה) מחליף את הקודם; ההיסטוריה ביומן. 4 ספרות בלבד – אין מספר כרטיס.
+async function orderAuth(request) {
+  const w = await C.who(request);
+  const input = inputObject(request);
+  C.onlyKeys(input, ['id', 'amt', 'via', 'last4']);
+  const id = C.idOf(input.id, 'הזמנה');
+  const amt = C.money(input.amt, 'סכום המסגרת');
+  if (!(amt > 0)) throw C.bad('bad-price', 'סכום המסגרת: יותר מ-0');
+  if (!['link', 'call'].includes(input.via)) throw C.bad('bad-via', 'בחרו: קישור ללקוח או מילוי בשיחה');
+  let last4 = '';
+  if (input.last4 != null && input.last4 !== '') {
+    if (typeof input.last4 !== 'string' || !/^\d{4}$/.test(input.last4)) throw C.bad(C.digRun(input.last4) >= 8 ? 'card-like' : 'bad-last4', '4 ספרות אחרונות בלבד – אסור מספר כרטיס מלא');
+    last4 = input.last4;
+  }
+  const db = T.tdb();
+  const ref = db.doc('ord/' + id);
+  let res = null;
+  await db.runTransaction(async (tx) => {
+    res = null;
+    const [s, p] = await tx.getAll(ref, db.doc('private/pay'));
+    access(w, s.exists ? s.data() : null);
+    const d = s.data();
+    if (!OPEN.includes(d.status)) throw C.pre('bad-status', d.status === 'cancel' ? 'ההזמנה בוטלה' : 'ההזמנה כבר שולמה');
+    if (d.shp) throw C.pre('locked', 'ההזמנה נשלחה');
+    if (!(p.exists && p.get('mode') === 'link' && p.get('link') && p.get('after') === true)) throw C.pre('no-after', 'בעסק לא מוגדר חיוב אחרי ליקוט');
+    const cid = d.custId;
+    const cs = typeof cid === 'string' && C.ID_RE.test(cid) ? await tx.get(db.doc('cust/' + cid)) : null;
+    if (cs && cs.exists && AC.termsOfCust(cs.data()).b !== 'imm') throw C.pre('terms', 'לקוח בשוטף – בלי מסגרת אשראי');
+    const due = AC.payOf(d);
+    if (AC.ag(amt) < AC.ag(due)) throw C.pre('auth-low', `המסגרת (₪${amt}) נמוכה מסכום ההזמנה (₪${due})`);
+    const now = Date.now();
+    const auth = Object.assign({ amt, due, mg: AC.mgOf(p.get('mg')), via: input.via, at: now, by: w.uid }, last4 ? { last4 } : {});
+    tx.update(ref, { auth, upd: now });
+    tx.set(logRef(db, id), logData(w, 'auth', `מסגרת ₪${amt} · ${input.via === 'link' ? 'קישור ללקוח' : 'בשיחה'}${last4 ? ' · ****' + last4 : ''}${d.auth && typeof d.auth.amt === 'number' ? ' (במקום ₪' + d.auth.amt + ')' : ''}`));
+    res = { ok: true, auth };
+  });
+  return res;
+}
+
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
     if (e instanceof HttpsError) throw e;
@@ -202,5 +248,5 @@ const wrap = (name, fn) => T.scoped(async (request) => {
     throw new HttpsError('internal', 'שגיאה בפעולה. נסו שוב.', { reason: 'internal' });
   }
 });
-const FNS = { orderPick, orderPickOk, supOrdSet };
+const FNS = { orderPick, orderPickOk, supOrdSet, orderAuth };
 for (const [k, f] of Object.entries(FNS)) exports[k] = onCall({}, wrap(k, f));

@@ -15,8 +15,11 @@
 //                        מתג כבוי / הזמנה ישנה בלי vm – בלי שום שינוי. setOrderStatus ו-markOrderPaid מחזירים ar:{…} רק כשהופק מסמך.
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
+//                        15.11.2026 (החלטה 32, חלק א) – תוספות ב-pay, רק כשאינן ברירת מחדל: kind:'both' (פרטי אשראי וגם קישור), after:true (חיוב אחרי ליקוט),
+//                        mg (אחוז מרווח למסגרת, ברירת מחדל 10), chg:'auto' (נשמר בלבד – בלי חיבור לחברת הסליקה מתנהג כמו 'man'). עסק בלי השדות – כמו קודם
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
-//   private/pay        { link, mode, at, by }                                       – רק השרת (setBusinessPayLink, מנהל־על)
+//   private/pay        { link, mode, at, by, kind?, after?, mg?, chg? }             – רק השרת (setBusinessPayLink, מנהל־על)
+//   ord/{id}           + auth?: { amt, due, mg, via:'link'|'call', last4?, at, by } – "המסגרת אושרה" (orderAuth ב-ord-pick.js); paid.fr – המסגרת שמולה חויב
 //   private/payCred    { box, at, by }                                              – 2026-11-12: פרטי כניסה לאתר הסליקה, מוצפנים (CARD.seal, AAD 'private/payCred'). ב-ordcfg/main.pay רק cred:true/false
 //
 // מלאי בין סניפים (החלטת המשתמש 16:39, אפשרות ב): הזמנה בסניף A, שורה שמקורה בסניף B → ב-B יורד (xout), ב-A העברה נכנסת (xin)
@@ -1212,13 +1215,17 @@ async function arAfter(w, res) {
 
 const LL_PRE = 'o_'; // מזהה דטרמיניסטי ל-lineLog: o_<ordId>_<מספר הקו>
 const portK = (r) => [r.d || '', r.phone || '', r.tz || ''].join('|');
-// markOrderPaid({ id, method, last4?, conf?, note? }) – "שולם" ידני. אחרי זה הסכום והפריטים נעולים.
+// markOrderPaid({ id, method, last4?, conf?, note?, amt? }) – "שולם" ידני. אחרי זה הסכום והפריטים נעולים.
+// amt (החלטה 32, חלק א – "חויב" מול מסגרת): רק method 'link', רק אחרי ליקוט (pk.st 'ok') ומסגרת מאושרת (ord.auth), רק הסכום הסופי (אחרת amt-mismatch),
+// ורק בתוך המסגרת (אחרת over-auth – קישור חדש ללקוח). בלי amt – כמו קודם.
 async function markOrderPaid(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'method', 'last4', 'conf', 'note', 'proofId']); // proofId (שלב 4): אסמכתא לקבלה על חשבונית פתוחה (עובד – חובה, החלטה 25)
+  onlyKeys(input, ['id', 'method', 'last4', 'conf', 'note', 'proofId', 'amt']); // proofId (שלב 4): אסמכתא לקבלה על חשבונית פתוחה (עובד – חובה, החלטה 25)
   const id = idOf(input.id, 'הזמנה');
   if (!PAY_METHODS.includes(input.method)) throw bad('bad-method', 'בחרו אמצעי תשלום');
+  const amtIn = input.amt === undefined ? undefined : money(input.amt, 'סכום החיוב');
+  if (amtIn !== undefined && input.method !== 'link') throw bad('bad-method', 'חיוב מול מסגרת – בקישור לתשלום בלבד');
   if (input.proofId !== undefined && (typeof input.proofId !== 'string' || !/^[A-Za-z0-9_-]{8,40}$/.test(input.proofId))) throw bad('bad-proof', 'אסמכתא לא תקינה');
   const paid = { method: input.method };
   if (input.last4 != null && input.last4 !== '') {
@@ -1240,6 +1247,15 @@ async function markOrderPaid(request) {
     const cur = s.get('status');
     if (cur === 'paid' || cur === 'out' || cur === 'done') { res = { ok: true, dup: true }; return; }
     if (!PAYABLE.includes(cur)) throw pre('bad-status', 'ההזמנה בוטלה');
+    delete paid.fr;
+    if (amtIn !== undefined) { // החלטה 32: "חויב" – הסכום הסופי, אחרי ליקוט, בתוך המסגרת
+      const due = AC.payOf(s.data()), au = s.get('auth'), pk = s.get('pk');
+      if (!au || !isNum(au.amt)) throw pre('no-auth', 'אין להזמנה מסגרת מאושרת. קודם "המסגרת אושרה"');
+      if (!pk || pk.st !== 'ok') throw pre(pk ? 'pick-chg' : 'no-pick', pk ? 'יש שינויים שהלקוח עוד לא אישר' : 'החיוב – רק אחרי סיום הליקוט');
+      if (agor(amtIn) !== agor(due)) throw pre('amt-mismatch', `הסכום הסופי של ההזמנה הוא ₪${due}. אפשר לסמן "חויב" רק על הסכום הסופי`);
+      if (agor(due) > agor(au.amt)) throw pre('over-auth', 'הסכום חורג מהמסגרת – יש לשלוח ללקוח קישור חדש');
+      paid.fr = au.amt;
+    }
     const now = Date.now();
     // 14.11.2026: הזמנה עם vm (מהגרסה הזו) – הסכום לתשלום הוא gross (כולל מע"מ והנחה). הזמנה ישנה – total, כמו קודם
     Object.assign(paid, { at: now, by: w.uid, amt: s.get('vm') && isNum(s.get('gross')) ? s.get('gross') : s.get('total') }); delete paid.pk; delete paid.rc; // pk/rc מנוסה קודם של הטרנזקציה לא נשארים
@@ -1271,7 +1287,7 @@ async function markOrderPaid(request) {
     res = { ok: true, dup: false };
     if (ar) { const r = ar.write(); if (r && r.t === 'rc' && r.id) paid.rc = r.id; } // לפני עדכון ההזמנה – כדי ש-paid.rc יישמר
     tx.update(ref, { status: s.get('shp') ? 'done' : 'paid', paid, upd: now }); // משוב סבב 2 (החלטה 15): הזמנה שנשלחה ושולמה – ישר "הושלם"
-    tx.set(logRef(db, id), logData(w, 'paid', `${paid.method} ₪${paid.amt}${paid.last4 ? ' ****' + paid.last4 : ''}${paid.conf ? ' אישור ' + paid.conf : ''}`));
+    tx.set(logRef(db, id), logData(w, 'paid', `${paid.method} ₪${paid.amt}${paid.last4 ? ' ****' + paid.last4 : ''}${paid.conf ? ' אישור ' + paid.conf : ''}${paid.fr != null ? ' (מסגרת ₪' + paid.fr + ')' : ''}`));
     if (ar && ar.res) { res.ar = ar.res; if (ar.res.id) tx.set(logRef(db, id), logData(w, 'ardoc', `${{ ir: 'חשבונית מס קבלה', rc: 'קבלה' }[ar.res.t] || ar.res.t} #${ar.res.no}${ar.res.draft ? ' (טיוטה)' : ''}`)); }
   });
   await arAfter(w, res);
@@ -1389,12 +1405,15 @@ async function markOrderCalled(request) {
 // getPayLink({ id, auto? }) – מחזיר את קישור הסליקה לפתיחה מיידית (האפליקציה לא מציגה אותו). רק להזמנה שעוד לא שולמה.
 // 2026-11-12: auto:true (רק מהאפליקציה, לפתיחה בדפדפן הפנימי) – אם מנהל־העל שמר פרטי כניסה, מוחזרים גם auto:{user,pass} לצורך מילוי.
 // בלי auto – אין שדה auto בתשובה. היומן: note 'auto' בלבד, בלי הערכים.
+// 15.11.2026 (החלטה 32): send:true – הקישור נשלח ללקוח (ווטסאפ/SMS/שיתוף מהמכשיר); ביומן 'paySend' במקום 'payOpen'.
+// בעסק עם "חיוב אחרי ליקוט" (private/pay.after) מוחזר גם fr – המסגרת (ArCalc.frameOf). בלי after – התשובה כמו קודם.
 async function getPayLink(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'auto']);
+  onlyKeys(input, ['id', 'auto', 'send']);
   const id = idOf(input.id, 'הזמנה');
   if (input.auto !== undefined && typeof input.auto !== 'boolean') throw bad('bad-field', 'auto: true או false');
+  if (input.send !== undefined && typeof input.send !== 'boolean') throw bad('bad-field', 'send: true או false');
   const db = T.tdb();
   const [s, p, c] = await Promise.all([db.doc('ord/' + id).get(), db.doc('private/pay').get(), input.auto === true ? db.doc(PAY_CRED).get() : null]);
   ordAccess(w, s.exists ? s.data() : null);
@@ -1410,9 +1429,10 @@ async function getPayLink(request) {
       note = auto ? 'auto' : 'auto-host';
     } catch (e) { note = 'auto-fail'; } // בלי פרטי השגיאה
   }
-  await db.collection(`ord/${id}/log`).add(logData(w, 'payOpen', note));
+  await db.collection(`ord/${id}/log`).add(logData(w, input.send === true ? 'paySend' : 'payOpen', note));
   const amt = AC.payOf(s.data()); // סבב 2 (ליקוי 6): הסכום לתשלום – gross בהזמנה עם vm, total בהזמנה ישנה
-  return auto ? { link, total: amt, auto } : { link, total: amt };
+  const fr = p.get('after') === true ? { fr: AC.frameOf(amt, p.get('mg')) } : {};
+  return Object.assign(auto ? { link, total: amt, auto } : { link, total: amt }, fr);
 }
 
 // פרטי כניסה לאתר הסליקה: undefined = בלי שינוי, null = מחיקה, { user?, pass } = שמירה. הערכים לא מופיעים בשום הודעת שגיאה.
@@ -1428,14 +1448,17 @@ function credOf(v) {
   return { user: user.trim(), pass: v.pass };
 }
 
-// setBusinessPayLink({ bizId, mode: 'link'|'phone', link?, sup?, cred? }) – מנהל־על בלבד. https בלבד, עד 500 תווים.
+// setBusinessPayLink({ bizId, mode: 'link'|'phone', link?, sup?, cred?, kind?, after?, mg?, chg? }) – מנהל־על בלבד. https בלבד, עד 500 תווים.
+// 15.11.2026 (החלטה 32, חלק א): kind – אמצעי הגבייה: 'phone' (פרטי אשראי, mode 'phone') / 'link' / 'both' (שניהם, mode 'link'). after – חיוב רק אחרי ליקוט
+// (רק עם קישור). mg – מרווח למסגרת 0–50 (ברירת מחדל 10). chg – 'man' / 'auto' (נשמר; בלי חיבור API מתנהג כמו ידני).
+// שדה שלא נשלח – נשמר הקודם (אפליקציה ישנה ששולחת רק mode לא מאפסת), חוץ מ-mode 'phone' שמאפס after ו-kind.
 // 2026-11-12: cred – פרטי כניסה לאתר (ראו credOf). רק במצב link; מעבר ל-phone מוחק אותם. בלי cred – הקיימים נשמרים.
 async function setBusinessPayLink(request) {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'צריך להתחבר לאפליקציה', { reason: 'not-signed-in' });
   if (!(await T.isSuper(uid))) throw deny('not-superadmin', 'הפעולה מותרת למנהל המערכת בלבד');
   const input = inputObject(request);
-  onlyKeys(input, ['bizId', 'mode', 'link', 'sup', 'cred']);
+  onlyKeys(input, ['bizId', 'mode', 'link', 'sup', 'cred', 'kind', 'after', 'mg', 'chg']);
   const bizId = input.bizId;
   if (typeof bizId !== 'string' || !T.BIZ_RE.test(bizId)) throw bad('bad-biz', 'מזהה עסק לא תקין');
   const biz = await T.loadBiz(bizId);
@@ -1468,6 +1491,19 @@ async function setBusinessPayLink(request) {
   }
   const cred = credOf(input.cred);
   if (cred && input.mode !== 'link') throw bad('bad-cred', 'פרטי כניסה – רק לקישור תשלום');
+  // החלטה 32: אמצעי גבייה, חיוב אחרי ליקוט, מרווח ואופן חיוב
+  const o0 = old.exists ? old.data() : {};
+  if (input.kind !== undefined && !['phone', 'link', 'both'].includes(input.kind)) throw bad('bad-kind', 'אמצעי גבייה: פרטי אשראי, קישור לתשלום או שניהם');
+  const kind = input.kind !== undefined ? input.kind : input.mode === 'link' && o0.kind === 'both' ? 'both' : input.mode;
+  if ((kind === 'phone') !== (input.mode === 'phone')) throw bad('bad-kind', 'אמצעי הגבייה לא תואם (פרטי אשראי = בלי קישור)');
+  if (input.after !== undefined && typeof input.after !== 'boolean') throw bad('bad-field', 'חיוב אחרי ליקוט: כן או לא');
+  if (input.after === true && input.mode !== 'link') throw bad('bad-after', 'חיוב אחרי ליקוט – רק עם קישור לתשלום');
+  const after = input.mode === 'link' && (input.after !== undefined ? input.after : o0.after === true);
+  const mgOk = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 50 && Math.abs(Math.round(v * 100) - v * 100) < 1e-6;
+  if (input.mg !== undefined && !mgOk(input.mg)) throw bad('bad-mg', 'אחוז מרווח: מספר בין 0 ל-50');
+  const mg = input.mg !== undefined ? input.mg : mgOk(o0.mg) ? o0.mg : AC.MG0;
+  if (input.chg !== undefined && !['man', 'auto'].includes(input.chg)) throw bad('bad-chg', 'אופן חיוב: ידני או אוטומטי');
+  const chg = input.chg !== undefined ? input.chg : o0.chg === 'auto' ? 'auto' : 'man';
   const host = link ? new URL(link).hostname.toLowerCase() : '';
   const had = oldCred.exists;
   // פרטי הכניסה קשורים ל-host (בתוך המוצפן, ו-host גלוי לצדו להחלטה כאן). קישור ל-host אחר בלי cred חדש – הישנים נמחקים
@@ -1476,13 +1512,14 @@ async function setBusinessPayLink(request) {
   const hasCred = !!box || (cred === undefined && input.mode === 'link' && had && !del);
   const now = Date.now();
   const b = db.batch();
-  b.set(payRef, { mode: input.mode, link, sup, at: now, by: uid });
+  b.set(payRef, { mode: input.mode, link, sup, at: now, by: uid, kind, after, mg, chg });
   if (box) b.set(credRef, { box, host, at: now, by: uid });
   else if (del) b.delete(credRef);
-  b.set(db.doc(pfx + 'ordcfg/main'), { pay: Object.assign({ mode: input.mode, has: !!link, cred: hasCred }, sup ? { sup } : {}), upd: now }, { mergeFields: ['pay', 'upd'] }); // pay מוחלף כולו (בלי sup ישן)
-  b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') + (sup ? ' sup=' + sup.id : '') + (box ? ' cred:set' : del ? ' cred:del' : '') });
+  const ext = Object.assign(kind === 'both' ? { kind } : {}, after ? { after } : {}, mg !== AC.MG0 ? { mg } : {}, chg !== 'man' ? { chg } : {}); // החלטה 32 – רק מה שאינו ברירת מחדל
+  b.set(db.doc(pfx + 'ordcfg/main'), { pay: Object.assign({ mode: input.mode, has: !!link, cred: hasCred }, sup ? { sup } : {}, ext), upd: now }, { mergeFields: ['pay', 'upd'] }); // pay מוחלף כולו (בלי sup ישן)
+  b.set(db.collection(`b/${bizId}/audit`).doc(), { by: uid, t: now, act: 'setBusinessPayLink', note: input.mode + (link ? ':' + new URL(link).hostname : '') + (sup ? ' sup=' + sup.id : '') + (box ? ' cred:set' : del ? ' cred:del' : '') + (kind === 'both' ? ' kind=both' : '') + (after ? ' after' : '') + (mg !== AC.MG0 ? ' mg=' + mg : '') + (chg !== 'man' ? ' chg=' + chg : '') });
   await b.commit();
-  return { ok: true, bizId, mode: input.mode, has: !!link, sup, cred: hasCred };
+  return { ok: true, bizId, mode: input.mode, has: !!link, sup, cred: hasCred, kind, after, mg, chg };
 }
 
 // 2026-11-12: copyF – השדות (וסדרם) ב"העתק פרטי לקוח" של הזמנת ניוד. רשימה סגורה + 'x:'+מפתח של שדה חופשי מ-custcfg/main.xKeys.

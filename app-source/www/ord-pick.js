@@ -5,6 +5,7 @@
    - "סיום וסיכום": orderPick (סימונים) ← updateOrder הקיים (רק כשיש הורדה/החלפה) ← מסך סיכום: כל השינויים במוצרים ובמחירים (לפני/אחרי), הוראה לחייג ללקוח, "הלקוח אישר את השינויים".
      עד האישור השרת לא מאפשר "נשלח" / "ממתין לתשלום" / "יצא" / "הושלם" (מנהל יכול לעקוף – כאן שואלים אותו קודם). הזמנה בלי שינויים – לא נחסמת. הזמנה ישנה בלי pk – כמו קודם.
    - V.oxSup: "להזמין מספקים", מקובץ לפי ספק, עם "הוזמן" / "הגיע" / "לא צריך".
+   - 15.11.2026 (החלטה 32): בסיכום (בלי שינויים ממתינים) – מסגרת / "חויב" של חיוב אחרי ליקוט (window.__oxAuthH מ-orders-staff.js).
    כל כתיבה – דרך השרת (functions/ord-pick.js, orders.js). */
 (function(){
 'use strict';
@@ -131,6 +132,7 @@ function sumV(o){const pk=o.pk,B=pk.sum||{it:[]},c=o.cust||{},chg=pk.st==='chg';
   <button type="button" class="btn w" data-a="oxPkOk" data-id="${esc(o.id)}" style="margin-top:8px">הלקוח אישר את השינויים</button>
   <p class="note" style="margin:6px 0 0">עד האישור אי אפשר לסמן "נשלח" או "ממתין לתשלום".</p></div>`
   :`<p class="note">${pk.okAt?'הלקוח אישר את השינויים · '+tm(pk.okAt):'אין שינויים שדורשים אישור.'}</p>`}
+ ${!chg&&OPEN.includes(o.status)&&!o.shp&&!(o.custId&&window.__onTerms&&window.__onTerms(o.custId))&&window.__oxAuthH?window.__oxAuthH(o):''}
  ${canPick(o)&&!chg?`<button type="button" class="btn g s w" data-a="oxPkRe" data-id="${esc(o.id)}" style="margin-top:8px">סימון מלאי מחדש</button>`:''}
  <button type="button" class="btn g w" data-a="oxPkBack" style="margin-top:6px">חזרה להזמנה</button>`}}
 ACT.oxPkOk=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('orderPickOk',{id});toast('נרשם: הלקוח אישר את השינויים');await after(id);back()}catch(e){el.disabled=false;err(e)}};

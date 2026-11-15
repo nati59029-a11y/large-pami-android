@@ -208,7 +208,7 @@ const allCards=D=>{const out=[];if(CD.d===D){const a=cdOut(CD,'');if(a)out.push(
  const c=D.custId&&(C.L||[]).find(x=>x.id===D.custId);if(out.length&&(c?cardsOf(c).length:0)+out.length>3)throw new Error(c&&cardsOf(c).length>=3?'ללקוח כבר שמורים 3 כרטיסים':'עד 3 כרטיסים ללקוח (כולל השמורים)');return out};
 const midN=D=>CD.d!==D?0:[CD].concat(cell()?CD.more||[]:[]).filter(m=>String(m.num||'').trim()).length;
 INP.ocCs=el=>{const D=O.draft;if(!D)return;if(CS.d!==D)CS={d:D};CS[el.dataset.k]=el.value};
-const payM=()=>window.__payMode?window.__payMode():'phone';
+const payM=()=>window.__payKind?window.__payKind():window.__payMode?window.__payMode():'phone'; // החלטה 32: 'both' (פרטי אשראי וגם קישור) – מסך הכרטיס מופיע כמו בתשלום בטלפון
 /* מסך הכרטיס שלפני הסיום. בניוד: כרטיס לתשלום ההזמנה (CS, נפרד מהמשבצת שבטופס, בלי cdMore). בלי ניוד: אותו CD כמו המשבצת. ריק = מותר. "סיום הזמנה" → שמירה רגילה (setCard עם ordId אחרי createOrder) */
 V.ocCardStep=()=>{const T='כרטיס אשראי (לא חובה)';if(!on())return{t:T,h:'<div class="empty">אין לך הרשאה להזמנות</div>'};const D=O.draft;
  if(!D)return{t:T,h:'<div class="empty">אין הזמנה פתוחה</div><button class="btn g w" data-a="back">חזרה</button>'};if(CD.d!==D)cdReset(D);const CL=cell();if(CL&&CS.d!==D)CS={d:D};

@@ -75,6 +75,13 @@ const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|
 const prod=id=>(O.P||[]).find(p=>p.id===id);
 const srcOf=br=>{const s=O.cfg&&O.cfg.src&&O.cfg.src[br];return s&&s!=='stock'&&brs().some(b=>b.id===s)?s:'stock'};
 const payMode=()=>{const p=O.cfg&&O.cfg.pay;return p&&p.mode==='link'&&p.has?'link':'phone'};
+/* 15.11.2026 (החלטה 32, חלק א – בלי חיבור לחברת הסליקה): payKind – 'phone' (פרטי אשראי, כמו היום) / 'link' / 'both' (שניהם).
+   afterOn – "חיוב רק אחרי ליקוט" (רק עם קישור): קודם מסגרת (orderAuth), ובסוף הליקוט "חויב" (markOrderPaid {amt}). עסק בלי השדות החדשים – בדיוק כמו קודם */
+const payCfg=()=>O.cfg&&O.cfg.pay||{};
+const payKind=()=>{const m=payMode();return m==='link'&&payCfg().kind==='both'?'both':m};
+const afterOn=()=>payMode()==='link'&&payCfg().after===true;
+const mgP=()=>{const m=payCfg().mg;return typeof m==='number'&&m>=0&&m<=50?m:10};
+const frOf=a=>window.ArCalc&&ArCalc.frameOf?ArCalc.frameOf(a,mgP()):Math.ceil(Math.round(a*(100+mgP()))/100-1e-9);
 const loading=t=>({t,h:O.err?`<div class="card"><p class="note">${esc(O.err)}</p><button class="btn g w" data-a="oxRe">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'});
 const deny=t=>({t,h:'<div class="empty">אין לך הרשאה להזמנות</div>'});
 ACT.oxRe=()=>load(true);
@@ -183,7 +190,8 @@ V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return
  let nl=NEXT[o.status]||[];if(lk)nl=nl.filter(s=>s!=='work');else if(ot&&(o.status==='work'||o.status==='wait_pay'))nl=['out'].concat(nl.filter(s=>s!=='wait_pay'));
  const items=(o.items||[]).map(it=>`<div class="li" style="cursor:default"><div class="m"><b>${esc(it.n)}</b><small>${it.ct?`${n3(it.qty/it.ct)} × קרטון (${it.ct} מארזים) · ${ils(it.price)} למארז`:`${n3(it.qty)} × ${ils(it.price)}`}${it.from&&hasBr()?' · מסניף '+esc(bn(it.from)):''}</small></div><b class="a">${ils(Math.round(it.qty*it.price*100)/100)}</b></div>`).join('');
  const nx=nl.map(s=>`<button class="btn g grow" data-a="oxStat" data-id="${esc(o.id)}" data-s="${s}">${s==='out'&&ot&&o.status!=='paid'?'נשלח':ST[s]}</button>`).join('');
- const pay=open?(np?'':payMode()==='link'?`<button class="btn w" data-a="oxPay" data-id="${esc(o.id)}">לתשלום</button><p class="note">נפתח דף הסליקה של העסק. מקלידים שם את פרטי האשראי של הלקוח – הם לא נשמרים באפליקציה.</p>`:`<a class="btn w" href="tel:${esc(c.phone)}" data-a="oxCall" data-id="${esc(o.id)}" style="display:flex;align-items:center;justify-content:center;text-decoration:none">תשלום בטלפון</a><p class="note">התקשר ללקוח וגבה בטלפון. אחר כך סמן "שולם".</p>`)+`<button class="btn g w" data-a="oxPaid" data-id="${esc(o.id)}">סמן שולם</button>`:'';
+ const LNK=`<button class="btn w" data-a="oxPay" data-id="${esc(o.id)}">לתשלום</button><p class="note">נפתח דף הסליקה של העסק. מקלידים שם את פרטי האשראי של הלקוח – הם לא נשמרים באפליקציה.</p>`,TEL=`<a class="btn w" href="tel:${esc(c.phone)}" data-a="oxCall" data-id="${esc(o.id)}" style="display:flex;align-items:center;justify-content:center;text-decoration:none">תשלום בטלפון</a><p class="note">התקשר ללקוח וגבה בטלפון. אחר כך סמן "שולם".</p>`,pk=payKind(); // החלטה 32: שניהם – קישור (או מסגרת) וגם טלפון
+ const pay=open?(np?'':pk==='phone'?TEL:(afterOn()?authH(o):LNK)+(pk==='both'?TEL:''))+`<button class="btn g w" data-a="oxPaid" data-id="${esc(o.id)}">סמן שולם</button>`:'';
  const paid=o.paid?`<div class="card"><b>שולם ${ils(o.paid.amt!=null?o.paid.amt:o.total)}</b><p class="note" style="margin:4px 0 0">${(PM.find(x=>x[0]===o.paid.method)||[0,o.paid.method])[1]}${o.paid.last4?' · ****'+esc(o.paid.last4):''}${o.paid.conf?' · אישור '+esc(o.paid.conf):''} · ${tm(o.paid.at)}${o.paid.sup?' · זיכוי אצל '+esc(o.paid.sup.name):''}</p>${mgr()&&(o.status==='paid'||(o.status==='done'&&lk))?`<button class="btn g s" data-a="oxUnpay" data-id="${esc(o.id)}">ביטול "שולם"</button>`:''}</div>`:'';
  const lg=O.log[id];if(lg===undefined){O.log[id]=null;logLoad(id)}
  return{t:'הזמנה #'+o.no,s:ST[o.status],h:`<div class="card"><div class="row" style="justify-content:space-between"><b>${esc(c.name||'')}</b><span class="tag">${ST[o.status]}</span></div>${lk?`<p class="note" style="margin:4px 0 0">נשלח בתאריך ${new Date(o.shp.at).toLocaleDateString('he-IL')}</p>`:''}
@@ -197,7 +205,7 @@ V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return
  ${nx?`<div class="sec"><h3>שינוי סטטוס</h3></div><div class="row">${nx}</div>`:''}
  ${(!lk||mgr())&&!o.inv&&o.status!=='done'&&o.status!=='cancel'&&(o.status!=='paid'||mgr())?`<button class="btn g w" style="margin-top:14px" data-a="oxCancel" data-id="${esc(o.id)}">ביטול הזמנה</button>`:''}
  <div class="sec"><h3>היסטוריה</h3></div>${lg?lg.map(x=>`<div class="note" style="padding:6px 0;border-bottom:1px solid var(--line)">${tm(x.t)} · ${esc(LOGW[x.act]||x.act)}${x.note?' · '+esc(x.note):''}</div>`).join('')||'<p class="note">אין</p>':'<p class="note">טוען…</p>'}`}};
-const LOGW={create:'נוצרה',edit:'נערכה',status:'סטטוס',ship:'נשלח',paid:'סומן שולם',unpay:'בוטל "שולם"',cancel:'בוטלה',called:'חייגו ללקוח',payOpen:'נפתח דף התשלום',pick:'ליקוט',pickok:'הלקוח אישר את השינויים',pickforce:'מנהל עקף אישור לקוח'}; // pick* – ord-pick.js (משוב סבב 3)
+const LOGW={create:'נוצרה',edit:'נערכה',status:'סטטוס',ship:'נשלח',paid:'סומן שולם',unpay:'בוטל "שולם"',cancel:'בוטלה',called:'חייגו ללקוח',payOpen:'נפתח דף התשלום',paySend:'נשלח קישור תשלום ללקוח',auth:'המסגרת אושרה',pick:'ליקוט',pickok:'הלקוח אישר את השינויים',pickforce:'מנהל עקף אישור לקוח'}; // pick* – ord-pick.js (משוב סבב 3)
 async function logLoad(id){try{const r=await fsx('/ord/'+id+'/log?pageSize=100');O.log[id]=((r&&r.documents)||[]).map(dec).sort((a,b)=>b.t-a.t)}catch(e){O.log[id]=[]}if(cur().v==='oxOrd'&&!typing())rerender()}
 async function after(id){O.log[id]=undefined;await load(true)}
 ACT.oxStat=async el=>{el.disabled=true;try{await fnCall('setOrderStatus',{id:el.dataset.id,status:el.dataset.s});toast('הסטטוס עודכן');await after(el.dataset.id)}catch(e){el.disabled=false;err(e)}};
@@ -215,6 +223,46 @@ ACT.oxPaid=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);if(!o)retu
  <p class="note">לא מקלידים כאן מספר כרטיס מלא, תוקף או קוד – זה נדחה.</p><div class="row"><button class="btn grow">שולם</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.oxPaidF=async f=>{const x=fd(f),b=f.querySelector('button');if(x.last4&&!/^\d{4}$/.test(x.last4))return toast('4 ספרות בדיוק');b.disabled=true;
  try{await fnCall('markOrderPaid',{id:x.id,method:x.method,last4:x.last4||undefined,conf:x.conf||undefined});closeDlg();toast('סומן שולם');await after(x.id);paidProf(x.id)}catch(e){b.disabled=false;err(e)}};
+/* ---------- החלטה 32 (חלק א): חיוב אחרי ליקוט – מסגרת ("שלח קישור ללקוח" / "אמלא בשיחה" → "המסגרת אושרה"), ובסוף הליקוט "חויב" ----------
+   המסגרת = סכום ההזמנה × (1+מרווח), מעוגלת לשקל למעלה (ArCalc.frameOf). העובד מקליד אותה באתר הסליקה כעסקת מסגרת/אישור בלבד.
+   "חויב" רק כשהליקוט הסתיים (pk.st 'ok') והסכום הסופי בתוך המסגרת; השרת אוכף (markOrderPaid {method:'link', amt}). לקוח בשוטף – לא מגיע לכאן (np) */
+const agr=x=>Math.round(x*100);
+const AV={};let AM=null; // AV – איך העובד בחר (קישור/שיחה) לכל הזמנה; AM – ההודעה עם הקישור, בזיכרון בלבד עד סגירת החלון
+function authH(o){const A=amtOf(o),au=o.auth&&typeof o.auth.amt==='number'?o.auth:null,id=esc(o.id),fr=frOf(A);
+ if(!au||agr(A)>agr(au.amt))return `<div class="card" id="oxauth">${au?`<p style="margin:0 0 6px;color:var(--bad)"><b>הסכום חורג מהמסגרת (${ils(au.amt)})</b> – יש לשלוח ללקוח קישור חדש</p>`:''}<p class="note" style="margin:0 0 6px">חיוב אחרי ליקוט: קודם מאשרים מסגרת (אישור בלבד, בלי חיוב). החיוב – בסוף הליקוט, לפי מה שיש בפועל.</p>
+  <div class="row" style="justify-content:space-between"><b>מסגרת לאישור</b><b class="amt" id="oxfr">${ils(fr)}</b></div><small class="note" style="display:block;margin:2px 0 8px">סכום ההזמנה ${ils(A)} + מרווח <bdi>${mgP()}%</bdi>. באתר הסליקה מקלידים את הסכום הזה כעסקת מסגרת / אישור בלבד.</small>
+  <div class="row" style="gap:8px"><button class="btn grow" data-a="oxAuthSend" data-id="${id}">שלח קישור ללקוח</button><button class="btn g grow" data-a="oxAuthCall" data-id="${id}">אמלא בשיחה</button></div>
+  <button class="btn g w" style="margin-top:8px" data-a="oxAuthOk" data-id="${id}">המסגרת אושרה</button>${payCfg().chg==='auto'?'<p class="note" style="margin:6px 0 0">חיוב אוטומטי דורש חיבור לחברת הסליקה – בינתיים ידני.</p>':''}</div>`;
+ const inf=[au.last4?'****'+esc(au.last4):'',au.via==='link'?'קישור ללקוח':'בשיחה',tm(au.at)].filter(Boolean).join(' · ');
+ if(!(o.pk&&o.pk.st==='ok'))return `<div class="card" id="oxauth"><b>מסגרת אושרה: ${ils(au.amt)}</b><p class="note" style="margin:4px 0 0">${inf}. החיוב – בסוף הליקוט, לפי הסכום הסופי.</p></div>`;
+ return `<div class="card" id="oxauth" style="border-color:var(--acc)"><div class="row" style="justify-content:space-between"><span>סכום סופי</span><b class="amt">${ils(A)}</b></div><div class="row" style="justify-content:space-between"><span>מסגרת שאושרה</span><b>${ils(au.amt)}</b></div><small class="note">${inf}</small>
+  <p style="margin:8px 0 6px"><b>לחייב ${ils(A)} באתר הסליקה</b> (בתוך המסגרת שאושרה).</p><button class="btn g w" data-a="oxPay" data-id="${id}">פתיחת אתר הסליקה</button><button class="btn w" style="margin-top:8px" data-a="oxCharged" data-id="${id}">חויב ${ils(A)}</button></div>`}
+const intl=p=>{const d=String(p||'').replace(/\D/g,'');return /^0\d{8,9}$/.test(d)?'972'+d.slice(1):d};
+ACT.oxAuthCall=el=>{AV[el.dataset.id]='call';return ACT.oxPay(el)};
+ACT.oxAuthSend=async el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);if(!o)return;el.disabled=true;
+ try{let r;try{r=await fnCall('getPayLink',{id,send:true})}catch(e){if(e.reason!=='bad-field')throw e;r=await fnCall('getPayLink',{id})} // שרת ישן – בלי send
+  const u=String(r&&r.link||'');if(!/^https:\/\//.test(u))throw new Error('קישור התשלום לא תקין');
+  const fr=r&&typeof r.fr==='number'?r.fr:frOf(amtOf(o)),c=o.cust||{};AV[id]='link';
+  AM={ph:String(c.phone||''),t:`שלום ${String(c.name||'').trim()}, לאישור הזמנה מספר ${o.no}: נא לאשר בקישור מסגרת אשראי עד ${ils(fr)} (אישור בלבד, בלי חיוב). החיוב הסופי יהיה לפי מה שיסופק בפועל, אחרי הכנת ההזמנה.\n${u}`};
+  dlg(`<h3>שליחת קישור ללקוח</h3><p class="note">מסגרת: <b>${ils(fr)}</b>. ההודעה נפתחת באפליקציה שבוחרים, עם הסכום ועם הקישור. אחרי שהלקוח אישר – "המסגרת אושרה".</p>
+   <div class="row" style="gap:8px"><button type="button" class="btn grow" data-a="oxAmGo" data-k="wa">ווטסאפ</button><button type="button" class="btn g grow" data-a="oxAmGo" data-k="sms">SMS</button><button type="button" class="btn g grow" data-a="oxAmGo" data-k="sh">שיתוף</button></div>
+   <button type="button" class="btn g w" style="margin-top:8px" data-a="oxAmX">סגירה</button>`);
+  O.log[id]=undefined}catch(e){err(e)}finally{el.disabled=false}};
+ACT.oxAmGo=async el=>{if(!AM)return closeDlg();const k=el.dataset.k,t=AM.t,p=AM.ph;AM=null;closeDlg();
+ if(k==='wa')window.open('https://wa.me/'+intl(p)+'?text='+encodeURIComponent(t),'_system');
+ else if(k==='sms')window.open('sms:'+p.replace(/[^\d+]/g,'')+'?body='+encodeURIComponent(t),'_system');
+ else{try{if(navigator.share)await navigator.share({text:t});else{await navigator.clipboard.writeText(t);toast('ההודעה הועתקה – הדביקו אותה ללקוח')}}catch(e){if(!(e&&e.name==='AbortError')){try{await navigator.clipboard.writeText(t);toast('ההודעה הועתקה – הדביקו אותה ללקוח')}catch(x){toast('השיתוף נכשל')}}}}
+ setTimeout(rerender,600)};
+ACT.oxAmX=()=>{AM=null;closeDlg()};
+ACT.oxAuthOk=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);if(!o)return;const v=AV[id]||'call';
+ dlg(`<h3>המסגרת אושרה</h3><form data-f="oxAuthF"><input type="hidden" name="id" value="${esc(id)}"><label class="f"><span>סכום המסגרת שאושר ₪</span><input name="amt" inputmode="decimal" required value="${frOf(amtOf(o))}"></label>
+ <label class="f"><span>איך אושרה</span><select name="via"><option value="link"${v==='link'?' selected':''}>הלקוח מילא בקישור</option><option value="call"${v==='call'?' selected':''}>מילאתי בשיחה</option></select></label>
+ <label class="f"><span>4 ספרות אחרונות של הכרטיס (רשות)</span><input name="last4" inputmode="numeric" maxlength="4" pattern="\\d{4}" autocomplete="off"></label>
+ <p class="note">לא מקלידים כאן מספר כרטיס מלא, תוקף או קוד – זה נדחה. סכום ההזמנה כרגע: ${ils(amtOf(o))}.</p><div class="row"><button class="btn grow">אישור</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+FRM.oxAuthF=async f=>{const x=fd(f),a=num(x.amt),b=f.querySelector('button');if(!(a>0))return toast('סכום לא תקין');if(x.last4&&!/^\d{4}$/.test(x.last4))return toast('4 ספרות בדיוק');b.disabled=true;
+ try{await fnCall('orderAuth',{id:x.id,amt:Math.round(a*100)/100,via:x.via==='link'?'link':'call',last4:x.last4||undefined});closeDlg();toast('נרשם: המסגרת אושרה');await after(x.id)}catch(e){b.disabled=false;err(e)}};
+ACT.oxCharged=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);if(!o)return;const A=amtOf(o);
+ ask(`לסמן שחויב ${ils(A)} באתר הסליקה?`,async()=>{try{const r=await fnCall('markOrderPaid',{id,method:'link',amt:A});toast('נרשם: חויב '+ils(A)+(r&&r.ar&&r.ar.no?' · מסמך #'+r.ar.no:''));await after(id);paidProf(id)}catch(e){err(e)}},'כן, חויב')};
 const reasonDlg=(ttl,fn,ok,ex)=>{dlg(`<h3>${esc(ttl)}</h3><form data-f="oxWhy"><label class="f"><span>סיבה (חובה)</span><input name="r" required maxlength="200"></label>${ex||''}<div class="row"><button class="btn r grow">${ok}</button><button type="button" class="btn g grow" data-a="closeDlg">חזרה</button></div></form>`);O.why=fn};
 FRM.oxWhy=async f=>{const r=fd(f).r.trim();if(!r)return;const b=f.querySelector('button');b.disabled=true;try{await O.why(r,f);closeDlg()}catch(e){b.disabled=false;err(e)}};
 ACT.oxCancel=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);
@@ -285,22 +333,29 @@ FRM.oxCfgF=async f=>{const src=fd(f),b=f.querySelector('button');b.disabled=true
 const PAYC={};
 {const s=V.sab;if(s)V.sab=id=>{const r=s(id);try{const b=(ADM.L||[]).find(x=>x.id===id);if(!SY.sa||!b||(b.missing&&id!==BZ0)||!r||!r.h)return r;const pf=(b.dataRoot==='legacy'||b.missing)&&id===BZ0?'':'/b/'+id;
  const c=PAYC[id];if(c===undefined){PAYC[id]=null;Promise.all([fsx(pf+'/ordcfg/main',{},true).then(d=>dec(d).pay||{}).catch(()=>({})),fsx(pf+'/cfg/main',{},true).then(d=>{const j=JSON.parse(fvj(d.fields&&d.fields.data)||'{}');return(j.cats||[]).filter(c=>c.beh==='sup').flatMap(c=>(c.subs||[]).map(x=>({id:x.id,name:x.name})))}).catch(()=>[])]).then(([p,sups])=>{PAYC[id]=Object.assign({},p,{sups})}).finally(()=>{if(cur().v==='sab')rerender()})}
- const p=c||{},mode=p.mode==='link'?'link':'phone';
+ const p=c||{},mode=p.mode==='link'?(p.kind==='both'?'both':'link'):'phone'; // החלטה 32: both = שניהם (mode 'link' בשרת)
  r.h+=`<div class="sec"><h3>תשלום בהזמנות</h3></div><form class="card" data-f="oxPayF" data-id="${esc(id)}"><p class="note" style="margin-top:0">${c===null?'טוען…':p.mode==='link'&&p.has?'מוגדר קישור סליקה. מטעמי אבטחה הקישור לא מוצג – אפשר להחליף אותו.':p.mode==='phone'?'מוגדר: תשלום בטלפון.':'עדיין לא הוגדר. ברירת המחדל: תשלום בטלפון.'} העובדים לא רואים את הקישור, רק כפתור "לתשלום".</p>
- <div class="chips" role="radiogroup"><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="link"${mode==='link'?' checked':''}> קישור סליקה</label><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="phone"${mode==='phone'?' checked':''}> תשלום בטלפון</label></div>
+ <p class="note" style="margin:0 0 4px">אמצעי גבייה:</p><div class="chips" role="radiogroup" style="flex-wrap:wrap"><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="phone"${mode==='phone'?' checked':''}> פרטי אשראי (תשלום בטלפון)</label><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="link"${mode==='link'?' checked':''}> קישור סליקה</label><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="both"${mode==='both'?' checked':''}> שניהם</label></div>
  <label class="f"><span>הקישור שייך לספק (זיכוי אצלו על כל הזמנה ששולמה בקישור; יסומן אוטומטית כספק קיזוז)</span><select name="sup"><option value="">בלי ספק</option>${(p.sups||[]).map(x=>`<option value="${esc(x.id)}"${p.sup&&p.sup.id===x.id?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
  <label class="f"><span>קישור לדף הסליקה (https)${p.mode==='link'&&p.has?' – רשות':''}</span><input name="link" type="url" dir="ltr" maxlength="500" placeholder="https://" autocomplete="off"></label>${p.mode==='link'&&p.has?'<p class="note" style="margin:0 0 6px" id="oxpaykeep">השאירו ריק כדי לא לשנות את הקישור. החלפת הקישור לאתר אחר מוחקת את פרטי הכניסה.</p>':''}
  <div class="card" style="margin:8px 0" id="oxpaycred"><b>כניסה אוטומטית לאתר הסליקה</b><p class="note" style="margin:4px 0">פרטי כניסה: <b>${c===null?'…':p.cred?'מוגדרים':'לא מוגדרים'}</b></p>
  <label class="f"><span>מייל / שם משתמש (רשות)</span><input name="cuser" dir="ltr" maxlength="120" autocomplete="off" value=""></label><label class="f"><span>סיסמה (רשות)</span><input name="cpass" type="password" dir="ltr" maxlength="200" autocomplete="new-password" value=""></label>
  ${p.cred?'<label class="row" style="min-height:44px;gap:8px"><input type="checkbox" name="cdel" value="1">מחק פרטי כניסה</label>':''}
- <p class="note" style="margin:4px 0 0">נשמר מוצפן בשרת; אף אחד לא רואה אותם, גם לא כאן. באפליקציה האתר נפתח בתוך האפליקציה וממלא לבד. אם האתר שולח קוד SMS – מקלידים אותו ידנית בדף שנפתח. במחשב – פתיחה רגילה.</p></div><button class="btn w">שמור</button></form>`}catch(e){}return r}}
-FRM.oxPayF=async f=>{const id=f.dataset.id,x=fd(f),P1=PAYC[id]||{},keep=x.mode==='link'&&!String(x.link||'').trim()&&P1.mode==='link'&&!!P1.has; // 12.11.2026: קישור קיים + שדה ריק → לא נשלח link (השרת שומר את הקיים)
+ <p class="note" style="margin:4px 0 0">נשמר מוצפן בשרת; אף אחד לא רואה אותם, גם לא כאן. באפליקציה האתר נפתח בתוך האפליקציה וממלא לבד. אם האתר שולח קוד SMS – מקלידים אותו ידנית בדף שנפתח. במחשב – פתיחה רגילה.</p></div>
+ <div class="card" style="margin:8px 0" id="oxpayafter"><b>חיוב אחרי ליקוט</b><p class="note" style="margin:4px 0">רק כשיש קישור. קודם מאשרים ללקוח מסגרת (אישור בלבד), והחיוב – בסוף הליקוט לפי מה שיש בפועל.</p>
+ <label class="row" style="min-height:44px;gap:8px;align-items:center"><input type="checkbox" name="after" value="1"${p.after===true?' checked':''}> חיוב רק אחרי ליקוט</label>
+ <label class="f"><span>אחוז מרווח למסגרת (0–50)</span><input name="mg" inputmode="decimal" maxlength="5" value="${typeof p.mg==='number'?p.mg:10}"></label>
+ <p class="note" style="margin:4px 0">אופן החיוב:</p><div class="chips" role="radiogroup"><label class="chip" style="min-height:44px"><input type="radio" name="chg" value="man"${p.chg!=='auto'?' checked':''}> ידני</label><label class="chip" style="min-height:44px"><input type="radio" name="chg" value="auto"${p.chg==='auto'?' checked':''}> אוטומטי</label></div>
+ <p class="note" style="margin:4px 0 0">אוטומטי: דורש חיבור לחברת הסליקה – בינתיים ידני.</p></div><button class="btn w">שמור</button></form>`}catch(e){}return r}}
+FRM.oxPayF=async f=>{const id=f.dataset.id,x=fd(f),kind=['phone','link','both'].includes(x.mode)?x.mode:'phone',mg=String(x.mg==null?'':x.mg).trim()===''?10:num(x.mg);x.mode=kind==='phone'?'phone':'link'; // החלטה 32
+ if(!(mg>=0&&mg<=50))return toast('אחוז מרווח: מספר בין 0 ל-50');const P1=PAYC[id]||{},keep=x.mode==='link'&&!String(x.link||'').trim()&&P1.mode==='link'&&!!P1.has; // 12.11.2026: קישור קיים + שדה ריק → לא נשלח link (השרת שומר את הקיים)
  if(x.mode==='link'&&!keep&&!/^https:\/\/[^\s]+\.[^\s]+/.test(x.link||''))return toast('קישור חייב להתחיל ב-https://');const b=f.querySelector('button');b.disabled=true;
  /* 12.11.2026: cred נשלח רק כשהוקלדה סיסמה; cred:null = מחיקה; בלי שינוי – לא נשלח (הקיים נשאר). הטופס מתרוקן מיד (f.reset) */
  const pw=String(x.cpass||''),cr=x.cdel?null:pw?Object.assign({pass:pw},String(x.cuser||'').trim()?{user:String(x.cuser).trim()}:{}):undefined;x.cpass='';f.querySelectorAll('[name=cuser],[name=cpass]').forEach(e=>{e.value=''});{const d=f.querySelector('[name=cdel]');if(d)d.checked=false}
  try{const P0=PAYC[id]||{},su=x.sup?(P0.sups||[]).find(s=>s.id===x.sup):null;const a={bizId:id,mode:x.mode,link:x.mode==='link'&&!keep?x.link.trim():undefined,sup:x.mode==='link'&&su?{id:su.id,name:su.name}:x.mode==='link'&&keep?null:undefined}; /* סבב 2: "בלי ספק" עם קישור קיים – null (השרת מנקה); undefined = שומר */if(cr!==undefined)a.cred=cr;
-  let r;try{r=await fnCall('setBusinessPayLink',a)}catch(e){if(cr!==undefined&&e.reason==='bad-field')throw new Error('שמירת פרטי הכניסה דורשת עדכון שרת. הקישור לא נשמר – נסו שוב בלי פרטי כניסה, או אחרי עדכון השרת');throw e}
-  PAYC[id]=Object.assign({},P0,{mode:r.mode,has:r.has,sup:r.sup||null},typeof r.cred==='boolean'?{cred:r.cred}:{});toast('נשמר');rerender()}catch(e){err(e)}finally{b.disabled=false}};
+  Object.assign(a,{kind,after:x.mode==='link'&&!!x.after,mg:Math.round(mg*100)/100,chg:x.chg==='auto'?'auto':'man'}); // החלטה 32
+  let r;try{r=await fnCall('setBusinessPayLink',a)}catch(e){if(cr!==undefined&&e.reason==='bad-field')throw new Error('שמירת פרטי הכניסה דורשת עדכון שרת. הקישור לא נשמר – נסו שוב בלי פרטי כניסה, או אחרי עדכון השרת');if(e.reason==='bad-field')throw new Error('הגדרות אמצעי הגבייה והחיוב אחרי ליקוט דורשות עדכון שרת. לא נשמר');throw e}
+  PAYC[id]=Object.assign({},P0,{mode:r.mode,has:r.has,sup:r.sup||null,kind:r.kind||a.kind,after:typeof r.after==='boolean'?r.after:a.after,mg:typeof r.mg==='number'?r.mg:a.mg,chg:r.chg||a.chg},typeof r.cred==='boolean'?{cred:r.cred}:{});toast('נשמר');rerender()}catch(e){err(e)}finally{b.disabled=false}};
 
 /* ---------- 17:47–17:59: הזמנה ששולמה דרך קישור הספק → הכנסה בסניף ההזמנה + זיכוי אצל הספק ----------
    השרת כותב ordpay/{ordId} (st paid/void). היומן נמצא במכשיר המנהל (S), ולכן כאן – רק אצל מנהל – כל רשומה הופכת לתנועת הכנסה אחת:
@@ -556,5 +611,5 @@ const dayH=()=>{const D=DAY();if(!D.b&&(!D.r||!D.at||D.br!==(OBR||'')))setTimeou
 ACT.oxDayK=el=>{const D=DAY();D.k=el.dataset.k;if(D.k!=='custom'){[D.from,D.to]=pfRange(D.k);D.r=null;dayLoad()}else rerender()};
 FRM.oxDayF=f=>{const x=fd(f),D=DAY(),ok=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'');if(!ok(x.from)||!ok(x.to))return toast('בחר תאריכים');if(x.to<x.from)return toast('תאריך הסיום לפני תאריך ההתחלה');if(dAdd(x.from,366)<x.to)return toast('תקופה של עד שנה');D.from=x.from;D.to=x.to;D.r=null;dayLoad()};
 ACT.oxDayProf=()=>{if(!prOk())return;const D=DAY(),P=PF();P.k=D.k==='today'||D.k==='yest'?D.k:'custom';P.from=D.from;P.to=D.to;P.br=OBR||'';P.r=null;P.err='';P.b=0;go('oxProf')};
-window.__ox=O;window.__oxAfter=after;/* ord-pick.js (משוב סבב 3) */window.__payMode=payMode;window.__oxMgr=mgr;window.__opSync=opSync;window.__brXfer=brXfer;window.__ordProfitOf=ordProfitOf;
+window.__ox=O;window.__oxAfter=after;/* ord-pick.js (משוב סבב 3) */window.__payMode=payMode;window.__payKind=payKind;window.__oxAuthH=o=>afterOn()?authH(o):''; /* החלטה 32 */window.__oxMgr=mgr;window.__opSync=opSync;window.__brXfer=brXfer;window.__ordProfitOf=ordProfitOf;
 })();

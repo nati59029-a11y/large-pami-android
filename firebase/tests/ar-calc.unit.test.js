@@ -159,3 +159,19 @@ describe('שלב 4 – חשבוניות (ar-calc)', () => {
     assert.equal(AC.nextNo(5, 100), 100); // start גבוה מהמונה (לא אמור לקרות – setArOff חוסם אחרי שהסדרה התחילה)
   });
 });
+
+describe('החלטה 32 – מסגרת לחיוב אחרי ליקוט (ar-calc.frameOf)', () => {
+  it('סכום × (1+מרווח), עיגול לשקל שלם כלפי מעלה; מרווח לא תקין = 10%', () => {
+    assert.equal(AC.frameOf(100, 10), 110);
+    assert.equal(AC.frameOf(42.5, 10), 47);
+    assert.equal(AC.frameOf(99.99, 10), 110);
+    assert.equal(AC.frameOf(100, 0), 100);
+    assert.equal(AC.frameOf(100, 12.5), 113);
+    assert.equal(AC.frameOf(1.1, 10), 2); // 1.21 → 2
+    assert.equal(AC.frameOf(52.5, 10), 58);
+    assert.equal(AC.frameOf(100, 51), 110);
+    assert.equal(AC.frameOf(100, undefined), 110);
+    assert.equal(AC.frameOf(0, 10), 0);
+    assert.equal(AC.mgOf(50), 50); assert.equal(AC.mgOf(-1), 10);
+  });
+});

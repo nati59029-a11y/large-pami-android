@@ -133,7 +133,11 @@ function dueOf(terms, d, isBiz) {
 // המספר הבא בסדרה: n = המונה (המספר האחרון שהופק, או null כשאין עדיין מסמך בסדרה); start = מספר ההתחלה שמנהל־העל קבע (סדרה רשמית בלבד)
 function nextNo(n, start) { const s = Number.isInteger(start) && start > 0 ? start : 1; return Number.isInteger(n) && n > 0 ? Math.max(n + 1, s) : s; }
 
-const api = { VAT0, ag, agUp, exVat, costIn, pctFor, floorOf, defPrice, priceOk, totals, termsOk, termsOfCust, termsTxt, cpConv, payOf, staffOk, docSums, dueOf, ymdOk, ymdAdd, nextNo };
+// החלטה 32 (חלק א, חיוב אחרי ליקוט): מסגרת = סכום ההזמנה × (1 + מרווח%), מעוגלת לשקל שלם כלפי מעלה. מרווח לא תקין / חסר = 10%
+const MG0 = 10;
+const mgOf = (m) => (isNum(m) && m >= 0 && m <= 50 ? m : MG0);
+function frameOf(amt, mg) { const c = ag(isNum(amt) && amt > 0 ? amt : 0); return Math.max(0, Math.ceil(Math.round(c * Math.round((100 + mgOf(mg)) * 100)) / 1e6 - 1e-9)); }
+const api = { VAT0, ag, agUp, exVat, costIn, pctFor, floorOf, defPrice, priceOk, totals, termsOk, termsOfCust, termsTxt, cpConv, payOf, staffOk, docSums, dueOf, ymdOk, ymdAdd, nextNo, MG0, mgOf, frameOf };
 // שרת (Node) – module.exports; מסך ההזמנה (דפדפן) – window.ArCalc
 if (typeof module === 'object' && module.exports) module.exports = api; else root.ArCalc = api;
 })(typeof self !== 'undefined' ? self : this);
