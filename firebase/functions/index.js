@@ -75,6 +75,8 @@ exports.scanDocument = onCall(
       || (kind === 'invlines' && !hasPerm(who, 'expW') && !hasPerm(who, 'prc')))) {
       throw new HttpsError('permission-denied', 'אין לך הרשאה לפעולה הזו. פנה למנהל.', { reason: 'no-perm' });
     }
+    // צילום רשימת הזמנה (ordlist, 14.11.2026): התוספת "הזמנות" והרשאת ord – בכל העסקים (גם legacy), לפני הספירה במכסה
+    if ((kind === 'ordlist' || kind === 'payproof') && (!(who.biz && who.biz.features && who.biz.features.orders === true) || !hasPerm(who, 'ord'))) throw new HttpsError('permission-denied', 'אין לך הרשאה להזמנות. פנה למנהל.', { reason: 'no-perm' });
     const key = GEMINI_API_KEY.value();
     if (!key) throw new HttpsError('failed-precondition', 'אין מפתח לזיהוי חכם בשרת', { reason: 'no-key' });
     const limit = SCAN_DAILY_LIMIT.value();
@@ -212,8 +214,20 @@ Object.assign(exports, require('./invite-mail'));
 
 // מערכת הזמנות – שלב 1 (2026-11-08): מוצרים ומלאי לכל סניף, הזמנות עובד, תשלום ידני וקישור סליקה (orders.js)
 Object.assign(exports, require('./orders'));
+// מסך טיפול/ליקוט (14.11.2026, משוב סבב 3): orderPick, orderPickOk, supOrdSet – ord-pick.js; orderAuth ("המסגרת אושרה", החלטה 32, 15.11.2026)
+Object.assign(exports, require('./ord-pick'));
 // תמחור מחשבונית ספק (12.11.2026): pinv – piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg (צילום, שלב 4)
 Object.assign(exports, require('./pricing'));
+
+// מסמכים ללקוח (14.11.2026, שלב 3 חלק א'): arFile – קישור עם אסימון לקובץ PDF (onRequest, us-central1 בלבד). ar-file.js
+Object.assign(exports, require('./ar-file'));
+// אישור הזמנה (14.11.2026, שלב 3 חלק ב'): arOc (מספור רץ נפרד + קובץ + שליחה אוטומטית לפי סימון הלקוח), arPdf, arSend, setArCfg. ar.js
+// חשבוניות, קבלות וזיכויים (15.11.2026, שלב 4): arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff. ar.js + lib/ar-doc.js
+Object.assign(exports, require('./ar'));
+// כרטסת ותזכורות (15.11.2026, שלב 5): arStatement, setRemCfg (ar.js); arRemind – מתוזמנת כל 15 דקות (ar-remind.js)
+Object.assign(exports, require('./ar-remind'));
+// ייבוא מתוכנה קודמת (15.11.2026, שלב 6): arImp (תצוגה מקדימה / ייבוא במנות של 25), arImpVoid (ביטול קבוצה = void), arImpList. ar-import.js
+Object.assign(exports, require('./ar-import'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
@@ -237,6 +251,8 @@ Object.assign(exports, require('./secretary-google'));
 // המזכירה שלב 7 (2026-11-12): secInv (רשימה, קובץ, הגדרות, רשימת ספקים), secDecide (תפיסה חד־פעמית, אישור, דחייה, עיכוב, ביטול, אישור שולח).
 // הזיהוי רץ בטריגר הקיים secWaWork (רשומת תור עם inv:true). secretary-inv.js
 Object.assign(exports, require('./secretary-inv'));
+// "תגובה למזכירה" (15.11.2026): secLearn – תגובה על הודעה של המזכירה, כללים אישיים לכל מנהל, "לעשות את זה מעכשיו לבד?", יומן "נשלח לבד". secretary-learn.js + lib/sec-learn.js
+Object.assign(exports, require('./secretary-learn'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));

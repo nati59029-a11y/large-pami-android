@@ -31,7 +31,7 @@ const MGR_FNS = ['secState', 'secConsent', 'secSetup'];
 const SA_FNS = ['secAdminGet', 'secAdminSetCfg', 'secAdminReadChat'];
 const ALL_FNS = MGR_FNS.concat(SA_FNS);
 // כל אוספי sec_* (מסמך לדוגמה בכל אחד) – לבדיקת חסימה ברמת החוקים
-const SAMPLE = ['sec_cfg/main', 'sec_cfg/cap', 'sec_chat/' + M1 + '/m/x1', 'sec_in/i1', 'sec_draft/d1', 'sec_inv/v1', 'sec_inv/v1/p/0', 'sec_facts/f1', 'sec_rules/r1', 'sec_cal/c1', 'sec_mirror/m', 'sec_rep/r1', 'sec_log/l1', 'sec_usage/2026-11', 'sec_facts_sensitive/s1', 'sec_note/' + M1 + '/n/x1', 'sec_snd/972500000001', 'sec_clean/c1', 'sec_gcal/' + M1 + '__c1', 'sec_learn/l1']; // sec_learn – מענה אוטומטי למייל (שרת בלבד); sec_snd – שלב 5 (כרטיס שולח בווצאפ; שרת בלבד); sec_clean, sec_gcal – שלב 6 (רשימות ניקוי ומיפוי יומן Google; שרת בלבד)
+const SAMPLE = ['sec_cfg/main', 'sec_cfg/cap', 'sec_chat/' + M1 + '/m/x1', 'sec_in/i1', 'sec_draft/d1', 'sec_inv/v1', 'sec_inv/v1/p/0', 'sec_facts/f1', 'sec_rules/r1', 'sec_cal/c1', 'sec_mirror/m', 'sec_rep/r1', 'sec_log/l1', 'sec_usage/2026-11', 'sec_facts_sensitive/s1', 'sec_note/' + M1 + '/n/x1', 'sec_snd/972500000001', 'sec_clean/c1', 'sec_gcal/' + M1 + '__c1', 'sec_learn/l1', 'sec_mrule/x1', 'sec_mlog/x1'];  // sec_mrule, sec_mlog – "תגובה למזכירה" (15.11.2026; שרת בלבד) // sec_learn – מענה אוטומטי למייל (שרת בלבד); sec_snd – שלב 5 (כרטיס שולח בווצאפ; שרת בלבד); sec_clean, sec_gcal – שלב 6 (רשימות ניקוי ומיפוי יומן Google; שרת בלבד)
 const CONSENTED = (ver) => ({ cv: ver, ca: 1 });
 
 async function seed(o) {
@@ -332,6 +332,8 @@ describe('לארג\' פעמי במצב legacy: אוספי sec_* בשורש', () 
     await assertFails(db(LE).doc('sec_log/l1').get());
     await assertFails(db(SUPER).doc(`sec_chat/${LM}/m/x1`).get());
     await assertFails(db(LM).doc('sec_log/l2').set({ t: 1 }));
+    // 15.11.2026: כללים אישיים ויומן "נשלח לבד" – שרת בלבד, גם במצב legacy (גם למנהל שאישר)
+    for (const p of ['sec_mrule/x1', 'sec_mlog/x1']) { await assertFails(db(LM).doc(p).get()); await assertFails(db(LM).doc(p).set({ t: 1 })); }
     const r = await call('secAdminReadChat', SUPER, { bizId: BZ0, uid: LM });
     assert.equal(r.status, 'OK', r.text); assert.equal(r.result.msgs.length, 1);
     assert.equal((await coll('sec_log')).filter((x) => x.act === 'readChat' && x.tgt === LM).length, 1);

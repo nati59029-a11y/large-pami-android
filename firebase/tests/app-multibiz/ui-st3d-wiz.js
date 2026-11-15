@@ -225,6 +225,45 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   await Wk.ctx.close();
 
   // ---- 11. תוסף כבוי: אין בקשות ----
+  // ---- 1ה. סרטון באשף: עיבוד בטלפון (webm שנוצר ב-ffmpeg; אם אין ffmpeg, הבדיקה מדולגת ומתועדת) ----
+  {
+    const cp = require('child_process'), os = require('os'); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 's3vid-'));
+    let have = true; try { cp.execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x480:rate=15', '-t', '14', '-c:v', 'libvpx', '-b:v', '400k', path.join(dir, 's.webm')]); cp.execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x480:rate=10', '-t', '70', '-c:v', 'libvpx', '-b:v', '300k', path.join(dir, 'l.webm')]); } catch (e) { have = false; }
+    if (!have) check('1ה סרטון: דולג, אין ffmpeg להכנת קובץ בדיקה (לא נבדק)', true);
+    else {
+      S.none = true; S.map = null; const V = await open(browser, www, cM(), 'm@x.co');
+      await V.page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await sleep(1500);
+      await V.page.evaluate(() => document.querySelector('[data-a=st3Build]').click()); await sleep(700);
+      const vd = await V.page.evaluate(() => ({ up: document.querySelector('input[data-c=s3wVid][accept="video/*"][multiple]') ? 1 : 0, cap: document.querySelector('input[data-c=s3wVid][capture=environment]') ? 1 : 0, t: document.querySelector('#main').innerText }));
+      check('1ה1 שלב 1: כפתורי "העלו סרטון" ו"צלמו סרטון" (video/*, multiple, capture)', vd.up && /capture="environment" data-c="s3wVid"/.test(SRC.find(([f]) => f === 'store3d-wizard.js')[1]) && /העלו סרטון/.test(vd.t) && /צלמו סרטון/.test(vd.t), vd);
+      const st = () => V.page.evaluate(() => ({ n: S3UI.W.imgs.length, busy: S3UI.W.busy, msg: S3UI.W.msg, sz: S3UI.W.imgs.reduce((a, i) => a + i.blob.size, 0), mx: Math.max(0, ...S3UI.W.imgs.map((i) => Math.max(i.w, i.h))) }));
+      const until = async (ms) => { for (let i = 0; i < ms / 250; i++) { await sleep(250); if (!(await st()).busy) return; } };
+      const corrupt = { name: 'bad.webm', mimeType: 'video/webm', buffer: Buffer.from('not a video at all '.repeat(50)) };
+      await V.page.setInputFiles('input[data-c=s3wVid][multiple]', corrupt); await until(30000);
+      let r = await st();
+      check('1ה2 סרטון פגום: הודעת שגיאה בעברית, בלי תמונות ובלי קריסה', r.n === 0 && /לא הצלחנו לקרוא את הסרטון/.test(r.msg) && !r.busy, r);
+      await V.page.setInputFiles('input[data-c=s3wVid][multiple]', path.join(dir, 's.webm')); await until(60000);
+      r = await st();
+      check('1ה3 סרטון של 14 שניות: נוספו תמונות (לכל היותר אחת לכל 2 שניות), מוקטנות עד 1024px, בלי הודעת שגיאה', r.n >= 3 && r.n <= 8 && r.mx <= 1024 && !r.msg, r);
+      const n0 = r.n;
+      await V.page.setInputFiles('input[data-c=s3wVid][multiple]', corrupt); await until(30000);
+      r = await st();
+      check('1ה4 סרטון פגום אחרי תמונות קיימות: התמונות שכבר נבחרו נשארות', r.n === n0 && /לא הצלחנו לקרוא/.test(r.msg), r);
+      await V.page.setInputFiles('input[data-c=s3wVid][multiple]', [1, 2, 3, 4].map((k) => path.join(dir, 'l.webm'))); await sleep(4000);
+      const prog = await st(); await shot(V.page, fp(shots, 'סרטון-התקדמות'), true);
+      const ui = await V.page.evaluate(() => ({ t: document.querySelector('#main').innerText.replace(/\s+/g, ' '), x: !!document.querySelector('[data-a=s3wVidX]') }));
+      check('1ה5 בזמן העיבוד: הודעת התקדמות "מעבד סרטון" עם אחוזים וכפתור ביטול, והממשק לא קפוא', /מעבד סרטון \d מתוך 4… \d+%/.test(ui.t) && ui.x, { prog, ui: ui.t.slice(0, 300) });
+      await until(540000); r = await st();
+      check('1ה6 ארבעה סרטונים ארוכים (70 שניות כל אחד): התקרה 100 נשמרת, גודל עד 13MB, והודעה על דקה ראשונה', r.n === 100 && r.sz <= 13e6 && /ארוך מדקה/.test(r.msg), r);
+      const hasWide = await V.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth); check('1ה7 בלי גלישה אופקית אחרי סרטונים', hasWide);
+      await V.page.evaluate(() => { const W = S3UI.W; W.imgs.length = 0; });
+      await V.page.setInputFiles('input[data-c=s3wVid][multiple]', path.join(dir, 'l.webm')); await sleep(1500);
+      await V.page.click('[data-a=s3wVidX]'); await until(30000); r = await st();
+      check('1ה8 ביטול באמצע: העיבוד נעצר, הודעת ביטול, בלי תמונות', !r.busy && /בוטל/.test(r.msg) && r.n === 0, r);
+      await V.ctx.close(); fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   const Off = await open(browser, www, cM({}), 'm@x.co');
   const rq = []; Off.page.on('request', (r) => { if (/s3PutTex|mapDraft|shelfCheck|s3SaveMap|s3View|s3Run|\/smap|\/s3br|\/s3sum|\/sround|\/srun|\/s3draft/.test(r.url())) rq.push(r.url()); });
   await Off.page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await sleep(1500);

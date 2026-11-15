@@ -81,12 +81,12 @@ async function open(browser, www, who, calls) {
     const c = await page.evaluate(() => (document.getElementById('oxprof') || {}).innerText || '');
     await shot(page, '01-כרטיס-הזמנה');
     // skip: total 39 − משלוח 5 (בלי עלות) − עלות (2×7 + 1×4 = 18) = 16
-    check('2 כרטיס הזמנה: עלות 18 (שמורה + נוכחית), רווח 16, ו"חסר מחיר עלות ב-1 שורות"', /18\.00/.test(c) && /16\.00/.test(c) && /חסר מחיר עלות ב-1 שורות/.test(c) && /לא נספרו ברווח/.test(c), c);
+    check('2 כרטיס הזמנה: עלות 18 (שמורה + נוכחית), רווח לפני מע"מ 13.56 + מע"מ 2.44 (=16), ו"חסר מחיר עלות ב-1 שורות"', /18\.00/.test(c) && /13\.56/.test(c) && /מע"מ: .*2\.44/.test(c) && /חסר מחיר עלות ב-1 שורות/.test(c) && /לא נספרו ברווח/.test(c), c);
     await page.evaluate(() => { ACT.oxPaid({ dataset: { id: 'o1' } }); }); await H.settle(page, 300);
     await page.click('#dlg form[data-f=oxPaidF] button:not([type=button])'); await H.settle(page, 1500);
     const pd = await page.evaluate(() => ({ t: (document.getElementById('dlg') || {}).innerText || '', p: (document.getElementById('oxpaidp') || {}).innerText || '' }));
     await shot(page, '02-אחרי-תשלום');
-    check('3 אחרי "שולם": "סך הכול הרווחת 16"', /סך הכול הרווחת/.test(pd.t) && /16\.00/.test(pd.p), pd);
+    check('3 אחרי "שולם": "סך הכול הרווחת 16"', /סך הכול הרווחת/.test(pd.t) && /13\.56/.test(pd.p), pd);
     const cel = await page.evaluate(() => { const c = document.getElementById('oxpaidc'), p = document.getElementById('oxpaidp'); return c && p ? { h: c.querySelector('h3').innerText, fs: parseFloat(getComputedStyle(p).fontSize), bc: getComputedStyle(c).borderTopColor, acc: (() => { const i = document.createElement('i'); i.style.color = 'var(--acc)'; document.body.appendChild(i); const v = getComputedStyle(i).color; i.remove(); return v; })(), col: getComputedStyle(p).color, cheer: (document.getElementById('oxcheer') || {}).innerText || '' } : null; });
     check('3א חלונית חגיגית: "כל הכבוד! ההזמנה שולמה", סכום גדול (≥30px) בצבע --acc, מסגרת --acc, שורת עידוד', !!cel && cel.h === 'כל הכבוד! ההזמנה שולמה' && cel.fs >= 30 && cel.bc === cel.acc && cel.col === cel.acc && cel.cheer.length > 5, cel);
     await page.evaluate(() => closeDlg());

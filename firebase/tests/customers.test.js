@@ -214,9 +214,9 @@ describe('לקוחות – importCusts', () => {
     assert.equal((await coll(`b/${A}/cust`)).length, 500);
     assert.equal((await get(`b/${A}/cust/p0520000000`)).name, 'לקוח 0');
   });
-  it('עמודת כרטיס מלא (ב-last4 או בשדה חופשי) → נשמרות 4 אחרונות בלבד; last4 של 5 ספרות → שורה שגויה; wholesale מתעלמים', async () => {
+  it('עמודת כרטיס מלא (ב-last4 או בשדה חופשי) → נשמרות 4 אחרונות בלבד; last4 של 5 ספרות → שורה שגויה; ws מתעלמים (wholesale:true כן מסמן – שלב 6, תשובה 114, ar-import.test.js)', async () => {
     const r = await call('importCusts', MGR, { reqId: rid(), rows: [
-      { name: 'א', phone: '0501111111', last4: '4580123456789012', wholesale: true },
+      { name: 'א', phone: '0501111111', last4: '4580123456789012', ws: true },
       { name: 'ב', phone: '0502222222', x: { xcity: '5326 1000 2000 3456' } },
       { name: 'ג', phone: '0503333333', last4: '12345' },
       { name: 'ד', phone: 'abc' }] });
@@ -549,6 +549,9 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
   it('ליקוי 4: מכסת פענוח – עובד 20 בדקה, החריגה נדחית בעברית ונרשמת ביומן; מנהל 60 בדקה', async () => {
     await call('saveCust', MGR, { cust: c1 }); await call('setCard', MGR, { custId: 't' + TZ, card: CARD });
     const id = 't' + TZ; await mkOrd('oQ', 'new', 'br1', id);
+    // המכסה לדקה נספרת לפי דקה בשעון: אם הדקה עומדת להתחלף, מחכים לחדשה (אחרת המונה מתאפס באמצע והבדיקה נכשלת במקרה)
+    const fresh = async () => { const s = Date.now() % 60000; if (s > 54000) await new Promise((ok) => setTimeout(ok, 60200 - s)); };
+    await fresh();
     for (let i = 0; i < 20; i++) assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' })).status, 'OK', 'i=' + i);
     const r = await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' });
     assert.equal(r.reason, 'card-quota', r.text); assert.match(r.text, /מכסת/); assert.ok(!leak(r.text));
@@ -557,6 +560,7 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     const d = new Date().toISOString().slice(0, 10);
     await prep((x) => x.doc(`b/${A}/cardQ/${E1}`).set({ m: 0, mn: 0, d, dn: 150 }));
     assert.equal((await call('getCard', E1, { custId: id, act: 'copy', ordId: 'oQ' })).reason, 'card-quota');
+    await fresh();
     await prep((x) => x.doc(`b/${A}/cardQ/${MGR}`).set({ m: Math.floor(Date.now() / 60000), mn: 59, d, dn: 59 }));
     assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).status, 'OK');
     assert.equal((await call('getCard', MGR, { custId: id, act: 'view' })).reason, 'card-quota');
@@ -652,3 +656,120 @@ describe('כרטיס אשראי מוצפן – setCard/getCard/delCard, ייבו
     assert.ok((await coll(`b/${A}/cardLog`)).some((x) => x.act === 'merge' && x.keep === 'p0528888888' && x.from === 'p0528888888'));
   });
 });
+
+// 14.11.2026 (משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1): אנשי קשר, כתובות, תנאי תשלום, חסימה, זיהוי, מחיר קבוע והגדרות מחיר
+describe('לקוח עסקי – שלב 1 (14.11.2026)', () => {
+  const BZ = { bn: 'מסעדת הים', vat: '514444444', ct: 'רינה', phone: '0541111111', st: 'הנמל 1', city: 'אשדוד',
+    cts: [{ n: 'רינה', ph: '0542222222', mail: 'r@x.co' }, { n: 'משה', ph: '052-3333333' }], addrs: [{ nm: 'סניף צפון', st: 'הגפן 2', city: 'חיפה' }, { k: 'b2', st: 'הזית 5' }], terms: { b: 'eom', d: 60 } };
+  it('עובד פותח לקוח עסקי עם אנשי קשר, כתובות ותנאי תשלום (בלי pay); phx כולל את כל הטלפונים; findCust לפי טלפון איש קשר, ע.מ ות"ז', async () => {
+    const r = await call('saveCust', E1, { cust: BZ, wholesale: true });
+    assert.equal(r.status, 'OK', r.text);
+    const d = await get(`b/${A}/cust/${r.result.id}`);
+    assert.equal(d.cts.length, 2); assert.equal(d.cts[1].ph, '0523333333'); assert.equal(d.addrs.length, 2); assert.match(d.addrs[0].k, /^a[0-9a-z]+$/); assert.equal(d.addrs[1].k, 'b2');
+    assert.deepEqual(d.terms, { b: 'eom', d: 60 }); assert.equal(d.pay, undefined);
+    assert.deepEqual(d.phx, ['0541111111', '0542222222', '0523333333']);
+    for (const q of ['0523333333', '052-3333333', '514444444']) {
+      const f = await call('findCust', E1, { q }); assert.equal(f.status, 'OK', f.text);
+      assert.deepEqual(f.result.list.map((x) => x.id), [r.result.id], q); assert.equal(f.result.list[0].wholesale, true);
+    }
+    await call('saveCust', E1, { cust: c1 });
+    assert.deepEqual((await call('findCust', E1, { q: TZ })).result.list.map((x) => x.id), ['t' + TZ]);
+    assert.equal((await call('findCust', E1, { q: '0' })).reason, 'bad-q');
+    assert.equal((await call('findCust', NOORD, { q: '0523333333' })).reason, 'no-perm');
+    // ולידציה
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, BZ, { phone: '0541111112', terms: { b: 'imm', d: 5 } }), wholesale: true })).status, 'OK'); // מיידי – d מתאפס
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, BZ, { phone: '0541111113', terms: { b: 'x', d: 5 } }), wholesale: true })).reason, 'bad-terms');
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, BZ, { phone: '0541111113', cts: [{ ph: '123' }] }), wholesale: true })).reason, 'bad-phone');
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, BZ, { phone: '0541111113', addrs: [{ nm: 'x' }] }), wholesale: true })).reason, 'bad-addrs');
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, BZ, { phone: '0541111113', terms: undefined }), wholesale: true })).reason, 'bad-pay'); // בלי terms ובלי pay
+  });
+  it('אחרי ההקמה: עובד לא משנה תנאי תשלום, לא חוסם ולא קובע מסגרת; אותו ערך עובר; מנהל משנה; [] מוחק אנשי קשר ו-phx מתעדכן', async () => {
+    const id = (await call('saveCust', E1, { cust: BZ, wholesale: true })).result.id;
+    assert.equal((await call('saveCust', E1, { id, cust: { terms: { b: 'eom', d: 90 } } })).reason, 'manager-only');
+    assert.equal((await call('saveCust', E1, { id, cust: { blk: true } })).reason, 'manager-only');
+    assert.equal((await call('saveCust', E1, { id, cust: { lim: 5000 } })).reason, 'manager-only');
+    assert.equal((await call('saveCust', E1, { cust: Object.assign({}, BZ, { phone: '0541111119', blk: true }), wholesale: true })).reason, 'manager-only'); // גם בהקמה
+    assert.equal((await call('saveCust', E1, { id, cust: { terms: { b: 'eom', d: 60 }, ct: 'רינה כהן' } })).status, 'OK');
+    let r = await call('saveCust', MGR, { id, cust: { terms: { b: 'inv', d: 45 }, blk: true, lim: 5000 } });
+    assert.equal(r.status, 'OK', r.text);
+    let d = await get(`b/${A}/cust/${id}`); assert.deepEqual(d.terms, { b: 'inv', d: 45 }); assert.equal(d.blk, true); assert.equal(d.lim, 5000);
+    r = await call('saveCust', MGR, { id, cust: { blk: false, lim: null, cts: [] } }); assert.equal(r.status, 'OK', r.text);
+    d = await get(`b/${A}/cust/${id}`); assert.equal(d.blk, undefined); assert.equal(d.lim, undefined); assert.equal(d.cts, undefined); assert.deepEqual(d.phx, ['0541111111']);
+    // fill מהזמנה לא דורס אנשי קשר קיימים
+    await call('saveCust', MGR, { id, cust: { cts: [{ n: 'א', ph: '0544444444' }] } });
+    await call('saveCust', E1, { id, fill: true, cust: { cts: [{ n: 'ב', ph: '0545555555' }] } });
+    assert.equal((await get(`b/${A}/cust/${id}`)).cts[0].ph, '0544444444');
+  });
+  it('לקוח ישן (pay בלי terms, בלי phx): נמצא לפי טלפון, pay נשמר; שמירה עם שינוי מוסיפה phx; mergeCust מאחד phx', async () => {
+    await prep((x) => x.doc(`b/${A}/cust/p0547777777`).set({ name: 'ישן', phone: '0547777777', phs: ['0547777778'], wholesale: true, bn: 'ישן', vat: '512222222', ct: 'א', pay: 'n30', at: 1, upd: 1, x: {} }));
+    assert.deepEqual((await call('findCust', E1, { q: '0547777778' })).result.list.map((x) => x.id), ['p0547777777']);
+    await call('saveCust', E1, { id: 'p0547777777', cust: { ct: 'ב' } });
+    const d = await get(`b/${A}/cust/p0547777777`); assert.equal(d.pay, 'n30'); assert.deepEqual(d.phx, ['0547777777', '0547777778']);
+    await prep((x) => x.doc(`b/${A}/cust/p0546666666`).set({ name: 'שני', phone: '0546666666', at: 1, upd: 1, x: {} }));
+    const m = await call('mergeCust', MGR, { a: 'p0547777777', b: 'p0546666666', keep: 'p0547777777' });
+    assert.equal(m.status, 'OK', m.text);
+    assert.deepEqual((await get(`b/${A}/cust/p0547777777`)).phx, ['0547777777', '0547777778', '0546666666']);
+  });
+  it('setPriceCfg (מנהל), setCustPrice: עובד בתוך המגבלה ורק מחיר חדש; מנהל משנה; היסטוריה; delCustPrice מנהל – בלי מחיקת המסמך', async () => {
+    assert.equal((await call('setPriceCfg', E1, { pct: 15 })).reason, 'manager-only');
+    assert.equal((await call('setPriceCfg', MGR, { pct: -1 })).reason, 'bad-pct');
+    let r = await call('setPriceCfg', MGR, { pct: 15, pp: 30, disc: 10, cat: { c1: 20 } }); assert.equal(r.status, 'OK', r.text);
+    assert.deepEqual(r.result.cfg, { cat: { c1: 20 }, pct: 15, pp: 30, disc: 10 });
+    r = await call('setPriceCfg', MGR, { pp: null }); assert.equal(r.result.cfg.pp, undefined); assert.equal(r.result.cfg.pct, 15);
+    const id = (await call('saveCust', E1, { cust: BZ, wholesale: true })).result.id;
+    // pA: מחיר 10 כולל, עלות 4 כולל → לפני מע"מ 3.39; 15% → מינימום 3.90 (לקוח עסקי, לפני מע"מ)
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 3.89 })).reason, 'price-floor');
+    r = await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 3.9 }); assert.equal(r.status, 'OK', r.text); assert.equal(r.result.vm, 'ex');
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 5 })).reason, 'manager-only');
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 3.9 })).result.same, true);
+    assert.equal((await call('setCustPrice', MGR, { custId: id, pid: 'pA', p: 2 })).status, 'OK'); // מנהל עוקף
+    // pB בלי עלות: עובד לא מוריד מתחת לברירת המחדל (7.5 ÷ 1.18 = 6.36)
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pB', p: 6 })).reason, 'price-floor');
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pB', p: 6.36 })).status, 'OK');
+    assert.equal((await call('delCustPrice', E1, { custId: id, pid: 'pA' })).reason, 'manager-only');
+    assert.equal((await call('delCustPrice', MGR, { custId: id, pid: 'pA' })).result.dup, false);
+    const cp = await get(`b/${A}/cprice/${id}_pA`);
+    assert.equal(cp.p, undefined); assert.ok(cp.del); assert.deepEqual(cp.h.map((x) => [x.f, x.t]), [[null, 3.9], [3.9, 2], [2, null]]);
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 4 })).status, 'OK'); // אחרי מחיקה – עובד שוב יכול לקבוע
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'nope', p: 4 })).reason, 'no-prod');
+    // off: המגבלה כבויה – עובד חופשי, וההגדרות נשמרות לשחזור
+    assert.equal((await call('setPriceCfg', MGR, { off: true })).status, 'OK');
+    assert.equal(await get(`b/${A}/ordcfg/price`), null); assert.equal((await get(`b/${A}/ordcfg/price_off`)).pct, 15);
+    assert.equal((await call('setCustPrice', MGR, { custId: id, pid: 'pB', p: 1 })).status, 'OK');
+  });
+  it('התראה למנהל: מחיר המוצר השתנה ויש לו מחיר קבוע → aralert; ackPriceAlert מנהל; חוקים: cprice/ordcfg/price לעובד, aralert למנהל, אין כתיבה', async () => {
+    const id = (await call('saveCust', E1, { cust: BZ, wholesale: true })).result.id;
+    await call('setCustPrice', MGR, { custId: id, pid: 'pA', p: 8 });
+    await call('setPriceCfg', MGR, { pct: 10 });
+    assert.equal((await call('saveProduct', MGR, { id: 'pB', name: 'לחם', price: 8 })).status, 'OK'); // אין מחיר קבוע ל-pB – אין התראה
+    assert.equal((await coll(`b/${A}/aralert`)).length, 0);
+    assert.equal((await call('saveProduct', MGR, { id: 'pA', name: 'עוגה', price: 10, wp: 7 })).status, 'OK');
+    const L = await coll(`b/${A}/aralert`);
+    assert.equal(L.length, 1); assert.equal(L[0].id, 'p_pA'); assert.equal(L[0].cnt, 1); assert.deepEqual(L[0].custs, [id]); assert.equal(L[0].to.wp, 7); assert.equal(L[0].st, 'new');
+    assert.equal((await call('ackPriceAlert', E1, { id: 'p_pA' })).reason, 'manager-only');
+    assert.equal((await call('ackPriceAlert', MGR, { id: 'p_pA' })).status, 'OK');
+    assert.equal((await get(`b/${A}/aralert/p_pA`)).st, 'done');
+    await assertSucceeds(db(E1).doc(`b/${A}/cprice/${id}_pA`).get());
+    await assertSucceeds(db(E1).collection(`b/${A}/cprice`).where('cust', '==', id).get());
+    await assertSucceeds(db(E1).doc(`b/${A}/ordcfg/price`).get());
+    await assertFails(db(NOORD).doc(`b/${A}/cprice/${id}_pA`).get());
+    await assertFails(db(E1).doc(`b/${A}/aralert/p_pA`).get());
+    await assertSucceeds(db(MGR).doc(`b/${A}/aralert/p_pA`).get());
+    await assertFails(db(MGR).doc(`b/${A}/cprice/${id}_pA`).set({ p: 1 }));
+    await assertFails(db(MGR).doc(`b/${A}/ordcfg/price`).set({ pct: 0 }));
+    await assertFails(db(MGR).doc(`b/${A}/aralert/x`).set({ st: 'new' }));
+    await assertFails(db('m2').doc(`b/${A}/cprice/${id}_pA`).get());
+  });
+  it('סבב 2: setCustPrice לעובד – גם בלי ordcfg/price: לא 0, לא מתחת לעלות (גם ללקוח פרטי); מנהל – חופשי', async () => {
+    const id = (await call('saveCust', E1, { cust: BZ, wholesale: true })).result.id;
+    await call('saveCust', E1, { cust: c1 });
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 0 })).reason, 'bad-price');
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 3.38 })).reason, 'price-floor'); // עסקי: 4 ÷ 1.18
+    assert.equal((await call('setCustPrice', E1, { custId: 't' + TZ, pid: 'pA', p: 3.99 })).reason, 'price-floor'); // פרטי: עלות 4
+    assert.equal((await call('setCustPrice', E1, { custId: 't' + TZ, pid: 'pA', p: 4 })).status, 'OK');
+    assert.equal((await call('setCustPrice', E1, { custId: id, pid: 'pA', p: 3.39 })).status, 'OK');
+    assert.equal((await call('setCustPrice', MGR, { custId: id, pid: 'pB', p: 0 })).status, 'OK');
+    assert.equal((await get(`b/${A}/cprice/${id}_pA`)).vm, 'ex'); assert.equal((await get(`b/${A}/cprice/t${TZ}_pA`)).vm, 'inc');
+  });
+});
+

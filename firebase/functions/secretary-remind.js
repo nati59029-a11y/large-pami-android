@@ -73,7 +73,7 @@ async function managersOf(db, cfg) {
     if (me.cv !== C.CONSENT_VER) continue;
     if (cfg.mode === 'main' && cfg.mainUid !== d.id) continue;
     const brs = Array.isArray(d.get('br')) ? d.get('br').filter((b) => typeof b === 'string') : null; // שלב 8: הסניפים עצמם (לתזכורת החשבוניות)
-    out.push({ uid: d.id, br: !!brs, brs, me, nt: R.ntOf(me) });
+    out.push({ uid: d.id, br: !!brs, brs, me, nt: R.ntOf(me), learn: cfg.learn });
   }
   return { list: out, ids: new Set(s.docs.map((d) => d.id)) };
 }
@@ -89,6 +89,13 @@ async function loadFin(db, cfg) {
 
 // יצירת התראה – מזהה קבוע (uid+key): ריצה כפולה לא יוצרת כפילות
 async function addNote(db, m, n, now, autoDay) {
+  // 15.11.2026: המנהל השתיק התראות כאלה בכלל אישי ("אל תתריעי לי על זה") – לא נוצרת התראה (נספר בכלל ונרשם ביומן). התראות בטיחות לא מושתקות
+  if (m.learn !== false) {
+    const LC = require('./secretary-learn')._core;
+    m._mc = m._mc || {};
+    const mu = await LC.muteRule(db, m.uid, n, m._mc).catch(() => null);
+    if (mu) { await LC.muted(db, mu, n, now); return false; }
+  }
   const ref = db.doc(`sec_note/${m.uid}/n/${nid(m.uid, n.key)}`);
   const at = n.at || now;
   // תזכורת אוטומטית ביום שאינו יום עסקים – גם התראת הטלפון מחכה ליום העסקים הבא בבוקר (7.4)
@@ -142,7 +149,7 @@ async function remindBiz(opts) {
       for (const m of mgrs) {
         if (!m.nt.rt.cal || (e.uid && e.uid !== m.uid)) continue;
         const title = (e.rem ? 'תזכורת: ' : 'ביומן: ') + String(e.title || '').slice(0, 100);
-        const body = e.d + (e.tm ? ' ' + e.tm : '') + (w.moved ? ' (נפל ביום שאינו יום עסקים – הועבר לבוקר יום העסקים הבא)' : '') + (e.note ? '\n' + e.note : '');
+        const body = R.dayHm(e.d, e.tm) + (w.moved ? ' (נפל ביום שאינו יום עסקים – הועבר לבוקר יום העסקים הבא)' : '') + (e.note ? '\n' + e.note : '');
         if (await addNote(db, m, { k: 'rem', typ: 'cal', key: 'cal:' + d.id + ':' + e.d + ':' + (e.tm || ''), title, body, at: w.at, ref: d.id }, now, false)) out.notes++;
       }
     }
@@ -357,6 +364,7 @@ async function dailyBiz(opts) {
   for (const p of await db.collection('sec_chat').listDocuments()) out.chat += await delWhere(db, `sec_chat/${p.id}/m`, c12);
   for (const p of await db.collection('sec_note').listDocuments()) out.notes += await delWhere(db, `sec_note/${p.id}/n`, c12);
   out.log = await delWhere(db, 'sec_log', c24);
+  out.log += await delWhere(db, 'sec_mlog', c24); // 15.11.2026: יומן "נשלח לבד" – כמו sec_log, 24 חודשים
   out.inbox = await require('./secretary-wa')._core.shrinkOld(db, c12); // שלב 5: הודעות ווצאפ וטיוטות בנות יותר מ-12 חודשים – רק תקציר (9.5)
   const iv = await require('./secretary-inv')._core.retention(db, now); // שלב 7: עותק בתור של חשבונית שאושרה / קובץ שנדחה – 30 יום (9.5); תפיסה שלא הושלמה – 24 שעות (4.7)
   if (out.chat || out.notes || out.log || out.inbox || iv.purged) await db.collection('sec_log').doc().set(logData('', 'auto', 'retention', { note: 'chat=' + out.chat + ',notes=' + out.notes + ',log=' + out.log + ',inbox=' + out.inbox + (iv.purged ? ',inv=' + iv.purged : '') }));
@@ -367,9 +375,28 @@ const runSecDaily = (opts) => forAll(dailyBiz, opts, 'daily');
 // =====================================================================================
 // secNotes – רשימת ההתראות של המנהל + פעולות על תזכורת (76: לשנות מספר חזרות או לבטל; "טופל")
 // =====================================================================================
+// "תזכירי לי שוב" (15.11.2026, סעיף 7): ההתראה של המנהל עצמו (sec_note/{uid}) חוזרת ברגע שבחר – באפליקציה ובטלפון.
+// זמן שהמנהל בחר במפורש יוצא בזמן הזה גם בשעות השקטות (pushAt = at). עד אז היא לא ברשימה (at בעתיד). התראה שנסגרה (טופלה) – נפתחת מחדש;
+// התראה שכבר לא רלוונטית (gone) – לא. חזרות (rep): אם נשארו – הבאה ביום העסקים שאחרי הזמן שנבחר (לא לפניו). עד 60 יום, לפחות דקה קדימה.
+// מחזיר { at, l }. גם מ"↩ תגובה" על התראה (secLearn, "תשלחי שוב בעוד שעה")
+async function snooze(db, uid, id, at, now, by) {
+  if (!R.snzOk(at, now)) throw bad('bad-at', 'אפשר לבחור זמן מעכשיו ועד 60 יום קדימה');
+  const ref = db.doc(`sec_note/${uid}/n/${id}`);
+  const s = await ref.get();
+  if (!s.exists) throw pre('not-found', 'ההתראה לא נמצאה');
+  const x = s.data();
+  if (x.st === 'gone') throw pre('gone', 'ההתראה הזו כבר לא רלוונטית');
+  if (Number.isFinite(x.until) && at >= x.until) throw pre('too-late', 'בזמן הזה כבר יהיה מאוחר מדי לטפל בזה');
+  const b = db.batch();
+  b.update(ref, { st: 'open', at, pushAt: at, pend: true, seen: false, n: (x.n || 1) + 1, snz: at, nextAt: x.rep > 0 ? R.nextBizMorning(at) : FieldValue.delete() });
+  b.set(db.collection('sec_log').doc(), logData(uid, 'mgr', 'remSnooze', { tgt: id, note: by + ':' + new Date(at).toISOString().slice(0, 16) }));
+  await b.commit();
+  return { at, l: R.whenL(at, now) };
+}
+
 async function secNotes(request) {
   const input = inputObject(request);
-  const op = ['list', 'seen', 'done', 'reps'].includes(input.op) ? input.op : null;
+  const op = ['list', 'seen', 'done', 'reps', 'snooze'].includes(input.op) ? input.op : null;
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const { who, db } = await gate(request, { consent: true });
   const col = db.collection(`sec_note/${who.uid}/n`);
@@ -395,6 +422,12 @@ async function secNotes(request) {
   }
   const id = typeof input.id === 'string' && ID_RE.test(input.id) ? input.id : null;
   if (!id) throw bad('bad-id', 'מזהה לא תקין');
+  if (op === 'snooze') {
+    // 15.11.2026 (סעיף 7): "תזכירי לי שוב" – at (ms) או when:'morning' (יום העסקים הבא 08:00)
+    const at = input.when === 'morning' ? R.snzMorning(now) : (Number.isFinite(input.at) ? Math.floor(input.at / 60e3) * 60e3 : NaN);
+    const out = await snooze(db, who.uid, id, at, now, 'app');
+    return { ok: true, id, at: out.at, l: out.l };
+  }
   const ref = col.doc(id);
   const s = await ref.get();
   if (!s.exists) throw pre('not-found', 'ההתראה לא נמצאה');
@@ -493,4 +526,4 @@ exports.secDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 04:1
   if (r.errors.length) throw new Error('secretary daily: ' + r.errors.length + ' errors');
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { runRemind, remindBiz, runSecDaily, dailyBiz, pushText, tokensOf, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN – גם ל-tasks-nudge.js (tkNudge)
+Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, tokensOf, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN – גם ל-tasks-nudge.js (tkNudge)

@@ -15,7 +15,7 @@ const hook = require(path.join(FN_DIR, 'yemot-hook.js')); // tzintukJoin מוש�
 const R = require(path.join(FN_DIR, 'lib', 'region.js'));
 
 const BOTH = ['europe-west1', 'us-central1'];
-const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync', 'recurringTasks', 's3Rounds', 's3Clean'];
+const SINGLE = ['expirePromosOnLine', 'syncLegacyAdmin', 'syncLegacyStaff', 'tzintukJoin', 'publicBrand', 'secBackupDaily', 'secRemind', 'secDaily', 'secWaHook', 'secOAuthCb', 'secMailHook', 'secCalSync', 'recurringTasks', 's3Rounds', 's3Clean', 'arFile', 'arRemind'];
 const ep = (f) => f && f.__endpoint;
 const regions = (f) => [].concat(ep(f).region || []);
 const entries = Object.entries(ex).filter(([, f]) => ep(f));
@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['arFile', 'arRemind', 'expirePromosOnLine', 'publicBrand', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -39,7 +39,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.deepEqual(bad, [], 'פונקציות onCall בלי שני האזורים: ' + bad.join(', '));
   });
 
-  it('15 הפונקציות המיוחדות – באזור us-central1 בלבד', () => {
+  it('17 הפונקציות המיוחדות (+arFile – כתובת קבועה בקישור ללקוח, +arRemind – תזכורות מתוזמנות) – באזור us-central1 בלבד', () => {
     for (const n of SINGLE) {
       const f = ex[n] || hook[n];
       assert.ok(ep(f), n + ' לא נמצאה');
