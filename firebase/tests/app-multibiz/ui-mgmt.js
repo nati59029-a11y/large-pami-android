@@ -54,6 +54,8 @@ const okMg = (r) => { if (!r.url.includes(':8080')) return !/:(5001|9199)\//.tes
     check('1 מנהל־על בלי users: מסך "ניהול עסקים" בלבד (רשימת העסקים, כולל לארג\' פעמי), בלי סרגל תחתון, בלי הגדרות עסק ובלי כפתור צף, עם התנתקות',
       st.mg === 1 && !st.bizId && st.BZP === '_sa:' && st.v === 'sa' && st.ttl.includes('ניהול עסקים') && st.bar === 'none' && st.set === 'none' && !st.fab && st.rows.includes('acme') && st.rows.includes(BZ0) && !st.sheet && !st.gate && st.out, st);
     await shot(page, '01-ניהול-עסקים-360');
+    const dr = await page.evaluate(() => [...document.querySelectorAll('#admL .li')].map((r) => { const b = r.querySelector('[data-a=admEnter]'); const R = b && b.getBoundingClientRect(); return { id: r.dataset.arg, btn: !!b, ok: !!R && R.right <= innerWidth && R.left >= 0 }; }));
+    check('1א כפתור "כניסה" ישיר בכל שורה ברשימת העסקים (גם ללארג\' פעמי בלי מסמך), בתוך רוחב 360', dr.length >= 2 && dr.every((x) => x.btn && x.ok), dr);
     // אירועי רקע של מנהל (חזרה לאפליקציה, חיבור, גיבוי אוטומטי, משיכת הודעות) – במסך הניהול לא יוצאת מהם שום בקשה
     page.__step = 'bg';
     await page.evaluate(async () => { document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('online')); try { abkTick(); } catch (e) { /* */ } try { bkAuto(); } catch (e) { /* */ } try { await inbTick(1); } catch (e) { /* */ } try { await bkCloud(false); } catch (e) { /* */ } });
