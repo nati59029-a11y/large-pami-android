@@ -22,8 +22,10 @@ const MIN_T = 1735689600000, MAX_T = 4102444800000;      // טווח שדות ז
 // גבולות תמונה (4.9, 4.20, 5.1)
 const IMG = { min: 1000, max: 1500000, longMin: 400, longMax: 1600, shortMin: 200, shortMax: 1600 };
 const THUMB = { min: 500, max: 150000, longMin: 1, longMax: 512, shortMin: 1, shortMax: 512 };
-// טיוטת מפה: כל תמונה כמו תמונת מדף (צלע ארוכה עד 1600), וסך הכל עד 9,000,000 בתים (הנחה – מגבלת גודל בקשה של פונקציה, לא מאומת)
-const DRAFT = { maxImgs: 40, maxTotal: 9000000, img: { min: 1000, max: 1500000, longMin: 200, longMax: 1600, shortMin: 100, shortMax: 1600 } };
+// טיוטת מפה: כל תמונה כמו תמונת מדף (צלע ארוכה עד 1600, אותה דחיסה), עד 100 תמונות, וסך הכל עד 13,000,000 בתים אחרי פענוח
+// (החלטת המשתמש 15.11.2026: "הכמות הכי גדולה בלי להוריד איכות"). 13MB ב-base64 ≈ 17.3MB – מתחת למגבלת בקשה inline של Gemini
+// (כ-20MB, לא מאומת) ומתחת למגבלת גודל בקשה של onCall / Cloud Run (32MiB, לא מאומת).
+const DRAFT = { maxImgs: 100, maxTotal: 13000000, img: { min: 1000, max: 1500000, longMin: 200, longMax: 1600, shortMin: 100, shortMax: 1600 } };
 
 const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
 const inR = (v, a, b) => Number.isInteger(v) && v >= a && v <= b;
@@ -49,6 +51,15 @@ function decodeJpeg(b64, lim, label) {
   const lo = Math.min(sz.w, sz.h), hi = Math.max(sz.w, sz.h);
   if (hi < lim.longMin || hi > lim.longMax || lo < lim.shortMin || lo > lim.shortMax) throw fail('bad-size', `המידות של ${L} לא מתאימות (צלע ארוכה עד ${lim.longMax} פיקסלים)`);
   return { buf, w: sz.w, h: sz.h, b64: s };
+}
+
+// טיוטת מפה: מערך התמונות (1–DRAFT.maxImgs, כל אחת לפי DRAFT.img, סך הכל עד DRAFT.maxTotal). מחזיר [{ buf, w, h, b64 }] או זורק fail.
+function draftImgs(arr) {
+  if (!Array.isArray(arr) || arr.length < 1 || arr.length > DRAFT.maxImgs) throw fail('bad-img-count', `צריך לשלוח בין 1 ל-${DRAFT.maxImgs} תמונות`);
+  let total = 0;
+  const imgs = arr.map((s, i) => { const d = decodeJpeg(s, DRAFT.img, 'תמונה ' + (i + 1)); total += d.buf.length; return d; });
+  if (total > DRAFT.maxTotal) throw fail('too-big', 'התמונות יחד גדולות מדי. שלחו פחות תמונות או תמונות קטנות יותר.');
+  return imgs;
 }
 
 // ---------- מקום הצילום ----------
@@ -301,6 +312,6 @@ const validAt = (t, now) => Number.isInteger(t) && t >= MIN_T && t <= MAX_T && t
 
 module.exports = {
   ISSUE_KINDS, PRICE_KINDS, STATUSES, DONE_ST, LOW_CONF, IMG, THUMB, DRAFT, RE_SLOT,
-  ADHOC_DAY: 20, decodeJpeg, checkSlot, quotaStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  ADHOC_DAY: 20, decodeJpeg, draftImgs, checkSlot, quotaStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
   israelMonth, validAt, fail,
 };

@@ -9,7 +9,8 @@
 //     סוג החנות, קטגוריות, הצילום הקודם ותאריך היום – נשלחים כהקשר (רק מהשרת, לא מהלקוח). pid – לפי bay.exp או שם זהה בקטלוג (prod).
 //     כותב: srun/{run}/ph/{slot}, srun/{run}/ai/{slot}, nDone/nUid בסבב (רק ok/issue/review נחשב "צולם"), s3sum/{map}.b[bay].
 //     מחזיר { st, iss:[{k,sev,t,box}], usage:{m,n,cap,w80}, runId, ask?, t? }.
-//   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 40], cctv? } – מנהל או s3m. נספר במכסה לפי מספר התמונות.
+//   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 100, סך הכל עד 13MB], cctv? } – מנהל או s3m. נספרת כבדיקה אחת
+//     במכסה (וגם בבלם היומי), בלי קשר למספר התמונות (החלטת המשתמש 15.11.2026); בהחזרה מוחזרת בדיקה אחת.
 //     כותב s3draft/{qid} (wait → ok / fail). המפה המוצעת במבנה 4.3, ואזורים שהמודל לא בטוח בהם ב-uz עם ok:false.
 //     התמונות עצמן לא נשמרות (אין צורך; ואין בדיקת "אדם בתמונה" בטיוטה). מחזיר { draftId, st, m, conf, scale, notes, drop, usage }.
 // מכסה (4.15): s3use/b_{br} – חודשית לסניף (תקרה s3br.cap, ברירת מחדל 500), אזהרה למנהלים ב-80% (פעם בחודש, s3ntf);
@@ -43,10 +44,11 @@ const GEMINI_API_BASE = defineString('GEMINI_API_BASE', { default: 'https://gene
 const S3_USER_DAILY = defineInt('S3_USER_DAILY', { default: 400, description: 'סריקת חנות: מספר תמונות מרבי ביום לכל משתמש (בלם בטיחות)' });
 
 const QID_DAYS = 30, D1 = 86400000, BUSY_MS = 10 * 60000, MAX_N = 99, SAVE_TRIES = 5;
-const TIMES = { shelf: { timeoutMs: 60000, budgetMs: 120000 }, draft: { timeoutMs: 150000, budgetMs: 240000 } };
+// draft: עד 100 תמונות – עד 300 שניות למודל, 480 שניות לכל הניסיונות; הפונקציה עצמה 540 שניות (מרווח לטרנזקציות ולשמירה)
+const TIMES = { shelf: { timeoutMs: 60000, budgetMs: 120000 }, draft: { timeoutMs: 300000, budgetMs: 480000 } };
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const CODE = {
-  'bad-img': 'invalid-argument', 'too-big': 'invalid-argument', 'bad-type': 'invalid-argument', 'bad-size': 'invalid-argument', 'bad-slot': 'invalid-argument',
+  'bad-img': 'invalid-argument', 'bad-img-count': 'invalid-argument', 'too-big': 'invalid-argument', 'bad-type': 'invalid-argument', 'bad-size': 'invalid-argument', 'bad-slot': 'invalid-argument',
   's3-month-limit': 'resource-exhausted', 's3-user-day': 'resource-exhausted', 'bad-answer': 'internal',
 };
 function toHttps(e) {
@@ -70,7 +72,7 @@ function myBranches(who) {
 
 // ---------------- מכסה + s3qid (טרנזקציה אחת) ----------------
 // q = { k, run?, slot? } – מה נשמר ב-s3qid ומה חייב להתאים בקריאה חוזרת.
-// o = { br, cap, k (מספר תמונות), now, userMax, adhocMax? (דיווח יזום של עובד: 20), extra?(tx) – כתיבה נוספת באותה טרנזקציה }.
+// o = { br, cap, k (כמה נספר: 1 לבדיקת מדף ו-1 לטיוטת מפה), now, userMax, adhocMax? (דיווח יזום של עובד: 20), extra?(tx) – כתיבה נוספת באותה טרנזקציה }.
 // מחזיר { dup: res } או { qs } (תוצאת quotaStep).
 async function reserve(db, who, qid, q, o) {
   const qref = db.doc('s3qid/' + qid), bref = db.doc('s3use/b_' + o.br), uref = db.doc('s3use/u_' + who.uid), aref = db.doc('s3use/a_' + who.uid);
@@ -462,15 +464,8 @@ async function draftCore(db, who, input, now, deps) {
   if (typeof input.qid !== 'string' || !C.RE.qid.test(input.qid)) throw bad('bad-qid', 'מזהה השליחה לא תקין');
   if (typeof input.br !== 'string' || !C.RE.br.test(input.br)) throw bad('bad-br', 'מזהה הסניף לא תקין');
   if (input.kind !== 's' && input.kind !== 'w') throw bad('bad-kind', 'סוג המפה (חנות/מחסן) לא תקין');
-  if (!Array.isArray(input.imgs) || input.imgs.length < 1 || input.imgs.length > A.DRAFT.maxImgs) throw bad('bad-img-count', `צריך לשלוח בין 1 ל-${A.DRAFT.maxImgs} תמונות`);
-  let total = 0;
-  const imgs = input.imgs.map((s, i) => {
-    let d;
-    try { d = A.decodeJpeg(s, A.DRAFT.img, 'תמונה ' + (i + 1)); } catch (e) { throw toHttps(e); }
-    total += d.buf.length;
-    return d;
-  });
-  if (total > A.DRAFT.maxTotal) throw bad('too-big', 'התמונות יחד גדולות מדי. שלחו פחות תמונות או תמונות קטנות יותר.');
+  let imgs;
+  try { imgs = A.draftImgs(input.imgs); } catch (e) { throw toHttps(e); }
   const qid = input.qid, br = input.br, kind = input.kind, n = imgs.length;
   if (who.brs && !who.brs.includes(br)) throw bad('other-branch', 'הסניף הזה לא משויך אליך', 'permission-denied');
   const cfg = await mapLib().branchOk(db, who.bizId, br, kind);
@@ -478,12 +473,13 @@ async function draftCore(db, who, input, now, deps) {
   const S = set.exists ? set.data() : {};
   if (!deps.key) throw bad('no-key', 'אין מפתח לזיהוי חכם בשרת', 'failed-precondition');
   const dref = db.doc('s3draft/' + qid);
-  const rv = await reserve(db, who, qid, { k: 'draft' }, { br, cap: cfg.cap, k: n, now, userMax: deps.userMax, extra: (tx) => tx.set(dref, { br, kind, by: who.uid, at: now, st: 'wait', n }) });
+  // טיוטה = בדיקה אחת במכסה (k: 1), לא לפי מספר התמונות. n נשמר ב-s3draft רק לתיעוד
+  const rv = await reserve(db, who, qid, { k: 'draft' }, { br, cap: cfg.cap, k: 1, now, userMax: deps.userMax, extra: (tx) => tx.set(dref, { br, kind, by: who.uid, at: now, st: 'wait', n }) });
   if (rv.dup) return Object.assign({}, rv.dup, { dup: true });
   await warn80(db, br, rv.qs, now, deps.send);
   let charged = false;
   const back = async (e) => {
-    await release(db, who, qid, { br, k: n, qs: rv.qs, charged, now: Date.now(), extra: (tx) => tx.set(dref, { br, kind, by: who.uid, at: now, st: 'fail', n, err: String(e.message || 'שגיאה').slice(0, 120) }) });
+    await release(db, who, qid, { br, k: 1, qs: rv.qs, charged, now: Date.now(), extra: (tx) => tx.set(dref, { br, kind, by: who.uid, at: now, st: 'fail', n, err: String(e.message || 'שגיאה').slice(0, 120) }) });
     throw e;
   };
   let resp;
@@ -526,7 +522,7 @@ exports.shelfCheck = onCall({ secrets: [GEMINI_API_KEY], timeoutSeconds: 300, me
   const input = inputObject(request);
   return shelfCore(T.tdb(), { uid: who.uid, mgr: who.role === 'manager', bizId: who.bizId, brs: myBranches(who) }, input, Date.now(), depsOf());
 }));
-exports.mapDraft = onCall({ secrets: [GEMINI_API_KEY], timeoutSeconds: 300, memory: '512MiB' }, T.scoped(async (request) => {
+exports.mapDraft = onCall({ secrets: [GEMINI_API_KEY], timeoutSeconds: 540, memory: '512MiB' }, T.scoped(async (request) => {
   const who = await requireStaff(request, { feature: 'store3d' });
   if (!(who.role === 'manager' || hasPerm(who, 's3m'))) throw bad('not-s3m', 'טיוטת מפה מותרת למנהל או לעובד עם הרשאת "שרטוט מפה"', 'permission-denied');
   return draftCore(T.tdb(), { uid: who.uid, mgr: who.role === 'manager', bizId: who.bizId, brs: myBranches(who) }, inputObject(request), Date.now(), depsOf());
