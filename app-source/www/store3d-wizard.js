@@ -215,7 +215,7 @@ async function fixDraft(){
  W.fixMsg='';W.busy='מתקנים את הטיוטה… זה יכול לקחת עד דקה או שתיים. אל תסגרו את האפליקציה.';rerender();
  try{
   if(W.fixQid&&W.fixQtxt!==t)W.fixQid='';if(!W.fixQid)W.fixQid=U.qid();W.fixQtxt=t;
-  const body={qid:W.fixQid,br:W.br||U.brSel(),kind:W.kind,m:d.m,txt:t};if(qb&&!qb.err&&qb.sketch)body.sk=qb.sketch;if(d.id)body.from=d.id;
+  const body={qid:W.fixQid,br:W.br||U.brSel(),kind:W.kind,m:d.m,txt:t};if(qb&&!qb.err&&qb.sketch){body.sk=qb.sketch;if(qb.info)body.info=qb.info}if(d.id)body.from=d.id;
   let r=await U.fn('mapFix',body);
   if(r&&r.st==='fail')throw Object.assign(new Error(r.err||'לא הצלחנו לתקן את הטיוטה.'),{reason:''});
   if(r&&!needs(r)&&r.draftId){const dd=await U.get('/s3draft/'+r.draftId);if(dd&&dd.m)r=Object.assign({},r,{m:dd.m})}

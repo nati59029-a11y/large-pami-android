@@ -70,7 +70,7 @@ describe('mapFix – הליבה מול האמולטור (Firestore + gemini-mock
     corrected.notes = 'המקררים הועברו לקיר השמאלי';
     GM.state.mapfix = corrected;
     const q = qid(), from = qid();
-    const r = await fix(DR, { qid: q, from, sk: { lines: [[0, 0, 700, 0]] } });
+    const r = await fix(DR, { qid: q, from, sk: { rows: [[100, 100, 600, 100]] }, info: { w: 700, l: 1400 } });
     assert.deepEqual([r.draftId, r.st, r.fix, r.drop, r.m.src], [q, 'ok', true, 0, 'draft']);
     assert.deepEqual([r.m.fx[0].k, r.m.fx[0].glass, r.m.fx[0].name], ['fridge', true, 'מקררים']);
     assert.equal(r.notes, 'המקררים הועברו לקיר השמאלי');

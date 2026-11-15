@@ -31,11 +31,16 @@ describe('store3d-fix – קלט', () => {
     assert.equal(code(() => F.fixInput(inp({ m: { rooms: [], pad: 'x'.repeat(800001) } }))), 'too-big');
   });
 
-  it('fixInput: סקיצה (sk) – כל JSON עד 50KB, בלי מבנה קבוע; from – מזהה טיוטה', () => {
-    assert.equal(F.fixInput(inp({ sk: { lines: [[0, 0, 100, 0]], any: 'x' } })).sk, '{"lines":[[0,0,100,0]],"any":"x"}');
-    assert.equal(F.fixInput(inp({ sk: [1, 2] })).sk, '[1,2]');
-    assert.equal(code(() => F.fixInput(inp({ sk: 'טקסט' }))), 'bad-sk');
-    assert.equal(code(() => F.fixInput(inp({ sk: { a: 'x'.repeat(50001) } }))), 'bad-sk');
+  it('fixInput: סקיצה (sk) – אותה בדיקה כמו ב-mapDraft, עם info.w/l; from – מזהה טיוטה', () => {
+    const info = { w: 700, l: 1400 }, sk = { rooms: [[0, 0, 700, 0, 700, 1400, 0, 1400]], rows: [[350, 200, 350, 1200]], rt: ['s'], rk: ['gon'] };
+    assert.equal(F.fixInput(inp({ sk, info })).sk, JSON.stringify(Object.assign({ w: 700, l: 1400 }, sk)));
+    assert.equal(F.fixInput(inp({ info })).sk, null, 'info בלי sk – מתעלמים');
+    assert.equal(code(() => F.fixInput(inp({ sk }))), 'bad-sk', 'בלי מידות');
+    assert.equal(code(() => F.fixInput(inp({ sk: { lines: [[0, 0, 100, 0]], any: 'x' }, info }))), 'bad-sk', 'מפתח לא מוכר');
+    assert.equal(code(() => F.fixInput(inp({ sk: [1, 2], info }))), 'bad-sk');
+    assert.equal(code(() => F.fixInput(inp({ sk: 'טקסט', info }))), 'bad-sk');
+    assert.equal(code(() => F.fixInput(inp({ sk: { rooms: [[0, 0, 9000, 0, 9000, 1400, 0, 1400]] }, info }))), 'bad-sk', 'מחוץ למסגרת');
+    assert.equal(code(() => F.fixInput(inp({ sk: { rows: Array.from({ length: 31 }, () => [0, 0, 100, 0]) }, info }))), 'bad-sk', 'יותר מ-30 שורות');
     assert.equal(F.fixInput(inp({ from: 'qprev0000-000000000001' })).from, 'qprev0000-000000000001');
     assert.equal(code(() => F.fixInput(inp({ from: 'bad id' }))), 'bad-from');
   });

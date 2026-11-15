@@ -7,17 +7,19 @@
 const { fail } = require('./store3d-ai');
 const M = require('./store3d-map');
 const C = require('./store3d-core');
+const DI = require('./store3d-draftin');
 
 const VERSION = 1;
-const FIX = { txtMin: 2, txtMax: 1000, skMax: 50000 };
+const FIX = { txtMin: 2, txtMax: 1000 };
 const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
 const inR = (v, a, b) => Number.isInteger(v) && v >= a && v <= b;
 // טקסט חופשי של המשתמש: בלי תווי בקרה, רווחים מכווצים
 const txt1 = (v) => String(v).replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim();
 
 // בדיקת קלט. מחזיר { qid, br, kind, txt, m, sk, from } או זורק fail(קוד, הודעה). הבדיקה המלאה של המפה – A.draftCheck (בליבה).
-// sk (לא חובה, סקיצה עתידית): כל ערך JSON (אובייקט או רשימה) עד 50,000 בתים. המבנה שלו לא נקבע כאן; הוא עובר ל-AI כמו שהוא
-// ולא נשמר בשרת.
+// sk (לא חובה): הסקיצה של mapDraft (rooms/rows/rt/rk/ent/cash), עם info (לפחות w ו-l – מסגרת הסקיצה). אותה בדיקה קפדנית
+// כמו ב-mapDraft (DI.draftInput: מפתחות מותרים, מספרים שלמים, גבולות, מצולע תקין, עד 4000 תווים יחד). עובר ל-AI כ-JSON
+// עם רוחב ואורך, ולא נשמר בשרת. info בלי sk – מתעלמים ממנו.
 function fixInput(input) {
   if (!isObj(input)) throw fail('bad-input', 'הבקשה לא תקינה');
   if (typeof input.qid !== 'string' || !C.RE.qid.test(input.qid)) throw fail('bad-qid', 'מזהה השליחה לא תקין');
@@ -31,11 +33,9 @@ function fixInput(input) {
   if (M.bytesOf(input.m) > M.MAX_BYTES) throw fail('too-big', 'הטיוטה הנוכחית גדולה מדי');
   let sk = null;
   if (input.sk !== undefined && input.sk !== null) {
-    if (typeof input.sk !== 'object') throw fail('bad-sk', 'הסקיצה לא תקינה');
-    let s;
-    try { s = JSON.stringify(input.sk); } catch (e) { throw fail('bad-sk', 'הסקיצה לא תקינה'); }
-    if (Buffer.byteLength(s, 'utf8') > FIX.skMax) throw fail('bad-sk', 'הסקיצה גדולה מדי');
-    sk = s;
+    let r;
+    try { r = DI.draftInput({ info: input.info, sketch: input.sk }); } catch (e) { throw fail('bad-sk', String((e && e.message) || 'הסקיצה לא תקינה')); }
+    if (r.sketch) sk = JSON.stringify(Object.assign({ w: r.info.w, l: r.info.l }, r.sketch));
   }
   let from = null;
   if (input.from !== undefined && input.from !== null) {

@@ -186,7 +186,7 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
     await A.page.click('[data-a=s3wFix]'); await sleep(1500);
     const f2 = nf()[1], d1 = await A.page.evaluate(() => ({ fixN: S3UI.W.draft.m.fixN, id: S3UI.W.draft.id, n: S3UI.W.draft.n, ta: document.getElementById('s3wFix').value, t: document.querySelector('#main').innerText }));
     check('2ד6 ניסיון חוזר אחרי כשל: אותו qid; הצלחה מחליפת את הטיוטה, שומרת n, ומנקה את התיבה', f1 && f2 && f1.b.qid === f2.b.qid && d1.fixN === 1 && d1.n === 3 && d1.ta === '' && /הטיוטה מוכנה/.test(d1.t), { q1: f1 && f1.b.qid, q2: f2 && f2.b.qid, d1 });
-    check('2ד7 גוף הבקשה: txt, m (הטיוטה הנוכחית), br, kind, from (מזהה הטיוטה), sk (הסקיצה) ובלי תמונות', f2.b.txt === 'המקרר נמצא בקיר השמאלי, יש 4 שורות מדפים ולא 3' && JSON.stringify(f2.b.m) === m0 && f2.b.br === 'main' && f2.b.kind === 's' && f2.b.from === id0 && JSON.stringify(f2.b.sk) === JSON.stringify(md.b.sketch) && !('imgs' in f2.b) && /^[A-Za-z0-9-]{16,40}$/.test(f2.b.qid), Object.keys(f2.b));
+    check('2ד7 גוף הבקשה: txt, m (הטיוטה הנוכחית), br, kind, from (מזהה הטיוטה), sk (הסקיצה) + info ובלי תמונות', f2.b.txt === 'המקרר נמצא בקיר השמאלי, יש 4 שורות מדפים ולא 3' && JSON.stringify(f2.b.m) === m0 && f2.b.br === 'main' && f2.b.kind === 's' && f2.b.from === id0 && JSON.stringify(f2.b.sk) === JSON.stringify(md.b.sketch) && JSON.stringify(f2.b.info) === JSON.stringify(md.b.info) && !('imgs' in f2.b) && /^[A-Za-z0-9-]{16,40}$/.test(f2.b.qid), Object.keys(f2.b));
     await A.page.fill('#s3wFix', 'להוסיף מקרר שני');
     await A.page.click('[data-a=s3wFix]'); await sleep(1500);
     const f3 = nf()[2], d2 = await A.page.evaluate(() => ({ fixN: S3UI.W.draft.m.fixN, id: S3UI.W.draft.id }));

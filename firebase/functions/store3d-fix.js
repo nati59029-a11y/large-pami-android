@@ -1,7 +1,7 @@
 'use strict';
 // סריקת חנות בתלת מימד – שלב 20ג, חלק השרת (15.11.2026): mapFix – תיקון טיוטת מפה בכתב. הלוגיקה הטהורה ב-lib/store3d-fix.js.
 //   mapFix { qid, br, kind: 's' | 'w', m: הטיוטה הנוכחית (מבנה המפה 4.3, כמו s3draft.m), txt: טקסט התיקון (2–1000 תווים),
-//            sk?: סקיצה (כל JSON עד 50KB, המבנה ייקבע בהמשך; לא נשמרת), from?: מזהה הטיוטה הקודמת (לתיעוד בלבד) }
+//            sk?: סקיצה במבנה של mapDraft + info? עם w/l (אותה בדיקה; לא נשמרת), from?: מזהה הטיוטה הקודמת (לתיעוד בלבד) }
 //     – מנהל או s3m (כמו mapDraft), עובד ששויך לסניפים – רק בסניפים שלו. בלי תמונות.
 //     הטיוטה הנוכחית חייבת לעבור את בדיקת שמירת המפה (A.draftCheck); הטיוטה המתוקנת עוברת את אותה בדיקה כמו בהקמה (A.evalDraft),
 //     כולל השמטת פריטים פסולים וניסיון חוזר אחד כשהתשובה שבורה, באותו תקציב זמן.
@@ -104,7 +104,10 @@ async function fixCore(db, who, input, now, deps) {
     } catch (e2) { logger.error('mapFix: release failed', { code: e2 && e2.code }); }
     throw e;
   };
-  const prompt = F.buildFixPrompt({ kind, storeType: S.stype, cur: F.toModel(x.m), txt: x.txt, sk: x.sk });
+  let prompt;
+  try { prompt = F.buildFixPrompt({ kind, storeType: S.stype, cur: F.toModel(x.m), txt: x.txt, sk: x.sk }); } catch (e) {
+    return back(bad('internal', 'שגיאה בתיקון הטיוטה', 'internal'));
+  }
   const deadline = Date.now() + TIMES.budgetMs;
   const check = (rp, tryN) => {
     const v = A.evalDraft(rp.obj, rp.finish, ectx);
