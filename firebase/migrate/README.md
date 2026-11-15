@@ -16,7 +16,7 @@
 
 ## שלבי העבודה
 1. **גיבוי** (`backup`): כל האוספים בשורש (חוץ מ-`b`), כולל תת-אוספים, לקובץ JSON. לכל מסמך נשמרים הערכים הגולמיים של Firestore, גיבוב (SHA-256) ותווית זמן. אחרי הכתיבה הכלי קורא את הקובץ שוב ומוודא שכל גיבוב יוצא זהה. עם `--upload` הקובץ נשמר גם ב-bucket הפרטי של הפרויקט, בתיקייה `migrate_backups/<זמן>_<תווית>/backup.json` (יצירה בלבד, אף פעם לא דריסה). בתהליך ב-GitHub זו ברירת המחדל. קובץ הגיבוי **לא** עולה ל-GitHub.
-2. **ספירה** (`dry-run`): מציג כמה מסמכים ייווצרו, יתעדכנו או יתנגשו, ואת האוספים שלא מועתקים (נדחים ולא ידועים) עם מספר המסמכים בהם. לא כותב כלום.
+2. **ספירה** (`dry-run`): מציג כמה מסמכים ייווצרו, יתעדכנו או יתנגשו, ואת האוספים שלא מועתקים (נדחים, משותפים ולא ידועים) עם מספר המסמכים בהם. לא כותב כלום.
 3. **העתקה** (`copy --mode write`): יוצר את המסמכים ב-`b/largpeami/...`, מעתיק את קבצי `app_backups/` ב-Storage אל `b/largpeami/app_backups/`, יוצר `users/{uid}` לכל מנהל ועובד, ויוצר את מסמך העסק `b/largpeami` (`status: active`, `dataRoot: legacy`, כל התוספות מופעלות, `createdBy: migrate`, `migrationTarget: true`).
    - **מותר רק לעסק `largpeami`.** כל מזהה אחר נדחה, כדי שטעות הקלדה לא תעתיק את הנתונים לעסק זר.
    - אם מסמך העסק כבר קיים, ההעתקה מותרת רק אם הוא נוצר על ידי הכלי (`createdBy: migrate` ו-`migrationTarget: true`), ורק כש-`dataRoot` הוא `legacy`.
@@ -27,10 +27,19 @@
 6. **חזרה:** ראו `ROLLBACK.md`. הפקודות `report-since`, `set-dataroot --to legacy` ו-`compare-backup --backup-gcs`.
 
 ## אילו אוספים
-- **מועתקים:** `admins`, `staff`, `cfg`, `bk`, `chunks`, `inbox`, `app_backup_status`, `shelf`, `fb`, `tasks` (+`c`), `supinv` (+`p`), `appreq` (+`p`), `closings` (+`p`), `cashout`, `deposits` (+`p`), `zlast`, `yemot_*`, `voice_usage`, `scan_usage`. כל תת-אוסף אחר שנמצא מתחתם מועתק גם הוא.
+הרשימה המלאה והמדויקת: `COPY`, `DEFERRED` ו-`SHARED` בראש `migrate.js`.
+- **מועתקים (`COPY`):** `admins`, `staff`, `cfg`, `bk`, `chunks`, `inbox`, `app_backup_status`, `shelf`, `fb`, `tasks` (+`c`), `supinv` (+`p`), `appreq` (+`p`), `closings` (+`p`), `cashout`, `deposits` (+`p`), `zlast`, `yemot_*`, `voice_usage`, `scan_usage`, `audit_log`, `table_bases`, הזמנות (`ord`, `prod`, `stockLog`, `ordcfg`, `ordpay`, `private`), סריקת חנות (`s3*`, `smap`, `sround`, `srun`), ומאז 15.11.2026 גם:
+  - משימות ובקשות: `ptk`, `rtk`, `rq` (+`c`), `mq` (+`p`).
+  - לקוחות: `cust` (+`p`, כולל כרטיסים מוצפנים כמו שהם), `custcfg`, `custBak` (+`items`), `cardLog`, `cardQ`.
+  - מלאי והזמנות: `cat`, `xfer`, `pinv` (+`p`), `stockBak` (+`items`), `impJobs`, `lineplan`, `lineLog`.
+  - שונות: `push_tokens`, `fn_rate`, `wv`.
+  - המזכירה העסקית: כל `SEC_COLLS` מ-`functions/secretary.js` (`sec_cfg`, `sec_chat`, `sec_in`, `sec_draft`, `sec_inv`, `sec_facts`, `sec_rules`, `sec_cal`, `sec_mirror`, `sec_rep`, `sec_log`, `sec_usage`, `sec_facts_sensitive`, `sec_note`, `sec_snd`, `sec_clean`, `sec_gcal`, `sec_learn`) ועוד `sec_ord`.
+  - כל תת-אוסף אחר שנמצא מתחתם מועתק גם הוא. בדיקה 13 ב-`migrate-tool.test.js` נכשלת אם נוסף כלל ב-`b/{bizId}` או אוסף ל-`SEC_COLLS` בלי להוסיף אותו כאן.
+- **טבלאות שרת משותפות (`SHARED`), נשארות בשורש:** `sec_route`, `sec_mailroute`, `sec_oauth`, `sec_mailq`, `sec_waq`, `mailRate`, `impQ`. השרת כותב אליהן תמיד בשורש (`getFirestore()`), בשביל כל העסקים, עם מזהה העסק בתוך המסמך. מגובות, לא מועתקות, לא נחשבות "לא ידוע", לא מכשילות את האימות, ולא נכללות ב-`compare-backup` (הן ממשיכות להשתנות גם אחרי המעבר).
 - **מגובים ולא מועתקים (הזמנות אתר, נדחה לסבב נפרד):** `site_income_daily` ואוספי `orders/`. מוצגים עם ספירה.
 - **אוסף שלא מופיע ברשימות:** מגובה, לא מועתק, ומכשיל את האימות עד החלטה מפורשת (`--ack-unknown`).
 - `users` ו-`superadmins` (חדשים) לא נחשבים חלק מהמקור, ולכן לא נכללים בהשוואה לגיבוי.
+- `b/{bizId}/audit` נכתב תמיד ישירות תחת `b/`, ולכן אין לו מקור בשורש.
 
 ## ההגנות
 - **ברירת המחדל: קריאה בלבד.** כתיבה לנתוני העסק רק עם `--mode write`. החריג היחיד הוא שמירת קובץ הגיבוי ב-`migrate_backups/` עם `--upload`.

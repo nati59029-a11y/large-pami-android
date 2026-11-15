@@ -124,6 +124,30 @@ async function seed() {
   w.push(['scan_usage/2026-10-28', { n: I(3) }]);
   w.push(['site_income_daily/2026-10-28', { sum: D(10) }]); // orders – נדחה
   w.push(['mystery/x', { a: S('לא ידוע') }]); // אוסף שלא במיפוי
+  // השלמת הרשימה (15.11.2026): אוספי עסק שנוספו ל-COPY, כולל תתי-אוספים ואב חסר – 19 מסמכים
+  w.push(['ptk/p1', { title: S('משימה פרטית'), st: S('open') }]);
+  w.push(['rq/r1', { text: S('בקשה'), amount: D(-12.5) }]);
+  w.push(['rq/r1/c/c1', { text: S('תגובה') }]);
+  w.push(['cust/x', { name: S('לקוח'), phone: S('0500000000') }]);
+  w.push(['cust/x/p/card1', { enc: S('מוצפן...'), last4: S('4242') }]);
+  w.push(['custBak/k1', { at: I(1), st: S('done'), n: I(1) }]);
+  w.push(['custBak/k1/items/i1', { d: M({ name: S('לקוח שנמחק') }) }]);
+  w.push(['sec_cfg/main', { on: B(true) }]);
+  w.push(['sec_chat/u_mgr/m/m1', { text: S('שלום') }]); // האב sec_chat/u_mgr חסר
+  w.push(['sec_ord/o1', { thr: S('t1'), st: S('new') }]);
+  w.push(['lineplan/p1', { name: S('תוכנית'), price: D(49.9) }]);
+  w.push(['lineLog/o_1_0', { phone: S('0500000001'), ord: S('1') }]);
+  w.push(['wv/inc_2026-10', { data: S('[]') }]);
+  w.push(['push_tokens/u_mgr', { pushTokens: A(S('tok')) }]);
+  w.push(['cardQ/u_emp', { m: I(1), d: S('2026-10-28') }]);
+  w.push(['fn_rate/cashoutTotal_u_emp', { n: I(1) }]);
+  w.push(['impJobs/j1', { t: I(1), st: S('done') }]);
+  w.push(['pinv/i1', { sup: S('ספק'), total: D(100) }]);
+  w.push(['pinv/i1/p/0', { img: S('...') }]);
+  // טבלאות שרת משותפות (SHARED): נשארות בשורש, מגובות ולא מועתקות
+  w.push(['sec_waq/largpeami__m1', { biz: S(BIZ), id: S('m1') }]);
+  w.push(['impQ/largpeami_j1/c/c1', { biz: S(BIZ), st: S('done') }]); // האב impQ/largpeami_j1 חסר
+  w.push(['mailRate/h_largpeami', { n: I(2) }]);
   await putMany(w);
   const bk = storage();
   await bk.file('app_backups/u_mgr/2026-10-28.json.gz.enc').save(Buffer.alloc(2048, 7), { contentType: 'application/octet-stream' });
@@ -164,6 +188,9 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     const b = report(F('backup1.json'));
     assert.equal(b.collections.mystery.plan, 'unknown');
     assert.equal(b.collections.site_income_daily.plan, 'deferred');
+    for (const c of ['sec_waq', 'impQ', 'mailRate']) assert.equal(b.collections[c].plan, 'shared', c);
+    for (const c of ['cust', 'custBak', 'sec_chat', 'sec_ord', 'wv', 'push_tokens', 'pinv']) assert.equal(b.collections[c].plan, 'copy', c);
+    assert.ok(b.docs['impQ/largpeami_j1/c/c1'], 'טבלה משותפת מגובה, כולל תת-אוסף');
     assert.equal(b.docs['tasks/orphan'].missing, true);
     assert.deepEqual(b.docs['cfg/types'].fields, (await get('cfg/types')).fields, 'הטיפוסים בקובץ הגיבוי זהים לגולמי');
     assert.match(r.out, /בדיקת סיבוב של קובץ הגיבוי: עברה/);
@@ -176,7 +203,7 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     show('dry-run', r);
     assert.equal(r.code, 0);
     const d = report(F('dry.json'));
-    assert.equal(d.docs.create, 688, 'מספר המסמכים שייווצרו = כל מסמכי הדמה באוספים המועתקים (בלי האב החסר, הנדחה והלא ידוע)');
+    assert.equal(d.docs.create, 707, 'מספר המסמכים שייווצרו = כל מסמכי הדמה באוספים המועתקים (בלי האב החסר, הנדחה והלא ידוע)');
     assert.equal(d.users.create, 5);
     assert.equal(await get('b/' + BIZ), null);
     assert.equal(await get('users/u_emp'), null);
@@ -214,6 +241,8 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     show('verify', v);
     assert.equal(v.code, 0, v.out);
     assert.match(v.out, /site_income_daily – 1 מסמכים/, 'אוסף נדחה מוצג עם ספירה');
+    assert.match(v.out, /משותף לכל העסקים \(מגובה, נשאר בשורש\): sec_waq – 1 מסמכים/, 'טבלה משותפת מוצגת ולא מכשילה');
+    assert.doesNotMatch(v.out, /לא ידוע[^\n]*(sec_waq|impQ|mailRate)/);
     const vr = report(F('verify1.json'));
     for (const [c, x] of Object.entries(vr.collections)) {
       assert.equal(x.src.count, x.dst.count, c);
@@ -229,6 +258,17 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     // אב "חסר" נשאר חסר ביעד, והתת-אוסף שלו הועתק
     assert.equal(await get('b/' + BIZ + '/tasks/orphan'), null);
     assert.ok(await get('b/' + BIZ + '/tasks/orphan/c/c9'));
+    // אוספי העסק החדשים ברשימה הועתקו ואומתו, כולל תתי-אוספים
+    for (const c of ['ptk', 'rq', 'cust', 'custBak', 'sec_cfg', 'sec_chat', 'sec_ord', 'lineplan', 'lineLog', 'wv', 'push_tokens', 'cardQ', 'fn_rate', 'impJobs', 'pinv']) {
+      assert.ok(vr.collections[c] && vr.collections[c].src.count > 0, 'נבדק באימות: ' + c);
+    }
+    for (const p of ['cust/x/p/card1', 'custBak/k1/items/i1', 'rq/r1/c/c1', 'sec_chat/u_mgr/m/m1', 'pinv/i1/p/0', 'wv/inc_2026-10']) {
+      assert.deepEqual((await get('b/' + BIZ + '/' + p)).fields, (await get(p)).fields, p);
+    }
+    // טבלאות משותפות – לא הועתקו ולא נבדקו כאוסף להעתקה
+    for (const p of ['sec_waq/largpeami__m1', 'impQ/largpeami_j1/c/c1', 'mailRate/h_largpeami']) assert.equal(await get('b/' + BIZ + '/' + p), null, p);
+    for (const c of ['sec_waq', 'impQ', 'mailRate']) assert.equal(vr.collections[c], undefined, c);
+    assert.deepEqual(vr.problems, []);
     // נדחה / לא ידוע – לא הועתקו
     assert.equal(await get('b/' + BIZ + '/site_income_daily/2026-10-28'), null);
     assert.equal(await get('b/' + BIZ + '/mystery/x'), null);
@@ -428,6 +468,23 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     assert.equal((all.match(/\.copy\(/g) || []).length, 1, 'העתקה אחת בלבד ל-Storage (אל b/<bizId>/app_backups)');
     assert.equal((all.match(/\.save\(/g) || []).length, 1, 'שמירה אחת בלבד ל-Storage (קובץ הגיבוי, תחת migrate_backups/)');
   });
+
+  it('13. (15.11.2026) הרשימות מכסות את כל אוספי העסק: כללי b/{bizId} ו-SEC_COLLS במלואם ב-COPY; הרשימות לא חופפות', () => {
+    const { COPY, DEFERRED, SHARED } = require(TOOL);
+    const all = [...COPY, ...DEFERRED, ...SHARED];
+    assert.equal(new Set(all).size, all.length, 'אוסף לא מופיע בשתי רשימות');
+    const rules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
+    const inBiz = rules.slice(rules.indexOf('match /b/{bizId} {'));
+    const B_ONLY = ['audit']; // נכתב תמיד ישירות ל-b/{bizId}/audit (גם ב-legacy), אין לו מקור בשורש
+    const names = [...new Set([...inBiz.matchAll(/^ {6}match \/([A-Za-z_0-9]+)\//gm)].map(m => m[1]))];
+    assert.ok(names.length > 50, 'נמצאו כללי b/{bizId}');
+    assert.deepEqual(names.filter(n => !COPY.includes(n) && !B_ONLY.includes(n)), [], 'כל אוסף עם כלל ב-b/{bizId} מועתק');
+    const sec = fs.readFileSync(path.join(ROOT, 'functions', 'secretary.js'), 'utf8').match(/const SEC_COLLS = Object\.freeze\(\[([^\]]*)\]/)[1].match(/'([^']+)'/g).map(x => x.slice(1, -1));
+    assert.ok(sec.length >= 18);
+    assert.deepEqual(sec.filter(c => !COPY.includes(c)), [], 'כל SEC_COLLS מועתקים');
+    const secRoot = fs.readFileSync(path.join(ROOT, 'functions', 'secretary.js'), 'utf8').match(/const SEC_ROOT_COLLS = Object\.freeze\(\[([^\]]*)\]/)[1].match(/'([^']+)'/g).map(x => x.slice(1, -1));
+    assert.deepEqual(secRoot.filter(c => !SHARED.includes(c)), [], 'טבלאות הניתוב בשורש הן SHARED');
+  });
 });
 
 describe('בדיקת השומר והתהליך הידני', () => {
@@ -504,13 +561,14 @@ describe('סבב 2: תיקוני הבדיקה העצמאית', () => {
     show('verify על מסד ריק', v);
     assert.equal(v.code, 1);
     assert.match(v.out, /0 מסמכים במקור|לא נמצא במקור אף אוסף/);
-    await put('push_tokens/t1', { tok: S('x') });
+    // (15.11.2026) push_tokens הפך לאוסף עסק מועתק; הדוגמה לאוסף לא ידוע היא עכשיו שם שלא קיים באף רשימה
+    await put('mystery_tokens/t1', { tok: S('x') });
     const v2 = await run(['verify', '--no-storage']);
     show('verify כשבשורש רק אוסף לא ידוע', v2);
     assert.equal(v2.code, 1);
-    assert.match(v2.out, /push_tokens/);
+    assert.match(v2.out, /mystery_tokens/);
     const d = await run(['dry-run', '--no-storage']);
-    assert.match(d.out, /אוסף לא ידוע.*push_tokens – 1 מסמכים/);
+    assert.match(d.out, /אוסף לא ידוע.*mystery_tokens – 1 מסמכים/);
   });
 
   it('ליקוי 3: במצב אמולטור בלי אמולטור Storage, או עם bucket אמיתי – הכלי מסרב', async () => {

@@ -71,7 +71,7 @@ try {
 // ואחרי "התנתק" באפליקציה (syOut מוחק את lp-sync) הלשונית לא נפתחת. הלשונית לא שומרת כניסה משלה במכשיר.
 function appSession() {
   try {
-    const y = JSON.parse(localStorage.getItem('lp-sync')) || {};
+    const y = JSON.parse(localStorage.getItem('lp-sync')) || {}; if (y.mg) return null; // 15.11: מנהל־על במסך "ניהול עסקים" – אין עסק נוכחי, ולכן אין לשונית הזמנות
     // 6ו: עובד בעסק במבנה החדש (b) בלי המתג "הזמנות" – הלשונית לא נפתחת, גם בכתובת ישירה. בלי perms = ברירת המחדל (פתוח, כמו היום)
     if (y.role === 'worker' && y.biz && y.biz.dataRoot === 'b' && y.perms && typeof y.perms === 'object' && y.perms.ord !== true) return 'no-ord';
     return y.refresh && y.uid && (y.role === 'admin' || y.role === 'worker') ? { uid: y.uid, email: y.email || '', refresh: y.refresh, idToken: y.idToken, exp: y.exp } : null;

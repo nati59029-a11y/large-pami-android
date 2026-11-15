@@ -104,6 +104,18 @@ async function login(page, email, opts) {
   page.__step = 'login';
   await Promise.all([page.waitForLoadState('load'), page.click('#gbtn')]);
   await settle(page);
+  if (!(opts && opts.mg)) await leaveMg(page);
+}
+// 15.11.2026: מנהל־על נכנס עכשיו למסך ניהול העסקים (בלי עסק). הבדיקות הקיימות בודקות מנהל־על בתוך עסק, ולכן כאן הוא נכנס
+// לעסק שלו לפי users/{uid}.bizId (בלי מסמך – לארג' פעמי), כמו מנהל־על שכבר נכנס לעסק בעבר. מצב הניהול עצמו נבדק ב-ui-mgmt.js (opts.mg).
+async function leaveMg(page) {
+  const t = await page.evaluate(async () => { if (!SY.mg) return null; let b = ''; try { const u = await fsx('/users/' + SY.uid, 0, 1); b = fvj(u && u.fields && u.fields.bizId); } catch (e) { /* אין מסמך */ } return BZOK(b) ? b : BZ0; }).catch(() => null);
+  if (!t) return;
+  const g = page.__gen;
+  await page.evaluate((b) => { bzSwitch(b).catch(() => {}); }, t).catch(() => {});
+  for (let i = 0; i < 60 && page.__gen === g; i++) await page.waitForTimeout(250);
+  await page.waitForLoadState('load').catch(() => {});
+  await settle(page);
 }
 const settle = async (page, ms) => { await page.waitForTimeout(ms || 2500); };
 
