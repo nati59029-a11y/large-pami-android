@@ -39,6 +39,8 @@ const COPY = [
   'ord', 'prod', 'stockLog', 'ordcfg', 'ordpay', 'private', // הזמנות שלב 1 (2026-11-08): לארג' פעמי ב-legacy כותב לשורש, באותם שמות כמו ב-b/{bizId}
   // סריקת חנות בתלת מימד (שלב 14, 15.11.2026): ב-legacy האוספים בשורש, באותם שמות כמו ב-b/{bizId}. תתי-האוספים (ver, bay, ph, ai, m) מועתקים עם ההורה.
   // קובצי התמונות כבר תחת b/largpeami/store3d/ ב-Storage בכל מצב, ולכן הנתיבים שבמסמכים נשארים נכונים אחרי ההעברה.
+  // הזמנות ספק, מחירי לקוח וחובות לקוחות (#65, מוזג ל-main 15.11.2026): כללים רק תחת b/{bizId}; בבדיקת הייצור 15.11 לא היו מסמכים בשורש
+  'supord', 'cprice', 'aralert', 'arcfg', 'ardoc', 'aralloc',
   's3br', 's3set', 'smap', 's3draft', 'sround', 'srun', 's3sum', 's3fix', 's3appeal', 's3short', 's3use', 's3perf', 's3qid', 's3ntf',
   // השלמה לפני ההעברה (15.11.2026): כל אוסף שהשרת כותב דרך T.tdb()/bizPrefix, או שיש לו כלל ב-b/{bizId} – ב-legacy נמצא בשורש.
   // תתי-האוספים (cust/p, pinv/p, rq/c, mq/p, sec_chat/m, sec_inv/p, sec_note/n, custBak/items, stockBak/items) מועתקים עם ההורה.
