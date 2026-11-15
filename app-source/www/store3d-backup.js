@@ -31,11 +31,12 @@ const WK='lp-s3bk-warn';
 const setWarn=m=>{try{if(m)localStorage.setItem(WK,m);else localStorage.removeItem(WK)}catch(e){}};
 const warn=()=>{try{return on()?(localStorage.getItem(WK)||''):''}catch(e){return''}};
 const WARN={size:'נתוני סריקת החנות גדולים מהתקרה – בגיבוי נשמרו רק החדשים והחשובים (השאר נשאר בשרת).',time:'איסוף נתוני סריקת החנות לקח יותר מדי זמן – בגיבוי נשמר רק חלק (השאר נשאר בשרת).',big:'הגיבוי לענן עם נתוני סריקת החנות היה גדול מדי – הגיבוי המוצפן נשמר בלעדיהם (שאר הנתונים נשמרו כרגיל).',err:'חלק מנתוני סריקת החנות לא נקראו – בגיבוי נשמר רק חלק.'};
-/* skip: הגיבוי נוצר בלי נתוני הסריקה (למשל כשהקובץ חורג מתקרת הגיבוי המוצפן) – נשאר רק סימון קטן */
 const stub=why=>({v:1,at:Date.now(),months:MONTHS,n:{},docs:[],part:1,miss:[why]});
+/* תיקון סבב 2: גיבוי מוצפן שחורג מהתקרה – abkRun מחליף את st3 בסימון קטן, באותו איסוף (בלי דגל משותף, בלי לקרוא שוב קבצים).
+   מחזיר את הסימון רק כש-st3 באמת תורם גודל (יש בו מסמכים); אחרת null – ואז אין ניסיון שני, והשגיאה כמו קודם */
+function big(x){if(!ok(x)||!x.docs.length)return null;setWarn(WARN.big);return stub('big')}
 async function collect(){
  if(!on())return undefined;
- if(window.S3BK&&S3BK.skip){setWarn(WARN.big);return stub('big')}
  const key=(SY&&SY.bizId||'')+'|'+(SY&&SY.uid||'');
  if(last&&last.key===key&&Date.now()-last.t<KEEP_MS)return last.v;
  const docs=[],miss=[],n={},t0=Date.now();let size=0,stop='';
@@ -72,5 +73,5 @@ const pick=o=>o&&ok(o.st3)?o.st3:null;
 function note(r){const x=r&&r.st3;if(!ok(x))return'';
  const runs=x.docs.filter(d=>d&&/^srun\/[^/]+$/.test(d.p||'')).length,maps=x.docs.filter(d=>d&&/^smap\/[^/]+$/.test(d.p||'')).length;
  return`<p class="note">הגיבוי כולל גם נתוני סריקת חנות (${maps} מפות, ${runs} סבבים, בלי תמונות${x.part?', חלקי':''}). השחזור לא משנה ולא מוחק את נתוני הסריקה שבשרת – הם נשארים כמו שהם, והעותק נשמר בקובץ הגיבוי.</p>`}
-window.S3BK={collect,note,pick,ok,on,rel,warn,L,skip:0,reset:()=>{last=null}};
+window.S3BK={collect,note,pick,ok,on,rel,warn,big,L,reset:()=>{last=null}};
 })();

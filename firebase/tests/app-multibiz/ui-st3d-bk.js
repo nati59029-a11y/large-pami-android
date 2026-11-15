@@ -50,6 +50,7 @@ async function open(browser, www, who, feat, o) {
   await ctx.route((u) => u.port === '8080' && S3RE.test(u.pathname), (route) => {
     const rq = route.request(), u = new URL(rq.url()), rel = decodeURIComponent(u.pathname.split(`/documents/b/${BIZ}/`)[1]);
     R.s3.push(rq.method() + ' ' + rel);
+    if (R.hang && rel === 's3br') return; // קריאה שלא נענית לעולם (8ה)
     if (rq.method() !== 'GET') return j(route, 200, { name: DOCS + rel, fields: {} });
     if (FIX[rel]) return j(route, 200, doc(rel));
     const kids = Object.keys(FIX).filter((k) => k.startsWith(rel + '/') && k.slice(rel.length + 1).split('/').length === 1);
@@ -161,13 +162,28 @@ const writesS3 = (R) => R.s3.filter((x) => !/^(GET|QUERY) /.test(x));
   check('8ב תקרת זמן: האיסוף נעצר (part=1, miss=time), הגיבוי נוצר כרגיל', r9.part === 1 && r9.miss[0] === 'time' && r9.tx, r9);
   A.R.up.length = 0;
   const r10 = await A.page.evaluate(async () => {
-    if (!S.tx.length) { S.tx.push({ id: 'tbk1', t: 'inc', cat: (S.cats[0] || {}).id || 'x', date: '2026-11-01', amt: 100, note: '' }); save(); }
-    S3BK.reset(); const full = (await abkEnc(await mkBackup())).length; S3BK.reset(); S3BK.skip = 1; const bare = (await abkEnc(await mkBackup())).length; S3BK.skip = 0; S3BK.reset();
+    // תנועה עם קובץ מצורף במכשיר, ומונים: כמה פעמים נקרא הקובץ (fget) וכמה פעמים הוצפן (abkEnc)
+    if (!S.tx.some((t) => t.file === 'fbk1')) { await fput('fbk1', 'data:image/png;base64,iVBORw0KGgo='); S.tx.push({ id: 'tbk1', t: 'inc', cat: (S.cats[0] || {}).id || 'x', date: '2026-11-01', amt: 100, note: '', file: 'fbk1' }); save(); }
+    window.__fg = 0; window.__en = 0; const f0 = fget, e0 = abkEnc; fget = async (...a) => { if (a[0] === 'fbk1') window.__fg++; return f0(...a); }; abkEnc = async (...a) => { window.__en++; return e0(...a); };
+    S3BK.reset(); const c = await bkCollect(undefined, true); const full = (await e0(await mkBackup(0, c))).length, bare = (await e0(await mkBackup(0, c, { v: 1, at: 1, months: 12, n: {}, docs: [], part: 1, miss: ['big'] }))).length;
+    window.__fg = 0; window.__en = 0;
     const M = ABK.max; ABK.max = Math.floor((full + bare) / 2); let ok; try { ok = await abkRun('test'); } finally { ABK.max = M; }
-    go('data'); return { full, bare, ok, err: abkGet().err || '', skip: S3BK.skip, w: /הגיבוי המוצפן נשמר בלעדיהם/.test(document.querySelector('#main').innerText) }; });
+    const fg = window.__fg, en = window.__en; go('data'); const w = /הגיבוי המוצפן נשמר בלעדיהם/.test(document.querySelector('#main').innerText);
+    // 8ד: חריגה שלא בגלל st3 (st3 ריק – תקרת גודל 0): בלי ניסיון שני, אותה שגיאה כמו קודם
+    S3BK.reset(); const MX = S3BK.L.MAX; S3BK.L.MAX = 0; window.__fg = 0; window.__en = 0; ABK.run = 0; ABK.max = 10; let ok2; try { ok2 = await abkRun('test'); } finally { ABK.max = M; S3BK.L.MAX = MX; S3BK.reset(); }
+    const d2 = { ok: ok2, fg: window.__fg, en: window.__en, err: abkGet().err || '' };
+    fget = f0; abkEnc = e0;
+    go('data'); return { full, bare, ok, fg, en, d2, skip: 'skip' in S3BK, w }; });
   let r10b = null;
   if (A.R.up.length) r10b = await A.page.evaluate(async (b64) => { const u = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); const o = parseBackup(await abkDec(u.buffer)); return { tx: o.d.tx.length === S.tx.length, st3: o.st3 && { miss: o.st3.miss, n: o.st3.docs.length } }; }, A.R.up[0].toString('base64'));
-  check('8ג גיבוי מוצפן שחורג מהתקרה בגלל st3: נוצר שוב בלי נתוני הסריקה, הועלה עם התנועות, בלי שגיאה, והערה בעברית', r10.ok === true && r10.err === '' && r10.skip === 0 && r10.w && A.R.up.length === 1 && r10b && r10b.tx && r10b.st3 && r10b.st3.miss[0] === 'big' && r10b.st3.n === 0, { r10, r10b });
+  check('8ג גיבוי מוצפן שחורג מהתקרה בגלל st3: נוצר שוב בלי נתוני הסריקה, הועלה עם התנועות, בלי שגיאה, והערה בעברית', r10.ok === true && r10.skip === false && r10.w && A.R.up.length === 1 && r10b && r10b.tx && r10b.st3 && r10b.st3.miss[0] === 'big' && r10b.st3.n === 0, { r10, r10b });
+  check('8ג2 (סבב 2) בלי קריאה כפולה: הקובץ המצורף נקרא פעם אחת (fget=1), שתי הצפנות (מלא ← בלי st3), ואין דגל משותף S3BK.skip', r10.fg === 1 && r10.en === 2 && r10.skip === false, r10);
+  check('8ד (סבב 2) חריגה שלא בגלל st3: אין ניסיון שני (הצפנה אחת, קובץ נקרא פעם אחת), אותה שגיאה "גדול מדי" כמו קודם', r10.d2.ok === false && r10.d2.en === 1 && r10.d2.fg === 1 && /גדול מדי/.test(r10.d2.err), r10.d2);
+  // 8ה (סבב 2, הערה): קריאה שנתקעת בלי תשובה – העצירה הכפויה (TIME + 5 שניות) משחררת את הגיבוי
+  A.R.hang = true;
+  const r11 = await A.page.evaluate(async () => { S3BK.reset(); const T = S3BK.L.TIME; S3BK.L.TIME = 300; const t0 = performance.now(); let o; try { o = JSON.parse(await mkBackup()); } finally { S3BK.L.TIME = T; S3BK.reset(); } return { ms: Math.round(performance.now() - t0), miss: o.st3.miss, part: o.st3.part, tx: o.data.tx.length === S.tx.length }; });
+  A.R.hang = false;
+  check('8ה קריאה תקועה: הגיבוי הסתיים תוך פחות מ-10 שניות עם miss=time, והתנועות בגיבוי', r11.ms < 10000 && r11.miss[0] === 'time' && r11.part === 1 && r11.tx, r11);
   check('6א אין שגיאות JS (מנהל)', A.page.__errors.length === 0, A.page.__errors);
   await A.ctx.close();
 

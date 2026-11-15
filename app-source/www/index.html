@@ -4256,7 +4256,7 @@ async function bkCollect(prog,cloudImgs){const files={},ids=bkFileIds();let i=0;
   if(!f&&cloudImgs&&id.startsWith('fb:')&&(typeof isA==='function'&&isA())){try{f=await fbImg(id.slice(3));if(f)await fput(id,f)}catch(e){}}
   if(f)files[id]=f}
  let st3;try{if(typeof S3BK!=='undefined')st3=await S3BK.collect()}catch(e){console.error(e)}return{data:S,files,fb:{cache:FBL.cache,pend:FBL.pend,out:FBL.out},shelf:shClean(),st3}}
-async function mkBackup(prog){const c=await bkCollect(prog,true);return JSON.stringify({app:'large-pami',schema:4,date:new Date().toISOString(),data:c.data,files:c.files,fb:c.fb,shelf:c.shelf,st3:c.st3})}
+async function mkBackup(prog,c0,st3x){const c=c0||await bkCollect(prog,true);return JSON.stringify({app:'large-pami',schema:4,date:new Date().toISOString(),data:c.data,files:c.files,fb:c.fb,shelf:c.shelf,st3:st3x!==undefined?st3x:c.st3})}
 /* ---- ענן (Firebase), אוסף bk: meta, d{a|b}_N (נתונים), f_<id>_N (קבצים) ---- */
 const BKC=700000;
 let BKS={run:0,msg:''};
@@ -4363,7 +4363,7 @@ const abkWhen=n=>{const m=/bk-(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)/.exec(n||''
 /* גיבוי אחד: יצירה, הצפנה, העלאה, דיווח לשרת, ומחיקת גרסאות מעבר ל-30. כל כישלון נרשם בשקט, והאפליקציה ממשיכה */
 async function abkRun(why){if(!isA()||ABK.run)return false;ABK.run=1;abkPut({tryAt:Date.now()});
  try{if(!S.tx.length)throw new Error('אין עדיין נתונים לגבות');
-  const sig=abkSig();let enc=await abkEnc(await mkBackup());if(enc.length>ABK.max&&typeof S3BK!=='undefined'&&S3BK.on()){S3BK.skip=1;try{enc=await abkEnc(await mkBackup())}finally{S3BK.skip=0}}/* שלב 14: חריגה בגלל נתוני הסריקה – יוצרים שוב בלעדיהם */const d=new Date(),nm='bk-'+d.toISOString().replace(/[-:]/g,'')+'-'+Math.random().toString(36).slice(2,6)+'.lpb';
+  const sig=abkSig(),c=await bkCollect(undefined,true);let enc=await abkEnc(await mkBackup(0,c));if(enc.length>ABK.max&&typeof S3BK!=='undefined'){const sb=S3BK.big(c.st3);if(sb)enc=await abkEnc(await mkBackup(0,c,sb))}/* שלב 14: חריגה ו-st3 תורם גודל – אותו איסוף (בלי לקרוא שוב קבצים), רק st3 מוחלף בסימון קטן */const d=new Date(),nm='bk-'+d.toISOString().replace(/[-:]/g,'')+'-'+Math.random().toString(36).slice(2,6)+'.lpb';
   if(enc.length>ABK.max){const x=new Error('הגיבוי גדול מדי לענן ('+(enc.length/1048576).toFixed(1)+' MB). שמרו גיבוי במכשיר');x.big=sig;throw x}/* קובץ גדול מהמגבלה: לא מעלים, ולא מנסים שוב עד תנועה חדשה או יום חדש (abkTick) */
   await abkSt('?uploadType=media&name='+encodeURIComponent(abkDir()+nm),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:enc});
   try{await abkCall('reportBackupStatus',{file:nm,device:abkDev()})}catch(e){}
