@@ -401,7 +401,7 @@ async function docRender(db, w, doc, cfg, isVoid) {
     base.table = { head: ['אמצעי תשלום', 'פרטים', 'סכום'], rows: [[PAYN[p.m] || 'אחר', det, ag2(doc.gross)]], num: [2] };
     base.sums = [['סה״כ שולם', doc.gross / 100]];
     const al = await db.collection('aralloc').where('rc', '==', doc.id || '').get().catch(() => null);
-    const inv = al ? al.docs.map((s) => s.data()).filter((a) => !a.void).map((a) => `${a.inv.replace(/^inv[DO]/, '')} (${ag2(a.amt)})`) : [];
+    const inv = al ? al.docs.map((s) => s.data()).filter((a) => !a.void).map((a) => `${a.inv.replace(/^inv[DO]/, '').replace(/^x_[a-z]+_/, '')} (${ag2(a.amt)})`) : [];
     if (inv.length) notes.push('עבור חשבוניות: ' + inv.join(', '));
   } else {
     base.lines = (doc.lines || []).map((l) => ({ n: l.n, q: l.q, p: l.p, u: l.u || '' }));
@@ -433,6 +433,7 @@ async function docOf(db, id) {
   if (typeof id !== 'string' || !OC.ID_RE.test(id)) throw bad('bad-id', 'מסמך לא תקין');
   const s = await db.doc('ardoc/' + id).get();
   if (!s.exists) throw new HttpsError('not-found', 'המסמך לא נמצא', { reason: 'no-doc' });
+  if (['ob', 'old'].includes(s.get('t'))) throw pre('imported', 'מסמך מיובא מתוכנה קודמת – אין לו קובץ'); // שלב 6: בלי PDF
   return Object.assign({ id: s.id }, s.data());
 }
 function docAccess(w, doc) { if (doc.br && doc.br !== NB && w.mine && !w.mine.includes(doc.br)) throw deny('foreign-br', 'אין לך הרשאה למסמך של סניף אחר'); }
@@ -604,7 +605,7 @@ async function arReceipt(request) {
     const open = await B.openDocs(cid);
     const pf = await ARD.proofPlan(B, input.proofId);
     if (!pf.ok && (w.role !== 'manager' || input.proofId)) throw pre(pf.why || 'need-proof', ARD.PROOF_MSG[pf.why] || ARD.PROOF_MSG['need-proof']);
-    const invs = open.filter((x) => x.d.t === 'inv' && !x.d.void && x.d.open > 0);
+    const invs = open.filter((x) => ARD.isDr(x.d) && !x.d.void && x.d.open > 0); // שלב 6: גם חוב מיובא (ob/old)
     let plan;
     if (want) {
       plan = want.map((x) => {
