@@ -526,6 +526,16 @@ async function arIssue(request) {
     const dd = d.vm ? d : Object.assign({}, d, { vm, vr: d.oc && isNum(d.oc.vr) ? d.oc.vr : undefined, gross: undefined });
     const c = typeof d.custId === 'string' && OC.ID_RE.test(d.custId) ? await B.needCust(d.custId) : null;
     if (t === 'inv' && !(c && c.data)) throw pre('need-cust', 'חשבונית מס (לתשלום בהמשך) – רק להזמנה עם לקוח');
+    // החלטה 36 (תיקון בודק 7ב): עסק עם "חיוב אחרי ליקוט" – חשבונית מס להזמנה של לקוח מיידי רק אחרי ליקוט שלא השתנה מאז,
+    // אחרת קבלה מכרטיס הלקוח שסוגרת אותה הייתה מסמנת "שולם" לפני הליקוט. לקוח בשוטף – כמו קודם
+    if (t === 'inv' && AC.termsOfCust(c.data).b === 'imm') {
+      const pp = await tx.get(db.doc('private/pay'));
+      if (pp.exists && pp.get('after') === true) {
+        const pk = d.pk;
+        if (!pk || pk.st !== 'ok') throw pre('pay-pick', 'בעסק הזה מפיקים חשבונית ללקוח מיידי רק אחרי שהליקוט הסתיים');
+        if (pk.fin && typeof pk.fin === 'object') { const f = OC.pickFin(d); if (f.k !== pk.fin.k || Math.round(f.due * 100) !== Math.round(pk.fin.due * 100)) throw pre('pick-old', 'ההזמנה השתנתה אחרי הליקוט – יש ללקט מחדש לפני הפקת החשבונית'); }
+      }
+    }
     await B.needSeq(t);
     const open = t === 'inv' ? await B.openDocs(c.id) : [];
     const ob = ARD.ordBody(B, dd, ordId, c, t);

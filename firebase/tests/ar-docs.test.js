@@ -520,6 +520,27 @@ describe('אסמכתאות (arProof / arProofGet)', () => {
 });
 
 describe('arIssue, סיכום חודשי ועומס מספור', () => {
+  it('החלטה 36 (תיקון 7ב): עסק עם "חיוב אחרי ליקוט" – חשבונית מס ללקוח מיידי רק אחרי ליקוט שלא השתנה; שוטף ועסק רגיל – כמו קודם', async () => {
+    await prep((d) => d.doc(`b/${A}/private/pay`).set({ mode: 'link', link: 'https://pay.example.com/biz', after: true }));
+    const id = await order(WI);
+    const r0 = await call('arIssue', MGR, { reqId: rid(), ord: id, t: 'inv' });
+    assert.equal(r0.reason, 'pay-pick', r0.text);
+    assert.equal((await get(`b/${A}/ord/${id}`)).inv, undefined, 'לא הופקה חשבונית');
+    const L = [{ i: 0, ok: true }, { i: 1, ok: true }];
+    assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: L })).status, 'OK');
+    const o = await get(`b/${A}/ord/${id}`);
+    const it2 = o.items.map((x) => ({ pid: x.pid, qty: x.qty, price: x.price })); it2[1].qty = 13;
+    assert.equal((await call('updateOrder', MGR, { id, items: it2 })).status, 'OK');
+    const r1 = await call('arIssue', MGR, { reqId: rid(), ord: id, t: 'inv' });
+    assert.equal(r1.reason, 'pick-old', r1.text);
+    assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: L })).status, 'OK');
+    assert.equal((await ok(call('arIssue', MGR, { reqId: rid(), ord: id, t: 'inv' }))).t, 'inv');
+    // לקוח בשוטף – בלי ליקוט, כמו קודם
+    assert.equal((await ok(call('arIssue', MGR, { reqId: rid(), ord: await order(WS), t: 'inv' }))).t, 'inv');
+    // עסק בלי "אחרי ליקוט" – לקוח מיידי בלי ליקוט, כמו קודם
+    await prep((d) => d.doc(`b/${A}/private/pay`).set({ mode: 'link', link: 'https://pay.example.com/biz', after: false }));
+    assert.equal((await ok(call('arIssue', MGR, { reqId: rid(), ord: await order(WI), t: 'inv' }))).t, 'inv');
+  });
   it('arIssue: הזמנה ישנה בלי vm – רק עם בחירה; כבר יש חשבונית – נדחה; מספר הקצאה מעל הסף: חובה או דילוג', async () => {
     const id = await order(WS);
     await prep(async (d) => { const r = d.doc(`b/${A}/ord/${id}`); const o = (await r.get()).data(); delete o.vm; delete o.vr; delete o.gross; delete o.net; delete o.vat; await r.set(o); });
