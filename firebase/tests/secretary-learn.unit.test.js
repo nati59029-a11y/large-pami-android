@@ -110,3 +110,39 @@ describe('sec-learn: "לעשות את זה מעכשיו לבד?" ושליחה ל
     assert.equal(L.maskTo('972501234567'), '***4567');
   });
 });
+
+// 15.11.2026 (סעיף 6): צ'אט נקי, "מול העיניים" וכללי ניתוב
+describe('sec-learn: כללי ניתוב, "מאז הכניסה הקודמת" ותזכורות בפיד', () => {
+  it('routeOf: הוראת ניתוב מזוהה; שאלה או משפט בלי הוראה – לא', () => {
+    assert.deepEqual(L.routeOf("חשבוניות מהיום – לקטגוריה 'בטיפול' באפליקציה"), { kind: 'inv', dest: 'hold' });
+    assert.deepEqual(L.routeOf('מעכשיו תזכורות רק בלשונית היומן'), { kind: 'rem', dest: 'tab' });
+    assert.deepEqual(L.routeOf('מעכשיו התראות לא בצ׳אט'), { kind: 'note', dest: 'tab' });
+    assert.deepEqual(L.routeOf("מעכשיו חשבוניות שוב לצ'אט"), { kind: 'inv', dest: 'chat' });
+    for (const t of ['כמה חשבוניות בטיפול?', 'חשבוניות בטיפול', 'מה בטיפול היום', 'תזכירי לי מחר להתקשר', '']) assert.equal(L.routeOf(t), null, t);
+  });
+  it('routeRule / routesOf / applyRoutes: האחרון גובר, כבוי לא חל, ברירת מחדל – הכול בצ\'אט', () => {
+    const r = L.routeRule('חשבוניות מהיום – לבטיפול', { kind: 'inv', dest: 'hold' });
+    assert.deepEqual(r, { ch: 'route', act: 'route', instr: 'חשבוניות מהיום – לבטיפול', scope: { kind: 'inv' }, dest: 'hold', safe: '' });
+    assert.equal(L.routeRule('x', { kind: 'zzz', dest: 'hold' }), null);
+    assert.equal(L.scopeL(r), 'חשבוניות ← בטיפול');
+    const R = L.routesOf([Object.assign({}, r, { t: 1 }), { ch: 'route', scope: { kind: 'inv' }, dest: 'tab', on: true, t: 2 }, { ch: 'route', scope: { kind: 'rem' }, dest: 'hold', on: false, t: 3 }, { ch: 'chat', instr: 'קצר', t: 4 }]);
+    assert.deepEqual(R, { inv: 'tab' });
+    const items = [{ k: 'inv', id: 1 }, { k: 'rem', id: 2 }, { k: 'note', id: 3 }];
+    assert.deepEqual(L.applyRoutes(items, {}), { feed: items, hold: [] });
+    assert.deepEqual(L.applyRoutes(items, { inv: 'hold', note: 'tab' }), { feed: [{ k: 'rem', id: 2 }], hold: [{ k: 'inv', id: 1 }] });
+  });
+  it('sinceOf: כניסה ראשונה – 24 שעות; כניסה חדשה – מהכניסה הקודמת; כניסה חוזרת תוך 2 דקות / בלי visit – אותו "מאז"; לא יותר מ-7 ימים', () => {
+    const now = 1e12;
+    assert.equal(L.sinceOf(null, now, true), now - 864e5);
+    assert.equal(L.sinceOf({ chat: now - 3600e3, prev: now - 9e6 }, now, true), now - 3600e3);
+    assert.equal(L.sinceOf({ chat: now - 60e3, prev: now - 9e6 }, now, true), now - 9e6);
+    assert.equal(L.sinceOf({ chat: now - 3600e3, prev: now - 9e6 }, now, false), now - 9e6);
+    assert.equal(L.sinceOf({ chat: now - 30 * 864e5, prev: 1 }, now, true), now - 7 * 864e5);
+  });
+  it('remLine / relDay: "תזכורת: … – מחר 08:00", אירוע בלי שעה, יום בשבוע', () => {
+    assert.equal(L.remLine({ title: 'להתקשר לספק', d: '2026-11-16', rem: true }, '2026-11-15', '08:00'), 'תזכורת: להתקשר לספק – מחר 08:00');
+    assert.equal(L.remLine({ title: 'פגישה', d: '2026-11-15', tm: '14:30' }, '2026-11-15', '08:00'), 'ביומן: פגישה – היום 14:30');
+    assert.equal(L.relDay('2026-11-18', '2026-11-15'), 'יום רביעי 18.11');
+    assert.equal(L.relDay('bad', '2026-11-15'), '');
+  });
+});

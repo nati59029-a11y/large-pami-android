@@ -1,4 +1,4 @@
-/* SEC:1+2+3+4+5+6+7+9 – המזכירה העסקית. שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
+/* SEC:1+2+3+4+5+6+7+9+10 – המזכירה העסקית. SEC:10 (15.11.2026): צ'אט נקי בכל כניסה, "צ'אט קודם", "מול העיניים", מצב כרטיסים שנשמר, כללי ניתוב ולשונית "בטיפול". שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
    שלב 2: secFin – נתוני הכספים לצ'אט ולמראה, מחושבים בפונקציות של מסכי האפליקציה עצמם (monthIncome, monthExpense, monthOwner, catTotal,
    inv/bal/dueOf, bsum, homeCards, dueStats, cfDebits, cfMonths) – אין כאן נוסחה כספית שנייה; מראה לענן אחרי כל שמירה (לכל היותר פעם ב-3 דקות);
    מסך הצ'אט (מקורות, "נכון ל-", "חשבי לעומק", אחוז ניצול, סף תזרים, "לא רלוונטי", מתג המראה).
@@ -101,7 +101,8 @@ V.sec=()=>{const T='המזכירה';
  if(tab==='bank')return{t:S.name||T,s:'תשובות מוכנות',h:tabsH()+bankH()};
  if(tab==='notes')return{t:S.name||T,s:'התראות',h:tabsH()+notesH()};
  if(tab==='reps')return{t:S.name||T,s:'דוחות ותובנות',h:tabsH()+repsH()};
- if(!X.msgs&&!X.mb)msgLoad();
+ /* SEC:10: הצ'אט נפתח נקי – בלי טעינת השיחה הקודמת (היא בלשונית "צ'אט קודם"; המזכירה עדיין זוכרת אותה בשרת) */
+ X.msgs=X.msgs||[];
  return{t:S.name||T,s:'המזכירה העסקית',h:tabsH()+chatH(S)}};
 ACT.secRe=()=>{X.st=null;load(true);rerender()};
 ACT.secEdit=()=>{X.edit=1;X.wz=1;rerender()};
@@ -202,7 +203,6 @@ css2.textContent='.secmsg{max-width:88%;padding:10px 12px;border-radius:14px;mar
 document.head.appendChild(css2);
 const QS=['מה קרה היום?','תזרים לחודש','חשבוניות לתשלום השבוע'];
 const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',facts:'@facts',cal:'@cal',bank:'@bank'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
-async function msgLoad(){X.mb=1;try{const r=await fnCall('secChatLoad',{limit:50});X.msgs=r&&r.msgs||[]}catch(e){X.msgs=X.msgs||[];X.msgErr=e&&e.message||'השיחה לא נטענה'}finally{X.mb=0;if(cur().v==='sec'&&!typing())rerender()}}
 const fmtAt=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 /* 13.11.2026: סימני עיצוב שהמודל מוסיף (Markdown) – מוצגים כעיצוב ולא ככוכביות. רץ על טקסט שכבר עבר esc, ומוסיף רק <b> */
 const mdLite=t=>t.split('\n').map(l=>{if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(l))return null;const h=/^\s*#{1,6}\s+(.*)$/.exec(l);if(h)return '<b>'+h[1].replace(/\*\*/g,'')+'</b>';return l.replace(/^(\s*)[-*•]\s+/,'$1• ')}).filter(l=>l!==null).join('\n').replace(/\*\*([^*\n]+?)\*\*/g,'<b>$1</b>').replace(/__([^_\n]+?)__/g,'<b>$1</b>').replace(/\n{3,}/g,'\n\n').replace(/^\n+|\n+$/g,'');
@@ -210,9 +210,9 @@ function bub(m,i){if(m.role!=='a')return `<div class="secmsg u">${esc(m.text)}</
  const tx=mdLite(esc(m.text)).replace(/\[(\d{1,2})\]/g,'<sup>$1</sup>');
  const src=(m.src||[]).map((s,k)=>`<li><b>${k+1}.</b> לפי ${esc(s.l||'')}${s.at?', נכון ל-'+esc(fmtAt(s.at)):''}${SCR[s.s]&&(SCR[s.s][0]==='@'||V[SCR[s.s]])?` <button class="chip" data-a="secGo" data-v="${SCR[s.s]}" style="min-height:32px">למסך</button>`:''}</li>`).join('');
  const ideas=(m.ideas||[]).filter(x=>!(X.nr||{})[x.key]).map(x=>`<div class="card" style="margin:6px 0 0;padding:8px"><small>${esc(x.seen||'')}</small><button class="chip" data-a="secNr" data-k="${esc(x.key)}" style="min-height:40px;margin-top:4px">לא רלוונטי – לא להציע 90 יום</button></div>`).join('');
- const th=m.th&&X.st&&X.st.cfTh==null?`<div class="card" style="margin:6px 0 0;padding:8px"><small>סף מוצע להתראת תזרים: ${esc(Number(m.th).toLocaleString('he-IL'))} ₪</small><div class="row" style="margin-top:4px"><button class="chip" data-a="secTh" data-v="${esc(String(m.th))}" style="min-height:40px">לאשר את הסף</button><button class="chip" data-a="secThEd" style="min-height:40px">סף אחר</button></div></div>`:'';
- const cards=(m.cards||[]).map(cardH).join('');
- return `<div class="secmsg a${m.stale?' secwarn':''}">${tx}${cards}${src?`<details class="secsrc"><summary>מקורות (${(m.src||[]).length})</summary><ol style="margin:4px 0;padding-inline-start:18px;list-style:none">${src}</ol></details>`:''}${ideas}${th}${m.id&&m.mode!=='policy'?`<div class="secrow">${mrBtnH('chat',m.id)}</div>`:''}</div>`}
+ const th=m.th&&X.st&&X.st.cfTh!=null?`<div class="card" style="margin:6px 0 0;padding:8px"><small><b>אושר ✓</b> סף התראת תזרים: ${esc(Number(X.st.cfTh).toLocaleString('he-IL'))} ₪</small></div>`:m.th&&X.st&&X.st.cfTh==null?`<div class="card" style="margin:6px 0 0;padding:8px"><small>סף מוצע להתראת תזרים: ${esc(Number(m.th).toLocaleString('he-IL'))} ₪</small><div class="row" style="margin-top:4px"><button class="chip" data-a="secTh" data-v="${esc(String(m.th))}" style="min-height:40px">לאשר את הסף</button><button class="chip" data-a="secThEd" style="min-height:40px">סף אחר</button></div></div>`:'';
+ const cards=(m.cards||[]).map(c=>cardH(c,m.id)).join('');
+ return `<div class="secmsg a${m.stale?' secwarn':''}">${tx}${cards}${src?`<details class="secsrc"><summary>מקורות (${(m.src||[]).length})</summary><ol style="margin:4px 0;padding-inline-start:18px;list-style:none">${src}</ol></details>`:''}${ideas}${th}${m.id?`<div class="secrow">${mrBtnH('chat',m.id)}</div>`:''}</div>`}
 function chatH(S){const pct=Number.isFinite(S.pct)?S.pct:null,fin=!!secFinOk();
  const bar=`<div class="secbar" id="secBar"><span>${fin?'נתוני הכספים: מהמכשיר, נכונים ל-'+esc(fmtAt(Date.now())):S.mirror===false?'מראה הכספים כבוי':S.mirrorAt?'נתוני הכספים נכונים ל-'+esc(fmtAt(S.mirrorAt)):'אין נתוני כספים במכשיר הזה'}</span>${pct!=null?`<span id="secPct">ניצול החודש: <bdi dir="ltr">${pct}%</bdi></span>`:''}<button class="chip" data-a="secSet" style="min-height:36px;margin-inline-start:auto">הגדרות</button></div>`;
  const warn=S.saving?`<div class="card secwarn" id="secSaving"><small>${S.saving==='day'?'הגעתם לתקרת השימוש היומית – אפשר להמשיך מחר.':'הגעתם לתקרת השימוש החודשית – המזכירה במצב חיסכון עד תחילת החודש או הגדלת התקרה.'}</small></div>`:pct>=80?`<div class="card secwarn"><small>ניצלתם ${pct}% מתקרת השימוש החודשית.</small></div>`:'';
@@ -220,7 +220,7 @@ function chatH(S){const pct=Number.isFinite(S.pct)?S.pct:null,fin=!!secFinOk();
  const L=X.msgs||[];
  const body=X.mb&&!L.length?'<div class="empty">טוען…</div>':(L.length?L.map(bub).join(''):`<div class="secmsg a">${hi}אני ${esc(S.name)}. אפשר לשאול אותי על הכספים, הספקים, העובדים, המשימות וההזמנות של העסק, על המידע ששמרתם על העסק ועל היומן.</div>`)+(X.msgErr?`<p class="note">${esc(X.msgErr)}</p>`:'');
  const busy=X.sending?`<div class="secmsg a" id="secWait"><small>${X.deep?'חושבת לעומק…':'כותבת…'}</small></div>`:'';
- return bar+warn+`<div id="secChat">${body}${busy}</div>
+ return bar+warn+eyH()+`<div id="secChat">${body}${busy}</div>
  <div class="chips" style="margin:10px 0 6px">${QS.map(q=>`<button class="chip" data-a="secQ" data-v="${esc(q)}" style="min-height:40px">${esc(q)}</button>`).join('')}</div>
  <form data-f="secAskF" id="secForm"><textarea class="secin" name="q" maxlength="2000" placeholder="כתבו שאלה על העסק…" aria-label="שאלה למזכירה">${esc(X.draft||'')}</textarea>
  <div class="row" style="margin-top:8px"><button class="btn grow" name="go" value="n"${X.sending?' disabled':''}>שליחה</button><button class="btn g grow" name="go" value="d"${X.sending?' disabled':''} title="מודל איכותי – עולה יותר בתקרה">חשבי לעומק</button></div></form>
@@ -256,7 +256,7 @@ async function ask2(q,deep){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)retur
  X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';rerender();scrollEnd();
  try{const fin=secFin({pay:!!X.st.pay});const d={text:q,deep};if(fin)d.fin=fin;
   const r=await fnCall('secChat',d);
-  X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null}
+  X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null;eyStale()}
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
  catch(e){const rs=e&&Object.prototype.hasOwnProperty.call(AIR,e.reason)?' (סיבה: '+AIR[e.reason]+')':'';X.msgs.push({role:'a',text:((e&&e.message)||'השליחה נכשלה. נסו שוב.')+rs,t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
  finally{X.sending=0;X.deep=0;if(cur().v==='sec')rerender();scrollEnd()}}
@@ -274,7 +274,7 @@ css3.textContent='.sectabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.
 document.head.appendChild(css3);
 const TABS=[['chat','שיחה'],['wa','ווצאפ'],['notes','התראות'],['reps','דוחות'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
 const unseenN=()=>X.nl&&!X.nl.err?X.nl.unseen:((X.st&&X.st.unseen)||0);
-function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
+function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.filter(([k])=>k!=='hold'||holdOn()).map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
 /* 13.11.2026: מעבר בין לשוניות – המידע הקודם מוצג מיד ומתעדכן ברקע (במקום "טוען…" בכל מעבר). אחרי שגיאה – טעינה רגילה */
 const swr=(o,k,b,ld)=>{const R=o[k];if(!R||R.err){o[k]=null;return}if(!X[b])ld()};
 ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')swr(X,'fl','fb',factsLoad);if(X.tab==='cal')swr(X,'cl','cb',calLoad);if(X.tab==='bank')swr(X,'rl','rb',rulesLoad);if(X.tab==='notes')swr(X,'nl','nb',notesLoad);if(X.tab==='reps'){X.rp=null;swr(X,'rpl','rb4',repsLoad)}rerender()};
@@ -286,27 +286,35 @@ const todayS=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMont
 
 /* ---------- כרטיסי אישור בצ'אט (47, 7.1): "אשר" / "בטל". נשמר רק באישור ---------- */
 X.done=X.done||{};
-function cardH(c){const d=X.done[c.id];
- if(d)return `<div class="card" style="margin:6px 0 0;padding:8px"><small>${esc(d)}</small></div>`;
+/* SEC:10: כרטיס שהוכרע – "אושר ✓" / "בוטל" בלי כפתורים, גם אחרי טעינה מחדש (המצב נשמר בהודעה בשרת: c.st) */
+const CST={ok:'אושר ✓',no:'בוטל',gone:'כבר טופל'};
+function cardSum(c){if(c.k==='cal')return (c.rem?'תזכורת: ':'')+c.title+' · '+wkD(c.okD||c.d)+' '+dShort(c.okD||c.d)+(c.tm?' '+c.tm:'');if(c.k==='fact')return c.text||'';if(c.k==='route')return rtL(c);return ''}
+function cardDone(c){const d=X.done[c.id]||(c.st?{st:c.st}:null);if(!d)return '';const st=CST[d.st]?d.st:'gone';
+ const det=st==='ok'?(c.k==='fact'?'נשמר במידע על העסק.':c.k==='cal'?(c.rem?'התזכורת נקבעה – תופיע ב"מול העיניים" ותישלח התראה בזמן.':'נקבע ביומן'+(c.okD&&c.okD!==c.d?' ל-'+dShort(c.okD):'')+'.'):c.k==='route'?'הכלל נשמר ב"הכללים שלי".':''):st==='no'?(c.k==='fact'?'לא נשמר.':c.k==='cal'?'לא נקבע.':'לא נשמר כלל.'):'';
+ return `<div class="card secdone" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}" data-st="${st}"><b>${CST[st]}</b> <small class="note">${esc(cardSum(c))}</small>${det?`<small class="note" style="display:block">${esc(det)}</small>`:''}</div>`}
+function cardH(c,mid){if(X.done[c.id]||c.st)return cardDone(c);
+ if(c.k==='route')return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>כלל ניתוב</b><p style="margin:4px 0">${esc(rtL(c))}</p><div class="secrow"><button class="chip" data-a="secRtOk" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">אשר</button><button class="chip" data-a="secRtNo" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">בטל</button></div></div>`;
  if(c.k==='fact'){const cf=(c.conflict||[]).map(x=>`<li>${esc(x.text)}</li>`).join('');
   return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>לשמור במידע על העסק?</b><p style="margin:4px 0">${esc(c.text)}${c.exp?` <span class="sectags">עד ${esc(dShort(c.exp))}</span>`:''}</p>
   ${cf?`<p class="note" style="margin:4px 0">זה נראה סותר את מה שכבר שמור:</p><ul style="margin:0 0 4px;padding-inline-start:18px">${cf}</ul><p class="note" style="margin:0">איזו נכונה?</p><div class="secrow"><button class="chip" data-a="secFOk" data-id="${esc(c.id)}" data-rp="${esc((c.conflict||[]).map(x=>x.id).join(','))}">החדשה נכונה</button><button class="chip" data-a="secFNo" data-id="${esc(c.id)}">הקיימת נכונה</button><button class="chip" data-a="secFOk" data-id="${esc(c.id)}" data-both="1">שתיהן נכונות</button></div>`
   :`<div class="secrow"><button class="chip" data-a="secFOk" data-id="${esc(c.id)}">אשר ושמור</button><button class="chip" data-a="secFNo" data-id="${esc(c.id)}">בטל</button></div>`}</div>`}
  if(c.k==='cal'){const w=c.warn;
-  return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>לקבוע ביומן?</b><p style="margin:4px 0">${esc(c.title)} · ${esc(wkD(c.d))} ${esc(dShort(c.d))}${c.tm?' · <bdi dir="ltr">'+esc(c.tm)+'</bdi>':''} <span class="sectags">${c.to==='biz'?'של העסק':'אישי'}</span></p>
+  return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>${c.rem?'לקבוע תזכורת?':'לקבוע ביומן?'}</b><p style="margin:4px 0">${esc(c.title)} · ${esc(wkD(c.d))} ${esc(dShort(c.d))}${c.tm?' · <bdi dir="ltr">'+esc(c.tm)+'</bdi>':''} <span class="sectags">${c.to==='biz'?'של העסק':'אישי'}</span></p>
   ${w?`<p class="note" style="margin:4px 0">התאריך נופל ב${esc(w.kind)}. להשאיר או להעביר ל${esc(wkD(w.next))} ${esc(dShort(w.next))}?</p><div class="secrow"><button class="chip" data-a="secCOk" data-id="${esc(c.id)}" data-d="${esc(w.next)}">להעביר ל-${esc(dShort(w.next))}</button><button class="chip" data-a="secCOk" data-id="${esc(c.id)}" data-force="1">להשאיר</button><button class="chip" data-a="secCNo" data-id="${esc(c.id)}">בטל</button></div>`
   :`<div class="secrow"><button class="chip" data-a="secCOk" data-id="${esc(c.id)}">אשר</button><button class="chip" data-a="secCNo" data-id="${esc(c.id)}">בטל</button></div>`}</div>`}
  return ''}
-const doneMsg=(id,m)=>{X.done[id]=m;X.fl=null;X.cl=null;rerender()};
+/* SEC:10: מצב הכרטיס – גם על הכרטיס עצמו (בשיחה הנוכחית וב"צ'אט קודם"), ו"מול העיניים" מתרענן */
+const allCards=()=>(X.msgs||[]).concat(X.pc&&X.pc.L||[]).flatMap(m=>m.cards||[]);
+const doneSt=(id,st,o)=>{X.done[id]={st};allCards().filter(c=>c.id===id).forEach(c=>{c.st=st;if(o&&o.d)c.okD=o.d});X.fl=null;X.cl=null;eyStale();rerender()};
 const notPend=e=>e&&e.reason==='not-pending'||e&&e.reason==='not-found';
 ACT.secFOk=async el=>{const id=el.dataset.id,d={op:'approve',id};if(el.dataset.rp){d.force=true;d.replace=el.dataset.rp.split(',').filter(Boolean)}if(el.dataset.both)d.force=true;el.disabled=true;
- try{const r=await fnCall('secFacts',d);if(r&&r.ok===false&&r.conflict){/* סתירה שנוצרה אחרי ההצעה – שואלים */const c=(X.msgs||[]).flatMap(m=>m.cards||[]).find(x=>x.id===id);if(c){c.conflict=r.conflict;rerender()}return}doneMsg(id,'נשמר במידע על העסק.')}
- catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
-ACT.secFNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secFacts',{op:'reject',id});doneMsg(id,'לא נשמר.')}catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
+ try{const r=await fnCall('secFacts',d);if(r&&r.ok===false&&r.conflict){/* סתירה שנוצרה אחרי ההצעה – שואלים */const c=allCards().find(x=>x.id===id);if(c){c.conflict=r.conflict;rerender()}return}doneSt(id,'ok')}
+ catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
+ACT.secFNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secFacts',{op:'reject',id});doneSt(id,'no')}catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
 ACT.secCOk=async el=>{const id=el.dataset.id,d={op:'approve',id};if(el.dataset.d)d.d=el.dataset.d;if(el.dataset.force)d.force=true;el.disabled=true;
- try{const r=await fnCall('secCal',d);if(r&&r.ok===false&&r.warn){const c=(X.msgs||[]).flatMap(m=>m.cards||[]).find(x=>x.id===id);if(c){c.warn=r.warn;rerender()}else toast('התאריך נופל ב'+r.warn.kind);return}doneMsg(id,'נקבע ביומן'+(d.d?' ל-'+dShort(d.d):'')+'.')}
- catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
-ACT.secCNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secCal',{op:'reject',id});doneMsg(id,'לא נקבע.')}catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
+ try{const r=await fnCall('secCal',d);if(r&&r.ok===false&&r.warn){const c=allCards().find(x=>x.id===id);if(c){c.warn=r.warn;rerender()}else toast('התאריך נופל ב'+r.warn.kind);return}doneSt(id,'ok',{d:d.d})}
+ catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
+ACT.secCNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secCal',{op:'reject',id});doneSt(id,'no')}catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
 
 /* ---------- מידע על העסק (8.2 מסך 5) ---------- */
 async function factsLoad(){X.fb=1;const s0=X.fl;let again=0;try{const r=await fnCall('secFacts',{op:'list'});if(s0&&X.fl===null){again=1;return}X.fl=r;X.facts={pend:(r.facts||[]).filter(f=>f.st==='prop').length}}catch(e){X.fl=X.fl&&!X.fl.err?X.fl:{err:e&&e.message||'לא נטען'}}finally{X.fb=0;if(again){factsLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
@@ -364,7 +372,7 @@ function calH(){const R=X.cl;if(!R){if(!X.cb)calLoad();return '<div class="empty
  const td=R.today||todayS(),E=R.events||[],pend=E.filter(e=>e.st==='prop'),ok=E.filter(e=>e.st==='ok'&&e.d>=td),view=X.cv||'list';
  let h=`<div class="secrow" style="margin:0 0 8px"><button class="btn" data-a="secEvAdd" style="flex:1">+ אירוע</button><button class="chip${view==='list'?' on':''}" data-a="secCv" data-v="list">רשימה</button><button class="chip${view==='week'?' on':''}" data-a="secCv" data-v="week">שבוע</button></div>`;
  const soon=ok.slice(0,3);h+=`<div class="card" id="secSoon"><b>קרוב</b>${soon.length?soon.map(e=>`<div class="note" style="margin-top:4px">${esc(dShort(e.d))}${e.tm?' <bdi dir="ltr">'+esc(e.tm)+'</bdi>':''} – ${esc(e.title)}</div>`).join(''):'<p class="note" style="margin:4px 0 0">אין אירועים קרובים</p>'}</div>`;
- if(pend.length)h+=`<div class="card secwarn" style="margin-top:8px"><b>המזכירה הציעה (${pend.length})</b>${pend.map(e=>cardH({k:'cal',id:e.id,title:e.title,d:e.d,tm:e.tm,to:e.to,warn:e.off&&R.we!=='accept'?{kind:e.off,next:nextBiz(e.d)}:null})).join('')}</div>`;
+ if(pend.length)h+=`<div class="card secwarn" style="margin-top:8px"><b>המזכירה הציעה (${pend.length})</b>${pend.map(e=>cardH({k:'cal',id:e.id,title:e.title,d:e.d,tm:e.tm,to:e.to,rem:e.rem,warn:e.off&&R.we!=='accept'?{kind:e.off,next:nextBiz(e.d)}:null})).join('')}</div>`;
  const days=[];if(view==='week'){for(let i=0;i<7;i++){const[y,m,x]=td.split('-').map(Number);const d=new Date(y,m-1,x+i,12);days.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))}}
  else{[...new Set(ok.map(e=>e.d))].slice(0,60).forEach(d=>days.push(d))}
  if(!days.length)return h+'<div class="empty">אין אירועים ביומן</div>';
@@ -537,7 +545,7 @@ FRM.secNtF=async f=>{const x=fd(f),T=(X.st&&X.st.types)||{},rt={};for(const k of
 ACT.secHistDel=()=>{ask('למחוק את כל ההיסטוריה שלך במזכירה (שיחה, התראות ודוחות)?',async()=>{
  try{const r=await fnCall('secHistory',{op:'ask'});const c=r.counts||{};X.hd=r.token;
   dlg(`<h3>אישור שני – מחיקה סופית</h3><p>יימחקו: ${esc(String(c.chat||0))} הודעות בשיחה, ${esc(String(c.notes||0))} התראות ו-${esc(String(c.reports||0))} דוחות. הנתונים יימחקו מהמזכירה ואי אפשר לשחזר אותם מהאפליקציה. עותקי הגיבוי האוטומטי בשרת נמחקים לבד תוך 35 יום. המחיקה תירשם ביומן הפעולות.</p><div class="row"><button class="btn grow" data-a="secHistOk">כן, למחוק סופית</button><button class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}catch(e){err(e)}},'המשך')};
-ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disabled=true;try{const r=await fnCall('secHistory',{op:'del',token:t,sure:true});closeDlg();X.msgs=null;X.nl=null;X.rpl=null;X.rp=null;X.log=null;const d=r.deleted||{};toast('נמחק: '+(d.chat||0)+' הודעות, '+(d.notes||0)+' התראות, '+(d.reports||0)+' דוחות');rerender()}catch(e){el.disabled=false;err(e)}};
+ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disabled=true;try{const r=await fnCall('secHistory',{op:'del',token:t,sure:true});closeDlg();X.msgs=null;X.pc=null;X.ey=null;X.nl=null;X.rpl=null;X.rp=null;X.log=null;const d=r.deleted||{};toast('נמחק: '+(d.chat||0)+' הודעות, '+(d.notes||0)+' התראות, '+(d.reports||0)+' דוחות');rerender()}catch(e){el.disabled=false;err(e)}};
 /* ---------- התראות לטלפון (7.2; 12.11.2026: רכיב ההתראות נוסף לאפליקציה) ----------
    רק באפליקציה לטלפון שנבנתה עם הגדרות Firebase (PushGate.ready). בלי זה – לא קורה כלום, וההתראות רק במסך (כמו קודם).
    מנהל: בכניסה הראשונה – בקשת הרשאה להתראות (Android 13+), פעם אחת בלבד בטלפון. אחר כך בכל פתיחה – רישום מחדש (המזהה מתחדש לפעמים).
@@ -1081,8 +1089,8 @@ window.__secInv=IV;
    הכול דרך secLearn בשרת. כללי הבטיחות (תשלום, מחיקה, סיסמאות ופרטים רגישים – תמיד באישור) נאכפים בשרת; כאן רק תצוגה.
    ===================================================================================== */
 const mrOn=()=>!!(X.st&&X.st.learn!==false);
-const MRCH={chat:'שיחה',note:'התראות',mail:'מייל',wa:'ווצאפ'};
-const MREX={chat:['מעכשיו תעני לי בקצרה','תמיד תתחילי בשורה התחתונה'],note:['אל תתריעי לי על התראות כאלה'],mail:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע'],wa:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע']};
+const MRCH={chat:'שיחה',note:'התראות',mail:'מייל',wa:'ווצאפ',feed:'מול העיניים',route:'ניתוב'};
+const MREX={feed:['מעכשיו להעביר את אלה ל"בטיפול"','מעכשיו רק בלשונית שלהן, לא בצ\'אט'],chat:['מעכשיו תעני לי בקצרה','תמיד תתחילי בשורה התחתונה'],note:['אל תתריעי לי על התראות כאלה'],mail:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע'],wa:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע']};
 const MRERR={'branch-limited':'כללים על מייל וווצאפ זמינים רק למנהל בלי הגבלת סניפים','learn-off':'הכללים האישיים כבויים בעסק הזה','too-many':'הגעתם למספר הכללים המרבי (50). אפשר למחוק כלל ישן במסך "הכללים שלי".','need-approval':'קודם צריך לאשר פעם אחת תשובה לפי הכלל הזה','safe-rule':'כלל בטיחות – תמיד באישור שלך','not-pending':'הטיוטה כבר נשלחה או טופלה'};
 const mrErr=e=>toast(e&&e.reason&&MRERR[e.reason]||e&&e.message||'הפעולה נכשלה');
 function mrBtnH(k,id){if(!id||!mrOn()||(X.st.brLimited&&(k==='mail'||k==='wa')))return '';
@@ -1101,6 +1109,7 @@ FRM.secMrF=async f=>{const p=X.mrp;if(!p)return;const text=String(f.t.value||'')
   mrPropDlg(p,!!r.draft);rerender()}
  catch(e){mrErr(e);if(b){b.disabled=false;b.textContent='שליחה'}}};
 function mrPropDlg(p,drafted){const o=p.prop||{};
+ if(o.ch==='route')return dlg(`<h3>לשמור כלל ניתוב?</h3><p style="margin:0 0 6px">מעכשיו: ${esc(o.routeL||'')}</p><div class="secin1" dir="auto" style="white-space:pre-wrap;margin:4px 0 8px">${esc(o.instr||p.text)}</div><p class="note" style="margin:0 0 8px">ברירת המחדל – הכול ב"מול העיניים" בצ'אט. אפשר למחוק את הכלל בכל רגע ב"הכללים שלי".</p><div class="row" style="margin-top:8px"><button class="btn grow" data-a="secMrSave">שמירה ככלל</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>`);
  const did=p.k==='mail'||p.k==='wa'?(drafted?'הכנתי טיוטה חדשה לפי ההוראה. היא לא נשלחה – בדקו אותה ושלחו בלחיצה.':''):p.k==='chat'?'אחרי השמירה אענה כך בשאלות הבאות.':o.act==='mute'?'אחרי השמירה לא אתריע לך על התראות כאלה (התראות בטיחות – תמיד).':'אחרי השמירה אזכור את ההוראה.';
  dlg(`<h3>לשמור ככלל קבוע?</h3>${did?`<p style="margin:0 0 6px">${esc(did)}</p>`:''}<div class="secin1" dir="auto" style="white-space:pre-wrap;margin:4px 0 8px">${esc(o.instr||p.text)}</div>
  ${o.safe?`<div class="card secwarn" style="margin:0 0 8px;padding:8px" id="secMrSafe"><b>תמיד באישור</b><p class="note" style="margin:4px 0 0">ההוראה נוגעת ב${esc(o.safeL)}. אפשר לשמור אותה, אבל המזכירה לא תעשה את זה לבד – תמיד תכין ותחכה לאישור שלך.</p></div>`:''}
@@ -1108,7 +1117,7 @@ function mrPropDlg(p,drafted){const o=p.prop||{};
  ${o.canAuto?'<p class="note" style="margin:6px 0">אחרי שתאשרו פעם אחת תשובה לפי הכלל, בפעם הבאה אשאל אם לעשות את זה מעכשיו לבד.</p>':''}
  <div class="row" style="margin-top:8px"><button class="btn grow" data-a="secMrSave">שמירה ככלל</button><button type="button" class="btn g grow" data-a="closeDlg">רק הפעם</button></div>`)}
 ACT.secMrSave=async el=>{const p=X.mrp;if(!p||!p.text)return;const c=document.querySelector('input[name="secMrSc"]:checked');el.disabled=true;
- try{await fnCall('secLearn',{op:'save',k:p.k,id:p.id,text:p.text,sc:c?c.value:''});closeDlg();toast('נשמר. אפשר לראות ולכבות ב"הכללים שלי" (בהגדרות).');X.mrl=null;
+ try{await fnCall('secLearn',{op:'save',k:p.k,id:p.id,text:p.text,sc:c?c.value:''});closeDlg();toast('נשמר. אפשר לראות ולכבות ב"הכללים שלי" (בהגדרות).');X.mrl=null;if(p.prop&&p.prop.ch==='route')eyStale();
   if(p.k==='note')X.nl=null;if(p.k==='mail'&&X.ml)X.ml.card=null;if(p.k==='wa'&&X.wa)X.wa.card=null;X.mrp=null;rerender()}
  catch(e){el.disabled=false;mrErr(e)}};
 /* בטיוטה: לפי איזו הנחיה נכתבה, "לעשות את זה מעכשיו לבד?" (רק לבעל הכלל), ולמה לא נשלחה לבד */
@@ -1128,6 +1137,8 @@ ACT.secMrBack=()=>{X.mrv=0;X.set=1;rerender()};
 async function mrLoad(){X.mrb=1;try{const[a,b]=await Promise.all([fnCall('secLearn',{op:'list'}),fnCall('secLearn',{op:'log'})]);X.mrl={rules:a.rules||[],max:a.max||50,br:!!a.brLimited,log:b.items||[]}}catch(e){X.mrl={err:e&&e.message||'לא נטען'}}finally{X.mrb=0;if(cur().v==='sec'&&!typing())rerender()}}
 const MRSAFE={pay:'תשלום או העברת כסף',del:'מחיקת נתונים',secret:'סיסמה או פרטים רגישים'};
 function mrRuleH(r){const out=r.ch==='mail'||r.ch==='wa';
+ if(r.ch==='route')return `<div class="secli" data-id="${esc(r.id)}"><p dir="auto"><b>${esc(r.instr)}</b></p><div class="sectg"><span class="sectags">ניתוב</span><span class="sectags g">${esc(r.scopeL||'')}</span>${r.on?'':'<span class="sectags">כבוי</span>'}</div><small class="note">${esc(tm(r.t))}</small>
+ <div class="secrow"><label class="chip" style="min-height:44px"><input type="checkbox" data-c="secMrOn" data-id="${esc(r.id)}"${r.on?' checked':''}> פעיל</label><button class="chip" data-a="secMrDel" data-id="${esc(r.id)}" style="min-height:44px">מחיקה</button></div></div>`;
  const st=r.safe?`<span class="sectags w">תמיד באישור – ${esc(r.safeL||MRSAFE[r.safe]||'')}</span>`:r.auto?'<span class="sectags g">שולחת לבד</span>':r.offWhy==='fail'?'<span class="sectags w">הופסק אחרי 3 כשלונות ברצף</span>':'';
  return `<div class="secli" data-id="${esc(r.id)}"><p dir="auto"><b>${esc(r.instr)}</b></p><div class="sectg"><span class="sectags">${esc(MRCH[r.ch]||'')}</span><span class="sectags">${esc(r.scopeL||'')}</span>${r.act==='mute'?'<span class="sectags">השתקה</span>':''}${st}${r.on?'':'<span class="sectags">כבוי</span>'}</div>
  <small class="note">${out?'אושר '+r.appr+' · ':''}${r.act==='mute'?'הושתקו ':'הופעל לבד '}${r.hits}${r.lastAt?' · לאחרונה '+esc(tm(r.lastAt)):''}${r.asked?' · ביקשת לשאול תמיד':''}</small>
@@ -1138,14 +1149,101 @@ function mrH(){const back='<button class="btn g w" data-a="secMrBack" style="mar
  const L=R.rules;
  const log=R.log.length?R.log.map(x=>`<div class="secli"><p dir="auto">${x.st==='sent'?'נשלח ✓':'נכשל'} · ${esc(MRCH[x.ch]||x.ch)} · <bdi dir="ltr">${esc(x.to)}</bdi></p><small class="note">${esc(tm(x.t))} · ${x.mine?'לפי הכלל שלי':'לפי הכלל של '+esc(x.by)}${x.ri?': "'+esc(x.ri)+'"':''}</small></div>`).join(''):'<p class="note">עוד לא נשלח שום דבר לבד.</p>';
  return back+stopH()+`<div class="card" id="secMr"><p class="note" style="margin:0 0 6px">הכללים שלך גוברים על ברירת המחדל של המזכירה, אבל לא על כללי הבטיחות: תשלום או העברת כסף, מחיקת נתונים ושליחת סיסמאות או פרטים רגישים – תמיד באישור שלך. "עצור הכל" עוצר גם את השליחה לבד.</p>${R.br?'<p class="note" style="margin:0 0 6px">למנהל עם הגבלת סניפים אין כללים על מייל וווצאפ.</p>':''}
- ${L.length?L.map(mrRuleH).join(''):'<p class="note" style="margin:0">עוד אין כללים. בכל הודעה של המזכירה יש כפתור "↩ תגובה".</p>'}<small class="note" style="display:block;margin-top:6px">${L.length} מתוך ${R.max} כללים</small></div>
+ ${L.length?L.map(mrRuleH).join(''):'<p class="note" style="margin:0">עוד אין כללים. בכל הודעה של המזכירה יש כפתור "↩ תגובה".</p>'}<p class="note" style="margin:6px 0 0">כלל ניתוב (למשל "חשבוניות מהיום – לבטיפול") קובע מה מופיע ב"מול העיניים" בצ'אט. בלי כלל – הכול שם.</p><small class="note" style="display:block;margin-top:6px">${L.length} מתוך ${R.max} כללים</small></div>
  <div class="sec"><h3>נשלח לבד</h3></div><div class="card" id="secMrLog">${log}</div>`}
-CHG.secMrOn=async el=>{const on=!!el.checked;el.disabled=true;try{await fnCall('secLearn',{op:'set',id:el.dataset.id,on});toast(on?'הכלל פעיל':'הכלל כובה')}catch(e){el.checked=!on;mrErr(e)}finally{X.mrl=null;rerender()}};
+CHG.secMrOn=async el=>{const on=!!el.checked;el.disabled=true;try{await fnCall('secLearn',{op:'set',id:el.dataset.id,on});toast(on?'הכלל פעיל':'הכלל כובה')}catch(e){el.checked=!on;mrErr(e)}finally{X.mrl=null;eyStale();rerender()}};
 CHG.secMrAu=el=>{const on=!!el.checked,id=el.dataset.id;const run=async()=>{el.disabled=true;try{await fnCall('secLearn',{op:'auto',id,on});toast(on?'מעכשיו לבד':'מעכשיו אשאל לפני כל שליחה')}catch(e){mrErr(e)}finally{X.mrl=null;rerender()}};
  if(on){el.checked=false;ask('מעכשיו פניות שמתאימות לכלל ייענו לבד, בלי לחכות לך (בכפוף לבדיקות הבטיחות ול"עצור הכל"). להמשיך?',run,'כן, לבד')}else run()};
-ACT.secMrDel=el=>{const id=el.dataset.id;ask('למחוק את הכלל? המזכירה תפסיק לפעול לפיו.',async()=>{try{await fnCall('secLearn',{op:'del',id});toast('הכלל נמחק')}catch(e){mrErr(e)}finally{X.mrl=null;rerender()}},'מחיקה')};
+ACT.secMrDel=el=>{const id=el.dataset.id;ask('למחוק את הכלל? המזכירה תפסיק לפעול לפיו.',async()=>{try{await fnCall('secLearn',{op:'del',id});toast('הכלל נמחק')}catch(e){mrErr(e)}finally{X.mrl=null;eyStale();rerender()}},'מחיקה')};
 {const r9=V.sec;V.sec=()=>{if(elig()&&ready()&&X.st&&X.st.setupDone&&X.mrv&&!X.set&&!X.edit&&mrOn())return {t:X.st.name||'המזכירה',s:'הכללים שלי',h:mrH()};return r9()}}
 window.__secMr=()=>X.mrl;
+
+/* =====================================================================================
+   SEC:10 – צ'אט נקי ו"מול העיניים" (15.11.2026; משימות/2026-11-15_התראות-ותגובה-למזכירה/00-בקשה.md סעיף 6):
+   - בכל כניסה לצ'אט (מסך אחר → המזכירה, או לשונית אחרת → "שיחה") המסך נקי. השיחה הקודמת – בלשונית "צ'אט קודם" (קריאה בלבד, בדפים).
+     שום הודעה לא נמחקת, והמזכירה ממשיכה לקבל את ההיסטוריה בשרת (secChat) – רק התצוגה השתנתה.
+   - בראש הצ'אט "מול העיניים": כל מה שפתוח (הצעות לאישור, טיוטות, התראות שלא טופלו, חשבוניות שהתקבלו, תזכורות קרובות) ומה שהמזכירה עשתה
+     מאז הכניסה הקודמת. קריאה אחת לשרת (secLearn op:'eyes'), הכניסה נרשמת בשרת לכל מנהל. כל שורה – לחיצה למקום שלה, אישור במקום כשיש, ו"↩ תגובה".
+   - כללי ניתוב ("חשבוניות מהיום – לבטיפול"): כרטיס אישור בשיחה / תגובה על פריט; פריטים מסוג שנותב מופיעים בלשונית "בטיפול" (או רק בלשונית שלהם).
+   ===================================================================================== */
+const css10=document.createElement('style');
+css10.textContent='.secey{margin:0 0 8px}.secey .secli{padding:8px 0}.secey .secli p{margin:0 0 2px}.secey .secrow .chip{min-height:44px}.secey .eyh{display:flex;justify-content:space-between;align-items:center;gap:8px}'
++'.secey .secday{margin:10px 0 2px}.secdone b{color:var(--acc)}#secPrev .secday{text-align:center;font-size:.85rem}';
+document.head.appendChild(css10);
+TABS.splice(1,0,['prev',"צ'אט קודם"]);TABS.splice(2,0,['hold','בטיפול']);
+const RKL={inv:'חשבוניות',rem:'תזכורות',note:'התראות',draft:'טיוטות תשובה',appr:'הצעות לאישור'},RDL={hold:'לשונית "בטיפול"',tab:"רק בלשונית שלהן (לא בצ'אט)",chat:'"מול העיניים" בצ\'אט'};
+const rtL=c=>'מעכשיו '+(RKL[c.kind]||'פריטים')+' ← '+(RDL[c.dest]||'');
+const holdOn=()=>!!(X.ey&&X.ey.holdOn)||X.tab==='hold';
+/* ---------- "מול העיניים" ---------- */
+async function eyLoad(visit){if(X.eyb){X.eyQ=1;return}X.eyb=1;
+ try{const r=await fnCall('secLearn',{op:'eyes',visit:!!visit});X.ey=r&&Array.isArray(r.open)?r:{err:'לא נטען'}}
+ catch(e){X.ey=X.ey&&!X.ey.err?X.ey:{err:e&&e.message||'לא נטען'}}
+ finally{X.eyb=0;if(X.eyQ){X.eyQ=0;eyLoad(false);return}if(cur().v==='sec'&&!typing())rerender()}}
+/* אחרי פעולה (אישור, "טופל", כלל חדש) – המידע הקיים נשאר על המסך ומתעדכן ברקע */
+function eyStale(){if(!X.ey||X.ey.err)X.ey=null;eyLoad(false)}
+const EYK={appr:'לאישור',draft:'טיוטה',note:'התראה',inv:'חשבונית',rem:'תזכורת'};
+const EYN=4,EYD=3;
+function eyGoA(x){const g=x.go||{};return ` data-tab="${esc(g.tab||'')}"${g.id?` data-id="${esc(g.id)}"`:''}${g.wa?` data-wa="${esc(g.wa)}"`:''}`}
+function eyRow(x,dn){const a=x.act,id=a&&esc(a.id);
+ const acts=!a?'':a.k==='fact'?`<button class="chip" data-a="secFOk" data-id="${id}">אשר</button><button class="chip" data-a="secFNo" data-id="${id}">בטל</button>`:a.k==='cal'?`<button class="chip" data-a="secCOk" data-id="${id}">אשר</button><button class="chip" data-a="secCNo" data-id="${id}">בטל</button>`:a.k==='note'?`<button class="chip" data-a="secNDone" data-id="${id}">טופל</button>`:'';
+ const tag=x.k==='rem'&&/^ביומן/.test(x.title)?'יומן':EYK[x.k]||'';
+ return `<div class="secli" data-ey="${esc(x.id)}"><button type="button" class="secnb" data-a="secEyGo"${eyGoA(x)} aria-label="פתיחה: ${esc(x.title)}"><p><b>${esc(x.title)}</b> <span class="sectags">${esc(tag)}</span></p>${x.sub?`<small class="note secclamp" style="display:block">${esc(x.sub)}</small>`:''}${x.t&&!x.soon?`<small class="note" style="display:block">${esc(tm(x.t))}</small>`:''}</button>
+ <div class="secrow">${acts}${dn?'':`<button class="chip" data-a="secEyGo"${eyGoA(x)}>פתיחה</button>`}${x.r?mrBtnH(x.r.k,x.r.id):''}</div></div>`}
+function eyH(){const R=X.ey,hd='<div class="eyh"><b>מול העיניים</b>';
+ if(!R){if(!X.eyb){const v=!!X.eyV;X.eyV=0;eyLoad(v)}return `<div class="card secey" id="secEyes">${hd}</div><p class="note" style="margin:4px 0 0">טוען…</p></div>`}
+ if(R.err)return `<div class="card secey" id="secEyes">${hd}</div><p class="note" style="margin:4px 0">${esc(R.err)}</p><button class="chip" data-a="secEyRe" style="min-height:44px">נסה שוב</button></div>`;
+ const O=R.open||[],D=R.did||[],on=X.eyAll?O.length:Math.min(O.length,EYN),dn=X.didAll?D.length:Math.min(D.length,EYD),H=R.hold||[];
+ return `<div class="card secey" id="secEyes">${hd}${O.length?`<span class="secbadge">${esc(String(R.openN||O.length))}</span>`:''}</div>
+ <div id="secEyOpen">${O.length?O.slice(0,on).map(x=>eyRow(x)).join(''):'<p class="note" style="margin:4px 0">אין כרגע משהו פתוח ✓</p>'}</div>
+ ${O.length>EYN?`<button class="chip" data-a="secEyMore" data-v="o" style="min-height:44px">${X.eyAll?'פחות':'עוד ('+(O.length-EYN)+')'}</button>`:''}
+ ${H.length?`<button class="chip" data-a="secTab" data-v="hold" style="min-height:44px;margin-inline-start:6px">בטיפול (${H.length})</button>`:''}
+ <div class="secday">מה עשיתי מאז הכניסה הקודמת<small class="note">${esc(tm(R.since))}</small></div>
+ <div id="secEyDid">${D.length?D.slice(0,dn).map(x=>eyRow(x,1)).join(''):'<p class="note" style="margin:4px 0">לא עשיתי משהו חדש מאז.</p>'}</div>
+ ${D.length>EYD?`<button class="chip" data-a="secEyMore" data-v="d" style="min-height:44px">${X.didAll?'פחות':'עוד ('+((R.didN||D.length)-EYD)+')'}</button>`:''}</div>`}
+ACT.secEyMore=el=>{if(el.dataset.v==='d')X.didAll=!X.didAll;else X.eyAll=!X.eyAll;rerender()};
+ACT.secEyRe=()=>{X.ey=null;eyLoad(false);rerender()};
+ACT.secEyGo=el=>{const t=el.dataset.tab,id=el.dataset.id||'',wa=el.dataset.wa||'';
+ if(t==='notes'){if(id)pnTap(id);else ACT.secNotesGo();return}
+ if(t==='set'){ACT.secMrOpen();return}
+ if(!TABS.some(x=>x[0]===t))return;
+ ACT.secTab({dataset:{v:t}});
+ if(t==='wa'&&wa&&X.wa){X.wa.cur=wa;X.wa.card=null;rerender()}
+ if(t==='mail'&&id&&X.ml){X.ml.cur=id;X.ml.card=null;rerender()}};
+{const o=ACT.secNDone;ACT.secNDone=async el=>{await o(el);eyStale()}}
+/* ---------- כרטיס ניתוב בשיחה ---------- */
+async function rtDo(el,no){const mid=el.dataset.mid,cid=el.dataset.id;if(!mid||!cid)return;el.disabled=true;
+ try{await fnCall('secLearn',no?{op:'route',mid,cid,no:true}:{op:'route',mid,cid});X.mrl=null;if(!no)toast('נשמר. אפשר לראות ולמחוק ב"הכללים שלי".');doneSt(cid,no?'no':'ok')}
+ catch(e){if(notPend(e))doneSt(cid,'gone');else{el.disabled=false;mrErr(e)}}}
+ACT.secRtOk=el=>rtDo(el,false);
+ACT.secRtNo=el=>rtDo(el,true);
+/* ---------- "צ'אט קודם": קריאה בלבד, 30 הודעות בכל פעם ---------- */
+async function pcLoad(){const P=X.pc;if(!P||P.b)return;P.b=1;const d={limit:30},o=(P.L||[]).find(m=>Number.isInteger(m.t));if(o)d.before=o.t;
+ try{const r=await fnCall('secChatLoad',d),m=(r&&r.msgs||[]).filter(x=>!P.L.some(y=>y.id&&y.id===x.id));if(X.pc!==P)return;P.L=m.concat(P.L);P.more=r&&typeof r.more==='boolean'?r.more:m.length>=30;P.err=''}
+ catch(e){P.err=e&&e.message||'השיחה לא נטענה'}finally{P.b=0;P.ld=1;if(cur().v==='sec'&&!typing())rerender()}}
+const dayH=t=>{try{return new Date(t).toLocaleDateString('he-IL',{weekday:'long',day:'numeric',month:'numeric',year:'2-digit'})}catch(e){return ''}};
+function prevH(){const P=X.pc||(X.pc={L:[],b:0,more:true,err:'',ld:0});
+ if(!P.ld){if(!P.b)pcLoad();return '<div class="empty">טוען…</div>'}
+ if(P.err&&!P.L.length)return `<div class="card"><p class="note">${esc(P.err)}</p><button class="btn g w" data-a="secTab" data-v="prev">נסה שוב</button></div>`;
+ let last='',h='';for(const m of P.L){const d=m.t?dayH(m.t):'';if(d&&d!==last){last=d;h+=`<div class="secday">${esc(d)}</div>`}h+=bub(m)}
+ return `<p class="note" style="margin:0 0 6px">השיחות הקודמות – לקריאה בלבד. ${esc(X.st.name||'המזכירה')} זוכרת אותן גם כשהן לא מוצגות בצ'אט.</p>
+ ${P.more&&P.L.length?`<button class="btn g w" data-a="secPcMore"${P.b?' disabled':''} style="margin-bottom:8px">הודעות קודמות</button>`:''}
+ <div id="secPrev">${h||'<div class="empty">אין שיחה קודמת</div>'}</div>${P.err?`<p class="note">${esc(P.err)}</p>`:''}`}
+ACT.secPcMore=()=>{pcLoad();rerender()};
+/* ---------- "בטיפול": מה שנותב לכאן בכלל אישי ---------- */
+function holdH(){const R=X.ey;if(!R){if(!X.eyb)eyLoad(false);return '<div class="empty">טוען…</div>'}
+ if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secEyRe">נסה שוב</button></div>`;
+ const H=R.hold||[];
+ return `<p class="note" style="margin:0 0 6px">כאן מופיע מה שביקשת להעביר ל"בטיפול" (ולא ל"מול העיניים" בצ'אט). את כללי הניתוב רואים ומוחקים ב"הכללים שלי".</p>
+ <div class="card secey" id="secHold">${H.length?H.map(x=>eyRow(x)).join(''):'<p class="note" style="margin:0">אין כרגע פריטים בטיפול.</p>'}</div>`}
+/* ---------- כניסה לצ'אט = מסך נקי ---------- */
+function chatEnter(){if(X.sending)return;X.msgs=[];X.msgErr='';X.ey=null;X.eyV=1;X.eyAll=0;X.didAll=0}
+{const t10=ACT.secTab;ACT.secTab=el=>{const v=el.dataset.v,was=X.tab||'chat';if(v==='chat'&&was!=='chat')chatEnter();if(v==='prev')X.pc=null;if(v==='hold')eyStale();t10(el)}}
+{const r0=window.render;if(typeof r0==='function')window.render=function(){const r=r0.apply(this,arguments);try{X.pvw=cur().v}catch(e){}return r}}
+{const r10=V.sec;V.sec=()=>{try{if(X.pvw!=='sec'){X.pvw='sec';if((X.tab||'chat')==='chat')chatEnter()}}catch(e){}
+ if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&(X.tab==='prev'||X.tab==='hold')){const S0=X.st;
+  return{t:S0.name||'המזכירה',s:X.tab==='prev'?"צ'אט קודם":'בטיפול',h:stopH()+tabsH()+(X.tab==='prev'?prevH():holdH())}}
+ return r10()}}
+window.__secEy=()=>X.ey;
 
 window.__sec=X;
 })();

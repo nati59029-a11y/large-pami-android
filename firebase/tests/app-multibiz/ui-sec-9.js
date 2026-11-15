@@ -83,9 +83,10 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
   {
     const { ctx, page, bodies } = await open(browser, www, {});
     // ---- שיחה ----
-    await tab(page, 'chat');
-    check('שיחה: כפתור "תגובה" על תשובת המזכירה (ולא על השאלה)', (await page.$$('#secChat [data-a=secMrReply][data-k=chat]')).length === 1 && !!(await page.$('#secChat [data-a=secMrReply][data-id=c2]')));
-    await page.click('#secChat [data-a=secMrReply]'); await H.settle(page, 400);
+    // 15.11.2026 (SEC:10): הצ'אט נפתח נקי – ההודעות הקודמות בלשונית "צ'אט קודם"
+    await tab(page, 'prev');
+    check('שיחה: כפתור "תגובה" על תשובת המזכירה (ולא על השאלה)', (await page.$$('#secPrev [data-a=secMrReply][data-k=chat]')).length === 1 && !!(await page.$('#secPrev [data-a=secMrReply][data-id=c2]')));
+    await page.click('#secPrev [data-a=secMrReply]'); await H.settle(page, 400);
     check('חלון התגובה: תיבת טקסט, דוגמאות, והערת כללי הבטיחות', /תגובה למזכירה/.test(await dlgText(page)) && /תמיד באישור שלך/.test(await dlgText(page)) && !!(await page.$('#dlg #secMrT')));
     await shot(page, shots, 'reply');
     await page.click('#dlg [data-a=secMrEx]'); await page.click('#secMrGo'); await H.settle(page, 600);
@@ -147,8 +148,8 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
   }
   {
     const { ctx, page } = await open(browser, www, { br: true });
-    await tab(page, 'chat');
-    const c = !!(await page.$('#secChat [data-a=secMrReply]'));
+    await tab(page, 'prev');
+    const c = !!(await page.$('#secPrev [data-a=secMrReply][data-k=chat]'));
     await tab(page, 'wa'); await page.click('#secWaList [data-a=secWaOpen]'); await H.settle(page, 900);
     check('מנהל עם הגבלת סניפים: "תגובה" בשיחה כן, בטיוטת ווצאפ לא', c && !(await page.$('.secdr [data-a=secMrReply]')));
     check('הגבלת סניפים: בלי שגיאות JS', page.__errors.length === 0, page.__errors.slice(0, 3));

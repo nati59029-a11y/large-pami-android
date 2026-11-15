@@ -94,6 +94,7 @@ function cleanRule(o) {
 }
 const scopeL = (r, clsL) => {
   const s = r.scope || {};
+  if (r.ch === 'route') return (RK[s.kind] || 'פריטים') + ' ← ' + (RD[r.dest] || '');
   if (r.ch === 'note') return s.fam ? 'התראות דומות' : 'כל ההתראות מהסוג הזה';
   if (r.ch === 'chat') return 'כל השיחות';
   if (s.cls) return 'פניות מסוג "' + ((clsL || {})[s.cls] || s.cls) + '"';
@@ -184,7 +185,69 @@ function maskTo(v) {
   return d.length > 4 ? '***' + d.slice(-4) : '***';
 }
 
+// ---------- צ'אט נקי ו"מול העיניים" (15.11.2026, סעיף 6) ----------
+// הוראות ניתוב: "חשבוניות מהיום – לבטיפול". סוג פריט → יעד. ברירת מחדל (בלי כלל): הכול ב"מול העיניים" בצ'אט.
+// כלל ניתוב הוא כלל אישי (sec_mrule, ch:'route'), נוצר רק בלחיצת המנהל. הכלל האחרון לכל סוג גובר (קודמים מכובים בשמירה).
+const RK = Object.freeze({ inv: 'חשבוניות', rem: 'תזכורות', note: 'התראות', draft: 'טיוטות תשובה', appr: 'הצעות לאישור' });
+const RD = Object.freeze({ hold: 'בטיפול', tab: 'רק בלשונית שלהן', chat: 'מול העיניים בצ\'אט' });
+const RK_RE = [['inv', /(חשבוני|קבלות|תעודות?\s*משלוח|invoice)/i], ['rem', /תזכור/], ['note', /התרא/], ['draft', /(טיוט|הודעות\s*(?:ה)?ווצאפ|מיילים)/], ['appr', /הצעות/]];
+const RD_RE = [['hold', /בטיפול/], ['tab', /(רק\s*ב(?:ה)?לשונית|ללשונית|לא\s*(?:ב|ל)?(?:ה)?(?:צ['׳]?אט|שיחה)|בלי\s*(?:ה)?(?:צ['׳]?אט|שיחה)|מחוץ\s*ל(?:צ['׳]?אט|שיחה))/], ['chat', /((?:ל|ב)(?:ה)?(?:צ['׳]?אט|שיחה)|מול\s*העיניים)/]];
+const RT_DO = /(מהיום|מעכשיו|מעתה|תעביר|להעביר|תנתב|לנתב|ינותבו|תשימ|לשים|שימי|יעבר|ילכו|שילכו|תכניס|להכניס|יופיעו|שיופיעו|תציג|להציג|from\s+now)/i;
+// מחזיר { kind, dest } או null. שאלה (סימן שאלה) – לא הוראה
+function routeOf(text) {
+  const t = String(text || '').trim();
+  if (!t || t.length > 200 || /[?؟]\s*$/.test(t) || !RT_DO.test(t)) return null;
+  const k = RK_RE.find((x) => x[1].test(t));
+  const d = RD_RE.find((x) => x[1].test(t));
+  return k && d ? { kind: k[0], dest: d[0] } : null;
+}
+// כלל ניתוב חדש (השדות שהשרת קובע)
+function routeRule(instr, rt) {
+  const i = clean(instr, INSTR_MAX);
+  if (!i || i.length > INSTR_MAX || !rt || !RK[rt.kind] || !RD[rt.dest]) return null;
+  return { ch: 'route', act: 'route', instr: i, scope: { kind: rt.kind }, dest: rt.dest, safe: '' };
+}
+// יעד לכל סוג לפי הכללים הפעילים (האחרון גובר)
+function routesOf(rules) {
+  const out = {};
+  for (const r of (rules || []).filter((x) => x && x.ch === 'route' && x.on !== false && x.scope && RK[x.scope.kind] && RD[x.dest]).sort((a, b) => (a.t || 0) - (b.t || 0))) out[r.scope.kind] = r.dest;
+  return out;
+}
+// חלוקת הפריטים: מול העיניים (chat) / בטיפול (hold) / רק בלשונית (מוסתר מהצ'אט)
+function applyRoutes(items, routes) {
+  const feed = [], hold = [];
+  for (const x of items || []) { const d = (routes || {})[x.k] || 'chat'; if (d === 'hold') hold.push(x); else if (d !== 'tab') feed.push(x); }
+  return { feed, hold };
+}
+// "מאז הכניסה הקודמת": rec = { chat (הכניסה האחרונה), prev (ה"מאז" שלה) }. כניסה חוזרת תוך 2 דקות – אותו "מאז" (רינדור כפול / חזרה מהירה)
+const VISIT_SAME_MS = 120000, VISIT_MAX_MS = 7 * 864e5, VISIT_FIRST_MS = 864e5;
+function sinceOf(rec, now, visit) {
+  const r = rec && typeof rec === 'object' ? rec : {};
+  const c = Number(r.chat) || 0, p = Number(r.prev) || 0;
+  let since;
+  if (!c) since = now - VISIT_FIRST_MS;
+  else if (!visit || now - c < VISIT_SAME_MS) since = p || c;
+  else since = c;
+  return Math.max(since, now - VISIT_MAX_MS);
+}
+// יום יחסי לתצוגה: היום / מחר / יום שלישי 18.11
+const WD = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+function relDay(d, today) {
+  if (typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return '';
+  const ms = (x) => Date.UTC(+x.slice(0, 4), +x.slice(5, 7) - 1, +x.slice(8, 10));
+  const k = Math.round((ms(d) - ms(today)) / 864e5);
+  if (k === 0) return 'היום';
+  if (k === 1) return 'מחר';
+  return 'יום ' + WD[new Date(ms(d)).getUTCDay()] + ' ' + (+d.slice(8, 10)) + '.' + (+d.slice(5, 7));
+}
+// "תזכורת: להתקשר לספק – מחר 08:00" (תזכורת בלי שעה – בבוקר, כמו בשליחת ההתראה)
+function remLine(e, today, morning) {
+  const tm = e.tm || (e.rem === true ? morning || '08:00' : '');
+  return (e.rem === true ? 'תזכורת: ' : 'ביומן: ') + String(e.title || '').slice(0, 100) + ' – ' + relDay(e.d, today) + (tm ? ' ' + tm : '');
+}
+
 module.exports = {
+  RK, RD, routeOf, routeRule, routesOf, applyRoutes, sinceOf, relDay, remLine, VISIT_SAME_MS,
   CHS, OUT_CHS, MAX_RULES, INSTR_MAX, PROMPT_MAX, AUTO_MIN, FAIL_MAX, ASK_AGAIN_MS, NOTIFY_FIRST, MONEY_CLS,
   SAFE_IN, SAFE_OUT, SAFE_L, safeOf, longNumOut, clean, hashTo, norm, MUTE_RE, actOf, keyFam, noteMutable, scopeOf, cleanRule, scopeL,
   prefilter, rulesBlock, pickMatch, askOk, autoNo, NO_L, noL, failNext, maskTo,

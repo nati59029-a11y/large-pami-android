@@ -362,8 +362,35 @@ async function secChatLoad(request) {
   const { who, db, sensOn } = await gate(request, { consent: true });
   const lim = input.limit === undefined ? 50 : input.limit;
   if (!Number.isInteger(lim) || lim < 1 || lim > 200) throw bad('bad-limit', 'מספר הודעות: 1 עד 200');
-  const s = await db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc').limit(lim).get();
-  return { ok: true, msgs: s.docs.map((d) => msgOut(d.id, d.data(), msgText(d, who, sensOn))).reverse() };
+  // 15.11.2026 (צ'אט נקי): "צ'אט קודם" נטען בדפים – before = זמן ההודעה הוותיקה ביותר שכבר מוצגת
+  if (input.before !== undefined && !(Number.isInteger(input.before) && input.before > 0)) throw bad('bad-before', 'ערך לא תקין');
+  let q = db.collection(`sec_chat/${who.uid}/m`).orderBy('t', 'desc');
+  if (input.before !== undefined) q = q.where('t', '<', input.before);
+  const s = await q.limit(lim).get();
+  const msgs = s.docs.map((d) => msgOut(d.id, d.data(), msgText(d, who, sensOn))).reverse();
+  await cardStates(db, msgs);
+  return { ok: true, msgs, more: s.size === lim };
+}
+// כרטיס אישור (עובדה / אירוע) מהודעה ישנה, שנשמרה לפני שמצב הכרטיס נרשם בהודעה: המצב נגזר מההצעה עצמה –
+// עדיין 'prop' = ממתין; אושרה = 'ok'; לא קיימת (בוטלה או נמחקה) = 'gone' ("כבר טופל"). קריאה בלבד – ההודעה לא משתנה
+async function cardStates(db, msgs) {
+  const need = [];
+  for (const m of msgs) for (const c of Array.isArray(m.cards) ? m.cards : []) if (c && !c.st && (c.k === 'fact' || c.k === 'cal') && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(c.id)) need.push(c);
+  if (!need.length) return;
+  const snaps = await db.getAll(...need.slice(0, 100).map((c) => db.doc((c.k === 'fact' ? 'sec_facts/' : 'sec_cal/') + c.id)));
+  snaps.forEach((sn, i) => { const c = need[i]; if (!sn.exists) c.st = 'gone'; else if (sn.get('st') !== 'prop') { c.st = 'ok'; if (c.k === 'cal' && sn.get('d') && sn.get('d') !== c.d) c.okD = sn.get('d'); } });
+}
+// מצב כרטיס בהודעה (15.11.2026): אחרי אישור / ביטול – נרשם על ההודעה עצמה, כך שהכרטיס מוצג "אושר ✓" / "בוטל" בלי כפתורים גם אחרי טעינה מחדש.
+// נוסף ל-batch של הפעולה (אותה כתיבה). רק כרטיס שעוד לא הוכרע. uid = בעל השיחה
+async function cardMark(db, b, uid, mid, cid, patch) {
+  if (typeof uid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(uid) || typeof mid !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(mid) || typeof cid !== 'string') return null;
+  const ref = db.doc(`sec_chat/${uid}/m/${mid}`);
+  const s = await ref.get();
+  if (!s.exists || !Array.isArray(s.get('cards'))) return null;
+  let hit = null;
+  const cards = s.get('cards').map((c) => { if (c && c.id === cid && !c.st && !hit) { hit = Object.assign({}, c, patch, { stAt: Date.now() }); return hit; } return c; });
+  if (hit) b.update(ref, { cards });
+  return hit;
 }
 // טקסט של הודעה: הודעה עם מידע רגיש – מפוענחת רק כש-sensOn (מתג עסקי + הרשאה אישית); אחרת hidden (ברירת מחדל: הנוסח הכללי; null = לא נשלחת)
 function msgText(d, who, sensOn, hidden) {
@@ -383,6 +410,7 @@ function msgOut(id, x, text) {
   return o;
 }
 
+const LR = () => require('./lib/sec-learn');
 const CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g;
 // secChat({ text, deep?, fin? }) – צ'אט עם כלים. הכלים נקבעים כאן לפי ערוץ (app) והרשאות – לא לפי בקשת המודל (5.5)
 async function secChat(request) {
@@ -418,7 +446,9 @@ async function secChat(request) {
   let reply = null, mode = 'ok', mt = null, usage = { in: 0, out: 0 }, sent = 0, denied = [], offered = [];
   let bank = null, bankCond = [];
   let s3 = null; // שלב 13ב: סיכום סבבי סריקת החנות שנכנס להקשר (ומשמש מקור לבדיקת המספרים)
-  if (!pol.sensitive && !deep) {
+  // 15.11.2026 (סעיף 6): הוראת ניתוב ("חשבוניות מהיום – לבטיפול") – בלי מודל: כרטיס אישור; הכלל נשמר רק ב"אשר" (secLearn op:'route')
+  const rt = cfg.learn && !pol.sensitive ? LR().routeOf(text) : null;
+  if (!pol.sensitive && !deep && !rt) {
     // בנק תשובות (3.5): לפני כל פנייה למודל. התאמה בלי תנאים = התשובה השמורה, בלי AI ובלי עלות (נספר ב-sec_usage.bank).
     // "חשבי לעומק" – תמיד למודל. כלל עם תנאים – עובר למודל כמידע (עד 40)
     const rs = await db.collection('sec_rules').limit(SK.RULES_MAX).get();
@@ -431,7 +461,14 @@ async function secChat(request) {
       bank = t ? { rule: Object.assign({}, bank.rule, { a: t }), q: bank.q } : null;
     }
   }
-  if (pol.sensitive) {
+  if (rt) {
+    await meter(db, who.uid, tier, false, cfg.rate); // קצב בלבד – אין עלות
+    const K0 = LR();
+    reply = 'להעביר מעכשיו ' + K0.RK[rt.kind] + ' ל' + (rt.dest === 'hold' ? 'לשונית "בטיפול"' : rt.dest === 'tab' ? 'לשונית שלהן בלבד (לא בצ\'אט)' : '"מול העיניים" בצ\'אט') + '? אחרי האישור זה יישמר ב"הכללים שלי", ואפשר למחוק בכל רגע.';
+    mode = 'route';
+    cards.push({ k: 'route', id: 'rt' + require('node:crypto').randomBytes(8).toString('hex'), kind: rt.kind, dest: rt.dest, instr: text.slice(0, 300) });
+    logs.push(['route', rt.kind + ':' + rt.dest]);
+  } else if (pol.sensitive) {
     // שאלה שמבקשת מסקנה לפי מצב בריאותי/משפחתי (6.3 כלל 3): תשובה קבועה, בלי מודל ובלי עלות
     await meter(db, who.uid, tier, false, cfg.rate);
     reply = ST.TXT.sensitive; mode = 'policy';
@@ -551,6 +588,9 @@ async function secChat(request) {
   { const sealed = am.sealed; delete am.sealed; b.set(aa, sealed ? Object.assign({}, am, sealed) : am); } // התשובה עכשיו (למנהל עם הרשאה) – בטקסט; במסד – מוצפנת
   for (const l of logs) b.set(db.collection('sec_log').doc(), logData(who.uid, l[0] === 'tool' || l[0] === 'toolDenied' || l[0] === 'sensTool' ? 'sec' : 'auto', l[0], { tgt: l[2], note: [l[1], l[3]].filter(Boolean).join(' ') }));
   await b.commit();
+  // 15.11.2026: ההצעות (עובדה / אירוע) יודעות באיזו הודעה הכרטיס שלהן – כדי לרשום עליה "אושר" / "בוטל" (גם כשמאשרים מלשונית אחרת). כשל – לא עוצר את התשובה
+  const props = (am.cards || []).filter((c) => c.k === 'fact' || c.k === 'cal');
+  if (props.length) { const b2 = db.batch(); for (const c of props) b2.update(db.doc((c.k === 'fact' ? 'sec_facts/' : 'sec_cal/') + c.id), { mid: aa.id }); await b2.commit().catch((e) => logger.warn('secChat: card mid failed', { code: e && e.code })); }
   return { ok: true, id: aa.id, reply, mode, deep, src: am.src, cards: am.cards || [], nums, unverified, asOf: am.asOf || null, asOfText: am.asOf ? ST.fmtAt(am.asOf) : '', finFrom, stale, ideas, th: am.th || null, pct: u.pct, saving: u.saving, tools: results.map((r) => r.name), offered, denied, brLimited };
 }
 function argNote(a, name) {
@@ -879,6 +919,8 @@ Object.defineProperty(exports, '_core', { enumerable: false, value: {
   usageOf, DEFAULT_CAP_CENTS, reserveOf, PREFS_HOUR, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
   // לשלב 3 (secretary-know.js): אותו שער הרשאה ואותו יומן
   gate, logData, hourKey, bad, deny, pre, wrap,
+  // 15.11.2026 (צ'אט נקי): מצב כרטיס אישור בהודעה
+  cardMark,
   // שלב 5 (secretary-wa.js): אותו מונה עלות (11.3) לעיבוד הודעות ווצאפ ולתמלול
   meter, settle,
 } });

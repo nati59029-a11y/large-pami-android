@@ -353,3 +353,119 @@ describe('מייל: שליחה לבד לפי כלל אישי (טקסט חדש ש
     assert.equal((await get(`b/${A}/sec_mrule/${RID}`)).appr, d0);
   });
 });
+
+// ---------------------------------------------------------------------------------
+// 15.11.2026 (סעיף 6): צ'אט נקי, מצב כרטיסים שנשמר, "מול העיניים" וכללי ניתוב
+describe('צ\'אט נקי ו"מול העיניים": מצב כרטיסים, צ\'אט קודם, פיד וניתוב', () => {
+  beforeEach(() => seed());
+  const SECM = () => require('../functions/secretary.js');
+  const KNOW = () => require('../functions/secretary-know.js');
+  const lastIsRes = (body) => { const c = (body.contents || []).slice(-1)[0]; return !!(c && (c.parts || []).some((p) => p.functionResponse)); };
+  const tomorrow = () => { const d = new Date(Date.now() + 2 * 864e5); return d.toISOString().slice(0, 10); };
+  it('כרטיס "לקבוע תזכורת?": rem נשמר בהצעה; אישור מלשונית היומן נרשם על ההודעה ("ok"); ביטול – "no"; טעינה מחדש מחזירה את המצב', async () => {
+    const D = tomorrow();
+    GM.state.sec = (body) => (lastIsRes(body) ? { text: 'לקבוע?' } : { calls: [{ name: 'proposeCalendarEvent', args: { title: 'להתקשר לספק', date: D, time: '09:00', reminder: true } }, { name: 'proposeCalendarEvent', args: { title: 'פגישה', date: D } }] });
+    const r = await SECM().secChat.run(req(M1, { text: 'תזכירי לי להתקשר לספק, ותקבעי פגישה' }));
+    assert.equal(r.cards.length, 2);
+    const [c1, c2] = r.cards;
+    assert.equal(c1.rem, true);
+    const p1 = await get(`b/${A}/sec_cal/${c1.id}`);
+    assert.equal(p1.rem, true); assert.equal(p1.mid, r.id, 'ההצעה יודעת באיזו הודעה הכרטיס');
+    await KNOW().secCal.run(req(M1, { op: 'approve', id: c1.id, force: true }));
+    await KNOW().secCal.run(req(M1, { op: 'reject', id: c2.id }));
+    const m = await get(`b/${A}/sec_chat/${M1}/m/${r.id}`);
+    assert.equal(m.cards.find((c) => c.id === c1.id).st, 'ok');
+    assert.equal(m.cards.find((c) => c.id === c2.id).st, 'no');
+    const ld = await SECM().secChatLoad.run(req(M1, { limit: 10 }));
+    const lm = ld.msgs.find((x) => x.id === r.id);
+    assert.deepEqual(lm.cards.map((c) => c.st), ['ok', 'no']);
+  });
+  it('הודעה ישנה (בלי מצב בכרטיס): המצב נגזר מההצעה – ממתין / אושר / כבר טופל; ההודעה לא משתנה', async () => {
+    await put(`b/${A}/sec_cal/kp`, { uid: M1, st: 'prop', to: 'me', title: 'א', d: '2030-01-01', src: 'sec', by: M1, t: 1 });
+    await put(`b/${A}/sec_cal/ko`, { uid: M1, st: 'ok', title: 'ב', d: '2030-01-02', src: 'sec', by: M1, t: 1 });
+    await put(`b/${A}/sec_chat/${M1}/m/old`, { t: 5, role: 'a', text: 'לקבוע?', cards: [{ k: 'cal', id: 'kp', title: 'א', d: '2030-01-01' }, { k: 'cal', id: 'ko', title: 'ב', d: '2030-01-01' }, { k: 'fact', id: 'gone1', text: 'ג' }] });
+    const ld = await SECM().secChatLoad.run(req(M1, {}));
+    const c = ld.msgs.find((x) => x.id === 'old').cards;
+    assert.equal(c[0].st, undefined); assert.equal(c[1].st, 'ok'); assert.equal(c[1].okD, '2030-01-02'); assert.equal(c[2].st, 'gone');
+    assert.equal((await get(`b/${A}/sec_chat/${M1}/m/old`)).cards[1].st, undefined, 'קריאה בלבד');
+  });
+  it('"צ\'אט קודם": before + more; השיחה לא נמחקת, וההיסטוריה עדיין נשלחת למודל', async () => {
+    for (let i = 0; i < 5; i++) await put(`b/${A}/sec_chat/${M1}/m/h${i}`, { t: 100 + i, role: i % 2 ? 'a' : 'u', text: 'הודעה ' + i });
+    const a = await SECM().secChatLoad.run(req(M1, { limit: 3 }));
+    assert.deepEqual(a.msgs.map((x) => x.id), ['h2', 'h3', 'h4']); assert.equal(a.more, true);
+    const b = await SECM().secChatLoad.run(req(M1, { limit: 3, before: 102 }));
+    assert.deepEqual(b.msgs.map((x) => x.id), ['u1', 'c1', 'h0', 'h1'].slice(-3));
+    await assert.rejects(SECM().secChatLoad.run(req(M1, { before: 'x' })), (e) => e.details && e.details.reason === 'bad-before');
+    GM.state.sec = () => ({ text: 'בסדר.' });
+    await SECM().secChat.run(req(M1, { text: 'מה המצב?' }));
+    const body = JSON.stringify(GM.state.requests.filter((x) => x.kind === 'sec')[0].body.contents);
+    assert.match(body, /הודעה 4/, 'המזכירה זוכרת את השיחה הקודמת');
+  });
+  it('הוראת ניתוב בשיחה: בלי מודל, כרטיס; אישור יוצר כלל (מהכרטיס בשרת) ומסמן "ok"; כרטיס שהוכרע – לא שוב; ביטול – "no" בלי כלל', async () => {
+    GM.state.sec = () => ({ text: 'לא אמור להגיע למודל' });
+    const r = await SECM().secChat.run(req(M1, { text: "חשבוניות מהיום – לקטגוריה 'בטיפול' באפליקציה" }));
+    assert.equal(r.mode, 'route'); assert.equal(GM.state.requests.filter((x) => x.kind === 'sec').length, 0);
+    const c = r.cards[0];
+    assert.equal(c.k, 'route'); assert.equal(c.kind, 'inv'); assert.equal(c.dest, 'hold');
+    assert.equal((await call(M1, { op: 'route', mid: r.id, cid: c.id })).ok, true);
+    const R = await rules();
+    assert.equal(R.length, 1); assert.equal(R[0].ch, 'route'); assert.equal(R[0].dest, 'hold'); assert.equal(R[0].uid, M1);
+    assert.equal((await get(`b/${A}/sec_chat/${M1}/m/${r.id}`)).cards[0].st, 'ok');
+    assert.equal((await call(M1, { op: 'route', mid: r.id, cid: c.id })).reason, 'not-pending');
+    assert.equal((await call(M2, { op: 'route', mid: r.id, cid: c.id })).reason, 'not-found', 'מנהל אחר – לא רואה את ההודעה');
+    const r2 = await SECM().secChat.run(req(M1, { text: 'מעכשיו תזכורות רק בלשונית היומן' }));
+    await call(M1, { op: 'route', mid: r2.id, cid: r2.cards[0].id, no: true });
+    assert.equal((await get(`b/${A}/sec_chat/${M1}/m/${r2.id}`)).cards[0].st, 'no');
+    assert.equal((await rules()).length, 1);
+    // שאלה על "בטיפול" – לא הוראה
+    GM.state.sec = () => ({ text: 'שתיים.' });
+    assert.equal((await SECM().secChat.run(req(M1, { text: 'כמה חשבוניות בטיפול?' }))).mode, 'ok');
+  });
+  it('ניתוב בתגובה על פריט ב"מול העיניים" (feed): save יוצר כלל ניתוב; כלל חדש לאותו סוג מכבה את הקודם (לא מוחק)', async () => {
+    const p = await call(M1, { op: 'reply', k: 'feed', id: 'inv', text: 'חשבוניות מהיום – לבטיפול' });
+    assert.equal(p.r.prop.ch, 'route');
+    await call(M1, { op: 'save', k: 'feed', id: 'inv', text: 'חשבוניות מהיום – לבטיפול' });
+    await call(M1, { op: 'save', k: 'feed', id: 'inv', text: "מעכשיו חשבוניות שוב לצ'אט" });
+    const R = (await rules()).sort((a, b) => a.t - b.t);
+    assert.equal(R.length, 2); assert.equal(R[0].on, false); assert.equal(R[0].offWhy, 'replaced'); assert.equal(R[1].dest, 'chat');
+    assert.equal((await call(M1, { op: 'reply', k: 'feed', id: 'zzz', text: 'x' })).reason, 'bad-id');
+    // תגובה רגילה על פריט – הנחיה כללית (שיחה)
+    assert.equal((await call(M1, { op: 'reply', k: 'feed', id: 'act', text: 'תכתבי לי יותר בקצרה' })).r.prop.ch, 'chat');
+  });
+  it('"מול העיניים": הצעות, טיוטות, התראות פתוחות, חשבוניות, תזכורות קרובות; "מאז הכניסה הקודמת"; ניתוב ל"בטיפול"; רשומת כניסה לכל מנהל', async () => {
+    const now = Date.now(), D = tomorrow();
+    await put(`b/${A}/sec_cal/pr1`, { uid: M1, st: 'prop', to: 'me', title: 'פגישה מוצעת', d: D, src: 'sec', by: M1, t: now - 1000 });
+    await put(`b/${A}/sec_cal/rm1`, { uid: M1, st: 'ok', title: 'להתקשר לספק', d: D, rem: true, src: 'wa', by: M1, t: now - 2000 });
+    await put(`b/${A}/sec_cal/oth`, { uid: M2, st: 'ok', title: 'של מנהל אחר', d: D, rem: true, src: 'sec', by: M2, t: now - 2000 });
+    await put(`b/${A}/sec_facts/fp1`, { topic: 'sup', text: 'ספק החלב בשני', st: 'prop', src: 'chat', by: M1, t: now - 3000 });
+    await put(`b/${A}/sec_draft/dw1`, { in: 'dw1', wa: CUST, text: 'שלום, פתוחים עד 18:00', st: 'pend', cls: 'hours', t: now - 4000 });
+    await put(`b/${A}/sec_inv/iv1`, { st: 'new', k: 'inv', f: { supplier: 'טרה', total: 1200 }, t: now - 5000 });
+    await put(`b/${A}/sec_note/${M1}/n/nr1`, { k: 'rem', typ: 'invDue', key: 'invDue:x', title: 'תזכורת: לשלם', body: 'היום', t: now - 6000, at: now - 6000, st: 'open', seen: true, n: 1, rep: 1 });
+    await put(`b/${A}/sec_note/${M1}/n/rep1`, { k: 'rep', typ: 'w', key: 'rep:w:1', title: 'דוח שבועי', body: '', t: now - 9e9, at: now - 9e9, st: 'open', seen: true, n: 1, rep: 0 });
+    const e = await call(M1, { op: 'eyes', visit: true });
+    assert.equal(e.ok, true, JSON.stringify(e));
+    const ks = e.r.open.map((x) => x.id);
+    for (const id of ['c:pr1', 'f:fp1', 'd:dw1', 'i:iv1', 'n:nr1', 'n:n1', 'e:rm1']) assert.ok(ks.includes(id), id + ' ' + JSON.stringify(ks));
+    assert.ok(!ks.includes('e:oth') && !ks.includes('n:rep1'), 'לא של מנהל אחר; דוח שנקרא – לא פתוח');
+    assert.match(e.r.open.find((x) => x.id === 'e:rm1').title, /^תזכורת: להתקשר לספק – (מחר|יום \S+ [\d.]+) 08:00$/);
+    assert.equal(e.r.open.find((x) => x.id === 'c:pr1').act.k, 'cal');
+    assert.ok(e.r.did.some((x) => x.id === 'e:rm1' && /^קבעתי – תזכורת/.test(x.title)), JSON.stringify(e.r.did.map((x) => x.title)));
+    assert.ok(e.r.did.some((x) => x.id === 'i:iv1'));
+    const v = (await get(`b/${A}/sec_cfg/visit`))[M1];
+    assert.ok(v.chat >= now && v.prev < now);
+    // בלי visit – אותו "מאז", בלי כתיבה
+    const e2 = await call(M1, { op: 'eyes' });
+    assert.equal(e2.r.since, e.r.since); assert.equal((await get(`b/${A}/sec_cfg/visit`))[M1].chat, v.chat);
+    // ניתוב: חשבוניות ל"בטיפול"
+    await call(M1, { op: 'save', k: 'feed', id: 'inv', text: 'חשבוניות מהיום – לבטיפול' });
+    const e3 = await call(M1, { op: 'eyes' });
+    assert.ok(!e3.r.open.some((x) => x.k === 'inv') && e3.r.hold.some((x) => x.id === 'i:iv1') && e3.r.holdOn === true);
+    // מנהל ב׳ – בלי הניתוב של מנהל א׳, ובלי ההצעה האישית שלו ביומן
+    const f = await call(M2, { op: 'eyes', visit: true });
+    assert.ok(f.r.open.some((x) => x.id === 'i:iv1') && !f.r.open.some((x) => x.id === 'c:pr1') && f.r.holdOn === false);
+    // תכונת הכללים כבויה – "מול העיניים" עדיין עובד
+    await put(`b/${A}/sec_cfg/main`, { learn: false }, true);
+    assert.equal((await call(M1, { op: 'eyes' })).ok, true);
+    assert.equal((await call(M1, { op: 'list' })).reason, 'learn-off');
+  });
+});

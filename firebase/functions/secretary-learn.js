@@ -154,6 +154,11 @@ async function itemOf(db, who, k, id) {
     if (!ds.exists || ds.get('ch') === 'mail' || ds.get('auto') === true || !ds.get('wa')) throw pre('no-draft', 'הטיוטה לא נמצאה');
     return { ch: 'wa', item: { cls: ds.get('cls') || '', from: ds.get('wa') }, ds };
   }
+  if (k === 'feed') {
+    // 15.11.2026: פריט ב"מול העיניים" שאין לו הודעה משלו (חשבונית, תזכורת ביומן, הצעה, פעולה של המזכירה) – ההוראה היא הנחיה כללית או הוראת ניתוב
+    if (typeof id !== 'string' || !(Object.hasOwn(L.RK, id) || id === 'act')) throw bad('bad-id', 'מזהה לא תקין');
+    return { ch: 'chat', item: {}, feed: id };
+  }
   throw bad('bad-k', 'סוג הודעה לא מוכר');
 }
 const SC_OK = ['cls', 'from', 'all', 'fam', 'typ'];
@@ -166,6 +171,7 @@ function readInstr(v) {
   return t;
 }
 function propOut(r, item) {
+  if (r.ch === 'route') return { ch: 'route', act: 'route', instr: r.instr, kind: r.scope.kind, dest: r.dest, routeL: L.scopeL(r), safe: '', safeL: '', opts: [], canAuto: false };
   const clsL = CLS_L();
   const opts = r.ch === 'mail' || r.ch === 'wa'
     ? [['cls', item.cls && item.cls !== 'other' ? 'פניות מסוג "' + (clsL[item.cls] || item.cls) + '"' : ''], ['from', item.from ? 'רק מהשולח הזה' : ''], ['all', 'כל ההודעות ב' + (r.ch === 'mail' ? 'מייל' : 'ווצאפ')]].filter((x) => x[1])
@@ -179,19 +185,101 @@ function ruleOut(r, now) {
     asked: !!(r.ask && r.ask.st === 'no' && now - (Number(r.ask.at) || 0) < L.ASK_AGAIN_MS) };
 }
 
+// כלל ניתוב חדש: עד MAX_RULES; כלל ניתוב קודם לאותו סוג – מכובה (לא נמחק), כדי שהאחרון יגבר. מוסיף ל-batch
+async function saveRoute(db, b, uid, r, src, now) {
+  const col = db.collection('sec_mrule');
+  const mine = await col.where('uid', '==', uid).limit(L.MAX_RULES + 5).get();
+  if (mine.size >= L.MAX_RULES) throw pre('too-many', 'הגעתם למספר הכללים המרבי (' + L.MAX_RULES + '). אפשר למחוק כלל ישן במסך "הכללים שלי".');
+  for (const d of mine.docs) if (d.get('ch') === 'route' && d.get('on') !== false && (d.get('scope') || {}).kind === r.scope.kind) b.update(d.ref, { on: false, offWhy: 'replaced', upd: now });
+  const id = col.doc().id;
+  const doc = Object.assign({ uid }, r, { on: true, auto: false, appr: 0, fails: 0, hits: 0, ask: { st: 'none', at: 0 }, src, t: now, upd: now, v: 1 });
+  b.set(col.doc(id), doc);
+  log(b, db, uid, 'mrRoute', { tgt: id, note: r.scope.kind + ':' + r.dest });
+  return { id, rule: ruleOut(Object.assign({ id }, doc), now) };
+}
+
 // ===================================================================================
-// secLearn { op: reply | save | list | set | del | auto | log }
+// "מול העיניים" (15.11.2026, סעיף 6): קריאה אחת בכניסה לצ'אט – כל מה שפתוח (הצעות לאישור, טיוטות, התראות שלא טופלו, חשבוניות שהתקבלו,
+// תזכורות ואירועים קרובים שהמזכירה קבעה) + מה שהיא עשתה מאז הכניסה הקודמת. visit:true – נרשמת כניסה (sec_cfg/visit, שרת בלבד).
+// ניתוב לפי כללי המנהל (ch:'route'): בטיפול → hold; רק בלשונית → לא מוצג כאן. שום נתון קיים לא משתנה (חוץ מרשומת הכניסה)
 // ===================================================================================
-const OPS = ['reply', 'save', 'list', 'set', 'del', 'auto', 'log'];
+const EY_OPEN = 30, EY_DID = 30, EY_DAYS = 7;
+const DRAFT_KIND = { open: 'הודעת פתיחה', ack: '"קיבלנו"' };
+async function eyes(g, input, now) {
+  const { who, db, brLimited, brs, cfg } = g;
+  const RM = require('./lib/sec-remind');
+  const K = require('./lib/sec-know');
+  const today = RM.il(now).day;
+  const vref = db.doc('sec_cfg/visit');
+  const vs = await vref.get();
+  const rec = vs.exists && vs.get(who.uid) && typeof vs.get(who.uid) === 'object' ? vs.get(who.uid) : {};
+  const visit = input.visit === true;
+  const since = L.sinceOf(rec, now, visit);
+  const brOk = (x) => !brs || (typeof x.br === 'string' && brs.includes(x.br));
+  const out3 = !brLimited; // טיוטות מייל/ווצאפ – ערוצים של כל העסק; מנהל עם הגבלת סניפים לא רואה אותן כאן
+  const empty = { docs: [] };
+  const q = (p) => p.get().catch((e) => { logger.warn('secLearn eyes: query failed', { code: e && e.code }); return empty; });
+  const [fp, cp, cu, no, dp, ip, ns, ml, cs, ds, is, rs] = await Promise.all([
+    q(db.collection('sec_facts').where('st', '==', 'prop').limit(20)),
+    q(db.collection('sec_cal').where('uid', '==', who.uid).where('st', '==', 'prop').limit(20)),
+    q(db.collection('sec_cal').where('d', '>=', today).where('d', '<=', K.addDays(today, EY_DAYS)).limit(300)),
+    q(db.collection(`sec_note/${who.uid}/n`).where('st', '==', 'open').limit(60)),
+    out3 ? q(db.collection('sec_draft').where('st', '==', 'pend').limit(20)) : empty,
+    q(db.collection('sec_inv').where('st', '==', 'new').limit(40)),
+    q(db.collection(`sec_note/${who.uid}/n`).where('t', '>', since).limit(20)),
+    q(db.collection('sec_mlog').where('t', '>', since).limit(20)),
+    q(db.collection('sec_cal').where('t', '>', since).limit(40)),
+    out3 ? q(db.collection('sec_draft').where('t', '>', since).limit(40)) : empty,
+    q(db.collection('sec_inv').where('t', '>', since).limit(40)),
+    cfg.learn ? q(db.collection('sec_mrule').where('uid', '==', who.uid).limit(L.MAX_RULES + 5)) : empty,
+  ]);
+  const MORN = RM.MORNING;
+  const IVK = { inv: 'חשבונית', cr: 'הודעת זיכוי', rcpt: 'קבלה', dn: 'תעודת משלוח', chk: 'צ׳ק', unk: 'מסמך', bad: 'קובץ שלא נקלט', long: 'קובץ ארוך' };
+  const supOf = (x) => String((x.f && (x.f.supplier || x.f.payee)) || x.subN || '').slice(0, 60);
+  const cut = (v, n) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const open = [];
+  for (const d of fp.docs) open.push({ k: 'appr', id: 'f:' + d.id, t: d.get('t') || 0, title: 'לשמור במידע על העסק? ' + cut(d.get('text'), 120), go: { tab: 'facts' }, act: { k: 'fact', id: d.id }, r: { k: 'feed', id: 'appr' } });
+  for (const d of cp.docs) { const e = d.data(); open.push({ k: 'appr', id: 'c:' + d.id, t: e.t || 0, title: (e.rem ? 'לקבוע תזכורת? ' : 'לקבוע ביומן? ') + L.remLine(Object.assign({}, e, { rem: e.rem === true }), today, MORN).replace(/^(תזכורת|ביומן): /, ''), go: { tab: 'cal' }, act: { k: 'cal', id: d.id }, r: { k: 'feed', id: 'appr' } }); }
+  for (const d of dp.docs) { const x = d.data(); if (x.auto === true) continue; const mail = x.ch === 'mail'; open.push({ k: 'draft', id: 'd:' + d.id, t: x.t || 0, title: 'טיוטת תשובה ב' + (mail ? 'מייל' : 'ווצאפ') + ' מחכה לך', sub: cut(x.sum || x.text, 90), go: mail ? { tab: 'mail', id: d.id } : { tab: 'wa', wa: String(x.wa || '') }, r: { k: mail ? 'mail' : 'wa', id: d.id } }); }
+  for (const d of no.docs) { const x = d.data(); if ((x.at || 0) > now || !(x.k === 'rem' || x.seen !== true)) continue; open.push({ k: 'note', id: 'n:' + d.id, t: x.at || x.t || 0, title: cut(x.title, 120), sub: cut(x.body, 90), go: { tab: 'notes', id: d.id }, act: x.k === 'rem' ? { k: 'note', id: d.id } : null, r: { k: 'note', id: d.id } }); }
+  for (const d of ip.docs) { const x = d.data(); if (!brOk(x)) continue; const a = x.k === 'chk' ? x.f && x.f.amt : x.f && x.f.total; open.push({ k: 'inv', id: 'i:' + d.id, t: x.t || 0, title: (IVK[x.k] || 'מסמך') + ' מחכה לאישור' + (supOf(x) ? ' – ' + supOf(x) : ''), sub: typeof a === 'number' ? a.toLocaleString('he-IL') + ' ₪' : '', go: { tab: 'inv' }, r: { k: 'feed', id: 'inv' } }); }
+  const calMine = (e) => e && e.st === 'ok' && (e.uid === '' || e.uid === who.uid);
+  for (const d of cu.docs) { const e = d.data(); if (!calMine(e) || !(e.rem === true || e.src === 'sec' || e.src === 'wa')) continue; open.push({ k: 'rem', id: 'e:' + d.id, t: Date.parse(e.d + 'T' + (e.tm || MORN) + ':00Z') || 0, title: L.remLine(e, today, MORN), go: { tab: 'cal' }, r: { k: 'feed', id: 'rem' }, soon: true }); }
+  const ord = { appr: 0, draft: 1, note: 2, inv: 3, rem: 4 };
+  open.sort((a, b) => (ord[a.k] - ord[b.k]) || (a.soon ? a.t - b.t : b.t - a.t));
+  // מה עשיתי מאז הכניסה הקודמת
+  const did = [];
+  for (const d of ns.docs) { const x = d.data(); if ((x.at || 0) > now) continue; did.push({ k: 'note', id: 'n:' + d.id, t: x.t || 0, title: 'התראה: ' + cut(x.title, 110), go: { tab: 'notes', id: d.id }, r: { k: 'note', id: d.id } }); }
+  for (const d of ml.docs) { const x = d.data(); did.push({ k: 'draft', id: 'm:' + d.id, t: x.t || 0, title: (x.st === 'sent' ? 'נשלח לבד ב' : 'שליחה לבד נכשלה ב') + (x.ch === 'mail' ? 'מייל' : 'ווצאפ') + ' אל ' + cut(x.to, 30) + (x.ri ? ' – לפי "' + cut(x.ri, 60) + '"' : ''), go: { tab: 'set', mr: 1 }, r: { k: 'feed', id: 'act' } }); }
+  for (const d of cs.docs) { const e = d.data(); if (!(e.uid === '' || e.uid === who.uid) || !(e.src === 'sec' || e.src === 'wa')) continue; const line = L.remLine(Object.assign({}, e, { rem: e.rem === true }), today, MORN); did.push({ k: e.st === 'prop' ? 'appr' : 'rem', id: 'e:' + d.id, t: e.t || 0, title: (e.st === 'prop' ? 'הצעתי – ' : 'קבעתי – ') + line, go: { tab: 'cal' }, r: { k: 'feed', id: e.st === 'prop' ? 'appr' : 'rem' } }); }
+  for (const d of ds.docs) { const x = d.data(); if (x.auto === true) { did.push({ k: 'draft', id: 'd:' + d.id, t: x.t || 0, title: 'נשלח אוטומטית בווצאפ: ' + (String(x.kind || '').split(/[+,]/).map((z) => DRAFT_KIND[z]).filter(Boolean).join(' + ') || 'הודעה'), sub: cut(x.text, 80), go: { tab: 'wa', wa: String(x.wa || '') }, r: { k: 'feed', id: 'act' } }); continue; }
+    if (x.st === 'pend' || x.st === 'fail') did.push({ k: 'draft', id: 'd:' + d.id, t: x.t || 0, title: 'הכנתי טיוטת תשובה ב' + (x.ch === 'mail' ? 'מייל' : 'ווצאפ'), sub: cut(x.sum || x.text, 80), go: x.ch === 'mail' ? { tab: 'mail', id: d.id } : { tab: 'wa', wa: String(x.wa || '') }, r: { k: x.ch === 'mail' ? 'mail' : 'wa', id: d.id } }); }
+  for (const d of is.docs) { const x = d.data(); if (!brOk(x)) continue; did.push({ k: 'inv', id: 'i:' + d.id, t: x.t || 0, title: 'התקבלה ' + (IVK[x.k] || 'מסמך') + (supOf(x) ? ' – ' + supOf(x) : '') + (x.st === 'ok' ? ' (נכנסה)' : ''), go: { tab: 'inv' }, r: { k: 'feed', id: 'inv' } }); }
+  for (const d of fp.docs) if ((d.get('t') || 0) > since) did.push({ k: 'appr', id: 'f:' + d.id, t: d.get('t') || 0, title: 'הצעתי לשמור עובדה: ' + cut(d.get('text'), 100), go: { tab: 'facts' }, r: { k: 'feed', id: 'appr' } });
+  did.sort((a, b) => b.t - a.t);
+  const routes = L.routesOf(rs.docs.map((d) => Object.assign({ id: d.id }, d.data())));
+  const o = L.applyRoutes(open, routes), dd = L.applyRoutes(did, routes);
+  const hold = o.hold.concat(dd.hold.filter((x) => !o.hold.some((y) => y.id === x.id))).slice(0, EY_OPEN);
+  if (visit) await vref.set({ [who.uid]: { chat: now, prev: since } }, { merge: true });
+  return { ok: true, since, now, today, open: o.feed.slice(0, EY_OPEN), openN: o.feed.length, did: dd.feed.slice(0, EY_DID), didN: dd.feed.length, hold, holdOn: Object.values(routes).includes('hold'), routes };
+}
+
+// ===================================================================================
+// secLearn { op: reply | save | list | set | del | auto | log | eyes | route }
+// ===================================================================================
+const OPS = ['reply', 'save', 'list', 'set', 'del', 'auto', 'log', 'eyes', 'route'];
+const K_OK = L.CHS.concat(['feed']);
 async function secLearn(request) {
   const input = inputObject(request);
   const op = OPS.includes(input.op) ? input.op : null;
   if (!op) throw bad('bad-op', 'פעולה לא מוכרת');
   const g = await gate(request, { consent: true });
   const { who, cfg, db, brLimited } = g;
-  if (!cfg.learn) throw deny('learn-off', 'הכללים האישיים כבויים בעסק הזה');
   const now = Date.now();
   const col = db.collection('sec_mrule');
+  // "מול העיניים" – פועל גם כשהכללים האישיים כבויים (אז בלי ניתוב)
+  if (op === 'eyes') return eyes(g, input, now);
+  if (!cfg.learn) throw deny('learn-off', 'הכללים האישיים כבויים בעסק הזה');
 
   if (op === 'list') {
     const [s, ws] = await Promise.all([col.where('uid', '==', who.uid).limit(L.MAX_RULES + 5).get(), db.doc('sec_cfg/wa').get()]);
@@ -207,14 +295,39 @@ async function secLearn(request) {
 
   await rate(db, who.uid);
 
+  if (op === 'route') {
+    // כרטיס "להעביר מעכשיו…?" מהשיחה: אישור יוצר כלל ניתוב (מהכרטיס שהשרת כתב בהודעה – לא מהאפליקציה); ביטול – רק מסמן את הכרטיס
+    const mid = idOf(input.mid), cid = typeof input.cid === 'string' && /^rt[0-9a-f]{16}$/.test(input.cid) ? input.cid : null;
+    if (!cid) throw bad('bad-id', 'מזהה לא תקין');
+    const ms = await db.doc(`sec_chat/${who.uid}/m/${mid}`).get();
+    const c = ms.exists && Array.isArray(ms.get('cards')) ? ms.get('cards').find((x) => x && x.k === 'route' && x.id === cid) : null;
+    if (!c) throw pre('not-found', 'ההצעה לא נמצאה');
+    if (c.st) throw pre('not-pending', 'ההצעה כבר טופלה');
+    const b = db.batch();
+    if (input.no === true) {
+      await C.cardMark(db, b, who.uid, mid, cid, { st: 'no' });
+      log(b, db, who.uid, 'mrRouteNo', { note: c.kind + ':' + c.dest });
+      await b.commit();
+      return { ok: true, st: 'no' };
+    }
+    const r = L.routeRule(c.instr || '', { kind: c.kind, dest: c.dest });
+    if (!r) throw bad('bad-text', 'ההוראה לא תקינה');
+    const out = await saveRoute(db, b, who.uid, r, { k: 'chat', id: mid }, now);
+    await C.cardMark(db, b, who.uid, mid, cid, { st: 'ok', rid: out.id });
+    await b.commit();
+    return { ok: true, st: 'ok', id: out.id, rule: out.rule };
+  }
+
   if (op === 'reply' || op === 'save') {
     const k = input.k;
-    if (!L.CHS.includes(k)) throw bad('bad-k', 'סוג הודעה לא מוכר');
+    if (!K_OK.includes(k)) throw bad('bad-k', 'סוג הודעה לא מוכר');
     // מנהל עם הגבלת סניפים – לא יוצר כללים על מייל וווצאפ (ערוצים של כל העסק; החלטה 3)
     if (brLimited && L.OUT_CHS.includes(k)) throw deny('branch-limited', 'כללים על מייל וווצאפ זמינים רק למנהל בלי הגבלת סניפים');
     const instr = readInstr(input.text);
     const it = await itemOf(db, who, k, input.id);
-    const r = L.cleanRule({ ch: it.ch, instr, sc: scOf(input.sc), item: it.item });
+    // 15.11.2026: הוראת ניתוב ("חשבוניות מהיום – לבטיפול") בתגובה על שיחה, התראה או פריט ב"מול העיניים" – כלל ניתוב
+    const rt = ['chat', 'note', 'feed'].includes(k) ? L.routeOf(instr) : null;
+    const r = rt ? L.routeRule(instr, rt) : L.cleanRule({ ch: it.ch, instr, sc: scOf(input.sc), item: it.item });
     if (!r) throw bad('bad-text', 'ההוראה לא תקינה');
     if (op === 'reply') {
       // ביצוע על ההודעה הזו: מייל/ווצאפ – טיוטה חדשה לפי ההוראה (לא נשלחת – רק בלחיצה). שאר הסוגים – אין שינוי עד "שמירה"
@@ -230,6 +343,12 @@ async function secLearn(request) {
       return { ok: true, prop: propOut(r, it.item), draft };
     }
     // save: הכלל נשמר רק בלחיצה של המנהל. ההוראה והתחום נקבעים כאן מחדש (לא סומכים על האפליקציה)
+    if (r.ch === 'route') {
+      const b = db.batch();
+      const out = await saveRoute(db, b, who.uid, r, { k, id: String(input.id).slice(0, 80) }, now);
+      await b.commit();
+      return { ok: true, id: out.id, rule: out.rule };
+    }
     const mine = await col.where('uid', '==', who.uid).limit(L.MAX_RULES + 5).get();
     if (mine.size >= L.MAX_RULES) throw pre('too-many', 'הגעתם למספר הכללים המרבי (' + L.MAX_RULES + '). אפשר למחוק כלל ישן במסך "הכללים שלי".');
     const id = col.doc().id;
