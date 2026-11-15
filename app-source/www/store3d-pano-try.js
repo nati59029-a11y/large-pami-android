@@ -24,7 +24,7 @@ function bar(el,res,again,done){const b=document.createElement('div');
   /* חומר גולמי (התמונות המקוריות + נתוני החיישן, zip) – לשיפור החיבור על צילום אמיתי. נשמר רק בזיכרון, של הצילום האחרון */
   if(window.S3PanoCap&&typeof S3PanoCap.lastRaw==='function')mk('שליחת חומר גולמי',async()=>{try{
     const z=await S3PanoCap.lastRaw();if(!z){if(typeof toast==='function')toast('אין חומר גולמי לצילום הזה');return}
-    const name='pano360-raw.zip';
+    const t=new Date(),p2=n=>String(n).padStart(2,'0'),name='pano360-raw-'+p2(t.getHours())+p2(t.getMinutes())+p2(t.getSeconds())+'.zip'/* שם שונה בכל שליחה: עם שם קבוע אפליקציית השיתוף שלחה קובץ ישן */;
     if(typeof isNat==='function'&&isNat()&&typeof outSave==='function'){await outSave({name,data:new Uint8Array(await z.arrayBuffer()),mime:'application/zip'},'share');return}
     const f=new File([z],name,{type:'application/zip'});
     if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:name});return}
