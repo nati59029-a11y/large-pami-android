@@ -189,7 +189,26 @@ exports.s3PutTex = onCall(T.scoped(async (request) => {
 }));
 
 // ---------------- s3PutPano / s3DelPano (שלב 18א – סיור 360) ----------------
-const del412 = async (bk, paths) => { for (const p of paths) { try { await bk.file(p).delete(); } catch (x) { /* ינוקה ב-s3Clean אחרי 30 יום */ } } };
+// ניקוי הקבצים של הבקשה הזו בלבד (תיקון סבב 1 של הבודק): items = [{ path, gen }] – רק קובץ שהבקשה הזו כתבה (נתיב שנתפס בנעילה,
+// ו-generation שחזר מהשמירה), רק עם ifGenerationMatch שלו, ולעולם לא נתיב שמופיע ב-full/sm של מסמך הנקודה הנוכחי (הגנה כפולה).
+// בספק (קריאת המסמך נכשלה, אין generation) – לא מוחקים; קובץ שנשאר יתום נמחק ב-s3Clean אחרי 30 יום.
+async function dropOwn(bk, ref, items) {
+  let cur = null;
+  try { const s = await ref.get(); cur = s.exists ? s.data() : null; } catch (e) { return; }
+  for (const it of items) {
+    if (!it || !it.path || !it.gen) continue;
+    if (cur && (cur.full === it.path || cur.sm === it.path)) continue;
+    try { await bk.file(it.path).delete({ ifGenerationMatch: it.gen }); } catch (x) { /* ינוקה ב-s3Clean אחרי 30 יום */ }
+  }
+}
+// נעילה על נתיב (תיקון סבב 1): s3qid/pano_{mapId}_{pid}_{ver} נוצר ב-create (נכשל אם קיים) לפני ההעלאה, כך שרק בקשה אחת כותבת לנתיב,
+// גם אם ifGenerationMatch: 0 לא נאכף (באמולטור). המזהה לא תואם את תבנית ה-qid (יש בו _), ולכן לא מתנגש בו. נמחק ב-s3Clean לפי exp.
+async function claimPath(db, who, mapId, pid, ver, now) {
+  try {
+    await db.doc(`s3qid/pano_${mapId}_${pid}_${ver}`).create({ k: 'pano-lock', uid: who.uid, at: now, exp: now + QID_DAYS * D1 });
+    return true;
+  } catch (e) { if (isExists(e)) return false; throw e; }
+}
 // מצב המפה והנקודות (לבדיקה לפני ההעלאה ושוב בתוך הטרנזקציה). ms = smap, ps = הנקודות (QuerySnapshot). מחזיר { map, pts, old }.
 function panoState(ms, ps, pid, pt) {
   if (!ms.exists || ms.get('del') === 1) throw bad('no-map', 'המפה לא קיימת. שמרו את המפה לפני שמוסיפים נקודות 360.', 'failed-precondition');
@@ -242,25 +261,28 @@ async function putPano(db, who, input, now, bucket, opts) {
   const [ms0, ps0, dd0] = await Promise.all([mref.get(), pcol.get(), dref.get()]);
   const st0 = check(ms0, ps0, dd0, pt.id);
   const bk = bucket || getStorage().bucket();
-  let pid = pt.id, ver = st0.old ? (Number.isInteger(st0.old.ver) ? st0.old.ver : 0) : 0, full = '', sm = '';
+  let pid = pt.id, ver = st0.old ? (Number.isInteger(st0.old.ver) ? st0.old.ver : 0) : 0, full = '', sm = '', mine = [];
   if (img) {
-    // ifGenerationMatch: 0 – לא דורסים קובץ קיים. התנגשות → מזהה / גרסה הבאים.
+    // לכל נתיב: קודם נעילה (claimPath), ואז שמירה עם ifGenerationMatch: 0. נתיב תפוס / 412 → מזהה / גרסה הבאים.
     let n = pt.id ? 0 : M.nextPid(st0.ids) - 1;
-    for (let i = 0; i < 5 && !full; i++) {
+    const save = async (p, buf) => { const f = bk.file(p); await f.save(buf, { resumable: false, contentType: 'image/jpeg', preconditionOpts: { ifGenerationMatch: 0 } }); return f.metadata && f.metadata.generation; };
+    for (let i = 0; i < 10 && !full; i++) {
       if (pt.id) ver += 1; else { n += 1; pid = 'p' + n; ver = 1; }
       if (n > 9999 || ver > 9999) throw bad('pano-full', 'נגמרו המזהים לנקודות 360 במפה הזו', 'resource-exhausted');
+      if (!(await claimPath(db, who, mapId, pid, ver, now))) continue;
       const pf = M.panoPath(who.bizId, br, mapId, pid, ver), ps = M.panoPath(who.bizId, br, mapId, pid, ver, true);
+      let gf;
       try {
-        await bk.file(pf).save(img.full.buf, { resumable: false, contentType: 'image/jpeg', preconditionOpts: { ifGenerationMatch: 0 } });
+        gf = await save(pf, img.full.buf);
       } catch (e) {
         if (e && (e.code === 412 || e.code === '412')) continue;
         logger.warn('s3PutPano: save failed', { code: e && e.code });
         throw bad('save-failed', 'שמירת התמונה נכשלה. נסו שוב.', 'unavailable');
       }
       try {
-        await bk.file(ps).save(img.sm.buf, { resumable: false, contentType: 'image/jpeg', preconditionOpts: { ifGenerationMatch: 0 } });
+        mine = [{ path: pf, gen: gf }, { path: ps, gen: await save(ps, img.sm.buf) }];
       } catch (e) {
-        await del412(bk, [pf]);
+        await dropOwn(bk, pcol.doc(pid), [{ path: pf, gen: gf }]);
         if (e && (e.code === 412 || e.code === '412')) continue;
         logger.warn('s3PutPano: save failed', { code: e && e.code });
         throw bad('save-failed', 'שמירת התמונה נכשלה. נסו שוב.', 'unavailable');
@@ -293,10 +315,10 @@ async function putPano(db, who, input, now, bucket, opts) {
       return { r };
     });
   } catch (e) {
-    if (full) await del412(bk, [full, sm]);
+    if (full) await dropOwn(bk, pcol.doc(pid), mine);
     throw e;
   }
-  if (res.dup) { if (full) await del412(bk, [full, sm]); return res.dup; }
+  if (res.dup) { if (full) await dropOwn(bk, pcol.doc(pid), mine); return res.dup; }
   return res.r;
 }
 exports.s3PutPano = onCall({ memory: '512MiB' }, T.scoped(async (request) => {
@@ -332,4 +354,4 @@ exports.s3DelPano = onCall(T.scoped(async (request) => {
 }));
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_map', { enumerable: false, value: { saveMap, setBranch, putTex, branchOk, putPano, delPano } });
+Object.defineProperty(exports, '_map', { enumerable: false, value: { saveMap, setBranch, putTex, branchOk, putPano, delPano, myBranches } });

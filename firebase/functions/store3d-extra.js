@@ -415,7 +415,7 @@ async function stepPano(c, brs, log) {
       const plan = X.panoClean(L, docs, c.now);
       const failed = new Set();
       for (const f of plan.files) {
-        if (await delFile(c.bucket, f)) { n++; log.push('pano ' + f.split('/pano/')[1]); } else failed.add(/\/(p[0-9]{1,4})_/.exec(f)[1]);
+        if (await delFile(c.bucket, f)) { n++; log.push('pano ' + f.split('/pano/')[1]); } else failed.add(/^(p[0-9]{1,4})_/.exec(f.slice(f.lastIndexOf('/') + 1))[1]); // רק שם הקובץ (סניף יכול להיקרא p2_north)
       }
       for (const pid of plan.docs) {
         if (failed.has(pid)) continue;

@@ -178,6 +178,78 @@ describe('store3d-pano – הליבה מול האמולטור (Firestore + Stora
     assert.equal((await files()).length, 4, 'הקבצים נשארים עד הניקוי');
   });
 
+  // תיקון סבב 1 (בודק עצמאי): בקשות מקבילות לא עוקפות את התקרות, ואף בקשה לא מוחקת קבצים של נקודה שנשמרה
+  const exists = async (p) => (await bucket.file(p).exists())[0];
+  const allPts = async () => (await adm.collection(`b/${A}/smap/s-main/pano`).get()).docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const seedPts = async (k) => {
+    const b = adm.batch();
+    for (let i = 1; i <= k; i++) b.set(adm.doc(`b/${A}/smap/s-main/pano/p${i}`), { x: 10 * i, y: 900, yaw: 0, nb: [], full: 'x', sm: 'x', w: 2048, h: 1024, sz: 1, ver: 1, by: MGR, at: 1, upd: 1 });
+    await b.commit();
+  };
+  const filesOk = async (ids) => { const L = await allPts(); for (const id of ids) { const d = L.find((x) => x.id === id); assert.ok(d && await exists(d.full) && await exists(d.sm), 'קבצים של ' + id); } };
+
+  it('מקביל מול 40 נקודות: 38 קיימות, 5 בקשות במקביל → בדיוק 2 נשמרות, 40 פעילות, הקבצים שלהן קיימים, ובלי קבצים יתומים', async () => {
+    await seedPts(38);
+    const r = await Promise.allSettled([1, 2, 3, 4, 5].map(() => put(mgr, {})));
+    const ok = r.filter((x) => x.status === 'fulfilled').map((x) => x.value.id);
+    assert.equal(ok.length, 2, JSON.stringify(r.map((x) => x.status === 'fulfilled' ? x.value.id : x.reason.details && x.reason.details.reason)));
+    assert.ok(r.filter((x) => x.status === 'rejected').every((x) => x.reason.details.reason === 'pano-limit'));
+    assert.equal((await allPts()).filter((d) => d.del !== 1).length, 40);
+    await filesOk(ok);
+    assert.equal((await files()).length, 4, 'הבקשות שנדחו מחקו רק את הקבצים שלהן');
+  });
+
+  it('מקביל מול 60 ביום: המונה ב-58, 5 בקשות במקביל → לכל היותר 2 נשמרות, המונה לא עובר 60, הקבצים של מה שנשמר קיימים', async () => {
+    await put(mgr, {});
+    const day = (await get(`b/${A}/s3use/p_main`)).d;
+    await adm.doc(`b/${A}/s3use/p_main`).set({ d: day, n: 58, upd: 1 });
+    const r = await Promise.allSettled([1, 2, 3, 4, 5].map((i) => put(mgr, { x: 100 * i })));
+    const ok = r.filter((x) => x.status === 'fulfilled').map((x) => x.value.id);
+    const n = (await get(`b/${A}/s3use/p_main`)).n;
+    assert.ok(ok.length <= 2 && ok.length >= 1, String(ok.length));
+    assert.equal(n, 58 + ok.length);
+    assert.ok(r.filter((x) => x.status === 'rejected').every((x) => ['pano-day', 'busy'].includes(x.reason.details.reason)));
+    await filesOk(['p1'].concat(ok));
+    assert.equal((await files()).length, 2 * (1 + ok.length));
+  });
+
+  it('אותו qid במקביל: בדיוק נקודה אחת, עם קבצים קיימים; השאר dup עם אותה תשובה', async () => {
+    const q = qid();
+    const r = await Promise.allSettled([1, 2, 3].map(() => put(mgr, { qid: q })));
+    const vals = r.filter((x) => x.status === 'fulfilled').map((x) => x.value);
+    assert.equal(vals.length, 3, JSON.stringify(r.map((x) => x.status === 'rejected' && x.reason.message)));
+    assert.equal(vals.filter((v) => !v.dup).length, 1);
+    assert.ok(vals.every((v) => v.id === vals[0].id && v.full === vals[0].full));
+    assert.equal((await allPts()).length, 1);
+    await filesOk([vals[0].id]);
+    assert.equal((await files()).length, 2);
+  });
+
+  it('nb לנקודה מחוקה – bad-nb; mapId מסוכן ב-put וב-del – bad-map-id; id לא תקין ב-del – bad-pt', async () => {
+    await put(mgr, { x: 100, y: 100 });
+    await C.delPano(db, mgr, { mapId: 's-main', id: 'p1' }, Date.now());
+    assert.equal(await err(put(mgr, { nb: ['p1'] })), 'bad-nb');
+    for (const m of ['../x', 's-A/B', 's-main/../w', '', null]) {
+      assert.equal(await err(put(mgr, { mapId: m })), 'bad-map-id', 'put ' + m);
+      assert.equal(await err(C.delPano(db, mgr, { mapId: m, id: 'p1' }, 1)), 'bad-map-id', 'del ' + m);
+    }
+    for (const id of ['x1', '../p1', 'p12345', '', 5]) assert.equal(await err(C.delPano(db, mgr, { mapId: 's-main', id }, 1)), 'bad-pt', 'id ' + id);
+  });
+
+  it('עובד s3m ששויך לסניף אחר (staff.br דרך myBranches): put ו-del נחסמים; מנהל – לא מוגבל', async () => {
+    const staff = (br) => ({ exists: true, get: (k) => (k === 'br' ? br : undefined) });
+    assert.deepEqual(C.myBranches({ role: 'employee', staff: staff(['other']) }), ['other']);
+    assert.equal(C.myBranches({ role: 'employee', staff: staff(undefined) }), null);
+    assert.equal(C.myBranches({ role: 'manager', staff: staff(['other']) }), null);
+    const lim = { uid: DR, bizId: A, brs: C.myBranches({ role: 'employee', staff: staff(['other']) }) };
+    assert.equal(await err(put(lim, {})), 'other-branch');
+    await put(mgr, {});
+    assert.equal(await err(C.delPano(db, lim, { mapId: 's-main', id: 'p1' }, 1)), 'other-branch');
+    const mine = { uid: DR, bizId: A, brs: C.myBranches({ role: 'employee', staff: staff(['main']) }) };
+    assert.equal((await put(mine, { x: 600 })).id, 'p2');
+    assert.equal((await get(`b/${A}/smap/s-main/pano/p1`)).del, undefined);
+  });
+
   it('s3Clean: מוחק רק גרסאות שהוחלפו לפני 30+ יום ונקודות שנמחקו לפני 30+ יום; לא נוגע בנקודות פעילות, בטקסטורות ובמפה', async () => {
     const NOW = Date.now();
     const P = `b/${A}/store3d/main/pano/s-main/`;
@@ -243,6 +315,12 @@ describe('s3PutPano / s3DelPano (אמולטור הפונקציות)', () => {
     assert.deepEqual([bad.status, bad.reason], ['INVALID_ARGUMENT', 'bad-ratio']);
     assert.match(bad.message, /2:1/);
     assert.equal((await call('s3DelPano', DR, { mapId: 's-main', id: 'p1' })).reason, 'del-mgr');
+    // עובד s3m ששויך לסניף אחר (staff.br → myBranches): העלאה נחסמת (other-branch), מחיקה – del-mgr
+    await adm.doc(`b/${A}/staff/${DR}`).update({ br: ['other'] });
+    assert.equal((await call('s3PutPano', DR, PT({ x: 700 }))).reason, 'other-branch');
+    assert.equal((await call('s3DelPano', DR, { mapId: 's-main', id: 'p2' })).reason, 'del-mgr');
+    assert.equal((await call('s3DelPano', MGR, { mapId: '../x', id: 'p2' })).reason, 'bad-map-id');
+    assert.equal((await call('s3DelPano', MGR, { mapId: 's-main', id: 'x' })).reason, 'bad-pt');
     assert.equal((await call('s3DelPano', E1, { mapId: 's-main', id: 'p1' })).reason, 'del-mgr');
     const del = await call('s3DelPano', MGR, { mapId: 's-main', id: 'p1' });
     assert.equal(del.status, 'OK', del.text);
