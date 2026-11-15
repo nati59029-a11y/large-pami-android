@@ -71,10 +71,10 @@ function cleanFin(x) {
   }
   f.chk = (Array.isArray(x.chk) ? x.chk : []).filter((r) => Array.isArray(r) && DAY_RE.test(r[0]) && N(r[2]) !== null).slice(0, LIM.chk).map((r) => [r[0], clean(r[1], 60), N(r[2])]);
   if (Number.isInteger(x.bk) && x.bk > 0) f.bk = x.bk;
-  // 15.11.2026: פעולות אחרונות שנרשמו (רק מהמכשיר, לשיחה – לא נשמרות במראה). [זמן רישום ms או 0, תאריך, i/e, קטגוריה, שם, סכום, מס' חשבונית, אמצעי תשלום, שולם]
+  // 15.11.2026: פעולות אחרונות שנרשמו (רק מהמכשיר, לשיחה – לא נשמרות במראה). [זמן רישום ms או 0, תאריך, i/e, קטגוריה, שם, סכום, מס' חשבונית, אמצעי תשלום, שולם, 1=שכר]
   if (Array.isArray(x.rec)) {
     f.rec = x.rec.filter((r) => Array.isArray(r) && ['i', 'e'].includes(r[2]) && N(r[5]) !== null).slice(0, LIM.rec)
-      .map((r) => [Number.isInteger(r[0]) && r[0] > 0 ? r[0] : 0, DAY_RE.test(r[1]) ? r[1] : '', r[2], clean(r[3], 40), clean(r[4], 60), N(r[5]), clean(r[6], 30), clean(r[7], 40), N(r[8]) || 0]);
+      .map((r) => [Number.isInteger(r[0]) && r[0] > 0 ? r[0] : 0, DAY_RE.test(r[1]) ? r[1] : '', r[2], clean(r[3], 40), clean(r[4], 60), N(r[5]), clean(r[6], 30), clean(r[7], 40), N(r[8]) || 0, r[9] === 1 ? 1 : 0]);
   }
   if (x.pay && typeof x.pay === 'object' && !Array.isArray(x.pay)) {
     f.pay = {};

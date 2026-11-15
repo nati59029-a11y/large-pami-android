@@ -303,6 +303,23 @@ describe('רק נושאי עסק; ערוץ והרשאות (5.5) נאכפים ב�
     await call('secChat', M2, { text: 'שכר', fin: FIN() });
     assert.ok(declNames(secReqs()[0]).includes('getPayroll'));
   });
+  it('פעולות אחרונות (getRecentEntries): מוצאת חשבונית של 50 באשראי; רשומת שכר לא מגיעה למודל כשמתג השכר כבוי', async () => {
+    await seed({ cfg: { pay: { [M2]: true } } });
+    const now = Date.now();
+    const rec = [[now - 60000, '2026-11-15', 'e', 'ספקים', 'מאפיית בדיקה', 50, 'A1', 'אשראי', 50, 0], [now - 120000, '2026-11-15', 'e', 'משכורות', 'עובדת בדיקה', 7333.25, '', '', 0, 1]];
+    GM.state.sec = (body) => (lastIsRes(body) ? { text: 'מאפיית בדיקה.' } : { calls: [{ name: 'getRecentEntries', args: {} }] });
+    const r = await call('secChat', M1, { text: 'לאיזה ספק הכנסתי חשבונית של 50 באשראי?', fin: Object.assign(FIN(), { rec }) });
+    assert.equal(r.status, 'OK', r.text);
+    const R = responses(secReqs()[1].body);
+    assert.equal(R.getRecentEntries.items[0].name, 'מאפיית בדיקה');
+    assert.equal(R.getRecentEntries.items[0].paidBy, 'אשראי');
+    assert.ok(!JSON.stringify(secReqs().map((x) => x.body)).includes('7333.25'), 'רשומת שכר לא נשלחה למודל');
+    // מנהל עם מתג שכר – רשומת השכר כן נכללת
+    GM.reset();
+    GM.state.sec = (body) => (lastIsRes(body) ? { text: 'בסדר' } : { calls: [{ name: 'getRecentEntries', args: {} }] });
+    await call('secChat', M2, { text: 'מה נרשם?', fin: Object.assign(FIN(), { rec }) });
+    assert.ok(JSON.stringify(secReqs().map((x) => x.body)).includes('7333.25'));
+  });
   it('מתג ניתוח עובדים כבוי: getEmployeeActivity לא נמסר למודל ולא מופעל; פעיל – כן', async () => {
     await seed({ cfg: { emp: false } });
     GM.state.sec = (body) => (lastIsRes(body) ? { text: 'אין לי' } : { calls: [{ name: 'getEmployeeActivity', args: { employee: 'דוד' } }] });

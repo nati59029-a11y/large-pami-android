@@ -434,6 +434,7 @@ async function secChat(request) {
     if (ms.exists) { fin = ST.cleanFin(parseJ(ms.get('data'))); if (fin) { finFrom = 'mirror'; mirrorAt = ms.get('at') || fin.at; } }
   }
   if (!payOn) pay = null; // מתג השכר כבוי – שום נתון שכר לא נכנס לשיחה
+  if (!payOn && fin && Array.isArray(fin.rec)) fin.rec = fin.rec.filter((r) => r[9] !== 1); // גם לא דרך רשימת הפעולות האחרונות
   else if (!pay && cfg.mirror) { const ps = await db.doc('sec_mirror/pay').get(); if (ps.exists) pay = (ST.cleanFin({ v: 1, at: 1, pay: parseJ(ps.get('data')) }) || {}).pay || null; }
   const asOf = finFrom === 'mirror' ? mirrorAt : fin ? fin.at : null;
   const stale = finFrom === 'mirror' && now - mirrorAt > STALE_MS;
