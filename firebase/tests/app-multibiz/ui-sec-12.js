@@ -20,7 +20,7 @@ async function open(browser, www, media, opt) {
   const bodies = [], log = [];
   const st = { ok: true, consented: true, setupDone: true, name: 'רותי', addr: 'f', call: 'נתי', rows: [], mode: 'all', pay: true, emp: true, sens: false, we: 'warn', mirror: true, mirrorAt: null, cfTh: null, pct: 10, saving: '', nt: NT, types: {}, unseen: 0, learn: true };
   if (media !== undefined) st.media = media;
-  const R = { see: null, stt: 'שלום, כמה הכנסות היום', admin: { bizId: BIZ, on: true, mode: 'all', mainUid: '', emp: false, empDefault: false, pay: { m: false }, sens: {}, capCents: 5000, rate: { hour: 40, day: 200 }, rateDefault: { hour: 40, day: 200 }, admins: [{ uid: 'm', email: 'm@x.co' }], consent: {} } };
+  const R = { see: null, stt: 'שלום, כמה הכנסות היום', admin: { bizId: BIZ, on: true, mode: 'all', mainUid: '', emp: false, empDefault: false, pay: { m: false }, sens: {}, capCents: 5000, rate: { hour: 40, day: 200 }, rateDefault: { hour: 40, day: 200 }, media: { aud: 120, img: true, vid: 60 }, mediaSet: false, admins: [{ uid: 'm', email: 'm@x.co' }], consent: {} } };
   const { ctx, page } = await H.newPage(browser, www, cfg, log, who);
   await ctx.route(/:9199\/.*/, async (route) => { log.push({ url: route.request().url(), method: route.request().method(), ct: route.request().headers()['content-type'], size: (route.request().postDataBuffer() || Buffer.alloc(0)).length, st: 1 }); return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }); });
   await ctx.route(/:5001\/.*/, async (route) => {
@@ -33,8 +33,9 @@ async function open(browser, www, media, opt) {
     if (n === 'secNotes') return ok({ ok: true, notes: [], unseen: 0, types: {} });
     if (n === 'secWaCfg') return ok({ ok: true, connected: false, num: '', link: '', stop: { on: false }, ack: { on: false, text: '' }, open: { on: false, text: '' }, ackH: { f: '08:00', t: '18:00' }, hour: 30, myNum: '', myReq: '', tpls: [], appr: [] });
     if (n === 'secAdminGet') return ok(R.admin);
-    if (n === 'secAdminSetCfg') { if (body.media) R.admin.media = body.media; return ok(R.admin); }
+    if (n === 'secAdminSetCfg') { if (body.media) { R.admin.media = body.media; R.admin.mediaSet = true; } return ok(R.admin); }
     if (n === 'secMedia') {
+      if (body.op === 'stt' && R.sttSave) return ok({ ok: true, text: '', mode: 'saving', reply: 'הגעתם לתקרת השימוש החודשית – המזכירה במצב חיסכון.', pct: 100 });
       if (body.op === 'stt') return R.sttErr ? route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { message: R.sttErr, details: { reason: 'media-off' } } }) }) : ok({ ok: true, text: R.stt });
       if (body.op === 'see') return ok(R.see || { ok: true, id: 'img1', reply: 'זו חשבונית.', cards: [], pct: 12, saving: false });
       if (body.op === 'mark') return R.markFail ? route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { message: 'x', status: 'INTERNAL' } }) }) : ok({ ok: true });
@@ -55,14 +56,14 @@ const sx = (page) => page.evaluate(() => document.documentElement.scrollWidth - 
 const toasts = (page) => page.evaluate(() => window.__toasts.join(' | '));
 const enter = async (page) => { await page.evaluate(() => go('sec')); await H.settle(page, 700); };
 // מקליט מדומה: מיקרופון ו-MediaRecorder שמחזירים WAV אמיתי של שנייה (כדי שהפענוח והמרה ירוצו באמת)
-const fakeMic = (page, deny) => page.evaluate((d) => {
+const fakeMic = (page, deny, badStart) => page.evaluate(([d, bs]) => {
   const wav = () => { const n = 8000, b = new Uint8Array(44 + n * 2), v = new DataView(b.buffer); const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
     w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
     for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.round(Math.sin(i / 8) * 8000), true); return new Blob([b], { type: 'audio/wav' }); };
   window.__tracks = 0;
   navigator.mediaDevices.getUserMedia = async () => { if (d) { const e = new Error('x'); e.name = 'NotAllowedError'; throw e; } window.__tracks++; return { getTracks: () => [{ stop() { window.__tracks--; }, onended: null }] }; };
-  window.MediaRecorder = class { constructor() { this.state = 'inactive'; this.mimeType = 'audio/wav'; } start() { this.state = 'recording'; } stop() { this.state = 'inactive'; setTimeout(() => { this.ondataavailable({ data: wav() }); this.onstop(); }, 20); } static isTypeSupported() { return true; } };
-}, !!deny);
+  window.MediaRecorder = class { constructor() { this.state = 'inactive'; this.mimeType = 'audio/wav'; } start() { if (bs) throw new Error('start'); this.state = 'recording'; } stop() { this.state = 'inactive'; setTimeout(() => { this.ondataavailable({ data: wav() }); this.onstop(); }, 20); } static isTypeSupported() { return true; } };
+}, [!!deny, !!badStart]);
 
 (async () => {
   const [www, shots] = process.argv.slice(2);
@@ -102,6 +103,22 @@ const fakeMic = (page, deny) => page.evaluate((d) => {
     await fakeMic(page); o.R.sttErr = 'הקלטות כבויות בעסק'; await page.click('[data-a=secMic]'); await H.settle(page, 300); await page.click('[data-a=secMic]'); await H.settle(page, 1200);
     check('שגיאת שרת בתמלול: הודעת השרת מוצגת, בלי קריאה ל-secChat נוספת, ואפשר להקליט שוב', /הקלטות כבויות בעסק/.test(await toasts(page)) && all(o.bodies, 'secChat').length === 2 && !!(await page.$('[data-a=secMic]:not([disabled])')));
     o.R.sttErr = '';
+    // --- מצב חיסכון בתמלול (ליקוי 2): מוצג ההסבר מהשרת, באנר החיסכון, ובלי secChat ---
+    await page.evaluate(() => { window.__toasts.length = 0; });
+    o.R.sttSave = true; await page.click('[data-a=secMic]'); await H.settle(page, 300); await page.click('[data-a=secMic]'); await H.settle(page, 1200);
+    check('מצב חיסכון בתמלול: הודעת התקרה מהשרת (לא "לא הצלחתי להבין"), באנר חיסכון, ובלי secChat', /תקרת השימוש החודשית/.test(await toasts(page)) && !/לא הצלחתי להבין/.test(await toasts(page)) && !!(await page.$('#secSaving')) && all(o.bodies, 'secChat').length === 2, await toasts(page));
+    o.R.sttSave = false; await page.evaluate(() => { window.__sec.st.saving = ''; window.__sec.st.pct = 10; rerender(); });
+    // --- כשל בהתחלת ההקלטה (ליקוי 7): המיקרופון משוחרר, הודעה, ואפשר לנסות שוב ---
+    await fakeMic(page, false, true); await page.evaluate(() => { window.__toasts.length = 0; });
+    await page.click('[data-a=secMic]'); await H.settle(page, 400);
+    check('כשל ב-start: הודעה, המיקרופון שוחרר ואין הקלטה תקועה', /לא הצלחנו להתחיל את ההקלטה/.test(await toasts(page)) && (await page.evaluate(() => window.__tracks)) === 0 && !/עצור ושלח/.test(await txt(page, '#secMedia')) && !!(await page.$('[data-a=secMic]:not([disabled])')), await toasts(page));
+    await fakeMic(page);
+    // --- מעבר ללשונית אחרת באמצע הקלטה מהצ'אט (ליקוי 3): ההקלטה בוטלה ולא נשלח תמלול ---
+    const s0 = all(o.bodies, 'secMedia', (b) => b.op === 'stt').length;
+    await page.click('[data-a=secMic]'); await H.settle(page, 300);
+    await page.click('#secTabs [data-v=notes]'); await H.settle(page, 3600);
+    check('מעבר לשונית באמצע הקלטה: המיקרופון שוחרר ולא נשלח תמלול', (await page.evaluate(() => window.__tracks)) === 0 && all(o.bodies, 'secMedia', (b) => b.op === 'stt').length === s0 && all(o.bodies, 'secChat').length === 2);
+    await page.click('#secTabs [data-v=chat]'); await H.settle(page, 400);
     // --- 🎤 בחלון "↩ תגובה" ---
     await page.click('#secChat [data-a=secMrReply][data-id=a1]'); await H.settle(page, 400);
     check('חלון "↩ תגובה": כפתור 🎤 ושורת הפרטיות', !!(await page.$('#dlg [data-a=secMrMic]')) && /נשלח לעיבוד ב-AI ונמחק/.test(await txt(page, '#dlg')));
@@ -110,12 +127,23 @@ const fakeMic = (page, deny) => page.evaluate((d) => {
     check('התמלול ממלא את שדה התגובה ולא נשלח לצ\'אט', (await page.inputValue('#secMrT')) === 'שלום, כמה הכנסות היום' && all(o.bodies, 'secChat').length === c0);
     if (shots) await page.screenshot({ path: path.join(shots, 'sec12-reply-360.png') });
     await page.click('#dlg [data-a=closeDlg]');
+    // --- סגירת חלון "↩ תגובה" באמצע הקלטה (ליקוי 3): בכפתור "ביטול" וב-Esc – המיקרופון נסגר ולא נשלח תמלול ---
+    for (const how of ['ביטול', 'Esc']) {
+      const s1 = all(o.bodies, 'secMedia', (b) => b.op === 'stt').length;
+      await page.click('#secChat [data-a=secMrReply][data-id=a1]'); await H.settle(page, 400);
+      await page.click('#dlg [data-a=secMrMic]'); await H.settle(page, 300);
+      const rec = (await page.evaluate(() => window.__tracks)) === 1;
+      if (how === 'Esc') await page.keyboard.press('Escape'); else await page.click('#dlg [data-a=closeDlg]');
+      await H.settle(page, 3600);
+      check('סגירת חלון התגובה (' + how + ') באמצע הקלטה: המיקרופון שוחרר (__tracks=0) ולא נשלח תמלול', rec && (await page.evaluate(() => window.__tracks)) === 0 && all(o.bodies, 'secMedia', (b) => b.op === 'stt').length === s1 && !(await page.evaluate(() => document.getElementById('dlg').open)));
+    }
     // --- תמונה: חשבונית ---
     o.R.see = { ok: true, id: 'img1', reply: 'זו חשבונית ספק.', cards: [{ id: 'sc1', k: 'scan', doc: 'inv' }], pct: 12, saving: false };
     await page.fill('#secForm textarea', 'חשבונית מהספק'); 
     await page.setInputFiles('[data-c=secImgF]', { name: 'a.png', mimeType: 'image/png', buffer: PNG }); await H.settle(page, 1500);
     let see = last(o.bodies, 'secMedia', (b) => b.op === 'see');
     check('תמונה: see עם JPEG (מוקטן), כיתוב, ובלי נתיב', see && see[1].kind === 'image' && see[1].mime === 'image/jpeg' && see[1].b64.startsWith('/9j/') && see[1].cap === 'חשבונית מהספק' && !see[1].path, see && Object.keys(see[1]));
+    check('"↩ תגובה" מוצג על תשובת המזכירה לתמונה (ליקוי 6)', !!(await page.$('#secChat [data-a=secMrReply][data-k=chat][data-id=img1]')));
     check('בועת משתמש עם 📷, תשובה וכרטיס "לסריקה"', /📷 חשבונית מהספק/.test(await txt(page, '#secChat')) && /להעביר לסריקה\?/.test(await txt(page, '#secChat')) && !!(await page.$('[data-a=secScOk][data-id=sc1]')));
     await page.evaluate(() => { window.__sg = 0; ACT.scanGo = () => { window.__sg++; }; });
     await page.click('[data-a=secScOk][data-id=sc1]'); await H.settle(page, 800);
@@ -132,6 +160,20 @@ const fakeMic = (page, deny) => page.evaluate((d) => {
     await page.click('[data-a=secScOk][data-id=sc2]'); await H.settle(page, 900);
     const z = await page.evaluate(() => ({ v: cur().v, z0: ZC && ZC.z[0] && ZC.z[0].slice(0, 22) }));
     check('דוח Z: נפתח מסך סגירת הקופה והתמונה ב-ZC.z[0]', z.v === 'zc' && /^data:image\/jpeg/.test(z.z0), z);
+    // --- דוח Z כשבסגירת הקופה כבר יש צילומים אחרים (ליקוי 9): שואלים; ביטול – לא נוגעים; אישור – סגירה חדשה ---
+    await enter(page);
+    await page.evaluate(() => { ZC = zcNew(); ZC.z = ['data:image/jpeg;base64,AAA', 'data:image/jpeg;base64,BBB', 'data:image/jpeg;base64,CCC']; ZC.o = 'data:image/jpeg;base64,OPEN'; });
+    o.R.see = { ok: true, id: 'img2b', reply: 'עוד דוח Z.', cards: [{ id: 'sc2b', k: 'scan', doc: 'z' }], pct: 12, saving: false };
+    await page.setInputFiles('[data-c=secImgF]', { name: 'z.png', mimeType: 'image/png', buffer: PNG }); await H.settle(page, 1500);
+    const mz0 = all(o.bodies, 'secMedia', (b) => b.op === 'mark').length;
+    await page.click('[data-a=secScOk][data-id=sc2b]'); await H.settle(page, 400);
+    check('דוח Z עם צילומים קיימים: נשאלת שאלה "להתחיל סגירה חדשה", בלי mark עדיין', /להתחיל סגירה חדשה/.test(await txt(page, '#dlg')) && all(o.bodies, 'secMedia', (b) => b.op === 'mark').length === mz0, await txt(page, '#dlg'));
+    await page.click('#dlg [data-a=closeDlg]'); await H.settle(page, 400);
+    const zk = await page.evaluate(() => ({ z: ZC.z.join('|'), v: cur().v, open: !!document.querySelector('[data-a=secScOk][data-id=sc2b]'), m: !!window.__sec.media.img2b }));
+    check('ביטול: הצילומים הקיימים לא נדרסו, הכרטיס נשאר פתוח והתמונה בזיכרון', zk.z === 'data:image/jpeg;base64,AAA|data:image/jpeg;base64,BBB|data:image/jpeg;base64,CCC' && zk.v === 'sec' && zk.open && zk.m && all(o.bodies, 'secMedia', (b) => b.op === 'mark').length === mz0, zk);
+    await page.click('[data-a=secScOk][data-id=sc2b]'); await H.settle(page, 400); await page.click('#dlg [data-a=yes]'); await H.settle(page, 900);
+    const zn = await page.evaluate(() => ({ v: cur().v, z0: ZC.z[0] && ZC.z[0].slice(0, 22), zOld: ZC.z[0] === 'data:image/jpeg;base64,AAA', z1: ZC.z[1], z2: ZC.z[2], o: ZC.o }));
+    check('אישור: סגירה חדשה – התמונה ב-z[0], שאר החלקים ריקים, צילום הקופה הפותחת נשמר, ו-mark נשלח', zn.v === 'zc' && /^data:image\/jpeg/.test(zn.z0) && !zn.zOld && zn.z0.length > 0 && !zn.z1 && !zn.z2 && zn.o === 'data:image/jpeg;base64,OPEN' && !!last(o.bodies, 'secMedia', (b) => b.op === 'mark' && b.cid === 'sc2b' && b.st === 'ok'), zn);
     // --- תמונה אחרת: משימה (עם התמונה) ו"בטל" ---
     await enter(page); await fakeMic(page);
     o.R.see = { ok: true, id: 'img3', reply: 'מדף ריק.', cards: [{ id: 'tk1', k: 'task', txt: 'למלא את המדף' }], pct: 12, saving: false };
@@ -149,6 +191,26 @@ const fakeMic = (page, deny) => page.evaluate((d) => {
     const L1 = o.log.length;
     await page.click('[data-a=secScNo][data-id=tk2]'); await H.settle(page, 700);
     check('"בטל": mark no, בלי יצירת משימה, והתמונה שוחררה', !!last(o.bodies, 'secMedia', (b) => b.op === 'mark' && b.cid === 'tk2' && b.st === 'no') && !o.log.slice(L1).some((r) => /\/tasks/.test(r.url)) && await page.evaluate(() => !window.__sec.media.img4));
+    // --- שני כרטיסים באותה הודעה (ליקוי 1): "בטל" על הסריקה ואז "פתח משימה" – התמונה עדיין בזיכרון ומועלית למשימה ---
+    o.R.see = { ok: true, id: 'img6', reply: 'אולי חשבונית.', cards: [{ id: 'sc6', k: 'scan', doc: 'inv', low: true }, { id: 'tk6', k: 'task', txt: 'לבדוק את הסכום' }], pct: 12, saving: false };
+    await page.setInputFiles('[data-c=secImgF]', { name: 'o.png', mimeType: 'image/png', buffer: PNG }); await H.settle(page, 1500);
+    await page.evaluate(() => { window.__toasts.length = 0; });
+    await page.click('[data-a=secScNo][data-id=sc6]'); await H.settle(page, 700);
+    check('שני כרטיסים: אחרי "בטל" על הסריקה התמונה עדיין בזיכרון (כרטיס המשימה פתוח)', await page.evaluate(() => !!window.__sec.media.img6));
+    const L6 = o.log.length;
+    await page.click('[data-a=secTkOk][data-id=tk6]'); await H.settle(page, 1200);
+    const n6 = o.log.slice(L6), p6 = n6.find((r) => r.method === 'POST' && /\/tasks\?documentId=sectk6/.test(r.url)), i6 = n6.find((r) => r.method === 'PATCH' && /\/tasks\/sectk6\/p\/m1/.test(r.url));
+    check('שני כרטיסים: "פתח משימה" אחרי "בטל" – המשימה נוצרה עם התמונה (mi=1, PATCH p/m1), בלי "שלחו שוב", והתמונה שוחררה בסוף', !!p6 && JSON.parse(p6.body).fields.mi.integerValue === '1' && !!i6 && !/שלחו שוב/.test(await toasts(page)) && await page.evaluate(() => !window.__sec.media.img6), await toasts(page));
+    // הסדר ההפוך: קודם משימה, אחר כך סריקה
+    o.R.see = { ok: true, id: 'img7', reply: 'אולי חשבונית.', cards: [{ id: 'sc7', k: 'scan', doc: 'inv', low: true }, { id: 'tk7b', k: 'task', txt: 'לשלם לספק' }], pct: 12, saving: false };
+    await page.setInputFiles('[data-c=secImgF]', { name: 'o.png', mimeType: 'image/png', buffer: PNG }); await H.settle(page, 1500);
+    await page.evaluate(() => { window.__toasts.length = 0; window.__sg = 0; });
+    await page.click('[data-a=secTkOk][data-id=tk7b]'); await H.settle(page, 1200);
+    check('שני כרטיסים (הפוך): אחרי "פתח משימה" התמונה עדיין בזיכרון', await page.evaluate(() => !!window.__sec.media.img7));
+    await page.click('[data-a=secScOk][data-id=sc7]'); await H.settle(page, 800);
+    const a7 = await page.evaluate(() => ({ step: A && A.step, pg: A && A.pg && A.pg[0] && A.pg[0].slice(0, 22), sg: window.__sg, m: !!window.__sec.media.img7 }));
+    check('שני כרטיסים (הפוך): "לסריקה" פותח את הסריקה עם התמונה, בלי "שלחו שוב", והתמונה שוחררה', a7.step === 'scan' && /^data:image\/jpeg/.test(a7.pg) && a7.sg === 1 && !a7.m && !/שלחו שוב/.test(await toasts(page)), a7);
+    await page.evaluate(() => { if (typeof sheetClose === 'function') sheetClose(); });
     // התמונה כבר לא בזיכרון
     o.R.see = { ok: true, id: 'img5', reply: 'חשבונית.', cards: [{ id: 'sc5', k: 'scan', doc: 'rcpt' }], pct: 12, saving: false };
     await page.setInputFiles('[data-c=secImgF]', { name: 'o.png', mimeType: 'image/png', buffer: PNG }); await H.settle(page, 1500);
@@ -242,8 +304,13 @@ const fakeMic = (page, deny) => page.evaluate((d) => {
     check('מנהל־על: שדות קול, סרטון ותמונות עם ערכי ברירת מחדל', (await page.inputValue('form[data-f=secSaF] [name=ma]')) === '120' && (await page.inputValue('form[data-f=secSaF] [name=mv]')) === '60' && await page.isChecked('form[data-f=secSaF] [name=mi]'));
     check('מנהל־על 360px: בלי גלישה לרוחב', (await sx(page)) <= 0, await sx(page));
     if (shots) await page.screenshot({ path: path.join(shots, 'sec12-sab-360.png'), fullPage: true });
+    // ליקוי 5: שמירה בלי שינוי בהגבלות (העסק על ברירת המחדל) – לא נכתב media
+    await page.fill('form[data-f=secSaF] [name=rh]', '41'); await page.click('form[data-f=secSaF] button.btn'); await H.settle(page, 500);
+    const sv0 = last(o.bodies, 'secAdminSetCfg');
+    check('שמירה בלי שינוי בקול/תמונה/סרטון (ברירת מחדל): לא נשלח media', !!sv0 && !('media' in sv0[1]), sv0 && sv0[1]);
+    const nsv = all(o.bodies, 'secAdminSetCfg').length;
     await page.fill('form[data-f=secSaF] [name=ma]', '400'); await page.click('form[data-f=secSaF] button.btn'); await H.settle(page, 400);
-    check('קול מעל 300: שגיאה ובלי שמירה', /0 עד 300/.test(await toasts(page)) && !last(o.bodies, 'secAdminSetCfg'));
+    check('קול מעל 300: שגיאה ובלי שמירה', /0 עד 300/.test(await toasts(page)) && all(o.bodies, 'secAdminSetCfg').length === nsv);
     await page.fill('form[data-f=secSaF] [name=ma]', '30'); await page.fill('form[data-f=secSaF] [name=mv]', '0'); await page.uncheck('form[data-f=secSaF] [name=mi]');
     await page.click('form[data-f=secSaF] button.btn'); await H.settle(page, 500);
     const sv = last(o.bodies, 'secAdminSetCfg');

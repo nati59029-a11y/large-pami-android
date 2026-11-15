@@ -457,7 +457,7 @@ FRM.secSaF=async f=>{const id=f.dataset.id,c=SA[id];if(!c||c.err)return;const x=
  if(rh||rd){if(!/^\d{1,3}$/.test(rh)||!/^\d{1,4}$/.test(rd)||+rh<1||+rh>500||+rd<1||+rd>5000||+rd<+rh)return toast('קצב: לשעה 1–500, ליום 1–5,000 (ליום לא פחות מלשעה)');if(+rh!==R.hour||+rd!==R.day)data.rate={hour:+rh,day:+rd}}
  {const ma=String(x.ma==null?'':x.ma).trim(),mv=String(x.mv==null?'':x.mv).trim(),m0=mdOf(c.media);
   if(!/^\d{1,3}$/.test(ma)||+ma>300)return toast('הקלטה קולית: 0 עד 300 שניות');if(!/^\d{1,2}$/.test(mv)||+mv>60)return toast('סרטון: 0 עד 60 שניות');
-  const mm={aud:+ma,img:x.mi==='1',vid:+mv};if(mm.aud!==m0.aud||mm.img!==m0.img||mm.vid!==m0.vid||c.media)data.media=mm}
+  const mm={aud:+ma,img:x.mi==='1',vid:+mv};if(mm.aud!==m0.aud||mm.img!==m0.img||mm.vid!==m0.vid||c.mediaSet)data.media=mm}
  b.disabled=true;try{const r=await window.fnCall('secAdminSetCfg',data);SA[id]=r;toast('נשמר')}catch(e){err(e)}finally{b.disabled=false;if(cur().v==='sab')rerender()}};
 ACT.secSaChat=el=>{const id=el.dataset.id,u=el.dataset.u;ask('לצפות בשיחה? הצפייה תירשם ביומן הפעולות, ומנהל העסק יראה אותה.',async()=>{
  try{const r=await window.fnCall('secAdminReadChat',{bizId:id,uid:u});const L=r&&r.msgs||[];
@@ -1223,7 +1223,7 @@ ACT.secMrReply=el=>{const k=el.dataset.k,id=el.dataset.id;if(!MRCH[k]||!id)retur
  <p class="note" style="margin:0 0 8px">תשלום או העברת כסף, מחיקת נתונים ושליחת סיסמאות או פרטים רגישים – תמיד באישור שלך, גם אם תכתבו אחרת.</p>
  <div class="row"><button class="btn grow" id="secMrGo">שליחה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 ACT.secMrEx=el=>{const t=document.getElementById('secMrT');if(t){t.value=el.dataset.v;t.focus()}};
-FRM.secMrF=async f=>{const p=X.mrp;if(!p)return;const text=String(f.t.value||'').trim();if(!text)return toast('כתבו מה לעשות');if(text.length>300)return toast('עד 300 תווים');
+FRM.secMrF=async f=>{if(RC.on&&RC.tgt==='mr')micCancel();const p=X.mrp;if(!p)return;const text=String(f.t.value||'').trim();if(!text)return toast('כתבו מה לעשות');if(text.length>300)return toast('עד 300 תווים');
  const b=document.getElementById('secMrGo');if(b){b.disabled=true;b.textContent=p.k==='mail'||p.k==='wa'?'מכינה טיוטה…':'רגע…'}
  try{const r=await fnCall('secLearn',{op:'reply',k:p.k,id:p.id,text});p.text=text;p.prop=r.prop;
   if(r.snz){closeDlg();X.mrp=null;toast('אזכיר לך שוב '+r.snz.l);X.nl=null;try{eyStale()}catch(e){}rerender();return}
@@ -1422,6 +1422,10 @@ async function toWav(blob,maxSec){/* מפענח וממיר ל-WAV PCM 16 ביט,
 const micDown=()=>{try{RC.stream&&RC.stream.getTracks().forEach(t=>t.stop())}catch(e){}RC.stream=null};
 function micStop(){if(RC.on&&RC.mr&&RC.mr.state!=='inactive'){clearInterval(RC.tm);try{RC.mr.stop()}catch(e){micDown();RC.on=0;micUi()}}}
 function micCancel(){if(!RC.on)return;RC.x=1;if(RC.mr&&RC.mr.state!=='inactive')micStop();else{clearInterval(RC.tm);micDown();RC.on=0;micUi()}}
+/* ההקלטה נעצרת (בלי תמלול) כשהמקום שלה כבר לא מוצג: יציאה מהמזכירה, חלון "↩ תגובה" שנסגר, או לשונית אחרת במקום השיחה */
+const micGone=()=>cur().v!=='sec'||(RC.tgt==='mr'?!document.getElementById('secMrT'):((X.tab||'chat')!=='chat'||!document.querySelector('#secMedia [data-a=secMic]')));
+let micDlgOn=0;
+function micDlgHook(){if(micDlgOn)return;const d=document.getElementById('dlg');if(!d)return;micDlgOn=1;d.addEventListener('close',()=>{if(RC.on&&RC.tgt==='mr')micCancel()})}
 async function micStart(tgt){
  if(RC.on||mBusy())return;
  const l=mlim();if(!l||l.aud<=0)return toast('ההקלטה הקולית כבויה בעסק הזה');
@@ -1434,13 +1438,16 @@ async function micStart(tgt){
  mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
  mr.onstop=()=>{clearInterval(RC.tm);micDown();const cancel=RC.x,tg=RC.tgt,auto=RC.auto;RC.on=0;micUi();if(cancel){if(tg==='chat'&&cur().v==='sec'){keepDraft();rerender()}return}micDone(new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'}),max,tg,auto)};
  stream.getTracks().forEach(t=>{t.onended=()=>micStop()});
- mr.start();
- RC.tm=setInterval(()=>{RC.el=(performance.now()-RC.t0)/1000;if(cur().v!=='sec'){micCancel();return}if(RC.el>=max){RC.auto=1;micStop();return}micUi()},250);
+ try{mr.start()}catch(e){micDown();RC.on=0;RC.mr=null;micUi();return toast('לא הצלחנו להתחיל את ההקלטה. נסו שוב או הקלידו.')}
+ micDlgHook();
+ RC.tm=setInterval(()=>{RC.el=(performance.now()-RC.t0)/1000;if(micGone()){micCancel();return}if(RC.el>=max){RC.auto=1;micStop();return}micUi()},250);
  if(tgt==='chat'){keepDraft();rerender()}else micUi()}
 async function micDone(blob,max,tg,auto){
  X.mst='מתמללת…';if(tg==='chat'&&cur().v==='sec'){rerender();scrollEnd()}micUi();let text='';
  try{const w=await toWav(blob,max);if(w.sec<0.5)toast('ההקלטה קצרה מדי. נסו שוב.');
-  else{if(auto)toast('ההקלטה נעצרה בגבול של '+max+' שניות');const r=await fnCall('secMedia',{op:'stt',mime:'audio/wav',b64:w.b64});text=String(r&&r.text||'').trim();if(!text)toast('לא הצלחתי להבין את ההקלטה. נסו שוב.')}}
+  else{if(auto)toast('ההקלטה נעצרה בגבול של '+max+' שניות');const r=await fnCall('secMedia',{op:'stt',mime:'audio/wav',b64:w.b64})||{};if(Number.isFinite(r.pct))X.st.pct=r.pct;
+   if(r.mode==='saving'){X.st.saving=X.st.saving||'month';toast(String(r.reply||'המזכירה במצב חיסכון – אפשר להקליד.'))}/* תקרת שימוש: ההסבר מהשרת, לא "לא הצלחתי להבין" */
+   else{text=String(r.text||'').trim();if(!text)toast('לא הצלחתי להבין את ההקלטה. נסו שוב.')}}}
  catch(e){toast(e&&e.message&&!(e instanceof DOMException)&&e.name!=='EncodingError'?e.message:'לא הצלחנו לעבד את ההקלטה. נסו שוב או הקלידו.')}
  X.mst='';blob=null;micUi();
  if(text&&tg==='mr'){const t=document.getElementById('secMrT');if(t){t.value=((t.value?t.value+' ':'')+text).slice(0,300);t.focus()}}
@@ -1498,33 +1505,39 @@ function vidShrink(v,dur){return new Promise((ok,no)=>{/* הקטנה במכשי�
  const cx=cv.getContext('2d'),vs=cv.captureStream(25);let ac=null;
  try{const AC=window.AudioContext||window.webkitAudioContext;ac=new AC();const src=ac.createMediaElementSource(v),dst=ac.createMediaStreamDestination();src.connect(dst);dst.stream.getAudioTracks().forEach(t=>vs.addTrack(t))}catch(e){ac=null;v.muted=true}
  const mime=['video/webm;codecs=vp8,opus','video/webm;codecs=vp8','video/webm'].find(m=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))||'';
- let mr;try{mr=new MediaRecorder(vs,Object.assign({videoBitsPerSecond:700000,audioBitsPerSecond:64000},mime?{mimeType:mime}:{}))}catch(e){return no(new Error(CANT))}
+ const vsStop=()=>{try{vs.getTracks().forEach(t=>t.stop())}catch(e){}};
+ let mr;try{mr=new MediaRecorder(vs,Object.assign({videoBitsPerSecond:700000,audioBitsPerSecond:64000},mime?{mimeType:mime}:{}))}catch(e){try{ac&&ac.close()}catch(e2){}vsStop();return no(new Error(CANT))}
  const ch=[];let tm=0,wd=0,fin=0;
  const clean=()=>{clearInterval(tm);clearTimeout(wd);try{ac&&ac.close()}catch(e){}};
  const end=()=>{if(fin)return;fin=1;clean();try{if(mr.state!=='inactive')mr.stop()}catch(e){no(new Error(CANT))}};
- const fail=()=>{if(fin)return;fin=1;clean();try{if(mr.state!=='inactive')mr.stop()}catch(e){}no(new Error(CANT))};
+ const fail=()=>{if(fin)return;fin=1;clean();try{if(mr.state!=='inactive')mr.stop()}catch(e){}vsStop();no(new Error(CANT))};
  mr.ondataavailable=e=>{if(e.data&&e.data.size)ch.push(e.data)};
- mr.onstop=()=>{if(fin&&ch.length)ok(new Blob(ch,{type:'video/webm'}))};
+ mr.onstop=()=>{vsStop();if(fin){if(ch.length)ok(new Blob(ch,{type:'video/webm'}));else no(new Error(CANT))}};
  v.onended=end;v.onerror=fail;wd=setTimeout(fail,(dur+20)*1000);
  mr.start(1000);
  v.play().then(()=>{tm=setInterval(()=>{try{cx.drawImage(v,0,0,cv.width,cv.height)}catch(e){}X.mst='מקטינה את הסרטון… '+Math.min(99,Math.round(v.currentTime/dur*100))+'%';updWait();if(v.currentTime>=dur-0.05)end()},40)}).catch(fail)})}
 /* ---------- כרטיסי "לסריקה" ו"פתח משימה" ---------- */
 const cardMsg=id=>(X.msgs||[]).concat(X.pc&&X.pc.L||[]).find(m=>(m.cards||[]).some(c=>c.id===id));
 const scMark=(id,mid,st)=>fnCall('secMedia',{op:'mark',mid,cid:id,st});
+/* התמונה נשארת בזיכרון עד שכל כרטיסי הסריקה/משימה של אותה הודעה הוכרעו (או יציאה מהשיחה – chatEnter) */
+const mdFree=mid=>{if(!X.media||!mid||!X.media[mid])return;const m=(X.msgs||[]).concat(X.pc&&X.pc.L||[]).find(x=>x.id===mid);if(!m||!(m.cards||[]).some(c=>(c.k==='scan'||c.k==='task')&&!c.st))delete X.media[mid]};
 /* כרטיס מדיה גם כשההודעה לא נטענה בשיחה – מתוך "מול העיניים" (act: k, id, mid, doc, txt, via) */
 const mdCard=id=>{const c=allCards().find(x=>x.id===id);if(c)return c;const a=((X.ey&&X.ey.open)||[]).map(x=>x.act).find(a=>a&&a.id===id&&(a.k==='scan'||a.k==='task'));return a?{id:a.id,k:a.k,doc:a.doc,txt:a.txt,eyVia:a.via}:null};
 ACT.secScNo=async el=>{const id=el.dataset.id,mid=el.dataset.mid||(cardMsg(id)||{}).id||'';el.disabled=true;
- try{await scMark(id,mid,'no');if(X.media)delete X.media[mid];doneSt(id,'no')}catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
+ try{await scMark(id,mid,'no');doneSt(id,'no');mdFree(mid)}catch(e){if(notPend(e)){doneSt(id,'gone');mdFree(mid)}else{el.disabled=false;err(e)}}};
 ACT.secScOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=mdCard(id),du=(X.media||{})[mid];
  if(!c||!du)return toast(AGAIN);
  const z=c.doc==='z',sup=z?null:(cat('e_sup')&&!cat('e_sup').hid?cat('e_sup'):catsOf('exp').find(x=>x.beh==='sup'));
  if(z&&(typeof zcNew!=='function'||!V.zc))return toast('מסך סגירת הקופה לא זמין');
  if(!z&&(!sup||typeof openAdd!=='function'||typeof sheetDraw!=='function'||!ACT.scanGo))return toast('אין קטגוריית ספקים. אפשר להוסיף חשבונית ידנית.');
- el.disabled=true;
- try{await scMark(id,mid,'ok')}catch(e){if(notPend(e)){doneSt(id,'gone');return}el.disabled=false;return err(e)}
- delete X.media[mid];doneSt(id,'ok');
- if(z){if(!ZC)ZC=zcNew();const i=ZC.z.findIndex(x=>!x);ZC.z[i<0?0:i]=du;ZC.sent=0;go('zc')}
- else{openAdd({type:'exp',cat:sup.id});A.step='scan';A.pg=[du];A.hi=[du];A.fid=null;sheetDraw();ACT.scanGo()}};
+ const run=async()=>{el.disabled=true;
+  try{await scMark(id,mid,'ok')}catch(e){if(notPend(e)){doneSt(id,'gone');mdFree(mid);return}el.disabled=false;return err(e)}
+  doneSt(id,'ok');mdFree(mid);
+  if(z){/* דוח Z: תמיד סגירה חדשה, התמונה בחלק הראשון (צילום הקופה הפותחת של היום נשמר) */const o=ZC&&ZC.o||null;ZC=zcNew();ZC.o=o;ZC.z[0]=du;go('zc')}
+  else{openAdd({type:'exp',cat:sup.id});A.step='scan';A.pg=[du];A.hi=[du];A.fid=null;sheetDraw();ACT.scanGo()}};
+ /* בסגירת הקופה כבר יש צילומים או פרטים של דוח אחר – לא דורסים בשקט */
+ if(z&&ZC&&(ZC.z.some(Boolean)||ZC.f))return ask('בסגירת הקופה כבר יש צילומים או פרטים של דוח אחר. להתחיל סגירה חדשה עם התמונה הזו? הצילומים והפרטים הקודמים יימחקו מהמסך.',run,'כן, סגירה חדשה');
+ run()};
 ACT.secTkOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=mdCard(id);
  if(!c)return toast(AGAIN);const du=(X.media||{})[mid]||'',txt=String(c.txt||'').trim().slice(0,500);
  if(!du&&!(m&&m.mvia==='video')&&c.eyVia!=='video')return toast(AGAIN);
@@ -1536,7 +1549,7 @@ ACT.secTkOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||
  try{await fsx('/tasks?documentId='+encodeURIComponent(tid),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e&&e.code===409)dup=1;else{el.disabled=false;return toast(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה')}}
  if(du&&!dup){try{await tkPutImg(tid,'m1',du)}catch(e){toast('המשימה נוצרה, אבל התמונה לא הועלתה');try{await tkPatch(tid,{mi:0})}catch(e2){}}}
  try{await scMark(id,mid,'ok')}catch(e){}
- if(X.media)delete X.media[mid];doneSt(id,'ok');toast(dup?'✓ המשימה כבר נפתחה':'✓ המשימה נוספה');try{await tkLoad()}catch(e){}
+ doneSt(id,'ok');mdFree(mid);toast(dup?'✓ המשימה כבר נפתחה':'✓ המשימה נוספה');try{await tkLoad()}catch(e){}
  if(cur().v==='sec')rerender()};
 
 window.__sec=X;

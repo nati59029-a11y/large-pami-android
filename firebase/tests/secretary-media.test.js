@@ -356,6 +356,8 @@ describe('שלב 2: op:"mark" ו-secMediaClean', () => {
     assert.equal((await eyes()).length, 0);
     // סרטון: כרטיס משימה עם via video; הודעה ישנה (25 שעות) – לא מוצגת
     await put(`b/${A}/sec_chat/${M1}/m/old1`, { t: Date.now() - 25 * 3600e3, role: 'a', text: 'x', mvia: 'image', mc: true, cards: [{ id: 'tk0123456789abcdef', k: 'task', txt: 'ישן' }] });
+    // יותר מ-20 הודעות ישנות עם כרטיס שלא הוכרע (mc נשאר true) – לא דוחקות את הכרטיס החדש
+    for (let i = 0; i < 25; i++) await put(`b/${A}/sec_chat/${M1}/m/old${String(i).padStart(2, '0')}x`, { t: Date.now() - (26 + i) * 3600e3, role: 'a', text: 'x', mvia: 'image', mc: true, cards: [{ id: 'tk' + String(i).padStart(2, '0') + '23456789abcdef', k: 'task', txt: 'ישן ' + i }] });
     await put(`b/${A}/sec_chat/${M1}/m/v1`, { t: Date.now() - 3600e3, role: 'a', text: 'x', mvia: 'video', mc: true, cards: [{ id: 'tkfedcba9876543210', k: 'task', txt: 'מהסרטון' }] });
     ey = await eyes();
     assert.equal(ey.length, 1); assert.equal(ey[0].act.via, 'video'); assert.equal(ey[0].act.txt, 'מהסרטון');

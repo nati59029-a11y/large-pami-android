@@ -19,7 +19,7 @@
 //   { id:'sc<16 hex>', k:'scan', doc:'inv'|'rcpt'|'dn'|'z', low?:true }  – רק בתמונה, רק כשהסיווג אינו 'other'. low = ביטחון נמוך
 //   { id:'tk<16 hex>', k:'task', txt }                                   – הצעת משימה (תמונה או סרטון). אחרי הכרעה: st:'ok'|'no', stAt
 // הודעת המזכירה עם כרטיס scan/task פתוח: mc:true (ו-false אחרי שכולם הוכרעו). "מול העיניים" (secLearn eyes) מציג כרטיסים פתוחים
-//   מ-24 השעות האחרונות: { k:'media', id:'md:<cid>', act:{ k:'scan'|'task', id:<cid>, mid, doc?, txt?, via } }.
+//   מ-24 השעות האחרונות (100 ההודעות האחרונות לפי t, mc מסונן בזיכרון): { k:'media', id:'md:<cid>', act:{ k:'scan'|'task', id:<cid>, mid, doc?, txt?, via } }.
 // הודעת המשתמש ב-sec_chat: { t, role:'u', text: cap או '', via:'image'|'video' } (בלי הקובץ). secChat מקבל via:'voice' (אופציונלי).
 // secState מחזיר media: { aud: שניות|0, img: bool, vid: שניות|0 } (0 = כבוי). secAdminGet: media, mediaSet, mediaDefault, mediaMax.
 // secAdminSetCfg({ media: { aud?, img?, vid? } | null }) – מנהל־על; null = חזרה לברירת המחדל (120 / true / 60). גבולות: קול 0–300, סרטון 0–60.
@@ -386,7 +386,7 @@ async function see(g, input, med, vidPath, bucket) {
   const ua = col.doc(), aa = col.doc();
   b.set(ua, { t: now, role: 'u', text: cap, via: kind });
   const am = { t: now + 1, role: 'a', text: reply, mode, deep: false, src: [], mvia: kind }; // mvia – תשובה לתמונה/סרטון (כרטיס משימה מסרטון – בלי קובץ)
-  if (cards.length) { am.cards = cards; am.mc = true; } // mc – "יש כרטיס מדיה פתוח" (שאילתת "מול העיניים" בשדה אחד); mark מנקה כשאין עוד פתוח
+  if (cards.length) { am.cards = cards; am.mc = true; } // mc – "יש כרטיס מדיה פתוח" ("מול העיניים" מסנן לפיו); mark מנקה כשאין עוד פתוח
   b.set(aa, am);
   logMedia(b, db, who.uid, 'k=' + (kind === 'video' ? 'vid' : 'img') + ',s=' + Math.round(sec) + ',kb=' + Math.round(bytes / 1024) + ',mode=' + mode + ',cls=' + parsed.cls + ',mc=' + mc);
   await b.commit();

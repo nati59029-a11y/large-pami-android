@@ -216,6 +216,7 @@ async function saveRoute(db, b, uid, r, src, now, rid) {
 // hold:true – בקשה של מסך "לטיפול": קודם רק הכללים; אין כלל "לטיפול" → תשובה מיידית בלי שאר השאילתות. לא נרשמת כניסה
 // ===================================================================================
 const EY_OPEN = 30, EY_DID = 30, EY_DAYS = 7;
+const MC_SCAN = 100; // "מול העיניים": כמה הודעות שיחה אחרונות (24 שעות) נבדקות לכרטיסי מדיה פתוחים
 const DRAFT_KIND = { open: 'הודעת פתיחה', ack: '"קיבלנו"' };
 async function eyes(g, input, now) {
   const { who, db, brLimited, brs, cfg } = g;
@@ -249,8 +250,9 @@ async function eyes(g, input, now) {
     out3 ? q(db.collection('sec_draft').where('t', '>', since).limit(40)) : empty,
     q(db.collection('sec_inv').where('t', '>', since).limit(40)),
     cfg.learn ? q(db.collection('sec_mrule').where('uid', '==', who.uid).limit(L.MAX_RULES + 5)) : empty,
-    // 15.11.2026 (קול, תמונה וסרטון): הודעות עם כרטיס מדיה פתוח (mc – שדה אחד, בלי אינדקס מורכב). מוצגות רק מ-24 השעות האחרונות (התמונה נשמרת רק בזיכרון המכשיר)
-    q(db.collection(`sec_chat/${who.uid}/m`).where('mc', '==', true).limit(20)),
+    // 15.11.2026 (קול, תמונה וסרטון): הודעות עם כרטיס מדיה פתוח – רק מ-24 השעות האחרונות (התמונה נשמרת רק בזיכרון המכשיר).
+    // שואלים לפי t (שדה אחד, בלי אינדקס מורכב), מהחדשה לישנה, ומסננים mc בזיכרון: כרטיסים ישנים שלא הוכרעו (mc נשאר true) לא דוחקים כרטיסים חדשים
+    q(db.collection(`sec_chat/${who.uid}/m`).where('t', '>', now - 864e5).orderBy('t', 'desc').limit(MC_SCAN)),
   ]);
   const MORN = RM.MORNING;
   const IVK = { inv: 'חשבונית', cr: 'הודעת זיכוי', rcpt: 'קבלה', dn: 'תעודת משלוח', chk: 'צ׳ק', unk: 'מסמך', bad: 'קובץ שלא נקלט', long: 'קובץ ארוך' };
@@ -267,7 +269,7 @@ async function eyes(g, input, now) {
   const MDOC = { inv: 'חשבונית', rcpt: 'קבלה', dn: 'תעודת משלוח', z: 'דוח Z' };
   for (const d of mm.docs) {
     const x = d.data(); const t = x.t || 0;
-    if (now - t > 864e5 || !Array.isArray(x.cards)) continue;
+    if (x.mc !== true || now - t > 864e5 || !Array.isArray(x.cards)) continue;
     const via = x.mvia === 'video' ? 'video' : 'image';
     for (const c of x.cards) {
       if (!c || c.st || typeof c.id !== 'string' || (c.k !== 'scan' && c.k !== 'task')) continue;
