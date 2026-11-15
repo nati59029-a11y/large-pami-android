@@ -202,7 +202,7 @@ function step5(){
  if(W.busy)h+=`<div class="s3info" role="status">${esc2(W.busy)}</div>`;
  if(W.msg)h+=`<div class="ban s3warn" role="alert">${esc2(W.msg)}</div>`;
  return h+`<div class="row s3row"><button class="btn grow" data-a="s3wMake"${W.busy?' disabled':''}>קבעו סבב</button><button class="btn g" data-a="s3wEnd">דלגו</button></div>`}
-V.st3w=()=>{const T='הקמת החנות בתלת מימד';
+V.st3w=()=>{const T='הקמת תלת מימד';
  if(!loggedIn()||!U.feat())return{t:T,h:'<div class="empty">תלת מימד לא מופעל בעסק הזה</div>'};
  if(!U.canDraw())return{t:T,h:'<div class="empty">אין לכם הרשאה להקים מפה בעסק הזה</div>'};
  if(W.own!==me())reset(W.kind);
