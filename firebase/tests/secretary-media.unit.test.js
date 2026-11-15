@@ -32,10 +32,22 @@ describe('secretary-media: סוג ואורך לפי התוכן', () => {
   it('סרטון מזויף (תיקון סבב 1): WebM עם Duration קצר – לפי זמן הבלוקים; MP4 – מקסימום של mvhd/tkhd/mdhd/stts; קובץ מקוטע – נדחה', () => {
     assert.ok(Math.abs(M.webmSec(F.webm(300, { duration: true, claim: 10 })) - 300) < 0.01);
     assert.ok(Math.abs(M.webmSec(F.webm(10, { duration: true, claim: 12 })) - 12) < 0.01);
-    assert.equal(M.isoSec(F.mp4(300, 'isom', 64, { claim: 10, trak: true })), 300);
+    assert.equal(M.isoSec(F.mp4(300, 'isom', 64, { claim: 10 })), 300);
     assert.equal(M.isoSec(F.mp4(300, 'isom', 64, { claim: 10, trak: true, all: true })), 300, 'גם כשכל הכותרות מזויפות – stts');
     assert.equal(M.isoSec(F.mp4(20, 'isom', 64, { trak: true })), 20);
     assert.equal(M.isoSec(F.mp4(20, 'isom', 64, { frag: true })), null);
+  });
+  it('תיקון סבב 2: Void / אלמנט לא מוכר באשכול מדולג; עצירה באמצע או בלי בלוקים – נדחה; תיבה פגומה או בלי stts ב-MP4 – נדחה', () => {
+    assert.ok(Math.abs(M.webmSec(F.webm(300, { duration: true, claim: 10, void: true })) - 300) < 0.01, 'Void לפני ה-Timecode ולפני כל בלוק');
+    assert.ok(Math.abs(M.webmSec(F.webm(20, { void: true })) - 20) < 0.01);
+    assert.equal(M.webmSec(F.webm(300, { duration: true, claim: 10, noBlocks: true })), null, 'אשכולות בלי בלוקים');
+    assert.equal(M.webmSec(F.webm(300, { duration: true, claim: 10, unknownKid: true })), null, 'ילד בגודל לא ידוע – עצירה = דחייה');
+    const w = F.webm(30, { duration: true, claim: 10 });
+    assert.ok(Math.abs(M.webmSec(w.subarray(0, w.length - 5)) - 30) < 0.01, 'קובץ שנחתך בסוף – עדיין נקרא');
+    const junk = Buffer.concat([F.webm(5, { duration: true, claim: 5 }).subarray(0, 120), Buffer.alloc(400, 0)]);
+    assert.equal(M.webmSec(junk), null, 'אפסים באמצע (אלמנט פגום) – נדחה');
+    assert.equal(M.isoSec(F.mp4(300, 'isom', 64, { claim: 10, badBox: true })), null, 'תיבה פגומה לפני המסלול');
+    assert.equal(M.isoSec(F.mp4(300, 'isom', 64, { claim: 10, trak: false })), null, 'בלי stts – לא סומכים על mvhd לבד');
   });
   it('WebM כמו MediaRecorder (בלי Duration, אשכולות בגודל לא ידוע) ועם Duration', () => {
     const a = F.webm(20);

@@ -19,6 +19,7 @@ function size8(n) { const b = Buffer.alloc(8); b[0] = 0x01; let v = n; for (let 
 const el = (idHex, body, unknown) => Buffer.concat([Buffer.from(idHex, 'hex'), unknown ? UNKNOWN : size8(body.length), body]);
 const uint = (v, n) => { const b = Buffer.alloc(n); let x = v; for (let i = n - 1; i >= 0; i--) { b[i] = x & 0xff; x = Math.floor(x / 256); } return b; };
 function block(rel) { const b = Buffer.alloc(4 + 20); b[0] = 0x81; b.writeInt16BE(rel, 1); b[3] = 0x80; return el('a3', b); }
+// o.void – אלמנט Void (0xEC) בתחילת כל אשכול ולפני כל בלוק; o.noBlocks – אשכולות בלי בלוקים; o.unknownKid – ילד לא מוכר בגודל לא ידוע באשכול
 function webm(sec, o) {
   const opt = o || {};
   const ms = Math.round(sec * 1000);
@@ -26,8 +27,9 @@ function webm(sec, o) {
   if (opt.duration) { const d = Buffer.alloc(8); d.writeDoubleBE(opt.claim !== undefined ? opt.claim * 1000 : ms); info.push(el('4489', d)); }
   const parts = [el('1549a966', Buffer.concat(info)), el('1654ae6b', Buffer.from([0xae, 0x80]))];
   for (let t = 0; t <= ms; t += 5000) {
-    const kids = [el('e7', uint(t, 4))];
-    for (let r = 0; r < 5000 && t + r <= ms; r += 1000) kids.push(block(Math.min(r, ms - t)));
+    const kids = opt.void ? [el('ec', Buffer.alloc(4)), el('e7', uint(t, 4))] : [el('e7', uint(t, 4))];
+    if (opt.unknownKid) kids.push(el('ec', Buffer.alloc(0), true));
+    if (!opt.noBlocks) for (let r = 0; r < 5000 && t + r <= ms; r += 1000) { if (opt.void) kids.push(el('ec', Buffer.alloc(2))); kids.push(block(Math.min(r, ms - t))); }
     parts.push(el('1f43b675', Buffer.concat(kids), true));
   }
   const head = el('1a45dfa3', Buffer.concat([el('4282', Buffer.from('webm'))]));
@@ -35,14 +37,16 @@ function webm(sec, o) {
 }
 
 function box(type, body) { const h = Buffer.alloc(8); h.writeUInt32BE(8 + body.length, 0); h.write(type, 4, 'ascii'); return Buffer.concat([h, body]); }
-// o.claim – שניות "מזויפות" ב-mvhd (ובאופציה גם ב-tkhd/mdhd: o.all); o.trak – מסלול עם tkhd, mdhd ו-stts אמיתי (sec); o.frag – קובץ מקוטע (moof)
+// o.claim – שניות "מזויפות" ב-mvhd (ובאופציה גם ב-tkhd/mdhd: o.all); מסלול עם tkhd, mdhd ו-stts אמיתי (sec) – תמיד, חוץ מ-o.trak === false;
+// o.frag – קובץ מקוטע (moof); o.badBox – תיבה פגומה (גודל 3) בתוך moov לפני המסלול
 function mp4(sec, brand, pad, o) {
   const opt = o || {};
   const ftyp = box('ftyp', Buffer.concat([Buffer.from((brand || 'isom').padEnd(4, ' '), 'ascii'), Buffer.alloc(4)]));
   const head = opt.claim !== undefined ? opt.claim : sec;
   const mv = Buffer.alloc(100); mv[0] = 0; mv.writeUInt32BE(1000, 12); mv.writeUInt32BE(Math.round(head * 1000), 16);
   const kids = [box('mvhd', mv)];
-  if (opt.trak) {
+  if (opt.badBox) kids.push(Buffer.from([0, 0, 0, 3, 0x66, 0x72, 0x65, 0x65]));
+  if (opt.trak !== false) {
     const hs = opt.all ? head : sec;
     const tk = Buffer.alloc(84); tk.writeUInt32BE(Math.round(hs * 1000), 20);
     const md = Buffer.alloc(24); md.writeUInt32BE(1000, 12); md.writeUInt32BE(Math.round(hs * 1000), 16);

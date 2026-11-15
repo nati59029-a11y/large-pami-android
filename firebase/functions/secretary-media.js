@@ -121,7 +121,7 @@ function vidMime(b) {
   }
   return '';
 }
-// MP4 / MOV / 3GP. תיקון סבב 1: האורך = המקסימום מכל המקורות – mvhd, ולכל מסלול tkhd, mdhd וסכום זמני הדגימות (stts) –
+// MP4 / MOV / 3GP. תיבה לא מוכרת מדולגת לפי הגודל שלה. תיקון סבב 1: האורך = המקסימום מכל המקורות – mvhd, ולכל מסלול tkhd, mdhd וסכום זמני הדגימות (stts) –
 // כדי שכותרת אחת מזויפת לא תקצר את הסרטון. קובץ מקוטע (moof) – נדחה (null): האורך האמיתי שלו לא נמצא בכותרות האלה.
 function isoSec(b) {
   const boxes = (from, to, cb) => {
@@ -129,13 +129,14 @@ function isoSec(b) {
     while (p + 8 <= to) {
       let size = b.readUInt32BE(p), hdr = 8;
       const type = b.toString('ascii', p + 4, p + 8);
-      if (size === 1) { if (p + 16 > to) return; size = Number(b.readBigUInt64BE(p + 8)); hdr = 16; } else if (size === 0) size = to - p;
-      if (size < hdr) return;
+      if (size === 1) { if (p + 16 > to) { bad = true; return; } size = Number(b.readBigUInt64BE(p + 8)); hdr = 16; } else if (size === 0) size = to - p;
+      if (size < hdr || !Number.isFinite(size)) { bad = true; return; } // תיקון סבב 2: תיבה פגומה – לא ממשיכים עם הערכים שנקראו עד כאן
+      if (++cnt > 2000000) { bad = true; return; }
       cb(type, p + hdr, Math.min(p + size, to));
       p += size;
     }
   };
-  let best = -1, mvTs = 0, frag = false;
+  let best = -1, mvTs = 0, frag = false, bad = false, cnt = 0, stts = false;
   const add = (du, ts) => { if (ts > 0 && du >= 0 && Number.isFinite(du)) best = Math.max(best, du / ts); };
   const full = (s, e, v0, v1) => (b[s] === 1 ? (s + v1 <= e) : (s + v0 <= e));
   boxes(0, b.length, (t, s, e) => {
@@ -171,14 +172,16 @@ function isoSec(b) {
               const n = b.readUInt32BE(s6 + 4);
               let sum = 0;
               for (let k = 0; k < n && s6 + 8 + k * 8 + 8 <= e6; k++) sum += b.readUInt32BE(s6 + 8 + k * 8) * b.readUInt32BE(s6 + 12 + k * 8);
-              add(sum, mdTs);
+              if (mdTs > 0) { stts = true; add(sum, mdTs); }
             });
           });
         });
       });
     });
   });
-  if (frag) return null;
+  // תיקון סבב 2: תיבה פגומה, קובץ מקוטע, או בלי זמני דגימות (stts) באף מסלול – נדחה (לא סומכים רק על הכותרות המוצהרות).
+  // גבול מוכר: קובץ שכל הכותרות וגם stts מזויפים בו יחד – מזוהה רק בפענוח הדגימות (לא נעשה כאן)
+  if (frag || bad || !stts) return null;
   return best >= 0 ? best : null;
 }
 // WebM (EBML): Info.Duration אם קיים; אחרת (MediaRecorder לא כותב משך) – הזמן המרבי של בלוק באשכולות (Cluster)
@@ -192,47 +195,58 @@ function vint(b, p, keep) {
   return { v, len, unknown: !keep && ones };
 }
 function uintAt(b, p, n) { let v = 0; for (let i = 0; i < n; i++) v = v * 256 + b[p + i]; return v; }
+// תיקון סבב 2 (בדיקה עצמאית): סריקה "בטוחה בכשל" – אלמנט לא מוכר (Void וכו') מדולג לפי הגודל שלו; אשכול בגודל לא ידוע נגמר
+// רק באלמנט של רמת הפלח (Cluster, Cues, Tags...). כל עצירה לפני סוף הקובץ (אלמנט פגום, גודל לא ידוע שאי אפשר לדלג עליו,
+// יותר מדי אלמנטים) = הסרטון נדחה (null), כדי שלא יישאר רק Duration המוצהר. בלי אף בלוק – נדחה.
+// גבול מוכר: זמני הבלוקים עצמם אפשר לזייף רק בפענוח מלא של הדגימות – לא נעשה כאן.
 function webmSec(b) {
-  let scale = 1e6, dur = 0, maxT = -1;
+  let scale = 1e6, dur = 0, maxT = -1, ok = true, n = 0;
   const el = (p) => { const id = vint(b, p, true); if (!id) return null; const sz = vint(b, p + id.len, false); if (!sz) return null; const body = p + id.len + sz.len; return { id: id.v, body, size: sz.v, unknown: sz.unknown, end: sz.unknown ? b.length : Math.min(b.length, body + sz.v) }; };
-  const CL_KIDS = new Set([0xe7, 0xa3, 0xa0, 0xa7, 0xab, 0xbf, 0x5854]);
+  const SEG_KIDS = new Set([0x1f43b675, 0x1c53bb6b, 0x1254c367, 0x1043a770, 0x1941a469, 0x114d9b74, 0x1549a966, 0x1654ae6b]);
+  const MAX_EL = 2000000;
+  const nearEnd = (p) => b.length - p < 16; // שאריות קצרות בסוף קובץ שנחתך – לא נחשבות עצירה
   const blockT = (p, ctc) => { const tn = vint(b, p, false); if (tn && p + tn.len + 2 <= b.length) maxT = Math.max(maxT, ctc + b.readInt16BE(p + tn.len)); };
-  let p = 0;
-  const h = el(p);
+  const h = el(0);
   if (!h || h.id !== 0x1a45dfa3 || h.unknown) return null;
-  p = h.end;
-  const seg = el(p);
+  const seg = el(h.end);
   if (!seg || seg.id !== 0x18538067) return null;
-  p = seg.body;
-  let guard = 0;
-  while (p < seg.end && guard++ < 200000) {
+  let p = seg.body;
+  while (p < seg.end) {
+    if (++n > MAX_EL) { ok = false; break; }
     const e = el(p);
-    if (!e) break;
-    if (e.id === 0x1549a966) { // Info
-      for (let q = e.body; q < e.end;) { const k = el(q); if (!k || k.unknown) break;
-        if (k.id === 0x2ad7b1 && k.size <= 8) scale = uintAt(b, k.body, k.size) || 1e6;
+    if (!e) { ok = nearEnd(p); break; }
+    if (e.id === 0x1549a966) { // Info – רק Duration ו-TimecodeScale
+      if (e.unknown) { ok = false; break; }
+      for (let q = e.body; q < e.end;) {
+        const k = el(q); if (!k || k.unknown) break;
+        if (k.id === 0x2ad7b1 && k.size >= 1 && k.size <= 8) scale = uintAt(b, k.body, k.size) || 1e6;
         else if (k.id === 0x4489 && (k.size === 4 || k.size === 8) && k.body + k.size <= b.length) dur = k.size === 4 ? b.readFloatBE(k.body) : b.readDoubleBE(k.body);
-        q = k.end; }
-      p = e.end;
-    } else if (e.id === 0x1f43b675) { // Cluster (גם בגודל לא ידוע – עד האלמנט הבא שאינו ילד של אשכול)
-      let ctc = 0, q = e.body;
-      while (q < e.end) {
-        const k = el(q);
-        if (!k || !CL_KIDS.has(k.id) || k.unknown) break;
-        if (k.id === 0xe7 && k.size <= 8) ctc = uintAt(b, k.body, k.size);
-        else if (k.id === 0xa3) blockT(k.body, ctc);
-        else if (k.id === 0xa0) { for (let r = k.body; r < k.end;) { const g = el(r); if (!g || g.unknown) break; if (g.id === 0xa1) blockT(g.body, ctc); r = g.end; } }
         q = k.end;
       }
+      p = e.end;
+    } else if (e.id === 0x1f43b675) { // Cluster
+      let ctc = 0, q = e.body;
+      while (q < e.end) {
+        if (++n > MAX_EL) { ok = false; break; }
+        const k = el(q);
+        if (!k) { if (!nearEnd(q)) ok = false; q = b.length; break; }
+        if (e.unknown && SEG_KIDS.has(k.id)) break; // סוף אשכול בגודל לא ידוע
+        if (k.unknown) { ok = false; break; }
+        if (k.id === 0xe7 && k.size >= 1 && k.size <= 8) ctc = uintAt(b, k.body, k.size);
+        else if (k.id === 0xa3) blockT(k.body, ctc);
+        else if (k.id === 0xa0) { for (let r = k.body; r < k.end;) { const g = el(r); if (!g || g.unknown) break; if (g.id === 0xa1) blockT(g.body, ctc); r = g.end; } }
+        q = k.end; // כל אלמנט אחר (Void, לא מוכר) – מדלגים לפי הגודל
+      }
+      if (!ok) break;
       p = e.unknown ? q : e.end;
     } else {
-      if (e.unknown) break;
+      if (e.unknown) { ok = nearEnd(e.body); break; }
       p = e.end;
     }
   }
-  // תיקון סבב 1: המקסימום בין Duration המוצהר לזמן הבלוק המרבי (Duration מזויף קצר לא מקצר את הסרטון)
-  const m = Math.max(dur > 0 ? dur : -1, maxT);
-  return m >= 0 ? (m * scale) / 1e9 : null;
+  if (!ok || maxT < 0) return null;
+  const m = Math.max(dur > 0 ? dur : -1, maxT); // המקסימום בין Duration המוצהר לזמן הבלוק המרבי
+  return (m * scale) / 1e9;
 }
 const vidSec = (buf, mime) => (mime === 'video/webm' ? webmSec(buf) : isoSec(buf));
 
