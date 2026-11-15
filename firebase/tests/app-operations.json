@@ -1696,6 +1696,35 @@
     "manager"
    ],
    "note": "מרכז עבודה סבב 2: יעד גמיש, עדיפות, נושא, משך ורשימת סימון. נשלח רק כשהגלאי מצא כללים חדשים."
+  },
+  {
+   "id": "M120",
+   "line": 3680,
+   "snippet": "fsx('/cfg/tkw')",
+   "fn": "tkWpGet (הגדרת עסק \"עובדים רשאים לקבוע עדיפות ויעד\", tasks-wc.js W.wpChk)",
+   "collection": "cfg",
+   "op": "get",
+   "rest": "GET /cfg/tkw",
+   "condition": "המסמך cfg/tkw (שדה wp). אין מסמך (404) = מותר",
+   "who": [
+    "manager",
+    "employee"
+   ],
+   "note": "נשמר במכשיר לכל עסק ל-10 דקות. אכיפה בממשק בלבד. אותו כלל של cfg/main (קריאה לצוות)."
+  },
+  {
+   "id": "M121",
+   "line": 3680,
+   "snippet": "fsx('/cfg/tkw',{method:'PATCH'",
+   "fn": "tkWpSet (ACT.tkwWp ב-tasks-wc.js)",
+   "collection": "cfg",
+   "op": "create+update",
+   "rest": "PATCH /cfg/tkw (בלי updateMask – יוצר אם אין)",
+   "condition": "המסמך cfg/tkw; שדה wp (בוליאני)",
+   "who": [
+    "manager"
+   ],
+   "note": "מנהל מדליק/מכבה \"עובדים רשאים לקבוע עדיפות ויעד למשימות שלהם\". אותו כלל של cfg/main (כתיבה למנהל)."
   }
  ],
  "fsbLine": 2625,

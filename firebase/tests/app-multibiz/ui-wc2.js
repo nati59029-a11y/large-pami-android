@@ -13,6 +13,7 @@ const T0 = H.T0, D1 = 864e5, H1 = 36e5; // T0 = יום ג' 3.11.2026 11:00 שע�
 const DOCS = 'projects/demo-largpeami/databases/(default)/documents/';
 let DB, LOG, RV; // RV: 'old' (403) / 'new' (404); NEWF403: יצירה עם שדות חדשים נדחית (כללים ישנים אחרי שהגלאי אמר "חדשים")
 let NEWF403 = false;
+let WP; // הגדרת cfg/tkw.wp בענן המדומה
 const reset = () => { DB = { tasks: {}, ptk: {}, rtk: {}, rq: {}, staff: {} }; LOG = []; };
 const docOf = (col, id) => ({ name: DOCS + col + '/' + id, fields: DB[col][id], createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
 const MINE = new Set(['tasks', 'ptk', 'rtk', 'rq']);
@@ -23,6 +24,9 @@ async function mockCloud(ctx, who) {
     const i = p.indexOf('/documents'); if (i < 0) return route.fallback(); const rest = p.slice(i + 10);
     const ok = (o) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(o) });
     const err = (c, s) => route.fulfill({ status: c, contentType: 'application/json', body: JSON.stringify({ error: { code: c, message: s, status: s } }) });
+    if (rest === '/cfg/tkw') { // הגדרת עסק: WP undefined = אין מסמך (404), true/false = הערך השמור; כתיבה רק למנהל
+      if (m === 'PATCH') { WP = JSON.parse(body).fields.wp.booleanValue; LOG.push({ who, m, col: 'cfg', f: JSON.parse(body).fields }); return ok({ name: DOCS + 'cfg/tkw', fields: { wp: { booleanValue: WP } } }); }
+      LOG.push({ who, m, col: 'cfg' }); return WP === undefined ? err(404, 'NOT_FOUND') : ok({ name: DOCS + 'cfg/tkw', fields: { wp: { booleanValue: WP } } }); }
     if (rest === '/rv/tk2') { LOG.push({ who, m, col: 'rv' }); return RV === 'old' ? err(403, 'PERMISSION_DENIED') : err(404, 'NOT_FOUND'); }
     if (rest === ':runQuery') {
       let q = {}; try { q = JSON.parse(body).structuredQuery; } catch (e) { /* */ }
@@ -238,6 +242,51 @@ const noOverflow = (page) => page.evaluate(() => document.documentElement.scroll
   check('44 360px: אין גלילה אופקית (מנהל)', await noOverflow(page));
   check('45 אין שגיאות JS (מנהל)', page.__errors.length === 0, page.__errors);
   await mm.ctx.close();
+
+  // ================= הגדרת עסק: עובדים רשאים לקבוע עדיפות ויעד (cfg/tkw.wp) =================
+  const formOpen = async (x) => { await x.page.evaluate(() => { TKT = 'open'; go('tk'); }); await sleep(900); await x.page.evaluate(() => tkLoad()); await sleep(600); if (await x.page.$('[data-a=tkwFold]')) { await x.page.click('[data-a=tkwFold]'); await sleep(300); } };
+  const hasChips = (pg) => pg.evaluate(() => !!document.querySelector('form[data-f=tkAdd] [data-a=tkwDk]') && !!document.querySelector('form[data-f=tkAdd] [data-a=tkwPri]'));
+  // ברירת מחדל (אין מסמך = 404): מותר
+  seed(); RV = 'new'; WP = undefined;
+  w = await open('w-wp-def', 'w1@x.co'); wp = w.page; await formOpen(w);
+  check('46 הגדרת עסק – ברירת מחדל (אין מסמך): עובד רואה יעד ועדיפות', await hasChips(wp));
+  await w.ctx.close();
+  // כבוי – עובד
+  seed(); WP = true; LOG = [];
+  w = await open('w-wp-off', 'w1@x.co'); wp = w.page; await formOpen(w);
+  await wp.click('[data-a=tkwDk][data-v=tm]'); await wp.click('[data-a=tkwPri][data-v=h]'); // ערכים שנבחרו לפני שהמנהל כיבה
+  WP = false; await wp.evaluate(() => { localStorage.removeItem(LK('lp-tk-wp')); TKW.wpChk(); }); await sleep(800);
+  check('47 מתג כבוי: עובד לא רואה צ\'יפי יעד/עדיפות, רואה הסבר 3 ימי עסקים; אין מתג', !(await wp.$('form[data-f=tkAdd] [data-a=tkwDk]')) && !(await wp.$('form[data-f=tkAdd] [data-a=tkwPri]')) && !(await wp.$('[data-a=tkwWp]')) && /3 ימי עסקים/.test(await txt(wp, 'form[data-f=tkAdd]')));
+  check('48 מתג כבוי: משך/נושא/רשימת סימון נשארים', !!(await wp.$('[data-a=tkwMore]')));
+  await wp.fill('form[data-f=tkAdd] textarea', 'משימת עובד בלי עדיפות'); await wp.click('[data-a=tkwMore]'); await sleep(100); await wp.fill('input[data-i=tkwCat]', 'קופה');
+  await wp.click('form[data-f=tkAdd] button.btn.w'); await waitFor(async () => LOG.some((l) => l.m === 'POST' && l.col === 'tasks'));
+  const pw = LOG.find((l) => l.m === 'POST' && l.col === 'tasks');
+  check('49 מתג כבוי: עובד יוצר משימה בלי dl ובלי pri (3 ימי עסקים, רגילה); הנושא נשמר', pw && !('dl' in pw.f) && !('pri' in pw.f) && pw.f.cat && pw.f.cat.stringValue === 'קופה', pw && Object.keys(pw.f));
+  check('50 360px בלי גלילה אופקית ובלי שגיאות JS (עובד, כבוי)', await noOverflow(wp) && wp.__errors.length === 0, wp.__errors);
+  await shot(wp, shots, 'w-wp-off');
+  await w.ctx.close();
+  // כבוי – מנהל: הכול נשאר + המתג; הפעלה כותבת cfg/tkw
+  seed(); WP = false; LOG = [];
+  const mg = await open('m-wp', 'm@x.co'); const mp = mg.page; await formOpen(mg);
+  check('51 מתג כבוי – מנהל: צ\'יפי יעד/עדיפות נשארים, המתג מוצג כבוי', await hasChips(mp) && await mp.evaluate(() => { const b = document.querySelector('[data-a=tkwWp]'); return !!b && b.getAttribute('aria-pressed') === 'false'; }));
+  await mp.click('[data-a=tkwWp]'); await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && l.col === 'cfg'));
+  await sleep(300);
+  check('52 הפעלת המתג: PATCH cfg/tkw עם wp=true, והמתג מוצג דלוק', WP === true && await mp.evaluate(() => document.querySelector('[data-a=tkwWp]').getAttribute('aria-pressed') === 'true'), WP);
+  await mp.click('[data-a=tkwWp]'); await waitFor(async () => WP === false); await sleep(300);
+  check('53 כיבוי המתג: wp=false נשמר', WP === false && await mp.evaluate(() => document.querySelector('[data-a=tkwWp]').getAttribute('aria-pressed') === 'false'));
+  check('54 360px בלי גלילה אופקית ובלי שגיאות JS (מנהל, מתג)', await noOverflow(mp) && mp.__errors.length === 0, mp.__errors);
+  await shot(mp, shots, 'm-wp');
+  await mg.ctx.close();
+  // דלוק – עובד רואה
+  seed(); WP = true;
+  w = await open('w-wp-on', 'w1@x.co'); wp = w.page; await formOpen(w);
+  check('55 מתג דלוק: עובד רואה יעד ועדיפות', await hasChips(wp));
+  await w.ctx.close();
+  // כללים ישנים: השדות מוסתרים ממילא
+  seed(); RV = 'old'; WP = false;
+  w = await open('w-wp-old', 'w1@x.co'); wp = w.page; await formOpen(w);
+  check('56 כללים ישנים: אין יעד/עדיפות, ואין שגיאות JS', !(await hasChips(wp)) && wp.__errors.length === 0, wp.__errors);
+  await w.ctx.close();
 
   await browser.close();
   console.log(fail ? `נכשלו ${fail} בדיקות` : 'כל הבדיקות עברו'); process.exit(fail ? 1 : 0);

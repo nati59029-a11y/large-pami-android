@@ -231,6 +231,15 @@ const rvSet=v=>{const c=rvC(),ch=!c||c.v!==v;wr(RVK(),{v,t:Date.now()});if(ch){t
 W.rv=rvNew;
 W.rvChk=f=>{if(!on()||rvB||typeof tkRv!=='function')return;const c=rvC(),n=Date.now();if(!f&&c&&n-c.t<RVT&&c.t<=n)return;rvB=1;
  tkRv().then(v=>{if(v===0||v===1)rvSet(v)}).catch(()=>{}).then(()=>{rvB=0})};
+/* ---- הגדרת עסק: "עובדים רשאים לקבוע עדיפות ויעד" (cfg/tkw, שדה wp; המנהל כותב, כל הצוות קורא; אין ערך = מותר). אכיפה בממשק בלבד.
+   נשמר במכשיר לכל עסק ל-10 דקות. כשל בטעינה (רשת) – נשאר מה שנשמר, ובלי ערך שמור – מותר ---- */
+const WPK=()=>LK('lp-tk-wp'),WPT=10*MIN;let wpB=0,wpF=0;
+const wpC=()=>{const c=rd(WPK(),null);return c&&typeof c==='object'&&(c.v===0||c.v===1)?c:null};
+const wpOk=()=>{const c=wpC();return !c||c.v!==0};
+const wpLim=()=>on()&&!fbAdmin()&&!wpOk();
+const wpSet=v=>{const ch=wpOk()!==!!v;wr(WPK(),{v:v?1:0,t:Date.now()});if(ch)tkRe()};
+W.wpChk=()=>{if(!on()||wpB||typeof tkWpGet!=='function')return;const c=wpC(),n=Date.now();if(c&&n-c.t<WPT&&c.t<=n)return;if(n-wpF<6e4)return;wpB=1;
+ tkWpGet().then(v=>{if(v===0||v===1)wpSet(v);else wpF=Date.now()}).catch(()=>{wpF=Date.now()}).then(()=>{wpB=0})};
 /* ---- סבב 2: תגיות, פס צבע ורשימת סימון בכרטיס ---- */
 const EST=[[0,'בלי'],[15,'15 דק׳'],[30,'30 דק׳'],[60,'שעה'],[120,'שעתיים']];
 const estTx=m=>{const e=EST.find(x=>x[0]===m);return e?e[1]:m>=60?(Math.round(m/6)/10)+' שע׳':m+' דק׳'};
@@ -263,18 +272,20 @@ ACT.tkwFold=()=>{W.fo=1;rerender();setTimeout(()=>{const t=document.querySelecto
 W.formX=()=>{if(!on())return '';
  if(!rvNew())return '<p class="note" style="margin:4px 0 2px">יעד לביצוע: '+NOTE72.replace(/^<p[^>]*>|<\/p>$/g,'')+'</p><p class="note" style="margin:0 0 8px">יעד גמיש, עדיפות, נושא ורשימת סימון – יופעל אחרי עדכון השרת.</p>';
  const ch=(a,v,t,o)=>`<button type="button" class="chip ${o?'on':''}" data-a="${a}" data-v="${esc(String(v))}" aria-pressed="${!!o}" style="min-height:36px;padding:0 12px">${t}</button>`;
+ W.wpChk();const lim=wpLim(),wpT=fbAdmin()?`<div class="f" style="margin:8px 0 2px"><button type="button" class="chip ${wpOk()?'on':''}" data-a="tkwWp" aria-pressed="${wpOk()}" style="min-height:36px;padding:0 12px">${wpOk()?'✓ ':''}עובדים רשאים לקבוע עדיפות ויעד למשימות שלהם</button><p class="note" style="margin:2px 0 0">הגדרה לכל העסק. כשהיא כבויה, עובד יוצר משימה בעדיפות רגילה וביעד של 3 ימי עסקים.</p></div>`:'';
  const DK=[['td','היום 23:59'],['tm','מחר'],['at','תאריך ושעה'],['d3','3 ימי עסקים'],['none','בלי יעד']];
- let h=`<div class="f" style="margin:6px 0 2px"><span>יעד לביצוע</span><div class="chips" style="margin:4px 0">${DK.map(d=>ch('tkwDk',d[0],d[1],FX.dk===d[0])).join('')}</div></div>`;
- if(FX.dk==='at')h+=`<div class="row" style="gap:8px"><label class="f grow"><span>תאריך</span><input type="date" data-i="tkwD" value="${esc(FX.d)}"></label><label class="f grow"><span>שעה</span><input type="time" data-i="tkwTm" value="${esc(FX.tm)}"></label></div>`;
- if(FX.dk==='d3')h+=NOTE72;
- h+=`<div class="f" style="margin:2px 0"><span>עדיפות</span><div class="chips" style="margin:4px 0">${[['h','דחוף'],['','רגילה'],['l','נמוכה']].map(p=>ch('tkwPri',p[0],p[1],FX.pri===p[0])).join('')}</div></div>`;
+ let h=lim?NOTE72:`<div class="f" style="margin:6px 0 2px"><span>יעד לביצוע</span><div class="chips" style="margin:4px 0">${DK.map(d=>ch('tkwDk',d[0],d[1],FX.dk===d[0])).join('')}</div></div>`;
+ if(!lim&&FX.dk==='at')h+=`<div class="row" style="gap:8px"><label class="f grow"><span>תאריך</span><input type="date" data-i="tkwD" value="${esc(FX.d)}"></label><label class="f grow"><span>שעה</span><input type="time" data-i="tkwTm" value="${esc(FX.tm)}"></label></div>`;
+ if(!lim&&FX.dk==='d3')h+=NOTE72;
+ if(!lim)h+=`<div class="f" style="margin:2px 0"><span>עדיפות</span><div class="chips" style="margin:4px 0">${[['h','דחוף'],['','רגילה'],['l','נמוכה']].map(p=>ch('tkwPri',p[0],p[1],FX.pri===p[0])).join('')}</div></div>`;
  const c=fxClean(),sm=[FX.est>0?estTx(FX.est):'',c.cat,c.ck.length?c.ck.length+' פריטים':''].filter(Boolean).join(' · ');
  h+=`<button type="button" class="btn g" data-a="tkwMore" aria-expanded="${!!FX.more}" style="margin:4px 0 8px;min-height:40px">${FX.more?'▴':'▾'} משך, נושא ורשימת סימון${sm?' ('+esc(sm)+')':''}</button>`;
  if(FX.more){const C=cats();
   h+=`<div class="f" style="margin:2px 0"><span>משך משוער</span><div class="chips" style="margin:4px 0">${EST.map(e=>ch('tkwEst',e[0],e[1],FX.est===e[0])).join('')}</div></div>
   <label class="f"><span>נושא</span><input data-i="tkwCat" list="tkwCats" maxlength="30" value="${esc(FX.cat)}" placeholder="למשל: מלאי, קופה, ניקיון" autocomplete="off"></label><datalist id="tkwCats">${C.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist>
   <div class="f"><span>רשימת סימון${FX.ck.length?' ('+FX.ck.length+'/20)':''}</span>${FX.ck.map((v,i)=>`<div class="row" style="gap:6px;margin:4px 0;flex-wrap:nowrap"><input data-i="tkwCkI" data-n="${i}" value="${esc(v)}" maxlength="120" placeholder="פריט ${i+1}" aria-label="פריט ${i+1}" style="flex:1;min-width:0"><button type="button" class="btn g" data-a="tkwCkDel" data-n="${i}" aria-label="הסר פריט ${i+1}" style="flex:none;min-height:40px;padding:0 12px">✕</button></div>`).join('')}${FX.ck.length<20?'<button type="button" class="btn g" data-a="tkwCkAdd" style="min-height:40px;margin:4px 0 8px">+ הוסף פריט</button>':''}<p class="note" style="margin:0 0 8px">הרשימה לא חוסמת "בוצע" – רק מזכירה.</p></div>`}
- return h};
+ return h+wpT};
+ACT.tkwWp=()=>{if(!fbAdmin())return;const v=!wpOk();tkWpSet(v).then(()=>{wpSet(v);toast(v?'✓ עובדים יכולים לקבוע עדיפות ויעד':'✓ עובדים לא יכולים לקבוע עדיפות ויעד')}).catch(e=>toast(tkErr(e)))};
 ACT.tkwDk=el=>{FX.dk=el.dataset.v;if(FX.dk==='at'&&!FX.d){const t=Date.now()+2*H,r=t-(t%(15*MIN))+15*MIN;FX.d=ymd(r);FX.tm=hhmm(r)}tkRe()};
 ACT.tkwPri=el=>{FX.pri=el.dataset.v||'';tkRe()};
 ACT.tkwEst=el=>{FX.est=+el.dataset.v||0;tkRe()};
@@ -290,11 +301,12 @@ W.fx=()=>{if(!on())return null;const X={msg:'',f:()=>({}),done:id=>{FX=FX0();W.f
    ks.forEach(k=>delete fl0[k]);X.msg='✓ המשימה נוספה (בלי עדיפות, נושא ורשימה – יופעלו אחרי עדכון השרת)';return true}};
  if(!rvNew())return X;
  const now=Date.now();let dl=null;
- if(FX.dk==='td')dl=atDay(0,23,59);else if(FX.dk==='tm')dl=atDay(1,23,59);else if(FX.dk==='none')dl=0;
+ const lim=wpLim();
+ if(lim){}else if(FX.dk==='td')dl=atDay(0,23,59);else if(FX.dk==='tm')dl=atDay(1,23,59);else if(FX.dk==='none')dl=0;
  else if(FX.dk==='at'){const dm=/^(\d{4})-(\d{2})-(\d{2})$/.exec(FX.d||''),tm=/^(\d{1,2}):(\d{2})/.exec(FX.tm||'');if(!dm||!tm){X.err='בחר תאריך ושעה ליעד';return X}
   dl=tkIL.at(+dm[1],+dm[2]-1,+dm[3],+tm[1],+tm[2]);if(dl<=now){X.err='היעד שנבחר כבר עבר. בחר זמן עתידי';return X}if(dl>now+399*864e5){X.err='אפשר לקבוע יעד עד שנה קדימה';return X}}
  const c=fxClean();
- X.f=()=>{const o={};if(dl!==null)o.dl=iv(Math.max(0,dl));if(FX.pri==='h'||FX.pri==='l')o.pri=sv(FX.pri);if(c.cat)o.cat=sv(c.cat);if(FX.est>0&&FX.est<=1440)o.est=iv(FX.est);
+ X.f=()=>{const o={};if(dl!==null)o.dl=iv(Math.max(0,dl));if(!lim&&(FX.pri==='h'||FX.pri==='l'))o.pri=sv(FX.pri);if(c.cat)o.cat=sv(c.cat);if(FX.est>0&&FX.est<=1440)o.est=iv(FX.est);
   if(c.ck.length){o.ck={arrayValue:{values:c.ck.map(sv)}};o.ckd={arrayValue:{}}}return o};
  return X};
 /* ---- סבב 3: בקשות למנהל (rq) – סוג פנייה k, שלב ph בתוך st=='new' ('' נשלחה, 'r' נקראה, 'w' בטיפול), "הפוך למשימה" (tk).

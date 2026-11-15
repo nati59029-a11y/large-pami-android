@@ -528,6 +528,13 @@ const REPLAY = {
     return [await fsx(uid, '/tasks/t_open?updateMask.fieldPaths=ckd&currentDocument.exists=true', { method: 'PATCH', body: JSON.stringify({ fields: { ckd: { arrayValue: { values: [iv(0), iv(2)] } } } }) })];
   } },
   // FRM.tkAdd עם השדות החדשים (W.fx ב-tasks-wc.js): dl, pri, cat, est, ck, ckd ריק
+  // tkWpGet / tkWpSet: הגדרת עסק cfg/tkw (wp) – קריאה לצוות, כתיבה למנהל
+  M120: { run: async (uid, env) => { await bypass(env, (db) => db.doc('cfg/tkw').set({ wp: false })); return [await fsx(uid, '/cfg/tkw')]; } },
+  M121: { run: async (uid, env) => {
+    await bypass(env, (db) => db.doc('cfg/tkw').delete());
+    const body = (v) => JSON.stringify({ fields: { wp: { booleanValue: v } } });
+    return [await fsx(uid, '/cfg/tkw', { method: 'PATCH', body: body(false) }), await fsx(uid, '/cfg/tkw', { method: 'PATCH', body: body(true) })];
+  } },
   M119: { run: async (uid, env, role) => {
     const now = Date.now(); const adm = role === 'manager' || role === 'managerAdminsOnly';
     const fields = { owner: sv(uid), by: sv(uid), role: sv(adm ? 'a' : 'w'), txt: sv('ספירת מלאי'), cr: iv(now), due: iv(now + 4 * 86400000), st: sv('open'), open: sv('1'),
