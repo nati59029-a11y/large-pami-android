@@ -1192,6 +1192,11 @@ async function ordRecalc(db, o) {
 // דרך createCore של orders.js (אותה טרנזקציה: מספור, מלאי, עלות, קרטונים, reqId אידמפוטנטי). by:'sec', src:'mail', status תמיד 'new'.
 // reqId = 'sec' + mailId + 'v' + ver – אותה גרסה פעמיים = הזמנה אחת. מחיר – לעולם לא מ-sec_ord: חישוב מחדש מהקטלוג (ordCalc, wp רק ללקוח סיטונאי מאושר)
 // לאותם מוצרים שבטיוטה (pid נעוץ). שורה חוסמת כלשהי (pick/ask/אזל/קרטון/מוצר שנעלם) או חסימת לקוח/סניף/טלפון – שגיאה, ושום דבר לא נוצר.
+// סבב 1 (בודק): (1) הזמנה עם אותו reqId כבר קיימת – מחזירים אותה (dup) לפני כל בדיקת חסימות (המלאי/הטלפון/הקטלוג אולי השתנו מאז).
+// (2) טיוטה שכבר יצרה הזמנה (sec_ord.ordId) – 'already-ordered' לכל גרסה אחרת. אחרי יצירה נכתבים ordId ו-st:'ordered' ל-sec_ord;
+//     כתיבה שנכשלה – ההזמנה קיימת, והקריאה הבאה עם אותו reqId מחזירה dup ומשלימה את הכתיבה.
+// (3) "אזל" נבדק בסניף שממנו createCore מוריד מלאי: סניף מקור קבוע (ordcfg/main.src[br]) אם הוגדר, אחרת סניף ההזמנה –
+//     ואז from:br מפורש בשורה, כדי ש-resolveItems לא יעביר בשקט מסניף אחר ("לפי המלאי").
 const SEC_BY = { uid: 'sec', name: 'המזכירה' };
 async function ordCreateFromSec(db, o) {
   const ORD = require('./orders')._core;
@@ -1201,21 +1206,38 @@ async function ordCreateFromSec(db, o) {
   const mailId = typeof o.in === 'string' && ID_RE.test(o.in) ? o.in : '';
   const reqId = 'sec' + mailId + 'v' + o.ver;
   if (!mailId || !Number.isInteger(o.ver) || o.ver < 1 || reqId.length > 40) throw bad('bad-req', 'מזהה הטיוטה לא תקין');
+  const sRef = db.doc('sec_ord/' + mailId);
+  const mark = (id) => sRef.update({ ordId: id, st: 'ordered', upd: Date.now() }).catch((e) => { logger.warn('secretary-google: sec_ord mark failed', { reason: (e && e.code) || 'error' }); });
+  const [ex, so] = await db.getAll(db.doc('ord/o' + reqId), sRef);
+  if (ex.exists) {
+    if (!so.exists || so.get('ordId') !== ex.id) await mark(ex.id);
+    return { id: ex.id, no: ex.get('no'), total: ex.get('total'), dup: true, warn: [] };
+  }
+  if (o.ordId || (so.exists && so.get('ordId'))) throw pre('already-ordered', 'מהטיוטה הזו כבר נוצרה הזמנה');
   const st = await ordState(db, o);
   if (st.blk.length) throw pre('ord-blocked', 'הטיוטה חסומה: ' + st.blk.join(','));
   const src = Array.isArray(o.lines) ? o.lines : [];
   if (!src.length) throw pre('ord-blocked', ORD_NO.empty);
   if (src.some((l) => !l || l.st !== 'ok' || l.out || l.block || typeof l.id !== 'string')) throw pre('ord-blocked', 'יש בטיוטה שורה חוסמת');
-  const { b } = await ordCalc(db, src.map((l) => ({ txt: l.txt, qty: l.qty, unit: l.unit, pid: l.id })), o.br, st.ws);
-  if (b.nBlock || b.lines.some((l) => l.st !== 'ok' || l.out || l.block)) throw pre('ord-blocked', 'יש בטיוטה שורה חוסמת (לפי הקטלוג הנוכחי)');
-  const items = b.lines.filter((l) => l.st === 'ok' && !l.out && !l.block).map((l) => ({ pid: l.id, qty: l.qty, price: l.pr / 100 }));
-  const cust = ORD.cleanCust({ name: st.custName || (o.custNew && o.custNew.bn) || '', phone: st.phone }); // טלפון/שם חסר – bad-phone/bad-name
-  const raw = ORD.rawItems(items);
   const brs = await ordBrs(biz);
   const w = Object.assign({}, SEC_BY, { biz, branches: brs, activeBr: brs.filter((x) => x.on !== false).map((x) => x.id), mine: null });
   const br = ORD.brOf(w, o.br);
+  // סניף המלאי – כמו resolveItems ב-createCore
+  const cs = (await db.doc('ordcfg/main').get()).get('src');
+  const cfgSrc = cs && typeof cs === 'object' ? cs[br] : null;
+  const fixed = brs.length && cfgSrc && cfgSrc !== 'stock' && w.activeBr.includes(cfgSrc) ? cfgSrc : null;
+  const stockBr = fixed || br;
+  const { b } = await ordCalc(db, src.map((l) => ({ txt: l.txt, qty: l.qty, unit: l.unit, pid: l.id })), br, st.ws); // מחיר לפי סניף ההזמנה (כמו brPrice)
+  if (b.lines.some((l) => l.st !== 'ok' || l.ctw || typeof l.id !== 'string')) throw pre('ord-blocked', 'יש בטיוטה שורה חוסמת (לפי הקטלוג הנוכחי)');
+  const pd = await db.getAll(...[...new Set(b.lines.map((l) => l.id))].map((i) => db.doc('prod/' + i)));
+  if (pd.some((d) => !d.exists || SO.isOut({ q: d.get('q') }, stockBr))) throw pre('ord-blocked', 'מוצר בטיוטה אזל במלאי');
+  const items = b.lines.map((l) => Object.assign({ pid: l.id, qty: l.qty, price: l.pr / 100 }, brs.length && !fixed ? { from: br } : {}));
+  const cust = ORD.cleanCust({ name: st.custName || (o.custNew && o.custNew.bn) || '', phone: st.phone }); // טלפון/שם חסר – bad-phone/bad-name
+  const raw = ORD.rawItems(items);
   const custId = o.custId ? ORD.idOf(o.custId, 'לקוח') : '';
-  return ORD.createCore(db, w, { reqId, br, cust, raw, note: '', custId, input: {}, src: 'mail', sec: { in: mailId, ch: 'mail' } });
+  const r = await ORD.createCore(db, w, { reqId, br, cust, raw, note: '', custId, input: {}, src: 'mail', sec: { in: mailId, ch: 'mail' } });
+  await mark(r.id);
+  return r;
 }
 // שמירה עם בדיקת גרסה בטרנזקציה. up – השדות החדשים (FieldValue.delete() למחיקה)
 async function ordSave(db, ref, ver, up, now) {

@@ -5,7 +5,7 @@ const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const H = require('./helpers');
 
-const A = 'biz-so6';
+const A = 'biz-so6', XB = 'biz-so6x';
 const MAIL = 'g' + 'a'.repeat(30);
 let env, T, CORE, ORD;
 const prep = (fn) => env.withSecurityRulesDisabled((c) => fn(c.firestore()));
@@ -36,6 +36,10 @@ async function seed(features) {
     b.set(d.doc(`b/${A}/cust/c1`), { name: 'דנה', phone: '0501234567' });
     b.set(d.doc(`b/${A}/cust/c2`), { name: 'סיטונאי', bn: 'סיטונאי בע"מ', phone: '0502222222', wholesale: true });
     b.set(d.doc(`b/${A}/cust/c3`), { name: 'בלי טלפון' });
+    b.set(d.doc(`b/${A}/prod/pB`), { name: 'לחם', price: 4, on: true, q: { br1: 0, br2: 5 } });
+    // עסק אחר – לקוח עם טלפון תקין, שאסור שייקרא מהעסק A
+    b.set(d.doc('b/' + XB), { name: 'ז', status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: { orders: true, secretary: true } });
+    b.set(d.doc(`b/${XB}/cust/cX`), { name: 'זר', phone: '0503333333' });
     await b.commit();
   });
 }
@@ -128,5 +132,55 @@ describe('שלב ג/6: הזמנה מהמזכירה (ordCreateFromSec)', () => {
     assert.ok(!Object.keys(require('../functions/secretary-google')).includes('ordCreateFromSec'));
     assert.equal(typeof ORD.createCore, 'function');
     assert.equal(typeof CORE.ordCreateFromSec, 'function');
+  });
+
+  it('סבב 1/1: הזמנה שגמרה את המלאי – קריאה חוזרת עם אותה טיוטה ואותה ver מחזירה dup:true ולא מורידה שוב', async () => {
+    const a = await make(secOrd({ lines: [okLine('pA', 5)] }));
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 0);
+    const b = await make(secOrd({ lines: [okLine('pA', 5)] }));
+    assert.deepEqual(b, { id: a.id, no: 1, total: 60, dup: true, warn: [] });
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, 0);
+    assert.equal((await coll(`b/${A}/stockLog`)).length, 1);
+    // גם אחרי שהטלפון נמחק מהכרטיס – עדיין dup ולא חסימה
+    await prep((d) => d.doc(`b/${A}/cust/c1`).update({ phone: '' }));
+    assert.equal((await make(secOrd({ lines: [okLine('pA', 5)] }))).dup, true);
+  });
+
+  it('סבב 1/2: sec_ord מקבל ordId ו-st:ordered; גרסה אחרת – already-ordered; כתיבה שנכשלה מושלמת בקריאה הבאה', async () => {
+    await prep((d) => d.doc(`b/${A}/sec_ord/${MAIL}`).set(secOrd()));
+    const a = await make(secOrd());
+    const so = await get(`b/${A}/sec_ord/${MAIL}`);
+    assert.equal(so.ordId, a.id); assert.equal(so.st, 'ordered');
+    await fails(secOrd({ ver: 2 }), 'already-ordered'); // הטיוטה שהקורא העביר ישנה (בלי ordId) – נקרא מהמסד
+    await fails(secOrd({ ver: 3, ordId: a.id }), 'already-ordered');
+    assert.equal((await coll(`b/${A}/ord`)).length, 1);
+    assert.equal((await make(secOrd())).dup, true, 'אותו reqId – dup');
+    // כתיבה ל-sec_ord שנכשלה (המסמך לא היה קיים) – ההזמנה נוצרה; הקריאה הבאה עם אותו reqId משלימה
+    await seed();
+    const c = await make(secOrd());
+    assert.equal(await get(`b/${A}/sec_ord/${MAIL}`), null);
+    await prep((d) => d.doc(`b/${A}/sec_ord/${MAIL}`).set(secOrd()));
+    assert.equal((await make(secOrd())).dup, true);
+    const so2 = await get(`b/${A}/sec_ord/${MAIL}`);
+    assert.equal(so2.ordId, c.id); assert.equal(so2.st, 'ordered');
+  });
+
+  it('סבב 1/3: "אזל" נבדק בסניף שממנו יורד המלאי – סניף ההזמנה (בלי מעבר שקט לסניף אחר), או סניף מקור קבוע מ-ordcfg/main.src', async () => {
+    // לפי המלאי: בסניף ההזמנה אין – חסום (גם אם בסניף אחר יש), ושום דבר לא זז
+    await fails(secOrd({ lines: [okLine('pB', 1)] }), 'ord-blocked');
+    assert.deepEqual((await get(`b/${A}/prod/pB`)).q, { br1: 0, br2: 5 });
+    // סניף מקור קבוע br2: pB יורד מ-br2 ונוצר; pA (ב-br2 אין) – חסום
+    await prep((d) => d.doc(`b/${A}/ordcfg/main`).set({ src: { br1: 'br2' } }));
+    await fails(secOrd({ ver: 5, lines: [okLine('pA', 1)] }), 'ord-blocked');
+    const r = await make(secOrd({ lines: [okLine('pB', 2)] }));
+    const d = await get(`b/${A}/ord/${r.id}`);
+    assert.equal(d.items[0].from, 'br2'); assert.equal(d.items[0].price, 4);
+    assert.deepEqual((await get(`b/${A}/prod/pB`)).q, { br1: 0, br2: 3 });
+  });
+
+  it('סבב 1/4: custId של עסק אחר – ord-blocked, ושום דבר לא נוצר', async () => {
+    await fails(secOrd({ custId: 'cX' }), 'ord-blocked');
+    assert.equal((await coll(`b/${A}/ord`)).length, 0);
+    assert.equal((await coll(`b/${XB}/ord`)).length, 0);
   });
 });
