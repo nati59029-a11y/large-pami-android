@@ -3653,8 +3653,8 @@ const iv=v=>({integerValue:String(Math.round(+v||0))});
 const gi=(d,k)=>{const f=d&&d.fields&&d.fields[k];return f?+(f.integerValue||f.doubleValue||0):0};
 /* nc='1': יש במשימה הערה של עובד – "בוצע" של עובד עובר לאישור המנהל (st 'wait'). rt='1': המנהל החזיר את המשימה לעובד */
 /* משימה חדשה (שדרוג): to/toN = נמענים (uid ושם), ow/owN/clt = המטפל שתפס, np = תמונות נדרשות לסגירה, wp = כמה הועלו, mi = תמונות מנהל, cT/cN = תצוגה מקדימה של התגובה האחרונה, rd = מי סימן "נקרא" ומתי. בלי to = משימה ישנה. התמונות (img ותת-אוסף p) לא נטענות ברשימה */
-const TKF=['owner','by','role','txt','cr','due','st','open','pr','sub','doneBy','note','ok','late','cAt','cBy','nc','rt','to','toN','ow','owN','clt','np','wp','mi','cT','cN','rd','rc'];
-const tkOf=d=>({id:idOf(d),owner:gv(d,'owner'),by:gv(d,'by'),role:gv(d,'role'),txt:gv(d,'txt'),cr:gi(d,'cr'),due:gi(d,'due'),st:gv(d,'st'),pr:gv(d,'pr'),sub:gi(d,'sub'),doneBy:gv(d,'doneBy'),note:gv(d,'note'),ok:gi(d,'ok'),late:gv(d,'late'),cAt:gi(d,'cAt'),cBy:gv(d,'cBy'),nc:gv(d,'nc'),rt:gv(d,'rt'),ut:d.updateTime||'',to:tkArr(d,'to'),toN:tkArr(d,'toN'),ow:gv(d,'ow'),owN:gv(d,'owN'),clt:gi(d,'clt'),np:gi(d,'np'),wp:gi(d,'wp'),mi:gi(d,'mi'),cT:gv(d,'cT'),cN:gv(d,'cN'),rd:tkRdOf(d),rc:gv(d,'rc')});
+const TKF=['owner','by','role','txt','cr','due','st','open','pr','sub','doneBy','note','ok','late','cAt','cBy','nc','rt','to','toN','ow','owN','clt','np','wp','mi','cT','cN','rd','rc','dl','nd','ndN'];
+const tkOf=d=>({id:idOf(d),owner:gv(d,'owner'),by:gv(d,'by'),role:gv(d,'role'),txt:gv(d,'txt'),cr:gi(d,'cr'),due:gi(d,'due'),st:gv(d,'st'),pr:gv(d,'pr'),sub:gi(d,'sub'),doneBy:gv(d,'doneBy'),note:gv(d,'note'),ok:gi(d,'ok'),late:gv(d,'late'),cAt:gi(d,'cAt'),cBy:gv(d,'cBy'),nc:gv(d,'nc'),rt:gv(d,'rt'),ut:d.updateTime||'',to:tkArr(d,'to'),toN:tkArr(d,'toN'),ow:gv(d,'ow'),owN:gv(d,'owN'),clt:gi(d,'clt'),np:gi(d,'np'),wp:gi(d,'wp'),mi:gi(d,'mi'),cT:gv(d,'cT'),cN:gv(d,'cN'),rd:tkRdOf(d),rc:gv(d,'rc'),dl:d&&d.fields&&d.fields.dl?gi(d,'dl'):-1,nd:gi(d,'nd'),ndN:gv(d,'ndN')});
 const tkArr=(d,k)=>{const f=d&&d.fields&&d.fields[k],v=f&&f.arrayValue?(f.arrayValue.values||[]).map(x=>x.stringValue||''):null;return v};
 const tkRdOf=d=>{const f=d&&d.fields&&d.fields.rd,o={};if(f&&f.mapValue)for(const k in (f.mapValue.fields||{}))o[k]=+(f.mapValue.fields[k].integerValue||f.mapValue.fields[k].doubleValue||0);return o};
 /* tkNew: משימה חדשה (עם נמענים). עובד רואה רק משימות שהוא נמען בהן, או משימות ישנות */
@@ -3669,8 +3669,8 @@ const tkcSave=()=>{try{localStorage.setItem(LK('lp-tk-c'),JSON.stringify(TKC))}c
 const tkRdv=t=>Math.max(((t.rd||{})[SY.uid])||0,(TKC[t.id]||{}).s||0);
 const tkCNew=t=>!!(t.cAt&&t.cBy&&t.cBy!==SY.uid&&t.cAt>tkRdv(t));
 const tkUnr=t=>tkNew(t)&&t.to.includes(SY.uid)&&!((t.rd||{})[SY.uid]);
-const tkLateNow=t=>t.st==='open'&&Date.now()>t.due;
-const tkIsLate=t=>tkLateNow(t)||t.late==='1'||((t.st==='wait'||t.st==='done')&&t.sub>t.due);
+/* יעד בפועל: dl>0 – יעד שנקבע; dl==0 – בלי יעד; בלי dl – 72 שעות ימי עסקים (due), כמו היום */const tkDl=t=>t.dl>0?t.dl:t.dl===0?Infinity:t.due;const tkLateNow=t=>t.st==='open'&&Date.now()>tkDl(t);
+const tkIsLate=t=>tkLateNow(t)||t.late==='1'||((t.st==='wait'||t.st==='done')&&t.sub>tkDl(t));
 const tkOverN=()=>tkVis().filter(tkLateNow).length;
 const tkErr=e=>e&&e.offline?'אין חיבור לאינטרנט':(e&&e.code===403?'אין הרשאה לפעולה הזו. אם זה חוזר, בדוק שהשעה בטלפון מדויקת, או פנה למנהל':'שגיאה: '+((e&&e.message)||e));
 async function tkQ(where){const sq={from:[{collectionId:'tasks'}],select:{fields:TKF.map(f=>({fieldPath:f}))},limit:1000};if(where)sq.where={fieldFilter:{field:{fieldPath:where},op:'EQUAL',value:{stringValue:'1'}}};
@@ -3687,7 +3687,7 @@ async function tkMark(ids){const now=Date.now(),u=SY.uid,pth=encodeURIComponent(
  await Promise.all(ids.slice(0,60).map(async id=>{try{await fsx('/tasks/'+id+'?updateMask.fieldPaths='+pth+'&currentDocument.exists=true',{method:'PATCH',body:JSON.stringify({fields:{rd:{mapValue:{fields:{[u]:iv(now)}}}}})});const t=tkGet(id);if(t)t.rd=Object.assign({},t.rd,{[u]:now})}catch(e){}}));tkSave()}
 /* רשימת העובדים הפעילים (למנהל): נטענת לפי דרישה ונשמרת בזיכרון */
 let TKST={L:null,busy:0,t:0};
-async function tkStaffLoad(){if(TKST.busy)return;TKST.busy=1;try{const j=await fsx('/staff?pageSize=300');TKST.L=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d}),id=idOf(d);return{uid:id,name:String(f.name||'').trim()||String(f.email||'').split('@')[0]||id,active:f.active===true}}).filter(x=>x.active&&idOk(x.uid)).sort((a,b)=>a.name.localeCompare(b.name,'he'))}catch(e){TKST.L=null}finally{TKST.busy=0;TKST.t=Date.now();tkRe()}}
+async function tkStaffLoad(){if(TKST.busy)return;TKST.busy=1;try{const j=await fsx('/staff?pageSize=300');TKST.L=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d}),id=idOf(d);return{uid:id,name:String(f.name||'').trim()||String(f.email||'').split('@')[0]||id,em:String(f.email||'').split('@')[0].toLowerCase(),active:f.active===true}}).filter(x=>x.active&&idOk(x.uid)).sort((a,b)=>a.name.localeCompare(b.name,'he'))}catch(e){TKST.L=null}finally{TKST.busy=0;TKST.t=Date.now();tkRe()}}
 /* מצב טופס יצירה (מנהל): נמענים שנבחרו, תמונות נדרשות, תמונות מצורפות (כבר מוקטנות) */
 let TKN={sel:null,np:0,imgs:[]};
 async function tkDo(fn,msg){try{await fn();if(msg)toast(msg)}catch(e){toast(tkErr(e))}try{await tkLoad()}catch(e){}tkRe()}
@@ -3697,13 +3697,13 @@ let TKT='open';
 V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbAdmin(),L=tkVis().slice();
  if(adm&&!TKST.busy&&(!TKST.t||Date.now()-TKST.t>(TKST.L?6e5:3e4)))tkStaffLoad();
  const PL=PT.L||[],wt=adm?L.filter(t=>t.st==='wait'||tkCNew(t)):[],
-  tabs=[['open','פתוחות',L.filter(t=>t.st!=='done').length+PL.filter(p=>p.st!=='done').length]].concat(adm?[['wait',icd('clock')+' ממתין לטיפול',wt.length]]:[]).concat([['late','באיחור',L.filter(tkIsLate).length],['done','בוצעו',(adm?L.filter(t=>t.st==='done').length:0)+PL.filter(p=>p.st==='done').length]]).concat(adm?[['rc',''+icd('refresh')+' קבועות',RC.L?RC.L.length:0]]:[]).concat([['sum',''+icd('chart')+' סיכום',0]]);
+  tabs=(window.TKW?TKW.tabs(adm,L,PL):[]).concat([['open','פתוחות',L.filter(t=>t.st!=='done').length+PL.filter(p=>p.st!=='done').length]].concat(adm?[['wait',icd('clock')+' ממתין לטיפול',wt.length]]:[]).concat([['late','באיחור',L.filter(tkIsLate).length],['done','בוצעו',(adm?L.filter(t=>t.st==='done').length:0)+PL.filter(p=>p.st==='done').length]]).concat(adm?[['rc',''+icd('refresh')+' קבועות',RC.L?RC.L.length:0]]:[]).concat([['sum',''+icd('chart')+' סיכום',0]]));
  if(!tabs.find(x=>x[0]===TKT))TKT='open';
  let S0=TKT==='open'?L.filter(t=>t.st!=='done').concat(PL.filter(p=>p.st!=='done')):TKT==='late'?L.filter(tkIsLate):TKT==='wait'?wt:(adm?L.filter(t=>t.st==='done'):[]).concat(PL.filter(p=>p.st==='done'));
- S0.sort((a,b)=>TKT==='done'?((b.ok||b.sub||0)-(a.ok||a.sub||0)):(a.due-b.due));
+ if(window.TKW)S0=TKW.flt(S0);S0.sort((a,b)=>TKT==='done'?((b.ok||b.sub||0)-(a.ok||a.sub||0)):((tkDl(a)-tkDl(b))||0));
  const card=t=>{const lt=tkIsLate(t),mine=t.owner===SY.uid;
   const cn=tkCNew(t),unr=tkUnr(t),cc=TKC[t.id]&&!cn?TKC[t.id].n:null;
-  const tags=(t.rc?'<span class="tag t2">'+icd('refresh')+' קבועה</span> ':'')+(unr?'<span class="tag t2">'+icd('dot')+' משימה חדשה</span> ':'')+(cn?'<span class="tag t2">'+icd('chat')+' תגובה חדשה</span> ':'')+(tkNew(t)&&t.st==='open'?(t.ow?(t.ow===SY.uid?'<span class="tag t3">אני מטפל</span> ':'<span class="tag t1">בטיפול של '+esc(t.owN||'עובד')+'</span> '):'<span class="tag t1">'+(adm?'לא נתפסה':'פנויה לתפיסה')+'</span> '):'')+(lt?'<span class="tag t4">באיחור</span> ':'')+(t.st==='wait'?`<span class="tag t1">${t.pr==='1'?'ממתין לאישור תמונה':'ממתין לאישור מנהל'}</span> `:'')+(t.st==='open'&&t.rt==='1'?'<span class="tag t4">'+icd('undo')+' הוחזרה על ידי המנהל</span> ':'')+(t.st==='open'&&t.pr==='1'?'<span class="tag t2">נדרשת תמונה</span> ':'')+(t.st==='done'?'<span class="tag t3">בוצע</span>':'');
+  const tags=(window.TKW?TKW.tag(t):'')+(t.rc?'<span class="tag t2">'+icd('refresh')+' קבועה</span> ':'')+(unr?'<span class="tag t2">'+icd('dot')+' משימה חדשה</span> ':'')+(cn?'<span class="tag t2">'+icd('chat')+' תגובה חדשה</span> ':'')+(tkNew(t)&&t.st==='open'?(t.ow?(t.ow===SY.uid?'<span class="tag t3">אני מטפל</span> ':'<span class="tag t1">בטיפול של '+esc(t.owN||'עובד')+'</span> '):'<span class="tag t1">'+(adm?'לא נתפסה':'פנויה לתפיסה')+'</span> '):'')+(lt?'<span class="tag t4">באיחור</span> ':'')+(t.st==='wait'?`<span class="tag t1">${t.pr==='1'?'ממתין לאישור תמונה':'ממתין לאישור מנהל'}</span> `:'')+(t.st==='open'&&t.rt==='1'?'<span class="tag t4">'+icd('undo')+' הוחזרה על ידי המנהל</span> ':'')+(t.st==='open'&&t.pr==='1'?'<span class="tag t2">נדרשת תמונה</span> ':'')+(t.st==='done'?'<span class="tag t3">בוצע</span>':'');
   const nw=tkNew(t),me=SY.uid,mineN=nw&&t.ow===me,did=esc(t.id),np=t.np||0,wp=t.wp||0;
   let act='';
   /* הזרימה הישנה (תמונה בודדת pr / "בוצע") – למשימות ישנות, למנהל, ולמטפל במשימה חדשה בלי תמונות נדרשות */
@@ -3722,20 +3722,20 @@ V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbA
   if(nw&&(t.mi>0||wp>0))act+=`<button class="btn g" data-a="tkPics" data-id="${did}">${icd('img')} תמונות${t.mi>0?' · מהמנהל '+t.mi:''}${wp>0?' · ביצוע '+wp+(np?'/'+np:''):''}</button>`;
   act+=`<button class="btn g" data-a="tkCm" data-id="${did}" style="${cn?'border-color:var(--acc);color:var(--acc)':''}">${icd('chat')} תגובות${cc!=null?' ('+cc+')':''}</button>`;
   if(cn||unr)act+=`<button class="btn g" data-a="tkRead" data-id="${did}">סמן כנקרא</button>`;
-  if(adm)act+=`<button class="btn g" data-a="tkDel" data-id="${did}" aria-label="מחק משימה">${icd('trash')}</button>`;
+  if(window.TKW)act+=TKW.act(t);if(adm)act+=`<button class="btn g" data-a="tkDel" data-id="${did}" aria-label="מחק משימה">${icd('trash')}</button>`;
   const pv=t.cT?`<p class="note" style="margin:4px 0 0;${cn?'color:var(--acc);font-weight:700':'opacity:.6'}">${icd('chat')} ${esc(t.cN||'')}${t.cN?': ':''}${esc(t.cT)}</p>`:'';
   return `<div class="card" id="tkc-${did}" style="${lt?'border-color:var(--bad)':''}"><div style="white-space:pre-wrap;font-weight:700">${esc(t.txt)}</div><div style="margin:6px 0">${tags}</div>${pv}
-  <p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${mine?' (אני)':''}<br>יעד לביצוע: ${tkDT(t.due)}${nw&&adm?`<br>נמענים: ${esc((t.toN&&t.toN.length?t.toN:t.to).join(', '))}`:''}${np>0?`<br>תמונות נדרשות לסגירה: ${np} (הועלו ${wp})`:''}${t.sub?`<br>בוצעה בפועל: ${tkDT(t.sub)}${t.doneBy?' · '+esc(t.doneBy):''}`:''}${t.st==='done'&&t.ok&&t.ok!==t.sub?`<br>אושרה: ${tkDT(t.ok)}`:''}</p>
+  <p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${mine?' (אני)':''}<br>יעד לביצוע: ${tkDl(t)<Infinity?tkDT(tkDl(t)):'בלי יעד'}${nw&&adm?`<br>נמענים: ${esc((t.toN&&t.toN.length?t.toN:t.to).join(', '))}`:''}${np>0?`<br>תמונות נדרשות לסגירה: ${np} (הועלו ${wp})`:''}${t.sub?`<br>בוצעה בפועל: ${tkDT(t.sub)}${t.doneBy?' · '+esc(t.doneBy):''}`:''}${t.st==='done'&&t.ok&&t.ok!==t.sub?`<br>אושרה: ${tkDT(t.ok)}`:''}</p>
   ${t.note&&t.st==='open'?`<p class="note" style="color:var(--bad);margin:6px 0 0;white-space:pre-wrap">${t.rt==='1'?'המנהל החזיר את המשימה':'התמונה לא אושרה'}: ${esc(t.note)}</p>`:''}
   ${t.st==='open'&&t.nc==='1'&&t.pr!=='1'&&!adm?'<p class="note" style="margin:6px 0 0">יש במשימה הערה, ולכן אחרי "בוצע" היא תעבור לאישור המנהל.</p>':''}
   ${act?`<div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">${act}</div>`:''}</div>`};
  return{t:'משימות',s:adm?'לעובדים':'שלי ושל הצוות',h:`<form class="card" data-f="tkAdd"><label class="f"><span>משימה חדשה</span><textarea name="txt" maxlength="500" required placeholder="מה צריך לעשות?"></textarea></label>
   <label class="cb"><input type="checkbox" name="prv" value="1" data-c="tkPrv"> ${icd('lock')} משימה פרטית (${adm?'לא נשלחת לעובדים':'רק אני והמנהל'})</label>
-  <div id="tkx">${adm?tkFormExtra():''}</div>
+  <div id="tkx">${adm?tkFormExtra():''}</div>${adm&&window.TKW?TKW.tplBar():''}
   <p class="note" style="margin:4px 0 8px">יעד לביצוע: 3 ימי עסקים (72 שעות, ראשון–חמישי, בלי חגים, חול המועד, ערבי חג, פורים ותשעה באב).</p><button class="btn w">הוסף משימה</button></form>
   ${adm?'':rqBtn()}
-  <div class="chips" style="margin:12px 0">${tabs.map(x=>`<button class="chip ${x[0]===TKT?'on':''}" data-a="tkTab" data-v="${x[0]}">${x[1]}${x[2]?' ('+x[2]+')':''}</button>`).join('')}</div>
-  ${TKT==='sum'?tkSumView():TKT==='rc'?rcView():S0.length?S0.map(t=>t.pv?ptCard(t):card(t)).join(''):`<p class="note">${TKT==='open'?'אין משימות פתוחות.':TKT==='late'?'אין משימות באיחור.':TKT==='wait'?'אין משימות שממתינות לטיפול.':'עוד אין משימות שבוצעו.'}</p>`}
+  <div class="chips" style="margin:12px 0">${tabs.map(x=>`<button class="chip ${x[0]===TKT?'on':''}" data-a="tkTab" data-v="${x[0]}">${x[1]}${x[2]?' ('+x[2]+')':''}</button>`).join('')}</div>${window.TKW?TKW.fbar(TKT):''}
+  ${TKT==='my'||TKT==='team'?(window.TKW?TKW.view(TKT,card):''):TKT==='sum'?tkSumView():TKT==='rc'?rcView():S0.length?S0.map(t=>t.pv?ptCard(t):card(t)).join(''):`<p class="note">${TKT==='open'?'אין משימות פתוחות.':TKT==='late'?'אין משימות באיחור.':TKT==='wait'?'אין משימות שממתינות לטיפול.':'עוד אין משימות שבוצעו.'}</p>`}
   <button class="btn g w" data-a="tkRefresh" style="margin-top:8px">רענן</button>`}};
 function tkSelInit(){if(TKN.sel===null&&TKST.L)TKN.sel=new Set(TKST.L.map(x=>x.uid));return TKN.sel||new Set()}
 function tkFormExtra(){const S=TKST.L;
@@ -3758,7 +3758,7 @@ ACT.tkRefresh=()=>{if(TKT==='sum')TKS.k='';tkDo(()=>Promise.resolve(),'')};
 /* סיכום משימות: בוצעו בזמן / באיחור / סה"כ, לפי תאריך הכתיבה (cr), ליום / שבוע (ראשון–שבת) / חודש / שנה, לפי שעון ישראל.
    נטען רק כשפותחים את הסיכום ובכל החלפת תקופה, ורק השדות הנדרשים (בלי התמונה). עובד – רק מה שהוא ביצע (doneBy בשמו, כמו fbBy);
    מנהל – כל העסק בטווח התאריכים, עם סינון אופציונלי לפי עובד. "באיחור" = tkIsLate, "בזמן" = בוצעה ולא באיחור */
-const TKSF=['cr','due','st','sub','late','doneBy'],TKMN=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
+const TKSF=['cr','due','st','sub','late','doneBy','dl'],TKMN=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
 let TKS={u:'m',y:0,m:0,d:1,who:'',k:'',L:null,err:''};
 const tkIL=(()=>{let F=null;try{F=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric'})}catch(e){}
  const off=t=>{if(!F)return -new Date(t).getTimezoneOffset()*6e4;const p={};F.formatToParts(new Date(t)).forEach(x=>p[x.type]=+x.value);return Date.UTC(p.year,p.month-1,p.day,p.hour%24,p.minute,p.second)-Math.floor(t/1000)*1000};
@@ -3779,7 +3779,7 @@ async function tkSumLoad(){const r=tkSumRange(),adm=fbAdmin(),me=fbBy(),k=TKS.u+
  else sq.where={fieldFilter:{field:{fieldPath:'doneBy'},op:'IN',value:{arrayValue:{values:[...new Set([me,me.toLowerCase()])].map(v=>({stringValue:v}))}}}};
  try{if(!adm&&!me)throw new Error('לא ידוע שם המשתמש. התנתק והתחבר מחדש');
   const x=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});if(TKS.k!==k)return;
-  TKS.L=(x||[]).filter(d=>d.document).map(d=>{const o=d.document,t={id:idOf(o),cr:gi(o,'cr'),due:gi(o,'due'),st:gv(o,'st'),sub:gi(o,'sub'),late:gv(o,'late'),doneBy:gv(o,'doneBy')};if(t.cr)t.due=tkDue(t.cr);return t}).filter(t=>t.cr>=r.from&&t.cr<r.to&&(adm||t.doneBy.toLowerCase()===me.toLowerCase()))}
+  TKS.L=(x||[]).filter(d=>d.document).map(d=>{const o=d.document,t={id:idOf(o),cr:gi(o,'cr'),due:gi(o,'due'),st:gv(o,'st'),sub:gi(o,'sub'),late:gv(o,'late'),doneBy:gv(o,'doneBy'),dl:o.fields&&o.fields.dl?gi(o,'dl'):-1};if(t.cr)t.due=tkDue(t.cr);return t}).filter(t=>t.cr>=r.from&&t.cr<r.to&&(adm||t.doneBy.toLowerCase()===me.toLowerCase()))}
  catch(e){if(TKS.k!==k)return;TKS.err=tkErr(e)}
  tkRe()}
 function tkSumView(){if(!TKS.y){const t=tkIL.today();TKS.y=t[0];TKS.m=t[1];TKS.d=t[2]}
@@ -6314,9 +6314,9 @@ async function ptQ(){const sq={from:[{collectionId:'ptk'}],select:{fields:PTF.ma
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});
  return(r||[]).filter(x=>x.document&&idOk(idOf(x.document))).map(x=>{const d=x.document;return{id:idOf(d),pv:1,owner:gv(d,'owner'),by:gv(d,'by'),txt:gv(d,'txt'),cr:gi(d,'cr'),due:gi(d,'due'),st:gv(d,'st'),sub:gi(d,'sub'),late:gv(d,'late')}})}
 const ptCard=p=>{const adm=fbAdmin(),mine=p.owner===SY.uid,did=esc(p.id),dn=p.st==='done';
- return `<div class="card" id="ptc-${did}"><div style="white-space:pre-wrap;font-weight:700">${esc(p.txt)}</div><div style="margin:6px 0"><span class="tag t2">${icd('lock')} פרטית</span>${adm&&!mine?`<span class="tag t1">של ${esc(p.by||'עובד')}</span>`:''}${dn?'<span class="tag t3">בוצע</span>':''}</div>
+ return `<div class="card" id="ptc-${did}"><div style="white-space:pre-wrap;font-weight:700">${esc(p.txt)}</div><div style="margin:6px 0"><span class="tag t2">${icd('lock')} פרטית</span>${adm&&!mine?`<span class="tag t1">של ${esc(p.by||'עובד')}</span>`:''}${dn?'<span class="tag t3">בוצע</span>':''}${window.TKW?TKW.ptTag(p):''}</div>
  <p class="note" style="margin:0">נכתבה: ${tkDT(p.cr)}${dn&&p.sub?`<br>בוצעה: ${tkDT(p.sub)}`:''}</p>
- <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">${dn?`<button class="btn g" data-a="ptOpen" data-id="${did}">${icd('undo')} החזר לפתוחה</button>`:`<button class="btn" data-a="ptDone" data-id="${did}">✓ בוצע</button>`}<button class="btn g" data-a="ptDel" data-id="${did}" aria-label="מחק משימה פרטית">${icd('trash')}</button></div></div>`};
+ <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">${dn?`<button class="btn g" data-a="ptOpen" data-id="${did}">${icd('undo')} החזר לפתוחה</button>`:`<button class="btn" data-a="ptDone" data-id="${did}">✓ בוצע</button>`}${window.TKW?TKW.ptAct(p):''}<button class="btn g" data-a="ptDel" data-id="${did}" aria-label="מחק משימה פרטית">${icd('trash')}</button></div></div>`};
 const ptGet=id=>PT.L.find(x=>x.id===id);
 ACT.ptDone=el=>{const p=ptGet(el.dataset.id);if(!p)return;const now=Date.now();tkDo(()=>docPatch('ptk',p.id,{st:'done',sub:now,late:now>p.due?'1':''}),'✓ סומן כבוצע')};
 ACT.ptOpen=el=>{const p=ptGet(el.dataset.id);if(p)tkDo(()=>docPatch('ptk',p.id,{st:'open',sub:0,late:''}),'המשימה חזרה לפתוחות')};
@@ -6461,5 +6461,5 @@ ACT.tkGoWait=()=>{TKT='wait';go('tk')};
 /* עובד: כפתור "בקשה למנהל" במסך הבית */
 {const o=V.wk;V.wk=function(){const r=o();try{if(isW()&&WS==='home'&&bzF('tasks')&&r&&typeof r.h==='string'){const m='<button class="btn g" style="width:100%;margin-top:14px" data-a="updChk">';r.h=r.h.includes(m)?r.h.replace(m,()=>rqBtn()+m):r.h+rqBtn()}}catch(e){}return r}}
 try{coSched()}catch(e){}
-boot();(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script><script src="yemot-board.js"></script><script src="orders-staff.js"></script><script src="orders-cust.js"></script><script src="line-discount.js"></script><script src="orders-lines.js"></script><script src="secretary.js"></script><script src="pricing-calc.js"></script><script src="pricing-lines.js"></script><script src="pricing.js"></script><script src="store3d-geo.js"></script><script src="store3d-view.js"></script><script src="store3d.js"></script><script src="store3d-editor.js"></script><script src="store3d-capture.js"></script><script src="store3d-report.js"></script><script src="store3d-wizard.js"></script><script src="store3d-card.js"></script><script src="store3d-backup.js"></script><script>/* סריקת חנות שלב 12: כניסה למסך התלת מימד (כשהתוספת פעילה) = בקשת הרשאה להתראות, פעם אחת בטלפון (secretary.js) */(function(){if(typeof V==="undefined"||typeof V.st3!=="function")return;const r0=V.st3;V.st3=function(){try{if(typeof window.secPushAsk==="function"&&window.S3UI&&typeof S3UI.feat==="function"&&S3UI.feat())window.secPushAsk()}catch(e){}return r0.apply(this,arguments)}})();</script>
+boot();(async()=>{const P=luP();if(!P)return;try{await P.ready({version:String(APP_VC)})}catch(e){}setTimeout(()=>luCheck(false),5000)})();</script><script src="yemot-preview.js"></script><script src="yemot-promo.js"></script><script src="yemot-line.js"></script><script src="yemot-board.js"></script><script src="orders-staff.js"></script><script src="orders-cust.js"></script><script src="line-discount.js"></script><script src="orders-lines.js"></script><script src="secretary.js"></script><script src="tasks-wc.js"></script><script src="pricing-calc.js"></script><script src="pricing-lines.js"></script><script src="pricing.js"></script><script src="store3d-geo.js"></script><script src="store3d-view.js"></script><script src="store3d.js"></script><script src="store3d-editor.js"></script><script src="store3d-capture.js"></script><script src="store3d-report.js"></script><script src="store3d-wizard.js"></script><script src="store3d-card.js"></script><script src="store3d-backup.js"></script><script>/* סריקת חנות שלב 12: כניסה למסך התלת מימד (כשהתוספת פעילה) = בקשת הרשאה להתראות, פעם אחת בטלפון (secretary.js) */(function(){if(typeof V==="undefined"||typeof V.st3!=="function")return;const r0=V.st3;V.st3=function(){try{if(typeof window.secPushAsk==="function"&&window.S3UI&&typeof S3UI.feat==="function"&&S3UI.feat())window.secPushAsk()}catch(e){}return r0.apply(this,arguments)}})();</script>
 </body></html>

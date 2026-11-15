@@ -1624,6 +1624,20 @@
     "employee"
    ],
    "note": "סריקה אחידה שלב 6: חלקי הצילום."
+  },
+  {
+   "id": "M115",
+   "line": 3684,
+   "snippet": "fsx('/tasks/'+id+'?'+mask.join('&')",
+   "fn": "ACT.tkwNd (tasks-wc.js) → tkPatch({nd,ndN})",
+   "collection": "tasks",
+   "op": "update",
+   "rest": "PATCH /tasks/{id}?updateMask nd,ndN&currentDocument.exists=true",
+   "condition": "מנהל בלבד (isManager() מתיר כל עדכון)",
+   "who": [
+    "manager"
+   ],
+   "note": "מרכז עבודה סבב 1: \"הזכר לעובד\" – זמן התזכורת ושם המנהל. עובד לא כותב את השדות האלה."
   }
  ],
  "fsbLine": 2625,

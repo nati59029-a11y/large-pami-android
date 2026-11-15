@@ -512,6 +512,8 @@ const REPLAY = {
     const a = await fsx(uid, '/mq?documentId=' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ fields: { uid: sv(uid), by: sv(uid), t: iv(Date.now()), st: sv('new'), k: sv('invoice'), np: iv(2) } }) });
     return [a, await fsx(uid, '/mq/' + id + '/p?documentId=' + 0, { method: 'POST', body: JSON.stringify({ fields: { data: sv('PAGES:["data:image/jpeg;base64,AAAA"]') } }) }), await fsx(uid, '/mq/' + id + '/p?documentId=' + 1, { method: 'POST', body: JSON.stringify({ fields: { data: sv('x') } }) })];
   } },
+  // ACT.tkwNd (tasks-wc.js): "הזכר לעובד" – מנהל כותב nd (עכשיו) ו-ndN (שמו) במשימה פתוחה
+  M115: { run: async (uid) => [await tkPatch(uid, 't_open', { nd: Date.now(), ndN: uid })] },
 };
 
 const ROLE_UID = { employee: H.UID.employee, manager: H.UID.manager, managerAdminsOnly: H.MANAGER_ONLY_ADMINS,
