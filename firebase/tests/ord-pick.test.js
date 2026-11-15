@@ -223,3 +223,75 @@ describe('ליקוט – קלט, נעילה והרשאות', () => {
     }
   });
 });
+
+// תיקון אחרי בדיקה עצמאית (סבב 1): כפילות ב"להזמין מספקים" בסימון מחדש, עקיפת "הלקוח אישר" בסימון מחדש, ודריסה (stale)
+describe('ליקוט – תיקון אחרי בדיקה', () => {
+  const ORD2 = [{ i: 0, ok: true }, { i: 1, ok: true }];
+  it('סימון מחדש (reqId חדש): לכל מוצר בהזמנה לכל היותר שורה פתוחה אחת; שורה שכבר לא "להזמין" ← void; "הוזמן" נשאר', async () => {
+    const id = await mk();
+    const sup = async () => (await coll(`b/${A}/supord`)).filter((x) => x.ord === id);
+    assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: ORD2.concat({ i: 2, ok: false, act: 'ord', qty: 3, eta: '2026-11-20' }) })).status, 'OK');
+    assert.equal((await call('orderPickOk', E1, { id })).status, 'OK');
+    const r = await call('orderPick', E1, { id, reqId: rid(), l: ORD2.concat({ i: 2, ok: false, act: 'ord', qty: 5 }) });
+    assert.equal(r.status, 'OK', r.text);
+    let S = await sup();
+    assert.equal(S.length, 1, JSON.stringify(S)); assert.equal(S[0].st, 'open'); assert.equal(S[0].qty, 5); assert.equal(S[0].eta, undefined, 'צפי שהוסר – נמחק');
+    // הוזמן מהספק ← סימון מחדש "להזמין" שומר "הוזמן"; "יש במלאי" לא מבטל שורה שכבר הוזמנה
+    assert.equal((await call('supOrdSet', E1, { id: S[0].id, st: 'ord' })).status, 'OK');
+    await call('orderPickOk', E1, { id });
+    await call('orderPick', E1, { id, reqId: rid(), l: ORD2.concat({ i: 2, ok: false, act: 'ord', qty: 4 }) });
+    S = await sup(); assert.equal(S.length, 1); assert.equal(S[0].st, 'ord'); assert.equal(S[0].qty, 4);
+    await call('orderPickOk', E1, { id });
+    await call('supOrdSet', E1, { id: S[0].id, st: 'open' });
+    assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: ORD2.concat({ i: 2, ok: true }) })).result.st, 'ok');
+    S = await sup(); assert.equal(S.length, 1); assert.equal(S[0].st, 'void', 'שורה פתוחה שכבר לא "להזמין" ← void');
+  });
+  it('תרחיש הבודק: להוריד ← updateOrder ← סימון מחדש "הכול במלאי" נדחה (pick-pending); החסימה ו"לפני" נשארים עד "הלקוח אישר"', async () => {
+    const id = await mk();
+    await call('orderPick', E1, { id, reqId: rid(), l: [{ i: 0, ok: true }, { i: 1, ok: false, act: 'rm' }, { i: 2, ok: true }] });
+    let o = await get(`b/${A}/ord/${id}`);
+    assert.equal((await call('updateOrder', E1, { id, items: keep(o).filter((x, i) => i !== 1) })).status, 'OK');
+    for (const u of [E1, MGR]) assert.equal((await call('orderPick', u, { id, reqId: rid(), l: [{ i: 0, ok: true }, { i: 1, ok: true }] })).reason, 'pick-pending');
+    o = await get(`b/${A}/ord/${id}`);
+    assert.equal(o.pk.st, 'chg'); assert.equal(o.pk.sum.t, 42.5); assert.equal(o.total, 35);
+    assert.equal((await call('setOrderStatus', E1, { id, status: 'wait_pay' })).reason, 'pick-chg');
+    assert.equal((await call('orderPickOk', E1, { id })).status, 'OK');
+    const r = await call('orderPick', E1, { id, reqId: rid(), l: [{ i: 0, ok: true }, { i: 1, ok: true }] });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.st, 'ok');
+    assert.equal((await call('setOrderStatus', E1, { id, status: 'wait_pay' })).status, 'OK');
+  });
+  it('גרסה: ההזמנה השתנתה מאז שנטענה ← stale (orderPick ו-updateOrder עם ver); ניסיון חוזר עם אותו reqId – עובר; בלי upd/ver – כמו קודם', async () => {
+    const id = await mk([{ pid: 'pA', qty: 2, price: 10 }, { pid: 'pC', qty: 1, price: 5 }]);
+    const u0 = (await get(`b/${A}/ord/${id}`)).upd;
+    const L = [{ i: 0, ok: true }, { i: 1, ok: false, act: 'rm' }];
+    assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: L, upd: u0 - 1 })).reason, 'stale');
+    assert.equal((await call('orderPick', E1, { id, reqId: rid(), l: L, upd: 'x' })).reason, 'bad-field');
+    const rq = rid();
+    const r = await call('orderPick', E1, { id, reqId: rq, l: L, upd: u0 });
+    assert.equal(r.status, 'OK', r.text); assert.equal(typeof r.result.upd, 'number');
+    // עובד אחר עורך באמצע ← updateOrder של המסך עם ver הישן נדחה, והעריכה של השני לא נדרסת
+    assert.equal((await call('updateOrder', MGR, { id, note: 'עריכה של מישהו אחר' })).status, 'OK');
+    assert.equal((await call('updateOrder', E1, { id, items: [{ pid: 'pA', qty: 2, price: 10 }], ver: r.result.upd })).reason, 'stale');
+    assert.equal((await get(`b/${A}/ord/${id}`)).items.length, 2);
+    // ניסיון חוזר עם אותו reqId אחרי עריכה של אחר ← stale; בלי עריכה באמצע – עובר
+    assert.equal((await call('orderPick', E1, { id, reqId: rq, l: L, upd: u0 })).reason, 'stale');
+    const id2 = await mk([{ pid: 'pA', qty: 2, price: 10 }, { pid: 'pC', qty: 1, price: 5 }]);
+    const v2 = (await get(`b/${A}/ord/${id2}`)).upd, rq2 = rid();
+    const a = await call('orderPick', E1, { id: id2, reqId: rq2, l: L, upd: v2 });
+    const b = await call('orderPick', E1, { id: id2, reqId: rq2, l: L, upd: v2 });
+    assert.equal(b.status, 'OK', b.text);
+    assert.equal((await call('updateOrder', E1, { id: id2, items: [{ pid: 'pA', qty: 2, price: 10 }], ver: b.result.upd })).status, 'OK');
+    assert.ok(a.result.upd);
+  });
+});
+describe('ליקוט – הורדה שלא נשמרה', () => {
+  it('הורדה שלא נשמרה (updateOrder נכשל) – סימון מחדש מותר; "להזמין" שלא אושר – סימון מחדש נדחה', async () => {
+    const id = await mk();
+    await call('orderPick', E1, { id, reqId: rid(), l: [{ i: 0, ok: true }, { i: 1, ok: false, act: 'rm' }, { i: 2, ok: true }] });
+    const r = await call('orderPick', E1, { id, reqId: rid(), l: [0, 1, 2].map((i) => ({ i, ok: true })) });
+    assert.equal(r.status, 'OK', r.text); assert.equal(r.result.st, 'ok');
+    const id2 = await mk();
+    await call('orderPick', E1, { id: id2, reqId: rid(), l: [{ i: 0, ok: true }, { i: 1, ok: true }, { i: 2, ok: false, act: 'ord', qty: 1 }] });
+    assert.equal((await call('orderPick', E1, { id: id2, reqId: rid(), l: [0, 1, 2].map((i) => ({ i, ok: true })) })).reason, 'pick-pending');
+  });
+});

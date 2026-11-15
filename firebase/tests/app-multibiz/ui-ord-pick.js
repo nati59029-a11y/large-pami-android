@@ -48,7 +48,8 @@ async function open(browser, www, who, calls, S) {
     else if (n === 'setOrderStatus' && o) { o.status = d.status; R = { ok: true, status: d.status }; }
     else if (n === 'orderPick' && o) { const st = d.l.every((x) => x.ok) ? 'ok' : 'chg';
       o.pk = { st, rq: d.reqId, l: d.l.map((x) => Object.assign({}, x, x.act === 'rep' ? { rep: { pid: x.pid, n: (PROD.find((p) => p.document.name.endsWith('/' + x.pid)) || { document: { fields: { name: { stringValue: '' } } } }).document.fields.name.stringValue } } : {})), sum: { it: o.items.map((x) => Object.assign({}, x)), t: o.total }, by: 'w', at: Date.now() };
-      R = { ok: true, st, applied: false, so: [] }; }
+      R = { ok: true, st, applied: false, so: [], upd: 777 }; }
+    else if (n === 'updateOrder' && o && S.stale) { S.stale = 0; return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'FAILED_PRECONDITION', message: 'stale', details: { reason: 'stale' } } }) }); }
     else if (n === 'updateOrder' && o) { o.items = d.items.map((x) => Object.assign({ n: x.pid === 'pD' ? 'מפית דומה' : (o.items.find((y) => y.pid === x.pid) || {}).n, price: x.price != null ? x.price : 6 }, x)); o.total = o.items.reduce((s, it) => s + it.qty * it.price, 0); R = { ok: true, total: o.total }; }
     else if (n === 'orderPickOk' && o) { o.pk.st = 'ok'; o.pk.okAt = Date.now(); }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R }) });
@@ -91,11 +92,11 @@ async function open(browser, www, who, calls, S) {
     k = calls.length; await page.click('[data-a=oxPkDone]'); await H.settle(page, 1500);
     const op = since(k, 'orderPick')[0], up = since(k, 'updateOrder')[0];
     check(who + ' 5 סיום: orderPick עם הסימונים, ואז updateOrder בלי השורה שהוסרה', !!op && JSON.stringify(op.d.l) === JSON.stringify([{ i: 0, ok: true }, { i: 1, ok: false, act: 'rm' }, { i: 2, ok: false, act: 'ord', sup: 'ספק המפיות', qty: 3, eta: '2026-11-20' }])
-      && !!up && JSON.stringify(up.d.items) === JSON.stringify([{ qty: 2, price: 10, pid: 'pA' }, { qty: 3, price: 5, pid: 'pC' }]) && calls.indexOf(op) < calls.indexOf(up), { op: op && op.d, up: up && up.d });
+      && !!up && JSON.stringify(up.d.items) === JSON.stringify([{ qty: 2, price: 10, pid: 'pA' }, { qty: 3, price: 5, pid: 'pC' }]) && calls.indexOf(op) < calls.indexOf(up) && up.d.ver === 777 && typeof op.d.upd === 'number', { op: op && op.d, up: up && up.d });
     const t5 = await txt(page);
     const sm = { v: await v(page), rm: /הוסר: לחם/.test(t5), ord: /להזמין מספק: מפית/.test(t5) && /ספק המפיות/.test(t5) && /20\.11\.2026/.test(t5), before: /סכום לפני[\s\S]*42\.5/.test(t5), after: /סכום אחרי[\s\S]*35/.test(t5),
-      call: await page.evaluate(() => !!document.querySelector('a[href^="tel:"][data-a=oxCall]')), ok: await page.evaluate(() => !!document.querySelector('[data-a=oxPkOk]')), ov: await ov(page) };
-    check(who + ' 6 סיכום: הוסר + להזמין (ספק, צפי), סכום לפני/אחרי, חיוג ללקוח, "הלקוח אישר"', sm.v === 'oxPick' && sm.rm && sm.ord && sm.before && sm.after && sm.call && sm.ok && sm.ov <= 0, sm);
+      call: await page.evaluate(() => !!document.querySelector('a[href^="tel:"][data-a=oxCall]')), ok: await page.evaluate(() => !!document.querySelector('[data-a=oxPkOk]')), re: await page.evaluate(() => !!document.querySelector('[data-a=oxPkRe]')), ov: await ov(page) };
+    check(who + ' 6 סיכום: הוסר + להזמין (ספק, צפי), סכום לפני/אחרי, חיוג ללקוח, "הלקוח אישר", בלי "סימון מחדש" עד האישור', sm.v === 'oxPick' && sm.rm && sm.ord && sm.before && sm.after && sm.call && sm.ok && !sm.re && sm.ov <= 0, sm);
     if (who === 'w') await shot(page, 'סיכום-שינויים-360');
     // 3. חסימה עד אישור
     await card('o1'); const ban = /ממתינים לאישור הלקוח/.test(await txt(page));
@@ -131,6 +132,15 @@ async function open(browser, www, who, calls, S) {
     k = calls.length; await page.click('[data-a=oxSoSt][data-id=s1][data-s=ord]'); await H.settle(page, 500);
     const ss = since(k, 'supOrdSet')[0];
     check(who + ' 11 "להזמין מספקים": כניסה מהרשימה, מקובץ לפי ספק, בלי מה שהגיע, "הוזמן" → supOrdSet', /להזמין מספקים \(2\)/.test(ent) && JSON.stringify(g) === JSON.stringify(['מאפיית כהן (1)', 'ספק המפיות (1)']) && !/ישן/.test(t11) && /לא נשלחת לספק/.test(t11) && !!ss && ss.d.st === 'ord' && await ov(page) <= 0, { ent, g, ss: ss && ss.d });
+    // 7א. ההזמנה השתנתה בזמן הסימון (stale) – לא נדרס, נטען מחדש וסימון חדש
+    await card('o3'); await page.evaluate(() => { delete window.__ox.L.find((o) => o.id === 'o3').pk; }); S.ord.o3.pk = undefined; delete S.ord.o3.pk; await card('o3');
+    await page.click('[data-a=go][data-v=oxPick]'); await H.settle(page, 400);
+    const rq0 = await page.evaluate(() => window.__oxPick.PS.o3 && window.__oxPick.PS.o3.rq);
+    await page.click('[data-a=oxPkAll]'); await page.click('[data-a=oxPkNo][data-n="1"]'); await H.settle(page, 100); await page.click('[data-a=oxPkAct][data-n="1"][data-k=rm]'); await H.settle(page, 100);
+    S.stale = 1; delete S.ord.o3.pk; k = calls.length; await page.click('[data-a=oxPkDone]'); await H.settle(page, 1500);
+    const rq1 = await page.evaluate(() => window.__oxPick.PS.o3 && window.__oxPick.PS.o3.rq);
+    const pv = await page.evaluate(() => ({ v: cur().v, n: document.querySelectorAll('[data-a=oxPkYes1]').length }));
+    check(who + ' 11א ההזמנה השתנתה בינתיים (stale) → הודעה, טעינה מחדש, מסך סימון חדש (reqId חדש)', since(k, 'updateOrder').length === 1 && !!rq0 && !!rq1 && rq0 !== rq1 && pv.v === 'oxPick' && pv.n === 3, { rq0, rq1, pv });
     // 8. הזמנה עם pk chg ישן (o4) – הכרטיס מציג באנר; הזמנה בלי pk – בלי באנר
     await card('o4'); const b4 = /ממתינים לאישור הלקוח/.test(await txt(page));
     check(who + ' 12 הזמנה עם שינויים שלא אושרו – באנר; "להזמין" בסיכום מוצג מתוך pk', b4, { b4 });

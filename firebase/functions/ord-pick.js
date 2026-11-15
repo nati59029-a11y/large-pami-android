@@ -8,7 +8,7 @@
 //   ord/{id}.pk = { st:'ok'|'chg', rq, l:[{ i, ok, act?:'rm'|'rep'|'ord', rep?:{pid,n}, so?, sup?, qty?, eta? }], sum:{ it:[{pid?,n,qty,price}], t, g? }, by, at, okBy?, okAt? }
 //     i = מיקום השורה ב-sum.it (ההזמנה לפני השינויים). st 'chg' = יש שינויים שהלקוח עוד לא אישר; 'ok' = הכול במלאי או שהלקוח אישר.
 //     כש-st === 'chg' השרת חוסם "נשלח" / "ממתין לתשלום" / "יצא למשלוח" / "הושלם" (setOrderStatus ב-orders.js). מנהל עוקף עם force:true.
-//   supord/{ordId}_{reqId}_{i} = { ord, no, br, pid?, n, qty, sup, eta?, cust?, st:'open'|'ord'|'done'|'void', by, at, upd, sby? }
+//   supord/{ordId}_p_{pid} (שורה ידנית: {ordId}_n_{sha1(שם)}) = { ord, no, br, pid?, n, qty, sup, eta?, cust?, st:'open'|'ord'|'done'|'void', by, at, upd, sby? }
 //     רשימה פנימית "להזמין מספקים" (לפי ספק). לא נשלח לספק ולא משנה מלאי. כשהסחורה מגיעה – "הכנסת מלאי" הקיים.
 // סדר הקריאות מהמסך: orderPick (סימונים + צילום "לפני") ← updateOrder (רק כשיש הורדה/החלפה) ← orderPickOk (אחרי שיחה עם הלקוח).
 // orderPick חוזר על עצמו בלי נזק עם אותו reqId: אם הפריטים עוד לא שונו – הסימונים מתעדכנים; אם כבר שונו – מוחזר applied:true ולא נוגעים.
@@ -18,7 +18,8 @@ const { onCall } = require('./lib/region');
 const logger = require('firebase-functions/logger');
 const T = require('./lib/tenant');
 const { inputObject } = require('./lib/roles');
-const C = require('./orders')._core; // who, idOf, reqIdOf, onlyKeys, txt, qtyOf, bad, deny, pre, NB
+const C = require('./orders')._core;
+const FV = () => require('firebase-admin/firestore').FieldValue; // who, idOf, reqIdOf, onlyKeys, txt, qtyOf, bad, deny, pre, NB
 
 const OPEN = ['new', 'work', 'wait_pay']; // כמו PAYABLE ב-orders.js – אחרי "שולם" / ביטול / "נשלח" אין ליקוט
 const ACTS = ['rm', 'rep', 'ord'];
@@ -60,11 +61,18 @@ function markOf(m, n) {
   return o;
 }
 
-// orderPick({ id, reqId, l:[סימון לכל שורה] }) → { ok, st, applied, so:[מזהי supord] }
+// מזהה שורת "להזמין מספקים" לפי הזמנה + מוצר (לא לפי reqId) – סימון מחדש מעדכן את אותה שורה ולא יוצר כפילות (תיקון אחרי בדיקה, ליקוי 1).
+// שורה ידנית (בלי מוצר) – לפי השם. שני מוצרים זהים באותה הזמנה – שורה אחת, הכמויות מצטרפות.
+const soId = (id, it) => `${id}_` + (it.pid ? 'p_' + it.pid : 'n_' + require('crypto').createHash('sha1').update(String(it.n || '')).digest('hex').slice(0, 16));
+
+// orderPick({ id, reqId, l:[סימון לכל שורה], upd? }) → { ok, st, applied, so:[מזהי supord], upd }
+//   upd (רשות) = ord.upd של ההזמנה כפי שנטענה במסך. השתנתה בינתיים (עובד אחר ערך) → stale, כדי לא לדרוס. בלי upd (גרסה ישנה) – בלי בדיקה.
+//   יש שינויים שהלקוח עוד לא אישר (pk.st 'chg') – סימון חדש (reqId אחר) נדחה (pick-pending) עד "הלקוח אישר" (ליקוי 2): כך "לפני" נשמר מהמצב המקורי והחסימה לא יורדת.
 async function orderPick(request) {
   const w = await C.who(request);
   const input = inputObject(request);
-  C.onlyKeys(input, ['id', 'reqId', 'l']);
+  C.onlyKeys(input, ['id', 'reqId', 'l', 'upd']);
+  if (input.upd !== undefined && (typeof input.upd !== 'number' || !Number.isFinite(input.upd))) throw C.bad('bad-field', 'upd לא תקין');
   const id = C.idOf(input.id, 'הזמנה');
   const reqId = C.reqIdOf(input);
   if (!Array.isArray(input.l) || !input.l.length || input.l.length > 50) throw C.bad('bad-pick', 'סימונים חסרים');
@@ -80,8 +88,13 @@ async function orderPick(request) {
     const old = d.pk && typeof d.pk === 'object' ? d.pk : null;
     const again = !!(old && old.rq === reqId);
     // אותו reqId והפריטים כבר שונו (updateOrder הצליח) – לא נוגעים, רק מחזירים
-    if (again && old.sum && !sameIt(old.sum.it, items)) { res = { ok: true, st: old.st, applied: true, dup: true, so: (old.l || []).filter((x) => x.so).map((x) => x.so) }; return; }
+    if (again && old.sum && !sameIt(old.sum.it, items)) { res = { ok: true, st: old.st, applied: true, dup: true, so: (old.l || []).filter((x) => x.so).map((x) => x.so), upd: d.upd }; return; }
     lockCheck(d);
+    // חריג: הסימון הקודם כלל הורדה/החלפה שלא נשמרה (updateOrder נכשל, למשל stale) – הפריטים עדיין כמו ב"לפני", ולכן אין שינוי להסתיר
+    const unapplied = !!(old && old.sum && sameIt(old.sum.it, items) && (old.l || []).some((x) => x.act === 'rm' || x.act === 'rep'));
+    if (!again && old && old.st === 'chg' && !unapplied) throw C.pre('pick-pending', 'יש שינויים שהלקוח עוד לא אישר. קודם "הלקוח אישר את השינויים" (תיקון פריטים – ב"עריכה")');
+    // גרסה: בקריאה ראשונה – ההזמנה כפי שנטענה; בניסיון חוזר עם אותו reqId – רק הסימון שלנו כתב מאז (upd === pk.at)
+    if (input.upd !== undefined && d.upd !== (again ? old.at : input.upd)) throw C.pre('stale', 'ההזמנה השתנתה בינתיים. טענו אותה מחדש וסמנו שוב');
     const base = again && old.sum ? old.sum.it : snapIt(items); // צילום "לפני": מהקריאה הראשונה עם ה-reqId הזה
     const L = input.l.map((m) => markOf(m, base.length));
     if (new Set(L.map((x) => x.i)).size !== L.length || L.length !== base.length) throw C.bad('bad-pick', 'צריך סימון אחד לכל מוצר בהזמנה');
@@ -91,6 +104,11 @@ async function orderPick(request) {
     const pids = [...new Set(L.filter((x) => x.pid).map((x) => x.pid).concat(L.filter((x) => x.act === 'ord' && base[x.i].pid).map((x) => base[x.i].pid)))];
     const ps = pids.length ? await tx.getAll(...pids.map((p) => db.doc('prod/' + p))) : [];
     const P = new Map(ps.filter((x) => x.exists).map((x) => [x.id, x.data()]));
+    const sids = [...new Set(L.filter((x) => x.act === 'ord').map((x) => soId(id, base[x.i])))];
+    const oldSo = [...new Set((old && old.l || []).filter((x) => x.so).map((x) => x.so))].filter((x) => !sids.includes(x));
+    const cur = (sids.length + oldSo.length) ? await tx.getAll(...sids.concat(oldSo).map((x) => db.doc('supord/' + x))) : [];
+    const SO = new Map(cur.map((x) => [x.id, x]));
+    const grp = new Map(); // sid → שורת supord (כמויות מצטרפות)
     const now = Date.now();
     const so = [], out = [];
     for (const x of L) {
@@ -107,22 +125,28 @@ async function orderPick(request) {
         const p = it.pid ? P.get(it.pid) : null;
         const sup = x.sup || (p && typeof p.sup === 'string' ? C.txt(p.sup, 60, 'bad-sup', 'ספק') : '');
         if (!sup) throw C.bad('no-sup', `"${it.n}": חסר ספק – כתבו את שם הספק`);
-        const sid = `${id}_${reqId}_${x.i}`;
-        const doc = Object.assign({ ord: id, no: d.no, br: d.br || C.NB, n: it.n, qty: x.qty, sup, st: 'open', by: w.uid, at: now, upd: now },
-          it.pid ? { pid: it.pid } : {}, x.eta ? { eta: x.eta } : {}, d.cust && typeof d.cust.name === 'string' ? { cust: d.cust.name.slice(0, 60) } : {});
-        tx.set(db.doc('supord/' + sid), doc);
-        Object.assign(o, { so: sid, sup, qty: x.qty }, x.eta ? { eta: x.eta } : {}); so.push(sid); // לסיכום במסך (העותק המלא ב-supord)
+        const sid = soId(id, it);
+        const g = grp.get(sid);
+        if (g) { g.qty = Math.round((g.qty + x.qty) * 1000) / 1000; g.sup = sup; if (x.eta) g.eta = x.eta; }
+        else grp.set(sid, Object.assign({ ord: id, no: d.no, br: d.br || C.NB, n: it.n, qty: x.qty, sup }, it.pid ? { pid: it.pid } : {}, x.eta ? { eta: x.eta } : {}, d.cust && typeof d.cust.name === 'string' ? { cust: d.cust.name.slice(0, 60) } : {}));
+        Object.assign(o, { so: sid, sup, qty: x.qty }, x.eta ? { eta: x.eta } : {}); if (!so.includes(sid)) so.push(sid); // לסיכום במסך (העותק המלא ב-supord)
       }
       out.push(o);
     }
-    // אותו reqId שוב (לפני שהפריטים שונו): שורה שכבר לא "להזמין" – הרשומה שלה מסומנת void (לא נמחקת)
-    if (again) for (const x of old.l || []) if (x.so && !so.includes(x.so)) tx.set(db.doc('supord/' + x.so), { st: 'void', upd: now, sby: w.uid }, { merge: true });
+    // שורה קיימת: "הוזמן" נשאר "הוזמן" (הספק כבר קיבל הזמנה); אחרת (חדשה / להזמין / הגיע / לא צריך) – "להזמין". הכמות, הספק והצפי מתעדכנים
+    for (const [sid, doc] of grp) {
+      const e = SO.get(sid), keep = e && e.exists && e.get('st') === 'ord';
+      if (e && e.exists && !doc.eta && e.get('eta')) doc.eta = FV().delete();
+      tx.set(db.doc('supord/' + sid), Object.assign(doc, { st: keep ? 'ord' : 'open', by: w.uid, upd: now }, e && e.exists ? {} : { at: now }), { merge: true });
+    }
+    // שורה מהסימון הקודם שכבר לא "להזמין" – void אם עוד לא הוזמנה (לא נמחקת; "הוזמן"/"הגיע" נשארים כמו שהם)
+    for (const x of oldSo) { const e = SO.get(x); if (e && e.exists && e.get('st') === 'open') tx.set(e.ref, { st: 'void', upd: now, sby: w.uid }, { merge: true }); }
     const st = out.every((x) => x.ok) ? 'ok' : 'chg';
     const pk = { st, rq: reqId, l: out, sum: Object.assign({ it: base, t: again && old.sum ? old.sum.t : d.total }, again && old.sum ? (typeof old.sum.g === 'number' ? { g: old.sum.g } : {}) : (d.vm && typeof d.gross === 'number' ? { g: d.gross } : {})), by: w.uid, at: now };
     tx.update(ref, { pk, upd: now });
     const cnt = (a) => out.filter((x) => x.act === a).length;
     tx.set(logRef(db, id), logData(w, 'pick', st === 'ok' ? 'הכול במלאי' : [`${out.filter((x) => x.ok).length} במלאי`, cnt('rm') && `${cnt('rm')} להוריד`, cnt('rep') && `${cnt('rep')} מוצר דומה`, cnt('ord') && `${cnt('ord')} להזמין מספק`].filter(Boolean).join(' · ')));
-    res = { ok: true, st, applied: false, so };
+    res = { ok: true, st, applied: false, so, upd: now };
   });
   return res;
 }

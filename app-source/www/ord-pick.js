@@ -39,7 +39,7 @@ const estP=(o,pid)=>{try{const b=window.__obBiz;if(b&&b.defOf)return b.defOf({cu
 
 /* ---------- מצב הליקוט (בזיכרון, עד הסיום) ---------- */
 const PS={};
-function sess(o){let s=PS[o.id];if(!s||(!s.sent&&s.l.length!==o.items.length)){s=PS[o.id]={rq:rid(),sent:0,err:'',it:o.items.map(x=>Object.assign({},x)),l:o.items.map(()=>({ok:null,act:'',pid:'',q:'',sup:'',qty:'',eta:''}))}}return s}
+function sess(o){let s=PS[o.id];if(!s||(!s.sent&&s.l.length!==o.items.length)){s=PS[o.id]={rq:rid(),upd:o.upd,sent:0,err:'',it:o.items.map(x=>Object.assign({},x)),l:o.items.map(()=>({ok:null,act:'',pid:'',q:'',sup:'',qty:'',eta:''}))}}return s}
 const supOf=it=>{const p=it&&it.pid?prod(it.pid):null;return p&&typeof p.sup==='string'?p.sup:''};
 
 /* ---------- חיפוש מוצר חלופי (החיפוש החכם הקיים – ProdMatch) ---------- */
@@ -101,15 +101,17 @@ ACT.oxPkDone=async el=>{const id=el.dataset.id,o=ordOf(id);if(!o)return;const s=
   L.push(m)}
  if(L.every(m=>m.act==='rm'))return toast('כל המוצרים מסומנים להורדה. לביטול ההזמנה – "ביטול הזמנה" בכרטיס ההזמנה');
  el.disabled=true;s.err='';
- try{const r=await fnCall('orderPick',{id,reqId:s.rq,l:L});s.sent=1;
+ try{const r=await fnCall('orderPick',Object.assign({id,reqId:s.rq,l:L},typeof s.upd==='number'?{upd:s.upd}:{}));s.sent=1;
   if(s.l.some(x=>x.act==='rm'||x.act==='rep')&&!(r&&r.applied)){
    const items=[];s.it.forEach((it,i)=>{const x=s.l[i];if(x.act==='rm')return;if(x.act==='rep'){items.push({pid:x.pid,qty:it.qty});return}
     const w={qty:it.qty,price:it.price};if(it.pid){w.pid=it.pid;if(it.from)w.from=it.from}else{w.n=it.n;if(typeof it.c==='number')w.c=it.c;if(it.lb)w.lb=it.lb}items.push(w)});
-   try{const u=await fnCall('updateOrder',{id,items});if(u&&u.warn&&u.warn.length)setTimeout(()=>toast('שים לב: אין מספיק במלאי – '+u.warn.map(w=>w.n).join(', ')),2700)}
-   catch(e){el.disabled=false;s.err=(e&&e.message||'הפעולה נכשלה')+' – השינויים במוצרים לא נשמרו. תקנו ולחצו שוב "סיום וסיכום".';toast(s.err);rerender();return}}
+   try{const u=await fnCall('updateOrder',Object.assign({id,items},r&&typeof r.upd==='number'?{ver:r.upd}:{}));if(u&&u.warn&&u.warn.length)setTimeout(()=>toast('שים לב: אין מספיק במלאי – '+u.warn.map(w=>w.n).join(', ')),2700)}
+   catch(e){el.disabled=false;if(e&&e.reason==='stale')return stale(id);s.err=(e&&e.message||'הפעולה נכשלה')+' – השינויים במוצרים לא נשמרו. תקנו ולחצו שוב "סיום וסיכום".';toast(s.err);rerender();return}}
   delete PS[id];await after(id);
   if(r&&r.st==='ok'){toast('הכול במלאי – אפשר להמשיך');back()}else rerender()}
- catch(e){el.disabled=false;err(e)}};
+ catch(e){el.disabled=false;if(e&&e.reason==='stale')return stale(id);err(e)}};
+// תיקון אחרי בדיקה: עובד אחר שינה את ההזמנה בזמן הסימון – לא דורסים. טוענים מחדש ומתחילים סימון חדש
+async function stale(id){toast('ההזמנה השתנתה בינתיים (מישהו אחר עדכן אותה). נטען מחדש – סמנו שוב.');delete PS[id];await after(id);const o=ordOf(id);if(o&&canPick(o))sess(o);rerender()}
 
 /* ---------- סיכום השינויים ואישור הלקוח ---------- */
 function sumV(o){const pk=o.pk,B=pk.sum||{it:[]},c=o.cust||{},chg=pk.st==='chg';
@@ -129,7 +131,7 @@ function sumV(o){const pk=o.pk,B=pk.sum||{it:[]},c=o.cust||{},chg=pk.st==='chg';
   <button type="button" class="btn w" data-a="oxPkOk" data-id="${esc(o.id)}" style="margin-top:8px">הלקוח אישר את השינויים</button>
   <p class="note" style="margin:6px 0 0">עד האישור אי אפשר לסמן "נשלח" או "ממתין לתשלום".</p></div>`
   :`<p class="note">${pk.okAt?'הלקוח אישר את השינויים · '+tm(pk.okAt):'אין שינויים שדורשים אישור.'}</p>`}
- ${canPick(o)?`<button type="button" class="btn g s w" data-a="oxPkRe" data-id="${esc(o.id)}" style="margin-top:8px">סימון מלאי מחדש</button>`:''}
+ ${canPick(o)&&!chg?`<button type="button" class="btn g s w" data-a="oxPkRe" data-id="${esc(o.id)}" style="margin-top:8px">סימון מלאי מחדש</button>`:''}
  <button type="button" class="btn g w" data-a="oxPkBack" style="margin-top:6px">חזרה להזמנה</button>`}}
 ACT.oxPkOk=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('orderPickOk',{id});toast('נרשם: הלקוח אישר את השינויים');await after(id);back()}catch(e){el.disabled=false;err(e)}};
 ACT.oxPkRe=el=>{const o=ordOf(el.dataset.id);if(!o)return;delete PS[o.id];sess(o);rerender()};

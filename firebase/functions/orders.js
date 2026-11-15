@@ -1058,8 +1058,9 @@ async function createOrder(request) {
 async function updateOrder(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'items', 'cust', 'note', 'total', 'cell', 'disc']);
+  onlyKeys(input, ['id', 'items', 'cust', 'note', 'total', 'cell', 'disc', 'ver']); // ver (משוב סבב 3, רשות): ord.upd שהמסך מכיר – השתנתה בינתיים → stale (מסך הליקוט)
   const id = idOf(input.id, 'הזמנה');
+  if (input.ver !== undefined && (typeof input.ver !== 'number' || !Number.isFinite(input.ver))) throw bad('bad-field', 'ver לא תקין');
   const disc = discIn(input.disc);
   const raw = input.items === undefined ? null : rawItems(input.items);
   const cust = input.cust === undefined ? null : cleanCust(input.cust);
@@ -1075,6 +1076,7 @@ async function updateOrder(request) {
     const d = s.data();
     if (!PAYABLE.includes(d.status)) throw pre('locked', d.status === 'cancel' ? 'ההזמנה בוטלה' : 'ההזמנה שולמה – אי אפשר לשנות פריטים או סכום');
     if (d.shp) throw pre('locked', 'ההזמנה נשלחה – אי אפשר לשנות פריטים, סכום או פרטים. תיקון – בזיכוי'); // משוב סבב 2 (החלטה 16)
+    if (input.ver !== undefined && d.upd !== input.ver) throw pre('stale', 'ההזמנה השתנתה בינתיים. טענו אותה מחדש ונסו שוב');
     // 14.11.2026: מחיר ברירת מחדל ומינימום – כמו ביצירה. הזמנה עם vm שומרת את אופן המחירים ואחוז המע"מ שלה; הזמנה ישנה בלי vm – בלי שדות חדשים
     const prc = await priceCtx(tx, db, typeof d.custId === 'string' && ID_RE.test(d.custId) ? d.custId : '', raw ? raw.filter((x) => x.pid).map((x) => x.pid) : [], c);
     if (d.vm === 'ex' || d.vm === 'inc') prc.vm = d.vm;
