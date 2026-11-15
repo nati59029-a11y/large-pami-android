@@ -85,6 +85,44 @@ describe('משימות פרטיות, קבועות ובקשות (שורש)', () =
     await assertFails(off.doc('ptk/p_off').delete());
   });
 
+  // ---------- ptk – מרכז עבודה סבב 2 (15.11.2026): dl, pri, cat, est, ck, ckd ----------
+  it('ptk סבב 2: יצירה עם השדות החדשים (חוקי); ערכים לא חוקיים וsa/nd – נחסם; due עדיין חובה', async () => {
+    const cr = Date.now();
+    await assertSucceeds(emp.doc('ptk/' + fresh('p')).set(ptk('u_emp', { dl: cr + 2 * 3600000, pri: 'h', cat: 'ספקים', est: 30, ck: ['א', 'ב'], ckd: [] })));
+    await assertSucceeds(emp.doc('ptk/' + fresh('p')).set(ptk('u_emp', { dl: 0, pri: 'l' })));
+    const bad = (o) => assertFails(emp.doc('ptk/' + fresh('p')).set(ptk('u_emp', o)));
+    await bad({ dl: cr - 10 * 60000 });
+    await bad({ dl: cr + 401 * D1 });
+    await bad({ pri: 'x' });
+    await bad({ cat: 'א'.repeat(31) });
+    await bad({ est: 1441 });
+    await bad({ ck: Array.from({ length: 21 }, (_, i) => 'p' + i) });
+    await bad({ ck: ['א'.repeat(121)] });
+    await bad({ ck: ['א'], ckd: [0] });
+    await bad({ sa: cr });
+    await bad({ nd: cr });
+    const noDue = ptk('u_emp', { dl: cr + 3600000 }); delete noDue.due;
+    await assertFails(emp.doc('ptk/' + fresh('p')).set(noDue));
+  });
+
+  it('ptk סבב 2: הבעלים מעדכן יעד/עדיפות/נושא/משך/רשימה ומסמן פריטים; לא חוקי – נחסם; עובד אחר – לא', async () => {
+    await assertSucceeds(emp.doc('ptk/p_emp').update({ dl: Date.now() + 5 * D1, pri: 'h', cat: 'x', est: 60, ck: ['א', 'ב', 'ג'] }));
+    await assertSucceeds(emp.doc('ptk/p_emp').update({ ckd: [0, 2] }));
+    await assertSucceeds(emp.doc('ptk/p_emp').update({ st: 'done', sub: Date.now(), late: '', ckd: [0, 1, 2] }));
+    await assertSucceeds(emp.doc('ptk/p_emp').update({ dl: 0 }));
+    await assertFails(emp.doc('ptk/p_emp').update({ ckd: [3] }));
+    await assertFails(emp.doc('ptk/p_emp').update({ ckd: [1, 1] }));
+    await assertFails(emp.doc('ptk/p_emp').update({ ck: ['א'], ckd: [0, 2] })); // ckd גדול מהרשימה החדשה
+    await assertFails(emp.doc('ptk/p_emp').update({ pri: 'z' }));
+    await assertFails(emp.doc('ptk/p_emp').update({ dl: Date.now() + 500 * D1 }));
+    await assertFails(emp.doc('ptk/p_emp').update({ sa: Date.now() }));
+    await assertFails(emp.doc('ptk/p_emp').update({ due: Date.now() + 9 * D1 })); // due לא משתנה, כמו היום
+    await assertFails(emp2.doc('ptk/p_emp').update({ pri: 'h' }));
+    await assertSucceeds(mgr.doc('ptk/p_emp').update({ pri: 'l' }));
+    // משימה פרטית ישנה (בלי השדות) – עדכון רגיל כמו היום
+    await assertSucceeds(emp.doc('ptk/p_emp').update({ txt: 'עדיין עובד' }));
+  });
+
   // ---------- rtk ----------
   it('rtk: עובד לא קורא ולא כותב כללי משימות קבועות (גם לא כלל שהוא נמען בו)', async () => {
     await assertFails(emp.doc('rtk/r1').get());
@@ -189,6 +227,34 @@ describe('משימות פרטיות, קבועות ובקשות (שורש)', () =
     await assertFails(mgr.doc('rq/q_emp').update({ txt: 'x' }));
     await assertSucceeds(mgr.doc('rq/q_emp').delete());
     await assertFails(emp.doc('rq/q_emp2').delete());
+  });
+
+  it('rq סבב 3: סוג פנייה k ביצירה (עובד); ערך לא חוקי נדחה; הבעלים לא משנה k/ph/tk', async () => {
+    for (const k of ['', 'q', 's', 'b', 'u']) await assertSucceeds(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { k })));
+    await assertFails(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { k: 'x' })));
+    await assertFails(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { k: 1 })));
+    await assertFails(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { ph: 'r' })));
+    await assertFails(emp.doc('rq/' + fresh('q')).set(rq('u_emp', { tk: 't1' })));
+    await assertFails(emp.doc('rq/q_emp').update({ k: 's' }));
+    await assertFails(emp.doc('rq/q_emp').update({ ph: 'w' }));
+    await assertFails(emp.doc('rq/q_emp').update({ tk: 't1' }));
+    await assertFails(emp.doc('rq/q_emp').update({ ph: 'r', cAt: Date.now(), cBy: 'u_emp', st: 'new' }));
+  });
+
+  it('rq סבב 3: מנהל כותב ph (\'\'/r/w) ו-tk (מחרוזת עד 128); ערכים לא חוקיים נדחים; k ו-st חדש – לא', async () => {
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ ph: 'r' }));
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ ph: 'w', tk: 'task_abc' }));
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ ph: '' }));
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ tk: 'א'.repeat(128) }));
+    await assertFails(mgr.doc('rq/q_emp').update({ tk: 'א'.repeat(129) }));
+    await assertFails(mgr.doc('rq/q_emp').update({ tk: 5 }));
+    await assertFails(mgr.doc('rq/q_emp').update({ ph: 'x' }));
+    await assertFails(mgr.doc('rq/q_emp').update({ ph: 'd' }));
+    await assertFails(mgr.doc('rq/q_emp').update({ k: 's' }));
+    await assertFails(mgr.doc('rq/q_emp').update({ st: 'wip' }));
+    await assertFails(emp2.doc('rq/q_emp').update({ ph: 'r' }));
+    await assertFails(off.doc('rq/q_emp').update({ ph: 'r' }));
+    await assertSucceeds(mgr.doc('rq/q_emp').update({ st: 'done', ans: 'בוצע', aBy: 'u_mgr', aAt: Date.now(), ph: 'w' }));
   });
 
   it('rq/c: תגובות – בעלים ומנהל בשמם; עובד אחר לא; בלי עדכון; מחיקה רק מנהל', async () => {
