@@ -1077,17 +1077,31 @@ describe('לקוח בשוטף – נשלח, נעילה ושולם (משוב סב
     await call('markOrderPaid', E1, { id: id2, method: 'cash' }); await call('setOrderStatus', E1, { id: id2, status: 'done' });
     assert.equal((await call('unpayOrder', MGR, { id: id2, reason: 'x' })).reason, 'bad-status');
   });
-  it('תיקון אחרי בדיקה: הזמנה שנשלחה לא מתבטלת (עובד ומנהל) והמלאי לא חוזר; לפני "נשלח" – ביטול כמו קודם', async () => {
+  it('החלטה 21: הזמנה שנשלחה – עובד locked; מנהל מבטל בלי החזרת מלאי, ועם restock מחזיר; עם inv – locked לכולם; לפני "נשלח" – כמו קודם', async () => {
     await seedT();
-    const id = await mk('cT');
-    await setSt(id, 'work');
-    await call('setOrderStatus', E1, { id, status: 'out' });
-    const q0 = (await get(`b/${A}/prod/pA`)).q.br1;
-    for (const u of [E1, MGR]) assert.equal((await call('cancelOrder', u, { id, reason: 'x' })).reason, 'locked');
-    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'wait_pay'); assert.equal((await get(`b/${A}/prod/pA`)).q.br1, q0);
-    const id2 = await mk('cT'); const q1 = (await get(`b/${A}/prod/pA`)).q.br1;
-    assert.equal((await call('cancelOrder', E1, { id: id2, reason: 'x' })).status, 'OK');
-    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, q1 + 1);
+    const q = async () => (await get(`b/${A}/prod/pA`)).q.br1;
+    const sent = async () => { const id = await mk('cT'); await setSt(id, 'work'); assert.equal((await call('setOrderStatus', E1, { id, status: 'out' })).status, 'OK'); return id; };
+    const id = await sent(); const q0 = await q();
+    assert.equal((await call('cancelOrder', E1, { id, reason: 'x' })).reason, 'locked');
+    assert.equal((await call('cancelOrder', E1, { id, reason: 'x', restock: true })).reason, 'locked');
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'wait_pay');
+    assert.equal((await call('cancelOrder', MGR, { id, reason: 'x', restock: 'yes' })).reason, 'bad-field');
+    let r = await call('cancelOrder', MGR, { id, reason: 'הלקוח החזיר' }); assert.equal(r.status, 'OK', r.text);
+    let o = await get(`b/${A}/ord/${id}`); assert.equal(o.status, 'cancel'); assert.equal(o.cancel.rs, false); assert.equal(o.cancel.from, 'wait_pay');
+    assert.equal(await q(), q0); // בלי restock – המלאי לא חוזר
+    const id2 = await sent(); const q1 = await q();
+    r = await call('cancelOrder', MGR, { id: id2, reason: 'חזר', restock: true }); assert.equal(r.status, 'OK', r.text);
+    assert.equal(await q(), q1 + 1); assert.equal((await get(`b/${A}/ord/${id2}`)).cancel.rs, true);
+    const lg = await coll(`b/${A}/ord/${id2}/log`); assert.match(lg.find((x) => x.act === 'cancel').note, /הוחזר למלאי/);
+    // חשבונית (inv – שלב 4, מדומה) – locked גם למנהל, גם עם restock, וגם בהזמנה שלא נשלחה
+    const id3 = await sent(); await prep((d) => d.doc(`b/${A}/ord/${id3}`).update({ inv: { id: 'i1', no: 1 } }));
+    for (const u of [E1, MGR]) assert.equal((await call('cancelOrder', u, { id: id3, reason: 'x', restock: true })).reason, 'locked');
+    const id4 = await mk('cT'); await prep((d) => d.doc(`b/${A}/ord/${id4}`).update({ inv: { id: 'i2', no: 2 } }));
+    assert.equal((await call('cancelOrder', MGR, { id: id4, reason: 'x' })).reason, 'locked');
+    // לא נשלחה – כמו קודם: עובד מבטל, המלאי חוזר (גם עם restock:false), בלי cancel.rs
+    const id5 = await mk('cT'); const q2 = await q();
+    assert.equal((await call('cancelOrder', E1, { id: id5, reason: 'x', restock: false })).status, 'OK');
+    assert.equal(await q(), q2 + 1); assert.equal((await get(`b/${A}/ord/${id5}`)).cancel.rs, undefined);
   });
   it('תיקון אחרי בדיקה: עובד לא הופך לקוח קיים ל"בשוטף" דרך pay; שינוי pay באותם תנאים, מנהל, ולקוח חדש – כמו קודם', async () => {
     await seedT();

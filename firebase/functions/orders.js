@@ -9,7 +9,7 @@
 //   cat/{id}           { name, parent?, ord, upd }                                  – קטגוריה (parent ריק) / תת־קטגוריה. מנהל, דרך saveCat
 //   xfer/{id}          { prod, name, from, to, qty, why:'order'|'cancel'|'edit'|'manual', ord?, no?, by, at, reqId }  – העברה פנימית בין סניפים
 //   stockLog/{id}      { prod, name, br, delta, why, ord?, no?, by, at }             – כל תנועת מלאי. why: in/set/zero/order/xout/xin/cancel/edit
-//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, shp?:{at,by}, by, byName, at, upd, cancel? }  – shp: "נשלח" ללקוח בשוטף (משוב סבב 2)
+//   ord/{id}           { no, src:'staff', br, cust, items:[{pid?,n,qty,price,from?,c?,ct?}], total, status, paid?, calledAt?, shp?:{at,by}, by, byName, at, upd, cancel? }  – shp: "נשלח" ללקוח בשוטף (משוב סבב 2); cancel.rs: בביטול הזמנה שנשלחה – האם המלאי הוחזר (החלטה 21)
 //   ord/{id}/log/{k}   { t, by, act, note }
 //   ordcfg/main        { pay: { mode: 'link'|'phone', has }, src: { <br>: 'stock' | <br> }, upd }   – הקישור עצמו לא כאן
 //   ordcfg/seq         { n }                                                        – מספור רץ לכל עסק
@@ -1289,9 +1289,10 @@ async function unpayOrder(request) {
 async function cancelOrder(request) {
   const w = await who(request);
   const input = inputObject(request);
-  onlyKeys(input, ['id', 'reason']);
+  onlyKeys(input, ['id', 'reason', 'restock']);
   const id = idOf(input.id, 'הזמנה');
   const reason = txt(input.reason, 200, 'bad-reason', 'סיבת ביטול', true);
+  if (input.restock !== undefined && typeof input.restock !== 'boolean') throw bad('bad-field', 'החזרה למלאי: כן או לא');
   const db = T.tdb();
   const ref = db.doc('ord/' + id);
   let res = null;
@@ -1301,17 +1302,21 @@ async function cancelOrder(request) {
     const d = s.data();
     if (d.status === 'cancel') { res = { ok: true, dup: true }; return; }
     if (d.status === 'done') throw pre('bad-status', 'הזמנה שהושלמה לא מבוטלת');
-    if (d.shp) throw pre('locked', 'ההזמנה נשלחה – אי אפשר לבטל אותה. תיקון – בזיכוי'); // משוב סבב 2, תיקון אחרי בדיקה (החלטה 16): גם מנהל, והמלאי לא חוזר
+    // החלטה 21 (משוב סבב 2): הזמנה עם חשבונית (inv, שלב 4) – לאף אחד, רק זיכוי. הזמנה שנשלחה (shp) – מנהל בלבד, והמלאי חוזר רק עם restock:true.
+    // הזמנה שלא נשלחה – כמו קודם (restock לא משנה כלום, המלאי חוזר תמיד)
+    if (d.inv) throw pre('locked', 'להזמנה יש חשבונית – אי אפשר לבטל אותה. תיקון – בזיכוי');
+    if (d.shp && w.role !== 'manager') throw pre('locked', 'ההזמנה נשלחה – רק מנהל יכול לבטל אותה');
+    const back = !d.shp || input.restock === true;
     if (d.status === 'paid') mgr(w); // 18:56: "יצא למשלוח" – גם עובד; "שולם" (לפני משלוח) – מנהל, כמו קודם
     const items = Array.isArray(d.items) ? d.items : [];
     const prods = await loadProds(tx, db, items.filter((x) => x.pid).map((x) => x.pid));
     const undo = ['paid', 'out'].includes(d.status) ? await linesUndo(tx, db, id, s) : null; // 12.11.2026: ביטול הזמנה ששולמה מבטל גם את הניוד
     if (undo) undo();
-    applyMoves(tx, db, w, prods, invert(moves(d.br, items.filter((x) => !x.pid || prods.has(x.pid)))), { ord: id, no: d.no });
+    if (back) applyMoves(tx, db, w, prods, invert(moves(d.br, items.filter((x) => !x.pid || prods.has(x.pid)))), { ord: id, no: d.no });
     if (['paid', 'out'].includes(d.status) && d.paid && d.paid.sup) tx.set(db.doc('ordpay/' + id), { st: 'void', upd: Date.now(), why: 'cancel' }, { merge: true });
     const now = Date.now();
-    tx.update(ref, { status: 'cancel', cancel: { at: now, by: w.uid, reason, from: d.status }, upd: now });
-    tx.set(logRef(db, id), logData(w, 'cancel', reason));
+    tx.update(ref, { status: 'cancel', cancel: Object.assign({ at: now, by: w.uid, reason, from: d.status }, d.shp ? { rs: back } : {}), upd: now });
+    tx.set(logRef(db, id), logData(w, 'cancel', reason + (d.shp ? (back ? ' · הוחזר למלאי' : ' · בלי החזרה למלאי') : '')));
     res = { ok: true, dup: false };
   });
   return res;

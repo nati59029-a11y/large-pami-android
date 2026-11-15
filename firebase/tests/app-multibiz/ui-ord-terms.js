@@ -17,7 +17,7 @@ const CUST = [doc('cust/cT', { name: S('חברת שוטף'), bn: S('חברת ש�
 const it1 = () => A([M({ pid: S('pA'), n: S('עוגה'), qty: N(1), price: N(12) })]);
 const o = (id, no, st, custId, x) => doc('ord/' + id, Object.assign({ no: N(no), br: S('br1'), status: S(st), total: N(12), at: N(T1), custId: S(custId), cust: M({ name: S('לקוח ' + no), phone: S('0541111111') }), items: it1() }, x || {}));
 const ORD = [o('o1', 1, 'work', 'cT'), o('o2', 2, 'wait_pay', 'cT', { shp: M({ at: N(T2), by: S('w') }) }), o('o3', 3, 'work', 'cP'), o('o4', 4, 'work', 'cN'), o('o5', 5, 'work', 'cI'),
-  o('o6', 6, 'done', 'cT', { shp: M({ at: N(T2), by: S('w') }), paid: M({ method: S('transfer'), amt: N(12), at: N(T2), by: S('w') }) }), o('o7', 7, 'wait_pay', 'cP')];
+  o('o6', 6, 'done', 'cT', { shp: M({ at: N(T2), by: S('w') }), paid: M({ method: S('transfer'), amt: N(12), at: N(T2), by: S('w') }) }), o('o7', 7, 'wait_pay', 'cP'), o('o8', 8, 'wait_pay', 'cT', { shp: M({ at: N(T2), by: S('w') }), inv: M({ id: S('i1'), no: N(1) }) })];
 const PROD = [doc('prod/pA', { name: S('עוגה'), price: N(12), on: { booleanValue: true }, q: M({ br1: N(5) }) })];
 
 async function open(browser, www, who, calls) {
@@ -39,7 +39,7 @@ async function open(browser, www, who, calls) {
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop(); let d = {}; try { d = JSON.parse(route.request().postData()).data; } catch (e) { /* */ }
     calls.push({ n, d });
-    const R = { getCosts: { cost: {} }, createOrder: { id: 'oN', no: 9, total: 12 }, saveCust: { ok: true, id: d && d.id }, setOrderStatus: { ok: true, status: 'wait_pay' }, ordProfit: { n: 0, total: 0, paid: 0, paidN: 0 } };
+    const R = { cancelOrder: { ok: true, dup: false }, getCosts: { cost: {} }, createOrder: { id: 'oN', no: 9, total: 12 }, saveCust: { ok: true, id: d && d.id }, setOrderStatus: { ok: true, status: 'wait_pay' }, ordProfit: { n: 0, total: 0, paid: 0, paidN: 0 } };
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: R[n] || { ok: true } }) });
   });
   await H.login(page, who + '@x.co');
@@ -68,7 +68,7 @@ async function open(browser, www, who, calls) {
     check(who + ' 1 בשוטף, בטיפול: "נשלח" (out) במקום "ממתין לתשלום", בלי תשלום בטלפון/לתשלום, "סמן שולם" נשאר, עריכה נשארת, בלי משבצת כרטיס, בלי גלילה לרוחב',
       JSON.stringify(c1.st) === JSON.stringify(['out:נשלח', 'new:חדשה']) && !c1.pay && !c1.phone && c1.paid && c1.edit && !c1.ccard && !c1.shp && c1.ov <= 0, c1);
     const c2 = await card(page, 'o2'); await shot(page, who + '-02-נשלח');
-    check(who + ' 2 נשלח (wait_pay+shp): "נשלח בתאריך", נעול לעריכה, אין חזרה לבטיפול, בלי כפתורי תשלום, "סמן שולם" נשאר, בלי "ביטול הזמנה"', !c2.cancel && c2.st.length === 0 && c2.shp && !c2.edit && c2.lock && !c2.pay && !c2.phone && c2.paid && c2.ov <= 0, c2);
+    check(who + ' 2 נשלח (wait_pay+shp): "נשלח בתאריך", נעול לעריכה, אין חזרה לבטיפול, בלי כפתורי תשלום, "סמן שולם" נשאר; "ביטול הזמנה" – רק מנהל', c2.cancel === (who === 'm') && c2.st.length === 0 && c2.shp && !c2.edit && c2.lock && !c2.pay && !c2.phone && c2.paid && c2.ov <= 0, c2);
     const c3 = await card(page, 'o3');
     check(who + ' 3 פרטי, בטיפול – כמו היום: "ממתין לתשלום" + "חדשה", תשלום בטלפון, סמן שולם, עריכה, משבצת כרטיס', JSON.stringify(c3.st) === JSON.stringify(['wait_pay:ממתין לתשלום', 'new:חדשה']) && c3.phone && c3.paid && c3.edit && c3.ccard && c3.cancel && !c3.shp, c3);
     const c4 = await card(page, 'o4');
@@ -79,6 +79,18 @@ async function open(browser, www, who, calls) {
     check(who + ' 5א פרטי, ממתין לתשלום – כמו היום ("בטיפול", תשלום בטלפון)', JSON.stringify(c7.st) === JSON.stringify(['work:בטיפול']) && c7.phone && c7.edit, c7);
     const c6 = await card(page, 'o6');
     check(who + ' 6 נשלח ושולם (הושלם): ' + (who === 'm' ? 'מנהל רואה ביטול "שולם"' : 'עובד לא רואה ביטול "שולם"'), c6.shp && c6.st.length === 0 && c6.unpay === (who === 'm') && !c6.edit, c6);
+    if (who === 'm') { // החלטה 21: מנהל מבטל הזמנה שנשלחה – "החזרה למלאי" כבויה כברירת מחדל; בלי סימון → restock:false, עם סימון → true
+      const run = async (tick) => { await card(page, 'o2'); await page.click('[data-a=oxCancel]'); await H.settle(page, 300);
+        const off = await page.evaluate(() => { const c = document.querySelector('#dlg input[name=rs]'); return c ? !c.checked : null; });
+        await page.fill('#dlg input[name=r]', 'חזר'); if (tick) await page.check('#dlg input[name=rs]');
+        if (!tick) await shot(page, who + '-03-ביטול-נשלח');
+        const n1 = calls.length; await page.click('#dlg form[data-f=oxWhy] button:not([type=button])'); await H.settle(page, 800);
+        return { off, d: (calls.slice(n1).find((x) => x.n === 'cancelOrder') || {}).d }; };
+      const a = await run(false), b = await run(true);
+      check(who + ' 6א ביטול הזמנה שנשלחה (מנהל): תיבת "החזרה למלאי" כבויה; בלי סימון restock:false, עם סימון true', a.off === true && a.d && a.d.restock === false && a.d.id === 'o2' && b.d && b.d.restock === true, { a, b });
+      const c8 = await card(page, 'o8');
+      check(who + ' 6ב הזמנה עם חשבונית (inv): אין "ביטול הזמנה" גם למנהל', !c8.cancel, c8);
+    }
     // לחיצה על "נשלח"
     await card(page, 'o1'); const n0 = calls.length; await page.click('[data-a=oxStat][data-s=out]'); await H.settle(page, 800);
     const sc = calls.slice(n0).find((x) => x.n === 'setOrderStatus');

@@ -195,7 +195,7 @@ V.oxOrd=id=>{const T='הזמנה';if(!on())return deny(T);if(!O.L){load();return
  ${o.status==='cancel'?`<div class="card"><b>בוטלה</b><p class="note" style="margin:4px 0 0">${esc(o.cancel&&o.cancel.reason||'')}</p></div>`:''}
  ${paid}${pay?`<div class="sec"><h3>תשלום</h3></div>${pay}`:''}
  ${nx?`<div class="sec"><h3>שינוי סטטוס</h3></div><div class="row">${nx}</div>`:''}
- ${!lk&&o.status!=='done'&&o.status!=='cancel'&&(o.status!=='paid'||mgr())?`<button class="btn g w" style="margin-top:14px" data-a="oxCancel" data-id="${esc(o.id)}">ביטול הזמנה</button>`:''}
+ ${(!lk||mgr())&&!o.inv&&o.status!=='done'&&o.status!=='cancel'&&(o.status!=='paid'||mgr())?`<button class="btn g w" style="margin-top:14px" data-a="oxCancel" data-id="${esc(o.id)}">ביטול הזמנה</button>`:''}
  <div class="sec"><h3>היסטוריה</h3></div>${lg?lg.map(x=>`<div class="note" style="padding:6px 0;border-bottom:1px solid var(--line)">${tm(x.t)} · ${esc(LOGW[x.act]||x.act)}${x.note?' · '+esc(x.note):''}</div>`).join('')||'<p class="note">אין</p>':'<p class="note">טוען…</p>'}`}};
 const LOGW={create:'נוצרה',edit:'נערכה',status:'סטטוס',ship:'נשלח',paid:'סומן שולם',unpay:'בוטל "שולם"',cancel:'בוטלה',called:'חייגו ללקוח',payOpen:'נפתח דף התשלום'};
 async function logLoad(id){try{const r=await fsx('/ord/'+id+'/log?pageSize=100');O.log[id]=((r&&r.documents)||[]).map(dec).sort((a,b)=>b.t-a.t)}catch(e){O.log[id]=[]}if(cur().v==='oxOrd'&&!typing())rerender()}
@@ -215,9 +215,13 @@ ACT.oxPaid=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);if(!o)retu
  <p class="note">לא מקלידים כאן מספר כרטיס מלא, תוקף או קוד – זה נדחה.</p><div class="row"><button class="btn grow">שולם</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 FRM.oxPaidF=async f=>{const x=fd(f),b=f.querySelector('button');if(x.last4&&!/^\d{4}$/.test(x.last4))return toast('4 ספרות בדיוק');b.disabled=true;
  try{await fnCall('markOrderPaid',{id:x.id,method:x.method,last4:x.last4||undefined,conf:x.conf||undefined});closeDlg();toast('סומן שולם');await after(x.id);paidProf(x.id)}catch(e){b.disabled=false;err(e)}};
-const reasonDlg=(ttl,fn,ok)=>{dlg(`<h3>${esc(ttl)}</h3><form data-f="oxWhy"><label class="f"><span>סיבה (חובה)</span><input name="r" required maxlength="200"></label><div class="row"><button class="btn r grow">${ok}</button><button type="button" class="btn g grow" data-a="closeDlg">חזרה</button></div></form>`);O.why=fn};
-FRM.oxWhy=async f=>{const r=fd(f).r.trim();if(!r)return;const b=f.querySelector('button');b.disabled=true;try{await O.why(r);closeDlg()}catch(e){b.disabled=false;err(e)}};
-ACT.oxCancel=el=>{const id=el.dataset.id;reasonDlg('לבטל את ההזמנה? המלאי יחזור.',async r=>{await fnCall('cancelOrder',{id,reason:r});toast('ההזמנה בוטלה');await after(id)},'בטל הזמנה')};
+const reasonDlg=(ttl,fn,ok,ex)=>{dlg(`<h3>${esc(ttl)}</h3><form data-f="oxWhy"><label class="f"><span>סיבה (חובה)</span><input name="r" required maxlength="200"></label>${ex||''}<div class="row"><button class="btn r grow">${ok}</button><button type="button" class="btn g grow" data-a="closeDlg">חזרה</button></div></form>`);O.why=fn};
+FRM.oxWhy=async f=>{const r=fd(f).r.trim();if(!r)return;const b=f.querySelector('button');b.disabled=true;try{await O.why(r,f);closeDlg()}catch(e){b.disabled=false;err(e)}};
+ACT.oxCancel=el=>{const id=el.dataset.id,o=(O.L||[]).find(x=>x.id===id);
+ // החלטה 21: הזמנה שנשלחה (מנהל בלבד) – המלאי חוזר רק אם מסמנים "החזרה למלאי" (כבוי כברירת מחדל). הזמנה שלא נשלחה – כמו קודם
+ if(o&&o.shp)return reasonDlg('לבטל הזמנה שכבר נשלחה?',async(r,f)=>{const rs=!!(f&&f.querySelector('input[name=rs]:checked'));await fnCall('cancelOrder',{id,reason:r,restock:rs});toast(rs?'ההזמנה בוטלה והמלאי הוחזר':'ההזמנה בוטלה (המלאי לא הוחזר)');await after(id)},'בטל הזמנה',
+  '<label class="row" style="gap:8px;align-items:center;min-height:44px;margin:4px 0 10px"><input type="checkbox" name="rs" id="oxrs"> <span>החזרה למלאי</span></label><p class="note" style="margin:0 0 10px">הסחורה כבר יצאה. סמנו רק אם היא חזרה בפועל.</p>');
+ reasonDlg('לבטל את ההזמנה? המלאי יחזור.',async r=>{await fnCall('cancelOrder',{id,reason:r});toast('ההזמנה בוטלה');await after(id)},'בטל הזמנה')};
 ACT.oxUnpay=el=>{const id=el.dataset.id;reasonDlg('לבטל את סימון "שולם"? ההזמנה תחזור ל"ממתין לתשלום".',async r=>{await fnCall('unpayOrder',{id,reason:r});toast('"שולם" בוטל');await after(id)},'בטל "שולם"')};
 ACT.oxEdit=el=>{const o=(O.L||[]).find(x=>x.id===el.dataset.id);if(!o)return;O.ed={id:o.id,items:(o.items||[]).map(it=>({pid:it.pid,n:it.n,qty:String(it.ct?it.qty/it.ct:it.qty),price:String(it.price),from:it.from||'',c:it.c,lb:it.lb,ct:it.ct||0}))}; // שורת קרטונים (ct) – עורכים בקרטונים
  dlg(edH());};
