@@ -7,7 +7,9 @@
 <!-- דף בדיקה למפתחים בלבד (שלב 18ו). לא מחובר לאפליקציה.
      מצב "מדומה" (ברירת מחדל): המצלמה והחיישן מזויפים – הסצנה נוצרת בקוד הדף (לא צילום אמיתי, לא נתוני העסק), והטלפון "מסתובב" לבד אל כל נקודת יעד.
      ?real=1 – מצלמה וחיישן אמיתיים (לבדיקה בטלפון דרך דפדפן) · ?noise=0.3 – רעש חיישן במעלות · ?auto=1 – מתחיל מיד
-     מצב סרטון: בוחרים "סרטון" במסך ולוחצים "הקלטה"; הטלפון המדומה מסתובב ברצף (vspeed, ברירת מחדל 40°/ש'); spin – סיבוב קבוע מהיר. -->
+     מצב סרטון: בוחרים "סרטון" במסך ולוחצים "הקלטה"; הטלפון המדומה מסתובב ברצף (vspeed, ברירת מחדל 40°/ש'); spin – סיבוב קבוע מהיר.
+     drift – סטייה איטית של החיישן (מעלות, מתחילה אחרי הפריים הראשון): המצלמה מציירת את הכיוון האמיתי והחיישן מדווח כיוון סוטה (לבדיקת היישור העדין);
+     shake – תאוצה ליניארית מדומה (מ'/ש²) אחרי הפריים הראשון (לבדיקת האזהרה "בלי להזיז"); noAlign – בלי יישור. -->
 <style>
  html,body{margin:0;background:#121216;color:#eee;font-family:sans-serif}
  .page{padding:12px;max-width:760px;margin:0 auto}
@@ -42,7 +44,7 @@ function mockCam(w,h,fovL){const c=document.createElement('canvas');c.width=w;c.
    d[i]=s[0]*gn;d[i+1]=s[1]*gn;d[i+2]=s[2]*gn;d[i+3]=255}x.putImageData(im,0,0)}}}
 /* חיישן מזויף. מצב נקודות: "המשתמש" מסתובב אל היעד הבא במהירות קבועה ונעצר עליו.
    מצב סרטון (אחרי "הקלטה"): מסתובב ברצף בלי לעצור (vspeed מעלות לשנייה בזמן אמיתי), שורה אחרי שורה לפי סדר היעדים, עם רעידה קטנה של היד */
-function mockSensor(cam,opt){opt=opt||{};return(cb,api)=>{let yaw=opt.yaw0||20,pitch=-8,last='',t=0,tp=performance.now(),vy=1,vp=0,ph=0;const sp=opt.speed||240,vsp=opt.vspeed||40,silent=!!opt.silent;
+function mockSensor(cam,opt){opt=opt||{};return(cb,api)=>{let yaw=opt.yaw0||20,pitch=-8,last='',t=0,tp=performance.now(),vy=1,vp=0,ph=0,t1=0;const sp=opt.speed||240,vsp=opt.vspeed||40,silent=!!opt.silent;
  const id=setInterval(()=>{if(silent)return;const now=performance.now(),dt=Math.min(.25,(now-tp)/1000);tp=now;const s=api.state?api.state():{},tg=api.target();
   if(opt.spin)yaw+=opt.spin*dt;/* סיבוב קבוע (מעלות לשנייה), בלי קשר ליעדים – לבדיקת "לאט יותר" */
   else if(s.mode==='video'){if(s.rec&&tg){const dy=M.wrap180(tg.yaw-yaw),dp=tg.pitch-pitch,L=Math.hypot(dy,dp),st=vsp*dt;
@@ -50,7 +52,9 @@ function mockSensor(cam,opt){opt=opt||{};return(cb,api)=>{let yaw=opt.yaw0||20,p
   else if(tg){const dy=M.wrap180(tg.yaw-yaw),dp=tg.pitch-pitch,L=Math.hypot(dy,dp),st=sp*.016;
    if(L>st){yaw+=dy/L*st;pitch+=dp/L*st}else{yaw=tg.yaw;pitch=tg.pitch}}
   const wob=s.mode==='video'?Math.sin(ph*2.1)*.8:0,nz=()=>NOISE?(Math.random()-.5)*2*NOISE:0,a=-yaw+nz(),b=90+pitch+wob+nz(),g=nz(),k=a.toFixed(3)+b.toFixed(3)+g.toFixed(3);
-  const q=M.oriToQuat(a,b,g,0);if(k!==last){cam.draw(q);last=k}t++;cb({alpha:a,beta:b,gamma:g,angle:0})},16);
+  const q=M.oriToQuat(a,b,g,0);if(k!==last){cam.draw(q);last=k}t++;
+  const dr=opt.drift||0;if(dr&&s.n>0&&!t1)t1=now;const tt=t1?(now-t1)/1000:0;
+  cb({alpha:a+dr*Math.sin(1.3*tt),beta:b+dr*Math.sin(.9*tt),gamma:g+.5*dr*Math.sin(1.7*tt),angle:0})},16);
  return()=>clearInterval(id)}}
 function b64(blob){return new Promise(r=>{const f=new FileReader();f.onload=()=>r(String(f.result).split(',')[1]);f.readAsDataURL(blob)})}
 async function size(blob){const b=await createImageBitmap(blob);const r={w:b.width,h:b.height};b.close();return r}
@@ -61,13 +65,22 @@ async function errOf(blob,yawRef){const b=await createImageBitmap(blob),W=b.widt
 /* הרצה (גם מ-Playwright): מחזיר סיכום, או null אם בוטל */
 window.__run=async function(o){o=o||{};let opts={};
  if(o.mode)try{localStorage.setItem('lp-s3pc-mode',o.mode)}catch(e){}
- if(!o.real){const cam=mockCam(o.w||360,o.h||480,o.fovL||62);opts.mock={camera:cam,sensor:mockSensor(cam,o)};}
+ if(!o.real){const cam=mockCam(o.w||360,o.h||480,o.fovL||62);opts.mock={camera:cam,sensor:mockSensor(cam,o)};
+  if(o.shake!=null)opts.mock.motion=cb=>{const id=setInterval(()=>{const c=document.querySelector('.s3pc-cnt');if(c&&/צולמו [1-9]|כוסו [1-9]/.test(c.textContent))cb({acceleration:{x:o.shake,y:0,z:0}})},16);return()=>clearInterval(id)}}
+ if(o.noAlign)opts.noAlign=true;if(o.width)opts.width=o.width;
  if(o.fov)opts.fov=o.fov;
  const t0=performance.now(),r=await S3PanoCap.start(document.body,opts);if(!r)return null;
  const fs=await size(r.full),ss=await size(r.sm),out={w:r.w,h:r.h,full:fs,sm:ss,fullBytes:r.full.size,smBytes:r.sm.size,meta:r.meta,ms:Math.round(performance.now()-t0),
   type:r.full.type,err:o.real?null:+(await errOf(r.sm,r.meta.yawRef)).toFixed(2)};
  if(o.b64)out.fullB64=await b64(r.full);
  const img=document.getElementById('img');img.src=URL.createObjectURL(r.full);img.hidden=false;
+ return out};
+/* בדיקת lastRaw: מפרק את ה-zip (חתימות, מספר רשומות, שמות) ומחזיר את meta.json */
+window.__raw=async function(){const t0=performance.now(),b=await S3PanoCap.lastRaw();if(!b)return null;const ms=Math.round(performance.now()-t0),u=new Uint8Array(await b.arrayBuffer()),V=new DataView(u.buffer),eo=u.length-22,dec=new TextDecoder();
+ const out={type:b.type,bytes:u.length,ms,pk:V.getUint32(0,true)===0x04034b50,eocd:V.getUint32(eo,true)===0x06054b50,count:V.getUint16(eo+10,true),names:[],jpg:0};let o=V.getUint32(eo+16,true);
+ for(let i=0;i<out.count;i++){if(V.getUint32(o,true)!==0x02014b50){out.bad=true;break}const nl=V.getUint16(o+28,true),sz=V.getUint32(o+20,true),off=V.getUint32(o+42,true),nm=dec.decode(u.subarray(o+46,o+46+nl));out.names.push(nm);
+  const ln=V.getUint16(off+26,true),d=u.subarray(off+30+ln,off+30+ln+sz);if(V.getUint32(off,true)!==0x04034b50)out.bad=true;
+  if(/\.jpg$/.test(nm)&&d[0]===0xff&&d[1]===0xd8)out.jpg++;if(nm==='meta.json')out.meta=JSON.parse(dec.decode(d));o+=46+nl}
  return out};
 document.getElementById('go').onclick=async()=>{const o=document.getElementById('out');o.textContent='…';
  const r=await window.__run({real:REAL});o.textContent=r?JSON.stringify(r,null,1):'בוטל'};

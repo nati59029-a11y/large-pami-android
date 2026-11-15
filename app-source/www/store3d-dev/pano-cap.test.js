@@ -20,12 +20,12 @@ function scene(d) {
   return [r, g, b];
 }
 /* "מצלמה" סינתטית: פריים לפי כיוון q ושדה ראייה */
-function render(q, fovL, w, h, gain = 1) {
+function render(q, fovL, w, h, gain = 1, sc = scene) {
   const m = M.qToMat(q), f = M.fovOf(fovL, w, h).f, data = new Uint8ClampedArray(w * h * 4);
   for (let v = 0; v < h; v++) for (let u = 0; u < w; u++) {
     const cx = (u + 0.5 - w / 2) / f, cy = -(v + 0.5 - h / 2) / f;
     const dx = m[0] * cx + m[1] * cy - m[2], dy = m[3] * cx + m[4] * cy - m[5], dz = m[6] * cx + m[7] * cy - m[8], n = Math.hypot(dx, dy, dz);
-    const c = scene([dx / n, dy / n, dz / n]), i = (v * w + u) * 4;
+    const c = sc([dx / n, dy / n, dz / n], u, v), i = (v * w + u) * 4;
     data[i] = c[0] * gain; data[i + 1] = c[1] * gain; data[i + 2] = c[2] * gain; data[i + 3] = 255;
   }
   return data;
@@ -48,13 +48,13 @@ function stitch(frames, fovL, W) {
   const holes = P.fill();
   return { P, W, H, yawRef, holes };
 }
-/* שגיאה ממוצעת מול הסצנה (רמות 0–255), בפס |lat|<=latMax */
-function err(S, latMax = 90, scale = 1) {
+/* שגיאה ממוצעת מול הסצנה (sc = פונקציית הסצנה) (רמות 0–255), בפס |lat|<=latMax */
+function err(S, latMax = 90, scale = 1, sc = scene) {
   let e = 0, n = 0;
   for (let y = 0; y < S.H; y += 2) {
     const lat = (0.5 - (y + 0.5) / S.H) * 180; if (Math.abs(lat) > latMax) continue;
     for (let x = 0; x < S.W; x += 2) {
-      const c = scene(M.eqDir(x, y, S.W, S.H, S.yawRef)), i = (y * S.W + x) * 4;
+      const c = sc(M.eqDir(x, y, S.W, S.H, S.yawRef)), i = (y * S.W + x) * 4;
       e += Math.abs(S.P.col[i] - c[0] * scale) + Math.abs(S.P.col[i + 1] - c[1] * scale) + Math.abs(S.P.col[i + 2] - c[2] * scale); n += 3;
     }
   }
@@ -213,5 +213,98 @@ describe('מצב סרטון', () => {
     assert.ok(frames.length <= T.length && n > frames.length * 5, 'נשמר רק פריים לכל נקודה');
     const S = stitch(frames, fovL, 512), e = err(S);
     assert.ok(e < 6, 'שגיאה ' + e.toFixed(2));
+  });
+});
+
+/* ---------- שלב 18: יישור עדין, ערבוב צר, zip של החומר הגולמי ---------- */
+/* צילום שבו הכיוון "הנמדד" (q) שונה מהכיוון האמיתי (qt) בסטייה אקראית ידועה של עד ±dev° בכל ציר (yaw/pitch/roll); הפריים הראשון בלי סטייה (הוא הקובע) */
+function captureDev(fovL, w, h, dev, sc = scene) {
+  const fv = M.fovOf(fovL, w, h), T = M.pickTargets(fv.fw, fv.fh);
+  return T.map((t, i) => {
+    const qt = qLook(t.yaw + 11, t.pitch, (rnd() - 0.5) * 4), e = [0, 1, 2].map(() => (i ? (rnd() - 0.5) * 2 * dev * D : 0));
+    return { data: render(qt, fovL, w, h, 1, sc), w, h, qt, q: M.qNorm(M.qMul(M.qFromVec(e), qt)) };
+  });
+}
+const withQ = (fr, qs) => fr.map((f, i) => Object.assign({}, f, { q: qs[i] }));
+/* סטייה ממוצעת (מעלות) של הכיוונים מול האמת */
+const qErr = (fr, qs) => fr.reduce((s, f, i) => s + M.qAngle(qs[i], f.qt), 0) / fr.length;
+const log = (...a) => console.log('   ', ...a);
+
+describe('יישור עדין אחרי הצילום', () => {
+  const w = 240, h = 320, fovL = 65, W = 512;
+  it('סטייה אקראית ידועה של ±1.5°: היישור מוריד משמעותית את השגיאה מול הסצנה ואת סטיית הכיוונים', () => {
+    const fr = captureDev(fovL, w, h, 1.5), e0 = err(stitch(fr, fovL, W)), q0 = qErr(fr, fr.map((f) => f.q));
+    const t = Date.now(), A = M.align(fr, fovL), ms = Date.now() - t;
+    const e1 = err(stitch(withQ(fr, A.qs), fovL, W)), q1 = qErr(fr, A.qs);
+    log(`פריימים ${fr.length}, זוגות ${A.pairs} (בשימוש ${A.used}); שגיאה מול הסצנה ${e0.toFixed(2)} → ${e1.toFixed(2)}; סטיית כיוון ${q0.toFixed(2)}° → ${q1.toFixed(2)}°; זמן ${ms}ms`);
+    assert.ok(e1 < e0 * 0.4 && e1 < 5, `שגיאה ${e0.toFixed(2)} → ${e1.toFixed(2)}`);
+    assert.ok(q1 < q0 * 0.35, `סטייה ${q0.toFixed(2)} → ${q1.toFixed(2)}`);
+    assert.ok(A.used >= fr.length, 'מספיק זוגות');
+  });
+  it('בלי סטייה: אין החמרה, והתיקונים זעירים', () => {
+    const fr = captureDev(fovL, w, h, 0), e0 = err(stitch(fr, fovL, W)), A = M.align(fr, fovL), e1 = err(stitch(withQ(fr, A.qs), fovL, W));
+    const mx = Math.max(...A.fix.map((v) => Math.hypot(...v)));
+    log(`בלי סטייה: שגיאה ${e0.toFixed(2)} → ${e1.toFixed(2)}, תיקון מרבי ${mx.toFixed(3)}°`);
+    assert.ok(e1 <= e0 + 0.3, `${e0} → ${e1}`); assert.ok(mx < 0.25, 'תיקון מרבי ' + mx);
+  });
+  it('סצנה חלקה בלי טקסטורה (צבע אחיד + רעש מצלמה): היישור לא "בורח" – אין תיקונים', () => {
+    const flat = (d, u) => { const n = u == null ? 0 : (rnd() - 0.5) * 10; return [120 + n, 118 + n, 110 + n]; };
+    const fr = captureDev(fovL, w, h, 1.5, flat), A = M.align(fr, fovL), mx = Math.max(...A.fix.map((v) => Math.hypot(...v)));
+    log(`סצנה חלקה: זוגות בשימוש ${A.used}, תיקון מרבי ${mx.toFixed(3)}°`);
+    assert.ok(mx < 0.05, 'תיקון מרבי ' + mx);
+    assert.equal(A.used, 0);
+  });
+  it('סצנה עם שינויי צבע רכים בלבד (בלי קווים), בלי סטייה: אין החמרה ואין בריחה', () => {
+    const soft = (d) => { const [x, y, z] = d; return [128 + 50 * Math.sin(2 * x + y), 128 + 50 * Math.sin(2 * y - z), 128 + 40 * Math.cos(2 * z + x)]; };
+    const fr = captureDev(fovL, w, h, 0, soft), e0 = err(stitch(fr, fovL, W), 90, 1, soft), A = M.align(fr, fovL), e1 = err(stitch(withQ(fr, A.qs), fovL, W), 90, 1, soft);
+    const mx = Math.max(...A.fix.map((v) => Math.hypot(...v)));
+    log(`סצנה רכה: שגיאה ${e0.toFixed(2)} → ${e1.toFixed(2)}, תיקון מרבי ${mx.toFixed(3)}°, זוגות בשימוש ${A.used}`);
+    assert.ok(mx < 0.5, 'תיקון מרבי ' + mx); assert.ok(e1 <= e0 + 0.5);
+  });
+  it('תקציב זמן: 400 פיקסלים בצלע הארוכה (כמו בטלפון)', () => {
+    const fr = captureDev(fovL, 300, 400, 1.5), t = Date.now(), A = M.align(fr, fovL), ms = Date.now() - t;
+    log(`יישור ${fr.length} פריימים 300×400: ${ms}ms ב-Node (בטלפון בינוני – הערכה: פי 3–5)`);
+    assert.ok(ms < 2500, ms + 'ms');
+    assert.ok(A.used > 0);
+  });
+});
+
+describe('ערבוב צר', () => {
+  it('שני פריימים חופפים בצבעים שונים: רצועת המעבר צרה (בערך BLEND_DEG) ולא כל אזור החפיפה', () => {
+    const w = 120, h = 160, fovL = 65, W = 1440, H = W / 2, P = M.makePano(W, H, 0);
+    const solid = (c) => { const d = new Uint8ClampedArray(w * h * 4); for (let i = 0; i < d.length; i += 4) { d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255; } return d; };
+    P.add({ data: solid([220, 20, 20]), w, h, q: qLook(0, 0), fovL }); P.add({ data: solid([20, 20, 220]), w, h, q: qLook(30, 0), fovL });
+    let mix = 0, ov = 0; const y = H / 2;
+    for (let x = 0; x < W; x++) { const i = (y * W + x) * 4, r = P.col[i], b = P.col[i + 2]; if (r > 40 && b > 40) mix++; }
+    const fw = M.fovOf(fovL, w, h).fw; ov = fw - 30; // חפיפה במעלות
+    const mixDeg = mix * 360 / W;
+    log(`חפיפה ${ov.toFixed(1)}°, רצועת ערבוב ${mixDeg.toFixed(2)}°`);
+    assert.ok(mixDeg <= M.C.BLEND_DEG * 1.3 && mixDeg > 0, 'רצועה ' + mixDeg);
+  });
+  it('בלי חורים או קווים שחורים – גם עם סטייה ויישור', () => {
+    const fr = captureDev(62, 160, 214, 1.5), A = M.align(fr, 62);
+    for (const qs of [fr.map((f) => f.q), A.qs]) {
+      const S = stitch(withQ(fr, qs), 62, 1024); let black = 0;
+      for (let i = 0; i < S.W * S.H; i++) if (S.P.col[i * 4] + S.P.col[i * 4 + 1] + S.P.col[i * 4 + 2] < 20) black++;
+      assert.equal(S.holes, 0); assert.equal(black, 0, 'פיקסלים שחורים ' + black);
+    }
+  });
+});
+
+describe('zip של החומר הגולמי (lastRaw)', () => {
+  it('zip במצב store: חתימת PK, מספר רשומות, שמות, תוכן ו-CRC נכונים', () => {
+    const enc = new TextEncoder(), files = [{ name: 'frame-00.jpg', data: new Uint8Array([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]) }, { name: 'frame-01.jpg', data: new Uint8Array(5000).map((_, i) => i & 255) }, { name: 'meta.json', data: enc.encode(JSON.stringify({ n: 2, ua: 'בדיקה' })) }];
+    const z = M.zipStore(files), V = new DataView(z.buffer, z.byteOffset, z.byteLength);
+    assert.equal(V.getUint32(0, true), 0x04034b50, 'PK\\3\\4');
+    const eo = z.length - 22; assert.equal(V.getUint32(eo, true), 0x06054b50);
+    assert.equal(V.getUint16(eo + 10, true), 3, 'מספר רשומות');
+    let o = V.getUint32(eo + 16, true); const dec = new TextDecoder();
+    for (const f of files) {
+      assert.equal(V.getUint32(o, true), 0x02014b50); const nl = V.getUint16(o + 28, true), off = V.getUint32(o + 42, true), crc = V.getUint32(o + 16, true), sz = V.getUint32(o + 20, true);
+      assert.equal(dec.decode(z.subarray(o + 46, o + 46 + nl)), f.name); assert.equal(sz, f.data.length); assert.equal(crc, M.crc32(f.data));
+      assert.equal(V.getUint32(off, true), 0x04034b50); const ln = V.getUint16(off + 26, true), d = z.subarray(off + 30 + ln, off + 30 + ln + sz);
+      assert.deepEqual([...d], [...f.data]); o += 46 + nl;
+    }
+    assert.equal(M.crc32(enc.encode('123456789')), 0xcbf43926, 'CRC32 תקני');
   });
 });
