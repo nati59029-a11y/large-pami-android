@@ -247,6 +247,8 @@ Object.assign(exports, require('./secretary-google'));
 // המזכירה שלב 7 (2026-11-12): secInv (רשימה, קובץ, הגדרות, רשימת ספקים), secDecide (תפיסה חד־פעמית, אישור, דחייה, עיכוב, ביטול, אישור שולח).
 // הזיהוי רץ בטריגר הקיים secWaWork (רשומת תור עם inv:true). secretary-inv.js
 Object.assign(exports, require('./secretary-inv'));
+// "תגובה למזכירה" (15.11.2026): secLearn – תגובה על הודעה של המזכירה, כללים אישיים לכל מנהל, "לעשות את זה מעכשיו לבד?", יומן "נשלח לבד". secretary-learn.js + lib/sec-learn.js
+Object.assign(exports, require('./secretary-learn'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));

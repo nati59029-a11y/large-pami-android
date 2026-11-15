@@ -1,6 +1,12 @@
 'use strict';
-// המזכירה העסקית – שלב ג/8: טיוטת הזמנה בכרטיס המייל, תשובת לקוח (oRe), חלון "שליחה לבד", ותווית "מהמייל" בהזמנות.
-// רשת מדומה (בלי שרת). שימוש: node ui-sec-9.js <www-dir> [shots-dir]
+// "תגובה למזכירה" (15.11.2026): המסכים במכשיר. רשת מדומה (בלי שרת), כמו ui-sec-7b.js. נבדק ברוחב 360px:
+//  - כפתור "↩ תגובה" על תשובה בשיחה, על התראה ועל טיוטת ווצאפ; חלון התגובה → secLearn reply → הצעה לכלל → "שמירה ככלל" (save עם התחום שנבחר).
+//  - הוראה רגישה (תשלום) – בהצעה מופיע "תמיד באישור".
+//  - בטיוטה: "לפי ההנחיה שלך", "לעשות את זה מעכשיו לבד?" (רק לבעל הכלל) → אישור → secLearn auto; "למה לא נשלח לבד".
+//  - מסך "הכללים שלי": פעיל / לבד / מחיקה, כלל בטיחות בלי "לבד", "לבד" נעול לפני אישור ראשון, יומן "נשלח לבד", "עצור הכל".
+//  - מנהל עם הגבלת סניפים – בלי "תגובה" על ווצאפ; תכונה כבויה – בלי "תגובה" בכלל.
+//  - בלי גלילה לרוחב, מטרות לחיצה 44px, תוכן זדוני מוצג כטקסט, בלי שגיאות JS. צילום אחד לכל מסך (רק אם ניתנה תיקייה).
+// שימוש: node ui-sec-9.js <www-dir> [shots-dir]
 const fs = require('fs');
 const path = require('path');
 const H = require('./harness');
@@ -8,31 +14,29 @@ let fail = 0;
 const check = (name, ok, info) => { if (!ok) fail++; console.log((ok ? 'עבר  ' : 'נכשל ') + name + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 400) : '')); };
 const BIZ = 'biz-o';
 const FEAT = { scan: true, tasks: true, orders: true, suppliers: true, cashClose: true, secretary: true };
-const NT = { wd: 0, wh: 8, mh: 8, md: 0, dg: false, dh: 8, q: { on: true, f: '22:00', t: '07:00' }, reps: 3, rt: {} };
-const ID1 = 'g' + '1'.repeat(40), ID2 = 'g' + '2'.repeat(40), ID3 = 'g' + '3'.repeat(40);
+const TYPES = { invDue: 'חשבונית לתשלום', win: 'הודעה שלא נענתה' };
 const XSS = '<img src=x onerror="window.__xss=1">';
+const NT = { wd: 0, wh: 8, md: 0, mh: 8, dg: false, dh: 8, q: { on: false, f: '22:00', t: '07:00' }, reps: 3, rt: {} };
 
-async function open(browser, www, w, h) {
+async function open(browser, www, o) {
   const who = 'm';
   const cfg = { mode: 'new', users: { [who]: BIZ }, sa: {}, biz: { [BIZ]: { dataRoot: 'b', features: FEAT, name: 'עסק בדיקה' } },
-    admins: { [`b/${BIZ}/|${who}`]: 1 }, staff: { [`b/${BIZ}/|${who}`]: 1 }, ctx: { hasTouch: true, isMobile: true, viewport: { width: w, height: h } } };
-  const bodies = [];
-  const now = Date.now();
-  const st = { ok: true, consented: true, setupDone: true, name: 'רותי', addr: 'f', call: 'נתי', rows: [], mode: 'all', pay: true, emp: true, sens: false, we: 'warn', mirror: true, mirrorAt: null, cfTh: null, pct: 10, saving: '', nt: NT, types: {}, unseen: 0 };
-  const wc = { ok: true, connected: false, num: '', link: '', stop: { on: false, auto: false, why: '', at: 0, by: '' }, ack: { on: false, text: '' }, open: { on: false, text: '' }, ackH: { f: '08:00', t: '18:00' }, hour: 30, myNum: '', myReq: '', tpls: [], appr: [] };
-  const boxes = [{ id: 'gm0123456789abcdef', addr: 'office@a-business.example', st: 'ok', clean: false, at: now }];
-  const mails = [
-    { id: ID1, from: 'yossi@client.example', name: 'יוסי', subj: 'הזמנה', snip: 'צריך 10 קרטוני חלב', t: now - 3600e3, st: 'new', flags: [], box: boxes[0].id, draft: { st: 'pend', src: 'ai' } },
-    { id: ID2, from: 'yossi@client.example', name: 'יוסי', subj: 'Re: טיוטת הזמנה', snip: 'מאשר', t: now - 600e3, st: 'new', flags: [], box: boxes[0].id, draft: { st: 'pend', src: 'ai' } },
-    { id: ID3, from: 'dan@client.example', name: 'דן', subj: 'שאלה על שעות', snip: 'מתי פתוח?', t: now - 7200e3, st: 'new', flags: [], box: boxes[0].id, draft: { st: 'pend', src: 'ai' } },
+    admins: { [`b/${BIZ}/|${who}`]: 1 }, staff: { [`b/${BIZ}/|${who}`]: 1 }, ctx: { hasTouch: true, isMobile: true, viewport: { width: 360, height: 740 } } };
+  const now = H.T0, bodies = [];
+  const st = { ok: true, consented: true, setupDone: true, name: 'רותי', addr: 'f', call: 'נתי', rows: [], mode: 'all', pay: true, emp: true, sens: false, we: 'warn', mirror: true, mirrorAt: null, cfTh: null, pct: 10, saving: '', nt: NT, types: TYPES, unseen: 0,
+    learn: o.learn !== false, brLimited: !!o.br };
+  const wc = { ok: true, connected: true, num: '03-0000000', link: '', stop: { on: false, auto: false, why: '', at: 0, by: '' }, ack: { on: false, text: '' }, open: { on: false, text: '' }, ackH: { f: '08:00', t: '18:00' }, hour: 30, myNum: '', myReq: '', tpls: [], appr: [] };
+  const S = { uid: '' };
+  const chat = [{ id: 'c1', role: 'u', text: 'כמה חשבוניות פתוחות?', t: now - 120000 }, { id: 'c2', role: 'a', text: 'יש 3 חשבוניות פתוחות.', t: now - 110000, src: [] }];
+  const notes = [{ id: 'n1', k: 'wa', typ: 'wa', title: 'המזכירה לא בטוחה בטיוטה', body: 'הודעה מ-054-1112233 מחכה לבדיקה שלך.', at: now - 60000, t: now - 60000, seen: true, st: 'open', rep: 0, n: 1 }];
+  const card = { wa: '972541112233', show: '054-1112233', name: 'יוסי ' + XSS, link: null, lang: 'he', langL: 'עברית', lastIn: now - 3600e3, n: 2, winLeft: 20 * 3600e3, isNew: false };
+  const drafts = () => [{ id: 'i1', in: 'i1', text: 'שלום, אנחנו פתוחים א׳–ה׳ 08:00–18:00.', st: 'pend', flags: [], why: [], src: 'ai', t: now, mr: 'r1', mrBy: S.uid, mrI: 'כששואלים על שעות – לענות קצר ' + XSS, mrAsk: true, mrNoL: ['הכלל לא מוגדר "לבד"'] }];
+  const rules = [
+    { id: 'r1', ch: 'wa', act: 'reply', instr: 'כששואלים על שעות – לענות קצר', scopeL: 'פניות מסוג "שעות וכתובת"', on: true, auto: false, safe: '', safeL: '', canAuto: true, appr: 1, hits: 0, fails: 0, offWhy: '', lastAt: 0, t: 3 },
+    { id: 'r2', ch: 'mail', act: 'reply', instr: 'תשלמי לספק כשמגיעה חשבונית', scopeL: 'כל ההודעות במייל', on: true, auto: false, safe: 'pay', safeL: 'תשלום או העברת כסף', canAuto: false, appr: 0, hits: 0, fails: 0, offWhy: '', lastAt: 0, t: 2 },
+    { id: 'r3', ch: 'wa', act: 'reply', instr: 'הזמנות – לאשר שקיבלנו ' + XSS, scopeL: 'רק מהשולח הזה', on: true, auto: false, safe: '', safeL: '', canAuto: false, appr: 0, hits: 0, fails: 0, offWhy: '', lastAt: 0, t: 1 },
   ];
-  const ord = { id: ID1, to: 'yossi@client.example', st: 'mgr', ver: 3, t: now, custId: '', custName: '', cands: [{ id: 'c1', name: 'יוסי כהן', bn: 'כהן שיווק' }, { id: 'c2', name: 'יוסי לוי', bn: '' }], idBy: 'mail', custNew: { name: 'יוסי ' + XSS, phone: '0501234567' },
-    phone: '', phoneHint: '0501234567', br: '', brDef: false, catCut: false, brs: [{ id: 'b1', name: 'צפון' }, { id: 'b2', name: 'דרום' }], lines: [
-      { st: 'ok', name: 'חלב 3%', txt: 'חלב', qty: 10, unit: 'קרטון', pr: 5000, sum: 50000 },
-      { st: 'pick', txt: 'גבינה', qty: 2, unit: 'יח', opts: [{ id: 'p1', name: 'גבינה לבנה 5%', pr: 800 }, { id: 'p2', name: 'גבינה צהובה', pr: 1500 }] },
-      { st: 'ok', name: 'שוקו', txt: 'שוקו', qty: 5, out: true },
-      { st: 'nomatch', txt: 'משהו לא ברור ' + XSS, qty: 1 }], total: 50000, nBlock: 3, blk: ['cust', 'br'], sentAt: 0, stuck: false, text: 'שלום,\n\nלהלן טיוטת ההזמנה שלך לבדיקה:\n1. חלב 3%\nסה"כ: 500.00 ₪' };
-  const oa = { on: [{ custId: 'c9', name: 'מכולת הים', at: now }], ask: [{ custId: 'c8', name: 'סופר השכונה', at: now }] };
+  const log = [{ id: 'l1', t: now - 30000, ch: 'wa', st: 'sent', to: '***2233', ri: 'כששואלים על שעות', by: 'אני', mine: true, whyL: [] }];
   const { ctx, page } = await H.newPage(browser, www, cfg, [], who);
   await ctx.route(/:5001\/.*/, async (route) => {
     const n = new URL(route.request().url()).pathname.split('/').pop();
@@ -40,158 +44,127 @@ async function open(browser, www, w, h) {
     bodies.push([n, body]);
     const ok = (r) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: r }) });
     if (n === 'secState') return ok(st);
-    if (n === 'secChatLoad') return ok({ ok: true, msgs: [] });
-    if (n === 'secNotes') return ok({ ok: true, notes: [], unseen: 0, types: {} });
+    if (n === 'secChatLoad') return ok({ ok: true, msgs: chat });
+    if (n === 'secNotes') return ok(body.op === 'list' ? { ok: true, notes, unseen: 0, types: TYPES } : { ok: true });
     if (n === 'secWaCfg') return ok(wc);
-    if (n === 'secMail') {
-      if (body.op === 'list') return ok({ ok: true, mails, boxes, max: 2, cleanN: 0 });
-      if (body.op === 'repGet') return ok({ ok: true, auto: true, cap: 100, drafts: 0, sent: 0, autoDay: 100, held: null });
-      if (body.op === 'get') {
-        const m = mails.find((x) => x.id === body.id);
-        const d = m.id === ID3 ? { id: ID3, to: m.from, subj: 'Re', text: 'פתוחים 8–18', src: 'ai', st: 'pend', flags: [], why: [], an: [], anL: [], t: now } : m.id === ID1 ? { id: ID1, to: m.from, subj: 'Re: הזמנה', text: 'טיוטה', src: 'ai', st: 'pend', flags: [], why: [], an: ['order'], anL: [], t: now, oRe: '' }
-          : { id: ID2, to: m.from, subj: 'Re: Re: הזמנה', text: 'תשובה', src: 'ai', st: 'pend', flags: [], why: [], an: ['order'], anL: [], t: now, oRe: ID1 };
-        return ok({ ok: true, mail: Object.assign({}, m, { text: m.snip, files: [], rto: '' }), draft: d });
+    if (n === 'secInbox') return ok(body.op === 'get' ? { ok: true, card, msgs: [{ id: 'i1', t: now - 3600e3, type: 'text', text: 'מתי אתם פתוחים?', draft: 'i1', flags: [] }], drafts: drafts(), tpls: [] }
+      : { ok: true, cards: [Object.assign({}, card, { pend: 1, flags: [], last: { id: 'i1', type: 'text', text: 'מתי אתם פתוחים?' } })], stop: wc.stop, connected: true });
+    if (n === 'secLearn') {
+      if (body.op === 'reply') {
+        const safe = /תשלמי/.test(body.text);
+        const opts = body.k === 'wa' ? [{ v: 'cls', l: 'פניות מסוג "שעות וכתובת"' }, { v: 'from', l: 'רק מהשולח הזה' }, { v: 'all', l: 'כל ההודעות בווצאפ' }] : body.k === 'note' ? [{ v: 'fam', l: 'התראות דומות לזו' }, { v: 'typ', l: 'כל ההתראות מהסוג הזה' }] : [];
+        return ok({ ok: true, prop: { ch: body.k, act: body.k === 'note' ? 'mute' : body.k === 'chat' ? 'style' : 'reply', instr: body.text, safe: safe ? 'pay' : '', safeL: safe ? 'תשלום או העברת כסף' : '', opts, canAuto: body.k === 'wa' && !safe },
+          draft: body.k === 'wa' ? Object.assign(drafts()[0], { text: 'טיוטה חדשה לפי ההוראה', mrAsk: false }) : null });
       }
-      if (body.op === 'autoList') return ok({ ok: true, rules: [{ id: 'r1', q: ['שעות פתיחה'], a: 'פתוחים 8–18', on: true, n: 3, ch: 'mail', facts: ['hours'] }], items: [] });
-      if (body.op === 'ordGet') return ok({ ok: true, ord });
-      if (body.op === 'ordEdit') {
-        for (const p of body.ops) {
-          if (p.k === 'cust') { ord.custId = p.cid; ord.custName = 'יוסי כהן'; ord.cands = []; ord.blk = ord.blk.filter((x) => x !== 'cust'); }
-          if (p.k === 'br') { ord.br = p.br; ord.blk = ord.blk.filter((x) => x !== 'br'); }
-          if (p.k === 'phone') { ord.phone = ord.phoneHint; ord.phoneHint = ''; }
-          if (p.k === 'pick') { const l = ord.lines[p.i]; const o = l.opts.find((q) => q.id === p.pid); Object.assign(l, { st: 'ok', name: o.name, pr: o.pr, sum: o.pr * l.qty }); delete l.opts; }
-        }
-        ord.ver++; return ok({ ok: true, ord });
-      }
-      if (body.op === 'ordCust') { ord.custId = 'p0501234567'; ord.custName = body.card.name; ord.ver++; return ok({ ok: true, created: true, custId: ord.custId, ord }); }
-      if (body.op === 'ordSend') { if (body.mark) { ord.st = 'sent'; return ok({ ok: true, marked: true }); } ord.st = 'sent'; return ok({ ok: true, id: body.id }); }
-      if (body.op === 'ordAuto') {
-        if (body.act === 'list') return ok({ ok: true, on: oa.on, ask: oa.ask });
-        const k = oa.ask.find((x) => x.custId === body.custId) || oa.on.find((x) => x.custId === body.custId);
-        oa.ask = oa.ask.filter((x) => x !== k); oa.on = oa.on.filter((x) => x !== k); if (body.act === 'on') oa.on.push(k);
-        return ok({ ok: true, custId: body.custId, on: body.act === 'on' });
-      }
+      if (body.op === 'save') return ok({ ok: true, id: 'rNew' });
+      if (body.op === 'list') return ok({ ok: true, rules, max: 50, brLimited: false, stop: false });
+      if (body.op === 'log') return ok({ ok: true, items: log });
+      return ok({ ok: true, rule: {} });
     }
-    return ok({});
+    return ok(n === 'getBackupKey' ? { key: Buffer.alloc(32, 7).toString('base64') } : {});
   });
   await H.login(page, who + '@x.co');
   await page.evaluate(() => { const s = document.getElementById('sheet'); if (s && !s.hidden && ACT.startBlank) ACT.startBlank(); });
-  await H.settle(page, 800);
-  return { ctx, page, bodies, ord };
+  await H.settle(page, 500);
+  S.uid = await page.evaluate(() => SY.uid || '');
+  return { ctx, page, bodies };
 }
 const last = (bodies, n, f) => bodies.filter((b) => b[0] === n && (!f || f(b[1]))).pop();
-const txt = (page) => page.evaluate(() => document.getElementById('main').innerText);
-const sx = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').open ? document.getElementById('dlg').innerText : '');
-const small = (page) => page.evaluate(() => [...document.querySelectorAll('#secOrd button:not([disabled]), #secOrd select, #secOrd input:not([type=checkbox])')].filter((e) => e.offsetParent && e.getBoundingClientRect().height < 43).map((e) => e.outerHTML.slice(0, 80)));
+const tab = async (page, v) => { await page.evaluate((x) => { if (document.getElementById('dlg').open) closeDlg(); go('sec'); if (ACT.secSetX) ACT.secSetX(); window.__sec.mrv = 0; const b = document.querySelector('#secTabs [data-v=' + x + ']'); if (b) b.click(); }, v); await H.settle(page, 900); };
+const dlgText = (page) => page.evaluate(() => (document.getElementById('dlg').open ? document.getElementById('dlg').innerText : ''));
+const shot = async (page, dir, name) => { if (dir) await page.screenshot({ path: path.join(dir, 'sec9-' + name + '-360.png'), fullPage: true }); };
+const small = (page, sel) => page.evaluate((s) => [...document.querySelectorAll(s)].filter((e) => e.offsetParent).map((e) => Math.round(e.getBoundingClientRect().height)).filter((h) => h < 44), sel);
+const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth <= 1);
 
 (async () => {
   const [www, shots] = process.argv.slice(2);
   if (shots) fs.mkdirSync(shots, { recursive: true });
   const browser = await H.launch();
-  for (const [w, h] of [[360, 740]]) {
-    const { ctx, page, bodies, ord } = await open(browser, www, w, h);
-    await page.evaluate(() => go('sec')); await H.settle(page, 700);
-    await page.click('#secTabs [data-v=mail]'); await H.settle(page, 600);
-    await page.click(`[data-a=secMlOpen][data-id=${ID1}]`); await H.settle(page, 500);
-    check('כרטיס מייל עם סיבת order – כפתור "פתיחת טיוטת ההזמנה", ועדיין בלי קריאה לשרת', !!(await page.$('[data-a=secOrdOpen]')) && !last(bodies, 'secMail', (b) => b.op === 'ordGet'));
-    check('החלטת המשתמש: במייל הזמנה – אין כפתור שליחה רגיל (רק דרך טיוטת ההזמנה), ויש "לא לענות"', !(await page.$('[data-a=secMlSend]')) && !(await page.$('#secMlTx')) && !!(await page.$('[data-a=secMlDone]')));
-    await page.click('[data-a=secOrdOpen]'); await H.settle(page, 600);
-    const g = last(bodies, 'secMail', (b) => b.op === 'ordGet');
-    let t = await txt(page);
-    check('טעינה: ordGet עם מזהה בלבד', g && g[1].id === ID1, g && g[1]);
-    check('מוצגים: מועמדים, כרטיס חדש, טלפון לאישור, שורות, אזל, לבירור, לבחירה, סה"כ, טקסט שיישלח, חסימות', /יוסי כהן/.test(t) && /יוסי לוי/.test(t) && /0501234567/.test(t) && /חלב 3%/.test(t) && /אזל/.test(t) && /לבירור/.test(t) && /לבחירה/.test(t) && /500\.00 ₪/.test(t) && /הטקסט שיישלח/.test(t) && /צריך לבחור לקוח/.test(t) && /צריך לבחור סניף/.test(t), t.slice(0, 300));
-    check('תוכן מהלקוח מוצג כטקסט (אין הרצה)', !(await page.evaluate(() => window.__xss)) && !(await page.$('#secOrd img')));
-    check('שליחה חסומה כל עוד אין לקוח וסניף', await page.evaluate(() => document.querySelector('[data-a=secOrdSend]').disabled));
-    check('אין מזהי מוצר בטקסט הנראה', !/\bp1\b|\bp2\b/.test(t));
-    check('בלי גלילה לרוחב', (await sx(page)) <= 0, await sx(page));
-    check('כפתורים ושדות בגובה 44px לפחות', (await small(page)).length === 0, await small(page));
-    if (shots) await page.screenshot({ path: path.join(shots, 'sec9-order-360.png'), fullPage: true });
-    await page.click('[data-a=secOrdOp][data-k=cust][data-cid=c1]'); await H.settle(page, 400);
-    let e = last(bodies, 'secMail', (b) => b.op === 'ordEdit');
-    check('בחירת לקוח מהמועמדים: ordEdit עם ver ו-cid', e && e[1].ver === 3 && e[1].ops[0].k === 'cust' && e[1].ops[0].cid === 'c1', e && e[1]);
-    await page.selectOption('[data-c=secOrdBr]', 'b1'); await H.settle(page, 400);
-    e = last(bodies, 'secMail', (b) => b.op === 'ordEdit' && b.ops[0].k === 'br');
-    check('בחירת סניף', e && e[1].ops[0].br === 'b1' && e[1].ver === 4, e && e[1]);
-    await page.click('[data-a=secOrdOp][data-k=phone]'); await H.settle(page, 400);
-    check('אישור טלפון', !!last(bodies, 'secMail', (b) => b.op === 'ordEdit' && b.ops[0].k === 'phone'));
-    await page.click('[data-a=secOrdOp][data-k=pick][data-i="1"][data-pid=p2]'); await H.settle(page, 400);
-    e = last(bodies, 'secMail', (b) => b.op === 'ordEdit' && b.ops[0].k === 'pick');
-    check('בחירת מוצר מאפשרות: i ו-pid', e && e[1].ops[0].i === 1 && e[1].ops[0].pid === 'p2', e && e[1]);
-    await page.fill('[data-c=secOrdQty][data-i="0"]', '12'); await page.dispatchEvent('[data-c=secOrdQty][data-i="0"]', 'change'); await H.settle(page, 400);
-    e = last(bodies, 'secMail', (b) => b.op === 'ordEdit' && b.ops[0].k === 'qty');
-    check('שינוי כמות', e && e[1].ops[0].i === 0 && e[1].ops[0].qty === 12, e && e[1]);
-    await page.click('[data-a=secOrdOp][data-k=del][data-i="3"]'); await H.settle(page, 300);
-    check('מחיקת שורה – שואל קודם', /למחוק את השורה/.test(await dlgText(page)) && !last(bodies, 'secMail', (b) => b.op === 'ordEdit' && b.ops[0].k === 'del'));
-    await page.click('#dlg [data-a=yes]'); await H.settle(page, 400);
-    check('מחיקה נשלחת אחרי אישור', !!last(bodies, 'secMail', (b) => b.op === 'ordEdit' && b.ops[0].k === 'del' && b.ops[0].i === 3));
-    check('אחרי בחירת לקוח וסניף – אין חסימה והשליחה פעילה', !(await page.evaluate(() => document.querySelector('[data-a=secOrdSend]').disabled)));
-    check('שליחה: לא נשלחה לפני אישור', !last(bodies, 'secMail', (b) => b.op === 'ordSend'));
-    await page.click('[data-a=secOrdSend]'); await H.settle(page, 300);
-    check('שליחה – שואל קודם עם הנמען', /yossi@client\.example/.test(await dlgText(page)) && !last(bodies, 'secMail', (b) => b.op === 'ordSend'));
+  {
+    const { ctx, page, bodies } = await open(browser, www, {});
+    // ---- שיחה ----
+    // 15.11.2026 (SEC:10): הצ'אט נפתח נקי – ההודעות הקודמות בלשונית "צ'אט קודם"
+    await tab(page, 'prev');
+    check('שיחה: כפתור "תגובה" על תשובת המזכירה (ולא על השאלה)', (await page.$$('#secPrev [data-a=secMrReply][data-k=chat]')).length === 1 && !!(await page.$('#secPrev [data-a=secMrReply][data-id=c2]')));
+    await page.click('#secPrev [data-a=secMrReply]'); await H.settle(page, 400);
+    check('חלון התגובה: תיבת טקסט, דוגמאות, והערת כללי הבטיחות', /תגובה למזכירה/.test(await dlgText(page)) && /תמיד באישור שלך/.test(await dlgText(page)) && !!(await page.$('#dlg #secMrT')));
+    await shot(page, shots, 'reply');
+    await page.click('#dlg [data-a=secMrEx]'); await page.click('#secMrGo'); await H.settle(page, 600);
+    const rq = last(bodies, 'secLearn', (b) => b.op === 'reply');
+    check('שליחה: secLearn reply עם הסוג, המזהה וההוראה', rq && rq[1].k === 'chat' && rq[1].id === 'c2' && rq[1].text === 'מעכשיו תעני לי בקצרה', rq && rq[1]);
+    check('הצעה: "לשמור ככלל קבוע?" עם "שמירה ככלל" ו"רק הפעם"', /לשמור ככלל קבוע/.test(await dlgText(page)) && /רק הפעם/.test(await dlgText(page)));
+    await page.click('#dlg [data-a=secMrSave]'); await H.settle(page, 600);
+    const sv = last(bodies, 'secLearn', (b) => b.op === 'save');
+    check('שמירה: secLearn save (k/id/text), החלון נסגר', sv && sv[1].k === 'chat' && sv[1].id === 'c2' && sv[1].text === 'מעכשיו תעני לי בקצרה' && !(await page.evaluate(() => document.getElementById('dlg').open)), sv && sv[1]);
+    // ---- התראות ----
+    await tab(page, 'notes');
+    check('התראות: כפתור "תגובה" בכל התראה', !!(await page.$('#secNotes [data-a=secMrReply][data-k=note][data-id=n1]')));
+    await page.click('#secNotes [data-a=secMrReply]'); await H.settle(page, 400);
+    await page.fill('#secMrT', 'אל תתריעי לי על התראות כאלה'); await page.click('#secMrGo'); await H.settle(page, 600);
+    check('התראה: הצעה עם בחירת תחום (דומות / כל הסוג)', (await page.$$('#secMrSc input[type=radio]')).length === 2 && /לא אתריע/.test(await dlgText(page)));
+    await page.click('#secMrSc label:nth-child(2) input'); await page.click('#dlg [data-a=secMrSave]'); await H.settle(page, 600);
+    check('התראה: save עם התחום שנבחר (typ)', last(bodies, 'secLearn', (b) => b.op === 'save')[1].sc === 'typ');
+    // ---- ווצאפ ----
+    await tab(page, 'wa');
+    await page.click('#secWaList [data-a=secWaOpen]'); await H.settle(page, 900);
+    const wtxt = await page.evaluate(() => document.getElementById('main').innerText);
+    check('טיוטת ווצאפ: "לפי ההנחיה שלך" + השאלה "לעשות את זה מעכשיו לבד?" + "למה לא נשלח לבד"', /לפי ההנחיה שלך/.test(wtxt) && !!(await page.$('#secMrAsk')) && /למה לא נשלח לבד/.test(wtxt), wtxt.slice(0, 300));
+    check('טיוטת ווצאפ: כפתור "תגובה"', !!(await page.$('.secdr [data-a=secMrReply][data-k=wa][data-id=i1]')));
+    check('מטרות לחיצה בשאלה "לבד?" – 44px לפחות', (await small(page, '#secMrAsk button')).length === 0, await small(page, '#secMrAsk button'));
+    await shot(page, shots, 'ask');
+    await page.click('#secMrAsk [data-a=secMrAuto][data-on="1"]'); await H.settle(page, 400);
+    check('"כן, מעכשיו לבד" – קודם שאלת אישור', /ייענו לבד/.test(await dlgText(page)));
+    await page.click('#dlg [data-a=yes]'); await H.settle(page, 700);
+    const au = last(bodies, 'secLearn', (b) => b.op === 'auto');
+    check('אישור: secLearn auto on=true עם הכלל והטיוטה; השאלה נעלמת', au && au[1].id === 'r1' && au[1].on === true && au[1].d === 'i1' && !(await page.$('#secMrAsk')), au && au[1]);
+    // הוראה רגישה
+    await page.click('.secdr [data-a=secMrReply]'); await H.settle(page, 400);
+    await page.fill('#secMrT', 'תשלמי לו את ההחזר'); await page.click('#secMrGo'); await H.settle(page, 700);
+    check('הוראה רגישה: "תמיד באישור" בהצעה', !!(await page.$('#secMrSafe')) && /תמיד באישור/.test(await dlgText(page)));
+    check('הטיוטה עודכנה לטיוטה החדשה (לא נשלחה)', await page.evaluate(() => { const t = document.querySelector('textarea[id^=secDr_]'); return !!t && t.value === 'טיוטה חדשה לפי ההוראה'; }));
+    await shot(page, shots, 'safe');
+    // ---- הכללים שלי ----
+    await page.evaluate(() => { closeDlg(); ACT.secSet(); }); await H.settle(page, 700);
+    check('הגדרות: כרטיס "הכללים שלי"', !!(await page.$('#secMrSet [data-a=secMrOpen]')));
+    await page.click('#secMrSet [data-a=secMrOpen]'); await H.settle(page, 1000);
+    const m = await page.evaluate(() => { const r = (id) => document.querySelector('#secMr [data-id=' + id + ']'); return {
+      n: document.querySelectorAll('#secMr .secli').length, stop: !!document.getElementById('secStopBar'),
+      r1au: !!r('r1').querySelector('[data-c=secMrAu]:not([disabled])'), r2au: !!r('r2').querySelector('[data-c=secMrAu]'), r2safe: /תמיד באישור/.test(r('r2').innerText),
+      r3lock: !!r('r3').querySelector('[data-c=secMrAu][disabled]'), log: document.getElementById('secMrLog').innerText }; });
+    check('מסך הכללים: 3 כללים, "עצור הכל", יומן "נשלח לבד"', m.n === 3 && m.stop && /נשלח ✓/.test(m.log) && /\*\*\*2233/.test(m.log), m);
+    check('כלל בטיחות – בלי "לבד" ועם "תמיד באישור"; "לבד" נעול לפני אישור ראשון; פתוח אחרי אישור', !m.r2au && m.r2safe && m.r3lock && m.r1au, m);
+    check('מטרות לחיצה במסך הכללים – 44px לפחות', (await small(page, '#secMr .secrow .chip')).length === 0, await small(page, '#secMr .secrow .chip'));
+    await shot(page, shots, 'rules');
+    await page.click('#secMr [data-id=r1] [data-c=secMrOn]'); await H.settle(page, 600);
+    check('כיבוי כלל: secLearn set on=false', (last(bodies, 'secLearn', (b) => b.op === 'set') || [0, {}])[1].on === false);
+    await page.click('#secMr [data-id=r3] [data-a=secMrDel]'); await H.settle(page, 400);
+    check('מחיקה – קודם שאלת אישור', /למחוק את הכלל/.test(await dlgText(page)));
     await page.click('#dlg [data-a=yes]'); await H.settle(page, 600);
-    const s = last(bodies, 'secMail', (b) => b.op === 'ordSend');
-    t = await txt(page);
-    check('ordSend עם id ו-ver; אחרי שליחה – תווית "ממתין לתשובה" בלי כפתור שליחה', s && s[1].id === ID1 && s[1].ver === ord.ver && /ממתין לתשובה/.test(t) && !(await page.$('[data-a=secOrdSend]')), s && s[1]);
-    // מצב "ייתכן שנשלח"
-    ord.st = 'sending'; ord.stuck = true;
-    await page.click('[data-a=secOrdRe]'); await H.settle(page, 500);
-    t = await txt(page);
-    check('stuck: "ייתכן שנשלח" + סמן נשלח (ללא כפתור שליחה)', /ייתכן שנשלח/.test(t) && !!(await page.$('[data-a=secOrdMark]')) && !(await page.$('[data-a=secOrdSend]')));
-    await page.click('[data-a=secOrdMark]'); await H.settle(page, 300);
-    await page.click('#dlg [data-a=yes]'); await H.settle(page, 500);
-    check('סמן נשלח: ordSend mark:true', !!last(bodies, 'secMail', (b) => b.op === 'ordSend' && b.mark === true));
-    for (const [st, re] of [['ordered', /הלקוח אישר – נוצרה הזמנה/], ['cancel', /הלקוח ביטל/]]) {
-      ord.st = st; ord.stuck = false; await page.click('[data-a=secOrdRe]'); await H.settle(page, 500);
-      check(`מצב ${st} – קריאה בלבד עם תווית`, re.test(await txt(page)) && !(await page.$('#secOrd [data-a=secOrdSend], #secOrd [data-k=del]')));
-    }
-    // כרטיס לקוח חדש
-    ord.st = 'mgr'; ord.custId = ''; ord.cands = []; ord.ver = 9; await page.click('[data-a=secOrdRe]'); await H.settle(page, 500);
-    check('בלי מועמדים: טופס כרטיס לקוח חדש עם שדות עסקיים', !!(await page.$('#secOrdCustF [name=bn]')) && !!(await page.$('#secOrdCustF [name=ws]')));
-    await page.fill('#secOrdCustF [name=name]', 'דנה'); await page.check('#secOrdCustF [name=ws]'); await page.fill('#secOrdCustF [name=bn]', 'דנה בע"מ'); await page.fill('#secOrdCustF [name=vat]', '123456789');
-    await page.click('#secOrdCustF button'); await H.settle(page, 500);
-    const c = last(bodies, 'secMail', (b) => b.op === 'ordCust');
-    check('ordCust: card + ws:true, בלי שדות שלא מולאו', c && c[1].ws === true && c[1].card.bn === 'דנה בע"מ' && c[1].card.vat === '123456789' && c[1].card.name === 'דנה' && c[1].card.pay === undefined, c && c[1]);
-    check('בלי שגיאות JS (כרטיס הזמנה)', page.__errors.length === 0, page.__errors);
-    // תשובת לקוח (oRe)
-    await page.click('[data-a=secMlBack]'); await H.settle(page, 400);
-    await page.click(`[data-a=secMlOpen][data-id=${ID2}]`); await H.settle(page, 500);
-    t = await txt(page);
-    check('תשובת לקוח: תווית "תשובה לטיוטת הזמנה", בלי טעינת ordGet', /תשובה לטיוטת הזמנה/.test(t) && !!(await page.$('[data-a=secOrdOrig]')) && !last(bodies, 'secMail', (b) => b.op === 'ordGet' && b.id === ID2));
-    if (shots) await page.screenshot({ path: path.join(shots, 'sec9-reply-360.png'), fullPage: true });
-    await page.click('[data-a=secOrdOrig]'); await H.settle(page, 500);
-    check('"פתיחת המייל המקורי" פותח את כרטיס המייל של ההזמנה', (await page.evaluate(() => window.__sec.ml.cur)) === ID1);
-    // צילומי השוואה: מסכים קיימים
-    await page.click('[data-a=secMlBack]'); await H.settle(page, 300);
-    await page.click(`[data-a=secMlOpen][data-id=${ID3}]`); await H.settle(page, 500);
-    if (shots) await page.screenshot({ path: path.join(shots, 'sec9-existing-draft-card-360.png'), fullPage: true });
-    await page.click('[data-a=secMlBack]'); await H.settle(page, 300);
-    await page.click('[data-a=secMlAu]'); await H.settle(page, 600);
-    if (shots) await page.screenshot({ path: path.join(shots, 'sec9-existing-autoH-360.png'), fullPage: true });
-    await page.click('[data-a=secMlBack]'); await H.settle(page, 300);
-    await page.click(`[data-a=secMlOpen][data-id=${ID2}]`); await H.settle(page, 400);
-    // שליחה לבד
-    await page.click('[data-a=secMlBack]'); await H.settle(page, 400);
-    check('כפתור "שליחה לבד של הזמנות" ברשימת המייל', !!(await page.$('[data-a=secOaOpen]')));
-    await page.click('[data-a=secOaOpen]'); await H.settle(page, 600);
-    t = await txt(page);
-    check('חלון שליחה לבד: ממתינים לאישורך + נשלח לבד + הסבר', /ממתינים לאישורך/.test(t) && /סופר השכונה/.test(t) && /מכולת הים/.test(t) && /ללקוח מאומת|הלקוח מאומת/.test(t) && !!(await page.$('[data-a=secOaAct][data-act=on]')) && !!(await page.$('[data-a=secOaAct][data-act=off]')), t.slice(0, 300));
-    check('חלון שליחה לבד: בלי גלילה לרוחב', (await sx(page)) <= 0, await sx(page));
-    if (shots) await page.screenshot({ path: path.join(shots, 'sec9-auto-360.png'), fullPage: true });
-    await page.click('[data-a=secOaAct][data-act=on]'); await H.settle(page, 600);
-    check('אישור שליחה לבד: ordAuto act:on + custId', !!last(bodies, 'secMail', (b) => b.op === 'ordAuto' && b.act === 'on' && b.custId === 'c8') && /סופר השכונה/.test(await page.evaluate(() => document.getElementById('secOaOn').innerText)));
-    await page.click('#secOaOn [data-act=off][data-id=c9]'); await H.settle(page, 600);
-    check('כיבוי: ordAuto act:off', !!last(bodies, 'secMail', (b) => b.op === 'ordAuto' && b.act === 'off' && b.custId === 'c9'));
-    // הגדרות: כפתור
-    await page.click('[data-a=secMlBack]'); await H.settle(page, 300);
-    await page.click('#secTabs [data-v=chat]'); await H.settle(page, 400); await page.click('[data-a=secSet]'); await H.settle(page, 700);
-    check('בהגדרות: כפתור שליחה לבד של הזמנות', !!(await page.$('[data-a=secOaOpen]')));
-    await page.click('[data-a=secOaOpen]'); await H.settle(page, 600);
-    check('מהגדרות נפתח חלון שליחה לבד', /ממתינים לאישורך/.test(await txt(page)));
-    check('בלי שגיאות JS (כל הבדיקה)', page.__errors.length === 0, page.__errors);
+    check('מחיקה: secLearn del', (last(bodies, 'secLearn', (b) => b.op === 'del') || [0, {}])[1].id === 'r3');
+    check('בלי גלילה לרוחב (360px)', await noHs(page));
+    check('תוכן זדוני מוצג כטקסט', !(await page.evaluate(() => window.__xss === 1 || !!document.querySelector('img[src="x"]'))));
+    check('בלי שגיאות JS', page.__errors.length === 0, page.__errors.slice(0, 3));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, www, { br: true });
+    await tab(page, 'prev');
+    const c = !!(await page.$('#secPrev [data-a=secMrReply][data-k=chat]'));
+    await tab(page, 'wa'); await page.click('#secWaList [data-a=secWaOpen]'); await H.settle(page, 900);
+    check('מנהל עם הגבלת סניפים: "תגובה" בשיחה כן, בטיוטת ווצאפ לא', c && !(await page.$('.secdr [data-a=secMrReply]')));
+    check('הגבלת סניפים: בלי שגיאות JS', page.__errors.length === 0, page.__errors.slice(0, 3));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, www, { learn: false });
+    await tab(page, 'chat'); const a = (await page.$$('[data-a=secMrReply]')).length;
+    await tab(page, 'notes'); const b = (await page.$$('[data-a=secMrReply]')).length;
+    await page.evaluate(() => ACT.secSet()); await H.settle(page, 600);
+    check('תכונה כבויה: בלי "תגובה" ובלי כרטיס "הכללים שלי"', a === 0 && b === 0 && !(await page.$('#secMrSet')));
+    check('תכונה כבויה: בלי שגיאות JS', page.__errors.length === 0, page.__errors.slice(0, 3));
     await ctx.close();
   }
   await browser.close();
-  console.log(fail ? `\nנכשלו ${fail}` : '\nהכול עבר');
+  console.log(fail ? `נכשלו ${fail}` : 'הכול עבר');
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
