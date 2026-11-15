@@ -1118,7 +1118,7 @@ async function setRemCfg(request) {
   const up = {};
   if (input.on !== undefined) { if (typeof input.on !== 'boolean') throw bad('bad-cfg', 'תזכורות: כן/לא'); up.on = input.on; }
   if (input.sum !== undefined) { if (typeof input.sum !== 'boolean') throw bad('bad-cfg', 'סיכום יומי: כן/לא'); up.sum = input.sum; }
-  if (input.hour !== undefined) { if (!Number.isInteger(input.hour) || input.hour < 6 || input.hour > 20) throw bad('bad-cfg', 'שעת שליחה: 6–20'); up.hour = input.hour; }
+  if (input.hour !== undefined) { if (!Number.isInteger(input.hour) || input.hour < 6 || input.hour > 19) throw bad('bad-cfg', 'שעת שליחה: 6–19 (לא שולחים אחרי 20:00)'); up.hour = input.hour; }
   if (input.b !== undefined) { if (!Number.isInteger(input.b) || input.b < 0 || input.b > 60) throw bad('bad-cfg', 'ימים לפני המועד: 0–60'); up.b = input.b; }
   if (input.steps !== undefined) {
     const x = input.steps;

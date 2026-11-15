@@ -13,6 +13,8 @@
 // אחרי ריצה מלאה (בלי עצירה בגלל תקרה / מכסת מייל) – arrem/n_{יום}.done, והריצות הבאות באותו יום לא סורקות שוב.
 // מייל בלבד (ar-send הקיים, עם PDF "פירוט יתרה"), כי אין עדיין תבנית ווטסאפ מאושרת לתזכורות. בלי מייל ללקוח – נרשם no-to (המנהל משתף מהאפליקציה).
 // מכסת המייל של העסק לשעה (ar-send: 30 לשעה) מלאה – הנעילה מבוטלת ומנסים שוב בריצה הבאה (לא נשלח כלום, ולכן אין כפילות).
+// תיקון סבב 1: לקוח עם cust.ar.bal <= 0 (זכות מכסה) – לא מקבל; הסכום בהודעה = min(פתוח, bal), עם שורת "בניכוי יתרת זכות"; חשבונית טיוטה מסומנת בהודעה;
+// אין שליחה מ-20:00 (שעון ישראל) – מה שלא יצא עובר ליום העסקים הבא.
 // סיכום יומי למנהל (92, sum !== false): אחרי שכל ההודעות של היום יצאו – arrem/sum_{יום} (פעם אחת), ומייל ל-arcfg/main.mail עם PDF: למי נשלח ומי עדיין חייב.
 // קישור תשלום (94): כשלעסק מוגדר קישור (private/pay, mode 'link') – נכנס להודעה במקום {קישור}.
 //
@@ -35,7 +37,7 @@ const S = require('./lib/ar-send');
 
 if (!getApps().length) initializeApp();
 
-const HOUR0 = 9, CAP0 = 200, MAX_INV = 5000;
+const HOUR0 = 9, CAP0 = 200, MAX_INV = 5000, LAST_HOUR = 20;
 const TXT0 = 'שלום {שם},\nתזכורת ידידותית: לפי הרישומים שלנו יתרה פתוחה לתשלום בסך {סכום}.\n{פירוט}\nאם התשלום כבר בוצע – תודה, ואפשר להתעלם מההודעה.\n{קישור}\n{עסק}';
 const WHO = 'arRemind';
 const isBizS = (s) => { const [y, m, d] = s.split('-').map(Number); return TK.tkBiz({ y, m: m - 1, d }); };
@@ -52,7 +54,7 @@ function msgOf(txt, v) {
 function detailOf(list, today) {
   return list.slice(0, 30).map((x) => {
     const due = dueOf(x), late = daysBetween(due, today);
-    return `• חשבונית ${x.no} מיום ${dd(x.d)}: ${PDF.moneyAg(x.open)}, לתשלום עד ${dd(due)}${late > 0 ? ` (באיחור ${late} ימים)` : late === 0 ? ' (היום)' : ''}`;
+    return `• חשבונית ${x.no}${x.draft ? ' (טיוטה – לא מסמך רשמי)' : ''} מיום ${dd(x.d)}: ${PDF.moneyAg(x.open)}, לתשלום עד ${dd(due)}${late > 0 ? ` (באיחור ${late} ימים)` : late === 0 ? ' (היום)' : ''}`;
   }).join('\n') + (list.length > 30 ? `\nועוד ${list.length - 30} חשבוניות – בפירוט המצורף` : '');
 }
 
@@ -84,10 +86,13 @@ async function remind(db, w, cfg, rc, now, today, deps, res) {
   for (const cid of cids) {
     const list = by.get(cid).sort((a, b) => dueOf(a).localeCompare(dueOf(b)) || a.no - b.no);
     const c = custs.get(cid);
-    owe.push({ cust: cid, name: (list[0].custSnap && list[0].custSnap.name) || (c && (c.bn || c.name)) || '', open: list.reduce((s, x) => s + x.open, 0), n: list.length, late: Math.max(0, daysBetween(dueOf(list[0]), today)) });
+    const bal0 = ARD.arOf(c).bal;
+    owe.push({ cust: cid, name: (list[0].custSnap && list[0].custSnap.name) || (c && (c.bn || c.name)) || '', open: Math.max(0, Math.min(list.reduce((s, x) => s + x.open, 0), bal0)), n: list.length, late: Math.max(0, daysBetween(dueOf(list[0]), today)) });
     if (res.stop) continue;
     if (!c || c.mv) { res.noCust = (res.noCust || 0) + 1; continue; }
     if (c.rem && c.rem.on === false) { res.custOff = (res.custOff || 0) + 1; continue; }
+    // תיקון סבב 1 (בודק 5): יתרת זכות שלא הוקצתה מכסה את החוב (cust.ar.bal <= 0) – אין תזכורת
+    if (bal0 <= 0) { res.credit = (res.credit || 0) + 1; continue; }
     const rcC = Object.assign({}, rc, c.rem && Number.isInteger(c.rem.b) ? { b: c.rem.b } : {});
     const want = [];
     for (const x of list) { const st = AC.remStages(dueOf(x), x.d, today, rcC, isBizS); if (st.length) want.push({ x, k: st[st.length - 1].k }); }
@@ -114,14 +119,20 @@ async function remind(db, w, cfg, rc, now, today, deps, res) {
     // כל החשבוניות הפתוחות של הלקוח – אחרי בדיקה חוזרת (מה שנסגר בינתיים לא נכנס)
     const live = (await db.getAll(...list.map((x) => db.doc('ardoc/' + x.id)))).filter((s) => s.exists && s.get('open') > 0 && !s.get('void')).map((s) => Object.assign({ id: s.id }, s.data()));
     if (!live.length) { await lock.update({ r: { ok: false, why: 'paid', to: '', n: 0, amt: 0 } }); res.paid = (res.paid || 0) + 1; continue; } // הכול שולם בינתיים – לא שולחים
-    const sum = live.reduce((s, x) => s + x.open, 0);
+    const open = live.reduce((s, x) => s + x.open, 0);
+    // הסכום לתשלום = min(החשבוניות הפתוחות, cust.ar.bal) – נקרא שוב לפני השליחה (קבלה עם זכות שנכנסה בינתיים)
+    const cNow = await db.doc('cust/' + cid).get();
+    const bal = ARD.arOf(cNow.exists ? cNow.data() : c).bal;
+    if (bal <= 0) { await lock.update({ r: { ok: false, why: 'credit', to: '', n: live.length, amt: 0 } }); res.credit = (res.credit || 0) + 1; continue; }
+    const sum = Math.min(open, bal);
+    const crLine = sum < open ? `\nבניכוי יתרת זכות ${PDF.moneyAg(open - sum)}` : '';
     const name = (live[0] && live[0].custSnap && live[0].custSnap.name) || c.bn || c.name || '';
     const to = String(c.mail || (live[0] && live[0].custSnap && live[0].custSnap.mail) || '').trim();
     let r;
     if (!to) r = { ch: 'mail', to: '', at: now, ok: false, why: 'no-to' };
     else {
       const st = await AR.stmtBuild(db, w, cfg, c, live, { open: true });
-      const text = msgOf(rc.txt, { 'שם': name, 'סכום': PDF.moneyAg(sum), 'פירוט': detailOf(live, today), 'עסק': cfg.name || '', 'קישור': link ? 'לתשלום: ' + link : '' });
+      const text = msgOf(rc.txt, { 'שם': name, 'סכום': PDF.moneyAg(sum), 'פירוט': detailOf(live, today) + crLine, 'עסק': cfg.name || '', 'קישור': link ? 'לתשלום: ' + link : '' });
       r = await send(w.bizId, { to, subject: `תזכורת תשלום${cfg.name ? ' – ' + cfg.name : ''}`, text, replyTo: cfg.mail, fromName: cfg.name || '', pdf: st.buf, fileName: st.name, by: WHO, now });
     }
     if (r && r.why === 'rate') { // מכסת המייל לשעה – מבטלים את הנעילה ומנסים בריצה הבאה
@@ -206,6 +217,7 @@ async function runBiz(biz, now, deps) {
     const hour = Number.isInteger(rc.hour) ? rc.hour : HOUR0;
     if (!isBizS(today)) { res.skipped = 'not-biz-day'; return; }
     if (wl.hh < hour) { res.skipped = 'early'; return; }
+    if (wl.hh >= LAST_HOUR) { res.skipped = 'late'; return; } // תיקון סבב 1: לא שולחים אחרי 20:00 – מה שלא יצא עובר ליום העסקים הבא
     const w = { uid: WHO, bizId: biz.bizId, role: 'manager', mine: null };
     await monthly(db, w, cfg, now, today, deps, res);
     if (rc.on !== true) { res.rem = 'off'; return; }

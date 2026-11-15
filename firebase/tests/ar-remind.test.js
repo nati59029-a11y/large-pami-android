@@ -47,14 +47,15 @@ async function seed(o) {
   for (const [u, role] of [[MGR, 'admin'], [E1, 'worker']]) b.set(adm.doc('users/' + u), { bizId: A, role, active: true, bizStatus: 'active', email: u + '@x.invalid', createdAt: 1 });
   b.set(adm.doc(`${P}ordcfg/main`), { vat: 18 });
   b.set(adm.doc(`${P}prod/pA`), { name: 'מגש', price: 100, barcode: '', on: true, q: { _: 1000 } });
-  b.set(adm.doc(`${P}cust/c1`), { name: 'לקוח c1', mail: 'c1@x.invalid', phone: '0541111111', wholesale: true, terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} });
-  b.set(adm.doc(`${P}cust/c2`), { name: 'לקוח c2', mail: 'c2@x.invalid', phone: '0541111112', wholesale: true, terms: { b: 'eom', d: 30 }, rem: { on: false }, at: 1, upd: 1, x: {} });
-  b.set(adm.doc(`${P}cust/c3`), { name: 'לקוח c3', phone: '0541111113', wholesale: true, terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} });
-  b.set(adm.doc(`${P}cust/c4`), { name: 'לקוח c4', mail: 'c4@x.invalid', phone: '0541111114', wholesale: true, terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} });
+  b.set(adm.doc(`${P}cust/c1`), { ar: BIG, name: 'לקוח c1', mail: 'c1@x.invalid', phone: '0541111111', wholesale: true, terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} });
+  b.set(adm.doc(`${P}cust/c2`), { ar: BIG, name: 'לקוח c2', mail: 'c2@x.invalid', phone: '0541111112', wholesale: true, terms: { b: 'eom', d: 30 }, rem: { on: false }, at: 1, upd: 1, x: {} });
+  b.set(adm.doc(`${P}cust/c3`), { ar: BIG, name: 'לקוח c3', phone: '0541111113', wholesale: true, terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} });
+  b.set(adm.doc(`${P}cust/c4`), { ar: BIG, name: 'לקוח c4', mail: 'c4@x.invalid', phone: '0541111114', wholesale: true, terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} });
   if (o.main !== false) b.set(adm.doc(`${P}arcfg/main`), { on: true, name: 'עסק תזכורות', mail: 'biz@x.invalid' });
   if (o.rem !== false) b.set(adm.doc(`${P}arcfg/rem`), Object.assign({ on: true }, o.rem || {}));
   await b.commit();
 }
+const BIG = { bal: 100000000, open: 100000000, cr: 0 };
 const put = (id, d) => adm.doc(`${P}ardoc/${id}`).set(d);
 function mailer(fail) {
   const L = [];
@@ -165,6 +166,43 @@ describe('arRemind – תרחיש של 40 יום מדומים (קריטריון 
   });
 });
 
+describe('תיקון סבב 1 (בודק 5): יתרת זכות, טיוטה, לא אחרי 20:00', () => {
+  beforeEach(async () => { await seed(); });
+  it('קבלה עם זכות שמכסה את החוב (bal<=0) – אין תזכורת; זכות חלקית – הסכום = bal ושורת "בניכוי יתרת זכות"; טיוטה מסומנת', async () => {
+    await put('invD1', inv('invD1', 'c1', '2026-11-20', '2026-12-10', 11800));
+    await put('invD4', inv('invD4', 'c4', '2026-11-20', '2026-12-10', 11800));
+    await adm.doc(`${P}cust/c1`).update({ ar: { bal: -500, open: 11800, cr: 12300 } });
+    await adm.doc(`${P}cust/c4`).update({ ar: { bal: 5000, open: 11800, cr: 6800 } });
+    const m = mailer();
+    const out = await run(at('2026-12-07', 10), m);
+    assert.deepEqual(m.cust().map((x) => x.to), ['c4@x.invalid'], JSON.stringify(out[A]));
+    assert.equal(out[A].credit, 1);
+    const t = m.cust()[0].text;
+    assert.match(t, /בסך ₪50\.00/); assert.match(t, /בניכוי יתרת זכות ₪68\.00/); assert.match(t, /חשבונית 4 \(טיוטה – לא מסמך רשמי\)/);
+    assert.equal((await adm.doc(`${P}arrem/c_c1_2026-12-07`).get()).exists, false, 'לקוח בזכות – אין נעילה');
+    assert.equal((await adm.doc(`${P}arrem/c_c4_2026-12-07`).get()).get('r').amt, 5000);
+  });
+  it('זכות שנכנסה אחרי הסריקה ולפני השליחה – לא נשלח (credit), ולא נשלח שוב באותו יום', async () => {
+    await put('invD1', inv('invD1', 'c1', '2026-11-20', '2026-12-10', 11800, { draft: false }));
+    const m = mailer();
+    const ref = adm.doc(`${P}cust/c1`);
+    const orig = adm.runTransaction.bind(adm);
+    let hit = false;
+    adm.runTransaction = async (fn, o) => { const r = await orig(fn, o); if (!hit) { hit = true; await ref.update({ ar: { bal: 0, open: 11800, cr: 11800 } }); } return r; };
+    try { await run(at('2026-12-07', 10), m); } finally { adm.runTransaction = orig; }
+    assert.equal(m.cust().length, 0);
+    assert.equal((await adm.doc(`${P}arrem/c_c1_2026-12-07`).get()).get('r').why, 'credit');
+  });
+  it('לא אחרי 20:00: ביום התזכורת ב-20:30 – כלום; ביום העסקים הבא – הודעה אחת (גם בשתי ריצות)', async () => {
+    await put('invD1', inv('invD1', 'c1', '2026-11-20', '2026-12-10', 11800));
+    const m = mailer();
+    assert.equal((await run(at('2026-12-07', 20, 30), m))[A].skipped, 'late');
+    assert.equal(m.L.length, 0);
+    await run(at('2026-12-08', 10), m); await run(at('2026-12-08', 10, 15), m);
+    assert.deepEqual(m.cust().map((x) => TK.dayStr(TK.ymdOf(x.now))), ['2026-12-08']);
+  });
+});
+
 describe('סיכום חודשי אוטומטי (invM)', () => {
   beforeEach(async () => { await seed({ rem: false }); });
   it('ביום העסקים הראשון בחודש – ללקוח עם invM בלבד, פעם אחת, על החודש הקודם', async () => {
@@ -183,7 +221,7 @@ describe('סיכום חודשי אוטומטי (invM)', () => {
 });
 
 describe('arStatement / setRemCfg (HTTP) + כרטסת = cust.ar.bal', () => {
-  beforeEach(async () => { await seed(); });
+  beforeEach(async () => { await seed(); await adm.doc(`${P}cust/c1`).update({ ar: null }); });
   it('הזמנה → חשבונית → קבלה חלקית → זיכוי: הכרטסת מהמסמכים = cust.ar.bal; PDF; עובד רואה, בלי הרשאה / לקוח לא קיים – נדחה', async () => {
     const o = await ok(call('createOrder', MGR, { reqId: rid(), cust: { name: 'לקוח c1', phone: '0541111111' }, custId: 'c1', items: [{ pid: 'pA', qty: 3, price: 100 }] }));
     await ok(call('setOrderStatus', MGR, { id: o.id, status: 'work' }));
@@ -210,7 +248,7 @@ describe('arStatement / setRemCfg (HTTP) + כרטסת = cust.ar.bal', () => {
     await ok(call('setRemCfg', MGR, { on: true, hour: 8, b: 5, steps: [7, 0, 7, 14], mon: 0, cap: 50, txt: 'שלום {שם}', sum: false }));
     const r = (await adm.doc(`${P}arcfg/rem`).get()).data();
     assert.deepEqual([r.on, r.hour, r.b, r.steps, r.mon, r.cap, r.txt, r.sum], [true, 8, 5, [0, 7, 14], 0, 50, 'שלום {שם}', false]);
-    for (const bad of [{ hour: 3 }, { b: 61 }, { steps: [1, 2, 3, 4, 5, 6, 7, 8, 9] }, { mon: 3 }, { cap: 0 }, { x: 1 }]) assert.equal((await call('setRemCfg', MGR, bad)).status, 'INVALID_ARGUMENT', JSON.stringify(bad));
+    for (const bad of [{ hour: 3 }, { hour: 20 }, { b: 61 }, { steps: [1, 2, 3, 4, 5, 6, 7, 8, 9] }, { mon: 3 }, { cap: 0 }, { x: 1 }]) assert.equal((await call('setRemCfg', MGR, bad)).status, 'INVALID_ARGUMENT', JSON.stringify(bad));
     await ok(call('setRemCfg', MGR, { cust: 'c1', rem: { on: false, b: 2 }, invM: true }));
     const c = (await adm.doc(`${P}cust/c1`).get()).data();
     assert.deepEqual(c.rem, { on: false, b: 2 }); assert.equal(c.invM, true); assert.equal(c.name, 'לקוח c1');
