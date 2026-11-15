@@ -198,7 +198,11 @@ describe('תזכורות (7.3, 7.4, 74–77)', () => {
     has(/^task:/, 'משימה שעברה את הזמן (מקובץ)');
     assert.match(byKey(L, /^task:/)[0].body, /לנקות את המקרר/); assert.doesNotMatch(byKey(L, /^task:/)[0].body, /משימה בזמן/);
     has(/^close:2026-11-11$/, 'סגירת קופה חסרה או עם הפרש – למחרת');
-    const cl = byKey(L, /^close:/)[0].body; assert.match(cl, /i_nl: לא נשלחה סגירה/); assert.match(cl, /i_yh: הפרש מזומן 120/);
+    const c0 = byKey(L, /^close:/)[0], cl = c0.body;
+    // 15.11.2026: נוסח ברור – יום בשבוע ותאריך, שם הסניף (לא המזהה), מה קרה ומה לעשות
+    assert.equal(c0.title, 'סגירות קופה של 11.11 – יש מה לבדוק');
+    assert.match(cl, /סניף נחל לכיש: לא נשלחה סגירת קופה ליום רביעי 11\.11\./); assert.match(cl, /סניף יהודה הנשיא: בסגירת הקופה של יום רביעי 11\.11 \(שלח\/ה: מנהל 1\) יש הפרש מזומן של 120/);
+    assert.match(cl, /מה לעשות:\n• לסגירה שלא נשלחה: לבקש מהעובד בסניף לשלוח סגירת קופה, או לפתוח את מסך סגירת הקופה/); assert.match(cl, /• להפרש:/); assert.doesNotMatch(cl, /i_nl|i_yh/);
     has(/^backup:/, 'גיבוי ישן מ-3 ימים'); assert.match(byKey(L, /^backup:/)[0].body, /Galaxy/);
     has(/^fact:f1:/, 'עובדה שפגה – ביום התפוגה'); assert.equal(byKey(L, /^fact:f2/).length, 0);
     assert.equal(byKey(L, /^cal:e1/).length, 0, 'אירוע ב-10:00 – התזכורת שעה לפני, עוד לא');
@@ -488,6 +492,11 @@ describe('תיקון סבב 1', () => {
     const cl = [{ reg: 'i_yh', d: P, st: 'rej', data: closingData(1000, 800) }, { reg: 'i_yh', d: P, st: 'ok', data: closingData(500, 500) }];
     assert.deepEqual(R.closeCands(cl, '2026-11-12'), [], 'סגירה תקינה בלי הפרש + נדחית עם הפרש – אין תזכורת');
     assert.equal(R.closeCands([{ reg: 'i_nl', d: '2026-11-08', st: 'rej', data: closingData(1, 1) }], '2026-11-12').length, 0, 'קופה שרק נדחו בה סגירות – לא "חסרה"');
+    // 15.11.2026: רק חסרה / רק הפרש – כותרת מתאימה; קופה לא מוכרת – המזהה כמו שהוא
+    const m1 = R.closeCands([{ reg: 'i_nl', d: '2026-11-08', st: 'ok', data: closingData(1, 1) }], '2026-11-13')[0];
+    assert.equal(m1.title, 'לא נשלחה סגירת קופה ל-12.11'); assert.match(m1.body, /^• סניף נחל לכיש: לא נשלחה סגירת קופה ליום חמישי 12\.11\./); assert.doesNotMatch(m1.body, /להפרש/);
+    const d1 = R.closeCands([{ reg: 'i_xx', d: '2026-11-12', st: 'ok', data: closingData(1000, 950) }], '2026-11-13')[0];
+    assert.equal(d1.title, 'הפרש מזומן בסגירת הקופה של 12.11'); assert.match(d1.body, /^• קופה i_xx: בסגירת הקופה של יום חמישי 12\.11 יש הפרש מזומן של 50/); assert.doesNotMatch(d1.body, /לסגירה שלא נשלחה/);
     const rep = R.buildReport({ kind: 'w', today: '2026-11-15', now: IL('2026-11-15T08:00'), fin: null, nr: {}, tasks: [], closings: cl, rt: { invLate: true } });
     assert.match(JSON.stringify(rep.secs), /הפרשי קופה בשבוע האחרון","lines":\["אין"\]/);
   });
