@@ -48,7 +48,7 @@ async function nudge(who, input, opts) {
     return d;
   });
   const str = (v) => (typeof v === 'string' ? v : '');
-  let to = str(t.ow) ? [str(t.ow)] : (Array.isArray(t.to) ? t.to.filter((u) => typeof u === 'string' && ID_RE.test(u)) : []);
+  let to = str(t.ow) && ID_RE.test(t.ow) ? [t.ow] : (Array.isArray(t.to) ? t.to.filter((u) => typeof u === 'string' && ID_RE.test(u)) : []);
   to = [...new Set(to)].filter((u) => u !== who.uid).slice(0, MAX_TO);
   let sent = 0, n = 0;
   for (const u of to) {
