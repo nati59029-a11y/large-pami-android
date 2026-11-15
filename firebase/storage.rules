@@ -144,12 +144,12 @@ service firebase.storage {
         && fname.matches('^[A-Za-z0-9_-]{8,64}([.](webm|mp4|3gp|mov))?$');
     }
     match /sec_tmp/{userId}/{fileName} {
-      allow create: if isSelf(userId) && isManager() && secTmpOk(fileName);
+      allow create: if resource == null && isSelf(userId) && isManager() && secTmpOk(fileName); // resource == null: בלי דריסת קובץ קיים (גם אם האמולטור מסווג דריסה כ-create)
       allow delete: if isSelf(userId) && isManager();
       allow read, update: if false;
     }
     match /b/{bizId}/sec_tmp/{userId}/{fileName} {
-      allow create: if isSelf(userId) && bMgr(bizId) && secTmpOk(fileName);
+      allow create: if resource == null && isSelf(userId) && bMgr(bizId) && secTmpOk(fileName);
       allow delete: if isSelf(userId) && bMgr(bizId);
       allow read, update: if false;
     }
