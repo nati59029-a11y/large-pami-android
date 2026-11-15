@@ -1301,6 +1301,7 @@ async function cancelOrder(request) {
     const d = s.data();
     if (d.status === 'cancel') { res = { ok: true, dup: true }; return; }
     if (d.status === 'done') throw pre('bad-status', 'הזמנה שהושלמה לא מבוטלת');
+    if (d.shp) throw pre('locked', 'ההזמנה נשלחה – אי אפשר לבטל אותה. תיקון – בזיכוי'); // משוב סבב 2, תיקון אחרי בדיקה (החלטה 16): גם מנהל, והמלאי לא חוזר
     if (d.status === 'paid') mgr(w); // 18:56: "יצא למשלוח" – גם עובד; "שולם" (לפני משלוח) – מנהל, כמו קודם
     const items = Array.isArray(d.items) ? d.items : [];
     const prods = await loadProds(tx, db, items.filter((x) => x.pid).map((x) => x.pid));

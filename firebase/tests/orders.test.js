@@ -1077,6 +1077,41 @@ describe('לקוח בשוטף – נשלח, נעילה ושולם (משוב סב
     await call('markOrderPaid', E1, { id: id2, method: 'cash' }); await call('setOrderStatus', E1, { id: id2, status: 'done' });
     assert.equal((await call('unpayOrder', MGR, { id: id2, reason: 'x' })).reason, 'bad-status');
   });
+  it('תיקון אחרי בדיקה: הזמנה שנשלחה לא מתבטלת (עובד ומנהל) והמלאי לא חוזר; לפני "נשלח" – ביטול כמו קודם', async () => {
+    await seedT();
+    const id = await mk('cT');
+    await setSt(id, 'work');
+    await call('setOrderStatus', E1, { id, status: 'out' });
+    const q0 = (await get(`b/${A}/prod/pA`)).q.br1;
+    for (const u of [E1, MGR]) assert.equal((await call('cancelOrder', u, { id, reason: 'x' })).reason, 'locked');
+    assert.equal((await get(`b/${A}/ord/${id}`)).status, 'wait_pay'); assert.equal((await get(`b/${A}/prod/pA`)).q.br1, q0);
+    const id2 = await mk('cT'); const q1 = (await get(`b/${A}/prod/pA`)).q.br1;
+    assert.equal((await call('cancelOrder', E1, { id: id2, reason: 'x' })).status, 'OK');
+    assert.equal((await get(`b/${A}/prod/pA`)).q.br1, q1 + 1);
+  });
+  it('תיקון אחרי בדיקה: עובד לא הופך לקוח קיים ל"בשוטף" דרך pay; שינוי pay באותם תנאים, מנהל, ולקוח חדש – כמו קודם', async () => {
+    await seedT();
+    const P = 'p0541111125', R = 'p0541111126', O = 'p0541111127', T = 'p0541111128';
+    await prep(async (d) => { const b = d.batch();
+      b.set(d.doc(`b/${A}/cust/${P}`), { name: 'פרטי', phone: '0541111125', pay: 'cash', at: 1, upd: 1, x: {} });
+      b.set(d.doc(`b/${A}/cust/${R}`), { name: 'בלי pay', phone: '0541111126', at: 1, upd: 1, x: {} });
+      b.set(d.doc(`b/${A}/cust/${O}`), { name: 'ישן שוטף', phone: '0541111127', pay: 'n60', at: 1, upd: 1, x: {} });
+      b.set(d.doc(`b/${A}/cust/${T}`), { name: 'עם terms', phone: '0541111128', terms: { b: 'eom', d: 30 }, at: 1, upd: 1, x: {} });
+      await b.commit(); });
+    assert.equal((await call('saveCust', E1, { id: P, cust: { pay: 'n30' } })).reason, 'manager-only');
+    assert.equal((await call('saveCust', E1, { id: R, cust: { pay: 'n30' }, fill: true })).reason, 'manager-only'); // fill בלקוח בלי pay
+    assert.equal((await call('saveCust', E1, { id: O, cust: { pay: 'cash' } })).reason, 'manager-only'); // גם הפוך (שוטף → מיידי)
+    assert.equal((await call('saveCust', E1, { id: O, cust: { pay: 'n30' } })).reason, 'manager-only'); // שוטף+60 → שוטף+30
+    assert.equal((await get(`b/${A}/cust/${P}`)).pay, 'cash');
+    let r = await call('saveCust', E1, { id: P, cust: { pay: 'transfer' } }); assert.equal(r.status, 'OK', r.text); assert.equal((await get(`b/${A}/cust/${P}`)).pay, 'transfer');
+    r = await call('saveCust', E1, { id: P, cust: { pay: 'n30' }, fill: true }); assert.equal(r.status, 'OK', r.text); assert.equal((await get(`b/${A}/cust/${P}`)).pay, 'transfer'); // fill לא דורס
+    r = await call('saveCust', E1, { id: T, cust: { pay: 'n60' } }); assert.equal(r.status, 'OK', r.text); // יש terms – pay לא משנה את התנאים
+    r = await call('saveCust', MGR, { id: P, cust: { pay: 'n30' } }); assert.equal(r.status, 'OK', r.text); assert.equal((await get(`b/${A}/cust/${P}`)).pay, 'n30');
+    r = await call('saveCust', E1, { cust: { name: 'חדש', phone: '0541111129', pay: 'n30' } }); assert.equal(r.status, 'OK', r.text); // לקוח חדש – כמו קודם
+    // הזמנה של לקוח בלי pay – "נשלח" עדיין נדחה אחרי ניסיון העובד
+    const id = await mk(R); await setSt(id, 'work');
+    assert.equal((await call('setOrderStatus', E1, { id, status: 'out' })).reason, 'bad-status');
+  });
   it('לקוח ישן שוטף+60 (pay:n60): נשלח עובד; גם מממתין לתשלום בלי shp. מחדשה – לא', async () => {
     await seedT();
     const id = await mk('cN');

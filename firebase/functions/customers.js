@@ -286,12 +286,20 @@ function bizClean(c, o) {
   }
 }
 // terms אחרי ההקמה, blk, lim – מנהל בלבד (76–79, 12, 13). base = הרשומה הקיימת (null = לקוח חדש)
-function bizGuard(base, o, mgr) {
+function bizGuard(base, o, mgr, opts) {
   if (mgr) return;
   const J = (v) => JSON.stringify(v === undefined ? null : v);
   if (o.blk !== undefined && (base ? base.blk === true : false) !== o.blk) throw deny('manager-only', 'חסימת לקוח – מנהל בלבד');
   if (o.lim !== undefined && J(base && typeof base.lim === 'number' ? base.lim : '') !== J(o.lim)) throw deny('manager-only', 'מסגרת אשראי – מנהל בלבד');
   if (base && o.terms !== undefined && J(base.terms) !== J(o.terms)) throw deny('manager-only', 'שינוי תנאי תשלום אחרי ההקמה – מנהל בלבד');
+  // 14.11.2026 (משוב סבב 2, תיקון אחרי בדיקה): לקוח בלי terms – התנאים לפי pay הישן. עובד לא משנה אותם דרך pay בלקוח קיים
+  // (כך עובד לא יכול להפוך לקוח ל"בשוטף" ולסמן "נשלח" בלי תשלום). pay ששומר על אותם תנאים (למשל cash→transfer) – מותר כמו קודם.
+  // fill לא דורס pay קיים – אז אין שינוי. ייבוא (src:'import') – מנהל בלבד (importCusts / imports.js), בלי שינוי
+  const op = opts || {};
+  if (base && o.pay !== undefined && op.src !== 'import' && !(op.fill && !empty(base.pay))) {
+    const a = AC.termsOfCust(base), b = AC.termsOfCust(Object.assign({}, base, { pay: o.pay }, o.terms !== undefined ? { terms: o.terms } : {}));
+    if (a.b !== b.b || a.d !== b.d) throw deny('manager-only', 'שינוי תנאי תשלום – מנהל בלבד');
+  }
 }
 const nbEmpty = (v) => v === '' || v === false || (Array.isArray(v) && !v.length);
 // כל הטלפונים שמזהים את הלקוח: הראשי, הנוספים ואנשי הקשר. נבנה בשרת בכל שמירה (שאילתת array-contains ב-findCust)
@@ -354,7 +362,7 @@ async function upsert(tx, db, w, o, opts) {
   if (!base && ps && ps.exists && !ps.get('mv') && empty(ps.get('tz'))) { base = Object.assign({}, ps.data()); moved = true; }
   const ws = opts.wholesale;
   if (base && ws === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
-  bizGuard(base, o, opts.mgr);
+  bizGuard(base, o, opts.mgr, opts);
   if (ws === true && !(base && base.wholesale === true)) needBiz(base, o, opts.fill);
   flagFix(base, o, opts.cell, opts.fill);
   if (!base) {
@@ -455,7 +463,7 @@ async function upsertId(tx, db, w, id, o, opts) {
   if (o.tz && !empty(base.tz) && base.tz !== o.tz) throw bad('tz-fixed', 'אי אפשר לשנות ת.ז של לקוח');
   if (ts && ts.exists && base.tz !== o.tz) throw bad('tz-taken', 'כבר יש לקוח עם הת.ז הזו. בחרו אותו.');
   if (opts.wholesale === true && base.wholesale !== true && !opts.mgr) throw deny('manager-only', 'הפיכת לקוח קיים ללקוח עסקי – מנהל בלבד');
-  bizGuard(base, o, opts.mgr);
+  bizGuard(base, o, opts.mgr, opts);
   if (opts.wholesale === true && base.wholesale !== true) needBiz(base, o, opts.fill);
   flagFix(base, o, opts.cell, opts.fill);
   return update(tx, db, w, o, opts, { id, ref, base, moved: false, now: Date.now() });

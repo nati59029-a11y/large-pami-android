@@ -56,7 +56,7 @@ async function open(browser, www, who, calls) {
   const card = async (page, id) => { await page.evaluate((i) => go('oxOrd', i), id); await H.settle(page, 1200); await page.evaluate((i) => go('oxOrd', i), id); await H.settle(page, 400);
     return page.evaluate(() => { const m = document.getElementById('main'); const st = [...m.querySelectorAll('[data-a=oxStat]')].map((b) => b.dataset.s + ':' + b.innerText.trim());
       return { st, pay: !!m.querySelector('[data-a=oxPay]'), phone: /תשלום בטלפון/.test(m.innerText), paid: !!m.querySelector('[data-a=oxPaid]'), edit: !!m.querySelector('[data-a=oxEdit]'),
-        unpay: !!m.querySelector('[data-a=oxUnpay]'), ccard: !!m.querySelector('#ocordcard'), shp: /נשלח בתאריך/.test(m.innerText), lock: /הסכום נעול/.test(m.innerText), ov: document.documentElement.scrollWidth - innerWidth }; }); };
+        unpay: !!m.querySelector('[data-a=oxUnpay]'), cancel: !!m.querySelector('[data-a=oxCancel]'), ccard: !!m.querySelector('#ocordcard'), shp: /נשלח בתאריך/.test(m.innerText), lock: /הסכום נעול/.test(m.innerText), ov: document.documentElement.scrollWidth - innerWidth }; }); };
 
   for (const who of ['w', 'm']) {
     const calls = []; const { ctx, page, log } = await open(browser, www, who, calls);
@@ -68,9 +68,9 @@ async function open(browser, www, who, calls) {
     check(who + ' 1 בשוטף, בטיפול: "נשלח" (out) במקום "ממתין לתשלום", בלי תשלום בטלפון/לתשלום, "סמן שולם" נשאר, עריכה נשארת, בלי משבצת כרטיס, בלי גלילה לרוחב',
       JSON.stringify(c1.st) === JSON.stringify(['out:נשלח', 'new:חדשה']) && !c1.pay && !c1.phone && c1.paid && c1.edit && !c1.ccard && !c1.shp && c1.ov <= 0, c1);
     const c2 = await card(page, 'o2'); await shot(page, who + '-02-נשלח');
-    check(who + ' 2 נשלח (wait_pay+shp): "נשלח בתאריך", נעול לעריכה, אין חזרה לבטיפול, בלי כפתורי תשלום, "סמן שולם" נשאר', c2.st.length === 0 && c2.shp && !c2.edit && c2.lock && !c2.pay && !c2.phone && c2.paid && c2.ov <= 0, c2);
+    check(who + ' 2 נשלח (wait_pay+shp): "נשלח בתאריך", נעול לעריכה, אין חזרה לבטיפול, בלי כפתורי תשלום, "סמן שולם" נשאר, בלי "ביטול הזמנה"', !c2.cancel && c2.st.length === 0 && c2.shp && !c2.edit && c2.lock && !c2.pay && !c2.phone && c2.paid && c2.ov <= 0, c2);
     const c3 = await card(page, 'o3');
-    check(who + ' 3 פרטי, בטיפול – כמו היום: "ממתין לתשלום" + "חדשה", תשלום בטלפון, סמן שולם, עריכה, משבצת כרטיס', JSON.stringify(c3.st) === JSON.stringify(['wait_pay:ממתין לתשלום', 'new:חדשה']) && c3.phone && c3.paid && c3.edit && c3.ccard && !c3.shp, c3);
+    check(who + ' 3 פרטי, בטיפול – כמו היום: "ממתין לתשלום" + "חדשה", תשלום בטלפון, סמן שולם, עריכה, משבצת כרטיס', JSON.stringify(c3.st) === JSON.stringify(['wait_pay:ממתין לתשלום', 'new:חדשה']) && c3.phone && c3.paid && c3.edit && c3.ccard && c3.cancel && !c3.shp, c3);
     const c4 = await card(page, 'o4');
     check(who + ' 4 לקוח ישן שוטף+60: "נשלח", בלי תשלום בטלפון', JSON.stringify(c4.st) === JSON.stringify(['out:נשלח', 'new:חדשה']) && !c4.phone && c4.paid, c4);
     const c5 = await card(page, 'o5');
