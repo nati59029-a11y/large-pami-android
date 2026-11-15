@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>בדיקת מנוע תלת מימד – דוגמה</title>
+<!-- דף בדיקה למפתחים בלבד (שלב 2). לא מחובר לאפליקציה ומציג מפת דוגמה בלבד – לא נתוני העסק. -->
+<style>
+ html,body{margin:0;height:100%;background:#121216;color:#eee;font-family:sans-serif}
+ #bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:6px 8px;background:#1b1b21;border-bottom:1px solid #3a3320}
+ #bar b{color:#d4af37;font-size:14px}
+ button,select{background:#24242c;color:#e8d9a8;border:1px solid #d4af37;border-radius:8px;padding:6px 10px;font-size:14px}
+ button.on{background:#d4af37;color:#141414}
+ #view{position:absolute;top:46px;bottom:64px;left:0;right:0}
+ #info{position:absolute;bottom:0;left:0;right:0;height:64px;box-sizing:border-box;padding:6px 10px;background:#1b1b21;border-top:1px solid #3a3320;font-size:13px;line-height:1.5;overflow:hidden}
+ #enter{position:absolute;top:46px;bottom:64px;left:0;right:0;display:flex;align-items:center;justify-content:center}
+</style>
+</head>
+<body>
+<div id="bar"><b>דוגמה</b>
+ <button id="top" class="on">מלמעלה</button><button id="walk">הליכה</button>
+ <select id="n"><option value="24">24 גופים</option><option value="300">300 גופים</option></select>
+</div>
+<div id="view"></div>
+<div id="enter"><button id="go">כניסה לתלת מימד</button></div>
+<div id="info">גרירה = סיבוב/הליכה · צביטה = זום · הקשה על מדף = בחירה</div>
+<script src="../store3d-geo.js"></script>
+<script src="../store3d-view.js"></script>
+<script>
+(function(){
+ const q=new URLSearchParams(location.search),$=id=>document.getElementById(id);
+ let h=null;
+ $('n').value=q.get('n')==='300'?'300':'24';
+ const info=t=>{$('info').textContent=t};
+ async function start(){
+  $('enter').style.display='none';
+  if(h){h.destroy();h=null}
+  const map=S3G.sampleMap(+$('n').value);
+  h=await Store3D.open($('view'),map,{sample:true,mode:q.get('mode')==='walk'?'walk':'top',
+   onPick:b=>info(b?('נבחר מקטע '+b.id+' · גוף מספר '+b.num+' · צד '+b.s+' · מקטע '+b.n+' · צילום: '+b.lv.join('+')+(b.lv.length>1?' (נגעת ב-'+b.lvHit+')':'')):'לא נבחר מדף'),
+   onError:(c,m)=>info('שגיאה: '+m)});
+  if(!h)return;
+  window.__h=h;
+  $('top').classList.toggle('on',h.getMode()==='top');$('walk').classList.toggle('on',h.getMode()==='walk');
+  const s=h.stats();info('מפת דוגמה: '+s.fx+' גופים, '+s.bays+' מקטעים · בנייה '+s.buildMs+'ms · three '+s.three);
+ }
+ $('go').onclick=start;
+ $('n').onchange=()=>{if(h)start()};
+ for(const m of['top','walk'])$(m).onclick=()=>{if(!h)return;h.setMode(m);$('top').classList.toggle('on',m==='top');$('walk').classList.toggle('on',m==='walk')};
+ if(q.get('auto')==='1')start();
+})();
+</script>
+</body>
+</html>

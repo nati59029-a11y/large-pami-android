@@ -16,11 +16,12 @@ const { getFirestore } = require('firebase-admin/firestore');
 const BIZ0 = 'largpeami';
 const BIZ_RE = /^[a-z0-9-]{3,30}$/;
 // מפתחות התוספות (חוזה, סעיף ו)
-const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cellular', 'ordCard', 'secretary'];
+const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders', 'cellular', 'ordCard', 'secretary', 'store3d'];
 // ordCard (2026-11-10 11:50): הזנת כרטיס אשראי בטופס ההזמנה – ברירת מחדל פעיל (גם כשהמפתח חסר במסמך); רק מנהל־על מכבה (false)
 // cellular (00:24, ניודים בלקוח) – ברירת מחדל כבוי גם בעסק הישן; רק מנהל־על מפעיל
 // secretary (המזכירה העסקית, שלב 1, 11.11.2026) – כמו cellular: כבוי כברירת מחדל בכל עסק, גם בעסק הישן; רק מנהל־על מפעיל
-const OFF_IN_LEGACY = ['cellular', 'secretary'];
+// store3d (סריקת חנות בתלת מימד, 14.11.2026) – כמו secretary: כבוי כברירת מחדל בכל עסק, גם בעסק הישן; רק מנהל־על מפעיל
+const OFF_IN_LEGACY = ['cellular', 'secretary', 'store3d'];
 const ALL_ON = Object.freeze(Object.fromEntries(FEATURES.map((k) => [k, !OFF_IN_LEGACY.includes(k)])));
 
 const als = new AsyncLocalStorage();

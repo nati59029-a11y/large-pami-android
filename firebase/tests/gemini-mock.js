@@ -65,14 +65,30 @@ const CLASSIFY = {
 };
 // המזכירה (שלב 2): בקשה עם הנחיית מערכת שמתחילה ב-SEC-CHAT-V1. התשובה נקבעת בבדיקה: state.sec = (body) => ({ calls: [{ name, args }] } | { text })
 // usage = טוקנים מדומים לכל תשובה (לבדיקת מונה העלות)
-const state = { invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+// סריקת חנות בתלת מימד (שלב 8): תשובות בדיקת מדף וטיוטת מפה – מקובצי הדוגמה של שלב 6 (tests/fixtures/store3d-*.json).
+// ברירת מחדל: shelf-ok / mapdraft-ok. בבדיקה: state.shelf / state.mapdraft = שם דוגמה ('shelf-broken'), אובייקט, או מחרוזת גולמית.
+const FIXTURES = {};
+function fixture(name) {
+  if (!FIXTURES[name]) FIXTURES[name] = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, 'fixtures', 'store3d-' + name + '.json'), 'utf8'));
+  return FIXTURES[name];
+}
+function s3Answer(kind) {
+  const v = kind === 's3shelf' ? state.shelf || 'shelf-ok' : state.mapdraft || 'mapdraft-ok';
+  if (typeof v === 'string' && !/^(shelf|mapdraft)-/.test(v)) return v; // מחרוזת גולמית (למשל לא JSON)
+  const o = Object.assign({}, typeof v === 'string' ? fixture(v) : v);
+  delete o._example; delete o._meta;
+  return JSON.stringify(o);
+}
+const state = { shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
   if (typeof si === 'string' && si.startsWith('SEC-CHAT-V1')) return 'sec';
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
+  if (s.startsWith('אתה בודק מדפים')) return 's3shelf';   // prompts-shelf.js (שלב 6)
+  if (s.startsWith('אתה מקבל תמונות של חנות')) return 's3draft'; // prompts-mapdraft.js (שלב 6)
   if (s.startsWith('סווג את המסמך')) return 'classify'; // סריקה אחידה – לפני כל השאר, כי ההנחיה מזכירה את כל הסוגים
   if (s.includes('טבלת שורות המוצרים')) return 'invlines'; // לפני invoice – גם היא מתחילה ב"חשבונית מס"
   if (s.includes('אישור על העברה בנקאית')) return 'transfer';
@@ -99,7 +115,7 @@ function rawAnswer(kind, body) {
   if (kind === 'sec') return secAnswer(body || {});
   if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
   const inl = () => (state.invlines && typeof state.invlines === 'object' ? state.invlines : INVLINES[state.invlines] || INVLINES.units);
-  let text = JSON.stringify(kind === 'classify' ? (state.classify || CLASSIFY.invoice) : kind === 'invlines' ? inl() : (ANSWERS[kind] || { ok: true }));
+  let text = kind === 's3shelf' || kind === 's3draft' ? s3Answer(kind) : JSON.stringify(kind === 'classify' ? (state.classify || CLASSIFY.invoice) : kind === 'invlines' ? inl() : (ANSWERS[kind] || { ok: true }));
   if (state.fenced) text = '```json\n' + text + '\n```';
   const parts = state.split ? [{ text: text.slice(0, 10) }, { text: text.slice(10) }] : [{ text }];
   return { candidates: [{ content: { parts, role: 'model' }, finishReason: 'STOP' }] };
@@ -138,6 +154,9 @@ function start() {
         if ((tc && tc.thinkingBudget === 0) || noSig) return send(400, { error: { code: 400, status: 'INVALID_ARGUMENT', message: noSig ? 'missing thought_signature' : 'thinking budget 0 not supported' } }); }
       if (state.mode === 'badkey') return send(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
       if (state.mode === 'quota') return send(429, { error: { message: 'quota' } });
+      // שלב 10: תשובה 200 בלי תוכן (חסימת בטיחות) → no-answer; שגיאת 400 שאינה מפתח → gemini-error
+      if (state.mode === 'noanswer') return send(200, { candidates: [], promptFeedback: { blockReason: 'SAFETY' } });
+      if (state.mode === 'badreq') return send(400, { error: { message: 'bad request' } });
       if (state.mode === 'overloaded') return send(503, { error: { message: 'overloaded' } });
       return send(200, rawAnswer(kind, body));
     });
@@ -146,4 +165,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { start, stop, reset, state, rawAnswer, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };
+module.exports = { start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };

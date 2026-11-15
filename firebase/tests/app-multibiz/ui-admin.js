@@ -233,7 +233,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   page.__step = 'perms';
   await page.click(`[data-a=admPerm][data-uid="${danaUid}"]`); await wait(page, 400);
   const dlg0 = await page.evaluate(() => ({ boxes: document.querySelectorAll('#dlg form[data-f=admPermSave] input[type=checkbox]').length, note: /עוד לא נקבעו מתגים/.test(document.getElementById('dlg').innerText), exp: (document.querySelector('#dlg select[name=p_expR]') || {}).value, on: [...document.querySelectorAll('#dlg input[type=checkbox]:checked')].map((c) => c.name).sort() }));
-  check('22ב חלון "הרשאות" לעובד בלי מתגים: 11 מתגים (כולל "רואה מצב העסק", "רווחיות הזמנות" ו"עדכון מחירים ומלאי" – כבוי) ובחירת "רואה הוצאות" (6ו), מסומנת ברירת המחדל של היום (incW, expR=הכול, expW, sup, ord) והערה', dlg0.boxes === 11 && dlg0.exp === 'all' && dlg0.note && dlg0.on.join() === 'p_expW,p_incW,p_ord,p_sup', dlg0);
+  check('22ב חלון "הרשאות" לעובד בלי מתגים: 12 מתגים (כולל "רואה מצב העסק", "רווחיות הזמנות", "עדכון מחירים ומלאי" ו"שרטוט מפה (תלת מימד)" – כבוי) ובחירת "רואה הוצאות" (6ו), מסומנת ברירת המחדל של היום (incW, expR=הכול, expW, sup, ord) והערה', dlg0.boxes === 12 && dlg0.exp === 'all' && dlg0.note && dlg0.on.join() === 'p_expW,p_incW,p_ord,p_sup', dlg0);
   const rid = await page.evaluate(() => ADM.ranks[0].id);
   await page.selectOption('#dlg select[name=rank]', rid); await wait(page, 200);
   await page.evaluate(() => { document.querySelector('#dlg [name=p_trf]').checked = true; });
@@ -295,7 +295,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const lgc = await page.evaluate(() => ({ brand: !!document.querySelector('[data-v=brand]'), enter: !!document.querySelector('[data-a=admEnter]'), sus: !!document.querySelector('[data-a=admSus]'), feat: [...document.querySelectorAll('[data-a=admFeat]')].map((e) => e.dataset.k).join(','), adv: !!document.querySelector('form[data-f=admAdv]'), tok: !!document.querySelector('[data-a=admTok]'), txt: document.querySelector('#main').innerText.slice(0, 160) }));
   await shot(page, '12-כרטיס-לארג-פעמי', true);
   // 12.11.2026: בעסק legacy – רק המתגים של התוספות שכבויות בו כברירת מחדל (סלולר, המזכירה); השרת (setBusinessFeatures) תומך בהן גם ב-legacy
-  check('31 כרטיס לארג\' פעמי (legacy): "כניסה כמנהל" + מתגי סלולר והמזכירה בלבד, בלי פעולות שהשרת דוחה (השהיה, adv, אסימון, מיתוג)', lgc.enter && !lgc.sus && lgc.feat === 'cellular,secretary' && !lgc.adv && !lgc.tok && !lgc.brand, lgc);
+  check('31 כרטיס לארג\' פעמי (legacy): "כניסה כמנהל" + מתגי סלולר, המזכירה וסריקת החנות בלבד, בלי פעולות שהשרת דוחה (השהיה, adv, אסימון, מיתוג)', lgc.enter && !lgc.sus && lgc.feat === 'cellular,secretary,store3d' && !lgc.adv && !lgc.tok && !lgc.brand, lgc);
   await page.click('[data-a=admFeat][data-k=secretary]'); await wait(page, 2000);
   const lsec = await page.evaluate(() => { const e = document.querySelector('[data-a=admFeat][data-k=secretary]'); return e ? e.textContent : ''; });
   check('31ב לארג\' פעמי: הפעלת המזכירה מהכרטיס – המתג "פעיל"', lsec === 'פעיל', lsec);
