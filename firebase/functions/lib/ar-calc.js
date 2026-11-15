@@ -137,7 +137,53 @@ function nextNo(n, start) { const s = Number.isInteger(start) && start > 0 ? sta
 const MG0 = 10;
 const mgOf = (m) => (isNum(m) && m >= 0 && m <= 50 ? m : MG0);
 function frameOf(amt, mg) { const c = ag(isNum(amt) && amt > 0 ? amt : 0); return Math.max(0, Math.ceil(Math.round(c * Math.round((100 + mgOf(mg)) * 100)) / 1e6 - 1e-9)); }
-const api = { VAT0, ag, agUp, exVat, costIn, pctFor, floorOf, defPrice, priceOk, totals, termsOk, termsOfCust, termsTxt, cpConv, payOf, staffOk, docSums, dueOf, ymdOk, ymdAdd, nextNo, MG0, mgOf, frameOf };
+
+// שלב 5 (תזכורות תשלום, 86–90): אילו תזכורות כבר הגיע זמנן לחשבונית אחת. due = מועד התשלום (dueX || due), d = תאריך החשבונית, today = היום (YYYY-MM-DD).
+// rc = { b: ימים לפני המועד (ברירת מחדל 3; 0 = בלי), steps: ימים אחרי המועד (ברירת מחדל [0,3,7,30]; 0 = ביום המועד), mon: אחר כך כל X ימים עד התשלום (30; 0 = בלי) }.
+// שלב שנופל ביום שאינו יום עסקים (isBiz – שישי, שבת, חג) עובר ליום העסקים הבא. שלב ביום ההפקה או לפניו – לא נשלח.
+// מחזיר את השלבים שהגיע זמנם (עד היום), לפי הסדר: [{ k:'b'|'a0'|'a3'|…|'m1'|'m2'…, day }]. השרת שולח רק את האחרון, ורק אם עוד לא נשלח.
+const REM0 = { b: 3, steps: [0, 3, 7, 30], mon: 30 };
+const intIn = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+function remCfg(x) {
+  x = x && typeof x === 'object' ? x : {};
+  const st = Array.isArray(x.steps) && x.steps.length <= 8 && x.steps.every((v) => intIn(v, 0, 365)) ? [...new Set(x.steps)].sort((a, b) => a - b) : REM0.steps.slice();
+  return { b: intIn(x.b, 0, 60) ? x.b : REM0.b, steps: st, mon: x.mon === 0 || intIn(x.mon, 7, 90) ? x.mon : REM0.mon };
+}
+function remStages(due, d, today, rc, isBiz) {
+  if (!ymdOk(due) || !ymdOk(today)) return [];
+  const c = remCfg(rc);
+  const nb = (s) => { if (typeof isBiz === 'function') for (let i = 0; i < 60 && !isBiz(s); i++) s = ymdAdd(s, 1); return s; };
+  const out = [];
+  const add = (k, n) => { const day = nb(n); if (day <= today && (!ymdOk(d) || day > d)) out.push({ k, day }); };
+  if (c.b > 0) add('b', ymdAdd(due, -c.b));
+  for (const s of c.steps) add('a' + s, ymdAdd(due, s));
+  if (c.mon > 0) {
+    const last = c.steps.length ? c.steps[c.steps.length - 1] : 0;
+    for (let k = 1; k <= 200; k++) { const n = ymdAdd(due, last + c.mon * k); if (n > today) break; add('m' + k, n); }
+  }
+  return out.map((x, i) => [x, i]).sort((a, b) => (a[0].day < b[0].day ? -1 : a[0].day > b[0].day ? 1 : a[1] - b[1])).map((x) => x[0]);
+}
+
+// כרטסת (104): שורות חובה / זכות ויתרה מצטברת ממסמכי הלקוח (ardoc), באגורות – אותו חישוב כמו cust.ar.bal (lib/ar-doc.js):
+// חובה: חשבונית מס, חשבונית מס קבלה, החזר כסף בזיכוי (rf). זכות: קבלה שלא בוטלה, חשבונית מס קבלה, זיכוי.
+// from / to (YYYY-MM-DD, רשות): השורות שבטווח; open = היתרה לפני from. bal = היתרה אחרי כל המסמכים (בלי קשר לטווח).
+function ledger(docs, from, to) {
+  const L = (Array.isArray(docs) ? docs : []).filter((x) => x && ['inv', 'ir', 'rc', 'cr'].includes(x.t) && Number.isInteger(x.gross) && !(x.t === 'rc' && x.void))
+    .map((x) => ({ id: x.id || '', t: x.t, no: x.no, d: String(x.d || ''), at: isNum(x.at) ? x.at : 0,
+      dr: x.t === 'inv' || x.t === 'ir' ? x.gross : x.t === 'cr' && x.rf && Number.isInteger(x.rf.amt) ? x.rf.amt : 0,
+      cr: x.t === 'inv' ? 0 : x.gross }))
+    .sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.at - b.at || (a.no || 0) - (b.no || 0)));
+  let bal = 0, open = 0, dr = 0, cr = 0;
+  const rows = [];
+  for (const r of L) {
+    bal += r.dr - r.cr; r.bal = bal;
+    if (from && r.d < from) { open = bal; continue; }
+    if (to && r.d > to) continue;
+    dr += r.dr; cr += r.cr; rows.push(r);
+  }
+  return { open, rows, dr, cr, end: rows.length ? rows[rows.length - 1].bal : open, bal };
+}
+const api = { VAT0, ag, agUp, exVat, costIn, pctFor, floorOf, defPrice, priceOk, totals, termsOk, termsOfCust, termsTxt, cpConv, payOf, staffOk, docSums, dueOf, ymdOk, ymdAdd, nextNo, MG0, mgOf, frameOf, REM0, remCfg, remStages, ledger };
 // שרת (Node) – module.exports; מסך ההזמנה (דפדפן) – window.ArCalc
 if (typeof module === 'object' && module.exports) module.exports = api; else root.ArCalc = api;
 })(typeof self !== 'undefined' ? self : this);
