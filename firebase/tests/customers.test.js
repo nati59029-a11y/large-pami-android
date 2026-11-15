@@ -214,9 +214,9 @@ describe('לקוחות – importCusts', () => {
     assert.equal((await coll(`b/${A}/cust`)).length, 500);
     assert.equal((await get(`b/${A}/cust/p0520000000`)).name, 'לקוח 0');
   });
-  it('עמודת כרטיס מלא (ב-last4 או בשדה חופשי) → נשמרות 4 אחרונות בלבד; last4 של 5 ספרות → שורה שגויה; wholesale מתעלמים', async () => {
+  it('עמודת כרטיס מלא (ב-last4 או בשדה חופשי) → נשמרות 4 אחרונות בלבד; last4 של 5 ספרות → שורה שגויה; ws מתעלמים (wholesale:true כן מסמן – שלב 6, תשובה 114, ar-import.test.js)', async () => {
     const r = await call('importCusts', MGR, { reqId: rid(), rows: [
-      { name: 'א', phone: '0501111111', last4: '4580123456789012', wholesale: true },
+      { name: 'א', phone: '0501111111', last4: '4580123456789012', ws: true },
       { name: 'ב', phone: '0502222222', x: { xcity: '5326 1000 2000 3456' } },
       { name: 'ג', phone: '0503333333', last4: '12345' },
       { name: 'ד', phone: 'abc' }] });
