@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['expirePromosOnLine', 'publicBrand', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -69,6 +69,14 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.equal(h.eventTrigger.retry, false);
     assert.ok(ep(ex.secCalSync).scheduleTrigger, 'secCalSync מתוזמנת');
     for (const n of ['secGoogle', 'secMail', 'secMailSend', 'secAdminMail']) assert.deepEqual(regions(ex[n]), BOTH, n);
+  });
+  it('המזכירה – מענה אוטומטי למייל (14.11): secMailWork – טריגר Firestore על התור sec_mailq, europe-west1 בלבד, בלי ניסיון חוזר', () => {
+    const e = ep(ex.secMailWork);
+    assert.deepEqual(regions(ex.secMailWork), ['europe-west1']);
+    assert.ok(e.eventTrigger && /document\.v1\.created$/.test(e.eventTrigger.eventType), 'טריגר יצירת מסמך');
+    assert.equal(e.eventTrigger.eventFilterPathPatterns.document, 'sec_mailq/{qid}');
+    assert.equal(e.eventTrigger.retry, false);
+    assert.ok(e.maxInstances >= 1 && e.maxInstances <= 3, 'maxInstances נמוך');
   });
   it('ייבוא ברקע (11.11.2026): runImportChunk – טריגר Firestore חדש, רק europe-west1, עם retry ומגבלת מקביליות; startImport – onCall בשני האזורים', () => {
     const e = ep(ex.runImportChunk);

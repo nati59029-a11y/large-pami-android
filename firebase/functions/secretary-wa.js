@@ -506,10 +506,17 @@ async function doSec(db, id, x, o) {
   }
   let draft = '', cls = 'other', unsure = false, src = 'ai';
   // בנק תשובות (3.5): התאמה בלי תנאים = תשובה מוכנה בלי AI
+  // שלב ב (מייל): כלל של מייל בלבד (ch:'mail') לא משמש כאן; כלל עם נתון חי ({{hours}}) – ממולא מ"מידע על העסק", ואם חסר נתון – כאילו אין התאמה.
+  // תיקון: הסוג של תשובה מהבנק הוא סוג הכלל (אם נשמר), ולא תמיד "שעות"
   const rs = await db.collection('sec_rules').limit(K.RULES_MAX).get();
-  const bank = K.bankMatch(text, rs.docs.map((d) => Object.assign({ id: d.id }, d.data())));
+  const bank = K.bankMatch(text, rs.docs.map((d) => Object.assign({ id: d.id }, d.data())).filter((r) => r.ch !== 'mail'));
   const pub = await pubInfo(db);
-  if (bank.hit) { draft = bank.hit.rule.a; src = 'bank'; cls = 'hours'; }
+  if (bank.hit && K.hasTpl(bank.hit.rule.a)) {
+    const fs = await db.collection('sec_facts').limit(K.FACTS_MAX + 10).get();
+    const t = K.fillTpl(bank.hit.rule.a, K.factMap(fs.docs, K.dayOf(now)));
+    bank.hit = t ? { rule: Object.assign({}, bank.hit.rule, { a: t }), q: bank.hit.q } : null;
+  }
+  if (bank.hit) { draft = bank.hit.rule.a; src = 'bank'; cls = Object.hasOwn(W.CLS, bank.hit.rule.cls) ? bank.hit.rule.cls : 'other'; }
   else {
     const info = '<<מידע לפונים מבחוץ>>\n' + (pub.facts.join('\n') || '(אין)') + '\n<<מחירון' + (pub.price.name ? ' "' + pub.price.name + '"' : '') + (pub.price.upd ? ', עודכן ' + K.dayOf(pub.price.upd) : '') + '>>\n' + (pub.text.split('\n').slice(pub.facts.length).join('\n').trim() || '(אין)')
       + (bank.cond.length ? '\n<<תשובות מוכנות עם תנאים>>\n' + bank.cond.map((c) => c.q + ' → ' + c.a + ' (תנאי: ' + c.cond + ')').join('\n') : '');

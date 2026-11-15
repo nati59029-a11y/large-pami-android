@@ -62,7 +62,7 @@ const CONSENT = Object.freeze({
   ok: 'קראתי ואני מסכים/ה',
 });
 
-const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal']); // sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
+const SEC_COLLS = Object.freeze(['sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log', 'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn']); // sec_learn (למידה ממיילים שנענו, בלי תוכן אישי) – שלב ב של המייל; sec_note – שלב 4; sec_snd (כרטיס שולח בווצאפ) – שלב 5; sec_clean (רשימות ניקוי ספאם), sec_gcal (מיפוי ליומן Google) – שלב 6. אסימוני Google (private/sec_g*) לא מגובים בכוונה: אחרי שחזור מחברים מחדש
 const SEC_ROOT_COLLS = Object.freeze(['sec_route', 'sec_mailroute']); // טבלאות ניתוב בשורש (שרת בלבד, משותפות לכל העסקים)
 
 function cleanText(v, max) {
@@ -421,6 +421,12 @@ async function secChat(request) {
     const rs = await db.collection('sec_rules').limit(SK.RULES_MAX).get();
     const m = SK.bankMatch(text, rs.docs.map((d) => Object.assign({ id: d.id }, d.data())));
     bank = m.hit; bankCond = m.cond;
+    // שלב ב (מייל): כלל עם נתון חי ({{hours}}) – ממולא מ"מידע על העסק"; חסר נתון – כאילו אין התאמה (עובר למודל)
+    if (bank && SK.hasTpl(bank.rule.a)) {
+      const fs = await db.collection('sec_facts').limit(SK.FACTS_MAX + 10).get();
+      const t = SK.fillTpl(bank.rule.a, SK.factMap(fs.docs, SK.dayOf(Date.now())));
+      bank = t ? { rule: Object.assign({}, bank.rule, { a: t }), q: bank.q } : null;
+    }
   }
   if (pol.sensitive) {
     // שאלה שמבקשת מסקנה לפי מצב בריאותי/משפחתי (6.3 כלל 3): תשובה קבועה, בלי מודל ובלי עלות

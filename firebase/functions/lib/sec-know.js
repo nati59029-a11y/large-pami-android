@@ -99,6 +99,50 @@ function cleanRule(x) {
   return { q: [...new Set(qs)], a, cond, on: x.on !== false };
 }
 
+// ---------- שלב ב (14.11): כלל עם נתון חי ולמידה מתשובות שנשלחו ----------
+// תבנית כלל: טקסט שהמנהל אישר, עם מקומות לנתון חי מ"מידע על העסק": {{hours}} / {{addr}} / ... (שדה קבוע) או {{f:<מזהה>}} (עובדה ציבורית).
+// הנתון נלקח בכל שליחה מחדש (עדכון של שעות הפתיחה – התשובה הבאה כבר עם השעות החדשות). רק עובדה פעילה (st ok), ציבורית (pub) ולא פגה.
+const TPL_RE = /\{\{([^{}]{1,80})\}\}/g;
+const FACT_KEY_RE = /^(?:[a-z]{2,12}|f:[A-Za-z0-9_-]{1,64})$/;
+function factMap(docs, today) {
+  const m = {};
+  for (const d of docs || []) {
+    if (!d || d.id === 'price') continue;
+    const x = typeof d.data === 'function' ? d.data() || {} : d;
+    if (x.st !== 'ok' || x.pub !== true || typeof x.text !== 'string' || !x.text.trim() || expired(x, today)) continue;
+    m[x.fx && FIXED[x.fx] ? x.fx : 'f:' + d.id] = x.text.trim();
+  }
+  return m;
+}
+const tplKeys = (a) => [...new Set([...String(a || '').matchAll(TPL_RE)].map((x) => x[1].trim()))];
+const hasTpl = (a) => tplKeys(a).length > 0;
+// null = חסר נתון (או מפתח לא תקין) – אסור לשלוח
+function fillTpl(a, fm) {
+  const ks = tplKeys(a);
+  if (ks.some((k) => !FACT_KEY_RE.test(k) || typeof (fm || {})[k] !== 'string')) return null;
+  return String(a).replace(TPL_RE, (all, k) => fm[k.trim()]);
+}
+// תבנית מתשובה שנשלחה: כל טקסט של עובדה שהופיע בה כמו שהוא מוחלף ב-{{מפתח}}. עובדה שלא הופיעה – לא נכנסת
+function tplOf(text, keys, fm) {
+  let a = String(text || '');
+  const used = [];
+  for (const k of [...new Set(keys || [])].sort((x, y) => String((fm || {})[y] || '').length - String((fm || {})[x] || '').length)) {
+    const v = (fm || {})[k];
+    if (typeof v !== 'string' || v.length < 3 || !a.includes(v)) continue;
+    a = a.split(v).join('{{' + k + '}}');
+    used.push(k);
+  }
+  return { a, facts: used.sort() };
+}
+function factsOverlap(a, b) {
+  const A = new Set(Array.isArray(a) ? a : []), B = new Set(Array.isArray(b) ? b : []);
+  if (!A.size || !B.size) return 0;
+  let n = 0; for (const x of A) if (B.has(x)) n++;
+  return n / Math.min(A.size, B.size);
+}
+// "השאלה בתמצית" מהמודל – בלי פרטים אישיים: בלי כתובות מייל, קישורים ומספרים, עד 120 תווים
+const cleanQk = (v) => line(String(v == null ? '' : v).replace(/\S+@\S+/g, ' ').replace(/https?:\/\/\S+/gi, ' ').replace(/[0-9]+/g, ' '), 200).replace(/\s+/g, ' ').trim().slice(0, 120);
+
 // ---------- יומן (7.1, 71, 72) ----------
 // ימי עסקים – אותו כלל בדיוק כמו tkBiz במשימות (index.html; 72 שעות): ראשון–חמישי, בלי יום טוב, חול המועד, ערבי חג, פורים ותשעה באב.
 // הועבר לשרת (7.4). בדיקה אוטומטית משווה לפונקציה שבאפליקציה על פני שנתיים (secretary-know.test.js).
@@ -185,6 +229,7 @@ function parseImport(raw, today) {
 module.exports = {
   TOPICS, FIXED, FACT_MAX, FACTS_MAX, PROP_MAX, PRICE_ROWS, normHe, tokens, variants, tokMatch, conflictsOf, overlap, factOut, expired, cleanPrice, validDay,
   RULE_Q_MAX, RULE_A_MAX, RULE_COND_MAX, RULES_MAX, BANK_CTX, ruleHits, bankMatch, cleanRule,
+  TPL_RE, FACT_KEY_RE, factMap, tplKeys, hasTpl, fillTpl, tplOf, factsOverlap, cleanQk,
   TK_OFF, bizDay, nextBizDay, offKind, addDays, CAL_TITLE, CAL_NOTE, CAL_MAX, CAL_PROP_MAX, cleanEvent, calOut,
   IMPORT_MAX, IMPORT_ITEMS, parseImport, clean, line, dayOf, DAY_RE, TIME_RE,
 };

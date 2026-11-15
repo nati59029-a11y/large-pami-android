@@ -36,6 +36,8 @@ function addMail(email, o) {
   const headers = [{ name: 'From', value: o.from || 'Someone <someone@example.invalid>' }, { name: 'Subject', value: o.subject || '' }, { name: 'Message-ID', value: '<' + id + '@mail.example.invalid>' }];
   if (o.unsub) headers.push({ name: 'List-Unsubscribe', value: '<mailto:u@example.invalid>' });
   if (o.replyTo) headers.push({ name: 'Reply-To', value: o.replyTo });
+  for (const h of o.headers || []) headers.push(h); // שלב ב: כותרות נוספות (List-Id, Precedence, Auto-Submitted)
+  const thr = o.thread || '';
   const parts = [];
   if (o.text != null) parts.push({ mimeType: 'text/plain', body: { data: b64u(Buffer.from(o.text, 'utf8')) } });
   if (o.html != null) parts.push({ mimeType: 'text/html', body: { data: b64u(Buffer.from(o.html, 'utf8')) } });
@@ -48,9 +50,9 @@ function addMail(email, o) {
   });
   if ((o.files || []).some((f) => typeof f !== 'string')) headers.push({ name: 'Content-Type', value: 'multipart/mixed; boundary="x"' });
   const labels = o.labels || ['INBOX', 'UNREAD'];
-  b.msgs[id] = { id, threadId: 't' + id, labelIds: labels, snippet: String(o.text || '').slice(0, 100), sizeEstimate: o.size || 2000, internalDate: String(o.date || Date.now()), payload: { mimeType: 'multipart/alternative', headers, parts } };
+  b.msgs[id] = { id, threadId: thr || 't' + id, labelIds: labels, snippet: String(o.text || '').slice(0, 100), sizeEstimate: o.size || 2000, internalDate: String(o.date || Date.now()), payload: { mimeType: 'multipart/alternative', headers, parts } };
   b.hist++;
-  b.history.push({ id: String(b.hist), messagesAdded: [{ message: { id, threadId: 't' + id, labelIds: labels } }] });
+  b.history.push({ id: String(b.hist), messagesAdded: [{ message: { id, threadId: thr || 't' + id, labelIds: labels } }] });
   return id;
 }
 // התראת Pub/Sub כמו ש-Gmail שולחת (base64 של JSON)

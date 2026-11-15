@@ -103,3 +103,96 @@ describe('sec-google: יומן', () => {
     assert.deepEqual(G.calToG('b', { title: 'x', d: '2026-12-31' }).end, { date: '2027-01-01' });
   });
 });
+
+// שלב ב (14.11): מענה אוטומטי למיילים – הלוגיקה הטהורה
+describe('sec-google / sec-know: מייל מאדם, "אף פעם", תבנית עם נתון חי', () => {
+  const K = require('../functions/lib/sec-know.js');
+  const W = require('../functions/lib/sec-wa.js');
+  const P = (o) => Object.assign({ labels: ['INBOX'], from: 'dana@cust.example', unsub: false, listId: false, prec: '', autoSub: '', t: 1000 }, o);
+  it('humanOf: כל סיבה בנפרד, ומייל רגיל מאדם – ריק', () => {
+    assert.equal(G.humanOf(P({}), { now: 2000 }), '');
+    const cases = [[{ labels: ['SPAM'] }, {}, 'spam'], [{ labels: ['INBOX', 'CATEGORY_SOCIAL'] }, {}, 'cat'], [{ labels: ['INBOX', 'CATEGORY_FORUMS'] }, {}, 'cat'],
+      [{ unsub: true }, {}, 'list'], [{ listId: true }, {}, 'list'], [{ prec: 'junk' }, {}, 'bulk'], [{ prec: 'list' }, {}, 'bulk'], [{ autoSub: 'auto-generated' }, {}, 'auto'],
+      [{ from: '' }, {}, 'nofrom'], [{ from: 'noreply@x.example' }, {}, 'noreply'], [{ from: 'do-not-reply@x.example' }, {}, 'noreply'], [{ from: 'postmaster@x.example' }, {}, 'noreply'],
+      [{ from: 'bounces+abc@x.example' }, {}, 'noreply'], [{}, { fromMgr: true }, 'self'], [{}, { sus: true }, 'sus'], [{}, { hist: true }, 'hist'],
+      [{ t: 1 }, { now: 1 + 49 * 3600e3 }, 'old']];
+    for (const [p, o, why] of cases) assert.equal(G.humanOf(P(p), o), why, JSON.stringify([p, o]));
+    assert.equal(G.humanOf(P({ autoSub: 'no' }), {}), '', 'Auto-Submitted: no – מאדם');
+    assert.equal(G.humanOf(P({ prec: 'first-class' }), {}), '');
+    assert.equal(G.humanOf(P({}), { inv: true }), '', 'החלטה (ג): מייל עם קובץ מצורף – מאדם (טיוטה / משימה), השליחה האוטומטית נחסמת ב-autoBlock');
+  });
+  it('parseMsg קורא List-Id / Precedence / Auto-Submitted; mime מסמן תשובה אוטומטית רק כשמבקשים', () => {
+    const p = G.parseMsg({ id: 'm1', payload: { headers: [{ name: 'From', value: 'a@b.example' }, { name: 'List-Id', value: '<x>' }, { name: 'Precedence', value: 'Bulk' }, { name: 'Auto-Submitted', value: 'auto-replied' }] } });
+    assert.equal(p.listId, true); assert.equal(p.prec, 'bulk'); assert.equal(p.autoSub, 'auto-replied');
+    const hdrOf = (raw) => Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8').split('\r\n\r\n')[0];
+    assert.match(hdrOf(G.mime({ to: 'a@b.example', subj: 's', text: 't', auto: true })), /^Auto-Submitted: auto-replied$/m);
+    assert.ok(!/Auto-Submitted/.test(hdrOf(G.mime({ to: 'a@b.example', subj: 's', text: 't' }))));
+  });
+  it('NEVER_RE: תלונה / החזר / הנחה / מחיר מיוחד / התחייבות / משפטי / ביטול / חוב – בעברית ובאנגלית; שאלה רגילה – לא', () => {
+    for (const t of ['יש לי תלונה', 'אני רוצה החזר', 'אפשר הנחה?', 'מחיר מיוחד לכמות', 'אתם מתחייבים?', 'אפנה לעורך דין', 'לבטל את ההזמנה', 'יש חוב פתוח', 'I want a refund', 'Formal complaint', 'any discount?', 'my lawyer', 'please cancel', 'invoice attached'])
+      assert.ok(G.NEVER_RE.test(t), t);
+    for (const t of ['מה שעות הפתיחה?', 'איפה אתם נמצאים', 'When are you open?', 'Where is the shop']) assert.ok(!G.NEVER_RE.test(t), t);
+  });
+  it('autoBlock: כל תנאי "אף פעם" לבד מחזיר את הסיבה שלו; מקרה תקין – ריק', () => {
+    const now = 10 * 3600e3;
+    const base = () => ({ stop: false, on: true, held: false, rule: { on: true, auto: true, cls: 'hours' }, x: { hum: true, st: 'done', flags: [], files: [], subj: 'שעות פתיחה', text: 'מתי פתוחים?', t: now - 1000, auth: true, from: 'dana@cust.example', rto: '' }, r: { cls: 'hours', risk: false, unsure: false, why: [] }, neverCls: W.NEVER_AUTO, now });
+    assert.deepEqual(G.autoBlock(base()), []);
+    const mods = [
+      ['stop', (o) => { o.stop = true; }], ['off', (o) => { o.on = false; }], ['held', (o) => { o.held = true; }],
+      ['ruleOff', (o) => { o.rule.on = false; }], ['ruleOff', (o) => { o.rule.autoOff = true; }], ['ruleOff', (o) => { o.rule.auto = false; }],
+      ['notHuman', (o) => { o.x.hum = false; }], ['sus', (o) => { o.x.st = 'sus'; }], ['sus', (o) => { o.x.flags = ['sus']; }],
+      ['file', (o) => { o.x.flags = ['file']; }], ['file', (o) => { o.x.files = ['a.pdf']; }], ['big', (o) => { o.x.flags = ['big']; }], ['big', (o) => { o.x.flags = ['cut']; }],
+      ['never', (o) => { o.x.text = 'אני רוצה זיכוי'; }], ['never', (o) => { o.x.subj = 'Complaint'; }],
+      ['risk', (o) => { o.r.risk = true; }], ['risk', (o) => { o.r.cls = 'price'; o.rule.cls = ''; }], ['cls', (o) => { o.r.cls = 'cust'; }],
+      ['unsure', (o) => { o.r.unsure = true; }], ['unsure', (o) => { o.r.why = ['x']; }], ['stock', (o) => { o.r.stk = true; }],
+      ['old', (o) => { o.x.t = now - 49 * 3600e3; }], ['old', (o) => { o.x.t = 0; }], ['replied', (o) => { o.x.st = 'replied'; }], ['replied', (o) => { o.x.hd = true; }],
+      // ליקוי 1: שולח לא מאומת (גם מייל ישן בלי השדה), Reply-To בדומיין אחר
+      ['auth', (o) => { o.x.auth = false; }], ['auth', (o) => { delete o.x.auth; }], ['auth', (o) => { o.x.auth = 'true'; }],
+      ['rto', (o) => { o.x.rto = 'attacker@evil.example'; }], ['rto', (o) => { o.x.rto = 'x@sub.cust.example'; }],
+    ];
+    for (const [why, f] of mods) { const o = base(); f(o); assert.deepEqual(G.autoBlock(o), [why], why + ' ' + f.toString()); }
+    { const o = base(); o.x.rto = 'Other <office@CUST.example>'; assert.deepEqual(G.autoBlock(o), [], 'Reply-To באותו דומיין – מותר'); }
+    assert.deepEqual(G.autoWhyL(['auth', 'rto', 'nope']), [G.AUTO_WHY.auth, G.AUTO_WHY.rto]);
+    for (const k of ['stop', 'off', 'held', 'ruleOff', 'notHuman', 'sus', 'file', 'big', 'never', 'risk', 'cls', 'unsure', 'stock', 'old', 'replied', 'auth', 'rto', 'src', 'box', 'to', 'thread', 'loop', 'day', 'dup', 'out', 'fail'])
+      assert.ok(/[א-ת]/.test(G.AUTO_WHY[k] || ''), 'סיבה בעברית: ' + k);
+    for (const c of W.NEVER_AUTO) { const o = base(); o.r.cls = c; o.rule.cls = c; assert.ok(G.autoBlock(o).includes('risk'), c); }
+  });
+  it('greetFix (החלטה ד): הטקסט לא משתנה; שם/ביטוי לא מוכר בפתיחה → hold (טיוטה לאישור)', () => {
+    const H = (t, n) => G.greetFix(t, n);
+    assert.deepEqual(H('שלום יוסי, אנחנו פתוחים', 'יוסי כהן'), { text: 'שלום יוסי, אנחנו פתוחים', hold: false });
+    assert.deepEqual(H('שלום יוסי, אנחנו פתוחים', 'דנה לוי'), { text: 'שלום יוסי, אנחנו פתוחים', hold: true });
+    assert.deepEqual(H('שלום יוסי, אנחנו פתוחים', ''), { text: 'שלום יוסי, אנחנו פתוחים', hold: true }, 'שם לא ידוע');
+    assert.equal(H('Hi Dana,\nWe are open', 'dana smith').hold, false);
+    assert.equal(H('Dear John, ok', 'Dana').hold, true);
+    for (const t of ['שלום, אנחנו פתוחים', 'שלום רב, אנחנו פתוחים', 'שלום לכולם!', 'אנחנו פתוחים {{hours}}', 'Hello there, we are open', 'שלום אנחנו פתוחים א׳–ה׳ 8–18. תודה!',
+      'שלום וברכה לך, אנחנו פתוחים', 'שלום לכולם ולכולן, אנחנו פתוחים', 'Hello and welcome, we are open'])
+      assert.deepEqual(H(t, ''), { text: t, hold: false }, t);
+    for (const t of ['שלום וברוכים הבאים, x', 'שלום וקבלת שבת, x', 'שלום וסליחה, x', 'שלום ורב תודות, x', 'Hi thanks, x', 'Hello please, x', 'Hello world, x', 'שלום ורד, x'])
+      assert.deepEqual(H(t, ''), { text: t, hold: true }, 'לא נחתך, ולא נשלח לבד: ' + t);
+    assert.equal(H('שלום ורד, x', 'ורד לוי').hold, false);
+  });
+  it('fileList (החלטה ג): שמות וסוגי קבצים, מנוקים ומוגבלים', () => {
+    assert.deepEqual(G.fileList(['inv.pdf', '<b>x</b>.DOCX', 'noext', 5, '']), ['inv.pdf (סוג: PDF)', 'bx/b.DOCX (סוג: DOCX)', 'noext (סוג: לא ידוע)']);
+    assert.equal(G.fileList(Array.from({ length: 20 }, (v, i) => i + '.pdf')).length, 10);
+    assert.deepEqual(G.fileList(undefined), []);
+  });
+  it('תבנית: factMap רק עובדות פעילות, ציבוריות ולא פגות; fillTpl – חסר נתון = null; tplOf מחליף טקסט מדויק; cleanQk בלי פרטים אישיים; taskLine', () => {
+    const fm = K.factMap([{ id: 'fx_hours', fx: 'hours', text: 'א–ה 8–18', st: 'ok', pub: true }, { id: 'f1', text: 'חניה חינם', st: 'ok', pub: true }, { id: 'f2', text: 'פנימי', st: 'ok' },
+      { id: 'f3', text: 'הוחלף', st: 'old', pub: true }, { id: 'f4', text: 'פג', st: 'ok', pub: true, exp: '2026-01-01' }, { id: 'price', kind: 'price', pub: true, text: 'x', st: 'ok' }], '2026-11-14');
+    assert.deepEqual(fm, { hours: 'א–ה 8–18', 'f:f1': 'חניה חינם' });
+    assert.equal(K.fillTpl('פתוחים {{hours}}, {{f:f1}}', fm), 'פתוחים א–ה 8–18, חניה חינם');
+    assert.equal(K.fillTpl('{{addr}}', fm), null);
+    assert.equal(K.fillTpl('{{f:f2}}', fm), null, 'עובדה לא ציבורית');
+    assert.equal(K.fillTpl('{{ evil code }}', fm), null);
+    assert.deepEqual(K.tplKeys('a {{hours}} b {{hours}} {{f:f1}}'), ['hours', 'f:f1']);
+    assert.equal(K.hasTpl('בלי'), false);
+    assert.deepEqual(K.tplOf('פתוחים א–ה 8–18. חניה חינם!', ['hours', 'f:f1', 'addr'], fm), { a: 'פתוחים {{hours}}. {{f:f1}}!', facts: ['f:f1', 'hours'] });
+    assert.deepEqual(K.tplOf('בלי נתונים', ['hours'], fm), { a: 'בלי נתונים', facts: [] });
+    assert.equal(K.factsOverlap(['hours'], ['hours', 'addr']), 1);
+    assert.equal(K.factsOverlap(['hours'], []), 0);
+    assert.equal(K.cleanQk('מתי 050-1234567 dana@x.example https://a.b/c פתוחים'), 'מתי - פתוחים');
+    assert.ok(K.cleanQk('א'.repeat(300)).length <= 120);
+    assert.equal(G.taskLine('לבדוק\n<b>משלוח</b> https://x.example/a {{x}}', 80), 'לבדוק bמשלוח/b x');
+    assert.equal(G.taskLine('א'.repeat(200), 80).length, 80);
+  });
+});
