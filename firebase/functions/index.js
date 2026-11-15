@@ -225,6 +225,10 @@ Object.assign(exports, require('./ar-file'));
 // אישור הזמנה (14.11.2026, שלב 3 חלק ב'): arOc (מספור רץ נפרד + קובץ + שליחה אוטומטית לפי סימון הלקוח), arPdf, arSend, setArCfg. ar.js
 // חשבוניות, קבלות וזיכויים (15.11.2026, שלב 4): arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff. ar.js + lib/ar-doc.js
 Object.assign(exports, require('./ar'));
+// כרטסת ותזכורות (15.11.2026, שלב 5): arStatement, setRemCfg (ar.js); arRemind – מתוזמנת כל 15 דקות (ar-remind.js)
+Object.assign(exports, require('./ar-remind'));
+// ייבוא מתוכנה קודמת (15.11.2026, שלב 6): arImp (תצוגה מקדימה / ייבוא במנות של 25), arImpVoid (ביטול קבוצה = void), arImpList. ar-import.js
+Object.assign(exports, require('./ar-import'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
