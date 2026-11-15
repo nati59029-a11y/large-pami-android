@@ -2619,6 +2619,97 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
       const L = await ords();
       assert.equal(L.length, 1); assert.equal(L[0].status, 'new');
     });
+
+    it('החלטת המשתמש: תשובת לקוח להזמנה – פטורה מתקרת הטיוטות היומית', async () => {
+      await ordSetup();
+      await setRep({ cap: 1 });
+      await sentOrd('thr-cap'); // הטיוטה הזו ניצלה את התקרה
+      const { r } = await reply('thr-cap', { reply: 'ok' });
+      assert.equal(r.ordRe && r.ordRe.res, 'ordered', JSON.stringify(r));
+      const n2 = await mail({ subject: 'שאלה אחרי התקרה', text: 'שאלה', from: 'Q <q@q.example>' });
+      assert.equal((await work(n2)).aw, 'cap', 'מייל רגיל – עדיין בתקרה');
+    });
+
+    // ---------- שלב ג/7: שליחה לבד לכל לקוח ----------
+    const oa = (uid, d) => sec(uid, Object.assign({ op: 'ordAuto' }, d));
+    const orderMail = async (from, lines, o) => {
+      AIR = Object.assign({ text: 'קיבלנו.', cls: 'order', qk: 'הזמנה', facts: [], order: { lines: lines || [{ txt: 'צלחת עמוקה', qty: 1 }], cust: {} } }, (o && o.air) || {});
+      const n = await mail(Object.assign({ subject: 'הזמנה ' + (++sq), text: 'הזמנה', from }, (o && o.mail) || {}));
+      return { n, r: await work(n) };
+    };
+    it('שלב ג/7: אחרי שליחה ידנית – הצעה (פעם אחת); אישור מנהל בלבד; לקוח מאושר – טיוטה נקייה נשלחת לבד; חסימות: עצור הכל / לבירור / רגיש / לולאה; כיבוי', async () => {
+      await ordSetup();
+      const DANA = 'Dana <dana@shop.example>';
+      await sentOrd('thr-a1');
+      let l = await oa(M1, { act: 'list' });
+      assert.deepEqual(l.r.ask.map((x) => x.custId), ['cmail'], JSON.stringify(l)); assert.equal(l.r.on.length, 0);
+      assert.ok((await notes()).some((b) => b.includes('לשלוח לו לבד')));
+      await sentOrd('thr-a2');
+      assert.equal((await oa(M1, { act: 'list' })).r.ask.length, 1, 'לא שואלים פעמיים');
+      // לפני אישור – לא נשלח לבד
+      const s0 = GO.state.sent.length;
+      const a0 = await orderMail(DANA);
+      assert.equal(a0.r.aw, 'draft'); assert.equal(GO.state.sent.length, s0);
+      // הרשאות: עובד / מנהל מעסק אחר
+      assert.equal((await oa(E1, { act: 'on', custId: 'cmail' })).code, 'permission-denied');
+      assert.equal((await oa(M1, { act: 'on', custId: 'nope' })).reason, 'not-found');
+      assert.ok((await oa(M1, { act: 'on', custId: 'cmail' })).ok);
+      l = await oa(M1, { act: 'list' });
+      assert.deepEqual(l.r.on.map((x) => x.custId), ['cmail']); assert.equal(l.r.ask.length, 0);
+      // "עצור הכל" – לא נשלח (ומקום הלולאה מוחזר)
+      await sec(M1, { op: 'stop', on: true });
+      const a1 = await orderMail(DANA);
+      assert.equal(a1.r.aw, 'draft'); assert.equal(GO.state.sent.length, s0);
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === a1.n && /stop/.test(x.note)));
+      await sec(M1, { op: 'stop', on: false });
+      // נקייה – נשלחת לבד
+      const a2 = await orderMail(DANA);
+      assert.equal(a2.r.aw, 'auto', JSON.stringify(a2.r)); assert.equal(GO.state.sent.length, s0 + 1);
+      const v2 = await ordOf(a2.n);
+      assert.equal(v2.st, 'sent'); assert.equal(v2.sentBy, 'auto');
+      const sx = GO.state.sent[s0];
+      assert.ok(/^To: dana@shop\.example\r?$/m.test(sx.raw));
+      assert.ok(body(s0).includes('1. צלחת עמוקה | כמות: 1 | מחיר: 10.00 ₪'), body(s0));
+      assert.equal((await draftOf(a2.n)).st, 'done');
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAuto' && x.tgt === a2.n));
+      assert.ok((await notes()).some((b) => b.includes('נשלחה לבד')));
+      // אותו לקוח בתוך 10 דקות – לולאה
+      const a3 = await orderMail(DANA);
+      assert.equal(a3.r.aw, 'draft'); assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === a3.n && /loop/.test(x.note)));
+      // שורות לבחירה/לבירור, מייל רגיש – לא נשלחים
+      const a4 = await orderMail(DANA, L0);
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === a4.n && /ask/.test(x.note)));
+      const a5 = await orderMail(DANA, null, { air: { risk: true } });
+      assert.ok((await logs(A)).some((x) => x.act === 'ordAutoNo' && x.tgt === a5.n && /risk/.test(x.note)));
+      assert.equal(GO.state.sent.length, s0 + 1);
+      // כיבוי – לא נשלח ולא שואלים שוב
+      assert.ok((await oa(M1, { act: 'off', custId: 'cmail' })).ok);
+      await prep((d) => d.doc(`b/${A}/sec_cfg/mail_use`).set({ lp: {} }, { merge: true }));
+      const a6 = await orderMail(DANA);
+      assert.equal(a6.r.aw, 'draft');
+      assert.ok((await sec(M1, { op: 'ordSend', id: a6.n, ver: 1 })).ok);
+      l = await oa(M1, { act: 'list' });
+      assert.equal(l.r.on.length, 0); assert.equal(l.r.ask.length, 0, 'אחרי כיבוי – לא שואלים שוב');
+    });
+
+    it('שלב ג/7: בקשת שינוי מלקוח מאושר – הגרסה המעודכנת נשלחת לבד בשרשור; לקוח לא מאושר – למנהל', async () => {
+      await ordSetup();
+      const n = await sentOrd('thr-a7', [{ txt: 'צלחת עמוקה', qty: 2 }], 'Buy <buy@ws.example>');
+      assert.ok((await oa(M1, { act: 'on', custId: 'cws' })).ok);
+      const s0 = GO.state.sent.length;
+      const { m, r } = await reply('thr-a7', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 4 }] } }, { from: 'Buy <buy@ws.example>' });
+      assert.equal(r.ordRe.res, 'chg'); assert.equal(r.ordRe.auto, true, JSON.stringify(r)); assert.equal(r.aw, 'auto');
+      assert.equal(GO.state.sent.length, s0 + 1);
+      const v = await ordOf(n);
+      assert.equal(v.st, 'sent'); assert.equal(v.ver, 2); assert.equal(v.sentBy, 'auto');
+      assert.ok(body(s0).includes('כמות: 4 | מחיר: 7.00 ₪'), body(s0));
+      assert.ok(GO.state.sent[s0].raw.includes('In-Reply-To: ' + (await get(`b/${A}/sec_in/${m}`)).mid));
+      // לקוח לא מאושר – שינוי חוזר למנהל
+      const n2 = await sentOrd('thr-a8');
+      const q2 = await reply('thr-a8', { reply: 'change', order: { lines: [{ txt: 'צלחת עמוקה', qty: 3 }] } });
+      assert.equal(q2.r.ordRe.res, 'chg'); assert.ok(!q2.r.ordRe.auto);
+      assert.equal((await ordOf(n2)).st, 'mgr');
+    });
   });
 
 });

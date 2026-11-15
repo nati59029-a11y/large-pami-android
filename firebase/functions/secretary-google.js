@@ -756,7 +756,7 @@ async function mailTask(db, id, x, task, now) {
 // =====================================================================================
 // secMail – מנהל העסק: תיבת המייל, טיוטה, דיוק (refine), "טופל", מענה אוטומטי (הגדרות, רשימה, כיבוי, הצעות לכלל), ורשימות ניקוי הספאם (פ3)
 // =====================================================================================
-const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend', 'ordReset'];
+const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend', 'ordReset', 'ordAuto'];
 async function secMail(request) {
   const input = inputObject(request);
   const { who, db } = await gate(request, { consent: true });
@@ -832,6 +832,7 @@ async function secMail(request) {
   }
   if (['repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo'].includes(op)) return autoOp(who, db, input, op, now);
   if (ORD_OPS.includes(op)) return ordOp(who, db, input, op, now);
+  if (op === 'ordAuto') return ordAutoOp(who, db, input, now);
   if (op === 'done') {
     const { id } = await mailDoc(db, input);
     const dRef = db.doc('sec_draft/' + id);
@@ -1027,7 +1028,7 @@ async function mailWorkIn(id, o) {
     if (!G.addrOf(x.rto || x.from)) return fin('skip', 'no-reply-to');
     if (!rep.cap) return fin('skip', 'off');
     const so = await ordThread(db, id, x); // שלב ג/5: תשובה בשרשור של טיוטת הזמנה
-    const cap = await capTake(db, rep.cap, now);
+    const cap = so ? { ok: true } : await capTake(db, rep.cap, now); // החלטת המשתמש (15.11): תשובת לקוח להזמנה – בלי תקרת הטיוטות
     if (!cap.ok) {
       if (cap.first) {
         await db.collection('sec_log').doc().set(glog('', 'auto', 'draftCap', { note: String(rep.cap) }));
@@ -1035,9 +1036,9 @@ async function mailWorkIn(id, o) {
       }
       return fin('cap');
     }
-    took = true;
+    took = !so;
     const r = await aiDraft(db, x, { now, ai: o.ai, so: so ? so.o : null });
-    if (r.saving) { took = false; await capTake(db, rep.cap, now, true).catch(() => {}); return fin('saving'); }
+    if (r.saving) { if (took) await capTake(db, rep.cap, now, true).catch(() => {}); took = false; return fin('saving'); }
     let task = '';
     try { task = await mailTask(db, id, x, r.task, now); } catch (e) { logger.warn('secretary-google: mail task failed', { reason: (e && e.code) || 'error' }); }
     // שלב ג/2: הזמנה מזוהה – רק בסוג order ובעסק עם תוספת ההזמנות. נשמרת על הטיוטה (ord) ולא נשלחת לבד (an: order). אחרת – כמו קודם
@@ -1053,11 +1054,14 @@ async function mailWorkIn(id, o) {
     if (so) {
       let q = { res: 'mgr', why: 'err' };
       try { q = await ordReply(db, id, x, so, r, now); } catch (e) { logger.warn('secretary-google: order reply failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
+      if (q.res === 'chg') { const oa = await ordAutoTry(db, so.id, x, r, now).catch(() => ({ no: ['err'] })); q.auto = !!oa.sent; if (oa.sent) q.sent = true; } // שלב ג/7
       await ordReNote(db, id, so, q, now).catch(() => {});
       const out = await fin(q.sent ? 'auto' : 'draft');
       return Object.assign(out, { draft: id, task, auto: '', no: ['order'], ordRe: q });
     }
-    const a = ord ? { no: ['order'] } : await tryAuto(db, id, Object.assign({}, x, task ? { task } : {}), r, rep, now);
+    let oa = null;
+    if (ord) { oa = await ordAutoTry(db, id, x, r, now).catch(() => ({ no: ['err'] })); } // שלב ג/7: לקוח שאושר לשליחה לבד
+    const a = ord ? (oa && oa.sent ? { sent: true, rule: 'ord' } : { no: ['order'] }) : await tryAuto(db, id, Object.assign({}, x, task ? { task } : {}), r, rep, now);
     const out = await fin(a.sent ? 'auto' : 'draft');
     return Object.assign(out, { draft: id, task, auto: a.sent ? a.rule : '', no: a.no || [] });
   } catch (e) {
@@ -1406,12 +1410,112 @@ const CFM_NO = { stop: '"עצור הכל" מופעל', off: 'המענה במיי
 async function ordReNote(db, id, so, q, now) {
   let body;
   if (q.res === 'ordered') body = 'הלקוח אישר את טיוטת ההזמנה – נוצרה הזמנה מס׳ ' + (q.no || '') + '.' + (q.sent ? ' נשלח ללקוח מייל אישור.' : ' מייל האישור לא נשלח (' + (q.sendNo || []).map((k) => CFM_NO[k] || k).join(', ') + ') – אפשר לשלוח אותו מתיבת המייל.');
-  else if (q.res === 'chg') body = 'הלקוח ביקש שינוי בהזמנה – הטיוטה עודכנה' + (q.lines ? ' לפי הבקשה' : '') + ' וממתינה לבדיקה ולשליחה שלך.';
+  else if (q.res === 'chg') body = 'הלקוח ביקש שינוי בהזמנה – הטיוטה עודכנה' + (q.lines ? ' לפי הבקשה' : '') + (q.auto ? ' ונשלחה אליו לבד (לקוח שאושר לשליחה לבד).' : ' וממתינה לבדיקה ולשליחה שלך.');
   else if (q.res === 'cancel') body = 'הלקוח ביטל את טיוטת ההזמנה. לא נוצרה הזמנה.';
   else body = ORD_RE_WHY[q.why] || ORD_RE_WHY.err;
   await db.collection('sec_log').doc().set(glog('', 'sec', 'ordRe', { tgt: id, note: (so.id + ':' + q.res + (q.why ? ':' + q.why : '') + (q.err ? ':' + q.err : '')).slice(0, 120) }));
   await WA.notifyMgrs(db, 'ordre|' + id, 'תשובת לקוח להזמנה מהמייל', body, now);
 }
+// =====================================================================================
+// שלב ג/7 (15.11.2026): "לשלוח לבד מעכשיו" – לכל לקוח (sec_cfg/ord_auto: { on, ask, no } – מפות custId → {at, by?, name, in?}).
+// אחרי שליחה ידנית מוצלחת של טיוטת הזמנה ללקוח מזוהה (custId) – הצעה למנהל (ask) + התראה. המנהל: ordAuto {act:'list'|'on'|'off'|'no', custId}.
+// "לא" / כיבוי – לא שואלים שוב על אותו לקוח. שליחה לבד (ordAutoTry) – דרך ordSend עצמו (חישוב מחדש, "עצור הכל", מענה כבוי, תיבה, שרשור, מכסה, כפילות),
+// ובנוסף רק כש: הלקוח ב-on, הכרטיס קיים, השולח = to של sec_ord + אימות, טיוטה נקייה (בלי חסימות ושורות לבחירה/לבירור/אזל/קרטון),
+// המייל לא סומן risk, המענה האוטומטי לא נעצר (held), והגנת הלולאה (autoTake: עד AUTO_DAY ביום, לקוח פעם ב-10 דקות). כל ניסיון – sec_log.
+// =====================================================================================
+const OA_MAX = 500;
+const oaOf = (s) => { const v = s && s.exists ? s.data() : {}; const m = (k) => (v[k] && typeof v[k] === 'object' && !Array.isArray(v[k]) ? Object.assign({}, v[k]) : {}); return { on: m('on'), ask: m('ask'), no: m('no') }; };
+async function oaAsk(db, id, o, now) {
+  const c = typeof o.custId === 'string' && ID_RE.test(o.custId) ? o.custId : '';
+  if (!c) return false;
+  const ref = db.doc('sec_cfg/ord_auto');
+  const name = (await ordState(db, o)).custName;
+  const did = await db.runTransaction(async (tx) => {
+    const v = oaOf(await tx.get(ref));
+    if (v.on[c] || v.no[c] || v.ask[c] || Object.keys(v.ask).length >= OA_MAX) return false;
+    v.ask[c] = { at: now, name, in: id };
+    tx.set(ref, v);
+    return true;
+  });
+  if (!did) return false;
+  await db.collection('sec_log').doc().set(glog('', 'sec', 'ordAutoAsk', { tgt: c, note: id }));
+  await WA.notifyMgrs(db, 'ordauto|' + c, 'לשלוח טיוטות הזמנה לבד?', 'שלחת טיוטת הזמנה ל' + (name || 'לקוח') + '. מעכשיו המזכירה יכולה לשלוח לו לבד טיוטות הזמנה נקיות – מחירים מהקטלוג בלבד, בלי שורות לבחירה או לבירור. אפשר לאשר או לסרב במסך המזכירה.', now).catch(() => {});
+  return true;
+}
+async function ordAutoOp(who, db, input, now) {
+  T.requireFeature(who.biz, 'orders');
+  const ref = db.doc('sec_cfg/ord_auto');
+  const act = input.act;
+  if (act === 'list') {
+    const v = oaOf(await ref.get());
+    const L = (m) => Object.entries(m).map(([custId, e]) => ({ custId, name: String((e && e.name) || '').slice(0, 80), at: Number(e && e.at) || 0 })).sort((a, b) => b.at - a.at);
+    return { ok: true, on: L(v.on), ask: L(v.ask) };
+  }
+  if (!['on', 'off', 'no'].includes(act)) throw bad('bad-input', 'act');
+  const c = typeof input.custId === 'string' && ID_RE.test(input.custId) ? input.custId : '';
+  if (!c) throw bad('bad-id', 'מזהה לקוח לא תקין');
+  let name = '';
+  if (act === 'on') {
+    const cs = await db.doc('cust/' + c).get();
+    if (!cs.exists || cs.get('mv')) throw pre('not-found', 'הלקוח לא נמצא');
+    name = String(cs.get('bn') || cs.get('name') || '').slice(0, 80);
+  }
+  await db.runTransaction(async (tx) => {
+    const v = oaOf(await tx.get(ref));
+    if (act === 'on') {
+      if (!v.on[c] && Object.keys(v.on).length >= OA_MAX) throw pre('too-many', 'הגעתם למספר הלקוחות המרבי לשליחה לבד (' + OA_MAX + ')');
+      v.on[c] = { at: now, by: who.uid, name }; delete v.ask[c]; delete v.no[c];
+    } else { // off / no – לא שולחים לבד ולא שואלים שוב
+      const nm = (v.on[c] && v.on[c].name) || (v.ask[c] && v.ask[c].name) || '';
+      delete v.on[c]; delete v.ask[c];
+      if (Object.keys(v.no).length < OA_MAX || v.no[c]) v.no[c] = { at: now, by: who.uid, name: nm };
+    }
+    tx.set(ref, v);
+    tx.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', act === 'on' ? 'ordAutoOn' : act === 'off' ? 'ordAutoOff' : 'ordAutoNo', { tgt: c }));
+  });
+  return { ok: true, custId: c, on: act === 'on' };
+}
+// oid – sec_ord (מזהה המייל המקורי); x – המייל שנכנס עכשיו (המקורי, או תשובת השינוי של הלקוח)
+async function ordAutoTry(db, oid, x, r, now) {
+  const ref = db.doc('sec_ord/' + oid);
+  const [s, as] = await Promise.all([ref.get(), db.doc('sec_cfg/ord_auto').get()]);
+  const o = s.exists ? s.data() : null;
+  if (!o || !o.custId || !oaOf(as).on[o.custId]) return { none: true };
+  const no = [];
+  if (o.st !== 'mgr') no.push('st');
+  if (repOf(await db.doc('sec_cfg/mail_rep').get()).held) no.push('held');
+  if (r && r.risk) no.push('risk');
+  const from = G.addrOf(x.from);
+  if (x.auth !== true || !from || from !== G.addrOf(o.to)) no.push('from');
+  if (o.nBlock || (o.blk || []).length || !(o.lines || []).length || o.lines.some(lineBad)) no.push('ask');
+  const cs = await db.doc('cust/' + o.custId).get();
+  if (!cs.exists || cs.get('mv')) no.push('cust');
+  const key = G.sha('ord|' + o.custId).slice(0, 20);
+  let lim = null;
+  if (!no.length) { lim = await autoTake(db, key, now); if (lim.why) { if (lim.why === 'day') await holdAuto(db, 'day', now); no.push(lim.why); } }
+  const name = String(cs.exists ? cs.get('bn') || cs.get('name') || '' : '').slice(0, 80);
+  const nope = async (why) => {
+    await db.collection('sec_log').doc().set(glog('', 'auto', 'ordAutoNo', { tgt: oid, note: why.join('+').slice(0, 60) }));
+    await WA.notifyMgrs(db, 'ordautono|' + oid + '|' + o.ver, 'טיוטת הזמנה לא נשלחה לבד', 'טיוטת ההזמנה של ' + (name || 'הלקוח') + ' לא נשלחה לבד (' + why.map((k) => OA_NO[k] || ORD_NO[k] || k).join(', ') + ') – ממתינה לבדיקה ולשליחה שלך.', now).catch(() => {});
+    return { no: why };
+  };
+  if (no.length) return nope(no);
+  const xo = x.gid && oid === inIdOf(x.box, x.gid) ? x : (await db.doc('sec_in/' + oid).get()).data();
+  try {
+    if (!xo) throw pre('not-found', 'המייל המקורי לא נמצא');
+    await ordSend({ uid: 'auto', bizId: T.scope().bizId }, db, { ver: o.ver }, oid, xo, ref, o, now);
+  } catch (e) {
+    await autoGive(db, key, now).catch(() => {});
+    const d = (e && e.details) || {};
+    return nope(Array.isArray(d.no) && d.no.length ? d.no : [String(d.reason || (e && e.code) || 'error').slice(0, 30)]);
+  }
+  if (lim && lim.last) await holdAuto(db, 'day', now);
+  await db.collection('sec_log').doc().set(glog('', 'auto', 'ordAuto', { tgt: oid, note: 'v' + o.ver }));
+  await WA.notifyMgrs(db, 'ordauto-sent|' + oid + '|' + o.ver, 'טיוטת הזמנה נשלחה לבד', 'טיוטת ההזמנה נשלחה לבד ל' + (name || 'לקוח') + ' (לקוח שאישרת לשליחה לבד). אפשר לראות אותה בתיבת המייל.', now).catch(() => {});
+  return { sent: true };
+}
+const OA_NO = { st: 'הטיוטה כבר טופלה', held: 'המענה האוטומטי נעצר להיום', risk: 'המייל נראה רגיש (בקשת הנחה, תלונה וכד׳)', from: 'השולח לא אומת', ask: 'יש בטיוטה שורות לבחירה/לבירור, פריט שאזל או פרט חסר',
+  cust: 'כרטיס הלקוח לא נמצא', day: 'הגעתם למספר השליחות האוטומטיות להיום', loop: 'נשלחה ללקוח הזה טיוטה לבד בדקות האחרונות', stale: 'המחירים בקטלוג השתנו – הטיוטה עודכנה', 'out-limit': 'מכסת המיילים היוצאים להיום', 'google-error': 'תקלה ב-Gmail' };
 // שמירה עם בדיקת גרסה בטרנזקציה. up – השדות החדשים (FieldValue.delete() למחיקה)
 async function ordSave(db, ref, ver, up, now) {
   await db.runTransaction(async (tx) => {
@@ -1612,6 +1716,7 @@ const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && 
 // כפילות: כמו secMailSend – מעבר מ-'mgr' ל-'sending' בטרנזקציה, maybeSent (gmid / sending), ver חד־פעמי (אותו ver שוב אחרי שליחה = already)
 async function ordSend(who, db, input, id, x, ref, o, now) {
   const ver = verOf(input.ver);
+  const wt = who.uid === 'auto' ? 'auto' : 'mgr'; // שלב ג/7: שליחה לבד (ordAutoTry)
   if (o.st === 'sent') { if (o.sentVer === ver) return { ok: true, already: true, id }; throw pre('not-pending', 'טיוטת ההזמנה כבר נשלחה'); }
   if (ordEnd(o)) throw pre('not-pending', 'הטיוטה כבר טופלה (בוטלה או שנוצרה ממנה הזמנה)');
   if (maybeSent(o, now)) throw pre('maybe-sent', MAYBE_SENT);
@@ -1626,7 +1731,7 @@ async function ordSend(who, db, input, id, x, ref, o, now) {
       if (!v || v.ver !== ver || !['mgr', 'fail'].includes(v.st)) return;
       tx.update(ref, { lines: rc.lines, total: rc.total, nBlock: rc.nBlock, blk: rc.blk, st: 'mgr', ver: ver + 1, upd: now });
     });
-    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordSendNo', { tgt: id, note: 'recalc' }));
+    await db.collection('sec_log').doc().set(glog(who.uid, wt, 'ordSendNo', { tgt: id, note: 'recalc' }));
     throw pre('stale', 'המחירים או הפריטים בקטלוג השתנו – הטיוטה עודכנה. בדקו אותה ושלחו שוב.');
   }
   // שלב ג/5: אחרי בקשת שינוי של הלקוח (chg) – עונים בשרשור על מייל השינוי (tid), ובדיקות השרשור הן ממנו והלאה
@@ -1654,7 +1759,7 @@ async function ordSend(who, db, input, id, x, ref, o, now) {
     try { gc = (await access(db, who.bizId, 'mail', x.box)).c; if (G.sentAfter(await gc.thread(x.thr), rx.t, rx.gid)) no.push('thread'); } catch (e) { no.push('thrErr'); }
   }
   if (no.length) {
-    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'ordSendNo', { tgt: id, note: no.join('+') }));
+    await db.collection('sec_log').doc().set(glog(who.uid, wt, 'ordSendNo', { tgt: id, note: no.join('+') }));
     throw new HttpsError('failed-precondition', 'אי אפשר לשלוח: ' + no.map((k) => ORD_NO[k]).join('; '), { reason: 'blocked', no });
   }
   const text = ordText(SO.safeView(Object.assign({}, o, rc)), !st.phone);
@@ -1676,7 +1781,7 @@ async function ordSend(who, db, input, id, x, ref, o, now) {
     res = await c.send(G.mime({ to, subj: G.reSubj(x.subj || ''), text, inReplyTo: rx.mid || x.mid }), x.thr || '');
   } catch (e) {
     await ref.update({ st: 'fail' }); // נכשל ב-Gmail: אפשר לנסות שוב (ordSend) או לחזור לעריכה (ordReset)
-    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'sendFail', { tgt: id, note: 'ord:' + String((e.details && e.details.reason) || 'error').slice(0, 30) }));
+    await db.collection('sec_log').doc().set(glog(who.uid, wt, 'sendFail', { tgt: id, note: 'ord:' + String((e.details && e.details.reason) || 'error').slice(0, 30) }));
     if (e instanceof HttpsError) throw e;
     throw new HttpsError('unavailable', 'השליחה נכשלה. נסו שוב בעוד דקה.', { reason: 'google-error' });
   }
@@ -1687,9 +1792,10 @@ async function ordSend(who, db, input, id, x, ref, o, now) {
     b.update(ref, { st: 'sent', sentAt: now, sentBy: who.uid, sentVer: ver, gmid, text });
     b.set(db.doc('sec_in/' + tid), { st: 'replied' }, { merge: true });
     if (dOpen) b.update(dRef, { st: 'done', doneBy: who.uid, doneAt: now, oSent: true }); // תשובת הטקסט לא תישלח בנוסף בשרשור
-    b.set(db.collection('sec_log').doc(), glog(who.uid, 'mgr', 'ordSend', { tgt: id, note: 'v' + ver + ':' + x.box }));
+    b.set(db.collection('sec_log').doc(), glog(who.uid, wt, 'ordSend', { tgt: id, note: 'v' + ver + ':' + x.box }));
     return b;
   });
+  if (wt === 'mgr') await oaAsk(db, id, o, now).catch(() => {}); // שלב ג/7: אחרי שליחה ידנית – הצעה לשלוח לבד ללקוח הזה
   return { ok: true, id, sent: true };
 }
 // שלב ג (0א): אחרי שליחה מוצלחת ב-Gmail – עד 3 ניסיונות לכתוב "נשלח" (build בונה batch חדש בכל ניסיון). נכשל – שומרים לפחות gmid (סימן שהמייל יצא)
