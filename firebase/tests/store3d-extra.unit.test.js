@@ -217,4 +217,14 @@ describe('שלב 13ב – סיכום למזכירה (secLatest / secText)', () =
     assert.equal(X.secText([], [{ br: 'north', st: 'open' }], {}, ['main']), null, 'משימה בסניף אחר לא נספרת');
     assert.match(X.secText([], [{ br: 'main', st: 'open' }], {}, null).text, /משימות תיקון פתוחות: 1\./);
   });
+  it('תיקון סבב 2: ספירה כמספר (count), סימון "חלקי", והבהרה למנהל מוגבל שמותר לענות', () => {
+    const t = X.secText(X.secLatest(L, ['main']), 5, {}, ['main'], true);
+    assert.match(t.text, /משימות תיקון פתוחות: 5\./);
+    assert.match(t.text, /ייתכן שהסיכום חלקי/);
+    assert.match(t.text, /מותר לענות עליהם/);
+    const u = X.secText(X.secLatest(L, null), 0, {}, null, false);
+    assert.ok(!/חלקי|מותר לענות/.test(u.text), 'מנהל בלי הגבלה, לא חלקי – בלי התוספות');
+    assert.equal(X.secText([], 0, {}, null), null);
+    assert.equal(X.secText([], -3, {}, null), null);
+  });
 });

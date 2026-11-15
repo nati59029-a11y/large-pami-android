@@ -187,7 +187,7 @@ async function shelfCore(db, who, input, now, deps) {
   if (x.mode === 'verify') return verifyCore(db, who, x, now, deps);
   const bucket = deps.bucket || getStorage().bucket();
   // ---- הרשאה ומקום הצילום (קריאות בלבד, לפני המכסה) ----
-  let runId, run = null, mapId, owner;
+  let runId, run = null, mapId, owner, adhocTxt = '';
   if (x.mode === 'run') {
     runId = input.run;
     const s = await db.doc('srun/' + runId).get();
@@ -198,6 +198,7 @@ async function shelfCore(db, who, input, now, deps) {
   } else {
     runId = 'ad_' + x.qid;
     mapId = input.map;
+    adhocTxt = typeof input.txt === 'string' ? input.txt.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300) : '';
   }
   const br = String(mapId || '').slice(2), kind = String(mapId || '').charAt(0);
   if (!C.RE.map.test(mapId || '')) throw bad('no-map', 'המפה של הסבב לא תקינה', 'failed-precondition');
@@ -327,7 +328,9 @@ async function shelfCore(db, who, input, now, deps) {
         if (rs.exists) throw bad('busy', 'נסו שוב בעוד רגע', 'aborted');
         const k = 1;
         tx.create(runRef, { br, map: mapId, mapV: Number.isInteger(map.v) ? map.v : 1, k: 'adhoc', st: 'done', asg: { [who.uid]: [sl.bay] }, uids: [who.uid],
-          n: k, nDone: A.countsDone(ai) ? 1 : 0, nUid: { [who.uid]: { n: k, d: A.countsDone(ai) ? 1 : 0 } }, openAt: now, dueAt: now + 1, doneAt: now, tlog: { [who.uid]: [] } });
+          n: k, nDone: A.countsDone(ai) ? 1 : 0, nUid: { [who.uid]: { n: k, d: A.countsDone(ai) ? 1 : 0 } }, openAt: now, dueAt: now + 1, doneAt: now, tlog: { [who.uid]: [] },
+          // 7ב: ההערה של העובד נשמרת לעיון המנהל בלבד – לא נשלחת ל-AI (מניעת הזרקת הוראות מטקסט חופשי)
+          ...(adhocTxt ? { txt: adhocTxt } : {}) });
       }
       tx.set(phRef, ph);
       tx.set(aiRef, ai);
@@ -505,7 +508,8 @@ async function draftCore(db, who, input, now, deps) {
   const res = { draftId: qid, st: 'ok', n, conf: d.conf, drop: d.drop, usage: rv.qs.usage };
   try {
     await db.runTransaction(async (tx) => {
-      tx.set(dref, { br, kind, by: who.uid, at: now, st: 'ok', m: d.map, n });
+      // 7ב: + conf (0–1) ו-notes (עד 200) – לא חובה בחוזה, נשמרים כשהם קיימים
+      tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'ok', m: d.map, n }, typeof d.conf === 'number' ? { conf: d.conf } : {}, d.notes ? { notes: d.notes } : {}));
       tx.update(db.doc('s3qid/' + qid), { res });
     });
   } catch (e) {

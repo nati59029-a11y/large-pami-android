@@ -245,6 +245,8 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.match(GM.state.requests[0].body.contents[0].parts[0].text, /זה מקטע במחסן/);
     const run = await get(`b/${A}/srun/ad_${inp.qid}`);
     assert.deepEqual([run.k, run.st, run.uids, run.asg, run.map, run.mapV], ['adhoc', 'done', [E2], { [E2]: ['f1-a-1'] }, 'w-main', 3]);
+    assert.equal(run.txt, 'ארגז נפל', '7ב: ההערה נשמרת בסבב היזום');
+    assert.ok(!JSON.stringify(GM.state.requests.map((x) => x.body)).includes('ארגז נפל'), '7ב: ההערה לא נשלחת ל-AI');
     assert.deepEqual((await get(`b/${A}/srun/ad_${inp.qid}/ai/f1-a-1_a`)).iss.map((i) => i.k), ['fallen']);
     assert.equal((await use()).n, 1);
     assert.equal(await err(X.shelfCore(db, W(E2, { brs: ['other'] }), photo({ mode: 'adhoc', map: 's-main' }), Date.now(), deps())), 'other-branch');
@@ -294,6 +296,8 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.match(rq.body.contents[0].parts[0].text, /מצלמות אבטחה/);
     const d = await get(`b/${A}/s3draft/${q}`);
     assert.deepEqual([d.st, d.by, d.n, d.br, d.kind, d.m.src, d.m.fx.length], ['ok', DR, 2, 'main', 's', 'draft', 5]);
+    assert.equal(d.conf, r.conf, '7ב: conf נשמר'); assert.ok(d.conf >= 0 && d.conf <= 1);
+    if (r.notes) assert.equal(d.notes, r.notes, '7ב: notes נשמר'); else assert.equal(d.notes, undefined);
     assert.deepEqual(await files(), [], 'תמונות הטיוטה לא נשמרות');
     const again = await X.draftCore(db, W(DR), { qid: q, br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps());
     assert.deepEqual([again.dup, again.draftId, GM.state.requests.length], [true, q, 1]);

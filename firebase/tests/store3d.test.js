@@ -412,13 +412,15 @@ describe('s3Run / s3Move / s3Log / s3View (אמולטור הפונקציות)', 
     await adm.doc(`b/${A}/srun/${R1}`).set(base({ st: 'done', uids: [E1, E2], asg: { [E1]: ['f1-a-1'], [E2]: ['f2-a-1'] }, nUid: { [E1]: { n: 2, d: 2 }, [E2]: { n: 6, d: 6 } }, dueAt: now - 2 * D1, doneAt: now - 3 * D1 }));
     await adm.doc(`b/${A}/srun/${R2}`).set(base({ st: 'closed', uids: [E1], asg: { [E1]: ['f1-a-1'] }, nUid: { [E1]: { n: 2, d: 1 } }, dueAt: now - 4 * D1, doneAt: now - D1 }));
     await adm.doc(`b/${A}/srun/${ROLD}`).set(base({ st: 'done', uids: [E1], asg: { [E1]: ['f1-a-1'] }, nUid: { [E1]: { n: 2, d: 2 } }, dueAt: now - 40 * D1, doneAt: now - 40 * D1 }));
+    const RLATE = RID + '_20260915'; // תיקון סבב 2: איחור ארוך (המועד לפני 60 יום), הושלם לפני יומיים – חייב להופיע
+    await adm.doc(`b/${A}/srun/${RLATE}`).set(base({ st: 'closed', uids: [E1], asg: { [E1]: ['f1-a-1'] }, nUid: { [E1]: { n: 2, d: 2 } }, openAt: now - 70 * D1, dueAt: now - 60 * D1, doneAt: now - 2 * D1 }));
     await adm.doc(`b/${A}/srun/${RCAN}`).set(base({ st: 'cancel', uids: [E1], asg: { [E1]: ['f1-a-1'] }, nUid: { [E1]: { n: 2, d: 0 } }, dueAt: now - D1, doneAt: now - D1 }));
     await adm.doc(`b/${A}/srun/${RE2}`).set(base({ rid: RID2, st: 'done', uids: [E2], asg: { [E2]: ['f2-a-1'] }, nUid: { [E2]: { n: 6, d: 6 } }, dueAt: now - D1, doneAt: now - D1 }));
     await adm.doc(`b/${A}/srun/${R1}/ai/f2-a-1_a`).set({ st: 'issue', conf: 0.9, iss: [{ k: 'hole', sev: 2, conf: 0.8, t: 'חור של E2', warn: false }], model: 'm', at: now, ver: 1 });
     await adm.doc(`b/${A}/srun/${R1}/ai/f1-a-1_a`).set({ st: 'ok', conf: 0.9, iss: [], model: 'm', at: now, ver: 1 });
     const l = await call('s3View', E1, {});
     assert.equal(l.status, 'OK', l.text);
-    assert.deepEqual(l.result.past.map((x) => [x.runId, x.st, x.n]), [[R2, 'closed', { n: 2, d: 1 }], [R1, 'done', { n: 2, d: 2 }]], 'החדש קודם; בלי ישן, מבוטל, או סבב של עובד אחר');
+    assert.deepEqual(l.result.past.map((x) => [x.runId, x.st, x.n]), [[R2, 'closed', { n: 2, d: 1 }], [RLATE, 'closed', { n: 2, d: 2 }], [R1, 'done', { n: 2, d: 2 }]], 'החדש קודם (לפי doneAt, גם באיחור ארוך); בלי ישן, מבוטל, או סבב של עובד אחר');
     assert.deepEqual(l.result.runs, [], 'runs – רק פתוחים, כמו קודם');
     assert.ok(!JSON.stringify(l.result.past).includes(E2), 'בלי מזהה של עובד אחר');
     const v = (await call('s3View', E1, { runId: R1 })).result.run;

@@ -37,6 +37,23 @@
       "collectionGroup": "srun",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "uids", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "st", "order": "ASCENDING" },
+        { "fieldPath": "doneAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "srun",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "br", "order": "ASCENDING" },
+        { "fieldPath": "doneAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "srun",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "map", "order": "ASCENDING" },
         { "fieldPath": "openAt", "order": "DESCENDING" }
       ]

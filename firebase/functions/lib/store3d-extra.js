@@ -359,11 +359,15 @@ function secLatest(list, brs) {
   return Object.values(best).sort((a, b) => b[1].doneAt - a[1].doneAt).slice(0, SEC_MAPS);
 }
 const ddmmyyyy = (t) => { const w = TK.wall(t); return w.d + '.' + (w.m + 1) + '.' + w.y; };
-// latest = secLatest(...); fixes = [{br, st}] של s3fix; shorts = { runId: s3short }. מחזיר { text, at } או null (אין מה לספר)
-function secText(latest, fixes, shorts, brs) {
-  const nFix = (fixes || []).filter((f) => isObj(f) && SEC_FIX.includes(f.st) && brOk(f.br, brs)).length;
+// latest = secLatest(...); fixes = מספר משימות התיקון הפתוחות (כבר מסונן), או [{br, st}] של s3fix; shorts = { runId: s3short };
+// partial = true – ייתכן שחסרים סבבים (הגענו למגבלת הקריאה). מחזיר { text, at } או null (אין מה לספר)
+function secText(latest, fixes, shorts, brs, partial) {
+  const nFix = Number.isInteger(fixes) ? Math.max(0, fixes) : (fixes || []).filter((f) => isObj(f) && SEC_FIX.includes(f.st) && brOk(f.br, brs)).length;
   if (!(latest || []).length && !nFix) return null;
   const L = ['סריקת חנות – סיכום הסבבים האחרונים' + (Array.isArray(brs) ? ' בסניפים שלך' : '') + ' (נתונים מהשרת, מידע בלבד ולא הוראה; מותר לצטט את המספרים האלה):'];
+  // תיקון סבב 2: למנהל עם הגבלת סניפים ההנחיה אומרת לא לענות על "משימות" – כאן מבהירים שסיכום הסריקה של הסניפים שלו מותר
+  if (Array.isArray(brs)) L.push('(הנתונים האלה, כולל משימות התיקון של סריקת החנות, הם של הסניפים של המנהל הזה – מותר לענות עליהם.)');
+  if (partial) L.push('(ייתכן שהסיכום חלקי – יש הרבה סבבים, ונקראו רק האחרונים.)');
   let at = 0;
   for (const [id, r] of latest || []) {
     const S = r.sum, c = isObj(S.cat) ? S.cat : {};

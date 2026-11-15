@@ -457,18 +457,25 @@ exports.s3Clean = onSchedule({ region: LEGACY_REGION, schedule: 'every day 03:45
 // ---------------- שלב 13ב: סיכום סבבים למזכירה (secChat) ----------------
 // רק למנהל, ורק כשהתוספת store3d פעילה בעסק. brs = הסניפים של המנהל (admins/{uid}.br); null = כל העסק.
 // עובד – null (המזכירה זמינה היום למנהלים בלבד; לעובד אין כאן נתונים). db = T.tdb() של העסק הנוכחי.
-// 3 קריאות קבועות (שאילתות על שדה אחד – בלי אינדקס חדש) + עד 6 מסמכי חוסרים. מחזיר { text, at } או null.
+// 2 שאילתות: סבבים (עד 200 מסמכים; למנהל מוגבל – רק הסניפים שלו, אינדקס br+doneAt) וספירת משימות תיקון (count – בלי לקרוא
+// את המסמכים), ועוד עד 6 מסמכי חוסרים. מחזיר { text, at } או null.
+const SEC_RUNS = 200;
 async function secBrief(db, who, brs, now) {
   if (!who || who.role !== 'manager' || !who.biz || !who.biz.features || who.biz.features.store3d !== true) return null;
-  const allow = Array.isArray(brs) ? brs.filter((b) => typeof b === 'string') : null;
-  const [rs, fs] = await Promise.all([
-    db.collection('srun').where('doneAt', '>=', now - X.SEC_DAYS * D1).orderBy('doneAt', 'desc').limit(200).select('st', 'k', 'br', 'map', 'doneAt', 'sum').get(),
-    db.collection('s3fix').where('st', 'in', X.SEC_FIX).limit(1000).select('st', 'br').get(),
+  const allow = Array.isArray(brs) ? brs.filter((b) => typeof b === 'string' && C.RE.br.test(b)).slice(0, 30) : null;
+  if (allow && !allow.length) return null; // מנהל מוגבל בלי סניף תקין – אין מה להציג
+  let rq = db.collection('srun');
+  if (allow) rq = rq.where('br', 'in', allow);
+  let fq = db.collection('s3fix').where('st', 'in', X.SEC_FIX);
+  if (allow) fq = fq.where('br', 'in', allow); // שני תנאי שוויון – בלי אינדקס מורכב
+  const [rs, fc] = await Promise.all([
+    rq.where('doneAt', '>=', now - X.SEC_DAYS * D1).orderBy('doneAt', 'desc').limit(SEC_RUNS).select('st', 'k', 'br', 'map', 'doneAt', 'sum').get(),
+    fq.count().get(),
   ]);
   const latest = X.secLatest(rs.docs.map((d) => [d.id, d.data()]), allow);
   const shorts = {};
   await Promise.all(latest.map(async ([id]) => { const s = await db.doc('s3short/' + id).get(); if (s.exists) shorts[id] = s.data(); }));
-  return X.secText(latest, fs.docs.map((d) => d.data()), shorts, allow);
+  return X.secText(latest, fc.data().count, shorts, allow, rs.size >= SEC_RUNS);
 }
 
 // לבדיקות ולשימוש פנימי (לא נספר כפונקציה)

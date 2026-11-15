@@ -415,9 +415,10 @@ exports.s3View = onCall(T.scoped(async (request) => {
       // שלב 10: גם 'rej' (צילום האימות הראה שהבעיה עדיין קיימת) – העובד צריך לתקן ולצלם שוב
       db.collection('s3fix').where('u', '==', uid).where('st', 'in', ['open', 'sent', 'rej']).orderBy('dueAt').limit(100).get(),
       db.collection('srun').where('st', 'in', C.LIVE).limit(200).get(),
-      // שלב 13ב: סבבים שנסגרו – אותו אינדקס (uids, st, dueAt). החדשים (limitToLast); הסינון הסופי לפי doneAt ב-C.pastList
+      // שלב 13ב (תיקון סבב 2): סבבים שנסגרו ב-30 הימים האחרונים לפי doneAt – גם סבב שהיה באיחור ארוך.
+      // אינדקס (uids, st, doneAt) ב-firestore.indexes.json. החדשים (limitToLast); C.pastList מסנן וממיין שוב
       db.collection('srun').where('uids', 'array-contains', uid).where('st', 'in', C.DONE)
-        .where('dueAt', '>=', now - (C.PAST_DAYS + 14) * C.D1).orderBy('dueAt').limitToLast(60).get(),
+        .where('doneAt', '>=', now - C.PAST_DAYS * C.D1).orderBy('doneAt').limitToLast(C.PAST_MAX).get(),
     ]);
     // מה אפשר לקחת: סבבים שאני לא בהם, שהכלל שלהם (או ההגדרות של הסניף) מתיר "כל עובד יכול לקחת"
     const take = [];
