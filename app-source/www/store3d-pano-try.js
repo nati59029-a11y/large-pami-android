@@ -16,7 +16,7 @@ function hasMap(){try{const d=U.data();return !!(U.dataOk()&&d&&d.maps&&d.maps.s
 let busy=false;
 function layer(){const d=document.createElement('div');d.dir='rtl';d.style.cssText='position:fixed;inset:0;z-index:9999;background:#111114';document.body.appendChild(d);return d}
 function bar(el,res,again,done){const b=document.createElement('div');
-  b.style.cssText='position:absolute;bottom:calc(10px + env(safe-area-inset-bottom,0px));inset-inline:0;display:flex;gap:8px;justify-content:center;z-index:5;pointer-events:none';
+  b.style.cssText='position:absolute;bottom:calc(10px + env(safe-area-inset-bottom,0px));inset-inline:12px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center;z-index:20;pointer-events:none';
   const mk=(t,f)=>{const x=document.createElement('button');x.type='button';x.className='btn';x.textContent=t;x.style.pointerEvents='auto';x.onclick=f;b.appendChild(x);return x};
   mk('צילום חדש',again);
   /* באפליקציה (isNat) – תמיד, דרך outSave; בדפדפן – רק כשיש navigator.share עם קבצים */
@@ -30,7 +30,7 @@ function bar(el,res,again,done){const b=document.createElement('div');
     if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:name});return}
     const u=URL.createObjectURL(z),x=document.createElement('a');x.href=u;x.download=name;document.body.appendChild(x);x.click();x.remove();setTimeout(()=>URL.revokeObjectURL(u),5000);
   }catch(e){if(!(e&&e.name==='AbortError')&&typeof toast==='function')toast('השליחה נכשלה: '+(e&&e.message||e))}});
-  b.style.bottom='calc(70px + env(safe-area-inset-bottom,0px))';el.appendChild(b)}
+  b.style.bottom='calc(200px + env(safe-area-inset-bottom,0px))';el.appendChild(b)}
 async function run(){if(busy)return;busy=true;const el=layer();let h=null;
   const close=()=>{if(closeCur!==close)return;closeCur=null;try{if(h)h.destroy()}catch(e){}try{S3PanoCap.close()}catch(e){}el.remove();busy=false};closeCur=close;
   try{
