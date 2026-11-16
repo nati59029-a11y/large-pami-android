@@ -46,6 +46,19 @@ jobs:
           echo "== Recent changes to services (audit, 72h) =="
           gcloud logging read "protoPayload.serviceName=\"serviceusage.googleapis.com\" AND timestamp>=\"$(date -u -d '-72 hours' +%Y-%m-%dT%H:%M:%SZ)\"" --project "$PROJECT" --limit 20 \
             --format='value(timestamp,protoPayload.methodName,protoPayload.resourceName)' 2>&1 | mask
+          echo "== Secretary invoice activity since deploy (read-only, counts only) =="
+          TOK=$(gcloud auth print-access-token)
+          for ACT in histInvRetry histInv; do
+            curl -sS -X POST -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
+              "https://firestore.googleapis.com/v1/projects/$PROJECT/databases/(default)/documents:runQuery" \
+              -d '{"structuredQuery":{"from":[{"collectionId":"sec_log","allDescendants":true}],"where":{"fieldFilter":{"field":{"fieldPath":"act"},"op":"EQUAL","value":{"stringValue":"'$ACT'"}}},"limit":30}}' \
+              | python3 -c 'import json,sys
+          d=json.load(sys.stdin)
+          if isinstance(d,dict): print("query error:",str(d.get("error",{}).get("message",""))[:200]); sys.exit()
+          for r in d:
+            f=(r.get("document") or {}).get("fields") or {}
+            if f: print(sys.argv[1], f.get("note",{}).get("stringValue",""), f.get("t",{}).get("integerValue",""))' "$ACT" | sort -k3 | tail -10
+          done
           echo "== Count by function and severity =="
           gcloud logging read "$BASE AND severity>=WARNING" --project "$PROJECT" --limit 1000 \
             --format='value(resource.labels.service_name,severity)' | sort | uniq -c | sort -rn
