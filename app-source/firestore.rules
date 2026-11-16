@@ -81,8 +81,11 @@ service cloud.firestore {
 
     // fb: יצירה בשמו (עובד – רק בסטטוס 'new'; מנהל – גם מאושר). קריאה: מנהל – הכול; עובד – רק משוב מאושר.
     // עדכון ומחיקה – מנהל.
+    // 16.11.2026: יצירת דף משוב חדש (st 'new') לא ננעלת אחרי המעבר ל-b. הסיבה: בקוד הישן (fbWSent ב-index.html),
+    // 403 בניסיון חוזר של עובד פעיל נחשב "כבר נשלח", והדף נמחק מהטלפון. בלי ההחרגה, דף ממכשיר ישן היה אובד בשקט.
+    // כך הוא נכתב לשורש, compare-backup מגלה אותו, ומעתיקים אותו ל-b ב-copy-docs. עדכון, מחיקה ויצירה מאושרת (מנהל) – נעולים.
     match /fb/{docId} {
-      allow create: if lpW() && (isStaff()
+      allow create: if (lpW() || request.resource.data.get('st', '') == 'new') && (isStaff()
         && request.resource.data.owner == request.auth.uid
         && (request.resource.data.st == 'new' || isManager()));
       allow read: if isManager()

@@ -661,6 +661,8 @@ describe('copy-docs: העתקה ממוקדת של מסמכים בודדים אח
       ['inbox/wdck2033h85', { owner: S('u_emp'), by: S('u_emp'), status: S('new'), data: S('{}'), parts: S('1') }],
       ['tasks/km8j0hu2ee', { txt: S('משימה'), st: S('open'), due: I(1) }],
       ['tasks/km8j0hu2ee/c/c1', { txt: S('תגובה – לא מועתקת') }],
+      ['tasks/km8j0hu2ee/c/c1/x/x1', { n: I(1) }],
+      ['tasks/km8j0hu2ee/p/w1', { img: S('...') }],
       ['cashout/conf1', { a: D(10) }],
       [LP + '/cashout/conf1', { a: D(11) }], // ביעד עם תוכן אחר
       ['orders/o1', { x: I(1) }],
@@ -682,6 +684,13 @@ describe('copy-docs: העתקה ממוקדת של מסמכים בודדים אח
     assert.equal((await get(LP + '/cashout/wdck2033h85')).fields.a.doubleValue, 50, 'double נשאר double');
     assert.equal((await get(LP + '/cashout/wdck2033h85')).fields.big.integerValue, '9007199254740993');
     assert.deepEqual(await sub(LP + '/tasks/km8j0hu2ee'), [], 'תת-אוסף לא הועתק');
+    // אזהרה על תתי-אוספים שלא הועתקו, עם נתיבי המסמכים (גם בעומק 2), בלי להכשיל את ההרצה
+    const tk = rep.docs.find(d => d.rel === 'tasks/km8j0hu2ee');
+    assert.deepEqual(tk.subDocs, ['tasks/km8j0hu2ee/c/c1', 'tasks/km8j0hu2ee/c/c1/x/x1', 'tasks/km8j0hu2ee/p/w1']);
+    assert.equal(rep.subDocWarnings, 1);
+    assert.ok(rep.docs.filter(d => d.rel !== 'tasks/km8j0hu2ee').every(d => !d.subDocs), 'אין אזהרה למסמך בלי תת-אוספים');
+    assert.match(r.out, /אזהרה: ל-tasks\/km8j0hu2ee יש 3 מסמכים בתתי-אוספים/);
+    assert.match(r.out, /^ {4}tasks\/km8j0hu2ee\/p\/w1$/m);
     assert.deepEqual(await snapshotRoot(), root0, 'השורש לא השתנה');
     assert.equal((await get(LP)).fields.dataRoot.stringValue, 'b');
     assert.match(r.out, /הועתקו 4/);
@@ -720,6 +729,13 @@ describe('copy-docs: העתקה ממוקדת של מסמכים בודדים אח
       assert.match(r.out, /נתיבים לא תקינים|יותר מדי נתיבים/, p);
     }
     assert.match((await cd('orders/o1')).out, /לא ברשימת האוספים המועתקים/);
+    // אוספי הרשאות וזהות – אסורים גם אם הם ב-COPY
+    for (const p of ['admins/u_new', 'staff/u_emp', 'private/info', 'push_tokens/u_mgr', 'staff/u_emp/x/y']) {
+      const r = await cd(p);
+      assert.notEqual(r.code, 0, p);
+      assert.match(r.out, /אוסף הרשאות\/זהות/, p);
+    }
+    assert.equal(await get(LP + '/admins/u_new'), null);
     const none = await run(['copy-docs', '--mode', 'write', '--no-storage', '--backup', F('cd-backup.json')]);
     assert.notEqual(none.code, 0);
     assert.match(none.out, /חסר --paths/);

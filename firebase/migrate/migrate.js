@@ -631,6 +631,8 @@ async function cmdSetDataRoot(ctx) {
 // רק המסמכים שברשימה, בלי תת-אוספים. יצירה בלבד: יעד קיים לא נדרס לעולם (זהה = "כבר קיים", שונה = התנגשות).
 const DOC_PATHS_MAX = 50;
 const DOC_SEG_RE = /^[A-Za-z0-9_-]{1,200}$/; // תווים בטוחים בלבד: בלי '/', '.', רווח, '%' וכו'
+// אוספי הרשאות וזהות: לא מעתיקים מסמך בודד (למשל admins/<uid> היה מחזיר הרשאת מנהל למי שהוסר ב-b)
+const DOC_PATHS_DENY = ['admins', 'staff', 'private', 'push_tokens', 'users', 'superadmins'];
 function parseDocPaths(raw) {
   const list = String(raw === undefined || raw === 'true' ? '' : raw).split(',').map(s => s.trim()).filter(Boolean);
   if (!list.length) throw new Error('חסר --paths: רשימת נתיבי מסמכים בשורש, מופרדים בפסיק (למשל cashout/abc,tasks/xyz)');
@@ -640,6 +642,7 @@ function parseDocPaths(raw) {
     const segs = p.split('/');
     if (segs.length < 2 || segs.length % 2 !== 0) bad.push(p + ' (נתיב מסמך = מספר זוגי של קטעים: אוסף/מזהה)');
     else if (!segs.every(s => DOC_SEG_RE.test(s) && !/^__.*__$/.test(s))) bad.push(p + ' (מותרים רק אותיות לטיניות, ספרות, _ ו-)');
+    else if (DOC_PATHS_DENY.includes(segs[0])) bad.push(p + ` (האוסף "${segs[0]}" הוא אוסף הרשאות/זהות – אסור בהעתקה ממוקדת)`);
     else if (!COPY.includes(segs[0])) bad.push(p + ` (האוסף "${segs[0]}" לא ברשימת האוספים המועתקים)`);
   }
   if (new Set(list).size !== list.length) bad.push('נתיב מופיע פעמיים ברשימה');
@@ -676,14 +679,28 @@ async function cmdCopyDocs(ctx) {
     if (w.ok) r.status = 'copied';
     else { r.status = 'failed'; r.error = w.error; }
   });
+  // אזהרה: תתי-אוספים מתחת למסמכי המקור לא מועתקים. מציגים את נתיבי המסמכים שבהם, כדי להחליט אם להעתיק אותם במפורש
+  for (const r of rows) {
+    if (r.status === 'missing') continue;
+    const subs = await ctx.fsr.listCollectionIds(r.rel);
+    if (!subs.length) continue;
+    const tree = await scanTree(ctx.fsr, '', subs.map(c => r.rel + '/' + c));
+    r.subDocs = [...tree.entries()].filter(([, d]) => !d.missing).map(([p]) => p).sort();
+  }
   const label = { copied: 'הועתק', already: 'כבר קיים ביעד וזהה – לא נכתב', conflict: 'התנגשות: קיים ביעד עם תוכן אחר – לא נכתב', missing: 'לא נמצא בשורש – לא נכתב', failed: 'הכתיבה נכשלה (ייתכן שהיעד נוצר בינתיים) – לא נדרס' };
   for (const r of rows) log(`  ${r.rel}: ${label[r.status]}${r.src ? ' (מקור ' + r.src.slice(0, 12) + (r.dst ? ', יעד ' + r.dst.slice(0, 12) : '') + ')' : ''}${r.error ? ' – ' + r.error : ''}`);
+  const withSubs = rows.filter(r => r.subDocs && r.subDocs.length);
+  for (const r of withSubs) {
+    log(`  אזהרה: ל-${r.rel} יש ${r.subDocs.length} מסמכים בתתי-אוספים שלא הועתקו (להעתקה – להוסיף את הנתיבים ל---paths):`);
+    for (const p of r.subDocs.slice(0, 50)) log('    ' + p);
+    if (r.subDocs.length > 50) log(`    ... ועוד ${r.subDocs.length - 50} (הרשימה המלאה בדוח)`);
+  }
   const count = k => rows.filter(r => r.status === k).length;
   const sum = { copied: count('copied'), already: count('already'), conflict: count('conflict'), missing: count('missing'), failed: count('failed') };
   const ok = !sum.conflict && !sum.missing && !sum.failed;
   log(`סיכום: הועתקו ${sum.copied}, כבר קיימים וזהים ${sum.already}, התנגשויות ${sum.conflict}, לא נמצאו ${sum.missing}, כשלים ${sum.failed}`);
   log(ok ? 'העתקה ממוקדת: הצליחה' : 'העתקה ממוקדת: יש מסמכים שלא הועתקו – דורש בדיקה (שום מסמך קיים לא נדרס)');
-  return { ok, dataRoot, ...sum, docs: rows };
+  return { ok, dataRoot, ...sum, subDocWarnings: withSubs.length, docs: rows };
 }
 
 const COMMANDS = { backup: cmdBackup, 'dry-run': cmdDryRun, copy: cmdCopy, 'copy-docs': cmdCopyDocs, verify: cmdVerify, 'compare-backup': cmdCompareBackup, 'report-since': cmdReportSince, 'set-dataroot': cmdSetDataRoot };

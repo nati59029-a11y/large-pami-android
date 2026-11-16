@@ -812,6 +812,25 @@ describe('נעילת כתיבה לשורש של לארג\' פעמי אחרי ה�
     await assertSucceeds(OPS['chunks – עובד יוצר']());
   });
 
+  it('fb: יצירת דף משוב חדש (st new) בשורש נשארת מותרת גם ב-b (fbWSent בקוד הישן מוחק את הדף אחרי 403); כל השאר ב-fb נעול', async () => {
+    const body = (owner, st) => ({ data: '{}', img: '', owner, at: '1', st });
+    for (const r of ['b', 'legacy']) {
+      await setRoot(r);
+      await assertSucceeds(emp().doc('fb/' + fresh('f')).set(body('u_emp', 'new')), 'עובד יוצר new ' + r);
+      await assertSucceeds(mgr().doc('fb/' + fresh('f')).set(body('u_mgr', 'new')), 'מנהל יוצר new ' + r);
+      await assertFails(emp().doc('fb/' + fresh('f')).set(body('u_emp2', 'new')), 'בשם אחר – נחסם ' + r);
+      await assertFails(emp().doc('fb/' + fresh('f')).set(body('u_emp', 'ok')), 'עובד ok – נחסם ' + r);
+    }
+    await setRoot('b');
+    await assertFails(mgr().doc('fb/' + fresh('f')).set(body('u_mgr', 'ok')), 'מנהל יוצר מאושר – נעול ב-b');
+    await assertFails(mgr().doc('fb/fb_new').update({ st: 'ok' }), 'עדכון – נעול ב-b');
+    await assertFails(mgr().doc('fb/fb_new').delete(), 'מחיקה – נעולה ב-b');
+    await assertFails(emp().doc('fb/fb_new').set(body('u_emp', 'new')), 'דריסת מסמך קיים (עדכון) – נעולה');
+    await setRoot('legacy');
+    await assertSucceeds(mgr().doc('fb/' + fresh('f')).set(body('u_mgr', 'ok')), 'מנהל יוצר מאושר – מותר ב-legacy');
+    await assertSucceeds(mgr().doc('fb/fb_new').update({ st: 'ok' }), 'עדכון – מותר ב-legacy');
+  });
+
   it('מסלול b/largpeami לא מושפע: כתיבה ב-b/ מותרת גם ב-b; אוסף אתר בשורש (orders) מתנהג אותו דבר בשני המצבים', async () => {
     for (const r of ['b', 'legacy']) {
       await setRoot(r);
