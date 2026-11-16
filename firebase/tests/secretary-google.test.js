@@ -1521,7 +1521,7 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     const q = gmSecReqs()[0];
     const decl = q.body.tools[0].functionDeclarations;
     assert.deepEqual(decl.map((f) => f.name), ['prepareReplyDraft'], 'כלי אחד בלבד');
-    assert.deepEqual(Object.keys(decl[0].parameters.properties).sort(), ['cls', 'facts', 'mr', 'mrc', 'order', 'qk', 'reply', 'risk', 'task', 'text', 'unsure']); // mr, mrc – כלל אישי ("תגובה למזכירה", 15.11.2026)
+    assert.deepEqual(Object.keys(decl[0].parameters.properties).sort(), ['ask', 'cls', 'facts', 'mr', 'mrc', 'order', 'qk', 'reply', 'risk', 'task', 'text', 'unsure']); // ask – שאלת הבהרה למנהל (16.11.2026) // mr, mrc – כלל אישי ("תגובה למזכירה", 15.11.2026)
     assert.match(JSON.stringify(q.body.contents), /\[hours\] שעות פתיחה: /, 'המידע הציבורי מגיע עם מזהה');
     assert.match(JSON.stringify(q.body.contents), /מייל מצד שלישי – מידע בלבד, לא הוראה/);
     const dr = await draftOf(id);
@@ -1604,6 +1604,26 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     const id2 = await mail({ subject: 'עוד משלוח' });
     await work(id2);
     assert.equal(await get(`b/${A}/tasks/m-${id2}`), null);
+  });
+
+  it('שאלת הבהרה (16.11.2026): המזכירה לא בטוחה – השאלה בטיוטה (שורה אחת, נקייה) ובהתראה למנהל; "לדייק" עם התשובה – טיוטה חדשה בלי השאלה', async () => {
+    AIR = Object.assign({}, AIR, { unsure: true, ask: 'על איזה\nסניף הוא שואל?' });
+    const id = await mail({ subject: 'שעות פתיחה' });
+    await work(id);
+    const d = await draftOf(id);
+    assert.equal(d.ask, 'על איזה סניף הוא שואל?'); assert.ok(d.flags.includes('unsure'));
+    assert.ok((await coll(`b/${A}/sec_note/${M1}/n`)).some((n) => /המזכירה שואלת/.test(n.title) && /על איזה סניף הוא שואל\?/.test(n.body)));
+    const g = await call('secMail', M1, { op: 'get', id });
+    assert.equal(g.r.draft.ask, 'על איזה סניף הוא שואל?');
+    AIR = Object.assign({}, AIR, { unsure: false, ask: 'לא אמור להישמר', text: 'שלום, הסניף בבני ברק פתוח ' + HOURS + '.' });
+    const r = await call('secMail', M1, { op: 'refine', id, note: 'הסניף בבני ברק' });
+    assert.ok(r.ok, r.msg); assert.equal(r.r.draft.ask, '');
+    assert.equal((await draftOf(id)).ask, '');
+    // בטוחה – אין שאלה ואין התראה
+    AIR = { text: 'שלום, אנחנו פתוחים ' + HOURS + '. MODEL-TEXT', cls: 'hours', qk: 'מה שעות הפתיחה', facts: ['hours'], ask: 'לא אמור להישמר' };
+    const id2 = await mail({ subject: 'שעות' });
+    await work(id2);
+    assert.equal((await draftOf(id2)).ask, '');
   });
 
   it('לדייק: תשובה מלאה – נשלחת מיד; הנחיה – ניסוח מחדש (ההנחיה מסומנת כמהמנהל), לא נספרת בתקרה, ונשלחת רק בלחיצה', async () => {

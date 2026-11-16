@@ -49,7 +49,7 @@ async function open(browser, www, o) {
     if (n === 'secMail') {
       if (body.op === 'list') return ok({ ok: true, mails: mails.map((m) => Object.assign({}, m, m.id === ID1 && draft1 ? { draft: { st: draft1.st, src: draft1.src } } : {})), boxes, max: 2, cleanN: lists.filter((l) => l.st === 'pend').length });
       if (body.op === 'get') { const m = mails.find((x) => x.id === body.id); return ok({ ok: true, mail: Object.assign({}, m, { text: m.snip + '\nתודה', files: m.id === ID1 ? ['הצעה.pdf'] : [], rto: '' }), draft: m.id === ID1 ? draft1 : null }); }
-      if (body.op === 'draft') { draft1 = { id: ID1, to: 'yossi@client.example', subj: 'Re: שאלה על שעות', text: 'שלום יוסי, אנחנו פתוחים מחר 08:00–18:00.', src: 'ai', st: 'pend', flags: ['chk'], why: ['מספר שלא מופיע במייל: 18'], t: now }; return ok({ ok: true, draft: draft1 }); }
+      if (body.op === 'draft') { draft1 = { id: ID1, to: 'yossi@client.example', subj: 'Re: שאלה על שעות', text: 'שלום יוסי, אנחנו פתוחים מחר 08:00–18:00.', src: 'ai', st: 'pend', flags: ['chk', 'unsure'], why: ['מספר שלא מופיע במייל: 18'], ask: 'עד איזו שעה פתוחים מחר?', t: now }; return ok({ ok: true, draft: draft1 }); }
       if (body.op === 'write') { draft1 = { id: ID1, to: 'yossi@client.example', subj: 'Re: שאלה על שעות', text: body.text, src: 'mgr', st: 'pend', flags: [], why: [], t: now }; return ok({ ok: true, draft: draft1 }); }
       if (body.op === 'done') return ok({ ok: true, id: body.id });
       if (body.op === 'cleanList') return ok({ ok: true, lists });
@@ -121,6 +121,7 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     await page.click('[data-a=secMlDraft]'); await H.settle(page, 500);
     const td = await txt(page);
     check(`${w}: טיוטה – נמען, "לבדוק לפני שליחה" עם הסיבה, "שלח מה-Gmail של העסק"`, /yossi@client\.example/.test(td) && /לבדוק לפני שליחה/.test(td) && /מספר שלא מופיע במייל/.test(td) && !!(await page.$('[data-a=secMlSend]')), td.slice(0, 400));
+    check(`${w}: 16.11 – שאלת ההבהרה של המזכירה מוצגת בכרטיס, עם הפניה ל"לדייק"`, /❓ המזכירה שואלת: עד איזו שעה פתוחים מחר\?/.test(td) && /בשדה "לדייק"/.test(td), td.slice(0, 500));
     check(`${w}: "טיוטה מהמזכירה" לא שולחת`, !!last(bodies, 'secMail', (b) => b.op === 'draft' && b.id === ID1) && !bodies.some((b) => b[0] === 'secMailSend'));
     await page.fill('#secMlTx', 'שלום יוסי, פתוחים מחר עד 17:00.');
     await page.click('[data-a=secMlSend]'); await H.settle(page, 400);
