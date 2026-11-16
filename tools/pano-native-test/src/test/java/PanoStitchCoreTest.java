@@ -183,7 +183,10 @@ public class PanoStitchCoreTest {
         boolean[] blank;
     }
 
-    static Scene scene(long seed, double yaw0, double perturbDeg, int[] blankIdx) {
+    static Scene scene(long seed, double yaw0, double perturbDeg, int[] blankIdx) { return scene(seed, yaw0, perturbDeg, blankIdx, 0); }
+
+    /** vig > 0: lens vignetting 1 - vig * r^2 (r = distance from the centre / half diagonal) applied to every frame */
+    static Scene scene(long seed, double yaw0, double perturbDeg, int[] blankIdx, double vig) {
         Random r = new Random(seed);
         double f = (Math.max(FW, FH) / 2.0) / Math.tan(FOV_TRUE * D / 2), fw = 2 * Math.atan(FW / 2.0 / f) / D, fh = 2 * Math.atan(FH / 2.0 / f) / D;
         List<double[]> T = pickTargets(fw, fh);
@@ -214,6 +217,19 @@ public class PanoStitchCoreTest {
             Mat fl = new Mat(), noise = new Mat(FH, FW, CvType.CV_32FC3);
             img.convertTo(fl, CvType.CV_32FC3);
             Core.multiply(fl, new Scalar(s.gain[i][0], s.gain[i][1], s.gain[i][2]), fl);
+            if (vig > 0) {
+                float[] vm = new float[FW * FH];
+                double hd2 = (FW * (double) FW + FH * (double) FH) / 4;
+                for (int v = 0; v < FH; v++) for (int u = 0; u < FW; u++) {
+                    double du = u + .5 - FW / 2.0, dv = v + .5 - FH / 2.0;
+                    vm[v * FW + u] = (float) (1 - vig * (du * du + dv * dv) / hd2);
+                }
+                Mat V = new Mat(FH, FW, CvType.CV_32FC1), V3 = new Mat();
+                V.put(0, 0, vm);
+                Imgproc.cvtColor(V, V3, Imgproc.COLOR_GRAY2BGR);
+                Core.multiply(fl, V3, fl);
+                V.release(); V3.release();
+            }
             Core.randn(noise, 0, 2.5);
             Core.add(fl, noise, fl);
             fl.convertTo(img, CvType.CV_8UC3);
@@ -467,6 +483,73 @@ public class PanoStitchCoreTest {
         assertTrue(eTex < 0.4, "textured frames still registered");
         assertTrue(maxBlankMove < 2.0, "blank frames stay near the sensor pose");
         assertTrue(Math.abs(r.fovL - FOV_TRUE) < 0.7, "fov");
+    }
+
+    /** mean luminance (BT.601) of rows |lat| < 70, cos(lat) weighted; pano in the gauge of the output (no rotation needed for a mean) */
+    static double meanLum(Mat pano) {
+        int W = pano.cols(), H = pano.rows();
+        byte[] px = new byte[W * H * 3];
+        pano.get(0, 0, px);
+        double s = 0, w = 0;
+        for (int y = 0; y < H; y++) {
+            double lat = (.5 - (y + .5) / H) * 180;
+            if (Math.abs(lat) > 70) continue;
+            double cw = Math.cos(lat * D);
+            for (int x = 0; x < W; x++) {
+                int k = (y * W + x) * 3;
+                s += cw * (.114 * (px[k] & 255) + .587 * (px[k + 1] & 255) + .299 * (px[k + 2] & 255));
+                w += cw;
+            }
+        }
+        return s / w;
+    }
+
+    /** brightness (16.11, real capture was ~45% darker than its frames): with vignetting 0.35 and random exposures (mean 1) the output
+     *  keeps the brightness of the scene, the vignetting is detected, and the gains have a geometric mean of 1 */
+    @Test
+    void brightnessKeptWithVignetting() {
+        Scene s = scene(11, 0, 2, null, .35);
+        PanoStitchCore.Result r = stitch(s, 2048, FOV_GIVEN, true);
+        Mat gt2 = new Mat();
+        Imgproc.resize(gt, gt2, new Size(2048, 1024), 0, 0, Imgproc.INTER_AREA);
+        double mGt = meanLum(gt2), mOut = meanLum(r.pano);
+        double gScene = 0;
+        for (double[] g : s.gain) gScene += Math.log(Math.cbrt(g[0] * g[1] * g[2]));
+        gScene = Math.exp(gScene / s.n); // the stitcher can only keep the mean exposure of the frames
+        double lg = 0;
+        for (double[] g : r.stats.gains) lg += Math.log(Math.cbrt(g[0] * g[1] * g[2]));
+        lg = Math.exp(lg / s.n);
+        double vEdge = Math.exp(r.stats.vigA + r.stats.vigB);
+        Imgcodecs.imwrite(new File(OUT, "vignetting-2048.jpg").getPath(), r.pano);
+        System.out.println("brightness: ground truth " + f2(mGt) + " x mean exposure " + f2(gScene) + " = " + f2(mGt * gScene) + ", output " + f2(mOut)
+                + "; vignetting V(corner) " + f2(vEdge) + " (true .65); gains geometric mean " + f2(lg));
+        gt2.release(); r.pano.release();
+        assertTrue(Math.abs(mOut / (mGt * gScene) - 1) < .05, "brightness kept: " + mOut + " vs " + mGt * gScene);
+        assertTrue(vEdge > .5 && vEdge < .8, "vignetting found: " + vEdge);
+        assertTrue(Math.abs(lg - 1) < .02, "gains mean 1: " + lg);
+    }
+
+    /** safety guard (16.11): weak matching -> run() throws a clear exception (the JS stitching is used); guard=false still stitches */
+    @Test
+    void guardRefusesWeakMatching() {
+        Scene s0 = scene(13, 0, 3, null);
+        int[] blank = new int[s0.n - 3];
+        for (int i = 3; i < s0.n; i++) blank[i - 3] = i; // only frames 0..2 have texture
+        Scene s = scene(13, 0, 3, blank);
+        String msg = null;
+        try { stitch(s, 1024, FOV_GIVEN, true); } catch (IllegalStateException e) { msg = e.getMessage(); }
+        System.out.println("guard: " + msg);
+        assertTrue(msg != null && msg.startsWith("native stitch refused"), "guard throws: " + msg);
+        PanoStitchCore.Options o = new PanoStitchCore.Options();
+        o.W = 1024; o.fovL = FOV_GIVEN; o.yawRef = s.yawRef; o.guard = false;
+        PanoStitchCore c = new PanoStitchCore(s.n, o);
+        for (int i = 0; i < s.n; i++) c.setFrame(i, s.jpeg[i], q(s.Rs[i]));
+        PanoStitchCore.Result r = c.run(null);
+        assertEquals(512, r.pano.rows());
+        r.pano.release();
+        // optimisation off (sensor-only comparison mode) is never refused
+        PanoStitchCore.Result r2 = stitch(s, 1024, FOV_GIVEN, false);
+        r2.pano.release();
     }
 
     @Test

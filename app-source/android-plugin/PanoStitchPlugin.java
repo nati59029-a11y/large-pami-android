@@ -163,6 +163,10 @@ public class PanoStitchPlugin extends Plugin {
         o.put("holesPct", r3(s.holesPct));
         o.put("optimized", s.optimized);
         o.put("feat", s.feat);
+        o.put("guardPairs", s.guardPairs);
+        o.put("guardHits", s.guardHits);
+        o.put("vigA", r3(s.vigA));
+        o.put("vigB", r3(s.vigB));
         o.put("ms", s.ms);
         o.put("msFeat", s.msFeat);
         o.put("msMatch", s.msMatch);
