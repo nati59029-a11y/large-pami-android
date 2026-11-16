@@ -596,7 +596,7 @@ describe('"תזכירי לי שוב": קביעה, בדיקות תקינות, ת�
     assert.ok(!PUSH.some((q) => q.meta.uid === M1), 'לפני הזמן – לא נשלח');
     await RMc().runRemind({ now: at + 60e3, bizzes: [biz], send });
     const q = PUSH.find((z) => z.meta.uid === M1);
-    assert.ok(q, 'בזמן שנבחר – נשלח, גם בשעות השקטות'); assert.match(q.msg.body, /^\(שוב\)/);
+    assert.ok(q, 'בזמן שנבחר – נשלח, גם בשעות השקטות'); assert.match(q.msg.title, /^\(שוב\)/, "16.11.2026: \"(שוב)\" בכותרת ההתראה");
     assert.equal((await get(`b/${A}/sec_note/${M1}/n/n1`)).pend, false);
   });
 });
