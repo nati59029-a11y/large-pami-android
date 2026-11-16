@@ -216,8 +216,11 @@ async function ingest(m, route, biz, now) {
   const t = m.ts && Math.abs(m.ts - now) < 7 * 864e5 ? m.ts : now;
   const h = hourKey(now), d = dayKey(now);
   const r = await db.runTransaction(async (tx) => {
-    const [is, ss, cs, us] = await Promise.all([tx.get(inRef), tx.get(sRef), tx.get(cRef), tx.get(uRef)]);
+    // 16.11.2026: קודם בודקים כפילות, ורק הודעה חדשה קוראת את מונה ההצפה (wa_use), את השולח ואת ההגדרות. קריאה בתוך עסקה נועלת את המסמך,
+    // ו-Meta שולחת שוב הרבה הודעות בעומס – כך שליחה חוזרת לא נועלת את המונה המשותף לכל העסק ולא מאטה את קבלת ההודעות החדשות. התוצאה זהה
+    const is = await tx.get(inRef);
     if (is.exists) return { dup: true, st: is.get('st') };
+    const [ss, cs, us] = await Promise.all([tx.get(sRef), tx.get(cRef), tx.get(uRef)]);
     const cfg = waCfgOf(cs);
     const snd = ss.exists ? ss.data() : null;
     const own = W.routeOf({ mgrUid, ordOn: cfg.ord, snd, btn: m.btn, text: m.text, now });
