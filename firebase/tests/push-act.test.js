@@ -26,6 +26,18 @@ describe('pushAct – פונקציות טהורות', () => {
     assert.equal(PA.parseBody(rq({ t: T43, a: 'done', f: F + '<' })), null);
     assert.equal(PA.parseBody(rq([T43])), null);
     assert.equal(PA.parseBody(rq({ t: T43, a: 'done', f: F }, 'application/json', Buffer.alloc(7000))), null, 'גוף גדול');
+    const big = { headers: { 'content-type': 'application/json', 'content-length': '7000' }, body: { t: T43, a: 'done', f: F } };
+    assert.equal(PA.tooBig(big), true, 'content-length גדול – נדחה לפני עיבוד הגוף');
+    assert.equal(PA.parseBody(big), null);
+    assert.equal(PA.tooBig({ headers: { 'content-length': 'abc' } }), true, 'content-length לא מספר');
+    assert.equal(PA.tooBig({ headers: { 'content-length': '120' } }), false);
+  });
+  it('handle: גוף גדול (content-length) – 413 לפני כל קריאה מהמסד; קלט לא תקין – 400 (בלי מסד)', async () => {
+    const res = () => ({ code: 0, h: {}, body: null, status(c) { this.code = c; return this; }, set(k, v) { this.h[k] = v; return this; }, json(b) { this.body = b; return this; } });
+    let r = res(); await PA.handle({ method: 'POST', headers: { 'content-type': 'application/json', 'content-length': '999999' }, body: { t: T43, a: 'done', f: F } }, r);
+    assert.equal(r.code, 413); assert.equal(r.body.ok, false);
+    r = res(); await PA.handle({ method: 'POST', headers: { 'content-type': 'application/json' }, body: { t: T43, a: 'done', f: 'bad id' } }, r);
+    assert.equal(r.code, 400, 'מזהה טלפון לא תקין – נדחה לפני המסד');
   });
   it('tkPlan: אותם כללים כמו "✓ בוצע" באפליקציה ו-workerUpd בחוקים', () => {
     const now = 1_800_000_000_000;
@@ -47,6 +59,15 @@ describe('pushAct – פונקציות טהורות', () => {
     assert.equal(PA.tkPlan(t({ st: 'wait' }), 'u1', false, 'd', now).r, 'closed');
     assert.equal(PA.tkPlan(null, 'u1', false, 'd', now).r, 'closed');
     assert.equal(PA.tkPlan(t(), 'u1', false, '', now).r, 'open-app', 'בלי שם (doneBy) – באפליקציה');
+    // 16.11.2026 (אבטחה): מה שהחוקים היו דוחים – לאפליקציה
+    assert.equal(PA.tkPlan(t({ open: '' }), 'u1', false, 'd', now).r, 'open-app', 'open לא "1" – החוקים דורשים open=="1" ב"לאישור"');
+    assert.equal(PA.tkPlan(t({ open: undefined }), 'u1', false, 'd', now).r, 'open-app');
+    assert.equal(PA.tkPlan(t({ open: '', nc: '1' }), 'u1', false, 'd', now).r, 'open-app');
+    assert.equal(PA.tkPlan(t({ due: undefined }), 'u1', false, 'd', now).r, 'open-app', 'בלי due ובלי dl – אין יעד מספרי');
+    assert.equal(PA.tkPlan(t({ due: '5' }), 'u1', false, 'd', now).r, 'open-app', 'due לא מספר');
+    assert.equal(PA.tkPlan(t({ due: undefined, dl: 0 }), 'u1', false, 'd', now).r, 'done', 'dl=0 (בלי יעד) – תקין');
+    assert.equal(PA.tkPlan(t({ due: 0 }), 'u1', false, 'd', now).r, 'done', 'due=0 – בלי יעד, תקין');
+    assert.equal(PA.tkPlan(t(), 'u1', false, 'd', now).r, 'done', 'משימה רגילה (open "1", due מספר) – נסגרת כמו קודם');
   });
   it('fcmPayload: טלפון ישן – בדיוק ההודעה של היום; טלפון עם כפתורים – data בלבד, priority high, עם אסימון, פעולות וכתובת', () => {
     const msg = { title: 'תזכורת: לבדוק', body: 'פרטים', id: 'n1' };
@@ -91,16 +112,22 @@ describe('pushAct – מול האמולטור', { skip: !EMU && 'אמולטור 
   after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* */ } });
   beforeEach(async () => {
     await env.clearFirestore();
+    const T0 = Date.now() - 60e3;
+    const AT = (...ts) => Object.fromEntries(ts.map((t) => [PA.hashOf(t), T0])); // pushActAt: רישום עם act:1 לפני דקה
     await prep(async (d) => {
       const b = d.batch();
+      // השיוך הגלובלי (push_dev) של כל טלפון רשום – כמו שכותב registerPushToken
+      for (const [u, biz, ts] of [[M1, A, [F(M1), F(M1, 'b')]], [M2, A, [F(M2)]], [E1, A, [F(E1), F(E1, 'old')]], [E2, A, [F(E2)]], [EOFF, A, [F(EOFF)]], [MB, B, [F(MB)]]]) {
+        for (const t of ts) b.set(d.doc(PA.devPath(t)), { biz, uid: u, t: T0 });
+      }
       b.set(d.doc('b/' + A), { name: A, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: { tasks: true, secretary: true } });
       b.set(d.doc('b/' + B), { name: B, status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: { tasks: true, secretary: true } });
       b.set(d.doc(`b/${A}/admins/${M1}`), { email: 'm1@x.invalid' });
-      b.set(d.doc(`b/${A}/staff/${M1}`), { name: 'מנהל', role: 'manager', active: true, pushTokens: [F(M1), F(M1, 'b')], pushAct: [F(M1)] });
+      b.set(d.doc(`b/${A}/staff/${M1}`), { name: 'מנהל', role: 'manager', active: true, pushTokens: [F(M1), F(M1, 'b')], pushAct: [F(M1)], pushActAt: AT(F(M1)) });
       b.set(d.doc(`b/${A}/admins/${M2}`), { email: 'm2@x.invalid' });
-      b.set(d.doc(`b/${A}/push_tokens/${M2}`), { pushTokens: [F(M2)], pushAct: [F(M2)] });
-      b.set(d.doc(`b/${A}/staff/${E1}`), { name: 'e1', role: 'employee', active: true, pushTokens: [F(E1), F(E1, 'old')], pushAct: [F(E1)] });
-      b.set(d.doc(`b/${A}/staff/${E2}`), { name: 'e2', role: 'employee', active: true, pushTokens: [F(E2)], pushAct: [F(E2)] });
+      b.set(d.doc(`b/${A}/push_tokens/${M2}`), { pushTokens: [F(M2)], pushAct: [F(M2)], pushActAt: AT(F(M2)) });
+      b.set(d.doc(`b/${A}/staff/${E1}`), { name: 'e1', role: 'employee', active: true, pushTokens: [F(E1), F(E1, 'old')], pushAct: [F(E1)], pushActAt: AT(F(E1)) });
+      b.set(d.doc(`b/${A}/staff/${E2}`), { name: 'e2', role: 'employee', active: true, pushTokens: [F(E2)], pushAct: [F(E2)], pushActAt: AT(F(E2)) });
       b.set(d.doc(`b/${A}/staff/${EOFF}`), { name: 'off', role: 'employee', active: false, pushTokens: [F(EOFF)] });
       b.set(d.doc(`b/${B}/admins/${MB}`), { email: 'mb@x.invalid' });
       b.set(d.doc(`b/${B}/staff/${MB}`), { name: 'mb', role: 'manager', active: true, pushTokens: [F(MB)] });
@@ -160,6 +187,52 @@ describe('pushAct – מול האמולטור', { skip: !EMU && 'אמולטור 
     // הטלפון השני של המנהל (גם בלי כפתורים) – רשום לו, ולכן מותר
     assert.equal((await press(x.token, 'done', F(M1, 'b'))).ok, true);
   });
+  it('16.11.2026 (אבטחה): push_dev – טלפון שעבר למשתמש בעסק אחר / בלי שיוך / שיוך למשתמש אחר – נחסם; האסימון לא נגוע', async () => {
+    const x = await mk({ uid: M1, kind: 'sec', id: 'n1', acts: ['done'] });
+    // הטלפון עבר ל-MB בעסק B (registerPushToken שם), אבל עדיין ב-pushTokens של M1 בעסק A
+    await prep((d) => d.doc(PA.devPath(F(M1))).set({ biz: B, uid: MB, t: Date.now() }));
+    assert.deepEqual(await press(x.token, 'done', F(M1)), { ok: false, r: 'bad-device', msg: 'אין הרשאה. פתחו את האפליקציה', open: true });
+    await prep((d) => d.doc(PA.devPath(F(M1))).set({ biz: A, uid: E1, t: Date.now() }));
+    assert.equal((await press(x.token, 'done', F(M1))).r, 'bad-device', 'אותו עסק, משתמש אחר');
+    await prep((d) => d.doc(PA.devPath(F(M1))).delete());
+    assert.equal((await press(x.token, 'done', F(M1))).r, 'bad-device', 'בלי שיוך (נרשם לפני התיקון / נמחק)');
+    assert.equal((await get(`b/${A}/sec_note/${M1}/n/n1`)).st, 'open');
+    assert.equal((await get('pact/' + PA.hashOf(x.token))).used, undefined, 'האסימון לא נוצל');
+    await prep((d) => d.doc(PA.devPath(F(M1))).set({ biz: A, uid: M1, t: Date.now() }));
+    assert.equal((await press(x.token, 'done', F(M1))).ok, true, 'השיוך הנכון – עובד');
+    const y = await mk({ uid: E1, kind: 'tk', id: 't1', acts: ['done'] });
+    await prep((d) => d.doc(PA.devPath(F(E1))).set({ biz: B, uid: E1, t: Date.now() }));
+    assert.equal((await press(y.token, 'done', F(E1))).r, 'bad-device', 'משימה: עסק אחר בשיוך');
+    assert.equal((await get(`b/${A}/tasks/t1`)).st, 'open');
+  });
+  it('16.11.2026 (אבטחה): tkPlan מול האמולטור – משימה בלי open="1" או בלי יעד מספרי – "פתחו את האפליקציה", לא נסגרת', async () => {
+    for (const o of [{ open: '' }, { due: 'x' }]) {
+      await prep((d) => d.doc(`b/${A}/tasks/t1`).set(task(o)));
+      const x = await mk({ uid: E1, kind: 'tk', id: 't1', acts: ['done'] });
+      assert.equal((await press(x.token, 'done', F(E1))).r, 'open-app', JSON.stringify(o));
+      assert.equal((await get(`b/${A}/tasks/t1`)).st, 'open');
+    }
+  });
+  it('16.11.2026 (אבטחה): tokensAct – pushAct בלי pushActAt (נתונים ישנים) / רישום אחרי זה בלי act / ישן מ-30 יום – בלי כפתורים', async () => {
+    const C = { bizId: A, prefix: `b/${A}/`, biz: BIZA };
+    const ta = (uid, now) => T.runInBiz(C, () => RMC.tokensAct(T.tdb(), uid, now));
+    assert.deepEqual(await ta(M1), [F(M1)]);
+    await prep((d) => d.doc(`b/${A}/staff/${M1}`).update({ pushActAt: {} }));
+    assert.deepEqual(await ta(M1), [], 'בלי pushActAt');
+    await prep((d) => d.doc(`b/${A}/staff/${M1}`).update({ pushActAt: { [PA.hashOf(F(M1))]: Date.now() - 1000 }, pushPlainAt: { [PA.hashOf(F(M1))]: Date.now() } }));
+    assert.deepEqual(await ta(M1), [], 'רישום בלי act אחרי act:1 – APK/מסכים בלי כפתורים');
+    await prep((d) => d.doc(`b/${A}/staff/${M1}`).update({ pushActAt: { [PA.hashOf(F(M1))]: Date.now() } , pushPlainAt: { [PA.hashOf(F(M1))]: Date.now() - 1000 } }));
+    assert.deepEqual(await ta(M1), [F(M1)], 'act:1 אחרי הרישום בלי act – חוזר');
+    assert.deepEqual(await ta(M1, Date.now() + 31 * 864e5), [], 'act:1 לפני יותר מ-30 יום');
+    assert.deepEqual(await ta(M2), [F(M2)], 'מנהל בלי staff (push_tokens) – אותו כלל');
+  });
+  it('push_dev ו-pact סגורים לאפליקציה (הכלל האחרון בחוקים)', async () => {
+    const { assertFails } = require('@firebase/rules-unit-testing');
+    const c = env.authenticatedContext(M1, { email: 'm1@x.invalid' }).firestore();
+    await assertFails(c.doc(PA.devPath(F(M1))).get());
+    await assertFails(c.doc(PA.devPath('fcm_new_' + 'z'.repeat(30))).set({ biz: A, uid: M1, t: 1 }));
+    await assertFails(c.collection(PA.DEV).get());
+  });
   it('שתי לחיצות במקביל – רק אחת עוברת (sec ו-tk)', async () => {
     const x = await mk({ uid: M1, kind: 'sec', id: 'n1', acts: ['done', 'h1', 'd1'] });
     const rs = await Promise.all([press(x.token, 'done', F(M1)), press(x.token, 'h1', F(M1)), press(x.token, 'd1', F(M1))]);
@@ -186,7 +259,9 @@ describe('pushAct – מול האמולטור', { skip: !EMU && 'אמולטור 
     assert.equal((await press(y.token, 'done', F(EOFF))).r, 'staff-disabled');
     // אסימון של עסק אחר לא עוזר: המשתמש שייך לעסק B
     const z = await mk({ uid: MB, kind: 'sec', id: 'n1', acts: ['done'] });
-    assert.equal((await press(z.token, 'done', F(MB))).r, 'foreign-biz');
+    assert.equal((await press(z.token, 'done', F(MB))).r, 'bad-device', 'השיוך (push_dev) של הטלפון – לעסק B');
+    await prep((d) => d.doc(PA.devPath(F(MB))).set({ biz: A, uid: MB, t: Date.now() }));
+    assert.equal((await press(z.token, 'done', F(MB))).r, 'foreign-biz', 'גם עם שיוך לעסק A – בדיקת ההרשאה חוסמת');
   });
 
   // ---------- משימות ----------

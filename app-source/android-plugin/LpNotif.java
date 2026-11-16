@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
+import android.service.notification.StatusBarNotification;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
@@ -245,6 +246,28 @@ public class LpNotif {
             return;
         }
         alarm(c, tag, when);
+    }
+
+    /**
+     * Sign-out (PushGate.clearLocal from secPushOff): all local snoozes and their alarms, the cached FCM token,
+     * and every notification we built (id NID) are removed, so the next user of this phone sees none of them.
+     */
+    public static void clearAll(Context c) {
+        SharedPreferences p = c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+        AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        for (String tag : new HashMap<>(p.getAll()).keySet()) {
+            if (am != null) am.cancel(snzPi(c, tag));
+            cancel(c, tag);
+        }
+        p.edit().clear().apply();
+        c.getSharedPreferences(LpMessagingService.TOK, Context.MODE_PRIVATE).edit().clear().apply();
+        if (Build.VERSION.SDK_INT >= 23) {
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            for (StatusBarNotification sb : nm.getActiveNotifications()) {
+                if (sb.getId() == NID && sb.getTag() != null) nm.cancel(sb.getTag(), NID);
+            }
+        }
     }
 
     /** A newer message for the same item replaces an old snooze. */

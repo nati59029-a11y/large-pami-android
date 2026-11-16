@@ -77,11 +77,26 @@ async function tokensOf(db, uid) {
   const arr = (d) => strArr(d, 'pushTokens');
   return [...new Set(arr(s).concat(arr(p)))];
 }
-// 16.11.2026: הטלפונים של המשתמש שתומכים בכפתורים (pushAct – registerPushToken עם act:1). רק מה שעדיין רשום ב-pushTokens
-async function tokensAct(db, uid) {
+// 16.11.2026: הטלפונים של המשתמש שתומכים בכפתורים. טלפון נחשב "עם כפתורים" רק אם כל התנאים מתקיימים (registerPushToken ב-index.js):
+//   1. ב-pushTokens וגם ב-pushAct;
+//   2. pushActAt[sha256(טלפון)] – רישום אחרון עם act:1 – לפני פחות מ-ACT_DAYS ימים (האפליקציה נרשמת מחדש בכל פתיחה);
+//   3. אין אחריו רישום בלי act (pushPlainAt[sha256]) – כלומר מסכים ישנים / APK ישן בלי כפתורים. מסכים חדשים שולחים תמיד act (0/1).
+// טלפון שלא עומד בזה מקבל את ההודעה הרגילה (notification) – שכל APK מציג. pushAct בלי pushActAt (נתונים מלפני 16.11) = בלי כפתורים עד הרישום הבא.
+const ACT_DAYS = 30;
+const mapOf = (d, f) => { const v = d.exists ? d.get(f) : null; return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; };
+async function tokensAct(db, uid, now) {
+  const t0 = now || Date.now();
   const [s, p] = await Promise.all([db.doc('staff/' + uid).get(), db.doc('push_tokens/' + uid).get()]);
+  const PA = require('./push-act')._core;
   const out = [];
-  for (const d of [s, p]) { const reg = new Set(strArr(d, 'pushTokens')); out.push(...strArr(d, 'pushAct').filter((t) => reg.has(t))); }
+  for (const d of [s, p]) {
+    const reg = new Set(strArr(d, 'pushTokens')), at = mapOf(d, 'pushActAt'), plain = mapOf(d, 'pushPlainAt');
+    out.push(...strArr(d, 'pushAct').filter((t) => {
+      if (!reg.has(t)) return false;
+      const h = PA.hashOf(t), a = at[h], pl = plain[h];
+      return typeof a === 'number' && t0 - a <= ACT_DAYS * 864e5 && !(typeof pl === 'number' && pl > a);
+    }));
+  }
   return [...new Set(out)];
 }
 async function dropTokens(db, uid, bad) {
@@ -91,6 +106,15 @@ async function dropTokens(db, uid, bad) {
     const s = await ref.get();
     // pushAct – רק אם השדה כבר קיים (מסמך ישן נשאר באותו מבנה)
     if (s.exists) await ref.update(Object.assign({ pushTokens: FieldValue.arrayRemove(...bad) }, Array.isArray(s.get('pushAct')) ? { pushAct: FieldValue.arrayRemove(...bad) } : {}));
+  }
+  // השיוך הגלובלי (push_dev, בשורש) – נמחק רק אם הוא עדיין של אותו משתמש (אם הטלפון כבר עבר למשתמש אחר – לא נוגעים)
+  const { getFirestore } = require('firebase-admin/firestore');
+  const PA = require('./push-act')._core;
+  for (const t of bad) {
+    try {
+      const ref = getFirestore().doc(PA.devPath(t));
+      await getFirestore().runTransaction(async (tx) => { const m = await tx.get(ref); if (m.exists && m.get('uid') === uid) tx.delete(ref); });
+    } catch (e) { logger.warn('push: push_dev cleanup failed', { name: e && e.name, code: e && e.code }); }
   }
 }
 // 16.11.2026: שליחה לפריט אחד – טלפונים ישנים כמו קודם (קריאה אחת, אותה הודעה); טלפונים עם כפתורים – קריאה נפרדת עם אסימון אחד לפריט למשתמש.
@@ -339,7 +363,7 @@ async function remindBiz(opts) {
     const due = s.docs.filter((d) => (d.get('pushAt') || 0) <= now);
     if (!due.length) continue;
     let toks, actT;
-    try { toks = await tokensOf(db, m.uid); actT = new Set(await tokensAct(db, m.uid)); } catch (e) {
+    try { toks = await tokensOf(db, m.uid); actT = new Set(await tokensAct(db, m.uid, now)); } catch (e) {
       logger.error('secretary: push failed', { bizId: scope.bizId, name: e && e.name, code: e && e.code });
       out.pushErr = (out.pushErr || 0) + 1;
       continue;
@@ -590,4 +614,4 @@ exports.secDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 04:1
   if (r.errors.length) throw new Error('secretary daily: ' + r.errors.length + ' errors');
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, doneNote, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, noteMsg, androidOf, fcmPayload, sendItem, tokensOf, tokensAct, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN, fcmPayload, sendItem, tokensAct – גם ל-tasks-nudge.js (tkNudge); snooze, doneNote – גם ל-push-act.js
+Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, doneNote, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, noteMsg, androidOf, fcmPayload, sendItem, tokensOf, tokensAct, ACT_DAYS, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN, fcmPayload, sendItem, tokensAct – גם ל-tasks-nudge.js (tkNudge); snooze, doneNote – גם ל-push-act.js

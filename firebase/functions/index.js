@@ -122,6 +122,12 @@ exports.scanDocument = onCall(
 // כפתורים בהתראה (16.11.2026): { token, act: 1 } – הטלפון תומך בכפתורים (הדגל מגיע מהקוד של אנדרואיד) → גם pushAct (באותו מסמך, תת־קבוצה של pushTokens).
 // בלי act – pushAct לא משתנה (גם orders/api.js רושם את אותו טלפון בלי act – אסור שזה יבטל את הכפתורים). act: 0 – הטלפון יוצא מ-pushAct.
 // pushTokens כמו קודם. מסמך בלי pushAct וטלפון בלי act – לא נוסף שדה (המבנה הישן נשמר). מעבר למשתמש אחר / קיצוץ / dropTokens – יוצא גם מ-pushAct.
+// תיקוני אבטחה (16.11.2026), תוספות בלבד – בלי מיגרציה:
+//   pushActAt  { <sha256 של הטלפון>: זמן } – הרישום האחרון עם act:1 (מסכים חדשים שולחים תמיד act: 1 או 0).
+//   pushPlainAt { <sha256>: זמן } – הרישום האחרון בלי act של טלפון שנמצא ב-pushAct (מסכים ישנים / חזרה ל-APK בלי כפתורים).
+//   הכלל (tokensAct ב-secretary-remind.js): כפתורים רק אם pushActAt קיים, מלפני פחות מ-30 יום, ואין אחריו pushPlainAt. אחרת – ההודעה הרגילה.
+//   שתי המפות נשמרות רק לטלפונים שעדיין ב-pushTokens, ונכתבות רק במסמך שיש בו pushAct (או ברישום עם act:1).
+//   push_dev/{sha256} { biz, uid, t } (בשורש) – למי הטלפון רשום עכשיו בכל העסקים; נכתב בכל רישום. pushAct דורש שהשיוך יתאים (push-act.js).
 // =====================================================================================
 const TOKEN_RE = /^[A-Za-z0-9_:.\-]+$/;
 exports.registerPushToken = onCall(T.scoped(async (request) => {
@@ -160,9 +166,22 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
     const prev = (hadAct ? s.get('pushAct') : []).filter((t) => typeof t === 'string');
     const keepTok = act === 1 || (act === null && prev.includes(token));
     const acts = prev.filter((t) => t !== token && kept.includes(t)).concat(keepTok && kept.includes(token) ? [token] : []);
-    const upd = Object.assign({ pushTokens: kept }, hadAct || act === 1 ? { pushAct: acts } : {});
-    if (ref === mgrRef) tx.set(ref, Object.assign(upd, { upd: Date.now() }));
+    const now = Date.now();
+    const PA = require('./push-act')._core;
+    const h = PA.hashOf(token);
+    const keptH = new Set(kept.map((t) => PA.hashOf(t)));
+    const mapIn = (f) => { const v = s.get(f); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; };
+    const prune = (m) => Object.fromEntries(Object.entries(m || {}).filter(([k, v]) => keptH.has(k) && typeof v === 'number'));
+    const actAt = prune(mapIn('pushActAt')), plainAt = prune(mapIn('pushPlainAt'));
+    if (act === 1) actAt[h] = now;
+    if (act === 0) { delete actAt[h]; delete plainAt[h]; }
+    if (act === null && prev.includes(token)) plainAt[h] = now; // מסכים ישנים – הכפתורים נעצרים עד רישום חדש עם act:1
+    const upd = Object.assign({ pushTokens: kept }, hadAct || act === 1 ? { pushAct: acts, pushActAt: actAt } : {},
+      (hadAct || act === 1) && (mapIn('pushPlainAt') || Object.keys(plainAt).length) ? { pushPlainAt: plainAt } : {});
+    if (ref === mgrRef) tx.set(ref, Object.assign(upd, { upd: now }));
     else tx.update(ref, upd);
+    // השיוך הגלובלי של הטלפון (שרת בלבד) – גם בלי act. טלפון שעבר לעסק אחר: השיוך עובר איתו, והעסק הקודם כבר לא יכול לפעול דרכו
+    tx.set(getFirestore().doc(PA.devPath(token)), { biz: who.bizId, uid: who.uid, t: now });
     return { ok: true, count: kept.length, removed: all.length - kept.length, moved };
   });
 }));

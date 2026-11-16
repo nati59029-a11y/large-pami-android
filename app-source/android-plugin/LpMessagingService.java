@@ -2,13 +2,16 @@ package com.largepami.finance;
 
 import androidx.annotation.NonNull;
 import com.capacitorjs.plugins.pushnotifications.MessagingService;
+import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin;
 import com.google.firebase.messaging.RemoteMessage;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Receives FCM messages instead of the push plugin's service (patch-android.sh removes that one from the manifest).
  * super = the plugin's code, so the screens keep getting "pushNotificationReceived" and new tokens exactly as before.
- * Data message with a one-time token ("at") -> we build the notification with buttons (LpNotif).
+ * Data message with a one-time token ("at") -> we build the notification with buttons (LpNotif). super is NOT called for it:
+ * the screens get a copy without "at" and "u" (the one-time token never reaches the WebView / JS).
  * {k:'x', tag} -> remove that notification (the item was handled elsewhere).
  * Ordinary notification messages (old devices / old server) are shown by Firebase as before - not touched here.
  */
@@ -17,7 +20,13 @@ public class LpMessagingService extends MessagingService {
 
     @Override
     public void onMessageReceived(@NonNull RemoteMessage msg) {
-        super.onMessageReceived(msg);
+        Map<String, String> d0 = null;
+        try {
+            d0 = msg.getData();
+        } catch (Exception e) {
+        }
+        if (d0 == null || d0.get("at") == null) super.onMessageReceived(msg);
+        else forwardWithoutToken(msg, d0);
         try {
             Map<String, String> d = msg.getData();
             if (d == null || d.isEmpty()) return;
@@ -32,6 +41,21 @@ public class LpMessagingService extends MessagingService {
             LpNotif.dropSnooze(this, tag);
             LpNotif.show(this, d, null);
         } catch (Exception e) {
+            // never crash the messaging service
+        }
+    }
+
+    /** Same event to the screens as super would send, but the data without the one-time token. Any problem -> no event (the notification is still shown). */
+    static void forwardWithoutToken(RemoteMessage msg, Map<String, String> d) {
+        try {
+            Map<String, String> safe = new HashMap<>(d);
+            safe.remove("at");
+            safe.remove("u");
+            String id = msg.getMessageId();
+            RemoteMessage.Builder b = new RemoteMessage.Builder("lp@local").setData(safe);
+            if (id != null) b.setMessageId(id);
+            PushNotificationsPlugin.sendRemoteMessage(b.build());
+        } catch (Throwable t) {
             // never crash the messaging service
         }
     }

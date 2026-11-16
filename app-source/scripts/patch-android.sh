@@ -155,6 +155,48 @@ assert s.count("LpMessagingService") == 1 and s.count('tools:node="remove"') >= 
 assert s.count("LpActReceiver") == 1 and s.count("LpActActivity") == 1 and s.count("LpBootReceiver") == 1
 print("notif buttons manifest: OK (LpMessagingService, plugin service removed)")
 PY3
+# Android backup (16.11.2026): the button tokens of local snoozes (lp_notif_snz) and the cached FCM token (lp_notif_tok) are not
+# backed up / moved to a new phone. Exclude-only rules = everything else is backed up exactly as before.
+# Skipped (with a warning) if the manifest already has its own backup rules.
+mkdir -p android/app/src/main/res/xml
+cat > android/app/src/main/res/xml/lp_backup_rules.xml <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="sharedpref" path="lp_notif_snz.xml" />
+    <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+</full-backup-content>
+XML
+cat > android/app/src/main/res/xml/lp_data_extraction_rules.xml <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="lp_notif_snz.xml" />
+        <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="lp_notif_snz.xml" />
+        <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+    </device-transfer>
+</data-extraction-rules>
+XML
+python3 - "$M" <<'PY4'
+import re, sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+m = re.search(r'<application\b[^>]*>', s, re.S)
+if not m:
+    sys.exit("::error::backup rules: <application> not found")
+tag = m.group(0)
+if "lp_backup_rules" in tag:
+    print("backup rules: already set")
+elif "fullBackupContent" in tag or "dataExtractionRules" in tag:
+    print("::warning::backup rules: the manifest has its own rules - lp_notif_* not excluded")
+else:
+    new = tag.replace("<application", '<application android:fullBackupContent="@xml/lp_backup_rules" android:dataExtractionRules="@xml/lp_data_extraction_rules"', 1)
+    s = s[:m.start()] + new + s[m.end():]
+    open(p, "w", encoding="utf-8").write(s)
+    print("backup rules: OK (lp_notif_snz, lp_notif_tok excluded)")
+PY4
 # The app module compiles against FirebaseMessagingService (the push plugin keeps firebase-messaging to itself).
 # Same version as the push plugin's default, so nothing new is downloaded. Plus the merged-manifest check.
 grep -q 'lp-notif-buttons' android/app/build.gradle || cat >> android/app/build.gradle <<'GRADLE'

@@ -4,12 +4,16 @@
 // אסימון: 32 בתים אקראיים (base64url, 43 תווים), אחד לכל פריט לכל משתמש. נשמר רק הגיבוב (sha256) – כמו arlink ב-ar-file.js:
 //   pact/{sha256}  (בשורש, שרת בלבד – החוקים סוגרים כל אוסף שלא הוגדר)  { biz, uid, kind: 'sec'|'tk', id, acts[], exp, at, used?, ua? }
 // חד־פעמי (used נכתב בטרנזקציה – שתי לחיצות במקביל: רק אחת עוברת), תוקף 7 ימים, קשור לעסק+משתמש+סוג+פריט+פעולות,
-// והטלפון ששלח (f) חייב להיות רשום להתראות של אותו משתמש (tokensOf). ההרשאה נבדקת מחדש בכל לחיצה, כמו קריאה מהאפליקציה:
+// והטלפון ששלח (f) חייב להיות רשום להתראות של אותו משתמש (tokensOf), וגם השיוך הגלובלי שלו (push_dev, ראו devPath) – לאותו עסק ואותו משתמש
+// (טלפון שעבר למשתמש בעסק אחר לא נמחק מ-pushTokens של העסק הקודם, אבל push_dev כבר מצביע על העסק החדש). ההרשאה נבדקת מחדש בכל לחיצה, כמו קריאה מהאפליקציה:
 //   sec (התראה של המזכירה) – אותו שער כמו secNotes (gate: מנהל העסק, עסק פעיל, תוספת, הסכמה בנוסח הנוכחי, מצב "מנהל ראשי").
 //   tk ("הזכר לעובד") – requireStaff עם התוספת tasks, עובד פעיל, עסק פעיל. "טופל" = בדיוק כמו "✓ בוצע" באפליקציה (ACT.tkDone) ובחוקים (workerUpd).
 //   "הזכר לי" במשימה – דחייה מקומית בטלפון בלבד, לא מגיעה לכאן.
 // כתובת קבועה בתוך ההתראה שכבר נשלחה – לכן אזור אחד בלבד, us-central1 (כמו arFile). האסימון לא נכתב ליומן.
 // ניקוי: secDaily מוחק מסמכי pact שפג תוקפם (cleanPact).
+// push_dev/{sha256(מזהה FCM)} (בשורש, שרת בלבד – החוקים סוגרים כל אוסף שלא הוגדר) { biz, uid, t } – למי הטלפון רשום עכשיו, בכל העסקים.
+//   נכתב בכל registerPushToken (עם act ובלי), נמחק ב-dropTokens כשהוא עדיין של אותו משתמש. מזהה ה-FCM עצמו לא נשמר שם – רק הגיבוב.
+// סדר הבדיקות: גודל הגוף (content-length, לפני כל עיבוד) ← פורמט (parseBody) ← רק אז קריאה מהמסד.
 
 const crypto = require('node:crypto');
 const { onRequest } = require('firebase-functions/v2/https');
@@ -37,6 +41,8 @@ const MSG = {
 };
 
 const hashOf = (tok) => crypto.createHash('sha256').update(String(tok), 'utf8').digest('hex');
+const DEV = 'push_dev';
+const devPath = (fcm) => `${DEV}/${hashOf(fcm)}`; // השיוך הגלובלי של טלפון (בשורש, לא בתוך העסק)
 
 // כתובת הפונקציה (נכנסת להתראה). באמולטור – הכתובת המקומית. כמו urlOf ב-ar-file.js
 function urlOf(o) {
@@ -59,6 +65,7 @@ async function mkAct(a) {
 
 // בדיקת הקלט (בלי מסד). מחזיר { t, a, f } או null
 function parseBody(req) {
+  if (tooBig(req)) return null;
   const ct = String((req.headers && req.headers['content-type']) || '');
   if (!/^application\/json\b/i.test(ct)) return null;
   if (req.rawBody && req.rawBody.length > BODY_MAX) return null;
@@ -67,6 +74,13 @@ function parseBody(req) {
   const t = typeof b.t === 'string' ? b.t : '', a = typeof b.a === 'string' ? b.a : '', f = typeof b.f === 'string' ? b.f.trim() : '';
   if (!TOKEN_RE.test(t) || !ACTS.includes(a) || !FCM_RE.test(f)) return null;
   return { t, a, f };
+}
+
+// גוף גדול מדי – לפי הכותרת content-length (נבדק לפני שקוראים את req.body) או לפי rawBody
+function tooBig(req) {
+  const cl = req.headers && req.headers['content-length'];
+  if (cl !== undefined && !(Number(cl) >= 0 && Number(cl) <= BODY_MAX)) return true;
+  return !!(req.rawBody && req.rawBody.length > BODY_MAX);
 }
 
 // "✓ בוצע" במשימה – אותם כללים כמו workerUpd בחוקים ו-ACT.tkDone באפליקציה. מחזיר { patch } או { r, msg, open? } (נדחה)
@@ -81,6 +95,9 @@ function tkPlan(t, uid, mgr, name, now) {
   if (ow !== uid) return { r: 'not-owner', msg: MSG.notMine };
   if (t.pr === '1' || Number(t.np) > 0) return { r: 'open-app', msg: MSG.open, open: true }; // נדרשת תמונה – רק באפליקציה
   if (!name) return { r: 'open-app', msg: MSG.open, open: true };
+  // החוקים (workerUpd): "לאישור" דורש open == '1', ו"בוצע" מחשב איחור לפי dl/due (tkLateOk). משימה בלי open='1' או בלי יעד מספרי
+  // (dl/due חסר או לא מספר) הייתה נכשלת בחוקים באפליקציה – לכן נשלחת לאפליקציה ולא נסגרת מכאן. משימה רגילה: open '1' ו-due מספר
+  if (t.open !== '1' || !Number.isFinite(dlOf(t))) return { r: 'open-app', msg: MSG.open, open: true };
   if (ckOpen(t)) return { r: 'open-app', msg: MSG.open, open: true }; // רשימת סימון שלא הושלמה – באפליקציה (שם מוצגת האזהרה ckWarn)
   if (!mgr && t.nc === '1') return { patch: { st: 'wait', sub: now, doneBy: name }, r: 'wait', msg: MSG.wait };
   const dl = dlOf(t);
@@ -108,6 +125,9 @@ async function act(b, o) {
   if (d.used) return R(false, 'used', MSG.used);
   if (!(typeof d.exp === 'number' && d.exp > now)) return R(false, 'expired', MSG.stale, { open: true });
   if (!d.acts.includes(b.a)) return d.kind === 'tk' && b.a === 'done' ? R(false, 'open-app', MSG.open, { open: true }) : R(false, 'bad-act', MSG.bad);
+  // הטלפון חייב להיות משויך עכשיו לאותו עסק ולאותו משתמש (push_dev) – לפני כל קריאה בתוך העסק
+  const dev = await getFirestore().doc(devPath(b.f)).get();
+  if (!dev.exists || dev.get('biz') !== d.biz || dev.get('uid') !== d.uid) return R(false, 'bad-device', MSG.deny, { open: true });
   // בדיקת הרשאה מחדש – בתוך העסק, בדיוק כמו קריאה מהאפליקציה של אותו משתמש (bizId מהאסימון, לא מהלקוח)
   return T.runInBiz({}, async () => {
     const req = { auth: { uid: d.uid }, data: { bizId: d.biz } };
@@ -158,7 +178,10 @@ async function secAct(db, ref, d, b, now, RM) {
     await RM.snooze(db, d.uid, d.id, at, now, 'push');
     return R(true, b.a, MSG[b.a]);
   } catch (e) {
-    await ref.update({ used: FieldValue.delete(), ua: FieldValue.delete() }).catch(() => null);
+    await ref.update({ used: FieldValue.delete(), ua: FieldValue.delete() }).catch((e2) => {
+      // האסימון נשאר "משומש" – לחיצה חוזרת תקבל "כבר בוצעה". ביומן בלי האסימון
+      logger.warn('pushAct: token release failed', { bizId: d.biz, kind: d.kind, name: e2 && e2.name, code: e2 && e2.code });
+    });
     const why = e && e.details && e.details.reason;
     if (why === 'gone' || why === 'not-found') return R(true, 'closed', MSG.closed);
     if (why === 'too-late' || why === 'bad-at') return R(false, 'too-late', MSG.late, { open: true });
@@ -170,6 +193,7 @@ async function handle(req, res, o) {
   res.set('Cache-Control', 'private, no-store');
   res.set('X-Content-Type-Options', 'nosniff');
   if (req.method !== 'POST') return res.status(405).set('Allow', 'POST').json(R(false, 'method', MSG.bad));
+  if (tooBig(req)) return res.status(413).json(R(false, 'too-big', MSG.bad));
   const b = parseBody(req);
   if (!b) return res.status(400).json(R(false, 'bad-input', MSG.bad));
   const out = await act(b, o);
@@ -196,4 +220,4 @@ exports.pushAct = onRequest({ region: LEGACY_REGION, maxInstances: 5, timeoutSec
     if (!res.headersSent) res.status(500).json(R(false, 'internal', MSG.err));
   }
 });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, act, mkAct, parseBody, tkPlan, ckOpen, dlOf, urlOf, hashOf, cleanPact, MSG, ACTS, COLL, DAYS, TOKEN_RE } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, act, mkAct, parseBody, tooBig, tkPlan, ckOpen, dlOf, urlOf, hashOf, devPath, cleanPact, MSG, ACTS, COLL, DEV, DAYS, TOKEN_RE } });

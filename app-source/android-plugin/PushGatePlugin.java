@@ -41,4 +41,15 @@ public class PushGatePlugin extends Plugin {
         r.put("act", true);
         call.resolve(r);
     }
+
+    /** Sign-out (secPushOff, 16.11.2026): removes our notifications with buttons, local snoozes and the cached FCM token. */
+    @PluginMethod
+    public void clearLocal(PluginCall call) {
+        try {
+            LpNotif.clearAll(getContext());
+        } catch (Exception e) {
+            // nothing to clear / no notification service - sign-out goes on
+        }
+        call.resolve();
+    }
 }
