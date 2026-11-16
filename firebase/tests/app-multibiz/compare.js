@@ -44,6 +44,11 @@ if (mode === 'legacy') {
   let tdA = 0, tdB = 0; for (let i = B2.length - 1; i >= 0; i--) if (tdQ(B2[i])) { tdB++; B2.splice(i, 1); }
   for (let i = A.length - 1; i >= 0; i--) if (tdQ(A[i])) { tdA++; A.splice(i, 1); }
   console.log(`תלוי בזמן – שאילתות על site_income_daily ו-fb: main ${tdA}, ענף ${tdB}`);
+  /* מכשיר אחד (16.11.2026): קריאות devClaim (בכניסה, בפתיחה, בחזרה לאפליקציה) – רק בענף, ומיקומן תלוי בזמן. חריג צר: רק POST לפונקציה devClaim, מוצאות משני הצדדים (הספירה מודפסת) */
+  const dcQ = (r) => r.method === 'POST' && /\/devClaim$/.test(new URL(r.url).pathname);
+  let dcA = 0, dcB = 0; for (let i = B2.length - 1; i >= 0; i--) if (dcQ(B2[i])) { dcB++; B2.splice(i, 1); }
+  for (let i = A.length - 1; i >= 0; i--) if (dcQ(A[i])) { dcA++; A.splice(i, 1); }
+  console.log(`מכשיר אחד – קריאות devClaim: main ${dcA}, ענף ${dcB}`);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');

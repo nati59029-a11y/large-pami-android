@@ -626,12 +626,15 @@ const PN={done:0,ready:0};
 async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
  const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;PN.act=g.act===true;
  /* 16.11.2026: act:1 רק כשה-APK עצמו (Java) בונה התראות עם כפתורים – לא לפי קוד המסכים, שעדכון חי יכול להביא ל-APK ישן. act נשלח תמיד (0/1): רישום בלי act = מסכים ישנים */
- await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW()))fnCall('registerPushToken',{token:t.value,act:PN.act?1:0}).catch(()=>{})});
+ await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW())){PN.tk=t.value;pnSend()}});
  await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}/* מרכז עבודה סבב 3: "הזכר לעובד" (tkNudge) – פותח את המשימות בלשונית "היום שלי" */if(d.k==='dr'&&(isA()||isW())&&typeof window.drOpen==='function'){try{window.drOpen(d.id)}catch(e){}return}if(d.k==='tk'&&(isA()||isW())&&typeof V.tk==='function'){try{TKT='my';if(window.TKW)TKW.d0=1;if(cur().v!=='tk')go('tk');else rerender()}catch(e){}return}if(d.k==='sec')pnTap(d.id)});
  let p=await P.checkPermissions();
  if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
   if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
  if(p.receive==='granted')await P.register()}catch(e){}}
+/* 16.11.2026 מכשיר אחד: s = מזהה הכניסה (SY.ds), רק אחרי שהשרת אישר אותה (SY.dsc) – כך השרת רושם רק את הטלפון הנוכחי. secPushRe: רישום חוזר אחרי אישור מאוחר (dvCur) */
+function pnSend(){if(!PN.tk||!(isA()||isW()))return;const d={token:PN.tk,act:PN.act?1:0};if(SY.dsc&&typeof SY.ds==='string')d.s=SY.ds;fnCall('registerPushToken',d).catch(()=>{})}
+window.secPushRe=()=>{try{pnSend()}catch(e){}};
 window.secPushBoot=()=>{try{pushReg()}catch(e){}};
 /* 15.11.2026 (סריקת חנות, שלב 12): בקשת הרשאה בכניסה לתכונה (החלטת המשתמש) – גם לעובד, שעד עכשיו לא התבקש, ולכן באנדרואיד 13+ לא קיבל
    התראות על סבב חדש, תזכורת, איחור ומשימת תיקון. פעם אחת בטלפון (אותו סימון כמו אצל מנהל). store3d קורא לזה דרך עטיפה ב-index.html. */
@@ -639,7 +642,7 @@ async function pushAsk(){if(PN.asking)return;PN.asking=1;try{if(!(isA()||isW()))
  if(!PN.done)await pushReg();if(!PN.ready)return;const P=window.Capacitor.Plugins.PushNotifications;let p=await P.checkPermissions();
  if(p.receive==='prompt'||p.receive==='prompt-with-rationale'){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions();if(p.receive==='granted')await P.register()}}catch(e){}finally{PN.asking=0}}
 window.secPushAsk=()=>{try{pushAsk()}catch(e){}};
-window.secPushOff=()=>{try{const P=PN.ready&&window.Capacitor&&window.Capacitor.Plugins.PushNotifications;if(P){P.removeAllListeners().catch(()=>{});P.unregister().catch(()=>{})}PN.done=0;PN.ready=0;PN.act=0;/* 16.11.2026: ההתראות עם הכפתורים והדחיות המקומיות (lp_notif_snz) נמחקות מהטלפון. APK ישן בלי clearLocal – נדחה בשקט */const G=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.PushGate;if(G&&typeof G.clearLocal==='function')G.clearLocal().catch(()=>{})}catch(e){}};
+window.secPushOff=()=>{try{const P=PN.ready&&window.Capacitor&&window.Capacitor.Plugins.PushNotifications;if(P){P.removeAllListeners().catch(()=>{});P.unregister().catch(()=>{})}PN.done=0;PN.ready=0;PN.act=0;PN.tk='';/* 16.11.2026: ההתראות עם הכפתורים והדחיות המקומיות (lp_notif_snz) נמחקות מהטלפון. APK ישן בלי clearLocal – נדחה בשקט */const G=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.PushGate;if(G&&typeof G.clearLocal==='function')G.clearLocal().catch(()=>{})}catch(e){}};
 try{if(isA()||isW())setTimeout(window.secPushBoot,0)}catch(e){}
 {const r0=V.sec;V.sec=()=>{const r=r0();try{if(ready())pushReg()}catch(e){}return r}}
 
