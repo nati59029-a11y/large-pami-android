@@ -31,7 +31,7 @@ public class PanoStitchPlugin extends Plugin {
     private PanoStitchCore core;
     private boolean running;
 
-    private static synchronized boolean load() {
+    private static synchronized boolean loadOpenCv() {
         if (loaded == null) {
             try {
                 System.loadLibrary("opencv_java4");
@@ -46,13 +46,13 @@ public class PanoStitchPlugin extends Plugin {
     @PluginMethod
     public void isAvailable(PluginCall call) {
         JSObject r = new JSObject();
-        r.put("ok", load());
+        r.put("ok", loadOpenCv());
         call.resolve(r);
     }
 
     @PluginMethod
     public void begin(PluginCall call) {
-        if (!load()) { call.reject("unavailable"); return; }
+        if (!loadOpenCv()) { call.reject("unavailable"); return; }
         Integer n = call.getInt("n");
         Double fov = call.getDouble("fovL"), yaw = call.getDouble("yawRef");
         Integer W = call.getInt("W");
