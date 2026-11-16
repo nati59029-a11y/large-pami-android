@@ -235,6 +235,27 @@ GRADLE
 grep -q 'lp-notif-buttons' android/app/build.gradle || { echo "::error::notif buttons: gradle block missing"; exit 1; }
 # --- NOTIF-BUTTONS END ---
 
+# --- PANO-STITCH (16.11.2026, 360 quality stage 21c): OpenCV for the native 360 stitching (PanoStitchPlugin) ---
+# Only arm64-v8a gets libopencv_java4.so (APK size); on x86 / x86_64 / armeabi-v7a PanoStitch.isAvailable() returns ok:false
+# and the screens keep stitching in JS. pickFirst: in case another library also brings libc++_shared.so.
+grep -q 'lp-pano-stitch' android/app/build.gradle || cat >> android/app/build.gradle <<'GRADLE'
+
+// lp-pano-stitch (patch-android.sh)
+dependencies {
+    implementation "org.opencv:opencv:4.12.0"
+}
+android {
+    packaging {
+        jniLibs {
+            excludes += ['**/x86/libopencv_java4.so', '**/x86_64/libopencv_java4.so', '**/armeabi-v7a/libopencv_java4.so']
+            pickFirsts += ['**/libc++_shared.so']
+        }
+    }
+}
+GRADLE
+grep -q 'lp-pano-stitch' android/app/build.gradle || { echo "::error::pano stitch: gradle block missing"; exit 1; }
+# --- PANO-STITCH END ---
+
 J=android/app/src/main/java/com/largepami/finance
 cp android-plugin/SaveFilePlugin.java $J/SaveFilePlugin.java
 cp android-plugin/AppUpdatePlugin.java $J/AppUpdatePlugin.java
@@ -245,6 +266,9 @@ cp android-plugin/ShareInPlugin.java $J/ShareInPlugin.java
 cp android-plugin/BiometricLockPlugin.java $J/BiometricLockPlugin.java
 cp android-plugin/PayBrowserPlugin.java $J/PayBrowserPlugin.java
 cp android-plugin/PushGatePlugin.java $J/PushGatePlugin.java
+# 360 stitching (stage 21c): OpenCV core (no Android code) + the Capacitor plugin
+cp android-plugin/PanoStitchCore.java $J/PanoStitchCore.java
+cp android-plugin/PanoStitchPlugin.java $J/PanoStitchPlugin.java
 # Notification buttons (16.11.2026): our FCM service + builder, button receiver, unlock screen (Android 8-11), restore after reboot
 for f in LpNotif LpMessagingService LpActReceiver LpActActivity LpBootReceiver; do cp android-plugin/$f.java $J/$f.java; done
 cat > $J/MainActivity.java <<'JAVA'
@@ -265,6 +289,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PayBrowserPlugin.class);
         // Push: tells the screens whether this APK was built with google-services.json (without it push stays off)
         registerPlugin(PushGatePlugin.class);
+        // 360 stitching with OpenCV (arm64-v8a only; elsewhere isAvailable() -> ok:false and the JS stitching is used)
+        registerPlugin(PanoStitchPlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them

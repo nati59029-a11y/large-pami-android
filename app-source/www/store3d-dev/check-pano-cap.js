@@ -183,6 +183,44 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('מצב סרטון: סיום ידני באמצע מחבר את מה שיש (חורים ממולאים)', typeof mres === 'object' && mres.meta.mode === 'video' && mres.meta.n >= 2 && mres.meta.n < 20 && mres.full.w === mres.w, typeof mres === 'object' ? mres.meta : mres);
   await pm.close();
 
+  /* ---------- 5. תמונה אמיתית מדומה (ImageCapture) + נעילות (שלב 21ב); מצב נקודות מפורש כי הבחירה נשמרת ---------- */
+  const phRun = async (name, o, early) => {
+    const p = await open();
+    await p.evaluate((a) => { try { localStorage.removeItem('lp-s3pc-fovL'); localStorage.removeItem('lp-s3pc-fovL-ph'); } catch (e) {} window.__res = undefined; window.__run(a).then((r) => (window.__res = r || 'null'), (e) => (window.__res = 'err:' + e.message)); }, { mode: 'pts', width: 2048, ...o });
+    if (early) { await p.waitForFunction((n) => { const c = document.querySelector('.s3pc-cnt'); return window.__res || (c && new RegExp('צולמו ([' + n + '-9]|[1-9]\\d) ').test(c.textContent)); }, early, { timeout: 120000 }); if (!(await p.evaluate(() => window.__res))) await p.click('.s3pc-bar [data-k=d]'); }
+    await p.waitForFunction(() => window.__res, null, { timeout: 240000 });
+    const r = await p.evaluate(() => window.__res), raw = typeof r === 'object' ? await p.evaluate(() => window.__raw()) : null;
+    const x = await p.evaluate(() => ({ applied: window.__applied || [], calls: window.__photoCalls || 0, ls: { v: localStorage.getItem('lp-s3pc-fovL'), ph: localStorage.getItem('lp-s3pc-fovL-ph') } }));
+    await p.close(); return { r, raw, ...x };
+  };
+  const srcOf = (q) => (q.raw && q.raw.meta ? q.raw.meta.frames.map((f) => f.src) : []);
+  const cnt = (a, v) => a.filter((x) => x === v).length;
+  const okRes = (q, early) => typeof q.r === 'object' && (early || q.r.err < 12) && q.r.full.w === q.r.w;
+  const pOk = await phRun('photo ok', { photo: 'ok', caps: 'full' });
+  { const s = srcOf(pOk), n = s.length, mf = pOk.raw && pOk.raw.meta;
+    check('תמונה אמיתית מדומה: כל הפריימים src=photo, התוצאה תקינה, מספר פריימים כמו בווידאו', okRes(pOk) && n >= 20 && cnt(s, 'photo') === n && pOk.r.meta.src === n + '/' + n, { n, src: pOk.r.meta && pOk.r.meta.src, err: pOk.r && pOk.r.err });
+    check('תמונה אמיתית: כיול FOV נשמר תחת המפתח של התמונות בלבד (-ph)', pOk.ls.ph && Math.abs(+pOk.ls.ph - 62) <= 2.5 && !pOk.ls.v, pOk.ls);
+    check('נעילות נתמכות: נשלחו exposure/whiteBalance/focus ידניים עם הערכים הנוכחיים, נרשמו ב-meta (lock) לפני הצילום הראשון', mf && mf.lock && mf.lock.exp && mf.lock.wb && mf.lock.focus && pOk.applied.length === 3 && pOk.applied[0].advanced[0].exposureMode === 'manual' && pOk.applied[0].advanced[0].exposureTime === 166 && pOk.applied[1].advanced[0].colorTemperature === 5200 && pOk.applied[2].advanced[0].focusDistance === 0.4 && pOk.r.meta.lock && pOk.r.meta.lock.exp, { lock: mf && mf.lock, applied: pOk.applied.length });
+    check('meta.json: src לכל פריים, photo.max=1600', mf && mf.frames.every((f) => f.src === 'photo' && Math.max(f.w, f.h) <= 1600) && mf.photo && mf.photo.max === 1600 && !mf.photo.off, mf && mf.photo); }
+  const pNone = await phRun('caps none', { photo: 'ok', caps: 'none' }, 5);
+  check('נעילות לא נתמכות: ממשיכים בלי נעילה (lock כולו false, אף applyConstraints), הצילום תקין', okRes(pNone, true) && pNone.applied.length === 0 && pNone.raw.meta.lock && !pNone.raw.meta.lock.exp && !pNone.raw.meta.lock.wb && !pNone.raw.meta.lock.focus, { lock: pNone.raw && pNone.raw.meta.lock, applied: pNone.applied.length });
+  const pFx = await phRun('lock exp fails', { photo: 'ok', caps: 'failexp' }, 5);
+  check('נעילת חשיפה נכשלת: ממשיכים (wb ו-focus כן ננעלו), הצילום תקין', okRes(pFx, true) && pFx.raw.meta.lock && !pFx.raw.meta.lock.exp && pFx.raw.meta.lock.wb && pFx.raw.meta.lock.focus, pFx.raw && pFx.raw.meta.lock);
+  const pFail = await phRun('photo fail', { photo: 'fail' }, 5);
+  { const s = srcOf(pFail);
+    check('takePhoto נכשל פעמיים: חזרה לפריימים מהווידאו (כולם src=video), 2 ניסיונות בלבד, התוצאה תקינה, הכיול במפתח הרגיל', okRes(pFail, true) && s.length >= 4 && cnt(s, 'video') === s.length && pFail.calls === 2 && pFail.raw.meta.photo.off && pFail.ls.v && !pFail.ls.ph, { calls: pFail.calls, src: pFail.r.meta && pFail.r.meta.src, ls: pFail.ls }); }
+  const pOnce = await phRun('photo failonce', { photo: 'failonce' }, 5);
+  { const s = srcOf(pOnce);
+    check('כשלון אחד בלבד: מנסים שוב ונשארים בתמונות (כולן photo)', okRes(pOnce, true) && cnt(s, 'photo') === s.length && s.length >= 4 && pOnce.raw.meta.photo.fails === 1, { n: s.length, fails: pOnce.raw && pOnce.raw.meta.photo }); }
+  for (const kind of ['cw', 'ccw']) {
+    const pr = await phRun('rot ' + kind, { photo: kind }, 5); const s = srcOf(pr);
+    check('תמונה מסובבת (' + kind + '): מוחזרת לכיוון התצוגה לפי דמיון לווידאו, כל הפריימים photo והתמונה המחוברת תואמת לסצנה', okRes(pr, true) && s.length >= 4 && cnt(s, 'photo') === s.length && pr.raw.meta.frames.every((f) => f.h > f.w), { n: s.length, err: pr.r && pr.r.err });
+  }
+  const pMv = await phRun('photo move', { photo: 'move' }, 5); { const s = srcOf(pMv);
+    check('הטלפון זז בזמן התמונה הראשונה: התמונה נזרקת ומצולמת מחדש (יותר קריאות takePhoto מפריימים), בלי חזרה לווידאו', okRes(pMv, true) && cnt(s, 'photo') === s.length && pMv.calls > s.length && pMv.raw.meta.photo.fails === 0 && !pMv.raw.meta.photo.off, { calls: pMv.calls, n: s.length }); }
+  const pVid = await phRun('no photo api', {}, 5);
+  check('בלי ImageCapture (mock.photo חסר): כמו קודם – כולם video, בלי נעילות (אין track)', okRes(pVid, true) && cnt(srcOf(pVid), 'video') === srcOf(pVid).length && !pVid.raw.meta.photo.avail, { photo: pVid.raw && pVid.raw.meta.photo });
+
   check('אין שגיאות JS', errors.length === 0, errors.slice(0, 5));
   await browser.close(); srv.close();
   const fail = R.checks.filter((c) => !c.ok).length;

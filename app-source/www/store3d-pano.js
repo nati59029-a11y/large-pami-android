@@ -97,9 +97,9 @@ function make(T,el,tour,opts){
       if(bm)return bm;return new Promise((res,rej)=>{const u=URL.createObjectURL(blob),i=new Image();i.onload=()=>{URL.revokeObjectURL(u);res(i)};i.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('decode'))};i.src=u})})}
   function mkTex(blob,maxW){return decodeTo(blob).then(im=>{const w0=im.width||im.naturalWidth,h0=im.height||im.naturalHeight;
       if(!w0||!h0||Math.abs(w0/h0-2)>0.05)throw new Error('ratio');
-      const w=Math.min(w0,maxW),h=Math.round(w/2),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);if(im.close)im.close();
-      const t=new T.CanvasTexture(c);t.colorSpace=T.SRGBColorSpace;t.generateMipmaps=false;t.minFilter=T.LinearFilter;t.magFilter=T.LinearFilter;t.wrapS=T.RepeatWrapping;
-      t.anisotropy=1;t.userData.cv=c;return t})}
+      const w=Math.min(w0,maxW),h=Math.round(w/2),c=document.createElement('canvas');c.width=w;c.height=h;const g2=c.getContext('2d');g2.imageSmoothingEnabled=true;g2.imageSmoothingQuality='high';g2.drawImage(im,0,0,w,h);if(im.close)im.close();
+      const t=new T.CanvasTexture(c);t.colorSpace=T.SRGBColorSpace;const p2=n=>n>0&&(n&(n-1))===0,mip=p2(w)&&p2(h);t.generateMipmaps=mip;t.minFilter=mip?T.LinearMipmapLinearFilter:T.LinearFilter;t.magFilter=T.LinearFilter;t.wrapS=T.RepeatWrapping;
+      let an=1;try{an=Math.max(1,Math.min(8,(renderer&&renderer.capabilities&&renderer.capabilities.getMaxAnisotropy&&renderer.capabilities.getMaxAnisotropy())||1))}catch(_){}t.anisotropy=an;t.userData.cv=c;return t})}
   function freeTex(p,k){const t=p.t[k];if(!t)return;p.t[k]=null;live[k]--;t.dispose();if(t.userData.cv){t.userData.cv.width=t.userData.cv.height=1;t.userData.cv=null}}
   function ensure(p,k){
     if(p.t[k])return Promise.resolve(p.t[k]);if(p.pend[k])return p.pend[k];const path=p[k];if(!path)return Promise.reject(new Error('nopath'));
