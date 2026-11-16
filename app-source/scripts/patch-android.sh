@@ -111,6 +111,129 @@ assert s.count("default_notification_icon") == 1
 print("notif icon meta-data: OK")
 PY2
 # --- NOTIF-ICON END ---
+# --- NOTIF-BUTTONS BEGIN ---
+# Notification buttons (16.11.2026): "טופל" / "הזכר לי מחר" / "הזכר לי בעוד שעה" straight from the notification.
+# Our service (LpMessagingService, extends the push plugin's service, so the screens keep their events) replaces the plugin's
+# service: exactly ONE app service may receive FCM messages, otherwise Firebase picks one of them at random.
+# Running twice adds nothing twice. A gradle check (end of this script) verifies the MERGED manifest too.
+grep -q 'android.permission.RECEIVE_BOOT_COMPLETED' $M || sed -i 's|<application|<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <application|' $M
+python3 - "$M" <<'PY3'
+import re, sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+m = re.search(r'<manifest\b[^>]*>', s)
+if not m:
+    sys.exit("::error::notif buttons: <manifest> not found")
+if 'xmlns:tools=' not in m.group(0):
+    s = s[:m.start()] + m.group(0).replace('<manifest', '<manifest xmlns:tools="http://schemas.android.com/tools"', 1) + s[m.end():]
+if "LpMessagingService" not in s:
+    P = "com.largepami.finance."
+    add = ('\n        <!-- Notification buttons (patch-android.sh) -->'
+           '\n        <service android:name="com.capacitorjs.plugins.pushnotifications.MessagingService" tools:node="remove" />'
+           '\n        <service android:name="' + P + 'LpMessagingService" android:exported="false">'
+           '\n            <intent-filter>'
+           '\n                <action android:name="com.google.firebase.MESSAGING_EVENT" />'
+           '\n            </intent-filter>'
+           '\n        </service>'
+           '\n        <receiver android:name="' + P + 'LpActReceiver" android:exported="false" />'
+           '\n        <receiver android:name="' + P + 'LpBootReceiver" android:exported="false">'
+           '\n            <intent-filter>'
+           '\n                <action android:name="android.intent.action.BOOT_COMPLETED" />'
+           '\n                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />'
+           '\n            </intent-filter>'
+           '\n        </receiver>'
+           '\n        <activity android:name="' + P + 'LpActActivity" android:exported="false" android:excludeFromRecents="true"'
+           ' android:noHistory="true" android:taskAffinity="" android:theme="@android:style/Theme.Translucent.NoTitleBar" />'
+           '\n    ')
+    i = s.rfind("</application>")
+    if i < 0:
+        sys.exit("::error::notif buttons: </application> not found")
+    s = s[:i] + add + s[i:]
+    open(p, "w", encoding="utf-8").write(s)
+assert s.count("com.google.firebase.MESSAGING_EVENT") == 1, "notif buttons: expected exactly 1 MESSAGING_EVENT service in the app manifest"
+assert s.count("LpMessagingService") == 1 and s.count('tools:node="remove"') >= 1
+assert s.count("LpActReceiver") == 1 and s.count("LpActActivity") == 1 and s.count("LpBootReceiver") == 1
+print("notif buttons manifest: OK (LpMessagingService, plugin service removed)")
+PY3
+# Android backup (16.11.2026): the button tokens of local snoozes (lp_notif_snz) and the cached FCM token (lp_notif_tok) are not
+# backed up / moved to a new phone. Exclude-only rules = everything else is backed up exactly as before.
+# Skipped (with a warning) if the manifest already has its own backup rules.
+mkdir -p android/app/src/main/res/xml
+cat > android/app/src/main/res/xml/lp_backup_rules.xml <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="sharedpref" path="lp_notif_snz.xml" />
+    <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+</full-backup-content>
+XML
+cat > android/app/src/main/res/xml/lp_data_extraction_rules.xml <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="lp_notif_snz.xml" />
+        <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="lp_notif_snz.xml" />
+        <exclude domain="sharedpref" path="lp_notif_tok.xml" />
+    </device-transfer>
+</data-extraction-rules>
+XML
+python3 - "$M" <<'PY4'
+import re, sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+m = re.search(r'<application\b[^>]*>', s, re.S)
+if not m:
+    sys.exit("::error::backup rules: <application> not found")
+tag = m.group(0)
+if "lp_backup_rules" in tag:
+    print("backup rules: already set")
+elif "fullBackupContent" in tag or "dataExtractionRules" in tag:
+    print("::warning::backup rules: the manifest has its own rules - lp_notif_* not excluded")
+else:
+    new = tag.replace("<application", '<application android:fullBackupContent="@xml/lp_backup_rules" android:dataExtractionRules="@xml/lp_data_extraction_rules"', 1)
+    s = s[:m.start()] + new + s[m.end():]
+    open(p, "w", encoding="utf-8").write(s)
+    print("backup rules: OK (lp_notif_snz, lp_notif_tok excluded)")
+PY4
+# The app module compiles against FirebaseMessagingService (the push plugin keeps firebase-messaging to itself).
+# Same version as the push plugin's default, so nothing new is downloaded. Plus the merged-manifest check.
+grep -q 'lp-notif-buttons' android/app/build.gradle || cat >> android/app/build.gradle <<'GRADLE'
+
+// lp-notif-buttons (patch-android.sh)
+dependencies {
+    implementation "com.google.firebase:firebase-messaging:${rootProject.ext.has('firebaseMessagingVersion') ? rootProject.ext.firebaseMessagingVersion : '23.3.1'}"
+}
+// Exactly one app service may receive FCM messages (ours). Firebase's own fallback service (priority -500) is ignored.
+tasks.configureEach { t ->
+    if (t.name ==~ /^process[A-Z]\w*MainManifest$/) {
+        t.doLast {
+            def files = t.outputs.files.asFileTree.matching { include '**/AndroidManifest.xml' }.files
+            if (files.isEmpty()) throw new GradleException("lp-notif: merged AndroidManifest.xml not found (" + t.name + ")")
+            files.each { f ->
+                def txt = f.getText('UTF-8')
+                def names = []
+                def m = (txt =~ /(?s)<service\b[^>]*?(?:\/>|>.*?<\/service>)/)
+                m.each { block ->
+                    def b = block instanceof List ? block[0] : block
+                    if (b.contains('com.google.firebase.MESSAGING_EVENT')) {
+                        def n = (b =~ /android:name="([^"]+)"/)
+                        names << (n.find() ? n.group(1) : '?')
+                    }
+                }
+                names.removeAll { it == 'com.google.firebase.messaging.FirebaseMessagingService' }
+                if (names != ['com.largepami.finance.LpMessagingService']) {
+                    throw new GradleException("lp-notif: expected exactly one MESSAGING_EVENT service (LpMessagingService), found " + names + " in " + f)
+                }
+                println "lp-notif: merged manifest OK (" + f.name + ": " + names + ")"
+            }
+        }
+    }
+}
+GRADLE
+grep -q 'lp-notif-buttons' android/app/build.gradle || { echo "::error::notif buttons: gradle block missing"; exit 1; }
+# --- NOTIF-BUTTONS END ---
 
 J=android/app/src/main/java/com/largepami/finance
 cp android-plugin/SaveFilePlugin.java $J/SaveFilePlugin.java
@@ -122,6 +245,8 @@ cp android-plugin/ShareInPlugin.java $J/ShareInPlugin.java
 cp android-plugin/BiometricLockPlugin.java $J/BiometricLockPlugin.java
 cp android-plugin/PayBrowserPlugin.java $J/PayBrowserPlugin.java
 cp android-plugin/PushGatePlugin.java $J/PushGatePlugin.java
+# Notification buttons (16.11.2026): our FCM service + builder, button receiver, unlock screen (Android 8-11), restore after reboot
+for f in LpNotif LpMessagingService LpActReceiver LpActActivity LpBootReceiver; do cp android-plugin/$f.java $J/$f.java; done
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
