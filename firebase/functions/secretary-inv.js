@@ -147,7 +147,9 @@ async function workIn(id, o) {
     return null;
   });
   if (!x) return { skip: 'taken' };
-  const fail = async (err) => { await ref.update({ st: 'new', k: 'unk', err, el: false, why: ['type'] }); await db.collection('sec_log').doc().set(ilog('', 'sec', 'invErr', { tgt: id, note: err })); return { err }; };
+  // 16.11: חשבונית שנדחתה בזמן הזיהוי (למשל חסימת השולח כספאם) – לא מחזירים אותה ל"ממתינה"
+  const live = (u) => db.runTransaction(async (tx) => { const s = await tx.get(ref); if (!s.exists || s.get('st') === 'rej') return false; tx.update(ref, u); return true; });
+  const fail = async (err) => { if (!(await live({ st: 'new', k: 'unk', err, el: false, why: ['type'] }))) return { skip: 'rej' }; await db.collection('sec_log').doc().set(ilog('', 'sec', 'invErr', { tgt: id, note: err })); return { err }; };
   const data = await readFile(db, id, x.np || 0);
   if (!data) return fail('file');
   // 109: הזיהוי עובר דרך המכסה הקיימת של העסק, קובץ = 1 (גם PDF של 4 עמודים)
@@ -202,7 +204,7 @@ async function workIn(id, o) {
   } else Object.assign(up, { sub: '', match: '', br: '', brOk: false, ns: '', full: false, dup: '' });
   const why = SI.eligOf(Object.assign({}, x, up), cfg, stop);
   Object.assign(up, { el: why.length === 0, why });
-  await ref.update(up);
+  if (!(await live(up))) return { skip: 'rej' };
   // תיקון 1 (ליקוי 7): שני קבצים של אותה חשבונית שזוהו באותו זמן – בדיקה שנייה אחרי הכתיבה; מי שמוצאת את השנייה – ממתינה
   if (!up.dup && (up.dk || up.dk2)) {
     for (const [fld, v] of [['dk', up.dk], ['dk2', up.dk2]]) {

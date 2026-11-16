@@ -572,6 +572,7 @@ describe('16.11: שולחים חסומים (ספאם) – מייל חדש לא �
     await connect(M1, 'mail', { email: BOX_A, clean: true });
     const old1 = GO.addMail(BOX_A, { from: 'Spammer <' + SP + '>', subject: 'a' }), old2 = GO.addMail(BOX_A, { from: SP, subject: 'b', labels: ['SPAM'] });
     GO.addMail(BOX_A, { from: OK, subject: 'c' });
+    const look = GO.addMail(BOX_A, { from: '"' + SP + ' via Shop" <real@shop.example>', subject: 'שם תצוגה דומה' }); // החיפוש מוצא – אבל הכתובת אחרת
     await CORE.mailHook(GO.note(BOX_A));
     await put(`b/${A}/sec_inv/fblk1`, { st: 'new', k: 'unk', t: 1, src: [{ ch: 'mail', from: SP, t: 1 }], np: 0 });
     await put(`b/${A}/sec_inv/fblk2`, { st: 'new', k: 'unk', t: 1, src: [{ ch: 'mail', from: SP, t: 1 }, { ch: 'mail', from: OK, t: 2 }], np: 0 });
@@ -580,6 +581,7 @@ describe('16.11: שולחים חסומים (ספאם) – מייל חדש לא �
     assert.equal(r.r.addr, SP); assert.equal(r.r.trashed, 2); assert.equal(r.r.rej, 1);
     assert.deepEqual(GO.state.trashed.map((t) => t.id).sort(), [old1, old2].sort());
     assert.equal(GO.state.deleted.length, 0, 'רק אשפה – לא מחיקה לצמיתות');
+    assert.ok(!GO.state.trashed.some((t) => t.id === look), 'מייל משולח אחר עם שם תצוגה דומה – לא לאשפה');
     assert.equal((await get(`b/${A}/sec_inv/fblk1`)).st, 'rej');
     assert.equal((await get(`b/${A}/sec_inv/fblk2`)).st, 'new', 'קובץ שהגיע גם משולח אחר – לא נדחה');
     assert.deepEqual(r.r.list.map((x) => x.a), [SP]);
