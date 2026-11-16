@@ -132,7 +132,7 @@ exports.scanDocument = onCall(
 // מכשיר אחד למשתמש (16.11.2026, one-device.js): קלט אופציונלי s = מזהה הכניסה (אותו s של devClaim).
 //   s של הטלפון הנוכחי (dev_cur/{uid}.phone.sh) – נרשם, phone.fh = sha256(הטלפון), וכל שאר הטלפונים של המשתמש יוצאים (pushTokens / pushAct / push_dev).
 //   בלי s (מסכים ישנים / orders/api.js) – כמו קודם, רק אם אין רישום טלפון או שזה הטלפון הנוכחי (fh). אחרת { ok: false, reason: 'not-current' } בלי שום כתיבה.
-//   s שלא תואם, כשיש רישום טלפון – אותו דבר. מנהל־העל ומתג ONE_DEVICE=off – כמו קודם. ONE_DEVICE=log – כמו קודם + יומן.
+//   s שלא תואם, כשיש רישום טלפון – אותו דבר. מנהל־העל ומתג ONE_DEVICE=off – כמו קודם. ONE_DEVICE=log – כמו קודם + יומן (גם עם s תואם לא מוחקים טלפונים אחרים).
 // =====================================================================================
 const TOKEN_RE = /^[A-Za-z0-9_:.\-]+$/;
 exports.registerPushToken = onCall(T.scoped(async (request) => {
@@ -156,6 +156,7 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
     // מכשיר אחד: mine = הטלפון הנוכחי עם s (רק הוא נשאר רשום). אין רישום טלפון – כמו קודם
     const ph = cd ? OD.kindOf(cd, 'phone') : null;
     const mine = !!ph && sIn !== null && ph.sh === OD.sha(sIn);
+    const solo = mine && odMode === 'on'; // רק במצב on שאר הטלפונים יוצאים. log – רק יומן, בלי למחוק טלפונים
     let ref = staffRef, s = st;
     if (!st.exists && adm.exists) { ref = mgrRef; s = await tx.get(mgrRef); }
     else if (!st.exists) throw new HttpsError('failed-precondition', 'אין לך עדיין רשומה ברשימת העובדים (staff). המנהל צריך להוסיף אותה.', { reason: 'no-staff-doc' });
@@ -168,7 +169,7 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
     const others = await Promise.all(['staff', 'push_tokens'].map((c) => tx.get(db.collection(c).where('pushTokens', 'array-contains', token).limit(20))));
     const old = (Array.isArray(s.get('pushTokens')) ? s.get('pushTokens') : []).filter((t) => typeof t === 'string' && t !== token);
     const all = old.concat([token]);
-    const kept = mine ? [token] : all.slice(Math.max(0, all.length - max));
+    const kept = solo ? [token] : all.slice(Math.max(0, all.length - max));
     let moved = 0;
     for (const q of others) {
       for (const d of q.docs) {
@@ -199,7 +200,7 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
     // השיוך הגלובלי של הטלפון (שרת בלבד) – גם בלי act. טלפון שעבר לעסק אחר: השיוך עובר איתו, והעסק הקודם כבר לא יכול לפעול דרכו
     tx.set(getFirestore().doc(PA.devPath(token)), { biz: who.bizId, uid: who.uid, t: now });
     if (mine) tx.update(curRef, { 'phone.fh': h });
-    return { ok: true, count: kept.length, removed: all.length - kept.length, moved, _drop: mine ? old : null };
+    return { ok: true, count: kept.length, removed: all.length - kept.length, moved, _drop: solo ? old : null };
   });
   // הטלפון הנוכחי: שאר הטלפונים יוצאים גם מהמסמך השני (staff / push_tokens) ומ-push_dev (רק אם עדיין של המשתמש)
   const drop = out._drop;

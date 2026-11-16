@@ -642,7 +642,7 @@ async function pushAsk(){if(PN.asking)return;PN.asking=1;try{if(!(isA()||isW()))
  if(!PN.done)await pushReg();if(!PN.ready)return;const P=window.Capacitor.Plugins.PushNotifications;let p=await P.checkPermissions();
  if(p.receive==='prompt'||p.receive==='prompt-with-rationale'){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions();if(p.receive==='granted')await P.register()}}catch(e){}finally{PN.asking=0}}
 window.secPushAsk=()=>{try{pushAsk()}catch(e){}};
-window.secPushOff=()=>{try{const P=PN.ready&&window.Capacitor&&window.Capacitor.Plugins.PushNotifications;if(P){P.removeAllListeners().catch(()=>{});P.unregister().catch(()=>{})}PN.done=0;PN.ready=0;PN.act=0;/* 16.11.2026: ההתראות עם הכפתורים והדחיות המקומיות (lp_notif_snz) נמחקות מהטלפון. APK ישן בלי clearLocal – נדחה בשקט */const G=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.PushGate;if(G&&typeof G.clearLocal==='function')G.clearLocal().catch(()=>{})}catch(e){}};
+window.secPushOff=()=>{try{const P=PN.ready&&window.Capacitor&&window.Capacitor.Plugins.PushNotifications;if(P){P.removeAllListeners().catch(()=>{});P.unregister().catch(()=>{})}PN.done=0;PN.ready=0;PN.act=0;PN.tk='';/* 16.11.2026: ההתראות עם הכפתורים והדחיות המקומיות (lp_notif_snz) נמחקות מהטלפון. APK ישן בלי clearLocal – נדחה בשקט */const G=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.PushGate;if(G&&typeof G.clearLocal==='function')G.clearLocal().catch(()=>{})}catch(e){}};
 try{if(isA()||isW())setTimeout(window.secPushBoot,0)}catch(e){}
 {const r0=V.sec;V.sec=()=>{const r=r0();try{if(ready())pushReg()}catch(e){}return r}}
 

@@ -164,6 +164,18 @@ describe('מכשיר אחד – מול האמולטור', { skip: !EMU && 'אמ�
     delete process.env.ONE_DEVICE;
     assert.equal((await check(E1, 'phone', S2)).result.cur, false, 'on – הרישום מ-log נשמר ופועל');
   });
+  it('ONE_DEVICE=log: registerPushToken עם s של הטלפון הנוכחי – לא מוחק את שאר הטלפונים (on – כן)', async () => {
+    process.env.ONE_DEVICE = 'log';
+    await claim(E1, 'phone', S1); // log – הרישום נשמר, ההתראות לא נמחקות
+    const r = await reg(E1, F(E1, 'new'), S1);
+    assert.equal(r.result.ok, true); assert.equal(r.result.removed, 0);
+    assert.deepEqual(await toks(E1), [F(E1), F(E1, 'old'), F(E1, 'new')], 'log – הטלפונים האחרים נשארים');
+    assert.ok(await get(PA.devPath(F(E1, 'old'))), 'log – push_dev של טלפון אחר נשאר');
+    delete process.env.ONE_DEVICE;
+    assert.equal((await reg(E1, F(E1, 'new'), S1)).result.ok, true);
+    assert.deepEqual(await toks(E1), [F(E1, 'new')], 'on – רק הטלפון הנוכחי');
+    assert.equal(await get(PA.devPath(F(E1, 'old'))), null);
+  });
 
   // ---------- registerPushToken ----------
   it('registerPushToken בלי רישום טלפון (APK/מסכים ישנים, משתמש שעוד לא נכנס מחדש) – בדיוק כמו קודם', async () => {
