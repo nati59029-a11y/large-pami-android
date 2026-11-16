@@ -9,7 +9,10 @@
    מוצגים לעריכה רק כשהכללים החדשים פורסמו: גלאי rv/tk2 (tkRv ב-index.html) – נשמר במכשיר לכל עסק ל-6 שעות (lp-tk-rv), ומתרענן ב"רענן".
    סבב 3: בקשות למנהל – סוג פנייה (k), תגיות שלב (ph), "בטיפול", "הפוך למשימה" (tk) – רק כשהגלאי מצא כללים חדשים; "הזכר לעובד" קורא גם ל-tkNudge
    בשרת (התראת טלפון; כל כשל נבלע); יצירת משימה מתוך "היום שלי" נשארת ב"היום שלי"; items() נשמר לאורך ציור אחד.
-   ביציאה מהחשבון (syOut ← W.out): מבטלים את ההתראות המקומיות ומוחקים מהמכשיר את התזכורות, הדחיות, התבניות והסינון. */
+   ביציאה מהחשבון (syOut ← W.out): מבטלים את ההתראות המקומיות ומוחקים מהמכשיר את התזכורות, הדחיות, התבניות והסינון.
+   16.11.2026: ב-APK שיודע (PushGate.state().rem) התזכורות נקבעות ב-Java (LpNotif.wcSync) – הכפתורים "טופל" / "מחר" (24 שעות) / "בעוד שעה"
+   עובדים בלי לפתוח את האפליקציה (בטלפון נעול – אחרי ביטול נעילה). הלחיצות נשמרות בטלפון ומיושמות כאן בפתיחה הבאה (wcDrain):
+   דחייה ← lp-snz, "טופל" לתזכורת ← remDone, "טופל" למשימה פרטית ← עדכון לשרת. APK ישן – כמו קודם (@capacitor/local-notifications). */
 (function(){'use strict';
 if(typeof V==='undefined'||typeof V.tk!=='function'||typeof tkIL==='undefined'||typeof tkDl!=='function')return;
 const W={},H=36e5,MIN=6e4,ND_GAP=30*MIN,MID=7000001;
@@ -187,16 +190,34 @@ function lnAct(){const a=lnQ;if(!a)return;if(!on()){return}lnQ=null;const n=a.no
  TKT='my';W.d0=1;if(cur().v!=='tk')go('tk');else rerender()}
 const nt=(id,title,body,at,ex)=>({id,title,body:String(body||'').slice(0,180),schedule:{at:new Date(at),allowWhileIdle:true},smallIcon:'ic_stat_notify',actionTypeId:ex.k==='m'?undefined:'lpwc',extra:Object.assign({lp:'wc',b:LK(''),u:SY.uid},ex)});
 const hid=s=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))|0;return 5000000+Math.abs(h)%1000000};
+/* ---- תזכורות עם כפתורים שעובדים בלי לפתוח את האפליקציה (Java, PushGate) ---- */
+let NR=null;const natRem=()=>NR||(NR=(async()=>{try{const C=window.Capacitor,G=C&&C.Plugins&&C.Plugins.PushGate;if(G&&typeof G.state==='function'){const s=await G.state();if(s&&s.rem===true)return G}}catch(e){}return null})());
+const wcPf=()=>'wc|'+LK('')+'|'+SY.uid+'|';
+/* לחיצות שנעשו בהתראה כשהאפליקציה סגורה. "טופל" למשימה פרטית שלא נשמר בשרת (אין רשת / המשימות לא נטענו) נשאר בתור לפעם הבאה */
+let qB=0;
+async function wcDrain(G){if(qB||!on()||!SY.uid)return;qB=1;try{const pf=wcPf();let q=[];try{q=((await G.remPeek({p:pf}))||{}).q||[]}catch(e){}
+ if(!Array.isArray(q)||!q.length)return;q.sort((x,y)=>(x.t||0)-(y.t||0));const ack=[],now=Date.now(),ptL=typeof PT!=='undefined'&&Array.isArray(PT.L)?PT.L:null;let nd=0;
+ for(const e of q){const s=String(e&&e.tag||'').slice(pf.length).split('|'),k=s[0],id=s[1]||'';if(!e||!e.q)continue;
+  if(!id||(k!=='r'&&k!=='p')||!['done','h1','d1'].includes(e.a)){ack.push(e.q);continue}
+  if(e.a!=='done'){if(e.w>now)snzSet(k+':'+id,e.w);ack.push(e.q);continue}
+  if(k==='r'){try{if(remL().some(r=>r.id===id)){remDone(id);nd++}}catch(x){}ack.push(e.q);continue}
+  if(!ptL)continue;const p=ptL.find(z=>z&&z.id===id);if(!p||p.st==='done'||p.owner!==SY.uid){ack.push(e.q);continue}
+  try{const t=e.t||now;await docPatch('ptk',id,{st:'done',sub:t,late:t>tkDl(p)?'1':''});p.st='done';p.sub=t;IC=null;snzSet('p:'+id,0);ack.push(e.q);nd++}catch(x){}}
+ if(ack.length)try{await G.remAck({q:ack})}catch(e){}
+ if(ack.length){if(nd)toast('✓ עודכן מההתראות: '+nd+' בוצעו');tkRe()}}finally{qB=0}}
 let sT=0;W.sched=()=>{clearTimeout(sT);sT=setTimeout(()=>{schedNow().catch(()=>{})},1200)};
-async function schedNow(){if(!LN()||!SY.uid)return;const P=await lnSetup();if(!P||!(await lnPerm(false)))return;const b=LK(''),u=SY.uid;
+async function schedNow(){if(!LN()||!SY.uid)return;const G=await natRem();if(G)await wcDrain(G);const P=await lnSetup();if(!P||!(await lnPerm(false)))return;const b=LK(''),u=SY.uid;
  let pend=[];try{pend=((await P.getPending())||{}).notifications||[]}catch(e){}
  /* גם התראות של משתמש אחר שהתחבר קודם במכשיר הזה (אם הביטול ביציאה לא הספיק) */
  const old=pend.filter(n=>n&&n.extra&&n.extra.lp==='wc'&&((n.extra.b===b&&n.extra.u===u)||n.extra.u!==u)).map(n=>({id:n.id}));if(old.length)try{await P.cancel({notifications:old})}catch(e){}
- if(!on())return;const now=Date.now(),L=[],sz=snzL();
+ if(!on()){if(G)try{await G.remSync({p:wcPf(),n:[],keep:[]})}catch(e){}return}const now=Date.now(),L=[],sz=snzL();
  remL().forEach(r=>{let ts=occ(r,now,4);const s=sz['r:'+r.id];if(s>now)ts=[s].concat(ts.filter(x=>x>s&&x!==r.at)).slice(0,4);/* הדחייה מחליפה את המופע הנוכחי */ts.forEach((at,i)=>L.push(nt(r.nid*8+i,'תזכורת',r.txt,at,{k:'r',id:r.id})))});
  (PT.L||[]).forEach(p=>{const s=sz['p:'+p.id];if(p.st!=='done'&&p.owner===u&&s>now)L.push(nt(hid(p.id),'משימה שנדחתה חזרה',p.txt,s,{k:'p',id:p.id}))});
  const m=mnCfg();if(m.on){const at=nextOcc({rp:'d',hm:m.hm},now);if(at)L.push(nt(MID,'בוקר טוב',mornTxt(),at,{k:'m'}))}
- const L2=L.slice(0,64);wr(KU('lp-ln-ids'),L2.map(n=>n.id));if(L2.length)try{await P.schedule({notifications:L2})}catch(e){}}
+ const L2=L.slice(0,64);
+ if(G){wr(KU('lp-ln-ids'),[]);const keep=remL().map(r=>'r|'+r.id).concat((PT.L||[]).filter(p=>p&&p.st!=='done'&&p.owner===u).map(p=>'p|'+p.id));if(m.on)keep.push('m|m');
+  try{await G.remSync({p:wcPf(),keep,n:L2.map(n=>({t:n.extra.k+'|'+(n.extra.id||'m')+'|'+n.id,title:n.title,body:n.body,at:+n.schedule.at,acts:n.extra.k==='m'?'':'done,d1,h1'}))})}catch(e){}return}
+ wr(KU('lp-ln-ids'),L2.map(n=>n.id));if(L2.length)try{await P.schedule({notifications:L2})}catch(e){}}
 /* ---- התראה בתוך האפליקציה: תזכורת מהמנהל, ותזכורות שהגיע זמנן כשאין התראות בטלפון ---- */
 const SHN=new Set();
 function wcAlert(){if(!on()||fbAdmin())return;const d=$('#dlg');if(d&&d.open)return;const now=Date.now();
@@ -347,6 +368,7 @@ function rqcDone(id){const c=W.rqc;if(!id||!c)return;W.rqc=null;const x=rqGet(c.
 W.out=u=>{const k=x=>LK(x+'-'+(u||''));clearTimeout(sT);
  try{const P=LN();if(P){const ids=rd(k('lp-ln-ids'),[]);if(Array.isArray(ids)&&ids.length)Promise.resolve(P.cancel({notifications:ids.map(id=>({id}))})).catch(()=>{});
   Promise.resolve(P.getPending()).then(r=>{const a=((r&&r.notifications)||[]).filter(n=>n&&n.extra&&n.extra.lp==='wc').map(n=>({id:n.id}));if(a.length)return P.cancel({notifications:a})}).catch(()=>{})}}catch(e){}
+ natRem().then(G=>{if(G)return G.remSync({p:'wc|',n:[],keep:[],q:true})}).catch(()=>{});
  ['lp-rem','lp-snz','lp-tk-dt','lp-tk-ndv','lp-tk-mn','lp-ln-ids'].forEach(x=>{try{localStorage.removeItem(k(x))}catch(e){}});
  ['lp-tk-flt','lp-tk-tpl','lp-tk-rv'].forEach(x=>{try{localStorage.removeItem(LK(x))}catch(e){}});
  FX=FX0();W.fo=0;W.rqc=null};
@@ -362,5 +384,7 @@ W.out=u=>{const k=x=>LK(x+'-'+(u||''));clearTimeout(sT);
 ['tkGoIt','tkGoAl','tkGoWait'].forEach(k=>{const o=ACT[k];if(o)ACT[k]=function(){W.d0=1;return o.apply(this,arguments)}});
 setTimeout(()=>{try{if(on()){W.sched();wcAlert()}}catch(e){}},6000);
 setTimeout(()=>{try{if(LN())lnSetup()}catch(e){}},500);
+/* חזרה לאפליקציה: מיישמים לחיצות שנעשו בהתראות בזמן שהייתה ברקע */
+document.addEventListener('resume',()=>{try{if(on())W.sched()}catch(e){}});
 window.TKW=W;
 })();

@@ -5,6 +5,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import org.json.JSONArray;
 
 /**
  * Push notifications gate (12.11.2026).
@@ -39,6 +40,7 @@ public class PushGatePlugin extends Plugin {
         JSObject r = new JSObject();
         r.put("ready", ready);
         r.put("act", true);
+        r.put("rem", true); // 16.11.2026: remSync / remPeek / remAck (personal reminders with working buttons)
         call.resolve(r);
     }
 
@@ -49,6 +51,46 @@ public class PushGatePlugin extends Plugin {
             LpNotif.clearAll(getContext());
         } catch (Exception e) {
             // nothing to clear / no notification service - sign-out goes on
+        }
+        call.resolve();
+    }
+
+    /** Personal reminders (tasks-wc.js): {p: "wc|<business>|<uid>|", n: [{t, title, body, at, acts}], keep: ["k|id"], q: true = also drop waiting presses}. */
+    @PluginMethod
+    public void remSync(PluginCall call) {
+        try {
+            LpNotif.wcSync(getContext(), call.getString("p"), call.getArray("n"), call.getArray("keep"));
+            if (Boolean.TRUE.equals(call.getBoolean("q", false))) LpNotif.wcAck(getContext(), null, true);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("remSync");
+        }
+    }
+
+    /** Button presses waiting for this user: {q: [{q, tag, a, t, w}]}. */
+    @PluginMethod
+    public void remPeek(PluginCall call) {
+        JSObject r = new JSObject();
+        JSONArray q;
+        try {
+            q = LpNotif.wcPeek(getContext(), call.getString("p"));
+        } catch (Exception e) {
+            q = new JSONArray();
+        }
+        try {
+            r.put("q", q);
+        } catch (Exception e) {
+            // cannot happen - an empty answer
+        }
+        call.resolve(r);
+    }
+
+    /** Presses the screens applied: {q: ["id", ...]}. */
+    @PluginMethod
+    public void remAck(PluginCall call) {
+        try {
+            LpNotif.wcAck(getContext(), call.getArray("q"), false);
+        } catch (Exception e) {
         }
         call.resolve();
     }
