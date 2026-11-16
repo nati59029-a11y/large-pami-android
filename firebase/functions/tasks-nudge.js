@@ -62,7 +62,7 @@ async function nudge(who, input, opts) {
       const toks = await RM.tokensOf(db, u);
       if (!toks.length) continue;
       // כפתורים (16.11.2026): "טופל" רק כשאפשר לסיים בלי האפליקציה – המטפל עצמו, בלי תמונה נדרשת; אחרת "פתח" (open). "הזכר לי" – מקומי בטלפון
-      const can = t.ow === u && t.pr !== '1' && !(Number(t.np) > 0);
+      const can = t.ow === u && t.pr !== '1' && !(Number(t.np) > 0) && !require('./push-act')._core.ckOpen(t);
       const res = await RM.sendItem(o.send || fcmSendTk, toks, new Set(await RM.tokensAct(db, u)), Object.assign({ id: taskId }, msgOf(t)), { uid: u, bizId: who.bizId },
         { bizId: who.bizId, uid: u, kind: 'tk', id: taskId, acts: can ? ['done'] : [], show: (can ? 'done' : 'open') + ',h1,d1', now });
       if (res.some((x) => x.ok)) sent++;

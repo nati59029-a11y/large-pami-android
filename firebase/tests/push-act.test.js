@@ -33,6 +33,8 @@ describe('pushAct – פונקציות טהורות', () => {
     assert.deepEqual(PA.tkPlan(t(), 'u1', false, 'dana', now).patch, { st: 'done', open: '', sub: now, ok: now, doneBy: 'dana', late: '' });
     assert.equal(PA.tkPlan(t({ due: now - 1 }), 'u1', false, 'dana', now).patch.late, '1', 'עבר היעד (due) – באיחור');
     assert.equal(PA.tkPlan(t({ due: now - 1, dl: now + 5 }), 'u1', false, 'd', now).patch.late, '', 'dl גובר על due');
+    assert.equal(PA.tkPlan(t({ ck: ['a', 'b'], ckd: [0] }), 'u1', false, 'd', now).r, 'open-app', 'רשימת סימון שלא הושלמה – באפליקציה');
+    assert.equal(PA.tkPlan(t({ ck: ['a', 'b'], ckd: [1, 0] }), 'u1', false, 'd', now).r, 'done', 'רשימה שהושלמה – נסגר');
     assert.equal(PA.tkPlan(t({ dl: 0, due: now - 1 }), 'u1', false, 'd', now).patch.late, '', 'dl=0 – בלי יעד');
     assert.equal(PA.tkPlan(t({ dl: now - 5 }), 'u1', false, 'd', now).patch.late, '1');
     assert.deepEqual(PA.tkPlan(t({ nc: '1' }), 'u1', false, 'dana', now).patch, { st: 'wait', sub: now, doneBy: 'dana' }, 'הערת עובד – לאישור המנהל');

@@ -72,6 +72,8 @@ function parseBody(req) {
 // "✓ בוצע" במשימה – אותם כללים כמו workerUpd בחוקים ו-ACT.tkDone באפליקציה. מחזיר { patch } או { r, msg, open? } (נדחה)
 // t = נתוני המשימה, uid = המשתמש, mgr = מנהל (באפליקציה מנהל סוגר גם משימה עם הערת עובד), name = doneBy, now
 const dlOf = (t) => (Number.isFinite(t.dl) ? t.dl : t.due); // כמו tkDlOf בחוקים: dl אם נשמר, אחרת due. 0/חסר = בלי יעד
+// רשימת סימון עם פריטים שלא סומנו (כמו ckN ב-tasks-wc.js)
+function ckOpen(t) { const n = Array.isArray(t.ck) ? t.ck.length : 0; if (!n) return false; const s = new Set((Array.isArray(t.ckd) ? t.ckd : []).filter((i) => Number.isInteger(i) && i >= 0 && i < n)); return s.size < n; }
 function tkPlan(t, uid, mgr, name, now) {
   if (!t || t.st !== 'open') return { r: 'closed', msg: MSG.closed };
   const ow = typeof t.ow === 'string' ? t.ow : '';
@@ -79,6 +81,7 @@ function tkPlan(t, uid, mgr, name, now) {
   if (ow !== uid) return { r: 'not-owner', msg: MSG.notMine };
   if (t.pr === '1' || Number(t.np) > 0) return { r: 'open-app', msg: MSG.open, open: true }; // נדרשת תמונה – רק באפליקציה
   if (!name) return { r: 'open-app', msg: MSG.open, open: true };
+  if (ckOpen(t)) return { r: 'open-app', msg: MSG.open, open: true }; // רשימת סימון שלא הושלמה – באפליקציה (שם מוצגת האזהרה ckWarn)
   if (!mgr && t.nc === '1') return { patch: { st: 'wait', sub: now, doneBy: name }, r: 'wait', msg: MSG.wait };
   const dl = dlOf(t);
   return { patch: { st: 'done', open: '', sub: now, ok: now, doneBy: name, late: dl > 0 && now > dl ? '1' : '' }, r: 'done', msg: MSG.done };
@@ -193,4 +196,4 @@ exports.pushAct = onRequest({ region: LEGACY_REGION, maxInstances: 5, timeoutSec
     if (!res.headersSent) res.status(500).json(R(false, 'internal', MSG.err));
   }
 });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, act, mkAct, parseBody, tkPlan, dlOf, urlOf, hashOf, cleanPact, MSG, ACTS, COLL, DAYS, TOKEN_RE } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { handle, act, mkAct, parseBody, tkPlan, ckOpen, dlOf, urlOf, hashOf, cleanPact, MSG, ACTS, COLL, DAYS, TOKEN_RE } });
