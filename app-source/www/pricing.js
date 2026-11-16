@@ -32,17 +32,25 @@ const ID_OK=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(v);
 const DATE_OK=v=>typeof v==='string'&&/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v);
 function on(){try{return(isA()||isW())&&(bzF('shelf')||bzF('orders'))&&typeof PricingLines!=='undefined'}catch(e){return false}}
 PI.on=on;
+/* אבחון (16.11.2026): יומן קצר במכשיר (lp-pilog, 12 אחרונים) – למה חשבונית לא נכנסה לתמחור ומה נכשל בשליחה.
+   מוצג ב"חשבוניות לתמחור" (PI.diagH), ובבית העובד כשיש ממתינות או תקלה ב-48 השעות האחרונות. רק קריאה/כתיבה מקומית, בלי שינוי בהתנהגות */
+const GK=LK('lp-pilog');
+const gGet=()=>{const v=rd(GK);return Array.isArray(v)?v:[]};
+function note(ev,msg){try{const L=gGet();L.push({at:Date.now(),ev,msg:String(msg||'').slice(0,200)});wr(GK,L.slice(-12))}catch(e){}}
+PI.note=note;PI.gl=gGet;
+function whyOff(){try{if(!(isA()||isW()))return'לא מחובר כמנהל או כעובד';if(!(bzF('shelf')||bzF('orders')))return'התוספת "מדף" / "הזמנות" לא פעילה בטלפון הזה';if(typeof PricingLines==='undefined')return'רכיב קריאת השורות לא נטען'}catch(e){return'שגיאה בבדיקת התנאים'}return''}
 const fnc=(n,d)=>{if(SY&&SY.sa&&SY.bizId)d=Object.assign({bizId:SY.bizId},d);return fnCall(n,d)};
 
 /* ---------- הכנסה לתור ---------- */
-function add(j){try{if(!on()||!j||!j.rq)return;const L=qGet();if(L.some(x=>x.rq===j.rq&&x.t===j.t)||(j.t==='c'&&done().includes(j.rq)))return;
+function add(j){try{if(!j||!j.rq)return;if(!on()){note('skip','לא נכנסה לתמחור: '+(whyOff()||'התמחור לא פעיל'));return}const L=qGet();if(L.some(x=>x.rq===j.rq&&x.t===j.t)||(j.t==='c'&&done().includes(j.rq)))return;
  j.n=0;j.nx=Date.now()+PI.wait;j.at=Date.now();L.push(j);qSet(L);
  if(j.t==='c'&&j.fid){const m=rd(IK)||{};m['i'+j.rq]=j.fid;const ks=Object.keys(m);if(ks.length>300)delete m[ks[0]];wr(IK,m)}
- later(PI.wait)}catch(e){}}
+ note('add',j.t==='c'?'נכנסה לתור: '+[j.sup,j.inv].filter(Boolean).join(' ')||'חשבונית':'ביטול חשבונית בתור');
+ later(PI.wait)}catch(e){note('err','שגיאה בהכנסה לתור: '+(e&&e.message||e))}}
 PI.img=id=>{const m=rd(IK)||{};return m[id]||''};
 /* הוצאה של המנהל שנשמרה עם קובץ סרוק */
-function fromTx(t,fid){try{if(!t||!fid||t.noStock)return;const c=cat(t.cat);if(!c||c.beh!=='sup')return;
- if((t.kind||'inv')!=='inv'||!(num(t.amt)>0))return;
+function fromTx(t,fid){try{if(!t||!fid)return;if(t.noStock)return note('skip','לא נכנסה לתמחור: סומן "לא למלאי"');const c=cat(t.cat);if(!c||c.beh!=='sup')return note('cat','לא נכנסה לתמחור: הקטגוריה "'+(c&&c.name||'?')+'" אינה מסוג ספק');
+ if((t.kind||'inv')!=='inv'||!(num(t.amt)>0))return note('skip','לא נכנסה לתמחור: זיכוי או סכום אפס');
  const s=t.sub?subById(t.sub):null;
  add({t:'c',rq:rqOf(fid),fid,sup:s&&s.name||'',supId:ID_OK(t.sub)?t.sub:'',inv:s_(t.inv||'')||(t.dn?String(t.note||'').replace(/^ת\. משלוח\s*/,''):''),date:DATE_OK(t.date)?t.date:''})}catch(e){}}
 const fromNew=(n0,fid)=>{try{if(!fid)return;for(const t of S.tx.slice(n0))if(t&&t.file===fid)fromTx(t,fid)}catch(e){}};
@@ -68,7 +76,9 @@ if(typeof awJoin==='function'){const o=awJoin;awJoin=function(e,t,fid,fx){const 
 /* עובד: ההוצאה נשלחה למנהל (inbox) → לתמחור כבר עכשיו */
 if(typeof pushItem==='function'){const o=pushItem;pushItem=async function(it){const r=await o.apply(this,arguments);
  try{const d=it&&it.data;if(isW()&&d&&!d.repl&&!d.reg&&d.kind!=='check'&&it.fileId&&num(d.amt)>0){const c=((cfgLocal()||{}).cats||[]).find(z=>z.id===d.cat);
-  if(c&&c.beh==='sup')add({t:'c',rq:rqOf(it.fileId),fid:it.fileId,sup:String(d.subName||''),supId:ID_OK(d.sub)?d.sub:'',inv:s_(d.inv||''),date:DATE_OK(d.date)?d.date:''})}}catch(e){}
+  if(c&&c.beh==='sup')add({t:'c',rq:rqOf(it.fileId),fid:it.fileId,sup:String(d.subName||''),supId:ID_OK(d.sub)?d.sub:'',inv:s_(d.inv||''),date:DATE_OK(d.date)?d.date:''});
+  else note(c?'cat':'skip','לא נכנסה לתמחור: הקטגוריה "'+(c&&c.name||d.catName||'?')+'" אינה מסוג ספק'+(c?'':' (הקטגוריות בטלפון לא מעודכנות)'))}
+  else if(isW()&&d&&!d.repl&&!d.reg&&d.kind!=='check'&&num(d.amt)>0&&!it.fileId)note('skip','לא נכנסה לתמחור: ההוצאה נשלחה בלי צילום')}catch(e){}
  return r}}
 /* מנהל דחה הוצאה של עובד → החשבונית יוצאת מהתמחור (piVoid). אותו מזהה כמו אצל העובד: הקובץ שלו הוא 'o'+מזהה ההוצאה */
 if(typeof inbDrop==='function'){const o=inbDrop;inbDrop=function(id){let it=null;try{it=(S.inbox||[]).find(x=>x.id===id)||null}catch(e){}
@@ -119,8 +129,10 @@ function kind(j,e){const rs=e&&(e.reason||e.rs)||'';
  return'tmp'}
 async function pump(){if(PI.busy||!on())return;if(typeof navigator!=='undefined'&&navigator.onLine===false)return;
  const now=Date.now(),j=qGet().find(x=>!(x.nx>now));if(!j)return;
- PI.busy=1;let res='ok';
- try{await run(j)}catch(e){res=kind(j,e);PI.log.push({rq:j.rq,t:j.t,res,msg:String(e&&e.message||e).slice(0,120)});if(PI.log.length>50)PI.log.shift()}
+ PI.busy=1;let res='ok';const cr0=!!j.cr;
+ try{await run(j);note('ok',j.t==='v'?'החשבונית בוטלה בתמחור':cr0?'הצילום עלה לענן':'✓ נכנסה לחשבוניות לתמחור'+(j.r&&Array.isArray(j.r.lines)?' ('+j.r.lines.length+' שורות)':''))}
+ catch(e){res=kind(j,e);const rs=e&&(e.reason||e.rs)||'';PI.log.push({rq:j.rq,t:j.t,res,msg:String(e&&e.message||e).slice(0,120)});if(PI.log.length>50)PI.log.shift();
+  note('err',(res==='perm'?'נכשל סופית: ':res==='quota'?'מכסת הזיהוי היומית נגמרה – ננסה בעוד שעה: ':res==='net'?'אין רשת – ננסה שוב: ':'נכשל – ננסה שוב: ')+String(e&&e.message||e).slice(0,140)+(rs?' ['+rs+']':'')+(e&&e.http?' [http '+e.http+']':''))}
  finally{PI.busy=0}
  try{let L=qGet();const k=L.findIndex(x=>x.rq===j.rq&&x.t===j.t);
   if(res==='ok'||res==='perm'){if(k>=0)L.splice(k,1);if(j.t==='c')markDone(j.rq)}
@@ -131,6 +143,8 @@ async function pump(){if(PI.busy||!on())return;if(typeof navigator!=='undefined'
 PI.pump=()=>pump().catch(()=>{});
 let tmr=0;function later(ms){clearTimeout(tmr);tmr=setTimeout(PI.pump,ms)}
 PI.q=qGet;PI.add=add;
+/* אבחון: "נסה לשלוח עכשיו" – מאפס את זמן ההמתנה של כל הממתינות ושולח */
+PI.qNow=()=>{try{const L=qGet();L.forEach(x=>{x.nx=0});qSet(L)}catch(e){}PI.pump()};
 try{window.addEventListener('online',()=>later(1000));setInterval(()=>{if(qGet().length)PI.pump()},60e3);later(8000)}catch(e){}
 })();
 
@@ -204,10 +218,20 @@ const rowH=x=>{const o=lkOther(x),me=fresh(x.lk)&&x.lk.uid===SY.uid;
  const meta=[x.date?dfmt(x.date):'',x.inv?'מס׳ '+esc(x.inv):'',x.n===1?'שורה אחת':x.n+' שורות'].filter(Boolean).join(' · ');
  return `<button class="li pi-row" ${o?'disabled aria-disabled="true"':`data-a="piOpen" data-id="${esc(x.id)}"`}><div class="m"><b>${esc(x.sup||'ספק לא ידוע')}</b><small>${meta}</small></div>`
   +(o?`<span class="tag t1">בטיפול של ${esc(String(x.lk.name||'משתמש אחר'))}</span>`:me?'<span class="tag t2">אצלך</span>':'')+(o?'':ico('chev'))+'</button>'};
+/* אבחון: מצב התור והיומן בטלפון הזה. w=1 (בית העובד) – רק כשיש ממתינות או תקלה/דילוג ב-48 השעות האחרונות */
+PI.diagH=w=>{try{const Q=PI.q(),G=PI.gl();if(!Q.length&&!G.length)return'';
+ const bad=G.filter(x=>(x.ev==='err'||x.ev==='skip')&&Date.now()-x.at<48*3600e3);if(w&&!Q.length&&!bad.length)return'';
+ const tm=x=>{try{return new Date(x).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return''}};
+ const nx=Q.length?Math.min(...Q.map(x=>x.nx||0)):0,mx=Q.length?Math.max(...Q.map(x=>x.n||0)):0,last=G[G.length-1];
+ return`<details class="card" style="padding:10px 12px;margin:8px 0"${last&&(last.ev==='err'||last.ev==='skip')?' open':''}><summary><b>מצב התמחור בטלפון הזה</b> <small style="color:var(--mut)">${Q.length?Q.length+' ממתינות לשליחה':'אין ממתינות'}</small></summary>`
+  +(Q.length?`<p class="note" style="margin:6px 0">ניסיון הבא: <bdi>${esc(tm(nx))}</bdi>${mx?' · ניסיונות שנכשלו: '+mx:''}</p>`:'')
+  +G.slice().reverse().map(x=>`<div style="font-size:13px;margin-top:4px;overflow-wrap:anywhere"><bdi>${esc(tm(x.at))}</bdi> · ${esc(x.msg)}</div>`).join('')
+  +(Q.length?`<button class="btn g s" style="margin-top:8px" data-a="piDiagGo">נסה לשלוח עכשיו</button>`:'')+'</details>'}catch(e){return''}};
+ACT.piDiagGo=()=>{PI.qNow();toast('שולח…');setTimeout(()=>{try{rerender()}catch(e){}},5000)};
 V.pi=()=>{const T='חשבוניות לתמחור';if(!can())return deny(T);
- if(!LS.L){if(!LS.b&&!LS.err)lload();return{t:T,h:LS.err?`<div class="card"><p class="note">${esc(LS.err)}</p><button class="btn g w" data-a="piRe">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'}}
+ if(!LS.L){if(!LS.b&&!LS.err)lload();return{t:T,h:PI.diagH()+(LS.err?`<div class="card"><p class="note">${esc(LS.err)}</p><button class="btn g w" data-a="piRe">נסה שוב</button></div>`:'<div class="empty">טוען…</div>')}}
  if(!LS.b&&!LS.err&&Date.now()-LS.at>=10e3)setTimeout(()=>lload(),0);
- return{t:T,s:'מחירים ומלאי מחשבוניות ספק',h:(LS.err?`<p class="note">${esc(LS.err)}</p>`:'')
+ return{t:T,s:'מחירים ומלאי מחשבוניות ספק',h:PI.diagH()+(LS.err?`<p class="note">${esc(LS.err)}</p>`:'')
   +(LS.L.length?LS.L.map(rowH).join(''):'<div class="empty">אין חשבוניות לתמחור</div>')+'<button class="btn g s w" style="margin-top:8px" data-a="piRe">רענן</button>'}};
 ACT.piRe=()=>{LS.err='';lload(true)};
 ACT.piOpen=el=>{const id=el.dataset.id;if(ID_OK(id))go('piEd',id)};
@@ -424,6 +448,7 @@ if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(thi
  try{if(isA()&&can()&&r&&typeof r.h==='string'){const n=piN();if(n){const sm=[n===1?'חשבונית אחת ממתינה לעדכון מחירים':n+' חשבוניות ממתינות לעדכון מחירים',piBusy()].filter(Boolean).join(' · ');
   r.h=adSec('חשבוניות לתמחור')+adOpt('pi','חשבוניות ספק לתמחור',esc(sm),n)+r.h}}}catch(e){}return r}}
 {const o=V.wk;if(typeof o==='function')V.wk=function(){const r=o.apply(this,arguments);
+ try{if(isW()&&WS==='home'&&r&&typeof r.h==='string'&&!can()){const d=PI.diagH(1);if(d)r.h+=d}}catch(e){}
  try{if(isW()&&WS==='home'&&r&&typeof r.h==='string'&&can()){const m='<button class="btn g" style="width:100%;margin-top:14px" data-a="updChk">',b=piOpt('עדכון מחירים ומלאי מחשבוניות ספק','margin-top:8px');
   r.h=r.h.includes(m)?r.h.replace(m,()=>b+m):r.h+b}}catch(e){}return r}}
 
