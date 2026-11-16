@@ -14,7 +14,8 @@
 //   מנהל העסק (אותו שער כמו בשלבים 1–3: requireStaff+secretary, מנהל אמיתי, הסכמה, מצב מנהלים): secNotes, secReports, secHistory.
 //   הגדרות ההתראות – secPrefs op:'notify' (secretary.js).
 //   מתוזמנות (אזור אחד): secRemind – כל 15 דקות: תזכורות, דוחות, התראה על עובד, שליחת התראות; secDaily – שמירה ומחיקה לפי 9.5.
-// תוכן התראת הטלפון כללי בלבד (בלי שמות, סכומים או תוכן) – הפרטים רק באפליקציה, אחרי כניסה.
+// התראת הטלפון (16.11.2026, בקשת בעל העסק): התראה נפרדת לכל פריט, עם הכותרת והתוכן שלו, והלחיצה פותחת אותו.
+// במסך נעול – visibility 'private': התוכן מוסתר לפי הגדרות הטלפון ("הסתרת תוכן רגיש").
 const crypto = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -35,7 +36,8 @@ const nid = (uid, key) => crypto.createHash('sha256').update(uid + '|' + key, 'u
 const RESOLVE = ['task', 'backup', 'fact', 'inv']; // נעלם מהנתונים (טופל) – התזכורת נסגרת לבד ולא חוזרת
 const FIN_RESOLVE = ['invDue', 'chk']; // תיקון סבב 1: נסגרת רק כשהחשבונית/הצ'ק באמת נעלמו ממראה תקין – לא כשאין מראה ולא בגלל חלון זמן
 
-// ---------- תוכן התראת הטלפון: כללי בלבד ----------
+// ---------- תוכן התראת הטלפון ----------
+// pushText – הנוסח הכללי הישן; נשאר כגיבוי להתראה בלי כותרת
 function pushText(notes) {
   if (notes.length > 1) return { title: 'המזכירה', body: 'יש ' + notes.length + ' התראות חדשות. פתחו את האפליקציה כדי לראות.' };
   const x = notes[0];
@@ -44,24 +46,89 @@ function pushText(notes) {
   return { title: 'המזכירה', body: (x.n > 1 ? '(שוב) ' : '') + body };
 }
 
+// 16.11.2026: התראה אחת לכל פריט – הכותרת והתוכן שלו (מקוצרים לגודל של התראה), והמזהה שלו לפתיחה בלחיצה
+const cut = (v, n) => { const t = String(v || '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+function noteMsg(x, id) {
+  const title = cut(String(x.title || '').replace(/\s+/g, ' '), 120);
+  if (!title) return Object.assign(pushText([x]), { id });
+  return { title: (x.n > 1 ? '(שוב) ' : '') + title, body: cut(x.body, 400), id };
+}
+
 // ---------- שליחה (FCM דרך firebase-admin). בבדיקות – opts.send מדומה ----------
+// tag – אותו פריט שנשלח שוב מחליף את ההתראה הקודמת שלו, ופריטים שונים מופיעים כהתראות נפרדות. private – מוסתר במסך נעול (לפי הגדרות הטלפון)
+const androidOf = (tag) => ({ priority: 'high', notification: Object.assign({ visibility: 'private' }, tag ? { tag } : {}) });
 const BAD_TOKEN = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument'];
+// 16.11.2026 (כפתורים בהתראה): גוף ההודעה ל-FCM. base = { data: { k, v? }, tag }.
+// טלפון ישן (msg בלי act) – בדיוק כמו קודם: הודעת notification. טלפון עם כפתורים (msg.act = { at, acts, u }) – הודעת data בלבד, priority high:
+// הטלפון בונה את ההתראה בעצמו (כותרת, תוכן, tag, כפתורים), והכפתור שולח את האסימון (at) לכתובת u (pushAct – push-act.js)
+function fcmPayload(tokens, msg, base) {
+  const data = Object.assign({}, base.data, msg.id ? { id: String(msg.id) } : {});
+  if (!msg.act) return { tokens, notification: { title: msg.title, body: msg.body }, data, android: androidOf(base.tag) };
+  return { tokens, data: Object.assign(data, { title: String(msg.title || ''), body: String(msg.body || ''), tag: base.tag || '', at: msg.act.at, acts: msg.act.acts, u: msg.act.u }), android: { priority: 'high' } };
+}
 async function fcmSend(tokens, msg) {
   const { getMessaging } = require('firebase-admin/messaging');
-  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: Object.assign({ k: 'sec', v: 'notes' }, msg.id ? { id: String(msg.id) } : {}), android: { priority: 'high' } });
+  const r = await getMessaging().sendEachForMulticast(fcmPayload(tokens, msg, { data: { k: 'sec', v: 'notes' }, tag: msg.id ? 'sec_' + msg.id : '' }));
   return r.responses.map((x, i) => ({ token: tokens[i], ok: x.success, code: x.error && x.error.code }));
 }
+const strArr = (d, f) => (d.exists && Array.isArray(d.get(f)) ? d.get(f).filter((t) => typeof t === 'string') : []);
 async function tokensOf(db, uid) {
   const [s, p] = await Promise.all([db.doc('staff/' + uid).get(), db.doc('push_tokens/' + uid).get()]);
-  const arr = (d) => (d.exists && Array.isArray(d.get('pushTokens')) ? d.get('pushTokens').filter((t) => typeof t === 'string') : []);
+  const arr = (d) => strArr(d, 'pushTokens');
   return [...new Set(arr(s).concat(arr(p)))];
+}
+// 16.11.2026: הטלפונים של המשתמש שתומכים בכפתורים. טלפון נחשב "עם כפתורים" רק אם כל התנאים מתקיימים (registerPushToken ב-index.js):
+//   1. ב-pushTokens וגם ב-pushAct;
+//   2. pushActAt[sha256(טלפון)] – רישום אחרון עם act:1 – לפני פחות מ-ACT_DAYS ימים (האפליקציה נרשמת מחדש בכל פתיחה);
+//   3. אין אחריו רישום בלי act (pushPlainAt[sha256]) – כלומר מסכים ישנים / APK ישן בלי כפתורים. מסכים חדשים שולחים תמיד act (0/1).
+// טלפון שלא עומד בזה מקבל את ההודעה הרגילה (notification) – שכל APK מציג. pushAct בלי pushActAt (נתונים מלפני 16.11) = בלי כפתורים עד הרישום הבא.
+const ACT_DAYS = 30;
+const mapOf = (d, f) => { const v = d.exists ? d.get(f) : null; return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; };
+async function tokensAct(db, uid, now) {
+  const t0 = now || Date.now();
+  const [s, p] = await Promise.all([db.doc('staff/' + uid).get(), db.doc('push_tokens/' + uid).get()]);
+  const PA = require('./push-act')._core;
+  const out = [];
+  for (const d of [s, p]) {
+    const reg = new Set(strArr(d, 'pushTokens')), at = mapOf(d, 'pushActAt'), plain = mapOf(d, 'pushPlainAt');
+    out.push(...strArr(d, 'pushAct').filter((t) => {
+      if (!reg.has(t)) return false;
+      const h = PA.hashOf(t), a = at[h], pl = plain[h];
+      return typeof a === 'number' && t0 - a <= ACT_DAYS * 864e5 && !(typeof pl === 'number' && pl > a);
+    }));
+  }
+  return [...new Set(out)];
 }
 async function dropTokens(db, uid, bad) {
   if (!bad.length) return;
   for (const p of ['staff/' + uid, 'push_tokens/' + uid]) {
     const ref = db.doc(p);
-    if ((await ref.get()).exists) await ref.update({ pushTokens: FieldValue.arrayRemove(...bad) });
+    const s = await ref.get();
+    // pushAct – רק אם השדה כבר קיים (מסמך ישן נשאר באותו מבנה)
+    if (s.exists) await ref.update(Object.assign({ pushTokens: FieldValue.arrayRemove(...bad) }, Array.isArray(s.get('pushAct')) ? { pushAct: FieldValue.arrayRemove(...bad) } : {}));
   }
+  // השיוך הגלובלי (push_dev, בשורש) – נמחק רק אם הוא עדיין של אותו משתמש (אם הטלפון כבר עבר למשתמש אחר – לא נוגעים)
+  const { getFirestore } = require('firebase-admin/firestore');
+  const PA = require('./push-act')._core;
+  for (const t of bad) {
+    try {
+      const ref = getFirestore().doc(PA.devPath(t));
+      await getFirestore().runTransaction(async (tx) => { const m = await tx.get(ref); if (m.exists && m.get('uid') === uid) tx.delete(ref); });
+    } catch (e) { logger.warn('push: push_dev cleanup failed', { name: e && e.name, code: e && e.code }); }
+  }
+}
+// 16.11.2026: שליחה לפריט אחד – טלפונים ישנים כמו קודם (קריאה אחת, אותה הודעה); טלפונים עם כפתורים – קריאה נפרדת עם אסימון אחד לפריט למשתמש.
+// אם יצירת האסימון נכשלה – גם הם מקבלים את ההודעה הרגילה (בלי כפתורים). a = { bizId, uid, kind, id, acts (לשרת), show (מה מוצג בטלפון) }
+async function sendItem(send, toks, actT, msg, meta, a) {
+  const old = toks.filter((t) => !actT.has(t)), act = toks.filter((t) => actT.has(t));
+  const res = [];
+  if (old.length) res.push(...(await send(old, msg, meta)));
+  if (act.length) {
+    let x = null;
+    try { x = await require('./push-act')._core.mkAct(a); } catch (e) { logger.warn('push: act token failed', { bizId: a.bizId, name: e && e.name, code: e && e.code }); }
+    res.push(...(await send(act, x ? Object.assign({}, msg, { act: { at: x.token, acts: a.show, u: x.u } }) : msg, meta)));
+  }
+  return res;
 }
 
 // ---------- מי מקבל: מנהלים שמשתמשים במזכירה (הסכמה בנוסח הנוכחי, מצב מנהלים) ----------
@@ -295,26 +362,37 @@ async function remindBiz(opts) {
     const s = await db.collection(`sec_note/${m.uid}/n`).where('pend', '==', true).limit(100).get();
     const due = s.docs.filter((d) => (d.get('pushAt') || 0) <= now);
     if (!due.length) continue;
-    let sent = 0;
-    try {
-      const toks = await tokensOf(db, m.uid);
-      if (toks.length) {
-        // 15.11.2026: התראה אחת – גם המזהה שלה (רק מזהה, בלי תוכן), כדי שהלחיצה תפתח את פרטי ההתראה
-        const msg = pushText(due.map((d) => d.data())); if (due.length === 1) msg.id = due[0].id;
-        const res = await (opts.send || fcmSend)(toks, msg, { uid: m.uid, bizId: scope.bizId });
-        sent = res.filter((x) => x.ok).length;
-        await dropTokens(db, m.uid, res.filter((x) => !x.ok && BAD_TOKEN.includes(x.code)).map((x) => x.token));
-      }
-    } catch (e) {
-      // תיקון סבב 1: תקלה בשליחה למנהל אחד לא עוצרת את שאר העסק. ההתראה נשארת ממתינה ותישלח בריצה הבאה
+    let toks, actT;
+    try { toks = await tokensOf(db, m.uid); actT = new Set(await tokensAct(db, m.uid, now)); } catch (e) {
       logger.error('secretary: push failed', { bizId: scope.bizId, name: e && e.name, code: e && e.code });
       out.pushErr = (out.pushErr || 0) + 1;
       continue;
     }
-    const b = db.batch();
-    for (const d of due) b.update(d.ref, { pend: false, pushed: sent ? now : 0 });
+    // 16.11.2026: התראה נפרדת לכל פריט (בלי הגבלת כמות – החלטת בעל העסק), עם התוכן שלו והמזהה שלו
+    const b = db.batch(), badT = new Set();
+    let any = false, errd = false;
+    for (const d of due) {
+      let sent = 0;
+      if (toks.length) {
+        try {
+          const live = toks.filter((t) => !badT.has(t));
+          const res = live.length ? await sendItem(opts.send || fcmSend, live, actT, noteMsg(d.data(), d.id), { uid: m.uid, bizId: scope.bizId }, { bizId: scope.bizId, uid: m.uid, kind: 'sec', id: d.id, acts: ['done', 'h1', 'd1'], show: 'done,h1,d1', now }) : [];
+          sent = res.filter((x) => x.ok).length;
+          res.filter((x) => !x.ok && BAD_TOKEN.includes(x.code)).forEach((x) => badT.add(x.token));
+        } catch (e) {
+          // תיקון סבב 1: תקלה בשליחה לא עוצרת את שאר העסק. הפריט הזה נשאר ממתין ויישלח בריצה הבאה
+          if (!errd) logger.error('secretary: push failed', { bizId: scope.bizId, name: e && e.name, code: e && e.code });
+          errd = true;
+          continue;
+        }
+      }
+      b.update(d.ref, { pend: false, pushed: sent ? now : 0 });
+      if (sent) any = true;
+    }
+    if (errd) out.pushErr = (out.pushErr || 0) + 1;
     await b.commit();
-    if (sent) out.pushed++;
+    try { await dropTokens(db, m.uid, [...badT]); } catch (e) { logger.warn('secretary: drop tokens failed', { bizId: scope.bizId }); }
+    if (any) out.pushed++;
   }
 
   const b = db.batch();
@@ -394,6 +472,17 @@ async function snooze(db, uid, id, at, now, by) {
   return { at, l: R.whenL(at, now) };
 }
 
+// "טופל" – מהאפליקציה (secNotes op:'done') ומהכפתור בהתראה (pushAct, by = 'push'). אותה התנהגות; מהכפתור נרשם גם המקור ביומן
+async function doneNote(db, uid, id, by) {
+  const ref = db.doc(`sec_note/${uid}/n/${id}`);
+  const s = await ref.get();
+  if (!s.exists) throw pre('not-found', 'ההתראה לא נמצאה');
+  const b = db.batch();
+  b.update(ref, { st: 'done', nextAt: FieldValue.delete(), pend: false, seen: true });
+  b.set(db.collection('sec_log').doc(), logData(uid, 'mgr', 'remDone', by && by !== 'app' ? { tgt: id, note: by } : { tgt: id }));
+  await b.commit();
+}
+
 async function secNotes(request) {
   const input = inputObject(request);
   const op = ['list', 'seen', 'done', 'reps', 'snooze'].includes(input.op) ? input.op : null;
@@ -428,20 +517,17 @@ async function secNotes(request) {
     const out = await snooze(db, who.uid, id, at, now, 'app');
     return { ok: true, id, at: out.at, l: out.l };
   }
+  if (op === 'done') { await doneNote(db, who.uid, id, 'app'); return { ok: true, id }; }
   const ref = col.doc(id);
   const s = await ref.get();
   if (!s.exists) throw pre('not-found', 'ההתראה לא נמצאה');
+  // reps
+  if (!Number.isInteger(input.n) || input.n < 0 || input.n > 3) throw bad('bad-reps', 'מספר חזרות: 0 עד 3');
+  if (s.get('k') !== 'rem') throw pre('no-repeat', 'אפשר לשנות חזרות רק בתזכורת');
+  const open = s.get('st') === 'open' && input.n > 0;
   const b = db.batch();
-  if (op === 'done') {
-    b.update(ref, { st: 'done', nextAt: FieldValue.delete(), pend: false, seen: true });
-    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'remDone', { tgt: id }));
-  } else {
-    if (!Number.isInteger(input.n) || input.n < 0 || input.n > 3) throw bad('bad-reps', 'מספר חזרות: 0 עד 3');
-    if (s.get('k') !== 'rem') throw pre('no-repeat', 'אפשר לשנות חזרות רק בתזכורת');
-    const open = s.get('st') === 'open' && input.n > 0;
-    b.update(ref, { rep: input.n, nextAt: open ? (s.get('nextAt') || R.nextBizMorning(now)) : FieldValue.delete() });
-    b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'remReps', { tgt: id, note: String(input.n) }));
-  }
+  b.update(ref, { rep: input.n, nextAt: open ? (s.get('nextAt') || R.nextBizMorning(now)) : FieldValue.delete() });
+  b.set(db.collection('sec_log').doc(), logData(who.uid, 'mgr', 'remReps', { tgt: id, note: String(input.n) }));
   await b.commit();
   return { ok: true, id };
 }
@@ -523,7 +609,9 @@ exports.secRemind = onSchedule({ region: LEGACY_REGION, schedule: 'every 15 minu
 exports.secDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 04:15', timeZone: R.TZ, timeoutSeconds: 540, memory: '512MiB' }, async () => {
   const r = await runSecDaily({});
   logger.info('secretary: daily retention done', { bizzes: Object.keys(r.res).length, errors: r.errors.length });
+  // 16.11.2026: אסימוני הכפתורים בהתראות (pact, בשורש) שפג תוקפם – נמחקים. תקלה כאן לא מפילה את הריצה
+  try { const n = await require('./push-act')._core.cleanPact(Date.now()); if (n) logger.info('secretary: pact cleanup', { n }); } catch (e) { logger.warn('secretary: pact cleanup failed', { name: e && e.name, code: e && e.code }); }
   if (r.errors.length) throw new Error('secretary daily: ' + r.errors.length + ' errors');
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, tokensOf, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN – גם ל-tasks-nudge.js (tkNudge)
+Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, doneNote, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, noteMsg, androidOf, fcmPayload, sendItem, tokensOf, tokensAct, ACT_DAYS, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN, fcmPayload, sendItem, tokensAct – גם ל-tasks-nudge.js (tkNudge); snooze, doneNote – גם ל-push-act.js

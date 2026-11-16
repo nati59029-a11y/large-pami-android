@@ -643,3 +643,152 @@ describe('סבב 2: תיקוני הבדיקה העצמאית', () => {
     assert.match(fs.readFileSync(path.join(MDIR, 'ROLLBACK.md'), 'utf8'), /migrate_backups\//, 'ROLLBACK כותב איפה נשמר הגיבוי');
   });
 });
+
+// 16.11.2026: העתקה ממוקדת (copy-docs) של מסמכים שמכשיר ישן כתב לשורש אחרי המעבר ל-b.
+describe('copy-docs: העתקה ממוקדת של מסמכים בודדים אחרי המעבר', () => {
+  const LP = 'b/' + BIZ;
+  const IDS = ['cashout/wdck2033h85', 'chunks/wdck2033h85_0', 'inbox/wdck2033h85', 'tasks/km8j0hu2ee'];
+  const bizFields = (dataRoot) => ({ name: S("לארג' פעמי"), status: S('active'), dataRoot: S(dataRoot), schemaVersion: I(1), createdAt: TS('2026-11-15T10:00:00Z'), createdBy: S('migrate'), migrationTarget: B(true) });
+  const sub = async (p) => { const r = await api('POST', BASE + '/' + enc(p) + ':listCollectionIds', {}); return (r && r.collectionIds) || []; };
+  const cd = (paths, extra = []) => run(['copy-docs', '--mode', 'write', '--no-storage', '--backup', F('cd-backup.json'), '--paths', paths, ...extra]);
+  before(async () => {
+    await clearAll();
+    await putMany([
+      [LP, bizFields('b')],
+      [LP + '/cfg/main', { data: S('{}') }],
+      ['cashout/wdck2033h85', { uid: S('u_emp'), a: D(50), neg: D(-12.5), big: I('9007199254740993'), t: I(Date.now()), when: TS('2026-11-15T12:00:00.123456789Z'), geo: TYPES.geo, nested: TYPES.nested, heb: TYPES.heb }],
+      ['chunks/wdck2033h85_0', { owner: S('u_emp'), data: S('x'.repeat(1000)) }],
+      ['inbox/wdck2033h85', { owner: S('u_emp'), by: S('u_emp'), status: S('new'), data: S('{}'), parts: S('1') }],
+      ['tasks/km8j0hu2ee', { txt: S('משימה'), st: S('open'), due: I(1) }],
+      ['tasks/km8j0hu2ee/c/c1', { txt: S('תגובה – לא מועתקת') }],
+      ['tasks/km8j0hu2ee/c/c1/x/x1', { n: I(1) }],
+      ['tasks/km8j0hu2ee/p/w1', { img: S('...') }],
+      ['cashout/conf1', { a: D(10) }],
+      [LP + '/cashout/conf1', { a: D(11) }], // ביעד עם תוכן אחר
+      ['orders/o1', { x: I(1) }],
+    ]);
+    const b = await run(['backup', '--out', F('cd-backup.json'), '--no-storage']);
+    assert.equal(b.code, 0, b.out);
+  });
+
+  it('dataRoot b: 4 המסמכים מועתקים, הטיפוסים זהים לגולמי, בלי תת-אוספים; השורש ומסמך העסק לא משתנים', async () => {
+    const root0 = await snapshotRoot();
+    const r = await cd(IDS.join(','), ['--report', F('cd1.json')]);
+    show('copy-docs (dataRoot b)', r);
+    assert.equal(r.code, 0, r.out);
+    const rep = report(F('cd1.json'));
+    assert.equal(rep.copied, 4);
+    assert.equal(rep.dataRoot, 'b');
+    assert.ok(rep.docs.every(d => d.fields === undefined), 'הדוח בלי נתונים, רק נתיבים וגיבובים');
+    for (const p of IDS) assert.deepEqual((await get(LP + '/' + p)).fields, (await get(p)).fields, p);
+    assert.equal((await get(LP + '/cashout/wdck2033h85')).fields.a.doubleValue, 50, 'double נשאר double');
+    assert.equal((await get(LP + '/cashout/wdck2033h85')).fields.big.integerValue, '9007199254740993');
+    assert.deepEqual(await sub(LP + '/tasks/km8j0hu2ee'), [], 'תת-אוסף לא הועתק');
+    // אזהרה על תתי-אוספים שלא הועתקו, עם נתיבי המסמכים (גם בעומק 2), בלי להכשיל את ההרצה
+    const tk = rep.docs.find(d => d.rel === 'tasks/km8j0hu2ee');
+    assert.deepEqual(tk.subDocs, ['tasks/km8j0hu2ee/c/c1', 'tasks/km8j0hu2ee/c/c1/x/x1', 'tasks/km8j0hu2ee/p/w1']);
+    assert.equal(rep.subDocWarnings, 1);
+    assert.ok(rep.docs.filter(d => d.rel !== 'tasks/km8j0hu2ee').every(d => !d.subDocs), 'אין אזהרה למסמך בלי תת-אוספים');
+    assert.match(r.out, /אזהרה: ל-tasks\/km8j0hu2ee יש 3 מסמכים בתתי-אוספים/);
+    assert.match(r.out, /^ {4}tasks\/km8j0hu2ee\/p\/w1$/m);
+    assert.deepEqual(await snapshotRoot(), root0, 'השורש לא השתנה');
+    assert.equal((await get(LP)).fields.dataRoot.stringValue, 'b');
+    assert.match(r.out, /הועתקו 4/);
+  });
+
+  it('הרצה שנייה: הכול "כבר קיים וזהה", לא נכתב כלום, יוצא 0', async () => {
+    const r = await cd(IDS.join(','));
+    show('copy-docs שוב', r);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /כבר קיימים וזהים 4/);
+    assert.match(r.out, /כתיבות: 0/);
+  });
+
+  it('יצירה בלבד: יעד שונה = התנגשות ולא נדרס; מסמך שחסר בשורש מדווח; יוצא 1; מסמך תקין באותה הרצה כן מועתק', async () => {
+    await put('rq/okdoc', { text: S('בקשה') });
+    const r = await cd('cashout/conf1,inbox/nosuchdoc,rq/okdoc', ['--report', F('cd2.json')]);
+    show('copy-docs עם התנגשות וחסר', r);
+    assert.equal(r.code, 1);
+    const rep = report(F('cd2.json'));
+    assert.deepEqual([rep.copied, rep.conflict, rep.missing], [1, 1, 1]);
+    assert.equal((await get(LP + '/cashout/conf1')).fields.a.doubleValue, 11, 'היעד לא נדרס');
+    assert.equal(await get(LP + '/inbox/nosuchdoc'), null);
+    assert.ok(await get(LP + '/rq/okdoc'));
+    assert.match(r.out, /התנגשות/);
+    assert.match(r.out, /לא נמצא בשורש/);
+  });
+
+  it('נתיב לא תקין או אוסף שלא ב-COPY – נדחה לפני כל כתיבה', async () => {
+    const before1 = JSON.stringify(await sub(LP));
+    const bad = ['cashout', 'cashout/a/c', 'cashout/../x', 'cashout/a b', 'cashout/a.b', 'cashout/%2e', 'cashout/__x__', '/cashout/a',
+      'orders/o1', 'mystery/x', 'sec_route/x', 'users/u_emp', 'b/largpeami', 'admins/x/y', 'cashout/a,cashout/a',
+      Array.from({ length: 51 }, (_, i) => 'inbox/m' + i).join(',')];
+    for (const p of bad) {
+      const r = await cd(p);
+      assert.notEqual(r.code, 0, p);
+      assert.match(r.out, /נתיבים לא תקינים|יותר מדי נתיבים/, p);
+    }
+    assert.match((await cd('orders/o1')).out, /לא ברשימת האוספים המועתקים/);
+    // אוספי הרשאות וזהות – אסורים גם אם הם ב-COPY
+    for (const p of ['admins/u_new', 'staff/u_emp', 'private/info', 'push_tokens/u_mgr', 'staff/u_emp/x/y']) {
+      const r = await cd(p);
+      assert.notEqual(r.code, 0, p);
+      assert.match(r.out, /אוסף הרשאות\/זהות/, p);
+    }
+    assert.equal(await get(LP + '/admins/u_new'), null);
+    const none = await run(['copy-docs', '--mode', 'write', '--no-storage', '--backup', F('cd-backup.json')]);
+    assert.notEqual(none.code, 0);
+    assert.match(none.out, /חסר --paths/);
+    assert.equal(JSON.stringify(await sub(LP)), before1, 'לא נוצר אוסף חדש ביעד');
+    assert.equal(await get(LP + '/orders/o1'), null);
+    const { parseDocPaths } = require(TOOL);
+    assert.deepEqual(parseDocPaths(' cashout/a , tasks/b/c/d '), ['cashout/a', 'tasks/b/c/d'], 'נתיב עמוק (מספר זוגי של קטעים) מותר');
+  });
+
+  it('שומרים: בלי --mode write, בלי גיבוי, לעסק אחר, או למסמך עסק שלא נוצר על ידי הכלי – סירוב', async () => {
+    const ro = await run(['copy-docs', '--no-storage', '--backup', F('cd-backup.json'), '--paths', 'cashout/wdck2033h85']);
+    assert.notEqual(ro.code, 0);
+    assert.match(ro.out, /copy-docs דורש --mode write/);
+    const nb = await run(['copy-docs', '--mode', 'write', '--no-storage', '--paths', 'cashout/wdck2033h85']);
+    assert.notEqual(nb.code, 0);
+    assert.match(nb.out, /--backup/);
+    await put('b/acme', { ...bizFields('b') });
+    const other = await cd('cashout/wdck2033h85', ['--biz', 'acme']);
+    assert.notEqual(other.code, 0);
+    assert.match(other.out, /רק לעסק ההעברה/);
+    assert.deepEqual(await sub('b/acme'), []);
+    const orig = (await get(LP)).fields;
+    const { createdBy, ...noMark } = orig;
+    assert.ok(createdBy);
+    await put(LP, noMark);
+    const r = await cd('rq/okdoc');
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /לא נוצר על ידי כלי ההעברה/);
+    await put(LP, orig); // החזרה (קוד בדיקה)
+  });
+
+  it('עובד גם כש-dataRoot עדיין legacy', async () => {
+    await put(LP, bizFields('legacy'));
+    await put('deposits/dl1', { a: D(300) });
+    const r = await cd('deposits/dl1');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual((await get(LP + '/deposits/dl1')).fields, (await get('deposits/dl1')).fields);
+    await put(LP, bizFields('b'));
+  });
+
+  it('קובץ התהליך: פעולת copy-docs = מצב כתיבה, קלט doc_paths, בדיקת נתיבים לפני הגיבוי', () => {
+    const yaml = require(require.resolve('js-yaml', { paths: [ROOT] }));
+    const y = yaml.load(fs.readFileSync(WF, 'utf8'));
+    const inp = (y.on || y[true]).workflow_dispatch.inputs;
+    assert.ok(inp.action.options.includes('copy-docs'));
+    assert.equal(inp.doc_paths.required, false);
+    assert.ok(Object.keys(inp).length <= 10, 'עד 10 קלטים בתהליך ידני');
+    const cfg = y.jobs.migrate.steps.find(s => s.id === 'cfg');
+    assert.match(cfg.run, /copy\|copy-docs\|switch-to-b\|rollback-to-legacy\) echo "mode=write"/);
+    const runStep = y.jobs.migrate.steps.find(s => s.name === 'Run');
+    assert.equal(runStep.env.DOC_PATHS, '${{ inputs.doc_paths }}', 'הנתיבים עוברים דרך משתנה סביבה, לא ישירות לפקודה');
+    assert.ok(!/inputs\.doc_paths/.test(runStep.run), 'אין הצבה ישירה של הקלט בתוך הסקריפט');
+    const block = runStep.run.split('copy-docs)')[1].split(';;')[0];
+    assert.ok(block.indexOf('parseDocPaths') < block.indexOf('backup') && block.indexOf('backup') < block.indexOf('copy-docs --mode write'), 'בדיקת נתיבים ← גיבוי ← העתקה');
+  });
+});

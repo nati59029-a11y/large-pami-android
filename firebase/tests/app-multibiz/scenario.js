@@ -32,7 +32,8 @@ async function worker(browser, www, cfg, log, email) {
 }
 async function manager(browser, www, cfg, log, email) {
   const { ctx, page } = await H.newPage(browser, www, cfg, log, email);
-  await H.login(page, email);
+  // המשיכה של 3 השניות (inbTick) רצה לפני הכניסה – כך מספר השאילתות קבוע בין ריצות (ראו harness.login, opts.afterMs)
+  await H.login(page, email, { afterMs: 3500 });
   await step(page, 'pull', async () => { try { await pullInbox(); } catch (e) { console.warn(e.message); } });
   await step(page, 'backup-dir', async () => { window.__abk = abkDir(); });
   const dir = await page.evaluate(() => abkDir());

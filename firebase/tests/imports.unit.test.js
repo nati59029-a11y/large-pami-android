@@ -97,7 +97,12 @@ describe('ייבוא ברקע – חלוקה, גודל והצפנה (בלי אמ
     const s = I.sealChunk(KEY, 'biz-o', JOB, c);
     const txt = JSON.stringify(s);
     for (const k of cards) { assert.ok(!txt.includes(k.num)); assert.ok(!txt.includes('"' + k.cvv + '"')); }
-    assert.ok(!txt.includes('cvv') && !txt.includes(rows[10].phone) && !txt.includes(rows.find((r) => r.tz).tz) && !txt.includes(rows[10].name));
+    assert.ok(!txt.includes(rows[10].phone) && !txt.includes(rows.find((r) => r.tz).tz) && !txt.includes(rows[10].name));
+    // יציבות (16.11.2026): המילה cvv נבדקת מחוץ לתוצרי ההצפנה. הצופן הוא base64 אקראי, ו-"cvv" הופיע בו במקרה בכ-8% מהריצות
+    // (נמדד: 155 מתוך 2000) – בלי שום דליפה. תוצרי ההצפנה (iv, ct, tag) חייבים להיות base64 בלבד, וכל השאר נבדק כמו קודם
+    for (const f of ['iv', 'ct', 'tag']) assert.ok(typeof s.box[f] === 'string' && /^[A-Za-z0-9+/=]+$/.test(s.box[f]), 'box.' + f + ' – base64 בלבד');
+    const plain = JSON.stringify(Object.assign({}, s, { box: Object.assign({}, s.box, { iv: '', ct: '', tag: '' }) }));
+    assert.ok(!plain.toLowerCase().includes('cvv'), 'cvv גלוי מחוץ להצפנה');
     assert.ok(!strings(s).some((v) => CARD_RUN.test(v) && !/^[A-Za-z0-9+/=]+$/.test(v)), 'רצף ספרות גלוי מחוץ להצפנה');
     assert.deepEqual(CARD.open(KEY, 'biz-o', I.aadOf('biz-o', JOB, 0), s.box).rows, c.rows);
     for (const [b, j, n] of [['biz-p', JOB, 0], ['biz-o', 'ZZZZZZZZZZZZZZZZZZZZ', 0], ['biz-o', JOB, 100]]) {
