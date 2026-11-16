@@ -3,7 +3,7 @@ name: Read secretary function logs (read-only)
 # Prints time, function, severity and a short masked message (emails/numbers hidden). Changes nothing.
 on:
   push:
-    branches: ["claude/secretary-email-server-check-sr908b"]
+    branches: ["claude/secretary-email-server-check-sr908b", "ccr-beb89403-34diot"]
     paths: [".github/workflows/read-sec-logs.yml"]
 permissions:
   contents: read
@@ -28,6 +28,12 @@ jobs:
           echo "== Errors/warnings (24h, newest first, max 60) =="
           gcloud logging read "$BASE AND severity>=WARNING" --project "$PROJECT" --limit 60 \
             --format='value(timestamp,resource.labels.service_name,severity,textPayload,jsonPayload.message,httpRequest.status)' | mask
+          echo "== Invoice / attachment failures with reason (24h, max 200) =="
+          gcloud logging read "$BASE AND severity>=WARNING AND (jsonPayload.message:\"invoice\" OR jsonPayload.message:\"attachment\" OR jsonPayload.message:\"hist inv\")" --project "$PROJECT" --limit 200 \
+            --format='value(timestamp,resource.labels.service_name,jsonPayload.message,jsonPayload.reason)' | mask
+          echo "== Same, grouped by message and reason =="
+          gcloud logging read "$BASE AND severity>=WARNING AND (jsonPayload.message:\"invoice\" OR jsonPayload.message:\"attachment\" OR jsonPayload.message:\"hist inv\")" --project "$PROJECT" --limit 2000 \
+            --format='value(jsonPayload.message,jsonPayload.reason)' | sort | uniq -c | sort -rn
           echo "== Count by function and severity =="
           gcloud logging read "$BASE AND severity>=WARNING" --project "$PROJECT" --limit 1000 \
             --format='value(resource.labels.service_name,severity)' | sort | uniq -c | sort -rn
