@@ -163,7 +163,7 @@ async function workIn(id, o) {
       usage = await scan.reserveScan(SEC_SCAN_UID, caps.perUser, caps.bizDaily, 1, caps.bizKey, caps.period);
     } catch (e) {
       if (e && e.code === 'resource-exhausted' && x.hist === true) {
-        await ref.update({ st: 'q', wk: FieldValue.delete(), qwt: nextDay(now) });
+        if (!(await live({ st: 'q', wk: FieldValue.delete(), qwt: nextDay(now) }))) return { skip: 'rej' };
         await db.collection('sec_log').doc().set(ilog('', 'sec', 'invWait', { tgt: id, note: 'hist' }));
         return { wait: true };
       }
