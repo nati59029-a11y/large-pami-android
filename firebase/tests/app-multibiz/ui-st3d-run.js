@@ -42,11 +42,13 @@ async function server(ctx, mgr) {
     if (S.off) return route.abort(); const b = rec(route, 'shelfCheck'); S.sh.push(b);
     if (S.mode === '404') return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { status: 'NOT_FOUND', message: 'not found' } }) });
     if (S.mode === 'abort1' && !S.aborted) { S.aborted = 1; return route.abort(); }
+    if (S.mode === 'sug') return ok(route, { st: 'ok', iss: [], usage: { m: '2026-11', n: 1, cap: 500, w80: false }, sug: { s: 'f2-a-1_a', c: 0.9 }, ask: true });
     if (S.mode === 'closed') return bad(route, 'run-closed', 'הסבב כבר הסתיים');
     return ok(route, { st: 'ok', iss: [], usage: { m: '2026-11', n: 1, cap: 500, w80: false } });
   });
   await ctx.route('**/s3Log', (route) => { if (S.off || S.logMode === 'abort') return route.abort(); const b = rec(route, 's3Log'); S.logs.push(b); ok(route, { ok: true, st: 'open', work: 0, pause: 0 }); });
   await ctx.route('**/s3Move', (route) => { rec(route, 's3Move'); ok(route, { ok: true }); });
+  await ctx.route('**/s3MovePh', (route) => { const b = rec(route, 's3MovePh'); if (S.mv) return bad(route, S.mv, 'שגיאה'); ok(route, { ok: true, runId: b.run, from: b.from, to: b.to }); });
   await ctx.route('**/s3Run', (route) => { const b = rec(route, 's3Run'); if (S.fail.run) return bad(route, 'run-open', 'כבר יש סבב פתוח'); ok(route, b.cancel ? { ok: true, st: 'cancel' } : { ok: true, runId: 'x_m1' }); });
   await ctx.route('**/s3SaveMap', (route) => { const b = rec(route, 's3SaveMap'); if (S.fail.save) return bad(route, S.fail.save, 'שגיאת שרת'); ok(route, { ok: true, v: 4, renamed: S.renamed || {}, dropped: S.dropped || [], purged: {} }); });
   await ctx.route('**/s3SetBranch', (route) => { rec(route, 's3SetBranch'); ok(route, { ok: true }); });
@@ -214,6 +216,49 @@ const pick = async (page, sel, file) => { await page.setInputFiles(sel, file); a
   check('13א מנהל רגיל: בלי bizId בבקשה', S.calls[0] && !('bizId' in S.calls[0].b), S.calls[0]);
   check('13ב אין שגיאות JavaScript (עורך)', !M.page.__errors.length, M.page.__errors);
   await M.ctx.close();
+
+  // ---- שלב 20ג: באנר הצעה (sug) / ask / להעביר / להשאיר ----
+  {
+    S.ph = [{ id: 'f1-a-1_a', sug: { s: 'f2-a-1_a', c: 0.85 } }, { id: 'f1-a-2_a', ask: true }]; S.mv = '';
+    const Z = await open(browser, www, cM(), 'w@x.co'); await showWk(Z.page);
+    await Z.page.evaluate(() => { ACT.s3cOpen({ dataset: { id: 'rid001_20261114' } }); }); await sleep(2000);
+    const bn = () => Z.page.evaluate(() => [...document.querySelectorAll('.s3sug')].map((e) => e.innerText.replace(/\s+/g, ' ')));
+    let b1 = await bn();
+    check('20ג-1 ph.sug במסמך (אחרי רענון): באנר "נראה כמו מקטע" עם התווית הקריאה, ו"עוד 1" (ask)', b1.length === 1 && /נראה כמו מקטע גוף 2 \(?.*מקטע 1/.test(b1[0]) && /עוד 1/.test(b1[0]) && /להעביר/.test(b1[0]) && /להשאיר/.test(b1[0]), b1);
+    if (shots) await shot(Z.page, fp(shots, 'sug'));
+    o = await noOverflow(Z.page); check('20ג-1א בלי גלישה ב-360px עם הבאנר', o.sw <= o.W && !o.bad.length, o);
+    const sb = await Z.page.evaluate(() => [...document.querySelectorAll('.s3sug .btn')].filter((b) => b.getBoundingClientRect().height < 43).length);
+    check('20ג-1ב כפתורי הבאנר לפחות 44px', sb === 0, sb);
+    S.calls.length = 0; await Z.page.click('[data-a=s3cSugMove]'); await sleep(800);
+    const mp = S.calls.find((c) => c.fn === 's3MovePh');
+    check('20ג-2 "להעביר": s3MovePh עם run, from, to הנכונים', mp && mp.b.run === RID && mp.b.from === 'f1-a-1_a' && mp.b.to === 'f2-a-1_a' && Object.keys(mp.b).length === 3, mp);
+    const af = await Z.page.evaluate(() => ({ from: S3UI.C.loc['f1-a-1_a'] || 'x', ph: !!S3UI.C.ph['f1-a-1_a'], to: S3UI.C.loc['f2-a-1_a'], sg: !!S3UI.C.sg['f1-a-1_a'], msg: document.querySelector('.s3s').innerText.replace(/\s+/g, ' ') }));
+    const b2 = await bn();
+    check('20ג-2א אחרי העברה: הבאנר של ההצעה נעלם, המקור חסר, היעד צולם, הודעה קצרה', !b2.some((t) => /נראה כמו מקטע/.test(t)) && af.from === 'x' && !af.ph && af.to === 's' && !af.sg && /התמונה הועברה/.test(af.msg), { af, b2 });
+    check('20ג-3 ask: "ייתכן שזה לא המדף הנכון" מוצג', b2.length === 1 && /ייתכן שזה לא המדף הנכון/.test(b2[0]) && !/להעביר/.test(b2[0]), b2);
+    // שגיאה בהעברה
+    S.ph = [{ id: 'f1-a-1_a', sug: { s: 'f2-a-1_a', c: 0.85 } }]; S.mv = 'busy';
+    await Z.page.evaluate(async () => { await S3UI.C && 0; ACT.s3cOpen({ dataset: { id: 'rid001_20261114' } }); }); await sleep(2000);
+    await Z.page.click('[data-a=s3cSugMove]'); await sleep(700);
+    const tt = await Z.page.evaluate(() => (document.querySelector('#toast') || {}).innerText || document.body.innerText);
+    check('20ג-4 שגיאת העברה (busy): הודעה בעברית והבאנר נשאר', /השרת עסוק/.test(tt) && (await bn()).length === 1, tt.slice(0, 120));
+    // להשאיר
+    await Z.page.click('[data-a=s3cSugKeep]'); await sleep(300);
+    check('20ג-5 "להשאיר": הבאנר נעלם', (await bn()).length === 0, await bn());
+    const kp = await Z.page.evaluate(() => Object.keys(localStorage).filter((k) => /s3k:/.test(k)).map((k) => localStorage.getItem(k)));
+    check('20ג-5א ההשארה נשמרה בטלפון (localStorage) לפי מקטע המקור והיעד', kp.length === 1 && /f1-a-1_a>f2-a-1_a/.test(kp[0]), kp);
+    S.calls.length = 0;
+    await Z.page.evaluate(() => { ACT.s3cOpen({ dataset: { id: 'rid001_20261114' } }); }); await sleep(2000);
+    check('20ג-5ב אחרי רענון הבאנר לא חוזר, ולא נשלחה s3MovePh', (await bn()).length === 0 && !S.calls.some((c) => c.fn === 's3MovePh'), await bn());
+    // הצעה מתשובת shelfCheck אחרי שליחה מהתור (בדיעבד)
+    S.ph = []; S.mode = 'sug'; S.mv = '';
+    await Z.page.evaluate(() => { localStorage.setItem(LK('lp-s3k:rid001_20261114'), 'null'); ACT.s3cOpen({ dataset: { id: 'rid001_20261114' } }); }); await sleep(2000);
+    await pick(Z.page, 'input[data-c=s3cPick]', await mkImg(Z.page, 'sharp')); await sleep(1500);
+    const b3 = await bn();
+    check('20ג-6 הצעה (sug) ו-ask בתשובת shelfCheck אחרי שליחה מהתור: באנר מוצג בלי רענון', b3.length === 1 && /נראה כמו מקטע/.test(b3[0]) && /לא המדף הנכון/.test(b3[0]), b3);
+    check('20ג-7 אין שגיאות JavaScript (באנר הצעה)', !Z.page.__errors.length, Z.page.__errors);
+    await Z.ctx.close(); S.mode = 'ok'; S.ph = [];
+  }
 
   // ---- תוסף כבוי: בלי אף בקשה נוספת ----
   S.calls.length = 0; S.reads.length = 0;

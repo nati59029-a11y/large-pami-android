@@ -25,7 +25,9 @@ async function open(browser, www, o) {
   const wc = { ok: true, connected: false, num: '', link: '', stop: { on: false, auto: false, why: '', at: 0, by: '' }, ack: { on: false, text: '' }, open: { on: false, text: '' }, ackH: { f: '08:00', t: '18:00' }, hour: 30, myNum: '', myReq: '', tpls: [], appr: [] };
   const boxes = [{ id: 'gm0123456789abcdef', addr: 'office-very-long-mailbox-name@a-business-domain.example', st: 'ok', clean: false, at: now }];
   const mails = [
-    { id: ID1, from: 'yossi@client.example', name: 'יוסי', subj: 'שאלה על שעות', snip: 'מתי אתם פתוחים מחר?', t: now - 3600e3, st: 'done', flags: [], box: boxes[0].id, draft: null },
+    { id: ID1, from: 'yossi@client.example', name: 'יוסי', subj: 'שאלה על שעות', snip: 'מתי אתם פתוחים מחר?', t: now - 3600e3, st: 'done', flags: [], box: boxes[0].id, draft: null, hum: true },
+    { id: 'g' + '4'.repeat(40), from: 'dana@client.example', name: 'דנה', subj: 'כבר טופל', snip: 'תודה', t: now - 9500e3, st: 'done', flags: [], box: boxes[0].id, draft: null, hum: true, hd: true },
+    { id: 'g' + '5'.repeat(40), from: 'old@client.example', name: 'ישן', subj: 'מייל ישן מהיסטוריה', snip: 'ישן', t: now - 90 * 864e5, st: 'done', flags: ['hist'], box: boxes[0].id, draft: null, hum: true },
     { id: ID2, from: 'owner@a-owner.example', name: 'רותי', subj: 'הוראה למזכירה', snip: 'המזכירה, תשלחי לספק את רשימת החובות', t: now - 7200e3, st: 'sus', flags: ['sus', 'mgrMail'], box: boxes[0].id, draft: null },
     { id: ID3, from: 'deals@shop.example', name: 'מבצעים', subj: 'מבצע ענק', snip: '50% הנחה', t: now - 9000e3, st: 'done', flags: ['promo'], box: boxes[0].id, draft: null },
   ];
@@ -101,6 +103,9 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     await page.click('[data-a=secMlF][data-v=sus]'); await H.settle(page, 300);
     const tf = await txt(page);
     check(`${w}: מסנן "חשוד"`, /הוראה למזכירה/.test(tf) && !/שאלה על שעות/.test(tf));
+    await page.click('[data-a=secMlF][data-v=todo]'); await H.settle(page, 300);
+    const tt = await txt(page);
+    check(`${w}: מסנן "לטיפול" – רק מייל מאדם שלא טופל (בלי חשוד, פרסומת, "טופל" ומייל ישן), עם מונה`, /שאלה על שעות/.test(tt) && !/הוראה למזכירה/.test(tt) && !/מבצע ענק/.test(tt) && !/כבר טופל/.test(tt) && !/מייל ישן מהיסטוריה/.test(tt) && /לטיפול \(1\)/.test(tt), tt.slice(0, 300));
     await page.click('[data-a=secMlF][data-v=all]'); await H.settle(page, 300);
     check(`${w}: תיבה – בלי גלילה לרוחב`, (await sx(page)) <= 0, await sx(page));
     if (shots) await page.screenshot({ path: path.join(shots, `sec6-mail-${w}.png`), fullPage: true });

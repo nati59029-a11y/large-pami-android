@@ -3,7 +3,7 @@
 // המודל מחזיר JSON לפי הסכימה למטה; השרת (שלב 8) מסנן ומתרגם אותו לשדות srun/{runId}/ai/{slot} (חוזה 4.10).
 // דיוק הזיהוי: (לא מאומת) עד ניסוי בטלפון. התאמות לתמונות מצלמות אבטחה מבוססות על 5 צילומי מסך אמיתיים (לא על ריצת מודל).
 // הערה למממש: הקשר (סוג חנות, הערות קבועות, "מה אמור להיות", תאריך) מגיע מהשרת בלבד, ולא מהלקוח. buildShelfPrompt מנקה אותו ומקצר.
-const VERSION = 3; // נכנס ל-ai.ver. מעלים בכל שינוי מהותי בטקסט.
+const VERSION = 4; // נכנס ל-ai.ver. מעלים בכל שינוי מהותי בטקסט. 4 = שלב 20א: slot_guess / slot_conf (זיהוי המקטע מתוך מועמדים)
 
 // ערכי iss[].k – זהים לחוזה 4.10. השרת מסנן כל ערך אחר.
 const ISSUE_KINDS = ['noprice', 'pricepos', 'promoexp', 'hole', 'low', 'damaged', 'fallen', 'upside', 'face', 'order', 'misplaced', 'missing'];
@@ -19,6 +19,7 @@ const BASE = 'אתה בודק מדפים בחנות קמעונאית בישרא�
   'החזר JSON בלבד, בלי טקסט לפני או אחרי ובלי ```: ' +
   '{"st":"ok"|"issue"|"review"|"bad"|"person","conf":מספר 0..1,' +
   '"not_this_shelf":true או false,' +
+  '"slot_guess":"מזהה מקטע מרשימת המועמדים או null","slot_conf":0..1,' +
   '"iss":[{"k":"סוג","sev":1..3,"conf":0..1,"box":[x,y,w,h] או null,"t":"הסבר בעברית עד 150 תווים","warn":true או false}],' +
   '"cat":"קטגוריה בעברית או null","cat_conf":0..1,' +
   '"prods":[{"n":"שם מוצר בעברית כפי שהוא כתוב","c":"קטגוריה","box":[x,y,w,h]}],' +
@@ -58,6 +59,8 @@ const BASE = 'אתה בודק מדפים בחנות קמעונאית בישרא�
   'ביטחון (conf): 0.8 ומעלה = ברור; 0.5–0.79 = סביר; מתחת ל-0.5 = ניחוש. בעיה שה-conf שלה מתחת ל-0.6 אינה בעיה: החזר st:"review" ובתוך iss רשום אותה עם conf מתחת ל-0.6 ו-warn:true, כדי שמנהל יבדוק. st:"issue" רק כשכל הבעיות ב-iss עם conf 0.6 ומעלה. ' +
   'בעיה שאתה בטוח בה (0.8 ומעלה) עדיפה על כמה בעיות לא בטוחות. ' +
   'not_this_shelf = true רק אם יש צילום קודם בהקשר והמדף בתמונה נראה בבירור מדף אחר. ' +
+  'slot_guess: רק כשבהקשר יש "מקטעים מועמדים". החזר את המזהה (כפי שהוא כתוב) של המקטע שהתמונה מתאימה לו לפי המוצרים והקטגוריה, ו-slot_conf = כמה אתה בטוח. ' +
+  'אם התמונה מתאימה למקטע הנוכחי, או שאין מספיק מידע להכריע (למשל אין מוצרים קריאים או שהמועמדים דומים) – החזר את המקטע הנוכחי עם conf נמוך או null. אל תמציא מזהה שאינו ברשימה. ' +
   'cat = קטגוריית המדף בעברית (למשל "כוסות חד-פעמיות", "מפיות", "כלי הגשה זכוכית"); cat_conf = כמה אתה בטוח. ' +
   'prods: עד 60 מוצרים, רק אלה ששמם קריא בבירור בעברית (או במותג מודפס), בשם כפי שכתוב. אל תוסיף מוצר שאינך מצליח לקרוא; תיאור כללי כמו "צנצנות זכוכית" רשום כ-cat ולא כ-prods. ' +
   'miss: רק כשיש צילום קודם או רשימת "מה אמור להיות" בהקשר, ורק מוצר שאתה בטוח שאינו בתמונה ואין מסתירים את מקומו. why="prev" = היה בצילום הקודם, why="exp" = ברשימת "מה אמור להיות". ' +
@@ -68,7 +71,9 @@ const BASE = 'אתה בודק מדפים בחנות קמעונאית בישרא�
 const WAREHOUSE = ' זה מקטע במחסן, לא בחנות: אל תבדוק מחירים ואל תדווח noprice, pricepos או promoexp. ' +
   'בדוק רק סדר, נפילות, פגמים, חורים ומוצרים על הרצפה במעברים.';
 
-// ctx: { kind:'s'|'w', storeType, notes:[...], expected:[...], prev:{date,cat,prods:[...]}|null, today:'YYYY-MM-DD', recN, cats:[...], catMode:'list'|'ai'|'mix', hi:'top'|'bottom'|null, cctv:bool }
+// ctx: { kind:'s'|'w', storeType, notes:[...], expected:[...], prev:{date,cat,prods:[...]}|null, today:'YYYY-MM-DD', recN, cats:[...], catMode:'list'|'ai'|'mix', hi:'top'|'bottom'|null, cctv:bool,
+//        cands?: [{ id, label, cat, prods:[...] }] – שלב 20א: מקטעים מועמדים (הראשון = הנוכחי), רק מהשרת }
+const RE_CAND = /^f[0-9]{1,4}-[ab]-[0-9]{1,2}_[atb]$/;
 function clean(s, n) { return String(s == null ? '' : s).replace(/[\r\n\t]+/g, ' ').replace(/[{}"\\]/g, ' ').trim().slice(0, n); }
 function list(a, maxN, maxLen) { return (Array.isArray(a) ? a : []).slice(0, maxN).map(function (x) { return clean(x, maxLen); }).filter(Boolean); }
 
@@ -91,6 +96,14 @@ function buildShelfPrompt(ctx) {
   if (ctx.prev && typeof ctx.prev === 'object') {
     const pp = list(ctx.prev.prods, 30, 40);
     hint.push('הצילום הקודם של המדף' + (ctx.prev.date ? ' (' + clean(ctx.prev.date, 10) + ')' : '') + (ctx.prev.cat ? ', קטגוריה: ' + clean(ctx.prev.cat, 30) : '') + (pp.length ? ', מוצרים שזוהו: ' + pp.join(', ') : '') + '. הצילום הקודם עצמו לא מצורף.');
+  }
+  // שלב 20א: מקטעים מועמדים (עד 8). מזהה לא תקין – לא נכנס
+  const cands = (Array.isArray(ctx.cands) ? ctx.cands : []).filter(function (c) { return c && typeof c.id === 'string' && RE_CAND.test(c.id); }).slice(0, 8);
+  if (cands.length > 1) {
+    hint.push('מקטעים מועמדים (העובד אמור לצלם את הראשון, אבל ייתכן שצילם מקטע שכן; זהה לפי המוצרים והקטגוריה): ' + cands.map(function (c, i) {
+      const pp = list(c.prods, 15, 40);
+      return c.id + (i === 0 ? ' (הנוכחי)' : '') + (c.label ? ' – ' + clean(c.label, 60) : '') + (c.cat ? ', קטגוריה: ' + clean(c.cat, 30) : '') + (pp.length ? ', מוצרים: ' + pp.join(', ') : c.cat ? '' : ', אין מידע קודם');
+    }).join(' | ') + '.');
   }
   const rn = Math.max(0, Math.min(10, ctx.recN == null ? 3 : (ctx.recN | 0)));
   hint.push('מספר המלצות מרבי: ' + rn + (rn === 0 ? ' (החזר recs ריק)' : '') + '.');
@@ -137,6 +150,8 @@ function checkShelfResponse(r, opts) {
     if (x && x.box != null && !isBox(x.box)) e.push('recs[' + i + '].box');
   });
   if (opts.recN != null && r.recs && r.recs.length > opts.recN) e.push('יותר המלצות מהמותר');
+  if (r.slot_guess != null && (typeof r.slot_guess !== 'string' || !RE_CAND.test(r.slot_guess))) e.push('slot_guess');
+  if (r.slot_conf != null && !isNum01(r.slot_conf)) e.push('slot_conf');
   return e;
 }
 

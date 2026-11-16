@@ -12,7 +12,7 @@ if(!U||typeof ACT==='undefined'||typeof V==='undefined'||typeof CHG==='undefined
 const esc2=U.esc2;
 /* ספי איכות במכשיר – (לא מאומת) – ערכי פתיחה, לכוונון אחרי בדיקה בטלפון בחנות אמיתית */
 const SHARP_MIN=25,DARK_MAX=45,FULL=1600,FULL_MAX=1400000,THUMB=320;
-const C={own:'',rid:'',run:null,map:null,slots:[],groups:[],cur:'',open:'',ph:{},loc:{},rt:{},tl:[],err:'',busy:0,msg:'',pend:null,vp:'',cache:0,qn:0,qf:0,qfm:'',fl:0,mg:null,mgAt:0,mgErr:'',mgBusy:0,staff:null};
+const C={own:'',rid:'',run:null,map:null,slots:[],groups:[],cur:'',open:'',ph:{},loc:{},rt:{},tl:[],err:'',busy:0,msg:'',pend:null,vp:'',cache:0,qn:0,qf:0,qfm:'',fl:0,mg:null,mgAt:0,mgErr:'',mgBusy:0,staff:null,sg:{},ak:{},mvb:0};
 U.C=C;
 const me=()=>(SY&&SY.bizId||'')+'|'+(SY&&SY.uid||'');
 const loggedIn=()=>!!(SY&&SY.refresh&&SY.uid);
@@ -98,6 +98,7 @@ async function addEv(k){const t=Date.now();C.tl=mergeTl(C.tl,[{k,t}]);lsS('s3t:'
 const b64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]||'');r.onerror=()=>rej(r.error);r.readAsDataURL(b)});
 /* שלב 11: עזרים לאשף ולכרטיס המדף (הקטנה, בדיקת חדות/חשיכה, base64, מזהה בקשה) */
 U.prep=prep;U.badOf=badOf;U.b64=b64;U.qid=qid;U.blobOf=blobOf;U.decode=decode;
+const sugOk=g=>!!(g&&typeof g.s==='string'&&/^f[0-9]{1,4}-[ab]-[0-9]{1,2}_[atb]$/.test(g.s));
 const PERM=/^(bad-|not-|no-|too-|full$|run-closed|feature-off|stale)/;
 function mark(run,slot,v){if(run!==C.rid||!slot)return;if(v)C.loc[slot]=v;else delete C.loc[slot];lsS('s3d:'+run,C.loc)}
 async function flush(){
@@ -108,7 +109,9 @@ async function flush(){
    try{
     if(r.k==='ev')await U.fn('s3Log',{qid:r.qid,run:r.run,ev:r.ev,at:r.at});
     else{const x=await U.fn('shelfCheck',{qid:r.qid,mode:'run',run:r.run,slot:r.slot,at:r.at,src:r.src,rt:r.rt,img:await b64(r.img),th:await b64(r.th)});
-     if(r.run===C.rid){if(x&&(x.person||x.st==='person'))C.ph[r.slot]={person:true};else if(C.ph[r.slot])delete C.ph[r.slot]}}
+     if(r.run===C.rid){if(x&&(x.person||x.st==='person'))C.ph[r.slot]={person:true};else if(C.ph[r.slot])delete C.ph[r.slot];
+      /* שלב 20ג: הצעת מקטע (sug) והערת "לא המדף הנכון" (ask) מהתשובה – מוצגות כבאנר */
+      if(x&&sugOk(x.sug))C.sg[r.slot]={s:x.sug.s,c:+x.sug.c};else delete C.sg[r.slot];if(x&&x.ask===true)C.ak[r.slot]=1;else delete C.ak[r.slot]}}
     await qDel(r.id);if(r.k==='ph')mark(r.run,r.slot,'s');
    }catch(e){
     if(e&&e.offline)break;
@@ -126,11 +129,11 @@ ACT.s3cRetry=async()=>{try{for(const r of (await qAll()).filter(r=>r.own===me()&
 ACT.s3cDrop=()=>ask('להסיר את הפריטים שלא נשלחו? התמונות שלהם יימחקו מהטלפון והמקטעים יסומנו כחסרים.',async()=>{try{for(const r of (await qAll()).filter(r=>r.own===me()&&r.fail)){await qDel(r.id);if(r.k==='ph')mark(r.run,r.slot,'')}}catch(e){}await recount();rerender()},'כן, הסר');
 
 /* ---------- פתיחת סבב ---------- */
-async function loadPh(){const o={};let pt='';try{for(let i=0;i<20;i++){const j=await fsx('/srun/'+C.rid+'/ph?pageSize=300&mask.fieldPaths=person&mask.fieldPaths=ask'+(pt?'&pageToken='+encodeURIComponent(pt):''));
- for(const d of ((j&&j.documents)||[])){const f=U.dec(d)||{};o[d.name.split('/').pop()]={person:f.person===true}}pt=(j&&j.nextPageToken)||'';if(!pt)break}C.ph=o}catch(e){}}
+async function loadPh(){const o={},sg={},ak={};let pt='';try{for(let i=0;i<20;i++){const j=await fsx('/srun/'+C.rid+'/ph?pageSize=300&mask.fieldPaths=person&mask.fieldPaths=ask&mask.fieldPaths=sug'+(pt?'&pageToken='+encodeURIComponent(pt):''));
+ for(const d of ((j&&j.documents)||[])){const f=U.dec(d)||{};const id=d.name.split('/').pop();o[id]={person:f.person===true};if(sugOk(f.sug))sg[id]={s:f.sug.s,c:+f.sug.c};if(f.ask===true)ak[id]=1}pt=(j&&j.nextPageToken)||'';if(!pt)break}C.ph=o;C.sg=sg;C.ak=ak}catch(e){}}
 async function openRun(id){
  if(!U.feat()||!loggedIn()||!/^[A-Za-z0-9_-]{6,80}$/.test(id||''))return;
- Object.assign(C,{own:me(),rid:id,run:null,map:null,slots:[],groups:[],err:'',busy:1,msg:'',pend:null,cur:'',open:'',ph:{},cache:0});
+ Object.assign(C,{own:me(),rid:id,run:null,map:null,slots:[],groups:[],err:'',busy:1,msg:'',pend:null,cur:'',open:'',ph:{},sg:{},ak:{},mvb:0,cache:0});
  if(cur().v!=='st3c')go('st3c');else rerender();
  let run=null,map=null;
  try{const r=await U.fn('s3View',{runId:id});run=r&&r.run;if(!run||!Array.isArray(run.bays))throw new Error('x');map=await U.get('/smap/'+run.map);if(!map||map.del===1){const x=new Error('x');x.reason='no-map';throw x}
@@ -182,6 +185,19 @@ ACT.s3cEv=el=>{const k=el.dataset.k;if(!/^[sper]$/.test(k))return;
  const go2=async()=>{await addEv(k);rerender();flush()};
  if(k==='e'){const m=counts().m;return ask(m?`יש ${m} מקטעים שלא צולמו. לסיים בכל זאת?`:'לסיים את הסבב?',go2,'כן, סיימתי')}
  go2()};
+/* שלב 20ג: הצעת "נראה כמו מקטע אחר". "להשאיר" נשמר בטלפון בלבד (run+slot+s) */
+const kpKey=(f,t)=>f+'>'+(t||'?');
+const kept=(f,t)=>{const k=lsG('s3k:'+C.rid);return !!(k&&k[kpKey(f,t)])};
+const MVE={'same-slot':'זה אותו מקטע.','no-photo':'אין תמונה במקטע המקורי (אולי כבר הועברה).','bad-slot':'המקטע לא תקין.','bad-run':'הסבב לא תקין.','no-run':'הסבב לא נמצא.'};
+function sugList(){const o=[];for(const s of C.slots){const f=s.slot,g=C.sg[f];if(g&&slotOf(g.s)&&g.s!==f&&!kept(f,g.s))o.push({f,t:g.s});else if(C.ak[f]&&!kept(f,''))o.push({f,ask:1})}return o}
+function sugHtml(){const L=sugList();if(!L.length)return '';const x=L[0],a=slotOf(x.f),n=L.length>1?` <small>(עוד ${L.length-1})</small>`:'';
+ if(x.ask)return `<div class="ban s3warn s3sug" role="alert"><b>ייתכן שזה לא המדף הנכון</b>${n}<br>התמונה של ${esc2(lbl(a))} לא נראית כמו המדף הזה. כדאי לבדוק שצילמתם את המקטע הנכון.<div class="row s3row"><button class="btn g" data-a="s3cSugKeep" data-f="${esc2(x.f)}" data-t="">הבנתי</button></div></div>`;
+ return `<div class="ban s3warn s3sug" role="alert"><b>נראה כמו מקטע ${esc2(lbl(slotOf(x.t)))}</b>${n}<br>התמונה ששלחתם למקטע ${esc2(lbl(a))} נראית כמו מקטע אחר. להעביר אותה?${C.ak[x.f]?' ייתכן גם שזה לא המדף הנכון.':''}<div class="row s3row"><button class="btn" data-a="s3cSugMove" data-f="${esc2(x.f)}" data-t="${esc2(x.t)}">להעביר</button><button class="btn g" data-a="s3cSugKeep" data-f="${esc2(x.f)}" data-t="${esc2(x.t)}">להשאיר</button></div></div>`}
+ACT.s3cSugKeep=el=>{const k=lsG('s3k:'+C.rid)||{};k[kpKey(el.dataset.f,el.dataset.t)]=1;lsS('s3k:'+C.rid,k);rerender()};
+ACT.s3cSugMove=async el=>{const from=el.dataset.f,to=el.dataset.t;if(C.mvb||!from||!to)return;C.mvb=1;
+ try{await U.fn('s3MovePh',{run:C.rid,from,to});mark(C.rid,from,'');delete C.ph[from];delete C.sg[from];delete C.ak[from];delete C.ak[to];delete C.sg[to];mark(C.rid,to,'s');C.msg='התמונה הועברה למקטע '+lbl(slotOf(to))}
+ catch(e){toast(e&&e.offline?U.errText(e):MVE[e&&e.reason]||U.errText(e,'לא הצלחנו להעביר את התמונה'))}
+ C.mvb=0;rerender()};
 ACT.s3cMap=()=>go('st3');
 
 /* ---------- המסך ---------- */
@@ -222,8 +238,8 @@ V.st3c=()=>{const T='צילום מדפים';
  h+=`<div class="s3info"><b>${ts==='idle'?'עוד לא התחלתם':ts==='work'?'בעבודה':ts==='pause'?'בהפסקה':'סיימתם את הסבב'}</b>${C.tl.length?` · זמן עבודה ${workMin()} דקות`:''}${C.tl.length?`<br><small>${C.tl.map(e=>TN[e.k]+' '+hm(e.t)).join(' · ')}</small>`:''}
   <div class="row s3row">${ts==='idle'?`<button class="btn" data-a="s3cEv" data-k="s">התחלתי</button>`:ts==='work'?`<button class="btn g" data-a="s3cEv" data-k="p">הפסקה</button><button class="btn" data-a="s3cEv" data-k="e">סיימתי</button>`:ts==='pause'?`<button class="btn" data-a="s3cEv" data-k="r">המשך</button><button class="btn g" data-a="s3cEv" data-k="e">סיימתי</button>`:`<button class="btn g" data-a="s3cEv" data-k="s">המשך לעבוד</button>`}</div></div>`;
  if(C.busy)h+=`<div class="s3info" role="status" id="s3cvp">${esc2(C.vp||C.msg||'רגע…')}</div>`;
- else{h+=curCard();if(C.msg)h+=`<div class="s3info" role="status">${esc2(C.msg)}</div>`}
- h+=`<p class="note s3note">מסלול מומלץ לפי מספור הגופים, מהכניסה. אפשר ללחוץ על כל מקטע ולצלם אותו.</p>`;
+ else{h+=sugHtml()+curCard();if(C.msg)h+=`<div class="s3info" role="status">${esc2(C.msg)}</div>`}
+ h+=`<p class="note s3note">מסלול מומלץ לפי מספור הגופים, מהכניסה. אפשר ללחוץ על כל מקטע ולצלם אותו. מספיק לצלם – אם התמונה נראית שייכת למקטע אחר, תופיע הצעה להעביר אותה.</p>`;
  for(const g of C.groups){const gd=g.L.filter(s=>doneOf(s.slot)).length,o=C.open===g.fx;
   h+=`<div class="s3g"><button class="hd" data-a="s3cGrp" data-f="${g.fx}" aria-expanded="${o}"><span>גוף ${esc2(g.num||g.fx)}${g.name?' ('+esc2(g.name)+')':''}${g.glass?' · מקרר':''}</span><span>${gd}/${g.L.length}</span></button>${o?chips(g):''}</div>`}
  h+=`<div class="row s3row"><button class="btn g" data-a="s3cMap">מפת החנות</button></div></div>`;
