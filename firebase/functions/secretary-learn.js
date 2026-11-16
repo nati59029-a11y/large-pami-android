@@ -216,6 +216,7 @@ async function saveRoute(db, b, uid, r, src, now, rid) {
 // hold:true – בקשה של מסך "לטיפול": קודם רק הכללים; אין כלל "לטיפול" → תשובה מיידית בלי שאר השאילתות. לא נרשמת כניסה
 // ===================================================================================
 const EY_OPEN = 30, EY_DID = 30, EY_DAYS = 7;
+const MC_SCAN = 100; // "מול העיניים": כמה הודעות שיחה אחרונות (24 שעות) נבדקות לכרטיסי מדיה פתוחים
 const DRAFT_KIND = { open: 'הודעת פתיחה', ack: '"קיבלנו"' };
 async function eyes(g, input, now) {
   const { who, db, brLimited, brs, cfg } = g;
@@ -236,7 +237,7 @@ async function eyes(g, input, now) {
   const out3 = !brLimited; // טיוטות מייל/ווצאפ – ערוצים של כל העסק; מנהל עם הגבלת סניפים לא רואה אותן כאן
   const empty = { docs: [] };
   const q = (p) => p.get().catch((e) => { logger.warn('secLearn eyes: query failed', { code: e && e.code }); return empty; });
-  const [fp, cp, cu, no, dp, ip, ns, ml, cs, ds, is, rs] = await Promise.all([
+  const [fp, cp, cu, no, dp, ip, ns, ml, cs, ds, is, rs, mm] = await Promise.all([
     q(db.collection('sec_facts').where('st', '==', 'prop').limit(20)),
     q(db.collection('sec_cal').where('uid', '==', who.uid).where('st', '==', 'prop').limit(20)),
     q(db.collection('sec_cal').where('d', '>=', today).where('d', '<=', K.addDays(today, EY_DAYS)).limit(300)),
@@ -249,6 +250,9 @@ async function eyes(g, input, now) {
     out3 ? q(db.collection('sec_draft').where('t', '>', since).limit(40)) : empty,
     q(db.collection('sec_inv').where('t', '>', since).limit(40)),
     cfg.learn ? q(db.collection('sec_mrule').where('uid', '==', who.uid).limit(L.MAX_RULES + 5)) : empty,
+    // 15.11.2026 (קול, תמונה וסרטון): הודעות עם כרטיס מדיה פתוח – רק מ-24 השעות האחרונות (התמונה נשמרת רק בזיכרון המכשיר).
+    // שואלים לפי t (שדה אחד, בלי אינדקס מורכב), מהחדשה לישנה, ומסננים mc בזיכרון: כרטיסים ישנים שלא הוכרעו (mc נשאר true) לא דוחקים כרטיסים חדשים
+    q(db.collection(`sec_chat/${who.uid}/m`).where('t', '>', now - 864e5).orderBy('t', 'desc').limit(MC_SCAN)),
   ]);
   const MORN = RM.MORNING;
   const IVK = { inv: 'חשבונית', cr: 'הודעת זיכוי', rcpt: 'קבלה', dn: 'תעודת משלוח', chk: 'צ׳ק', unk: 'מסמך', bad: 'קובץ שלא נקלט', long: 'קובץ ארוך' };
@@ -262,7 +266,18 @@ async function eyes(g, input, now) {
   for (const d of ip.docs) { const x = d.data(); if (!brOk(x)) continue; const a = x.k === 'chk' ? x.f && x.f.amt : x.f && x.f.total; open.push({ k: 'inv', id: 'i:' + d.id, t: x.t || 0, title: (IVK[x.k] || 'מסמך') + ' מחכה לאישור' + (supOf(x) ? ' – ' + supOf(x) : ''), sub: typeof a === 'number' ? a.toLocaleString('he-IL') + ' ₪' : '', go: { tab: 'inv' }, r: { k: 'feed', id: 'inv' } }); }
   const calMine = (e) => e && e.st === 'ok' && (e.uid === '' || e.uid === who.uid);
   for (const d of cu.docs) { const e = d.data(); if (!calMine(e) || !(e.rem === true || e.src === 'sec' || e.src === 'wa')) continue; open.push({ k: 'rem', id: 'e:' + d.id, t: Date.parse(e.d + 'T' + (e.tm || MORN) + ':00Z') || 0, title: L.remLine(e, today, MORN), go: { tab: 'cal' }, r: { k: 'feed', id: 'rem' }, soon: true }); }
-  const ord = { appr: 0, draft: 1, note: 2, inv: 3, rem: 4 };
+  const MDOC = { inv: 'חשבונית', rcpt: 'קבלה', dn: 'תעודת משלוח', z: 'דוח Z' };
+  for (const d of mm.docs) {
+    const x = d.data(); const t = x.t || 0;
+    if (x.mc !== true || now - t > 864e5 || !Array.isArray(x.cards)) continue;
+    const via = x.mvia === 'video' ? 'video' : 'image';
+    for (const c of x.cards) {
+      if (!c || c.st || typeof c.id !== 'string' || (c.k !== 'scan' && c.k !== 'task')) continue;
+      if (c.k === 'scan') open.push({ k: 'media', id: 'md:' + c.id, t, title: (MDOC[c.doc] || 'מסמך') + ' מחכה לסריקה', sub: 'מהתמונה ששלחת בשיחה', go: { tab: 'chat' }, act: { k: 'scan', id: c.id, mid: d.id, doc: MDOC[c.doc] ? c.doc : 'inv', via }, r: { k: 'chat', id: d.id } });
+      else open.push({ k: 'media', id: 'md:' + c.id, t, title: 'לפתוח משימה? ' + cut(c.txt, 110), go: { tab: 'chat' }, act: { k: 'task', id: c.id, mid: d.id, txt: cut(c.txt, 300), via }, r: { k: 'chat', id: d.id } });
+    }
+  }
+  const ord = { appr: 0, media: 1, draft: 2, note: 3, inv: 4, rem: 5 };
   open.sort((a, b) => (ord[a.k] - ord[b.k]) || (a.soon ? a.t - b.t : b.t - a.t));
   // מה עשיתי מאז הכניסה הקודמת
   const did = [];

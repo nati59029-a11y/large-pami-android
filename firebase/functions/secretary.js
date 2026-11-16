@@ -6,6 +6,8 @@
 //                    mgr: { <uid>: { cv (מזהה נוסח ההסכמה), ca (מתי אושר, ms), nm (שם המזכירה), ad ('m'|'f' – פנייה), call } },
 //                    upd, updBy }                                       – מנהלי העסק קוראים (חוקים); כתיבה רק כאן
 //   sec_cfg/cap    { capCents, upd, updBy }                             – תקרה חודשית (82). מנהל־על בלבד (83: מנהל העסק רואה רק אחוז)
+//   sec_cfg/media  { aud: שניות|0, img: bool, vid: שניות|0, upd, updBy } – 15.11.2026 (קול, תמונה וסרטון למזכירה, secretary-media.js): הגבלות לכל עסק.
+//                    0 = כבוי. אין מסמך = ברירת מחדל (MEDIA_DEF). מנהל־על בלבד כותב (secAdminSetCfg media); secState מחזיר למנהל רק את הערכים
 //   sec_log/{id}   { t, by, who: 'mgr'|'sa'|'sec'|'auto', act, ch, tgt?, note? } – הוספה בלבד (10.7)
 //   sec_chat/{uid}/m/{id} { t, role: 'u'|'a', text, src?, asOf?, mode?, deep? } – שלב 2: נכתב רק כאן (secChat); נקרא דרך secChatLoad / secAdminReadChat
 //   sec_cfg/main   + שלב 2: mirror (מתג המראה, 45; ברירת מחדל פעיל), cfTh (סף תזרים שהמנהל אישר, 51), nr { <מפתח רעיון>: עד מתי לא להציע (56) }
@@ -92,6 +94,14 @@ function cfgOf(snap, bizId) {
   };
 }
 const empDefault = (bizId) => bizId === T.BIZ0;
+// 15.11.2026 (קול, תמונה וסרטון): ברירות מחדל וגבולות שהשרת אוכף (קול עד 300 שניות, סרטון עד 60). 0 = כבוי
+const MEDIA_DEF = Object.freeze({ aud: 120, img: true, vid: 60 });
+const MEDIA_MAX = Object.freeze({ aud: 300, vid: 60 });
+function mediaOf(snap) {
+  const d = snap && snap.exists ? snap.data() || {} : {};
+  const sec = (v, max, def) => (Number.isInteger(v) && v >= 0 && v <= max ? v : def);
+  return { aud: sec(d.aud, MEDIA_MAX.aud, MEDIA_DEF.aud), img: typeof d.img === 'boolean' ? d.img : MEDIA_DEF.img, vid: sec(d.vid, MEDIA_MAX.vid, MEDIA_DEF.vid) };
+}
 
 function logData(by, who, act, extra) {
   const o = { t: Date.now(), by: String(by || ''), who, act: String(act).slice(0, 40), ch: 'app' };
@@ -141,8 +151,9 @@ async function secState(request) {
   if (!consented) out.consent = CONSENT;
   // שלב 2: מתג המראה (45), סף התזרים שאושר (51), אחוז ניצול בלבד (83) ומצב חיסכון (84). בלי סכומי עלות ובלי התקרה עצמה
   const db = T.tdb();
-  const [use, cap, mir, un] = await Promise.all([db.doc('sec_cfg/use').get(), db.doc('sec_cfg/cap').get(), cfg.mirror ? db.doc('sec_mirror/fin').get() : null,
-    consented ? db.collection(`sec_note/${who.uid}/n`).where('seen', '==', false).count().get() : null]);
+  const [use, cap, mir, un, med] = await Promise.all([db.doc('sec_cfg/use').get(), db.doc('sec_cfg/cap').get(), cfg.mirror ? db.doc('sec_mirror/fin').get() : null,
+    consented ? db.collection(`sec_note/${who.uid}/n`).where('seen', '==', false).count().get() : null, db.doc('sec_cfg/media').get()]);
+  out.media = mediaOf(med); // 15.11.2026: אילו כפתורי קול/תמונה/סרטון להציג ועד כמה שניות (רק הערכים, בלי עלות). השרת אוכף בכל מקרה
   const u = usageOf(use, capOf(cap), Date.now());
   // שלב 4: הגדרות ההתראות האישיות + מספר התראות שלא נקראו (שורה בכרטיס הבית – 11)
   out.nt = RM.ntOf(me); out.types = Object.fromEntries(Object.entries(RM.TYPES).map(([k, v]) => [k, v.l]));
@@ -216,7 +227,8 @@ function usageOf(snap, capCents, now) {
 }
 
 // מונה: קצב לכל מנהל + עלות (שמירה מראש). reserve=false – רק קצב (תשובה שלא עולה כסף)
-async function meter(db, uid, tier, reserve, rate) {
+// maxMc (אופציונלי, 15.11.2026 – סרטון): גודל השמירה מראש במקום reserveOf(tier). קריאות קיימות – בלי שינוי
+async function meter(db, uid, tier, reserve, rate, maxMc) {
   const RL = rate || { hour: RATE_HOUR, day: RATE_DAY };
   const now = Date.now();
   const useRef = db.doc('sec_cfg/use');
@@ -234,7 +246,7 @@ async function meter(db, uid, tier, reserve, rate) {
     if (reserve && !u.saving) {
       // מה שנשאר מהתקרה (החודשית והיומית). "חשבי לעומק" רק כשנשאר מספיק לעלות המרבית; מהיר – עד מה שנשאר
       const left = Math.min(u.capMc - u.mc, u.capMc / DAY_CAP_DIV - u.dmc);
-      const max = reserveOf(tier);
+      const max = Number.isInteger(maxMc) && maxMc > 0 ? maxMc : reserveOf(tier);
       if (tier === 'deep' && left < max) throw new HttpsError('resource-exhausted', 'לא נשאר מספיק מתקרת השימוש ל"חשבי לעומק". אפשר לשאול שאלה רגילה.', { reason: 'deep-over-cap' });
       reserved = Math.max(1, Math.min(max, Math.floor(left)));
       upd.mc += reserved; upd.dmc += reserved;
@@ -407,7 +419,7 @@ function msgOut(id, x, text) {
   const o = { id, t: x.t || null, role: x.role === 'a' ? 'a' : 'u', text: text !== undefined ? text : typeof x.text === 'string' ? x.text : '' };
   if (x.sens === true) o.sens = true;
   if (Array.isArray(x.src)) o.src = x.src.slice(0, 12);
-  for (const k of ['asOf', 'mode', 'deep', 'stale', 'ideas', 'th', 'cards']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
+  for (const k of ['asOf', 'mode', 'deep', 'stale', 'ideas', 'th', 'cards', 'via', 'mvia']) if (x[k] !== undefined && x[k] !== null) o[k] = x[k];
   return o;
 }
 
@@ -422,6 +434,9 @@ async function secChat(request) {
   const text = input.text.replace(CTRL, '').trim();
   if (!text) throw bad('bad-text', 'כתבו שאלה');
   const deep = input.deep === true;
+  // 15.11.2026 (קול): הודעה שתומללה מהקלטה – נשמר רק סימון בהודעת המשתמש (בלי ההקלטה). ערך אחר – נדחה
+  if (input.via !== undefined && input.via !== null && input.via !== 'voice') throw bad('bad-via', 'ערך לא תקין');
+  const via = input.via === 'voice' ? 'voice' : '';
   const tier = deep ? 'deep' : 'fast';
   const now = Date.now();
   const payOn = cfg.pay[who.uid] === true && !brLimited;
@@ -571,9 +586,9 @@ async function secChat(request) {
   if (sensUsed) {
     // תיקון סבב 1: תור שהשתמש במידע רגיש – שאלה ותשובה נשמרות מוצפנות (sec-sens, AAD = נתיב ההודעה), בלי טקסט קריא במסד ובגיבוי
     const key = SENS.SEC_SENS_KEY.value();
-    b.set(ua, { t: now, role: 'u', text: '', sens: true, box: SENS.seal(key, who.bizId, ua.path.replace(/^b\/[^/]+\//, ''), { text }), deep });
+    b.set(ua, Object.assign({ t: now, role: 'u', text: '', sens: true, box: SENS.seal(key, who.bizId, ua.path.replace(/^b\/[^/]+\//, ''), { text }), deep }, via ? { via } : {}));
     am.sealed = { text: '', sens: true, box: SENS.seal(key, who.bizId, aa.path.replace(/^b\/[^/]+\//, ''), { text: reply }) };
-  } else b.set(ua, { t: now, role: 'u', text, deep });
+  } else b.set(ua, Object.assign({ t: now, role: 'u', text, deep }, via ? { via } : {}));
   if (asOf && srcs.some((x) => x.at === asOf)) am.asOf = asOf;
   if (stale) am.stale = true;
   if (ideas.length) am.ideas = ideas;
@@ -626,7 +641,7 @@ async function secAdminGet(request) {
   inputObject(request);
   const who = await superIn(request);
   const db = T.tdb();
-  const [cs, cap, admins] = await Promise.all([db.doc('sec_cfg/main').get(), db.doc('sec_cfg/cap').get(), adminsOf(db)]);
+  const [cs, cap, admins, med] = await Promise.all([db.doc('sec_cfg/main').get(), db.doc('sec_cfg/cap').get(), adminsOf(db), db.doc('sec_cfg/media').get()]);
   const cfg = cfgOf(cs, who.bizId);
   const consent = {};
   for (const [u, m] of Object.entries(cfg.mgr)) if (m && typeof m === 'object' && m.cv) consent[u] = { ver: m.cv, at: m.ca || null, cur: m.cv === CONSENT_VER };
@@ -637,6 +652,7 @@ async function secAdminGet(request) {
     sens: Object.fromEntries(admins.map((a) => [a.uid, cfg.sens[a.uid] === true])),
     capCents: cap.exists && Number.isInteger(cap.get('capCents')) ? cap.get('capCents') : null,
     rate: cfg.rate, rateDefault: { hour: RATE_HOUR, day: RATE_DAY },
+    media: mediaOf(med), mediaSet: med.exists, mediaDefault: MEDIA_DEF, mediaMax: MEDIA_MAX, // 15.11.2026: הגבלות קול/תמונה/סרטון לעסק
     admins, consent, consentVer: CONSENT_VER,
   };
 }
@@ -645,7 +661,7 @@ async function secAdminGet(request) {
 async function secAdminSetCfg(request) {
   const input = inputObject(request);
   const who = await superIn(request);
-  const known = ['mode', 'mainUid', 'emp', 'pay', 'sens', 'capCents', 'rate'];
+  const known = ['mode', 'mainUid', 'emp', 'pay', 'sens', 'capCents', 'rate', 'media'];
   for (const k of Object.keys(input)) if (!known.includes(k)) throw bad('bad-input', 'שדה לא מוכר: ' + String(k).slice(0, 30));
   const db = T.tdb();
   const [cs, admins] = await Promise.all([db.doc('sec_cfg/main').get(), adminsOf(db)]);
@@ -697,13 +713,28 @@ async function secAdminSetCfg(request) {
       upd.rate = { hour: r.hour, day: r.day }; notes.push('rate=' + r.hour + '/' + r.day);
     }
   }
+  let media; // 15.11.2026: undefined = בלי שינוי; null = חזרה לברירת המחדל (מחיקת המסמך); אובייקט = { aud?, img?, vid? } – רק מה שנשלח משתנה
+  if (input.media !== undefined) {
+    const m = input.media;
+    if (m === null) { media = null; notes.push('media=default'); }
+    else {
+      if (!m || typeof m !== 'object' || Array.isArray(m) || !Object.keys(m).length || Object.keys(m).some((k) => !['aud', 'img', 'vid'].includes(k))) throw bad('bad-media', 'הגבלות קול/תמונה/סרטון לא תקינות');
+      if (m.aud !== undefined && !(Number.isInteger(m.aud) && m.aud >= 0 && m.aud <= MEDIA_MAX.aud)) throw bad('bad-media', 'הודעה קולית: 0 (כבוי) עד ' + MEDIA_MAX.aud + ' שניות');
+      if (m.vid !== undefined && !(Number.isInteger(m.vid) && m.vid >= 0 && m.vid <= MEDIA_MAX.vid)) throw bad('bad-media', 'סרטון: 0 (כבוי) עד ' + MEDIA_MAX.vid + ' שניות');
+      if (m.img !== undefined && typeof m.img !== 'boolean') throw bad('bad-media', 'תמונות: כן/לא');
+      media = Object.assign(mediaOf(await db.doc('sec_cfg/media').get()), m);
+      notes.push('media=aud:' + media.aud + ',img:' + (media.img ? 1 : 0) + ',vid:' + media.vid);
+    }
+  }
   if (!notes.length) throw bad('bad-input', 'לא נשלח שום שינוי');
   const t = Date.now();
   const b = getFirestore().batch();
   const main = db.doc('sec_cfg/main');
   const fields = Object.assign({}, upd, { upd: t, updBy: who.uid });
-  // update עם נתיבי שדות (pay.<uid>) כשהמסמך קיים; יצירה ראשונה – set עם מפה מקוננת
-  if (cs.exists) b.update(main, fields);
+  // update עם נתיבי שדות (pay.<uid>) כשהמסמך קיים; יצירה ראשונה – set עם מפה מקוננת. שינוי של media בלבד – לא נוגע ב-sec_cfg/main
+  const mainTouched = Object.keys(upd).length > 0 || cap !== undefined;
+  if (!mainTouched) { /* רק הגבלות מדיה */ }
+  else if (cs.exists) b.update(main, fields);
   else {
     const first = { mode, mainUid, emp: upd.emp !== undefined ? upd.emp : empDefault(who.bizId), pay: {}, mgr: {}, upd: t, updBy: who.uid };
     for (const [k, v] of Object.entries(upd)) if (k.startsWith('pay.')) first.pay[k.slice(4)] = v;
@@ -713,6 +744,8 @@ async function secAdminSetCfg(request) {
   }
   if (cap === null) b.delete(db.doc('sec_cfg/cap'));
   else if (cap !== undefined) b.set(db.doc('sec_cfg/cap'), { capCents: cap, upd: t, updBy: who.uid });
+  if (media === null) b.delete(db.doc('sec_cfg/media'));
+  else if (media !== undefined) b.set(db.doc('sec_cfg/media'), { aud: media.aud, img: media.img, vid: media.vid, upd: t, updBy: who.uid });
   b.set(db.collection('sec_log').doc(), logData(who.uid, 'sa', 'cfg', { note: notes.join(',') }));
   b.set(auditRef(who.bizId), { by: who.uid, t, act: 'secAdminSetCfg', note: notes.join(',').slice(0, 500) });
   await b.commit();
@@ -919,7 +952,7 @@ exports.secBackupDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every da
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   CONSENT, CONSENT_VER, SEC_COLLS, SEC_ROOT_COLLS, SEC_SUBS, BACKUP_KEEP_DAYS, cfgOf, runSecBackup, restoreSecBackup, pruneSecBackups, enc, dec, dayKey,
-  usageOf, DEFAULT_CAP_CENTS, reserveOf, PREFS_HOUR, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
+  usageOf, capOf, DEFAULT_CAP_CENTS, reserveOf, MEDIA_DEF, MEDIA_MAX, mediaOf, msgOut, PREFS_HOUR, CHAT_MAX, FIN_MAX, RATE_HOUR, STALE_MS,
   // לשלב 3 (secretary-know.js): אותו שער הרשאה ואותו יומן
   gate, logData, hourKey, bad, deny, pre, wrap,
   // 15.11.2026 (צ'אט נקי): מצב כרטיס אישור בהודעה
