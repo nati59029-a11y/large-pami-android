@@ -458,6 +458,25 @@ public class PanoStitchCoreTest {
         assertTrue(Math.abs(Math.atan2(-Re[0][2], -Re[0][5]) / D - s.yawRef) < 1e-6, "frame 0 yaw stays yawRef");
     }
 
+    /** 16.11 (real capture: fov 51.9 / 50.6 / 56.1 from the starts 52 / 60 / 66): the fov comes from the ring closure of the matches,
+     *  so it must not depend on the first guess */
+    @Test
+    void fovIndependentOfStart() {
+        Scene s = scene(5, 0, 4, null);
+        double mn = 1e9, mx = -1e9;
+        StringBuilder sb = new StringBuilder("fov from different starts (true " + FOV_TRUE + "):");
+        for (double f0 : new double[]{55, 62, 70}) {
+            PanoStitchCore.Result r = stitch(s, 1024, f0, true);
+            sb.append(" ").append(f0).append(" -> ").append(f2(r.fovL)).append(" (pairs ").append(r.stats.inlierPairs).append(", corr ").append(f2(r.stats.meanCorrDeg)).append(")");
+            assertTrue(r.stats.optimized, "optimised from " + f0);
+            assertTrue(Math.abs(r.fovL - FOV_TRUE) < 0.5, "fov from start " + f0 + ": " + r.fovL);
+            mn = Math.min(mn, r.fovL); mx = Math.max(mx, r.fovL);
+            r.pano.release();
+        }
+        System.out.println(sb);
+        assertTrue(mx - mn < 0.3, "spread " + (mx - mn));
+    }
+
     @Test
     void blankWallsDoNotDiverge() {
         Scene s0 = scene(5, 0, 4, null);

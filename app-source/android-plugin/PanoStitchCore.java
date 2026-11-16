@@ -46,6 +46,11 @@ import java.util.List;
  * CLAHE + low SIFT contrast threshold; ratio test inside the sensor gate; RANSAC of a pure rotation on bearings (1.5 deg); two passes
  * (re-match with the pass-1 poses, gate 5 deg); smoothness prior between overlapping frames (frames without matches follow their
  * neighbours); log-domain gains (geometric mean 1) + shared radial vignetting; white pixels never darkened; 7 bands.
+ * Stability fixes 16.11 (photos of the same room, the fov came out 51.9 / 50.6 / 56.1 from the starts 52 / 60 / 66): pass 1 matching
+ * tolerates the whole fov range FOV_LO..FOV_HI (gate + RANSAC at several focals, threshold constant in pixels); the fov is the one at
+ * which the matched yaw steps of a row close the 360 degree ring (fixed in the LM, the priors cannot pull it); the LM residual scale
+ * no longer depends on the focal; a shared camera offset (same small rotation in every frame vs the sensor) is estimated; pairs that
+ * disagree with the rest are dropped; frames moved > 12 degrees on weak evidence are kept near the sensor.
  * Safety guard: run() throws IllegalStateException("native stitch refused: ...") if the optimisation is not applied or fewer than
  * Options.minPairFrac of the pairs overlapping >= 20% have matches (the caller then uses the JS stitching).
  * Frames are decoded one at a time (memory); progress callback; cancel() -> Cancelled.
@@ -77,11 +82,14 @@ public final class PanoStitchCore {
          *  or fewer than minPairFrac of the overlapping pairs have matches - the caller then uses the JS stitching */
         public boolean guard = true;
         public double minPairFrac = .25;
+        /** estimate a shared camera offset (the same small rotation in every frame between the camera and the orientation sensor) */
+        public boolean camOffset = true;
     }
 
     public static final class Stats {
         public int frames, pairs, inlierPairs, matches;
         public double rms0Deg, rmsDeg, fovL0, fovL, meanCorrDeg, maxCorrDeg, holesPct;
+        public double offsetDeg;        // shared camera offset (Options.camOffset); mean/maxCorrDeg are measured from the sensor pose + this offset
         public int guardPairs, guardHits; // safety guard: pairs with >= 20% overlap / of them with matches
         public double vigA, vigB;       // vignetting V(r) = exp(vigA r^2 + vigB r^4), r = radius / half diagonal (0 = none)
         public boolean optimized;
@@ -265,6 +273,9 @@ public final class PanoStitchCore {
         int B = Math.max(1, Math.min(7, o.bands)), A = 1 << B;
         int W = Math.max(4 * A, (int) Math.round(o.W / (2.0 * A)) * 2 * A), H = W / 2;
         Stats st = new Stats();
+        pw = new double[n];
+        java.util.Arrays.fill(pw, 1);
+        off = new double[]{1, 0, 0, 0, 1, 0, 0, 0, 1};
         st.frames = n;
         st.fovL0 = o.fovL;
         Fr[] F = new Fr[n];
@@ -305,58 +316,64 @@ public final class PanoStitchCore {
         // 2. pairs + matches
         long tm = System.currentTimeMillis();
         List<Pair> pairs = new ArrayList<>();
-        List<int[]> nb = new ArrayList<>(); // all overlapping pairs (by the sensor): smoothness of the corrections
-        for (int i = 0; i < n; i++) for (int j = i + 1; j < n; j++) {
-            double c = -F[i].Rs[2] * -F[j].Rs[2] + -F[i].Rs[5] * -F[j].Rs[5] + -F[i].Rs[8] * -F[j].Rs[8];
-            if (Math.acos(Math.max(-1, Math.min(1, c))) / D > o.fovL * 0.95) continue;
-            double ov = Math.min(overlapFrac(F[i], F[j], t), overlapFrac(F[j], F[i], t));
-            if (ov > 0) nb.add(new int[]{i, j, (int) Math.round(ov * 100)});
-        }
+        // fov search range: a fixed wide range (the result must not depend on the first guess), widened if the guess lies outside
+        double fLo = Math.max(20, Math.min(FOV_LO, o.fovL - 10)), fHi = Math.min(120, Math.max(FOV_HI, o.fovL + 10));
+        double fovEst = o.fovL;
+        List<int[]> nb = neighbours(F, o.fovL); // all overlapping pairs (by the sensor): smoothness of the corrections
         st.pairs = nb.size();
         long to = 0, msOpt = 0;
         String reason = feat == null ? null : "no pairs";
         List<Pair> pairs1 = null;
-        // pass 1: gate by the sensor poses; pass 2: re-match with the poses of pass 1 and a narrow gate (more correct matches on
-        // repeated / weak texture), then optimise again from the sensor priors
+        // pass 1: gate by the sensor poses, tolerant to the whole fov range; the fov is estimated from the matches (ring closure);
+        // pass 2: re-match with the poses + fov of pass 1 and a narrow gate (more correct matches on repeated / weak texture), then
+        // estimate the fov and optimise again from the sensor priors
         for (int pass = 0; pass < 2 && feat != null; pass++) {
             for (Fr f : F) f.Rg = f.R.clone();
             double gate = pass == 0 ? GATE_DEG : GATE2_DEG;
+            double[] ts;
+            if (pass == 0) {
+                int ns = (int) Math.ceil((fHi - fLo) / FOV_STEP) + 1;
+                ts = new double[ns];
+                for (int k = 0; k < ns; k++) ts[k] = Math.tan((fLo + (fHi - fLo) * k / (ns - 1)) * D / 2);
+            } else ts = new double[]{Math.tan(fovEst * D / 2)};
+            List<int[]> cl = neighbours(F, pass == 0 ? fHi : fovEst);
             List<Pair> pp = new ArrayList<>();
-            for (int k = 0; k < nb.size(); k++) {
+            for (int k = 0; k < cl.size(); k++) {
                 if (k % 8 == 0) chk();
-                int[] q = nb.get(k);
-                Pair p = matchPair(F, q[0], q[1], t, sift, gate);
+                int[] q = cl.get(k);
+                Pair p = matchPair(F, q[0], q[1], ts, sift, gate);
                 if (p != null) pp.add(p);
-                P.on(.25 + (pass == 0 ? .1 : .05) * (k + 1) / nb.size() + (pass == 0 ? 0 : .1));
+                P.on(.25 + (pass == 0 ? .1 : .05) * (k + 1) / cl.size() + (pass == 0 ? 0 : .1));
             }
             if (pass == 1 && pp.size() < pairs.size()) { log("pass 2: " + pp.size() + " pairs < " + pairs.size() + ", kept pass 1"); break; }
-            pairs = pp;
             to = System.currentTimeMillis();
+            pairs = pp;
             st.inlierPairs = pairs.size(); st.matches = 0;
             for (Pair p : pairs) st.matches += p.m;
             if (pass == 0) { st.msMatch = System.currentTimeMillis() - tm; st.rms0Deg = rmsDeg(F, pairs, t); }
-            // 3. global optimisation (always from the sensor poses and the given fov)
+            // 3. global optimisation (always from the sensor poses); fixed fov when the ring closure gave one
             for (Fr f : F) f.R = f.Rs.clone();
-            t = Math.tan(o.fovL * D / 2);
             st.optimized = false; st.rmsDeg = st.rms0Deg; st.maxCorrDeg = 0; st.meanCorrDeg = 0;
-            String why = optimiseChecked(F, pairs, nb, st);
-            if (st.optimized) t = Math.tan(st.fovL * D / 2);
+            String why = optimiseChecked(F, pairs, nb, st, fLo, fHi, pass == 0 ? Double.NaN : fovEst);
+            st.inlierPairs = pairs.size(); st.matches = 0; // without the dropped pairs
+            for (Pair p : pairs) st.matches += p.m;
             msOpt += System.currentTimeMillis() - to;
-            log("pass " + (pass + 1) + ": gate " + gate + " pairs " + pairs.size() + "/" + nb.size() + " " + (why == null ? "optimised rms " + r1(st.rms0Deg) + " -> " + r1(st.rmsDeg) + " fov " + r1(st.fovL) : "not applied: " + why));
+            log("pass " + (pass + 1) + ": gate " + gate + " pairs " + pairs.size() + "/" + cl.size() + " "
+                    + (why == null ? "optimised rms " + r1(st.rms0Deg) + " -> " + r3(st.rmsDeg) + " fov " + r1(st.fovL) + " corr " + r1(st.meanCorrDeg) + "/" + r1(st.maxCorrDeg) + " offset " + r1(st.offsetDeg) : "not applied: " + why));
             if (!st.optimized && pass == 1) { // pass 2 worse than pass 1: back to pass 1
                 pairs = pairs1;
+                for (Fr f : F) f.R = f.Rs.clone();
+                optimiseChecked(F, pairs, nb, st, fLo, fHi, fovEst);
                 st.inlierPairs = pairs.size(); st.matches = 0;
                 for (Pair p : pairs) st.matches += p.m;
-                for (Fr f : F) f.R = f.Rs.clone();
-                t = Math.tan(o.fovL * D / 2);
-                optimiseChecked(F, pairs, nb, st);
-                if (st.optimized) t = Math.tan(st.fovL * D / 2);
                 log("pass 2 rejected (" + why + "), kept pass 1");
                 break;
             }
             if (!st.optimized) { reason = why; break; }
             reason = null;
             pairs1 = pairs;
+            fovEst = st.fovL;
+            nb = neighbours(F, fovEst);
         }
         if (feat != null) feat.clear();
         for (Fr f : F) { f.dF = null; f.dB = null; f.Rg = null; }
@@ -409,32 +426,150 @@ public final class PanoStitchCore {
     }
 
     /** LM + sanity checks; on success sets st.optimized / rmsDeg / fovL / corrections and keeps F[].R, else restores the sensor poses.
+     *  Removes the pairs found to be wrong from 'pairs'. fovPrev: fov to use when the ring closure fails (NaN = free fov in the LM).
      *  Returns null or the reason why the result was not applied. */
-    private String optimiseChecked(Fr[] F, List<Pair> pairs, List<int[]> nb, Stats st) {
+    private String optimiseChecked(Fr[] F, List<Pair> pairs, List<int[]> nb, Stats st, double fLo, double fHi, double fovPrev) {
         if (!o.optimize) return "off";
         if (pairs.isEmpty()) return "no pairs with matches";
-        double t = Math.tan(o.fovL * D / 2);
         double[][] R0 = new double[n][];
         for (int i = 0; i < n; i++) R0[i] = F[i].R.clone();
-        double tNew = optimise(F, pairs, nb, t);
+        java.util.Arrays.fill(pw, 1);
+        double tNew = 0;
+        // robust loop: fov by the ring closure (fixed in the LM, so the priors cannot pull it), LM, then drop the pair that disagrees
+        // most with all the others (wrong match on repeated texture, e.g. floor tiles) and repeat. Then frames that moved far from the
+        // sensor (+ camera offset) on weak evidence get a strong sensor prior, and the loop runs once more.
+        for (int round = 0; round < 2; round++) {
+            for (int rep = 0; ; rep++) {
+                double fv = closureFov(F, pairs, fLo, fHi);
+                if (Double.isNaN(fv)) fv = fovPrev;
+                boolean fix = !Double.isNaN(fv);
+                for (int i = 0; i < n; i++) F[i].R = R0[i].clone();
+                off = new double[]{1, 0, 0, 0, 1, 0, 0, 0, 1};
+                tNew = optimise(F, pairs, nb, Math.tan((fix ? fv : o.fovL) * D / 2), fix, null);
+                if (rep >= MAX_DROP || pairs.size() < 3) break;
+                double[] md = new double[pairs.size()];
+                for (int k = 0; k < md.length; k++) md[k] = pairMed(F, pairs.get(k), tNew);
+                double[] so = md.clone();
+                java.util.Arrays.sort(so);
+                double lim = Math.max(PAIR_OUT_DEG, 4 * so[so.length / 2]);
+                int w = 0;
+                for (int k = 1; k < md.length; k++) if (md[k] > md[w]) w = k;
+                if (md[w] <= lim) break;
+                Pair p = pairs.remove(w);
+                log("pair " + p.i + "-" + p.j + " dropped: median residual " + r1(md[w]) + " deg > " + r1(lim));
+            }
+            if (round == 1) break;
+            int[] sup = new int[n];
+            for (Pair p : pairs) { sup[p.i] += p.m; sup[p.j] += p.m; }
+            boolean any = false;
+            for (int i = 0; i < n; i++) {
+                double a = angDeg(F[i].R, mul(F[i].Rs, off));
+                if (a > CORR_WEAK && sup[i] < SUPPORT_MIN) { pw[i] = PW_WEAK; any = true; log("frame " + i + ": correction " + r1(a) + " deg on " + sup[i] + " matches -> kept near the sensor"); }
+            }
+            // and its pairs that contradict the sensor (+ offset) by more than half of that are not trusted
+            for (int k = pairs.size() - 1; k >= 0 && any; k--) {
+                Pair p = pairs.get(k);
+                if (pw[p.i] == 1 && pw[p.j] == 1) continue;
+                double[] Rij = pairRot(p, tNew);
+                double dev = Rij == null ? 180 : angDeg(Rij, mul(tr(mul(F[p.i].Rs, off)), mul(F[p.j].Rs, off)));
+                if (dev > CORR_WEAK / 2) { pairs.remove(k); log("pair " + p.i + "-" + p.j + " dropped: " + r1(dev) + " deg from the sensor at a weak frame"); }
+            }
+            if (!any) break;
+        }
         // keep the yaw of frame 0 = its sensor yaw (u = 0.5 stays yawRef); already (almost) exact by the gauge term in the LM
         double dy = (yawOf(F[0].R) - yawOf(F[0].Rs)) * D;
         double[] Rz = expR(0, 0, dy);
         for (Fr f : F) f.R = mul(Rz, f.R);
         double mx = 0, sum = 0;
-        for (Fr f : F) { double a = angDeg(f.R, f.Rs); mx = Math.max(mx, a); sum += a; }
+        for (Fr f : F) { double a = angDeg(f.R, mul(f.Rs, off)); mx = Math.max(mx, a); sum += a; }
         double fovNew = 2 * Math.atan(tNew) / D, rms = rmsDeg(F, pairs, tNew);
+        if (o.log != null) {
+            StringBuilder sb = new StringBuilder("corrections (deg, world x,y,z):");
+            for (int i = 0; i < n; i++) { double[] e = logR(mul(F[i].R, tr(mul(F[i].Rs, off)))); sb.append(" " + i + ":" + r1(e[0] / D) + "," + r1(e[1] / D) + "," + r1(e[2] / D)); }
+            log(sb.toString());
+        }
         String why = null;
         if (Double.isNaN(fovNew) || Double.isNaN(rms)) why = "NaN";
         else if (mx > 25) why = "correction " + r1(mx) + " deg > 25";
-        else if (Math.abs(fovNew - o.fovL) > 15) why = "fov " + r1(fovNew) + " far from " + r1(o.fovL);
+        else if (angDeg(off, new double[]{1, 0, 0, 0, 1, 0, 0, 0, 1}) > 20) why = "camera offset " + r1(angDeg(off, new double[]{1, 0, 0, 0, 1, 0, 0, 0, 1})) + " deg > 20";
+        else if (fovNew < fLo + .5 || fovNew > fHi - .5) why = "fov " + r1(fovNew) + " at the edge of " + r1(fLo) + ".." + r1(fHi);
         else if (!(rms < 1.5)) why = "rms " + r1(rms) + " deg >= 1.5";
         if (why != null) {
             for (int i = 0; i < n; i++) F[i].R = R0[i]; // diverged: back to the sensor poses
             return why;
         }
-        st.optimized = true; st.rmsDeg = rms; st.maxCorrDeg = mx; st.meanCorrDeg = sum / n; st.fovL = fovNew;
+        st.optimized = true; st.rmsDeg = rms; st.maxCorrDeg = mx; st.meanCorrDeg = sum / n; st.fovL = fovNew; st.offsetDeg = angDeg(off, new double[]{1, 0, 0, 0, 1, 0, 0, 0, 1});
         return null;
+    }
+
+    /** fov (degrees) at which the yaw steps between neighbours of a row add up to 360 (the matched pairs give the steps as a function of
+     *  the focal, unmatched neighbours keep the sensor step; sensor errors cancel around the ring). Rows: frames grouped by sensor
+     *  pitch (|pitch| < 75); the row with the fewest unmatched degrees is used (the horizon on a tie). NaN if no row has >= 180 degrees of matched steps. */
+    private double closureFov(Fr[] F, List<Pair> pairs, double fLo, double fHi) {
+        java.util.HashMap<Integer, Pair> pm = new java.util.HashMap<>();
+        for (Pair p : pairs) pm.put(p.i * n + p.j, p);
+        // rows = groups of frames at about the same sensor pitch (sorted by pitch, split at gaps > 10 degrees), zenith / nadir excluded
+        final double[] pt = new double[n];
+        List<Integer> all = new ArrayList<>();
+        for (int i = 0; i < n; i++) { pt[i] = Math.asin(Math.max(-1, Math.min(1, -F[i].Rs[8]))) / D; if (Math.abs(pt[i]) < 75) all.add(i); }
+        java.util.Collections.sort(all, (x, y) -> Double.compare(pt[x], pt[y]));
+        List<List<Integer>> rows = new ArrayList<>();
+        for (int k = 0; k < all.size(); k++) {
+            if (k == 0 || pt[all.get(k)] - pt[all.get(k - 1)] > 10) rows.add(new ArrayList<>());
+            rows.get(rows.size() - 1).add(all.get(k));
+        }
+        // horizon row first (wins ties: least parallax from a near ceiling / floor)
+        java.util.Collections.sort(rows, (x, y) -> Double.compare(Math.abs(pt[x.get(x.size() / 2)]), Math.abs(pt[y.get(y.size() / 2)])));
+        double res = Double.NaN, bestSens = 1e9;
+        for (int r = 0; r < rows.size(); r++) {
+            List<Integer> idx = rows.get(r);
+            if (idx.size() < 3) continue;
+            final double[] yw = new double[n];
+            for (int i : idx) yw[i] = yawOf(F[i].Rs);
+            java.util.Collections.sort(idx, (x, y) -> Double.compare(yw[x], yw[y]));
+            int m = idx.size();
+            double sens = 0, matched = 0, maxGap = 0;
+            List<Pair> ring = new ArrayList<>();
+            List<int[]> dir = new ArrayList<>();
+            for (int k = 0; k < m; k++) {
+                int a = idx.get(k), b = idx.get((k + 1) % m);
+                double step = wrap180(yw[b] - yw[a]);
+                if (step < 0) step += 360;
+                maxGap = Math.max(maxGap, step);
+                Pair p = pm.get(Math.min(a, b) * n + Math.max(a, b));
+                if (p == null) { sens += step; continue; }
+                matched += step;
+                ring.add(p); dir.add(new int[]{a, b});
+            }
+            if (maxGap > 90 || matched < 180) { log("closure row " + r + ": " + ring.size() + "/" + m + " steps matched (" + Math.round(matched) + " deg) - skipped"); continue; }
+            double lo = fLo, hi = fHi, gLo = ringSum(F, ring, dir, lo) + sens - 360, gHi = ringSum(F, ring, dir, hi) + sens - 360;
+            if (Double.isNaN(gLo) || Double.isNaN(gHi) || gLo * gHi > 0) { log("closure row " + r + ": no root (" + r1(gLo) + " / " + r1(gHi) + ")"); continue; }
+            for (int it = 0; it < 40; it++) {
+                double mid = (lo + hi) / 2, g = ringSum(F, ring, dir, mid) + sens - 360;
+                if (g * gLo > 0) { lo = mid; gLo = g; } else hi = mid;
+            }
+            double f = (lo + hi) / 2;
+            log("closure row " + r + ": " + ring.size() + "/" + m + " steps matched (" + Math.round(matched) + " deg) -> fov " + r3(f));
+            // the row with the least sensor (unmatched) steps wins, the horizon on a tie (least parallax from a near ceiling / floor)
+            if (sens < bestSens - 1) { bestSens = sens; res = f; }
+        }
+        return res;
+    }
+
+    /** sum of the yaw steps a -> b of the matched pairs at the given fov (relative rotation by Kabsch on the inlier bearings) */
+    private static double ringSum(Fr[] F, List<Pair> ring, List<int[]> dir, double fov) {
+        double t = Math.tan(fov * D / 2), sum = 0;
+        for (int k = 0; k < ring.size(); k++) {
+            Pair p = ring.get(k);
+            double[] Rij = pairRot(p, t); // camera j -> camera i
+            if (Rij == null) return Double.NaN;
+            // yaw step i -> j = minus the vertical component of the world rotation vector Rs_i log(Rij) (yaw is clockwise from above);
+            // only the direction of the axis comes from the sensor, so its tilt error hardly matters (rows at +-45 included)
+            double[] w = logR(Rij), m = F[p.i].Rs;
+            double step = -(m[6] * w[0] + m[7] * w[1] + m[8] * w[2]) / D;
+            sum += dir.get(k)[0] == p.i ? step : -step;
+        }
+        return sum;
     }
 
     private Mat decode(int i) {
@@ -501,18 +636,33 @@ public final class PanoStitchCore {
         return c / 144.0;
     }
 
-    /** keypoints of frame i that (by the sensor pose) fall inside frame j */
-    private static int[] inside(Fr fi, Fr fj, double t) {
+    /** frame pairs whose footprints overlap by the sensor poses at the given fov: {i, j, overlap %} */
+    private List<int[]> neighbours(Fr[] F, double fov) {
+        double t = Math.tan(fov * D / 2);
+        List<int[]> nb = new ArrayList<>();
+        for (int i = 0; i < n; i++) for (int j = i + 1; j < n; j++) {
+            double c = -F[i].Rs[2] * -F[j].Rs[2] + -F[i].Rs[5] * -F[j].Rs[5] + -F[i].Rs[8] * -F[j].Rs[8];
+            if (Math.acos(Math.max(-1, Math.min(1, c))) / D > fov * 0.95) continue;
+            double ov = Math.min(overlapFrac(F[i], F[j], t), overlapFrac(F[j], F[i], t));
+            if (ov > 0) nb.add(new int[]{i, j, (int) Math.round(ov * 100)});
+        }
+        return nb;
+    }
+
+    /** keypoints of frame i that (by the gating poses) fall inside frame j for any of the focal values ts */
+    private static int[] inside(Fr fi, Fr fj, double[] ts) {
         int[] out = new int[fi.nk];
         int c = 0;
         double[] d = new double[3], w = new double[3];
         double ma = fj.w / fj.L * 1.12, mb = fj.h / fj.L * 1.12;
         for (int q = 0; q < fi.nk; q++) {
-            camDir(fi.ka[q], fi.kb[q], t, d);
-            rot(fi.Rg, d, w);
-            double x = fj.Rg[0] * w[0] + fj.Rg[3] * w[1] + fj.Rg[6] * w[2], y = fj.Rg[1] * w[0] + fj.Rg[4] * w[1] + fj.Rg[7] * w[2], z = fj.Rg[2] * w[0] + fj.Rg[5] * w[1] + fj.Rg[8] * w[2];
-            if (z > -0.2) continue;
-            if (Math.abs(x / -z / t) <= ma && Math.abs(y / -z / t) <= mb) out[c++] = q;
+            for (double t : ts) {
+                camDir(fi.ka[q], fi.kb[q], t, d);
+                rot(fi.Rg, d, w);
+                double x = fj.Rg[0] * w[0] + fj.Rg[3] * w[1] + fj.Rg[6] * w[2], y = fj.Rg[1] * w[0] + fj.Rg[4] * w[1] + fj.Rg[7] * w[2], z = fj.Rg[2] * w[0] + fj.Rg[5] * w[1] + fj.Rg[8] * w[2];
+                if (z > -0.2) continue;
+                if (Math.abs(x / -z / t) <= ma && Math.abs(y / -z / t) <= mb) { out[c++] = q; break; }
+            }
         }
         int[] r = new int[c];
         System.arraycopy(out, 0, r, 0, c);
@@ -538,13 +688,22 @@ public final class PanoStitchCore {
     /* Matching (fixed 16.11 after the first real capture: 2 of 83 pairs had inliers). Gate = sensor pose (real error 3-6 degrees per frame,
        so up to ~10 between two frames); the model is a pure rotation fitted on bearings (3 dof, 2-point minimal sample) instead of a
        homography (8 dof, needs many points and was too strict at 3 px) - a white room gives only 10-40 good matches per pair. */
+    private static final double T60 = Math.tan(30 * D);
+    private static final double PAIR_OUT_DEG = 1.5; // a pair whose median residual after the LM is above max(this, 4 x the median pair) is dropped
+    private static final int MAX_DROP = 12;
+    // a frame corrected by more than CORR_WEAK degrees with fewer than SUPPORT_MIN matches in its pairs gets PW_WEAK x the sensor prior
+    private static final double CORR_WEAK = 12, PW_WEAK = 16;
+    private static final int SUPPORT_MIN = 40;
+    private static final double FOV_LO = 40, FOV_HI = 85, FOV_STEP = 6; // fov search range (degrees, long side) and the sampling of the pass 1 gate
     private static final double GATE_DEG = 12, GATE2_DEG = 5, RATIO = .85, RANSAC_DEG = 1.5, SIFT_CONTRAST = .015;
     private static final int MAX_PAIR_PTS = 150, MIN_IN = 8, RANSAC_IT = 500, KNN = 6;
 
-    private Pair matchPair(Fr[] F, int i, int j, double t, boolean sift, double gateDeg) {
+    /** ts: focal values (tan(fovL/2)) the gate must tolerate (pass 1: the fov search range; pass 2: the estimated fov). The pixel
+     *  correspondences do not depend on the focal; the rotation RANSAC is run for each ts and the largest inlier set is kept. */
+    private Pair matchPair(Fr[] F, int i, int j, double[] ts, boolean sift, double gateDeg) {
         Fr fi = F[i], fj = F[j];
         if (fi.nk < MIN_IN || fj.nk < MIN_IN) { log("pair " + i + "-" + j + ": few features " + fi.nk + "/" + fj.nk); return null; }
-        int[] si = inside(fi, fj, t), sj = inside(fj, fi, t);
+        int[] si = inside(fi, fj, ts), sj = inside(fj, fi, ts);
         if (si.length < MIN_IN || sj.length < MIN_IN) { log("pair " + i + "-" + j + ": few features in overlap " + si.length + "/" + sj.length); return null; }
         Mat qd = descMat(fi, si, sift), td = descMat(fj, sj, sift);
         DescriptorMatcher bf = DescriptorMatcher.create(sift ? DescriptorMatcher.BRUTEFORCE : DescriptorMatcher.BRUTEFORCE_HAMMING);
@@ -554,11 +713,11 @@ public final class PanoStitchCore {
         } finally { qd.release(); td.release(); bf.clear(); }
         double cg = Math.cos(gateDeg * D);
         double[] Rrs = mul(tr(fi.Rg), fj.Rg); // gating pose (sensor, or the first pass): camera j -> camera i
+        int nt = ts.length;
         double[] w2 = new double[3], d1 = new double[3];
-        double[][] dj = new double[sj.length][];
-        for (int k = 0; k < sj.length; k++) { double[] v = new double[3]; camDir(fj.ka[sj[k]], fj.kb[sj[k]], t, v); dj[k] = v; }
+        double[][][] dj = new double[nt][sj.length][];
+        for (int s = 0; s < nt; s++) for (int k = 0; k < sj.length; k++) { double[] v = new double[3]; camDir(fj.ka[sj[k]], fj.kb[sj[k]], ts[s], v); dj[s][k] = v; }
         List<int[]> cand = new ArrayList<>();
-        List<double[]> vI = new ArrayList<>(), vJ = new ArrayList<>();
         boolean[] usedT = new boolean[sj.length];
         int nRatio = 0;
         // guided ratio test: the ratio is taken between the two best descriptors INSIDE the sensor gate (repeated texture such as
@@ -568,12 +727,16 @@ public final class PanoStitchCore {
             mm.release();
             if (a.length < 2) continue;
             int qi = si[a[0].queryIdx];
-            camDir(fi.ka[qi], fi.kb[qi], t, d1);
             int b1 = -1;
             double best1 = 0, best2 = a[a.length - 1].distance;
             for (DMatch dm : a) {
-                rot(Rrs, dj[dm.trainIdx], w2);
-                if (d1[0] * w2[0] + d1[1] * w2[1] + d1[2] * w2[2] < cg) continue;
+                boolean ok = false;
+                for (int s = 0; s < nt && !ok; s++) {
+                    camDir(fi.ka[qi], fi.kb[qi], ts[s], d1);
+                    rot(Rrs, dj[s][dm.trainIdx], w2);
+                    ok = d1[0] * w2[0] + d1[1] * w2[1] + d1[2] * w2[2] >= cg;
+                }
+                if (!ok) continue;
                 if (b1 < 0) { b1 = dm.trainIdx; best1 = dm.distance; } else { best2 = dm.distance; break; }
             }
             if (b1 < 0 || best1 >= RATIO * best2) continue;
@@ -581,36 +744,60 @@ public final class PanoStitchCore {
             if (usedT[b1]) continue;
             usedT[b1] = true;
             cand.add(new int[]{qi, sj[b1]});
-            vI.add(d1.clone()); vJ.add(dj[b1]);
         }
         int m = cand.size();
         String head = "pair " + i + "-" + j + ": feat " + si.length + "/" + sj.length + " ratio " + nRatio + " gate " + m;
         if (m < MIN_IN) { log(head + " -> rejected (few)"); return null; }
-        // RANSAC of the relative rotation (seeded: the result is reproducible)
-        java.util.Random rnd = new java.util.Random(1000003L * i + j);
-        double ct = Math.cos(RANSAC_DEG * D);
-        boolean[] in = new boolean[m], tmp = new boolean[m];
+        // RANSAC of the relative rotation for each focal (seeded: the result is reproducible). The threshold is constant in pixels
+        // (RANSAC_DEG at fov 60), otherwise a small focal (compressed bearings) would always win
+        boolean[] in = new boolean[m], tmp = new boolean[m], inS = new boolean[m];
         int ni = 0;
         double[] best = null;
-        for (int it = 0; it < RANSAC_IT; it++) {
-            int a = rnd.nextInt(m), b = rnd.nextInt(m);
-            if (a == b) continue;
-            double[] R = triad(vI.get(a), vI.get(b), vJ.get(a), vJ.get(b));
-            if (R == null) continue;
-            int c = countIn(R, vI, vJ, ct, tmp);
-            if (c > ni) { ni = c; best = R; System.arraycopy(tmp, 0, in, 0, m); }
+        double bestT = ts[0], dev = 1e9;
+        for (int s = 0; s < nt; s++) {
+            List<double[]> vI = new ArrayList<>(), vJ = new ArrayList<>();
+            for (int[] q : cand) {
+                double[] v = new double[3]; camDir(fi.ka[q[0]], fi.kb[q[0]], ts[s], v); vI.add(v);
+                double[] u = new double[3]; camDir(fj.ka[q[1]], fj.kb[q[1]], ts[s], u); vJ.add(u);
+            }
+            java.util.Random rnd = new java.util.Random(1000003L * i + j);
+            double ct = Math.cos(RANSAC_DEG * D * ts[s] / T60);
+            int nS = 0;
+            double[] bS = null;
+            for (int it = 0; it < RANSAC_IT; it++) {
+                int a = rnd.nextInt(m), b = rnd.nextInt(m);
+                if (a == b) continue;
+                double[] R = triad(vI.get(a), vI.get(b), vJ.get(a), vJ.get(b));
+                if (R == null) continue;
+                int c = countIn(R, vI, vJ, ct, tmp);
+                if (c > nS) { nS = c; bS = R; System.arraycopy(tmp, 0, inS, 0, m); }
+            }
+            if (bS == null) continue;
+            for (int rep = 0; rep < 2; rep++) { // least squares refinement on the inliers
+                double[] R = kabsch(vI, vJ, inS);
+                if (R == null) break;
+                int c = countIn(R, vI, vJ, ct, tmp);
+                if (c < nS) break;
+                nS = c; bS = R; System.arraycopy(tmp, 0, inS, 0, m);
+            }
+            double dS = angDeg(bS, Rrs);
+            if (nS > ni || (nS == ni && dS < dev)) { ni = nS; best = bS; bestT = ts[s]; dev = dS; System.arraycopy(inS, 0, in, 0, m); }
         }
         if (best == null || ni < MIN_IN) { log(head + " ransac " + ni + " -> rejected"); return null; }
-        for (int rep = 0; rep < 2; rep++) { // least squares refinement on the inliers
-            double[] R = kabsch(vI, vJ, in);
-            if (R == null) break;
-            int c = countIn(R, vI, vJ, ct, tmp);
-            if (c < ni) break;
-            ni = c; best = R; System.arraycopy(tmp, 0, in, 0, m);
+        // deviation from the gating pose: the smallest over the focal range (a wrong focal changes the measured rotation of the pair)
+        if (nt > 1) {
+            for (int s = 0; s < nt; s++) {
+                List<double[]> vI = new ArrayList<>(), vJ = new ArrayList<>();
+                for (int[] q : cand) {
+                    double[] v = new double[3]; camDir(fi.ka[q[0]], fi.kb[q[0]], ts[s], v); vI.add(v);
+                    double[] u = new double[3]; camDir(fj.ka[q[1]], fj.kb[q[1]], ts[s], u); vJ.add(u);
+                }
+                double[] R = kabsch(vI, vJ, in);
+                if (R != null) dev = Math.min(dev, angDeg(R, Rrs));
+            }
         }
-        double dev = angDeg(best, Rrs);
         if (ni < MIN_IN || ni < .15 * m || dev > gateDeg) { log(head + " ransac " + ni + " dev " + r1(dev) + " -> rejected"); return null; }
-        log(head + " ransac " + ni + " dev " + r1(dev) + " -> ok");
+        log(head + " ransac " + ni + " dev " + r1(dev) + (nt > 1 ? " fov " + r1(2 * Math.atan(bestT) / D) : "") + " -> ok");
         int keep = Math.min(ni, MAX_PAIR_PTS);
         Pair p = new Pair();
         p.i = i; p.j = j; p.m = keep;
@@ -686,6 +873,31 @@ public final class PanoStitchCore {
         } finally { a.release(); w.release(); u.release(); vt.release(); }
     }
 
+    /** relative rotation (camera j -> camera i) measured by all the matches of a pair at focal t (Kabsch) */
+    private static double[] pairRot(Pair p, double t) {
+        List<double[]> vI = new ArrayList<>(), vJ = new ArrayList<>();
+        for (int q = 0; q < p.m; q++) {
+            double[] v = new double[3]; camDir(p.ai[q], p.bi[q], t, v); vI.add(v);
+            double[] u = new double[3]; camDir(p.aj[q], p.bj[q], t, u); vJ.add(u);
+        }
+        boolean[] all = new boolean[p.m];
+        java.util.Arrays.fill(all, true);
+        return kabsch(vI, vJ, all);
+    }
+
+    /** median angle (degrees) between the matched rays of one pair at the current poses */
+    private static double pairMed(Fr[] F, Pair p, double t) {
+        double[] r = new double[p.m], d = new double[3], v1 = new double[3], v2 = new double[3];
+        for (int k = 0; k < p.m; k++) {
+            camDir(p.ai[k], p.bi[k], t, d); rot(F[p.i].R, d, v1);
+            camDir(p.aj[k], p.bj[k], t, d); rot(F[p.j].R, d, v2);
+            double c = v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+            r[k] = Math.acos(Math.min(1, c)) / D;
+        }
+        java.util.Arrays.sort(r);
+        return p.m == 0 ? 0 : r[p.m / 2];
+    }
+
     /** RMS angle (degrees) between matched rays */
     private static double rmsDeg(Fr[] F, List<Pair> pairs, double t) {
         double s = 0;
@@ -705,16 +917,25 @@ public final class PanoStitchCore {
 
     /* ------------------------------------------------------------------ Levenberg-Marquardt ------------------------------------------------------------------ */
 
-    private static final double SIG_PX = 1.0, HUBER_PX = 2.0, SIG_PRIOR = 8 * D, SIG_SMOOTH = 3 * D, SIG_LOGT = .15;
+    private static final double SIG_PX = 1.0, HUBER_PX = 2.0, SIG_PRIOR = 8 * D, SIG_SMOOTH = 3 * D, SIG_LOGT = .15, SIG_OFF = 15 * D;
+    /** shared camera offset (camera frame, camera -> sensor camera): R_i ~ Rs_i off. Real capture 16.11 (photos): about 6 degrees, the same
+     *  in every frame (camera mounting / photo vs preview); without it every frame needed a 'correction' of 5-10 degrees */
+    private double[] off = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    private double[] pw; // per-frame weight of the sensor prior (1, or more for frames with weak matches)
 
-    private double optimise(Fr[] F, List<Pair> pairs, List<int[]> nb, double t0) {
-        int np = 3 * n + 1;
+    private double optimise(Fr[] F, List<Pair> pairs, List<int[]> nb, double t0) { return optimise(F, pairs, nb, t0, false, null); }
+
+    /** fixT: the focal stays t0 (1-D fov search); comp (optional, length 3) <- final cost parts {matches, sensor prior, smoothness} */
+    private double optimise(Fr[] F, List<Pair> pairs, List<int[]> nb, double t0, boolean fixT, double[] comp) {
+        // parameters: 3 per frame (world rotation vector), 3 for the shared camera offset (camera frame), log(t)
+        int np = 3 * n + 4, oD = 3 * n;
         double[][] R = new double[n][];
         for (int i = 0; i < n; i++) R[i] = F[i].R.clone();
+        double[] Dl = off.clone();
         double lt = Math.log(t0), lt0 = lt;
         double hL = F[0].L / 2;
         double lambda = 1e-3;
-        double cost = lmCost(R, lt, lt0, pairs, nb, F, hL);
+        double cost = lmCost(R, Dl, lt, lt0, pairs, nb, F, hL, null);
         double[] Aa = new double[np * np], g = new double[np];
         double[] d1 = new double[3], d2 = new double[3], v1 = new double[3], v2 = new double[3], e1 = new double[3], e2 = new double[3];
         double[][] J = new double[3][7];
@@ -723,7 +944,7 @@ public final class PanoStitchCore {
             chk();
             java.util.Arrays.fill(Aa, 0);
             java.util.Arrays.fill(g, 0);
-            double t = Math.exp(lt), s = hL / t / SIG_PX;
+            double t = Math.exp(lt), s = hL / T60 / SIG_PX;
             for (Pair p : pairs) {
                 for (int k = 0; k < 3; k++) { col[k] = 3 * p.i + k; col[3 + k] = 3 * p.j + k; }
                 col[6] = np - 1;
@@ -751,29 +972,57 @@ public final class PanoStitchCore {
                     }
                 }
             }
+            // prior: R_i ~ T_i = Rs_i Dl (sensor pose with the shared camera offset); e_i = log(R_i T_i^T) ~ w_i - T_i d
+            double[][] T = new double[n][];
+            for (int i = 0; i < n; i++) T[i] = mul(F[i].Rs, Dl);
             for (int i = 0; i < n; i++) {
-                double[] e = logR(mul(R[i], tr(F[i].Rs)));
-                double k = 1 / (SIG_PRIOR * SIG_PRIOR);
-                for (int a = 0; a < 3; a++) { Aa[(3 * i + a) * np + 3 * i + a] += k; g[3 * i + a] += k * e[a]; }
+                double[] e = logR(mul(R[i], tr(T[i])));
+                double k = 1 / (SIG_PRIOR * SIG_PRIOR) * pw[i];
+                for (int a = 0; a < 3; a++) {
+                    Aa[(3 * i + a) * np + 3 * i + a] += k; g[3 * i + a] += k * e[a];
+                    for (int b = 0; b < 3; b++) {
+                        Aa[(3 * i + a) * np + oD + b] -= k * T[i][a * 3 + b];
+                        Aa[(oD + b) * np + 3 * i + a] -= k * T[i][a * 3 + b];
+                        Aa[(oD + a) * np + oD + b] += a == b ? k : 0;
+                        g[oD + a] -= k * T[i][b * 3 + a] * e[b];
+                    }
+                }
             }
             // smoothness: overlapping frames get similar world corrections C = R Rs^T (the sensor error drifts slowly), so a frame
             // without matches (white ceiling) follows its matched neighbours instead of staying at its own sensor pose.
             // e = log(Ci Cj^T) ~ ci - cj  =>  J = [I, -I] (Gauss-Newton approximation; the cost itself is exact)
+            // with the offset: e ~ (w_i - T_i d) - (w_j - T_j d)  =>  J_d = -(T_i - T_j) = -Mq
             for (int[] q : nb) {
-                double[] e = logR(mul(mul(R[q[0]], tr(F[q[0]].Rs)), tr(mul(R[q[1]], tr(F[q[1]].Rs)))));
+                double[] e = logR(mul(mul(R[q[0]], tr(T[q[0]])), tr(mul(R[q[1]], tr(T[q[1]])))));
                 double k = 1 / (SIG_SMOOTH * SIG_SMOOTH);
+                double[] Mq = new double[9];
+                for (int a = 0; a < 9; a++) Mq[a] = T[q[0]][a] - T[q[1]][a];
                 for (int a = 0; a < 3; a++) {
                     int ia = 3 * q[0] + a, ja = 3 * q[1] + a;
                     Aa[ia * np + ia] += k; Aa[ja * np + ja] += k; Aa[ia * np + ja] -= k; Aa[ja * np + ia] -= k;
                     g[ia] += k * e[a]; g[ja] -= k * e[a];
+                    for (int b = 0; b < 3; b++) {
+                        Aa[ia * np + oD + b] -= k * Mq[a * 3 + b]; Aa[(oD + b) * np + ia] -= k * Mq[a * 3 + b];
+                        Aa[ja * np + oD + b] += k * Mq[a * 3 + b]; Aa[(oD + b) * np + ja] += k * Mq[a * 3 + b];
+                        double mm = 0;
+                        for (int c = 0; c < 3; c++) mm += Mq[c * 3 + a] * Mq[c * 3 + b];
+                        Aa[(oD + a) * np + oD + b] += k * mm;
+                        g[oD + a] -= k * Mq[b * 3 + a] * e[b];
+                    }
                 }
+            }
+            // weak prior on the offset; none when the offset is off (fixed at identity)
+            for (int a = 0; a < 3; a++) {
+                double[] lo = logR(Dl);
+                Aa[(oD + a) * np + oD + a] += o.camOffset ? 1 / (SIG_OFF * SIG_OFF) : 1e12;
+                g[oD + a] += o.camOffset ? lo[a] / (SIG_OFF * SIG_OFF) : 0;
             }
             // gauge: frame 0 keeps its sensor yaw inside the optimisation (a rotation about world z = a pure yaw change). Re-anchoring
             // only afterwards rotated the frames without matches away from their matched neighbours (real capture 16.11: 5.6 degrees)
             Aa[2 * np + 2] += 1e8;
             g[2] += 1e8 * wrap180(yawOf(R[0]) - yawOf(F[0].Rs)) * D;
-            Aa[(np - 1) * np + np - 1] += 1 / (SIG_LOGT * SIG_LOGT);
-            g[np - 1] += (lt - lt0) / (SIG_LOGT * SIG_LOGT);
+            Aa[(np - 1) * np + np - 1] += fixT ? 1e12 : 1 / (SIG_LOGT * SIG_LOGT);
+            g[np - 1] += fixT ? 0 : (lt - lt0) / (SIG_LOGT * SIG_LOGT);
             boolean better = false;
             for (int tries = 0; tries < 8 && !better; tries++) {
                 double[] M = Aa.clone(), x = new double[np];
@@ -781,17 +1030,20 @@ public final class PanoStitchCore {
                 if (!cholSolve(M, x, np)) { lambda *= 10; continue; }
                 double[][] R2 = new double[n][];
                 for (int i = 0; i < n; i++) R2[i] = mul(expR(x[3 * i], x[3 * i + 1], x[3 * i + 2]), R[i]);
-                double lt2 = lt + x[np - 1];
-                double c2 = lmCost(R2, lt2, lt0, pairs, nb, F, hL);
+                double[] D2 = mul(Dl, expR(x[oD], x[oD + 1], x[oD + 2]));
+                double lt2 = fixT ? lt : lt + x[np - 1];
+                double c2 = lmCost(R2, D2, lt2, lt0, pairs, nb, F, hL, null);
                 if (c2 < cost) {
                     double rel = (cost - c2) / Math.max(1e-12, cost);
-                    R = R2; lt = lt2; cost = c2; lambda = Math.max(1e-7, lambda / 3); better = true;
+                    R = R2; Dl = D2; lt = lt2; cost = c2; lambda = Math.max(1e-7, lambda / 3); better = true;
                     if (rel < 1e-7) { it = 1000; }
                 } else lambda *= 4;
             }
             if (!better) break;
         }
         for (int i = 0; i < n; i++) F[i].R = R[i];
+        off = Dl;
+        if (comp != null) lmCost(R, Dl, lt, lt0, pairs, nb, F, hL, comp);
         return Math.exp(lt);
     }
 
@@ -808,8 +1060,8 @@ public final class PanoStitchCore {
         out[0] = (px - d[0] * dot) / nrm; out[1] = (py - d[1] * dot) / nrm; out[2] = (0 - d[2] * dot) / nrm;
     }
 
-    private double lmCost(double[][] R, double lt, double lt0, List<Pair> pairs, List<int[]> nb, Fr[] F, double hL) {
-        double t = Math.exp(lt), s = hL / t / SIG_PX, c = 0;
+    private double lmCost(double[][] R, double[] Dl, double lt, double lt0, List<Pair> pairs, List<int[]> nb, Fr[] F, double hL, double[] comp) {
+        double t = Math.exp(lt), s = hL / T60 / SIG_PX, c = 0, c1 = 0;
         double[] d = new double[3], v1 = new double[3], v2 = new double[3];
         for (Pair p : pairs) {
             for (int q = 0; q < p.m; q++) {
@@ -819,14 +1071,20 @@ public final class PanoStitchCore {
                 c += rn <= HUBER_PX ? rn * rn : 2 * HUBER_PX * rn - HUBER_PX * HUBER_PX;
             }
         }
+        if (comp != null) comp[0] = c1 = c;
+        double[][] T = new double[n][];
+        for (int i = 0; i < n; i++) T[i] = mul(F[i].Rs, Dl);
         for (int i = 0; i < n; i++) {
-            double[] e = logR(mul(R[i], tr(F[i].Rs)));
-            c += (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]) / (SIG_PRIOR * SIG_PRIOR);
+            double[] e = logR(mul(R[i], tr(T[i])));
+            c += (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]) / (SIG_PRIOR * SIG_PRIOR) * pw[i];
         }
+        if (comp != null) { comp[1] = c - c1; c1 = c; }
         for (int[] q : nb) {
-            double[] e = logR(mul(mul(R[q[0]], tr(F[q[0]].Rs)), tr(mul(R[q[1]], tr(F[q[1]].Rs)))));
+            double[] e = logR(mul(mul(R[q[0]], tr(T[q[0]])), tr(mul(R[q[1]], tr(T[q[1]])))));
             c += (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]) / (SIG_SMOOTH * SIG_SMOOTH);
         }
+        if (o.camOffset) { double[] lo = logR(Dl); c += (lo[0] * lo[0] + lo[1] * lo[1] + lo[2] * lo[2]) / (SIG_OFF * SIG_OFF); }
+        if (comp != null) comp[2] = c - c1;
         c += (lt - lt0) * (lt - lt0) / (SIG_LOGT * SIG_LOGT);
         return c;
     }
