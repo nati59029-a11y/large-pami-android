@@ -41,6 +41,11 @@ jobs:
           echo "== google-scope by hour (72h) =="
           gcloud logging read "$B72 AND jsonPayload.reason=\"google-scope\"" --project "$PROJECT" --limit 3000 \
             --format='value(timestamp,jsonPayload.message)' | cut -c1-13,28- | sort | uniq -c
+          echo "== Gmail / Calendar API enabled? (read-only) =="
+          gcloud services list --enabled --project "$PROJECT" --format='value(config.name)' 2>&1 | grep -Ei 'gmail|calendar|denied|error' || echo "(gmail/calendar not in enabled list)"
+          echo "== Recent changes to services (audit, 72h) =="
+          gcloud logging read "protoPayload.serviceName=\"serviceusage.googleapis.com\" AND timestamp>=\"$(date -u -d '-72 hours' +%Y-%m-%dT%H:%M:%SZ)\"" --project "$PROJECT" --limit 20 \
+            --format='value(timestamp,protoPayload.methodName,protoPayload.resourceName)' 2>&1 | mask
           echo "== Count by function and severity =="
           gcloud logging read "$BASE AND severity>=WARNING" --project "$PROJECT" --limit 1000 \
             --format='value(resource.labels.service_name,severity)' | sort | uniq -c | sort -rn
