@@ -225,12 +225,18 @@ const supItems=id=>{const q=SUPQ.trim(),L=supList().filter(s=>!q||String(s.name|
 ACT.piSup=el=>{const x=lsGet(el.dataset.id);if(!x)return;if(!supList().length)return toast('אין ספקים ברשימה');SUPQ='';
  dlg(`<h3>שינוי ספק</h3><p class="note">עכשיו: ${esc(x.sup||'ספק לא ידוע')}</p><input data-i="piSupQ" data-id="${esc(x.id)}" placeholder="חיפוש ספק" autocomplete="off" style="width:100%"><div class="pi-sl" id="piSl">${supItems(x.id)}</div><button type="button" class="btn g w" data-a="closeDlg">ביטול</button>`)};
 INP.piSupQ=el=>{SUPQ=String(el.value||'');const b=document.getElementById('piSl');if(b)b.innerHTML=supItems(el.dataset.id)};
+/* שינוי ספק גם בהוצאה המקורית (החלטת המשתמש 16.11.2026): רק אצל מנהל (העובד לא מחזיק את ההוצאות). ההוצאה – לפי הקובץ שלה
+   (pinv = 'i'+rqOf(file)) או, בהוצאה של עובד שאושרה, לפי src ('i'+rqOf('o'+src)). משתנים רק הספק (sub) והקטגוריה שלו (cat); חודש התשלום לא משתנה */
+const txOf=id=>{try{const q=PI.rqOf;return(S.tx||[]).find(t=>t&&((t.file&&'i'+q(t.file)===id)||(t.src&&'i'+q('o'+t.src)===id)))||null}catch(e){return null}};
+function txSup(id,s){try{if(!canDel()||!s||!s.id)return false;const t=txOf(id);if(!t||t.sub===s.id)return false;const c=cat(s.cat);if(!c||c.beh!=='sup')return false;
+ t.sub=s.id;t.cat=s.cat;save();return true}catch(e){return false}}
+PI.txOf=txOf;
 ACT.piSup2=async el=>{const id=el.dataset.id,s=supList().find(v=>v.id===el.dataset.v),x=lsGet(id);closeDlg();if(!s||!x||!ID_OK(id))return;
  if(s.name===x.sup)return toast('זה כבר הספק של החשבונית');
  let claimed=false;try{const r=await fnc('piClaim',{id});claimed=true;
   const lines=(Array.isArray(r&&r.inv&&r.inv.lines)?r.inv.lines:[]).map(l=>{const o={};for(const k of KEYS)if(l&&l[k]!=null)o[k]=l[k];return o});
   await fnc('piDraft',{id,rev:Number.isInteger(r&&r.rev)?r.rev:0,lines,sup:String(s.name||'').slice(0,60),supId:ID_OK(s.id)?s.id:''});
-  x.sup=String(s.name||'');toast('הספק עודכן ל'+x.sup)}
+  x.sup=String(s.name||'');toast('הספק עודכן ל'+x.sup+(txSup(id,s)?' – גם בהוצאה':''))}
  catch(e){toast(e&&e.offline?e.message:'שינוי הספק נכשל: '+String(e&&e.message||''))}
  finally{if(claimed)try{await fnc('piRelease',{id})}catch(e){}LS.at=0;try{if(cur().v==='pi'){rerender();lload(true)}}catch(e){}}};
 ACT.piDel=el=>{const id=el.dataset.id,x=lsGet(id);if(!x||!ID_OK(id)||!canDel())return;

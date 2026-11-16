@@ -131,6 +131,14 @@ const addSubs = (page) => page.evaluate(() => { S.cats.push({ id: 'cS9', name: '
   await A.page.click('#dlg [data-a="yes"]'); await waitFor(A.page, () => document.querySelectorAll('.pi-it').length === 2); await sleep(400);
   const r3 = await rows(A.page);
   check('3א אישור – piVoid, והחשבונית יוצאת מהרשימה', S.inv.i1.st === 'void' && r3.length === 2 && !r3.some((r) => /אסם/.test(r.t)), r3);
+  // 5. שינוי ספק גם בהוצאה המקורית (לפי הקובץ שלה)
+  S.inv.ipiFILE0001 = { st: 'new', sup: 'אסם בע"מ', inv: '9001', date: '2026-11-04', at: H.T0, by: 'm', byName: 'דני', np: 0, lines: [{ n: 'במבה', qty: 2, unit: 'u', cost: 3 }] };
+  await A.page.evaluate(() => { S.tx.push({ id: 'tSUPX', t: 'exp', cat: 'cS9', sub: 's1', date: '2026-11-04', amt: 100, plan: '2026-12', kind: 'inv', inv: '9001', file: 'FILE0001' }); PI.ls.at = 0; ACT.piRe(); });
+  await waitFor(A.page, () => !!document.querySelector('[data-a="piSup"][data-id="ipiFILE0001"]')); await sleep(300);
+  await A.page.click('[data-a="piSup"][data-id="ipiFILE0001"]'); await sleep(200);
+  await A.page.click('#piSl .li[data-v="s2"]'); await sleep(1200);
+  const tx = await A.page.evaluate(() => { const t = S.tx.find((x) => x.id === 'tSUPX'); const st = JSON.parse(localStorage.getItem(KEY) || '{}'); const t2 = (st.tx || []).find((x) => x.id === 'tSUPX'); return { sub: t.sub, cat: t.cat, plan: t.plan, amt: t.amt, saved: t2 && t2.sub }; });
+  check('5 שינוי ספק – מתעדכן גם בהוצאה המקורית (ונשמר), בלי לשנות סכום וחודש תשלום', S.inv.ipiFILE0001.sup === 'שטראוס בדיקה' && tx.sub === 's2' && tx.saved === 's2' && tx.plan === '2026-12' && tx.amt === 100, tx);
   check('3ב אין שגיאות JavaScript (מנהל)', !errs.length, errs);
   // עובד עם prc: שינוי ספק כן, מחק לא
   S.inv = fresh();
