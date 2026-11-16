@@ -185,6 +185,8 @@ try{if(!document.getElementById('pi-css')){const st=document.createElement('styl
 +'.pil .cb{display:flex;align-items:center;gap:8px;font-size:.88rem;font-weight:600;margin:2px 0 4px}'
 +'.pil .bt{display:flex;gap:6px;margin-top:6px}.pil .bt .btn{flex:1;min-width:0;min-height:40px;padding:0 6px;font-size:.85rem}'
 +'.pi-row>svg{width:20px;height:20px;color:var(--mut);transform:scaleX(-1);flex:none}.pi-row[disabled]{opacity:.78;cursor:not-allowed}.pi-hdr small{display:block;color:var(--mut)}'
++'.pi-it{margin-bottom:10px}.pi-it>.li{margin-bottom:0}.pi-act{display:flex;gap:6px;margin-top:4px}.pi-act .btn{flex:1;min-width:0;min-height:36px;padding:0 8px;font-size:.82rem}'
++'.pi-sl{max-height:55vh;overflow:auto;margin:8px 0}.pi-sl .li{min-height:44px;padding:8px 12px;margin-bottom:6px}'
 +'.pi-fin{margin-top:8px}.pil.sk{display:block;opacity:.55;padding:8px 10px}.pil.sk .hd{margin:0}';
 document.head.append(st)}}catch(e){}
 
@@ -204,13 +206,44 @@ const rowH=x=>{const o=lkOther(x),me=fresh(x.lk)&&x.lk.uid===SY.uid;
  const meta=[x.date?dfmt(x.date):'',x.inv?'מס׳ '+esc(x.inv):'',x.n===1?'שורה אחת':x.n+' שורות'].filter(Boolean).join(' · ');
  return `<button class="li pi-row" ${o?'disabled aria-disabled="true"':`data-a="piOpen" data-id="${esc(x.id)}"`}><div class="m"><b>${esc(x.sup||'ספק לא ידוע')}</b><small>${meta}</small></div>`
   +(o?`<span class="tag t1">בטיפול של ${esc(String(x.lk.name||'משתמש אחר'))}</span>`:me?'<span class="tag t2">אצלך</span>':'')+(o?'':ico('chev'))+'</button>'};
+/* מחק / שינוי ספק (16.11.2026): מתחת לכל חשבונית שלא בטיפול של אחר. "מחק" – למנהל בלבד (piVoid בשרת): מוציא מרשימת התמחור בלי לגעת במלאי
+   ובהוצאה עצמה. "שינוי ספק" – נכנס לרגע לחשבונית (piClaim), שומר ספק חדש עם אותן שורות (piDraft) ויוצא (piRelease) */
+const canDel=()=>{try{return isA()||!!(SY&&SY.sa)}catch(e){return false}};
+const itemH=x=>{const o=lkOther(x),id=esc(x.id);
+ return`<div class="pi-it">${rowH(x)}${o?'':`<div class="pi-act"><button type="button" class="btn g s" data-a="piSup" data-id="${id}">שינוי ספק</button>${canDel()?`<button type="button" class="btn g s" data-a="piDel" data-id="${id}" style="color:var(--bad)">מחק</button>`:''}</div>`}</div>`};
 V.pi=()=>{const T='חשבוניות לתמחור';if(!can())return deny(T);
  if(!LS.L){if(!LS.b&&!LS.err)lload();return{t:T,h:LS.err?`<div class="card"><p class="note">${esc(LS.err)}</p><button class="btn g w" data-a="piRe">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'}}
  if(!LS.b&&!LS.err&&Date.now()-LS.at>=10e3)setTimeout(()=>lload(),0);
  return{t:T,s:'מחירים ומלאי מחשבוניות ספק',h:(LS.err?`<p class="note">${esc(LS.err)}</p>`:'')
-  +(LS.L.length?LS.L.map(rowH).join(''):'<div class="empty">אין חשבוניות לתמחור</div>')+'<button class="btn g s w" style="margin-top:8px" data-a="piRe">רענן</button>'}};
+  +(LS.L.length?LS.L.map(itemH).join(''):'<div class="empty">אין חשבוניות לתמחור</div>')+'<button class="btn g s w" style="margin-top:8px" data-a="piRe">רענן</button>'}};
 ACT.piRe=()=>{LS.err='';lload(true)};
 ACT.piOpen=el=>{const id=el.dataset.id;if(ID_OK(id))go('piEd',id)};
+const lsGet=id=>(LS.L||[]).find(x=>x.id===id);
+let SUPQ='';const supList=()=>{try{return typeof usSupSubs==='function'?usSupSubs().sort((a,b)=>heCmp(a.name,b.name)):[]}catch(e){return[]}};
+const supItems=id=>{const q=SUPQ.trim(),L=supList().filter(s=>!q||String(s.name||'').includes(q)).slice(0,200);
+ return L.length?L.map(s=>`<button type="button" class="li" data-a="piSup2" data-id="${esc(id)}" data-v="${esc(s.id)}"><div class="m"><b>${esc(s.name)}</b></div></button>`).join(''):'<div class="empty">לא נמצא ספק</div>'};
+ACT.piSup=el=>{const x=lsGet(el.dataset.id);if(!x)return;if(!supList().length)return toast('אין ספקים ברשימה');SUPQ='';
+ dlg(`<h3>שינוי ספק</h3><p class="note">עכשיו: ${esc(x.sup||'ספק לא ידוע')}</p><input data-i="piSupQ" data-id="${esc(x.id)}" placeholder="חיפוש ספק" autocomplete="off" style="width:100%"><div class="pi-sl" id="piSl">${supItems(x.id)}</div><button type="button" class="btn g w" data-a="closeDlg">ביטול</button>`)};
+INP.piSupQ=el=>{SUPQ=String(el.value||'');const b=document.getElementById('piSl');if(b)b.innerHTML=supItems(el.dataset.id)};
+/* שינוי ספק גם בהוצאה המקורית (החלטת המשתמש 16.11.2026): רק אצל מנהל (העובד לא מחזיק את ההוצאות). ההוצאה – לפי הקובץ שלה
+   (pinv = 'i'+rqOf(file)) או, בהוצאה של עובד שאושרה, לפי src ('i'+rqOf('o'+src)). משתנים רק הספק (sub) והקטגוריה שלו (cat); חודש התשלום לא משתנה */
+const txOf=id=>{try{const q=PI.rqOf;return(S.tx||[]).find(t=>t&&((t.file&&'i'+q(t.file)===id)||(t.src&&'i'+q('o'+t.src)===id)))||null}catch(e){return null}};
+function txSup(id,s){try{if(!canDel()||!s||!s.id)return false;const t=txOf(id);if(!t||t.sub===s.id)return false;const c=cat(s.cat);if(!c||c.beh!=='sup')return false;
+ t.sub=s.id;t.cat=s.cat;save();return true}catch(e){return false}}
+PI.txOf=txOf;
+ACT.piSup2=async el=>{const id=el.dataset.id,s=supList().find(v=>v.id===el.dataset.v),x=lsGet(id);closeDlg();if(!s||!x||!ID_OK(id))return;
+ if(s.name===x.sup)return toast('זה כבר הספק של החשבונית');
+ let claimed=false;try{const r=await fnc('piClaim',{id});claimed=true;
+  const lines=(Array.isArray(r&&r.inv&&r.inv.lines)?r.inv.lines:[]).map(l=>{const o={};for(const k of KEYS)if(l&&l[k]!=null)o[k]=l[k];return o});
+  await fnc('piDraft',{id,rev:Number.isInteger(r&&r.rev)?r.rev:0,lines,sup:String(s.name||'').slice(0,60),supId:ID_OK(s.id)?s.id:''});
+  x.sup=String(s.name||'');toast('הספק עודכן ל'+x.sup+(txSup(id,s)?' – גם בהוצאה':''))}
+ catch(e){toast(e&&e.offline?e.message:'שינוי הספק נכשל: '+String(e&&e.message||''))}
+ finally{if(claimed)try{await fnc('piRelease',{id})}catch(e){}LS.at=0;try{if(cur().v==='pi'){rerender();lload(true)}}catch(e){}}};
+ACT.piDel=el=>{const id=el.dataset.id,x=lsGet(id);if(!x||!ID_OK(id)||!canDel())return;
+ ask(`למחוק את החשבונית של ${x.sup||'ספק לא ידוע'} מרשימת התמחור?`,async()=>{
+  try{await fnc('piVoid',{id});LS.L=(LS.L||[]).filter(v=>v.id!==id);toast('החשבונית נמחקה מרשימת התמחור')}
+  catch(e){toast(e&&e.offline?e.message:'המחיקה נכשלה: '+String(e&&e.message||''))}
+  LS.at=0;try{if(cur().v==='pi'){rerender();lload(true)}}catch(e){}},'כן, מחק')};
 
 /* ---------- עריכה: מצב ---------- */
 let E=null;PI.ed=()=>E;
