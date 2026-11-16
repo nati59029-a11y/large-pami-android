@@ -552,6 +552,73 @@ describe('סריקת היסטוריה (מנהל־על) וניקוי ספאם (מ
 });
 
 // ---------------------------------------------------------------------------------
+describe('16.11: שולחים חסומים (ספאם) – מייל חדש לא נקלט ועובר לאשפה; המיילים הקיימים לאשפה; ביטול חסימה', () => {
+  const SP = 'spam@x.example', OK = 'good@x.example';
+  const inA = async () => (await coll(`b/${A}/sec_in`)).filter((x) => x.ch === 'mail');
+  beforeEach(async () => { await seed(); });
+
+  it('הרשאות ותקינות: עובד ומנהל עסק אחר לא חוסמים בעסק; כתובת לא תקינה / של התיבה / של מנהל – נדחית', async () => {
+    await connect(M1, 'mail', { email: BOX_A, clean: true });
+    assert.equal((await call('secMail', E1, { op: 'blkAdd', addr: SP })).reason, 'not-manager');
+    assert.ok((await call('secMail', MB, { op: 'blkAdd', addr: SP })).ok, 'מנהל של עסק אחר – חוסם רק אצלו');
+    assert.equal(((await get(`b/${A}/sec_cfg/mail_blk`)) || {}).L, undefined, 'בעסק A – לא נחסם');
+    assert.equal((await call('secMail', M1, { op: 'blkAdd', addr: 'not-an-address' })).reason, 'bad-addr');
+    assert.equal((await call('secMail', M1, { op: 'blkAdd', addr: BOX_A })).reason, 'own-addr');
+    assert.equal((await call('secMail', M1, { op: 'blkAdd', addr: M1_MAIL })).reason, 'own-addr');
+    assert.equal(GO.state.trashed.length + GO.state.deleted.length, 0);
+  });
+
+  it('חסימה עם הרשאת ניקוי: הקיימים מהשולח לאשפה (לא מחיקה), חשבונית ממתינה ממנו נדחית, מייל חדש ממנו לא נקלט ועובר לאשפה; אחרים – רגיל; ביטול חסימה מחזיר קליטה', async () => {
+    await connect(M1, 'mail', { email: BOX_A, clean: true });
+    const old1 = GO.addMail(BOX_A, { from: 'Spammer <' + SP + '>', subject: 'a' }), old2 = GO.addMail(BOX_A, { from: SP, subject: 'b', labels: ['SPAM'] });
+    GO.addMail(BOX_A, { from: OK, subject: 'c' });
+    const look = GO.addMail(BOX_A, { from: '"' + SP + ' via Shop" <real@shop.example>', subject: 'שם תצוגה דומה' }); // החיפוש מוצא – אבל הכתובת אחרת
+    await CORE.mailHook(GO.note(BOX_A));
+    await put(`b/${A}/sec_inv/fblk1`, { st: 'new', k: 'unk', t: 1, src: [{ ch: 'mail', from: SP, t: 1 }], np: 0 });
+    await put(`b/${A}/sec_inv/fblk2`, { st: 'new', k: 'unk', t: 1, src: [{ ch: 'mail', from: SP, t: 1 }, { ch: 'mail', from: OK, t: 2 }], np: 0 });
+    const r = await call('secMail', M1, { op: 'blkAdd', addr: 'SPAM@X.example' });
+    assert.ok(r.ok, r.msg);
+    assert.equal(r.r.addr, SP); assert.equal(r.r.trashed, 2); assert.equal(r.r.rej, 1);
+    assert.deepEqual(GO.state.trashed.map((t) => t.id).sort(), [old1, old2].sort());
+    assert.equal(GO.state.deleted.length, 0, 'רק אשפה – לא מחיקה לצמיתות');
+    assert.ok(!GO.state.trashed.some((t) => t.id === look), 'מייל משולח אחר עם שם תצוגה דומה – לא לאשפה');
+    assert.equal((await get(`b/${A}/sec_inv/fblk1`)).st, 'rej');
+    assert.equal((await get(`b/${A}/sec_inv/fblk2`)).st, 'new', 'קובץ שהגיע גם משולח אחר – לא נדחה');
+    assert.deepEqual(r.r.list.map((x) => x.a), [SP]);
+    assert.ok((await logs(A)).some((l) => l.act === 'mailBlock'));
+    const before = (await inA()).length;
+    const nw = GO.addMail(BOX_A, { from: SP, subject: 'חדש', files: [{ name: 'x.pdf', data: Buffer.from('%PDF-1.4 x') }] });
+    GO.addMail(BOX_A, { from: OK, subject: 'רגיל' });
+    const h = await CORE.mailHook(GO.note(BOX_A));
+    assert.equal(h.saved, 1, 'רק המייל מהשולח הרגיל');
+    assert.equal((await inA()).length, before + 1);
+    assert.ok(!(await inA()).some((x) => x.from === SP && x.subj === 'חדש'));
+    assert.ok(GO.state.trashed.some((t) => t.id === nw), 'המייל החדש מהשולח החסום – לאשפה');
+    assert.equal((await coll(`b/${A}/sec_inv`)).filter((x) => x.id !== 'fblk1' && x.id !== 'fblk2').length, 0, 'הקובץ שלו לא נכנס לחשבוניות');
+    const L = await call('secMail', M2, { op: 'blkList' });
+    assert.equal(L.r.list[0].n, 2); assert.equal(L.r.clean, true);
+    const d = await call('secMail', M1, { op: 'blkDel', addr: SP });
+    assert.ok(d.ok); assert.equal(d.r.list.length, 0);
+    const t0 = GO.state.trashed.length;
+    GO.addMail(BOX_A, { from: SP, subject: 'אחרי ביטול' });
+    assert.equal((await CORE.mailHook(GO.note(BOX_A))).saved, 1);
+    assert.equal(GO.state.trashed.length, t0);
+    assert.equal((await call('secMail', M1, { op: 'blkClean', addr: SP })).reason, 'not-blocked');
+  });
+
+  it('תיבה בלי הרשאת ניקוי: חסימה עובדת באפליקציה (לא נקלט), אבל שום דבר לא עובר לאשפה, והתשובה אומרת זאת', async () => {
+    await connect(M1, 'mail', { email: BOX_A });
+    GO.addMail(BOX_A, { from: SP, subject: 'a' });
+    const r = await call('secMail', M1, { op: 'blkAdd', addr: SP });
+    assert.ok(r.ok, r.msg);
+    assert.equal(r.r.trashed, 0); assert.equal(r.r.noScope, 1); assert.equal(r.r.clean, false);
+    GO.addMail(BOX_A, { from: SP, subject: 'b' });
+    assert.equal((await CORE.mailHook(GO.note(BOX_A))).saved, 0);
+    assert.equal(GO.state.trashed.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------------
 describe('ניתוק ומחיקת האסימון', () => {
   beforeEach(async () => { await seed(); await connect(M1, 'mail', { email: BOX_A }); });
 

@@ -468,6 +468,11 @@ async function saveMail(db, c, ctx, gid, now, o) {
   let p;
   try { p = G.parseMsg(await c.meta(gid)); } catch (e) { if (gone404(e)) return 'skip'; throw e; }
   if (!p || p.labels.includes('SENT') || p.labels.includes('DRAFT')) return 'skip';
+  // 16.11 (בעל העסק): שולח חסום (דיווח ספאם) – המייל לא נקלט, ובתיבה עם הרשאת ניקוי עובר לאשפה של Gmail (לא מחיקה לצמיתות)
+  if (ctx.blk && p.from && ctx.blk.has(p.from) && !(ctx.mgrMails && ctx.mgrMails.has(p.from)) && p.from !== ctx.addr) {
+    if (ctx.clean) { try { await c.trash(gid); } catch (e) { if (!gone404(e)) logger.warn('secretary-google: blocked trash failed', { reason: (e && e.details && e.details.reason) || 'error' }); } }
+    return 'blk';
+  }
   if (o.hist && (p.labels.includes('SPAM') || p.labels.includes('TRASH'))) return 'skip'; // היסטוריה: בלי ספאם ואשפה (הם עוברים לרשימת הניקוי)
   const big = p.size > G.FULL_MAX; // גודל – לפני הורדת הגוף (10.3)
   if (!big) { let f = null; try { f = G.parseMsg(await c.full(gid)); } catch (e) { if (!gone404(e)) throw e; } if (f) p = f; }
@@ -539,6 +544,76 @@ async function invFiles(db, c, gid, p, big, sus, now, hist) {
   }
   return { ids, names };
 }
+// =====================================================================================
+// 16.11 (בעל העסק): שולחים חסומים – "דיווח ספאם" מכרטיס חשבונית, או הקלדת כתובת בהגדרות.
+//   sec_cfg/mail_blk { L:[{ a (כתובת, אותיות קטנות), t, by, n (כמה מיילים הועברו לאשפה בסך הכול) }] } – חל על כל העסק, רק מנהל בלי הגבלת סניפים.
+//   מייל חדש מכתובת חסומה – לא נקלט (saveMail), ובתיבה עם הרשאת ניקוי עובר לאשפה של Gmail. בחסימה (וב"ניקוי שוב") – גם המיילים הקיימים
+//   מהשולח עוברים לאשפה (עד BLK_CLEAN בכל פעם; Gmail מרוקן את האשפה לבד אחרי 30 יום), וחשבוניות ממתינות ממנו נדחות.
+//   אף פעם לא כתובת של התיבה או של מנהל. ביטול חסימה – blkDel (מיילים שכבר באשפה נשארים שם; אפשר להחזיר אותם ב-Gmail עד 30 יום).
+// =====================================================================================
+const BLK_MAX = 500, BLK_CLEAN = 100, BLK_MS = 40000; // עד 100 מיילים ועד 40 שניות בכל לחיצה (זמן הריצה של הפונקציה מוגבל) – השאר ב"ניקוי שוב"
+const blkOf = (s) => (s && s.exists && Array.isArray(s.get('L')) ? s.get('L') : []).filter((x) => x && typeof x.a === 'string' && G.addrOf(x.a) === x.a);
+async function blkSet(db) { return new Set(blkOf(await db.doc('sec_cfg/mail_blk').get()).map((x) => x.a)); }
+const blkOut = (L, m) => ({ ok: true, list: L.map((x) => ({ a: x.a, t: Number(x.t) || 0, n: Number(x.n) || 0 })).sort((p, q) => q.t - p.t), clean: Object.values(m.boxes).some((b) => b.st === 'ok' && b.clean), boxes: Object.values(m.boxes).filter((b) => b.st === 'ok').length });
+// מעבירה לאשפה עד BLK_CLEAN מיילים קיימים מהשולח, בכל תיבה מחוברת עם הרשאת ניקוי. מחזירה { n, more, skip (תיבות בלי הרשאה), fail }
+async function blkTrash(db, m, a) {
+  const out = { n: 0, more: false, skip: 0, fail: 0 }, t0 = Date.now();
+  for (const [boxId, b] of Object.entries(m.boxes)) {
+    if (b.st !== 'ok') continue;
+    if (!b.clean) { out.skip++; continue; }
+    let c;
+    try { c = (await access(db, T.scope().bizId, 'mail', boxId)).c; } catch (e) { out.fail++; continue; }
+    let j;
+    try { j = await c.list('from:' + a, '', BLK_CLEAN - out.n + 1); } catch (e) { out.fail++; continue; }
+    const ids = (Array.isArray(j.messages) ? j.messages : []).map((x) => x && x.id).filter((g) => typeof g === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(g));
+    if (ids.length > BLK_CLEAN - out.n || j.nextPageToken) out.more = true;
+    // החיפוש של Gmail לפי from: עלול להתאים גם לשם התצוגה – כל מייל נבדק לפני ההעברה: הכתובת המדויקת של השולח (10 במקביל)
+    const L = ids.slice(0, BLK_CLEAN - out.n);
+    for (let i = 0; i < L.length; i += 10) {
+      if (Date.now() - t0 > BLK_MS) { out.more = true; break; }
+      await Promise.all(L.slice(i, i + 10).map(async (g) => {
+        try { const p = G.parseMsg(await c.meta(g)); if (!p || p.from !== a) return; await c.trash(g); out.n++; } catch (e) { if (!gone404(e)) out.fail++; }
+      }));
+    }
+    if (out.n >= BLK_CLEAN || out.more) { out.more = true; break; }
+  }
+  return out;
+}
+async function blkOp(who, db, input, op, now) {
+  const adm = await db.doc('admins/' + who.uid).get();
+  if (!who.superadmin && adm.exists && Array.isArray(adm.get('br'))) throw deny('br-limited', 'חסימת שולחים – למנהל בלי הגבלת סניפים');
+  const ref = db.doc('sec_cfg/mail_blk');
+  const m = mailCfgOf(await db.doc('sec_cfg/mail').get());
+  if (op === 'blkList') return blkOut(blkOf(await ref.get()), m);
+  const a = G.addrOf(input.addr);
+  if (!a) throw bad('bad-addr', 'כתובת מייל לא תקינה');
+  if (op === 'blkDel') {
+    const L = await db.runTransaction(async (tx) => { const L0 = blkOf(await tx.get(ref)), L1 = L0.filter((x) => x.a !== a); if (L1.length !== L0.length) tx.set(ref, { L: L1 }, { merge: true }); return L1; });
+    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'mailUnblock', { tgt: a }));
+    return blkOut(L, m);
+  }
+  if (op === 'blkAdd') {
+    const own = await mgrMailsOf(db);
+    if (own.has(a) || Object.values(m.boxes).some((b) => b.addr === a)) throw pre('own-addr', 'אי אפשר לחסום כתובת של העסק או של מנהל');
+    await db.runTransaction(async (tx) => {
+      const L = blkOf(await tx.get(ref));
+      if (L.some((x) => x.a === a)) return;
+      if (L.length >= BLK_MAX) throw pre('blk-full', 'רשימת החסומים מלאה (' + BLK_MAX + '). בטלו חסימה ישנה ונסו שוב');
+      tx.set(ref, { L: L.concat([{ a, t: now, by: who.uid, n: 0 }]) }, { merge: true });
+    });
+    // חשבוניות שממתינות מהשולח (כל המקורות שלהן – מייל מהכתובת הזו) – נדחות, כמו דחייה ידנית
+    const SI = require('./lib/sec-inv');
+    const q = await db.collection('sec_inv').where('st', 'in', ['new', 'q', 'qw']).limit(500).get();
+    const mine = q.docs.filter((d) => { const S = Array.isArray(d.get('src')) ? d.get('src') : []; return S.length && S.every((x) => x && x.ch === 'mail' && G.addrOf(x.from) === a); });
+    for (let i = 0; i < mine.length; i += 400) { const b = db.batch(); mine.slice(i, i + 400).forEach((d) => b.update(d.ref, { st: 'rej', rejAt: now, rejBy: who.uid, rejW: 'blk', el: false, purgeAt: now + SI.KEEP_DAYS * 864e5 })); await b.commit(); }
+    input.rej = mine.length;
+  } else if (!blkOf(await ref.get()).some((x) => x.a === a)) throw pre('not-blocked', 'הכתובת לא ברשימת החסומים');
+  // blkAdd / blkClean: המיילים הקיימים מהשולח – לאשפה של Gmail
+  const r = await blkTrash(db, m, a);
+  const L = await db.runTransaction(async (tx) => { const L0 = blkOf(await tx.get(ref)); const L1 = L0.map((x) => (x.a === a ? Object.assign({}, x, { n: (Number(x.n) || 0) + r.n }) : x)); if (r.n) tx.set(ref, { L: L1 }, { merge: true }); return L1; });
+  await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', op === 'blkAdd' ? 'mailBlock' : 'mailBlkClean', { tgt: a, note: 'trash ' + r.n + (r.more ? ' more' : '') + (r.fail ? ' fail ' + r.fail : '') + (r.skip ? ' noScope ' + r.skip : '') + (input.rej ? ' rej ' + input.rej : '') }));
+  return Object.assign(blkOut(L, m), { addr: a, trashed: r.n, more: r.more, fail: r.fail, noScope: r.skip, rej: input.rej || 0 });
+}
 async function mgrMailsOf(db) { const ad = await db.collection('admins').get(); return new Set(ad.docs.map((d) => G.addrOf(d.get('email'))).filter(Boolean)); }
 // קליטה מתיבה (התראה מ-Gmail, או המשך מהריצה המתוזמנת כשנשאר פיגור).
 // 5: נקודת ההמשך (hist) מתקדמת רק עד רשומת ההיסטוריה האחרונה שכל המיילים שלה טופלו בפועל. מה שנשאר – בריצה הבאה (lag:true → secCalSync ממשיך כל 15 דקות).
@@ -577,7 +652,7 @@ async function ingestBox(boxId, addr, o) {
   const todo = [];
   ids.forEach((g, k) => { if (ex[k].exists) { done.add(g); out.dup++; } else if (todo.length < G.RUN_MAX) todo.push(g); });
   const cap = await dayIn(db, boxId, todo.length, now);
-  const ctx = { boxId, addr, mgrMails: await mgrMailsOf(db), rep: repOf(await db.doc('sec_cfg/mail_rep').get()) };
+  const ctx = { boxId, addr, mgrMails: await mgrMailsOf(db), rep: repOf(await db.doc('sec_cfg/mail_rep').get()), blk: await blkSet(db), clean: bx.clean === true };
   let err = false, fail = null;
   for (const gid of todo.slice(0, cap.ok)) {
     let r;
@@ -793,7 +868,7 @@ async function refineOp(who, db, mailId, note, now) {
   await b.commit();
   return draftOut(id, Object.assign({}, ds.data(), up, { an: [], mrNo: [] }));
 }
-const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend', 'ordReset', 'ordAuto', 'ordPhone'];
+const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend', 'ordReset', 'ordAuto', 'ordPhone', 'blkList', 'blkAdd', 'blkDel', 'blkClean'];
 async function secMail(request) {
   const input = inputObject(request);
   const { who, db } = await gate(request, { consent: true });
@@ -868,6 +943,7 @@ async function secMail(request) {
     await b.commit();
     return { ok: true, id };
   }
+  if (op.startsWith('blk')) return blkOp(who, db, input, op, now);
   if (op === 'cleanList') {
     const s = await db.collection('sec_clean').orderBy('t', 'desc').limit(10).get();
     return { ok: true, lists: s.docs.map((d) => cleanOut(d.id, d.data())) };
@@ -2478,7 +2554,7 @@ async function histStep(db, bizId, max, now) {
     let c = null;
     if (bx && bx.st === 'ok') { try { c = (await access(db, bizId, 'mail', id)).c; } catch (e) { c = null; } }
     if (!c) { boxes[id] = Object.assign(bj, { end: true, why: 'off' }); await ref.update({ ['boxes.' + id]: boxes[id] }); continue; } // תיבה שנותקה / פגה – מדלגים
-    const ctx = { boxId: id, addr: bx.addr, mgrMails };
+    const ctx = { boxId: id, addr: bx.addr, mgrMails, blk: await blkSet(db), clean: bx.clean === true };
     let done = 0;
     while (done < max && total < HIST_MAX) {
       if ((await ref.get()).get('st') !== 'run') { stopped = true; break; } // עצירה באמצע – בין עמודים
