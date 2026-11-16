@@ -254,7 +254,7 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
     assert.equal(await use(), 1, 'gemini-error – מוחזר');
     GM.state.mode = 'noanswer';
     assert.equal(await err(AI.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [IMG, IMG] }, Date.now(), deps())), 'no-answer');
-    assert.equal(await use(), 3, 'טיוטה: 2 תמונות נספרות');
+    assert.equal(await use(), 2, 'טיוטה (2 תמונות) נספרת כבדיקה אחת');
     GM.reset();
     const dir = `b/${A}/store3d/main/run/${RUN}/`;
     for (let i = 1; i <= 98; i++) await bucket.file(`${dir}f1-a-1_a_${i}.jpg`).save(Buffer.from('x'), { resumable: false });

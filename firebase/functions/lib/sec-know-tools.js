@@ -13,7 +13,7 @@ const DECL = {
   getBusinessFacts: { description: 'מידע על העסק שהמנהל אישר: שעות, כתובות, סניפים, ספקים, עובדים (תפקידים), מטרות, כללי תשובה, ומחירון. לשאלות על העסק עצמו.', parameters: S({ topic: { type: 'string', enum: Object.keys(K.TOPICS).concat(['price', 'all']), description: 'נושא (לא חובה)' }, query: str('מילת חיפוש (לא חובה), למשל שם ספק או פריט') }) },
   proposeFact: { description: 'להציע למנהל לשמור עובדה קבועה על העסק שעלתה בשיחה. לא נשמר – נוצר כרטיס, והמנהל מאשר או מבטל. אסור להציע כך מידע על בריאות, היריון, משפחה או מידע אישי רגיש אחר על עובד – אותו המנהל שומר במסך המידע הרגיש.', parameters: S({ topic: { type: 'string', enum: Object.keys(K.TOPICS) }, text: str('העובדה במשפט אחד'), expires: str('תאריך תפוגה YYYY-MM-DD, רק אם העובדה זמנית') }, ['topic', 'text']) },
   getCalendar: { description: 'אירועים ביומן: היומן האישי של המנהל ואירועי העסק המשותפים.', parameters: S({ from: str('מתאריך YYYY-MM-DD (ברירת מחדל: היום)'), to: str('עד תאריך YYYY-MM-DD (ברירת מחדל: עוד 30 יום)') }) },
-  proposeCalendarEvent: { description: 'להציע אירוע ביומן. לא נוצר – נוצר כרטיס, והמנהל מאשר או מבטל.', parameters: S({ title: str('כותרת קצרה'), date: str('YYYY-MM-DD'), time: str('HH:MM (לא חובה)'), note: str('הערה (לא חובה)'), forBusiness: { type: 'boolean', description: 'אירוע של העסק (כל המנהלים רואים). ברירת מחדל: אישי' } }, ['title', 'date']) },
+  proposeCalendarEvent: { description: 'להציע אירוע ביומן. לא נוצר – נוצר כרטיס, והמנהל מאשר או מבטל.', parameters: S({ title: str('כותרת קצרה'), date: str('YYYY-MM-DD'), time: str('HH:MM (לא חובה)'), note: str('הערה (לא חובה)'), forBusiness: { type: 'boolean', description: 'אירוע של העסק (כל המנהלים רואים). ברירת מחדל: אישי' }, reminder: { type: 'boolean', description: 'תזכורת – כשהמנהל ביקש "תזכירי לי". התראה בשעה שנקבעה (בלי שעה – בבוקר)' } }, ['title', 'date']) },
   getSensitiveInfo: { description: 'מידע רגיש ששמר המנהל על עובד מסוים (למשל בריאות או משפחה). רק להסבר נתונים, לעולם לא כבסיס להמלצה לפגוע בעובד.', parameters: S({ employee: str('שם העובד') }, ['employee']) },
 };
 const NAMES = Object.keys(DECL);
@@ -90,9 +90,10 @@ async function run(name, a, ctx) {
       if (pend.size >= K.CAL_PROP_MAX) return { error: 'too-many', note: 'יש כבר הרבה הצעות שממתינות לאישור ביומן.' };
       const to = a.forBusiness === true ? 'biz' : 'me';
       const ref = db.collection('sec_cal').doc();
-      await ref.set(Object.assign({ uid: ctx.uid, to, st: 'prop', src: 'sec', by: ctx.uid, t: ctx.now }, ev));
+      const rem = a.reminder === true; // 15.11.2026: "תזכירי לי…" – תזכורת (rem), שמופיעה גם ב"מול העיניים" בצ'אט
+      await ref.set(Object.assign({ uid: ctx.uid, to, st: 'prop', src: 'sec', by: ctx.uid, t: ctx.now }, ev, rem ? { rem: true } : {}));
       const off = K.offKind(ev.d);
-      const card = Object.assign({ k: 'cal', id: ref.id, to }, ev);
+      const card = Object.assign({ k: 'cal', id: ref.id, to }, ev, rem ? { rem: true } : {});
       // שישי/שבת/חג (72): לפי הגדרת המנהל – להזהיר ולהציע יום אחר (ברירת מחדל) או לקבל בלי הערה
       if (off && ctx.we !== 'accept') card.warn = { kind: off, next: K.nextBizDay(ev.d) };
       ctx.cards.push(card);

@@ -41,6 +41,25 @@ describe('store3d-ai – תמונות ומקום צילום', () => {
     assert.deepEqual(A.checkSlot('f2-a-1_t', MAP), { bay: 'f2-a-1', fx: 'f2', lv: 't', hi: true });
     for (const s of ['f1-a-4_a', 'f2-b-1_t', 'f2-a-1_a', 'f1-a-1_t', 'f3-a-1_a', 'f9-a-1_a', 'x']) assert.equal(code(() => A.checkSlot(s, MAP)), 'bad-slot', s);
   });
+  it('draftImgs (15.11.2026): עד 100 תמונות עוברות, 101 נדחות; סך הכל מעל 13,000,000 בתים נדחה; אותה דחיסה לכל תמונה', () => {
+    assert.deepEqual([A.DRAFT.maxImgs, A.DRAFT.maxTotal, A.DRAFT.img.max, A.DRAFT.img.longMax], [100, 13000000, 1500000, 1600]);
+    const small = jpeg(1200, 900, 2000).toString('base64');
+    assert.equal(A.draftImgs(Array(100).fill(small)).length, 100, '100 תמונות');
+    assert.equal(code(() => A.draftImgs(Array(101).fill(small))), 'bad-img-count', '101 תמונות');
+    assert.equal(code(() => A.draftImgs([])), 'bad-img-count');
+    assert.equal(code(() => A.draftImgs('x')), 'bad-img-count');
+    // 13,000,000 בתים בדיוק – עובר; בית אחד יותר – נדחה
+    const big = jpeg(1200, 900, 1500000 - 45);
+    const per = big.length, last = 13000000 - 8 * per;
+    assert.ok(per <= 1500000 && last >= 1000 && last <= 1500000);
+    const tail = jpeg(1200, 900, last - jpeg(1200, 900).length);
+    assert.equal(tail.length, last);
+    const B64 = big.toString('base64');
+    assert.equal(A.draftImgs(Array(8).fill(B64).concat([tail.toString('base64')])).length, 9, 'בדיוק 13,000,000');
+    const tail1 = jpeg(1200, 900, last + 1 - jpeg(1200, 900).length).toString('base64');
+    assert.equal(code(() => A.draftImgs(Array(8).fill(B64).concat([tail1]))), 'too-big', '13,000,001 בתים');
+    assert.equal(code(() => A.draftImgs([jpeg(1200, 900, 1500001).toString('base64')])), 'too-big', 'תמונה בודדת מעל 1.5MB – כמו קודם');
+  });
 });
 
 describe('store3d-ai – מכסה', () => {
@@ -53,7 +72,7 @@ describe('store3d-ai – מכסה', () => {
     r = A.quotaStep(r.b, null, o());
     assert.deepEqual([r.b.n, r.warn, r.b.w80], [9, false, '2026-11'], 'אזהרה רק פעם אחת בחודש');
     assert.equal(code(() => A.quotaStep({ m: '2026-11', n: 10 }, null, o())), 's3-month-limit');
-    assert.equal(code(() => A.quotaStep({ m: '2026-11', n: 8 }, null, o({ k: 3 }))), 's3-month-limit', 'טיוטה עם 3 תמונות כשנשארו 2');
+    assert.equal(code(() => A.quotaStep({ m: '2026-11', n: 8 }, null, o({ k: 3 }))), 's3-month-limit', 'k גדול מהיתרה (k = 3 כשנשארו 2)');
     assert.equal(A.quotaStep({ m: '2026-10', n: 10, w80: '2026-10' }, null, o()).b.n, 1, 'חודש חדש');
     assert.equal(code(() => A.quotaStep(null, { d: '2026-11-14', n: 400 }, o({ cap: 1000 }))), 's3-user-day');
     assert.equal(A.quotaStep(null, { d: '2026-11-13', n: 400 }, o()).u.n, 1, 'יום חדש');
@@ -70,6 +89,19 @@ describe('store3d-ai – מכסה', () => {
     assert.equal(A.refundStep({ m: '2026-12', n: 5 }, '2026-11', 1, 9), null);
     assert.deepEqual(A.refundDay({ d: '2026-11-14', n: 5 }, '2026-11-14', 1, 9), { n: 4, upd: 9 });
     assert.equal(A.refundDay({ d: '2026-11-13', n: 5 }, '2026-11-14', 1, 9), null);
+  });
+  it('draftDayStep: עד 5 הקמות ביום לסניף, יום חדש מתאפס, החזרה לא מתחת ל-0', () => {
+    const D = '2026-11-15';
+    assert.equal(A.DRAFT_DAY_MAX, 5);
+    assert.deepEqual(A.draftDayStep(null, D, 7), { d: D, n: 1, upd: 7 });
+    assert.deepEqual(A.draftDayStep({ d: D, n: 4 }, D, 7), { d: D, n: 5, upd: 7 }, 'החמישית עוברת');
+    let e = null;
+    try { A.draftDayStep({ d: D, n: 5 }, D, 7); } catch (x) { e = x; }
+    assert.equal(e && e.code, 'draft-daily', 'השישית נדחית');
+    assert.match(e.message, /5 הקמות היום בסניף הזה/);
+    assert.deepEqual(A.draftDayStep({ d: '2026-11-14', n: 5 }, D, 7), { d: D, n: 1, upd: 7 }, 'יום חדש');
+    assert.equal(A.draftDayStep({ d: D, n: 'x' }, D, 7).n, 1, 'מסמך פגום = 0');
+    assert.deepEqual(A.refundDay({ d: D, n: 0 }, D, 1, 9), { n: 0, upd: 9 }, 'לא מתחת ל-0');
   });
 });
 
@@ -174,5 +206,147 @@ describe('store3d-ai – טיוטת מפה (קובצי הדוגמה של שלב 
     assert.deepEqual([f.k, f.x, f.y, f.a, f.sides, f.room, f.glass], ['fridge', 900, 201, 270, 1, 'r2', true]);
     assert.equal(d.map.ent, 'd1');
     passesSave(d.map);
+  });
+});
+
+describe('store3d-ai – טיוטת מפה: סיבת כשל, השמטה חלקית (תיקון 15.11.2026)', () => {
+  const ectx = { br: 'main', kind: 's', numDir: 'rtl', bizId: 'biz-x', uid: 'u_mgr1', now: 1 };
+  const cc = { bizId: 'biz-x', mapId: 's-main', uid: 'u_mgr1', now: 1 };
+  it('evalDraft: לא JSON = parse; לא JSON עם MAX_TOKENS = cut; לא אובייקט = not-obj; בלי חדר = no-rooms; תקינה = d', () => {
+    assert.deepEqual(A.evalDraft(null, 'STOP', ectx), { why: 'parse' });
+    assert.deepEqual(A.evalDraft(null, 'MAX_TOKENS', ectx), { why: 'cut' });
+    assert.deepEqual(A.evalDraft(null, '', ectx), { why: 'parse' });
+    assert.equal(A.evalDraft(['a', 'b'], 'STOP', ectx).why, 'not-obj');
+    assert.equal(A.evalDraft(FX('mapdraft-broken'), 'STOP', ectx).why, 'no-rooms');
+    const v = A.evalDraft(FX('mapdraft-ok'), 'STOP', ectx);
+    assert.deepEqual([v.why, v.d.drop, v.d.map.fx.length, v.fit], [undefined, 0, 5, 0]);
+    // מודל שעטף את התשובה במערך של אובייקט אחד – מתקבל
+    assert.equal(A.evalDraft([FX('mapdraft-ok')], 'STOP', ectx).d.map.rooms.length, 1);
+  });
+  it('draftMsg: הודעה בעברית לכל סיבה, ותמיד "לא נספרה במכסה"; סיבה לא מוכרת – נוסח כללי', () => {
+    for (const w of Object.keys(A.DRAFT_WHY)) { const m = A.draftMsg(w); assert.match(m, /לא נספרה במכסה/); assert.match(m, /[\u0590-\u05FF]/); assert.doesNotMatch(m, /JSON|MAX_TOKENS|finish/i); }
+    assert.match(A.draftMsg('cut'), /נקטעה/);
+    assert.equal(A.draftMsg('zzz'), A.draftMsg('map'));
+  });
+  it('fitDraft: גופים וחדר שלא עוברים את בדיקת השמירה מושמטים (drop), גוף של חדר שהושמט עובר לחדר הראשון; התוצאה עוברת את draftCheck', () => {
+    const d = A.cleanDraft(FX('mapdraft-ok'), ectx);
+    const m = JSON.parse(JSON.stringify(d.map));
+    // חדר עם קירות חוצים (נכשל ב-finalCheck), גוף לא תקין ל-cleanMap (sides 3), גוף תקין בחדר הפסול, ואזור עם txt ארוך מדי
+    m.rooms.push({ id: 'r2', name: 'פסול', p: [0, 0, 500, 500, 500, 0, 0, 500], h: 300 });
+    m.fx.push(Object.assign({}, m.fx[0], { id: 'f6', num: 6, sides: 3 }));
+    m.fx.push(Object.assign({}, m.fx[0], { id: 'f7', num: 7, room: 'r2' }));
+    m.uz.push({ x: 1, y: 1, w: 100, d: 100, txt: 'א'.repeat(81), ok: false });
+    assert.throws(() => A.draftCheck(m, cc));
+    const f = A.fitDraft(m, cc);
+    assert.equal(f.drop, 3, 'חדר + גוף + אזור');
+    assert.deepEqual(f.map.rooms.map((r) => r.id), ['r1']);
+    assert.deepEqual(f.map.fx.map((x) => [x.id, x.num, x.room]), [1, 2, 3, 4, 5, 6].map((i) => ['f' + i, i, 'r1']), 'מספור מחדש, f7 עבר ל-r1');
+    assert.deepEqual([f.map.seq, f.map.uz.length], [6, 3]);
+    A.draftCheck(f.map, cc);
+    // טיוטה תקינה – בלי שינוי
+    const ok = A.fitDraft(d.map, cc);
+    assert.deepEqual([ok.drop, ok.map === d.map], [0, true]);
+  });
+  it('fitDraft / evalDraft: כשלא נשאר אף חדר תקין – no-rooms (הטיוטה נדחית)', () => {
+    const d = A.cleanDraft(FX('mapdraft-ok'), ectx);
+    const m = Object.assign({}, d.map, { name: '' });   // שם המפה לא תקין – כל פריט נכשל
+    assert.equal(code(() => A.fitDraft(m, cc)), 'no-rooms');
+  });
+});
+
+// שאלון וסקיצה מבעל החנות (15.11.2026): בדיקת קלט, הנחיה, והתאמת הטיוטה למידות ולסקיצה
+describe('store3d-draftin – שאלון וסקיצה לטיוטת מפה', () => {
+  const DI = require(path.join(FN, 'lib', 'store3d-draftin.js'));
+  const ectx = { br: 'main', kind: 's', numDir: 'rtl', bizId: 'biz-x', uid: 'u_mgr1', now: 1 };
+  const cc = { bizId: 'biz-x', mapId: 's-main', uid: 'u_mgr1', now: 1 };
+  const INFO = { w: 1400, l: 1500, rooms: 2, rows: 3, ent: 'd', cash: 'r', note: 'קופה ליד הכניסה' };
+  const SK = { rooms: [[0, 0, 1400, 0, 1400, 1000, 0, 1000], [0, 1000, 1400, 1000, 1400, 1500, 0, 1500]], rows: [[600, 300, 600, 1100], [1100, 300, 1100, 900], [200, 1250, 1200, 1250]] };
+  it('draftInput: בלי שדות (גרסה ישנה) = null; קלט תקין עובר; ריק = null', () => {
+    assert.deepEqual(DI.draftInput({ qid: 'x' }), { info: null, sketch: null });
+    assert.deepEqual(DI.draftInput({ info: null, sketch: null }), { info: null, sketch: null });
+    const v = DI.draftInput({ info: INFO, sketch: SK });
+    assert.deepEqual(v.info, INFO); assert.deepEqual(v.sketch, SK);
+    assert.deepEqual(DI.draftInput({ info: { ent: '', note: '   ' } }), { info: null, sketch: null });
+    assert.deepEqual(DI.draftInput({ info: { rows: 0 } }).info, { rows: 0 });
+    assert.deepEqual(DI.draftInput({ info: { w: 1400, l: 1500 }, sketch: { rooms: [], rows: [] } }).sketch, null);
+  });
+  it('draftInput: זבל נדחה ב-bad-info (סוגים, טווחים, מפתחות זרים, מחוץ למידות, מצולע חוצה, גודל, סקיצה בלי מידות)', () => {
+    const bad = (inp) => code(() => DI.draftInput(inp));
+    for (const info of ['x', [1], { w: 150 }, { w: 10001 }, { l: 1500.5 }, { w: '1400' }, { rooms: 0 }, { rooms: 7 }, { rows: 31 }, { rows: -1 }, { ent: 'n' }, { cash: 3 }, { note: 'א'.repeat(201) }, { note: 5 }, { zz: 1 }, { __proto__x: 1 }])
+      assert.equal(bad({ info }), 'bad-info', JSON.stringify(info));
+    const I = { w: 1400, l: 1500 };
+    for (const sketch of ['x', { rooms: 'x' }, { zz: [] }, { rooms: [[0, 0, 100, 0]] }, { rooms: [[0, 0, 1500, 0, 1500, 900, 0, 900]] }, { rooms: [[0, 0, 500, 500, 500, 0, 0, 500]] },
+      { rooms: Array(7).fill([0, 0, 500, 0, 500, 500]) }, { rows: [[0, 0, 10, 10]] }, { rows: [[0, 0, 100]] }, { rows: [[0, 0, 100, 1600]] }, { rows: Array(31).fill([0, 0, 100, 0]) }, { rows: [[0, 0, 100.5, 0]] }])
+      assert.equal(bad({ info: I, sketch }), 'bad-info', JSON.stringify(sketch).slice(0, 80));
+    assert.equal(bad({ sketch: SK }), 'bad-info', 'סקיצה בלי מידות');
+    assert.equal(bad({ info: { rooms: 2 }, sketch: SK }), 'bad-info', 'סקיצה בלי רוחב ואורך');
+    assert.equal(bad({ info: I, sketch: { rows: Array(30).fill([0, 0, 1000, 1000]), rooms: Array(6).fill(Array(40).fill(1000)) } }), 'bad-info', 'מעל 4000 תווים');
+    assert.equal(bad({ info: Object.assign({}, I, { note: 'x' }), sketch: { rows: [[0, 0, 0, 0]] } }), 'bad-info', 'שורה באורך 0');
+  });
+  it('buildMapDraftPrompt: בלי שאלון – זהה לגרסה הקודמת; עם שאלון – מידות, חדרים, שורות, כניסה וקופה כמחייבים; ההערה מנוקה', () => {
+    const base = PM.buildMapDraftPrompt({ kind: 's', n: 3 });
+    assert.equal(PM.buildMapDraftPrompt({ kind: 's', n: 3, info: null, sketch: null }), base);
+    assert.doesNotMatch(base, /מבעל החנות/);
+    const p = PM.buildMapDraftPrompt({ kind: 's', n: 3, info: Object.assign({}, INFO, { note: 'הערה "}{ עם\nשורה' }), sketch: SK });
+    assert.ok(p.startsWith(PM.mapdraft), 'אותה התחלה (המודל המדומה מזהה לפיה)');
+    assert.match(p, /מחייבים/); assert.match(p, /רוחב 14 מטר/); assert.match(p, /אורך 15 מטר/); assert.match(p, /בדיוק 2/);
+    assert.match(p, /חדר 2: \[0,1000,1400,1000,1400,1500,0,1500\]/); assert.match(p, /\[200,1250,1200,1250\]/);
+    assert.match(p, /הכניסה הראשית למטה/); assert.match(p, /הקופה בצד ימין/);
+    assert.doesNotMatch(p.split('הערת בעל החנות')[1], /["{}\n]/);
+    const q = PM.buildMapDraftPrompt({ kind: 's', info: { rows: 8, w: 2000, l: 1000 } });
+    assert.match(q, /בערך 8/); assert.match(q, /רוחב 20 מטר/); assert.doesNotMatch(q, /הכניסה הראשית/);
+  });
+  it('evalDraft עם שאלון: הטיוטה נמתחת למידות, החדרים מהסקיצה, גופים מוצמדים לשורות, שורה בלי גוף = גונדולה + uz; עוברת draftCheck', () => {
+    const plain = A.evalDraft(FX('mapdraft-ok'), 'STOP', ectx).d;
+    const v = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: INFO, sketch: SK }));
+    assert.ok(v.d, JSON.stringify(v));
+    const m = v.d.map;
+    assert.deepEqual(m.rooms.map((r) => r.p), SK.rooms);
+    assert.deepEqual(m.rooms.map((r) => r.id), ['r1', 'r2']);
+    assert.equal(m.walls.length, 0);
+    assert.deepEqual([v.d.snap, v.d.add], [2, 1]);
+    const g = m.fx.find((f) => f.name === 'גונדולה מרכזית');
+    assert.deepEqual([g.x, g.y, g.w, g.a % 180], [600, 700, 800, 90]);
+    const added = m.fx[m.fx.length - 1];
+    assert.deepEqual([added.k, added.sides, added.x, added.y, added.w, added.bays, added.room], ['gon', 2, 700, 1250, 1000, 10, 'r2']);
+    assert.equal(m.fx.length, plain.map.fx.length + 1);
+    assert.deepEqual(m.fx.map((f) => f.num), m.fx.map((f, i) => i + 1));
+    assert.equal(m.seq, m.fx.length);
+    assert.match(m.uz[m.uz.length - 1].txt, /שורה מהשרטוט/);
+    for (const f of m.fx) assert.ok(f.x >= 0 && f.x <= 1400 && f.y >= 0 && f.y <= 1500, f.id);
+    A.draftCheck(m, cc);
+  });
+  it('שאלות ההמשך על הסקיצה: סוג חדר, סוג שורה, נקודת כניסה וקופה – נבדקים, נכנסים להנחיה וגוברים בטיוטה', () => {
+    const sk = Object.assign({}, SK, { rt: ['s', 'w'], rk: ['gon', 'gon', 'fridge'], ent: [700, 1500], cash: [1200, 1400] });
+    const v = DI.draftInput({ info: { w: 1400, l: 1500 }, sketch: sk });
+    assert.deepEqual(v.sketch, sk);
+    const I = { w: 1400, l: 1500 }, bad = (x) => code(() => DI.draftInput({ info: I, sketch: Object.assign({}, SK, x) }));
+    for (const x of [{ rt: ['s'] }, { rt: ['s', 'q'] }, { rk: ['gon', 'gon'] }, { rk: ['gon', 'gon', 'bin'] }, { ent: [1, 2, 3] }, { ent: [1500, 0] }, { cash: ['1', 2] }, { rt: 's' }]) assert.equal(bad(x), 'bad-info', JSON.stringify(x));
+    assert.deepEqual(DI.draftInput({ info: I, sketch: { ent: [0, 0] } }).sketch, { rooms: [], rows: [], ent: [0, 0] }, 'רק כניסה');
+    const p = PM.buildMapDraftPrompt({ kind: 's', info: I, sketch: sk });
+    assert.match(p, /חדר 2 \(מחסן\)/); assert.match(p, /\[200,1250,1200,1250\] fridge/); assert.match(p, /הכניסה הראשית בנקודה \(700,1500\)/); assert.match(p, /הקופה בנקודה \(1200,1400\)/);
+    const m = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: I, sketch: sk })).d.map;
+    assert.deepEqual(m.rooms.map((r) => r.name), ['אולם מכירות', 'מחסן']);
+    const fr = m.fx[m.fx.length - 1];
+    assert.deepEqual([fr.k, fr.sides, fr.glass, fr.d], ['fridge', 1, true, 80]);
+    assert.deepEqual(m.syms.filter((y) => y.k === 'ent').map((y) => [y.x, y.y]), [[700, 1500]]);
+    assert.deepEqual(m.syms.filter((y) => y.k === 'cash').map((y) => [y.x, y.y]), [[1200, 1400]]);
+    A.draftCheck(m, cc);
+    // שורה שה-AI זיהה כגונדולה ובעל החנות אמר "מדף קיר" – הופכת למדף קיר חד-צדדי
+    const m2 = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: I, sketch: Object.assign({}, SK, { rk: ['wall', 'gon', 'gon'] }) })).d.map;
+    const g = m2.fx.find((f) => f.name === 'גונדולה מרכזית');
+    assert.deepEqual([g.k, g.sides], ['wall', 1]);
+    A.draftCheck(m2, cc);
+  });
+  it('shapeDraft: רק מידות (בלי סקיצה) – החדרים ממלאים בדיוק את המלבן; הטיוטה המקורית לא משתנה', () => {
+    const d = A.cleanDraft(FX('mapdraft-ok'), ectx), before = JSON.stringify(d.map);
+    const s = DI.shapeDraft(d.map, { w: 2100, l: 700 }, null);
+    assert.equal(JSON.stringify(d.map), before);
+    assert.deepEqual(s.map.rooms[0].p, [0, 0, 2100, 0, 2100, 700, 0, 700]);
+    const wl = s.map.fx.find((f) => f.name === 'קיר אחורי');   // a=0 – האורך לאורך x, פי 3
+    assert.deepEqual([wl.x, wl.y, wl.w, wl.d], [1050, 15, 1800, 40]);
+    A.draftCheck(s.map, cc);
+    const v = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: { rows: 3 } }));
+    assert.deepEqual(v.d.map.rooms[0].p, [0, 0, 700, 0, 700, 1400, 0, 1400], 'בלי מידות – בלי מתיחה');
   });
 });

@@ -4,6 +4,7 @@
 //   decodeJpeg(b64, lim)        – תמונה מהטלפון: base64 של JPEG בלבד (לפי התוכן, scan.sniff), גודל ומידות לפי הגבולות.
 //   checkSlot(slot, map)        – מקום הצילום קיים במפה: הגוף לא מחוק, הצד והמקטע בטווח, וגובה הצילום (a / t+b) לפי hi.
 //   quotaStep(...)              – הזמנת מכסה: חודשית לסניף (s3use/b_{br}) + בלם יומי לעובד (s3use/u_{uid}), אזהרה ב-80%.
+//   draftDayStep(...)           – עד DRAFT_DAY_MAX (5) הקמות (mapDraft) ביום לסניף (s3use/d_{br}).
 //   shelfBroken / cleanShelf    – תשובת המודל לבדיקת מדף: "שבורה" (נדחית, המכסה מוחזרת) או מסוננת לשדות ai (4.10).
 //                                 גם תשובה תקינה במבנה מסוננת כאן: סוגים, טווחים, מחסן בלי מחירים, conf<0.6 = אזהרה, מספר המלצות.
 //   cleanDraft                  – תשובת המודל לטיוטת מפה → מפה במבנה 4.3 (מזהים, מספור, חדר לכל גוף, uz עם ok:false).
@@ -11,6 +12,7 @@
 
 const { sniff } = require('./scan');
 const M = require('./store3d-map');
+const DI = require('./store3d-draftin');
 
 const ISSUE_KINDS = ['noprice', 'pricepos', 'promoexp', 'hole', 'low', 'damaged', 'fallen', 'upside', 'face', 'order', 'misplaced', 'missing'];
 const PRICE_KINDS = ['noprice', 'pricepos', 'promoexp']; // במחסן השרת מוחק אותם (4.10)
@@ -22,8 +24,10 @@ const MIN_T = 1735689600000, MAX_T = 4102444800000;      // טווח שדות ז
 // גבולות תמונה (4.9, 4.20, 5.1)
 const IMG = { min: 1000, max: 1500000, longMin: 400, longMax: 1600, shortMin: 200, shortMax: 1600 };
 const THUMB = { min: 500, max: 150000, longMin: 1, longMax: 512, shortMin: 1, shortMax: 512 };
-// טיוטת מפה: כל תמונה כמו תמונת מדף (צלע ארוכה עד 1600), וסך הכל עד 9,000,000 בתים (הנחה – מגבלת גודל בקשה של פונקציה, לא מאומת)
-const DRAFT = { maxImgs: 40, maxTotal: 9000000, img: { min: 1000, max: 1500000, longMin: 200, longMax: 1600, shortMin: 100, shortMax: 1600 } };
+// טיוטת מפה: כל תמונה כמו תמונת מדף (צלע ארוכה עד 1600, אותה דחיסה), עד 100 תמונות, וסך הכל עד 13,000,000 בתים אחרי פענוח
+// (החלטת המשתמש 15.11.2026: "הכמות הכי גדולה בלי להוריד איכות"). 13MB ב-base64 ≈ 17.3MB – מתחת למגבלת בקשה inline של Gemini
+// (כ-20MB, לא מאומת) ומתחת למגבלת גודל בקשה של onCall / Cloud Run (32MiB, לא מאומת).
+const DRAFT = { maxImgs: 100, maxTotal: 13000000, img: { min: 1000, max: 1500000, longMin: 200, longMax: 1600, shortMin: 100, shortMax: 1600 } };
 
 const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
 const inR = (v, a, b) => Number.isInteger(v) && v >= a && v <= b;
@@ -49,6 +53,15 @@ function decodeJpeg(b64, lim, label) {
   const lo = Math.min(sz.w, sz.h), hi = Math.max(sz.w, sz.h);
   if (hi < lim.longMin || hi > lim.longMax || lo < lim.shortMin || lo > lim.shortMax) throw fail('bad-size', `המידות של ${L} לא מתאימות (צלע ארוכה עד ${lim.longMax} פיקסלים)`);
   return { buf, w: sz.w, h: sz.h, b64: s };
+}
+
+// טיוטת מפה: מערך התמונות (1–DRAFT.maxImgs, כל אחת לפי DRAFT.img, סך הכל עד DRAFT.maxTotal). מחזיר [{ buf, w, h, b64 }] או זורק fail.
+function draftImgs(arr) {
+  if (!Array.isArray(arr) || arr.length < 1 || arr.length > DRAFT.maxImgs) throw fail('bad-img-count', `צריך לשלוח בין 1 ל-${DRAFT.maxImgs} תמונות`);
+  let total = 0;
+  const imgs = arr.map((s, i) => { const d = decodeJpeg(s, DRAFT.img, 'תמונה ' + (i + 1)); total += d.buf.length; return d; });
+  if (total > DRAFT.maxTotal) throw fail('too-big', 'התמונות יחד גדולות מדי. שלחו פחות תמונות או תמונות קטנות יותר.');
+  return imgs;
 }
 
 // ---------- מקום הצילום ----------
@@ -79,8 +92,8 @@ function quotaStep(b, u, o) {
   const un0 = dayN(u, o.day);
   const lim = Number.isInteger(o.adhocMax);
   const an0 = lim ? dayN(o.a, o.day) : 0;
-  if (n0 + k > cap) throw fail('s3-month-limit', `נגמרה המכסה החודשית של הסניף (${n0} מתוך ${cap} תמונות). התמונות נשמרות בטלפון ויישלחו כשהמכסה תוגדל או בחודש הבא.`);
-  if (un0 + k > o.userMax) throw fail('s3-user-day', `שלחת היום יותר מ-${o.userMax} תמונות. נסו שוב מחר.`);
+  if (n0 + k > cap) throw fail('s3-month-limit', `נגמרה המכסה החודשית של הסניף (${n0} מתוך ${cap} בדיקות). התמונות נשמרות בטלפון ויישלחו כשהמכסה תוגדל או בחודש הבא.`);
+  if (un0 + k > o.userMax) throw fail('s3-user-day', `שלחת היום יותר מ-${o.userMax} בדיקות. נסו שוב מחר.`);
   if (lim && an0 + k > o.adhocMax) throw fail('s3-adhoc-day', `אפשר לשלוח עד ${o.adhocMax} דיווחים יזומים ביום. נסו שוב מחר.`);
   const n = n0 + k;
   const warn = n >= 0.8 * cap && w80 !== o.month;
@@ -99,7 +112,16 @@ function refundStep(b, month, k, now) {
   if (!isObj(b) || b.m !== month || !inR(b.n, 0, 100000)) return null;
   return { n: Math.max(0, b.n - k), upd: now };
 }
-// החזרה במונה יומי (דיווח יזום), באותו יום
+// הקמות (mapDraft) ביום לסניף (החלטת המשתמש 15.11.2026): s3use/d_{br} = { d: יום בשעון ישראל, n, upd }. יום חדש = מתחילים מ-0.
+// doc = המסמך הקיים (או null). מחזיר את המסמך החדש לכתיבה, או זורק fail('draft-daily'). בהחזרה – refundDay (אותו מבנה).
+const DRAFT_DAY_MAX = 5;
+function draftDayStep(doc, day, now, max) {
+  const lim = inR(max, 0, 100000) ? max : DRAFT_DAY_MAX;
+  const n0 = dayN(doc, day);
+  if (n0 + 1 > lim) throw fail('draft-daily', `הגעתם ל-${lim} הקמות היום בסניף הזה. נסו שוב מחר.`);
+  return { d: day, n: n0 + 1, upd: now };
+}
+// החזרה במונה יומי (דיווח יזום, הקמות), באותו יום
 function refundDay(doc, day, k, now) {
   if (!isObj(doc) || doc.d !== day || !inR(doc.n, 0, 100000)) return null;
   return { n: Math.max(0, doc.n - k), upd: now };
@@ -296,11 +318,77 @@ function cleanDraft(r, ctx) {
   return { map, drop, conf: num01(r.conf) == null ? 0 : r2(num01(r.conf)), scale: sc, notes: str(r.notes, 200) };
 }
 
+// ---------- טיוטת מפה: בדיקת התשובה, השמטה חלקית וסיבת כשל (תיקון 15.11.2026) ----------
+// סיבות כשל (why) – נשמרות ב-s3draft.why, נכתבות ליומן ומוצגות במסך בעברית. ההקמה לא נספרת במכסה כשהתשובה שבורה.
+const DRAFT_WHY = {
+  cut: 'תשובת ה-AI נקטעה באמצע, כנראה בגלל הרבה תמונות ופרטים. נסו שוב עם פחות תמונות (למשל 20–25).',
+  parse: 'ה-AI החזיר תשובה לא שלמה שאי אפשר לקרוא, גם בניסיון חוזר. נסו שוב בעוד כמה דקות.',
+  'not-obj': 'ה-AI החזיר תשובה במבנה לא צפוי, גם בניסיון חוזר. נסו שוב בעוד כמה דקות.',
+  'no-rooms': 'ה-AI לא זיהה את קירות החנות (אין בטיוטה אף חדר תקין). צלמו שוב ממקומות שרואים מהם את הקירות והפינות.',
+  map: 'השרטוט שה-AI החזיר לא עבר את בדיקות המפה. נסו שוב, אולי עם תמונות אחרות.',
+  'too-big': 'הטיוטה שה-AI החזיר גדולה מדי לשמירה. נסו שוב עם פחות תמונות.',
+};
+const NOT_COUNTED = ' ההקמה הזו לא נספרה במכסה.';
+const draftMsg = (why) => (DRAFT_WHY[why] || DRAFT_WHY.map) + NOT_COUNTED;
+
+// אותה בדיקה כמו בשמירת מפה (s3SaveMap): cleanMap ← mergeDel ← finalCheck ← גודל. c = { bizId, mapId, uid, now }. זורק fail.
+function draftCheck(map, c) {
+  const x = M.cleanMap(map, { bizId: c.bizId, mapId: c.mapId });
+  M.finalCheck(M.mergeDel(null, x.map, { mgr: true, uid: c.uid, now: c.now }), null);
+  if (M.bytesOf(map) > M.MAX_BYTES) throw fail('too-big', 'הטיוטה גדולה מדי');
+}
+// כשהבדיקה המלאה נכשלת – משמיטים רק את הפריטים שנכשלים לבד (כל פריט נבדק עם החדרים התקינים), במקום לדחות את כל הטיוטה.
+// גוף שהחדר שלו נשמט עובר לחדר הראשון (כמו ב-cleanDraft). אחרי ההשמטה – מספור הגופים מחדש, ושוב הבדיקה המלאה.
+// מחזיר { map, drop } (drop = כמה פריטים הושמטו כאן), או זורק fail('no-rooms' | 'too-big' | קוד של store3d-map).
+const DRAFT_LISTS = ['walls', 'cols', 'doors', 'syms', 'uz'];
+function fitDraft(map, c) {
+  try { draftCheck(map, c); return { map, drop: 0 }; } catch (e) { if (e.code === 'too-big') throw e; }
+  const ok1 = (m) => { try { draftCheck(m, c); return true; } catch (e) { return false; } };
+  const base = Object.assign({}, map, { rooms: [], walls: [], cols: [], doors: [], fx: [], syms: [], uz: [] });
+  delete base.ent;
+  let drop = 0;
+  const keep = (L, test) => (Array.isArray(L) ? L : []).filter((x) => { if (test(x)) return true; drop++; return false; });
+  const rooms = keep(map.rooms, (r) => ok1(Object.assign({}, base, { rooms: [r] })));
+  if (!rooms.length) throw fail('no-rooms', 'בטיוטה אין אף חדר תקין');
+  const withR = Object.assign({}, base, { rooms });
+  const out = Object.assign({}, map, { rooms });
+  for (const k of DRAFT_LISTS) out[k] = keep(map[k], (x) => ok1(Object.assign({}, withR, { [k]: [x] })));
+  const rid = new Set(rooms.map((r) => r.id));
+  const fx0 = (Array.isArray(map.fx) ? map.fx : []).map((f) => (isObj(f) && !rid.has(f.room) ? Object.assign({}, f, { room: rooms[0].id }) : f));
+  out.fx = keep(fx0, (f) => ok1(Object.assign({}, withR, { fx: [f] }))).map((f, i) => Object.assign({}, f, { id: 'f' + (i + 1), num: i + 1 }));
+  out.seq = out.fx.length;
+  if (out.ent && !out.doors.some((d) => d.id === out.ent)) delete out.ent;
+  draftCheck(out, c);
+  return { map: out, drop };
+}
+// תשובת המודל → טיוטה, או סיבת כשל. obj = JSON שפוענח (או null), finish = finishReason, ctx = { br, kind, numDir, bizId, uid, now, info?, sketch? }.
+// מחזיר { d } (כמו cleanDraft, drop כולל גם את מה שהושמט ב-fitDraft) או { why, code? } – why מתוך DRAFT_WHY.
+function evalDraft(obj, finish, ctx) {
+  if (obj === null || obj === undefined) return { why: finish === 'MAX_TOKENS' ? 'cut' : 'parse' };
+  // מודל שעטף את התשובה במערך של אובייקט אחד – משתמשים באובייקט
+  const r = Array.isArray(obj) && obj.length === 1 && isObj(obj[0]) ? obj[0] : obj;
+  if (!isObj(r)) return { why: finish === 'MAX_TOKENS' ? 'cut' : 'not-obj' };
+  let d;
+  try { d = cleanDraft(r, ctx); } catch (e) { return { why: 'no-rooms' }; }
+  // שאלון וסקיצה מבעל החנות (15.11.2026): מידות חיצוניות, חדרים ושורות מהסקיצה. כשל לא צפוי כאן – ממשיכים עם הטיוטה כמו שהיא
+  if (ctx.info) {
+    try { const s = DI.shapeDraft(d.map, ctx.info, ctx.sketch); d = Object.assign({}, d, { map: s.map, add: s.add, snap: s.snap }); } catch (e) { /* הטיוטה בלי התאמה */ }
+  }
+  try {
+    const f = fitDraft(d.map, { bizId: ctx.bizId, mapId: ctx.kind + '-' + ctx.br, uid: ctx.uid, now: ctx.now });
+    return { d: Object.assign({}, d, { map: f.map, drop: d.drop + f.drop }), fit: f.drop };
+  } catch (e) {
+    const why = e && e.code === 'too-big' ? 'too-big' : e && e.code === 'no-rooms' ? 'no-rooms' : 'map';
+    return { why, code: String((e && e.code) || '').slice(0, 30) };
+  }
+}
+
 const israelMonth = (day) => String(day).slice(0, 7);
 const validAt = (t, now) => Number.isInteger(t) && t >= MIN_T && t <= MAX_T && t <= now + 120000;
 
 module.exports = {
   ISSUE_KINDS, PRICE_KINDS, STATUSES, DONE_ST, LOW_CONF, IMG, THUMB, DRAFT, RE_SLOT,
-  ADHOC_DAY: 20, decodeJpeg, checkSlot, quotaStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  ADHOC_DAY: 20, DRAFT_DAY_MAX, decodeJpeg, draftImgs, checkSlot, quotaStep, draftDayStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  DRAFT_WHY, draftMsg, draftCheck, fitDraft, evalDraft,
   israelMonth, validAt, fail,
 };

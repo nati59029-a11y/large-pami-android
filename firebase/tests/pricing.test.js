@@ -242,6 +242,48 @@ describe('תמחור חשבונית ספק – שרת', () => {
     assert.equal((await call('piClaim', P2, { id })).reason, 'closed', 'אחרי סיום – נעלם לכולם מהעריכה');
   });
 
+  it('שינוי שם וכינויים (שלב 2): "שם במלאי" הופך לשם הראשי והישן נשמר ככינוי בלי כפילות; מוצר חדש בשם אחר; שורה בשם ישן מקבלת הצעה למוצר', async () => {
+    await prep((d) => d.doc(PFX() + 'prod/pR').set({ name: 'צלחות עמוקות ירוקות', price: 12, barcode: '', on: true, q: { br1: 1 }, sup: 'אסם', al: ['צלחת ירוקה'] }));
+    // piCreate (מהזיהוי) לא שומר nm – רק המסך של מי שמטפל
+    const id0 = (await call('piCreate', NOP, { reqId: rid(), sup: 'אסם', lines: [{ n: 'x', nm: 'y', qty: 1 }] })).result.id;
+    assert.equal((await get(PFX() + 'pinv/' + id0)).lines[0].nm, undefined);
+    const L = [
+      { n: 'צלחות עמוקות ירוקות', qty: 2, cost: 5, pid: 'pR', price: 12, nm: 'מגשים עמוקים' },
+      { n: 'קערות ירוקות 20', qty: 3, cost: 2, price: 6, nm: 'קערות ירוקות' },
+      { n: 'במבה 80 גרם', bc: '729001', qty: 1, cost: 3, pid: 'pA', nm: '' }, // nm ריק – השם לא משתנה ואין כינוי
+    ];
+    const id = await mk(MGR, L);
+    assert.equal((await call('piClaim', P1, { id })).status, 'OK');
+    assert.equal((await call('piDraft', P1, { id, lines: L })).status, 'OK');
+    assert.equal((await get(PFX() + 'pinv/' + id)).lines[0].nm, 'מגשים עמוקים', 'nm נשמר בטיוטה');
+    assert.equal((await call('piDraft', P1, { id, lines: [{ n: 'x', nm: 5 }] })).reason, 'bad-field');
+    const f = await call('piFinish', P1, { id, reqId: rid(), br: 'br1', lines: L });
+    assert.equal(f.status, 'OK', f.text);
+    const r = await get(PFX() + 'prod/pR');
+    assert.equal(r.name, 'מגשים עמוקים'); assert.deepEqual(r.al, ['צלחת ירוקה', 'צלחות עמוקות ירוקות'], 'השם הישן נשמר פעם אחת (גם בחשבונית)');
+    assert.equal(r.price, 12); assert.deepEqual(r.q, { br1: 3 });
+    const a = await get(PFX() + 'prod/pA'); assert.equal(a.name, 'במבה'); assert.equal(a.al, undefined);
+    const log = (await coll(PFX() + 'stockLog')).find((x) => x.prod === 'pR' && x.why === 'prod');
+    assert.match(log.note, /שם: צלחות עמוקות ירוקות → מגשים עמוקים/);
+    const nid = (await get(PFX() + 'pinv/' + id)).lines[1].pid;
+    const n = await get(PFX() + 'prod/' + nid); assert.equal(n.name, 'קערות ירוקות'); assert.deepEqual(n.al, ['קערות ירוקות 20']);
+    // חשבונית חדשה מאותו ספק בשם הישן (בלי ברקוד) – הצעה למוצר ששמו שונה; גם כתיב קצת אחר (סופיות/גרשיים) ושם ישן קודם
+    const id2 = await mk(MGR, [{ n: 'צלחות עמוקות ירוקות', qty: 1 }, { n: 'צלחת  ירוקה', qty: 1 }, { n: 'קערות ירוקות 20', qty: 1 }, { n: 'מגשים עמוקים', qty: 1 }, { n: 'בלי קשר', qty: 1 }]);
+    const c = await call('piClaim', P2, { id: id2 });
+    assert.equal(c.status, 'OK', c.text);
+    assert.deepEqual(c.result.m.map((x) => [x.k, x.m && x.m.pid]), [['al', 'pR'], ['al', 'pR'], ['al', nid], ['name', 'pR'], ['', null]]);
+    assert.equal(c.result.m[0].m.name, 'מגשים עמוקים'); assert.ok(c.result.m[0].m.al.includes('צלחות עמוקות ירוקות'));
+    // ספק אחר – כינוי של מוצר של ספק אחר לא מוצע
+    const id3 = (await call('piCreate', MGR, { reqId: rid(), sup: 'שטראוס', lines: [{ n: 'צלחות עמוקות ירוקות', qty: 1 }] })).result.id;
+    assert.equal((await call('piClaim', MGR, { id: id3 })).result.m[0].k, '');
+    // שינוי שם חזרה לשם ישן: הכינוי יוצא מהרשימה (הוא שוב השם הראשי), והשם "מגשים עמוקים" נשמר ככינוי
+    const id4 = await mk(MGR, [{ n: 'מגשים עמוקים', qty: 1, cost: 5, pid: 'pR', nm: 'צלחת ירוקה' }]);
+    assert.equal((await call('piClaim', MGR, { id: id4 })).status, 'OK');
+    assert.equal((await call('piFinish', MGR, { id: id4, reqId: rid(), br: 'br1', lines: [{ n: 'מגשים עמוקים', qty: 1, cost: 5, pid: 'pR', nm: 'צלחת ירוקה' }] })).status, 'OK');
+    const r2 = await get(PFX() + 'prod/pR');
+    assert.equal(r2.name, 'צלחת ירוקה'); assert.deepEqual(r2.al, ['צלחות עמוקות ירוקות', 'מגשים עמוקים']);
+  });
+
   it('piVoid: מנהל בלבד, על חשבונית פנויה (או שהנעילה פגה); עובד – נחסם', async () => {
     const id = await mk();
     assert.equal((await call('piVoid', P1, { id })).reason, 'manager-only');

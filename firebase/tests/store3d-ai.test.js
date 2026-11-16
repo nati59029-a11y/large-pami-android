@@ -285,14 +285,16 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal(await err(shelf(E1, photo({ slot: 'f1-b-1_a' }), { userMax: 2 })), 's3-user-day');
   });
 
-  it('mapDraft: טיוטה תקינה עם אזורים לא בטוחים (uz, ok:false) ב-s3draft; נספר לפי מספר התמונות; שבורה – fail והחזרת מכסה', async () => {
+  it('mapDraft: טיוטה תקינה עם אזורים לא בטוחים (uz, ok:false) ב-s3draft; נספרת כבדיקה אחת (לא לפי מספר התמונות); שבורה – fail; כשל לפני תשובה – מוחזרת בדיקה אחת', async () => {
     const q = qid();
     const r = await X.draftCore(db, W(DR), { qid: q, br: 'main', kind: 's', imgs: [IMG, IMG], cctv: true }, Date.now(), deps());
-    assert.deepEqual([r.draftId, r.st, r.n, r.usage.n, r.drop], [q, 'ok', 2, 2, 0]);
+    assert.deepEqual([r.draftId, r.st, r.n, r.usage.n, r.drop], [q, 'ok', 2, 1, 0], '2 תמונות = בדיקה אחת במכסה');
+    assert.equal((await get(`b/${A}/s3use/u_${DR}`)).n, 1, 'גם הבלם היומי – 1');
     assert.ok(r.m.uz.length === 3 && r.m.uz.every((u) => u.ok === false));
     const rq = GM.state.requests[0];
     assert.equal(rq.kind, 's3draft');
     assert.equal(rq.body.contents[0].parts.length, 3, 'הנחיה + 2 תמונות');
+    assert.equal(rq.body.generationConfig.maxOutputTokens, 65536, 'maxOutputTokens מפורש לטיוטה (תיקון 15.11.2026)');
     assert.match(rq.body.contents[0].parts[0].text, /מצלמות אבטחה/);
     const d = await get(`b/${A}/s3draft/${q}`);
     assert.deepEqual([d.st, d.by, d.n, d.br, d.kind, d.m.src, d.m.fx.length], ['ok', DR, 2, 'main', 's', 'draft', 5]);
@@ -304,20 +306,162 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     GM.state.mapdraft = 'mapdraft-broken';
     const q2 = qid();
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: q2, br: 'main', kind: 's', imgs: [IMG, IMG, IMG] }, Date.now(), deps())), 'bad-answer');
-    assert.equal((await get(`b/${A}/s3draft/${q2}`)).st, 'fail');
-    assert.equal((await use()).n, 5, 'Gemini ענה (טיוטה שבורה) – 3 התמונות נספרות (החלטת המשתמש)');
+    assert.deepEqual([(await get(`b/${A}/s3draft/${q2}`)).st, (await get(`b/${A}/s3draft/${q2}`)).why], ['fail', 'no-rooms']);
+    assert.equal(GM.state.requests.length, 3, 'שבורה – ניסיון חוזר אחד (תיקון 15.11.2026)');
+    assert.equal((await use()).n, 1, 'שבורה גם בניסיון החוזר – ההקמה לא נספרת (החלטת המשתמש 15.11.2026)');
     assert.equal(await get(`b/${A}/s3qid/${q2}`), null);
     GM.state.mapdraft = 'mapdraft-unsure';
     const u = await X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps());
     assert.deepEqual([u.conf, u.m.fx.length, u.m.uz.length], [0.3, 0, 1]);
+    // 15.11.2026: טיוטה עם 5 תמונות – המונה החודשי והבלם היומי עולים ב-1 בלבד
+    const b5 = (await use()).n, u5 = (await get(`b/${A}/s3use/u_${MGR}`)).n;
+    const r5 = await X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(5).fill(IMG) }, Date.now(), deps());
+    assert.deepEqual([r5.n, r5.usage.n, (await use()).n, (await get(`b/${A}/s3use/u_${MGR}`)).n], [5, b5 + 1, b5 + 1, u5 + 1]);
+    // תקרה: 100 תמונות – עד 13,000,000 בתים; 101 תמונות / מעל 13MB – נדחה לפני המכסה ולפני Gemini
+    const nReq = GM.state.requests.length, b101 = (await use()).n;
+    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(101).fill(IMG) }, Date.now(), deps())), 'bad-img-count');
+    const BIG = jpeg(1200, 900, 1490000).toString('base64');
+    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(9).fill(BIG) }, Date.now(), deps())), 'too-big', '9 × 1.49MB > 13MB');
+    assert.deepEqual([GM.state.requests.length, (await use()).n], [nReq, b101]);
+    const r100 = await X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(100).fill(IMG) }, Date.now(), deps());
+    assert.deepEqual([r100.st, r100.n, r100.usage.n], ['ok', 100, b101 + 1]);
+    assert.equal(GM.state.requests[GM.state.requests.length - 1].body.contents[0].parts.length, 101, 'הנחיה + 100 תמונות');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 'w', imgs: [IMG] }, Date.now(), deps())), 'no-wh');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [] }, Date.now(), deps())), 'bad-img-count');
     assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'zz', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'no-branch');
     assert.equal(await err(X.draftCore(db, W(DR, { brs: ['other'] }), { qid: qid(), br: 'main', kind: 's', imgs: [IMG] }, Date.now(), deps())), 'other-branch');
+    // עד כאן 5 הקמות היום בסניף (התקרה היומית, 15.11.2026) – מאפסים את המונה היומי כדי לבדוק כאן רק את החזרת המכסה החודשית
+    assert.equal((await get(`b/${A}/s3use/d_main`)).n, 4, 'הטיוטה השבורה לא נספרה בתקרה היומית');
+    await adm.doc(`b/${A}/s3use/d_main`).delete();
     GM.state.mode = 'quota';
     const before = (await use()).n;
-    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: [IMG, IMG] }, Date.now(), deps())), 'gemini-quota');
-    assert.equal((await use()).n, before, '429 – מוחזר');
+    assert.equal(await err(X.draftCore(db, W(MGR), { qid: qid(), br: 'main', kind: 's', imgs: Array(5).fill(IMG) }, Date.now(), deps())), 'gemini-quota');
+    assert.equal((await use()).n, before, '429 – מוחזרת בדיקה אחת בדיוק (5 תמונות, לא 5 בדיקות)');
+  });
+
+  it('mapDraft: עד 5 הקמות ביום לסניף (החלטת המשתמש 15.11.2026) – השישית נדחית לפני Gemini; כשל מחזיר; qid חוזר לא נספר; יום חדש מתאפס; סניף אחר לא מושפע', async () => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const dd = (br) => get(`b/${A}/s3use/d_${br}`);
+    const draft = (q, br) => X.draftCore(db, W(MGR), { qid: q || qid(), br: br || 'main', kind: 's', imgs: [IMG] }, Date.now(), deps());
+    await adm.doc('b/' + A).update({ org: { branches: [{ id: 'main', name: 'ראשי', on: true }, { id: 'br2', name: 'שני', on: true }] } });
+    // יום חדש: מסמך מאתמול עם 5 – לא חוסם, ומתחילים מ-1
+    await adm.doc(`b/${A}/s3use/d_main`).set({ d: '2026-01-01', n: 5, upd: 1 });
+    const q1 = qid();
+    assert.equal((await draft(q1)).st, 'ok');
+    assert.deepEqual([(await dd('main')).d, (await dd('main')).n], [today, 1], 'יום חדש מאפס את המונה');
+    // qid חוזר (dup) – לא נספר
+    assert.equal((await draft(q1)).dup, true);
+    assert.equal((await dd('main')).n, 1, 'qid חוזר לא נספר');
+    for (let i = 2; i <= 5; i++) assert.equal((await draft()).st, 'ok', 'הקמה ' + i);
+    assert.equal((await dd('main')).n, 5);
+    // השישית – נדחית לפני Gemini, בלי מכסה חודשית ובלי s3draft / s3qid
+    const nReq = GM.state.requests.length, b6 = (await use()).n, q6 = qid();
+    let e6 = null;
+    try { await draft(q6); } catch (e) { e6 = e; }
+    assert.equal(e6 && e6.details && e6.details.reason, 'draft-daily');
+    assert.equal(e6.code, 'resource-exhausted');
+    assert.match(e6.message, /5 הקמות היום בסניף הזה/);
+    assert.deepEqual([GM.state.requests.length, (await use()).n, (await dd('main')).n], [nReq, b6, 5]);
+    assert.equal(await get(`b/${A}/s3draft/${q6}`), null);
+    assert.equal(await get(`b/${A}/s3qid/${q6}`), null);
+    // סניף אחר – לא מושפע
+    assert.equal((await draft(null, 'br2')).st, 'ok');
+    assert.equal((await dd('br2')).n, 1);
+    assert.equal((await dd('main')).n, 5);
+    // כשל של Gemini לפני תשובה (429) – המונה היומי חוזר ב-1, ואחריו אפשר הקמה נוספת
+    await adm.doc(`b/${A}/s3use/d_main`).set({ d: today, n: 4, upd: 1 });
+    GM.state.mode = 'quota';
+    assert.equal(await err(draft()), 'gemini-quota');
+    assert.equal((await dd('main')).n, 4, 'כשל מחזיר את המונה היומי');
+    GM.state.mode = 'ok';
+    assert.equal((await draft()).st, 'ok', 'אחרי כשל – אפשר הקמה נוספת');
+    assert.equal((await dd('main')).n, 5);
+    assert.equal(await err(draft()), 'draft-daily');
+  });
+
+  it('mapDraft (תיקון 15.11.2026): קטועה → ניסיון חוזר → הצלחה נספרת 1; שבורה פעמיים → bad-answer עם סיבה, לא נספרת; פריטים פסולים מושמטים; בדיקת מדף בלי maxOutputTokens', async () => {
+    const dd = async () => { const x = await get(`b/${A}/s3use/d_main`); return x ? x.n : 0; };
+    const draft = (q) => X.draftCore(db, W(MGR), { qid: q || qid(), br: 'main', kind: 's', imgs: [IMG, IMG] }, Date.now(), deps());
+    // 1. תשובה קטועה (MAX_TOKENS), ואז תקינה – הצלחה, נספרת פעם אחת בדיוק
+    GM.state.mapdraftSeq = [{ cut: 'mapdraft-ok' }, 'mapdraft-ok'];
+    const q1 = qid();
+    const r1 = await draft(q1);
+    assert.deepEqual([r1.st, r1.usage.n, r1.drop, GM.state.requests.length], ['ok', 1, 0, 2]);
+    assert.deepEqual([(await use()).n, await dd(), (await get(`b/${A}/s3use/u_${MGR}`)).n], [1, 1, 1]);
+    assert.ok(GM.state.requests.every((x) => x.body.generationConfig.maxOutputTokens === 65536));
+    assert.equal((await get(`b/${A}/s3draft/${q1}`)).why, undefined, 'הצלחה – בלי why');
+    // qid חוזר – dup, בלי Gemini ובלי מכסה (בלי שינוי)
+    assert.equal((await draft(q1)).dup, true);
+    assert.deepEqual([GM.state.requests.length, (await use()).n, await dd()], [2, 1, 1]);
+    // 2. קטועה פעמיים – bad-answer עם הסיבה המפורטת; המכסה החודשית והתקרה היומית לא משתנות
+    GM.state.mapdraftSeq = [{ cut: 'mapdraft-ok' }, { cut: 'mapdraft-ok' }];
+    const q2 = qid();
+    let e2 = null;
+    try { await draft(q2); } catch (e) { e2 = e; }
+    assert.deepEqual([e2.code, e2.details.reason, e2.details.why], ['internal', 'bad-answer', 'cut']);
+    assert.match(e2.message, /נקטעה/); assert.match(e2.message, /לא נספרה במכסה/);
+    assert.equal(GM.state.requests.length, 4, 'ניסיון חוזר אחד בלבד');
+    assert.deepEqual([(await use()).n, await dd()], [1, 1], 'שבורה – לא נספרת');
+    const f2 = await get(`b/${A}/s3draft/${q2}`);
+    assert.deepEqual([f2.st, f2.why], ['fail', 'cut']);
+    assert.equal(await get(`b/${A}/s3qid/${q2}`), null, 'אפשר לנסות שוב עם אותו qid');
+    // לא JSON ואז בלי חדר – הסיבה של הניסיון האחרון
+    GM.state.mapdraftSeq = ['not json at all', 'mapdraft-broken'];
+    let e3 = null;
+    try { await draft(); } catch (e) { e3 = e; }
+    assert.deepEqual([e3.details.reason, e3.details.why], ['bad-answer', 'no-rooms']);
+    assert.deepEqual([(await use()).n, await dd()], [1, 1]);
+    // 3. שבורה ואז תקינה – נספרת 1
+    GM.state.mapdraftSeq = ['not json at all', 'mapdraft-ok'];
+    assert.equal((await draft()).st, 'ok');
+    assert.deepEqual([(await use()).n, await dd()], [2, 2]);
+    // 4. גוף עם חדר שלא קיים ומקרר דו-צדדי וגוף פסול – cleanDraft מסנן; חדר פסול (קירות חוצים) לצד חדר תקין – מושמט, הטיוטה נשמרת
+    const okAns = GM.fixture('mapdraft-ok');
+    const part = JSON.parse(JSON.stringify(okAns)); delete part._example; delete part._meta;
+    part.rooms.push({ name: 'פסול', p: [0, 0, 500, 500, 500, 0, 0, 500], h: 300 });
+    part.fx.push({ k: 'shelf', x: 1, y: 1, w: 100, d: 50, h: 100, a: 0, sides: 1, bays: 1, lvl: 1, room: 'x' });
+    GM.state.mapdraftSeq = [part];
+    const n0 = GM.state.requests.length;
+    const r4 = await draft();
+    assert.deepEqual([r4.st, r4.drop, r4.m.rooms.length, GM.state.requests.length - n0], ['ok', 2, 1, 1], 'חדר + גוף הושמטו, בלי ניסיון חוזר');
+    assert.deepEqual([(await use()).n, await dd()], [3, 3]);
+    // 5. בדיקת מדף – בלי maxOutputTokens (לא השתנתה)
+    await shelf(E1, photo());
+    const last = GM.state.requests[GM.state.requests.length - 1];
+    assert.deepEqual([last.kind, last.body.generationConfig.maxOutputTokens], ['s3shelf', undefined]);
+  });
+  it('mapDraft עם שאלון וסקיצה (15.11.2026): קלט לא תקין נדחה לפני המכסה ו-Gemini; תקין – בהנחיה, בטיוטה (מידות, חדרים, שורות) וב-s3draft; בלי השדות – כמו קודם', async () => {
+    const dd = async () => { const x = await get(`b/${A}/s3use/d_main`); return x ? x.n : 0; };
+    const INFO = { w: 1400, l: 1500, rooms: 2, rows: 3, ent: 'd', cash: 'r', note: 'קופה ליד הכניסה' };
+    const SK = { rooms: [[0, 0, 1400, 0, 1400, 1000, 0, 1000], [0, 1000, 1400, 1000, 1400, 1500, 0, 1500]], rows: [[600, 300, 600, 1100], [1100, 300, 1100, 900], [200, 1250, 1200, 1250]], rt: ['s', 'w'], rk: ['gon', 'gon', 'fridge'], ent: [700, 1500], cash: [1200, 1400] };
+    const draft = (extra, q) => X.draftCore(db, W(MGR), Object.assign({ qid: q || qid(), br: 'main', kind: 's', imgs: [IMG] }, extra), Date.now(), deps());
+    const un = async () => ((await use()) || {}).n || 0;
+    const n0 = GM.state.requests.length, u0 = await un(), d0 = await dd();
+    for (const bad of [{ info: { w: 50 } }, { info: 'x' }, { info: INFO, sketch: { rooms: [[0, 0, 5000, 0, 5000, 5000]] } }, { sketch: SK }, { info: INFO, sketch: Object.assign({}, SK, { rk: ['gon'] }) }, { info: Object.assign({ zz: 1 }, INFO) }])
+      assert.equal(await err(draft(bad)), 'bad-info', JSON.stringify(bad).slice(0, 60));
+    assert.deepEqual([GM.state.requests.length - n0, await un(), await dd()], [0, u0, d0], 'בלי Gemini ובלי מכסה');
+    GM.state.mapdraftSeq = ['mapdraft-ok'];
+    const q1 = qid();
+    const r = await draft({ info: INFO, sketch: SK }, q1);
+    assert.equal(r.st, 'ok');
+    const pr = JSON.stringify(GM.state.requests[GM.state.requests.length - 1].body);
+    assert.match(pr, /מחייבים/); assert.match(pr, /רוחב 14 מטר/); assert.match(pr, /חדר 2 \(מחסן\)/); assert.match(pr, /הכניסה הראשית בנקודה \(700,1500\)/);
+    assert.deepEqual(r.m.rooms.map((x) => x.p), SK.rooms);
+    assert.deepEqual(r.m.rooms.map((x) => x.name), ['אולם מכירות', 'מחסן']);
+    assert.ok(r.m.fx.some((f) => f.k === 'fridge' && f.x === 700 && f.y === 1250));
+    assert.ok(r.m.fx.every((f) => f.x >= 0 && f.x <= 1400 && f.y >= 0 && f.y <= 1500));
+    const doc = await get(`b/${A}/s3draft/${q1}`);
+    assert.deepEqual(doc.info, INFO);
+    assert.deepEqual(doc.sk.rooms.map((x) => x.p), SK.rooms, 'Firestore: מערך של {p} (בלי מערך בתוך מערך)');
+    assert.deepEqual([doc.sk.rk, doc.sk.ent], [SK.rk, SK.ent]);
+    // בלי השדות (גרסת אפליקציה ישנה) – בלי info/sk ב-s3draft, וההנחיה בלי "נתונים מבעל החנות"
+    GM.state.mapdraftSeq = ['mapdraft-ok'];
+    const q2 = qid();
+    assert.equal((await draft({}, q2)).st, 'ok');
+    const pr2 = JSON.stringify(GM.state.requests[GM.state.requests.length - 1].body);
+    assert.doesNotMatch(pr2, /מבעל החנות/);
+    const doc2 = await get(`b/${A}/s3draft/${q2}`);
+    assert.deepEqual([doc2.info, doc2.sk], [undefined, undefined]);
   });
 });
 

@@ -102,8 +102,10 @@ service firebase.storage {
       allow delete: if bSuper();
     }
 
+    // מסמכים ללקוח (14.11.2026, שלב 3): ar/{bizId}/{docId}.pdf (אישורי הזמנה ובהמשך חשבוניות) – בכוונה בלי כלל, ולכן סגור לכולם.
+    // רק השרת (Admin) כותב וקורא: האפליקציה מקבלת את הקובץ דרך arPdf (בדיקת הרשאה), והלקוח – דרך arFile (קישור עם אסימון).
     // סריקת חנות בתלת מימד – store3d (14.11.2026; חוזה, סעיף 5): תמונות מדפים, צילומי אימות וטקסטורות.
-    // כתיבה ומחיקה: אף לקוח – רק השרת (shelfCheck / mapDraft / s3PutTex, Admin SDK), אחרי בדיקת סוג לפי התוכן, גודל, ו"אין אדם בתמונה".
+    // כתיבה ומחיקה: אף לקוח – רק השרת (shelfCheck / mapDraft / s3PutTex / s3PutPano, Admin SDK), אחרי בדיקת סוג לפי התוכן, גודל, ו"אין אדם בתמונה".
     // קריאה: חברי העסק (bStaff – 2 קריאות: users/{uid}, superadmins/{uid}; בדיקת התוספת הייתה קריאה שלישית – לכן היא נאכפת
     // בכך שבלי התוספת השרת לא שומר קבצים). רק get של קובץ בודד (אין list – הנתיבים מגיעים מ-Firestore), רק בנתיבים
     // המוגדרים, רק JPEG (contentType image/jpeg, סיומת .jpg) ורק עד הגודל שבחוזה: מלאה 1,500,000 בתים, מוקטנת (_t) 150,000,
@@ -117,7 +119,11 @@ service firebase.storage {
           && ((file.matches('^f[0-9]{1,4}-[ab]-[0-9]{1,2}_[atb]_[0-9]{1,2}[.]jpg$') && s3Jpg(1500000))
               || (file.matches('^f[0-9]{1,4}-[ab]-[0-9]{1,2}_[atb]_[0-9]{1,2}_t[.]jpg$') && s3Jpg(150000))))
         || (kind == 'tex' && folder.matches('^[sw]-[a-z0-9_]{2,20}$')
-          && file.matches('^t[0-9]{1,4}_[0-9]{1,2}[.]jpg$') && s3Jpg(600000)));
+          && file.matches('^t[0-9]{1,4}_[0-9]{1,2}[.]jpg$') && s3Jpg(600000))
+        // שלב 18א (15.11.2026): סיור 360 – מלאה (p{n}_{גרסה}.jpg) עד 3,000,000 בתים, קטנה (_s) עד 200,000. כתיבה – רק s3PutPano.
+        || (kind == 'pano' && folder.matches('^[sw]-[a-z0-9_]{2,20}$')
+          && ((file.matches('^p[0-9]{1,4}_[0-9]{1,4}[.]jpg$') && s3Jpg(3000000))
+              || (file.matches('^p[0-9]{1,4}_[0-9]{1,4}_s[.]jpg$') && s3Jpg(200000)))));
       // עדכון 7ב: הנתיב draft/ הוסר מהקריאה (מינימום הרשאה) – השרת לא שומר את תמונות טיוטת המפה (שלב 8). אם יישמרו בעתיד – להחזיר כאן.
       allow list, write: if false;
     }
@@ -126,6 +132,26 @@ service firebase.storage {
         (file.matches('^[A-Za-z0-9_-]{6,80}_[0-9]{1,2}[.]jpg$') && !file.matches('.*_t[.]jpg$') && s3Jpg(1500000))
         || (file.matches('^[A-Za-z0-9_-]{6,80}_[0-9]{1,2}_t[.]jpg$') && s3Jpg(150000)));
       allow list, write: if false;
+    }
+
+    // קול, תמונה וסרטון למזכירה (15.11.2026, secretary-media.js): סרטון בדרך לשרת – sec_tmp/{uid}/{file} (עסק legacy) ו-b/{bizId}/sec_tmp/{uid}/{file}.
+    // יצירה: רק המשתמש עצמו, רק מנהל (legacy: admins/{uid}; בעסק: bMgr – 2 קריאות), עד 12MB, רק סרטון (webm/mp4/3gpp/quicktime), שם קובץ אקראי.
+    // קריאה, רשימה ועדכון (דריסה): אסורים לכולם – רק השרת (secMedia) קורא, ומוחק מיד אחרי ההורדה. מחיקה: המשתמש עצמו (ביטול שליחה).
+    // הרשאת המזכירה (תוספת, הסכמה) נאכפת בשרת; קובץ שלא עובד נמחק בכל מקרה ב-secMediaClean (20 דקות).
+    function secTmpOk(fname) {
+      return request.resource.size <= 12 * 1024 * 1024
+        && request.resource.contentType.matches('^video/(webm|mp4|3gpp|quicktime)(;.*)?$')
+        && fname.matches('^[A-Za-z0-9_-]{8,64}([.](webm|mp4|3gp|mov))?$');
+    }
+    match /sec_tmp/{userId}/{fileName} {
+      allow create: if resource == null && isSelf(userId) && isManager() && secTmpOk(fileName); // resource == null: בלי דריסת קובץ קיים (גם אם האמולטור מסווג דריסה כ-create)
+      allow delete: if isSelf(userId) && isManager();
+      allow read, update: if false;
+    }
+    match /b/{bizId}/sec_tmp/{userId}/{fileName} {
+      allow create: if resource == null && isSelf(userId) && bMgr(bizId) && secTmpOk(fileName);
+      allow delete: if isSelf(userId) && bMgr(bizId);
+      allow read, update: if false;
     }
 
     // הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם.

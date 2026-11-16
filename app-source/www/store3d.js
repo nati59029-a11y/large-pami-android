@@ -33,11 +33,19 @@ const dec=d=>d&&d.fields?Object.fromEntries(Object.entries(d.fields).map(([k,v])
 S3UI.dec=dec;
 const msgOf=e=>e&&e.offline?'אין חיבור לאינטרנט. בדקו את החיבור ונסו שוב.':e&&e.code===403?'אין לכם הרשאה לצפות בתלת מימד בעסק הזה.':'לא הצלחנו לטעון את נתוני החנות. נסו שוב.';
 const g404=async p=>{try{return dec(await fsx(p))}catch(e){if(e&&e.code===404)return null;throw e}};
-S3UI.get=g404;S3UI.esc2=esc2;
+S3UI.get=g404;
+/* שלב 19א: מסמך ph של מקום צילום (srun/<סבב>/ph/<מקום>) לתצוגת ההליכה. כל הצוות רשאי לקרוא; חסר / שגיאה = null (התצוגה משאירה את התמונה הקיימת) */
+const loadPh=(run,slot)=>/^[A-Za-z0-9_-]{1,80}$/.test(run||'')&&/^[A-Za-z0-9_-]{1,80}_[atb]$/.test(slot||'')?g404('/srun/'+run+'/ph/'+slot).catch(()=>null):Promise.resolve(null);S3UI.esc2=esc2;
 /* שלב 7: קריאה לפונקציית שרת. מנהל־על שעבר לעסק אחר (bzSwitch) שולח את העסק בקלט – השרת מקבל bizId רק ממנהל־על (takeBizInput) */
 S3UI.fn=(n,d)=>window.fnCall(n,(SY&&SY.sa&&SY.bizId)?Object.assign({bizId:SY.bizId},d||{}):(d||{}));
 /* שגיאות שרת (details.reason) בעברית פשוטה */
-S3UI.RS={'br-off':'התלת מימד כבוי בסניף הזה. מנהל־על צריך להפעיל אותו לפני שמירת מפה.','no-wh':'לסניף הזה אין מחסן בתלת מימד. מנהל־על צריך להפעיל מחסן.','tex-day':'הגעתם למכסת תמונות הטקסטורה להיום (200 למפה). נסו שוב מחר.','run-open':'כבר יש סבב פתוח לכלל הזה.','no-map':'אין מפה בסניף הזה.','map-deleted':'המפה של הסבב נמחקה.','no-rule':'כלל הסבב לא נמצא.','no-take':'אי אפשר לקחת חלק מהסבב הזה.','other-branch':'הסבב הזה שייך לסניף אחר.','run-closed':'הסבב כבר הסתיים.','not-assigned':'אינכם משויכים לסבב הזה.','staff-disabled':'העובד הזה מושבת.','manager-only':'רק מנהל יכול לבצע את זה.','s3-month-limit':'מכסת הבדיקות החודשית של הסניף נגמרה. פנו למנהל המערכת.','s3-user-day':'הגעתם למכסה היומית. נסו שוב מחר.','s3-adhoc-day':'הגעתם למכסת הדיווחים היומית. נסו שוב מחר.','gemini-quota':'שירות ה-AI עמוס כרגע. נסו שוב בעוד כמה דקות.','time-budget':'הבדיקה לקחה יותר מדי זמן. נסו שוב.','bad-answer':'ה-AI לא החזיר תשובה שאפשר להשתמש בה. נסו שוב, או צלמו תמונות ברורות יותר.','bad-img-count':'צריך בין תמונה אחת ל-40 תמונות.','too-big':'התמונות גדולות מדי. מחקו כמה תמונות ונסו שוב.','busy':'השרת עסוק. נסו שוב בעוד רגע.','not-s3m':'אין לכם הרשאת שרטוט מפה.','too-many':'יותר מדי צילומים למקום הזה.'};
+S3UI.RS={'br-off':'התלת מימד כבוי בסניף הזה. מנהל־על צריך להפעיל אותו לפני שמירת מפה.','no-wh':'לסניף הזה אין מחסן בתלת מימד. מנהל־על צריך להפעיל מחסן.','tex-day':'הגעתם למכסת תמונות הטקסטורה להיום (200 למפה). נסו שוב מחר.','run-open':'כבר יש סבב פתוח לכלל הזה.','no-map':'אין מפה בסניף הזה.','map-deleted':'המפה של הסבב נמחקה.','no-rule':'כלל הסבב לא נמצא.','no-take':'אי אפשר לקחת חלק מהסבב הזה.','other-branch':'הסבב הזה שייך לסניף אחר.','run-closed':'הסבב כבר הסתיים.','not-assigned':'אינכם משויכים לסבב הזה.','staff-disabled':'העובד הזה מושבת.','manager-only':'רק מנהל יכול לבצע את זה.','s3-month-limit':'מכסת הבדיקות החודשית של הסניף נגמרה. פנו למנהל המערכת.','s3-user-day':'הגעתם למכסה היומית. נסו שוב מחר.','s3-adhoc-day':'הגעתם למכסת הדיווחים היומית. נסו שוב מחר.','gemini-quota':'שירות ה-AI עמוס כרגע. נסו שוב בעוד כמה דקות.','time-budget':'הבדיקה לקחה יותר מדי זמן. נסו שוב.','bad-answer':'ה-AI לא החזיר תשובה שאפשר להשתמש בה. נסו שוב, או צלמו תמונות ברורות יותר.','bad-img-count':'צריך בין תמונה אחת ל-40 תמונות.','too-big':'התמונות גדולות מדי. מחקו כמה תמונות ונסו שוב.','busy':'השרת עסוק. נסו שוב בעוד רגע.','not-s3m':'אין לכם הרשאת שרטוט מפה.','too-many':'יותר מדי צילומים למקום הזה.',
+ /* שלב 18 – נקודות 360 (s3PutPano / s3DelPano) */
+ 'bad-qid':'שגיאה פנימית בשליחה. נסו שוב.','bad-map-id':'מזהה המפה לא תקין.','no-branch':'הסניף לא קיים בעסק.','out-of-map':'הנקודה מחוץ לחדרי המפה. הקישו בתוך חדר.','no-pano':'הנקודה לא קיימת (אולי נמחקה בטלפון אחר).','pano-gone':'הנקודה נמחקה.','pano-limit':'הגעתם למספר הנקודות המרבי במפה. מחקו נקודה שלא צריך.','bad-nb':'אחת הנקודות המקושרות לא קיימת. טענו מחדש ונסו שוב.','pano-day':'הגעתם למכסת העלאות ה-360 היומית בסניף. נסו שוב מחר.','pano-full':'נגמרו המזהים לנקודות 360 במפה הזו.','save-failed':'שמירת התמונה נכשלה. נסו שוב.','bad-img':'התמונה לא תקינה. צלמו שוב.','bad-type':'מותרת רק תמונת JPEG.','bad-size':'גודל התמונה לא מתאים (רוחב 2048 או 4096, והקטנה 1024×512).','bad-ratio':'תמונת 360 חייבת להיות ביחס 2:1 (רוחב כפול מהגובה).','bad-pt':'מיקום או כיוון הנקודה לא תקינים.','del-mgr':'מחיקה מותרת למנהל בלבד.','bad-input':'הנתונים שנשלחו לא תקינים.'};
+/* שיתוף תמונת JPEG: באפליקציה – outSave של index.html (ה-WebView לא תומך ב-navigator.share עם קבצים), בדפדפן – navigator.share */
+S3UI.canShare=b=>{try{if(typeof isNat==='function'&&isNat()&&typeof outSave==='function')return true;return !!(navigator.canShare&&navigator.canShare({files:[new File([b||new Blob()],'x.jpg',{type:'image/jpeg'})]}))}catch(e){return false}};
+S3UI.shareJpg=async(b,name)=>{try{if(typeof isNat==='function'&&isNat()&&typeof outSave==='function')return await outSave({name,data:new Uint8Array(await b.arrayBuffer()),mime:'image/jpeg'},'share');
+ await navigator.share({files:[new File([b],name,{type:'image/jpeg'})],title:'צילום 360'})}catch(e){if(!/abort|cancel/i.test(String(e&&(e.name||e.message)))&&typeof toast==='function')toast('השיתוף נכשל')}};
 S3UI.errText=(e,d)=>e&&e.offline?'אין חיבור לאינטרנט. נסו שוב כשיש חיבור.':(e&&S3UI.RS[e.reason])||(e&&e.message)||d||'הפעולה נכשלה';
 async function load(force){
  if(!feat()||!loggedIn())return;
@@ -51,6 +59,8 @@ async function load(force){
   if(d.maps.s&&d.maps.s.del===1)d.maps.s=null;
   if(d.maps.w&&d.maps.w.del===1)d.maps.w=null;
  }catch(e){d.err=msgOf(e)}
+ /* שלב 18: נקודות 360 פעילות לכל מפה (קריאה ישירה, כמו smap). שגיאה = אין נקודות (לא חוסם את המסך) */
+ d.pano={s:[],w:[]};if(!d.err&&typeof S3UI.panoList==='function')for(const k of ['s','w'])if(d.maps[k])d.pano[k]=await S3UI.panoList(mapIdOf(k,br));
  if(!d.err&&d.maps.s){try{d.sum=await g404('/s3sum/s-'+br)}catch(e){}
   if(isMgr()){try{const r=await fsx('/sround?pageSize=100');d.rounds=((r&&r.documents)||[]).map(x=>{const o=dec(x);if(o)o.rid=String(x.name||'').split('/').pop();return o}).filter(x=>x&&x.br===br&&x.on===true&&x.del!==1)}catch(e){d.rounds=null}}}
  X.d=d;X.at=Date.now();X.busy=0;
@@ -130,7 +140,7 @@ function mapPane(d){
  let h='';
  if(d.cfg.wh&&d.maps.w)h+=`<div class="chips" style="margin:0 0 8px"><button class="chip ${kind==='s'?'on':''}" data-a="st3Kind" data-k="s">החנות</button><button class="chip ${kind==='w'?'on':''}" data-a="st3Kind" data-k="w">המחסן</button></div>`;
  if(!m){h+=`<p class="note s3note">${kind==='w'?'עוד לא נבנתה מפה למחסן.':'עוד לא נבנתה מפה לסניף הזה.'}</p>${canDraw()?`<div class="row"><button class="btn" data-a="st3Build" data-k="${kind}">בנו מתמונות</button><button class="btn g" data-a="st3Edit" data-k="${kind}">ציור ידני</button></div>`:''}`;return h}
- h+=`<div class="row s3row" style="margin:0 0 8px"><button class="chip ${X.mode==='top'?'on':''}" data-a="st3Mode" data-m="top">מבט מלמעלה</button><button class="chip ${X.mode==='walk'?'on':''}" data-a="st3Mode" data-m="walk">הליכה בחנות</button>${canDraw()?`<button class="btn g" style="margin-inline-start:auto" data-a="st3Edit" data-k="${kind}">עריכת המפה</button>`:''}</div>
+ h+=`<div class="row s3row" style="margin:0 0 8px"><button class="chip ${X.mode==='top'?'on':''}" data-a="st3Mode" data-m="top">מבט מלמעלה</button><button class="chip ${X.mode==='walk'?'on':''}" data-a="st3Mode" data-m="walk">הליכה בחנות</button>${typeof S3UI.tourBtn==='function'?S3UI.tourBtn(kind,d):''}${canDraw()?`<button class="btn g" style="margin-inline-start:auto" data-a="st3Edit" data-k="${kind}">עריכת המפה</button>`:''}</div>
  <div class="s3main" id="s3main"></div><div class="s3info" id="s3info" aria-live="polite">${pickInfo()}</div>`;
  if(d.cfg.on===false)h+=`<div class="ban s3off">הסניף הזה כבוי בתלת מימד</div>`;
  return h}
@@ -184,7 +194,7 @@ function after(){
  if(X.h&&X.h.el===el)return;
  unmount();const tok=++X.seq,rec={el,id,handle:null};X.h=rec;
  if(!window.Store3D||!window.S3G){el.textContent='רכיב התצוגה לא נטען';return}
- window.Store3D.open(el,m,{mode:X.mode,sum:d.sum||null,onPick:b=>{X.pick=b;const i=document.getElementById('s3info');if(i)i.innerHTML=pickInfo()},onError:()=>{}}).then(hd=>{
+ window.Store3D.open(el,m,{mode:X.mode,sum:d.sum||null,loadPh:loadPh,onPick:b=>{X.pick=b;const i=document.getElementById('s3info');if(i)i.innerHTML=pickInfo()},onError:()=>{}}).then(hd=>{
   if(!hd)return;if(tok!==X.seq||X.h!==rec||!el.isConnected){try{hd.destroy()}catch(e){}return}rec.handle=hd}).catch(()=>{})
 }
 {const r0=window.render;if(typeof r0==='function')window.render=function(){/* אלמנט המיני יוצא מהדף לפני הציור (בלי להעביר צומת תוך כדי החלפת התוכן), וחוזר ב-after() */try{const n=X.mn&&X.mn.node;if(n&&n.parentNode)n.parentNode.removeChild(n)}catch(e){}const r=r0.apply(this,arguments);try{after()}catch(e){}return r}}

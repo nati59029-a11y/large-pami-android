@@ -10,7 +10,9 @@
 //   recurringTasks (מתוזמנת, לא נקראת ממשתמש) – משימות קבועות (recurring.js).
 //   s3Rounds (מתוזמנת), s3Run, s3Move, s3Log, s3View – סבבי סריקת חנות בתלת מימד (store3d.js).
 //   s3SaveMap, s3SetBranch (מנהל־על), s3PutTex – המפה של סריקת החנות: שמירה עם נעילה וגרסאות, הגדרות סניף, טקסטורות (store3d-map.js).
+//   s3PutPano, s3DelPano – נקודות סיור 360 (שלב 18א, store3d-map.js).
 //   shelfCheck, mapDraft – בדיקת מדף וטיוטת מפה דרך Gemini, עם מכסה חודשית לסניף (store3d-ai.js).
+//   mapFix – תיקון טיוטת מפה בכתב דרך Gemini, בלי מכסה (רק הבלם היומי לעובד) (store3d-fix.js).
 //   s3Fix, s3Clean – משימות תיקון, ניקוי יומי וביצועי עובדים (store3d-extra.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
@@ -75,6 +77,8 @@ exports.scanDocument = onCall(
       || (kind === 'invlines' && !hasPerm(who, 'expW') && !hasPerm(who, 'prc')))) {
       throw new HttpsError('permission-denied', 'אין לך הרשאה לפעולה הזו. פנה למנהל.', { reason: 'no-perm' });
     }
+    // צילום רשימת הזמנה (ordlist, 14.11.2026): התוספת "הזמנות" והרשאת ord – בכל העסקים (גם legacy), לפני הספירה במכסה
+    if ((kind === 'ordlist' || kind === 'payproof') && (!(who.biz && who.biz.features && who.biz.features.orders === true) || !hasPerm(who, 'ord'))) throw new HttpsError('permission-denied', 'אין לך הרשאה להזמנות. פנה למנהל.', { reason: 'no-perm' });
     const key = GEMINI_API_KEY.value();
     if (!key) throw new HttpsError('failed-precondition', 'אין מפתח לזיהוי חכם בשרת', { reason: 'no-key' });
     const limit = SCAN_DAILY_LIMIT.value();
@@ -212,8 +216,20 @@ Object.assign(exports, require('./invite-mail'));
 
 // מערכת הזמנות – שלב 1 (2026-11-08): מוצרים ומלאי לכל סניף, הזמנות עובד, תשלום ידני וקישור סליקה (orders.js)
 Object.assign(exports, require('./orders'));
+// מסך טיפול/ליקוט (14.11.2026, משוב סבב 3): orderPick, orderPickOk, supOrdSet – ord-pick.js; orderAuth ("המסגרת אושרה", החלטה 32, 15.11.2026)
+Object.assign(exports, require('./ord-pick'));
 // תמחור מחשבונית ספק (12.11.2026): pinv – piCreate, piClaim, piBeat, piRelease, piDraft, piFinish, piVoid, piImg (צילום, שלב 4)
 Object.assign(exports, require('./pricing'));
+
+// מסמכים ללקוח (14.11.2026, שלב 3 חלק א'): arFile – קישור עם אסימון לקובץ PDF (onRequest, us-central1 בלבד). ar-file.js
+Object.assign(exports, require('./ar-file'));
+// אישור הזמנה (14.11.2026, שלב 3 חלק ב'): arOc (מספור רץ נפרד + קובץ + שליחה אוטומטית לפי סימון הלקוח), arPdf, arSend, setArCfg. ar.js
+// חשבוניות, קבלות וזיכויים (15.11.2026, שלב 4): arIssue, arReceipt, arCredit, arVoidRc, arProof, arProofGet, arDoc, arMonthly, setArOff. ar.js + lib/ar-doc.js
+Object.assign(exports, require('./ar'));
+// כרטסת ותזכורות (15.11.2026, שלב 5): arStatement, setRemCfg (ar.js); arRemind – מתוזמנת כל 15 דקות (ar-remind.js)
+Object.assign(exports, require('./ar-remind'));
+// ייבוא מתוכנה קודמת (15.11.2026, שלב 6): arImp (תצוגה מקדימה / ייבוא במנות של 25), arImpVoid (ביטול קבוצה = void), arImpList. ar-import.js
+Object.assign(exports, require('./ar-import'));
 
 // לקוחות להזמנות (2026-11-08, fb/ord-cust): saveCust, importCusts, setCustCfg (customers.js)
 Object.assign(exports, require('./customers'));
@@ -237,19 +253,28 @@ Object.assign(exports, require('./secretary-google'));
 // המזכירה שלב 7 (2026-11-12): secInv (רשימה, קובץ, הגדרות, רשימת ספקים), secDecide (תפיסה חד־פעמית, אישור, דחייה, עיכוב, ביטול, אישור שולח).
 // הזיהוי רץ בטריגר הקיים secWaWork (רשומת תור עם inv:true). secretary-inv.js
 Object.assign(exports, require('./secretary-inv'));
+// "תגובה למזכירה" (15.11.2026): secLearn – תגובה על הודעה של המזכירה, כללים אישיים לכל מנהל, "לעשות את זה מעכשיו לבד?", יומן "נשלח לבד". secretary-learn.js + lib/sec-learn.js
+Object.assign(exports, require('./secretary-learn'));
+// קול, תמונה וסרטון למזכירה (15.11.2026): secMedia (תמלול, תמונה/סרטון, סימון כרטיס), secMediaClean (ניקוי הקבצים הזמניים ב-sec_tmp). secretary-media.js
+Object.assign(exports, require('./secretary-media'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));
+// מרכז עבודה סבב 3 (15.11.2026): tkNudge – "הזכר לעובד" בהתראת טלפון (tasks-nudge.js). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./tasks-nudge'));
 
 // סריקת חנות בתלת מימד – שלב 5 (14.11.2026): s3Rounds (מתוזמנת כל 5 דקות – פתיחת סבבים, תזכורות, איחור, העברה למחליף),
 // s3Run (פתיחה ידנית/ביטול – מנהל), s3Move (העברה/לקיחה), s3Log (אירועי זמן), s3View (מה עובד רואה). store3d.js + lib/store3d-core.js
 Object.assign(exports, require('./store3d'));
 // שלב 5ב (14.11.2026): s3SaveMap (מנהל / s3m; נעילה לפי baseV, גרסאות, 30 אחרונות), s3SetBranch (מנהל־על, audit), s3PutTex (טקסטורה ל-Storage).
-// store3d-map.js + lib/store3d-map.js
+// store3d-map.js + lib/store3d-map.js. שלב 18א (15.11.2026): s3PutPano (נקודת 360 – מנהל / s3m), s3DelPano (מחיקה רכה – מנהל).
 Object.assign(exports, require('./store3d-map'));
 // שלב 8 (14.11.2026): shelfCheck (בדיקת מדף – עובד אחראי בסבב / דיווח יזום), mapDraft (טיוטת מפה – מנהל / s3m). Gemini, מכסה חודשית לסניף
 // (s3use, אזהרה ב-80%) ובלם יומי לעובד, החזרה בכשל, תמונה עם אדם לא נשמרת. store3d-ai.js + lib/store3d-ai.js
 Object.assign(exports, require('./store3d-ai'));
+// שלב 20ג (15.11.2026): mapFix (תיקון טיוטה בכתב – מנהל / s3m). טקסט בלבד, בלי תמונות; לא נספר במכסה (החלטת המשתמש), רק בלם 400 ביום לעובד.
+// store3d-fix.js + lib/store3d-fix.js
+Object.assign(exports, require('./store3d-fix'));
 // שלב 10 (14.11.2026): s3Fix (משימת תיקון ידנית / ביטול / הכרעה – מנהל), s3Clean (מתוזמנת יומית: סל מחזור אחרי 30 יום, 3 סבבים אחרונים
 // של תמונות לכל מקום, טקסטורות יתומות, ביצועי עובדים). סיום סבב (ציון, חוסרים, משימות תיקון) וערעורים – store3d-extra.js + lib/store3d-extra.js
 Object.assign(exports, require('./store3d-extra'));

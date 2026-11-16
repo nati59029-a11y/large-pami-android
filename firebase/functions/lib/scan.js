@@ -7,7 +7,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore } = require('firebase-admin/firestore');
 const T = require('./tenant');
 // prompts.js נוצר אוטומטית מהאפליקציה; ההנחיה של recipe קיימת רק בשרת (prompts-recipe.js)
-const PROMPTS = Object.assign({}, require('./prompts'), require('./prompts-recipe'), require('./prompts-classify'));
+const PROMPTS = Object.assign({}, require('./prompts'), require('./prompts-recipe'), require('./prompts-classify'), { ordlist: require('./prompts-ord').ordlist }, { payproof: require('./prompts-ar').payproof });
 
 // ---------- סוגי זיהוי (מה האפליקציה מזהה היום) ----------
 // invoice  = ocrAI  (חשבונית / תעודת משלוח), עד 4 עמודים, temperature 0
@@ -38,10 +38,14 @@ const KINDS = Object.freeze({
   // invlines = שורות המוצרים מחשבונית ספק (תמחור חשבונית ספק, שלב 2; הנחיה INVL_P מהאפליקציה), עד 4 עמודים.
   // תשובה ארוכה (טבלה) – 60 שניות למודל (הנחה), באותו תקציב כולל של חשבונית
   invlines: { minFiles: 1, maxFiles: 4, temperature: 0, pro: false, timeoutMs: 60000, budgetMs: 100000 },
+  // ordlist = צילום רשימת הזמנה (שלב 2 חלק ב', 14.11.2026): שורות שם + כמות, עד 3 תמונות. ההתאמה למוצרים – ordParse (orders.js). הרשאת ord (index.js)
+  ordlist: { minFiles: 1, maxFiles: 3, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
+  // payproof = אסמכתת תשלום של לקוח (שלב 4, 15.11.2026): צ'ק / העברה / אשראי / מזומן – קובץ אחד. הרשאת ord (index.js)
+  payproof: { minFiles: 1, maxFiles: 1, temperature: 0, pro: false, timeoutMs: 30000, budgetMs: 100000 },
 });
 // בדיקת סוג הזיהוי מול רשימה קבועה בלבד. Object.hasOwn ולא KINDS[kind], כי KINDS[kind] "מוצא" גם שמות
 // שכל אובייקט ב-JavaScript מכיר מעצמו (__proto__, constructor, toString…) – פרצה שהבודק מצא בסבב 1.
-const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening', 'deposit', 'cashout', 'transfer', 'recipe', 'classify', 'invlines']);
+const KIND_NAMES = Object.freeze(['invoice', 'product', 'feedback', 'zreport', 'opening', 'deposit', 'cashout', 'transfer', 'recipe', 'classify', 'invlines', 'ordlist', 'payproof']);
 function isKind(kind) {
   return typeof kind === 'string' && KIND_NAMES.includes(kind) && Object.hasOwn(KINDS, kind) && Object.hasOwn(PROMPTS, kind);
 }
@@ -51,7 +55,7 @@ function kindCfg(kind) {
 }
 // כמה זמן הטלפון מחכה לתשובה מ-scanDocument (לפי קוד האפליקציה בשלב 4, כפי שהועבר מהמתאם): חשבונית ומוצר 120 שניות, משוב 150.
 // סגירת קופה (zreport, opening): 120 שניות (zcAI באפליקציה). אישור הפקדה (deposit): 120 שניות (dpScan). פתק הוצאה מקופה (cashout): 120 שניות (coScan). מתכון (recipe): 150.
-const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000, classify: 120000, invlines: 120000 };
+const PHONE_WAIT_MS = { invoice: 120000, product: 120000, feedback: 150000, zreport: 120000, opening: 120000, deposit: 120000, cashout: 120000, transfer: 120000, recipe: 150000, classify: 120000, invlines: 120000, ordlist: 120000, payproof: 120000 };
 
 // באמולטור בלבד: אפשר לקצר את כל הזמנים באותו יחס (SCAN_TIME_SCALE), כדי שבדיקות התקציב לא יחכו 100 שניות.
 // מחוץ לאמולטור היחס תמיד 1.
@@ -241,6 +245,8 @@ async function refundScan(uid, day) {
 const FALLBACK_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash'];
 const modelCache = { false: null, true: null };   // כמו SHML / SHMLP באפליקציה
 const lastGood = { false: '', true: '' };         // כמו localStorage 'lp-gmodel' / 'lp-gmodelp'
+// מגבלת הפלט (outputTokenLimit) של כל מודל, מרשימת המודלים. משמש רק כשהקורא מבקש opts.maxOut (טיוטת מפה, 15.11.2026)
+const outLimit = {};
 
 function assertSafeBase(base) {
   // באמולטור מותר לפנות רק לשרת דמה מקומי – אף פעם לא ל-Gemini האמיתי.
@@ -264,6 +270,7 @@ async function listModels(base, key, pro, deadline) {
         && !/image|tts|live|audio|embed|robotics|computer|gemma|-exp|aqa|imagen|veo|learnlm|vision/.test(m.name))
         .map((m) => {
           const n = m.name.replace('models/', ''), v = /(\d+(?:\.\d+)?)/.exec(n);
+          if (Number.isInteger(m.outputTokenLimit) && m.outputTokenLimit > 0) outLimit[n] = m.outputTokenLimit;
           return { n, v: v ? parseFloat(v[1]) : 0, t: /lite/.test(n) ? (pro ? 2 : 1) : /flash/.test(n) ? (pro ? 1 : 0) : (pro ? 0 : 2), pv: /preview/.test(n) ? 0 : 1, lt: /latest/.test(n) ? 1 : 0 };
         })
         .sort((x, y) => x.t - y.t || y.v - x.v || y.pv - x.pv || y.lt - x.lt);
@@ -298,6 +305,8 @@ function neverConnected(e) {
 }
 
 // deadline = רגע (במילישניות) שאחריו השרת לא מנסה יותר, ומחזיר שגיאה. ברירת מחדל: עכשיו + 100 שניות.
+// opts.maxOut (לא חובה, טיוטת מפה 15.11.2026): maxOutputTokens מפורש – לכל מודל לא יותר ממגבלת הפלט שלו לפי רשימת המודלים.
+// מחזיר { text, model, finish } – finish = finishReason של המודל (למשל STOP / MAX_TOKENS), או '' אם לא נשלח.
 async function callGemini(base, key, body, timeoutMs, pro, opts) {
   assertSafeBase(base);
   const o = opts || {};
@@ -317,7 +326,7 @@ async function callGemini(base, key, body, timeoutMs, pro, opts) {
     stats.sent++;
     try {
       r = await fetch(`${base}/v1beta/models/${m}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body), signal: ctl.signal,
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(o.maxOut ? withMaxOut(body, Math.min(o.maxOut, outLimit[m] || o.maxOut)) : body), signal: ctl.signal,
       });
     } catch (e) {
       clearTimeout(tm);
@@ -349,14 +358,15 @@ async function callGemini(base, key, body, timeoutMs, pro, opts) {
       throw new HttpsError('internal', 'שגיאה ' + r.status + ' משירות הזיהוי', { reason: 'gemini-error', status: r.status });
     }
     const j = await readJson();
-    const pt = (((j.candidates || [])[0] || {}).content || {}).parts;
+    const c0 = (j.candidates || [])[0] || {};
+    const pt = (c0.content || {}).parts;
     if (!pt) throw new HttpsError('internal', 'אין תשובה מהמודל' + (j.promptFeedback && j.promptFeedback.blockReason ? ' (' + j.promptFeedback.blockReason + ')' : ''), { reason: 'no-answer' });
     lastGood[pro] = m;
-    return { text: pt.map((p) => p.text || '').join(''), model: m };
+    return { text: pt.map((p) => p.text || '').join(''), model: m, finish: typeof c0.finishReason === 'string' ? c0.finishReason.slice(0, 30) : '' };
   }
   if (!o.isRetry && err && err.details && err.details.reason === 'overloaded') {
     await sleep(Math.max(0, Math.min(RETRY_WAIT_MS * 2.5, left())));
-    return callGemini(base, key, body, timeoutMs, pro, { deadline, isRetry: true, stats });
+    return callGemini(base, key, body, timeoutMs, pro, { deadline, isRetry: true, stats, maxOut: o.maxOut });
   }
   if (qt.length && qt.length + nf.length === ms.length) {
     throw new HttpsError('resource-exhausted', 'עברת את מגבלת השימוש היומית של המפתח החינמי בכל המודלים. המכסה מתאפסת בערך ב-10:00 בבוקר, או אפשר להפעיל חיוב ב-AI Studio', { reason: 'gemini-quota' });
@@ -365,6 +375,11 @@ async function callGemini(base, key, body, timeoutMs, pro, opts) {
     throw new HttpsError('failed-precondition', 'כל המודלים נדחו כ"לא קיים" (' + nf.join(', ') + '). ייתכן שהמפתח לא מאפשר שימוש בזיהוי', { reason: 'models-not-found' });
   }
   throw err || new HttpsError('unavailable', 'לא זמין', { reason: 'unavailable' });
+}
+
+// עותק רדוד של גוף הבקשה עם maxOutputTokens (הגוף המקורי לא משתנה)
+function withMaxOut(body, n) {
+  return Object.assign({}, body, { generationConfig: Object.assign({}, body && body.generationConfig, { maxOutputTokens: n }) });
 }
 
 // האפליקציה מפענחת היום כך: JSON.parse(String(t).replace(/```json|```/g,'').trim())

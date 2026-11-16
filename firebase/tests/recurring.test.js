@@ -112,6 +112,20 @@ describe('חוקי ptk / rtk / rq בתוך עסק', () => {
     await assertFails(fs(U[B].emp).doc(P + 'rq/' + fresh('q')).set(rq(U[B].emp)));
   });
 
+  it('rq סבב 3 בתוך עסק: k ביצירה לעובד, ph/tk רק למנהל של אותו עסק; ערכים לא חוקיים נדחים', async () => {
+    const e = fs(U[A].emp), m = fs(U[A].mgr), mb = fs(U[B].mgr);
+    await assertSucceeds(e.doc(P + 'rq/' + fresh('q')).set(rq(U[A].emp, { k: 'b' })));
+    await assertFails(e.doc(P + 'rq/' + fresh('q')).set(rq(U[A].emp, { k: 'z' })));
+    await assertFails(e.doc(P + 'rq/' + fresh('q')).set(rq(U[A].emp, { ph: 'w' })));
+    await assertFails(e.doc(P + 'rq/q1').update({ ph: 'r' }));
+    await assertFails(e.doc(P + 'rq/q1').update({ tk: 't1' }));
+    await assertSucceeds(m.doc(P + 'rq/q1').update({ ph: 'r' }));
+    await assertSucceeds(m.doc(P + 'rq/q1').update({ ph: 'w', tk: 't1' }));
+    await assertFails(m.doc(P + 'rq/q1').update({ ph: 'q' }));
+    await assertFails(m.doc(P + 'rq/q1').update({ tk: 'x'.repeat(129) }));
+    await assertFails(mb.doc(P + 'rq/q1').update({ ph: 'r' }));
+  });
+
   it('תוספת tasks כבויה: ptk / rtk / rq נחסמים גם למנהל; עסק ב\' לא מושפע', async () => {
     await prep((a) => a.doc('b/' + A).update({ features: Object.assign({}, FEAT, { tasks: false }) }));
     const m = fs(U[A].mgr), e = fs(U[A].emp);

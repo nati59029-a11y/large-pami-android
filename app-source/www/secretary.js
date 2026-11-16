@@ -1,4 +1,4 @@
-/* SEC:1+2+3+4+5+6+7 – המזכירה העסקית. שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
+/* SEC:1+2+3+4+5+6+7+9+10 – המזכירה העסקית. SEC:10 (15.11.2026): צ'אט נקי בכל כניסה, "צ'אט קודם", "מול העיניים", מצב כרטיסים שנשמר, כללי ניתוב (למסך "לטיפול" באפליקציה). שלב 7: לשונית "חשבוניות" (חשבוניות שהתקבלו מווצאפ ומ-Gmail: אישור, דחייה, עריכה ובחירת סניף, "נכנס ישר" עם ביטול, קבלה → "סמן כשולם", חשבונית אחרי תעודת משלוח → החלפה, שולח חדש). שלב 6: לשונית "מייל" (Gmail – שליחה רק בלחיצה, ניקוי ספאם באישור מנהל העסק), חיבורי Google בהגדרות, סריקת היסטוריה אצל מנהל־על, סנכרון יומן Google. שלב 5: לשונית "ווצאפ" (תיבת הודעות, כרטיס שולח, טיוטה עם "שלח" בלחיצה, חלון 24 שעות ותבניות), "עצור הכל", הגדרות ווצאפ, ובכרטיס העסק של מנהל־על – חיבור המספר ומספרי המנהלים. שלב 4: לשוניות "התראות" ו"דוחות", הגדרות התראות ודוחות, מחיקת היסטוריה באישור כפול, תזכורת ביומן, רישום הטלפון להתראות (אם רכיב ההתראות קיים באפליקציה). שלב 1 ("שלד ותוספת"), שלב 2 ("צ'אט, מראה הכספים וייעוץ") ושלב 3 ("מידע על העסק, בנק תשובות, יומן" – לשוניות בתוך מסך המזכירה). קובץ עצמאי, נטען אחרי index.html (כמו orders-staff.js).
    שלב 2: secFin – נתוני הכספים לצ'אט ולמראה, מחושבים בפונקציות של מסכי האפליקציה עצמם (monthIncome, monthExpense, monthOwner, catTotal,
    inv/bal/dueOf, bsum, homeCards, dueStats, cfDebits, cfMonths) – אין כאן נוסחה כספית שנייה; מראה לענן אחרי כל שמירה (לכל היותר פעם ב-3 דקות);
    מסך הצ'אט (מקורות, "נכון ל-", "חשבי לעומק", אחוז ניצול, סף תזרים, "לא רלוונטי", מתג המראה).
@@ -85,7 +85,7 @@ const ACTS={consent:'אישור תנאי השימוש',setup:'הגדרת שם ו
  sensRead:'צפייה במידע הרגיש',sensTool:'המזכירה קראה מידע רגיש',sensAdd:'נשמר מידע רגיש',sensEdit:'מידע רגיש נערך',sensDel:'מידע רגיש נמחק',
  ruleAdd:'נוספה תשובה מוכנה',ruleEdit:'תשובה מוכנה נערכה',ruleDel:'תשובה מוכנה נמחקה',bank:'נענתה שאלה מתשובה מוכנה (בלי AI)',import:'ייבוא מהמזכירה הקודמת',
  calAdd:'נוסף אירוע ביומן',calOk:'אושר אירוע שהמזכירה הציעה',calNo:'בוטלה הצעה לאירוע',calEdit:'אירוע נערך',calDel:'אירוע נמחק',calWe:'שונתה הגדרת פגישות בשישי/שבת/חג',
- notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
+ notify:'שונו הגדרות ההתראות והדוחות',remDone:'תזכורת סומנה כטופלה',remReps:'שונה מספר החזרות בתזכורת',remSnooze:'נקבע "תזכירי לי שוב" להתראה',empAlert:'התראה על עובד',report:'נוצר דוח',insightDone:'תובנה סומנה כטופלה',histAsk:'בקשה למחוק היסטוריה',histDel:'ההיסטוריה נמחקה',retention:'ניקוי אוטומטי לפי מדיניות השמירה'};
 const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric',year:'2-digit'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 V.sec=()=>{const T='המזכירה';
  if(!elig())return{t:T,h:'<div class="empty">המזכירה לא מופעלת בעסק הזה</div>'};
@@ -101,7 +101,8 @@ V.sec=()=>{const T='המזכירה';
  if(tab==='bank')return{t:S.name||T,s:'תשובות מוכנות',h:tabsH()+bankH()};
  if(tab==='notes')return{t:S.name||T,s:'התראות',h:tabsH()+notesH()};
  if(tab==='reps')return{t:S.name||T,s:'דוחות ותובנות',h:tabsH()+repsH()};
- if(!X.msgs&&!X.mb)msgLoad();
+ /* SEC:10: הצ'אט נפתח נקי – בלי טעינת השיחה הקודמת (היא בלשונית "צ'אט קודם"; המזכירה עדיין זוכרת אותה בשרת) */
+ X.msgs=X.msgs||[];
  return{t:S.name||T,s:'המזכירה העסקית',h:tabsH()+chatH(S)}};
 ACT.secRe=()=>{X.st=null;load(true);rerender()};
 ACT.secEdit=()=>{X.edit=1;X.wz=1;rerender()};
@@ -177,6 +178,12 @@ function secFin(o){o=o||{};
   if(o.pay){f.pay={};const emp=t=>(cat(t.cat)||{}).beh==='emp';
    for(let i=0;i<=MONTHS;i++){const m=addMon(m0,-i),G={};L.filter(t=>t.t==='exp'&&emp(t)&&pmon(t)===m).forEach(t=>{const n=String(subName(t)).slice(0,60);G[n]=rnd((G[n]||0)+num(t.amt))});
     const r=Object.entries(G);if(r.length)f.pay[m]=r}}
+  /* 15.11.2026: o.rec – הפעולות האחרונות שנרשמו (רק לשאלה בצ'אט, לא למראה): מהאחרונה שנרשמה (t.ts), 30 יום, עד 80.
+     [זמן רישום, תאריך, i/e, קטגוריה, שם, סכום, מס' חשבונית, אמצעי תשלום, שולם] – כדי לענות על "לאיזה ספק הכנסתי עכשיו חשבונית של 50 באשראי" */
+  if(o.rec){const lo=now-30*864e5,tsOf=t=>{const x=t.ts?Date.parse(t.ts):NaN;return Number.isFinite(x)?x:0},key=t=>tsOf(t)||Date.parse((t.date||'')+'T12:00:00')||0;
+   /* שכר (beh emp) – רק כשמתג השכר של המנהל פעיל (o.pay), ומסומן [9]=1 כדי שהשרת יסנן גם הוא */const isEmp=t=>(cat(t.cat)||{}).beh==='emp';
+   f.rec=L.filter(t=>(t.t==='exp'||t.t==='inc')&&key(t)>=lo&&(o.pay||!isEmp(t))).sort((x,y)=>key(y)-key(x)).slice(0,80).map(t=>{const P=(t.pays||[]).filter(p=>p&&!p.crof);
+    return [Math.round(tsOf(t)),t.date||'',t.t==='inc'?'i':'e',String((cat(t.cat)||{}).name||'').slice(0,40),String(subName(t)).slice(0,60),rnd(num(t.amt)),String(t.inv||'').slice(0,30),[...new Set(P.map(p=>p.m).filter(Boolean))].join(', ').slice(0,40),rnd(sum(P,p=>num(p.a))),isEmp(t)?1:0]})}
   return f}
  catch(e){try{console.warn('secFin',e&&e.message)}catch(z){}return null}
  finally{BRSEL=sB;P=sP}}
@@ -198,31 +205,38 @@ css2.textContent='.secmsg{max-width:88%;padding:10px 12px;border-radius:14px;mar
 +'.secmsg.a{margin-inline-end:auto;border-color:var(--acc)}.secmsg.u{margin-inline-start:auto}.secmsg sup{color:var(--acc);font-weight:700;font-size:.72em;margin-inline-start:1px}'
 +'.secsrc{margin-top:8px;font-size:.85rem}.secsrc summary{cursor:pointer;color:var(--acc);min-height:32px;display:flex;align-items:center}.secsrc li{margin:4px 0}'
 +'.secbar{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:.85rem;margin:0 0 6px}.secin{width:100%;min-height:72px;resize:vertical;font:inherit;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);box-sizing:border-box}'
-+'.secwarn{border-color:var(--acc)!important}';
++'.secwarn{border-color:var(--acc)!important}'
+/* 15.11.2026: "כותבת" בולט ומונפש – המילה נכתבת שוב ושוב, שלוש נקודות קופצות והבועה פועמת */
++'.sectyp{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.05rem;color:var(--acc);border-width:2px;white-space:normal;animation:secPulse 1.6s ease-in-out infinite}'
++'.sectypt{display:inline-block;animation:secTw 1.8s steps(7,end) infinite}.sectypd{display:inline-flex;gap:5px}.sectypd i{display:block;width:9px;height:9px;border-radius:50%;background:var(--acc);animation:secDot 1s ease-in-out infinite}.sectypd i:nth-child(2){animation-delay:.15s}.sectypd i:nth-child(3){animation-delay:.3s}'
++'@keyframes secDot{0%,80%,100%{transform:translateY(0);opacity:.35}40%{transform:translateY(-7px);opacity:1}}'
++'@keyframes secTw{0%{clip-path:inset(0 0 0 100%)}65%,100%{clip-path:inset(0 0 0 0)}}'
++'@keyframes secPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--acc) 40%,transparent)}50%{box-shadow:0 0 0 7px color-mix(in srgb,var(--acc) 0%,transparent)}}'
++'@media(prefers-reduced-motion:reduce){.sectyp,.sectypt,.sectypd i{animation:none!important;clip-path:none!important}}';
 document.head.appendChild(css2);
 const QS=['מה קרה היום?','תזרים לחודש','חשבוניות לתשלום השבוע'];
 const SCR={due:'due',cf:'cf',tasks:'tk',zc:'zc',facts:'@facts',cal:'@cal',bank:'@bank'};/* @ = לשונית בתוך מסך המזכירה (שלב 3) */
-async function msgLoad(){X.mb=1;try{const r=await fnCall('secChatLoad',{limit:50});X.msgs=r&&r.msgs||[]}catch(e){X.msgs=X.msgs||[];X.msgErr=e&&e.message||'השיחה לא נטענה'}finally{X.mb=0;if(cur().v==='sec'&&!typing())rerender()}}
 const fmtAt=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he-IL',{day:'numeric',month:'numeric'})+' '+d.toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})};
 /* 13.11.2026: סימני עיצוב שהמודל מוסיף (Markdown) – מוצגים כעיצוב ולא ככוכביות. רץ על טקסט שכבר עבר esc, ומוסיף רק <b> */
 const mdLite=t=>t.split('\n').map(l=>{if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(l))return null;const h=/^\s*#{1,6}\s+(.*)$/.exec(l);if(h)return '<b>'+h[1].replace(/\*\*/g,'')+'</b>';return l.replace(/^(\s*)[-*•]\s+/,'$1• ')}).filter(l=>l!==null).join('\n').replace(/\*\*([^*\n]+?)\*\*/g,'<b>$1</b>').replace(/__([^_\n]+?)__/g,'<b>$1</b>').replace(/\n{3,}/g,'\n\n').replace(/^\n+|\n+$/g,'');
-function bub(m,i){if(m.role!=='a')return `<div class="secmsg u">${esc(m.text)}</div>`;
+function bub(m,i){if(m.role!=='a')return `<div class="secmsg u">${m.via==='voice'?'🎤 ':m.via==='image'?'📷 ':m.via==='video'?'🎬 ':''}${esc(m.text)}</div>`;
  const tx=mdLite(esc(m.text)).replace(/\[(\d{1,2})\]/g,'<sup>$1</sup>');
  const src=(m.src||[]).map((s,k)=>`<li><b>${k+1}.</b> לפי ${esc(s.l||'')}${s.at?', נכון ל-'+esc(fmtAt(s.at)):''}${SCR[s.s]&&(SCR[s.s][0]==='@'||V[SCR[s.s]])?` <button class="chip" data-a="secGo" data-v="${SCR[s.s]}" style="min-height:32px">למסך</button>`:''}</li>`).join('');
  const ideas=(m.ideas||[]).filter(x=>!(X.nr||{})[x.key]).map(x=>`<div class="card" style="margin:6px 0 0;padding:8px"><small>${esc(x.seen||'')}</small><button class="chip" data-a="secNr" data-k="${esc(x.key)}" style="min-height:40px;margin-top:4px">לא רלוונטי – לא להציע 90 יום</button></div>`).join('');
- const th=m.th&&X.st&&X.st.cfTh==null?`<div class="card" style="margin:6px 0 0;padding:8px"><small>סף מוצע להתראת תזרים: ${esc(Number(m.th).toLocaleString('he-IL'))} ₪</small><div class="row" style="margin-top:4px"><button class="chip" data-a="secTh" data-v="${esc(String(m.th))}" style="min-height:40px">לאשר את הסף</button><button class="chip" data-a="secThEd" style="min-height:40px">סף אחר</button></div></div>`:'';
- const cards=(m.cards||[]).map(cardH).join('');
- return `<div class="secmsg a${m.stale?' secwarn':''}">${tx}${cards}${src?`<details class="secsrc"><summary>מקורות (${(m.src||[]).length})</summary><ol style="margin:4px 0;padding-inline-start:18px;list-style:none">${src}</ol></details>`:''}${ideas}${th}</div>`}
+ const th=m.th&&X.st&&X.st.cfTh!=null?`<div class="card" style="margin:6px 0 0;padding:8px"><small><b>אושר ✓</b> סף התראת תזרים: ${esc(Number(X.st.cfTh).toLocaleString('he-IL'))} ₪</small></div>`:m.th&&X.st&&X.st.cfTh==null?`<div class="card" style="margin:6px 0 0;padding:8px"><small>סף מוצע להתראת תזרים: ${esc(Number(m.th).toLocaleString('he-IL'))} ₪</small><div class="row" style="margin-top:4px"><button class="chip" data-a="secTh" data-v="${esc(String(m.th))}" style="min-height:40px">לאשר את הסף</button><button class="chip" data-a="secThEd" style="min-height:40px">סף אחר</button></div></div>`:'';
+ const cards=(m.cards||[]).map(c=>cardH(c,m.id)).join('');
+ return `<div class="secmsg a${m.stale?' secwarn':''}">${tx}${cards}${src?`<details class="secsrc"><summary>מקורות (${(m.src||[]).length})</summary><ol style="margin:4px 0;padding-inline-start:18px;list-style:none">${src}</ol></details>`:''}${ideas}${th}${m.id?`<div class="secrow">${mrBtnH('chat',m.id)}</div>`:''}</div>`}
 function chatH(S){const pct=Number.isFinite(S.pct)?S.pct:null,fin=!!secFinOk();
  const bar=`<div class="secbar" id="secBar"><span>${fin?'נתוני הכספים: מהמכשיר, נכונים ל-'+esc(fmtAt(Date.now())):S.mirror===false?'מראה הכספים כבוי':S.mirrorAt?'נתוני הכספים נכונים ל-'+esc(fmtAt(S.mirrorAt)):'אין נתוני כספים במכשיר הזה'}</span>${pct!=null?`<span id="secPct">ניצול החודש: <bdi dir="ltr">${pct}%</bdi></span>`:''}<button class="chip" data-a="secSet" style="min-height:36px;margin-inline-start:auto">הגדרות</button></div>`;
  const warn=S.saving?`<div class="card secwarn" id="secSaving"><small>${S.saving==='day'?'הגעתם לתקרת השימוש היומית – אפשר להמשיך מחר.':'הגעתם לתקרת השימוש החודשית – המזכירה במצב חיסכון עד תחילת החודש או הגדלת התקרה.'}</small></div>`:pct>=80?`<div class="card secwarn"><small>ניצלתם ${pct}% מתקרת השימוש החודשית.</small></div>`:'';
  const hi=S.call?`שלום ${esc(S.call)}! `:'שלום! ';
  const L=X.msgs||[];
- const body=X.mb&&!L.length?'<div class="empty">טוען…</div>':(L.length?L.map(bub).join(''):`<div class="secmsg a">${hi}אני ${esc(S.name)}. אפשר לשאול אותי על הכספים, הספקים, העובדים, המשימות וההזמנות של העסק, על המידע ששמרתם על העסק ועל היומן.</div>`)+(X.msgErr?`<p class="note">${esc(X.msgErr)}</p>`:'');
- const busy=X.sending?`<div class="secmsg a" id="secWait"><small>${X.deep?'חושבת לעומק…':'כותבת…'}</small></div>`:'';
+ const body=X.mb&&!L.length?'<div class="empty">טוען…</div>':(L.length?L.map(bub).join(''):`<div class="secmsg a">${hi}אני ${esc(S.name)}. אפשר לשאול אותי על הכספים, הספקים, העובדים, המשימות וההזמנות של העסק, על היומן, על כל שאלה בניהול העסק – וגם איך עושים משהו באפליקציה או מה לעשות כשמשהו לא עובד.</div>`)+(X.msgErr?`<p class="note">${esc(X.msgErr)}</p>`:'');
+ const busy=X.sending||X.mst?`<div class="secmsg a sectyp" id="secWait" role="status" aria-live="polite"><span class="sectypt">${X.mst?esc(String(X.mst).replace(/…$/,'')):X.deep?'חושבת לעומק':'כותבת'}</span><span class="sectypd" aria-hidden="true"><i></i><i></i><i></i></span></div>`:'';
  return bar+warn+`<div id="secChat">${body}${busy}</div>
  <div class="chips" style="margin:10px 0 6px">${QS.map(q=>`<button class="chip" data-a="secQ" data-v="${esc(q)}" style="min-height:40px">${esc(q)}</button>`).join('')}</div>
  <form data-f="secAskF" id="secForm"><textarea class="secin" name="q" maxlength="2000" placeholder="כתבו שאלה על העסק…" aria-label="שאלה למזכירה">${esc(X.draft||'')}</textarea>
+ ${mediaH()}
  <div class="row" style="margin-top:8px"><button class="btn grow" name="go" value="n"${X.sending?' disabled':''}>שליחה</button><button class="btn g grow" name="go" value="d"${X.sending?' disabled':''} title="מודל איכותי – עולה יותר בתקרה">חשבי לעומק</button></div></form>
  <p class="note" style="margin:6px 0 0">כל מספר מגיע עם מקור. מספר שלא נמצא בנתונים מסומן "לא אומת". המזכירה עלולה לטעות – לפני החלטה כספית, משפטית או לגבי עובד כדאי לבדוק עם איש מקצוע.</p>`}
 const secFinOk=()=>{try{return typeof S!=='undefined'&&S&&Array.isArray(S.tx)&&S.tx.length&&!brMineIds()}catch(e){return false}};
@@ -230,6 +244,7 @@ function setH(S){return `<div class="card"><b>מראה הכספים בענן</b>
  <label class="chip" style="min-height:44px;width:100%;justify-content:flex-start"><input type="checkbox" data-c="secMir"${S.mirror!==false?' checked':''}> פעיל${S.mirrorAt?' · עודכן '+esc(fmtAt(S.mirrorAt)):''}</label></div>
  <div class="card" style="margin-top:8px"><b>סף התראת תזרים</b><p class="note" style="margin:4px 0 8px">${S.cfTh!=null?'הסף שאישרת: '+esc(Number(S.cfTh).toLocaleString('he-IL'))+' ₪':'עדיין לא נקבע. המזכירה תציע סף כשתשאלו על התזרים.'}</p><button class="chip" data-a="secThEd" style="min-height:40px">${S.cfTh!=null?'שינוי':'קביעת סף'}</button></div>
  <div class="card" style="margin-top:8px"><b>פגישה בשישי, בשבת או בחג</b><p class="note" style="margin:4px 0 8px">מה לעשות כשאירוע נקבע ליום שאינו יום עסקים.</p><div class="chips" role="radiogroup"><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="warn"${S.we!=='accept'?' checked':''}> להזהיר ולהציע יום אחר</label><label class="chip" style="min-height:44px"><input type="radio" name="secWe" data-c="secWe" value="accept"${S.we==='accept'?' checked':''}> לקבל בלי הערה</label></div></div>
+ ${mrSetH()}
  ${waSetH()}
  ${mailSetH()}
  ${gSetH()}
@@ -251,11 +266,11 @@ FRM.secThF=f=>{const v=String(f.a.value||'').replace(/[,\s₪]/g,'');if(v===''){
 const scrollEnd=()=>setTimeout(()=>{const f=document.getElementById('secForm');if(f&&f.scrollIntoView)f.scrollIntoView({block:'end'})},30);
 // 13.11.2026: קוד הסיבה כשספק ה-AI נכשל (reason מ-functions/lib/sec-ai.js), כדי שיהיה אפשר לאבחן מהמסך
 const AIR={'ai-quota':'נגמרה המכסה או אין חיוב פעיל בחשבון ה-AI','ai-rejected':'שירות ה-AI דחה את הבקשה – מפתח או מודל לא תקינים','ai-model':'מודל ה-AI לא נמצא בשירות','ai-overloaded':'עומס זמני בשירות ה-AI','ai-timeout':'שירות ה-AI לא ענה בזמן','ai-network':'אין חיבור מהשרת לשירות ה-AI','ai-error':'שגיאה לא מוכרת בשירות ה-AI'};
-async function ask2(q,deep){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)return;if(q.length>2000)return toast('השאלה ארוכה מדי (עד 2,000 תווים)');
- X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';rerender();scrollEnd();
- try{const fin=secFin({pay:!!X.st.pay});const d={text:q,deep};if(fin)d.fin=fin;
+async function ask2(q,deep,via){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)return;if(q.length>2000)return toast('השאלה ארוכה מדי (עד 2,000 תווים)');
+ X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,via:via==='voice'?'voice':undefined,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';rerender();scrollEnd();
+ try{const fin=secFin({pay:!!X.st.pay,rec:true});const d={text:q,deep};if(via==='voice')d.via='voice';if(fin)d.fin=fin;/* 15.11.2026: לשאלות על תקלות – גרסה ומצב חיבור בלבד */try{const vc=typeof APP_VC!=='undefined'?String(APP_VC):'';d.app={on:navigator.onLine!==false};if(/^\d{1,7}$/.test(vc))d.app.v=vc}catch(e){}
   const r=await fnCall('secChat',d);
-  X.msgs.push({role:'a',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null}
+  X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null;eyStale()}
   if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):'';if(r.mode==='saving')X.st.saving=X.st.saving||'month'}
  catch(e){const rs=e&&Object.prototype.hasOwnProperty.call(AIR,e.reason)?' (סיבה: '+AIR[e.reason]+')':'';X.msgs.push({role:'a',text:((e&&e.message)||'השליחה נכשלה. נסו שוב.')+rs,t:Date.now()});if(e&&e.reason==='rate-limit')X.draft=q}
  finally{X.sending=0;X.deep=0;if(cur().v==='sec')rerender();scrollEnd()}}
@@ -273,7 +288,7 @@ css3.textContent='.sectabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}.
 document.head.appendChild(css3);
 const TABS=[['chat','שיחה'],['wa','ווצאפ'],['notes','התראות'],['reps','דוחות'],['facts','מידע על העסק'],['cal','יומן'],['bank','תשובות מוכנות']];
 const unseenN=()=>X.nl&&!X.nl.err?X.nl.unseen:((X.st&&X.st.unseen)||0);
-function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
+function tabsH(){const t=X.tab||'chat';return `<div class="sectabs" role="tablist" id="secTabs">${TABS.map(([k,l])=>`<button class="chip${t===k?' on':''}" role="tab" aria-selected="${t===k}" data-a="secTab" data-v="${k}">${l}${k==='facts'&&X.facts&&X.facts.pend?` (${X.facts.pend})`:''}${k==='eyes'&&X.ey&&!X.ey.err&&(X.ey.openN||(X.ey.open||[]).length)?` <span class="secbadge">${X.ey.openN||X.ey.open.length}</span>`:''}${k==='notes'&&unseenN()?` <span class="secbadge">${unseenN()}</span>`:''}${k==='wa'&&typeof waN==='function'&&waN()?` <span class="secbadge">${waN()}</span>`:''}</button>`).join('')}</div>`}
 /* 13.11.2026: מעבר בין לשוניות – המידע הקודם מוצג מיד ומתעדכן ברקע (במקום "טוען…" בכל מעבר). אחרי שגיאה – טעינה רגילה */
 const swr=(o,k,b,ld)=>{const R=o[k];if(!R||R.err){o[k]=null;return}if(!X[b])ld()};
 ACT.secTab=el=>{X.tab=el.dataset.v;if(X.tab==='facts')swr(X,'fl','fb',factsLoad);if(X.tab==='cal')swr(X,'cl','cb',calLoad);if(X.tab==='bank')swr(X,'rl','rb',rulesLoad);if(X.tab==='notes')swr(X,'nl','nb',notesLoad);if(X.tab==='reps'){X.rp=null;swr(X,'rpl','rb4',repsLoad)}rerender()};
@@ -285,27 +300,37 @@ const todayS=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMont
 
 /* ---------- כרטיסי אישור בצ'אט (47, 7.1): "אשר" / "בטל". נשמר רק באישור ---------- */
 X.done=X.done||{};
-function cardH(c){const d=X.done[c.id];
- if(d)return `<div class="card" style="margin:6px 0 0;padding:8px"><small>${esc(d)}</small></div>`;
+/* SEC:10: כרטיס שהוכרע – "אושר ✓" / "בוטל" בלי כפתורים, גם אחרי טעינה מחדש (המצב נשמר בהודעה בשרת: c.st) */
+const CST={ok:'אושר ✓',no:'בוטל',gone:'כבר טופל'};
+function cardSum(c){if(c.k==='cal')return (c.rem?'תזכורת: ':'')+c.title+' · '+wkD(c.okD||c.d)+' '+dShort(c.okD||c.d)+(c.tm?' '+c.tm:'');if(c.k==='fact')return c.text||'';if(c.k==='route')return rtL(c);if(c.k==='scan')return SCL[c.doc]||'מסמך';if(c.k==='task')return c.txt||'';return ''}
+function cardDone(c){const d=X.done[c.id]||(c.st?{st:c.st}:null);if(!d)return '';const st=CST[d.st]?d.st:'gone';
+ const det=st==='ok'?(c.k==='fact'?'נשמר במידע על העסק.':c.k==='cal'?(c.rem?'התזכורת נקבעה – תופיע ב"מול העיניים" ותישלח התראה בזמן.':'נקבע ביומן'+(c.okD&&c.okD!==c.d?' ל-'+dShort(c.okD):'')+'.'):c.k==='route'?'הכלל נשמר ב"הכללים שלי".':c.k==='scan'?'נפתח מסך הסריקה.':c.k==='task'?'המשימה נפתחה.':''):st==='no'?(c.k==='fact'?'לא נשמר.':c.k==='cal'?'לא נקבע.':'לא נשמר כלל.'):'';
+ return `<div class="card secdone" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}" data-st="${st}"><b>${CST[st]}</b> <small class="note">${esc(cardSum(c))}</small>${det?`<small class="note" style="display:block">${esc(det)}</small>`:''}</div>`}
+function cardH(c,mid){if(X.done[c.id]||c.st)return cardDone(c);
+ if(c.k==='route')return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>כלל ניתוב</b><p style="margin:4px 0">${esc(rtL(c))}</p><div class="secrow"><button class="chip" data-a="secRtOk" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">אשר</button><button class="chip" data-a="secRtNo" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">בטל</button></div></div>`;
  if(c.k==='fact'){const cf=(c.conflict||[]).map(x=>`<li>${esc(x.text)}</li>`).join('');
   return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>לשמור במידע על העסק?</b><p style="margin:4px 0">${esc(c.text)}${c.exp?` <span class="sectags">עד ${esc(dShort(c.exp))}</span>`:''}</p>
   ${cf?`<p class="note" style="margin:4px 0">זה נראה סותר את מה שכבר שמור:</p><ul style="margin:0 0 4px;padding-inline-start:18px">${cf}</ul><p class="note" style="margin:0">איזו נכונה?</p><div class="secrow"><button class="chip" data-a="secFOk" data-id="${esc(c.id)}" data-rp="${esc((c.conflict||[]).map(x=>x.id).join(','))}">החדשה נכונה</button><button class="chip" data-a="secFNo" data-id="${esc(c.id)}">הקיימת נכונה</button><button class="chip" data-a="secFOk" data-id="${esc(c.id)}" data-both="1">שתיהן נכונות</button></div>`
   :`<div class="secrow"><button class="chip" data-a="secFOk" data-id="${esc(c.id)}">אשר ושמור</button><button class="chip" data-a="secFNo" data-id="${esc(c.id)}">בטל</button></div>`}</div>`}
  if(c.k==='cal'){const w=c.warn;
-  return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>לקבוע ביומן?</b><p style="margin:4px 0">${esc(c.title)} · ${esc(wkD(c.d))} ${esc(dShort(c.d))}${c.tm?' · <bdi dir="ltr">'+esc(c.tm)+'</bdi>':''} <span class="sectags">${c.to==='biz'?'של העסק':'אישי'}</span></p>
+  return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>${c.rem?'לקבוע תזכורת?':'לקבוע ביומן?'}</b><p style="margin:4px 0">${esc(c.title)} · ${esc(wkD(c.d))} ${esc(dShort(c.d))}${c.tm?' · <bdi dir="ltr">'+esc(c.tm)+'</bdi>':''} <span class="sectags">${c.to==='biz'?'של העסק':'אישי'}</span></p>
   ${w?`<p class="note" style="margin:4px 0">התאריך נופל ב${esc(w.kind)}. להשאיר או להעביר ל${esc(wkD(w.next))} ${esc(dShort(w.next))}?</p><div class="secrow"><button class="chip" data-a="secCOk" data-id="${esc(c.id)}" data-d="${esc(w.next)}">להעביר ל-${esc(dShort(w.next))}</button><button class="chip" data-a="secCOk" data-id="${esc(c.id)}" data-force="1">להשאיר</button><button class="chip" data-a="secCNo" data-id="${esc(c.id)}">בטל</button></div>`
   :`<div class="secrow"><button class="chip" data-a="secCOk" data-id="${esc(c.id)}">אשר</button><button class="chip" data-a="secCNo" data-id="${esc(c.id)}">בטל</button></div>`}</div>`}
+ if(c.k==='scan'||c.k==='task'){const t=c.k==='scan';
+  return `<div class="card" style="margin:6px 0 0;padding:8px" data-card="${esc(c.id)}"><b>${t?'להעביר לסריקה?':'לפתוח משימה?'}</b><p style="margin:4px 0">${t?esc(SCL[c.doc]||'מסמך'):esc(c.txt||'')}</p><div class="secrow"><button class="chip" data-a="${t?'secScOk':'secTkOk'}" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">${t?'פתח את מסך הסריקה':'פתח משימה'}</button><button class="chip" data-a="secScNo" data-mid="${esc(mid||'')}" data-id="${esc(c.id)}">בטל</button></div></div>`}
  return ''}
-const doneMsg=(id,m)=>{X.done[id]=m;X.fl=null;X.cl=null;rerender()};
+/* SEC:10: מצב הכרטיס – גם על הכרטיס עצמו (בשיחה הנוכחית וב"צ'אט קודם"), ו"מול העיניים" מתרענן */
+const allCards=()=>(X.msgs||[]).concat(X.pc&&X.pc.L||[]).flatMap(m=>m.cards||[]);
+const doneSt=(id,st,o)=>{X.done[id]={st};allCards().filter(c=>c.id===id).forEach(c=>{c.st=st;if(o&&o.d)c.okD=o.d});X.fl=null;X.cl=null;eyStale();rerender()};
 const notPend=e=>e&&e.reason==='not-pending'||e&&e.reason==='not-found';
 ACT.secFOk=async el=>{const id=el.dataset.id,d={op:'approve',id};if(el.dataset.rp){d.force=true;d.replace=el.dataset.rp.split(',').filter(Boolean)}if(el.dataset.both)d.force=true;el.disabled=true;
- try{const r=await fnCall('secFacts',d);if(r&&r.ok===false&&r.conflict){/* סתירה שנוצרה אחרי ההצעה – שואלים */const c=(X.msgs||[]).flatMap(m=>m.cards||[]).find(x=>x.id===id);if(c){c.conflict=r.conflict;rerender()}return}doneMsg(id,'נשמר במידע על העסק.')}
- catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
-ACT.secFNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secFacts',{op:'reject',id});doneMsg(id,'לא נשמר.')}catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
+ try{const r=await fnCall('secFacts',d);if(r&&r.ok===false&&r.conflict){/* סתירה שנוצרה אחרי ההצעה – שואלים */const c=allCards().find(x=>x.id===id);if(c){c.conflict=r.conflict;rerender()}return}doneSt(id,'ok')}
+ catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
+ACT.secFNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secFacts',{op:'reject',id});doneSt(id,'no')}catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
 ACT.secCOk=async el=>{const id=el.dataset.id,d={op:'approve',id};if(el.dataset.d)d.d=el.dataset.d;if(el.dataset.force)d.force=true;el.disabled=true;
- try{const r=await fnCall('secCal',d);if(r&&r.ok===false&&r.warn){const c=(X.msgs||[]).flatMap(m=>m.cards||[]).find(x=>x.id===id);if(c){c.warn=r.warn;rerender()}else toast('התאריך נופל ב'+r.warn.kind);return}doneMsg(id,'נקבע ביומן'+(d.d?' ל-'+dShort(d.d):'')+'.')}
- catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
-ACT.secCNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secCal',{op:'reject',id});doneMsg(id,'לא נקבע.')}catch(e){if(notPend(e))doneMsg(id,'ההצעה כבר טופלה.');else{el.disabled=false;err(e)}}};
+ try{const r=await fnCall('secCal',d);if(r&&r.ok===false&&r.warn){const c=allCards().find(x=>x.id===id);if(c){c.warn=r.warn;rerender()}else toast('התאריך נופל ב'+r.warn.kind);return}doneSt(id,'ok',{d:d.d})}
+ catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
+ACT.secCNo=async el=>{const id=el.dataset.id;el.disabled=true;try{await fnCall('secCal',{op:'reject',id});doneSt(id,'no')}catch(e){if(notPend(e))doneSt(id,'gone');else{el.disabled=false;err(e)}}};
 
 /* ---------- מידע על העסק (8.2 מסך 5) ---------- */
 async function factsLoad(){X.fb=1;const s0=X.fl;let again=0;try{const r=await fnCall('secFacts',{op:'list'});if(s0&&X.fl===null){again=1;return}X.fl=r;X.facts={pend:(r.facts||[]).filter(f=>f.st==='prop').length}}catch(e){X.fl=X.fl&&!X.fl.err?X.fl:{err:e&&e.message||'לא נטען'}}finally{X.fb=0;if(again){factsLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
@@ -359,11 +384,33 @@ ACT.secSDel=el=>{const id=el.dataset.id;ask('למחוק את המידע הרגי
 async function calLoad(){X.cb=1;const s0=X.cl;let again=0;try{const r=await fnCall('secCal',{op:'list'});if(s0&&X.cl===null){again=1;return}X.cl=r}catch(e){X.cl=X.cl&&!X.cl.err?X.cl:{err:e&&e.message||'לא נטען'}}finally{X.cb=0;if(again){calLoad();return}if(cur().v==='sec'&&!typing())rerender()}}
 const SRC={mgr:'ידני',sec:'מהמזכירה',import:'ייבוא',wa:'מווצאפ'};
 function evH(e){return `<div class="secli"><p><b>${e.tm?'<bdi dir="ltr">'+esc(e.tm)+'</bdi> · ':''}${esc(e.title)}</b> ${e.rem?'<span class="sectags">תזכורת</span>':''}<span class="sectags">${e.biz?'של העסק':'אישי'}</span><span class="sectags">${esc(SRC[e.src]||'ידני')}</span>${e.offW?'<span class="sectags w">'+esc(e.offW)+'</span>':''}</p>${e.note?`<small class="note">${esc(e.note)}</small>`:''}<div class="secrow"><button class="chip" data-a="secEvEd" data-id="${esc(e.id)}">ערוך</button><button class="chip" data-a="secEvDel" data-id="${esc(e.id)}">מחק</button></div></div>`}
+/* 15.11.2026: לוח שנה חודשי (ברירת המחדל) – יום עם אירוע/תזכורת מסומן, לחיצה על יום מציגה את מה שבו */
+const ymd=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+function monH(R,td){const E=(R.events||[]).filter(e=>e.st==='ok'),m=X.cm||td.slice(0,7),sel=X.cd&&X.cd.slice(0,7)===m?X.cd:(m===td.slice(0,7)?td:m+'-01');
+ const[y,mm]=m.split('-').map(Number),first=new Date(y,mm-1,1,12),n=new Date(y,mm,0).getDate(),by={};E.forEach(e=>{(by[e.d]=by[e.d]||[]).push(e)});
+ let cells='';for(let i=0;i<first.getDay();i++)cells+='<span></span>';
+ for(let k=1;k<=n;k++){const d=m+'-'+String(k).padStart(2,'0'),L=by[d]||[];cells+=`<button type="button" class="seccd${d===td?' td':''}${d===sel?' sel':''}${isOff(d)?' off':''}${d<td?' past':''}" data-a="secCd" data-v="${d}" aria-label="${esc(wkD(d)+' '+dShort(d))}${L.length?', '+L.length+(L.length===1?' אירוע':' אירועים'):''}"><b>${k}</b>${L.length?`<i>${L.length>1?L.length:''}</i>`:'<i class="z"></i>'}</button>`}
+ const L=(by[sel]||[]).slice().sort((a,b)=>(a.tm||'').localeCompare(b.tm||''));
+ return `<div class="card seccal" id="secMon"><div class="seccalh"><button class="chip" data-a="secCm" data-v="-1" aria-label="החודש הקודם">›</button><b>${esc(first.toLocaleDateString('he-IL',{month:'long',year:'numeric'}))}</b><button class="chip" data-a="secCm" data-v="1" aria-label="החודש הבא">‹</button></div>
+ <div class="seccalg">${['א','ב','ג','ד','ה','ו','ש'].map(c=>`<span class="wd">${c}</span>`).join('')}${cells}</div>
+ ${sel!==td?`<button class="chip" data-a="secCd" data-v="${td}" style="margin-top:8px">חזרה להיום</button>`:''}</div>
+ <div class="card" style="margin-top:8px" id="secMonDay"><div class="secday">${esc(wkD(sel))} ${esc(dShort(sel))}<small class="note">${esc(hebD(sel))}${isOff(sel)?' · יום לא עסקים':''}</small></div>${L.length?L.map(evH).join(''):'<p class="note" style="margin:0">אין אירועים או תזכורות ביום הזה</p>'}${sel>=td?`<button class="chip" data-a="secEvAdd" data-d="${sel}" style="margin-top:8px">+ אירוע או תזכורת ביום הזה</button>`:''}</div>`}
+ACT.secCd=el=>{X.cd=el.dataset.v;X.cm=X.cd.slice(0,7);rerender()};
+ACT.secCm=el=>{const[y,m]=(X.cm||todayS().slice(0,7)).split('-').map(Number);X.cm=ymd(new Date(y,m-1+(+el.dataset.v||0),1,12)).slice(0,7);X.cd='';rerender()};
+const css3c=document.createElement('style');
+css3c.textContent='.seccalh{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}.seccalh b{font-size:1.15rem}.seccalh .chip{min-width:48px;justify-content:center;font-size:1.3rem}'
++'.seccalg{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}.seccalg .wd{text-align:center;font-size:.8rem;font-weight:700;opacity:.7;padding:2px 0}'
++'.seccd{min-height:48px;padding:2px 0;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer}'
++'.seccd b{font-size:1rem}.seccd.off{background:color-mix(in srgb,var(--acc) 8%,var(--card))}.seccd.past{opacity:.55}.seccd.td{border:2px solid var(--acc)}.seccd.td b{color:var(--acc)}'
++'.seccd i{display:block;min-width:9px;height:9px;padding:0 3px;border-radius:9px;background:var(--acc);color:var(--onacc,#fff);font-style:normal;font-size:.62rem;line-height:9px;font-weight:800;box-sizing:border-box}.seccd i.z{visibility:hidden}'
++'.seccd.sel{background:var(--acc);border-color:var(--acc);opacity:1}.seccd.sel b{color:var(--onacc,#fff)}.seccd.sel i{background:var(--onacc,#fff);color:var(--acc)}';
+document.head.appendChild(css3c);
 function calH(){const R=X.cl;if(!R){if(!X.cb)calLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="cal">נסה שוב</button></div>`;
- const td=R.today||todayS(),E=R.events||[],pend=E.filter(e=>e.st==='prop'),ok=E.filter(e=>e.st==='ok'&&e.d>=td),view=X.cv||'list';
- let h=`<div class="secrow" style="margin:0 0 8px"><button class="btn" data-a="secEvAdd" style="flex:1">+ אירוע</button><button class="chip${view==='list'?' on':''}" data-a="secCv" data-v="list">רשימה</button><button class="chip${view==='week'?' on':''}" data-a="secCv" data-v="week">שבוע</button></div>`;
+ const td=R.today||todayS(),E=R.events||[],pend=E.filter(e=>e.st==='prop'),ok=E.filter(e=>e.st==='ok'&&e.d>=td),view=X.cv||'month';
+ let h=`<div class="secrow" style="margin:0 0 8px"><button class="btn" data-a="secEvAdd" style="flex:1">+ אירוע</button><button class="chip${view==='month'?' on':''}" data-a="secCv" data-v="month">חודש</button><button class="chip${view==='list'?' on':''}" data-a="secCv" data-v="list">רשימה</button><button class="chip${view==='week'?' on':''}" data-a="secCv" data-v="week">שבוע</button></div>`;
+ if(view==='month'){if(pend.length)h+=`<div class="card secwarn" style="margin-bottom:8px"><b>המזכירה הציעה (${pend.length})</b>${pend.map(e=>cardH({k:'cal',id:e.id,title:e.title,d:e.d,tm:e.tm,to:e.to,rem:e.rem,warn:e.off&&R.we!=='accept'?{kind:e.off,next:nextBiz(e.d)}:null})).join('')}</div>`;return h+monH(R,td)}
  const soon=ok.slice(0,3);h+=`<div class="card" id="secSoon"><b>קרוב</b>${soon.length?soon.map(e=>`<div class="note" style="margin-top:4px">${esc(dShort(e.d))}${e.tm?' <bdi dir="ltr">'+esc(e.tm)+'</bdi>':''} – ${esc(e.title)}</div>`).join(''):'<p class="note" style="margin:4px 0 0">אין אירועים קרובים</p>'}</div>`;
- if(pend.length)h+=`<div class="card secwarn" style="margin-top:8px"><b>המזכירה הציעה (${pend.length})</b>${pend.map(e=>cardH({k:'cal',id:e.id,title:e.title,d:e.d,tm:e.tm,to:e.to,warn:e.off&&R.we!=='accept'?{kind:e.off,next:nextBiz(e.d)}:null})).join('')}</div>`;
+ if(pend.length)h+=`<div class="card secwarn" style="margin-top:8px"><b>המזכירה הציעה (${pend.length})</b>${pend.map(e=>cardH({k:'cal',id:e.id,title:e.title,d:e.d,tm:e.tm,to:e.to,rem:e.rem,warn:e.off&&R.we!=='accept'?{kind:e.off,next:nextBiz(e.d)}:null})).join('')}</div>`;
  const days=[];if(view==='week'){for(let i=0;i<7;i++){const[y,m,x]=td.split('-').map(Number);const d=new Date(y,m-1,x+i,12);days.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))}}
  else{[...new Set(ok.map(e=>e.d))].slice(0,60).forEach(d=>days.push(d))}
  if(!days.length)return h+'<div class="empty">אין אירועים ביומן</div>';
@@ -376,7 +423,7 @@ function evForm(e){e=e||{};return `<h3>${e.id?'עריכת אירוע':'אירו�
  <label class="f"><span>הערה (לא חובה)</span><input name="note" maxlength="500" autocomplete="off" value="${esc(e.note||'')}"></label>
  ${e.id?'':`<label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:6px"><input type="checkbox" name="biz" value="1"> של העסק (כל המנהלים רואים)</label><label class="chip" style="min-height:44px;width:100%;justify-content:flex-start;margin-top:6px"><input type="checkbox" name="rem" value="1"> תזכורת (התראה בשעה שנקבעה)</label>`}
  <div class="row" style="margin-top:8px"><button class="btn grow">שמירה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`}
-ACT.secEvAdd=()=>dlg(evForm());
+ACT.secEvAdd=el=>{const d=el&&el.dataset&&el.dataset.d;dlg(evForm(d?{d}:undefined))};
 ACT.secEvEd=el=>{const e=((X.cl||{}).events||[]).find(z=>z.id===el.dataset.id);if(e)dlg(evForm(e))};
 async function evSave(d){const r=await fnCall('secCal',d);if(r&&r.ok===false&&r.warn){const w=r.warn;
   dlg(`<h3>${esc(w.kind)}</h3><p>${w.rem?'התזכורת':'האירוע'} נופל${w.rem?'ת':''} ב${esc(w.kind)} (${esc(dShort(w.d))}). ${w.rem?'להשאיר בזמנה':'להשאיר'} או להעביר ל${esc(wkD(w.next))} ${esc(dShort(w.next))}?</p><div class="secrow"><button class="chip" data-a="secEvW" data-m="move">להעביר ל-${esc(dShort(w.next))}</button><button class="chip" data-a="secEvW" data-m="keep">להשאיר</button><button class="chip" data-a="closeDlg">ביטול</button></div>`);X.evp={d,next:w.next};return}
@@ -418,7 +465,7 @@ const saLoad=id=>{SA[id]=null;fnCall('secAdminGet',{bizId:id}).then(r=>{SA[id]=r
  let h=`<div class="sec"><h3>המזכירה העסקית</h3></div>`;
  if(!c){r.h+=h+'<div class="empty">טוען…</div>';return r}
  if(c.err){r.h+=h+`<div class="card"><p class="note">${esc(c.err)}</p><button class="btn g w" data-a="secSaRe" data-id="${esc(id)}">נסה שוב</button></div>`;return r}
- const A=c.admins||[],dollars=c.capCents==null?'':String(Math.round(c.capCents/100));
+ const A=c.admins||[],dollars=c.capCents==null?'':String(Math.round(c.capCents/100)),md=mdOf(c.media);
  const nm=a=>esc(a.email||a.uid);
  h+=`<form class="card" data-f="secSaF" data-id="${esc(id)}"><p class="note" style="margin-top:0">${on?'התוספת פעילה בעסק.':'התוספת כבויה בעסק. אפשר להכין את ההגדרות, ולהפעיל במתג "המזכירה העסקית" ברשימת התוספות.'}</p>
  <b>1. מי משתמש במזכירה</b><div class="chips" role="radiogroup" style="margin:6px 0"><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="all"${c.mode!=='main'?' checked':''}> כל המנהלים</label><label class="chip" style="min-height:44px"><input type="radio" name="mode" value="main"${c.mode==='main'?' checked':''}> מנהל ראשי בלבד</label></div>
@@ -429,6 +476,8 @@ const saLoad=id=>{SA[id]=null;fnCall('secAdminGet',{bizId:id}).then(r=>{SA[id]=r
  <b style="display:block;margin-top:10px">3א. קצב הודעות לכל מנהל</b><div class="row"><label class="f grow"><span>לשעה</span><input name="rh" inputmode="numeric" dir="ltr" maxlength="3" value="${esc(String((c.rate||{}).hour||''))}"></label><label class="f grow"><span>ליום</span><input name="rd" inputmode="numeric" dir="ltr" maxlength="4" value="${esc(String((c.rate||{}).day||''))}"></label></div><small class="note">ברירת מחדל: ${esc(String((c.rateDefault||{}).hour||40))} לשעה, ${esc(String((c.rateDefault||{}).day||200))} ליום.</small>
  <b style="display:block;margin-top:10px">4. ניתוח עובדים ומידע רגיש</b><label class="chip" style="min-height:44px;margin:4px 0;width:100%;justify-content:flex-start"><input type="checkbox" name="emp" value="1"${c.emp?' checked':''}> פעיל</label>
  <p class="note" style="margin:0">${c.empDefault?'עסק הפיילוט: פעיל כברירת מחדל (החלטה פ4).':'בעסק של לקוח – להפעיל רק אחרי חוות דעת עורך דין.'}</p>
+ <b style="display:block;margin-top:10px">5. קול, תמונה וסרטון בצ'אט</b><div class="row"><label class="f grow"><span>הקלטה קולית (שניות, 0 = כבוי)</span><input name="ma" inputmode="numeric" dir="ltr" maxlength="3" value="${esc(String(md.aud))}"></label><label class="f grow"><span>סרטון (שניות, 0 = כבוי)</span><input name="mv" inputmode="numeric" dir="ltr" maxlength="2" value="${esc(String(md.vid))}"></label></div>
+ <label class="chip" style="min-height:44px;margin:4px 0;width:100%;justify-content:flex-start"><input type="checkbox" name="mi" value="1"${md.img?' checked':''}> שליחת תמונות פעילה</label><small class="note">קול עד 300 שניות, סרטון עד 60. ברירת מחדל: קול ${MDEF.aud}, סרטון ${MDEF.vid}, תמונות פעילות.</small>
  <button class="btn w" style="margin-top:10px">שמירה</button></form>`;
  h+=`<div class="card" style="margin-top:8px"><b>מנהלים ותנאי השימוש</b>${A.map(a=>{const k=c.consent&&c.consent[a.uid];return `<div class="li" style="cursor:default"><div class="m"><b>${nm(a)}</b><small>${k?(k.cur?'אישר/ה ב-'+esc(tm(k.at)):'אישר/ה נוסח קודם'):'עוד לא אישר/ה'}</small></div>${on?`<button class="chip" data-a="secSaChat" data-id="${esc(id)}" data-u="${esc(a.uid)}" style="min-height:44px">צפייה בשיחה</button>`:''}</div>`}).join('')||'<p class="note">אין מנהלים</p>'}
  <p class="note" style="margin:6px 0 0">כל צפייה בשיחה נרשמת ביומן הפעולות, ומנהל העסק רואה אותה.</p></div>`;
@@ -441,6 +490,9 @@ FRM.secSaF=async f=>{const id=f.dataset.id,c=SA[id];if(!c||c.err)return;const x=
  const data={bizId:id,mode:x.mode==='main'?'main':'all',mainUid:x.mainUid||'',emp:x.emp==='1'};if(Object.keys(pay).length){data.pay=pay;data.sens=sens}if(cap)data.capCents=+cap*100;else if(c.capCents!=null)data.capCents=null;/* ריק אחרי שהייתה תקרה = ניקוי */
  const rh=String(x.rh||'').trim(),rd=String(x.rd||'').trim(),R=c.rate||{};
  if(rh||rd){if(!/^\d{1,3}$/.test(rh)||!/^\d{1,4}$/.test(rd)||+rh<1||+rh>500||+rd<1||+rd>5000||+rd<+rh)return toast('קצב: לשעה 1–500, ליום 1–5,000 (ליום לא פחות מלשעה)');if(+rh!==R.hour||+rd!==R.day)data.rate={hour:+rh,day:+rd}}
+ {const ma=String(x.ma==null?'':x.ma).trim(),mv=String(x.mv==null?'':x.mv).trim(),m0=mdOf(c.media);
+  if(!/^\d{1,3}$/.test(ma)||+ma>300)return toast('הקלטה קולית: 0 עד 300 שניות');if(!/^\d{1,2}$/.test(mv)||+mv>60)return toast('סרטון: 0 עד 60 שניות');
+  const mm={aud:+ma,img:x.mi==='1',vid:+mv};if(mm.aud!==m0.aud||mm.img!==m0.img||mm.vid!==m0.vid||c.mediaSet)data.media=mm}
  b.disabled=true;try{const r=await window.fnCall('secAdminSetCfg',data);SA[id]=r;toast('נשמר')}catch(e){err(e)}finally{b.disabled=false;if(cur().v==='sab')rerender()}};
 ACT.secSaChat=el=>{const id=el.dataset.id,u=el.dataset.u;ask('לצפות בשיחה? הצפייה תירשם ביומן הפעולות, ומנהל העסק יראה אותה.',async()=>{
  try{const r=await window.fnCall('secAdminReadChat',{bizId:id,uid:u});const L=r&&r.msgs||[];
@@ -465,12 +517,40 @@ const KIND={rep:'דוח',emp:'עובד',dig:'תקציר',wa:'ווצאפ'};
 /* 15.11.2026: התראות ישנות של סגירת קופה נשמרו עם מזהה הקופה (i_nl) ותאריך בכתיב מחשב – בתצוגה: שם הסניף (ZREG) ויום בשבוע + תאריך */
 const ZN=g=>{try{return typeof ZREG!=='undefined'&&ZREG[g]?ZREG[g].n:''}catch(e){return ''}};
 const dayL=d=>{const t=new Date(d+'T12:00:00Z');return isNaN(t)?d:'יום '+WDN[t.getUTCDay()]+' '+(+d.slice(8,10))+'.'+(+d.slice(5,7))};
-const nFix=(s,n)=>{s=String(s||'').replace(/(קופה )?\b(i_[a-z]{2})\b/g,(m,a,g)=>ZN(g)?'סניף '+ZN(g):m);if(n&&n.typ==='close')s=s.replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m,d)=>dayL(d));return s};
+const nFix=(s,n)=>{s=String(s||'').replace(/(קופה )?\b(i_[a-z]{2})\b/g,(m,a,g)=>ZN(g)?'סניף '+ZN(g):m);if(n&&n.typ==='close')s=s.replace(/\b(\d{4}-\d{2}-\d{2})\b/g,(m,d)=>dayL(d));if(n&&n.typ==='cal')s=calFix(s,n);return s};
+/* 15.11.2026 (סעיף 7): תזכורת יומן – "2026-11-15 12:00" (התראות ישנות) או "יום ראשון 15.11, 12:00" (חדשות) → "היום 12:00" / "מחר 12:00" /
+   "יום ראשון 15.11, 12:00", לפי היום בזמן הציור (שעון ישראל) */
+const ilDay=ms=>{try{return new Date(ms).toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'})}catch(e){return new Date(ms).toISOString().slice(0,10)}};
+const dDiff=(a,b)=>Math.round((Date.parse(a+'T12:00:00Z')-Date.parse(b+'T12:00:00Z'))/864e5);
+function calL(d,t){const k=dDiff(d,ilDay(Date.now()));return k===0||k===1||k===-1?['אתמול','היום','מחר'][k+1]+(t?' '+t:''):dayL(d)+(t?', '+t:'')}
+function calFix(s,n){let m=/^(\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2}))?/.exec(s);if(m)return calL(m[1],m[2]||'')+s.slice(m[0].length);
+ m=/^יום [א-ת]+ (\d{1,2})\.(\d{1,2})(?:, (\d{2}:\d{2}))?/.exec(s);if(!m)return s;
+ const a=ilDay(n.at||Date.now());let y=+a.slice(0,4);const iso=yy=>yy+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0');
+ if(dDiff(iso(y),a)>180)y--;else if(dDiff(iso(y),a)<-180)y++;const d=iso(y);return isNaN(Date.parse(d+'T12:00:00Z'))?s:calL(d,m[3]||'')+s.slice(m[0].length)}
+/* 15.11.2026 (סעיף 7): "תזכירי לי שוב" – בכרטיס (נפתח בלחיצה) ובחלון הפרטים. השרת קובע את הזמן ושולח שוב (גם לטלפון, גם בשעות השקטות) */
+const SNZ=[['h1','שוב בעוד שעה'],['h3','בעוד 3 שעות'],['mo','מחר בבוקר'],['pick','לבחור מתי']];
+const snzH=(id,d)=>`<div class="secrow secsnz" role="group" aria-label="תזכירי לי שוב">${SNZ.map(([v,l])=>`<button type="button" class="chip" data-a="secSnz" data-v="${v}" data-id="${esc(id)}"${d?' data-d="1"':''} style="min-height:44px">${l}</button>`).join('')}</div>`;
+const snzCan=n=>n&&n.st!=='gone';
+async function snzDo(id,o,el){if(el)el.disabled=true;
+ try{const r=await fnCall('secNotes',Object.assign({op:'snooze',id},o));if(document.getElementById('dlg').open)closeDlg();X.snz='';toast('אזכיר לך שוב '+(r&&r.l||''));X.nl=null;try{eyStale()}catch(e){}rerender()}
+ catch(e){if(el)el.disabled=false;err(e)}}
+const dtl=ms=>{const d=new Date(ms),z=x=>String(x).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+'T'+z(d.getHours())+':'+z(d.getMinutes())};
+ACT.secSnz=el=>{const id=el.dataset.id,v=el.dataset.v;if(!id)return;
+ if(v==='h1'||v==='h3')return snzDo(id,{at:Date.now()+(v==='h1'?1:3)*3600e3},el);
+ if(v==='mo')return snzDo(id,{when:'morning'},el);
+ const t0=Math.ceil((Date.now()+3600e3)/9e5)*9e5;
+ dlg(`<h3>מתי להזכיר שוב?</h3><form data-f="secSnzF" data-id="${esc(id)}"><label class="f"><span>תאריך ושעה</span><input type="datetime-local" name="at" dir="ltr" required value="${dtl(t0)}" min="${dtl(Date.now()+60e3)}" max="${dtl(Date.now()+60*864e5)}" style="min-height:44px"></label>
+ <p class="note" style="margin:4px 0 8px">ההתראה תחזור בזמן הזה, גם לטלפון – גם בשעות השקטות. עד 60 יום קדימה.</p>
+ <div class="row"><button class="btn grow">קביעה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+ACT.secSnzT=el=>{const id=el.dataset.id;X.snz=X.snz===id?'':id;rerender()};
+FRM.secSnzF=f=>{const id=f.dataset.id,at=new Date(String(f.at.value||'')).getTime();
+ if(!Number.isFinite(at)||at<Date.now()+60e3||at>Date.now()+60*864e5)return toast('אפשר לבחור זמן מעכשיו ועד 60 יום קדימה');
+ return snzDo(id,{at},f.querySelector('button:not([type=button])'))};
 const nLab=(n,T)=>n.k==='rem'?(T[n.typ]||'תזכורת'):(KIND[n.k]||'');
 function noteH(n,T){const lab=nLab(n,T);const open=n.st==='open'&&n.k==='rem';
  return `<div class="secli${n.seen?'':' secnew'}" style="padding-inline-start:8px"><button type="button" class="secnb" data-a="secNOpen" data-id="${esc(n.id)}" aria-label="כל הפרטים: ${esc(nFix(n.title,n))}"><p><b>${esc(nFix(n.title,n))}</b> <span class="sectags">${esc(lab)}</span>${n.st==='done'?'<span class="sectags">טופל</span>':n.st==='gone'?'<span class="sectags">כבר לא רלוונטי</span>':''}</p>
  <small class="note">${esc(tm(n.at))}${n.n>1?' · נשלחה '+n.n+' פעמים':''}</small>${n.body?`<p class="note secclamp" style="margin:4px 0 0">${esc(nFix(n.body,n))}</p>`:''}</button>
- <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}</div></div>`}
+ <div class="secrow"><button class="chip" data-a="secNOpen" data-id="${esc(n.id)}">כל הפרטים</button>${mrBtnH('note',n.id)}${n.k==='rep'&&n.ref?`<button class="chip" data-a="secRpOpen" data-id="${esc(n.ref)}">פתיחת הדוח</button>`:''}${open?`<button class="chip" data-a="secNDone" data-id="${esc(n.id)}">טופל</button><label class="chip" style="gap:6px">חזרות <select data-c="secNReps" data-id="${esc(n.id)}" aria-label="מספר חזרות">${[0,1,2,3].map(k=>`<option value="${k}"${k===n.rep?' selected':''}>${k}</option>`).join('')}</select></label>`:''}${snzCan(n)?`<button type="button" class="chip" data-a="secSnzT" data-id="${esc(n.id)}" aria-expanded="${X.snz===n.id}">⏰ תזכירי לי שוב</button>`:''}</div>${snzCan(n)&&X.snz===n.id?snzH(n.id):''}</div>`}
 function notesH(){const R=X.nl;if(!R){if(!X.nb)notesLoad();return '<div class="empty">טוען…</div>'}if(R.err)return `<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secTab" data-v="notes">נסה שוב</button></div>`;
  const L=R.notes||[];pnShown();if(!L.length)return '<div class="empty">אין התראות</div>';
  return `<div class="card" id="secNotes">${L.map(n=>noteH(n,R.types||{})).join('')}</div><p class="note">לחיצה על התראה – כל הפרטים. תזכורת שלא טופלה חוזרת עד 3 פעמים, פעם ביום עסקים. אפשר לשנות בכל תזכורת.</p>`}
@@ -481,18 +561,18 @@ function noteDlg(id){const R=X.nl,n=R&&!R.err&&(R.notes||[]).find(x=>x.id===id);
  const todo=n.typ==='close'&&!/מה לעשות/.test(body)?'\nמה לעשות:\n• לבקש מהעובד בסניף לשלוח סגירת קופה, או לפתוח את מסך סגירת הקופה ולהכניס אותה.\n• אם יש הפרש מזומן – לבדוק את הסגירה במסך סגירת הקופה ולברר עם העובד.':'';
  dlg(`<h3 style="overflow-wrap:anywhere">${esc(nFix(n.title,n))}</h3>${row('סוג',nLab(n,T)||'התראה')}${row('נוצרה',tm(n.t||n.at))}${n.n>1?row('נשלחה',n.n+' פעמים (לאחרונה '+tm(n.at)+')'):''}${row('מצב',st)}
  ${body||todo?`<div class="card" style="margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere" id="secNBody">${esc(body+todo)}</div>`:''}
- ${n.typ==='close'&&typeof V.zc==='function'?'<button class="btn w" data-a="secNZc" style="margin-top:8px">פתיחת מסך סגירת הקופה</button>':''}${n.k==='rep'&&n.ref?`<button class="btn w" data-a="secNRp" data-id="${esc(n.ref)}" style="margin-top:8px">פתיחת הדוח</button>`:''}${open?`<button class="btn g w" data-a="secNDoneD" data-id="${esc(n.id)}" style="margin-top:8px">סמן כטופל</button>`:''}<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`)}
+ ${n.typ==='close'&&typeof V.zc==='function'?'<button class="btn w" data-a="secNZc" style="margin-top:8px">פתיחת מסך סגירת הקופה</button>':''}${n.k==='rep'&&n.ref?`<button class="btn w" data-a="secNRp" data-id="${esc(n.ref)}" style="margin-top:8px">פתיחת הדוח</button>`:''}${snzCan(n)?`<p class="note" style="margin:10px 0 2px"><b>תזכירי לי שוב:</b></p>${snzH(n.id,1)}`:''}${open?`<button class="btn g w" data-a="secNDoneD" data-id="${esc(n.id)}" style="margin-top:8px">סמן כטופל</button>`:''}<button class="btn g w" data-a="closeDlg" style="margin-top:8px">סגירה</button>`)}
 ACT.secNOpen=el=>noteDlg(el.dataset.id);
 ACT.secNZc=()=>{closeDlg();go('zc')};
 ACT.secNRp=el=>{closeDlg();ACT.secRpOpen(el)};
 ACT.secNDoneD=el=>{closeDlg();ACT.secNDone(el)};
-ACT.secNotesGo=()=>{X.tab='notes';X.set=0;X.edit=0;X.rp=null;X.nl=null;go('sec')};
+ACT.secNotesGo=()=>{X.tab='notes';X.set=0;X.edit=0;X.mrv=0;X.rp=null;X.nl=null;go('sec')};
 /* 15.11.2026: לחיצה על התראה בטלפון – "לפתוח את ההתראות" נשמר לדקה (גם בזיכרון הטלפון, למקרה שהמסך נטען מחדש) ומוחל שוב עד שרשימת ההתראות באמת מוצגת:
    בפתיחה מאפס האירוע יכול להגיע לפני שההרשאות, העסק או המזכירה נטענו, ומסך שנפתח בדרך מסתיר את המזכירה. כשההתראה אחת – גם פרטיה נפתחים. */
 const PNK='lp-pn-open',PNI={t:0,id:''},PNW=[600,1500,3000,6000,10000,20000];
 const pnEnd=()=>{PNI.t=0;PNI.id='';try{localStorage.removeItem(PNK)}catch(e){}};
 function pnTry(){if(!PNI.t)return;if(Date.now()-PNI.t>60000){pnEnd();return}if(!isA())return;
- if(cur().v!=='sec'||X.tab!=='notes'||X.set||X.edit){try{ACT.secNotesGo()}catch(e){}}}
+ if(cur().v!=='sec'||X.tab!=='notes'||X.set||X.edit||X.mrv){try{ACT.secNotesGo()}catch(e){}}}
 function pnShown(){if(!PNI.t||cur().v!=='sec')return;const id=PNI.id;pnEnd();if(id&&(X.nl.notes||[]).some(x=>x.id===id))setTimeout(()=>{if(cur().v==='sec'&&X.tab==='notes')noteDlg(id)},0)}
 function pnTap(id){PNI.t=Date.now();PNI.id=typeof id==='string'&&/^[A-Za-z0-9_:.-]{1,200}$/.test(id)?id:'';try{localStorage.setItem(PNK,JSON.stringify(PNI))}catch(e){}pnTry();PNW.forEach(ms=>setTimeout(pnTry,ms))}
 try{const o=JSON.parse(localStorage.getItem(PNK)||'null');if(o&&+o.t&&Date.now()-o.t<60000){PNI.t=+o.t;PNI.id=String(o.id||'');PNW.forEach(ms=>setTimeout(pnTry,ms))}else if(o)localStorage.removeItem(PNK)}catch(e){}
@@ -536,7 +616,7 @@ FRM.secNtF=async f=>{const x=fd(f),T=(X.st&&X.st.types)||{},rt={};for(const k of
 ACT.secHistDel=()=>{ask('למחוק את כל ההיסטוריה שלך במזכירה (שיחה, התראות ודוחות)?',async()=>{
  try{const r=await fnCall('secHistory',{op:'ask'});const c=r.counts||{};X.hd=r.token;
   dlg(`<h3>אישור שני – מחיקה סופית</h3><p>יימחקו: ${esc(String(c.chat||0))} הודעות בשיחה, ${esc(String(c.notes||0))} התראות ו-${esc(String(c.reports||0))} דוחות. הנתונים יימחקו מהמזכירה ואי אפשר לשחזר אותם מהאפליקציה. עותקי הגיבוי האוטומטי בשרת נמחקים לבד תוך 35 יום. המחיקה תירשם ביומן הפעולות.</p><div class="row"><button class="btn grow" data-a="secHistOk">כן, למחוק סופית</button><button class="btn g grow" data-a="closeDlg">ביטול</button></div>`)}catch(e){err(e)}},'המשך')};
-ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disabled=true;try{const r=await fnCall('secHistory',{op:'del',token:t,sure:true});closeDlg();X.msgs=null;X.nl=null;X.rpl=null;X.rp=null;X.log=null;const d=r.deleted||{};toast('נמחק: '+(d.chat||0)+' הודעות, '+(d.notes||0)+' התראות, '+(d.reports||0)+' דוחות');rerender()}catch(e){el.disabled=false;err(e)}};
+ACT.secHistOk=async el=>{const t=X.hd;X.hd=null;if(!t)return closeDlg();el.disabled=true;try{const r=await fnCall('secHistory',{op:'del',token:t,sure:true});closeDlg();X.msgs=null;X.pc=null;X.ey=null;X.nl=null;X.rpl=null;X.rp=null;X.log=null;const d=r.deleted||{};toast('נמחק: '+(d.chat||0)+' הודעות, '+(d.notes||0)+' התראות, '+(d.reports||0)+' דוחות');rerender()}catch(e){el.disabled=false;err(e)}};
 /* ---------- התראות לטלפון (7.2; 12.11.2026: רכיב ההתראות נוסף לאפליקציה) ----------
    רק באפליקציה לטלפון שנבנתה עם הגדרות Firebase (PushGate.ready). בלי זה – לא קורה כלום, וההתראות רק במסך (כמו קודם).
    מנהל: בכניסה הראשונה – בקשת הרשאה להתראות (Android 13+), פעם אחת בלבד בטלפון. אחר כך בכל פתיחה – רישום מחדש (המזהה מתחדש לפעמים).
@@ -546,7 +626,7 @@ const PN={done:0,ready:0};
 async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.PushNotifications,G=C&&C.Plugins&&C.Plugins.PushGate;if(!P||!G)return;PN.done=1;
  const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;
  await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW()))fnCall('registerPushToken',{token:t.value}).catch(()=>{})});
- await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}if(d.k==='sec')pnTap(d.id)});
+ await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}/* מרכז עבודה סבב 3: "הזכר לעובד" (tkNudge) – פותח את המשימות בלשונית "היום שלי" */if(d.k==='tk'&&(isA()||isW())&&typeof V.tk==='function'){try{TKT='my';if(window.TKW)TKW.d0=1;if(cur().v!=='tk')go('tk');else rerender()}catch(e){}return}if(d.k==='sec')pnTap(d.id)});
  let p=await P.checkPermissions();
  if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
   if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
@@ -602,11 +682,11 @@ ACT.secWaBack=()=>{X.wa.cur=null;X.wa.card=null;X.wa.list=null;rerender()};
 /* ---------- כרטיס שולח + טיוטות ---------- */
 async function waCardLoad(){const wa=X.wa.cur;X.wa.cb=1;try{const r=await fnCall('secInbox',{op:'get',wa});if(X.wa.cur===wa)X.wa.card=r&&r.card?r:{err:'לא נטען'}}catch(e){X.wa.card={err:e&&e.message||'לא נטען'}}finally{X.wa.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
 function drH(d,open,tpls){
- if(d.st==='sent')return `<div class="secdr"><small class="note">נשלח ✓</small><div style="white-space:pre-wrap">${esc(d.sum||d.text)}</div></div>`;
+ if(d.st==='sent')return `<div class="secdr"><small class="note">${d.am?'נשלח לבד לפי הכלל ✓':'נשלח ✓'}</small><div style="white-space:pre-wrap">${esc(d.sum||d.text)}</div></div>`;
  if(d.st==='done')return '<div class="secdr" style="opacity:.75"><small class="note">טופל בלי לענות</small></div>';
  const why=(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:'';
  const head=`<small class="note">טיוטת תשובה${d.src==='bank'?' (מתשובה מוכנה)':''}${d.lang&&d.lang!=='he'?' · בשפת הפונה':''}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+flH(d.flags)+'</div>':''}${why}`;
- if(open)return `<div class="secdr" data-id="${esc(d.id)}">${head}<textarea class="secin" id="secDr_${esc(d.id)}" maxlength="2000" aria-label="טיוטת תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" style="flex:1">שלח</button><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button></div></div>`;
+ if(open)return `<div class="secdr" data-id="${esc(d.id)}">${head}${mrInfoH(d)}<textarea class="secin" id="secDr_${esc(d.id)}" maxlength="2000" aria-label="טיוטת תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" style="flex:1">שלח</button><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button>${mrBtnH('wa',d.id)}</div></div>`;
  return `<div class="secdr" data-id="${esc(d.id)}">${head}<div style="white-space:pre-wrap;margin-top:4px">${esc(d.text)}</div><p class="note" style="margin:6px 0">עברו 24 שעות מההודעה האחרונה של הפונה. אפשר לשלוח רק הודעת תבנית מאושרת.</p>${(tpls||[]).length?`<div class="secrow"><select id="secTpl_${esc(d.id)}" aria-label="תבנית">${tpls.map(t=>`<option value="${esc(t.name)}">${esc(t.label)}</option>`).join('')}</select><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" data-t="1">שלח תבנית</button></div>`:'<p class="note" style="margin:0">אין תבניות מאושרות. מנהל המערכת מוסיף אותן.</p>'}<div class="secrow"><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button></div></div>`}
 function waCardH(){const R=X.wa.card,back='<button class="btn g w" data-a="secWaBack" style="margin-bottom:8px">חזרה לתיבת ההודעות</button>';
  if(!R){if(!X.wa.cb)waCardLoad();return back+'<div class="empty">טוען…</div>'}if(R.err)return back+`<div class="card"><p class="note">${esc(R.err)}</p></div>`;
@@ -729,9 +809,9 @@ function mlCardH(){const R=X.ml.card,back='<button class="btn g w" data-a="secMl
  if(d&&d.stuck)return h+`<div class="secdr" id="secMlDr"><small class="note">תשובה אל <bdi dir="ltr" class="secaddr">${esc(d.to)}</bdi></small>${stuckH('secMlStuck','התשובה',d.to,'לסמן כנשלח')}<div style="white-space:pre-wrap">${esc(d.text)}</div><div class="secrow" style="margin-top:8px"><button class="btn" data-a="secMlMark" style="flex:1;min-height:44px">לסמן כנשלח</button></div></div>`;/* שלב ג 0א: אולי כבר יצא – בלי "שלח" */
  if(d&&!d.oRe&&(d.an||[]).includes('order')&&['pend','fail'].includes(d.st)){const O=ordO(),os=O&&O.o&&O.o.st;if(!['ordered','cancel'].includes(os))return h+`<div class="secdr"><p class="note" style="margin:0">התשובה ללקוח נשלחת דרך טיוטת ההזמנה למעלה. התשובה הרגילה מוסתרת עד שהטיוטה תישלח או תיסגר.</p><div class="secrow" style="margin-top:8px"><button class="chip" data-a="secMlDone" style="min-height:44px">לא לענות</button></div></div>`}/* החלטת המשתמש 15.11: בלי שני כפתורי שליחה */
  if(d&&['pend','fail','sending'].includes(d.st)){const hasFile=!!(d.file||(d.flags||[]).includes('file')||(m.files||[]).length||(m.flags||[]).includes('file')),an=(d.anL||[]).length?`<div class="secin1" style="margin:6px 0"><b>למה לא נשלחה אוטומטית</b><ul style="margin:4px 0 0;padding-inline-start:18px">${d.anL.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul></div>`:'';const why=(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:'';
-  return h+`<div class="secdr" id="secMlDr"><small class="note">תשובה אל <bdi dir="ltr" class="secaddr">${esc(d.to)}</bdi> · ${d.src==='ai'?'טיוטה מהמזכירה':'נכתבה על ידך'}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+mflH(d.flags)+'</div>':''}${hasFile?'<div class="sectg"><span class="sectags w">📎 יש קובץ מצורף</span></div>':''}${an}${why}
+  return h+`<div class="secdr" id="secMlDr"><small class="note">תשובה אל <bdi dir="ltr" class="secaddr">${esc(d.to)}</bdi> · ${d.src==='ai'?'טיוטה מהמזכירה':'נכתבה על ידך'}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+mflH(d.flags)+'</div>':''}${hasFile?'<div class="sectg"><span class="sectags w">📎 יש קובץ מצורף</span></div>':''}${an}${why}${mrInfoH(d)}
   <textarea class="secin" id="secMlTx" maxlength="5000" aria-label="תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secMlSend" style="flex:1">שלח מה-Gmail של העסק</button><button class="chip" data-a="secMlDone">לא לענות</button></div>
-  <div class="secrow" style="margin-top:8px"><input class="secin" id="secMlNote" maxlength="500" dir="auto" placeholder="לדייק: הנחיה קצרה לשינוי הטיוטה" aria-label="הנחיה לדיוק הטיוטה" style="flex:1 1 100%;min-height:44px"><button class="chip" data-a="secMlRefine" style="min-height:44px">לדייק</button></div><small class="note">המייל יוצא רק בלחיצה שלך. לשינוי חופשי – ערכו את התשובה למעלה ושלחו.</small></div>`}
+  <div class="secrow" style="margin-top:8px"><input class="secin" id="secMlNote" maxlength="500" dir="auto" placeholder="לדייק: הנחיה קצרה לשינוי הטיוטה" aria-label="הנחיה לדיוק הטיוטה" style="flex:1 1 100%;min-height:44px"><button class="chip" data-a="secMlRefine" style="min-height:44px">לדייק</button>${mrBtnH('mail',X.ml.cur)}</div><small class="note">המייל יוצא רק בלחיצה שלך. לשינוי חופשי – ערכו את התשובה למעלה ושלחו.</small></div>`}
  if(X.ml.w)return h+`<form class="secdr" data-f="secMlW"><small class="note">תשובה משלך</small><textarea class="secin" name="text" maxlength="5000" aria-label="תשובה" dir="auto"></textarea><div class="secrow"><button class="btn" style="flex:1">שמירת טיוטה</button><button type="button" class="chip" data-a="secMlWx">ביטול</button></div></form>`;
  return h+`<div class="secrow" style="margin-top:8px">${sus?'':'<button class="btn" data-a="secMlDraft" style="flex:1">טיוטה מהמזכירה</button>'}<button class="chip" data-a="secMlW" style="min-height:44px">לכתוב בעצמי</button><button class="chip" data-a="secMlDone" style="min-height:44px">טופל</button></div>`}
 ACT.secMlDraft=async el=>{el.disabled=true;try{const r=await fnCall('secMail',{op:'draft',id:X.ml.cur});if(X.ml.card)X.ml.card.draft=r.draft}catch(e){merr(e)}finally{el.disabled=false;rerender()}};
@@ -1163,6 +1243,363 @@ ACT.secIvOn=async el=>{try{const r=await fnCall('secInv',{op:'cfg',sub:el.datase
 {const h7=V.home;if(h7)V.home=()=>{const r=h7();try{const n=ivPend();if(n&&r&&r.h&&r.h.includes('id="secHome"'))r.h=r.h.replace(/(id="secHome"[\s\S]*?<small class="note" style="display:block">[^<]*<\/small>)/,'$1<div class="note" style="margin-top:4px" id="secHomeInv">'+(n===1?'חשבונית אחת ממתינה לאישור':n+' חשבוניות ממתינות לאישור')+'</div>')}catch(e){}return r}}
 {const t7=ACT.secTab;ACT.secTab=el=>{if(el.dataset.v==='inv'){IV.at=0}t7(el)}}
 window.__secInv=IV;
+
+/* =====================================================================================
+   SEC:9 – "תגובה למזכירה" (15.11.2026): כפתור "תגובה" על כל הודעה של המזכירה (תשובה בשיחה, התראה, טיוטת מייל, טיוטת ווצאפ),
+   הצעה לשמור את ההוראה ככלל אישי, השאלה "לעשות את זה מעכשיו לבד?" בטיוטה, ומסך "הכללים שלי" (פעיל / לבד / מחיקה) עם יומן "נשלח לבד".
+   הכול דרך secLearn בשרת. כללי הבטיחות (תשלום, מחיקה, סיסמאות ופרטים רגישים – תמיד באישור) נאכפים בשרת; כאן רק תצוגה.
+   ===================================================================================== */
+const mrOn=()=>!!(X.st&&X.st.learn!==false);
+const MRCH={chat:'שיחה',note:'התראות',mail:'מייל',wa:'ווצאפ',feed:'מול העיניים',route:'ניתוב'};
+const MREX={feed:['מעכשיו להעביר את אלה למסך "לטיפול"','מעכשיו רק בלשונית שלהן, לא בצ\'אט'],chat:['מעכשיו תעני לי בקצרה','תמיד תתחילי בשורה התחתונה'],note:['אל תתריעי לי על התראות כאלה','תשלחי שוב בעוד שעה'],mail:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע'],wa:['תעני לו בנימוס שנחזור אליו מחר','תאשרי לו שקיבלנו ושנטפל בזה השבוע']};
+const MRERR={'branch-limited':'כללים על מייל וווצאפ זמינים רק למנהל בלי הגבלת סניפים','learn-off':'הכללים האישיים כבויים בעסק הזה','too-many':'הגעתם למספר הכללים המרבי (50). אפשר למחוק כלל ישן במסך "הכללים שלי".','need-approval':'קודם צריך לאשר פעם אחת תשובה לפי הכלל הזה','safe-rule':'כלל בטיחות – תמיד באישור שלך','not-pending':'הטיוטה כבר נשלחה או טופלה'};
+const mrErr=e=>toast(e&&e.reason&&MRERR[e.reason]||e&&e.message||'הפעולה נכשלה');
+function mrBtnH(k,id){if(!id||!mrOn()||(X.st.brLimited&&(k==='mail'||k==='wa')))return '';
+ return `<button type="button" class="chip" data-a="secMrReply" data-k="${esc(k)}" data-id="${esc(id)}" style="min-height:44px" aria-label="תגובה למזכירה – להגיד לה מה לעשות">↩ תגובה</button>`}
+ACT.secMrReply=el=>{const k=el.dataset.k,id=el.dataset.id;if(!MRCH[k]||!id)return;X.mrp={k,id};
+ dlg(`<h3>תגובה למזכירה</h3><p class="note" style="margin:0 0 6px">כתבו מה לעשות${k==='mail'||k==='wa'?' – אכין טיוטה חדשה לפי ההוראה (היא לא תישלח בלי לחיצה שלך)':''}. אחר כך אפשר לשמור את ההוראה ככלל קבוע.</p>
+ <form data-f="secMrF"><textarea class="secin" name="t" id="secMrT" maxlength="300" dir="auto" aria-label="מה לעשות" placeholder="למשל: ${esc(MREX[k][0])}"></textarea>
+ ${micOk()?`<div class="secrow"><button type="button" class="chip" data-a="secMrMic" style="min-height:44px">${micLbl()}</button></div><p class="note" style="margin:0 0 6px">${PRIV}</p>`:''}
+ <div class="chips" style="margin:6px 0">${MREX[k].map(x=>`<button type="button" class="chip" data-a="secMrEx" data-v="${esc(x)}" style="min-height:44px">${esc(x)}</button>`).join('')}</div>
+ <p class="note" style="margin:0 0 8px">תשלום או העברת כסף, מחיקת נתונים ושליחת סיסמאות או פרטים רגישים – תמיד באישור שלך, גם אם תכתבו אחרת.</p>
+ <div class="row"><button class="btn grow" id="secMrGo">שליחה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
+ACT.secMrEx=el=>{const t=document.getElementById('secMrT');if(t){t.value=el.dataset.v;t.focus()}};
+FRM.secMrF=async f=>{if(RC.on&&RC.tgt==='mr')micCancel();const p=X.mrp;if(!p)return;const text=String(f.t.value||'').trim();if(!text)return toast('כתבו מה לעשות');if(text.length>300)return toast('עד 300 תווים');
+ const b=document.getElementById('secMrGo');if(b){b.disabled=true;b.textContent=p.k==='mail'||p.k==='wa'?'מכינה טיוטה…':'רגע…'}
+ try{const r=await fnCall('secLearn',{op:'reply',k:p.k,id:p.id,text});p.text=text;p.prop=r.prop;
+  if(r.snz){closeDlg();X.mrp=null;toast('אזכיר לך שוב '+r.snz.l);X.nl=null;try{eyStale()}catch(e){}rerender();return}
+  if(r.draft){if(p.k==='mail'&&X.ml&&X.ml.card)X.ml.card.draft=r.draft;if(p.k==='wa'&&X.wa&&X.wa.card){const L=X.wa.card.drafts||[],i=L.findIndex(x=>x.id===r.draft.id);if(i>=0)L[i]=Object.assign({},L[i],r.draft)}}
+  mrPropDlg(p,!!r.draft);rerender()}
+ catch(e){mrErr(e);if(b){b.disabled=false;b.textContent='שליחה'}}};
+function mrPropDlg(p,drafted){const o=p.prop||{};
+ if(o.ch==='route')return dlg(`<h3>לשמור כלל ניתוב?</h3><p style="margin:0 0 6px">מעכשיו: ${esc(o.routeL||'')}</p><div class="secin1" dir="auto" style="white-space:pre-wrap;margin:4px 0 8px">${esc(o.instr||p.text)}</div><p class="note" style="margin:0 0 8px">ברירת המחדל – הכול ב"מול העיניים" בצ'אט. אפשר למחוק את הכלל בכל רגע ב"הכללים שלי".</p><div class="row" style="margin-top:8px"><button class="btn grow" data-a="secMrSave">שמירה ככלל</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div>`);
+ const did=p.k==='mail'||p.k==='wa'?(drafted?'הכנתי טיוטה חדשה לפי ההוראה. היא לא נשלחה – בדקו אותה ושלחו בלחיצה.':''):p.k==='chat'?'אחרי השמירה אענה כך בשאלות הבאות.':o.act==='mute'?'אחרי השמירה לא אתריע לך על התראות כאלה (התראות בטיחות – תמיד).':'אחרי השמירה אזכור את ההוראה בשיחות איתך. ההתראות עצמן לא ישתנו.';
+ dlg(`<h3>לשמור ככלל קבוע?</h3>${did?`<p style="margin:0 0 6px">${esc(did)}</p>`:''}<div class="secin1" dir="auto" style="white-space:pre-wrap;margin:4px 0 8px">${esc(o.instr||p.text)}</div>
+ ${o.safe?`<div class="card secwarn" style="margin:0 0 8px;padding:8px" id="secMrSafe"><b>תמיד באישור</b><p class="note" style="margin:4px 0 0">ההוראה נוגעת ב${esc(o.safeL)}. אפשר לשמור אותה, אבל המזכירה לא תעשה את זה לבד – תמיד תכין ותחכה לאישור שלך.</p></div>`:''}
+ ${(o.opts||[]).length?`<p class="note" style="margin:0 0 4px">על מה הכלל חל?</p><div class="chips" role="radiogroup" id="secMrSc">${o.opts.map((x,i)=>`<label class="chip" style="min-height:44px"><input type="radio" name="secMrSc" value="${esc(x.v)}"${i?'':' checked'}> ${esc(x.l)}</label>`).join('')}</div>`:''}
+ ${o.canAuto?'<p class="note" style="margin:6px 0">אחרי שתאשרו פעם אחת תשובה לפי הכלל, בפעם הבאה אשאל אם לעשות את זה מעכשיו לבד.</p>':''}
+ <div class="row" style="margin-top:8px"><button class="btn grow" data-a="secMrSave">שמירה ככלל</button><button type="button" class="btn g grow" data-a="closeDlg">רק הפעם</button></div>`)}
+ACT.secMrSave=async el=>{const p=X.mrp;if(!p||!p.text)return;const c=document.querySelector('input[name="secMrSc"]:checked');el.disabled=true;
+ try{await fnCall('secLearn',{op:'save',k:p.k,id:p.id,text:p.text,sc:c?c.value:''});closeDlg();toast('נשמר. אפשר לראות ולכבות ב"הכללים שלי" (בהגדרות).');X.mrl=null;if(p.prop&&p.prop.ch==='route')eyStale();
+  if(p.k==='note')X.nl=null;if(p.k==='mail'&&X.ml)X.ml.card=null;if(p.k==='wa'&&X.wa)X.wa.card=null;X.mrp=null;rerender()}
+ catch(e){el.disabled=false;mrErr(e)}};
+/* בטיוטה: לפי איזו הנחיה נכתבה, "לעשות את זה מעכשיו לבד?" (רק לבעל הכלל), ולמה לא נשלחה לבד */
+function mrInfoH(d){if(!d)return '';let h='';
+ if(d.mr&&d.mrI)h+=`<p class="note" style="margin:4px 0" dir="auto">לפי ההנחיה${d.mrBy&&SY&&d.mrBy===SY.uid?' שלך':' של מנהל'}: "${esc(d.mrI)}"</p>`;
+ if(d.mrAsk&&d.mr&&SY&&d.mrBy===SY.uid)h+=`<div class="card secwarn" style="margin:6px 0;padding:8px" id="secMrAsk"><b>לעשות את זה מעכשיו לבד?</b><p class="note" style="margin:4px 0 6px">בפעמים הבאות אכתוב תשובה לפי ההנחיה ואשלח אותה לבד – רק כשאני בטוחה שהיא מתאימה ורק אם עברה את כל בדיקות הבטיחות. כל שליחה נרשמת ב"הכללים שלי", ואפשר לכבות בכל רגע.</p><div class="secrow"><button class="btn" data-a="secMrAuto" data-id="${esc(d.mr)}" data-d="${esc(d.id)}" data-on="1" style="flex:1;min-height:44px">כן, מעכשיו לבד</button><button class="chip" data-a="secMrAuto" data-id="${esc(d.mr)}" data-d="${esc(d.id)}" data-on="0" style="min-height:44px">לא, תמיד לשאול</button></div></div>`;
+ if((d.mrNoL||[]).length)h+=`<details class="secsrc"><summary>למה לא נשלח לבד</summary><ul style="margin:4px 0;padding-inline-start:18px">${d.mrNoL.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul></details>`;
+ return h}
+const mrDraftUpd=(dId,f)=>{const a=[];if(X.ml&&X.ml.card&&X.ml.card.draft)a.push(X.ml.card.draft);if(X.wa&&X.wa.card)a.push(...(X.wa.card.drafts||[]));a.filter(d=>d&&d.id===dId).forEach(f)};
+ACT.secMrAuto=el=>{const id=el.dataset.id,dId=el.dataset.d,on=el.dataset.on==='1';
+ const run=async()=>{el.disabled=true;try{await fnCall('secLearn',{op:'auto',id,on,never:!on,d:dId});mrDraftUpd(dId,d=>{d.mrAsk=false});X.mrl=null;toast(on?'מעכשיו אעשה את זה לבד. אפשר לכבות ב"הכללים שלי".':'בסדר, אמשיך לשאול לפני כל שליחה.')}catch(e){mrErr(e)}finally{el.disabled=false;rerender()}};
+ if(on)ask('מעכשיו פניות שמתאימות לכלל ייענו לבד, בלי לחכות לך (בכפוף לבדיקות הבטיחות ול"עצור הכל"). להמשיך?',run,'כן, לבד');else run()};
+/* ---------- מסך "הכללים שלי" ---------- */
+function mrSetH(){if(!mrOn())return '';return `<div class="card" style="margin-top:8px" id="secMrSet"><b>הכללים שלי</b><p class="note" style="margin:4px 0 8px">הוראות שנתת למזכירה בכפתור "תגובה", ומה היא שלחה לבד לפיהן.</p><button class="chip" data-a="secMrOpen" style="min-height:44px">לכללים ולשליחות לבד</button></div>`}
+ACT.secMrOpen=()=>{X.mrv=1;X.set=0;X.mrl=null;rerender()};
+ACT.secMrBack=()=>{X.mrv=0;X.set=1;rerender()};
+async function mrLoad(){X.mrb=1;try{const[a,b]=await Promise.all([fnCall('secLearn',{op:'list'}),fnCall('secLearn',{op:'log'})]);X.mrl={rules:a.rules||[],max:a.max||50,br:!!a.brLimited,log:b.items||[]}}catch(e){X.mrl={err:e&&e.message||'לא נטען'}}finally{X.mrb=0;if(cur().v==='sec'&&!typing())rerender()}}
+const MRSAFE={pay:'תשלום או העברת כסף',del:'מחיקת נתונים',secret:'סיסמה או פרטים רגישים'};
+function mrRuleH(r){const out=r.ch==='mail'||r.ch==='wa';
+ if(r.ch==='route')return `<div class="secli" data-id="${esc(r.id)}"><p dir="auto"><b>${esc(r.instr)}</b></p><div class="sectg"><span class="sectags">ניתוב</span><span class="sectags g">${esc(r.scopeL||'')}</span>${r.on?'':'<span class="sectags">כבוי</span>'}</div><small class="note">${esc(tm(r.t))}</small>
+ <div class="secrow"><label class="chip" style="min-height:44px"><input type="checkbox" data-c="secMrOn" data-id="${esc(r.id)}"${r.on?' checked':''}> פעיל</label><button class="chip" data-a="secMrDel" data-id="${esc(r.id)}" style="min-height:44px">מחיקה</button></div></div>`;
+ const st=r.safe?`<span class="sectags w">תמיד באישור – ${esc(r.safeL||MRSAFE[r.safe]||'')}</span>`:r.auto?'<span class="sectags g">שולחת לבד</span>':r.offWhy==='fail'?'<span class="sectags w">הופסק אחרי 3 כשלונות ברצף</span>':'';
+ return `<div class="secli" data-id="${esc(r.id)}"><p dir="auto"><b>${esc(r.instr)}</b></p><div class="sectg"><span class="sectags">${esc(MRCH[r.ch]||'')}</span><span class="sectags">${esc(r.scopeL||'')}</span>${r.act==='mute'?'<span class="sectags">השתקה</span>':''}${st}${r.on?'':'<span class="sectags">כבוי</span>'}</div>
+ <small class="note">${out?'אושר '+r.appr+' · ':''}${r.act==='mute'?'הושתקו ':'הופעל לבד '}${r.hits}${r.lastAt?' · לאחרונה '+esc(tm(r.lastAt)):''}${r.asked?' · ביקשת לשאול תמיד':''}</small>
+ <div class="secrow"><label class="chip" style="min-height:44px"><input type="checkbox" data-c="secMrOn" data-id="${esc(r.id)}"${r.on?' checked':''}> פעיל</label>${out&&!r.safe?`<label class="chip" style="min-height:44px"${!r.canAuto&&!r.auto?' title="קודם צריך לאשר פעם אחת תשובה לפי הכלל"':''}><input type="checkbox" data-c="secMrAu" data-id="${esc(r.id)}"${r.auto?' checked':''}${(!r.canAuto&&!r.auto)||!r.on?' disabled':''}> לבד</label>`:''}<button class="chip" data-a="secMrDel" data-id="${esc(r.id)}" style="min-height:44px">מחיקה</button></div>
+ ${out&&!r.safe&&!r.canAuto&&!r.auto?'<small class="note">"לבד" יתאפשר אחרי שתאשרו פעם אחת תשובה לפי הכלל.</small>':''}</div>`}
+function mrH(){const back='<button class="btn g w" data-a="secMrBack" style="margin-bottom:8px">חזרה להגדרות</button>';
+ const R=X.mrl;if(!R){if(!X.mrb)mrLoad();return back+stopH()+'<div class="empty">טוען…</div>'}if(R.err)return back+`<div class="card"><p class="note">${esc(R.err)}</p><button class="btn g w" data-a="secMrOpen">נסה שוב</button></div>`;
+ const L=R.rules;
+ const log=R.log.length?R.log.map(x=>`<div class="secli"><p dir="auto">${x.st==='sent'?'נשלח ✓':'נכשל'} · ${esc(MRCH[x.ch]||x.ch)} · <bdi dir="ltr">${esc(x.to)}</bdi></p><small class="note">${esc(tm(x.t))} · ${x.mine?'לפי הכלל שלי':'לפי הכלל של '+esc(x.by)}${x.ri?': "'+esc(x.ri)+'"':''}</small></div>`).join(''):'<p class="note">עוד לא נשלח שום דבר לבד.</p>';
+ return back+stopH()+`<div class="card" id="secMr"><p class="note" style="margin:0 0 6px">הכללים שלך גוברים על ברירת המחדל של המזכירה, אבל לא על כללי הבטיחות: תשלום או העברת כסף, מחיקת נתונים ושליחת סיסמאות או פרטים רגישים – תמיד באישור שלך. "עצור הכל" עוצר גם את השליחה לבד.</p>${R.br?'<p class="note" style="margin:0 0 6px">למנהל עם הגבלת סניפים אין כללים על מייל וווצאפ.</p>':''}
+ ${L.length?L.map(mrRuleH).join(''):'<p class="note" style="margin:0">עוד אין כללים. בכל הודעה של המזכירה יש כפתור "↩ תגובה".</p>'}<p class="note" style="margin:6px 0 0">כלל ניתוב (למשל "חשבוניות מהיום – למסך לטיפול") קובע מה מופיע ב"מול העיניים" בצ'אט ומה עובר למסך "לטיפול" באפליקציה. בלי כלל – הכול בצ'אט.</p><small class="note" style="display:block;margin-top:6px">${L.length} מתוך ${R.max} כללים</small></div>
+ <div class="sec"><h3>נשלח לבד</h3></div><div class="card" id="secMrLog">${log}</div>`}
+CHG.secMrOn=async el=>{const on=!!el.checked;el.disabled=true;try{await fnCall('secLearn',{op:'set',id:el.dataset.id,on});toast(on?'הכלל פעיל':'הכלל כובה')}catch(e){el.checked=!on;mrErr(e)}finally{X.mrl=null;eyStale();rerender()}};
+CHG.secMrAu=el=>{const on=!!el.checked,id=el.dataset.id;const run=async()=>{el.disabled=true;try{await fnCall('secLearn',{op:'auto',id,on});toast(on?'מעכשיו לבד':'מעכשיו אשאל לפני כל שליחה')}catch(e){mrErr(e)}finally{X.mrl=null;rerender()}};
+ if(on){el.checked=false;ask('מעכשיו פניות שמתאימות לכלל ייענו לבד, בלי לחכות לך (בכפוף לבדיקות הבטיחות ול"עצור הכל"). להמשיך?',run,'כן, לבד')}else run()};
+ACT.secMrDel=el=>{const id=el.dataset.id;ask('למחוק את הכלל? המזכירה תפסיק לפעול לפיו.',async()=>{try{await fnCall('secLearn',{op:'del',id});toast('הכלל נמחק')}catch(e){mrErr(e)}finally{X.mrl=null;eyStale();rerender()}},'מחיקה')};
+{const r9=V.sec;V.sec=()=>{if(elig()&&ready()&&X.st&&X.st.setupDone&&X.mrv&&!X.set&&!X.edit&&mrOn())return {t:X.st.name||'המזכירה',s:'הכללים שלי',h:mrH()};return r9()}}
+window.__secMr=()=>X.mrl;
+
+/* =====================================================================================
+   SEC:10 – צ'אט נקי ו"מול העיניים" (15.11.2026; משימות/2026-11-15_התראות-ותגובה-למזכירה/00-בקשה.md סעיף 6):
+   - בכל כניסה למסך המזכירה (ממסך אחר) הצ'אט נקי. מעבר בין הלשוניות של המזכירה (למשל ליומן וחזרה) לא מנקה (החלטת המשתמש 15.11). השיחה הקודמת – בלשונית "צ'אט קודם" (קריאה בלבד, בדפים).
+     שום הודעה לא נמחקת, והמזכירה ממשיכה לקבל את ההיסטוריה בשרת (secChat) – רק התצוגה השתנתה.
+   - בראש הצ'אט "מול העיניים": כל מה שפתוח (הצעות לאישור, טיוטות, התראות שלא טופלו, חשבוניות שהתקבלו, תזכורות קרובות) ומה שהמזכירה עשתה
+     מאז הכניסה הקודמת. קריאה אחת לשרת (secLearn op:'eyes'), הכניסה נרשמת בשרת לכל מנהל. כל שורה – לחיצה למקום שלה, אישור במקום כשיש, ו"↩ תגובה".
+   - כללי ניתוב ("חשבוניות מהיום – למסך לטיפול"): כרטיס אישור בשיחה / תגובה על פריט; פריטים מסוג שנותב מופיעים במסך "לטיפול" הקיים
+     באפליקציה (V.todo, סעיף "מהמזכירה"; החלטת המשתמש 15.11 – לא לשונית במזכירה) או רק בלשונית שלהם.
+   ===================================================================================== */
+const css10=document.createElement('style');
+css10.textContent='.secey{margin:0 0 8px}.secey .secli{padding:8px 0}.secey .secli p{margin:0 0 2px}.secey .secrow .chip{min-height:44px}.secey .eyh{display:flex;justify-content:space-between;align-items:center;gap:8px}'
++'.secey .secday{margin:10px 0 2px}.secdone b{color:var(--acc)}#secPrev .secday{text-align:center;font-size:.85rem}';
+document.head.appendChild(css10);
+TABS.splice(1,0,['eyes','מול העיניים'],['prev',"צ'אט קודם"]);/* 15.11.2026: "מול העיניים" עבר ללשונית משלו – הצ'אט נפתח ריק בכל כניסה */
+const RKL={inv:'חשבוניות',rem:'תזכורות',note:'התראות',draft:'טיוטות תשובה',appr:'הצעות לאישור'},RDL={hold:'מסך "לטיפול" באפליקציה',tab:"רק בלשונית שלהן (לא בצ'אט)",chat:'לשונית "מול העיניים"'};
+const rtL=c=>'מעכשיו '+(RKL[c.kind]||'פריטים')+' ← '+(RDL[c.dest]||'');
+/* ---------- "מול העיניים" ---------- */
+async function eyLoad(visit){if(X.eyb){X.eyQ=X.eyQ===2||visit?2:1;return}X.eyb=1;
+ try{const r=await fnCall('secLearn',{op:'eyes',visit:!!visit});X.ey=r&&Array.isArray(r.open)?r:{err:'לא נטען'};if(Array.isArray(X.ey.hold)){TD.key=keyNow();TD.L=X.ey.hold;TD.at=Date.now()}}
+ catch(e){X.ey=X.ey&&!X.ey.err?X.ey:{err:e&&e.message||'לא נטען'}}
+ finally{X.eyb=0;if(X.eyQ){const v=X.eyQ===2;X.eyQ=0;eyLoad(v);return}if(cur().v==='sec'&&!typing())rerender()}}
+/* אחרי פעולה (אישור, "טופל", כלל חדש) – המידע הקיים נשאר על המסך ומתעדכן ברקע */
+function eyStale(){if(!X.ey||X.ey.err)X.ey=null;eyLoad(false)}
+const EYK={appr:'לאישור',media:'מהשיחה',draft:'טיוטה',note:'התראה',inv:'חשבונית',rem:'תזכורת'};
+const EYN=4,EYD=3;
+function eyGoA(x){const g=x.go||{};return ` data-tab="${esc(g.tab||'')}"${g.id?` data-id="${esc(g.id)}"`:''}${g.wa?` data-wa="${esc(g.wa)}"`:''}`}
+function eyRow(x,dn){const a=x.act,id=a&&esc(a.id);
+ const acts=!a?'':a.k==='fact'?`<button class="chip" data-a="secFOk" data-id="${id}">אשר</button><button class="chip" data-a="secFNo" data-id="${id}">בטל</button>`:a.k==='cal'?`<button class="chip" data-a="secCOk" data-id="${id}">אשר</button><button class="chip" data-a="secCNo" data-id="${id}">בטל</button>`:a.k==='note'?`<button class="chip" data-a="secNDone" data-id="${id}">טופל</button>`:a.k==='scan'||a.k==='task'?`<button class="chip" data-a="${a.k==='scan'?'secScOk':'secTkOk'}" data-id="${id}" data-mid="${esc(a.mid||'')}">${a.k==='scan'?'לסריקה':'פתח משימה'}</button><button class="chip" data-a="secScNo" data-id="${id}" data-mid="${esc(a.mid||'')}">בטל</button>`:'';
+ const tag=x.k==='rem'&&/^ביומן/.test(x.title)?'יומן':EYK[x.k]||'';
+ return `<div class="secli" data-ey="${esc(x.id)}"><button type="button" class="secnb" data-a="secEyGo"${eyGoA(x)} aria-label="פתיחה: ${esc(x.title)}"><p><b>${esc(x.title)}</b> <span class="sectags">${esc(tag)}</span></p>${x.sub?`<small class="note secclamp" style="display:block">${esc(x.sub)}</small>`:''}${x.t&&!x.soon?`<small class="note" style="display:block">${esc(tm(x.t))}</small>`:''}</button>
+ <div class="secrow">${acts}${dn?'':`<button class="chip" data-a="secEyGo"${eyGoA(x)}>פתיחה</button>`}${x.r?mrBtnH(x.r.k,x.r.id):''}</div></div>`}
+function eyH(){const R=X.ey,hd='<div class="eyh"><b>מול העיניים</b>';
+ if(!R){if(!X.eyb){const v=!!X.eyV;X.eyV=0;eyLoad(v)}return `<div class="card secey" id="secEyes">${hd}</div><p class="note" style="margin:4px 0 0">טוען…</p></div>`}
+ if(R.err)return `<div class="card secey" id="secEyes">${hd}</div><p class="note" style="margin:4px 0">${esc(R.err)}</p><button class="chip" data-a="secEyRe" style="min-height:44px">נסה שוב</button></div>`;
+ const O=R.open||[],D=R.did||[],on=X.eyAll?O.length:Math.min(O.length,EYN),dn=X.didAll?D.length:Math.min(D.length,EYD),H=R.hold||[];
+ return `<div class="card secey" id="secEyes">${hd}${O.length?`<span class="secbadge">${esc(String(R.openN||O.length))}</span>`:''}</div>
+ <div id="secEyOpen">${O.length?O.slice(0,on).map(x=>eyRow(x)).join(''):'<p class="note" style="margin:4px 0">אין כרגע משהו פתוח ✓</p>'}</div>
+ ${O.length>EYN?`<button class="chip" data-a="secEyMore" data-v="o" style="min-height:44px">${X.eyAll?'פחות':'עוד ('+(O.length-EYN)+')'}</button>`:''}
+ ${H.length?`<button class="chip" data-a="go" data-v="todo" style="min-height:44px;margin-inline-start:6px">במסך "לטיפול" (${H.length})</button>`:''}
+ <div class="secday">מה עשיתי מאז הכניסה הקודמת<small class="note">${esc(tm(R.since))}</small></div>
+ <div id="secEyDid">${D.length?D.slice(0,dn).map(x=>eyRow(x,1)).join(''):'<p class="note" style="margin:4px 0">לא עשיתי משהו חדש מאז.</p>'}</div>
+ ${D.length>EYD?`<button class="chip" data-a="secEyMore" data-v="d" style="min-height:44px">${X.didAll?'פחות':'עוד ('+((R.didN||D.length)-EYD)+')'}</button>`:''}</div>`}
+ACT.secEyMore=el=>{if(el.dataset.v==='d')X.didAll=!X.didAll;else X.eyAll=!X.eyAll;rerender()};
+ACT.secEyRe=()=>{X.ey=null;eyLoad(false);rerender()};
+ACT.secEyGo=el=>{const t=el.dataset.tab,id=el.dataset.id||'',wa=el.dataset.wa||'';
+ if(t==='notes'){if(id)pnTap(id);else ACT.secNotesGo();return}
+ if(t==='set'){ACT.secMrOpen();return}
+ if(!TABS.some(x=>x[0]===t))return;
+ ACT.secTab({dataset:{v:t}});
+ if(t==='wa'&&wa&&X.wa){X.wa.cur=wa;X.wa.card=null;rerender()}
+ if(t==='mail'&&id&&X.ml){X.ml.cur=id;X.ml.card=null;rerender()}};
+{const o=ACT.secNDone;ACT.secNDone=async el=>{await o(el);eyStale()}}
+/* ---------- כרטיס ניתוב בשיחה ---------- */
+async function rtDo(el,no){const mid=el.dataset.mid,cid=el.dataset.id;if(!mid||!cid)return;el.disabled=true;
+ try{await fnCall('secLearn',no?{op:'route',mid,cid,no:true}:{op:'route',mid,cid});X.mrl=null;if(!no)toast('נשמר. אפשר לראות ולמחוק ב"הכללים שלי".');doneSt(cid,no?'no':'ok')}
+ catch(e){if(notPend(e))doneSt(cid,'gone');else{el.disabled=false;mrErr(e)}}}
+ACT.secRtOk=el=>rtDo(el,false);
+ACT.secRtNo=el=>rtDo(el,true);
+/* ---------- "צ'אט קודם": קריאה בלבד, 30 הודעות בכל פעם ---------- */
+async function pcLoad(){const P=X.pc;if(!P||P.b)return;P.b=1;const d={limit:30},o=(P.L||[]).find(m=>Number.isInteger(m.t));if(o)d.before=o.t;
+ try{const r=await fnCall('secChatLoad',d),m=(r&&r.msgs||[]).filter(x=>!P.L.some(y=>y.id&&y.id===x.id));if(X.pc!==P)return;P.L=m.concat(P.L);P.more=r&&typeof r.more==='boolean'?r.more:m.length>=30;P.err=''}
+ catch(e){P.err=e&&e.message||'השיחה לא נטענה'}finally{P.b=0;P.ld=1;if(cur().v==='sec'&&!typing())rerender()}}
+const dayH=t=>{try{return new Date(t).toLocaleDateString('he-IL',{weekday:'long',day:'numeric',month:'numeric',year:'2-digit'})}catch(e){return ''}};
+function prevH(){const P=X.pc||(X.pc={L:[],b:0,more:true,err:'',ld:0});
+ if(!P.ld){if(!P.b)pcLoad();return '<div class="empty">טוען…</div>'}
+ if(P.err&&!P.L.length)return `<div class="card"><p class="note">${esc(P.err)}</p><button class="btn g w" data-a="secTab" data-v="prev">נסה שוב</button></div>`;
+ let last='',h='';for(const m of P.L){const d=m.t?dayH(m.t):'';if(d&&d!==last){last=d;h+=`<div class="secday">${esc(d)}</div>`}h+=bub(m)}
+ return `<p class="note" style="margin:0 0 6px">השיחות הקודמות – לקריאה בלבד. ${esc(X.st.name||'המזכירה')} זוכרת אותן גם כשהן לא מוצגות בצ'אט.</p>
+ ${P.more&&P.L.length?`<button class="btn g w" data-a="secPcMore"${P.b?' disabled':''} style="margin-bottom:8px">הודעות קודמות</button>`:''}
+ <div id="secPrev">${h||'<div class="empty">אין שיחה קודמת</div>'}</div>${P.err?`<p class="note">${esc(P.err)}</p>`:''}`}
+ACT.secPcMore=()=>{pcLoad();rerender()};
+/* ---------- מסך "לטיפול" באפליקציה (V.todo): מה שנותב לשם בכלל אישי ----------
+   secLearn eyes hold:true – בלי כלל "לטיפול" השרת עונה מיד (קריאת הכללים בלבד). לא יותר מפעם בדקה, ורק למי שהמזכירה פתוחה לו. */
+const TD={L:[],at:0,b:0,key:''};
+const tdOn=()=>{try{return elig()&&ready()&&!!X.st.setupDone}catch(e){return false}};
+function tdLoad(force){const k=keyNow();if(TD.key!==k){TD.key=k;TD.L=[];TD.at=0}
+ if(!tdOn()||TD.b||(!force&&Date.now()-TD.at<60000))return;TD.b=1;TD.at=Date.now();const s0=TD.L.map(x=>x.id).join();
+ fnCall('secLearn',{op:'eyes',hold:true}).then(r=>{if(TD.key===keyNow())TD.L=r&&Array.isArray(r.hold)?r.hold:[]}).catch(()=>{})
+  .finally(()=>{TD.b=0;try{if(TD.L.map(x=>x.id).join()!==s0&&['todo','home'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}})}
+const tdN=()=>tdOn()&&TD.key===keyNow()?TD.L.length:0;
+function tdRow(x){const g=x.go||{};return `<button class="opt" data-a="secTdGo" data-tab="${esc(g.tab||'')}"${g.id?` data-id="${esc(g.id)}"`:''}${g.wa?` data-wa="${esc(g.wa)}"`:''}><span>${esc(x.title)}<small>${esc([EYK[x.k]||'',x.sub||''].filter(Boolean).join(' · '))}</small></span>${ico('chev')}</button>`}
+if(typeof todoC==='function'){const o=todoC;todoC=function(){const r=o.apply(this,arguments);try{r.sec=tdN();r.n+=r.sec}catch(e){r.sec=0}return r}}
+{const o=V.todo;if(typeof o==='function')V.todo=function(){const r=o.apply(this,arguments);
+ try{if(r&&typeof r.h==='string'&&isA()&&tdOn()){tdLoad(false);const L=TD.L;if(L.length)r.h=adSec('מהמזכירה – לטיפול')+L.slice(0,EYN*3).map(tdRow).join('')+`<p class="note" style="margin:4px 0 8px">הגיעו לכאן לפי כלל ניתוב שלך. אפשר לשנות ב"הכללים שלי" במזכירה.</p>`+r.h}}catch(e){}return r}}
+ACT.secTdGo=el=>{const t=el.dataset.tab,id=el.dataset.id||'',wa=el.dataset.wa||'';TD.at=0;
+ if(t==='notes'){if(id)pnTap(id);else ACT.secNotesGo();return}
+ X.set=0;X.edit=0;X.mrv=0;
+ if(t==='set'){X.mrv=1;X.mrl=null;go('sec');return}
+ if(TABS.some(x=>x[0]===t))ACT.secTab({dataset:{v:t}});
+ if(t==='wa'&&wa&&X.wa){X.wa.cur=wa;X.wa.card=null}
+ if(t==='mail'&&id&&X.ml){X.ml.cur=id;X.ml.card=null}
+ go('sec')};
+/* ---------- כניסה לצ'אט = מסך נקי ---------- */
+function chatEnter(){if(X.sending)return;X.msgs=[];X.media={};X.msgErr='';X.ey=null;X.eyV=1;X.eyAll=0;X.didAll=0}
+/* מעבר בין לשוניות לא מנקה את הצ'אט (15.11): חזרה ל"שיחה" – "מול העיניים" מתעדכן ברקע */
+{const t10=ACT.secTab;ACT.secTab=el=>{const v=el.dataset.v,was=X.tab||'chat';if(v==='eyes'){if(X.eyV){X.eyV=0;eyLoad(true)}else if(was!=='eyes'&&X.ey&&!X.ey.err)eyStale()}if(v==='prev')X.pc=null;t10(el)}}
+{const r0=window.render;if(typeof r0==='function')window.render=function(){const r=r0.apply(this,arguments);try{X.pvw=cur().v}catch(e){}return r}}
+{const r10=V.sec;V.sec=()=>{try{if(X.pvw!=='sec'){X.pvw='sec';chatEnter()}}catch(e){}
+ if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='prev'){const S0=X.st;
+  return{t:S0.name||'המזכירה',s:"צ'אט קודם",h:stopH()+tabsH()+prevH()}}
+ if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.edit&&!X.set&&!X.mrv&&X.tab==='eyes'){const S0=X.st;
+  return{t:S0.name||'המזכירה',s:'מול העיניים',h:stopH()+tabsH()+eyH()}}
+ /* מספר הפריטים הפתוחים ללשונית – נטען ברקע (בלי לסמן "ביקור") */
+ try{if(elig()&&ready()&&X.st&&X.st.setupDone&&!X.ey&&!X.eyb)eyLoad(false)}catch(e){}
+ return r10()}}
+window.__secEy=()=>X.ey;window.__secTd=TD;
+
+/* =====================================================================================
+   SEC:11 – קול, תמונה וסרטון בצ'אט (15.11.2026). הכול דרך secMedia בשרת (op: stt | see | mark). שום קובץ לא נשמר במכשיר.
+   קול: הקלטה ← WAV ← תמלול ← בועת משתמש עם 🎤 ← secChat רגיל. תמונה: הקטנה ל-JPEG ← see ← כרטיס "לסריקה" / "פתח משימה".
+   סרטון: בדיקת אורך מקומית, הקטנה במכשיר אם כבד, העלאה ל-sec_tmp ← see. התמונה נשמרת בזיכרון בלבד עד החלטה על הכרטיס.
+   ===================================================================================== */
+const MDEF={aud:120,img:true,vid:60};
+const mdOf=m=>m&&typeof m==='object'?{aud:Number.isFinite(+m.aud)?+m.aud:MDEF.aud,img:m.img!==false&&m.img!==0,vid:Number.isFinite(+m.vid)?+m.vid:MDEF.vid}:{aud:MDEF.aud,img:MDEF.img,vid:MDEF.vid};
+const mlim=()=>X.st&&X.st.media?mdOf(X.st.media):null;/* null = השרת עוד לא מחזיר הגבלות: הכפתורים מוסתרים */
+const micOk=()=>{const l=mlim();return !!(l&&l.aud>0)};
+const PRIV='הקובץ נשלח לעיבוד ב-AI ונמחק';
+const SCL={inv:'חשבונית',rcpt:'קבלה',dn:'תעודת משלוח',z:'דוח Z (נפתח מסך סגירת הקופה)'};
+const AGAIN='התמונה כבר לא בזיכרון. שלחו שוב את התמונה.';
+const VMAX=11*1048576,VHARD=12*1048576,CANT='הסרטון כבד מדי ואי אפשר להקטין אותו במכשיר הזה. צלמו סרטון קצר יותר או באיכות נמוכה יותר.';
+const RC={on:0};
+const fsec=s=>{s=Math.max(0,Math.floor(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const micLbl=()=>RC.on?'⏹ עצור ושלח ('+fsec(RC.el||0)+')':'🎤 הקלטה';
+const mBusy=()=>!!(X.mst||X.sending);
+function micUi(){document.querySelectorAll('[data-a=secMic],[data-a=secMrMic]').forEach(b=>{b.textContent=micLbl();b.disabled=!RC.on&&mBusy()})}
+const keepDraft=()=>{const f=document.getElementById('secForm');if(f&&f.q)X.draft=f.q.value};
+const updWait=()=>{const w=document.querySelector('#secWait small');if(w)w.textContent=X.mst};
+const micErr=e=>{const n=e&&e.name;
+ if(n==='NotAllowedError'||n==='SecurityError'||n==='PermissionDeniedError')return'אין הרשאה למיקרופון. אפשרו לאפליקציה גישה למיקרופון בהגדרות הטלפון ונסו שוב.';
+ if(n==='NotFoundError'||n==='DevicesNotFoundError')return'לא נמצא מיקרופון במכשיר.';
+ if(n==='NotReadableError')return'המיקרופון תפוס על ידי אפליקציה אחרת.';
+ return'לא הצלחנו להפעיל את המיקרופון.'};
+async function toWav(blob,maxSec){/* מפענח וממיר ל-WAV PCM 16 ביט, מונו, 16kHz; חותך לאורך המרבי */
+ const AC=window.AudioContext||window.webkitAudioContext,ac=new AC();let buf;
+ try{buf=await ac.decodeAudioData(await blob.arrayBuffer())}finally{try{ac.close()}catch(e){}}
+ const len=Math.max(1,Math.min(Math.ceil(buf.duration*16000),maxSec*16000)),oc=new OfflineAudioContext(1,len,16000),src=oc.createBufferSource();
+ src.buffer=buf;src.connect(oc.destination);src.start();
+ const f=(await oc.startRendering()).getChannelData(0),n=Math.min(len,f.length),bytes=new Uint8Array(44+n*2),dv=new DataView(bytes.buffer);
+ const w=(o,s)=>{for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i))};
+ w(0,'RIFF');dv.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);dv.setUint32(24,16000,true);dv.setUint32(28,32000,true);dv.setUint16(32,2,true);dv.setUint16(34,16,true);w(36,'data');dv.setUint32(40,n*2,true);
+ for(let i=0;i<n;i++){const s=Math.max(-1,Math.min(1,f[i]));dv.setInt16(44+i*2,s<0?s*32768:s*32767,true)}
+ let bin='';for(let i=0;i<bytes.length;i+=8192)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+ return{sec:n/16000,b64:btoa(bin)}}
+const micDown=()=>{try{RC.stream&&RC.stream.getTracks().forEach(t=>t.stop())}catch(e){}RC.stream=null};
+function micStop(){if(RC.on&&RC.mr&&RC.mr.state!=='inactive'){clearInterval(RC.tm);try{RC.mr.stop()}catch(e){micDown();RC.on=0;micUi()}}}
+function micCancel(){if(!RC.on)return;RC.x=1;if(RC.mr&&RC.mr.state!=='inactive')micStop();else{clearInterval(RC.tm);micDown();RC.on=0;micUi()}}
+/* ההקלטה נעצרת (בלי תמלול) כשהמקום שלה כבר לא מוצג: יציאה מהמזכירה, חלון "↩ תגובה" שנסגר, או לשונית אחרת במקום השיחה */
+const micGone=()=>cur().v!=='sec'||(RC.tgt==='mr'?!document.getElementById('secMrT'):((X.tab||'chat')!=='chat'||!document.querySelector('#secMedia [data-a=secMic]')));
+let micDlgOn=0;
+function micDlgHook(){if(micDlgOn)return;const d=document.getElementById('dlg');if(!d)return;micDlgOn=1;d.addEventListener('close',()=>{if(RC.on&&RC.tgt==='mr')micCancel()})}
+async function micStart(tgt){
+ if(RC.on||mBusy())return;
+ const l=mlim();if(!l||l.aud<=0)return toast('ההקלטה הקולית כבויה בעסק הזה');
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined'||!(window.AudioContext||window.webkitAudioContext))return toast('ההקלטה לא נתמכת במכשיר הזה. אפשר להקליד.');
+ RC.on=1;let stream;
+ try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){RC.on=0;return toast(micErr(e))}
+ const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(m=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))||'';
+ let mr;try{mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined)}catch(e){stream.getTracks().forEach(t=>t.stop());RC.on=0;return toast('ההקלטה לא נתמכת במכשיר הזה. אפשר להקליד.')}
+ const chunks=[],max=l.aud;Object.assign(RC,{on:1,tgt,mr,stream,t0:performance.now(),el:0,x:0,auto:0,tm:0});
+ mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+ mr.onstop=()=>{clearInterval(RC.tm);micDown();const cancel=RC.x,tg=RC.tgt,auto=RC.auto;RC.on=0;micUi();if(cancel){if(tg==='chat'&&cur().v==='sec'){keepDraft();rerender()}return}micDone(new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'}),max,tg,auto)};
+ stream.getTracks().forEach(t=>{t.onended=()=>micStop()});
+ try{mr.start()}catch(e){micDown();RC.on=0;RC.mr=null;micUi();return toast('לא הצלחנו להתחיל את ההקלטה. נסו שוב או הקלידו.')}
+ micDlgHook();
+ RC.tm=setInterval(()=>{RC.el=(performance.now()-RC.t0)/1000;if(micGone()){micCancel();return}if(RC.el>=max){RC.auto=1;micStop();return}micUi()},250);
+ if(tgt==='chat'){keepDraft();rerender()}else micUi()}
+async function micDone(blob,max,tg,auto){
+ X.mst='מתמללת…';if(tg==='chat'&&cur().v==='sec'){rerender();scrollEnd()}micUi();let text='';
+ try{const w=await toWav(blob,max);if(w.sec<0.5)toast('ההקלטה קצרה מדי. נסו שוב.');
+  else{if(auto)toast('ההקלטה נעצרה בגבול של '+max+' שניות');const r=await fnCall('secMedia',{op:'stt',mime:'audio/wav',b64:w.b64})||{};if(Number.isFinite(r.pct))X.st.pct=r.pct;
+   if(r.mode==='saving'){X.st.saving=X.st.saving||'month';toast(String(r.reply||'המזכירה במצב חיסכון – אפשר להקליד.'))}/* תקרת שימוש: ההסבר מהשרת, לא "לא הצלחתי להבין" */
+   else{text=String(r.text||'').trim();if(!text)toast('לא הצלחתי להבין את ההקלטה. נסו שוב.')}}}
+ catch(e){toast(e&&e.message&&!(e instanceof DOMException)&&e.name!=='EncodingError'?e.message:'לא הצלחנו לעבד את ההקלטה. נסו שוב או הקלידו.')}
+ X.mst='';blob=null;micUi();
+ if(text&&tg==='mr'){const t=document.getElementById('secMrT');if(t){t.value=((t.value?t.value+' ':'')+text).slice(0,300);t.focus()}}
+ else if(text&&tg==='chat'&&cur().v==='sec')ask2(text,false,'voice');
+ else if(cur().v==='sec'){rerender()}}
+ACT.secMic=()=>{if(RC.on)micStop();else micStart('chat')};
+ACT.secMrMic=()=>{if(RC.on)micStop();else micStart('mr')};
+ACT.secMicX=()=>micCancel();
+function mediaH(){const l=mlim();if(!l||(l.aud<=0&&!l.img&&l.vid<=0))return '';
+ const dis=mBusy()||RC.on,off=dis?' disabled':'',lb='class="chip" style="min-height:44px;cursor:pointer'+(dis?';opacity:.5':'')+'"';
+ return `<div class="secrow" id="secMedia" style="margin-top:8px">${l.aud>0?`<button type="button" class="chip" data-a="secMic" style="min-height:44px"${RC.on?'':mBusy()?' disabled':''}>${micLbl()}</button>`:''}${RC.on&&RC.tgt==='chat'?'<button type="button" class="chip" data-a="secMicX" style="min-height:44px">ביטול</button>':''}${l.img?`<label ${lb}>📷 תמונה<input type="file" accept="image/*" data-c="secImgF" hidden${off}></label>`:''}${l.vid>0?`<label ${lb}>🎬 סרטון<input type="file" accept="video/*" data-c="secVidF" hidden${off}></label>`:''}</div><p class="note" style="margin:4px 0 0">${PRIV}</p>`}
+/* ---------- תמונה וסרטון ---------- */
+async function mediaSend(via,prep){
+ if(mBusy()||RC.on)return;keepDraft();
+ const f=document.getElementById('secForm'),cap=String(f&&f.q?f.q.value:X.draft||'').trim().slice(0,300);
+ X.msgs=X.msgs||[];X.mst=via==='image'?'מכינה את התמונה…':'בודקת את הסרטון…';rerender();scrollEnd();
+ let p=null;
+ try{p=await prep()}catch(e){X.mst='';rerender();return toast(e&&e.message||'לא הצלחנו להכין את הקובץ')}
+ X.draft='';X.msgs.push({role:'u',text:cap||(via==='image'?'תמונה':'סרטון'),via,t:Date.now()});X.mst=via==='image'?'מתארת את התמונה…':'מעבדת את הסרטון…';rerender();scrollEnd();
+ try{const d=Object.assign({},p.call);if(cap)d.cap=cap;const r=await fnCall('secMedia',d);
+  const cards=r.cards||[];X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:[],th:null,cards,stale:false,mvia:via,t:Date.now()});
+  if(via==='image'&&p.du&&r.id&&cards.some(c=>c.k==='scan'||c.k==='task')){X.media=X.media||{};X.media[r.id]=p.du}
+  if(cards.length){X.fl=null;X.cl=null;eyStale()}
+  if(Number.isFinite(r.pct))X.st.pct=r.pct;X.st.saving=r.saving?(X.st.saving||'month'):''}
+ catch(e){const rs=e&&Object.prototype.hasOwnProperty.call(AIR,e.reason)?' (סיבה: '+AIR[e.reason]+')':'';X.msgs.push({role:'a',text:((e&&e.message)||'השליחה נכשלה. נסו שוב.')+rs,t:Date.now()});
+  if(p.path){tok().then(t=>fetch(STB()+'/'+encodeURIComponent(p.path),{method:'DELETE',headers:{Authorization:'Firebase '+t}})).catch(()=>{})}}/* גיבוי: השרת וגם הניקוי המתוזמן מוחקים בכל מקרה */
+ finally{X.mst='';p=null;if(cur().v==='sec')rerender();scrollEnd()}}
+CHG.secImgF=el=>{const f=el.files&&el.files[0];el.value='';const l=mlim();if(!f||!l||!l.img)return;
+ mediaSend('image',async()=>{if(f.type&&!/^image\//.test(f.type))throw new Error('הקובץ אינו תמונה');
+  const du=await fbShrink(await rdU(f));if(du.length>1400000)throw new Error('התמונה גדולה מדי');
+  return{du,call:{op:'see',kind:'image',mime:'image/jpeg',b64:du.slice(du.indexOf(',')+1)}}})};
+CHG.secVidF=el=>{const f=el.files&&el.files[0];el.value='';const l=mlim();if(!f||!l||l.vid<=0)return;mediaSend('video',()=>vidPrep(f,l.vid))};
+const rnd12=()=>Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>b.toString(16).padStart(2,'0')).join('');
+async function vidPrep(f,max){
+ const url=URL.createObjectURL(f),v=document.createElement('video');v.preload='metadata';v.playsInline=true;let blob=null,name='';
+ try{
+  const dur0=await new Promise((ok,no)=>{const bad=()=>no(new Error('לא הצלחנו לקרוא את הסרטון. נסו סרטון אחר.')),t=setTimeout(bad,10000);v.onloadedmetadata=()=>{clearTimeout(t);ok(v.duration)};v.onerror=()=>{clearTimeout(t);bad()};v.src=url});
+  let dur=dur0;if(dur===Infinity){/* סרטון webm שהוקלט בדפדפן: האורך נקבע רק אחרי דילוג לסוף */await new Promise(ok=>{const t=setTimeout(ok,4000);v.ondurationchange=()=>{if(Number.isFinite(v.duration)){clearTimeout(t);ok()}};v.currentTime=1e101});dur=v.duration;v.ondurationchange=null;try{v.currentTime=0}catch(e){}}
+  if(!Number.isFinite(dur)||dur<=0)throw new Error('לא הצלחנו לקרוא את אורך הסרטון. נסו סרטון אחר.');
+  if(dur>max+0.5)throw new Error('הסרטון ארוך מדי ('+Math.round(dur)+' שניות). אפשר עד '+max+' שניות.');
+  let type=String(f.type||'').split(';')[0];blob=f;
+  const EXT={'video/mp4':'.mp4','video/webm':'.webm','video/quicktime':'.mov','video/3gpp':'.3gp'};
+  if(!EXT[type]||f.size>VMAX){blob=await vidShrink(v,dur);type='video/webm'}
+  if(blob.size>VHARD)throw new Error('הסרטון עדיין כבד מדי אחרי ההקטנה. צלמו סרטון קצר יותר.');
+  X.mst='מעלה את הסרטון…';updWait();
+  const t=await tok();name=(bzB()?'b/'+SY.bizId+'/':'')+'sec_tmp/'+SY.uid+'/'+rnd12()+EXT[type];let r;
+  try{r=await fetch(STB()+'?uploadType=media&name='+encodeURIComponent(name),{method:'POST',headers:{Authorization:'Firebase '+t,'Content-Type':type},body:blob})}catch(e){throw new Error('אין חיבור לאינטרנט')}
+  if(!r.ok)throw new Error(r.status===403?'אין הרשאה להעלות סרטון (עד 12MB).':'העלאת הסרטון נכשלה ('+r.status+'). נסו שוב.');
+  return{call:{op:'see',kind:'video',path:name},path:name}}
+ finally{URL.revokeObjectURL(url);try{v.removeAttribute('src');v.load()}catch(e){}blob=null}}
+function vidShrink(v,dur){return new Promise((ok,no)=>{/* הקטנה במכשיר: canvas 640 + MediaRecorder (בזמן אמת, אורך הסרטון) */
+ const cv=document.createElement('canvas');
+ if(typeof MediaRecorder==='undefined'||!cv.captureStream||!v.videoWidth)return no(new Error(CANT));
+ const sc=Math.min(1,640/Math.max(v.videoWidth,v.videoHeight));cv.width=Math.max(2,Math.round(v.videoWidth*sc));cv.height=Math.max(2,Math.round(v.videoHeight*sc));
+ const cx=cv.getContext('2d'),vs=cv.captureStream(25);let ac=null;
+ try{const AC=window.AudioContext||window.webkitAudioContext;ac=new AC();const src=ac.createMediaElementSource(v),dst=ac.createMediaStreamDestination();src.connect(dst);dst.stream.getAudioTracks().forEach(t=>vs.addTrack(t))}catch(e){ac=null;v.muted=true}
+ const mime=['video/webm;codecs=vp8,opus','video/webm;codecs=vp8','video/webm'].find(m=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))||'';
+ const vsStop=()=>{try{vs.getTracks().forEach(t=>t.stop())}catch(e){}};
+ let mr;try{mr=new MediaRecorder(vs,Object.assign({videoBitsPerSecond:700000,audioBitsPerSecond:64000},mime?{mimeType:mime}:{}))}catch(e){try{ac&&ac.close()}catch(e2){}vsStop();return no(new Error(CANT))}
+ const ch=[];let tm=0,wd=0,fin=0;
+ const clean=()=>{clearInterval(tm);clearTimeout(wd);try{ac&&ac.close()}catch(e){}};
+ const end=()=>{if(fin)return;fin=1;clean();try{if(mr.state!=='inactive')mr.stop()}catch(e){no(new Error(CANT))}};
+ const fail=()=>{if(fin)return;fin=1;clean();try{if(mr.state!=='inactive')mr.stop()}catch(e){}vsStop();no(new Error(CANT))};
+ mr.ondataavailable=e=>{if(e.data&&e.data.size)ch.push(e.data)};
+ mr.onstop=()=>{vsStop();if(fin){if(ch.length)ok(new Blob(ch,{type:'video/webm'}));else no(new Error(CANT))}};
+ v.onended=end;v.onerror=fail;wd=setTimeout(fail,(dur+20)*1000);
+ mr.start(1000);
+ v.play().then(()=>{tm=setInterval(()=>{try{cx.drawImage(v,0,0,cv.width,cv.height)}catch(e){}X.mst='מקטינה את הסרטון… '+Math.min(99,Math.round(v.currentTime/dur*100))+'%';updWait();if(v.currentTime>=dur-0.05)end()},40)}).catch(fail)})}
+/* ---------- כרטיסי "לסריקה" ו"פתח משימה" ---------- */
+const cardMsg=id=>(X.msgs||[]).concat(X.pc&&X.pc.L||[]).find(m=>(m.cards||[]).some(c=>c.id===id));
+const scMark=(id,mid,st)=>fnCall('secMedia',{op:'mark',mid,cid:id,st});
+/* התמונה נשארת בזיכרון עד שכל כרטיסי הסריקה/משימה של אותה הודעה הוכרעו (או יציאה מהשיחה – chatEnter) */
+const mdFree=mid=>{if(!X.media||!mid||!X.media[mid])return;const m=(X.msgs||[]).concat(X.pc&&X.pc.L||[]).find(x=>x.id===mid);if(!m||!(m.cards||[]).some(c=>(c.k==='scan'||c.k==='task')&&!c.st))delete X.media[mid]};
+/* כרטיס מדיה גם כשההודעה לא נטענה בשיחה – מתוך "מול העיניים" (act: k, id, mid, doc, txt, via) */
+const mdCard=id=>{const c=allCards().find(x=>x.id===id);if(c)return c;const a=((X.ey&&X.ey.open)||[]).map(x=>x.act).find(a=>a&&a.id===id&&(a.k==='scan'||a.k==='task'));return a?{id:a.id,k:a.k,doc:a.doc,txt:a.txt,eyVia:a.via}:null};
+ACT.secScNo=async el=>{const id=el.dataset.id,mid=el.dataset.mid||(cardMsg(id)||{}).id||'';el.disabled=true;
+ try{await scMark(id,mid,'no');doneSt(id,'no');mdFree(mid)}catch(e){if(notPend(e)){doneSt(id,'gone');mdFree(mid)}else{el.disabled=false;err(e)}}};
+ACT.secScOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=mdCard(id),du=(X.media||{})[mid];
+ if(!c||!du)return toast(AGAIN);
+ const z=c.doc==='z',sup=z?null:(cat('e_sup')&&!cat('e_sup').hid?cat('e_sup'):catsOf('exp').find(x=>x.beh==='sup'));
+ if(z&&(typeof zcNew!=='function'||!V.zc))return toast('מסך סגירת הקופה לא זמין');
+ if(!z&&(!sup||typeof openAdd!=='function'||typeof sheetDraw!=='function'||!ACT.scanGo))return toast('אין קטגוריית ספקים. אפשר להוסיף חשבונית ידנית.');
+ const run=async()=>{el.disabled=true;
+  try{await scMark(id,mid,'ok')}catch(e){if(notPend(e)){doneSt(id,'gone');mdFree(mid);return}el.disabled=false;return err(e)}
+  doneSt(id,'ok');mdFree(mid);
+  if(z){/* דוח Z: תמיד סגירה חדשה, התמונה בחלק הראשון (צילום הקופה הפותחת של היום נשמר) */const o=ZC&&ZC.o||null;ZC=zcNew();ZC.o=o;ZC.z[0]=du;go('zc')}
+  else{openAdd({type:'exp',cat:sup.id});A.step='scan';A.pg=[du];A.hi=[du];A.fid=null;sheetDraw();ACT.scanGo()}};
+ /* בסגירת הקופה כבר יש צילומים או פרטים של דוח אחר – לא דורסים בשקט */
+ if(z&&ZC&&(ZC.z.some(Boolean)||ZC.f))return ask('בסגירת הקופה כבר יש צילומים או פרטים של דוח אחר. להתחיל סגירה חדשה עם התמונה הזו? הצילומים והפרטים הקודמים יימחקו מהמסך.',run,'כן, סגירה חדשה');
+ run()};
+ACT.secTkOk=async el=>{const id=el.dataset.id,m=cardMsg(id),mid=el.dataset.mid||(m||{}).id||'',c=mdCard(id);
+ if(!c)return toast(AGAIN);const du=(X.media||{})[mid]||'',txt=String(c.txt||'').trim().slice(0,500);
+ if(!du&&!(m&&m.mvia==='video')&&c.eyVia!=='video')return toast(AGAIN);
+ if(!txt||typeof fsx!=='function'||typeof tkDue!=='function'||!isA())return toast('אי אפשר לפתוח משימה כאן');
+ /* מזהה המשימה נגזר מהכרטיס: אישור חוזר (למשל אחרי שהסימון בשרת נכשל) לא יוצר משימה שנייה – הקיימת מזוהה (409) */
+ el.disabled=true;const now=Date.now(),tid='sec'+String(id).replace(/[^A-Za-z0-9]/g,''),nm=fbBy();let dup=0;
+ const fields={owner:sv(SY.uid),by:sv(nm),role:sv('a'),txt:sv(txt),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),open:sv('1'),pr:sv(''),img:sv(''),sub:iv(0),doneBy:sv(''),note:sv(''),ok:iv(0),late:sv(''),
+  mi:iv(du?1:0)};
+ /* 15.11.2026 (החלטת בעל הפרויקט): משימה מהמזכירה – לכל העובדים. יש רשימת עובדים (עד 30) – כולם נמענים; אחרת משימה ישנה לכל הצוות (בלי to), כמו FRM.tkAdd */
+ if(typeof tkStaffLoad==='function'&&typeof TKST!=='undefined'&&!TKST.L){try{await tkStaffLoad()}catch(e){}}
+ const SL=typeof TKST!=='undefined'&&Array.isArray(TKST.L)?TKST.L:null;
+ if(SL&&SL.length&&SL.length<=30)Object.assign(fields,{to:{arrayValue:{values:SL.map(z=>sv(z.uid))}},toN:{arrayValue:{values:SL.map(z=>sv(z.name))}},ow:sv(SL.length===1?SL[0].uid:''),owN:sv(SL.length===1?SL[0].name:''),clt:iv(SL.length===1?now:0),np:iv(0),wp:iv(0)});
+ try{await fsx('/tasks?documentId='+encodeURIComponent(tid),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(e&&e.code===409)dup=1;else{el.disabled=false;return toast(typeof tkErr==='function'?tkErr(e):'פתיחת המשימה נכשלה')}}
+ if(du&&!dup){try{await tkPutImg(tid,'m1',du)}catch(e){toast('המשימה נוצרה, אבל התמונה לא הועלתה');try{await tkPatch(tid,{mi:0})}catch(e2){}}}
+ try{await scMark(id,mid,'ok')}catch(e){}
+ doneSt(id,'ok');mdFree(mid);toast(dup?'✓ המשימה כבר נפתחה':'✓ המשימה נוספה');try{await tkLoad()}catch(e){}
+ if(cur().v==='sec')rerender()};
 
 window.__sec=X;
 })();

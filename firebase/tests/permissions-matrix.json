@@ -384,6 +384,16 @@
         "delete": "DDDDD"
       }
     },
+    "cprice": {
+      "source": "משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1 – מחיר קבוע ללקוח (כתיבה רק בשרת)",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה (הרשאת הזמנות)", "manager": "קריאה" },
+      "ops": { "get": "DDDAA", "list": "DDDAA", "create": "DDDDD", "update": "DDDDD", "delete": "DDDDD" }
+    },
+    "aralert": {
+      "source": "משימה 2026-11-14_הזמנות-לקוח-עסקי-וחשבוניות, שלב 1 – התראות מחירון למנהל (כתיבה רק בשרת)",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "קריאה" },
+      "ops": { "get": "DDDDA", "list": "DDDDA", "create": "DDDDD", "update": "DDDDD", "delete": "DDDDD" }
+    },
     "_not_in_table": {
       "source": "3.3 – 'ברירת מחדל לכל אוסף שלא מופיע בטבלה: אין גישה לאף אחד'",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
@@ -426,6 +436,21 @@
         "overwrite-apk":        "DDDDD",
         "delete-apk":           "DDDDD",
         "create-other-folder":  "DDDDD"
+      }
+    },
+    "sec_tmp/{uid}/": {
+      "source": "קול, תמונה וסרטון למזכירה (15.11.2026, 01-תוכנית.md סעיף 2.1): סרטון בדרך לשרת, נמחק מיד אחרי העיבוד",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "יצירה ומחיקה: רק התיקייה של עצמו; רק סרטון עד 12MB; בלי קריאה ובלי דריסה" },
+      "ops": {
+        "create-own":           "DDDDA",
+        "create-own-too-big":   "DDDDD",
+        "create-own-bad-type":  "DDDDD",
+        "create-own-bad-name":  "DDDDD",
+        "create-other":         "DDDDD",
+        "read-own":             "DDDDD",
+        "list-own":             "DDDDD",
+        "delete-own":           "DDDDA",
+        "delete-other":         "DDDDD"
       }
     },
     "_not_in_table": {

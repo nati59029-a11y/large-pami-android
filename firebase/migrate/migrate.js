@@ -39,7 +39,19 @@ const COPY = [
   'ord', 'prod', 'stockLog', 'ordcfg', 'ordpay', 'private', // הזמנות שלב 1 (2026-11-08): לארג' פעמי ב-legacy כותב לשורש, באותם שמות כמו ב-b/{bizId}
   // סריקת חנות בתלת מימד (שלב 14, 15.11.2026): ב-legacy האוספים בשורש, באותם שמות כמו ב-b/{bizId}. תתי-האוספים (ver, bay, ph, ai, m) מועתקים עם ההורה.
   // קובצי התמונות כבר תחת b/largpeami/store3d/ ב-Storage בכל מצב, ולכן הנתיבים שבמסמכים נשארים נכונים אחרי ההעברה.
+  // הזמנות ספק, מחירי לקוח וחובות לקוחות (#65, מוזג ל-main 15.11.2026): כללים רק תחת b/{bizId}; בבדיקת הייצור 15.11 לא היו מסמכים בשורש
+  'supord', 'cprice', 'aralert', 'arcfg', 'ardoc', 'aralloc',
   's3br', 's3set', 'smap', 's3draft', 'sround', 'srun', 's3sum', 's3fix', 's3appeal', 's3short', 's3use', 's3perf', 's3qid', 's3ntf',
+  // השלמה לפני ההעברה (15.11.2026): כל אוסף שהשרת כותב דרך T.tdb()/bizPrefix, או שיש לו כלל ב-b/{bizId} – ב-legacy נמצא בשורש.
+  // תתי-האוספים (cust/p, pinv/p, rq/c, mq/p, sec_chat/m, sec_inv/p, sec_note/n, custBak/items, stockBak/items) מועתקים עם ההורה.
+  'ptk', 'rtk', 'rq', 'mq', // משימות פרטיות, משימות חוזרות, בקשות, בקשות מנהל
+  'rv', // גלאי גרסת הכללים של מרכז העבודה במשימות (#74): מסמך rv/tk2 שלא קיים, אין כתיבה – נוסף כדי שהרשימה תכסה כל כלל ב-b/{bizId}
+  'cust', 'custcfg', 'custBak', 'cardLog', 'cardQ', // לקוחות; custBak = גיבוי לפני "מחיקת כל הלקוחות" (customers.js)
+  'cat', 'xfer', 'pinv', 'stockBak', // קטגוריות, העברות מלאי, חשבוניות מחיר; stockBak = גיבוי לפני "מחיקת כל המלאי" (orders.js)
+  'impJobs', 'push_tokens', 'fn_rate', 'lineplan', 'lineLog', 'wv',
+  // המזכירה העסקית: SEC_COLLS ב-functions/secretary.js + sec_ord (הזמנות מהמייל, secretary-google.js)
+  'sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log',
+  'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_ord', 'sec_mrule', 'sec_mlog', // sec_mrule/sec_mlog: #67 (צ'אט נקי), מוזג ל-main 15.11 אחרי ההעברה
 ];
 // הזמנות אתר: נדחה לסבב נפרד (לפי התוכנית). מגובים, לא מועתקים.
 const DEFERRED = [
@@ -48,6 +60,9 @@ const DEFERRED = [
   'inspirations', 'event_types', 'quantity_rules', 'recognition_jobs', 'promotions', 'coupons', 'credits',
   'credit_rules', 'ai_usage', 'faqs', 'recipes', 'ai_conversations', 'staging_items',
 ];
+// טבלאות שרת משותפות לכל העסקים (מפתח לפי bizId, נכתבות תמיד ב-getFirestore() בשורש): נשארות בשורש.
+// מגובות, לא מועתקות, לא "לא ידוע", ולא מכשילות אימות. ב-compare-backup לא מושוות (עסקים אחרים כותבים אליהן כל הזמן).
+const SHARED = ['sec_route', 'sec_mailroute', 'sec_oauth', 'sec_mailq', 'sec_waq', 'mailRate', 'impQ'];
 // אוספים חדשים של ריבוי העסקים: לא מקור להעתקה. b לא נכלל אפילו בגיבוי (זה היעד)
 const NEW_ROOT = ['users', 'superadmins'];
 const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests', 'cashClose', 'yemot', 'orders'];
@@ -173,6 +188,7 @@ function collSummary(map, colls) {
 function classify(c) {
   if (COPY.includes(c)) return 'copy';
   if (DEFERRED.includes(c)) return 'deferred';
+  if (SHARED.includes(c)) return 'shared';
   if (NEW_ROOT.includes(c)) return 'new';
   return 'unknown';
 }
@@ -244,7 +260,7 @@ async function otherColls(ctx, colls) {
   const out = [];
   for (const c of colls) {
     const k = classify(c);
-    if (k !== 'unknown' && k !== 'deferred') continue;
+    if (k !== 'unknown' && k !== 'deferred' && k !== 'shared') continue;
     const docs = await ctx.fsr.listDocuments(c);
     out.push({ coll: c, plan: k, count: docs.length });
   }
@@ -253,6 +269,7 @@ async function otherColls(ctx, colls) {
 function printOther(list, ack) {
   for (const o of list) {
     if (o.plan === 'deferred') log(`  נדחה (מגובה, לא מועתק): ${o.coll} – ${o.count} מסמכים`);
+    else if (o.plan === 'shared') log(`  משותף לכל העסקים (מגובה, נשאר בשורש): ${o.coll} – ${o.count} מסמכים`);
     else log(`  !!! אוסף לא ידוע (לא מועתק${ack.includes(o.coll) ? ', אושר ב---ack-unknown' : ', דורש החלטה'}): ${o.coll} – ${o.count} מסמכים`);
   }
 }
@@ -544,9 +561,11 @@ async function loadBackup(ctx) {
 }
 async function cmdCompareBackup(ctx) {
   const bk = await loadBackup(ctx);
-  // users ו-superadmins הם אוספים חדשים שהכלי והשרת כותבים אליהם: לא חלק מ"המקור" שמושווה
-  const colls = Object.keys(bk.collections).filter(c => !NEW_ROOT.includes(c));
-  bk.docs = Object.fromEntries(Object.entries(bk.docs).filter(([rel]) => !NEW_ROOT.includes(topColl(rel)))); // סינון בזיכרון בלבד
+  // users ו-superadmins הם אוספים חדשים שהכלי והשרת כותבים אליהם: לא חלק מ"המקור" שמושווה.
+  // גם הטבלאות המשותפות (SHARED) לא מושוות: השרת כותב אליהן בשורש בשביל כל העסקים, גם אחרי המעבר
+  const skip = c => NEW_ROOT.includes(c) || SHARED.includes(c);
+  const colls = Object.keys(bk.collections).filter(c => !skip(c));
+  bk.docs = Object.fromEntries(Object.entries(bk.docs).filter(([rel]) => !skip(topColl(rel)))); // סינון בזיכרון בלבד
   const now = await rootCollections(ctx);
   const map = await scanTree(ctx.fsr, '', colls);
   const diffs = [];
@@ -557,7 +576,7 @@ async function cmdCompareBackup(ctx) {
     else if (!d.missing && hashFields(d.fields) !== d.hash) diffs.push({ rel, why: 'קובץ הגיבוי פגום' });
   }
   for (const rel of map.keys()) if (!bk.docs[rel]) diffs.push({ rel, why: 'נוסף אחרי הגיבוי' });
-  const newColls = now.filter(c => !colls.includes(c) && !NEW_ROOT.includes(c));
+  const newColls = now.filter(c => !colls.includes(c) && !skip(c));
   log(`השוואה לגיבוי מ-${bk.takenAt}: ${Object.keys(bk.docs).length} מסמכים בגיבוי, ${map.size} עכשיו, הבדלים ${diffs.length}`);
   for (const d of diffs.slice(0, 50)) log(`  ${d.rel}: ${d.why}`);
   if (newColls.length) log('  אוספים חדשים בשורש מאז הגיבוי (לא נכללים בהשוואה): ' + newColls.join(', '));
@@ -627,4 +646,4 @@ if (require.main === module) {
   main(process.argv.slice(2)).then(code => { process.exitCode = code; }, e => { console.error('שגיאה: ' + (e && e.message ? e.message : e)); process.exitCode = 1; });
 }
 
-module.exports = { main, COPY, DEFERRED, FEATURES, classify };
+module.exports = { main, COPY, DEFERRED, SHARED, FEATURES, classify };
