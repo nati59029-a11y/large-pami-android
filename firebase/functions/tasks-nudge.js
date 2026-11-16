@@ -7,6 +7,7 @@
 // נמענים: ow (מי שמטפל), ואם אין – to (עד 30). רק עובד פעיל (staff/{uid}.active == true), לא המנהל עצמו.
 // הגבלה: פעם ב-30 דקות למשימה – fn_rate/tkNudge_<taskId> { t, nd } בתוך העסק (אין כלל = חסום מהאפליקציה). nd שכבר נשלח – לא נשלח שוב.
 // תוכן ההתראה (16.11.2026, בקשת בעל העסק): "תזכורת מהמנהל" + טקסט המשימה (בלי טקסט – הנוסח הכללי). במסך נעול מוסתר (private). data: { k: 'tk', id }.
+// כפתורים בהתראה (16.11.2026): טלפון שנרשם עם act:1 מקבל הודעת data עם אסימון חד־פעמי ל"טופל" (pushAct – push-act.js).
 // הפונקציה לא מפורסמת עד מיזוג ואישור בעל העסק.
 const { HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
@@ -20,9 +21,10 @@ const GAP = 30 * 60000, ND_FRESH = 10 * 60000, MAX_TO = 30;
 const MSG = { title: 'משימות', body: 'תזכורת מהמנהל למשימה – פרטים באפליקציה' };
 const msgOf = (t) => { const x = String((t && t.txt) || '').replace(/\s+/g, ' ').trim(); return x ? { title: 'תזכורת מהמנהל', body: x.length > 400 ? x.slice(0, 399) + '…' : x } : MSG; };
 
+// 16.11.2026 (כפתורים בהתראה): טלפון ישן – בדיוק כמו קודם; טלפון עם כפתורים – הודעת data בלבד (RM.fcmPayload)
 async function fcmSendTk(tokens, msg) {
   const { getMessaging } = require('firebase-admin/messaging');
-  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: { k: 'tk', id: String(msg.id) }, android: RM.androidOf('tk_' + msg.id) });
+  const r = await getMessaging().sendEachForMulticast(RM.fcmPayload(tokens, msg, { data: { k: 'tk' }, tag: 'tk_' + msg.id }));
   return r.responses.map((x, i) => ({ token: tokens[i], ok: x.success, code: x.error && x.error.code }));
 }
 
@@ -59,7 +61,12 @@ async function nudge(who, input, opts) {
       n++;
       const toks = await RM.tokensOf(db, u);
       if (!toks.length) continue;
-      const res = await (o.send || fcmSendTk)(toks, Object.assign({ id: taskId }, msgOf(t)), { uid: u, bizId: who.bizId });
+      // כפתורים (16.11.2026): "טופל" רק כשאפשר לסיים בלי האפליקציה – המטפל עצמו, בלי תמונה נדרשת; אחרת "פתח" (open). "הזכר לי" – מקומי בטלפון
+      // open == '1' ויעד מספרי – אחרת השרת ממילא יחזיר "פתחו את האפליקציה" (tkPlan, כמו החוקים)
+      const PAC = require('./push-act')._core;
+      const can = t.ow === u && t.pr !== '1' && !(Number(t.np) > 0) && !PAC.ckOpen(t) && t.open === '1' && Number.isFinite(PAC.dlOf(t));
+      const res = await RM.sendItem(o.send || fcmSendTk, toks, new Set(await RM.tokensAct(db, u, now)), Object.assign({ id: taskId }, msgOf(t)), { uid: u, bizId: who.bizId },
+        { bizId: who.bizId, uid: u, kind: 'tk', id: taskId, acts: can ? ['done'] : [], show: (can ? 'done' : 'open') + ',h1,d1', now });
       if (res.some((x) => x.ok)) sent++;
       await RM.dropTokens(db, u, res.filter((x) => !x.ok && RM.BAD_TOKEN.includes(x.code)).map((x) => x.token));
     } catch (e) {

@@ -175,12 +175,13 @@ function mornTxt(){const now=Date.now(),a=items().filter(x=>!x.sz),l=a.filter(x=
 function LN(){try{const C=window.Capacitor;return C&&typeof C.isPluginAvailable==='function'&&C.isPluginAvailable('LocalNotifications')&&C.Plugins&&C.Plugins.LocalNotifications||null}catch(e){return null}}
 let lnI=0,lnQ=null;
 async function lnSetup(){const P=LN();if(!P)return null;if(lnI)return P;lnI=1;
- try{await P.registerActionTypes({types:[{id:'lpwc',actions:[{id:'h1',title:'בעוד שעה'},{id:'done',title:'✓ בוצע'}]}]})}catch(e){}
+ try{await P.registerActionTypes({types:[{id:'lpwc',actions:[{id:'done',title:'טופל'},{id:'d1',title:'הזכר לי מחר'},{id:'h1',title:'הזכר לי בעוד שעה'}]}]})}catch(e){}
  try{await P.addListener('localNotificationActionPerformed',a=>{lnQ=a;setTimeout(lnAct,300)})}catch(e){}return P}
 async function lnPerm(askIt){const P=LN();if(!P)return false;try{let p=await P.checkPermissions();if(p&&p.display!=='granted'&&askIt)p=await P.requestPermissions();return !!(p&&p.display==='granted')}catch(e){return false}}
 function lnAct(){const a=lnQ;if(!a)return;if(!on()){return}lnQ=null;const n=a.notification||{},ex=n.extra||{};if(ex.lp!=='wc')return;
  if(ex.u!==SY.uid||ex.b!==LK(''))return;
- if(a.actionId==='h1'&&(ex.k==='r'||ex.k==='p')){snzSet(ex.k+':'+ex.id,Date.now()+H);W.sched();tkRe();return toast('נדחה לעוד שעה')}
+ /* 16.11.2026: כפתורי ההתראה – "טופל", "הזכר לי מחר" (בדיוק 24 שעות), "הזכר לי בעוד שעה" */
+ if((a.actionId==='h1'||a.actionId==='d1')&&(ex.k==='r'||ex.k==='p')){const d1=a.actionId==='d1';snzSet(ex.k+':'+ex.id,Date.now()+(d1?24*H:H));W.sched();tkRe();return toast(d1?'נדחה למחר':'נדחה לעוד שעה')}
  if(a.actionId==='done'&&ex.k==='r')return remDone(ex.id);
  if(a.actionId==='done'&&ex.k==='p'&&typeof ptGet==='function'&&ptGet(ex.id))return ACT.ptDone({dataset:{id:ex.id}});
  TKT='my';W.d0=1;if(cur().v!=='tk')go('tk');else rerender()}

@@ -1,7 +1,7 @@
 'use strict';
 // פונקציות שרת של שלב 0 (מוכנות לפרסום, אבל לא מפורסמות מכאן):
 //   scanDocument       – זיהוי חשבונית, מוצר, טופס משוב, דוח Z או הצהרת פתיחת קופה דרך Gemini, עם המפתח בכספת של השרת.
-//   registerPushToken  – רישום הטלפון להתראות: staff/{uid}.pushTokens.
+//   registerPushToken  – רישום הטלפון להתראות: staff/{uid}.pushTokens (וטלפון עם כפתורים – גם pushAct).
 //   reportBackupStatus – עדכון מצב הגיבוי: app_backup_status/{uid} של השולח בלבד.
 //   getBackupKey       – מפתח הצפנה קבוע לכל משתמש, נגזר מ-BACKUP_MASTER_KEY ומהמזהה שלו.
 //   sendPromoToLine (עובד/מנהל), expirePromosOnLine (מתוזמנת, לא נקראת ממשתמש) – מבצע לקו ימות והורדתו (yemot.js).
@@ -119,12 +119,22 @@ exports.scanDocument = onCall(
 // המזכירה שלב 4: מנהל בלי רשומת עובד (רק admins/{uid}) – נרשם ב-push_tokens/{uid} (אותו מבנה; שרת בלבד, אין גישה מהאפליקציה).
 // מי שיש לו staff/{uid} – בדיוק כמו קודם. מי שאין לו לא staff ולא admins (למשל מנהל־על שאינו מנהל העסק) – אותה שגיאה כמו קודם.
 // פלט: { ok: true, count, removed, moved } – moved = מכמה משתמשים אחרים הטלפון הוסר
+// כפתורים בהתראה (16.11.2026): { token, act: 1 } – הטלפון תומך בכפתורים (הדגל מגיע מהקוד של אנדרואיד) → גם pushAct (באותו מסמך, תת־קבוצה של pushTokens).
+// בלי act – pushAct לא משתנה (גם orders/api.js רושם את אותו טלפון בלי act – אסור שזה יבטל את הכפתורים). act: 0 – הטלפון יוצא מ-pushAct.
+// pushTokens כמו קודם. מסמך בלי pushAct וטלפון בלי act – לא נוסף שדה (המבנה הישן נשמר). מעבר למשתמש אחר / קיצוץ / dropTokens – יוצא גם מ-pushAct.
+// תיקוני אבטחה (16.11.2026), תוספות בלבד – בלי מיגרציה:
+//   pushActAt  { <sha256 של הטלפון>: זמן } – הרישום האחרון עם act:1 (מסכים חדשים שולחים תמיד act: 1 או 0).
+//   pushPlainAt { <sha256>: זמן } – הרישום האחרון בלי act של טלפון שנמצא ב-pushAct (מסכים ישנים / חזרה ל-APK בלי כפתורים).
+//   הכלל (tokensAct ב-secretary-remind.js): כפתורים רק אם pushActAt קיים, מלפני פחות מ-30 יום, ואין אחריו pushPlainAt. אחרת – ההודעה הרגילה.
+//   שתי המפות נשמרות רק לטלפונים שעדיין ב-pushTokens, ונכתבות רק במסמך שיש בו pushAct (או ברישום עם act:1).
+//   push_dev/{sha256} { biz, uid, t } (בשורש) – למי הטלפון רשום עכשיו בכל העסקים; נכתב בכל רישום. pushAct דורש שהשיוך יתאים (push-act.js).
 // =====================================================================================
 const TOKEN_RE = /^[A-Za-z0-9_:.\-]+$/;
 exports.registerPushToken = onCall(T.scoped(async (request) => {
   const who = await requireStaff(request);
   const input = inputObject(request);
   const token = typeof input.token === 'string' ? input.token.trim() : '';
+  const act = input.act === 1 || input.act === true ? 1 : input.act === 0 || input.act === false ? 0 : null; // null = לא נשלח – בלי שינוי
   if (token.length < 20 || token.length > 4096 || !TOKEN_RE.test(token)) {
     throw new HttpsError('invalid-argument', 'מזהה הטלפון להתראות לא תקין', { reason: 'bad-token' });
   }
@@ -147,12 +157,31 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
     for (const q of others) {
       for (const d of q.docs) {
         if (d.ref.path === ref.path) continue;
-        tx.update(d.ref, { pushTokens: FieldValue.arrayRemove(token) });
+        tx.update(d.ref, Object.assign({ pushTokens: FieldValue.arrayRemove(token) }, Array.isArray(d.get('pushAct')) ? { pushAct: FieldValue.arrayRemove(token) } : {}));
         moved++;
       }
     }
-    if (ref === mgrRef) tx.set(ref, { pushTokens: kept, upd: Date.now() });
-    else tx.update(ref, { pushTokens: kept });
+    // pushAct: רק טלפונים שעדיין ב-pushTokens (גם אחרי שהישן ביותר יצא)
+    const hadAct = Array.isArray(s.get('pushAct'));
+    const prev = (hadAct ? s.get('pushAct') : []).filter((t) => typeof t === 'string');
+    const keepTok = act === 1 || (act === null && prev.includes(token));
+    const acts = prev.filter((t) => t !== token && kept.includes(t)).concat(keepTok && kept.includes(token) ? [token] : []);
+    const now = Date.now();
+    const PA = require('./push-act')._core;
+    const h = PA.hashOf(token);
+    const keptH = new Set(kept.map((t) => PA.hashOf(t)));
+    const mapIn = (f) => { const v = s.get(f); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; };
+    const prune = (m) => Object.fromEntries(Object.entries(m || {}).filter(([k, v]) => keptH.has(k) && typeof v === 'number'));
+    const actAt = prune(mapIn('pushActAt')), plainAt = prune(mapIn('pushPlainAt'));
+    if (act === 1) actAt[h] = now;
+    if (act === 0) { delete actAt[h]; delete plainAt[h]; }
+    if (act === null && prev.includes(token)) plainAt[h] = now; // מסכים ישנים – הכפתורים נעצרים עד רישום חדש עם act:1
+    const upd = Object.assign({ pushTokens: kept }, hadAct || act === 1 ? { pushAct: acts, pushActAt: actAt } : {},
+      (hadAct || act === 1) && (mapIn('pushPlainAt') || Object.keys(plainAt).length) ? { pushPlainAt: plainAt } : {});
+    if (ref === mgrRef) tx.set(ref, Object.assign(upd, { upd: now }));
+    else tx.update(ref, upd);
+    // השיוך הגלובלי של הטלפון (שרת בלבד) – גם בלי act. טלפון שעבר לעסק אחר: השיוך עובר איתו, והעסק הקודם כבר לא יכול לפעול דרכו
+    tx.set(getFirestore().doc(PA.devPath(token)), { biz: who.bizId, uid: who.uid, t: now });
     return { ok: true, count: kept.length, removed: all.length - kept.length, moved };
   });
 }));
@@ -263,6 +292,8 @@ Object.assign(exports, require('./secretary-media'));
 Object.assign(exports, require('./recurring'));
 // מרכז עבודה סבב 3 (15.11.2026): tkNudge – "הזכר לעובד" בהתראת טלפון (tasks-nudge.js). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./tasks-nudge'));
+// כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
+Object.assign(exports, require('./push-act'));
 
 // סריקת חנות בתלת מימד – שלב 5 (14.11.2026): s3Rounds (מתוזמנת כל 5 דקות – פתיחת סבבים, תזכורות, איחור, העברה למחליף),
 // s3Run (פתיחה ידנית/ביטול – מנהל), s3Move (העברה/לקיחה), s3Log (אירועי זמן), s3View (מה עובד רואה). store3d.js + lib/store3d-core.js
