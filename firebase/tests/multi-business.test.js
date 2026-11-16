@@ -741,6 +741,89 @@ describe('ריבוי עסקים – הקוד הישן מול הכללים החד
   });
 });
 
+// 16.11.2026: אחרי המעבר של לארג' פעמי ל-b/largpeami (dataRoot 'b'), מכשיר ישן שנשאר במצב legacy לא כותב יותר לשורש.
+// אותה פעולה בדיוק: ב-legacy מותרת (כמו היום), ב-b נחסמת, ובחזרה ל-legacy מותרת שוב. קריאה מהשורש לא נחסמת.
+describe('נעילת כתיבה לשורש של לארג\' פעמי אחרי המעבר ל-b (lpW)', () => {
+  before(async () => { env = await H.getEnv(); });
+  const LP = 'b/largpeami';
+  const setRoot = (dataRoot) => prep((a) => a.doc(LP).set(bizDoc('largpeami', { dataRoot })));
+  beforeEach(async () => {
+    await H.seed(env);
+    await prep(async (a) => {
+      // חברות ב-b/largpeami (כמו אחרי ההעברה), כדי לבדוק שמסלול b/ לא מושפע
+      await a.doc(`${LP}/admins/u_mgr`).set({ email: 'u_mgr@example.invalid' });
+      await a.doc(`${LP}/staff/u_mgr`).set({ name: 'u_mgr', role: 'manager', active: true });
+      await a.doc(`${LP}/staff/u_emp`).set({ name: 'u_emp', role: 'employee', active: true });
+    });
+  });
+  const mgr = () => H.ctxFor(env, 'manager').firestore();
+  const emp = () => H.ctxFor(env, 'employee').firestore();
+  // כל פעולה יוצרת לעצמה מזהה חדש, כך שאפשר להריץ אותה כמה פעמים באותה בדיקה
+  const OPS = {
+    'cfg – מנהל כותב': () => mgr().doc('cfg/main').set({ data: '{}' }),
+    'bk – מנהל כותב': () => mgr().doc('bk/' + fresh('k')).set({ data: '{}', owner: 'u_mgr' }),
+    'inbox – מנהל מעדכן': () => mgr().doc('inbox/i_u_emp').update({ status: 'done' }),
+    'inbox – מנהל מוחק': async () => { const id = fresh('i'); await prep((a) => a.doc('inbox/' + id).set({ owner: 'u_emp', by: 'u_emp', status: 'new', created: 'x', data: '{}', parts: '1' })); return mgr().doc('inbox/' + id).delete(); },
+    'inbox – עובד יוצר': async () => { const id = fresh('i'); await prep((a) => a.doc(`chunks/${id}_0`).set({ owner: 'u_emp', data: 'x' })); return emp().doc('inbox/' + id).set({ owner: 'u_emp', by: 'u_emp', status: 'new', created: 'x', data: '{}', parts: '1' }); },
+    'chunks – עובד יוצר': () => emp().doc(`chunks/${fresh('c')}_0`).set({ owner: 'u_emp', data: 'x' }),
+    'chunks – מנהל מוחק': async () => { const id = fresh('c') + '_0'; await prep((a) => a.doc('chunks/' + id).set({ owner: 'u_emp', data: 'x' })); return mgr().doc('chunks/' + id).delete(); },
+    'tasks – מנהל מעדכן': () => mgr().doc('tasks/t_open').update({ note: 'הערה ' + fresh() }),
+    'tasks – מנהל מוחק': async () => { const id = fresh('t'); await prep((a) => a.doc('tasks/' + id).set({ owner: 'u_emp2', st: 'open' })); return mgr().doc('tasks/' + id).delete(); },
+    'cashout – מנהל מוחק': async () => { const id = fresh('co'); await prep((a) => a.doc('cashout/' + id).set({ uid: 'u_emp2', a: 1 })); return mgr().doc('cashout/' + id).delete(); },
+    'shelf – עובד כותב': () => emp().doc('shelf/price').set({ data: '{"items":[],"next":0}', at: '2' }),
+  };
+
+  it('legacy: כל הכתיבות לשורש מותרות כמו היום (מנהל ועובד)', async () => {
+    await setRoot('legacy');
+    for (const [name, op] of Object.entries(OPS)) await assertSucceeds(op(), name);
+  });
+
+  it('dataRoot b: כל הכתיבות לשורש נחסמות – inbox, cashout, chunks, tasks, bk, cfg, shelf (מנהל ועובד)', async () => {
+    await setRoot('b');
+    for (const [name, op] of Object.entries(OPS)) await assertFails(op(), name);
+    // שום דבר לא השתנה בשורש
+    assert.equal((await getDoc('inbox/i_u_emp')).status, 'new');
+    assert.equal((await getDoc('tasks/t_open')).note, '');
+  });
+
+  it('dataRoot b: קריאה מהשורש עדיין מותרת (מכשיר ישן ממשיך להציג עד הפתיחה מחדש)', async () => {
+    await setRoot('b');
+    await assertSucceeds(mgr().doc('cfg/main').get());
+    await assertSucceeds(mgr().collection('inbox').get());
+    await assertSucceeds(emp().doc('inbox/i_u_emp').get());
+    await assertSucceeds(emp().doc('cfg/main').get());
+  });
+
+  it('חזרה: b ← legacy פותח שוב את הכתיבה לשורש', async () => {
+    await setRoot('b');
+    await assertFails(OPS['cfg – מנהל כותב']());
+    await setRoot('legacy');
+    for (const [name, op] of Object.entries(OPS)) await assertSucceeds(op(), name);
+  });
+
+  it('dataRoot חסר או ערך לא מוכר = נחסם (רק legacy פותח); בלי מסמך b/largpeami בכלל = כמו היום (לפני ההעברה)', async () => {
+    await prep((a) => a.doc(LP).set(Object.assign(bizDoc('largpeami'), { dataRoot: 'other' })));
+    await assertFails(OPS['cfg – מנהל כותב']());
+    const d = bizDoc('largpeami'); delete d.dataRoot;
+    await prep((a) => a.doc(LP).set(d));
+    await assertFails(OPS['chunks – עובד יוצר']());
+    await prep((a) => a.doc(LP).delete());
+    await assertSucceeds(OPS['cfg – מנהל כותב']());
+    await assertSucceeds(OPS['chunks – עובד יוצר']());
+  });
+
+  it('מסלול b/largpeami לא מושפע: כתיבה ב-b/ מותרת גם ב-b; אוסף אתר בשורש (orders) מתנהג אותו דבר בשני המצבים', async () => {
+    for (const r of ['b', 'legacy']) {
+      await setRoot(r);
+      await assertSucceeds(mgr().doc(`${LP}/cfg/main`).set({ data: '{}' }), 'b/ cfg ' + r);
+      await assertSucceeds(emp().doc(`${LP}/chunks/${fresh('c')}_0`).set({ owner: 'u_emp', data: 'x' }), 'b/ chunks ' + r);
+      // אוספי האתר (orders וכו') אינם בכללים בכלל: נשארים סגורים ללקוח, ללא תלות ב-dataRoot (האתר והשרת עובדים עם הרשאת שרת)
+      await assertFails(mgr().doc('orders/o1').get(), 'orders read ' + r);
+      await assertFails(mgr().doc('orders/' + fresh()).set({ x: 1 }), 'orders write ' + r);
+    }
+  });
+});
+
 after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* האמולטור כבר נסגר */ } });
 
 // סריקה אחידה, שלב 6: תור "נשלח למנהל לטיפול" (mq) – הקריטריונים במילים: עובד יוצר ורואה רק את שלו, לא עורך אחרי שליחה,
