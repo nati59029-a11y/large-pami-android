@@ -14,7 +14,8 @@
 //   מנהל העסק (אותו שער כמו בשלבים 1–3: requireStaff+secretary, מנהל אמיתי, הסכמה, מצב מנהלים): secNotes, secReports, secHistory.
 //   הגדרות ההתראות – secPrefs op:'notify' (secretary.js).
 //   מתוזמנות (אזור אחד): secRemind – כל 15 דקות: תזכורות, דוחות, התראה על עובד, שליחת התראות; secDaily – שמירה ומחיקה לפי 9.5.
-// תוכן התראת הטלפון כללי בלבד (בלי שמות, סכומים או תוכן) – הפרטים רק באפליקציה, אחרי כניסה.
+// התראת הטלפון (16.11.2026, בקשת בעל העסק): התראה נפרדת לכל פריט, עם הכותרת והתוכן שלו, והלחיצה פותחת אותו.
+// במסך נעול – visibility 'private': התוכן מוסתר לפי הגדרות הטלפון ("הסתרת תוכן רגיש").
 const crypto = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -35,7 +36,8 @@ const nid = (uid, key) => crypto.createHash('sha256').update(uid + '|' + key, 'u
 const RESOLVE = ['task', 'backup', 'fact', 'inv']; // נעלם מהנתונים (טופל) – התזכורת נסגרת לבד ולא חוזרת
 const FIN_RESOLVE = ['invDue', 'chk']; // תיקון סבב 1: נסגרת רק כשהחשבונית/הצ'ק באמת נעלמו ממראה תקין – לא כשאין מראה ולא בגלל חלון זמן
 
-// ---------- תוכן התראת הטלפון: כללי בלבד ----------
+// ---------- תוכן התראת הטלפון ----------
+// pushText – הנוסח הכללי הישן; נשאר כגיבוי להתראה בלי כותרת
 function pushText(notes) {
   if (notes.length > 1) return { title: 'המזכירה', body: 'יש ' + notes.length + ' התראות חדשות. פתחו את האפליקציה כדי לראות.' };
   const x = notes[0];
@@ -44,11 +46,21 @@ function pushText(notes) {
   return { title: 'המזכירה', body: (x.n > 1 ? '(שוב) ' : '') + body };
 }
 
+// 16.11.2026: התראה אחת לכל פריט – הכותרת והתוכן שלו (מקוצרים לגודל של התראה), והמזהה שלו לפתיחה בלחיצה
+const cut = (v, n) => { const t = String(v || '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+function noteMsg(x, id) {
+  const title = cut(String(x.title || '').replace(/\s+/g, ' '), 120);
+  if (!title) return Object.assign(pushText([x]), { id });
+  return { title: (x.n > 1 ? '(שוב) ' : '') + title, body: cut(x.body, 400), id };
+}
+
 // ---------- שליחה (FCM דרך firebase-admin). בבדיקות – opts.send מדומה ----------
+// tag – אותו פריט שנשלח שוב מחליף את ההתראה הקודמת שלו, ופריטים שונים מופיעים כהתראות נפרדות. private – מוסתר במסך נעול (לפי הגדרות הטלפון)
+const androidOf = (tag) => ({ priority: 'high', notification: Object.assign({ visibility: 'private' }, tag ? { tag } : {}) });
 const BAD_TOKEN = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument'];
 async function fcmSend(tokens, msg) {
   const { getMessaging } = require('firebase-admin/messaging');
-  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: Object.assign({ k: 'sec', v: 'notes' }, msg.id ? { id: String(msg.id) } : {}), android: { priority: 'high' } });
+  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: Object.assign({ k: 'sec', v: 'notes' }, msg.id ? { id: String(msg.id) } : {}), android: androidOf(msg.id ? 'sec_' + msg.id : '') });
   return r.responses.map((x, i) => ({ token: tokens[i], ok: x.success, code: x.error && x.error.code }));
 }
 async function tokensOf(db, uid) {
@@ -295,26 +307,37 @@ async function remindBiz(opts) {
     const s = await db.collection(`sec_note/${m.uid}/n`).where('pend', '==', true).limit(100).get();
     const due = s.docs.filter((d) => (d.get('pushAt') || 0) <= now);
     if (!due.length) continue;
-    let sent = 0;
-    try {
-      const toks = await tokensOf(db, m.uid);
-      if (toks.length) {
-        // 15.11.2026: התראה אחת – גם המזהה שלה (רק מזהה, בלי תוכן), כדי שהלחיצה תפתח את פרטי ההתראה
-        const msg = pushText(due.map((d) => d.data())); if (due.length === 1) msg.id = due[0].id;
-        const res = await (opts.send || fcmSend)(toks, msg, { uid: m.uid, bizId: scope.bizId });
-        sent = res.filter((x) => x.ok).length;
-        await dropTokens(db, m.uid, res.filter((x) => !x.ok && BAD_TOKEN.includes(x.code)).map((x) => x.token));
-      }
-    } catch (e) {
-      // תיקון סבב 1: תקלה בשליחה למנהל אחד לא עוצרת את שאר העסק. ההתראה נשארת ממתינה ותישלח בריצה הבאה
+    let toks;
+    try { toks = await tokensOf(db, m.uid); } catch (e) {
       logger.error('secretary: push failed', { bizId: scope.bizId, name: e && e.name, code: e && e.code });
       out.pushErr = (out.pushErr || 0) + 1;
       continue;
     }
-    const b = db.batch();
-    for (const d of due) b.update(d.ref, { pend: false, pushed: sent ? now : 0 });
+    // 16.11.2026: התראה נפרדת לכל פריט (בלי הגבלת כמות – החלטת בעל העסק), עם התוכן שלו והמזהה שלו
+    const b = db.batch(), badT = new Set();
+    let any = false, errd = false;
+    for (const d of due) {
+      let sent = 0;
+      if (toks.length) {
+        try {
+          const live = toks.filter((t) => !badT.has(t));
+          const res = live.length ? await (opts.send || fcmSend)(live, noteMsg(d.data(), d.id), { uid: m.uid, bizId: scope.bizId }) : [];
+          sent = res.filter((x) => x.ok).length;
+          res.filter((x) => !x.ok && BAD_TOKEN.includes(x.code)).forEach((x) => badT.add(x.token));
+        } catch (e) {
+          // תיקון סבב 1: תקלה בשליחה לא עוצרת את שאר העסק. הפריט הזה נשאר ממתין ויישלח בריצה הבאה
+          if (!errd) logger.error('secretary: push failed', { bizId: scope.bizId, name: e && e.name, code: e && e.code });
+          errd = true;
+          continue;
+        }
+      }
+      b.update(d.ref, { pend: false, pushed: sent ? now : 0 });
+      if (sent) any = true;
+    }
+    if (errd) out.pushErr = (out.pushErr || 0) + 1;
     await b.commit();
-    if (sent) out.pushed++;
+    try { await dropTokens(db, m.uid, [...badT]); } catch (e) { logger.warn('secretary: drop tokens failed', { bizId: scope.bizId }); }
+    if (any) out.pushed++;
   }
 
   const b = db.batch();
@@ -526,4 +549,4 @@ exports.secDaily = onSchedule({ region: LEGACY_REGION, schedule: 'every day 04:1
   if (r.errors.length) throw new Error('secretary daily: ' + r.errors.length + ' errors');
 });
 
-Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, tokensOf, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN – גם ל-tasks-nudge.js (tkNudge)
+Object.defineProperty(exports, '_core', { enumerable: false, value: { snooze, runRemind, remindBiz, runSecDaily, dailyBiz, pushText, noteMsg, androidOf, tokensOf, dropTokens, BAD_TOKEN, nid, monthsAgo } }); // dropTokens, BAD_TOKEN – גם ל-tasks-nudge.js (tkNudge)
