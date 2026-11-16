@@ -229,7 +229,9 @@ export async function registerPush() {
     if (!perm || perm.receive !== 'granted') return 'denied';
     // 16.11.2026: act נשלח תמיד (1 = ה-APK בונה התראות עם כפתורים, 0 = לא) – רישום בלי act נחשב "מסכים ישנים" בשרת (tokensAct)
     const act = g.act === true ? 1 : 0;
-    P.addListener('registration', (t) => { if (t && t.value) call(FN.registerPushToken, { token: t.value, act }).catch(() => {}); });
+    // 16.11.2026 מכשיר אחד: מזהה הכניסה של האפליקציה (lp-sync: ds), רק אם השרת כבר אישר אותה (dsc)
+    let s = ''; try { const y = JSON.parse(localStorage.getItem('lp-sync')) || {}; if (y.dsc && typeof y.ds === 'string') s = y.ds; } catch (e) { /* */ }
+    P.addListener('registration', (t) => { if (t && t.value) call(FN.registerPushToken, s ? { token: t.value, act, s } : { token: t.value, act }).catch(() => {}); });
     await P.register();
     return 'requested';
   } catch (e) { return 'error'; }

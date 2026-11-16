@@ -13,6 +13,7 @@
 // ניקוי: secDaily מוחק מסמכי pact שפג תוקפם (cleanPact).
 // push_dev/{sha256(מזהה FCM)} (בשורש, שרת בלבד – החוקים סוגרים כל אוסף שלא הוגדר) { biz, uid, t } – למי הטלפון רשום עכשיו, בכל העסקים.
 //   נכתב בכל registerPushToken (עם act ובלי), נמחק ב-dropTokens כשהוא עדיין של אותו משתמש. מזהה ה-FCM עצמו לא נשמר שם – רק הגיבוב.
+// מכשיר אחד (16.11.2026): אחרי push_dev – אם למשתמש יש רישום טלפון נוכחי (dev_cur/{uid}.phone, one-device.js), הטלפון הלוחץ חייב להיות fh שלו.
 // סדר הבדיקות: גודל הגוף (content-length, לפני כל עיבוד) ← פורמט (parseBody) ← רק אז קריאה מהמסד.
 
 const crypto = require('node:crypto');
@@ -128,6 +129,8 @@ async function act(b, o) {
   // הטלפון חייב להיות משויך עכשיו לאותו עסק ולאותו משתמש (push_dev) – לפני כל קריאה בתוך העסק
   const dev = await getFirestore().doc(devPath(b.f)).get();
   if (!dev.exists || dev.get('biz') !== d.biz || dev.get('uid') !== d.uid) return R(false, 'bad-device', MSG.deny, { open: true });
+  // מכשיר אחד למשתמש (16.11.2026, one-device.js): יש רישום טלפון נוכחי (dev_cur/{uid}.phone) – רק הוא (fh) יכול ללחוץ
+  if (!(await require('./one-device')._core.phoneOk(d.uid, b.f))) return R(false, 'bad-device', MSG.deny, { open: true });
   // בדיקת הרשאה מחדש – בתוך העסק, בדיוק כמו קריאה מהאפליקציה של אותו משתמש (bizId מהאסימון, לא מהלקוח)
   return T.runInBiz({}, async () => {
     const req = { auth: { uid: d.uid }, data: { bizId: d.biz } };

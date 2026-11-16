@@ -71,6 +71,9 @@ jobs:
       - name: ui-bio
         if: always()
         run: $EX "node tests/app-multibiz/ui-bio.js ../app-source/www ../out/ui-bio.json ../out/shots-bio"
+      - name: ui-onedev (one device per user – devClaim, mocked network)
+        if: always()
+        run: node tests/app-multibiz/ui-onedev.js ../app-source/www ../out/ui-onedev.json
       - name: ui-e2e
         if: always()
         run: $EX "node tests/app-multibiz/ui-e2e.js ../app-source/www ../out/ui-e2e.json ../out/shots-e2e"
