@@ -303,6 +303,7 @@ async function secMirrorPut(request) {
     if (n >= MIRROR_HOUR) throw new HttpsError('resource-exhausted', 'יותר מדי עדכונים בשעה', { reason: 'rate-limit' });
     tx.set(useRef, { mp: { h, n: n + 1 } }, { merge: true });
     const pay = fin.pay; delete fin.pay;
+    delete fin.rec; // פעולות אחרונות – רק לשיחה מהמכשיר, לא נשמרות במראה
     // נשמר כמחרוזת JSON (ב-Firestore אין מערך בתוך מערך), כמו התצוגות לעובדים (wv)
     tx.set(db.doc('sec_mirror/fin'), { v: 1, data: JSON.stringify(fin), at: now, devAt: fin.at, by: who.uid });
     if (pay) tx.set(db.doc('sec_mirror/pay'), { data: JSON.stringify(pay), at: now, by: who.uid });
@@ -448,6 +449,7 @@ async function secChat(request) {
     if (ms.exists) { fin = ST.cleanFin(parseJ(ms.get('data'))); if (fin) { finFrom = 'mirror'; mirrorAt = ms.get('at') || fin.at; } }
   }
   if (!payOn) pay = null; // מתג השכר כבוי – שום נתון שכר לא נכנס לשיחה
+  if (!payOn && fin && Array.isArray(fin.rec)) fin.rec = fin.rec.filter((r) => r[9] !== 1); // גם לא דרך רשימת הפעולות האחרונות
   else if (!pay && cfg.mirror) { const ps = await db.doc('sec_mirror/pay').get(); if (ps.exists) pay = (ST.cleanFin({ v: 1, at: 1, pay: parseJ(ps.get('data')) }) || {}).pay || null; }
   const asOf = finFrom === 'mirror' ? mirrorAt : fin ? fin.at : null;
   const stale = finFrom === 'mirror' && now - mirrorAt > STALE_MS;
@@ -517,7 +519,10 @@ async function secChat(request) {
     s3 = await require('./store3d-extra')._x.secBrief(db, who, brs, now).catch((e) => { logger.warn('secChat: store3d brief failed', { code: e && e.code }); return null; });
     // 15.11.2026: ההנחיות הקבועות של המנהל הזה בלבד (sec_mrule, ערוץ השיחה) – גוברות על ברירת המחדל בסגנון, לא על הכללים המחייבים. כשל – בלי ההנחיות
     const mr = cfg.learn ? await require('./secretary-learn')._core.chatRules(db, who.uid).catch(() => []) : [];
-    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote, mr }) + (s3 ? '\n' + s3.text : '');
+    // 15.11.2026: פרטי המכשיר לשאלות על תקלות – רק גרסה ומצב חיבור, מסוננים
+    const ap = input.app && typeof input.app === 'object' && !Array.isArray(input.app) ? input.app : {};
+    const appNote = [/^\d{1,7}$/.test(String(ap.v)) ? 'גרסת אפליקציה ' + ap.v : '', ap.on === false ? 'המכשיר דיווח שאין חיבור לאינטרנט' : '', typeof ap.sync === 'number' && ap.sync >= 0 && ap.sync < 100000 ? 'פעולות שעוד לא נשלחו לענן: ' + Math.round(ap.sync) : ''].filter(Boolean).join('; ');
+    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote, mr, appNote }) + (s3 ? '\n' + s3.text : '');
     let final = null, refused = false;
     try {
       for (let round = 0; round < MAX_ROUNDS && final === null && !refused; round++) {

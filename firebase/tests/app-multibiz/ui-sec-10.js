@@ -106,8 +106,11 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
     await enter(page);
     // ---- כניסה: מסך נקי + מול העיניים ----
     check('כניסה לצ\'אט: השיחה הקודמת לא נטענת ולא מוצגת', !all(bodies, 'secChatLoad').length && (await page.$$('#secChat .secmsg.u')).length === 0 && /אני רותי/.test(await txt(page, '#secChat')));
+    // 15.11.2026: "מול העיניים" עבר ללשונית משלו – הצ'אט נפתח ריק; פתיחת הלשונית רושמת את הכניסה (visit:true)
+    check('כניסה: "מול העיניים" לא מוצג בצ\'אט', !(await page.$('#secChat #secEyes')) && !(await page.$('#secEyes')));
+    await tab(page, 'eyes');
     const e1 = last(bodies, 'secLearn', (b) => b.op === 'eyes');
-    check('כניסה: secLearn eyes עם visit:true (נרשמת כניסה)', e1 && e1[1].visit === true, e1 && e1[1]);
+    check('לשונית "מול העיניים": secLearn eyes עם visit:true (נרשמת כניסה)', e1 && e1[1].visit === true, e1 && e1[1]);
     const et = await txt(page, '#secEyes');
     check('"מול העיניים": 4 שורות פתוחות + "עוד (1)", ו"מה עשיתי מאז הכניסה הקודמת" עם 3 + "עוד"', (await page.$$('#secEyOpen .secli')).length === 4 && /עוד \(1\)/.test(et) && /מה עשיתי מאז הכניסה הקודמת/.test(et) && (await page.$$('#secEyDid .secli')).length === 3, et.slice(0, 300));
     check('"↩ תגובה" על כל שורה ב"מול העיניים"', await page.evaluate(() => [...document.querySelectorAll('#secEyes .secli')].every((r) => !!r.querySelector('[data-a=secMrReply]'))));
@@ -122,22 +125,26 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
     const ca = last(bodies, 'secCal', (b) => b.op === 'approve');
     check('"אשר" מ"מול העיניים": secCal approve, ו"מול העיניים" מתרענן (בלי visit)', ca && ca[1].id === 'k9' && all(bodies, 'secLearn', (b) => b.op === 'eyes').length > n0 && last(bodies, 'secLearn', (b) => b.op === 'eyes')[1].visit === false, ca && ca[1]);
     // ---- שאלה → כרטיס תזכורת → אישור ----
+    await tab(page, 'chat');
     await page.fill('#secForm textarea', 'תזכירי לי מחר ב-9 להתקשר לספק'); await page.click('#secForm button[value=n]'); await H.settle(page, 800);
     check('כרטיס "לקבוע תזכורת?" עם אשר/בטל, ו"↩ תגובה" על התשובה', /לקבוע תזכורת\?/.test(await txt(page, '#secChat')) && !!(await page.$('#secChat [data-a=secCOk][data-id=k7]')) && !!(await page.$('#secChat [data-a=secMrReply][data-id=a9]')));
     await page.click('#secChat [data-a=secCOk][data-id=k7]'); await H.settle(page, 700);
     const k7 = await page.evaluate(() => { const c = document.querySelector('#secChat [data-card=k7]'); return c ? { st: c.dataset.st, t: c.innerText, btn: c.querySelectorAll('button').length } : null; });
     check('אחרי אישור: "אושר ✓" בלי כפתורים', k7 && k7.st === 'ok' && /אושר ✓/.test(k7.t) && k7.btn === 0, k7);
     // ---- לחיצה על שורה → המקום שלה ----
+    await tab(page, 'eyes');
     await page.click('#secEyOpen .secli[data-ey="n:n1"] .secrow [data-a=secEyGo]'); await H.settle(page, 1500);
     check('לחיצה על התראה ב"מול העיניים" → לשונית ההתראות ופרטי ההתראה', await page.evaluate(() => window.__sec.tab === 'notes') && /לשלם לספק החלב/.test(await page.evaluate(() => (document.getElementById('dlg').open ? document.getElementById('dlg').innerText : ''))));
     // ---- מעבר ליומן וחזרה – הצ'אט נשאר; כניסה מחדש למסך – נקי ----
     await tab(page, 'cal'); await tab(page, 'chat');
     check('מעבר ליומן וחזרה ל"שיחה": הצ\'אט הנוכחי נשאר (השאלה והכרטיס "אושר ✓")', (await page.$$('#secChat .secmsg.u')).length === 1 && /אושר ✓/.test(await txt(page, '#secChat [data-card=k7]')));
-    check('חזרה ללשונית: "מול העיניים" מתעדכן ברקע בלי לרשום כניסה (visit:false)', last(bodies, 'secLearn', (b) => b.op === 'eyes')[1].visit === false);
+    await tab(page, 'eyes');
+    check('חזרה ללשונית "מול העיניים": "מול העיניים" מתעדכן ברקע בלי לרשום כניסה (visit:false)', last(bodies, 'secLearn', (b) => b.op === 'eyes')[1].visit === false);
     await tab(page, 'cal'); await enter(page);
     check('כניסה מחדש למסך המזכירה (גם כשהלשונית האחרונה הייתה יומן): הצ\'אט נקי', await page.evaluate(() => window.__sec.msgs.length === 0));
-    await tab(page, 'chat');
-    check('כניסה מחדש: אין את השאלה והכרטיס הקודמים, ו"מול העיניים" נטען עם visit:true', (await page.$$('#secChat .secmsg.u')).length === 0 && !(await page.$('#secChat [data-card=k7]')) && last(bodies, 'secLearn', (b) => b.op === 'eyes')[1].visit === true);
+    check('כניסה מחדש: הצ\'אט ריק', (await page.$$('#secChat .secmsg.u')).length === 0 && !(await page.$('#secChat [data-card=k7]')));
+    await tab(page, 'eyes');
+    check('כניסה מחדש: אין את השאלה והכרטיס הקודמים, ו"מול העיניים" נטען עם visit:true', last(bodies, 'secLearn', (b) => b.op === 'eyes')[1].visit === true);
     // ---- צ'אט קודם ----
     await tab(page, 'prev');
     const pv = await page.evaluate(() => { const q = (id) => document.querySelector('#secPrev [data-card=' + id + ']'); const f = (id) => { const c = q(id); return c ? { st: c.dataset.st || '', t: c.innerText, btn: c.querySelectorAll('button').length } : null; }; return { k1: f('k1'), k2: f('k2'), k3: f('k3'), rt: f('rt0123456789abcdef'), form: !!document.getElementById('secForm') }; });
@@ -159,7 +166,7 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
     await page.evaluate(() => { window.__secTd.at = 0; go('home'); go('todo'); }); await H.settle(page, 900);
     check('מסך "לטיפול" (מטמון פג): נשאל השרת secLearn eyes hold:true', !!last(bodies, 'secLearn', (b) => b.op === 'eyes' && b.hold === true));
     S.hold = true;
-    await enter(page); await tab(page, 'chat');
+    await enter(page); await tab(page, 'eyes');
     check('כלל ניתוב: ב"מול העיניים" כפתור למסך "לטיפול" (1)', /במסך "לטיפול" \(1\)/.test(await txt(page, '#secEyes')));
     await page.click('#secEyes [data-a=go][data-v=todo]'); await H.settle(page, 900);
     const td = await txt(page, '#main');
@@ -217,7 +224,7 @@ const noHs = (page) => page.evaluate(() => document.documentElement.scrollWidth 
   }
   {
     const { ctx, page } = await open(browser, www, { learn: false });
-    await enter(page);
+    await enter(page); await tab(page, 'eyes');
     check('כללים כבויים: "מול העיניים" מוצג, בלי "תגובה"', !!(await page.$('#secEyes #secEyOpen .secli')) && (await page.$$('[data-a=secMrReply]')).length === 0);
     check('כללים כבויים: בלי שגיאות JS', page.__errors.length === 0, page.__errors.slice(0, 3));
     await ctx.close();
