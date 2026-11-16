@@ -45,7 +45,7 @@ function mockCam(w,h,fovL){const c=document.createElement('canvas');c.width=w;c.
 /* חיישן מזויף. מצב נקודות: "המשתמש" מסתובב אל היעד הבא במהירות קבועה ונעצר עליו.
    מצב סרטון (אחרי "הקלטה"): מסתובב ברצף בלי לעצור (vspeed מעלות לשנייה בזמן אמיתי), שורה אחרי שורה לפי סדר היעדים, עם רעידה קטנה של היד */
 function mockSensor(cam,opt){opt=opt||{};return(cb,api)=>{let yaw=opt.yaw0||20,pitch=-8,last='',t=0,tp=performance.now(),vy=1,vp=0,ph=0,t1=0;const sp=opt.speed||240,vsp=opt.vspeed||40,silent=!!opt.silent;
- const id=setInterval(()=>{if(silent)return;const now=performance.now(),dt=Math.min(.25,(now-tp)/1000);tp=now;const s=api.state?api.state():{},tg=api.target();
+ const id=setInterval(()=>{if(silent)return;const now=performance.now(),dt=Math.min(.25,(now-tp)/1000);tp=now;if(window.__kick){yaw+=window.__kick;window.__kick=0}const s=api.state?api.state():{},tg=api.target();
   if(opt.spin)yaw+=opt.spin*dt;/* סיבוב קבוע (מעלות לשנייה), בלי קשר ליעדים – לבדיקת "לאט יותר" */
   else if(s.mode==='video'){if(s.rec&&tg){const dy=M.wrap180(tg.yaw-yaw),dp=tg.pitch-pitch,L=Math.hypot(dy,dp),st=vsp*dt;
     if(L>st){vy=dy/L;vp=dp/L}yaw+=vy*st;pitch=Math.max(-90,Math.min(90,pitch+vp*st));ph+=dt}}
@@ -67,9 +67,18 @@ window.__run=async function(o){o=o||{};let opts={};
  if(o.mode)try{localStorage.setItem('lp-s3pc-mode',o.mode)}catch(e){}
  if(!o.real){const cam=mockCam(o.w||360,o.h||480,o.fovL||62);opts.mock={camera:cam,sensor:mockSensor(cam,o)};
   if(o.shake!=null)opts.mock.motion=cb=>{const id=setInterval(()=>{const c=document.querySelector('.s3pc-cnt');if(c&&/צולמו [1-9]|כוסו [1-9]/.test(c.textContent))cb({acceleration:{x:o.shake,y:0,z:0}})},16);return()=>clearInterval(id)}}
+ /* תמונה אמיתית מדומה (o.photo): ok | cw | ccw (מסובבת 90°) | fail | failonce | move (הטלפון זז באמצע) | wide (יחס שונה בלי סיבוב). o.caps: full | none | failexp (applyConstraints נכשל לחשיפה) */
+ if(!o.real&&o.photo){const cam=opts.mock.camera,kind=o.photo;window.__photoCalls=0;opts.mock.photo=()=>new Promise((res,rej)=>{const n=++window.__photoCalls;
+   if(kind==='fail'||(kind==='failonce'&&n===1))return setTimeout(()=>rej(new Error('photo')),50);
+   if(kind==='move'&&n===1)setTimeout(()=>{window.__kick=12},100);
+   setTimeout(()=>{const sw=cam.el.width,sh=cam.el.height,rot=kind==='cw'?1:kind==='ccw'?-1:0,c=document.createElement('canvas');c.width=rot?sh*2:sw*2;c.height=rot?sw*2:sh*2;const g=c.getContext('2d');
+    if(rot>0){g.translate(c.width,0);g.rotate(Math.PI/2);g.drawImage(cam.el,0,0,c.height,c.width)}else if(rot<0){g.translate(0,c.height);g.rotate(-Math.PI/2);g.drawImage(cam.el,0,0,c.height,c.width)}else g.drawImage(cam.el,0,0,c.width,c.height);
+   c.toBlob(b=>res(b),'image/jpeg',.9)},kind==='move'?300:120)})}
+ if(!o.real&&o.caps){window.__applied=[];const cp=o.caps==='none'?{}:{exposureMode:['continuous','manual'],whiteBalanceMode:['continuous','manual'],focusMode:['continuous','manual'],exposureTime:{min:1,max:1e4},iso:{min:50,max:800}};
+  opts.mock.caps={caps:cp,settings:o.caps==='none'?{}:{exposureTime:166,colorTemperature:5200,focusDistance:0.4,iso:100},apply:c=>{window.__applied.push(c);const a=c.advanced[0];return o.caps==='failexp'&&a.exposureMode?Promise.reject(new Error('x')):Promise.resolve()}}}
  if(o.noAlign)opts.noAlign=true;if(o.width)opts.width=o.width;
  if(o.fov)opts.fov=o.fov;
- const t0=performance.now(),r=await S3PanoCap.start(document.body,opts);if(!r)return null;
+ window.__fovKeys=null;const t0=performance.now(),r=await S3PanoCap.start(document.body,opts);if(!r)return null;
  const fs=await size(r.full),ss=await size(r.sm),out={w:r.w,h:r.h,full:fs,sm:ss,fullBytes:r.full.size,smBytes:r.sm.size,meta:r.meta,ms:Math.round(performance.now()-t0),
   type:r.full.type,err:o.real?null:+(await errOf(r.sm,r.meta.yawRef)).toFixed(2)};
  if(o.b64)out.fullB64=await b64(r.full);
