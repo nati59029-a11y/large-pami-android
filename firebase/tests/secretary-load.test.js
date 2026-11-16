@@ -60,13 +60,20 @@ function hookReq(msgs) {
   return { method: 'POST', rawBody: raw, get: (h) => hd[String(h).toLowerCase()] };
 }
 function fakeRes() { return { code: 0, body: '', headersSent: false, status(c) { this.code = c; return this; }, set() { return this; }, send(b) { this.body = b; this.headersSent = true; return this; } }; }
-// Meta: אם התשובה אינה 200 – שולחת שוב (במציאות במשך שעות; כאן עד 40 ניסיונות עם המתנה שגדלה ופיזור אקראי).
+// Meta: אם התשובה אינה 200 – שולחת שוב (במציאות במשך שעות). כאן: עד שהבקשה מתקבלת, בחלון של עד 10 דקות לבקשה, עם המתנה שגדלה (עד 4 שניות) ופיזור אקראי.
 // הפיזור חשוב: בלי פיזור כל הבקשות שנכשלו יחד מנסות שוב באותו רגע ומתנגשות שוב על מונה ההצפה (נכשל ב-CI אחרי מיזוג main, 12.11)
+// יציבות (16.11.2026): כל קבלת הודעה (גם כפולה) קוראת וכותבת בעסקה את אותו מסמך (sec_cfg/wa_use – מונה ההצפה), כך ש-40 בקשות במקביל
+// עוברות אחת־אחת. ב-CI אמולטור הפונקציות מעבד באותו זמן את התור (sec_waq) ומעמיס על המכונה, חלק מהעסקאות נכשלות ב-"Transaction lock timeout",
+// ו-40 ניסיונות קבועים (כ-2 דקות) לא תמיד הספיקו (נכשל: "לא התקבלו: 50, מקסימום ניסיונות: 40"). חלון זמן במקום מספר ניסיונות קבוע –
+// כמו Meta. הבדיקה עצמה לא השתנתה: כל בקשה חייבת להתקבל, בלי אובדן ובלי כפילות, והמונים מדויקים.
+const META_WINDOW_MS = 10 * 60000;
+const ERRS = {}; // סוגי השגיאות שגרמו לניסיון חוזר – מוצגים בהודעת הכשל
 async function deliver(msgs, now) {
-  for (let i = 0; i < 40; i++) {
+  const end = Date.now() + META_WINDOW_MS;
+  for (let i = 0; i === 0 || Date.now() < end; i++) {
     if (i) await new Promise((r) => setTimeout(r, Math.min(4000, 150 * i) * (0.5 + Math.random())));
     const res = fakeRes();
-    try { await WA.handleHook(hookReq(msgs), res, { secret: SECRET, now }); } catch (e) { res.code = 500; }
+    try { await WA.handleHook(hookReq(msgs), res, { secret: SECRET, now }); } catch (e) { res.code = 500; const k = String((e && e.code) || '') + ' ' + String((e && e.message) || e).slice(0, 80); ERRS[k] = (ERRS[k] || 0) + 1; }
     if (res.code === 200) return i + 1;
   }
   return 0;
@@ -90,7 +97,7 @@ describe('עומס: ווצאפ, מייל ותור חשבוניות – בלי א
     const reqs = msgs.map((m) => [m]).concat(msgs.map((m) => [m])).sort(() => Math.random() - 0.5);
     const tries = [];
     for (const c of chunks(reqs, 40)) tries.push(...(await Promise.all(c.map((r) => deliver(r, now)))));
-    assert.ok(tries.every((n) => n > 0), 'כל בקשה התקבלה בסוף (אולי אחרי ניסיון חוזר); לא התקבלו: ' + tries.filter((n) => !n).length + ', מקסימום ניסיונות: ' + Math.max(...tries));
+    assert.ok(tries.every((n) => n > 0), 'כל בקשה התקבלה בסוף (אולי אחרי ניסיון חוזר); לא התקבלו: ' + tries.filter((n) => !n).length + ', מקסימום ניסיונות: ' + Math.max(...tries) + ', שגיאות: ' + JSON.stringify(ERRS));
     const ins = await coll(`b/${A}/sec_in`);
     assert.equal(ins.length, 320, 'אין אובדן ואין כפילות');
     assert.equal(new Set(ins.map((x) => x.wamid)).size, 320);

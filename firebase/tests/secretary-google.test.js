@@ -12,7 +12,7 @@ process.env.SEC_GOOGLE_KEY = Buffer.from('test-only-sec-google-key-32bytes').toS
 process.env.GEMINI_API_BASE = 'http://127.0.0.1:9799';
 process.env.GEMINI_API_KEY = 'dummy-gemini-key-for-emulator';
 
-const { describe, it, before, after, beforeEach } = require('node:test');
+const { describe, it, before, after, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
@@ -1324,6 +1324,16 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     GM.reset();
     AIR = { text: 'שלום, אנחנו פתוחים ' + HOURS + '. MODEL-TEXT', cls: 'hours', qk: 'מה שעות הפתיחה', facts: ['hours'] };
     GM.state.sec = () => ({ calls: [{ name: 'prepareReplyDraft', args: AIR }] });
+  });
+  // יציבות (16.11.2026): ב-CI הטריגר secMailWork באמולטור הפונקציות מעבד את sec_mailq ברקע, ולפעמים מאחר (הפעלה ראשונה של התהליך).
+  // מזהי המיילים חוזרים בכל בדיקה (GO.reset מאפס את המונה, ואותה תיבה) – כך שרשומת תור שנשארה מבדיקה קודמת "תפסה" את המייל הראשון
+  // של הבדיקה הבאה (למשל "תקרה יומית": s1 נלקח ברקע, ו-s3 קיבל 'draft' במקום 'cap'). לכן כל בדיקה מסתיימת רק אחרי שהטריגר סיים
+  // את כל מה שנכנס לתור (הטריגר מוחק את הרשומה בסוף העיבוד). בלי אמולטור הפונקציות אין מי שיעבד – התור נמחק ב-seed הבא.
+  afterEach(async () => {
+    if (!(await fnLive())) return;
+    let q = [];
+    for (let i = 0; i < 300; i++) { q = await coll('sec_mailq'); if (!q.length) return; await sleep(200); }
+    throw new Error('תור הטיוטות לא התרוקן אחרי 60 שניות: ' + q.map((v) => v.id).join(','));
   });
 
   it('מייל מאדם (בקוד, בלי AI): רק הוא נכנס לתור; דיוור / no-reply / מענה אוטומטי / מהמנהל / חשוד / קובץ / ישן – בלי תור ובלי טיוטה', async () => {
