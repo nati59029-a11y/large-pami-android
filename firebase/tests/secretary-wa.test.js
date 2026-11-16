@@ -90,7 +90,7 @@ function model(body) {
   if (s.startsWith('SEC-CHAT-V1 WA-IN')) {
     const u = userText(body).split('<<הודעה מצד שלישי').pop(); // רק ההודעה עצמה (לא המידע לפונים והמחירון שנשלחים לפניה)
     if (/مرحبا/.test(u)) return { calls: [{ name: 'prepareReplyDraft', args: { text: 'مرحبا، سنعود إليك قريبا', lang: 'ar', cls: 'cust' } }] };
-    if (/לא ברור/.test(u)) return { calls: [{ name: 'prepareReplyDraft', args: { text: 'תודה, נחזור אליך בהקדם.', cls: 'other', unsure: true } }] };
+    if (/לא ברור/.test(u)) return { calls: [{ name: 'prepareReplyDraft', args: { text: 'תודה, נחזור אליך בהקדם.', cls: 'other', unsure: true, ask: 'על איזה מוצר\nהפונה שואל?' } }] };
     if (/יתרה|חוב/.test(u)) return { calls: [{ name: 'prepareReplyDraft', args: { text: 'היתרה שלך היא 4,870 ₪.', cls: 'debt' } }] };
     if (/מחיר/.test(u)) return { calls: [{ name: 'prepareReplyDraft', args: { text: 'עוגת גבינה – 89 ₪ (מחירון "מחירון", עודכן לאחרונה).', cls: 'price' } }] };
     if (/תזכיר/.test(u)) return { calls: [{ name: 'createCalendarItem', args: { title: 'פריצה', d: TOMORROW } }, { name: 'prepareReplyDraft', args: { text: 'תודה על הפנייה, נחזור אליך.', cls: 'other' } }] };
@@ -263,6 +263,10 @@ describe('פונה מבחוץ: כרטיס, טיוטה, סימונים (17, 5, 24
     const d2 = await get(`b/${A}/sec_draft/${W.msgId('wamid.K2')}`);
     assert.ok(d2.flags.includes('unsure'));
     for (const u of [M1, M2]) assert.ok((await coll(`b/${A}/sec_note/${u}/n`)).some((n) => n.k === 'wa' && /לא בטוחה/.test(n.title)), u);
+    // 16.11.2026: שאלת ההבהרה למנהל – נשמרת בטיוטה (שורה אחת, נקייה) ומופיעה בהתראה; בטיוטה בטוחה – אין שאלה
+    assert.equal(d2.ask, 'על איזה מוצר הפונה שואל?');
+    assert.ok((await coll(`b/${A}/sec_note/${M1}/n`)).some((n) => /שאלה לגבי ההודעה/.test(n.body) && /על איזה מוצר הפונה שואל\?/.test(n.body)));
+    assert.equal(d1.ask, undefined);
     // מחיר מהמחירון – לא "לבדוק"
     await hook(waBody(PN_A, [txt('972525555555', 'wamid.K3', 'מה המחיר של עוגת גבינה?')]));
     await processed(A, 'wamid.K3');
