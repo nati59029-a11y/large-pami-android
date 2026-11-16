@@ -255,6 +255,8 @@ Object.assign(exports, require('./secretary-google'));
 Object.assign(exports, require('./secretary-inv'));
 // "תגובה למזכירה" (15.11.2026): secLearn – תגובה על הודעה של המזכירה, כללים אישיים לכל מנהל, "לעשות את זה מעכשיו לבד?", יומן "נשלח לבד". secretary-learn.js + lib/sec-learn.js
 Object.assign(exports, require('./secretary-learn'));
+// קול, תמונה וסרטון למזכירה (15.11.2026): secMedia (תמלול, תמונה/סרטון, סימון כרטיס), secMediaClean (ניקוי הקבצים הזמניים ב-sec_tmp). secretary-media.js
+Object.assign(exports, require('./secretary-media'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));

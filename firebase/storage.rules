@@ -134,6 +134,26 @@ service firebase.storage {
       allow list, write: if false;
     }
 
+    // קול, תמונה וסרטון למזכירה (15.11.2026, secretary-media.js): סרטון בדרך לשרת – sec_tmp/{uid}/{file} (עסק legacy) ו-b/{bizId}/sec_tmp/{uid}/{file}.
+    // יצירה: רק המשתמש עצמו, רק מנהל (legacy: admins/{uid}; בעסק: bMgr – 2 קריאות), עד 12MB, רק סרטון (webm/mp4/3gpp/quicktime), שם קובץ אקראי.
+    // קריאה, רשימה ועדכון (דריסה): אסורים לכולם – רק השרת (secMedia) קורא, ומוחק מיד אחרי ההורדה. מחיקה: המשתמש עצמו (ביטול שליחה).
+    // הרשאת המזכירה (תוספת, הסכמה) נאכפת בשרת; קובץ שלא עובד נמחק בכל מקרה ב-secMediaClean (20 דקות).
+    function secTmpOk(fname) {
+      return request.resource.size <= 12 * 1024 * 1024
+        && request.resource.contentType.matches('^video/(webm|mp4|3gpp|quicktime)(;.*)?$')
+        && fname.matches('^[A-Za-z0-9_-]{8,64}([.](webm|mp4|3gp|mov))?$');
+    }
+    match /sec_tmp/{userId}/{fileName} {
+      allow create: if resource == null && isSelf(userId) && isManager() && secTmpOk(fileName); // resource == null: בלי דריסת קובץ קיים (גם אם האמולטור מסווג דריסה כ-create)
+      allow delete: if isSelf(userId) && isManager();
+      allow read, update: if false;
+    }
+    match /b/{bizId}/sec_tmp/{userId}/{fileName} {
+      allow create: if resource == null && isSelf(userId) && bMgr(bizId) && secTmpOk(fileName);
+      allow delete: if isSelf(userId) && bMgr(bizId);
+      allow read, update: if false;
+    }
+
     // הכלל האחרון: כל מה שלא הוגדר למעלה סגור לכולם.
     match /{allPaths=**} {
       allow read, write: if false;
