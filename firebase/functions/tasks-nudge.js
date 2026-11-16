@@ -6,7 +6,7 @@
 // תנאים: משימה קיימת, st == 'open', ו-nd נכתב בעשר הדקות האחרונות (ההתראה צמודה לתזכורת שנכתבה באפליקציה).
 // נמענים: ow (מי שמטפל), ואם אין – to (עד 30). רק עובד פעיל (staff/{uid}.active == true), לא המנהל עצמו.
 // הגבלה: פעם ב-30 דקות למשימה – fn_rate/tkNudge_<taskId> { t, nd } בתוך העסק (אין כלל = חסום מהאפליקציה). nd שכבר נשלח – לא נשלח שוב.
-// תוכן ההתראה כללי בלבד (בלי טקסט המשימה, שמות או פרטים): "תזכורת מהמנהל למשימה – פרטים באפליקציה". data: { k: 'tk', id }.
+// תוכן ההתראה (16.11.2026, בקשת בעל העסק): "תזכורת מהמנהל" + טקסט המשימה (בלי טקסט – הנוסח הכללי). במסך נעול מוסתר (private). data: { k: 'tk', id }.
 // הפונקציה לא מפורסמת עד מיזוג ואישור בעל העסק.
 const { HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
@@ -18,10 +18,11 @@ const RM = require('./secretary-remind')._core;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const GAP = 30 * 60000, ND_FRESH = 10 * 60000, MAX_TO = 30;
 const MSG = { title: 'משימות', body: 'תזכורת מהמנהל למשימה – פרטים באפליקציה' };
+const msgOf = (t) => { const x = String((t && t.txt) || '').replace(/\s+/g, ' ').trim(); return x ? { title: 'תזכורת מהמנהל', body: x.length > 400 ? x.slice(0, 399) + '…' : x } : MSG; };
 
 async function fcmSendTk(tokens, msg) {
   const { getMessaging } = require('firebase-admin/messaging');
-  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: { k: 'tk', id: String(msg.id) }, android: { priority: 'high' } });
+  const r = await getMessaging().sendEachForMulticast({ tokens, notification: { title: msg.title, body: msg.body }, data: { k: 'tk', id: String(msg.id) }, android: RM.androidOf('tk_' + msg.id) });
   return r.responses.map((x, i) => ({ token: tokens[i], ok: x.success, code: x.error && x.error.code }));
 }
 
@@ -58,7 +59,7 @@ async function nudge(who, input, opts) {
       n++;
       const toks = await RM.tokensOf(db, u);
       if (!toks.length) continue;
-      const res = await (o.send || fcmSendTk)(toks, Object.assign({ id: taskId }, MSG), { uid: u, bizId: who.bizId });
+      const res = await (o.send || fcmSendTk)(toks, Object.assign({ id: taskId }, msgOf(t)), { uid: u, bizId: who.bizId });
       if (res.some((x) => x.ok)) sent++;
       await RM.dropTokens(db, u, res.filter((x) => !x.ok && RM.BAD_TOKEN.includes(x.code)).map((x) => x.token));
     } catch (e) {
@@ -72,4 +73,4 @@ exports.tkNudge = onCall(T.scoped(async (request) => {
   const who = await requireStaff(request, { feature: 'tasks' });
   return nudge(who, inputObject(request));
 }));
-Object.defineProperty(exports, '_core', { enumerable: false, value: { nudge, MSG, GAP } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { nudge, MSG, msgOf, GAP } });

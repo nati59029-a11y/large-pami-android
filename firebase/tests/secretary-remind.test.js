@@ -170,7 +170,17 @@ describe('תזכורות (7.3, 7.4, 74–77)', () => {
     assert.equal(byKey(await notes(M2), /^invDue:due:/).length, 1, 'גם למנהל בלי רשומת עובד');
     const p2 = PUSH.find((p) => p.meta.uid === M2);
     assert.ok(p2 && p2.tokens[0].startsWith('tokM2_'), 'התראה נשלחה לטלפון של מנהל בלי רשומת עובד');
-    assert.ok(PUSH.every((p) => !/ספק|1,200|1200|רואה החשבון/.test(p.msg.title + p.msg.body)), 'תוכן ההתראה כללי – בלי שמות וסכומים');
+    // 16.11.2026: התראה נפרדת לכל פריט, עם התוכן שלו והמזהה שלו (הלחיצה פותחת אותו)
+    const p1 = PUSH.filter((p) => p.meta.uid === M1);
+    assert.ok(p1.length >= 2, 'כל פריט בהתראה נפרדת: ' + p1.map((p) => p.msg.title).join(' | '));
+    assert.ok(p1.every((p) => p.msg.id && p.msg.title), 'לכל התראה מזהה וכותרת');
+    assert.ok(p1.some((p) => /רואה החשבון/.test(p.msg.title)), 'התזכורת מהיומן – עם מה שצריך לעשות');
+    assert.ok(p1.some((p) => /ספק החלב/.test(p.msg.title + p.msg.body)), 'תזכורת החשבונית – עם שם הספק');
+    assert.equal(new Set(p1.map((p) => p.msg.id)).size, p1.length, 'מזהה שונה לכל התראה');
+    const RMC = require('../functions/secretary-remind.js')._core;
+    assert.deepEqual(RMC.androidOf('sec_x').notification, { visibility: 'private', tag: 'sec_x' }, 'במסך נעול – מוסתר; tag לכל פריט');
+    assert.equal(RMC.noteMsg({ title: 'תזכורת: לבדוק', body: 'x', n: 2 }, 'i1').title, '(שוב) תזכורת: לבדוק');
+    assert.equal(RMC.noteMsg({ title: '', body: '', k: 'dig' }, 'i2').body, 'התקציר היומי מוכן', 'בלי כותרת – הנוסח הכללי');
     assert.equal(byKey(await notes(M3), /^invDue/).length, 0, 'מנהל עם הגבלת סניפים – בלי תזכורות על נתוני כל העסק');
   });
 
@@ -280,7 +290,7 @@ describe('תזכורות (7.3, 7.4, 74–77)', () => {
     assert.equal(L.length, 1, JSON.stringify(L.map((x) => x.key)));
     assert.match(L[0].title, /דוד כהן/); assert.match(L[0].body, /הפרש מספר 2 החודש/); assert.match(L[0].body, /120.*80|80.*120/); assert.match(L[0].body, /מה לא ידוע/); assert.match(L[0].body, /אינו הוכחה לגניבה/);
     assert.equal((await notes(M3)).filter((x) => x.k === 'emp').length, 0, 'מנהל עם הגבלת סניפים – לא');
-    assert.ok(PUSH.length && PUSH.every((p) => !/דוד|כהן|80/.test(p.msg.body)), 'בטלפון – בלי שם ובלי סכום');
+    assert.ok(PUSH.some((p) => /דוד כהן/.test(p.msg.title)), 'בטלפון – עם הפרטים (16.11.2026; במסך נעול מוסתר)');
     assert.ok((await coll(`b/${A}/sec_log`)).some((l) => l.act === 'empAlert' && l.tgt === E1));
   });
 });
@@ -304,8 +314,7 @@ describe('דוחות שבועי וחודשי (6.4, 55, 66–69): ביום ובש
     for (const re of [/חשבוניות לתשלום השבוע/, /חשבוניות באיחור/, /צ'קים/, /משימות פתוחות/, /הפרשי קופה/]) assert.match(txt, re);
     assert.ok(w1.ideas.some((x) => /^loss:2026-10/.test(x.key)) && w1.ideas.some((x) => /^catUp:אריזות/.test(x.key)), 'יוזמות לשיפור (55)');
     assert.equal(reps.filter((r) => r.uid === M3).length, 0, 'מנהל עם הגבלת סניפים – אין דוח');
-    assert.ok(PUSH.some((p) => p.msg.body === 'הדוח השבועי מוכן' || /התראות חדשות/.test(p.msg.body)), 'התראה באפליקציה/בטלפון – כללית');
-    assert.ok(PUSH.every((p) => !/61,000|50,000|אריזות/.test(p.msg.body)));
+    assert.ok(PUSH.some((p) => p.meta.uid === M1 && p.msg.id && /דוח/.test(p.msg.title)), 'התראה בטלפון – עם כותרת הדוח (16.11.2026)');
     // באפליקציה בלבד (68): אין ערוץ אחר – לא נוצר שום מסמך יוצא (sec_draft/sec_in) ולא נשלח דבר מלבד ההתראה
     assert.equal((await coll(`b/${A}/sec_draft`)).length, 0); assert.equal((await coll(`b/${A}/sec_in`)).length, 0);
     const lr = await call('secReports', M1, { op: 'list' });
