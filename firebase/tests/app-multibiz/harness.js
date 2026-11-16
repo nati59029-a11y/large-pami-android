@@ -91,6 +91,10 @@ async function trustUid(page, email) {
 async function login(page, email, opts) {
   await page.goto(ORIGIN + '/?emu=1');
   await page.waitForSelector('#gform', { timeout: 15000 });
+  // opts.afterMs (16.11.2026): המתנה לפני הכניסה. ב-scenario (השוואת ענף מול main) – כדי שהמשיכה של "הגעה מיידית" 3 שניות אחרי טעינת הדף
+  // (inbTick ב-index.html) תרוץ תמיד לפני הכניסה (אז היא לא שולחת כלום), ולא פעם לפני, פעם במהלך ופעם אחרי משיכת הכניסה – מה שגרם למספר שונה של
+  // שאילתות inb/mq/rq גם בין main ל-main עצמו
+  if (opts && opts.afterMs) await page.waitForTimeout(opts.afterMs);
   if (!(opts && opts.trust === false)) { const u = await trustUid(page, email); if (u) await page.evaluate((x) => localStorage.setItem('lp-trust', JSON.stringify({ uid: x, exp: Date.now() + 864e5 })), u); }
   // 11.11: מסך הכניסה עלול להצטייר מחדש מיד אחרי טעינה (למשל אחרי התנתקות) ולמחוק את מה שהוקלד – ממלאים שוב עד שהערכים נשארים
   const pw = (opts && opts.pw) || 'pw-123456';
