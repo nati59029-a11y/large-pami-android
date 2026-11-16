@@ -6047,8 +6047,8 @@ function usReview(){const U=US;if(!U||!U.grp)return;U.grp=U.grp.filter(g=>g.ix.l
   ${!gr.done&&mz.length?`<div class="usrq"><b>⚠ חסר בדוח Z:</b> ${esc(mz.join(', '))}. צלמו את החלק החסר.<label class="btn g w" style="cursor:pointer;margin-top:6px">📷 הוספת החלק החסר<input type="file" accept="image/*" data-c="usRvAdd" data-g="${gi}" hidden></label></div>`:''}</div>`};
  usSheet('חיבור דפים',`<p class="note" style="margin:0 0 10px">${U.all.length} דפים · ${tot===1?'מסמך אחד':tot+' מסמכים'}${dn?' · '+dn+' נשמרו':''}. בדקו את החלוקה לפני השמירה: אפשר להזיז דף, לפצל למסמך נפרד (✂), לצרף למסמך הקודם (⤒) או למחוק.</p>
   ${G.map(card).join('')}
-  ${nx>=0?`<button class="btn w" style="margin-bottom:8px" data-a="usGo" ${pend?'disabled':''}>${pend?'יש שאלות פתוחות למעלה':'המשך: מסמך '+(nx+1)+' מתוך '+tot}</button>`:''}
-  <button class="btn g w" data-a="usExit">סגירה (הדפים נשארים שמורים במכשיר)</button>`)}
+  ${nx>=0?`<button class="btn w" style="margin-bottom:8px" data-a="usGo" ${pend?'disabled':''}>${pend?'יש שאלות פתוחות למעלה':'המשך עדכון חשבונית'+(tot>1?' ('+(nx+1)+'/'+tot+')':'')}</button>`:''}
+  <button class="btn g w" data-a="usExit">ביטול</button><div style="text-align:center;font-size:12px;opacity:.65;margin-top:6px">אפשר להמשיך אחר כך</div>`)}
 const usRvG=el=>{const U=US;if(!U||!U.grp)return null;const gr=U.grp[+el.dataset.g];return gr&&!gr.done?gr:null};
 const usRvDone=()=>{usqSave();usReview()};
 ACT.usRvSee=el=>{if(!US)return;US.i=+el.dataset.j||0;UZ={s:1,x:0,y:0};usPaneDraw()};
