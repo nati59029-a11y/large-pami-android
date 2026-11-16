@@ -3059,3 +3059,106 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
   });
 
 });
+
+describe('16.11: מייל חדש – הורדת הקובץ המצורף נכשלה בתקלה זמנית של Google: תור וניסיון חוזר, כרטיס תקלה רק אחרי כמה ניסיונות', () => {
+  const pdfQ = (i) => Buffer.from('%PDF-1.4\n1 0 obj<</Type /Catalog /Pages 2 0 R>>endobj\n2 0 obj<</Type /Pages /Count 1>>endobj\n3 0 obj<</Type /Page /Parent 2 0 R>>endobj\n%uniq retry ' + i + '\ntrailer<<>>\n%%EOF', 'latin1');
+  const inA = async () => (await coll(`b/${A}/sec_in`)).filter((x) => x.ch === 'mail');
+  const invA = () => coll(`b/${A}/sec_inv`);
+  const inBizA = async (fn) => { const b = await T.loadBiz(A); return T.runInBiz({ bizId: A, prefix: T.bizPrefix(b), biz: b }, () => fn(T.tdb())); };
+  const retry = (t) => inBizA((db) => CORE.mailInvRetry(db, A, t));
+  before(() => { process.env.SEC_INV_TEST_NOQUEUE = '1'; });
+  after(() => { delete process.env.SEC_INV_TEST_NOQUEUE; });
+  beforeEach(async () => {
+    await seed(); await connect(M1, 'mail', { email: BOX_A });
+    GO.addMail(BOX_A, { from: 'Supplier <sup@sup.example>', subject: 'חשבונית חדשה', text: 'מצורפת', files: [{ name: 'inv.pdf', data: pdfQ(1) }] });
+  });
+
+  it('הרשאה שנדחתה (403) – המייל נקלט ונכנס לתור בלי כרטיס "תקלה"; אחרי שהתקלה עוברת – החשבונית נקלטת כחשבונית חדשה רגילה (לא כמו מייל ישן)', async () => {
+    GO.state.mode.attFail = 403;
+    const t0 = Date.now();
+    assert.equal((await CORE.mailHook(GO.note(BOX_A))).saved, 1);
+    assert.equal((await invA()).length, 0, 'בלי כרטיס "הקובץ לא נקלט"');
+    let m = (await inA())[0];
+    assert.equal(m.invQ, true); assert.equal(m.invQN, 1); assert.ok(m.invQT >= t0 + CORE.INVQ_WAIT); assert.ok(!m.flags.includes('invErr')); assert.equal(m.inv, undefined);
+    // עוד לא הגיע הזמן – לא מנסים
+    assert.deepEqual(await retry(Date.now()), { n: 0, files: 0, err: 0 });
+    // עדיין תקלה – ניסיון שני נכשל, נשאר בתור עם מרווח גדול יותר, בלי כרטיס
+    let t = Date.now() + CORE.INVQ_WAIT + 1000;
+    assert.equal((await retry(t)).n, 0);
+    m = (await inA())[0];
+    assert.equal(m.invQ, true); assert.equal(m.invQN, 2); assert.equal(m.invQT, t + 2 * CORE.INVQ_WAIT);
+    assert.equal((await invA()).length, 0);
+    // התקלה עברה – הריצה המתוזמנת (כל 15 דקות) קולטת
+    delete GO.state.mode.attFail;
+    t += 2 * CORE.INVQ_WAIT + 1000;
+    const out = await CORE.syncAll({ now: t });
+    assert.equal(out.invRetry, 1, JSON.stringify(out));
+    const I = await invA();
+    assert.equal(I.length, 1);
+    assert.notEqual(I[0].k, 'bad'); assert.equal(I[0].hist, undefined, 'לא מייל ישן'); assert.equal(I[0].noStock, undefined, 'עם עדכון מלאי'); assert.equal(I[0].src[0].hist, undefined);
+    assert.equal(I[0].src[0].from, 'sup@sup.example');
+    m = (await inA())[0];
+    assert.deepEqual(m.inv, [I[0].id]);
+    for (const f of ['invQ', 'invQN', 'invQT', 'invQ0', 'invL']) assert.equal(m[f], undefined, f);
+    assert.ok(!m.flags.includes('invErr'));
+    assert.ok((await logs(A)).some((l) => l.act === 'invRetry' && l.note === '1/1'));
+    // ריצה נוספת – אין מה לעשות
+    assert.equal((await retry(t + 864e5)).n, 0);
+  });
+
+  it('תקלה בצד Google (500) שלא עוברת – כרטיס "הקובץ לא נקלט – תקלה" (חשבונית חדשה, לא hist) רק אחרי INVQ_TRIES ניסיונות', async () => {
+    GO.state.mode.attFail = 500;
+    await CORE.mailHook(GO.note(BOX_A));
+    let t = Date.now();
+    for (let i = 2; i < CORE.INVQ_TRIES; i++) {
+      t += 864e5;
+      await retry(t);
+      const m = (await inA())[0];
+      assert.equal(m.invQ, true, 'ניסיון ' + i); assert.equal(m.invQN, i);
+      assert.equal((await invA()).length, 0, 'עדיין בלי כרטיס בניסיון ' + i);
+    }
+    t += 864e5;
+    assert.equal((await retry(t)).err, 1);
+    const I = await invA();
+    assert.equal(I.length, 1); assert.equal(I[0].k, 'bad'); assert.deepEqual(I[0].why, ['dl']); assert.equal(I[0].hist, undefined); assert.equal(I[0].src[0].from, 'sup@sup.example');
+    const m = (await inA())[0];
+    assert.deepEqual(m.inv, [I[0].id]); assert.ok(m.flags.includes('invErr')); assert.equal(m.invQ, undefined); assert.equal(m.invQN, undefined);
+    assert.equal((await retry(t + 864e5)).err, 0, 'לא נוצר כרטיס נוסף');
+  });
+
+  it('תקלה קבועה (הקובץ לא נמצא, 404) – כרטיס תקלה מיד, בלי תור (כמו קודם)', async () => {
+    GO.state.mode.attFail = 404;
+    await CORE.mailHook(GO.note(BOX_A));
+    const I = await invA();
+    assert.equal(I.length, 1); assert.equal(I[0].k, 'bad'); assert.deepEqual(I[0].why, ['dl']);
+    const m = (await inA())[0];
+    assert.equal(m.invQ, undefined); assert.deepEqual(m.inv, [I[0].id]);
+  });
+
+  it('החיבור לתיבה פג בזמן ההמתנה – לא נספר כניסיון; אחרי INVQ_AGE – כרטיס תקלה. תיבה שנותקה – כרטיס מיד', async () => {
+    GO.state.mode.attFail = 403;
+    await CORE.mailHook(GO.note(BOX_A));
+    delete GO.state.mode.attFail;
+    const t0 = Date.now();
+    const cfg = await get(`b/${A}/sec_cfg/mail`); const bx = G.boxIdOf(BOX_A);
+    cfg.boxes[bx].st = 'expired'; await put(`b/${A}/sec_cfg/mail`, cfg);
+    assert.deepEqual(await retry(t0 + 3600e3), { n: 0, files: 0, err: 0 });
+    let m = (await inA())[0];
+    assert.equal(m.invQ, true); assert.equal(m.invQN, 1, 'לא נספר');
+    assert.equal((await retry(t0 + CORE.INVQ_AGE + 3600e3)).err, 1);
+    assert.equal((await invA())[0].k, 'bad');
+    m = (await inA())[0];
+    assert.ok(m.flags.includes('invErr')); assert.equal(m.invQ, undefined);
+    // תיבה שנותקה (כבר לא בהגדרות) – כרטיס מיד
+    GO.addMail(BOX_A, { from: 'sup2@sup.example', subject: 'עוד חשבונית', text: 'מצורפת', files: [{ name: 'inv2.pdf', data: pdfQ(2) }] });
+    cfg.boxes[bx].st = 'ok'; await put(`b/${A}/sec_cfg/mail`, cfg);
+    GO.state.mode.attFail = 500;
+    await CORE.mailHook(GO.note(BOX_A));
+    delete GO.state.mode.attFail;
+    const m2 = (await inA()).find((x) => x.subj === 'עוד חשבונית');
+    assert.equal(m2.invQ, true);
+    await put(`b/${A}/sec_cfg/mail`, { max: cfg.max || 1, boxes: {} });
+    assert.equal((await retry(Date.now() + CORE.INVQ_WAIT + 1000)).err, 1);
+    assert.ok((await get(`b/${A}/sec_in/${m2.id}`)).flags.includes('invErr'));
+  });
+});
