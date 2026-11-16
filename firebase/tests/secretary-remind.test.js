@@ -137,6 +137,45 @@ describe('רישום התראות: מנהל בלי רשומת עובד נרשם;
     assert.equal((await call('registerPushToken', M2, { token: tok(1) })).status, 'OK');
     assert.deepEqual((await get(`b/${A}/push_tokens/${M2}`)).pushTokens, [tok(1)]);
   });
+  it('16.11.2026 (כפתורים בהתראה): act:1 → גם pushAct; בלי act – בלי שינוי; act:0 – יוצא מ-pushAct; pushTokens כמו קודם; מעבר בין משתמשים וקיצוץ – pushAct מסונכרן', async () => {
+    await seed();
+    // בלי act – בדיוק כמו קודם, בלי שדה חדש
+    assert.equal((await call('registerPushToken', E1, { token: tok(1) })).status, 'OK');
+    assert.equal((await get(`b/${A}/staff/${E1}`)).pushAct, undefined, 'טלפון ישן – המבנה הישן נשמר');
+    assert.equal((await call('registerPushToken', E1, { token: tok(1), act: 1 })).status, 'OK');
+    let e = await get(`b/${A}/staff/${E1}`);
+    assert.deepEqual(e.pushTokens, [tok(1)]); assert.deepEqual(e.pushAct, [tok(1)]);
+    assert.equal((await call('registerPushToken', E1, { token: tok(2) })).status, 'OK');
+    e = await get(`b/${A}/staff/${E1}`);
+    assert.deepEqual(e.pushTokens, [tok(1), tok(2)]); assert.deepEqual(e.pushAct, [tok(1)], 'טלפון בלי act לא נכנס ל-pushAct');
+    assert.equal((await call('registerPushToken', E1, { token: tok(1) })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/staff/${E1}`)).pushAct, [tok(1)], 'אותו טלפון שוב בלי act (למשל orders/api.js) – נשאר ב-pushAct');
+    assert.equal((await call('registerPushToken', E1, { token: tok(1), act: 0 })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/staff/${E1}`)).pushAct, [], 'act: 0 במפורש – יוצא מ-pushAct');
+    assert.deepEqual((await get(`b/${A}/staff/${E1}`)).pushTokens, [tok(2), tok(1)], 'pushTokens כמו קודם');
+    // מנהל בלי staff (push_tokens) + מעבר טלפון למשתמש אחר
+    assert.equal((await call('registerPushToken', M2, { token: tok(3), act: 1 })).status, 'OK');
+    assert.deepEqual((await get(`b/${A}/push_tokens/${M2}`)).pushAct, [tok(3)]);
+    assert.equal((await call('registerPushToken', E1, { token: tok(3), act: 1 })).status, 'OK');
+    const m2 = await get(`b/${A}/push_tokens/${M2}`);
+    assert.deepEqual(m2.pushTokens, []); assert.deepEqual(m2.pushAct, [], 'הטלפון יצא מהמנהל גם מ-pushAct');
+    assert.deepEqual((await get(`b/${A}/staff/${E1}`)).pushAct, [tok(3)]);
+    // קיצוץ ל-5 טלפונים – pushAct רק ממה שנשאר
+    for (let i = 4; i <= 8; i++) await call('registerPushToken', E1, { token: tok(i) });
+    e = await get(`b/${A}/staff/${E1}`);
+    assert.ok(!e.pushTokens.includes(tok(3))); assert.deepEqual(e.pushAct, [], 'הטלפון שיצא בקיצוץ – יצא גם מ-pushAct');
+    // tokensAct / dropTokens
+    await call('registerPushToken', E1, { token: tok(8), act: 1 });
+    await bizA();
+    const C = { bizId: A, prefix: `b/${A}/`, biz: BIZA };
+    assert.deepEqual(await T.runInBiz(C, () => RM.tokensAct(T.tdb(), E1)), [tok(8)]);
+    assert.equal((await T.runInBiz(C, () => RM.tokensOf(T.tdb(), E1))).length, 5, 'tokensOf לא השתנה');
+    await T.runInBiz(C, () => RM.dropTokens(T.tdb(), E1, [tok(8)]));
+    e = await get(`b/${A}/staff/${E1}`);
+    assert.ok(!e.pushTokens.includes(tok(8))); assert.deepEqual(e.pushAct, [], 'dropTokens מוציא גם מ-pushAct');
+    await T.runInBiz(C, () => RM.dropTokens(T.tdb(), M1, ['tokM1_' + 'a'.repeat(30)]));
+    assert.equal((await get(`b/${A}/staff/${M1}`)).pushAct, undefined, 'dropTokens לא מוסיף pushAct למסמך ישן');
+  });
 });
 
 // ---------------------------------------------------------------------------------
@@ -181,6 +220,7 @@ describe('תזכורות (7.3, 7.4, 74–77)', () => {
     assert.deepEqual(RMC.androidOf('sec_x').notification, { visibility: 'private', tag: 'sec_x' }, 'במסך נעול – מוסתר; tag לכל פריט');
     assert.equal(RMC.noteMsg({ title: 'תזכורת: לבדוק', body: 'x', n: 2 }, 'i1').title, '(שוב) תזכורת: לבדוק');
     assert.equal(RMC.noteMsg({ title: '', body: '', k: 'dig' }, 'i2').body, 'התקציר היומי מוכן', 'בלי כותרת – הנוסח הכללי');
+    assert.ok(PUSH.every((p) => !p.msg.act), 'אין טלפונים עם כפתורים – ההודעה כמו קודם (בלי אסימון)');
     assert.equal(byKey(await notes(M3), /^invDue/).length, 0, 'מנהל עם הגבלת סניפים – בלי תזכורות על נתוני כל העסק');
   });
 
