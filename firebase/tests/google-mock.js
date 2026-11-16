@@ -87,6 +87,7 @@ function qmatch(m, q, now) {
     let ok = true;
     if (x === 'in:trash') ok = m.labelIds.includes('TRASH');
     else if (x === 'in:spam') ok = m.labelIds.includes('SPAM');
+    else if (/^from:/.test(x)) { const h = ((m.payload && m.payload.headers) || []).find((y) => y.name === 'From'); ok = !!h && String(h.value).toLowerCase().includes(x.slice(5).toLowerCase()); } // 16.11: חסימת שולח
     else if (x === 'category:promotions') ok = m.labelIds.includes('CATEGORY_PROMOTIONS');
     else if (/^larger:(\d+)M$/.test(x)) ok = m.sizeEstimate >= Number(/^larger:(\d+)M$/.exec(x)[1]) * 1048576;
     else if (/^older_than:(\d+)y$/.test(x)) ok = Number(m.internalDate) < now - Number(/^older_than:(\d+)y$/.exec(x)[1]) * 365 * 864e5;
