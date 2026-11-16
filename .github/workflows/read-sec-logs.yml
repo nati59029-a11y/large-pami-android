@@ -3,7 +3,7 @@ name: Read secretary function logs (read-only)
 # Prints time, function, severity and a short masked message (emails/numbers hidden). Changes nothing.
 on:
   push:
-    branches: ["claude/secretary-email-server-check-sr908b", "ccr-beb89403-34diot"]
+    branches: ["claude/secretary-email-server-check-sr908b"]
     paths: [".github/workflows/read-sec-logs.yml"]
 permissions:
   contents: read
