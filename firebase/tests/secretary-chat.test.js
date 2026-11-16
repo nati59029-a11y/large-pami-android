@@ -235,7 +235,7 @@ describe('מנהל עם הגבלת סניפים: אין לו נתוני כל ה�
     const r = await call('secChat', M1, { text: 'כמה הכנסות?', fin: FIN() });
     assert.equal(r.status, 'OK', r.text);
     assert.equal(r.result.brLimited, true);
-    assert.deepEqual(declNames(secReqs()[0]), ['loanCalc', 'refuseOffTopic']);
+    assert.deepEqual(declNames(secReqs()[0]), ['loanCalc', 'getAppHelp', 'refuseOffTopic']);
     assert.deepEqual(r.result.tools, []); assert.deepEqual(r.result.denied.sort(), ['getMonthSummary', 'getTasks']);
     assert.ok(!JSON.stringify(secReqs().map((x) => x.body)).includes('152340.5'), 'שום נתון כספי (מהמכשיר או מהמראה) לא הגיע למודל');
     assert.match(secReqs()[0].body.systemInstruction.parts[0].text, /רק למנהל בלי הגבלת סניפים/);
@@ -284,7 +284,7 @@ describe('רק נושאי עסק; ערוץ והרשאות (5.5) נאכפים ב�
     assert.equal(r.result.reply, ST.TXT.offTopic);
     assert.deepEqual(r.result.tools, []);
     assert.equal(secReqs().length, 1, 'לא ממשיכים לעוד סבב אחרי סירוב');
-    assert.match(secReqs()[0].body.systemInstruction.parts[0].text, /רק נושאי העסק/);
+    assert.match(secReqs()[0].body.systemInstruction.parts[0].text, /כל מה שקשור לעסק[\s\S]*getAppHelp/);
   });
   it('מנהל בלי מתג שכר: getPayroll לא נמסר למודל, ובקשה שלו – לא מופעלת ונרשמת', async () => {
     await seed({ cfg: { pay: { [M2]: true } } });
@@ -302,6 +302,23 @@ describe('רק נושאי עסק; ערוץ והרשאות (5.5) נאכפים ב�
     GM.state.sec = () => ({ text: 'בסדר' });
     await call('secChat', M2, { text: 'שכר', fin: FIN() });
     assert.ok(declNames(secReqs()[0]).includes('getPayroll'));
+  });
+  it('פעולות אחרונות (getRecentEntries): מוצאת חשבונית של 50 באשראי; רשומת שכר לא מגיעה למודל כשמתג השכר כבוי', async () => {
+    await seed({ cfg: { pay: { [M2]: true } } });
+    const now = Date.now();
+    const rec = [[now - 60000, '2026-11-15', 'e', 'ספקים', 'מאפיית בדיקה', 50, 'A1', 'אשראי', 50, 0], [now - 120000, '2026-11-15', 'e', 'משכורות', 'עובדת בדיקה', 7333.25, '', '', 0, 1]];
+    GM.state.sec = (body) => (lastIsRes(body) ? { text: 'מאפיית בדיקה.' } : { calls: [{ name: 'getRecentEntries', args: {} }] });
+    const r = await call('secChat', M1, { text: 'לאיזה ספק הכנסתי חשבונית של 50 באשראי?', fin: Object.assign(FIN(), { rec }) });
+    assert.equal(r.status, 'OK', r.text);
+    const R = responses(secReqs()[1].body);
+    assert.equal(R.getRecentEntries.items[0].name, 'מאפיית בדיקה');
+    assert.equal(R.getRecentEntries.items[0].paidBy, 'אשראי');
+    assert.ok(!JSON.stringify(secReqs().map((x) => x.body)).includes('7333.25'), 'רשומת שכר לא נשלחה למודל');
+    // מנהל עם מתג שכר – רשומת השכר כן נכללת
+    GM.reset();
+    GM.state.sec = (body) => (lastIsRes(body) ? { text: 'בסדר' } : { calls: [{ name: 'getRecentEntries', args: {} }] });
+    await call('secChat', M2, { text: 'מה נרשם?', fin: Object.assign(FIN(), { rec }) });
+    assert.ok(JSON.stringify(secReqs().map((x) => x.body)).includes('7333.25'));
   });
   it('מתג ניתוח עובדים כבוי: getEmployeeActivity לא נמסר למודל ולא מופעל; פעיל – כן', async () => {
     await seed({ cfg: { emp: false } });

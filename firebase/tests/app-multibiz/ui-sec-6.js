@@ -146,6 +146,7 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     check(`${w}: "כל השולח" – נשלחים כל המיילים של השולח בלבד`, c2 && JSON.stringify(c2[1].ids) === JSON.stringify(['mB']), c2 && c2[1]);
     // --- יומן: אירוע מיומן Google עם אזהרת שבת ---
     await page.evaluate(() => { const X = window.__sec; X.ml.clean = null; }); await page.click('#secTabs [data-v=cal]'); await H.settle(page, 600);
+    await page.click('[data-a=secCv][data-v=list]'); await H.settle(page, 400); // 15.11.2026: ברירת המחדל – לוח חודשי; הבדיקה על תצוגת הרשימה
     const tcal = await txt(page);
     check(`${w}: יומן – אירוע "מיומן Google" עם סימון שבת`, /פגישה מהטלפון/.test(tcal) && /מיומן Google/.test(tcal) && /שבת/.test(tcal), tcal.slice(0, 300));
     // --- הגדרות: חיבורי Google ---

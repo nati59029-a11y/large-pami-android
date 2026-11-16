@@ -142,6 +142,7 @@ const dlgText = (page) => page.evaluate(() => document.getElementById('dlg').ope
     check(`${w}: ביטול העצירה`, !!last(bodies, 'secWaCfg', (b) => b.op === 'stop' && b.on === false) && !/עצור הכל – פעיל/.test(await txt(page)));
     // --- יומן: תזכורת שנוצרה מווצאפ מסומנת "מווצאפ" (ולא "ידני") ---
     await page.click('#secTabs [data-v=cal]'); await H.settle(page, 500);
+    await page.click('[data-a=secCv][data-v=list]'); await H.settle(page, 400); // 15.11.2026: ברירת המחדל – לוח חודשי; הבדיקה על תצוגת הרשימה
     const tcal = await txt(page);
     check(`${w}: יומן – תזכורת מווצאפ עם התגית "מווצאפ" ו"מחק"`, /להתקשר לספק/.test(tcal) && /מווצאפ/.test(tcal) && !/ידני/.test(tcal) && !!(await page.$('[data-a=secEvDel][data-id=ew]')), tcal.slice(0, 300));
     // --- הגדרות ווצאפ של המנהל ---
