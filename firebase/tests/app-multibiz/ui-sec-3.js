@@ -123,6 +123,15 @@ const tab = async (page, v) => { await page.click(`#secTabs [data-v=${v}]`); awa
 
     // --- יומן ---
     await tab(page, 'cal');
+    // 15.11.2026: ברירת המחדל – לוח שנה חודשי: היום מסומן, לחיצה על יום מציגה את האירועים שלו
+    const mon = await page.evaluate(() => { const g = document.querySelector('#secMon .seccalg'); const td = document.querySelector('#secMon .seccd.td'); return { g: !!g, cells: g ? g.querySelectorAll('.seccd').length : 0, td: !!td, sel: !!document.querySelector('#secMon .seccd.sel') }; });
+    check(`${w}: יומן – לוח שנה חודשי כברירת מחדל, היום מסומן ונבחר`, mon.g && mon.cells >= 28 && mon.td && mon.sel, mon);
+    check(`${w}: לוח שנה – ימים בגובה 44px לפחות, בלי גלילה לרוחב`, (await page.evaluate(() => [...document.querySelectorAll('#secMon .seccd')].every((e) => e.getBoundingClientRect().height >= 44))) && (await sx(page)) <= 0);
+    const evDay = await page.evaluate(() => { const b = [...document.querySelectorAll('#secMon .seccd')].find((e) => e.querySelector('i:not(.z)')); return b ? b.dataset.v : ''; });
+    if (evDay) { await page.click(`#secMon .seccd[data-v="${evDay}"]`); await H.settle(page, 400); }
+    check(`${w}: לחיצה על יום עם אירוע – האירוע מוצג מתחת ללוח`, !!evDay && (await page.$$('#secMonDay .secli')).length > 0, evDay);
+    if (shots) await page.screenshot({ path: path.join(shots, `sec3-month-${w}.png`), fullPage: true });
+    await page.click('[data-a=secCv][data-v=list]'); await H.settle(page, 400);
     const tl = await txt(page);
     check(`${w}: יומן – רשימה, "קרוב", אישי/של העסק, מקור, תאריך עברי, יום לא עסקים, הצעה לאישור`, /קרוב/.test(tl) && /ספירת מלאי/.test(tl) && /של העסק/.test(tl) && /ייבוא/.test(tl) && /יום לא עסקים/.test(tl) && /המזכירה הציעה \(1\)/.test(tl) && /[א-ת]+ב?\s?[א-ת]*/.test(tl) && !!(await page.$('.secoff')), tl.slice(0, 300));
     const heb = await page.evaluate(() => [...document.querySelectorAll('.secday small')].map((x) => x.innerText).join('|'));

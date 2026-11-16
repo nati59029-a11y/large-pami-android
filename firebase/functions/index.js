@@ -13,6 +13,7 @@
 //   s3PutPano, s3DelPano – נקודות סיור 360 (שלב 18א, store3d-map.js).
 //   shelfCheck, mapDraft – בדיקת מדף וטיוטת מפה דרך Gemini, עם מכסה חודשית לסניף (store3d-ai.js).
 //   s3MovePh – העברת תמונה בין מקטעים בסבב, בלי AI ובלי מכסה (שלב 20ב, store3d-ai.js).
+//   mapFix – תיקון טיוטת מפה בכתב דרך Gemini, בלי מכסה (רק הבלם היומי לעובד) (store3d-fix.js).
 //   s3Fix, s3Clean – משימות תיקון, ניקוי יומי וביצועי עובדים (store3d-extra.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
@@ -255,6 +256,8 @@ Object.assign(exports, require('./secretary-google'));
 Object.assign(exports, require('./secretary-inv'));
 // "תגובה למזכירה" (15.11.2026): secLearn – תגובה על הודעה של המזכירה, כללים אישיים לכל מנהל, "לעשות את זה מעכשיו לבד?", יומן "נשלח לבד". secretary-learn.js + lib/sec-learn.js
 Object.assign(exports, require('./secretary-learn'));
+// קול, תמונה וסרטון למזכירה (15.11.2026): secMedia (תמלול, תמונה/סרטון, סימון כרטיס), secMediaClean (ניקוי הקבצים הזמניים ב-sec_tmp). secretary-media.js
+Object.assign(exports, require('./secretary-media'));
 
 // משימות קבועות (12.11.2026): recurringTasks – מתוזמנת כל 5 דקות, פותחת משימות מכללי rtk (recurring.js + lib/tk-time.js)
 Object.assign(exports, require('./recurring'));
@@ -270,6 +273,9 @@ Object.assign(exports, require('./store3d-map'));
 // שלב 8 (14.11.2026): shelfCheck (בדיקת מדף – עובד אחראי בסבב / דיווח יזום), mapDraft (טיוטת מפה – מנהל / s3m). Gemini, מכסה חודשית לסניף
 // (s3use, אזהרה ב-80%) ובלם יומי לעובד, החזרה בכשל, תמונה עם אדם לא נשמרת. store3d-ai.js + lib/store3d-ai.js
 Object.assign(exports, require('./store3d-ai'));
+// שלב 20ג (15.11.2026): mapFix (תיקון טיוטה בכתב – מנהל / s3m). טקסט בלבד, בלי תמונות; לא נספר במכסה (החלטת המשתמש), רק בלם 400 ביום לעובד.
+// store3d-fix.js + lib/store3d-fix.js
+Object.assign(exports, require('./store3d-fix'));
 // שלב 10 (14.11.2026): s3Fix (משימת תיקון ידנית / ביטול / הכרעה – מנהל), s3Clean (מתוזמנת יומית: סל מחזור אחרי 30 יום, 3 סבבים אחרונים
 // של תמונות לכל מקום, טקסטורות יתומות, ביצועי עובדים). סיום סבב (ציון, חוסרים, משימות תיקון) וערעורים – store3d-extra.js + lib/store3d-extra.js
 Object.assign(exports, require('./store3d-extra'));

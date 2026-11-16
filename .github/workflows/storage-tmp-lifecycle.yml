@@ -1,0 +1,97 @@
+name: Storage – auto-delete temp media (manual)
+
+# 15.11.2026 (קול, תמונה וסרטון למזכירה – החלטה ה5, אושר ע"י בעל הפרויקט):
+# כלל מחיקה אוטומטית ב-bucket: קבצים זמניים של המזכירה (sec_tmp) נמחקים אחרי יום.
+# זה גיבוי שלישי – השרת מוחק מיד אחרי העיבוד, ו-secMediaClean מנקה כל 30 דקות.
+# כללי lifecycle תומכים רק בתחילית, לכן נבנית תחילית לכל עסק קיים (b/<biz>/sec_tmp/) + sec_tmp/ (legacy).
+# עסק חדש נכנס לכלל רק בהרצה הבאה (עד אז secMediaClean מכסה). כללי lifecycle אחרים ב-bucket נשמרים כמו שהם.
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "הפרויקט (בדיקה או ייצור)"
+        required: true
+        type: choice
+        options: [largpeami-test-f4691, largpeami]
+      confirm:
+        description: "הקלד tmp-lifecycle-<פרויקט>, למשל tmp-lifecycle-largpeami"
+        required: true
+        type: string
+
+concurrency:
+  group: storage-lifecycle-${{ inputs.project }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.project == 'largpeami' && 'firebase-prod' || 'firebase-test' }}
+    steps:
+      - name: Guard (main only, typed confirmation)
+        env:
+          P: ${{ inputs.project }}
+          C: ${{ inputs.confirm }}
+        run: |
+          [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "::error::מותר להפעיל רק מ-main"; exit 1; }
+          case "$P" in largpeami|largpeami-test-f4691) ;; *) echo "::error::פרויקט לא מוכר"; exit 1 ;; esac
+          [ "$C" = "tmp-lifecycle-$P" ] || { echo "::error::קלט האישור צריך להיות בדיוק tmp-lifecycle-$P"; exit 1; }
+
+      - name: Service account (temporary file, must belong to the chosen project)
+        env:
+          SA: ${{ inputs.project == 'largpeami' && secrets.FIREBASE_SERVICE_ACCOUNT || secrets.FIREBASE_SERVICE_ACCOUNT_TEST }}
+          P: ${{ inputs.project }}
+        run: |
+          umask 077
+          [ -n "$SA" ] || { echo "::error::חסר הסוד של חשבון השירות"; exit 1; }
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          SP=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("project_id",""))' "$RUNNER_TEMP/sa.json")
+          [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Set lifecycle rule for sec_tmp (keeps all other rules)
+        env:
+          P: ${{ inputs.project }}
+        run: |
+          TOKEN=$(CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="$GOOGLE_APPLICATION_CREDENTIALS" gcloud auth print-access-token 2>/dev/null) || { echo "::error::לא הצלחתי לקבל אסימון גישה מחשבון השירות"; exit 1; }
+          echo "::add-mask::$TOKEN"
+          export TOKEN BUCKET="$P.firebasestorage.app"
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.parse, urllib.error
+          T, B = os.environ['TOKEN'], os.environ['BUCKET']
+          API = 'https://storage.googleapis.com/storage/v1/b/' + urllib.parse.quote(B, safe='')
+          def call(url, method='GET', body=None):
+              req = urllib.request.Request(url, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                           headers={'Authorization': 'Bearer ' + T, 'Content-Type': 'application/json'})
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as r: return json.load(r)
+              except urllib.error.HTTPError as e:
+                  msg = {403: 'לחשבון השירות אין הרשאה לנהל את ה-bucket (נדרש roles/storage.admin)', 404: 'ה-bucket לא נמצא: ' + B}.get(e.code, 'שגיאה ' + str(e.code))
+                  print('::error::' + msg); sys.exit(1)
+          meta = call(API + '?fields=lifecycle')
+          rules = (meta.get('lifecycle') or {}).get('rule') or []
+          mine = lambda r: all('sec_tmp/' in p for p in ((r.get('condition') or {}).get('matchesPrefix') or ['x']))
+          keep = [r for r in rules if not mine(r)]
+          bizs, tok = [], ''
+          while True:
+              q = {'prefix': 'b/', 'delimiter': '/', 'fields': 'prefixes,nextPageToken', 'maxResults': '1000'}
+              if tok: q['pageToken'] = tok
+              j = call(API + '/o?' + urllib.parse.urlencode(q))
+              bizs += j.get('prefixes') or []
+              tok = j.get('nextPageToken') or ''
+              if not tok: break
+          prefixes = ['sec_tmp/'] + sorted(p + 'sec_tmp/' for p in bizs)
+          CH = 50  # (לא מאומת) מגבלת אורך רשימת matchesPrefix – מחולק לכללים של 50
+          new = [{'action': {'type': 'Delete'}, 'condition': {'age': 1, 'matchesPrefix': prefixes[i:i + CH]}} for i in range(0, len(prefixes), CH)]
+          if len(keep) + len(new) > 100: print('::error::יותר מדי כללים ב-bucket (המגבלה 100)'); sys.exit(1)
+          call(API + '?fields=lifecycle', 'PATCH', {'lifecycle': {'rule': keep + new}})
+          out = 'כלל מחיקה אחרי יום הוגדר ב-%s: %d תחיליות (%d עסקים + legacy), %d כללים אחרים נשמרו.' % (B, len(prefixes), len(bizs), len(keep))
+          print(out); open(os.environ['GITHUB_STEP_SUMMARY'], 'a').write(out + '\n')
+          PY
+
+      - name: Remove service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

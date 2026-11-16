@@ -12,10 +12,16 @@
 //     שלב 20א: בסבב נשלחים להנחיה עד 8 מקטעים מועמדים (שכנים במסלול, רק של העובד, רק עם מידע מהצילום האחרון). ניחוש תקין של המודל
 //     נשמר ב-ai.slot = { s, c }; אם הוא מקטע אחר בביטחון A.SUG_MIN ומעלה – גם ph.sug = { s, c } ו-sug בתשובה (הצעה בלבד, נספר 1 כרגיל).
 //   s3MovePh { run, from, to } – שלב 20ב: העברת תמונה ותוצאה בין מקטעים של אותו עובד בסבב פתוח (בלי AI ובלי מכסה; ראו moveCore).
-//   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 100, סך הכל עד 13MB], cctv? } – מנהל או s3m. נספרת כבדיקה אחת
+//   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 100, סך הכל עד 13MB], cctv?, info?, sketch? }
+//     info/sketch (15.11.2026, לא חובה) = שאלון וסקיצה מבעל החנות (lib/store3d-draftin.js): נתונים מחייבים בהנחיה, ואחרי התשובה –
+//     התאמה למידות, חדרים מהסקיצה והצמדת גופים לשורות. קלט לא תקין = bad-info לפני המכסה. – מנהל או s3m. נספרת כבדיקה אחת
 //     במכסה (וגם בבלם היומי), בלי קשר למספר התמונות (החלטת המשתמש 15.11.2026); בהחזרה מוחזרת בדיקה אחת.
 //     כותב s3draft/{qid} (wait → ok / fail). המפה המוצעת במבנה 4.3, ואזורים שהמודל לא בטוח בהם ב-uz עם ok:false.
 //     התמונות עצמן לא נשמרות (אין צורך; ואין בדיקת "אדם בתמונה" בטיוטה). מחזיר { draftId, st, m, conf, scale, notes, drop, usage }.
+//     תיקון 15.11.2026 (החלטת המשתמש): תשובה שבורה (לא JSON / נקטעה / בלי חדר תקין / לא עוברת את בדיקת המפה) – ניסיון חוזר אחד
+//     באותה קריאה ובאותו תקציב זמן. שבורה גם אחריו – bad-answer עם סיבה מפורטת (details.why, s3draft.why), וההקמה לא נספרת
+//     (המכסה החודשית ותקרת ההקמות היומית מוחזרות; הבלם היומי לעובד – לא, כמו בכל החזרה). פריטים בודדים שלא עוברים את בדיקת
+//     המפה מושמטים (נספרים ב-drop) במקום לדחות את כל הטיוטה.
 // מכסה (4.15): s3use/b_{br} – חודשית לסניף (תקרה s3br.cap, ברירת מחדל 500), אזהרה למנהלים ב-80% (פעם בחודש, s3ntf);
 //   s3use/u_{uid} – בלם יומי לעובד (S3_USER_DAILY, ברירת מחדל 400). ההזמנה ויצירת s3qid – באותה טרנזקציה, לפני Gemini.
 //   s3use/d_{br} – עד 5 הקמות (mapDraft) ביום לסניף, לפי יום בשעון ישראל (החלטת המשתמש 15.11.2026); חוזר ב-1 כשהמכסה מוחזרת.
@@ -36,6 +42,7 @@ const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const T = require('./lib/tenant');
 const scan = require('./lib/scan');
 const A = require('./lib/store3d-ai');
+const DI = require('./lib/store3d-draftin');
 const C = require('./lib/store3d-core');
 const PS = require('./lib/prompts-shelf');
 const PM = require('./lib/prompts-mapdraft');
@@ -51,10 +58,13 @@ const S3_USER_DAILY = defineInt('S3_USER_DAILY', { default: 400, description: '�
 const QID_DAYS = 30, D1 = 86400000, BUSY_MS = 10 * 60000, MAX_N = 99, SAVE_TRIES = 5;
 // draft: עד 100 תמונות – עד 300 שניות למודל, 480 שניות לכל הניסיונות; הפונקציה עצמה 540 שניות (מרווח לטרנזקציות ולשמירה)
 const TIMES = { shelf: { timeoutMs: 60000, budgetMs: 120000 }, draft: { timeoutMs: 300000, budgetMs: 480000 } };
+// טיוטת מפה (תיקון 15.11.2026): maxOutputTokens מפורש – 65,536 = מגבלת הפלט של gemini-2.5-flash (לא מאומת כאן; callGemini לא עובר
+// את outputTokenLimit של המודל לפי רשימת המודלים). ניסיון חוזר אחד כשהתשובה שבורה – רק אם נשארו לפחות 60 שניות מאותו תקציב (480).
+const DRAFT_MAX_OUT = 65536, DRAFT_RETRY_MIN_MS = 60000;
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const CODE = {
   'bad-img': 'invalid-argument', 'bad-img-count': 'invalid-argument', 'too-big': 'invalid-argument', 'bad-type': 'invalid-argument', 'bad-size': 'invalid-argument', 'bad-slot': 'invalid-argument',
-  's3-month-limit': 'resource-exhausted', 's3-user-day': 'resource-exhausted', 's3-adhoc-day': 'resource-exhausted', 'draft-daily': 'resource-exhausted', 'bad-answer': 'internal',
+  's3-month-limit': 'resource-exhausted', 's3-user-day': 'resource-exhausted', 's3-adhoc-day': 'resource-exhausted', 'draft-daily': 'resource-exhausted', 'bad-answer': 'internal', 'bad-info': 'invalid-argument',
 };
 function toHttps(e) {
   if (e instanceof HttpsError || !e || !CODE[e.code]) return e;
@@ -138,14 +148,18 @@ async function warn80(db, br, qs, now, send) {
   try { await notify({ db, send }, `${br}_${qs.b.m}_w80`, 'w80', await managers(db), now); } catch (e) { logger.warn('store3d-ai: w80 notify failed', { code: e && e.code }); }
 }
 
-// קריאה ל-Gemini עם תמונות JPEG. מחזיר { obj, model } – obj = JSON שפוענח (או null)
-async function ask(deps, prompt, b64s, t) {
+// קריאה ל-Gemini עם תמונות JPEG. מחזיר { obj, model, finish, len } – obj = JSON שפוענח (או null), finish = finishReason, len = אורך הטקסט.
+// o (לא חובה, טיוטת מפה): { deadline – תקציב משותף לכל הניסיונות, maxOut – maxOutputTokens מפורש }. בדיקת מדף – בלי o, כמו קודם.
+async function ask(deps, prompt, b64s, t, o) {
+  const x = o || {};
   const body = {
     contents: [{ parts: [{ text: prompt }].concat(b64s.map((d) => ({ inline_data: { mime_type: 'image/jpeg', data: d } }))) }],
     generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
   };
-  const r = await scan.callGemini(String(deps.base).replace(/\/+$/, ''), deps.key, body, t.timeoutMs, false, { deadline: Date.now() + t.budgetMs, stats: { sent: 0 } });
-  return { obj: scan.parseLikeApp(r.text), model: String(r.model || '').slice(0, 60) || 'unknown' };
+  const opts = { deadline: x.deadline || Date.now() + t.budgetMs, stats: { sent: 0 } };
+  if (x.maxOut) opts.maxOut = x.maxOut;
+  const r = await scan.callGemini(String(deps.base).replace(/\/+$/, ''), deps.key, body, t.timeoutMs, false, opts);
+  return { obj: scan.parseLikeApp(r.text), model: String(r.model || '').slice(0, 60) || 'unknown', finish: r.finish || '', len: String(r.text || '').length };
 }
 
 // ---------------- shelfCheck ----------------
@@ -511,9 +525,11 @@ async function draftCore(db, who, input, now, deps) {
   if (typeof input.qid !== 'string' || !C.RE.qid.test(input.qid)) throw bad('bad-qid', 'מזהה השליחה לא תקין');
   if (typeof input.br !== 'string' || !C.RE.br.test(input.br)) throw bad('bad-br', 'מזהה הסניף לא תקין');
   if (input.kind !== 's' && input.kind !== 'w') throw bad('bad-kind', 'סוג המפה (חנות/מחסן) לא תקין');
-  let imgs;
-  try { imgs = A.draftImgs(input.imgs); } catch (e) { throw toHttps(e); }
+  let imgs, din;
+  try { imgs = A.draftImgs(input.imgs); din = DI.draftInput(input); } catch (e) { throw toHttps(e); }
   const qid = input.qid, br = input.br, kind = input.kind, n = imgs.length;
+  // שאלון וסקיצה (לא חובה, 15.11.2026) – נשמרים ב-s3draft כשדות info / sk (חדשים ולא חובה; מסמכים קיימים לא משתנים)
+  const dIn = Object.assign({}, din.info ? { info: din.info } : {}, din.sketch ? { sk: Object.assign({}, din.sketch, { rooms: din.sketch.rooms.map((p) => ({ p })), rows: din.sketch.rows.map((p) => ({ p })) }) } : {});
   if (who.brs && !who.brs.includes(br)) throw bad('other-branch', 'הסניף הזה לא משויך אליך', 'permission-denied');
   const cfg = await mapLib().branchOk(db, who.bizId, br, kind);
   const set = await db.doc('s3set/' + br).get();
@@ -522,38 +538,56 @@ async function draftCore(db, who, input, now, deps) {
   const dref = db.doc('s3draft/' + qid);
   // טיוטה = בדיקה אחת במכסה (k: 1), לא לפי מספר התמונות. n נשמר ב-s3draft רק לתיעוד
   // + עד A.DRAFT_DAY_MAX הקמות ביום לסניף (s3use/d_{br}), באותה טרנזקציה. qid חוזר (dup) לא נספר
-  const rv = await reserve(db, who, qid, { k: 'draft' }, { br, cap: cfg.cap, k: 1, now, userMax: deps.userMax, draftDay: true, extra: (tx) => tx.set(dref, { br, kind, by: who.uid, at: now, st: 'wait', n }) });
+  const rv = await reserve(db, who, qid, { k: 'draft' }, { br, cap: cfg.cap, k: 1, now, userMax: deps.userMax, draftDay: true, extra: (tx) => tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'wait', n }, dIn)) });
   if (rv.dup) return Object.assign({}, rv.dup, { dup: true });
   await warn80(db, br, rv.qs, now, deps.send);
   let charged = false;
-  const back = async (e) => {
-    await release(db, who, qid, { br, k: 1, qs: rv.qs, charged, now: Date.now(), extra: (tx) => tx.set(dref, { br, kind, by: who.uid, at: now, st: 'fail', n, err: String(e.message || 'שגיאה').slice(0, 120) }) });
+  // why (לא חובה, תיקון 15.11.2026) = קוד קצר של סיבת הכשל של תשובת ה-AI, נשמר ב-s3draft.why (שדה חדש; מסמכים קיימים לא משתנים)
+  const back = async (e, why) => {
+    await release(db, who, qid, { br, k: 1, qs: rv.qs, charged, now: Date.now(), extra: (tx) => tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'fail', n, err: String(e.message || 'שגיאה').slice(0, 200) }, why ? { why } : {}, dIn)) });
     throw e;
   };
+  const prompt = PM.buildMapDraftPrompt({ kind, storeType: S.stype, cctv: input.cctv === true, n, info: din.info, sketch: din.sketch }), b64s = imgs.map((d) => d.b64);
+  const deadline = Date.now() + TIMES.draft.budgetMs;   // תקציב אחד לשני הניסיונות – לא חורגים מ-TIMES.draft
+  const ectx = { br, kind, numDir: S.numDir, bizId: who.bizId, uid: who.uid, now, info: din.info, sketch: din.sketch };
   let resp;
-  try { resp = await ask(deps, PM.buildMapDraftPrompt({ kind, storeType: S.stype, cctv: input.cctv === true, n }), imgs.map((d) => d.b64), TIMES.draft); } catch (e) {
+  try { resp = await ask(deps, prompt, b64s, TIMES.draft, { deadline, maxOut: DRAFT_MAX_OUT }); } catch (e) {
     if (answered(e)) charged = true;
     return back(e instanceof HttpsError ? e : bad('internal', 'שגיאה ביצירת הטיוטה', 'internal'));
   }
-  charged = true;
-  const errs = PM.checkMapDraftResponse(resp.obj);
-  if (errs.length) logger.info('mapDraft: model answer cleaned', { n: errs.length });
-  let d;
-  try {
-    d = A.cleanDraft(resp.obj, { br, kind, numDir: S.numDir });
-    // רשת ביטחון: אותה בדיקה כמו בשמירת מפה (s3SaveMap), כדי שהטיוטה תישמר בלי שגיאה אחרי עריכה
-    const M = require('./lib/store3d-map');
-    const c = M.cleanMap(d.map, { bizId: who.bizId, mapId: kind + '-' + br });
-    M.finalCheck(M.mergeDel(null, c.map, { mgr: true, uid: who.uid, now }), null);
-    if (M.bytesOf(d.map) > M.MAX_BYTES) throw A.fail('bad-answer', 'הטיוטה גדולה מדי');
-  } catch (e) {
-    return back(bad('bad-answer', e && e.code === 'bad-answer' ? e.message : 'הטיוטה שהתקבלה לא תקינה. נסו שוב, אולי עם תמונות אחרות.', 'internal'));
+  // הבדיקה מתחילה ב-cleanDraft, וממשיכה באותה בדיקה כמו בשמירת מפה (s3SaveMap) כרשת ביטחון; פריטים שנכשלים לבד מושמטים (fitDraft)
+  const check = (rp, tryN) => {
+    const errs = PM.checkMapDraftResponse(rp.obj);
+    if (errs.length) logger.info('mapDraft: model answer cleaned', { n: errs.length, try: tryN });
+    const v = A.evalDraft(rp.obj, rp.finish, ectx);
+    // ביומן – רק שלב הכשל, finishReason, אורך הפלט ומספר התמונות. בלי תוכן התשובה ובלי תמונות
+    if (v.why) logger.warn('mapDraft: bad answer', { try: tryN, why: v.why, code: v.code || '', finish: rp.finish, len: rp.len, n, model: rp.model, errs: errs.length });
+    else if (v.fit) logger.info('mapDraft: items dropped by map check', { try: tryN, fit: v.fit, n });
+    if (!v.why && din.info) logger.info('mapDraft: owner info applied', { try: tryN, snap: v.d.snap || 0, add: v.d.add || 0, rooms: din.sketch ? din.sketch.rooms.length : 0, rows: din.sketch ? din.sketch.rows.length : 0 });
+    return v;
+  };
+  let v = check(resp, 1);
+  if (v.why && deadline - Date.now() >= DRAFT_RETRY_MIN_MS) {
+    // ניסיון חוזר אחד (תשובה שבורה / קטועה / בלי חדרים), באותה קריאה ובאותו תקציב זמן
+    try {
+      const v2 = check(await ask(deps, prompt, b64s, TIMES.draft, { deadline, maxOut: DRAFT_MAX_OUT }), 2);
+      v = v2.why === 'parse' && v.why === 'cut' ? v : v2;   // "נקטעה" נשאר – העצה (פחות תמונות) מועילה יותר
+    } catch (e) {
+      logger.warn('mapDraft: retry failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || '', why: v.why, n });
+    }
+  } else if (v.why) logger.warn('mapDraft: no time for retry', { why: v.why, n, left: deadline - Date.now() });
+  if (v.why) {
+    // תשובה שבורה גם אחרי הניסיון החוזר: ההקמה לא נספרת – לא במכסה החודשית ולא בתקרת ההקמות היומית (החלטת המשתמש 15.11.2026)
+    charged = false;
+    return back(bad('bad-answer', A.draftMsg(v.why), 'internal', { why: v.why }), v.why);
   }
+  charged = true;
+  const d = v.d;
   const res = { draftId: qid, st: 'ok', n, conf: d.conf, drop: d.drop, usage: rv.qs.usage };
   try {
     await db.runTransaction(async (tx) => {
       // 7ב: + conf (0–1) ו-notes (עד 200) – לא חובה בחוזה, נשמרים כשהם קיימים
-      tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'ok', m: d.map, n }, typeof d.conf === 'number' ? { conf: d.conf } : {}, d.notes ? { notes: d.notes } : {}));
+      tx.set(dref, Object.assign({ br, kind, by: who.uid, at: now, st: 'ok', m: d.map, n }, dIn, typeof d.conf === 'number' ? { conf: d.conf } : {}, d.notes ? { notes: d.notes } : {}));
       tx.update(db.doc('s3qid/' + qid), { res });
     });
   } catch (e) {
