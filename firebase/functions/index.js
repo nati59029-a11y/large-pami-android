@@ -20,6 +20,7 @@
 const { HttpsError } = require('firebase-functions/v2/https');
 const { onCall, LEGACY_REGION } = require('./lib/region'); // onCall בשני אזורים (europe-west1 + us-central1) – lib/region.js
 const { setGlobalOptions } = require('firebase-functions/v2');
+const logger = require('firebase-functions/logger');
 const { defineSecret, defineInt, defineString } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
@@ -128,6 +129,10 @@ exports.scanDocument = onCall(
 //   הכלל (tokensAct ב-secretary-remind.js): כפתורים רק אם pushActAt קיים, מלפני פחות מ-30 יום, ואין אחריו pushPlainAt. אחרת – ההודעה הרגילה.
 //   שתי המפות נשמרות רק לטלפונים שעדיין ב-pushTokens, ונכתבות רק במסמך שיש בו pushAct (או ברישום עם act:1).
 //   push_dev/{sha256} { biz, uid, t } (בשורש) – למי הטלפון רשום עכשיו בכל העסקים; נכתב בכל רישום. pushAct דורש שהשיוך יתאים (push-act.js).
+// מכשיר אחד למשתמש (16.11.2026, one-device.js): קלט אופציונלי s = מזהה הכניסה (אותו s של devClaim).
+//   s של הטלפון הנוכחי (dev_cur/{uid}.phone.sh) – נרשם, phone.fh = sha256(הטלפון), וכל שאר הטלפונים של המשתמש יוצאים (pushTokens / pushAct / push_dev).
+//   בלי s (מסכים ישנים / orders/api.js) – כמו קודם, רק אם אין רישום טלפון או שזה הטלפון הנוכחי (fh). אחרת { ok: false, reason: 'not-current' } בלי שום כתיבה.
+//   s שלא תואם, כשיש רישום טלפון – אותו דבר. מנהל־העל ומתג ONE_DEVICE=off – כמו קודם. ONE_DEVICE=log – כמו קודם + יומן.
 // =====================================================================================
 const TOKEN_RE = /^[A-Za-z0-9_:.\-]+$/;
 exports.registerPushToken = onCall(T.scoped(async (request) => {
@@ -142,17 +147,28 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
   const db = T.tdb(); // staff/{uid} בתוך העסק (בשורש ללארג' פעמי במצב legacy)
   const staffRef = db.doc('staff/' + who.uid);
   const mgrRef = db.doc('push_tokens/' + who.uid);
-  return db.runTransaction(async (tx) => {
-    const [st, adm] = await Promise.all([tx.get(staffRef), tx.get(db.doc('admins/' + who.uid))]);
+  const OD = require('./one-device')._core;
+  const odMode = who.superadmin ? 'off' : OD.mode(); // מנהל־העל – פטור
+  const sIn = typeof input.s === 'string' ? input.s : null;
+  const curRef = getFirestore().doc(OD.pathOf(who.uid));
+  const out = await db.runTransaction(async (tx) => {
+    const [st, adm, cd] = await Promise.all([tx.get(staffRef), tx.get(db.doc('admins/' + who.uid)), odMode === 'off' ? null : tx.get(curRef)]);
+    // מכשיר אחד: mine = הטלפון הנוכחי עם s (רק הוא נשאר רשום). אין רישום טלפון – כמו קודם
+    const ph = cd ? OD.kindOf(cd, 'phone') : null;
+    const mine = !!ph && sIn !== null && ph.sh === OD.sha(sIn);
     let ref = staffRef, s = st;
     if (!st.exists && adm.exists) { ref = mgrRef; s = await tx.get(mgrRef); }
     else if (!st.exists) throw new HttpsError('failed-precondition', 'אין לך עדיין רשומה ברשימת העובדים (staff). המנהל צריך להוסיף אותה.', { reason: 'no-staff-doc' });
+    if (ph && !mine && !(sIn === null && ph.fh === OD.sha(token))) {
+      if (odMode === 'on') return { ok: false, reason: 'not-current' };
+      logger.info('registerPushToken: not current phone (log only)');
+    }
     // התראות לטלפון (12.11.2026): טלפון אחד = משתמש אחד. אם הטלפון היה רשום למשתמש אחר בעסק (למשל עובד נכנס בטלפון שהיה של מנהל),
     // הוא יוצא מהמשתמש הקודם – כדי שעובד לא יקבל התראות של מנהל. כל הקריאות לפני הכתיבות (חובה בטרנזקציה).
     const others = await Promise.all(['staff', 'push_tokens'].map((c) => tx.get(db.collection(c).where('pushTokens', 'array-contains', token).limit(20))));
     const old = (Array.isArray(s.get('pushTokens')) ? s.get('pushTokens') : []).filter((t) => typeof t === 'string' && t !== token);
     const all = old.concat([token]);
-    const kept = all.slice(Math.max(0, all.length - max));
+    const kept = mine ? [token] : all.slice(Math.max(0, all.length - max));
     let moved = 0;
     for (const q of others) {
       for (const d of q.docs) {
@@ -182,8 +198,20 @@ exports.registerPushToken = onCall(T.scoped(async (request) => {
     else tx.update(ref, upd);
     // השיוך הגלובלי של הטלפון (שרת בלבד) – גם בלי act. טלפון שעבר לעסק אחר: השיוך עובר איתו, והעסק הקודם כבר לא יכול לפעול דרכו
     tx.set(getFirestore().doc(PA.devPath(token)), { biz: who.bizId, uid: who.uid, t: now });
-    return { ok: true, count: kept.length, removed: all.length - kept.length, moved };
+    if (mine) tx.update(curRef, { 'phone.fh': h });
+    return { ok: true, count: kept.length, removed: all.length - kept.length, moved, _drop: mine ? old : null };
   });
+  // הטלפון הנוכחי: שאר הטלפונים יוצאים גם מהמסמך השני (staff / push_tokens) ומ-push_dev (רק אם עדיין של המשתמש)
+  const drop = out._drop;
+  delete out._drop;
+  if (drop) {
+    try {
+      const RM = require('./secretary-remind')._core;
+      const rest = [...new Set(drop.concat(await RM.tokensOf(db, who.uid)))].filter((t) => t !== token);
+      if (rest.length) await RM.dropTokens(db, who.uid, rest);
+    } catch (e) { logger.warn('registerPushToken: drop other phones failed', { name: e && e.name, code: e && e.code }); }
+  }
+  return out;
 }));
 
 // =====================================================================================
@@ -294,6 +322,8 @@ Object.assign(exports, require('./recurring'));
 Object.assign(exports, require('./tasks-nudge'));
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
 Object.assign(exports, require('./push-act'));
+// מכשיר אחד למשתמש (16.11.2026): devClaim – טלפון אחד + מחשב אחד, כניסה חדשה מחליפה את הקודמת (onCall, שני האזורים). one-device.js
+Object.assign(exports, require('./one-device'));
 
 // סריקת חנות בתלת מימד – שלב 5 (14.11.2026): s3Rounds (מתוזמנת כל 5 דקות – פתיחת סבבים, תזכורות, איחור, העברה למחליף),
 // s3Run (פתיחה ידנית/ביטול – מנהל), s3Move (העברה/לקיחה), s3Log (אירועי זמן), s3View (מה עובד רואה). store3d.js + lib/store3d-core.js
