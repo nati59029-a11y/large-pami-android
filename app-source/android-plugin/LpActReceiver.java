@@ -19,6 +19,8 @@ import org.json.JSONObject;
 
 /**
  * A notification button was pressed (after unlock - see LpNotif.action), or a local snooze alarm fired.
+ * - Personal reminder (tag "wc|...", scheduled on the phone by tasks-wc.js): "טופל" removes it at once, "מחר"/"בעוד שעה" snooze it
+ *   locally; the press is kept (LpNotif.wcQueue) and the app applies it (and updates the server) when it opens next.
  * - Task reminder ('tk') "בעוד שעה" / "מחר": local snooze - the same notification (same token) comes back later.
  * - Anything else: POST {t: token, a: action, f: this device's FCM token} to the server address that came with the message
  *   (only https://us-central1-<this APK's Firebase project>.cloudfunctions.net/pushAct - see allowed()). While waiting the notification shows "מעדכן…".
@@ -46,6 +48,22 @@ public class LpActReceiver extends BroadcastReceiver {
         final String tag = LpNotif.s(d, "tag");
         if (a == null || tag.isEmpty() || LpNotif.s(d, "at").isEmpty()) return;
         if (!a.equals("done") && !a.equals("h1") && !a.equals("d1")) return;
+
+        // Personal reminder (tasks-wc.js, scheduled on the phone): everything happens here, the app applies it when it opens
+        if (tag.startsWith(LpNotif.WC)) {
+            long now = System.currentTimeMillis();
+            if (a.equals("done")) {
+                LpNotif.dropSnooze(c, tag);
+                LpNotif.cancel(c, tag);
+                LpNotif.wcQueue(c, tag, a, 0);
+            } else {
+                long w = now + (a.equals("h1") ? H : 24 * H); // "מחר" = exactly 24 hours
+                LpNotif.snooze(c, d, w);
+                LpNotif.wcQueue(c, tag, a, w);
+                LpNotif.result(c, d, a.equals("h1") ? "נזכיר לך בעוד שעה" : "נזכיר לך מחר", 4000);
+            }
+            return;
+        }
 
         if ("tk".equals(d.get("k")) && (a.equals("h1") || a.equals("d1"))) {
             LpNotif.snooze(c, d, System.currentTimeMillis() + (a.equals("h1") ? H : 24 * H));

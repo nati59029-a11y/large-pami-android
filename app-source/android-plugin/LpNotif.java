@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -32,6 +33,11 @@ public class LpNotif {
     public static final String ACTION_ACT = "com.largepami.finance.LP_ACT";
     public static final String ACTION_SNZ = "com.largepami.finance.LP_SNZ";
     static final String PREF = "lp_notif_snz";
+    /** Personal reminders scheduled by the screens (tasks-wc.js): tag = "wc|<business>|<uid>|<k>|<id>|<n>". */
+    public static final String WC = "wc|";
+    /** Button presses on personal reminders, waiting for the app to open (the screens apply them). */
+    static final String QPREF = "lp_wc_q";
+    static final long DAY = 24L * 3600 * 1000;
     /** Keys of the data map that are kept (button extras, snooze store). */
     static final String[] KEYS = {"k", "v", "id", "title", "body", "tag", "at", "acts", "u"};
 
@@ -260,6 +266,7 @@ public class LpNotif {
             cancel(c, tag);
         }
         p.edit().clear().apply();
+        c.getSharedPreferences(QPREF, Context.MODE_PRIVATE).edit().clear().apply();
         c.getSharedPreferences(LpMessagingService.TOK, Context.MODE_PRIVATE).edit().clear().apply();
         if (Build.VERSION.SDK_INT >= 23) {
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -317,6 +324,122 @@ public class LpNotif {
             } catch (Exception x) {
                 p.edit().remove(tag).apply();
             }
+        }
+    }
+    // ---------- personal reminders (16.11.2026): scheduled here so their buttons work without opening the app ----------
+
+    /** "k|id" of a tag after its prefix ("k|id|n"). */
+    static String item(String rest) {
+        int i = rest.lastIndexOf('|');
+        return i < 0 ? rest : rest.substring(0, i);
+    }
+
+    /**
+     * Replaces all scheduled personal reminders with the list from the screens (prefix = "wc|<business>|<uid>|").
+     * Shown reminders stay, unless their item is gone (not in keep) or they belong to another user / business.
+     * n: [{t: "k|id|n", title, body, at, acts}] - only future times are scheduled.
+     */
+    public static synchronized void wcSync(Context c, String prefix, JSONArray n, JSONArray keep) {
+        if (prefix == null || !prefix.startsWith(WC)) return;
+        SharedPreferences p = c.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+        AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+        SharedPreferences.Editor ed = p.edit();
+        for (String tag : new HashMap<>(p.getAll()).keySet()) {
+            if (!tag.startsWith(WC)) continue;
+            if (am != null) am.cancel(snzPi(c, tag));
+            ed.remove(tag);
+        }
+        ed.commit();
+        java.util.Set<String> k = new java.util.HashSet<>();
+        if (keep != null) for (int i = 0; i < keep.length(); i++) k.add(keep.optString(i, ""));
+        if (Build.VERSION.SDK_INT >= 23) {
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) {
+                for (StatusBarNotification sb : nm.getActiveNotifications()) {
+                    String tag = sb.getTag();
+                    if (sb.getId() != NID || tag == null || !tag.startsWith(WC)) continue;
+                    if (!tag.startsWith(prefix) || !k.contains(item(tag.substring(prefix.length())))) nm.cancel(tag, NID);
+                }
+            }
+        }
+        if (n == null) return;
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < n.length() && i < 64; i++) {
+            JSONObject o = n.optJSONObject(i);
+            if (o == null) continue;
+            String t = o.optString("t", "");
+            long at = o.optLong("at", 0);
+            if (t.isEmpty() || at <= now || at > now + 400 * DAY) continue;
+            Map<String, String> d = new HashMap<>();
+            d.put("k", "tk"); // tap on the text opens "היום שלי" (same as a task notification from the server)
+            d.put("tag", prefix + t);
+            d.put("title", o.optString("title", ""));
+            d.put("body", o.optString("body", ""));
+            d.put("at", "L"); // local: the buttons are handled on the phone (LpActReceiver), no server token
+            d.put("acts", o.optString("acts", ""));
+            snooze(c, d, at);
+        }
+    }
+
+    /** A button was pressed on a personal reminder: kept until the screens read it (wcPeek) and confirm (wcAck). */
+    static synchronized void wcQueue(Context c, String tag, String a, long w) {
+        try {
+            SharedPreferences q = c.getSharedPreferences(QPREF, Context.MODE_PRIVATE);
+            JSONArray arr = new JSONArray(q.getString("q", "[]")), out = new JSONArray();
+            long now = System.currentTimeMillis();
+            for (int i = Math.max(0, arr.length() - 199); i < arr.length(); i++) out.put(arr.get(i));
+            JSONObject o = new JSONObject();
+            o.put("q", now + ":" + Math.abs((tag + a + System.nanoTime()).hashCode()));
+            o.put("tag", tag);
+            o.put("a", a);
+            o.put("t", now);
+            o.put("w", w);
+            out.put(o);
+            q.edit().putString("q", out.toString()).commit();
+        } catch (Exception e) {
+            // broken store - the press still worked on the notification
+        }
+    }
+
+    /** Waiting presses of this user and business (prefix). Older than 8 days are dropped. */
+    public static synchronized JSONArray wcPeek(Context c, String prefix) {
+        JSONArray r = new JSONArray();
+        if (prefix == null || !prefix.startsWith(WC)) return r;
+        try {
+            SharedPreferences q = c.getSharedPreferences(QPREF, Context.MODE_PRIVATE);
+            JSONArray arr = new JSONArray(q.getString("q", "[]")), keep = new JSONArray();
+            long old = System.currentTimeMillis() - 8 * DAY;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null || o.optLong("t", 0) < old) continue;
+                keep.put(o);
+                if (o.optString("tag", "").startsWith(prefix)) r.put(o);
+            }
+            if (keep.length() != arr.length()) q.edit().putString("q", keep.toString()).commit();
+        } catch (Exception e) {
+            c.getSharedPreferences(QPREF, Context.MODE_PRIVATE).edit().clear().commit();
+        }
+        return r;
+    }
+
+    /** The screens applied these presses (by "q" id) - remove them. all = sign-out: remove every press. */
+    public static synchronized void wcAck(Context c, JSONArray ids, boolean all) {
+        SharedPreferences q = c.getSharedPreferences(QPREF, Context.MODE_PRIVATE);
+        if (all) {
+            q.edit().clear().commit();
+            return;
+        }
+        try {
+            java.util.Set<String> k = new java.util.HashSet<>();
+            for (int i = 0; ids != null && i < ids.length(); i++) k.add(ids.optString(i, ""));
+            JSONArray arr = new JSONArray(q.getString("q", "[]")), keep = new JSONArray();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o != null && !k.contains(o.optString("q", ""))) keep.put(o);
+            }
+            q.edit().putString("q", keep.toString()).commit();
+        } catch (Exception e) {
+            q.edit().clear().commit();
         }
     }
 }
