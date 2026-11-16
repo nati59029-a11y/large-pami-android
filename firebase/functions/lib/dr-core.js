@@ -174,6 +174,13 @@ function splitTr(tr, n) {
   return parts.length === n ? parts : new Array(n).fill('');
 }
 
+// טקסט של העובד בתוך ההנחיה ל-AI: מנטרלים רצפים של < או > (2 ומעלה), כדי שאי אפשר לזייף את המפרידים <<< … >>> של "תוכן הדיווח"
+const safeTxt = (v) => String(v == null ? '' : v).replace(/<{2,}/g, (m) => '‹'.repeat(m.length)).replace(/>{2,}/g, (m) => '›'.repeat(m.length));
+// שמירה מראש לפי מספר ההקלטות והתמונות שנשלחות (resum יכול לשלוח עד 3 הקלטות ו-9 תמונות). אחת או פחות – RESERVE_USAGE
+function reserveUsage(nAud, nImg) {
+  const a = Math.max(1, nAud | 0), extraImg = Math.max(0, (nImg | 0) - IMG_MAX);
+  return { in: RESERVE_USAGE.in + (a - 1) * 4000 + extraImg * 1500, aud: RESERVE_USAGE.aud * a, out: RESERVE_USAGE.out };
+}
 const capOf = (snap) => (snap && snap.exists && Number.isInteger(snap.get('capCents')) ? snap.get('capCents') : CAP_DEF);
 // כמה לשמור מראש: עד העלות המרבית, ולא יותר ממה שנשאר (כמו meter במזכירה)
 const reserveAmt = (left, max) => Math.max(1, Math.min(max, Math.floor(left)));
@@ -206,5 +213,5 @@ const tkAdd = (old, add) => [...new Set((Array.isArray(old) ? old.filter((t) => 
 module.exports = {
   DAYS_DEF, HR_DEF, OFF_MAX, REQ_MAX, MAX_SUB, TXT_MAX, IMG_MAX, IMG_MAX_CHARS, AUD_MAX_SEC, AUD_MAX_BYTES, CAP_DEF, CAP_MAX, DAY_CAP_DIV,
   NOTES_MAX, NOTE_MAX, TK_MAX, TR_MAX, SUM_MAX, SUMW_MAX, RESERVE_USAGE, UID_RE, ID_RE,
-  clean, dayInfo, validDay, cfgOf, dayStatus, remindDue, cfgIn, submitIn, parseAi, splitTr, capOf, reserveAmt, costOf, notesIn, tkIn, tkAdd,
+  clean, dayInfo, validDay, cfgOf, dayStatus, remindDue, cfgIn, submitIn, parseAi, splitTr, capOf, reserveAmt, costOf, notesIn, tkIn, tkAdd, safeTxt, reserveUsage,
 };

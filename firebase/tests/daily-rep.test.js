@@ -102,6 +102,8 @@ describe('dailyRep – כללי Firestore', () => {
     await assertFails(fs(E2).doc(P + ID1 + '/x/w').get());
     await assertFails(fs(E2).doc(P + ID1 + '/p/0_0').get());
     await assertSucceeds(db.collection(`b/${A}/dr`).where('uid', '==', E1).get());
+    await assertSucceeds(db.collection(P + ID1 + '/p').get()); // רשימה של התמונות שלו בלי סינון (כמו המסך)
+    await assertFails(fs(E2).collection(P + ID1 + '/p').get());
     await assertFails(db.collection(`b/${A}/dr`).get());
   });
   it('מנהל רואה הכול; עסק אחר נחסם; אף אחד לא כותב (גם לא מנהל ומנהל־על)', async () => {
@@ -133,6 +135,22 @@ describe('dailyRep – כללי Firestore', () => {
     await assertFails(fs(E1).doc(`b/${A}/dr/${ID1}`).get());
     await assertFails(fs(E1).doc(`b/${A}/drcfg/main`).get());
     await assertFails(fs(SUPER).doc(`b/${A}/drcfg/cap`).get());
+  });
+  it('משימה מהערה (tkNew במסך הדיווח) עוברת את כללי tasks, כולל הגבולות 3 ו-17 ימים; עובד נחסם', async () => {
+    // אותם שדות בדיוק כמו tkNew ב-app-source/www/daily-rep.js – הבדיקה נכשלת אם רשימת השדות שם משתנה
+    const src = require('node:fs').readFileSync(path.join(H.ROOT, '..', 'app-source', 'www', 'daily-rep.js'), 'utf8');
+    const m = /function tkNew\(o\)\{[\s\S]*?const fields=\{([\s\S]*?)\};\n/.exec(src);
+    assert.ok(m, 'tkNew לא נמצא במסך');
+    const keys = [...m[1].matchAll(/(?:^|,)\s*([a-zA-Z]+):/g)].map((x) => x[1]).sort();
+    const doc = (due, owner, by) => { const now = Date.now(); return { owner, by, role: 'a', txt: 'לבדוק מלאי', cr: now, due: now + due, st: 'open', open: '1', pr: '', img: '', sub: 0, doneBy: '', note: '', ok: 0, late: '',
+      to: [E1], toN: ['דנה'], ow: E1, owN: 'דנה', clt: now, np: 0, wp: 0, mi: 0 }; };
+    assert.deepEqual(Object.keys(doc(0, M1, M1)).sort(), keys, 'השדות בבדיקה = השדות ב-tkNew');
+    const T3 = 259200000 + 60000, T17 = 1468800000 - 60000; // הגבולות ש-tkNew מצמיד אליהם (3 ו-17 ימים, דקה מרווח)
+    await assertSucceeds(fs(M1).doc(`b/${A}/tasks/tkn_min`).set(doc(T3, M1, M1)));
+    await assertSucceeds(fs(M1).doc(`b/${A}/tasks/tkn_max`).set(doc(T17, M1, M1)));
+    await assertFails(fs(M1).doc(`b/${A}/tasks/tkn_lo`).set(doc(259200000 - 60000, M1, M1)));
+    await assertFails(fs(M1).doc(`b/${A}/tasks/tkn_hi`).set(doc(1468800000 + 60000, M1, M1)));
+    await assertFails(fs(E1).doc(`b/${A}/tasks/tkn_emp`).set(doc(T3, E1, E1)));
   });
   it('אין כלל dr / drcfg בשורש (legacy)', async () => {
     await put('dr/' + LE + '_20261116', { uid: LE });
@@ -170,7 +188,8 @@ describe('drSubmit', () => {
     assert.equal(d.uid, E1); assert.equal(d.n, 'דנה'); assert.equal(d.br, 'b1'); assert.equal(d.day, '2026-11-16'); assert.equal(d.st, 'sum'); assert.equal(d.ai, 'ok');
     assert.equal(d.e.length, 1);
     assert.deepEqual({ txt: d.e[0].txt, tr: d.e[0].tr, np: d.e[0].np, au: d.e[0].au, sec: d.e[0].sec }, { txt: 'סגרתי קופה', tr: GM.DR_DEF.tr, np: 2, au: true, sec: 3 });
-    assert.ok(await exists(`b/${A}/dr/${ID1}/a0.wav`), 'ההקלטה נשמרה ב-Storage בנתיב החוזה');
+    assert.match(d.e[0].af, /^a0_[0-9a-f]{12}[.]wav$/);
+    assert.ok(await exists(`b/${A}/dr/${ID1}/` + d.e[0].af), 'ההקלטה נשמרה ב-Storage בנתיב שבתוך הרשומה');
     assert.equal((await get(`b/${A}/dr/${ID1}/p/0_0`)).uid, E1);
     assert.ok((await get(`b/${A}/dr/${ID1}/p/0_1`)).img.startsWith('data:image/jpeg;base64,'));
     assert.deepEqual(await get(`b/${A}/dr/${ID1}/x/m`), { sum: GM.DR_DEF.sum, sumW: GM.DR_DEF.sumW });
@@ -200,7 +219,7 @@ describe('drSubmit', () => {
     const r = await call('drSubmit', E1, { txt: 'א', audio: { mime: 'audio/wav', b64: wavB64(2) } }, MON());
     assert.deepEqual(r.r, { id: ID1, st: 'raw', ai: 'cap' });
     assert.equal(drReqs().length, 0);
-    assert.ok(await exists(`b/${A}/dr/${ID1}/a0.wav`));
+    assert.ok(await exists(`b/${A}/dr/${ID1}/` + (await get(`b/${A}/dr/${ID1}`)).e[0].af));
     assert.equal((await get(`b/${A}/dr/${ID1}`)).e[0].txt, 'א');
     assert.equal(PUSH.length, 1);
   });
@@ -215,6 +234,39 @@ describe('drSubmit', () => {
     GM.state.mode = 'ok';
     GM.state.dr = 'not json';
     assert.deepEqual((await call('drSubmit', E1, { txt: 'ב' }, MON())).r, { id: ID1, st: 'raw', ai: 'err' });
+  });
+});
+
+describe('drSubmit – שליחות במקביל וכשל במונה', () => {
+  beforeEach(() => seed());
+  it('שתי שליחות עם הקלטה במקביל: כל הקלטה שנשמרה ברשומה קיימת, בנתיב ייחודי, ומושמעת נכון', async () => {
+    const w1 = wavB64(2), w2 = wavB64(3);
+    await bucket.deleteFiles({ prefix: `b/${A}/dr/${ID1}/` }).catch(() => {}); // קבצים מבדיקות קודמות (seed מנקה רק את Firestore)
+    const rs = await Promise.all([call('drSubmit', E1, { txt: 'א', audio: { mime: 'audio/wav', b64: w1 } }, MON()), call('drSubmit', E1, { txt: 'ב', audio: { mime: 'audio/wav', b64: w2 } }, MON())]);
+    for (const r of rs) assert.ok(r.ok || r.reason === 'busy', JSON.stringify(r));
+    const d = await get(`b/${A}/dr/${ID1}`);
+    assert.equal(d.e.length, rs.filter((r) => r.ok).length);
+    const [files] = await bucket.getFiles({ prefix: `b/${A}/dr/${ID1}/` });
+    assert.deepEqual(files.map((f) => f.name.split('/').pop()).sort(), d.e.map((x) => x.af).sort(), 'אין קובץ יתום ואין קובץ חסר');
+    const names = new Set(d.e.map((x) => x.af));
+    assert.equal(names.size, d.e.length, 'נתיב ייחודי לכל שליחה');
+    for (let i = 0; i < d.e.length; i++) {
+      assert.match(d.e[i].af, new RegExp('^a' + i + '_[0-9a-f]{12}[.]wav$'));
+      const a = await call('drMgr', M1, { op: 'audio', id: ID1, i });
+      assert.equal(a.r.b64, d.e[i].txt === 'א' ? w1 : w2, 'ההקלטה של השליחה הנכונה');
+    }
+  });
+  it('כשל בשמירה מראש במונה אחרי השמירה הגולמית: נשאר raw/err, וההתראה למנהל נשלחת', async () => {
+    const AI = require('../functions/lib/sec-ai.js');
+    const orig = AI.costMc;
+    AI.costMc = () => { throw new Error('boom'); };
+    let r;
+    try { r = await call('drSubmit', E1, { txt: 'א' }, MON()); } finally { AI.costMc = orig; }
+    assert.deepEqual(r.r, { id: ID1, st: 'raw', ai: 'err' });
+    const d = await get(`b/${A}/dr/${ID1}`);
+    assert.equal(d.e[0].txt, 'א'); assert.equal(d.st, 'raw'); assert.equal(d.ai, 'err');
+    assert.deepEqual(PUSH.map((p) => p.uid), [M1]);
+    assert.equal(drReqs().length, 0);
   });
 });
 

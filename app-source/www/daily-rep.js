@@ -33,7 +33,7 @@ const loading=(T)=>({t:T,h:D.err?`<div class="card"><p class="note" style="margi
 const deny=T=>({t:T,h:'<div class="empty">התכונה לא פעילה בעסק הזה</div>'});
 
 /* ---------- קריאה ---------- */
-async function runQ(field,val,lim){const sq={from:[{collectionId:'dr'}],where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:val}}},limit:lim||100};
+async function runQ(field,val,lim){const sq={from:[{collectionId:'dr'}],where:{fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:{stringValue:val}}},limit:lim||60};if(field==='uid')sq.orderBy=[{field:{fieldPath:'day'},direction:'DESCENDING'}];/* היסטוריה: החדשים קודם (אינדקס uid+day). יום: where day== בלבד */
  const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>dec(x.document)).sort((a,b)=>String(b.day).localeCompare(String(a.day)))}
 const get404=async p=>{try{return dec(await fsx(p))}catch(e){if(e&&e.code===404)return null;throw e}};
 async function cfgLoad(){const c=await get404('/drcfg/main');D.cfg=c||{}}
@@ -125,7 +125,7 @@ function dayH(){const c=D.cfg,L=D.dayL,by={};L.forEach(d=>{by[d.uid]=d});
  ${us.length?us.map(u=>{const d=by[u],nm=stf(u)||(d&&d.n)||u;return d?`<button class="li" data-a="drOpen" data-id="${esc(d.id)}"><div class="m"><b>${esc(nm)}</b><small>${d.e?d.e.length+' שליחות':''}${d.ai==='cap'?' · בלי סיכום (תקרה)':''}</small></div>${tag(d)}${ico('chev')}</button>`:`<div class="li" style="cursor:default"><div class="m"><b>${esc(nm)}</b></div><span class="tag t4">לא דיווח</span></div>`}).join(''):'<div class="empty">אין עובדים חייבים בדיווח. אפשר לסמן במסך "עובדים".</div>'}`}
 function mHist(){const us=[...new Set([...reqUids(),...(D.staff||[]).filter(s=>s.role!=='manager').map(s=>s.uid)])];
  const sel=`<label class="f"><span>עובד</span><select data-c="drHu"><option value="">בחר עובד</option>${us.map(u=>`<option value="${esc(u)}"${u===D.hu?' selected':''}>${esc(stf(u)||u)}</option>`).join('')}</select></label>`;
- if(D.hu&&!D.hl)load('hl',async()=>{D.hl=await runQ('uid',D.hu,100)});
+ if(D.hu&&!D.hl)load('hl',async()=>{D.hl=await runQ('uid',D.hu,60)});
  return `<div class="card">${sel}</div>`+(D.hu?(D.hl?histH(D.hl,'drOpen'):'<div class="empty">טוען…</div>'):'<div class="empty">בחר עובד</div>')}
 function cardH(id){const C=D.card;if(!C||C.id!==id){load('c'+id,()=>cardLoad(id));return loading('דיווח')}
  const d=C.doc,m=C.m||{},raw=d.st==='raw'||!m.sum,nm=stf(d.uid)||d.n||'';
@@ -156,7 +156,7 @@ function mgrV(){const T='דיווח יומי';
  if(D.open)return{t:T,h:cardH(D.open)};
  const tab=['day','hist','cfg'].includes(D.tab)?D.tab:'day';
  if(!D.day)D.day=todayIL();
- if(tab==='day'&&!D.dayL){const dd=D.day;load('day',async()=>{const L=await runQ('day',dd,200);if(dd===D.day)D.dayL=L});return loading(T)}
+ if(tab==='day'&&!D.dayL){const dd=D.day;load('day',async()=>{const L=await runQ('day',dd,500);if(dd===D.day)D.dayL=L});return loading(T)}
  const tb=[['day','היום'],['hist','היסטוריה'],['cfg','הגדרות']].map(([k,l])=>`<button class="chip ${tab===k?'on':''}" data-a="drTab" data-v="${k}" aria-pressed="${tab===k}">${l}</button>`).join('');
  return{t:T,s:'דיווח עובדים',h:`<div class="chips" role="tablist" style="margin:0 0 10px">${tb}</div>`+(tab==='day'?dayH():tab==='hist'?mHist():cfgH())}}
 V.dr=()=>{const T='דיווח יומי';if(!on())return deny(T);return mgr()?mgrV():isW()?workerV():deny(T)};

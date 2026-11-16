@@ -2239,13 +2239,15 @@ service cloud.firestore {
       }
 
       // ----- דיווח יומי – dailyRep (16.11.2026). רק בתוך העסק (לא בשורש). כל כתיבה – רק השרת (daily-rep.js). התוספת כבויה = אין גישה. -----
-      // dr/{uid}_{YYYYMMDD}: מנהל, או העובד בעל הדיווח. p (תמונות) – כמו האב, לפי uid שבמסמך. x/m (טיוטת המנהל) – מנהל בלבד.
+      // dr/{uid}_{YYYYMMDD}: מנהל, או העובד בעל הדיווח. p (תמונות) – כמו האב, לפי uid של מסמך האב. x/m (טיוטת המנהל) – מנהל בלבד.
       // x/w (מה שאושר, נוצר רק ב-approve) – מנהל והעובד בעל הדיווח. drcfg/main – צוות; drcfg/cap – מנהל־על; השאר (use, rem_*) – אף אחד.
       match /dr/{id} {
         allow read: if feat('dailyRep') && (bMgr() || (bEmp() && resource.data.uid == request.auth.uid));
         allow create, update, delete: if false;
         match /p/{k} {
-          allow read: if feat('dailyRep') && (bMgr() || (bEmp() && resource.data.uid == request.auth.uid));
+          // בעל הדיווח לפי מסמך האב (לא לפי p.uid) – כך גם רשימה של p בלי סינון עוברת לעובד בעל הדיווח
+          allow read: if feat('dailyRep') && (bMgr()
+            || (bEmp() && get(/databases/$(database)/documents/b/$(bizId)/dr/$(id)).data.uid == request.auth.uid));
           allow create, update, delete: if false;
         }
         match /x/{k} {
