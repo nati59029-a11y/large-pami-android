@@ -235,7 +235,7 @@ function chatH(S){const pct=Number.isFinite(S.pct)?S.pct:null,fin=!!secFinOk();
  const busy=X.sending||X.mst?`<div class="secmsg a sectyp" id="secWait" role="status" aria-live="polite"><span class="sectypt">${X.mst?esc(String(X.mst).replace(/…$/,'')):X.deep?'חושבת לעומק':'כותבת'}</span><span class="sectypd" aria-hidden="true"><i></i><i></i><i></i></span></div>`:'';
  return bar+warn+`<div id="secChat">${body}${busy}</div>
  <div class="chips" style="margin:10px 0 6px">${QS.map(q=>`<button class="chip" data-a="secQ" data-v="${esc(q)}" style="min-height:40px">${esc(q)}</button>`).join('')}</div>
- <form data-f="secAskF" id="secForm"><textarea class="secin" name="q" maxlength="2000" placeholder="כתבו שאלה על העסק…" aria-label="שאלה למזכירה">${esc(X.draft||'')}</textarea>
+ <form data-f="secAskF" id="secForm"><textarea class="secin" name="q" maxlength="2000" placeholder="כתבו שאלה על העסק…" aria-label="שאלה למזכירה"${typeof RC!=='undefined'&&RC.live&&RC.tgt==='chat'?' readonly':''}>${esc(X.draft||'')}</textarea>
  ${mediaH()}
  <div class="row" style="margin-top:8px"><button class="btn grow" name="go" value="n"${X.sending?' disabled':''}>שליחה</button><button class="btn g grow" name="go" value="d"${X.sending?' disabled':''} title="מודל איכותי – עולה יותר בתקרה">חשבי לעומק</button></div></form>
  <p class="note" style="margin:6px 0 0">כל מספר מגיע עם מקור. מספר שלא נמצא בנתונים מסומן "לא אומת". המזכירה עלולה לטעות – לפני החלטה כספית, משפטית או לגבי עובד כדאי לבדוק עם איש מקצוע.</p>`}
@@ -256,7 +256,7 @@ CHG.secWe=async el=>{const v=el.value;try{await fnCall('secPrefs',{op:'calWe',v}
 ACT.secSetX=()=>{X.set=0;rerender()};
 ACT.secGo=el=>{const v=el.dataset.v;if(v[0]==='@'){X.tab=v.slice(1);X.fl=X.cl=X.rl=null;rerender();return}if(V[v])go(v)};
 ACT.secQ=el=>{const f=document.getElementById('secForm');if(f){f.q.value=el.dataset.v;ask2(el.dataset.v,false)}};
-FRM.secAskF=(f,ev)=>{const sub=ev&&ev.submitter;ask2(String(f.q.value||''),!!(sub&&sub.value==='d'))};
+FRM.secAskF=(f,ev)=>{if(RC.on&&RC.tgt==='chat')return toast('קודם עצרו את ההקלטה');const sub=ev&&ev.submitter;ask2(String(f.q.value||''),!!(sub&&sub.value==='d'),X.vdr?'voice':undefined)};
 CHG.secMir=async el=>{const on=!!el.checked;el.disabled=true;try{await fnCall('secPrefs',{op:'mirror',on});X.st.mirror=on;toast(on?'המראה פעיל':'המראה כבוי – תזכורות כספים ודוחות לא יפעלו');if(on){MR.h='';mirSched()}}catch(e){el.checked=!on;err(e)}finally{el.disabled=false;rerender()}};
 ACT.secNr=async el=>{const k=el.dataset.k;try{await fnCall('secPrefs',{op:'notRelevant',key:k});X.nr=Object.assign({},X.nr,{[k]:1});toast('לא אציע את זה שוב ב-90 הימים הקרובים');rerender()}catch(e){err(e)}};
 async function thSave(a){try{await fnCall('secPrefs',{op:'threshold',amount:a});X.st.cfTh=a;toast(a==null?'הסף נמחק':'הסף נשמר');rerender()}catch(e){err(e)}}
@@ -267,7 +267,7 @@ const scrollEnd=()=>setTimeout(()=>{const f=document.getElementById('secForm');i
 // 13.11.2026: קוד הסיבה כשספק ה-AI נכשל (reason מ-functions/lib/sec-ai.js), כדי שיהיה אפשר לאבחן מהמסך
 const AIR={'ai-quota':'נגמרה המכסה או אין חיוב פעיל בחשבון ה-AI','ai-rejected':'שירות ה-AI דחה את הבקשה – מפתח או מודל לא תקינים','ai-model':'מודל ה-AI לא נמצא בשירות','ai-overloaded':'עומס זמני בשירות ה-AI','ai-timeout':'שירות ה-AI לא ענה בזמן','ai-network':'אין חיבור מהשרת לשירות ה-AI','ai-error':'שגיאה לא מוכרת בשירות ה-AI'};
 async function ask2(q,deep,via){q=q.replace(/\s+$/,'');if(!q.trim()||X.sending)return;if(q.length>2000)return toast('השאלה ארוכה מדי (עד 2,000 תווים)');
- X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,via:via==='voice'?'voice':undefined,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';rerender();scrollEnd();
+ X.msgs=X.msgs||[];X.msgs.push({role:'u',text:q,via:via==='voice'?'voice':undefined,t:Date.now()});X.sending=1;X.deep=deep;X.draft='';X.vdr=0;rerender();scrollEnd();
  try{const fin=secFin({pay:!!X.st.pay,rec:true});const d={text:q,deep};if(via==='voice')d.via='voice';if(fin)d.fin=fin;/* 15.11.2026: לשאלות על תקלות – גרסה ומצב חיבור בלבד */try{const vc=typeof APP_VC!=='undefined'?String(APP_VC):'';d.app={on:navigator.onLine!==false};if(/^\d{1,7}$/.test(vc))d.app.v=vc}catch(e){}
   const r=await fnCall('secChat',d);
   X.msgs.push({role:'a',id:r.id||'',text:r.reply,src:r.src||[],ideas:r.ideas||[],th:r.th||null,cards:r.cards||[],stale:!!r.stale,mode:r.mode,t:Date.now()});if((r.cards||[]).length){X.fl=null;X.cl=null;eyStale()}
@@ -685,11 +685,13 @@ ACT.secWaOpen=el=>{X.wa.cur=el.dataset.wa;X.wa.card=null;rerender()};
 ACT.secWaBack=()=>{X.wa.cur=null;X.wa.card=null;X.wa.list=null;rerender()};
 /* ---------- כרטיס שולח + טיוטות ---------- */
 async function waCardLoad(){const wa=X.wa.cur;X.wa.cb=1;try{const r=await fnCall('secInbox',{op:'get',wa});if(X.wa.cur===wa)X.wa.card=r&&r.card?r:{err:'לא נטען'}}catch(e){X.wa.card={err:e&&e.message||'לא נטען'}}finally{X.wa.cb=0;if(cur().v==='sec'&&!typing())rerender()}}
+/* 16.11.2026: שאלת הבהרה של המזכירה למנהל, כשהיא לא בטוחה בהודעה. עונים ב"↩ תגובה" – והיא מכינה טיוטה חדשה לפי התשובה */
+const askH=(d,open)=>d&&d.ask?`<div class="secin1" style="margin:6px 0" role="note"><b>❓ המזכירה שואלת:</b> <span dir="auto">${esc(d.ask)}</span>${open&&mrBtnH('wa',d.id)?'<small class="note" style="display:block;margin-top:4px">לחצו "↩ תגובה" למטה וכתבו לה את התשובה – היא תכין טיוטה חדשה לפי מה שתכתבו.</small>':''}</div>`:'';
 function drH(d,open,tpls){
  if(d.st==='sent')return `<div class="secdr"><small class="note">${d.am?'נשלח לבד לפי הכלל ✓':'נשלח ✓'}</small><div style="white-space:pre-wrap">${esc(d.sum||d.text)}</div></div>`;
  if(d.st==='done')return '<div class="secdr" style="opacity:.75"><small class="note">טופל בלי לענות</small></div>';
  const why=(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:'';
- const head=`<small class="note">טיוטת תשובה${d.src==='bank'?' (מתשובה מוכנה)':''}${d.lang&&d.lang!=='he'?' · בשפת הפונה':''}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+flH(d.flags)+'</div>':''}${why}`;
+ const head=`<small class="note">טיוטת תשובה${d.src==='bank'?' (מתשובה מוכנה)':''}${d.lang&&d.lang!=='he'?' · בשפת הפונה':''}${d.st==='fail'?' · השליחה הקודמת נכשלה':''}</small>${(d.flags||[]).length?'<div class="sectg">'+flH(d.flags)+'</div>':''}${why}${askH(d,open)}`;
  if(open)return `<div class="secdr" data-id="${esc(d.id)}">${head}${mrInfoH(d)}<textarea class="secin" id="secDr_${esc(d.id)}" maxlength="2000" aria-label="טיוטת תשובה" dir="auto">${esc(d.text)}</textarea><div class="secrow"><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" style="flex:1">שלח</button><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button>${mrBtnH('wa',d.id)}</div></div>`;
  return `<div class="secdr" data-id="${esc(d.id)}">${head}<div style="white-space:pre-wrap;margin-top:4px">${esc(d.text)}</div><p class="note" style="margin:6px 0">עברו 24 שעות מההודעה האחרונה של הפונה. אפשר לשלוח רק הודעת תבנית מאושרת.</p>${(tpls||[]).length?`<div class="secrow"><select id="secTpl_${esc(d.id)}" aria-label="תבנית">${tpls.map(t=>`<option value="${esc(t.name)}">${esc(t.label)}</option>`).join('')}</select><button class="btn" data-a="secWaSend" data-id="${esc(d.id)}" data-t="1">שלח תבנית</button></div>`:'<p class="note" style="margin:0">אין תבניות מאושרות. מנהל המערכת מוסיף אותן.</p>'}<div class="secrow"><button class="chip" data-a="secWaDone" data-id="${esc(d.id)}">טופל בלי לענות</button></div></div>`}
 function waCardH(){const R=X.wa.card,back='<button class="btn g w" data-a="secWaBack" style="margin-bottom:8px">חזרה לתיבת ההודעות</button>';
@@ -1293,7 +1295,7 @@ ACT.secMrReply=el=>{const k=el.dataset.k,id=el.dataset.id;if(!MRCH[k]||!id)retur
  <p class="note" style="margin:0 0 8px">תשלום או העברת כסף, מחיקת נתונים ושליחת סיסמאות או פרטים רגישים – תמיד באישור שלך, גם אם תכתבו אחרת.</p>
  <div class="row"><button class="btn grow" id="secMrGo">שליחה</button><button type="button" class="btn g grow" data-a="closeDlg">ביטול</button></div></form>`)};
 ACT.secMrEx=el=>{const t=document.getElementById('secMrT');if(t){t.value=el.dataset.v;t.focus()}};
-FRM.secMrF=async f=>{if(RC.on&&RC.tgt==='mr')micCancel();const p=X.mrp;if(!p)return;const text=String(f.t.value||'').trim();if(!text)return toast('כתבו מה לעשות');if(text.length>300)return toast('עד 300 תווים');
+FRM.secMrF=async f=>{if(RC.on&&RC.tgt==='mr'){if(RC.live){try{RC.P&&RC.P.cancel().catch(()=>{})}catch(e){}liveEnd('',1)}else micCancel()}/* 16.11.2026: בהכתבה חיה הטקסט כבר בתיבה – נשמר */const p=X.mrp;if(!p)return;const text=String(f.t.value||'').trim();if(!text)return toast('כתבו מה לעשות');if(text.length>300)return toast('עד 300 תווים');
  const b=document.getElementById('secMrGo');if(b){b.disabled=true;b.textContent=p.k==='mail'||p.k==='wa'?'מכינה טיוטה…':'רגע…'}
  try{const r=await fnCall('secLearn',{op:'reply',k:p.k,id:p.id,text});p.text=text;p.prop=r.prop;
   if(r.snz){closeDlg();X.mrp=null;toast('אזכיר לך שוב '+r.snz.l);X.nl=null;try{eyStale()}catch(e){}rerender();return}
@@ -1472,7 +1474,7 @@ const AGAIN='התמונה כבר לא בזיכרון. שלחו שוב את הת�
 const VMAX=11*1048576,VHARD=12*1048576,CANT='הסרטון כבד מדי ואי אפשר להקטין אותו במכשיר הזה. צלמו סרטון קצר יותר או באיכות נמוכה יותר.';
 const RC={on:0};
 const fsec=s=>{s=Math.max(0,Math.floor(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
-const micLbl=()=>RC.on?'⏹ עצור ושלח ('+fsec(RC.el||0)+')':'🎤 הקלטה';
+const micLbl=()=>RC.on?(RC.stp?'⏳ מסיימת…':'⏹ עצור ('+fsec(RC.el||0)+')'):'🎤 הקלטה';
 const mBusy=()=>!!(X.mst||X.sending);
 function micUi(){document.querySelectorAll('[data-a=secMic],[data-a=secMrMic]').forEach(b=>{b.textContent=micLbl();b.disabled=!RC.on&&mBusy()})}
 const keepDraft=()=>{const f=document.getElementById('secForm');if(f&&f.q)X.draft=f.q.value};
@@ -1494,8 +1496,8 @@ async function toWav(blob,maxSec){/* מפענח וממיר ל-WAV PCM 16 ביט,
  let bin='';for(let i=0;i<bytes.length;i+=8192)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
  return{sec:n/16000,b64:btoa(bin)}}
 const micDown=()=>{try{RC.stream&&RC.stream.getTracks().forEach(t=>t.stop())}catch(e){}RC.stream=null};
-function micStop(){if(RC.on&&RC.mr&&RC.mr.state!=='inactive'){clearInterval(RC.tm);try{RC.mr.stop()}catch(e){micDown();RC.on=0;micUi()}}}
-function micCancel(){if(!RC.on)return;RC.x=1;if(RC.mr&&RC.mr.state!=='inactive')micStop();else{clearInterval(RC.tm);micDown();RC.on=0;micUi()}}
+function micStop(){if(RC.on&&RC.live){liveStop();return}if(RC.on&&RC.mr&&RC.mr.state!=='inactive'){clearInterval(RC.tm);try{RC.mr.stop()}catch(e){micDown();RC.on=0;micUi()}}}
+function micCancel(){if(!RC.on)return;RC.x=1;if(RC.live){liveCancel();return}if(RC.mr&&RC.mr.state!=='inactive')micStop();else{clearInterval(RC.tm);micDown();RC.on=0;micUi()}}
 /* ההקלטה נעצרת (בלי תמלול) כשהמקום שלה כבר לא מוצג: יציאה מהמזכירה, חלון "↩ תגובה" שנסגר, או לשונית אחרת במקום השיחה */
 const micGone=()=>cur().v!=='sec'||(RC.tgt==='mr'?!document.getElementById('secMrT'):((X.tab||'chat')!=='chat'||!document.querySelector('#secMedia [data-a=secMic]')));
 let micDlgOn=0;
@@ -1503,12 +1505,14 @@ function micDlgHook(){if(micDlgOn)return;const d=document.getElementById('dlg');
 async function micStart(tgt){
  if(RC.on||mBusy())return;
  const l=mlim();if(!l||l.aud<=0)return toast('ההקלטה הקולית כבויה בעסק הזה');
+ const P=await spAvail();if(P&&!RC.on&&!mBusy()){if(await liveStart(tgt,P,l.aud))return}
+ if(RC.on||mBusy())return;
  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||typeof MediaRecorder==='undefined'||!(window.AudioContext||window.webkitAudioContext))return toast('ההקלטה לא נתמכת במכשיר הזה. אפשר להקליד.');
  RC.on=1;let stream;
  try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){RC.on=0;return toast(micErr(e))}
  const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'].find(m=>MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(m))||'';
  let mr;try{mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined)}catch(e){stream.getTracks().forEach(t=>t.stop());RC.on=0;return toast('ההקלטה לא נתמכת במכשיר הזה. אפשר להקליד.')}
- const chunks=[],max=l.aud;Object.assign(RC,{on:1,tgt,mr,stream,t0:performance.now(),el:0,x:0,auto:0,tm:0});
+ const chunks=[],max=l.aud;Object.assign(RC,{on:1,live:0,stp:0,tgt,mr,stream,t0:performance.now(),el:0,x:0,auto:0,tm:0});
  mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
  mr.onstop=()=>{clearInterval(RC.tm);micDown();const cancel=RC.x,tg=RC.tgt,auto=RC.auto;RC.on=0;micUi();if(cancel){if(tg==='chat'&&cur().v==='sec'){keepDraft();rerender()}return}micDone(new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'}),max,tg,auto)};
  stream.getTracks().forEach(t=>{t.onended=()=>micStop()});
@@ -1525,8 +1529,38 @@ async function micDone(blob,max,tg,auto){
  catch(e){toast(e&&e.message&&!(e instanceof DOMException)&&e.name!=='EncodingError'?e.message:'לא הצלחנו לעבד את ההקלטה. נסו שוב או הקלידו.')}
  X.mst='';blob=null;micUi();
  if(text&&tg==='mr'){const t=document.getElementById('secMrT');if(t){t.value=((t.value?t.value+' ':'')+text).slice(0,300);t.focus()}}
- else if(text&&tg==='chat'&&cur().v==='sec')ask2(text,false,'voice');
+ else if(text&&tg==='chat'&&cur().v==='sec'){keepDraft();const d=String(X.draft||'').trim();X.draft=((d?d+' ':'')+text).slice(0,2000);X.vdr=1;rerender();micFocus('chat')}/* 16.11.2026: לא נשלח לבד – נכנס לתיבה לעריכה */
  else if(cur().v==='sec'){rerender()}}
+/* 16.11.2026: הכתבה חיה – זיהוי הדיבור של הטלפון (תוסף LpSpeech ב-APK החדש, בלי שרת ובלי עלות).
+   המילים נכנסות לתיבת הכתיבה תוך כדי דיבור; בזמן ההקלטה התיבה לקריאה בלבד, ואחרי "עצור" עורכים ושולחים בלחיצה.
+   APK ישן (בלי התוסף) או טלפון בלי זיהוי דיבור – ההקלטה הקודמת (תמלול בשרת אחרי העצירה), וגם היא נכנסת לתיבה ולא נשלחת לבד. */
+let SPA=null;
+async function spAvail(){if(SPA!==null)return SPA||null;SPA=0;
+ try{const C=window.Capacitor,P=C&&C.Plugins&&C.Plugins.LpSpeech;if(!P||!(C.isNativePlatform&&C.isNativePlatform())||(C.isPluginAvailable&&!C.isPluginAvailable('LpSpeech')))return null;
+  const r=await P.available();if(r&&r.ok)SPA=P}catch(e){SPA=0}return SPA||null}
+const micFld=tg=>{if(tg==='mr')return document.getElementById('secMrT');const f=document.getElementById('secForm');return f&&f.q||null};
+const micFocus=tg=>setTimeout(()=>{const t=micFld(tg);if(t){try{t.focus();const n=t.value.length;t.setSelectionRange(n,n)}catch(e){}}},40);
+const liveTxt=()=>{const max=RC.tgt==='mr'?300:2000;return[RC.base,RC.fin,RC.par].map(x=>String(x||'').trim()).filter(Boolean).join(' ').slice(0,max)};
+function liveShow(){if(!RC.live)return;const v=liveTxt(),t=micFld(RC.tgt);if(RC.tgt==='chat')X.draft=v;
+ if(t){t.readOnly=true;if(t.value!==v)t.value=v;try{t.scrollTop=t.scrollHeight}catch(e){}}}
+const LVE={perm:'אין הרשאה למיקרופון. אפשרו לאפליקציה גישה למיקרופון בהגדרות הטלפון ונסו שוב.',net:'זיהוי הדיבור צריך חיבור לאינטרנט. בדקו את החיבור ונסו שוב, או הקלידו.',lang:'זיהוי דיבור בעברית לא זמין בטלפון הזה. אפשר להקליד.',audio:'המיקרופון תפוס או לא זמין.',silence:'לא שמעתי דיבור. נסו שוב.',fail:'זיהוי הדיבור נעצר. אפשר להמשיך להקליד או להקליט שוב.'};
+async function liveStart(tgt,P,max){
+ const f=micFld(tgt);Object.assign(RC,{on:1,live:1,stp:0,tgt,P,max,t0:performance.now(),el:0,x:0,auto:0,tm:0,fin:'',par:'',hs:[],base:f?String(f.value||''):''});
+ const on=(n,fn)=>P.addListener(n,e=>{if(RC.live&&RC.P===P)fn(e||{})});
+ try{RC.hs=await Promise.all([on('partial',e=>{RC.par=String(e.text||'');liveShow()}),on('final',e=>{const t=String(e.text||'').trim();if(t)RC.fin=(RC.fin?RC.fin+' ':'')+t;RC.par='';liveShow()}),on('end',e=>liveEnd(String(e.code||'')))]);
+  await P.start({lang:'he-IL'})}
+ catch(e){const c=e&&e.code;liveOff();micUi();if(c==='na'){SPA=0;return false}/* אין זיהוי דיבור – ההקלטה הקודמת */toast(LVE[c==='perm'?'perm':'fail']);return true}
+ micDlgHook();
+ RC.tm=setInterval(()=>{if(!RC.live)return;RC.el=(performance.now()-RC.t0)/1000;if(micGone()){micCancel();return}if(!RC.stp&&RC.el>=max){RC.auto=1;liveStop();return}micUi()},250);
+ if(tgt==='chat'){rerender()}micUi();liveShow();return true}
+function liveOff(){clearInterval(RC.tm);clearTimeout(RC.st);const hs=RC.hs||[];RC.hs=[];hs.forEach(h=>{try{h&&h.remove&&h.remove()}catch(e){}});const t=micFld(RC.tgt);if(t)t.readOnly=false;Object.assign(RC,{on:0,live:0,stp:0,P:null})}
+function liveStop(){if(!RC.live||RC.stp)return;RC.stp=1;micUi();const P=RC.P;try{P.stop().catch(()=>liveEnd(''))}catch(e){liveEnd('')}RC.st=setTimeout(()=>liveEnd(''),4000)}
+function liveCancel(){const P=RC.P,tg=RC.tgt,base=RC.base||'';try{P&&P.cancel().catch(()=>{})}catch(e){}liveOff();const t=micFld(tg);if(t)t.value=base;if(tg==='chat'){X.draft=base;if(cur().v==='sec')rerender()}micUi()}
+function liveEnd(code,quiet){if(!RC.live)return;const tg=RC.tgt,auto=RC.auto,v=liveTxt(),got=v.trim()!==String(RC.base||'').trim();liveOff();
+ const t=micFld(tg);if(t)t.value=v;if(tg==='chat'){X.draft=v;if(got)X.vdr=1;if(cur().v==='sec')rerender()}micUi();if(quiet)return;micFocus(tg);
+ if(auto)toast('ההקלטה נעצרה בגבול של '+(RC.max||'')+' שניות. אפשר לערוך ולשלוח, או להקליט עוד.');
+ else if(code&&code!=='pause'&&(code!=='silence'||!got))toast(LVE[code]||LVE.fail);
+ else if(got)toast('אפשר לערוך את הטקסט ואז לשלוח')}
 ACT.secMic=()=>{if(RC.on)micStop();else micStart('chat')};
 ACT.secMrMic=()=>{if(RC.on)micStop();else micStart('mr')};
 ACT.secMicX=()=>micCancel();

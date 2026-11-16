@@ -79,17 +79,21 @@ const fakeMic = (page, deny, badStart) => page.evaluate(([d, bs]) => {
     check('360px: בלי גלישה לרוחב, וכפתורי המדיה בגובה 44px לפחות', (await sx(page)) <= 0 && (await page.evaluate(() => [...document.querySelectorAll('#secMedia .chip')].every((e) => e.getBoundingClientRect().height >= 43))), await sx(page));
     check('הקלדה בשדה הטקסט עדיין אפשרית ומתחת לכפתורים (השדה נראה במסך)', await page.evaluate(() => { const q = document.querySelector('#secForm textarea').getBoundingClientRect(), m = document.querySelector('#secMedia').getBoundingClientRect(); return q.width > 200 && m.top >= q.bottom - 1 && m.right <= window.innerWidth + 1 && m.left >= -1; }));
     if (shots) await page.screenshot({ path: path.join(shots, 'sec12-chat-360.png'), fullPage: true });
-    // --- קול: הקלטה ← תמלול ← בועה עם 🎤 ← secChat עם via ---
+    // --- קול (טלפון בלי זיהוי דיבור / APK ישן): הקלטה ← תמלול ← הטקסט בתיבה לעריכה ← שליחה בלחיצה ← secChat עם via ---
     await fakeMic(page);
     await page.click('[data-a=secMic]'); await H.settle(page, 500);
-    check('בזמן הקלטה: כפתור "עצור ושלח" וביטול, והשדות האחרים כבויים', /עצור ושלח/.test(await txt(page, '#secMedia')) && !!(await page.$('[data-a=secMicX]')) && await page.evaluate(() => document.querySelector('[data-c=secImgF]').disabled));
+    check('בזמן הקלטה: כפתור "עצור" וביטול, והשדות האחרים כבויים', /⏹ עצור/.test(await txt(page, '#secMedia')) && !!(await page.$('[data-a=secMicX]')) && await page.evaluate(() => document.querySelector('[data-c=secImgF]').disabled));
     await page.click('[data-a=secMic]'); await H.settle(page, 1500);
-    const stt = last(o.bodies, 'secMedia', (b) => b.op === 'stt'), ch = last(o.bodies, 'secChat');
+    const stt = last(o.bodies, 'secMedia', (b) => b.op === 'stt'), chN = all(o.bodies, 'secChat').length;
+    check('16.11: אחרי התמלול הטקסט בתיבה לעריכה ולא נשלח לבד', (await page.inputValue('#secForm textarea')) === 'שלום, כמה הכנסות היום' && chN === 0, { v: await page.inputValue('#secForm textarea'), chN });
+    await page.click('#secForm [name=go][value=n]'); await H.settle(page, 800);
+    const ch = last(o.bodies, 'secChat');
     check('תמלול: secMedia stt עם WAV (כותרת RIFF) מונו 16kHz', stt && stt[1].mime === 'audio/wav' && Buffer.from(stt[1].b64, 'base64').slice(0, 4).toString() === 'RIFF' && Buffer.from(stt[1].b64, 'base64').readUInt32LE(24) === 16000, stt && stt[1].b64.slice(0, 20));
     check('התמלול נשלח דרך secChat כרגיל עם via=voice', ch && ch[1].text === 'שלום, כמה הכנסות היום' && ch[1].via === 'voice', ch && ch[1]);
     const ct = await txt(page, '#secChat');
     check('בועת משתמש עם 🎤 והתשובה מוצגת; המיקרופון שוחרר', /🎤 שלום, כמה הכנסות היום/.test(ct) && /ענו: שלום/.test(ct) && (await page.evaluate(() => window.__tracks)) === 0, ct.slice(-120));
     // --- עצירה אוטומטית בגבול ---
+    await page.fill('#secForm textarea', ''); await page.evaluate(() => { window.__sec.draft = ''; });
     const n0 = all(o.bodies, 'secMedia', (b) => b.op === 'stt').length;
     await page.click('[data-a=secMic]'); await H.settle(page, 4200);
     check('עצירה אוטומטית אחרי 3 שניות (הגבלה), עם הודעה', all(o.bodies, 'secMedia', (b) => b.op === 'stt').length === n0 + 1 && /נעצרה בגבול של 3 שניות/.test(await toasts(page)), await toasts(page));
@@ -98,26 +102,26 @@ const fakeMic = (page, deny, badStart) => page.evaluate(([d, bs]) => {
     check('ביטול הקלטה: לא נשלח תמלול ונעלם כפתור הביטול', all(o.bodies, 'secMedia', (b) => b.op === 'stt').length === n0 + 1 && !(await page.$('[data-a=secMicX]')) && (await page.evaluate(() => window.__tracks)) === 0);
     // --- סירוב למיקרופון ---
     await fakeMic(page, true); await page.click('[data-a=secMic]'); await H.settle(page, 400);
-    check('סירוב למיקרופון: הודעה בעברית ואין הקלטה', /אין הרשאה למיקרופון/.test(await toasts(page)) && !/עצור ושלח/.test(await txt(page, '#secMedia')));
+    check('סירוב למיקרופון: הודעה בעברית ואין הקלטה', /אין הרשאה למיקרופון/.test(await toasts(page)) && !/⏹ עצור/.test(await txt(page, '#secMedia')));
     // --- שגיאת שרת בתמלול ---
     await fakeMic(page); o.R.sttErr = 'הקלטות כבויות בעסק'; await page.click('[data-a=secMic]'); await H.settle(page, 300); await page.click('[data-a=secMic]'); await H.settle(page, 1200);
-    check('שגיאת שרת בתמלול: הודעת השרת מוצגת, בלי קריאה ל-secChat נוספת, ואפשר להקליט שוב', /הקלטות כבויות בעסק/.test(await toasts(page)) && all(o.bodies, 'secChat').length === 2 && !!(await page.$('[data-a=secMic]:not([disabled])')));
+    check('שגיאת שרת בתמלול: הודעת השרת מוצגת, בלי קריאה ל-secChat נוספת, ואפשר להקליט שוב', /הקלטות כבויות בעסק/.test(await toasts(page)) && all(o.bodies, 'secChat').length === 1 /* 16.11: הקלטה לא נשלחת לבד – רק השליחה הידנית */ && !!(await page.$('[data-a=secMic]:not([disabled])')));
     o.R.sttErr = '';
     // --- מצב חיסכון בתמלול (ליקוי 2): מוצג ההסבר מהשרת, באנר החיסכון, ובלי secChat ---
     await page.evaluate(() => { window.__toasts.length = 0; });
     o.R.sttSave = true; await page.click('[data-a=secMic]'); await H.settle(page, 300); await page.click('[data-a=secMic]'); await H.settle(page, 1200);
-    check('מצב חיסכון בתמלול: הודעת התקרה מהשרת (לא "לא הצלחתי להבין"), באנר חיסכון, ובלי secChat', /תקרת השימוש החודשית/.test(await toasts(page)) && !/לא הצלחתי להבין/.test(await toasts(page)) && !!(await page.$('#secSaving')) && all(o.bodies, 'secChat').length === 2, await toasts(page));
+    check('מצב חיסכון בתמלול: הודעת התקרה מהשרת (לא "לא הצלחתי להבין"), באנר חיסכון, ובלי secChat', /תקרת השימוש החודשית/.test(await toasts(page)) && !/לא הצלחתי להבין/.test(await toasts(page)) && !!(await page.$('#secSaving')) && all(o.bodies, 'secChat').length === 1 /* 16.11: הקלטה לא נשלחת לבד – רק השליחה הידנית */, await toasts(page));
     o.R.sttSave = false; await page.evaluate(() => { window.__sec.st.saving = ''; window.__sec.st.pct = 10; rerender(); });
     // --- כשל בהתחלת ההקלטה (ליקוי 7): המיקרופון משוחרר, הודעה, ואפשר לנסות שוב ---
     await fakeMic(page, false, true); await page.evaluate(() => { window.__toasts.length = 0; });
     await page.click('[data-a=secMic]'); await H.settle(page, 400);
-    check('כשל ב-start: הודעה, המיקרופון שוחרר ואין הקלטה תקועה', /לא הצלחנו להתחיל את ההקלטה/.test(await toasts(page)) && (await page.evaluate(() => window.__tracks)) === 0 && !/עצור ושלח/.test(await txt(page, '#secMedia')) && !!(await page.$('[data-a=secMic]:not([disabled])')), await toasts(page));
+    check('כשל ב-start: הודעה, המיקרופון שוחרר ואין הקלטה תקועה', /לא הצלחנו להתחיל את ההקלטה/.test(await toasts(page)) && (await page.evaluate(() => window.__tracks)) === 0 && !/⏹ עצור/.test(await txt(page, '#secMedia')) && !!(await page.$('[data-a=secMic]:not([disabled])')), await toasts(page));
     await fakeMic(page);
     // --- מעבר ללשונית אחרת באמצע הקלטה מהצ'אט (ליקוי 3): ההקלטה בוטלה ולא נשלח תמלול ---
     const s0 = all(o.bodies, 'secMedia', (b) => b.op === 'stt').length;
     await page.click('[data-a=secMic]'); await H.settle(page, 300);
     await page.click('#secTabs [data-v=notes]'); await H.settle(page, 3600);
-    check('מעבר לשונית באמצע הקלטה: המיקרופון שוחרר ולא נשלח תמלול', (await page.evaluate(() => window.__tracks)) === 0 && all(o.bodies, 'secMedia', (b) => b.op === 'stt').length === s0 && all(o.bodies, 'secChat').length === 2);
+    check('מעבר לשונית באמצע הקלטה: המיקרופון שוחרר ולא נשלח תמלול', (await page.evaluate(() => window.__tracks)) === 0 && all(o.bodies, 'secMedia', (b) => b.op === 'stt').length === s0 && all(o.bodies, 'secChat').length === 1 /* 16.11: הקלטה לא נשלחת לבד – רק השליחה הידנית */);
     await page.click('#secTabs [data-v=chat]'); await H.settle(page, 400);
     // --- 🎤 בחלון "↩ תגובה" ---
     await page.click('#secChat [data-a=secMrReply][data-id=a1]'); await H.settle(page, 400);
@@ -296,6 +300,53 @@ const fakeMic = (page, deny, badStart) => page.evaluate(([d, bs]) => {
       check(label + ': כפתורים לפי ההגבלה' + (want.none ? ', בלי שורת פרטיות' : ''), got.mic === !!want.mic && got.img === !!want.img && got.vid === !!want.vid && got.note === !want.none, got);
       await ctxClose(o);
     }
+  }
+  {
+    // --- 16.11.2026: הכתבה חיה (תוסף LpSpeech מדומה): המילים בתיבה תוך כדי דיבור, בלי שרת, עריכה ושליחה בלחיצה ---
+    const o = await open(browser, www, { aud: 120, img: true, vid: 30 }); const page = o.page;
+    await page.evaluate(() => {
+      const L = {}; window.__sp = { calls: [], fire: (n, d) => (L[n] || []).forEach((f) => f(d)) };
+      const P = { available: async () => ({ ok: true }), start: async (a) => { window.__sp.calls.push(['start', a]); if (window.__sp.rej) { const e = new Error('x'); e.code = window.__sp.rej; throw e; } },
+        stop: async () => { window.__sp.calls.push(['stop']); setTimeout(() => { window.__sp.fire('final', { text: 'עד יום חמישי' }); window.__sp.fire('end', { code: '' }); }, 30); },
+        cancel: async () => { window.__sp.calls.push(['cancel']); },
+        addListener: async (n, f) => { (L[n] = L[n] || []).push(f); return { remove: () => { L[n] = (L[n] || []).filter((x) => x !== f); } }; } };
+      window.Capacitor = Object.assign(window.Capacitor || {}, { isNativePlatform: () => true, isPluginAvailable: (n) => n === 'LpSpeech', Plugins: Object.assign((window.Capacitor && window.Capacitor.Plugins) || {}, { LpSpeech: P }) });
+      SPA = null; navigator.mediaDevices.getUserMedia = async () => { window.__gum = 1; throw new Error('no'); };
+    });
+    await enter(page);
+    await page.fill('#secForm textarea', 'תזכירי לי');
+    await page.click('[data-a=secMic]'); await H.settle(page, 300);
+    check('הכתבה חיה: התחילה בעברית דרך הטלפון, בלי מיקרופון של הדפדפן ובלי שרת', (await page.evaluate(() => JSON.stringify(window.__sp.calls[0]))) === JSON.stringify(['start', { lang: 'he-IL' }]) && !(await page.evaluate(() => window.__gum)) && !last(o.bodies, 'secMedia'));
+    await page.evaluate(() => window.__sp.fire('partial', { text: 'לשלם לספק' })); await H.settle(page, 100);
+    check('תוך כדי דיבור: המילים מופיעות בתיבה אחרי הטקסט הקיים, והתיבה לקריאה בלבד', (await page.inputValue('#secForm textarea')) === 'תזכירי לי לשלם לספק' && await page.evaluate(() => document.querySelector('#secForm textarea').readOnly), await page.inputValue('#secForm textarea'));
+    await page.evaluate(() => { window.__sp.fire('final', { text: 'לשלם לספק החלב' }); window.__sp.fire('partial', { text: 'מחר' }); }); await H.settle(page, 100);
+    check('משפט שהסתיים נשמר, והמשפט הבא מתווסף', (await page.inputValue('#secForm textarea')) === 'תזכירי לי לשלם לספק החלב מחר', await page.inputValue('#secForm textarea'));
+    check('בזמן הכתבה: "⏹ עצור" וביטול', /⏹ עצור/.test(await txt(page, '#secMedia')) && !!(await page.$('[data-a=secMicX]')));
+    if (shots) await page.screenshot({ path: path.join(shots, 'sec12-live-360.png'), fullPage: true });
+    await page.click('#secForm [name=go][value=n]'); await H.settle(page, 300);
+    check('שליחה באמצע הכתבה – נחסמת עם הודעה', all(o.bodies, 'secChat').length === 0 && /קודם עצרו את ההקלטה/.test(await toasts(page)));
+    await page.click('[data-a=secMic]'); await H.settle(page, 400);
+    const v = await page.inputValue('#secForm textarea');
+    check('עצירה: המשפט האחרון נכנס, התיבה ניתנת לעריכה, ולא נשלח כלום', v === 'תזכירי לי לשלם לספק החלב עד יום חמישי' && !(await page.evaluate(() => document.querySelector('#secForm textarea').readOnly)) && all(o.bodies, 'secChat').length === 0 && !/⏹ עצור/.test(await txt(page, '#secMedia')), v);
+    await page.fill('#secForm textarea', 'תזכירי לי לשלם לספק החלב ביום חמישי');
+    await page.click('#secForm [name=go][value=n]'); await H.settle(page, 800);
+    const ch = last(o.bodies, 'secChat');
+    check('שליחה אחרי עריכה: הטקסט הערוך נשלח עם via=voice', ch && ch[1].text === 'תזכירי לי לשלם לספק החלב ביום חמישי' && ch[1].via === 'voice', ch && ch[1]);
+    // ביטול: הטקסט חוזר למה שהיה לפני ההקלטה
+    await page.fill('#secForm textarea', 'טקסט קודם');
+    await page.click('[data-a=secMic]'); await H.settle(page, 200); await page.evaluate(() => window.__sp.fire('partial', { text: 'משהו' })); await page.click('[data-a=secMicX]'); await H.settle(page, 300);
+    check('ביטול הכתבה: הטקסט חוזר למה שהיה, והתוסף בוטל', (await page.inputValue('#secForm textarea')) === 'טקסט קודם' && (await page.evaluate(() => window.__sp.calls.some((c) => c[0] === 'cancel'))));
+    // שגיאת רשת באמצע: הטקסט שנאמר נשאר, הודעה בעברית
+    await page.click('[data-a=secMic]'); await H.settle(page, 200); await page.evaluate(() => { window.__sp.fire('final', { text: 'שלום' }); window.__sp.fire('end', { code: 'net' }); }); await H.settle(page, 300);
+    check('שגיאת רשת: הטקסט נשאר בתיבה והודעה על החיבור', (await page.inputValue('#secForm textarea')) === 'טקסט קודם שלום' && /חיבור לאינטרנט/.test(await toasts(page)) && !/⏹ עצור/.test(await txt(page, '#secMedia')));
+    // סירוב הרשאה
+    await page.evaluate(() => { window.__sp.rej = 'perm'; window.__toasts.length = 0; }); await page.click('[data-a=secMic]'); await H.settle(page, 300);
+    check('סירוב למיקרופון בהכתבה: הודעה בעברית ואין הקלטה תקועה', /אין הרשאה למיקרופון/.test(await toasts(page)) && !/⏹ עצור/.test(await txt(page, '#secMedia')));
+    // אין זיהוי דיבור בטלפון: חוזרים להקלטה הקודמת
+    await page.evaluate(() => { window.__sp.rej = 'na'; }); await page.click('[data-a=secMic]'); await H.settle(page, 400);
+    check('אין זיהוי דיבור בטלפון: מעבר להקלטה הרגילה', !!(await page.evaluate(() => window.__gum)));
+    check('בלי שגיאות JS (הכתבה חיה)', page.__errors.length === 0, page.__errors);
+    await ctxClose(o);
   }
   {
     // --- חלון מנהל־העל ---
