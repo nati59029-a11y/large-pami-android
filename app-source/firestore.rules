@@ -2238,6 +2238,27 @@ service cloud.firestore {
         allow read, create, update, delete: if false;
       }
 
+      // ----- דיווח יומי – dailyRep (16.11.2026). רק בתוך העסק (לא בשורש). כל כתיבה – רק השרת (daily-rep.js). התוספת כבויה = אין גישה. -----
+      // dr/{uid}_{YYYYMMDD}: מנהל, או העובד בעל הדיווח. p (תמונות) – כמו האב, לפי uid שבמסמך. x/m (טיוטת המנהל) – מנהל בלבד.
+      // x/w (מה שאושר, נוצר רק ב-approve) – מנהל והעובד בעל הדיווח. drcfg/main – צוות; drcfg/cap – מנהל־על; השאר (use, rem_*) – אף אחד.
+      match /dr/{id} {
+        allow read: if feat('dailyRep') && (bMgr() || (bEmp() && resource.data.uid == request.auth.uid));
+        allow create, update, delete: if false;
+        match /p/{k} {
+          allow read: if feat('dailyRep') && (bMgr() || (bEmp() && resource.data.uid == request.auth.uid));
+          allow create, update, delete: if false;
+        }
+        match /x/{k} {
+          allow read: if feat('dailyRep') && (bMgr()
+            || (k == 'w' && bEmp() && get(/databases/$(database)/documents/b/$(bizId)/dr/$(id)).data.uid == request.auth.uid));
+          allow create, update, delete: if false;
+        }
+      }
+      match /drcfg/{d} {
+        allow read: if feat('dailyRep') && ((d == 'main' && bStaff()) || (d == 'cap' && bSuper()));
+        allow create, update, delete: if false;
+      }
+
       // closings: העתק של הכלל בשורש (תוספת 'cashClose')
       match /closings/{id} {
         function nw() { return request.resource.data; }
