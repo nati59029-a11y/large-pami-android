@@ -270,4 +270,15 @@ describe('store3d-ai – זיהוי המקטע (שלב 20א) והעברה (של�
     assert.deepEqual(A.moveDone({ n: 2, nDone: 0, nUid: {} }, 'e1', ok, ok), { nUid: { e1: { n: 0, d: 0 } }, nDone: 0 });
     assert.deepEqual(r.nUid.e1, { n: 4, d: 2 }, 'הקלט לא משתנה');
   });
+  it('moveDone (תיקון סבב 1): מקור שחוזר ל"קודמת" (aiBack) נשאר נספר; A→B (B צולם) ואז B→A – nDone חוזר לערכו', () => {
+    const ok = { st: 'ok' }, iss = { st: 'issue' }, bad = { st: 'bad' };
+    const r0 = { n: 8, nDone: 2, nUid: { e1: { n: 4, d: 2 } } };
+    const r1 = Object.assign({}, r0, A.moveDone(r0, 'e1', iss, ok, null)); // A→B: A מתרוקן, B1 הופכת לקודמת
+    assert.deepEqual([r1.nDone, r1.nUid.e1.d], [1, 1]);
+    const r2 = A.moveDone(r1, 'e1', iss, null, ok); // B→A: B חוזר ל-B1, A היה ריק
+    assert.deepEqual([r2.nDone, r2.nUid.e1.d], [2, 2]);
+    assert.equal(A.moveDone(r0, 'e1', ok, ok, ok).nDone, 2, 'יעד נספר + מקור חוזר לקודמת שנספרת – בלי שינוי');
+    assert.equal(A.moveDone(r0, 'e1', ok, null, bad).nDone, 2, 'קודמת שלא נספרת – בלי שינוי');
+    assert.equal(A.moveDone({ n: 2, nDone: 2, nUid: { e1: { n: 2, d: 2 } } }, 'e1', ok, null, ok).nDone, 2, 'לא מעל n');
+  });
 });

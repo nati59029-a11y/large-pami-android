@@ -273,9 +273,11 @@ function slotGuess(r, cands) {
 
 // ---------- שלב 20ב: העברת תמונה בין מקטעים (s3MovePh) ----------
 // r = מסמך הסבב, owner = העובד של שני המקטעים, aiFrom / aiTo = תוצאות הבדיקה לפני ההעברה (aiTo = null כשהיעד ריק).
-// אחרי ההעברה: המקור ריק, והיעד מקבל את aiFrom (הקודם ביעד נשמר כ"קודמת" ולא נספר). מחזיר { nUid, nDone } לעדכון.
-function moveDone(r, owner, aiFrom, aiTo) {
-  const delta = (countsDone(aiFrom) ? 1 : 0) - ((countsDone(aiFrom) ? 1 : 0) + (countsDone(aiTo) ? 1 : 0));
+// אחרי ההעברה: היעד מקבל את aiFrom (הקודם ביעד נשמר כ"קודמת" ולא נספר). המקור ריק – או, כשהייתה לו "קודמת" עם קובץ (תיקון סבב 1),
+// חוזר אליה: aiBack = ה-ai המשוחזר של המקור (null כשהמקור מתרוקן). מחזיר { nUid, nDone } לעדכון.
+function moveDone(r, owner, aiFrom, aiTo, aiBack) {
+  const c = (ai) => (countsDone(ai) ? 1 : 0);
+  const delta = (c(aiFrom) + c(aiBack)) - (c(aiFrom) + c(aiTo));
   const nUid = Object.assign({}, isObj(r) ? r.nUid : null);
   const me = Object.assign({ n: 0, d: 0 }, nUid[owner]);
   me.d = Math.max(0, Math.min(me.n, me.d + delta));

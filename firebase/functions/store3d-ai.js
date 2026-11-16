@@ -566,11 +566,14 @@ async function draftCore(db, who, input, now, deps) {
 // ---------------- s3MovePh: העברת תמונה ממקטע למקטע (שלב 20ב) ----------------
 // { run, from, to } – בלי AI ובלי מכסה. רק העובד ששני המקטעים שלו בסבב (או מנהל, כששני המקטעים של אותו עובד), בסבב open / late.
 // הקבצים מועתקים לשם של מקום היעד ({to}_{n}.jpg + _t) – כך הניקוי היומי (s3Clean, לפי שם הקובץ) משייך אותם נכון; אחרי שהטרנזקציה
-// הצליחה, הקבצים הישנים של המקור נמחקים. בטרנזקציה אחת: ph + ai של היעד (המקור נמחק), nDone / nUid (moveDone), s3sum של שני המקטעים.
+// הצליחה, הקבצים הישנים של המקור נמחקים. בטרנזקציה אחת: ph + ai של היעד (המקור נמחק, או חוזר ל"קודמת" שלו), nDone / nUid (moveDone), s3sum של שני המקטעים.
 // יעד שכבר צולם (החלטת המשתמש 4): התמונה המועברת מחליפה, והקודמת נשמרת ב-ph.prv / ai.prv (הקבצים שלה לא נמחקים). קודמת אחת בלבד.
 // sug ו-ask של התמונה המועברת נמחקים (ההצעה טופלה); נרשם ph.mv = { f: מקור, at, by }. קריאה חוזרת אחרי הצלחה – { ok, dup:true }.
+// תיקון סבב 1: מקור שיש לו "קודמת" עם קובץ (ph.prv עם p/th, לא person ולא gone) – חוזר אליה (ph / ai = prv, בלי prv) במקום להתרוקן,
+// ונספר "צולם" לפי ה-ai המשוחזר. נרשם ph.mvb = { t: יעד, at } לזיהוי קריאה חוזרת (MV_DUP_MS). קודמת בלי קובץ – המקור מתרוקן כמו קודם.
 const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
 const noPrv = (o) => { const x = Object.assign({}, o); delete x.prv; return x; };
+const MV_DUP_MS = 10 * 60000; // קריאה חוזרת אחרי העברה שהחזירה את המקור ל"קודמת" – רק בחלון הזה נחשבת dup
 function moveInput(input) {
   if (!C.isRunId(input.run) || /^ad_/.test(input.run)) throw bad('bad-run', 'מזהה הסבב לא תקין');
   if (typeof input.from !== 'string' || !A.RE_SLOT.test(input.from) || typeof input.to !== 'string' || !A.RE_SLOT.test(input.to)) throw bad('bad-slot', 'מקום הצילום לא תקין');
@@ -609,6 +612,11 @@ async function moveCore(db, who, input, now, deps) {
     throw bad('no-photo', 'במקטע הזה אין תמונה להעביר', 'failed-precondition');
   }
   const src = p0.data();
+  if (isObj(src.mvb) && src.mvb.t === x.to && Number.isFinite(src.mvb.at) && now - src.mvb.at < MV_DUP_MS) {
+    const t0 = await phToRef.get();
+    const mv = t0.exists ? t0.get('mv') : null;
+    if (isObj(mv) && mv.f === x.from && mv.at === src.mvb.at) return { ok: true, dup: true, runId, from: x.from, to: x.to };
+  }
   if (src.person || src.gone || typeof src.p !== 'string' || typeof src.th !== 'string') throw bad('no-photo', 'במקטע הזה אין תמונה שמורה להעביר', 'failed-precondition');
   // ---- העתקת הקבצים לשם של היעד ----
   const dir = runDir(who.bizId, br, runId);
@@ -652,10 +660,14 @@ async function moveCore(db, who, input, now, deps) {
       if (ow !== owner || !(r.asg[owner] || []).includes(st.bay)) throw bad('not-assigned', 'השיוך בסבב השתנה. טענו מחדש.', 'permission-denied');
       if (!pf.exists || pf.get('p') !== src.p || !af.exists) throw bad('busy', 'התמונה השתנתה בינתיים. טענו מחדש ונסו שוב.', 'aborted');
       const aiFrom = af.data(), aiTo = at.exists ? at.data() : null, phTo = pt.exists ? pt.data() : null;
-      tx.update(runRef, A.moveDone(r, owner, aiFrom, aiTo));
+      // תיקון סבב 1: "קודמת" של המקור עם קובץ – המקור חוזר אליה (הקבצים שלה לא נמחקים בשום מקרה)
+      const pv = pf.get('prv');
+      const back = isObj(pv) && !pv.person && !pv.gone && typeof pv.p === 'string' && typeof pv.th === 'string' && pv.p.startsWith(dir) && pv.th.startsWith(dir) ? noPrv(pv) : null;
+      const aiBack = back && isObj(aiFrom.prv) ? noPrv(aiFrom.prv) : null;
+      tx.update(runRef, A.moveDone(r, owner, aiFrom, aiTo, aiBack));
       // ph / ai של היעד
       const ph = Object.assign(noPrv(pf.data()), { p, th: tp, mv: { f: x.from, at: now, by: who.uid } });
-      delete ph.sug; delete ph.ask;
+      delete ph.sug; delete ph.ask; delete ph.mvb;
       const ai = noPrv(aiFrom);
       prvOld = phTo && isObj(phTo.prv) ? phTo.prv : null;
       hadTo = !!phTo;
@@ -663,10 +675,10 @@ async function moveCore(db, who, input, now, deps) {
       if (aiTo) ai.prv = noPrv(aiTo);
       tx.set(phToRef, ph);
       tx.set(aiRef(x.to), ai);
-      tx.delete(phFromRef);
-      tx.delete(aiRef(x.from));
+      if (back) tx.set(phFromRef, Object.assign(back, { mvb: { t: x.to, at: now } })); else tx.delete(phFromRef);
+      if (aiBack) tx.set(aiRef(x.from), aiBack); else tx.delete(aiRef(x.from));
       // s3sum: שני המקטעים (או אחד, כשמעבירים בין עליון לתחתון של אותו מקטע)
-      const aiAfter = { [x.from]: null, [x.to]: ai }, phAfter = { [x.from]: null, [x.to]: ph };
+      const aiAfter = { [x.from]: aiBack, [x.to]: ai }, phAfter = { [x.from]: back, [x.to]: ph };
       extra.forEach((s, i) => { aiAfter[s] = ex[i].exists ? ex[i].data() : null; phAfter[s] = ex[extra.length + i].exists ? ex[extra.length + i].data() : null; });
       const B = (su.exists && su.get('b')) || {};
       const sp = { b: {}, upd: now, run: runId };
@@ -676,6 +688,8 @@ async function moveCore(db, who, input, now, deps) {
         const ths = ls.map((s) => phAfter[s] && phAfter[s].th).filter((t) => typeof t === 'string' && t);
         const keepTh = oldB && typeof oldB.th === 'string' && oldB.th !== src.th ? oldB.th : '';
         if (ais.length) {
+          // מקור שחזר ל"קודמת" – הרשומה שלו מתעדכנת רק כשהיא של הסבב הזה (או חסרה)
+          if (back && sl.bay !== st.bay && oldB && oldB.r !== runId) continue;
           const e = A.sumEntry(ais, runId, now, sl.bay === st.bay ? tp : (ths[0] || ''), keepTh);
           if (!e.th) e.th = FieldValue.delete();
           sp.b[sl.bay] = e;
@@ -690,7 +704,7 @@ async function moveCore(db, who, input, now, deps) {
     await delFiles(bucket, [p, tp]);
     throw e instanceof HttpsError ? e : (logger.error('s3MovePh: write failed', { code: e && e.code }), bad('save-failed', 'ההעברה נכשלה. נסו שוב.', 'unavailable'));
   }
-  // הקבצים הישנים של המקור (עכשיו יש להם עותק ביעד). "קודמת" ישנה יותר (שתי העברות לאותו יעד) – ינוקה בניקוי היומי (s3Clean)
+  // הקבצים הישנים של המקור (עכשיו יש להם עותק ביעד; קובצי ה"קודמת" שהמקור חזר אליה לא נוגעים בהם). "קודמת" ישנה יותר (שתי העברות לאותו יעד) – ינוקה בניקוי היומי (s3Clean)
   await delFiles(bucket, [src.p, src.th]);
   if (prvOld) logger.info('s3MovePh: older previous photo left for s3Clean', { run: runId, slot: x.to });
   return { ok: true, runId, from: x.from, to: x.to, p, th: tp, replaced: hadTo };

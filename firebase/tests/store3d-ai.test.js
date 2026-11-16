@@ -439,6 +439,45 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     assert.equal((await get(`b/${A}/srun/${RUN}`)).nDone, 1);
   });
 
+  it('20ב תיקון סבב 1: A→B (B צולם, B1 הופכת לקודמת) ואז B→A – B חוזר ל-B1, הקבצים של B1 קיימים ולא "תועים", nDone חוזר; קודמת gone – המקור מתרוקן', async () => {
+    const E = require(path.join(FN, 'lib', 'store3d-extra.js'));
+    const { FieldValue } = require(require.resolve('firebase-admin/firestore', { paths: [FN] }));
+    const B1 = DIR + 'f1-a-2_a_1.jpg', B1T = DIR + 'f1-a-2_a_1_t.jpg';
+    await shelf(E1, photo());
+    GM.state.shelf = 'shelf-clean';
+    await shelf(E1, photo({ slot: 'f1-a-2_a' }));
+    const n0 = (await get(`b/${A}/srun/${RUN}`)).nDone;
+    assert.equal(n0, 2);
+    await move(E1, { run: RUN, from: 'f1-a-1_a', to: 'f1-a-2_a' });
+    assert.equal((await get(`b/${A}/srun/${RUN}/ph/f1-a-2_a`)).prv.p, B1);
+    const r = await move(E1, { run: RUN, from: 'f1-a-2_a', to: 'f1-a-1_a' });
+    assert.ok(r.ok && !r.dup && r.p.startsWith(DIR + 'f1-a-1_a_'));
+    const phB = await get(`b/${A}/srun/${RUN}/ph/f1-a-2_a`), aiB = await get(`b/${A}/srun/${RUN}/ai/f1-a-2_a`);
+    assert.deepEqual([phB.p, phB.th, phB.prv, phB.mvb.t, aiB.st, aiB.prv], [B1, B1T, undefined, 'f1-a-1_a', 'ok', undefined], 'B חזר ל-B1');
+    const phA = await get(`b/${A}/srun/${RUN}/ph/f1-a-1_a`), aiA = await get(`b/${A}/srun/${RUN}/ai/f1-a-1_a`);
+    assert.deepEqual([phA.p, phA.mv.f, phA.prv, phA.mvb, aiA.st], [r.p, 'f1-a-2_a', undefined, undefined, 'issue']);
+    const fl = await files();
+    assert.ok(fl.includes(B1) && fl.includes(B1T), 'הקבצים של B1 קיימים');
+    assert.deepEqual(fl.filter((f) => f.includes('/f1-a-2_a_')), [B1, B1T], 'העותק המועבר של A נמחק מ-B');
+    assert.deepEqual(E.strayFiles(fl.filter((f) => f.includes('/f1-a-2_a_')).map((name) => ({ name, t: 0 })), phB, Date.now()), [], 'לא "תועים" בניקוי');
+    let run = await get(`b/${A}/srun/${RUN}`);
+    assert.deepEqual([run.nDone, run.nUid[E1].d, run.st], [n0, 2, 'open'], 'nDone חזר לערכו לפני ההעברה הראשונה');
+    const sum = (await get(`b/${A}/s3sum/s-main`)).b;
+    assert.deepEqual([sum['f1-a-2'].s, sum['f1-a-2'].r, sum['f1-a-2'].th], ['ok', RUN, B1T]);
+    assert.deepEqual([sum['f1-a-1'].s, sum['f1-a-1'].th], ['iss', r.th]);
+    // קריאה חוזרת – dup, שום דבר לא זז
+    assert.equal((await move(E1, { run: RUN, from: 'f1-a-2_a', to: 'f1-a-1_a' })).dup, true);
+    assert.deepEqual([(await get(`b/${A}/srun/${RUN}/ph/f1-a-2_a`)).p, (await get(`b/${A}/srun/${RUN}`)).nDone], [B1, n0]);
+    // קודמת שקבציה כבר gone (ניקוי) – המקור מתרוקן כמו קודם; שום קובץ קיים לא נמחק
+    await move(E1, { run: RUN, from: 'f1-a-1_a', to: 'f1-a-2_a' });
+    await adm.doc(`b/${A}/srun/${RUN}/ph/f1-a-2_a`).update({ 'prv.gone': true, 'prv.p': FieldValue.delete(), 'prv.th': FieldValue.delete() });
+    await move(E1, { run: RUN, from: 'f1-a-2_a', to: 'f1-a-1_a' });
+    assert.deepEqual([await get(`b/${A}/srun/${RUN}/ph/f1-a-2_a`), await get(`b/${A}/srun/${RUN}/ai/f1-a-2_a`)], [null, null]);
+    assert.ok((await files()).includes(B1), 'קובץ שעדיין קיים לא נמחק בהעברה');
+    run = await get(`b/${A}/srun/${RUN}`);
+    assert.deepEqual([run.nDone, run.nUid[E1].d], [1, 1]);
+  });
+
   it('20ב: דחיות – עובד זר, מקטע של עובד אחר, מקטע לא קיים, אותו מקטע, קלט לא תקין, אין תמונה / תמונה עם אדם, סבב סגור; מנהל – רק בין מקטעים של אותו עובד; מדף גבוה עליון → תחתון', async () => {
     await shelf(E1, photo());
     const mv = (uid, o) => err(move(uid, Object.assign({ run: RUN, from: 'f1-a-1_a', to: 'f1-a-2_a' }, o)));
