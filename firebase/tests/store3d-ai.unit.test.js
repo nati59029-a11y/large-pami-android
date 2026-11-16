@@ -209,6 +209,80 @@ describe('store3d-ai – טיוטת מפה (קובצי הדוגמה של שלב 
   });
 });
 
+// ---------------- שלב 20א / 20ב (16.11.2026): זיהוי המקטע והעברה בין מקטעים ----------------
+describe('store3d-ai – זיהוי המקטע (שלב 20א) והעברה (שלב 20ב)', () => {
+  const MAP20 = { fx: [fx('f2', { num: 2, bays: 3 }), fx('f1', { num: 1, sides: 2, bays: 3 }), fx('f3', { num: 3, hi: true, bays: 1 }), fx('f4', { num: 4, del: 1 })] };
+  const BAYS = ['f3-a-1', 'f2-a-2', 'f1-b-1', 'f1-a-1', 'f1-a-2', 'f1-a-3', 'f2-a-1', 'f4-a-1', 'f1-a-9'];
+  it('routeSlots: סדר המסלול כמו במסך הצילום; גוף מחוק / מקטע לא קיים – לא נכנסים; מדף גבוה = עליון ואז תחתון', () => {
+    assert.deepEqual(A.routeSlots(BAYS, MAP20).map((x) => x.slot), ['f1-a-1_a', 'f1-a-2_a', 'f1-a-3_a', 'f1-b-1_a', 'f2-a-1_a', 'f2-a-2_a', 'f3-a-1_t', 'f3-a-1_b']);
+  });
+  it('slotCands: הנוכחי ראשון, עד 8, עד 3 לפני; מקטע שלא של העובד / עובד עם מקטע אחד – אין מועמדים', () => {
+    const c = A.slotCands(BAYS, MAP20, 'f2-a-1_a').map((x) => x.slot);
+    assert.deepEqual(c, ['f2-a-1_a', 'f1-a-1_a', 'f1-a-2_a', 'f1-a-3_a', 'f1-b-1_a', 'f2-a-2_a', 'f3-a-1_t', 'f3-a-1_b'], '8 מקומות – כולם');
+    assert.ok(c.length <= A.CANDS.max);
+    const many = []; for (let i = 1; i <= 12; i++) many.push('f9-a-' + i);
+    const big = { fx: [fx('f9', { bays: 12 })] };
+    const c2 = A.slotCands(many, big, 'f9-a-6_a').map((x) => x.slot);
+    assert.deepEqual(c2, ['f9-a-6_a', 'f9-a-3_a', 'f9-a-4_a', 'f9-a-5_a', 'f9-a-7_a', 'f9-a-8_a', 'f9-a-9_a', 'f9-a-10_a']);
+    assert.deepEqual(A.slotCands(many, big, 'f9-a-1_a').map((x) => x.slot).slice(1), ['f9-a-2_a', 'f9-a-3_a', 'f9-a-4_a', 'f9-a-5_a', 'f9-a-6_a', 'f9-a-7_a', 'f9-a-8_a'], 'בתחילת המסלול – 7 אחרי');
+    assert.deepEqual(A.slotCands(BAYS, MAP20, 'f5-a-1_a'), [], 'לא במקטעים של העובד');
+    assert.deepEqual(A.slotCands(['f1-a-1'], MAP20, 'f1-a-1_a'), []);
+    assert.deepEqual(A.slotCands(null, MAP20, 'f1-a-1_a'), []);
+  });
+  it('slotGuess / cleanShelf: ניחוש מהרשימה נשמר (ai.slot); הצעה (sug) רק כשהוא אחר ובביטחון מעל הסף; מחוץ לרשימה / בלי ניחוש / אדם – כמו קודם', () => {
+    const cands = ['f1-a-1_a', 'f1-a-2_a', 'f1-a-3_a'];
+    const base = { st: 'ok', conf: 0.9, iss: [] };
+    const r1 = A.cleanShelf(Object.assign({}, base, { slot_guess: 'f1-a-2_a', slot_conf: 0.91 }), { cands, cur: 'f1-a-1_a' });
+    assert.deepEqual([r1.ai.slot, r1.sug], [{ s: 'f1-a-2_a', c: 0.91 }, { s: 'f1-a-2_a', c: 0.91 }]);
+    const low = A.cleanShelf(Object.assign({}, base, { slot_guess: 'f1-a-2_a', slot_conf: A.SUG_MIN - 0.01 }), { cands, cur: 'f1-a-1_a' });
+    assert.deepEqual([low.ai.slot.s, low.sug], ['f1-a-2_a', null], 'ביטחון נמוך – בלי הצעה');
+    const same = A.cleanShelf(Object.assign({}, base, { slot_guess: 'f1-a-1_a', slot_conf: 0.99 }), { cands, cur: 'f1-a-1_a' });
+    assert.deepEqual([same.ai.slot.s, same.sug], ['f1-a-1_a', null], 'אותו מקטע – בלי הצעה');
+    const out = A.cleanShelf(Object.assign({}, base, { slot_guess: 'f2-a-1_a', slot_conf: 0.99 }), { cands, cur: 'f1-a-1_a' });
+    assert.deepEqual([out.ai.slot, out.sug], [undefined, null], 'מחוץ לרשימת המועמדים – נזרק');
+    assert.equal(A.cleanShelf(Object.assign({}, base, { slot_guess: 'f1-a-2_a', slot_conf: 0.99 }), { cur: 'f1-a-1_a' }).sug, null, 'בלי מועמדים – אין ניחוש');
+    assert.equal(A.cleanShelf(Object.assign({}, base, { slot_guess: 'f1-a-2_a' }), { cands, cur: 'f1-a-1_a' }).sug, null, 'בלי conf – אין ניחוש');
+    assert.deepEqual(A.cleanShelf(Object.assign({}, base, { slotGuess: 'f1-a-3_a', slotConf: 0.8 }), { cands, cur: 'f1-a-1_a' }).sug, { s: 'f1-a-3_a', c: 0.8 }, 'גם camelCase');
+    const old = A.cleanShelf(FX('shelf-ok'), { cands, cur: 'f1-a-1_a' });
+    assert.deepEqual([old.ai.slot, old.sug], [undefined, null], 'תשובה ישנה בלי ניחוש');
+    assert.equal(A.cleanShelf({ st: 'person', slot_guess: 'f1-a-2_a', slot_conf: 1 }, { cands, cur: 'f1-a-1_a' }).sug, null);
+    const both = A.cleanShelf(Object.assign({}, base, { not_this_shelf: true, slot_guess: 'f1-a-2_a', slot_conf: 0.9 }), { cands, cur: 'f1-a-1_a' });
+    assert.deepEqual([both.ask, both.sug.s], [true, 'f1-a-2_a'], 'not_this_shelf נשאר');
+  });
+  it('הנחיה: מועמדים נכנסים רק כשיש יותר מאחד, מזהה לא תקין נזרק; checkShelfResponse מקבל slot_guess תקין ודוחה לא תקין; VERSION 4', () => {
+    assert.equal(PS.VERSION, 4);
+    const p = PS.buildShelfPrompt({ cands: [{ id: 'f1-a-1_a', label: 'גוף 1', prods: ['כוסות'] }, { id: 'f1-a-2_a', cat: 'מפיות' }, { id: 'bad"}', prods: ['x'] }] });
+    assert.match(p, /מקטעים מועמדים/);
+    assert.match(p, /f1-a-1_a \(הנוכחי\)/);
+    assert.match(p, /f1-a-2_a – |f1-a-2_a, קטגוריה: מפיות/);
+    assert.ok(!p.includes('bad"}'));
+    assert.ok(!/מקטעים מועמדים \(/.test(PS.buildShelfPrompt({ cands: [{ id: 'f1-a-1_a' }] })), 'מועמד אחד – לא נכנס');
+    assert.deepEqual(PS.checkShelfResponse(Object.assign(FX('shelf-clean'), { slot_guess: 'f1-a-2_a', slot_conf: 0.8 }), {}), []);
+    assert.deepEqual(PS.checkShelfResponse(Object.assign(FX('shelf-clean'), { slot_guess: 'מדף 3', slot_conf: 2 }), {}), ['slot_guess', 'slot_conf']);
+  });
+  it('moveDone: אין ספירה כפולה – יעד ריק: nDone לא משתנה; יעד שצולם: יורד ב-1; לא מתחת ל-0', () => {
+    const r = { n: 8, nDone: 3, nUid: { e1: { n: 4, d: 2 }, e2: { n: 4, d: 1 } } };
+    const ok = { st: 'ok' }, bad = { st: 'bad' };
+    assert.deepEqual(A.moveDone(r, 'e1', ok, null), { nUid: { e1: { n: 4, d: 2 }, e2: { n: 4, d: 1 } }, nDone: 3 });
+    assert.deepEqual(A.moveDone(r, 'e1', ok, ok), { nUid: { e1: { n: 4, d: 1 }, e2: { n: 4, d: 1 } }, nDone: 2 });
+    assert.deepEqual(A.moveDone(r, 'e1', bad, null).nDone, 3);
+    assert.deepEqual(A.moveDone(r, 'e1', ok, bad).nDone, 3, 'יעד שלא נספר (bad) – בלי שינוי');
+    assert.deepEqual(A.moveDone({ n: 2, nDone: 0, nUid: {} }, 'e1', ok, ok), { nUid: { e1: { n: 0, d: 0 } }, nDone: 0 });
+    assert.deepEqual(r.nUid.e1, { n: 4, d: 2 }, 'הקלט לא משתנה');
+  });
+  it('moveDone (תיקון סבב 1): מקור שחוזר ל"קודמת" (aiBack) נשאר נספר; A→B (B צולם) ואז B→A – nDone חוזר לערכו', () => {
+    const ok = { st: 'ok' }, iss = { st: 'issue' }, bad = { st: 'bad' };
+    const r0 = { n: 8, nDone: 2, nUid: { e1: { n: 4, d: 2 } } };
+    const r1 = Object.assign({}, r0, A.moveDone(r0, 'e1', iss, ok, null)); // A→B: A מתרוקן, B1 הופכת לקודמת
+    assert.deepEqual([r1.nDone, r1.nUid.e1.d], [1, 1]);
+    const r2 = A.moveDone(r1, 'e1', iss, null, ok); // B→A: B חוזר ל-B1, A היה ריק
+    assert.deepEqual([r2.nDone, r2.nUid.e1.d], [2, 2]);
+    assert.equal(A.moveDone(r0, 'e1', ok, ok, ok).nDone, 2, 'יעד נספר + מקור חוזר לקודמת שנספרת – בלי שינוי');
+    assert.equal(A.moveDone(r0, 'e1', ok, null, bad).nDone, 2, 'קודמת שלא נספרת – בלי שינוי');
+    assert.equal(A.moveDone({ n: 2, nDone: 2, nUid: { e1: { n: 2, d: 2 } } }, 'e1', ok, null, ok).nDone, 2, 'לא מעל n');
+  });
+});
+
 describe('store3d-ai – טיוטת מפה: סיבת כשל, השמטה חלקית (תיקון 15.11.2026)', () => {
   const ectx = { br: 'main', kind: 's', numDir: 'rtl', bizId: 'biz-x', uid: 'u_mgr1', now: 1 };
   const cc = { bizId: 'biz-x', mapId: 's-main', uid: 'u_mgr1', now: 1 };

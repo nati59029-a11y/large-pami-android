@@ -280,13 +280,15 @@ function keepPlan(files, now, keep, runMap) {
   }
   return { drop };
 }
-// קבצים "יתומים" בסבב שנשמר: קבצים של מקום צילום שאינם ph.p / ph.th שלו (למשל שמירה שנכשלה באמצע), ישנים מיום.
+// קבצים "יתומים" בסבב שנשמר: קבצים של מקום צילום שאינם ph.p / ph.th (או ph.prv.p / ph.prv.th) שלו (למשל שמירה שנכשלה באמצע), ישנים מיום.
 // files = [{ name, t }] של סבב ומקום אחד; ph = מסמך ph (או null)
 function strayFiles(files, ph, now) {
   // שלב 14 (החלטה): מסמך ph חסר = לא מוחקים. אי אפשר להבחין בין שמירה שנכשלה לבין מסמך שאבד (ושעשוי לחזור מגיבוי);
   // קובץ יתום כזה יימחק ממילא כשהסבב ייצא מ-3 הסבבים האחרונים (keepPlan)
   if (!isObj(ph)) return [];
-  const keep = new Set(isObj(ph) ? [ph.p, ph.th].filter((x) => typeof x === 'string') : []);
+  // שלב 20ב: גם התמונה ה"קודמת" (ph.prv, אחרי העברה בין מקטעים ב-s3MovePh) נשמרת
+  const prv = isObj(ph) && isObj(ph.prv) ? ph.prv : {};
+  const keep = new Set(isObj(ph) ? [ph.p, ph.th, prv.p, prv.th].filter((x) => typeof x === 'string') : []);
   return (files || []).filter((f) => f && !keep.has(f.name) && Number.isFinite(f.t) && f.t <= now - YOUNG_MS).map((f) => f.name);
 }
 

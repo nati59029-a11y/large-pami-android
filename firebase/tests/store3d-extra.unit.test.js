@@ -150,6 +150,8 @@ describe('store3d-extra: ניקוי – 3 סבבים אחרונים, סל מחז
     // שלב 14: מסמך ph חסר – לא נמחק כלום
     assert.deepEqual(X.strayFiles(L, null, NOW), []);
     assert.deepEqual(X.strayFiles(L, undefined, NOW), []);
+    // שלב 20ב: התמונה ה"קודמת" (ph.prv, אחרי העברה בין מקטעים) לא נחשבת תועה
+    assert.deepEqual(X.strayFiles(L, { p: L[1].name, th: L[2].name, prv: { p: L[0].name } }, NOW), []);
   });
   it('סל המחזור: נמחק סופית רק פריט עם del:1 ש-delAt לפני 30 יום ומעלה; פריט חי ופריט שנמחק לאחרונה נשארים', () => {
     const map = { v: 4, ent: 'd2', rooms: [{ id: 'r1' }], doors: [{ id: 'd1', del: 1, delAt: NOW - 31 * D1, delBy: 'u_mgr001' }, { id: 'd2' }],
