@@ -45,10 +45,10 @@ const COPY = [
   // השלמה לפני ההעברה (15.11.2026): כל אוסף שהשרת כותב דרך T.tdb()/bizPrefix, או שיש לו כלל ב-b/{bizId} – ב-legacy נמצא בשורש.
   // תתי-האוספים (cust/p, pinv/p, rq/c, mq/p, sec_chat/m, sec_inv/p, sec_note/n, custBak/items, stockBak/items) מועתקים עם ההורה.
   'ptk', 'rtk', 'rq', 'mq', // משימות פרטיות, משימות חוזרות, בקשות, בקשות מנהל
+  'rv', // גלאי גרסת הכללים של מרכז העבודה במשימות (#74): מסמך rv/tk2 שלא קיים, אין כתיבה – נוסף כדי שהרשימה תכסה כל כלל ב-b/{bizId}
   'cust', 'custcfg', 'custBak', 'cardLog', 'cardQ', // לקוחות; custBak = גיבוי לפני "מחיקת כל הלקוחות" (customers.js)
   'cat', 'xfer', 'pinv', 'stockBak', // קטגוריות, העברות מלאי, חשבוניות מחיר; stockBak = גיבוי לפני "מחיקת כל המלאי" (orders.js)
   'impJobs', 'push_tokens', 'fn_rate', 'lineplan', 'lineLog', 'wv',
-  'rv', // גלאי גרסת כללי המשימות (rv/tk2, #74 מרכז עבודה סבב 2) – כלל בשורש וב-b/{bizId}; בדיקה 13 תפסה אחרי מיזוג main
   // המזכירה העסקית: SEC_COLLS ב-functions/secretary.js + sec_ord (הזמנות מהמייל, secretary-google.js)
   'sec_cfg', 'sec_chat', 'sec_in', 'sec_draft', 'sec_inv', 'sec_facts', 'sec_rules', 'sec_cal', 'sec_mirror', 'sec_rep', 'sec_log',
   'sec_usage', 'sec_facts_sensitive', 'sec_note', 'sec_snd', 'sec_clean', 'sec_gcal', 'sec_learn', 'sec_ord', 'sec_mrule', 'sec_mlog', // sec_mrule/sec_mlog: #67 (צ'אט נקי), מוזג ל-main 15.11 אחרי ההעברה

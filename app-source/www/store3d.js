@@ -33,7 +33,9 @@ const dec=d=>d&&d.fields?Object.fromEntries(Object.entries(d.fields).map(([k,v])
 S3UI.dec=dec;
 const msgOf=e=>e&&e.offline?'אין חיבור לאינטרנט. בדקו את החיבור ונסו שוב.':e&&e.code===403?'אין לכם הרשאה לצפות בתלת מימד בעסק הזה.':'לא הצלחנו לטעון את נתוני החנות. נסו שוב.';
 const g404=async p=>{try{return dec(await fsx(p))}catch(e){if(e&&e.code===404)return null;throw e}};
-S3UI.get=g404;S3UI.esc2=esc2;
+S3UI.get=g404;
+/* שלב 19א: מסמך ph של מקום צילום (srun/<סבב>/ph/<מקום>) לתצוגת ההליכה. כל הצוות רשאי לקרוא; חסר / שגיאה = null (התצוגה משאירה את התמונה הקיימת) */
+const loadPh=(run,slot)=>/^[A-Za-z0-9_-]{1,80}$/.test(run||'')&&/^[A-Za-z0-9_-]{1,80}_[atb]$/.test(slot||'')?g404('/srun/'+run+'/ph/'+slot).catch(()=>null):Promise.resolve(null);S3UI.esc2=esc2;
 /* שלב 7: קריאה לפונקציית שרת. מנהל־על שעבר לעסק אחר (bzSwitch) שולח את העסק בקלט – השרת מקבל bizId רק ממנהל־על (takeBizInput) */
 S3UI.fn=(n,d)=>window.fnCall(n,(SY&&SY.sa&&SY.bizId)?Object.assign({bizId:SY.bizId},d||{}):(d||{}));
 /* שגיאות שרת (details.reason) בעברית פשוטה */
@@ -192,7 +194,7 @@ function after(){
  if(X.h&&X.h.el===el)return;
  unmount();const tok=++X.seq,rec={el,id,handle:null};X.h=rec;
  if(!window.Store3D||!window.S3G){el.textContent='רכיב התצוגה לא נטען';return}
- window.Store3D.open(el,m,{mode:X.mode,sum:d.sum||null,onPick:b=>{X.pick=b;const i=document.getElementById('s3info');if(i)i.innerHTML=pickInfo()},onError:()=>{}}).then(hd=>{
+ window.Store3D.open(el,m,{mode:X.mode,sum:d.sum||null,loadPh:loadPh,onPick:b=>{X.pick=b;const i=document.getElementById('s3info');if(i)i.innerHTML=pickInfo()},onError:()=>{}}).then(hd=>{
   if(!hd)return;if(tok!==X.seq||X.h!==rec||!el.isConnected){try{hd.destroy()}catch(e){}return}rec.handle=hd}).catch(()=>{})
 }
 {const r0=window.render;if(typeof r0==='function')window.render=function(){/* אלמנט המיני יוצא מהדף לפני הציור (בלי להעביר צומת תוך כדי החלפת התוכן), וחוזר ב-after() */try{const n=X.mn&&X.mn.node;if(n&&n.parentNode)n.parentNode.removeChild(n)}catch(e){}const r=r0.apply(this,arguments);try{after()}catch(e){}return r}}
