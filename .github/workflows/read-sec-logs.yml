@@ -34,6 +34,13 @@ jobs:
           echo "== Same, grouped by message and reason =="
           gcloud logging read "$BASE AND severity>=WARNING AND (jsonPayload.message:\"invoice\" OR jsonPayload.message:\"attachment\" OR jsonPayload.message:\"hist inv\")" --project "$PROJECT" --limit 2000 \
             --format='value(jsonPayload.message,jsonPayload.reason)' | sort | uniq -c | sort -rn
+          echo "== OAuth callback / connect warnings+errors (72h) =="
+          B72='resource.type="cloud_run_revision" AND resource.labels.service_name:"sec" AND timestamp>="'$(date -u -d '-72 hours' +%Y-%m-%dT%H:%M:%SZ)'"'
+          gcloud logging read "$B72 AND severity>=WARNING AND (resource.labels.service_name:\"oauth\" OR resource.labels.service_name:\"secgoogle\")" --project "$PROJECT" --limit 40 \
+            --format='value(timestamp,resource.labels.service_name,severity,jsonPayload.message,jsonPayload.reason,jsonPayload.why,textPayload,httpRequest.status)' | mask
+          echo "== google-scope by hour (72h) =="
+          gcloud logging read "$B72 AND jsonPayload.reason=\"google-scope\"" --project "$PROJECT" --limit 3000 \
+            --format='value(timestamp,jsonPayload.message)' | cut -c1-13,28- | sort | uniq -c
           echo "== Count by function and severity =="
           gcloud logging read "$BASE AND severity>=WARNING" --project "$PROJECT" --limit 1000 \
             --format='value(resource.labels.service_name,severity)' | sort | uniq -c | sort -rn
