@@ -1,0 +1,80 @@
+# הגדרת מדיניות ניקוי (cleanup policy) לעותקים הארוזים של הפונקציות ב-Artifact Registry.
+# רקע: בפרסום פונקציות התקבלה אזהרה "No cleanup policy detected for repositories in europe-west1".
+# בלי מדיניות, עותקים ישנים נשמרים לתמיד ועלולים לגרום לחיוב חודשי קטן.
+# ידני בלבד, רק מ-main. לא נוגע בפונקציות, בנתונים, בחוקים או ב-Hosting – רק במדיניות הניקוי של האזור שנבחר.
+# פקודה: firebase functions:artifacts:setpolicy --location <אזור> --days <ימים> --force (firebase-tools 15.34.1).
+name: Set Functions Artifacts Cleanup Policy
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "הפרויקט"
+        required: true
+        type: choice
+        options: [largpeami, largpeami-test-f4691]
+      location:
+        description: "האזור (רק אזורי הפונקציות של הפרויקט)"
+        required: true
+        type: choice
+        options: [europe-west1, us-central1]
+      days:
+        description: "כמה ימים לשמור עותקים ישנים (1-30)"
+        required: true
+        type: string
+        default: "1"
+      confirm:
+        description: "הקלד setpolicy-<אזור>-<פרויקט>, למשל setpolicy-europe-west1-largpeami"
+        required: true
+        type: string
+
+concurrency:
+  group: artifacts-cleanup-${{ inputs.project }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  setpolicy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.project == 'largpeami' && 'firebase-prod' || 'firebase-test' }}
+    steps:
+      - name: Guard (main only, days, typed confirmation)
+        env:
+          P: ${{ inputs.project }}
+          L: ${{ inputs.location }}
+          D: ${{ inputs.days }}
+          C: ${{ inputs.confirm }}
+        run: |
+          [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "::error::מותר להריץ רק מ-main"; exit 1; }
+          echo "$D" | grep -Eq '^([1-9]|[12][0-9]|30)$' || { echo "::error::מספר ימים לא תקין: $D (1-30)"; exit 1; }
+          [ "$C" = "setpolicy-$L-$P" ] || { echo "::error::האישור שהוקלד לא תואם (צריך: setpolicy-$L-$P)"; exit 1; }
+
+      - name: Install firebase-tools (before the service account exists on disk)
+        run: npm install -g firebase-tools@15.34.1 --no-audit --no-fund && firebase --version
+
+      - name: Service account (temporary file, must belong to the chosen project)
+        env:
+          SA: ${{ inputs.project == 'largpeami' && secrets.FIREBASE_SERVICE_ACCOUNT || secrets.FIREBASE_SERVICE_ACCOUNT_TEST }}
+          P: ${{ inputs.project }}
+        run: |
+          umask 077
+          [ -n "$SA" ] || { echo "::error::חסר הסוד (FIREBASE_SERVICE_ACCOUNT לייצור, FIREBASE_SERVICE_ACCOUNT_TEST לבדיקה)"; exit 1; }
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          SP=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("project_id",""))' "$RUNNER_TEMP/sa.json")
+          [ "$SP" = "$P" ] || { rm -f "$RUNNER_TEMP/sa.json"; echo "::error::חשבון השירות שייך לפרויקט אחר"; exit 1; }
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Set cleanup policy
+        env:
+          P: ${{ inputs.project }}
+          L: ${{ inputs.location }}
+          D: ${{ inputs.days }}
+        run: |
+          firebase functions:artifacts:setpolicy --location "$L" --days "$D" --force --project "$P" --non-interactive
+          echo "הוגדרה מדיניות ניקוי: $P / $L – שמירת עותקים $D ימים" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
