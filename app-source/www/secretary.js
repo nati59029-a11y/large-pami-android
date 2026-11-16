@@ -627,7 +627,7 @@ async function pushReg(){try{if(PN.done||!(isA()||isW()))return;const C=window.C
  const g=await G.state();if(!g||g.ready!==true)return;PN.ready=1;PN.act=g.act===true;
  /* 16.11.2026: act:1 רק כשה-APK עצמו (Java) בונה התראות עם כפתורים – לא לפי קוד המסכים, שעדכון חי יכול להביא ל-APK ישן. act נשלח תמיד (0/1): רישום בלי act = מסכים ישנים */
  await P.addListener('registration',t=>{if(t&&t.value&&(isA()||isW())){PN.tk=t.value;pnSend()}});
- await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}/* מרכז עבודה סבב 3: "הזכר לעובד" (tkNudge) – פותח את המשימות בלשונית "היום שלי" */if(d.k==='tk'&&(isA()||isW())&&typeof V.tk==='function'){try{TKT='my';if(window.TKW)TKW.d0=1;if(cur().v!=='tk')go('tk');else rerender()}catch(e){}return}if(d.k==='sec')pnTap(d.id)});
+ await P.addListener('pushNotificationActionPerformed',a=>{const d=a&&a.notification&&a.notification.data||{};if(d.k==='s3'&&(isA()||isW())&&typeof V.st3==='function'){try{go('st3')}catch(e){}return}/* מרכז עבודה סבב 3: "הזכר לעובד" (tkNudge) – פותח את המשימות בלשונית "היום שלי" */if(d.k==='dr'&&(isA()||isW())&&typeof window.drOpen==='function'){try{window.drOpen(d.id)}catch(e){}return}if(d.k==='tk'&&(isA()||isW())&&typeof V.tk==='function'){try{TKT='my';if(window.TKW)TKW.d0=1;if(cur().v!=='tk')go('tk');else rerender()}catch(e){}return}if(d.k==='sec')pnTap(d.id)});
  let p=await P.checkPermissions();
  if(isA()&&(p.receive==='prompt'||p.receive==='prompt-with-rationale')){let asked=false;try{asked=localStorage.getItem('lp-push-asked')==='1'}catch(e){}
   if(!asked){try{localStorage.setItem('lp-push-asked','1')}catch(e){}p=await P.requestPermissions()}}
@@ -1112,7 +1112,7 @@ async function toInbox(x){const lid=lidOf(x.id),L=secL();let it=S.inbox.find(i=>
  if(x.k==='chk')d={kind:'check',amt:Math.max(0,+f.amt||0),date:'',cdate:f.cdate||'',no:String(f.no||'').replace(/\D/g,'').slice(0,20),bank:String(f.bank||'').slice(0,60),payee:String(f.payee||'').slice(0,80),cat:'',catName:'',sub:'',subName:'',note:'',inv:'',dn:false};
  else d={cat:ok?s.cat:'',sub:ok?s.id:'',subName:ok?s.name:String(f.supplier||'').slice(0,80),amt:typeof f.total==='number'?String(f.total):'',date:/^\d{4}-\d{2}-\d{2}$/.test(f.date||'')?f.date:'',inv:x.k==='dn'?'':x.k==='rcpt'?String(f.rel||''):String(f.num||''),dn:x.k==='dn',note:srcN};
  if(x.br&&brAll().some(b=>b.id===x.br))d.br=x.br;
- it={id:lid,by:'המזכירה',ow:'',at:new Date(x.t||Date.now()).toISOString(),d,file:du?'i'+lid:'',np:0,sec:x.id,secK:x.k};if((x.src||[]).some(q=>q&&q.ch==='mail'))it.secM=1;if(x.noStock||x.hist)it.noStock=1;
+ it={id:lid,by:'המזכירה',ow:'',at:new Date(x.t||Date.now()).toISOString(),d,file:du?'i'+lid:'',np:0,sec:x.id,secK:x.k};if((x.src||[]).some(q=>q&&q.ch==='mail'))it.secM=1;if(ivFrom(x))it.secF=ivFrom(x);if(x.noStock||x.hist)it.noStock=1;
  S.inbox.push(it);L[x.id]={s:'in',ns:x.ns||''};save();return it}
 const brNeed=it=>brMulti()&&!(it.d&&it.d.br&&brAll().some(b=>b.id===it.d.br));
 async function ivClaim(x,mode){try{const r=await fnCall('secDecide',{op:'claim',id:x.id,mode,dev:devId()});return r&&r.item||x}catch(e){if(mode==='man')toast(e&&e.reason==='already'?'החשבונית כבר הוכנסה במכשיר אחר':e&&e.message||'לא ניתן לקחת את החשבונית');IV.at=0;return null}}
@@ -1172,19 +1172,22 @@ function ivCard(x){const f=x.f||{},a=ivAmt(x),s=ivSub(x),tg=[],sug=[];let act=''
   const no=`<button class="chip" data-a="secIvNo" data-id="${id}">דחייה</button>`;
   if(x.k==='inv'||x.k==='cr'){const dn=x.k==='inv'?dnOpen(x):[];
    if(dn.length)sug.push(`<div class="secivsug"><small>יש תעודת משלוח פתוחה של ${esc(s?s.name:'')} באותו סכום (${esc(dfmt(dn[0].date))}). כדי שלא תיספר פעמיים:</small><button class="btn w" style="margin-top:6px" data-a="secIvDn" data-id="${id}" data-t="${esc(dn[0].id)}">החלף את תעודת המשלוח בחשבונית</button></div>`);
-   act=`<div class="secrow"><button class="btn" data-a="secIvOk" data-id="${id}" style="flex:1">${mineIn||x.mine?'המשך':'אישור'}</button><button class="chip" data-a="secIvEd" data-id="${id}">עריכה${brMulti()&&!x.br?' ובחירת סניף':''}</button>${view}${no}</div>`}
+   /* 16.11 (בעל העסק): גם חשבונית שזוהתה – נפתחת קודם במסך הבדיקה (המסמך משמאל, מה שזוהה מימין, אפשר לשנות), ורק שם מאשרים */
+   act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">${mineIn||x.mine?'המשך':'בדיקה ואישור'}</button>${view}${no}</div>`}
   else if(x.k==='rcpt'){const t=rcptOf(x);
    if(t)sug.push(`<div class="secivsug"><small>נמצאה חשבונית פתוחה: ${esc(t.inv||'')} · ${esc(ils(bal(t)))} לתשלום (${esc(dfmt(t.date))}). זו קבלה – לא הוצאה חדשה.</small><button class="btn w" style="margin-top:6px" data-a="secIvPay" data-id="${id}" data-t="${esc(t.id)}">סמן כשולם</button></div>`);
    else sug.push('<div class="secivsug"><small><b>קבלה בלי חשבונית – מה לעשות?</b> לא נמצאה חשבונית פתוחה מתאימה. אפשר לרשום כהוצאה (רק אם אין עליה חשבונית), או לדחות.</small></div>');
    act=`<div class="secrow">${t?'':`<button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כהוצאה</button>`}${view}${no}</div>`}
   else if(x.k==='dn')act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">רישום כתעודת משלוח</button>${view}${no}</div>`;
   else if(x.k==='chk')act=`<div class="secrow"><button class="btn" data-a="secIvOk" data-id="${id}" style="flex:1">שיוך לחשבונית</button>${view}${no}</div>`;
-  else act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">הזנה ידנית</button>${view}${no}</div>`;
-  if(x.ns&&x.sub)act+=`<div class="secrow"><button class="chip" data-a="secIvSnd" data-id="${id}">אישור השולח כ${esc(x.subN||'ספק')}</button></div>`}
+  else act=`<div class="secrow"><button class="btn" data-a="secIvEd" data-id="${id}" style="flex:1">פתיחה והזנה</button>${view}${no}</div>`;
+  if(x.ns&&x.sub)act+=`<div class="secrow"><button class="chip" data-a="secIvSnd" data-id="${id}">אישור השולח כ${esc(x.subN||'ספק')}</button></div>`;
+  if(ivFrom(x)&&!(IV.L&&IV.L.br))act+=`<div class="secrow"><button class="chip" data-a="secSpam" data-x="${id}">🚫 ספאם – חסימת השולח</button></div>`}
  const sub=[f.date?dfmt(f.date):'',x.k==='chk'?(f.no?'צ׳ק '+f.no:'')+(f.cdate?' · לפירעון '+dfmt(f.cdate):''):f.num?'מס׳ '+f.num:'',x.fn?x.fn:''].filter(Boolean).join(' · ');
  return `<div class="card secinv" id="secIv_${id}" style="margin-bottom:8px"><div class="ivh"><b>${esc(IVK[x.k]||'מסמך')}${supL?' · '+esc(supL):''}</b>${typeof a==='number'?`<span class="iva">${esc(ils(a))}</span>`:''}</div>
  ${sub?`<small class="note ivs">${esc(sub)}</small>`:''}<small class="note ivs">${esc(ivSrc(x))} · ${esc(tm(x.t))}</small>${tg.length?'<div class="sectg">'+tg.join('')+'</div>':''}${sug.join('')}${act}</div>`}
-function ivSetH(){const R=IV.L;if(!R||R.err||R.br)return '';const c=R.cfg||{},off=c.off||[],subs=S.subs.filter(s=>subOk(s)).sort((a,b)=>heCmp(a.name,b.name));
+function ivSetH(){const R=IV.L;if(!R||R.err||R.br)return '';return ivSetH0()+ivBlkH()}
+function ivSetH0(){const R=IV.L;const c=R.cfg||{},off=c.off||[],subs=S.subs.filter(s=>subOk(s)).sort((a,b)=>heCmp(a.name,b.name));
  return `<details class="card secivset" id="secIvSet" style="margin-bottom:8px"><summary>הגדרות "נכנס ישר"</summary>
  <p class="note" style="margin:4px 0 8px">חשבונית רגילה מספק מוכר, שכל השדות שלה זוהו ושהסכום שלה מתחת לתקרה – נכנסת לבד בפתיחה הבאה של האפליקציה, עם אפשרות ביטול. זיכוי, קבלה, תעודת משלוח, צ׳ק, סכום שלילי וחשד לכפילות – תמיד מחכים לאישור שלך.</p>
  <label class="chip" style="min-height:44px"><input type="checkbox" data-c="secIvAuto"${c.auto!==false?' checked':''}> "נכנס ישר" פעיל בעסק</label>
@@ -1196,6 +1199,26 @@ function ivSetH(){const R=IV.L;if(!R||R.err||R.br)return '';const c=R.cfg||{},of
 /* חשבוניות שנרשמו כאן ואולי גם במכשיר אחר (ליקוי 1) */
 function ivCfH(){const C=S.secCf&&typeof S.secCf==='object'?S.secCf:{},k=Object.keys(C);if(!k.length)return '';
  return `<div class="card" id="secIvCf" style="margin-bottom:8px;border-color:var(--bad)"><b>לבדוק: ייתכן שנרשמה פעמיים</b><p class="note" style="margin:4px 0 6px">החשבוניות האלה נרשמו במכשיר הזה, אבל הדיווח לשרת התעכב יותר מ-24 שעות, ובינתיים ייתכן שנרשמו גם במכשיר אחר. בדקו ברשימת ההוצאות ומחקו כפילות אם יש.</p>${k.map(id=>{const c=C[id]||{};return `<div class="secrow"><small class="note" style="flex:1">${esc(c.sub||'')} ${c.inv?'· מס׳ '+esc(c.inv):''} · ${esc(ils(+c.amt||0))}</small><button class="chip" data-a="secIvCfOk" data-id="${esc(id)}">בדקתי</button></div>`}).join('')}</div>`}
+/* 16.11 (בעל העסק): שולחים חסומים (ספאם). חסימה: מייל חדש מהשולח לא נכנס ועובר לאשפה בג׳ימייל, וגם המיילים הקיימים ממנו עוברים לאשפה (מוריד את נפח התיבה; ג׳ימייל מרוקן את האשפה לבד אחרי 30 יום) */
+const ivFrom=x=>{const q=(x&&x.src||[]).find(s=>s&&s.ch==='mail'&&s.from);return q?String(q.from).trim().toLowerCase():''};
+function ivBlkH(){const B=IV.blk;if(B===undefined&&!IV.blkB){IV.blkB=1;fnCall('secMail',{op:'blkList'}).then(r=>{IV.blk=r}).catch(()=>{IV.blk=null}).finally(()=>{IV.blkB=0;rerender()})}
+ const L=B&&B.list||[];
+ return `<details class="card secivset" id="secIvBlk" style="margin-bottom:8px"${IV.bo?' open':''}><summary>שולחים חסומים (ספאם)${L.length?' · '+L.length:''}</summary>
+ <p class="note" style="margin:4px 0 8px">מייל משולח חסום לא נכנס לאפליקציה ומועבר לאשפה בג׳ימייל. בחסימה גם המיילים הקיימים ממנו מועברים לאשפה. ג׳ימייל מוחק את האשפה לבד אחרי 30 יום, ועד אז אפשר להחזיר משם.</p>
+ ${B&&!B.clean?'<p class="note" style="margin:0 0 8px;color:var(--bad)">התיבה מחוברת בלי הרשאת ניקוי, ולכן המיילים לא נמחקים מג׳ימייל – רק לא נכנסים לאפליקציה. כדי שיימחקו, חברו מחדש את התיבה עם הרשאת ניקוי בהגדרות המזכירה.</p>':''}
+ <form data-f="secBlkAdd" class="row" style="align-items:flex-end"><label class="f grow"><span>כתובת מייל לחסימה</span><input name="addr" type="email" dir="ltr" inputmode="email" autocomplete="off" maxlength="254" placeholder="name@example.com"></label><button class="btn">חסימה</button></form>
+ ${B===null?'<p class="note" style="margin:8px 0 0">לא ניתן לטעון את הרשימה כרגע. <button type="button" class="chip" data-a="secBlkRe">נסה שוב</button></p>':B===undefined?'<p class="note" style="margin:8px 0 0">טוען…</p>':L.length?L.map(b=>`<div class="secrow" style="flex-wrap:wrap;align-items:center"><bdi dir="ltr" style="flex:1;min-width:160px;overflow-wrap:anywhere">${esc(b.a)}</bdi><small class="note">${b.n?esc(String(b.n))+' הועברו לאשפה':''}</small><button class="chip" data-a="secBlkCl" data-v="${esc(b.a)}">ניקוי שוב</button><button class="chip" data-a="secBlkDel" data-v="${esc(b.a)}">ביטול חסימה</button></div>`).join(''):'<p class="note" style="margin:8px 0 0">אין שולחים חסומים.</p>'}</details>`}
+function blkMsg(r){if(!r)return;let t='השולח נחסם';if(r.trashed)t+=' · '+r.trashed+' מיילים קיימים הועברו לאשפה בג׳ימייל';if(r.more)t+=' · נשארו עוד – אפשר "ניקוי שוב" בהגדרות';if(r.noScope)t+=' · בתיבה בלי הרשאת ניקוי המיילים לא נמחקים מג׳ימייל';if(r.fail)t+=' · חלק מהמיילים לא הועברו (תקלה) – אפשר "ניקוי שוב"';toast(t)}
+function secBlk(a,after){ask('לחסום את '+a+'? מיילים חדשים ממנו לא ייכנסו ויועברו לאשפה בג׳ימייל, וגם המיילים הקיימים ממנו יועברו לאשפה. אפשר לבטל חסימה בהגדרות החשבוניות.',async()=>{try{const r=await fnCall('secMail',{op:'blkAdd',addr:a});IV.blk=r;if(after)await after();blkMsg(r)}catch(e){err(e)}finally{IV.at=0;IV.L=null;rerender()}},'חסימה')}
+/* "ספאם" – מכרטיס בלשונית החשבוניות (data-x) או ממסך הבדיקה (data-id של ההוצאה הממתינה) */
+ACT.secSpam=el=>{let x=null,it=null;if(el.dataset.x)x=ivX({dataset:{id:el.dataset.x}});else{it=S.inbox.find(i=>i.id===el.dataset.id);x=it&&(IV.L&&IV.L.items||[]).find(z=>z.id===it.sec)}if(!it&&x)it=S.inbox.find(i=>i.sec===x.id);
+ const a=ivFrom(x)||(it&&it.secF)||'',sid=x?x.id:it&&it.sec;if(!a)return toast('לא נמצאה כתובת המייל של השולח');
+ secBlk(a,async()=>{/* דחייה כמו "דחה": ההוצאה הממתינה במכשיר – דרך inbDrop (מסמן דחייה ומדווח לשרת גם אם הרשת נפלה); כרטיס שעוד לא נלקח – דחייה בשרת */if(it&&typeof window.inbDrop==='function')window.inbDrop(it.id);else if(sid){try{await fnCall('secDecide',{op:'rej',id:sid})}catch(e){}}})};
+window.secSpamOk=()=>!(IV.L&&IV.L.br);
+ACT.secBlkRe=()=>{IV.blk=undefined;IV.bo=1;rerender()};
+FRM.secBlkAdd=f=>{const a=String(fd(f).addr||'').trim().toLowerCase();if(!/^[^\s@<>]+@[^\s@<>]+\.[a-z]{2,24}$/.test(a))return toast('כתובת מייל לא תקינה');IV.bo=1;secBlk(a)};
+ACT.secBlkDel=el=>{const a=el.dataset.v;IV.bo=1;ask('לבטל את החסימה של '+a+'? מיילים חדשים ממנו ייכנסו שוב. מיילים שכבר הועברו לאשפה נשארים שם (אפשר להחזיר אותם בג׳ימייל עד 30 יום).',async()=>{try{IV.blk=await fnCall('secMail',{op:'blkDel',addr:a});toast('החסימה בוטלה')}catch(e){err(e)}finally{rerender()}},'ביטול חסימה')};
+ACT.secBlkCl=async el=>{el.disabled=true;IV.bo=1;try{const r=await fnCall('secMail',{op:'blkClean',addr:el.dataset.v});IV.blk=r;toast(r.trashed?r.trashed+' מיילים הועברו לאשפה'+(r.more?' · נשארו עוד – לחצו שוב':''):r.noScope&&!r.clean?'התיבה בלי הרשאת ניקוי – לא ניתן למחוק מג׳ימייל':'לא נמצאו מיילים נוספים מהשולח')}catch(e){err(e)}finally{el.disabled=false;rerender()}};
 ACT.secIvCfOk=el=>{const C=secCf();delete C[el.dataset.id];save();rerender()};
 /* חלון "חשבוניות מהמייל": כל ההוצאות שנכנסו מהמזכירה במייל. טופלה = שולמה במלואה (bal) או שאין מעקב תשלום להוצאה. זיהוי מייל: t.mail (חדש) או ערוץ mail בפריט השרת של אותה הוצאה (3 ימים אחרונים); הוצאות ישנות יותר שנכנסו מהמזכירה לא ניתנות לזיהוי כמייל */
 const ivMailTx=()=>{const m=new Set((IV.L&&IV.L.items||[]).filter(x=>(x.src||[]).some(q=>q&&q.ch==='mail')).map(x=>lidOf(x.id)));return S.tx.filter(t=>t&&t.t==='exp'&&(t.mail===1||(t.src&&m.has(t.src))))};

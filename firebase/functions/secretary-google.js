@@ -468,6 +468,11 @@ async function saveMail(db, c, ctx, gid, now, o) {
   let p;
   try { p = G.parseMsg(await c.meta(gid)); } catch (e) { if (gone404(e)) return 'skip'; throw e; }
   if (!p || p.labels.includes('SENT') || p.labels.includes('DRAFT')) return 'skip';
+  // 16.11 (בעל העסק): שולח חסום (דיווח ספאם) – המייל לא נקלט, ובתיבה עם הרשאת ניקוי עובר לאשפה של Gmail (לא מחיקה לצמיתות)
+  if (ctx.blk && p.from && ctx.blk.has(p.from) && !(ctx.mgrMails && ctx.mgrMails.has(p.from)) && p.from !== ctx.addr) {
+    if (ctx.clean) { try { await c.trash(gid); } catch (e) { if (!gone404(e)) logger.warn('secretary-google: blocked trash failed', { reason: (e && e.details && e.details.reason) || 'error' }); } }
+    return 'blk';
+  }
   if (o.hist && (p.labels.includes('SPAM') || p.labels.includes('TRASH'))) return 'skip'; // היסטוריה: בלי ספאם ואשפה (הם עוברים לרשימת הניקוי)
   const big = p.size > G.FULL_MAX; // גודל – לפני הורדת הגוף (10.3)
   if (!big) { let f = null; try { f = G.parseMsg(await c.full(gid)); } catch (e) { if (!gone404(e)) throw e; } if (f) p = f; }
@@ -496,7 +501,7 @@ async function saveMail(db, c, ctx, gid, now, o) {
   // שלב 7: קבצים מצורפים → תור החשבוניות. מייל ישן מסריקת היסטוריה – לא כאן אלא בהדרגה, בתקציב יומי (histInvStep). תקלה כאן לא פוגעת בקליטת המייל
   if (!o.hist && wantInv) {
     try { const r = await invFiles(db, c, gid, p, big, sus, now); if (r.ids.length || r.names.length) await ref.update(Object.assign({ inv: r.ids }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {})); } catch (e) {
-      logger.warn('secretary-google: invoice files failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
+      logger.warn('secretary-google: invoice files failed', gWhy(e));
       // תיקון 1 (ליקוי 5): לא מאבדים בשקט – כרטיס "הקובץ לא נקלט – תקלה, לבדוק במייל" עם השולח, וסימון במייל עצמו
       try {
         const INV = require('./secretary-inv')._core;
@@ -510,6 +515,10 @@ async function saveMail(db, c, ctx, gid, now, o) {
 // קבצים מצורפים של מייל אחד → secretary-inv.ingest. סוג לא מותר (zip, Office, הפעלה…) או גדול מדי – כרטיס בלי הורדה (10.3).
 // תמונה קטנה מאוד (חתימה/לוגו במייל) – מדלגים, כדי שלא תיספר במכסת הסריקה (הנחה: מתחת ל-15KB).
 const INV_ATT_MAX = 5, INV_IMG_MIN = 15000;
+// תקלה זמנית בחיבור ל-Google (הרשאה שנדחתה, חיבור שפג, מכסה, רשת, תקלה בצד Google) – לא "קובץ שלא נקלט": ממתינים ומנסים שוב
+const G_TEMP = new Set(['google-scope', 'google-expired', 'google-quota', 'google-timeout', 'google-network']);
+function gTemp(e) { const d = (e && e.details) || {}; return G_TEMP.has(d.reason) || (d.reason === 'google-rejected' && Number(d.status) >= 500); }
+const gWhy = (e) => ({ reason: (e && e.details && e.details.reason) || (e && e.code) || 'error', g: (e && e.details && e.details.g) || '' });
 async function invFiles(db, c, gid, p, big, sus, now, hist) {
   const INV = require('./secretary-inv')._core;
   const SI = require('./lib/sec-inv');
@@ -525,12 +534,85 @@ async function invFiles(db, c, gid, p, big, sus, now, hist) {
     else {
       // תיקון 1 (ליקוי 5): הורדה שנכשלה – כרטיס "הקובץ לא נקלט – תקלה" (ולא איבוד שקט; ניסיון חוזר לא קורה כי המייל כבר נשמר)
       let buf = null;
-      try { const j = await c.att(gid, a.id); buf = Buffer.from(String(j.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'); } catch (e) { logger.warn('secretary-google: attachment download failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
+      try { const j = await c.att(gid, a.id, hist === true ? 30000 : 15000); buf = Buffer.from(String(j.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'); } catch (e) {
+        logger.warn('secretary-google: attachment download failed', gWhy(e));
+        if (hist === true && gTemp(e)) throw e; // מייל ישן: התקלה בחיבור – המייל נשאר בתור ומנסים שוב בריצה הבאה (בלי כרטיס תקלה)
+      }
       r = await INV.ingest(db, Object.assign(base, buf ? { buf } : { why: 'dl', size: a.size }));
     }
     if (r && r.id) ids.push(r.id);
   }
   return { ids, names };
+}
+// =====================================================================================
+// 16.11 (בעל העסק): שולחים חסומים – "דיווח ספאם" מכרטיס חשבונית, או הקלדת כתובת בהגדרות.
+//   sec_cfg/mail_blk { L:[{ a (כתובת, אותיות קטנות), t, by, n (כמה מיילים הועברו לאשפה בסך הכול) }] } – חל על כל העסק, רק מנהל בלי הגבלת סניפים.
+//   מייל חדש מכתובת חסומה – לא נקלט (saveMail), ובתיבה עם הרשאת ניקוי עובר לאשפה של Gmail. בחסימה (וב"ניקוי שוב") – גם המיילים הקיימים
+//   מהשולח עוברים לאשפה (עד BLK_CLEAN בכל פעם; Gmail מרוקן את האשפה לבד אחרי 30 יום), וחשבוניות ממתינות ממנו נדחות.
+//   אף פעם לא כתובת של התיבה או של מנהל. ביטול חסימה – blkDel (מיילים שכבר באשפה נשארים שם; אפשר להחזיר אותם ב-Gmail עד 30 יום).
+// =====================================================================================
+const BLK_MAX = 500, BLK_CLEAN = 100, BLK_MS = 40000; // עד 100 מיילים ועד 40 שניות בכל לחיצה (זמן הריצה של הפונקציה מוגבל) – השאר ב"ניקוי שוב"
+const blkOf = (s) => (s && s.exists && Array.isArray(s.get('L')) ? s.get('L') : []).filter((x) => x && typeof x.a === 'string' && G.addrOf(x.a) === x.a);
+async function blkSet(db) { return new Set(blkOf(await db.doc('sec_cfg/mail_blk').get()).map((x) => x.a)); }
+const blkOut = (L, m) => ({ ok: true, list: L.map((x) => ({ a: x.a, t: Number(x.t) || 0, n: Number(x.n) || 0 })).sort((p, q) => q.t - p.t), clean: Object.values(m.boxes).some((b) => b.st === 'ok' && b.clean), boxes: Object.values(m.boxes).filter((b) => b.st === 'ok').length });
+// מעבירה לאשפה עד BLK_CLEAN מיילים קיימים מהשולח, בכל תיבה מחוברת עם הרשאת ניקוי. מחזירה { n, more, skip (תיבות בלי הרשאה), fail }
+async function blkTrash(db, m, a) {
+  const out = { n: 0, more: false, skip: 0, fail: 0 }, t0 = Date.now();
+  for (const [boxId, b] of Object.entries(m.boxes)) {
+    if (b.st !== 'ok') continue;
+    if (!b.clean) { out.skip++; continue; }
+    let c;
+    try { c = (await access(db, T.scope().bizId, 'mail', boxId)).c; } catch (e) { out.fail++; continue; }
+    let j;
+    try { j = await c.list('from:' + a, '', BLK_CLEAN - out.n + 1); } catch (e) { out.fail++; continue; }
+    const ids = (Array.isArray(j.messages) ? j.messages : []).map((x) => x && x.id).filter((g) => typeof g === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(g));
+    if (ids.length > BLK_CLEAN - out.n || j.nextPageToken) out.more = true;
+    // החיפוש של Gmail לפי from: עלול להתאים גם לשם התצוגה – כל מייל נבדק לפני ההעברה: הכתובת המדויקת של השולח (10 במקביל)
+    const L = ids.slice(0, BLK_CLEAN - out.n);
+    for (let i = 0; i < L.length; i += 10) {
+      if (Date.now() - t0 > BLK_MS) { out.more = true; break; }
+      await Promise.all(L.slice(i, i + 10).map(async (g) => {
+        try { const p = G.parseMsg(await c.meta(g)); if (!p || p.from !== a) return; await c.trash(g); out.n++; } catch (e) { if (!gone404(e)) out.fail++; }
+      }));
+    }
+    if (out.n >= BLK_CLEAN || out.more) { out.more = true; break; }
+  }
+  return out;
+}
+async function blkOp(who, db, input, op, now) {
+  const adm = await db.doc('admins/' + who.uid).get();
+  if (!who.superadmin && adm.exists && Array.isArray(adm.get('br'))) throw deny('br-limited', 'חסימת שולחים – למנהל בלי הגבלת סניפים');
+  const ref = db.doc('sec_cfg/mail_blk');
+  const m = mailCfgOf(await db.doc('sec_cfg/mail').get());
+  if (op === 'blkList') return blkOut(blkOf(await ref.get()), m);
+  const a = G.addrOf(input.addr);
+  if (!a) throw bad('bad-addr', 'כתובת מייל לא תקינה');
+  if (op === 'blkDel') {
+    const L = await db.runTransaction(async (tx) => { const L0 = blkOf(await tx.get(ref)), L1 = L0.filter((x) => x.a !== a); if (L1.length !== L0.length) tx.set(ref, { L: L1 }, { merge: true }); return L1; });
+    await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', 'mailUnblock', { tgt: a }));
+    return blkOut(L, m);
+  }
+  if (op === 'blkAdd') {
+    const own = await mgrMailsOf(db);
+    if (own.has(a) || Object.values(m.boxes).some((b) => b.addr === a)) throw pre('own-addr', 'אי אפשר לחסום כתובת של העסק או של מנהל');
+    await db.runTransaction(async (tx) => {
+      const L = blkOf(await tx.get(ref));
+      if (L.some((x) => x.a === a)) return;
+      if (L.length >= BLK_MAX) throw pre('blk-full', 'רשימת החסומים מלאה (' + BLK_MAX + '). בטלו חסימה ישנה ונסו שוב');
+      tx.set(ref, { L: L.concat([{ a, t: now, by: who.uid, n: 0 }]) }, { merge: true });
+    });
+    // חשבוניות שממתינות מהשולח (כל המקורות שלהן – מייל מהכתובת הזו) – נדחות, כמו דחייה ידנית
+    const SI = require('./lib/sec-inv');
+    const q = await db.collection('sec_inv').where('st', 'in', ['new', 'q', 'qw']).limit(500).get();
+    const mine = q.docs.filter((d) => { const S = Array.isArray(d.get('src')) ? d.get('src') : []; return S.length && S.every((x) => x && x.ch === 'mail' && G.addrOf(x.from) === a); });
+    for (let i = 0; i < mine.length; i += 400) { const b = db.batch(); mine.slice(i, i + 400).forEach((d) => b.update(d.ref, { st: 'rej', rejAt: now, rejBy: who.uid, rejW: 'blk', el: false, purgeAt: now + SI.KEEP_DAYS * 864e5 })); await b.commit(); }
+    input.rej = mine.length;
+  } else if (!blkOf(await ref.get()).some((x) => x.a === a)) throw pre('not-blocked', 'הכתובת לא ברשימת החסומים');
+  // blkAdd / blkClean: המיילים הקיימים מהשולח – לאשפה של Gmail
+  const r = await blkTrash(db, m, a);
+  const L = await db.runTransaction(async (tx) => { const L0 = blkOf(await tx.get(ref)); const L1 = L0.map((x) => (x.a === a ? Object.assign({}, x, { n: (Number(x.n) || 0) + r.n }) : x)); if (r.n) tx.set(ref, { L: L1 }, { merge: true }); return L1; });
+  await db.collection('sec_log').doc().set(glog(who.uid, 'mgr', op === 'blkAdd' ? 'mailBlock' : 'mailBlkClean', { tgt: a, note: 'trash ' + r.n + (r.more ? ' more' : '') + (r.fail ? ' fail ' + r.fail : '') + (r.skip ? ' noScope ' + r.skip : '') + (input.rej ? ' rej ' + input.rej : '') }));
+  return Object.assign(blkOut(L, m), { addr: a, trashed: r.n, more: r.more, fail: r.fail, noScope: r.skip, rej: input.rej || 0 });
 }
 async function mgrMailsOf(db) { const ad = await db.collection('admins').get(); return new Set(ad.docs.map((d) => G.addrOf(d.get('email'))).filter(Boolean)); }
 // קליטה מתיבה (התראה מ-Gmail, או המשך מהריצה המתוזמנת כשנשאר פיגור).
@@ -570,7 +652,7 @@ async function ingestBox(boxId, addr, o) {
   const todo = [];
   ids.forEach((g, k) => { if (ex[k].exists) { done.add(g); out.dup++; } else if (todo.length < G.RUN_MAX) todo.push(g); });
   const cap = await dayIn(db, boxId, todo.length, now);
-  const ctx = { boxId, addr, mgrMails: await mgrMailsOf(db), rep: repOf(await db.doc('sec_cfg/mail_rep').get()) };
+  const ctx = { boxId, addr, mgrMails: await mgrMailsOf(db), rep: repOf(await db.doc('sec_cfg/mail_rep').get()), blk: await blkSet(db), clean: bx.clean === true };
   let err = false, fail = null;
   for (const gid of todo.slice(0, cap.ok)) {
     let r;
@@ -786,7 +868,7 @@ async function refineOp(who, db, mailId, note, now) {
   await b.commit();
   return draftOut(id, Object.assign({}, ds.data(), up, { an: [], mrNo: [] }));
 }
-const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend', 'ordReset', 'ordAuto', 'ordPhone'];
+const MAIL_OPS = ['list', 'get', 'draft', 'write', 'done', 'refine', 'repGet', 'repSet', 'stop', 'autoList', 'ruleAuto', 'offers', 'ruleOk', 'ruleNo', 'cleanList', 'cleanOk', 'cleanNo', 'ordGet', 'ordEdit', 'ordCust', 'ordSend', 'ordReset', 'ordAuto', 'ordPhone', 'blkList', 'blkAdd', 'blkDel', 'blkClean'];
 async function secMail(request) {
   const input = inputObject(request);
   const { who, db } = await gate(request, { consent: true });
@@ -861,6 +943,7 @@ async function secMail(request) {
     await b.commit();
     return { ok: true, id };
   }
+  if (op.startsWith('blk')) return blkOp(who, db, input, op, now);
   if (op === 'cleanList') {
     const s = await db.collection('sec_clean').orderBy('t', 'desc').limit(10).get();
     return { ok: true, lists: s.docs.map((d) => cleanOut(d.id, d.data())) };
@@ -2471,7 +2554,7 @@ async function histStep(db, bizId, max, now) {
     let c = null;
     if (bx && bx.st === 'ok') { try { c = (await access(db, bizId, 'mail', id)).c; } catch (e) { c = null; } }
     if (!c) { boxes[id] = Object.assign(bj, { end: true, why: 'off' }); await ref.update({ ['boxes.' + id]: boxes[id] }); continue; } // תיבה שנותקה / פגה – מדלגים
-    const ctx = { boxId: id, addr: bx.addr, mgrMails };
+    const ctx = { boxId: id, addr: bx.addr, mgrMails, blk: await blkSet(db), clean: bx.clean === true };
     let done = 0;
     while (done < max && total < HIST_MAX) {
       if ((await ref.get()).get('st') !== 'run') { stopped = true; break; } // עצירה באמצע – בין עמודים
@@ -2565,6 +2648,56 @@ async function invBudget(db, ref, now, free, k) {
     return true;
   });
 }
+// חד־פעמי (16.11.2026): מיילים ישנים שקיבלו כרטיס "הקובץ לא נקלט – תקלה" בגלל סירוב זמני של Google – חוזרים לתור (פעם אחת).
+// הכרטיס הישן נמחק רק אחרי שהמייל נקלט בהצלחה (dropDlCards), ורק אם עוד לא טופל (st: 'new'). מיילים חדשים (לא bg) – לא נוגעים
+const RQ_PAGE = 300, RQ_PAGES = 10;
+async function requeueInvErr(db, ref, boxes, now) {
+  const ok = new Set(boxes), pick = new Map();
+  const take = (d) => { if (d.exists && d.get('bg') === true && ok.has(d.get('box')) && d.get('invW') !== true && !d.get('invR')) pick.set(d.id, d); };
+  // (א) מיילים שכל הקליטה שלהם נכשלה (כרטיס אחד, idx 99 – סימון invErr)
+  let last = null;
+  for (let i = 0; i < RQ_PAGES; i++) {
+    let q = db.collection('sec_in').where('flags', 'array-contains', 'invErr').orderBy('__name__').limit(RQ_PAGE);
+    if (last) q = q.startAfter(last);
+    const s = await q.get();
+    s.docs.forEach(take);
+    if (s.size < RQ_PAGE) break;
+    last = s.docs[s.size - 1];
+  }
+  // (ב) קובץ בודד שלא ירד (כרטיס "dl" של מייל ישן שעוד לא טופל) – המייל שלו לפי מזהה Gmail
+  last = null;
+  for (let i = 0; i < RQ_PAGES; i++) {
+    let q = db.collection('sec_inv').where('why', 'array-contains', 'dl').orderBy('__name__').limit(RQ_PAGE);
+    if (last) q = q.startAfter(last);
+    const s = await q.get();
+    for (const c of s.docs) {
+      const src = (c.get('src') || [])[0] || {};
+      if (c.get('hist') !== true || c.get('st') !== 'new' || src.ch !== 'mail' || typeof src.in !== 'string' || !src.in) continue;
+      const m = await db.collection('sec_in').where('gid', '==', src.in).limit(3).get();
+      m.docs.forEach(take);
+    }
+    if (s.size < RQ_PAGE) break;
+    last = s.docs[s.size - 1];
+  }
+  const L = [...pick.values()];
+  for (let i = 0; i < L.length; i += 200) {
+    const b = db.batch();
+    for (const d of L.slice(i, i + 200)) b.update(d.ref, { invW: true, invR: now, invN: FieldValue.delete(), invL: FieldValue.delete(), flags: (d.get('flags') || []).filter((f) => f !== 'invErr') });
+    await b.commit();
+  }
+  if (L.length) await db.collection('sec_log').doc().set(glog('', 'auto', 'histInvRetry', { note: String(L.length) }));
+  await ref.update({ rq1: now }).catch(() => {}); // חד־פעמי – גם אם נשארו עוד (מעבר לתקרה)
+}
+async function dropDlCards(db, ids) {
+  for (const id of Array.isArray(ids) ? ids.slice(0, 5) : []) {
+    if (typeof id !== 'string' || !/^x[0-9a-f]{1,60}$/.test(id)) continue;
+    const r = db.doc('sec_inv/' + id);
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(r);
+      if (s.exists && s.get('k') === 'bad' && s.get('st') === 'new' && (s.get('why') || []).includes('dl')) tx.delete(r);
+    }).catch(() => {});
+  }
+}
 async function histInvStep(db, bizId, now) {
   const ref = db.doc('sec_cfg/mail_hist');
   const hs = await ref.get();
@@ -2580,9 +2713,10 @@ async function histInvStep(db, bizId, now) {
   for (const d of q0.docs) if (!m.boxes[d.get('box')]) await d.ref.update({ invW: FieldValue.delete(), invL: FieldValue.delete(), invX: 'off' });
   // שאילתה נפרדת לכל תיבה פעילה – מיילים של תיבה שהחיבור שלה פג או נכשל לא תוקעים את התור של תיבות אחרות
   const boxes = Object.entries(m.boxes).filter(([, b]) => b.st === 'ok').map(([id]) => id);
+  if (!hs.get('rq1') && boxes.length) await requeueInvErr(db, ref, boxes, now);
   let left = null;
   const INV = require('./secretary-inv')._core;
-  let budget = HIST_INV_RUN;
+  let budget = HIST_INV_RUN, gw = false;
   for (const box of boxes) {
     if (budget <= 0 || out.wait) break;
     const q = await db.collection('sec_in').where('invW', '==', true).where('box', '==', box).limit(HIST_INV_RUN).get();
@@ -2607,6 +2741,7 @@ async function histInvStep(db, bizId, now) {
       budget--;
       const flags = Array.isArray(x.flags) ? x.flags : [];
       const rel = () => d.ref.update({ invL: FieldValue.delete() });
+      let took = 0;
       try {
         let p = G.parseMsg(await c.meta(x.gid));
         if (!p) { await d.ref.update({ inv: [], invW: FieldValue.delete(), invL: FieldValue.delete(), invN: FieldValue.delete() }); continue; }
@@ -2616,13 +2751,21 @@ async function histInvStep(db, bizId, now) {
         const k = Math.max(1, Math.min(INV_ATT_MAX, p.att.length));
         if (left - k < HIST_INV_RESERVE) { await rel(); out.wait = 'reserve'; break; }
         if (!(await invBudget(db, ref, now, free, k))) { await rel(); out.wait = 'day'; break; }
+        took = k;
         const r = await invFiles(db, c, x.gid, p, big, x.st === 'sus', now, true);
+        if (x.invR) await dropDlCards(db, (x.inv || []).filter((id) => !r.ids.includes(id))); // ניסיון חוזר אחרי תקלה: הכרטיס הישן "הקובץ לא נקלט" כבר לא נכון
         await d.ref.update(Object.assign({ inv: r.ids, invW: FieldValue.delete(), invL: FieldValue.delete(), invN: FieldValue.delete() }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {}));
         if (r.ids.length !== k) await ref.update({ 'invDay.n': FieldValue.increment(r.ids.length - k) }).catch(() => {}); // תיקון לפי מה שנכנס בפועל
         out.n++; out.files += r.ids.length; left -= r.ids.length;
       } catch (e) {
         if (gone404(e)) { await d.ref.update({ invW: FieldValue.delete(), invL: FieldValue.delete(), invX: 'gone' }); continue; } // נמחק ב-Gmail
-        logger.warn('secretary-google: hist invoice failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
+        logger.warn('secretary-google: hist invoice failed', gWhy(e));
+        if (gTemp(e)) { // תקלה בחיבור לתיבה (לא במייל עצמו): לא נספר כניסיון, מחזירים את התקציב, ועוברים לתיבה הבאה – מנסים שוב בריצה הבאה
+          await rel().catch(() => {});
+          if (took) await ref.update({ 'invDay.n': FieldValue.increment(-took) }).catch(() => {});
+          gw = true;
+          break; // רק התיבה הזו – ממשיכים לתיבה הבאה
+        }
         const n = (Number(x.invN) || 0) + 1;
         if (n < MAIL_TRIES) { await d.ref.update({ invL: FieldValue.delete(), invN: n }); continue; }
         // אחרי MAIL_TRIES ניסיונות – כרטיס "הקובץ לא נקלט – תקלה" (כמו במייל חדש), בלי התראה
@@ -2633,6 +2776,7 @@ async function histInvStep(db, bizId, now) {
       }
     }
   }
+  if (gw && !out.wait) out.wait = 'google';
   // יומן: כשנקלטו קבצים, או כשמצב ההמתנה השתנה (לא בכל ריצה של 15 דקות)
   const w0 = hs.get('invWait') || '';
   if (out.n || out.wait !== w0) {
@@ -2783,7 +2927,7 @@ async function syncAll(o) {
 const SECRETS = [G.SEC_GOOGLE_KEY, G.GOOGLE_CLIENT_SECRET];
 exports.secOAuthCb = onRequest({ region: LEGACY_REGION, secrets: SECRETS, timeoutSeconds: 60, memory: '256MiB', maxInstances: 5 }, async (req, res) => {
   try { await handleCb(req, res); } catch (e) {
-    logger.error('secretary-google: callback failed', { reason: (e && e.details && e.details.reason) || 'internal', name: e && e.name });
+    logger.error('secretary-google: callback failed', { reason: (e && e.details && e.details.reason) || 'internal', g: (e && e.details && e.details.g) || '', name: e && e.name });
     if (!res.headersSent) page(res, 500, 'החיבור לא הושלם', 'אירעה שגיאה. התחילו שוב מהאפליקציה.');
   }
 });
@@ -2811,7 +2955,7 @@ exports.secMailSend = onCall({ secrets: SECRETS }, wrap('secMailSend', secMailSe
 exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdminMail));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, histInvStep, histFill, autoHist, HIST_INV_DAY, HIST_INV_RESERVE, saveMail, invFiles, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
+  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, histInvStep, histFill, autoHist, HIST_INV_DAY, HIST_INV_RESERVE, saveMail, invFiles, MAIL_TRIES, requeueInvErr, gTemp, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
   mailWork, mailRequeue, ordDraft, ordCreateFromSec, tryAuto, tryMrAuto, refineOp, aiDraft, autoGive, learnSend, repOf, REP_CAP_DEFAULT, REP_CAP_MAX, AUTO_DAY, LOOP_MS, stripName,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },

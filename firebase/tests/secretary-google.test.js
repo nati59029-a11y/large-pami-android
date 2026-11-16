@@ -552,6 +552,73 @@ describe('סריקת היסטוריה (מנהל־על) וניקוי ספאם (מ
 });
 
 // ---------------------------------------------------------------------------------
+describe('16.11: שולחים חסומים (ספאם) – מייל חדש לא נקלט ועובר לאשפה; המיילים הקיימים לאשפה; ביטול חסימה', () => {
+  const SP = 'spam@x.example', OK = 'good@x.example';
+  const inA = async () => (await coll(`b/${A}/sec_in`)).filter((x) => x.ch === 'mail');
+  beforeEach(async () => { await seed(); });
+
+  it('הרשאות ותקינות: עובד ומנהל עסק אחר לא חוסמים בעסק; כתובת לא תקינה / של התיבה / של מנהל – נדחית', async () => {
+    await connect(M1, 'mail', { email: BOX_A, clean: true });
+    assert.equal((await call('secMail', E1, { op: 'blkAdd', addr: SP })).reason, 'not-manager');
+    assert.ok((await call('secMail', MB, { op: 'blkAdd', addr: SP })).ok, 'מנהל של עסק אחר – חוסם רק אצלו');
+    assert.equal(((await get(`b/${A}/sec_cfg/mail_blk`)) || {}).L, undefined, 'בעסק A – לא נחסם');
+    assert.equal((await call('secMail', M1, { op: 'blkAdd', addr: 'not-an-address' })).reason, 'bad-addr');
+    assert.equal((await call('secMail', M1, { op: 'blkAdd', addr: BOX_A })).reason, 'own-addr');
+    assert.equal((await call('secMail', M1, { op: 'blkAdd', addr: M1_MAIL })).reason, 'own-addr');
+    assert.equal(GO.state.trashed.length + GO.state.deleted.length, 0);
+  });
+
+  it('חסימה עם הרשאת ניקוי: הקיימים מהשולח לאשפה (לא מחיקה), חשבונית ממתינה ממנו נדחית, מייל חדש ממנו לא נקלט ועובר לאשפה; אחרים – רגיל; ביטול חסימה מחזיר קליטה', async () => {
+    await connect(M1, 'mail', { email: BOX_A, clean: true });
+    const old1 = GO.addMail(BOX_A, { from: 'Spammer <' + SP + '>', subject: 'a' }), old2 = GO.addMail(BOX_A, { from: SP, subject: 'b', labels: ['SPAM'] });
+    GO.addMail(BOX_A, { from: OK, subject: 'c' });
+    const look = GO.addMail(BOX_A, { from: '"' + SP + ' via Shop" <real@shop.example>', subject: 'שם תצוגה דומה' }); // החיפוש מוצא – אבל הכתובת אחרת
+    await CORE.mailHook(GO.note(BOX_A));
+    await put(`b/${A}/sec_inv/fblk1`, { st: 'new', k: 'unk', t: 1, src: [{ ch: 'mail', from: SP, t: 1 }], np: 0 });
+    await put(`b/${A}/sec_inv/fblk2`, { st: 'new', k: 'unk', t: 1, src: [{ ch: 'mail', from: SP, t: 1 }, { ch: 'mail', from: OK, t: 2 }], np: 0 });
+    const r = await call('secMail', M1, { op: 'blkAdd', addr: 'SPAM@X.example' });
+    assert.ok(r.ok, r.msg);
+    assert.equal(r.r.addr, SP); assert.equal(r.r.trashed, 2); assert.equal(r.r.rej, 1);
+    assert.deepEqual(GO.state.trashed.map((t) => t.id).sort(), [old1, old2].sort());
+    assert.equal(GO.state.deleted.length, 0, 'רק אשפה – לא מחיקה לצמיתות');
+    assert.ok(!GO.state.trashed.some((t) => t.id === look), 'מייל משולח אחר עם שם תצוגה דומה – לא לאשפה');
+    assert.equal((await get(`b/${A}/sec_inv/fblk1`)).st, 'rej');
+    assert.equal((await get(`b/${A}/sec_inv/fblk2`)).st, 'new', 'קובץ שהגיע גם משולח אחר – לא נדחה');
+    assert.deepEqual(r.r.list.map((x) => x.a), [SP]);
+    assert.ok((await logs(A)).some((l) => l.act === 'mailBlock'));
+    const before = (await inA()).length;
+    const nw = GO.addMail(BOX_A, { from: SP, subject: 'חדש', files: [{ name: 'x.pdf', data: Buffer.from('%PDF-1.4 x') }] });
+    GO.addMail(BOX_A, { from: OK, subject: 'רגיל' });
+    const h = await CORE.mailHook(GO.note(BOX_A));
+    assert.equal(h.saved, 1, 'רק המייל מהשולח הרגיל');
+    assert.equal((await inA()).length, before + 1);
+    assert.ok(!(await inA()).some((x) => x.from === SP && x.subj === 'חדש'));
+    assert.ok(GO.state.trashed.some((t) => t.id === nw), 'המייל החדש מהשולח החסום – לאשפה');
+    assert.equal((await coll(`b/${A}/sec_inv`)).filter((x) => x.id !== 'fblk1' && x.id !== 'fblk2').length, 0, 'הקובץ שלו לא נכנס לחשבוניות');
+    const L = await call('secMail', M2, { op: 'blkList' });
+    assert.equal(L.r.list[0].n, 2); assert.equal(L.r.clean, true);
+    const d = await call('secMail', M1, { op: 'blkDel', addr: SP });
+    assert.ok(d.ok); assert.equal(d.r.list.length, 0);
+    const t0 = GO.state.trashed.length;
+    GO.addMail(BOX_A, { from: SP, subject: 'אחרי ביטול' });
+    assert.equal((await CORE.mailHook(GO.note(BOX_A))).saved, 1);
+    assert.equal(GO.state.trashed.length, t0);
+    assert.equal((await call('secMail', M1, { op: 'blkClean', addr: SP })).reason, 'not-blocked');
+  });
+
+  it('תיבה בלי הרשאת ניקוי: חסימה עובדת באפליקציה (לא נקלט), אבל שום דבר לא עובר לאשפה, והתשובה אומרת זאת', async () => {
+    await connect(M1, 'mail', { email: BOX_A });
+    GO.addMail(BOX_A, { from: SP, subject: 'a' });
+    const r = await call('secMail', M1, { op: 'blkAdd', addr: SP });
+    assert.ok(r.ok, r.msg);
+    assert.equal(r.r.trashed, 0); assert.equal(r.r.noScope, 1); assert.equal(r.r.clean, false);
+    GO.addMail(BOX_A, { from: SP, subject: 'b' });
+    assert.equal((await CORE.mailHook(GO.note(BOX_A))).saved, 0);
+    assert.equal(GO.state.trashed.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------------
 describe('ניתוק ומחיקת האסימון', () => {
   beforeEach(async () => { await seed(); await connect(M1, 'mail', { email: BOX_A }); });
 
@@ -1262,6 +1329,71 @@ describe('קליטה אוטומטית בחיבור ראשון, חשבוניות 
     assert.deepEqual((await get(`b/${A}/sec_in/gnew`)).inv, ['fx']);
     assert.equal((await invA()).filter((x) => x.hist).length, 3);
     assert.ok((await logs(A)).some((l) => l.act === 'histFill' && l.note === '3'));
+  });
+  it('16.11: Gmail מסרבת (403) – המיילים נשארים בתור בלי כרטיס "תקלה", התקציב מוחזר; כרטיסי תקלה ישנים חוזרים לתור פעם אחת ונמחקים אחרי קליטה', async () => {
+    await connect(M1, 'mail', { email: BOX_A });
+    await inBizA((db) => CORE.histStep(db, A, 100, Date.now()));
+    assert.equal((await inA()).filter((x) => x.invW === true).length, 3);
+    GO.state.mode.g403 = 'insufficientPermissions';
+    for (let i = 0; i < CORE.MAIL_TRIES + 1; i++) {
+      const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+      assert.equal(r.n, 0); assert.equal(r.wait, 'google');
+    }
+    assert.equal((await invA()).length, 0, 'בלי כרטיסי "הקובץ לא נקלט"');
+    let L = await inA();
+    assert.equal(L.filter((x) => x.invW === true).length, 3, 'נשארים בתור');
+    assert.ok(L.every((x) => !x.invN && !(x.flags || []).includes('invErr')));
+    assert.ok(!((await get(`b/${A}/sec_cfg/mail_hist`)).invDay || {}).n, 'התקציב היומי לא נצרך');
+    // הגבלת קצב (403 rateLimit) – נחשבת זמנית (google-quota)
+    GO.state.mode.g403 = 'userRateLimitExceeded';
+    assert.equal((await inBizA((db) => CORE.histInvStep(db, A, Date.now()))).wait, 'google');
+    delete GO.state.mode.g403;
+    // מצב ישן (לפני התיקון): מייל אחד קיבל כרטיס תקלה ויצא מהתור
+    const one = L.find((x) => x.invW === true);
+    const bad = await inBizA((db) => require('../functions/secretary-inv')._core.ingest(db, { ch: 'mail', from: 'sup@sup.example', inId: one.gid, idx: 99, fn: 'inv.pdf', now: Date.now(), why: 'dl', hist: true }));
+    const id1 = CORE.inIdOf(bx(), one.gid);
+    const d1 = await get(`b/${A}/sec_in/${id1}`); delete d1.invW; await put(`b/${A}/sec_in/${id1}`, Object.assign(d1, { inv: [bad.id], flags: one.flags.concat(['invErr']) }));
+    const hs = await get(`b/${A}/sec_cfg/mail_hist`); delete hs.rq1; await put(`b/${A}/sec_cfg/mail_hist`, hs);
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r.n, 3, 'כולם נקלטו, כולל המייל שחזר לתור');
+    const I = await invA();
+    assert.equal(I.length, 3); assert.ok(I.every((x) => x.k !== 'bad'), 'כרטיס התקלה הישן נמחק');
+    const x1 = await get(`b/${A}/sec_in/${id1}`);
+    assert.ok(!x1.flags.includes('invErr') && x1.invR && x1.inv.length === 1 && x1.inv[0] !== bad.id);
+    assert.ok((await get(`b/${A}/sec_cfg/mail_hist`)).rq1, 'חד־פעמי');
+    assert.ok((await logs(A)).some((l) => l.act === 'histInvRetry' && l.note === '1'));
+  });
+  it('16.11: תיבה אחת מסורבת לא עוצרת תיבה אחרת; כרטיס "dl" של קובץ בודד ממייל ישן חוזר לתור ונמחק אחרי קליטה', async () => {
+    await put(`b/${A}/sec_cfg/mail`, { max: 3 });
+    await connect(M1, 'mail', { email: BOX_A2 });
+    await connect(M1, 'mail', { email: BOX_A });
+    await put(`b/${A}/sec_cfg/mail_hist`, { st: 'done', boxes: {}, n: 0, rq1: 1 });
+    const g = Object.values(GO.box(BOX_A).msgs).find((m) => m.payload.parts.some((p) => p.filename)).id;
+    const idA = CORE.inIdOf(bx(), g);
+    const dl = await inBizA((db) => require('../functions/secretary-inv')._core.ingest(db, { ch: 'mail', from: 'sup0@sup.example', inId: g, idx: 0, fn: 'inv0.pdf', now: Date.now(), why: 'dl', hist: true }));
+    await put(`b/${A}/sec_in/${idA}`, { ch: 'mail', box: bx(), gid: g, from: 'sup0@sup.example', t: 1, st: 'done', bg: true, flags: ['hist', 'file'], inv: [dl.id] });
+    for (let i = 0; i < 3; i++) await put(`b/${A}/sec_in/a${i}`, { ch: 'mail', box: G.boxIdOf(BOX_A2), gid: 'x' + i, t: 1, st: 'done', bg: true, flags: ['hist', 'file'], invW: true });
+    GO.state.mode.g403For = BOX_A2;
+    // התיבה המסורבת מטופלת ראשונה (בגלל הסדר) – ובכל זאת המייל בתיבה התקינה נקלט אחרי שהוחזר לתור
+    const hs = await get(`b/${A}/sec_cfg/mail_hist`); delete hs.rq1; await put(`b/${A}/sec_cfg/mail_hist`, hs);
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    delete GO.state.mode.g403For;
+    assert.equal(r.n, 1, JSON.stringify(r)); assert.equal(r.wait, 'google');
+    assert.equal((await get(`b/${A}/sec_in/a0`)).invW, true);
+    const I = await invA();
+    assert.ok(!I.some((x) => x.k === 'bad'), 'כרטיס dl נמחק'); assert.equal(I.length, 1);
+    assert.ok((await get(`b/${A}/sec_cfg/mail_hist`)).rq1);
+  });
+  it('16.11: קובץ מצורף של 3MB (מעל גבול התשובה הרגיל של 2MB) – יורד ונקלט', async () => {
+    const big = Buffer.concat([pdfB(9).subarray(0, 120), Buffer.from('%' + 'x'.repeat(3 * 1024 * 1024) + '\n', 'latin1'), pdfB(9).subarray(120)]);
+    GO.addMail(BOX_A, { from: 'big@sup.example', subject: 'חשבונית גדולה', text: 'מצורפת', files: [{ name: 'big.pdf', data: big }], date: now - 5 * DAY });
+    await connect(M1, 'mail', { email: BOX_A });
+    await inBizA((db) => CORE.histStep(db, A, 100, Date.now()));
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r.n, 4); assert.equal(r.files, 4);
+    const I = await invA();
+    assert.equal(I.length, 4); assert.ok(I.every((x) => x.k !== 'bad'), JSON.stringify(I.map((x) => [x.k, x.why])));
+    assert.ok(I.some((x) => x.size === big.length));
   });
   it('תור לא נתקע: 25 מיילים של תיבה שהחיבור שלה פג ומיילים של תיבה שנותקה – המייל של התיבה התקינה נקלט', async () => {
     await put(`b/${A}/sec_cfg/mail`, { max: 3 });

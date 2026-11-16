@@ -321,6 +321,8 @@ Object.assign(exports, require('./secretary-media'));
 Object.assign(exports, require('./recurring'));
 // מרכז עבודה סבב 3 (15.11.2026): tkNudge – "הזכר לעובד" בהתראת טלפון (tasks-nudge.js). לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./tasks-nudge'));
+// דיווח יומי (16.11.2026): drSubmit, drMgr, drSetCfg (מנהל), drSetCap (מנהל־על), drRemind (מתוזמנת, us-central1 בלבד). daily-rep.js + lib/dr-core.js. לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./daily-rep'));
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
 Object.assign(exports, require('./push-act'));
 // מכשיר אחד למשתמש (16.11.2026): devClaim – טלפון אחד + מחשב אחד, כניסה חדשה מחליפה את הקודמת (onCall, שני האזורים). one-device.js
