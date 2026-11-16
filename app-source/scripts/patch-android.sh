@@ -30,6 +30,19 @@ sed -i 's|<application|<uses-permission android:name="android.permission.USE_BIO
 # Push notifications (12.11.2026): Android 13+ asks the user before showing notifications (the push plugin declares it too; listed here so it is never missing)
 grep -q 'android.permission.POST_NOTIFICATIONS' $M || sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <application|' $M
 grep -q 'fileprovider' $M || echo "::warning::FileProvider not found in manifest"
+# Live dictation (16.11.2026): Android 11+ hides other apps' services unless declared - without this the phone's speech
+# recognizer is "not available" to LpSpeechPlugin. Running twice does not add it twice.
+grep -q 'android.speech.RecognitionService' $M || python3 - "$M" <<'PYQ'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+i = s.find("<application")
+if i < 0:
+    sys.exit("::error::speech queries: <application> not found")
+s = s[:i] + '<queries>\n        <intent>\n            <action android:name="android.speech.RecognitionService" />\n        </intent>\n    </queries>\n    ' + s[i:]
+open(p, "w", encoding="utf-8").write(s)
+print("speech queries: OK")
+PYQ
 # --- SHARE-TARGET BEGIN ---
 # "Share" menu of Android (WhatsApp, bank app, gallery): images and PDF, one file or many.
 # Adds ONE intent-filter to MainActivity (running twice does not add it twice) and keeps launchMode="singleTask",
@@ -269,6 +282,8 @@ cp android-plugin/PushGatePlugin.java $J/PushGatePlugin.java
 # 360 stitching (stage 21c): OpenCV core (no Android code) + the Capacitor plugin
 cp android-plugin/PanoStitchCore.java $J/PanoStitchCore.java
 cp android-plugin/PanoStitchPlugin.java $J/PanoStitchPlugin.java
+# Live dictation in the secretary chat (16.11.2026): the phone's own speech recognizer
+cp android-plugin/LpSpeechPlugin.java $J/LpSpeechPlugin.java
 # Notification buttons (16.11.2026): our FCM service + builder, button receiver, unlock screen (Android 8-11), restore after reboot
 for f in LpNotif LpMessagingService LpActReceiver LpActActivity LpBootReceiver; do cp android-plugin/$f.java $J/$f.java; done
 cat > $J/MainActivity.java <<'JAVA'
@@ -291,6 +306,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PushGatePlugin.class);
         // 360 stitching with OpenCV (arm64-v8a only; elsewhere isAvailable() -> ok:false and the JS stitching is used)
         registerPlugin(PanoStitchPlugin.class);
+        // Live dictation (secretary chat): words appear while speaking
+        registerPlugin(LpSpeechPlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them

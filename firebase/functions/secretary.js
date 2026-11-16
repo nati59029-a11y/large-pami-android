@@ -522,7 +522,7 @@ async function secChat(request) {
     // 15.11.2026: פרטי המכשיר לשאלות על תקלות – רק גרסה ומצב חיבור, מסוננים
     const ap = input.app && typeof input.app === 'object' && !Array.isArray(input.app) ? input.app : {};
     const appNote = [/^\d{1,7}$/.test(String(ap.v)) ? 'גרסת אפליקציה ' + ap.v : '', ap.on === false ? 'המכשיר דיווח שאין חיבור לאינטרנט' : '', typeof ap.sync === 'number' && ap.sync >= 0 && ap.sync < 100000 ? 'פעולות שעוד לא נשלחו לענן: ' + Math.round(ap.sync) : ''].filter(Boolean).join('; ');
-    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote, mr, appNote }) + (s3 ? '\n' + s3.text : '');
+    const system = ST.systemPrompt({ name: me.nm, addr: me.ad, call: me.call, today: dayKey(now), q: text, pol, finNote, bankNote, mr, appNote, voice: via === 'voice' }) + (s3 ? '\n' + s3.text : '');
     let final = null, refused = false;
     try {
       for (let round = 0; round < MAX_ROUNDS && final === null && !refused; round++) {
