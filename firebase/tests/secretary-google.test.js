@@ -1297,7 +1297,7 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
   const body = (i) => Buffer.from(raw(i).split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString('utf8');
   const draftOf = (id) => get(`b/${A}/sec_draft/${id}`);
   const setRep = (o) => prep((d) => d.doc(`b/${A}/sec_cfg/mail_rep`).set(o, { merge: true }));
-  let seq = 0, live = null;
+  let seq = 0;
   // מייל נכנס דרך הקליטה הרגילה, בלי תור (תקרה 0 בזמן הקליטה – כדי שהטריגר באמולטור הפונקציות ב-CI לא יעבד במקביל), ואז מסומן לתור ומעובד כאן
   async function mail(o) {
     const cap = ((await get(`b/${A}/sec_cfg/mail_rep`)) || {}).cap;
@@ -1308,12 +1308,12 @@ describe('שלב ב: מענה אוטומטי למיילים', () => {
     const dom = G.addrOf(m0.from).split('@')[1];
     if (!o.noAuth) m0.headers = [{ name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.i=@' + dom + '; dmarc=pass (p=NONE) header.from=' + dom }].concat(o.headers || []);
     GO.addMail(BOX_A, m0);
-    await CORE.mailHook(GO.note(BOX_A));
+    // סבב 3 (תיקון מירוץ ב-CI): הקליטה כאן בלי רשומת תור (SEC_MAIL_TEST_NOQUEUE), כך שהטריגר secMailWork באמולטור הפונקציות
+    // לא רואה את המייל בכלל ולא יכול לתפוס אותו (קודם: "תקרה יומית" נכשלה כשהטריגר תפס מייל באיחור). המייל מעובד רק כאן (work)
+    process.env.SEC_MAIL_TEST_NOQUEUE = '1';
+    try { await CORE.mailHook(GO.note(BOX_A)); } finally { delete process.env.SEC_MAIL_TEST_NOQUEUE; }
     const x = (await inA()).filter((m) => m.subj === subject).sort((a, b) => b.rt - a.rt || (a.id < b.id ? 1 : -1))[0];
-    // סבב שיפורים (תיקון מירוץ ב-CI): הטריגר באמולטור הפונקציות רץ באיחור – מחכים שיסיים (מוחק את רשומת התור) לפני שמחזירים את התקרה.
-    // אחרת הוא לוקח את המייל אחרי שהתקרה חזרה, מנסה טיוטה בתהליך האמולטור (בלי המודל המדומה), והמייל לא מעובד כאן ("תקרה יומית" נכשלה כך)
-    if (live === null) live = await fnLive();
-    if (live) for (let i = 0; i < 150 && (await get('sec_mailq/' + A + '__' + x.id)); i++) await sleep(100);
+    assert.equal(await get('sec_mailq/' + A + '__' + x.id), null, 'אין רשומת תור – הטריגר לא יכול לתפוס את המייל');
     await setRep({ cap: cap === undefined ? 30 : cap });
     if (x.hum) await prep((d) => d.doc(`b/${A}/sec_in/${x.id}`).update({ aw: 'q', awAt: Date.now(), awN: 0 }));
     return x.id;

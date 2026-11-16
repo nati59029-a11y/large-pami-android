@@ -957,6 +957,8 @@ async function repOut(db, now) {
 async function mailEnqueue(id, now, n) {
   const bizId = (T.scope() || {}).bizId;
   if (!bizId) return;
+  // בדיקות שמעבדות את המייל בתוך התהליך (mailWork עם מודל מדומה) – בלי תור, כדי שהטריגר באמולטור הפונקציות לא יתחרה בהן (כמו SEC_INV_TEST_NOQUEUE). רק באמולטור
+  if (process.env.FUNCTIONS_EMULATOR === 'true' && process.env.SEC_MAIL_TEST_NOQUEUE === '1') return;
   await getFirestore().doc('sec_mailq/' + bizId + '__' + id + (n ? '__' + n : '')).create({ biz: bizId, id, t: now }).catch(() => {});
 }
 // תקרת הטיוטות האוטומטיות להיום (sec_cfg/mail_use.dr). give – החזרת מקום שלא נוצל (מצב חיסכון / תקלה)
