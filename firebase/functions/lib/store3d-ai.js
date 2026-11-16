@@ -12,6 +12,7 @@
 
 const { sniff } = require('./scan');
 const M = require('./store3d-map');
+const DI = require('./store3d-draftin');
 
 const ISSUE_KINDS = ['noprice', 'pricepos', 'promoexp', 'hole', 'low', 'damaged', 'fallen', 'upside', 'face', 'order', 'misplaced', 'missing'];
 const PRICE_KINDS = ['noprice', 'pricepos', 'promoexp']; // במחסן השרת מוחק אותם (4.10)
@@ -317,11 +318,77 @@ function cleanDraft(r, ctx) {
   return { map, drop, conf: num01(r.conf) == null ? 0 : r2(num01(r.conf)), scale: sc, notes: str(r.notes, 200) };
 }
 
+// ---------- טיוטת מפה: בדיקת התשובה, השמטה חלקית וסיבת כשל (תיקון 15.11.2026) ----------
+// סיבות כשל (why) – נשמרות ב-s3draft.why, נכתבות ליומן ומוצגות במסך בעברית. ההקמה לא נספרת במכסה כשהתשובה שבורה.
+const DRAFT_WHY = {
+  cut: 'תשובת ה-AI נקטעה באמצע, כנראה בגלל הרבה תמונות ופרטים. נסו שוב עם פחות תמונות (למשל 20–25).',
+  parse: 'ה-AI החזיר תשובה לא שלמה שאי אפשר לקרוא, גם בניסיון חוזר. נסו שוב בעוד כמה דקות.',
+  'not-obj': 'ה-AI החזיר תשובה במבנה לא צפוי, גם בניסיון חוזר. נסו שוב בעוד כמה דקות.',
+  'no-rooms': 'ה-AI לא זיהה את קירות החנות (אין בטיוטה אף חדר תקין). צלמו שוב ממקומות שרואים מהם את הקירות והפינות.',
+  map: 'השרטוט שה-AI החזיר לא עבר את בדיקות המפה. נסו שוב, אולי עם תמונות אחרות.',
+  'too-big': 'הטיוטה שה-AI החזיר גדולה מדי לשמירה. נסו שוב עם פחות תמונות.',
+};
+const NOT_COUNTED = ' ההקמה הזו לא נספרה במכסה.';
+const draftMsg = (why) => (DRAFT_WHY[why] || DRAFT_WHY.map) + NOT_COUNTED;
+
+// אותה בדיקה כמו בשמירת מפה (s3SaveMap): cleanMap ← mergeDel ← finalCheck ← גודל. c = { bizId, mapId, uid, now }. זורק fail.
+function draftCheck(map, c) {
+  const x = M.cleanMap(map, { bizId: c.bizId, mapId: c.mapId });
+  M.finalCheck(M.mergeDel(null, x.map, { mgr: true, uid: c.uid, now: c.now }), null);
+  if (M.bytesOf(map) > M.MAX_BYTES) throw fail('too-big', 'הטיוטה גדולה מדי');
+}
+// כשהבדיקה המלאה נכשלת – משמיטים רק את הפריטים שנכשלים לבד (כל פריט נבדק עם החדרים התקינים), במקום לדחות את כל הטיוטה.
+// גוף שהחדר שלו נשמט עובר לחדר הראשון (כמו ב-cleanDraft). אחרי ההשמטה – מספור הגופים מחדש, ושוב הבדיקה המלאה.
+// מחזיר { map, drop } (drop = כמה פריטים הושמטו כאן), או זורק fail('no-rooms' | 'too-big' | קוד של store3d-map).
+const DRAFT_LISTS = ['walls', 'cols', 'doors', 'syms', 'uz'];
+function fitDraft(map, c) {
+  try { draftCheck(map, c); return { map, drop: 0 }; } catch (e) { if (e.code === 'too-big') throw e; }
+  const ok1 = (m) => { try { draftCheck(m, c); return true; } catch (e) { return false; } };
+  const base = Object.assign({}, map, { rooms: [], walls: [], cols: [], doors: [], fx: [], syms: [], uz: [] });
+  delete base.ent;
+  let drop = 0;
+  const keep = (L, test) => (Array.isArray(L) ? L : []).filter((x) => { if (test(x)) return true; drop++; return false; });
+  const rooms = keep(map.rooms, (r) => ok1(Object.assign({}, base, { rooms: [r] })));
+  if (!rooms.length) throw fail('no-rooms', 'בטיוטה אין אף חדר תקין');
+  const withR = Object.assign({}, base, { rooms });
+  const out = Object.assign({}, map, { rooms });
+  for (const k of DRAFT_LISTS) out[k] = keep(map[k], (x) => ok1(Object.assign({}, withR, { [k]: [x] })));
+  const rid = new Set(rooms.map((r) => r.id));
+  const fx0 = (Array.isArray(map.fx) ? map.fx : []).map((f) => (isObj(f) && !rid.has(f.room) ? Object.assign({}, f, { room: rooms[0].id }) : f));
+  out.fx = keep(fx0, (f) => ok1(Object.assign({}, withR, { fx: [f] }))).map((f, i) => Object.assign({}, f, { id: 'f' + (i + 1), num: i + 1 }));
+  out.seq = out.fx.length;
+  if (out.ent && !out.doors.some((d) => d.id === out.ent)) delete out.ent;
+  draftCheck(out, c);
+  return { map: out, drop };
+}
+// תשובת המודל → טיוטה, או סיבת כשל. obj = JSON שפוענח (או null), finish = finishReason, ctx = { br, kind, numDir, bizId, uid, now, info?, sketch? }.
+// מחזיר { d } (כמו cleanDraft, drop כולל גם את מה שהושמט ב-fitDraft) או { why, code? } – why מתוך DRAFT_WHY.
+function evalDraft(obj, finish, ctx) {
+  if (obj === null || obj === undefined) return { why: finish === 'MAX_TOKENS' ? 'cut' : 'parse' };
+  // מודל שעטף את התשובה במערך של אובייקט אחד – משתמשים באובייקט
+  const r = Array.isArray(obj) && obj.length === 1 && isObj(obj[0]) ? obj[0] : obj;
+  if (!isObj(r)) return { why: finish === 'MAX_TOKENS' ? 'cut' : 'not-obj' };
+  let d;
+  try { d = cleanDraft(r, ctx); } catch (e) { return { why: 'no-rooms' }; }
+  // שאלון וסקיצה מבעל החנות (15.11.2026): מידות חיצוניות, חדרים ושורות מהסקיצה. כשל לא צפוי כאן – ממשיכים עם הטיוטה כמו שהיא
+  if (ctx.info) {
+    try { const s = DI.shapeDraft(d.map, ctx.info, ctx.sketch); d = Object.assign({}, d, { map: s.map, add: s.add, snap: s.snap }); } catch (e) { /* הטיוטה בלי התאמה */ }
+  }
+  try {
+    const f = fitDraft(d.map, { bizId: ctx.bizId, mapId: ctx.kind + '-' + ctx.br, uid: ctx.uid, now: ctx.now });
+    return { d: Object.assign({}, d, { map: f.map, drop: d.drop + f.drop }), fit: f.drop };
+  } catch (e) {
+    const why = e && e.code === 'too-big' ? 'too-big' : e && e.code === 'no-rooms' ? 'no-rooms' : 'map';
+    return { why, code: String((e && e.code) || '').slice(0, 30) };
+  }
+}
+
 const israelMonth = (day) => String(day).slice(0, 7);
 const validAt = (t, now) => Number.isInteger(t) && t >= MIN_T && t <= MAX_T && t <= now + 120000;
 
 module.exports = {
   ISSUE_KINDS, PRICE_KINDS, STATUSES, DONE_ST, LOW_CONF, IMG, THUMB, DRAFT, RE_SLOT,
   ADHOC_DAY: 20, DRAFT_DAY_MAX, decodeJpeg, draftImgs, checkSlot, quotaStep, draftDayStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  DRAFT_WHY, draftMsg, draftCheck, fitDraft, evalDraft,
   israelMonth, validAt, fail,
 };
