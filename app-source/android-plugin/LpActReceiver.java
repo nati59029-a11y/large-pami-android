@@ -1,0 +1,172 @@
+package com.largepami.finance;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import com.google.android.gms.tasks.Tasks;
+import com.google.firebase.messaging.FirebaseMessaging;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import org.json.JSONObject;
+
+/**
+ * A notification button was pressed (after unlock - see LpNotif.action), or a local snooze alarm fired.
+ * - Task reminder ('tk') "בעוד שעה" / "מחר": local snooze - the same notification (same token) comes back later.
+ * - Anything else: POST {t: token, a: action, f: this device's FCM token} to the server address that came with the message
+ *   (only https on *.cloudfunctions.net / *.run.app). While waiting the notification shows "מעדכן…".
+ *   Success -> the server's message without buttons, gone after 4 seconds. No connection -> the buttons come back with a note.
+ * Not exported: only our own PendingIntents (and LpActActivity) reach it.
+ */
+public class LpActReceiver extends BroadcastReceiver {
+    static final long H = 3600L * 1000;
+    static final String NO_NET = "אין חיבור לאינטרנט – נסו שוב";
+
+    @Override
+    public void onReceive(Context ctx, Intent intent) {
+        if (intent == null) return;
+        final Context c = ctx.getApplicationContext();
+        if (LpNotif.ACTION_SNZ.equals(intent.getAction())) {
+            String tag = intent.getStringExtra("tag");
+            if (tag != null) LpNotif.fire(c, tag);
+            return;
+        }
+        if (!LpNotif.ACTION_ACT.equals(intent.getAction())) return;
+        final Map<String, String> d = LpNotif.fromBundle(intent.getExtras());
+        final String a = intent.getStringExtra("a");
+        final String tag = LpNotif.s(d, "tag");
+        if (a == null || tag.isEmpty() || LpNotif.s(d, "at").isEmpty()) return;
+        if (!a.equals("done") && !a.equals("h1") && !a.equals("d1")) return;
+
+        if ("tk".equals(d.get("k")) && (a.equals("h1") || a.equals("d1"))) {
+            LpNotif.snooze(c, d, System.currentTimeMillis() + (a.equals("h1") ? H : 24 * H));
+            LpNotif.result(c, d, a.equals("h1") ? "נזכיר לך בעוד שעה" : "נזכיר לך מחר", 4000);
+            return;
+        }
+
+        final URL url = allowed(LpNotif.s(d, "u"));
+        if (url == null) {
+            LpNotif.result(c, d, "אי אפשר לבצע מההתראה – פתחו את האפליקציה", 0);
+            return;
+        }
+        LpNotif.progress(c, d);
+        final PendingResult pr = goAsync();
+        new Thread(() -> {
+            try {
+                run(c, d, a, url);
+            } catch (Throwable t) {
+                LpNotif.show(c, d, NO_NET);
+            } finally {
+                pr.finish();
+            }
+        }).start();
+    }
+
+    /** Only the project's Cloud Functions addresses, only https. */
+    static URL allowed(String u) {
+        try {
+            URL url = new URL(u);
+            String h = url.getHost() == null ? "" : url.getHost().toLowerCase(Locale.ROOT);
+            if (!"https".equals(url.getProtocol())) return null;
+            if (url.getUserInfo() != null) return null;
+            if (!h.endsWith(".cloudfunctions.net") && !h.endsWith(".run.app")) return null;
+            return url;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static String fcmToken(Context c) {
+        try {
+            String t = Tasks.await(FirebaseMessaging.getInstance().getToken(), 1500, TimeUnit.MILLISECONDS);
+            if (t != null && !t.isEmpty()) {
+                c.getSharedPreferences(LpMessagingService.TOK, Context.MODE_PRIVATE).edit().putString("t", t).apply();
+                return t;
+            }
+        } catch (Exception e) {
+            // slow or no Firebase - use the last known token
+        }
+        return c.getSharedPreferences(LpMessagingService.TOK, Context.MODE_PRIVATE).getString("t", null);
+    }
+
+    static void run(Context c, Map<String, String> d, String a, URL url) {
+        String f = fcmToken(c);
+        if (f == null) {
+            LpNotif.show(c, d, NO_NET);
+            return;
+        }
+        HttpURLConnection con = null;
+        int code;
+        String body;
+        try {
+            JSONObject req = new JSONObject();
+            req.put("t", LpNotif.s(d, "at"));
+            req.put("a", a);
+            req.put("f", f);
+            byte[] out = req.toString().getBytes(StandardCharsets.UTF_8);
+            con = (HttpURLConnection) url.openConnection();
+            con.setInstanceFollowRedirects(false);
+            con.setConnectTimeout(4000);
+            con.setReadTimeout(4000);
+            con.setDoOutput(true);
+            con.setRequestMethod("POST");
+            con.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            con.setFixedLengthStreamingMode(out.length);
+            try (OutputStream os = con.getOutputStream()) {
+                os.write(out);
+            }
+            code = con.getResponseCode();
+            InputStream in = code >= 400 ? con.getErrorStream() : con.getInputStream();
+            body = read(in);
+        } catch (Exception e) {
+            LpNotif.show(c, d, NO_NET);
+            return;
+        } finally {
+            if (con != null) con.disconnect();
+        }
+        JSONObject r = null;
+        try {
+            r = new JSONObject(body);
+        } catch (Exception e) {
+            // not JSON
+        }
+        if (r == null || code >= 500) {
+            LpNotif.show(c, d, "לא הצלחנו לעדכן – נסו שוב");
+            return;
+        }
+        String msg = r.optString("msg", "");
+        if (r.optBoolean("ok", false)) {
+            LpNotif.dropSnooze(c, LpNotif.s(d, "tag"));
+            if (r.optBoolean("open", false)) {
+                // Android 10+ does not let a background receiver open a screen: the note stays until tapped (tap opens the item)
+                LpNotif.result(c, d, msg.isEmpty() ? "לחצו לפתיחה באפליקציה" : msg, 0);
+            } else {
+                LpNotif.result(c, d, msg.isEmpty() ? "עודכן" : msg, 4000);
+            }
+        } else {
+            // refused by the server (token used / expired / no permission): no buttons, tap opens the app
+            LpNotif.result(c, d, msg.isEmpty() ? "הפעולה לא בוצעה – פתחו את האפליקציה" : msg, 0);
+        }
+    }
+
+    static String read(InputStream in) throws IOException {
+        if (in == null) return "";
+        try (InputStream i = in) {
+            ByteArrayOutputStream b = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n, total = 0;
+            while ((n = i.read(buf)) > 0 && total < 65536) {
+                b.write(buf, 0, n);
+                total += n;
+            }
+            return new String(b.toByteArray(), StandardCharsets.UTF_8);
+        }
+    }
+}

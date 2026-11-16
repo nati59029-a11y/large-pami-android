@@ -12,6 +12,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * (the build writes the string resource "google_app_id" from it). Without that file, calling
  * PushNotifications.register() would crash the app, so the screens ask this plugin first.
  * ready=false -> the screens do not touch push at all (the app works exactly like before).
+ * act=true (16.11.2026) -> this APK builds notifications with action buttons itself (LpMessagingService), so the screens
+ * register the device with act:1 and the server may send it data-only messages. Comes from Java, not from the screens,
+ * because a live update can bring new screens to an old APK that does not have the buttons.
  */
 @CapacitorPlugin(name = "PushGate")
 public class PushGatePlugin extends Plugin {
@@ -35,6 +38,7 @@ public class PushGatePlugin extends Plugin {
         }
         JSObject r = new JSObject();
         r.put("ready", ready);
+        r.put("act", true);
         call.resolve(r);
     }
 }
