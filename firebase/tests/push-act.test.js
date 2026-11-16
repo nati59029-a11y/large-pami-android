@@ -205,6 +205,21 @@ describe('pushAct – מול האמולטור', { skip: !EMU && 'אמולטור 
     assert.equal((await press(y.token, 'done', F(E1))).r, 'bad-device', 'משימה: עסק אחר בשיוך');
     assert.equal((await get(`b/${A}/tasks/t1`)).st, 'open');
   });
+  it('מכשיר אחד (16.11.2026): יש רישום טלפון נוכחי (dev_cur) – רק הטלפון שלו (fh) לוחץ; טלפון אחר של אותו משתמש – bad-device, האסימון לא נוגע', async () => {
+    const OD = require('../functions/one-device.js')._core;
+    const x = await mk({ uid: M1, kind: 'sec', id: 'n1', acts: ['done'] });
+    await prep((d) => d.doc(OD.pathOf(M1)).set({ phone: { sh: OD.sha('s'.repeat(43)), fh: PA.hashOf(F(M1, 'b')), at: 1 } }));
+    assert.deepEqual(await press(x.token, 'done', F(M1)), { ok: false, r: 'bad-device', msg: 'אין הרשאה. פתחו את האפליקציה', open: true });
+    assert.equal((await get('pact/' + PA.hashOf(x.token))).used, undefined);
+    assert.equal((await get(`b/${A}/sec_note/${M1}/n/n1`)).st, 'open');
+    await prep((d) => d.doc(OD.pathOf(M1)).update({ 'phone.fh': null }));
+    assert.equal((await press(x.token, 'done', F(M1, 'b'))).r, 'bad-device', 'fh ריק – הטלפון החדש עוד לא נרשם');
+    await prep((d) => d.doc(OD.pathOf(M1)).update({ 'phone.fh': PA.hashOf(F(M1, 'b')) }));
+    assert.equal((await press(x.token, 'done', F(M1, 'b'))).ok, true, 'הטלפון הנוכחי – עובד');
+    const y = await mk({ uid: E1, kind: 'tk', id: 't1', acts: ['done'] });
+    await prep((d) => d.doc(OD.pathOf(E1)).set({ web: { sh: 'x', at: 1 } }));
+    assert.equal((await press(y.token, 'done', F(E1))).ok, true, 'רישום מחשב בלבד – הטלפון לא נחסם');
+  });
   it('16.11.2026 (אבטחה): tkPlan מול האמולטור – משימה בלי open="1" או בלי יעד מספרי – "פתחו את האפליקציה", לא נסגרת', async () => {
     for (const o of [{ open: '' }, { due: 'x' }]) {
       await prep((d) => d.doc(`b/${A}/tasks/t1`).set(task(o)));

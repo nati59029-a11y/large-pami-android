@@ -65,6 +65,7 @@ async function step(page, name, fn, arg) { page.__step = name; const r = await p
   const bad = log.filter((r) => typeof r.status !== 'number' || (r.status >= 400 && !(r.status === 404 && r.method === 'GET')));
   console.log('בקשות שנכשלו (חוץ מ-404 בקריאה):', bad.length); bad.forEach((r) => console.log(' ', r.status, r.who, r.step, r.method, decodeURIComponent(r.url).replace(/^.*documents/, ''), r.body.slice(0, 160)));
   // 7: כל דחייה חוץ מ-site_income_daily (ידוע: אין לו כלל, נדחה לסבב ההזמנות) מכשילה את הבדיקה
-  const unexp = bad.filter((r) => !/site_income_daily/.test(r.body || ''));
+  // 16.11.2026 מכשיר אחד: devClaim (callable) בלי תשובה – בכוונה לא מנתק ולא חוסם (האפליקציה ממשיכה); נבדק ב-ui-onedev.js ו-one-device.test.js
+  const unexp = bad.filter((r) => !/site_income_daily/.test(r.body || '') && !/\/devClaim$/.test(r.url || ''));
   console.log(unexp.length ? `תוצאה: נכשל (${unexp.length} דחיות לא צפויות)` : 'תוצאה: עבר'); if (unexp.length) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });
