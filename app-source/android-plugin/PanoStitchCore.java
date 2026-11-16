@@ -1,6 +1,5 @@
 package com.largepami.finance;
 
-import org.opencv.calib3d.Calib3d;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.DMatch;
@@ -10,8 +9,6 @@ import org.opencv.core.MatOfByte;
 import org.opencv.core.MatOfDMatch;
 import org.opencv.core.MatOfInt;
 import org.opencv.core.MatOfKeyPoint;
-import org.opencv.core.MatOfPoint2f;
-import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
@@ -20,6 +17,7 @@ import org.opencv.features2d.Feature2D;
 import org.opencv.features2d.ORB;
 import org.opencv.features2d.SIFT;
 import org.opencv.imgcodecs.Imgcodecs;
+import org.opencv.imgproc.CLAHE;
 import org.opencv.imgproc.Imgproc;
 import org.opencv.photo.Photo;
 
@@ -44,12 +42,21 @@ import java.util.List;
  * -> Voronoi labels (by distance from the frame edge) refined by minimal-difference DP seams per neighbour pair (low resolution)
  * -> multi-band blending (Laplacian pyramids, float, periodic in x) of each frame warped on its bounding region (cv remap)
  * -> uncovered zenith / nadir filled by Photo.inpaint at low resolution, upsampled, feathered.
+ * Fixes after the first real capture (16.11, white bedroom, 29 video-grab frames: 2 of 83 pairs matched, output 45% darker):
+ * CLAHE + low SIFT contrast threshold; ratio test inside the sensor gate; RANSAC of a pure rotation on bearings (1.5 deg); two passes
+ * (re-match with the pass-1 poses, gate 5 deg); smoothness prior between overlapping frames (frames without matches follow their
+ * neighbours); log-domain gains (geometric mean 1) + shared radial vignetting; white pixels never darkened; 7 bands.
+ * Safety guard: run() throws IllegalStateException("native stitch refused: ...") if the optimisation is not applied or fewer than
+ * Options.minPairFrac of the pairs overlapping >= 20% have matches (the caller then uses the JS stitching).
  * Frames are decoded one at a time (memory); progress callback; cancel() -> Cancelled.
  * Memory (estimate, not measured on a phone): W=4096 -> about 250MB native at the peak (blend pyramid in float). W=2048 -> about 65MB.
  */
 public final class PanoStitchCore {
 
     public interface Progress { void on(double p); }
+
+    /** diagnostics (per frame / per pair numbers); null = silent */
+    public interface Log { void d(String s); }
 
     public static final class Cancelled extends RuntimeException {
         public Cancelled() { super("cancelled"); }
@@ -61,15 +68,22 @@ public final class PanoStitchCore {
         public double yawRef = 0;       // yaw (degrees) at u = 0.5 (= yaw of frame 0, as in JS)
         public boolean optimize = true; // false = sensor poses + given fovL only (comparison / fallback)
         public boolean gains = true, seams = true, multiband = true, fill = true;
-        public int bands = 5;
+        public int bands = 7;           // 7 (was 5): wider low-frequency transitions on white ceilings / walls (no blotchy seams)
         public int workMax = 1000;      // long side of the feature images
         public int nFeatures = 1500;
         public int seamW = 1024;        // width of the low resolution equirect used for gains and seams
+        public Log log;                 // diagnostics, null = silent
+        /** safety guard (16.11): run() throws IllegalStateException("native stitch refused: ...") when the optimisation was not applied
+         *  or fewer than minPairFrac of the overlapping pairs have matches - the caller then uses the JS stitching */
+        public boolean guard = true;
+        public double minPairFrac = .25;
     }
 
     public static final class Stats {
         public int frames, pairs, inlierPairs, matches;
         public double rms0Deg, rmsDeg, fovL0, fovL, meanCorrDeg, maxCorrDeg, holesPct;
+        public int guardPairs, guardHits; // safety guard: pairs with >= 20% overlap / of them with matches
+        public double vigA, vigB;       // vignetting V(r) = exp(vigA r^2 + vigB r^4), r = radius / half diagonal (0 = none)
         public boolean optimized;
         public String feat = "";
         public double[][] gains;        // [frame][B,G,R]
@@ -215,7 +229,7 @@ public final class PanoStitchCore {
     private static final class Fr {
         int w, h;
         double L;
-        double[] Rs, R;
+        double[] Rs, R, Rg; // sensor, current, pose used to gate the matching
         double[] ka, kb;     // feature positions, normalised: a = (u - w/2)/(L/2), b = -(v - h/2)/(L/2)
         float[] dF;          // SIFT descriptors
         byte[] dB;           // ORB descriptors
@@ -223,7 +237,7 @@ public final class PanoStitchCore {
         byte[] th; int tw, thh; // small BGR copy (gains, seams)
         double[] gain = {1, 1, 1};
         // low resolution warp (seam canvas)
-        int lx0, ly0, lw, lh; float[] lsc; byte[] lcol;
+        int lx0, ly0, lw, lh; float[] lsc, lr2; byte[] lcol;
     }
 
     private static final class Pair {
@@ -265,7 +279,8 @@ public final class PanoStitchCore {
         Feature2D feat = null;
         boolean sift = false;
         if (o.optimize && n > 1) {
-            try { feat = SIFT.create(o.nFeatures); sift = true; } catch (Throwable e) { feat = null; }
+            // low contrast threshold (default .04): white walls / video-grab frames have very few strong features (real capture 16.11: 14-55 per frame)
+            try { feat = SIFT.create(o.nFeatures, 3, SIFT_CONTRAST, 10, 1.6); sift = true; } catch (Throwable e) { feat = null; }
             if (feat == null) feat = ORB.create(o.nFeatures * 2);
             st.feat = sift ? "sift" : "orb";
         }
@@ -281,7 +296,7 @@ public final class PanoStitchCore {
                 f.tw = sm.cols(); f.thh = sm.rows(); f.th = new byte[f.tw * f.thh * 3];
                 sm.get(0, 0, f.th);
                 sm.release();
-                if (feat != null) detect(feat, sift, img, f);
+                if (feat != null) { detect(feat, sift, img, f); log("frame " + i + ": " + f.w + "x" + f.h + " features " + f.nk); }
             } finally { img.release(); }
             P.on(.25 * (i + 1) / n);
         }
@@ -290,59 +305,92 @@ public final class PanoStitchCore {
         // 2. pairs + matches
         long tm = System.currentTimeMillis();
         List<Pair> pairs = new ArrayList<>();
-        if (feat != null) {
-            for (int i = 0; i < n; i++) {
-                chk();
-                for (int j = i + 1; j < n; j++) {
-                    double c = -F[i].Rs[2] * -F[j].Rs[2] + -F[i].Rs[5] * -F[j].Rs[5] + -F[i].Rs[8] * -F[j].Rs[8];
-                    if (Math.acos(Math.max(-1, Math.min(1, c))) / D > o.fovL * 0.95) continue;
-                    st.pairs++;
-                    Pair p = matchPair(F, i, j, t, sift);
-                    if (p != null) { pairs.add(p); st.inlierPairs++; st.matches += p.m; }
-                }
-                P.on(.25 + .15 * (i + 1) / n);
-            }
-            feat.clear();
+        List<int[]> nb = new ArrayList<>(); // all overlapping pairs (by the sensor): smoothness of the corrections
+        for (int i = 0; i < n; i++) for (int j = i + 1; j < n; j++) {
+            double c = -F[i].Rs[2] * -F[j].Rs[2] + -F[i].Rs[5] * -F[j].Rs[5] + -F[i].Rs[8] * -F[j].Rs[8];
+            if (Math.acos(Math.max(-1, Math.min(1, c))) / D > o.fovL * 0.95) continue;
+            double ov = Math.min(overlapFrac(F[i], F[j], t), overlapFrac(F[j], F[i], t));
+            if (ov > 0) nb.add(new int[]{i, j, (int) Math.round(ov * 100)});
         }
-        for (Fr f : F) { f.dF = null; f.dB = null; }
-        st.msMatch = System.currentTimeMillis() - tm;
-
-        // 3. global optimisation
-        long to = System.currentTimeMillis();
-        st.rms0Deg = rmsDeg(F, pairs, t);
-        st.rmsDeg = st.rms0Deg;
-        if (o.optimize && !pairs.isEmpty()) {
-            double[][] R0 = new double[n][];
-            for (int i = 0; i < n; i++) R0[i] = F[i].R.clone();
-            double tNew = optimise(F, pairs, t);
-            // keep the yaw of frame 0 = its sensor yaw (u = 0.5 stays yawRef)
-            double dy = (yawOf(F[0].R) - yawOf(F[0].Rs)) * D;
-            double[] Rz = expR(0, 0, dy);
-            for (Fr f : F) f.R = mul(Rz, f.R);
-            double mx = 0, sum = 0;
-            for (Fr f : F) { double a = angDeg(f.R, f.Rs); mx = Math.max(mx, a); sum += a; }
-            double fovNew = 2 * Math.atan(tNew) / D, rms = rmsDeg(F, pairs, tNew);
-            if (mx > 25 || Math.abs(fovNew - o.fovL) > 15 || !(rms < 1.5) || Double.isNaN(fovNew)) {
-                for (int i = 0; i < n; i++) F[i].R = R0[i]; // diverged: back to the sensor poses
-            } else {
-                t = tNew; st.optimized = true; st.rmsDeg = rms; st.maxCorrDeg = mx; st.meanCorrDeg = sum / n;
+        st.pairs = nb.size();
+        long to = 0, msOpt = 0;
+        String reason = feat == null ? null : "no pairs";
+        List<Pair> pairs1 = null;
+        // pass 1: gate by the sensor poses; pass 2: re-match with the poses of pass 1 and a narrow gate (more correct matches on
+        // repeated / weak texture), then optimise again from the sensor priors
+        for (int pass = 0; pass < 2 && feat != null; pass++) {
+            for (Fr f : F) f.Rg = f.R.clone();
+            double gate = pass == 0 ? GATE_DEG : GATE2_DEG;
+            List<Pair> pp = new ArrayList<>();
+            for (int k = 0; k < nb.size(); k++) {
+                if (k % 8 == 0) chk();
+                int[] q = nb.get(k);
+                Pair p = matchPair(F, q[0], q[1], t, sift, gate);
+                if (p != null) pp.add(p);
+                P.on(.25 + (pass == 0 ? .1 : .05) * (k + 1) / nb.size() + (pass == 0 ? 0 : .1));
             }
+            if (pass == 1 && pp.size() < pairs.size()) { log("pass 2: " + pp.size() + " pairs < " + pairs.size() + ", kept pass 1"); break; }
+            pairs = pp;
+            to = System.currentTimeMillis();
+            st.inlierPairs = pairs.size(); st.matches = 0;
+            for (Pair p : pairs) st.matches += p.m;
+            if (pass == 0) { st.msMatch = System.currentTimeMillis() - tm; st.rms0Deg = rmsDeg(F, pairs, t); }
+            // 3. global optimisation (always from the sensor poses and the given fov)
+            for (Fr f : F) f.R = f.Rs.clone();
+            t = Math.tan(o.fovL * D / 2);
+            st.optimized = false; st.rmsDeg = st.rms0Deg; st.maxCorrDeg = 0; st.meanCorrDeg = 0;
+            String why = optimiseChecked(F, pairs, nb, st);
+            if (st.optimized) t = Math.tan(st.fovL * D / 2);
+            msOpt += System.currentTimeMillis() - to;
+            log("pass " + (pass + 1) + ": gate " + gate + " pairs " + pairs.size() + "/" + nb.size() + " " + (why == null ? "optimised rms " + r1(st.rms0Deg) + " -> " + r1(st.rmsDeg) + " fov " + r1(st.fovL) : "not applied: " + why));
+            if (!st.optimized && pass == 1) { // pass 2 worse than pass 1: back to pass 1
+                pairs = pairs1;
+                st.inlierPairs = pairs.size(); st.matches = 0;
+                for (Pair p : pairs) st.matches += p.m;
+                for (Fr f : F) f.R = f.Rs.clone();
+                t = Math.tan(o.fovL * D / 2);
+                optimiseChecked(F, pairs, nb, st);
+                if (st.optimized) t = Math.tan(st.fovL * D / 2);
+                log("pass 2 rejected (" + why + "), kept pass 1");
+                break;
+            }
+            if (!st.optimized) { reason = why; break; }
+            reason = null;
+            pairs1 = pairs;
         }
-        double fovL = 2 * Math.atan(t) / D;
-        st.fovL = fovL;
-        st.msOpt = System.currentTimeMillis() - to;
+        if (feat != null) feat.clear();
+        for (Fr f : F) { f.dF = null; f.dB = null; f.Rg = null; }
+        st.msOpt = msOpt;
+        if (feat != null && o.guard) {
+            // safety guard: on weak data the result is not better than the JS stitching (which shows its own fallback) -> refuse clearly
+            // counted on the pairs that really overlap (>= 20% of the frame by the sensor): corner-to-corner pairs of a sphere capture
+            // overlap by a few percent and rarely match even on good data
+            java.util.HashSet<Integer> ok = new java.util.HashSet<>();
+            for (Pair p : pairs) ok.add(p.i * n + p.j);
+            int cand = 0, hit = 0;
+            for (int[] q : nb) if (q[2] >= 20) { cand++; if (ok.contains(q[0] * n + q[1])) hit++; }
+            st.guardPairs = cand; st.guardHits = hit;
+            double frac = cand == 0 ? 0 : hit / (double) cand;
+            log("guard: " + hit + "/" + cand + " pairs with >= 20% overlap have matches (" + Math.round(frac * 100) + "%), all pairs " + st.inlierPairs + "/" + nb.size());
+            if (reason != null) throw new IllegalStateException("native stitch refused: optimisation not applied (" + reason + "); pairs with matches " + st.inlierPairs + "/" + nb.size());
+            if (frac < o.minPairFrac) throw new IllegalStateException("native stitch refused: only " + hit + " of " + cand + " overlapping frame pairs have matches (" + Math.round(frac * 100) + "% < " + Math.round(o.minPairFrac * 100) + "%)");
+        }
+        if (!st.optimized) st.fovL = o.fovL;
+        t = Math.tan(st.fovL * D / 2);
         P.on(.45);
         chk();
+
+        double fovL = st.fovL;
 
         // 4. low resolution warps -> gains -> labels -> seams
         int Ws = Math.min(W, Math.max(256, o.seamW)), Hs = Ws / 2;
         for (Fr f : F) lowWarp(f, t, Ws, Hs);
-        if (o.gains && n > 1) gains(F, Ws);
+        if (o.gains && n > 1) gains(F, Ws, st);
         st.gains = new double[n][];
         for (int i = 0; i < n; i++) st.gains[i] = F[i].gain.clone();
         int[] lab = labels(F, Ws, Hs);
         if (o.seams && n > 1) seams(F, lab, Ws, Hs);
-        for (Fr f : F) { f.th = null; f.lcol = null; f.lsc = null; }
+        for (Fr f : F) { f.th = null; f.lcol = null; f.lsc = null; f.lr2 = null; }
         P.on(.5);
 
         // 5. warp + multi-band blend
@@ -358,6 +406,35 @@ public final class PanoStitchCore {
         r.quats = new double[n][];
         for (int i = 0; i < n; i++) r.quats[i] = matToQ(F[i].R);
         return r;
+    }
+
+    /** LM + sanity checks; on success sets st.optimized / rmsDeg / fovL / corrections and keeps F[].R, else restores the sensor poses.
+     *  Returns null or the reason why the result was not applied. */
+    private String optimiseChecked(Fr[] F, List<Pair> pairs, List<int[]> nb, Stats st) {
+        if (!o.optimize) return "off";
+        if (pairs.isEmpty()) return "no pairs with matches";
+        double t = Math.tan(o.fovL * D / 2);
+        double[][] R0 = new double[n][];
+        for (int i = 0; i < n; i++) R0[i] = F[i].R.clone();
+        double tNew = optimise(F, pairs, nb, t);
+        // keep the yaw of frame 0 = its sensor yaw (u = 0.5 stays yawRef); already (almost) exact by the gauge term in the LM
+        double dy = (yawOf(F[0].R) - yawOf(F[0].Rs)) * D;
+        double[] Rz = expR(0, 0, dy);
+        for (Fr f : F) f.R = mul(Rz, f.R);
+        double mx = 0, sum = 0;
+        for (Fr f : F) { double a = angDeg(f.R, f.Rs); mx = Math.max(mx, a); sum += a; }
+        double fovNew = 2 * Math.atan(tNew) / D, rms = rmsDeg(F, pairs, tNew);
+        String why = null;
+        if (Double.isNaN(fovNew) || Double.isNaN(rms)) why = "NaN";
+        else if (mx > 25) why = "correction " + r1(mx) + " deg > 25";
+        else if (Math.abs(fovNew - o.fovL) > 15) why = "fov " + r1(fovNew) + " far from " + r1(o.fovL);
+        else if (!(rms < 1.5)) why = "rms " + r1(rms) + " deg >= 1.5";
+        if (why != null) {
+            for (int i = 0; i < n; i++) F[i].R = R0[i]; // diverged: back to the sensor poses
+            return why;
+        }
+        st.optimized = true; st.rmsDeg = rms; st.maxCorrDeg = mx; st.meanCorrDeg = sum / n; st.fovL = fovNew;
+        return null;
     }
 
     private Mat decode(int i) {
@@ -378,6 +455,10 @@ public final class PanoStitchCore {
         try {
             Imgproc.resize(img, work, new Size(Math.max(8, Math.round(f.w * s)), Math.max(8, Math.round(f.h * s))), 0, 0, Imgproc.INTER_AREA);
             Imgproc.cvtColor(work, gray, Imgproc.COLOR_BGR2GRAY);
+            // local contrast (CLAHE): faint edges / shading on white surfaces become detectable; matching is on descriptors, so the
+            // same enhancement on both frames does not bias the geometry
+            CLAHE cl = Imgproc.createCLAHE(2.5, new Size(8, 8));
+            cl.apply(gray, gray);
             feat.detectAndCompute(gray, none, kp, desc);
             KeyPoint[] k = kp.toArray();
             int m = Math.min(k.length, desc.rows());
@@ -406,6 +487,20 @@ public final class PanoStitchCore {
         }
     }
 
+    /** fraction (0..1) of frame i that falls inside frame j by the sensor poses (grid 12 x 12, the smaller of both directions) */
+    private static double overlapFrac(Fr fi, Fr fj, double t) {
+        int c = 0;
+        double[] d = new double[3], w = new double[3];
+        double ma = fj.w / fj.L, mb = fj.h / fj.L;
+        for (int y = 0; y < 12; y++) for (int x = 0; x < 12; x++) {
+            camDir(((x + .5) / 12 * 2 - 1) * fi.w / fi.L, ((y + .5) / 12 * 2 - 1) * fi.h / fi.L, t, d);
+            rot(fi.Rs, d, w);
+            double px = fj.Rs[0] * w[0] + fj.Rs[3] * w[1] + fj.Rs[6] * w[2], py = fj.Rs[1] * w[0] + fj.Rs[4] * w[1] + fj.Rs[7] * w[2], pz = fj.Rs[2] * w[0] + fj.Rs[5] * w[1] + fj.Rs[8] * w[2];
+            if (pz < -.1 && Math.abs(px / -pz / t) <= ma && Math.abs(py / -pz / t) <= mb) c++;
+        }
+        return c / 144.0;
+    }
+
     /** keypoints of frame i that (by the sensor pose) fall inside frame j */
     private static int[] inside(Fr fi, Fr fj, double t) {
         int[] out = new int[fi.nk];
@@ -414,8 +509,8 @@ public final class PanoStitchCore {
         double ma = fj.w / fj.L * 1.12, mb = fj.h / fj.L * 1.12;
         for (int q = 0; q < fi.nk; q++) {
             camDir(fi.ka[q], fi.kb[q], t, d);
-            rot(fi.Rs, d, w);
-            double x = fj.Rs[0] * w[0] + fj.Rs[3] * w[1] + fj.Rs[6] * w[2], y = fj.Rs[1] * w[0] + fj.Rs[4] * w[1] + fj.Rs[7] * w[2], z = fj.Rs[2] * w[0] + fj.Rs[5] * w[1] + fj.Rs[8] * w[2];
+            rot(fi.Rg, d, w);
+            double x = fj.Rg[0] * w[0] + fj.Rg[3] * w[1] + fj.Rg[6] * w[2], y = fj.Rg[1] * w[0] + fj.Rg[4] * w[1] + fj.Rg[7] * w[2], z = fj.Rg[2] * w[0] + fj.Rg[5] * w[1] + fj.Rg[8] * w[2];
             if (z > -0.2) continue;
             if (Math.abs(x / -z / t) <= ma && Math.abs(y / -z / t) <= mb) out[c++] = q;
         }
@@ -440,56 +535,82 @@ public final class PanoStitchCore {
         return m;
     }
 
-    private static final double GATE_DEG = 12, RATIO = .8;
-    private static final int MAX_PAIR_PTS = 150;
+    /* Matching (fixed 16.11 after the first real capture: 2 of 83 pairs had inliers). Gate = sensor pose (real error 3-6 degrees per frame,
+       so up to ~10 between two frames); the model is a pure rotation fitted on bearings (3 dof, 2-point minimal sample) instead of a
+       homography (8 dof, needs many points and was too strict at 3 px) - a white room gives only 10-40 good matches per pair. */
+    private static final double GATE_DEG = 12, GATE2_DEG = 5, RATIO = .85, RANSAC_DEG = 1.5, SIFT_CONTRAST = .015;
+    private static final int MAX_PAIR_PTS = 150, MIN_IN = 8, RANSAC_IT = 500, KNN = 6;
 
-    private Pair matchPair(Fr[] F, int i, int j, double t, boolean sift) {
+    private Pair matchPair(Fr[] F, int i, int j, double t, boolean sift, double gateDeg) {
         Fr fi = F[i], fj = F[j];
-        if (fi.nk < 8 || fj.nk < 8) return null;
+        if (fi.nk < MIN_IN || fj.nk < MIN_IN) { log("pair " + i + "-" + j + ": few features " + fi.nk + "/" + fj.nk); return null; }
         int[] si = inside(fi, fj, t), sj = inside(fj, fi, t);
-        if (si.length < 8 || sj.length < 8) return null;
+        if (si.length < MIN_IN || sj.length < MIN_IN) { log("pair " + i + "-" + j + ": few features in overlap " + si.length + "/" + sj.length); return null; }
         Mat qd = descMat(fi, si, sift), td = descMat(fj, sj, sift);
         DescriptorMatcher bf = DescriptorMatcher.create(sift ? DescriptorMatcher.BRUTEFORCE : DescriptorMatcher.BRUTEFORCE_HAMMING);
         List<MatOfDMatch> km = new ArrayList<>();
         try {
-            bf.knnMatch(qd, td, km, 2);
+            bf.knnMatch(qd, td, km, KNN);
         } finally { qd.release(); td.release(); bf.clear(); }
-        double cg = Math.cos(GATE_DEG * D);
-        double[] d1 = new double[3], d2 = new double[3], w1 = new double[3], w2 = new double[3];
+        double cg = Math.cos(gateDeg * D);
+        double[] Rrs = mul(tr(fi.Rg), fj.Rg); // gating pose (sensor, or the first pass): camera j -> camera i
+        double[] w2 = new double[3], d1 = new double[3];
+        double[][] dj = new double[sj.length][];
+        for (int k = 0; k < sj.length; k++) { double[] v = new double[3]; camDir(fj.ka[sj[k]], fj.kb[sj[k]], t, v); dj[k] = v; }
         List<int[]> cand = new ArrayList<>();
+        List<double[]> vI = new ArrayList<>(), vJ = new ArrayList<>();
         boolean[] usedT = new boolean[sj.length];
+        int nRatio = 0;
+        // guided ratio test: the ratio is taken between the two best descriptors INSIDE the sensor gate (repeated texture such as
+        // floor tiles has many similar descriptors elsewhere in the frame, which made the plain ratio test drop the right match)
         for (MatOfDMatch mm : km) {
             DMatch[] a = mm.toArray();
             mm.release();
-            if (a.length < 2 || a[0].distance >= RATIO * a[1].distance) continue;
-            int qi = si[a[0].queryIdx], ti = sj[a[0].trainIdx];
-            if (usedT[a[0].trainIdx]) continue;
-            camDir(fi.ka[qi], fi.kb[qi], t, d1); rot(fi.Rs, d1, w1);
-            camDir(fj.ka[ti], fj.kb[ti], t, d2); rot(fj.Rs, d2, w2);
-            if (w1[0] * w2[0] + w1[1] * w2[1] + w1[2] * w2[2] < cg) continue;
-            usedT[a[0].trainIdx] = true;
-            cand.add(new int[]{qi, ti});
+            if (a.length < 2) continue;
+            int qi = si[a[0].queryIdx];
+            camDir(fi.ka[qi], fi.kb[qi], t, d1);
+            int b1 = -1;
+            double best1 = 0, best2 = a[a.length - 1].distance;
+            for (DMatch dm : a) {
+                rot(Rrs, dj[dm.trainIdx], w2);
+                if (d1[0] * w2[0] + d1[1] * w2[1] + d1[2] * w2[2] < cg) continue;
+                if (b1 < 0) { b1 = dm.trainIdx; best1 = dm.distance; } else { best2 = dm.distance; break; }
+            }
+            if (b1 < 0 || best1 >= RATIO * best2) continue;
+            nRatio++;
+            if (usedT[b1]) continue;
+            usedT[b1] = true;
+            cand.add(new int[]{qi, sj[b1]});
+            vI.add(d1.clone()); vJ.add(dj[b1]);
         }
         int m = cand.size();
-        if (m < 15) return null;
-        Point[] pi = new Point[m], pj = new Point[m];
-        for (int k = 0; k < m; k++) {
-            int[] c = cand.get(k);
-            pi[k] = new Point(fi.ka[c[0]] * fi.L / 2 + fi.w / 2.0, -fi.kb[c[0]] * fi.L / 2 + fi.h / 2.0);
-            pj[k] = new Point(fj.ka[c[1]] * fj.L / 2 + fj.w / 2.0, -fj.kb[c[1]] * fj.L / 2 + fj.h / 2.0);
-        }
-        MatOfPoint2f mi = new MatOfPoint2f(pi), mj = new MatOfPoint2f(pj);
-        Mat mask = new Mat(), Hm = null;
-        byte[] in = new byte[m];
-        try {
-            double thr = Math.max(2.0, 2.5 * fi.L / o.workMax);
-            Hm = Calib3d.findHomography(mj, mi, Calib3d.RANSAC, thr, mask, 4000, 0.995);
-            if (Hm == null || Hm.empty() || mask.rows() != m) return null;
-            mask.get(0, 0, in);
-        } finally { mi.release(); mj.release(); mask.release(); if (Hm != null) Hm.release(); }
+        String head = "pair " + i + "-" + j + ": feat " + si.length + "/" + sj.length + " ratio " + nRatio + " gate " + m;
+        if (m < MIN_IN) { log(head + " -> rejected (few)"); return null; }
+        // RANSAC of the relative rotation (seeded: the result is reproducible)
+        java.util.Random rnd = new java.util.Random(1000003L * i + j);
+        double ct = Math.cos(RANSAC_DEG * D);
+        boolean[] in = new boolean[m], tmp = new boolean[m];
         int ni = 0;
-        for (byte b : in) if (b != 0) ni++;
-        if (ni < 12 || ni < 8 + 0.3 * m) return null;
+        double[] best = null;
+        for (int it = 0; it < RANSAC_IT; it++) {
+            int a = rnd.nextInt(m), b = rnd.nextInt(m);
+            if (a == b) continue;
+            double[] R = triad(vI.get(a), vI.get(b), vJ.get(a), vJ.get(b));
+            if (R == null) continue;
+            int c = countIn(R, vI, vJ, ct, tmp);
+            if (c > ni) { ni = c; best = R; System.arraycopy(tmp, 0, in, 0, m); }
+        }
+        if (best == null || ni < MIN_IN) { log(head + " ransac " + ni + " -> rejected"); return null; }
+        for (int rep = 0; rep < 2; rep++) { // least squares refinement on the inliers
+            double[] R = kabsch(vI, vJ, in);
+            if (R == null) break;
+            int c = countIn(R, vI, vJ, ct, tmp);
+            if (c < ni) break;
+            ni = c; best = R; System.arraycopy(tmp, 0, in, 0, m);
+        }
+        double dev = angDeg(best, Rrs);
+        if (ni < MIN_IN || ni < .15 * m || dev > gateDeg) { log(head + " ransac " + ni + " dev " + r1(dev) + " -> rejected"); return null; }
+        log(head + " ransac " + ni + " dev " + r1(dev) + " -> ok");
         int keep = Math.min(ni, MAX_PAIR_PTS);
         Pair p = new Pair();
         p.i = i; p.j = j; p.m = keep;
@@ -497,7 +618,7 @@ public final class PanoStitchCore {
         double step = ni / (double) keep, next = 0;
         int seen = 0, c = 0;
         for (int k = 0; k < m && c < keep; k++) {
-            if (in[k] == 0) continue;
+            if (!in[k]) continue;
             if (seen >= next) {
                 int[] q = cand.get(k);
                 p.ai[c] = fi.ka[q[0]]; p.bi[c] = fi.kb[q[0]]; p.aj[c] = fj.ka[q[1]]; p.bj[c] = fj.kb[q[1]];
@@ -508,6 +629,61 @@ public final class PanoStitchCore {
         }
         p.m = c;
         return p;
+    }
+
+    private void log(String s) { if (o.log != null) o.log.d(s); }
+
+    static String r1(double v) { return String.valueOf(Math.round(v * 10) / 10.0); }
+
+    private static int countIn(double[] R, List<double[]> vI, List<double[]> vJ, double ct, boolean[] in) {
+        int c = 0;
+        double[] w = new double[3];
+        for (int k = 0; k < vI.size(); k++) {
+            double[] a = vI.get(k);
+            rot(R, vJ.get(k), w);
+            in[k] = a[0] * w[0] + a[1] * w[1] + a[2] * w[2] >= ct;
+            if (in[k]) c++;
+        }
+        return c;
+    }
+
+    private static double[] cross(double[] a, double[] b) { return new double[]{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]}; }
+
+    /** rotation R with p1 = R q1 exactly and p2 ~ R q2 (triad); null if the two directions are (almost) parallel or their angles disagree */
+    static double[] triad(double[] p1, double[] p2, double[] q1, double[] q2) {
+        double[] cp = cross(p1, p2), cq = cross(q1, q2);
+        double np = Math.sqrt(cp[0] * cp[0] + cp[1] * cp[1] + cp[2] * cp[2]), nq = Math.sqrt(cq[0] * cq[0] + cq[1] * cq[1] + cq[2] * cq[2]);
+        if (np < Math.sin(1.5 * D) || nq < Math.sin(1.5 * D)) return null;
+        if (Math.abs(Math.asin(Math.min(1, np)) - Math.asin(Math.min(1, nq))) > 2 * RANSAC_DEG * D) return null;
+        for (int k = 0; k < 3; k++) { cp[k] /= np; cq[k] /= nq; }
+        double[] tp = cross(p1, cp), tq = cross(q1, cq);
+        // R = [p1 cp tp] [q1 cq tq]^T
+        double[] R = new double[9];
+        for (int r = 0; r < 3; r++) for (int c = 0; c < 3; c++) R[r * 3 + c] = p1[r] * q1[c] + cp[r] * cq[c] + tp[r] * tq[c];
+        return R;
+    }
+
+    /** least squares rotation R minimising sum |p - R q|^2 over the inliers (Kabsch, SVD) */
+    static double[] kabsch(List<double[]> vI, List<double[]> vJ, boolean[] in) {
+        double[] M = new double[9];
+        for (int k = 0; k < vI.size(); k++) {
+            if (!in[k]) continue;
+            double[] p = vI.get(k), q = vJ.get(k);
+            for (int r = 0; r < 3; r++) for (int c = 0; c < 3; c++) M[r * 3 + c] += p[r] * q[c];
+        }
+        Mat a = new Mat(3, 3, CvType.CV_64F), w = new Mat(), u = new Mat(), vt = new Mat();
+        try {
+            a.put(0, 0, M);
+            Core.SVDecomp(a, w, u, vt);
+            double[] U = new double[9], V = new double[9];
+            u.get(0, 0, U); vt.get(0, 0, V);
+            double[] R = mul(U, V);
+            double det = R[0] * (R[4] * R[8] - R[5] * R[7]) - R[1] * (R[3] * R[8] - R[5] * R[6]) + R[2] * (R[3] * R[7] - R[4] * R[6]);
+            if (det < 0) { for (int c = 0; c < 3; c++) U[c * 3 + 2] = -U[c * 3 + 2]; R = mul(U, V); }
+            return R;
+        } catch (Throwable e) {
+            return null;
+        } finally { a.release(); w.release(); u.release(); vt.release(); }
     }
 
     /** RMS angle (degrees) between matched rays */
@@ -529,16 +705,16 @@ public final class PanoStitchCore {
 
     /* ------------------------------------------------------------------ Levenberg-Marquardt ------------------------------------------------------------------ */
 
-    private static final double SIG_PX = 1.0, HUBER_PX = 2.0, SIG_PRIOR = 5 * D, SIG_LOGT = .15;
+    private static final double SIG_PX = 1.0, HUBER_PX = 2.0, SIG_PRIOR = 8 * D, SIG_SMOOTH = 3 * D, SIG_LOGT = .15;
 
-    private double optimise(Fr[] F, List<Pair> pairs, double t0) {
+    private double optimise(Fr[] F, List<Pair> pairs, List<int[]> nb, double t0) {
         int np = 3 * n + 1;
         double[][] R = new double[n][];
         for (int i = 0; i < n; i++) R[i] = F[i].R.clone();
         double lt = Math.log(t0), lt0 = lt;
         double hL = F[0].L / 2;
         double lambda = 1e-3;
-        double cost = lmCost(R, lt, lt0, pairs, F, hL);
+        double cost = lmCost(R, lt, lt0, pairs, nb, F, hL);
         double[] Aa = new double[np * np], g = new double[np];
         double[] d1 = new double[3], d2 = new double[3], v1 = new double[3], v2 = new double[3], e1 = new double[3], e2 = new double[3];
         double[][] J = new double[3][7];
@@ -580,6 +756,22 @@ public final class PanoStitchCore {
                 double k = 1 / (SIG_PRIOR * SIG_PRIOR);
                 for (int a = 0; a < 3; a++) { Aa[(3 * i + a) * np + 3 * i + a] += k; g[3 * i + a] += k * e[a]; }
             }
+            // smoothness: overlapping frames get similar world corrections C = R Rs^T (the sensor error drifts slowly), so a frame
+            // without matches (white ceiling) follows its matched neighbours instead of staying at its own sensor pose.
+            // e = log(Ci Cj^T) ~ ci - cj  =>  J = [I, -I] (Gauss-Newton approximation; the cost itself is exact)
+            for (int[] q : nb) {
+                double[] e = logR(mul(mul(R[q[0]], tr(F[q[0]].Rs)), tr(mul(R[q[1]], tr(F[q[1]].Rs)))));
+                double k = 1 / (SIG_SMOOTH * SIG_SMOOTH);
+                for (int a = 0; a < 3; a++) {
+                    int ia = 3 * q[0] + a, ja = 3 * q[1] + a;
+                    Aa[ia * np + ia] += k; Aa[ja * np + ja] += k; Aa[ia * np + ja] -= k; Aa[ja * np + ia] -= k;
+                    g[ia] += k * e[a]; g[ja] -= k * e[a];
+                }
+            }
+            // gauge: frame 0 keeps its sensor yaw inside the optimisation (a rotation about world z = a pure yaw change). Re-anchoring
+            // only afterwards rotated the frames without matches away from their matched neighbours (real capture 16.11: 5.6 degrees)
+            Aa[2 * np + 2] += 1e8;
+            g[2] += 1e8 * wrap180(yawOf(R[0]) - yawOf(F[0].Rs)) * D;
             Aa[(np - 1) * np + np - 1] += 1 / (SIG_LOGT * SIG_LOGT);
             g[np - 1] += (lt - lt0) / (SIG_LOGT * SIG_LOGT);
             boolean better = false;
@@ -590,7 +782,7 @@ public final class PanoStitchCore {
                 double[][] R2 = new double[n][];
                 for (int i = 0; i < n; i++) R2[i] = mul(expR(x[3 * i], x[3 * i + 1], x[3 * i + 2]), R[i]);
                 double lt2 = lt + x[np - 1];
-                double c2 = lmCost(R2, lt2, lt0, pairs, F, hL);
+                double c2 = lmCost(R2, lt2, lt0, pairs, nb, F, hL);
                 if (c2 < cost) {
                     double rel = (cost - c2) / Math.max(1e-12, cost);
                     R = R2; lt = lt2; cost = c2; lambda = Math.max(1e-7, lambda / 3); better = true;
@@ -616,7 +808,7 @@ public final class PanoStitchCore {
         out[0] = (px - d[0] * dot) / nrm; out[1] = (py - d[1] * dot) / nrm; out[2] = (0 - d[2] * dot) / nrm;
     }
 
-    private double lmCost(double[][] R, double lt, double lt0, List<Pair> pairs, Fr[] F, double hL) {
+    private double lmCost(double[][] R, double lt, double lt0, List<Pair> pairs, List<int[]> nb, Fr[] F, double hL) {
         double t = Math.exp(lt), s = hL / t / SIG_PX, c = 0;
         double[] d = new double[3], v1 = new double[3], v2 = new double[3];
         for (Pair p : pairs) {
@@ -630,6 +822,10 @@ public final class PanoStitchCore {
         for (int i = 0; i < n; i++) {
             double[] e = logR(mul(R[i], tr(F[i].Rs)));
             c += (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]) / (SIG_PRIOR * SIG_PRIOR);
+        }
+        for (int[] q : nb) {
+            double[] e = logR(mul(mul(R[q[0]], tr(F[q[0]].Rs)), tr(mul(R[q[1]], tr(F[q[1]].Rs)))));
+            c += (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]) / (SIG_SMOOTH * SIG_SMOOTH);
         }
         c += (lt - lt0) * (lt - lt0) / (SIG_LOGT * SIG_LOGT);
         return c;
@@ -695,6 +891,8 @@ public final class PanoStitchCore {
         int[] r = roiOf(f.R, t, f.w, f.h, Ws, Hs, o.yawRef);
         f.lx0 = r[0]; f.lw = r[1] - r[0]; f.ly0 = r[2]; f.lh = r[3] - r[2];
         f.lsc = new float[f.lw * f.lh];
+        f.lr2 = new float[f.lw * f.lh];
+        double hd2 = (f.w * f.w + f.h * f.h) / 4.0;
         f.lcol = new byte[f.lw * f.lh * 3];
         double[] m = f.R;
         double hL = f.L / 2, fp = hL / t;
@@ -711,6 +909,7 @@ public final class PanoStitchCore {
                 double nx = Math.abs(u - f.w / 2.0) / (f.w / 2.0), ny = Math.abs(v - f.h / 2.0) / (f.h / 2.0);
                 if (nx >= 1 || ny >= 1) continue;
                 f.lsc[k] = (float) Math.min((1 - nx) * ex, (1 - ny) * ey);
+                f.lr2[k] = (float) (((u - f.w / 2.0) * (u - f.w / 2.0) + (v - f.h / 2.0) * (v - f.h / 2.0)) / hd2);
                 // bilinear from the small copy
                 double fx = u * kx - .5, fy = v * ky - .5;
                 int ix = (int) Math.floor(fx), iy = (int) Math.floor(fy);
@@ -736,55 +935,137 @@ public final class PanoStitchCore {
         return f.lsc[k] >= 0 ? k : -1;
     }
 
-    /** per-frame per-channel gains: least squares on the overlaps (like cv::detail::GainCompensator), weak prior gain = 1 */
-    private void gains(Fr[] F, int Ws) {
-        double[][][] I = new double[3][n][n];
-        double[][] N = new double[n][n];
+    /* Brightness (fixed 16.11: on the first real capture the old linear solve pushed every gain to the 0.5 clamp - the whole pano was
+       ~45% darker than the frames). Now in the log domain, which has no bias towards 0:
+       1. vignetting V(r) = exp(a r^2 + b r^4) (r = distance from the frame centre / half diagonal), shared by all frames, fitted on the
+          overlaps jointly with per-frame luminance gains; only darkening towards the border is corrected (V <= 1, V(1) >= .35);
+       2. per-frame per-channel gains on the vignetting-corrected overlaps; normalised so that their geometric mean is 1 per channel
+          (the overall brightness / white balance of the inputs is kept);
+       3. near-white pixels are never darkened (protect(): a gain < 1 fades out between 225 and 250). */
+    private double vigA, vigB;
+
+    double vig(double r2) { return Math.exp(vigA * r2 + vigB * r2 * r2); }
+
+    /** factor k applied to a pixel whose brightest channel is mx: no darkening of (almost) white pixels */
+    static double protect(double k, double mx) {
+        if (k >= 1 || mx <= 225) return k;
+        double s = Math.min(1, (mx - 225) / 25);
+        return k * (1 - s) + s;
+    }
+
+    private interface OverlapVisitor { void on(int a, int ka, int b, int kb); }
+
+    /** every overlapping low-res sample of every frame pair (a < b), sub-sampled by 2 */
+    private void overlaps(Fr[] F, int Ws, OverlapVisitor v) {
         for (int i = 0; i < n; i++) {
             Fr a = F[i];
-            for (int j = 0; j < n; j++) {
-                if (j == i) continue;
+            for (int j = i + 1; j < n; j++) {
                 Fr b = F[j];
-                double s0 = 0, s1 = 0, s2 = 0, c = 0;
-                for (int yy = 0; yy < a.lh; yy++) {
+                for (int yy = 0; yy < a.lh; yy += 2) {
                     int y = a.ly0 + yy;
                     if (y < b.ly0 || y >= b.ly0 + b.lh) continue;
-                    for (int xx = 0; xx < a.lw; xx++) {
+                    for (int xx = 0; xx < a.lw; xx += 2) {
                         int ka = yy * a.lw + xx;
                         if (a.lsc[ka] < 0) continue;
                         int kb = at(b, (a.lx0 + xx) % Ws, y, Ws);
-                        if (kb < 0) continue;
-                        int pa = ka * 3, pb = kb * 3;
-                        int ma = Math.max(a.lcol[pa] & 255, Math.max(a.lcol[pa + 1] & 255, a.lcol[pa + 2] & 255)), mb = Math.max(b.lcol[pb] & 255, Math.max(b.lcol[pb + 1] & 255, b.lcol[pb + 2] & 255));
-                        if (ma > 250 || mb > 250 || ma < 6 || mb < 6) continue; // clipped
-                        s0 += a.lcol[pa] & 255; s1 += a.lcol[pa + 1] & 255; s2 += a.lcol[pa + 2] & 255;
-                        c++;
+                        if (kb >= 0) v.on(i, ka, j, kb);
                     }
                 }
-                N[i][j] = c;
-                if (c > 0) { I[0][i][j] = s0 / c; I[1][i][j] = s1 / c; I[2][i][j] = s2 / c; }
             }
-        }
-        double alpha = 1 / (10.0 * 10.0), beta = 1 / (0.5 * 0.5);
-        for (int ch = 0; ch < 3; ch++) {
-            double[] M = new double[n * n], b = new double[n];
-            for (int i = 0; i < n; i++) {
-                double nsum = 0;
-                for (int j = 0; j < n; j++) {
-                    if (j == i || N[i][j] < 20) continue;
-                    double Nij = N[i][j];
-                    nsum += Nij;
-                    M[i * n + i] += 2 * alpha * I[ch][i][j] * I[ch][i][j] * Nij;
-                    M[i * n + j] -= 2 * alpha * I[ch][i][j] * I[ch][j][i] * Nij;
-                }
-                double pw = beta * Math.max(nsum, 1);
-                M[i * n + i] += pw;
-                b[i] += pw;
-            }
-            if (!cholSolve(M, b, n)) continue;
-            for (int i = 0; i < n; i++) F[i].gain[ch] = Math.max(.5, Math.min(2, b[i]));
         }
     }
+
+    private static double lum(byte[] c, int k) { return .114 * (c[k * 3] & 255) + .587 * (c[k * 3 + 1] & 255) + .299 * (c[k * 3 + 2] & 255); }
+
+    private static int mx3(byte[] c, int k) { return Math.max(c[k * 3] & 255, Math.max(c[k * 3 + 1] & 255, c[k * 3 + 2] & 255)); }
+
+    private void gains(final Fr[] F, int Ws, Stats st) {
+        // 1. vignetting + luminance gains: unknowns [l_0 .. l_n-1, a, b]; row: l_a - l_b + a (ra2 - rb2) + b (ra4 - rb4) = ln Ia - ln Ib
+        final int np = n + 2;
+        final double[] M = new double[np * np], g = new double[np];
+        final double[] cnt = new double[n];
+        final double[] row = new double[np];
+        overlaps(F, Ws, new OverlapVisitor() {
+            public void on(int a, int ka, int b, int kb) {
+                Fr fa = F[a], fb = F[b];
+                int ma = mx3(fa.lcol, ka), mb = mx3(fb.lcol, kb);
+                if (ma > 245 || mb > 245 || ma < 12 || mb < 12) return; // clipped / too dark
+                double d = Math.log(lum(fa.lcol, ka) + .5) - Math.log(lum(fb.lcol, kb) + .5);
+                if (Math.abs(d) > .7) return; // misaligned / moving content
+                double ra = fa.lr2[ka], rb = fb.lr2[kb];
+                java.util.Arrays.fill(row, 0);
+                row[a] = 1; row[b] = -1; row[n] = ra - rb; row[n + 1] = ra * ra - rb * rb;
+                for (int p = 0; p < np; p++) {
+                    if (row[p] == 0) continue;
+                    g[p] += row[p] * d;
+                    for (int q = 0; q < np; q++) M[p * np + q] += row[p] * row[q];
+                }
+                cnt[a]++; cnt[b]++;
+            }
+        });
+        double tot = 0;
+        for (double c : cnt) tot += c;
+        double ridge = Math.max(1, .02 * tot / n);
+        for (int i = 0; i < n; i++) M[i * np + i] += ridge;
+        M[n * np + n] += 1; M[(n + 1) * np + n + 1] += 1;
+        vigA = 0; vigB = 0;
+        if (tot > 200 && cholSolve(M, g, np)) {
+            vigA = g[n]; vigB = g[n + 1];
+            // only darkening towards the border, and not more than to .35
+            boolean ok = !Double.isNaN(vigA) && !Double.isNaN(vigB);
+            for (int s = 1; s <= 10 && ok; s++) { double r2 = s / 10.0, v = vig(r2); if (v > 1.0001 || v < .35) ok = false; }
+            if (!ok) { // retry with r^2 only
+                vigB = 0;
+                vigA = Math.max(Math.log(.35), Math.min(0, vigA));
+            }
+        }
+        st.vigA = vigA; st.vigB = vigB;
+        log("vignetting: a " + r3(vigA) + " b " + r3(vigB) + " V(edge) " + r3(vig(1)) + " samples " + (long) (tot / 2));
+        // correct the low-res colours (gains / seams then work on vignetting-free values)
+        for (Fr f : F) {
+            for (int k = 0; k < f.lsc.length; k++) {
+                if (f.lsc[k] < 0) continue;
+                double kk = protect(1 / vig(f.lr2[k]), mx3(f.lcol, k));
+                for (int c = 0; c < 3; c++) f.lcol[k * 3 + c] = (byte) Math.min(255, Math.round((f.lcol[k * 3 + c] & 255) * kk));
+            }
+        }
+        // 2. per channel gains (log domain): l_a - l_b = ln Ia - ln Ib, ridge towards 0, then geometric mean 1
+        for (int ch = 0; ch < 3; ch++) {
+            final int c = ch;
+            final double[] A = new double[n * n], b = new double[n];
+            overlaps(F, Ws, new OverlapVisitor() {
+                public void on(int a, int ka, int bb, int kb) {
+                    Fr fa = F[a], fb = F[bb];
+                    int ma = mx3(fa.lcol, ka), mb = mx3(fb.lcol, kb);
+                    if (ma > 245 || mb > 245 || ma < 12 || mb < 12) return;
+                    double d = Math.log((fa.lcol[ka * 3 + c] & 255) + .5) - Math.log((fb.lcol[kb * 3 + c] & 255) + .5);
+                    if (Math.abs(d) > .7) return;
+                    A[a * n + a] += 1; A[bb * n + bb] += 1; A[a * n + bb] -= 1; A[bb * n + a] -= 1;
+                    b[a] += d; b[bb] -= d;
+                }
+            });
+            for (int i = 0; i < n; i++) A[i * n + i] += ridge;
+            // the solution x is the log of 1/gain (frame a brighter than b -> l_a > 0 -> gain < 1)
+            if (!cholSolve(A, b, n)) continue;
+            double mean = 0;
+            for (int i = 0; i < n; i++) mean += b[i];
+            mean /= n;
+            for (int i = 0; i < n; i++) F[i].gain[ch] = Math.exp(-(b[i] - mean));
+        }
+        // colour: a frame's channel gains stay within +-8% of its luminance gain (a dark, lamp-exposed frame gave B/G/R 1.3/2.0/2.0 = green)
+        // a frame with few usable overlap samples (zenith frame around a lamp: 698 vs ~5000) gets a neutral gain (no colour change)
+        double[] sc = cnt.clone();
+        java.util.Arrays.sort(sc);
+        double med = sc[n / 2];
+        for (int i = 0; i < n; i++) {
+            Fr f = F[i];
+            double g0 = Math.cbrt(f.gain[0] * f.gain[1] * f.gain[2]), gl = Math.max(.5, Math.min(2.5, g0));
+            boolean few = cnt[i] < .25 * med;
+            for (int c = 0; c < 3; c++) f.gain[c] = few ? gl : gl * Math.max(.92, Math.min(1.08, f.gain[c] / g0));
+        }
+    }
+
+    static String r3(double v) { return String.valueOf(Math.round(v * 1000) / 1000.0); }
 
     private int[] labels(Fr[] F, int Ws, int Hs) {
         int[] lab = new int[Ws * Hs];
@@ -1053,12 +1334,12 @@ public final class PanoStitchCore {
                 double lon = (((x0 + xx) + .5) / W - .5) * 360 + o.yawRef;
                 sinLo[xx] = Math.sin(lon * D); cosLo[xx] = Math.cos(lon * D);
             }
-            double ratio = Ws / (double) W;
+            double ratio = Ws / (double) W, hd2 = (sw * (double) sw + sh * (double) sh) / 4.0;
             Mat tmp = new Mat(), mx = new Mat(), my = new Mat(), g3 = new Mat();
             try {
                 for (int ys = 0; ys < rh; ys += STRIP) {
                     int sh2 = Math.min(STRIP, rh - ys);
-                    float[] ax = new float[sh2 * rw], ay = new float[sh2 * rw], vw = new float[sh2 * rw], vv = new float[sh2 * rw];
+                    float[] ax = new float[sh2 * rw], ay = new float[sh2 * rw], vw = new float[sh2 * rw], vv = new float[sh2 * rw], r2 = new float[sh2 * rw];
                     for (int yy = 0; yy < sh2; yy++) {
                         int y = y0 + ys + yy;
                         double lat = (.5 - (y + .5) / H) * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
@@ -1075,6 +1356,7 @@ public final class PanoStitchCore {
                             ax[k] = (float) (u - .5); ay[k] = (float) (v - .5);
                             if (u < 1 || v < 1 || u > sw - 1 || v > sh - 1) continue;
                             vv[k] = 1;
+                            r2[k] = (float) (((u - sw / 2.0) * (u - sw / 2.0) + (v - sh / 2.0) * (v - sh / 2.0)) / hd2);
                             // seam weight: bilinear indicator of (label == i) on the low-res canvas
                             double lx = ((x0 + xx) + .5) * ratio - .5;
                             int lx0 = (int) Math.floor(lx);
@@ -1091,17 +1373,24 @@ public final class PanoStitchCore {
                     mx.create(sh2, rw, CvType.CV_32FC1); my.create(sh2, rw, CvType.CV_32FC1);
                     mx.put(0, 0, ax); my.put(0, 0, ay);
                     Imgproc.remap(src, tmp, mx, my, Imgproc.INTER_CUBIC, Core.BORDER_REPLICATE, new Scalar(0, 0, 0));
-                    Mat dstStrip = roiImg.submat(ys, ys + sh2, 0, rw);
-                    tmp.convertTo(dstStrip, CvType.CV_32FC3);
-                    dstStrip.release();
+                    // gains + vignetting, per pixel (white pixels are not darkened)
+                    byte[] px = new byte[sh2 * rw * 3];
+                    tmp.get(0, 0, px);
+                    float[] fpx = new float[px.length];
+                    for (int k = 0; k < sh2 * rw; k++) {
+                        int b0 = px[k * 3] & 255, b1 = px[k * 3 + 1] & 255, b2 = px[k * 3 + 2] & 255, mxv = Math.max(b0, Math.max(b1, b2));
+                        double iv = vv[k] > 0 ? 1 / vig(r2[k]) : 1;
+                        fpx[k * 3] = (float) (b0 * protect(f.gain[0] * iv, mxv));
+                        fpx[k * 3 + 1] = (float) (b1 * protect(f.gain[1] * iv, mxv));
+                        fpx[k * 3 + 2] = (float) (b2 * protect(f.gain[2] * iv, mxv));
+                    }
+                    roiImg.put(ys, 0, fpx);
                     Mat ws = roiW.submat(ys, ys + sh2, 0, rw); ws.put(0, 0, vw); ws.release();
                     Mat vs = valid.submat(ys, ys + sh2, 0, rw); vs.put(0, 0, vv); vs.release();
                 }
             } finally { tmp.release(); mx.release(); my.release(); g3.release(); }
             src.release();
             src = null;
-            // gains
-            Core.multiply(roiImg, new Scalar(f.gain[0], f.gain[1], f.gain[2]), roiImg);
             // invalid pixels: smooth extrapolation (clean Laplacian near the frame border)
             pushPull(roiImg, valid, false);
             valid.release(); valid = null;
