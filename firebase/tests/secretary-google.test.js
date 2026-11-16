@@ -1330,6 +1330,71 @@ describe('קליטה אוטומטית בחיבור ראשון, חשבוניות 
     assert.equal((await invA()).filter((x) => x.hist).length, 3);
     assert.ok((await logs(A)).some((l) => l.act === 'histFill' && l.note === '3'));
   });
+  it('16.11: Gmail מסרבת (403) – המיילים נשארים בתור בלי כרטיס "תקלה", התקציב מוחזר; כרטיסי תקלה ישנים חוזרים לתור פעם אחת ונמחקים אחרי קליטה', async () => {
+    await connect(M1, 'mail', { email: BOX_A });
+    await inBizA((db) => CORE.histStep(db, A, 100, Date.now()));
+    assert.equal((await inA()).filter((x) => x.invW === true).length, 3);
+    GO.state.mode.g403 = 'insufficientPermissions';
+    for (let i = 0; i < CORE.MAIL_TRIES + 1; i++) {
+      const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+      assert.equal(r.n, 0); assert.equal(r.wait, 'google');
+    }
+    assert.equal((await invA()).length, 0, 'בלי כרטיסי "הקובץ לא נקלט"');
+    let L = await inA();
+    assert.equal(L.filter((x) => x.invW === true).length, 3, 'נשארים בתור');
+    assert.ok(L.every((x) => !x.invN && !(x.flags || []).includes('invErr')));
+    assert.ok(!((await get(`b/${A}/sec_cfg/mail_hist`)).invDay || {}).n, 'התקציב היומי לא נצרך');
+    // הגבלת קצב (403 rateLimit) – נחשבת זמנית (google-quota)
+    GO.state.mode.g403 = 'userRateLimitExceeded';
+    assert.equal((await inBizA((db) => CORE.histInvStep(db, A, Date.now()))).wait, 'google');
+    delete GO.state.mode.g403;
+    // מצב ישן (לפני התיקון): מייל אחד קיבל כרטיס תקלה ויצא מהתור
+    const one = L.find((x) => x.invW === true);
+    const bad = await inBizA((db) => require('../functions/secretary-inv')._core.ingest(db, { ch: 'mail', from: 'sup@sup.example', inId: one.gid, idx: 99, fn: 'inv.pdf', now: Date.now(), why: 'dl', hist: true }));
+    const id1 = CORE.inIdOf(bx(), one.gid);
+    const d1 = await get(`b/${A}/sec_in/${id1}`); delete d1.invW; await put(`b/${A}/sec_in/${id1}`, Object.assign(d1, { inv: [bad.id], flags: one.flags.concat(['invErr']) }));
+    const hs = await get(`b/${A}/sec_cfg/mail_hist`); delete hs.rq1; await put(`b/${A}/sec_cfg/mail_hist`, hs);
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r.n, 3, 'כולם נקלטו, כולל המייל שחזר לתור');
+    const I = await invA();
+    assert.equal(I.length, 3); assert.ok(I.every((x) => x.k !== 'bad'), 'כרטיס התקלה הישן נמחק');
+    const x1 = await get(`b/${A}/sec_in/${id1}`);
+    assert.ok(!x1.flags.includes('invErr') && x1.invR && x1.inv.length === 1 && x1.inv[0] !== bad.id);
+    assert.ok((await get(`b/${A}/sec_cfg/mail_hist`)).rq1, 'חד־פעמי');
+    assert.ok((await logs(A)).some((l) => l.act === 'histInvRetry' && l.note === '1'));
+  });
+  it('16.11: תיבה אחת מסורבת לא עוצרת תיבה אחרת; כרטיס "dl" של קובץ בודד ממייל ישן חוזר לתור ונמחק אחרי קליטה', async () => {
+    await put(`b/${A}/sec_cfg/mail`, { max: 3 });
+    await connect(M1, 'mail', { email: BOX_A2 });
+    await connect(M1, 'mail', { email: BOX_A });
+    await put(`b/${A}/sec_cfg/mail_hist`, { st: 'done', boxes: {}, n: 0, rq1: 1 });
+    const g = Object.values(GO.box(BOX_A).msgs).find((m) => m.payload.parts.some((p) => p.filename)).id;
+    const idA = CORE.inIdOf(bx(), g);
+    const dl = await inBizA((db) => require('../functions/secretary-inv')._core.ingest(db, { ch: 'mail', from: 'sup0@sup.example', inId: g, idx: 0, fn: 'inv0.pdf', now: Date.now(), why: 'dl', hist: true }));
+    await put(`b/${A}/sec_in/${idA}`, { ch: 'mail', box: bx(), gid: g, from: 'sup0@sup.example', t: 1, st: 'done', bg: true, flags: ['hist', 'file'], inv: [dl.id] });
+    for (let i = 0; i < 3; i++) await put(`b/${A}/sec_in/a${i}`, { ch: 'mail', box: G.boxIdOf(BOX_A2), gid: 'x' + i, t: 1, st: 'done', bg: true, flags: ['hist', 'file'], invW: true });
+    GO.state.mode.g403For = BOX_A2;
+    // התיבה המסורבת מטופלת ראשונה (בגלל הסדר) – ובכל זאת המייל בתיבה התקינה נקלט אחרי שהוחזר לתור
+    const hs = await get(`b/${A}/sec_cfg/mail_hist`); delete hs.rq1; await put(`b/${A}/sec_cfg/mail_hist`, hs);
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    delete GO.state.mode.g403For;
+    assert.equal(r.n, 1, JSON.stringify(r)); assert.equal(r.wait, 'google');
+    assert.equal((await get(`b/${A}/sec_in/a0`)).invW, true);
+    const I = await invA();
+    assert.ok(!I.some((x) => x.k === 'bad'), 'כרטיס dl נמחק'); assert.equal(I.length, 1);
+    assert.ok((await get(`b/${A}/sec_cfg/mail_hist`)).rq1);
+  });
+  it('16.11: קובץ מצורף של 3MB (מעל גבול התשובה הרגיל של 2MB) – יורד ונקלט', async () => {
+    const big = Buffer.concat([pdfB(9).subarray(0, 120), Buffer.from('%' + 'x'.repeat(3 * 1024 * 1024) + '\n', 'latin1'), pdfB(9).subarray(120)]);
+    GO.addMail(BOX_A, { from: 'big@sup.example', subject: 'חשבונית גדולה', text: 'מצורפת', files: [{ name: 'big.pdf', data: big }], date: now - 5 * DAY });
+    await connect(M1, 'mail', { email: BOX_A });
+    await inBizA((db) => CORE.histStep(db, A, 100, Date.now()));
+    const r = await inBizA((db) => CORE.histInvStep(db, A, Date.now()));
+    assert.equal(r.n, 4); assert.equal(r.files, 4);
+    const I = await invA();
+    assert.equal(I.length, 4); assert.ok(I.every((x) => x.k !== 'bad'), JSON.stringify(I.map((x) => [x.k, x.why])));
+    assert.ok(I.some((x) => x.size === big.length));
+  });
   it('תור לא נתקע: 25 מיילים של תיבה שהחיבור שלה פג ומיילים של תיבה שנותקה – המייל של התיבה התקינה נקלט', async () => {
     await put(`b/${A}/sec_cfg/mail`, { max: 3 });
     await connect(M1, 'mail', { email: BOX_A });

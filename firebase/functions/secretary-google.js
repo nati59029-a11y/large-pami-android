@@ -501,7 +501,7 @@ async function saveMail(db, c, ctx, gid, now, o) {
   // שלב 7: קבצים מצורפים → תור החשבוניות. מייל ישן מסריקת היסטוריה – לא כאן אלא בהדרגה, בתקציב יומי (histInvStep). תקלה כאן לא פוגעת בקליטת המייל
   if (!o.hist && wantInv) {
     try { const r = await invFiles(db, c, gid, p, big, sus, now); if (r.ids.length || r.names.length) await ref.update(Object.assign({ inv: r.ids }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {})); } catch (e) {
-      logger.warn('secretary-google: invoice files failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
+      logger.warn('secretary-google: invoice files failed', gWhy(e));
       // תיקון 1 (ליקוי 5): לא מאבדים בשקט – כרטיס "הקובץ לא נקלט – תקלה, לבדוק במייל" עם השולח, וסימון במייל עצמו
       try {
         const INV = require('./secretary-inv')._core;
@@ -515,6 +515,10 @@ async function saveMail(db, c, ctx, gid, now, o) {
 // קבצים מצורפים של מייל אחד → secretary-inv.ingest. סוג לא מותר (zip, Office, הפעלה…) או גדול מדי – כרטיס בלי הורדה (10.3).
 // תמונה קטנה מאוד (חתימה/לוגו במייל) – מדלגים, כדי שלא תיספר במכסת הסריקה (הנחה: מתחת ל-15KB).
 const INV_ATT_MAX = 5, INV_IMG_MIN = 15000;
+// תקלה זמנית בחיבור ל-Google (הרשאה שנדחתה, חיבור שפג, מכסה, רשת, תקלה בצד Google) – לא "קובץ שלא נקלט": ממתינים ומנסים שוב
+const G_TEMP = new Set(['google-scope', 'google-expired', 'google-quota', 'google-timeout', 'google-network']);
+function gTemp(e) { const d = (e && e.details) || {}; return G_TEMP.has(d.reason) || (d.reason === 'google-rejected' && Number(d.status) >= 500); }
+const gWhy = (e) => ({ reason: (e && e.details && e.details.reason) || (e && e.code) || 'error', g: (e && e.details && e.details.g) || '' });
 async function invFiles(db, c, gid, p, big, sus, now, hist) {
   const INV = require('./secretary-inv')._core;
   const SI = require('./lib/sec-inv');
@@ -530,7 +534,10 @@ async function invFiles(db, c, gid, p, big, sus, now, hist) {
     else {
       // תיקון 1 (ליקוי 5): הורדה שנכשלה – כרטיס "הקובץ לא נקלט – תקלה" (ולא איבוד שקט; ניסיון חוזר לא קורה כי המייל כבר נשמר)
       let buf = null;
-      try { const j = await c.att(gid, a.id); buf = Buffer.from(String(j.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'); } catch (e) { logger.warn('secretary-google: attachment download failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' }); }
+      try { const j = await c.att(gid, a.id, hist === true ? 30000 : 15000); buf = Buffer.from(String(j.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64'); } catch (e) {
+        logger.warn('secretary-google: attachment download failed', gWhy(e));
+        if (hist === true && gTemp(e)) throw e; // מייל ישן: התקלה בחיבור – המייל נשאר בתור ומנסים שוב בריצה הבאה (בלי כרטיס תקלה)
+      }
       r = await INV.ingest(db, Object.assign(base, buf ? { buf } : { why: 'dl', size: a.size }));
     }
     if (r && r.id) ids.push(r.id);
@@ -2641,6 +2648,56 @@ async function invBudget(db, ref, now, free, k) {
     return true;
   });
 }
+// חד־פעמי (16.11.2026): מיילים ישנים שקיבלו כרטיס "הקובץ לא נקלט – תקלה" בגלל סירוב זמני של Google – חוזרים לתור (פעם אחת).
+// הכרטיס הישן נמחק רק אחרי שהמייל נקלט בהצלחה (dropDlCards), ורק אם עוד לא טופל (st: 'new'). מיילים חדשים (לא bg) – לא נוגעים
+const RQ_PAGE = 300, RQ_PAGES = 10;
+async function requeueInvErr(db, ref, boxes, now) {
+  const ok = new Set(boxes), pick = new Map();
+  const take = (d) => { if (d.exists && d.get('bg') === true && ok.has(d.get('box')) && d.get('invW') !== true && !d.get('invR')) pick.set(d.id, d); };
+  // (א) מיילים שכל הקליטה שלהם נכשלה (כרטיס אחד, idx 99 – סימון invErr)
+  let last = null;
+  for (let i = 0; i < RQ_PAGES; i++) {
+    let q = db.collection('sec_in').where('flags', 'array-contains', 'invErr').orderBy('__name__').limit(RQ_PAGE);
+    if (last) q = q.startAfter(last);
+    const s = await q.get();
+    s.docs.forEach(take);
+    if (s.size < RQ_PAGE) break;
+    last = s.docs[s.size - 1];
+  }
+  // (ב) קובץ בודד שלא ירד (כרטיס "dl" של מייל ישן שעוד לא טופל) – המייל שלו לפי מזהה Gmail
+  last = null;
+  for (let i = 0; i < RQ_PAGES; i++) {
+    let q = db.collection('sec_inv').where('why', 'array-contains', 'dl').orderBy('__name__').limit(RQ_PAGE);
+    if (last) q = q.startAfter(last);
+    const s = await q.get();
+    for (const c of s.docs) {
+      const src = (c.get('src') || [])[0] || {};
+      if (c.get('hist') !== true || c.get('st') !== 'new' || src.ch !== 'mail' || typeof src.in !== 'string' || !src.in) continue;
+      const m = await db.collection('sec_in').where('gid', '==', src.in).limit(3).get();
+      m.docs.forEach(take);
+    }
+    if (s.size < RQ_PAGE) break;
+    last = s.docs[s.size - 1];
+  }
+  const L = [...pick.values()];
+  for (let i = 0; i < L.length; i += 200) {
+    const b = db.batch();
+    for (const d of L.slice(i, i + 200)) b.update(d.ref, { invW: true, invR: now, invN: FieldValue.delete(), invL: FieldValue.delete(), flags: (d.get('flags') || []).filter((f) => f !== 'invErr') });
+    await b.commit();
+  }
+  if (L.length) await db.collection('sec_log').doc().set(glog('', 'auto', 'histInvRetry', { note: String(L.length) }));
+  await ref.update({ rq1: now }).catch(() => {}); // חד־פעמי – גם אם נשארו עוד (מעבר לתקרה)
+}
+async function dropDlCards(db, ids) {
+  for (const id of Array.isArray(ids) ? ids.slice(0, 5) : []) {
+    if (typeof id !== 'string' || !/^x[0-9a-f]{1,60}$/.test(id)) continue;
+    const r = db.doc('sec_inv/' + id);
+    await db.runTransaction(async (tx) => {
+      const s = await tx.get(r);
+      if (s.exists && s.get('k') === 'bad' && s.get('st') === 'new' && (s.get('why') || []).includes('dl')) tx.delete(r);
+    }).catch(() => {});
+  }
+}
 async function histInvStep(db, bizId, now) {
   const ref = db.doc('sec_cfg/mail_hist');
   const hs = await ref.get();
@@ -2656,9 +2713,10 @@ async function histInvStep(db, bizId, now) {
   for (const d of q0.docs) if (!m.boxes[d.get('box')]) await d.ref.update({ invW: FieldValue.delete(), invL: FieldValue.delete(), invX: 'off' });
   // שאילתה נפרדת לכל תיבה פעילה – מיילים של תיבה שהחיבור שלה פג או נכשל לא תוקעים את התור של תיבות אחרות
   const boxes = Object.entries(m.boxes).filter(([, b]) => b.st === 'ok').map(([id]) => id);
+  if (!hs.get('rq1') && boxes.length) await requeueInvErr(db, ref, boxes, now);
   let left = null;
   const INV = require('./secretary-inv')._core;
-  let budget = HIST_INV_RUN;
+  let budget = HIST_INV_RUN, gw = false;
   for (const box of boxes) {
     if (budget <= 0 || out.wait) break;
     const q = await db.collection('sec_in').where('invW', '==', true).where('box', '==', box).limit(HIST_INV_RUN).get();
@@ -2683,6 +2741,7 @@ async function histInvStep(db, bizId, now) {
       budget--;
       const flags = Array.isArray(x.flags) ? x.flags : [];
       const rel = () => d.ref.update({ invL: FieldValue.delete() });
+      let took = 0;
       try {
         let p = G.parseMsg(await c.meta(x.gid));
         if (!p) { await d.ref.update({ inv: [], invW: FieldValue.delete(), invL: FieldValue.delete(), invN: FieldValue.delete() }); continue; }
@@ -2692,13 +2751,21 @@ async function histInvStep(db, bizId, now) {
         const k = Math.max(1, Math.min(INV_ATT_MAX, p.att.length));
         if (left - k < HIST_INV_RESERVE) { await rel(); out.wait = 'reserve'; break; }
         if (!(await invBudget(db, ref, now, free, k))) { await rel(); out.wait = 'day'; break; }
+        took = k;
         const r = await invFiles(db, c, x.gid, p, big, x.st === 'sus', now, true);
+        if (x.invR) await dropDlCards(db, (x.inv || []).filter((id) => !r.ids.includes(id))); // ניסיון חוזר אחרי תקלה: הכרטיס הישן "הקובץ לא נקלט" כבר לא נכון
         await d.ref.update(Object.assign({ inv: r.ids, invW: FieldValue.delete(), invL: FieldValue.delete(), invN: FieldValue.delete() }, big && r.names.length ? { files: r.names, flags: [...new Set(flags.concat(['file']))] } : {}));
         if (r.ids.length !== k) await ref.update({ 'invDay.n': FieldValue.increment(r.ids.length - k) }).catch(() => {}); // תיקון לפי מה שנכנס בפועל
         out.n++; out.files += r.ids.length; left -= r.ids.length;
       } catch (e) {
         if (gone404(e)) { await d.ref.update({ invW: FieldValue.delete(), invL: FieldValue.delete(), invX: 'gone' }); continue; } // נמחק ב-Gmail
-        logger.warn('secretary-google: hist invoice failed', { reason: (e && e.details && e.details.reason) || (e && e.code) || 'error' });
+        logger.warn('secretary-google: hist invoice failed', gWhy(e));
+        if (gTemp(e)) { // תקלה בחיבור לתיבה (לא במייל עצמו): לא נספר כניסיון, מחזירים את התקציב, ועוברים לתיבה הבאה – מנסים שוב בריצה הבאה
+          await rel().catch(() => {});
+          if (took) await ref.update({ 'invDay.n': FieldValue.increment(-took) }).catch(() => {});
+          gw = true;
+          break; // רק התיבה הזו – ממשיכים לתיבה הבאה
+        }
         const n = (Number(x.invN) || 0) + 1;
         if (n < MAIL_TRIES) { await d.ref.update({ invL: FieldValue.delete(), invN: n }); continue; }
         // אחרי MAIL_TRIES ניסיונות – כרטיס "הקובץ לא נקלט – תקלה" (כמו במייל חדש), בלי התראה
@@ -2709,6 +2776,7 @@ async function histInvStep(db, bizId, now) {
       }
     }
   }
+  if (gw && !out.wait) out.wait = 'google';
   // יומן: כשנקלטו קבצים, או כשמצב ההמתנה השתנה (לא בכל ריצה של 15 דקות)
   const w0 = hs.get('invWait') || '';
   if (out.n || out.wait !== w0) {
@@ -2859,7 +2927,7 @@ async function syncAll(o) {
 const SECRETS = [G.SEC_GOOGLE_KEY, G.GOOGLE_CLIENT_SECRET];
 exports.secOAuthCb = onRequest({ region: LEGACY_REGION, secrets: SECRETS, timeoutSeconds: 60, memory: '256MiB', maxInstances: 5 }, async (req, res) => {
   try { await handleCb(req, res); } catch (e) {
-    logger.error('secretary-google: callback failed', { reason: (e && e.details && e.details.reason) || 'internal', name: e && e.name });
+    logger.error('secretary-google: callback failed', { reason: (e && e.details && e.details.reason) || 'internal', g: (e && e.details && e.details.g) || '', name: e && e.name });
     if (!res.headersSent) page(res, 500, 'החיבור לא הושלם', 'אירעה שגיאה. התחילו שוב מהאפליקציה.');
   }
 });
@@ -2887,7 +2955,7 @@ exports.secMailSend = onCall({ secrets: SECRETS }, wrap('secMailSend', secMailSe
 exports.secAdminMail = onCall({ secrets: SECRETS }, wrap('secAdminMail', secAdminMail));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
-  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, histInvStep, histFill, autoHist, HIST_INV_DAY, HIST_INV_RESERVE, saveMail, invFiles, MAIL_TRIES, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
+  handleCb, prepConnect, finishConnect, mailHook, ingestBox, histStep, histInvStep, histFill, autoHist, HIST_INV_DAY, HIST_INV_RESERVE, saveMail, invFiles, MAIL_TRIES, requeueInvErr, gTemp, acctInUse, HIST_PAGE, HIST_RUN, syncOne, syncAll, disconnectBox, disconnectCal, mailCfgOf, gcalOf, inIdOf, MAIL_SYS,
   mailWork, mailRequeue, ordDraft, ordCreateFromSec, tryAuto, tryMrAuto, refineOp, aiDraft, autoGive, learnSend, repOf, REP_CAP_DEFAULT, REP_CAP_MAX, AUTO_DAY, LOOP_MS, stripName,
   // לבדיקות בתוך התהליך: אותן פונקציות עטופות כמו ב-onCall (T.scoped + טיפול בשגיאות)
   call: { secGoogle: wrap('secGoogle', secGoogle), secMail: wrap('secMail', secMail), secMailSend: wrap('secMailSend', secMailSend), secAdminMail: wrap('secAdminMail', secAdminMail) },

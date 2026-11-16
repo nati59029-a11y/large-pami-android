@@ -106,6 +106,8 @@ function handle(req, res, raw) {
   state.requests.push({ method: req.method, path, query: Object.fromEntries(q), auth: req.headers.authorization || '', body, at: Date.now() });
   const json = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
   if (state.mode[path] === 'fail') return json(500, { error: { message: 'mock failure', echo: req.headers.authorization } });
+  // 16.11: Gmail מסרבת (403) לכל פנייה – mode.g403 = הסיבה ש-Google מחזירה (למשל insufficientPermissions / userRateLimitExceeded)
+  if (state.mode.g403 && path.startsWith('/gmail/')) return json(403, { error: { code: 403, message: 'mock forbidden', errors: [{ reason: state.mode.g403 }], status: 'PERMISSION_DENIED' } });
   // ----- OAuth -----
   if (req.method === 'POST' && path === '/token') {
     if (body.grant_type === 'authorization_code') {
@@ -139,6 +141,7 @@ function handle(req, res, raw) {
   if (m) {
     const a = who(req);
     if (!a) return json(401, { error: { code: 401 } });
+    if (state.mode.g403For && state.mode.g403For === a.email) return json(403, { error: { code: 403, errors: [{ reason: 'insufficientPermissions' }] } }); // רק תיבה אחת מסורבת
     const has = (s) => a.scope.split(' ').includes('https://www.googleapis.com/auth/gmail.' + s);
     const b = box(a.email), rest = m[1];
     if (req.method === 'GET' && rest === 'profile') return json(200, { emailAddress: a.email, historyId: String(b.hist), messagesTotal: Object.keys(b.msgs).length });

@@ -178,4 +178,17 @@ async function see(o) {
   return { text: String(r.text || ''), usage: r.usage, sent: r.sent };
 }
 
-module.exports = { _goodModel: goodModel, _noThinkCfg: noThinkCfg, chat, transcribe, see, STT_SYS, costMc, modelOf, geminiBody, GEMINI_API_KEY, PROVIDERS };
+// 16.11.2026 (דיווח יומי – daily-rep.js): קריאה אחת עם כמה חלקים (טקסט, הקלטות, תמונות) והנחיה ייעודית, בלי כלים. על בסיס see.
+// { system, parts: [{ text } | { mime, b64 }], json (ברירת מחדל true), timeoutMs } → { text, usage, sent }
+async function multi(o) {
+  const name = str(P.provider, 'gemini');
+  if (name !== 'gemini') throw new HttpsError('failed-precondition', 'ספק AI לא מוגדר', { reason: 'no-provider' });
+  const parts = (o.parts || []).map((p) => (typeof p.text === 'string' ? { text: p.text } : { inlineData: { mimeType: p.mime, data: p.b64 } }));
+  const gc = { temperature: 0.2, maxOutputTokens: 4096, thinkingConfig: { thinkingBudget: 0 } };
+  if (o.json !== false) gc.responseMimeType = 'application/json';
+  const rawBody = { systemInstruction: { parts: [{ text: o.system }] }, contents: [{ role: 'user', parts }], generationConfig: gc };
+  const r = await gemini({ tier: 'fast', rawBody, timeoutMs: o.timeoutMs || 90000 });
+  return { text: String(r.text || ''), usage: r.usage, sent: r.sent };
+}
+
+module.exports = { _goodModel: goodModel, _noThinkCfg: noThinkCfg, chat, transcribe, see, multi, STT_SYS, costMc, modelOf, geminiBody, GEMINI_API_KEY, PROVIDERS };

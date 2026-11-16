@@ -57,6 +57,8 @@ const FULL_MAX = 256 * 1024;    // מייל גדול מזה – נשמרים ר�
 const TEXT_MAX = 4000;          // טקסט מייל שנשמר
 const SUBJ_MAX = 200;
 const RESP_MAX = 2 * 1024 * 1024; // תשובה מ-Google
+const ATT_RESP_MAX = 16 * 1024 * 1024; // הורדת קובץ מצורף: עד 10MB (MAX_FILE) אחרי קידוד base64 (×1.34) ועטיפת JSON
+const ATT_TIMEOUT = 15000; // ברירת מחדל כמו כל פנייה; מייל ישן (histInvStep) – 30 שניות
 const OUT_DAY = 200;            // מיילים יוצאים ליום לעסק
 const CLEAN_MAX = 500;          // פריטים ברשימת ניקוי אחת
 const COUNT_PAGES = 40;         // ספירה: עד 40 עמודים × 500 = 20,000
@@ -371,17 +373,28 @@ const TOPIC = 'sec-gmail'; // נושא ה-Pub/Sub שאליו Gmail שולח הת
 const topicName = () => 'projects/' + (process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'demo') + '/topics/' + TOPIC;
 
 // ---------- קריאות ל-Google. בלי גוף השגיאה, בלי האסימון ----------
-function gErr(reason, status) { return new HttpsError('unavailable', 'הפנייה ל-Google נכשלה. נסו שוב בעוד דקה.', { reason, status: status || 0 }); }
-async function gfetch(url, opt, timeoutMs) {
+function gErr(reason, status, g) { return new HttpsError('unavailable', 'הפנייה ל-Google נכשלה. נסו שוב בעוד דקה.', Object.assign({ reason, status: status || 0 }, g ? { g } : {})); }
+// הסיבה ש-Google מחזירה בשגיאה (למשל insufficientPermissions, userRateLimitExceeded) – מילה אחת, בלי שום תוכן אחר, ליומן ולהחלטה
+function gReason(j) {
+  const e = j && typeof j === 'object' && j.error && typeof j.error === 'object' ? j.error : null;
+  if (!e) return '';
+  const d = Array.isArray(e.details) && e.details.find((x) => x && typeof x.reason === 'string');
+  const v = (Array.isArray(e.errors) && e.errors[0] && e.errors[0].reason) || (d && d.reason) || e.status || '';
+  return typeof v === 'string' && /^[A-Za-z_]{1,60}$/.test(v) ? v : '';
+}
+// 403 של הגבלת קצב / מכסה ב-Gmail – זמני, לא חוסר הרשאה
+const RATE_403 = /ratelimit|quota|dailylimit|limitexceeded|concurrent/i;
+async function gfetch(url, opt, timeoutMs, maxBytes) {
+  const MAX = maxBytes || RESP_MAX;
   const ctl = new AbortController();
   const tm = setTimeout(() => ctl.abort(), timeoutMs || 15000);
   let r;
   try { r = await fetch(url, Object.assign({}, opt, { signal: ctl.signal, redirect: 'error' })); } catch (e) { clearTimeout(tm); throw gErr(e && e.name === 'AbortError' ? 'google-timeout' : 'google-network'); }
   try {
     const len = Number(r.headers.get('content-length'));
-    if (Number.isFinite(len) && len > RESP_MAX) throw gErr('google-big', r.status);
+    if (Number.isFinite(len) && len > MAX) throw gErr('google-big', r.status);
     const buf = Buffer.from(await r.arrayBuffer());
-    if (buf.length > RESP_MAX) throw gErr('google-big', r.status);
+    if (buf.length > MAX) throw gErr('google-big', r.status);
     let j = null; try { j = buf.length ? JSON.parse(buf.toString('utf8')) : {}; } catch (e) { j = null; }
     return { status: r.status, ok: r.ok, j };
   } finally { clearTimeout(tm); }
@@ -408,11 +421,13 @@ async function revoke(u, token) {
 function client(u, at) {
   const H = { Authorization: 'Bearer ' + at };
   const J = Object.assign({ 'Content-Type': 'application/json' }, H);
-  const call = async (method, url, body, okCodes) => {
-    const r = await gfetch(url, Object.assign({ method, headers: body ? J : H }, body ? { body: JSON.stringify(body) } : {}));
+  const call = async (method, url, body, okCodes, lim) => {
+    const r = await gfetch(url, Object.assign({ method, headers: body ? J : H }, body ? { body: JSON.stringify(body) } : {}), lim && lim.to, lim && lim.max);
     if (r.status === 401) throw new HttpsError('failed-precondition', 'החיבור ל-Google פג או בוטל. צריך לחבר מחדש.', { reason: 'google-expired' });
-    if (r.status === 403) throw new HttpsError('permission-denied', 'אין ל-Google הרשאה לפעולה הזו. צריך לחבר מחדש עם ההרשאה המתאימה.', { reason: 'google-scope' });
-    if (!r.ok && !(okCodes || []).includes(r.status)) throw gErr(r.status === 429 ? 'google-quota' : 'google-rejected', r.status);
+    const g = r.ok ? '' : gReason(r.j);
+    if (r.status === 403 && RATE_403.test(g)) throw gErr('google-quota', 403, g);
+    if (r.status === 403) throw new HttpsError('permission-denied', 'אין ל-Google הרשאה לפעולה הזו. צריך לחבר מחדש עם ההרשאה המתאימה.', Object.assign({ reason: 'google-scope' }, g ? { g } : {}));
+    if (!r.ok && !(okCodes || []).includes(r.status)) throw gErr(r.status === 429 ? 'google-quota' : 'google-rejected', r.status, g);
     return r;
   };
   const gm = u.gmail + '/users/me';
@@ -426,7 +441,7 @@ function client(u, at) {
     meta: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=Reply-To&metadataHeaders=List-Unsubscribe&metadataHeaders=Content-Type&metadataHeaders=Authentication-Results&metadataHeaders=List-Id&metadataHeaders=Precedence&metadataHeaders=Auto-Submitted')).j || {},
     // שלב 7: מבנה המייל בלבד (שמות ומזהי הקבצים, בלי תוכן) – למייל גדול שיש בו קבצים מצורפים; והורדת קובץ מצורף אחד
     struct: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=full&fields=' + enc('id,payload(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size),parts(mimeType,filename,body(attachmentId,size)))))'))).j || {},
-    att: async (id, attId) => (await call('GET', gm + '/messages/' + enc(id) + '/attachments/' + enc(attId))).j || {},
+    att: async (id, attId, to) => (await call('GET', gm + '/messages/' + enc(id) + '/attachments/' + enc(attId), null, null, { to: to || ATT_TIMEOUT, max: ATT_RESP_MAX })).j || {},
     full: async (id) => (await call('GET', gm + '/messages/' + enc(id) + '?format=full')).j || {},
     list: async (q, pageToken, max) => (await call('GET', gm + '/messages?' + form(Object.assign({ maxResults: String(max || 500), includeSpamTrash: 'true', q: (q ? q + ' ' : '') + '-in:trash' }, pageToken ? { pageToken } : {})))).j || {},
     // שלב ג (0ב): השרשור – רק מזהים, תוויות ותאריכים (format=minimal, בלי תוכן)
@@ -442,7 +457,7 @@ function client(u, at) {
 }
 
 module.exports = {
-  SC, FORBIDDEN, scopesFor, grantedOk, STATE_TTL, CONNECT_HOUR, MAX_BOX_DEFAULT, MAX_BOX_LIMIT, HOOK_DATA_MAX, RUN_MAX, DAY_IN_MAX, FULL_MAX, TEXT_MAX, SUBJ_MAX, OUT_DAY, CLEAN_MAX,
+  SC, FORBIDDEN, gReason, ATT_RESP_MAX, scopesFor, grantedOk, STATE_TTL, CONNECT_HOUR, MAX_BOX_DEFAULT, MAX_BOX_LIMIT, HOOK_DATA_MAX, RUN_MAX, DAY_IN_MAX, FULL_MAX, TEXT_MAX, SUBJ_MAX, OUT_DAY, CLEAN_MAX,
   COUNT_PAGES, SCAN_TTL, CAL_PAGES, CAL_PUSH_MAX, BIG_OLD, RANGES, AI_PER_MAIL, STATE_RE,
   newState, pkce, authUrl, sha, b64u, seal, open, tokPath, boxIdOf, addrOf, nameOf, clean, parseMsg, authOf, bodyOf, attOf, decodeWords, kindOf, isInstr, humanOf, NEVER_RE, autoBlock, AUTO_WHY, autoWhyL, sentAfter, fileList, greetFix, domOf, taskLine, OLD_MS, mime, reSubj, rangeQ, costEstimate,
   gToCal, calToG, sameEv, localOf, dayIL, urls, oauthCfg, topicName, TOPIC, exchange, refresh, revoke, client, SEC_GOOGLE_KEY, GOOGLE_CLIENT_SECRET, sv, EMAIL_RE,
