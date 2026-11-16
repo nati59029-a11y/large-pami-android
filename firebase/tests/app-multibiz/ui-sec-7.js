@@ -134,14 +134,15 @@ const card = (id) => `#secIv_${id}`;
     check(`${w}: לשונית "חשבוניות" עם מונה, וכרטיסים לכל סוג`, !!(await page.$('#secTabs [data-v=inv] .secbadge')) && /הודעת זיכוי/.test(t0) && /קבלה/.test(t0) && /צ׳ק/.test(t0) && /מסמך שלא זוהה/.test(t0) && /התקבל קובץ שלא נקלט/.test(t0), t0.slice(0, 300));
     check(`${w}: קובץ שנדחה – הסיבה ו"הקובץ לא נפתח ולא נשמר"`, /קובץ מכווץ \(zip\)/.test(await page.innerText(card(ID.B1))) && /לא נפתח ולא נשמר/.test(await page.innerText(card(ID.B1))));
     check(`${w}: "כבר רשומה אצלך" על החשבונית שנסרקה ידנית`, /כבר רשומה אצלך/.test(await page.innerText(card(ID.A2))));
-    check(`${w}: "בטיפול במכשיר אחר" – בלי כפתורי פעולה`, /בטיפול במכשיר אחר/.test(await page.innerText(card(ID.O1))) && !(await page.$(card(ID.O1) + ' [data-a=secIvOk]')));
+    check(`${w}: "בטיפול במכשיר אחר" – בלי כפתורי פעולה`, /בטיפול במכשיר אחר/.test(await page.innerText(card(ID.O1))) && !(await page.$(card(ID.O1) + ' [data-a=secIvOk]')) && !(await page.$(card(ID.O1) + ' [data-a=secIvEd]')));
     check(`${w}: קבלה בלי חשבונית – "מה לעשות?" עם רישום כהוצאה או דחייה`, /קבלה בלי חשבונית – מה לעשות\?/.test(await page.innerText(card(ID.RQ))) && !!(await page.$(card(ID.RQ) + ' [data-a=secIvEd]')));
     check(`${w}: ספק רב־סניפי – "ממתין לבחירת סניף"`, /ממתין לבחירת סניף/.test(await page.innerText(card(ID.P1))));
     check(`${w}: "נכנסו אוטומטית" – ביטול ואישור שולח`, !!(await page.$(card(ID.A1) + ' [data-a=secIvUndo]')) && !!(await page.$(card(ID.N1) + ' [data-a=secIvSnd]')));
     check(`${w}: מסך החשבוניות – בלי גלילה לרוחב`, (await sx(page)) <= 0, await sx(page));
     if (shots) await page.screenshot({ path: path.join(shots, `sec7-inv-${w}.png`), fullPage: true });
-    // --- אישור עם בחירת סניף ---
-    await page.click(card(ID.P1) + ' [data-a=secIvOk]'); await H.settle(page, 900);
+    // --- אישור עם בחירת סניף (16.11: כל חשבונית נפתחת קודם במסך הבדיקה – "בדיקה ואישור") ---
+    check(`${w}: חשבונית – אין אישור מהיר בכרטיס, רק "בדיקה ואישור"`, !(await page.$(card(ID.P1) + ' [data-a=secIvOk]')) && /בדיקה ואישור/.test(await page.innerText(card(ID.P1))));
+    await page.click(card(ID.P1) + ' [data-a=secIvEd]'); await H.settle(page, 900);
     const dP = await dlgText(page);
     check(`${w}: אישור ספק רב־סניפי – נפתח מסך הבדיקה הקיים עם "סניף (חובה)"`, /בדיקת הוצאה/.test(dP) && /סניף \(חובה\)/.test(dP) && !!last(bodies, 'secDecide', (b) => b.op === 'claim' && b.id === ID.P1 && b.mode === 'man'), dP.slice(0, 200));
     check(`${w}: מסך הבדיקה – בלי גלילה לרוחב`, (await sx(page)) <= 0);
@@ -159,7 +160,9 @@ const card = (id) => `#secIv_${id}`;
     check(`${w}: ותזרים (מסך התזרים נפתח והחודש של התשלום מחושב)`, !/שגיאה/.test(tCf) && tCf.length > 20 && page.__errors.length === 0, cf);
     await page.evaluate(() => { go('sec'); }); await H.settle(page, 500); await page.click('#secTabs [data-v=inv]'); await H.settle(page, 700);
     // --- זיכוי: באישור, סכום שלילי ---
-    await page.click(card(ID.C1) + ' [data-a=secIvOk]'); await H.settle(page, 900);
+    await page.click(card(ID.C1) + ' [data-a=secIvEd]'); await H.settle(page, 900);
+    check(`${w}: זיכוי – נפתח מסך הבדיקה`, /בדיקת הוצאה/.test(await dlgText(page)));
+    await page.click('#dlg [data-a=inbSaveOk]'); await H.settle(page, 900);
     const sC = await tx(page, 's' + ID.C1);
     check(`${w}: זיכוי – נרשם רק באישור, כסכום שלילי (kind=credit)`, sC.length === 1 && sC[0].amt === -59 && sC[0].kind === 'credit', sC);
     // --- קבלה → "סמן כשולם" ---
@@ -194,9 +197,10 @@ const card = (id) => `#secIv_${id}`;
     check(`${w}: אישור השולח – נשלח לשרת, והסימון יורד מההוצאה`, !!last(bodies, 'secDecide', (b) => b.op === 'sender' && b.id === ID.N1) && sN2[0].secNs === '' && !/שולח חדש/.test(sN2[0].note), sN2);
     // --- ביטול "נכנס ישר" ---
     await page.click(card(ID.A1) + ' [data-a=secIvUndo]'); await H.settle(page, 300); await page.click('#dlg [data-a=yes]'); await H.settle(page, 800);
-    check(`${w}: ביטול – ההוצאה הוסרה, והחשבונית חזרה ל"ממתינות"`, (await tx(page, 's' + ID.A1)).length === 0 && !!last(bodies, 'secDecide', (b) => b.op === 'undo' && b.id === ID.A1) && !!(await page.$(card(ID.A1) + ' [data-a=secIvOk]')));
+    check(`${w}: ביטול – ההוצאה הוסרה, והחשבונית חזרה ל"ממתינות"`, (await tx(page, 's' + ID.A1)).length === 0 && !!last(bodies, 'secDecide', (b) => b.op === 'undo' && b.id === ID.A1) && !!(await page.$(card(ID.A1) + ' [data-a=secIvEd]')));
     // --- סגירה באמצע: ההוצאה נרשמה, הדיווח לשרת נכשל → אחרי טעינה מחדש: דיווח אחד, בלי כפילות ---
-    await page.click(card(ID.F1) + ' [data-a=secIvOk]'); await H.settle(page, 1200);
+    await page.click(card(ID.F1) + ' [data-a=secIvEd]'); await H.settle(page, 900);
+    await page.click('#dlg [data-a=inbSaveOk]'); await H.settle(page, 1200);
     const before = await tx(page, 's' + ID.F1);
     const led = await page.evaluate((id) => !!(S.secL && S.secL[id]), ID.F1);
     check(`${w}: הדיווח נכשל – ההוצאה נשמרה במכשיר, והפריט נשאר בפנקס ההשלמה`, before.length === 1 && led, { before, led });

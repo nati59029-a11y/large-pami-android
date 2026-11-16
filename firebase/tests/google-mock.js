@@ -87,6 +87,7 @@ function qmatch(m, q, now) {
     let ok = true;
     if (x === 'in:trash') ok = m.labelIds.includes('TRASH');
     else if (x === 'in:spam') ok = m.labelIds.includes('SPAM');
+    else if (/^from:/.test(x)) { const h = ((m.payload && m.payload.headers) || []).find((y) => y.name === 'From'); ok = !!h && String(h.value).toLowerCase().includes(x.slice(5).toLowerCase()); } // 16.11: חסימת שולח
     else if (x === 'category:promotions') ok = m.labelIds.includes('CATEGORY_PROMOTIONS');
     else if (/^larger:(\d+)M$/.test(x)) ok = m.sizeEstimate >= Number(/^larger:(\d+)M$/.exec(x)[1]) * 1048576;
     else if (/^older_than:(\d+)y$/.test(x)) ok = Number(m.internalDate) < now - Number(/^older_than:(\d+)y$/.exec(x)[1]) * 365 * 864e5;
@@ -176,6 +177,8 @@ function handle(req, res, raw) {
     mm = /^messages\/([A-Za-z0-9_-]+)\/attachments\/([A-Za-z0-9_-]+)$/.exec(rest);
     if (req.method === 'GET' && mm) { // שלב 7: הורדת קובץ מצורף
       if (!b.msgs[mm[1]] || !state.atts[mm[2]]) return json(404, { error: { code: 404 } });
+      // 16.11: הורדת קובץ מצורף נכשלת – mode.attFail = קוד התשובה (403 = הרשאה נדחתה, 500 = תקלה בצד Google, 404 = הקובץ לא קיים)
+      if (state.mode.attFail) return json(state.mode.attFail, { error: { code: state.mode.attFail, errors: state.mode.attFail === 403 ? [{ reason: 'insufficientPermissions' }] : [] } });
       state.attGets.push(mm[2]);
       return json(200, { size: state.atts[mm[2]].length, data: b64u(state.atts[mm[2]]) });
     }
