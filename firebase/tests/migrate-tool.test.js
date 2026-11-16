@@ -476,6 +476,7 @@ describe('כלי העברה – באמולטור עם נתוני דמה', () => 
     const rules = fs.readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
     const inBiz = rules.slice(rules.indexOf('match /b/{bizId} {'));
     const B_ONLY = ['audit']; // נכתב תמיד ישירות ל-b/{bizId}/audit (גם ב-legacy), אין לו מקור בשורש
+    B_ONLY.push('dr', 'drcfg'); // 16.11.2026 דיווח יומי: קיים רק ב-b/{bizId} (התוספת חסומה ב-legacy), אין לו מקור בשורש
     const names = [...new Set([...inBiz.matchAll(/^ {6}match \/([A-Za-z_0-9]+)\//gm)].map(m => m[1]))];
     assert.ok(names.length > 50, 'נמצאו כללי b/{bizId}');
     assert.deepEqual(names.filter(n => !COPY.includes(n) && !B_ONLY.includes(n)), [], 'כל אוסף עם כלל ב-b/{bizId} מועתק');
