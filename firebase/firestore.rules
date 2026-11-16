@@ -47,6 +47,17 @@ service cloud.firestore {
             && (st.get('br', null) == null || d.br in st.br));
     }
 
+    // 16.11.2026: נעילת כתיבה לשורש אחרי המעבר של לארג' פעמי ל-b/largpeami.
+    // כל יצירה / עדכון / מחיקה באוספי העסק שבשורש (מכאן ועד yemot_lexicon) מותרת רק כשאין b/largpeami (לפני ההעברה,
+    // והאפליקציה מתנהגת אז כ-legacy), או כש-b/largpeami.dataRoot == 'legacy'. אחרי המעבר (dataRoot 'b') מכשיר ישן
+    // שעדיין במצב legacy לא יכול לכתוב לשורש. קריאה לא נחסמת. חזרה (dataRoot ← legacy) פותחת את הכתיבה מחדש.
+    // המזכירה (sOn) והסריקה בתלת מימד (s3On) כבר דורשות legacy. b/{bizId}, users, superadmins ואוספי האתר – לא מושפעים.
+    // עלות: קריאת מסמך אחת לכל כתיבה (אותו מסמך בכל הבקשה נספר פעם אחת).
+    function lpW() {
+      return !exists(/databases/$(database)/documents/b/largpeami)
+        || get(/databases/$(database)/documents/b/largpeami).data.get('dataRoot', '') == 'legacy';
+    }
+
     // ---------- 7 האוספים הקיימים (המבנה לא משתנה, רק מי רשאי) ----------
 
     // admins: כל מחובר קורא רק את המסמך של עצמו (כמו היום; האפליקציה בודקת בכניסה אם הוא מנהל).
@@ -59,28 +70,33 @@ service cloud.firestore {
     // cfg: קריאה – עובד פעיל או מנהל. כתיבה – מנהל.
     match /cfg/{docId} {
       allow read: if isStaff();
-      allow write: if isManager();
+      allow write: if lpW() && (isManager());
     }
 
     // shelf: קריאה וכתיבה – עובד פעיל או מנהל.
     match /shelf/{docId} {
-      allow read, write: if isStaff();
+      allow read: if isStaff();
+      allow write: if lpW() && (isStaff());
     }
 
     // fb: יצירה בשמו (עובד – רק בסטטוס 'new'; מנהל – גם מאושר). קריאה: מנהל – הכול; עובד – רק משוב מאושר.
     // עדכון ומחיקה – מנהל.
+    // 16.11.2026: יצירת דף משוב חדש (st 'new') לא ננעלת אחרי המעבר ל-b. הסיבה: בקוד הישן (fbWSent ב-index.html),
+    // 403 בניסיון חוזר של עובד פעיל נחשב "כבר נשלח", והדף נמחק מהטלפון. בלי ההחרגה, דף ממכשיר ישן היה אובד בשקט.
+    // כך הוא נכתב לשורש, compare-backup מגלה אותו, ומעתיקים אותו ל-b ב-copy-docs. עדכון, מחיקה ויצירה מאושרת (מנהל) – נעולים.
     match /fb/{docId} {
-      allow create: if isStaff()
+      allow create: if (lpW() || request.resource.data.get('st', '') == 'new') && (isStaff()
         && request.resource.data.owner == request.auth.uid
-        && (request.resource.data.st == 'new' || isManager());
+        && (request.resource.data.st == 'new' || isManager()));
       allow read: if isManager()
         || (isActiveEmployee() && resource.data.st == 'ok');
-      allow update, delete: if isManager();
+      allow update, delete: if lpW() && (isManager());
     }
 
     // bk: מנהל בלבד (ללא שינוי מהיום).
     match /bk/{docId} {
-      allow read, write: if isManager();
+      allow read: if isManager();
+      allow write: if lpW() && (isManager());
     }
 
     // chunks: יצירה בשמו – עובד פעיל (בטבלה למנהל אין יצירה; גם באפליקציה רק מכשיר עובד שולח).
@@ -88,17 +104,17 @@ service cloud.firestore {
     // הקשחה (שלב 3, לפי הערת הבודק בשלב 2): רק השדות owner ו-data, data עד 700,000 תווים
     // (CH=700000 באפליקציה), וחלק 1 ומעלה ({id}_1, {id}_2…) רק אם חלק 0 של אותו פריט שייך לאותו עובד.
     match /chunks/{docId} {
-      allow create: if isActiveEmployee() && !isManager()
+      allow create: if lpW() && (isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.keys().hasOnly(['owner', 'data'])
         && request.resource.data.data is string
         && request.resource.data.data.size() <= 700000
         && (docId.matches('^.+_0$')
             || (docId.matches('^.+_[1-9][0-9]*$')
-                && get(/databases/$(database)/documents/chunks/$(docId.replace('_[0-9]+$', '_0'))).data.owner == request.auth.uid));
+                && get(/databases/$(database)/documents/chunks/$(docId.replace('_[0-9]+$', '_0'))).data.owner == request.auth.uid)));
       allow read: if isManager()
         || (isActiveEmployee() && resource.data.owner == request.auth.uid);
-      allow delete: if isManager();
+      allow delete: if lpW() && (isManager());
       allow update: if false;
     }
 
@@ -107,7 +123,7 @@ service cloud.firestore {
     // קריאה – של עצמו, או מנהל. עדכון ומחיקה – מנהל.
     // הקשחה (שלב 3): החלק הראשון של הצילום שייך לאותו עובד, ורק השדות שהאפליקציה כותבת (pushItem).
     match /inbox/{docId} {
-      allow create: if isActiveEmployee() && !isManager()
+      allow create: if lpW() && (isActiveEmployee() && !isManager()
         && request.resource.data.owner == request.auth.uid
         && request.resource.data.status == 'new'
         && request.resource.data.keys().hasOnly(['owner', 'by', 'status', 'created', 'data', 'parts', 't', 'br', 'k'])
@@ -117,10 +133,10 @@ service cloud.firestore {
         // t (שלב 2 של סגירת קופה, לא חובה – גרסאות ישנות לא שולחות): זמן השליחה, לפי שעון השרת. cashout בודק לפיו שההוצאה חדשה.
         && (!request.resource.data.keys().hasAny(['t'])
             || (request.resource.data.t is int && math.abs(request.resource.data.t - request.time.toMillis()) < 120000))
-        && get(/databases/$(database)/documents/chunks/$(docId + '_0')).data.owner == request.auth.uid;
+        && get(/databases/$(database)/documents/chunks/$(docId + '_0')).data.owner == request.auth.uid);
       allow read: if isManager()
         || (isActiveEmployee() && resource.data.owner == request.auth.uid);
-      allow update, delete: if isManager();
+      allow update, delete: if lpW() && (isManager());
     }
 
     // ---------- אוספים חדשים בשלב 0 ----------
@@ -304,7 +320,7 @@ service cloud.firestore {
       allow read: if isManager()
         || (isStaff() && (resource.data.open == '1' || resource.data.late == '1'))
         || (isActiveEmployee() && isMyName(resource.data.doneBy));
-      allow create: if isStaff()
+      allow create: if lpW() && (isStaff()
         && nw().keys().hasOnly(['owner', 'by', 'role', 'txt', 'cr', 'due', 'st', 'open', 'pr', 'img', 'sub', 'doneBy', 'note', 'ok', 'late',
           'to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp', 'dl', 'pri', 'cat', 'est', 'ck', 'ckd', 'sa', 'nd'])
         && (!nw().keys().hasAny(['to', 'toN', 'ow', 'owN', 'clt', 'np', 'mi', 'wp']) || (isManager() && mgrNewOk()))
@@ -317,10 +333,10 @@ service cloud.firestore {
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
         && nowOk(nw().cr)
         && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000
-        && tkXOk(nw()) && nw().get('ckd', []).size() == 0 && nw().get('sa', 0) == 0 && nw().get('nd', 0) == 0;
-      allow update: if isManager()
-        || (isStaff() && (rdMark() || claim() || wpMark() || ncMark() || commentMark() || workerUpd() || ckMark() || saMark()));
-      allow delete: if isManager();
+        && tkXOk(nw()) && nw().get('ckd', []).size() == 0 && nw().get('sa', 0) == 0 && nw().get('nd', 0) == 0);
+      allow update: if lpW() && (isManager()
+        || (isStaff() && (rdMark() || claim() || wpMark() || ncMark() || commentMark() || workerUpd() || ckMark() || saMark())));
+      allow delete: if lpW() && (isManager());
 
       // תגובות: tasks/{id}/c/{cid}. קורא ומגיב – מי שרשאי לקרוא את המשימה. בשמו בלבד, בלי עדכון. מחיקה – מנהל.
       // עובד מגיב רק במשימה פתוחה (st 'open', כולל משימה שהמנהל החזיר), ורק אחרי שהיא סומנה nc == '1' (ncMark) –
@@ -332,7 +348,7 @@ service cloud.firestore {
             && (isManager() || (isStaff() && (task().open == '1' || task().late == '1')));
         }
         allow read: if canReadTask();
-        allow create: if isStaff() && canReadTask()
+        allow create: if lpW() && (isStaff() && canReadTask()
           && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
           && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
           && nw().uid == request.auth.uid
@@ -340,9 +356,9 @@ service cloud.firestore {
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
           && nowOk(nw().t)
-          && (isManager() || (task().get('nc', '') == '1' && task().st == 'open'));
+          && (isManager() || (task().get('nc', '') == '1' && task().st == 'open')));
         allow update: if false;
-        allow delete: if isManager();
+        allow delete: if lpW() && (isManager());
       }
 
       // תמונות המשימה (2026-11-09): tasks/{id}/p/{pid}, מסמך {img, t, uid}.
@@ -372,9 +388,9 @@ service cloud.firestore {
               || (pid == 'w3' && task().get('np', 0) >= 3));
         }
         allow read: if canReadTask();
-        allow create, update: if imgOk()
-          && ((isManager() && pid.matches('^m[1-5]$')) || (isStaff() && workOk()));
-        allow delete: if isManager() && pid.matches('^(m[1-5]|w[1-3])$');
+        allow create, update: if lpW() && (imgOk()
+          && ((isManager() && pid.matches('^m[1-5]$')) || (isStaff() && workOk())));
+        allow delete: if lpW() && (isManager() && pid.matches('^(m[1-5]|w[1-3])$'));
       }
     }
 
@@ -396,7 +412,7 @@ service cloud.firestore {
             || (nw().st == 'open' && nw().sub == 0 && nw().late == ''));
       }
       allow read: if mine(resource.data);
-      allow create: if isStaff()
+      allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['owner', 'by', 'txt', 'cr', 'due', 'st', 'sub', 'late'])
         && nw().keys().hasOnly(['owner', 'by', 'txt', 'cr', 'due', 'st', 'sub', 'late', 'dl', 'pri', 'cat', 'est', 'ck', 'ckd'])
         && nw().owner == request.auth.uid
@@ -405,9 +421,9 @@ service cloud.firestore {
         && nw().st == 'open' && nw().sub == 0 && nw().late == ''
         && nowOk(nw().cr)
         && nw().due is int && nw().due >= nw().cr + 259200000 && nw().due <= nw().cr + 1468800000
-        && tkXOk(nw()) && nw().get('ckd', []).size() == 0;
-      allow update: if mine(od()) && updOk();
-      allow delete: if mine(resource.data);
+        && tkXOk(nw()) && nw().get('ckd', []).size() == 0);
+      allow update: if lpW() && (mine(od()) && updOk());
+      allow delete: if lpW() && (mine(resource.data));
     }
 
     // גלאי גרסת הכללים (מרכז עבודה, סבב 2): האפליקציה קוראת rv/tk2 (מסמך שלא קיים). כללים חדשים – צוות מקבל 404,
@@ -441,15 +457,15 @@ service cloud.firestore {
           && nw().cr is int && nowOk(nw().ed);
       }
       allow read: if isManager();
-      allow create: if isManager() && ruleOk()
+      allow create: if lpW() && (isManager() && ruleOk()
         && nw().owner == request.auth.uid && isMyName(nw().by)
         && nowOk(nw().cr)
-        && nw().get('last', '') == '' && nw().get('n', 0) == 0 && nw().get('err', '') == '';
-      allow update: if isManager() && ruleOk()
+        && nw().get('last', '') == '' && nw().get('n', 0) == 0 && nw().get('err', '') == '');
+      allow update: if lpW() && (isManager() && ruleOk()
         && nw().diff(od()).affectedKeys().hasOnly(['owner', 'by', 'txt', 'to', 'toN', 'np', 'fq', 'wd', 'md', 'hh', 'mm', 'hol', 'on', 'ed'])
         && nw().diff(od()).affectedKeys().hasAny(['ed'])
-        && ((nw().owner == od().owner && nw().by == od().by) || (nw().owner == request.auth.uid && isMyName(nw().by)));
-      allow delete: if isManager();
+        && ((nw().owner == od().owner && nw().by == od().by) || (nw().owner == request.auth.uid && isMyName(nw().by))));
+      allow delete: if lpW() && (isManager());
     }
 
     // rq: בקשה של עובד למנהל. קריאה (בקשה ותגובות): מנהל, או הבעלים (עובד שולף where owner == uid).
@@ -485,7 +501,7 @@ service cloud.firestore {
           && cmOk();
       }
       allow read: if isManager() || (isActiveEmployee() && resource.data.owner == request.auth.uid);
-      allow create: if isStaff()
+      allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['owner', 'by', 'txt', 't', 'st', 'ans'])
         && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans', 'k'])
         && nw().owner == request.auth.uid
@@ -494,10 +510,10 @@ service cloud.firestore {
         && nw().st == 'new' && nw().ans == ''
         // סבב 3: סוג פנייה (''/'q' בקשה, 's' שאלה, 'b' תקלה, 'u' עדכון) – אופציונלי
         && nw().get('k', '') in ['', 'q', 's', 'b', 'u']
-        && nowOk(nw().t);
-      allow update: if (isManager() && mgrUpd())
-        || (isActiveEmployee() && od().owner == request.auth.uid && ownUpd());
-      allow delete: if isManager();
+        && nowOk(nw().t));
+      allow update: if lpW() && ((isManager() && mgrUpd())
+        || (isActiveEmployee() && od().owner == request.auth.uid && ownUpd()));
+      allow delete: if lpW() && (isManager());
 
       // תגובות: rq/{id}/c/{cid}. מנהל או הבעלים, בשמו, בזמן אמת, בלי עדכון. מחיקה – מנהל.
       match /c/{cid} {
@@ -507,16 +523,16 @@ service cloud.firestore {
             && (isManager() || (isActiveEmployee() && req().owner == request.auth.uid));
         }
         allow read: if canRead();
-        allow create: if canRead()
+        allow create: if lpW() && (canRead()
           && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
           && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
           && nw().uid == request.auth.uid
           && nw().by is string && nw().by.size() <= 100
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
-          && nowOk(nw().t);
+          && nowOk(nw().t));
         allow update: if false;
-        allow delete: if isManager();
+        allow delete: if lpW() && (isManager());
       }
     }
 
@@ -526,17 +542,17 @@ service cloud.firestore {
     // התמונה בחלקים בתת-האוסף p (כמו chunks): רק השדה data, עד 700,000 תווים.
     match /supinv/{id} {
       allow read: if isStaff();
-      allow create, update: if isManager()
-        && request.resource.data.keys().hasOnly(['c', 'n', 'd', 'at', 'a', 'inv', 'by', 'pend', 'src', 'm', 'np', 'h', 'fh']);
-      allow delete: if isManager();
+      allow create, update: if lpW() && (isManager()
+        && request.resource.data.keys().hasOnly(['c', 'n', 'd', 'at', 'a', 'inv', 'by', 'pend', 'src', 'm', 'np', 'h', 'fh']));
+      allow delete: if lpW() && (isManager());
 
       match /p/{k} {
         allow read: if isStaff();
-        allow create, update: if isManager()
+        allow create, update: if lpW() && (isManager()
           && request.resource.data.keys().hasOnly(['data'])
           && request.resource.data.data is string
-          && request.resource.data.data.size() <= 700000;
-        allow delete: if isManager();
+          && request.resource.data.data.size() <= 700000);
+        allow delete: if lpW() && (isManager());
       }
     }
 
@@ -548,7 +564,7 @@ service cloud.firestore {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       allow read: if isStaff();
-      allow create: if isStaff()
+      allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['uid', 'by', 'txt', 't', 'st', 'np'])
         && nw().keys().hasOnly(['uid', 'by', 'txt', 't', 'st', 'np'])
         && nw().uid == request.auth.uid
@@ -557,30 +573,30 @@ service cloud.firestore {
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 2000
         && nowOk(nw().t)
         && nw().st == 'new'
-        && nw().np is int && nw().np >= 0 && nw().np <= 8;
-      allow update: if isManager()
+        && nw().np is int && nw().np >= 0 && nw().np <= 8);
+      allow update: if lpW() && (isManager()
         && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
         && nw().st in ['new', 'doing', 'done', 'rej']
         && isMyName(nw().get('stBy', ''))
         && nowOk(nw().get('stAt', 0))
-        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
-      allow delete: if isManager();
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+      allow delete: if lpW() && (isManager());
 
       // חלקי התמונות: appreq/{id}/p/{k} (כמו supinv): רק השדה data, עד 700,000 תווים.
       // כותב רק מי שיצר את הבקשה, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. אין עדכון (אין עריכה אחרי השליחה).
       match /p/{k} {
         function req() { return get(/databases/$(database)/documents/appreq/$(id)).data; }
         allow read: if isStaff();
-        allow create: if isStaff()
+        allow create: if lpW() && (isStaff()
           && exists(/databases/$(database)/documents/appreq/$(id))
           && req().uid == request.auth.uid
           && k.matches('^[0-7]$') && int(k) < req().np
           && request.time.toMillis() - req().t < 900000
           && request.resource.data.keys().hasOnly(['data'])
           && request.resource.data.data is string
-          && request.resource.data.data.size() <= 700000;
+          && request.resource.data.data.size() <= 700000);
         allow update: if false;
-        allow delete: if isManager();
+        allow delete: if lpW() && (isManager());
       }
     }
 
@@ -593,7 +609,7 @@ service cloud.firestore {
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       allow read: if isManager()
         || (isActiveEmployee() && resource.data.uid == request.auth.uid);
-      allow create: if isActiveEmployee() && !isManager()
+      allow create: if lpW() && (isActiveEmployee() && !isManager()
         && nw().keys().hasAll(['uid', 'by', 't', 'st', 'k', 'np'])
         && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'k', 'np', 'br'])
         && brMine(nw(), get(/databases/$(database)/documents/staff/$(request.auth.uid)).data)
@@ -602,30 +618,30 @@ service cloud.firestore {
         && nowOk(nw().t)
         && nw().st == 'new'
         && nw().k in ['invoice', 'cashout', 'deposit', 'transfer', 'zreport', 'opening', 'unknown']
-        && nw().np is int && nw().np >= 1 && nw().np <= 12;
-      allow update: if isManager()
+        && nw().np is int && nw().np >= 1 && nw().np <= 12);
+      allow update: if lpW() && (isManager()
         && resource.data.st == 'new'
         && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt'])
         && nw().st in ['done', 'rej']
         && isMyName(nw().get('stBy', ''))
-        && nowOk(nw().get('stAt', 0));
-      allow delete: if isManager();
+        && nowOk(nw().get('stAt', 0)));
+      allow delete: if lpW() && (isManager());
 
       // חלקי הצילום: mq/{id}/p/{k} – רק data עד 700,000 תווים; כותב רק מי ששלח, רק חלק שהוכרז ב-np, ב-15 הדקות שאחרי השליחה.
       match /p/{k} {
         function q() { return get(/databases/$(database)/documents/mq/$(id)).data; }
         allow read: if isManager()
           || (isActiveEmployee() && q().uid == request.auth.uid);
-        allow create: if isActiveEmployee() && !isManager()
+        allow create: if lpW() && (isActiveEmployee() && !isManager()
           && exists(/databases/$(database)/documents/mq/$(id))
           && q().uid == request.auth.uid
           && k.matches('^([0-9]|1[01])$') && int(k) < q().np
           && request.time.toMillis() - q().t < 900000
           && request.resource.data.keys().hasOnly(['data'])
           && request.resource.data.data is string
-          && request.resource.data.data.size() <= 700000;
+          && request.resource.data.data.size() <= 700000);
         allow update: if false;
-        allow delete: if isManager();
+        allow delete: if lpW() && (isManager());
       }
     }
 
@@ -639,7 +655,7 @@ service cloud.firestore {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       allow read: if isManager();
-      allow create: if isStaff()
+      allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data'])
         && nw().keys().hasOnly(['uid', 'by', 't', 'st', 'np', 'reg', 'd', 'no', 'data', 'tm', 'od', 'otm'])
         // tm (שלב 2, לא חובה): שעת הדוח HH:MM או ריק – לחלון ההוצאות מקופה ול-zlast
@@ -656,30 +672,30 @@ service cloud.firestore {
         && nw().reg in ['i_yh', 'i_nl']
         && nw().d is string && nw().d.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
         && nw().no is string && nw().no.size() <= 30
-        && nw().data is string && nw().data.size() <= 20000;
-      allow update: if isManager()
+        && nw().data is string && nw().data.size() <= 20000);
+      allow update: if lpW() && (isManager()
         && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
         && nw().st in ['new', 'ok', 'rej']
         && isMyName(nw().get('stBy', ''))
         && nowOk(nw().get('stAt', 0))
-        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
-      allow delete: if isManager();
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+      allow delete: if lpW() && (isManager());
 
       // חלקי הצילומים: closings/{id}/p/{k} (כמו appreq): רק השדה data, עד 700,000 תווים.
       // כותב רק מי ששלח את הסגירה, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. קריאה – מנהל בלבד. אין עדכון.
       match /p/{k} {
         function cl() { return get(/databases/$(database)/documents/closings/$(id)).data; }
         allow read: if isManager();
-        allow create: if isStaff()
+        allow create: if lpW() && (isStaff()
           && exists(/databases/$(database)/documents/closings/$(id))
           && cl().uid == request.auth.uid
           && k.matches('^[0-7]$') && int(k) < cl().np
           && request.time.toMillis() - cl().t < 900000
           && request.resource.data.keys().hasOnly(['data'])
           && request.resource.data.data is string
-          && request.resource.data.data.size() <= 700000;
+          && request.resource.data.data.size() <= 700000);
         allow update: if false;
-        allow delete: if isManager();
+        allow delete: if lpW() && (isManager());
       }
     }
 
@@ -734,7 +750,7 @@ service cloud.firestore {
         return !exists(/databases/$(database)/documents/zlast/$(nw().reg)) || afterB(get(/databases/$(database)/documents/zlast/$(nw().reg)).data);
       }
       allow read: if isStaff();
-      allow create: if isStaff()
+      allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['uid', 'by', 't', 'reg', 'd', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
         && nw().keys().hasOnly(['uid', 'by', 't', 'reg', 'd', 'tm', 'a', 'why', 'dep', 'src', 'zc', 'dp'])
         && nw().uid == request.auth.uid
@@ -744,16 +760,16 @@ service cloud.firestore {
         && bodyOk()
         && idStr(nw().src) && nw().src != ''
         && idStr(nw().zc) && idStr(nw().dp)
-        && (isManager() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk() && notOld()));
-      allow update: if (isManager()
+        && (isManager() || (nw().zc == '' && nw().dp == '' && nw().src == id && inbOk() && notOld())));
+      allow update: if lpW() && ((isManager()
           && nw().diff(od()).affectedKeys().hasOnly(['zc', 'dp', 'reg', 'd', 'tm', 'a', 'why', 'dep'])
           && idStr(nw().zc) && idStr(nw().dp) && bodyOk())
         || (isActiveEmployee()
           && nw().diff(od()).affectedKeys().hasOnly(['dp'])
           && od().dp == '' && od().dep == '1'
           && nw().dp is string && nw().dp.matches('^[A-Za-z0-9_-]{1,120}$')
-          && depOk(nw().dp));
-      allow delete: if isManager();
+          && depOk(nw().dp)));
+      allow delete: if lpW() && (isManager());
     }
 
     // ---------- אישורי הפקדה (deposits) ----------
@@ -766,7 +782,7 @@ service cloud.firestore {
       function nw() { return request.resource.data; }
       function nowOk(t) { return t is int && math.abs(t - request.time.toMillis()) < 120000; }
       allow read: if isStaff();
-      allow create: if isStaff()
+      allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
         && nw().keys().hasOnly(['uid', 'by', 't', 'd', 'items', 'a', 'st', 'why', 'np', 'data'])
         && nw().data is string && nw().data.size() <= 5000
@@ -779,30 +795,30 @@ service cloud.firestore {
         && nw().items is list && nw().items.size() >= 1 && nw().items.size() <= 30
         && (nw().a is int || nw().a is float) && nw().a > 0 && nw().a <= 1000000
         && nw().why is string && nw().why.size() <= 500
-        && nw().np is int && nw().np >= 1 && nw().np <= 8;
-      allow update: if isManager()
+        && nw().np is int && nw().np >= 1 && nw().np <= 8);
+      allow update: if lpW() && (isManager()
         && nw().diff(resource.data).affectedKeys().hasOnly(['st', 'stBy', 'stAt', 'note'])
         && nw().st in ['new', 'ok', 'rej']
         && isMyName(nw().get('stBy', ''))
         && nowOk(nw().get('stAt', 0))
-        && nw().get('note', '') is string && nw().get('note', '').size() <= 300;
-      allow delete: if isManager();
+        && nw().get('note', '') is string && nw().get('note', '').size() <= 300);
+      allow delete: if lpW() && (isManager());
 
       // חלקי הצילומים: deposits/{id}/p/{k} (כמו closings): רק השדה data, עד 700,000 תווים.
       // כותב רק מי ששלח את האישור, רק חלק שהוכרז ב-np, ורק ב-15 הדקות שאחרי השליחה. קריאה – מנהל בלבד. אין עדכון.
       match /p/{k} {
         function dp() { return get(/databases/$(database)/documents/deposits/$(id)).data; }
         allow read: if isManager();
-        allow create: if isStaff()
+        allow create: if lpW() && (isStaff()
           && exists(/databases/$(database)/documents/deposits/$(id))
           && dp().uid == request.auth.uid
           && k.matches('^[0-7]$') && int(k) < dp().np
           && request.time.toMillis() - dp().t < 900000
           && request.resource.data.keys().hasOnly(['data'])
           && request.resource.data.data is string
-          && request.resource.data.data.size() <= 700000;
+          && request.resource.data.data.size() <= 700000);
         allow update: if false;
-        allow delete: if isManager();
+        allow delete: if lpW() && (isManager());
       }
     }
 
@@ -820,7 +836,7 @@ service cloud.firestore {
           || (nw().d == resource.data.d && nw().tm > resource.data.get('tm', ''));
       }
       allow read: if isStaff();
-      allow create, update: if isStaff()
+      allow create, update: if lpW() && (isStaff()
         && reg in ['i_yh', 'i_nl']
         && nw().keys().hasAll(['d', 'tm', 'id', 'uid', 't'])
         && nw().keys().hasOnly(['d', 'tm', 'id', 'uid', 't', 'od', 'otm'])
@@ -837,8 +853,8 @@ service cloud.firestore {
                 && cl().uid == request.auth.uid && cl().reg == reg && cl().d == nw().d
                 && cl().get('tm', '') == nw().tm && nowOk(cl().t)
                 && cl().get('od', '') == nw().get('od', '') && cl().get('otm', '') == nw().get('otm', '')
-                && fwd()));
-      allow delete: if isManager();
+                && fwd())));
+      allow delete: if lpW() && (isManager());
     }
 
     // ---------- ימות: תוכן שלוחות הקו (חוזה 5.3, משימה 2026-11-02) ----------
@@ -857,11 +873,11 @@ service cloud.firestore {
     // updatedAt = זמן במילישניות (כמו במשימות), עד 2 דקות מהשעון של השרת. updatedBy = המשתמש עצמו. אין מחיקה.
     match /yemot_lexicon/{docId} {
       allow read: if docId == 'main' && isManager();
-      allow create, update: if docId == 'main' && isManager()
+      allow create, update: if lpW() && (docId == 'main' && isManager()
         && request.resource.data.keys().hasOnly(['text', 'updatedAt', 'updatedBy'])
         && request.resource.data.text is string && request.resource.data.text.size() <= 8000
         && request.resource.data.updatedAt is int && math.abs(request.resource.data.updatedAt - request.time.toMillis()) < 120000
-        && request.resource.data.updatedBy == request.auth.uid;
+        && request.resource.data.updatedBy == request.auth.uid);
       allow delete: if false;
     }
 

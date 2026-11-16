@@ -18,6 +18,7 @@
 //   compare-backup  השוואה מלאה של המקור (השורש) לקובץ גיבוי
 //   report-since    דוח: מה נכתב ב-b/<bizId> מאז ההעתקה האחרונה (לפי קובץ המצב). לא כותב
 //   set-dataroot    שינוי b/<bizId>.dataRoot ל-legacy או b (חזרה / מעבר). דורש --mode write
+//   copy-docs       העתקה ממוקדת של מסמכים בודדים מהשורש (--paths a/1,b/2), גם אחרי המעבר. יצירה בלבד. דורש --mode write, --backup
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -625,7 +626,84 @@ async function cmdSetDataRoot(ctx) {
   return { ok: true, before, after: to };
 }
 
-const COMMANDS = { backup: cmdBackup, 'dry-run': cmdDryRun, copy: cmdCopy, verify: cmdVerify, 'compare-backup': cmdCompareBackup, 'report-since': cmdReportSince, 'set-dataroot': cmdSetDataRoot };
+// ---- העתקה ממוקדת של מסמכים בודדים (16.11.2026) ----
+// מסמכים שנכתבו לשורש אחרי המעבר (מכשיר ישן שנשאר ב-legacy). עובד גם כש-dataRoot כבר b (וגם ב-legacy).
+// רק המסמכים שברשימה, בלי תת-אוספים. יצירה בלבד: יעד קיים לא נדרס לעולם (זהה = "כבר קיים", שונה = התנגשות).
+const DOC_PATHS_MAX = 50;
+const DOC_SEG_RE = /^[A-Za-z0-9_-]{1,200}$/; // תווים בטוחים בלבד: בלי '/', '.', רווח, '%' וכו'
+// אוספי הרשאות וזהות: לא מעתיקים מסמך בודד (למשל admins/<uid> היה מחזיר הרשאת מנהל למי שהוסר ב-b)
+const DOC_PATHS_DENY = ['admins', 'staff', 'private', 'push_tokens', 'users', 'superadmins'];
+function parseDocPaths(raw) {
+  const list = String(raw === undefined || raw === 'true' ? '' : raw).split(',').map(s => s.trim()).filter(Boolean);
+  if (!list.length) throw new Error('חסר --paths: רשימת נתיבי מסמכים בשורש, מופרדים בפסיק (למשל cashout/abc,tasks/xyz)');
+  if (list.length > DOC_PATHS_MAX) throw new Error(`יותר מדי נתיבים (${list.length}). מותר עד ${DOC_PATHS_MAX} בהרצה אחת`);
+  const bad = [];
+  for (const p of list) {
+    const segs = p.split('/');
+    if (segs.length < 2 || segs.length % 2 !== 0) bad.push(p + ' (נתיב מסמך = מספר זוגי של קטעים: אוסף/מזהה)');
+    else if (!segs.every(s => DOC_SEG_RE.test(s) && !/^__.*__$/.test(s))) bad.push(p + ' (מותרים רק אותיות לטיניות, ספרות, _ ו-)');
+    else if (DOC_PATHS_DENY.includes(segs[0])) bad.push(p + ` (האוסף "${segs[0]}" הוא אוסף הרשאות/זהות – אסור בהעתקה ממוקדת)`);
+    else if (!COPY.includes(segs[0])) bad.push(p + ` (האוסף "${segs[0]}" לא ברשימת האוספים המועתקים)`);
+  }
+  if (new Set(list).size !== list.length) bad.push('נתיב מופיע פעמיים ברשימה');
+  if (bad.length) throw new Error('נתיבים לא תקינים, לא נכתב כלום:\n - ' + bad.join('\n - '));
+  return list;
+}
+
+async function cmdCopyDocs(ctx) {
+  if (ctx.mode !== 'write') throw new Error('copy-docs דורש --mode write');
+  const paths = parseDocPaths(ctx.args.paths);
+  if (!ctx.args.backup || !fs.existsSync(ctx.args.backup)) throw new Error('copy-docs דורש --backup עם קובץ גיבוי קיים (מריצים backup קודם)');
+  const bk = JSON.parse(fs.readFileSync(ctx.args.backup, 'utf8'));
+  if (bk.kind !== 'lp-migrate-backup' || bk.project !== ctx.project) throw new Error('קובץ הגיבוי לא שייך לפרויקט הזה');
+  const bizDoc = await ctx.fsr.getDoc('b/' + ctx.bizId);
+  if (!bizDoc) throw new Error(`מסמך העסק b/${ctx.bizId} לא קיים. copy-docs רק אחרי ההעתקה הראשונה`);
+  assertMigrationTarget(ctx, bizDoc, false);
+  const dataRoot = (bizDoc.fields.dataRoot || {}).stringValue || '';
+  if (dataRoot !== 'b' && dataRoot !== 'legacy') throw new Error(`b/${ctx.bizId}.dataRoot הוא "${dataRoot}", לא b ולא legacy`);
+  log(`העתקה ממוקדת: ${paths.length} מסמכים מהשורש אל b/${ctx.bizId}/ (dataRoot=${dataRoot}). יצירה בלבד, בלי תת-אוספים`);
+  const rows = await pmap(paths, 8, async rel => {
+    const s = await ctx.fsr.getDoc(rel);
+    if (!s) return { rel, status: 'missing' };
+    const sh = hashFields(s.fields);
+    const t = await ctx.fsr.getDoc('b/' + ctx.bizId + '/' + rel);
+    if (!t) return { rel, status: 'create', src: sh, fields: s.fields };
+    const th = hashFields(t.fields);
+    return th === sh ? { rel, status: 'already', src: sh, dst: th } : { rel, status: 'conflict', src: sh, dst: th };
+  });
+  const creates = rows.filter(r => r.status === 'create');
+  const res = await ctx.fsr.writeDocs(creates.map(r => ({ path: 'b/' + ctx.bizId + '/' + r.rel, kind: 'create', fields: r.fields })));
+  res.forEach((w, i) => {
+    const r = creates[i];
+    delete r.fields; // לא נשמר בדוח: רק נתיבים וגיבובים
+    if (w.ok) r.status = 'copied';
+    else { r.status = 'failed'; r.error = w.error; }
+  });
+  // אזהרה: תתי-אוספים מתחת למסמכי המקור לא מועתקים. מציגים את נתיבי המסמכים שבהם, כדי להחליט אם להעתיק אותם במפורש
+  for (const r of rows) {
+    if (r.status === 'missing') continue;
+    const subs = await ctx.fsr.listCollectionIds(r.rel);
+    if (!subs.length) continue;
+    const tree = await scanTree(ctx.fsr, '', subs.map(c => r.rel + '/' + c));
+    r.subDocs = [...tree.entries()].filter(([, d]) => !d.missing).map(([p]) => p).sort();
+  }
+  const label = { copied: 'הועתק', already: 'כבר קיים ביעד וזהה – לא נכתב', conflict: 'התנגשות: קיים ביעד עם תוכן אחר – לא נכתב', missing: 'לא נמצא בשורש – לא נכתב', failed: 'הכתיבה נכשלה (ייתכן שהיעד נוצר בינתיים) – לא נדרס' };
+  for (const r of rows) log(`  ${r.rel}: ${label[r.status]}${r.src ? ' (מקור ' + r.src.slice(0, 12) + (r.dst ? ', יעד ' + r.dst.slice(0, 12) : '') + ')' : ''}${r.error ? ' – ' + r.error : ''}`);
+  const withSubs = rows.filter(r => r.subDocs && r.subDocs.length);
+  for (const r of withSubs) {
+    log(`  אזהרה: ל-${r.rel} יש ${r.subDocs.length} מסמכים בתתי-אוספים שלא הועתקו (להעתקה – להוסיף את הנתיבים ל---paths):`);
+    for (const p of r.subDocs.slice(0, 50)) log('    ' + p);
+    if (r.subDocs.length > 50) log(`    ... ועוד ${r.subDocs.length - 50} (הרשימה המלאה בדוח)`);
+  }
+  const count = k => rows.filter(r => r.status === k).length;
+  const sum = { copied: count('copied'), already: count('already'), conflict: count('conflict'), missing: count('missing'), failed: count('failed') };
+  const ok = !sum.conflict && !sum.missing && !sum.failed;
+  log(`סיכום: הועתקו ${sum.copied}, כבר קיימים וזהים ${sum.already}, התנגשויות ${sum.conflict}, לא נמצאו ${sum.missing}, כשלים ${sum.failed}`);
+  log(ok ? 'העתקה ממוקדת: הצליחה' : 'העתקה ממוקדת: יש מסמכים שלא הועתקו – דורש בדיקה (שום מסמך קיים לא נדרס)');
+  return { ok, dataRoot, ...sum, subDocWarnings: withSubs.length, docs: rows };
+}
+
+const COMMANDS = { backup: cmdBackup, 'dry-run': cmdDryRun, copy: cmdCopy, 'copy-docs': cmdCopyDocs, verify: cmdVerify, 'compare-backup': cmdCompareBackup, 'report-since': cmdReportSince, 'set-dataroot': cmdSetDataRoot };
 
 async function main(argv) {
   const args = parseArgs(argv);
@@ -646,4 +724,4 @@ if (require.main === module) {
   main(process.argv.slice(2)).then(code => { process.exitCode = code; }, e => { console.error('שגיאה: ' + (e && e.message ? e.message : e)); process.exitCode = 1; });
 }
 
-module.exports = { main, COPY, DEFERRED, SHARED, FEATURES, classify };
+module.exports = { main, COPY, DEFERRED, SHARED, FEATURES, classify, parseDocPaths, DOC_PATHS_MAX };

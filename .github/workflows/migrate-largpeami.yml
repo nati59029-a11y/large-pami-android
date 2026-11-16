@@ -1,7 +1,7 @@
 # העברת הנתונים של לארג' פעמי לעסק הראשון במבנה ריבוי העסקים (b/largpeami). העסק קבוע: largpeami.
 # ידני בלבד (Actions -> "Migrate largpeami data" -> Run workflow). אין push ואין schedule.
 # ברירת המחדל (action=check): גיבוי, ספירה ואימות, בלי שום כתיבה לנתוני העסק.
-# פעולות שכותבות (copy, switch-to-b, rollback-to-legacy) רק עם קלט אישור נוסף. המקור בשורש לא נמחק ולא מתעדכן לעולם.
+# פעולות שכותבות (copy, copy-docs, switch-to-b, rollback-to-legacy) רק עם קלט אישור נוסף. המקור בשורש לא נמחק ולא מתעדכן לעולם.
 # הגיבוי שלפני כל פעולה נשמר כברירת מחדל ב-bucket הפרטי של הפרויקט (migrate_backups/), לא ב-GitHub.
 # הוראות: firebase/migrate/README.md. חזרה: firebase/migrate/ROLLBACK.md.
 # סודות: FIREBASE_SERVICE_ACCOUNT (ייצור) ו-FIREBASE_SERVICE_ACCOUNT_TEST (פרויקט שמזהה שלו מכיל test), מ-secrets של GitHub בלבד.
@@ -19,13 +19,13 @@ on:
         required: true
         type: string
       action:
-        description: "check = גיבוי+ספירה+אימות (קריאה בלבד). copy = העתקה/השלמה. report-since / compare-backup = דוחות. switch-to-b / rollback-to-legacy = שינוי dataRoot"
+        description: "check = גיבוי+ספירה+אימות (קריאה בלבד). copy = העתקה/השלמה. copy-docs = העתקת מסמכים בודדים (doc_paths), גם אחרי המעבר. report-since / compare-backup = דוחות. switch-to-b / rollback-to-legacy = שינוי dataRoot"
         required: true
         type: choice
-        options: [check, copy, report-since, compare-backup, switch-to-b, rollback-to-legacy]
+        options: [check, copy, copy-docs, report-since, compare-backup, switch-to-b, rollback-to-legacy]
         default: check
       write_confirm:
-        description: "רק לפעולות שכותבות (copy, switch-to-b, rollback-to-legacy): הקלד write-to-<מזהה הפרויקט>"
+        description: "רק לפעולות שכותבות (copy, copy-docs, switch-to-b, rollback-to-legacy): הקלד write-to-<מזהה הפרויקט>"
         required: false
         type: string
         default: ""
@@ -51,6 +51,11 @@ on:
         default: "true"
       ack_unknown:
         description: "אוספים לא ידועים שהוחלט במפורש לא להעביר (מופרדים בפסיק). ריק = אוסף לא ידוע מכשיל את האימות"
+        required: false
+        type: string
+        default: ""
+      doc_paths:
+        description: "ל-copy-docs בלבד: נתיבי מסמכים בשורש, מופרדים בפסיק (למשל cashout/abc,tasks/xyz). עד 50. יצירה בלבד, יעד קיים לא נדרס"
         required: false
         type: string
         default: ""
@@ -81,7 +86,7 @@ jobs:
         run: |
           case "$ACTION" in
             check|report-since|compare-backup) echo "mode=readonly" >> "$GITHUB_OUTPUT" ;;
-            copy|switch-to-b|rollback-to-legacy) echo "mode=write" >> "$GITHUB_OUTPUT" ;;
+            copy|copy-docs|switch-to-b|rollback-to-legacy) echo "mode=write" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::Unknown action"; exit 1 ;;
           esac
           # vars.FIREBASE_STORAGE_BUCKET רק אם הוא שייך לפרויקט שהוקלד; אחרת ה-bucket ברירת המחדל של הפרויקט
@@ -146,6 +151,7 @@ jobs:
           UPLOAD: ${{ inputs.upload_backup }}
           BACKUP_PATH: ${{ inputs.backup_path }}
           ACK: ${{ inputs.ack_unknown }}
+          DOC_PATHS: ${{ inputs.doc_paths }}
         run: |
           set -o pipefail
           O="$RUNNER_TEMP/out"; mkdir -p "$O"
@@ -166,6 +172,11 @@ jobs:
               "${T[@]}" copy --mode write --state "$O/state.json" --backup "$O/backup.json" --report "$O/r-copy.json" | tee -a "$O/log.txt"
               "${T[@]}" verify --report "$O/r-verify.json" "${ACKA[@]}" | tee -a "$O/log.txt"
               "${T[@]}" compare-backup --backup "$O/backup.json" --report "$O/r-compare.json" | tee -a "$O/log.txt" ;;
+            copy-docs)
+              # בדיקת הנתיבים לפני הגיבוי: טעות הקלדה נעצרת מיד, בלי לקרוא ובלי לכתוב כלום
+              node -e 'require("./firebase/migrate/migrate.js").parseDocPaths(process.env.DOC_PATHS)'
+              backup
+              "${T[@]}" copy-docs --mode write --paths "$DOC_PATHS" --backup "$O/backup.json" --report "$O/r-copy-docs.json" | tee -a "$O/log.txt" ;;
             report-since)
               need_state
               "${T[@]}" report-since --state "$O/state.json" --report "$O/r-since.json" | tee -a "$O/log.txt" ;;
