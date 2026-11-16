@@ -308,3 +308,10 @@ describe('zip של החומר הגולמי (lastRaw)', () => {
     assert.equal(M.crc32(enc.encode('123456789')), 0xcbf43926, 'CRC32 תקני');
   });
 });
+
+describe('צילום תמונה אמיתית (שלב 21ב) – קבועים', () => {
+  it('PHOTO_MAX=1600 נפרד מ-FRAME_MAX של הווידאו, וסף תזוזה 1.5°', () => {
+    const C = require('../store3d-pano-cap.js')._m.C;
+    assert.equal(C.PHOTO_MAX, 1600); assert.equal(C.FRAME_MAX, 1280); assert.equal(C.PH_MOVE, 1.5);
+  });
+});
