@@ -251,16 +251,20 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   check('6ב הכרטיס ב-360px בלי גלישה', (await noOverflow(A.page)).bad.length === 0, await noOverflow(A.page));
   await shot(A.page, fp(shots, 'כרטיס-מדף'));
   // דיווח יזום: תמונה חשוכה ← אזהרה ← שליחה בכל זאת; תמונה תקינה ← shelfCheck adhoc
-  await A.page.setInputFiles('#dlg input[data-c=s3kPick]', await mkImg(A.page, 'dark')); await sleep(1500);
+  /* 16.11.2026: בזמן עיבוד (K.busy) הכרטיס מתעלם מבחירה חדשה. במכונת CI איטית עיבוד התמונה ארך יותר מההמתנה הקבועה, והבחירות הבאות נבלעו (6ג–6ו נכשלו ברצף).
+     לכן מחכים שהכרטיס יהיה פנוי לפני הבחירה ושיסיים לעבד אחריה (עד 20 שניות), ורק אז בודקים */
+  const kIdle = () => A.page.waitForFunction(() => S3UI.K && !S3UI.K.busy, null, { timeout: 20000 });
+  const kPick = async (kind, ms) => { await kIdle(); await A.page.setInputFiles('#dlg input[data-c=s3kPick]', await mkImg(A.page, kind)); await sleep(ms); await kIdle(); await sleep(200); };
+  await kPick('dark', 1500);
   check('6ג תמונה חשוכה בדיווח יזום: אזהרה וכפתור "שלחו בכל זאת", בלי שליחה', /חשוכה מדי/.test(await txt(A.page, '#dlg')) && !!(await A.page.$('#dlg [data-a=s3kKeep]')) && !S.calls.some((c) => c.fn === 'shelfCheck'));
-  await A.page.setInputFiles('#dlg input[data-c=s3kPick]', await mkImg(A.page, 'a')); await sleep(2500);
+  await kPick('a', 2500);
   const sc = S.calls.find((c) => c.fn === 'shelfCheck');
   check('6ד תמונה תקינה: shelfCheck mode=adhoc עם map, slot, at, src, rt, img ו-th, והתוצאה מוצגת בכרטיס', !!sc && sc.b.mode === 'adhoc' && sc.b.map === 's-main' && sc.b.slot === 'f1-a-1' && sc.b.src === 'photo' && sc.b.rt === 0 && sc.b.img.length > 1000 && sc.b.th.length > 500 && !/^data:/.test(sc.b.img) && /חור במדף העליון/.test(await txt(A.page, '#dlg')), sc && { mode: sc.b.mode, slot: sc.b.slot });
   S.adhoc = { st: 'person', person: true, iss: [], usage: { m: '2026-11', n: 4, cap: 500, w80: false } };
-  await A.page.setInputFiles('#dlg input[data-c=s3kPick]', await mkImg(A.page, 'a')); await sleep(2500);
+  await kPick('a', 2500);
   check('6ה בתמונה עם אדם: הודעה "לא נשמרה, צלמו שוב בלי אנשים"', /בתמונה היה אדם/.test(await txt(A.page, '#dlg')));
   S.fnFail.shelf = 's3-adhoc-day';
-  await A.page.setInputFiles('#dlg input[data-c=s3kPick]', await mkImg(A.page, 'a')); await sleep(2500);
+  await kPick('a', 2500);
   check('6ו מכסה יומית מלאה: הודעה בעברית בכרטיס', /מכסת הדיווחים היומית|הגעתם למכסה/.test(await txt(A.page, '#dlg')), await txt(A.page, '#dlg .s3warn'));
   S.fnFail.shelf = '';
   await A.page.click('#dlg [data-a=closeDlg]'); await sleep(300);
