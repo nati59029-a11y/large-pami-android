@@ -335,9 +335,13 @@ async function stepPhotos(c, brs, log) {
       const pref = c.db.doc(`srun/${d.runId}/ph/${d.slot}`);
       const ph = await pref.get();
       const names = new Set(d.names);
-      if (ph.exists && (names.has(ph.get('p')) || names.has(ph.get('th')))) {
+      const prv = ph.exists && ph.get('prv') && typeof ph.get('prv') === 'object' ? ph.get('prv') : null; // שלב 20ב: התמונה ה"קודמת"
+      const cur = ph.exists && (names.has(ph.get('p')) || names.has(ph.get('th'))), old = !!prv && (names.has(prv.p) || names.has(prv.th));
+      if (cur || old) {
         // קודם המסמך (gone, בלי נתיב), ואחר כך הקבצים – אף פעם לא נשאר נתיב לקובץ שנמחק
-        try { await pref.update({ gone: true, p: FieldValue.delete(), th: FieldValue.delete() }, { lastUpdateTime: ph.updateTime }); } catch (e) { if (e && e.code === 9) continue; throw e; }
+        const up = cur ? { gone: true, p: FieldValue.delete(), th: FieldValue.delete() } : {};
+        if (old) Object.assign(up, { 'prv.gone': true, 'prv.p': FieldValue.delete(), 'prv.th': FieldValue.delete() });
+        try { await pref.update(up, { lastUpdateTime: ph.updateTime }); } catch (e) { if (e && e.code === 9) continue; throw e; }
       }
       let k = 0;
       for (const f of d.names) if (await delFile(c.bucket, f)) { n++; k++; dropped.add(f); }

@@ -8,7 +8,10 @@
 //     מחסן (w-) – noprice/pricepos/promoexp נמחקים בשרת גם אם המודל החזיר אותם. הערות קבועות (bay.notes), "מה אמור להיות" (bay.exp),
 //     סוג החנות, קטגוריות, הצילום הקודם ותאריך היום – נשלחים כהקשר (רק מהשרת, לא מהלקוח). pid – לפי bay.exp או שם זהה בקטלוג (prod).
 //     כותב: srun/{run}/ph/{slot}, srun/{run}/ai/{slot}, nDone/nUid בסבב (רק ok/issue/review נחשב "צולם"), s3sum/{map}.b[bay].
-//     מחזיר { st, iss:[{k,sev,t,box}], usage:{m,n,cap,w80}, runId, ask?, t? }.
+//     מחזיר { st, iss:[{k,sev,t,box}], usage:{m,n,cap,w80}, runId, ask?, t?, sug? }.
+//     שלב 20א: בסבב נשלחים להנחיה עד 8 מקטעים מועמדים (שכנים במסלול, רק של העובד, רק עם מידע מהצילום האחרון). ניחוש תקין של המודל
+//     נשמר ב-ai.slot = { s, c }; אם הוא מקטע אחר בביטחון A.SUG_MIN ומעלה – גם ph.sug = { s, c } ו-sug בתשובה (הצעה בלבד, נספר 1 כרגיל).
+//   s3MovePh { run, from, to } – שלב 20ב: העברת תמונה ותוצאה בין מקטעים של אותו עובד בסבב פתוח (בלי AI ובלי מכסה; ראו moveCore).
 //   mapDraft { qid, br, kind: 's' | 'w', imgs: [base64 JPEG, עד 100, סך הכל עד 13MB], cctv?, info?, sketch? }
 //     info/sketch (15.11.2026, לא חובה) = שאלון וסקיצה מבעל החנות (lib/store3d-draftin.js): נתונים מחייבים בהנחיה, ואחרי התשובה –
 //     התאמה למידות, חדרים מהסקיצה והצמדת גופים לשורות. קלט לא תקין = bad-info לפני המכסה. – מנהל או s3m. נספרת כבדיקה אחת
@@ -33,6 +36,7 @@ const logger = require('firebase-functions/logger');
 const { defineSecret, defineString, defineInt } = require('firebase-functions/params');
 const { getApps, initializeApp } = require('firebase-admin/app');
 const { getStorage } = require('firebase-admin/storage');
+const { FieldValue } = require('firebase-admin/firestore');
 const { onCall } = require('./lib/region');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const T = require('./lib/tenant');
@@ -204,6 +208,33 @@ async function savedRes(db, who, qid, q) {
   return d.res ? Object.assign({}, d.res, { dup: true }) : null;
 }
 
+// שלב 20א: מקטעים מועמדים להנחיה. הראשון = המקטע הנוכחי (עם הצילום הקודם שלו, prev), ואחריו שכנים במסלול מתוך המקטעים
+// של העובד בסבב (run.asg[owner]), רק כאלה שיש להם מידע מהצילום האחרון (s3sum.b[bay].r → srun/{r}/ai/{slot}: קטגוריה / מוצרים).
+// בלי שכן עם מידע (למשל סבב ראשון) – [] ואין ניחוש. כשל בקריאה – בלי מועמדים (הבדיקה עצמה ממשיכה כרגיל).
+const sideTxt = (c, fm) => { const f = fm.get(c.fx) || {}; return `גוף ${f.num || c.fx}${f.name ? ' (' + String(f.name).slice(0, 30) + ')' : ''}, ${c.s === 'a' ? 'צד ראשי' : 'צד שני'}, מקטע ${c.n}${c.lv === 't' ? ', עליון' : c.lv === 'b' ? ', תחתון' : ''}`; };
+async function candsOf(db, run, owner, map, slot, sum, prev) {
+  try {
+    const L = A.slotCands(run && run.asg ? run.asg[owner] : null, map, slot);
+    if (!L.length) return [];
+    const fm = new Map(map.fx.filter((f) => f && typeof f.id === 'string').map((f) => [f.id, f]));
+    const B = (sum.exists && sum.get('b')) || {};
+    const docs = await Promise.all(L.slice(1).map((c) => { const e = B[c.bay]; return e && C.isRunId(e.r) ? db.doc(`srun/${e.r}/ai/${c.slot}`).get() : null; }));
+    const out = [];
+    L.slice(1).forEach((c, i) => {
+      const d = docs[i];
+      if (!d || !d.exists) return;
+      const cat = typeof d.get('cat') === 'string' ? d.get('cat') : '';
+      const prods = (Array.isArray(d.get('prods')) ? d.get('prods') : []).map((p) => p && p.n).filter((n) => typeof n === 'string' && n);
+      if (cat || prods.length) out.push({ id: c.slot, label: sideTxt(c, fm), cat, prods });
+    });
+    if (!out.length) return [];
+    return [{ id: L[0].slot, label: sideTxt(L[0], fm), cat: (prev && prev.cat) || '', prods: (prev && prev.prods) || [] }].concat(out);
+  } catch (e) {
+    logger.warn('shelfCheck: candidates failed', { code: e && e.code });
+    return [];
+  }
+}
+
 // who = { uid, mgr, bizId, brs }; deps = { base, key, bucket, send, userMax }
 async function shelfCore(db, who, input, now, deps) {
   const x = shelfInput(input, now);
@@ -247,9 +278,12 @@ async function shelfCore(db, who, input, now, deps) {
     if (pa.exists) prev = { date: Number.isInteger(pa.get('at')) ? scan.israelDay(new Date(pa.get('at'))) : '', cat: pa.get('cat') || '', prods: (pa.get('prods') || []).map((p) => p && p.n) };
   }
   const exp = Array.isArray(B.exp) ? B.exp : [];
+  // שלב 20א: מקטעים מועמדים (רק בסבב, רק מהמקטעים של העובד שהמקטע הנוכחי שלו)
+  const cands = x.mode === 'run' ? await candsOf(db, run, owner, map, x.slot, sum, prev) : [];
   const ctx = {
     kind, storeType: S.stype, today: scan.israelDay(new Date(now)), recN: Number.isInteger(S.recN) ? S.recN : 3, cats: S.cats, catMode: S.catMode || 'mix',
     notes: (Array.isArray(B.notes) ? B.notes : []).map((n) => n && n.t), expected: exp.map((e) => e && e.n), prev, hi: sl.lv === 't' ? 'top' : sl.lv === 'b' ? 'bottom' : null, cctv: false,
+    cands,
   };
   if (!deps.key) throw bad('no-key', 'אין מפתח לזיהוי חכם בשרת', 'failed-precondition');
   const dir = runDir(who.bizId, br, runId);
@@ -284,7 +318,7 @@ async function shelfCore(db, who, input, now, deps) {
   if (names.length) {
     try { (await db.collection('prod').where('name', 'in', names).limit(60).get()).docs.forEach((d) => { const k = A.norm(d.get('name')); if (k && !catalog.has(k)) catalog.set(k, d.id); }); } catch (e) { /* בלי קטלוג – בלי pid */ }
   }
-  const cl = A.cleanShelf(resp.obj, { wh: kind === 'w', recN: ctx.recN, cats: S.cats, catMode: ctx.catMode, exp, catalog });
+  const cl = A.cleanShelf(resp.obj, { wh: kind === 'w', recN: ctx.recN, cats: S.cats, catMode: ctx.catMode, exp, catalog, cands: cands.map((c) => c.id), cur: x.slot });
   const ai = Object.assign(cl.ai, { model: resp.model, at: now, ver: PS.VERSION });
   const sc = X.scoreSlot(ai, S.w); // שלב 10: ציון המקום לפי המשקלות של הסניף ("לבדיקה" ואזהרות לא מורידים)
   if (sc) ai.sc = sc;
@@ -314,10 +348,12 @@ async function shelfCore(db, who, input, now, deps) {
   const ph = { w: x.img.w, h: x.img.h, sz: x.img.buf.length, tsz: x.th.buf.length, src: x.src, by: who.uid, at: x.at, rx: now, qid: x.qid, rt: x.rt };
   if (p) { ph.p = p; ph.th = tp; } else ph.person = true;
   if (cl.ask) ph.ask = true;
+  if (cl.sug) ph.sug = cl.sug; // שלב 20א: הצעה "נראה כמו מקטע אחר" – העובד מחליט (s3MovePh). לא מועבר אוטומטית
   const out = { st: ai.st, iss: ai.iss.map((i) => { const o = { k: i.k, sev: i.sev, t: i.t }; if (i.box) o.box = i.box; return o; }), usage: rv.qs.usage, runId };
   if (cl.ask) out.ask = true;
   if (cl.t) out.t = cl.t;
   const res = { st: ai.st, iss: ai.iss.map((i) => ({ k: i.k, sev: i.sev })), usage: rv.qs.usage, runId };
+  if (cl.sug) { out.sug = cl.sug; res.sug = cl.sug; }
   let kept = false;
   // ---- כתיבה (טרנזקציה אחת) ----
   const runRef = db.doc('srun/' + runId), phRef = db.doc(`srun/${runId}/ph/${x.slot}`), aiRef = db.doc(`srun/${runId}/ai/${x.slot}`);
@@ -336,6 +372,10 @@ async function shelfCore(db, who, input, now, deps) {
         tx.update(qref, { res: Object.assign({}, res, { kept: true }) });
         return;
       }
+      // שלב 20ב: תמונה "קודמת" (prv) שנשמרה בהעברה בין מקטעים – נשארת גם בצילום חוזר (הקבצים שלה לא נמחקים כאן)
+      if (oldPh && oldPh.prv && typeof oldPh.prv === 'object') ph.prv = oldPh.prv; else delete ph.prv;
+      const aiPrv = ai0.exists ? ai0.get('prv') : null;
+      if (aiPrv && typeof aiPrv === 'object') ai.prv = aiPrv; else delete ai.prv;
       const delta = (A.countsDone(ai) ? 1 : 0) - (ai0.exists && A.countsDone(ai0.data()) ? 1 : 0);
       if (x.mode === 'run') {
         if (!rs.exists || !C.LIVE.includes(rs.get('st'))) throw bad('run-closed', 'הסבב כבר הסתיים או בוטל', 'failed-precondition');
@@ -557,6 +597,153 @@ async function draftCore(db, who, input, now, deps) {
   return Object.assign({}, res, { m: d.map, scale: d.scale, notes: d.notes });
 }
 
+// ---------------- s3MovePh: העברת תמונה ממקטע למקטע (שלב 20ב) ----------------
+// { run, from, to } – בלי AI ובלי מכסה. רק העובד ששני המקטעים שלו בסבב (או מנהל, כששני המקטעים של אותו עובד), בסבב open / late.
+// הקבצים מועתקים לשם של מקום היעד ({to}_{n}.jpg + _t) – כך הניקוי היומי (s3Clean, לפי שם הקובץ) משייך אותם נכון; אחרי שהטרנזקציה
+// הצליחה, הקבצים הישנים של המקור נמחקים. בטרנזקציה אחת: ph + ai של היעד (המקור נמחק, או חוזר ל"קודמת" שלו), nDone / nUid (moveDone), s3sum של שני המקטעים.
+// יעד שכבר צולם (החלטת המשתמש 4): התמונה המועברת מחליפה, והקודמת נשמרת ב-ph.prv / ai.prv (הקבצים שלה לא נמחקים). קודמת אחת בלבד.
+// sug ו-ask של התמונה המועברת נמחקים (ההצעה טופלה); נרשם ph.mv = { f: מקור, at, by }. קריאה חוזרת אחרי הצלחה – { ok, dup:true }.
+// תיקון סבב 1: מקור שיש לו "קודמת" עם קובץ (ph.prv עם p/th, לא person ולא gone) – חוזר אליה (ph / ai = prv, בלי prv) במקום להתרוקן,
+// ונספר "צולם" לפי ה-ai המשוחזר. נרשם ph.mvb = { t: יעד, at } לזיהוי קריאה חוזרת (MV_DUP_MS). קודמת בלי קובץ – המקור מתרוקן כמו קודם.
+const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
+const noPrv = (o) => { const x = Object.assign({}, o); delete x.prv; return x; };
+const MV_DUP_MS = 10 * 60000; // קריאה חוזרת אחרי העברה שהחזירה את המקור ל"קודמת" – רק בחלון הזה נחשבת dup
+function moveInput(input) {
+  if (!C.isRunId(input.run) || /^ad_/.test(input.run)) throw bad('bad-run', 'מזהה הסבב לא תקין');
+  if (typeof input.from !== 'string' || !A.RE_SLOT.test(input.from) || typeof input.to !== 'string' || !A.RE_SLOT.test(input.to)) throw bad('bad-slot', 'מקום הצילום לא תקין');
+  if (input.from === input.to) throw bad('same-slot', 'אי אפשר להעביר תמונה לאותו מקטע');
+  return { run: input.run, from: input.from, to: input.to };
+}
+const levels = (sl) => (sl.hi ? [sl.bay + '_t', sl.bay + '_b'] : [sl.bay + '_a']);
+// who = { uid, mgr, bizId }; deps = { bucket? }
+async function moveCore(db, who, input, now, deps) {
+  const x = moveInput(input);
+  const bucket = (deps && deps.bucket) || getStorage().bucket();
+  const runId = x.run;
+  const rs = await db.doc('srun/' + runId).get();
+  if (!rs.exists) throw bad('no-run', 'הסבב לא נמצא', 'not-found');
+  const run = rs.data();
+  if (!C.LIVE.includes(run.st)) throw bad('run-closed', 'הסבב כבר הסתיים או בוטל', 'failed-precondition');
+  const mapId = run.map, br = String(mapId || '').slice(2), kind = String(mapId || '').charAt(0);
+  if (!C.RE.map.test(mapId || '')) throw bad('no-map', 'המפה של הסבב לא תקינה', 'failed-precondition');
+  const ms = await db.doc('smap/' + mapId).get();
+  const map = ms.exists ? ms.data() : null;
+  if (!map || map.del === 1) throw bad('no-map', 'המפה לא נמצאה (או שנמחקה)', 'failed-precondition');
+  let sf, st;
+  try { sf = A.checkSlot(x.from, map); st = A.checkSlot(x.to, map); } catch (e) { throw toHttps(e); }
+  const ownerOf = (bay) => Object.keys(run.asg || {}).find((u) => Array.isArray(run.asg[u]) && run.asg[u].includes(bay));
+  const owner = ownerOf(sf.bay), ownerTo = ownerOf(st.bay);
+  if (!owner || !ownerTo) throw bad('bad-slot', 'המדף הזה לא בסבב', 'invalid-argument');
+  if (owner !== ownerTo) throw bad('not-assigned', 'אפשר להעביר רק בין מקטעים של אותו עובד בסבב', 'permission-denied');
+  if (!who.mgr && owner !== who.uid) throw bad('not-assigned', 'המדף הזה לא משויך אליך בסבב', 'permission-denied');
+  await mapLib().branchOk(db, who.bizId, br, kind);
+  const phFromRef = db.doc(`srun/${runId}/ph/${x.from}`), phToRef = db.doc(`srun/${runId}/ph/${x.to}`);
+  const p0 = await phFromRef.get();
+  if (!p0.exists) {
+    const t0 = await phToRef.get();
+    const mv = t0.exists ? t0.get('mv') : null;
+    if (isObj(mv) && mv.f === x.from) return { ok: true, dup: true, runId, from: x.from, to: x.to };
+    throw bad('no-photo', 'במקטע הזה אין תמונה להעביר', 'failed-precondition');
+  }
+  const src = p0.data();
+  if (isObj(src.mvb) && src.mvb.t === x.to && Number.isFinite(src.mvb.at) && now - src.mvb.at < MV_DUP_MS) {
+    const t0 = await phToRef.get();
+    const mv = t0.exists ? t0.get('mv') : null;
+    if (isObj(mv) && mv.f === x.from && mv.at === src.mvb.at) return { ok: true, dup: true, runId, from: x.from, to: x.to };
+  }
+  if (src.person || src.gone || typeof src.p !== 'string' || typeof src.th !== 'string') throw bad('no-photo', 'במקטע הזה אין תמונה שמורה להעביר', 'failed-precondition');
+  // ---- העתקת הקבצים לשם של היעד ----
+  const dir = runDir(who.bizId, br, runId);
+  if (!src.p.startsWith(dir) || !src.th.startsWith(dir)) throw bad('no-photo', 'הקובץ של התמונה לא נמצא', 'failed-precondition');
+  let bufs;
+  try { bufs = [(await bucket.file(src.p).download())[0], (await bucket.file(src.th).download())[0]]; } catch (e) {
+    if (e && (e.code === 404 || e.code === '404')) throw bad('no-photo', 'הקובץ של התמונה לא נמצא', 'failed-precondition');
+    logger.warn('s3MovePh: read failed', { code: e && e.code });
+    throw bad('save-failed', 'קריאת התמונה נכשלה. נסו שוב.', 'unavailable');
+  }
+  let n = await nextN(bucket, dir, x.to), p = '', tp = '';
+  const saved = [];
+  try {
+    for (let i = 0; i < SAVE_TRIES && !p; i++, n++) {
+      if (n > MAX_N) break;
+      const fp = `${dir}${x.to}_${n}.jpg`, ft = `${dir}${x.to}_${n}_t.jpg`;
+      if (!(await saveJpeg(bucket, fp, bufs[0]))) continue;
+      saved.push(fp);
+      if (!(await saveJpeg(bucket, ft, bufs[1]))) { await delFiles(bucket, [fp]); saved.pop(); continue; }
+      saved.push(ft);
+      p = fp; tp = ft;
+    }
+  } catch (e) {
+    logger.warn('s3MovePh: save failed', { code: e && e.code });
+    await delFiles(bucket, saved);
+    throw bad('save-failed', 'שמירת התמונה נכשלה. נסו שוב.', 'unavailable');
+  }
+  if (!p) { await delFiles(bucket, saved); throw bad(n > MAX_N ? 'too-many' : 'busy', n > MAX_N ? 'יותר מדי צילומים חוזרים למקום הזה בסבב' : 'נסו שוב בעוד רגע', n > MAX_N ? 'resource-exhausted' : 'aborted'); }
+  // ---- טרנזקציה אחת ----
+  const runRef = db.doc('srun/' + runId), sumRef = db.doc('s3sum/' + mapId);
+  const aiRef = (s) => db.doc(`srun/${runId}/ai/${s}`), phRef = (s) => db.doc(`srun/${runId}/ph/${s}`);
+  const extra = [...new Set(levels(sf).concat(levels(st)))].filter((s) => s !== x.from && s !== x.to); // הצד השני של מדף גבוה
+  let prvOld = null, hadTo = false;
+  try {
+    await db.runTransaction(async (tx) => {
+      const [r1, pf, pt, af, at, su, ...ex] = await Promise.all([tx.get(runRef), tx.get(phFromRef), tx.get(phToRef), tx.get(aiRef(x.from)), tx.get(aiRef(x.to)), tx.get(sumRef)]
+        .concat(extra.map((s) => tx.get(aiRef(s)))).concat(extra.map((s) => tx.get(phRef(s)))));
+      if (!r1.exists || !C.LIVE.includes(r1.get('st'))) throw bad('run-closed', 'הסבב כבר הסתיים או בוטל', 'failed-precondition');
+      const r = r1.data();
+      const ow = Object.keys(r.asg || {}).find((u) => Array.isArray(r.asg[u]) && r.asg[u].includes(sf.bay));
+      if (ow !== owner || !(r.asg[owner] || []).includes(st.bay)) throw bad('not-assigned', 'השיוך בסבב השתנה. טענו מחדש.', 'permission-denied');
+      if (!pf.exists || pf.get('p') !== src.p || !af.exists) throw bad('busy', 'התמונה השתנתה בינתיים. טענו מחדש ונסו שוב.', 'aborted');
+      const aiFrom = af.data(), aiTo = at.exists ? at.data() : null, phTo = pt.exists ? pt.data() : null;
+      // תיקון סבב 1: "קודמת" של המקור עם קובץ – המקור חוזר אליה (הקבצים שלה לא נמחקים בשום מקרה)
+      const pv = pf.get('prv');
+      const back = isObj(pv) && !pv.person && !pv.gone && typeof pv.p === 'string' && typeof pv.th === 'string' && pv.p.startsWith(dir) && pv.th.startsWith(dir) ? noPrv(pv) : null;
+      const aiBack = back && isObj(aiFrom.prv) ? noPrv(aiFrom.prv) : null;
+      tx.update(runRef, A.moveDone(r, owner, aiFrom, aiTo, aiBack));
+      // ph / ai של היעד
+      const ph = Object.assign(noPrv(pf.data()), { p, th: tp, mv: { f: x.from, at: now, by: who.uid } });
+      delete ph.sug; delete ph.ask; delete ph.mvb;
+      const ai = noPrv(aiFrom);
+      prvOld = phTo && isObj(phTo.prv) ? phTo.prv : null;
+      hadTo = !!phTo;
+      if (phTo) ph.prv = noPrv(phTo);
+      if (aiTo) ai.prv = noPrv(aiTo);
+      tx.set(phToRef, ph);
+      tx.set(aiRef(x.to), ai);
+      if (back) tx.set(phFromRef, Object.assign(back, { mvb: { t: x.to, at: now } })); else tx.delete(phFromRef);
+      if (aiBack) tx.set(aiRef(x.from), aiBack); else tx.delete(aiRef(x.from));
+      // s3sum: שני המקטעים (או אחד, כשמעבירים בין עליון לתחתון של אותו מקטע)
+      const aiAfter = { [x.from]: aiBack, [x.to]: ai }, phAfter = { [x.from]: back, [x.to]: ph };
+      extra.forEach((s, i) => { aiAfter[s] = ex[i].exists ? ex[i].data() : null; phAfter[s] = ex[extra.length + i].exists ? ex[extra.length + i].data() : null; });
+      const B = (su.exists && su.get('b')) || {};
+      const sp = { b: {}, upd: now, run: runId };
+      for (const sl of sf.bay === st.bay ? [st] : [sf, st]) {
+        const ls = levels(sl), oldB = B[sl.bay];
+        const ais = ls.map((s) => aiAfter[s]).filter(isObj);
+        const ths = ls.map((s) => phAfter[s] && phAfter[s].th).filter((t) => typeof t === 'string' && t);
+        const keepTh = oldB && typeof oldB.th === 'string' && oldB.th !== src.th ? oldB.th : '';
+        if (ais.length) {
+          // מקור שחזר ל"קודמת" – הרשומה שלו מתעדכנת רק כשהיא של הסבב הזה (או חסרה)
+          if (back && sl.bay !== st.bay && oldB && oldB.r !== runId) continue;
+          const e = A.sumEntry(ais, runId, now, sl.bay === st.bay ? tp : (ths[0] || ''), keepTh);
+          if (!e.th) e.th = FieldValue.delete();
+          sp.b[sl.bay] = e;
+        } else if (oldB && oldB.r === runId) {
+          // המקטע כבר לא צולם בסבב הזה
+          sp.b[sl.bay] = Object.assign({ s: 'miss', r: runId, t: now, n: 0 }, keepTh ? { th: keepTh } : { th: FieldValue.delete() });
+        }
+      }
+      tx.set(sumRef, sp, { merge: true });
+    });
+  } catch (e) {
+    await delFiles(bucket, [p, tp]);
+    throw e instanceof HttpsError ? e : (logger.error('s3MovePh: write failed', { code: e && e.code }), bad('save-failed', 'ההעברה נכשלה. נסו שוב.', 'unavailable'));
+  }
+  // הקבצים הישנים של המקור (עכשיו יש להם עותק ביעד; קובצי ה"קודמת" שהמקור חזר אליה לא נוגעים בהם). "קודמת" ישנה יותר (שתי העברות לאותו יעד) – ינוקה בניקוי היומי (s3Clean)
+  await delFiles(bucket, [src.p, src.th]);
+  if (prvOld) logger.info('s3MovePh: older previous photo left for s3Clean', { run: runId, slot: x.to });
+  return { ok: true, runId, from: x.from, to: x.to, p, th: tp, replaced: hadTo };
+}
+
 // ---------------- הפונקציות ----------------
 const depsOf = () => ({ base: GEMINI_API_BASE.value(), key: GEMINI_API_KEY.value(), userMax: S3_USER_DAILY.value(), adhocMax: A.ADHOC_DAY });
 exports.shelfCheck = onCall({ secrets: [GEMINI_API_KEY], timeoutSeconds: 300, memory: '512MiB' }, T.scoped(async (request) => {
@@ -570,5 +757,11 @@ exports.mapDraft = onCall({ secrets: [GEMINI_API_KEY], timeoutSeconds: 540, memo
   return draftCore(T.tdb(), { uid: who.uid, mgr: who.role === 'manager', bizId: who.bizId, brs: myBranches(who) }, inputObject(request), Date.now(), depsOf());
 }));
 
+// שלב 20ב: העברת תמונה ממקטע למקטע (בלי AI ובלי מכסה). לא מפורסם עד מיזוג ואישור
+exports.s3MovePh = onCall({ timeoutSeconds: 60, memory: '256MiB' }, T.scoped(async (request) => {
+  const who = await requireStaff(request, { feature: 'store3d' });
+  return moveCore(T.tdb(), { uid: who.uid, mgr: who.role === 'manager', bizId: who.bizId }, inputObject(request), Date.now(), {});
+}));
+
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_ai', { enumerable: false, value: { shelfCore, draftCore, reserve, release } });
+Object.defineProperty(exports, '_ai', { enumerable: false, value: { shelfCore, draftCore, moveCore, reserve, release } });
