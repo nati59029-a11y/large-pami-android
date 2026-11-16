@@ -655,14 +655,17 @@ describe('tkNudge – "הזכר לעובד" (מרכז עבודה סבב 3)', () 
     });
   });
 
-  it('מנהל: נשלח למטפל (ow) בלבד, טקסט כללי בלי תוכן המשימה, data {k:"tk", id}', async () => {
+  it('מנהל: נשלח למטפל (ow) בלבד, עם טקסט המשימה (16.11.2026), data {k:"tk", id}', async () => {
     const r = await run('u_mgr', { taskId: 't1' });
     assert.deepEqual(r, { ok: true, n: 1, sent: 1 });
     assert.equal(PUSH.length, 1);
     assert.deepEqual(PUSH[0].tokens.sort(), [TOK('E1'), TOK('E1b')].sort());
-    assert.equal(PUSH[0].msg.body, 'תזכורת מהמנהל למשימה – פרטים באפליקציה');
+    assert.equal(PUSH[0].msg.title, 'תזכורת מהמנהל');
+    assert.equal(PUSH[0].msg.body, 'סוד: לספור את הכספת', 'ההתראה מציגה מה המשימה');
     assert.equal(PUSH[0].msg.id, 't1');
-    assert.ok(!JSON.stringify(PUSH[0].msg).includes('כספת'), 'אין תוכן משימה בהתראה');
+    const NU = require('../functions/tasks-nudge.js')._core;
+    assert.deepEqual(NU.msgOf({ txt: '  ' }), NU.MSG, 'משימה בלי טקסט – הנוסח הכללי');
+    assert.equal(NU.msgOf({ txt: 'א'.repeat(500) }).body.length, 400, 'טקסט ארוך – מקוצר');
     assert.equal(PUSH[0].meta.uid, 'u_emp');
   });
 

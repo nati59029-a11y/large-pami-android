@@ -102,8 +102,7 @@ describe('קריטריון 4: תזכורות 7.3 על sec_in (חלון 24 השע
     assert.equal(w1.pend, false); assert.equal(w1.pushed, IL('2026-11-12T07:00'), 'התראת טלפון נשלחה ב-07:00');
     assert.equal(byKey(await notes(M3), /^win:/).length, 2, 'גם מנהל עם הגבלת סניפים (תיבת הווצאפ אינה לפי סניף)');
     assert.equal(byKey(await notes(M2), /^win:/).length, 0, 'מנהל שכיבה את הסוג – לא מקבל');
-    assert.ok(PUSH.every((p) => !/יוסי|פתוחים|0521111111|972521111111/.test(p.msg.title + p.msg.body)), 'התראת הטלפון כללית – בלי שם, מספר או תוכן');
-    assert.ok(PUSH.some((p) => /חלון 24 השעות/.test(p.msg.body)));
+    assert.ok(PUSH.some((p) => /יוסי/.test(p.msg.body) && p.msg.id), 'התראת הטלפון – עם התוכן והמזהה (16.11.2026)');
     // בידוד: התזכורת של עסק B רק אצל המנהל של B, והתוכן של B לא אצל A
     assert.doesNotMatch(JSON.stringify(await notes(M1)), /עסק B|972525555555/);
     assert.equal(byKey(await notes(MB, B), /^win:/).length, 1, 'עסק B – אצל המנהל שלו');
@@ -165,7 +164,7 @@ describe('קריטריון 4: תזכורות 7.3 על sec_in (חלון 24 השע
     const m3 = byKey(await notes(M3), /^inv:/);
     assert.equal(m3.length, 1); assert.match(m3[0].title, /חשבונית אחת/); assert.doesNotMatch(m3[0].body, /ספק החלב/, 'מנהל של סניף 1 – רק את סניף 1');
     assert.equal(byKey(await notes(M2), /^inv:/).length, 0, 'כיבה את הסוג');
-    assert.ok(PUSH.every((p) => !/מאפיית|החלב|450/.test(p.msg.title + p.msg.body)), 'התראת הטלפון כללית');
+    assert.ok(PUSH.some((p) => /חשבוניות מחכות לאישור/.test(p.msg.title)), 'התראת הטלפון – עם הכותרת (16.11.2026)');
     await run('2026-11-13T09:00'); // שישי
     assert.equal(byKey(await notes(M1), /^inv:/).length, 1, 'שישי – לא');
     await run('2026-11-15T08:10'); // ראשון
