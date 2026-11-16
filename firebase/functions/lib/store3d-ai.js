@@ -9,6 +9,8 @@
 //                                 גם תשובה תקינה במבנה מסוננת כאן: סוגים, טווחים, מחסן בלי מחירים, conf<0.6 = אזהרה, מספר המלצות.
 //   cleanDraft                  – תשובת המודל לטיוטת מפה → מפה במבנה 4.3 (מזהים, מספור, חדר לכל גוף, uz עם ok:false).
 //   sumEntry / countsDone       – s3sum.b[bay] ומספר המקומות שצולמו בפועל (רק ok / issue / review נחשבים "צולם").
+//   slotCands / slotGuess       – שלב 20א: מקטעים מועמדים לזיהוי המדף (שכנים במסלול, רק של העובד) וניקוי הניחוש של המודל.
+//   moveDone                    – שלב 20ב (s3MovePh): עדכון nDone / nUid בהעברת תמונה בין מקטעים, בלי ספירה כפולה.
 
 const { sniff } = require('./scan');
 const M = require('./store3d-map');
@@ -150,11 +152,13 @@ function pidOf(n, ctx) {
   return (ctx.catalog && ctx.catalog.get(k)) || '';
 }
 
-// r = תשובת המודל (אחרי JSON.parse), ctx = { wh, recN, cats, catMode, exp, catalog }. מחזיר { ai, ask, t } – ai בלי model/at/ver.
+// r = תשובת המודל (אחרי JSON.parse), ctx = { wh, recN, cats, catMode, exp, catalog, cands?, cur? }. מחזיר { ai, ask, t, sug } – ai בלי model/at/ver.
+// שלב 20א: cands = מזהי המקטעים המועמדים שנשלחו להנחיה, cur = המקטע הנוכחי. ניחוש תקין נשמר ב-ai.slot = { s, c };
+// sug = { s, c } רק כשהניחוש שונה מהמקטע הנוכחי ובביטחון SUG_MIN ומעלה (אחרת null). תשובה בלי ניחוש – כמו קודם.
 function cleanShelf(r, ctx) {
   const c = ctx || {};
-  if (r.st === 'person') return { ai: { st: 'person', conf: num01(r.conf) == null ? 1 : r2(num01(r.conf)), iss: [] }, ask: false, t: '' };
-  if (r.st === 'bad') return { ai: { st: 'bad', conf: num01(r.conf) == null ? 1 : r2(num01(r.conf)), iss: [] }, ask: false, t: str(r.t, 120) };
+  if (r.st === 'person') return { ai: { st: 'person', conf: num01(r.conf) == null ? 1 : r2(num01(r.conf)), iss: [] }, ask: false, t: '', sug: null };
+  if (r.st === 'bad') return { ai: { st: 'bad', conf: num01(r.conf) == null ? 1 : r2(num01(r.conf)), iss: [] }, ask: false, t: str(r.t, 120), sug: null };
   const iss = [];
   for (const x of r.iss) {
     if (iss.length >= 30) break;
@@ -216,13 +220,67 @@ function cleanShelf(r, ctx) {
     }
     if (L.length) ai.recs = L;
   }
-  return { ai, ask: r.not_this_shelf === true, t: '' };
+  const g = slotGuess(r, c.cands);
+  let sug = null;
+  if (g) { ai.slot = g; if (g.s !== c.cur && g.c >= SUG_MIN) sug = { s: g.s, c: g.c }; }
+  return { ai, ask: r.not_this_shelf === true, t: '', sug };
 }
 // שמות מוצרים מהתשובה, לחיפוש בקטלוג (עד 30 – מגבלת 'in' של Firestore)
 function prodNames(r) {
   const out = new Set();
   for (const L of [r && r.prods, r && r.miss]) for (const x of Array.isArray(L) ? L : []) { const n = isObj(x) ? str(x.n, 60) : ''; if (n) out.add(n); }
   return [...out].slice(0, 30);
+}
+
+// ---------- שלב 20א: זיהוי המקטע (מועמדים וניחוש) ----------
+// המסלול = אותו סדר כמו במסך הצילום (store3d-capture.js, build): מספר הגוף, מזהה הגוף, צד, מקטע, ואז עליון/תחתון.
+const SUG_MIN = 0.7;          // מתחת לזה – הניחוש נשמר ב-ai.slot בלבד, בלי הצעה לעובד (הנחה, לא מאומת)
+const CANDS = { max: 8, before: 3 };
+const LV_ORD = { a: 0, t: 1, b: 2 };
+// bays = המקטעים של העובד בסבב (run.asg[uid]), map = המפה. מחזיר [{ slot, bay, fx, s, n, lv, num }] לפי סדר המסלול (גופים מחוקים / מקטעים לא קיימים – לא נכנסים)
+function routeSlots(bays, map) {
+  const fm = new Map((isObj(map) && Array.isArray(map.fx) ? map.fx : []).filter((f) => isObj(f) && f.del !== 1 && typeof f.id === 'string').map((f) => [f.id, f]));
+  const out = [];
+  for (const id of new Set(Array.isArray(bays) ? bays : [])) {
+    const m = typeof id === 'string' ? /^(f[0-9]{1,4})-([ab])-([0-9]{1,2})$/.exec(id) : null;
+    const f = m && fm.get(m[1]);
+    if (!f || (m[2] === 'b' && f.sides !== 2) || !inR(+m[3], 1, inR(f.bays, 1, 30) ? f.bays : 0)) continue;
+    for (const lv of f.hi === true ? ['t', 'b'] : ['a']) out.push({ slot: id + '_' + lv, bay: id, fx: m[1], s: m[2], n: +m[3], lv, num: inR(f.num, 1, 100000) ? f.num : 0 });
+  }
+  out.sort((a, b) => (a.num || 1e6) - (b.num || 1e6) || (+a.fx.slice(1)) - (+b.fx.slice(1)) || a.s.localeCompare(b.s) || a.n - b.n || LV_ORD[a.lv] - LV_ORD[b.lv]);
+  return out;
+}
+// מועמדים: עד CANDS.max מקומות צילום שכנים במסלול (עד 3 לפני הנוכחי, והשאר אחריו), כולל הנוכחי. פחות משניים – אין מועמדים ([]).
+// מחזיר [{ slot, bay, lv, num, s, n }] – הנוכחי ראשון ברשימה
+function slotCands(bays, map, cur) {
+  const L = routeSlots(bays, map);
+  const i = L.findIndex((x) => x.slot === cur);
+  if (i < 0 || L.length < 2) return [];
+  let a = Math.max(0, i - CANDS.before);
+  const b = Math.min(L.length, a + CANDS.max);
+  a = Math.max(0, b - CANDS.max);
+  const W = L.slice(a, b);
+  return [L[i]].concat(W.filter((x) => x.slot !== cur));
+}
+// ניחוש המודל: slot_guess (או slotGuess) חייב להיות אחד מהמועמדים, slot_conf (או slotConf) מספר 0..1. מחזיר { s, c } או null
+function slotGuess(r, cands) {
+  if (!isObj(r) || !Array.isArray(cands) || !cands.length) return null;
+  const s = typeof r.slot_guess === 'string' ? r.slot_guess.trim() : typeof r.slotGuess === 'string' ? r.slotGuess.trim() : '';
+  if (!s || !RE_SLOT.test(s) || !cands.includes(s)) return null;
+  const c = num01(r.slot_conf != null ? r.slot_conf : r.slotConf);
+  return c == null ? null : { s, c: r2(c) };
+}
+
+// ---------- שלב 20ב: העברת תמונה בין מקטעים (s3MovePh) ----------
+// r = מסמך הסבב, owner = העובד של שני המקטעים, aiFrom / aiTo = תוצאות הבדיקה לפני ההעברה (aiTo = null כשהיעד ריק).
+// אחרי ההעברה: המקור ריק, והיעד מקבל את aiFrom (הקודם ביעד נשמר כ"קודמת" ולא נספר). מחזיר { nUid, nDone } לעדכון.
+function moveDone(r, owner, aiFrom, aiTo) {
+  const delta = (countsDone(aiFrom) ? 1 : 0) - ((countsDone(aiFrom) ? 1 : 0) + (countsDone(aiTo) ? 1 : 0));
+  const nUid = Object.assign({}, isObj(r) ? r.nUid : null);
+  const me = Object.assign({ n: 0, d: 0 }, nUid[owner]);
+  me.d = Math.max(0, Math.min(me.n, me.d + delta));
+  nUid[owner] = me;
+  return { nUid, nDone: Math.max(0, Math.min((r && r.n) || 0, ((r && r.nDone) || 0) + delta)) };
 }
 
 // ---------- s3sum (4.11) ----------
@@ -323,5 +381,6 @@ const validAt = (t, now) => Number.isInteger(t) && t >= MIN_T && t <= MAX_T && t
 module.exports = {
   ISSUE_KINDS, PRICE_KINDS, STATUSES, DONE_ST, LOW_CONF, IMG, THUMB, DRAFT, RE_SLOT,
   ADHOC_DAY: 20, DRAFT_DAY_MAX, decodeJpeg, draftImgs, checkSlot, quotaStep, draftDayStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  SUG_MIN, CANDS, routeSlots, slotCands, slotGuess, moveDone,
   israelMonth, validAt, fail,
 };

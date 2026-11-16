@@ -12,6 +12,7 @@
 //   s3SaveMap, s3SetBranch (מנהל־על), s3PutTex – המפה של סריקת החנות: שמירה עם נעילה וגרסאות, הגדרות סניף, טקסטורות (store3d-map.js).
 //   s3PutPano, s3DelPano – נקודות סיור 360 (שלב 18א, store3d-map.js).
 //   shelfCheck, mapDraft – בדיקת מדף וטיוטת מפה דרך Gemini, עם מכסה חודשית לסניף (store3d-ai.js).
+//   s3MovePh – העברת תמונה בין מקטעים בסבב, בלי AI ובלי מכסה (שלב 20ב, store3d-ai.js).
 //   s3Fix, s3Clean – משימות תיקון, ניקוי יומי וביצועי עובדים (store3d-extra.js).
 // כולן: רק מנהל (admins/{uid}) או עובד פעיל (staff/{uid}.active == true). התפקיד נקרא מהמסד בכל קריאה.
 
