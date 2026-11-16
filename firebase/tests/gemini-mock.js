@@ -86,13 +86,14 @@ function s3Answer(kind, v0) {
 // טיוטת מפה (תיקון 15.11.2026): state.mapdraftSeq = תור תשובות לבקשות הבאות (כל בקשה מוציאה אחת; ריק = state.mapdraft).
 // פריט: כמו state.mapdraft, או { cut: שם/אובייקט } = ה-JSON נחתך באמצע ו-finishReason: 'MAX_TOKENS' (תשובה קטועה).
 // תיקון טיוטה בכתב (mapFix, שלב 20ג): state.mapfix / state.mapfixSeq – כמו state.mapdraft / state.mapdraftSeq (ברירת מחדל mapdraft-ok).
-const state = { mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+const state = { dr: null, mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.dr = null; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
   if (typeof si === 'string' && si.startsWith('SEC-CHAT-V1')) return 'sec';
   if (typeof si === 'string' && si.startsWith('ORD-PARSE-V1')) return 'ordparse';
+  if (typeof si === 'string' && si.startsWith('DR-REP-V1')) return 'dr'; // דיווח יומי (lib/prompts-dr.js)
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
   if (s.startsWith('אתה בודק מדפים')) return 's3shelf';   // prompts-shelf.js (שלב 6)
@@ -129,7 +130,17 @@ function ordAnswer(body) {
   if (!r) r = { r: P.map((l) => ({ i: l.i, id: l.c && l.c[0] ? l.c[0].id : null })) };
   return { candidates: [{ content: { parts: [{ text: typeof r === 'string' ? r : JSON.stringify(r) }], role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
 }
+// דיווח יומי (16.11.2026): בקשה עם כמה חלקים (טקסט + הקלטות + תמונות). state.dr = אובייקט / פונקציה(body) / מחרוזת גולמית; בלי – תשובת ברירת מחדל.
+// inlineOf(body) – סוגי הקבצים שצורפו לבקשה, לפי הסדר (לבדיקת ריבוי קבצים).
+const DR_DEF = { tr: 'תמלול דמה', sum: 'סיכום למנהל', sumW: 'סיכום לעובד' };
+function inlineOf(body) { return (((body && body.contents) || [])[0] || { parts: [] }).parts.filter((p) => p && p.inlineData).map((p) => p.inlineData.mimeType); }
+function drAnswer(body) {
+  let r = DR_DEF;
+  try { r = typeof state.dr === 'function' ? state.dr(body) : state.dr != null ? state.dr : DR_DEF; } catch (e) { r = 'mock error'; }
+  return { candidates: [{ content: { parts: [{ text: typeof r === 'string' ? r : JSON.stringify(r) }], role: 'model' }, finishReason: 'STOP' }], usageMetadata: state.secUsage };
+}
 function rawAnswer(kind, body) {
+  if (kind === 'dr') return drAnswer(body || {});
   if (kind === 'sec') return secAnswer(body || {});
   if (kind === 'ordparse') return ordAnswer(body || {});
   if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
@@ -190,4 +201,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { ordPayload, start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };
+module.exports = { inlineOf, DR_DEF, ordPayload, start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };
