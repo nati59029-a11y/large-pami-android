@@ -219,7 +219,7 @@ const fakeMic = (page, deny, badStart) => page.evaluate(([d, bs]) => {
     await page.click('[data-a=secScOk][data-id=sc5]'); await H.settle(page, 500);
     check('אישור אחרי שהתמונה לא בזיכרון: "שלחו שוב את התמונה", בלי mark והכרטיס נשאר פתוח', /שלחו שוב את התמונה/.test(await toasts(page)) && all(o.bodies, 'secMedia', (b) => b.op === 'mark').length === m1 && !!(await page.$('[data-a=secScOk][data-id=sc5]')));
     // "מול העיניים": כרטיס פתוח מהשרת
-    await page.evaluate(() => { window.__sec.ey = { open: [{ id: 'e1', k: 'appr', title: 'מסמך לסריקה', sub: 'חשבונית', act: { k: 'scan', id: 'sc9', mid: 'img9' } }], did: [], hold: [], since: Date.now() }; rerender(); });
+    await page.evaluate(() => { window.__sec.tab = 'eyes'; /* 16.11: "מול העיניים" בלשונית משלו (#76) */ window.__sec.ey = { open: [{ id: 'e1', k: 'appr', title: 'מסמך לסריקה', sub: 'חשבונית', act: { k: 'scan', id: 'sc9', mid: 'img9' } }], did: [], hold: [], since: Date.now() }; rerender(); });
     await H.settle(page, 400);
     check('"מול העיניים": כרטיס scan פתוח עם כפתורי לסריקה/בטל', !!(await page.$('#secEyOpen [data-a=secScOk][data-id=sc9][data-mid=img9]')) && !!(await page.$('#secEyOpen [data-a=secScNo][data-id=sc9]')));
     // "מול העיניים": כרטיס משימה מסרטון (ההודעה לא נטענה בשיחה) – נפתח מהשורה; אישור חוזר אחרי שהסימון נכשל לא משכפל משימה
@@ -230,7 +230,7 @@ const fakeMic = (page, deny, badStart) => page.evaluate(([d, bs]) => {
       if (dup) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 409, message: 'Document already exists', status: 'ALREADY_EXISTS' } }) });
       return route.fallback();
     });
-    const eyTk = () => page.evaluate(() => { window.__sec.ey = { open: [{ id: 'md:tk7', k: 'media', title: 'לפתוח משימה? לבדוק את המקרר', act: { k: 'task', id: 'tk7', mid: 'vid7', txt: 'לבדוק את המקרר', via: 'video' }, r: { k: 'chat', id: 'vid7' } }], did: [], hold: [], since: Date.now() }; window.__toasts.length = 0; rerender(); });
+    const eyTk = () => page.evaluate(() => { window.__sec.tab = 'eyes'; window.__sec.ey = { open: [{ id: 'md:tk7', k: 'media', title: 'לפתוח משימה? לבדוק את המקרר', act: { k: 'task', id: 'tk7', mid: 'vid7', txt: 'לבדוק את המקרר', via: 'video' }, r: { k: 'chat', id: 'vid7' } }], did: [], hold: [], since: Date.now() }; window.__toasts.length = 0; rerender(); });
     o.R.markFail = true; await eyTk(); await H.settle(page, 300);
     check('"מול העיניים": שורת משימה מהשיחה עם "פתח משימה"', !!(await page.$('#secEyOpen [data-a=secTkOk][data-id=tk7][data-mid=vid7]')) && /מהשיחה/.test(await txt(page, '#secEyOpen')));
     await page.click('#secEyOpen [data-a=secTkOk][data-id=tk7]'); await H.settle(page, 900);
