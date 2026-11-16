@@ -177,6 +177,8 @@ function handle(req, res, raw) {
     mm = /^messages\/([A-Za-z0-9_-]+)\/attachments\/([A-Za-z0-9_-]+)$/.exec(rest);
     if (req.method === 'GET' && mm) { // שלב 7: הורדת קובץ מצורף
       if (!b.msgs[mm[1]] || !state.atts[mm[2]]) return json(404, { error: { code: 404 } });
+      // 16.11: הורדת קובץ מצורף נכשלת – mode.attFail = קוד התשובה (403 = הרשאה נדחתה, 500 = תקלה בצד Google, 404 = הקובץ לא קיים)
+      if (state.mode.attFail) return json(state.mode.attFail, { error: { code: state.mode.attFail, errors: state.mode.attFail === 403 ? [{ reason: 'insufficientPermissions' }] : [] } });
       state.attGets.push(mm[2]);
       return json(200, { size: state.atts[mm[2]].length, data: b64u(state.atts[mm[2]]) });
     }
