@@ -641,7 +641,7 @@ const MAIL_DECL = [{ name: 'prepareReplyDraft', description: 'מכינה טיו�
   mr: { type: 'string', description: 'מזהה ההנחיה הקבועה שלפיה נכתבה הטיוטה, או ריק' }, mrc: { type: 'number', description: 'עד כמה ההנחיה מתאימה למייל הזה, 0–1' } }, required: ['text'] } }];
 function mailOut(id, x, dr) {
   return { id, from: x.from || '', name: x.name || '', subj: x.subj || x.sum || '', snip: String(x.text || x.sum || '').replace(/\s+/g, ' ').slice(0, 140), t: x.t || 0, st: x.st || '', flags: x.flags || [], box: x.box || '',
-    hum: x.hum === true, aw: x.aw || '', task: x.task || '',
+    hum: x.hum === true, aw: x.aw || '', task: x.task || '', hd: x.hd === true, // hd: סומן "טופל" (16.11.2026 – למסנן "לטיפול")
     draft: dr ? { st: dr.st, src: dr.src || '', ad: dr.ad === true, am: dr.am === true } : null };
 }
 function draftOut(id, x) {
