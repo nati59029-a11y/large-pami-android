@@ -206,7 +206,7 @@ dialog h3{margin-bottom:12px;font-size:1.2rem}
 .ban svg{width:20px;height:20px;flex:none;transform:scaleX(-1)}.ban .tag{flex:none}
 .hero .ib svg{width:22px;height:22px}
 
-body.wk .bar,body.wk header [aria-label="הגדרות"],body.mg .bar,body.mg header [aria-label="הגדרות"]{display:none!important}body.mg main{padding-bottom:30px}body.wk main{padding-bottom:30px}
+body.wk .bar:not(.wbar),body.wk header [aria-label="הגדרות"],body.mg .bar,body.mg header [aria-label="הגדרות"]{display:none!important}body.mg main{padding-bottom:30px}body.wk main{padding-bottom:30px}/* סבב 2: סרגל תחתון לעובד בלבד (בית · משימות · בקשות · עוד). מוצג רק במסכים הראשיים; סרגל המנהל לא משתנה */.wbar{display:none;grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:1fr}body.wk.wkb .wbar{display:grid}body.wk.wkb main{padding-bottom:96px}.wbar button{position:relative}.wbar .bdg{position:absolute;top:2px;inset-inline-start:calc(50% + 6px);min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:var(--bad);color:#fff;font-size:.68rem;font-weight:800;line-height:18px;text-align:center}
 
 #viewer{position:fixed;inset:0;z-index:99;background:#111;display:flex;flex-direction:column}#viewer[hidden]{display:none!important}#fbburst{position:fixed;inset:0;z-index:99;background:#000;display:flex;flex-direction:column;color:#fff}#fbburst video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}#fbburst .fbbtop{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));font-size:1.1rem}#fbburst .fbbtop b{color:#fff}#fbburst .fbbbar .btn.g{color:#fff;border-color:rgba(255,255,255,.7);background:transparent}#fbburst .fbbbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}#fbburst .fbbbar .btn{flex:1;min-width:0}#fbburst .fbbsh{flex:0 0 76px;width:76px;height:76px;border-radius:50%;border:5px solid var(--acc);background:#fff;cursor:pointer}#fbburst .fbbsh:active{transform:scale(.92)}#fbburst .fbbfl{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none}#fbburst .fbbfl.on{animation:fbbfl .25s ease-out}@keyframes fbbfl{from{opacity:.7}to{opacity:0}}#viewer .vbar{display:flex;gap:10px;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top))}#viewer .vbar .btn{flex:1}#viewer .vimg{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;touch-action:pinch-zoom pan-x pan-y}#viewer img{max-width:100%;max-height:100%;object-fit:contain}
 
@@ -417,6 +417,12 @@ html[data-ds] tr.shbad>td{background:var(--srf-0);box-shadow:inset 0 -2px 0 var(
 <button class="fab" data-a="add" aria-label="הוספה"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
 <button data-a="tab" data-v="exp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15M6 13l6 6 6-6"/><path d="M5 4h14"/></svg>הוצאות</button>
 <button data-a="tab" data-v="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>עוד</button>
+</nav>
+<nav class="bar wbar" aria-label="ניווט עובד">
+<button data-a="wtab" data-w="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5M5.5 10v9.5h13V10M10 19.5v-5h4v5"/></svg>בית</button>
+<button data-a="wtab" data-w="tk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5h6M9 12l2 2 4-4"/></svg>משימות</button>
+<button data-a="wtab" data-w="rq"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v12H4zM4 7l8 6 8-6"/></svg>בקשות<span class="bdg" hidden></span></button>
+<button data-a="wtab" data-w="more"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>עוד</button>
 </nav>
 <div id="sheet" class="sheet" hidden></div><div id="uspane" class="uspane" role="region" aria-label="תמונת המסמך" hidden></div><div id="usdiv" class="usdiv" role="separator" aria-orientation="vertical" aria-label="שינוי רוחב התמונה" tabindex="0" hidden></div>
 <dialog id="dlg"></dialog>
@@ -696,10 +702,19 @@ let NAV=[{v:'home'}],A=null;
 const cur=()=>NAV[NAV.length-1];
 function go(v,a){NAV.push({v,a});P.open=false;render(1)}
 function tab(v){NAV=[{v}];P.open=false;render(0)}
-function goBack(){if(typeof fbbBack==='function'&&fbbBack())return true;const vw=document.getElementById('viewer');if(vw&&!vw.hidden){vwClose();return true}if(A){sheetBack();return true}const d=$('#dlg');if(d.open){d.close();return true}if(typeof isW==='function'&&isW()&&typeof WS!=='undefined'&&WS!=='home'){if(WS==='rp'){ACT.wkHome();return true}WS=WS==='manual'?'exp':'home';rerender();return true}if(NAV.length>1){NAV.pop();render(-1);return true}return false}
+function goBack(){if(typeof fbbBack==='function'&&fbbBack())return true;const vw=document.getElementById('viewer');if(vw&&!vw.hidden){vwClose();return true}if(A){sheetBack();return true}const d=$('#dlg');if(d.open){d.close();return true}if(typeof isW==='function'&&isW()&&typeof WS!=='undefined'&&WS!=='home'){if(WS==='rp'){ACT.wkHome();return true}WS=WS==='manual'?'exp':'home';rerender();return true}if(NAV.length>1){NAV.pop();render(-1);return true}if(typeof isW==='function'&&isW()&&NAV[0].v!=='wk'){tab('wk');return true}return false}
 ACT.back=()=>goBack();
 ACT.go=el=>{let a=el.dataset.arg;try{a=a&&a[0]==='{'?JSON.parse(a):a}catch(e){}go(el.dataset.v,a)};
 ACT.tab=el=>tab(el.dataset.v);
+/* סבב 2: סרגל תחתון לעובד בלבד. בית ← מסך הבית (WS='home'), משימות ← tk, בקשות ← rq, עוד ← wkMore. מונה על "בקשות" = תשובות שלא נקראו (rqUnread). כל המסכים הקיימים של העובד (הכנסות/הוצאות/סריקה וכו') נשארים במשבצות מסך הבית */
+const wbShow=()=>{if(!isW())return false;const v=cur().v;return v==='tk'||v==='rq'||v==='wkMore'||(v==='wk'&&WS==='home')};
+function wbUp(){const nb=document.querySelector('.wbar');if(!nb)return;const on=wbShow();document.body.classList.toggle('wkb',on);if(!on)return;
+ const tk=bzF('tasks'),v=cur().v,k=v==='tk'?'tk':v==='rq'?'rq':v==='wkMore'?'more':'home';
+ if(tk&&!RQ.mb&&(!RQ.mat||Date.now()-RQ.mat>60000))rqMine().catch(()=>{});
+ const n=tk?RQ.mine.filter(rqUnread).length:0;
+ nb.querySelectorAll('button').forEach(b=>{const w=b.dataset.w;b.style.display=(w==='tk'||w==='rq')&&!tk?'none':'';b.classList.toggle('on',w===k);const g=b.querySelector('.bdg');if(g){g.textContent=n>9?'9+':String(n);g.hidden=!(w==='rq'&&n)}})}
+ACT.wtab=el=>{if(!isW())return;const w=el.dataset.w;WS='home';tab(w==='tk'?'tk':w==='rq'?'rq':w==='more'?'wkMore':'wk')};
+V.wkMore=()=>({t:'עוד',s:esc((SY.email||'').split('@')[0]),h:`<button class="btn g" style="width:100%" data-a="updChk">בדוק עדכון והתקן</button><button class="btn g" style="width:100%;margin-top:8px" data-a="syOut">התנתק</button><p class="note" style="margin:12px 0 0">הכנסות, הוצאות, סריקה ושאר המסכים נמצאים בבית.</p>`});
 let SCROLL={};
 function render(dir,keep){
  const c=cur();try{if(c.v!=='brand'&&BR)brFree()}catch(e){}/* 7: שחרור תמונות המיתוג ביציאה מהמסך */const x=V[c.v]?V[c.v](c.a):{t:'?',h:''};
@@ -707,7 +722,7 @@ function render(dir,keep){
  $('#main').innerHTML=x.h;
  $('#ttl').innerHTML=`${x.s?`<small>${esc(x.s)}</small>`:''}${esc(x.t)}`;
  $('#bk').style.display=NAV.length>1?'':'none';
- const root=NAV[0].v;$$('.bar [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===root));
+ const root=NAV[0].v;$$('.bar [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===root));try{wbUp()}catch(e){}
  if(keep)window.scrollTo(0,y);else window.scrollTo(0,0);
  if(dir){const m=$('#main');m.classList.remove('sw');void m.offsetWidth;m.classList.add('sw')}
  document.documentElement.dataset.th=themeNow();document.documentElement.dataset.fs=S.fs||1;try{bzSkin()}catch(e){dsApply()}
@@ -3743,12 +3758,15 @@ async function tkMark(ids){const now=Date.now(),u=SY.uid,pth=encodeURIComponent(
 let TKST={L:null,busy:0,t:0};
 async function tkStaffLoad(){if(TKST.busy)return;TKST.busy=1;try{const j=await fsx('/staff?pageSize=300');TKST.L=((j&&j.documents)||[]).map(d=>{const f=fvj({mapValue:d}),id=idOf(d);return{uid:id,name:String(f.name||'').trim()||String(f.email||'').split('@')[0]||id,em:String(f.email||'').split('@')[0].toLowerCase(),active:f.active===true}}).filter(x=>x.active&&idOk(x.uid)).sort((a,b)=>a.name.localeCompare(b.name,'he'))}catch(e){TKST.L=null}finally{TKST.busy=0;TKST.t=Date.now();tkRe()}}
 /* מצב טופס יצירה (מנהל): נמענים שנבחרו, תמונות נדרשות, תמונות מצורפות (כבר מוקטנות) */
-let TKN={sel:null,np:0,imgs:[]};
+let TKN={sel:null,np:0,imgs:[],kind:'any'};/* סבב 2: kind = one (לעובד אחד) / all (עותק לכל נבחר) / any (מי שלוקח ראשון – ההתנהגות הקודמת) */
 async function tkDo(fn,msg){try{await fn();if(msg)toast(msg)}catch(e){toast(tkErr(e))}try{await tkLoad()}catch(e){}tkRe()}
 function tkTile(){const n=tkOverN();return `<button class="tile" data-a="go" data-v="tk" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:34px;height:34px;display:block;margin:0 auto 6px"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>משימות${n?`<small style="display:block;color:var(--bad);font-weight:700">${n} באיחור</small>`:''}</button>`}
 const tkDT=ms=>ms?new Date(ms).toLocaleString('he-IL',{weekday:'short',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
 let TKT='open';
-V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbAdmin(),L=tkVis().slice();
+/* סבב 2: מעקב לקבוצת עותקים ("כל העובדים שנבחרו צריכים לבצע"): משימות של מנהל, נמען אחד כל אחת, אותו טקסט ואותו זמן יצירה (cr). רק כשיש לפחות 2. המפה נבנית פעם אחת לכל ציור מסך */
+let TKGM=null;const tkGrpKey=t=>t.role==='a'&&t.to&&t.to.length===1?t.txt+'\u0001'+t.cr:'';
+function tkGrpTag(t){const k=tkGrpKey(t);if(!k||!TKGM)return '';const g=TKGM[k];if(!g||g.n<2)return '';return `<span class="tag ${g.d===g.n?'t3':'t2'}">${g.d} מתוך ${g.n} ביצעו${g.w?' · '+g.w+' ממתינות לאישור':''}</span> `}
+V.tk=()=>{TKGM={};(TK.L||[]).forEach(x=>{const k=tkGrpKey(x);if(!k)return;const g=TKGM[k]||(TKGM[k]={n:0,d:0,w:0});g.n++;if(x.st==='done')g.d++;else if(x.st==='wait')g.w++});if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbAdmin(),L=tkVis().slice();
  if(adm&&!TKST.busy&&(!TKST.t||Date.now()-TKST.t>(TKST.L?6e5:3e4)))tkStaffLoad();
  const PL=PT.L||[],wt=adm?L.filter(t=>t.st==='wait'||tkCNew(t)):[],
   tabs=(window.TKW?TKW.tabs(adm,L,PL):[]).concat([['open','פתוחות',L.filter(t=>t.st!=='done').length+PL.filter(p=>p.st!=='done').length]].concat(adm?[['wait',icd('clock')+' ממתין לטיפול',wt.length]]:[]).concat([['late','באיחור',L.filter(tkIsLate).length],['done','בוצעו',(adm?L.filter(t=>t.st==='done').length:0)+PL.filter(p=>p.st==='done').length]]).concat(adm?[['rc',''+icd('refresh')+' קבועות',RC.L?RC.L.length:0]]:[]).concat([['sum',''+icd('chart')+' סיכום',0]]));
@@ -3758,7 +3776,7 @@ V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbA
  const card=t=>{const lt=tkIsLate(t),mine=t.owner===SY.uid;
   const cn=tkCNew(t),unr=tkUnr(t),cc=TKC[t.id]&&!cn?TKC[t.id].n:null;
   const tags0=(window.TKW?TKW.tag(t):'')+(cn||unr?`<button type="button" class="chip" data-a="tkRead" data-id="${esc(t.id)}" style="min-height:28px;padding:0 10px;font-size:.78rem;margin-inline-end:4px">✓ סמן כנקרא</button> `:'')+(t.rc?'<span class="tag t2">'+icd('refresh')+' קבועה</span> ':'')+(unr?'<span class="tag t2">'+icd('dot')+' משימה חדשה</span> ':'')+(cn?'<span class="tag t2">'+icd('chat')+' תגובה חדשה</span> ':'')+(tkNew(t)&&t.st==='open'?(t.ow?(t.ow===SY.uid?'<span class="tag t3">אני מטפל</span> ':'<span class="tag t1">בטיפול של '+esc(t.owN||'עובד')+'</span> '):'<span class="tag t1">'+(adm?'לא נתפסה':'פנויה לתפיסה')+'</span> '):'')+(lt?'<span class="tag t4">באיחור</span> ':'')+(t.st==='wait'?`<span class="tag t1">${t.pr==='1'?'ממתין לאישור תמונה':'ממתין לאישור מנהל'}</span> `:'')+(t.st==='open'&&t.rt==='1'?'<span class="tag t4">'+icd('undo')+' הוחזרה על ידי המנהל</span> ':'')+(t.st==='open'&&t.pr==='1'?'<span class="tag t2">נדרשת תמונה</span> ':'')+(t.st==='done'?'<span class="tag t3">בוצע</span>':'');
-  const wk=!!(window.TKW&&TKW.wk()),tags=wk?TKW.wkTags(t,lt):tags0;
+  const wk=!!(window.TKW&&TKW.wk()),tags=(wk?TKW.wkTags(t,lt):tags0)+(adm?tkGrpTag(t):'');
   const nw=tkNew(t),me=SY.uid,mineN=nw&&t.ow===me,did=esc(t.id),np=t.np||0,wp=t.wp||0;
   let act='';
   /* הזרימה הישנה (תמונה בודדת pr / "בוצע") – למשימות ישנות, למנהל, ולמטפל במשימה חדשה בלי תמונות נדרשות */
@@ -3794,16 +3812,19 @@ V.tk=()=>{if(!TK.at||Date.now()-TK.at>20000)tkLoad().catch(()=>{});const adm=fbA
   <button class="btn g w" data-a="tkRefresh" style="margin-top:8px">רענן</button>`}};
 function tkSelInit(){if(TKN.sel===null&&TKST.L)TKN.sel=new Set(TKST.L.map(x=>x.uid));return TKN.sel||new Set()}
 function tkFormExtra(){const S=TKST.L;
- const mi=`<div id="tkmi" style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">${tkMiHtml()}</div><label class="btn g" style="cursor:pointer;margin:2px 0">${icd('img')} צרף תמונות (עד 5)<input type="file" accept="image/*" multiple data-c="tkMimg" hidden></label>`;
+ const mi=`<div id="tkmi" style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">${tkMiHtml()}</div><label class="btn g" style="cursor:pointer;margin:2px 0">${icd('cam')} הוסף תמונה להוראות (עד 5)<input type="file" accept="image/*" multiple data-c="tkMimg" hidden></label>`;
  if(!S||!S.length)return (TKST.busy||!TKST.t?'<p class="note">טוען רשימת עובדים…</p>':`<p class="note" style="color:var(--bad)">${S?'אין עובדים פעילים.':'לא ניתן לטעון את רשימת העובדים.'} המשימה תישלח לכל הצוות. <button type="button" class="btn g" data-a="tkStaffRetry">נסה שוב</button></p>`)+'<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" name="pr" value="1"> לבקש תמונה שהמשימה בוצעה</label>'+mi;
  const sel=tkSelInit();
- return `<div class="f"><span>נמענים</span><div class="chips" id="tkrc" style="margin:4px 0"><button type="button" class="chip ${sel.size===S.length?'on':''}" data-a="tkSel" data-v="*">כל העובדים</button>${S.map(x=>`<button type="button" class="chip ${sel.has(x.uid)?'on':''}" data-a="tkSel" data-v="${esc(x.uid)}">${esc(x.name)}</button>`).join('')}</div></div>
- <div class="f"><span>תמונות נדרשות לסגירה</span><div class="chips" id="tknp" style="margin:4px 0">${[0,1,2,3].map(n=>`<button type="button" class="chip ${TKN.np===n?'on':''}" data-a="tkNp" data-v="${n}">${n}</button>`).join('')}</div></div>`+mi}
+ const KD=[['one','לעובד אחד','נשלחת ישר לעובד שבחרת, כמשימה שלו.'],['all','כל העובדים שנבחרו צריכים לבצע','כל עובד מקבל עותק משלו, וכל אחד מבצע.'],['any','אחד מהעובדים שנבחרו (מי שלוקח ראשון)','מופיע "אני לוקח את זה"; מי שלוקח – המשימה שלו.']];
+ return mi+`<div class="f"><span>למי</span><div class="chips" id="tkrc" style="margin:4px 0"><button type="button" class="chip ${sel.size===S.length?'on':''}" data-a="tkSel" data-v="*">כל העובדים</button>${S.map(x=>`<button type="button" class="chip ${sel.has(x.uid)?'on':''}" data-a="tkSel" data-v="${esc(x.uid)}">${esc(x.name)}</button>`).join('')}</div></div>
+ <div class="f"><span>סוג המשימה (בחירה אחת)</span><div id="tkkd" role="radiogroup" aria-label="סוג המשימה" style="margin:4px 0">${KD.map(k=>`<button type="button" role="radio" aria-checked="${TKN.kind===k[0]}" class="opt ${TKN.kind===k[0]?'on':''}" data-a="tkKind" data-v="${k[0]}" style="${TKN.kind===k[0]?'border-color:var(--acc)':''}"><span>${TKN.kind===k[0]?'● ':'○ '}${k[1]}<small>${k[2]}</small></span></button>`).join('')}</div></div>
+ <div class="f"><span>דרוש תמונה מהעובד בסיום</span><div class="chips" id="tknp" style="margin:4px 0">${[0,1,2,3].map(n=>`<button type="button" class="chip ${TKN.np===n?'on':''}" data-a="tkNp" data-v="${n}">${n}</button>`).join('')}</div></div>`}
 const tkMiHtml=()=>TKN.imgs.map((u,i)=>`<span style="position:relative;display:inline-block"><img src="${esc(u)}" alt="תמונה ${i+1}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"><button type="button" class="btn r" data-a="tkMiDel" data-i="${i}" aria-label="הסר תמונה" style="position:absolute;top:-6px;inset-inline-start:-6px;min-height:0;padding:0 6px;line-height:20px">✕</button></span>`).join('');
 const tkMiPaint=()=>{const e=$('#tkmi');if(e)e.innerHTML=tkMiHtml()};
 ACT.tkStaffRetry=()=>{TKST.t=0;tkStaffLoad()};
-ACT.tkSel=el=>{const S=TKST.L||[],sel=tkSelInit(),v=el.dataset.v;if(v==='*'){if(sel.size===S.length)sel.clear();else S.forEach(x=>sel.add(x.uid))}else{if(sel.has(v))sel.delete(v);else sel.add(v)}
+ACT.tkSel=el=>{const S=TKST.L||[],sel=tkSelInit(),v=el.dataset.v;if(TKN.kind==='one'){if(v==='*')return toast('בסוג "לעובד אחד" בוחרים עובד אחד');sel.clear();sel.add(v)}else if(v==='*'){if(sel.size===S.length)sel.clear();else S.forEach(x=>sel.add(x.uid))}else{if(sel.has(v))sel.delete(v);else sel.add(v)}
  document.querySelectorAll('#tkrc .chip').forEach(c=>c.classList.toggle('on',c.dataset.v==='*'?sel.size===S.length:sel.has(c.dataset.v)))};
+ACT.tkKind=el=>{const k=el.dataset.v;if(!['one','all','any'].includes(k))return;TKN.kind=k;if(k==='one'){const sel=tkSelInit();if(sel.size!==1)TKN.sel=new Set()}tkRe()};
 ACT.tkNp=el=>{TKN.np=+el.dataset.v||0;document.querySelectorAll('#tknp .chip').forEach(c=>c.classList.toggle('on',+c.dataset.v===TKN.np))};
 ACT.tkMiDel=el=>{TKN.imgs.splice(+el.dataset.i,1);tkMiPaint()};
 CHG.tkMimg=async el=>{const fs=[...(el.files||[])];el.value='';if(!fs.length)return;const room=5-TKN.imgs.length;if(fs.length>room)toast('אפשר לצרף עד 5 תמונות');
@@ -3872,17 +3893,23 @@ FRM.tkAdd=async f=>{const x=fd(f),txt=String(x.txt||'').trim().slice(0,500);if(!
  const now=Date.now(),id=uid(),adm=fbAdmin();
  const fields={owner:sv(SY.uid),by:sv(fbBy()),role:sv(adm?'a':'w'),txt:sv(txt),cr:iv(now),due:iv(tkDue(now)),st:sv('open'),open:sv('1'),pr:sv(adm&&x.pr?'1':''),img:sv(''),sub:iv(0),doneBy:sv(''),note:sv(''),ok:iv(0),late:sv('')};if(X)Object.assign(fields,X.f(now));
  /* מנהל עם רשימת עובדים: משימה חדשה עם נמענים. בלי רשימה – משימה ישנה לכל הצוות */
- let ims=[];const S=TKST.L;
+ let ims=[],cp=null;const S=TKST.L;
  if(adm){ims=TKN.imgs.slice();if(S&&S.length){const sel=tkSelInit(),pk=S.filter(z=>sel.has(z.uid));
    if(!pk.length){if(b)b.disabled=false;return toast('בחר לפחות עובד אחד')}
+   if(TKN.kind==='one'&&pk.length!==1){if(b)b.disabled=false;return toast('בסוג "לעובד אחד" בוחרים עובד אחד בדיוק')}
    if(pk.length>30){if(b)b.disabled=false;return toast('אפשר לבחור עד 30 עובדים. בחר פחות')}
-   const one=pk.length===1;fields.pr=sv('');
+   const one=pk.length===1;fields.pr=sv('');if(TKN.kind==='all'&&!one)cp=pk;
    Object.assign(fields,{to:{arrayValue:{values:pk.map(z=>sv(z.uid))}},toN:{arrayValue:{values:pk.map(z=>sv(z.name))}},ow:sv(one?pk[0].uid:''),owN:sv(one?pk[0].name:''),clt:iv(one?now:0),np:iv(TKN.np),wp:iv(0),mi:iv(ims.length)})}
   else if(ims.length)fields.mi=iv(ims.length)}
- let ok=false;
- try{try{await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})})}catch(e){if(!(X&&X.old(e,fields)))throw e;await fsx('/tasks?documentId='+encodeURIComponent(id),{method:'POST',body:JSON.stringify({fields})})}ok=true;toast(X&&X.msg||'✓ המשימה נוספה');f.reset();if(X)X.done(id);TKT=TKT==='my'?'my':'open'}catch(e){toast(e.tkw||tkErr(e))}finally{if(b)b.disabled=false}
- if(ok&&ims.length){let n=0;try{for(const u of ims){await tkPutImg(id,'m'+(n+1),u);n++}}catch(e){toast('המשימה נוצרה, אבל רק '+n+' מתוך '+ims.length+' תמונות הועלו. '+tkErr(e));try{await tkPatch(id,{mi:n})}catch(e2){}}}
- if(ok){TKN.imgs=[];TKN.np=0;TKN.sel=null}
+ /* סבב 2: "כל העובדים שנבחרו צריכים לבצע" = משימה רגילה נפרדת לכל עובד (נמען אחד, תפוסה אצלו – כמו "לעובד אחד"), באותם שדות ובאותה כתיבה. אין שדה קישור בחוקים, לכן העותקים נקשרים לפי אותו טקסט ואותו זמן יצירה (cr זהה) – כך המעקב "X מתוך Y ביצעו" מזהה אותם */
+ const tg=cp?cp.map(z=>({id:uid(),f:Object.assign({},fields,{to:{arrayValue:{values:[sv(z.uid)]}},toN:{arrayValue:{values:[sv(z.name)]}},ow:sv(z.uid),owN:sv(z.name)}),u:z.uid})):[{id,f:fields,u:''}];
+ const made=[];let ok=false,fl='';
+ for(const g of tg){try{try{await fsx('/tasks?documentId='+encodeURIComponent(g.id),{method:'POST',body:JSON.stringify({fields:g.f})})}catch(e){if(!(X&&X.old(e,g.f)))throw e;await fsx('/tasks?documentId='+encodeURIComponent(g.id),{method:'POST',body:JSON.stringify({fields:g.f})})}made.push(g)}catch(e){fl=e.tkw||tkErr(e);break}}
+ ok=made.length===tg.length;
+ if(made.length){toast(ok?(X&&X.msg||(cp?'✓ נוצרו '+made.length+' משימות, אחת לכל עובד':'✓ המשימה נוספה')):'נוצרו רק '+made.length+' מתוך '+tg.length+' משימות. '+fl+' נשארו בטופס רק העובדים שעוד לא קיבלו');if(ok){f.reset();if(X)X.done(made[0].id);TKT=TKT==='my'?'my':'open'}}else toast(fl)
+ if(b)b.disabled=false;
+ for(const g of made){if(!ims.length)break;let n=0;try{for(const u of ims){await tkPutImg(g.id,'m'+(n+1),u);n++}}catch(e){toast('המשימה נוצרה, אבל רק '+n+' מתוך '+ims.length+' תמונות הועלו. '+tkErr(e));try{await tkPatch(g.id,{mi:n})}catch(e2){}}}
+ if(ok){TKN.imgs=[];TKN.np=0;TKN.sel=null;TKN.kind='any'}else if(made.length&&cp){TKN.sel=new Set(tg.filter(g=>!made.includes(g)).map(g=>g.u))}
  /* tkRe (ולא rerender): בכישלון הטקסט שהוקלד נשאר בטופס */
  try{await tkLoad()}catch(e){}tkRe()};
 /* כתיבת תמונה לתת-אוסף p של המשימה: m1..m5 מנהל, w1..w3 ביצוע */
@@ -6557,7 +6584,7 @@ async function rqQ(fld,op,val,lim){const sq={from:[{collectionId:'rq'}],select:{
 /* מנהל: הבקשות הממתינות (st == new). נקרא גם מ-inbTick (q=1: בלי ציור מחדש, inbTick מחליט) */
 async function rqLoad(q){if(!isA()||RQ.b||!fbRole()||!bzF('tasks'))return;RQ.b=1;RQ.at=Date.now();try{RQ.L=(await rqQ('st','EQUAL','new',200)).sort((a,b)=>(a.cAt||a.t)-(b.cAt||b.t))}catch(e){}finally{RQ.b=0}if(!q&&['rq','todo','home'].includes(cur().v))rqRe()}
 async function rqHLoad(){if(!isA()||RQ.hb)return;RQ.hb=1;RQ.hat=Date.now();try{RQ.hl=(await rqQ('st','IN',['done','rej'],100)).sort((a,b)=>(b.aAt||b.t)-(a.aAt||a.t))}catch(e){}finally{RQ.hb=0}if(cur().v==='rq')rqRe()}
-async function rqMine(){if(!isW()||RQ.mb||!bzF('tasks'))return;RQ.mb=1;RQ.mat=Date.now();try{RQ.mine=(await rqQ('owner','EQUAL',SY.uid,100)).sort((a,b)=>b.t-a.t)}catch(e){}finally{RQ.mb=0}if(cur().v==='tk')tkRe();else if(cur().v==='rq'||(cur().v==='wk'&&WS==='home'))rqRe()}
+async function rqMine(){if(!isW()||RQ.mb||!bzF('tasks'))return;RQ.mb=1;RQ.mat=Date.now();try{RQ.mine=(await rqQ('owner','EQUAL',SY.uid,100)).sort((a,b)=>b.t-a.t)}catch(e){}finally{RQ.mb=0}if(cur().v==='tk')tkRe();else if(cur().v==='rq'||(cur().v==='wk'&&WS==='home'))rqRe();else try{wbUp()}catch(e){}}
 /* לא מציירים מחדש מעל חלון פתוח או באמצע כתיבת בקשה */
 function rqRe(){if(document.querySelector('#dlg[open]'))return;const ta=document.querySelector('form[data-f=rqNew] textarea');if(ta&&ta.value.trim())return;rerender()}
 const rqGet=id=>RQ.L.concat(RQ.hl,RQ.mine).find(x=>x.id===id);
