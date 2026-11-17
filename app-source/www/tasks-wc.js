@@ -59,10 +59,12 @@ function pass(x,F,now){if(F.q){const s=[x.txt,x.by,x.owN,x.cat,(x.toN||[]).join(
  switch(F.c){case'mine':return rem||(x.pv?x.owner===SY.uid:(x.ow===SY.uid||x.owner===SY.uid));case'mgr':return !rem&&!x.pv&&x.role==='a';case'prv':return rem||!!x.pv;case'urg':return !rem&&x.pri==='h';
   case'late':return rem?x.at<now:x.pv?(x.st!=='done'&&now>dl)||x.late==='1':tkIsLate(x);case'today':return dl<day0(1);case'week':return dl<wkEnd()}return true}
 W.flt=L=>{const F=fl();if(!on()||(!F.q&&!F.c&&!F.t))return L;const now=Date.now();return L.filter(x=>pass(x,F,now))};
-W.fbar=tab=>{if(!on()||!['my','open','late','done','wait'].includes(tab))return '';const F=fl();
+W.fbar=tab=>{if(!on()||!['my','open','late','done','wait'].includes(tab))return '';const F=fl(),h0=fbar0(tab,F);
+ if(!W.wk())return h0;return `<details class="card" style="padding:8px 12px;margin:0 0 8px" ${F.q||F.c||F.t?'open':''}><summary style="cursor:pointer;font-weight:600;color:var(--mut)">חיפוש וסינון</summary><div style="margin-top:8px">${h0}</div></details>`};
+function fbar0(tab,F){
  return `<div class="chips" style="flex-wrap:nowrap;overflow-x:auto;margin:-4px 0 8px;padding-bottom:2px">${FC.map(c=>`<button class="chip ${F.c===c[0]?'on':''}" data-a="tkwF" data-v="${c[0]}" style="flex:none;min-height:36px;padding:0 12px">${c[1]}</button>`).join('')}</div>
  ${(()=>{const C=cats();if(F.t&&!C.includes(F.t))C.unshift(F.t);return C.length?`<label class="f" style="margin:0 0 8px"><span>נושא</span><select data-c="tkwT" aria-label="סינון לפי נושא"><option value="">כל הנושאים</option>${C.map(c=>`<option value="${esc(c)}" ${c===F.t?'selected':''}>${esc(c)}</option>`).join('')}</select></label>`:''})()}
- <label class="f" style="margin:0 0 10px"><input type="search" data-i="tkwQ" value="${esc(F.q)}" maxlength="60" placeholder="חיפוש במשימות…" aria-label="חיפוש במשימות" style="width:100%"></label>`};
+ <label class="f" style="margin:0 0 10px"><input type="search" data-i="tkwQ" value="${esc(F.q)}" maxlength="60" placeholder="חיפוש במשימות…" aria-label="חיפוש במשימות" style="width:100%"></label>`}
 CHG.tkwT=el=>{const F=fl();F.t=String(el.value||'').slice(0,30);wr(FLK(),F);tkRe()};
 ACT.tkwF=el=>{const F=fl();F.c=el.dataset.v||'';wr(FLK(),F);tkRe()};
 let qT=0;INP.tkwQ=el=>{clearTimeout(qT);qT=setTimeout(()=>{const F=fl();F.q=String(el.value||'').slice(0,60);wr(FLK(),F);tkRe();const n=document.querySelector('input[data-i=tkwQ]');if(n){n.focus();try{n.setSelectionRange(n.value.length,n.value.length)}catch(e){}}},300)};
@@ -87,7 +89,7 @@ const remCard=r=>{const did=esc(r.id),sz=snzL()['r:'+r.id];
  <p class="note" style="margin:0">${esc(whenTx(r.at))}</p><div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px"><button class="btn" data-a="tkwRDone" data-id="${did}">✓ בוצע</button><button class="btn g" data-a="tkwSnz" data-k="r" data-id="${did}">${icd('clock')} דחה</button><button class="btn g" data-a="tkwRDel" data-id="${did}" aria-label="מחק תזכורת">${icd('trash')}</button></div></div>`};
 const srcTag=x=>`<span class="tag ${x.src==='מהמנהל'?'t2':'t1'}" style="opacity:.85">${x.src==='פרטית'?icd('lock'):x.src==='מהמנהל'?icd('user'):''} ${x.src}</span>`;
 let inMy=null;
-function myView(card){const now=Date.now(),F=fl(),all=items(),dn=doneToday(),L=all.filter(x=>pass(x.o,F,now));
+function myView(card){if(W.wk())return wkView(card);const now=Date.now(),F=fl(),all=items(),dn=doneToday(),L=all.filter(x=>pass(x.o,F,now));
  const open=all.filter(x=>!x.sz&&(x.nd||x.at<day0(1))).length,X=dn.length,Y=X+open,pc=Y?Math.round(X*100/Y):0;
  const G={};L.filter(x=>!x.sz).forEach(x=>{const g=x.nd?'mgr':grpOf(x.at,now);(G[g]=G[g]||[]).push(x)});
  const one=x=>{inMy=x;try{return x.k==='t'?card(x.o):x.k==='p'?ptCard(x.o):remCard(x.o)}finally{inMy=null}};
@@ -99,6 +101,58 @@ function myView(card){const now=Date.now(),F=fl(),all=items(),dn=doneToday(),L=a
  const S=L.filter(x=>x.sz).sort((p,q)=>p.sz-q.sz);
  if(S.length)h+=`<details class="card" style="padding:10px 14px"><summary style="cursor:pointer;font-weight:700">${icd('clock')} נדחו (${S.length})</summary><div style="margin-top:8px">${S.map(one).join('')}</div></details>`;
  if(dn.length)h+=`<details class="card" style="padding:10px 14px"><summary style="cursor:pointer;font-weight:700">✓ בוצע היום (${dn.length})</summary><div style="margin-top:6px">${dn.map(x=>`<p style="margin:6px 0;display:flex;gap:8px;justify-content:space-between"><span style="white-space:pre-wrap;opacity:.8">${esc(x.txt||'')}</span><small class="note" style="flex:none">${hhmm(x.t)}</small></p>`).join('')}</div></details>`;
+ return h}
+
+/* ---- 17.11.2026: מסך עובד – "עכשיו" / "אחר כך" / "עוד". רק לעובד (לא fbAdmin); מנהל רואה כמו קודם. בלי שינוי נתונים ---- */
+W.wk=()=>on()&&!fbAdmin();
+const MI={};
+function miImg(id){if(MI[id])return MI[id].img;MI[id]={img:null};try{Promise.resolve(fsx('/tasks/'+id+'/p/m1')).then(d=>{const v=d&&gv(d,'img');if(v&&imgOk(v)){MI[id].img=v;tkRe()}}).catch(()=>{})}catch(e){}return null}
+W.wkTags=(t,lt)=>{let s='';if(lt)s+='<span class="tag t4">באיחור</span> ';if(t.pri==='h')s+=`<span class="tag t4">${icd('warn')} דחוף</span> `;
+return s};
+W.wkDet=(t,tg)=>{const np=t.np||0,sa=rvNew()&&tkNew(t)&&t.st==='open'&&t.ow===SY.uid&&!(t.sa>0)?`<button class="btn g" data-a="tkwSa" data-id="${esc(t.id)}" style="margin-top:8px">▶ התחלתי</button>`:'';
+ tg=String(tg||'').trim();
+ return `<details style="margin:8px 0 0"><summary style="cursor:pointer;color:var(--mut)">פרטים</summary><div style="margin-top:6px">${tg?`<div style="margin:0 0 6px">${tg}</div>`:''}<p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${np>0?`<br>תמונות נדרשות לסגירה: ${np} (הועלו ${t.wp||0})`:''}</p>${sa}</div></details>`};
+function nowCard(t){const did=esc(t.id),me=SY.uid,np=t.np||0,wp=t.wp||0,nw=tkNew(t),lt=tkIsLate(t),dl=tkDl(t),cn=tkCNew(t),cc=TKC[t.id]&&!cn?TKC[t.id].n:null;
+ const PS='min-height:52px;font-size:1.05rem;font-weight:700;background:var(--acc);color:var(--onacc);border-color:var(--acc);opacity:1',LK='background:none;border:0;padding:6px 4px;min-height:36px;color:var(--mut);font:inherit;font-size:.9rem;cursor:pointer';
+ const lnk=(a,tx,x)=>`<button type="button" data-a="${a}" data-id="${did}" style="${LK}${x||''}">${tx}</button>`,glr=c=>`<label style="${LK}">${icd('img')} מהגלריה<input type="file" accept="image/*" data-c="${c}" data-id="${did}" hidden></label>`;
+ const cam=(c,tx,cap)=>`<label class="btn w" style="cursor:pointer;${PS}">${tx}<input type="file" accept="image/*" ${cap?'capture="environment" ':''}data-c="${c}" data-id="${did}" hidden></label>`;
+ const go=(a,tx)=>`<button class="btn w" data-a="${a}" data-id="${did}" style="${PS}">${tx}</button>`;
+ let pb='',nt='',ex='';
+ if(!nw){if(t.pr==='1'){pb=cam('tkimg',`${icd('cam')} צלם וסיים`,1);nt='נדרשת תמונה אחת';ex=glr('tkimg')}else pb=go('tkDone','✓ בוצע')}
+ else if(!t.ow){if((t.to||[]).length>1||np>0||t.pr==='1')pb=go('tkTake','✓ אני לוקח את זה');else pb=go('tkwQDone','✓ בוצע')}
+ else if(t.ow===me){
+  if(np>0){if(wp<np){pb=cam('tkwimg',`${icd('cam')} צלם תמונה (${wp+1}/${np})`,1);nt=np===1?'נדרשת תמונה אחת':`נדרשות ${np} תמונות (הועלו ${wp})`;ex=glr('tkwimg')}else pb=go('tkDone','✓ בוצע')}
+  else if(t.pr==='1'){pb=cam('tkimg',`${icd('cam')} צלם וסיים`,1);nt='נדרשת תמונה אחת';ex=glr('tkimg')}
+  else pb=go('tkDone','✓ בוצע')}
+ else nt='בטיפול של '+esc(t.owN||'עובד אחר');
+ const mi=t.mi>0?miImg(t.id):null,tg=W.wkTags(t,lt);
+ return `<div class="card" id="tkc-${did}" style="border-color:${lt?'var(--bad)':'var(--acc)'};border-width:2px${W.bar(t)}">${tg?`<div style="margin:0 0 6px">${tg}</div>`:''}<div style="white-space:pre-wrap;font-weight:700;font-size:1.2rem">${esc(t.txt)}</div>
+  ${mi?`<img src="${esc(mi)}" alt="תמונת הוראות מהמנהל" data-a="tkPics" data-id="${did}" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin:8px 0 0;display:block">`:''}${W.ckH(t)}
+  <p class="note" style="margin:8px 0">יעד: ${dl<Infinity?esc(tkDT(dl)):'בלי יעד'}</p>${t.note?`<p class="note" style="color:var(--bad);margin:0 0 8px;white-space:pre-wrap">${t.rt==='1'?'המנהל החזיר את המשימה':'התמונה לא אושרה'}: ${esc(t.note)}</p>`:''}
+  ${pb}${nt?`<p class="note" style="margin:6px 0 0;text-align:center">${nt}</p>`:''}
+  <div style="margin-top:8px;text-align:center">${[ex,(cn||tkUnr(t))?lnk('tkRead','✓ סמן כנקרא'):'',lnk('tkCm',`${icd('chat')} תגובה${cc!=null?' ('+cc+')':''}`,cn?';color:var(--acc)':''),t.mi>0||wp>0?lnk('tkPics',`${icd('img')} תמונות`):'',ndNew(t)?lnk('tkwNdSeen','ראיתי את התזכורת'):''].filter(Boolean).join('<span style="color:var(--mut)"> · </span>')}</div>
+  ${W.wkDet(t,W.tag(t))}</div>`}
+ACT.tkwQDone=async el=>{const t=tkGet(el.dataset.id);if(!t)return;
+ if(tkNew(t)&&!t.ow){el.disabled=true;try{await tkPatch(t.id,{ow:SY.uid,owN:fbBy(),clt:Date.now()},t.ut)}catch(e){try{await tkLoad()}catch(e2){}const u=tkGet(t.id);el.disabled=false;if(!(u&&u.ow===SY.uid)){tkRe();return toast(u&&u.ow?'המשימה כבר בטיפול של '+(u.owN||'עובד אחר'):tkErr(e))}}}
+ ACT.tkDone(el)};
+ACT.tkwOpen=el=>{const k=el.dataset.v||'';W.ex=W.ex===k?'':k;rerender()};
+function wkView(card){const now=Date.now(),F=fl(),all=items(),dn=doneToday(),L=all.filter(x=>pass(x.o,F,now));
+ const open=all.filter(x=>!x.sz&&(x.nd||x.at<day0(1))).length,X=dn.length,Y=X+open,pc=Y?Math.round(X*100/Y):0;
+ const one=x=>{inMy=x;try{return x.k==='t'?card(x.o):x.k==='p'?ptCard(x.o):remCard(x.o)}finally{inMy=null}};
+ const rk=x=>(x.nd||x.at<now)?0:x.o&&x.o.pri==='h'&&x.at<day0(1)?1:x.at<day0(1)?2:3;
+ const A=L.filter(x=>!x.sz).sort((a,b)=>(rk(a)-rk(b))||((a.at-b.at)||0)),nx=A[0],R=A.slice(1);W.nowId=nx&&nx.k==='t'?nx.id:'';
+ const pin=typeof window.drPin==='function'?window.drPin():'';
+ let h=pin+`<div style="padding:2px 2px 8px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700"><span>${Y?`בוצעו ${X} מתוך ${Y} היום`:'אין משימות להיום'}</span><span style="color:var(--acc)">${Y?pc+'%':''}</span></div>
+  <div role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pc}" aria-label="התקדמות היום" style="height:6px;border-radius:99px;background:var(--line);margin-top:6px;overflow:hidden"><div style="width:${pc}%;height:100%;background:var(--acc);border-radius:99px"></div></div></div>`;
+ if(nx)h+=`<div class="mh"><span>עכשיו</span></div>`+(nx.k==='t'?nowCard(nx.o):one(nx));
+ else h+=`<p class="note">${F.q||F.c||F.t?'אין תוצאות לסינון הזה.':'אין משימות פתוחות. אפשר להוסיף משימה ב"עוד".'}</p>`;
+ if(R.length)h+=`<div class="mh"><span>אחר כך</span><span>${R.length}</span></div>`+R.map(x=>{const k=x.k+':'+x.id;if(W.ex===k)return one(x);
+  return `<button class="opt" data-a="tkwOpen" data-v="${esc(k)}" style="margin-bottom:8px"><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${esc(x.o.txt||'')}</span><b style="color:var(--mut);white-space:nowrap;font-weight:600">${x.at<Infinity?esc(whenTx(x.at)):'בלי יעד'}</b>${ico('chev')}</button>`}).join('');
+ const S=L.filter(x=>x.sz).sort((p,q)=>p.sz-q.sz);
+ if(S.length)h+=`<details class="card" style="padding:10px 14px"><summary style="cursor:pointer;font-weight:700">${icd('clock')} נדחו (${S.length})</summary><div style="margin-top:8px">${S.map(one).join('')}</div></details>`;
+ if(dn.length)h+=`<details class="card" style="padding:10px 14px"><summary style="cursor:pointer;font-weight:700">✓ בוצע היום (${dn.length})</summary><div style="margin-top:6px">${dn.map(x=>`<p style="margin:6px 0;display:flex;gap:8px;justify-content:space-between"><span style="white-space:pre-wrap;opacity:.8">${esc(x.txt||'')}</span><small class="note" style="flex:none">${hhmm(x.t)}</small></p>`).join('')}</div></details>`;
+ h+=`<details class="card" style="padding:10px 14px"><summary style="cursor:pointer;font-weight:700">＋ עוד</summary><div style="display:grid;gap:8px;margin-top:8px"><button class="btn g" data-a="tkwFold">+ משימה חדשה</button><button class="btn g" data-a="tkwRNew">${icd('bell')} תזכורת חדשה</button><button class="btn g" data-a="tkwMorn">${icd('clock')} הודעת בוקר</button>${typeof rqBtn==='function'?rqBtn():''}
+  <div class="chips" style="margin:0"><button class="chip" data-a="tkTab" data-v="open">פתוחות</button><button class="chip" data-a="tkTab" data-v="late">באיחור</button><button class="chip" data-a="tkTab" data-v="sum">${icd('chart')} סיכום</button></div>${LN()?'':'<p class="note" style="margin:0">בגרסה הזו של האפליקציה אין התראות בטלפון: התזכורות מופיעות רק כאן, בתוך האפליקציה.</p>'}</div></details>`;
  return h}
 /* ---- לוח צוות (מנהל) ---- */
 function teamView(){const S=TKST.L,L=TK.L||[],now=Date.now(),t0=day0(0),m30=now-30*864e5,p=typeof tkPend==='function'?tkPend():{w:0,c:0},q=typeof rqN==='function'?rqN():0,fr=L.filter(t=>t.st==='open'&&tkNew(t)&&!t.ow).length;
@@ -119,7 +173,7 @@ W.view=(tab,card)=>{if(!on())return '';return tab==='team'?(fbAdmin()?teamView()
 W.tag=t=>{if(!on())return '';let s=(inMy&&inMy.k==='t'?srcTag(inMy)+' ':'')+xTags(t);
  if(t.sa>0&&t.st==='open')s+=`<span class="tag t3">${icd('clock')} ${t.ow===SY.uid?'התחלתי ב-':'בעבודה אצל '+esc(t.owN||'עובד')+' מ-'}${hhmm(t.sa)}</span> `;
  if(t.nd>0&&t.st==='open'){if(fbAdmin())s+=`<span class="tag t2">${icd('bell')} נשלחה תזכורת · ${hhmm(t.nd)}</span> `;else if(ndNew(t))s+=`<span class="tag t4">${icd('bell')} תזכורת מהמנהל · ${hhmm(t.nd)}</span> `}return s};
-W.act=t=>{if(!on()||t.st!=='open')return '';const did=esc(t.id),sa=rvNew()&&t.ow===SY.uid&&!(t.sa>0)?`<button class="btn g" data-a="tkwSa" data-id="${did}">▶ התחלתי</button>`:'';
+W.act=t=>{if(!on()||t.st!=='open')return '';const did=esc(t.id),sa=!W.wk()&&rvNew()&&t.ow===SY.uid&&!(t.sa>0)?`<button class="btn g" data-a="tkwSa" data-id="${did}">▶ התחלתי</button>`:'';
  if(fbAdmin())return sa+(tkNew(t)?`<button class="btn g" data-a="tkwNd" data-id="${did}">${icd('bell')} הזכר לעובד</button>`:'');
  return sa+(ndNew(t)?`<button class="btn g" data-a="tkwNdSeen" data-id="${did}">ראיתי את התזכורת</button>`:'')};
 W.ptTag=p=>{if(!on())return '';const s=(inMy?srcTag(inMy)+' ':'')+xTags(p)+(p.st!=='done'&&p.dl>=0?`<span class="tag t1">${icd('clock')} ${p.dl>0?'יעד: '+esc(whenTx(p.dl)):'בלי יעד'}</span> `:''),z=p.st!=='done'&&snzL()['p:'+p.id];return s+(z?`<span class="tag t1">${icd('clock')} נדחתה עד ${esc(whenTx(z))}</span>`:'')};
@@ -271,12 +325,12 @@ function xTags(x){let s='';if(x.pri==='h')s+=`<span class="tag t4">${icd('warn')
  const c=ckN(x);if(c[1])s+=`<span class="tag ${c[0]===c[1]?'t3':'t1'}">☑ ${c[0]}/${c[1]}</span> `;return s}
 W.bar=x=>!on()?'':x.pri==='h'?';border-inline-start:5px solid var(--bad)':x.pri==='l'?';border-inline-start:5px solid var(--mut)':'';
 const ckCan=x=>rvNew()&&(x.pv?(x.st!=='done'&&(x.owner===SY.uid||fbAdmin())):(x.st==='open'&&(fbAdmin()||x.ow===SY.uid||(!tkNew(x)&&!x.ow))));
-const ckO=new Set();
+const ckO=new Set(),ckC=new Set();
 W.ckH=x=>{if(!on())return '';const c=ckN(x);if(!c[1])return '';const k=(x.pv?'p':'t'),can=ckCan(x),did=esc(x.id);
- return `<details class="tkck" style="margin:0 0 6px" ${ckO.has(k+':'+x.id)?'open':''}><summary data-a="tkwCkTog" data-k="${k}" data-id="${did}" style="cursor:pointer;font-weight:600;color:var(--acc)">רשימת סימון ${c[0]}/${c[1]}</summary><div style="display:grid;gap:4px;margin-top:6px">${x.ck.map((t,i)=>{const d=c[2].has(i);
+ return `<details class="tkck" style="margin:0 0 6px" ${ckO.has(k+':'+x.id)||(W.nowId===x.id&&c[1]<=5&&!ckC.has(k+':'+x.id))?'open':''}><summary data-a="tkwCkTog" data-k="${k}" data-id="${did}" style="cursor:pointer;font-weight:600;color:var(--acc)">רשימת סימון ${c[0]}/${c[1]}</summary><div style="display:grid;gap:4px;margin-top:6px">${x.ck.map((t,i)=>{const d=c[2].has(i);
   return can?`<button type="button" class="opt" data-a="tkwCk" data-k="${k}" data-id="${did}" data-n="${i}" aria-pressed="${d}" style="justify-content:flex-start;gap:8px;text-align:start;min-height:40px"><span aria-hidden="true">${d?'☑':'☐'}</span><span style="${d?'text-decoration:line-through;opacity:.7':''};white-space:pre-wrap">${esc(t)}</span></button>`
   :`<div style="display:flex;gap:8px"><span aria-hidden="true">${d?'☑':'☐'}</span><span style="${d?'text-decoration:line-through;opacity:.7':''};white-space:pre-wrap">${esc(t)}</span></div>`}).join('')}</div></details>`};
-ACT.tkwCkTog=el=>{const d=el.parentElement,k=el.dataset.k+':'+el.dataset.id;if(!d)return;d.open=!d.open;if(d.open)ckO.add(k);else ckO.delete(k)};
+ACT.tkwCkTog=el=>{const d=el.parentElement,k=el.dataset.k+':'+el.dataset.id;if(!d)return;d.open=!d.open;if(d.open){ckO.add(k);ckC.delete(k)}else{ckO.delete(k);ckC.add(k)}};
 let ckQ=Promise.resolve();
 ACT.tkwCk=el=>{const k=el.dataset.k,id=el.dataset.id,n=+el.dataset.n,x=k==='p'?(typeof ptGet==='function'?ptGet(id):null):tkGet(id);if(!x||!ckCan(x))return;
  const prev=(x.ckd||[]).slice(),s=new Set(prev);if(s.has(n))s.delete(n);else s.add(n);const nx=[...s].filter(i=>i>=0&&i<(x.ck||[]).length).sort((a,b)=>a-b);
