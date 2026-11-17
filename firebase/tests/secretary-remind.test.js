@@ -652,3 +652,23 @@ describe('תיקון סבב 1', () => {
     assert.equal((await get(`b/${A}/sec_cfg/rem`)).scan, '2026-11-15', 'מצב הריצה נשמר');
   });
 });
+
+describe('17.11.2026: "המזכירה שואלת לגבי מייל" – מזהה המייל ברשימת ההתראות', () => {
+  it('התראה עם key mailask|<מזהה מייל> – mail מוחזר; מזהה לא תקין או התראה אחרת – בלי mail', async () => {
+    await seed({});
+    const mid = 'g' + 'a1'.repeat(20), now = Date.now() - 60000;
+    const base = { k: 'wa', typ: 'wa', title: 'המזכירה שואלת לגבי מייל', body: 'שאלה', t: now, at: now, pend: false, n: 1, rep: 0, st: 'open', seen: false };
+    await prep(async (d) => {
+      await d.doc(`b/${A}/sec_note/${M1}/n/n1`).set(Object.assign({ key: 'mailask|' + mid }, base));
+      await d.doc(`b/${A}/sec_note/${M1}/n/n2`).set(Object.assign({ key: 'mailask|../x' }, base));
+      await d.doc(`b/${A}/sec_note/${M1}/n/n3`).set(Object.assign({ key: 'draftcap|2026-11-17' }, base));
+    });
+    const r = await call('secNotes', M1, { op: 'list' });
+    assert.equal(r.status, 'OK');
+    const by = Object.fromEntries(r.result.notes.map((x) => [x.id, x]));
+    assert.equal(by.n1.mail, mid);
+    assert.equal(by.n2.mail, undefined);
+    assert.equal(by.n3.mail, undefined);
+    assert.equal(by.n1.key, undefined, 'המפתח הפנימי לא נחשף');
+  });
+});
