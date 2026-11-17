@@ -71,11 +71,8 @@ const fp = (f, s) => f ? f + '-' + s + '.png' : null;
 /* שאלון וסקיצה (15.11.2026): הקשה על השרטוט בס"מ, לפי המסגרת (מידות אמיתיות או 20×20 זמנית) */
 const tapSk = async (page, x, y) => { const r = await page.evaluate((yy) => { const c = document.getElementById('s3wSk'); if (!c) return null; const q = S3UI.W.q, w = parseFloat(q.w), l = parseFloat(q.l), fw = w > 0 && l > 0 ? Math.round(w * 100) : 2000; let b = c.getBoundingClientRect(); window.scrollBy(0, b.top + yy * b.width / fw - innerHeight / 2); b = c.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, fw, fl: w > 0 && l > 0 ? Math.round(l * 100) : 2000 }; }, y);
   if (!r) throw new Error("no sketch canvas " + (await page.evaluate(() => JSON.stringify({ v: cur().v, det: S3UI.W.det, step: S3UI.W.step, p: S3UI.W.q.path, t: document.querySelector("#main").innerText.slice(0, 300) })))); const px = r.w / r.fw; const h = r.w * r.fl / r.fw, c = (v, m) => Math.min(m - 1, Math.max(0.5, v)); await page.mouse.click(r.x + c(x * px, r.w), r.y + c(y * px, h)); await sleep(150); };
-// כניסות וקופות (PR #108–#110): רשימות doors / tills. ent / cash = הראשונה בכל רשימה (כמו qBuild), כדי שהבדיקות הישנות יבדקו את אותו מקום
-const skOf = (page) => page.evaluate(() => JSON.parse(JSON.stringify((({ rooms, cur, rows, rt, rk, ent, cash, doors, tills, mode, sel }) => ({ rooms, cur, rows, rt, rk, ent: doors && doors[0] ? [doors[0].x, doors[0].y] : ent, cash: tills && tills[0] ? [tills[0].x, tills[0].y] : cash, mode, sel }))(S3UI.W.sk))));
-// הסקיצה שנשלחה, בלי doors / tills (נבדקים בנפרד: לפחות אחת מכל אחת, והראשונה = ent / cash)
-const skBase = (sk) => { if (!sk) return sk; const o = Object.assign({}, sk); delete o.doors; delete o.tills; return o; };
-const skDT = (sk) => !!sk && Array.isArray(sk.doors) && sk.doors.length >= 1 && Array.isArray(sk.tills) && sk.tills.length >= 1 && JSON.stringify([sk.doors[0].x, sk.doors[0].y]) === JSON.stringify(sk.ent) && JSON.stringify([sk.tills[0].x, sk.tills[0].y]) === JSON.stringify(sk.cash);
+// סבב 2: עודכן כי המודל השתנה (e0a54e9): במקום ent/cash יש רשימות doors/tills (עד 40). ent/cash נגזרים מהכניסה והקופה הראשונות, כמו ששולח המסך ל-mapDraft
+const skOf = (page) => page.evaluate(() => JSON.parse(JSON.stringify((({ rooms, cur, rows, rt, rk, doors, tills, mode, sel }) => ({ rooms, cur, rows, rt, rk, doors, tills, ent: doors[0] ? [doors[0].x, doors[0].y] : undefined, cash: tills[0] ? [tills[0].x, tills[0].y] : undefined, mode, sel }))(S3UI.W.sk))));
 const setQ = async (page, f, v) => { const sel = `[data-c=s3wQ][data-f=${f}]`; if (f === 'ent' || f === 'cash') await page.selectOption(sel, v); else { await page.fill(sel, v); await page.dispatchEvent(sel, 'change'); } await sleep(150); };
 const shot412 = async (page, file) => { if (!file) return; await page.setViewportSize({ width: 412, height: 915 }); await page.evaluate(() => { window.scrollTo(0, 0); const st = document.createElement('style'); st.id = '__shot'; st.textContent = '.bar,.toast,#toast,.fab{display:none!important}'; document.head.appendChild(st); }); await sleep(500); await page.screenshot({ path: file, fullPage: true }); await page.evaluate(() => { const st = document.getElementById('__shot'); if (st) st.remove(); }); await page.setViewportSize({ width: 360, height: 760 }); await sleep(400); };
 const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fetch('data:image/jpeg;base64,' + b).then((r) => r.blob()); const im = await createImageBitmap(bl); return [im.width, im.height]; }, b64);
@@ -136,6 +133,14 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   check('1ו5 הוספת פינה לחדר (באמצע הקיר) ו"ביטול אחרון"', nIns === 10 && (await skOf(A.page)).rooms[0].length === 8, { nIns });
   await A.page.selectOption('[data-c=s3wRt][data-i="1"]', 'w'); await sleep(200);
   check('1ו6 שאלות על השרטוט: סוג לכל חדר ולכל שורה; חדר 2 סומן "מחסן"', (await A.page.$$('[data-c=s3wRk]')).length === 4 && (await skOf(A.page)).rt[1] === 'w');
+  // סבב 2: נוסף (9e66479) – ביטול אחרי שינוי מידות מחזיר את השרטוט בקנה המידה הנכון ובתוך המסגרת, ולא "יוצא מהמסגרת"
+  const before = await skOf(A.page);
+  await setQ(A.page, 'w', '7'); await sleep(300);
+  const mid = await A.page.evaluate(() => ({ w: S3UI.W.sk.w, l: S3UI.W.sk.l, u: (S3UI.W.sk.undo || []).map((x) => { const o = JSON.parse(x); return [o.w, o.qw, o.rooms[0] && o.rooms[0][2]]; }) }));
+  await A.page.click('[data-a=s3wSkUndo]'); await sleep(300);
+  const after = await skOf(A.page);
+  const fr = await A.page.evaluate(() => { const k = S3UI.W.sk; let mx = 0, my = 0; const A = [].concat(...k.rooms, k.cur, ...k.rows, ...k.doors.map((d) => [d.x, d.y]), ...k.tills.map((t) => [t.x, t.y])); for (let i = 0; i < A.length; i += 2) { mx = Math.max(mx, A[i]); my = Math.max(my, A[i + 1]); } return { mx, my, w: S3UI.W.sk.w, l: S3UI.W.sk.l, q: S3UI.W.q.w, warn: /מחוץ למסגרת/.test(document.querySelector('#main').innerText) }; });
+  check('1ו6א ביטול אחרי שינוי רוחב (14→7 מ\'): השרטוט חוזר בדיוק כמו שהיה, בתוך המסגרת, בלי אזהרת "מחוץ למסגרת"', JSON.stringify(after.rooms) === JSON.stringify(before.rooms) && JSON.stringify(after.rows) === JSON.stringify(before.rows) && fr.mx <= 1400 && fr.my <= 1500 && !fr.warn, { mid, before: before.rooms, after: after.rooms, fr });
   await shot412(A.page, fp(shots, 'פרטים-שאלון'));
   const small44 = () => A.page.evaluate(() => [...document.querySelectorAll('#main button, #main select, #main input:not([hidden])')].filter((b) => b.getBoundingClientRect().height < 43.5).map((b) => b.outerHTML.slice(0, 80)));
   check('1ו7 מסך הפרטים ב-360px בלי גלישה, וכל הכפתורים והשדות לפחות 44px', (await noOverflow(A.page)).bad.length === 0 && (await small44()).length === 0, { o: await noOverflow(A.page), small: await small44() });
@@ -166,8 +171,9 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   // ---- 2. טיוטה ----
   await A.page.click('[data-a=s3wDraft]'); await sleep(2500);
   const md = S.calls.find((c) => c.fn === 'mapDraft');
-  const SK1 = { rooms: [[0, 450, 1400, 450, 1400, 1500, 0, 1500], [0, 0, 1400, 0, 1400, 450, 0, 450]], rows: [[300, 650, 1250, 660], [150, 870, 1250, 870], [150, 1080, 1250, 1080], [150, 1290, 1250, 1290]], rt: ['s', 'w'], rk: ['gon', 'gon', 'gon', 'gon'], ent: [700, 1500], cash: [1400, 750] };
-  check('2ג mapDraft נשלח עם info (מידות בס"מ, חדרים, שורות, צדדים, הערה) ו-sketch (חדרים, שורות, סוגים, כניסה וקופה)', !!md && JSON.stringify(md.b.info) === JSON.stringify({ w: 1400, l: 1500, rooms: 2, rows: 4, ent: 'd', cash: 'r', note: 'מקררים לאורך הקיר הימני' }) && JSON.stringify(skBase(md.b.sketch)) === JSON.stringify(SK1) && skDT(md.b.sketch), md && { info: md.b.info, sketch: md.b.sketch });
+  const SK1 = { rooms: [[0, 450, 1400, 450, 1400, 1500, 0, 1500], [0, 0, 1400, 0, 1400, 450, 0, 450]], rows: [[300, 650, 1250, 660], [150, 870, 1250, 870], [150, 1080, 1250, 1080], [150, 1290, 1250, 1290]], rt: ['s', 'w'], rk: ['gon', 'gon', 'gon', 'gon'], doors: [{ x: 700, y: 1500, w: 100, a: 180, sw: 1, hg: -1 }], ent: [700, 1500], tills: [{ x: 1400, y: 750, w: 120, d: 60, a: 90 }], cash: [1400, 750] };
+  // סבב 2: עודכן כי הסקיצה נשלחת עכשיו גם עם doors/tills (e0a54e9) לצד ent/cash הישנים; הרשימות נבדקות במלואן
+  check('2ג mapDraft נשלח עם info (מידות בס"מ, חדרים, שורות, צדדים, הערה) ו-sketch (חדרים, שורות, סוגים, כניסה וקופה)', !!md && JSON.stringify(md.b.info) === JSON.stringify({ w: 1400, l: 1500, rooms: 2, rows: 4, ent: 'd', cash: 'r', note: 'מקררים לאורך הקיר הימני' }) && JSON.stringify(md.b.sketch) === JSON.stringify(SK1), md && { info: md.b.info, sketch: md.b.sketch });
   check('2 mapDraft נשלח עם qid, סניף, סוג ושלוש תמונות (base64)', !!md && md.b.br === 'main' && md.b.kind === 's' && md.b.imgs.length === 3 && md.b.imgs.every((x) => typeof x === 'string' && x.length > 1000 && !/^data:/.test(x)) && /^[A-Za-z0-9-]{16,40}$/.test(md.b.qid), md && { br: md.b.br, n: md.b.imgs.length });
   const s2 = await txt(A.page, '#main');
   check('2א סיכום הטיוטה: חדרים, גופים, אזורים לא ודאיים (2), רמת ביטחון (הערכה) וכפתור "עברו על הטיוטה"', /הטיוטה מוכנה/.test(s2) && /אזורים לא ודאיים 2/.test(s2) && /55%/.test(s2) && /עברו על הטיוטה/.test(s2), s2.slice(0, 260));
@@ -489,7 +495,8 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
     let k = await skOf(P.page);
     const ask1 = await P.page.evaluate(() => ({ rt: document.querySelectorAll('[data-c=s3wRt]').length, rk: document.querySelectorAll('[data-c=s3wRk]').length, rw: !!document.querySelector('[data-c=s3wRw]'), t: document.querySelector('#main').innerText }));
     check('1ז1 ציור: חדר של 4 פינות, 2 שורות, כניסה וקופה בהקשה (מסגרת זמנית 20×20)', JSON.stringify(k.rooms) === '[[0,0,1000,0,1000,1500,0,1500]]' && JSON.stringify(k.rows) === '[[300,200,300,1300],[700,200,700,1300]]' && JSON.stringify(k.ent) === '[500,1500]' && JSON.stringify(k.cash) === '[900,1400]', k);
-    check('1ז2 אחרי הציור – שאלות על השרטוט: סוג החדר, סוג כל שורה, ורוחב אמיתי (אין מידות)', ask1.rt === 1 && ask1.rk === 2 && ask1.rw && /כמה שאלות על השרטוט/.test(ask1.t) && /כניסות ✓/.test(ask1.t), ask1);
+    check('1ז2 אחרי הציור – שאלות על השרטוט: סוג החדר, סוג כל שורה, ורוחב אמיתי (אין מידות)', ask1.rt === 1 && ask1.rk === 2 && ask1.rw && /כמה שאלות על השרטוט/.test(ask1.t) && /1 כניסות ✓/.test(ask1.t) && /1 קופות ✓/.test(ask1.t), ask1);
+    // סבב 2: עודכן כי הכיתוב "הכניסה סומנה" הוחלף (e0a54e9) בספירה "1 כניסות ✓ 1 קופות ✓"; נבדקות גם הכניסה וגם הקופה
     await P.page.selectOption('[data-c=s3wRk][data-i="1"]', 'fridge'); await sleep(200);
     const pre = await P.page.evaluate(() => { const k = S3UI.W.sk; ACT.s3wDraft(); return S3UI.W.msg; }); await sleep(300);
     check('1ז3 שליחה בלי רוחב אמיתי נחסמת בהודעה (בלי mapDraft)', /רוחב האמיתי/.test(pre) && !S.calls.some((c) => c.fn === 'mapDraft'), pre);
@@ -501,7 +508,8 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
     check('1ז5 מסך הסקיצה ב-360px בלי גלישה', (await noOverflow(P.page)).bad.length === 0, await noOverflow(P.page));
     await P.page.click('[data-a=s3wDraft]'); await sleep(2000);
     const m1 = S.calls.find((c) => c.fn === 'mapDraft');
-    check('1ז6 mapDraft מדרך א: info עם מידות מהרוחב האמיתי ומספרים מהשרטוט; sketch עם סוגי שורות (מקררים), כניסה וקופה', !!m1 && JSON.stringify(m1.b.info) === JSON.stringify({ w: 2000, l: 3000, rooms: 1, rows: 2 }) && JSON.stringify(skBase(m1.b.sketch)) === JSON.stringify({ rooms: [[0, 0, 2000, 0, 2000, 3000, 0, 3000]], rows: [[600, 400, 600, 2600], [1400, 400, 1400, 2600]], rt: ['s'], rk: ['gon', 'fridge'], ent: [1000, 3000], cash: [1800, 2800] }) && skDT(m1.b.sketch), m1 && { info: m1.b.info, sketch: m1.b.sketch });
+    // סבב 2: עודכן כי הסקיצה נשלחת גם עם doors/tills (e0a54e9) לצד ent/cash
+    check('1ז6 mapDraft מדרך א: info עם מידות מהרוחב האמיתי ומספרים מהשרטוט; sketch עם סוגי שורות (מקררים), כניסה וקופה', !!m1 && JSON.stringify(m1.b.info) === JSON.stringify({ w: 2000, l: 3000, rooms: 1, rows: 2 }) && JSON.stringify(m1.b.sketch) === JSON.stringify({ rooms: [[0, 0, 2000, 0, 2000, 3000, 0, 3000]], rows: [[600, 400, 600, 2600], [1400, 400, 1400, 2600]], rt: ['s'], rk: ['gon', 'fridge'], doors: [{ x: 1000, y: 3000, w: 100, a: 180, sw: 1, hg: -1 }], ent: [1000, 3000], tills: [{ x: 1800, y: 2800, w: 120, d: 60, a: 0 }], cash: [1800, 2800] }), m1 && { info: m1.b.info, sketch: m1.b.sketch });
     check('1ז7 בלי שגיאות JavaScript בדרך א', P.page.__errors.length === 0, P.page.__errors);
     await P.ctx.close();
   }
