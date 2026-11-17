@@ -101,6 +101,8 @@ async function noteCore(db, who, input, now) {
       // קודם: ההערות הקיימות הולכות אחרי הפריטים הפיזיים לטיוטה/למפה הנוכחית (לפי g), כדי שהמספרים במסך ובשרת יהיו אותם מספרים
       const sy = mm ? S.syncNotes(ns.docs.map((d) => ({ id: d.id, data: d.data() })), G, items, on === 'map', NOTE_WRITES)
         : { cur: new Map(ns.docs.map((d) => [d.id, d.data()])), set: [], del: [], cut: 0 };
+      // מעבר לתקרה (לא אמור לקרות: עד 190 הערות ≤ 380 כתיבות) – לא כותבים על מצב שלא סונכרן, כדי לא לדרוס הערה של פריט אחר
+      if (sy.cut) throw bad('notes-sync', 'יש יותר מדי הערות לסנכרון עם הטיוטה הזו. שמרו קודם את המפה, או מחקו הערות שלא צריך, ונסו שוב.', 'resource-exhausted');
       const C2 = sy.cur, W2 = new Set(sy.set), D2 = new Set(sy.del);
       const put = (id, v) => { C2.set(id, v); W2.add(id); D2.delete(id); };
       const drop = (id) => { C2.delete(id); W2.delete(id); D2.add(id); };
@@ -171,11 +173,12 @@ async function qsCore(db, who, input, now, deps) {
   if (!mm) throw bad('no-draft', 'אין עדיין טיוטה. בנו טיוטה קודם.', 'failed-precondition');
   if (!deps.key) throw bad('no-key', 'אין מפתח לזיהוי חכם בשרת', 'failed-precondition');
   const items = S.itemsOf(mm.map);
-  const nt = await notesOf(db, mapId, sd, items, S.NK.geoIndex(mm.map));
+  const G0 = S.NK.geoIndex(mm.map);
+  const nt = await notesOf(db, mapId, sd, items, G0);
   const set = await db.doc('s3set/' + br).get();
   const prompt = S.buildQsPrompt({
     kind, storeType: set.exists ? set.get('stype') : '', cur: S.toQsModel(mm.map), round: qr0 + 1,
-    gnote: nt.gnote, notes: nt.notes.map((n) => (n.st === 'ok' ? { פריט: n.d, id: n.id, t: n.t } : { פריט: n.d, מצב: 'פריט מטיוטה קודמת – לא ידוע אם הוא עדיין במפה', t: n.t })), prev: S.answered(sd && sd.qs),
+    gnote: nt.gnote, notes: nt.notes.map((n) => (n.st === 'ok' ? { פריט: n.d, id: n.id, t: n.t } : { פריט: n.d, מצב: 'פריט מטיוטה קודמת – לא ידוע אם הוא עדיין במפה', t: n.t })), prev: S.answered(S.refsTo(sd && sd.qs, G0) || (sd && sd.qs)),
   });
   // רק הבלם היומי לעובד + s3qid, בטרנזקציה אחת לפני Gemini
   const dup = await db.runTransaction(async (tx) => {
@@ -202,11 +205,11 @@ async function qsCore(db, who, input, now, deps) {
     } catch (e2) { logger.error('mapQs: release failed', { code: e2 && e2.code }); }
     throw e;
   };
-  const deadline = Date.now() + TIMES.budgetMs, ids = new Set(items.keys());
+  const deadline = Date.now() + TIMES.budgetMs, ids = new Set(items.keys()), G1 = S.NK.geoIndex(mm.map);
   const check = (rp, n) => {
     if (rp.finish === 'MAX_TOKENS') { logger.warn('mapQs: cut', { try: n, len: rp.len }); return { why: 'cut' }; }
     if (rp.obj === null || rp.obj === undefined) { logger.warn('mapQs: parse', { try: n, len: rp.len }); return { why: 'parse' }; }
-    try { return { v: S.qsClean(rp.obj, ids) }; } catch (e) { logger.warn('mapQs: bad answer', { try: n, why: e.why || '', len: rp.len }); return { why: e.why || 'not-obj' }; }
+    try { return { v: S.qsClean(rp.obj, ids, G1) }; } catch (e) { logger.warn('mapQs: bad answer', { try: n, why: e.why || '', len: rp.len }); return { why: e.why || 'not-obj' }; }
   };
   let r;
   try { r = check(await ask(deps, prompt, deadline), 1); } catch (e) {

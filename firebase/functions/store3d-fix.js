@@ -78,7 +78,7 @@ async function fixCore(db, who, input, now, deps) {
   let qa = [], gnote = '', notes = [];
   if (x.ans || x.notes) {
     const ss = await sref.get(), sd = ss.exists ? ss.data() : null;
-    if (x.ans) qa = SL.answered(sd && sd.qs);
+    if (x.ans) qa = SL.answered(SL.refsTo(sd && sd.qs, SL.NK.geoIndex(x.m)) || (sd && sd.qs));
     if (x.notes) {
       const items = SL.itemsOf(x.m);
       gnote = sd && typeof sd.gnote === 'string' ? sd.gnote : '';

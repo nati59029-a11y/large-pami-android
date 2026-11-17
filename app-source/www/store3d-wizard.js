@@ -277,8 +277,9 @@ const ntLbl=(m,id)=>{const b=/^(f[0-9]+)-([ab])-([0-9]+)$/.exec(id||''),x=ntItem
    והפריט במזהה הזה כבר אחר (או לא קיים). הערה כזו לא מוצגת על הפריט: אפשר לשייך אותה לפריט שנבחר או למחוק */
 /* ok לפי המזהה הנוכחי של הפריט (ההערה הולכת אחרי הפריט הפיזי לפי g – אותה התאמה כמו בשרת), עם from = המזהה שבו היא שמורה */
 const ntSplit=(N,m)=>{const K=window.S3NK,I=K?K.itemsOf(m):null,G=K?K.geoIndex(m):null,ok={},re={};
- for(const id of Object.keys(N.D).sort()){const n=N.D[id];if(!n||!n.t)continue;const x=G?K.noteTo(n,id,G):{st:'ok',to:id};
-  if(x.st==='ok'&&!ok[x.to])ok[x.to]=Object.assign({},n,{from:id});else re[id]=n}
+ /* כמו בשרת (syncNotes): קודם הערות שנשארות על הפריט שלהן, ואחר כך אלה שעוברות (לפי סדר המזהים) */
+ const L=Object.keys(N.D).sort().map(id=>{const n=N.D[id];return n&&n.t?{id,n,x:G?K.noteTo(n,id,G):{st:'ok',to:id}}:null}).filter(Boolean);
+ for(const e of L.filter(e=>e.x.st==='ok'&&e.x.to===e.id).concat(L.filter(e=>!(e.x.st==='ok'&&e.x.to===e.id)))){if(e.x.st==='ok'&&!ok[e.x.to])ok[e.x.to]=Object.assign({},e.n,{from:e.id});else re[e.id]=e.n}
  return{ok,re,I,G}};
 /* אחרי כתיבה: ההערה של הפריט נשמרת במזהה הנוכחי שלו (כמו הסנכרון בשרת) */
 const ntPut=(N,S0,id,t)=>{const o=S0.ok[id];if(o&&o.from!==id)delete N.D[o.from];if(!t){delete N.D[id];return}const K=window.S3NK,g=S0.G&&K?K.gOf(S0.G,id):null;N.D[id]=Object.assign({t,d:S0.I?S0.I.get(id):'',on:'draft'},g?{g}:{})};
@@ -352,7 +353,7 @@ function ntBox(){
  /* שאלות */
  h+=`<div style="margin-top:12px"><b>שאלות מהמערכת</b> <small class="note">(סבב ${Math.min(N.qr,3)} מתוך 3)</small></div>`;
  if(N.qs.length){h+=N.qs.map((q,qi)=>{const a=N.ans[q.id]||{c:[],x:''},ty=q.multi?'checkbox':'radio';
-   return `<fieldset class="s3ntQ" style="border:1px solid var(--line);border-radius:var(--r-m,10px);margin:8px 0;padding:8px"><legend style="padding:0 4px">${qi+1}. ${esc2(q.t)}${q.ref?` <small class="note">(${esc2(ntLbl(m,q.ref))})</small>`:''}</legend>
+   return `<fieldset class="s3ntQ" style="border:1px solid var(--line);border-radius:var(--r-m,10px);margin:8px 0;padding:8px"><legend style="padding:0 4px">${qi+1}. ${esc2(q.t)}${(()=>{/* ref הולך אחרי הפריט הפיזי (rg) – כמו בשרת; לא נמצא ⇒ בלי פריט */const K=window.S3NK,rf=q.rg&&K&&SP.G?K.resolve(q.rg,SP.G):q.rg?null:q.ref;return rf?` <small class="note">(${esc2(ntLbl(m,rf))})</small>`:''})()}</legend>
     ${(q.o||[]).map((o,i)=>`<label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="${ty}" name="s3ntQ_${esc2(q.id)}" data-c="s3ntC" data-q="${esc2(q.id)}" data-i="${i}"${a.c.includes(i)?' checked':''}${dis}> ${esc2(o)}</label>`).join('')}
     <input id="s3ntX_${esc2(q.id)}" data-c="s3ntX" data-q="${esc2(q.id)}" maxlength="200" placeholder="או כתבו תשובה משלכם" aria-label="תשובה בכתב לשאלה ${qi+1}" value="${esc2(a.x)}" style="width:100%;min-height:44px"${dis}></fieldset>`}).join('');
   h+=`<div class="row s3row"><button class="btn" data-a="s3ntAns"${dis}>שמרו תשובות ותקנו את הטיוטה</button></div>`}

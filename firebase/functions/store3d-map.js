@@ -90,13 +90,13 @@ async function saveMap(db, who, input, now) {
       if (M.bytesOf(doc) > M.MAX_BYTES) throw M.fail('too-big', 'המפה גדולה מדי (עד 800KB). מחקו פריטים שלא צריך או חלקו לשתי מפות.');
       // הקמת חנות שלב 2 (חוזה 6 + תוספת 17.11): בשמירה הראשונה, או כשגוף קיבל מספר חדש (renamed), ההערות לפריטים (s3setup/{mapId}/n)
       // מסונכרנות באותה טרנזקציה (קריאות לפני כל כתיבה) למפה שנשמרה – לפי הגיאומטריה (g), לא לפי המספר: הערה עוברת למזהה של אותו פריט
-      // פיזי ומקבלת on='map'; פריט שלא נמצא / לא חד-משמעי ⇒ re=1 ("לשיוך מחדש"). בלי דריסה. qs[].ref – לפי renamed.
+      // פיזי ומקבלת on='map'; פריט שלא נמצא / לא חד-משמעי ⇒ re=1 ("לשיוך מחדש"). בלי דריסה. qs[].ref – אותה התאמה לפי rg (שאלה ישנה בלי rg – לפי renamed).
       let mv = null;
       if (!old || Object.keys(fin.renamed).length) {
         const [ss, ns] = await Promise.all([tx.get(db.doc('s3setup/' + mapId)), tx.get(db.collection(`s3setup/${mapId}/n`))]);
         if (ss.exists || ns.size) {
           mv = SL.syncNotes(ns.docs.map((d) => ({ id: d.id, data: d.data() })), SL.NK.geoIndex(doc), SL.itemsOf(doc), true, NOTE_WRITES);
-          mv.qs = ss.exists ? SL.renameRefs(ss.get('qs'), fin.renamed) : null;
+          mv.qs = ss.exists ? SL.refsTo(ss.get('qs'), SL.NK.geoIndex(doc), fin.renamed) : null;
           mv.ss = ss.exists;
         }
       }

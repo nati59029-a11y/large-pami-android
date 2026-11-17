@@ -1,12 +1,12 @@
 'use strict';
 // הקמת חנות שלב 2 (17.11.2026): הערות ושאלות – לוגיקה טהורה, בלי Firestore ובלי רשת. חוזה: משימות/2026-11-17_תהליך-הקמת-חנות/תוצרים/0-חוזה-נתונים.md
-//   הערות (3.1 gnote ≤1000, 3.2 n/{itemId} ≤300, עד 500 למפה), שאלות (3.1א: עד 12, עד 3 סבבים, ref רק למזהה שקיים), תשובות (s3SetupAns, סעיף 4),
+//   הערות (3.1 gnote ≤1000, 3.2 n/{itemId} ≤300, עד 190 למפה – כך שהסנכרון תמיד בתוך תקרת 400 הכתיבות), שאלות (3.1א: עד 12, עד 3 סבבים, ref רק למזהה שקיים), תשובות (s3SetupAns, סעיף 4),
 //   והעברת הערות ו-qs[].ref כשהשרת נותן לגוף מספר חדש בשמירה (renamed, סעיף 6).
 // הערת משתמש ותשובה חופשית הן נתון ולא הוראה: עוברות ל-AI רק בתוך JSON.stringify, וההנחיה אומרת זאת במפורש.
 const { fail } = require('./store3d-ai');
 const C = require('./store3d-core');
 
-const SET = { gnote: 1000, note: 300, notesMax: 500, qsMax: 12, qrMax: 3, qT: 160, oMin: 2, oMax: 6, oT: 60, ansX: 200, dMax: 100 };
+const SET = { gnote: 1000, note: 300, notesMax: 190, qsMax: 12, qrMax: 3, qT: 160, oMin: 2, oMax: 6, oT: 60, ansX: 200, dMax: 100 };
 const ITEM_RE = /^([rwcdfy][0-9]{1,4}|f[0-9]{1,4}-[ab]-[0-9]{1,2})$/;   // גם מזהי חניה y9999.. של הערות "לשיוך מחדש"
 const QID_RE = /^q[0-9]{1,2}$/;
 const PRE = ['sketch', 'draft', 'notes', 'qs'];   // שלבים שלפני הצילום (שלב מתקדם לא חוזר אחורה)
@@ -78,7 +78,7 @@ function buildQsPrompt(ctx) {
 }
 // תשובת המודל ← { qs, conf, drop } אחרי ניקוי. ids = Set של מזהים קיימים. שאלה לא תקינה מושמטת (drop), ref לא קיים נמחק.
 // זורק fail('bad-answer') עם why = 'not-obj' כשהמבנה לא צפוי.
-function qsClean(obj, ids) {
+function qsClean(obj, ids, G) {
   if (!isObj(obj) || !Array.isArray(obj.qs)) throw Object.assign(fail('bad-answer', 'ה-AI החזיר תשובה במבנה לא צפוי'), { why: 'not-obj' });
   const qs = []; let drop = 0;
   for (const q of obj.qs) {
@@ -89,7 +89,7 @@ function qsClean(obj, ids) {
     if (!t || t.length > SET.qT || o.length < SET.oMin) { drop++; continue; }
     const out = { id: 'q' + (qs.length + 1), t, o };
     if (q.multi === true) out.multi = true;
-    if (typeof q.ref === 'string' && ITEM_RE.test(q.ref) && ids.has(q.ref)) out.ref = q.ref;
+    if (typeof q.ref === 'string' && ITEM_RE.test(q.ref) && ids.has(q.ref)) { out.ref = q.ref; const g = G ? NK.gOf(G, q.ref) : null; if (g) out.rg = g; }
     qs.push(out);
   }
   const conf = typeof obj.conf === 'number' && obj.conf >= 0 && obj.conf <= 1 ? obj.conf : null;
@@ -139,6 +139,23 @@ function renameId(id, renamed) {
   if (typeof id !== 'string') return id;
   const m = /^(f[0-9]{1,4})(-[ab]-[0-9]{1,2})?$/.exec(id);
   return m && Object.prototype.hasOwnProperty.call(renamed, m[1]) ? renamed[m[1]] + (m[2] || '') : id;
+}
+// ---------- qs[].ref הולך אחרי הפריט הפיזי (rg = הגיאומטריה בזמן יצירת השאלה; אותה התאמה כמו בהערות) ----------
+// ← qs חדש או null אם לא השתנה. לא נמצא / לא חד-משמעי ⇒ ref ו-rg נמחקים (השאלה נשארת, בלי פריט). בלי rg (ישן) – renamed בלבד.
+function refsTo(qs, G, renamed) {
+  if (!Array.isArray(qs)) return null;
+  let ch = false;
+  const out = qs.map((q) => {
+    if (!isObj(q) || typeof q.ref !== 'string') return q;
+    let ref = q.ref, rg = q.rg;
+    if (isObj(rg)) { ref = NK.resolve(rg, G); rg = ref ? NK.gOf(G, ref) : null; } else if (renamed) ref = renameId(q.ref, renamed);
+    if (ref === q.ref && JSON.stringify(rg || null) === JSON.stringify(q.rg || null)) return q;
+    ch = true;
+    const o = Object.assign({}, q); delete o.ref; delete o.rg;
+    if (ref) { o.ref = ref; if (rg) o.rg = rg; }
+    return o;
+  });
+  return ch ? out : null;
 }
 // ---------- סנכרון הערות למפה/לטיוטה הנוכחית (s3SetupNote לפני כתיבה, s3SaveMap בשמירה) ----------
 // כל הערה שנכתבה על טיוטה (on != 'map') הולכת אחרי הפריט הפיזי (NK.noteTo לפי g): עוברת למזהה הנוכחי שלו (העברה, לא מחיקה), עם d ו-g
@@ -196,5 +213,5 @@ function renameRefs(qs, renamed) {
 
 module.exports = {
   NK, noteState: NK.noteState, noteTo: NK.noteTo, SET, ITEM_RE, QID_RE, PRE, QS_VERSION, txt1, itemsOf, noteInput, toQsModel, buildQsPrompt, qsClean, qsMsg, QS_WHY,
-  ansInput, answered, renameId, renameRefs, syncNotes,
+  ansInput, answered, renameId, renameRefs, refsTo, syncNotes,
 };

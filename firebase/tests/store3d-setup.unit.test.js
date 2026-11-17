@@ -186,6 +186,18 @@ describe('שיוך הערות לפי גיאומטריה – noteTo, syncNotes', 
     assert.equal(b.cur.size, 2);
     assert.equal(S.syncNotes([{ id: 'f3', data: note('f3') }], G3, I3, false, 0).cut > 0, true);
   });
+  it('refsTo: ref הולך אחרי הגוף הפיזי (rg); לא נמצא ⇒ ref ו-rg נמחקים; בלי rg ⇒ renamed; qsClean שומר rg', () => {
+    const D3 = M([gon(1, 100), gon(2, 500), gon(3, 700)]), G3 = NK.geoIndex(D3);
+    const q = (ref) => ({ id: 'q1', t: 'א', o: ['1', '2'], ref, rg: NK.gOf(G4, ref) });
+    const r = S.refsTo([q('f3-b-1'), q('f2'), { id: 'q3', t: 'ג', o: ['1', '2'], ref: 'f9' }, { id: 'q4', t: 'ד', o: ['1', '2'] }], G3, { f9: 'f4' });
+    assert.equal(r[0].ref, 'f2-b-1'); assert.equal(r[0].rg.x, 500);
+    assert.equal('ref' in r[1], false); assert.equal('rg' in r[1], false);
+    assert.equal(r[2].ref, 'f4'); assert.equal(r[3], r[3]);
+    assert.equal(S.refsTo([q('f1')], G4), null, 'בלי שינוי');
+    const c = S.qsClean({ qs: [{ t: 'ש', o: ['א', 'ב'], ref: 'f3' }] }, new Set(I4.keys()), G4);
+    assert.equal(c.qs[0].rg.x, 500);
+    assert.equal(S.SET.notesMax, 190);
+  });
   it('noteInput: from רק עם itemId אחר וטקסט', () => {
     const ok = (o) => S.noteInput(Object.assign({ qid: Q, mapId: 's-main', t: 'הערה', itemId: 'f1' }, o));
     assert.equal(ok({ from: 'f3' }).from, 'f3');

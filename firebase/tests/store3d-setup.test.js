@@ -92,7 +92,8 @@ describe('הקמת חנות שלב 2 – הערות, שאלות ותשובות (
     GM.state.mapqs = { qs: [{ t: 'מה סוג המדף?', o: ['גונדולה', 'מקרר דלתות'], ref: 'f1-a-1' }, { t: 'כמה קומות?', o: ['4', '5'], ref: 'f77' }, { t: 'שבורה', o: ['רק אחת'] }], conf: 0.55 };
     const q = qid();
     const r = await qs({ qid: q });
-    assert.deepEqual(r.qs, [{ id: 'q1', t: 'מה סוג המדף?', o: ['גונדולה', 'מקרר דלתות'], ref: 'f1-a-1' }, { id: 'q2', t: 'כמה קומות?', o: ['4', '5'] }]);
+    assert.deepEqual(r.qs.map((q) => { const o = Object.assign({}, q); delete o.rg; return o; }), [{ id: 'q1', t: 'מה סוג המדף?', o: ['גונדולה', 'מקרר דלתות'], ref: 'f1-a-1' }, { id: 'q2', t: 'כמה קומות?', o: ['4', '5'] }]);
+    assert.deepEqual([r.qs[0].rg.t, r.qs[0].rg.s, r.qs[0].rg.n], ['bay', 'a', 1], 'ref נשמר עם הגיאומטריה (rg)');
     assert.equal(r.drop, 1);
     const s = await get(P + 's3setup/s-main');
     assert.deepEqual([s.qr, s.qConf, s.st, s.qs.length], [1, 0.55, 'qs', 2]);
@@ -223,6 +224,60 @@ describe('הקמת חנות שלב 2 – הערות, שאלות ותשובות (
     assert.equal((await n('f2-a-1')).re, 1, 'הערת המקטע של הגוף שנמחק לא נקשרת לגוף החדש שקיבל את המספר f2');
     assert.equal((await n('f1')).re, 1, 'זז 2 מטר – לשיוך מחדש');
     assert.equal(await err(note({ itemId: 'f1', t: 'x' })), 'note-re');
+  });
+
+  // ---------- סבב בדיקה 3 (החלטת בעל הפרויקט): עד 190 הערות, והסנכרון תמיד בתוך התקרה; qs[].ref הולך אחרי הפריט הפיזי ----------
+  it('190 הערות (95 גופים + מקטע לכל אחד), הגוף הראשון נמחק והמספור התחדש: כולן הולכות לגוף הפיזי, של הגוף שנמחק – לשיוך מחדש; ההערה ה-191 נדחית', async () => {
+    const NK = require(path.join(FN, 'lib', 'store3d-notekey.js'));
+    const big = { id: 'r1', name: 'אולם', p: [0, 0, 2200, 0, 2200, 2200, 0, 2200], h: 300 };
+    const g95 = (L) => MAP({ seq: L.length, rooms: [big], fx: L.map((k, i) => fx('f' + (i + 1), { num: i + 1, sides: 1, bays: 1, w: 100, x: 150 + 200 * (k % 10), y: 150 + 200 * Math.floor(k / 10) })) });
+    const all = Array.from({ length: 95 }, (_, k) => k), M0 = g95(all), G0 = NK.geoIndex(M0), I0 = NK.itemsOf(M0);
+    const b = adm.batch();
+    for (let i = 1; i <= 95; i++) for (const id of ['f' + i, `f${i}-a-1`]) b.set(adm.doc(P + 's3setup/s-main/n/' + id), { t: 'של ' + id, upd: 1, by: DR, d: I0.get(id), g: NK.gOf(G0, id), on: 'draft' });
+    b.set(adm.doc(P + 's3setup/s-main'), { v: 1, st: 'notes', nN: 190, upd: 1, by: DR });
+    await b.commit();
+    const M1 = g95(all.slice(1));   // הגוף הראשון נמחק; f1 החדש = f2 הישן, וכו'
+    await note({ itemId: 'f1', t: 'עדכון', m: M1 });   // עדכון של הערה קיימת – מפעיל סנכרון של כל ה-190
+    const L = (await adm.collection(P + 's3setup/s-main/n').get()).docs;
+    assert.equal(L.length, 190);
+    let ok = 0;
+    for (let i = 2; i <= 95; i++) {
+      const a = L.find((d) => d.id === 'f' + (i - 1)), c = L.find((d) => d.id === `f${i - 1}-a-1`);
+      if (a && c && c.get('t') === `של f${i}-a-1` && (i === 2 ? a.get('t') === 'עדכון' : a.get('t') === 'של f' + i)) ok++;
+    }
+    assert.equal(ok, 94, 'כל 94 הגופים: ההערה והמקטע על הגוף הפיזי');
+    const gone = L.filter((d) => /^של f1(-a-1)?$/.test(d.get('t')));
+    assert.equal(gone.length, 2); assert.ok(gone.every((d) => d.get('re') === 1 && /^y99/.test(d.id)), 'של הגוף שנמחק – בחניה, לשיוך מחדש');
+    assert.equal(await err(note({ itemId: 'r1', t: 'הערה 191', m: M1 })), 'notes-max');
+  });
+
+  it('שמירה: אם הסנכרון היה חורג מהתקרה – הכתיבה נדחית בהודעה ברורה ולא נכתבת על מצב ישן', async () => {
+    const SL = require(path.join(FN, 'lib', 'store3d-setup.js')), orig = SL.syncNotes;
+    await note({ itemId: 'f1', t: 'קיימת', m: MAP() });
+    SL.syncNotes = () => ({ cur: new Map(), set: [], del: [], cut: 401 });
+    try { assert.equal(await err(note({ itemId: 'f1', t: 'דריסה', m: MAP() })), 'notes-sync'); } finally { SL.syncNotes = orig; }
+    assert.equal((await get(P + 's3setup/s-main/n/f1')).t, 'קיימת');
+  });
+
+  it('qs[].ref: נשמר עם rg; אחרי מספור מחדש ושמירה ref עובר לגוף הפיזי; גוף שנמחק ⇒ ref נמחק (השאלה נשארת); בהנחיה הבאה – המזהה הנוכחי', async () => {
+    GM.state.mapqs = { qs: [{ t: 'מה בגוף הזה?', o: ['א', 'ב'], ref: 'f3-a-1' }, { t: 'ומה כאן?', o: ['א', 'ב'], ref: 'f2' }], conf: 0.5 };
+    await qs({ m: D4() });
+    let s = await get(P + 's3setup/s-main');
+    assert.equal(s.qs[0].rg.x, 550); assert.equal(s.qs[0].rg.t, 'bay');
+    await X.ansCore(db, W(DR), { qid: qid(), mapId: 's-main', ans: [{ id: 'q1', c: [0] }] }, Date.now());
+    GM.state.mapqs = { qs: [], conf: 0.9 };
+    await adm.doc(P + 's3setup/s-main').set({ qr: 1 }, { merge: true });
+    await qs({ m: D3() });
+    const txt = GM.state.requests[GM.state.requests.length - 1].body.contents[0].parts[0].text;
+    assert.ok(txt.includes('"ref":"f2-a-1"') && !txt.includes('"ref":"f3-a-1"'), 'בסבב הבא – המזהה הנוכחי של אותו גוף');
+    // השאלות של סבב 1 נשמרו מחדש בסבב 2 כ-[]; בודקים את השמירה על שאלות חדשות
+    GM.state.mapqs = { qs: [{ t: 'מה בגוף הזה?', o: ['א', 'ב'], ref: 'f3-a-1' }, { t: 'ומה כאן?', o: ['א', 'ב'], ref: 'f2' }], conf: 0.5 };
+    await adm.doc(P + 's3setup/s-main').set({ qr: 0 }, { merge: true });
+    await qs({ m: D4() });
+    await MP.saveMap(db, { uid: MGR, mgr: true, bizId: A }, { mapId: 's-main', baseV: 0, map: D3() }, Date.now());
+    s = await get(P + 's3setup/s-main');
+    assert.equal(s.qs[0].ref, 'f2-a-1'); assert.equal(s.qs[0].rg.x, 550);
+    assert.equal(s.qs[1].ref, undefined, 'הגוף נמחק – בלי פריט'); assert.equal(s.qs[1].rg, undefined); assert.equal(s.qs[1].t, 'ומה כאן?');
   });
 
   // ---------- סבב בדיקה 1, ליקוי 2: הרשאות דרך הפונקציה עצמה (exports.<שם>.run, בלי אמולטור הפונקציות) ----------

@@ -248,6 +248,11 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
     const geo = await txt(A.page, '.s3ntL');
     check('2ה13 מספור מחדש: ההערה מוצגת על הגוף לפי המקום (g), לא לפי המספר שבו נשמרה', /מדף קיר 2[^:]*: הערה לפי מקום/.test(geo || '') && !(await A.page.$('#s3ntRe')), geo);
     await A.page.evaluate(() => { S3UI.W.nt.D = {}; rerender(); });
+    // סבב בדיקה 3: ref של שאלה הולך אחרי הגוף הפיזי (rg): נשמר על f9 עם המקום של f2 ⇒ מוצג "מדף קיר 2"; מקום שלא קיים ⇒ בלי פריט
+    await A.page.evaluate(() => { const K = window.S3NK, G = K.geoIndex(S3UI.W.draft.m); S3UI.W.nt.qs = [{ id: 'q1', t: 'שאלה א', o: ['כן', 'לא'], ref: 'f9', rg: K.gOf(G, 'f2') }, { id: 'q2', t: 'שאלה ב', o: ['כן', 'לא'], ref: 'f1', rg: { t: 'fx', k: 'gon', x: 9000, y: 9000 } }]; rerender(); }); await sleep(300);
+    const lg = await A.page.evaluate(() => [...document.querySelectorAll('.s3ntQ legend')].map((l) => l.innerText.replace(/\s+/g, ' ')));
+    check('2ה14 שאלה: הפריט לפי הגיאומטריה (rg), ופריט שלא נמצא – בלי תיאור', lg.length === 2 && /שאלה א \(מדף קיר 2/.test(lg[0]) && !/\(/.test(lg[1]), lg);
+    await A.page.evaluate(() => { S3UI.W.nt.qs = []; rerender(); });
     // שרת/כללים ישנים (403 על s3setup): התיבה מוסתרת עם הסבר
     S.nt403 = true; await A.page.evaluate(() => { S3UI.W.nt = null; rerender(); }); await sleep(800);
     check('2ה9 שרת שעוד לא עודכן: "העדכון בשרת עוד לא הותקן", בלי כפתורי הערות/שאלות', /העדכון בשרת עוד לא הותקן/.test(await txt(A.page, '#s3nt')) && !(await A.page.$('[data-a=s3ntAsk]')));
