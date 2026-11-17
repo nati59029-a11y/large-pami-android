@@ -59,13 +59,20 @@ async function openTour(kind,startId){
  try{h=await S3Pano.open(el,tour,{load,map,tags:kind==='s'?tagsOf(map,d.sum):[],onClose:close});}catch(e){h=null}
  if(dead){try{if(h)h.destroy()}catch(e){}return}
  U.tourH=h;
+ /* שלב 9: מתג חזרה לדגם (סוגר רק את שכבת ה-360; הדגם והמצלמה שלו לא נגעו) */
+ if(h){const sw=document.createElement('div');sw.setAttribute('role','group');sw.setAttribute('aria-label','מעבר בין דגם לצילום 360');
+  sw.style.cssText='position:absolute;top:calc(56px + env(safe-area-inset-top,0px));inset-inline-end:8px;z-index:6;display:flex;gap:6px;direction:rtl';
+  const mk=(t,on,f)=>{const b=document.createElement('button');b.type='button';b.className='chip'+(on?' on':'');b.textContent=t;b.style.minHeight='44px';b.setAttribute('aria-pressed',on?'true':'false');b.className+=on?' s3sw-on':' s3sw-back';b.onclick=f;return b};
+  sw.append(mk('דגם',false,()=>close()),mk('צילום 360',true,()=>{}));el.appendChild(sw)}
  /* שיתוף התמונה של הנקודה הנוכחית – למי שרשאי לערוך (מנהל / s3m) */
  if(h&&U.canDraw()&&U.canShare&&U.canShare()){const b=document.createElement('button');b.type='button';b.className='btn g';b.textContent='שיתוף התמונה';
   b.style.cssText='position:absolute;top:calc(64px + env(safe-area-inset-top,0px));inset-inline-start:8px;z-index:6;min-height:44px';
   b.onclick=async()=>{const id=h.stats().id,p=L.find(x=>x.id===id);if(!p)return;try{U.shareJpg(await load(p.full),'pano360-'+p.id+'.jpg')}catch(e){toast('טעינת התמונה נכשלה')}};el.appendChild(b)}
 }
 U.openTour=openTour;
-U.tourBtn=(kind,d)=>d&&d.pano&&Array.isArray(d.pano[kind])&&d.pano[kind].length&&window.S3Pano?`<button class="chip" data-a="s3qTour" data-k="${kind}">סיור בחנות</button>`:'';
+/* שלב 9 – מתג "דגם / צילום 360": שני כפתורים באותה שורה (אחים, בלי עטיפה). "דגם" = המסך הנוכחי (פעיל), "צילום 360" = השכבה הנפרדת (הסיור). בלי טעינה מחדש ובלי נגיעה בדגם או במפה */
+U.tourBtn=(kind,d)=>d&&d.pano&&Array.isArray(d.pano[kind])&&d.pano[kind].length&&window.S3Pano?`<button class="chip on" type="button" aria-pressed="true" aria-label="דגם (מוצג עכשיו)" data-a="s3qModel" style="min-height:44px;margin-inline-start:6px">דגם</button><button class="chip" type="button" aria-pressed="false" data-a="s3qTour" data-k="${kind}" style="min-height:44px">צילום 360</button>`:'';
+ACT.s3qModel=()=>{};/* כבר בדגם */
 ACT.s3qTour=el=>{const k=el&&el.dataset&&el.dataset.k?el.dataset.k:kindE();openTour(k==='w'?'w':'s')};
 ACT.s3qView=()=>{if(P.sel)openTour(kindE(),P.sel)};
 

@@ -1364,6 +1364,26 @@ service cloud.firestore {
       allow read: if s3On() && r3Staff();
       allow create, update, delete: if false;
     }
+    // ----- תהליך הקמת חנות (17.11.2026; חוזה: משימות/2026-11-17_תהליך-הקמת-חנות/תוצרים/0-חוזה-נתונים.md) -----
+    // אוספים חדשים בלבד. כל כתיבה – רק השרת (s3SetupNote, mapQs, mapFix, s3CapPut, s3CapCheck, s3SaveMap, s3SetupDone). אין שינוי באף כלל קיים.
+    // s3setup/{mapId} + n/{itemId} + cap/{key}: מצב ההקמה, הערות, שאלות, תוכנית הצילום ותוצאות – מנהל ומי שמשרטט (s3m), כי הם המצלמים.
+    // s3look/{mapId}: תמונות הקירות/רצפה/תקרה/דלתות/קופות לדגם – כל הצוות (כמו s3sum).
+    match /s3setup/{mapId} {
+      allow read: if s3On() && (rMgr() || r3S3m());
+      allow create, update, delete: if false;
+      match /n/{itemId} {
+        allow read: if s3On() && (rMgr() || r3S3m());
+        allow create, update, delete: if false;
+      }
+      match /cap/{key} {
+        allow read: if s3On() && (rMgr() || r3S3m());
+        allow create, update, delete: if false;
+      }
+    }
+    match /s3look/{mapId} {
+      allow read: if s3On() && r3Staff();
+      allow create, update, delete: if false;
+    }
     match /s3fix/{id} {
       allow read: if s3On() && (rMgr() || (isActiveEmployee() && resource.data.get('u', '') == request.auth.uid));
       allow create, update, delete: if false;
@@ -2331,6 +2351,23 @@ service cloud.firestore {
         }
       }
       match /s3sum/{mapId} {
+        allow read: if feat('store3d') && bStaff();
+        allow create, update, delete: if false;
+      }
+      // ----- תהליך הקמת חנות בתוך העסק (17.11.2026): אותם תנאים כמו בשורש, עם התפקידים של העסק -----
+      match /s3setup/{mapId} {
+        allow read: if feat('store3d') && (bMgr() || b3s3m());
+        allow create, update, delete: if false;
+        match /n/{itemId} {
+          allow read: if feat('store3d') && (bMgr() || b3s3m());
+          allow create, update, delete: if false;
+        }
+        match /cap/{key} {
+          allow read: if feat('store3d') && (bMgr() || b3s3m());
+          allow create, update, delete: if false;
+        }
+      }
+      match /s3look/{mapId} {
         allow read: if feat('store3d') && bStaff();
         allow create, update, delete: if false;
       }

@@ -127,6 +127,8 @@ function field(spec, v, ctx) {
   }
 }
 
+// סוג מפורט (fx.st) ← k בסיסי מחייב; null = כל k (חוזה 3.5)
+const FX_ST = { dfr: 'fridge', ofr: 'fridge', frz: 'fridge', pal: 'table', rack: 'stand', ctr: 'table', oth: null };
 // פריט ברשימה: id (חוץ מ-uz), השדות לפי הסכמה, ו-del (0/1). delAt/delBy מהלקוח – לא נקראים.
 function cleanItem(list, o, ctx, errs) {
   const label = NAME[list] + (o && typeof o.id === 'string' ? ' ' + o.id.slice(0, 8) : '');
@@ -145,7 +147,12 @@ function cleanItem(list, o, ctx, errs) {
     if (o.del === 1) out.del = 1;
     else if (o.del !== 0) errs.push(`${label}: del – 0 או 1`);
   }
-  for (const k of Object.keys(o)) if (!(k in sc) && !['id', 'del', 'delAt', 'delBy'].includes(k)) ctx.drop(list + '.' + k);
+  // הקמת חנות שלב 5 (חוזה 3.5): fx.st – סוג מפורט, לא חובה. לא מוכר או לא מתאים ל-k הבסיסי ⇒ לא נשמר (dropped), והשמירה ממשיכה
+  if (list === 'fx' && o.st !== undefined && o.st !== null) {
+    const base = typeof o.st === 'string' && Object.prototype.hasOwnProperty.call(FX_ST, o.st) ? FX_ST[o.st] : undefined;
+    if (base !== undefined && (base === null || base === out.k)) out.st = o.st; else ctx.drop('fx.st');
+  }
+  for (const k of Object.keys(o)) if (!(k in sc) && !['id', 'del', 'delAt', 'delBy'].includes(k) && !(list === 'fx' && k === 'st')) ctx.drop(list + '.' + k);
   if (list === 'tx' && out.path && !out.path.endsWith('/' + out.id + '_' + out.path.split('_').pop())) errs.push(`${label}: המזהה לא תואם לנתיב הקובץ`);
   if (list === 'fx' && out.sides === 2 && out.k && !TWO.includes(out.k)) errs.push(`${label}: לסוג הזה יש רק צד אחד`);
   return out;
