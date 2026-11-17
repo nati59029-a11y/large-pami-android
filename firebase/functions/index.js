@@ -258,6 +258,7 @@ exports.cashoutTotal = onCall(T.scoped(require('./lib/cashout-total').cashoutTot
 Object.assign(exports, require('./yemot'));
 
 // תוכן שלוחות הקו (שלוחות 1, 3, 4 והפתיחה): publishLineItem, removeLineItem, getLineState
+// + setLineLayout (מנהל, משימה 2026-11-17): "כל התוכן בשלוחה אחת" (yemot_state/layout)
 Object.assign(exports, require('./yemot-line'));
 
 // "ההודעות שבקו" (משימה 2026-11-04, שלב 5): getLineBoard, getLineAudio (עובד/מנהל), extendLineItem, restoreLineItem (מנהל)

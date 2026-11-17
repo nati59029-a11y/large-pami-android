@@ -7,6 +7,8 @@
 //   getLineState    – הרשימות, המילון והמגבלות לאפליקציה (עובד ומנהל). בלי פנייה לימות. כולל voice (מנוע, ולמנהל – הגבול החודשי).
 //   previewVoice    – "שמע קודם" בקול המשוכפל (עובד ומנהל): מחזיר שמע mp3 (base64). נשמר במטמון לשליחה של אותו נוסח.
 //   runLineExpiry   – (לא מ-index.js) נקראת מ-expirePromosOnLine כל לילה: מוחקת הודעות זמניות בשלוחה 4 שפג תוקפן.
+//   setLineLayout   – (מנהל, משימה 2026-11-17) "כל התוכן בשלוחה אחת": yemot_state/layout { single, ext:'1' }. בלי מסמך = המבנה הרגיל.
+//                     השלוחה של כל העלאה חדשה – לפי ההגדרה (lib/yemot-layout.js). מחיקה/הורדה – לפי הנתיב השמור ברשומה.
 // עקרונות:
 //   * התפקיד נקבע בשרת (requireStaff: admins/staff במסד), לעולם לא משדה שהטלפון שולח.
 //   * כל העלאה עוברת: ניקוי ← מילון הגייה ← lib/voice.js. רק voice.js מכיר את סוג הקובץ.
@@ -30,7 +32,8 @@ const requireStaff = (request) => roles.requireStaff(request, { feature: 'yemot'
 const { YemotError, apiBase, listDir, listDirInfo, downloadFile, deleteFiles } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { applyLexicon } = require('./lib/lexicon');
-const { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS } = require('./yemot').shared;
+const { cleanText, israelDay, addDays, validDay, loadLexicon, ensureLexiconSeed, testFault, LOCK_MS, readCfg } = require('./yemot').shared;
+const LY = require('./lib/yemot-layout');
 
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
@@ -61,9 +64,16 @@ const SLOTS = Object.freeze({
 });
 const SLOT_NAMES = Object.keys(SLOTS);
 const isSlot = (s) => typeof s === 'string' && SLOT_NAMES.includes(s) && Object.hasOwn(SLOTS, s);
+// השלוחה והמונה של סוג תוכן לפי מבנה השלוחות (משימה 2026-11-17). במבנה הרגיל – בדיוק SLOTS. הפתיחה – תמיד כמו שהיא.
+function slotIn(slot, S0, layout) {
+  if (S0.fixedName) return S0;
+  const promoExt = String(readCfg().ext);
+  const ext = LY.extOf(slot, layout, promoExt);
+  return Object.assign({}, S0, { ext, state: LY.counterDoc(ext, promoExt) });
+}
 
 // נתיב שהשרת רשאי למחוק: קובץ ממוספר 001-999 בשלוחות 1/3, 000-999 בשלוחה 4 (גם הקובץ הוותיק 000), או קובץ הפתיחה M1000 בשורש.
-// תמיד קובץ אחד בנתיב מדויק – אף פעם לא תיקייה.
+// תמיד קובץ אחד בנתיב מדויק – אף פעם לא תיקייה. ("כל התוכן בשלוחה אחת" = שלוחה 1, ולכן פריטים לעולם לא בשלוחה 2.)
 function safePath(p) {
   const m = /^ivr2:([134])\/(\d{3})\.[A-Za-z0-9]+$/.exec(String(p || ''));
   if (m) return m[1] === '4' || Number(m[2]) >= 1;
@@ -146,11 +156,12 @@ async function allocate(db, ctx, S, itemRef, rendered) {
   });
 }
 
+// ההודעה אחרי העלאה – עם מספר השלוחה שאליה עלה בפועל (במבנה הרגיל: 1, 3, 4 – כמו קודם)
 const DONE_MSG = {
-  recipes: 'המתכון עלה לקו (שלוחה 1), ויושמע ראשון.',
-  updates: 'העדכון עלה לקו (שלוחה 3), ויושמע ראשון.',
-  hours: 'ההודעה עלתה לשלוחה 4, ותושמע ראשונה.',
-  opening: 'הודעת הפתיחה עודכנה בקו.',
+  recipes: (ext) => `המתכון עלה לקו (שלוחה ${ext}), ויושמע ראשון.`,
+  updates: (ext) => `העדכון עלה לקו (שלוחה ${ext}), ויושמע ראשון.`,
+  hours: (ext) => `ההודעה עלתה לשלוחה ${ext}, ותושמע ראשונה.`,
+  opening: () => 'הודעת הפתיחה עודכנה בקו.',
 };
 
 // ---------------- שמע שמור וגיבוי הפתיחה (משימה 2026-11-04, חוזה 5.3, 5.5.1) ----------------
@@ -229,7 +240,7 @@ async function publishItem(request, key, base, pre) {
   const who = await requireStaff(request);
   const input = inputObject(request);
   const v = pre ? pre.v : validateItem(input);
-  const S = v.S;
+  let S = v.S;
   if (S.managerOnly && who.role !== 'manager') {
     throw new HttpsError('permission-denied', `רק מנהל יכול לשנות את ${S.name}.`, { reason: 'slot-manager-only' });
   }
@@ -238,6 +249,8 @@ async function publishItem(request, key, base, pre) {
   if (!engine) throw bad('bad-input', 'קלט לא תקין');
   const ctx = context(key, base);
   const db = T.tdb();
+  // השלוחה שאליה הפריט עולה עכשיו (מבנה השלוחות, משימה 2026-11-17)
+  S = slotIn(v.slot, v.S, await LY.loadLayout(db));
   // ההקראה עצמה (שעולה כסף בקול המשוכפל) נוצרת רק אחרי בדיקת הכפילות והנעילה – שלב 2 למטה
   let spoken = null, rendered = null;
   // החזרה (שלב 5) עם שמע שמור: מעלים את אותו שמע בדיוק, בלי הקראה (ובלי עלות). הנוסח ברשומה נשאר כמו במקור.
@@ -261,8 +274,8 @@ async function publishItem(request, key, base, pre) {
     if (isLocked(x, nowMs)) throw busy();
     if (l && l.exists && isLocked(l.data(), nowMs) && l.get('lockReq') !== v.requestId) throw busy();
     const now = new Date(nowMs).toISOString();
-    // ניסיון חוזר אחרי כשל: אותו נתיב (גם אם ייתכן שהקובץ כבר עלה), כל עוד הסיומת לא השתנתה
-    const keepPath = !!(x && x.path && voice.extOf(x.path) === ext);
+    // ניסיון חוזר אחרי כשל: אותו נתיב (גם אם ייתכן שהקובץ כבר עלה), כל עוד הסיומת לא השתנתה – ורק באותה שלוחה (משימה 2026-11-17)
+    const keepPath = !!(x && x.path && voice.extOf(x.path) === ext && LY.dirOf(x.path) === S.ext);
     const rec = {
       slot: v.slot, ext: S.ext, kind: v.kind, source: v.source, title: v.title, text: v.text, spoken,
       durationSec: v.kind === 'audio' ? v.durationSec : null, engine: v.kind === 'audio' ? (pre && pre.recEngine) || 'recording' : engine, status: 'uploading', error: null,
@@ -384,7 +397,7 @@ async function publishItem(request, key, base, pre) {
       }
       await unlockSlot();
     }
-    const message = DONE_MSG[v.slot] + (v.until ? ` היא תרד מהקו אחרי ${v.until.split('-').reverse().join('/')}.` : '') + (warnings.includes('yemot-remove-failed') ? ' התוכן הקודם עוד לא הוסר מהקו – הוא יוסר בעדכון הבא.' : '')
+    const message = DONE_MSG[v.slot](S.ext) + (v.until ? ` היא תרד מהקו אחרי ${v.until.split('-').reverse().join('/')}.` : '') + (warnings.includes('yemot-remove-failed') ? ' התוכן הקודם עוד לא הוסר מהקו – הוא יוסר בעדכון הבא.' : '')
       + (warnings.includes('opening-backup-text-only') ? ' לא נשמר עותק שמע של הפתיחה הקודמת – אפשר להחזיר אותה רק בהקראה מחדש של הנוסח.' : '');
     return reply({ file, path, kind: v.kind, spoken }, { replaced, warnings, message, engine: rendered.engine, audioSaved, backedUp });
   } catch (e) {
@@ -527,21 +540,33 @@ async function listFiles(request, key, base) {
   const who = await requireStaff(request);
   const input = inputObject(request);
   if (who.role !== 'manager') throw new HttpsError('permission-denied', 'הפעולה הזו מותרת למנהל בלבד.', { reason: 'manager-only' });
-  if (input.ext !== '4') throw bad('bad-slot', 'השלוחה לא מוכרת.');
-  const ctx = context(key, base);
   const db = T.tdb();
+  // שלוחת השעות לפי מבנה השלוחות (משימה 2026-11-17). '4' מתקבל תמיד (גרסאות ישנות של האפליקציה) ומציג את שלוחת השעות הנוכחית.
+  const hx = LY.extOf('hours', await LY.loadLayout(db), String(readCfg().ext));
+  if (input.ext !== '4' && input.ext !== hx) throw bad('bad-slot', 'השלוחה לא מוכרת.');
+  const ctx = context(key, base);
   let names;
-  try { names = await listDir(ctx, '4'); } catch (e) {
+  try { names = await listDir(ctx, hx); } catch (e) {
     logger.warn('yemot-line: list failed', { reason: 'yemot-list-failed', code: e.code });
     throw new HttpsError('unavailable', 'לא הצלחנו לקרוא את השלוחה מהקו. נסו שוב.', { reason: 'yemot-list-failed' });
   }
   const items = new Map();
-  for (const d of (await db.collection(ITEMS).where('slot', '==', 'hours').get()).docs) if (ON_LINE.includes(d.get('status'))) items.set(d.get('file'), d);
+  const view = (d) => ({ id: d.id, title: d.get('title') || '', until: d.get('until') || null, temporary: !!d.get('temporary'), createdAt: d.get('createdAt') || null });
+  if (hx === '4') {
+    for (const d of (await db.collection(ITEMS).where('slot', '==', 'hours').get()).docs) if (ON_LINE.includes(d.get('status'))) items.set(d.get('file'), view(d));
+  } else {
+    // שלוחה משותפת: כל הפריטים והמבצעים שבה (לא "קובץ ותיק")
+    for (const d of (await db.collection(ITEMS).where('status', 'in', ON_LINE).get()).docs) if (LY.dirOf(d.get('path')) === hx) items.set(d.get('file'), view(d));
+    for (const d of (await db.collection('yemot_promos').where('status', 'in', ON_LINE).get()).docs) {
+      if (LY.dirOf(d.get('path')) !== hx || items.has(d.get('file'))) continue;
+      items.set(d.get('file'), { id: d.id, title: (d.get('source') && d.get('source').name) || d.get('title') || cleanText(d.get('text') || '').slice(0, 60) || 'מבצע', until: d.get('until') || null, temporary: true, createdAt: d.get('createdAt') || null });
+    }
+  }
   const files = names.filter((n) => FILE_RE.test(n)).sort().reverse().map((name) => {
-    const d = items.get(name);
-    return { name, legacy: !d, deletable: voice.isDeletableContent(name), item: d ? { id: d.id, title: d.get('title') || '', until: d.get('until') || null, temporary: !!d.get('temporary'), createdAt: d.get('createdAt') || null } : null };
+    const it = items.get(name);
+    return { name, legacy: !it, deletable: voice.isDeletableContent(name), item: it || null };
   });
-  return { ok: true, ext: '4', files };
+  return { ok: true, ext: hx, files };
 }
 
 // ---------------- runLineExpiry – הודעות זמניות בשלוחה 4 (נקראת מ-expirePromosOnLine) ----------------
@@ -564,13 +589,25 @@ async function runLineExpiry(opts) {
   const keep = new Set(all.filter((d) => { const x = d.data(); return x.path && !isDue(x) && (holds(x) || isLocked(x, nowMs)); }).map((d) => d.get('path')));
   out.checked = due.length;
   if (!due.length) return out;
-  let names;
-  try { names = await listDir(ctx, '4'); } catch (e) { logger.error('yemot-line: expiry dir failed', { reason: 'dir-failed', code: e.code }); return Object.assign(out, { error: 'dir-failed' }); }
+  // (משימה 2026-11-17) הודעה זמנית נמחקת לפי הנתיב השמור שלה: שלוחה 4, או שלוחת "כל התוכן בשלוחה אחת".
+  // בשלוחה משותפת: נתיב שפריט מסוג אחר או מבצע מחזיקים – לא מוחקים.
+  for (const d of (await db.collection(ITEMS).where('status', 'in', ON_LINE.concat('failed', 'uploading')).get()).docs) { const x = d.data(); if (x.slot !== 'hours' && x.path && (holds(x) || isLocked(x, nowMs))) keep.add(x.path); }
+  for (const d of (await db.collection('yemot_promos').where('status', 'in', ON_LINE.concat('failed', 'uploading')).get()).docs) { const x = d.data(); if (x.path && (holds(x) || isLocked(x, nowMs))) keep.add(x.path); }
+  // שלוחה 4 – כמו קודם. שלוחת "שלוחה אחת" – רק לפריט שנוצר שם (שדה ext ברשומה), גם אחרי חזרה למבנה הרגיל.
+  const oneExt = (await LY.loadLayout(db)).ext;
+  const RE = /^ivr2:([0-9]+)\/(\d{3})\.[A-Za-z0-9]+$/;
+  const matchOf = (x) => { const m = RE.exec(String(x.path || '')); return m && (m[1] === '4' || (m[1] === oneExt && x.ext === m[1])) ? m : null; };
+  const dirs = new Map();
+  for (const e of ['4'].concat(due.map((d) => (matchOf(d.data()) || [])[1]).filter(Boolean))) {
+    if (dirs.has(e)) continue;
+    try { dirs.set(e, await listDir(ctx, e)); } catch (err) { logger.error('yemot-line: expiry dir failed', { reason: 'dir-failed', code: err.code }); return Object.assign(out, { error: 'dir-failed' }); }
+  }
   for (const d of due) {
     const x = d.data();
     const now = new Date().toISOString();
-    const m = /^ivr2:4\/(\d{3})\.[A-Za-z0-9]+$/.exec(String(x.path || ''));
-    if (!m || Number(m[1]) < 1) { out.skipped++; continue; } // רק קובץ ממוספר שהשרת העלה, אף פעם לא 000
+    const m = matchOf(x);
+    if (!m || Number(m[2]) < 1) { out.skipped++; continue; } // רק קובץ ממוספר שהשרת העלה, אף פעם לא 000
+    const names = dirs.get(m[1]);
     if (keep.has(x.path)) { await d.ref.update({ status: x.status === 'failed' || x.status === 'uploading' ? 'failed' : 'removed', removedAt: now, updatedAt: now, uncertain: false, error: 'path-reused' }); out.skipped++; continue; }
     if (!names.includes(x.path.split('/').pop())) {
       await d.ref.update({ status: x.status === 'failed' || x.status === 'uploading' ? 'failed' : 'removed', removedAt: now, updatedAt: now, uncertain: false, error: 'expired-missing' });
@@ -615,12 +652,16 @@ async function lineState(request) {
   }
   await ensureLexiconSeed(db);
   const lx = await db.doc(LEXICON_DOC).get();
+  // מבנה השלוחות (משימה 2026-11-17): לתוויות באפליקציה – לאיזו שלוחה עולה כל סוג תוכן עכשיו
+  const ly = await LY.loadLayout(db);
+  const px = String(readCfg().ext);
+  const layout = { single: ly.single, ext: ly.ext, exts: Object.fromEntries(LY.CONTENT_SLOTS.map((s) => [s, LY.extOf(s, ly, px)])) };
   // הקול: איזה מנוע מוגדר, ול"שמע קודם" – האם יש קול אמיתי. למנהל גם מצב הגבול החודשי (כדי להתריע לפני שנגמר).
   const engine = voice.configuredEngine();
   const vInfo = { engine, preview: engine === 'elevenlabs' ? 'voice' : 'phone' };
   if (mgr && engine === 'elevenlabs') { try { vInfo.quota = await voice.quotaView(); } catch (e) { vInfo.quota = null; } }
   return {
-    voice: vInfo,
+    voice: vInfo, layout,
     ok: true, role: who.role, slots, lexicon: lx.exists && typeof lx.get('text') === 'string' ? lx.get('text') : '',
     limits: {
       recipes: YEMOT_RECIPE_MAX.value(), updates: 800, hours: 600, opening: 600, recordSec: YEMOT_REC_MAX_SEC.value(), recordBytes: REC_MAX_BYTES, tempMaxDays: YEMOT_TEMP_MAX_DAYS.value(),
@@ -653,6 +694,28 @@ async function previewItem(request) {
   }
 }
 
+// ---------------- setLineLayout – "כל התוכן בשלוחה אחת" (מנהל, משימה 2026-11-17) ----------------
+// קלט { single: boolean, confirm: true }. כותב רק את yemot_state/layout (ושדה stale במטמון של "ההודעות שבקו"). בלי שום פנייה לימות,
+// בלי מחיקה ובלי שינוי ברשומות קיימות: מה שכבר בקו נשאר בשלוחה שלו, ויורד/נמחק לפי הנתיב השמור ברשומה. אפשר לחזור בכל רגע.
+async function setLayout(request) {
+  const who = await requireStaff(request);
+  const input = inputObject(request);
+  if (who.role !== 'manager') throw new HttpsError('permission-denied', 'הפעולה הזו מותרת למנהל בלבד.', { reason: 'manager-only' });
+  if (typeof input.single !== 'boolean' || (input.ext !== undefined && !LY.SINGLE_EXTS.includes(input.ext))) throw bad('bad-input', 'קלט לא תקין');
+  if (input.confirm !== true) throw bad('confirm-needed', 'צריך לאשר את השינוי.');
+  const db = T.tdb();
+  const prev = await LY.loadLayout(db);
+  const now = new Date().toISOString();
+  await db.doc(LY.LAYOUT_DOC).set({ single: input.single, ext: LY.SINGLE_EXTS[0], updatedAt: now, updatedBy: who.uid, previous: prev.single }, { merge: true });
+  // רשימות "בקו עכשיו" שבמטמון שייכות למבנה הקודם – נקראות מחדש מהקו
+  for (const s of LY.CONTENT_SLOTS) await db.doc(`yemot_state/board-${s}`).set({ stale: true }, { merge: true });
+  logger.info('yemot-line: layout set', { single: input.single, changed: prev.single !== input.single });
+  return {
+    ok: true, single: input.single, ext: LY.SINGLE_EXTS[0], changed: prev.single !== input.single,
+    message: input.single ? `מעכשיו כל התוכן (מבצעים, מתכונים, עדכונים ושעות) עולה לשלוחה ${LY.SINGLE_EXTS[0]}.` : 'חזרנו לחלוקה הרגילה: כל סוג תוכן עולה לשלוחה שלו.',
+  };
+}
+
 // עטיפה: כל שגיאה שאינה HttpsError → "internal" בעברית, בלי פרטים (אולי מכילים טקסט מימות)
 const wrap = (name, fn) => T.scoped(async (request) => {
   try { return await fn(request); } catch (e) {
@@ -666,9 +729,10 @@ exports.publishLineItem = onCall({ secrets: [YEMOT_API_KEY, voice.ELEVENLABS_API
 exports.removeLineItem = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('remove', (r) => removeItem(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 exports.getLineState = onCall(wrap('state', (r) => lineState(r)));
 exports.previewVoice = onCall({ secrets: [voice.ELEVENLABS_API_KEY], timeoutSeconds: 120 }, wrap('preview', (r) => previewItem(r)));
+exports.setLineLayout = onCall(wrap('layout', (r) => setLayout(r)));
 exports.listLineFiles = onCall({ secrets: [YEMOT_API_KEY], timeoutSeconds: 60 }, wrap('list', (r) => listFiles(r, YEMOT_API_KEY.value(), YEMOT_API_BASE.value())));
 // נקראת מ-expirePromosOnLine (yemot.js). לא נספרת כפונקציה.
 Object.defineProperty(exports, 'runLineExpiry', { enumerable: false, value: runLineExpiry });
 
 // לבדיקות בלבד (לא נספרים כפונקציות): הליבה, כדי לקרוא לה בתוך תהליך הבדיקה עם voice.js מוחלף או פסק זמן קצר.
-Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, previewItem, runLineExpiry, parseWav: voice.parseWav, safePath, safeFilePath, SLOTS, backupOpening, FILE_RE, ON_LINE, context, wrap, ID_RE, YEMOT_TEMP_MAX_DAYS, LISTEN_MAX_BYTES } });
+Object.defineProperty(exports, '_core', { enumerable: false, value: { publishItem, removeItem, lineState, listFiles, previewItem, runLineExpiry, setLayout, parseWav: voice.parseWav, safePath, safeFilePath, SLOTS, backupOpening, FILE_RE, ON_LINE, context, wrap, ID_RE, YEMOT_TEMP_MAX_DAYS, LISTEN_MAX_BYTES } });

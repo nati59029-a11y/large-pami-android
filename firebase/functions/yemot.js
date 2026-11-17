@@ -29,6 +29,8 @@ const requireStaff = (request) => roles.requireStaff(request, { feature: 'yemot'
 const { YemotError, apiBase, yemotCall, deleteFiles } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { parseLexicon, applyLexicon } = require('./lib/lexicon');
+// מבנה השלוחות (משימה 2026-11-17): yemot_state/layout. בלי מסמך / single:false – בדיוק כמו קודם (שלוחה YEMOT_EXT, מונה yemot_state/line).
+const LY = require('./lib/yemot-layout');
 
 const TZ = 'Asia/Jerusalem';
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
@@ -167,8 +169,10 @@ async function refundUsage(db, uid, day) {
 // ---------------- בחירת מספר קובץ (בטרנזקציה, בלי התנגשות בין מקבילים) ----------------
 // n = max(nextNum, 1 + המספר הגבוה בשלוחה). מעל 999: המספר הפנוי הקטן ביותר מ-001. לעולם לא 000.
 // recent = 20 המספרים האחרונים שהוקצו, כדי ששני מקבילים לא יבחרו אותו מספר פנוי גם כשהשלוחה כמעט מלאה.
-async function allocateNumber(db, onLine, promoRef, ext, rendered) {
-  const stateRef = db.doc(STATE);
+// stateDoc (משימה 2026-11-17): מונה השלוחה (LY.counterDoc). שלוחה משותפת עם פריטי yemot-line.js – אותו מונה, ולכן מספרים שונים.
+//   מילוי חורים מדלג גם על מספרים שרשומה של האפליקציה מחזיקה (LY.heldNums), כדי לא לדרוס קובץ של סוג אחר שמצבו לא ודאי.
+async function allocateNumber(db, onLine, promoRef, ext, rendered, stateDoc) {
+  const stateRef = db.doc(stateDoc || STATE);
   return db.runTransaction(async (tx) => {
     const s = await tx.get(stateRef);
     const nextNum = (s.exists && Number(s.get('nextNum'))) || 1;
@@ -177,12 +181,15 @@ async function allocateNumber(db, onLine, promoRef, ext, rendered) {
     let n = Math.max(nextNum, maxOn + 1, 1);
     if (n > 999) {
       n = 0;
-      for (let c = 1; c <= 999; c++) if (!onLine.has(c) && !recent.includes(c)) { n = c; break; }
+      const held = await LY.heldNums(db, ext);
+      for (let c = 1; c <= 999; c++) if (!onLine.has(c) && !recent.includes(c) && !held.has(c)) { n = c; break; }
       if (!n) throw new HttpsError('resource-exhausted', 'אין מקום לעוד מבצעים בשלוחה. פנו למנהל.', { reason: 'line-full' });
     }
     const file = voice.fileName(n, rendered);
     const now = new Date().toISOString();
-    tx.set(stateRef, { nextNum: n + 1, recent: recent.concat(n).slice(-20), updatedAt: now });
+    // yemot_state/line – כמו קודם (בלי merge). מונה של שלוחה אחרת – merge (יש בו גם שדות נעילה של yemot-line.js)
+    if (stateRef.path === STATE) tx.set(stateRef, { nextNum: n + 1, recent: recent.concat(n).slice(-20), updatedAt: now });
+    else tx.set(stateRef, { nextNum: n + 1, recent: recent.concat(n).slice(-20), updatedAt: now }, { merge: true });
     tx.update(promoRef, { file, path: voice.pathOf(ext, file), updatedAt: now });
     return file;
   });
@@ -198,6 +205,10 @@ async function allocateNumber(db, onLine, promoRef, ext, rendered) {
 const LOCK_MS = 120000; // שליחה "בטיפול": שתי שליחות של אותו מבצע לא רצות במקביל
 // נעילה פעילה = שליחה אחרת של אותו מבצע רצה עכשיו. נעילה ישנה מ-LOCK_MS = השליחה נתקעה/קרסה, ואפשר להמשיך.
 function isLocked(x, nowMs) { return !!(x && x.lockAt && nowMs - Date.parse(x.lockAt) < LOCK_MS); }
+// פריט של yemot-line.js שאולי בקו (כמו holdsPath, לפי הסטטוסים של yemot_items)
+function itemHolds(x) {
+  return !!(x && x.path && (ACTIVE.includes(x.status) || x.status === 'uploading' || (x.status === 'failed' && x.uncertain)));
+}
 // האם ייתכן שהקובץ של הרשומה נמצא בקו (גם אם לא בוודאות)
 function holdsPath(x) {
   return !!(x && x.path && (ACTIVE.includes(x.status) || x.status === 'uploading' || (x.status === 'failed' && x.uncertain)));
@@ -267,6 +278,9 @@ async function sendPromo(request, key, base, pre) {
 
   // מצב בלבד: האם אפשר עוד לשלוח צינתוק היום. בלי פנייה לימות.
   if (input.statusOnly === true && !pre) return { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
+  // השלוחה שאליה המבצע עולה עכשיו: YEMOT_EXT, או שלוחת "כל התוכן בשלוחה אחת" (משימה 2026-11-17)
+  const layout = await LY.loadLayout(db);
+  const pext = LY.extOf('promos', layout, cfg.ext);
 
   // מבצע מוקלט: יש audio. אחרת – הנוסח (ההתנהגות הקיימת, בלי שינוי)
   const isRec = pre ? pre.kind === 'audio' : input.audio !== undefined && input.audio !== null;
@@ -317,7 +331,7 @@ async function sendPromo(request, key, base, pre) {
     // וגם אותו קול: קובץ שבקו בקול אחר (למשל ממוחשב, אחרי "שלח בקול הממוחשב" או מלפני הפרסום) מוקרא מחדש בקול המבוקש.
     // הקול נקבע לפי סוג הקובץ שבקו (עובד גם לרשומות ישנות בלי שדה engine).
     const sameText = !isRec && onLine && ACTIVE.includes(x.status) && x.text === v.text && (x.spoken == null ? x.text : x.spoken) === spoken
-      && voice.extOf(x.path) === voice.extFor(engine);
+      && voice.extOf(x.path) === voice.extFor(engine) && LY.dirOf(x.path) === pext; // מבצע שבקו בשלוחה אחרת (אחרי שינוי המבנה) – עולה מחדש לשלוחה הנוכחית
     const upload = !sameText;
     const doTz = v.withTzintuk && !(sameText && x.tzintuk === 'sent');
     const now = new Date(nowMs).toISOString();
@@ -402,16 +416,19 @@ async function sendPromo(request, key, base, pre) {
         throw voice.toHttps(e, !isEmp);
       }
       try {
-        if (path && voice.extOf(path) !== rendered.ext) { stale = path; path = null; file = null; }
+        // סיומת אחרת, או נתיב בשלוחה אחרת (אחרי שינוי מבנה השלוחות) – הקובץ הקודם יימחק אחרי שהחדש עלה
+        if (path && (voice.extOf(path) !== rendered.ext || LY.dirOf(path) !== pext)) { stale = path; path = null; file = null; }
         if (path) {
-          // הגנה: אם רשומה אחרת "מחזיקה" את אותו נתיב (למשל מספר שהוקצה מחדש) – לא דורסים, מקצים מספר חדש
+          // הגנה: אם רשומה אחרת "מחזיקה" את אותו נתיב (למשל מספר שהוקצה מחדש) – לא דורסים, מקצים מספר חדש.
+          // גם פריט של yemot-line.js (שלוחה משותפת, משימה 2026-11-17)
           const other = await db.collection(PROMOS).where('path', '==', path).get();
-          if (other.docs.some((d) => d.id !== v.promoKey && holdsPath(d.data(), Date.now()))) { path = null; file = null; action = 'uploaded'; }
+          const otherItem = (await db.collection('yemot_items').where('path', '==', path).get()).docs.some((d) => itemHolds(d.data()));
+          if (otherItem || other.docs.some((d) => d.id !== v.promoKey && holdsPath(d.data(), Date.now()))) { path = null; file = null; action = 'uploaded'; }
         }
         if (!path) {
-          const nums = await lineNumbers(ctx, cfg.ext);
-          file = await allocateNumber(db, nums, promoRef, cfg.ext, rendered);
-          path = voice.pathOf(cfg.ext, file);
+          const nums = await lineNumbers(ctx, pext);
+          file = await allocateNumber(db, nums, promoRef, pext, rendered, LY.counterDoc(pext, cfg.ext));
+          path = voice.pathOf(pext, file);
         }
       } catch (e) {
         if (e instanceof HttpsError) {
@@ -422,7 +439,7 @@ async function sendPromo(request, key, base, pre) {
         throw await failUpload(e instanceof YemotError ? 'dir-' + e.code : 'internal', false);
       }
       try {
-        await voice.upload(ctx, cfg.ext, file.split('.')[0], rendered);
+        await voice.upload(ctx, pext, file.split('.')[0], rendered);
       } catch (e) {
         throw await failUpload(e instanceof YemotError ? 'upload-' + e.code : 'internal', e instanceof YemotError && e.sent && e.code === 'timeout');
       }
@@ -443,7 +460,8 @@ async function sendPromo(request, key, base, pre) {
       }
       // הגנה כפולה: מוחקים רק קובץ ממוספר 001-999 בשלוחת המבצעים (כמו runExpiry).
       // התבנית נבנית מ-YEMOT_EXT, כך שגם שלוחה מקוננת (למשל '2/1') נתמכת, כמו ב-runExpiry. שלוחה אחרת – לא נמחק.
-      const staleM = stale ? staleRe(cfg.ext).exec(stale) : null;
+      // (משימה 2026-11-17) הקובץ הקודם יכול להיות גם בשלוחה הקודמת של המבצעים – רק שלוחות המבצעים (LY.promoExts)
+      const staleM = stale ? LY.promoExts(layout, cfg.ext).map((e) => staleRe(e).exec(stale)).find(Boolean) : null;
       const staleOk = !!staleM && Number(staleM[1]) >= 1;
       if (staleOk && stale !== path) {
         try { await deleteFiles(ctx, [stale]); } catch (e) { logger.warn('yemot: old file left', { reason: 'stale-file', code: e instanceof YemotError ? e.code : 'internal', requestId: v.requestId }); }
@@ -526,15 +544,24 @@ async function runExpiry(opts) {
   const keep = new Set(snap.docs.filter((d) => holdsPath(d.data()) && !isDue(d.data())).map((d) => d.get('path')));
   out.checked = due.length;
   if (!due.length) return out;
-  let onLine;
-  try { onLine = await lineNumbers(ctx, ext); } catch (e) {
-    logger.error('yemot: expiry dir failed', { reason: 'dir-failed', code: e.code });
-    return Object.assign(out, { error: 'dir-failed' });
+  // (משימה 2026-11-17) מבצע יכול לשבת בשלוחת המבצעים או בשלוחת "כל התוכן בשלוחה אחת" – כל אחד נמחק לפי הנתיב השמור שלו.
+  // בשלוחה משותפת: נתיב שפריט של yemot-line.js מחזיק – לא מוחקים.
+  const layout = await LY.loadLayout(db);
+  const res = LY.promoExts(layout, ext).map((e) => ({ e, re: new RegExp(`^ivr2:${e.replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.[A-Za-z0-9]+$`) }));
+  const match = (p) => { for (const r of res) { const m = r.re.exec(String(p || '')); if (m) return { m, e: r.e }; } return { m: null, e: null }; };
+  for (const d of (await db.collection('yemot_items').where('status', 'in', ACTIVE.concat('failed', 'uploading')).get()).docs) if (itemHolds(d.data())) keep.add(d.get('path'));
+  const dirs = new Map();
+  for (const e of [ext].concat(due.map((d) => match(d.get('path')).e).filter(Boolean))) {
+    if (dirs.has(e)) continue;
+    try { dirs.set(e, await lineNumbers(ctx, e)); } catch (err) {
+      logger.error('yemot: expiry dir failed', { reason: 'dir-failed', code: err.code });
+      return Object.assign(out, { error: 'dir-failed' });
+    }
   }
-  const re = new RegExp(`^ivr2:${ext.replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.[A-Za-z0-9]+$`);
   for (const d of due) {
     const x = d.data();
-    const m = re.exec(String(x.path || ''));
+    const { m, e } = match(x.path);
+    const onLine = e ? dirs.get(e) : null;
     const now = new Date().toISOString();
     if (!m || Number(m[1]) < 1) { out.skipped++; continue; } // לעולם לא 000 ולא נתיב שלא אנחנו יצרנו
     if (keep.has(x.path)) { await d.ref.update({ status: x.status === 'failed' || x.status === 'uploading' ? 'failed' : 'removed', uncertain: false, pending: null, removedAt: now, updatedAt: now, error: 'path-reused' }); out.skipped++; continue; }

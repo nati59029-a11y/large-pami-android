@@ -18,6 +18,7 @@ require('./50-functions');
 require('./60-yemot');
 require('./61-yemot-line');
 require('./62-voice');
+require('./64-yemot-one-ext'); // כל התוכן בשלוחה אחת (משימה 2026-11-17, שלבים 1-2)
 require('./90-coverage');
 const H = require('./helpers');
 after(async () => { try { (await H.getEnv()).cleanup(); } catch (e) { /* האמולטור כבר נסגר */ } });

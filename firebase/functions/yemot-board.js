@@ -27,6 +27,8 @@ const voice = require('./lib/voice');
 const { applyLexicon } = require('./lib/lexicon');
 const Y = require('./yemot');
 const L = require('./yemot-line');
+// מבנה השלוחות (משימה 2026-11-17, "כל התוכן בשלוחה אחת"): שלוחה ← סוגים. במבנה הרגיל – בדיוק כמו קודם (סוג אחד לכל שלוחה).
+const LY = require('./lib/yemot-layout');
 
 const { cleanText, israelDay, addDays, validDay, loadLexicon, LOCK_MS, staleRe, holdsPath, isLocked, readCfg, heDate } = Y.shared;
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
@@ -70,7 +72,12 @@ const noBackupConfirm = () => pre('no-backup-confirm', 'אין עותק שמור
 const stamp = () => new Date().toISOString();
 
 const isMgr = (who) => who.role === 'manager';
-const extOfSlot = (slot) => (slot === 'promos' ? String(readCfg().ext) : SLOT_EXT[slot]);
+const extOfSlot = (slot, layout) => LY.extOf(slot, layout, String(readCfg().ext));
+// הסוגים שעולים עכשיו לשלוחה (שלוחה שאף סוג לא עולה אליה – הסוג שהיה בה במבנה הרגיל). השורש ('') – אין (כמו EXT_SLOT).
+const extSlots = (ext, layout) => (typeof ext !== 'string' || ext === '' ? [] : LY.slotsOfExt(ext, layout, String(readCfg().ext)));
+// מבצע: נתיב ממוספר 001-999 באחת משלוחות המבצעים (YEMOT_EXT או שלוחת "כל התוכן בשלוחה אחת")
+const promoPathOk = (p, layout) => LY.promoExts(layout, readCfg().ext).some((e) => { const m = staleRe(e).exec(String(p || '')); return !!m && Number(m[1]) >= 1; });
+const itemHolds = (x) => !!x.path && (ON_LINE.includes(x.status) || x.status === 'uploading' || (x.status === 'failed' && x.uncertain));
 const hasText = (x) => typeof x.text === 'string' && x.text.trim() !== '';
 const savedPath = (x) => (typeof x.audioPath === 'string' && x.audioPath && !x.audioPurgedAt ? x.audioPath : null);
 // רשומה ישנה בלי kind = נוסח (הערת הבודק בשלב 4: גם kind:null)
@@ -90,35 +97,38 @@ function ctxOf(key, base) {
 
 // ---------------- רשומות של שלוחה ----------------
 // מחזיר: online (Map path → {kind, doc, certain}), certain (רשומות "בקו" בוודאות), down (רשומות שירדו), changedAt (העדכון האחרון).
-async function loadRecords(db, slot, ext) {
+// types (משימה 2026-11-17): כל הסוגים שעולים לשלוחה הזו (בשלוחה משותפת – כמה). לכל רשומה נשמר type (הסוג שלה).
+async function loadRecords(db, slot, ext, types) {
   const cutoff = new Date(Date.now() - (RESTORE_DAYS + 2) * 86400000).toISOString();
   const online = new Map(), certain = [], down = [];
   let changedAt = '';
   const seen = (x) => { for (const f of ['updatedAt', 'removedAt', 'finishedAt', 'createdAt']) if (typeof x[f] === 'string' && x[f] > changedAt) changedAt = x[f]; };
-  if (slot === 'promos') {
+  for (const type of types || [slot]) {
+   if (type === 'promos') {
     const act = (await db.collection(PROMOS).where('status', 'in', ON_LINE.concat('failed', 'uploading')).get()).docs;
     for (const d of act) {
       const x = d.data(); seen(x);
       if (!holdsPath(x)) continue;
       const sure = ON_LINE.includes(x.status) && !x.pending;
-      const e = { kind: 'promo', doc: d, certain: sure };
+      const e = { kind: 'promo', doc: d, certain: sure, type };
       if (!online.has(x.path) || sure) online.set(x.path, e);
       if (ON_LINE.includes(x.status)) certain.push(e);
     }
-    for (const d of (await db.collection(PROMOS).where('removedAt', '>=', cutoff).get()).docs) { const x = d.data(); seen(x); if (x.status === 'removed') down.push({ kind: 'promo', doc: d }); }
+    for (const d of (await db.collection(PROMOS).where('removedAt', '>=', cutoff).get()).docs) { const x = d.data(); seen(x); if (x.status === 'removed') down.push({ kind: 'promo', doc: d, type }); }
     const last = (await db.collection(PROMOS).orderBy('updatedAt', 'desc').limit(1).get()).docs[0];
     if (last) seen(last.data());
-  } else {
-    for (const d of (await db.collection(ITEMS).where('slot', '==', slot).get()).docs) {
+   } else {
+    for (const d of (await db.collection(ITEMS).where('slot', '==', type).get()).docs) {
       const x = d.data(); seen(x);
       if (ON_LINE.includes(x.status) || (x.status === 'failed' && x.uncertain) || x.status === 'uploading') {
         if (!x.path) continue;
         const sure = ON_LINE.includes(x.status);
-        const e = { kind: 'item', doc: d, certain: sure };
+        const e = { kind: 'item', doc: d, certain: sure, type };
         if (!online.has(x.path) || sure) online.set(x.path, e);
         if (sure) certain.push(e);
-      } else if (['removed', 'replaced'].includes(x.status)) down.push({ kind: 'item', doc: d });
+      } else if (['removed', 'replaced'].includes(x.status)) down.push({ kind: 'item', doc: d, type });
     }
+   }
   }
   if (ext !== '') {
     for (const d of (await db.collection(BACKUPS).where('ext', '==', ext).get()).docs) { const x = d.data(); seen(x); if (x.status === 'complete' && ['applied', 'uncertain'].includes(x.result)) down.push({ kind: 'backup', doc: d }); }
@@ -136,8 +146,13 @@ async function board(request, key, base) {
   if (!mgr && !EMP_SLOTS.includes(slot)) throw slotManagerOnly();
   if (input.refresh !== undefined && typeof input.refresh !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
   const db = T.tdb();
-  const ext = extOfSlot(slot);
-  const recs = await loadRecords(db, slot, ext);
+  const layout = await LY.loadLayout(db);
+  const ext = extOfSlot(slot, layout);
+  // שלוחה משותפת (כל התוכן בשלוחה אחת): כל הסוגים שבה, עם תווית סוג. במבנה הרגיל – רק הסוג של המסך (כמו קודם)
+  const types = slot === 'opening' ? ['opening'] : extSlots(ext, layout);
+  if (!types.includes(slot)) types.unshift(slot);
+  const shared = types.length > 1;
+  const recs = await loadRecords(db, slot, ext, types);
 
   // 1. התיקייה: מטמון (120 שניות, או 15 ב"רענון"), אלא אם משהו השתנה במסד אחרי הקריאה האחרונה (העלאה/הורדה/החזרה/לילה)
   const cacheRef = db.doc(`yemot_state/board-${slot}`);
@@ -190,16 +205,17 @@ async function board(request, key, base) {
     const unsure = !e.certain || !!x.uncertain;
     const locked = isLocked(x, Date.now());
     const listen = savedPath(x) ? 'saved' : hasText(x) ? 'text' : kindOf(x) === 'audio' && e.certain ? 'line' : 'none';
-    const canExtend = mgr && !unsure && x.status === 'live' && (e.kind === 'promo' || (slot === 'hours' && x.temporary === true));
+    const canExtend = mgr && !unsure && x.status === 'live' && (e.kind === 'promo' || (e.type === 'hours' && x.temporary === true));
     return {
-      ref: { kind: e.kind, id: e.doc.id, ext, file: f.name }, file: f.name, origin: 'app', title: titleOf(e.kind, x), kind: kindOf(x),
+      ref: { kind: e.kind, id: e.doc.id, ext, file: f.name }, file: f.name, origin: 'app', title: titleOf(e.kind, x), kind: kindOf(x), ...(shared ? { type: e.type } : {}),
       createdAt: x.createdAt || null, byRole: x.byRole || null, until: x.until || null, temporary: e.kind === 'promo' ? true : !!x.temporary,
       durationSec: x.durationSec || f.duration || null, size: f.size, uncertain: unsure, listen,
       actions: { remove: mgr && slot !== 'opening' && !unsure && !locked, extend: canExtend },
     };
   });
   // רשומה "בקו" שהקובץ שלה לא בתיקייה (אולי נמחק ידנית בימות)
-  const missing = recs.certain.filter((e) => !names.has(String(e.doc.get('path')).split('/').pop()))
+  // רק רשומות שהנתיב שלהן בשלוחה הזו (מבצע ישן בשלוחה אחרת אחרי שינוי המבנה – לא "חסר")
+  const missing = recs.certain.filter((e) => LY.dirOf(e.doc.get('path')) === ext && !names.has(String(e.doc.get('path')).split('/').pop()))
     .map((e) => ({ ref: { kind: e.kind, id: e.doc.id }, title: titleOf(e.kind, e.doc.data()), file: e.doc.get('file') || null }));
 
   // 3. "ירדו בשבוע האחרון"
@@ -216,11 +232,11 @@ async function board(request, key, base) {
     const downReason = e.kind === 'backup' ? 'legacy-removed' : x.status === 'replaced' ? 'replaced' : (e.kind === 'promo' ? x.removedVia === 'app' : x.removedBy !== 'expiry') ? 'removed' : 'expired';
     const already = restoredLive.has(`${e.kind}:${e.doc.id}`);
     recent.push({
-      ref: { kind: e.kind, id: e.doc.id }, title: e.kind === 'backup' ? `קובץ ותיק ${x.file}` : titleOf(e.kind, x), kind: e.kind === 'backup' ? x.kind : kindOf(x),
+      ref: { kind: e.kind, id: e.doc.id }, title: e.kind === 'backup' ? `קובץ ותיק ${x.file}` : titleOf(e.kind, x), kind: e.kind === 'backup' ? x.kind : kindOf(x), ...(shared && e.type ? { type: e.type } : {}),
       file: x.file || null, downAt, downReason, until: x.until || null, hasSavedAudio: !!saved, alreadyRestored: already,
       restore: {
         allowed: mgr && !already && (!!saved || txt),
-        needsUntil: e.kind === 'promo' || (slot === 'hours' && x.temporary === true),
+        needsUntil: e.kind === 'promo' || ((e.type || slot) === 'hours' && x.temporary === true),
         costNote: e.kind !== 'backup' && !saved && txt && textEngine(x) === 'elevenlabs',
       },
     });
@@ -265,21 +281,25 @@ async function listen(request, key, base) {
   const ref = input.ref;
   if (!ref || typeof ref !== 'object' || Array.isArray(ref)) throw bad('bad-input', 'קלט לא תקין');
   const db = T.tdb();
-  const cfg = readCfg();
-  const allow = (slot) => { if (!isMgr(who) && !EMP_SLOTS.includes(slot)) throw slotManagerOnly(); };
+  const layout = await LY.loadLayout(db);
+  // עובד: רק שלוחות של עובדים. שלוחה משותפת (משימה 2026-11-17) – מותר אם אחד הסוגים שבה מותר לעובד
+  const allow = (slots) => { if (!isMgr(who) && !slots.some((s) => EMP_SLOTS.includes(s))) throw slotManagerOnly(); };
   let x = null, slot = null, linePath = null, kind = ref.kind;
   if (kind === 'file') {
     const ext = ref.ext, file = ref.file;
     const okFile = voice.isListenable(file) && ((typeof ext === 'string' && ['1', '2', '3', '4'].includes(ext) && /^\d{3}\./.test(file)) || (ext === '' && file.startsWith('M1000.')));
     if (!okFile) throw bad('bad-file', 'אי אפשר להשמיע את הקובץ הזה.');
-    slot = ext === '' ? 'opening' : ext === String(cfg.ext) ? 'promos' : EXT_SLOT[ext];
-    if (!slot) throw bad('bad-file', 'אי אפשר להשמיע את הקובץ הזה.');
-    allow(slot);
+    const slots = ext === '' ? ['opening'] : extSlots(ext, layout);
+    if (!slots.length) throw bad('bad-file', 'אי אפשר להשמיע את הקובץ הזה.');
+    allow(slots);
     linePath = voice.pathOf(ext, file);
-    // לקובץ יש רשומה של האפליקציה? אז משמיעים ממנה (שמע שמור / נוסח)
-    const col = slot === 'promos' ? PROMOS : ITEMS;
-    const d = (await db.collection(col).where('path', '==', linePath).get()).docs.find((q) => (slot === 'promos' ? ON_LINE.includes(q.get('status')) : ON_LINE.includes(q.get('status'))));
-    if (d) { x = d.data(); kind = slot === 'promos' ? 'promo' : 'item'; }
+    // לקובץ יש רשומה של האפליקציה (פריט או מבצע – בשלוחה משותפת שניהם)? אז משמיעים ממנה (שמע שמור / נוסח)
+    for (const [col, k] of [[ITEMS, 'item'], [PROMOS, 'promo']]) {
+      if (x) break;
+      if (k === 'item' && ext === String(readCfg().ext) && !layout.single) continue; // במבנה הרגיל בשלוחת המבצעים – רק מבצעים (כמו קודם)
+      const d = (await db.collection(col).where('path', '==', linePath).get()).docs.find((q) => ON_LINE.includes(q.get('status')));
+      if (d) { x = d.data(); kind = k; }
+    }
   } else if (kind === 'item' || kind === 'promo') {
     if (typeof ref.id !== 'string' || !ID_RE.test(ref.id)) throw notFound();
     const s = await db.doc(`${kind === 'promo' ? PROMOS : ITEMS}/${ref.id}`).get();
@@ -287,15 +307,16 @@ async function listen(request, key, base) {
     x = s.data();
     slot = kind === 'promo' ? 'promos' : x.slot;
     if (!Object.hasOwn(SLOT_EXT, slot || '')) throw notFound();
-    allow(slot);
+    const pd = LY.dirOf(x.path);
+    allow([slot].concat(pd ? extSlots(pd, layout) : []));
   } else if (kind === 'backup') {
     if (typeof ref.id !== 'string' || !BACKUP_ID_RE.test(ref.id)) throw notFound();
     const s = await db.doc(`${BACKUPS}/${ref.id}`).get();
     if (!s.exists) throw notFound();
     const b = s.data();
-    slot = b.ext === String(cfg.ext) ? 'promos' : EXT_SLOT[b.ext];
-    if (!slot) throw notFound();
-    allow(slot);
+    const slots = extSlots(b.ext, layout);
+    if (!slots.length) throw notFound();
+    allow(slots);
     if (b.storagePath && !b.purgedAt) {
       const buf = await safeRead(b.storagePath);
       if (buf) return { ok: true, mode: 'audio', mime: 'audio/wav', data: buf.toString('base64'), durationSec: null, source: 'saved' };
@@ -318,7 +339,7 @@ async function listen(request, key, base) {
     if (hasText(x)) return textReply(x.text);
     // (3) הקלטה בלי עותק – רק אם הרשומה בקו בוודאות (אחרת הנתיב אולי שייך עכשיו להודעה אחרת)
     if (!ON_LINE.includes(x.status) || !x.path) throw listenUnavailable();
-    const safe = kind === 'promo' ? (() => { const m = staleRe(cfg.ext).exec(x.path); return !!m && Number(m[1]) >= 1; })() : L._core.safePath(x.path);
+    const safe = kind === 'promo' ? promoPathOk(x.path, layout) : L._core.safePath(x.path);
     if (!safe) throw listenUnavailable();
     linePath = x.path;
   }
@@ -419,8 +440,9 @@ async function backupResult(db, backupId, result, error) {
 }
 async function markStale(db, backupId) {
   const b = await db.doc(`${BACKUPS}/${backupId}`).get();
-  const slot = b.exists ? (b.get('ext') === String(readCfg().ext) ? 'promos' : EXT_SLOT[b.get('ext')]) : null;
-  if (slot) await db.doc(`yemot_state/board-${slot}`).set({ stale: true }, { merge: true });
+  // כל המסכים שמציגים את השלוחה הזו (בשלוחה משותפת – כמה)
+  const slots = b.exists ? extSlots(b.get('ext'), await LY.loadLayout(db)) : [];
+  for (const slot of slots) await db.doc(`yemot_state/board-${slot}`).set({ stale: true }, { merge: true });
 }
 
 // מבצע שמחזיק את הנתיב הזה: promoKey, 'uncertain' (ייתכן שבקו, לא ודאי), או null
@@ -438,9 +460,9 @@ async function removePromo(who, input, key, base) {
   if (typeof input.requestId !== 'string' || !ID_RE.test(input.requestId)) throw bad('bad-request-id', 'הבקשה לא תקינה. נסו שוב.');
   if (typeof input.promoKey !== 'string' || !ID_RE.test(input.promoKey)) throw notFound();
   if (input.confirmNoBackup !== undefined && typeof input.confirmNoBackup !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
-  const cfg = readCfg();
   const ctx = ctxOf(key, base);
   const db = T.tdb();
+  const layout = await LY.loadLayout(db);
   const ref = db.doc(`${PROMOS}/${input.promoKey}`);
   const plan = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
@@ -450,8 +472,7 @@ async function removePromo(who, input, key, base) {
     if (!ON_LINE.includes(x.status)) { if (holdsPath(x)) throw uncertainErr(); throw notFound(); }
     if (isLocked(x, Date.now())) throw busy();
     if (x.pending) throw uncertainErr();
-    const m = staleRe(cfg.ext).exec(String(x.path || ''));
-    if (!m || Number(m[1]) < 1) { logger.error('yemot-board: unsafe promo path refused', { reason: 'unsafe-path', id: input.promoKey }); throw notFound(); }
+    if (!promoPathOk(x.path, layout)) { logger.error('yemot-board: unsafe promo path refused', { reason: 'unsafe-path', id: input.promoKey }); throw notFound(); }
     const now = stamp();
     tx.update(ref, { lockAt: now, lockReq: input.requestId, updatedAt: now });
     return { kind: 'work', x };
@@ -467,11 +488,13 @@ async function removePromo(who, input, key, base) {
   };
   try {
     let infos;
-    try { infos = await listDirInfo(ctx, cfg.ext); } catch (e) { throw await failed(e); }
+    // השלוחה – לפי הנתיב השמור במבצע (משימה 2026-11-17), לא לפי ההגדרה הנוכחית
+    try { infos = await listDirInfo(ctx, LY.dirOf(x.path)); } catch (e) { throw await failed(e); }
     const file = x.path.split('/').pop();
     const info = infos.find((f) => f.name === file);
-    // הגנת path-reused (כמו runExpiry): מבצע אחר שמחזיק את אותו נתיב – לא מוחקים את הקובץ שלו
-    const reused = (await db.collection(PROMOS).where('path', '==', x.path).get()).docs.some((d) => d.id !== input.promoKey && holdsPath(d.data()));
+    // הגנת path-reused (כמו runExpiry): מבצע אחר – או פריט אחר בשלוחה משותפת – שמחזיק את אותו נתיב: לא מוחקים את הקובץ שלו
+    const reused = (await db.collection(PROMOS).where('path', '==', x.path).get()).docs.some((d) => d.id !== input.promoKey && holdsPath(d.data()))
+      || (await db.collection(ITEMS).where('path', '==', x.path).get()).docs.some((d) => itemHolds(d.data()));
     if (info && !reused) {
       if (!(await keepBeforeRemove(ctx, ref, x, `promos/${input.promoKey}.wav`, info)) && input.confirmNoBackup !== true) { await unlock(); throw noBackupConfirm(); }
       try { await deleteFiles(ctx, [x.path]); } catch (e) { throw await failed(e); }
@@ -532,6 +555,7 @@ async function restore(request, key, base) {
   if (input.confirmCost !== undefined && typeof input.confirmCost !== 'boolean') throw bad('bad-input', 'קלט לא תקין');
   const db = T.tdb();
   const cfg = readCfg();
+  const layout = await LY.loadLayout(db);
   const col = { item: ITEMS, promo: PROMOS, backup: BACKUPS }[input.kind];
   const s = await db.doc(`${col}/${input.id}`).get();
   if (!s.exists) throw notFound();
@@ -553,7 +577,7 @@ async function restore(request, key, base) {
     else if (holdsPath(x)) throw pre('restore-not-down', 'ההודעה הזו עדיין בקו.');
     else throw notFound();
   } else {
-    slot = x.ext === String(cfg.ext) ? 'promos' : EXT_SLOT[x.ext];
+    slot = extSlots(x.ext, layout)[0];
     if (!slot || x.status !== 'complete' || !['applied', 'uncertain'].includes(x.result)) throw notFound();
     downAt = x.finishedAt || x.createdAt;
   }
@@ -607,7 +631,7 @@ async function restore(request, key, base) {
       kind: kindOf(x) === 'audio' ? 'audio' : 'text', durationSec: x.durationSec || null, title: kindOf(x) === 'audio' ? titleOf('promo', x) : undefined };
     if (v.kind === 'text' && !v.text) throw pre('no-saved-content', 'אין עותק של ההודעה הזו, ולכן אי אפשר להחזיר אותה.');
     r = await Y._core.sendPromo(req, key, base, { v, kind: v.kind, engine: v.kind === 'audio' ? recEngine : engine || 'elevenlabs', rendered, spoken: x.spoken || null, restoredFrom: from, title: titleOf('promo', x) });
-    return { ok: true, id: r.promoKey, restoredFrom: from, file: r.file, path: r.file ? voice.pathOf(String(cfg.ext), r.file) : null, until: r.until, usedCost: usedCost && !r.duplicate, duplicate: !!r.duplicate,
+    return { ok: true, id: r.promoKey, restoredFrom: from, file: r.file, path: r.file ? voice.pathOf(extOfSlot('promos', layout), r.file) : null, until: r.until, usedCost: usedCost && !r.duplicate, duplicate: !!r.duplicate,
       warnings: r.warnings || [], message: r.duplicate ? 'ההודעה הזו כבר הוחזרה.' : `המבצע הוחזר לקו ויושמע עד ${heDate(r.until)}, בלי צינתוק.` };
   }
   const S = L._core.SLOTS[slot];
