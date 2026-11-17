@@ -1,7 +1,9 @@
 /* store3d-pano.js – צפייה בסיור 360 (שלב 18ב). window.S3Pano. תלוי ב-three.js המקומי (vendor/three), בלי CDN. נטען רק בכניסה לסיור.
    open(el, tour, opts) -> Promise<handle|null>
      tour: {pts:[{id, x, y (ס"מ במפה), yaw (מעלות; כיוון מרכז התמונה, 0 = למעלה במפה, בכיוון השעון), full:path, sm:path, nb:[ids]}], start:id}
-     opts: {load(path)->Promise<Blob>, map (smap, למפה הקטנה), onError(code,txt), onClose(), tags:[{x,y,k}] (k: ok|iss|miss|rev), base}
+     opts: {load(path)->Promise<Blob>, map (smap, למפה הקטנה), onError(code,txt), onClose(), tags:[{x,y,k}] (k: ok|iss|miss|rev), base, maxTex? (לבדיקות בלבד: מגבלת טקסטורה נמוכה מזו של המכשיר)}
+   שלב 21ו – תמונות 8192×4096: טקסטורה אחת כש-maxTextureSize ≥ 8192; אחרת (4096 ומעלה) שני חצאים 4096×4096 על שני חצאי כדור – בלי איבוד איכות.
+     בטלפון עם deviceMemory < 4 – מוקטן ל-4096. כשנטענה תמונה רחבה מ-4096, נטענת מראש מלאה של שכנה אחת בלבד (במקום שתיים), כדי לחסום את הזיכרון.
    handle: goTo(id) · setTags(tags) · showTags(bool) · setView(yawDeg,pitchDeg,fov) · view() · pause() · resume() · destroy() · stats() · screenOf(id) (לבדיקות)
    מוסכמות: כיוון (bearing) = מעלות מהכיוון "למעלה במפה" עם כיוון השעון. גובה העין 1.5 מ'. */
 (function(){
@@ -38,7 +40,9 @@ function make(T,el,tour,opts){
   if(!P.size)throw new Error('empty');
   const load=typeof opts.load==='function'?opts.load:()=>Promise.reject(new Error('no-loader'));
   const renderer=new T.WebGLRenderer({antialias:false,alpha:false,powerPreference:'high-performance'});
-  const maxTex=renderer.capabilities.maxTextureSize||2048,TEXW=maxTex>=4096?4096:2048;
+  const maxTex=Math.min(renderer.capabilities.maxTextureSize||2048,+opts.maxTex||1e9),dm=navigator.deviceMemory,memOk=!(dm&&dm<4);
+  /* רוחב מרבי של מלאה: 8192 (טקסטורה אחת, או שני חצאים כש-maxTex בין 4096 ל-8192); 4096 בזיכרון נמוך */
+  const TEXW=maxTex>=4096?(memOk?8192:4096):2048,SPLIT=TEXW>maxTex;let big8=false;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
   const root=document.createElement('div');root.dir='rtl';root.className='s3p-root';
   root.style.cssText='position:absolute;inset:0;overflow:hidden;background:#101014;touch-action:none;user-select:none;-webkit-user-select:none;font-family:sans-serif';
@@ -47,7 +51,10 @@ function make(T,el,tour,opts){
   const scene=new T.Scene(),cam=new T.PerspectiveCamera(75,1,0.05,50);cam.rotation.order='YXZ';
   let H=0,Pt=0,fov=75,vH=0,vP=0,vF=0;
   const geo=new T.SphereGeometry(10,48,32);geo.scale(-1,1,1);
-  const spheres=[0,1].map(i=>{const m=new T.Mesh(geo,new T.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:1,depthWrite:false}));m.visible=false;m.renderOrder=i;scene.add(m);return m});
+  /* חצאי כדור לתמונה מפוצלת: שמאל התמונה (u 0–0.5) = phi 0–π, ימין = π–2π; החצי הימני הוא "ילד" של הכדור ומקבל את אותו סיבוב */
+  const geoL=new T.SphereGeometry(10,24,32,0,Math.PI),geoR=new T.SphereGeometry(10,24,32,Math.PI,Math.PI);geoL.scale(-1,1,1);geoR.scale(-1,1,1);
+  const spheres=[0,1].map(i=>{const m=new T.Mesh(geo,new T.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:1,depthWrite:false}));m.visible=false;m.renderOrder=i;
+    const hr=new T.Mesh(geoR,new T.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:1,depthWrite:false}));hr.visible=false;m.add(hr);m.userData.hr=hr;scene.add(m);return m});
   let front=0,cur=null,shown=[null,null],busy=false,tok=0,alive=true,paused=false,dirty=true,raf=0,lost=false,fadeT=null,tagsOn=true,fullMax=0;
   const live={sm:0,full:0};
   /* חצים על הרצפה */
@@ -97,26 +104,35 @@ function make(T,el,tour,opts){
       if(bm)return bm;return new Promise((res,rej)=>{const u=URL.createObjectURL(blob),i=new Image();i.onload=()=>{URL.revokeObjectURL(u);res(i)};i.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('decode'))};i.src=u})})}
   function mkTex(blob,maxW){return decodeTo(blob).then(im=>{const w0=im.width||im.naturalWidth,h0=im.height||im.naturalHeight;
       if(!w0||!h0||Math.abs(w0/h0-2)>0.05)throw new Error('ratio');
-      const w=Math.min(w0,maxW),h=Math.round(w/2),c=document.createElement('canvas');c.width=w;c.height=h;const g2=c.getContext('2d');g2.imageSmoothingEnabled=true;g2.imageSmoothingQuality='high';g2.drawImage(im,0,0,w,h);if(im.close)im.close();
-      const t=new T.CanvasTexture(c);t.colorSpace=T.SRGBColorSpace;const p2=n=>n>0&&(n&(n-1))===0,mip=p2(w)&&p2(h);t.generateMipmaps=mip;t.minFilter=mip?T.LinearMipmapLinearFilter:T.LinearFilter;t.magFilter=T.LinearFilter;t.wrapS=T.RepeatWrapping;
-      let an=1;try{an=Math.max(1,Math.min(8,(renderer&&renderer.capabilities&&renderer.capabilities.getMaxAnisotropy&&renderer.capabilities.getMaxAnisotropy())||1))}catch(_){}t.anisotropy=an;t.userData.cv=c;return t})}
-  function freeTex(p,k){const t=p.t[k];if(!t)return;p.t[k]=null;live[k]--;t.dispose();if(t.userData.cv){t.userData.cv.width=t.userData.cv.height=1;t.userData.cv=null}}
+      const w=Math.min(w0,maxW),h=Math.round(w/2);
+      if(w>maxTex){/* שני חצאים h×h (רק כש-SPLIT: 8192 על maxTex 4096+) */
+        const half=x0=>{const c=document.createElement('canvas');c.width=h;c.height=h;const g2=c.getContext('2d');g2.imageSmoothingEnabled=true;g2.imageSmoothingQuality='high';g2.drawImage(im,x0*w0/w,0,h*w0/w,h0,0,0,h,h);return texOf(c,1)};
+        const t=half(0);t.userData.b=half(h);if(im.close)im.close();big8=true;return t}
+      const c=document.createElement('canvas');c.width=w;c.height=h;const g2=c.getContext('2d');g2.imageSmoothingEnabled=true;g2.imageSmoothingQuality='high';g2.drawImage(im,0,0,w,h);if(im.close)im.close();
+      if(w>4096)big8=true;return texOf(c)})}
+  function texOf(c,half){const w=c.width,h=c.height;{
+      const t=new T.CanvasTexture(c);t.colorSpace=T.SRGBColorSpace;const p2=n=>n>0&&(n&(n-1))===0,mip=p2(w)&&p2(h);t.generateMipmaps=mip;t.minFilter=mip?T.LinearMipmapLinearFilter:T.LinearFilter;t.magFilter=T.LinearFilter;t.wrapS=half?T.ClampToEdgeWrapping:T.RepeatWrapping;/* חצי: בלי גלישה לצד השני של אותו חצי בקצוות */
+      let an=1;try{an=Math.max(1,Math.min(8,(renderer&&renderer.capabilities&&renderer.capabilities.getMaxAnisotropy&&renderer.capabilities.getMaxAnisotropy())||1))}catch(_){}t.anisotropy=an;t.userData.cv=c;return t}}
+  function freeTex(p,k){const t=p.t[k];if(!t)return;p.t[k]=null;live[k]--;for(const x of[t,t.userData.b]){if(!x)continue;x.dispose();if(x.userData.cv){x.userData.cv.width=x.userData.cv.height=1;x.userData.cv=null}}t.userData.b=null}
   function ensure(p,k){
     if(p.t[k])return Promise.resolve(p.t[k]);if(p.pend[k])return p.pend[k];const path=p[k];if(!path)return Promise.reject(new Error('nopath'));
     const pr=Promise.resolve().then(()=>load(path)).then(b=>{if(!(b instanceof Blob)||!b.size)throw new Error('blob');return mkTex(b,k==='sm'?1024:TEXW)}).then(t=>{
-      delete p.pend[k];if(!alive||lost){t.dispose();return Promise.reject(new Error('cancel'))}
-      if(!wanted(p,k)){t.dispose();return Promise.reject(new Error('cancel'))}
+      delete p.pend[k];if(!alive||lost){disp(t);return Promise.reject(new Error('cancel'))}
+      if(!wanted(p,k)){disp(t);return Promise.reject(new Error('cancel'))}
       p.t[k]=t;live[k]++;if(k==='full')fullMax=Math.max(fullMax,live.full);return t},e=>{delete p.pend[k];throw e});
     p.pend[k]=pr;return pr}
+  const disp=t=>{t.dispose();if(t.userData.b)t.userData.b.dispose()};/* טקסטורה שלא נכנסה לשימוש (כולל החצי השני) */
+  const fnb=()=>big8?1:2;/* מלאות של שכנות שנטענות מראש */
   /* מדיניות זיכרון: מלאות – הנוכחית, ועוד 2 השכנות הקרובות; קטנות – הנוכחית והשכנות. מה שמוצג כרגע לא משתחרר. */
   function nearNb(p){return p.nb.map(i=>P.get(i)).sort((a,b)=>dist(p,a)-dist(p,b))}
-  function wantSet(){const tgt=cur,full=new Set(),small=new Set();if(tgt){full.add(tgt);small.add(tgt);nearNb(tgt).forEach((q,i)=>{small.add(q);if(i<2)full.add(q)})}
+  function wantSet(){const tgt=cur,full=new Set(),small=new Set();if(tgt){full.add(tgt);small.add(tgt);nearNb(tgt).forEach((q,i)=>{small.add(q);if(i<fnb())full.add(q)})}
     return{full,small}}
   function wanted(p,k){const w=wantSet();return(k==='full'?w.full:w.small).has(p)||shown.some(id=>id===p.id)}
   function enforce(){const w=wantSet();for(const p of P.values()){const keep=shown.indexOf(p.id)>=0;
       if(p.t.full&&!w.full.has(p)&&!keep)freeTex(p,'full');if(p.t.sm&&!w.small.has(p)&&!keep)freeTex(p,'sm')}}
   /* תצוגה */
-  function setSphere(i,p,t){const m=spheres[i];m.material.map=t;m.material.needsUpdate=true;m.rotation.y=-(p.yaw+90)*DEG;m.visible=true;shown[i]=p.id;dirty=true}
+  function setSphere(i,p,t){const m=spheres[i],hr=m.userData.hr,b=t.userData.b||null;m.material.map=t;m.material.needsUpdate=true;
+    m.geometry=b?geoL:geo;hr.material.map=b;hr.material.needsUpdate=true;hr.visible=!!b;m.rotation.y=-(p.yaw+90)*DEG;m.visible=true;shown[i]=p.id;dirty=true}
   function bestTex(p){return p.t.full||p.t.sm}
   function buildArrows(){while(arrows.children.length)arrows.remove(arrows.children[0]);
     for(const q of nearNb(cur)){const b=bearing(cur,q)*DEG,m=new T.Mesh(arrGeo,arrMat);m.position.set(Math.sin(b)*ARR_D,-EYE+0.05,-Math.cos(b)*ARR_D);m.rotation.y=-b;m.renderOrder=9;m.userData.id=q.id;arrows.add(m)}}
@@ -132,7 +148,7 @@ function make(T,el,tour,opts){
     try{await Promise.all(nearNb(p).map(q=>q.sm?ensure(q,'sm').catch(()=>{}):0));
       if(my!==tok)return;
       if(p.full&&!p.t.full){const t=await ensure(p,'full').catch(()=>null);if(t&&my===tok&&shown[front]===p.id&&!busy){setSphere(front,p,t)}}
-      for(const q of nearNb(p).slice(0,2)){if(my!==tok)return;if(q.full)await ensure(q,'full').catch(()=>{})}
+      for(const q of nearNb(p).slice(0,fnb())){if(my!==tok)return;if(q.full)await ensure(q,'full').catch(()=>{})}
     }catch(e){}}
   async function goTo(id,force){
     const p=P.get(id);if(!p||!alive||(p===cur&&!force)||(busy&&!force))return;
@@ -189,16 +205,16 @@ function make(T,el,tour,opts){
   function frame(){raf=0;if(!alive||paused)return;
     if(fadeT)fadeT();
     if(Math.abs(vH)>0.01||Math.abs(vP)>0.01){if(!down){H+=vH;Pt+=vP;vH*=.92;vP*=.92;clampP();dirty=true}}else vH=vP=0;
-    if(dirty&&!lost){dirty=false;H=norm(H);applyCam();renderer.render(scene,cam);drawMap()}
+    if(dirty&&!lost){dirty=false;H=norm(H);applyCam();for(const m of spheres){const hr=m.userData.hr;hr.material.opacity=m.material.opacity;hr.renderOrder=m.renderOrder}renderer.render(scene,cam);drawMap()}
     raf=requestAnimationFrame(frame)}
   function pause(){paused=true;if(raf){cancelAnimationFrame(raf);raf=0}}
   function resume(){if(!alive||!paused)return;paused=false;dirty=true;if(!raf)raf=requestAnimationFrame(frame)}
   const vis=()=>{document.hidden?pause():resume()};document.addEventListener('visibilitychange',vis);
   function destroy(){if(!alive)return;alive=false;tok++;if(raf)cancelAnimationFrame(raf);document.removeEventListener('visibilitychange',vis);window.removeEventListener('resize',resize);if(ro)ro.disconnect();
     for(const p of P.values()){freeTex(p,'sm');freeTex(p,'full')}
-    for(const k in bdgTex)bdgTex[k].dispose();arrTex.dispose();arrGeo.dispose();arrMat.dispose();geo.dispose();spheres.forEach(m=>m.material.dispose());
+    for(const k in bdgTex)bdgTex[k].dispose();arrTex.dispose();arrGeo.dispose();arrMat.dispose();geo.dispose();geoL.dispose();geoR.dispose();spheres.forEach(m=>{m.material.dispose();m.userData.hr.material.dispose()});
     renderer.dispose();try{renderer.forceContextLoss()}catch(e){}root.remove()}
-  function stats(){return{id:cur?cur.id:null,busy,tex:{sm:live.sm,full:live.full},fullMax,texW:TEXW,maxTex,geo:renderer.info.memory.geometries,textures:renderer.info.memory.textures,tags:tagG.children.length,arrows:arrows.children.length,paused,lost}}
+  function stats(){return{id:cur?cur.id:null,busy,tex:{sm:live.sm,full:live.full},fullMax,texW:TEXW,maxTex,split:[...P.values()].filter(p=>p.t.full&&p.t.full.userData.b).length,fnb:fnb(),geo:renderer.info.memory.geometries,textures:renderer.info.memory.textures,tags:tagG.children.length,arrows:arrows.children.length,paused,lost}}
   function view(){return{id:cur?cur.id:null,yaw:H,pitch:Pt,fov}}
   function setView(y,p,f){vH=vP=0;if(isFinite(y))H=norm(y);if(isFinite(p))Pt=p;if(isFinite(f))fov=f;clampP();dirty=true}
   resize();showTags(true);raf=requestAnimationFrame(frame);

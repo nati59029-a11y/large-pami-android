@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>בדיקת סיור 360 – תמונות סינתטיות</title>
-<!-- דף בדיקה למפתחים בלבד (שלב 18ב). התמונות נוצרות בקוד, אינן נתוני העסק. -->
+<!-- דף בדיקה למפתחים בלבד (שלב 18ב). התמונות נוצרות בקוד, אינן נתוני העסק. ?w=8192 – רוחב המלאות (ברירת מחדל 4096); ?mt=4096 – מגבלת טקסטורה מדומה (שלב 21ו: שני חצאים). -->
 <style>html,body{margin:0;height:100%;background:#121216}#v{position:absolute;inset:0}</style>
 </head>
 <body>
@@ -29,15 +29,16 @@ function mk(p,w){return new Promise(res=>{const h=w/2,c=document.createElement('
   for(const q of PTS)if(p.nb.includes(q.id)){const b=Math.atan2(q.x-p.x,-(q.y-p.y))*180/Math.PI,u=(((b-p.yaw)%360)+540)%360-180;
     g.fillStyle='#d4af37';g.fillRect(w/2+u*k-3*k,h/2+8*k,6*k,20*k);g.fillStyle='#000';g.font='bold '+(5*k)+'px sans-serif';g.fillText(q.id,w/2+u*k,h/2+22*k)}
   c.toBlob(b=>{c.width=c.height=1;res(b)},'image/jpeg',.8)})}
+const Q=new URLSearchParams(location.search),FW=+Q.get('w')||4096,MT=+Q.get('mt')||undefined;
 window.__ready=(async()=>{
-  for(const p of PTS){blobs['f/'+p.id]=await mk(p,4096);blobs['s/'+p.id]=await mk(p,1024)}
+  for(const p of PTS){blobs['f/'+p.id]=await mk(p,FW);blobs['s/'+p.id]=await mk(p,1024)}
   const tour={start:'A',pts:PTS.map(p=>({id:p.id,x:p.x,y:p.y,yaw:p.yaw,full:'f/'+p.id,sm:'s/'+p.id,nb:p.nb}))};
   window.__loads=[];
   const h=await S3Pano.open(document.getElementById('v'),tour,{
     load:path=>{window.__loads.push(path);return new Promise(r=>setTimeout(()=>r(blobs[path]),path[0]==='f'?150:20))},
     map:{rooms:[{id:'r',p:[0,0,900,0,900,800,0,800]}],walls:[{id:'w',p:[450,0,450,300]}]},
     tags:[{x:450,y:300,k:'ok'},{x:300,y:150,k:'iss'},{x:600,y:450,k:'miss'}],
-    onError:(c,t)=>{window.__err=[c,t]},onClose:()=>{window.__closed=true}});
+    onError:(c,t)=>{window.__err=[c,t]},onClose:()=>{window.__closed=true},maxTex:MT});
   window.__pano=h;return !!h})();
 })();
 </script>
