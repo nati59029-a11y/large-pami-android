@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const { appSourceLines } = require('./helpers');
 
 const PARTS = ['const s_=', 'const rnd=', 'function pNum(', 'var ZPAY=', 'function zcN(', 'function zcCalc(', 'function zcRes(', 'const zcResT=', 'const zcThr=',
-  'function zcGap(', 'function zcNeed(', 'function zc3(', 'function dpAiChk(', 'function zsDepAuto(', 'function zsOf(', 'function zsDep4('];
+  'function zcGap(', 'function zcNeed(', 'function zc3(', 'function dpAiChk(', 'function zsDepAuto(', 'function zsOf(', 'function zsDep4(', 'function zsDep4H('];
 
 function load() {
   const L = appSourceLines();
@@ -19,8 +19,8 @@ function load() {
     let j = i + 1; while (j < L.length && L[j].startsWith(' ')) j++;
     return L.slice(i, j).join('\n');
   });
-  const pre = 'var S={zc:[]};const ils=n=>(Math.round((n||0)*100)/100).toFixed(2),cat=()=>true,zcRegOk=()=>true,zcDup=()=>null,zcNsNeed=()=>[],dfmt=d=>d;\n';
-  const post = '\n;({S,zcCalc,zcRes,zcResT,zcThr,zcGap,zcNeed,zc3,zsDep4})';
+  const pre = 'var S={zc:[]};const ils=n=>(Math.round((n||0)*100)/100).toFixed(2),cat=()=>true,zcRegOk=()=>true,zcDup=()=>null,zcNsNeed=()=>[],dfmt=d=>d,esc=t=>String(t);\n';
+  const post = '\n;({S,zcCalc,zcRes,zcResT,zcThr,zcGap,zcNeed,zc3,zsDep4,zsDep4H})';
   return vm.runInNewContext(pre + chunks.join('\n') + post, {}, { filename: 'index.html (חלקים)' });
 }
 // טופס סגירה תקין: סכום השורות = סה"כ, קרן 1500 + 2350 − 1400 = 2450
@@ -91,8 +91,12 @@ describe('סגירת קופה – שרשרת הבדיקות (index.html)', () =>
     for (const v of [0, -5, 'abc', NaN, null, '30']) { M.S.zcThr = v; assert.equal(M.zcThr(), 0, String(v)); assert.deepEqual(need(M, f), [], String(v)); }
     M.S.zcThr = 30; assert.deepEqual(need(M, f), []);                    // שווה לסף – לא מעל
     M.S.zcThr = 29.99; assert.equal(need(M, f).length, 1); assert.match(need(M, f)[0], /מעל הסף/);
-    M.S.zcThr = 20; assert.match(need(M, F({ oTot: '2475' }))[0], /עודף 25\.00/); // גם עודף
-    assert.match(need(M, F({ drawer: '2420', oTot: '2420' }))[0], /חוסר 30\.00/); // גם בדיקה 1
+    M.S.zcThr = 20; assert.match(need(M, F({ oTot: '2475' }))[0], /\(25\.00, הסף 20\.00\)/); // גם עודף
+    assert.match(need(M, F({ drawer: '2420', oTot: '2420' }))[0], /\(30\.00,/); // גם בדיקה 1
+    // סבב 2: עודף 50 בבדיקה 2 עם חוסר קטן (5) בבדיקה 1 – הסף לפי הגדול בערך מוחלט; שורת התוצאה עדיין מעדיפה חוסר
+    const mix = F({ drawer: '2445', oTot: '2495' });
+    assert.equal(M.zcGap(M.zcCalc(mix, 'i_nl')), 50); assert.equal(M.zcRes(M.zcCalc(mix, 'i_nl')).k, 'bad');
+    assert.equal(need(M, mix).length, 1); assert.match(need(M, mix)[0], /\(50\.00, הסף 20\.00\)/);
     const big = need(M, F({ oTot: '1000' }));                            // מעל 10% – הודעה אחת (הקיימת), בלי כפילות
     assert.equal(big.length, 1); assert.match(big[0], /מעל 10%/);
     assert.deepEqual(need(M, F({ drawer: '', oTot: '' })).filter((m) => /הסף/.test(m)), []); // אין מה לבדוק – אין הודעת סף
@@ -119,6 +123,12 @@ describe('סגירת קופה – שרשרת הבדיקות (index.html)', () =>
     D.P.p1.a = 800; x = M.zsDep4(D); assert.equal(x.d, -600.5); assert.equal(x.k, 'bad');
     D.C[2].dp = 'p1'; D.C[2].dep = '1'; D.P.p1.a = 1400.5; x = M.zsDep4(D); assert.equal(x.d, 0); assert.equal(x.k, 'inc');
     D.P.p1.a = 1500; x = M.zsDep4(D); assert.equal(x.d, 99.5); assert.equal(x.k, 'warn');
+    // סבב 2: "מתוכו ממתין להפקדה" רק בחוסר, ולכל היותר בגובה החוסר; בעודף או בלי פער – לא מוצג
+    const T = (d) => M.zsDep4H(d).replace(/<[^>]+>/g, ' ');
+    D.C[2].dp = ''; D.P.p1.a = 1500; assert.doesNotMatch(T(D), /ממתין/);       // פתקים 1400.5, הופקד 1500: עודף 99.5 עם ממתין 600
+    D.P.p1.a = 1000; assert.match(T(D), /חוסר 400\.50 · מתוכו ממתין להפקדה 400\.50/); // חוסר 400.5 < ממתין 600
+    D.P.p1.a = 0; assert.match(T(D), /חוסר 1400\.50 · מתוכו ממתין להפקדה 600\.00/);  // חוסר גדול מהממתין
+    D.C[2].dp = 'p1'; D.P.p1.a = 1400.5; assert.doesNotMatch(T(D), /ממתין/);   // מאוזן
     D.P.p1.st = 'rej'; x = M.zsDep4(D); assert.equal(x.r, 0);           // הפקדה שנדחתה – לא נספרת
     x = M.zsDep4({ L: [], C: [], P: {}, DC: [] }); assert.equal(x.k, 'inc'); assert.equal(x.e, 0);
   });
