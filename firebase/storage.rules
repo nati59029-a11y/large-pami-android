@@ -154,6 +154,42 @@ service firebase.storage {
       allow read, update: if false;
     }
 
+    // סרטונים בקבוצות התכתבות (סבב 3, 17.11.2026): grpv/{gid}/{mid} (לארג' פעמי ב-legacy) ו-b/{bizId}/grpv/{gid}/{mid}.
+    // האפליקציה (groups.js) מעלה קודם את הסרטון, ורק אחר כך כותבת את ההודעה grp/{gid}/m/{mid} (k 'vid', vp = הנתיב המלא) –
+    // ולכן כאן לא קוראים את ההודעה. החוקים של Firestore מוודאים שה-vp של ההודעה הוא בדיוק הנתיב של אותה הודעה.
+    // הקבצים נמחקים אוטומטית אחרי 90 יום (כלל lifecycle לפי התחילית grpv/ – storage-tmp-lifecycle.yml), ומיד כשהקבוצה נמחקת (grpDel). ההודעה נשארת.
+    // מגבלת 2 קריאות מסמכים לכל הערכה (עדכון חוזה 6, לא מאומת בייצור): כל פעולה קוראת לכל היותר users/{uid} ו-grp/{gid}.
+    //   התפקיד – מ-users/{uid} (ב-legacy: העותק של largpeami שהשרת מסנכרן מ-admins/staff, כמו app_releases/). מנהל־על לא נכלל.
+    //   get (צפייה): מנהל העסק; עובד פעיל שנמצא ב-mem של הקבוצה. list – אסור (הנתיב מגיע מההודעה).
+    //   create (העלאה): הקבוצה קיימת ו-md == true; מנהל העסק, או עובד פעיל שב-mem ו-ao לא true (אותם תנאים כמו שליחת הודעה).
+    //     סרטון בלבד (mp4/webm/3gpp), עד 30MB, בלי דריסה (resource == null). update: אסור.
+    //   delete: מנהל בלבד (legacy: admins/{uid}; בעסק: bMgr).
+    // התוספת groups לא נבדקת כאן (קריאה שלישית): בלי התוספת אי אפשר לשלוח את ההודעה, ולכן הסרטון לא מוצג לאף אחד.
+    function grpvOk() {
+      return request.resource.size <= 30 * 1024 * 1024
+        && request.resource.contentType.matches('^video/(mp4|webm|3gpp)(;.*)?$');
+    }
+    function grpvSend(biz, g) {
+      return g.get('md', false) == true
+        && (uIn(biz, 'admin') || (uIn(biz, 'worker') && request.auth.uid in g.get('mem', []) && g.get('ao', false) != true));
+    }
+    match /grpv/{gid}/{mid} {
+      allow get: if uIn('largpeami', 'admin')
+        || (uIn('largpeami', 'worker') && request.auth.uid in firestore.get(/databases/(default)/documents/grp/$(gid)).data.get('mem', []));
+      allow create: if resource == null && grpvOk()
+        && grpvSend('largpeami', firestore.get(/databases/(default)/documents/grp/$(gid)).data);
+      allow delete: if isManager();
+      allow list, update: if false;
+    }
+    match /b/{bizId}/grpv/{gid}/{mid} {
+      allow get: if uIn(bizId, 'admin')
+        || (uIn(bizId, 'worker') && request.auth.uid in firestore.get(/databases/(default)/documents/b/$(bizId)/grp/$(gid)).data.get('mem', []));
+      allow create: if resource == null && grpvOk()
+        && grpvSend(bizId, firestore.get(/databases/(default)/documents/b/$(bizId)/grp/$(gid)).data);
+      allow delete: if bMgr(bizId);
+      allow list, update: if false;
+    }
+
     // דיווח יומי (dailyRep, 16.11.2026): הקלטות העובדים – b/{bizId}/dr/{id}/a{i}.wav. רק השרת (Admin SDK) כותב וקורא;
     // ההשמעה למנהל דרך drMgr op 'audio'. כלל חוסם מפורש (הכלל הכללי למטה כבר חוסם – זה רק תיעוד והגנה מפני כלל רחב בעתיד).
     match /b/{bizId}/dr/{allPaths=**} {
