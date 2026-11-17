@@ -7,6 +7,7 @@ const ROOT = path.resolve(__dirname, '..');
 const [outJpg, shot, outJson] = [process.argv[2] || 'pano-cap-out.jpg', process.argv[3] || 'pano-cap-360.png', process.argv[4]];
 const [vidJpg, vidShot] = [process.argv[5] || 'pano-cap-video.jpg', process.argv[6] || 'pano-cap-video.png'];
 const alJpg = process.argv[7] || 'pano-cap-aligned.jpg';
+const shotFloor = process.argv[8] || 'pano-cap-floor-360.png';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 const srv = http.createServer((req, res) => {
   const p = path.normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/\\])+/, '');
@@ -66,6 +67,65 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.close();
   { const p = await open(); const r2 = await p.evaluate(async () => { const b = await S3PanoCap.lastRaw(); return b ? 'blob' : 'null'; });
     check('lastRaw בעמוד חדש (אין צילום): null', r2 === 'null', r2); await p.close(); }
+
+  check('דילוג על הרצפה (ברירת מחדל בבדיקות): אין role באף פריים ב-meta הגולמי', mf && mf.length === n0 && mf.every((f) => f.role === undefined), mf && mf.map((f) => f.role).filter(Boolean));
+
+  /* ---------- 1ג. שלב 21ה: שכבת עזר, שלב רצפה (צילום), חפיפה 0.4 ---------- */
+  let tot0 = -1;
+  {
+    const p = await open(); /* מספר היעדים נקבע בזמן הריצה: אחרי הצילום הראשון הכיול (62°) נשמר ומשנה את מספר היעדים */
+    await p.evaluate(() => { localStorage.removeItem('lp-s3pc-help'); });
+    await p.evaluate(() => { window.__res = undefined; window.__run({ floor: 'manual', width: 2048 }).then((r) => (window.__res = r || 'null'), (e) => (window.__res = 'err:' + e.message)); });
+    await p.waitForSelector('.s3pc-cnt', { timeout: 15000 });
+    const st = () => p.evaluate(() => window.__api.state());
+    const helpUi = await p.evaluate(() => { const b = document.querySelector('.s3pc [data-k=ol]'); return { t: b.textContent, p: b.getAttribute('aria-pressed'), h: Math.round(b.getBoundingClientRect().height), vis: !b.hidden, tip: document.querySelector('.s3pc-tip').textContent }; });
+    check('שכבת עזר: כפתור "שכבת עזר" מוצג, פעיל כברירת מחדל, גובה 44 לפחות; טיפ: עמדו במרכז החדר', helpUi.t === 'שכבת עזר' && helpUi.p === 'true' && helpUi.h >= 44 && helpUi.vis && helpUi.tip.includes('עמדו במרכז החדר, רחוק מרהיטים') && helpUi.tip.includes('סובבו את הטלפון סביב המצלמה'), helpUi);
+    await p.waitForFunction(() => { const s = window.__api && window.__api.state(); return s && s.n >= 6; }, null, { timeout: 90000 });
+    await p.waitForFunction(() => window.__api.state().ovn > 0, null, { timeout: 20000 }).catch(() => {});
+    const s1 = await st();
+    check('שכבת עזר: מצוירת על הקנבס כשהכיוון חופף לפריים שצולם', s1.ovn > 0 && s1.help === true, s1);
+    await p.click('.s3pc [data-k=ol]'); const s2 = await st(); await sleep(700); const s3 = await st();
+    const ls1 = await p.evaluate(() => localStorage.getItem('lp-s3pc-help'));
+    check('שכבת עזר: כיבוי – לא מציירת יותר, נשמר ב-localStorage', s2.help === false && s3.ovn === s2.ovn && ls1 === '0', { s2: s2.ovn, s3: s3.ovn, ls1 });
+    await p.click('.s3pc [data-k=ol]');
+    await p.waitForFunction((n) => window.__api.state().ovn > n, s3.ovn, { timeout: 30000 }).catch(() => {});
+    const s4 = await st(); const ls2 = await p.evaluate(() => localStorage.getItem('lp-s3pc-help'));
+    check('שכבת עזר: הדלקה מחדש – מציירת שוב ונשמר', s4.help === true && s4.ovn > s3.ovn && ls2 === '1', { s3: s3.ovn, s4: s4.ovn, ls2 });
+    await p.click('.s3pc [data-k=ol]'); /* משאירים כבוי לבדיקת זיכרון בהפעלה הבאה */
+    await p.waitForFunction(() => /שלב אחרון/.test(document.querySelector('.s3pc-cnt').textContent), null, { timeout: 240000 });
+    const fl = await p.evaluate(() => { const fb = document.querySelector('.s3pc-fb'), bs = [...fb.querySelectorAll('button')], top = document.querySelector('.s3pc-top').getBoundingClientRect();
+      return { vis: !fb.hidden, txt: fb.querySelector('.s3pc-fi').textContent, btn: bs.map((b) => ({ t: b.textContent, h: Math.round(b.getBoundingClientRect().height) })), overflow: document.documentElement.scrollWidth > innerWidth, topH: Math.round(top.height), tot: window.__api.state().tot, n: window.__api.state().n, ol: document.querySelector('.s3pc [data-k=ol]').hidden }; });
+    await p.screenshot({ path: shotFloor });
+    check('שלב רצפה: ההוראה בעברית, כפתורי "צלם" ו"דלג" בגובה 44 לפחות, בלי גלישה לרוחב', fl.vis && fl.txt === 'זוזו צעד אחד הצידה, וכוונו את המצלמה ישר למטה, למקום שבו עמדתם' && fl.btn.map((b) => b.t).join() === 'צלם,דלג' && fl.btn.every((b) => b.h >= 44) && !fl.overflow, fl);
+    tot0 = fl.tot;
+    check('שלב רצפה מופיע רק אחרי כל נקודות היעד (' + fl.tot + ')', fl.n === fl.tot && fl.tot >= 40, { n: fl.n, tot: fl.tot });
+    await p.evaluate(() => { window.__hold = true; window.__pset = -30; }); await sleep(150);
+    await p.click('.s3pc [data-k=fs]'); await sleep(500);
+    const rej = await p.evaluate(() => ({ cnt: document.querySelector('.s3pc-cnt').textContent, hint: document.querySelector('.s3pc-hint').textContent, open: !!document.querySelector('.s3pc') }));
+    check('שלב רצפה: בלי כיוון למטה (פחות מ-75°-) לא מצלמים; ההודעה מבקשת לכוון למטה', rej.open && /שלב אחרון/.test(rej.cnt) && rej.hint.includes('ישר למטה'), rej);
+    await p.evaluate(() => { window.__pset = -88; }); await sleep(300);
+    await p.click('.s3pc [data-k=fs]');
+    await p.waitForFunction(() => window.__res, null, { timeout: 240000 });
+    const fr = await p.evaluate(() => window.__res);
+    const rw = await p.evaluate(() => window.__raw()); const fm = rw && rw.meta && rw.meta.frames;
+    check('צילום רצפה: הפריים האחרון role=nadir ב-meta הגולמי, כל השאר בלי role, מספר הפריימים = יעדים + 1', typeof fr === 'object' && fm && fm.length === tot0 + 1 && fm[fm.length - 1].role === 'nadir' && fm.slice(0, -1).every((f) => f.role === undefined) && fr.meta.n === tot0 + 1, fm && fm.map((f) => f.role).filter(Boolean).concat([fm.length, tot0]));
+    check('צילום רצפה (חיבור JS): התוצאה תקינה ושגיאה מול הסצנה סבירה', typeof fr === 'object' && fr.err < 14 && fr.w === 2048, typeof fr === 'object' ? { err: fr.err, w: fr.w } : fr);
+    await p.close();
+  }
+  { /* שכבת העזר שנכבתה נשמרת להפעלה הבאה; "דלג" בשלב הרצפה */
+    const p = await open();
+    await p.evaluate(() => { window.__res = undefined; window.__run({ floor: 'manual', width: 2048 }).then((r) => (window.__res = r || 'null'), (e) => (window.__res = 'err:' + e.message)); });
+    await p.waitForSelector('.s3pc-cnt', { timeout: 15000 });
+    const pr = await p.evaluate(() => document.querySelector('.s3pc [data-k=ol]').getAttribute('aria-pressed'));
+    check('שכבת עזר: הבחירה (כבוי) נשמרה להפעלה הבאה', pr === 'false', pr);
+    await p.click('.s3pc [data-k=ol]'); await p.evaluate(() => localStorage.setItem('lp-s3pc-help', '1'));
+    await p.waitForFunction(() => /שלב אחרון/.test(document.querySelector('.s3pc-cnt').textContent), null, { timeout: 240000 });
+    await p.click('.s3pc [data-k=fk]');
+    await p.waitForFunction(() => window.__res, null, { timeout: 240000 });
+    const fr = await p.evaluate(() => window.__res), rw = await p.evaluate(() => window.__raw()), fm = rw && rw.meta && rw.meta.frames;
+    check('דילוג על הרצפה: מסתיים כרגיל בלי פריים רצפה (התנהגות קודמת)', typeof fr === 'object' && fr.meta.n === tot0 && fm.every((f) => f.role === undefined), typeof fr === 'object' ? { n: fr.meta.n } : fr);
+    await p.close();
+  }
 
   /* ---------- 1ב. יישור עדין: החיישן סוטה לאט (עד 1.5°) – עם יישור מול בלי ---------- */
   const driftRun = async (noAlign) => { const p = await open();
@@ -139,7 +199,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     return { def: null, ins: q('.s3pc-ins').textContent, tip: q('.s3pc-tip').hidden ? '' : q('.s3pc-tip').textContent, cnt: q('.s3pc-cnt').textContent, d: d.textContent, rHidden: q('.s3pc-bar [data-k=r]').hidden, map: !q('.s3pc-map').hidden, ls: localStorage.getItem('lp-s3pc-mode'),
       seg: [...document.querySelectorAll('.s3pc-seg button')].map((b) => ({ t: b.textContent, p: b.getAttribute('aria-pressed'), h: Math.round(b.getBoundingClientRect().height) })) }; });
   vui.def = def;
-  check('בחירת מצב: ברירת מחדל "נקודות"; "סרטון" מציג הנחיה, מפת כיסוי, כפתור "הקלטה", ונשמר בטלפון', def === 'true' && vui.ins.includes('סיבוב אחד באמצע, סיבוב אחד למעלה וסיבוב אחד למטה') && /כוסו 0 מתוך \d+/.test(vui.cnt) && vui.d === 'הקלטה' && vui.rHidden && vui.map && vui.ls === 'video' && vui.seg[1].p === 'true' && vui.seg.every((b) => b.h >= 40) && vui.tip === 'סובבו את הטלפון סביב המצלמה עצמה, לא סביב הגוף; עצמים קרובים מאוד עלולים להיראות כפולים', vui);
+  check('בחירת מצב: ברירת מחדל "נקודות"; "סרטון" מציג הנחיה, מפת כיסוי, כפתור "הקלטה", ונשמר בטלפון', def === 'true' && vui.ins.includes('סיבוב אחד באמצע, סיבוב אחד למעלה וסיבוב אחד למטה') && /כוסו 0 מתוך \d+/.test(vui.cnt) && vui.d === 'הקלטה' && vui.rHidden && vui.map && vui.ls === 'video' && vui.seg[1].p === 'true' && vui.seg.every((b) => b.h >= 40) && vui.tip === 'עמדו במרכז החדר, רחוק מרהיטים; סובבו את הטלפון סביב המצלמה. עצמים קרובים מאוד עלולים להיראות כפולים', vui);
   await pv.click('.s3pc-bar [data-k=d]');
   await pv.waitForFunction(() => { const c = document.querySelector('.s3pc-cnt'); return c && /כוסו ([6-9]|\d\d)/.test(c.textContent); }, null, { timeout: 90000 });
   const vui2 = await pv.evaluate(() => { const q = (s) => document.querySelector(s); return { d: q('.s3pc-bar [data-k=d]').textContent, segDis: [...document.querySelectorAll('.s3pc-seg button')].map((b) => b.disabled), hint: q('.s3pc-hint').textContent, overflow: document.documentElement.scrollWidth > innerWidth,

@@ -19,7 +19,8 @@ import org.opencv.core.Mat;
  * JS (window.Capacitor.Plugins.PanoStitch, wrapped by www/store3d-pano-native.js):
  *   isAvailable()                                  -> { ok }
  *   begin({ n, W, fovL, yawRef, w, h })            -> {}          starts a new job (drops an unfinished one)
- *   addFrame({ i, jpeg: base64, q: [w,x,y,z] })    -> {}          one frame at a time (memory)
+ *   addFrame({ i, jpeg: base64, q: [w,x,y,z], role? }) -> {}     one frame at a time (memory); role: absent / null or "nadir"
+ *                                                                  (floor photo taken after stepping aside: owns the area below ~-65 deg)
  *   run()                                          -> { jpeg: base64 (quality 92), fovL, stats }   on a background thread
  *   cancel()                                       -> {}          run() then rejects with "cancelled"
  *   listener "progress": { p } (0..1)
@@ -83,7 +84,8 @@ public class PanoStitchPlugin extends Plugin {
             if (b64.startsWith("data:") && k > 0) b64 = b64.substring(k + 1);
             double[] q = new double[4];
             for (int j = 0; j < 4; j++) q[j] = qa.getDouble(j);
-            c.setFrame(i, Base64.decode(b64, Base64.DEFAULT), q);
+            String role = call.getString("role");
+            c.setFrame(i, Base64.decode(b64, Base64.DEFAULT), q, role);
             call.resolve();
         } catch (Throwable e) {
             call.reject("frame: " + e.getMessage());
