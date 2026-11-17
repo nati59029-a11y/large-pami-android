@@ -53,14 +53,15 @@ function ymDraw(){
  if(ok){ok.disabled=!!bad||Q.busy;ok.textContent=Q.busy?'שולח…':'אשר ושלח'}
  if(cn)cn.disabled=Q.busy;
  if(w){w.textContent=Q.busy?'':bad;w.style.display=bad?'':'none'}
- if(c)c.textContent=Q.text.trim().length+' / '+YM_TEXT_MAX}
+ if(c)c.textContent=Q.text.trim().length+' / '+YM_TEXT_MAX;
+ const fb=$q('#ymFb');if(fb){const on=!!(Q.fb&&Q.withTz);fb.textContent=on?`גם עד ${Q.fb.upTo} לקוחות משוב יקבלו צינתוק (בתשלום, 0.1 יחידה לכל מספר)${Q.fb.max&&Q.fb.upTo>Q.fb.max?`. אם יהיו יותר מ-${Q.fb.max}, הם לא יקבלו צינתוק`:''}.`:'';fb.style.display=on?'':'none'}}
 function ymOpen(k,i,opts){
  opts=opts||{}; // opts.builder: נפתח מ"שמור ושלח לקו" במסך בניית מבצע (בלי בחירת צינתוק בחלון; opts.withTz נקבע בכפתור)
  const it=SH&&SH[k]&&SH[k].items&&SH[k].items[i];if(!it){toast('המבצע לא נמצא');return}
  const today=isoDay(new Date());let until=it.vf||'',note='';
  if(until&&until<today){until='';note='תאריך התוקף של המבצע כבר עבר. בחרו תאריך הורדה חדש.'}
  if(!YM_ID.test(it.ym||'')){it.ym='pk'+ymRand();shTouch(k)} // promoKey נוצר פעם אחת לכל מבצע ונשמר (גם בסנכרון)
- Q={k,i,it,key:it.ym,until,fromVf:!!(it.vf&&until),edited:false,busy:false,builder:!!opts.builder,withTz:opts.builder?(opts.withTz===true&&typeof SY!=='undefined'&&!!SY&&SY.role==='admin'):typeof SY!=='undefined'&&!!SY&&SY.role==='admin',tzBlocked:false,rid:null,sig:null,note,text:''};
+ Q={k,i,it,key:it.ym,until,fromVf:!!(it.vf&&until),edited:false,busy:false,builder:!!opts.builder,withTz:opts.builder?(opts.withTz===true&&typeof SY!=='undefined'&&!!SY&&SY.role==='admin'):typeof SY!=='undefined'&&!!SY&&SY.role==='admin',tzBlocked:false,fb:null,rid:null,sig:null,note,text:''};
  Q.text=ymText(it,until);
  const chips=[7,14,30].map(n=>`<button type="button" class="chip" data-a="ymDays" data-v="${n}">${n===YM_DEFAULT_DAYS?n+' ימים (מומלץ)':n+' ימים'}</button>`).join('');
  dlg(`<h3>שליחת מבצע לקו</h3><form data-f="ymform" onsubmit="return false">
@@ -68,6 +69,7 @@ function ymOpen(k,i,opts){
  <label class="f"><span>הנוסח שיוקרא בקו</span><textarea id="ymTxt" name="text" rows="5">${esc(Q.text)}</textarea><span class="note" dir="ltr" id="ymCnt" style="text-align:left;margin:4px 0 0"></span></label>
  ${window.ypButton?`<div style="margin:0 0 12px">${ypButton('ymTxt')}</div>`:''}
  ${Q.builder?`<p class="note" id="ymBMode" style="margin:0 0 12px;font-weight:700">${Q.withTz?'יעלה לקו, ויישלח צינתוק לנרשמים (עולה יחידות).':'יעלה לקו, בלי צינתוק.'}</p>`:`<label class="f"><span>מה לעשות</span><div class="chips" id="ymMode"></div><span class="note" id="ymCost" style="display:block;margin:4px 0 0">צינתוק מהאפליקציה עולה יחידות לכל נרשם. צינתוק חינמי – מהטלפון בשלוחת הניהול.</span><span class="note" id="ymTzNote" style="color:var(--warn);display:none"></span></label>`}
+ <p class="note" id="ymFb" style="color:var(--warn);font-weight:700;margin:0 0 12px;display:none"></p>
  <label class="f"><span>${it.vf&&Q.until?'תאריך הורדה (לפי תוקף המבצע)':'מתי להוריד את המבצע מהקו?'}</span><input id="ymDate" name="until" type="date" value="${esc(Q.until)}" min="${today}" max="${addDays(today,YM_MAX_DAYS)}"></label>
  <div class="chips" style="margin:0 0 12px">${chips}</div>
  ${note?`<p class="note" style="color:var(--warn);font-weight:700;margin:6px 0">${esc(note)}</p>`:''}
@@ -80,9 +82,12 @@ function ymOpen(k,i,opts){
  d.addEventListener('close',()=>{if(Q&&!Q.busy)Q=null},{once:true});
  ymDraw();ymStatus(Q)}
 async function ymStatus(q){
- if(q&&q.builder)return; // במסך החדש אין בחירת צינתוק לעובד, ואין צורך לשאול // האם העובד עוד יכול לצנתק היום (בלי פנייה לימות). כשל = לא משנים כלום, השרת אוכף ממילא
- if(typeof SY!=='undefined'&&SY&&SY.role==='admin')return; // מנהל: אין מגבלה, לא צריך לשאול
- try{const r=await ymCall({statusOnly:true});const t=r&&r.tzintukToday;
+ const adm=typeof SY!=='undefined'&&!!SY&&SY.role==='admin';
+ if(q&&q.builder&&!(adm&&q.withTz))return; // במסך החדש אין בחירת צינתוק לעובד, ואין צורך לשאול // האם העובד עוד יכול לצנתק היום (בלי פנייה לימות). כשל = לא משנים כלום, השרת אוכף ממילא
+ // מנהל: אין מגבלה יומית; שואלים רק כמה לקוחות משוב יקבלו צינתוק בתשלום (fbTz, משימה 2026-11-17). בלי פנייה לימות.
+ try{const r=await ymCall({statusOnly:true});
+  if(adm){const f=r&&r.fbTz;if(Q===q&&!q.busy&&f&&f.on===true&&f.upTo>0){q.fb=f;ymDraw()}return}
+  const t=r&&r.tzintukToday;
   if(Q!==q||q.busy||!t)return;
   if(t.allowed===false){q.tzBlocked=true;q.withTz=false;ymDraw()}}catch(e){}}
 function ymRetext(){Q.text=ymText(Q.it,Q.until);const t=document.getElementById('ymTxt');if(t)t.value=Q.text}

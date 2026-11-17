@@ -228,8 +228,10 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   await wp.evaluate(() => { go('tk'); }); await sleep(900);
   // מרכז עבודה סבב 2: ב"היום שלי" (ברירת המחדל לעובד) הטופס מקופל לכפתור "+ משימה חדשה"
   check('30א "היום שלי": הטופס מקופל לכפתור "+ משימה חדשה", והרשימה מופיעה מיד', await wp.evaluate(() => TKT === 'my' && !!document.querySelector('[data-a=tkwFold]') && document.querySelector('form[data-f=tkAdd]').hidden));
+  // סבב 1 (17.11): אצל העובד "+ משימה חדשה" נמצא בתוך "עוד" המקופל – פותחים אותו קודם
+  await wp.evaluate(() => { const b = document.querySelector('[data-a=tkwFold]'); const d = b && b.closest('details'); if (d) d.open = true; }); await sleep(200);
   await wp.click('[data-a=tkwFold]'); await sleep(300);
-  const wt1 = await txt(wp, '#main');
+  const wt1 = (await txt(wp, '#main')) + '\n' + (await wp.evaluate(() => [...document.querySelectorAll('#main details')].map((d) => d.textContent).join('\n'))); // סבב 1: "בקשה למנהל" בתוך "עוד" המקופל
   check('30 מסך המשימות של העובד: כפתור "בקשה למנהל", תיבת "משימה פרטית", לשונית בוצעו', /בקשה למנהל/.test(wt1) && /משימה פרטית \(רק אני והמנהל\)/.test(wt1) && /בוצעו/.test(wt1) && !/קבועות/.test(wt1) && !/ממתין לטיפול\s*\(/.test(wt1), wt1.slice(0, 300));
   await wp.fill('form[data-f=tkAdd] textarea', 'להזמין חלב לעצמי'); await wp.check('form[data-f=tkAdd] input[name=prv]');
   await wp.click('form[data-f=tkAdd] button.btn.w'); await waitFor(async () => Object.values(DB.ptk).some((x) => x.owner.stringValue === 'w1' && /חלב/.test(x.txt.stringValue)));
@@ -241,6 +243,7 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   const wopen = await txt(wp, '#main');
   check('31ב הפרטית של העובד ברשימה עם תג פרטית; הפרטית של w2/המנהל/אחרים לא מופיעה', /להזמין חלב לעצמי/.test(wopen) && /פרטית/.test(wopen) && /תזכורת פרטית של עובד/.test(wopen) && !/פרטית של עובד אחר/.test(wopen));
   await shot(wp, shots, 'w-tk');
+  if (!(await wp.$(`#ptc-${wpk[0]}`))) { await wp.click(`[data-a=tkwOpen]:has-text("להזמין חלב לעצמי")`); await sleep(400); } // סבב 1: ב"אחר כך" שורה אחת – פותחים
   await wp.click(`#ptc-${wpk[0]} [data-a=ptDone]`); await sleep(600);
   await wp.click('[data-a=tkTab][data-v=done]'); await sleep(400);
   const wdn = await txt(wp, '#main');
