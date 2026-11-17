@@ -49,6 +49,11 @@ function seedS3(b, d, P, resp, other) {
   b.set(d.doc(P + 's3perf/' + other + '/m/2026-11'), { runs: 2, onTime: 2, late: 0, upd: t });
   b.set(d.doc(P + 's3qid/' + 'q'.repeat(16)), { k: 'photo', uid: resp, res: {}, at: t, exp: t + 30 * DAY });
   b.set(d.doc(P + 's3ntf/' + RUN + '_new'), { at: t, kind: 'new', to: [resp] });
+  // הקמת חנות (17.11.2026, שלב 3)
+  b.set(d.doc(P + 's3setup/' + MAP), { v: 1, st: 'cap', gnote: 'הערה', upd: t, by: MGR });
+  b.set(d.doc(P + 's3setup/' + MAP + '/n/f1-a-1'), { t: 'מדף שבור', upd: t, by: MGR });
+  b.set(d.doc(P + 's3setup/' + MAP + '/cap/b_f1-a-1'), { k: 'b', ord: 1, st: 'part', ph: [], upd: t, by: MGR });
+  b.set(d.doc(P + 's3look/' + MAP), { v: 1, it: {}, upd: t });
 }
 
 async function seed(rootFeature) {
@@ -139,6 +144,10 @@ describe('store3d – חוקי Firestore בתוך עסק: מטריצת קריא�
     ['s3perf/' + FOR + '/m/2026-11', [SUPER, MGR, FOR]],
     ['s3qid/' + 'q'.repeat(16), []],
     ['s3ntf/' + RUN + '_new', []],
+    ['s3setup/' + MAP, [SUPER, MGR, S3M]],
+    ['s3setup/' + MAP + '/n/f1-a-1', [SUPER, MGR, S3M]],
+    ['s3setup/' + MAP + '/cap/b_f1-a-1', [SUPER, MGR, S3M]],
+    ['s3look/' + MAP, STAFF],
   ];
   for (const [p, okRoles] of rows) {
     it('קריאה: ' + p.split('/').filter((x, i) => i % 2 === 0).join('/'), async () => {
@@ -158,6 +167,9 @@ describe('store3d – חוקי Firestore בתוך עסק: מטריצת קריא�
     await assertSucceeds(fs(MGR).collection(P + 'srun').get());
     await assertSucceeds(fs(RESP).collection(P + `srun/${RUN}/ph`).get());
     await assertFails(fs(RESP).collection(P + `srun/${RUN}/ai`).get());
+    // הקמת חנות: רשימת cap / n – מנהל ו-s3m; עובד רגיל – נחסם
+    for (const u of [MGR, S3M, SUPER]) { await assertSucceeds(fs(u).collection(P + `s3setup/${MAP}/cap`).get(), u); await assertSucceeds(fs(u).collection(P + `s3setup/${MAP}/n`).get(), u); }
+    for (const u of [RESP, FOR, DIS, OMGR, null]) await assertFails(fs(u).collection(P + `s3setup/${MAP}/cap`).get(), String(u));
   });
   it('s3perf – שליפת רשימה (חוזה 4.16): עובד על עצמו – מותר; על עובד אחר – נחסם; מנהל ומנהל־על – מותר; מושבת ועסק אחר – נחסמים', async () => {
     await assertSucceeds(fs(RESP).collection(P + `s3perf/${RESP}/m`).get());
@@ -180,12 +192,13 @@ describe('store3d – חוקי Firestore בתוך עסק: כתיבה', () => {
 
   it('אוספי שרת: אף לקוח (גם מנהל־על, גם s3m) לא כותב ולא מוחק – smap, ver, s3br, s3draft, srun, ph, ai, s3sum, s3fix, s3use, s3perf, s3qid, s3ntf', async () => {
     const paths = ['smap/' + MAP, 'smap/s-new', 'smap/' + MAP + '/ver/000002', 's3br/main', 's3br/br2', 's3draft/draft-0000000000000009', 'srun/' + RUN, 'srun/rule0001_20261201',
-      'srun/' + RUN + '/ph/f1-a-2_a', 'srun/' + RUN + '/ai/' + SLOT, 's3sum/' + MAP, 's3fix/' + RUN + '__' + SLOT, 's3use/b_main', 's3perf/' + RESP + '/m/2026-11', 's3qid/x'.padEnd(20, 'x'), 's3ntf/zz_new'];
+      'srun/' + RUN + '/ph/f1-a-2_a', 'srun/' + RUN + '/ai/' + SLOT, 's3sum/' + MAP, 's3fix/' + RUN + '__' + SLOT, 's3use/b_main', 's3perf/' + RESP + '/m/2026-11', 's3qid/x'.padEnd(20, 'x'), 's3ntf/zz_new',
+      's3setup/' + MAP, 's3setup/s-new', 's3setup/' + MAP + '/n/f1-a-2', 's3setup/' + MAP + '/n/f1-a-1', 's3setup/' + MAP + '/cap/b_f1-a-2', 's3setup/' + MAP + '/cap/b_f1-a-1', 's3look/' + MAP, 's3look/s-new'];
     for (const u of [SUPER, MGR, S3M, RESP]) {
       for (const p of paths) {
         await assertFails(fs(u).doc(P + p).set({ x: 1, upd: now(), by: u }), u + ' ' + p);
       }
-      for (const p of ['smap/' + MAP, 's3br/main', 'srun/' + RUN, 's3set/main', 'sround/' + RID, 's3appeal/' + RUN + '__' + SLOT + '__1', 's3short/' + RUN, 'smap/' + MAP + '/bay/f1-a-1']) {
+      for (const p of ['smap/' + MAP, 's3br/main', 'srun/' + RUN, 's3set/main', 'sround/' + RID, 's3appeal/' + RUN + '__' + SLOT + '__1', 's3short/' + RUN, 'smap/' + MAP + '/bay/f1-a-1', 's3setup/' + MAP, 's3setup/' + MAP + '/n/f1-a-1', 's3setup/' + MAP + '/cap/b_f1-a-1', 's3look/' + MAP]) {
         await assertFails(fs(u).doc(P + p).delete(), 'delete ' + u + ' ' + p);
       }
     }
@@ -388,6 +401,10 @@ describe('store3d – מסלול השורש (לארג\' פעמי במצב legacy
       ['s3perf/' + RFOR + '/m/2026-11', [RMGR, RFOR, SUPER]],
       ['s3qid/' + 'q'.repeat(16), []],
       ['s3ntf/' + RUN + '_new', []],
+      ['s3setup/' + MAP, [RMGR, RS3M, SUPER]],
+      ['s3setup/' + MAP + '/n/f1-a-1', [RMGR, RS3M, SUPER]],
+      ['s3setup/' + MAP + '/cap/b_f1-a-1', [RMGR, RS3M, SUPER]],
+      ['s3look/' + MAP, RSTAFF],
     ];
     for (const [p, ok] of rows) {
       for (const u of [RMGR, RS3M, RRESP, RFOR, RDIS, SUPER, MGR, OMGR, null]) {
@@ -404,7 +421,10 @@ describe('store3d – מסלול השורש (לארג\' פעמי במצב legacy
     await assertSucceeds(fs(RRESP).doc('s3appeal/' + AID0).set(okAppeal(RRESP)));
     await assertFails(fs(RFOR).doc(`s3appeal/${RUN}__${SLOT}__2`).set(okAppeal(RFOR, { ik: '2' })));
     await assertSucceeds(fs(RMGR).doc('s3appeal/' + AID0).update({ st: 'rej', decBy: RMGR, decAt: now() }));
-    for (const p of ['s3br/main', 'srun/' + RUN, 's3sum/' + MAP, 's3use/b_main']) await assertFails(fs(RMGR).doc(p).set({ x: 1 }), p);
+    for (const p of ['s3br/main', 'srun/' + RUN, 's3sum/' + MAP, 's3use/b_main', 's3setup/' + MAP, 's3setup/' + MAP + '/cap/b_f1-a-1', 's3setup/' + MAP + '/n/f1-a-1', 's3look/' + MAP]) await assertFails(fs(RMGR).doc(p).set({ x: 1 }), p);
+    for (const p of ['s3setup/' + MAP, 's3setup/' + MAP + '/cap/b_f1-a-1']) await assertFails(fs(RS3M).doc(p).set({ x: 1 }), 's3m ' + p);
+    await assertSucceeds(fs(RS3M).collection(`s3setup/${MAP}/cap`).get());
+    await assertFails(fs(RRESP).collection(`s3setup/${MAP}/cap`).get());
     // s3perf – שליפת רשימה בשורש
     await assertSucceeds(fs(RRESP).collection(`s3perf/${RRESP}/m`).get());
     await assertFails(fs(RRESP).collection(`s3perf/${RFOR}/m`).get());
@@ -430,6 +450,17 @@ describe('store3d – חוקי Storage', () => {
     fixT: `${base}/fix/${RUN}__${SLOT}_1_t.jpg`,
     stray: `${base}/other/x/y.jpg`,
     otherBiz: `b/${O}/store3d/main/run/${RUN}/${SLOT}_1.jpg`,
+    // הקמת חנות (שלב 3): צילומי הקמה וחזיתות
+    cap: `${base}/cap/${MAP}/b_f1-a-1_1.jpg`,
+    capT: `${base}/cap/${MAP}/w_r1-2-1_99_t.jpg`,
+    front: `${base}/front/${MAP}/fl_r1-3_1.jpg`,
+    frontT: `${base}/front/${MAP}/d_d2_999_t.jpg`,
+    capBigT: `${base}/cap/${MAP}/k_y1_1_t.jpg`,
+    capPng: `${base}/cap/${MAP}/k_y1_2.jpg`,
+    capN0: `${base}/cap/${MAP}/k_y1_0.jpg`,
+    capKey: `${base}/cap/${MAP}/x_y1_1.jpg`,
+    frontV0: `${base}/front/${MAP}/k_y1_0.jpg`,
+    capMap: `${base}/cap/bad/k_y1_1.jpg`,
   };
   before(async () => {
     await seed(true);
@@ -439,11 +470,13 @@ describe('store3d – חוקי Storage', () => {
       await up(files.full, 2000); await up(files.thumb, 1000); await up(files.bigThumb, 160000); await up(files.png, 2000, 'image/png');
       await up(files.tex, 2000); await up(files.draft, 2000); await up(files.fix, 2000); await up(files.fixT, 1000);
       await up(files.stray, 1000); await up(files.otherBiz, 1000);
+      await up(files.cap, 2000); await up(files.capT, 1000); await up(files.front, 2000); await up(files.frontT, 1000);
+      await up(files.capBigT, 160000); await up(files.capPng, 2000, 'image/png'); await up(files.capN0, 1000); await up(files.capKey, 1000); await up(files.frontV0, 1000); await up(files.capMap, 1000);
     });
   });
   it('קריאה: חברי העסק (מנהל־על, מנהל, עובדים) – רק JPEG בגודל המותר ובנתיבים המוגדרים; עובד מושבת, עסק אחר, אורח – נחסמים', async () => {
     const wrong = [];
-    for (const k of ['full', 'thumb', 'tex', 'fix', 'fixT']) {
+    for (const k of ['full', 'thumb', 'tex', 'fix', 'fixT', 'cap', 'capT', 'front', 'frontT']) {
       for (const u of [SUPER, MGR, S3M, RESP, FOR, DIS, OMGR, OEMP, null]) {
         const want = [SUPER, MGR, S3M, RESP, FOR].includes(u);
         const got = await st(u).ref(files[k]).getMetadata().then(() => true, () => false);
@@ -451,7 +484,7 @@ describe('store3d – חוקי Storage', () => {
       }
     }
     assert.deepEqual(wrong, []);
-    for (const k of ['bigThumb', 'png', 'stray']) await assertFails(st(MGR).ref(files[k]).getMetadata(), k);
+    for (const k of ['bigThumb', 'png', 'stray', 'capBigT', 'capPng', 'capN0', 'capKey', 'frontV0', 'capMap']) await assertFails(st(MGR).ref(files[k]).getMetadata(), k);
     // עדכון 7ב: תמונות טיוטת המפה לא נשמרות בשרת – הנתיב draft/ סגור לקריאה לכולם (גם מנהל־על)
     for (const u of [SUPER, MGR, S3M, RESP]) await assertFails(st(u).ref(files.draft).getMetadata(), 'draft ' + u);
     await assertFails(st(MGR).ref(files.otherBiz).getMetadata());
@@ -459,12 +492,16 @@ describe('store3d – חוקי Storage', () => {
   });
   it('רשימת קבצים (list) – נחסמת לכולם', async () => {
     for (const u of [SUPER, MGR, RESP]) await assertFails(st(u).ref(`${base}/run/${RUN}`).listAll());
+    for (const u of [SUPER, MGR, S3M]) await assertFails(st(u).ref(`${base}/cap/${MAP}`).listAll(), 'cap ' + u);
   });
   it('כתיבה ומחיקה – לאף לקוח (גם מנהל־על ו-s3m), בכל נתיב, סוג וגודל', async () => {
     for (const u of [SUPER, MGR, S3M, RESP]) {
       await assertFails(st(u).ref(`${base}/run/${RUN}/${SLOT}_9.jpg`).put(JPG(1000), { contentType: 'image/jpeg' }), u);
       await assertFails(st(u).ref(`${base}/tex/${MAP}/t2_1.jpg`).put(JPG(1000), { contentType: 'image/jpeg' }), u);
       await assertFails(st(u).ref(files.full).delete(), u);
+      await assertFails(st(u).ref(`${base}/cap/${MAP}/b_f1-a-1_2.jpg`).put(JPG(1000), { contentType: 'image/jpeg' }), 'cap ' + u);
+      await assertFails(st(u).ref(`${base}/front/${MAP}/b_f1-a-1_2.jpg`).put(JPG(1000), { contentType: 'image/jpeg' }), 'front ' + u);
+      await assertFails(st(u).ref(files.cap).delete(), 'cap delete ' + u);
     }
   });
 });

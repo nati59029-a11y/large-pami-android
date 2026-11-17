@@ -121,6 +121,7 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     // והוצאות מקופה (cashout) ואישורי הפקדה (deposits, וחלקי הצילומים p – מקונן בתוך deposits/{id}) – שלב 2, וזמן הסגירה האחרונה (zlast)
     // ואוספי ימות (yemot_items, yemot_line_backups, yemot_hook_usage, yemot_lexicon – משימה 2026-11-02; yemot_fbsent – 17.11.2026)
     // משימות פרטיות (ptk), כללי משימות קבועות (rtk) ובקשות למנהל (rq, ותגובות c – מקונן בתוך rq/{id}) – 12.11.2026
+    // תמונות בבקשות למנהל: p בתוך rq/{id} ו-p בתוך rq/{id}/c/{cid} – 17.11.2026 (סבב 2)
     // גלאי גרסת הכללים rv (get של rv/tk2 בלבד) – מרכז עבודה סבב 2, 15.11.2026
     // ייבוא ברקע (impJobs – 2026-11-11, מסמך העבודה; החלקים המוצפנים ב-impQ בלי כלל = סגורים)
     // תמחור חשבונית ספק (pinv, וחלקי התמונה p – מקונן בתוך pinv/{id}) – 12.11.2026
@@ -129,13 +130,14 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     // "להזמין מספקים" מתוך מסך הליקוט (supord) – 14.11.2026, משוב סבב 3
     // חשבוניות, קבלות וזיכויים (ardoc) והקצאות (aralloc) – 15.11.2026, שלב 4
     // סריקת חנות בתלת מימד – store3d (14.11.2026): s3br, s3set, smap (ver, bay מקוננים), s3draft, sround, srun (ph, ai מקוננים), s3sum, s3fix, s3appeal, s3short, s3use, s3perf, s3qid, s3ntf; שלב 18א: pano מקונן בתוך smap (סיור 360)
+    // הקמת חנות (17.11.2026, שלב 3): s3setup (n, cap מקוננים), s3look – קריאה בלבד, כתיבה רק מהשרת
     // המזכירה – כללים אישיים ויומן "נשלח לבד" (sec_mrule, sec_mlog – 15.11.2026, שרת בלבד)
     // ריבוי עסקים (2026-11-05): אוספי השורש נבדקים רק עד הבלוק match /b/{bizId}, שמכיל העתק שלהם בתוך העסק
     const rootPart = t.slice(0, t.indexOf('match /b/{bizId} {'));
     const rootMatches = [...rootPart.matchAll(/match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g)].map((m) => m[1]);
     const colls = rootMatches.filter((p) => p !== '/databases/{database}/documents' && p !== '/{document=**}').map((p) => p.split('/')[1]);
     assert.ok(/match \/b\/\{bizId\} \{/.test(t), 'בלוק העסקים חסר');
-    assert.deepEqual(colls.sort(), ['admins', 'ai', 'app_backup_status', 'appreq', 'aralert', 'aralloc', 'arcfg', 'ardoc', 'bay', 'bk', 'c', 'c', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cprice', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'm', 'mq', 'n', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'pano', 'ph', 'pinv', 'prod', 'ptk', 'rq', 'rtk', 'rv', 's3appeal', 's3br', 's3draft', 's3fix', 's3ntf', 's3perf', 's3qid', 's3set', 's3short', 's3sum', 's3use', 'sec_cal', 'sec_cfg', 'sec_chat', 'sec_draft', 'sec_facts', 'sec_facts_sensitive', 'sec_in', 'sec_inv', 'sec_log', 'sec_mirror', 'sec_mlog', 'sec_mrule', 'sec_note', 'sec_rep', 'sec_rules', 'sec_usage', 'shelf', 'smap', 'sround', 'srun', 'staff', 'stockLog', 'superadmins', 'supinv', 'supord', 'tasks', 'users', 'ver', 'xfer', 'yemot_fbsent', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
+    assert.deepEqual(colls.sort(), ['admins', 'ai', 'app_backup_status', 'appreq', 'aralert', 'aralloc', 'arcfg', 'ardoc', 'bay', 'bk', 'c', 'c', 'cap', 'cardLog', 'cashout', 'cat', 'cfg', 'chunks', 'closings', 'cprice', 'cust', 'custcfg', 'deposits', 'fb', 'impJobs', 'inbox', 'log', 'm', 'mq', 'n', 'n', 'ord', 'ordcfg', 'ordpay', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p', 'pano', 'ph', 'pinv', 'prod', 'ptk', 'rq', 'rtk', 'rv', 's3appeal', 's3br', 's3draft', 's3fix', 's3look', 's3ntf', 's3perf', 's3qid', 's3set', 's3setup', 's3short', 's3sum', 's3use', 'sec_cal', 'sec_cfg', 'sec_chat', 'sec_draft', 'sec_facts', 'sec_facts_sensitive', 'sec_in', 'sec_inv', 'sec_log', 'sec_mirror', 'sec_mlog', 'sec_mrule', 'sec_note', 'sec_rep', 'sec_rules', 'sec_usage', 'shelf', 'smap', 'sround', 'srun', 'staff', 'stockLog', 'superadmins', 'supinv', 'supord', 'tasks', 'users', 'ver', 'xfer', 'yemot_fbsent', 'yemot_hook_usage', 'yemot_items', 'yemot_lexicon', 'yemot_line_backups', 'zlast']);
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך tasks');
     assert.match(t, /match \/rq\/\{id\} \{[\s\S]*?match \/c\/\{cid\} \{/, 'c חייב להיות מקונן בתוך rq');
     assert.match(t, /match \/tasks\/\{id\} \{[\s\S]*match \/p\/\{pid\} \{/, 'p (תמונות משימה) חייב להיות מקונן בתוך tasks');
@@ -147,6 +149,7 @@ describe('כיסוי ובדיקות טקסט של הכללים', () => {
     assert.match(t, /match \/pinv\/\{id\} \{[\s\S]*?match \/p\/\{k\} \{/, 'p חייב להיות מקונן בתוך pinv');
     assert.match(t, /match \/smap\/\{mapId\} \{[\s\S]*?match \/ver\/\{vid\} \{[\s\S]*?match \/bay\/\{bayId\} \{/, 'ver ו-bay חייבים להיות מקוננים בתוך smap (store3d)');
     assert.match(t, /match \/smap\/\{mapId\} \{[\s\S]*?match \/pano\/\{pid\} \{[\s\S]*?match \/bay\/\{bayId\} \{/, 'pano חייב להיות מקונן בתוך smap (שלב 18א)');
+    assert.match(t, /match \/s3setup\/\{mapId\} \{[\s\S]*?match \/n\/\{itemId\} \{[\s\S]*?match \/cap\/\{key\} \{/, 'n ו-cap חייבים להיות מקוננים בתוך s3setup (הקמת חנות)');
     assert.match(t, /match \/srun\/\{runId\} \{[\s\S]*?match \/ph\/\{slot\} \{[\s\S]*?match \/ai\/\{slot\} \{/, 'ph ו-ai חייבים להיות מקוננים בתוך srun (store3d)');
     // המזכירה (2026-11-11): m מקונן בתוך sec_chat, p בתוך sec_inv
     assert.match(t, /match \/sec_chat\/\{uid\} \{\s*allow read, create, update, delete: if false;\s*match \/m\/\{id\} \{/, 'm חייב להיות מקונן בתוך sec_chat');

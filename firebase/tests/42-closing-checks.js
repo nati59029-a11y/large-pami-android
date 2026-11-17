@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { appSourceLines } = require('./helpers');
 
-const PARTS = ['const s_=', 'const rnd=', 'function pNum(', 'var ZPAY=', 'function zcN(', 'function zcCalc(', 'function zcRes(', 'const zcResT=', 'const zcThr=',
+const PARTS = ['const s_=', 'const rnd=', 'function pNum(', 'var ZPAY=', 'function zcN(', 'function zcCalc(', 'function zcRes(', 'const zcResT=', 'const ZCTK=', 'const zcThrC=', 'const zcThr=',
   'function zcGap(', 'function zcNeed(', 'function zc3(', 'function dpAiChk(', 'function zsDepAuto(', 'function zsOf(', 'function zsDep4(', 'function zsDep4H('];
 
 function load() {
@@ -19,8 +19,8 @@ function load() {
     let j = i + 1; while (j < L.length && L[j].startsWith(' ')) j++;
     return L.slice(i, j).join('\n');
   });
-  const pre = 'var S={zc:[]};const ils=n=>(Math.round((n||0)*100)/100).toFixed(2),cat=()=>true,zcRegOk=()=>true,zcDup=()=>null,zcNsNeed=()=>[],dfmt=d=>d,esc=t=>String(t);\n';
-  const post = '\n;({S,zcCalc,zcRes,zcResT,zcThr,zcGap,zcNeed,zc3,zsDep4,zsDep4H})';
+  const pre = 'var S={zc:[]};const LS={};var localStorage={getItem:k=>k in LS?LS[k]:null,setItem:(k,v)=>{LS[k]=String(v)},removeItem:k=>{delete LS[k]}};const LK=k=>k;const ils=n=>(Math.round((n||0)*100)/100).toFixed(2),cat=()=>true,zcRegOk=()=>true,zcDup=()=>null,zcNsNeed=()=>[],dfmt=d=>d,esc=t=>String(t);\n';
+  const post = '\n;({S,localStorage,ZCTK,zcCalc,zcRes,zcResT,zcThr,zcGap,zcNeed,zc3,zsDep4,zsDep4H})';
   return vm.runInNewContext(pre + chunks.join('\n') + post, {}, { filename: 'index.html (חלקים)' });
 }
 // טופס סגירה תקין: סכום השורות = סה"כ, קרן 1500 + 2350 − 1400 = 2450
@@ -101,6 +101,17 @@ describe('סגירת קופה – שרשרת הבדיקות (index.html)', () =>
     assert.equal(big.length, 1); assert.match(big[0], /מעל 10%/);
     assert.deepEqual(need(M, F({ drawer: '', oTot: '' })).filter((m) => /הסף/.test(m)), []); // אין מה לבדוק – אין הודעת סף
     M.S.zcThr = 1000; assert.deepEqual(need(M, f), []);
+  });
+  it('סבב 2: סף משותף מהענן (עותק במכשיר) גובר על הערך המקומי; אין ערך משותף – הערך המקומי', () => {
+    const M = load();
+    const f = F({ oTot: '2420' });                                       // פער 30
+    const LSet = (o) => M.localStorage.setItem(M.ZCTK, JSON.stringify(o));
+    M.S.zcThr = 100; assert.equal(M.zcThr(), 100);                       // אין עותק מהענן – מקומי (מכשיר ישן / חוקים ישנים)
+    LSet({ v: 20, at: 1 }); assert.equal(M.zcThr(), 20); assert.equal(need(M, f).length, 1); // משותף 20 גובר
+    LSet({ v: 0, at: 1 }); assert.equal(M.zcThr(), 0); assert.deepEqual(need(M, f), []);     // משותף "ללא סף" גובר על מקומי
+    for (const bad of [{ v: -1 }, { v: 'x' }, {}, null]) { LSet(bad); assert.equal(M.zcThr(), 100, JSON.stringify(bad)); } // עותק לא תקין – מקומי
+    M.localStorage.setItem(M.ZCTK, '{לא json'); assert.equal(M.zcThr(), 100);
+    M.localStorage.removeItem(M.ZCTK); delete M.S.zcThr; assert.equal(M.zcThr(), 0); // שום ערך – כבוי
   });
   it('בדיקה 3: פתקים מול הוצאת המזומן בדוח, עם כיוון; לא ידוע – null', () => {
     const M = load();
