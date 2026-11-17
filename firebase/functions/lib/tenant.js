@@ -22,7 +22,7 @@ const FEATURES = ['scan', 'shelf', 'feedback', 'tasks', 'suppliers', 'requests',
 // secretary (המזכירה העסקית, שלב 1, 11.11.2026) – כמו cellular: כבוי כברירת מחדל בכל עסק, גם בעסק הישן; רק מנהל־על מפעיל
 // store3d (סריקת חנות בתלת מימד, 14.11.2026) – כמו secretary: כבוי כברירת מחדל בכל עסק, גם בעסק הישן; רק מנהל־על מפעיל
 // dailyRep (דיווח יומי, 16.11.2026) – כמו store3d: כבוי כברירת מחדל בכל עסק; רק מנהל־על מפעיל. השרת דוחה עסק legacy (daily-rep.js)
-// pos (קופה, 17.11.2026) – כבוי כברירת מחדל בכל עסק, גם בעסק הישן; רק מנהל־על מפעיל. אותה תוספת בדיוק כמו בענף שלב 0 של הקופה (במיזוג – להשאיר פעם אחת)
+// pos (קופה, שלב 0, 17.11.2026) – כמו dailyRep: כבוי כברירת מחדל בכל עסק; רק מנהל־על מפעיל. השרת דוחה עסק legacy (pos.js)
 const OFF_IN_LEGACY = ['cellular', 'secretary', 'store3d', 'dailyRep', 'pos'];
 const ALL_ON = Object.freeze(Object.fromEntries(FEATURES.map((k) => [k, !OFF_IN_LEGACY.includes(k)])));
 

@@ -66,6 +66,28 @@ function draftImgs(arr) {
   return imgs;
 }
 
+// הקמת חנות שלב 1 (17.11.2026, חוזה 3.8): מקורות התמונות (src) ותוויות פינה (lbl) – לא חובה. n = מספר התמונות אחרי draftImgs.
+// src = { vid: פריימים מסרטון, ph: תמונות נפרדות, sk?: bool } – vid + ph = n בדיוק. הפריימים קודמים לתמונות (1..vid), כך ההנחיה יודעת מה רצף.
+// lbl = רשימה באורך n של מחרוזות 0–40 (תווית פינה, "" = בלי). sk נקבע בשרת לפי הסקיצה שעברה בדיקה (לא לפי הלקוח).
+// מחזיר { src: {sk, vid, ph} | null, lbl: [מחרוזות נקיות] | null, lblN: כמה עם תווית } או זורק fail('bad-src').
+const DRAFT_LBL = 40;
+function draftSrc(input, n, hasSk) {
+  const i = isObj(input) ? input : {};
+  let src = null, lbl = null, lblN = 0;
+  if (i.src !== undefined && i.src !== null) {
+    const o = i.src;
+    if (!isObj(o) || Object.keys(o).some((k) => !['sk', 'vid', 'ph'].includes(k)) || !inR(o.vid, 0, DRAFT.maxImgs) || !inR(o.ph, 0, DRAFT.maxImgs) || o.vid + o.ph !== n || (o.sk !== undefined && typeof o.sk !== 'boolean')) throw fail('bad-src', 'פרטי מקור התמונות לא תקינים');
+    src = { sk: !!hasSk, vid: o.vid, ph: o.ph };
+  }
+  if (i.lbl !== undefined && i.lbl !== null) {
+    if (!Array.isArray(i.lbl) || i.lbl.length !== n || !i.lbl.every((v) => typeof v === 'string' && v.length <= DRAFT_LBL)) throw fail('bad-src', 'תוויות התמונות לא תקינות');
+    lbl = i.lbl.map((v) => str(v, DRAFT_LBL));
+    lblN = lbl.filter(Boolean).length;
+    if (!lblN) lbl = null;
+  }
+  return { src, lbl, lblN };
+}
+
 // ---------- מקום הצילום ----------
 const RE_SLOT = /^(f[0-9]{1,4})-([ab])-([0-9]{1,2})_([atb])$/;
 // map = המפה הנוכחית. מחזיר { bay, fx, lv, hi } או זורק fail('bad-slot').
@@ -291,13 +313,16 @@ const SUM_RANK = { miss: 4, iss: 3, rev: 2, ok: 1 };
 const sumOf = (st) => (st === 'ok' ? 'ok' : st === 'issue' ? 'iss' : st === 'review' ? 'rev' : 'miss');
 const hardCount = (ai) => (isObj(ai) && Array.isArray(ai.iss) ? ai.iss.filter((i) => i && !i.warn).length : 0);
 // הרשומה של מקטע: הגרוע מבין מקומות הצילום שלו באותו סבב (עליון/תחתון). ais = [ai של המקום הזה, ai של המקום השני או null]
-function sumEntry(ais, runId, now, th, oldTh) {
+// old = הרשומה הקודמת של המקטע (לא חובה). חזית ההקמה (fr/frT, הקמת חנות שלב 7) עוברת ממנה כמו שהיא – סבב לא מוחק אותה,
+// גם כשהקורא מחליף את כל רשומת המקטע (הכרעת ערעור). איזו תמונה מוצגת (fr או th) – התצוגה בוחרת לפי הזמן.
+function sumEntry(ais, runId, now, th, oldTh, old) {
   const L = ais.filter(isObj);
   let s = 'ok', n = 0;
   for (const a of L) { const x = sumOf(a.st); if (SUM_RANK[x] > SUM_RANK[s]) s = x; n += hardCount(a); }
   const e = { s, r: runId, t: now, n: Math.min(30, n) };
   const t = th || oldTh;
   if (typeof t === 'string' && t) e.th = t;
+  if (isObj(old) && typeof old.fr === 'string' && old.fr) { e.fr = old.fr; if (Number.isInteger(old.frT)) e.frT = old.frT; }
   return e;
 }
 const countsDone = (ai) => !!(isObj(ai) && DONE_ST.includes(ai.st));
@@ -448,7 +473,7 @@ const validAt = (t, now) => Number.isInteger(t) && t >= MIN_T && t <= MAX_T && t
 
 module.exports = {
   ISSUE_KINDS, PRICE_KINDS, STATUSES, DONE_ST, LOW_CONF, IMG, THUMB, DRAFT, RE_SLOT,
-  ADHOC_DAY: 20, DRAFT_DAY_MAX, decodeJpeg, draftImgs, checkSlot, quotaStep, draftDayStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
+  ADHOC_DAY: 20, DRAFT_DAY_MAX, DRAFT_LBL, decodeJpeg, draftImgs, draftSrc, checkSlot, quotaStep, draftDayStep, refundStep, refundDay, shelfBroken, cleanShelf, prodNames, pidOf, norm, box, sumEntry, sumOf, countsDone, cleanDraft,
   SUG_MIN, CANDS, routeSlots, slotCands, slotGuess, moveDone,
   DRAFT_WHY, draftMsg, draftCheck, fitDraft, evalDraft,
   israelMonth, validAt, fail,

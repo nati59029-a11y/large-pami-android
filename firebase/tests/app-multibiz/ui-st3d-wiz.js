@@ -19,11 +19,12 @@ const ALL = { store3d: true };
 async function server(ctx, mgr) {
   const doc = (name, o) => ({ name: DOCS + name, fields: Object.fromEntries(Object.entries(o).map(([k, v]) => [k, enc(v)])), createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
   const j = (route, st, b) => route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify(b) });
-  await ctx.route((u) => u.port === '8080' && /\/documents\/b\/biz-s\/(smap|s3br|s3sum|sround|srun|staff|s3draft)/.test(u.pathname), (route) => {
+  await ctx.route((u) => u.port === '8080' && /\/documents\/b\/biz-s\/(smap|s3br|s3sum|sround|srun|staff|s3draft|s3setup)/.test(u.pathname), (route) => {
     const rq = route.request(), u = new URL(rq.url()), p = u.pathname.replace(/^.*\/documents\/b\/biz-s\//, ''); S.reads.push(rq.method() + ' ' + p);
     if (rq.method() === 'POST' && p === 'sround') { let b = {}; try { b = JSON.parse(rq.postData()); } catch (e) { /* */ } S.posts.push({ id: u.searchParams.get('documentId'), b }); return j(route, 200, { name: DOCS + 'sround/' + u.searchParams.get('documentId'), fields: b.fields }); }
     if (p === 'smap/s-main') return S.none ? j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } }) : j(route, 200, doc(p, S.map));
-    if (p === 's3sum/s-main') return S.none ? j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } }) : j(route, 200, doc(p, { b: { 'f1-a-1': { s: 'iss', r: 'run_1', t: Date.UTC(2026, 10, 12, 9, 30), th: TH, n: 2 } }, run: 'run_1', score: 80, upd: Date.UTC(2026, 10, 12, 10) }));
+    if (p === 's3sum/s-main') return S.none ? j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } }) : j(route, 200, doc(p, { b: { 'f1-a-1': Object.assign({ s: 'iss', r: 'run_1', t: Date.UTC(2026, 10, 12, 9, 30), th: TH, n: 2 }, S.fr || {}) }, run: 'run_1', score: 80, upd: Date.UTC(2026, 10, 12, 10) }));
+    if (/^s3setup/.test(p)) return S.nt403 ? j(route, 403, { error: { code: 403, status: 'PERMISSION_DENIED' } }) : p === 's3setup/s-main/n' ? j(route, 200, {}) : j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } });
     if (p === 'sround') return j(route, 200, { documents: [] });
     if (p === 'staff') return j(route, 200, { documents: [doc('staff/w', { name: 'דנה', active: true }), doc('staff/w9', { name: 'עובד מושבת', active: false })] });
     if (p === 'srun') return j(route, 200, { documents: S.hist ? [doc('srun/run_1', { map: 's-main', openAt: Date.UTC(2026, 10, 12), st: 'done' }), doc('srun/run_0', { map: 's-main', openAt: Date.UTC(2026, 10, 5), st: 'done' }), doc('srun/other', { map: 's-other', openAt: Date.UTC(2026, 10, 4), st: 'done' })] : [] });
@@ -38,6 +39,10 @@ async function server(ctx, mgr) {
   const bad = (route, reason, msg) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'FAILED_PRECONDITION', message: msg || 'שגיאה', details: { reason } } }) });
   await ctx.route('**/mapDraft', (route) => { const b = rec(route, 'mapDraft'); if (S.fnFail.draft) return bad(route, S.fnFail.draft, S.fnFail.draftMsg || 'שגיאה'); ok(route, { draftId: b.qid, st: 'ok', n: (b.imgs || []).length, conf: 0.55, drop: 0, usage: { m: '2026-11', n: 1, cap: 500, w80: false }, m: draftMap(), scale: { ref: '', conf: 0 }, notes: 'המידות הן הערכה, בלי מטר בתמונות.' }); });
   await ctx.route('**/mapFix', (route) => { const b = rec(route, 'mapFix'); if (S.fnFail.fix) return bad(route, S.fnFail.fix, S.fnFail.fixMsg || 'שגיאה'); S.fixN = (S.fixN || 0) + 1; ok(route, { draftId: b.qid, st: 'ok', conf: 0.7, drop: 0, fix: true, m: Object.assign(draftMap(), { fixN: S.fixN, fixTxt: b.txt }), scale: { ref: '', conf: 0 }, notes: 'תוקן לפי הבקשה.' }); });
+  // הקמת חנות שלב 2: הערות ושאלות
+  await ctx.route('**/s3SetupNote', (route) => { const b = rec(route, 's3SetupNote'); ok(route, { ok: true, mapId: b.mapId, itemId: b.itemId, t: b.t }); });
+  await ctx.route('**/mapQs', (route) => { const b = rec(route, 'mapQs'); ok(route, { ok: true, mapId: b.mapId, qr: 1, conf: 0.6, drop: 0, qs: [{ id: 'q1', t: 'הגוף הזה גונדולה או מקרר?', o: ['גונדולה', 'מקרר דלתות'], ref: 'f1' }, { id: 'q2', t: 'מה יש בקיר האחורי?', o: ['מדפים', 'מקררים', 'מקפיאים'], multi: true }] }); });
+  await ctx.route('**/s3SetupAns', (route) => { const b = rec(route, 's3SetupAns'); ok(route, { ok: true, mapId: b.mapId, n: (b.ans || []).length, left: 0 }); });
   await ctx.route('**/s3PutTex', (route) => { const b = rec(route, 's3PutTex'); S.tn = (S.tn || 0) + 1; ok(route, { texId: 't' + S.tn, path: 'b/biz-s/store3d/main/tex/s-main/t' + S.tn + '_1.jpg', w: 1024, h: 512 }); });
   await ctx.route('**/s3SaveMap', (route) => { const b = rec(route, 's3SaveMap'); S.none = false; S.map = Object.assign({}, b.map, { v: 1, upd: 1763200000000, by: 'm' }); ok(route, { ok: true, v: 1, renamed: {}, dropped: [], purged: {} }); });
   await ctx.route('**/shelfCheck', (route) => { const b = rec(route, 'shelfCheck'); if (S.fnFail.shelf) return bad(route, S.fnFail.shelf, 'הגעתם למכסה'); ok(route, S.adhoc); });
@@ -89,7 +94,7 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   check('1 הזמנה בבית: "בואו נתחיל" פותח את האשף (לא את העורך)', await A.page.evaluate(() => { const b = document.querySelector('[data-a=st3Build]'); if (!b) return false; b.click(); return true; }) && (await sleep(500), await A.page.evaluate(() => cur().v)) === 'st3w');
   const st1 = await txt(A.page, '#main');
   const dom1 = await A.page.evaluate(() => ({ cap: !!document.querySelector('input[data-c=s3wPick][capture]'), html: (document.querySelector('input[data-c=s3wPick]')||{}).outerHTML, multi: !!document.querySelector('input[data-c=s3wPick][multiple]'), dis: document.querySelector('[data-a=s3wDraft]').disabled }));
-  check('1א שלב 1: סרגל שלבים, הנחיה, כפתורי צילום וגלריה, ו"בנו טיוטה" כבוי בלי תמונות', /1\. צלמו/.test(st1) && /5\. סבב/.test(st1) && /צלמו את החנות/.test(st1) && /capture="environment" data-c="s3wPick"/.test(SRC.find(([f]) => f === 'store3d-wizard.js')[1]) && dom1.multi && dom1.dis, dom1);
+  check('1א שלב 1: סרגל שלבים, מתחילים בסקיצה, כפתורי צילום וגלריה, ו"בנו טיוטה" פעיל גם בלי תמונות (הקמת חנות שלב 1: מפה מהסקיצה)', /1\. צלמו/.test(st1) && /5\. סבב/.test(st1) && /מתחילים בסקיצה/.test(st1) && /capture="environment" data-c="s3wPick"/.test(SRC.find(([f]) => f === 'store3d-wizard.js')[1]) && dom1.multi && !dom1.dis, dom1);
   const imgs = [await mkImg(A.page, 'a'), await mkImg(A.page, 'a'), await mkImg(A.page, 'a')];
   await A.page.setInputFiles('input[data-c=s3wPick][multiple]', imgs); await sleep(2500);
   const n1 = await A.page.evaluate(() => ({ th: document.querySelectorAll('#main img[alt^="תמונה"]').length, dis: document.querySelector('[data-a=s3wDraft]').disabled, w: S3UI.W.imgs.map((i) => Math.max(i.w, i.h)) }));
@@ -204,6 +209,63 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
     S.calls = S.calls.filter((c) => c.fn !== 'mapFix');
   }
 
+  // ---- 2ה. הערות ושאלות (הקמת חנות שלב 2) ----
+  {
+    const cl = (f) => S.calls.filter((c) => c.fn === f);
+    const nt = await A.page.evaluate(() => { const b = document.getElementById('s3nt'); return b ? { t: b.innerText.replace(/\s+/g, ' '), g: !!document.getElementById('s3ntG') } : null; });
+    check('2ה1 מסך הטיוטה: תיבת "הערות ושאלות" עם הערה כללית, הערה לפריט וכפתור "המערכת תשאל שאלות"', !!nt && nt.g && /הערות ושאלות/.test(nt.t) && /הערה לפריט/.test(nt.t) && /המערכת תשאל שאלות/.test(nt.t), nt && nt.t.slice(0, 200));
+    await A.page.fill('#s3ntG', 'החנות בצורת ר, המחסן מאחור'); await A.page.click('[data-a=s3ntSaveG]'); await sleep(700);
+    const g = cl('s3SetupNote')[0];
+    check('2ה2 הערה כללית: s3SetupNote עם itemId ריק, הטקסט, mapId, qid והטיוטה שבטלפון (m)', !!g && g.b.itemId === '' && g.b.t === 'החנות בצורת ר, המחסן מאחור' && g.b.mapId === 's-main' && /^[A-Za-z0-9-]{16,40}$/.test(g.b.qid) && !!(g.b.m && g.b.m.rooms) && /ההערה הכללית נשמרה/.test(await txt(A.page, '#s3nt')), g && { itemId: g.b.itemId, t: g.b.t });
+    await A.page.selectOption('[data-c=s3ntItem]', 'f1'); await sleep(300);
+    const bays = await A.page.evaluate(() => [...document.querySelectorAll('[data-c=s3ntBay] option')].map((o) => o.value));
+    check('2ה3 בחירת גוף דו-צדדי עם 2 מקטעים: בחירת מקטע (כל הגוף + 4 מקטעים)', JSON.stringify(bays) === JSON.stringify(['', 'f1-a-1', 'f1-a-2', 'f1-b-1', 'f1-b-2']), bays);
+    await A.page.selectOption('[data-c=s3ntBay]', 'f1-b-2'); await sleep(300);
+    await A.page.fill('#s3ntT', 'במקטע הזה מקרר דלתות'); await A.page.click('[data-a=s3ntSaveI]'); await sleep(700);
+    const it1 = cl('s3SetupNote')[1], li = await txt(A.page, '.s3ntL');
+    check('2ה4 הערה למקטע: itemId של המקטע, הטקסט; מופיעה ברשימה עם שם המקטע', !!it1 && it1.b.itemId === 'f1-b-2' && it1.b.t === 'במקטע הזה מקרר דלתות' && /מקטע 2 בצד ב של גונדולה 1/.test(li || ''), { b: it1 && it1.b.itemId, li });
+    await A.page.click('[data-a=s3ntAsk]'); await sleep(900);
+    const q = await A.page.evaluate(() => ({ fs: document.querySelectorAll('.s3ntQ').length, radio: document.querySelectorAll('input[type=radio][data-c=s3ntC]').length, cb: document.querySelectorAll('input[type=checkbox][data-c=s3ntC]').length, h: Math.min(...[...document.querySelectorAll('.s3ntQ label')].map((l) => l.getBoundingClientRect().height)), t: document.getElementById('s3nt').innerText }));
+    const mq = cl('mapQs')[0];
+    check('2ה5 המערכת שואלת: mapQs עם mapId ו-m; שתי שאלות – בחירה אחת (radio) ובחירה מרובה (checkbox), עם שם הפריט ותשובה בכתב; יעד מגע 44px', !!mq && mq.b.mapId === 's-main' && !!mq.b.m && q.fs === 2 && q.radio === 2 && q.cb === 3 && q.h >= 44 && /גונדולה 1/.test(q.t) && !!(await A.page.$('#s3ntX_q1')), q);
+    check('2ה6 שאלות ב-360px בלי גלישה', (await noOverflow(A.page)).bad.length === 0, await noOverflow(A.page));
+    await A.page.click('[data-a=s3ntAns]'); await sleep(400);
+    check('2ה7 בלי אף תשובה: הודעה, בלי קריאה לשרת', cl('s3SetupAns').length === 0 && /ענו לפחות על שאלה אחת/.test(await txt(A.page, '#s3nt')));
+    await A.page.check('input[data-q=q1][data-i="1"]'); await A.page.fill('#s3ntX_q2', 'מקפיאים ומדף לחם');
+    if (fp(shots, 'x')) await A.page.locator('#s3nt').screenshot({ path: fp(shots, 'שלב2-הערות-ושאלות') });
+    await A.page.click('[data-a=s3ntAns]'); await sleep(1500);
+    const an = cl('s3SetupAns')[0], fxs = cl('mapFix'), fx1 = fxs[fxs.length - 1], st = await A.page.evaluate(() => ({ fixN: S3UI.W.draft.m.fixN, t: document.getElementById('s3nt').innerText }));
+    check('2ה8 תשובות: s3SetupAns עם בחירה וכתיבה, ואז mapFix עם ans ו-notes (בלי txt) – הטיוטה מוחלפת, והשינויים מסומנים לבדיקה', !!an && JSON.stringify(an.b.ans) === JSON.stringify([{ id: 'q1', c: [1], x: '' }, { id: 'q2', c: [], x: 'מקפיאים ומדף לחם' }]) && !!fx1 && fx1.b.ans === true && fx1.b.notes === true && !('txt' in fx1.b) && st.fixN >= 1 && /מסומנים כאזורים לבדיקה/.test(st.t), { ans: an && an.b.ans, fix: fx1 && Object.keys(fx1.b) });
+    // סבב בדיקה 1: הערה שהפריט במספר שלה כבר אחר (הטיוטה מוספרה מחדש) – "לשיוך מחדש", לא מוצגת על הפריט; שיוך (from) ומחיקה
+    await A.page.evaluate(() => { S3UI.W.nt.D.f2 = { t: 'הערה על גוף שזז', d: 'מקרר מספר 9 "אחר"', on: 'draft', g: { t: 'fx', k: 'fridge', x: 9000, y: 9000 } }; S3UI.W.nt.item = ''; S3UI.W.nt.bay = ''; rerender(); }); await sleep(400);
+    const re1 = await A.page.evaluate(() => { const b = document.getElementById('s3ntRe'); return { t: b ? b.innerText : '', dis: !!(document.querySelector('[data-a=s3ntRe]') || {}).disabled, inL: /הערה על גוף שזז/.test((document.querySelector('.s3ntL') || {}).innerText || '') }; });
+    check('2ה10 הערה לשיוך מחדש: מוצגת בנפרד עם "נכתבה על" התיאור המקורי, לא ברשימת ההערות על הפריטים; "שייכו" כבוי עד שבוחרים פריט', /מחכה לשיוך מחדש/.test(re1.t) && /נכתבה על: מקרר מספר 9/.test(re1.t) && re1.dis && !re1.inL, re1);
+    await A.page.selectOption('[data-c=s3ntItem]', 'f1'); await sleep(300);
+    await A.page.click('[data-a=s3ntRe]'); await sleep(700);
+    const rn = cl('s3SetupNote').pop();
+    check('2ה11 שיוך: s3SetupNote עם from (המספר הישן), itemId (הפריט שנבחר) והטקסט; ההערה עוברת לרשימה', !!rn && rn.b.from === 'f2' && rn.b.itemId === 'f1' && rn.b.t === 'הערה על גוף שזז' && !(await A.page.$('#s3ntRe')), rn && rn.b);
+    await A.page.evaluate(() => { S3UI.W.nt.D.f1 = { t: 'הערה ישנה', d: 'מקפיא מספר 3', on: 'draft', g: { t: 'fx', k: 'fridge', x: 9000, y: 9000 } }; rerender(); }); await sleep(300);
+    if (fp(shots, 'x')) await A.page.locator('#s3ntRe').screenshot({ path: fp(shots, 'שלב2-לשיוך-מחדש') });
+    await A.page.click('[data-a=s3ntDel]'); await sleep(700);
+    const dl = cl('s3SetupNote').pop();
+    check('2ה12 מחיקת הערה לשיוך: s3SetupNote עם itemId הישן וטקסט ריק', !!dl && dl.b.itemId === 'f1' && dl.b.t === '' && !dl.b.from && !(await A.page.$('#s3ntRe')), dl && dl.b);
+    // סבב בדיקה 2: הערה שנשמרה במספר f9 (מספור של טיוטה קודמת) עם הגיאומטריה של הגוף שעכשיו f2 – מוצגת על f2, לפי המקום
+    await A.page.evaluate(() => { const K = window.S3NK, m = S3UI.W.draft.m, g = K.gOf(K.geoIndex(m), 'f2'); S3UI.W.nt.D = { f9: { t: 'הערה לפי מקום', d: 'ישן', on: 'draft', g } }; rerender(); }); await sleep(300);
+    const geo = await txt(A.page, '.s3ntL');
+    check('2ה13 מספור מחדש: ההערה מוצגת על הגוף לפי המקום (g), לא לפי המספר שבו נשמרה', /מדף קיר 2[^:]*: הערה לפי מקום/.test(geo || '') && !(await A.page.$('#s3ntRe')), geo);
+    await A.page.evaluate(() => { S3UI.W.nt.D = {}; rerender(); });
+    // סבב בדיקה 3: ref של שאלה הולך אחרי הגוף הפיזי (rg): נשמר על f9 עם המקום של f2 ⇒ מוצג "מדף קיר 2"; מקום שלא קיים ⇒ בלי פריט
+    await A.page.evaluate(() => { const K = window.S3NK, G = K.geoIndex(S3UI.W.draft.m); S3UI.W.nt.qs = [{ id: 'q1', t: 'שאלה א', o: ['כן', 'לא'], ref: 'f9', rg: K.gOf(G, 'f2') }, { id: 'q2', t: 'שאלה ב', o: ['כן', 'לא'], ref: 'f1', rg: { t: 'fx', k: 'gon', x: 9000, y: 9000 } }]; rerender(); }); await sleep(300);
+    const lg = await A.page.evaluate(() => [...document.querySelectorAll('.s3ntQ legend')].map((l) => l.innerText.replace(/\s+/g, ' ')));
+    check('2ה14 שאלה: הפריט לפי הגיאומטריה (rg), ופריט שלא נמצא – בלי תיאור', lg.length === 2 && /שאלה א \(מדף קיר 2/.test(lg[0]) && !/\(/.test(lg[1]), lg);
+    await A.page.evaluate(() => { S3UI.W.nt.qs = []; rerender(); });
+    // שרת/כללים ישנים (403 על s3setup): התיבה מוסתרת עם הסבר
+    S.nt403 = true; await A.page.evaluate(() => { S3UI.W.nt = null; rerender(); }); await sleep(800);
+    check('2ה9 שרת שעוד לא עודכן: "העדכון בשרת עוד לא הותקן", בלי כפתורי הערות/שאלות', /העדכון בשרת עוד לא הותקן/.test(await txt(A.page, '#s3nt')) && !(await A.page.$('[data-a=s3ntAsk]')));
+    S.nt403 = false; await A.page.evaluate(() => { S3UI.W.nt = null; rerender(); }); await sleep(500);
+    S.calls = S.calls.filter((c) => !['mapFix', 's3SetupNote', 'mapQs', 's3SetupAns'].includes(c.fn));
+  }
+
   // ---- 3. תקנו: העורך עם לוח האזורים הלא ודאיים ----
   await A.page.click('[data-a=s3wEdit]'); await sleep(1200);
   const e1 = await A.page.evaluate(() => ({ v: cur().v, panel: !!document.getElementById('s3wp'), zones: document.querySelectorAll('#s3wz .s3err').length, svgZ: document.querySelectorAll('#s3pl svg rect[stroke-dasharray]').length, save: document.querySelector('[data-a=s3eSave]').disabled, name: document.querySelector('[data-c=s3wName]').value, ap: document.querySelector('[data-c=s3wAppr]').checked }));
@@ -278,6 +340,44 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   check('6ו מכסה יומית מלאה: הודעה בעברית בכרטיס', /מכסת הדיווחים היומית|הגעתם למכסה/.test(await txt(A.page, '#dlg')), await txt(A.page, '#dlg .s3warn'));
   S.fnFail.shelf = '';
   await A.page.click('#dlg [data-a=closeDlg]'); await sleep(300);
+
+  // ---- 6ז. הקמת חנות שלב 7: חזית ההקמה בכרטיס ובהיסטוריה (ראשונה), הגדלה בהקשה, מעבר בין תאריכים בהחלקה ובכפתורים ----
+  {
+    const FR = 'b/biz-s/s3front/s-main/b_f1-a-1_1_t.jpg';
+    const reopen = async () => { await A.page.evaluate(async () => { S3UI.drop(); await S3UI.load(true); S3UI.X.pick = { id: 'f1-a-1', fx: 'f1', s: 'a', n: 1, num: 1, name: 'גונדולה מרכזית' }; ACT.s3kOpen(); }); await sleep(2500); };
+    const card = () => A.page.evaluate(() => { const d = document.getElementById('dlg'), t = d.innerText.replace(/\s+/g, ' '), h = t.split('היסטוריה')[1] || '';
+      return { t, h, top: (d.querySelector('img[alt="תמונת המדף"]') || {}).src || '', thumbs: [...d.querySelectorAll('[data-a=s3hsOpen]')].map((b) => [b.dataset.i, (b.querySelector('img') || {}).alt, Math.round(b.getBoundingClientRect().height)]), v: !!d.querySelector('#s3hsV') }; });
+    // א. חזית הקמה חדשה מהסבב
+    S.fr = { fr: FR, frT: Date.UTC(2026, 10, 14, 8) };
+    await reopen();
+    let c = await card();
+    check('6ז1 חזית הקמה חדשה מהסבב: למעלה "חזית ההקמה" עם התאריך שלה; בהיסטוריה חזית ההקמה ראשונה, אחריה הסבבים (גם הסבב הנוכחי, כי הוא לא מוצג למעלה)', !!c.top && /חזית ההקמה · 14\.11/.test(c.t.split('היסטוריה')[0]) && c.h.indexOf('חזית ההקמה') >= 0 && c.h.indexOf('חזית ההקמה') < c.h.indexOf('יש בעיות') && c.h.indexOf('יש בעיות') < c.h.indexOf('תקין') && JSON.stringify(c.thumbs.map((x) => x.slice(0, 2))) === JSON.stringify([['0', 'חזית ההקמה'], ['1', 'תמונה מהסבב']]) && c.thumbs.every((x) => x[2] >= 44), { h: c.h.slice(0, 200), thumbs: c.thumbs });
+    await A.page.click('#dlg [data-a=s3hsOpen][data-i="0"]'); await sleep(400);
+    let v = await txt(A.page, '#dlg');
+    const vb = await A.page.evaluate(() => [...document.querySelectorAll('#dlg button')].map((b) => [b.dataset.a, b.disabled, Math.round(b.getBoundingClientRect().height)]));
+    check('6ז2 הקשה על התמונה: תצוגה מוגדלת של חזית ההקמה, "1 מתוך 2", "הקודמת" כבויה, כל הכפתורים ≥44px', /חזית ההקמה/.test(v) && /1 מתוך 2/.test(v) && !!(await A.page.$('#dlg img#s3hsV')) && vb.find((x) => x[0] === 's3hsPrev')[1] === true && vb.every((x) => x[2] >= 44), { v: v.slice(0, 160), vb });
+    check('6ז3 התצוגה המוגדלת ב-360px בלי גלישה', (await noOverflow(A.page)).bad.length === 0, await noOverflow(A.page));
+    await shot(A.page, fp(shots, 'כרטיס-היסטוריה-מוגדלת'));
+    const sw = async (dx) => { const r = await A.page.evaluate(() => { const b = document.getElementById('s3hsV').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }); await A.page.mouse.move(r.x - dx / 2, r.y); await A.page.mouse.down(); await A.page.mouse.move(r.x + dx / 2, r.y, { steps: 5 }); await A.page.mouse.up(); await sleep(400); };
+    await sw(140); v = await txt(A.page, '#dlg');
+    check('6ז4 החלקה ימינה: התמונה הבאה (הסבב, עם התאריך והמצב), "2 מתוך 2", "הבאה" כבויה', /2 מתוך 2/.test(v) && /סבב/.test(v) && /תקין/.test(v) && /5\.11/.test(v) && await A.page.evaluate(() => document.querySelector('#dlg [data-a=s3hsNext]').disabled), v.slice(0, 160));
+    await sw(140); check('6ז5 החלקה מעבר לסוף: נשארים בתמונה האחרונה', /2 מתוך 2/.test(await txt(A.page, '#dlg')));
+    await sw(-140); check('6ז6 החלקה שמאלה: חוזרים לחזית ההקמה', /1 מתוך 2/.test(await txt(A.page, '#dlg')) && /חזית ההקמה/.test(await txt(A.page, '#dlg')));
+    await A.page.click('#dlg [data-a=s3hsNext]'); await sleep(300);
+    check('6ז7 כפתור "הבאה" עובד כמו ההחלקה', /2 מתוך 2/.test(await txt(A.page, '#dlg')));
+    await A.page.click('#dlg [data-a=s3hsClose]'); await sleep(300);
+    c = await card();
+    check('6ז8 "חזרה לכרטיס": הכרטיס המלא חוזר (היסטוריה ו"צלם"), והדיאלוג עדיין פתוח', !c.v && /היסטוריה/.test(c.t) && /צלם|העלה/.test(c.t) && await A.page.evaluate(() => document.getElementById('dlg').open), c.t.slice(0, 120));
+    await A.page.click('#dlg [data-a=closeDlg]'); await sleep(300);
+    // ב. חזית הקמה ישנה מהסבב: למעלה הסבב (כמו קודם), חזית ההקמה עדיין ראשונה בהיסטוריה, והסבב הנוכחי לא מוצג פעמיים
+    S.fr = { fr: FR, frT: Date.UTC(2026, 10, 1, 8) };
+    await reopen();
+    c = await card();
+    check('6ז9 חזית הקמה ישנה מהסבב: למעלה תמונת הסבב ("צולם 12.11"), בהיסטוריה חזית ההקמה ואחריה רק הסבב הקודם', !!c.top && /צולם 12\.11/.test(c.t) && c.h.indexOf('חזית ההקמה') >= 0 && c.h.indexOf('חזית ההקמה') < c.h.indexOf('תקין') && !/יש בעיות/.test(c.h) && c.thumbs.length === 2, { h: c.h.slice(0, 200), thumbs: c.thumbs });
+    await A.page.click('#dlg [data-a=closeDlg]'); await sleep(300);
+    S.fr = null;
+    check('6ז10 בלי שגיאות JavaScript בהיסטוריה', A.page.__errors.length === 0, A.page.__errors);
+  }
 
   // ---- 7. מיני בבית: נבנה פעם אחת, לא נבנה מחדש בכל ציור, ונהרס ביציאה ----
   await A.page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await sleep(2500);
@@ -360,7 +460,7 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
       const ui = await V.page.evaluate(() => ({ t: document.querySelector('#main').innerText.replace(/\s+/g, ' '), x: !!document.querySelector('[data-a=s3wVidX]') }));
       check('1ה5 בזמן העיבוד: הודעת התקדמות "מעבד סרטון" עם אחוזים וכפתור ביטול, והממשק לא קפוא', /מעבד סרטון \d מתוך 4… \d+%/.test(ui.t) && ui.x, { prog, ui: ui.t.slice(0, 300) });
       await until(540000); r = await st();
-      check('1ה6 ארבעה סרטונים ארוכים (70 שניות כל אחד): התקרה 100 נשמרת, גודל עד 13MB, והודעה על דקה ראשונה', r.n === 100 && r.sz <= 13e6 && /ארוך מדקה/.test(r.msg), r);
+      check('1ה6 ארבעה סרטונים של 70 שניות (מתחת ל-3 דקות): התקרה 100 נשמרת, גודל עד 13MB, בלי הודעת "ארוך" ועם הודעת פיזור שווה', r.n === 100 && r.sz <= 13e6 && !/ארוך/.test(r.msg) && /בפיזור שווה/.test(r.msg), r);
       const hasWide = await V.page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth); check('1ה7 בלי גלישה אופקית אחרי סרטונים', hasWide);
       await V.page.evaluate(() => { const W = S3UI.W; W.imgs.length = 0; });
       await V.page.setInputFiles('input[data-c=s3wVid][multiple]', path.join(dir, 'l.webm')); await sleep(1500);
@@ -412,6 +512,96 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
     check('1ז6 mapDraft מדרך א: info עם מידות מהרוחב האמיתי ומספרים מהשרטוט; sketch עם סוגי שורות (מקררים), כניסה וקופה', !!m1 && JSON.stringify(m1.b.info) === JSON.stringify({ w: 2000, l: 3000, rooms: 1, rows: 2 }) && JSON.stringify(m1.b.sketch) === JSON.stringify({ rooms: [[0, 0, 2000, 0, 2000, 3000, 0, 3000]], rows: [[600, 400, 600, 2600], [1400, 400, 1400, 2600]], rt: ['s'], rk: ['gon', 'fridge'], doors: [{ x: 1000, y: 3000, w: 100, a: 180, sw: 1, hg: -1 }], ent: [1000, 3000], tills: [{ x: 1800, y: 2800, w: 120, d: 60, a: 0 }], cash: [1800, 2800] }), m1 && { info: m1.b.info, sketch: m1.b.sketch });
     check('1ז7 בלי שגיאות JavaScript בדרך א', P.page.__errors.length === 0, P.page.__errors);
     await P.ctx.close();
+  }
+
+  // ---- 1ט. הקמת חנות שלב 1 (17.11.2026): סקיצה בלי תמונות = מפה בלי AI; תמונות פינה עם תווית; פריימים ותמונות יחד; סרטון 3 דקות ----
+  {
+    const SA = require(path.join(__dirname, '..', '..', 'functions', 'lib', 'store3d-ai.js'));
+    const valid = (m) => { try { SA.draftCheck(m, { bizId: 'biz-s', mapId: 's-main', uid: 'm', now: Date.now() }); return ''; } catch (e) { return String(e.code || e.message); } };
+    const wiz = async () => { const P = await open(browser, www, cM(), 'm@x.co'); await P.page.evaluate(() => { S3UI.openWizard('s'); }); await sleep(1200); return P; };
+    // א. דרך ב (שאלות ← שרטוט), בלי תמונות: "בנו טיוטה מהסקיצה" בונה מפה בטלפון, בלי mapDraft
+    S.none = true; S.map = null; S.calls.length = 0;
+    let P = await wiz();
+    await P.page.click('[data-a=s3wDraft]'); await sleep(400);
+    await P.page.click('[data-a=s3wPath][data-p=b]'); await sleep(300);
+    for (const [f, v] of [['w', '14'], ['l', '15'], ['rooms', '2'], ['rows', '3'], ['ent', 'd'], ['cash', 'r']]) await setQ(P.page, f, v);
+    await P.page.click('[data-a=s3wGen]'); await sleep(500);
+    const bt = await P.page.evaluate(() => { const b = document.querySelector('[data-a=s3wDraft]'); return { dis: b.disabled, t: b.innerText }; });
+    check('1ט1 בלי תמונות: "בנו טיוטה מהסקיצה" פעיל במסך הפרטים', !bt.dis && /מהסקיצה/.test(bt.t), bt);
+    await P.page.click('[data-a=s3wDraft]'); await sleep(800);
+    const d1 = await P.page.evaluate(() => ({ step: S3UI.W.step, sk: S3UI.W.draft && S3UI.W.draft.sk, m: S3UI.W.draft && S3UI.W.draft.m, t: document.querySelector('#main').innerText }));
+    const m1 = d1.m || {};
+    check('1ט2 סקיצה ← מפה בלי AI: בלי mapDraft, שלב 2 "הטיוטה מהסקיצה מוכנה", 2 חדרים (חנות + חדר נוסף), 3 שורות = 3 גופים, כניסה (ent) וקופה, בלי uz',
+      !S.calls.some((c) => c.fn === 'mapDraft') && d1.step === 2 && d1.sk === 1 && /הטיוטה מהסקיצה מוכנה/.test(d1.t) && (m1.rooms || []).length === 2 && (m1.fx || []).length === 3 && (m1.doors || []).length === 1 && m1.doors[0].k === 'ent' && m1.ent === 'd1' && (m1.syms || []).filter((y) => y.k === 'cash').length === 1 && (m1.uz || []).length === 0 && m1.src === 'draft',
+      { step: d1.step, rooms: (m1.rooms || []).length, fx: (m1.fx || []).length, doors: m1.doors, syms: m1.syms, t: d1.t.slice(0, 120) });
+    check('1ט3 המפה מהסקיצה עוברת את אותה בדיקה של השרת (cleanMap ← finalCheck ← גודל, כמו בטיוטה ובשמירה)', valid(m1) === '', valid(m1));
+    await P.page.click('[data-a=s3wEdit]'); await sleep(1200);
+    const e1 = await P.page.evaluate(() => ({ v: cur().v, p: (document.getElementById('s3wp') || {}).innerText || '', z: (document.getElementById('s3wz') || {}).innerText || '' }));
+    check('1ט4 בעורך: "טיוטה מהסקיצה", בלי AI, ובלי אזורים לא ודאיים', e1.v === 'st3e' && /טיוטה מהסקיצה/.test(e1.p) && /בלי AI/.test(e1.p) && !/ה-AI בנה/.test(e1.p) && /אין אזורים לא ודאיים/.test(e1.z), e1);
+    await P.page.click('[data-c=s3wAppr]'); await sleep(300);
+    await P.page.click('[data-a=s3eSave]'); await sleep(2000);
+    const sv1 = S.calls.find((c) => c.fn === 's3SaveMap');
+    check('1ט5 שמירה: s3SaveMap עם המפה מהסקיצה, והמפה ששמרנו עוברת את בדיקת השרת', !!sv1 && sv1.b.map.src === 'draft' && sv1.b.map.fx.length === 3 && valid(sv1.b.map) === '', sv1 && valid(sv1.b.map));
+    check('1ט6 בלי שגיאות JavaScript (סקיצה ← מפה)', P.page.__errors.length === 0, P.page.__errors);
+    await P.ctx.close();
+    // ב. רק רוחב ואורך (בלי שרטוט): חדר מלבני אחד. ג. בלי כלום: הודעה, בלי מפה
+    S.none = true; S.map = null; S.calls.length = 0;
+    P = await wiz();
+    await P.page.click('[data-a=s3wDraft]'); await sleep(400);
+    await P.page.click('[data-a=s3wDraft]'); await sleep(400);
+    const e0 = await P.page.evaluate(() => ({ msg: S3UI.W.msg, d: !!S3UI.W.draft }));
+    check('1ט7 בלי סקיצה, בלי מידות ובלי תמונות: הודעה בעברית, בלי מפה ובלי שרת', /אין ממה לבנות מפה/.test(e0.msg) && !e0.d && !S.calls.some((c) => c.fn === 'mapDraft'), e0);
+    await P.page.click('[data-a=s3wPath][data-p=b]'); await sleep(300);
+    for (const [f, v] of [['w', '9'], ['l', '12']]) await setQ(P.page, f, v);
+    await P.page.click('[data-a=s3wDraft]'); await sleep(600);
+    const m2 = await P.page.evaluate(() => S3UI.W.draft && S3UI.W.draft.m);
+    check('1ט8 רק רוחב ואורך: חדר מלבני אחד 9×12 מ\' (בלי גופים), תקין לפי השרת', !!m2 && m2.rooms.length === 1 && JSON.stringify(m2.rooms[0].p) === '[0,0,900,0,900,1200,0,1200]' && m2.fx.length === 0 && valid(m2) === '', m2 && { r: m2.rooms, v: valid(m2) });
+    await P.ctx.close();
+    // ד. תמונות פינה עם תווית + פריימים מסרטון: הסדר לשרת (פריימים קודם), src ו-lbl
+    const cp = require('child_process'), os = require('os'); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 's3vid1-'));
+    let have = true; try { cp.execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x480:rate=10', '-t', '10', '-c:v', 'libvpx', '-b:v', '300k', path.join(dir, 's.webm')]); cp.execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=4', '-t', '200', '-c:v', 'libvpx', '-b:v', '150k', path.join(dir, 'l3.webm')]); } catch (e) { have = false; }
+    S.none = true; S.map = null; S.calls.length = 0;
+    P = await wiz();
+    const st = () => P.page.evaluate(() => ({ n: S3UI.W.imgs.length, nv: S3UI.W.imgs.filter((i) => i.s === 'v').length, busy: S3UI.W.busy, msg: S3UI.W.msg, lbl: S3UI.W.imgs.map((i) => i.lbl || ''), cur: S3UI.W.lbl }));
+    const until = async (ms) => { for (let i = 0; i < ms / 250; i++) { await sleep(250); if (!(await st()).busy) return; } };
+    const c0 = await P.page.evaluate(() => ({ box: !!document.getElementById('s3wCor'), cap: !!document.querySelector('input[data-c=s3wCorner][type=file][accept="image/*"]'), dl: document.querySelectorAll('#s3wLbls option').length, v: (document.querySelector('[data-c=s3wLbl]') || {}).value }));
+    check('1ט9 שלב 1: "תמונות מהפינות" – תווית (עם הצעות) וכפתור "צלמו פינה" עם מצלמה', c0.box && c0.cap && /capture="environment" data-c="s3wCorner"/.test(SRC.find(([f]) => f === 'store3d-wizard.js')[1]) && c0.dl >= 5 && c0.v === 'כניסה', c0);
+    await P.page.setInputFiles('input[data-c=s3wCorner]', await mkImg(P.page, 'a')); await until(8000);
+    await P.page.fill('[data-c=s3wLbl]', ''); await P.page.fill('[data-c=s3wLbl]', 'פינה  ימנית בעומק'); await P.page.dispatchEvent('[data-c=s3wLbl]', 'change'); await sleep(200);
+    await P.page.setInputFiles('input[data-c=s3wCorner]', await mkImg(P.page, 'a')); await until(8000);
+    let r = await st();
+    check('1ט10 תמונה ראשונה מסומנת "כניסה" והתווית עוברת לפינה הבאה; תווית שנכתבה ביד נשמרת (רווחים מנוקים)', r.n === 2 && r.lbl[0] === 'כניסה' && r.lbl[1] === 'פינה ימנית בעומק' && r.cur === 'פינה שמאלית בעומק', r);
+    check('1ט11 התווית מוצגת מתחת לתמונה הממוזערת', await P.page.evaluate(() => [...document.querySelectorAll('#main .s3lbl')].map((e) => e.innerText).join('|')) === 'כניסה|פינה ימנית בעומק');
+    if (!have) check('1ט12 סרטון: דולג, אין ffmpeg (לא נבדק)', true);
+    else {
+      await P.page.setInputFiles('input[data-c=s3wVid][multiple]', path.join(dir, 's.webm')); await until(60000);
+      r = await st();
+      check('1ט12 סרטון אחרי תמונות פינה: הפריימים נוספו (s=v) והתמונות עם התווית נשארו', r.nv >= 2 && r.n === r.nv + 2 && r.lbl.filter(Boolean).length === 2 && !r.msg, r);
+      check('1ט13 שלב 1 עם פינות, סרטון ותמונות ב-360px בלי גלישה', (await noOverflow(P.page)).bad.length === 0, await noOverflow(P.page));
+      const sm = await P.page.evaluate(() => [...document.querySelectorAll('#s3wCor input:not([hidden]), #s3wCor .btn, [data-a=s3wDraft]')].filter((e) => e.getBoundingClientRect().height < 43.5).map((e) => e.outerHTML.slice(0, 80)));
+      check('1ט13א "תמונות מהפינות": השדה והכפתורים לפחות 44px', sm.length === 0, sm);
+      await shot(P.page, fp(shots, 'שלב1-פינות-360'), true);
+      await P.page.click('[data-a=s3wDraft]'); await sleep(300); await P.page.click('[data-a=s3wDetX]'); await sleep(300);
+      await P.page.click('[data-a=s3wDraft]'); await sleep(2500);
+      const md = S.calls.find((c) => c.fn === 'mapDraft'), b = md ? md.b : {};
+      check('1ט14 mapDraft: פריימים קודם ואחריהם התמונות; src = {vid, ph, sk:false}; lbl באורך התמונות, ריק לפריימים ובתווית לתמונות',
+        !!md && b.imgs.length === r.n && JSON.stringify(b.src) === JSON.stringify({ vid: r.nv, ph: 2, sk: false }) && Array.isArray(b.lbl) && b.lbl.length === r.n && b.lbl.slice(0, r.nv).every((x) => x === '') && JSON.stringify(b.lbl.slice(r.nv)) === '["כניסה","פינה ימנית בעומק"]',
+        md && { src: b.src, lbl: b.lbl, n: b.imgs.length });
+      // ה. תמונה נפרדת קודמת לפריימים: 100 תמונות מלאות בפריימים → תמונה חדשה נכנסת ופריים אחד יוצא
+      await P.page.evaluate(() => { ACT.s3wBack1(); });
+      await P.page.evaluate(async () => { const W = S3UI.W; W.imgs.length = 0; const c = document.createElement('canvas'); c.width = 64; c.height = 48; const x = c.getContext('2d');
+        for (let i = 0; i < 100; i++) { x.fillStyle = `rgb(${i},${(i * 7) % 256},90)`; x.fillRect(0, 0, 64, 48); const bl = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', .8)); W.imgs.push({ blob: bl, url: URL.createObjectURL(bl), w: 64, h: 48, s: 'v', lbl: '', i }); } rerender(); });
+      await P.page.setInputFiles('input[data-c=s3wCorner]', await mkImg(P.page, 'a')); await until(8000);
+      const pr = await P.page.evaluate(() => ({ n: S3UI.W.imgs.length, nv: S3UI.W.imgs.filter((i) => i.s === 'v').length, last: S3UI.W.imgs[S3UI.W.imgs.length - 1].s, gone: Array.from({ length: 100 }, (_, i) => i).filter((i) => !S3UI.W.imgs.some((x) => x.i === i)), msg: S3UI.W.msg }));
+      check('1ט15 100 פריימים + תמונת פינה: נשארות 100 (99 פריימים + התמונה), פריים אחד מהאמצע הוסר, והודעה בעברית', pr.n === 100 && pr.nv === 99 && pr.last === 'p' && pr.gone.length === 1 && pr.gone[0] > 10 && pr.gone[0] < 90 && /הוסרו 1 פריימים מהסרטון/.test(pr.msg), pr);
+      // ו. סרטון של 200 שניות: נלקחות 3 הדקות הראשונות, ועד 100 תמונות
+      await P.page.evaluate(() => { const W = S3UI.W; W.imgs.length = 0; W.msg = ''; rerender(); });
+      await P.page.setInputFiles('input[data-c=s3wVid][multiple]', path.join(dir, 'l3.webm')); await until(540000);
+      r = await st();
+      check('1ט16 סרטון של 3:20 דקות: עד 100 תמונות (ולפחות 30), הודעה "3 הדקות הראשונות", בלי שגיאה', r.n <= 100 && r.n >= 30 && r.n === r.nv && /3 הדקות הראשונות/.test(r.msg) && !/לא הצלחנו/.test(r.msg), { n: r.n, msg: r.msg });
+    }
+    check('1ט17 בלי שגיאות JavaScript (פינות וסרטון)', P.page.__errors.length === 0, P.page.__errors);
+    await P.ctx.close(); fs.rmSync(dir, { recursive: true, force: true });
   }
 
   const Off = await open(browser, www, cM({}), 'm@x.co');

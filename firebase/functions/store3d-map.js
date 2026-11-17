@@ -24,10 +24,11 @@ const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const T = require('./lib/tenant');
 const M = require('./lib/store3d-map');
 const scan = require('./lib/scan');
+const SL = require('./lib/store3d-setup');
 
 if (!getApps().length) initializeApp();
 
-const QID_DAYS = 30, D1 = 86400000;
+const QID_DAYS = 30, D1 = 86400000, NOTE_WRITES = 400;   // תקרת כתיבות של הערות בטרנזקציית השמירה (המגבלה של Firestore: 500)
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const isExists = (e) => e && (e.code === 6 || /ALREADY_EXISTS/.test(String(e.message)));
 const CODE = {
@@ -87,6 +88,24 @@ async function saveMap(db, who, input, now) {
       const fin = M.finalCheck(M.mergeDel(old, clean.map, { mgr: who.mgr, uid: who.uid, now }), old);
       const doc = Object.assign(fin.map, { v, upd: now, by: who.uid });
       if (M.bytesOf(doc) > M.MAX_BYTES) throw M.fail('too-big', 'המפה גדולה מדי (עד 800KB). מחקו פריטים שלא צריך או חלקו לשתי מפות.');
+      // הקמת חנות שלב 2 (חוזה 6 + תוספת 17.11): בשמירה הראשונה, או כשגוף קיבל מספר חדש (renamed), ההערות לפריטים (s3setup/{mapId}/n)
+      // מסונכרנות באותה טרנזקציה (קריאות לפני כל כתיבה) למפה שנשמרה – לפי הגיאומטריה (g), לא לפי המספר: הערה עוברת למזהה של אותו פריט
+      // פיזי ומקבלת on='map'; פריט שלא נמצא / לא חד-משמעי ⇒ re=1 ("לשיוך מחדש"). בלי דריסה. qs[].ref – אותה התאמה לפי rg (שאלה ישנה בלי rg – לפי renamed).
+      let mv = null;
+      if (!old || Object.keys(fin.renamed).length) {
+        const [ss, ns] = await Promise.all([tx.get(db.doc('s3setup/' + mapId)), tx.get(db.collection(`s3setup/${mapId}/n`))]);
+        if (ss.exists || ns.size) {
+          mv = SL.syncNotes(ns.docs.map((d) => ({ id: d.id, data: d.data() })), SL.NK.geoIndex(doc), SL.itemsOf(doc), true, NOTE_WRITES);
+          mv.qs = ss.exists ? SL.refsTo(ss.get('qs'), SL.NK.geoIndex(doc), fin.renamed) : null;
+          mv.ss = ss.exists;
+        }
+      }
+      if (mv && (mv.set.length || mv.del.length || mv.qs)) {
+        for (const id of mv.set) tx.set(db.doc(`s3setup/${mapId}/n/${id}`), mv.cur.get(id));
+        for (const id of mv.del) tx.delete(db.doc(`s3setup/${mapId}/n/${id}`));
+        tx.set(db.doc('s3setup/' + mapId), Object.assign(mv.ss ? {} : { v: 1, st: 'draft' }, { upd: now, by: who.uid, nN: mv.cur.size }, mv.qs ? { qs: mv.qs } : {}), { merge: true });
+      }
+      if (mv && mv.cut) logger.warn('s3SaveMap: notes not synced (too many)', { n: mv.cut });
       if (old) tx.set(db.doc('smap/' + mapId + '/ver/' + M.verId(old.v)), M.verDoc(old, { uid: who.uid, now }, input.why));
       tx.set(ref, doc);
       return { ok: true, mapId, v, upd: now, seq: doc.seq, dropped: clean.dropped, renamed: fin.renamed, purged: fin.purged };

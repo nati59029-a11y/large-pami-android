@@ -16,6 +16,7 @@
 | `tests/permissions-matrix.json` | הרשימה "אוסף × תפקיד × פעולה" לפי טבלת ההרשאות באפיון (פרקים 3.3, 20.3). |
 | `tests/app-operations.json` | כל פעולה של האפליקציה מול Firestore, עם שורה בקוד (ה-ZIP של הבסיס c9bac16). |
 | `tests/*.js` | הבדיקות. `tests/all.test.js` מריץ את כולן בסדר קבוע. |
+| `functions/pos.js` + `functions/lib/pos-*.js` | קופה (POS) שלב 0: הגדרות לכל עסק (`posCfg`, `posCfgSet`), קופות ומכשירים (`posDev`), שלד מכירה עם `reqId` ומספור לכל קופה (`posSale`), ספריית חישוב באגורות (`pos-calc.js`, עותק זהה ב-`app-source/www/pos-calc.js`). בדיקות: `npm run test:pos`. |
 
 ## הרצה
 ```

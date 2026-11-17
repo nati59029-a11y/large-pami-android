@@ -161,6 +161,18 @@ describe('שלב 10 – הליבה מול האמולטור (Firestore + Storage 
     assert.equal((await get(`b/${A}/smap/s-main/bay/f1-a-1`)).notes.length, 1, 'note:false – בלי הערה');
   });
 
+  it('הקמת חנות שלב 7: חזית ההקמה (s3sum.b[bay].fr/frT) נשמרת אחרי צילום בסבב (מיזוג) ואחרי הכרעת ערעור (שמחליפה את כל רשומת המקטע)', async () => {
+    const FR = `b/${A}/s3front/s-main/b_f1-a-1_1_t.jpg`, FRT = Date.now() - 10 * D1;
+    await adm.doc(`b/${A}/s3sum/s-main`).set({ b: { 'f1-a-1': { fr: FR, frT: FRT } }, upd: 1 });
+    await shelf(E1, photo({ run: RUN1 }));
+    let e = (await get(`b/${A}/s3sum/s-main`)).b['f1-a-1'];
+    assert.deepEqual([e.fr, e.frT, e.r, typeof e.th], [FR, FRT, RUN1, 'string'], 'צילום בסבב (set merge) לא מוחק את fr');
+    await appeal(RUN1, 'f1-a-1_a', 'all', { note: false });
+    assert.equal(await appeals(), 1);
+    e = (await get(`b/${A}/s3sum/s-main`)).b['f1-a-1'];
+    assert.deepEqual([e.s, e.r, e.fr, e.frT, typeof e.th], ['ok', RUN1, FR, FRT, 'string'], 'הכרעת ערעור: הרשומה חושבה מחדש ו-fr/frT נשארו');
+  });
+
   it('תיקון סבב 1: כשל באמצע ההשלמה של ערעור – לא מסומן כמטופל, והריצה הבאה משלימה (ציון, s3sum, חוסרים, משימה); אחר כך מסומן sv', async () => {
     GM.state.shelf = HOLE;
     await shelf(E1, photo({ run: RUN1 }));
