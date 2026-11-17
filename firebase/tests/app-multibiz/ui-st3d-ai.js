@@ -109,13 +109,23 @@ const toBay = (page) => page.evaluate(() => { S3UI.K3.cur = 'b_f1-a-1'; S3UI.K3.
   S.use = { n: 44, lim: 56, w80: false };
   await A.page.click('[data-a=s3aiRun]'); await sleep(1500);
   check('4 80%: באנר "נוצלו 45 מתוך 56"', /נוצלו 45 מתוך 56/.test(await dlgTxt(A.page)));
+  check('4 80%: באנר משותף s3qt ("נוצלו 45 מתוך 56 בהקמה")', await A.page.evaluate(() => { const e = document.querySelector('#dlg .s3qt[data-q=swarn]'); return !!e && /נוצלו 45 מתוך 56 בהקמה/.test(e.textContent); }));
+  if (shots) { await sleep(300); await A.page.screenshot({ path: shots + '-qt80.png' }); }
   S.limit = true;
   await A.page.click('[data-a=s3aiRun]'); await sleep(1500);
+  check('4א1 מכסה מלאה: באנר "נחסם" משותף', await A.page.evaluate(() => !!document.querySelector('#dlg .s3qt[data-q=sfull]')));
   check('4א מכסה מלאה: הודעה בעברית', /נגמרה מכסת הבדיקות החכמות/.test(await dlgTxt(A.page)));
   S.limit = false;
   o = await noOverflow(A.page); check('4ב בלי גלישה', o.sw <= o.W && !o.bad.length, o);
+  const qc = await A.page.evaluate(() => { const c = S3UI.qtCalc, m = (() => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); })();
+    return [c('m', { n: 79, lim: 100, mo: m }), c('m', { n: 80, lim: 100, mo: m }), c('m', { n: 100, lim: 100, mo: m }), c('m', { n: 100, lim: 100, mo: '2000-01' }), c('m', { blocked: true, mo: m }), c('s', { n: 79, lim: 100 }), c('s', { n: 80, lim: 100 })].map((x) => x && x.lvl); });
+  check('4ה חישוב באנר: 79% בלי, 80% אזהרה, 100% חסום, חודש ישן מתאפס, שגיאת מכסה = חסום', JSON.stringify(qc) === JSON.stringify([null, 'warn', 'full', null, 'full', null, 'warn']), qc);
   await A.page.click('[data-a=s3aiClose]'); await sleep(300);
   check('4ג סגירה – חוזרים למסך הצילום', await A.page.evaluate(() => !document.getElementById('dlg').open && cur().v === 'st3k'));
+  const re = await A.page.evaluate(() => { const K = S3UI.K3, k = K.cur, t = () => document.body.textContent.includes('החזית סומנה לצילום מחדש – יש אדם בתמונה');
+    const d = K.docs[k] || (K.docs[k] = {}); Object.assign(d, { fr: 'f', frV: 2, frRe: 1 }); rerender(); const before = t();
+    Object.assign(d, { frV: 2, frRe: 2 }); rerender(); const marked = t(); Object.assign(d, { frV: 3 }); rerender(); const fresh = t(); return [before, marked, fresh]; });
+  check('4ו חזית שסומנה לצילום מחדש (frRe===frV): הודעה; חזית חדשה (frV עולה) – בלי הודעה', JSON.stringify(re) === JSON.stringify([false, true, false]), re);
   check('4ד אין שגיאות JavaScript (מנהל)', !(A.page.__errors || []).length, A.page.__errors);
   await A.ctx.close();
 

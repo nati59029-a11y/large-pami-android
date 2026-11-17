@@ -28,7 +28,7 @@ const stOf=it=>{const s=PL.itemState(K.docs[it.key],it);return s==='todo'&&K.q[i
 const doneOf=it=>{const s=stOf(it);return s==='ok'||s==='skip'};
 function nextOf(after){const L=(K.plan&&K.plan.items)||[];const i=after?L.findIndex(x=>x.key===after):-1;for(let k=1;k<=L.length;k++){const it=L[(i+k+L.length)%L.length];if(it&&!doneOf(it)&&!K.q[it.key])return it.key}return ''}
 async function loadDocs(){const o={};let pt='';
- for(let i=0;i<20;i++){const j=await fsx('/s3setup/'+K.mapId+'/cap?pageSize=300'+['st','why','ph','fr','frTh','geo','okBy','man'].map(f=>'&mask.fieldPaths='+f).join('')+(pt?'&pageToken='+encodeURIComponent(pt):''));
+ for(let i=0;i<20;i++){const j=await fsx('/s3setup/'+K.mapId+'/cap?pageSize=300'+['st','why','ph','fr','frTh','frV','frRe','geo','okBy','man'].map(f=>'&mask.fieldPaths='+f).join('')+(pt?'&pageToken='+encodeURIComponent(pt):''));
   for(const d of ((j&&j.documents)||[])){o[d.name.split('/').pop()]=U.dec(d)||{}}pt=(j&&j.nextPageToken)||'';if(!pt)break}
  return o}
 async function refreshQ(){const L=typeof U.capQ==='function'?await U.capQ().catch(()=>[]):[];const q={};for(const r of L)if(r.mapId===K.mapId&&!r.fail)q[r.key]=(q[r.key]|0)+1;K.q=q;K.qf=L.filter(r=>r.mapId===K.mapId&&r.fail);}
@@ -130,6 +130,7 @@ function curCard(){
  const d=K.docs[it.key]||{},s=stOf(it),ph=(Array.isArray(d.ph)?d.ph:[]).filter(p=>p&&!p.off).length+(K.q[it.key]|0);
  const ST={ok:'הושלם',part:'צולם – עוד לא אושר',todo:'עוד לא צולם',skip:'דולג'};
  let h=`<div class="s3info"><b>${esc2(PL.label(it,K.map))}</b> <small>(${it.ord} מתוך ${K.plan.n})</small><br>${esc2(PL.guide(it))}<br><small>${ST[s]}${ph?` · ${ph} תמונות`:''}${s==='skip'&&d.why?' · '+esc2(d.why):''}${d.st==='ok'&&s==='part'?' · המקום השתנה במפה – צלמו שוב':''}</small></div>`;
+ if(it.k==='b'&&d.fr&&Number.isInteger(d.frRe)&&d.frRe===(Number.isInteger(d.frV)?d.frV:1))h+=`<div class="ban s3warn s3qt" role="alert" data-q="re">החזית סומנה לצילום מחדש – יש אדם בתמונה</div>`;
  /* שלב 4ב: הנחיית צילום למקטע של יותר מתמונה אחת (מדף גבוה, או שכבר יש תמונה) – מקטינה פרלקסה בתפרים */
  if(it.k==='b'&&(it.lv.length>1||ph>=1))h+=`<p class="note s3note" data-tip="wp">צלמו מאותו מרחק ובזווית ישרה; כוונו שהחיבור בין תמונות ייפול על שפת מדף או על עמוד.</p>`;
  const cam=(lv,t)=>`<label class="btn">${t}<input type="file" accept="image/*" capture="environment" data-c="s3cpPick" data-lv="${lv}" hidden></label>`;
@@ -146,6 +147,7 @@ V.st3k=()=>{const T='צילום החנות';
  const c={ok:0,part:0,todo:0,skip:0};for(const it of K.plan.items)c[stOf(it)]++;const dn=c.ok+c.skip,N=K.plan.n,off=navigator.onLine===false,qn=Object.values(K.q).reduce((a,b)=>a+b,0);
  let h=`<div class="card s3s s3k">`;
  if(off)h+=`<div class="ban s3off" role="status">אין חיבור – התמונות נשמרות בטלפון ויישלחו כשיש רשת</div>`;
+ h+=U.qtBanner?U.qtBanner():'';
  if(qn)h+=`<div class="ban s3off" role="status">${qn===1?'תמונה אחת ממתינה':qn+' תמונות ממתינות'} לשליחה</div>`;
  if(K.qf&&K.qf.length)h+=`<div class="ban s3warn" role="alert">${K.qf.length} תמונות לא נשלחו${K.qf[0].fail?': '+esc2(K.qf[0].fail):''}<div class="row s3row"><button class="btn" data-a="s3cpRetry">נסו שוב</button></div></div>`;
  if(K.setup&&K.setup.st==='done')h+=`<div class="ban s3off" role="status">ההקמה הסתיימה. אפשר להמשיך לצלם כדי לעדכן.</div>`;

@@ -236,6 +236,7 @@ V.st3c=()=>{const T='צילום מדפים';
  if(!C.run)return{t:T,h:'<div class="empty">טוען את הסבב…</div>'};
  const c=counts(),ts=tState(),R=C.run,off=navigator.onLine===false;
  let h=`<div class="card s3s">`;
+ h+=U.qtBanner?U.qtBanner('m'):'';
  if(off)h+=`<div class="ban s3off" role="status">אין חיבור – התמונות נשמרות בטלפון ויישלחו כשיש רשת</div>`;
  if(C.cache)h+=`<div class="ban s3off" role="status">מוצגים נתונים שנשמרו בטלפון</div>`;
  if(C.qn)h+=`<div class="ban s3off" role="status">${C.qn===1?'פריט אחד ממתין':C.qn+' פריטים ממתינים'} לשליחה${off?'':` <button class="btn g s" data-a="s3cFlush">שלחו עכשיו</button>`}</div>`;

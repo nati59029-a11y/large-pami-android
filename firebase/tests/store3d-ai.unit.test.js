@@ -83,6 +83,22 @@ describe('store3d-ai – מכסה', () => {
     assert.equal(A.quotaStep(null, null, o({ adhocMax: 20, a: { d: '2026-11-13', n: 20 } })).a.n, 1, 'יום חדש');
     assert.equal(A.quotaStep(null, null, o({ a: { d: '2026-11-14', n: 99 } })).a, undefined, 'בלי adhocMax (מנהל / סבב) – אין מונה');
   });
+  it('מכסה (שלב 8): 79% בלי אזהרה, 80% בדיוק אזהרה פעם אחת, 100% חסום, חודש חדש מתאפס ומזהיר שוב', () => {
+    const c = (x) => Object.assign({ k: 1, cap: 100, month: '2026-11', day: '2026-11-14', now: 5, userMax: 400 }, x);
+    let r = A.quotaStep({ m: '2026-11', n: 78, w80: '' }, null, c());
+    assert.deepEqual([r.b.n, r.warn, r.usage.w80, r.b.w80], [79, false, false, ''], '79%');
+    r = A.quotaStep(r.b, null, c());
+    assert.deepEqual([r.b.n, r.warn, r.usage.w80], [80, true, true], '80% בדיוק');
+    r = A.quotaStep(r.b, null, c());
+    assert.equal(r.warn, false, 'לא שוב באותו חודש');
+    r = A.quotaStep({ m: '2026-11', n: 99, w80: '2026-11' }, null, c());
+    assert.equal(r.b.n, 100, '100 מותר (המכסה עצמה)');
+    assert.equal(code(() => A.quotaStep(r.b, null, c())), 's3-month-limit', '101 חסום');
+    r = A.quotaStep({ m: '2026-10', n: 100, w80: '2026-10' }, null, c({ cap: 5, month: '2026-11' }));
+    assert.deepEqual([r.b.n, r.warn], [1, false], 'חודש חדש מתחיל מ-0');
+    r = A.quotaStep({ m: '2026-10', n: 100, w80: '2026-10' }, null, c({ cap: 1, month: '2026-11' }));
+    assert.equal(r.warn, true, 'בחודש חדש האזהרה (w80 של חודש קודם) נשלחת שוב');
+  });
   it('refundStep: רק באותו חודש, לא מתחת ל-0', () => {
     assert.deepEqual(A.refundStep({ m: '2026-11', n: 5 }, '2026-11', 2, 9), { n: 3, upd: 9 });
     assert.deepEqual(A.refundStep({ m: '2026-11', n: 1 }, '2026-11', 3, 9), { n: 0, upd: 9 });
@@ -162,6 +178,12 @@ describe('store3d-ai – תשובת בדיקת מדף (קובצי הדוגמה �
     assert.deepEqual(e, { s: 'iss', r: 'r1_20261115', t: 7, n: 2, th: 'a_t.jpg' });
     assert.equal(A.sumEntry([{ st: 'person', iss: [] }], 'x', 1, '', 'old.jpg').s, 'miss');
     assert.equal(A.sumEntry([{ st: 'person', iss: [] }], 'x', 1, '', 'old.jpg').th, 'old.jpg', 'אדם – נשארת המוקטנת הקודמת');
+    // הקמת חנות שלב 7: sumEntry לא מוחק את חזית ההקמה של הרשומה הקודמת
+    const old = { s: 'ok', r: 'r0', t: 1, n: 0, th: 'old_t.jpg', fr: 'front/b_f1-a-1_2_t.jpg', frT: 5 };
+    assert.deepEqual(A.sumEntry([{ st: 'issue', iss: [{ k: 'hole' }] }], 'r1', 9, 'new_t.jpg', null, old), { s: 'iss', r: 'r1', t: 9, n: 1, th: 'new_t.jpg', fr: 'front/b_f1-a-1_2_t.jpg', frT: 5 }, 'fr/frT עוברים, th מתחלף');
+    assert.deepEqual(A.sumEntry([{ st: 'ok', iss: [] }], 'r1', 9, '', null, { fr: 'front/x_t.jpg' }), { s: 'ok', r: 'r1', t: 9, n: 0, fr: 'front/x_t.jpg' }, 'בלי frT – רק fr');
+    for (const o of [undefined, null, {}, { fr: '' }, { fr: 7, frT: 5 }, []]) assert.equal('fr' in A.sumEntry([{ st: 'ok', iss: [] }], 'r1', 9, 'a.jpg', null, o), false, 'אין חזית קודמת תקינה – אין fr');
+    assert.equal('frT' in A.sumEntry([{ st: 'ok', iss: [] }], 'r1', 9, 'a.jpg', null, { fr: 'f.jpg', frT: 'x' }), false, 'frT לא מספר שלם – לא מועתק');
     assert.deepEqual(['ok', 'issue', 'review', 'bad', 'person'].map((st) => A.countsDone({ st })), [true, true, true, false, false]);
   });
 });

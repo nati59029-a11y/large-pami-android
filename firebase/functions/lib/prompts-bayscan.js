@@ -49,7 +49,7 @@ const BASE = 'אתה בודק פריט אחד בהקמת חנות קמעונאי
 function clean(s, n) { return String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n); }
 function list(a, maxN, maxLen) { return (Array.isArray(a) ? a : []).slice(0, maxN).map((x) => clean(x, maxLen)).filter(Boolean); }
 
-// ctx = { k: 'b'|'w'|…, label, storeType, photos: [{ i, lv }], hi: bool, fx?: { kind, lvl, w, bays, name, glass }, cat?, exp?: [שמות],
+// ctx = { k: 'b'|'w'|…, label (בלי שמות שהמשתמש כתב), room?: שם החדר (נתון מהמשתמש), storeType, photos: [{ i, lv }], hi: bool, fx?: { kind, lvl, w, bays, name, glass }, cat?, exp?: [שמות],
 //         notes?: [טקסט], setup?: [טקסט – הערות ההקמה לפריט ולגוף] } – הכול מהשרת בלבד
 function buildBayPrompt(ctx) {
   const c = ctx || {};
@@ -61,6 +61,7 @@ function buildBayPrompt(ctx) {
   }
   const user = {};
   if (c.fx && c.fx.name) user['שם הגוף'] = clean(c.fx.name, 30);
+  if (c.room) user['שם החדר'] = clean(c.room, 30);
   if (c.cat) user.קטגוריה = clean(c.cat, 30);
   const exp = list(c.exp, 60, 60);
   if (exp.length) user['מה אמור להיות'] = exp;
@@ -123,8 +124,14 @@ function cleanBayScan(r, ctx) {
     if (!nil(r.kc)) { if (!n01(r.kc)) throw fail('kc'); o.kc = r3(r.kc); }
     if (!nil(r.lvl)) { if (!int(r.lvl, 1, 12)) throw fail('lvl'); o.lvl = r.lvl; }
     if (!nil(r.bays)) { if (!int(r.bays, 1, 30)) throw fail('bays'); o.bays = r.bays; }
-    o.prods = arr(r.prods, LIM.prods, 'prods').map((p) => {
-      if (!isObj(p) || typeof p.n !== 'string' || !clean(p.n, LIM.n) || !n01(p.conf)) throw fail('prods');
+    // סבב בדיקה 1, ליקוי 2: מוצר בלי שם (חסר / לא מחרוזת / ריק) – מוסר לבד, ושאר התשובה נשמרת. כל חריגה אחרת – כל התשובה נדחית
+    o.noName = 0;
+    o.prods = arr(r.prods, LIM.prods, 'prods').filter((p) => {
+      if (isObj(p) && typeof p.n === 'string' && clean(p.n, LIM.n)) return true;
+      if (isObj(p) || p === null) { o.noName++; return false; }
+      throw fail('prods');
+    }).map((p) => {
+      if (!n01(p.conf)) throw fail('prods');
       const x = { n: clean(p.n, LIM.n), conf: r3(p.conf) };
       for (const f of ['brand', 'var', 'size', 'cat']) { if (nil(p[f])) continue; if (typeof p[f] !== 'string') throw fail('prods'); const s = clean(p[f], LIM[f]); if (s) x[f] = s; }
       if (typeof p.bc === 'string' && RE_BC.test(p.bc.trim())) x.bc = p.bc.trim(); // ברקוד לא תקין – נמחק (לא מנחשים)

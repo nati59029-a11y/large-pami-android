@@ -31,13 +31,15 @@ function setupQuota(doc, o) {
   const n0 = inR(d.n, 0, LIM_MAX) ? d.n : 0, k = o.k || 1;
   if (n0 + k > lim) throw fail('s3-setup-limit', `נגמרה מכסת הבדיקות החכמות של ההקמה במפה הזו (${n0} מתוך ${lim}). מנהל המערכת יכול להגדיל אותה.`, { n: n0, lim });
   const n = n0 + k, hi = n >= 0.8 * lim;
-  const had = d.w80 === true && hi;   // התקרה גדלה מתחת ל-80% – ההתראה תישלח שוב כשיגיעו
+  const had = d.w80 === true && hi;   // התקרה גדלה מתחת ל-80% – w80 מתאפס (ה-push עצמו נחסם ב-s3ntf: פעם אחת למפה)
   const warn = hi && !had;
   return { doc: { n, lim, w80: had || warn, upd: o.now }, warn, usage: { n, lim, w80: hi } };
 }
 function setupRefund(doc, k, now) {
   if (!isObj(doc) || !inR(doc.n, 0, LIM_MAX)) return null;
-  return { n: Math.max(0, doc.n - (k || 1)), upd: now };
+  const n = Math.max(0, doc.n - (k || 1)), out = { n, upd: now };
+  if (doc.w80 === true && inR(doc.lim, 0, LIM_MAX) && n < 0.8 * doc.lim) out.w80 = false; // הבדיקה הוחזרה – גם סימון ה-80% (ה-push נשלח רק אחרי הצלחה)
+  return out;
 }
 // s3SetupLim: n לא משתנה; lim < n מותר (= חסום). w80 מתאפס כש-n < 80% מהתקרה החדשה
 function setupLim(doc, lim, uid, now) {
@@ -94,14 +96,26 @@ function applyPhotos(ph, cl, sent) {
 }
 
 // ---------- מצב הפריט (חוזה 3.3, "מתי ok") ----------
-// doc = המסמך אחרי השינוי; moved = הגיאומטריה זזה. משנה את doc (st, okBy, okAt) ומחזיר אותו
+// חזית תקפה: יש fr, והיא לא החזית שסומנה לצילום מחדש (frRe = frV של חזית שנבנתה כשנמצא אדם בתמונות). חזית חדשה (frV עולה) – תקפה שוב
+const frOk = (doc) => !!doc.fr && !(Number.isInteger(doc.frRe) && doc.frRe === (Number.isInteger(doc.frV) ? doc.frV : 1));
+// סבב בדיקה 1, ליקוי 1: נמצא אדם בתמונות כשכבר יש חזית ⇒ החזית (שנבנתה מאותן תמונות) מסומנת frRe ולא נחשבת; האישור הידני שלה בטל.
+// מחזיר true אם סומנה (השרת מוריד אותה גם מ-s3sum / s3look)
+function markFront(doc) {
+  if (!doc.fr || !frOk(doc)) return false;
+  doc.frRe = Number.isInteger(doc.frV) ? doc.frV : 1;
+  delete doc.okBy; delete doc.okAt;
+  return true;
+}
+// doc = המסמך אחרי השינוי; moved = הגיאומטריה זזה. משנה את doc (st, okBy, okAt) ומחזיר אותו.
+// ai.retake (אדם / חשוך / מטושטש) ⇒ לא ok עד בדיקה נקייה
 function capSt(doc, moved, uid, now) {
   if (doc.st === 'skip' || doc.st === 'orph') return doc;
   const ai = isObj(doc.ai) ? doc.ai : null;
   const pending = !!(ai && Array.isArray(ai.diff) && ai.diff.some((d) => d && d.st === 'rev'));
   const aiOk = !!(ai && typeof ai.cov === 'number' && ai.cov >= COV_OK && Array.isArray(ai.ends) && ai.ends.includes('l') && ai.ends.includes('r'));
   const manOk = doc.man === true && typeof doc.okBy === 'string';
-  if (doc.fr && !moved && !pending && (aiOk || manOk)) {
+  const retake = !!(ai && typeof ai.retake === 'string' && ai.retake);
+  if (frOk(doc) && !moved && !pending && !retake && (aiOk || manOk)) {
     if (doc.st !== 'ok' || !doc.okBy) Object.assign(doc, { okBy: doc.okBy || uid, okAt: Number.isInteger(doc.okAt) ? doc.okAt : now });
     doc.st = 'ok';
   } else {
@@ -165,4 +179,4 @@ function expAdd(exp, prods) {
   return { exp: L, added };
 }
 
-module.exports = { AUTO, COV_OK, DOC_MAX, EXP_MAX, ST_BASE, baseLim, setupQuota, setupRefund, setupLim, kindOf, buildAi, applyPhotos, capSt, sizeOf, fitSize, kindFx, expAdd };
+module.exports = { AUTO, COV_OK, DOC_MAX, EXP_MAX, ST_BASE, baseLim, setupQuota, setupRefund, setupLim, kindOf, buildAi, applyPhotos, frOk, markFront, capSt, sizeOf, fitSize, kindFx, expAdd };

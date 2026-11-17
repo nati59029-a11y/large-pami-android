@@ -104,7 +104,7 @@ function editor(L,it){
 function paint(){
  const it=itemOf(C.key);if(!it){closeDlg();return}
  const L=photos(C.key),hi=it.lv.length>1;if(C.sel>=L.length)C.sel=Math.max(0,L.length-1);
- let h=`<div class="s3wp2"><h3>חיבור וחיתוך – ${esc2(U.K3&&window.S3Plan?S3Plan.label(it,K.map):'')}</h3>`;
+ let h=`<div class="s3wp2"><h3>חיבור וחיתוך – ${esc2(U.K3&&window.S3Plan?S3Plan.label(it,K.map):'')}</h3>`+(U.qtBanner?U.qtBanner('s'):'');
  if(!L.length)h+=`<p>עוד אין תמונות לפריט הזה. צלמו קודם.</p>`;
  else if(C.res){const r=C.res,miss=r.gaps.length>0;
   h+=`<div class="s3wppv" dir="ltr"><img src="${C.res.url}" alt="החזית המחוברת">${r.gaps.map(g=>`<i style="left:${g.a/10}%;width:${(g.b-g.a)/10}%;${hi?(g.lv==='t'?'top:0;height:50%':'top:50%;height:50%'):'top:0;height:100%'}"></i>`).join('')}</div>`;

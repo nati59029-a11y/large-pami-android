@@ -55,7 +55,7 @@ function paint(){
  const it=itemOf(A.key);if(!it){closeDlg();return}
  const d=A.doc||K.docs[A.key]||{},ai=d.ai&&typeof d.ai==='object'?d.ai:null,off=navigator.onLine===false;
  let h=`<div class="s3ai"><h3>המערכת מציעה – ${esc2(PL.label(it,K.map))}</h3>`;
- if(A.use&&A.use.w80)h+=`<div class="ban s3warn" role="status">נוצלו ${+A.use.n} מתוך ${+A.use.lim} בדיקות חכמות של הקמת המפה (80% ומעלה). מנהל המערכת יכול להגדיל את המכסה.</div>`;
+ if(U.qtBanner)h+=U.qtBanner('s');else if(A.use&&A.use.w80)h+=`<div class="ban s3warn" role="status">נוצלו ${+A.use.n} מתוך ${+A.use.lim} בדיקות חכמות של הקמת המפה (80% ומעלה). מנהל המערכת יכול להגדיל את המכסה.</div>`;
  if(A.busy)h+=`<div class="s3info" role="status">${esc2(A.msg||'רגע…')}</div>`;
  else if(A.msg)h+=`<div class="s3info" role="alert">${esc2(A.msg)}</div>`;
  if(!ai)h+=`<p class="note">הבדיקה החכמה מזהה את סוג המידוף, הקומות והמוצרים, ובודקת שאין קטע חסר. כל בדיקה נספרת במכסת ההקמה של המפה.</p>`;

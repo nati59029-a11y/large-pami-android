@@ -23,7 +23,7 @@ async function server(ctx, mgr) {
     const rq = route.request(), u = new URL(rq.url()), p = u.pathname.replace(/^.*\/documents\/b\/biz-s\//, ''); S.reads.push(rq.method() + ' ' + p);
     if (rq.method() === 'POST' && p === 'sround') { let b = {}; try { b = JSON.parse(rq.postData()); } catch (e) { /* */ } S.posts.push({ id: u.searchParams.get('documentId'), b }); return j(route, 200, { name: DOCS + 'sround/' + u.searchParams.get('documentId'), fields: b.fields }); }
     if (p === 'smap/s-main') return S.none ? j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } }) : j(route, 200, doc(p, S.map));
-    if (p === 's3sum/s-main') return S.none ? j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } }) : j(route, 200, doc(p, { b: { 'f1-a-1': { s: 'iss', r: 'run_1', t: Date.UTC(2026, 10, 12, 9, 30), th: TH, n: 2 } }, run: 'run_1', score: 80, upd: Date.UTC(2026, 10, 12, 10) }));
+    if (p === 's3sum/s-main') return S.none ? j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } }) : j(route, 200, doc(p, { b: { 'f1-a-1': Object.assign({ s: 'iss', r: 'run_1', t: Date.UTC(2026, 10, 12, 9, 30), th: TH, n: 2 }, S.fr || {}) }, run: 'run_1', score: 80, upd: Date.UTC(2026, 10, 12, 10) }));
     if (/^s3setup/.test(p)) return S.nt403 ? j(route, 403, { error: { code: 403, status: 'PERMISSION_DENIED' } }) : p === 's3setup/s-main/n' ? j(route, 200, {}) : j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } });
     if (p === 'sround') return j(route, 200, { documents: [] });
     if (p === 'staff') return j(route, 200, { documents: [doc('staff/w', { name: 'דנה', active: true }), doc('staff/w9', { name: 'עובד מושבת', active: false })] });
@@ -334,6 +334,44 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
   check('6ו מכסה יומית מלאה: הודעה בעברית בכרטיס', /מכסת הדיווחים היומית|הגעתם למכסה/.test(await txt(A.page, '#dlg')), await txt(A.page, '#dlg .s3warn'));
   S.fnFail.shelf = '';
   await A.page.click('#dlg [data-a=closeDlg]'); await sleep(300);
+
+  // ---- 6ז. הקמת חנות שלב 7: חזית ההקמה בכרטיס ובהיסטוריה (ראשונה), הגדלה בהקשה, מעבר בין תאריכים בהחלקה ובכפתורים ----
+  {
+    const FR = 'b/biz-s/s3front/s-main/b_f1-a-1_1_t.jpg';
+    const reopen = async () => { await A.page.evaluate(async () => { S3UI.drop(); await S3UI.load(true); S3UI.X.pick = { id: 'f1-a-1', fx: 'f1', s: 'a', n: 1, num: 1, name: 'גונדולה מרכזית' }; ACT.s3kOpen(); }); await sleep(2500); };
+    const card = () => A.page.evaluate(() => { const d = document.getElementById('dlg'), t = d.innerText.replace(/\s+/g, ' '), h = t.split('היסטוריה')[1] || '';
+      return { t, h, top: (d.querySelector('img[alt="תמונת המדף"]') || {}).src || '', thumbs: [...d.querySelectorAll('[data-a=s3hsOpen]')].map((b) => [b.dataset.i, (b.querySelector('img') || {}).alt, Math.round(b.getBoundingClientRect().height)]), v: !!d.querySelector('#s3hsV') }; });
+    // א. חזית הקמה חדשה מהסבב
+    S.fr = { fr: FR, frT: Date.UTC(2026, 10, 14, 8) };
+    await reopen();
+    let c = await card();
+    check('6ז1 חזית הקמה חדשה מהסבב: למעלה "חזית ההקמה" עם התאריך שלה; בהיסטוריה חזית ההקמה ראשונה, אחריה הסבבים (גם הסבב הנוכחי, כי הוא לא מוצג למעלה)', !!c.top && /חזית ההקמה · 14\.11/.test(c.t.split('היסטוריה')[0]) && c.h.indexOf('חזית ההקמה') >= 0 && c.h.indexOf('חזית ההקמה') < c.h.indexOf('יש בעיות') && c.h.indexOf('יש בעיות') < c.h.indexOf('תקין') && JSON.stringify(c.thumbs.map((x) => x.slice(0, 2))) === JSON.stringify([['0', 'חזית ההקמה'], ['1', 'תמונה מהסבב']]) && c.thumbs.every((x) => x[2] >= 44), { h: c.h.slice(0, 200), thumbs: c.thumbs });
+    await A.page.click('#dlg [data-a=s3hsOpen][data-i="0"]'); await sleep(400);
+    let v = await txt(A.page, '#dlg');
+    const vb = await A.page.evaluate(() => [...document.querySelectorAll('#dlg button')].map((b) => [b.dataset.a, b.disabled, Math.round(b.getBoundingClientRect().height)]));
+    check('6ז2 הקשה על התמונה: תצוגה מוגדלת של חזית ההקמה, "1 מתוך 2", "הקודמת" כבויה, כל הכפתורים ≥44px', /חזית ההקמה/.test(v) && /1 מתוך 2/.test(v) && !!(await A.page.$('#dlg img#s3hsV')) && vb.find((x) => x[0] === 's3hsPrev')[1] === true && vb.every((x) => x[2] >= 44), { v: v.slice(0, 160), vb });
+    check('6ז3 התצוגה המוגדלת ב-360px בלי גלישה', (await noOverflow(A.page)).bad.length === 0, await noOverflow(A.page));
+    await shot(A.page, fp(shots, 'כרטיס-היסטוריה-מוגדלת'));
+    const sw = async (dx) => { const r = await A.page.evaluate(() => { const b = document.getElementById('s3hsV').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }); await A.page.mouse.move(r.x - dx / 2, r.y); await A.page.mouse.down(); await A.page.mouse.move(r.x + dx / 2, r.y, { steps: 5 }); await A.page.mouse.up(); await sleep(400); };
+    await sw(140); v = await txt(A.page, '#dlg');
+    check('6ז4 החלקה ימינה: התמונה הבאה (הסבב, עם התאריך והמצב), "2 מתוך 2", "הבאה" כבויה', /2 מתוך 2/.test(v) && /סבב/.test(v) && /תקין/.test(v) && /5\.11/.test(v) && await A.page.evaluate(() => document.querySelector('#dlg [data-a=s3hsNext]').disabled), v.slice(0, 160));
+    await sw(140); check('6ז5 החלקה מעבר לסוף: נשארים בתמונה האחרונה', /2 מתוך 2/.test(await txt(A.page, '#dlg')));
+    await sw(-140); check('6ז6 החלקה שמאלה: חוזרים לחזית ההקמה', /1 מתוך 2/.test(await txt(A.page, '#dlg')) && /חזית ההקמה/.test(await txt(A.page, '#dlg')));
+    await A.page.click('#dlg [data-a=s3hsNext]'); await sleep(300);
+    check('6ז7 כפתור "הבאה" עובד כמו ההחלקה', /2 מתוך 2/.test(await txt(A.page, '#dlg')));
+    await A.page.click('#dlg [data-a=s3hsClose]'); await sleep(300);
+    c = await card();
+    check('6ז8 "חזרה לכרטיס": הכרטיס המלא חוזר (היסטוריה ו"צלם"), והדיאלוג עדיין פתוח', !c.v && /היסטוריה/.test(c.t) && /צלם|העלה/.test(c.t) && await A.page.evaluate(() => document.getElementById('dlg').open), c.t.slice(0, 120));
+    await A.page.click('#dlg [data-a=closeDlg]'); await sleep(300);
+    // ב. חזית הקמה ישנה מהסבב: למעלה הסבב (כמו קודם), חזית ההקמה עדיין ראשונה בהיסטוריה, והסבב הנוכחי לא מוצג פעמיים
+    S.fr = { fr: FR, frT: Date.UTC(2026, 10, 1, 8) };
+    await reopen();
+    c = await card();
+    check('6ז9 חזית הקמה ישנה מהסבב: למעלה תמונת הסבב ("צולם 12.11"), בהיסטוריה חזית ההקמה ואחריה רק הסבב הקודם', !!c.top && /צולם 12\.11/.test(c.t) && c.h.indexOf('חזית ההקמה') >= 0 && c.h.indexOf('חזית ההקמה') < c.h.indexOf('תקין') && !/יש בעיות/.test(c.h) && c.thumbs.length === 2, { h: c.h.slice(0, 200), thumbs: c.thumbs });
+    await A.page.click('#dlg [data-a=closeDlg]'); await sleep(300);
+    S.fr = null;
+    check('6ז10 בלי שגיאות JavaScript בהיסטוריה', A.page.__errors.length === 0, A.page.__errors);
+  }
 
   // ---- 7. מיני בבית: נבנה פעם אחת, לא נבנה מחדש בכל ציור, ונהרס ביציאה ----
   await A.page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await sleep(2500);

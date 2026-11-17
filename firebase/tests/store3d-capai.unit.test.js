@@ -32,7 +32,13 @@ describe('prompts-bayscan: הנחיה ובדיקה קפדנית', () => {
     assert.equal(why(() => PB.cleanBayScan(ok({ conf: 2 }), { k: 'b', nPh: 1 })), 'conf');
     assert.equal(why(() => PB.cleanBayScan(ok({ per: [3] }), { k: 'b', nPh: 2 })), 'per');
     assert.equal(why(() => PB.cleanBayScan(ok({ prods: [{ n: 'x', conf: 0.9, lv: 13 }] }), { k: 'b', nPh: 1 })), 'prods');
+    assert.equal(why(() => PB.cleanBayScan(ok({ prods: [{ n: 'x', conf: 0.9 }, 'מחרוזת'] }), { k: 'b', nPh: 1 })), 'prods', 'מוצר שאינו אובייקט – דחייה');
     assert.equal(why(() => PB.cleanBayScan([], { k: 'b', nPh: 1 })), 'not-obj');
+  });
+  it('סבב בדיקה 1, ליקוי 2: מוצר בלי שם (חסר / ריק / רווחים / לא מחרוזת / null) מוסר לבד, השאר נשמר; ביטחון שגוי – עדיין דחייה', () => {
+    const c = PB.cleanBayScan(ok({ prods: [{ conf: 0.9 }, { n: '', conf: 0.9 }, { n: '   ', conf: 0.9 }, { n: 5, conf: 0.9 }, null, { n: 'מפיות', conf: 0.7 }] }), { k: 'b', nPh: 1 });
+    assert.deepEqual(c.prods.map((p) => p.n), ['מפיות']); assert.equal(c.noName, 5);
+    assert.equal(why(() => PB.cleanBayScan(ok({ prods: [{ conf: 0.9 }, { n: 'x', conf: 7 }] }), { k: 'b', nPh: 1 })), 'prods');
   });
   it('פריט שאינו מקטע: סוג ומוצרים לא נכנסים; yr קטן מ-50 נמחק', () => {
     const c = PB.cleanBayScan(ok({ photos: [{ i: 1, yr: { a: 0, b: 30 } }] }), { k: 'w', nPh: 1 });
@@ -90,6 +96,23 @@ describe('store3d-capai: מכסה, תוצאה, מצב, גודל, החלטות', 
     const mv = CA.capSt({ fr: 'x', man: true, okBy: 'u_user2', st: 'ok', ai }, true, 'u_user1', 5);
     assert.deepEqual([mv.st, mv.okBy], ['part', undefined]);
     assert.equal(CA.capSt({ st: 'skip', why: 'x', fr: 'x', ai }, false, 'u', 1).st, 'skip');
+    assert.equal(CA.capSt({ fr: 'x', ph: [{}], ai: Object.assign({ retake: 'חשוך' }, ai), st: 'part' }, false, 'u_user1', 5).st, 'part', 'retake – לא ok');
+  });
+  it('סבב בדיקה 1, ליקוי 1: markFront – חזית קיימת מסומנת frRe = frV, האישור בטל, לא ok; חזית חדשה (frV עולה) – תקפה שוב', () => {
+    const ai = { cov: 1, ends: ['l', 'r'] };
+    const d = { fr: 'f2', frV: 2, man: true, okBy: 'u_user2', okAt: 1, st: 'ok', ph: [{}], ai };
+    assert.equal(CA.markFront(d), true);
+    assert.deepEqual([d.frRe, d.okBy, d.okAt], [2, undefined, undefined]);
+    assert.equal(CA.markFront(d), false, 'כבר מסומנת');
+    assert.equal(CA.capSt(d, false, 'u_user1', 5).st, 'part');
+    d.frV = 3; d.fr = 'f3';
+    assert.equal(CA.frOk(d), true);
+    assert.equal(CA.capSt(d, false, 'u_user1', 6).st, 'ok', 'חזית חדשה + בדיקה נקייה');
+    assert.equal(CA.markFront({ ph: [{}] }), false, 'בלי חזית – אין מה לסמן');
+  });
+  it('setupRefund מאפס w80 כשחוזרים מתחת ל-80%', () => {
+    assert.deepEqual(CA.setupRefund({ n: 45, lim: 56, w80: true }, 1, 3), { n: 44, upd: 3, w80: false });
+    assert.deepEqual(CA.setupRefund({ n: 50, lim: 56, w80: true }, 1, 3), { n: 49, upd: 3 });
   });
   it('fitSize: מסמך קטן – בלי שינוי; גדול – מקוצץ מתחת ל-60,000', () => {
     const small = { ai: { prods: [{ n: 'a', conf: 1 }] } };

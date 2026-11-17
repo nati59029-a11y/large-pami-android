@@ -8,6 +8,9 @@
 //     לא ענה (429, ניתוק, timeout) = מוחזר. qid חוזר אחרי הצלחה = אותה תשובה, בלי ספירה ובלי Gemini. 80% – push למנהלים פעם אחת למפה.
 //     כותב cap/{key}.ai, ph[].quad/xr/yr/q (תמונה שנערכה ידנית – man: 1 – לא נדרסת), st (ok רק לפי הכללים ב-capSt), מונים ב-s3setup.
 //     תמונה עם אדם – נמחקת מ-ph ומ-Storage (לא נשמרת, כמו בבדיקת מדף), ו-ai.retake מבקש לצלם שוב. מסמך cap עד 60,000 בתים (fitSize).
+//     סבב בדיקה 1: אם כבר יש חזית – היא מסומנת frRe (= frV שלה, "צלמו שוב"), לא נחשבת ל-ok ויורדת מ-s3sum/s3look; חזית חדשה (frV עולה) תקפה.
+//     ai.retake ⇒ לא ok עד בדיקה נקייה. מוצר בלי שם מוסר לבד (noName בתשובה); שאר החריגות – כל התשובה נדחית.
+//     בכשל לפני תשובה מוחזרת רק מכסת ההקמה (s_); הבלם היומי לעובד (u_) לא מוחזר – בכוונה, כמו בבדיקת מדף (נגד לולאת שליחה תקועה).
 //     מחזיר { ok, mapId, key, st, cov, kind?, prods, rev, retake?, per, usage: { n, lim, w80 } }.
 //   s3CapDec { qid, mapId, key, at, k: 'prod' | 'diff' | 'exp', i?, st?: 'ok' | 'no' } – החלטה במסך "המערכת מציעה". at = ai.at (נגד החלטה
 //     על תוצאה ישנה). prod/diff – st של הפריט ברשימה. diff של סוג (kind) / קומות (lvl) שאושר – נשמר במפה דרך saveMap (גרסה קודמת נשמרת
@@ -18,7 +21,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
 const { defineSecret, defineString, defineInt } = require('firebase-functions/params');
 const { getApps, initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldPath, FieldValue } = require('firebase-admin/firestore');
 const { getStorage } = require('firebase-admin/storage');
 const { onCall } = require('./lib/region');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
@@ -83,8 +86,10 @@ async function ask(deps, prompt, b64s, deadline) {
   return { obj: scan.parseLikeApp(r.text), finish: r.finish || '', len: String(r.text || '').length };
 }
 // התמונות שבשימוש (לא off), לפי הגובה (עליון, תחתון, רגיל) ואז לפי n. מלאות עד IMG_BUDGET, ואחר כך מוקטנות. קובץ חסר – מדלגים
-async function readPhotos(bucket, ph) {
-  const L = ph.filter((p) => isObj(p) && p.off !== true && Number.isInteger(p.n) && typeof p.p === 'string' && typeof p.th === 'string')
+// pre = התחילית המותרת של הנתיב (b/{biz}/store3d/{br}/cap/{mapId}/{key}_) – הגנה נוספת: לא קוראים ולא מוחקים קובץ מחוץ לפריט
+const inPre = (p, pre) => !pre || [p.p, p.th].every((x) => typeof x === 'string' && x.startsWith(pre) && !x.includes('..'));
+async function readPhotos(bucket, ph, pre) {
+  const L = ph.filter((p) => isObj(p) && p.off !== true && Number.isInteger(p.n) && typeof p.p === 'string' && typeof p.th === 'string' && inPre(p, pre))
     .sort((a, b) => (LV_ORD[a.lv] || 0) - (LV_ORD[b.lv] || 0) || a.n - b.n);
   const out = [];
   let total = 0;
@@ -127,10 +132,12 @@ async function checkCore(db, who, input, now, deps) {
   ]);
   const B = bayDoc && bayDoc.exists ? bayDoc.data() : {};
   const bucket = deps.bucket || getStorage().bucket();
-  const sent = await readPhotos(bucket, ph);
+  const pre = `b/${who.bizId}/store3d/${br}/cap/${mapId}/${key}_`;
+  const sent = await readPhotos(bucket, ph, pre);
   if (!sent.length) throw bad('no-photos', 'לא הצלחנו לקרוא את התמונות של הפריט. צלמו שוב.', 'failed-precondition');
   const prompt = PB.buildBayPrompt({
-    k: item.k, label: P.label(item, map), storeType: set.exists ? set.get('stype') : '', hi: item.lv.length > 1, photos: sent.map((s) => ({ i: s.i, lv: s.lv })),
+    // שמות שהמשתמש כתב (גוף, חדר) – רק בחלק "נתונים מהמשתמש", לא בתיאור (סבב בדיקה 1, הערה 2)
+    k: item.k, label: P.label(item, null), room: ((Array.isArray(map.rooms) ? map.rooms : []).find((r) => isObj(r) && r.id === item.room) || {}).name || '', storeType: set.exists ? set.get('stype') : '', hi: item.lv.length > 1, photos: sent.map((s) => ({ i: s.i, lv: s.lv })),
     fx: fx ? { kind: CA.kindOf(fx), lvl: fx.lvl, w: Number.isInteger(fx.w) && fx.bays ? Math.round(fx.w / fx.bays) : null, bays: fx.bays, name: fx.name, glass: fx.glass === true } : null,
     cat: B.cat, exp: (Array.isArray(B.exp) ? B.exp : []).map((e) => e && e.n), notes: (Array.isArray(B.notes) ? B.notes : []).map((n) => n && n.t),
     setup: [n1, n2].filter((s) => s && s.exists && typeof s.get('t') === 'string').map((s) => s.get('t')),
@@ -157,7 +164,6 @@ async function checkCore(db, who, input, now, deps) {
     return { qs };
   });
   if (rv.dup) return Object.assign({}, rv.dup, { dup: true });
-  if (rv.qs.warn) { try { await notify({ db, send: deps.send }, `${mapId}_sw80`, 'sw80', await managers(db), now); } catch (e) { logger.warn('s3CapCheck: sw80 notify failed', { code: e && e.code }); } }
   let charged = false;
   const back = async (e) => {
     try {
@@ -190,14 +196,27 @@ async function checkCore(db, who, input, now, deps) {
   let res, drop = [];
   try {
     res = await db.runTransaction(async (tx) => {
-      const [q, ms2, cs2, ss] = await Promise.all([tx.get(qref), tx.get(mref), tx.get(cref), tx.get(setRef)]);
+      const xref = item.k === 'b' ? db.doc('s3sum/' + mapId) : db.doc('s3look/' + mapId);
+      const [q, ms2, cs2, ss, xs] = await Promise.all([tx.get(qref), tx.get(mref), tx.get(cref), tx.get(setRef), tx.get(xref)]);
       if (q.exists && q.get('res')) return Object.assign({}, q.get('res'), { dup: true });
       const it = C.planItem(ms2, key).item;
       const old = cs2.exists ? cs2.data() : null;
       if (!old) throw bad('no-photos', 'אין עדיין תמונות לפריט הזה. צלמו קודם.', 'failed-precondition');
       const ap = CA.applyPhotos(old.ph, cl, sent);
-      drop = ap.drop;
+      drop = ap.drop.filter((p) => inPre(p, pre));
       const doc = Object.assign({}, old, { ph: ap.ph, ai, upd: now, by: who.uid });
+      // סבב בדיקה 1, ליקוי 1: אדם בתמונות וכבר יש חזית (שנבנתה מהן) ⇒ החזית מסומנת לצילום מחדש (frRe), לא נחשבת ל-ok,
+      // ויורדת מהדגם (s3sum.b[bay].fr/frT או s3look.it[key]) – רק אם שם מוצגת אותה חזית. הקבצים שלה לא נמחקים כאן
+      let frRe = false;
+      if (ap.drop.length) ai.retake = ai.retake || 'יש אדם בתמונה – צלמו שוב';
+      if (ap.drop.length && CA.markFront(doc)) {
+        frRe = true;
+        ai.retake = 'יש אדם בתמונה – צלמו שוב ובנו חזית חדשה';
+        if (xs.exists) {
+          if (item.k === 'b') { const e = (xs.get('b') || {})[key.slice(2)]; if (isObj(e) && e.fr === doc.frTh) tx.update(xref, new FieldPath('b', key.slice(2), 'fr'), FieldValue.delete(), new FieldPath('b', key.slice(2), 'frT'), FieldValue.delete()); }
+          else { const e = (xs.get('it') || {})[key]; if (isObj(e) && e.v === doc.frV) tx.update(xref, new FieldPath('it', key), FieldValue.delete()); }
+        }
+      }
       if (doc.st !== 'skip') CA.capSt(doc, P.geoMoved(old.geo, it.geo, it.k), who.uid, now);
       try { CA.fitSize(doc); } catch (e) { throw toHttps(e); }
       const setup = ss.exists ? ss.data() : null;
@@ -207,6 +226,8 @@ async function checkCore(db, who, input, now, deps) {
       const out = { ok: true, mapId, key, st: s1, cov: ai.cov, prods: (ai.prods || []).length, rev: (ai.diff || []).filter((d) => d.st === 'rev').length + (ai.prods || []).filter((p) => p.st === 'rev').length, per: drop.length, usage: rv.qs.usage, at: now };
       if (ai.kind) out.kind = ai.kind;
       if (ai.retake) out.retake = ai.retake;
+      if (frRe) out.frRe = 1;
+      if (cl.noName) out.noName = cl.noName;
       tx.update(qref, { res: out });
       return out;
     });
@@ -214,7 +235,9 @@ async function checkCore(db, who, input, now, deps) {
     drop = [];
     return back(e instanceof HttpsError ? e : (logger.error('s3CapCheck: write failed', { code: e && e.code }), bad('save-failed', 'שמירת התוצאה נכשלה. נסו שוב.', 'unavailable')));
   }
-  // תמונה עם אדם – הקבצים נמחקים (כבר לא במסמך)
+  // 80% – push למנהלים פעם אחת למפה, רק אחרי בדיקה שנשמרה (סבב בדיקה 1, הערה 6)
+  if (rv.qs.warn && !res.dup) { try { await notify({ db, send: deps.send }, `${mapId}_sw80`, 'sw80', await managers(db), now); } catch (e) { logger.warn('s3CapCheck: sw80 notify failed', { code: e && e.code }); } }
+  // תמונה עם אדם – הקבצים נמחקים (כבר לא במסמך; רק בתוך התיקייה של הפריט)
   for (const p of drop) for (const path of [p.p, p.th]) { if (typeof path === 'string') { try { await bucket.file(path).delete(); } catch (e) { /* יתום – לא מזיק */ } } }
   return res;
 }

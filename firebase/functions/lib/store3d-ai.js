@@ -313,13 +313,16 @@ const SUM_RANK = { miss: 4, iss: 3, rev: 2, ok: 1 };
 const sumOf = (st) => (st === 'ok' ? 'ok' : st === 'issue' ? 'iss' : st === 'review' ? 'rev' : 'miss');
 const hardCount = (ai) => (isObj(ai) && Array.isArray(ai.iss) ? ai.iss.filter((i) => i && !i.warn).length : 0);
 // הרשומה של מקטע: הגרוע מבין מקומות הצילום שלו באותו סבב (עליון/תחתון). ais = [ai של המקום הזה, ai של המקום השני או null]
-function sumEntry(ais, runId, now, th, oldTh) {
+// old = הרשומה הקודמת של המקטע (לא חובה). חזית ההקמה (fr/frT, הקמת חנות שלב 7) עוברת ממנה כמו שהיא – סבב לא מוחק אותה,
+// גם כשהקורא מחליף את כל רשומת המקטע (הכרעת ערעור). איזו תמונה מוצגת (fr או th) – התצוגה בוחרת לפי הזמן.
+function sumEntry(ais, runId, now, th, oldTh, old) {
   const L = ais.filter(isObj);
   let s = 'ok', n = 0;
   for (const a of L) { const x = sumOf(a.st); if (SUM_RANK[x] > SUM_RANK[s]) s = x; n += hardCount(a); }
   const e = { s, r: runId, t: now, n: Math.min(30, n) };
   const t = th || oldTh;
   if (typeof t === 'string' && t) e.th = t;
+  if (isObj(old) && typeof old.fr === 'string' && old.fr) { e.fr = old.fr; if (Number.isInteger(old.frT)) e.frT = old.frT; }
   return e;
 }
 const countsDone = (ai) => !!(isObj(ai) && DONE_ST.includes(ai.st));

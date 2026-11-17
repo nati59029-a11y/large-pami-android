@@ -182,6 +182,49 @@ describe('s3capai – בדיקה חכמה, "המערכת מציעה" ומכסת 
     assert.equal(await err(check()), 'skipped');
   });
 
+  it('סבב בדיקה 1, ליקוי 1: אדם בתמונה כשכבר יש חזית – הפריט נשאר part, החזית מסומנת frRe ויורדת מהדגם (s3sum / s3look); חזית חדשה + בדיקה נקייה ⇒ ok', async () => {
+    await put({ key: 'b_f1-a-1', op: 'ph', img: IMG, th: TH });
+    await put({ key: 'b_f1-a-1', op: 'ph', img: IMG, th: TH });
+    await put({ key: 'b_f1-a-1', op: 'front', img: FR, th: TH, man: true });
+    let d = await cap();
+    assert.equal(d.st, 'ok', 'חזית ידנית מאושרת');
+    const sum0 = await get(`b/${A}/s3sum/s-main`);
+    assert.equal(sum0.b['f1-a-1'].fr, d.frTh);
+    GM.state.bayscan = Object.assign({}, GM.BAY_DEF, { kind: 'gon', per: [2], retake: '' });
+    const r = await check();
+    assert.deepEqual([r.st, r.frRe, r.per], ['part', 1, 1]);
+    d = await cap();
+    assert.deepEqual([d.st, d.frRe, d.frV, d.okBy], ['part', 1, 1, undefined], 'לא ok, האישור הידני בטל');
+    assert.match(d.ai.retake, /אדם/);
+    const sum1 = await get(`b/${A}/s3sum/s-main`);
+    assert.equal(sum1.b['f1-a-1'].fr, undefined, 'החזית לא מוצגת בדגם'); assert.equal(sum1.b['f1-a-1'].frT, undefined);
+    assert.equal((await get(`b/${A}/s3setup/s-main`)).capOk, 0);
+    // החלטה ב"המערכת מציעה" לא מחזירה ok לחזית שסומנה
+    await dec({ at: d.ai.at, k: 'prod', i: 0, st: 'ok' });
+    assert.equal((await cap()).st, 'part');
+    // חזית חדשה (frV 2) ובדיקה נקייה ⇒ ok
+    await put({ key: 'b_f1-a-1', op: 'front', img: FR, th: TH, man: false });
+    GM.state.bayscan = Object.assign({}, GM.BAY_DEF, { kind: 'gon', diff: [] });
+    assert.equal((await check()).st, 'ok');
+    // קיר: אותו דבר מול s3look
+    await put({ key: 'd_d1', op: 'ph', img: IMG, th: TH });
+    await put({ key: 'd_d1', op: 'front', img: FR, th: TH, man: true });
+    assert.ok((await get(`b/${A}/s3look/s-main`)).it.d_d1);
+    GM.state.bayscan = Object.assign({}, GM.BAY_DEF, { per: [1] });
+    assert.equal((await check({ key: 'd_d1' })).st, 'part');
+    assert.equal((await get(`b/${A}/s3look/s-main`)).it.d_d1, undefined, 's3look בלי הפריט');
+  });
+
+  it('סבב בדיקה 1, ליקוי 2: מוצר בלי שם נעלם, שאר המוצרים נשמרים, והבדיקה נספרת פעם אחת', async () => {
+    await put({ key: 'b_f1-a-1', op: 'ph', img: IMG, th: TH });
+    GM.state.bayscan = Object.assign({}, GM.BAY_DEF, { prods: [{ conf: 0.9, cat: 'כוסות' }, { n: '', conf: 0.95 }, { n: 'מפיות לבנות', conf: 0.85 }] });
+    const r = await check();
+    assert.deepEqual([r.ok, r.prods, r.noName], [true, 1, 2]);
+    const d = await cap();
+    assert.deepEqual(d.ai.prods.map((p) => p.n + ':' + p.st), ['מפיות לבנות:auto']);
+    assert.equal((await use()).n, 1);
+  });
+
   it('גודל המסמך: מוצרים עם טקסטים ארוכים – נשמר עד 60,000 בתים, בביטחון הנמוך מוצאים קודם, ai.cut', async () => {
     await put({ key: 'b_f1-a-1', op: 'ph', img: IMG, th: TH });
     // 80 מוצרים בגבולות השדות הם כ-40KB; כדי לבדוק את רשת הביטחון – שדה עזר גדול במסמך (במציאות: frH, ph וכו')

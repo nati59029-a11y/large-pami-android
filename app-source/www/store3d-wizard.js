@@ -799,6 +799,7 @@ V.st3w=()=>{const T='הקמת תלת מימד';
  if(have&&W.step<5&&!W.draft&&!(U.E&&U.E.wiz))return{t:T,h:`<div class="card s3s"><b>כבר יש מפה${W.kind==='w'?' למחסן':' לסניף הזה'}</b><p class="note s3note">האשף בונה מפה חדשה בלבד, ולא דורס מפה קיימת. את המפה הקיימת אפשר לערוך.</p><div class="row s3row"><button class="btn" data-a="st3Edit" data-k="${W.kind}">לעריכת המפה</button><button class="btn g" data-a="st3Open">למפה</button></div></div>`};
  let h='';const L=U.brs();
  if(L.length>1&&W.step<3)h+=`<div class="chips" style="margin:0 0 8px">${L.map(b=>`<button class="chip ${b.id===d.br?'on':''}" data-a="s3wBr" data-id="${esc2(b.id)}">${esc2(b.name)}</button>`).join('')}</div>`;
+ h+=U.qtBanner?U.qtBanner():'';
  h+=W.step===1?(W.det?stepDet():step1(d)):W.step===2?step2():W.step===5?step5():step3();
  return{t:T,s:(L.find(b=>b.id===d.br)||{}).name||'',h:`<div class="card s3s">${h}</div>`}};
 ACT.s3wBr=el=>{if(W.busy)return;U.X.br=el.dataset.id;U.X.d=null;W.br=el.dataset.id;W.qid='';for(const k of ['w','f','c'])W.tex[k]=null;const v=lsRead();qLoad(v);W.det=0;W.qSeen=0;if(v)for(const k of ['w','f','c'])if(v.tex[k])W.tex[k]={texId:v.tex[k].texId,path:v.tex[k].path,w:v.tex[k].w,h:v.tex[k].h,url:''};rerender()};
