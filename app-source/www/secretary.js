@@ -567,8 +567,13 @@ ACT.secNOpen=el=>noteDlg(el.dataset.id);
    כותבים מה לענות ← המזכירה מנסחת תשובה (secMail refine) ← רואים אותה, אפשר לערוך, ושולחים בלחיצה (secMailSend). או "לא לענות" (secMail done).
    אחרי שליחה או "לא לענות" – גם ההתראה מסומנת כטופלה. המייל לא יוצא בלי לחיצה ואישור */
 const NMEX=['תעני בנימוס שכרגע לא צריך, תודה','תעני שנחזור אליו מחר','תבקשי ממנו הצעת מחיר מסודרת'];
-const nmlCan=n=>!!(n&&n.mail&&n.st!=='done'&&n.st!=='gone'&&!(X.st&&X.st.brLimited));
-const nmlH=n=>`<div class="card" id="secNMl" style="margin:8px 0" data-id="${esc(n.id)}" data-m="${esc(n.mail)}">${nmlAskH()}</div>`;
+/* מזהה המייל מגיע מהשרת (n.mail). שרת שעוד לא עודכן – לפי כתובת השולח שבגוף ההתראה ("שאלה לגבי המייל מ-<כתובת>:"), ובחיפוש בתיבה */
+const NMT='המזכירה שואלת לגבי מייל',nmlAddr=n=>{const m=/^שאלה לגבי המייל מ-(.+?):\s/.exec(String(n&&n.body||''));const a=m&&/[^\s<>"]+@[^\s<>"]+/.exec(m[1]);return a?a[0].toLowerCase():''};
+const nmlCan=n=>!!(n&&(n.mail||n.title===NMT&&nmlAddr(n))&&n.st!=='done'&&n.st!=='gone'&&!(X.st&&X.st.brLimited));
+const nmlH=n=>`<div class="card" id="secNMl" style="margin:8px 0" data-id="${esc(n.id)}" data-m="${esc(n.mail||'')}" data-ad="${esc(n.mail?'':nmlAddr(n))}" data-t="${+(n.t||n.at)||0}">${nmlAskH()}</div>`;
+async function nmlId(b){if(b.dataset.m)return b.dataset.m;const ad=b.dataset.ad,t0=+b.dataset.t||Date.now();if(!ad)return '';
+ const r=await fnCall('secMail',{op:'list'}),L=(r&&r.mails||[]).filter(m=>String(m.from||'').toLowerCase()===ad&&m.draft&&['pend','fail'].includes(m.draft.st)&&(m.t||0)<=t0+60e3).sort((a,b)=>(b.t||0)-(a.t||0));
+ const id=L[0]&&L[0].id||'';if(id)b.dataset.m=id;return id}
 const nmlAskH=v=>`<b>לטפל במייל מכאן</b><p class="note" style="margin:4px 0 6px">כתבו למזכירה מה לענות. היא תכין תשובה, ותראו אותה לפני שהיא נשלחת.</p>
  <textarea class="secin" id="secNMlT" maxlength="500" dir="auto" aria-label="מה לענות" placeholder="למשל: ${esc(NMEX[0])}">${esc(v||'')}</textarea>
  <div class="chips" style="margin:6px 0">${NMEX.map(x=>`<button type="button" class="chip" data-a="secNMlEx" data-v="${esc(x)}" style="min-height:44px">${esc(x)}</button>`).join('')}</div>
@@ -577,8 +582,8 @@ const nmlAskH=v=>`<b>לטפל במייל מכאן</b><p class="note" style="marg
 const nmlBox=()=>document.getElementById('secNMl');
 ACT.secNMlEx=el=>{const t=document.getElementById('secNMlT');if(t){t.value=el.dataset.v;t.focus()}};
 ACT.secNMlGo=async el=>{const b=nmlBox(),t=document.getElementById('secNMlT'),note=t?t.value.trim():'';if(!b)return;if(!note)return toast('כתבו מה לענות');if(note.length>500)return toast(MERR['bad-note']||'עד 500 תווים');
- const id=b.dataset.m;el.disabled=true;el.textContent='מכינה תשובה…';
- try{let r;try{r=await fnCall('secMail',{op:'refine',id,note})}catch(e){if(!(e&&e.reason==='no-draft'))throw e;await fnCall('secMail',{op:'draft',id});r=await fnCall('secMail',{op:'refine',id,note})}
+ el.disabled=true;el.textContent='מכינה תשובה…';
+ try{const id=await nmlId(b);if(!id)throw new Error('לא מצאתי את המייל. אפשר לפתוח אותו בתיבת המייל.');let r;try{r=await fnCall('secMail',{op:'refine',id,note})}catch(e){if(!(e&&e.reason==='no-draft'))throw e;await fnCall('secMail',{op:'draft',id});r=await fnCall('secMail',{op:'refine',id,note})}
   const d=r&&r.draft;if(!d)throw new Error('התשובה לא הוכנה');X.nml={nid:b.dataset.id,id,d,note};if(nmlBox()===b)b.innerHTML=nmlDrH(d)}
  catch(e){el.disabled=false;el.textContent='הכנת תשובה';if(e&&e.reason==='not-pending'){nmlEnd(b.dataset.id,'המייל כבר טופל');return}merr(e)}};
 const nmlDrH=d=>`<b>התשובה שהמזכירה הכינה</b><p class="note" style="margin:4px 0">אל <bdi dir="ltr" class="secaddr">${esc(d.to||'')}</bdi> · אפשר לערוך לפני השליחה</p>${(d.why||[]).length?`<p class="note" style="margin:4px 0">${d.why.map(esc).join(' · ')}</p>`:''}${d.ask?`<div class="secin1" style="margin:6px 0" role="note"><b>❓ המזכירה שואלת:</b> <span dir="auto">${esc(d.ask)}</span></div>`:''}
@@ -593,9 +598,9 @@ ACT.secNMlSend=()=>{const p=X.nml,b=nmlBox();if(!p||!b)return;const t=document.g
  ask('לשלוח את התשובה אל '+(p.d.to||'')+' מה-Gmail של העסק?'+(fl.includes('chk')?' בטיוטה יש מידע שכדאי לבדוק ('+(p.d.why||[]).join(', ')+').':''),async()=>{
   try{const r=await fnCall('secMailSend',data);await nmlEnd(p.nid,r&&r.already?'כבר נשלח':'נשלח מה-Gmail של העסק');if(r&&r.offerRule)setTimeout(()=>offerDlg(r.offerRule),50)}
   catch(e){if(e&&e.reason==='maybe-sent')return toast(MERR['maybe-sent']);merr(e)}},'שלח')};
-ACT.secNMlNo=()=>{const b=nmlBox();if(!b)return;const nid=b.dataset.id,id=b.dataset.m;
- ask('לסמן את המייל כטופל? לא תישלח תשובה.',async()=>{try{await fnCall('secMail',{op:'done',id});await nmlEnd(nid,'המייל סומן כטופל, בלי תשובה')}catch(e){merr(e)}},'לא לענות')};
-ACT.secNMlOpen=()=>{const b=nmlBox();if(!b)return;const id=b.dataset.m;closeDlg();X.nml=null;X.set=0;X.edit=0;X.mrv=0;X.tab='mail';X.ml={f:X.ml&&X.ml.f||'all',list:null,cur:id,card:null,clean:null};X.rep=null;go('sec')};
+ACT.secNMlNo=()=>{const b=nmlBox();if(!b)return;const nid=b.dataset.id;
+ ask('לסמן את המייל כטופל? לא תישלח תשובה.',async()=>{try{const id=await nmlId(b);if(!id)throw new Error('לא מצאתי את המייל. אפשר לפתוח אותו בתיבת המייל.');await fnCall('secMail',{op:'done',id});await nmlEnd(nid,'המייל סומן כטופל, בלי תשובה')}catch(e){merr(e)}},'לא לענות')};
+ACT.secNMlOpen=async()=>{const b=nmlBox();if(!b)return;let id='';try{id=await nmlId(b)}catch(e){}closeDlg();X.nml=null;X.set=0;X.edit=0;X.mrv=0;X.tab='mail';X.ml={f:X.ml&&X.ml.f||'all',list:null,cur:id,card:null,clean:null};X.rep=null;go('sec')};
 ACT.secNZc=()=>{closeDlg();go('zc')};
 ACT.secNRp=el=>{closeDlg();ACT.secRpOpen(el)};
 ACT.secNDoneD=el=>{closeDlg();ACT.secNDone(el)};
