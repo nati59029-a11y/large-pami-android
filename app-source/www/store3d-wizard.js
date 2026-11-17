@@ -352,9 +352,11 @@ const near=(F,px,x,y)=>{const k=W.sk,tol=26/px,c=[];/* פינות, קצוות ש
  for(let i=0;i<k.cur.length;i+=2)c.push({t:'c',r:-1,i,d:Math.hypot(k.cur[i]-x,k.cur[i+1]-y)});
  k.rows.forEach((s,r)=>{c.push({t:'w',r,i:0,d:Math.hypot(s[0]-x,s[1]-y)});c.push({t:'w',r,i:2,d:Math.hypot(s[2]-x,s[3]-y)})});
  c.sort((a,b)=>a.d-b.d);return c[0]&&c[0].d<=tol?c[0]:null};
+/* שם הנקודה שנבחרה, למשוב: "פינה 2 של חדר 3" / "קצה של שורה 4" */
+const selName=s=>s.t==='w'?`קצה של שורה ${s.r+1}`:s.r<0?`פינה ${s.i/2+1} של החדר הפתוח`:`פינה ${s.i/2+1} של חדר ${s.r+1}`;
 const okPoly=p=>{const g=G3();return !g||!g.polyValid||g.polyValid(p).ok};
-ACT.s3wSkT=(el,e)=>{const k=W.sk,F=frame(),R=el.getBoundingClientRect();if(!R.width||!e)return;const px=R.width/F.w;
- const rx=cl((e.clientX-R.left)/px,0,F.w),ry=cl((e.clientY-R.top)/px,0,F.l),x=cl(snap(rx),0,F.w),y=cl(snap(ry),0,F.l);W.msg='';
+ACT.s3wSkT=(el,e)=>{const k=W.sk,F=frame(),R=el.getBoundingClientRect();if(!R.width||!e)return;if(Date.now()-zDragT<400)return;zvFit(F);const px=R.width/F.w*ZV.z;
+ const rx=cl(ZV.ox+(e.clientX-R.left)/px,0,F.w),ry=cl(ZV.oy+(e.clientY-R.top)/px,0,F.l),x=cl(snap(rx),0,F.w),y=cl(snap(ry),0,F.l);W.msg='';
  if(k.mode==='room'){if(k.rooms.length>=6){W.msg='אפשר עד 6 חדרים.';return rerender()}if(k.cur.length>=40){W.msg='לחדר יכולות להיות עד 20 פינות. סגרו את החדר.';return rerender()}
   const n=k.cur.length;if(n&&k.cur[n-2]===x&&k.cur[n-1]===y)return;skPush();k.cur.push(x,y)}
  else if(k.mode==='row'){if(!k.pend){if(k.rows.length>=30){W.msg='אפשר עד 30 שורות.';return rerender()}k.pend=[x,y];return rerender()}
@@ -366,7 +368,8 @@ ACT.s3wSkT=(el,e)=>{const k=W.sk,F=frame(),R=el.getBoundingClientRect();if(!R.wi
   const s=k.sel,L=s.t==='w'?k.rows[s.r]:s.r<0?k.cur:k.rooms[s.r];if(!L)return;
   const o=[L[s.i],L[s.i+1]];if(o[0]===x&&o[1]===y)return;skPush();L[s.i]=x;L[s.i+1]=y;
   const bad=s.t==='c'&&s.r>=0&&!okPoly(L),short=s.t==='w'&&Math.hypot(L[2]-L[0],L[3]-L[1])<GRID;
-  if(bad||short){L[s.i]=o[0];L[s.i+1]=o[1];k.undo.pop();W.msg=bad?'אי אפשר להזיז לשם: קירות החדר יחצו זה את זה.':'השורה תהיה קצרה מדי.';return rerender()}}
+  if(bad||short){L[s.i]=o[0];L[s.i+1]=o[1];k.undo.pop();W.msg=bad?'אי אפשר להזיז לשם: קירות החדר יחצו זה את זה.':'השורה תהיה קצרה מדי.';return rerender()}
+  toast(selName(s)+' הוזז'+(s.t==='w'?'':'ה'))}
  skDone()};
 ACT.s3wSkClose=()=>{const k=W.sk;if(k.cur.length<6){W.msg='לחדר צריך לפחות 3 פינות.';return rerender()}if(!okPoly(k.cur)){W.msg='החדר לא תקין: קירות שחוצים זה את זה, או שטח קטן ממטר מרובע. בטלו פינה ונסו שוב.';return rerender()}
  skPush();skNorm();k.rooms.push(k.cur);k.rt.push(k.rooms.length===1?'s':'x');k.cur=[];skDone()};
@@ -384,6 +387,20 @@ ACT.s3wSkUndo=()=>{const k=W.sk;if(k.pend){k.pend=null;return rerender()}const u
 ACT.s3wSkClr=()=>ask('למחוק את כל השרטוט?',()=>{const k=W.sk;skPush();Object.assign(k,{rooms:[],cur:[],rows:[],rt:[],rk:[],ent:null,cash:null,pend:null,sel:null,gen:0});skDone()},'כן, מחקו');
 
 /* --- ציור השרטוט (canvas; צבעים מהטוקנים של הערכה) --- */
+/* הגדלה/הקטנה של השרטוט (תצוגה בלבד, לא נשמר): z = פי כמה, ox/oy = הפינה השמאלית העליונה של מה שרואים (ס"מ) */
+const ZV={z:1,ox:0,oy:0},ZL=[1,1.5,2,3,4];
+const zvFit=F=>{if(!(ZV.z>1)){ZV.z=1;ZV.ox=ZV.oy=0;return}ZV.ox=cl(ZV.ox,0,F.w-F.w/ZV.z);ZV.oy=cl(ZV.oy,0,F.l-F.l/ZV.z)};
+ACT.s3wZ=el=>{const F=frame(),d=el.dataset.z,i=ZL.indexOf(ZV.z),k=W.sk;
+ const cx=ZV.ox+F.w/ZV.z/2,cy=ZV.oy+F.l/ZV.z/2,s=k.sel,L=s&&(s.t==='w'?k.rows[s.r]:s.r<0?k.cur:k.rooms[s.r]);
+ const z=d==='fit'?1:ZL[cl((i<0?0:i)+(d==='in'?1:-1),0,ZL.length-1)];
+ const px=L?L[s.i]:cx,py=L?L[s.i+1]:cy;ZV.z=z;ZV.ox=px-F.w/z/2;ZV.oy=py-F.l/z/2;zvFit(F);rerender()};
+/* גרירה באצבע כשהשרטוט מוגדל = הזזת התצוגה. אחרי גרירה ההקשה לא נספרת */
+let zDrag=null,zDragT=0;
+document.addEventListener('pointerdown',e=>{if(!(ZV.z>1)||!e.target||e.target.id!=='s3wSk')return;zDrag={x:e.clientX,y:e.clientY,ox:ZV.ox,oy:ZV.oy,m:0,w:e.target.getBoundingClientRect().width}});
+document.addEventListener('pointermove',e=>{const d=zDrag;if(!d)return;const dx=e.clientX-d.x,dy=e.clientY-d.y;if(!d.m&&Math.hypot(dx,dy)<10)return;d.m=1;
+ const F=frame(),u=F.w/ZV.z/d.w;ZV.ox=d.ox-dx*u;ZV.oy=d.oy-dy*u;zvFit(F);drawSk()});
+const zEnd=()=>{if(zDrag&&zDrag.m)zDragT=Date.now();zDrag=null};
+document.addEventListener('pointerup',zEnd);document.addEventListener('pointercancel',zEnd);
 /* השורה שהבחירה שלה פתוחה עכשיו ("שורה N – מה יש בה?") – מודגשת בשרטוט. -1 = אין */
 let hiRow=-1;
 document.addEventListener('focusin',e=>{const el=e.target;if(el&&el.dataset&&el.dataset.c==='s3wRk'){hiRow=+el.dataset.i;drawSk()}});
@@ -392,8 +409,9 @@ function drawSk(){const cv=document.getElementById('s3wSk');if(!cv)return;const 
  const pe=cv.parentElement,ps=pe&&getComputedStyle(pe),box=pe?Math.max(160,pe.clientWidth-parseFloat(ps.paddingLeft||0)-parseFloat(ps.paddingRight||0)-2):300;let cw=box,ch=cw*F.l/F.w;const mx=Math.max(220,Math.min(520,innerHeight*.6));if(ch>mx){ch=mx;cw=ch*F.w/F.l}
  cw=Math.floor(cw);ch=Math.floor(ch);const dpr=window.devicePixelRatio||1;cv.style.width=cw+'px';cv.style.height=ch+'px';cv.width=Math.round(cw*dpr);cv.height=Math.round(ch*dpr);
  const c=cv.getContext('2d');if(!c)return;c.setTransform(dpr,0,0,dpr,0,0);const cs=getComputedStyle(cv),col=n=>cs.getPropertyValue('--'+n).trim()||'gray';
- const K=cw/F.w,P=v=>v*K,acc=col('acc'),ink=col('ink'),line=col('line'),mut=col('mut');
- c.clearRect(0,0,cw,ch);c.lineWidth=1;c.strokeStyle=line;const st=Math.max(F.w,F.l)>3000?500:100;
+ zvFit(F);const K=cw/F.w*ZV.z,P=v=>v*K,acc=col('acc'),ink=col('ink'),line=col('line'),mut=col('mut');
+ c.clearRect(0,0,cw,ch);c.translate(-P(ZV.ox),-P(ZV.oy));cw=P(F.w);ch=P(F.l);/* מכאן cw/ch = כל השרטוט (גם החלק שמחוץ לתצוגה) */
+ c.lineWidth=1;c.strokeStyle=line;const st=Math.max(F.w,F.l)>3000?500:100;
  for(let x=0;x<=F.w;x+=st){c.beginPath();c.moveTo(P(x)+.5,0);c.lineTo(P(x)+.5,ch);c.stroke()}for(let y=0;y<=F.l;y+=st){c.beginPath();c.moveTo(0,P(y)+.5);c.lineTo(cw,P(y)+.5);c.stroke()}
  const poly=(p,close)=>{c.beginPath();for(let i=0;i<p.length;i+=2)(i?c.lineTo:c.moveTo).call(c,P(p[i]),P(p[i+1]));if(close)c.closePath()};
  const dot=(x,y,r,fill)=>{c.beginPath();c.arc(P(x),P(y),r,0,7);c.fillStyle=fill;c.fill()};
@@ -422,12 +440,23 @@ function qForm(){return `<div class="row" style="gap:8px">${numIn('w','רוחב 
  <div class="row" style="gap:8px">${numIn('rooms','מספר חדרים (1–6)',1,6)}${numIn('rows','מספר שורות / מעברים (0–30)',0,30)}</div>
  <div class="row" style="gap:8px">${sideSel('ent','איפה הכניסה')}${sideSel('cash','איפה הקופה')}</div>
  <label class="f" style="display:block;margin-bottom:8px"><span>הערה קצרה (לא חובה)</span><textarea data-c="s3wQ" data-f="note" maxlength="200" rows="2" style="width:100%">${esc2(W.q.note)}</textarea></label>`}
+/* הוראות ציור – נפתחות בכפתור "איך מציירים?" */
+let skHelp=0;ACT.s3wHelp=()=>{skHelp=skHelp?0:1;rerender()};
+const HELP=`<div class="s3info" style="margin-top:8px"><b>איך מציירים</b><ol style="margin:6px 0 0;padding-inline-start:20px;line-height:1.6">
+<li><b>פינות חדר:</b> מקישים על הפינות של החדר אחת אחרי השנייה, לפי הסדר מסביב לחדר (לפחות 3), ואז "סגרו חדר". החדר צריך להיות גדול ממטר רבוע, והקירות שלו לא יכולים לחצות זה את זה. החדר הראשון הוא החנות.</li>
+<li><b>שורה:</b> מקישים על תחילת השורה ואז על הסוף שלה. המספר שליד כל שורה הוא המספר שלה בשאלות שמתחת לשרטוט.</li>
+<li><b>הזזה ועריכה:</b> מקישים על פינה או על קצה של שורה – סביבה מופיע עיגול, וכתוב מה נבחר. אחר כך מקישים במקום החדש. כאן אפשר גם למחוק פינה או שורה, ולהוסיף פינה באמצע הקיר.</li>
+<li><b>כניסה וקופה:</b> בוחרים "כניסה" או "קופה" ומקישים במקום שלה בשרטוט.</li>
+<li><b>הגדלה:</b> "＋" מגדיל, "－" מקטין, "כל השרטוט" מחזיר לגודל הרגיל. כשהשרטוט מוגדל, גוררים באצבע כדי לזוז בו. כשיש פינה נבחרת, ההגדלה מתמקדת בה.</li>
+<li><b>טעות?</b> "ביטול אחרון" מבטל פעולה אחת בכל הקשה (עד 40 אחורה, עד שסוגרים את האפליקציה). "ניקוי" מוחק את כל השרטוט.</li>
+<li>כל הקשה נצמדת לנקודה הקרובה על רשת של חצי מטר.</li></ol></div>`;
 function skTools(){const k=W.sk,m=k.mode,F=frame();
  const chip=(v,l)=>`<button class="chip ${m===v?'on':''}" data-a="s3wSkM" data-m="${v}" aria-pressed="${m===v}">${l}</button>`;
- const hint={room:'הקישו על פינות החדר לפי הסדר, ואז "סגרו חדר".',row:k.pend?'הקישו על נקודת הסוף של השורה.':'הקישו על תחילת השורה ואז על הסוף שלה.',sel:k.sel?'הקישו במקום החדש כדי להזיז, או בחרו פעולה.':'הקישו על פינה או על קצה של שורה כדי לבחור.',ent:'הקישו במקום של הכניסה.',cash:'הקישו במקום של הקופה.'}[m];
+ const hint={room:'הקישו על פינות החדר לפי הסדר, ואז "סגרו חדר".',row:k.pend?'הקישו על נקודת הסוף של השורה.':'הקישו על תחילת השורה ואז על הסוף שלה.',sel:k.sel?`נבחרה ${selName(k.sel)}. הקישו במקום החדש כדי להזיז, או בחרו פעולה.`:'הקישו על פינה או על קצה של שורה כדי לבחור.',ent:'הקישו במקום של הכניסה.',cash:'הקישו במקום של הקופה.'}[m];
  let h=`<div class="chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${chip('room','פינות חדר')}${chip('row','שורה')}${chip('sel','הזזה ועריכה')}${chip('ent','כניסה')}${chip('cash','קופה')}</div>`;
- h+=`<p class="note s3note" aria-live="polite">${hint}${F.tmp?' <b>השרטוט עוד בלי קנה מידה</b> – בסוף תתבקשו לרוחב אמיתי.':''}</p>`;
- h+=`<canvas id="s3wSk" data-a="s3wSkT" role="img" aria-label="שרטוט החנות. ${k.rooms.length} חדרים, ${k.rows.length} שורות" style="display:block;touch-action:manipulation;border:1px solid var(--line);background:var(--bg);margin:8px auto 0;cursor:crosshair"></canvas>`;
+ h+=`<div class="row" style="gap:6px;margin-top:8px;align-items:center"><button class="btn s g" data-a="s3wZ" data-z="out" aria-label="הקטנה"${ZV.z>1?'':' disabled'}>－</button><button class="btn s g" data-a="s3wZ" data-z="in" aria-label="הגדלה"${ZV.z<4?'':' disabled'}>＋</button><button class="btn s g" data-a="s3wZ" data-z="fit"${ZV.z>1?'':' disabled'}>כל השרטוט</button><small class="note">${ZV.z>1?`מוגדל פי ${ZV.z} · גררו באצבע כדי לזוז`:''}</small><button class="btn s g" data-a="s3wHelp" style="margin-inline-start:auto" aria-expanded="${!!skHelp}">איך מציירים?</button></div>${skHelp?HELP:''}
+ <p class="note s3note" aria-live="polite">${hint}${F.tmp?' <b>השרטוט עוד בלי קנה מידה</b> – בסוף תתבקשו לרוחב אמיתי.':''}</p>`;
+ h+=`<canvas id="s3wSk" data-a="s3wSkT" role="img" aria-label="שרטוט החנות. ${k.rooms.length} חדרים, ${k.rows.length} שורות" style="display:block;touch-action:${ZV.z>1?'none':'manipulation'};border:1px solid var(--line);background:var(--bg);margin:8px auto 0;cursor:crosshair"></canvas>`;
  h+=`<p class="s3note"><small>${F.tmp?'מסגרת זמנית (עוד בלי מידות), כל משבצת = יחידה':`רוחב ${+(F.w/100).toFixed(1)} מ', אורך ${+(F.l/100).toFixed(1)} מ', כל משבצת = ${Math.max(F.w,F.l)>3000?5:1} מ'`} · ${k.rooms.length} חדרים · ${k.rows.length} שורות${k.cur.length?` · חדר פתוח עם ${k.cur.length/2} פינות`:''}</small></p>`;
  h+=`<div class="row s3row" style="gap:6px">${m==='room'?`<button class="btn s" data-a="s3wSkClose"${k.cur.length>=6?'':' disabled'}>סגרו חדר</button>`:''}${m==='sel'&&k.sel?`<button class="btn s g" data-a="s3wSkDel">${k.sel.t==='w'?'מחקו שורה':'מחקו פינה'}</button>${k.sel.t==='c'&&k.sel.r>=0?`<button class="btn s g" data-a="s3wSkIns">הוסיפו פינה</button>`:''}`:''}<button class="btn s g" data-a="s3wSkUndo"${k.undo&&k.undo.length||k.pend?'':' disabled'}>ביטול אחרון</button><button class="btn s g" data-a="s3wSkClr"${skHas()?'':' disabled'}>ניקוי</button></div>`;
  return h}
