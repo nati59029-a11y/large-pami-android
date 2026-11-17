@@ -12,6 +12,7 @@ import org.opencv.core.MatOfKeyPoint;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
+import org.opencv.core.TermCriteria;
 import org.opencv.features2d.DescriptorMatcher;
 import org.opencv.features2d.Feature2D;
 import org.opencv.features2d.ORB;
@@ -19,7 +20,9 @@ import org.opencv.features2d.SIFT;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.CLAHE;
 import org.opencv.imgproc.Imgproc;
+import org.opencv.photo.MergeMertens;
 import org.opencv.photo.Photo;
+import org.opencv.video.Video;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -65,9 +68,20 @@ import java.util.List;
  *  - nadir frame (setFrame(.., role "nadir"): a floor photo taken after stepping aside): not part of the pose optimisation; only its
  *    own rotation is refined against the lower frames (else sensor pose + camera offset); it owns the area below NADIR_LAT (others
  *    excluded there), so feet / tripod / smear disappear.
+ * Stage 21f ("highest level", 17.11):
+ *  - HDR: setFrame(i, jpg, q, role, g, ev): frames with the same group g are aligned to the ev = 0 bracket (ECC, rotation +
+ *    translation) and fused (Mertens, 8 bit) into ONE frame before everything else (fuseGroups); group by group, only the fused
+ *    JPEG is kept; at most Options.hdrMaxPx pixels per bracket (~70 bytes per pixel inside MergeMertens: 4.5MP -> ~300MB, estimate);
+ *  - seams: graph cut (max-flow, Boykov-Kolmogorov) per pair of neighbouring labels on the seam canvas, same cost terms as the DP
+ *    (colour difference + edge term) + a penalty inside regions where the two frames disagree (parallax); DP stays as the fallback
+ *    (Options.graphCut = false, time budget Options.seamMs, very large bands);
+ *  - W = 8192: the blend runs in horizontal strips when the whole-canvas blend would exceed Options.memBudgetMB (blendStrips: low
+ *    bands on the whole canvas at 1/8 resolution, high bands strip by strip). The per-frame pyramid is built one level at a time,
+ *    push-pull and hole filling no longer make whole-canvas float copies.
  * Frames are decoded one at a time (memory); progress callback; cancel() -> Cancelled.
- * Memory (estimate, not measured on a phone): W=4096 -> about 250MB native at the peak (blend pyramid in float; stage 21e adds one float
- * ROI image + its pyramid per frame being blended, ~+20MB, and a few MB of Java arrays). W=2048 -> about 65MB.
+ * Memory (estimate printed in the log / Stats.memEstMB, not measured on a phone): W=4096 whole canvas ~330MB (accumulator pyramids
+ * 180MB + one frame's working set); W=8192 in 6 strips ~575MB. Desktop peak RSS growth during run() (glibc, MALLOC_ARENA_MAX=2,
+ * incl. ~80MB JVM non-heap) on the real 29-frame capture: 4096 ~400-440MB (before 21f ~620MB), 8192 ~580MB (before 21f ~2.35GB).
  */
 public final class PanoStitchCore {
 
@@ -101,6 +115,16 @@ public final class PanoStitchCore {
         public boolean smartSeams = true, meshWarp = true, deghost = true;
         /** diagnostics: Stats.debugLab / debugLock <- the final labels / exclusive owners on the seam canvas */
         public boolean debugMaps;
+        /** stage 21f: seams by graph cut (max-flow on the seam canvas, per pair of neighbouring labels); false = the older DP seams.
+         *  seamMs: time budget of the graph cuts - pairs after it (or with more than GC_MAX_NODES pixels in the band) use DP */
+        public boolean graphCut = true;
+        public long seamMs = 20000;
+        /** stage 21f: warp + blend in horizontal strips (bounded memory for W = 8192): 0 = auto (when the whole-canvas blend would
+         *  need more than memBudgetMB), 1 = always, -1 = never (whole canvas, as before) */
+        public int stripBlend = 0;
+        public int memBudgetMB = 600;
+        /** stage 21f HDR: exposure fusion works on at most this many pixels per frame (larger brackets are scaled down; memory) */
+        public int hdrMaxPx = 4500000;
     }
 
     public static final class Stats {
@@ -121,47 +145,70 @@ public final class PanoStitchCore {
         public boolean nadirRegistered;  // the (first) nadir frame was registered against the lower frames (else sensor pose)
         public double nadirCorrDeg;      // its rotation change from the sensor pose (+ camera offset)
         public int[] debugLab, debugLock; // Options.debugMaps: seam canvas (seamW x seamW/2) labels / exclusive owners (-1 = none)
+        /** stage 21f */
+        public int inputFrames, hdrGroups, hdrAligned, hdrAlignFailed; // HDR: groups fused (>= 2 brackets), brackets aligned / kept unaligned
+        public long msHdr;
+        public int gcPairs, dpPairs, gcNodes;  // seams: pairs cut by graph cut / by DP, largest graph (pixels)
+        public int strips;                     // blend strips (0 = whole canvas)
+        public double memEstMB;                // estimated native peak of the blend stage (MB)
     }
 
     public static final class Result {
         public Mat pano;                // 8UC3, BGR, W x W/2
         public double fovL;
-        public double[][] quats;        // final camera -> world [w,x,y,z] (output gauge)
+        public double[][] quats;        // final camera -> world [w,x,y,z] (output gauge), per frame after the HDR fusion
+        public int[] frameIndex;        // input index (setFrame i) of each of those frames (the ev = 0 bracket of a group)
         public Stats stats;
     }
 
     private static final double D = Math.PI / 180;
     private static final int THUMB = 400;
 
-    private final int n;
+    /** frames: before run() = the input frames (exposure brackets included); run() replaces them by the fused frames (HDR groups) */
+    private int n;
     private final Options o;
-    private final byte[][] jpeg;
-    private final double[][] qIn;
-    private final boolean[] nadir;
+    private byte[][] jpeg;
+    private double[][] qIn;
+    private boolean[] nadir;
+    private int[] grp, evIdx, srcIdx; // HDR group (-1 = none) / exposure index (0 = normal) / input index of the output frame
     private volatile boolean cancelled;
 
+    /** n = number of input frames (exposure brackets counted one by one) */
     public PanoStitchCore(int n, Options o) {
-        if (n < 1 || n > 200) throw new IllegalArgumentException("n");
+        if (n < 1 || n > MAX_FRAMES) throw new IllegalArgumentException("n");
         this.n = n;
         this.o = o == null ? new Options() : o;
         this.jpeg = new byte[n][];
         this.qIn = new double[n][];
         this.nadir = new boolean[n];
+        this.grp = new int[n];
+        this.evIdx = new int[n];
+        java.util.Arrays.fill(grp, -1);
     }
+
+    /** largest n: 3 exposures per target (stage 21f HDR) x ~60 targets + floor frames */
+    public static final int MAX_FRAMES = 300;
 
     public void setFrame(int i, byte[] jpg, double[] q) { setFrame(i, jpg, q, null); }
 
     /** role: null / "" = a normal frame; "nadir" = floor photo taken after the user stepped aside, pointing at where they stood */
-    public void setFrame(int i, byte[] jpg, double[] q, String role) {
+    public void setFrame(int i, byte[] jpg, double[] q, String role) { setFrame(i, jpg, q, role, -1, 0); }
+
+    /** g: HDR group (>= 0: the exposure brackets of one target, fused into ONE frame before everything else; -1 = none);
+     *  ev: exposure index inside the group (0 = normal exposure: the fused frame takes its pose q and role; < 0 darker, > 0 brighter) */
+    public void setFrame(int i, byte[] jpg, double[] q, String role, int g, int ev) {
         if (role != null && !role.isEmpty() && !"nadir".equals(role)) throw new IllegalArgumentException("frame " + i + ": role " + role);
         if (i < 0 || i >= n) throw new IllegalArgumentException("frame index");
         if (jpg == null || jpg.length < 4) throw new IllegalArgumentException("frame " + i + ": no jpeg");
         if (q == null || q.length != 4) throw new IllegalArgumentException("frame " + i + ": q");
+        if (g < -1 || ev < -8 || ev > 8) throw new IllegalArgumentException("frame " + i + ": g / ev");
         double s = Math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
         if (!(s > 1e-9)) throw new IllegalArgumentException("frame " + i + ": q");
         jpeg[i] = jpg;
         qIn[i] = new double[]{q[0] / s, q[1] / s, q[2] / s, q[3] / s};
         nadir[i] = "nadir".equals(role);
+        grp[i] = g;
+        evIdx[i] = g < 0 ? 0 : ev;
     }
 
     public void cancel() { cancelled = true; }
@@ -304,12 +351,25 @@ public final class PanoStitchCore {
     /* ------------------------------------------------------------------ run ------------------------------------------------------------------ */
 
     public Result run(Progress prog) {
-        final Progress P = prog != null ? prog : new Progress() { public void on(double p) { } };
+        final Progress P0 = prog != null ? prog : new Progress() { public void on(double p) { } };
         long t0 = System.currentTimeMillis();
         for (int i = 0; i < n; i++) if (jpeg[i] == null) throw new IllegalStateException("frame " + i + " missing");
+        Stats st = new Stats();
+        st.inputFrames = n;
+        // 0. HDR: the exposure brackets of every group -> ONE fused frame (the rest of the pipeline sees only fused frames)
+        boolean groups = false;
+        for (int g : grp) if (g >= 0) groups = true;
+        final Progress P;
+        if (groups) {
+            fuseGroups(st, new Progress() { public void on(double p) { P0.on(.1 * p); } });
+            P = new Progress() { public void on(double p) { P0.on(.1 + .9 * p); } };
+        } else {
+            srcIdx = new int[n];
+            for (int i = 0; i < n; i++) srcIdx[i] = i;
+            P = P0;
+        }
         int B = Math.max(1, Math.min(7, o.bands)), A = 1 << B;
         int W = Math.max(4 * A, (int) Math.round(o.W / (2.0 * A)) * 2 * A), H = W / 2;
-        Stats st = new Stats();
         pw = new double[n];
         java.util.Arrays.fill(pw, 1);
         off = new double[]{1, 0, 0, 0, 1, 0, 0, 0, 1};
@@ -460,7 +520,7 @@ public final class PanoStitchCore {
         chk();
         if (o.smartSeams || o.deghost) for (Fr f : F) edges(f);
         int[] lab = labels(F, Ws, Hs);
-        if (o.seams && n > 1) seams(F, lab, Ws, Hs);
+        if (o.seams && n > 1) seams(F, lab, Ws, Hs, st);
         int[] lock = new int[Ws * Hs];
         java.util.Arrays.fill(lock, -1);
         if (st.nadirFrames > 0) lockNadir(F, lab, lock, Ws, Hs);
@@ -483,6 +543,7 @@ public final class PanoStitchCore {
         r.stats = st;
         r.quats = new double[n][];
         for (int i = 0; i < n; i++) r.quats[i] = matToQ(F[i].R);
+        r.frameIndex = srcIdx.clone();
         return r;
     }
 
@@ -632,6 +693,140 @@ public final class PanoStitchCore {
         }
         return sum;
     }
+
+    /* ------------------------------------------------------------------ stage 21f: HDR exposure fusion ------------------------------------------------------------------ */
+
+    /** frames with the same group g -> ONE frame: brackets aligned to the ev = 0 one (ECC, rotation + translation: the phone moves a
+     *  little between the shots), Mertens exposure fusion, 8 bit, JPEG 95. The fused frame takes the ev = 0 pose and the place of the
+     *  group's first frame in the order (frame 0 keeps the yaw anchor). Group by group: only the fused JPEGs are kept */
+    private void fuseGroups(Stats st, Progress P) {
+        long t0 = System.currentTimeMillis();
+        List<List<Integer>> order = new ArrayList<>();
+        java.util.HashMap<Integer, List<Integer>> byG = new java.util.HashMap<>();
+        for (int i = 0; i < n; i++) {
+            if (grp[i] < 0) { List<Integer> one = new ArrayList<>(); one.add(i); order.add(one); continue; }
+            List<Integer> L = byG.get(grp[i]);
+            if (L == null) { L = new ArrayList<>(); byG.put(grp[i], L); order.add(L); }
+            L.add(i);
+        }
+        int m = order.size();
+        byte[][] nj = new byte[m][];
+        double[][] nq = new double[m][];
+        boolean[] nn = new boolean[m];
+        int[] src = new int[m];
+        int[] al = new int[2];
+        for (int k = 0; k < m; k++) {
+            List<Integer> L = order.get(k);
+            int ref = L.get(0);
+            for (int i : L) if (Math.abs(evIdx[i]) < Math.abs(evIdx[ref])) ref = i;
+            nq[k] = qIn[ref];
+            src[k] = ref;
+            for (int i : L) nn[k] |= nadir[i];
+            if (L.size() == 1) { nj[k] = jpeg[ref]; continue; }
+            chk();
+            List<Mat> imgs = new ArrayList<>();
+            int r = 0;
+            try {
+                for (int i : L) { if (i == ref) r = imgs.size(); imgs.add(decode(i)); }
+                al[0] = 0; al[1] = 0;
+                Mat f = fuseExposures(imgs, r, o.hdrMaxPx, al);
+                try { nj[k] = jpeg(f, 95); } finally { f.release(); }
+            } finally { for (Mat x : imgs) x.release(); }
+            for (int i : L) jpeg[i] = null; // memory: only the fused JPEG stays
+            st.hdrGroups++; st.hdrAligned += al[0]; st.hdrAlignFailed += al[1];
+            log("hdr group " + grp[ref] + ": frames " + L + " (ref " + ref + " ev 0) aligned " + al[0] + " not aligned " + al[1]);
+            P.on((k + 1) / (double) m);
+        }
+        n = m; jpeg = nj; qIn = nq; nadir = nn; srcIdx = src;
+        grp = new int[m]; evIdx = new int[m];
+        java.util.Arrays.fill(grp, -1);
+        st.msHdr = System.currentTimeMillis() - t0;
+        log("hdr: " + st.inputFrames + " input frames -> " + m + " frames (" + st.hdrGroups + " groups fused) " + st.msHdr + " ms");
+    }
+
+    /** Mertens exposure fusion of the brackets imgs (8UC3 BGR) after aligning each to imgs[ref]; on at most maxPx pixels (scaled
+     *  down, INTER_AREA). align (optional) += {aligned, kept unaligned}. Returns a new 8UC3 image */
+    public static Mat fuseExposures(List<Mat> imgs, int ref, int maxPx, int[] align) {
+        Mat R = imgs.get(ref);
+        double px = R.cols() * (double) R.rows(), s = maxPx > 0 && px > maxPx ? Math.sqrt(maxPx / px) : 1;
+        Size sz = s < 1 ? new Size(Math.max(8, Math.round(R.cols() * s)), Math.max(8, Math.round(R.rows() * s))) : R.size();
+        List<Mat> use = new ArrayList<>(), own = new ArrayList<>();
+        Mat f = new Mat(), out = new Mat();
+        try {
+            Mat Rs = R;
+            if (s < 1) { Rs = new Mat(); Imgproc.resize(R, Rs, sz, 0, 0, Imgproc.INTER_AREA); own.add(Rs); }
+            for (int k = 0; k < imgs.size(); k++) {
+                if (k == ref) { use.add(Rs); continue; }
+                Mat I = imgs.get(k);
+                if (I.cols() != (int) sz.width || I.rows() != (int) sz.height) {
+                    Mat t = new Mat();
+                    Imgproc.resize(I, t, sz, 0, 0, Imgproc.INTER_AREA);
+                    own.add(t);
+                    I = t;
+                }
+                double[] w = alignEcc(Rs, I);
+                if (w == null) { if (align != null) align[1]++; use.add(I); continue; }
+                if (align != null) align[0]++;
+                Mat M = new Mat(2, 3, CvType.CV_64F), a = new Mat();
+                M.put(0, 0, w);
+                Imgproc.warpAffine(I, a, M, sz, Imgproc.INTER_LINEAR | Imgproc.WARP_INVERSE_MAP, Core.BORDER_REPLICATE);
+                M.release();
+                own.add(a);
+                use.add(a);
+            }
+            MergeMertens mm = Photo.createMergeMertens();
+            mm.process(use, f);
+            f.convertTo(out, CvType.CV_8UC3, 255);
+            Mat r = out;
+            out = null;
+            return r;
+        } finally {
+            for (Mat x : own) x.release();
+            f.release();
+            if (out != null) out.release();
+        }
+    }
+
+    /** rotation + translation (ECC, coarse to fine, on grey images with the clipped pixels of the reference masked out) that maps
+     *  pixels of ref to img: img(A [x y 1]) ~ ref(x, y). Returns A row-major (2 x 3, pixels of the given images) or null when ECC failed
+     *  or the motion is implausible (> HDR_MAX_ROT_DEG, > HDR_MAX_SHIFT of the long side) */
+    public static double[] alignEcc(Mat ref, Mat img) {
+        int L = Math.max(ref.cols(), ref.rows());
+        double sc = Math.min(1, HDR_ALIGN_PX / (double) L);
+        Mat g1 = new Mat(), g2 = new Mat(), t = new Mat(), in = new Mat(), mask = new Mat(), warp = Mat.eye(2, 3, CvType.CV_32F);
+        try {
+            Imgproc.cvtColor(ref, g1, Imgproc.COLOR_BGR2GRAY);
+            Imgproc.cvtColor(img, g2, Imgproc.COLOR_BGR2GRAY);
+            double cc = 0, prev = 0;
+            for (double k : new double[]{.25, 1}) {
+                double s = sc * k;
+                Size sz = new Size(Math.max(16, Math.round(ref.cols() * s)), Math.max(16, Math.round(ref.rows() * s)));
+                Imgproc.resize(g1, t, sz, 0, 0, Imgproc.INTER_AREA);
+                Imgproc.resize(g2, in, sz, 0, 0, Imgproc.INTER_AREA);
+                Core.inRange(t, new Scalar(8), new Scalar(247), mask);
+                if (prev > 0) { // translation to this scale
+                    float[] w = new float[6];
+                    warp.get(0, 0, w);
+                    w[2] *= (float) (s / prev); w[5] *= (float) (s / prev);
+                    warp.put(0, 0, w);
+                }
+                prev = s;
+                cc = Video.findTransformECC(t, in, warp, Video.MOTION_EUCLIDEAN, new TermCriteria(TermCriteria.COUNT + TermCriteria.EPS, 80, 1e-5), mask, 3);
+            }
+            float[] w = new float[6];
+            warp.get(0, 0, w);
+            double ang = Math.atan2(w[3], w[0]) / D, k = 1 / sc;
+            double tx = w[2] * k, ty = w[5] * k;
+            // brackets 2 stops apart: the correlation stays low (clipping, noise x4), .3 with a plausible motion is a good alignment
+            if (!(cc > HDR_MIN_CC) || Math.abs(ang) > HDR_MAX_ROT_DEG || Math.hypot(tx, ty) > HDR_MAX_SHIFT * L) return null;
+            return new double[]{w[0], w[1], tx, w[3], w[4], ty};
+        } catch (RuntimeException e) { // ECC did not converge (CvException)
+            return null;
+        } finally { g1.release(); g2.release(); t.release(); in.release(); mask.release(); warp.release(); }
+    }
+
+    private static final int HDR_ALIGN_PX = 800;
+    private static final double HDR_MAX_ROT_DEG = 4, HDR_MAX_SHIFT = .08, HDR_MIN_CC = .3;
 
     private Mat decode(int i) {
         MatOfByte b = new MatOfByte(jpeg[i]);
@@ -1430,8 +1625,9 @@ public final class PanoStitchCore {
         return c + EDGE_W * Math.max(a.lgr[ka], b.lgr[kb]);
     }
 
-    /** minimal-difference seams: for every pair of neighbouring labels, a DP path inside a band around the Voronoi border */
-    private void seams(Fr[] F, int[] lab, int Ws, int Hs) {
+    /** minimal-cost seams: for every pair of neighbouring labels, a graph cut (Options.graphCut) or a DP path inside a band around
+     *  the Voronoi border */
+    private void seams(Fr[] F, int[] lab, int Ws, int Hs, Stats st) {
         java.util.HashMap<Integer, int[]> adj = new java.util.HashMap<>();
         for (int y = 0; y < Hs; y++) for (int x = 0; x < Ws; x++) {
             int a = lab[y * Ws + x];
@@ -1455,12 +1651,22 @@ public final class PanoStitchCore {
         int band = Math.max(3, Ws * (o.smartSeams ? SEAM_BAND_DEG : 6) / 360);
         List<Integer> keys = new ArrayList<>(adj.keySet());
         java.util.Collections.sort(keys);
+        int[] node = null;
+        MaxFlow mf = null;
+        if (o.graphCut) {
+            node = new int[Ws * Hs];
+            java.util.Arrays.fill(node, -1);
+            mf = new MaxFlow();
+        }
+        long tg = System.currentTimeMillis();
         for (int key : keys) {
             if (adj.get(key)[0] < 3) continue;
             chk();
             int a = key / n, b = key % n;
             if (cnt[a] == 0 || cnt[b] == 0) continue;
             if (F[a].nadir || F[b].nadir) continue; // the nadir border stays at NADIR_LAT
+            if (o.graphCut && System.currentTimeMillis() - tg < o.seamMs && seamPairGC(F, lab, Ws, Hs, a, b, band, node, mf, st)) { st.gcPairs++; continue; }
+            st.dpPairs++;
             double xa = Math.atan2(cs[a], cc[a]) / (2 * Math.PI) * Ws - .5, xb = Math.atan2(cs[b], cc[b]) / (2 * Math.PI) * Ws - .5;
             double ra = Math.hypot(cs[a], cc[a]) / cnt[a], rb = Math.hypot(cs[b], cc[b]) / cnt[b];
             double ya = cy[a] / cnt[a], yb = cy[b] / cnt[b];
@@ -1474,6 +1680,289 @@ public final class PanoStitchCore {
             if (vertical) { nLines = Hs; nPos = Ws / 2; } else { nLines = Ws; nPos = Hs; }
             boolean rev = vertical ? dxp < 0 : dyv < 0;
             seamPair(F, lab, Ws, Hs, a, b, vertical, rev, xc, nLines, nPos, band);
+        }
+        if (o.graphCut) log("seams: graph cut " + st.gcPairs + " pairs (largest " + st.gcNodes + " px), DP " + st.dpPairs + " pairs, " + (System.currentTimeMillis() - tg) + " ms");
+    }
+
+    private static final int GC_MAX_NODES = 300000;
+    /** graph cut: extra cost of a pixel inside a region where the two frames disagree (an object seen at two places: parallax) */
+    private static final double GC_GHOST_W = 60, GC_GHOST_CLOSE_DEG = 4, GC_GHOST_GROW_DEG = 1;
+
+    /** where frames a and b disagree in structure (as in deghost: difference after gains minus its smooth part > GHOST_T), closed
+     *  (~GC_GHOST_CLOSE_DEG: the edges of one object become one region, its flat inside too) and grown by GC_GHOST_GROW_DEG; on the
+     *  low-res grid of frame a (index = at(a, ..)), 0 / 255 */
+    private byte[] disagreement(Fr fa, Fr fb, int Ws) {
+        int w = fa.lw, h = fa.lh;
+        float[] df = new float[w * h];
+        byte[] both = new byte[w * h];
+        for (int yy = 0; yy < h; yy++) for (int xx = 0; xx < w; xx++) {
+            int k = yy * w + xx;
+            if (fa.lsc[k] < 0) continue;
+            int kb = at(fb, (fa.lx0 + xx) % Ws, fa.ly0 + yy, Ws);
+            if (kb < 0) continue;
+            df[k] = (float) (lumG(fa, k) - lumG(fb, kb));
+            both[k] = (byte) 255;
+        }
+        double sig = Math.max(2, Ws * 3.0 / 360);
+        int ck = 2 * Math.max(2, (int) Math.round(Ws * GC_GHOST_CLOSE_DEG / 360 / 2)) + 1, gk = 2 * Math.max(1, (int) Math.round(Ws * GC_GHOST_GROW_DEG / 360)) + 1;
+        Mat D1 = new Mat(h, w, CvType.CV_32FC1), DL = new Mat(), Bm = new Mat(h, w, CvType.CV_8UC1), mask = new Mat();
+        Mat kc = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(ck, ck)), kg = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(gk, gk));
+        try {
+            D1.put(0, 0, df); Bm.put(0, 0, both);
+            Imgproc.GaussianBlur(D1, DL, new Size(0, 0), sig);
+            Imgproc.GaussianBlur(D1, D1, new Size(0, 0), 1);
+            Core.subtract(D1, DL, D1);
+            Core.absdiff(D1, new Scalar(0), D1);
+            Imgproc.threshold(D1, D1, GHOST_T, 255, Imgproc.THRESH_BINARY);
+            D1.convertTo(mask, CvType.CV_8U);
+            Core.bitwise_and(mask, Bm, mask);
+            Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, kc);
+            Imgproc.dilate(mask, mask, kg);
+            byte[] mb = new byte[w * h];
+            mask.get(0, 0, mb);
+            return mb;
+        } finally { D1.release(); DL.release(); Bm.release(); mask.release(); kc.release(); kg.release(); }
+    }
+
+    /** graph-cut seam of the neighbouring labels a | b: the pixels of a or b covered by both frames within 'band' (8-connected steps)
+     *  of their current border are the nodes; every 4-neighbour edge p-q costs 1 + seamCost(p) + seamCost(q) (colour difference
+     *  + smart-seam gradient term: the cut avoids objects / edges, as the DP did); a node next to a fixed pixel of a (b) is tied to the
+     *  source (sink) by that same edge cost (a fixed pixel of a that b does not cover costs 300: the cut never leaves b's frame).
+     *  Minimum cut (max-flow, Boykov-Kolmogorov) -> source side a, sink side b, unreached pixels keep their label.
+     *  Returns false (caller falls back to DP) when the band has more than GC_MAX_NODES pixels */
+    private boolean seamPairGC(Fr[] F, int[] lab, int Ws, int Hs, int a, int b, int band, int[] node, MaxFlow mf, Stats st) {
+        Fr fa = F[a], fb = F[b];
+        int r0 = Math.max(fa.ly0, fb.ly0), r1 = Math.min(fa.ly0 + fa.lh, fb.ly0 + fb.lh);
+        if (r1 <= r0) return true;
+        int[] pix = new int[1024], dep = new int[1024];
+        int cnt = 0;
+        boolean ok = true;
+        try {
+            // 1. seeds: pixels on the a | b border covered by both frames
+            for (int y = r0; y < r1 && ok; y++) for (int x = 0; x < Ws; x++) {
+                int p = y * Ws + x, lp = lab[p];
+                if (lp != a && lp != b) continue;
+                int other = lp == a ? b : a;
+                int qr = y * Ws + (x + 1) % Ws, qd = y + 1 < Hs ? p + Ws : -1;
+                for (int q : new int[]{qr, qd}) {
+                    if (q < 0 || lab[q] != other) continue;
+                    for (int u : new int[]{p, q}) {
+                        if (node[u] >= 0 || at(fa, u % Ws, u / Ws, Ws) < 0 || at(fb, u % Ws, u / Ws, Ws) < 0) continue;
+                        if (cnt == pix.length) { pix = java.util.Arrays.copyOf(pix, cnt * 2); dep = java.util.Arrays.copyOf(dep, cnt * 2); }
+                        node[u] = cnt; pix[cnt] = u; dep[cnt] = 0; cnt++;
+                    }
+                }
+            }
+            if (cnt == 0) return true;
+            // 2. band: breadth-first, 8-connected, through pixels of a or b covered by both frames
+            for (int k = 0; k < cnt; k++) {
+                if (dep[k] >= band) continue;
+                int p = pix[k], x = p % Ws, y = p / Ws;
+                for (int dy = -1; dy <= 1; dy++) {
+                    int yy = y + dy;
+                    if (yy < 0 || yy >= Hs) continue;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        if (dx == 0 && dy == 0) continue;
+                        int xx = fm(x + dx, Ws), q = yy * Ws + xx;
+                        if (node[q] >= 0 || (lab[q] != a && lab[q] != b) || at(fa, xx, yy, Ws) < 0 || at(fb, xx, yy, Ws) < 0) continue;
+                        if (cnt == pix.length) { pix = java.util.Arrays.copyOf(pix, cnt * 2); dep = java.util.Arrays.copyOf(dep, cnt * 2); }
+                        node[q] = cnt; pix[cnt] = q; dep[cnt] = dep[k] + 1; cnt++;
+                    }
+                }
+                if (cnt > GC_MAX_NODES) { ok = false; break; }
+            }
+            if (!ok) { log("seam " + a + "|" + b + ": band " + cnt + "+ px > " + GC_MAX_NODES + " -> DP"); return false; }
+            st.gcNodes = Math.max(st.gcNodes, cnt);
+            // 3. graph
+            double[] c = new double[cnt], src = new double[cnt], snk = new double[cnt];
+            byte[] dm = o.smartSeams ? disagreement(fa, fb, Ws) : null;
+            for (int k = 0; k < cnt; k++) {
+                int x = pix[k] % Ws, y = pix[k] / Ws;
+                c[k] = seamCost(fa, fb, x, y, Ws);
+                if (dm != null && dm[at(fa, x, y, Ws)] != 0) c[k] += GC_GHOST_W;
+            }
+            mf.reset(cnt, 4 * cnt);
+            for (int k = 0; k < cnt; k++) {
+                int p = pix[k], x = p % Ws, y = p / Ws;
+                for (int d = 0; d < 4; d++) {
+                    int xx = x, yy = y;
+                    if (d == 0) xx = (x + 1) % Ws; else if (d == 1) yy = y + 1; else if (d == 2) xx = fm(x - 1, Ws); else yy = y - 1;
+                    if (yy < 0 || yy >= Hs) continue;
+                    int q = yy * Ws + xx, nq = node[q];
+                    if (nq >= 0) {
+                        if (d < 2) { double w = 1 + c[k] + c[nq]; mf.addEdge(k, nq, w, w); }
+                        continue;
+                    }
+                    int lq = lab[q];
+                    if (lq != a && lq != b) continue;
+                    double w = 1 + c[k] + seamCost(fa, fb, xx, yy, Ws);
+                    if (lq == a) src[k] += w; else snk[k] += w;
+                }
+            }
+            for (int k = 0; k < cnt; k++) mf.setT(k, src[k], snk[k]);
+            mf.maxflow();
+            for (int k = 0; k < cnt; k++) {
+                int sg = mf.segment(k);
+                if (sg == 1) lab[pix[k]] = a; else if (sg == 2) lab[pix[k]] = b;
+            }
+            return true;
+        } finally {
+            for (int k = 0; k < cnt; k++) node[pix[k]] = -1;
+        }
+    }
+
+    /** max-flow / min-cut on a sparse graph (Boykov-Kolmogorov 2004: two search trees, augment, adopt orphans), double capacities.
+     *  Nodes 0..N-1; setT(i, source, sink) = terminal capacities; segment(i): 1 = source side, 2 = sink side, 0 = reached by neither */
+    static final class MaxFlow {
+        private static final int NONE = -1, TERMINAL = -2, ORPHAN = -3;
+        private static final double EPS = 1e-9;
+        private int N, nA;
+        private int[] first = new int[0], parent, ts, dist, act, orph, head = new int[0], next;
+        private byte[] tree, inAct;
+        private double[] tr, rc;
+        private int aHead, aTail, aSize, oHead, oSize, time;
+
+        void reset(int nodes, int arcs) {
+            N = nodes; nA = 0;
+            if (first.length < nodes) {
+                int c = Math.max(nodes, first.length * 2);
+                first = new int[c]; parent = new int[c]; ts = new int[c]; dist = new int[c]; act = new int[c + 1]; orph = new int[c + 1];
+                tree = new byte[c]; inAct = new byte[c]; tr = new double[c];
+            }
+            java.util.Arrays.fill(first, 0, nodes, -1);
+            java.util.Arrays.fill(tr, 0, nodes, 0);
+            if (head.length < 2 * arcs) { int c = Math.max(2 * arcs, head.length * 2); head = new int[c]; next = new int[c]; rc = new double[c]; }
+        }
+
+        void addEdge(int i, int j, double cap, double rev) {
+            if (nA + 2 > head.length) {
+                int c = head.length * 2 + 2;
+                head = java.util.Arrays.copyOf(head, c); next = java.util.Arrays.copyOf(next, c); rc = java.util.Arrays.copyOf(rc, c);
+            }
+            int a = nA;
+            head[a] = j; next[a] = first[i]; first[i] = a; rc[a] = cap;
+            head[a + 1] = i; next[a + 1] = first[j]; first[j] = a + 1; rc[a + 1] = rev;
+            nA += 2;
+        }
+
+        void setT(int i, double source, double sink) { tr[i] = source - sink; }
+
+        int segment(int i) { return parent[i] == NONE ? 0 : tree[i]; }
+
+        private void activate(int i) {
+            if (inAct[i] != 0) return;
+            inAct[i] = 1;
+            act[aTail] = i; aTail = (aTail + 1) % (N + 1); aSize++;
+        }
+
+        private void orphan(int i) {
+            parent[i] = ORPHAN;
+            orph[(oHead + oSize) % (N + 1)] = i; oSize++;
+        }
+
+        void maxflow() {
+            aHead = 0; aTail = 0; aSize = 0; oHead = 0; oSize = 0; time = 0;
+            for (int i = 0; i < N; i++) {
+                inAct[i] = 0; ts[i] = 0; dist[i] = 0;
+                if (tr[i] > EPS) { tree[i] = 1; parent[i] = TERMINAL; dist[i] = 1; activate(i); }
+                else if (tr[i] < -EPS) { tree[i] = 2; parent[i] = TERMINAL; dist[i] = 1; activate(i); }
+                else { tree[i] = 0; parent[i] = NONE; }
+            }
+            int cur = -1;
+            while (true) {
+                int i = cur;
+                cur = -1;
+                if (i < 0 || parent[i] == NONE) {
+                    i = -1;
+                    while (aSize > 0) {
+                        int k = act[aHead]; aHead = (aHead + 1) % (N + 1); aSize--; inAct[k] = 0;
+                        if (parent[k] != NONE) { i = k; break; }
+                    }
+                    if (i < 0) break;
+                }
+                // growth
+                int mid = -1;
+                boolean S = tree[i] == 1;
+                for (int a = first[i]; a != -1; a = next[a]) {
+                    if ((S ? rc[a] : rc[a ^ 1]) <= EPS) continue;
+                    int j = head[a];
+                    if (parent[j] == NONE) {
+                        tree[j] = tree[i]; parent[j] = a ^ 1; ts[j] = ts[i]; dist[j] = dist[i] + 1;
+                        activate(j);
+                    } else if (tree[j] != tree[i]) {
+                        mid = S ? a : a ^ 1;
+                        break;
+                    } else if (ts[j] <= ts[i] && dist[j] > dist[i]) {
+                        parent[j] = a ^ 1; ts[j] = ts[i]; dist[j] = dist[i] + 1;
+                    }
+                }
+                time++;
+                if (mid < 0) continue;
+                cur = i; // may still grow
+                augment(mid);
+                adopt();
+            }
+        }
+
+        private void augment(int mid) {
+            double d = rc[mid];
+            int i;
+            for (i = head[mid ^ 1]; parent[i] != TERMINAL; i = head[parent[i]]) d = Math.min(d, rc[parent[i] ^ 1]);
+            d = Math.min(d, tr[i]);
+            for (i = head[mid]; parent[i] != TERMINAL; i = head[parent[i]]) d = Math.min(d, rc[parent[i]]);
+            d = Math.min(d, -tr[i]);
+            rc[mid] -= d; rc[mid ^ 1] += d;
+            for (i = head[mid ^ 1]; ; ) {
+                int a = parent[i];
+                if (a == TERMINAL) { tr[i] -= d; if (tr[i] <= EPS) orphan(i); break; }
+                rc[a] += d; rc[a ^ 1] -= d;
+                if (rc[a ^ 1] <= EPS) orphan(i);
+                i = head[a];
+            }
+            for (i = head[mid]; ; ) {
+                int a = parent[i];
+                if (a == TERMINAL) { tr[i] += d; if (tr[i] >= -EPS) orphan(i); break; }
+                rc[a ^ 1] += d; rc[a] -= d;
+                if (rc[a] <= EPS) orphan(i);
+                i = head[a];
+            }
+        }
+
+        private void adopt() {
+            while (oSize > 0) {
+                int i = orph[oHead]; oHead = (oHead + 1) % (N + 1); oSize--;
+                byte t = tree[i];
+                boolean S = t == 1;
+                int best = -1, dmin = Integer.MAX_VALUE;
+                for (int a0 = first[i]; a0 != -1; a0 = next[a0]) {
+                    if ((S ? rc[a0 ^ 1] : rc[a0]) <= EPS) continue;
+                    int j = head[a0];
+                    if (tree[j] != t || parent[j] == NONE) continue;
+                    // origin of j: the terminal (valid) or an orphan (invalid)
+                    int d = 0, k = j;
+                    while (true) {
+                        if (ts[k] == time) { d += dist[k]; break; }
+                        int a = parent[k];
+                        d++;
+                        if (a == TERMINAL) { ts[k] = time; dist[k] = 1; break; }
+                        if (a == ORPHAN) { d = Integer.MAX_VALUE; break; }
+                        k = head[a];
+                    }
+                    if (d == Integer.MAX_VALUE) continue;
+                    if (d < dmin) { best = a0; dmin = d; }
+                    for (k = j; ts[k] != time; k = head[parent[k]]) { ts[k] = time; dist[k] = d; d--; }
+                }
+                if (best >= 0) { parent[i] = best; ts[i] = time; dist[i] = dmin + 1; continue; }
+                // no valid parent: i becomes free; its children become orphans, possible parents become active
+                for (int a0 = first[i]; a0 != -1; a0 = next[a0]) {
+                    int j = head[a0];
+                    if (tree[j] != t || parent[j] == NONE) continue;
+                    if ((S ? rc[a0 ^ 1] : rc[a0]) > EPS) activate(j);
+                    int pj = parent[j];
+                    if (pj != TERMINAL && pj != ORPHAN && head[pj] == i) orphan(j);
+                }
+                tree[i] = 0; parent[i] = NONE;
+            }
         }
     }
 
@@ -2047,10 +2536,16 @@ public final class PanoStitchCore {
 
     /* ------------------------------------------------------------------ full resolution: warp + multi-band blend ------------------------------------------------------------------ */
 
+    /** warp + multi-band blend: on the whole canvas (as before) or, when that would need more than Options.memBudgetMB (W = 8192),
+     *  in horizontal strips (blendStrips) */
     private Mat blend(Fr[] F, int[] lab, double t, int W, int H, int Ws, int Hs, int B, Stats st, Progress P) {
         int A = 1 << B, levels = o.multiband ? B : 0;
+        double whole = memWholeMB(F, t, W, H, levels, A);
+        if (o.stripBlend == 1 || (o.stripBlend == 0 && whole > o.memBudgetMB)) return blendStrips(F, lab, t, W, H, Ws, Hs, B, whole, st, P);
+        st.memEstMB = whole;
+        log("blend: whole canvas " + W + "x" + H + ", memory estimate " + Math.round(whole) + " MB");
         Mat[] dst = new Mat[levels + 1], wsum = new Mat[levels + 1];
-        Mat out = null;
+        Mat out = null, cover8 = null;
         try {
             for (int l = 0; l <= levels; l++) {
                 dst[l] = Mat.zeros(H >> l, W >> l, CvType.CV_32FC3);
@@ -2058,45 +2553,21 @@ public final class PanoStitchCore {
             }
             for (int i = 0; i < n; i++) {
                 chk();
-                addFrame(F, i, lab, t, W, H, Ws, Hs, A, levels, dst, wsum);
+                addFrame(F, i, lab, t, W, H, Ws, Hs, A, levels, levels + 1, 0, H, dst, wsum);
                 P.on(.5 + .4 * (i + 1) / n);
             }
             // coverage (level 0) before normalising
             Mat cover = new Mat();
             Imgproc.threshold(wsum[0], cover, 1e-4, 255, Imgproc.THRESH_BINARY);
-            Mat cover8 = new Mat();
+            cover8 = new Mat();
             cover.convertTo(cover8, CvType.CV_8U);
             cover.release();
-            for (int l = 0; l <= levels; l++) {
-                Mat w3 = new Mat(), wp = new Mat();
-                Core.add(wsum[l], new Scalar(1e-6), wp);
-                Imgproc.cvtColor(wp, w3, Imgproc.COLOR_GRAY2BGR);
-                Core.divide(dst[l], w3, dst[l]);
-                w3.release(); wp.release();
-            }
-            // top level: extrapolate into uncovered areas (no dark halo when collapsing near holes)
-            Mat topMask = new Mat();
-            Imgproc.threshold(wsum[levels], topMask, 1e-3, 1, Imgproc.THRESH_BINARY);
-            for (int l = 0; l <= levels; l++) { wsum[l].release(); wsum[l] = null; }
-            pushPull(dst[levels], topMask, true);
-            topMask.release();
-            Mat R = dst[levels];
-            dst[levels] = null;
-            for (int l = levels - 1; l >= 0; l--) {
-                Mat up = pyrUpWrap(R, dst[l].cols(), dst[l].rows());
-                R.release();
-                Core.add(up, dst[l], up);
-                dst[l].release(); dst[l] = null;
-                R = up;
-            }
+            Mat R = normaliseCollapse(dst, wsum, levels);
             out = new Mat();
             R.convertTo(out, CvType.CV_8UC3);
             R.release();
             P.on(.94);
-            int holes = (int) (W * (long) H - Core.countNonZero(cover8));
-            st.holesPct = 100.0 * holes / (W * (double) H);
-            if (holes > 0 && o.fill) fillHoles(out, cover8);
-            cover8.release();
+            finish(out, cover8, st);
             Mat r = out;
             out = null;
             return r;
@@ -2104,7 +2575,200 @@ public final class PanoStitchCore {
             for (Mat m : dst) if (m != null) m.release();
             for (Mat m : wsum) if (m != null) m.release();
             if (out != null) out.release();
+            if (cover8 != null) cover8.release();
         }
+    }
+
+    /** holes statistics + fill */
+    private void finish(Mat out, Mat cover8, Stats st) {
+        int W = out.cols(), H = out.rows();
+        int holes = (int) (W * (long) H - Core.countNonZero(cover8));
+        st.holesPct = 100.0 * holes / (W * (double) H);
+        if (holes > 0 && o.fill) fillHoles(out, cover8);
+    }
+
+    /** normalises every level by its weight, extrapolates the top level into uncovered areas (no dark halo when collapsing near holes)
+     *  and collapses the pyramid; releases dst / wsum (entries set to null). Returns the float image of level 0 */
+    private static Mat normaliseCollapse(Mat[] dst, Mat[] wsum, int levels) {
+        for (int l = 0; l <= levels; l++) {
+            Mat w3 = new Mat(), wp = new Mat();
+            Core.add(wsum[l], new Scalar(1e-6), wp);
+            Imgproc.cvtColor(wp, w3, Imgproc.COLOR_GRAY2BGR);
+            Core.divide(dst[l], w3, dst[l]);
+            w3.release(); wp.release();
+        }
+        Mat topMask = new Mat();
+        Imgproc.threshold(wsum[levels], topMask, 1e-3, 1, Imgproc.THRESH_BINARY);
+        for (int l = 0; l <= levels; l++) { wsum[l].release(); wsum[l] = null; }
+        pushPull(dst[levels], topMask, true);
+        topMask.release();
+        Mat R = dst[levels];
+        dst[levels] = null;
+        for (int l = levels - 1; l >= 0; l--) {
+            Mat up = pyrUpWrap(R, dst[l].cols(), dst[l].rows());
+            R.release();
+            Core.add(up, dst[l], up);
+            dst[l].release(); dst[l] = null;
+            R = up;
+        }
+        return R;
+    }
+
+    /* Strip blend (stage 21f, W = 8192 in bounded memory). The multi-band result is split by frequency:
+     *  - the low bands (pyramid levels >= STRIP_LC) are blended on the whole canvas at 1/2^STRIP_LC resolution (each frame warped
+     *    straight to that resolution: tiny), normalised, top level extrapolated, collapsed -> Rlow;
+     *  - the high bands (levels 0 .. STRIP_LC-1) are blended strip by strip (STRIP_MARGIN extra rows above / below, enough for the
+     *    support of 3 levels): every frame that touches the strip is warped on (its footprint) x (strip rows), its Laplacian levels are
+     *    accumulated, the strip is collapsed on top of Rlow and its central rows written to the 8 bit output.
+     * So only one strip of float pyramids (and one frame's working set inside it) exists at a time. The low bands come from the frame
+     * warped at low resolution instead of from the pyramid of the full-resolution warp: the same up to the anti-aliasing filter. */
+    private static final int STRIP_LC = 3, STRIP_MARGIN = 64, STRIP_PAD = 32;
+    /** extra blur (low-res pixels) of the low-band warp: 2^STRIP_LC pyrDown steps blur by ~.57 low-res pixels, the direct warp less
+     *  (measured on the synthetic scene: .5 is closest to the whole-canvas result) */
+    private static final double STRIP_LOW_SIGMA = .5;
+    /** bytes per pixel of one frame's working set in addFrame (float ROI 12 + weight 4 + valid 4 + exclusion 4 + pyrUp / push-pull
+     *  temporary 12 + masks / next level ~4) */
+    private static final double FRAME_BPP = 40;
+
+    private Mat blendStrips(Fr[] F, int[] lab, double t, int W, int H, int Ws, int Hs, int B, double whole, Stats st, Progress P) {
+        int levels = o.multiband ? B : 0;
+        boolean low = levels > 0;
+        int Lc = low ? Math.min(levels, STRIP_LC) : 0, LB = levels - Lc, M = STRIP_MARGIN, pad = STRIP_PAD;
+        int Wl = W >> Lc, Hl = H >> Lc;
+        // strip height: the largest multiple of 64 within the memory budget
+        int S = Math.max(64, (H / 64) * 64);
+        double est = memStripMB(F, t, W, H, low, Lc, LB, S, M, pad);
+        while (S > 64 && est > o.memBudgetMB) { S -= 64; est = memStripMB(F, t, W, H, low, Lc, LB, S, M, pad); }
+        int ns = (H + S - 1) / S;
+        st.strips = ns; st.memEstMB = est;
+        log("blend: " + ns + " strips of " + S + " rows (+" + M + " margin) on " + W + "x" + H + ", memory estimate " + Math.round(est)
+                + " MB (whole canvas would be " + Math.round(whole) + " MB)");
+        Mat Rlow = null, out = null, cover8 = null;
+        Mat[] dl = new Mat[LB + 1], wl = new Mat[LB + 1];
+        try {
+            // 1. low bands on the whole canvas at low resolution
+            if (low) {
+                for (int l = 0; l <= LB; l++) {
+                    dl[l] = Mat.zeros(Hl >> l, Wl >> l, CvType.CV_32FC3);
+                    wl[l] = Mat.zeros(Hl >> l, Wl >> l, CvType.CV_32FC1);
+                }
+                for (int i = 0; i < n; i++) {
+                    chk();
+                    addFrame(F, i, lab, t, Wl, Hl, Ws, Hs, 1 << LB, LB, LB + 1, 0, Hl, dl, wl, .5 / (1 << Lc));
+                    P.on(.5 + .05 * (i + 1) / n);
+                }
+                Rlow = normaliseCollapse(dl, wl, LB);
+            }
+            // 2. high bands strip by strip
+            out = new Mat(H, W, CvType.CV_8UC3);
+            cover8 = new Mat(H, W, CvType.CV_8UC1);
+            int nAcc = low ? Lc : 1, k = 0;
+            for (int y0 = 0; y0 < H; y0 += S, k++) {
+                int y1 = Math.min(H, y0 + S), e0 = Math.max(0, y0 - M), e1 = Math.min(H, y1 + M), eh = e1 - e0;
+                Mat[] ds = new Mat[nAcc], ws = new Mat[nAcc];
+                Mat R = null;
+                try {
+                    for (int l = 0; l < nAcc; l++) {
+                        ds[l] = Mat.zeros(eh >> l, W >> l, CvType.CV_32FC3);
+                        ws[l] = Mat.zeros(eh >> l, W >> l, CvType.CV_32FC1);
+                    }
+                    for (int i = 0; i < n; i++) {
+                        chk();
+                        addFrame(F, i, lab, t, W, H, Ws, Hs, pad, Lc, nAcc, e0, e1, ds, ws);
+                        P.on(.55 + .35 * (k + (i + 1) / (double) n) / ns);
+                    }
+                    Mat cv = new Mat(), c8 = new Mat(), wr = ws[0].submat(y0 - e0, y1 - e0, 0, W), cr = cover8.submat(y0, y1, 0, W);
+                    Imgproc.threshold(wr, cv, 1e-4, 255, Imgproc.THRESH_BINARY);
+                    cv.convertTo(c8, CvType.CV_8U);
+                    c8.copyTo(cr);
+                    cv.release(); c8.release(); wr.release(); cr.release();
+                    for (int l = 0; l < nAcc; l++) {
+                        Mat w3 = new Mat(), wp = new Mat();
+                        Core.add(ws[l], new Scalar(1e-6), wp);
+                        Imgproc.cvtColor(wp, w3, Imgproc.COLOR_GRAY2BGR);
+                        Core.divide(ds[l], w3, ds[l]);
+                        w3.release(); wp.release(); ws[l].release(); ws[l] = null;
+                    }
+                    if (low) {
+                        // Rlow rows of the strip (+2 rows of context), up to level Lc-1
+                        int r0 = e0 >> Lc, r1 = e1 >> Lc, q0 = Math.max(0, r0 - 2), q1 = Math.min(Hl, r1 + 2);
+                        Mat sub = Rlow.submat(q0, q1, 0, Wl);
+                        Mat up = pyrUpWrap(sub, W >> (Lc - 1), 2 * (q1 - q0));
+                        sub.release();
+                        R = up.submat(2 * (r0 - q0), 2 * (r0 - q0) + (eh >> (Lc - 1)), 0, W >> (Lc - 1)).clone();
+                        up.release();
+                        for (int l = Lc - 1; l >= 0; l--) {
+                            Core.add(R, ds[l], R);
+                            ds[l].release(); ds[l] = null;
+                            if (l > 0) { Mat u = pyrUpWrap(R, W >> (l - 1), eh >> (l - 1)); R.release(); R = u; }
+                        }
+                    } else { R = ds[0]; ds[0] = null; }
+                    Mat rr = R.submat(y0 - e0, y1 - e0, 0, W), orow = out.submat(y0, y1, 0, W);
+                    rr.convertTo(orow, CvType.CV_8UC3);
+                    rr.release(); orow.release();
+                } finally {
+                    for (Mat m : ds) if (m != null) m.release();
+                    for (Mat m : ws) if (m != null) m.release();
+                    if (R != null) R.release();
+                }
+            }
+            if (Rlow != null) { Rlow.release(); Rlow = null; }
+            P.on(.94);
+            finish(out, cover8, st);
+            Mat r = out;
+            out = null;
+            return r;
+        } finally {
+            for (Mat m : dl) if (m != null) m.release();
+            for (Mat m : wl) if (m != null) m.release();
+            if (Rlow != null) Rlow.release();
+            if (out != null) out.release();
+            if (cover8 != null) cover8.release();
+        }
+    }
+
+    /** largest working area (pixels) of one frame in addFrame on a W x H canvas with alignment / padding A, rows clipped to maxRows */
+    private long maxRoiPx(Fr[] F, double t, int W, int H, int A, int maxRows) {
+        long mx = 0;
+        for (Fr f : F) {
+            int[] r = roiOfF(f, t, W, H);
+            long w = r[4] == 1 ? W + 2L * A : Math.min(W + 2L * A, r[1] - r[0] + 3L * A), h = Math.min(maxRows, r[3] - r[2] + 3L * A);
+            mx = Math.max(mx, w * h);
+        }
+        return mx;
+    }
+
+    /** decoded frame + its pre-downscaled copy (bytes) */
+    private static double srcBytes(Fr[] F) {
+        double mx = 0;
+        for (Fr f : F) mx = Math.max(mx, f.w * (double) f.h * 3 * 2);
+        return mx;
+    }
+
+    private static double pyr(int levels) { double s = 0; for (int l = 0; l <= levels; l++) s += Math.pow(.25, l); return s; }
+
+    /** memory estimate (MB, native) of the whole-canvas blend: max(accumulators + one frame, collapse) */
+    private double memWholeMB(Fr[] F, double t, int W, int H, int levels, int A) {
+        double px = W * (double) H;
+        double acc = px * 16 * pyr(levels) + maxRoiPx(F, t, W, H, A, H) * FRAME_BPP + srcBytes(F);
+        double col = px * (12 + 12 + 3 + 1);
+        return Math.max(acc, col) / (1 << 20);
+    }
+
+    /** memory estimate (MB, native) of the strip blend with strips of S rows */
+    private double memStripMB(Fr[] F, double t, int W, int H, boolean low, int Lc, int LB, int S, int M, int pad) {
+        double px = W * (double) H, eh = Math.min(H, S + 2.0 * M);
+        double fixed = px * 4;                                              // 8 bit output + coverage
+        double lowPass = 0;
+        if (low) {
+            double pl = px / Math.pow(4, Lc);
+            lowPass = pl * 16 * pyr(LB) + maxRoiPx(F, t, W >> Lc, H >> Lc, 1 << LB, H >> Lc) * FRAME_BPP + srcBytes(F);
+            fixed += pl * 12;                                               // Rlow
+        }
+        double accS = W * eh * 16 * (low ? pyr(Lc - 1) : 1);
+        double strip = accS + maxRoiPx(F, t, W, H, pad, (int) eh) * FRAME_BPP + srcBytes(F);
+        double col = accS + W * eh * 12 * 2;                                // collapse of one strip
+        return (fixed + Math.max(lowPass, Math.max(strip, col))) / (1 << 20);
     }
 
     /** pyrUp with horizontal wrap (equirect is periodic in x) */
@@ -2123,12 +2787,31 @@ public final class PanoStitchCore {
 
     private static final int STRIP = 128;
 
-    private void addFrame(Fr[] F, int i, int[] lab, double t, int W, int H, int Ws, int Hs, int A, int levels, Mat[] dst, Mat[] wsum) {
+    /** warps frame i onto its footprint on a W x H canvas (rows clipped to [ry0, ry1)), builds its Laplacian pyramid (levels) one level
+     *  at a time and adds levels 0 .. accLevels-1 (weighted by the Gaussian pyramid of its seam weight) to dst / wsum, whose row 0 is
+     *  canvas row ry0. A: alignment of the footprint (multiple of 2^levels; ry0 too) and periodic padding of full-width footprints */
+    private void addFrame(Fr[] F, int i, int[] lab, double t, int W, int H, int Ws, int Hs, int A, int levels, int accLevels, int ry0, int ry1,
+                          Mat[] dst, Mat[] wsum) { addFrame(F, i, lab, t, W, H, Ws, Hs, A, levels, accLevels, ry0, ry1, dst, wsum, .5); }
+
+    /** c: position of the sample inside its canvas pixel (.5 = centre). The low-band pass of blendStrips uses .5 / 2^STRIP_LC: a
+     *  pixel of pyramid level l (OpenCV pyrDown) sits on full-resolution pixel 2^l i, not at the centre of its 2^l block */
+    private void addFrame(Fr[] F, int i, int[] lab, double t, int W, int H, int Ws, int Hs, int A, int levels, int accLevels, int ry0, int ry1,
+                          Mat[] dst, Mat[] wsum, double c) {
         Fr f = F[i];
+        int[] r = roiOfF(f, t, W, H);
+        boolean full = r[4] == 1;
+        int x0, x1;
+        if (full) { x0 = -A; x1 = W + A; }
+        else {
+            x0 = fd(r[0], A) * A - A; x1 = -fd(-r[1], A) * A + A;
+            if (x1 - x0 >= W - A) { full = true; x0 = -A; x1 = W + A; }
+        }
+        int y0 = Math.max(ry0, fd(r[2], A) * A - A), y1 = Math.min(ry1, -fd(-r[3], A) * A + A);
+        int rw = x1 - x0, rh = y1 - y0;
+        if (rh <= 0) return;
         Mat img = decode(i);
         Mat src = img;
-        List<Mat> lap = new ArrayList<>(), gw = new ArrayList<>();
-        Mat roiImg = null, roiW = null, valid = null, roiAl = null;
+        Mat roiImg = null, roiW = null, valid = null, roiAl = null, G = null, Wr = null;
         try {
             int w = f.w, h = f.h;
             // pre-downscale so the source is not much finer than the output (anti-aliasing)
@@ -2140,17 +2823,6 @@ public final class PanoStitchCore {
             }
             int sw = src.cols(), sh = src.rows();
             double sfp = (Math.max(sw, sh) / 2.0) / t;
-            int[] r = roiOfF(f, t, W, H);
-            boolean full = r[4] == 1;
-            int x0, x1;
-            if (full) { x0 = -A; x1 = W + A; }
-            else {
-                x0 = fd(r[0], A) * A - A; x1 = -fd(-r[1], A) * A + A;
-                if (x1 - x0 >= W - A) { full = true; x0 = -A; x1 = W + A; }
-            }
-            int y0 = Math.max(0, fd(r[2], A) * A - A), y1 = Math.min(H, -fd(-r[3], A) * A + A);
-            int rw = x1 - x0, rh = y1 - y0;
-            if (rh <= 0) return;
             roiImg = new Mat(rh, rw, CvType.CV_32FC3);
             roiW = new Mat(rh, rw, CvType.CV_32FC1);
             if (f.lal != null) roiAl = new Mat(rh, rw, CvType.CV_32FC1);
@@ -2159,11 +2831,11 @@ public final class PanoStitchCore {
             double[] m = f.R;
             double[] sinLo = new double[rw], cosLo = new double[rw];
             for (int xx = 0; xx < rw; xx++) {
-                double lon = (((x0 + xx) + .5) / W - .5) * 360 + o.yawRef;
+                double lon = (((x0 + xx) + c) / W - .5) * 360 + o.yawRef;
                 sinLo[xx] = Math.sin(lon * D); cosLo[xx] = Math.cos(lon * D);
             }
             double ratio = Ws / (double) W, hd2 = (sw * (double) sw + sh * (double) sh) / 4.0;
-            Mat tmp = new Mat(), mx = new Mat(), my = new Mat(), g3 = new Mat();
+            Mat tmp = new Mat(), mx = new Mat(), my = new Mat();
             try {
                 for (int ys = 0; ys < rh; ys += STRIP) {
                     int sh2 = Math.min(STRIP, rh - ys);
@@ -2172,15 +2844,15 @@ public final class PanoStitchCore {
                     if (al != null) java.util.Arrays.fill(al, 1);
                     for (int yy = 0; yy < sh2; yy++) {
                         int y = y0 + ys + yy;
-                        double lat = (.5 - (y + .5) / H) * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
-                        double ly = (y + .5) * ratio - .5;
+                        double lat = (.5 - (y + c) / H) * Math.PI, cl = Math.cos(lat), sl = Math.sin(lat);
+                        double ly = (y + c) * ratio - .5;
                         int ly0 = (int) Math.floor(ly);
                         double fy = ly - ly0;
                         int lyA = Math.max(0, Math.min(Hs - 1, ly0)), lyB = Math.max(0, Math.min(Hs - 1, ly0 + 1));
                         for (int xx = 0; xx < rw; xx++) {
                             int k = yy * rw + xx;
                             double d0 = cl * sinLo[xx], d1 = cl * cosLo[xx], d2 = sl;
-                            if (f.wE != null) { dv[0] = d0; dv[1] = d1; dv[2] = d2; displace(f, x0 + xx, y, W, H, dv); d0 = dv[0]; d1 = dv[1]; d2 = dv[2]; }
+                            if (f.wE != null) { dv[0] = d0; dv[1] = d1; dv[2] = d2; displace(f, x0 + xx + c - .5, y + c - .5, W, H, dv); d0 = dv[0]; d1 = dv[1]; d2 = dv[2]; }
                             double cx = m[0] * d0 + m[3] * d1 + m[6] * d2, cy = m[1] * d0 + m[4] * d1 + m[7] * d2, cz = m[2] * d0 + m[5] * d1 + m[8] * d2;
                             if (cz >= -1e-6) { ax[k] = -1e4f; ay[k] = -1e4f; continue; }
                             double u = sw / 2.0 + sfp * cx / -cz, v = sh / 2.0 - sfp * cy / -cz;
@@ -2189,7 +2861,7 @@ public final class PanoStitchCore {
                             vv[k] = 1;
                             r2[k] = (float) (((u - sw / 2.0) * (u - sw / 2.0) + (v - sh / 2.0) * (v - sh / 2.0)) / hd2);
                             // seam weight: bilinear indicator of (label == i) on the low-res canvas
-                            double lx = ((x0 + xx) + .5) * ratio - .5;
+                            double lx = ((x0 + xx) + c) * ratio - .5;
                             int lx0 = (int) Math.floor(lx);
                             double fx = lx - lx0;
                             int xa = fm(lx0, Ws), xb = fm(lx0 + 1, Ws);
@@ -2225,38 +2897,45 @@ public final class PanoStitchCore {
                     Mat vs = valid.submat(ys, ys + sh2, 0, rw); vs.put(0, 0, vv); vs.release();
                     if (al != null) { Mat as = roiAl.submat(ys, ys + sh2, 0, rw); as.put(0, 0, al); as.release(); }
                 }
-            } finally { tmp.release(); mx.release(); my.release(); g3.release(); }
+            } finally { tmp.release(); mx.release(); my.release(); }
             src.release();
             src = null;
             // invalid pixels: smooth extrapolation (clean Laplacian near the frame border)
             pushPull(roiImg, valid, false);
             valid.release(); valid = null;
-            // pyramids
-            lap.add(roiImg); roiImg = null;
-            gw.add(roiW); roiW = null;
-            for (int l = 1; l <= levels; l++) {
-                Mat g = new Mat(), ww = new Mat();
-                Imgproc.pyrDown(lap.get(l - 1), g);
-                Imgproc.pyrDown(gw.get(l - 1), ww);
-                lap.add(g); gw.add(ww);
+            if (c != .5) { // low-band pass: the blur of 2^STRIP_LC pyrDown steps that the direct low-res warp lacks
+                Imgproc.GaussianBlur(roiImg, roiImg, new Size(0, 0), STRIP_LOW_SIGMA, STRIP_LOW_SIGMA, Core.BORDER_REFLECT_101);
             }
-            // excluded areas stay excluded at every level (the pyramid would otherwise spread the weight of the excluded copy back in)
-            if (roiAl != null) {
-                for (int l = 1; l <= levels; l++) {
-                    Mat a = new Mat();
-                    Imgproc.resize(roiAl, a, gw.get(l).size(), 0, 0, Imgproc.INTER_AREA);
-                    Core.multiply(gw.get(l), a, gw.get(l));
-                    a.release();
+            // pyramids, one level at a time (memory): L_l = G_l - up(G_l+1), weight = Gaussian pyramid of the seam weight; excluded areas
+            // stay excluded at every level (the pyramid would otherwise spread the weight of the excluded copy back in)
+            G = roiImg; roiImg = null;
+            Wr = roiW; roiW = null;
+            for (int l = 0; l <= levels; l++) {
+                Mat Gn = null, Wn = null, Wa = Wr, a = null;
+                try {
+                    if (l > 0 && roiAl != null) {
+                        a = new Mat();
+                        Imgproc.resize(roiAl, a, Wr.size(), 0, 0, Imgproc.INTER_AREA);
+                        Wa = new Mat();
+                        Core.multiply(Wr, a, Wa);
+                    }
+                    if (l < levels) {
+                        Gn = new Mat(); Wn = new Mat();
+                        Imgproc.pyrDown(G, Gn);
+                        Imgproc.pyrDown(Wr, Wn);
+                        Mat up = new Mat();
+                        Imgproc.pyrUp(Gn, up, G.size());
+                        Core.subtract(G, up, G);
+                        up.release();
+                    }
+                    if (l < accLevels) accumulate(G, Wa, dst[l], wsum[l], x0 >> l, (y0 - ry0) >> l, full, A >> l, W >> l);
+                } finally {
+                    if (a != null) a.release();
+                    if (Wa != Wr) Wa.release();
+                    G.release(); Wr.release();
+                    G = Gn; Wr = Wn;
                 }
-                roiAl.release(); roiAl = null;
             }
-            for (int l = 0; l < levels; l++) {
-                Mat up = new Mat();
-                Imgproc.pyrUp(lap.get(l + 1), up, lap.get(l).size());
-                Core.subtract(lap.get(l), up, lap.get(l));
-                up.release();
-            }
-            for (int l = 0; l <= levels; l++) accumulate(lap.get(l), gw.get(l), dst[l], wsum[l], x0 >> l, y0 >> l, full, A >> l, W >> l);
         } finally {
             if (src != null) src.release();
             if (img != src) img.release();
@@ -2264,8 +2943,8 @@ public final class PanoStitchCore {
             if (roiW != null) roiW.release();
             if (valid != null) valid.release();
             if (roiAl != null) roiAl.release();
-            for (Mat m : lap) m.release();
-            for (Mat m : gw) m.release();
+            if (G != null) G.release();
+            if (Wr != null) Wr.release();
         }
     }
 
@@ -2291,18 +2970,21 @@ public final class PanoStitchCore {
         }
     }
 
-    /** fills pixels with mask 0 by push-pull (pyramid) extrapolation; mask = CV_32FC1 0/1. wrapX: periodic in x */
+    /** fills pixels with mask 0 by push-pull (pyramid) extrapolation; mask = CV_32FC1, 0 / 1 only. wrapX: periodic in x.
+     *  Memory (stage 21f): level 0 is not copied (img is zeroed where mask = 0, which is what the premultiplied level 0 was), the
+     *  coarser levels are released while going up, and at level 0 only the upsampled image is computed and copied into the holes */
     private static void pushPull(Mat img, Mat mask, boolean wrapX) {
         int total = img.rows() * img.cols();
-        if (Core.countNonZero(mask) == total) return;
-        if (Core.countNonZero(mask) == 0) return;
+        int nz = Core.countNonZero(mask);
+        if (nz == total || nz == 0) return;
         List<Mat> Is = new ArrayList<>(), Ms = new ArrayList<>();
-        Mat m3 = new Mat(), I0 = new Mat();
-        Imgproc.cvtColor(mask, m3, Imgproc.COLOR_GRAY2BGR);
-        Core.multiply(img, m3, I0);
-        m3.release();
-        Is.add(I0); Ms.add(mask.clone());
+        Mat inv = new Mat(), inv8 = new Mat(), T = null;
         try {
+            Imgproc.threshold(mask, inv, .5, 1, Imgproc.THRESH_BINARY_INV);
+            inv.convertTo(inv8, CvType.CV_8U);
+            inv.release();
+            img.setTo(new Scalar(0, 0, 0), inv8);
+            Is.add(img); Ms.add(mask); // level 0: not owned
             while (Is.get(Is.size() - 1).cols() > 4 && Is.get(Is.size() - 1).rows() > 4) {
                 Mat a = new Mat(), b = new Mat();
                 Imgproc.pyrDown(Is.get(Is.size() - 1), a);
@@ -2310,7 +2992,7 @@ public final class PanoStitchCore {
                 Is.add(a); Ms.add(b);
             }
             int top = Is.size() - 1;
-            Mat T = new Mat();
+            T = new Mat();
             {
                 Mat w3 = new Mat(), wp = new Mat();
                 Core.add(Ms.get(top), new Scalar(1e-6), wp);
@@ -2332,70 +3014,97 @@ public final class PanoStitchCore {
                 Mat up = wrapX ? pyrUpWrap(T, Is.get(l).cols(), Is.get(l).rows()) : new Mat();
                 if (!wrapX) Imgproc.pyrUp(T, up, Is.get(l).size());
                 T.release();
-                // T_l = I_l + (1 - M_l) * up, where M_l is normalised (<= 1) and I_l premultiplied
-                Mat mc = new Mat(), inv = new Mat(), inv3 = new Mat(), norm = new Mat(), m3b = new Mat();
-                Core.min(Ms.get(l), new Scalar(1), mc);
-                mc.convertTo(inv, -1, -1, 1); // 1 - M
-                Imgproc.cvtColor(inv, inv3, Imgproc.COLOR_GRAY2BGR);
-                // colour where the mask is partial: I/M * M = I (premultiplied) - scaled so that full weight keeps the exact value
-                Mat w3 = new Mat(), wp = new Mat();
-                Core.add(Ms.get(l), new Scalar(1e-6), wp);
-                Imgproc.cvtColor(wp, w3, Imgproc.COLOR_GRAY2BGR);
-                Core.divide(Is.get(l), w3, norm);
-                Imgproc.cvtColor(mc, m3b, Imgproc.COLOR_GRAY2BGR);
-                Core.multiply(norm, m3b, norm);
-                Core.multiply(up, inv3, up);
-                Core.add(norm, up, up);
-                T = up;
-                mc.release(); inv.release(); inv3.release(); norm.release(); m3b.release(); w3.release(); wp.release();
+                if (l > 0) {
+                    // T_l = I_l + (1 - M_l) * up, where M_l is normalised (<= 1) and I_l premultiplied
+                    Mat mc = new Mat(), in1 = new Mat(), inv3 = new Mat(), norm = new Mat(), m3b = new Mat();
+                    Core.min(Ms.get(l), new Scalar(1), mc);
+                    mc.convertTo(in1, -1, -1, 1); // 1 - M
+                    Imgproc.cvtColor(in1, inv3, Imgproc.COLOR_GRAY2BGR);
+                    // colour where the mask is partial: I/M * M = I (premultiplied) - scaled so that full weight keeps the exact value
+                    Mat w3 = new Mat(), wp = new Mat();
+                    Core.add(Ms.get(l), new Scalar(1e-6), wp);
+                    Imgproc.cvtColor(wp, w3, Imgproc.COLOR_GRAY2BGR);
+                    Core.divide(Is.get(l), w3, norm);
+                    Imgproc.cvtColor(mc, m3b, Imgproc.COLOR_GRAY2BGR);
+                    Core.multiply(norm, m3b, norm);
+                    Core.multiply(up, inv3, up);
+                    Core.add(norm, up, up);
+                    mc.release(); in1.release(); inv3.release(); norm.release(); m3b.release(); w3.release(); wp.release();
+                    Is.get(l).release(); Ms.get(l).release(); // not needed any more
+                }
+                T = up; // level 0 (mask 0 / 1): 0 + 1 * up where the mask is 0
             }
             // keep the original pixels exactly where the mask is 1
-            Mat keep = new Mat(), k8 = new Mat();
-            Imgproc.threshold(mask, keep, .5, 1, Imgproc.THRESH_BINARY_INV);
-            keep.convertTo(k8, CvType.CV_8U);
-            T.copyTo(img, k8);
-            keep.release(); k8.release(); T.release();
+            T.copyTo(img, inv8);
         } finally {
-            for (Mat m : Is) m.release();
-            for (Mat m : Ms) m.release();
+            for (int l = 1; l < Is.size(); l++) Is.get(l).release();
+            for (int l = 1; l < Ms.size(); l++) Ms.get(l).release();
+            inv.release(); inv8.release();
+            if (T != null) T.release();
         }
     }
 
-    /** uncovered areas (zenith / nadir): Photo.inpaint at low resolution (periodic in x), upsampled, feathered */
+    /** uncovered areas (zenith / nadir): Photo.inpaint at low resolution (periodic in x), upsampled, feathered. Strip by strip
+     *  (stage 21f: the old whole-canvas float copies were ~3 x 12 bytes per pixel), strips without holes nearby are skipped */
     private static void fillHoles(Mat pano, Mat cover8) {
         int W = pano.cols(), H = pano.rows(), w = Math.min(512, W), h = w / 2, pad = w / 16;
-        Mat small = new Mat(), hs = new Mat(), hole = new Mat(), sp = new Mat(), hp = new Mat(), fl = new Mat(), big = new Mat();
-        Mat hf = new Mat(), dil = new Mat(), alpha = new Mat(), a3 = new Mat(), pf = new Mat(), bf = new Mat(), ker = null;
+        Mat small = new Mat(), hs = new Mat(), sp = new Mat(), hp = new Mat(), fl = new Mat(), sm2 = new Mat(), ker = null;
         try {
             Imgproc.resize(pano, small, new Size(w, h), 0, 0, Imgproc.INTER_AREA);
-            Core.bitwise_not(cover8, hole);
-            Imgproc.resize(hole, hs, new Size(w, h), 0, 0, Imgproc.INTER_AREA);
-            Imgproc.threshold(hs, hs, 0, 255, Imgproc.THRESH_BINARY);
+            // hole at low resolution: any uncovered pixel in the area
+            Imgproc.resize(cover8, hs, new Size(w, h), 0, 0, Imgproc.INTER_AREA);
+            Imgproc.threshold(hs, hs, 254, 255, Imgproc.THRESH_BINARY_INV);
             Core.copyMakeBorder(small, sp, 0, 0, pad, pad, Core.BORDER_WRAP);
             Core.copyMakeBorder(hs, hp, 0, 0, pad, pad, Core.BORDER_WRAP);
             Photo.inpaint(sp, hp, fl, 6, Photo.INPAINT_TELEA);
             Mat flc = fl.submat(0, h, pad, pad + w);
-            Mat sm2 = new Mat();
             Imgproc.GaussianBlur(flc, sm2, new Size(0, 0), 2);
-            Imgproc.resize(sm2, big, new Size(W, H), 0, 0, Imgproc.INTER_CUBIC);
-            flc.release(); sm2.release();
-            // alpha = max(hole, blur(dilate(hole)))
-            hole.convertTo(hf, CvType.CV_32F, 1 / 255.0);
-            int r = Math.max(2, W / 512);
+            flc.release();
+            int r = Math.max(2, W / 512), m = 5 * r + 4, SH = 256;
             ker = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(2 * r + 1, 2 * r + 1));
-            Imgproc.dilate(hf, dil, ker);
-            Imgproc.GaussianBlur(dil, alpha, new Size(0, 0), r);
-            Core.max(alpha, hf, alpha);
-            Imgproc.cvtColor(alpha, a3, Imgproc.COLOR_GRAY2BGR);
-            pano.convertTo(pf, CvType.CV_32FC3);
-            big.convertTo(bf, CvType.CV_32FC3);
-            Core.subtract(bf, pf, bf);
-            Core.multiply(bf, a3, bf);
-            Core.add(pf, bf, pf);
-            pf.convertTo(pano, CvType.CV_8UC3);
+            float[] mxs = new float[W];
+            for (int x = 0; x < W; x++) mxs[x] = (float) ((x + .5) * w / W - .5);
+            for (int y0 = 0; y0 < H; y0 += SH) {
+                int y1 = Math.min(H, y0 + SH), e0 = Math.max(0, y0 - m), e1 = Math.min(H, y1 + m), sh = y1 - y0;
+                Mat cs = cover8.submat(e0, e1, 0, W);
+                boolean any = Core.countNonZero(cs) < (e1 - e0) * W;
+                if (!any) { cs.release(); continue; }
+                Mat hole = new Mat(), hf = new Mat(), dil = new Mat(), alpha = new Mat(), a3 = new Mat(), pf = new Mat(), bf = new Mat(), big = new Mat();
+                Mat X = new Mat(sh, W, CvType.CV_32FC1), Y = new Mat(sh, W, CvType.CV_32FC1);
+                try {
+                    // alpha = max(hole, blur(dilate(hole))) on the strip + margin, central rows kept
+                    Core.bitwise_not(cs, hole);
+                    hole.convertTo(hf, CvType.CV_32F, 1 / 255.0);
+                    Imgproc.dilate(hf, dil, ker);
+                    Imgproc.GaussianBlur(dil, alpha, new Size(0, 0), r);
+                    Core.max(alpha, hf, alpha);
+                    Mat ac = alpha.submat(y0 - e0, y1 - e0, 0, W);
+                    Imgproc.cvtColor(ac, a3, Imgproc.COLOR_GRAY2BGR);
+                    ac.release();
+                    // the inpainted low-res image, upsampled (bicubic) on the strip rows
+                    float[] xs = new float[sh * W], ys = new float[sh * W];
+                    for (int yy = 0; yy < sh; yy++) {
+                        float sy = (float) ((y0 + yy + .5) * h / H - .5);
+                        System.arraycopy(mxs, 0, xs, yy * W, W);
+                        java.util.Arrays.fill(ys, yy * W, (yy + 1) * W, sy);
+                    }
+                    X.put(0, 0, xs); Y.put(0, 0, ys);
+                    Imgproc.remap(sm2, big, X, Y, Imgproc.INTER_CUBIC, Core.BORDER_REPLICATE, new Scalar(0, 0, 0));
+                    Mat ps = pano.submat(y0, y1, 0, W);
+                    ps.convertTo(pf, CvType.CV_32FC3);
+                    big.convertTo(bf, CvType.CV_32FC3);
+                    Core.subtract(bf, pf, bf);
+                    Core.multiply(bf, a3, bf);
+                    Core.add(pf, bf, pf);
+                    pf.convertTo(ps, CvType.CV_8UC3);
+                    ps.release();
+                } finally {
+                    cs.release(); hole.release(); hf.release(); dil.release(); alpha.release(); a3.release(); pf.release(); bf.release(); big.release();
+                    X.release(); Y.release();
+                }
+            }
         } finally {
-            small.release(); hs.release(); hole.release(); sp.release(); hp.release(); fl.release(); big.release();
-            hf.release(); dil.release(); alpha.release(); a3.release(); pf.release(); bf.release();
+            small.release(); hs.release(); sp.release(); hp.release(); fl.release(); sm2.release();
             if (ker != null) ker.release();
         }
     }
