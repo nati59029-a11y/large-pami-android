@@ -44,7 +44,7 @@ async function seed() {
     b.set(d.doc(`b/${A}/staff/${E1}`), { name: E1, role: 'employee', active: true });
     b.set(d.doc('users/' + E1), { bizId: A, role: 'worker', active: true, bizStatus: 'active', email: E1 + '@x.invalid', createdAt: 1 });
     // רשומות קיימות (דוגמה) – אסור שישתנו
-    b.set(d.doc(P('prod/old1')), { name: 'צלחות ותיקות (דוגמה)', price: 99, barcode: '7290000000101', on: true, q: { _: 5 }, at: 1, by: 'x' });
+    b.set(d.doc(P('prod/old1')), { name: 'צלחות ותיקות (דוגמה)', price: 99, barcode: '7290000001012', on: true, q: { _: 5 }, at: 1, by: 'x' });
     b.set(d.doc(P('prod/old2')), { name: 'שקית נייר בלי ברקוד (דוגמה)', price: 1, barcode: '', on: true, q: {}, at: 1, by: 'x' });
     b.set(d.doc(P('cust/p0500000001')), { name: 'לקוח ותיק (דוגמה)', phone: '0500000001', phx: ['0500000001', '0500000009'], mail: 'old@example.invalid', x: {}, at: 1, by: 'x' });
     b.set(d.doc(P('cust/t000000018')), { name: 'לקוח ותיק עם ת"ז (דוגמה)', tz: '000000018', x: {}, at: 1, by: 'x' });
@@ -73,7 +73,7 @@ describe('קופה – ייבוא מכספיט (pos-import.js)', () => {
   });
 
   it('בדיקה מקדימה: מחזירה אילו שורות כבר קיימות (ברקוד / שם בלי ברקוד / טלפון כולל phx / ת"ז)', async () => {
-    const p = await call('posImpCheck', MGR, { kind: 'prod', keys: [{ bc: '7290000000101' }, { bc: '7290000000999' }, { nm: 'שקית נייר בלי ברקוד (דוגמה)' }, { nm: 'חדש' }] });
+    const p = await call('posImpCheck', MGR, { kind: 'prod', keys: [{ bc: '7290000001012' }, { bc: '7290000009995' }, { nm: 'שקית נייר בלי ברקוד (דוגמה)' }, { nm: 'חדש' }] });
     assert.equal(p.status, 'OK', p.text); assert.deepEqual(p.result.ex, [0, 2]);
     const c = await call('posImpCheck', MGR, { kind: 'cust', keys: [{ ph: '050-0000009' }, { tz: '000000018' }, { ph: '0500000077' }, { ph: '0500000001' }] });
     assert.equal(c.status, 'OK', c.text); assert.deepEqual(c.result.ex, [0, 1, 3]);
@@ -83,12 +83,12 @@ describe('קופה – ייבוא מכספיט (pos-import.js)', () => {
     const before = [await snap('prod/old1'), await snap('prod/old2')];
     const job = jid();
     const rows = [
-      { n: 3, name: 'צלחות – מחיר אחר (דוגמה)', price: 1, barcode: '7290000000101' }, // קיים לפי ברקוד
-      { n: 4, name: 'עוגת שמרים (דוגמה)', price: 24.9, barcode: '7290000000103', cid: 'c_bake', cost: 10 },
+      { n: 3, name: 'צלחות – מחיר אחר (דוגמה)', price: 1, barcode: '7290000001012' }, // קיים לפי ברקוד
+      { n: 4, name: 'עוגת שמרים (דוגמה)', price: 24.9, barcode: '7290000001036', cid: 'c_bake', cost: 10 },
       { n: 5, name: 'שקית נייר בלי ברקוד (דוגמה)', price: 0.5 }, // קיים לפי שם
-      { n: 6, name: 'מגש (דוגמה)', price: 11.8, barcode: '7290000000201', cat: 'חד פעמי' },
-      { n: 7, name: 'מגש כפול (דוגמה)', price: 11.8, barcode: '7290000000201' }, // כפול בקובץ
-      { n: 8, name: 'קטגוריה לא קיימת (דוגמה)', price: 2, barcode: '7290000000301', cid: 'c_nope' },
+      { n: 6, name: 'מגש (דוגמה)', price: 11.8, barcode: '7290000002019', cat: 'חד פעמי' },
+      { n: 7, name: 'מגש כפול (דוגמה)', price: 11.8, barcode: '7290000002019' }, // כפול בקובץ
+      { n: 8, name: 'קטגוריה לא קיימת (דוגמה)', price: 2, barcode: '7290000003016', cid: 'c_nope' },
       { n: 9, name: 'מחיר שלילי (דוגמה)', price: -2 },
     ];
     const r = await call('posImport', MGR, { job, kind: 'prod', file: 'SAMPLE-export-20261117.csv', src: 'csv', total: rows.length, at: 0, rows });
@@ -98,9 +98,9 @@ describe('קופה – ייבוא מכספיט (pos-import.js)', () => {
     assert.deepEqual([await snap('prod/old1'), await snap('prod/old2')], before, 'רשומות קיימות לא השתנו');
     const all = (await adm().collection(P('prod')).where('imp', '==', job).get()).docs.map((d) => d.data());
     assert.equal(all.length, 2);
-    const cake = all.find((x) => x.barcode === '7290000000103');
+    const cake = all.find((x) => x.barcode === '7290000001036');
     assert.equal(cake.cat, 'c_bake'); assert.equal(cake.on, true); assert.equal(cake.src, 'posimp'); assert.equal(cake.price, 24.9);
-    const tray = all.find((x) => x.barcode === '7290000000201');
+    const tray = all.find((x) => x.barcode === '7290000002019');
     const cs = await adm().doc(P('cat/' + tray.cat)).get();
     assert.equal(cs.get('name'), 'חד פעמי', 'קטגוריה חדשה נוצרה בשם מהקובץ');
     const log = await snap('posimp/' + job);

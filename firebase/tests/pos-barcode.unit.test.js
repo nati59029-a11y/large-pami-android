@@ -43,18 +43,18 @@ describe('pos-barcode', () => {
 
   it('סוג לפי קידומת (B9): כרטיס מתנה / קופון / קבלה / פנימי / מוצר; התנגשות עם ברקודים מיובאים', () => {
     const g = B.internal('98', 7), c = B.internal('99', 7), r = B.internal('97', 7);
-    assert.deepEqual([B.kind(g), B.kind(c), B.kind(r), B.kind('7290000000101'), B.kind('1234567890')], ['gift', 'cpn', 'rcpt', 'prod', 'prod']);
+    assert.deepEqual([B.kind(g), B.kind(c), B.kind(r), B.kind('7290000001012'), B.kind('1234567890')], ['gift', 'cpn', 'rcpt', 'prod', 'prod']);
     assert.equal(B.kind(B.internal('55', 1), { bc: { prefixes: { gift: '55' } } }), 'gift', 'קידומת מההגדרות');
-    const cl = B.clash(['9780306406157', '7290000000101', '9800000000017', B.internal('200', 1)]);
+    const cl = B.clash(['9780306406157', '7290000001012', '9800000000017', B.internal('200', 1)]);
     assert.deepEqual([cl.rcpt.length, cl.gift.length, cl.int.length], [1, 1, 1], 'ספר (978) מתנגש בקידומת הקבלה – מסומן');
   });
 
   it('ברקוד חלקי: מ-4 ספרות אחרונות; 3 ספרות – לא מחפש (א 5.6)', () => {
-    const L = [{ id: 'a', codes: ['7290000000101'] }, { id: 'b', codes: ['7290000000202', '1230101'] }, { id: 'c', codes: [] }];
-    assert.deepEqual(B.partial('0101', L).map((x) => x.id), ['a', 'b']);
-    assert.deepEqual(B.partial('101', L), []);
-    assert.deepEqual(B.partial('0202', L).map((x) => x.id), ['b']);
-    assert.deepEqual(B.partial('00101', L, 5).map((x) => x.id), ['a']);
+    const L = [{ id: 'a', codes: ['5901234123457'] }, { id: 'b', codes: ['4006381333931', '1233457'] }, { id: 'c', codes: [] }];
+    assert.deepEqual(B.partial('3457', L).map((x) => x.id), ['a', 'b']);
+    assert.deepEqual(B.partial('457', L), []);
+    assert.deepEqual(B.partial('3931', L).map((x) => x.id), ['b']);
+    assert.deepEqual(B.partial('23457', L, 5).map((x) => x.id), ['a']);
   });
 
   it('פסים: פענוח חוזר בטבלה עצמאית נותן את אותן ספרות (EAN-13 ו-EAN-8)', () => {
@@ -93,16 +93,16 @@ describe('pos-barcode', () => {
       const got = [];
       const stop = B.listen((c) => got.push(c), { beep: false });
       const key = (k, target) => { let pd = false; L.keydown({ key: k, target: target || { tagName: 'BODY' }, preventDefault: () => { pd = true; } }); return pd; };
-      for (const ch of '7290000000101') { key(ch); t += 10; }
+      for (const ch of '7290000001012') { key(ch); t += 10; }
       assert.equal(key('Enter'), true);
-      assert.deepEqual(got, ['7290000000101']);
+      assert.deepEqual(got, ['7290000001012']);
       for (const ch of '12345') { key(ch); t += 300; }
       key('Enter');
       assert.equal(got.length, 1, 'הקלדה איטית של אדם – לא סריקה');
-      t += 1000; for (const ch of '7290000000202') { key(ch, { tagName: 'INPUT', dataset: {} }); t += 5; } key('Enter', { tagName: 'INPUT', dataset: {} });
+      t += 1000; for (const ch of '7290000002026') { key(ch, { tagName: 'INPUT', dataset: {} }); t += 5; } key('Enter', { tagName: 'INPUT', dataset: {} });
       assert.equal(got.length, 1, 'בתוך שדה טקסט – השדה מקבל את התווים');
-      t += 1000; for (const ch of '7290000000303') { key(ch, { tagName: 'INPUT', dataset: { posScan: '' } }); t += 5; } key('Enter', { tagName: 'INPUT', dataset: { posScan: '' } });
-      assert.deepEqual(got, ['7290000000101', '7290000000303'], 'שדה שמסומן data-pos-scan – כן');
+      t += 1000; for (const ch of '7290000003030') { key(ch, { tagName: 'INPUT', dataset: { posScan: '' } }); t += 5; } key('Enter', { tagName: 'INPUT', dataset: { posScan: '' } });
+      assert.deepEqual(got, ['7290000001012', '7290000003030'], 'שדה שמסומן data-pos-scan – כן');
       stop(); assert.equal(L.keydown, undefined);
     } finally { Date.now = realNow; globalThis.document = prev; }
   });

@@ -27,7 +27,7 @@ const ANSWERS = {
   cashout: { register: '6346053', store: 'לארג\' פעמי-יהודה הנשיא', date: '2026-10-20', time: '09:02', amount: 4650 },
   // צילום רשימת הזמנה (ordlist, 14.11.2026)
   // POS:M6 – מחירון מצילום (pos-ocr.js): 3 שורות לדוגמה, אחת בלי מחיר
-  posocr: { rows: [{ name: 'צלחות 20 יח׳ (דוגמה)', price: 12.9, bc: '7290000000101' }, { name: 'כוסות 50 יח׳ (דוגמה)', price: 9.9, bc: '' }, { name: 'מפיות (דוגמה)', price: null, bc: '' }] },
+  posocr: { rows: [{ name: 'צלחות 20 יח׳ (דוגמה)', price: 12.9, bc: '7290000001012' }, { name: 'כוסות 50 יח׳ (דוגמה)', price: 9.9, bc: '' }, { name: 'מפיות (דוגמה)', price: null, bc: '' }] },
   ordlist: { lines: [{ name: 'צלחות עמוקות', qty: 5, unit: 'ct' }, { name: 'מפיות', qty: 2, unit: null }, { name: 'כוס חד פעמית', qty: null, unit: null }] },
   recipe: { title: 'עוגת שמרים', text: 'עוגת שמרים. המצרכים: שתי כוסות קמח. אופן ההכנה: לערבב ולאפות.' },
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
@@ -37,18 +37,18 @@ const ANSWERS = {
 const INVLINES = {
   // יחידות ומארזים, מחיר ליחידה, שורה אחת שהסה"כ שלה לא מתאים (לבדיקה)
   units: { supplier: 'תבניכל בע"מ', number: '50123', date: '2026-11-10', prices_include_vat: false, lines: [
-    { name: 'כוסות קרטון 250 מ"ל', barcode: '7290000000011', sku: 'K-250', qty: 12, unit: 'pk', pack_qty: 50, carton_qty: 20, price: 9.5, discount: null, total: 114 },
+    { name: 'כוסות קרטון 250 מ"ל', barcode: '7290000000114', sku: 'K-250', qty: 12, unit: 'pk', pack_qty: 50, carton_qty: 20, price: 9.5, discount: null, total: 114 },
     { name: 'מפיות לבנות', barcode: null, sku: '3301', qty: 30, unit: 'u', pack_qty: null, carton_qty: null, price: 4.2, discount: null, total: 126 },
-    { name: 'צלחות קרטון', barcode: '7290000000028', sku: null, qty: 10, unit: 'pk', pack_qty: 20, carton_qty: 12, price: 6, discount: null, total: 70 },
+    { name: 'צלחות קרטון', barcode: '7290000000282', sku: null, qty: 10, unit: 'pk', pack_qty: 20, carton_qty: 12, price: 6, discount: null, total: 70 },
   ] },
   // מחיר לקרטון: עלות מארז = מחיר קרטון ÷ carton_qty, כמות במלאי = קרטונים × carton_qty
   cartons: { supplier: 'אריזות הדרום', number: '777', date: '2026-11-11', prices_include_vat: false, lines: [
-    { name: 'תבנית אלומיניום 30', barcode: '7290000000035', sku: 'AL30', qty: 2, unit: 'ct', pack_qty: 10, carton_qty: 24, price: 216, discount: null, total: 432 },
-    { name: 'נייר אפייה', barcode: '7290000000042', sku: 'NP', qty: 1, unit: 'ct', pack_qty: null, carton_qty: null, price: 150, discount: null, total: 150 },
+    { name: 'תבנית אלומיניום 30', barcode: '7290000000350', sku: 'AL30', qty: 2, unit: 'ct', pack_qty: 10, carton_qty: 24, price: 216, discount: null, total: 432 },
+    { name: 'נייר אפייה', barcode: '7290000000428', sku: 'NP', qty: 1, unit: 'ct', pack_qty: null, carton_qty: null, price: 150, discount: null, total: 150 },
   ] },
   // הנחה בשורה (אחוז), ומחירים כוללים מע"מ
   discount: { supplier: 'שפע ניקיון', number: '9001', date: '2026-11-12', prices_include_vat: true, lines: [
-    { name: 'סכו"ם חד פעמי', barcode: '7290000000059', sku: 'S1', qty: 10, unit: 'pk', pack_qty: 100, carton_qty: 10, price: 11.8, discount: 10, total: 106.2 },
+    { name: 'סכו"ם חד פעמי', barcode: '7290000000596', sku: 'S1', qty: 10, unit: 'pk', pack_qty: 100, carton_qty: 10, price: 11.8, discount: 10, total: 106.2 },
     { name: 'שקיות אשפה', barcode: '', sku: 'SH-9', qty: '5', unit: 'u', pack_qty: null, carton_qty: null, price: '23,60', discount: 0, total: null },
   ] },
 };
@@ -93,7 +93,7 @@ const QS_DEF = { qs: [{ t: 'האם הגוף הראשון הוא גונדולה �
 // בדיקה חכמה בהקמה (s3CapCheck, הקמת חנות שלב 5): state.bayscan = אובייקט / פונקציה(body) / מחרוזת גולמית; state.bayscanSeq – תור. ברירת מחדל: BAY_DEF
 const BAY_DEF = { retake: '', per: [], kind: 'dfr', kc: 0.9, lvl: 5, bays: 1, cov: 0.97, ends: ['l', 'r'], gaps: [],
   photos: [{ i: 1, quad: [10, 20, 990, 15, 985, 980, 12, 990], xr: { a: 0, b: 1000 }, q: 0.9 }],
-  prods: [{ n: 'כוסות קרטון 250 מ"ל', brand: 'תבניכל', size: '50 יח\'', cat: 'כוסות', bc: '7290000000011', lv: 2, xr: { a: 100, b: 400 }, conf: 0.92 },
+  prods: [{ n: 'כוסות קרטון 250 מ"ל', brand: 'תבניכל', size: '50 יח\'', cat: 'כוסות', bc: '7290000000114', lv: 2, xr: { a: 100, b: 400 }, conf: 0.92 },
     { n: 'מפיות לבנות', cat: 'מפיות', bc: '12345', conf: 0.6 }],
   diff: [{ k: 'prod', was: 'צלחות', got: 'כוסות קרטון', conf: 0.85 }], conf: 0.88 };
 const state = { bayscan: null, bayscanSeq: [], dr: null, mapqs: null, mapqsSeq: [], mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };

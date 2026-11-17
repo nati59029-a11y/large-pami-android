@@ -68,8 +68,8 @@ async function open(browser, www, who, calls, pos) {
     await page.click('#dlg form[data-f=piCatF] button:not([type=button])'); await H.settle(page, 1200);
     const ck = calls.slice(n0).filter((c) => c.n === 'posImpCheck');
     const pv = await dlgT(page); await shot(page, 'm-03-תצוגה-מקדימה');
-    check('m 5 בדיקת כפילויות בשרת (6 מפתחות), תצוגה מקדימה: 4 חדשים · 2 קיימים / כפולים · 2 שגויים · 1 לא פעיל; "קיים במערכת – דילגתי"; עד 20 שורות',
-      ck.length === 1 && ck[0].d.keys.length === 6 && ck[0].d.keys[0].bc === '7290000000101' && /4\s*חדשים/.test(pv) && /2\s*קיימים \/ כפולים/.test(pv) && /2\s*שגויים/.test(pv) && /1\s*לא פעילים/.test(pv) && /קיים במערכת – דילגתי/.test(pv) && /כפול בקובץ/.test(pv),
+    check('m 5 בדיקת כפילויות בשרת (8 מפתחות), תצוגה מקדימה: 6 חדשים (2 עם סימון: חסר מחיר / ברקוד לבדיקה – P1) · 2 קיימים / כפולים · 0 שגויים · 1 לא פעיל; "קיים במערכת – דילגתי"',
+      ck.length === 1 && ck[0].d.keys.length === 8 && ck[0].d.keys[0].bc === '7290000001012' && /6\s*חדשים/.test(pv) && /2\s*קיימים \/ כפולים/.test(pv) && /0\s*שגויים/.test(pv) && /2 מהחדשים ייובאו עם סימון/.test(pv) && /חסר מחיר/.test(pv) && /1\s*לא פעילים/.test(pv) && /קיים במערכת – דילגתי/.test(pv) && /כפול בקובץ/.test(pv),
       { keys: ck[0] && ck[0].d.keys.length, pv: pv.slice(0, 300) });
     const ov = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     n0 = calls.length;
@@ -77,9 +77,9 @@ async function open(browser, www, who, calls, pos) {
     const run = calls.slice(n0).filter((c) => c.n === 'posImport');
     const done = await dlgT(page);
     const r0 = run[0] && run[0].d;
-    check('m 6 ייבוא: קריאה אחת עם 4 השורות החדשות בלבד, job של 20 תווים, מחלקה קיימת = cid, חדשה = cat; "הייבוא הסתיים"; בלי גלילה לרוחב',
-      run.length === 1 && r0.rows.length === 4 && /^[A-Za-z0-9]{20}$/.test(r0.job) && r0.kind === 'prod' && r0.src === 'csv' && r0.total === 4 && r0.at === 0
-      && r0.rows.find((r) => /עוגת שמרים/.test(r.name)).cid === 'c_bake' && r0.rows.find((r) => /כוסות/.test(r.name)).cat === 'חד פעמי' && !r0.rows.some((r) => r.barcode === '7290000000101') && /הייבוא הסתיים/.test(done) && ov <= 0,
+    check('m 6 ייבוא: קריאה אחת עם 6 השורות החדשות בלבד (כולל חסר מחיר = 0 ו-bcRaw), job של 20 תווים, מחלקה קיימת = cid, חדשה = cat; "הייבוא הסתיים"; בלי גלילה לרוחב',
+      run.length === 1 && r0.rows.length === 6 && r0.rows.some((r) => r.price === 0) && r0.rows.some((r) => r.bcRaw === '7.29E+12') && /^[A-Za-z0-9]{20}$/.test(r0.job) && r0.kind === 'prod' && r0.src === 'csv' && r0.total === 6 && r0.at === 0
+      && r0.rows.find((r) => /עוגת שמרים/.test(r.name)).cid === 'c_bake' && r0.rows.find((r) => /כוסות/.test(r.name)).cat === 'חד פעמי' && !r0.rows.some((r) => r.barcode === '7290000001012') && /הייבוא הסתיים/.test(done) && ov <= 0,
       { rows: r0 && r0.rows, done: done.slice(0, 160) });
     await page.evaluate(() => closeDlg());
     // ביטול ייבוא

@@ -28,6 +28,8 @@ const T = require('./lib/tenant');
 const { inputObject } = require('./lib/roles');
 const ORD = require('./orders')._core;
 const CUS = require('./customers')._core;
+const STK = Object.assign({ BCL: require('./lib/pos-barcode') }, require('./lib/pos-stock')); // POS:M6 – אינדקס ברקודים, דגלים, מק"ט רץ
+const SKU0 = 10000;
 
 const bad = (reason, message) => new HttpsError('invalid-argument', message, { reason });
 const deny = (reason, message) => new HttpsError('permission-denied', message, { reason });
@@ -57,11 +59,14 @@ const onlyKeys = (o, keys, label) => ORD.onlyKeys(o, keys, label);
 // ---------- ניקוי שורה (טהור – גם לבדיקות בלי אמולטור) ----------
 function prodRow(r) {
   if (!r || typeof r !== 'object' || Array.isArray(r)) throw bad('bad-row', 'שורה לא תקינה');
-  onlyKeys(r, ['n', 'name', 'price', 'barcode', 'sku', 'cost', 'cid', 'cat'], 'שורה');
+  onlyKeys(r, ['n', 'name', 'price', 'barcode', 'bcRaw', 'sku', 'cost', 'cid', 'cat'], 'שורה');
   const o = { n: r.n, name: ORD.txt(r.name, 60, 'bad-name', 'שם המוצר', true), price: ORD.money(r.price, 'מחיר') };
   const bc = r.barcode == null ? '' : String(r.barcode).trim();
   if (bc && !BC_RE.test(bc)) throw bad('bad-barcode', 'ברקוד: ספרות / אותיות, 3 עד 30');
   o.barcode = bc;
+  // P1: ברקוד ישן לא תקין (ספרת ביקורת, כתיב מדעי) – נקלט בלי ברקוד, הטקסט המקורי נשמר ב-bcRaw והמוצר מסומן "לבדיקה"
+  if (r.bcRaw != null && r.bcRaw !== '') o.bcRaw = String(r.bcRaw).replace(/[\u0000-\u001f]/g, '').trim().slice(0, 40);
+  if (bc && !STK.BCL.check(bc).ok) { o.bcRaw = bc; o.barcode = ''; }
   if (r.sku != null && r.sku !== '') o.sku = ORD.txt(String(r.sku), 30, 'bad-sku', 'מק"ט');
   if (r.cost != null && r.cost !== '') o.cost = ORD.money(r.cost, 'עלות');
   if (r.cid != null && r.cid !== '') o.cid = ORD.idOf(r.cid, 'קטגוריה');
@@ -86,6 +91,9 @@ async function existingProds(db, get, bcs, names) {
   const byBc = new Set(), byName = new Set();
   for (const part of inChunks([...new Set(bcs)], 30)) (await get(db.collection('prod').where('barcode', 'in', part))).forEach((s) => byBc.add(s.get('barcode')));
   for (const part of inChunks([...new Set(names)], 30)) (await get(db.collection('prod').where('name', 'in', part))).forEach((s) => byName.add(s.get('name')));
+  // גם ברקוד נוסף / ברקוד ארגז של מוצר קיים, ואינדקס posbc (P19)
+  const rest = [...new Set(bcs)].filter((b) => !byBc.has(b));
+  if (rest.length) for (const t of await STK.bcTaken(get, db, rest, '')) byBc.add(t.bc);
   return { byBc, byName };
 }
 async function existingCusts(db, get, getAll, phones, tzs) {
@@ -178,7 +186,21 @@ async function posImport(request) {
       const newCats = new Map();
       for (const o of ok) if (o.cat) newCats.set(ORD.catIdOf(o.cat, ''), o.cat);
       const ncSnaps = newCats.size ? await tx.getAll(...[...newCats.keys()].map((id) => db.doc('cat/' + id))) : [];
+      // P4: מק"ט רץ למוצר בלי מק"ט – מונה poscfg/ctr6 (כמו pos-catalog.js), מדלגים על מק"ט שכבר קיים
+      const ctrRef = db.doc('poscfg/ctr6');
+      const cs = await tx.get(ctrRef);
+      let ctr = cs.exists && Number.isInteger(cs.get('sku')) ? cs.get('sku') : 0;
+      const ctr0 = ctr;
+      const need = ok.filter((o) => !o.sku).length;
+      const free = [];
+      for (let round = 0; round < 5 && free.length < need; round++) {
+        const cand = Array.from({ length: need - free.length + 5 }, () => String(SKU0 + (++ctr)));
+        const used = new Set();
+        for (const part of inChunks(cand, 30)) (await tx.get(db.collection('prod').where('sku', 'in', part))).forEach((x) => used.add(x.get('sku')));
+        cand.forEach((c) => { if (!used.has(c)) free.push(c); });
+      }
       // כל הקריאות לפני כל הכתיבות (חובה בטרנזקציה)
+      if (ctr !== ctr0) tx.set(ctrRef, { sku: ctr, upd: now }, { merge: true });
       ncSnaps.forEach((s) => { if (!s.exists) tx.set(s.ref, { name: newCats.get(s.id), ord: 0, upd: now }); });
       for (const o of ok) {
         const key = o.barcode ? 'b:' + o.barcode : 'n:' + o.name;
@@ -188,9 +210,12 @@ async function posImport(request) {
         seen.add(key);
         const id = 'p' + crypto.createHash('sha1').update(job + '|' + (at + o.i)).digest('hex').slice(0, 24); // מזהה קבוע לשורה
         const d = { name: o.name, price: o.price, barcode: o.barcode, on: true, q: {}, at: now, by: w.uid, upd: now, src: 'posimp', imp: job };
-        if (o.sku) d.sku = o.sku;
+        d.sku = o.sku || free.shift() || '';
         if (o.cid) d.cat = o.cid; else if (o.cat) d.cat = ORD.catIdOf(o.cat, '');
+        if (o.bcRaw) d.bcRaw = o.bcRaw;
+        d.flags = STK.prodFlags(d, o.cost != null ? o.cost : null); // P1/P2: חסר מחיר / חסר פרטים / לבדיקה – לא חוסם
         tx.create(db.doc('prod/' + id), d); // create – אם במקרה קיים, הטרנזקציה נכשלת ולא דורסת
+        STK.bcIndex(tx, db, id, d);
         if (o.cost != null) tx.set(db.doc(`prod/${id}/p/cost`), { cost: o.cost, at: now, by: w.uid });
         out.ids.push(id); out.added++;
       }

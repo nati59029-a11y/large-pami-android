@@ -39,15 +39,15 @@ describe('אשף ייבוא מכספיט – ליבת המכשיר', () => {
     assert.equal(by[3].row.name, 'צלחות 20 יח׳ (דוגמה)');
     assert.equal(by[3].row.price, 12.9);
     assert.equal(by[3].row.cost, 7.5);
-    assert.equal(by[3].row.barcode, '7290000000101');
+    assert.equal(by[3].row.barcode, '7290000001012');
     assert.equal(by[4].row.name, 'כוסות "שקופות" 50 יח׳ (דוגמה)', 'מירכאות כפולות בתוך תא');
     assert.equal(by[8].st, 'off', 'מוצר לא פעיל – לא מייבאים (C19-015)');
-    assert.equal(by[9].st, 'bad'); assert.match(by[9].why, /מחיר/);
-    assert.equal(by[10].st, 'bad'); assert.match(by[10].why, /מדעי/);
+    assert.equal(by[9].st, 'ok', 'P1: בלי מחיר – נקלט ומסומן'); assert.equal(by[9].row.price, 0); assert.match(by[9].why, /חסר מחיר/);
+    assert.equal(by[10].st, 'ok', 'P1: ברקוד ישן לא תקין – נקלט בלי ברקוד, לבדיקה'); assert.equal(by[10].row.barcode, undefined); assert.equal(by[10].row.bcRaw, '7.29E+12'); assert.match(by[10].why, /לבדיקה/);
     assert.equal(by[11].row.price, 1234.5, 'פסיק אלפים');
     assert.equal(by[7].row.barcode, undefined, 'בלי ברקוד');
     const pv = P.classify(list, new Set());
-    assert.deepEqual([pv.add, pv.dup, pv.bad, pv.off], [5, 1, 2, 1]);
+    assert.deepEqual([pv.add, pv.dup, pv.bad, pv.off], [7, 1, 0, 1]);
     assert.match(list.find((x) => x.n === 6).why, /כפול בקובץ \(כמו שורה 3\)/);
   });
 
@@ -64,7 +64,7 @@ describe('אשף ייבוא מכספיט – ליבת המכשיר', () => {
   it('מחיר "מחיר מכירה" שמוגדר "לפני מע"מ" – מוסיפים את שיעור המע"מ שנבחר', () => {
     const R = [['1', 'א (דוגמה)', 100], ['2', 'ב (דוגמה)', '84,75']];
     const map = ['barcode', 'name', 'price'];
-    assert.deepEqual(P.build('prod', R, map, { vatIn: false, rate: 18 }).map((x) => x.st), ['bad', 'bad'], 'ברקוד קצר מ-3 – שגוי');
+    assert.deepEqual(P.build('prod', R, map, { vatIn: false, rate: 18 }).map((x) => [x.st, x.row.bcRaw]), [['ok', '1'], ['ok', '2']], 'ברקוד קצר מ-3 – נקלט בלי ברקוד, לבדיקה (P1)');
     const R2 = [['111', 'א (דוגמה)', 100], ['222', 'ב (דוגמה)', '84,75']];
     assert.deepEqual(P.build('prod', R2, map, { vatIn: false, rate: 18 }).map((x) => x.row.price), [118, 100.01]);
     assert.deepEqual(P.build('prod', R2, map, { vatIn: true }).map((x) => x.row.price), [100, 84.75]);
@@ -100,8 +100,8 @@ describe('אשף ייבוא מכספיט – ליבת המכשיר', () => {
   it('מפתחות לבדיקה בשרת – לפי סדר השורות התקינות; אינדקס ex מהשרת מסמן את השורה הנכונה', () => {
     const R = [['111', 'א', 1], ['', 'ב בלי ברקוד', 2], ['x', 'שגוי', 3], ['333', 'ג', 4]];
     const list = P.build('prod', R, ['barcode', 'name', 'price'], {});
-    assert.deepEqual(P.checkKeys('prod', list), [{ bc: '111' }, { nm: 'ב בלי ברקוד' }, { bc: '333' }]);
-    P.classify(list, new Set([2])); // השלישי ברשימת הבדיקה = '333'
+    assert.deepEqual(P.checkKeys('prod', list), [{ bc: '111' }, { nm: 'ב בלי ברקוד' }, { nm: 'שגוי' }, { bc: '333' }]);
+    P.classify(list, new Set([3])); // הרביעי ברשימת הבדיקה = '333'
     assert.equal(list[3].st, 'dup'); assert.equal(list[0].st, 'ok');
   });
 
@@ -112,7 +112,8 @@ describe('אשף ייבוא מכספיט – ליבת המכשיר', () => {
 
   it('Excel של 5,200 מוצרים (נוצר בבדיקה, נתונים מומצאים): נקרא, נבנה ומסווג מהר; ברקוד מספרי הופך לטקסט', () => {
     const aoa = [['ברקוד', 'שם פריט', 'מחיר מכירה', 'מחלקה']];
-    for (let i = 0; i < 5200; i++) aoa.push([7290000100000 + (i % 5000), `מוצר דוגמה ${i % 5000}`, 1 + (i % 97) / 10, i % 2 ? 'מאפים' : 'חד פעמי']);
+    const BC = require(path.join(ROOT, 'app-source', 'www', 'pos-barcode.js'));
+    for (let i = 0; i < 5200; i++) aoa.push([+BC.internal('729', 100000 + (i % 5000)), `מוצר דוגמה ${i % 5000}`, 1 + (i % 97) / 10, i % 2 ? 'מאפים' : 'חד פעמי']);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'דוגמה');
     const buf = new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
     const t0 = Date.now();
@@ -123,7 +124,7 @@ describe('אשף ייבוא מכספיט – ליבת המכשיר', () => {
     assert.equal(P.checkKeys('prod', list).length, 5200, 'כל השורות נשלחות לבדיקת כפילות (11 קריאות של 500)');
     const pv = P.classify(list, new Set([0, 1, 2]));
     const ms = Date.now() - t0;
-    assert.equal(list[0].row.barcode, '7290000100000');
+    assert.equal(list[0].row.barcode, BC.internal('729', 100000));
     assert.deepEqual([pv.add, pv.dup, pv.bad], [4997, 203, 0]); // 3 קיימים + 200 כפולים בקובץ (3 מהם כפולים של קיימים)
     assert.equal(list[5000].st, 'dup', 'שורה כפולה של רשומה קיימת – גם היא לא חדשה');
     assert.ok(ms < 5000, `5,200 שורות ב-${ms}ms`);
@@ -153,10 +154,12 @@ describe('אשף ייבוא מכספיט – ניקוי שורה בשרת', () =
   const S = require(path.join(FN, 'pos-import.js'))._core;
   const rs = (fn) => { try { fn(); return 'ok'; } catch (e) { return S.reasonOf(e); } };
   it('מוצר: שם ומחיר חובה, ברקוד, קטגוריה קיימת או חדשה, שדה לא מוכר נדחה', () => {
-    assert.deepEqual(S.prodRow({ n: 3, name: ' צלחות ', price: 12.9, barcode: '7290000000101', cost: 7.5, cid: 'c_x' }), { n: 3, name: 'צלחות', price: 12.9, barcode: '7290000000101', cost: 7.5, cid: 'c_x' });
+    assert.deepEqual(S.prodRow({ n: 3, name: ' צלחות ', price: 12.9, barcode: '7290000001012', cost: 7.5, cid: 'c_x' }), { n: 3, name: 'צלחות', price: 12.9, barcode: '7290000001012', cost: 7.5, cid: 'c_x' });
     assert.equal(rs(() => S.prodRow({ name: 'x', price: -1 })), 'bad-price');
     assert.equal(rs(() => S.prodRow({ name: '', price: 1 })), 'bad-name');
-    assert.equal(rs(() => S.prodRow({ name: 'x', price: 1, barcode: '7.29E+12' })), 'bad-barcode');
+    assert.equal(rs(() => S.prodRow({ name: 'x', price: 1, barcode: '7.29E+12' })), 'bad-barcode', 'תווים אסורים – נדחה בשרת (המכשיר שולח bcRaw)');
+    assert.deepEqual(S.prodRow({ name: 'x', price: 0, barcode: '5901234123458' }), { n: undefined, name: 'x', price: 0, barcode: '', bcRaw: '5901234123458' }, 'ספרת ביקורת שגויה – לבדיקה');
+    assert.equal(S.prodRow({ name: 'x', price: 1, bcRaw: '7.29E+12' }).bcRaw, '7.29E+12');
     assert.equal(rs(() => S.prodRow({ name: 'x', price: 1, on: false })), 'bad-field');
     assert.equal(rs(() => S.prodRow({ name: 'מוצר 1234567890', price: 1 })), 'card-like');
   });

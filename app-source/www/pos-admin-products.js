@@ -29,7 +29,7 @@ window.PosM6={C,load,find,codes,catName,fnCall,on,mgr,lead,err,ils2,FL};
 const S={q:'',f:'',sel:null,alerts:null};
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const redraw=()=>{try{if(['posProds','posAdm'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()}catch(e){}};
-function match(p){const f=S.f;if(f==='hidden'){if(p.on!==false)return false}else if(p.on===false&&f!=='')return false;
+function match(p){const f=S.f;if(f==='hidden'){if(p.on!==false)return false}else if(p.on===false)return false;
  if(f&&f!=='hidden'&&!(p.flags||[]).includes(f))return false;
  const q=S.q.trim();if(!q)return true;if(/^\d{4,}$/.test(q))return codes(p).some(c=>c.endsWith(q))||String(p.sku||'')===q;
  const s=q.toLowerCase();return String(p.name||'').toLowerCase().includes(s)||String(p.sku||'').toLowerCase()===s||(p.alias||[]).some(a=>String(a).toLowerCase().includes(s))}

@@ -9,6 +9,7 @@
 'use strict';
 // ===================== ליבה טהורה =====================
 const VAT0=18;
+const BCL=root.PosBarcode||(typeof require==='function'?(()=>{try{return require('./pos-barcode.js')}catch(e){return null}})():null);
 const KN={prod:'מוצרים',cust:'לקוחות'};
 const FIELDS={
  prod:[['name','שם המוצר',1],['barcode','ברקוד'],['sku','מק"ט / קוד פריט'],['price','מחיר מכירה'],['priceEx','מחיר לפני מע"מ'],['cost','מחיר עלות (לפני מע"מ)'],['cat','מחלקה / קטגוריה'],['active','פעיל / סטטוס']],
@@ -91,16 +92,19 @@ function build(kind,R,map,opts,first){opts=opts||{};first=first||2;const rate=Nu
    if(kind==='prod'){
     if(C.active>-1&&isOff(at(r,'active')))return{n,st:'off',why:'לא פעיל בכספיט – לא מייבאים'};
     const name=txt(at(r,'name'),60);if(!name)throw 'חסר שם מוצר';if(digRun(name)>=8)throw 'שם המוצר כולל מספר ארוך (8 ספרות ומעלה)';
-    const bc=barcodeOf(at(r,'barcode'));if(bc.err)throw bc.err;
+    // P1 (אפיון א): ברקוד ישן לא תקין / ספרת ביקורת שגויה – נקלט בלי ברקוד ומסומן "לבדיקה" (bcRaw). מחיר חסר – נקלט ומסומן "חסר מחיר"
+    let bc=barcodeOf(at(r,'barcode')),bcRaw='';if(bc.err||(bc.v&&BCL&&!BCL.check(bc.v).ok)){bcRaw=txt(at(r,'barcode'),40);bc={v:''}}
     let price=NaN;const p=num(at(r,'price')),px=num(at(r,'priceEx'));
     if(C.price>-1&&String(at(r,'price')).trim()!=='')price=vatIn?p:p*(1+rate/100);
     else if(C.priceEx>-1&&String(at(r,'priceEx')).trim()!=='')price=px*(1+rate/100);
-    if(!Number.isFinite(price))throw 'חסר מחיר או מחיר לא תקין';if(price<0||price>1000000)throw 'מחיר מחוץ לטווח';
-    const row={name,price:r2(price)};if(bc.v)row.barcode=bc.v;
+    const noP=(C.price<0||String(at(r,'price')).trim()==='')&&(C.priceEx<0||String(at(r,'priceEx')).trim()==='');
+    if(noP)price=0;else if(!Number.isFinite(price))throw 'מחיר לא תקין';if(price<0||price>1000000)throw 'מחיר מחוץ לטווח';
+    const row={name,price:r2(price)};if(bc.v)row.barcode=bc.v;if(bcRaw)row.bcRaw=bcRaw;
+    const warn=[noP?'חסר מחיר – לא נמכר עד שמתקנים':'',bcRaw?'ברקוד לא תקין – לבדיקה':''].filter(Boolean).join(' · ');
     const sku=txt(at(r,'sku'),30);if(sku){if(digRun(sku)>=8&&!/[A-Za-z֐-׿]/.test(sku))throw 'מק"ט ארוך מדי (8 ספרות ומעלה) – אם זה ברקוד, בחרו לעמודה "ברקוד"';row.sku=sku}
     if(C.cost>-1&&String(at(r,'cost')).trim()!==''){const c=num(at(r,'cost'));if(!Number.isFinite(c)||c<0||c>1000000)throw 'מחיר עלות לא תקין';row.cost=r2(c)}
     const cat=txt(at(r,'cat'),40);if(cat&&opts.cats){const m=opts.cats[cat];if(m&&m.cid)row.cid=m.cid;else if(m&&m.cat)row.cat=m.cat}else if(cat&&!opts.cats)row.cat=cat;
-    return{n,st:'ok',row,key:bc.v?'b:'+bc.v:'n:'+name,show:{name,bc:bc.v,price:row.price,cat}}}
+    return Object.assign({n,st:'ok',row,key:bc.v?'b:'+bc.v:'n:'+name,show:{name,bc:bc.v||bcRaw,price:noP?null:row.price,cat}},warn?{why:warn,warn:1}:{})}
    const name=txt(at(r,'name')||[txt(at(r,'first'),30),txt(at(r,'last'),30)].filter(Boolean).join(' '),60);if(!name)throw 'חסר שם לקוח';if(digRun(name)>=8)throw 'השם כולל מספר ארוך';
    const ph=phoneOf(at(r,'phone')),tz=tzOf(at(r,'tz'));if(ph.err)throw ph.err;if(tz.err)throw tz.err;
    if(!ph.v&&!tz.v)throw 'חסר טלפון או ת"ז – אי אפשר לבדוק כפילות';
@@ -122,7 +126,7 @@ const checkKeys=(kind,list)=>list.filter(x=>x.st==='ok').map(x=>kind==='prod'?(x
 const distinctCats=(R,map)=>{const c=map.indexOf('cat');if(c<0)return[];const s=new Set();R.forEach(r=>{const v=txt(r&&r[c],40);if(v)s.add(v)});return[...s].sort((a,b)=>a.localeCompare(b,'he'))};
 // קבצי דוגמה – השורות מסומנות "(דוגמה)" ונתונים מומצאים; מוחקים לפני ייבוא
 const TPL={
- prod:[['ברקוד','שם פריט','מחיר מכירה','מחיר עלות','מחלקה','פעיל'],['7290000000001','צלחות חד-פעמיות 20 יח׳ (דוגמה)',12.9,7.5,'חד פעמי','כן'],['7290000000002','עוגת שמרים (דוגמה)',24.9,'','מאפים','כן'],['','שקית נייר קטנה (דוגמה)',0.5,0.2,'חד פעמי','לא']],
+ prod:[['ברקוד','שם פריט','מחיר מכירה','מחיר עלות','מחלקה','פעיל'],['7290000000015','צלחות חד-פעמיות 20 יח׳ (דוגמה)',12.9,7.5,'חד פעמי','כן'],['7290000000022','עוגת שמרים (דוגמה)',24.9,'','מאפים','כן'],['','שקית נייר קטנה (דוגמה)',0.5,0.2,'חד פעמי','לא']],
  cust:[['שם לקוח','טלפון','ת.ז','מייל'],['לקוח לדוגמה א','050-0000000','','example-a@example.invalid'],['לקוח לדוגמה ב','','000000018','']]};
 const ERR={exists:'קיים – דילגתי','file-dup':'כפול בקובץ','no-cat':'מחלקה לא נמצאה','no-key':'חסר טלפון / ת"ז','bad-name':'שם לא תקין','bad-price':'מחיר לא תקין','bad-barcode':'ברקוד לא תקין','bad-phone':'טלפון לא תקין','bad-tz':'ת"ז לא תקינה','bad-mail':'מייל לא תקין','card-like':'מספר ארוך בשדה טקסט','bad-sku':'מק"ט לא תקין','bad-cat':'מחלקה לא תקינה'};
 const Core={VAT0,KN,FIELDS,guess,decode,parseCsv,headerAt,readRows,num,barcodeOf,phoneOf,tzOf,isOff,build,classify,checkKeys,distinctCats,TPL,ERR,filled};
@@ -201,11 +205,11 @@ async function check(){const P=I.f;dlg(`<h3>בודק…</h3><p class="note" id="
   P.pv=classify(list,ex);P.job=null;P.done=0;dlg(prevH())}catch(e){closeDlg();err(e)}}
 const stTxt={ok:'חדש',dup:'קיים / כפול',bad:'שגוי',off:'לא פעיל'};
 const prevH=()=>{const P=I.f,pv=P.pv,R=pv.rows;const nm=x=>x.show?x.show.name:'';
- const sub=x=>!x.show?esc(x.why||''):P.kind==='prod'?[x.show.bc?'<bdi dir="ltr">'+esc(x.show.bc)+'</bdi>':'בלי ברקוד','<bdi dir="ltr">'+esc(money(x.show.price))+'</bdi>',x.show.cat?esc(x.show.cat):''].filter(Boolean).join(' · '):'<bdi dir="ltr">'+esc([x.show.ph,x.show.tz].filter(Boolean).join(' · '))+'</bdi>';
+ const sub=x=>!x.show?esc(x.why||''):P.kind==='prod'?[x.show.bc?'<bdi dir="ltr">'+esc(x.show.bc)+'</bdi>':'בלי ברקוד',(x.show.price==null?'חסר מחיר':'<bdi dir="ltr">'+esc(money(x.show.price))+'</bdi>'),x.show.cat?esc(x.show.cat):'',x.warn&&x.st==='ok'?'<b>'+esc(x.why)+'</b>':''].filter(Boolean).join(' · '):'<bdi dir="ltr">'+esc([x.show.ph,x.show.tz].filter(Boolean).join(' · '))+'</bdi>';
  const top=R.slice(0,20).map(x=>`<div style="padding:5px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere"><small class="note">שורה ${x.n} · <b style="${x.st==='bad'?'color:var(--bad)':''}">${esc(stTxt[x.st]||'')}</b></small><br>${esc(nm(x))}${nm(x)?'<br>':''}<small class="note">${sub(x)}</small></div>`).join('');
  const lst=(st,c)=>{const a=R.filter(x=>x.st===st);return a.slice(0,50).map(x=>`<div class="note" style="padding:3px 0;border-bottom:1px solid var(--line)${c?';color:'+c:''}">שורה ${x.n}${nm(x)?': '+esc(nm(x)):''} – ${esc(x.why||'')}</div>`).join('')+(a.length>50?`<p class="note">ועוד ${a.length-50}…</p>`:'')};
  return `<h3>תצוגה מקדימה · ${esc(KN[P.kind])}</h3>
- <p><b>${pv.add}</b> חדשים · <b>${pv.dup}</b> קיימים / כפולים (ידולגו) · <b style="${pv.bad?'color:var(--bad)':''}">${pv.bad}</b> שגויים${pv.off?` · <b>${pv.off}</b> לא פעילים (לא ייובאו)`:''}</p>
+ <p><b>${pv.add}</b> חדשים · <b>${pv.dup}</b> קיימים / כפולים (ידולגו) · <b style="${pv.bad?'color:var(--bad)':''}">${pv.bad}</b> שגויים${pv.off?` · <b>${pv.off}</b> לא פעילים (לא ייובאו)`:''}</p>${(()=>{const w=R.filter(x=>x.st==='ok'&&x.warn).length;return w?`<p class="note">${w} מהחדשים ייובאו עם סימון (חסר מחיר / ברקוד לבדיקה). הם יופיעו ברשימת ההשלמה במסך המוצרים.</p>`:''})()}
  ${P.kind==='prod'?`<p class="note">המחירים ${P.vatIn?'כוללים מע"מ כמו בקובץ':`הם המחיר בקובץ + ${P.rate}% מע"מ`}.</p>`:''}
  <div style="max-height:42vh;overflow:auto"><h4 style="margin:4px 0">${Math.min(20,R.length)} השורות הראשונות</h4>${top}
  ${pv.dup?`<h4>קיימים / כפולים – לא משתנים</h4>${lst('dup')}`:''}${pv.bad?`<h4 style="color:var(--bad)">שגויים – לא ייובאו</h4>${lst('bad','var(--bad)')}`:''}</div>
@@ -228,5 +232,8 @@ ACT.piUndo=el=>{const id=el.dataset.id,b=(I.L||[]).find(x=>x.id===id);if(!b)retu
  ask(`לבטל את ייבוא המוצרים (${b.added} מוצרים)? מוצרים שעוד לא נמכרו יכובו (לא יופיעו למכירה). שום דבר לא נמחק, ומוצר שכבר נמכר נשאר פעיל.`,async()=>{
   try{let left=1,n=0,off=0,kept=0;while(left>0&&n<400){const r=await fnCall('posImpUndo',{job:id});left=r.left;off+=r.off;kept+=r.kept;n++}
    toast(`הייבוא בוטל: כובו ${off}${kept?`, נשארו פעילים ${kept} (נמכרו)`:''}`);I.L=null;rerender()}catch(e){err(e)}},'כן, לבטל')};
-window.__posImp={I,Core};
+// POS:M6 – מקור שורות שאינו קובץ (צילום מחירון – pos-ocr.js): אותה התאמת עמודות, אותה תצוגה מקדימה, ושום מוצר לא נוצר לפני "ייבא"
+async function fromRows(name,H,R,src){I.k='prod';const used=new Set();const map=H.map(x=>{const g=guess('prod',x);if(!g||used.has(g))return '';used.add(g);return g});
+ I.f={kind:'prod',name:txt(name,80),src:src||'csv',enc:'',H,R,first:2,map,vatIn:true,rate:VAT0,cats:null};if(I.L===null||I.L===undefined)await listL();dlg(mapH())}
+window.__posImp={I,Core,fromRows};
 })(typeof window!=='undefined'?window:globalThis);
