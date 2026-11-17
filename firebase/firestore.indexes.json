@@ -1,6 +1,20 @@
 {
   "indexes": [
     {
+      "collectionGroup": "priceLog",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "prod",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "at",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "dr",
       "queryScope": "COLLECTION",
       "fields": [

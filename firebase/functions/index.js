@@ -356,3 +356,5 @@ Object.assign(exports, require('./s3capai'));
 
 // אפליקציה עם סמל העסק – בנייה מיידית (12.11.2026): requestBizApk – מנהל־על בלבד, מפעיל את build-biz-apks ב-GitHub (biz-apk.js)
 Object.assign(exports, require('./biz-apk'));
+// סנכרון כספית A1 (17.11.2026): cxCfg, cxSetCfg, cxUpload, cxPreview, cxApply, cxExport, cxHist – מנהל בלבד (caspit.js)
+Object.assign(exports, require('./caspit'));

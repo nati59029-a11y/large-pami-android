@@ -54,6 +54,13 @@ if (mode === 'legacy') {
   let dcA = 0, dcB = 0; for (let i = B2.length - 1; i >= 0; i--) if (dcQ(B2[i])) { dcB++; B2.splice(i, 1); }
   for (let i = A.length - 1; i >= 0; i--) if (dcQ(A[i])) { dcA++; A.splice(i, 1); }
   console.log(`מכשיר אחד – קריאות devClaim: main ${dcA}, ענף ${dcB}`);
+  /* סנכרון כספית A1 (17.11.2026): המוצרים נטענים בעמודים (orderBy __name__, startAt בעמוד הבא). חריג צר: רק runQuery על prod –
+     עמוד ראשון (בלי startAt) שאחרי הסרת orderBy זהה בדיוק לגוף של main מנורמל לגוף של main; עמודי המשך (startAt) – רק בענף, מוצאים */
+  const pdQ = (r) => { try { const q = JSON.parse(r.body).structuredQuery; return r.method === 'POST' && /:runQuery$/.test(new URL(r.url).pathname) && q.from[0].collectionId === 'prod' ? q : null; } catch (e) { return null; } };
+  let pdN = 0; for (let i = B2.length - 1; i >= 0; i--) { const q = pdQ(B2[i]); if (q && q.startAt) { pdN++; B2.splice(i, 1); } }
+  A.forEach((r, i) => { const b = B2[i], qb = b && pdQ(b); if (!qb || !pdQ(r) || r.url !== b.url) return; const o = JSON.parse(b.body); delete o.structuredQuery.orderBy;
+    const nb = JSON.stringify({ structuredQuery: { from: o.structuredQuery.from, limit: o.structuredQuery.limit } }); if (nb === r.body) b.body = nb; });
+  console.log(`כספית – עמודי המשך של prod: ענף ${pdN}`);
   A.forEach((r, i) => tkNorm(r, B2[i]));
   const seqEq = A.length === B2.length && A.every((r, i) => key(r) === key(B2[i]));
   console.log('אותו סדר, אותה שיטה, אותה כתובת ואותו גוף (בלי קריאות הזיהוי):', seqEq ? 'כן' : 'לא');
