@@ -4,9 +4,9 @@
      supported()                         -> האם יש WebGL במכשיר
      preload()                           -> Promise: טעינת הספרייה מראש (לא חובה)
      open(el, map, opts)                 -> Promise<handle|null>
-        opts: {mode:'top'|'walk', sample:bool (תווית "דוגמה"), sum: מסמך s3sum (צבעים ותמונות), load(path)->Promise<Blob> (ברירת מחדל: abkSt מ-index.html),
+        opts: {look: מסמך s3look (תמונות לקירות, רצפה, תקרה, דלתות וקופה; בלי זה הדגם כמו תמיד), mode:'top'|'walk', sample:bool (תווית "דוגמה"), sum: מסמך s3sum (צבעים ותמונות), load(path)->Promise<Blob> (ברירת מחדל: abkSt מ-index.html),
                legend:bool (ברירת מחדל true), frames:bool (ברירת מחדל true), onPick(bay|null), onError(code,msg), base: נתיב לתיקיית www, mini:bool}
-     handle: setMode(m), getMode(), setMap(map), setSum(sum), select(bayId|null), focus(fxId), search(q)->[{fx,num,name}], blink(ids|null, ms),
+     handle: setMode(m), getMode(), setMap(map), setSum(sum), setLook(look), select(bayId|null), focus(fxId), search(q)->[{fx,num,name}], blink(ids|null, ms),
              frames(bool), walkTo(x,y) (ס"מ בתוכנית), resize(), pause(), resume(), destroy(), stats()
      mini(el, map, sum, opts)            -> {update(map,sum), destroy(), stats(), handle} – אותה סצנה, ברזולוציה מוקטנת ובסיבוב איטי.
         נטען רק כשהחלון נראה במסך (IntersectionObserver), נעצר כשהוא יוצא, ומשחרר זיכרון אחרי 15 שניות מחוץ למסך או כשהאלמנט הוסר.
@@ -221,6 +221,7 @@ function makeView(T,el,map0,opts){
     model=G.buildModel(map);
     txById=new Map();for(const t of(Array.isArray(map&&map.tx)?map.tx:[]))if(t&&t.del!==1&&/^t[0-9]{1,4}$/.test(t.id||'')&&okPath(t.path))txById.set(t.id,{path:t.path,w:t.w|0,h:t.h|0});
     {const b=model.bounds,cx=(b[0]+b[2])/200,cz=(b[1]+b[3])/200;world.center.set(cx,2,cz);world.radius=Math.hypot((b[2]-b[0])/200,(b[3]-b[1])/200,4)+1}
+    clearLook();
     if(root){scene.remove(root);disposeTree(root)}
     root=new T.Group();wallsG=new T.Group();ceilG=new T.Group();floorG=new T.Group();root.add(wallsG,ceilG,floorG);
     const scaleUv=(g,k)=>{const u=g.attributes.uv.array;for(let i=0;i<u.length;i++)u[i]*=k};
@@ -276,6 +277,8 @@ function makeView(T,el,map0,opts){
     const cm=inst(BOX,M.inst,cs,csC);if(cm)root.add(cm);
     /* גופים: מדפי מתכת לבנים ריקים (התמונה האמיתית מוצגת על החזית כשיש), זכוכית, ומשטחי בחירה לכל מקטע */
     const body=[],bodyC=[],pegs=[],shelf=[],glass=[],pick=[];pickBays=[];
+    /* fx.st (סוג מפורט, לא חובה): רק גוון/זכוכית; הצורה נשארת לפי fx.k. בלי st – בדיוק כמו קודם */
+    const stF=new Map();for(const o of(Array.isArray(map&&map.fx)?map.fx:[]))if(o&&typeof o.st==='string')stF.set(o.id,o.st);
     for(const f of model.fx){
       const W=f.w/100,D=f.d/100,H=f.h/100;
       const ry=-f.a*Math.PI/180,fc=Math.cos(ry),fs=Math.sin(ry),fx0=f.x/100,fz0=f.y/100;
@@ -291,12 +294,12 @@ function makeView(T,el,map0,opts){
           L(shelf,0,y+.0125,(z0+z1)/2,W-.08,.025,Math.abs(z1-z0));
           B(0,y+.035,z1-Math.sign(z1-z0)*.01,W-.08,.045,.02,0xd3d7dc)/* פס חזית המדף */}});
       }else if(f.k==='fridge'){
-        const wc=0xf1f3f4;B(0,H/2,-D/2+.02,W,H,.04,wc);for(const sg of[-1,1])B(sg*(W/2-.025),H/2,0,.05,H,D,wc);
+        const wc=stF.get(f.id)==='frz'?0xdce9f3:0xf1f3f4;B(0,H/2,-D/2+.02,W,H,.04,wc);for(const sg of[-1,1])B(sg*(W/2-.025),H/2,0,.05,H,D,wc);
         B(0,H-.04,0,W,.08,D,wc);B(0,.075,0,W,.15,D,0x9aa3ab);
         const gap=(H-.3)/f.lvl;for(let j=0;j<f.lvl;j++){const y=.15+j*gap;L(shelf,0,y+.01,0,W-.1,.02,D-.06)}
-        if(f.glass)L(glass,0,(H+.07)/2,D/2-.01,W-.1,H-.23,.02);
+        if(f.glass||stF.get(f.id)==='dfr')L(glass,0,(H+.07)/2,D/2-.01,W-.1,H-.23,.02);
       }else if(f.k==='table'){
-        B(0,H-.02,0,W,.04,D,0x8b5e3c);for(const sx of[-1,1])for(const sz of[-1,1])B(sx*(W/2-.05),(H-.04)/2,sz*(D/2-.05),.05,H-.04,.05,0x5b3d26);
+        B(0,H-.02,0,W,.04,D,stF.get(f.id)==='pal'?0xc9a46b:stF.get(f.id)==='ctr'?0xb9bcc0:0x8b5e3c);for(const sx of[-1,1])for(const sz of[-1,1])B(sx*(W/2-.05),(H-.04)/2,sz*(D/2-.05),.05,H-.04,.05,0x5b3d26);
       }else{/* bin – סל תיל */
         const bc=0x6f747a;B(0,.02,0,W,.04,D,bc);for(const sg of[-1,1]){B(sg*(W/2-.015),H/2,0,.03,H,D,bc);B(0,H/2,sg*(D/2-.015),W,H,.03,bc)}
       }
@@ -307,6 +310,7 @@ function makeView(T,el,map0,opts){
     const gm=add(inst(BOX,M.glass,glass));if(gm)gm.renderOrder=2;
     pickMat=pick;pickMesh=add(inst(BOX,M.pick,pick));
     scene.add(root);
+    buildLook(map);
     buildMs=performance.now()-t0;
     buildDyn();
     applyMode();
@@ -321,10 +325,66 @@ function makeView(T,el,map0,opts){
   function disposeTree(o){o.traverse(n=>{if(n.geometry&&n.geometry!==BOX&&n.geometry!==CYL)n.geometry.dispose();if(n.isInstancedMesh)n.dispose()})}
 
   /* ---- מצב המקטעים מ-s3sum: פס דק בשפת המדף + תג עם סמל מעל המקטע, ותמונות המדפים על החזיתות ---- */
-  let sum=opts.sum||null,showFrames=opts.frames!==false,dynG=null,statG=null,bdgN={};
+  let look=opts.look||null,sum=opts.sum||null,showFrames=opts.frames!==false,dynG=null,statG=null,bdgN={};
   const ph={atl:[],geo:[],want:0,ok:0,fail:0,skip:0,cell:0,byId:new Map()};
   /* תמונות שמגיעות ברצף: מציירים מחדש לכל היותר פעם ב-300ms (העלאת אטלס לכרטיס הגרפי יקרה) */
   let soonT=0;const soon=()=>{if(!soonT)soonT=setTimeout(()=>{soonT=0;invalidate()},300)};
+
+  /* ---- s3look: תמונה לכל קטע קיר, אריח רצפה/תקרה, דלת וקופה (מפתחות כמו תוכנית הצילום, S3Plan.capPlan). בלי מסמך / בלי תמונה לפריט – הדגם כמו תמיד.
+     כל קבוצה (קירות, רצפה, תקרה, מופעים) = אטלס קנבס אחד לכמה תמונות (תא 256/128/64/32 לפי מספר התמונות), כמו תמונות המקטעים: זיכרון קטן וקבוע. במיני – לא נטען. ---- */
+  const lk={atl:[],gen:0,want:0,ok:0,fail:0,cell:0};
+  function clearLook(){lk.gen++;for(const a of lk.atl){if(a.mesh&&a.mesh.parent)a.mesh.parent.remove(a.mesh);a.mesh&&a.mesh.geometry.dispose();a.tex.dispose();a.mat.dispose()}
+    lk.atl=[];lk.want=lk.ok=lk.fail=lk.cell=0}
+  function clipRect(p,x0,y0,x1,y1){let P=[];for(let i=0;i+1<p.length;i+=2)P.push([p[i],p[i+1]]);
+    for(const[ax,sg,v]of[[0,1,x0],[0,-1,x1],[1,1,y0],[1,-1,y1]]){const ins=q=>sg*(q[ax]-v)>=0,out=[];
+      for(let i=0;i<P.length;i++){const a=P[i],b=P[(i+1)%P.length],ia=ins(a),ib=ins(b);if(ia)out.push(a);
+        if(ia!==ib){const t=(v-a[ax])/(b[ax]-a[ax]);out.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t])}}
+      P=out;if(P.length<3)return null}
+    const Q=P.filter((q,i)=>{const n=P[(i+1)%P.length];return Math.hypot(q[0]-n[0],q[1]-n[1])>.5});return Q.length<3?null:Q}
+  function buildLook(map){
+    clearLook();const IT=look&&typeof look==='object'&&look.it&&typeof look.it==='object'?look.it:null;
+    if(MINI||!IT||!model||!window.S3Plan||typeof S3Plan.capPlan!=='function')return;
+    let plan;try{plan=S3Plan.capPlan(map)}catch(e){return}
+    if(!plan||!Array.isArray(plan.items))return;
+    const rooms=new Map(model.rooms.map(r=>[r.id,r])),doors=new Map(model.doors.map(d=>[d.id,d])),syms=new Map(model.syms.map(y=>[y.id,y])),inner=new Map();
+    for(const w of model.inner)if(!inner.has(w.id))inner.set(w.id,w.t/100);
+    const maxH=model.rooms.reduce((m,r)=>Math.max(m,r.h),300)/100;
+    /* משטח אנכי מ-(x1,z1) ל-(x2,z2) במטרים; הצופה בצד שמאל של הכיוון (-dz,dx), והתמונה לא הפוכה */
+    const wq=(x1,z1,x2,z2,y0,y1,off)=>{const dx=x2-x1,dz=z2-z1,L=Math.hypot(dx,dz);if(L<.05)return null;const nx=-dz/L*off,nz=dx/L*off;
+      return{pts:[[x1+nx,y0,z1+nz],[x2+nx,y0,z2+nz],[x2+nx,y1,z2+nz],[x1+nx,y1,z1+nz]],tri:[0,1,2,0,2,3],uv:[[0,0],[1,0],[1,1],[0,1]],asp:L/(y1-y0)}};
+    const list=[];
+    for(const it of plan.items){const e=IT[it.key];if(!e||typeof e!=='object'||!okPath(e.th))continue;if(list.length>=1500)break;
+      const g=it.geo;if(!Array.isArray(g)||g.length<4)continue;let o=null,grp='w';
+      if(it.k==='w'||it.k==='iw'){let x1=g[0]/100,z1=g[1]/100,x2=g[2]/100,z2=g[3]/100,off,h;
+        if(it.k==='w'){const r=rooms.get(it.room);if(!r)continue;h=r.h/100;off=.07;
+          const dx=g[2]-g[0],dy=g[3]-g[1],L=Math.hypot(dx,dy)||1;/* הצד הפנימי של החדר: אם לא – מחליפים כיוון */
+          if(!G.pointInPoly((g[0]+g[2])/2-dy/L*20,(g[1]+g[3])/2+dx/L*20,r.p)){[x1,z1,x2,z2]=[x2,z2,x1,z1]}}
+        else{h=maxH;off=(inner.get(it.ref)||.1)/2+.01}
+        o=wq(x1,z1,x2,z2,.02,h-.02,off)}
+      else if(it.k==='d'){const d=doors.get(it.ref);if(!d)continue;const a=doorAngle(d),hw=d.w/200,x=d.x/100,z=d.y/100;o=wq(x-hw*Math.cos(a),z-hw*Math.sin(a),x+hw*Math.cos(a),z+hw*Math.sin(a),.01,2.05,0)}
+      else if(it.k==='k'){const y=syms.get(it.ref);if(!y||y.k!=='cash')continue;const cw=y.w>0?y.w/100:1.4,cd=y.d>0?y.d/100:.6,ry=-(y.a||0)*Math.PI/180,c=Math.cos(ry),s=Math.sin(ry),x=y.x/100,z=y.y/100,
+          P=sx=>[x+c*sx+s*(cd/2+.012),z-s*sx+c*(cd/2+.012)],a=P(-cw/2),b=P(cw/2);grp='r';o=wq(a[0],a[1],b[0],b[1],.05,.88,0)}
+      else if(it.k==='fl'||it.k==='ce'){const r=rooms.get(it.room);if(!r)continue;const P=clipRect(r.p,g[0],g[1],g[0]+g[2],g[1]+g[3]);if(!P||!(g[2]>0)||!(g[3]>0))continue;
+        const idx=T.ShapeUtils.triangulateShape(P.map(q=>new T.Vector2(q[0],q[1])),[]);if(!idx.length)continue;
+        const fl=it.k==='fl',y=fl?.0015:r.h/100-.03;grp=fl?'f':'c';
+        o={pts:P.map(q=>[q[0]/100,y,q[1]/100]),tri:idx.flat(),uv:P.map(q=>{const u=(q[0]-g[0])/g[2];return[fl?u:1-u,1-(q[1]-g[1])/g[3]]}),asp:g[2]/g[3]}}
+      if(!o)continue;o.th=e.th;o.grp=grp;list.push(o)}
+    const N=list.length;lk.want=N;if(!N)return;
+    const cell0=N<=64?256:N<=256?128:N<=1024?64:32,cell=MINI?cell0/2:cell0,per=(ATLAS/cell)**2,inset=.5/ATLAS,gen=lk.gen,GR={w:wallsG,r:root,f:floorG,c:ceilG};lk.cell=cell;
+    for(const k of Object.keys(GR)){const items=list.filter(o=>o.grp===k),par=GR[k];if(!items.length||!par)continue;
+      for(let a=0;a*per<items.length;a++){const c=document.createElement('canvas');c.width=c.height=ATLAS;
+        const tex=new T.CanvasTexture(c);tex.colorSpace=T.SRGBColorSpace;tex.anisotropy=aniso;
+        const mat=new T.MeshBasicMaterial({map:tex,alphaTest:.5,side:T.DoubleSide,fog:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+        const P=[],U=[],I=[],ent={c,g:c.getContext('2d'),tex,mat,dirty:false,mesh:null};
+        items.slice(a*per,(a+1)*per).forEach((o,i)=>{const cx=i%(ATLAS/cell),cy=Math.floor(i/(ATLAS/cell)),base=P.length/3,
+            u0=cx*cell/ATLAS+inset,u1=(cx+1)*cell/ATLAS-inset,v1=1-cy*cell/ATLAS-inset,v0=1-(cy+1)*cell/ATLAS+inset;
+          for(const p of o.pts)P.push(p[0],p[1],p[2]);for(const q of o.uv)U.push(u0+(u1-u0)*q[0],v0+(v1-v0)*q[1]);for(const t of o.tri)I.push(base+t);
+          o.cx=cx;o.cy=cy;o.ent=ent});
+        const ge=new T.BufferGeometry();ge.setAttribute('position',new T.Float32BufferAttribute(P,3));ge.setAttribute('uv',new T.Float32BufferAttribute(U,2));ge.setIndex(I);ge.computeBoundingSphere();
+        ent.mesh=new T.Mesh(ge,mat);par.add(ent.mesh);lk.atl.push(ent)}}
+    for(const o of list)getBlob(o.th,load,alive).then(decode).then(img=>{
+      if(dead||gen!==lk.gen){closeImg(img);return}drawCover(o.ent.g,img,o.cx*cell,o.cy*cell,cell,cell,o.asp);closeImg(img);o.ent.dirty=true;lk.ok++;soon()
+    }).catch(()=>{if(!dead&&gen===lk.gen)lk.fail++})}
   const sumB=()=>sum&&sum.b&&typeof sum.b==='object'?sum.b:null;
   const stOf=id=>{const B=sumB(),e=B&&B[id];return e&&STAT[e.s]?e.s:''};
   /* פינות משטח התמונה של מקטע (בעולם), לפי סדר: שמאל-תחתון, ימין-תחתון, ימין-עליון, שמאל-עליון – כפי שרואה מי שעומד מול החזית */
@@ -344,7 +404,9 @@ function makeView(T,el,map0,opts){
         else{F(lx,H-.02,lz+n*.022,bw,.036,.012);/* פס תוויות בשפה העליונה של החזית */
           F(lx,H+.006,lz-n*.03,bw,.012,.06);/* ושפה דקה מלמעלה – נראית במבט מלמעלה */by=H+.17;bz=lz-n*.06}
         if(bp[st])bp[st].push(o.x0+o.c*lx+o.s*bz,by,o.z0-o.s*lx+o.c*bz)}
-      if(okPath(e.th))list.push({o,th:e.th})}
+      /* חזית: הסבב (th, t) או ההקמה (fr, frT) – החדשה מבין השתיים; שווה או חסר זמן = הסבב כמו קודם */
+      const useFr=okPath(e.fr)&&(!okPath(e.th)||(+e.frT||0)>(+e.t||0)),th=useFr?e.fr:e.th;
+      if(okPath(th))list.push({o,th})}
     const sm=inst(BOX,M.stat,fr,frC);if(sm)statG.add(sm);
     bdgN={};for(const k of BDG){const a=bp[k];bdgN[k]=a.length/3;if(!a.length)continue;
       const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(a,3));g.computeBoundingSphere();
@@ -529,7 +591,7 @@ function makeView(T,el,map0,opts){
     if(now-perf.w0>=2000){const avg=perf.wn*1000/(now-perf.w0);perf.w0=now;perf.wn=0;/* ממוצע חלון של 2 שניות רצופות */
       if(avg<28&&pr>1&&!MINI){pr=1;renderer.setPixelRatio(1);perf.drop=true;resize()}}}
   const gpuMB=()=>{let b=0;const add=t=>{const i=t&&t.image;if(i&&i.width)b+=i.width*i.height*4*1.33};
-    for(const o of disp)if(o.isTexture)add(o);for(const a of ph.atl)add(a.tex);for(const e of sl.cache.values())add(e.t);
+    for(const o of disp)if(o.isTexture)add(o);for(const a of ph.atl)add(a.tex);for(const a of lk.atl)add(a.tex);for(const e of sl.cache.values())add(e.t);
     if(hi.g)for(const m of hi.g.children)add(m.material.map);return+(b/1048576).toFixed(1)};
   /* ---- ציור לפי דרישה (חוסך סוללה): מציירים רק כשמשהו השתנה; במיני – עד 24 פריימים בשנייה ---- */
   let raf=0,paused=false,lost=false,frames=0;
@@ -537,6 +599,7 @@ function makeView(T,el,map0,opts){
     if(MINI&&last&&now-last<40){raf=requestAnimationFrame(frame);return}
     const more=step(now);last=now;
     for(const a of ph.atl)if(a.dirty){a.dirty=false;a.tex.needsUpdate=true}
+    for(const a of lk.atl)if(a.dirty){a.dirty=false;a.tex.needsUpdate=true}
     placeCam();renderer.render(scene,cam);frames++;perfTick(now);
     if(mode==='walk'&&HI_N){clearTimeout(hi.t);hi.t=setTimeout(hiUpdate,250);if(now-hi.at>700)hiUpdate()}
     if(more)invalidate()}
@@ -615,6 +678,7 @@ function makeView(T,el,map0,opts){
       if(!instant){fly={t0:performance.now(),from:f0,s0};ceilG.visible=false}invalidate()},
     getMode:()=>mode,
     setMap,
+    setLook(l){look=l||null;buildLook(curMap);invalidate()},
     setSum(s){sum=s||null;buildDyn();drawLegend();if(selId)select(selId,true);invalidate()},
     frames(v){if(v===undefined)return showFrames;setFrames(v);return showFrames},
     select:id=>select(id),focus,search,blink,
@@ -622,16 +686,16 @@ function makeView(T,el,map0,opts){
     resize,
     pause(){paused=true;if(raf){cancelAnimationFrame(raf);raf=0}},
     resume(){paused=false;last=0;invalidate()},
-    renderNow(){placeCam();for(const a of ph.atl)if(a.dirty){a.dirty=false;a.tex.needsUpdate=true}const t=performance.now();renderer.render(scene,cam);const g=renderer.getContext();g.readPixels(0,0,1,1,g.RGBA,g.UNSIGNED_BYTE,new Uint8Array(4));return performance.now()-t},
+    renderNow(){placeCam();for(const a of ph.atl.concat(lk.atl))if(a.dirty){a.dirty=false;a.tex.needsUpdate=true}const t=performance.now();renderer.render(scene,cam);const g=renderer.getContext();g.readPixels(0,0,1,1,g.RGBA,g.UNSIGNED_BYTE,new Uint8Array(4));return performance.now()-t},
     stats:()=>{const st={};for(const k in STAT)st[k]=0;const B=sumB();if(B)for(const o of pickBays){const s=stOf(o.b.id);if(s)st[s]++}
       return{three:THREE_VER,mini:MINI,buildMs:+buildMs.toFixed(1),fx:model.fx.length,bays:model.bays.length,instances,calls:renderer.info.render.calls,tris:renderer.info.render.triangles,
         skip:model.skip.slice(),cam:cam.position.toArray().map(v=>+v.toFixed(2)),walk:[+walk.x.toFixed(2),+walk.z.toFixed(2)],mode,frames,paused,
-        tex:Object.assign({},texSt),photos:{want:ph.want,ok:ph.ok,fail:ph.fail,cell:ph.cell,atlases:ph.atl.length,hi:hi.g?hi.g.children.length:0},slots:{on:!!PH,calls:sl.calls,th:sl.g?sl.g.children.length-[...sl.cache.values()].filter(e=>e.full&&e.t).length:0,full:[...sl.cache.values()].filter(e=>e.full&&e.t).length},stat:st,badges:Object.assign({},bdgN),badgePx:BM.ok.size,framesOn:showFrames,blink:!!bl,px:renderer.getPixelRatio(),fps:+perf.fps.toFixed(1),dprDrop:perf.drop,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,downloaded:{files:DL.n,mb:+(DL.bytes/1048576).toFixed(2)},gpuMB:gpuMB(),joy:!!joyEl&&joyEl.style.display==='block'}},
+        tex:Object.assign({},texSt),look:{want:lk.want,ok:lk.ok,fail:lk.fail,cell:lk.cell,atlases:lk.atl.length},photos:{want:ph.want,ok:ph.ok,fail:ph.fail,cell:ph.cell,atlases:ph.atl.length,hi:hi.g?hi.g.children.length:0},slots:{on:!!PH,calls:sl.calls,th:sl.g?sl.g.children.length-[...sl.cache.values()].filter(e=>e.full&&e.t).length:0,full:[...sl.cache.values()].filter(e=>e.full&&e.t).length},stat:st,badges:Object.assign({},bdgN),badgePx:BM.ok.size,framesOn:showFrames,blink:!!bl,px:renderer.getPixelRatio(),fps:+perf.fps.toFixed(1),dprDrop:perf.drop,textures:renderer.info.memory.textures,geometries:renderer.info.memory.geometries,downloaded:{files:DL.n,mb:+(DL.bytes/1048576).toFixed(2)},gpuMB:gpuMB(),joy:!!joyEl&&joyEl.style.display==='block'}},
     destroy(){if(dead)return;dead=true;if(raf)cancelAnimationFrame(raf);clearTimeout(hi.t);clearTimeout(soonT);clearTimeout(sl.t);
       cv.removeEventListener('pointerdown',onDown);cv.removeEventListener('pointermove',onMove);cv.removeEventListener('pointerup',onUp);cv.removeEventListener('pointercancel',onUp);
       cv.removeEventListener('wheel',onWheel);cv.removeEventListener('webglcontextlost',onLost);cv.removeEventListener('webglcontextrestored',onRestored);
       document.removeEventListener('visibilitychange',onVis);window.removeEventListener('keydown',kd);window.removeEventListener('keyup',ku);if(ro)ro.disconnect();else window.removeEventListener('resize',resize);
-      clearDyn();for(const p of hi.cache.values())p.then(t=>t.dispose()).catch(()=>{});hi.cache.clear();
+      clearLook();clearDyn();for(const p of hi.cache.values())p.then(t=>t.dispose()).catch(()=>{});hi.cache.clear();
       if(root)disposeTree(root);for(const o of disp)o.dispose&&o.dispose();
       renderer.dispose();try{renderer.forceContextLoss()}catch(e){}cv.remove();overlay.forEach(o=>o.remove());if(lostBox)lostBox.remove();
       model=root=pickMesh=null;pickBays=[];pickMat=[]},

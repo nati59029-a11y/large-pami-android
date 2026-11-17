@@ -262,7 +262,8 @@ ACT.s3rRetryRuns=()=>{R.runsErr='';R.runs=null;rerender()};
 const SET0=()=>({w:{p:35,h:30,o:20,d:15},show:['fix'],recN:3,stype:'',catMode:'mix',cats:[],sub:'manual',subU:'',due:2,numDir:'rtl'});
 async function setLoad(){if(R.set!==undefined)return;R.set=null;const t=R.tok,br=U.brSel();
  try{const o=await U.get('/s3set/'+br);R.set=Object.assign(SET0(),o||{});R.setNew=!o}catch(e){R.set=e&&e.offline?'offline':'err'}
- if(isSa()&&R.use===undefined){R.use=null;try{R.use=await U.get('/s3use/b_'+br)||{}}catch(e){R.use={}}}
+ if(U.isMgr()&&R.use===undefined){R.use=null;try{R.use=await U.get('/s3use/b_'+br)||{}}catch(e){R.use={}}
+  R.suse=null;try{R.suse=await U.get('/s3use/s_'+U.mapIdOf('s',br))||{}}catch(e){R.suse={}}}
  if(t===R.tok)again()}
 function setH(d){
  setLoad();staffLoad();const S=R.set;
@@ -282,8 +283,11 @@ function setH(d){
   <label class="f" id="s3rsuw"${S.sub==='fixed'?'':' hidden'}><span>המחליף הקבוע</span><select id="s3rsu" style="min-height:44px"><option value="">לא נבחר</option>${(R.staff||[]).filter(s=>s.active).map(s=>`<option value="${esc2(s.uid)}"${S.subU===s.uid?' selected':''}>${esc2(s.name)}</option>`).join('')}</select></label>
   <label class="f"><span>ימים לסיום סבב ולתיקון (1 עד 14)</span><input type="number" inputmode="numeric" min="1" max="14" id="s3rdu" value="${+S.due||2}" style="min-height:44px"></label></div>
  <div class="row s3row"><button class="btn grow" data-a="s3rSetSave"${R.busy==='set'?' aria-disabled="true"':''}>שמירת ההגדרות</button></div>`;
- if(isSa()){const cap=R.use&&Number.isInteger(R.use.cap)?R.use.cap:d.cfg.cap,n=R.use&&Number.isInteger(R.use.n)?R.use.n:null;
-  h+=`<div class="s3info"><b>מכסת AI חודשית לסניף (מנהל־על)</b><br><small>${n!=null?`נוצלו החודש: ${n} מתוך ${cap}. `:''}תמונה אחת שנשלחה לבדיקה נספרת כיחידה אחת.</small>
+ if(U.isMgr()){const cap=R.use&&Number.isInteger(R.use.cap)?R.use.cap:d.cfg.cap,mn=R.use&&R.use.m===U.qtMonth()||R.use&&!R.use.m,n=mn&&R.use&&Number.isInteger(R.use.n)?R.use.n:null,su=R.suse||{},sn=Number.isInteger(su.n)?su.n:0;
+  h+=`<div class="s3info"><b>מכסת AI חודשית לסניף</b><br><small>${n!=null?`נוצלו החודש: ${n} מתוך ${cap}. `:''}תמונה אחת שנשלחה לבדיקה נספרת כיחידה אחת.</small>
+  <br><b>מכסת הקמת המפה (חד-פעמית)</b><br><small>${Number.isInteger(su.lim)?`נוצלו בהקמה: ${sn} מתוך ${su.lim}.`:'עוד לא נעשה שימוש בבדיקה חכמה בהקמה.'}</small></div>`}
+ if(isSa()){const cap=R.use&&Number.isInteger(R.use.cap)?R.use.cap:d.cfg.cap;
+  h+=`<div class="s3info"><b>שינוי מכסה חודשית (מנהל־על)</b>
   <label class="f"><span>מכסה (0 עד 100,000)</span><input type="number" inputmode="numeric" min="0" max="100000" id="s3rcap" value="${+d.cfg.cap||0}" style="min-height:44px"></label><div class="row"><button class="btn g grow" data-a="s3rCapSave">שמירת המכסה</button></div></div>`}
  if(R.msg)h+=`<div class="ban s3warn" role="alert">${esc2(R.msg)}</div>`;
  return h}

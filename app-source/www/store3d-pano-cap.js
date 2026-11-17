@@ -10,6 +10,11 @@
    שלב 18 (תיקון "רוחות"): אחרי הצילום – יישור עדין של הכיוונים לפי החפיפה (align), וערבוב צר סביב קו התפר במקום ערבוב שקוף רחב;
      בזמן הצילום – אזהרה אם מד התאוצה מראה שהטלפון זז (ולא רק מסתובב).
    שלב 21ה (מצב נקודות): שכבת עזר (כפתור "שכבת עזר", נשמר ב-localStorage; פריימים סמוכים חצי שקופים על התצוגה), חפיפה .4, ובסוף שלב רצפה אופציונלי ("צלם"/"דלג"): פריים עם role:'nadir' (גם ב-meta.frames[i].role ובתוסף). בחיבור ה-JS הוא מוחרג מהיישור והעיוות ומתווסף אחרון רק מתחת ל-65°-.
+   שלב 21ו (מצב נקודות, תמונה אמיתית): HDR – לכל נקודת יעד 3 חשיפות באותו כיוון (רגילה, כהה, בהירה): exposureTime ×¼/×1/×4 אם החשיפה ננעלה ידנית, אחרת exposureCompensation ‎−2/0/+2,
+     אחרת תמונה אחת (כמו קודם); החשיפה הבסיסית מוחזרת אחרי כל סדרה. כל תמונה = פריים עם g (מספר היעד) ו-ev (‎-1/0/1), אותו q (של ev=0); תזוזה של יותר מ-1.5° בזמן הסדרה ⇒ כל הסדרה מצולמת שוב.
+     בחיבור ה-JS רק ev=0; התוסף מקבל את כולן (g, ev) וממזג לפי g. כפתור "HDR" (פעיל כברירת מחדל, נשמר ב-localStorage). צילום הרצפה – תמונה אחת. ב-zip הגולמי: g, ev לכל פריים ו-hdr:{mode, factors}.
+     צילום חוזר אוטומטי (פעם אחת לכל יעד) לתמונה מטושטשת: חדות (וריאנס לפלסיאן, ~320px) מתחת לחצי מהחציון של השורה (אחרי 3 תמונות), או סיבוב בזמן הצילום לפי החיישן.
+     תוצאה ברוחב 8192 בחיבור בתוסף כשיש זיכרון (deviceMemory ≥ 6 או לא ידוע) והתצוגה יכולה להציג (maxTex ≥ 4096; מתחת ל-8192 התצוגה מחלקת לשני חצאים).
    שני מצבים במסך (הבחירה האחרונה נשמרת בטלפון): "נקודות" – עוצרים על כל נקודת יעד; "סרטון" – לוחצים "הקלטה" ומסתובבים ברצף, והאפליקציה דוגמת פריימים מהמצלמה החיה
      (כל ~120ms, רק כשהסיבוב איטי מספיק), ושומרת לכל נקודת יעד רק את הפריים החד והקרוב ביותר אליה – כך הזיכרון חסום. החיבור זהה בשני המצבים.
    מצלמה: getUserMedia בתוך ה-WebView (כמו "צילום רציף" ב-index.html; ההרשאה CAMERA כבר ב-patch-android.sh). חיישן: אירוע deviceorientation (בלי הרשאת Android).
@@ -29,11 +34,13 @@ const FOV_DEF=65/* צלע ארוכה, מצלמה ראשית רגילה */,OVERLA
   MOVE_ACC=1.3,
   /* עיוות מקומי ליד התפרים (שלב 18, אחרי היישור): טווח מדידה (מעלות), רדיוס ההשפעה (מעלות), גודל רשת העיוות לפריים */
   WP_MAX=6,WP_SIG=8/* כוונן על שני צילומי חניון אמיתיים */,WP_GW=12,WP_GH=16,
-  FULL_MAX=2500000,SM_MAX=150000,FOV_KEY='lp-s3pc-fovL',/* תמונות אמיתיות: FOV_KEY+'-ph' */
+  FULL_MAX=2500000/* 4096×2048; השרת והכללים: עד 3,000,000 (8192 בוטל 17.11) */,SM_MAX=150000,FOV_KEY='lp-s3pc-fovL',/* תמונות אמיתיות: FOV_KEY+'-ph' */
   /* מצב סרטון: מרווח דגימה, מהירות זוויתית מרבית (מעלות לשנייה), הצלע הארוכה של ההקטנה לציון החדות */
   VID_MS=120,VID_SPD=60,VID_SM=160,MODE_KEY='lp-s3pc-mode',
    /* שלב 21ה: שכבת עזר (תמונה ממוזערת של פריימים שצולמו, חצי שקופה), וצילום רצפה נפרד: כיוון מינימלי כלפי מטה (מעלות) */
-   HELP_KEY='lp-s3pc-help',HELP_TH=320,HELP_A=.35,HELP_N=6,FLOOR_PITCH=-75;
+   HELP_KEY='lp-s3pc-help',HELP_TH=320,HELP_A=.35,HELP_N=6,FLOOR_PITCH=-75,
+   /* שלב 21ו: HDR – מכפילי זמן החשיפה / הפרש פיצוי החשיפה, המתנה להתייצבות אחרי שינוי חשיפה (מ"ש); טשטוש – יחס לחציון השורה, מינימום תמונות בשורה, גודל ההקטנה, סיבוב מרבי בזמן הצילום (מעלות). (לא מאומת) */
+   HDR_KEY='lp-s3pc-hdr',HDR_T=[.25,1,4],HDR_C=[-2,0,2],HDR_SET=250,BLUR_K=.5,BLUR_N=3,BLUR_TH=320,PH_ROT=.8;
 
 /* ---------------- מתמטיקה טהורה ---------------- */
 /* קווטרניון [w,x,y,z] */
@@ -291,14 +298,22 @@ function angSpeed(h,t,win){win=win||150;if(h.length<2)return 0;let j=h.length-1;
 function lapVar(d,w,h){if(w<3||h<3)return 0;const g=new Float32Array(w*h);for(let i=0,j=0;i<g.length;i++,j+=4)g[i]=d[j]*.299+d[j+1]*.587+d[j+2]*.114;
  let s=0,s2=0,n=0;for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x,l=4*g[i]-g[i-1]-g[i+1]-g[i-w]-g[i+w];s+=l;s2+=l*l;n++}
  return s2/n-(s/n)**2}
+/* שלב 21ו: תכנית HDR מיכולות המצלמה (track.getCapabilities / getSettings). locked = החשיפה ננעלה ידנית (lockAll). null = בלי HDR (תמונה אחת) */
+function hdrPlan(caps,st,locked){caps=caps||{};st=st||{};const rng=k=>{const r=caps[k];return r&&isFinite(r.min)&&isFinite(r.max)&&r.max>r.min?r:null},et=rng('exposureTime'),ec=rng('exposureCompensation');let p=null;
+ if(locked&&et&&+st.exposureTime>0){const b=+st.exposureTime,v=HDR_T.map(f=>clamp(b*f,et.min,et.max));p={mode:'time',base:b,vals:v,factors:v.map(x=>Math.round(x/b*1000)/1000)}}
+ else if(ec){const b=clamp(st.exposureCompensation!=null&&isFinite(+st.exposureCompensation)?+st.exposureCompensation:0,ec.min,ec.max),v=HDR_C.map(d=>clamp(b+d,ec.min,ec.max));p={mode:'comp',base:b,vals:v,factors:v.map(x=>Math.round((x-b)*100)/100)}}
+ return p&&(p.vals[0]!==p.base||p.vals[2]!==p.base)?p:null}
+/* חציון; תמונה מטושטשת = סיבוב בזמן הצילום מעל PH_ROT מעלות, או חדות מתחת ל-BLUR_K מהחציון של השורה (רק אחרי BLUR_N תמונות בשורה) */
+function median(a){if(!a.length)return 0;const s=a.slice().sort((x,y)=>x-y),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2}
+function blurry(sharp,row,rot){return rot>PH_ROT||(row.length>=BLUR_N&&sharp<BLUR_K*median(row))}
 /* רדיוס הקליטה של כל נקודת יעד = מחצית המרחק לנקודה הקרובה אליה */
 function vidRadii(T){const ds=T.map(t=>dirOf(t.yaw,t.pitch));return ds.map((d,i)=>{let m=180;for(let j=0;j<ds.length;j++)if(j!==i)m=Math.min(m,angDir(d,ds[j]));return m/2})}
 /* לאילו נקודות יעד הפריים (כיוון מבט fwd, חדות sharp) טוב יותר ממה שכבר נשמר. ציון = חדות × קרבה למרכז הנקודה. best[i]={s,...} או null */
 function vidPick(fwd,TD,R,best,sharp){const out=[];for(let i=0;i<TD.length;i++){const a=angDir(fwd,TD[i]);if(a>=R[i])continue;
   const s=sharp*(1-.6*(a/R[i])**2);if(!best[i]||s>best[i].s)out.push({i,s,a})}return out}
 
-const M={qMul,qNorm,qAxis,oriToQuat,qToMat,qAngle,camFwd,dirOf,yawPitch,wrap180,angDir,fovOf,fovLongOf,pickTargets,projToFrame,eqDir,eqToFrame,footprint,makePano,estFov,estFovShift,qSlerp,oriAt,angSpeed,lapVar,vidRadii,vidPick,qFromVec,grayOf,alPatch,alPair,align,warpFields,crc32,zipStore,
-  C:{FOV_DEF,OVERLAP,OVERLAP_PTS,FLOOR_PITCH,HELP_TH,AIM_TOL,STAB_MS,STAB_DEG,FRAME_MAX,PHOTO_MAX,PH_MOVE,FULL_MAX,SM_MAX,VID_MS,VID_SPD,VID_SM,BLEND_DEG,AL_MAX,AL_RES,AL_SM,MOVE_ACC,WP_MAX,WP_SIG,WP_GW,WP_GH}};
+const M={qMul,qNorm,qAxis,oriToQuat,qToMat,qAngle,camFwd,dirOf,yawPitch,wrap180,angDir,fovOf,fovLongOf,pickTargets,projToFrame,eqDir,eqToFrame,footprint,makePano,estFov,estFovShift,qSlerp,oriAt,angSpeed,lapVar,hdrPlan,median,blurry,vidRadii,vidPick,qFromVec,grayOf,alPatch,alPair,align,warpFields,crc32,zipStore,
+  C:{FOV_DEF,OVERLAP,OVERLAP_PTS,FLOOR_PITCH,HELP_TH,AIM_TOL,STAB_MS,STAB_DEG,FRAME_MAX,PHOTO_MAX,PH_MOVE,FULL_MAX,SM_MAX,VID_MS,VID_SPD,VID_SM,BLEND_DEG,AL_MAX,AL_RES,AL_SM,MOVE_ACC,WP_MAX,WP_SIG,WP_GW,WP_GH,HDR_T,HDR_C,BLUR_K,BLUR_N,BLUR_TH,PH_ROT}};
 if(typeof document==='undefined')return{_m:M};
 
 /* ---------------- דפדפן: מסך הצילום ---------------- */
@@ -330,7 +345,7 @@ const CSS=`.s3pc{position:fixed;inset:0;z-index:10050;background:#000;color:#f3e
 .s3pc .s3pc-hint.warn{color:#ffb199;font-weight:700}
 .s3pc .s3pc-tip{font-size:12px;line-height:1.3;color:#cdbf98;margin-top:3px}
 .s3pc .s3pc-tip[hidden]{display:none}
-.s3pc .s3pc-ol{flex:none;display:block;margin:4px auto 0;min-width:140px}.s3pc .s3pc-ol[aria-pressed=true]{background:#d4af37;color:#17140a;font-weight:700}
+.s3pc .s3pc-ol{flex:none;display:block;margin:4px auto 0;min-width:140px}.s3pc .s3pc-tg{display:flex;gap:8px;justify-content:center}.s3pc .s3pc-tg .s3pc-ol{margin:4px 0 0;min-width:110px}.s3pc .s3pc-ol[aria-pressed=true]{background:#d4af37;color:#17140a;font-weight:700}
 .s3pc .s3pc-fb{margin-top:6px}.s3pc .s3pc-fb[hidden]{display:none}.s3pc .s3pc-fi{font-size:14px;line-height:1.4;color:#f1d77a;font-weight:700}.s3pc .s3pc-fr{display:flex;gap:8px;margin-top:6px}
 @media (min-width:600px){.s3pc .s3pc-ins{font-size:15px}.s3pc .s3pc-bar{justify-content:center}.s3pc .s3pc-bar button{flex:0 1 200px}}`;
 function css(){if(document.getElementById('s3pc-css'))return;const s=document.createElement('style');s.id='s3pc-css';s.textContent=CSS;document.head.appendChild(s)}
@@ -372,9 +387,10 @@ function camErr(e){const n=String(e&&e.name||'');
 /* קידוד התוצאה: מלאה (עד FULL_MAX) וקטנה 1024×512 (עד SM_MAX); משחרר את הקנבס */
 async function encodeOut(big,W){
  let full=null;for(const q of[.9,.85,.78,.7,.62,.55]){full=await blobOf(big,q);if(full&&full.size<=FULL_MAX)break}
- const sc=cv(1024,512),sx=sc.getContext('2d');sx.imageSmoothingQuality='high';sx.drawImage(big,0,0,1024,512);big.width=big.height=1;
- let sm=null;for(const q of[.8,.72,.64,.56,.48,.4]){sm=await blobOf(sc,q);if(sm&&sm.size<=SM_MAX)break}
+ const sm=await smOf(big);big.width=big.height=1;
  return{full,sm}}
+async function smOf(src){const sc=cv(1024,512),sx=sc.getContext('2d');sx.imageSmoothingQuality='high';sx.drawImage(src,0,0,1024,512);
+ let sm=null;for(const q of[.8,.72,.64,.56,.48,.4]){sm=await blobOf(sc,q);if(sm&&sm.size<=SM_MAX)break}sc.width=sc.height=1;return sm}
 /* חיבור הפריימים (אחרי הצילום, המצלמה כבר סגורה) */
 async function stitch(frames,o,onP){
  const mt=o.maxTex!=null?o.maxTex:maxTex(),low=navigator.deviceMemory&&navigator.deviceMemory<=2,W=o.width||(mt>=4096&&!low?4096:2048),H=W/2;
@@ -384,12 +400,20 @@ async function stitch(frames,o,onP){
  /* שלב 21ד: חיבור מקצועי בתוסף Android (OpenCV) אם קיים; כל כשלון ⇒ ממשיכים לחיבור ב-JS שלמטה */
  const NT=typeof window!=='undefined'&&window.S3PanoNative;
  if(NT&&!o.noNative){try{if(await NT.available()){
-  const Wn=o.width||(mt>=4096&&!(navigator.deviceMemory&&navigator.deviceMemory<4)?4096:2048);
+  /* שלב 21ו: 8192 כשיש זיכרון (deviceMemory ≥ 6 או לא ידוע) והתצוגה יכולה להציג (maxTex ≥ 4096 – מתחת ל-8192 היא מחלקת לשני חצאים) */
+  const dm=navigator.deviceMemory,Wn=o.width||(mt>=4096&&!(dm&&dm<4)?4096:2048);/* 17.11: 8192 בוטל לבקשת בעל הפרויקט (השרת נשאר 3MB); התוסף והתצוגה עדיין יודעים 8192 */
   const r=await NT.stitch(frames,{fovL,yawRef,W:Wn},p=>onP(.9*p));
-  const d=await decodeBlob(r.full);let big;try{if(Math.abs(d.w/d.h-2)>.01)throw new Error('ratio');big=cv(Wn,Wn/2);const g=big.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(d.src,0,0,Wn,Wn/2)}finally{d.close()}
-  const e=await encodeOut(big,Wn);onP(1);const fl=+r.fovL||fovL;
-  return{full:e.full,sm:e.sm,w:Wn,h:Wn/2,fovL:fl,fovH:fovOf(fl,frames[0].w,frames[0].h).fw,cal:null,qs:frames.map(f=>f.q),al:null,wf:null,nat:r.stats||{}}}}
+  /* JPEG מהתוסף בגודל הנכון ועד FULL_MAX – נשמר כמו שהוא (בלי קנבס ענק וקידוד שני); אחרת – מצויר מחדש ומקודד כמו קודם */
+  /* תוסף שהחזיר רוחב קטן יותר (2048/4096, למשל בלי תמיכה ב-8192) – נשאר בגודל שלו, בלי הגדלה */
+  const d=await decodeBlob(r.full);let e,Wr=Wn;try{if(Math.abs(d.w/d.h-2)>.01)throw new Error('ratio');if(d.w<Wn&&(d.w===2048||d.w===4096))Wr=d.w;
+   if(d.w===Wr&&r.full.size<=FULL_MAX&&/jpeg/.test(r.full.type||''))e={full:r.full,sm:await smOf(d.src)};
+   else{const big=cv(Wr,Wr/2),g=big.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(d.src,0,0,Wr,Wr/2);d.close();e=await encodeOut(big,Wr)}}finally{d.close()}
+  onP(1);const fl=+r.fovL||fovL;
+  return{full:e.full,sm:e.sm,w:Wr,h:Wr/2,fovL:fl,fovH:fovOf(fl,frames[0].w,frames[0].h).fw,cal:null,qs:frames.map(f=>f.q),al:null,wf:null,nat:r.stats||{}}}}
   catch(e){console.warn('pano native',e&&e.message);onP(0)}}
+ /* שלב 21ו: בחיבור ה-JS רק החשיפה הרגילה (ev=0) או פריים בלי קבוצה; qs ו-al.fix מוחזרים לפי כל הפריימים (חשיפה נוספת = כמו ה-ev=0 שלה) */
+ const all=frames;if(frames.some(f=>f.ev)){frames=frames.filter(f=>!f.ev);main=main.filter(f=>!f.ev)}
+ const exA=a=>all===frames?a:all.map(f=>{let j=frames.indexOf(f);if(j<0)j=frames.findIndex(x=>x.g!=null&&x.g===f.g);return j>=0?a[j]:null});
  /* עותקים קטנים: לכיול שדה הראייה מהחפיפה ולמדידת הסטייה בין פריימים */
  const lo=[];for(const fr of main){const d=await decodeBlob(fr.blob);try{const k=AL_SM/Math.max(d.w,d.h),w=Math.max(8,Math.round(d.w*k)),h=Math.max(8,Math.round(d.h*k));lo.push({data:pixels(d.src,w,h),w,h,q:fr.q})}finally{d.close()}}
  onP(.06);await tick();
@@ -405,7 +429,7 @@ async function stitch(frames,o,onP){
  const big=cv(W,H);big.getContext('2d').putImageData(new ImageData(P.col,W,H),0,0);
  const{full,sm}=await encodeOut(big,W);
  onP(1);const fw=fovOf(fovL,frames[0].w,frames[0].h).fw;
- return{full,sm,w:W,h:H,fovL,fovH:fw,cal,qs:qs.concat(nad.map(f=>f.q)),al,wf:wf?{pts:wf.pts,ms:wf.ms}:null}}
+ return{full,sm,w:W,h:H,fovL,fovH:fw,cal,qs:exA(qs.concat(nad.map(f=>f.q))),al:al&&all!==frames?Object.assign({},al,{fix:exA(al.fix||[])}):al,wf:wf?{pts:wf.pts,ms:wf.ms}:null}}
 
 let cur=null,raw=null/* חומר גולמי של הצילום האחרון בלבד (בזיכרון): {frames, meta} */;
 /* zip של הצילום האחרון: הפריימים (JPEG כפי שנשמרו) + meta.json (כיוון לכל פריים, שדה ראייה, ממדי וידאו, דגם, התיקונים). null אם אין. */
@@ -420,12 +444,12 @@ function start(el,opts){
   const mock=opts.mock||null,host=el&&el.appendChild?el:document.body;
   const R=document.createElement('div');R.className='s3pc';R.setAttribute('role','dialog');R.setAttribute('aria-label','צילום 360');
   R.innerHTML=`<div class="s3pc-camw"></div><canvas class="s3pc-ov"></canvas><div class="s3pc-fl"></div>
-<div class="s3pc-top"><div class="s3pc-ins"></div><div class="s3pc-tip"></div><div class="s3pc-seg" role="group" aria-label="סוג צילום"><button type="button" data-k="mp">נקודות</button><button type="button" data-k="mv">סרטון</button></div><button type="button" class="s3pc-ol" data-k="ol" aria-pressed="true">שכבת עזר</button><div class="s3pc-cnt"></div><canvas class="s3pc-map" width="288" height="144" aria-label="מפת כיסוי" hidden></canvas><div class="s3pc-hint" aria-live="polite"></div><div class="s3pc-fb" hidden><div class="s3pc-fi">זוזו צעד אחד הצידה, וכוונו את המצלמה ישר למטה, למקום שבו עמדתם</div><div class="s3pc-fr"><button type="button" class="s3pc-pri" data-k="fs">צלם</button><button type="button" data-k="fk">דלג</button></div></div></div>
+<div class="s3pc-top"><div class="s3pc-ins"></div><div class="s3pc-tip"></div><div class="s3pc-seg" role="group" aria-label="סוג צילום"><button type="button" data-k="mp">נקודות</button><button type="button" data-k="mv">סרטון</button></div><div class="s3pc-tg"><button type="button" class="s3pc-ol" data-k="ol" aria-pressed="true">שכבת עזר</button><button type="button" class="s3pc-ol" data-k="hdr" aria-pressed="true" title="שלוש חשיפות לכל נקודה (כהה, רגילה, בהירה)">HDR</button></div><div class="s3pc-cnt"></div><canvas class="s3pc-map" width="288" height="144" aria-label="מפת כיסוי" hidden></canvas><div class="s3pc-hint" aria-live="polite"></div><div class="s3pc-fb" hidden><div class="s3pc-fi">זוזו צעד אחד הצידה, וכוונו את המצלמה ישר למטה, למקום שבו עמדתם</div><div class="s3pc-fr"><button type="button" class="s3pc-pri" data-k="fs">צלם</button><button type="button" data-k="fk">דלג</button></div></div></div>
 <div class="s3pc-bar"><button type="button" data-k="x">ביטול</button><button type="button" data-k="r" disabled>צלם שוב את האחרונה</button><button type="button" class="s3pc-pri" data-k="d" disabled>סיום</button></div>
 <div class="s3pc-msg"><div class="s3pc-card"><b></b><div class="s3pc-mt"></div><div class="s3pc-pb" hidden><i></i></div><button type="button" data-k="c" hidden>סגירה</button></div></div>`;
   host.appendChild(R);
   const $=s=>R.querySelector(s),ov=$('canvas.s3pc-ov'),cnt=$('.s3pc-cnt'),hint=$('.s3pc-hint'),msg=$('.s3pc-msg'),fl=$('.s3pc-fl');
-  const S={help:lsG(HELP_KEY)!=='0',floor:false,floorDone:false,fwUntil:0,ovn:0,off:null,done:false,stream:null,camEl:null,cw:0,ch:0,stopSensor:null,q:null,hist:[],frames:[],T:[],TD:[],yaw0:null,fovL:0,fw:0,fh:0,raf:0,busy:false,last:0,xArm:0,phase:'init',
+  const S={help:lsG(HELP_KEY)!=='0',hdr:lsG(HDR_KEY)!=='0',hp:undefined,hdrCap:false,hdrBad:false,brk:false,shp:{},blurTry:{},blurN:0,blurUntil:0,floor:false,floorDone:false,fwUntil:0,ovn:0,off:null,done:false,stream:null,camEl:null,cw:0,ch:0,stopSensor:null,q:null,hist:[],frames:[],T:[],TD:[],yaw0:null,fovL:0,fw:0,fh:0,raf:0,busy:false,last:0,xArm:0,phase:'init',
    mode:lsG(MODE_KEY)==='video'?'video':'pts',rec:false,vh:[],best:[],R:[],lastS:0,fast:0,vfc:0,sc:null,ph:null,track:null,phFail:0,phDir:0,phOff:false,pend:false,qs:null,pmax:0,reaimUntil:0,lock:null,lockDone:false,stopMotion:null,accE:0,accT:0,mv:-1e9};
   const ins=$('.s3pc-ins'),tip=$('.s3pc-tip'),map=$('canvas.s3pc-map');raw=null/* החומר הגולמי של הצילום הקודם משתחרר */;
   function cleanup(){if(S.raf)cancelAnimationFrame(S.raf);S.raf=0;if(S.vfc){try{S.camEl.cancelVideoFrameCallback(S.vfc)}catch(e){}S.vfc=0}try{S.stopSensor&&S.stopSensor()}catch(e){}S.stopSensor=null;try{S.stopMotion&&S.stopMotion()}catch(e){}S.stopMotion=null;
@@ -438,24 +462,26 @@ function start(el,opts){
   R.addEventListener('click',e=>{const b=e.target.closest('button[data-k]');if(!b||b.disabled)return;const k=b.dataset.k;
    if(k==='c')return finish(null);
    if(k==='ol'){S.help=!S.help;lsS(HELP_KEY,S.help?'1':'0');upd();return}
+   if(k==='hdr'){S.hdr=!S.hdr;lsS(HDR_KEY,S.hdr?'1':'0');upd();return}
    if(k==='fs')return floorShoot();
    if(k==='fk'){if(S.phase==='cap'&&S.floor)run();return}
    if(k==='mp'||k==='mv'){if(S.phase==='cap'&&!started()){S.mode=k==='mv'?'video':'pts';lsS(MODE_KEY,S.mode);setFov();upd()}return}
    if(S.mode==='video'&&k==='d'&&S.phase==='cap'){if(!S.rec)startRec();else if(nGot()>=2)run();return}
    if(k==='x'){if(S.phase!=='cap'||nGot()<3||Date.now()-S.xArm<2500)return finish(null);S.xArm=Date.now();b.textContent='לבטל? הקישו שוב';setTimeout(()=>{if(!S.done)b.textContent='ביטול'},2500);return}
-   if(k==='r'&&S.phase==='cap'){const f=S.frames.pop();if(f&&f.ti>=0)S.T[f.ti].got=false;S.floor=false;S.last=Date.now()+750;upd();return}
-   if(k==='d'&&S.phase==='cap'&&S.frames.length>=2)return run()});
+   if(k==='r'&&S.phase==='cap'){const f=S.frames.pop();if(f&&f.g!=null)while(S.frames.length&&S.frames[S.frames.length-1].g===f.g)S.frames.pop()/* כל החשיפות של היעד */;if(f&&f.ti>=0)S.T[f.ti].got=false;S.floor=false;S.last=Date.now()+750;upd();return}
+   if(k==='d'&&S.phase==='cap'&&nGot()>=2)return run()});
   function size(){const r=R.getBoundingClientRect(),dp=Math.min(2,window.devicePixelRatio||1);ov.width=Math.max(1,Math.round(r.width*dp));ov.height=Math.max(1,Math.round(r.height*dp))}
   /* כיול שדה הראייה נשמר בנפרד לתמונות אמיתיות (FOV_KEY+'-ph') ולווידאו; מחושב מחדש גם כשמחליפים מצב לפני הצילום הראשון */
   function setFov(){const key=S.ph&&!S.phOff&&S.mode!=='video'?FOV_KEY+'-ph':FOV_KEY;S.fovL=clamp(+opts.fov||+lsG(key)||FOV_DEF,35,110);const fv=fovOf(S.fovL,S.cw,S.ch);S.fw=fv.fw;S.fh=fv.fh;
    S.T=pickTargets(S.fw,S.fh,S.mode==='video'?OVERLAP:OVERLAP_PTS).map(t=>Object.assign(t,{got:false}))}
   function nextT(){return S.T.findIndex(t=>!t.got)}
-  function nGot(){return S.mode==='video'?S.T.filter(t=>t.got).length:S.frames.length}
+  function nGot(){return S.mode==='video'?S.T.filter(t=>t.got).length:S.frames.filter(f=>!f.ev).length/* בלי החשיפות הנוספות של HDR */}
   function started(){return S.mode==='video'?S.rec:S.frames.length>0}
   function upd(){const n=nGot(),tot=S.T.length,v=S.mode==='video',st=started();
    ins.textContent=v?'הקליטו לאט: סיבוב אחד באמצע, סיבוב אחד למעלה וסיבוב אחד למטה':'עמדו במקום אחד, סובבו את הטלפון סביב המצלמה עצמה – לא סביב הגוף. צלמו כשהחנות ריקה מאנשים';
    tip.textContent='עמדו במרכז החדר, רחוק מרהיטים; סובבו את הטלפון סביב המצלמה. עצמים קרובים מאוד עלולים להיראות כפולים';tip.hidden=st;
-   const ol=$('[data-k=ol]');ol.hidden=v;ol.setAttribute('aria-pressed',S.help?'true':'false');$('.s3pc-fb').hidden=v||!S.floor;
+   const ol=$('[data-k=ol]');ol.hidden=v;ol.setAttribute('aria-pressed',S.help?'true':'false');
+   const hb=$('[data-k=hdr]');hb.hidden=v||!S.ph||S.phOff||!S.hdrCap||S.hdrBad;hb.setAttribute('aria-pressed',S.hdr?'true':'false');$('.s3pc-fb').hidden=v||!S.floor;
    for(const[k,on]of[['mp',!v],['mv',v]]){const b=$('[data-k='+k+']');b.setAttribute('aria-pressed',on?'true':'false');b.disabled=st&&!on}
    map.hidden=!v;$('[data-k=r]').hidden=v;
    const d=$('[data-k=d]');
@@ -488,9 +514,10 @@ function start(el,opts){
   function stable(now){const h=S.hist;if(!h.length||now-h[0].t<STAB_MS)return 0;let mx=0;for(let i=h.length-1;i>=0&&now-h[i].t<=STAB_MS;i--)mx=Math.max(mx,qAngle(h[i].q,S.q));return mx<=STAB_DEG?1:0}
   /* ---- נעילת חשיפה / איזון לבן / מיקוד לפני הצילום הראשון (רק אם נתמך; כשל = ממשיכים בלי נעילה) ---- */
   const tmo=(p,ms)=>Promise.race([p,new Promise((_,j)=>setTimeout(()=>j(new Error('tmo')),ms))]);
+  const apC=async c=>{const t=S.track;if(!t)return false;try{await tmo(t.applyConstraints({advanced:[c]}),1500);return true}catch(e){return false}};
   async function lockAll(){const L={exp:false,wb:false,focus:false};S.lock=L;const t=S.track;if(!t)return;let caps={},st={};
    try{caps=t.getCapabilities?t.getCapabilities()||{}:{};st=t.getSettings?t.getSettings()||{}:{}}catch(e){return}
-   const has=(k,v)=>Array.isArray(caps[k])&&caps[k].indexOf(v)>=0,ap=async c=>{try{await tmo(t.applyConstraints({advanced:[c]}),1500);return true}catch(e){return false}};
+   const has=(k,v)=>Array.isArray(caps[k])&&caps[k].indexOf(v)>=0,ap=apC;
    try{if(has('exposureMode','manual')){const c={exposureMode:'manual'};if(st.exposureTime!=null)c.exposureTime=st.exposureTime;if(st.iso!=null&&caps.iso)c.iso=st.iso;
     L.exp=await ap(c);if(!L.exp&&c.iso!=null){delete c.iso;L.exp=await ap(c)}}}catch(e){}
    try{if(has('whiteBalanceMode','manual')&&st.colorTemperature!=null)L.wb=await ap({whiteBalanceMode:'manual',colorTemperature:st.colorTemperature})}catch(e){}
@@ -498,20 +525,42 @@ function start(el,opts){
    if(L.exp||L.wb||L.focus)await new Promise(r=>setTimeout(r,200))}
   /* ---- צילום תמונה אמיתית לנקודת יעד (מצב נקודות). כל כשל ⇒ מחזירים את השליטה ללולאה (שוב, או חזרה לווידאו) ---- */
   function phOff(){S.phOff=true;if(!S.frames.length)setFov()}
-  async function grabPhoto(ti,floor){S.busy=true;S.pend=true;S.pmax=0;let blob=null,ref=null,q0=null,ok=false;
+  /* שלב 21ו: תכנית HDR (פעם אחת, אחרי הנעילה); כשל בהחלת חשיפה ⇒ HDR כבוי עד סוף הצילום (hdrBad) */
+  function hdrNow(){if(!S.hdr||S.hdrBad||!S.track)return null;
+   if(S.hp===undefined){let caps={},st={};try{caps=S.track.getCapabilities?S.track.getCapabilities()||{}:{};st=S.track.getSettings?S.track.getSettings()||{}:{}}catch(e){}S.hp=hdrPlan(caps,st,!!(S.lock&&S.lock.exp))}return S.hp}
+  const expSet=(p,v)=>apC(p.mode==='time'?{exposureMode:'manual',exposureTime:v}:{exposureCompensation:v});
+  const take=()=>tmo(Promise.resolve(S.ph.take()),PH_TMO);
+  function sharpOf(c){try{const k=Math.min(1,BLUR_TH/Math.max(c.width,c.height)),w=Math.max(3,Math.round(c.width*k)),h=Math.max(3,Math.round(c.height*k));return lapVar(pixels(c,w,h),w,h)}catch(e){return null}}
+  async function grabPhoto(ti,floor){S.busy=true;S.pend=true;S.pmax=0;let ref=null,q0=null,ok=false,rot=0;const shots=[],hp=floor?null:hdrNow();S.brk=!!hp;
    try{S.qs=q0=S.q.slice();
     try{const k=48/Math.max(S.cw,S.ch);ref=cv(Math.max(8,Math.round(S.cw*k)),Math.max(8,Math.round(S.ch*k)));ref.getContext('2d').drawImage(S.camEl,0,0,ref.width,ref.height)}catch(e){ref=null}
-    blob=await tmo(Promise.resolve(S.ph.take()),PH_TMO);ok=!!(blob&&blob.size)}catch(e){ok=false}
-   S.pend=false;S.qs=null;const moved=Math.max(S.pmax,q0?qAngle(q0,S.q):0);
+    const b0=await take();ok=!!(b0&&b0.size);rot=S.pmax;if(ok)shots.push({blob:b0,ev:0});
+    /* HDR: כהה ואז בהירה, באותו כיוון; כל כשל ⇒ רק התמונה הרגילה ליעד הזה. החשיפה הבסיסית מוחזרת תמיד */
+    if(ok&&hp){let chg=false;try{for(const k of[0,2]){if(S.done||S.phase!=='cap'||Math.max(S.pmax,qAngle(q0,S.q))>PH_MOVE)break;
+      chg=true;if(!(await expSet(hp,hp.vals[k]))){S.hdrBad=true;shots.length=1;break}
+      await new Promise(r=>setTimeout(r,HDR_SET));let b=null;try{b=await take()}catch(e){b=null}
+      if(!b||!b.size){shots.length=1;break}shots.push({blob:b,ev:k-1})}}
+     finally{if(chg)await expSet(hp,hp.base)}}}
+   catch(e){ok=false}
+   S.pend=false;S.qs=null;S.brk=false;const moved=Math.max(S.pmax,q0?qAngle(q0,S.q):0);
    if(S.done||S.phase!=='cap'){S.busy=false;return}
    if(!ok){if(++S.phFail>=PH_FAILS)phOff();S.busy=false;S.last=Date.now();upd();return}
    if(!floor&&moved>PH_MOVE){S.reaimUntil=performance.now()+2200;S.busy=false;S.last=Date.now()+500;return}
-   const c=await photoCanvas(blob,S.cw,S.ch,ref,S.phDir);if(ref){ref.width=ref.height=1}
+   const c=await photoCanvas(shots[0].blob,S.cw,S.ch,ref,S.phDir);if(ref){ref.width=ref.height=1}
    if(c&&c._dir)S.phDir=c._dir;
    if(!c){phOff();S.busy=false;S.last=Date.now();upd();return}
+   /* שלב 21ו: תמונה מטושטשת ⇒ צילום חוזר אוטומטי, פעם אחת לכל יעד (השנייה מתקבלת). חציון לכל שורה (אותו pitch) */
+   let sh=null;if(!floor){sh=sharpOf(c);const pk=S.T[ti].pitch,row=S.shp[pk]||(S.shp[pk]=[]),bad=sh!=null&&blurry(sh,row,rot);
+    if(bad&&!S.blurTry[ti]){S.blurTry[ti]=1;S.blurN++;c.width=c.height=1;S.blurUntil=performance.now()+2200;S.busy=false;S.last=Date.now()+400;upd();return}
+    if(sh!=null&&!bad)row.push(sh)}
    const th=floor?null:mkThumb(c),b=await blobOf(c,.92),w=c.width,h=c.height;c.width=c.height=1;
    if(S.done||S.phase!=='cap'||!b){if(!b)phOff();S.busy=false;return}
-   const yaw=yawPitch(q0).yaw;if(!S.frames.length&&S.yaw0==null)S.yaw0=yaw;const rec={blob:b,q:q0,ti:floor?-1:ti,w,h,yaw,t:Date.now(),src:'photo',th};if(floor){rec.role='nadir';S.floorDone=true;S.floor=false}else S.T[ti].got=true;S.frames.push(rec);S.last=Date.now();
+   /* החשיפות הנוספות: אותו סיבוב ואותו גודל; תמונה שלא נקראה – נשמטת */
+   const ex=[];for(const x of shots.slice(1)){const c2=await photoCanvas(x.blob,S.cw,S.ch,null,S.phDir);if(!c2)continue;const b2=c2.width===w&&c2.height===h?await blobOf(c2,.92):null;c2.width=c2.height=1;if(b2)ex.push({blob:b2,ev:x.ev})}
+   if(S.done||S.phase!=='cap'){S.busy=false;return}
+   const yaw=yawPitch(q0).yaw;if(!S.frames.length&&S.yaw0==null)S.yaw0=yaw;const rec={blob:b,q:q0,ti:floor?-1:ti,w,h,yaw,t:Date.now(),src:'photo',th};if(sh!=null)rec.sh=sh;
+   if(floor){rec.role='nadir';S.floorDone=true;S.floor=false}else S.T[ti].got=true;
+   if(hp){rec.g=ti;rec.ev=0}S.frames.push(rec);if(hp)for(const x of ex)S.frames.push({blob:x.blob,q:q0,ti,w,h,yaw,t:rec.t,src:'photo',th:null,g:ti,ev:x.ev});S.last=Date.now();
    try{navigator.vibrate&&navigator.vibrate(30)}catch(e){}fl.classList.remove('on');void fl.offsetWidth;fl.classList.add('on');setTimeout(()=>fl.classList.remove('on'),60);
    S.busy=false;upd();afterShot()}
   /* ---- שלב 21ה: תמונה ממוזערת לשכבת העזר, סיום הנקודות ⇒ צילום רצפה, שכבת עזר ---- */
@@ -570,7 +619,7 @@ function start(el,opts){
      g.save();g.translate(ax,ay);g.rotate(Math.atan2(uy,ux));g.beginPath();g.moveTo(18*dp,0);g.lineTo(-10*dp,-13*dp);g.lineTo(-4*dp,0);g.lineTo(-10*dp,13*dp);g.closePath();g.fillStyle='#d4af37';g.fill();g.restore()}}
    let h='',warn=false;
    if(vid){drawMap();if(S.rec&&!S.vfcOn)sample(now);warn=S.rec&&now-S.fast<700}
-   if(S.pend)h='מצלם… החזיקו יציב';else if(S.floor)h=now<S.fwUntil||yawPitch(S.q).pitch>=FLOOR_PITCH?'כוונו את המצלמה ישר למטה, אל העיגול הזהוב':'לחצו "צלם"';else if(now<S.reaimUntil)h='זז בזמן הצילום – כוונו שוב והחזיקו יציב';else if(vid&&!S.rec)h='לחצו "הקלטה" והתחילו להסתובב לאט';else if(warn)h='לאט יותר';else if(ni<0)h=vid?'הכיסוי מלא':'כל הנקודות צולמו';else if(on)h=S.busy?'שומר…':'החזיקו יציב…';else{
+   if(S.pend)h=S.brk?'מצלם 3 חשיפות… החזיקו יציב':'מצלם… החזיקו יציב';else if(now<S.blurUntil){h='התמונה יצאה מטושטשת – מצלם שוב';warn=true}else if(S.floor)h=now<S.fwUntil||yawPitch(S.q).pitch>=FLOOR_PITCH?'כוונו את המצלמה ישר למטה, אל העיגול הזהוב':'לחצו "צלם"';else if(now<S.reaimUntil)h='זז בזמן הצילום – כוונו שוב והחזיקו יציב';else if(vid&&!S.rec)h='לחצו "הקלטה" והתחילו להסתובב לאט';else if(warn)h='לאט יותר';else if(ni<0)h=vid?'הכיסוי מלא':'כל הנקודות צולמו';else if(on)h=S.busy?'שומר…':'החזיקו יציב…';else{
     const d=S.TD[ni],x=m[0]*d[0]+m[3]*d[1]+m[6]*d[2],y=m[1]*d[0]+m[4]*d[1]+m[7]*d[2];h=Math.abs(x)>=Math.abs(y)?(x>0?'סובבו ימינה אל העיגול הזהוב':'סובבו שמאלה אל העיגול הזהוב'):(y>0?'הטו למעלה אל העיגול הזהוב':'הטו למטה אל העיגול הזהוב')}
    /* הטלפון זז (לא רק מסתובב) ⇒ פרלקסה בעצמים קרובים; הודעה בלבד, בלי לחסום */
    if(!warn&&started()&&now-S.mv<1500){h='סובבו את הטלפון במקום, בלי להזיז אותו';warn=true}
@@ -587,20 +636,20 @@ function start(el,opts){
   const api={target:()=>{if(S.floor)return{yaw:S.yaw0!=null?S.yaw0:0,pitch:-90,i:-1};const i=nextT();if(i<0||!S.T.length)return null;const y0=S.yaw0!=null?S.yaw0:S.base!=null?S.base:0;return{yaw:S.T[i].yaw+y0,pitch:S.T[i].pitch,i}},state:()=>({phase:S.phase,n:nGot(),tot:S.T.length,mode:S.mode,rec:S.rec,floor:S.floor,ovn:S.ovn,help:S.help})};
   async function run(){if(S.phase!=='cap')return;
    S.phase='stitch';if(S.busy){for(let i=0;i<50&&S.busy;i++)await new Promise(r=>setTimeout(r,50))}
-   const frames=(S.mode==='video'?vidFrames():S.frames).filter(f=>f.blob);S.frames.forEach(f=>{f.th=null});cleanup();if(frames.length<2)return fail('צולמו פחות משתי תמונות.');
+   const frames=(S.mode==='video'?vidFrames():S.frames).filter(f=>f.blob);S.frames.forEach(f=>{f.th=null});cleanup();if(frames.filter(f=>!f.ev).length<2)return fail('צולמו פחות משתי תמונות.');
    const pb=$('.s3pc-pb i');showMsg('מחבר את התמונות…','זה לוקח כמה שניות. אל תסגרו את האפליקציה.',{pb:true});
    const t0=Date.now();
    const r6=a=>a.map(x=>Math.round(x*1e6)/1e6);
    const keep=r=>{raw={frames:frames.map(f=>({blob:f.blob})),meta:{kind:'s3pano-raw',v:1,created:new Date().toISOString(),mode:S.mode==='video'?'video':'pts',n:frames.length,ua:navigator.userAgent||'',dev:mock?'mock':devName(),
-     screenAngle:screenAngle(),video:{w:S.cw,h:S.ch},lock:S.lock||null,photo:{avail:!!S.ph,off:S.phOff,fails:S.phFail,max:PHOTO_MAX},fovL0:S.fovL,fixedFov:!!opts.fov,fovL:r?Math.round(r.fovL*100)/100:null,fovH:r?Math.round(r.fovH*100)/100:null,cal:r&&r.cal?{fovL:r.cal.fovL,score:r.cal.score,base:r.cal.base,sh:r.cal.sh,n:r.cal.n}:null,
+     screenAngle:screenAngle(),video:{w:S.cw,h:S.ch},lock:S.lock||null,photo:{avail:!!S.ph,off:S.phOff,fails:S.phFail,max:PHOTO_MAX},hdr:{mode:S.hp?S.hp.mode:'off',factors:S.hp?S.hp.factors:null,on:S.hdr,bad:S.hdrBad},blur:{retakes:S.blurN,k:BLUR_K,minN:BLUR_N,rotDeg:PH_ROT},fovL0:S.fovL,fixedFov:!!opts.fov,fovL:r?Math.round(r.fovL*100)/100:null,fovH:r?Math.round(r.fovH*100)/100:null,cal:r&&r.cal?{fovL:r.cal.fovL,score:r.cal.score,base:r.cal.base,sh:r.cal.sh,n:r.cal.n}:null,
      out:r?{w:r.w,h:r.h}:null,engine:r?(r.nat?'native':'js'):null,nat:r&&r.nat?r.nat:null,ok:!!r,ms:Date.now()-t0,blendDeg:BLEND_DEG,align:r&&r.al?{pairs:r.al.pairs,used:r.al.used,ms:r.al.ms,maxDeg:AL_MAX}:null,warp:r&&r.wf?{pts:r.wf.pts,ms:r.wf.ms,maxDeg:WP_MAX,sigDeg:WP_SIG}:null,yawRef:frames[0].yaw,
      conv:'q=[w,x,y,z] מצלמה→עולם; עולם x=מזרח y=צפון z=למעלה (alpha יחסי); מצלמה x=ימין y=למעלה מבט ל-z-. qFix=סיבוב(fixDeg, וקטור בעולם, מעלות)·q',
-     frames:frames.map((f,i)=>Object.assign({file:'frame-'+String(i).padStart(2,'0')+'.jpg',src:f.src||'video',w:f.w,h:f.h,ti:f.ti,t:f.t,yaw:Math.round(f.yaw*1000)/1000,q:r6(f.q),qFix:r&&r.qs?r6(r.qs[i]):null,fixDeg:r&&r.al?r.al.fix[i]:null},f.role?{role:f.role}:{}))}}};
+     frames:frames.map((f,i)=>Object.assign({file:'frame-'+String(i).padStart(2,'0')+'.jpg',src:f.src||'video',w:f.w,h:f.h,ti:f.ti,t:f.t,yaw:Math.round(f.yaw*1000)/1000,q:r6(f.q),qFix:r&&r.qs?r6(r.qs[i]):null,fixDeg:r&&r.al?r.al.fix[i]:null},f.role?{role:f.role}:{},f.g!=null?{g:f.g,ev:f.ev}:{},f.sh!=null?{sh:Math.round(f.sh*10)/10}:{}))}}};
    try{const r=await stitch(frames,{fovL:S.fovL,fixedFov:!!opts.fov,maxTex:opts.maxTex,width:opts.width,noAlign:!!opts.noAlign,noWarp:!!opts.noWarp},p=>{pb.style.width=Math.round(p*100)+'%';$('.s3pc-mt').textContent='מחבר את התמונות… '+Math.round(p*100)+'%'});
     try{keep(r)}catch(e){}if(!r.full||!r.sm)throw new Error('encode');
     const ns=new Set(frames.map(f=>f.src||'video')),fk=ns.size===1?(ns.has('photo')?FOV_KEY+'-ph':FOV_KEY):null;/* מעורב (חזרה לווידאו באמצע) – לא שומרים כיול */
     if(!opts.fov&&fk&&r.cal&&r.fovL!==S.fovL)lsS(fk,String(Math.round(r.fovL*10)/10));
-    finish({full:r.full,sm:r.sm,w:r.w,h:r.h,meta:{n:frames.length,mode:S.mode==='video'?'video':'pts',fovH:Math.round(r.fovH*10)/10,fovL:Math.round(r.fovL*10)/10,yawRef:Math.round(frames[0].yaw*100)/100,dev:mock?'mock':devName(),ms:Date.now()-t0,src:frames.filter(f=>f.src==='photo').length+'/'+frames.length,lock:S.lock||null,engine:r.nat?'native':'js'}})}
+    finish({full:r.full,sm:r.sm,w:r.w,h:r.h,meta:{n:frames.length,mode:S.mode==='video'?'video':'pts',fovH:Math.round(r.fovH*10)/10,fovL:Math.round(r.fovL*10)/10,yawRef:Math.round(frames[0].yaw*100)/100,dev:mock?'mock':devName(),ms:Date.now()-t0,src:frames.filter(f=>f.src==='photo').length+'/'+frames.length,lock:S.lock||null,engine:r.nat?'native':'js',hdr:S.hp?S.hp.mode:'off',blur:S.blurN}})}
    catch(e){if(!raw)try{keep(null)}catch(e2){}fail('החיבור נכשל (ייתכן שאין מספיק זיכרון בטלפון). נסו שוב.')}}
   /* מכשיר אמיתי: בקשת הרשאת חיישן (אם הדפדפן דורש) חייבת לצאת מיד, בזמן שהלחיצה של המשתמש עוד "טרייה"; לא נכשלים לפי התשובה – רק אם לא מגיעים אירועים */
   let perm=null;
@@ -623,6 +672,8 @@ function start(el,opts){
     for(let i=0;i<60&&!v.videoWidth;i++)await new Promise(r=>setTimeout(r,50));
     if(!v.videoWidth)return fail('המצלמה לא נפתחה. נסו שוב.');S.cw=v.videoWidth;S.ch=v.videoHeight}
    if(S.done)return cleanup();
+   /* שלב 21ו: כפתור HDR רק אם יש שליטה בחשיפה (זמן או פיצוי) */
+   try{const c=S.track&&S.track.getCapabilities?S.track.getCapabilities()||{}:{},rg=k=>c[k]&&c[k].max>c[k].min;S.hdrCap=!!(rg('exposureTime')||rg('exposureCompensation'))}catch(e){S.hdrCap=false}
    S.camEl.classList.add('s3pc-cam');$('.s3pc-camw').appendChild(S.camEl);
    /* מצב סרטון: דגימה לפי פריימי הווידאו (אם יש), עם זמן הצילום של הפריים; אחרת מתוך הלולאה (rAF + זמן) */
    if(typeof S.camEl.requestVideoFrameCallback==='function'){S.vfcOn=true;const vf=(now,md)=>{if(S.done)return;S.vfc=S.camEl.requestVideoFrameCallback(vf);

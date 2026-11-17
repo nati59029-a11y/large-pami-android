@@ -4,16 +4,19 @@
    ← 3 תקנו (העורך, עם סימון אזורים לא ודאיים uz) ← 4 שמרו (s3SaveMap, רק אחרי שהמנהל עבר על כל אזור לא ודאי ואישר את הטיוטה) ← 5 קבעו סבב (sround).
    החלטת משתמש: המנהל עובר על טיוטת ה-AI ומאשר לפני השמירה הראשונה; אי אפשר לשמור עד שכל uz אושר/תוקן/נמחק.
    האשף פועל רק כשאין עדיין מפה (לא דורס מפה קיימת). טקסטורות: s3PutTex מיד בצילום, והנתיבים נשמרים בטלפון ונכנסים למפה ב-tx[] ובחדרים ב-tex בשמירה (wizPrep).
-   אין כאן שום קריאה לשרת כשהתוסף כבוי (feat()). */
+   אין כאן שום קריאה לשרת כשהתוסף כבוי (feat()).
+   הקמת חנות שלב 1 (17.11.2026): (א) סקיצה בלי תמונות = מפה בלי AI (skToMap, באותו מבנה כמו טיוטה מהשרת). (ב) סרטון עד 3 דקות; עד 100
+   תמונות מכל המקורות יחד, ותמונה נפרדת קודמת לפריימים (כשאין מקום – הפריימים מדוללים בפיזור שווה). (ג) תמונות פינה עם תווית (lbl).
+   לשרת: פריימים קודם ואז תמונות, src = {vid, ph, sk}, ו-lbl רק כשיש תווית (שרת ישן מתעלם משניהם). */
 (function(){
 'use strict';
 const U=window.S3UI;
 if(!U||typeof ACT==='undefined'||typeof V==='undefined'||typeof CHG==='undefined'||typeof go==='undefined')return;
 const esc2=U.esc2;
-const MAXI=100,MAXB=13e6,STEPS=['צלמו','טיוטה','תקנו','שמרו','סבב'];
+const MAXI=100,MAXB=13e6,LBLM=40,STEPS=['צלמו','טיוטה','תקנו','שמרו','סבב'];
 const TK={w:'קירות',f:'רצפה',c:'תקרה'};
 const DOW=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
-const W={own:'',kind:'s',br:'',step:1,imgs:[],tex:{w:null,f:null,c:null},busy:'',msg:'',qid:'',draft:null,staff:null,staffErr:'',rule:null,rid:'',made:0,runMsg:'',q:null,sk:null,det:0,qSeen:0};
+const W={own:'',kind:'s',br:'',step:1,imgs:[],tex:{w:null,f:null,c:null},busy:'',msg:'',qid:'',draft:null,staff:null,staffErr:'',rule:null,rid:'',made:0,runMsg:'',q:null,sk:null,det:0,qSeen:0,lbl:'כניסה'};
 /* שאלון וסקיצה (15.11.2026): q = מה שהוקלד (מחרוזות, מטרים); sk = שרטוט בס"מ במערכת הצירים של המפה (x ימינה, y למטה), w/l = המידות שבהן שורטט */
 const Q0=()=>({path:'',w:'',l:'',rooms:'',rows:'',ent:'',cash:'',note:''});
 const SK0=()=>({rooms:[],cur:[],rows:[],rt:[],rk:[],doors:[],tills:[],pend:null,cpend:null,sel:null,mode:'room',w:0,l:0,undo:[],gen:0});
@@ -45,7 +48,7 @@ function qLoad(v){W.q=Q0();W.sk=SK0();if(!v)return;
   if(!K.tills.length&&nArr(k.cash,2))K.tills=[{x:k.cash[0],y:k.cash[1],w:120,d:60,a:0}];K.gen=k.gen?1:0}
  if(!['a','b'].includes(W.q.path))W.q.path=''}
 const revoke=()=>{for(const i of W.imgs)try{URL.revokeObjectURL(i.url)}catch(e){}for(const k of ['w','f','c'])if(W.tex[k]&&W.tex[k].url)try{URL.revokeObjectURL(W.tex[k].url)}catch(e){}};
-function reset(kind){revoke();W.own=me();W.kind=kind==='w'?'w':'s';W.br=U.brSel();W.step=1;W.imgs=[];W.tex={w:null,f:null,c:null};W.busy='';W.msg='';W.qid='';W.draft=null;W.fixTxt='';W.fixQid='';W.fixMsg='';W.staff=null;W.staffErr='';W.rule=null;W.rid='';W.made=0;W.runMsg='';W.det=0;W.qSeen=0;
+function reset(kind){revoke();W.own=me();W.kind=kind==='w'?'w':'s';W.br=U.brSel();W.step=1;W.imgs=[];W.tex={w:null,f:null,c:null};W.busy='';W.msg='';W.qid='';W.draft=null;W.fixTxt='';W.fixQid='';W.fixMsg='';W.staff=null;W.staffErr='';W.rule=null;W.rid='';W.made=0;W.runMsg='';W.det=0;W.qSeen=0;W.nt=null;
  const v=lsRead();qLoad(v);if(v)for(const k of ['w','f','c'])if(v.tex[k]&&typeof v.tex[k].path==='string')W.tex[k]={texId:v.tex[k].texId,path:v.tex[k].path,w:v.tex[k].w,h:v.tex[k].h,url:''}}
 U.openWizard=k=>{const kind=k==='w'?'w':'s';if(W.own!==me()||W.kind!==kind||W.br!==U.brSel())reset(kind);if(cur().v!=='st3w')go('st3w')};
 
@@ -70,8 +73,8 @@ const keyOf=z=>[z.x,z.y,z.w,z.d].join('_');
 U.wizPanel=()=>{/* ראש הלוח: מעל המפה */
  const E=U.E,m=E.map,n=zOpen(m),w=E.wiz||{};
  const step=(n||(w.appr?0:1))?3:4;
- return `<div class="card s3s" id="s3wp">${stepper(step)}<b>טיוטה מהתמונות – בדקו לפני השמירה</b>
-  <p class="note s3note">${w.n?`ה-AI בנה את הטיוטה מ-${+w.n} תמונות. `:''}זו הערכה (לא מאומת)${w.conf!=null?`, רמת ביטחון ${Math.round(+w.conf*100)}% לפי המודל`:''}. עברו על המפה, תקנו מה שלא נכון, ואז על האזורים שמתחתיה.</p>
+ return `<div class="card s3s" id="s3wp">${stepper(step)}<b>${w.sk?'טיוטה מהסקיצה – בדקו לפני השמירה':'טיוטה מהתמונות – בדקו לפני השמירה'}</b>
+  <p class="note s3note">${w.sk?'המפה נבנתה מהסקיצה שציירתם, בלי AI: חדרים, שורות, כניסות וקופות. השורות קיבלו מידות ברירת מחדל (מקטע לכל מטר, 5 קומות). עברו על המפה ותקנו מה שלא נכון.':`${w.n?`ה-AI בנה את הטיוטה מ-${+w.n} תמונות. `:''}זו הערכה (לא מאומת)${w.conf!=null?`, רמת ביטחון ${Math.round(+w.conf*100)}% לפי המודל`:''}. עברו על המפה, תקנו מה שלא נכון, ואז על האזורים שמתחתיה.`}</p>
   ${w.notes?`<div class="s3info"><small>הערת ה-AI:</small> ${esc2(w.notes)}</div>`:''}
   <label class="f" style="display:block;margin-top:8px"><span>שם המפה</span><input data-c="s3wName" maxlength="40" value="${esc2(String(m.name||'').replace(/\s*\(טיוטה\)\s*$/,''))}"></label></div>`};
 U.wizZones=()=>{/* אזורים לא ודאיים ואישור הטיוטה: מתחת למפה, ממש לפני כפתור השמירה */
@@ -81,7 +84,7 @@ U.wizZones=()=>{/* אזורים לא ודאיים ואישור הטיוטה: מ�
   h+=`<p class="s3note" style="margin-top:0"><b>${n?`${n} מתוך ${Z.length} אזורים לא ודאיים עוד לא נבדקו`:`עברתם על כל ${Z.length} האזורים הלא ודאיים`}</b><br><span class="note">האזורים מסומנים במפה במסגרת מקווקווה עם סימן שאלה. אי אפשר לשמור עד שעוברים על כולם: אישור (המפה נכונה), תיקנתי (תיקנתם במפה), או מחיקה (האזור לא רלוונטי).</span></p>`;
   h+=Z.map((z,i)=>`<div class="s3info ${z.ok?'':'s3err'}"><div class="row" style="justify-content:space-between"><b>${z.ok?'✓':'?'} אזור ${i+1}${z.txt?': '+esc2(z.txt):''}</b>${z.ok?`<span class="tag t3">${how[keyOf(z)]==='fix'?'תוקן':'אושר'}</span>`:`<span class="tag t1">לבדיקה</span>`}</div>
    <div class="row s3row"><button class="btn s g" data-a="s3wZ" data-i="${i}">הראו במפה</button>${z.ok?`<button class="btn s g" data-a="s3wUn" data-i="${i}">החזירו לבדיקה</button>`:`<button class="btn s" data-a="s3wOk" data-i="${i}">אישור</button><button class="btn s g" data-a="s3wZFix" data-i="${i}">תיקנתי</button>`}<button class="btn s g" data-a="s3wDel" data-i="${i}" aria-label="מחיקת האזור ${i+1}">מחיקה</button></div></div>`).join('');
- }else h+=`<p class="s3note" style="margin-top:0">ה-AI לא סימן אזורים לא ודאיים. עדיין חשוב לעבור על המפה לפני השמירה.</p>`;
+ }else h+=`<p class="s3note" style="margin-top:0">${w.sk?'אין אזורים לא ודאיים (המפה מהסקיצה).':'ה-AI לא סימן אזורים לא ודאיים.'} עדיין חשוב לעבור על המפה לפני השמירה.</p>`;
  h+=`<label class="cb" style="display:flex;gap:8px;align-items:center;min-height:44px;margin-top:10px"><input type="checkbox" data-c="s3wAppr"${w.appr?' checked':''}> עברתי על הטיוטה ואני מאשר/ת אותה</label></div>`;
  return h};
 const rr=()=>{if(U.edTouch)U.edTouch();else rerender()};
@@ -106,15 +109,22 @@ async function texBlob(file){/* טקסטורה: כל צלע 256/512/1024 בדי�
   throw new Error('big')}finally{d.close()}}
 const total=()=>W.imgs.reduce((a,i)=>a+i.blob.size,0);
 const mb=n=>(n/1e6).toFixed(1).replace('.0','');
-async function addImgs(files){
- W.msg='';W.busy='מכינים את התמונות…';rerender();let bad=0,full=0;
+/* s: 'v' = פריים מסרטון, 'p' = תמונה נפרדת. lbl = תווית פינה (עד 40 תווים, '' = בלי) */
+const isV=i=>i.s==='v';
+/* תמונה נפרדת קודמת לפריימים: כשאין מקום (100 תמונות או 13MB) מסירים פריים אחד בכל פעם, כך שהנשארים בפיזור שווה. מחזיר כמה הוסרו */
+function vroom(sz){let cut=0;
+ while(W.imgs.length>=MAXI||total()+sz>MAXB){const V=W.imgs.filter(isV);if(!V.length)break;const keep=new Set(vsel(V,V.length-1));
+  W.imgs=W.imgs.filter(i=>{if(!isV(i)||keep.has(i))return true;try{URL.revokeObjectURL(i.url)}catch(e){}return false});cut++}
+ return cut}
+async function addImgs(files,lbl){
+ W.msg='';W.busy='מכינים את התמונות…';rerender();let bad=0,full=0,cut=0;const L=String(lbl||'').replace(/\s+/g,' ').trim().slice(0,LBLM);
  for(const f of files){
-  if(W.imgs.length>=MAXI){full=1;break}
+  if(W.imgs.length>=MAXI&&!W.imgs.some(isV)){full=1;break}
   if(f.type&&!/^image\//.test(f.type)){bad++;continue}
-  try{const p=await small(f);if(total()+p.blob.size>MAXB){full=2;break}W.imgs.push({blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h});W.qid=''}catch(e){bad++}}
- W.busy='';W.msg=(full===1?`אפשר עד ${MAXI} תמונות. `:full===2?'התמונות הגיעו לגודל המרבי. מחקו תמונה כדי להוסיף. ':'')+(bad?`${bad} קבצים לא נקלטו (לא תמונה, או שלא ניתן היה לקרוא אותם). `:'');rerender()}
+  try{const p=await small(f);cut+=vroom(p.blob.size);if(W.imgs.length>=MAXI){full=1;break}if(total()+p.blob.size>MAXB){full=2;break}W.imgs.push({blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h,s:'p',lbl:L});W.qid=''}catch(e){bad++}}
+ W.busy='';W.msg=(cut?`כדי לפנות מקום לתמונות הוסרו ${cut} פריימים מהסרטון (הנשארים בפיזור שווה). `:'')+(full===1?`אפשר עד ${MAXI} תמונות. `:full===2?'התמונות הגיעו לגודל המרבי. מחקו תמונה כדי להוסיף. ':'')+(bad?`${bad} קבצים לא נקלטו (לא תמונה, או שלא ניתן היה לקרוא אותם). `:'');rerender()}
 /* ---------- סרטון: עיבוד בטלפון. פריימים חדים נבחרים ועוברים דרך small() כמו תמונות מהגלריה ---------- */
-const VMAX=60,VSTEP=.75,VWIN=2,VERR='לא הצלחנו לקרוא את הסרטון. נסו לצלם שוב, או בחרו תמונות.';
+const VMAX=180,VSTEP=.75,VWIN=2,VERR='לא הצלחנו לקרוא את הסרטון. נסו לצלם שוב, או בחרו תמונות.';
 const vwait=(v,ev,ms)=>new Promise((ok,no)=>{let t;const f=()=>{clear();ok()},e=()=>{clear();no(new Error('v'))},clear=()=>{clearTimeout(t);v.removeEventListener(ev,f);v.removeEventListener('error',e)};
  t=setTimeout(e,ms);v.addEventListener(ev,f);v.addEventListener('error',e)});
 async function vopen(file){
@@ -161,14 +171,14 @@ async function addVids(files){
     for(const x of L){if(W.vcancel)break;await vseek(v,Math.min(x.t,Math.max(0,v.duration-.05)));c.getContext('2d').drawImage(v,0,0);
      const b=await U.blobOf(c,.92);if(!b)throw new Error('x');const p=await small(b);
      if(total()+p.blob.size>MAXB){full=2;break}
-     W.imgs.push({blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h});W.qid='';done++;vprog(i,n,.5+.5*done/P.length)}
+     W.imgs.push({blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h,s:'v',lbl:''});W.qid='';done++;vprog(i,n,.5+.5*done/P.length)}
     c.width=c.height=0}
    catch(e){err++}finally{o.done()}
    if(full===2)break}
  }catch(e){err++}
  cv.width=cv.height=0;
  W.vid=false;W.busy='';
- W.msg=(W.vcancel?'העיבוד בוטל. ':'')+(long?'הסרטון ארוך מדקה, לקחנו רק את הדקה הראשונה. ':'')+(full===1?`אפשר עד ${MAXI} תמונות, בחרנו מהסרטונים בפיזור שווה. `:full===2?'התמונות הגיעו לגודל המרבי. ':'')+(err?VERR:'');W.vcancel=false;rerender()}
+ W.msg=(W.vcancel?'העיבוד בוטל. ':'')+(long?'הסרטון ארוך מ-3 דקות, לקחנו רק את 3 הדקות הראשונות. ':'')+(full===1?`אפשר עד ${MAXI} תמונות, בחרנו מהסרטונים בפיזור שווה. `:full===2?'התמונות הגיעו לגודל המרבי. ':'')+(err?VERR:'');W.vcancel=false;rerender()}
 CHG.s3wVid=async el=>{const L=[...(el.files||[])];el.value='';if(!L.length||W.busy)return;W.busy='מעבד סרטון…';rerender();await addVids(L)};
 ACT.s3wVidX=()=>{W.vcancel=true};
 CHG.s3wPick=async el=>{const L=[...(el.files||[])];el.value='';if(!L.length||W.busy)return;await addImgs(L)};
@@ -189,14 +199,16 @@ ACT.s3wTexRm=el=>{const k=el.dataset.k,t=W.tex[k];if(!t)return;if(t.url)try{URL.
 /* ---------- טיוטה מהשרת (mapDraft) ---------- */
 const needs=d=>{try{return d&&d.m&&typeof d.m==='object'}catch(e){return false}};
 async function makeDraft(){
- if(W.busy)return;if(!W.imgs.length){W.msg='צלמו לפחות תמונה אחת.';return rerender()}
+ if(W.busy)return;if(!W.imgs.length)return skDraft();
  if(navigator.onLine===false){W.msg='אין חיבור לאינטרנט. יצירת הטיוטה דורשת רשת.';return rerender()}
  const qb=qBuild();if(qb.err){W.msg=qb.err;W.det=1;return rerender()}
  W.msg='';W.step=2;W.busy='מנתחים את התמונות ובונים טיוטה… זה יכול לקחת כדקה או שתיים. אל תסגרו את האפליקציה.';rerender();
  try{
   if(!W.qid)W.qid=U.qid();
-  const imgs=[];for(const i of W.imgs)imgs.push(await U.b64(i.blob));
+  /* פריימים מסרטון קודם (לפי הסדר), ואחריהם התמונות הנפרדות – כך השרת יודע מה רצף (src.vid) */
+  const IM=W.imgs.filter(isV).concat(W.imgs.filter(i=>!isV(i))),nv=IM.filter(isV).length,imgs=[];for(const i of IM)imgs.push(await U.b64(i.blob));
   const body={qid:W.qid,br:W.br||U.brSel(),kind:W.kind,imgs};if(qb.info)body.info=qb.info;if(qb.sketch)body.sketch=qb.sketch;
+  body.src={vid:nv,ph:IM.length-nv,sk:!!qb.sketch};if(IM.some(i=>i.lbl))body.lbl=IM.map(i=>i.lbl||'');
   let r;try{r=await U.fn('mapDraft',body)}catch(e){
    /* שרת שעוד לא עודכן לא מכיר כמה כניסות/קופות: שולחים שוב רק את הכניסה והקופה הראשונות (כמו פעם) */
    const sk=body.sketch;if(!(sk&&(sk.doors||sk.tills)&&/השרטוט לא תקין|גדולים מדי/.test(String(e&&e.message||''))))throw e;
@@ -239,10 +251,118 @@ ACT.s3wDraft=()=>{if(!W.det&&!W.qSeen&&!W.busy){W.det=1;W.qSeen=1;W.msg='';reren
 ACT.s3wBack1=()=>{W.draft=null;W.step=1;W.msg='';rerender()};
 ACT.s3wEdit=()=>{
  const d=W.draft;
- if(d){const m=JSON.parse(JSON.stringify(d.m));if(!Array.isArray(m.uz))m.uz=[];W.step=3;U.edLoad(m,W.kind,{n:d.n,conf:d.conf,notes:d.notes,how:{}});W.draft=null;return}
+ if(d){const m=JSON.parse(JSON.stringify(d.m));if(!Array.isArray(m.uz))m.uz=[];W.step=3;U.edLoad(m,W.kind,Object.assign({n:d.n,conf:d.conf,notes:d.notes,how:{}},d.sk?{sk:1}:{}));W.draft=null;return}
  if(U.E&&U.E.wiz&&U.E.map)go('st3e');else{W.step=1;rerender()}};
 ACT.s3wManual=()=>{if(typeof U.openEditor==='function')U.openEditor(W.kind)};
 ACT.s3wAgain=()=>ask('להתחיל מחדש? התמונות והטיוטה שבעבודה יימחקו מהמסך הזה (שום דבר לא נשמר בשרת כמפה).',()=>{const k=W.kind;if(U.E&&U.E.wiz){U.E.wiz=null;U.E.key=''}reset(k);rerender()},'כן, התחילו מחדש');
+
+/* ---------- הערות ושאלות (הקמת חנות שלב 2, 17.11.2026) ----------
+   אחרי שהטיוטה מוכנה: הערה כללית (עד 1000) והערות לפריטים (עד 300) – לא חובה – נשמרות בשרת (s3SetupNote). "המערכת תשאל" – mapQs (עד 12
+   שאלות, עד 3 סבבים, מחוץ למכסה כמו mapFix). תשובות: בחירה ו/או כתיבה (s3SetupAns), ואז mapFix עם ans/notes מחזיר טיוטה מתוקנת, שבה כל שינוי
+   מסומן כאזור לא ודאי (uz) – ואי אפשר לשמור לפני שעוברים עליו. הטיוטה שבטלפון נשלחת (m) כשאין עדיין מפה שמורה, כדי לבדוק שהפריט קיים.
+   שרת שעוד לא עודכן: "העדכון בשרת עוד לא הותקן" (הפעולות האלה מוסתרות עד אז). כל השמות כאן עם התחילית s3nt (בלי התנגשות עם שמות קיימים). */
+const NT_OLD='העדכון בשרת עוד לא הותקן, ולכן הערות ושאלות עוד לא זמינות. אפשר להמשיך בלעדיהן.';
+const ntErr=(e,d)=>e&&!e.offline&&!e.reason&&/^הפעולה נכשלה/.test(e.message||'')?NT_OLD:U.errText(e,d);
+const NFX={gon:'גונדולה',wall:'מדף קיר',fridge:'מקרר',table:'שולחן/משטח',stand:'סטנד/מתלה',bin:'סל/מתקן'};
+const ntLive=(m,k)=>(m&&Array.isArray(m[k])?m[k]:[]).filter(o=>o&&o.del!==1&&typeof o.id==='string');
+/* הפריטים שאפשר לכתוב עליהם הערה: חדרים, גופים, דלתות, קופות (מקטע – בבחירה שנייה אחרי הגוף) */
+function ntItems(m){const L=[],rn={};
+ ntLive(m,'rooms').forEach((r,i)=>{rn[r.id]=r.name||('חדר '+(i+1));L.push([r.id,'חדר: '+rn[r.id]])});
+ ntLive(m,'fx').forEach(f=>L.push([f.id,(NFX[f.k]||'גוף')+(f.num?' '+f.num:'')+(f.name?' – '+f.name:'')+(rn[f.room]?' ('+rn[f.room]+')':'')]));
+ ntLive(m,'doors').forEach((d,i)=>L.push([d.id,(d.k==='ent'?'כניסה':'דלת')+' '+(i+1)]));
+ ntLive(m,'syms').filter(y=>y.k==='cash').forEach((y,i)=>L.push([y.id,'קופה '+(i+1)]));
+ return L}
+const ntLbl=(m,id)=>{const b=/^(f[0-9]+)-([ab])-([0-9]+)$/.exec(id||''),x=ntItems(m).find(i=>i[0]===(b?b[1]:id));return x?(b?`מקטע ${b[3]} בצד ${b[2]==='a'?'א':'ב'} של ${x[1]}`:x[1]):id};
+/* ההערות לפי מצב מול הטיוטה הנוכחית (S3NK – אותה בדיקה כמו בשרת): ok = על הפריט שבמזהה; re = "לשיוך מחדש" – הטיוטה מוספרה מחדש
+   והפריט במזהה הזה כבר אחר (או לא קיים). הערה כזו לא מוצגת על הפריט: אפשר לשייך אותה לפריט שנבחר או למחוק */
+/* ok לפי המזהה הנוכחי של הפריט (ההערה הולכת אחרי הפריט הפיזי לפי g – אותה התאמה כמו בשרת), עם from = המזהה שבו היא שמורה */
+const ntSplit=(N,m)=>{const K=window.S3NK,I=K?K.itemsOf(m):null,G=K?K.geoIndex(m):null,ok={},re={};
+ /* כמו בשרת (syncNotes): קודם הערות שנשארות על הפריט שלהן, ואחר כך אלה שעוברות (לפי סדר המזהים) */
+ const L=Object.keys(N.D).sort().map(id=>{const n=N.D[id];return n&&n.t?{id,n,x:G?K.noteTo(n,id,G):{st:'ok',to:id}}:null}).filter(Boolean);
+ for(const e of L.filter(e=>e.x.st==='ok'&&e.x.to===e.id).concat(L.filter(e=>!(e.x.st==='ok'&&e.x.to===e.id)))){if(e.x.st==='ok'&&!ok[e.x.to])ok[e.x.to]=Object.assign({},e.n,{from:e.id});else re[e.id]=e.n}
+ return{ok,re,I,G}};
+/* אחרי כתיבה: ההערה של הפריט נשמרת במזהה הנוכחי שלו (כמו הסנכרון בשרת) */
+const ntPut=(N,S0,id,t)=>{const o=S0.ok[id];if(o&&o.from!==id)delete N.D[o.from];if(!t){delete N.D[id];return}const K=window.S3NK,g=S0.G&&K?K.gOf(S0.G,id):null;N.D[id]=Object.assign({t,d:S0.I?S0.I.get(id):'',on:'draft'},g?{g}:{})};
+const NT0=()=>({g:'',gs:'',t:null,item:'',bay:'',D:{},qs:[],qr:0,ans:{},busy:'',msg:'',ok:'',old:0,ld:0,qq:'',qa:'',qf:''});
+async function ntLoad(){const N=W.nt;if(!N||N.ld)return;N.ld=1;
+ try{const sd=await U.get('/s3setup/'+mapId());if(sd){N.g=N.gs=String(sd.gnote||'');N.qr=+sd.qr||0;N.qs=Array.isArray(sd.qs)?sd.qs:[];
+   for(const q of N.qs)if(q&&q.a)N.ans[q.id]={c:Array.isArray(q.a.c)?q.a.c.slice():[],x:String(q.a.x||'')};
+   let tok='';for(let i=0;i<5;i++){const j=await fsx('/s3setup/'+mapId()+'/n?pageSize=300'+(tok?'&pageToken='+encodeURIComponent(tok):''));
+    for(const d of (j&&j.documents)||[]){const f=U.dec(d)||{};if(typeof f.t==='string'&&f.t)N.D[d.name.split('/').pop()]={t:f.t,d:String(f.d||''),on:f.on,re:f.re,g:f.g}}tok=j&&j.nextPageToken;if(!tok)break}}}
+ catch(e){if(e&&e.code===403)N.old=1}
+ if(cur().v==='st3w')rerender()}
+const ntBody=o=>Object.assign({mapId:mapId(),m:W.draft&&W.draft.m},o);
+/* ערכי השדות נקראים לפני הציור מחדש (busy), כדי שלא יאבדו */
+const ntGrab=()=>{const N=W.nt;if(!N)return;const g=document.getElementById('s3ntG');if(g)N.g=String(g.value||'').slice(0,1000);const t=document.getElementById('s3ntT');if(t)N.t=String(t.value||'').slice(0,300);
+ for(const q of N.qs){const el=document.getElementById('s3ntX_'+q.id);if(el){const a=N.ans[q.id]||(N.ans[q.id]={c:[],x:''});a.x=String(el.value||'').slice(0,200)}}};
+const ntRun=async(busy,f)=>{const N=W.nt;if(!N||N.busy||W.busy)return;ntGrab();if(navigator.onLine===false){N.msg='אין חיבור לאינטרנט. נסו שוב כשיש רשת.';return rerender()}
+ N.msg='';N.ok='';N.busy=busy;rerender();try{await f(N)}catch(e){N.msg=ntErr(e,'הפעולה נכשלה. נסו שוב.')}N.busy='';rerender()};
+ACT.s3ntSaveG=()=>ntRun('שומרים…',async N=>{const t=N.g.replace(/\s+/g,' ').trim();
+ await U.fn('s3SetupNote',ntBody({itemId:'',t,qid:U.qid()}));N.g=N.gs=t;N.ok=t?'ההערה הכללית נשמרה':'ההערה הכללית נמחקה'});
+ACT.s3ntSaveI=()=>ntRun('שומרים…',async N=>{const id=N.bay||N.item;if(!id){N.msg='בחרו פריט.';return}
+ const S0=ntSplit(N,W.draft.m);if(S0.re[id]){N.msg='לפריט הזה יש הערה שמחכה לשיוך (למטה). שייכו או מחקו אותה קודם.';return}
+ const t=String(N.t==null?((S0.ok[id]||{}).t||''):N.t).replace(/\s+/g,' ').trim().slice(0,300);
+ await U.fn('s3SetupNote',ntBody({itemId:id,t,qid:U.qid()}));ntPut(N,S0,id,t);N.t=null;N.ok=t?'ההערה נשמרה':'ההערה נמחקה'});
+/* הערה לשיוך מחדש: לפריט שנבחר בשדה "הערה לפריט" (from), או מחיקה (ניקוי הטקסט) */
+ACT.s3ntRe=el=>{const from=el.dataset.id||'';ntRun('משייכים…',async N=>{const n=N.D[from],to=N.bay||N.item;if(!n)return;if(!to){N.msg='בחרו קודם פריט בשדה "הערה לפריט", ואז "שייכו לפריט שנבחר".';return}
+ const r=await U.fn('s3SetupNote',ntBody({itemId:to,from,t:n.t,qid:U.qid()}));const S0=ntSplit(N,W.draft.m);ntPut(N,S0,to,String(r&&r.t||n.t));delete N.D[from];N.ok='ההערה שויכה לפריט שנבחר'})};
+ACT.s3ntDel=el=>{const id=el.dataset.id||'';ntRun('מוחקים…',async N=>{if(!N.D[id])return;await U.fn('s3SetupNote',ntBody({itemId:id,t:'',qid:U.qid()}));delete N.D[id];N.ok='ההערה נמחקה'})};
+ACT.s3ntEdit=el=>{const N=W.nt,id=el.dataset.id||'';if(!N)return;N.t=null;const b=/^(f[0-9]+)-[ab]-[0-9]+$/.exec(id);N.item=b?b[1]:id;N.bay=b?id:'';N.msg='';N.ok='';rerender()};
+CHG.s3ntItem=el=>{const N=W.nt;if(!N)return;N.item=String(el.value||'');N.bay='';N.t=null;rerender()};
+CHG.s3ntBay=el=>{const N=W.nt;if(!N)return;N.bay=String(el.value||'');N.t=null;rerender()};
+CHG.s3ntG=el=>{if(W.nt)W.nt.g=String(el.value||'').slice(0,1000)};
+ACT.s3ntAsk=()=>ntRun('המערכת עוברת על הטיוטה ועל ההערות ומכינה שאלות… זה יכול לקחת עד דקה.',async N=>{
+ if(!N.qq)N.qq=U.qid();const r=await U.fn('mapQs',ntBody({qid:N.qq}));N.qq='';
+ N.qs=Array.isArray(r&&r.qs)?r.qs:[];N.qr=+(r&&r.qr)||N.qr+1;N.ans={};N.ok=N.qs.length?`יש ${N.qs.length} שאלות. ענו על מה שאפשר (אפשר גם לכתוב), ואז "שמרו ותקנו".`:'המערכת לא מצאה מה לשאול – הטיוטה ברורה לה.'});
+CHG.s3ntC=el=>{const N=W.nt;if(!N)return;const q=N.qs.find(x=>x.id===el.dataset.q);if(!q)return;const a=N.ans[q.id]||(N.ans[q.id]={c:[],x:''}),i=+el.dataset.i;
+ if(q.multi){a.c=a.c.filter(v=>v!==i);if(el.checked)a.c.push(i);a.c.sort()}else a.c=el.checked?[i]:[]};
+CHG.s3ntX=el=>{const N=W.nt;if(!N)return;const a=N.ans[el.dataset.q]||(N.ans[el.dataset.q]={c:[],x:''});a.x=String(el.value||'').slice(0,200)};
+/* mapFix עם התשובות/ההערות השמורות: הטיוטה המתוקנת מחליפה את הנוכחית (כמו תיקון בכתב), והשינויים מסומנים כאזורים לבדיקה */
+async function ntFix(N,o){const d=W.draft;if(!d)return;
+ if(!N.qf)N.qf=U.qid();const body=Object.assign({qid:N.qf,br:W.br||U.brSel(),kind:W.kind,m:d.m},o);if(d.id)body.from=d.id;
+ let r=await U.fn('mapFix',body);N.qf='';
+ if(r&&r.st==='fail')throw Object.assign(new Error(r.err||'לא הצלחנו לתקן את הטיוטה.'),{reason:''});
+ if(r&&!needs(r)&&r.draftId){const dd=await U.get('/s3draft/'+r.draftId);if(dd&&dd.m)r=Object.assign({},r,{m:dd.m})}
+ if(!r||!needs(r))throw new Error('התשובה מהשרת חסרה. נסו שוב.');
+ W.draft={m:r.m,conf:typeof r.conf==='number'?r.conf:null,notes:String(r.notes||''),n:d.n,drop:+r.drop||0,usage:null,id:r.draftId||''};
+ const z=zs(r.m).length;N.ok=`הטיוטה תוקנה לפי ${o.ans?'התשובות וההערות':'ההערות'}.${z?` ${z} שינויים מסומנים כאזורים לבדיקה – עברו עליהם לפני השמירה.`:''}`}
+ACT.s3ntAns=()=>ntRun('שומרים את התשובות ומתקנים את הטיוטה… זה יכול לקחת עד דקה או שתיים.',async N=>{
+ const ans=N.qs.filter(q=>{const a=N.ans[q.id];return a&&(a.c.length||a.x.trim())}).map(q=>({id:q.id,c:N.ans[q.id].c,x:N.ans[q.id].x.trim()}));
+ if(!ans.length){N.msg='ענו לפחות על שאלה אחת (בחירה או כתיבה).';return}
+ if(!N.qa)N.qa=U.qid();await U.fn('s3SetupAns',{mapId:mapId(),qid:N.qa,ans,qr:N.qr});N.qa='';
+ for(const q of N.qs)if(N.ans[q.id]&&ans.some(a=>a.id===q.id))q.a=1;
+ await ntFix(N,{ans:true,notes:true})});
+ACT.s3ntFix=()=>ntRun('מתקנים את הטיוטה לפי ההערות… זה יכול לקחת עד דקה או שתיים.',async N=>{
+ if(!N.gs&&!Object.keys(N.D).length){N.msg='עוד אין הערות שמורות. כתבו הערה ושמרו אותה קודם.';return}await ntFix(N,{notes:true})});
+function ntBox(){
+ if(!W.draft)return '';if(!W.nt||W.nt.mid!==mapId()){W.nt=Object.assign(NT0(),{mid:mapId()})}
+ const N=W.nt,m=W.draft.m,dis=N.busy||W.busy?' disabled':'';ntLoad();const SP=ntSplit(N,m);
+ if(N.old)return `<div class="s3info" id="s3nt"><b>הערות ושאלות</b><br><small>${esc2(NT_OLD)}</small></div>`;
+ const I=ntItems(m),f=ntLive(m,'fx').find(x=>x.id===N.item),nb=f&&+f.bays>0?Math.min(30,+f.bays):0,sel=N.bay||N.item;
+ const opt=(v,c,l)=>`<option value="${esc2(v)}"${v===c?' selected':''}>${esc2(l)}</option>`;
+ let h=`<div class="s3info" id="s3nt"><b>הערות ושאלות (לא חובה)</b><br><small>כתבו מה שחשוב לדעת על החנות, כללי או על פריט מסוים. המערכת יכולה לשאול שאלות על מה שלא ברור, ולתקן את הטיוטה לפי התשובות. לא נספר במכסה.</small>`;
+ h+=`<label class="f" style="display:block;margin-top:8px"><span>הערה כללית (עד 1000 תווים)</span><textarea id="s3ntG" data-c="s3ntG" rows="3" maxlength="1000" style="width:100%"${dis}>${esc2(N.g)}</textarea></label><div class="row s3row"><button class="btn s g" data-a="s3ntSaveG"${dis}>שמרו הערה כללית</button></div>`;
+ h+=`<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><label class="f" style="flex:1;min-width:150px;margin:0"><span>הערה לפריט</span><select data-c="s3ntItem"${dis}>${opt('',N.item,'בחרו פריט…')}${I.map(i=>opt(i[0],N.item,i[1])).join('')}</select></label>`;
+ if(nb){let o=opt('',N.bay,'כל הגוף');for(const sd of (f.sides===2?['a','b']:['a']))for(let n=1;n<=nb;n++)o+=opt(`${f.id}-${sd}-${n}`,N.bay,`מקטע ${n}${f.sides===2?' צד '+(sd==='a'?'א':'ב'):''}`);h+=`<label class="f" style="flex:1;min-width:110px;margin:0"><span>מקטע</span><select data-c="s3ntBay"${dis}>${o}</select></label>`}
+ h+=`</div>`;
+ if(sel)h+=`<textarea id="s3ntT" rows="2" maxlength="300" style="width:100%;margin-top:6px" aria-label="הערה ל${esc2(ntLbl(m,sel))} (עד 300 תווים)"${dis}>${esc2(N.t!=null?N.t:(SP.ok[sel]||{}).t||'')}</textarea><div class="row s3row"><button class="btn s g" data-a="s3ntSaveI"${dis}>שמרו הערה לפריט</button></div>`;
+ const ks=Object.keys(SP.ok),kr=Object.keys(SP.re);
+ if(kr.length)h+=`<div class="s3info s3err" id="s3ntRe" style="margin-top:8px"><b>${kr.length} ${kr.length===1?'הערה מחכה':'הערות מחכות'} לשיוך מחדש</b><br><small>הטיוטה השתנתה, והפריט שעליו נכתבה ההערה כבר לא נמצא באותו מקום ברשימה. בחרו את הפריט הנכון בשדה "הערה לפריט" ולחצו "שייכו", או מחקו. הערה כזו לא תועבר לעובדים עד שתשויך.</small>
+  <ul style="margin:6px 0 0;padding-inline-start:18px">${kr.map(k=>`<li style="margin:4px 0"><b>נכתבה על: ${esc2(SP.re[k].d||k)}</b><br>${esc2(SP.re[k].t)}<div class="row s3row"><button class="btn s" data-a="s3ntRe" data-id="${esc2(k)}"${dis||!sel?' disabled':''}>שייכו לפריט שנבחר</button><button class="btn s g" data-a="s3ntDel" data-id="${esc2(k)}"${dis}>מחקו</button></div></li>`).join('')}</ul></div>`;
+ if(ks.length)h+=`<ul class="s3ntL" style="margin:8px 0 0;padding-inline-start:18px">${ks.map(k=>`<li style="margin:4px 0"><b>${esc2(ntLbl(m,k))}:</b> ${esc2(SP.ok[k].t)} <button class="btn s g" style="min-height:44px" data-a="s3ntEdit" data-id="${esc2(k)}"${dis}>עריכה</button></li>`).join('')}</ul>`;
+ /* שאלות */
+ h+=`<div style="margin-top:12px"><b>שאלות מהמערכת</b> <small class="note">(סבב ${Math.min(N.qr,3)} מתוך 3)</small></div>`;
+ if(N.qs.length){h+=N.qs.map((q,qi)=>{const a=N.ans[q.id]||{c:[],x:''},ty=q.multi?'checkbox':'radio';
+   return `<fieldset class="s3ntQ" style="border:1px solid var(--line);border-radius:var(--r-m,10px);margin:8px 0;padding:8px"><legend style="padding:0 4px">${qi+1}. ${esc2(q.t)}${(()=>{/* ref הולך אחרי הפריט הפיזי (rg) – כמו בשרת; לא נמצא ⇒ בלי פריט */const K=window.S3NK,rf=q.rg&&K&&SP.G?K.resolve(q.rg,SP.G):q.rg?null:q.ref;return rf?` <small class="note">(${esc2(ntLbl(m,rf))})</small>`:''})()}</legend>
+    ${(q.o||[]).map((o,i)=>`<label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="${ty}" name="s3ntQ_${esc2(q.id)}" data-c="s3ntC" data-q="${esc2(q.id)}" data-i="${i}"${a.c.includes(i)?' checked':''}${dis}> ${esc2(o)}</label>`).join('')}
+    <input id="s3ntX_${esc2(q.id)}" data-c="s3ntX" data-q="${esc2(q.id)}" maxlength="200" placeholder="או כתבו תשובה משלכם" aria-label="תשובה בכתב לשאלה ${qi+1}" value="${esc2(a.x)}" style="width:100%;min-height:44px"${dis}></fieldset>`}).join('');
+  h+=`<div class="row s3row"><button class="btn" data-a="s3ntAns"${dis}>שמרו תשובות ותקנו את הטיוטה</button></div>`}
+ h+=`<div class="row s3row"><button class="btn g" data-a="s3ntAsk"${dis||N.qr>=3?' disabled':''}>${N.qr?'שאלו שוב':'המערכת תשאל שאלות'}</button><button class="btn g" data-a="s3ntFix"${dis}>תקנו לפי ההערות</button></div>`;
+ if(N.qr>=3)h+=`<p class="note s3note" style="margin:4px 0"><small>היו כבר 3 סבבי שאלות. אפשר להמשיך לתקן בכתב או בעורך.</small></p>`;
+ if(N.busy)h+=`<div class="s3info" role="status">${esc2(N.busy)}</div>`;
+ if(N.ok)h+=`<div class="s3info" role="status">${esc2(N.ok)}</div>`;
+ if(N.msg)h+=`<div class="ban s3warn" role="alert">${esc2(N.msg)}</div>`;
+ return h+`</div>`}
 
 /* ---------- קביעת סבב (שלב 5) ---------- */
 async function loadStaff(){
@@ -342,6 +462,38 @@ function qBuild(){const q=W.q,k=W.sk,info={};
   if(DD.length){sketch.doors=DD;sketch.ent=[DD[0].x,DD[0].y]}if(TT.length){sketch.tills=TT;sketch.cash=[TT[0].x,TT[0].y]}
   if(k.rooms.length&&!info.rooms)info.rooms=k.rooms.length;if(!info.rows&&info.rows!==0&&k.rows.length)info.rows=k.rows.length}
  return{info:Object.keys(info).length?info:null,sketch}}
+/* ---------- סקיצה ← מפה בלי AI (הקמת חנות שלב 1) ----------
+   אותו מבנה כמו טיוטה מהשרת (cleanDraft ואחריו shapeDraft ב-lib/store3d-ai.js ו-lib/store3d-draftin.js), כדי שתעבור את אותה בדיקה בשמירה.
+   חדרים: מהסקיצה, ובלעדיה מלבן אחד לפי הרוחב והאורך. שורה ← גוף (סוג מהתשובות, מקטע לכל מטר, 5 קומות). כניסות ← דלתות ent, קופות ← סמלי cash.
+   בלי uz: שום דבר כאן לא "ניחוש" של AI. qb = תוצאת qBuild(). מחזיר את המפה, או null כשאין חדר. */
+const RTN={s:'אולם מכירות',w:'מחסן',x:''};
+function skToMap(qb,kind){
+ const G=G3(),info=qb&&qb.info||{},sk=qb&&qb.sketch,W0=info.w,L0=info.l,ok=v=>Number.isFinite(v)&&v>=0&&v<=10000,I=v=>Math.round(v);
+ const deg=v=>((Math.round(v)%360)+360)%360,clI=(v,a,b)=>Math.min(b,Math.max(a,Math.round(v)));
+ let rooms=[];
+ if(sk&&sk.rooms&&sk.rooms.length)rooms=sk.rooms.map((p,i)=>({id:'r'+(i+1),name:RTN[(sk.rt||[])[i]]||(i?'חדר '+(i+1):kind==='w'?'מחסן':'אולם מכירות'),p:p.map(I),h:300}));
+ else if(W0>0&&L0>0)rooms=[{id:'r1',name:kind==='w'?'מחסן':'אולם מכירות',p:[0,0,W0,0,W0,L0,0,L0],h:300}];
+ rooms=rooms.filter(r=>r.p.every(ok)&&(!G||!G.polyValid||G.polyValid(r.p).ok)).map((r,i)=>Object.assign(r,{id:'r'+(i+1)}));
+ if(!rooms.length)return null;
+ const roomAt=(x,y)=>(rooms.find(r=>G&&G.pointInPoly&&G.pointInPoly(x,y,r.p))||rooms[0]).id,MB=G&&G.MAX_BAYS||2000;
+ const fx=[];let bays=0;
+ ((sk&&sk.rows)||[]).forEach((s,ri)=>{if(fx.length>=400||!s.every(ok))return;
+  const len=clI(Math.hypot(s[2]-s[0],s[3]-s[1]),30,2000),nb=clI(len/100,1,30),k=((sk.rk||[])[ri])||'gon',sides=k==='gon'?2:1;
+  if(bays+sides*nb>MB)return;bays+=sides*nb;
+  const x=I((s[0]+s[2])/2),y=I((s[1]+s[3])/2),f={id:'f'+(fx.length+1),k,x,y,w:len,d:k==='gon'?90:k==='fridge'?80:40,h:180,a:deg(Math.atan2(s[3]-s[1],s[2]-s[0])*180/Math.PI),sides,bays:nb,lvl:5,hi:false,room:roomAt(x,y),num:fx.length+1};
+  if(k==='fridge')f.glass=true;fx.push(f)});
+ const doors=((sk&&sk.doors)||[]).slice(0,40).map((d,i)=>({id:'d'+(i+1),x:I(d.x),y:I(d.y),w:clI(d.w,60,500),a:deg(d.a),k:'ent',sw:d.sw===-1?-1:1,hg:d.hg===-1?-1:1}));
+ const syms=((sk&&sk.tills)||[]).slice(0,40).map((t,i)=>({id:'y'+(i+1),k:'cash',x:I(t.x),y:I(t.y),a:deg(t.a),w:clI(t.w,30,1000),d:clI(t.d,30,1000)}));
+ const m={br:W.br||U.brSel(),kind:kind==='w'?'w':'s',name:kind==='w'?'מחסן (טיוטה)':'חנות (טיוטה)',seq:fx.length,grid:50,numDir:'rtl',rooms,walls:[],cols:[],doors,fx,syms,uz:[],src:'draft'};
+ if(doors.length)m.ent='d1';
+ return m}
+/* "בנו טיוטה" בלי תמונות: מהסקיצה או מהמידות, בטלפון, בלי AI ובלי מכסה */
+function skDraft(){
+ const qb=qBuild();if(qb.err){W.msg=qb.err;W.det=1;return rerender()}
+ const m=skToMap(qb,W.kind);
+ if(!m){W.msg='אין ממה לבנות מפה: ציירו סקיצה (או מלאו רוחב ואורך), או צלמו את החנות.';W.det=1;W.qSeen=1;return rerender()}
+ W.draft={m,conf:null,notes:'',n:0,drop:0,usage:null,id:'',sk:1};W.step=2;W.msg='';W.det=0;W.fixTxt='';W.fixQid='';W.fixMsg='';rerender()}
+U.skToMap=skToMap;
 const qSum=()=>{const D=realDims(),k=W.sk,t=[];if(D)t.push(`רוחב ${+(D.w/100).toFixed(1)} מ', אורך ${+(D.l/100).toFixed(1)} מ'`);
  const nr=qInt(W.q.rooms,1,6);if(nr)t.push(nr+' חדרים');const nw=qInt(W.q.rows,0,30);if(nw!=null&&!Number.isNaN(nw))t.push(nw+' שורות');
  if(k.rooms.length||k.rows.length)t.push(`שרטוט: ${k.rooms.length} חדרים, ${k.rows.length} שורות`);return t.join(' · ')};
@@ -570,35 +722,47 @@ function stepDet(){const p=W.q.path;
  if(p)h+=`<p class="s3note"><button class="btn s g" data-a="s3wPath" data-p="${p==='a'?'b':'a'}">${p==='a'?'עברו לשאלות':'עברו לציור סקיצה'}</button></p>`;
  if(W.busy)h+=`<div class="s3info" role="status">${esc2(W.busy)}</div>`;
  if(W.msg)h+=`<div class="ban s3warn" role="alert">${esc2(W.msg)}</div>`;
- h+=`<div class="row s3row"><button class="btn grow" data-a="s3wDraft"${W.imgs.length&&!W.busy?'':' disabled'}>בנו טיוטה</button><button class="btn g" data-a="s3wDetX">חזרה לתמונות</button></div>`;
+ h+=`<div class="row s3row"><button class="btn grow" data-a="s3wDraft"${W.busy?' disabled':''}>${W.imgs.length?'בנו טיוטה':'בנו טיוטה מהסקיצה'}</button><button class="btn g" data-a="s3wDetX">חזרה לתמונות</button></div>`;
+ if(!W.imgs.length)h+=`<p class="note s3note"><small>בלי תמונות המפה נבנית מהסקיצה בלבד, בלי AI. אפשר לצלם גם אחר כך.</small></p>`;
  if(p&&(p==='a'||skHas()))setTimeout(drawSk,0);
  return h}
 
 /* ---------- המסך ---------- */
-const thumbs=()=>W.imgs.length?`<div class="row" style="gap:6px;margin:8px 0">${W.imgs.map((x,i)=>`<div style="position:relative;width:68px;height:68px"><img src="${x.url}" alt="תמונה ${i+1}" style="width:68px;height:68px;object-fit:cover;border-radius:var(--r-m,10px);border:1px solid var(--line)"><button type="button" class="chip" style="position:absolute;top:-6px;inset-inline-start:-6px;min-height:28px;width:28px;padding:0;justify-content:center" data-a="s3wRm" data-i="${i}" aria-label="מחיקת תמונה ${i+1}">✕</button></div>`).join('')}</div>`:'';
+const thumbs=()=>W.imgs.length?`<div class="row" style="gap:6px;margin:8px 0;align-items:flex-start">${W.imgs.map((x,i)=>`<div style="position:relative;width:68px"><img src="${x.url}" alt="תמונה ${i+1}${x.lbl?' – '+esc2(x.lbl):isV(x)?' – מסרטון':''}" style="width:68px;height:68px;object-fit:cover;border-radius:var(--r-m,10px);border:1px solid var(--line);display:block"><button type="button" class="chip" style="position:absolute;top:-6px;inset-inline-start:-6px;min-height:28px;width:28px;padding:0;justify-content:center" data-a="s3wRm" data-i="${i}" aria-label="מחיקת תמונה ${i+1}">✕</button>${x.lbl?`<small class="s3lbl" style="display:block;font-size:11px;line-height:1.2;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc2(x.lbl)}</small>`:''}</div>`).join('')}</div>`:'';
+/* תוויות פינה מוצעות (אפשר לכתוב אחרת). אחרי כל צילום עוברים לתווית הבאה ברשימה – כך מצלמים לפי הסדר */
+const LBLS=['כניסה','פינה ימנית ליד הכניסה','פינה ימנית בעומק','פינה שמאלית בעומק','פינה שמאלית ליד הכניסה','מרכז החנות','מחסן'];
+CHG.s3wLbl=el=>{W.lbl=String(el.value||'').replace(/\s+/g,' ').slice(0,LBLM)};
+CHG.s3wCorner=async el=>{const L=[...(el.files||[])];el.value='';if(!L.length||W.busy)return;const l=W.lbl;await addImgs(L,l);const k=LBLS.indexOf(String(l).trim());if(k>=0&&k<LBLS.length-1&&W.lbl===l){W.lbl=LBLS[k+1];rerender()}};
+const corners=()=>{const nc=W.imgs.filter(x=>x.lbl).length;
+ return `<div class="s3info" id="s3wCor"><b>תמונות מהפינות (מומלץ 4–8 לכל חדר)</b><br><small>עמדו בכל פינה וצלמו לכיוון הפינה שממול. בחרו מאיפה מצלמים ואז צלמו: התווית עוזרת להבין את צורת החנות. אחרי כל צילום עוברים לפינה הבאה.</small>
+ <div class="row s3row" style="align-items:flex-end;gap:8px"><label class="f" style="flex:1;min-width:150px;margin:0"><span>מאיפה מצלמים?</span><input data-c="s3wLbl" list="s3wLbls" maxlength="${LBLM}" value="${esc2(W.lbl)}"></label><label class="btn">צלמו פינה<input type="file" accept="image/*" capture="environment" data-c="s3wCorner" hidden></label></div>
+ <datalist id="s3wLbls">${LBLS.map(x=>`<option value="${esc2(x)}">`).join('')}</datalist>${nc?`<p class="s3note" style="margin:6px 0 0"><small>${nc} תמונות עם תווית פינה</small></p>`:''}</div>`};
 const texRow=k=>{const t=W.tex[k];return `<div class="s3info"><div class="row" style="justify-content:space-between"><b>${TK[k]}</b>${t?`<span class="tag t3">נשלח ✓</span>`:`<span class="note">לא חובה</span>`}</div>
  <div class="row s3row">${t&&t.url?`<img src="${t.url}" alt="תצוגה מקדימה של ${TK[k]}" style="width:56px;height:56px;object-fit:cover;border-radius:var(--r-m,10px);border:1px solid var(--line)">`:''}<label class="btn s ${t?'g':''}">${t?'צלמו שוב':'צלמו '+TK[k]}<input type="file" accept="image/*" capture="environment" data-c="s3wTex" data-k="${k}" hidden></label>${t?`<button class="btn s g" data-a="s3wTexRm" data-k="${k}">הסירו</button>`:''}</div></div>`};
 function step1(d){
- const off=navigator.onLine===false;
- let h=stepper(1)+`<b>צלמו את החנות</b><p class="note s3note">עברו בחנות וצלמו מכל הכיוונים: את הקירות, המעברים, המדפים והכניסה. כשיש יותר זוויות, הטיוטה מדויקת יותר. המערכת בונה לבד טיוטה של המפה, ואתם עוברים עליה ומאשרים לפני שהיא נשמרת. אפשר עד ${MAXI} תמונות, או סרטון קצר (עד דקה) שממנו נבחרות התמונות החדות.</p>`;
- if(off)h+=`<div class="ban s3off" role="status">אין חיבור לאינטרנט. אפשר לצלם, אבל יצירת הטיוטה דורשת רשת.</div>`;
+ const off=navigator.onLine===false,qs=qSum(),nv=W.imgs.filter(isV).length;
+ /* הסדר (הקמת חנות שלב 1): קודם סקיצה ופרטים, ואז – לא חובה – סריקה בתמונות ובסרטון. בלי תמונות "בנו טיוטה" בונה מהסקיצה, בלי AI */
+ let h=stepper(1)+`<b>מתחילים בסקיצה</b><p class="note s3note">ציירו סקיצה של החנות, או ענו על כמה שאלות. אפשר לבנות ממנה מפה מיד, בלי AI. כדי שהמערכת תשלים לבד את המדפים והפרטים, צלמו גם את החנות: סרטון הליכה (עד 3 דקות) ותמונות מכל פינה. עד ${MAXI} תמונות מכל המקורות יחד. לפני השמירה עוברים על המפה ומאשרים.</p>`;
+ if(off)h+=`<div class="ban s3off" role="status">אין חיבור לאינטרנט. אפשר לצייר ולצלם, אבל טיוטה מהתמונות דורשת רשת.</div>`;
+ h+=`<div class="s3info"><div class="row" style="justify-content:space-between"><b>סקיצה ופרטים על החנות</b>${qs?`<span class="tag t3">מולא ✓</span>`:`<span class="note">מתחילים כאן</span>`}</div><small>${qs?esc2(qs):'מידות, חדרים ושורות, או שרטוט גס באצבע.'}</small><div class="row s3row"><button class="btn s ${qs?'g':''}" data-a="s3wDet">${qs?'עריכת הסקיצה והפרטים':'ציירו סקיצה או מלאו פרטים'}</button></div></div>`;
+ h+=`<b style="display:block;margin-top:12px">סריקת החנות (לא חובה)</b>`;
  h+=`<div class="row s3row"><label class="btn">צלמו תמונה<input type="file" accept="image/*" capture="environment" data-c="s3wPick" hidden></label><label class="btn g">בחרו מהגלריה<input type="file" accept="image/*" multiple data-c="s3wPick" hidden></label><label class="btn g">העלו סרטון<input type="file" accept="video/*" multiple data-c="s3wVid" hidden></label><label class="btn g">צלמו סרטון<input type="file" accept="video/*" capture="environment" data-c="s3wVid" hidden></label></div>`;
+ h+=corners();
  h+=thumbs();
- h+=`<p class="s3note" aria-live="polite">${W.imgs.length?`${W.imgs.length} תמונות · בערך ${mb(total())}MB מתוך ${mb(MAXB)}MB`:'עוד לא צולמו תמונות.'}</p>`;
+ h+=`<p class="s3note" aria-live="polite">${W.imgs.length?`${W.imgs.length} תמונות${nv?` (${nv} מסרטון)`:''} · בערך ${mb(total())}MB מתוך ${mb(MAXB)}MB`:'עוד לא צולמו תמונות.'}</p>`;
  h+=`<div class="s3info"><b>תמונות לצבע ולמראה (לא חובה)</b><br><small>תמונה של קיר, של הרצפה ושל התקרה, כדי שהתלת מימד ייראה כמו החנות שלכם. כל תמונה נשלחת מיד.</small>${['w','f','c'].map(texRow).join('')}</div>`;
  if(W.busy)h+=`<div class="s3info" role="status">${esc2(W.busy)}${W.vid?` <button class="btn s g" data-a="s3wVidX">ביטול</button>`:''}</div>`;
  if(W.msg)h+=`<div class="ban s3warn" role="alert">${esc2(W.msg)}</div>`;
- const qs=qSum();
- h+=`<div class="s3info"><div class="row" style="justify-content:space-between"><b>פרטים על החנות</b>${qs?`<span class="tag t3">מולא ✓</span>`:`<span class="note">מומלץ</span>`}</div><small>${qs?esc2(qs):'מידות, חדרים ושורות, או שרטוט גס באצבע – כדי שהטיוטה תתאים לחנות.'}</small><div class="row s3row"><button class="btn s ${qs?'g':''}" data-a="s3wDet">${qs?'עריכת הפרטים':'מלאו פרטים או ציירו'}</button></div></div>`;
- h+=`<div class="row s3row"><button class="btn grow" data-a="s3wDraft"${W.imgs.length&&!W.busy?'':' disabled'}>בנו טיוטה</button><button class="btn g" data-a="s3wManual">ציור ידני במקום</button></div>`;
+ h+=`<div class="row s3row"><button class="btn grow" data-a="s3wDraft"${W.busy?' disabled':''}>${W.imgs.length?'בנו טיוטה':'בנו טיוטה מהסקיצה'}</button><button class="btn g" data-a="s3wManual">ציור ידני במקום</button></div>`;
  return h}
 function step2(){
  const d=W.draft;
  if(!d)return stepper(2)+`<div class="s3info" role="status" aria-live="polite">${esc2(W.busy||'רגע…')}</div>`;
  const m=d.m,L=a=>(Array.isArray(a)?a:[]).filter(x=>x&&x.del!==1).length,z=zs(m).length,empty=!L(m.rooms)&&!L(m.fx);
- return stepper(2)+`<b>הטיוטה מוכנה</b><div class="kg" style="margin-top:8px"><div class="k"><small>חדרים</small><b>${L(m.rooms)}</b></div><div class="k"><small>גופים (מדפים, מקררים…)</small><b>${L(m.fx)}</b></div><div class="k"><small>אזורים לא ודאיים</small><b>${z}</b></div><div class="k"><small>רמת ביטחון (הערכת המודל)</small><b>${d.conf==null?'לא ידוע':Math.round(d.conf*100)+'%'}</b></div></div>
+ return stepper(2)+`<b>${d.sk?'הטיוטה מהסקיצה מוכנה (בלי AI)':'הטיוטה מוכנה'}</b><div class="kg" style="margin-top:8px"><div class="k"><small>חדרים</small><b>${L(m.rooms)}</b></div><div class="k"><small>גופים (מדפים, מקררים…)</small><b>${L(m.fx)}</b></div><div class="k"><small>אזורים לא ודאיים</small><b>${z}</b></div>${d.sk?'':`<div class="k"><small>רמת ביטחון (הערכת המודל)</small><b>${d.conf==null?'לא ידוע':Math.round(d.conf*100)+'%'}</b></div>`}</div>
  ${empty?`<div class="ban s3warn">ה-AI לא הצליח לזהות חדרים או מדפים. אפשר לצלם עוד תמונות מזוויות אחרות, או להמשיך ולצייר ידנית בעורך.</div>`:''}
  <p class="note s3note">${d.drop?`${d.drop} פריטים לא תקינים הוסרו מהטיוטה. `:''}הטיוטה עדיין לא נשמרה. בשלב הבא עוברים עליה במפה, מתקנים, ומאשרים.</p>
+ ${ntBox()}
  <div class="s3info"><b>תיקונים בכתב</b><br><small>אפשר לכתוב מה לא נכון, והמערכת תתקן את הטיוטה. למשל: "המקרר נמצא בקיר השמאלי, יש 4 שורות מדפים ולא 3".</small><textarea id="s3wFix" data-c="s3wFixT" rows="3" maxlength="1000" style="width:100%;margin-top:6px"${W.busy?' disabled':''}>${esc2(W.fixTxt||'')}</textarea><p class="note s3note" style="margin:4px 0">התיקון לא נספר במכסה החודשית. אפשר לתקן כמה פעמים.</p>${W.busy?`<div class="s3info" role="status">${esc2(W.busy)}</div>`:''}${W.fixMsg?`<div class="ban s3warn" role="alert">${esc2(W.fixMsg)}</div>`:''}<div class="row s3row"><button class="btn g" data-a="s3wFix"${W.busy?' disabled':''}>תקנו את הטיוטה</button></div></div>
  <div class="row s3row"><button class="btn grow" data-a="s3wEdit"${W.busy?' disabled':''}>עברו על הטיוטה</button><button class="btn g" data-a="s3wBack1"${W.busy?' disabled':''}>צלמו עוד</button></div>`}
 function step3(){
@@ -635,6 +799,7 @@ V.st3w=()=>{const T='הקמת תלת מימד';
  if(have&&W.step<5&&!W.draft&&!(U.E&&U.E.wiz))return{t:T,h:`<div class="card s3s"><b>כבר יש מפה${W.kind==='w'?' למחסן':' לסניף הזה'}</b><p class="note s3note">האשף בונה מפה חדשה בלבד, ולא דורס מפה קיימת. את המפה הקיימת אפשר לערוך.</p><div class="row s3row"><button class="btn" data-a="st3Edit" data-k="${W.kind}">לעריכת המפה</button><button class="btn g" data-a="st3Open">למפה</button></div></div>`};
  let h='';const L=U.brs();
  if(L.length>1&&W.step<3)h+=`<div class="chips" style="margin:0 0 8px">${L.map(b=>`<button class="chip ${b.id===d.br?'on':''}" data-a="s3wBr" data-id="${esc2(b.id)}">${esc2(b.name)}</button>`).join('')}</div>`;
+ h+=U.qtBanner?U.qtBanner():'';
  h+=W.step===1?(W.det?stepDet():step1(d)):W.step===2?step2():W.step===5?step5():step3();
  return{t:T,s:(L.find(b=>b.id===d.br)||{}).name||'',h:`<div class="card s3s">${h}</div>`}};
 ACT.s3wBr=el=>{if(W.busy)return;U.X.br=el.dataset.id;U.X.d=null;W.br=el.dataset.id;W.qid='';for(const k of ['w','f','c'])W.tex[k]=null;const v=lsRead();qLoad(v);W.det=0;W.qSeen=0;if(v)for(const k of ['w','f','c'])if(v.tex[k])W.tex[k]={texId:v.tex[k].texId,path:v.tex[k].path,w:v.tex[k].w,h:v.tex[k].h,url:''};rerender()};
