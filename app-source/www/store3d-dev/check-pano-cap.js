@@ -246,11 +246,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   /* ---------- 5. תמונה אמיתית מדומה (ImageCapture) + נעילות (שלב 21ב); מצב נקודות מפורש כי הבחירה נשמרת ---------- */
   const phRun = async (name, o, early) => {
     const p = await open();
-    await p.evaluate((a) => { try { localStorage.removeItem('lp-s3pc-fovL'); localStorage.removeItem('lp-s3pc-fovL-ph'); } catch (e) {} window.__res = undefined; window.__run(a).then((r) => (window.__res = r || 'null'), (e) => (window.__res = 'err:' + e.message)); }, { mode: 'pts', width: 2048, ...o });
+    await p.evaluate((a) => { try { localStorage.removeItem('lp-s3pc-fovL'); localStorage.removeItem('lp-s3pc-fovL-ph'); } catch (e) {} window.__res = undefined; window.__run(a).then((r) => (window.__res = r || 'null'), (e) => (window.__res = 'err:' + e.message)); }, { mode: 'pts', width: 2048, hdr: 0, ...o });
     if (early) { await p.waitForFunction((n) => { const c = document.querySelector('.s3pc-cnt'); return window.__res || (c && new RegExp('צולמו ([' + n + '-9]|[1-9]\\d) ').test(c.textContent)); }, early, { timeout: 120000 }); if (!(await p.evaluate(() => window.__res))) await p.click('.s3pc-bar [data-k=d]'); }
     await p.waitForFunction(() => window.__res, null, { timeout: 240000 });
     const r = await p.evaluate(() => window.__res), raw = typeof r === 'object' ? await p.evaluate(() => window.__raw()) : null;
-    const x = await p.evaluate(() => ({ applied: window.__applied || [], calls: window.__photoCalls || 0, ls: { v: localStorage.getItem('lp-s3pc-fovL'), ph: localStorage.getItem('lp-s3pc-fovL-ph') } }));
+    const x = await p.evaluate(() => ({ applied: window.__applied || [], calls: window.__photoCalls || 0, ls: { v: localStorage.getItem('lp-s3pc-fovL'), ph: localStorage.getItem('lp-s3pc-fovL-ph') }, shots: window.__shots || [], hints: window.__hints || [], exp: window.__exp || null }));
     await p.close(); return { r, raw, ...x };
   };
   const srcOf = (q) => (q.raw && q.raw.meta ? q.raw.meta.frames.map((f) => f.src) : []);
@@ -261,6 +261,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('תמונה אמיתית מדומה: כל הפריימים src=photo, התוצאה תקינה, מספר פריימים כמו בווידאו', okRes(pOk) && n >= 20 && cnt(s, 'photo') === n && pOk.r.meta.src === n + '/' + n, { n, src: pOk.r.meta && pOk.r.meta.src, err: pOk.r && pOk.r.err });
     check('תמונה אמיתית: כיול FOV נשמר תחת המפתח של התמונות בלבד (-ph)', pOk.ls.ph && Math.abs(+pOk.ls.ph - 62) <= 2.5 && !pOk.ls.v, pOk.ls);
     check('נעילות נתמכות: נשלחו exposure/whiteBalance/focus ידניים עם הערכים הנוכחיים, נרשמו ב-meta (lock) לפני הצילום הראשון', mf && mf.lock && mf.lock.exp && mf.lock.wb && mf.lock.focus && pOk.applied.length === 3 && pOk.applied[0].advanced[0].exposureMode === 'manual' && pOk.applied[0].advanced[0].exposureTime === 166 && pOk.applied[1].advanced[0].colorTemperature === 5200 && pOk.applied[2].advanced[0].focusDistance === 0.4 && pOk.r.meta.lock && pOk.r.meta.lock.exp, { lock: mf && mf.lock, applied: pOk.applied.length });
+    check('HDR כבוי (21ו): פריים אחד לכל יעד, בלי g/ev, hdr.mode=off; צילום חוזר לטשטוש רק לעתים רחוקות בצילום חד (≤3 – לפי התוכן, ראו הדוח) וכל אחד = קריאה אחת נוספת', mf && mf.frames.every((f) => f.g === undefined && f.ev === undefined) && mf.hdr && mf.hdr.mode === 'off' && mf.blur && mf.blur.retakes <= 3 && pOk.calls === mf.frames.length + mf.blur.retakes, { hdr: mf && mf.hdr, blur: mf && mf.blur, calls: pOk.calls });
     check('meta.json: src לכל פריים, photo.max=1600', mf && mf.frames.every((f) => f.src === 'photo' && Math.max(f.w, f.h) <= 1600) && mf.photo && mf.photo.max === 1600 && !mf.photo.off, mf && mf.photo); }
   const pNone = await phRun('caps none', { photo: 'ok', caps: 'none' }, 5);
   check('נעילות לא נתמכות: ממשיכים בלי נעילה (lock כולו false, אף applyConstraints), הצילום תקין', okRes(pNone, true) && pNone.applied.length === 0 && pNone.raw.meta.lock && !pNone.raw.meta.lock.exp && !pNone.raw.meta.lock.wb && !pNone.raw.meta.lock.focus, { lock: pNone.raw && pNone.raw.meta.lock, applied: pNone.applied.length });
@@ -280,6 +281,48 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check('הטלפון זז בזמן התמונה הראשונה: התמונה נזרקת ומצולמת מחדש (יותר קריאות takePhoto מפריימים), בלי חזרה לווידאו', okRes(pMv, true) && cnt(s, 'photo') === s.length && pMv.calls > s.length && pMv.raw.meta.photo.fails === 0 && !pMv.raw.meta.photo.off, { calls: pMv.calls, n: s.length }); }
   const pVid = await phRun('no photo api', {}, 5);
   check('בלי ImageCapture (mock.photo חסר): כמו קודם – כולם video, בלי נעילות (אין track)', okRes(pVid, true) && cnt(srcOf(pVid), 'video') === srcOf(pVid).length && !pVid.raw.meta.photo.avail, { photo: pVid.raw && pVid.raw.meta.photo });
+
+  /* ---------- 6. שלב 21ו: HDR (3 חשיפות לכל יעד) וצילום חוזר לתמונה מטושטשת ---------- */
+  const frOf = (q) => (q.raw && q.raw.meta ? q.raw.meta.frames : []);
+  const pH = await phRun('hdr time', { photo: 'ok', caps: 'full', hdr: 1, floor: 'shoot' });
+  { const fr = frOf(pH), mf = pH.raw && pH.raw.meta, main = fr.filter((f) => f.ev === 0), nad = fr.filter((f) => f.role === 'nadir');
+    const grpOk = main.length > 0 && main.every((f) => { const g = fr.filter((x) => x.g === f.g); return g.length === 3 && g.map((x) => x.ev).join() === '0,-1,1' && g.every((x) => JSON.stringify(x.q) === JSON.stringify(f.q) && x.ti === f.ti && x.g === x.ti); });
+    check('HDR (זמן חשיפה): לכל יעד 3 פריימים (g = היעד, ev 0,-1,1, אותו q), hdr.mode=time ו-factors ¼/1/4; רצפה – פריים אחד בלי g; חיבור JS רק מ-ev=0 (השגיאה כרגיל)',
+      okRes(pH) && main.length >= 20 && grpOk && fr.length === main.length * 3 + 1 && nad.length === 1 && nad[0].g === undefined && nad[0].ev === undefined && mf.hdr.mode === 'time' && JSON.stringify(mf.hdr.factors) === '[0.25,1,4]' && pH.r.meta.hdr === 'time',
+      { n: fr.length, main: main.length, hdr: mf && mf.hdr, err: pH.r && pH.r.err });
+    const rt = mf ? mf.blur.retakes : -1, nb = main.length + rt; /* סדרה שנזרקה בגלל טשטוש – גם היא 3 חשיפות */
+    const ts = pH.shots.map((s) => s.t), tri = ts.slice(0, -1), pat = tri.every((t, i) => t === [166, 41.5, 664][i % 3]);
+    const restore = pH.applied.filter((a) => a.advanced[0].exposureTime === 166).length;
+    check('HDR: סדר החשיפות בכל סדרה – רגילה 166, כהה 41.5, בהירה 664; אחרי כל סדרה חזרה ל-166; הרצפה – תמונה אחת בחשיפה הרגילה', pat && ts.length === nb * 3 + 1 && ts[ts.length - 1] === 166 && restore === nb + 1 && pH.exp.t === 166, { first: ts.slice(0, 7), n: ts.length, retakes: rt, restore, exp: pH.exp });
+    check('HDR: ההנחיה "מצלם 3 חשיפות… החזיקו יציב" הוצגה', pH.hints.includes('מצלם 3 חשיפות… החזיקו יציב'), pH.hints.slice(0, 12)); }
+  const pC = await phRun('hdr comp', { photo: 'ok', caps: 'comp', hdr: 1 }, 5);
+  { const fr = frOf(pC), mf = pC.raw && pC.raw.meta, cs = pC.shots.map((s) => s.c);
+    check('HDR (פיצוי חשיפה, בלי נעילה ידנית): ‎−2/0/+2, החזרה ל-0, hdr.mode=comp', okRes(pC, true) && mf.hdr.mode === 'comp' && JSON.stringify(mf.hdr.factors) === '[-2,0,2]' && !mf.lock.exp && cs.slice(0, 6).join() === '0,-2,2,0,-2,2' && pC.exp.c === 0 && fr.filter((f) => f.ev === 0).length * 3 === fr.length, { hdr: mf && mf.hdr, cs: cs.slice(0, 9), exp: pC.exp }); }
+  const pF = await phRun('hdr apply fails', { photo: 'ok', caps: 'failhdr', hdr: 1 }, 5);
+  { const fr = frOf(pF), mf = pF.raw && pF.raw.meta;
+    check('HDR: שינוי חשיפה נכשל – ממשיכים בתמונה אחת ליעד (בלי ev ‎±1), hdr.bad, התוצאה תקינה', okRes(pF, true) && mf.hdr.bad === true && fr.length >= 5 && fr.every((f) => !f.ev) && pF.exp.t === 166, { hdr: mf && mf.hdr, n: fr.length, evs: fr.map((f) => f.ev).join() }); }
+  const pB = await phRun('blur once', { photo: 'ok', caps: 'full', hdr: 0, blurAt: [6] }, 8);
+  { const fr = frOf(pB), mf = pB.raw && pB.raw.meta;
+    check('טשטוש: התמונה ה-6 מטושטשת – נזרקת ומצולמת שוב אוטומטית (קריאה אחת נוספת), הנחיה בעברית, blur.retakes=1', okRes(pB, true) && mf.blur.retakes === 1 && pB.calls === fr.length + 1 && pB.hints.includes('התמונה יצאה מטושטשת – מצלם שוב') && fr.every((f) => f.sh > 0), { calls: pB.calls, n: fr.length, blur: mf && mf.blur, sh: fr.map((f) => f.sh).slice(0, 8) }); }
+  const pB2 = await phRun('blur twice', { photo: 'ok', caps: 'full', hdr: 0, blurAt: [6, 7] }, 8);
+  { const fr = frOf(pB2), mf = pB2.raw && pB2.raw.meta, sh = fr.map((f) => f.sh), lo = sh.filter((v) => v < 0.5 * Math.max(...sh));
+    check('טשטוש: גם הצילום החוזר מטושטש – מתקבל (צילום חוזר אחד בלבד ליעד)', okRes(pB2, true) && mf.blur.retakes === 1 && pB2.calls === fr.length + 1 && lo.length === 1, { calls: pB2.calls, n: fr.length, sh }); }
+  { const p = await open();
+    await p.evaluate(() => { window.__res = undefined; window.__run({ mode: 'pts', photo: 'ok', caps: 'full', hdr: 1 }).then((r) => (window.__res = r || 'null')); });
+    await p.waitForFunction(() => { const c = document.querySelector('.s3pc-cnt'); return c && /צולמו [1-9]/.test(c.textContent); }, null, { timeout: 60000 });
+    const b0 = await p.evaluate(() => { const b = document.querySelector('[data-k=hdr]'), r = b.getBoundingClientRect(); return { vis: !b.hidden && r.height >= 40, pr: b.getAttribute('aria-pressed'), t: b.textContent, h: Math.round(r.height), cnt: document.querySelector('.s3pc-cnt').textContent, over: document.documentElement.scrollWidth > innerWidth }; });
+    await p.click('[data-k=hdr]');
+    const b1 = await p.evaluate(() => ({ pr: document.querySelector('[data-k=hdr]').getAttribute('aria-pressed'), ls: localStorage.getItem('lp-s3pc-hdr') }));
+    await p.screenshot({ path: shot.replace(/\.png$/, '') + '-hdr.png' });
+    await p.evaluate(() => S3PanoCap.close()); await p.close();
+    const m = /צולמו (\d+) מתוך (\d+)/.exec(b0.cnt);
+    check('כפתור HDR: מוצג (גובה 40 לפחות), פעיל כברירת מחדל; לחיצה מכבה ונשמר ב-localStorage; המונה סופר יעדים (לא חשיפות); בלי גלישה', b0.vis && b0.pr === 'true' && b0.t === 'HDR' && b1.pr === 'false' && b1.ls === '0' && m && +m[1] <= +m[2] && !b0.over, { b0, b1 }); }
+  { const p = await open();
+    await p.evaluate(() => { window.__run({ mode: 'pts', photo: 'ok', caps: 'none', hdr: 1 }); });
+    await p.waitForFunction(() => { const c = document.querySelector('.s3pc-cnt'); return c && /צולמו/.test(c.textContent); }, null, { timeout: 60000 });
+    const hid = await p.evaluate(() => document.querySelector('[data-k=hdr]').hidden);
+    await p.evaluate(() => S3PanoCap.close()); await p.close();
+    check('כפתור HDR מוסתר כשאין שליטה בחשיפה', hid === true, hid); }
 
   check('אין שגיאות JS', errors.length === 0, errors.slice(0, 5));
   await browser.close(); srv.close();

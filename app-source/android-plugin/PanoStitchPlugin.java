@@ -21,6 +21,9 @@ import org.opencv.core.Mat;
  *   begin({ n, W, fovL, yawRef, w, h })            -> {}          starts a new job (drops an unfinished one)
  *   addFrame({ i, jpeg: base64, q: [w,x,y,z], role? }) -> {}     one frame at a time (memory); role: absent / null or "nadir"
  *                                                                  (floor photo taken after stepping aside: owns the area below ~-65 deg)
+ *            optional g, ev (stage 21f HDR): g = group (target) id >= 0, -1 / absent = none; ev = exposure index (0 = normal).
+ *            Frames with the same g are aligned and fused (Mertens) into ONE frame before the stitching; it takes the ev = 0 pose.
+ *            n (begin) counts every bracket, up to PanoStitchCore.MAX_FRAMES.
  *   run()                                          -> { jpeg: base64 (quality 92), fovL, stats }   on a background thread
  *   cancel()                                       -> {}          run() then rejects with "cancelled"
  *   listener "progress": { p } (0..1)
@@ -57,7 +60,7 @@ public class PanoStitchPlugin extends Plugin {
         Integer n = call.getInt("n");
         Double fov = call.getDouble("fovL"), yaw = call.getDouble("yawRef");
         Integer W = call.getInt("W");
-        if (n == null || n < 1 || n > 200 || fov == null || !(fov > 20 && fov < 150)) { call.reject("bad args"); return; }
+        if (n == null || n < 1 || n > PanoStitchCore.MAX_FRAMES || fov == null || !(fov > 20 && fov < 150)) { call.reject("bad args"); return; }
         PanoStitchCore.Options o = new PanoStitchCore.Options();
         o.W = W == null ? 4096 : Math.max(512, Math.min(8192, W));
         o.fovL = fov;
@@ -85,7 +88,8 @@ public class PanoStitchPlugin extends Plugin {
             double[] q = new double[4];
             for (int j = 0; j < 4; j++) q[j] = qa.getDouble(j);
             String role = call.getString("role");
-            c.setFrame(i, Base64.decode(b64, Base64.DEFAULT), q, role);
+            Integer g = call.getInt("g"), ev = call.getInt("ev");
+            c.setFrame(i, Base64.decode(b64, Base64.DEFAULT), q, role, g == null ? -1 : g, ev == null ? 0 : ev);
             call.resolve();
         } catch (Throwable e) {
             call.reject("frame: " + e.getMessage());
@@ -174,6 +178,15 @@ public class PanoStitchPlugin extends Plugin {
         o.put("msMatch", s.msMatch);
         o.put("msOpt", s.msOpt);
         o.put("msBlend", s.msBlend);
+        o.put("inputFrames", s.inputFrames);
+        o.put("hdrGroups", s.hdrGroups);
+        o.put("hdrAligned", s.hdrAligned);
+        o.put("hdrAlignFailed", s.hdrAlignFailed);
+        o.put("msHdr", s.msHdr);
+        o.put("gcPairs", s.gcPairs);
+        o.put("dpPairs", s.dpPairs);
+        o.put("strips", s.strips);
+        o.put("memEstMB", r3(s.memEstMB));
         JSArray g = new JSArray();
         if (s.gains != null) {
             for (double[] v : s.gains) {
