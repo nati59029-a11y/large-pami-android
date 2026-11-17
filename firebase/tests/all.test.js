@@ -14,6 +14,7 @@ require('./38-closings');
 require('./39-cashout');
 require('./41-closing-logic');
 require('./42-closing-checks');
+require('./43-rq-photos-zcthr');
 require('./40-storage-matrix');
 require('./50-functions');
 require('./60-yemot');
