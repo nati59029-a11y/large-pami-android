@@ -101,7 +101,21 @@ async function seedMember(biz, email, role) {
   await page.click('[data-a=admStfMail]'); await wait(page, 300); await page.click('#dlg [data-a=yes]'); await wait(page, 3500);
   const tm = await page.evaluate(() => window.__toasts.slice(-1)[0] || '');
   const callM = log.some((r) => r.step === 'mail' && /sendInviteMail/.test(r.url));
-  check('7א מנהל־על, מסך עובדים: כפתור "מייל" ליד העובד שולח מייל (sendInviteMail, ובאמולטור – המייל הרגיל)', callM && /wk@x\.co/.test(tm), { tm, callM });
+  const lbl = await page.evaluate(() => (document.querySelector('[data-a=admStfMail]') || {}).textContent || '');
+  check('7א מנהל־על, מסך עובדים: כפתור "שלח הזמנה" ליד העובד שולח מייל (sendInviteMail, ובאמולטור – המייל הרגיל)', callM && /wk@x\.co/.test(tm) && lbl === 'שלח הזמנה', { tm, callM, lbl });
+  // 17.11.2026: שינוי מייל של עובד (setStaffEmail) – ואחר כך מחזירים למייל המקורי (העובד נכנס בהמשך עם wk@x.co)
+  await page.evaluate(() => { if (document.getElementById('dlg').open) closeDlg(); });
+  page.__step = 'email';
+  await page.click('[data-a=admEmail]'); await wait(page, 300);
+  const ed = await page.evaluate(() => ({ open: document.getElementById('dlg').open, cur: document.querySelector('#dlg').innerText.includes('wk@x.co'), inp: !!document.querySelector('#dlg input[name=email]') }));
+  await shot(page, '02א-שינוי-מייל');
+  await page.fill('#dlg input[name=email]', 'WK2@x.co '); await page.click('#dlg form button:not([type=button])'); await wait(page, 3500);
+  const ce = log.some((r) => r.step === 'email' && /setStaffEmail/.test(r.url));
+  const after = await page.evaluate(() => ({ row: document.querySelector('#main').innerText.includes('wk2@x.co'), ask: document.getElementById('dlg').open && /wk2@x\.co/.test(document.querySelector('#dlg').innerText) }));
+  check('7ב מנהל־על: "שינוי מייל" פותח חלון עם המייל הנוכחי; שמירה קוראת ל-setStaffEmail, השורה מציגה את המייל החדש ומוצעת שליחת הזמנה לכתובת החדשה', ed.open && ed.cur && ed.inp && ce && after.row && after.ask, { ed, ce, after });
+  await page.evaluate(() => closeDlg());
+  const back = await page.evaluate(async () => { const u = ADM.staff.find((x) => x.email === 'wk2@x.co'); try { await fnCall('setStaffEmail', { bizId: SY.bizId, uid: u.uid, email: 'wk@x.co' }); return true; } catch (e) { return e.message; } });
+  check('7ג החזרת המייל המקורי (אותו עובד)', back === true, back);
   await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await wait(page, 500);
   await page.click('#safab'); await until(() => page.evaluate(() => !!document.querySelector('#saL [data-a=admEnter]')), 15000);
   d = await page.evaluate(() => ({ here: document.querySelector('#safabd').innerText.includes('עסק acme'), go: [...document.querySelectorAll('#saL [data-a=admEnter]')].map((b) => b.dataset.id).sort() }));
@@ -133,8 +147,8 @@ async function seedMember(biz, email, role) {
   for (const v of ['home', 'exp']) { await page.evaluate((x) => { NAV = [{ v: x }]; render(0); }, v); await wait(page, 400); }
   const m1 = await page.evaluate(() => ({ fab: !!document.getElementById('safab'), sa: ADM.sa, old: !!document.querySelector('[data-v="sa"]') }));
   await page.evaluate(() => go('staff')); await wait(page, 2500);
-  const m2 = await page.evaluate(() => ({ rows: document.querySelectorAll('#main .li').length, mail: !!document.querySelector('[data-a=admStfMail]') }));
-  check('15א מנהל רגיל: אין כפתור "מייל" במסך העובדים', m2.rows > 0 && !m2.mail, m2);
+  const m2 = await page.evaluate(() => ({ rows: document.querySelectorAll('#main .li').length, mail: !!document.querySelector('[data-a=admStfMail]'), email: !!document.querySelector('[data-a=admEmail]') }));
+  check('15א מנהל רגיל: אין כפתור "שלח הזמנה" ואין "שינוי מייל" במסך העובדים', m2.rows > 0 && !m2.mail && !m2.email, m2);
   await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await wait(page, 400);
   check('15 מנהל רגיל: הכפתור הצף לא קיים ב-DOM (וגם לא הכניסה מההגדרות)', !m1.fab && !m1.sa && !m1.old, m1);
   await shot(page, '04-מנהל-רגיל');

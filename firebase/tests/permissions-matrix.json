@@ -30,10 +30,10 @@
     },
     "cfg": {
       "source": "3.3",
-      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה", "manager": "קריאה וכתיבה (בלי מפתח Gemini בתוכו)" },
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה (get בלבד; לא cfg/zc – סף הפער)", "manager": "קריאה וכתיבה (בלי מפתח Gemini בתוכו)" },
       "ops": {
         "get":    "DDDAA",
-        "list":   "DDDAA",
+        "list":   "DDDDA",
         "create": "DDDDA",
         "update": "DDDDA",
         "delete": "DDDDA"
@@ -375,6 +375,17 @@
     },
     "yemot_hook_usage": {
       "source": "חוזה 5.3, משימה 2026-11-02 (רק השרת)",
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
+      "ops": {
+        "get":    "DDDDD",
+        "list":   "DDDDD",
+        "create": "DDDDD",
+        "update": "DDDDD",
+        "delete": "DDDDD"
+      }
+    },
+    "yemot_fbsent": {
+      "source": "משימה 2026-11-17 – לקוחות משוב שנשלחו לרשימת התפוצה בימות (רק השרת)",
       "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "אין", "manager": "אין" },
       "ops": {
         "get":    "DDDDD",

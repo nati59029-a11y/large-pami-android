@@ -116,6 +116,17 @@ const REPLAY = {
     const put = () => fsx(uid, '/shelf/bc', { method: 'PATCH', body: JSON.stringify({ fields: { data: sv(JSON.stringify({ '7290000000001': { n: 'מוצר', d: '', t: Date.now() } })), at: sv(Date.now()) } }) });
     return [await put(), await put()];
   } },
+  // shLnPut / shLnSync (#111): כיתוב קו העדכונים – אותו דפוס כמו M13/M14
+  M122: { run: async (uid) => {
+    const put = () => fsx(uid, '/shelf/line', { method: 'PATCH', body: JSON.stringify({ fields: { data: sv(JSON.stringify({ on: true, t: 'קו', p: '0' })), at: sv(Date.now()) } }) });
+    return [await put(), await put()];
+  } },
+  M123: { allowed: () => [200, 404], run: async (uid, env) => {
+    const missing = await fsx(uid, '/shelf/line');
+    await bypass(env, (db) => db.doc('shelf/line').set({ data: '{}', at: '1' }));
+    const present = await fsx(uid, '/shelf/line');
+    return [missing, present];
+  }, check: (role, res) => { if (res[1].status !== 403) assert.equal(res[1].status, 200); } },
   M14: { allowed: () => [200, 404], run: async (uid, env) => {
     const missing = await fsx(uid, '/shelf/bc');
     await bypass(env, (db) => db.doc('shelf/bc').set({ data: '{}', at: '1' }));
@@ -534,6 +545,23 @@ const REPLAY = {
     await bypass(env, (db) => db.doc('cfg/tkw').delete());
     const body = (v) => JSON.stringify({ fields: { wp: { booleanValue: v } } });
     return [await fsx(uid, '/cfg/tkw', { method: 'PATCH', body: body(false) }), await fsx(uid, '/cfg/tkw', { method: 'PATCH', body: body(true) })];
+  } },
+  // shLnPut / shLnSync: כיתוב קו העדכונים בדף המבצעים (shelf/line) – נוסף ב-main בלי שורה בטבלה
+  M122: { run: async (uid) => [await fsx(uid, '/shelf/line', { method: 'PATCH', body: JSON.stringify({ fields: { data: sv(JSON.stringify({ on: true, t: 'קו עדכונים', p: '050-0000000', at: Date.now() })), at: sv(String(Date.now())) } }) })] },
+  M123: { allowed: () => [200, 404], run: async (uid, env) => {
+    const missing = await fsx(uid, '/shelf/line');
+    await bypass(env, (db) => db.doc('shelf/line').set({ data: '{}', at: '1' }));
+    return [missing, await fsx(uid, '/shelf/line')];
+  } },
+  // סבב 2 (17.11): סף פער מזומן משותף cfg/zc – מנהל בלבד (zcThrLoad: 404 = אין ערך משותף; CHG.zcThr: PATCH thr/by/at)
+  M124: { allowed: () => [200, 404], run: async (uid, env) => {
+    const missing = await fsx(uid, '/cfg/zc');
+    await bypass(env, (db) => db.doc('cfg/zc').set({ thr: 50, by: 'u_mgr', at: Date.now() }));
+    return [missing, await fsx(uid, '/cfg/zc')];
+  } },
+  M125: { run: async (uid) => {
+    const put = (t) => fsx(uid, '/cfg/zc', { method: 'PATCH', body: JSON.stringify({ fields: { thr: { doubleValue: t }, by: sv(uid), at: iv(Date.now()) } }) });
+    return [await put(80), await put(0)];
   } },
   M119: { run: async (uid, env, role) => {
     const now = Date.now(); const adm = role === 'manager' || role === 'managerAdminsOnly';

@@ -4,6 +4,7 @@
 //                                     setBusinessAdv, setYemotToken, logBusinessEntry, setBusinessBrand.
 //                                     setBusinessRanks, setStaffPerms, addStaff (6ה: הוספת עובדים – רק מנהל־על).
 //                                     setBusinessOrg, setStaffBranches (סניפים/בנקים/כרטיסים, 2026-11-08).
+//                                     setStaffEmail (שינוי מייל של עובד קיים – 17.11.2026).
 //   מנהל העסק (בתוך העסק שלו בלבד):   setStaffActive (השבתה והחזרה של עובד קיים).
 //                                     setStaffPrc (רק בלארג' פעמי במצב legacy: המתג prc בלבד – 12.11.2026).
 // כל פעולה נרשמת ב-b/{bizId}/audit (by, t, act, note). bizId של משתמש רגיל נקבע בשרת בלבד (requireStaff).
@@ -677,6 +678,44 @@ async function setStaffName(request) {
   return { ok: true, uid, name };
 }
 
+// setStaffEmail({uid, email}) – 17.11.2026: שינוי מייל של עובד קיים (מנהל־על בלבד, כמו addStaff – המייל הוא פרטי הכניסה).
+// אותו חשבון (אותו uid): ההיסטוריה, ההרשאות, הסניפים והשם נשארים. רק כתובת הכניסה מתחלפת.
+//   - Auth: המייל מוחלף ומסומן כלא מאומת; החיבורים הקיימים מבוטלים (הטוקן הישן נושא את המייל הישן, וחוק isMyName קורא אותו).
+//   - staff.email ו-users.email מתעדכנים, ונרשם audit. מייל שכבר שייך לחשבון אחר – נדחה (email-taken), בלי לגעת בו.
+//   - אידמפוטנטי: אם הכתיבה ל-Firestore נכשלה אחרי עדכון Auth, הפעלה חוזרת עם אותו מייל משלימה אותה.
+async function setStaffEmail(request) {
+  const who = await requireBizManager(request);
+  if (who.superadmin !== true) throw deny('not-superadmin', 'שינוי מייל של עובד מותר למנהל המערכת בלבד');
+  const input = inputObject(request);
+  const uid = typeof input.uid === 'string' ? input.uid : '';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) throw bad('bad-uid', 'מזהה משתמש לא תקין');
+  const email = cleanEmail(input.email);
+  if (uid === who.uid) throw new HttpsError('failed-precondition', 'אי אפשר לשנות את עצמך', { reason: 'self' });
+  const db = getFirestore();
+  const sRef = db.doc(T.bizRef(who.biz, 'staff/' + uid));
+  const [s, a, u] = await Promise.all([sRef.get(), db.doc(T.bizRef(who.biz, 'admins/' + uid)).get(), db.doc('users/' + uid).get()]);
+  if (!s.exists || (u.exists && u.get('bizId') !== who.bizId)) throw new HttpsError('not-found', 'העובד לא נמצא בעסק', { reason: 'no-staff' });
+  if (a.exists) throw new HttpsError('failed-precondition', 'אי אפשר לשנות מייל של מנהל מכאן', { reason: 'is-admin' });
+  const auth = getAuth();
+  let other = null;
+  try { other = await auth.getUserByEmail(email); } catch (e) { if (!e || e.code !== 'auth/user-not-found') throw e; }
+  if (other && other.uid !== uid) throw new HttpsError('failed-precondition', 'המייל הזה כבר שייך לחשבון אחר', { reason: 'email-taken' });
+  const old = String(s.get('email') || '');
+  if (old === email && (!u.exists || u.get('email') === email) && other) return { ok: true, uid, email, same: true };
+  try { await auth.getUser(uid); } catch (e) {
+    if (e && e.code === 'auth/user-not-found') throw new HttpsError('not-found', 'לעובד אין חשבון כניסה', { reason: 'no-account' });
+    throw e;
+  }
+  await auth.updateUser(uid, { email, emailVerified: false });
+  await auth.revokeRefreshTokens(uid);
+  const b = db.batch();
+  b.update(sRef, { email });
+  if (u.exists) b.update(u.ref, { email });
+  b.set(auditRef(who.bizId), auditData(who.uid, 'setStaffEmail', uid + ':' + old + '>' + email));
+  await b.commit();
+  return { ok: true, uid, email };
+}
+
 // ---------- syncLegacyAdmin / syncLegacyStaff: עותק users/{uid} לחברי לארג' פעמי במצב legacy ----------
 // כללי Storage של app_releases/ קוראים רק את users/{uid} ואת superadmins/{uid} (מגבלת 2 הקריאות, עדכון חוזה 6).
 // לכן כל שינוי ב-admins/{uid} או ב-staff/{uid} בשורש (למשל השבתת עובד בלוח הבקרה) מתעדכן מיד בעותק.
@@ -739,10 +778,11 @@ exports.setStaffPrc = onCall(wrap('setStaffPrc', setStaffPrc));
 exports.addStaff = onCall(wrap('addStaff', addStaff));
 exports.setStaffActive = onCall(wrap('setStaffActive', setStaffActive));
 exports.setStaffName = onCall(wrap('setStaffName', setStaffName));
+exports.setStaffEmail = onCall(wrap('setStaffEmail', setStaffEmail));
 exports.setBusinessOrg = onCall(wrap('setBusinessOrg', setBusinessOrg));
 exports.setStaffBranches = onCall(wrap('setStaffBranches', setStaffBranches));
 
 Object.defineProperty(exports, '_core', { enumerable: false, value: {
   createBusiness, inviteBusinessAdmin, setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken,
-  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, mapBase, themeOf, addStaff, setBusinessRanks, setStaffPerms, setStaffPrc, cleanPerms, cleanRanks, setStaffActive, syncLegacyMember, setBusinessOrg, setStaffBranches, cleanOrg, israeliPhone, cleanAdv, BATCH_MAX, wrap,
+  setScanQuota, NEW_BIZ_SCAN_DAILY, logBusinessEntry, setBusinessBrand, cleanBrand, mapBase, themeOf, addStaff, setBusinessRanks, setStaffPerms, setStaffPrc, cleanPerms, cleanRanks, setStaffActive, setStaffEmail, syncLegacyMember, setBusinessOrg, setStaffBranches, cleanOrg, israeliPhone, cleanAdv, BATCH_MAX, wrap,
 } });

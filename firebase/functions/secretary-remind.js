@@ -496,6 +496,9 @@ async function secNotes(request) {
       const x = d.data();
       const o = { id: d.id, k: x.k, typ: x.typ || '', title: x.title || '', body: x.body || '', at: x.at || 0, t: x.t || 0, seen: x.seen === true, st: x.st || 'open', rep: x.rep || 0, n: x.n || 1 };
       if (x.ref && x.k === 'rep') o.ref = x.ref;
+      // 17.11.2026: "המזכירה שואלת לגבי מייל" – מזהה המייל, כדי לענות לה ולטפל במייל מתוך ההתראה עצמה
+      const mk = /^mailask\|(g[0-9a-f]{40})$/.exec(String(x.key || ''));
+      if (mk) o.mail = mk[1];
       return o;
     });
     return { ok: true, notes: L, unseen: L.filter((x) => !x.seen).length, types: Object.fromEntries(Object.entries(R.TYPES).map(([k, v]) => [k, v.l])) };

@@ -37,6 +37,11 @@ function getD(){const u=(SY&&SY.uid)||'';if(Y.uid===u)return Y.d;Y.uid=u;try{con
 function save(){try{localStorage.setItem(DK,JSON.stringify({uid:Y.uid,d:Y.d}))}catch(e){}}
 const lim=()=>Object.assign({},DEF,(Y.st&&Y.st.r&&Y.st.r.limits)||{});
 const SLACT={recipes:'1',promos:'2',updates:'3',hours:'4',opening:'open'}; // שלוחה (שם בשרת) ← מסך באפליקציה
+// מבנה השלוחות (משימה 2026-11-17): מ-getLineState (layout). עד שנטען – המבנה הרגיל. single = כל התוכן בשלוחה אחת.
+const DEXT={recipes:'1',promos:'2',updates:'3',hours:'4'};
+const LY=()=>{const l=Y.st&&Y.st.r&&Y.st.r.layout;return l&&l.exts?l:{single:false,ext:'1',exts:DEXT}};
+const xn=slot=>String(LY().exts[slot]||DEXT[slot]); // מספר השלוחה שאליה עולה סוג התוכן עכשיו
+const lySig=()=>JSON.stringify(LY().exts)+((cur().a||'')===''?(Y.st?'1':'0'):''); // במסך הראשי: גם "נטען" (כרטיס ההגדרה מוצג רק אחרי טעינה)
 const recMax=slot=>{const m=lim().recordSecBySlot;return(m&&+m[slot])||(slot==='opening'?60:lim().recordSec)};
 const canRec=slot=>{const c=lim().canRecord;if(c&&c[slot]===false)return false;return isA()||['recipes','promos','updates'].includes(slot)}; // נוחות בלבד: ההרשאה נאכפת בשרת
 const modeOf=slot=>Y.modes[slot]||'type';
@@ -61,6 +66,7 @@ async function state(force){
  if(!force&&Y.st&&Date.now()-Y.st.at<30000)return Y.st;
  const r=await call('getLineState',{});Y.st={at:Date.now(),r};
  if(r&&typeof r.lexicon==='string'&&window.ypLexicon)window.ypLexicon(r.lexicon); // מילון שמור = מה ש"שמע קודם" מחיל
+ if(cur().v==='yl'&&Y.ly!==lySig()&&!typing())setTimeout(()=>{if(cur().v==='yl'&&Y.ly!==lySig()&&!typing())redraw()},0); // מבנה השלוחות השתנה ← תוויות מעודכנות
  return Y.st}
 // ---------- עזרים לתצוגה ----------
 const box=f=>document.querySelector(`[data-f="${f}"]`);
@@ -84,18 +90,32 @@ const opt=(v,t,s)=>`<button class="opt" data-a="ylGo" data-v="${v}" style="min-h
 // ---------- משבצת במסך הבית ----------
 window.ylTile=()=>`<button class="tile" data-a="go" data-v="yl" style="border-color:var(--acc);color:var(--acc);font-size:1.15rem;text-align:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:34px;height:34px;display:block;margin:0 auto 6px"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>שלוחות הקו</button>`;
 ACT.ylGo=el=>go('yl',el.dataset.v);
+// כניסת מנהל ל"לקוחות משוב בימות" (yemot-fblist.js, window.yfOpen). בלי הקובץ – לא מוצג.
+const fbOpt=()=>`<button class="opt" data-a="ylFb" style="min-height:84px"><span style="font-size:1.1rem;font-weight:800">לקוחות משוב בימות<small>רשימת הטלפונים מהמשוב וצינתוק בתשלום</small></span>${ico('chev')}</button>`;
+ACT.ylFb=()=>{if(window.yfOpen)window.yfOpen()};
 // ---------- המסכים ----------
 V.yl=a=>{a=a||'';
  if(Y.rec&&Y.rec.on&&a!==Y.rec.act)recDiscard();
  if(MG.includes(a)&&!isA())return{t:'שלוחות הקו',h:'<div class="empty">הפעולה הזו מותרת למנהל בלבד.</div>'};
- getD();setTimeout(()=>ylLoad(a),0);
+ getD();setTimeout(()=>ylLoad(a),0);Y.ly=lySig();
  return({'':vMain,'1':vRecipes,'2':vPromos,'3':vUpdates,'4':vHours,open:vOpen,lex:vLex}[a]||vMain)()};
-function vMain(){const m=isA();
- return{t:'שלוחות הקו',s:m?'מנהל':'עובד',h:`<p class="note" style="margin:0 0 12px">בוחרים שלוחה, כותבים או מקליטים, שומעים איך זה ייראה, ורק אחרי אישור זה עולה לקו.</p>${m?'<div id="ylVoice"></div>':''}
- ${opt('1','שלוחה 1 · מתכונים','כתיבה או סריקה מצילום · החדש מושמע ראשון')}
- ${opt('2','שלוחה 2 · מבצעים','בחירת מבצע מהמדף, תיקון נוסח ושליחה')}
- ${opt('3','שלוחה 3 · עדכונים','הקלדה או הקלטה · החדש מושמע ראשון')}
- ${m?`${opt('4','שלוחה 4 · שעות וכתובת','הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}`:''}`}}
+function vMain(){const m=isA(),ly=LY();
+ return{t:'שלוחות הקו',s:m?'מנהל':'עובד',h:`<p class="note" style="margin:0 0 12px">בוחרים שלוחה, כותבים או מקליטים, שומעים איך זה ייראה, ורק אחרי אישור זה עולה לקו.${ly.single?` כל התוכן עולה עכשיו לשלוחה ${esc(ly.ext)}, והחדש מושמע ראשון.`:''}</p>${m?'<div id="ylVoice"></div>':''}
+ ${opt('1',`שלוחה ${xn('recipes')} · מתכונים`,'כתיבה או סריקה מצילום · החדש מושמע ראשון')}
+ ${opt('2',`שלוחה ${xn('promos')} · מבצעים`,'בחירת מבצע מהמדף, תיקון נוסח ושליחה')}
+ ${opt('3',`שלוחה ${xn('updates')} · עדכונים`,'הקלדה או הקלטה · החדש מושמע ראשון')}
+ ${m?`${opt('4',`שלוחה ${xn('hours')} · שעות וכתובת`,'הודעה קבועה או זמנית, ומחיקה')}${opt('open','הודעת פתיחה','מה שנשמע בכניסה לקו')}${opt('lex','מילון הגייה','איך לבטא שמות ומילים בקו')}${window.yfOpen?fbOpt():''}${Y.st?layoutCard():''}`:''}`}}
+// כרטיס מנהל: "כל התוכן בשלוחה אחת" (setLineLayout). מוצג רק אחרי שהמצב נטען מהשרת, כדי לא להציג מצב שגוי.
+function layoutCard(){const ly=LY();
+ return`<div class="card" id="ylLayout" style="margin-top:12px"><b>כל התוכן בשלוחה אחת</b><p class="note" style="margin:4px 0 10px">${ly.single?`מופעל: מבצעים, מתכונים, עדכונים ושעות – כולם עולים לשלוחה ${esc(ly.ext)}.`:'כבוי: כל סוג תוכן עולה לשלוחה משלו (1 עד 4).'} הודעות שכבר בקו נשארות במקומן עד שהן יורדות. ההחלפה לא מוחקת כלום, ואפשר לחזור בכל רגע.</p>
+ <button class="btn s ${ly.single?'g':''}" data-a="ylLayout" data-v="${ly.single?0:1}">${ly.single?'חזור לחלוקה הרגילה':'העבר את כל התוכן לשלוחה 1'}</button></div>`}
+ACT.ylLayout=el=>{if(!isA()||Y.sending)return;const one=el.dataset.v==='1';
+ ask(one?'להעביר את כל התוכן לשלוחה 1? מעכשיו מבצעים, מתכונים, עדכונים ושעות יעלו כולם לשלוחה 1, והחדש יושמע ראשון. הודעות שכבר בקו נשארות במקומן עד שהן יורדות (מבצעים יורדים בתאריך שלהם). אפשר לחזור בכל רגע.'
+  :'לחזור לחלוקה הרגילה? מעכשיו כל סוג תוכן יעלה לשלוחה שלו (מתכונים 1, מבצעים 2, עדכונים 3, שעות 4). מה שכבר עלה לשלוחה 1 נשאר שם עד שהוא יורד.',
+  async()=>{if(Y.sending)return;Y.sending=true;
+   try{const r=await call('setLineLayout',{single:one,confirm:true});toast(r&&he(r.message)?r.message:'✓ ההגדרה עודכנה');Y.st=null;if(window.ylBoard&&ylBoard.invalidate)ylBoard.invalidate();await state(true)}
+   catch(e){toast(errMsg(e))}finally{Y.sending=false}
+   if(here(''))redraw()},one?'כן, הכול לשלוחה 1':'כן, חזור לחלוקה')};
 function listHtml(slot){
  if(window.ylBoard)return ylBoard.html(slot); // yemot-board.js: "בקו עכשיו" + "ירדו בשבוע האחרון"
  const L=Y.st&&Y.st.r&&Y.st.r.slots&&Y.st.r.slots[slot];if(!L)return'<p class="note">טוען…</p>';
@@ -108,7 +128,7 @@ function paintVoice(v){const el=document.getElementById('ylVoice'),q=v&&v.quota;
  el.innerHTML=`<div class="card" style="border-color:var(--warn)"><b style="color:var(--warn)">${over?'הקול האנושי הגיע לתקרה החודשית':'הקול האנושי קרוב לתקרה החודשית'}</b><p class="note" style="margin:4px 0 0">נוצלו ${(+q.used).toLocaleString('he-IL')} מתוך ${(+q.limit).toLocaleString('he-IL')} תווים החודש. ${over?'שליחה שלא נכנסת בתקרה תציע לשלוח בקול הממוחשב.':'כשהתקרה תיגמר, שליחה תציע לשלוח בקול הממוחשב.'} התקרה מתחדשת ב-1 לחודש.</p></div>`}
 function paintList(slot){const el=document.getElementById('ylList');if(el)el.innerHTML=listHtml(slot)}
 async function ylLoad(a,force){
- if(a===''&&isA()){try{const s=await state(force);if(here(''))paintVoice(s.r&&s.r.voice)}catch(e){}return} // מנהל: מצב התקרה של הקול האנושי
+ if(a===''){try{const s=await state(force);if(here('')&&isA())paintVoice(s.r&&s.r.voice)}catch(e){}return} // מנהל: מצב התקרה של הקול האנושי. כולם: מבנה השלוחות (התוויות)
  if(!here(a)||!['1','2','3','4','open','lex'].includes(a))return;
  const el=document.getElementById('ylList'),fail=e=>{if(!here(a))return;if(window.ylBoard&&ylBoard.slots[a]){toast(errMsg(e));return} // הרשימה של yemot-board.js נשארת במסך
   if(el)el.innerHTML=`<p class="note" style="color:var(--bad)">לא הצלחנו לטעון: ${esc(errMsg(e))}</p>`};
@@ -116,7 +136,7 @@ async function ylLoad(a,force){
   if(window.ylBoard&&ylBoard.slots[a])ylBoard.load(a,force); // yemot-board.js טוען רק כשפותחים את השלוחה
   if(a==='2'){state(force).catch(()=>{});return} // מגבלות ההקלטה מהשרת (ברקע, כדי לא לדרוס את הרשימה)
   if(a==='4'&&!window.ylBoard){state(force).catch(()=>{}); // מגבלות ההקלטה מהשרת
-   const r=await call('listLineFiles',{ext:'4'});Y.files=r&&r.files||[];if(here(a))paintFiles();return}
+   const r=await call('listLineFiles',{ext:xn('hours')});Y.files=r&&r.files||[];if(here(a))paintFiles();return}
   const s=await state(force);if(!here(a))return;
   if(a==='1')paintList('recipes');
   if(a==='3')paintList('updates');
@@ -126,7 +146,7 @@ async function ylLoad(a,force){
  }catch(e){fail(e)}}
 // שלוחה 1 – מתכונים
 function vRecipes(){
- return{t:'מתכונים',s:'שלוחה 1',h:`<div class="card"><p class="note" style="margin:0 0 10px">כותבים את המתכון, או סורקים אותו מצילום (גם כתב יד). אפשר לתקן לפני השליחה. המתכון החדש יושמע ראשון.</p>
+ return{t:'מתכונים',s:'שלוחה '+xn('recipes'),h:`<div class="card"><p class="note" style="margin:0 0 10px">כותבים את המתכון, או סורקים אותו מצילום (גם כתב יד). אפשר לתקן לפני השליחה. המתכון החדש יושמע ראשון.</p>
  ${modeChips('recipes')}${modeOf('recipes')==='rec'&&canRec('recipes')?recHtml('recipes'):`<label class="btn g w" style="cursor:pointer;margin-bottom:6px">סרוק מתכון מצילום<input type="file" accept="image/*" multiple data-c="ylscan" hidden></label>
  <p class="note" id="ylScanMsg" aria-live="polite" style="margin:0 0 10px">${getD().rs==='scan'&&getD().r?'המתכון נסרק מצילום. בדקו ותקנו לפני השליחה.':'אפשר לבחור עד 2 תמונות (למשל שני עמודים).'}</p>
  ${field('r','נוסח המתכון (שם, מצרכים, אופן ההכנה)',9)}${sendBtn('r','recipes')}`}</div>
@@ -153,7 +173,7 @@ function promoRows(){const rows=[];['p8','p2','p1'].forEach(k=>((typeof SH!=='un
 const offerTxt=it=>it.kind==='A'?`${it.k} ב-${shN(it.tot)} ₪`:it.kind==='B'?`ב-${shN(it.now)} ₪ (רגיל ${shN(it.reg)})`:'₪ '+shN(it.p);
 function vPromos(){const rows=promoRows(),m=isA();
  if(typeof shSync==='function'&&typeof shOn==='function'){try{if(shOn())shSync().then(ch=>{if(ch&&here('2')&&!typing())redraw()}).catch(()=>{})}catch(e){}}
- return{t:'מבצעים',s:'שלוחה 2',h:`<div class="card"><p class="note" style="margin:0">בוחרים מבצע מהמדף, מתקנים את הנוסח, שומעים ושולחים. ${m?'מנהל יכול לבחור גם צינתוק.':'השליחה היא בלי צינתוק.'}</p></div>
+ return{t:'מבצעים',s:'שלוחה '+xn('promos'),h:`<div class="card"><p class="note" style="margin:0">בוחרים מבצע מהמדף, מתקנים את הנוסח, שומעים ושולחים. ${m?'מנהל יכול לבחור גם צינתוק.':'השליחה היא בלי צינתוק.'}</p></div>
  <div class="sec"><h3>מבצע מוקלט</h3></div><div class="card"><p class="note">הקלטה בקול שלכם, בלי צינתוק. בשליחה בוחרים מתי להוריד אותה מהקו.</p>${recHtml('promos')}</div>
  <div class="sec"><h3>המבצעים במדף</h3></div>
  ${rows.length?rows.map(x=>`<div class="li" style="cursor:default;flex-wrap:wrap"><div class="m"><b>${esc(x.it.n)}</b><small>${esc(offerTxt(x.it))}${x.it.d?' · '+esc(x.it.d):''}</small></div><button class="btn s" data-a="ylPromo" data-k="${x.k}" data-i="${x.i}">שלח לקו…</button></div>`).join(''):'<p class="note">אין עדיין מבצעים במדף. בונים אותם במסך "מחירים ומבצעים למדף", "מבצע למדף".</p>'}
@@ -162,12 +182,12 @@ function vPromos(){const rows=promoRows(),m=isA();
 ACT.ylPromo=el=>{const k=el.dataset.k,i=+el.dataset.i,it=SH&&SH[k]&&SH[k].items&&SH[k].items[i];if(!it){toast('המבצע לא נמצא');return}
  if(!ID.test(it.ym||'')){it.ym='pk'+rand();shTouch(k)} // promoKey קבוע לכל מבצע (כמו בחלון "שלח לקו" הקיים), כך שהקובץ בקו מוחלף ולא מתווסף
  const today=isoDay(new Date());let until=it.vf||'';if(until&&until<today)until='';
- cOpen({kind:'promo',slot:'promos',heading:'שליחת מבצע לקו',note:'המבצע יעלה לשלוחת המבצעים (2). תקנו את הנוסח אם צריך, שמעו ואשרו.'+(isA()?'':' השליחה היא בלי צינתוק.'),promo:{k,i,key:it.ym,name:String(it.n||'').slice(0,80)},it,
+ cOpen({kind:'promo',slot:'promos',heading:'שליחת מבצע לקו',note:`המבצע יעלה לשלוחה ${xn('promos')}. תקנו`+' את הנוסח אם צריך, שמעו ואשרו.'+(isA()?'':' השליחה היא בלי צינתוק.'),promo:{k,i,key:it.ym,name:String(it.n||'').slice(0,80)},it,
   text:promoText(it,until),max:lim().promo,untilReq:true,until,maxDays:lim().promoMaxDays,untilLabel:'מתי להוריד את המבצע מהקו?',retext:true,tzChoice:isA()})};
 function promoText(it,until){return window.ymText(it,until)} // נוסח אוטומטי: אותה פונקציה בדיוק כמו בחלון "שלח לקו" (yemot-promo.js), כדי שלא יהיו שני נוסחים
 // שלוחה 3 – עדכונים
 function vUpdates(){const rec=modeOf('updates')==='rec';
- return{t:'עדכונים',s:'שלוחה 3',h:`<div class="card"><p class="note" style="margin:0 0 10px">כל העדכונים נשמרים בקו, והחדש מושמע ראשון. הקלדה נשמעת בקול הממוחשב של הקו. הקלטה נשמעת בקול שלכם.</p>
+ return{t:'עדכונים',s:'שלוחה '+xn('updates'),h:`<div class="card"><p class="note" style="margin:0 0 10px">כל העדכונים נשמרים בקו, והחדש מושמע ראשון. הקלדה נשמעת בקול הממוחשב של הקו. הקלטה נשמעת בקול שלכם.</p>
  ${modeChips('updates')}
  ${rec&&canRec('updates')?recHtml('updates'):`${field('u','נוסח העדכון',5)}${sendBtn('u','updates')}`}</div>
  <div class="sec"><h3>העדכונים שבקו</h3></div><div id="ylList">${listHtml('updates')}</div>`}}
@@ -223,19 +243,19 @@ async function toWav(blob,maxSec){ // מפענח, ממיר ל-WAV PCM 16 ביט,
  return{sec:n/8000,b64:btoa(bin),blob:new Blob([bytes],{type:'audio/wav'})}}
 ACT.ylRecSend=el=>{const slot=(el&&el.dataset&&el.dataset.s)||'updates',R=Y.rec;if(!R||R.slot!==slot||!R.url||!R.b64)return;
  const d=getD(),td=isoDay(new Date()),c={kind:'audio',slot,url:R.url,b64:R.b64,sec:R.sec,clear:()=>{recDiscard();if(slot==='promos')d.ru='';save()}};
- if(slot==='updates')Object.assign(c,{heading:'שליחת הקלטה לקו',note:'ההקלטה תעלה לשלוחת העדכונים (3) ותושמע ראשונה.'});
- else if(slot==='recipes')Object.assign(c,{heading:'שליחת הקלטת מתכון לקו',note:'ההקלטה תעלה לשלוחת המתכונים (1) ותושמע ראשונה.'});
- else if(slot==='promos')Object.assign(c,{heading:'שליחת מבצע מוקלט לקו',note:'ההקלטה תעלה לשלוחת המבצעים (2), בלי צינתוק. בחרו מתי להוריד אותה מהקו.',untilReq:true,until:d.ru&&d.ru>=td?d.ru:'',untilField:'ru',maxDays:lim().promoMaxDays,untilLabel:'מתי להוריד את המבצע מהקו?'});
- else if(slot==='hours'){const tmp=!!d.ht;Object.assign(c,{heading:'שליחת הקלטה לשלוחה 4',note:tmp?'ההקלטה תושמע עד התאריך שתבחרו (כולל), ותימחק אוטומטית בלילה שאחריו.':'ההקלטה תעלה כקובץ חדש ותושמע ראשונה. ההודעות הקודמות נשארות עד שתמחקו אותן.',untilReq:tmp,until:d.hu&&d.hu>=td?d.hu:'',untilField:'hu',maxDays:lim().tempMaxDays,untilLabel:'עד איזה תאריך להשמיע (כולל)?'})}
+ if(slot==='updates')Object.assign(c,{heading:'שליחת הקלטה לקו',note:`ההקלטה תעלה לשלוחה ${xn('updates')} ותושמע ראשונה.`});
+ else if(slot==='recipes')Object.assign(c,{heading:'שליחת הקלטת מתכון לקו',note:`ההקלטה תעלה לשלוחה ${xn('recipes')} ותושמע ראשונה.`});
+ else if(slot==='promos')Object.assign(c,{heading:'שליחת מבצע מוקלט לקו',note:`ההקלטה תעלה לשלוחה ${xn('promos')}, בלי צינתוק. בחרו מתי להוריד אותה מהקו.`,untilReq:true,until:d.ru&&d.ru>=td?d.ru:'',untilField:'ru',maxDays:lim().promoMaxDays,untilLabel:'מתי להוריד את המבצע מהקו?'});
+ else if(slot==='hours'){const tmp=!!d.ht;Object.assign(c,{heading:'שליחת הקלטה לשלוחה '+xn('hours'),note:tmp?'ההקלטה תושמע עד התאריך שתבחרו (כולל), ותימחק אוטומטית בלילה שאחריו.':'ההקלטה תעלה כקובץ חדש ותושמע ראשונה. ההודעות הקודמות נשארות עד שתמחקו אותן.',untilReq:tmp,until:d.hu&&d.hu>=td?d.hu:'',untilField:'hu',maxDays:lim().tempMaxDays,untilLabel:'עד איזה תאריך להשמיע (כולל)?'})}
  else if(slot==='opening')Object.assign(c,{heading:'החלפת הפתיחה בהקלטה',note:'ההקלטה תחליף את הפתיחה של הקו, וכל מי שיתקשר ישמע אותה. הפתיחה הקודמת תישמר לפני ההחלפה; אם אי אפשר לשמור אותה, כלום לא ישתנה.'});
  else return;
  cOpen(c)};
 // שלוחה 4 – שעות וכתובת (מנהל)
 function vHours(){const d=getD(),tmp=!!d.ht;
  const chips=[[0,'קבועה'],[1,'זמנית, עם תאריך תפוגה']].map(([v,t])=>`<button type="button" class="chip ${!!v===tmp?'on':''}" role="radio" aria-checked="${!!v===tmp}" data-a="ylTemp" data-v="${v}">${t}</button>`).join('');
- return{t:'שעות וכתובת',s:'שלוחה 4 · מנהל',h:`<div class="card"><p class="note" style="margin:0 0 10px">כל הודעה חדשה עולה כקובץ חדש ומושמעת ראשונה. הקודמות נשארות עד שמוחקים אותן. הודעה זמנית נמחקת אוטומטית בלילה שאחרי התאריך.</p>
+ return{t:'שעות וכתובת',s:`שלוחה ${xn('hours')} · מנהל`,h:`<div class="card"><p class="note" style="margin:0 0 10px">כל הודעה חדשה עולה כקובץ חדש ומושמעת ראשונה. הקודמות נשארות עד שמוחקים אותן. הודעה זמנית נמחקת אוטומטית בלילה שאחרי התאריך.</p>
  <div class="chips" role="radiogroup" style="margin-bottom:12px">${chips}</div>${modeChips('hours')}${modeOf('hours')==='rec'?recHtml('hours'):`${field('h','נוסח ההודעה',5)}${sendBtn('h','hours')}`}</div>
- <div class="sec"><h3>הקבצים בשלוחה 4</h3><button class="btn s g" data-a="ylReload">רענן</button></div><div id="ylList">${filesHtml()}</div>`}}
+ <div class="sec"><h3>הקבצים בשלוחה ${xn('hours')}</h3><button class="btn s g" data-a="ylReload">רענן</button></div><div id="ylList">${filesHtml()}</div>`}}
 ACT.ylTemp=el=>{getD().ht=el.dataset.v==='1';save();redraw()};
 ACT.ylReload=()=>{Y.files=null;const el=document.getElementById('ylList');if(el)el.innerHTML='<p class="note">טוען…</p>';ylLoad('4',true)};
 function filesHtml(){if(window.ylBoard)return ylBoard.html('hours');const F=Y.files;if(!F)return'<p class="note">טוען…</p>';if(!F.length)return'<p class="note">אין קבצי תוכן בשלוחה.</p>';
@@ -243,7 +263,7 @@ function filesHtml(){if(window.ylBoard)return ylBoard.html('hours');const F=Y.fi
 function paintFiles(){const el=document.getElementById('ylList');if(el)el.innerHTML=filesHtml()}
 ACT.ylRmF=el=>{const n=el.dataset.n,leg=el.dataset.l==='1';
  ask(leg?`למחוק את ${n}? זה הקובץ הוותיק של השלוחה, והוא לא יושמע יותר. אי אפשר לשחזר.`:`למחוק את ${n} מהשלוחה? ההודעה לא תושמע יותר, ואי אפשר לשחזר.`,
-  ()=>doRemove({ext:'4',file:n},'4'),'כן, מחק')};
+  ()=>doRemove({ext:xn('hours'),file:n},'4'),'כן, מחק')};
 ACT.ylRm=el=>{const id=el.dataset.id;ask('להסיר את הפריט מהקו? הוא לא יושמע יותר, ואי אפשר לשחזר.',()=>doRemove({id},here('1')?'1':'3'),'כן, הסר')};
 async function doRemove(p,a){
  if(Y.sending)return;Y.sending=true;
@@ -274,13 +294,13 @@ ACT.ylLexSave=async()=>{
  catch(e){toast(e&&e.offline?'אין חיבור לאינטרנט. בדקו ונסו שוב.':e&&e.code===403?(isA()?'השמירה נדחתה. בדקו שהשעה בטלפון נכונה ושהחשבון הוא של מנהל.':LEX_DENY):'שמירת המילון נכשלה. נסו שוב מאוחר יותר.')}
  finally{Y.sending=false;if(b)b.disabled=false}};
 // ---------- חלון אישור (לכל שליחה) ----------
-const LABELS={recipes:['שליחת מתכון לקו','המתכון יעלה לשלוחה 1 ויושמע ראשון.'],updates:['שליחת עדכון לקו','העדכון יעלה לשלוחה 3 ויושמע ראשון.'],opening:['החלפת הודעת הפתיחה','ההודעה תחליף את הפתיחה של הקו. כל מי שיתקשר ישמע אותה.']};
+const LABELS=s=>({recipes:['שליחת מתכון לקו',`המתכון יעלה לשלוחה ${xn('recipes')} ויושמע ראשון.`],updates:['שליחת עדכון לקו',`העדכון יעלה לשלוחה ${xn('updates')} ויושמע ראשון.`],opening:['החלפת הודעת הפתיחה','ההודעה תחליף את הפתיחה של הקו. כל מי שיתקשר ישמע אותה.']})[s];
 const FIELD={recipes:'r',updates:'u',hours:'h',opening:'o',manual:'m'};
 ACT.ylSend=el=>{const s=el.dataset.s,f=FIELD[s],d=getD(),bx=box(f),text=String(bx?bx.value:d[f]||''),L=lim();
- if(s==='manual'){cOpen({kind:'promo',slot:'promos',manual:true,heading:'שליחת מבצע ידני לקו',note:'מבצע בלי בסיס במדף. יעלה לשלוחת המבצעים (2).',text,field:'m',max:L.promo,untilReq:true,until:d.mu||'',maxDays:L.promoMaxDays,untilLabel:'מתי להוריד את המבצע מהקו?',tzChoice:true,key:'man_'+(d.mk=d.mk||rand()),clear:()=>{d.m='';d.mu='';d.mk=null;save()}});return}
+ if(s==='manual'){cOpen({kind:'promo',slot:'promos',manual:true,heading:'שליחת מבצע ידני לקו',note:`מבצע בלי בסיס במדף. יעלה לשלוחה ${xn('promos')}.`,text,field:'m',max:L.promo,untilReq:true,until:d.mu||'',maxDays:L.promoMaxDays,untilLabel:'מתי להוריד את המבצע מהקו?',tzChoice:true,key:'man_'+(d.mk=d.mk||rand()),clear:()=>{d.m='';d.mu='';d.mk=null;save()}});return}
  if(s==='hours'){const tmp=!!d.ht;
-  cOpen({kind:'item',slot:'hours',heading:'שליחת הודעה לשלוחה 4',note:tmp?'ההודעה תושמע עד התאריך שתבחרו (כולל), ותימחק אוטומטית בלילה שאחריו.':'ההודעה תעלה כקובץ חדש ותושמע ראשונה. ההודעות הקודמות נשארות עד שתמחקו אותן.',text,field:'h',max:L.hours,source:'typed',untilReq:tmp,until:d.hu||'',maxDays:L.tempMaxDays,untilLabel:'עד איזה תאריך להשמיע (כולל)?',untilField:'hu',clear:()=>{d.h='';save()}});return}
- const lb=LABELS[s];
+  cOpen({kind:'item',slot:'hours',heading:'שליחת הודעה לשלוחה '+xn('hours'),note:tmp?'ההודעה תושמע עד התאריך שתבחרו (כולל), ותימחק אוטומטית בלילה שאחריו.':'ההודעה תעלה כקובץ חדש ותושמע ראשונה. ההודעות הקודמות נשארות עד שתמחקו אותן.',text,field:'h',max:L.hours,source:'typed',untilReq:tmp,until:d.hu||'',maxDays:L.tempMaxDays,untilLabel:'עד איזה תאריך להשמיע (כולל)?',untilField:'hu',clear:()=>{d.h='';save()}});return}
+ const lb=LABELS(s);
  cOpen({kind:'item',slot:s,heading:lb[0],note:lb[1],text,field:f,max:L[s],source:s==='recipes'?(d.rs==='scan'?'scan':'typed'):'typed',clear:()=>{if(s==='opening')d.o=null;else d[f]='';if(s==='recipes')d.rs='typed';save()}})};
 function cBad(c){
  if(c.kind==='audio'){if(!c.b64)return'אין הקלטה'}
@@ -348,5 +368,5 @@ function cVoiceChoice(c,e){
    c.engine='tts';c.busy=true;Y.sending=true;
    try{await cSend(c)}catch(err){c.busy=false;c.engine=null;err.userMsg=errMsg(err);throw err}finally{Y.sending=false}},
   onLater:()=>{if(Y.c===c)Y.c=null}})}
-window.ylApi={call,errMsg,rand,isoDay,addDays,he,here,toast:m=>toast(m),isMgr:()=>isA()}; // לשימוש yemot-board.js
+window.ylApi={call,errMsg,rand,isoDay,addDays,he,here,toast:m=>toast(m),isMgr:()=>isA(),extN:xn}; // לשימוש yemot-board.js
 })();

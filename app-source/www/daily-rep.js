@@ -26,7 +26,7 @@ const tm=t=>{if(!t)return '';const d=new Date(t);return d.toLocaleDateString('he
 const mmss=s=>{s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 const tag=d=>{const c=d.st==='ok'?'t3':d.st==='raw'?'t4':'t1';return `<span class="tag ${c}">${esc(ST[d.st]||'נשלח')}</span>`};
 const stf=u=>{const s=(D.staff||[]).find(x=>x.uid===u);return s?s.name:''};
-const load=(k,fn)=>{if(ld[k]||D.err)return;ld[k]=1;fn().catch(e=>{D.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{ld[k]=0;if(['dr','staff'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})};
+const load=(k,fn)=>{if(ld[k]||D.err)return;ld[k]=1;fn().catch(e=>{D.err=e&&e.message||'הטעינה נכשלה'}).finally(()=>{ld[k]=0;if(['dr','staff','tk'].includes(cur().v)&&!typing()&&!document.querySelector('#dlg[open]'))rerender()})};
 const typing=()=>{const a=document.activeElement;return !!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.closest('#main'))};
 const reset=()=>{D.cfg=null;D.staff=null;D.dayL=null;D.my=null;D.hl=null;D.card=null;D.w={};D.err='';D.cap=null};
 const loading=(T)=>({t:T,h:D.err?`<div class="card"><p class="note" style="margin:0">${esc(D.err)}</p><button class="btn g w" data-a="drRe" style="margin-top:10px">נסה שוב</button></div>`:'<div class="empty">טוען…</div>'});
@@ -167,6 +167,14 @@ ACT.drTab=el=>{if(RC.on)micCancel();D.tab=el.dataset.v;D.open='';D.card=null;if(
 ACT.drOpen=el=>{D.open=el.dataset.id;D.card=null;rerender()};
 ACT.drBack=()=>{D.open='';D.card=null;rerender()};
 window.drOpen=id=>{if(!on()||!/^[A-Za-z0-9_-]{1,80}$/.test(String(id||''))){if(on())go('dr');return}D.open=String(id);D.card=null;D.dayL=null;D.my=null;if(!isW())D.tab='day';else D.tab='hist';if(cur().v!=='dr')go('dr');else rerender()};
+/* כרטיס נעוץ בראש מסך המשימות של העובד (tasks-wc.js): דיווח חובה שעוד לא נשלח / אושר היום. אחרת '' */
+window.drPin=()=>{try{if(!on()||mgr()||!isW())return '';if(!D.cfg){load('cfg',cfgLoad);return ''}
+ const c=D.cfg,t=todayIL();if(!(c.req&&c.req[SY.uid]===true)||!isRepDay(t,c))return '';
+ if(!D.my){load('my',async()=>{D.my=await runQ('uid',SY.uid,60)});return ''}
+ const id=SY.uid+'_'+t.replace(/-/g,''),doc=D.my.find(x=>x.id===id)||null;
+ if(doc&&doc.st==='ok')return `<div class="card" style="border-color:var(--inc);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="color:var(--inc)">✓ הדיווח של היום אושר</b><button class="chip" data-a="go" data-v="dr">לצפייה</button></div>`;
+ if(doc)return '';
+ return `<button class="opt" data-a="go" data-v="dr" style="margin-bottom:10px;border-color:var(--acc)"><span>📝 <b>הדיווח היומי שלך</b> · עד ${esc(String(c.hr||'18:00'))}</span>${ico('chev')}</button>`}catch(e){return ''}};
 window.drTile=()=>on()?`<button class="tile" data-a="addGo" data-v="dr" style="font-size:1rem">${ico('doc')}${mgr()?'דיווח יומי':'דיווח היום'}</button>`:'';
 INP.drT=el=>{D.dr.txt=el.value};
 INP.drSumW=el=>{if(D.card){D.card.sumW=el.value;D.card.dirty=1}};
