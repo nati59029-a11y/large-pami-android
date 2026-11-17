@@ -304,6 +304,8 @@ Object.assign(exports, require('./secretary'));
 Object.assign(exports, require('./secretary-know'));
 // ייבוא קבצים ברקע (2026-11-11, שלב 3): startImport (מנהל, שני האזורים) + runImportChunk (טריגר, europe-west1 בלבד) – imports.js
 Object.assign(exports, require('./imports'));
+// קופה – אשף ייבוא מכספיט (17.11.2026, ענף feature/pos-import): מוצרים ולקוחות חדשים בלבד, יומן posimp וביטול ייבוא
+Object.assign(exports, require('./pos-import'));
 // המזכירה שלב 4 (2026-11-11): secNotes, secReports, secHistory (מנהל העסק), secRemind (מתוזמנת – תזכורות, דוחות, התראות), secDaily (מתוזמנת – שמירה ומחיקה 9.5). secretary-remind.js
 Object.assign(exports, require('./secretary-remind'));
 // המזכירה שלב 5 (2026-11-11): secWaHook (webhook ווצאפ, us-central1 בלבד – כתובת קבועה אצל Meta), secWaWork (טריגר תור, europe-west1),
