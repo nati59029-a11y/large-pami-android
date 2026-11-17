@@ -199,7 +199,7 @@ async function makeDraft(){
   const body={qid:W.qid,br:W.br||U.brSel(),kind:W.kind,imgs};if(qb.info)body.info=qb.info;if(qb.sketch)body.sketch=qb.sketch;
   let r;try{r=await U.fn('mapDraft',body)}catch(e){
    /* שרת שעוד לא עודכן לא מכיר כמה כניסות/קופות: שולחים שוב רק את הכניסה והקופה הראשונות (כמו פעם) */
-   const sk=body.sketch;if(!(sk&&(sk.doors||sk.tills)&&/השרטוט לא תקין/.test(String(e&&e.message||''))))throw e;
+   const sk=body.sketch;if(!(sk&&(sk.doors||sk.tills)&&/השרטוט לא תקין|גדולים מדי/.test(String(e&&e.message||''))))throw e;
    delete sk.doors;delete sk.tills;W.qid=U.qid();body.qid=W.qid;r=await U.fn('mapDraft',body)}
   if(r&&r.st==='fail')throw Object.assign(new Error(r.err||'לא הצלחנו לבנות טיוטה מהתמונות.'),{reason:''});
   /* ניסיון חוזר עם אותו מזהה מחזיר dup בלי המפה: קוראים אותה מהטיוטה השמורה */
@@ -398,6 +398,8 @@ function doorGeo(d){const w=wallAt(d.x,d.y)||{ux:1,uy:0,nx:0,ny:-1},vx=w.nx,vy=w
 /* לשרת/למפה: a = זווית הקיר במעלות; sw = צד הפתיחה ביחס לניצב (−sin a, cos a); hg = הציר בקצה בכיוון a (1) או ההפוך (−1) */
 function doorOut(d){const g=doorGeo(d),a=((Math.round(Math.atan2(g.uy,g.ux)*180/Math.PI)%360)+360)%360,r=a*Math.PI/180,px=-Math.sin(r),py=Math.cos(r);
  return{x:Math.round(d.x),y:Math.round(d.y),w:d.w,a,sw:g.sx*px+g.sy*py>=0?1:-1,hg:g.hx*Math.cos(r)+g.hy*Math.sin(r)>=0?1:-1}}
+/* הנקודה שנבחרה [x,y] – פינה / קצה שורה / כניסה / קופה */
+const selPt=s=>{const k=W.sk;if(!s)return null;if(s.t==='e'||s.t==='k'){const O=(s.t==='e'?k.doors:k.tills)[s.r];return O?[O.x,O.y]:null}const L=s.t==='w'?k.rows[s.r]:s.r<0?k.cur:k.rooms[s.r];return L?[L[s.i],L[s.i+1]]:null};
 /* שם הנקודה שנבחרה, למשוב: "פינה 2 של חדר 3" / "קצה של שורה 4" */
 const selName=s=>s.t==='e'?`כניסה ${s.r+1}`:s.t==='k'?`קופה ${s.r+1}`:s.t==='w'?`קצה של שורה ${s.r+1}`:s.r<0?`פינה ${s.i/2+1} של החדר הפתוח`:`פינה ${s.i/2+1} של חדר ${s.r+1}`;
 const okPoly=p=>{const g=G3();return !g||!g.polyValid||g.polyValid(p).ok};
@@ -459,10 +461,10 @@ ACT.s3wSkClr=()=>ask('למחוק את כל השרטוט?',()=>{const k=W.sk;skPu
 /* הגדלה/הקטנה של השרטוט (תצוגה בלבד, לא נשמר): z = פי כמה, ox/oy = הפינה השמאלית העליונה של מה שרואים (ס"מ) */
 const ZV={z:1,ox:0,oy:0},ZL=[1,1.5,2,3,4];
 const zvFit=F=>{if(!(ZV.z>1)){ZV.z=1;ZV.ox=ZV.oy=0;return}ZV.ox=cl(ZV.ox,0,F.w-F.w/ZV.z);ZV.oy=cl(ZV.oy,0,F.l-F.l/ZV.z)};
-ACT.s3wZ=el=>{const F=frame(),d=el.dataset.z,i=ZL.indexOf(ZV.z),k=W.sk;
- const cx=ZV.ox+F.w/ZV.z/2,cy=ZV.oy+F.l/ZV.z/2,s=k.sel,L=s&&(s.t==='w'?k.rows[s.r]:s.r<0?k.cur:k.rooms[s.r]);
+ACT.s3wZm=el=>{const F=frame(),d=el.dataset.z,i=ZL.indexOf(ZV.z),k=W.sk;
+ const cx=ZV.ox+F.w/ZV.z/2,cy=ZV.oy+F.l/ZV.z/2,s=k.sel,L=selPt(s);
  const z=d==='fit'?1:ZL[cl((i<0?0:i)+(d==='in'?1:-1),0,ZL.length-1)];
- const px=L?L[s.i]:cx,py=L?L[s.i+1]:cy;ZV.z=z;ZV.ox=px-F.w/z/2;ZV.oy=py-F.l/z/2;zvFit(F);rerender()};
+ const px=L?L[0]:cx,py=L?L[1]:cy;ZV.z=z;ZV.ox=px-F.w/z/2;ZV.oy=py-F.l/z/2;zvFit(F);rerender()};
 /* גרירה באצבע כשהשרטוט מוגדל = הזזת התצוגה. אחרי גרירה ההקשה לא נספרת */
 let zDrag=null,zDragT=0;
 document.addEventListener('pointerdown',e=>{if(!(ZV.z>1)||!e.target||e.target.id!=='s3wSk')return;zDrag={x:e.clientX,y:e.clientY,ox:ZV.ox,oy:ZV.oy,m:0,w:e.target.getBoundingClientRect().width}});
@@ -510,7 +512,7 @@ function drawSk(){const cv=document.getElementById('s3wSk');if(!cv)return;const 
   c.fillStyle=ink;c.font='700 11px system-ui,sans-serif';c.fillText('ק'+(r+1),P(t.x),P(t.y));c.font='600 12px system-ui,sans-serif'});
  if(k.cpend)dot(k.cpend[0],k.cpend[1],6,acc);
  if(k.mode==='sel'){c.lineWidth=1.5;c.strokeStyle=mut;k.rooms.forEach(p=>{for(let i=0;i<p.length;i+=2){c.beginPath();c.arc(P(p[i]),P(p[i+1]),5,0,7);c.stroke()}});k.rows.forEach(s=>{for(const i of [0,2]){c.beginPath();c.arc(P(s[i]),P(s[i+1]),5,0,7);c.stroke()}})}
- const s=k.sel;if(s){const L=s.t==='w'?k.rows[s.r]:s.r<0?k.cur:k.rooms[s.r];if(L){c.beginPath();c.arc(P(L[s.i]),P(L[s.i+1]),11,0,7);c.lineWidth=3;c.strokeStyle=acc;c.stroke()}}}
+ const s=k.sel;if(s){const L=selPt(s);if(L){c.beginPath();c.arc(P(L[0]),P(L[1]),11,0,7);c.lineWidth=3;c.strokeStyle=acc;c.stroke()}}}
 
 /* --- המסך "פרטים על החנות" --- */
 const opt=(v,cur,l)=>`<option value="${v}"${v===cur?' selected':''}>${l}</option>`;
@@ -540,7 +542,7 @@ function skTools(){const k=W.sk,m=k.mode,F=frame();
  const sel=(f,c,L,v)=>`<select data-c="${c}" data-f="${f}">${L.map(([a,b])=>opt(a,v,b)).join('')}</select>`;
  if(m==='ent')h+=`<div class="s3info" style="margin-top:8px"><b>כניסה חדשה תהיה:</b><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:4px"><label class="f" style="flex:1;min-width:110px;margin:0"><span>רוחב (מטר)</span><input type="number" inputmode="decimal" min=".6" max="5" step=".1" data-c="s3wDf" data-f="w" value="${esc2(DF.w)}"></label><label class="f" style="flex:1;min-width:110px;margin:0"><span>נפתחת</span>${sel('io','s3wDf',[['in','פנימה'],['out','החוצה']],DF.io)}</label><label class="f" style="flex:1;min-width:110px;margin:0"><span>הציר (מבחוץ, מול הדלת)</span>${sel('dh','s3wDf',[['r','מימין'],['l','משמאל']],DF.dh)}</label></div><small class="note">אפשר לשנות כל כניסה גם אחר כך, ברשימה שמתחת לשרטוט.</small></div>`;
  if(m==='cash')h+=`<div class="s3info" style="margin-top:8px"><div class="row" style="gap:6px;flex-wrap:wrap"><button class="chip ${TD.how==='one'?'on':''}" data-a="s3wTh" data-h="one" aria-pressed="${TD.how==='one'}">לפי מידות שכותבים</button><button class="chip ${TD.how==='box'?'on':''}" data-a="s3wTh" data-h="box" aria-pressed="${TD.how==='box'}">סימון 2 פינות על המפה</button></div>${TD.how==='one'?`<div class="row" style="gap:8px;margin-top:6px"><label class="f" style="flex:1;margin:0"><span>רוחב (מטר)</span><input type="number" inputmode="decimal" min=".3" max="10" step=".1" data-c="s3wDf" data-f="tw" value="${esc2(TD.w)}"></label><label class="f" style="flex:1;margin:0"><span>עומק (מטר)</span><input type="number" inputmode="decimal" min=".3" max="10" step=".1" data-c="s3wDf" data-f="td" value="${esc2(TD.d)}"></label></div>`:''}</div>`;
- h+=`<div class="row" style="gap:6px;margin-top:8px;align-items:center"><button class="btn s g" data-a="s3wZ" data-z="out" aria-label="הקטנה"${ZV.z>1?'':' disabled'}>－</button><button class="btn s g" data-a="s3wZ" data-z="in" aria-label="הגדלה"${ZV.z<4?'':' disabled'}>＋</button><button class="btn s g" data-a="s3wZ" data-z="fit"${ZV.z>1?'':' disabled'}>כל השרטוט</button><small class="note">${ZV.z>1?`מוגדל פי ${ZV.z} · גררו באצבע כדי לזוז`:''}</small><button class="btn s g" data-a="s3wHelp" style="margin-inline-start:auto" aria-expanded="${!!skHelp}">איך מציירים?</button></div>${F.tmp?'':`<div style="margin-top:6px"><button class="btn s g" data-a="s3wGrowT" aria-expanded="${!!growOpen}">הגדילו את המסגרת</button></div>`}${growOpen&&!F.tmp?`<div class="s3info" style="margin-top:6px"><label class="f" style="display:block;margin:0 0 6px"><span>כמה מטרים להוסיף</span><input type="number" inputmode="decimal" min=".5" max="98" step=".5" data-c="s3wGm" value="${esc2(growM)}"></label><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn s g" data-a="s3wGrow" data-s="u">למעלה ↑</button><button class="btn s g" data-a="s3wGrow" data-s="d">למטה ↓</button><button class="btn s g" data-a="s3wGrow" data-s="r">ימינה →</button><button class="btn s g" data-a="s3wGrow" data-s="l">שמאלה ←</button></div><small class="note" style="display:block;margin-top:4px">המסגרת גדלה בצד שבוחרים, והשרטוט נשאר כמו שהוא. אפשר עד 100 מטר לכל צד. טעיתם? "ביטול אחרון".</small></div>`:''}${skHelp?HELP:''}
+ h+=`<div class="row" style="gap:6px;margin-top:8px;align-items:center"><button class="btn s g" data-a="s3wZm" data-z="out" aria-label="הקטנה"${ZV.z>1?'':' disabled'}>－</button><button class="btn s g" data-a="s3wZm" data-z="in" aria-label="הגדלה"${ZV.z<4?'':' disabled'}>＋</button><button class="btn s g" data-a="s3wZm" data-z="fit"${ZV.z>1?'':' disabled'}>כל השרטוט</button><small class="note">${ZV.z>1?`מוגדל פי ${ZV.z} · גררו באצבע כדי לזוז`:''}</small><button class="btn s g" data-a="s3wHelp" style="margin-inline-start:auto" aria-expanded="${!!skHelp}">איך מציירים?</button></div>${F.tmp?'':`<div style="margin-top:6px"><button class="btn s g" data-a="s3wGrowT" aria-expanded="${!!growOpen}">הגדילו את המסגרת</button></div>`}${growOpen&&!F.tmp?`<div class="s3info" style="margin-top:6px"><label class="f" style="display:block;margin:0 0 6px"><span>כמה מטרים להוסיף</span><input type="number" inputmode="decimal" min=".5" max="98" step=".5" data-c="s3wGm" value="${esc2(growM)}"></label><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn s g" data-a="s3wGrow" data-s="u">למעלה ↑</button><button class="btn s g" data-a="s3wGrow" data-s="d">למטה ↓</button><button class="btn s g" data-a="s3wGrow" data-s="r">ימינה →</button><button class="btn s g" data-a="s3wGrow" data-s="l">שמאלה ←</button></div><small class="note" style="display:block;margin-top:4px">המסגרת גדלה בצד שבוחרים, והשרטוט נשאר כמו שהוא. אפשר עד 100 מטר לכל צד. טעיתם? "ביטול אחרון".</small></div>`:''}${skHelp?HELP:''}
  <p class="note s3note" aria-live="polite">${hint}${F.tmp?' <b>השרטוט עוד בלי קנה מידה</b> – בסוף תתבקשו לרוחב אמיתי.':''}</p>`;
  h+=`<canvas id="s3wSk" data-a="s3wSkT" role="img" aria-label="שרטוט החנות. ${k.rooms.length} חדרים, ${k.rows.length} שורות" style="display:block;touch-action:${ZV.z>1?'none':'manipulation'};border:1px solid var(--line);background:var(--bg);margin:8px auto 0;cursor:crosshair"></canvas>`;
  {const m=skMax();if(m.x>F.w+1||m.y>F.l+1)h+=`<div class="ban s3warn" role="alert" style="margin-top:8px">חלק מהשרטוט נמצא מחוץ למסגרת, ולכן לא רואים אותו. <button class="btn s" data-a="s3wSkFit" style="margin-top:6px">הקטינו את השרטוט כדי שייכנס</button></div>`}
