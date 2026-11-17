@@ -44,7 +44,7 @@ const st=document.createElement('style');st.textContent=`
 .gr-pic .ph{display:flex;align-items:center;justify-content:center;min-height:90px;font-size:.8rem;padding:6px;text-align:center}
 .gr-pic .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--ink)}
 .gr-pic .dr{position:absolute;bottom:4px;inset-inline-end:6px;font-size:.74rem;background:var(--card);color:var(--ink);padding:0 6px;border-radius:8px}
-.gr-pin{display:block;width:100%;text-align:start;background:var(--card);color:var(--ink);border:1px solid var(--line);border-inline-start:4px solid var(--acc);border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;min-height:40px}
+.gr-pin{position:sticky;top:calc(72px + env(safe-area-inset-top));z-index:5;box-shadow:var(--elev-1,0 2px 6px rgba(0,0,0,.3));display:block;width:100%;text-align:start;background:var(--card);color:var(--ink);border:1px solid var(--line);border-inline-start:4px solid var(--acc);border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;min-height:40px}
 .gr-b.hl{outline:2px solid var(--acc);outline-offset:2px}
 .gr-dsep{align-self:center;font-size:.76rem;color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:2px 12px}
 .gr-unr{align-self:stretch;text-align:center;font-size:.8rem;font-weight:800;color:var(--onacc);background:var(--acc);border-radius:20px;padding:3px 0;scroll-margin-top:70px}
