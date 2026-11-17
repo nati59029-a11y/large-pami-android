@@ -24,6 +24,7 @@ const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const T = require('./lib/tenant');
 const M = require('./lib/store3d-map');
 const scan = require('./lib/scan');
+const SL = require('./lib/store3d-setup');
 
 if (!getApps().length) initializeApp();
 
@@ -87,6 +88,23 @@ async function saveMap(db, who, input, now) {
       const fin = M.finalCheck(M.mergeDel(old, clean.map, { mgr: who.mgr, uid: who.uid, now }), old);
       const doc = Object.assign(fin.map, { v, upd: now, by: who.uid });
       if (M.bytesOf(doc) > M.MAX_BYTES) throw M.fail('too-big', 'המפה גדולה מדי (עד 800KB). מחקו פריטים שלא צריך או חלקו לשתי מפות.');
+      // הקמת חנות שלב 2 (חוזה 6): גוף שקיבל מספר חדש (renamed) – ההערות שלו ושל המקטעים שלו (s3setup/{mapId}/n) ו-qs[].ref עוברים
+      // למזהה החדש באותה טרנזקציה. זו העברה ולא מחיקת נתון. קריאות לפני כל כתיבה.
+      let mv = null;
+      if (Object.keys(fin.renamed).length) {
+        const [ss, ns] = await Promise.all([tx.get(db.doc('s3setup/' + mapId)), tx.get(db.collection(`s3setup/${mapId}/n`))]);
+        const rn = SL.renameNotes(ns.docs.map((d) => ({ id: d.id, data: d.data() })), fin.renamed);
+        const qs = ss.exists ? SL.renameRefs(ss.get('qs'), fin.renamed) : null;
+        const ids = new Set(ns.docs.map((d) => d.id));
+        for (const id of rn.del) ids.delete(id);
+        for (const x of rn.set) ids.add(x.id);
+        mv = { rn, qs, nN: ids.size };
+      }
+      if (mv && (mv.qs || mv.rn.set.length)) {
+        for (const x of mv.rn.set) tx.set(db.doc(`s3setup/${mapId}/n/${x.id}`), x.data);
+        for (const id of mv.rn.del) tx.delete(db.doc(`s3setup/${mapId}/n/${id}`));
+        tx.set(db.doc('s3setup/' + mapId), Object.assign({ upd: now, by: who.uid }, mv.qs ? { qs: mv.qs } : {}, mv.rn.set.length ? { nN: mv.nN } : {}), { merge: true });
+      }
       if (old) tx.set(db.doc('smap/' + mapId + '/ver/' + M.verId(old.v)), M.verDoc(old, { uid: who.uid, now }, input.why));
       tx.set(ref, doc);
       return { ok: true, mapId, v, upd: now, seq: doc.seq, dropped: clean.dropped, renamed: fin.renamed, purged: fin.purged };

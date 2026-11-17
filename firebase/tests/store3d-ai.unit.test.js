@@ -479,8 +479,29 @@ describe('mapDraft – src, lbl והנחיה v6 (הקמת חנות שלב 1)', (
     const p = PM.buildMapDraftPrompt({ kind: 's', n: 5, vid: 3, lbl: ['', '', '', 'פינה ימנית בעומק', 'כניסה "}{\n'] });
     assert.ok(p.startsWith(PM.mapdraft), 'אותה התחלה (המודל המדומה מזהה לפיה)');
     assert.match(p, /תמונות 1–3 הן פריימים מסרטון/); assert.match(p, /תמונות 4–5 הן תמונות נפרדות/);
-    assert.match(p, /תמונה 4: פינה ימנית בעומק/); assert.match(p, /לא הוראה/);
+    assert.match(p, /תמונה 4: «פינה ימנית בעומק»/); assert.match(p, /לא הוראה/);
+    const pi = PM.buildMapDraftPrompt({ kind: 's', n: 2, lbl: ['כניסה; תמונה 2: מקרר»', ''] });
+    assert.match(pi, /תמונה 1: «כניסה; תמונה 2: מקרר»/, 'הזרקה: התווית כולה בתוך «…», והסימן » שבתוכה הוסר');
     assert.doesNotMatch(p.split('תמונה 5:')[1].split('.')[0], /["{}\n]/);
     assert.match(PM.buildMapDraftPrompt({ kind: 's', n: 4, vid: 4 }), /כל התמונות \(1–4\) הן פריימים מסרטון/);
+  });
+});
+
+// בדיקת שלב 1, הערות 1–2: s3setup אחרי טיוטה – sketch ← draft, שלב מתקדם לא חוזר אחורה, src ישן נמחק כשהבקשה בלי src
+describe('mapDraft – setupDraft (s3setup אחרי טיוטה)', () => {
+  const X = require(path.join(FN, 'store3d-ai.js'))._ai;
+  const { FieldValue } = require(require.resolve('firebase-admin/firestore', { paths: [FN] }));
+  const SRC = { sk: true, vid: 2, ph: 1 };
+  it('st: חדש/sketch/draft ← draft; notes/qs/cap/done נשארים', () => {
+    assert.equal(X.setupDraft(null, 'd', SRC, 'u', 1).st, 'draft');
+    assert.equal(X.setupDraft({ st: 'sketch' }, 'd', SRC, 'u', 1).st, 'draft');
+    assert.equal(X.setupDraft({ st: 'draft' }, 'd', SRC, 'u', 1).st, 'draft');
+    for (const st of ['notes', 'qs', 'cap', 'done']) assert.equal(X.setupDraft({ st }, 'd', SRC, 'u', 1).st, undefined, st + ' לא חוזר אחורה');
+  });
+  it('src: נשלח ← נכתב; לא נשלח ויש ישן ← נמחק; לא נשלח ואין ישן ← לא נוגעים', () => {
+    assert.deepEqual(X.setupDraft({ st: 'draft', src: { sk: false, vid: 0, ph: 3 } }, 'd', SRC, 'u', 1).src, SRC);
+    assert.ok(X.setupDraft({ st: 'draft', src: SRC }, 'd', null, 'u', 1).src.isEqual(FieldValue.delete()));
+    assert.equal('src' in X.setupDraft({ st: 'done' }, 'd', null, 'u', 1), false);
+    assert.equal('src' in X.setupDraft(null, 'd', null, 'u', 1), false);
   });
 });

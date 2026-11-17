@@ -48,7 +48,7 @@ function qLoad(v){W.q=Q0();W.sk=SK0();if(!v)return;
   if(!K.tills.length&&nArr(k.cash,2))K.tills=[{x:k.cash[0],y:k.cash[1],w:120,d:60,a:0}];K.gen=k.gen?1:0}
  if(!['a','b'].includes(W.q.path))W.q.path=''}
 const revoke=()=>{for(const i of W.imgs)try{URL.revokeObjectURL(i.url)}catch(e){}for(const k of ['w','f','c'])if(W.tex[k]&&W.tex[k].url)try{URL.revokeObjectURL(W.tex[k].url)}catch(e){}};
-function reset(kind){revoke();W.own=me();W.kind=kind==='w'?'w':'s';W.br=U.brSel();W.step=1;W.imgs=[];W.tex={w:null,f:null,c:null};W.busy='';W.msg='';W.qid='';W.draft=null;W.fixTxt='';W.fixQid='';W.fixMsg='';W.staff=null;W.staffErr='';W.rule=null;W.rid='';W.made=0;W.runMsg='';W.det=0;W.qSeen=0;
+function reset(kind){revoke();W.own=me();W.kind=kind==='w'?'w':'s';W.br=U.brSel();W.step=1;W.imgs=[];W.tex={w:null,f:null,c:null};W.busy='';W.msg='';W.qid='';W.draft=null;W.fixTxt='';W.fixQid='';W.fixMsg='';W.staff=null;W.staffErr='';W.rule=null;W.rid='';W.made=0;W.runMsg='';W.det=0;W.qSeen=0;W.nt=null;
  const v=lsRead();qLoad(v);if(v)for(const k of ['w','f','c'])if(v.tex[k]&&typeof v.tex[k].path==='string')W.tex[k]={texId:v.tex[k].texId,path:v.tex[k].path,w:v.tex[k].w,h:v.tex[k].h,url:''}}
 U.openWizard=k=>{const kind=k==='w'?'w':'s';if(W.own!==me()||W.kind!==kind||W.br!==U.brSel())reset(kind);if(cur().v!=='st3w')go('st3w')};
 
@@ -255,6 +255,96 @@ ACT.s3wEdit=()=>{
  if(U.E&&U.E.wiz&&U.E.map)go('st3e');else{W.step=1;rerender()}};
 ACT.s3wManual=()=>{if(typeof U.openEditor==='function')U.openEditor(W.kind)};
 ACT.s3wAgain=()=>ask('להתחיל מחדש? התמונות והטיוטה שבעבודה יימחקו מהמסך הזה (שום דבר לא נשמר בשרת כמפה).',()=>{const k=W.kind;if(U.E&&U.E.wiz){U.E.wiz=null;U.E.key=''}reset(k);rerender()},'כן, התחילו מחדש');
+
+/* ---------- הערות ושאלות (הקמת חנות שלב 2, 17.11.2026) ----------
+   אחרי שהטיוטה מוכנה: הערה כללית (עד 1000) והערות לפריטים (עד 300) – לא חובה – נשמרות בשרת (s3SetupNote). "המערכת תשאל" – mapQs (עד 12
+   שאלות, עד 3 סבבים, מחוץ למכסה כמו mapFix). תשובות: בחירה ו/או כתיבה (s3SetupAns), ואז mapFix עם ans/notes מחזיר טיוטה מתוקנת, שבה כל שינוי
+   מסומן כאזור לא ודאי (uz) – ואי אפשר לשמור לפני שעוברים עליו. הטיוטה שבטלפון נשלחת (m) כשאין עדיין מפה שמורה, כדי לבדוק שהפריט קיים.
+   שרת שעוד לא עודכן: "העדכון בשרת עוד לא הותקן" (הפעולות האלה מוסתרות עד אז). כל השמות כאן עם התחילית s3nt (בלי התנגשות עם שמות קיימים). */
+const NT_OLD='העדכון בשרת עוד לא הותקן, ולכן הערות ושאלות עוד לא זמינות. אפשר להמשיך בלעדיהן.';
+const ntErr=(e,d)=>e&&!e.offline&&!e.reason&&/^הפעולה נכשלה/.test(e.message||'')?NT_OLD:U.errText(e,d);
+const NFX={gon:'גונדולה',wall:'מדף קיר',fridge:'מקרר',table:'שולחן/משטח',stand:'סטנד/מתלה',bin:'סל/מתקן'};
+const ntLive=(m,k)=>(m&&Array.isArray(m[k])?m[k]:[]).filter(o=>o&&o.del!==1&&typeof o.id==='string');
+/* הפריטים שאפשר לכתוב עליהם הערה: חדרים, גופים, דלתות, קופות (מקטע – בבחירה שנייה אחרי הגוף) */
+function ntItems(m){const L=[],rn={};
+ ntLive(m,'rooms').forEach((r,i)=>{rn[r.id]=r.name||('חדר '+(i+1));L.push([r.id,'חדר: '+rn[r.id]])});
+ ntLive(m,'fx').forEach(f=>L.push([f.id,(NFX[f.k]||'גוף')+(f.num?' '+f.num:'')+(f.name?' – '+f.name:'')+(rn[f.room]?' ('+rn[f.room]+')':'')]));
+ ntLive(m,'doors').forEach((d,i)=>L.push([d.id,(d.k==='ent'?'כניסה':'דלת')+' '+(i+1)]));
+ ntLive(m,'syms').filter(y=>y.k==='cash').forEach((y,i)=>L.push([y.id,'קופה '+(i+1)]));
+ return L}
+const ntLbl=(m,id)=>{const b=/^(f[0-9]+)-([ab])-([0-9]+)$/.exec(id||''),x=ntItems(m).find(i=>i[0]===(b?b[1]:id));return x?(b?`מקטע ${b[3]} בצד ${b[2]==='a'?'א':'ב'} של ${x[1]}`:x[1]):id};
+const NT0=()=>({g:'',gs:'',t:null,item:'',bay:'',L:{},qs:[],qr:0,ans:{},busy:'',msg:'',ok:'',old:0,ld:0,qq:'',qa:'',qf:''});
+async function ntLoad(){const N=W.nt;if(!N||N.ld)return;N.ld=1;
+ try{const sd=await U.get('/s3setup/'+mapId());if(sd){N.g=N.gs=String(sd.gnote||'');N.qr=+sd.qr||0;N.qs=Array.isArray(sd.qs)?sd.qs:[];
+   for(const q of N.qs)if(q&&q.a)N.ans[q.id]={c:Array.isArray(q.a.c)?q.a.c.slice():[],x:String(q.a.x||'')};
+   const j=await fsx('/s3setup/'+mapId()+'/n?pageSize=300');for(const d of (j&&j.documents)||[]){const f=U.dec(d)||{};if(f.t)N.L[d.name.split('/').pop()]=String(f.t)}}}
+ catch(e){if(e&&e.code===403)N.old=1}
+ if(cur().v==='st3w')rerender()}
+const ntBody=o=>Object.assign({mapId:mapId(),m:W.draft&&W.draft.m},o);
+/* ערכי השדות נקראים לפני הציור מחדש (busy), כדי שלא יאבדו */
+const ntGrab=()=>{const N=W.nt;if(!N)return;const g=document.getElementById('s3ntG');if(g)N.g=String(g.value||'').slice(0,1000);const t=document.getElementById('s3ntT');if(t)N.t=String(t.value||'').slice(0,300);
+ for(const q of N.qs){const el=document.getElementById('s3ntX_'+q.id);if(el){const a=N.ans[q.id]||(N.ans[q.id]={c:[],x:''});a.x=String(el.value||'').slice(0,200)}}};
+const ntRun=async(busy,f)=>{const N=W.nt;if(!N||N.busy||W.busy)return;ntGrab();if(navigator.onLine===false){N.msg='אין חיבור לאינטרנט. נסו שוב כשיש רשת.';return rerender()}
+ N.msg='';N.ok='';N.busy=busy;rerender();try{await f(N)}catch(e){N.msg=ntErr(e,'הפעולה נכשלה. נסו שוב.')}N.busy='';rerender()};
+ACT.s3ntSaveG=()=>ntRun('שומרים…',async N=>{const t=N.g.replace(/\s+/g,' ').trim();
+ await U.fn('s3SetupNote',ntBody({itemId:'',t,qid:U.qid()}));N.g=N.gs=t;N.ok=t?'ההערה הכללית נשמרה':'ההערה הכללית נמחקה'});
+ACT.s3ntSaveI=()=>ntRun('שומרים…',async N=>{const id=N.bay||N.item;if(!id){N.msg='בחרו פריט.';return}
+ const t=String(N.t==null?(N.L[id]||''):N.t).replace(/\s+/g,' ').trim().slice(0,300);
+ await U.fn('s3SetupNote',ntBody({itemId:id,t,qid:U.qid()}));if(t)N.L[id]=t;else delete N.L[id];N.t=null;N.ok=t?'ההערה נשמרה':'ההערה נמחקה'});
+ACT.s3ntEdit=el=>{const N=W.nt,id=el.dataset.id||'';if(!N)return;N.t=null;const b=/^(f[0-9]+)-[ab]-[0-9]+$/.exec(id);N.item=b?b[1]:id;N.bay=b?id:'';N.msg='';N.ok='';rerender()};
+CHG.s3ntItem=el=>{const N=W.nt;if(!N)return;N.item=String(el.value||'');N.bay='';N.t=null;rerender()};
+CHG.s3ntBay=el=>{const N=W.nt;if(!N)return;N.bay=String(el.value||'');N.t=null;rerender()};
+CHG.s3ntG=el=>{if(W.nt)W.nt.g=String(el.value||'').slice(0,1000)};
+ACT.s3ntAsk=()=>ntRun('המערכת עוברת על הטיוטה ועל ההערות ומכינה שאלות… זה יכול לקחת עד דקה.',async N=>{
+ if(!N.qq)N.qq=U.qid();const r=await U.fn('mapQs',ntBody({qid:N.qq}));N.qq='';
+ N.qs=Array.isArray(r&&r.qs)?r.qs:[];N.qr=+(r&&r.qr)||N.qr+1;N.ans={};N.ok=N.qs.length?`יש ${N.qs.length} שאלות. ענו על מה שאפשר (אפשר גם לכתוב), ואז "שמרו ותקנו".`:'המערכת לא מצאה מה לשאול – הטיוטה ברורה לה.'});
+CHG.s3ntC=el=>{const N=W.nt;if(!N)return;const q=N.qs.find(x=>x.id===el.dataset.q);if(!q)return;const a=N.ans[q.id]||(N.ans[q.id]={c:[],x:''}),i=+el.dataset.i;
+ if(q.multi){a.c=a.c.filter(v=>v!==i);if(el.checked)a.c.push(i);a.c.sort()}else a.c=el.checked?[i]:[]};
+CHG.s3ntX=el=>{const N=W.nt;if(!N)return;const a=N.ans[el.dataset.q]||(N.ans[el.dataset.q]={c:[],x:''});a.x=String(el.value||'').slice(0,200)};
+/* mapFix עם התשובות/ההערות השמורות: הטיוטה המתוקנת מחליפה את הנוכחית (כמו תיקון בכתב), והשינויים מסומנים כאזורים לבדיקה */
+async function ntFix(N,o){const d=W.draft;if(!d)return;
+ if(!N.qf)N.qf=U.qid();const body=Object.assign({qid:N.qf,br:W.br||U.brSel(),kind:W.kind,m:d.m},o);if(d.id)body.from=d.id;
+ let r=await U.fn('mapFix',body);N.qf='';
+ if(r&&r.st==='fail')throw Object.assign(new Error(r.err||'לא הצלחנו לתקן את הטיוטה.'),{reason:''});
+ if(r&&!needs(r)&&r.draftId){const dd=await U.get('/s3draft/'+r.draftId);if(dd&&dd.m)r=Object.assign({},r,{m:dd.m})}
+ if(!r||!needs(r))throw new Error('התשובה מהשרת חסרה. נסו שוב.');
+ W.draft={m:r.m,conf:typeof r.conf==='number'?r.conf:null,notes:String(r.notes||''),n:d.n,drop:+r.drop||0,usage:null,id:r.draftId||''};
+ const z=zs(r.m).length;N.ok=`הטיוטה תוקנה לפי ${o.ans?'התשובות וההערות':'ההערות'}.${z?` ${z} שינויים מסומנים כאזורים לבדיקה – עברו עליהם לפני השמירה.`:''}`}
+ACT.s3ntAns=()=>ntRun('שומרים את התשובות ומתקנים את הטיוטה… זה יכול לקחת עד דקה או שתיים.',async N=>{
+ const ans=N.qs.filter(q=>{const a=N.ans[q.id];return a&&(a.c.length||a.x.trim())}).map(q=>({id:q.id,c:N.ans[q.id].c,x:N.ans[q.id].x.trim()}));
+ if(!ans.length){N.msg='ענו לפחות על שאלה אחת (בחירה או כתיבה).';return}
+ if(!N.qa)N.qa=U.qid();await U.fn('s3SetupAns',{mapId:mapId(),qid:N.qa,ans});N.qa='';
+ for(const q of N.qs)if(N.ans[q.id]&&ans.some(a=>a.id===q.id))q.a=1;
+ await ntFix(N,{ans:true,notes:true})});
+ACT.s3ntFix=()=>ntRun('מתקנים את הטיוטה לפי ההערות… זה יכול לקחת עד דקה או שתיים.',async N=>{
+ if(!N.gs&&!Object.keys(N.L).length){N.msg='עוד אין הערות שמורות. כתבו הערה ושמרו אותה קודם.';return}await ntFix(N,{notes:true})});
+function ntBox(){
+ if(!W.draft)return '';if(!W.nt||W.nt.mid!==mapId()){W.nt=Object.assign(NT0(),{mid:mapId()})}
+ const N=W.nt,m=W.draft.m,dis=N.busy||W.busy?' disabled':'';ntLoad();
+ if(N.old)return `<div class="s3info" id="s3nt"><b>הערות ושאלות</b><br><small>${esc2(NT_OLD)}</small></div>`;
+ const I=ntItems(m),f=ntLive(m,'fx').find(x=>x.id===N.item),nb=f&&+f.bays>0?Math.min(30,+f.bays):0,sel=N.bay||N.item;
+ const opt=(v,c,l)=>`<option value="${esc2(v)}"${v===c?' selected':''}>${esc2(l)}</option>`;
+ let h=`<div class="s3info" id="s3nt"><b>הערות ושאלות (לא חובה)</b><br><small>כתבו מה שחשוב לדעת על החנות, כללי או על פריט מסוים. המערכת יכולה לשאול שאלות על מה שלא ברור, ולתקן את הטיוטה לפי התשובות. לא נספר במכסה.</small>`;
+ h+=`<label class="f" style="display:block;margin-top:8px"><span>הערה כללית (עד 1000 תווים)</span><textarea id="s3ntG" data-c="s3ntG" rows="3" maxlength="1000" style="width:100%"${dis}>${esc2(N.g)}</textarea></label><div class="row s3row"><button class="btn s g" data-a="s3ntSaveG"${dis}>שמרו הערה כללית</button></div>`;
+ h+=`<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><label class="f" style="flex:1;min-width:150px;margin:0"><span>הערה לפריט</span><select data-c="s3ntItem"${dis}>${opt('',N.item,'בחרו פריט…')}${I.map(i=>opt(i[0],N.item,i[1])).join('')}</select></label>`;
+ if(nb){let o=opt('',N.bay,'כל הגוף');for(const sd of (f.sides===2?['a','b']:['a']))for(let n=1;n<=nb;n++)o+=opt(`${f.id}-${sd}-${n}`,N.bay,`מקטע ${n}${f.sides===2?' צד '+(sd==='a'?'א':'ב'):''}`);h+=`<label class="f" style="flex:1;min-width:110px;margin:0"><span>מקטע</span><select data-c="s3ntBay"${dis}>${o}</select></label>`}
+ h+=`</div>`;
+ if(sel)h+=`<textarea id="s3ntT" rows="2" maxlength="300" style="width:100%;margin-top:6px" aria-label="הערה ל${esc2(ntLbl(m,sel))} (עד 300 תווים)"${dis}>${esc2(N.t!=null?N.t:N.L[sel]||'')}</textarea><div class="row s3row"><button class="btn s g" data-a="s3ntSaveI"${dis}>שמרו הערה לפריט</button></div>`;
+ const ks=Object.keys(N.L);
+ if(ks.length)h+=`<ul class="s3ntL" style="margin:8px 0 0;padding-inline-start:18px">${ks.map(k=>`<li style="margin:4px 0"><b>${esc2(ntLbl(m,k))}:</b> ${esc2(N.L[k])} <button class="btn s g" style="min-height:44px" data-a="s3ntEdit" data-id="${esc2(k)}"${dis}>עריכה</button></li>`).join('')}</ul>`;
+ /* שאלות */
+ h+=`<div style="margin-top:12px"><b>שאלות מהמערכת</b> <small class="note">(סבב ${Math.min(N.qr,3)} מתוך 3)</small></div>`;
+ if(N.qs.length){h+=N.qs.map((q,qi)=>{const a=N.ans[q.id]||{c:[],x:''},ty=q.multi?'checkbox':'radio';
+   return `<fieldset class="s3ntQ" style="border:1px solid var(--line);border-radius:var(--r-m,10px);margin:8px 0;padding:8px"><legend style="padding:0 4px">${qi+1}. ${esc2(q.t)}${q.ref?` <small class="note">(${esc2(ntLbl(m,q.ref))})</small>`:''}</legend>
+    ${(q.o||[]).map((o,i)=>`<label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="${ty}" name="s3ntQ_${esc2(q.id)}" data-c="s3ntC" data-q="${esc2(q.id)}" data-i="${i}"${a.c.includes(i)?' checked':''}${dis}> ${esc2(o)}</label>`).join('')}
+    <input id="s3ntX_${esc2(q.id)}" data-c="s3ntX" data-q="${esc2(q.id)}" maxlength="200" placeholder="או כתבו תשובה משלכם" aria-label="תשובה בכתב לשאלה ${qi+1}" value="${esc2(a.x)}" style="width:100%;min-height:44px"${dis}></fieldset>`}).join('');
+  h+=`<div class="row s3row"><button class="btn" data-a="s3ntAns"${dis}>שמרו תשובות ותקנו את הטיוטה</button></div>`}
+ h+=`<div class="row s3row"><button class="btn g" data-a="s3ntAsk"${dis||N.qr>=3?' disabled':''}>${N.qr?'שאלו שוב':'המערכת תשאל שאלות'}</button><button class="btn g" data-a="s3ntFix"${dis}>תקנו לפי ההערות</button></div>`;
+ if(N.qr>=3)h+=`<p class="note s3note" style="margin:4px 0"><small>היו כבר 3 סבבי שאלות. אפשר להמשיך לתקן בכתב או בעורך.</small></p>`;
+ if(N.busy)h+=`<div class="s3info" role="status">${esc2(N.busy)}</div>`;
+ if(N.ok)h+=`<div class="s3info" role="status">${esc2(N.ok)}</div>`;
+ if(N.msg)h+=`<div class="ban s3warn" role="alert">${esc2(N.msg)}</div>`;
+ return h+`</div>`}
 
 /* ---------- קביעת סבב (שלב 5) ---------- */
 async function loadStaff(){
@@ -654,6 +744,7 @@ function step2(){
  return stepper(2)+`<b>${d.sk?'הטיוטה מהסקיצה מוכנה (בלי AI)':'הטיוטה מוכנה'}</b><div class="kg" style="margin-top:8px"><div class="k"><small>חדרים</small><b>${L(m.rooms)}</b></div><div class="k"><small>גופים (מדפים, מקררים…)</small><b>${L(m.fx)}</b></div><div class="k"><small>אזורים לא ודאיים</small><b>${z}</b></div>${d.sk?'':`<div class="k"><small>רמת ביטחון (הערכת המודל)</small><b>${d.conf==null?'לא ידוע':Math.round(d.conf*100)+'%'}</b></div>`}</div>
  ${empty?`<div class="ban s3warn">ה-AI לא הצליח לזהות חדרים או מדפים. אפשר לצלם עוד תמונות מזוויות אחרות, או להמשיך ולצייר ידנית בעורך.</div>`:''}
  <p class="note s3note">${d.drop?`${d.drop} פריטים לא תקינים הוסרו מהטיוטה. `:''}הטיוטה עדיין לא נשמרה. בשלב הבא עוברים עליה במפה, מתקנים, ומאשרים.</p>
+ ${ntBox()}
  <div class="s3info"><b>תיקונים בכתב</b><br><small>אפשר לכתוב מה לא נכון, והמערכת תתקן את הטיוטה. למשל: "המקרר נמצא בקיר השמאלי, יש 4 שורות מדפים ולא 3".</small><textarea id="s3wFix" data-c="s3wFixT" rows="3" maxlength="1000" style="width:100%;margin-top:6px"${W.busy?' disabled':''}>${esc2(W.fixTxt||'')}</textarea><p class="note s3note" style="margin:4px 0">התיקון לא נספר במכסה החודשית. אפשר לתקן כמה פעמים.</p>${W.busy?`<div class="s3info" role="status">${esc2(W.busy)}</div>`:''}${W.fixMsg?`<div class="ban s3warn" role="alert">${esc2(W.fixMsg)}</div>`:''}<div class="row s3row"><button class="btn g" data-a="s3wFix"${W.busy?' disabled':''}>תקנו את הטיוטה</button></div></div>
  <div class="row s3row"><button class="btn grow" data-a="s3wEdit"${W.busy?' disabled':''}>עברו על הטיוטה</button><button class="btn g" data-a="s3wBack1"${W.busy?' disabled':''}>צלמו עוד</button></div>`}
 function step3(){

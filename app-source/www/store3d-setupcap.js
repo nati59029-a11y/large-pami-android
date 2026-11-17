@@ -132,7 +132,7 @@ function curCard(){
  let h=`<div class="s3info"><b>${esc2(PL.label(it,K.map))}</b> <small>(${it.ord} מתוך ${K.plan.n})</small><br>${esc2(PL.guide(it))}<br><small>${ST[s]}${ph?` · ${ph} תמונות`:''}${s==='skip'&&d.why?' · '+esc2(d.why):''}${d.st==='ok'&&s==='part'?' · המקום השתנה במפה – צלמו שוב':''}</small></div>`;
  const cam=(lv,t)=>`<label class="btn">${t}<input type="file" accept="image/*" capture="environment" data-c="s3cpPick" data-lv="${lv}" hidden></label>`;
  h+=`<div class="row s3row">${it.lv.length>1?cam('t','צלמו עליון')+cam('b','צלמו תחתון'):cam('a','צלמו')}</div>`;
- h+=`<div class="row s3row">${K.last[it.key]&&s!=='ok'?`<button class="btn" data-a="s3cpFront">אשרו כחזית</button>`:''}${s==='skip'?`<button class="btn g" data-a="s3cpUnskip">בטלו את הדילוג</button>`:`<button class="btn g" data-a="s3cpSkip">דלגו (עם סיבה)</button>`}<button class="btn g" data-a="s3cpNext">הבא</button></div>`;
+ h+=`<div class="row s3row">${K.last[it.key]&&s!=='ok'?`<button class="btn" data-a="s3cpFront">אשרו כחזית</button>`:''}${typeof U.wpBtn==='function'?U.wpBtn(it,s):''/* שלב 4: נקודת החיבור היחידה לעורך "חיבור וחיתוך" (store3d-crop.js) */}${s==='skip'?`<button class="btn g" data-a="s3cpUnskip">בטלו את הדילוג</button>`:`<button class="btn g" data-a="s3cpSkip">דלגו (עם סיבה)</button>`}<button class="btn g" data-a="s3cpNext">הבא</button></div>`;
  return h}
 V.st3k=()=>{const T='צילום החנות';
  if(!loggedIn()||!U.feat())return{t:T,h:'<div class="empty">תלת מימד לא מופעל בעסק הזה</div>'};

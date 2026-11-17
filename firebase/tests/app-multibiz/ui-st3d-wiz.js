@@ -19,11 +19,12 @@ const ALL = { store3d: true };
 async function server(ctx, mgr) {
   const doc = (name, o) => ({ name: DOCS + name, fields: Object.fromEntries(Object.entries(o).map(([k, v]) => [k, enc(v)])), createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
   const j = (route, st, b) => route.fulfill({ status: st, contentType: 'application/json', body: JSON.stringify(b) });
-  await ctx.route((u) => u.port === '8080' && /\/documents\/b\/biz-s\/(smap|s3br|s3sum|sround|srun|staff|s3draft)/.test(u.pathname), (route) => {
+  await ctx.route((u) => u.port === '8080' && /\/documents\/b\/biz-s\/(smap|s3br|s3sum|sround|srun|staff|s3draft|s3setup)/.test(u.pathname), (route) => {
     const rq = route.request(), u = new URL(rq.url()), p = u.pathname.replace(/^.*\/documents\/b\/biz-s\//, ''); S.reads.push(rq.method() + ' ' + p);
     if (rq.method() === 'POST' && p === 'sround') { let b = {}; try { b = JSON.parse(rq.postData()); } catch (e) { /* */ } S.posts.push({ id: u.searchParams.get('documentId'), b }); return j(route, 200, { name: DOCS + 'sround/' + u.searchParams.get('documentId'), fields: b.fields }); }
     if (p === 'smap/s-main') return S.none ? j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } }) : j(route, 200, doc(p, S.map));
     if (p === 's3sum/s-main') return S.none ? j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } }) : j(route, 200, doc(p, { b: { 'f1-a-1': { s: 'iss', r: 'run_1', t: Date.UTC(2026, 10, 12, 9, 30), th: TH, n: 2 } }, run: 'run_1', score: 80, upd: Date.UTC(2026, 10, 12, 10) }));
+    if (/^s3setup/.test(p)) return S.nt403 ? j(route, 403, { error: { code: 403, status: 'PERMISSION_DENIED' } }) : p === 's3setup/s-main/n' ? j(route, 200, {}) : j(route, 404, { error: { code: 404, status: 'NOT_FOUND' } });
     if (p === 'sround') return j(route, 200, { documents: [] });
     if (p === 'staff') return j(route, 200, { documents: [doc('staff/w', { name: 'דנה', active: true }), doc('staff/w9', { name: 'עובד מושבת', active: false })] });
     if (p === 'srun') return j(route, 200, { documents: S.hist ? [doc('srun/run_1', { map: 's-main', openAt: Date.UTC(2026, 10, 12), st: 'done' }), doc('srun/run_0', { map: 's-main', openAt: Date.UTC(2026, 10, 5), st: 'done' }), doc('srun/other', { map: 's-other', openAt: Date.UTC(2026, 10, 4), st: 'done' })] : [] });
@@ -38,6 +39,10 @@ async function server(ctx, mgr) {
   const bad = (route, reason, msg) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: { status: 'FAILED_PRECONDITION', message: msg || 'שגיאה', details: { reason } } }) });
   await ctx.route('**/mapDraft', (route) => { const b = rec(route, 'mapDraft'); if (S.fnFail.draft) return bad(route, S.fnFail.draft, S.fnFail.draftMsg || 'שגיאה'); ok(route, { draftId: b.qid, st: 'ok', n: (b.imgs || []).length, conf: 0.55, drop: 0, usage: { m: '2026-11', n: 1, cap: 500, w80: false }, m: draftMap(), scale: { ref: '', conf: 0 }, notes: 'המידות הן הערכה, בלי מטר בתמונות.' }); });
   await ctx.route('**/mapFix', (route) => { const b = rec(route, 'mapFix'); if (S.fnFail.fix) return bad(route, S.fnFail.fix, S.fnFail.fixMsg || 'שגיאה'); S.fixN = (S.fixN || 0) + 1; ok(route, { draftId: b.qid, st: 'ok', conf: 0.7, drop: 0, fix: true, m: Object.assign(draftMap(), { fixN: S.fixN, fixTxt: b.txt }), scale: { ref: '', conf: 0 }, notes: 'תוקן לפי הבקשה.' }); });
+  // הקמת חנות שלב 2: הערות ושאלות
+  await ctx.route('**/s3SetupNote', (route) => { const b = rec(route, 's3SetupNote'); ok(route, { ok: true, mapId: b.mapId, itemId: b.itemId, t: b.t }); });
+  await ctx.route('**/mapQs', (route) => { const b = rec(route, 'mapQs'); ok(route, { ok: true, mapId: b.mapId, qr: 1, conf: 0.6, drop: 0, qs: [{ id: 'q1', t: 'הגוף הזה גונדולה או מקרר?', o: ['גונדולה', 'מקרר דלתות'], ref: 'f1' }, { id: 'q2', t: 'מה יש בקיר האחורי?', o: ['מדפים', 'מקררים', 'מקפיאים'], multi: true }] }); });
+  await ctx.route('**/s3SetupAns', (route) => { const b = rec(route, 's3SetupAns'); ok(route, { ok: true, mapId: b.mapId, n: (b.ans || []).length, left: 0 }); });
   await ctx.route('**/s3PutTex', (route) => { const b = rec(route, 's3PutTex'); S.tn = (S.tn || 0) + 1; ok(route, { texId: 't' + S.tn, path: 'b/biz-s/store3d/main/tex/s-main/t' + S.tn + '_1.jpg', w: 1024, h: 512 }); });
   await ctx.route('**/s3SaveMap', (route) => { const b = rec(route, 's3SaveMap'); S.none = false; S.map = Object.assign({}, b.map, { v: 1, upd: 1763200000000, by: 'm' }); ok(route, { ok: true, v: 1, renamed: {}, dropped: [], purged: {} }); });
   await ctx.route('**/shelfCheck', (route) => { const b = rec(route, 'shelfCheck'); if (S.fnFail.shelf) return bad(route, S.fnFail.shelf, 'הגעתם למכסה'); ok(route, S.adhoc); });
@@ -196,6 +201,40 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
     const f3 = nf()[2], d2 = await A.page.evaluate(() => ({ fixN: S3UI.W.draft.m.fixN, id: S3UI.W.draft.id }));
     check('2ד8 תיקון שני: qid חדש, נשלחת הטיוטה המתוקנת הקודמת, והטיוטה מוחלפת שוב (בלי הגבלה)', nf().length === 3 && f3.b.qid !== f2.b.qid && f3.b.txt === 'להוסיף מקרר שני' && f3.b.m.fixN === 1 && f3.b.from === d1.id && d2.fixN === 2, { q: f3.b.qid, d2 });
     S.calls = S.calls.filter((c) => c.fn !== 'mapFix');
+  }
+
+  // ---- 2ה. הערות ושאלות (הקמת חנות שלב 2) ----
+  {
+    const cl = (f) => S.calls.filter((c) => c.fn === f);
+    const nt = await A.page.evaluate(() => { const b = document.getElementById('s3nt'); return b ? { t: b.innerText.replace(/\s+/g, ' '), g: !!document.getElementById('s3ntG') } : null; });
+    check('2ה1 מסך הטיוטה: תיבת "הערות ושאלות" עם הערה כללית, הערה לפריט וכפתור "המערכת תשאל שאלות"', !!nt && nt.g && /הערות ושאלות/.test(nt.t) && /הערה לפריט/.test(nt.t) && /המערכת תשאל שאלות/.test(nt.t), nt && nt.t.slice(0, 200));
+    await A.page.fill('#s3ntG', 'החנות בצורת ר, המחסן מאחור'); await A.page.click('[data-a=s3ntSaveG]'); await sleep(700);
+    const g = cl('s3SetupNote')[0];
+    check('2ה2 הערה כללית: s3SetupNote עם itemId ריק, הטקסט, mapId, qid והטיוטה שבטלפון (m)', !!g && g.b.itemId === '' && g.b.t === 'החנות בצורת ר, המחסן מאחור' && g.b.mapId === 's-main' && /^[A-Za-z0-9-]{16,40}$/.test(g.b.qid) && !!(g.b.m && g.b.m.rooms) && /ההערה הכללית נשמרה/.test(await txt(A.page, '#s3nt')), g && { itemId: g.b.itemId, t: g.b.t });
+    await A.page.selectOption('[data-c=s3ntItem]', 'f1'); await sleep(300);
+    const bays = await A.page.evaluate(() => [...document.querySelectorAll('[data-c=s3ntBay] option')].map((o) => o.value));
+    check('2ה3 בחירת גוף דו-צדדי עם 2 מקטעים: בחירת מקטע (כל הגוף + 4 מקטעים)', JSON.stringify(bays) === JSON.stringify(['', 'f1-a-1', 'f1-a-2', 'f1-b-1', 'f1-b-2']), bays);
+    await A.page.selectOption('[data-c=s3ntBay]', 'f1-b-2'); await sleep(300);
+    await A.page.fill('#s3ntT', 'במקטע הזה מקרר דלתות'); await A.page.click('[data-a=s3ntSaveI]'); await sleep(700);
+    const it1 = cl('s3SetupNote')[1], li = await txt(A.page, '.s3ntL');
+    check('2ה4 הערה למקטע: itemId של המקטע, הטקסט; מופיעה ברשימה עם שם המקטע', !!it1 && it1.b.itemId === 'f1-b-2' && it1.b.t === 'במקטע הזה מקרר דלתות' && /מקטע 2 בצד ב של גונדולה 1/.test(li || ''), { b: it1 && it1.b.itemId, li });
+    await A.page.click('[data-a=s3ntAsk]'); await sleep(900);
+    const q = await A.page.evaluate(() => ({ fs: document.querySelectorAll('.s3ntQ').length, radio: document.querySelectorAll('input[type=radio][data-c=s3ntC]').length, cb: document.querySelectorAll('input[type=checkbox][data-c=s3ntC]').length, h: Math.min(...[...document.querySelectorAll('.s3ntQ label')].map((l) => l.getBoundingClientRect().height)), t: document.getElementById('s3nt').innerText }));
+    const mq = cl('mapQs')[0];
+    check('2ה5 המערכת שואלת: mapQs עם mapId ו-m; שתי שאלות – בחירה אחת (radio) ובחירה מרובה (checkbox), עם שם הפריט ותשובה בכתב; יעד מגע 44px', !!mq && mq.b.mapId === 's-main' && !!mq.b.m && q.fs === 2 && q.radio === 2 && q.cb === 3 && q.h >= 44 && /גונדולה 1/.test(q.t) && !!(await A.page.$('#s3ntX_q1')), q);
+    check('2ה6 שאלות ב-360px בלי גלישה', (await noOverflow(A.page)).bad.length === 0, await noOverflow(A.page));
+    await A.page.click('[data-a=s3ntAns]'); await sleep(400);
+    check('2ה7 בלי אף תשובה: הודעה, בלי קריאה לשרת', cl('s3SetupAns').length === 0 && /ענו לפחות על שאלה אחת/.test(await txt(A.page, '#s3nt')));
+    await A.page.check('input[data-q=q1][data-i="1"]'); await A.page.fill('#s3ntX_q2', 'מקפיאים ומדף לחם');
+    if (fp(shots, 'x')) await A.page.locator('#s3nt').screenshot({ path: fp(shots, 'שלב2-הערות-ושאלות') });
+    await A.page.click('[data-a=s3ntAns]'); await sleep(1500);
+    const an = cl('s3SetupAns')[0], fxs = cl('mapFix'), fx1 = fxs[fxs.length - 1], st = await A.page.evaluate(() => ({ fixN: S3UI.W.draft.m.fixN, t: document.getElementById('s3nt').innerText }));
+    check('2ה8 תשובות: s3SetupAns עם בחירה וכתיבה, ואז mapFix עם ans ו-notes (בלי txt) – הטיוטה מוחלפת, והשינויים מסומנים לבדיקה', !!an && JSON.stringify(an.b.ans) === JSON.stringify([{ id: 'q1', c: [1], x: '' }, { id: 'q2', c: [], x: 'מקפיאים ומדף לחם' }]) && !!fx1 && fx1.b.ans === true && fx1.b.notes === true && !('txt' in fx1.b) && st.fixN >= 1 && /מסומנים כאזורים לבדיקה/.test(st.t), { ans: an && an.b.ans, fix: fx1 && Object.keys(fx1.b) });
+    // שרת/כללים ישנים (403 על s3setup): התיבה מוסתרת עם הסבר
+    S.nt403 = true; await A.page.evaluate(() => { S3UI.W.nt = null; rerender(); }); await sleep(800);
+    check('2ה9 שרת שעוד לא עודכן: "העדכון בשרת עוד לא הותקן", בלי כפתורי הערות/שאלות', /העדכון בשרת עוד לא הותקן/.test(await txt(A.page, '#s3nt')) && !(await A.page.$('[data-a=s3ntAsk]')));
+    S.nt403 = false; await A.page.evaluate(() => { S3UI.W.nt = null; rerender(); }); await sleep(500);
+    S.calls = S.calls.filter((c) => !['mapFix', 's3SetupNote', 'mapQs', 's3SetupAns'].includes(c.fn));
   }
 
   // ---- 3. תקנו: העורך עם לוח האזורים הלא ודאיים ----

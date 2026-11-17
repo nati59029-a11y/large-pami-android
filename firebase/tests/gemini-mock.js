@@ -86,8 +86,10 @@ function s3Answer(kind, v0) {
 // טיוטת מפה (תיקון 15.11.2026): state.mapdraftSeq = תור תשובות לבקשות הבאות (כל בקשה מוציאה אחת; ריק = state.mapdraft).
 // פריט: כמו state.mapdraft, או { cut: שם/אובייקט } = ה-JSON נחתך באמצע ו-finishReason: 'MAX_TOKENS' (תשובה קטועה).
 // תיקון טיוטה בכתב (mapFix, שלב 20ג): state.mapfix / state.mapfixSeq – כמו state.mapdraft / state.mapdraftSeq (ברירת מחדל mapdraft-ok).
-const state = { dr: null, mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
-function reset() { state.dr = null; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
+// שאלות הקמה (mapQs, הקמת חנות שלב 2): state.mapqs = אובייקט או מחרוזת גולמית; state.mapqsSeq – תור (כמו mapfixSeq). ברירת מחדל: QS_DEF.
+const QS_DEF = { qs: [{ t: 'האם הגוף הראשון הוא גונדולה או מקרר?', o: ['גונדולה', 'מקרר'], ref: 'f1' }], conf: 0.7 };
+const state = { dr: null, mapqs: null, mapqsSeq: [], mapfix: null, mapfixSeq: [], mapdraftSeq: [], ordparse: null, shelf: null, mapdraft: null, invlines: null, mode: 'ok', requests: [], listCalls: 0, split: false, fenced: false, delayMs: 0, listDelayMs: 0, gone: [], strict: false, classify: null, sec: null, secUsage: { promptTokenCount: 1000, candidatesTokenCount: 200 } };
+function reset() { state.dr = null; state.mapqs = null; state.mapqsSeq = []; state.mapfix = null; state.mapfixSeq = []; state.mapdraftSeq = []; state.ordparse = null; state.shelf = null; state.mapdraft = null; state.invlines = null; state.gone = []; state.strict = false; state.sec = null; state.secUsage = { promptTokenCount: 1000, candidatesTokenCount: 200 }; state.classify = null; state.mode = 'ok'; state.requests = []; state.listCalls = 0; state.split = false; state.fenced = false; state.delayMs = 0; state.listDelayMs = 0; }
 
 function kindOf(body) {
   const si = body && body.systemInstruction && body.systemInstruction.parts && body.systemInstruction.parts[0] && body.systemInstruction.parts[0].text;
@@ -98,6 +100,7 @@ function kindOf(body) {
   const s = (t && t.text) || '';
   if (s.startsWith('אתה בודק מדפים')) return 's3shelf';   // prompts-shelf.js (שלב 6)
   if (s.startsWith('אתה מקבל תמונות של חנות')) return 's3draft'; // prompts-mapdraft.js (שלב 6)
+  if (s.startsWith('אתה עוזר להקים מפה של חנות')) return 's3qs'; // lib/store3d-setup.js (הקמת חנות שלב 2)
   if (s.startsWith('אתה מקבל טיוטת מפה של חנות')) return 's3fix'; // lib/store3d-fix.js (שלב 20ג)
   if (s.startsWith('סווג את המסמך')) return 'classify'; // סריקה אחידה – לפני כל השאר, כי ההנחיה מזכירה את כל הסוגים
   if (s.includes('רשימת הזמנה של מוצרים')) return 'ordlist';
@@ -145,6 +148,11 @@ function rawAnswer(kind, body) {
   if (kind === 'ordparse') return ordAnswer(body || {});
   if (state.mode === 'garbage') return { candidates: [{ content: { parts: [{ text: 'not json' }], role: 'model' }, finishReason: 'STOP' }] };
   const inl = () => (state.invlines && typeof state.invlines === 'object' ? state.invlines : INVLINES[state.invlines] || INVLINES.units);
+  if (kind === 's3qs') {
+    const it = state.mapqsSeq.length ? state.mapqsSeq.shift() : state.mapqs || QS_DEF;
+    if (it && typeof it === 'object' && it.cut) { const t = JSON.stringify(it.cut); return { candidates: [{ content: { parts: [{ text: t.slice(0, Math.floor(t.length / 2)) }], role: 'model' }, finishReason: 'MAX_TOKENS' }] }; }
+    return { candidates: [{ content: { parts: [{ text: typeof it === 'string' ? it : JSON.stringify(it) }], role: 'model' }, finishReason: 'STOP' }] };
+  }
   const seq = kind === 's3draft' ? state.mapdraftSeq : kind === 's3fix' ? state.mapfixSeq : null;
   if (seq && seq.length) {
     const it = seq.shift();
@@ -201,4 +209,4 @@ function start() {
 }
 function stop() { if (!server) return Promise.resolve(); const s = server; server = null; return new Promise((ok) => s.close(ok)); }
 
-module.exports = { inlineOf, DR_DEF, ordPayload, start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };
+module.exports = { QS_DEF, inlineOf, DR_DEF, ordPayload, start, stop, reset, state, rawAnswer, fixture, ANSWERS, CLASSIFY, INVLINES, MODELS, PORT };

@@ -647,21 +647,21 @@ describe('shelfCheck / mapDraft – הליבה מול האמולטור (Firestor
     const q1 = qid();
     assert.equal((await draft({ src: { vid: 2, ph: 1, sk: true }, lbl: ['', '', 'פינה ימנית בעומק'] }, q1)).st, 'ok');
     const pr = JSON.stringify(GM.state.requests[GM.state.requests.length - 1].body);
-    assert.match(pr, /תמונות 1–2 הן פריימים מסרטון/); assert.match(pr, /תמונה 3: פינה ימנית בעומק/);
+    assert.match(pr, /תמונות 1–2 הן פריימים מסרטון/); assert.match(pr, /תמונה 3: «פינה ימנית בעומק»/);
     const d1 = await get(`b/${A}/s3draft/${q1}`);
     assert.deepEqual([d1.src, d1.lbl], [{ sk: false, vid: 2, ph: 1 }, 1], 'sk לפי הסקיצה בשרת (אין), lbl = כמה עם תווית');
     const s1 = await get(`b/${A}/s3setup/s-main`);
     assert.deepEqual([s1.v, s1.st, s1.draftId, s1.src, s1.by], [1, 'draft', q1, { sk: false, vid: 2, ph: 1 }, MGR]);
     assert.ok(Number.isInteger(s1.upd));
     // שלב מתקדם (cap) עם שדות של שלבים אחרים: st לא חוזר ל-draft, ושאר השדות לא נוגעים
-    await adm.doc(`b/${A}/s3setup/s-main`).set({ v: 1, st: 'cap', gnote: 'הערה כללית', qr: 1, upd: 1, by: MGR });
+    await adm.doc(`b/${A}/s3setup/s-main`).set({ v: 1, st: 'cap', gnote: 'הערה כללית', qr: 1, upd: 1, by: MGR, src: { sk: false, vid: 2, ph: 1 } });
     GM.state.mapdraftSeq = ['mapdraft-ok'];
     const q2 = qid();
     assert.equal((await draft({}, q2)).st, 'ok');
     const d2 = await get(`b/${A}/s3draft/${q2}`);
     assert.deepEqual([d2.src, d2.lbl], [undefined, undefined], 'אפליקציה ישנה: בלי השדות');
     const s2 = await get(`b/${A}/s3setup/s-main`);
-    assert.deepEqual([s2.st, s2.draftId, s2.gnote, s2.qr, s2.src], ['cap', q2, 'הערה כללית', 1, undefined], 'בלי src בבקשה – לא נכתב src');
+    assert.deepEqual([s2.st, s2.draftId, s2.gnote, s2.qr, s2.src], ['cap', q2, 'הערה כללית', 1, undefined], 'בלי src בבקשה – src לא נשאר (שייך לטיוטה האחרונה)');
     // תשובה שבורה – s3setup לא משתנה
     GM.state.mapdraftSeq = ['not json at all', 'mapdraft-broken'];
     assert.ok(await err(draft({ src: { vid: 0, ph: 3 } })));

@@ -1,6 +1,7 @@
 'use strict';
 // סריקת חנות בתלת מימד – שלב 20ג, חלק השרת (15.11.2026): mapFix – תיקון טיוטת מפה בכתב. הלוגיקה הטהורה ב-lib/store3d-fix.js.
 //   mapFix { qid, br, kind: 's' | 'w', m: הטיוטה הנוכחית (מבנה המפה 4.3, כמו s3draft.m), txt: טקסט התיקון (2–1000 תווים),
+//            ans?, notes?: bool (הקמת חנות שלב 2 – לצרף תשובות/הערות שמורות; עם אחד מהם txt לא חובה; כותב גם s3setup.draftId),
 //            sk?: סקיצה במבנה של mapDraft + info? עם w/l (אותה בדיקה; לא נשמרת), from?: מזהה הטיוטה הקודמת (לתיעוד בלבד) }
 //     – מנהל או s3m (כמו mapDraft), עובד ששויך לסניפים – רק בסניפים שלו. בלי תמונות.
 //     הטיוטה הנוכחית חייבת לעבור את בדיקת שמירת המפה (A.draftCheck); הטיוטה המתוקנת עוברת את אותה בדיקה כמו בהקמה (A.evalDraft),
@@ -21,6 +22,7 @@ const T = require('./lib/tenant');
 const scan = require('./lib/scan');
 const A = require('./lib/store3d-ai');
 const F = require('./lib/store3d-fix');
+const SL = require('./lib/store3d-setup');
 
 if (!getApps().length) initializeApp();
 
@@ -71,6 +73,21 @@ async function fixCore(db, who, input, now, deps) {
   if (!deps.key) throw bad('no-key', 'אין מפתח לזיהוי חכם בשרת', 'failed-precondition');
   const set = await db.doc('s3set/' + br).get();
   const S = set.exists ? set.data() : {};
+  // הקמת חנות שלב 2: ans – התשובות השמורות (s3setup.qs[].a, רק קריאה); notes – ההערה הכללית והערות הפריטים (עם תיאור הפריט מזמן הכתיבה)
+  const mapId = kind + '-' + br, sref = db.doc('s3setup/' + mapId);
+  let qa = [], gnote = '', notes = [];
+  if (x.ans || x.notes) {
+    const ss = await sref.get(), sd = ss.exists ? ss.data() : null;
+    if (x.ans) qa = SL.answered(sd && sd.qs);
+    if (x.notes) {
+      const items = SL.itemsOf(x.m);
+      gnote = sd && typeof sd.gnote === 'string' ? sd.gnote : '';
+      const ns = await db.collection(`s3setup/${mapId}/n`).limit(SL.SET.notesMax).get();
+      notes = ns.docs.filter((d) => typeof d.get('t') === 'string' && d.get('t').trim())
+        .map((d) => ({ פריט: typeof d.get('d') === 'string' && d.get('d') ? d.get('d') : items.get(d.id) || d.id, t: d.get('t') }));
+    }
+    if (!x.txt && !qa.length && !gnote && !notes.length) throw bad('nothing', 'אין עדיין תשובות או הערות. ענו על השאלות, כתבו הערה, או כתבו מה לתקן.', 'failed-precondition');
+  }
   const dref = db.doc('s3draft/' + qid), qref = db.doc('s3qid/' + qid), uref = db.doc('s3use/u_' + who.uid);
   const base = Object.assign({ br, kind, by: who.uid, at: now, n: 0, fix: 1 }, x.from ? { from: x.from } : {});
   // רק הבלם היומי לעובד + s3qid + s3draft (wait), בטרנזקציה אחת לפני Gemini
@@ -105,7 +122,7 @@ async function fixCore(db, who, input, now, deps) {
     throw e;
   };
   let prompt;
-  try { prompt = F.buildFixPrompt({ kind, storeType: S.stype, cur: F.toModel(x.m), txt: x.txt, sk: x.sk }); } catch (e) {
+  try { prompt = F.buildFixPrompt({ kind, storeType: S.stype, cur: F.toModel(x.m), txt: x.txt, sk: x.sk, qa, gnote, notes }); } catch (e) {
     return back(bad('internal', 'שגיאה בתיקון הטיוטה', 'internal'));
   }
   const deadline = Date.now() + TIMES.budgetMs;
@@ -132,9 +149,12 @@ async function fixCore(db, who, input, now, deps) {
   // שם המפה ורשת ההצמדה – כמו בטיוטה הנוכחית (cleanDraft קובע ברירת מחדל)
   if (typeof x.m.name === 'string' && x.m.name.trim()) d.map.name = x.m.name.trim().slice(0, 40);
   if ([25, 50, 100].includes(x.m.grid)) d.map.grid = x.m.grid;
-  const res = { draftId: qid, st: 'ok', conf: d.conf, drop: d.drop, fix: true };
+  const res = Object.assign({ draftId: qid, st: 'ok', conf: d.conf, drop: d.drop, fix: true }, x.ans || x.notes ? { used: { qa: qa.length, nt: notes.length + (gnote ? 1 : 0) } } : {});
   try {
     await db.runTransaction(async (tx) => {
+      // הקמת חנות (חוזה 4): s3setup.draftId = הטיוטה המתוקנת. merge – שאר השדות לא נוגעים; st רק כשאין עדיין הקמה
+      const ss = await tx.get(sref);
+      tx.set(sref, Object.assign(ss.exists && ss.get('st') ? {} : { v: 1, st: 'draft' }, { draftId: qid, upd: now, by: who.uid }), { merge: true });
       tx.set(dref, Object.assign({}, base, { st: 'ok', m: d.map }, typeof d.conf === 'number' ? { conf: d.conf } : {}, d.notes ? { notes: d.notes } : {}));
       tx.update(qref, { res });
     });

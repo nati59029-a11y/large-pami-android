@@ -525,10 +525,12 @@ async function verifyCore(db, who, x, now, deps) {
 // ---------------- mapDraft ----------------
 // s3setup/{mapId} אחרי טיוטה (חוזה 3.1): v, draftId, src (רק כשנשלח), upd, by. st = 'draft' רק כשאין עדיין הקמה או שהיא בשלב sketch/draft –
 // שלב מתקדם יותר (notes/qs/cap/done) לא חוזר אחורה. merge: שדות אחרים במסמך (הערות, שאלות, מונים) לא נוגעים.
+// src שייך לטיוטה האחרונה: בקשה בלי src (אפליקציה ישנה) מוחקת את src של טיוטה קודמת, כדי שלא יתאר טיוטה אחרת (בדיקת שלב 1, הערה 1).
 function setupDraft(sd, draftId, src, uid, now) {
   const o = { v: 1, draftId, upd: now, by: uid };
   if (!sd || !sd.st || sd.st === 'sketch' || sd.st === 'draft') o.st = 'draft';
   if (src) o.src = src;
+  else if (sd && sd.src !== undefined) o.src = FieldValue.delete();
   return o;
 }
 async function draftCore(db, who, input, now, deps) {
@@ -779,4 +781,4 @@ exports.s3MovePh = onCall({ timeoutSeconds: 60, memory: '256MiB' }, T.scoped(asy
 }));
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_ai', { enumerable: false, value: { shelfCore, draftCore, moveCore, reserve, release } });
+Object.defineProperty(exports, '_ai', { enumerable: false, value: { shelfCore, draftCore, moveCore, reserve, release, setupDraft } });

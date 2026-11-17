@@ -8,6 +8,8 @@
    שחזור: נתוני הסריקה חיים בשרת, והשרת בלבד כותב אותם (חוקים). לכן שחזור גיבוי בטלפון לא כותב ולא מוחק שום דבר מנתוני הסריקה –
    הם נשארים בקובץ, ומוצגת שורת הסבר בחלון השחזור. גיבוי בלי השדה – בלי שורה ובלי שגיאה.
    רק מנהל / מנהל־על, רק כשהתוספת store3d פעילה. כשל בקריאה לא מכשיל את הגיבוי: נרשם ב-miss.
+   הקמת חנות (17.11.2026, חוזה 7): גם s3setup (מצב ההקמה, הערה כללית, שאלות ותשובות) ו-n (הערות לפריטים) – אחרי המקטעים – ו-cap (תוכנית
+   הצילום: סטטוס, נתיבים ותוצאות בדיקה, בלי תמונות) – אחרון, כדי שבחיתוך ייחתך דווקא הוא. גיבוי ישן בלי האוספים האלה – בלי שגיאה.
    תיקון סבב 1: תקרת גודל (12MB) וזמן (20 שניות), רק 3 הגרסאות האחרונות לכל מפה, ובגיבוי המוצפן – אם הקובץ חורג מ-50MB נוצר שוב בלי st3 (abkRun). */
 (function(){
 'use strict';
@@ -47,6 +49,8 @@ async function collect(){
   for(const c of ['s3br','s3set'])await get(c,'/'+c);
   const maps=await get('smap','/smap');
   for(const d of maps)await get('bay','/smap/'+enc(rel(d.name).split('/')[1])+'/bay');
+  const sets=await get('s3setup','/s3setup');
+  for(const d of sets)await get('n','/s3setup/'+enc(rel(d.name).split('/')[1])+'/n');
   for(const c of ['sround','s3fix','s3appeal','s3short'])await get(c,'/'+c);
   const cut=Date.now()-MONTHS*31*D1;let runs=[];
   if(!halt())try{const r=await fsx(':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'srun'}],where:{fieldFilter:{field:{fieldPath:'openAt'},op:'GREATER_THAN_OR_EQUAL',value:{integerValue:String(cut)}}},orderBy:[{field:{fieldPath:'openAt'},direction:'DESCENDING'}],limit:RUN_MAX}})});
@@ -58,6 +62,7 @@ async function collect(){
   for(const d of maps){if(halt())break;const id=rel(d.name).split('/')[1];
    try{const r=await fsx('/smap/'+enc(id)+':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:{from:[{collectionId:'ver'}],orderBy:[{field:{fieldPath:'at'},direction:'DESCENDING'}],limit:VER_N}})});add('ver',(r||[]).filter(x=>x&&x.document).map(x=>x.document))}catch(e){miss.push('smap/'+id+'/ver')}}
   for(const u of uids)await get('s3perf','/s3perf/'+enc(u)+'/m');
+  for(const d of sets)await get('cap','/s3setup/'+enc(rel(d.name).split('/')[1])+'/cap');
  })();
  let tm;const late=new Promise(r=>{tm=setTimeout(()=>{stop=stop||'time';r()},L.TIME+5e3)});
  await Promise.race([work.catch(e=>{miss.push('err')}),late]);clearTimeout(tm);
@@ -71,7 +76,7 @@ const ok=x=>!!(x&&typeof x==='object'&&!Array.isArray(x)&&Array.isArray(x.docs))
 const pick=o=>o&&ok(o.st3)?o.st3:null;
 /* שורת הסבר בחלון השחזור. בלי השדה – מחרוזת ריקה */
 function note(r){const x=r&&r.st3;if(!ok(x))return'';
- const runs=x.docs.filter(d=>d&&/^srun\/[^/]+$/.test(d.p||'')).length,maps=x.docs.filter(d=>d&&/^smap\/[^/]+$/.test(d.p||'')).length;
- return`<p class="note">הגיבוי כולל גם נתוני סריקת חנות (${maps} מפות, ${runs} סבבים, בלי תמונות${x.part?', חלקי':''}). השחזור לא משנה ולא מוחק את נתוני הסריקה שבשרת – הם נשארים כמו שהם, והעותק נשמר בקובץ הגיבוי.</p>`}
+ const runs=x.docs.filter(d=>d&&/^srun\/[^/]+$/.test(d.p||'')).length,maps=x.docs.filter(d=>d&&/^smap\/[^/]+$/.test(d.p||'')).length,sets=x.docs.filter(d=>d&&/^s3setup\/[^/]+$/.test(d.p||'')).length;
+ return`<p class="note">הגיבוי כולל גם נתוני סריקת חנות (${maps} מפות, ${runs} סבבים${sets?`, ${sets} הקמות חנות`:''}, בלי תמונות${x.part?', חלקי':''}). השחזור לא משנה ולא מוחק את נתוני הסריקה שבשרת – הם נשארים כמו שהם, והעותק נשמר בקובץ הגיבוי.</p>`}
 window.S3BK={collect,note,pick,ok,on,rel,warn,big,L,reset:()=>{last=null}};
 })();
