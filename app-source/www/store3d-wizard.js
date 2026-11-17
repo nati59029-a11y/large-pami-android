@@ -276,7 +276,10 @@ const frame=()=>realDims()||{w:VF,l:VF,tmp:1};
 const skHas=()=>{const k=W.sk;return !!(k.rooms.length||k.cur.length||k.rows.length||k.ent||k.cash)};
 const cl=(v,a,b)=>Math.min(b,Math.max(a,v));
 const snap=v=>Math.round(v/GRID)*GRID;
-const skSnap=()=>{const k=W.sk;return JSON.stringify({rooms:k.rooms,cur:k.cur,rows:k.rows,rt:k.rt,rk:k.rk,ent:k.ent,cash:k.cash})};
+/* w/l = גודל המסגרת שבה השרטוט היה, כדי שביטול אחרי שינוי מידות יחזיר אותו בקנה המידה הנכון */
+const skSnap=()=>{const k=W.sk;return JSON.stringify({rooms:k.rooms,cur:k.cur,rows:k.rows,rt:k.rt,rk:k.rk,ent:k.ent,cash:k.cash,w:k.w,l:k.l})};
+/* הנקודה הרחוקה ביותר בשרטוט (לבדיקה אם משהו יצא מחוץ למסגרת) */
+const skMax=()=>{const k=W.sk,A=[].concat(...k.rooms,k.cur,...k.rows,k.ent||[],k.cash||[]);let x=0,y=0;for(let i=0;i<A.length;i+=2){x=Math.max(x,A[i]);y=Math.max(y,A[i+1])}return{x,y}};
 const skPush=()=>{const k=W.sk;k.undo=k.undo||[];k.undo.push(skSnap());if(k.undo.length>40)k.undo.shift()};
 const skDone=()=>{const F=frame(),k=W.sk;k.w=F.w;k.l=F.l;W.qid='';lsSave();rerender()};
 const fit=(L,n,d)=>{L=Array.isArray(L)?L.slice(0,n):[];while(L.length<n)L.push(d);return L};
@@ -383,7 +386,12 @@ ACT.s3wSkIns=()=>{const k=W.sk,s=k.sel;if(!s||s.t!=='c'||s.r<0)return;const L=k.
  const j=(s.i+2)%L.length,x=snap((L[s.i]+L[j])/2),y=snap((L[s.i+1]+L[j+1])/2),c=L.slice();c.splice(s.i+2,0,x,y);
  if(!okPoly(c)){W.msg='אין מקום לפינה נוספת כאן. הזיזו קודם את הפינות.';return rerender()}skPush();k.rooms[s.r]=c;k.sel={t:'c',r:s.r,i:s.i+2};skDone()};
 ACT.s3wSkUndo=()=>{const k=W.sk;if(k.pend){k.pend=null;return rerender()}const u=k.undo&&k.undo.pop();if(!u)return;
- try{const o=JSON.parse(u);Object.assign(k,{rooms:o.rooms||[],cur:o.cur||[],rows:o.rows||[],rt:o.rt||[],rk:o.rk||[],ent:o.ent||null,cash:o.cash||null})}catch(e){}k.sel=null;skDone()};
+ try{const o=JSON.parse(u);Object.assign(k,{rooms:o.rooms||[],cur:o.cur||[],rows:o.rows||[],rt:o.rt||[],rk:o.rk||[],ent:o.ent||null,cash:o.cash||null});
+  if(o.w>0&&o.l>0){k.w=o.w;k.l=o.l;skRescale(frame())}}catch(e){}k.sel=null;skDone()};
+/* שרטוט שיצא מחוץ למסגרת (נוצר בביטול בגרסה קודמת): מקטינים הכול באותו יחס עד שהכול נכנס */
+ACT.s3wSkFit=()=>{const k=W.sk,F=frame(),m=skMax();if(m.x<=F.w&&m.y<=F.l)return;const r=Math.min(F.w/m.x,F.l/m.y);skPush();
+ const P=p=>p.map((v,i)=>cl(Math.round(v*r),0,i%2?F.l:F.w));k.rooms=k.rooms.map(P);k.cur=P(k.cur);k.rows=k.rows.map(P);if(k.ent)k.ent=P(k.ent);if(k.cash)k.cash=P(k.cash);k.pend=null;k.sel=null;
+ ZV.z=1;toast('השרטוט הוקטן ונכנס למסגרת');skDone()};
 ACT.s3wSkClr=()=>ask('למחוק את כל השרטוט?',()=>{const k=W.sk;skPush();Object.assign(k,{rooms:[],cur:[],rows:[],rt:[],rk:[],ent:null,cash:null,pend:null,sel:null,gen:0});skDone()},'כן, מחקו');
 
 /* --- ציור השרטוט (canvas; צבעים מהטוקנים של הערכה) --- */
@@ -457,6 +465,7 @@ function skTools(){const k=W.sk,m=k.mode,F=frame();
  h+=`<div class="row" style="gap:6px;margin-top:8px;align-items:center"><button class="btn s g" data-a="s3wZ" data-z="out" aria-label="הקטנה"${ZV.z>1?'':' disabled'}>－</button><button class="btn s g" data-a="s3wZ" data-z="in" aria-label="הגדלה"${ZV.z<4?'':' disabled'}>＋</button><button class="btn s g" data-a="s3wZ" data-z="fit"${ZV.z>1?'':' disabled'}>כל השרטוט</button><small class="note">${ZV.z>1?`מוגדל פי ${ZV.z} · גררו באצבע כדי לזוז`:''}</small><button class="btn s g" data-a="s3wHelp" style="margin-inline-start:auto" aria-expanded="${!!skHelp}">איך מציירים?</button></div>${skHelp?HELP:''}
  <p class="note s3note" aria-live="polite">${hint}${F.tmp?' <b>השרטוט עוד בלי קנה מידה</b> – בסוף תתבקשו לרוחב אמיתי.':''}</p>`;
  h+=`<canvas id="s3wSk" data-a="s3wSkT" role="img" aria-label="שרטוט החנות. ${k.rooms.length} חדרים, ${k.rows.length} שורות" style="display:block;touch-action:${ZV.z>1?'none':'manipulation'};border:1px solid var(--line);background:var(--bg);margin:8px auto 0;cursor:crosshair"></canvas>`;
+ {const m=skMax();if(m.x>F.w+1||m.y>F.l+1)h+=`<div class="ban s3warn" role="alert" style="margin-top:8px">חלק מהשרטוט נמצא מחוץ למסגרת, ולכן לא רואים אותו. <button class="btn s" data-a="s3wSkFit" style="margin-top:6px">הקטינו את השרטוט כדי שייכנס</button></div>`}
  h+=`<p class="s3note"><small>${F.tmp?'מסגרת זמנית (עוד בלי מידות), כל משבצת = יחידה':`רוחב ${+(F.w/100).toFixed(1)} מ', אורך ${+(F.l/100).toFixed(1)} מ', כל משבצת = ${Math.max(F.w,F.l)>3000?5:1} מ'`} · ${k.rooms.length} חדרים · ${k.rows.length} שורות${k.cur.length?` · חדר פתוח עם ${k.cur.length/2} פינות`:''}</small></p>`;
  h+=`<div class="row s3row" style="gap:6px">${m==='room'?`<button class="btn s" data-a="s3wSkClose"${k.cur.length>=6?'':' disabled'}>סגרו חדר</button>`:''}${m==='sel'&&k.sel?`<button class="btn s g" data-a="s3wSkDel">${k.sel.t==='w'?'מחקו שורה':'מחקו פינה'}</button>${k.sel.t==='c'&&k.sel.r>=0?`<button class="btn s g" data-a="s3wSkIns">הוסיפו פינה</button>`:''}`:''}<button class="btn s g" data-a="s3wSkUndo"${k.undo&&k.undo.length||k.pend?'':' disabled'}>ביטול אחרון</button><button class="btn s g" data-a="s3wSkClr"${skHas()?'':' disabled'}>ניקוי</button></div>`;
  return h}
