@@ -231,18 +231,23 @@ const jpegDims = (page, b64) => page.evaluate(async (b) => { const bl = await fe
     const an = cl('s3SetupAns')[0], fxs = cl('mapFix'), fx1 = fxs[fxs.length - 1], st = await A.page.evaluate(() => ({ fixN: S3UI.W.draft.m.fixN, t: document.getElementById('s3nt').innerText }));
     check('2ה8 תשובות: s3SetupAns עם בחירה וכתיבה, ואז mapFix עם ans ו-notes (בלי txt) – הטיוטה מוחלפת, והשינויים מסומנים לבדיקה', !!an && JSON.stringify(an.b.ans) === JSON.stringify([{ id: 'q1', c: [1], x: '' }, { id: 'q2', c: [], x: 'מקפיאים ומדף לחם' }]) && !!fx1 && fx1.b.ans === true && fx1.b.notes === true && !('txt' in fx1.b) && st.fixN >= 1 && /מסומנים כאזורים לבדיקה/.test(st.t), { ans: an && an.b.ans, fix: fx1 && Object.keys(fx1.b) });
     // סבב בדיקה 1: הערה שהפריט במספר שלה כבר אחר (הטיוטה מוספרה מחדש) – "לשיוך מחדש", לא מוצגת על הפריט; שיוך (from) ומחיקה
-    await A.page.evaluate(() => { S3UI.W.nt.D.f2 = { t: 'הערה על גוף שזז', d: 'מקרר מספר 9 "אחר"', on: 'draft' }; S3UI.W.nt.item = ''; S3UI.W.nt.bay = ''; rerender(); }); await sleep(400);
+    await A.page.evaluate(() => { S3UI.W.nt.D.f2 = { t: 'הערה על גוף שזז', d: 'מקרר מספר 9 "אחר"', on: 'draft', g: { t: 'fx', k: 'fridge', x: 9000, y: 9000 } }; S3UI.W.nt.item = ''; S3UI.W.nt.bay = ''; rerender(); }); await sleep(400);
     const re1 = await A.page.evaluate(() => { const b = document.getElementById('s3ntRe'); return { t: b ? b.innerText : '', dis: !!(document.querySelector('[data-a=s3ntRe]') || {}).disabled, inL: /הערה על גוף שזז/.test((document.querySelector('.s3ntL') || {}).innerText || '') }; });
     check('2ה10 הערה לשיוך מחדש: מוצגת בנפרד עם "נכתבה על" התיאור המקורי, לא ברשימת ההערות על הפריטים; "שייכו" כבוי עד שבוחרים פריט', /מחכה לשיוך מחדש/.test(re1.t) && /נכתבה על: מקרר מספר 9/.test(re1.t) && re1.dis && !re1.inL, re1);
     await A.page.selectOption('[data-c=s3ntItem]', 'f1'); await sleep(300);
     await A.page.click('[data-a=s3ntRe]'); await sleep(700);
     const rn = cl('s3SetupNote').pop();
     check('2ה11 שיוך: s3SetupNote עם from (המספר הישן), itemId (הפריט שנבחר) והטקסט; ההערה עוברת לרשימה', !!rn && rn.b.from === 'f2' && rn.b.itemId === 'f1' && rn.b.t === 'הערה על גוף שזז' && !(await A.page.$('#s3ntRe')), rn && rn.b);
-    await A.page.evaluate(() => { S3UI.W.nt.D.f1 = { t: 'הערה ישנה', d: 'מקפיא מספר 3', on: 'draft' }; rerender(); }); await sleep(300);
+    await A.page.evaluate(() => { S3UI.W.nt.D.f1 = { t: 'הערה ישנה', d: 'מקפיא מספר 3', on: 'draft', g: { t: 'fx', k: 'fridge', x: 9000, y: 9000 } }; rerender(); }); await sleep(300);
     if (fp(shots, 'x')) await A.page.locator('#s3ntRe').screenshot({ path: fp(shots, 'שלב2-לשיוך-מחדש') });
     await A.page.click('[data-a=s3ntDel]'); await sleep(700);
     const dl = cl('s3SetupNote').pop();
     check('2ה12 מחיקת הערה לשיוך: s3SetupNote עם itemId הישן וטקסט ריק', !!dl && dl.b.itemId === 'f1' && dl.b.t === '' && !dl.b.from && !(await A.page.$('#s3ntRe')), dl && dl.b);
+    // סבב בדיקה 2: הערה שנשמרה במספר f9 (מספור של טיוטה קודמת) עם הגיאומטריה של הגוף שעכשיו f2 – מוצגת על f2, לפי המקום
+    await A.page.evaluate(() => { const K = window.S3NK, m = S3UI.W.draft.m, g = K.gOf(K.geoIndex(m), 'f2'); S3UI.W.nt.D = { f9: { t: 'הערה לפי מקום', d: 'ישן', on: 'draft', g } }; rerender(); }); await sleep(300);
+    const geo = await txt(A.page, '.s3ntL');
+    check('2ה13 מספור מחדש: ההערה מוצגת על הגוף לפי המקום (g), לא לפי המספר שבו נשמרה', /מדף קיר 2[^:]*: הערה לפי מקום/.test(geo || '') && !(await A.page.$('#s3ntRe')), geo);
+    await A.page.evaluate(() => { S3UI.W.nt.D = {}; rerender(); });
     // שרת/כללים ישנים (403 על s3setup): התיבה מוסתרת עם הסבר
     S.nt403 = true; await A.page.evaluate(() => { S3UI.W.nt = null; rerender(); }); await sleep(800);
     check('2ה9 שרת שעוד לא עודכן: "העדכון בשרת עוד לא הותקן", בלי כפתורי הערות/שאלות', /העדכון בשרת עוד לא הותקן/.test(await txt(A.page, '#s3nt')) && !(await A.page.$('[data-a=s3ntAsk]')));

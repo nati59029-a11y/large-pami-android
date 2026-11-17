@@ -83,10 +83,12 @@ async function fixCore(db, who, input, now, deps) {
       const items = SL.itemsOf(x.m);
       gnote = sd && typeof sd.gnote === 'string' ? sd.gnote : '';
       const ns = await db.collection(`s3setup/${mapId}/n`).limit(SL.SET.notesMax).get();
-      // הערה "לשיוך מחדש" (הפריט במזהה כבר אחר – הטיוטה מוספרה מחדש) עוברת עם התיאור המקורי וסימון, לא כהערה על הפריט הנוכחי
-      notes = ns.docs.filter((d) => typeof d.get('t') === 'string' && d.get('t').trim())
-        .map((d) => Object.assign({ פריט: typeof d.get('d') === 'string' && d.get('d') ? d.get('d') : items.get(d.id) || d.id, t: d.get('t') },
-          SL.noteState(d.data(), d.id, items) === 'ok' ? {} : { מצב: 'פריט מטיוטה קודמת – לא ידוע אם הוא עדיין במפה' }));
+      // ההערה הולכת אחרי הפריט הפיזי (g): התיאור של הפריט הנוכחי. "לשיוך מחדש" (לא נמצא / לא חד-משמעי) – התיאור המקורי וסימון
+      const G = SL.NK.geoIndex(x.m);
+      notes = ns.docs.filter((d) => typeof d.get('t') === 'string' && d.get('t').trim()).map((d) => {
+        const r = SL.NK.noteTo(d.data(), d.id, G), d0 = typeof d.get('d') === 'string' && d.get('d') ? d.get('d') : d.id;
+        return r.st === 'ok' ? { פריט: items.get(r.to) || d0, t: d.get('t') } : { פריט: d0, t: d.get('t'), מצב: 'פריט מטיוטה קודמת – לא ידוע אם הוא עדיין במפה' };
+      });
     }
     if (!x.txt && !qa.length && !gnote && !notes.length) throw bad('nothing', 'אין עדיין תשובות או הערות. ענו על השאלות, כתבו הערה, או כתבו מה לתקן.', 'failed-precondition');
   }

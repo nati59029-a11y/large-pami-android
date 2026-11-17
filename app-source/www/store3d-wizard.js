@@ -275,13 +275,19 @@ function ntItems(m){const L=[],rn={};
 const ntLbl=(m,id)=>{const b=/^(f[0-9]+)-([ab])-([0-9]+)$/.exec(id||''),x=ntItems(m).find(i=>i[0]===(b?b[1]:id));return x?(b?`מקטע ${b[3]} בצד ${b[2]==='a'?'א':'ב'} של ${x[1]}`:x[1]):id};
 /* ההערות לפי מצב מול הטיוטה הנוכחית (S3NK – אותה בדיקה כמו בשרת): ok = על הפריט שבמזהה; re = "לשיוך מחדש" – הטיוטה מוספרה מחדש
    והפריט במזהה הזה כבר אחר (או לא קיים). הערה כזו לא מוצגת על הפריט: אפשר לשייך אותה לפריט שנבחר או למחוק */
-const ntSplit=(N,m)=>{const K=window.S3NK,I=K?K.itemsOf(m):null,ok={},re={};for(const id of Object.keys(N.D)){const n=N.D[id];if(!n||!n.t)continue;(I&&K.noteState(n,id,I)!=='ok'?re:ok)[id]=n}return{ok,re,I}};
+/* ok לפי המזהה הנוכחי של הפריט (ההערה הולכת אחרי הפריט הפיזי לפי g – אותה התאמה כמו בשרת), עם from = המזהה שבו היא שמורה */
+const ntSplit=(N,m)=>{const K=window.S3NK,I=K?K.itemsOf(m):null,G=K?K.geoIndex(m):null,ok={},re={};
+ for(const id of Object.keys(N.D).sort()){const n=N.D[id];if(!n||!n.t)continue;const x=G?K.noteTo(n,id,G):{st:'ok',to:id};
+  if(x.st==='ok'&&!ok[x.to])ok[x.to]=Object.assign({},n,{from:id});else re[id]=n}
+ return{ok,re,I,G}};
+/* אחרי כתיבה: ההערה של הפריט נשמרת במזהה הנוכחי שלו (כמו הסנכרון בשרת) */
+const ntPut=(N,S0,id,t)=>{const o=S0.ok[id];if(o&&o.from!==id)delete N.D[o.from];if(!t){delete N.D[id];return}const K=window.S3NK,g=S0.G&&K?K.gOf(S0.G,id):null;N.D[id]=Object.assign({t,d:S0.I?S0.I.get(id):'',on:'draft'},g?{g}:{})};
 const NT0=()=>({g:'',gs:'',t:null,item:'',bay:'',D:{},qs:[],qr:0,ans:{},busy:'',msg:'',ok:'',old:0,ld:0,qq:'',qa:'',qf:''});
 async function ntLoad(){const N=W.nt;if(!N||N.ld)return;N.ld=1;
  try{const sd=await U.get('/s3setup/'+mapId());if(sd){N.g=N.gs=String(sd.gnote||'');N.qr=+sd.qr||0;N.qs=Array.isArray(sd.qs)?sd.qs:[];
    for(const q of N.qs)if(q&&q.a)N.ans[q.id]={c:Array.isArray(q.a.c)?q.a.c.slice():[],x:String(q.a.x||'')};
    let tok='';for(let i=0;i<5;i++){const j=await fsx('/s3setup/'+mapId()+'/n?pageSize=300'+(tok?'&pageToken='+encodeURIComponent(tok):''));
-    for(const d of (j&&j.documents)||[]){const f=U.dec(d)||{};if(typeof f.t==='string'&&f.t)N.D[d.name.split('/').pop()]={t:f.t,d:String(f.d||''),on:f.on,re:f.re}}tok=j&&j.nextPageToken;if(!tok)break}}}
+    for(const d of (j&&j.documents)||[]){const f=U.dec(d)||{};if(typeof f.t==='string'&&f.t)N.D[d.name.split('/').pop()]={t:f.t,d:String(f.d||''),on:f.on,re:f.re,g:f.g}}tok=j&&j.nextPageToken;if(!tok)break}}}
  catch(e){if(e&&e.code===403)N.old=1}
  if(cur().v==='st3w')rerender()}
 const ntBody=o=>Object.assign({mapId:mapId(),m:W.draft&&W.draft.m},o);
@@ -295,10 +301,10 @@ ACT.s3ntSaveG=()=>ntRun('שומרים…',async N=>{const t=N.g.replace(/\s+/g,'
 ACT.s3ntSaveI=()=>ntRun('שומרים…',async N=>{const id=N.bay||N.item;if(!id){N.msg='בחרו פריט.';return}
  const S0=ntSplit(N,W.draft.m);if(S0.re[id]){N.msg='לפריט הזה יש הערה שמחכה לשיוך (למטה). שייכו או מחקו אותה קודם.';return}
  const t=String(N.t==null?((S0.ok[id]||{}).t||''):N.t).replace(/\s+/g,' ').trim().slice(0,300);
- await U.fn('s3SetupNote',ntBody({itemId:id,t,qid:U.qid()}));if(t)N.D[id]={t,d:S0.I?S0.I.get(id):'',on:'draft'};else delete N.D[id];N.t=null;N.ok=t?'ההערה נשמרה':'ההערה נמחקה'});
+ await U.fn('s3SetupNote',ntBody({itemId:id,t,qid:U.qid()}));ntPut(N,S0,id,t);N.t=null;N.ok=t?'ההערה נשמרה':'ההערה נמחקה'});
 /* הערה לשיוך מחדש: לפריט שנבחר בשדה "הערה לפריט" (from), או מחיקה (ניקוי הטקסט) */
 ACT.s3ntRe=el=>{const from=el.dataset.id||'';ntRun('משייכים…',async N=>{const n=N.D[from],to=N.bay||N.item;if(!n)return;if(!to){N.msg='בחרו קודם פריט בשדה "הערה לפריט", ואז "שייכו לפריט שנבחר".';return}
- const r=await U.fn('s3SetupNote',ntBody({itemId:to,from,t:n.t,qid:U.qid()}));const S0=ntSplit(N,W.draft.m);N.D[to]={t:String(r&&r.t||n.t),d:S0.I?S0.I.get(to):'',on:'draft'};delete N.D[from];N.ok='ההערה שויכה לפריט שנבחר'})};
+ const r=await U.fn('s3SetupNote',ntBody({itemId:to,from,t:n.t,qid:U.qid()}));const S0=ntSplit(N,W.draft.m);ntPut(N,S0,to,String(r&&r.t||n.t));delete N.D[from];N.ok='ההערה שויכה לפריט שנבחר'})};
 ACT.s3ntDel=el=>{const id=el.dataset.id||'';ntRun('מוחקים…',async N=>{if(!N.D[id])return;await U.fn('s3SetupNote',ntBody({itemId:id,t:'',qid:U.qid()}));delete N.D[id];N.ok='ההערה נמחקה'})};
 ACT.s3ntEdit=el=>{const N=W.nt,id=el.dataset.id||'';if(!N)return;N.t=null;const b=/^(f[0-9]+)-[ab]-[0-9]+$/.exec(id);N.item=b?b[1]:id;N.bay=b?id:'';N.msg='';N.ok='';rerender()};
 CHG.s3ntItem=el=>{const N=W.nt;if(!N)return;N.item=String(el.value||'');N.bay='';N.t=null;rerender()};

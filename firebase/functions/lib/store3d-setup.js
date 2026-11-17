@@ -7,7 +7,7 @@ const { fail } = require('./store3d-ai');
 const C = require('./store3d-core');
 
 const SET = { gnote: 1000, note: 300, notesMax: 500, qsMax: 12, qrMax: 3, qT: 160, oMin: 2, oMax: 6, oT: 60, ansX: 200, dMax: 100 };
-const ITEM_RE = /^([rwcdfy][0-9]{1,4}|f[0-9]{1,4}-[ab]-[0-9]{1,2})$/;
+const ITEM_RE = /^([rwcdfy][0-9]{1,4}|f[0-9]{1,4}-[ab]-[0-9]{1,2})$/;   // גם מזהי חניה y9999.. של הערות "לשיוך מחדש"
 const QID_RE = /^q[0-9]{1,2}$/;
 const PRE = ['sketch', 'draft', 'notes', 'qs'];   // שלבים שלפני הצילום (שלב מתקדם לא חוזר אחורה)
 const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
@@ -140,33 +140,45 @@ function renameId(id, renamed) {
   const m = /^(f[0-9]{1,4})(-[ab]-[0-9]{1,2})?$/.exec(id);
   return m && Object.prototype.hasOwnProperty.call(renamed, m[1]) ? renamed[m[1]] + (m[2] || '') : id;
 }
-// docs = [{ id, data }] (n/*) ← { set: [{ id, data }], del: [id] }. מסמך שמישהו אחר עובר אליו – לא נמחק.
-function renameNotes(docs, renamed) {
-  const L = docs || [], ids = new Set(L.map((d) => d.id)), mv = [];
-  for (const d of L) { const to = renameId(d.id, renamed); if (to !== d.id) mv.push({ from: d.id, to, data: d.data }); }
-  const away = new Set(mv.map((m) => m.from));
-  // אם במספר החדש כבר יש הערה שלא עוברת למקום אחר (למשל של גוף שנמחק) – לא דורסים: ההערה נשארת במקומה ותיבדק (re)
-  const ok = mv.filter((m) => !ids.has(m.to) || away.has(m.to));
-  const tgt = new Set(ok.map((m) => m.to));
-  return { set: ok.map((m) => ({ id: m.to, data: m.data })), del: ok.map((m) => m.from).filter((id) => !tgt.has(id)) };
-}
-// שמירת מפה: docs = n/* , renamed, items = itemsOf(המפה שנשמרה), qs = s3setup.qs, max = תקרת כתיבות.
-// ← { set: [{ id, data }], del: [id], qs: חדש או null, nN, cut: כמה לא נבדקו (מעבר לתקרה) }. ראו store3d-map.js saveMap.
-function saveNotes(docs, renamed, items, qs, max) {
+// ---------- סנכרון הערות למפה/לטיוטה הנוכחית (s3SetupNote לפני כתיבה, s3SaveMap בשמירה) ----------
+// כל הערה שנכתבה על טיוטה (on != 'map') הולכת אחרי הפריט הפיזי (NK.noteTo לפי g): עוברת למזהה הנוכחי שלו (העברה, לא מחיקה), עם d ו-g
+// מעודכנים; לא נמצא / לא חד-משמעי ⇒ re = 1 ("לשיוך מחדש"), והיא נשארת במקומה. לא דורסים: אם במזהה היעד יש הערה שנשארת שם (או שתי
+// הערות לאותו פריט) – זו שעוברת מסומנת re. toMap (שמירת מפה) – הערה שנמצאה מקבלת on = 'map' (מעכשיו המזהים יציבים).
+// docs = [{ id, data }] ← { cur: Map מזהה → נתונים (המצב אחרי), set: [מזהים לכתיבה], del: [מזהים למחיקה], cut }.
+// מעבר לתקרת הכתיבות (max) – לא משנים כלום (cut), וההתאמה נשארת "עצלה" (noteTo בכל קריאה).
+function syncNotes(docs, G, items, toMap, max) {
   const cur = new Map((docs || []).map((d) => [d.id, Object.assign({}, d.data)]));
-  const rn = renameNotes(docs, renamed);
-  const set = new Map(), del = new Set();
-  for (const x of rn.set) { cur.set(x.id, Object.assign({}, x.data)); set.set(x.id, cur.get(x.id)); }
-  for (const id of rn.del) { cur.delete(id); del.add(id); }
-  let cut = 0;
-  for (const [id, n] of cur) {
-    if (n.on === 'map' || n.re === 1 || typeof n.t !== 'string' || !n.t.trim()) continue;
-    if (set.size + del.size >= max) { cut++; continue; }
-    if (NK.noteState(n, id, items) === 'ok') Object.assign(n, { on: 'map', d: items.get(id) });
-    else n.re = 1;
-    set.set(id, n);
+  const set = new Set(), del = new Set(), mv = [];
+  const has = (n) => n && typeof n.t === 'string' && n.t.trim();
+  const fresh = (n, to) => { const g = NK.gOf(G, to); if (g) n.g = g; const d = items.get(to); if (d) n.d = d; if (toMap) n.on = 'map'; };
+  for (const id of [...cur.keys()].sort()) {
+    const n = cur.get(id);
+    if (!has(n) || n.re === 1 || n.on === 'map') continue;
+    const r = NK.noteTo(n, id, G);
+    if (r.st !== 'ok') { n.re = 1; set.add(id); continue; }
+    if (r.to === id) { const b = JSON.stringify(n); fresh(n, id); if (JSON.stringify(n) !== b) set.add(id); continue; }
+    mv.push({ from: id, to: r.to, n });
   }
-  return { set: [...set].map(([id, data]) => ({ id, data })), del: [...del], qs: renameRefs(qs, renamed), nN: cur.size, cut };
+  // יעד חוסם = הערה עם טקסט שנשארת שם ואינה "לשיוך מחדש" (הערה על הפריט עצמו). הערה "לשיוך מחדש" במקום היעד לא חוסמת – היא עוברת למזהה חניה
+  const away = new Set(mv.map((m) => m.from)), taken = new Set(), win = [];
+  for (const m of mv) {
+    const o = cur.get(m.to), block = o && !away.has(m.to) && has(o) && o.re !== 1;
+    if (block || taken.has(m.to)) { m.n.re = 1; set.add(m.from); away.delete(m.from); continue; }
+    taken.add(m.to); win.push(m);
+  }
+  // הערות "לשיוך מחדש" שיושבות במקום שמישהו עובר אליו – עוברות למזהה חניה פנוי (y9999 ומטה: לא קיים במפה), בלי לאבד אותן
+  let pk = 9999;
+  const park = () => { while (pk > 0 && (cur.has('y' + pk) || G.has('y' + pk) || taken.has('y' + pk))) pk--; return 'y' + pk--; };
+  const moves = win.map((m) => ({ from: m.from, to: m.to, n: m.n, fr: true }));
+  for (const m of win) {
+    const o = cur.get(m.to);
+    if (o && !away.has(m.to) && o.re === 1) { const p = park(); taken.add(p); moves.push({ from: m.to, to: p, n: o }); }
+  }
+  for (const m of moves) { cur.delete(m.from); del.add(m.from); }
+  for (const m of moves) { if (m.fr) fresh(m.n, m.to); cur.set(m.to, m.n); set.add(m.to); del.delete(m.to); }
+  for (const id of del) set.delete(id);
+  if (set.size + del.size > max) return { cur: new Map((docs || []).map((d) => [d.id, d.data])), set: [], del: [], cut: set.size + del.size };
+  return { cur, set: [...set], del: [...del], cut: 0 };
 }
 // qs ← qs עם ref מעודכן, או null אם לא השתנה כלום
 function renameRefs(qs, renamed) {
@@ -183,6 +195,6 @@ function renameRefs(qs, renamed) {
 }
 
 module.exports = {
-  NK, noteState: NK.noteState, dKey: NK.dKey, SET, ITEM_RE, QID_RE, PRE, QS_VERSION, txt1, itemsOf, noteInput, toQsModel, buildQsPrompt, qsClean, qsMsg, QS_WHY,
-  ansInput, answered, renameId, renameNotes, renameRefs, saveNotes,
+  NK, noteState: NK.noteState, noteTo: NK.noteTo, SET, ITEM_RE, QID_RE, PRE, QS_VERSION, txt1, itemsOf, noteInput, toQsModel, buildQsPrompt, qsClean, qsMsg, QS_WHY,
+  ansInput, answered, renameId, renameRefs, syncNotes,
 };

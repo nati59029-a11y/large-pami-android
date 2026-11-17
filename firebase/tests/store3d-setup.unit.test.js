@@ -84,14 +84,7 @@ describe('ansInput – תשובות (s3SetupAns)', () => {
   });
 });
 
-describe('renamed – הערות ו-ref עוברים למזהה החדש', () => {
-  it('גוף ומקטעים שלו; שרשרת f3→f1, f1→f2 בלי לאבד הערה', () => {
-    const docs = [{ id: 'f3', data: { t: 'שלוש' } }, { id: 'f3-a-1', data: { t: 'מקטע' } }, { id: 'f1', data: { t: 'אחת' } }, { id: 'r1', data: { t: 'חדר' } }];
-    const r = S.renameNotes(docs, { f3: 'f1', f1: 'f2' });
-    assert.deepEqual(r.set.map((x) => [x.id, x.data.t]).sort(), [['f1', 'שלוש'], ['f1-a-1', 'מקטע'], ['f2', 'אחת']]);
-    assert.deepEqual(r.del.sort(), ['f3', 'f3-a-1'], 'f1 לא נמחק – הערה אחרת עוברת אליו');
-    assert.deepEqual(S.renameNotes(docs, {}), { set: [], del: [] });
-  });
+describe('renamed – qs[].ref עובר למזהה החדש', () => {
   it('qs[].ref', () => {
     const qs = [{ id: 'q1', t: 'א', o: ['1', '2'], ref: 'f3-b-2' }, { id: 'q2', t: 'ב', o: ['1', '2'], ref: 'r1' }];
     assert.equal(S.renameRefs(qs, { f3: 'f7' })[0].ref, 'f7-b-2');
@@ -135,47 +128,63 @@ describe('mapFix – ans/notes (הקמת חנות שלב 2)', () => {
   });
 });
 
-// סבב בדיקה 1, ליקוי 1: הערה לא נקשרת בשקט לפריט אחר כשהטיוטה מוספרת מחדש או בשמירה הראשונה (renamed)
-describe('שיוך הערות – noteState, renamed בלי דריסה, saveNotes', () => {
+// סבבי בדיקה 1–2, ליקוי 1: הערה הולכת אחרי הפריט הפיזי (גיאומטריה g), לא אחרי המספר ולא אחרי התיאור
+describe('שיוך הערות לפי גיאומטריה – noteTo, syncNotes', () => {
   const fs = require('node:fs');
   const NK = require(path.join(FN, 'lib', 'store3d-notekey.js'));
   it('הקובץ המשותף זהה תו-בתו בטלפון ובשרת', () => {
     assert.equal(fs.readFileSync(path.join(FN, 'lib', 'store3d-notekey.js'), 'utf8'), fs.readFileSync(path.join(__dirname, '..', '..', 'app-source', 'www', 'store3d-notekey.js'), 'utf8'));
   });
-  const fxA = (id, num, name, x) => ({ id, k: 'gon', num, name, room: 'r1', x, y: 300, sides: 1, bays: 2 });
-  const map = (fx) => Object.assign({}, MAP, { fx });
-  it('noteState: אותו גוף שזז = ok; גוף אחר באותו מזהה = re; לא קיים = re; re:1 = re; on=map = ok; ריק = empty', () => {
-    const I1 = NK.itemsOf(map([fxA('f3', 3, 'משקאות', 100)]));
-    const n = { t: 'הערה', d: I1.get('f3'), on: 'draft' }, nb = { t: 'מקטע', d: I1.get('f3-a-2'), on: 'draft' };
-    assert.equal(NK.noteState(n, 'f3', NK.itemsOf(map([fxA('f3', 3, 'משקאות', 900)]))), 'ok', 'הזזה בלבד');
-    const I2 = NK.itemsOf(map([fxA('f1', 1, 'חטיפים', 100), fxA('f3', 3, 'ניקיון', 500)]));
-    assert.equal(NK.noteState(n, 'f3', I2), 're', 'מוספר מחדש – f3 עכשיו גוף אחר');
-    assert.equal(NK.noteState(nb, 'f3-a-2', I2), 're', 'גם מקטע');
-    assert.equal(NK.noteState(n, 'f3', NK.itemsOf(map([]))), 're', 'לא קיים');
-    assert.equal(NK.noteState(Object.assign({}, n, { re: 1 }), 'f3', I1), 're');
-    assert.equal(NK.noteState(Object.assign({}, n, { on: 'map' }), 'f3', I2), 'ok', 'מפה שמורה – מזהים יציבים');
-    assert.equal(NK.noteState({ t: '' }, 'f3', I1), 'empty');
+  // גונדולות בלי שם (כמו בטיוטת AI: num = מספר סידורי), 200 ס"מ זו מזו
+  const gon = (i, x, o) => Object.assign({ id: 'f' + i, k: 'gon', num: i, room: 'r1', x, y: 300, a: 0, sides: 2, bays: 2 }, o);
+  const M = (fx) => Object.assign({}, MAP, { fx, doors: [], syms: [] });
+  const D4 = M([gon(1, 100), gon(2, 300), gon(3, 500), gon(4, 700)]);
+  const G4 = NK.geoIndex(D4), I4 = NK.itemsOf(D4);
+  const note = (id, t) => ({ t: t || 'הערה', d: I4.get(id), g: NK.gOf(G4, id), on: 'draft' });
+  it('4 גונדולות זהות בלי שם, האמצעית נמחקה והמספור התחדש: ההערה על f3 הולכת לגוף הפיזי (עכשיו f2), גם הערת מקטע', () => {
+    const D3 = M([gon(1, 100), gon(2, 500), gon(3, 700)]), G3 = NK.geoIndex(D3);
+    assert.deepEqual(NK.noteTo(note('f3'), 'f3', G3), { st: 'ok', to: 'f2' });
+    assert.deepEqual(NK.noteTo(note('f3-b-2'), 'f3-b-2', G3), { st: 'ok', to: 'f2-b-2' });
+    assert.deepEqual(NK.noteTo(note('f4'), 'f4', G3), { st: 'ok', to: 'f3' });
+    assert.equal(NK.noteTo(note('f2'), 'f2', G3).st, 're', 'הגוף שנמחק – לשיוך מחדש (הקרוב 200 ס"מ)');
   });
-  it('renamed: מספר חדש שכבר תפוס בהערה של גוף שנמחק – לא דורסים (שתיהן נשארות)', () => {
-    const docs = [{ id: 'f4', data: { t: 'של הגוף שנמחק' } }, { id: 'f4-a-2', data: { t: 'מקטע של שנמחק' } }, { id: 'f9', data: { t: 'של f9' } }, { id: 'f9-a-1', data: { t: 'מקטע f9' } }];
-    const r = S.renameNotes(docs, { f9: 'f4' });
-    assert.deepEqual(r.set.map((x) => x.id), ['f4-a-1'], 'רק מקטע f9-a-1 עובר (f4-a-1 פנוי)');
-    assert.deepEqual(r.del, ['f9-a-1']);
+  it('שני גופים שהחליפו מקום: כל הערה הולכת אחרי המקום', () => {
+    const S = M([gon(1, 100), gon(2, 500), gon(3, 300), gon(4, 700)]), GS = NK.geoIndex(S);
+    assert.equal(NK.noteTo(note('f2'), 'f2', GS).to, 'f3'); assert.equal(NK.noteTo(note('f3'), 'f3', GS).to, 'f2');
   });
-  it('saveNotes: אותו פריט ⇒ on=map; פריט אחר במספר ⇒ re=1; הערות המקטעים של גוף שנמחק לא עוברות לגוף שקיבל את מספרו', () => {
-    const draft = map([fxA('f2', 2, 'משקאות', 100), fxA('f4', 4, 'ניקיון', 500)]);   // f4 נמחק בעורך, f9 חדש
-    const D0 = NK.itemsOf(draft), D9 = NK.itemsOf(map([fxA('f9', 5, 'חטיפים', 700)]));
-    const docs = [{ id: 'f2', data: { t: 'משקאות קרים', d: D0.get('f2'), on: 'draft' } }, { id: 'f4-a-2', data: { t: 'נוזל כלים', d: D0.get('f4-a-2'), on: 'draft' } },
-      { id: 'f9', data: { t: 'חטיפים', d: D9.get('f9'), on: 'draft' } }, { id: 'r1', data: { t: 'חדר', d: D0.get('r1'), on: 'map' } }];
-    const saved = NK.itemsOf(map([fxA('f2', 2, 'משקאות', 100), fxA('f4', 5, 'חטיפים', 700)]));   // השרת: f9 ← f4
-    const r = S.saveNotes(docs, { f9: 'f4' }, saved, [{ id: 'q1', t: 'א', o: ['1', '2'], ref: 'f9' }], 400);
-    const by = Object.fromEntries(r.set.map((x) => [x.id, x.data]));
-    assert.equal(by.f2.on, 'map');
-    assert.equal(by.f4.t, 'חטיפים'); assert.equal(by.f4.on, 'map', 'f9 עבר ל-f4 ונשאר אותו גוף');
-    assert.equal(by['f4-a-2'].re, 1, 'מקטע של הגוף שנמחק – לשיוך מחדש, לא נקשר לגוף החדש');
-    assert.deepEqual(r.del, ['f9']); assert.equal(r.qs[0].ref, 'f4'); assert.equal(r.nN, 4);
-    assert.equal(by.r1, undefined, 'הערה על מפה שמורה לא נכתבת');
-    assert.equal(S.saveNotes(docs, {}, saved, null, 1).cut > 0, true, 'מעבר לתקרה – לא נבדק ונספר');
+  it('גוף שזז יותר מ-60 ס"מ ⇒ re; עד 60 ⇒ ok; שני מועמדים במרחק שווה ⇒ re; סוג אחר ⇒ re', () => {
+    assert.equal(NK.noteTo(note('f1'), 'f1', NK.geoIndex(M([gon(1, 161)]))).st, 're');
+    assert.equal(NK.noteTo(note('f1'), 'f1', NK.geoIndex(M([gon(1, 160)]))).st, 'ok');
+    assert.equal(NK.noteTo(note('f1'), 'f1', NK.geoIndex(M([gon(1, 80), gon(2, 120)]))).st, 're', 'שניהם 20 ס"מ');
+    assert.equal(NK.noteTo(note('f1'), 'f1', NK.geoIndex(M([gon(1, 90), gon(2, 125)]))).st, 'ok', '10 מול 25 – פי 2.5');
+    assert.equal(NK.noteTo(note('f1'), 'f1', NK.geoIndex(M([gon(1, 100, { k: 'fridge', sides: 1 })]))).st, 're');
+    assert.equal(NK.noteTo(note('f1-b-1'), 'f1-b-1', NK.geoIndex(M([gon(1, 100, { sides: 1 })]))).st, 're', 'הצד לא קיים יותר');
+  });
+  it('re:1, on=map, ריק', () => {
+    assert.equal(NK.noteTo(Object.assign(note('f1'), { re: 1 }), 'f1', G4).st, 're');
+    assert.deepEqual(NK.noteTo(Object.assign(note('f1'), { on: 'map' }), 'f2', G4), { st: 'ok', to: 'f2' }, 'מפה שמורה – לפי המזהה');
+    assert.equal(NK.noteTo(Object.assign(note('f1'), { on: 'map' }), 'f9', G4).st, 're');
+    assert.equal(NK.noteTo({ t: '' }, 'f1', G4).st, 'empty');
+  });
+  it('syncNotes: הערות עוברות לגוף הפיזי (בשרשרת, בלי דריסה), d/g מתעדכנים, toMap ⇒ on=map; לא נמצא ⇒ re=1', () => {
+    const D3 = M([gon(1, 100), gon(2, 500), gon(3, 700)]);
+    const docs = [{ id: 'f2', data: note('f2', 'של הגוף שנמחק') }, { id: 'f3', data: note('f3', 'שלוש') }, { id: 'f3-a-1', data: note('f3-a-1', 'מקטע של שלוש') }, { id: 'f4', data: note('f4', 'ארבע') }, { id: 'r1', data: { t: 'חדר', on: 'map' } }];
+    const r = S.syncNotes(docs, NK.geoIndex(D3), NK.itemsOf(D3), true, 400);
+    const t = (id) => (r.cur.get(id) || {}).t;
+    assert.equal(t('f2'), 'שלוש'); assert.equal(t('f2-a-1'), 'מקטע של שלוש'); assert.equal(t('f3'), 'ארבע');
+    assert.equal(r.cur.get('f3').on, 'map'); assert.equal(r.cur.get('f3').g.x, 700);
+    assert.ok(![...r.cur.values()].some((n) => n.t === 'של הגוף שנמחק' && !n.re), 'הגוף שנמחק – re');
+    assert.deepEqual(r.del.sort(), ['f3-a-1', 'f4']);
+    assert.equal(r.cut, 0);
+  });
+  it('syncNotes: יעד עם הערה על הפריט עצמו ⇒ זו שעוברת מסומנת re (לא דורסים); יעד עם הערה "לשיוך מחדש" ⇒ היא עוברת לחניה y9999 ולא אובדת; מעבר לתקרה ⇒ בלי שינוי', () => {
+    const D3 = M([gon(1, 100), gon(2, 500), gon(3, 700)]), G3 = NK.geoIndex(D3), I3 = NK.itemsOf(D3);
+    const a = S.syncNotes([{ id: 'f2', data: { t: 'על f2 במפה', on: 'map' } }, { id: 'f3', data: note('f3', 'שלוש') }], G3, I3, false, 400);
+    assert.equal(a.cur.get('f2').t, 'על f2 במפה'); assert.equal(a.cur.get('f3').re, 1);
+    const b = S.syncNotes([{ id: 'f2', data: { t: 'נעולה', re: 1 } }, { id: 'f3', data: note('f3', 'שלוש') }], G3, I3, false, 400);
+    assert.equal(b.cur.get('f2').t, 'שלוש'); assert.equal(b.cur.get('y9999').t, 'נעולה'); assert.equal(b.cur.get('y9999').re, 1);
+    assert.equal(b.cur.size, 2);
+    assert.equal(S.syncNotes([{ id: 'f3', data: note('f3') }], G3, I3, false, 0).cut > 0, true);
   });
   it('noteInput: from רק עם itemId אחר וטקסט', () => {
     const ok = (o) => S.noteInput(Object.assign({ qid: Q, mapId: 's-main', t: 'הערה', itemId: 'f1' }, o));

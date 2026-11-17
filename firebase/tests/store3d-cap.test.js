@@ -244,7 +244,7 @@ describe('s3cap – הליבה מול האמולטור (Firestore + Storage)', (
     // הקמת חנות שלב 2 (סבב בדיקה 1): הערה לשיוך מחדש (re:1), והערה מטיוטה שהפריט במספר שלה כבר אחר – לא מועתקות
     await adm.doc(`b/${A}/s3setup/s-main/n/f2-a-1`).set({ t: 'לשיוך מחדש', upd: 1, by: DR, re: 1 });
     await adm.doc(`b/${A}/smap/s-main/bay/f2-a-1`).delete();
-    await adm.doc(`b/${A}/s3setup/s-main/n/f2`).set({ t: 'על גוף אחר', upd: 1, by: DR, d: 'מקרר מספר 7 "אחר"', on: 'draft' });
+    await adm.doc(`b/${A}/s3setup/s-main/n/f2`).set({ t: 'על גוף אחר', upd: 1, by: DR, d: 'מקרר מספר 7 "אחר"', on: 'draft', g: { t: 'fx', k: 'fridge', x: 9000, y: 9000 } });
     for (const it of plan.items) {
       if (it.key === 'w_r1-1-1') await put({ key: it.key, op: 'skip', why: 'מכוסה במדפים' });
       else await adm.doc(`b/${A}/s3setup/s-main/cap/${it.key}`).set({ k: it.k, ord: it.ord, st: 'ok', geo: it.geo, okBy: MGR, okAt: 1, fr: 'x', upd: 1, by: MGR });

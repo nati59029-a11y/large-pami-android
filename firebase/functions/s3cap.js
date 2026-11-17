@@ -321,9 +321,10 @@ async function setupDone(db, who, input, now) {
   // הערות המקטעים ← bay.notes (רק הוספה, רק אם יש מקום; n.bay = 1 כדי שלא תועתק פעמיים). בקבוצות של 100 מקטעים לטרנזקציה.
   const bays = new Set(plan.items.filter((i) => i.k === 'b').map((i) => i.key.slice(2)));
   const ns = await db.collection(`s3setup/${mapId}/n`).get();
-  // הקמת חנות שלב 2: הערה "לשיוך מחדש" (re, או שנכתבה על טיוטה והפריט במספר הזה כבר אחר) לא מועתקת עד שישייכו אותה
-  const NI = NK.itemsOf(map);
-  const todo = ns.docs.filter((d) => BAY_RE.test(d.id) && bays.has(d.id) && d.get('bay') !== 1 && typeof d.get('t') === 'string' && d.get('t').trim() && NK.noteState(d.data(), d.id, NI) === 'ok');
+  // הקמת חנות שלב 2: רק הערה שבטוח שייכת למקטע הזה מועתקת: על המפה השמורה (on='map'), או מטיוטה שהגיאומטריה שלה (g) מצביעה בדיוק
+  // על המקטע הזה. "לשיוך מחדש" (re, לא נמצא / לא חד-משמעי / מצביע על מקטע אחר) – לא מועתקת עד שישייכו אותה
+  const NI = NK.geoIndex(map), okHere = (n, id) => { const r = NK.noteTo(n, id, NI); return r.st === 'ok' && r.to === id; };
+  const todo = ns.docs.filter((d) => BAY_RE.test(d.id) && bays.has(d.id) && d.get('bay') !== 1 && typeof d.get('t') === 'string' && d.get('t').trim() && okHere(d.data(), d.id));
   let added = 0;
   for (let i = 0; i < todo.length; i += 100) {
     const part = todo.slice(i, i + 100);
@@ -332,7 +333,7 @@ async function setupDone(db, who, input, now) {
       const bb = await Promise.all(part.map((d) => tx.get(db.doc(`smap/${mapId}/bay/${d.id}`))));
       let k = 0;
       nn.forEach((n, j) => {
-        if (!n.exists || n.get('bay') === 1 || NK.noteState(n.data(), n.id, NI) !== 'ok') return;
+        if (!n.exists || n.get('bay') === 1 || !okHere(n.data(), n.id)) return;
         const t = String(n.get('t') || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 200);
         if (!t) return;
         const L = bb[j].exists && Array.isArray(bb[j].get('notes')) ? bb[j].get('notes') : [];
@@ -345,7 +346,7 @@ async function setupDone(db, who, input, now) {
       return k;
     });
   }
-  const reN = ns.docs.filter((d) => typeof d.get('t') === 'string' && d.get('t').trim() && NK.noteState(d.data(), d.id, NI) === 're').length;
+  const reN = ns.docs.filter((d) => typeof d.get('t') === 'string' && d.get('t').trim() && !okHere(d.data(), d.id)).length;
   const res = { ok: true, mapId, n: plan.n, done: sm.ok, skip: sm.skip, notes: added, re: reN, mapV: Number.isInteger(map.v) ? map.v : 0 };
   await db.runTransaction(async (tx) => {
     const [q, ss] = await Promise.all([tx.get(qref), tx.get(db.doc('s3setup/' + mapId))]);

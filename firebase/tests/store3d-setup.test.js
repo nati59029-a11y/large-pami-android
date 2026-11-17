@@ -150,12 +150,9 @@ describe('הקמת חנות שלב 2 – הערות, שאלות ותשובות (
   });
 
   it('s3SaveMap: renamed – ההערות של הגוף ושל המקטעים שלו ו-qs[].ref עוברים למזהה החדש; הערות אחרות לא נוגעות', async () => {
-    const b = adm.batch();
-    b.set(adm.doc(P + 's3setup/s-main'), { v: 1, st: 'qs', nN: 3, upd: 1, by: DR, qs: [{ id: 'q1', t: 'א', o: ['1', '2'], ref: 'f5-a-1' }, { id: 'q2', t: 'ב', o: ['1', '2'], ref: 'r1' }] });
-    b.set(adm.doc(P + 's3setup/s-main/n/f5'), { t: 'גוף חמש', upd: 1, by: DR, d: 'גונדולה' });
-    b.set(adm.doc(P + 's3setup/s-main/n/f5-a-1'), { t: 'מקטע', upd: 1, by: DR });
-    b.set(adm.doc(P + 's3setup/s-main/n/r1'), { t: 'חדר', upd: 1, by: DR });
-    await b.commit();
+    const M5 = MAP({ seq: 5, fx: [fx('f5')] });
+    for (const [id, t] of [['f5', 'גוף חמש'], ['f5-a-1', 'מקטע'], ['r1', 'חדר']]) await note({ itemId: id, t, m: M5 });
+    await adm.doc(P + 's3setup/s-main').set({ st: 'qs', qs: [{ id: 'q1', t: 'א', o: ['1', '2'], ref: 'f5-a-1' }, { id: 'q2', t: 'ב', o: ['1', '2'], ref: 'r1' }] }, { merge: true });
     const r = await MP.saveMap(db, { uid: MGR, mgr: true, bizId: A }, { mapId: 's-main', baseV: 0, map: MAP({ seq: 5, fx: [fx('f5')] }) }, Date.now());
     assert.deepEqual(r.renamed, { f5: 'f1' });
     assert.deepEqual(await ids(P + 's3setup/s-main/n'), ['f1', 'f1-a-1', 'r1']);
@@ -165,49 +162,67 @@ describe('הקמת חנות שלב 2 – הערות, שאלות ותשובות (
     assert.equal(s.nN, 3); assert.equal(s.st, 'qs');
   });
 
-  // ---------- סבב בדיקה 1, ליקוי 1: הערה לא נקשרת בשקט לפריט אחר ----------
-  const fxN = (id, num, name, x) => fx(id, { num, name, x });
-  it('טיוטה שמוספרה מחדש: הערה על f1 לא נשלחת ל-mapQs עם המזהה; לא נשמרת על ה-f1 החדש (note-re); שיוך מחדש (from) ומחיקה', async () => {
-    const D1 = MAP({ seq: 2, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f2', 2, 'ניקיון', 600)] });
-    await note({ itemId: 'f1-a-2', t: 'מקרר דלתות', m: D1 });
-    // טיוטה חדשה (mapFix / mapDraft): f1 הוא עכשיו "ניקיון", ו"משקאות" נהיה f2
-    const D2 = MAP({ seq: 2, fx: [fxN('f1', 1, 'ניקיון', 600), fxN('f2', 2, 'משקאות', 300)] });
+  // ---------- סבבי בדיקה 1–2, ליקוי 1: הערה הולכת אחרי הפריט הפיזי (g), לא אחרי המספר; לא חד-משמעי ⇒ "לשיוך מחדש" ----------
+  // גונדולות בלי שם, כמו בטיוטת AI (num = מספר סידורי), 200 ס"מ זו מזו
+  const gon = (i, x, o) => fx('f' + i, Object.assign({ num: i, x, w: 100, sides: 2 }, o));
+  const D = (L, o) => MAP(Object.assign({ seq: L.length, fx: L }, o));
+  const D4 = () => D([gon(1, 150), gon(2, 350), gon(3, 550), gon(4, 750)]);
+  const D3 = () => D([gon(1, 150), gon(2, 550), gon(3, 750)]);   // האמצעית (f2) נמחקה, והמספור התחדש
+  it('טיוטה שמוספרה מחדש (גופים זהים בלי שם): ההערה על f3 ועל מקטע שלו הולכת לגוף הפיזי (עכשיו f2), בהנחיה ובשרת; הגוף שנמחק – לשיוך מחדש', async () => {
+    await note({ itemId: 'f3', t: 'גונדולה של שתייה', m: D4() });
+    await note({ itemId: 'f3-b-1', t: 'מקרר דלתות', m: D4() });
+    await note({ itemId: 'f2', t: 'של הגוף שנמחק', m: D4() });
     GM.state.mapqs = { qs: [], conf: 0.9 };
-    await qs({ m: D2 });
+    await qs({ m: D3() });
     const txt = GM.state.requests[GM.state.requests.length - 1].body.contents[0].parts[0].text;
-    assert.ok(txt.includes('מקרר דלתות') && !txt.includes('"id":"f1-a-2"') && txt.includes('פריט מטיוטה קודמת'), 'ההערה עם התיאור המקורי, בלי המזהה הישן');
-    assert.equal(await err(note({ itemId: 'f1-a-2', t: 'דריסה', m: D2 })), 'note-re', 'לא נקשרת בשקט לפריט שבמספר');
-    const r = await note({ itemId: 'f2-a-2', from: 'f1-a-2', t: 'מקרר דלתות', m: D2 });
-    assert.equal(r.ok, true);
-    assert.equal(await get(P + 's3setup/s-main/n/f1-a-2'), null, 'עברה');
-    const n2 = await get(P + 's3setup/s-main/n/f2-a-2');
-    assert.equal(n2.t, 'מקרר דלתות'); assert.match(n2.d, /משקאות/); assert.equal((await get(P + 's3setup/s-main')).nN, 1);
-    // מחיקה של הערה לשיוך: ניקוי הטקסט (המסמך נשאר)
-    await adm.doc(P + 's3setup/s-main/n/f1').set({ t: 'ישנה', upd: 1, by: DR, d: 'גונדולה מספר 9 "לא קיים"', on: 'draft' });
-    await note({ itemId: 'f1', t: '', m: D2 });
-    assert.equal((await get(P + 's3setup/s-main/n/f1')).t, '');
+    assert.ok(txt.includes('"id":"f2-b-1"') && txt.includes('"id":"f2","t":"גונדולה של שתייה"'), 'בהנחיה – המזהה החדש של אותו גוף');
+    assert.ok(!txt.includes('"id":"f3-b-1"'));
+    assert.ok(/פריט מטיוטה קודמת[^}]*של הגוף שנמחק|של הגוף שנמחק[^}]*פריט מטיוטה קודמת/.test(txt), 'הגוף שנמחק – בלי מזהה, עם סימון');
+    // כתיבה על הטיוטה החדשה מסנכרנת את המזהים בשרת לפי הגיאומטריה
+    await note({ itemId: 'f1', t: 'ליד הכניסה', m: D3() });
+    const n = async (id) => get(P + 's3setup/s-main/n/' + id);
+    assert.equal((await n('f2')).t, 'גונדולה של שתייה'); assert.equal((await n('f2')).g.x, 550);
+    assert.equal((await n('f2-b-1')).t, 'מקרר דלתות');
+    assert.equal(await n('f3-b-1'), null);
+    const park = (await adm.collection(P + 's3setup/s-main/n').get()).docs.filter((d) => d.get('t') === 'של הגוף שנמחק');
+    assert.equal(park.length, 1); assert.equal(park[0].get('re'), 1, 'לא נמחקה – לשיוך מחדש');
+    assert.equal((await get(P + 's3setup/s-main')).nN, 4);
+    // שיוך מחדש ומחיקה של הערה שמחכה לשיוך
+    await note({ itemId: 'f3', from: park[0].id, t: 'של הגוף שנמחק', m: D3() });
+    assert.equal((await n('f3')).t, 'של הגוף שנמחק'); assert.equal(await n(park[0].id), null);
   });
 
-  it('שמירה ראשונה: הערה על אותו פריט ⇒ on=map; פריט אחר במספר ⇒ re=1; הערות מקטע של גוף שנמחק לא עוברות לגוף שקיבל את מספרו (העתקה ב-s3SetupDone – store3d-cap.test.js)', async () => {
-    const D = MAP({ seq: 4, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f4', 4, 'ניקיון', 600)] });
-    await note({ itemId: 'f1', t: 'משקאות קרים', m: D });
-    await note({ itemId: 'f4-a-2', t: 'נוזל כלים', m: D });
-    // בעורך: f4 נמחק (לפני שמירה – יוצא מהטיוטה), ונוסף גוף חדש f9 ⇒ השרת נותן לו f2
-    const S1 = MAP({ seq: 4, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f9', 2, 'חטיפים', 600)] });
+  it('לא חד-משמעי / זז יותר מ-60 ס"מ ⇒ לשיוך מחדש: לא נשמרת על הפריט שבמספר (note-re), אפשר לשייך או למחוק; שני גופים שהחליפו מקום ⇒ ההערות אחרי המקום', async () => {
+    await note({ itemId: 'f1', t: 'קצה', m: D([gon(1, 150)]) });
+    const amb = D([gon(1, 120), gon(2, 180)]);   // שני מועמדים, 30 ס"מ כל אחד
+    assert.equal(await err(note({ itemId: 'f1', t: 'דריסה', m: amb })), 'note-re');
+    await note({ itemId: 'f1', t: '', m: amb });
+    assert.equal((await get(P + 's3setup/s-main/n/f1')).t, '', 'מחיקה = ניקוי הטקסט');
+    await note({ itemId: 'f1', t: 'רחוק', m: D([gon(1, 150)]) });
+    assert.equal(await err(note({ itemId: 'f1', t: 'x', m: D([gon(1, 211)]) })), 'note-re', 'זז 61 ס"מ');
+    // החלפת מקום
+    await env.clearFirestore(); await seed();
+    await note({ itemId: 'f1', t: 'א', m: D([gon(1, 150), gon(2, 550)]) });
+    await note({ itemId: 'f2', t: 'ב', m: D([gon(1, 150), gon(2, 550)]) });
+    await note({ itemId: 'r1', t: 'חדר', m: D([gon(1, 550), gon(2, 150)]) });
+    assert.equal((await get(P + 's3setup/s-main/n/f1')).t, 'ב'); assert.equal((await get(P + 's3setup/s-main/n/f2')).t, 'א');
+  });
+
+  it('שמירה ראשונה עם renamed: ההערות הולכות אחרי הגוף הפיזי ומקבלות on=map; גוף שנמחק / זז רחוק ⇒ re=1; הערת מקטע של גוף שנמחק לא עוברת לגוף שקיבל את מספרו', async () => {
+    await note({ itemId: 'f3', t: 'שלוש', m: D4() });
+    await note({ itemId: 'f4-a-2', t: 'מקטע של ארבע', m: D4() });
+    await note({ itemId: 'f2-a-1', t: 'מקטע של הגוף שנמחק', m: D4() });
+    await note({ itemId: 'f1', t: 'זז רחוק', m: D4() });
+    // בעורך: f2 נמחק, f1 זז 2 מטר, ונוסף גוף חדש f9 במקום אחר (x=900) – השרת נותן לו את המספר הפנוי f2
+    const S1 = D([gon(1, 150, { y: 500 }), gon(3, 550), gon(4, 750), gon(9, 900)], { seq: 4 });
     const sv = await MP.saveMap(db, { uid: MGR, mgr: true, bizId: A }, { mapId: 's-main', baseV: 0, map: S1 }, Date.now());
     assert.deepEqual(sv.renamed, { f9: 'f2' });
-    const a = await get(P + 's3setup/s-main/n/f1'), b = await get(P + 's3setup/s-main/n/f4-a-2');
-    assert.equal(a.on, 'map'); assert.equal(a.re, undefined);
-    assert.equal(b.re, 1, 'הגוף נמחק – לשיוך מחדש');
-    // גוף שנמחק שהמספר שלו ניתן לגוף חדש: f4 נמחק, וגוף חדש מקבל f4
-    await env.clearFirestore(); await seed();
-    const E = MAP({ seq: 4, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f2', 2, 'ח', 400), fxN('f3', 3, 'ט', 500), fxN('f4', 4, 'ניקיון', 600)] });
-    await note({ itemId: 'f4-a-2', t: 'נוזל כלים', m: E });
-    const S2 = MAP({ seq: 4, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f2', 2, 'ח', 400), fxN('f3', 3, 'ט', 500), fxN('f7', 5, 'חטיפים', 700)] });
-    const sv2 = await MP.saveMap(db, { uid: MGR, mgr: true, bizId: A }, { mapId: 's-main', baseV: 0, map: S2 }, Date.now());
-    assert.deepEqual(sv2.renamed, { f7: 'f4' });
-    assert.equal((await get(P + 's3setup/s-main/n/f4-a-2')).re, 1, 'הערת המקטע של הגוף שנמחק לא נקשרת לגוף החדש f4');
-    assert.equal(await err(note({ itemId: 'f4-a-2', t: 'דריסה' })), 'note-re');
+    const n = async (id) => get(P + 's3setup/s-main/n/' + id);
+    assert.deepEqual([(await n('f3')).t, (await n('f3')).on], ['שלוש', 'map']);
+    assert.equal((await n('f4-a-2')).on, 'map');
+    assert.equal((await n('f2-a-1')).re, 1, 'הערת המקטע של הגוף שנמחק לא נקשרת לגוף החדש שקיבל את המספר f2');
+    assert.equal((await n('f1')).re, 1, 'זז 2 מטר – לשיוך מחדש');
+    assert.equal(await err(note({ itemId: 'f1', t: 'x' })), 'note-re');
   });
 
   // ---------- סבב בדיקה 1, ליקוי 2: הרשאות דרך הפונקציה עצמה (exports.<שם>.run, בלי אמולטור הפונקציות) ----------
