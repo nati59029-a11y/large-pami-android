@@ -68,9 +68,23 @@ service cloud.firestore {
     }
 
     // cfg: קריאה – עובד פעיל או מנהל. כתיבה – מנהל.
+    // 17.11.2026: cfg/zc = סף פער מזומן בסגירת קופה, משותף לכל המנהלים. קריאה וכתיבה – מנהל בלבד: העובד לא צריך
+    // את הסף (הבדיקה מול הסף רצה רק אצל המנהל, zcNeed), ולא אמור לדעת אותו. לכן גם רשימת האוסף (list) – מנהל בלבד
+    // (האפליקציה אף פעם לא מושכת רשימה של cfg; עובד קורא רק get של cfg/main ו-cfg/tkw).
+    // שדות cfg/zc: thr (מספר 0 עד 1,000,000; 0 = ללא סף), by (שם המנהל), at (זמן). מחיקה – מנהל (= חזרה לערך המקומי).
+    function zcCfgOk() {
+      return request.resource.data.keys().hasAll(['thr'])
+        && request.resource.data.keys().hasOnly(['thr', 'by', 'at'])
+        && (request.resource.data.thr is int || request.resource.data.thr is float)
+        && request.resource.data.thr >= 0 && request.resource.data.thr <= 1000000
+        && request.resource.data.get('by', '') is string && request.resource.data.get('by', '').size() <= 100
+        && request.resource.data.get('at', 0) is int;
+    }
     match /cfg/{docId} {
-      allow read: if isStaff();
-      allow write: if lpW() && (isManager());
+      allow get: if isStaff() && (docId != 'zc' || isManager());
+      allow list: if isManager();
+      allow create, update: if lpW() && (isManager()) && (docId != 'zc' || zcCfgOk());
+      allow delete: if lpW() && (isManager());
     }
 
     // shelf: קריאה וכתיבה – עובד פעיל או מנהל.
@@ -503,13 +517,15 @@ service cloud.firestore {
       allow read: if isManager() || (isActiveEmployee() && resource.data.owner == request.auth.uid);
       allow create: if lpW() && (isStaff()
         && nw().keys().hasAll(['owner', 'by', 'txt', 't', 'st', 'ans'])
-        && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans', 'k'])
+        && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans', 'k', 'np'])
         && nw().owner == request.auth.uid
         && isMyName(nw().by)
         && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 1000
         && nw().st == 'new' && nw().ans == ''
         // סבב 3: סוג פנייה (''/'q' בקשה, 's' שאלה, 'b' תקלה, 'u' עדכון) – אופציונלי
         && nw().get('k', '') in ['', 'q', 's', 'b', 'u']
+        // 17.11.2026: np = מספר התמונות המצורפות (0–3, אופציונלי; p/r1..r{np})
+        && nw().get('np', 0) in [0, 1, 2, 3]
         && nowOk(nw().t));
       allow update: if lpW() && ((isManager() && mgrUpd())
         || (isActiveEmployee() && od().owner == request.auth.uid && ownUpd()));
@@ -525,12 +541,65 @@ service cloud.firestore {
         allow read: if canRead();
         allow create: if lpW() && (canRead()
           && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
-          && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
+          && nw().keys().hasOnly(['uid', 'by', 'txt', 't', 'np'])
           && nw().uid == request.auth.uid
           && nw().by is string && nw().by.size() <= 100
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+          // 17.11.2026: np = מספר התמונות בתגובה (p/1..np, אופציונלי). בעל הבקשה – עד 3; מנהל (שאינו הבעלים) – עד 1
+          && nw().get('np', 0) in [0, 1, 2, 3]
+          && (nw().get('np', 0) <= 1 || req().owner == request.auth.uid)
           && nowOk(nw().t));
+        allow update: if false;
+        allow delete: if lpW() && (isManager());
+
+        // תמונות בתגובה (17.11.2026): rq/{id}/c/{cid}/p/1..3, מסמך {img, t, uid} (כמו p של הבקשה).
+        // יצירה: רק כותב התגובה, בשמו, בזמן אמת, ורק N <= np של התגובה. קריאה: מי שקורא את הבקשה. בלי עדכון. מחיקה: מנהל.
+        match /p/{pid} {
+          function cmt() { return get(/databases/$(database)/documents/rq/$(id)/c/$(cid)).data; }
+          function imgOk() {
+            return nw().keys().hasAll(['img', 't', 'uid'])
+              && nw().keys().hasOnly(['img', 't', 'uid'])
+              && nw().uid == request.auth.uid
+              && nowOk(nw().t)
+              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+          }
+          allow read: if canRead();
+          allow create: if lpW() && (canRead() && imgOk()
+            && exists(/databases/$(database)/documents/rq/$(id)/c/$(cid))
+            && cmt().uid == request.auth.uid
+            && ((pid == '1' && cmt().get('np', 0) >= 1)
+              || (pid == '2' && cmt().get('np', 0) >= 2)
+              || (pid == '3' && cmt().get('np', 0) >= 3)));
+          allow update: if false;
+          allow delete: if lpW() && (isManager());
+        }
+      }
+      // תמונות בבקשה (17.11.2026): rq/{id}/p/r1..r3, מסמך {img, t, uid} – אותו מבנה ואותה הגבלה כמו תמונות משימה
+      // (tasks/{id}/p): data:image jpeg/png/webp ב-base64, 100 עד 900,000 תווים (האפליקציה דוחסת ל-JPEG ועוצרת מעל 880,000).
+      // קריאה: מנהל, או בעל הבקשה. יצירה: רק בעל הבקשה, בשמו, בזמן אמת, ורק rN עם N <= np שנקבע ביצירת הבקשה.
+      // בלי עדכון (תמונה לא מוחלפת). מחיקה: מנהל.
+      match /p/{pid} {
+        function req() { return get(/databases/$(database)/documents/rq/$(id)).data; }
+        function canRead() {
+          return exists(/databases/$(database)/documents/rq/$(id))
+            && (isManager() || (isActiveEmployee() && req().owner == request.auth.uid));
+        }
+        function imgOk() {
+          return nw().keys().hasAll(['img', 't', 'uid'])
+            && nw().keys().hasOnly(['img', 't', 'uid'])
+            && nw().uid == request.auth.uid
+            && nowOk(nw().t)
+            && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+            && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+        }
+        allow read: if canRead();
+        allow create: if lpW() && (canRead() && imgOk()
+          && req().owner == request.auth.uid
+          && ((pid == 'r1' && req().get('np', 0) >= 1)
+            || (pid == 'r2' && req().get('np', 0) >= 2)
+            || (pid == 'r3' && req().get('np', 0) >= 3)));
         allow update: if false;
         allow delete: if lpW() && (isManager());
       }
@@ -1418,10 +1487,12 @@ service cloud.firestore {
         allow list, create, update, delete: if false;
       }
 
-      // cfg: העתק של הכלל בשורש
+      // cfg: העתק של הכלל בשורש (כולל cfg/zc – סף פער בסגירת קופה, מנהל בלבד; list – מנהל בלבד)
       match /cfg/{docId} {
-        allow read: if bStaff();
-        allow write: if bMgr();
+        allow get: if bStaff() && (docId != 'zc' || bMgr());
+        allow list: if bMgr();
+        allow create, update: if bMgr() && (docId != 'zc' || zcCfgOk());
+        allow delete: if bMgr();
       }
 
       // shelf: העתק של הכלל בשורש (תוספת 'shelf')
@@ -1803,13 +1874,15 @@ service cloud.firestore {
         allow read: if feat('tasks') && (bMgr() || (bEmp() && resource.data.owner == request.auth.uid));
         allow create: if feat('tasks') && (bStaff()
           && nw().keys().hasAll(['owner', 'by', 'txt', 't', 'st', 'ans'])
-          && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans', 'k'])
+          && nw().keys().hasOnly(['owner', 'by', 'txt', 't', 'st', 'ans', 'k', 'np'])
           && nw().owner == request.auth.uid
           && isMyName(nw().by)
           && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 1000
           && nw().st == 'new' && nw().ans == ''
           // סבב 3: סוג פנייה (''/'q' בקשה, 's' שאלה, 'b' תקלה, 'u' עדכון) – אופציונלי
           && nw().get('k', '') in ['', 'q', 's', 'b', 'u']
+          // 17.11.2026: np = מספר התמונות המצורפות (0–3, אופציונלי; p/r1..r{np})
+          && nw().get('np', 0) in [0, 1, 2, 3]
           && nowOk(nw().t));
         allow update: if feat('tasks') && ((bMgr() && mgrUpd())
           || (bEmp() && od().owner == request.auth.uid && ownUpd()));
@@ -1825,12 +1898,65 @@ service cloud.firestore {
           allow read: if feat('tasks') && (canRead());
           allow create: if feat('tasks') && (canRead()
             && nw().keys().hasAll(['uid', 'by', 'txt', 't'])
-            && nw().keys().hasOnly(['uid', 'by', 'txt', 't'])
+            && nw().keys().hasOnly(['uid', 'by', 'txt', 't', 'np'])
             && nw().uid == request.auth.uid
             && nw().by is string && nw().by.size() <= 100
             && isMyName(nw().by)
             && nw().txt is string && nw().txt.size() > 0 && nw().txt.size() <= 500
+            // 17.11.2026: np = מספר התמונות בתגובה (p/1..np, אופציונלי). בעל הבקשה – עד 3; מנהל (שאינו הבעלים) – עד 1
+            && nw().get('np', 0) in [0, 1, 2, 3]
+            && (nw().get('np', 0) <= 1 || req().owner == request.auth.uid)
             && nowOk(nw().t));
+          allow update: if false;
+          allow delete: if feat('tasks') && (bMgr());
+
+          // תמונות בתגובה (17.11.2026): rq/{id}/c/{cid}/p/1..3, מסמך {img, t, uid} (כמו p של הבקשה).
+          // יצירה: רק כותב התגובה, בשמו, בזמן אמת, ורק N <= np של התגובה. קריאה: מי שקורא את הבקשה. בלי עדכון. מחיקה: מנהל.
+          match /p/{pid} {
+            function cmt() { return get(/databases/$(database)/documents/b/$(bizId)/rq/$(id)/c/$(cid)).data; }
+            function imgOk() {
+              return nw().keys().hasAll(['img', 't', 'uid'])
+                && nw().keys().hasOnly(['img', 't', 'uid'])
+                && nw().uid == request.auth.uid
+                && nowOk(nw().t)
+                && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+                && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+            }
+            allow read: if feat('tasks') && (canRead());
+            allow create: if feat('tasks') && (canRead() && imgOk()
+              && exists(/databases/$(database)/documents/b/$(bizId)/rq/$(id)/c/$(cid))
+              && cmt().uid == request.auth.uid
+              && ((pid == '1' && cmt().get('np', 0) >= 1)
+                || (pid == '2' && cmt().get('np', 0) >= 2)
+                || (pid == '3' && cmt().get('np', 0) >= 3)));
+            allow update: if false;
+            allow delete: if feat('tasks') && (bMgr());
+          }
+        }
+        // תמונות בבקשה (17.11.2026): rq/{id}/p/r1..r3, מסמך {img, t, uid} – אותו מבנה ואותה הגבלה כמו תמונות משימה
+        // (tasks/{id}/p): data:image jpeg/png/webp ב-base64, 100 עד 900,000 תווים (האפליקציה דוחסת ל-JPEG ועוצרת מעל 880,000).
+        // קריאה: מנהל, או בעל הבקשה. יצירה: רק בעל הבקשה, בשמו, בזמן אמת, ורק rN עם N <= np שנקבע ביצירת הבקשה.
+        // בלי עדכון (תמונה לא מוחלפת). מחיקה: מנהל.
+        match /p/{pid} {
+          function req() { return get(/databases/$(database)/documents/b/$(bizId)/rq/$(id)).data; }
+          function canRead() {
+            return exists(/databases/$(database)/documents/b/$(bizId)/rq/$(id))
+              && (bMgr() || (bEmp() && req().owner == request.auth.uid));
+          }
+          function imgOk() {
+            return nw().keys().hasAll(['img', 't', 'uid'])
+              && nw().keys().hasOnly(['img', 't', 'uid'])
+              && nw().uid == request.auth.uid
+              && nowOk(nw().t)
+              && nw().img is string && nw().img.size() >= 100 && nw().img.size() <= 900000
+              && nw().img.matches('^data:image/(jpeg|png|webp);base64,.*');
+          }
+          allow read: if feat('tasks') && (canRead());
+          allow create: if feat('tasks') && (canRead() && imgOk()
+            && req().owner == request.auth.uid
+            && ((pid == 'r1' && req().get('np', 0) >= 1)
+              || (pid == 'r2' && req().get('np', 0) >= 2)
+              || (pid == 'r3' && req().get('np', 0) >= 3)));
           allow update: if false;
           allow delete: if feat('tasks') && (bMgr());
         }

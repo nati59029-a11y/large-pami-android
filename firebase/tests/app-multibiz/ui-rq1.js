@@ -13,6 +13,8 @@ const DOCS = 'projects/demo-largpeami/databases/(default)/documents/';
 
 // "ענן" משותף: DB[נתיב-אוסף][id] = fields. LOG = כל כתיבה (שיטה, נתיב, שדות)
 const DB = { tasks: {}, ptk: {}, rtk: {}, rq: {}, staff: {} }; const LOG = []; const QLOG = [];
+// סבב 2 (תיקון סבב בדיקה 1): חוקים ישנים מדומים – DENY.np: יצירת rq עם np נדחית (403); DENY.k: יצירת rq עם k נדחית
+const DENY = { np: 0, k: 0 };
 const docOf = (col, id) => ({ name: DOCS + col + '/' + id, fields: DB[col][id], createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
 const colOf = (rest) => { const s = rest.split('?')[0].split('/').filter(Boolean); return s.length >= 3 && s[0] === 'rq' && s[2] === 'c' ? { col: 'rq/' + s[1] + '/c', id: s[3] } : { col: s[0], id: s[1] }; };
 const MINE = new Set(['tasks', 'ptk', 'rtk', 'rq']);
@@ -35,6 +37,7 @@ async function mockCloud(ctx, who) {
     if (!MINE.has(top)) return route.fallback();
     if (!DB[col]) DB[col] = {};
     if (m === 'GET') { if (id) return DB[col][id] ? ok(docOf(col, id)) : err(404, 'NOT_FOUND'); return ok({ documents: Object.keys(DB[col]).map((k) => docOf(col, k)) }); }
+    if (m === 'POST' && col === 'rq') { const f = (JSON.parse(body || '{}').fields) || {}; if ((DENY.np && f.np) || (DENY.k && f.k)) { LOG.push({ who, m, col, deny: Object.keys(f) }); return err(403, 'PERMISSION_DENIED'); } }
     if (m === 'POST') { const nid = u.searchParams.get('documentId'); if (DB[col][nid]) return err(409, 'ALREADY_EXISTS'); DB[col][nid] = JSON.parse(body).fields; LOG.push({ who, m, col, id: nid, f: DB[col][nid] }); return ok(docOf(col, nid)); }
     if (m === 'PATCH') { const mask = u.searchParams.getAll('updateMask.fieldPaths'); if (!DB[col][id]) return err(404, 'NOT_FOUND'); const f = JSON.parse(body).fields; const ch = {};
       for (const k of mask) { if (k.includes('.')) continue; DB[col][id][k] = f[k]; ch[k] = f[k]; } LOG.push({ who, m, col, id, f: ch, mask }); return ok(docOf(col, id)); }
@@ -210,6 +213,26 @@ const waitFor = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t
   check('27 בקשה חדשה נשמרת ב-rq: owner/by/txt/t/st=new/ans=""', nf.owner.stringValue === 'w1' && nf.by.stringValue === 'w1' && nf.txt.stringValue === 'צריך עוד שקיות' && +nf.t.integerValue === T0 && nf.st.stringValue === 'new' && nf.ans.stringValue === '', nf && Object.keys(nf));
   await sleep(700);
   check('27א הבקשה מופיעה ברשימה כ"ממתין לטיפול"', /צריך עוד שקיות/.test(await txt(wp, '#main')));
+  // סבב 2 (תיקון): בקשה עם תמונות וסוג מול חוקים שדוחים np – נשלחת שוב בלי התמונות, הסוג נשאר, ו-rvOld לא נקרא
+  const IMGD = 'data:image/jpeg;base64,' + 'A'.repeat(200);
+  const rqImgSend = async (t) => {
+    await wp.evaluate((u) => { window.__rvOld = 0; const o = window.__rvO || TKW.rvOld; TKW.rvOld = function () { window.__rvOld++; }; if (!window.__rvO) { window.__rvO = o; window.__rqK = TKW.rqK; } TKW.rqK = () => 'b'; RQI.n = [u, u]; rqImPaint('n'); }, IMGD);
+    const n0 = Object.keys(DB.rq).length;
+    await wp.fill('form[data-f=rqNew] textarea', t); await wp.click('form[data-f=rqNew] button.btn.w');
+    await waitFor(async () => Object.keys(DB.rq).length === n0 + 1); await sleep(300);
+    const [id, f] = Object.entries(DB.rq).find(([, x]) => x.txt && x.txt.stringValue === t) || [];
+    const r = await wp.evaluate(() => ({ rv: window.__rvOld, imgs: RQI.n.length, toast: [...document.querySelectorAll('.toast')].map((e) => e.textContent).join(' | ') }));
+    return { id, f: f || {}, r };
+  };
+  DENY.np = 1;
+  const a1 = await rqImgSend('מברשת נשברה (תמונות)');
+  check('27ב 403 בגלל התמונות: נשלח שוב בלי np, הסוג (k) נשאר, rvOld לא נקרא, הודעה שהתמונות לא נשלחו', !!a1.id && a1.f.k && a1.f.k.stringValue === 'b' && !a1.f.np && a1.r.rv === 0 && a1.r.imgs === 0 && /בלי התמונות/.test(a1.r.toast)
+    && !Object.keys(DB).some((c) => c.startsWith('rq/' + a1.id + '/p')), a1);
+  DENY.k = 1;
+  const a2 = await rqImgSend('בקשה עם סוג ותמונה (חוקים ישנים מאוד)');
+  check('27ג גם בלי התמונות נדחה: רק אז מוותרים גם על הסוג ו-rvOld נקרא; הבקשה נשמרת בלי k ובלי np', !!a2.id && !a2.f.k && !a2.f.np && a2.r.rv === 1 && /בלי התמונות/.test(a2.r.toast), a2);
+  DENY.np = 0; DENY.k = 0;
+  await wp.evaluate(() => { if (window.__rvO) TKW.rvOld = window.__rvO; TKW.rqK = window.__rqK; }); await sleep(300);
   // תג תשובה חדשה ומעקב נקרא
   const un0 = await wp.evaluate(() => RQ.mine.filter(rqUnread).map((x) => x.id));
   check('28 "תשובה חדשה" רק על הבקשות שהמנהל ענה עליהן (r1, r2) ולא על r3 של עובד אחר או על הבקשה החדשה', un0.slice().sort().join() === 'r1,r2', un0);

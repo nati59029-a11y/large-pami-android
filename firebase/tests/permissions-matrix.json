@@ -30,10 +30,10 @@
     },
     "cfg": {
       "source": "3.3",
-      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה", "manager": "קריאה וכתיבה (בלי מפתח Gemini בתוכו)" },
+      "tableText": { "guest": "אין", "signedIn": "אין", "disabledEmployee": "אין", "employee": "קריאה (get בלבד; לא cfg/zc – סף הפער)", "manager": "קריאה וכתיבה (בלי מפתח Gemini בתוכו)" },
       "ops": {
         "get":    "DDDAA",
-        "list":   "DDDAA",
+        "list":   "DDDDA",
         "create": "DDDDA",
         "update": "DDDDA",
         "delete": "DDDDA"

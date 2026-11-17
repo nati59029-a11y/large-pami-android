@@ -129,7 +129,8 @@ const OPS = {
     update: { allow: NONE, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/app_backup_status/${uid}`).set({ size: 1 })); return db.doc(`${P(biz)}/app_backup_status/${uid}`).set({ size: 2 }); } },
     delete: { allow: NONE, run: async (db, biz, uid) => { await prep((a) => a.doc(`${P(biz)}/app_backup_status/${uid}`).set({ size: 1 })); return db.doc(`${P(biz)}/app_backup_status/${uid}`).delete(); } },
   },
-  cfg: simple('cfg', S, M, () => ({ data: '{}' })),
+  // 17.11.2026 (סבב 2): list של cfg – מנהל בלבד (cfg/zc, סף פער הקופה, חסוי מעובדים). get של מסמכי cfg אחרים – כמו קודם
+  cfg: Object.assign(simple('cfg', S, M, () => ({ data: '{}' })), { list: { allow: M, run: async (db, biz) => { await prep((a) => a.doc(`${P(biz)}/cfg/g1`).set({ data: '{}' })); return db.collection(`${P(biz)}/cfg`).get(); } } }),
   bk: simple('bk', M, M, () => ({ data: '{}', owner: 'x' })),
   shelf: simple('shelf', S, S, () => ({ data: '{}', at: '1' })),
   fb: {

@@ -350,8 +350,8 @@ const qSum=()=>{const D=realDims(),k=W.sk,t=[];if(D)t.push(`רוחב ${+(D.w/100
 ACT.s3wDet=()=>{W.det=1;W.qSeen=1;W.msg='';rerender();window.scrollTo(0,0)};
 ACT.s3wDetX=()=>{W.det=0;W.msg='';rerender()};
 ACT.s3wPath=el=>{const p=el.dataset.p==='a'?'a':el.dataset.p==='b'?'b':'';W.q.path=p;if(p==='a'&&!skHas())W.sk.mode='room';W.msg='';lsSave();rerender()};
-CHG.s3wQ=el=>{const f=el.dataset.f;if(!(f in W.q)||f==='path')return;const v=String(el.value||'').slice(0,f==='note'?200:12);W.q[f]=v;W.msg='';
- if((f==='w'||f==='l')&&skHas()){const D=realDims();if(D){skPush();skRescale(D)}}
+CHG.s3wQ=el=>{const f=el.dataset.f;if(!(f in W.q)||f==='path')return;const v=String(el.value||'').slice(0,f==='note'?200:12),old=W.q[f];W.q[f]=v;W.msg='';
+ if((f==='w'||f==='l')&&skHas()){const D=realDims();if(D){if(D.w!==W.sk.w||D.l!==W.sk.l){W.q[f]=old;skPush();W.q[f]=v}skRescale(D)}}/* התמונה לביטול נשמרת עם המידה הישנה, אחרת הביטול מחזיר את המידה החדשה והשרטוט נשאר מוקטן */
  if(f==='w'||f==='l'){const n=qNum(v,2,100);if(Number.isNaN(n))W.msg=(f==='w'?'הרוחב':'האורך')+' צריך להיות בין 2 ל-100 מטר.'}
  if(f==='rooms'&&Number.isNaN(qInt(v,1,6)))W.msg='מספר החדרים צריך להיות בין 1 ל-6.';
  if(f==='rows'&&Number.isNaN(qInt(v,0,30)))W.msg='מספר השורות צריך להיות בין 0 ל-30.';
