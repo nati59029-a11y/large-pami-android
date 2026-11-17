@@ -137,6 +137,25 @@ const toBay = (page) => page.evaluate(() => { S3UI.K3.cur = 'b_f1-a-1'; S3UI.K3.
   t = await dlgTxt(D.page);
   check('5 s3m: רואה את התוצאה, בלי "העתיקו לרשימה"', /נכתב גונדולה/.test(t) && !(await D.page.evaluate(() => !!document.querySelector('[data-a=s3aiExp]'))), t.slice(0, 120));
   check('5א אין שגיאות JavaScript (s3m)', !(D.page.__errors || []).length, D.page.__errors);
+  // ---- 6. ליקוי 1 (בדיקה): עובד לא רואה מספרי מכסה חודשית; מכסת הקמה כן (תשובת s3CapCheck) ----
+  await D.page.click('[data-a=s3aiClose]'); await sleep(300);
+  const wk = await D.page.evaluate(() => { const U = S3UI, mo = U.qtMonth(), txt = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.textContent; };
+    const out = { isMgr: U.isMgr() }; U.qtReset();
+    U.qtLearn({ usage: { n: 80, cap: 100, m: mo, w80: true } }); out.m80 = U.qtBanner('m'); out.all80 = U.qtBanner();
+    U.qtLearnErr({ reason: 's3-month-limit' }); U.qtLearn({ usage: { n: 100, cap: 100, m: mo, w80: true } }); out.mFull = txt(U.qtBanner('m'));
+    U.qtLearnErr({ reason: 's3-month-limit' }); out.mFull2 = txt(U.qtBanner('m'));
+    U.qtLearn({ usage: { n: 45, lim: 56, w80: true } }); out.s80 = txt(U.qtBanner('s'));
+    U.qtReset(); U.qtLearn({ usage: { n: 80, cap: 100, m: mo, w80: true } }); rerender(); out.screen = document.body.textContent; out.wiz = (() => { try { return txt(V.st3w().h); } catch (e) { return 'ERR'; } })();
+    U.qtReset(); U.qtLearnErr({ reason: 's3-month-limit' }); rerender(); out.screenFull = document.body.textContent; return out; });
+  check('6 עובד s3m (לא מנהל): באנר חודשי ב-80% ריק, גם בכלל ((s3) הבאנר המשולב', wk.isMgr === false && wk.m80 === '' && wk.all80 === '', wk);
+  check('6א עובד: מכסה חודשית מלאה – "נחסם" בלי מספרים', /נחסם/.test(wk.mFull) && !/\d/.test(wk.mFull) && !/\d/.test(wk.mFull2), [wk.mFull, wk.mFull2]);
+  check('6ב עובד: מכסת הקמה כן עם מספרים (מתשובת s3CapCheck)', /נוצלו 45 מתוך 56 בהקמה/.test(wk.s80), wk.s80);
+  check('6ג עובד: מסך צילום החנות והאשף בלי מספרי מכסה חודשית ב-80%', !/נוצלו 80 מתוך 100/.test(wk.screen) && !/נוצלו 80 מתוך 100/.test(wk.wiz), [wk.wiz.slice(0, 80)]);
+  check('6ד עובד: מסך צילום החנות במכסה חודשית מלאה – "נחסם" בלי מספרים', /נחסם/.test(wk.screenFull) && !/(נוצלו|מתוך) \d+ (מתוך|החודש)/.test(wk.screenFull.slice(wk.screenFull.indexOf('נחסם'), wk.screenFull.indexOf('נחסם') + 140)), wk.screenFull.slice(0, 100));
+  // ---- 7. ליקוי 2: חודש בשעון ישראל סביב חצות של ה-1 בחודש ----
+  const mid = await D.page.evaluate(() => { const f = S3UI.qtMonthOf; return [f(new Date('2026-11-30T21:59:00Z')), f(new Date('2026-11-30T22:00:00Z')), f(new Date('2026-12-31T21:59:00Z')), f(new Date('2026-12-31T22:00:00Z'))]; });
+  check('7 חודש בשעון ישראל: חצות ה-1 (UTC 21:59 / 22:00, חורף)', JSON.stringify(mid) === JSON.stringify(['2026-11', '2026-12', '2026-12', '2027-01']), mid);
+  check('7א הדוח משווה לחודש ישראלי ולא ל-toISOString', !/toISOString\(\)\.slice\(0,7\)/.test(require('fs').readFileSync(path.join(www, 'store3d-report.js'), 'utf8')));
   await D.ctx.close();
 
   await browser.close();

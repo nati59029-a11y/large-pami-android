@@ -283,7 +283,7 @@ function setH(d){
   <label class="f" id="s3rsuw"${S.sub==='fixed'?'':' hidden'}><span>המחליף הקבוע</span><select id="s3rsu" style="min-height:44px"><option value="">לא נבחר</option>${(R.staff||[]).filter(s=>s.active).map(s=>`<option value="${esc2(s.uid)}"${S.subU===s.uid?' selected':''}>${esc2(s.name)}</option>`).join('')}</select></label>
   <label class="f"><span>ימים לסיום סבב ולתיקון (1 עד 14)</span><input type="number" inputmode="numeric" min="1" max="14" id="s3rdu" value="${+S.due||2}" style="min-height:44px"></label></div>
  <div class="row s3row"><button class="btn grow" data-a="s3rSetSave"${R.busy==='set'?' aria-disabled="true"':''}>שמירת ההגדרות</button></div>`;
- if(U.isMgr()){const cap=R.use&&Number.isInteger(R.use.cap)?R.use.cap:d.cfg.cap,mn=R.use&&R.use.m===new Date().toISOString().slice(0,7)||R.use&&!R.use.m,n=mn&&R.use&&Number.isInteger(R.use.n)?R.use.n:null,su=R.suse||{},sn=Number.isInteger(su.n)?su.n:0;
+ if(U.isMgr()){const cap=R.use&&Number.isInteger(R.use.cap)?R.use.cap:d.cfg.cap,mn=R.use&&R.use.m===U.qtMonth()||R.use&&!R.use.m,n=mn&&R.use&&Number.isInteger(R.use.n)?R.use.n:null,su=R.suse||{},sn=Number.isInteger(su.n)?su.n:0;
   h+=`<div class="s3info"><b>מכסת AI חודשית לסניף</b><br><small>${n!=null?`נוצלו החודש: ${n} מתוך ${cap}. `:''}תמונה אחת שנשלחה לבדיקה נספרת כיחידה אחת.</small>
   <br><b>מכסת הקמת המפה (חד-פעמית)</b><br><small>${Number.isInteger(su.lim)?`נוצלו בהקמה: ${sn} מתוך ${su.lim}.`:'עוד לא נעשה שימוש בבדיקה חכמה בהקמה.'}</small></div>`}
  if(isSa()){const cap=R.use&&Number.isInteger(R.use.cap)?R.use.cap:d.cfg.cap;

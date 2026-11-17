@@ -7,7 +7,8 @@
 'use strict';
 const U=window.S3UI;if(!U||typeof U.fn!=='function')return;
 const esc2=U.esc2||(s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
-const mo=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')};
+/* החודש בשעון ישראל (כמו israelMonth בשרת); d אופציונלי לבדיקה */
+const mo=d=>{try{const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit'}).format(d||new Date());return p.slice(0,7)}catch(e){d=d||new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}};
 const Q={m:null,s:null};
 const int=v=>Number.isInteger(v)&&v>=0;
 /* חישוב טהור (נבדק): kind 'm' חודשי / 's' הקמה. מחזיר null | {lvl:'warn'|'full', n, lim, txt} */
@@ -32,10 +33,13 @@ function learnErr(e){
 const fn0=U.fn;
 U.fn=function(){const p=fn0.apply(this,arguments);
  if(p&&typeof p.then==='function')p.then(learn,learnErr).catch(()=>{});return p};
-const one=(kind)=>{const c=calc(kind,Q[kind]);if(!c)return '';
+/* החודשית ('m'): מספרים רק למנהל (s3use נקרא רק למנהל). עובד רואה לכל היותר "נחסם" בלי מספרים. ההקמה ('s') – מספרים מתשובת s3CapCheck (החוזה מתיר גם לעובד s3m) */
+const mgr=()=>{try{return typeof U.isMgr==='function'&&!!U.isMgr()}catch(e){return false}};
+const one=(kind)=>{let c=calc(kind,Q[kind]);if(!c)return '';
+ if(kind==='m'&&!mgr()){if(c.lvl!=='full')return '';c={lvl:'full',txt:'מכסת הבדיקות החכמות של החודש נגמרה. התמונות נשמרות בטלפון. פנו למנהל המערכת, או נסו בחודש הבא.'}}
  return `<div class="ban s3warn s3qt" role="${c.lvl==='full'?'alert':'status'}" data-q="${kind}${c.lvl}">${c.lvl==='full'?'<b>נחסם: </b>':''}${esc2(c.txt)}</div>`};
 /* kind: 'm' | 's' | undefined (שניהם) */
 U.qtBanner=kind=>kind?one(kind):one('s')+one('m');
-U.qtCalc=calc;U.qtLearn=learn;U.qtLearnErr=learnErr;U.qtReset=()=>{Q.m=null;Q.s=null};U.qtState=()=>Q;
+U.qtMonth=()=>mo();U.qtMonthOf=mo;U.qtCalc=calc;U.qtLearn=learn;U.qtLearnErr=learnErr;U.qtReset=()=>{Q.m=null;Q.s=null};U.qtState=()=>Q;
 const CSS=document.createElement('style');CSS.textContent='.s3qt{overflow-wrap:anywhere;margin:6px 0}';document.head.appendChild(CSS);
 })();
