@@ -352,7 +352,7 @@ describe('ימות שלב 4: לקוחות משוב ← רשימת תפוצה ב�
     assert.equal(M.state.requests.length, 0);
   });
 
-  for (const [what, mode] of [['פסק זמן ב-RunTzintuk למערך', 'hang'], ['שגיאה מימות אחרי שהקריאה יצאה', 'error']]) {
+  for (const [what, mode] of [['פסק זמן ב-RunTzintuk למערך', 'hang'], ['שגיאה מימות אחרי שהקריאה יצאה', 'error'], ['החיבור נותק באמצע הקריאה הראשונה (כלל מחמיר, החלטת בעל העסק)', 'reset']]) {
     it(`שלב 5: ${what} – fbTz:'uncertain', הודעה "לא ידוע", tzintuk נשאר 'sent'; אין שליחה חוזרת אוטומטית (סבב 2)`, async () => {
       await fbSetup(['0501111111', '0502222222']);
       M.setMode('tzphones', mode);
@@ -558,6 +558,22 @@ describe('ימות שלב 4: לקוחות משוב ← רשימת תפוצה ב�
     assert.match(r3.result.message, /לא ידוע אם הצינתוק הקודם ללקוחות המשוב נשלח, ולכן הוא לא נשלח שוב/);
     rec = await readDoc(env, 'yemot_promos/' + p.promoKey);
     assert.equal(rec.fbTz, 'uncertain'); assert.equal(rec.fbTzSent.length, 604);
+  });
+
+  it('statusOnly עם promoKey: already/forText/prev של המבצע (להצגת "עד N" של הנותרים); בלי promoKey – כמו קודם', async () => {
+    await fbSetup(nums(603));
+    M.setMode('tzphones', ['okclose']);
+    const p = promo();
+    try { await call('sendPromoToLine', 'u_mgr', p); } finally { await M.stop(); await M.start(PORT); }
+    M.setMode('tzphones', undefined);
+    const a = await call('sendPromoToLine', 'u_mgr', { statusOnly: true });
+    assert.deepEqual(a.result.fbTz, { on: true, upTo: 603, max: 1500 });
+    const b = await call('sendPromoToLine', 'u_mgr', { statusOnly: true, promoKey: p.promoKey });
+    assert.deepEqual(b.result.fbTz, { on: true, upTo: 603, max: 1500, already: 500, forText: p.text, prev: 'partial' });
+    const c = await call('sendPromoToLine', 'u_mgr', { statusOnly: true, promoKey: 'pk_unknown_123' });
+    assert.deepEqual(c.result.fbTz, { on: true, upTo: 603, max: 1500 });
+    const e = await call('sendPromoToLine', 'u_emp', { statusOnly: true, promoKey: p.promoKey });
+    assert.equal(e.result.fbTz, undefined, 'עובד – לא');
   });
 
   it('נרמול טלפון ושם', () => {

@@ -54,7 +54,14 @@ function ymDraw(){
  if(cn)cn.disabled=Q.busy;
  if(w){w.textContent=Q.busy?'':bad;w.style.display=bad?'':'none'}
  if(c)c.textContent=Q.text.trim().length+' / '+YM_TEXT_MAX;
- const fb=$q('#ymFb');if(fb){const on=!!(Q.fb&&Q.withTz);fb.textContent=on?`גם עד ${Q.fb.upTo} לקוחות משוב יקבלו צינתוק (בתשלום, 0.1 יחידה לכל מספר)${Q.fb.max&&Q.fb.upTo>Q.fb.max?`. אם יהיו יותר מ-${Q.fb.max}, הם לא יקבלו צינתוק`:''}.`:'';fb.style.display=on?'':'none'}}
+ const fb=$q('#ymFb');if(fb){const on=!!(Q.fb&&Q.withTz);fb.textContent=on?ymFbNote(Q.fb,Q.text.trim()):'';fb.style.display=on?'':'none'}}
+// כמה לקוחות משוב יקבלו צינתוק. אותו נוסח שכבר נשלח בעבר (forText) – רק הנותרים (upTo פחות already, הערכה); מצב קודם לא ודאי – לא יישלח
+function ymFbNote(f,t){
+ const same=typeof f.forText==='string'&&f.forText.trim()===t,already=same&&Number.isInteger(f.already)?f.already:0;
+ if(same&&(f.prev==='pending'||f.prev==='uncertain'))return'לקוחות המשוב לא יקבלו צינתוק שוב: לא ידוע אם הצינתוק הקודם בנוסח הזה נשלח – בדקו בימות.';
+ const n=Math.max(0,f.upTo-already);
+ if(already&&!n)return'כל לקוחות המשוב כבר קיבלו צינתוק בנוסח הזה – לא יישלח להם שוב.';
+ return`גם עד ${n} לקוחות משוב יקבלו צינתוק (בתשלום, 0.1 יחידה לכל מספר)${already?` – ${already} כבר קיבלו בנוסח הזה ולא יקבלו שוב`:''}${f.max&&f.upTo>f.max?`. אם יהיו יותר מ-${f.max}, הם לא יקבלו צינתוק`:''}.`}
 function ymOpen(k,i,opts){
  opts=opts||{}; // opts.builder: נפתח מ"שמור ושלח לקו" במסך בניית מבצע (בלי בחירת צינתוק בחלון; opts.withTz נקבע בכפתור)
  const it=SH&&SH[k]&&SH[k].items&&SH[k].items[i];if(!it){toast('המבצע לא נמצא');return}
@@ -85,7 +92,7 @@ async function ymStatus(q){
  const adm=typeof SY!=='undefined'&&!!SY&&SY.role==='admin';
  if(q&&q.builder&&!(adm&&q.withTz))return; // במסך החדש אין בחירת צינתוק לעובד, ואין צורך לשאול // האם העובד עוד יכול לצנתק היום (בלי פנייה לימות). כשל = לא משנים כלום, השרת אוכף ממילא
  // מנהל: אין מגבלה יומית; שואלים רק כמה לקוחות משוב יקבלו צינתוק בתשלום (fbTz, משימה 2026-11-17). בלי פנייה לימות.
- try{const r=await ymCall({statusOnly:true});
+ try{const r=await ymCall(Object.assign({statusOnly:true},adm&&q&&q.key?{promoKey:q.key}:{}));
   if(adm){const f=r&&r.fbTz;if(Q===q&&!q.busy&&f&&f.on===true&&f.upTo>0){q.fb=f;ymDraw()}return}
   const t=r&&r.tzintukToday;
   if(Q!==q||q.busy||!t)return;

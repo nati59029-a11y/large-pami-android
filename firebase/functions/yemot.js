@@ -162,8 +162,9 @@ async function lineNumbers(ctx, ext) {
 // שליחה בקבוצות של 500. אחרי כל קבוצה שימות אישר – נשמרים ברשומת המבצע fbTzSent (המספרים המנורמלים שנשלחו בוודאות במבצע הזה)
 // ו-fbTzCount (כמה). already = fbTzSent מהרשומה: מספר שכבר בו לא יקבל צינתוק שוב (אף מסלול לא שולח פעמיים לאותו מספר באותו מבצע).
 //   'failed'    – בוודאות לא יצאה אף קריאת צינתוק (כשל בקריאת הרשימות, או לפני השליחה), ואין מספרים שכבר נשלחו. ניסיון חוזר ישלים.
-//   'partial'   – חלק נשלח בוודאות (ב-fbTzSent), והקבוצה הבאה בוודאות לא יצאה (שגיאה בלי sent, ובשגיאת רשת – רק כשלא נוצר חיבור,
-//                 למשל ECONNREFUSED; חיבור שנותק אחרי שליחה = לא ודאי). ניסיון חוזר שולח רק למי שאינו ב-fbTzSent.
+//   'partial'   – חלק נשלח בוודאות (ב-fbTzSent), והקבוצה הבאה בוודאות לא יצאה. ניסיון חוזר שולח רק למי שאינו ב-fbTzSent.
+//   "בוודאות לא יצאה" (בכל קבוצה, גם הראשונה): שגיאה בלי sent, ובשגיאת רשת – רק כשלא נוצר חיבור (למשל ECONNREFUSED).
+//   חיבור שנותק באמצע הקריאה = לא ודאי.
 //   'uncertain' – קריאה יצאה וייתכן שימות שלח וגבה (פסק זמן, תשובה לא תקינה, כל YemotError עם sent). אין שליחה חוזרת אוטומטית – המנהל בודק בימות.
 // לפני הקריאה הראשונה נרשם ברשומת המבצע fbTz:'pending' (קריסה באמצע = כמו 'uncertain', בלי שליחה חוזרת).
 // מחזיר { st: 'sent'|'empty'|'capped'|'failed'|'partial'|'uncertain', count (נשלח עכשיו), sent (מערך מצטבר במבצע), total }.
@@ -215,8 +216,8 @@ async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already, forText) {
   } catch (e) {
     if (e && e.testCrash) throw e; // בדיקות בלבד: קריסה מדומה עוברת הלאה בלי טיפול
     // ודאי: לא יצאה קריאה (לפני השליחה, או קבוצה שבוודאות לא יצאה). אחרת – לא ודאי.
-    // כשעוד לא נשלח לאף אחד במבצע – הכלל הקודם בדיוק (YemotError בלי sent). כשכבר נשלח לחלק – הכלל המחמיר (partOk).
-    const certain = !called || (sent.length ? partOk : (e instanceof YemotError && !e.sent));
+    // כלל מחמיר בכל קבוצה, גם בראשונה (החלטת בעל העסק 17.11): ודאי רק כשלא נוצר חיבור / שגיאה לפני שליחה (partOk).
+    const certain = !called || partOk;
     out.st = !certain ? 'uncertain' : sent.length ? 'partial' : 'failed';
     logger.warn('yemot: fb tzintuk failed', { reason: 'fb-tz-' + out.st, code: e instanceof YemotError ? e.code : 'internal', sent: out.count });
   }
@@ -362,11 +363,21 @@ async function sendPromo(request, key, base, pre) {
 
   // מצב בלבד: האם אפשר עוד לשלוח צינתוק היום. בלי פנייה לימות.
   // למנהל גם הערכה ללקוחות המשוב (שלב 5): upTo = כמה נשלחו לרשימה עד היום (עד N; חסומים ורשומים לצינתוק החינמי לא יקבלו)
+  // עם promoKey (לא חובה): גם מה שכבר נשלח במבצע הזה – already (כמה ב-fbTzSent), forText (הטקסט שעליו נשלח), prev (fbTz הקודם).
+  // האפליקציה מחשבת "עד N" = upTo פחות already, כשהנוסח בחלון זהה ל-forText (הערכה; השרת אוכף ממילא).
   if (input.statusOnly === true && !pre) {
     const r = { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
     if (who.role === 'manager') {
       const f = (await db.doc(FBLIST).get()).data() || {};
       r.fbTz = { on: f.tzOn === true, upTo: Number.isInteger(f.sentCount) ? f.sentCount : 0, max: cfg.fbTzMax };
+      const pk = input.promoKey;
+      if (r.fbTz.on && typeof pk === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(pk)) {
+        const x = (await db.doc(`${PROMOS}/${pk}`).get()).data();
+        if (x && (x.fbTz != null || Array.isArray(x.fbTzSent))) {
+          const t = x.fbTzText != null ? x.fbTzText : x.text;
+          Object.assign(r.fbTz, { already: Array.isArray(x.fbTzSent) ? x.fbTzSent.length : 0, forText: typeof t === 'string' ? t : null, prev: typeof x.fbTz === 'string' ? x.fbTz : null });
+        }
+      }
     }
     return r;
   }
