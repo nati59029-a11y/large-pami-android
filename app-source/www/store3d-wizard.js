@@ -16,7 +16,7 @@ const DOW=['ראשון','שני','שלישי','רביעי','חמישי','שיש�
 const W={own:'',kind:'s',br:'',step:1,imgs:[],tex:{w:null,f:null,c:null},busy:'',msg:'',qid:'',draft:null,staff:null,staffErr:'',rule:null,rid:'',made:0,runMsg:'',q:null,sk:null,det:0,qSeen:0};
 /* שאלון וסקיצה (15.11.2026): q = מה שהוקלד (מחרוזות, מטרים); sk = שרטוט בס"מ במערכת הצירים של המפה (x ימינה, y למטה), w/l = המידות שבהן שורטט */
 const Q0=()=>({path:'',w:'',l:'',rooms:'',rows:'',ent:'',cash:'',note:''});
-const SK0=()=>({rooms:[],cur:[],rows:[],rt:[],rk:[],ent:null,cash:null,pend:null,sel:null,mode:'room',w:0,l:0,undo:[],gen:0});
+const SK0=()=>({rooms:[],cur:[],rows:[],rt:[],rk:[],doors:[],tills:[],pend:null,cpend:null,sel:null,mode:'room',w:0,l:0,undo:[],gen:0});
 U.W=W;
 const me=()=>(SY&&SY.bizId||'')+'|'+(SY&&SY.uid||'');
 const loggedIn=()=>!!(SY&&SY.refresh&&SY.uid);
@@ -25,18 +25,24 @@ const lsK=()=>LK('lp-s3w:'+mapId());
 /* הטיוטה בטלפון: גרסה 1 = {tex}; גרסה 2 (15.11.2026) = {v:2,tex,q,sk}. גרסה 1 נקראת כמו קודם (בלי שאלון) */
 const isO=o=>!!o&&typeof o==='object'&&!Array.isArray(o);
 const lsRead=()=>{try{const v=JSON.parse(localStorage.getItem(lsK()));if(!isO(v)||!(isO(v.tex)||isO(v.q)||isO(v.sk)))return null;if(!isO(v.tex))v.tex={};return v}catch(e){return null}};
-const qEmpty=()=>{const q=W.q,k=W.sk;return(!q||!Object.values(q).some(x=>String(x).trim()))&&(!k||!(k.rooms.length||k.cur.length||k.rows.length||k.ent||k.cash))};
+const qEmpty=()=>{const q=W.q,k=W.sk;return(!q||!Object.values(q).some(x=>String(x).trim()))&&(!k||!(k.rooms.length||k.cur.length||k.rows.length||k.doors.length||k.tills.length))};
 const lsSave=()=>{try{const t={};for(const k of ['w','f','c'])if(W.tex[k])t[k]={texId:W.tex[k].texId,path:W.tex[k].path,w:W.tex[k].w,h:W.tex[k].h};
- const o={v:2,tex:t};if(!qEmpty()){o.q=W.q;const k=W.sk;o.sk={rooms:k.rooms,cur:k.cur,rows:k.rows,rt:k.rt,rk:k.rk,ent:k.ent,cash:k.cash,mode:k.mode,w:k.w,l:k.l,gen:k.gen?1:0}}
+ const o={v:2,tex:t};if(!qEmpty()){o.q=W.q;const k=W.sk;o.sk={rooms:k.rooms,cur:k.cur,rows:k.rows,rt:k.rt,rk:k.rk,doors:k.doors,tills:k.tills,mode:k.mode,w:k.w,l:k.l,gen:k.gen?1:0}}
  if(Object.keys(t).length||o.q)localStorage.setItem(lsK(),JSON.stringify(o));else localStorage.removeItem(lsK())}catch(e){}};
 /* שחזור מהטלפון – רק ערכים בצורה הנכונה; כל דבר אחר מתחיל ריק */
 const nArr=(a,n)=>Array.isArray(a)&&a.every(v=>Number.isFinite(v))&&(!n||a.length===n);
+/* כניסות: {x,y,w (ס"מ), io: in/out = נפתחת פנימה/החוצה, dh: r/l = הציר מימין/משמאל כשעומדים בחוץ מול הדלת}. קופות: {x,y,w,d,a} */
+const dLoad=L=>Array.isArray(L)?L.filter(d=>isO(d)&&Number.isFinite(d.x)&&Number.isFinite(d.y)).slice(0,40).map(d=>({x:d.x,y:d.y,w:Number.isFinite(d.w)?Math.min(500,Math.max(60,Math.round(d.w))):120,io:d.io==='out'?'out':'in',dh:d.dh==='l'?'l':'r'})):[];
+const tLoad=L=>Array.isArray(L)?L.filter(t=>isO(t)&&Number.isFinite(t.x)&&Number.isFinite(t.y)).slice(0,40).map(t=>({x:t.x,y:t.y,w:Number.isFinite(t.w)?Math.min(1000,Math.max(30,Math.round(t.w))):120,d:Number.isFinite(t.d)?Math.min(1000,Math.max(30,Math.round(t.d))):60,a:t.a===90?90:0})):[];
 function qLoad(v){W.q=Q0();W.sk=SK0();if(!v)return;
  if(isO(v.q))for(const k of Object.keys(W.q))if(typeof v.q[k]==='string')W.q[k]=v.q[k].slice(0,k==='note'?200:12);
  const k=v.sk;if(isO(k)){const K=W.sk;if(Array.isArray(k.rooms))K.rooms=k.rooms.filter(p=>nArr(p)&&p.length>=6&&p.length<=40&&!(p.length%2)).slice(0,6);if(nArr(k.cur)&&!(k.cur.length%2))K.cur=k.cur.slice(0,40);
   if(Array.isArray(k.rows))K.rows=k.rows.filter(r=>nArr(r,4)).slice(0,30);if(['row','sel','ent','cash'].includes(k.mode))K.mode=k.mode;if(Number.isFinite(k.w)&&Number.isFinite(k.l)){K.w=k.w;K.l=k.l}
   const ty=(a,ok)=>Array.isArray(a)?a.map(v=>ok.includes(v)?v:ok[ok.length-1]):[];K.rt=ty(k.rt,['s','w','x']);K.rk=ty(k.rk,['wall','fridge','gon']);
-  for(const f of ['ent','cash'])if(nArr(k[f],2))K[f]=k[f].slice();K.gen=k.gen?1:0}
+  K.doors=dLoad(k.doors);K.tills=tLoad(k.tills);
+  /* שרטוט מגרסה קודמת: נקודת כניסה/קופה אחת → כניסה/קופה ברשימה, בגודל ברירת מחדל */
+  if(!K.doors.length&&nArr(k.ent,2))K.doors=[{x:k.ent[0],y:k.ent[1],w:120,io:'in',dh:'r'}];
+  if(!K.tills.length&&nArr(k.cash,2))K.tills=[{x:k.cash[0],y:k.cash[1],w:120,d:60,a:0}];K.gen=k.gen?1:0}
  if(!['a','b'].includes(W.q.path))W.q.path=''}
 const revoke=()=>{for(const i of W.imgs)try{URL.revokeObjectURL(i.url)}catch(e){}for(const k of ['w','f','c'])if(W.tex[k]&&W.tex[k].url)try{URL.revokeObjectURL(W.tex[k].url)}catch(e){}};
 function reset(kind){revoke();W.own=me();W.kind=kind==='w'?'w':'s';W.br=U.brSel();W.step=1;W.imgs=[];W.tex={w:null,f:null,c:null};W.busy='';W.msg='';W.qid='';W.draft=null;W.fixTxt='';W.fixQid='';W.fixMsg='';W.staff=null;W.staffErr='';W.rule=null;W.rid='';W.made=0;W.runMsg='';W.det=0;W.qSeen=0;
@@ -191,7 +197,10 @@ async function makeDraft(){
   if(!W.qid)W.qid=U.qid();
   const imgs=[];for(const i of W.imgs)imgs.push(await U.b64(i.blob));
   const body={qid:W.qid,br:W.br||U.brSel(),kind:W.kind,imgs};if(qb.info)body.info=qb.info;if(qb.sketch)body.sketch=qb.sketch;
-  let r=await U.fn('mapDraft',body);
+  let r;try{r=await U.fn('mapDraft',body)}catch(e){
+   /* שרת שעוד לא עודכן לא מכיר כמה כניסות/קופות: שולחים שוב רק את הכניסה והקופה הראשונות (כמו פעם) */
+   const sk=body.sketch;if(!(sk&&(sk.doors||sk.tills)&&/השרטוט לא תקין/.test(String(e&&e.message||''))))throw e;
+   delete sk.doors;delete sk.tills;W.qid=U.qid();body.qid=W.qid;r=await U.fn('mapDraft',body)}
   if(r&&r.st==='fail')throw Object.assign(new Error(r.err||'לא הצלחנו לבנות טיוטה מהתמונות.'),{reason:''});
   /* ניסיון חוזר עם אותו מזהה מחזיר dup בלי המפה: קוראים אותה מהטיוטה השמורה */
   if(r&&!needs(r)&&r.draftId){const dd=await U.get('/s3draft/'+r.draftId);if(dd&&dd.m)r=Object.assign({},r,{m:dd.m})}
@@ -273,13 +282,16 @@ const qInt=(s,a,b)=>{const n=qNum(s,a,b);return n===null?null:Number.isInteger(n
 const realDims=()=>{const w=qNum(W.q.w,2,100),l=qNum(W.q.l,2,100);return w>0&&l>0?{w:Math.round(w*100),l:Math.round(l*100)}:null};
 /* המסגרת של השרטוט: המידות האמיתיות, ובלעדיהן מסגרת זמנית של 20×20 (רק בדרך א, עד שעונים על הרוחב האמיתי) */
 const frame=()=>realDims()||{w:VF,l:VF,tmp:1};
-const skHas=()=>{const k=W.sk;return !!(k.rooms.length||k.cur.length||k.rows.length||k.ent||k.cash)};
+const skHas=()=>{const k=W.sk;return !!(k.rooms.length||k.cur.length||k.rows.length||k.doors.length||k.tills.length)};
 const cl=(v,a,b)=>Math.min(b,Math.max(a,v));
 const snap=v=>Math.round(v/GRID)*GRID;
 /* w/l = גודל המסגרת שבה השרטוט היה, כדי שביטול אחרי שינוי מידות יחזיר אותו בקנה המידה הנכון */
-const skSnap=()=>{const k=W.sk;return JSON.stringify({rooms:k.rooms,cur:k.cur,rows:k.rows,rt:k.rt,rk:k.rk,ent:k.ent,cash:k.cash,w:k.w,l:k.l,qw:W.q.w,ql:W.q.l})};
+const skSnap=()=>{const k=W.sk;return JSON.stringify({rooms:k.rooms,cur:k.cur,rows:k.rows,rt:k.rt,rk:k.rk,doors:k.doors,tills:k.tills,w:k.w,l:k.l,qw:W.q.w,ql:W.q.l})};
 /* הנקודה הרחוקה ביותר בשרטוט (לבדיקה אם משהו יצא מחוץ למסגרת) */
-const skMax=()=>{const k=W.sk,A=[].concat(...k.rooms,k.cur,...k.rows,k.ent||[],k.cash||[]);let x=0,y=0;for(let i=0;i<A.length;i+=2){x=Math.max(x,A[i]);y=Math.max(y,A[i+1])}return{x,y}};
+/* כל הנקודות בשרטוט (פינות, שורות, כניסות, קופות) – לבדיקות ולהזזה/מתיחה של הכול יחד */
+const skAll=()=>{const k=W.sk;return [].concat(...k.rooms,k.cur,...k.rows,...k.doors.map(d=>[d.x,d.y]),...k.tills.map(t=>[t.x,t.y]))};
+const skMapAll=P=>{const k=W.sk,O=o=>{const q=P([o.x,o.y]);return Object.assign({},o,{x:q[0],y:q[1]})};k.rooms=k.rooms.map(P);k.cur=P(k.cur);k.rows=k.rows.map(P);k.doors=k.doors.map(O);k.tills=k.tills.map(O)};
+const skMax=()=>{const A=skAll();let x=0,y=0;for(let i=0;i<A.length;i+=2){x=Math.max(x,A[i]);y=Math.max(y,A[i+1])}return{x,y}};
 const skPush=()=>{const k=W.sk;k.undo=k.undo||[];k.undo.push(skSnap());if(k.undo.length>40)k.undo.shift()};
 const skDone=()=>{const F=frame(),k=W.sk;k.w=F.w;k.l=F.l;W.qid='';lsSave();rerender()};
 const fit=(L,n,d)=>{L=Array.isArray(L)?L.slice(0,n):[];while(L.length<n)L.push(d);return L};
@@ -287,14 +299,14 @@ const skNorm=()=>{const k=W.sk;k.rt=fit(k.rt,k.rooms.length,'x');if(k.rooms.leng
 /* שינוי מסגרת (המידות השתנו): כל נקודה נמתחת יחסית */
 function skRescale(F){const k=W.sk;if(!k.w||!k.l||(k.w===F.w&&k.l===F.l)){k.w=F.w;k.l=F.l;return}
  const sx=F.w/k.w,sy=F.l/k.l,X=v=>cl(Math.round(v*sx),0,F.w),Y=v=>cl(Math.round(v*sy),0,F.l),P=p=>p.map((v,i)=>i%2?Y(v):X(v));
- k.rooms=k.rooms.map(P);k.cur=P(k.cur);k.rows=k.rows.map(P);if(k.ent)k.ent=P(k.ent);if(k.cash)k.cash=P(k.cash);k.pend=null;k.w=F.w;k.l=F.l}
+ skMapAll(P);k.pend=null;k.cpend=null;k.w=F.w;k.l=F.l}
 /* דרך א: רוחב אמיתי לשרטוט שצויר במסגרת הזמנית – לפי רוחב השרטוט עצמו (מהפינה השמאלית לימנית) */
-function skReal(m){const k=W.sk,A=[].concat(...k.rooms,k.cur,...k.rows,k.ent||[],k.cash||[]);if(A.length<2)return 'קודם שרטטו משהו.';
+function skReal(m){const k=W.sk,A=skAll();if(A.length<2)return 'קודם שרטטו משהו.';
  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;for(let i=0;i<A.length;i+=2){x0=Math.min(x0,A[i]);x1=Math.max(x1,A[i]);y0=Math.min(y0,A[i+1]);y1=Math.max(y1,A[i+1])}
  if(x1-x0<GRID)return 'השרטוט צר מדי כדי לקבוע לפיו רוחב.';
  const s=m*100/(x1-x0),L=Math.round((y1-y0)*s);if(L<200||L>10000)return 'לפי הרוחב הזה האורך יוצא מחוץ לטווח (2 עד 100 מטר). בדקו את הרוחב.';
  skPush();const P=p=>p.map((v,i)=>i%2?cl(Math.round((v-y0)*s),0,L):cl(Math.round((v-x0)*s),0,Math.round(m*100)));
- k.rooms=k.rooms.map(P);k.cur=P(k.cur);k.rows=k.rows.map(P);if(k.ent)k.ent=P(k.ent);if(k.cash)k.cash=P(k.cash);
+ skMapAll(P);
  W.q.w=String(m);W.q.l=String(Math.round(L/10)/10);return ''}
 /* דרך ב: שרטוט מהתשובות. חדר ראשון = חנות (כ-70% כשיש עוד חדרים, בצד של הכניסה), שאר החדרים בשווה בצד השני;
    השורות במרווחים שווים בחנות, לאורך הצלע הארוכה שלה, עם מעבר של 1.5 מטר בקצוות; כניסה וקופה באמצע הצד שנבחר */
@@ -309,7 +321,7 @@ function skGen(){const D=realDims();if(!D)return 'כדי לבנות שרטוט �
  for(let i=0;i<nw;i++){const c=Math.round((i+1)*crS/(nw+1));rows.push(lng?[rx0+c,ry0+m,rx0+c,ry1-m]:[rx0+m,ry0+c,rx1-m,ry0+c])}
  const side=(sd,f)=>sd==='u'?[Math.round(W0*f),0]:sd==='d'?[Math.round(W0*f),L0]:sd==='l'?[0,Math.round(L0*f)]:sd==='r'?[W0,Math.round(L0*f)]:null;
  skPush();const k=W.sk;k.rooms=rooms;k.rt=rt;k.rows=rows;k.rk=rows.map(()=>'gon');k.cur=[];k.pend=null;k.sel=null;
- k.ent=side(ent,.5);k.cash=W.q.cash?side(W.q.cash,W.q.cash===ent?.25:.5):null;k.mode='sel';k.gen=1;return ''}
+ const pe=side(ent,.5),pc=W.q.cash?side(W.q.cash,W.q.cash===ent?.25:.5):null;k.doors=pe?[doorNew(pe[0],pe[1])]:[];k.tills=pc?[{x:pc[0],y:pc[1],w:120,d:60,a:SIDE_L[W.q.cash]&&(W.q.cash==='l'||W.q.cash==='r')?90:0}]:[];k.mode='sel';k.gen=1;return ''}
 /* מה נשלח לשרת. מחזיר {info, sketch} או {err} */
 function qBuild(){const q=W.q,k=W.sk,info={};
  const w=qNum(q.w,2,100),l=qNum(q.l,2,100);
@@ -326,7 +338,8 @@ function qBuild(){const q=W.q,k=W.sk,info={};
   if(!info.w)return{err:'כדי לשלוח את השרטוט צריך את הרוחב האמיתי של החנות (בשאלות שמתחת לשרטוט). אפשר גם למחוק את השרטוט.'};
   if(k.cur.length)return{err:'החדר האחרון בשרטוט לא נסגר. הקישו "סגרו חדר" או "ביטול אחרון".'};
   skNorm();sketch={rooms:k.rooms.map(p=>p.slice()),rows:k.rows.map(r=>r.slice())};
-  if(k.rooms.length)sketch.rt=k.rt.slice();if(k.rows.length)sketch.rk=k.rk.slice();if(k.ent)sketch.ent=k.ent.slice();if(k.cash)sketch.cash=k.cash.slice();
+  if(k.rooms.length)sketch.rt=k.rt.slice();if(k.rows.length)sketch.rk=k.rk.slice();const DD=k.doors.map(d=>doorOut(d)),TT=k.tills.map(t=>({x:Math.round(t.x),y:Math.round(t.y),w:t.w,d:t.d,a:t.a}));
+  if(DD.length){sketch.doors=DD;sketch.ent=[DD[0].x,DD[0].y]}if(TT.length){sketch.tills=TT;sketch.cash=[TT[0].x,TT[0].y]}
   if(k.rooms.length&&!info.rooms)info.rooms=k.rooms.length;if(!info.rows&&info.rows!==0&&k.rows.length)info.rows=k.rows.length}
  return{info:Object.keys(info).length?info:null,sketch}}
 const qSum=()=>{const D=realDims(),k=W.sk,t=[];if(D)t.push(`רוחב ${+(D.w/100).toFixed(1)} מ', אורך ${+(D.l/100).toFixed(1)} מ'`);
@@ -345,18 +358,48 @@ CHG.s3wQ=el=>{const f=el.dataset.f;if(!(f in W.q)||f==='path')return;const v=Str
  W.qid='';lsSave();if(f!=='note')rerender()};
 CHG.s3wRw=el=>{const m=qNum(el.value,2,100);if(!(m>0)){W.msg='הרוחב צריך להיות בין 2 ל-100 מטר.';return rerender()}const e=skReal(m);W.msg=e;if(!e){const k=W.sk,F=frame();k.w=F.w;k.l=F.l;toast('השרטוט הותאם למידות')}W.qid='';lsSave();rerender()};
 CHG.s3wRt=el=>{const i=+el.dataset.i;if(!RT_L[el.value]||!(i>=0&&i<W.sk.rooms.length))return;skNorm();W.sk.rt[i]=el.value;W.qid='';lsSave();drawSk()};
+/* שדות של כניסה/קופה ברשימה שמתחת לשרטוט */
+CHG.s3wDo=el=>{const d=W.sk.doors[+el.dataset.i],f=el.dataset.f;if(!d)return;let v=el.value;
+ if(f==='w'){const m=qNum(v,.6,5);if(!(m>0)){W.msg='רוחב הכניסה צריך להיות בין 0.6 ל-5 מטר.';return rerender()}v=Math.round(m*100)}else if(f==='io'){if(!['in','out'].includes(v))return}else if(f==='dh'){if(!['r','l'].includes(v))return}else return;
+ skPush();d[f]=v;W.msg='';skDone()};
+CHG.s3wTi=el=>{const t=W.sk.tills[+el.dataset.i],f=el.dataset.f;if(!t)return;let v=el.value;
+ if(f==='w'||f==='d'){const m=qNum(v,.3,10);if(!(m>0)){W.msg='גודל הקופה צריך להיות בין 0.3 ל-10 מטר.';return rerender()}v=Math.round(m*100)}else if(f==='a'){v=v==='90'?90:0}else return;
+ skPush();t[f]=v;W.msg='';skDone()};
+ACT.s3wDoDel=el=>{const k=W.sk,i=+el.dataset.i,L=el.dataset.t==='k'?k.tills:k.doors;if(!L[i])return;skPush();L.splice(i,1);k.sel=null;hiO={t:'',i:-1};skDone()};
+/* ברירות מחדל לכניסה/קופה חדשה */
+CHG.s3wDf=el=>{const f=el.dataset.f,v=String(el.value||'').slice(0,6);if(f in DF)DF[f]=v;else if(f==='tw')TD.w=v;else if(f==='td')TD.d=v};
+ACT.s3wTh=el=>{TD.how=el.dataset.h==='box'?'box':'one';W.sk.cpend=null;rerender()};
 CHG.s3wRk=el=>{const i=+el.dataset.i;if(!RK_L[el.value]||!(i>=0&&i<W.sk.rows.length))return;skNorm();W.sk.rk[i]=el.value;W.qid='';lsSave();drawSk()};
 ACT.s3wGen=()=>{if(skHas()&&!W.sk.gen&&!W.sk.genOk){return ask('לבנות שרטוט חדש מהתשובות? השרטוט הנוכחי יוחלף (אפשר לבטל ב"ביטול אחרון").',()=>{W.sk.genOk=1;ACT.s3wGen()},'כן, בנו')}
  const e=skGen();W.msg=e;if(!e){W.sk.genOk=0;const F=frame();W.sk.w=F.w;W.sk.l=F.l;toast('השרטוט נבנה מהתשובות. אפשר לערוך אותו')}W.qid='';lsSave();rerender()};
-ACT.s3wSkM=el=>{const m=el.dataset.m;if(!['room','row','sel','ent','cash'].includes(m))return;const k=W.sk;k.mode=m;k.pend=null;k.sel=null;W.msg='';rerender()};
+ACT.s3wSkM=el=>{const m=el.dataset.m;if(!['room','row','sel','ent','cash'].includes(m))return;const k=W.sk;k.mode=m;k.pend=null;k.cpend=null;k.sel=null;W.msg='';rerender()};
 /* הקשה על השרטוט – לפי המצב */
 const near=(F,px,x,y)=>{const k=W.sk,tol=26/px,c=[];/* פינות, קצוות שורות */
  k.rooms.forEach((p,r)=>{for(let i=0;i<p.length;i+=2)c.push({t:'c',r,i,d:Math.hypot(p[i]-x,p[i+1]-y)})});
  for(let i=0;i<k.cur.length;i+=2)c.push({t:'c',r:-1,i,d:Math.hypot(k.cur[i]-x,k.cur[i+1]-y)});
  k.rows.forEach((s,r)=>{c.push({t:'w',r,i:0,d:Math.hypot(s[0]-x,s[1]-y)});c.push({t:'w',r,i:2,d:Math.hypot(s[2]-x,s[3]-y)})});
+ k.doors.forEach((o,r)=>c.push({t:'e',r,i:0,d:Math.hypot(o.x-x,o.y-y)}));k.tills.forEach((o,r)=>c.push({t:'k',r,i:0,d:Math.hypot(o.x-x,o.y-y)}));
  c.sort((a,b)=>a.d-b.d);return c[0]&&c[0].d<=tol?c[0]:null};
+/* --- כניסות: הדלת יושבת על הקיר הקרוב (קיר של חדר, או דופן המסגרת) --- */
+const DF={w:'1',io:'in',dh:'r'},TD={how:'one',w:'1.2',d:'0.6'};/* ברירות מחדל לכניסה/קופה חדשה (נבחרות מעל השרטוט) */
+const doorNew=(x,y)=>({x,y,w:Math.round((qNum(DF.w,.6,5)||1)*100),io:DF.io,dh:DF.dh});
+/* הקיר הקרוב לנקודה: {x,y (על הקיר), ux,uy (כיוון הקיר), nx,ny (ניצב פנימה), dd (מרחק)} */
+function wallAt(x,y){const k=W.sk,F=frame();let b=null;
+ const seg=(x1,y1,x2,y2,cx,cy)=>{const L2=(x2-x1)**2+(y2-y1)**2;if(!L2)return;const t=cl(((x-x1)*(x2-x1)+(y-y1)*(y2-y1))/L2,0,1),px=x1+t*(x2-x1),py=y1+t*(y2-y1),dd=Math.hypot(x-px,y-py);
+  if(b&&dd>=b.dd)return;const L=Math.sqrt(L2),ux=(x2-x1)/L,uy=(y2-y1)/L;let nx=-uy,ny=ux;if(!cx(px+nx*20,py+ny*20)){nx=-nx;ny=-ny}b={x:px,y:py,ux,uy,nx,ny,dd}};
+ const G=G3();k.rooms.forEach(p=>{const ins=(qx,qy)=>G&&G.pointInPoly?G.pointInPoly(qx,qy,p):false;const n=p.length/2;for(let i=0;i<n;i++){const j=(i+1)%n;seg(p[2*i],p[2*i+1],p[2*j],p[2*j+1],ins)}});
+ if(!b||b.dd>150){const fin=(qx,qy)=>qx>0&&qy>0&&qx<F.w&&qy<F.l;const b0=b;b=null;seg(0,0,F.w,0,fin);seg(F.w,0,F.w,F.l,fin);seg(F.w,F.l,0,F.l,fin);seg(0,F.l,0,0,fin);if(b0&&b0.dd<=b.dd)b=b0}
+ return b}
+/* הקשה לכניסה: נצמדת לקיר אם הוא עד 1.5 מ' מהנקודה */
+const wallSnap=(x,y)=>{const F=frame(),w=wallAt(x,y);return w&&w.dd<=150?[cl(Math.round(w.x),0,F.w),cl(Math.round(w.y),0,F.l)]:[cl(snap(x),0,F.w),cl(snap(y),0,F.l)]};
+/* גאומטריה לציור ולשליחה: מרכז, כיוון הקיר u, צד הפתיחה s, כיוון הציר h (מבחוץ מול הדלת: "ימין" הוא ימין של מי שמסתכל פנימה) */
+function doorGeo(d){const w=wallAt(d.x,d.y)||{ux:1,uy:0,nx:0,ny:-1},vx=w.nx,vy=w.ny,rx=-vy,ry=vx,sg=d.io==='out'?-1:1,hg=d.dh==='l'?-1:1;
+ return{x:d.x,y:d.y,ux:w.ux,uy:w.uy,sx:vx*sg,sy:vy*sg,hx:rx*hg,hy:ry*hg}}
+/* לשרת/למפה: a = זווית הקיר במעלות; sw = צד הפתיחה ביחס לניצב (−sin a, cos a); hg = הציר בקצה בכיוון a (1) או ההפוך (−1) */
+function doorOut(d){const g=doorGeo(d),a=((Math.round(Math.atan2(g.uy,g.ux)*180/Math.PI)%360)+360)%360,r=a*Math.PI/180,px=-Math.sin(r),py=Math.cos(r);
+ return{x:Math.round(d.x),y:Math.round(d.y),w:d.w,a,sw:g.sx*px+g.sy*py>=0?1:-1,hg:g.hx*Math.cos(r)+g.hy*Math.sin(r)>=0?1:-1}}
 /* שם הנקודה שנבחרה, למשוב: "פינה 2 של חדר 3" / "קצה של שורה 4" */
-const selName=s=>s.t==='w'?`קצה של שורה ${s.r+1}`:s.r<0?`פינה ${s.i/2+1} של החדר הפתוח`:`פינה ${s.i/2+1} של חדר ${s.r+1}`;
+const selName=s=>s.t==='e'?`כניסה ${s.r+1}`:s.t==='k'?`קופה ${s.r+1}`:s.t==='w'?`קצה של שורה ${s.r+1}`:s.r<0?`פינה ${s.i/2+1} של החדר הפתוח`:`פינה ${s.i/2+1} של חדר ${s.r+1}`;
 const okPoly=p=>{const g=G3();return !g||!g.polyValid||g.polyValid(p).ok};
 ACT.s3wSkT=(el,e)=>{const k=W.sk,F=frame(),R=el.getBoundingClientRect();if(!R.width||!e)return;if(Date.now()-zDragT<400)return;zvFit(F);const px=R.width/F.w*ZV.z;
  const rx=cl(ZV.ox+(e.clientX-R.left)/px,0,F.w),ry=cl(ZV.oy+(e.clientY-R.top)/px,0,F.l),x=cl(snap(rx),0,F.w),y=cl(snap(ry),0,F.l);W.msg='';
@@ -364,11 +407,19 @@ ACT.s3wSkT=(el,e)=>{const k=W.sk,F=frame(),R=el.getBoundingClientRect();if(!R.wi
   const n=k.cur.length;if(n&&k.cur[n-2]===x&&k.cur[n-1]===y)return;skPush();k.cur.push(x,y)}
  else if(k.mode==='row'){if(!k.pend){if(k.rows.length>=30){W.msg='אפשר עד 30 שורות.';return rerender()}k.pend=[x,y];return rerender()}
   if(Math.hypot(x-k.pend[0],y-k.pend[1])<GRID){W.msg='השורה קצרה מדי. הקישו על נקודת הסוף שלה.';return rerender()}skPush();skNorm();k.rows.push([k.pend[0],k.pend[1],x,y]);k.rk.push('gon');k.pend=null}
- else if(k.mode==='ent'||k.mode==='cash'){skPush();k[k.mode]=[x,y];toast(k.mode==='ent'?'הכניסה סומנה':'הקופה סומנה')}
+ else if(k.mode==='ent'){if(k.doors.length>=40){W.msg='אפשר עד 40 כניסות.';return rerender()}skPush();const q=wallSnap(rx,ry);k.doors.push(doorNew(q[0],q[1]));toast(`כניסה ${k.doors.length} נוספה`)}
+ else if(k.mode==='cash'){if(k.tills.length>=40){W.msg='אפשר עד 40 קופות.';return rerender()}
+  if(TD.how==='box'){if(!k.cpend){k.cpend=[x,y];return rerender()}const w=Math.abs(x-k.cpend[0]),d=Math.abs(y-k.cpend[1]);
+   if(w<30||d<30){W.msg='הקופה קטנה מדי (לפחות 30 ס"מ לכל צד). הקישו על הפינה הנגדית.';return rerender()}
+   skPush();k.tills.push({x:Math.round((x+k.cpend[0])/2),y:Math.round((y+k.cpend[1])/2),w:Math.min(1000,w),d:Math.min(1000,d),a:0});k.cpend=null}
+  else{const w=Math.round((qNum(TD.w,.3,10)||1.2)*100),d=Math.round((qNum(TD.d,.3,10)||.6)*100);skPush();k.tills.push({x,y,w,d,a:0})}
+  toast(`קופה ${k.tills.length} נוספה`)}
  else{const h=near(F,px,rx,ry);
   if(h&&!(k.sel&&k.sel.t===h.t&&k.sel.r===h.r&&k.sel.i===h.i)){k.sel={t:h.t,r:h.r,i:h.i};return rerender()}
   if(!k.sel){W.msg='הקישו על פינה או על קצה של שורה כדי לבחור אותם.';return rerender()}
-  const s=k.sel,L=s.t==='w'?k.rows[s.r]:s.r<0?k.cur:k.rooms[s.r];if(!L)return;
+  const s=k.sel;
+  if(s.t==='e'||s.t==='k'){const O=s.t==='e'?k.doors[s.r]:k.tills[s.r];if(!O)return;const q=s.t==='e'?wallSnap(rx,ry):[x,y];if(O.x===q[0]&&O.y===q[1])return;skPush();O.x=q[0];O.y=q[1];toast(selName(s)+' הוזזה');return skDone()}
+  const L=s.t==='w'?k.rows[s.r]:s.r<0?k.cur:k.rooms[s.r];if(!L)return;
   const o=[L[s.i],L[s.i+1]];if(o[0]===x&&o[1]===y)return;skPush();L[s.i]=x;L[s.i+1]=y;
   const bad=s.t==='c'&&s.r>=0&&!okPoly(L),short=s.t==='w'&&Math.hypot(L[2]-L[0],L[3]-L[1])<GRID;
   if(bad||short){L[s.i]=o[0];L[s.i+1]=o[1];k.undo.pop();W.msg=bad?'אי אפשר להזיז לשם: קירות החדר יחצו זה את זה.':'השורה תהיה קצרה מדי.';return rerender()}
@@ -377,7 +428,8 @@ ACT.s3wSkT=(el,e)=>{const k=W.sk,F=frame(),R=el.getBoundingClientRect();if(!R.wi
 ACT.s3wSkClose=()=>{const k=W.sk;if(k.cur.length<6){W.msg='לחדר צריך לפחות 3 פינות.';return rerender()}if(!okPoly(k.cur)){W.msg='החדר לא תקין: קירות שחוצים זה את זה, או שטח קטן ממטר מרובע. בטלו פינה ונסו שוב.';return rerender()}
  skPush();skNorm();k.rooms.push(k.cur);k.rt.push(k.rooms.length===1?'s':'x');k.cur=[];skDone()};
 ACT.s3wSkDel=()=>{const k=W.sk,s=k.sel;if(!s)return;skPush();
- if(s.t==='w'){skNorm();k.rows.splice(s.r,1);k.rk.splice(s.r,1)}
+ if(s.t==='e'||s.t==='k')(s.t==='e'?k.doors:k.tills).splice(s.r,1);
+ else if(s.t==='w'){skNorm();k.rows.splice(s.r,1);k.rk.splice(s.r,1)}
  else{const L=s.r<0?k.cur:k.rooms[s.r];if(!L)return;
   if(s.r>=0&&L.length<=6){skNorm();k.rooms.splice(s.r,1);k.rt.splice(s.r,1);toast('החדר נמחק (היו לו 3 פינות)')}
   else{const c=L.slice();c.splice(s.i,2);if(s.r>=0&&!okPoly(c)){k.undo.pop();W.msg='אי אפשר למחוק את הפינה הזו: החדר יהיה לא תקין.';return rerender()}if(s.r<0)k.cur=c;else k.rooms[s.r]=c}}
@@ -385,8 +437,8 @@ ACT.s3wSkDel=()=>{const k=W.sk,s=k.sel;if(!s)return;skPush();
 ACT.s3wSkIns=()=>{const k=W.sk,s=k.sel;if(!s||s.t!=='c'||s.r<0)return;const L=k.rooms[s.r];if(!L||L.length>=40){W.msg='לחדר יכולות להיות עד 20 פינות.';return rerender()}
  const j=(s.i+2)%L.length,x=snap((L[s.i]+L[j])/2),y=snap((L[s.i+1]+L[j+1])/2),c=L.slice();c.splice(s.i+2,0,x,y);
  if(!okPoly(c)){W.msg='אין מקום לפינה נוספת כאן. הזיזו קודם את הפינות.';return rerender()}skPush();k.rooms[s.r]=c;k.sel={t:'c',r:s.r,i:s.i+2};skDone()};
-ACT.s3wSkUndo=()=>{const k=W.sk;if(k.pend){k.pend=null;return rerender()}const u=k.undo&&k.undo.pop();if(!u)return;
- try{const o=JSON.parse(u);Object.assign(k,{rooms:o.rooms||[],cur:o.cur||[],rows:o.rows||[],rt:o.rt||[],rk:o.rk||[],ent:o.ent||null,cash:o.cash||null});
+ACT.s3wSkUndo=()=>{const k=W.sk;if(k.pend||k.cpend){k.pend=null;k.cpend=null;return rerender()}const u=k.undo&&k.undo.pop();if(!u)return;
+ try{const o=JSON.parse(u);Object.assign(k,{rooms:o.rooms||[],cur:o.cur||[],rows:o.rows||[],rt:o.rt||[],rk:o.rk||[],doors:dLoad(o.doors),tills:tLoad(o.tills)});
   if(typeof o.qw==='string'&&typeof o.ql==='string'){W.q.w=o.qw;W.q.l=o.ql}
   if(o.w>0&&o.l>0){k.w=o.w;k.l=o.l;skRescale(frame())}}catch(e){}k.sel=null;skDone()};
 /* הגדלת המסגרת לצד אחד (בחירת המשתמש: כפתור, לא אוטומטי). שמאל/למעלה = כל הנקודות זזות כדי שהשרטוט יישאר במקומו. עד 100 מ' לצד */
@@ -395,13 +447,13 @@ CHG.s3wGm=el=>{growM=String(el.value||'').slice(0,6)};
 ACT.s3wGrow=el=>{const sd=el.dataset.s,F=frame(),k=W.sk;if(F.tmp||!['r','l','u','d'].includes(sd))return;const m=qNum(growM,.5,98);
  if(!(m>0)){W.msg='כמה מטרים להוסיף? מספר בין 0.5 ל-98.';return rerender()}const d=snap(m*100),hz=sd==='r'||sd==='l',nw=hz?F.w+d:F.w,nl=hz?F.l:F.l+d;
  if(nw>10000||nl>10000){W.msg=`אי אפשר: ${hz?'הרוחב':'האורך'} יהיה יותר מ-100 מטר.`;return rerender()}
- skPush();const dx=sd==='l'?d:0,dy=sd==='u'?d:0;if(dx||dy){const P=p=>p.map((v,i)=>v+(i%2?dy:dx));k.rooms=k.rooms.map(P);k.cur=P(k.cur);k.rows=k.rows.map(P);if(k.ent)k.ent=P(k.ent);if(k.cash)k.cash=P(k.cash);k.pend=null}
+ skPush();const dx=sd==='l'?d:0,dy=sd==='u'?d:0;if(dx||dy){skMapAll(p=>p.map((v,i)=>v+(i%2?dy:dx)));k.pend=null;k.cpend=null}
  W.q.w=String(+(nw/100).toFixed(2));W.q.l=String(+(nl/100).toFixed(2));k.w=nw;k.l=nl;W.msg='';toast(`המסגרת הוגדלה ב-${+(d/100).toFixed(1)} מ' ${({u:'למעלה',d:'למטה',r:'ימינה',l:'שמאלה'})[sd]}`);skDone()};
 /* שרטוט שיצא מחוץ למסגרת (נוצר בביטול בגרסה קודמת): מקטינים הכול באותו יחס עד שהכול נכנס */
 ACT.s3wSkFit=()=>{const k=W.sk,F=frame(),m=skMax();if(m.x<=F.w&&m.y<=F.l)return;const r=Math.min(F.w/m.x,F.l/m.y);skPush();
- const P=p=>p.map((v,i)=>cl(Math.round(v*r),0,i%2?F.l:F.w));k.rooms=k.rooms.map(P);k.cur=P(k.cur);k.rows=k.rows.map(P);if(k.ent)k.ent=P(k.ent);if(k.cash)k.cash=P(k.cash);k.pend=null;k.sel=null;
+ skMapAll(p=>p.map((v,i)=>cl(Math.round(v*r),0,i%2?F.l:F.w)));k.pend=null;k.cpend=null;k.sel=null;
  ZV.z=1;toast('השרטוט הוקטן ונכנס למסגרת');skDone()};
-ACT.s3wSkClr=()=>ask('למחוק את כל השרטוט?',()=>{const k=W.sk;skPush();Object.assign(k,{rooms:[],cur:[],rows:[],rt:[],rk:[],ent:null,cash:null,pend:null,sel:null,gen:0});skDone()},'כן, מחקו');
+ACT.s3wSkClr=()=>ask('למחוק את כל השרטוט?',()=>{const k=W.sk;skPush();Object.assign(k,{rooms:[],cur:[],rows:[],rt:[],rk:[],doors:[],tills:[],pend:null,cpend:null,sel:null,gen:0});skDone()},'כן, מחקו');
 
 /* --- ציור השרטוט (canvas; צבעים מהטוקנים של הערכה) --- */
 /* הגדלה/הקטנה של השרטוט (תצוגה בלבד, לא נשמר): z = פי כמה, ox/oy = הפינה השמאלית העליונה של מה שרואים (ס"מ) */
@@ -420,8 +472,9 @@ const zEnd=()=>{if(zDrag&&zDrag.m)zDragT=Date.now();zDrag=null};
 document.addEventListener('pointerup',zEnd);document.addEventListener('pointercancel',zEnd);
 /* השורה שהבחירה שלה פתוחה עכשיו ("שורה N – מה יש בה?") – מודגשת בשרטוט. -1 = אין */
 let hiRow=-1;
-document.addEventListener('focusin',e=>{const el=e.target;if(el&&el.dataset&&el.dataset.c==='s3wRk'){hiRow=+el.dataset.i;drawSk()}});
-document.addEventListener('focusout',e=>{const el=e.target;if(el&&el.dataset&&el.dataset.c==='s3wRk'&&hiRow>=0){hiRow=-1;drawSk()}});
+let hiO={t:'',i:-1};/* כניסה/קופה שהשדות שלה פתוחים */
+document.addEventListener('focusin',e=>{const el=e.target,c=el&&el.dataset&&el.dataset.c;if(c==='s3wRk'){hiRow=+el.dataset.i;drawSk()}else if(c==='s3wDo'||c==='s3wTi'){hiO={t:c==='s3wDo'?'e':'k',i:+el.dataset.i};drawSk()}});
+document.addEventListener('focusout',e=>{const el=e.target,c=el&&el.dataset&&el.dataset.c;if(c==='s3wRk'&&hiRow>=0){hiRow=-1;drawSk()}else if((c==='s3wDo'||c==='s3wTi')&&hiO.t){hiO={t:'',i:-1};drawSk()}});
 function drawSk(){const cv=document.getElementById('s3wSk');if(!cv)return;const F=frame(),k=W.sk;
  const pe=cv.parentElement,ps=pe&&getComputedStyle(pe),box=pe?Math.max(160,pe.clientWidth-parseFloat(ps.paddingLeft||0)-parseFloat(ps.paddingRight||0)-2):300;let cw=box,ch=cw*F.l/F.w;const mx=Math.max(220,Math.min(520,innerHeight*.6));if(ch>mx){ch=mx;cw=ch*F.w/F.l}
  cw=Math.floor(cw);ch=Math.floor(ch);const dpr=window.devicePixelRatio||1;cv.style.width=cw+'px';cv.style.height=ch+'px';cv.width=Math.round(cw*dpr);cv.height=Math.round(ch*dpr);
@@ -445,7 +498,17 @@ function drawSk(){const cv=document.getElementById('s3wSk');if(!cv)return;const 
  c.font='600 12px system-ui,sans-serif';
  if(k.pend)dot(k.pend[0],k.pend[1],6,ink);
  const mark=(pt,t)=>{if(!pt)return;dot(pt[0],pt[1],9,acc);c.fillStyle=ink;const y=P(pt[1])>ch-20?P(pt[1])-16:P(pt[1])+16;c.fillText(t,cl(P(pt[0]),24,cw-24),y)};
- mark(k.ent,'כניסה');mark(k.cash,'קופה');
+ /* כניסות: הדלת על הקיר + קשת הפתיחה; קופות: מלבן בגודל האמיתי. מודגשת = הפריט שהשדות שלו פתוחים ברשימה */
+ const inc=col('inc')||acc,bg=col('bg');
+ const badge=(x,y,t,on)=>{c.beginPath();c.arc(x,y,10,0,7);c.fillStyle=on?acc:inc;c.fill();c.lineWidth=1.5;c.strokeStyle=bg;c.stroke();c.fillStyle=bg;c.font='700 10px system-ui,sans-serif';c.fillText(t,x,y+.5);c.font='600 12px system-ui,sans-serif'};
+ k.doors.forEach((d,r)=>{const g=doorGeo(d),h=d.w/2,on=hiO.t==='e'&&hiO.i===r,col2=on?acc:inc,Hx=g.x+g.hx*h,Hy=g.y+g.hy*h;
+  c.lineCap='round';c.beginPath();c.moveTo(P(g.x-g.ux*h),P(g.y-g.uy*h));c.lineTo(P(g.x+g.ux*h),P(g.y+g.uy*h));c.lineWidth=on?9:6;c.strokeStyle=col2;c.stroke();c.lineCap='butt';
+  c.beginPath();c.moveTo(P(Hx),P(Hy));c.lineTo(P(Hx+g.sx*d.w),P(Hy+g.sy*d.w));c.lineWidth=2;c.stroke();
+  c.beginPath();for(let t=0;t<=12;t++){const a=t/12*Math.PI/2,x=Hx+d.w*(-g.hx*Math.cos(a)+g.sx*Math.sin(a)),y=Hy+d.w*(-g.hy*Math.cos(a)+g.sy*Math.sin(a));t?c.lineTo(P(x),P(y)):c.moveTo(P(x),P(y))}c.setLineDash([4,3]);c.lineWidth=1.5;c.stroke();c.setLineDash([]);
+  badge(P(g.x)-g.sx*16,P(g.y)-g.sy*16,'כ'+(r+1),on)});
+ k.tills.forEach((t,r)=>{const on=hiO.t==='k'&&hiO.i===r,w=t.a===90?t.d:t.w,d=t.a===90?t.w:t.d;c.beginPath();c.rect(P(t.x-w/2),P(t.y-d/2),P(w),P(d));c.globalAlpha=on?.45:.25;c.fillStyle=acc;c.fill();c.globalAlpha=1;c.lineWidth=on?3:2;c.strokeStyle=acc;c.stroke();
+  c.fillStyle=ink;c.font='700 11px system-ui,sans-serif';c.fillText('ק'+(r+1),P(t.x),P(t.y));c.font='600 12px system-ui,sans-serif'});
+ if(k.cpend)dot(k.cpend[0],k.cpend[1],6,acc);
  if(k.mode==='sel'){c.lineWidth=1.5;c.strokeStyle=mut;k.rooms.forEach(p=>{for(let i=0;i<p.length;i+=2){c.beginPath();c.arc(P(p[i]),P(p[i+1]),5,0,7);c.stroke()}});k.rows.forEach(s=>{for(const i of [0,2]){c.beginPath();c.arc(P(s[i]),P(s[i+1]),5,0,7);c.stroke()}})}
  const s=k.sel;if(s){const L=s.t==='w'?k.rows[s.r]:s.r<0?k.cur:k.rooms[s.r];if(L){c.beginPath();c.arc(P(L[s.i]),P(L[s.i+1]),11,0,7);c.lineWidth=3;c.strokeStyle=acc;c.stroke()}}}
 
@@ -463,28 +526,38 @@ const HELP=`<div class="s3info" style="margin-top:8px"><b>איך מציירים<
 <li><b>פינות חדר:</b> מקישים על הפינות של החדר אחת אחרי השנייה, לפי הסדר מסביב לחדר (לפחות 3), ואז "סגרו חדר". החדר צריך להיות גדול ממטר רבוע, והקירות שלו לא יכולים לחצות זה את זה. החדר הראשון הוא החנות.</li>
 <li><b>שורה:</b> מקישים על תחילת השורה ואז על הסוף שלה. המספר שליד כל שורה הוא המספר שלה בשאלות שמתחת לשרטוט.</li>
 <li><b>הזזה ועריכה:</b> מקישים על פינה או על קצה של שורה – סביבה מופיע עיגול, וכתוב מה נבחר. אחר כך מקישים במקום החדש. כאן אפשר גם למחוק פינה או שורה, ולהוסיף פינה באמצע הקיר.</li>
-<li><b>כניסה וקופה:</b> בוחרים "כניסה" או "קופה" ומקישים במקום שלה בשרטוט.</li>
+<li><b>כניסות:</b> בוחרים "כניסות", קובעים רוחב, לאן הדלת נפתחת (פנימה/החוצה) ובאיזה צד הציר (כשעומדים בחוץ מול הדלת), ומקישים על הקיר. כל הקשה מוסיפה כניסה (עד 40). בשרטוט רואים את הדלת ואת הקשת שלאן היא נפתחת.</li>
+<li><b>קופות:</b> בוחרים "קופות". אפשר לכתוב רוחב ועומק ולהקיש במקום, או לבחור "סימון 2 פינות" ולהקיש על שתי פינות נגדיות. עד 40 קופות.</li>
+<li><b>שינוי ומחיקה:</b> לכל כניסה וקופה יש שורה ברשימה שמתחת לשרטוט – משנים שם מידות, כיוון ומחיקה. כשנוגעים בשדה, הפריט מודגש בשרטוט. להזזה: "הזזה ועריכה", מקישים על הכניסה או הקופה ואז במקום החדש.</li>
 <li><b>הגדלה:</b> "＋" מגדיל, "－" מקטין, "כל השרטוט" מחזיר לגודל הרגיל. כשהשרטוט מוגדל, גוררים באצבע כדי לזוז בו. כשיש פינה נבחרת, ההגדלה מתמקדת בה.</li>
 <li><b>צריך עוד מקום?</b> "הגדילו את המסגרת" ← בוחרים כמה מטרים ← מקישים על הצד (למעלה, למטה, ימינה או שמאלה). אחר כך מציירים שם את החדר החדש. אפשר עד 6 חדרים.</li>
 <li><b>טעות?</b> "ביטול אחרון" מבטל פעולה אחת בכל הקשה (עד 40 אחורה, עד שסוגרים את האפליקציה). "ניקוי" מוחק את כל השרטוט.</li>
 <li>כל הקשה נצמדת לנקודה הקרובה על רשת של חצי מטר.</li></ol></div>`;
 function skTools(){const k=W.sk,m=k.mode,F=frame();
  const chip=(v,l)=>`<button class="chip ${m===v?'on':''}" data-a="s3wSkM" data-m="${v}" aria-pressed="${m===v}">${l}</button>`;
- const hint={room:'הקישו על פינות החדר לפי הסדר, ואז "סגרו חדר".',row:k.pend?'הקישו על נקודת הסוף של השורה.':'הקישו על תחילת השורה ואז על הסוף שלה.',sel:k.sel?`נבחרה ${selName(k.sel)}. הקישו במקום החדש כדי להזיז, או בחרו פעולה.`:'הקישו על פינה או על קצה של שורה כדי לבחור.',ent:'הקישו במקום של הכניסה.',cash:'הקישו במקום של הקופה.'}[m];
- let h=`<div class="chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${chip('room','פינות חדר')}${chip('row','שורה')}${chip('sel','הזזה ועריכה')}${chip('ent','כניסה')}${chip('cash','קופה')}</div>`;
+ const hint={room:'הקישו על פינות החדר לפי הסדר, ואז "סגרו חדר".',row:k.pend?'הקישו על נקודת הסוף של השורה.':'הקישו על תחילת השורה ואז על הסוף שלה.',sel:k.sel?`נבחרה ${selName(k.sel)}. הקישו במקום החדש כדי להזיז, או בחרו פעולה.`:'הקישו על פינה, על קצה של שורה, על כניסה או על קופה כדי לבחור.',ent:'הקישו על הקיר במקום של כל כניסה. כל הקשה מוסיפה כניסה, והיא נצמדת לקיר הקרוב.',cash:TD.how==='box'?(k.cpend?'הקישו על הפינה הנגדית של הקופה.':'הקישו על פינה אחת של הקופה ואז על הפינה הנגדית.'):'הקישו במקום של כל קופה. כל הקשה מוסיפה קופה בגודל שכתבתם.'}[m];
+ let h=`<div class="chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${chip('room','פינות חדר')}${chip('row','שורה')}${chip('sel','הזזה ועריכה')}${chip('ent','כניסות')}${chip('cash','קופות')}</div>`;
+ const sel=(f,c,L,v)=>`<select data-c="${c}" data-f="${f}">${L.map(([a,b])=>opt(a,v,b)).join('')}</select>`;
+ if(m==='ent')h+=`<div class="s3info" style="margin-top:8px"><b>כניסה חדשה תהיה:</b><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:4px"><label class="f" style="flex:1;min-width:110px;margin:0"><span>רוחב (מטר)</span><input type="number" inputmode="decimal" min=".6" max="5" step=".1" data-c="s3wDf" data-f="w" value="${esc2(DF.w)}"></label><label class="f" style="flex:1;min-width:110px;margin:0"><span>נפתחת</span>${sel('io','s3wDf',[['in','פנימה'],['out','החוצה']],DF.io)}</label><label class="f" style="flex:1;min-width:110px;margin:0"><span>הציר (מבחוץ, מול הדלת)</span>${sel('dh','s3wDf',[['r','מימין'],['l','משמאל']],DF.dh)}</label></div><small class="note">אפשר לשנות כל כניסה גם אחר כך, ברשימה שמתחת לשרטוט.</small></div>`;
+ if(m==='cash')h+=`<div class="s3info" style="margin-top:8px"><div class="row" style="gap:6px;flex-wrap:wrap"><button class="chip ${TD.how==='one'?'on':''}" data-a="s3wTh" data-h="one" aria-pressed="${TD.how==='one'}">לפי מידות שכותבים</button><button class="chip ${TD.how==='box'?'on':''}" data-a="s3wTh" data-h="box" aria-pressed="${TD.how==='box'}">סימון 2 פינות על המפה</button></div>${TD.how==='one'?`<div class="row" style="gap:8px;margin-top:6px"><label class="f" style="flex:1;margin:0"><span>רוחב (מטר)</span><input type="number" inputmode="decimal" min=".3" max="10" step=".1" data-c="s3wDf" data-f="tw" value="${esc2(TD.w)}"></label><label class="f" style="flex:1;margin:0"><span>עומק (מטר)</span><input type="number" inputmode="decimal" min=".3" max="10" step=".1" data-c="s3wDf" data-f="td" value="${esc2(TD.d)}"></label></div>`:''}</div>`;
  h+=`<div class="row" style="gap:6px;margin-top:8px;align-items:center"><button class="btn s g" data-a="s3wZ" data-z="out" aria-label="הקטנה"${ZV.z>1?'':' disabled'}>－</button><button class="btn s g" data-a="s3wZ" data-z="in" aria-label="הגדלה"${ZV.z<4?'':' disabled'}>＋</button><button class="btn s g" data-a="s3wZ" data-z="fit"${ZV.z>1?'':' disabled'}>כל השרטוט</button><small class="note">${ZV.z>1?`מוגדל פי ${ZV.z} · גררו באצבע כדי לזוז`:''}</small><button class="btn s g" data-a="s3wHelp" style="margin-inline-start:auto" aria-expanded="${!!skHelp}">איך מציירים?</button></div>${F.tmp?'':`<div style="margin-top:6px"><button class="btn s g" data-a="s3wGrowT" aria-expanded="${!!growOpen}">הגדילו את המסגרת</button></div>`}${growOpen&&!F.tmp?`<div class="s3info" style="margin-top:6px"><label class="f" style="display:block;margin:0 0 6px"><span>כמה מטרים להוסיף</span><input type="number" inputmode="decimal" min=".5" max="98" step=".5" data-c="s3wGm" value="${esc2(growM)}"></label><div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn s g" data-a="s3wGrow" data-s="u">למעלה ↑</button><button class="btn s g" data-a="s3wGrow" data-s="d">למטה ↓</button><button class="btn s g" data-a="s3wGrow" data-s="r">ימינה →</button><button class="btn s g" data-a="s3wGrow" data-s="l">שמאלה ←</button></div><small class="note" style="display:block;margin-top:4px">המסגרת גדלה בצד שבוחרים, והשרטוט נשאר כמו שהוא. אפשר עד 100 מטר לכל צד. טעיתם? "ביטול אחרון".</small></div>`:''}${skHelp?HELP:''}
  <p class="note s3note" aria-live="polite">${hint}${F.tmp?' <b>השרטוט עוד בלי קנה מידה</b> – בסוף תתבקשו לרוחב אמיתי.':''}</p>`;
  h+=`<canvas id="s3wSk" data-a="s3wSkT" role="img" aria-label="שרטוט החנות. ${k.rooms.length} חדרים, ${k.rows.length} שורות" style="display:block;touch-action:${ZV.z>1?'none':'manipulation'};border:1px solid var(--line);background:var(--bg);margin:8px auto 0;cursor:crosshair"></canvas>`;
  {const m=skMax();if(m.x>F.w+1||m.y>F.l+1)h+=`<div class="ban s3warn" role="alert" style="margin-top:8px">חלק מהשרטוט נמצא מחוץ למסגרת, ולכן לא רואים אותו. <button class="btn s" data-a="s3wSkFit" style="margin-top:6px">הקטינו את השרטוט כדי שייכנס</button></div>`}
  h+=`<p class="s3note"><small>${F.tmp?'מסגרת זמנית (עוד בלי מידות), כל משבצת = יחידה':`רוחב ${+(F.w/100).toFixed(1)} מ', אורך ${+(F.l/100).toFixed(1)} מ', כל משבצת = ${Math.max(F.w,F.l)>3000?5:1} מ'`} · ${k.rooms.length} חדרים · ${k.rows.length} שורות${k.cur.length?` · חדר פתוח עם ${k.cur.length/2} פינות`:''}</small></p>`;
- h+=`<div class="row s3row" style="gap:6px">${m==='room'?`<button class="btn s" data-a="s3wSkClose"${k.cur.length>=6?'':' disabled'}>סגרו חדר</button>`:''}${m==='sel'&&k.sel?`<button class="btn s g" data-a="s3wSkDel">${k.sel.t==='w'?'מחקו שורה':'מחקו פינה'}</button>${k.sel.t==='c'&&k.sel.r>=0?`<button class="btn s g" data-a="s3wSkIns">הוסיפו פינה</button>`:''}`:''}<button class="btn s g" data-a="s3wSkUndo"${k.undo&&k.undo.length||k.pend?'':' disabled'}>ביטול אחרון</button><button class="btn s g" data-a="s3wSkClr"${skHas()?'':' disabled'}>ניקוי</button></div>`;
+ h+=`<div class="row s3row" style="gap:6px">${m==='room'?`<button class="btn s" data-a="s3wSkClose"${k.cur.length>=6?'':' disabled'}>סגרו חדר</button>`:''}${m==='sel'&&k.sel?`<button class="btn s g" data-a="s3wSkDel">${k.sel.t==='w'?'מחקו שורה':k.sel.t==='e'?'מחקו כניסה':k.sel.t==='k'?'מחקו קופה':'מחקו פינה'}</button>${k.sel.t==='c'&&k.sel.r>=0?`<button class="btn s g" data-a="s3wSkIns">הוסיפו פינה</button>`:''}`:''}<button class="btn s g" data-a="s3wSkUndo"${k.undo&&k.undo.length||k.pend||k.cpend?'':' disabled'}>ביטול אחרון</button><button class="btn s g" data-a="s3wSkClr"${skHas()?'':' disabled'}>ניקוי</button></div>`;
  return h}
 /* שאלות ההמשך על השרטוט: סוג כל חדר, סוג כל שורה, כניסה/קופה, ורוחב אמיתי כשאין מידות */
 function skAsk(){const k=W.sk;skNorm();if(!skHas())return '';let h=`<div class="s3info"><b>כמה שאלות על השרטוט</b>`;
  if(frame().tmp)h+=`<label class="f" style="display:block;margin:8px 0"><span>כמה מטרים בערך רוחב החנות בשרטוט (מהקיר השמאלי לימני)?</span><input type="number" inputmode="decimal" min="2" max="100" step=".5" data-c="s3wRw" value=""></label>`;
  if(k.rooms.length)h+=k.rooms.map((p,i)=>`<label class="f" style="display:block;margin:8px 0 0"><span>חדר ${i+1} – מה זה?</span><select data-c="s3wRt" data-i="${i}">${['s','w','x'].map(v=>opt(v,k.rt[i],RT_L[v])).join('')}</select></label>`).join('');
  if(k.rows.length)h+=k.rows.map((s,i)=>`<label class="f" style="display:block;margin:8px 0 0"><span>שורה ${i+1} – מה יש בה?</span><select data-c="s3wRk" data-i="${i}">${['gon','wall','fridge'].map(v=>opt(v,k.rk[i],RK_L[v])).join('')}</select></label>`).join('');
- h+=`<p class="s3note"><small>${k.ent?'הכניסה סומנה ✓':'הכניסה לא סומנה – בחרו "כניסה" והקישו על השרטוט.'} ${k.cash?'הקופה סומנה ✓':'הקופה לא סומנה – בחרו "קופה" והקישו על השרטוט.'}</small></p></div>`;
+ const ml=(c,f,i,v,a,b,st)=>`<label class="f" style="flex:1;min-width:90px;margin:0"><span>${a}</span><input type="number" inputmode="decimal" min="${b[0]}" max="${b[1]}" step="${st}" data-c="${c}" data-f="${f}" data-i="${i}" value="${+(v/100).toFixed(2)}"></label>`;
+ const sl=(c,f,i,L,v,a)=>`<label class="f" style="flex:1;min-width:90px;margin:0"><span>${a}</span><select data-c="${c}" data-f="${f}" data-i="${i}">${L.map(([x,y])=>opt(x,v,y)).join('')}</select></label>`;
+ const del=(t,i,l)=>`<button class="btn s g" data-a="s3wDoDel" data-t="${t}" data-i="${i}" aria-label="מחקו ${l}" style="align-self:flex-end">מחקו</button>`;
+ h+=k.doors.map((d,i)=>`<div style="margin:10px 0 0"><b>כניסה ${i+1} (כ${i+1})</b><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px">${ml('s3wDo','w',i,d.w,'רוחב (מטר)',[.6,5],.1)}${sl('s3wDo','io',i,[['in','פנימה'],['out','החוצה']],d.io,'נפתחת')}${sl('s3wDo','dh',i,[['r','מימין'],['l','משמאל']],d.dh,'ציר (מבחוץ)')}${del('e',i,'כניסה '+(i+1))}</div></div>`).join('');
+ h+=k.tills.map((t,i)=>`<div style="margin:10px 0 0"><b>קופה ${i+1} (ק${i+1})</b><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px">${ml('s3wTi','w',i,t.w,'רוחב (מטר)',[.3,10],.1)}${ml('s3wTi','d',i,t.d,'עומק (מטר)',[.3,10],.1)}${sl('s3wTi','a',i,[['0','רגיל'],['90','מסובב 90°']],String(t.a),'סיבוב')}${del('k',i,'קופה '+(i+1))}</div></div>`).join('');
+ h+=`<p class="s3note"><small>${k.doors.length?`${k.doors.length} כניסות ✓`:'אין עדיין כניסה – בחרו "כניסות" והקישו על הקיר.'} ${k.tills.length?`${k.tills.length} קופות ✓`:'אין עדיין קופה – בחרו "קופות" והקישו על השרטוט.'}</small></p></div>`;
  return h}
 function stepDet(){const p=W.q.path;
  let h=stepper(1)+`<b>פרטים על החנות</b><p class="note s3note">לא חובה, אבל מומלץ מאוד: מתמונות בלבד אי אפשר לדעת את גודל החנות ואיפה השורות. כמה פרטים ושרטוט גס משפרים מאוד את הטיוטה. ה-AI ישתמש בהם כנתונים מחייבים, ויוסיף מהתמונות את סוגי המדפים והפרטים.</p>`;

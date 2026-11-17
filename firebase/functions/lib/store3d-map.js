@@ -87,8 +87,9 @@ const SCHEMA = {
   rooms: { name: S(1, 30), p: { t: 'poly', req: true }, h: I(200, 600), tex: { t: 'tex', req: false } },
   walls: { p: { t: 'seg', req: true }, t: I(5, 50) },
   cols: Object.assign({}, XY, { w: I(10, 300), d: I(10, 300), rnd: B(false) }),
-  doors: Object.assign({}, XY, { w: I(60, 500), a: I(0, 359), k: E(['ent', 'in', 'emg', 'wh']) }),
-  syms: Object.assign({ k: E(['cash', 'ent', 'exit']) }, XY, { a: I(0, 359) }),
+  // sw/hg (לא חובה): לאיזה צד הדלת נפתחת ובאיזה קצה הציר (1/-1). w/d בסמל (לא חובה): גודל הקופה בס"מ
+  doors: Object.assign({}, XY, { w: I(60, 500), a: I(0, 359), k: E(['ent', 'in', 'emg', 'wh']), sw: E([1, -1], false), hg: E([1, -1], false) }),
+  syms: Object.assign({ k: E(['cash', 'ent', 'exit']) }, XY, { a: I(0, 359), w: I(30, 1000, false), d: I(30, 1000, false) }),
   tx: { path: { t: 'path', req: true }, w: E(TEX_SIDES), h: E(TEX_SIDES) },
   fx: Object.assign({ k: E(FX_K) }, XY, {
     w: I(30, 2000), d: I(20, 300), h: I(30, 300), a: I(0, 359), sides: E([1, 2]), bays: I(1, 30), lvl: I(1, 12),
