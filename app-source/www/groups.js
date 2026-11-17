@@ -18,7 +18,8 @@ const lTime=ms=>{if(!ms)return'';const k=dk(ms),n=Date.now();if(k===dk(n))return
 const dur=s=>{s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 const qrun=async(parent,sq)=>{const r=await fsx((parent||'')+':runQuery',{method:'POST',body:JSON.stringify({structuredQuery:sq})});return(r||[]).filter(x=>x.document).map(x=>x.document)};
 const tF=(op,v)=>({fieldFilter:{field:{fieldPath:'t'},op,value:iv(v)}});
-const gOf=d=>{const f=fvj({mapValue:d})||{},l=f.last&&typeof f.last==='object'?f.last:null;return{id:idOf(d),name:String(f.name||'').slice(0,60),mem:Array.isArray(f.mem)?f.mem.map(String):[],ao:f.ao===true,md:f.md===true,t:+f.t||0,last:l?{txt:String(l.txt||''),byN:String(l.byN||''),t:+l.t||0,k:String(l.k||'t')}:null,rt:0,mu:false,n:0,np:false}};
+const pOf=p=>p&&typeof p==='object'&&idOk(String(p.mid||''))?{mid:String(p.mid),txt:String(p.txt||'').slice(0,120),byN:String(p.byN||''),t:+p.t||0,k:String(p.k||'t')}:null;
+const gOf=d=>{const f=fvj({mapValue:d})||{},l=f.last&&typeof f.last==='object'?f.last:null;return{id:idOf(d),name:String(f.name||'').slice(0,60),mem:Array.isArray(f.mem)?f.mem.map(String):[],ao:f.ao===true,md:f.md===true,t:+f.t||0,last:l?{txt:String(l.txt||''),byN:String(l.byN||''),t:+l.t||0,k:String(l.k||'t')}:null,rt:0,mu:false,n:0,np:false,pin:pOf(f.pin)}};
 const mOf=d=>{const f=fvj({mapValue:d})||{};return{id:idOf(d),by:String(f.by||''),byN:String(f.byN||''),t:+f.t||0,k:f.k==='img'||f.k==='vid'?f.k:'t',txt:String(f.txt||''),vp:String(f.vp||''),vs:+f.vs||0,vb:+f.vb||0}};
 const gGet=id=>(GR.L||[]).find(g=>g.id===id)||(GR.c&&GR.c.g&&GR.c.g.id===id?GR.c.g:null);
 const lastTx=g=>{const l=g.last;if(!l)return'אין הודעות עדיין';const t=l.k==='img'?'📷 תמונה':l.k==='vid'?'🎬 סרטון':l.txt;return(l.byN?l.byN+': ':'')+t};
@@ -43,6 +44,8 @@ const st=document.createElement('style');st.textContent=`
 .gr-pic .ph{display:flex;align-items:center;justify-content:center;min-height:90px;font-size:.8rem;padding:6px;text-align:center}
 .gr-pic .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--ink)}
 .gr-pic .dr{position:absolute;bottom:4px;inset-inline-end:6px;font-size:.74rem;background:var(--card);color:var(--ink);padding:0 6px;border-radius:8px}
+.gr-pin{display:block;width:100%;text-align:start;background:var(--card);color:var(--ink);border:1px solid var(--line);border-inline-start:4px solid var(--acc);border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;min-height:40px}
+.gr-b.hl{outline:2px solid var(--acc);outline-offset:2px}
 .gr-dsep{align-self:center;font-size:.76rem;color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:2px 12px}
 .gr-unr{align-self:stretch;text-align:center;font-size:.8rem;font-weight:800;color:var(--onacc);background:var(--acc);border-radius:20px;padding:3px 0;scroll-margin-top:70px}
 #grcomp{position:sticky;bottom:0;background:var(--bg);padding:8px 0 calc(8px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
@@ -86,7 +89,11 @@ V.gr=()=>{
  return{t:'קבוצות',s:GR.n?GR.n+' הודעות שלא נקראו':'',h:`${top}${GR.L.length?GR.L.map(rowH).join(''):`<p class="note">${adm?'עוד אין קבוצות. אפשר ליצור קבוצה חדשה.':'אתה עוד לא חבר באף קבוצה.'}</p>`}${GR.err?`<p class="note">${esc(GR.err)}</p>`:''}<button class="btn g w" data-a="grRefresh" style="margin-top:8px">רענן</button>`}};
 ACT.grRefresh=()=>{GR.at=0;grLoad();toast('מרענן...')};
 ACT.grOpen=el=>{const id=el.dataset.id;if(!idOk(id))return;const g=gGet(id);if(!g)return;GR.c={gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0};go('grc',id)};
-window.GRP={n:()=>on()?GR.n:0,tick:grTick,off:()=>GR.off};
+/* לחיצה על התראה (data.k='grp', data.id=gid): פותח את שיחת הקבוצה */
+async function grOpenId(id){if(!on()||!idOk(String(id||'')))return;
+ try{const g=gOf(await fsx('/grp/'+id));if(!g.id)throw 0;GR.c={gid:id,g,msgs:[],more:false,rt:0,rtSaved:0,unr:'',ready:0,loading:1,started:0,draft:'',sending:'',gone:0,tm:0};go('grc',id)}
+ catch(e){toast('הקבוצה לא זמינה')}}
+window.GRP={n:()=>on()?GR.n:0,tick:grTick,off:()=>GR.off,open:grOpenId};
 
 /* ---- שיחה ---- */
 const mineId=m=>m.by===SY.uid;
@@ -94,7 +101,7 @@ function msgH(m,c){
  const me=mineId(m),adm=fbAdmin();let b='';
  if(m.k==='img'){const du=GR.img[c.gid+'/'+m.id];b=`<button class="gr-pic" data-a="grImg" data-id="${esc(m.id)}" aria-label="תמונה">${du?`<img src="${esc(du)}" alt="תמונה">`:`<span class="ph" data-gimg="${esc(m.id)}">${GR.img['x'+c.gid+'/'+m.id]?'התמונה לא נטענה. לחץ לנסות שוב':'טוען תמונה…'}</span>`}</button>`}
  else if(m.k==='vid'){const old=Date.now()-m.t>90*DAY;b=old||m.gone?`<div class="gr-pic" style="cursor:default"><span class="ph">🎬 הסרטון נמחק אחרי 90 יום</span></div>`:`<button class="gr-pic" data-a="grVid" data-id="${esc(m.id)}" aria-label="סרטון"><span class="ph" style="min-height:110px;background:var(--bg)"></span><span class="play">▶</span><span class="dr">${dur(m.vs)}</span></button>`}
- return `<div class="gr-b${me?' me':''}" data-mid="${esc(m.id)}">${adm?`<button class="dl" data-a="grDel" data-id="${esc(m.id)}" aria-label="אפשרויות הודעה">⋯</button>`:''}${me?'':`<div class="who">${esc(m.byN||'')}</div>`}${b}${m.txt?`<div class="tx">${esc(m.txt)}</div>`:''}<div class="tm">${hm(m.t)}</div></div>`}
+ return `<div class="gr-b${me?' me':''}" data-mid="${esc(m.id)}">${adm?`<button class="dl" data-a="grMenu" data-id="${esc(m.id)}" aria-label="אפשרויות הודעה">⋯</button>`:''}${me?'':`<div class="who">${esc(m.byN||'')}</div>`}${b}${m.txt?`<div class="tx">${esc(m.txt)}</div>`:''}<div class="tm">${hm(m.t)}</div></div>`}
 function msgsH(c){
  if(!c.ready)return `<p class="note">${c.err?esc(c.err):'טוען…'}</p>`;
  if(!c.msgs.length)return '<p class="note">אין הודעות עדיין.</p>';
@@ -103,6 +110,8 @@ function msgsH(c){
  c.msgs.forEach((m,i)=>{const k=dk(m.t);if(k!==last){h+=`<div class="gr-dsep">${esc(dLbl(m.t))}</div>`;last=k}
   if(i===ui)h+=`<div class="gr-unr" id="grunr">${un}${c.more&&ui===0?'+':''} ${un===1?'הודעה שלא נקראה':'הודעות שלא נקראו'}</div>`;h+=msgH(m,c)});
  return h}
+function pinH(c){const p=c.g.pin;return p?`<button class="gr-pin" data-a="grPinGo" aria-label="הודעה מוצמדת">📌 ${esc(p.txt)}</button>`:''}
+function grPinPaint(){const c=GR.c;if(!c||cur().v!=='grc'||cur().a!==c.gid)return;const e=$('#grpin');if(e)e.innerHTML=pinH(c)}
 function compH(c){const g=c.g;
  if(!fbAdmin()&&g.ao)return '<div class="gr-lock">🔒 רק המנהל יכול לשלוח הודעות בקבוצה הזו</div>';
  const dis=c.sending?' disabled':'';
@@ -114,7 +123,7 @@ function topH(c){const g=c.g;
 V.grc=gid=>{
  const c=GR.c;if(!on()||!c||c.gid!==gid)return{t:'קבוצה',s:'',h:'<div class="card"><p class="note">הקבוצה לא זמינה.</p></div>'};
  if(!c.started){c.started=1;grEnter(c)}
- return{t:c.g.name,s:'קבוצה',h:`<div id="grtop">${topH(c)}</div><div id="grmsgs">${msgsH(c)}</div><div id="grcomp">${compH(c)}</div>`}};
+ return{t:c.g.name,s:'קבוצה',h:`<div id="grtop">${topH(c)}</div><div id="grpin">${pinH(c)}</div><div id="grmsgs">${msgsH(c)}</div><div id="grcomp">${compH(c)}</div>`}};
 const atBottom=()=>window.innerHeight+window.scrollY>=document.documentElement.scrollHeight-160;
 function grPaint(opt){const c=GR.c;if(!c||cur().v!=='grc'||cur().a!==c.gid)return;const m=$('#grmsgs');if(!m)return;
  const bot=atBottom(),h0=document.documentElement.scrollHeight;m.innerHTML=msgsH(c);
@@ -125,7 +134,7 @@ function grScrollInit(){const u=document.getElementById('grunr');if(u)u.scrollIn
 async function grEnter(c){
  try{
   try{const r=await fsx('/grp/'+c.gid+'/r/'+SY.uid),f=fvj({mapValue:r})||{};c.rt=+f.t||0;c.g.mu=f.mu===true}catch(e){if(e.code!==404)throw e}
-  c.rtSaved=c.rt;
+  c.rtSaved=c.rt;grPinGet(c);
   const d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],orderBy:[{field:{fieldPath:'t'},direction:'DESCENDING'}],limit:PAGE});
   c.msgs=d.map(mOf).filter(m=>idOk(m.id)).reverse();c.more=d.length>=PAGE;
   const f=c.msgs.find(m=>m.t>c.rt&&!mineId(m));c.unr=f?f.id:'';c.ready=1;c.loading=0}
@@ -134,12 +143,14 @@ async function grEnter(c){
  const m=$('#grmsgs');if(m){m.innerHTML=msgsH(c);grScrollInit();grImgs()}
  const t=$('#grtop');if(t)t.innerHTML=topH(c);
  grMark();grPoll(c)}
+async function grPinGet(c){try{const d=await fsx('/grp/'+c.gid),p=pOf((fvj({mapValue:d})||{}).pin);if(GR.c!==c)return;if(JSON.stringify(p)!==JSON.stringify(c.g.pin||null)){c.g.pin=p;grPinPaint()}}catch(e){}}
 /* סימון "נקרא עד" – הודעה אחרונה שנטענה (לא קודם ממה שכבר נשמר) */
 function grMark(){const c=GR.c;if(!c||!c.ready)return;const nt=c.msgs.reduce((a,m)=>Math.max(a,m.t),c.rtSaved);if(nt<=c.rtSaved)return;c.rtSaved=nt;
  fsx('/grp/'+c.gid+'/r/'+SY.uid+'?updateMask.fieldPaths=t',{method:'PATCH',body:JSON.stringify({fields:{t:iv(nt)}})}).catch(()=>{});
  const g=gGet(c.gid);if(g&&g!==c.g){g.rt=nt}c.g.rt=nt;c.g.n=0;c.g.np=false;recount();try{wbUp()}catch(e){}}
 function grPoll(c){clearTimeout(c.tm);c.tm=setTimeout(async()=>{
  if(GR.c!==c||cur().v!=='grc'||cur().a!==c.gid)return;
+ c.pt=(c.pt||0)+1;if(c.pt%4===0)grPinGet(c);
  try{const nw=c.msgs.reduce((a,m)=>Math.max(a,m.t),0),d=await qrun('/grp/'+c.gid,{from:[{collectionId:'m'}],where:tF('GREATER_THAN',nw),orderBy:[{field:{fieldPath:'t'},direction:'ASCENDING'}],limit:PAGE});
   const add=d.map(mOf).filter(m=>idOk(m.id)&&!c.msgs.some(x=>x.id===m.id));if(add.length&&GR.c===c){c.msgs=c.msgs.concat(add);grPaint();grMark()}}catch(e){}
  grPoll(c)},8000)}
@@ -173,7 +184,7 @@ INP.grDraft=el=>{if(GR.c)GR.c.draft=el.value};
 /* שליחה */
 const newMid=()=>{const m=uid();return idOk(m)?m:'m'+Date.now().toString(36)};
 async function grPost(c,k,txt,x){
- const mid=x&&x.mid||newMid(),f={by:sv(SY.uid),byN:sv(fbBy().slice(0,60)),t:iv(Date.now()),k:sv(k),txt:sv(txt)};
+ const mid=x&&x.mid||newMid(),f={by:sv(SY.uid),byN:sv(fbBy().slice(0,100)),t:iv(Date.now()),k:sv(k),txt:sv(txt)};
  if(x&&x.vp){f.vp=sv(x.vp);f.vs=iv(x.vs);f.vb=iv(x.vb)}
  await fsx('/grp/'+c.gid+'/m?documentId='+encodeURIComponent(mid),{method:'POST',body:JSON.stringify({fields:f})});
  const m={id:mid,by:SY.uid,byN:fbBy(),t:+f.t.integerValue,k,txt,vp:x&&x.vp||'',vs:x&&x.vs||0,vb:x&&x.vb||0};
@@ -220,8 +231,25 @@ async function grVideo(c,f){
 CHG.grMute=async el=>{const c=GR.c;if(!c)return;const v=el.checked;
  try{await fsx('/grp/'+c.gid+'/r/'+SY.uid+'?updateMask.fieldPaths=mu',{method:'PATCH',body:JSON.stringify({fields:{mu:bv(v)}})});c.g.mu=v;recount();toast(v?'הקבוצה הושתקה':'ההשתקה בוטלה')}
  catch(e){el.checked=!v;toast(tkErr(e))}};
+/* ⋯ של הודעה (מנהל): הצמדה / מחיקה */
+ACT.grMenu=el=>{const c=GR.c;if(!c||!fbAdmin())return;const id=el.dataset.id;if(!c.msgs.some(x=>x.id===id))return;const pd=c.g.pin&&c.g.pin.mid===id;
+ dlg(`<h3>אפשרויות הודעה</h3><button class="btn g w" data-a="grPin" data-id="${esc(id)}" style="margin-bottom:8px">${pd?'בטל הצמדה':'📌 הצמד'}</button><button class="btn r w" data-a="grDel" data-id="${esc(id)}" style="margin-bottom:8px">🗑 מחק הודעה</button><button class="btn g w" data-a="closeDlg">ביטול</button>`)};
+/* הצמדה: עדכון חלקי של השדה pin בלבד; שרת ישן (403) = הודעה ברורה */
+ACT.grPin=async el=>{const c=GR.c;if(!c||!fbAdmin())return;closeDlg();const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;
+ const un=c.g.pin&&c.g.pin.mid===id,q='/grp/'+c.gid+'?updateMask.fieldPaths=pin';
+ try{if(un){await fsx(q,{method:'PATCH',body:JSON.stringify({fields:{}})});c.g.pin=null;toast('ההצמדה בוטלה')}
+  else{const txt=m.k==='img'?'📷 תמונה':m.k==='vid'?'🎬 סרטון':String(m.txt||'').replace(/\s+/g,' ').trim().slice(0,120),byN=fbBy().slice(0,100),t=Date.now();
+   await fsx(q,{method:'PATCH',body:JSON.stringify({fields:{pin:{mapValue:{fields:{mid:sv(id),txt:sv(txt),byN:sv(byN),t:iv(t),k:sv(m.k)}}}}})});c.g.pin={mid:id,txt,byN,t,k:m.k};toast('ההודעה הוצמדה')}
+  grPinPaint()}
+ catch(e){toast(e&&e.code===403?'ההצמדה תופעל בקרוב (השרת עוד לא מוכן)':tkErr(e))}};
+/* לחיצה על הפס: גלילה להודעה (טוען עמודים קודמים עד גבול סביר) והדגשה */
+ACT.grPinGo=async()=>{const c=GR.c;if(!c||!c.g.pin||!c.ready)return;const id=c.g.pin.mid;let n=0;
+ while(!c.msgs.some(x=>x.id===id)&&c.more&&n<10){if(c.loading){await new Promise(r=>setTimeout(r,100));continue}n++;await ACT.grMore()}
+ if(GR.c!==c)return;const e=document.querySelector('#grmsgs [data-mid="'+id+'"]');
+ if(!e)return toast('ההודעה המוצמדת לא נמצאה (ייתכן שנמחקה)');
+ e.scrollIntoView({block:'center',behavior:'smooth'});e.classList.add('hl');setTimeout(()=>e.classList.remove('hl'),1800)};
 /* מחיקת הודעה – מנהל בלבד */
-ACT.grDel=el=>{const c=GR.c;if(!c||!fbAdmin())return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;
+ACT.grDel=el=>{const c=GR.c;if(!c||!fbAdmin())return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;closeDlg();
  ask('למחוק את ההודעה? אי אפשר לשחזר.',async()=>{
   try{if(m.k==='img'){try{await fsx('/grp/'+c.gid+'/m/'+id+'/p/1',{method:'DELETE'})}catch(e){if(e.code!==404)throw e}}
    await fsx('/grp/'+c.gid+'/m/'+id,{method:'DELETE'});c.msgs=c.msgs.filter(x=>x.id!==id);grPaint();toast('ההודעה נמחקה')}

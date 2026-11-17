@@ -11,8 +11,8 @@ const S = (v) => ({ stringValue: String(v) }), I = (v) => ({ integerValue: Strin
 const T0 = H.T0, D1 = 864e5, H1 = 36e5, MIN = 6e4;
 const DOCS = 'projects/demo-largpeami/databases/(default)/documents/';
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-let DB, LOG, G403, VID404;
-const reset = () => { DB = { grp: {}, m: {}, r: {}, p: {}, staff: {} }; LOG = []; G403 = false; VID404 = false; };
+let DB, LOG, G403, VID404, PIN403;
+const reset = () => { DB = { grp: {}, m: {}, r: {}, p: {}, staff: {} }; LOG = []; G403 = false; VID404 = false; PIN403 = false; };
 const grp = (id, o) => { DB.grp[id] = Object.assign({ name: S('קבוצה'), mem: A(['w1', 'w2']), ao: B(false), md: B(true), by: S('m'), t: I(T0 - 9 * D1) }, o); DB.m[id] = DB.m[id] || {}; };
 const msg = (g, id, o) => { DB.m[g][id] = Object.assign({ by: S('m'), byN: S('המנהל'), t: I(T0 - H1), k: S('t'), txt: S('הודעה ' + id) }, o); };
 const seed = () => {
@@ -61,7 +61,8 @@ async function mockCloud(ctx, who) {
       if (m === 'POST') { const id = u.searchParams.get('documentId'); DB.grp[id] = JSON.parse(body).fields; DB.m[id] = {}; return ok(docOf('grp/' + id, DB.grp[id])); } }
     const g = s[1];
     if (s.length === 2) { if (m === 'DELETE') { delete DB.grp[g]; return ok({}); }
-      if (m === 'PATCH') { const f = JSON.parse(body).fields; for (const k of u.searchParams.getAll('updateMask.fieldPaths')) DB.grp[g][k] = f[k]; return ok(docOf('grp/' + g, DB.grp[g])); } }
+      if (m === 'GET') return DB.grp[g] ? ok(docOf('grp/' + g, DB.grp[g])) : err(404, 'NOT_FOUND');
+      if (m === 'PATCH') { if (PIN403) return err(403, 'PERMISSION_DENIED'); const f = JSON.parse(body).fields; for (const k of u.searchParams.getAll('updateMask.fieldPaths')) { if (f[k]) DB.grp[g][k] = f[k]; else delete DB.grp[g][k]; } return ok(docOf('grp/' + g, DB.grp[g])); } }
     if (s[2] === 'r' && s.length === 4) { const k = g + '/' + s[3]; if (m === 'GET') return DB.r[k] ? ok(docOf('grp/' + k.replace('/', '/r/'), DB.r[k])) : err(404, 'NOT_FOUND');
       if (m === 'PATCH') { const f = JSON.parse(body).fields; DB.r[k] = DB.r[k] || {}; for (const q of u.searchParams.getAll('updateMask.fieldPaths')) DB.r[k][q] = f[q]; return ok({}); } }
     if (s[2] === 'm' && s.length === 4) { if (m === 'DELETE') { delete DB.m[g][s[3]]; return ok({}); } }
@@ -132,7 +133,7 @@ const sent = (re) => LOG.filter((l) => l.m === 'POST' && re.test(l.R));
   LOG.length = 0; await wp.check('input[data-c=grMute]'); await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && /\/r\/w1$/.test(l.R)));
   const mu = LOG.find((l) => l.m === 'PATCH' && /\/r\/w1$/.test(l.R));
   check('6 השתקה: PATCH ל-r/w1 עם mu=true בלבד', mu && mu.body.fields.mu.booleanValue === true && /updateMask.fieldPaths=mu$/.test(mu.q) && DB.r['g1/w1'].mu.booleanValue === true, mu && mu.q);
-  check('6א לעובד אין כפתור מחיקה/הגדרות בקבוצה', await wp.evaluate(() => !document.querySelector('[data-a=grDel]') && !document.querySelector('[data-a=grSet]')));
+  check('6א לעובד אין כפתור מחיקה/הגדרות בקבוצה', await wp.evaluate(() => !document.querySelector('[data-a=grMenu]') && !document.querySelector('[data-a=grPin]') && !document.querySelector('[data-a=grSet]')));
   await wp.evaluate(() => goBack()); await sleep(400); await wp.click('.gr-row[data-id=g2]'); await sleep(900);
   const ao = await wp.evaluate(() => ({ lock: (document.querySelector('.gr-lock') || {}).innerText || '', ta: !!document.getElementById('grtx'), clip: !!document.querySelector('input[data-c=grFile]'), mute: !!document.querySelector('input[data-c=grMute]') }));
   check('7 קבוצה עם ao לעובד: פס "רק המנהל יכול לשלוח", בלי שורת כתיבה, בלי השתקה', /רק המנהל יכול לשלוח הודעות בקבוצה הזו/.test(ao.lock) && !ao.ta && !ao.clip && !ao.mute, ao);
@@ -168,8 +169,8 @@ const sent = (re) => LOG.filter((l) => l.m === 'POST' && re.test(l.R));
   check('13א אחרי השמירה חוזרים לרשימה והקבוצה החדשה מוצגת', await waitFor(() => mp.evaluate(() => cur().v === 'gr' && document.querySelectorAll('.gr-row').length === 5)));
   // עריכה
   await mp.click('.gr-row[data-id=g1]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('[data-a=grSet]'))); await sleep(700);
-  check('14 מנהל בשיחה: ⋯ על כל הודעה, "הגדרות", בלי שורת השתקה, ובלי פס לא-נקרא לשליחות שלו', await mp.evaluate(() => document.querySelectorAll('[data-a=grDel]').length === 6 && !document.querySelector('input[data-c=grMute]')));
-  LOG.length = 0; await mp.evaluate(() => document.querySelector('[data-a=grDel][data-id=m4]').click()); await sleep(300);
+  check('14 מנהל בשיחה: ⋯ על כל הודעה, "הגדרות", בלי שורת השתקה, ובלי פס לא-נקרא לשליחות שלו', await mp.evaluate(() => document.querySelectorAll('[data-a=grMenu]').length === 6 && !document.querySelector('input[data-c=grMute]')));
+  LOG.length = 0; await mp.evaluate(() => document.querySelector('[data-a=grMenu][data-id=m4]').click()); await sleep(300); await mp.click('#dlg [data-a=grDel]'); await sleep(300);
   check('15 מחיקת הודעה: חלון אישור, ובלי אישור לא נמחק', await mp.evaluate(() => document.getElementById('dlg').open && /למחוק את ההודעה/.test(document.getElementById('dlg').innerText)) && !LOG.some((l) => l.m === 'DELETE'));
   await mp.click('#dlg [data-a=yes]'); await waitFor(async () => LOG.some((l) => l.m === 'DELETE')); await sleep(300);
   check('15א אחרי אישור: DELETE להודעה והיא נעלמה מהמסך', LOG.some((l) => l.m === 'DELETE' && l.R === '/grp/g1/m/m4') && !DB.m.g1.m4 && await mp.evaluate(() => !document.querySelector('[data-mid=m4]')));
@@ -184,7 +185,72 @@ const sent = (re) => LOG.filter((l) => l.m === 'POST' && re.test(l.R));
   await mp.click('#dlg [data-a=yes]'); await waitFor(async () => LOG.some((l) => l.m === 'DELETE')); await sleep(400);
   check('17א נמחקה הקבוצה וחזרנו לרשימה בלי g3', !DB.grp.g3 && await waitFor(() => mp.evaluate(() => cur().v === 'gr' && !/סניף אחר/.test(document.getElementById('main').innerText))));
   check('18 אין שגיאות JS (מנהל)', mp.__errors.length === 0, mp.__errors);
+
+  // ===== הצמדה =====
+  await mp.evaluate(() => go('gr')); await sleep(300); await mp.click('.gr-row[data-id=g1]'); await waitFor(() => mp.evaluate(() => !!document.querySelector('[data-a=grMenu]'))); await sleep(500);
+  check('19 לפני הצמדה אין פס', await mp.evaluate(() => !document.querySelector('.gr-pin')));
+  await mp.evaluate(() => document.querySelector('[data-a=grMenu][data-id=m3]').click()); await sleep(300);
+  check('19א תפריט ⋯ למנהל: "📌 הצמד" ו"מחק הודעה"', await mp.evaluate(() => /📌 הצמד/.test(document.getElementById('dlg').innerText) && !!document.querySelector('#dlg [data-a=grDel]')));
+  LOG.length = 0; await mp.click('#dlg [data-a=grPin]'); await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && l.R === '/grp/g1')); await sleep(300);
+  const pn = LOG.find((l) => l.m === 'PATCH' && l.R === '/grp/g1'), pf = pn && pn.body.fields.pin && pn.body.fields.pin.mapValue.fields;
+  check('20 הצמדה: PATCH ל-grp/g1 עם updateMask=pin בלבד ו-pin {mid,txt,byN,t,k}', pn && /^\?updateMask\.fieldPaths=pin$/.test(pn.q) && Object.keys(pn.body.fields).join() === 'pin' && pf && pf.mid.stringValue === 'm3' && pf.txt.stringValue === 'הגיעו הצבעים' && pf.byN.stringValue === 'm' && +pf.t.integerValue > 0 && pf.k.stringValue === 't' && Object.keys(pf).sort().join() === 'byN,k,mid,t,txt', pn && pn.body);
+  check('20א הפס מופיע אצל המנהל: "📌 הגיעו הצבעים"', await mp.evaluate(() => { const e = document.querySelector('.gr-pin'); return !!e && e.innerText.trim() === '📌 הגיעו הצבעים'; }));
+  await mp.evaluate(() => document.querySelector('[data-a=grMenu][data-id=m3]').click()); await sleep(300);
+  check('20ב בהודעה המוצמדת התפריט מציג "בטל הצמדה"', await mp.evaluate(() => /בטל הצמדה/.test(document.getElementById('dlg').innerText)));
+  await mp.evaluate(() => closeDlg());
+  await shot(mp, shots, 'r3-הצמדה');
+  // תמונה וסרטון: טקסט קבוע
+  LOG.length = 0; await mp.evaluate(() => document.querySelector('[data-a=grMenu][data-id=m5]').click()); await sleep(300); await mp.click('#dlg [data-a=grPin]'); await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && l.R === '/grp/g1')); await sleep(200);
+  check('20ג הצמדת תמונה: txt="📷 תמונה", k=img', DB.grp.g1.pin.mapValue.fields.txt.stringValue === '📷 תמונה' && DB.grp.g1.pin.mapValue.fields.k.stringValue === 'img');
+  await mp.evaluate(() => document.querySelector('[data-a=grMenu][data-id=m0]').click()); await sleep(300); await mp.click('#dlg [data-a=grPin]'); await sleep(400);
+  check('20ד הצמדת סרטון: txt="🎬 סרטון"; ההצמדה החדשה מחליפה את הקודמת', DB.grp.g1.pin.mapValue.fields.txt.stringValue === '🎬 סרטון' && DB.grp.g1.pin.mapValue.fields.mid.stringValue === 'm0');
+  // ביטול
+  await mp.evaluate(() => document.querySelector('[data-a=grMenu][data-id=m0]').click()); await sleep(300); LOG.length = 0; await mp.click('#dlg [data-a=grPin]'); await waitFor(async () => LOG.some((l) => l.m === 'PATCH' && l.R === '/grp/g1')); await sleep(300);
+  const un = LOG.find((l) => l.m === 'PATCH' && l.R === '/grp/g1');
+  check('21 ביטול הצמדה: PATCH עם updateMask=pin וגוף ריק, pin נמחק והפס נעלם', un && /^\?updateMask\.fieldPaths=pin$/.test(un.q) && Object.keys(un.body.fields).length === 0 && !DB.grp.g1.pin && await mp.evaluate(() => !document.querySelector('.gr-pin')), un && un.body);
+  // שרת ישן
+  PIN403 = true; await mp.evaluate(() => document.querySelector('[data-a=grMenu][data-id=m3]').click()); await sleep(300); await mp.click('#dlg [data-a=grPin]'); await sleep(500);
+  check('22 שרת ישן (403): הודעה ברורה, בלי פס ובלי קריסה', /ההצמדה תופעל בקרוב/.test(await toasts(mp)) && await mp.evaluate(() => !document.querySelector('.gr-pin')) && mp.__errors.length === 0, mp.__errors);
+  PIN403 = false;
   await m.ctx.close();
+
+  // ===== פס אצל עובד, גלילה, הודעה ישנה =====
+  seed(); DB.grp.g1.pin = { mapValue: { fields: { mid: S('m3'), txt: S('הגיעו הצבעים'), byN: S('המנהל'), t: I(T0 - H1), k: S('t') } } };
+  w = await open('w-pin', 'w1@x.co'); wp = w.page;
+  await wp.evaluate(() => tab('gr')); await waitFor(() => wp.evaluate(() => document.querySelectorAll('.gr-row').length >= 2)); await sleep(300);
+  check('23 ברשימת הקבוצות אין שינוי (בלי סימן הצמדה)', await wp.evaluate(() => !/📌/.test(document.getElementById('main').innerText)));
+  await wp.click('.gr-row[data-id=g1]'); await waitFor(() => wp.evaluate(() => !!document.getElementById('grunr') && !!document.querySelector('.gr-pin'))); await sleep(700);
+  const wc = await wp.evaluate(() => { const u = document.getElementById('grunr').getBoundingClientRect(), p = document.querySelector('.gr-pin'); return { pin: p.innerText.trim(), ut: Math.round(u.top), vh: innerHeight, tail: getComputedStyle(p).textOverflow, ws: getComputedStyle(p).whiteSpace, bg: getComputedStyle(p).backgroundColor, adm: !!document.querySelector('[data-a=grMenu]') }; });
+  check('23א אצל עובד: פס "📌 הגיעו הצבעים" בשורה אחת עם ellipsis, בלי ⋯ והצמדה; פס "לא נקרא" עדיין בחלון', wc.pin === '📌 הגיעו הצבעים' && wc.tail === 'ellipsis' && wc.ws === 'nowrap' && !wc.adm && wc.ut >= 0 && wc.ut < wc.vh, wc);
+  await wp.evaluate(() => window.scrollTo(0, 0)); await sleep(200); await wp.click('.gr-pin'); await sleep(900);
+  check('24 לחיצה על הפס גוללת להודעה ומדגישה אותה', await wp.evaluate(() => { const e = document.querySelector('[data-mid=m3]'), r = e.getBoundingClientRect(); return e.classList.contains('hl') && r.top >= 0 && r.bottom <= innerHeight; }));
+  await sleep(2000); check('24א ההדגשה יורדת אחרי רגע', await wp.evaluate(() => !document.querySelector('.gr-b.hl')));
+  // לחיצה על התראה (רכיב התראות מדומה, כמו ב-ui-push-s3)
+  await wp.evaluate(() => { while (cur().v === 'grc') goBack(); const L = {}; window.__pnL = L; window.Capacitor = window.Capacitor || {}; window.Capacitor.Plugins = Object.assign({}, window.Capacitor.Plugins || {}, { PushGate: { state: async () => ({ ready: true }) }, PushNotifications: { removeAllListeners: async () => {}, unregister: async () => {}, addListener: async (e, f) => { L[e] = f; return { remove() {} }; }, checkPermissions: async () => ({ receive: 'granted' }), requestPermissions: async () => ({ receive: 'granted' }), register: async () => {} } }); window.secPushOff(); window.secPushBoot(); });
+  await sleep(600);
+  await wp.evaluate(() => { window.__pnL.pushNotificationActionPerformed({ actionId: 'tap', notification: { data: { k: 'grp', id: 'g1' } } }); });
+  check('25א לחיצה על התראת קבוצה (data.k=grp, id) פותחת את מסך הקבוצה', await waitFor(() => wp.evaluate(() => cur().v === 'grc' && cur().a === 'g1' && document.querySelectorAll('.gr-b').length > 0)));
+  // שם שולח ארוך: 80 תווים לפני ה-@ נשמרים בלי חיתוך ל-60
+  await wp.evaluate(() => { SY.email = 'a'.repeat(80) + '@x.co'; }); LOG.length = 0; await wp.fill('#grtx', 'בדיקה'); await wp.click('[data-a=grSend]'); await waitFor(async () => sent(/\/grp\/g1\/m$/).length >= 1);
+  const lf = sent(/\/grp\/g1\/m$/)[0]; check('25ב byN ארוך (80) נשלח שלם, לא נחתך ל-60', lf && lf.body.fields.byN.stringValue.length === 80, lf && lf.body.fields.byN.stringValue.length);
+  check('25 אין שגיאות JS (עובד, הצמדה)', wp.__errors.length === 0, wp.__errors);
+  await w.ctx.close();
+  // הודעה מוצמדת ישנה: לא בעמוד הראשון (50 הודעות) ← נטענים עמודים קודמים
+  seed(); for (let i = 0; i < 120; i++) msg('g1', 'o' + i, { t: I(T0 - 10 * D1 + i * MIN), txt: S('ישנה ' + i) });
+  DB.grp.g1.pin = { mapValue: { fields: { mid: S('o3'), txt: S('ישנה 3'), byN: S('המנהל'), t: I(T0 - 10 * D1), k: S('t') } } };
+  w = await open('w-pin-old', 'w1@x.co'); wp = w.page; await wp.evaluate(() => tab('gr')); await waitFor(() => wp.evaluate(() => document.querySelectorAll('.gr-row').length >= 2));
+  await wp.click('.gr-row[data-id=g1]'); await waitFor(() => wp.evaluate(() => !!document.querySelector('.gr-pin'))); await sleep(600);
+  check('26 ההודעה המוצמדת הישנה לא בעמוד הראשון', await wp.evaluate(() => !document.querySelector('[data-mid=o3]')));
+  await wp.click('.gr-pin'); await waitFor(() => wp.evaluate(() => !!document.querySelector('[data-mid=o3]')), 6000); await sleep(900);
+  check('26א לחיצה טוענת עמודים קודמים, גוללת ומדגישה', await wp.evaluate(() => { const e = document.querySelector('[data-mid=o3]'); return !!e && e.classList.contains('hl'); }));
+  await w.ctx.close();
+  // הודעה מוצמדת שלא קיימת: הודעה קצרה
+  seed(); DB.grp.g1.pin = { mapValue: { fields: { mid: S('nope'), txt: S('נעלמה'), byN: S('המנהל'), t: I(T0), k: S('t') } } };
+  w = await open('w-pin-gone', 'w1@x.co'); wp = w.page; await wp.evaluate(() => tab('gr')); await waitFor(() => wp.evaluate(() => document.querySelectorAll('.gr-row').length >= 2));
+  await wp.click('.gr-row[data-id=g1]'); await waitFor(() => wp.evaluate(() => !!document.querySelector('.gr-pin'))); await sleep(600); await wp.click('.gr-pin'); await sleep(600);
+  check('27 הודעה מוצמדת שלא נמצאה: הודעה קצרה ובלי קריסה', /לא נמצאה/.test(await toasts(wp)) && wp.__errors.length === 0, wp.__errors);
+  check('28 אין שגיאות JS (הודעה ישנה)', wp.__errors.length === 0, wp.__errors);
+  await w.ctx.close();
   await browser.close();
   console.log(fail ? 'תוצאה: ' + fail + ' נכשלו' : 'כל הבדיקות עברו'); process.exit(fail ? 1 : 0);
 })();
