@@ -122,7 +122,7 @@ const MEMBER_FNS = {
   sendPromoToLine: () => ({ statusOnly: true }), publishLineItem: () => ({}), removeLineItem: () => ({}), getLineState: () => ({}), listLineFiles: () => ({}),
   previewVoice: () => ({}), getLineBoard: () => ({}), getLineAudio: () => ({}), extendLineItem: () => ({}), restoreLineItem: () => ({}),
   addStaff: () => ({ email: 'new@example.invalid', name: 'חדש' }), setStaffActive: () => ({ uid: U[A].emp, active: false }),
-  setStaffName: () => ({ uid: U[A].emp, name: 'זר' }),
+  setStaffName: () => ({ uid: U[A].emp, name: 'זר' }), setStaffEmail: () => ({ uid: U[A].emp, email: 'zar@example.invalid' }),
 };
 describe('שלב 5 – bizId של עסק אחר בקלט: שגיאה, בלי פעולה על העסק האחר (לכל פונקציה)', () => {
   for (const [fn, input] of Object.entries(MEMBER_FNS)) {
@@ -456,6 +456,47 @@ describe('שלב 5 – פונקציות ניהול: רק מנהל־על; כל פ
     assert.equal((await call('setStaffName', U.super, { bizId: A, uid: U[A].emp, name: 'דרך מנהל־על' })).status, 'OK');
     assert.equal(JSON.stringify(await listDocs(`b/${B}/staff`)), snapB);
     assert.equal((await call('setStaffName', R.mgr, { uid: R.emp, name: 'x' })).reason, 'legacy-biz');
+  });
+  it('setStaffEmail (17.11.2026): מנהל־על מחליף מייל של עובד – אותו uid, Auth + staff + users + audit; מייל תפוס, מנהל עסק, מנהל ועצמו – נדחים', async () => {
+    const { getAuth } = fa('firebase-admin/auth');
+    const snapB = JSON.stringify([await listDocs(`b/${B}/staff`), await listDocs(`b/${B}/audit`)]);
+    const add = await call('addStaff', U.super, { bizId: A, email: 'old-mail@example.invalid', name: 'אהרן' });
+    assert.equal(add.status, 'OK', add.text);
+    const uid = add.result.uid;
+    const before = await getDoc(`b/${A}/staff/${uid}`);
+    await getAuth().createUser({ email: 'taken@example.invalid' }).catch(() => {});
+    // הרשאות: עובד, מנהל העסק עצמו (לא מנהל־על), מנהל של עסק אחר, legacy
+    assert.equal((await call('setStaffEmail', U[A].emp, { uid, email: 'new-mail@example.invalid' })).reason, 'manager-only');
+    assert.equal((await call('setStaffEmail', U[A].mgr, { uid, email: 'new-mail@example.invalid' })).reason, 'not-superadmin');
+    assert.equal((await call('setStaffEmail', U.super, { bizId: B, uid, email: 'new-mail@example.invalid' })).reason, 'no-staff');
+    assert.equal((await call('setStaffEmail', R.mgr, { uid: R.emp, email: 'new-mail@example.invalid' })).reason, 'legacy-biz');
+    // ולידציה
+    assert.equal((await call('setStaffEmail', U.super, { bizId: A, uid, email: 'לא מייל' })).reason, 'bad-email');
+    assert.equal((await call('setStaffEmail', U.super, { bizId: A, uid: '../x', email: 'new-mail@example.invalid' })).reason, 'bad-uid');
+    assert.equal((await call('setStaffEmail', U.super, { bizId: A, uid: U[A].mgr, email: 'new-mail@example.invalid' })).reason, 'is-admin');
+    assert.equal((await call('setStaffEmail', U.super, { bizId: A, uid, email: 'taken@example.invalid' })).reason, 'email-taken');
+    assert.equal((await getAuth().getUser(uid)).email, 'old-mail@example.invalid', 'לא השתנה אחרי הדחיות');
+    // הצלחה: אותו חשבון, רק המייל מתחלף
+    const r = await call('setStaffEmail', U.super, { bizId: A, uid, email: '  New-Mail@Example.invalid ' });
+    assert.equal(r.status, 'OK', r.text);
+    assert.equal(r.result.uid, uid);
+    assert.equal(r.result.email, 'new-mail@example.invalid');
+    assert.equal((await getAuth().getUser(uid)).email, 'new-mail@example.invalid');
+    const after = await getDoc(`b/${A}/staff/${uid}`);
+    assert.equal(after.email, 'new-mail@example.invalid');
+    assert.deepEqual(Object.assign({}, after, { email: before.email }), before, 'רק השדה email השתנה ב-staff');
+    const usr = await getDoc('users/' + uid);
+    assert.deepEqual([usr.email, usr.bizId, usr.active], ['new-mail@example.invalid', A, true]);
+    assert.ok((await audits(A)).find((x) => x.act === 'setStaffEmail' && x.by === U.super && x.note.startsWith(uid + ':old-mail@example.invalid>')));
+    // שוב עם אותו מייל – בלי שינוי
+    const again = await call('setStaffEmail', U.super, { bizId: A, uid, email: 'new-mail@example.invalid' });
+    assert.equal(again.status, 'OK', again.text);
+    assert.equal(again.result.same, true);
+    // המייל הישן התפנה: אפשר להוסיף איתו עובד חדש (חשבון אחר)
+    const add2 = await call('addStaff', U.super, { bizId: A, email: 'old-mail@example.invalid', name: 'אחר' });
+    assert.equal(add2.status, 'OK', add2.text);
+    assert.notEqual(add2.result.uid, uid);
+    assert.equal(JSON.stringify([await listDocs(`b/${B}/staff`), await listDocs(`b/${B}/audit`)]), snapB);
   });
 });
 
