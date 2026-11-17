@@ -609,7 +609,7 @@ service cloud.firestore {
     // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
     // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
     // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
-    // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של כולם – כמו הקבוצה.
+    // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של m ו-p – כמו הקבוצה; r – רק הבעלים והמנהל.
     // מחיקת קבוצה לא מוחקת את תתי-האוספים (האפליקציה של המנהל מוחקת אותם; בלי הקבוצה אין גישה לעובדים בכל מקרה).
     match /grp/{gid} {
       function nw() { return request.resource.data; }
@@ -691,7 +691,8 @@ service cloud.firestore {
       }
 
       // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
-      // קריאה: כמו הקבוצה. כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
+      // קריאה (החלטת המתאם 17.11): רק בעל ה-uid (אם הוא רשאי לקרוא את הקבוצה) והמנהל – חבר אחר לא רואה מתי קראו ומי השתיק.
+      // כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
       // בקבוצה עם ao מותר לשמור mu, אבל השרת מתעלם ממנו (אי אפשר להשתיק קבוצת "רק המנהל שולח").
       match /r/{uid} {
         function g() { return get(/databases/$(database)/documents/grp/$(gid)).data; }
@@ -704,7 +705,7 @@ service cloud.firestore {
             && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
             && (!d.keys().hasAny(['mu']) || d.mu is bool);
         }
-        allow read: if (canRead());
+        allow read: if (canRead() && (isSelf(uid) || isManager()));
         allow create, update: if lpW() && (isSelf(uid) && canRead() && rOk(nw()));
         allow delete: if lpW() && (isManager());
       }
@@ -2071,7 +2072,7 @@ service cloud.firestore {
       // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
       // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
       // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
-      // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של כולם – כמו הקבוצה.
+      // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של m ו-p – כמו הקבוצה; r – רק הבעלים והמנהל.
       // מחיקת קבוצה לא מוחקת את תתי-האוספים (האפליקציה של המנהל מוחקת אותם; בלי הקבוצה אין גישה לעובדים בכל מקרה).
       match /grp/{gid} {
         function nw() { return request.resource.data; }
@@ -2153,7 +2154,8 @@ service cloud.firestore {
         }
 
         // מצב קריאה: grp/{gid}/r/{uid} = { t (נקרא עד, ms), mu (מושתק, bool) } – שניהם רשות.
-        // קריאה: כמו הקבוצה. כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
+        // קריאה (החלטת המתאם 17.11): רק בעל ה-uid (אם הוא רשאי לקרוא את הקבוצה) והמנהל – חבר אחר לא רואה מתי קראו ומי השתיק.
+        // כתיבה: כל משתמש רק את המסמך שלו, ורק אם הוא רשאי לקרוא את הקבוצה. מחיקה: מנהל.
         // בקבוצה עם ao מותר לשמור mu, אבל השרת מתעלם ממנו (אי אפשר להשתיק קבוצת "רק המנהל שולח").
         match /r/{uid} {
           function g() { return get(/databases/$(database)/documents/b/$(bizId)/grp/$(gid)).data; }
@@ -2166,7 +2168,7 @@ service cloud.firestore {
               && (!d.keys().hasAny(['t']) || (d.t is int && d.t >= 0 && d.t <= request.time.toMillis() + 120000))
               && (!d.keys().hasAny(['mu']) || d.mu is bool);
           }
-          allow read: if feat('groups') && (canRead());
+          allow read: if feat('groups') && (canRead() && (isSelf(uid) || bMgr()));
           allow create, update: if feat('groups') && (isSelf(uid) && canRead() && rOk(nw()));
           allow delete: if feat('groups') && (bMgr());
         }

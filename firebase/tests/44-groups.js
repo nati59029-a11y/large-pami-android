@@ -211,7 +211,7 @@ for (const E of ENVS) {
       await assertSucceeds(fs(E.mgr).doc(R('grp/g1/m/mi/p/1')).delete());
     });
 
-    it('r: כל משתמש כותב רק את שלו (t, mu); של משתמש אחר – נחסם; קריאה כמו הקבוצה', async () => {
+    it('r: כל משתמש כותב רק את שלו (t, mu); של משתמש אחר – נחסם; קריאה – רק הבעלים והמנהל', async () => {
       const now = Date.now();
       await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).set({ t: now, mu: true }));
       await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).update({ t: now + 1000 }));
@@ -228,6 +228,19 @@ for (const E of ENVS) {
       await assertSucceeds(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).get());
       await assertSucceeds(fs(E.mgr).doc(R('grp/g1/r/' + E.e1)).get());
       await assertFails(fs(E.e2).doc(R('grp/g1/r/' + E.e1)).get());
+      // החלטת המתאם 17.11: חבר בקבוצה לא קורא את r של חבר אחר (ולא את כל האוסף)
+      await prep(async (d) => {
+        await d.doc(R('grp/g3')).set(grp({ mem: [E.e1, E.e2] }));
+        await d.doc(R('grp/g3/r/' + E.e2)).set({ t: 1, mu: true });
+        await d.doc(R('grp/g3/r/' + E.e1)).set({ t: 1 });
+      });
+      await assertFails(fs(E.e1).doc(R('grp/g3/r/' + E.e2)).get(), 'r של חבר אחר');
+      await assertFails(fs(E.e1).collection(R('grp/g3/r')).get(), 'list של r');
+      await assertSucceeds(fs(E.e1).doc(R('grp/g3/r/' + E.e1)).get());
+      await assertSucceeds(fs(E.e2).doc(R('grp/g3/r/' + E.e2)).get());
+      await assertSucceeds(fs(E.mgr).doc(R('grp/g3/r/' + E.e2)).get());
+      await assertSucceeds(fs(E.mgr).collection(R('grp/g3/r')).get(), 'מנהל – list');
+      if (E.foreign) await assertFails(fs(E.foreign).doc(R('grp/g3/r/' + E.e2)).get());
       await assertFails(fs(E.e1).doc(R('grp/g1/r/' + E.e1)).delete());
       await assertSucceeds(fs(E.mgr).doc(R('grp/g1/r/' + E.e1)).delete());
     });
