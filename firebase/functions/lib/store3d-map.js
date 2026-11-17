@@ -389,9 +389,11 @@ function recentCount(times, now) {
 // ---------- סיור 360 (s3PutPano / s3DelPano) – שלב 18א (15.11.2026) ----------
 // נקודה = smap/{mapId}/pano/{pid}: { x, y (ס"מ), yaw (0–359.9), nb [pid], full, sm (נתיבים), w, h, sz, ver, by, at, upd, del?, delAt?, delBy? }.
 // קבצים: b/{biz}/store3d/{br}/pano/{mapId}/{pid}_{ver}.jpg (מלאה) ו-{pid}_{ver}_s.jpg (קטנה). החלפת תמונה = ver+1.
-const PANO_MAX = 3000000;      // מלאה, אחרי פענוח
+// שלב 21ו (17.11.2026): 8192×4096 – המלאה עד 8,000,000 בתים (היה 3,000,000). נמדד: equirect 8192 של חנות עמוסה ≈ 6.5MB ב-JPEG ‎.85, רגילה ≈ 3MB ב-‎.9.
+// בבקשה: base64 ≈ 10.7MB + קטנה – מתחת למגבלת גודל בקשה של onCall / Cloud Run (32MiB, לא מאומת; ראו גם DRAFT ב-store3d-ai.js – 17.3MB).
+const PANO_MAX = 8000000;      // מלאה, אחרי פענוח
 const PANO_SM_MAX = 200000;    // קטנה
-const PANO_W = [2048, 4096];   // רוחב המלאה; גובה = חצי (2:1)
+const PANO_W = [2048, 4096, 8192];   // רוחב המלאה; גובה = חצי (2:1). 8192 – שלב 21ו
 const PANO_SM = { w: 1024, h: 512 };
 const PANO_LIMIT = 40;         // נקודות פעילות למפה (הנחת מתאם)
 const PANO_DAY = 60;           // העלאות תמונה ביום לסניף (הנחת מתאם), s3use/p_{br}
@@ -414,11 +416,11 @@ function decodeJpeg(img, max, what, kb) {
   if (!sz) throw fail('bad-img', 'לא הצלחנו לקרוא את מידות ה' + what);
   return { buf, w: sz.w, h: sz.h };
 }
-// full: יחס 2:1 בדיוק, רוחב 2048 או 4096, עד 3MB. sm: 1024×512, עד 200KB.
+// full: יחס 2:1 בדיוק, רוחב 2048, 4096 או 8192, עד 8MB. sm: 1024×512, עד 200KB.
 function decodePano(full, sm) {
-  const f = decodeJpeg(full, PANO_MAX, 'תמונת 360', '3MB');
+  const f = decodeJpeg(full, PANO_MAX, 'תמונת 360', '8MB');
   if (f.w !== f.h * 2) throw fail('bad-ratio', 'תמונת 360 חייבת להיות ביחס 2:1 (רוחב כפול מהגובה)');
-  if (!PANO_W.includes(f.w)) throw fail('bad-size', 'רוחב תמונת 360 צריך להיות 2048 או 4096 פיקסלים');
+  if (!PANO_W.includes(f.w)) throw fail('bad-size', 'רוחב תמונת 360 צריך להיות 2048, 4096 או 8192 פיקסלים');
   const s = decodeJpeg(sm, PANO_SM_MAX, 'תמונה קטנה', '200KB');
   if (s.w !== PANO_SM.w || s.h !== PANO_SM.h) throw fail('bad-size', 'התמונה הקטנה צריכה להיות 1024×512 פיקסלים');
   return { full: f, sm: s };

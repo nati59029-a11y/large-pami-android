@@ -315,3 +315,39 @@ describe('צילום תמונה אמיתית (שלב 21ב) – קבועים', ()
     assert.equal(C.PHOTO_MAX, 1600); assert.equal(C.FRAME_MAX, 1280); assert.equal(C.PH_MOVE, 1.5);
   });
 });
+
+describe('שלב 21ו – HDR וצילום חוזר לתמונה מטושטשת', () => {
+  const C = M.C;
+  it('hdrPlan: חשיפה נעולה עם exposureTime ⇒ ×¼/×1/×4, חתוך לטווח המצלמה', () => {
+    const p = M.hdrPlan({ exposureTime: { min: 1, max: 1e4 }, exposureCompensation: { min: -3, max: 3 } }, { exposureTime: 166 }, true);
+    assert.equal(p.mode, 'time'); assert.deepEqual(p.vals, [41.5, 166, 664]); assert.deepEqual(p.factors, [0.25, 1, 4]); assert.equal(p.base, 166);
+    const q = M.hdrPlan({ exposureTime: { min: 100, max: 300 } }, { exposureTime: 200 }, true);
+    assert.deepEqual(q.vals, [100, 200, 300], 'חיתוך לטווח'); assert.deepEqual(q.factors, [0.5, 1, 1.5]);
+  });
+  it('hdrPlan: בלי נעילה / בלי exposureTime ⇒ exposureCompensation ‎−2/0/+2 (חתוך); בלי שליטה ⇒ null', () => {
+    const caps = { exposureTime: { min: 1, max: 1e4 }, exposureCompensation: { min: -3, max: 3 } };
+    const p = M.hdrPlan(caps, { exposureTime: 166, exposureCompensation: 0 }, false);
+    assert.equal(p.mode, 'comp'); assert.deepEqual(p.vals, [-2, 0, 2]); assert.deepEqual(p.factors, [-2, 0, 2]);
+    const q = M.hdrPlan({ exposureCompensation: { min: -1, max: 2 } }, { exposureCompensation: 1 }, true);
+    assert.deepEqual(q.vals, [-1, 1, 2]); assert.deepEqual(q.factors, [-2, 0, 1]);
+    assert.equal(M.hdrPlan({ exposureCompensation: { min: -1, max: 2 } }, {}, false).base, 0, 'בלי ערך נוכחי – 0');
+    assert.equal(M.hdrPlan({}, {}, true), null);
+    assert.equal(M.hdrPlan(null, null, false), null);
+    assert.equal(M.hdrPlan({ exposureTime: { min: 1, max: 1e4 } }, { exposureTime: 166 }, false), null, 'זמן חשיפה בלי נעילה – לא');
+    assert.equal(M.hdrPlan({ exposureCompensation: { min: 0, max: 0 } }, {}, false), null, 'טווח ריק');
+    assert.equal(M.hdrPlan({ exposureTime: { min: 166, max: 166.5 } }, { exposureTime: 166 }, true).vals[2], 166.5);
+  });
+  it('median / blurry: חדות מתחת לחצי מהחציון אחרי 3 תמונות בשורה, או סיבוב מעל הסף', () => {
+    assert.equal(M.median([]), 0); assert.equal(M.median([3, 1, 2]), 2); assert.equal(M.median([4, 1, 3, 2]), 2.5);
+    assert.equal(C.BLUR_K, 0.5); assert.equal(C.BLUR_N, 3); assert.equal(C.BLUR_TH, 320); assert.deepEqual(C.HDR_T, [0.25, 1, 4]); assert.deepEqual(C.HDR_C, [-2, 0, 2]);
+    assert.equal(M.blurry(10, [100, 100], 0), false, 'פחות מ-3 בשורה – לא נפסל לפי חדות');
+    assert.equal(M.blurry(10, [100, 100, 100], 0), true);
+    assert.equal(M.blurry(50, [100, 100, 100], 0), false, 'בדיוק חצי – עובר');
+    assert.equal(M.blurry(49, [100, 100, 100], 0), true);
+    assert.equal(M.blurry(500, [], C.PH_ROT + 0.01), true, 'סיבוב בזמן הצילום');
+    assert.equal(M.blurry(500, [], C.PH_ROT), false);
+  });
+  it('FULL_MAX מאפשר 8192 באיכות טובה ולא עולה על גבול השרת (8,000,000)', () => {
+    assert.ok(C.FULL_MAX >= 7000000 && C.FULL_MAX <= 8000000, String(C.FULL_MAX));
+  });
+});

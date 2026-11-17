@@ -98,9 +98,20 @@ describe('store3d-pano – הליבה מול האמולטור (Firestore + Stora
     assert.equal((await get(`b/${A}/s3qid/${q}`)).k, 'pano');
   });
 
+  it('שלב 21ו: 8192×4096 של 6.5MB (מעל המגבלה הקודמת של 3MB) – נשמרת עם w/h/sz הנכונים', async () => {
+    const big = jpeg(8192, 4096, 6500000);
+    const r = await put(mgr, { full: big.toString('base64') });
+    assert.deepEqual([r.ok, r.w, r.h], [true, 8192, 4096]);
+    const d = await get(`b/${A}/smap/s-main/pano/p1`);
+    assert.deepEqual([d.w, d.h, d.sz], [8192, 4096, big.length]);
+    const [meta] = await bucket.file(r.full).getMetadata();
+    assert.equal(+meta.size, big.length);
+  });
+
   it('תמונה לא 2:1 / גדולה מדי / לא JPEG / קטנה במידה אחרת – נדחות, בלי קבצים ובלי מונה', async () => {
     assert.equal(await err(put(mgr, { full: jpeg(2048, 1000).toString('base64') })), 'bad-ratio');
-    assert.equal(await err(put(mgr, { full: jpeg(2048, 1024, 3000000).toString('base64') })), 'too-big');
+    assert.equal(await err(put(mgr, { full: jpeg(2048, 1024, 8000000).toString('base64') })), 'too-big', 'שלב 21ו: מעל 8,000,000');
+    assert.equal(await err(put(mgr, { full: jpeg(16384, 8192).toString('base64') })), 'bad-size');
     assert.equal(await err(put(mgr, { full: Buffer.from('not an image at all').toString('base64') })), 'bad-type');
     assert.equal(await err(put(mgr, { sm: jpeg(800, 400).toString('base64') })), 'bad-size');
     assert.equal(await err(put(mgr, { sm: undefined })), 'bad-img');
@@ -353,6 +364,7 @@ describe('store3d-pano – חוקי Firestore ו-Storage', () => {
       const s = c.storage();
       const up = (p, n) => s.ref(p).put(new Uint8Array(n).fill(7), { contentType: 'image/jpeg' });
       await up(`${base}/p1_1.jpg`, 2000); await up(`${base}/p1_1_s.jpg`, 1000); await up(`${base}/p1_2_s.jpg`, 210000);
+      await up(`${base}/p2_1.jpg`, 8000000); await up(`${base}/p3_1.jpg`, 8000001); // שלב 21ו: גבול המלאה 8,000,000
       await up(`b/biz-p3c/store3d/main/pano/s-main/p1_1.jpg`, 1000);
     });
   });
@@ -388,6 +400,8 @@ describe('store3d-pano – חוקי Firestore ו-Storage', () => {
       want(ok, await can(st(u).ref(`${base}/p1_1_s.jpg`).getMetadata()), `${u} sm`);
     }
     want(false, await can(st(MGR).ref(`${base}/p1_2_s.jpg`).getMetadata()), 'קטנה מעל 200KB');
+    want(true, await can(st(E1).ref(`${base}/p2_1.jpg`).getMetadata()), 'מלאה של 8,000,000 בדיוק (שלב 21ו)');
+    want(false, await can(st(E1).ref(`${base}/p3_1.jpg`).getMetadata()), 'מלאה מעל 8,000,000');
     want(false, await can(st(MGR).ref('b/biz-p3c/store3d/main/pano/s-main/p1_1.jpg').getMetadata()), 'עסק אחר – מנהל שלנו');
     want(true, await can(st(OM).ref('b/biz-p3c/store3d/main/pano/s-main/p1_1.jpg').getMetadata()), 'עסק אחר – המנהל שלו');
     for (const u of [MGR, DR, E1]) {
