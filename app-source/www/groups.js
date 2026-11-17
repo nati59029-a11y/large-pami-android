@@ -252,7 +252,7 @@ ACT.grPinGo=async()=>{const c=GR.c;if(!c||!c.g.pin||!c.ready)return;const id=c.g
 ACT.grDel=el=>{const c=GR.c;if(!c||!fbAdmin())return;const id=el.dataset.id,m=c.msgs.find(x=>x.id===id);if(!m)return;closeDlg();
  ask('למחוק את ההודעה? אי אפשר לשחזר.',async()=>{
   try{if(m.k==='img'){try{await fsx('/grp/'+c.gid+'/m/'+id+'/p/1',{method:'DELETE'})}catch(e){if(e.code!==404)throw e}}
-   await fsx('/grp/'+c.gid+'/m/'+id,{method:'DELETE'});c.msgs=c.msgs.filter(x=>x.id!==id);grPaint();toast('ההודעה נמחקה')}
+   await fsx('/grp/'+c.gid+'/m/'+id,{method:'DELETE'});c.msgs=c.msgs.filter(x=>x.id!==id);if(c.g&&c.g.pin&&c.g.pin.mid===id){delete c.g.pin;grPinPaint()}/* ההצמדה מתבטלת בשרת; מסירים מיד גם במסך */grPaint();toast('ההודעה נמחקה')}
   catch(e){toast(tkErr(e))}},'מחק')};
 
 /* ---- הגדרות קבוצה (מנהל) ---- */
