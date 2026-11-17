@@ -3056,7 +3056,7 @@ function shPromo(x,X,Y,W,H,it,key){
  shT(x,it.title||"מבצע בלארג'!",X+W/2,Y+b+P.tp[0]*s+.8465*P.tt*s,P.tt*s,{c:'#fff',sw:.3*s});
  shT(x,'בס״ד',X+W-b-P.br*s,Y+b+P.bt*s+.9*2.5*s,2.5*s,{al:'right',c:'#fff'});
  /* כיתוב קו העדכונים (1 ו-2 בעמוד): בתחתית הפתק, מתחת לכל השורות */
- const ln=(key==='p1'||key==='p2')&&it.ln&&(it.ln.t||it.ln.p)?it.ln:null,lf0=4.2*s,lbH=lf0*1.75,lnH=ln?lbH+2*s:0;
+ const ln=shLnOk()&&(key==='p1'||key==='p2')&&it.ln&&(it.ln.t||it.ln.p)?it.ln:null,lf0=4.2*s,lbH=lf0*1.75,lnH=ln?lbH+2*s:0;
  /* תחתית */
  const sm=4.8*s,sm2=3.3*s,fh=(1+4.8*1.1+.4+3.3*1.1)*s+P.fp*s,yf=Y+H-b-fh-lnH,ytop=Y+b+th;
  /* גוף */
@@ -3176,10 +3176,20 @@ async function shBcSync(){if(!shOn())return 0;let r={};try{const d=await fsx('/s
  const loc=SH.bc=SH.bc||{};let ch=0,up=0;for(const c in r){if(!loc[c]||(r[c].t||0)>(loc[c].t||0)){loc[c]=r[c];ch=1}}for(const c in loc){if(!r[c]||(loc[c].t||0)>(r[c].t||0))up=1}
  if(up)await shBcPut();if(ch)shSave();return ch}
 /* כיתוב קו העדכונים בפתקי מבצע (1 ו-2 בעמוד): ברירת מחדל שהמנהל קובע, מסונכרנת לכל המכשירים */
-const shLnDef=()=>SH.ln||{t:'להצטרפות לקו העדכונים והמבצעים',p:'',at:0};
-async function shLnPut(){if(!shOn()||!SH.ln)return;try{await fsx('/shelf/line',{method:'PATCH',body:JSON.stringify({fields:{data:sv(JSON.stringify({t:SH.ln.t,p:SH.ln.p})),at:sv(SH.ln.at)}})})}catch(e){}}
+const shLnDef=()=>Object.assign({on:false,t:'להצטרפות לקו העדכונים והמבצעים',p:'',at:0},SH.ln||{});
+/* האפשרות פתוחה רק אם מנהל העסק הפעיל אותה. כבויה: הפתק נשאר בדיוק בעיצוב הקודם */
+const shLnOk=()=>!!(SH.ln&&SH.ln.on);
+async function shLnPut(){if(!shOn()||!SH.ln)return;try{await fsx('/shelf/line',{method:'PATCH',body:JSON.stringify({fields:{data:sv(JSON.stringify({on:!!SH.ln.on,t:SH.ln.t,p:SH.ln.p})),at:sv(SH.ln.at)}})})}catch(e){}}
 async function shLnSync(){if(!shOn())return 0;try{const d=await fsx('/shelf/line'),at=+gv(d,'at')||0,j=JSON.parse(gv(d,'data')||'{}');
- if(at>((SH.ln||{}).at||0)){SH.ln={t:String(j.t||''),p:String(j.p||''),at};shSave();return 1}if(SH.ln&&SH.ln.at>at)await shLnPut()}catch(e){if(e.code===404&&SH.ln&&SH.ln.at)await shLnPut()}return 0}
+ if(at>((SH.ln||{}).at||0)){SH.ln={on:!!j.on,t:String(j.t||''),p:String(j.p||''),at};shSave();return 1}if(SH.ln&&SH.ln.at>at)await shLnPut()}catch(e){if(e.code===404&&SH.ln&&SH.ln.at)await shLnPut()}return 0}
+const shMgr=()=>!(typeof isW==='function'&&isW());
+let SHLE=null;
+INP.shln=el=>{if(SHLE)SHLE[el.name]=el.value};
+ACT.shLnTog=el=>{const on=el.dataset.v==='1';SH.ln=Object.assign(shLnDef(),{on,at:Date.now()});shSave();shLnPut();toast(on?'✓ הכיתוב הופעל בפתקי 1 ו-2 בעמוד':'הכיתוב כובה. הפתקים בעיצוב הרגיל');rerender()};
+ACT.shLnSave=()=>{const e=SHLE||{},t=String(e.t||'').trim(),p=String(e.p||'').trim();if(!t&&!p)return toast('כתוב כיתוב או מספר טלפון');SH.ln=Object.assign(shLnDef(),{t,p,at:Date.now()});SHLE=null;shSave();shLnPut();toast('✓ ברירת המחדל נשמרה');rerender()};
+/* כרטיס הגדרה למנהל בלבד, במסך מחירים ומבצעים למדף */
+const shLnMgr=()=>{if(!shMgr())return'';const L=shLnDef();if(!SHLE)SHLE={t:L.t,p:L.p};
+ return`<div class="card"><b>כיתוב קו העדכונים בפתקי מבצע</b><p class="note" style="margin:2px 0 0">למנהל בלבד. כשפעיל, בפתקי מבצע של 1 ו-2 בעמוד מודפסת בתחתית מסגרת עם כיתוב ומספר הטלפון של הקו. העובד יכול לשנות את הכיתוב בכל פתק.</p>${shChips('shLnTog',L.on?'1':'0',[['1','פעיל'],['0','כבוי']])}${L.on?fld('כיתוב ברירת המחדל','t',SHLE.t,'text','data-i="shln" autocomplete="off" placeholder="להתעדכן במבצעים שלנו"')+fld('מספר הטלפון של הקו','p',SHLE.p,'text','data-i="shln" inputmode="tel" autocomplete="off" dir="ltr"')+'<button type="button" class="btn s" data-a="shLnSave">שמור ברירת מחדל</button>':''}</div>`};
 /* ===== זיהוי חכם (Gemini) ===== */
 /* הזיהוי החכם זמין לכל מי שמחובר לחשבון (מנהל או עובד). המפתח של Gemini נמצא רק בשרת */const shKey=()=>SY.refresh&&SY.role?'srv':'';
 const SHAI_P='בתמונה מוצר מחנות לכלי בית, חד פעמי ומוצרי אפייה. החזר JSON בלבד בצורה {"name":"...","details":"..."}. name = שם המוצר בעברית כפי שמופיע על האריזה, קצר וברור (למשל: כוסות קרטון, שקיות אשפה, נייר אפייה). details = שם החברה או המותג ואחריו הכמות, הגודל או המשקל (למשל: תבניכל, 50 יחידות, 250 מ"ל). שדה שלא נראה בתמונה השאר ריק. אל תמציא פרטים.';
@@ -3227,7 +3237,7 @@ V.shelf=()=>{shSync().then(ch=>{if(ch&&cur().v==='shelf')rerender()}).catch(()=>
  ${shOpt('shGo','shAdd','מחיר למדף','פתק עם שם, פירוט ומחיר · 20 בעמוד',I('<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.4"/>'))}
  ${shOpt('shGo','shPromo','מבצע למדף','8, 2 או 1 בעמוד',I('<path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.3 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z"/>'))}
  ${shOpt('shGo','shDrafts','טיוטות','הדפים שנוצרו · הדפסה, PDF והורדה',I('<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7"/>'))}
- ${shOpt('shGo','shImp','ייבוא מאקסל','יצירת הרבה פתקי מחיר בבת אחת',I('<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v5h16v-5"/>'))}</div>`}};
+ ${shOpt('shGo','shImp','ייבוא מאקסל','יצירת הרבה פתקי מחיר בבת אחת',I('<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v5h16v-5"/>'))}${shLnMgr()}</div>`}};
 ACT.shGo=el=>{const v=el.dataset.k;SHS={price:{},promo:{}};if(v==='shAdd')SHF=null;if(v==='shPromo')SHP=null;if(v==='shImp')SHI=null;go(v)};
 const shBar=k=>{const c=shCount(k),cap=SHC[k].cap;return`<div class="card"><b>הדף הנוכחי: ${c} מתוך ${cap}</b><div style="height:10px;background:var(--line);border-radius:6px;margin-top:8px;overflow:hidden"><div style="width:${Math.round(c/cap*100)}%;height:100%;background:var(--acc)"></div></div><p class="note" style="margin:8px 0 0">הפתק הבא ייכנס למקום ${shPos(k)}${shNeedWarn(k)?' (הדף מלא: יימחק הפתק הישן)':''}</p></div>`};
 let SHS={price:{},promo:{}};
@@ -3271,19 +3281,18 @@ FRM.shadd=f=>{const it=shfLine();if(!it.n.trim())return toast('חסר שם מו�
  if(SHF.edit<0&&shNeedWarn('price'))shWarn('price',fin);else fin()};
 /* --- מבצע למדף --- */
 let SHP=null;
-const shpNew=sz=>{const L=shLnDef();return{mode:'start',size:sz||'p8',kind:'A',title:"מבצע בלארג'!",n:'',d:'',k:'3',tot:'',unit:'',now:'',reg:'',vf:'',edit:-1,uTouched:0,lnOn:L.at&&(L.t||L.p)?1:0,lt:L.t||'',lp:L.p||''}};
+const shpNew=sz=>{const L=shLnDef();return{mode:'start',size:sz||'p8',kind:'A',title:"מבצע בלארג'!",n:'',d:'',k:'3',tot:'',unit:'',now:'',reg:'',vf:'',edit:-1,uTouched:0,lnOn:L.on?1:0,lt:L.t||'',lp:L.p||''}};
 const shpItem=()=>{const q=SHP,it={kind:q.kind,n:(q.n||'').trim(),d:(q.d||'').trim(),vf:q.vf||'',title:(q.title||'').trim()||"מבצע בלארג'!"};
  if(q.kind==='A'){const k=Math.round(pNum(q.k)||0),t=pNum(q.tot),u=q.unit!==''&&q.uTouched?pNum(q.unit):(k>0&&t>0?t/k:null);it.k=k;it.tot=t;it.unit=u!=null?(+u).toFixed(2):''}else{it.now=pNum(q.now);it.reg=pNum(q.reg)}
- const lt=String(q.lt||'').trim(),lp=String(q.lp||'').trim();if((q.size==='p1'||q.size==='p2')&&q.lnOn&&(lt||lp))it.ln={t:lt,p:lp};return it};
+ const lt=String(q.lt||'').trim(),lp=String(q.lp||'').trim();if(shLnOk()&&(q.size==='p1'||q.size==='p2')&&q.lnOn&&(lt||lp))it.ln={t:lt,p:lp};return it};
 async function shpPrev(){const im=document.getElementById('shPrev');if(!im||!SHP)return;const it=shpItem();if(it.kind==='A'){it.k=it.k||'?';it.tot=it.tot||'?'}else{it.now=it.now||'?';it.reg=it.reg||'?'}im.src=await shOne(SHP.size,it)}
 INP.shp=el=>{if(!SHP)return;SHP[el.name]=el.value;if(el.name==='n'&&!SHP.d){const c=(SH.cat||[]).find(x=>x.n===el.value&&x.d);if(c){SHP.d=c.d;const q=document.querySelector('input[name=d]');if(q)q.value=c.d}}if(el.name==='unit')SHP.uTouched=1;if(SHP.kind==='A'&&!SHP.uTouched&&(el.name==='k'||el.name==='tot')){const k=Math.round(pNum(SHP.k)||0),t=pNum(SHP.tot);SHP.unit=k>0&&t>0?(t/k).toFixed(2):'';const u=document.querySelector('input[name=unit]');if(u)u.value=SHP.unit}shDeb(shpPrev)};
 const shChips=(a,cur_,list)=>`<div class="chips" style="margin:6px 0 12px">${list.map(([v,t])=>`<button type="button" class="chip ${v===cur_?'on':''}" data-a="${a}" data-v="${v}">${t}</button>`).join('')}</div>`;
 ACT.shSize=el=>{SHP.size=el.dataset.v;rerender()};
 ACT.shKind=el=>{SHP.kind=el.dataset.v;rerender()};
 ACT.shLnOn=el=>{SHP.lnOn=el.dataset.v==='1'?1:0;rerender()};
-ACT.shLnSet=()=>{if(!SHP)return;const t=String(SHP.lt||'').trim(),p=String(SHP.lp||'').trim();if(!t&&!p)return toast('כתוב כיתוב או מספר טלפון');SH.ln={t,p,at:Date.now()};shSave();shLnPut();toast('✓ נשמר כברירת מחדל לכל המבצעים הבאים');rerender()};
-const shLnCard=q=>{if(q.size!=='p1'&&q.size!=='p2')return'';const L=shLnDef(),mgr=!(typeof isW==='function'&&isW());
- return`<div class="card"><b>כיתוב קו העדכונים והמבצעים</b><p class="note" style="margin:2px 0 0">מודפס באותיות גדולות בתחתית הפתק, מתחת לכל השורות (רק ב-1 וב-2 בעמוד).</p>${shChips('shLnOn',q.lnOn?'1':'0',[['1','עם כיתוב'],['0','בלי כיתוב']])}${q.lnOn?fld('הכיתוב','lt',q.lt,'text','data-i="shp" autocomplete="off" placeholder="להתעדכן במבצעים שלנו"')+fld('מספר הטלפון של הקו','lp',q.lp,'text','data-i="shp" inputmode="tel" autocomplete="off" dir="ltr"')+(mgr?`<button type="button" class="btn s g" data-a="shLnSet">שמור כברירת מחדל</button>`:'')+`<p class="note" style="margin:8px 0 0">ברירת המחדל: ${L.t||L.p?esc(L.t||'')+(L.p?` <bdi dir="ltr" style="white-space:nowrap">${esc(L.p)}</bdi>`:''):'עוד לא נקבעה'}</p>`:''}</div>`};
+const shLnCard=q=>{if(!shLnOk()||(q.size!=='p1'&&q.size!=='p2'))return'';
+ return`<div class="card"><b>כיתוב קו העדכונים והמבצעים</b><p class="note" style="margin:2px 0 0">מודפס באותיות גדולות בתחתית הפתק. אפשר לשנות לפתק הזה; ברירת המחדל לא משתנה.</p>${shChips('shLnOn',q.lnOn?'1':'0',[['1','עם כיתוב'],['0','בלי כיתוב']])}${q.lnOn?fld('הכיתוב','lt',q.lt,'text','data-i="shp" autocomplete="off" placeholder="להתעדכן במבצעים שלנו"')+fld('מספר הטלפון של הקו','lp',q.lp,'text','data-i="shp" inputmode="tel" autocomplete="off" dir="ltr"'):''}</div>`};
 V.shPromo=()=>{if(!SHP)SHP=shpNew();const q=SHP,sizes=[['p8','8 בעמוד'],['p2','2 בעמוד'],['p1','1 בעמוד']];
  if(q.mode!=='form')return{t:'מבצע למדף',s:'מבצע חדש',h:`<div class="card"><b>כמה מבצעים בעמוד</b>${shChips('shSize',q.size,sizes)}<p class="note" style="margin:0">בכל גודל יש דף נפרד בטיוטות.</p></div>${shStart('promo')}<button class="btn g w" data-a="shPManual">${icd('pen')} הכנסה ידנית</button><div style="height:14px"></div>${shBar(q.size)}`};
  const pos=q.edit>=0?q.edit+1:shPos(q.size);setTimeout(shpPrev,0);
