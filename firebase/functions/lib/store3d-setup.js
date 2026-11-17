@@ -14,33 +14,10 @@ const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
 // טקסט חופשי של משתמש או של המודל: בלי תווי בקרה, רווחים מכווצים
 const txt1 = (v) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim();
 
-// ---------- פריטים במפה (לבדיקת itemId ו-ref, ולתיאור הפריט ל-AI) ----------
-const FX_HE = { gon: 'גונדולה', wall: 'מדף קיר', fridge: 'מקרר', table: 'שולחן/משטח', stand: 'סטנד/מתלה', bin: 'סל/מתקן' };
-const DOOR_HE = { ent: 'כניסה', in: 'דלת פנימית', emg: 'יציאת חירום', wh: 'דלת מחסן' };
-const SYM_HE = { cash: 'קופה', ent: 'סימן כניסה', exit: 'סימן יציאה' };
+// ---------- פריטים במפה ושיוך הערות – בקובץ המשותף לטלפון ולשרת (lib/store3d-notekey.js) ----------
+const NK = require('./store3d-notekey');
+const itemsOf = NK.itemsOf;
 const live = (map, k) => (isObj(map) && Array.isArray(map[k]) ? map[k] : []).filter((o) => isObj(o) && o.del !== 1 && typeof o.id === 'string');
-const at = (o) => (Number.isFinite(o.x) && Number.isFinite(o.y) ? ` (x=${Math.round(o.x)}, y=${Math.round(o.y)})` : '');
-const nm = (s) => (typeof s === 'string' && txt1(s) ? ` "${txt1(s).slice(0, 30)}"` : '');
-// מזהה ← תיאור קצר בעברית (עד 100 תווים). כולל מקטעים (C.baysOf). פריטים מחוקים – לא.
-function itemsOf(map) {
-  const out = new Map(), rn = new Map();
-  for (const r of live(map, 'rooms')) { rn.set(r.id, txt1(r.name).slice(0, 26)); out.set(r.id, 'חדר' + nm(r.name)); }
-  for (const w of live(map, 'walls')) out.set(w.id, 'קיר פנימי ' + w.id);
-  for (const c of live(map, 'cols')) out.set(c.id, 'עמוד' + at(c));
-  for (const d of live(map, 'doors')) out.set(d.id, (DOOR_HE[d.k] || 'דלת') + at(d));
-  const fxd = new Map();
-  for (const f of live(map, 'fx')) {
-    const s = (FX_HE[f.k] || 'גוף') + (Number.isInteger(f.num) ? ' מספר ' + f.num : '') + nm(f.name) + (rn.get(f.room) ? ` בחדר "${rn.get(f.room)}"` : '') + at(f);
-    fxd.set(f.id, s); out.set(f.id, s);
-  }
-  for (const y of live(map, 'syms')) out.set(y.id, (SYM_HE[y.k] || 'סמל') + at(y));
-  for (const b of C.baysOf(map)) {
-    const p = b.bay.split('-');
-    out.set(b.bay, `מקטע ${p[2]} בצד ${p[1] === 'a' ? 'א' : 'ב'} של ${fxd.get(b.fx) || b.fx}`);
-  }
-  for (const [k, v] of out) out.set(k, v.slice(0, SET.dMax));
-  return out;
-}
 
 // ---------- s3SetupNote ----------
 // { mapId, itemId?: '' = כללית, t, qid, m?: הטיוטה שבטלפון (רק כשאין עדיין מפה שמורה) } ← { mapId, itemId, t, qid, m }
@@ -55,7 +32,10 @@ function noteInput(input) {
   if (t.length > max) throw fail('bad-note', `ההערה ארוכה מדי (עד ${max} תווים)`);
   const m = input.m === undefined || input.m === null ? null : input.m;
   if (m !== null && !isObj(m)) throw fail('bad-map', 'הטיוטה לא תקינה');
-  return { mapId: input.mapId, itemId, t, qid: input.qid, m };
+  // from (לא חובה): שיוך מחדש – ההערה עוברת מ-n/{from} (הערה "לשיוך מחדש") ל-n/{itemId}
+  const from = input.from === undefined || input.from === null || input.from === '' ? '' : input.from;
+  if (from && (typeof from !== 'string' || !ITEM_RE.test(from) || !itemId || from === itemId || !t)) throw fail('bad-item', 'השיוך לא תקין');
+  return { mapId: input.mapId, itemId, t, qid: input.qid, m, from };
 }
 
 // ---------- mapQs: הנחיה ובדיקת התשובה ----------
@@ -160,16 +140,33 @@ function renameId(id, renamed) {
   const m = /^(f[0-9]{1,4})(-[ab]-[0-9]{1,2})?$/.exec(id);
   return m && Object.prototype.hasOwnProperty.call(renamed, m[1]) ? renamed[m[1]] + (m[2] || '') : id;
 }
-// docs = [{ id, data }] (n/*) ← { set: [{ id, data }], del: [id] }. הערה שעוברת דורסת הערה ישנה שנשארה במזהה החדש
-// (המזהה החדש תמיד חדש במפה, ולכן הערה שם שייכת לטיוטה ישנה). מסמך שמישהו אחר עובר אליו – לא נמחק.
+// docs = [{ id, data }] (n/*) ← { set: [{ id, data }], del: [id] }. מסמך שמישהו אחר עובר אליו – לא נמחק.
 function renameNotes(docs, renamed) {
-  const set = [], from = [];
-  for (const d of docs || []) {
-    const to = renameId(d.id, renamed);
-    if (to !== d.id) { set.push({ id: to, data: d.data }); from.push(d.id); }
+  const L = docs || [], ids = new Set(L.map((d) => d.id)), mv = [];
+  for (const d of L) { const to = renameId(d.id, renamed); if (to !== d.id) mv.push({ from: d.id, to, data: d.data }); }
+  const away = new Set(mv.map((m) => m.from));
+  // אם במספר החדש כבר יש הערה שלא עוברת למקום אחר (למשל של גוף שנמחק) – לא דורסים: ההערה נשארת במקומה ותיבדק (re)
+  const ok = mv.filter((m) => !ids.has(m.to) || away.has(m.to));
+  const tgt = new Set(ok.map((m) => m.to));
+  return { set: ok.map((m) => ({ id: m.to, data: m.data })), del: ok.map((m) => m.from).filter((id) => !tgt.has(id)) };
+}
+// שמירת מפה: docs = n/* , renamed, items = itemsOf(המפה שנשמרה), qs = s3setup.qs, max = תקרת כתיבות.
+// ← { set: [{ id, data }], del: [id], qs: חדש או null, nN, cut: כמה לא נבדקו (מעבר לתקרה) }. ראו store3d-map.js saveMap.
+function saveNotes(docs, renamed, items, qs, max) {
+  const cur = new Map((docs || []).map((d) => [d.id, Object.assign({}, d.data)]));
+  const rn = renameNotes(docs, renamed);
+  const set = new Map(), del = new Set();
+  for (const x of rn.set) { cur.set(x.id, Object.assign({}, x.data)); set.set(x.id, cur.get(x.id)); }
+  for (const id of rn.del) { cur.delete(id); del.add(id); }
+  let cut = 0;
+  for (const [id, n] of cur) {
+    if (n.on === 'map' || n.re === 1 || typeof n.t !== 'string' || !n.t.trim()) continue;
+    if (set.size + del.size >= max) { cut++; continue; }
+    if (NK.noteState(n, id, items) === 'ok') Object.assign(n, { on: 'map', d: items.get(id) });
+    else n.re = 1;
+    set.set(id, n);
   }
-  const tgt = new Set(set.map((s) => s.id));
-  return { set, del: from.filter((id) => !tgt.has(id)) };
+  return { set: [...set].map(([id, data]) => ({ id, data })), del: [...del], qs: renameRefs(qs, renamed), nN: cur.size, cut };
 }
 // qs ← qs עם ref מעודכן, או null אם לא השתנה כלום
 function renameRefs(qs, renamed) {
@@ -186,6 +183,6 @@ function renameRefs(qs, renamed) {
 }
 
 module.exports = {
-  SET, ITEM_RE, QID_RE, PRE, QS_VERSION, txt1, itemsOf, noteInput, toQsModel, buildQsPrompt, qsClean, qsMsg, QS_WHY,
-  ansInput, answered, renameId, renameNotes, renameRefs,
+  NK, noteState: NK.noteState, dKey: NK.dKey, SET, ITEM_RE, QID_RE, PRE, QS_VERSION, txt1, itemsOf, noteInput, toQsModel, buildQsPrompt, qsClean, qsMsg, QS_WHY,
+  ansInput, answered, renameId, renameNotes, renameRefs, saveNotes,
 };

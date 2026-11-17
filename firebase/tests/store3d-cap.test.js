@@ -11,7 +11,7 @@ const path = require('node:path');
 const H = require('./helpers');
 
 const A = 'biz-cap', B = 'biz-capoff';
-const MGR = 'cap_mgr1', E1 = 'cap_emp1', DR = 'cap_draw1', EB = 'cap_empb';
+const MGR = 'cap_mgr1', E1 = 'cap_emp1', DR = 'cap_draw1', EB = 'cap_empb', EO = 'cap_other', EOFF = 'cap_off';
 const FEAT = { scan: true, tasks: true, store3d: true };
 const fx = (id, o) => Object.assign({ id, k: 'gon', x: 300, y: 300, w: 200, d: 60, h: 180, a: 0, sides: 1, bays: 2, lvl: 5, hi: false, room: 'r1', num: 1 }, o);
 const MAP = (o) => Object.assign({ br: 'main', kind: 's', name: 'החנות', v: 1, seq: 2, grid: 50, numDir: 'rtl', src: 'manual', ent: 'd1',
@@ -39,8 +39,8 @@ async function seed(map) {
   b.set(adm.doc('b/' + A), { name: 'א', status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: FEAT });
   b.set(adm.doc('b/' + B), { name: 'ב', status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: Object.assign({}, FEAT, { store3d: false }) });
   b.set(adm.doc(`b/${A}/admins/${MGR}`), { email: MGR + '@example.invalid' });
-  for (const [u, role, perms] of [[MGR, 'manager', null], [E1, 'employee', null], [DR, 'employee', { s3m: true }]]) {
-    b.set(adm.doc(`b/${A}/staff/${u}`), Object.assign({ name: u, role, active: true }, perms ? { perms } : {}));
+  for (const [u, role, perms, o] of [[MGR, 'manager', null], [E1, 'employee', null], [DR, 'employee', { s3m: true }], [EO, 'employee', { s3m: true }, { br: ['other'] }], [EOFF, 'employee', { s3m: true }, { active: false }]]) {
+    b.set(adm.doc(`b/${A}/staff/${u}`), Object.assign({ name: u, role, active: true }, perms ? { perms } : {}, o || {}));
     b.set(adm.doc('users/' + u), { bizId: A, role: role === 'manager' ? 'admin' : 'worker', active: true, bizStatus: 'active', email: u + '@example.invalid', createdAt: 1 });
   }
   b.set(adm.doc(`b/${B}/staff/${EB}`), { name: EB, role: 'employee', active: true, perms: { s3m: true } });
@@ -155,6 +155,8 @@ describe('s3cap – הליבה מול האמולטור (Firestore + Storage)', (
     assert.equal(await g({ xr: { a: 0, b: 500, c: 1 } }), 'bad-xr', 'שדה זר');
     assert.equal(await g({ yr: { a: 900, b: 100 } }), 'bad-yr');
     assert.equal(await g({ yr: { a: -5, b: 100 } }), 'bad-yr');
+    assert.equal(await g({ yr: { a: 100, b: 149 } }), 'bad-yr', 'b-a < 50');
+    assert.notEqual(await g({ yr: { a: 100, b: 150 } }), 'bad-yr', 'b-a = 50 מותר');
     assert.equal(await g({}), 'bad-input', 'בלי quad/xr/yr');
     assert.equal(await g({ n: 0, xr: { a: 0, b: 500 } }), 'bad-n');
     assert.equal(await g({ n: 50, xr: { a: 0, b: 500 } }), 'no-photo', 'n לא קיים');
@@ -166,6 +168,21 @@ describe('s3cap – הליבה מול האמולטור (Firestore + Storage)', (
     assert.equal(f1.length, f0.length, 'בלי קבצים חדשים');
   });
 
+  it('geo (סבב בדיקה של שלב 2): הרשאות דרך הפונקציה עצמה (exports.s3CapPut.run) – מנהל ו-s3m מותר; בלי s3m / סניף אחר / עסק אחר / תוסף כבוי / עובד מושבת – נדחה', async () => {
+    const IX = require(path.join(FN, 'index.js'));
+    const call = async (uid, biz) => {
+      try { await IX.s3CapPut.run({ auth: { uid, token: { uid } }, data: { bizId: biz || A, qid: qid(), mapId: 's-main', key: 'b_f1-a-1', op: 'geo', n: 1, xr: { a: 0, b: 500 } }, rawRequest: { headers: {} } }); return 'OK'; }
+      catch (e) { return (e.details && e.details.reason) || e.code; }
+    };
+    // מותר = עבר את ההרשאה ונעצר בבדיקת התוכן (אין עדיין תמונה לפריט)
+    assert.equal(await call(MGR), 'no-photo', 'מנהל');
+    assert.equal(await call(DR), 'no-photo', 's3m');
+    assert.equal(await call(E1), 'not-s3m');
+    assert.equal(await call(EO), 'other-branch');
+    assert.equal(await call(EB), 'foreign-biz');
+    assert.equal(await call(EB, B), 'feature-off');
+    assert.equal(await call(EOFF), 'staff-disabled');
+  });
   it('geo על פריט ok: נשאר ok (okBy לא נמחק)', async () => {
     await put({ key: 'b_f1-a-1', op: 'ph', img: IMG, th: TH });
     await put({ key: 'b_f1-a-1', op: 'front', img: FR, th: TH, man: true });
@@ -224,6 +241,10 @@ describe('s3cap – הליבה מול האמולטור (Firestore + Storage)', (
     await adm.doc(`b/${A}/smap/s-main/bay/f1-a-1`).set({ cat: 'חטיפים', notes: [{ t: 'קיימת', at: 1, by: MGR }], upd: 1, by: MGR });
     await adm.doc(`b/${A}/s3setup/s-main/n/f1-a-1`).set({ t: 'המדף התחתון שבור', upd: 1, by: DR });
     await adm.doc(`b/${A}/s3setup/s-main/n/f1-a-2`).set({ t: '', upd: 1, by: DR });
+    // הקמת חנות שלב 2 (סבב בדיקה 1): הערה לשיוך מחדש (re:1), והערה מטיוטה שהפריט במספר שלה כבר אחר – לא מועתקות
+    await adm.doc(`b/${A}/s3setup/s-main/n/f2-a-1`).set({ t: 'לשיוך מחדש', upd: 1, by: DR, re: 1 });
+    await adm.doc(`b/${A}/smap/s-main/bay/f2-a-1`).delete();
+    await adm.doc(`b/${A}/s3setup/s-main/n/f2`).set({ t: 'על גוף אחר', upd: 1, by: DR, d: 'מקרר מספר 7 "אחר"', on: 'draft' });
     for (const it of plan.items) {
       if (it.key === 'w_r1-1-1') await put({ key: it.key, op: 'skip', why: 'מכוסה במדפים' });
       else await adm.doc(`b/${A}/s3setup/s-main/cap/${it.key}`).set({ k: it.k, ord: it.ord, st: 'ok', geo: it.geo, okBy: MGR, okAt: 1, fr: 'x', upd: 1, by: MGR });
@@ -238,6 +259,8 @@ describe('s3cap – הליבה מול האמולטור (Firestore + Storage)', (
     assert.equal(bay.cat, 'חטיפים');
     assert.equal((await get(`b/${A}/s3setup/s-main/n/f1-a-1`)).bay, 1);
     assert.equal(await get(`b/${A}/smap/s-main/bay/f1-a-2`), null, 'הערה ריקה – לא נוצר כלום');
+    assert.equal(await get(`b/${A}/smap/s-main/bay/f2-a-1`), null, 'הערה לשיוך מחדש – לא מועתקת ל-bay.notes');
+    assert.equal(r.re, 2, 'מספר ההערות שמחכות לשיוך');
     assert.equal((await C.setupDone(db, who, { qid: q, mapId: 's-main' }, 1800000010000)).dup, true);
     await C.setupDone(db, who, { qid: qid(), mapId: 's-main' }, 1800000011000);
     assert.equal((await get(`b/${A}/smap/s-main/bay/f1-a-1`)).notes.length, 2, 'לא מועתקת פעמיים');

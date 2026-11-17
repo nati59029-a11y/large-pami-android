@@ -134,3 +134,55 @@ describe('mapFix – ans/notes (הקמת חנות שלב 2)', () => {
     assert.ok(!p.includes('בקשת התיקון של המנהל'), 'בלי טקסט – בלי שורת בקשה');
   });
 });
+
+// סבב בדיקה 1, ליקוי 1: הערה לא נקשרת בשקט לפריט אחר כשהטיוטה מוספרת מחדש או בשמירה הראשונה (renamed)
+describe('שיוך הערות – noteState, renamed בלי דריסה, saveNotes', () => {
+  const fs = require('node:fs');
+  const NK = require(path.join(FN, 'lib', 'store3d-notekey.js'));
+  it('הקובץ המשותף זהה תו-בתו בטלפון ובשרת', () => {
+    assert.equal(fs.readFileSync(path.join(FN, 'lib', 'store3d-notekey.js'), 'utf8'), fs.readFileSync(path.join(__dirname, '..', '..', 'app-source', 'www', 'store3d-notekey.js'), 'utf8'));
+  });
+  const fxA = (id, num, name, x) => ({ id, k: 'gon', num, name, room: 'r1', x, y: 300, sides: 1, bays: 2 });
+  const map = (fx) => Object.assign({}, MAP, { fx });
+  it('noteState: אותו גוף שזז = ok; גוף אחר באותו מזהה = re; לא קיים = re; re:1 = re; on=map = ok; ריק = empty', () => {
+    const I1 = NK.itemsOf(map([fxA('f3', 3, 'משקאות', 100)]));
+    const n = { t: 'הערה', d: I1.get('f3'), on: 'draft' }, nb = { t: 'מקטע', d: I1.get('f3-a-2'), on: 'draft' };
+    assert.equal(NK.noteState(n, 'f3', NK.itemsOf(map([fxA('f3', 3, 'משקאות', 900)]))), 'ok', 'הזזה בלבד');
+    const I2 = NK.itemsOf(map([fxA('f1', 1, 'חטיפים', 100), fxA('f3', 3, 'ניקיון', 500)]));
+    assert.equal(NK.noteState(n, 'f3', I2), 're', 'מוספר מחדש – f3 עכשיו גוף אחר');
+    assert.equal(NK.noteState(nb, 'f3-a-2', I2), 're', 'גם מקטע');
+    assert.equal(NK.noteState(n, 'f3', NK.itemsOf(map([]))), 're', 'לא קיים');
+    assert.equal(NK.noteState(Object.assign({}, n, { re: 1 }), 'f3', I1), 're');
+    assert.equal(NK.noteState(Object.assign({}, n, { on: 'map' }), 'f3', I2), 'ok', 'מפה שמורה – מזהים יציבים');
+    assert.equal(NK.noteState({ t: '' }, 'f3', I1), 'empty');
+  });
+  it('renamed: מספר חדש שכבר תפוס בהערה של גוף שנמחק – לא דורסים (שתיהן נשארות)', () => {
+    const docs = [{ id: 'f4', data: { t: 'של הגוף שנמחק' } }, { id: 'f4-a-2', data: { t: 'מקטע של שנמחק' } }, { id: 'f9', data: { t: 'של f9' } }, { id: 'f9-a-1', data: { t: 'מקטע f9' } }];
+    const r = S.renameNotes(docs, { f9: 'f4' });
+    assert.deepEqual(r.set.map((x) => x.id), ['f4-a-1'], 'רק מקטע f9-a-1 עובר (f4-a-1 פנוי)');
+    assert.deepEqual(r.del, ['f9-a-1']);
+  });
+  it('saveNotes: אותו פריט ⇒ on=map; פריט אחר במספר ⇒ re=1; הערות המקטעים של גוף שנמחק לא עוברות לגוף שקיבל את מספרו', () => {
+    const draft = map([fxA('f2', 2, 'משקאות', 100), fxA('f4', 4, 'ניקיון', 500)]);   // f4 נמחק בעורך, f9 חדש
+    const D0 = NK.itemsOf(draft), D9 = NK.itemsOf(map([fxA('f9', 5, 'חטיפים', 700)]));
+    const docs = [{ id: 'f2', data: { t: 'משקאות קרים', d: D0.get('f2'), on: 'draft' } }, { id: 'f4-a-2', data: { t: 'נוזל כלים', d: D0.get('f4-a-2'), on: 'draft' } },
+      { id: 'f9', data: { t: 'חטיפים', d: D9.get('f9'), on: 'draft' } }, { id: 'r1', data: { t: 'חדר', d: D0.get('r1'), on: 'map' } }];
+    const saved = NK.itemsOf(map([fxA('f2', 2, 'משקאות', 100), fxA('f4', 5, 'חטיפים', 700)]));   // השרת: f9 ← f4
+    const r = S.saveNotes(docs, { f9: 'f4' }, saved, [{ id: 'q1', t: 'א', o: ['1', '2'], ref: 'f9' }], 400);
+    const by = Object.fromEntries(r.set.map((x) => [x.id, x.data]));
+    assert.equal(by.f2.on, 'map');
+    assert.equal(by.f4.t, 'חטיפים'); assert.equal(by.f4.on, 'map', 'f9 עבר ל-f4 ונשאר אותו גוף');
+    assert.equal(by['f4-a-2'].re, 1, 'מקטע של הגוף שנמחק – לשיוך מחדש, לא נקשר לגוף החדש');
+    assert.deepEqual(r.del, ['f9']); assert.equal(r.qs[0].ref, 'f4'); assert.equal(r.nN, 4);
+    assert.equal(by.r1, undefined, 'הערה על מפה שמורה לא נכתבת');
+    assert.equal(S.saveNotes(docs, {}, saved, null, 1).cut > 0, true, 'מעבר לתקרה – לא נבדק ונספר');
+  });
+  it('noteInput: from רק עם itemId אחר וטקסט', () => {
+    const ok = (o) => S.noteInput(Object.assign({ qid: Q, mapId: 's-main', t: 'הערה', itemId: 'f1' }, o));
+    assert.equal(ok({ from: 'f3' }).from, 'f3');
+    assert.equal(code(() => ok({ from: 'f1' })), 'bad-item');
+    assert.equal(code(() => ok({ from: 'f3', t: '' })), 'bad-item');
+    assert.equal(code(() => ok({ from: 'f3', itemId: '' })), 'bad-item');
+    assert.equal(code(() => ok({ from: 'x' })), 'bad-item');
+  });
+});

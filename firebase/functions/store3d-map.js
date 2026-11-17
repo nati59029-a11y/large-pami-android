@@ -28,7 +28,7 @@ const SL = require('./lib/store3d-setup');
 
 if (!getApps().length) initializeApp();
 
-const QID_DAYS = 30, D1 = 86400000;
+const QID_DAYS = 30, D1 = 86400000, NOTE_WRITES = 400;   // תקרת כתיבות של הערות בטרנזקציית השמירה (המגבלה של Firestore: 500)
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const isExists = (e) => e && (e.code === 6 || /ALREADY_EXISTS/.test(String(e.message)));
 const CODE = {
@@ -88,22 +88,21 @@ async function saveMap(db, who, input, now) {
       const fin = M.finalCheck(M.mergeDel(old, clean.map, { mgr: who.mgr, uid: who.uid, now }), old);
       const doc = Object.assign(fin.map, { v, upd: now, by: who.uid });
       if (M.bytesOf(doc) > M.MAX_BYTES) throw M.fail('too-big', 'המפה גדולה מדי (עד 800KB). מחקו פריטים שלא צריך או חלקו לשתי מפות.');
-      // הקמת חנות שלב 2 (חוזה 6): גוף שקיבל מספר חדש (renamed) – ההערות שלו ושל המקטעים שלו (s3setup/{mapId}/n) ו-qs[].ref עוברים
-      // למזהה החדש באותה טרנזקציה. זו העברה ולא מחיקת נתון. קריאות לפני כל כתיבה.
+      // הקמת חנות שלב 2 (חוזה 6 + תוספת 17.11): בשמירה הראשונה, או כשגוף קיבל מספר חדש (renamed), ההערות לפריטים (s3setup/{mapId}/n)
+      // נבדקות באותה טרנזקציה (קריאות לפני כל כתיבה): הערות של גוף שקיבל מספר חדש ושל המקטעים שלו עוברות למספר החדש (העברה, לא מחיקה;
+      // אם כבר יש הערה במספר החדש – לא דורסים, ושתיהן נבדקות). כל הערה שנכתבה על טיוטה (on != 'map') מושווית לפריט שבמזהה במפה
+      // שנשמרה (לפי התיאור d, בלי קואורדינטות): אותו פריט ⇒ on='map'; פריט אחר / לא קיים ⇒ re=1 ("לשיוך מחדש" – לא נקשרת בשקט).
       let mv = null;
-      if (Object.keys(fin.renamed).length) {
+      if (!old || Object.keys(fin.renamed).length) {
         const [ss, ns] = await Promise.all([tx.get(db.doc('s3setup/' + mapId)), tx.get(db.collection(`s3setup/${mapId}/n`))]);
-        const rn = SL.renameNotes(ns.docs.map((d) => ({ id: d.id, data: d.data() })), fin.renamed);
-        const qs = ss.exists ? SL.renameRefs(ss.get('qs'), fin.renamed) : null;
-        const ids = new Set(ns.docs.map((d) => d.id));
-        for (const id of rn.del) ids.delete(id);
-        for (const x of rn.set) ids.add(x.id);
-        mv = { rn, qs, nN: ids.size };
+        if (ss.exists || ns.size) mv = SL.saveNotes(ns.docs.map((d) => ({ id: d.id, data: d.data() })), fin.renamed, SL.itemsOf(doc), ss.exists ? ss.get('qs') : null, NOTE_WRITES);
+        if (mv) mv.ss = ss.exists;
       }
-      if (mv && (mv.qs || mv.rn.set.length)) {
-        for (const x of mv.rn.set) tx.set(db.doc(`s3setup/${mapId}/n/${x.id}`), x.data);
-        for (const id of mv.rn.del) tx.delete(db.doc(`s3setup/${mapId}/n/${id}`));
-        tx.set(db.doc('s3setup/' + mapId), Object.assign({ upd: now, by: who.uid }, mv.qs ? { qs: mv.qs } : {}, mv.rn.set.length ? { nN: mv.nN } : {}), { merge: true });
+      if (mv && (mv.set.length || mv.del.length || mv.qs)) {
+        for (const x of mv.set) tx.set(db.doc(`s3setup/${mapId}/n/${x.id}`), x.data);
+        for (const id of mv.del) tx.delete(db.doc(`s3setup/${mapId}/n/${id}`));
+        tx.set(db.doc('s3setup/' + mapId), Object.assign(mv.ss ? {} : { v: 1, st: 'draft' }, { upd: now, by: who.uid, nN: mv.nN }, mv.qs ? { qs: mv.qs } : {}), { merge: true });
+        if (mv.cut) logger.warn('s3SaveMap: notes not checked (too many)', { n: mv.cut });
       }
       if (old) tx.set(db.doc('smap/' + mapId + '/ver/' + M.verId(old.v)), M.verDoc(old, { uid: who.uid, now }, input.why));
       tx.set(ref, doc);

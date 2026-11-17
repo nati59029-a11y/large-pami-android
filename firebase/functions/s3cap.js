@@ -26,6 +26,7 @@ const T = require('./lib/tenant');
 const M = require('./lib/store3d-map');
 const A = require('./lib/store3d-ai');
 const P = require('./lib/store3d-capplan');
+const NK = require('./lib/store3d-notekey');
 
 if (!getApps().length) initializeApp();
 
@@ -49,6 +50,7 @@ const fileOf = (dir, key, n, t) => dir + key + '_' + n + (t ? '_t' : '') + '.jpg
 const cleanWhy = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
 
 // תיקון ידני (op 'geo'): quad – בדיוק 8 מספרים שלמים 0–1000; xr/yr – { a, b } שלמים 0–1000, a < b (חוזה 3.3א + תוספת 17.11)
+const YR_MIN = 50;
 const int1k = (v) => Number.isInteger(v) && v >= 0 && v <= 1000;
 function cleanGeo(input) {
   const o = {};
@@ -60,6 +62,8 @@ function cleanGeo(input) {
     if (input[f] === undefined) continue;
     const r = input[f];
     if (!isObj(r) || Object.keys(r).some((k) => k !== 'a' && k !== 'b') || !int1k(r.a) || !int1k(r.b) || r.a >= r.b) throw bad('bad-' + f, 'הטווח לא תקין');
+    // החלטת המתאם (17.11): טווח הגובה לפחות 50 (5% מהתמונה), כמו בטלפון
+    if (f === 'yr' && r.b - r.a < YR_MIN) throw bad('bad-yr', 'טווח הגובה קטן מדי');
     o[f] = { a: r.a, b: r.b };
   }
   if (!Object.keys(o).length) throw bad('bad-input', 'אין מה לשמור');
@@ -317,7 +321,9 @@ async function setupDone(db, who, input, now) {
   // הערות המקטעים ← bay.notes (רק הוספה, רק אם יש מקום; n.bay = 1 כדי שלא תועתק פעמיים). בקבוצות של 100 מקטעים לטרנזקציה.
   const bays = new Set(plan.items.filter((i) => i.k === 'b').map((i) => i.key.slice(2)));
   const ns = await db.collection(`s3setup/${mapId}/n`).get();
-  const todo = ns.docs.filter((d) => BAY_RE.test(d.id) && bays.has(d.id) && d.get('bay') !== 1 && typeof d.get('t') === 'string' && d.get('t').trim());
+  // הקמת חנות שלב 2: הערה "לשיוך מחדש" (re, או שנכתבה על טיוטה והפריט במספר הזה כבר אחר) לא מועתקת עד שישייכו אותה
+  const NI = NK.itemsOf(map);
+  const todo = ns.docs.filter((d) => BAY_RE.test(d.id) && bays.has(d.id) && d.get('bay') !== 1 && typeof d.get('t') === 'string' && d.get('t').trim() && NK.noteState(d.data(), d.id, NI) === 'ok');
   let added = 0;
   for (let i = 0; i < todo.length; i += 100) {
     const part = todo.slice(i, i + 100);
@@ -326,7 +332,7 @@ async function setupDone(db, who, input, now) {
       const bb = await Promise.all(part.map((d) => tx.get(db.doc(`smap/${mapId}/bay/${d.id}`))));
       let k = 0;
       nn.forEach((n, j) => {
-        if (!n.exists || n.get('bay') === 1) return;
+        if (!n.exists || n.get('bay') === 1 || NK.noteState(n.data(), n.id, NI) !== 'ok') return;
         const t = String(n.get('t') || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 200);
         if (!t) return;
         const L = bb[j].exists && Array.isArray(bb[j].get('notes')) ? bb[j].get('notes') : [];
@@ -339,7 +345,8 @@ async function setupDone(db, who, input, now) {
       return k;
     });
   }
-  const res = { ok: true, mapId, n: plan.n, done: sm.ok, skip: sm.skip, notes: added, mapV: Number.isInteger(map.v) ? map.v : 0 };
+  const reN = ns.docs.filter((d) => typeof d.get('t') === 'string' && d.get('t').trim() && NK.noteState(d.data(), d.id, NI) === 're').length;
+  const res = { ok: true, mapId, n: plan.n, done: sm.ok, skip: sm.skip, notes: added, re: reN, mapV: Number.isInteger(map.v) ? map.v : 0 };
   await db.runTransaction(async (tx) => {
     const [q, ss] = await Promise.all([tx.get(qref), tx.get(db.doc('s3setup/' + mapId))]);
     if (q.exists) return;

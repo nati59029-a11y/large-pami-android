@@ -83,8 +83,10 @@ async function fixCore(db, who, input, now, deps) {
       const items = SL.itemsOf(x.m);
       gnote = sd && typeof sd.gnote === 'string' ? sd.gnote : '';
       const ns = await db.collection(`s3setup/${mapId}/n`).limit(SL.SET.notesMax).get();
+      // הערה "לשיוך מחדש" (הפריט במזהה כבר אחר – הטיוטה מוספרה מחדש) עוברת עם התיאור המקורי וסימון, לא כהערה על הפריט הנוכחי
       notes = ns.docs.filter((d) => typeof d.get('t') === 'string' && d.get('t').trim())
-        .map((d) => ({ פריט: typeof d.get('d') === 'string' && d.get('d') ? d.get('d') : items.get(d.id) || d.id, t: d.get('t') }));
+        .map((d) => Object.assign({ פריט: typeof d.get('d') === 'string' && d.get('d') ? d.get('d') : items.get(d.id) || d.id, t: d.get('t') },
+          SL.noteState(d.data(), d.id, items) === 'ok' ? {} : { מצב: 'פריט מטיוטה קודמת – לא ידוע אם הוא עדיין במפה' }));
     }
     if (!x.txt && !qa.length && !gnote && !notes.length) throw bad('nothing', 'אין עדיין תשובות או הערות. ענו על השאלות, כתבו הערה, או כתבו מה לתקן.', 'failed-precondition');
   }

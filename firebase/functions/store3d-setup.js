@@ -13,6 +13,7 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
 const { defineSecret, defineString, defineInt } = require('firebase-functions/params');
 const { getApps, initializeApp } = require('firebase-admin/app');
+const { FieldValue } = require('firebase-admin/firestore');
 const { onCall } = require('./lib/region');
 const { requireStaff, inputObject, hasPerm } = require('./lib/roles');
 const T = require('./lib/tenant');
@@ -72,35 +73,58 @@ const PREST = (sd) => !sd || !sd.st || S.PRE.includes(sd.st);
 async function noteCore(db, who, input, now) {
   let x;
   try { x = S.noteInput(input); } catch (e) { throw toHttps(e); }
-  const { mapId, itemId, t, qid } = x, br = mapId.slice(2);
+  const { mapId, itemId, t, qid, from } = x, br = mapId.slice(2);
   brAllowed(who, br);
   const d0 = await dupOf(db, qid, 'note', who.uid);
   if (d0) return d0;
   await mapLib().branchOk(db, who.bizId, br, mapId.charAt(0));
   const sref = db.doc('s3setup/' + mapId), qref = db.doc('s3qid/' + qid);
-  let desc = '';
+  let items = null, on = 'draft';
   if (itemId) {
     const s0 = await sref.get();
     const mm = await mapOf(db, who, mapId, x.m, s0.exists ? s0.data() : null);
-    if (!mm) throw bad('no-draft', 'אין עדיין מפה או טיוטה. אפשר לכתוב עכשיו רק הערה כללית.', 'failed-precondition');
-    desc = S.itemsOf(mm.map).get(itemId);
-    if (!desc) throw bad('no-item', 'הפריט הזה לא נמצא במפה. טענו מחדש ונסו שוב.', 'failed-precondition');
+    if (mm) { items = S.itemsOf(mm.map); on = mm.src === 'map' ? 'map' : 'draft'; }
+    else if (t || from) throw bad('no-draft', 'אין עדיין מפה או טיוטה. אפשר לכתוב עכשיו רק הערה כללית.', 'failed-precondition');
   }
   const res = { ok: true, mapId, itemId, t };
+  if (from) res.from = from;
   await db.runTransaction(async (tx) => {
-    const nref = itemId ? db.doc(`s3setup/${mapId}/n/${itemId}`) : null;
-    const [q, ss, ns] = await Promise.all([tx.get(qref), tx.get(sref), nref ? tx.get(nref) : Promise.resolve(null)]);
+    const nref = itemId ? db.doc(`s3setup/${mapId}/n/${itemId}`) : null, fref = from ? db.doc(`s3setup/${mapId}/n/${from}`) : null;
+    const [q, ss, ns, fs] = await Promise.all([tx.get(qref), tx.get(sref), nref ? tx.get(nref) : null, fref ? tx.get(fref) : null]);
     if (q.exists) return;
     const sd = ss.exists ? ss.data() : null;
     const o = Object.assign(sd ? {} : { v: 1 }, { upd: now, by: who.uid });
     if (PREST(sd) && (!sd || sd.st !== 'qs')) o.st = 'notes';
+    const nN = sd && Number.isInteger(sd.nN) ? sd.nN : 0;
     if (!itemId) Object.assign(o, { gnote: t, gnoteAt: now, gnoteBy: who.uid });
-    else if (ns.exists) tx.update(nref, { t, upd: now, by: who.uid, d: desc });
-    else if (t) {
-      const nN = sd && Number.isInteger(sd.nN) ? sd.nN : 0;
-      if (nN >= S.SET.notesMax) throw bad('notes-max', `אפשר עד ${S.SET.notesMax} הערות לפריטים במפה`, 'resource-exhausted');
-      tx.set(nref, { t, upd: now, by: who.uid, d: desc });
-      o.nN = nN + 1;
+    else {
+      const desc = items ? items.get(itemId) : '';
+      const cur = ns && ns.exists ? ns.data() : null;
+      const st = cur ? S.noteState(cur, itemId, items || new Map()) : 'empty';
+      if (from) {
+        // שיוך מחדש: הערה שמחכה לשיוך עוברת לפריט שנבחר (העברה, לא מחיקה). אם לפריט כבר יש הערה – הטקסטים מתחברים (עד 300)
+        if (!fs.exists || typeof fs.get('t') !== 'string' || !fs.get('t').trim()) throw bad('no-note', 'ההערה לשיוך לא נמצאה. טענו מחדש.', 'failed-precondition');
+        if (!desc) throw bad('no-item', 'הפריט הזה לא נמצא במפה. טענו מחדש ונסו שוב.', 'failed-precondition');
+        if (st === 're') throw bad('note-re', 'גם לפריט הזה יש הערה שמחכה לשיוך. שייכו או מחקו אותה קודם.', 'failed-precondition');
+        const tt = st === 'ok' ? cur.t + ' · ' + t : t;
+        if (tt.length > S.SET.note) throw bad('bad-note', `לפריט הזה כבר יש הערה, ויחד הן ארוכות מ-${S.SET.note} תווים. קצרו ונסו שוב.`);
+        tx.set(nref, { t: tt, upd: now, by: who.uid, d: desc, on });
+        tx.delete(fref);
+        if (cur) o.nN = Math.max(0, nN - 1);
+        res.t = tt;
+      } else if (cur && st === 're') {
+        // הערה "לשיוך מחדש" לא נקשרת בשקט לפריט שנמצא עכשיו במספר הזה: רק ניקוי (המסמך נשאר) או שיוך מחדש (from)
+        if (t) throw bad('note-re', 'להערה הזו יש פריט מטיוטה קודמת. שייכו אותה לפריט או מחקו אותה.', 'failed-precondition');
+        tx.update(nref, { t: '', upd: now, by: who.uid, re: FieldValue.delete() });
+      } else if (cur) {
+        if (t && !desc) throw bad('no-item', 'הפריט הזה לא נמצא במפה. טענו מחדש ונסו שוב.', 'failed-precondition');
+        tx.update(nref, Object.assign({ t, upd: now, by: who.uid }, t ? { d: desc, on } : {}));
+      } else if (t) {
+        if (!desc) throw bad('no-item', 'הפריט הזה לא נמצא במפה. טענו מחדש ונסו שוב.', 'failed-precondition');
+        if (nN >= S.SET.notesMax) throw bad('notes-max', `אפשר עד ${S.SET.notesMax} הערות לפריטים במפה`, 'resource-exhausted');
+        tx.set(nref, { t, upd: now, by: who.uid, d: desc, on });
+        o.nN = nN + 1;
+      }
     }
     tx.set(sref, o, { merge: true });
     tx.set(qref, qidRec('note', who.uid, now, res));
@@ -117,8 +141,9 @@ async function ask(deps, prompt, deadline) {
 // ההערות השמורות ← { gnote, notes: [{ id, d, t }] } (רק לא ריקות, עד 500)
 async function notesOf(db, mapId, sd, items) {
   const ns = await db.collection(`s3setup/${mapId}/n`).limit(S.SET.notesMax).get();
+  // st: 'ok' = על הפריט שבמזהה; 're' = לשיוך מחדש (הפריט במזהה הזה כבר אחר) – נשלח ל-AI בלי המזהה
   const notes = ns.docs.filter((d) => typeof d.get('t') === 'string' && d.get('t').trim())
-    .map((d) => ({ id: d.id, d: typeof d.get('d') === 'string' && d.get('d') ? d.get('d') : items.get(d.id) || d.id, t: d.get('t') }));
+    .map((d) => ({ id: d.id, d: typeof d.get('d') === 'string' && d.get('d') ? d.get('d') : items.get(d.id) || d.id, t: d.get('t'), st: S.noteState(d.data(), d.id, items) }));
   return { gnote: sd && typeof sd.gnote === 'string' ? sd.gnote : '', notes };
 }
 async function qsCore(db, who, input, now, deps) {
@@ -144,7 +169,7 @@ async function qsCore(db, who, input, now, deps) {
   const set = await db.doc('s3set/' + br).get();
   const prompt = S.buildQsPrompt({
     kind, storeType: set.exists ? set.get('stype') : '', cur: S.toQsModel(mm.map), round: qr0 + 1,
-    gnote: nt.gnote, notes: nt.notes.map((n) => ({ פריט: n.d, id: n.id, t: n.t })), prev: S.answered(sd && sd.qs),
+    gnote: nt.gnote, notes: nt.notes.map((n) => (n.st === 'ok' ? { פריט: n.d, id: n.id, t: n.t } : { פריט: n.d, מצב: 'פריט מטיוטה קודמת – לא ידוע אם הוא עדיין במפה', t: n.t })), prev: S.answered(sd && sd.qs),
   });
   // רק הבלם היומי לעובד + s3qid, בטרנזקציה אחת לפני Gemini
   const dup = await db.runTransaction(async (tx) => {
@@ -223,6 +248,8 @@ async function ansCore(db, who, input, now) {
     if (q.exists) return Object.assign({}, q.get('res') || {}, { dup: true });
     const qs = ss.exists && Array.isArray(ss.get('qs')) ? ss.get('qs') : [];
     if (!qs.length) throw bad('no-qs', 'אין שאלות פתוחות. טענו מחדש.', 'failed-precondition');
+    // qr (לא חובה): סבב השאלות שהטלפון ענה עליו. סבב אחר בינתיים (המזהים q1.. חוזרים בכל סבב) ⇒ נדחה
+    if (input.qr !== undefined && input.qr !== null && input.qr !== (Number.isInteger(ss.get('qr')) ? ss.get('qr') : 0)) throw bad('stale-qs', 'השאלות התחלפו בינתיים. טענו מחדש וענו שוב.', 'failed-precondition');
     let A2;
     try { A2 = S.ansInput(input.ans, qs); } catch (e) { throw toHttps(e); }
     const nq = qs.map((x) => (A2.has(x.id) ? Object.assign({}, x, { a: Object.assign({}, A2.get(x.id), { at: now, by: who.uid }) }) : x));

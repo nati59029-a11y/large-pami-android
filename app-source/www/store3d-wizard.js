@@ -273,11 +273,15 @@ function ntItems(m){const L=[],rn={};
  ntLive(m,'syms').filter(y=>y.k==='cash').forEach((y,i)=>L.push([y.id,'קופה '+(i+1)]));
  return L}
 const ntLbl=(m,id)=>{const b=/^(f[0-9]+)-([ab])-([0-9]+)$/.exec(id||''),x=ntItems(m).find(i=>i[0]===(b?b[1]:id));return x?(b?`מקטע ${b[3]} בצד ${b[2]==='a'?'א':'ב'} של ${x[1]}`:x[1]):id};
-const NT0=()=>({g:'',gs:'',t:null,item:'',bay:'',L:{},qs:[],qr:0,ans:{},busy:'',msg:'',ok:'',old:0,ld:0,qq:'',qa:'',qf:''});
+/* ההערות לפי מצב מול הטיוטה הנוכחית (S3NK – אותה בדיקה כמו בשרת): ok = על הפריט שבמזהה; re = "לשיוך מחדש" – הטיוטה מוספרה מחדש
+   והפריט במזהה הזה כבר אחר (או לא קיים). הערה כזו לא מוצגת על הפריט: אפשר לשייך אותה לפריט שנבחר או למחוק */
+const ntSplit=(N,m)=>{const K=window.S3NK,I=K?K.itemsOf(m):null,ok={},re={};for(const id of Object.keys(N.D)){const n=N.D[id];if(!n||!n.t)continue;(I&&K.noteState(n,id,I)!=='ok'?re:ok)[id]=n}return{ok,re,I}};
+const NT0=()=>({g:'',gs:'',t:null,item:'',bay:'',D:{},qs:[],qr:0,ans:{},busy:'',msg:'',ok:'',old:0,ld:0,qq:'',qa:'',qf:''});
 async function ntLoad(){const N=W.nt;if(!N||N.ld)return;N.ld=1;
  try{const sd=await U.get('/s3setup/'+mapId());if(sd){N.g=N.gs=String(sd.gnote||'');N.qr=+sd.qr||0;N.qs=Array.isArray(sd.qs)?sd.qs:[];
    for(const q of N.qs)if(q&&q.a)N.ans[q.id]={c:Array.isArray(q.a.c)?q.a.c.slice():[],x:String(q.a.x||'')};
-   const j=await fsx('/s3setup/'+mapId()+'/n?pageSize=300');for(const d of (j&&j.documents)||[]){const f=U.dec(d)||{};if(f.t)N.L[d.name.split('/').pop()]=String(f.t)}}}
+   let tok='';for(let i=0;i<5;i++){const j=await fsx('/s3setup/'+mapId()+'/n?pageSize=300'+(tok?'&pageToken='+encodeURIComponent(tok):''));
+    for(const d of (j&&j.documents)||[]){const f=U.dec(d)||{};if(typeof f.t==='string'&&f.t)N.D[d.name.split('/').pop()]={t:f.t,d:String(f.d||''),on:f.on,re:f.re}}tok=j&&j.nextPageToken;if(!tok)break}}}
  catch(e){if(e&&e.code===403)N.old=1}
  if(cur().v==='st3w')rerender()}
 const ntBody=o=>Object.assign({mapId:mapId(),m:W.draft&&W.draft.m},o);
@@ -289,8 +293,13 @@ const ntRun=async(busy,f)=>{const N=W.nt;if(!N||N.busy||W.busy)return;ntGrab();i
 ACT.s3ntSaveG=()=>ntRun('שומרים…',async N=>{const t=N.g.replace(/\s+/g,' ').trim();
  await U.fn('s3SetupNote',ntBody({itemId:'',t,qid:U.qid()}));N.g=N.gs=t;N.ok=t?'ההערה הכללית נשמרה':'ההערה הכללית נמחקה'});
 ACT.s3ntSaveI=()=>ntRun('שומרים…',async N=>{const id=N.bay||N.item;if(!id){N.msg='בחרו פריט.';return}
- const t=String(N.t==null?(N.L[id]||''):N.t).replace(/\s+/g,' ').trim().slice(0,300);
- await U.fn('s3SetupNote',ntBody({itemId:id,t,qid:U.qid()}));if(t)N.L[id]=t;else delete N.L[id];N.t=null;N.ok=t?'ההערה נשמרה':'ההערה נמחקה'});
+ const S0=ntSplit(N,W.draft.m);if(S0.re[id]){N.msg='לפריט הזה יש הערה שמחכה לשיוך (למטה). שייכו או מחקו אותה קודם.';return}
+ const t=String(N.t==null?((S0.ok[id]||{}).t||''):N.t).replace(/\s+/g,' ').trim().slice(0,300);
+ await U.fn('s3SetupNote',ntBody({itemId:id,t,qid:U.qid()}));if(t)N.D[id]={t,d:S0.I?S0.I.get(id):'',on:'draft'};else delete N.D[id];N.t=null;N.ok=t?'ההערה נשמרה':'ההערה נמחקה'});
+/* הערה לשיוך מחדש: לפריט שנבחר בשדה "הערה לפריט" (from), או מחיקה (ניקוי הטקסט) */
+ACT.s3ntRe=el=>{const from=el.dataset.id||'';ntRun('משייכים…',async N=>{const n=N.D[from],to=N.bay||N.item;if(!n)return;if(!to){N.msg='בחרו קודם פריט בשדה "הערה לפריט", ואז "שייכו לפריט שנבחר".';return}
+ const r=await U.fn('s3SetupNote',ntBody({itemId:to,from,t:n.t,qid:U.qid()}));const S0=ntSplit(N,W.draft.m);N.D[to]={t:String(r&&r.t||n.t),d:S0.I?S0.I.get(to):'',on:'draft'};delete N.D[from];N.ok='ההערה שויכה לפריט שנבחר'})};
+ACT.s3ntDel=el=>{const id=el.dataset.id||'';ntRun('מוחקים…',async N=>{if(!N.D[id])return;await U.fn('s3SetupNote',ntBody({itemId:id,t:'',qid:U.qid()}));delete N.D[id];N.ok='ההערה נמחקה'})};
 ACT.s3ntEdit=el=>{const N=W.nt,id=el.dataset.id||'';if(!N)return;N.t=null;const b=/^(f[0-9]+)-[ab]-[0-9]+$/.exec(id);N.item=b?b[1]:id;N.bay=b?id:'';N.msg='';N.ok='';rerender()};
 CHG.s3ntItem=el=>{const N=W.nt;if(!N)return;N.item=String(el.value||'');N.bay='';N.t=null;rerender()};
 CHG.s3ntBay=el=>{const N=W.nt;if(!N)return;N.bay=String(el.value||'');N.t=null;rerender()};
@@ -313,14 +322,14 @@ async function ntFix(N,o){const d=W.draft;if(!d)return;
 ACT.s3ntAns=()=>ntRun('שומרים את התשובות ומתקנים את הטיוטה… זה יכול לקחת עד דקה או שתיים.',async N=>{
  const ans=N.qs.filter(q=>{const a=N.ans[q.id];return a&&(a.c.length||a.x.trim())}).map(q=>({id:q.id,c:N.ans[q.id].c,x:N.ans[q.id].x.trim()}));
  if(!ans.length){N.msg='ענו לפחות על שאלה אחת (בחירה או כתיבה).';return}
- if(!N.qa)N.qa=U.qid();await U.fn('s3SetupAns',{mapId:mapId(),qid:N.qa,ans});N.qa='';
+ if(!N.qa)N.qa=U.qid();await U.fn('s3SetupAns',{mapId:mapId(),qid:N.qa,ans,qr:N.qr});N.qa='';
  for(const q of N.qs)if(N.ans[q.id]&&ans.some(a=>a.id===q.id))q.a=1;
  await ntFix(N,{ans:true,notes:true})});
 ACT.s3ntFix=()=>ntRun('מתקנים את הטיוטה לפי ההערות… זה יכול לקחת עד דקה או שתיים.',async N=>{
- if(!N.gs&&!Object.keys(N.L).length){N.msg='עוד אין הערות שמורות. כתבו הערה ושמרו אותה קודם.';return}await ntFix(N,{notes:true})});
+ if(!N.gs&&!Object.keys(N.D).length){N.msg='עוד אין הערות שמורות. כתבו הערה ושמרו אותה קודם.';return}await ntFix(N,{notes:true})});
 function ntBox(){
  if(!W.draft)return '';if(!W.nt||W.nt.mid!==mapId()){W.nt=Object.assign(NT0(),{mid:mapId()})}
- const N=W.nt,m=W.draft.m,dis=N.busy||W.busy?' disabled':'';ntLoad();
+ const N=W.nt,m=W.draft.m,dis=N.busy||W.busy?' disabled':'';ntLoad();const SP=ntSplit(N,m);
  if(N.old)return `<div class="s3info" id="s3nt"><b>הערות ושאלות</b><br><small>${esc2(NT_OLD)}</small></div>`;
  const I=ntItems(m),f=ntLive(m,'fx').find(x=>x.id===N.item),nb=f&&+f.bays>0?Math.min(30,+f.bays):0,sel=N.bay||N.item;
  const opt=(v,c,l)=>`<option value="${esc2(v)}"${v===c?' selected':''}>${esc2(l)}</option>`;
@@ -329,9 +338,11 @@ function ntBox(){
  h+=`<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px"><label class="f" style="flex:1;min-width:150px;margin:0"><span>הערה לפריט</span><select data-c="s3ntItem"${dis}>${opt('',N.item,'בחרו פריט…')}${I.map(i=>opt(i[0],N.item,i[1])).join('')}</select></label>`;
  if(nb){let o=opt('',N.bay,'כל הגוף');for(const sd of (f.sides===2?['a','b']:['a']))for(let n=1;n<=nb;n++)o+=opt(`${f.id}-${sd}-${n}`,N.bay,`מקטע ${n}${f.sides===2?' צד '+(sd==='a'?'א':'ב'):''}`);h+=`<label class="f" style="flex:1;min-width:110px;margin:0"><span>מקטע</span><select data-c="s3ntBay"${dis}>${o}</select></label>`}
  h+=`</div>`;
- if(sel)h+=`<textarea id="s3ntT" rows="2" maxlength="300" style="width:100%;margin-top:6px" aria-label="הערה ל${esc2(ntLbl(m,sel))} (עד 300 תווים)"${dis}>${esc2(N.t!=null?N.t:N.L[sel]||'')}</textarea><div class="row s3row"><button class="btn s g" data-a="s3ntSaveI"${dis}>שמרו הערה לפריט</button></div>`;
- const ks=Object.keys(N.L);
- if(ks.length)h+=`<ul class="s3ntL" style="margin:8px 0 0;padding-inline-start:18px">${ks.map(k=>`<li style="margin:4px 0"><b>${esc2(ntLbl(m,k))}:</b> ${esc2(N.L[k])} <button class="btn s g" style="min-height:44px" data-a="s3ntEdit" data-id="${esc2(k)}"${dis}>עריכה</button></li>`).join('')}</ul>`;
+ if(sel)h+=`<textarea id="s3ntT" rows="2" maxlength="300" style="width:100%;margin-top:6px" aria-label="הערה ל${esc2(ntLbl(m,sel))} (עד 300 תווים)"${dis}>${esc2(N.t!=null?N.t:(SP.ok[sel]||{}).t||'')}</textarea><div class="row s3row"><button class="btn s g" data-a="s3ntSaveI"${dis}>שמרו הערה לפריט</button></div>`;
+ const ks=Object.keys(SP.ok),kr=Object.keys(SP.re);
+ if(kr.length)h+=`<div class="s3info s3err" id="s3ntRe" style="margin-top:8px"><b>${kr.length} ${kr.length===1?'הערה מחכה':'הערות מחכות'} לשיוך מחדש</b><br><small>הטיוטה השתנתה, והפריט שעליו נכתבה ההערה כבר לא נמצא באותו מקום ברשימה. בחרו את הפריט הנכון בשדה "הערה לפריט" ולחצו "שייכו", או מחקו. הערה כזו לא תועבר לעובדים עד שתשויך.</small>
+  <ul style="margin:6px 0 0;padding-inline-start:18px">${kr.map(k=>`<li style="margin:4px 0"><b>נכתבה על: ${esc2(SP.re[k].d||k)}</b><br>${esc2(SP.re[k].t)}<div class="row s3row"><button class="btn s" data-a="s3ntRe" data-id="${esc2(k)}"${dis||!sel?' disabled':''}>שייכו לפריט שנבחר</button><button class="btn s g" data-a="s3ntDel" data-id="${esc2(k)}"${dis}>מחקו</button></div></li>`).join('')}</ul></div>`;
+ if(ks.length)h+=`<ul class="s3ntL" style="margin:8px 0 0;padding-inline-start:18px">${ks.map(k=>`<li style="margin:4px 0"><b>${esc2(ntLbl(m,k))}:</b> ${esc2(SP.ok[k].t)} <button class="btn s g" style="min-height:44px" data-a="s3ntEdit" data-id="${esc2(k)}"${dis}>עריכה</button></li>`).join('')}</ul>`;
  /* שאלות */
  h+=`<div style="margin-top:12px"><b>שאלות מהמערכת</b> <small class="note">(סבב ${Math.min(N.qr,3)} מתוך 3)</small></div>`;
  if(N.qs.length){h+=N.qs.map((q,qi)=>{const a=N.ans[q.id]||{c:[],x:''},ty=q.multi?'checkbox':'radio';

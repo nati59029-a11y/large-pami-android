@@ -9,8 +9,8 @@ const path = require('node:path');
 const H = require('./helpers');
 const GM = require('./gemini-mock');
 
-const A = 'biz-s3n';
-const MGR = 's3n_mgr1', DR = 's3n_draw1', E1 = 's3n_emp1';
+const A = 'biz-s3n', B = 'biz-s3noff';
+const MGR = 's3n_mgr1', DR = 's3n_draw1', E1 = 's3n_emp1', EO = 's3n_other', EOFF = 's3n_off', EB = 's3n_empb';
 const FEAT = { scan: true, tasks: true, store3d: true };
 const FN = path.join(__dirname, '..', 'functions');
 let qn = 0;
@@ -28,10 +28,13 @@ async function seed() {
   const b = adm.batch();
   b.set(adm.doc('b/' + A), { name: 'א', status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: FEAT });
   b.set(adm.doc(`b/${A}/admins/${MGR}`), { email: MGR + '@example.invalid' });
-  for (const [u, role, perms] of [[MGR, 'manager', null], [E1, 'employee', null], [DR, 'employee', { s3m: true }]]) {
-    b.set(adm.doc(`b/${A}/staff/${u}`), Object.assign({ name: u, role, active: true }, perms ? { perms } : {}));
+  b.set(adm.doc('b/' + B), { name: 'ב', status: 'active', dataRoot: 'b', schemaVersion: 1, createdAt: 1, createdBy: 'x', features: Object.assign({}, FEAT, { store3d: false }) });
+  for (const [u, role, perms, o] of [[MGR, 'manager', null], [E1, 'employee', null], [DR, 'employee', { s3m: true }], [EO, 'employee', { s3m: true }, { br: ['other'] }], [EOFF, 'employee', { s3m: true }, { active: false }]]) {
+    b.set(adm.doc(`b/${A}/staff/${u}`), Object.assign({ name: u, role, active: true }, perms ? { perms } : {}, o || {}));
     b.set(adm.doc('users/' + u), { bizId: A, role: role === 'manager' ? 'admin' : 'worker', active: true, bizStatus: 'active', email: u + '@example.invalid', createdAt: 1 });
   }
+  b.set(adm.doc(`b/${B}/staff/${EB}`), { name: EB, role: 'employee', active: true, perms: { s3m: true } });
+  b.set(adm.doc('users/' + EB), { bizId: B, role: 'worker', active: true, bizStatus: 'active', email: EB + '@example.invalid', createdAt: 1 });
   await b.commit();
 }
 
@@ -160,5 +163,70 @@ describe('הקמת חנות שלב 2 – הערות, שאלות ותשובות (
     const s = await get(P + 's3setup/s-main');
     assert.deepEqual(s.qs.map((x) => x.ref), ['f1-a-1', 'r1']);
     assert.equal(s.nN, 3); assert.equal(s.st, 'qs');
+  });
+
+  // ---------- סבב בדיקה 1, ליקוי 1: הערה לא נקשרת בשקט לפריט אחר ----------
+  const fxN = (id, num, name, x) => fx(id, { num, name, x });
+  it('טיוטה שמוספרה מחדש: הערה על f1 לא נשלחת ל-mapQs עם המזהה; לא נשמרת על ה-f1 החדש (note-re); שיוך מחדש (from) ומחיקה', async () => {
+    const D1 = MAP({ seq: 2, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f2', 2, 'ניקיון', 600)] });
+    await note({ itemId: 'f1-a-2', t: 'מקרר דלתות', m: D1 });
+    // טיוטה חדשה (mapFix / mapDraft): f1 הוא עכשיו "ניקיון", ו"משקאות" נהיה f2
+    const D2 = MAP({ seq: 2, fx: [fxN('f1', 1, 'ניקיון', 600), fxN('f2', 2, 'משקאות', 300)] });
+    GM.state.mapqs = { qs: [], conf: 0.9 };
+    await qs({ m: D2 });
+    const txt = GM.state.requests[GM.state.requests.length - 1].body.contents[0].parts[0].text;
+    assert.ok(txt.includes('מקרר דלתות') && !txt.includes('"id":"f1-a-2"') && txt.includes('פריט מטיוטה קודמת'), 'ההערה עם התיאור המקורי, בלי המזהה הישן');
+    assert.equal(await err(note({ itemId: 'f1-a-2', t: 'דריסה', m: D2 })), 'note-re', 'לא נקשרת בשקט לפריט שבמספר');
+    const r = await note({ itemId: 'f2-a-2', from: 'f1-a-2', t: 'מקרר דלתות', m: D2 });
+    assert.equal(r.ok, true);
+    assert.equal(await get(P + 's3setup/s-main/n/f1-a-2'), null, 'עברה');
+    const n2 = await get(P + 's3setup/s-main/n/f2-a-2');
+    assert.equal(n2.t, 'מקרר דלתות'); assert.match(n2.d, /משקאות/); assert.equal((await get(P + 's3setup/s-main')).nN, 1);
+    // מחיקה של הערה לשיוך: ניקוי הטקסט (המסמך נשאר)
+    await adm.doc(P + 's3setup/s-main/n/f1').set({ t: 'ישנה', upd: 1, by: DR, d: 'גונדולה מספר 9 "לא קיים"', on: 'draft' });
+    await note({ itemId: 'f1', t: '', m: D2 });
+    assert.equal((await get(P + 's3setup/s-main/n/f1')).t, '');
+  });
+
+  it('שמירה ראשונה: הערה על אותו פריט ⇒ on=map; פריט אחר במספר ⇒ re=1; הערות מקטע של גוף שנמחק לא עוברות לגוף שקיבל את מספרו (העתקה ב-s3SetupDone – store3d-cap.test.js)', async () => {
+    const D = MAP({ seq: 4, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f4', 4, 'ניקיון', 600)] });
+    await note({ itemId: 'f1', t: 'משקאות קרים', m: D });
+    await note({ itemId: 'f4-a-2', t: 'נוזל כלים', m: D });
+    // בעורך: f4 נמחק (לפני שמירה – יוצא מהטיוטה), ונוסף גוף חדש f9 ⇒ השרת נותן לו f2
+    const S1 = MAP({ seq: 4, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f9', 2, 'חטיפים', 600)] });
+    const sv = await MP.saveMap(db, { uid: MGR, mgr: true, bizId: A }, { mapId: 's-main', baseV: 0, map: S1 }, Date.now());
+    assert.deepEqual(sv.renamed, { f9: 'f2' });
+    const a = await get(P + 's3setup/s-main/n/f1'), b = await get(P + 's3setup/s-main/n/f4-a-2');
+    assert.equal(a.on, 'map'); assert.equal(a.re, undefined);
+    assert.equal(b.re, 1, 'הגוף נמחק – לשיוך מחדש');
+    // גוף שנמחק שהמספר שלו ניתן לגוף חדש: f4 נמחק, וגוף חדש מקבל f4
+    await env.clearFirestore(); await seed();
+    const E = MAP({ seq: 4, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f2', 2, 'ח', 400), fxN('f3', 3, 'ט', 500), fxN('f4', 4, 'ניקיון', 600)] });
+    await note({ itemId: 'f4-a-2', t: 'נוזל כלים', m: E });
+    const S2 = MAP({ seq: 4, fx: [fxN('f1', 1, 'משקאות', 300), fxN('f2', 2, 'ח', 400), fxN('f3', 3, 'ט', 500), fxN('f7', 5, 'חטיפים', 700)] });
+    const sv2 = await MP.saveMap(db, { uid: MGR, mgr: true, bizId: A }, { mapId: 's-main', baseV: 0, map: S2 }, Date.now());
+    assert.deepEqual(sv2.renamed, { f7: 'f4' });
+    assert.equal((await get(P + 's3setup/s-main/n/f4-a-2')).re, 1, 'הערת המקטע של הגוף שנמחק לא נקשרת לגוף החדש f4');
+    assert.equal(await err(note({ itemId: 'f4-a-2', t: 'דריסה' })), 'note-re');
+  });
+
+  // ---------- סבב בדיקה 1, ליקוי 2: הרשאות דרך הפונקציה עצמה (exports.<שם>.run, בלי אמולטור הפונקציות) ----------
+  it('הרשאות: מנהל ו-s3m – מותר; בלי s3m / סניף אחר / עסק אחר / תוסף כבוי / עובד מושבת – נדחה (s3SetupNote, mapQs, s3SetupAns)', async () => {
+    const IX = require(path.join(FN, 'index.js'));
+    const call = async (name, uid, data, biz) => {
+      try { await IX[name].run({ auth: { uid, token: { uid } }, data: Object.assign({ bizId: biz || A }, data), rawRequest: { headers: {} } }); return 'OK'; }
+      catch (e) { return (e.details && e.details.reason) || e.code; }
+    };
+    const IN = { s3SetupNote: () => ({ qid: qid(), mapId: 's-main', t: 'x' }), mapQs: () => ({ qid: qid(), mapId: 's-main' }), s3SetupAns: () => ({ qid: qid(), mapId: 's-main', ans: [{ id: 'q1', c: [0] }] }) };
+    const PASS = { s3SetupNote: 'OK', mapQs: 'no-draft', s3SetupAns: 'no-qs' };   // עבר את ההרשאה ונעצר בבדיקה הבאה
+    for (const fn of Object.keys(IN)) {
+      assert.equal(await call(fn, MGR, IN[fn]()), PASS[fn], fn + ' מנהל');
+      assert.equal(await call(fn, DR, IN[fn]()), PASS[fn], fn + ' s3m');
+      assert.equal(await call(fn, E1, IN[fn]()), 'not-s3m', fn + ' בלי s3m');
+      assert.equal(await call(fn, EO, IN[fn]()), 'other-branch', fn + ' סניף אחר');
+      assert.equal(await call(fn, EB, IN[fn]()), 'foreign-biz', fn + ' עסק אחר');
+      assert.equal(await call(fn, EB, IN[fn](), B), 'feature-off', fn + ' תוסף כבוי');
+      assert.equal(await call(fn, EOFF, IN[fn]()), 'staff-disabled', fn + ' עובד מושבת');
+    }
   });
 });
