@@ -269,6 +269,32 @@ GRADLE
 grep -q 'lp-pano-stitch' android/app/build.gradle || { echo "::error::pano stitch: gradle block missing"; exit 1; }
 # --- PANO-STITCH END ---
 
+# --- BG-WORK BEGIN ---
+# Background work (17.11.2026): customer feedback queues (AI recognition, sending scans) keep running when the user leaves
+# the app - a foreground service of type dataSync (LpWorkService) with a quiet notification and a partial wake lock.
+# Android 14+ needs FOREGROUND_SERVICE_DATA_SYNC and the type on the service. Running twice adds nothing twice.
+for P in FOREGROUND_SERVICE FOREGROUND_SERVICE_DATA_SYNC WAKE_LOCK; do
+  grep -q "android.permission.$P\"" $M || sed -i "s|<application|<uses-permission android:name=\"android.permission.$P\" />\n    <application|" $M
+done
+python3 - "$M" <<'PY5'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+if "LpWorkService" not in s:
+    i = s.rfind("</application>")
+    if i < 0:
+        sys.exit("::error::bg work: </application> not found")
+    s = s[:i] + ('\n        <!-- Background work (patch-android.sh) -->'
+                 '\n        <service android:name="com.largepami.finance.LpWorkService" android:exported="false" android:foregroundServiceType="dataSync" />'
+                 '\n    ') + s[i:]
+    open(p, "w", encoding="utf-8").write(s)
+assert s.count("LpWorkService") == 1
+for x in ("FOREGROUND_SERVICE\"", "FOREGROUND_SERVICE_DATA_SYNC\"", "WAKE_LOCK\""):
+    assert s.count("android.permission." + x) == 1, "bg work: permission " + x
+print("bg work manifest: OK (LpWorkService dataSync, FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC, WAKE_LOCK)")
+PY5
+# --- BG-WORK END ---
+
 J=android/app/src/main/java/com/largepami/finance
 cp android-plugin/SaveFilePlugin.java $J/SaveFilePlugin.java
 cp android-plugin/AppUpdatePlugin.java $J/AppUpdatePlugin.java
@@ -286,6 +312,9 @@ cp android-plugin/PanoStitchPlugin.java $J/PanoStitchPlugin.java
 cp android-plugin/LpSpeechPlugin.java $J/LpSpeechPlugin.java
 # Notification buttons (16.11.2026): our FCM service + builder, button receiver, unlock screen (Android 8-11), restore after reboot
 for f in LpNotif LpMessagingService LpActReceiver LpActActivity LpBootReceiver; do cp android-plugin/$f.java $J/$f.java; done
+# Background work (17.11.2026): customer feedback queues keep running outside the app
+cp android-plugin/LpWorkService.java $J/LpWorkService.java
+cp android-plugin/LpWorkPlugin.java $J/LpWorkPlugin.java
 cat > $J/MainActivity.java <<'JAVA'
 package com.largepami.finance;
 
@@ -308,6 +337,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PanoStitchPlugin.class);
         // Live dictation (secretary chat): words appear while speaking
         registerPlugin(LpSpeechPlugin.class);
+        // Background work: feedback queues keep running when the user leaves the app (foreground service)
+        registerPlugin(LpWorkPlugin.class);
         // Share menu: a re-created screen gets the same share intent again - do not take it twice
         ShareInPlugin.recreated = savedInstanceState != null;
         // Live update: choose the version of the screens before Capacitor loads them
