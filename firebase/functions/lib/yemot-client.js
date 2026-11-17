@@ -28,7 +28,11 @@ async function readReply(r) {
 function netError(e) {
   const timeout = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
   // בפסק זמן ייתכן שהבקשה כבר הגיעה לימות ובוצעה – "לא ודאי"
-  return new YemotError(timeout ? 'timeout' : 'network', timeout);
+  const err = new YemotError(timeout ? 'timeout' : 'network', timeout);
+  // קוד הרשת (למשל ECONNREFUSED) – רק למי שצריך להבחין "לא נוצר חיבור" מ"החיבור נותק" (צינתוק משוב בקבוצות). לא משנה את sent.
+  const c = e && e.cause;
+  err.netCode = c ? String(c.code || (Array.isArray(c.errors) && c.errors[0] && c.errors[0].code) || '') : '';
+  return err;
 }
 
 // קריאה אחת ל-API. המפתח רק בכותרת.
