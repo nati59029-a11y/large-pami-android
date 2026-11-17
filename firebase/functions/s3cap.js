@@ -10,6 +10,7 @@
 //     op 'skip'   – דילוג עם סיבה (why, 1–120 תווים). op 'unskip' – ביטול הדילוג. op 'off' – n: תמונה שלא בשימוש (הפוך), לא נמחקת.
 //     op 'geo'    – (שלב 4ב) תיקון ידני מהעורך "חיבור וחיתוך" לתמונה n: quad? (8 מספרים שלמים 0–1000), xr?/yr? ({a,b} שלמים 0–1000, a<b).
 //                   לפחות אחד מהשלושה. נכתב ל-ph[n] בלבד (שדה שלא נשלח – לא משתנה). בלי תמונה; st לא משתנה מהפעולה עצמה.
+//                   שלב 5: מסמן ph[n].man = 1 (נערך ידנית), ו-s3CapCheck לא דורס את quad/xr/yr של תמונה כזו.
 //     תמיד: הפריט חייב להיות בתוכנית של המפה השמורה; geo/geoV מהמפה הנוכחית; פריט ok שהמקום שלו זז ← 'part' (חוזה 3.3).
 //     qid חוזר = אותה תשובה (dup: true), בלי קבצים ובלי כתיבה נוספת. מונים ב-s3setup (capOk/capPart/capSkip) באותה טרנזקציה.
 //     כשגרסת המפה השתנתה מאז הכתיבה הקודמת (s3setup.mapV) – פריטים שכבר לא בתוכנית מסומנים 'orph' (לא נמחקים) והמונים מחושבים מחדש.
@@ -160,7 +161,7 @@ function nextDoc(old, item, mapV, x, f, uid, now) {
   } else if (x.op === 'geo') {
     const i = phOf(d).findIndex((p) => p.n === x.n);
     if (i < 0) throw bad('no-photo', 'התמונה לא נמצאה', 'not-found');
-    d.ph = phOf(d).map((p, j) => (j === i ? Object.assign({}, p, x.g) : p));
+    d.ph = phOf(d).map((p, j) => (j === i ? Object.assign({}, p, x.g, { man: 1 }) : p)); // שלב 5: man = נערך ידנית – בדיקת ה-AI לא דורסת quad/xr/yr
   }
   return d;
 }
@@ -363,4 +364,4 @@ exports.s3SetupDone = onCall(T.scoped(async (request) => {
 }));
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_cap', { enumerable: false, value: { capPut, setupDone, cleanPut, cleanGeo, nextDoc, counters, phRoom, syncPlan, LIM } });
+Object.defineProperty(exports, '_cap', { enumerable: false, value: { capPut, setupDone, cleanPut, cleanGeo, nextDoc, counters, phRoom, syncPlan, planItem, setupDoc, LIM } });

@@ -134,7 +134,7 @@ function curCard(){
  if(it.k==='b'&&(it.lv.length>1||ph>=1))h+=`<p class="note s3note" data-tip="wp">צלמו מאותו מרחק ובזווית ישרה; כוונו שהחיבור בין תמונות ייפול על שפת מדף או על עמוד.</p>`;
  const cam=(lv,t)=>`<label class="btn">${t}<input type="file" accept="image/*" capture="environment" data-c="s3cpPick" data-lv="${lv}" hidden></label>`;
  h+=`<div class="row s3row">${it.lv.length>1?cam('t','צלמו עליון')+cam('b','צלמו תחתון'):cam('a','צלמו')}</div>`;
- h+=`<div class="row s3row">${K.last[it.key]&&s!=='ok'?`<button class="btn" data-a="s3cpFront">אשרו כחזית</button>`:''}${typeof U.wpBtn==='function'?U.wpBtn(it,s):''/* שלב 4: נקודת החיבור היחידה לעורך "חיבור וחיתוך" (store3d-crop.js) */}${s==='skip'?`<button class="btn g" data-a="s3cpUnskip">בטלו את הדילוג</button>`:`<button class="btn g" data-a="s3cpSkip">דלגו (עם סיבה)</button>`}<button class="btn g" data-a="s3cpNext">הבא</button></div>`;
+ h+=`<div class="row s3row">${K.last[it.key]&&s!=='ok'?`<button class="btn" data-a="s3cpFront">אשרו כחזית</button>`:''}${typeof U.wpBtn==='function'?U.wpBtn(it,s):''/* שלב 4: נקודת החיבור היחידה לעורך "חיבור וחיתוך" (store3d-crop.js) */}${typeof U.aiBtn==='function'?U.aiBtn(it,s):''/* שלב 5: "בדיקה חכמה" / "המערכת מציעה" (store3d-capai.js) */}${s==='skip'?`<button class="btn g" data-a="s3cpUnskip">בטלו את הדילוג</button>`:`<button class="btn g" data-a="s3cpSkip">דלגו (עם סיבה)</button>`}<button class="btn g" data-a="s3cpNext">הבא</button></div>`;
  return h}
 V.st3k=()=>{const T='צילום החנות';
  if(!loggedIn()||!U.feat())return{t:T,h:'<div class="empty">תלת מימד לא מופעל בעסק הזה</div>'};
