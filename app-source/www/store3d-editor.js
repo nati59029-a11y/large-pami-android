@@ -30,6 +30,8 @@ const draftKey=()=>LK('lp-s3e:'+mid());
 const readDraft=()=>{try{const v=JSON.parse(localStorage.getItem(draftKey()));return v&&v.map&&typeof v.map==='object'?v:null}catch(e){return null}};
 const saveDraftNow=()=>{try{if(E.map)localStorage.setItem(draftKey(),JSON.stringify({baseV:E.baseV,map:E.map,at:now()}))}catch(e){}};
 const dropDraft=()=>{try{localStorage.removeItem(draftKey())}catch(e){}};
+/* קשת פתיחה של דלת (במערכת של הדלת: x לאורך הקיר, הציר בקצה hg, נפתחת לצד sw). רבע עיגול מהמצב הסגור לפתוח */
+function doorArc(w,sw,hg){const hx=hg*w/2,P=[];for(let t=0;t<=8;t++){const a=t/8*Math.PI/2;P.push(`${(hx-hg*w*Math.cos(a)).toFixed(1)},${(sw*w*Math.sin(a)).toFixed(1)}`)}return `M${hx},0 L${P[0]} `+P.slice(1).map(p=>'L'+p).join(' ')+` L${hx},0`}
 function touch(){E.dirty=true;clearTimeout(E.tm);E.tm=setTimeout(saveDraftNow,400)}
 function snap(){try{E.undo.push(JSON.stringify(E.map));if(E.undo.length>25)E.undo.shift()}catch(e){}}
 function blank(){const L=U.brs(),b=L.find(x=>x.id===U.brSel());
@@ -107,8 +109,8 @@ function planSvg(){
  for(const f of live(m.fx)){const sw=isS('fx',f.id)?px*4:px*1.5,col=f.k==='fridge'?K.inc:f.k==='wall'?K.warn:f.k==='gon'?K.acc:K.mut;
   s+=`<g transform="translate(${f.x} ${f.y}) rotate(${f.a||0})"><rect x="${-f.w/2}" y="${-f.d/2}" width="${f.w}" height="${f.d}" fill="${col}" fill-opacity=".75" stroke="${K.ink}" stroke-width="${sw}"/><line x1="${-f.w/2}" y1="${f.d/2}" x2="${f.w/2}" y2="${f.d/2}" stroke="${K.ink}" stroke-width="${px*3}"/></g><text x="${f.x}" y="${f.y+fs*.35}" fill="${K.ink}" stroke="${K.card}" stroke-width="${px*.8}" paint-order="stroke" font-size="${fs}" font-weight="700" text-anchor="middle">${f.num||''}</text>`}
  for(const o of live(m.doors)){const col={ent:K.inc,in:K.acc,emg:K.bad,wh:K.warn}[o.k]||K.acc;
-  s+=`<g transform="translate(${o.x} ${o.y}) rotate(${o.a||0})"><line x1="${-o.w/2}" y1="0" x2="${o.w/2}" y2="0" stroke="${col}" stroke-width="${isS('doors',o.id)?px*9:px*6}" stroke-linecap="round"/></g>`}
- for(const o of live(m.syms)){s+=`<circle cx="${o.x}" cy="${o.y}" r="${isS('syms',o.id)?px*17:px*13}" fill="${K.card}" stroke="${K.acc}" stroke-width="${px*2}"/><text x="${o.x}" y="${o.y+fs*.35}" fill="${K.ink}" font-size="${fs*.8}" text-anchor="middle">${esc2((SYN[o.k]||'?').slice(0,1))}</text>`}
+  s+=`<g transform="translate(${o.x} ${o.y}) rotate(${o.a||0})"><line x1="${-o.w/2}" y1="0" x2="${o.w/2}" y2="0" stroke="${col}" stroke-width="${isS('doors',o.id)?px*9:px*6}" stroke-linecap="round"/>${(o.sw===1||o.sw===-1)&&(o.hg===1||o.hg===-1)?`<path d="${doorArc(o.w,o.sw,o.hg)}" fill="none" stroke="${col}" stroke-width="${px*1.5}" stroke-dasharray="${px*4} ${px*3}"/>`:''}</g>`}
+ for(const o of live(m.syms)){if(o.k==='cash'&&o.w>0&&o.d>0)s+=`<rect x="${o.x-o.w/2}" y="${o.y-o.d/2}" width="${o.w}" height="${o.d}" transform="rotate(${o.a||0} ${o.x} ${o.y})" fill="${K.acc}" fill-opacity=".25" stroke="${K.acc}" stroke-width="${px*2}"/>`;s+=`<circle cx="${o.x}" cy="${o.y}" r="${isS('syms',o.id)?px*17:px*13}" fill="${K.card}" stroke="${K.acc}" stroke-width="${px*2}"/><text x="${o.x}" y="${o.y+fs*.35}" fill="${K.ink}" font-size="${fs*.8}" text-anchor="middle">${esc2((SYN[o.k]||'?').slice(0,1))}</text>`}
  if(E.pts.length){const pp=[];for(let i=0;i+1<E.pts.length;i+=2)pp.push(E.pts[i]+','+E.pts[i+1]);
   s+=`<polyline points="${pp.join(' ')}" fill="none" stroke="${K.ink}" stroke-width="${px*2}" stroke-dasharray="${px*6} ${px*4}"/>`;
   for(let i=0;i+1<E.pts.length;i+=2)s+=`<circle cx="${E.pts[i]}" cy="${E.pts[i+1]}" r="${px*(i?6:9)}" fill="${i?K.acc:K.inc}"/>`}

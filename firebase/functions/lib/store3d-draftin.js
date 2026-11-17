@@ -8,9 +8,13 @@
 const M = require('./store3d-map');
 
 const SIDES = ['u', 'd', 'r', 'l'];          // למעלה / למטה / ימין / שמאל בסקיצה
-const LIM = { dimMin: 200, dimMax: 10000, rooms: 6, rows: 30, corners: 20, rowMin: 50, note: 200, bytes: 4000 };
+const LIM = { dimMin: 200, dimMax: 10000, rooms: 6, rows: 30, corners: 20, rowMin: 50, note: 200, bytes: 12000, doors: 40, tills: 40 };
 const INFO_KEYS = ['w', 'l', 'rooms', 'rows', 'ent', 'cash', 'note'];
-const SK_KEYS = ['rooms', 'rows', 'rt', 'rk', 'ent', 'cash'];
+const SK_KEYS = ['rooms', 'rows', 'rt', 'rk', 'ent', 'cash', 'doors', 'tills'];
+// כמה כניסות וקופות (החלטת המשתמש 17.11.2026): doors = [{x,y,w,a,sw,hg}] – רוחב (ס"מ), זווית הקיר, sw = לאיזה צד של הקיר הדלת נפתחת
+// (1/-1 ביחס לניצב של a), hg = באיזה קצה הציר (1 = הקצה בכיוון a). tills = [{x,y,w,d,a}] – קופה עם רוחב, עומק וזווית.
+// ent/cash (נקודה אחת) נשארים לגרסאות ישנות של האפליקציה.
+const DOOR_KEYS = ['x', 'y', 'w', 'a', 'sw', 'hg'], TILL_KEYS = ['x', 'y', 'w', 'd', 'a'];
 const RT = ['s', 'w', 'x'];                  // סוג חדר: חנות / מחסן / חדר נוסף
 const RK = ['gon', 'wall', 'fridge'];        // סוג שורה: גונדולה דו-צדדית / מדף קיר / מקררים
 const RT_NAME = { s: 'אולם מכירות', w: 'מחסן', x: '' };
@@ -67,12 +71,25 @@ function cleanSketch(o, info) {
   const rt = types('rt', rooms, RT), rk = types('rk', rows, RK);
   const pt = (k) => { if (none(o[k])) return null; if (!Array.isArray(o[k]) || o[k].length !== 2 || !inBox(o[k])) throw fail('מיקום הכניסה או הקופה בשרטוט לא תקין'); return o[k].slice(); };
   const ent = pt('ent'), cash = pt('cash');
-  if (!rooms.length && !rows.length && !ent && !cash) return null;
+  const objs = (k, max, keys, ok, msg) => {
+    if (none(o[k])) return [];
+    if (!Array.isArray(o[k]) || o[k].length > max) throw fail(`בשרטוט אפשר עד ${max} ${msg}`);
+    return o[k].map((v, i) => {
+      if (!isObj(v) || Object.keys(v).some((x) => !keys.includes(x)) || !keys.every((x) => x in v) || !inBox([v.x, v.y]) || !ok(v)) throw fail(`${msg} ${i + 1} בשרטוט לא תקינה`);
+      const c = {}; for (const x of keys) c[x] = v[x]; return c;
+    });
+  };
+  const pm = (v) => v === 1 || v === -1;
+  const doors = objs('doors', LIM.doors, DOOR_KEYS, (v) => inR(v.w, 60, 500) && inR(v.a, 0, 359) && pm(v.sw) && pm(v.hg), 'כניסות');
+  const tills = objs('tills', LIM.tills, TILL_KEYS, (v) => inR(v.w, 30, 1000) && inR(v.d, 30, 1000) && inR(v.a, 0, 359), 'קופות');
+  if (!rooms.length && !rows.length && !ent && !cash && !doors.length && !tills.length) return null;
   const out = { rooms: rooms.map((p) => p.slice()), rows: rows.map((s) => s.slice()) };
   if (rt) out.rt = rt;
   if (rk) out.rk = rk;
   if (ent) out.ent = ent;
   if (cash) out.cash = cash;
+  if (doors.length) out.doors = doors;
+  if (tills.length) out.tills = tills;
   return out;
 }
 // input = גוף הבקשה של mapDraft. גודל: info + sketch יחד עד LIM.bytes תווים של JSON (לפני כל בדיקה אחרת)
@@ -162,8 +179,22 @@ function shapeDraft(map0, info, sketch) {
     map.fx = fx.map((f, i) => Object.assign(f, { id: 'f' + (i + 1), num: i + 1 }));
     map.seq = map.fx.length;
   }
-  // 4. כניסה וקופה שסומנו על הסקיצה: הסמל מהסקיצה במקום הסמל של ה-AI מאותו סוג
+  // 4א. כניסות מהסקיצה (דלתות אמיתיות עם רוחב וכיוון פתיחה) במקום כניסות ה-AI; שאר הדלתות של ה-AI נשארות עד 40
+  if (sketch && sketch.doors && sketch.doors.length) {
+    const L = sketch.doors.map((d) => ({ id: '', x: d.x, y: d.y, w: d.w, a: d.a, k: 'ent', sw: d.sw, hg: d.hg }))
+      .concat((map.doors || []).filter((d) => d.k !== 'ent' && d.del !== 1)).slice(0, 40);
+    map.doors = L.map((d, i) => Object.assign(d, { id: 'd' + (i + 1) }));
+    map.ent = 'd1';
+  }
+  // 4ב. קופות מהסקיצה (עם גודל) במקום הקופות של ה-AI; הקופות קודמות לשאר הסמלים כשיש יותר מ-40
+  if (sketch && sketch.tills && sketch.tills.length) {
+    const L = sketch.tills.map((t) => ({ id: '', k: 'cash', x: t.x, y: t.y, a: t.a, w: t.w, d: t.d }))
+      .concat((map.syms || []).filter((y) => y.k !== 'cash')).slice(0, 40);
+    map.syms = L.map((y, i) => Object.assign(y, { id: 'y' + (i + 1) }));
+  }
+  // 4. כניסה וקופה שסומנו על הסקיצה: הסמל מהסקיצה במקום הסמל של ה-AI מאותו סוג (קופות עם גודל כבר נכנסו למעלה)
   for (const k of ['ent', 'cash']) {
+    if (k === 'cash' && sketch && sketch.tills && sketch.tills.length) continue;
     const pt = sketch && sketch[k];
     if (!pt) continue;
     const L = (map.syms || []).filter((y) => y.k !== k);
