@@ -205,6 +205,36 @@
    "note": ""
   },
   {
+   "id": "M122",
+   "line": 3184,
+   "snippet": "fsx('/shelf/line',{method:'PATCH'",
+   "fn": "shLnPut",
+   "collection": "shelf",
+   "op": "create+update",
+   "rest": "PATCH /shelf/line (בלי updateMask)",
+   "condition": "כיתוב קו העדכונים בפתקים; שדות data, at",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "נוסף ב-#111"
+  },
+  {
+   "id": "M123",
+   "line": 3185,
+   "snippet": "fsx('/shelf/line')",
+   "fn": "shLnSync",
+   "collection": "shelf",
+   "op": "get",
+   "rest": "GET /shelf/line",
+   "condition": "כיתוב קו העדכונים בפתקים",
+   "who": [
+    "employee",
+    "manager"
+   ],
+   "note": "נוסף ב-#111"
+  },
+  {
    "id": "M15",
    "line": 3495,
    "snippet": "updateMask.fieldPaths=data&updateMask.fieldPaths=st",

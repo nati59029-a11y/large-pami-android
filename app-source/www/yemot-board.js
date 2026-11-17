@@ -9,6 +9,11 @@ if(typeof ACT==='undefined'||!window.ylApi)return;
 const A=window.ylApi;
 const SLOTS={'1':'recipes','2':'promos','3':'updates','4':'hours',open:'opening'}; // מסך ← שלוחה
 const NAME={recipes:'שלוחה 1 · מתכונים',promos:'שלוחה 2 · מבצעים',updates:'שלוחה 3 · עדכונים',hours:'שלוחה 4 · שעות וכתובת',opening:'הודעת הפתיחה'};
+// שם השלוחה לפי מבנה השלוחות הנוכחי (משימה 2026-11-17: "כל התוכן בשלוחה אחת"); בלי מידע – השמות הקבועים
+const TNAME={recipes:'מתכונים',promos:'מבצעים',updates:'עדכונים',hours:'שעות וכתובת'};
+const nm=slot=>A.extN&&TNAME[slot]?`שלוחה ${A.extN(slot)} · ${TNAME[slot]}`:NAME[slot];
+const TYPE={recipes:'מתכון',promos:'מבצע',updates:'עדכון',hours:'שעות וכתובת'}; // סוג ההודעה, כשכמה סוגים חולקים שלוחה
+const typeTag=(slot,x)=>x.type&&TYPE[x.type]?tag('t2',TYPE[x.type]):''; // השרת שולח type רק בשלוחה משותפת
 const SCR=Object.fromEntries(Object.entries(SLOTS).map(([a,s])=>[s,a]));
 const WHY={removed:'הורדה',expired:'פג תוקף',replaced:'הוחלפה',['legacy-removed']:'קובץ ותיק שהוסר'};
 const MSG={'restore-too-old':'אפשר להחזיר רק הודעות שירדו בשבוע האחרון.','restore-not-down':'ההודעה הזו עדיין בקו.','already-on-line':'ההודעה הזו כבר הוחזרה לקו.',
@@ -32,7 +37,7 @@ const refAttr=ref=>esc(JSON.stringify(ref));
 const tag=(c,t)=>`<span class="tag ${c}">${t}</span>`; // תגית סטנדרטית של האפליקציה
 function row(slot,x,mgr){
  const legacy=x.origin==='legacy',ttl=x.title||x.file||'ללא שם',k=keyOf(x.ref);
- const tags=[legacy?tag('','קובץ ותיק'):tag('t2','מהאפליקציה'),x.kind==='audio'?tag('t2','הקלטה'):'',x.uncertain?tag('t1','לא ודאי'):''].join('');
+ const tags=[legacy?tag('','קובץ ותיק'):tag('t2','מהאפליקציה'),typeTag(slot,x),x.kind==='audio'?tag('t2','הקלטה'):'',x.uncertain?tag('t1','לא ודאי'):''].join('');
  const meta=[legacy&&x.file?`<span dir="ltr">${esc(x.file)}</span>`:'',x.createdAt?esc(fdt(x.createdAt)):'',x.byRole?(x.byRole==='manager'?'מנהל':'עובד'):'',x.until?'יורד אחרי '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
  const a=x.actions||{};
  const btns=[x.listen&&x.listen!=='none'?`<button class="btn s g" data-a="ybListen" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}">האזן</button>`:''];
@@ -42,7 +47,7 @@ function row(slot,x,mgr){
  return`<div class="li" style="cursor:default" data-k="${esc(k)}"><div class="m"><b>${esc(ttl)}</b><div>${tags}</div><small>${meta}</small><div class="row" style="margin-top:8px">${btns.join('')}</div></div></div>`}
 function rec(slot,x,mgr){
  const ttl=x.title||'ללא שם',rs=x.restore||{};
- const tags=[tag('',WHY[x.downReason]||'ירדה'),x.kind==='audio'?tag('t2','הקלטה'):'',x.hasSavedAudio?'':tag('t1','ללא שמע שמור')].join('');
+ const tags=[tag('',WHY[x.downReason]||'ירדה'),typeTag(slot,x),x.kind==='audio'?tag('t2','הקלטה'):'',x.hasSavedAudio?'':tag('t1','ללא שמע שמור')].join('');
  const meta=[x.downAt?esc(fdt(x.downAt)):'',x.until?'היה עד '+esc(heDay(x.until)):''].filter(Boolean).join(' · ');
  const btns=[`<button class="btn s g" data-a="ybListen" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}">האזן</button>`];
  if(mgr&&rs.allowed)btns.push(`<button class="btn s g" data-a="ybRestore" data-s="${slot}" data-r="${refAttr(x.ref)}" data-t="${esc(ttl)}" data-nu="${rs.needsUntil?1:0}" data-c="${rs.costNote?1:0}">החזר לקו</button>`);
@@ -58,7 +63,7 @@ function html(slot){
  const r=S.r,on=r.onLine||[],rc=r.recent||[];
  const info=[r.fetchedAt?'עודכן '+fhm(r.fetchedAt):'',r.stale?'<b style="color:var(--warn)">הקו לא ענה, מוצג מידע שמור</b>':''].filter(Boolean).join(' · ');
  h+=`<div class="sec"><h3>בקו עכשיו (${on.length})</h3><button class="btn s g" data-a="ybReload" data-s="${slot}"${S.loading?' disabled':''}>${S.loading?'טוען…':'רענן'}</button></div>`;
- h+=`<p class="note" style="margin:0 0 6px">${NAME[slot]}. מהגבוה לנמוך = לפי סדר ההשמעה.${info?' '+info:''}</p>`;
+ h+=`<p class="note" style="margin:0 0 6px">${nm(slot)}. מהגבוה לנמוך = לפי סדר ההשמעה.${info?' '+info:''}</p>`;
  if(S.err)h+=`<p class="note" style="color:var(--bad)">הרענון נכשל: ${esc(S.err)}</p>`;
  h+=playerHtml();
  h+=on.length?on.map(x=>row(slot,x,mgr)).join(''):'<p class="note">אין כרגע הודעות בשלוחה.</p>';
@@ -130,20 +135,20 @@ const parse=el=>{try{return JSON.parse(el.dataset.r)}catch(e){return null}};
 // ---------- הורדה באמצע ----------
 ACT.ybRemove=el=>{const ref=parse(el),slot=el.dataset.s,legacy=el.dataset.l==='1',ttl=el.dataset.t;if(!ref)return;
  dOpen({slot,title:'להוריד מהקו?',danger:true,ok:'כן, הורד',done:'✓ הורד מהקו',
-  msg:`${NAME[slot]}: «${ttl}» תורד מהקו ולא תושמע יותר.`+(legacy?' זה קובץ ותיק שלא הועלה מהאפליקציה: לפני המחיקה נשמר עותק, ואם אי אפשר לשמור עותק הקובץ לא יימחק.':'')+' ההודעה תופיע ב"ירדו בשבוע האחרון" ואפשר יהיה להחזיר אותה.',
+  msg:`${nm(slot)}: «${ttl}» תורד מהקו ולא תושמע יותר.`+(legacy?' זה קובץ ותיק שלא הועלה מהאפליקציה: לפני המחיקה נשמר עותק, ואם אי אפשר לשמור עותק הקובץ לא יימחק.':'')+' ההודעה תופיע ב"ירדו בשבוע האחרון" ואפשר יהיה להחזיר אותה.',
   req:d=>{const base=ref.kind==='promo'?{promoKey:ref.id}:ref.kind==='file'?{ext:ref.ext,file:ref.file}:{id:ref.id};
    if(!d.rid)d.rid='yr'+A.rand();const p=Object.assign({requestId:d.rid},base);if(d.noBackup)p.confirmNoBackup=true;return['removeLineItem',p]}})};
 // ---------- הארכת תוקף ----------
 ACT.ybExtend=el=>{const ref=parse(el),slot=el.dataset.s,ttl=el.dataset.t,cu=el.dataset.u;if(!ref)return;
  dOpen({slot,title:'להאריך תוקף?',ok:'אשר הארכה',done:'✓ תאריך ההורדה עודכן',date:cu,dateVal:cu,dateReq:true,dateLabel:'עד איזה תאריך להשמיע (כולל)?',
-  msg:`${NAME[slot]}: «${ttl}»${cu?' מושמעת עד '+heDay(cu):''}. התאריך החדש ייכנס לריצת הלילה. לא נשלחת שום פנייה לקו עכשיו.`,
+  msg:`${nm(slot)}: «${ttl}»${cu?' מושמעת עד '+heDay(cu):''}. התאריך החדש ייכנס לריצת הלילה. לא נשלחת שום פנייה לקו עכשיו.`,
   req:d=>{if(!d.rid||d.sig!==d.dateVal){d.rid='ye'+A.rand();d.sig=d.dateVal}
    return['extendLineItem',{requestId:d.rid,kind:ref.kind==='promo'?'promo':'item',id:ref.id,until:d.dateVal}]}})};
 // ---------- החזרה לקו ----------
 ACT.ybRestore=el=>{const ref=parse(el),slot=el.dataset.s,ttl=el.dataset.t,nu=el.dataset.nu==='1',cost=el.dataset.c==='1';if(!ref)return;
  dOpen({slot,title:'להחזיר לקו?',ok:'אשר והחזר',done:'✓ הוחזר לקו',date:nu?'':null,dateVal:'',dateReq:nu,dateLabel:'מתי להוריד את ההודעה מהקו?',
   warn:cost?'אין שמע שמור להודעה הזו. ההחזרה תקריא אותה מחדש בקול האנושי, ותנצל חלק ממכסת התווים החודשית. הקול עלול להישמע מעט שונה.':'',
-  msg:`${NAME[slot]}: «${ttl}» תעלה לקו כהודעה חדשה ותושמע ראשונה. בלי צינתוק. ההודעה המקורית לא משתנה.`+(slot==='opening'?' היא תחליף את הפתיחה הנוכחית, שנשמרת קודם.':''),cost,
+  msg:`${nm(slot)}: «${ttl}» תעלה לקו כהודעה חדשה ותושמע ראשונה. בלי צינתוק. ההודעה המקורית לא משתנה.`+(slot==='opening'?' היא תחליף את הפתיחה הנוכחית, שנשמרת קודם.':''),cost,
   req:d=>{if(!d.rid||d.sig!==d.dateVal){d.rid='yb'+A.rand();d.sig=d.dateVal}
    const p={requestId:d.rid,kind:ref.kind,id:ref.id};if(nu)p.until=d.dateVal;if(d.cost||cost)p.confirmCost=true;return['restoreLineItem',p]}})};
 const invalidate=()=>{for(const k in B)B[k].at=0}; // אחרי שליחה מהמסך (yemot-line.js): הטעינה הבאה מביאה רשימה עדכנית, ולא מהמטמון המקומי
