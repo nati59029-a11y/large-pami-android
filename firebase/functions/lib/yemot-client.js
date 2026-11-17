@@ -133,4 +133,58 @@ async function deleteFiles(ctx, whats) {
   }
 }
 
-module.exports = { YemotError, apiBase, yemotCall, listDir, listDirInfo, downloadFile, readText, uploadText, uploadBinary, deleteFiles };
+// ---------------- רשימות תפוצה וצינתוק (משימה 2026-11-17, לקוחות משוב) ----------------
+// מתועד ב-api-55 (post/32033, 32037, 32039, 32043, 64941, 65034). אין כאן פקודות מחיקה של רשימה או של מספרים:
+// לא DeleteTemplate, לא ClearTemplateEntries, לא UpdateTemplateEntries, ולא updateType NEW/REMOVE – בכוונה.
+const PHONE_RE = /^0\d{8,9}$/;
+
+// כל התבניות: [{ templateId, description }]
+async function getTemplates(ctx) {
+  const j = await yemotCall(ctx, 'GetTemplates', {});
+  return (Array.isArray(j.templates) ? j.templates : []).map((t) => ({ templateId: Number(t && t.templateId), description: t && typeof t.description === 'string' ? t.description : null }))
+    .filter((t) => Number.isInteger(t.templateId) && t.templateId > 0);
+}
+
+// תבנית חדשה (ההגדרות מועתקות מקמפיין ברירת המחדל). מחזיר templateId. תשובה בלי מזהה ← no-template-id (לא ודאי: ייתכן שנוצרה).
+async function createTemplate(ctx, description) {
+  const j = await yemotCall(ctx, 'CreateTemplate', { description: String(description) });
+  const id = Number(j.templateId);
+  if (!Number.isInteger(id) || id <= 0) throw new YemotError('no-template-id', true);
+  return id;
+}
+
+// המספרים ברשימת התפוצה: [{ phone, blocked }]
+async function getTemplateEntries(ctx, templateId) {
+  const j = await yemotCall(ctx, 'GetTemplateEntries', { templateId });
+  return (Array.isArray(j.entries) ? j.entries : []).map((e) => ({ phone: String((e && e.phone) || ''), blocked: !!(e && e.blocked === true) })).filter((e) => e.phone);
+}
+
+// הוספה/עדכון של מספרים ברשימת תפוצה. updateType קבוע: UPDATE (מוסיף חדשים ומעדכן קיימים, לא מסיר אף מספר).
+// rows: [{ phone, name }] – phone כבר מנורמל, name בלי פסיקים ושורות (המתקשר מנקה). בלי שורת כותרת (לא מאומת אם ימות מצפה לה).
+// מחזיר { parsed, inserted, updated, rejected: [{ phone, errorState }] }. message שאינו ok ← bad-format (ימות דחה את כל הקובץ).
+async function uploadPhoneList(ctx, templateId, rows) {
+  if (!Array.isArray(rows) || !rows.length) throw new YemotError('empty-list', false);
+  for (const r of rows) if (!PHONE_RE.test(String(r && r.phone)) || /[,\r\n]/.test(String((r && r.name) || ''))) throw new YemotError('bad-row', false);
+  const data = rows.map((r) => r.phone + ',' + String(r.name || '')).join('\n');
+  const j = await yemotCall(ctx, 'UploadPhoneList', { templateId, data, nameColumns: 1, delimiter: ',', updateType: 'UPDATE', blocked: 0 });
+  if (j.message !== undefined && String(j.message).toLowerCase() !== 'ok') throw new YemotError('bad-format', false);
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const rejected = (Array.isArray(j.rejectedRecords) ? j.rejectedRecords : []).map((x) => ({ phone: String((x && x.phone) || ''), errorState: String((x && x.errorState) || '').slice(0, 20) }));
+  return { parsed: num(j.totalParsed), inserted: num(j.totalInserted), updated: num(j.totalUpdated), rejected };
+}
+
+// המנויים לרשימת צינתוקים חינמית (TzintukimListManagement, getlistEnteres בלבד – קריאה, בלי שינוי). מחזיר מערך טלפונים.
+async function tzlEntries(ctx, list) {
+  const j = await yemotCall(ctx, 'TzintukimListManagement', { action: 'getlistEnteres', TzintukimList: String(list) });
+  return (Array.isArray(j.enteres) ? j.enteres : []).map((e) => String((e && e.phone) || '')).filter(Boolean);
+}
+
+// צינתוק למערך מפורש של מספרים (בתשלום: 0.1 יחידה למספר, לפי התיעוד). לא מקבל tpl:/tzl: – רק מספרים תקינים, עד 500 בקריאה.
+async function runTzintukPhones(ctx, phones) {
+  if (!Array.isArray(phones) || !phones.length || phones.length > 500 || !phones.every((p) => PHONE_RE.test(String(p)))) throw new YemotError('bad-phones', false);
+  const j = await yemotCall(ctx, 'RunTzintuk', { phones: phones.map(String) });
+  return { callsCount: Number.isFinite(Number(j.callsCount)) ? Number(j.callsCount) : null, errors: j.errors && typeof j.errors === 'object' ? Object.keys(j.errors).length : 0 };
+}
+
+module.exports = { YemotError, apiBase, yemotCall, listDir, listDirInfo, downloadFile, readText, uploadText, uploadBinary, deleteFiles,
+  getTemplates, createTemplate, getTemplateEntries, uploadPhoneList, tzlEntries, runTzintukPhones };
