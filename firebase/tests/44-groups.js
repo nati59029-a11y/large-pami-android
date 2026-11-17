@@ -10,6 +10,7 @@ const { describe, it, before, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
+const deleteField = () => require('firebase/compat/app').default.firestore.FieldValue.delete(); // כמו ב-36-tasks
 
 const IMG = 'data:image/jpeg;base64,' + 'A'.repeat(500);
 let seq = 0;
@@ -106,6 +107,19 @@ for (const E of ENVS) {
       await assertSucceeds(m.doc(R('grp/g1')).update({ last: { txt: 'היי', byN: E.mgr, t: Date.now(), k: 't' } }));
       await assertFails(m.doc(R('grp/g1')).update({ last: { txt: 'א'.repeat(121), byN: E.mgr, t: 1, k: 't' } }));
       await assertFails(m.doc(R('grp/g1')).update({ last: { txt: 'x', byN: E.mgr, t: 1, k: 't', z: 1 } }));
+      // תוספת 17.11 – הצמדת הודעה: מנהל מצמיד ומבטל; עובד, מושבת ועסק אחר – נחסמים; מבנה נבדק
+      const pin = { mid: 'm1', txt: 'שלום', byN: E.e1, t: Date.now(), k: 't' };
+      await assertSucceeds(m.doc(R('grp/g1')).update({ pin }));
+      await assertFails(e.doc(R('grp/g1')).update({ pin }), 'עובד מצמיד');
+      await assertFails(fs(E.off).doc(R('grp/g1')).update({ pin }));
+      if (E.foreign) await assertFails(fs(E.foreign).doc(R('grp/g1')).update({ pin }));
+      await assertFails(m.doc(R('grp/g1')).update({ pin: Object.assign({}, pin, { txt: 'א'.repeat(121) }) }));
+      await assertFails(m.doc(R('grp/g1')).update({ pin: Object.assign({}, pin, { x: 1 }) }));
+      await assertFails(m.doc(R('grp/g1')).update({ pin: Object.assign({}, pin, { mid: '../x' }) }));
+      await assertFails(m.doc(R('grp/g1')).update({ pin: { txt: 'בלי mid', t: 1 } }));
+      await assertFails(m.doc(R('grp/g1')).update({ pin: 'm1' }));
+      await assertFails(e.doc(R('grp/g1')).update({ pin: deleteField() }), 'עובד מבטל הצמדה');
+      await assertSucceeds(m.doc(R('grp/g1')).update({ pin: deleteField() }), 'מנהל מבטל הצמדה');
       await assertFails(m.doc(R('grp/g1')).update({ by: 'x' }));
       await assertFails(m.doc(R('grp/g1')).update({ t: 5 }));
       await assertFails(e.doc(R('grp/g1')).update({ name: 'שלי' }));
@@ -449,6 +463,58 @@ describe('grpMsg / grpMsgB – התראה על הודעה חדשה (שרת, של
     const send = async (toks) => toks.map((t) => ({ token: t, ok: false, code: 'messaging/registration-token-not-registered' }));
     await G.onMsg('gbz', 'g1', 'mbad', { by: 'e1', byN: 'e1', t: T0, k: 't', txt: 'x' }, { send });
     assert.deepEqual((await get('b/gbz/staff/e2')).pushTokens, []);
+  });
+
+  it('grpMDel: מחיקת ההודעה האחרונה מחשבת מחדש את last; הודעה ישנה – last לא משתנה; אין הודעות – last נמחק; סרטון – רק הקובץ שלה', async () => {
+    const del = [];
+    const bucket = { file: (p) => ({ delete: async () => { del.push(p); } }) };
+    const M = (by, t, o) => Object.assign({ by, byN: by, t, k: 't', txt: 'הודעה ' + t }, o);
+    for (const P of ['b/gbz/', '']) {
+      const biz = P ? 'gbz' : null;
+      const vp = P + 'grpv/g1/m3';
+      await prep(async (d) => {
+        const b = d.batch();
+        b.set(d.doc(P + 'grp/g1/m/m1'), M('e1', T0 + 1000));
+        b.set(d.doc(P + 'grp/g1/m/m2'), M('e2', T0 + 2000, { k: 'img', txt: '' }));
+        b.update(d.doc(P + 'grp/g1'), { last: { txt: 'סוד', byN: 'x', t: T0 + 3000, k: 'vid' }, pin: { mid: 'm3', txt: 'סוד', byN: 'x', t: T0 + 3000, k: 'vid' } });
+        await b.commit();
+      });
+      const m3 = M('e1', T0 + 3000, { k: 'vid', txt: 'סוד', vp, vs: 5, vb: 10 }); // כבר נמחקה (המנהל)
+      del.length = 0;
+      let r = await G.onMDel(biz, 'g1', 'm3', m3, { bucket });
+      assert.deepEqual(r, { ok: true, last: 'recalc', file: 'deleted', pin: true });
+      assert.equal((await get(P + 'grp/g1')).pin, undefined, 'ההודעה המוצמדת נמחקה – pin נמחק');
+      await prep((d) => d.doc(P + 'grp/g1').update({ pin: { mid: 'm2', t: T0 + 2000 } }));
+      assert.deepEqual(del, [vp], 'נמחק רק הקובץ של ההודעה');
+      const nm = P ? 'עובד e2' : 'יוסי';
+      assert.deepEqual((await get(P + 'grp/g1')).last, { txt: '', byN: nm, t: T0 + 2000, k: 'img' }, 'הטקסט שנמחק לא נשאר');
+      // מחיקת הודעה ישנה (m1) – last לא משתנה
+      await prep((d) => d.doc(P + 'grp/g1/m/m1').delete());
+      r = await G.onMDel(biz, 'g1', 'm1', M('e1', T0 + 1000), { bucket });
+      assert.equal(r.last, 'older');
+      assert.equal(r.pin, false);
+      assert.equal((await get(P + 'grp/g1')).pin.mid, 'm2', 'pin של הודעה אחרת נשאר');
+      assert.equal((await get(P + 'grp/g1')).last.t, T0 + 2000);
+      // vp שלא תואם בדיוק לנתיב של ההודעה – לא נמחק שום קובץ
+      del.length = 0;
+      await G.onMDel(biz, 'g1', 'm9', M('e1', 1, { k: 'vid', vp: P + 'grpv/g2/m9' }), { bucket });
+      await G.onMDel(biz, 'g1', 'm9', M('e1', 1, { k: 'vid', vp: P + 'grpv/g1/m8' }), { bucket });
+      assert.deepEqual(del, []);
+      // מחיקת ההודעה האחרונה שנשארה – last נמחק
+      await prep((d) => d.doc(P + 'grp/g1/m/m2').delete());
+      r = await G.onMDel(biz, 'g1', 'm2', M('e2', T0 + 2000, { k: 'img', txt: '' }), { bucket });
+      assert.equal(r.last, 'cleared');
+      assert.equal(r.pin, true);
+      assert.equal((await get(P + 'grp/g1')).pin, undefined);
+      assert.equal((await get(P + 'grp/g1')).last, undefined);
+    }
+    // הקבוצה כולה נמחקה (grpDel) – בלי חישוב last ובלי מחיקת קבצים (בלי לולאה)
+    await prep((d) => d.doc('b/gbz/grp/g1').delete());
+    del.length = 0;
+    assert.deepEqual(await G.onMDel('gbz', 'g1', 'mz', M('e1', T0, { k: 'vid', vp: 'b/gbz/grpv/g1/mz' }), { bucket }), { ok: true, last: 'no-group', file: 'skip', pin: false });
+    assert.equal(await get('b/gbz/grp/g1'), null, 'הקבוצה לא נוצרה מחדש');
+    assert.deepEqual(del, []);
+    assert.equal((await G.onMDel('../x', 'g1', 'm1', {}, { bucket })).ok, false);
   });
 
   it('grpDel: מחיקת קבוצה מוחקת m, m/p, r והסרטונים בתחילית שלה בלבד; קבוצה שנוצרה מחדש – לא נוגעים', async () => {

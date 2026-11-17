@@ -3,6 +3,7 @@
 //   grpMsg  – טריגר על יצירת grp/{gid}/m/{mid} (לארג' פעמי במצב legacy, בשורש).
 //   grpMsgB – טריגר על יצירת b/{bizId}/grp/{gid}/m/{mid}.
 //   grpDel / grpDelB – מחיקה מדורגת כשקבוצה נמחקת (ראו onDel למטה).
+//   grpMDel / grpMDelB – מחיקת הודעה בודדת (מנהל): last מחושב מחדש, וקובץ הסרטון שלה נמחק (ראו onMDel למטה).
 // ההודעה כבר עברה את החוקים (חבר בקבוצה / מנהל, ao, md, by == השולח). השרת לא סומך על שום שם מההודעה מלבד byN כגיבוי:
 // שם השולח נלקח מ-staff/{by}.name, ואם אין – מ-byN (שהחוקים מחייבים להיות של השולח עצמו, isMyName).
 // נמענים: כל ה-uid ב-mem שהם עובד פעיל (staff/{uid}.active == true) או מנהל (admins/{uid}), וכל מנהלי העסק (admins) – חוץ מהשולח.
@@ -19,7 +20,7 @@ const { NEW_REGION } = require('./lib/region');
 const T = require('./lib/tenant');
 
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
-const MAX_TO = 300; // כמו מגבלת mem בחוקים
+const MAX_TO = 300; // כמו מגבלת mem בחוקים – לחברים; המנהלים נוספים מעבר לזה (הערה 1 של הבודק)
 const PREV = 100; // אורך תחילת ההודעה בגוף ההתראה
 const KIND_TXT = { img: '📷 תמונה', vid: '🎬 סרטון' };
 
@@ -38,8 +39,10 @@ async function recipients(g, sender, admins, staffOf, muted) {
   const adm = new Set(admins);
   const mem = Array.isArray(g.mem) ? g.mem.filter((u) => typeof u === 'string' && ID_RE.test(u)) : [];
   const out = [];
+  const cap = MAX_TO + adm.size;
   for (const u of [...new Set(admins.concat(mem))]) {
-    if (u === sender || out.length >= MAX_TO) continue;
+    if (u === sender) continue;
+    if (out.length >= cap) { logger.warn('grpMsg: recipients capped', { cap }); break; }
     if (!adm.has(u)) { const s = await staffOf(u); if (!s || s.active !== true) continue; }
     if (g.ao !== true && (await muted(u))) continue;
     out.push(u);
@@ -130,6 +133,67 @@ async function onDel(bizId, gid, opts) {
   return { ok: true, files };
 }
 
+// מחיקת הודעה בודדת (grpMDel / grpMDelB, אחרי סבב בדיקה 1): רק מנהל מוחק הודעה (החוקים), והטריגר רץ אחרי המחיקה.
+// 1. last: אם ההודעה שנמחקה לא ישנה מ-last (או שאין last) – last מחושב מחדש בטרנזקציה מההודעה האחרונה שנשארה (לפי t),
+//    ואם לא נשארה אף הודעה – last נמחק. כך הטקסט של הודעה שנמחקה לא נשאר ברשימת הקבוצות.
+// 1א. pin (תוספת 17.11): אם ההודעה שנמחקה היא ההודעה המוצמדת (pin.mid == mid) – pin נמחק.
+// 2. סרטון: נמחק רק הקובץ של אותה הודעה, ורק אם vp שווה בדיוק ל-grpv/{gid}/{mid} (בעסק: b/{bizId}/grpv/{gid}/{mid}).
+// בלי לולאה: כשהקבוצה כולה נמחקת (grpDel → recursiveDelete), מסמך הקבוצה כבר לא קיים – לא מחושב last ולא נוגעים בקבצים
+// (grpDel מוחק את כל התחילית בעצמו). כתיבת last לא מפעילה שום טריגר של הודעות.
+// m = נתוני ההודעה שנמחקה (ev.data). opts: { bucket } לבדיקות (אובייקט עם file(path).delete()).
+async function onMDel(bizId, gid, mid, m, opts) {
+  const o = opts || {};
+  if (!ID_RE.test(String(gid || '')) || !ID_RE.test(String(mid || '')) || (bizId && !T.BIZ_RE.test(String(bizId)))) return { ok: false, r: 'bad' };
+  const d = m && typeof m === 'object' ? m : {};
+  const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+  const db = getFirestore();
+  const P = bizId ? 'b/' + bizId + '/' : '';
+  const gRef = db.doc(P + 'grp/' + gid);
+  const t = Number.isInteger(d.t) ? d.t : null;
+  let pin = false;
+  const last = await db.runTransaction(async (tx) => {
+    const gs = await tx.get(gRef);
+    if (!gs.exists) return 'no-group';
+    // תוספת 17.11: ההודעה המוצמדת נמחקה – pin נמחק (באותה טרנזקציה)
+    const pn = gs.get('pin');
+    const upd = pn && typeof pn === 'object' && pn.mid === mid ? { pin: FieldValue.delete() } : {};
+    pin = 'pin' in upd;
+    const l = gs.get('last');
+    let r;
+    if (l && typeof l === 'object' && t !== null && Number(l.t) > t) r = 'older';
+    else {
+      const q = await tx.get(gRef.collection('m').orderBy('t', 'desc').limit(1));
+      if (q.empty) {
+        if (l !== undefined) upd.last = FieldValue.delete();
+        r = 'cleared';
+      } else {
+        const x = q.docs[0].data() || {};
+        const by = typeof x.by === 'string' && ID_RE.test(x.by) ? x.by : '';
+        const st = by ? await tx.get(db.doc(P + 'staff/' + by)) : null;
+        const name = clean((st && st.exists && st.get('name')) || x.byN).slice(0, 100);
+        upd.last = { txt: cut(clean(x.txt), 120), byN: name, t: Number.isInteger(x.t) ? x.t : 0, k: ['t', 'img', 'vid'].includes(x.k) ? x.k : 't' };
+        r = 'recalc';
+      }
+    }
+    if (Object.keys(upd).length) tx.update(gRef, upd);
+    return r;
+  });
+  if (last === 'no-group') return { ok: true, last, file: 'skip', pin: false };
+  let file = 'none';
+  const vp = P + 'grpv/' + gid + '/' + mid;
+  if (d.k === 'vid' && d.vp === vp) {
+    try {
+      const bucket = o.bucket || require('firebase-admin/storage').getStorage().bucket();
+      await bucket.file(vp).delete({ ignoreNotFound: true });
+      file = 'deleted';
+    } catch (e) {
+      file = 'failed'; // לא קריטי: כלל ה-lifecycle מוחק אחרי 90 יום
+      logger.warn('grpMDel: video delete failed', { bizId: bizId || T.BIZ0, name: e && e.name, code: e && e.code });
+    }
+  }
+  return { ok: true, last, file, pin };
+}
+
 const OPTS = { region: NEW_REGION, retry: false, timeoutSeconds: 120, memory: '256MiB', maxInstances: 5 };
 const run = (bizId, ev) => {
   const d = ev.data && typeof ev.data.data === 'function' ? ev.data.data() : null;
@@ -151,4 +215,15 @@ exports.grpDelB = onDocumentDeleted(Object.assign({ document: 'b/{bizId}/grp/{gi
   if (!T.BIZ_RE.test(String(ev.params.bizId || ''))) return null;
   return del(ev.params.bizId, ev);
 });
-Object.defineProperty(exports, '_core', { enumerable: false, value: { onMsg, onDel, msgOf, recipients, MAX_TO } });
+const mdel = (bizId, ev) => {
+  const d = ev.data && typeof ev.data.data === 'function' ? ev.data.data() : null;
+  return onMDel(bizId, ev.params.gid, ev.params.mid, d).catch((e) => {
+    logger.error('grpMDel failed', { reason: 'internal', name: e && e.name, code: e && e.code });
+  });
+};
+exports.grpMDel = onDocumentDeleted(Object.assign({ document: 'grp/{gid}/m/{mid}' }, OPTS), (ev) => mdel(null, ev));
+exports.grpMDelB = onDocumentDeleted(Object.assign({ document: 'b/{bizId}/grp/{gid}/m/{mid}' }, OPTS), (ev) => {
+  if (!T.BIZ_RE.test(String(ev.params.bizId || ''))) return null;
+  return mdel(ev.params.bizId, ev);
+});
+Object.defineProperty(exports, '_core', { enumerable: false, value: { onMsg, onDel, onMDel, msgOf, recipients, MAX_TO } });

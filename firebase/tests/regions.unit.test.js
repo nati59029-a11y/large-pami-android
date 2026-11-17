@@ -30,7 +30,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
 
   it('כל פונקציה מיוצאת היא onCall או אחת מהפונקציות המיוחדות', () => {
     const other = entries.filter(([, f]) => !ep(f).callableTrigger).map(([n]) => n).sort();
-    assert.deepEqual(other, ['arFile', 'arRemind', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMsg', 'grpMsgB', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
+    assert.deepEqual(other, ['arFile', 'arRemind', 'drRemind', 'expirePromosOnLine', 'grpDel', 'grpDelB', 'grpMDel', 'grpMDelB', 'grpMsg', 'grpMsgB', 'publicBrand', 'pushAct', 'recurringTasks', 'runImportChunk', 's3Clean', 's3Rounds', 'secBackupDaily', 'secCalSync', 'secDaily', 'secMailHook', 'secMailWork', 'secMediaClean', 'secOAuthCb', 'secRemind', 'secWaHook', 'secWaWork', 'syncLegacyAdmin', 'syncLegacyStaff']);
     assert.ok(callable.length >= 60, 'נמצאו רק ' + callable.length + ' פונקציות onCall');
   });
 
@@ -80,7 +80,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
     assert.equal(e.eventTrigger.retry, false);
     assert.ok(e.maxInstances >= 1 && e.maxInstances <= 3, 'maxInstances נמוך');
   });
-  it('קבוצות התכתבות (17.11.2026): grpMsg / grpMsgB – טריגרי יצירת הודעה, grpDel / grpDelB – מחיקה מדורגת; europe-west1 בלבד, בלי ניסיון חוזר', () => {
+  it('קבוצות התכתבות (17.11.2026): grpMsg / grpMsgB – טריגרי יצירת הודעה, grpDel / grpDelB – מחיקה מדורגת; grpMDel / grpMDelB – מחיקת הודעה; europe-west1 בלבד, בלי ניסיון חוזר', () => {
     for (const [n, doc] of [['grpMsg', 'grp/{gid}/m/{mid}'], ['grpMsgB', 'b/{bizId}/grp/{gid}/m/{mid}']]) {
       const e = ep(ex[n]);
       assert.deepEqual(regions(ex[n]), ['europe-west1'], n);
@@ -89,7 +89,7 @@ describe('אזורי פונקציות (מעבר לאירופה)', () => {
       assert.equal(e.eventTrigger.retry, false);
       assert.ok(e.maxInstances >= 1 && e.maxInstances <= 5, 'maxInstances נמוך');
     }
-    for (const [n, doc] of [['grpDel', 'grp/{gid}'], ['grpDelB', 'b/{bizId}/grp/{gid}']]) {
+    for (const [n, doc] of [['grpDel', 'grp/{gid}'], ['grpDelB', 'b/{bizId}/grp/{gid}'], ['grpMDel', 'grp/{gid}/m/{mid}'], ['grpMDelB', 'b/{bizId}/grp/{gid}/m/{mid}']]) {
       const e = ep(ex[n]);
       assert.deepEqual(regions(ex[n]), ['europe-west1'], n);
       assert.ok(e.eventTrigger && /document\.v1\.deleted$/.test(e.eventTrigger.eventType), n + ' – טריגר מחיקת מסמך');

@@ -608,7 +608,7 @@ service cloud.firestore {
     // ---------- קבוצות התכתבות (grp) – סבב 3, 17.11.2026 ----------
     // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
     // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
-    // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
+    // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. pin – ההודעה המוצמדת (ראו pinOk). השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
     // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של m ו-p – כמו הקבוצה; r – רק הבעלים והמנהל.
     // מחיקת קבוצה לא מוחקת את תתי-האוספים (האפליקציה של המנהל מוחקת אותם; בלי הקבוצה אין גישה לעובדים בכל מקרה).
     match /grp/{gid} {
@@ -622,14 +622,24 @@ service cloud.firestore {
             && d.last.get('byN', '') is string && d.last.get('byN', '').size() <= 100
             && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
       }
+      // pin (תוספת 17.11 – הצמדת הודעה): { mid, txt <= 120, byN, t, k } – הודעה מוצמדת אחת לקבוצה. רק המנהל כותב (כמו כל grp);
+      // ביטול הצמדה = מחיקת השדה. השרת (grpMDel) מוחק את pin כשההודעה המוצמדת נמחקת.
+      function pinOk(d) {
+        return !d.keys().hasAny(['pin'])
+          || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
+            && d.pin.mid is string && d.pin.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+            && d.pin.get('txt', '') is string && d.pin.get('txt', '').size() <= 120
+            && d.pin.get('byN', '') is string && d.pin.get('byN', '').size() <= 100
+            && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid']);
+      }
       function grpOk(d) {
         return d.keys().hasAll(['name', 'mem', 'ao', 'md', 'by', 't'])
-          && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last'])
+          && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last', 'pin'])
           && d.name is string && d.name.size() > 0 && d.name.size() <= 60
           && d.mem is list && d.mem.size() <= 300
           && d.ao is bool && d.md is bool
           && d.by is string && d.t is int
-          && lastOk(d);
+          && lastOk(d) && pinOk(d);
       }
       allow read: if (isManager() || (isActiveEmployee() && request.auth.uid in resource.data.mem));
       allow create: if lpW() && (isManager() && grpOk(nw()) && nw().by == request.auth.uid && nowOk(nw().t));
@@ -2091,7 +2101,7 @@ service cloud.firestore {
       // grp: העתק של הכלל בשורש (תוספת 'groups' – מתג 'קבוצות התכתבות' של מנהל־העל), עם התפקידים של העסק (bMgr / bEmp)
       // grp/{gid}: { name (1..60), mem (רשימת uid, עד 300), ao (רק המנהל שולח), md (מותר מדיה), by, t, last? }.
       // קריאה (get וגם רשימה where mem array-contains uid): מנהל, או עובד פעיל שנמצא ב-mem. יצירה, עריכה ומחיקה: מנהל בלבד.
-      // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
+      // last ({ txt <= 120, byN, t, k }) – תקציר ההודעה האחרונה. pin – ההודעה המוצמדת (ראו pinOk). השרת (grpMsg) מעדכן אותו; מנהל רשאי לכתוב אותו עם המסמך (אותה בדיקה).
       // תתי-האוספים: m (הודעות), m/{mid}/p/1 (תמונה), r/{uid} (מצב קריאה והשתקה). קריאה של m ו-p – כמו הקבוצה; r – רק הבעלים והמנהל.
       // מחיקת קבוצה לא מוחקת את תתי-האוספים (האפליקציה של המנהל מוחקת אותם; בלי הקבוצה אין גישה לעובדים בכל מקרה).
       match /grp/{gid} {
@@ -2105,14 +2115,24 @@ service cloud.firestore {
               && d.last.get('byN', '') is string && d.last.get('byN', '').size() <= 100
               && d.last.get('t', 0) is int && d.last.get('k', 't') in ['t', 'img', 'vid']);
         }
+        // pin (תוספת 17.11 – הצמדת הודעה): { mid, txt <= 120, byN, t, k } – הודעה מוצמדת אחת לקבוצה. רק המנהל כותב (כמו כל grp);
+        // ביטול הצמדה = מחיקת השדה. השרת (grpMDel) מוחק את pin כשההודעה המוצמדת נמחקת.
+        function pinOk(d) {
+          return !d.keys().hasAny(['pin'])
+            || (d.pin is map && d.pin.keys().hasAll(['mid', 't']) && d.pin.keys().hasOnly(['mid', 'txt', 'byN', 't', 'k'])
+              && d.pin.mid is string && d.pin.mid.matches('^[A-Za-z0-9_-]{1,128}$')
+              && d.pin.get('txt', '') is string && d.pin.get('txt', '').size() <= 120
+              && d.pin.get('byN', '') is string && d.pin.get('byN', '').size() <= 100
+              && d.pin.t is int && d.pin.get('k', 't') in ['t', 'img', 'vid']);
+        }
         function grpOk(d) {
           return d.keys().hasAll(['name', 'mem', 'ao', 'md', 'by', 't'])
-            && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last'])
+            && d.keys().hasOnly(['name', 'mem', 'ao', 'md', 'by', 't', 'last', 'pin'])
             && d.name is string && d.name.size() > 0 && d.name.size() <= 60
             && d.mem is list && d.mem.size() <= 300
             && d.ao is bool && d.md is bool
             && d.by is string && d.t is int
-            && lastOk(d);
+            && lastOk(d) && pinOk(d);
         }
         allow read: if feat('groups') && (bMgr() || (bEmp() && request.auth.uid in resource.data.mem));
         allow create: if feat('groups') && (bMgr() && grpOk(nw()) && nw().by == request.auth.uid && nowOk(nw().t));

@@ -62,7 +62,7 @@ jobs:
           echo "::add-mask::$TOKEN"
           export TOKEN BUCKET="$P.firebasestorage.app"
           python3 - <<'PY'
-          import json, os, sys, urllib.request, urllib.parse, urllib.error
+          import json, os, re, sys, urllib.request, urllib.parse, urllib.error
           T, B = os.environ['TOKEN'], os.environ['BUCKET']
           API = 'https://storage.googleapis.com/storage/v1/b/' + urllib.parse.quote(B, safe='')
           def call(url, method='GET', body=None):
@@ -76,7 +76,8 @@ jobs:
           meta = call(API + '?fields=lifecycle')
           rules = (meta.get('lifecycle') or {}).get('rule') or []
           KINDS = (('sec_tmp/', 1), ('grpv/', 90))  # (תחילית, ימים) – הכללים שהתהליך הזה מנהל
-          ours = lambda p: any(p.startswith(k) or ('/' + k) in p for k, _ in KINDS)
+          OURS = re.compile(r'^(b/[^/]+/)?(sec_tmp|grpv)/$')  # רק תחיליות שהתהליך הזה יוצר (הערה 3 של הבודק)
+          ours = lambda p: bool(OURS.match(p))
           mine = lambda r: all(ours(p) for p in ((r.get('condition') or {}).get('matchesPrefix') or ['x']))
           keep = [r for r in rules if not mine(r)]
           bizs, tok = [], ''
