@@ -21,6 +21,7 @@ const { apiBase, getTemplates, createTemplate, uploadPhoneList } = require('./li
 
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
 const YEMOT_API_BASE = defineString('YEMOT_API_BASE', { default: 'https://www.call2all.co.il/ym/api/', description: 'כתובת ה-API של ימות המשיח' });
+const YEMOT_FB_TZ_MAX = defineInt('YEMOT_FB_TZ_MAX', { default: 300, description: 'מכסה לצינתוק ללקוחות משוב במבצע אחד (מעל זה לא שולחים להם)' });
 const YEMOT_TIMEOUT_MS = defineInt('YEMOT_TIMEOUT_MS', { default: 15000, description: 'זמן המתנה מרבי לכל קריאה לימות' });
 
 const requireStaff = (request) => roles.requireStaff(request, { feature: 'yemot', yemotLine: true });
@@ -201,7 +202,7 @@ async function stateOf(db) {
     sent: Number.isInteger(x.sentCount) ? x.sentCount : 0, rejected: Number.isInteger(x.rejectedCount) ? x.rejectedCount : 0,
     uncertain: lr && Number.isInteger(lr.uncertain) ? lr.uncertain : 0, pending: todo.length,
     lastRun: lr && typeof lr.at === 'string' ? lr.at : null, lastError: lr && typeof lr.error === 'string' ? lr.error.slice(0, 40) : null,
-    tzMonth: { month, count: tm } };
+    tzMonth: { month, count: tm }, tzMax: Number.isInteger(YEMOT_FB_TZ_MAX.value()) && YEMOT_FB_TZ_MAX.value() > 0 ? YEMOT_FB_TZ_MAX.value() : 300 };
 }
 
 async function fbList(request, key, base) {

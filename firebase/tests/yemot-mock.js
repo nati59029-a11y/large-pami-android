@@ -119,7 +119,7 @@ function start(port) {
       if (cmd === 'GetTemplateEntries') {
         const t = tplOf();
         if (!t) return reply(res, 200, { responseStatus: 'ERROR', message: 'templateId invalid' });
-        return reply(res, 200, OK({ templateId: t.templateId, entries: [...t.entries.entries()].map(([phone, e], i) => ({ rowid: i + 1, index: i, phone, blocked: !!e.blocked, name: e.name || null, moreinfo: null })) }));
+        return reply(res, 200, OK({ templateId: t.templateId, entries: [...t.entries.entries()].map(([phone, e], i) => ({ rowid: i + 1, index: i, phone, blocked: e.blocked === undefined ? false : e.blocked, name: e.name || null, moreinfo: null })) }));
       }
       if (cmd === 'UploadPhoneList') {
         const t = tplOf();

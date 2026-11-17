@@ -51,7 +51,7 @@ async function setTz(on){
  finally{Z.tzBusy=false}paint()}
 ACT.yfTz=()=>{if(!Z.st||Z.tzBusy)return;
  if(Z.st.tzOn){setTz(false);return}
- dlg(`<h3>להדליק צינתוק ללקוחות המשוב?</h3><p class="note" style="margin:0 0 12px">כל צינתוק ללקוחות המשוב בתשלום – 0.1 יחידה לכל מספר (לפי התיעוד של ימות). עד 300 מספרים בכל שליחה.</p><div class="row"><button type="button" class="btn grow" data-a="yfTzOk">כן, הדלק</button><button type="button" class="btn g grow" data-a="yfTzNo">ביטול</button></div>`)};
+ dlg(`<h3>להדליק צינתוק ללקוחות המשוב?</h3><p class="note" style="margin:0 0 12px">כל צינתוק ללקוחות המשוב בתשלום – 0.1 יחידה לכל מספר (לפי התיעוד של ימות). ${Z.st&&Number.isInteger(Z.st.tzMax)?`עד ${Z.st.tzMax} מספרים בכל שליחה; מעל זה לא נשלח להם צינתוק.`:''}</p><div class="row"><button type="button" class="btn grow" data-a="yfTzOk">כן, הדלק</button><button type="button" class="btn g grow" data-a="yfTzNo">ביטול</button></div>`)};
 ACT.yfTzNo=()=>closeDlg();
 ACT.yfTzOk=()=>{closeDlg();setTz(true)};
 })();

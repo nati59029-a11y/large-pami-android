@@ -158,11 +158,16 @@ async function lineNumbers(ctx, ext) {
 // ---------------- צינתוק ללקוחות משוב (משימה 2026-11-17, שלב 5) ----------------
 // רק מנהל, רק עם צינתוק, ורק כשהמתג tzOn דולק (נבדק אצל המתקשר). בתשלום – 0.1 יחידה למספר לפי התיעוד (לא מאומת).
 // הנמענים: רשימת התפוצה "לקוחות משוב" (רק לא חסומים) פחות מי שכבר ברשימת הצינתוקים החינמית (קיבל את הצינתוק הרגיל). כל מספר פעם אחת.
-// מעל המכסה (YEMOT_FB_TZ_MAX) – לא שולחים לאף אחד ('capped'). כשל – 'failed' בלי לזרוק; הצינתוק הרגיל לא מושפע.
-// מחזיר { st: 'sent'|'empty'|'capped'|'failed', count, total }. מספרים שנשלחו נספרים במונה החודשי fblist.tzMonth (שעון ישראל).
+// מעל המכסה (YEMOT_FB_TZ_MAX) – לא שולחים לאף אחד ('capped'). כשל לא זורק, והצינתוק הרגיל לא מושפע:
+//   'failed'    – בוודאות לא יצאה קריאת צינתוק (כשל בקריאת הרשימות, או לפני השליחה). ניסיון חוזר ישלים.
+//   'uncertain' – הקריאה יצאה וייתכן שימות שלח וגבה (פסק זמן, תשובה לא תקינה, כל YemotError עם sent), או שקבוצה כבר נשלחה.
+//                 אין שליחה חוזרת אוטומטית – המנהל בודק בימות.
+// לפני הקריאה הראשונה נרשם ברשומת המבצע fbTz:'pending' (קריסה באמצע = כמו 'uncertain', בלי שליחה חוזרת).
+// מחזיר { st: 'sent'|'empty'|'capped'|'failed'|'uncertain', count, total }. רק קבוצות שימות אישר נספרות במונה החודשי fblist.tzMonth (שעון ישראל).
 const israelMonth = () => israelDay().slice(0, 7);
-async function fbTzintuk(db, ctx, cfg, fbs) {
+async function fbTzintuk(db, ctx, cfg, fbs, promoRef) {
   const out = { st: 'empty', count: 0, total: 0 };
+  let called = false;
   try {
     const tplId = fbs.templateId;
     if (!Number.isInteger(tplId) || tplId <= 0) return out; // הרשימה עוד לא נוצרה
@@ -174,15 +179,18 @@ async function fbTzintuk(db, ctx, cfg, fbs) {
     out.total = phones.length;
     if (!phones.length) return out;
     if (phones.length > cfg.fbTzMax) { out.st = 'capped'; return out; }
+    await promoRef.update({ fbTz: 'pending', fbTzAt: new Date().toISOString() });
     for (let i = 0; i < phones.length; i += 500) {
       const part = phones.slice(i, i + 500);
+      called = true;
       await runTzintukPhones(ctx, part);
       out.count += part.length;
     }
     out.st = 'sent';
   } catch (e) {
-    out.st = 'failed';
-    logger.warn('yemot: fb tzintuk failed', { reason: 'fb-tz-failed', code: e instanceof YemotError ? e.code : 'internal', sent: out.count });
+    // לא ודאי: קבוצה כבר נשלחה, או שהקריאה יצאה (YemotError עם sent, או חריגה לא צפויה בזמן הקריאה)
+    out.st = called && (out.count > 0 || !(e instanceof YemotError) || e.sent) ? 'uncertain' : 'failed';
+    logger.warn('yemot: fb tzintuk failed', { reason: 'fb-tz-' + out.st, code: e instanceof YemotError ? e.code : 'internal', sent: out.count });
   }
   if (out.count) {
     const ref = db.doc(FBLIST);
@@ -393,8 +401,9 @@ async function sendPromo(request, key, base, pre) {
       && voice.extOf(x.path) === voice.extFor(engine) && LY.dirOf(x.path) === pext; // מבצע שבקו בשלוחה אחרת (אחרי שינוי המבנה) – עולה מחדש לשלוחה הנוכחית
     const upload = !sameText;
     const doTz = v.withTzintuk && !(sameText && x.tzintuk === 'sent');
-    // ניסיון חוזר: הצינתוק הרגיל כבר נשלח, וחלק המשוב חסר או נכשל – משלימים רק אותו
-    const fbRetry = fbOn && !upload && !doTz && x.tzintuk === 'sent' && (x.fbTz == null || x.fbTz === 'failed');
+    // ניסיון חוזר: הצינתוק הרגיל כבר נשלח, וחלק המשוב נכשל בוודאות ('failed') – משלימים רק אותו.
+    // לא כשחסר (מבצע ישן / המתג היה כבוי – הארכת תאריך לא שולחת צינתוק בתשלום), ולא על 'pending'/'uncertain' (ייתכן שכבר נשלח ונגבה).
+    const fbRetry = fbOn && !upload && !doTz && x.tzintuk === 'sent' && x.fbTz === 'failed';
     const now = new Date(nowMs).toISOString();
     const who2 = { withTzintuk: v.withTzintuk, byUid: who.uid, byRole: who.role, day: today, updatedAt: now };
     if (v.source) who2.source = v.source;
@@ -545,7 +554,7 @@ async function sendPromo(request, key, base, pre) {
     // 3א. לקוחות משוב: רק אחרי צינתוק רגיל שנשלח עכשיו, או השלמה (fbRetry). כשל כאן לא משנה את tzintuk ולא זורק.
     let fb = null;
     if (fbOn && (tzSent || plan.fbRetry)) {
-      fb = await fbTzintuk(db, ctx, cfg, fbs);
+      fb = await fbTzintuk(db, ctx, cfg, fbs, promoRef);
       if (fb.st === 'capped') v.warnings.push('fb-tz-capped');
     }
     await finish(tz === 'failed' || (fb && fb.st === 'failed') ? 'partial' : 'done', Object.assign({ tzintuk: tz }, tzSent ? { tzintukAt: stamp() } : {},
@@ -560,7 +569,8 @@ async function sendPromo(request, key, base, pre) {
         : (v.withTzintuk ? '.' : ' בלי צינתוק.');
     const fbPart = !fb ? '' : fb.st === 'sent' ? ` גם ${fb.count} לקוחות משוב קיבלו צינתוק.`
       : fb.st === 'capped' ? ` לקוחות המשוב לא קיבלו צינתוק: ${fb.total} מספרים, יותר מהמכסה (${cfg.fbTzMax}).`
-        : fb.st === 'failed' ? ' הצינתוק ללקוחות המשוב לא נשלח. אפשר לנסות שוב – הצינתוק לנרשמים לא יישלח פעמיים.' : '';
+        : fb.st === 'failed' ? ' הצינתוק ללקוחות המשוב לא נשלח. אפשר לנסות שוב – הצינתוק לנרשמים לא יישלח פעמיים.'
+          : fb.st === 'uncertain' ? ' לא ידוע אם הצינתוק ללקוחות המשוב נשלח – בדקו בימות לפני שליחה חוזרת.' : '';
     return Object.assign({
       ok: true, id: v.promoKey, promoKey: v.promoKey, requestId: v.requestId, action, file, until: v.until, withTzintuk: v.withTzintuk, tzintuk: tz,
       role: who.role, usage: isEmp && plan.doTz ? tToday : null, tzintukToday: tToday, duplicate: false, warnings: v.warnings, message: `${head}${tzPart}${fbPart} ${end}`,

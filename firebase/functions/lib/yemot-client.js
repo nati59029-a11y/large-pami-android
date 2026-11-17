@@ -154,9 +154,11 @@ async function createTemplate(ctx, description) {
 }
 
 // המספרים ברשימת התפוצה: [{ phone, blocked }]
+// חסום = כל ערך שאינו false/0/'0'/'false'/ריק (true, 1, '1' וכו') – בספק לא שולחים צינתוק בתשלום
+const isBlocked = (b) => !(b === false || b === 0 || b == null || b === '' || b === '0' || b === 'false');
 async function getTemplateEntries(ctx, templateId) {
   const j = await yemotCall(ctx, 'GetTemplateEntries', { templateId });
-  return (Array.isArray(j.entries) ? j.entries : []).map((e) => ({ phone: String((e && e.phone) || ''), blocked: !!(e && e.blocked === true) })).filter((e) => e.phone);
+  return (Array.isArray(j.entries) ? j.entries : []).map((e) => ({ phone: String((e && e.phone) || ''), blocked: isBlocked(e && e.blocked) })).filter((e) => e.phone);
 }
 
 // הוספה/עדכון של מספרים ברשימת תפוצה. updateType קבוע: UPDATE (מוסיף חדשים ומעדכן קיימים, לא מסיר אף מספר).
