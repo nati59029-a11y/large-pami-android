@@ -247,7 +247,7 @@ async function putPano(db, who, input, now, bucket, opts) {
   await branchOk(db, who.bizId, br, mapId.charAt(0));
   const mref = db.doc('smap/' + mapId), pcol = db.collection('smap/' + mapId + '/pano'), dref = db.doc('s3use/p_' + br);
   const day = scan.israelDay(new Date(now));
-  // בדיקות לפני ההעלאה (כדי לא להעלות עד 8MB לשווא). אותן בדיקות שוב בתוך הטרנזקציה.
+  // בדיקות לפני ההעלאה (כדי לא להעלות 3MB לשווא). אותן בדיקות שוב בתוך הטרנזקציה.
   const check = (ms, ps, dd, pid) => {
     const st = panoState(ms, ps, pid, pt);
     if (pid && !st.old) throw bad('no-pano', 'הנקודה לא קיימת', 'not-found');
@@ -321,8 +321,7 @@ async function putPano(db, who, input, now, bucket, opts) {
   if (res.dup) { if (full) await dropOwn(bk, pcol.doc(pid), mine); return res.dup; }
   return res.r;
 }
-// שלב 21ו: timeoutSeconds 120 (ברירת המחדל 60) – בקשה של עד ~11MB מרשת סלולרית איטית (לא מאומת אם זמן ההעלאה נספר בזמן הפונקציה).
-exports.s3PutPano = onCall({ memory: '512MiB', timeoutSeconds: 120 }, T.scoped(async (request) => {
+exports.s3PutPano = onCall({ memory: '512MiB' }, T.scoped(async (request) => {
   const who = await requireStaff(request, { feature: 'store3d' });
   if (!canDraw(who)) throw bad('not-s3m', 'העלאת נקודות 360 מותרת למנהל או לעובד עם הרשאת "שרטוט מפה"', 'permission-denied');
   return putPano(T.tdb(), { uid: who.uid, bizId: who.bizId, brs: myBranches(who) }, inputObject(request), Date.now());

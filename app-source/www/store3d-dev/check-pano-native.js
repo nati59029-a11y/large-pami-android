@@ -68,8 +68,8 @@ const check = (name, ok, ev) => { if (!ok) fails++; console.log((ok ? 'PASS ' : 
       const grp = (a.gs || []).slice(0, -1).every((g, i) => Number.isInteger(g) && g === a.gs[i - (i % 3)] && (i % 3 || i === 0 || g !== a.gs[i - 1])) && (a.evs || []).slice(0, -1).every((e, i) => e === [0, -1, 1][i % 3]);
       check('HDR לתוסף: כל החשיפות נשלחות (3 לכל יעד + רצפה), עם g ו-ev; הרצפה בלי g; התוצאה מהתוסף', r.calls === 1 && m.engine === 'native' && m.hdr === 'time' && ev0 >= 20 && n === ev0 * 3 + 1 && grp && a.gs[n - 1] === undefined && a.roles[n - 1] === 'nadir' && r.res.full.w === 2048, { n, ev0, gs: (a.gs || []).slice(0, 7), evs: (a.evs || []).slice(0, 7), meta: m.hdr });
     } else if (kind === 'w8k' || kind === 'mem4') {
-      const W = kind === 'w8k' ? 8192 : 4096;
-      check('רוחב התוצאה בתוסף (21ו): ' + (kind === 'w8k' ? 'זיכרון לא ידוע / 6 ומעלה ⇒ 8192' : 'deviceMemory=4 ⇒ 4096') + ', ה-JPEG של התוסף נשמר כמו שהוא, קטנה 1024×512', r.calls === 1 && m.engine === 'native' && r.args.W === W && r.res.w === W && r.res.full.w === W && r.res.full.h === W / 2 && r.res.sm.w === 1024 && r.res.fullBytes === r.natBytes, { bytes: [r.res.fullBytes, r.natBytes], W: r.args && r.args.W, full: r.res.full, sm: r.res.sm, dm: await p.evaluate(() => navigator.deviceMemory) });
+      const W = 4096;/* 8192 בוטל 17.11 */
+      check('רוחב התוצאה בתוסף (21ו): ' + 'תמיד 4096 (8192 בוטל)' + ', ה-JPEG של התוסף נשמר כמו שהוא, קטנה 1024×512', r.calls === 1 && m.engine === 'native' && r.args.W === W && r.res.w === W && r.res.full.w === W && r.res.full.h === W / 2 && r.res.sm.w === 1024 && r.res.fullBytes === r.natBytes, { bytes: [r.res.fullBytes, r.natBytes], W: r.args && r.args.W, full: r.res.full, sm: r.res.sm, dm: await p.evaluate(() => navigator.deviceMemory) });
     } else {
       check('אין תוסף: חיבור ב-JS בלי לקרוא לתוסף', !r.calls && m.engine === 'js' && r.res.full.w === 2048, { engine: m.engine, calls: r.calls });
     }

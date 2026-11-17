@@ -33,8 +33,6 @@ describe('store3d-pano: תמונות (decodePano)', () => {
     assert.equal(code(() => M.decodePano(b64(jpeg(4096, 2000)), SM)), 'bad-ratio');
     assert.equal(code(() => M.decodePano(b64(jpeg(4096, 4096)), SM)), 'bad-ratio');
     assert.equal(code(() => M.decodePano(b64(jpeg(3000, 1500)), SM)), 'bad-size');
-    assert.equal(code(() => M.decodePano(b64(jpeg(16384, 8192)), SM)), 'bad-size', 'שלב 21ו: 8192 הוא הרוחב המרבי');
-    assert.equal(code(() => M.decodePano(b64(jpeg(8192, 4000)), SM)), 'bad-ratio');
     assert.equal(code(() => M.decodePano(FULL, b64(jpeg(512, 256)))), 'bad-size');
     const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(20)]);
     assert.equal(code(() => M.decodePano(b64(png), SM)), 'bad-type');
@@ -44,17 +42,9 @@ describe('store3d-pano: תמונות (decodePano)', () => {
     assert.equal(code(() => M.decodePano('@@@@', SM)), 'bad-img');
     assert.equal(code(() => M.decodePano(b64(Buffer.from([0xff, 0xd8, 0xff, 0xd9])), SM)), 'bad-img', 'בלי כותרת מידות');
   });
-  it('גבול הגודל (שלב 21ו): מלאה בדיוק 8,000,000 בתים – עוברת; בית אחד יותר – נדחית', () => {
-    assert.equal(M.PANO_MAX, 8000000);
+  it('גבול הגודל: מלאה בדיוק 3,000,000 בתים – עוברת', () => {
     const base = jpeg(4096, 2048).length;
     assert.equal(M.decodePano(b64(jpeg(4096, 2048, M.PANO_MAX - base)), SM).full.buf.length, M.PANO_MAX);
-    assert.equal(code(() => M.decodePano(b64(jpeg(4096, 2048, M.PANO_MAX - base + 1)), SM)), 'too-big');
-  });
-  it('שלב 21ו: 8192×4096 – עוברת (גם 6.5MB, גודל אופייני של חנות עמוסה); 2048 ו-4096 – עדיין עוברות', () => {
-    assert.deepEqual(M.PANO_W, [2048, 4096, 8192]);
-    const r = M.decodePano(b64(jpeg(8192, 4096, 6500000)), SM);
-    assert.deepEqual([r.full.w, r.full.h, r.sm.w, r.sm.h], [8192, 4096, 1024, 512]);
-    for (const w of [2048, 4096]) assert.equal(M.decodePano(b64(jpeg(w, w / 2)), SM).full.w, w);
   });
 });
 

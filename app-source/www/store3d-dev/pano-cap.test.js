@@ -347,7 +347,7 @@ describe('שלב 21ו – HDR וצילום חוזר לתמונה מטושטשת'
     assert.equal(M.blurry(500, [], C.PH_ROT + 0.01), true, 'סיבוב בזמן הצילום');
     assert.equal(M.blurry(500, [], C.PH_ROT), false);
   });
-  it('FULL_MAX מאפשר 8192 באיכות טובה ולא עולה על גבול השרת (8,000,000)', () => {
-    assert.ok(C.FULL_MAX >= 7000000 && C.FULL_MAX <= 8000000, String(C.FULL_MAX));
+  it('FULL_MAX בגבול השרת (3,000,000; 8192 בוטל 17.11)', () => {
+    assert.ok(C.FULL_MAX >= 2000000 && C.FULL_MAX <= 3000000, String(C.FULL_MAX));
   });
 });
