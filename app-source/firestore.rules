@@ -1364,6 +1364,26 @@ service cloud.firestore {
       allow read: if s3On() && r3Staff();
       allow create, update, delete: if false;
     }
+    // ----- תהליך הקמת חנות (17.11.2026; חוזה: משימות/2026-11-17_תהליך-הקמת-חנות/תוצרים/0-חוזה-נתונים.md) -----
+    // אוספים חדשים בלבד. כל כתיבה – רק השרת (s3SetupNote, mapQs, mapFix, s3CapPut, s3CapCheck, s3SaveMap, s3SetupDone). אין שינוי באף כלל קיים.
+    // s3setup/{mapId} + n/{itemId} + cap/{key}: מצב ההקמה, הערות, שאלות, תוכנית הצילום ותוצאות – מנהל ומי שמשרטט (s3m), כי הם המצלמים.
+    // s3look/{mapId}: תמונות הקירות/רצפה/תקרה/דלתות/קופות לדגם – כל הצוות (כמו s3sum).
+    match /s3setup/{mapId} {
+      allow read: if s3On() && (rMgr() || r3S3m());
+      allow create, update, delete: if false;
+      match /n/{itemId} {
+        allow read: if s3On() && (rMgr() || r3S3m());
+        allow create, update, delete: if false;
+      }
+      match /cap/{key} {
+        allow read: if s3On() && (rMgr() || r3S3m());
+        allow create, update, delete: if false;
+      }
+    }
+    match /s3look/{mapId} {
+      allow read: if s3On() && r3Staff();
+      allow create, update, delete: if false;
+    }
     match /s3fix/{id} {
       allow read: if s3On() && (rMgr() || (isActiveEmployee() && resource.data.get('u', '') == request.auth.uid));
       allow create, update, delete: if false;
@@ -2072,7 +2092,8 @@ service cloud.firestore {
         allow list, create, update, delete: if false;
       }
       match /prod/{id} {
-        allow read: if ordOk();
+        // קופה (שלב 0, 17.11.2026): גם קופאי / אחראי משמרת (posAny) קורא מוצרים – בלי p/cost ו-p/ws (שם נשאר רק ordOk / מנהל)
+        allow read: if ordOk() || posAny();
         allow create, update, delete: if false;
         // עלות (p/cost) – מנהל ועובד עם ord (החלטה 00:12); סיטונאי (p/ws) – מנהל בלבד (עובד דרך getWsPrices)
         match /p/{k} {
@@ -2104,7 +2125,7 @@ service cloud.firestore {
       }
       // fb/ord-catalog: קטגוריות והעברות פנימיות. מחיר סיטונאי (prod/{id}/p/ws) – תחת p/{k}, מנהל בלבד; עובד מקבל דרך getWsPrices.
       match /cat/{id} {
-        allow read: if ordOk();
+        allow read: if ordOk() || posAny();
         allow create, update, delete: if false;
       }
       match /xfer/{id} {
@@ -2334,6 +2355,23 @@ service cloud.firestore {
         allow read: if feat('store3d') && bStaff();
         allow create, update, delete: if false;
       }
+      // ----- תהליך הקמת חנות בתוך העסק (17.11.2026): אותם תנאים כמו בשורש, עם התפקידים של העסק -----
+      match /s3setup/{mapId} {
+        allow read: if feat('store3d') && (bMgr() || b3s3m());
+        allow create, update, delete: if false;
+        match /n/{itemId} {
+          allow read: if feat('store3d') && (bMgr() || b3s3m());
+          allow create, update, delete: if false;
+        }
+        match /cap/{key} {
+          allow read: if feat('store3d') && (bMgr() || b3s3m());
+          allow create, update, delete: if false;
+        }
+      }
+      match /s3look/{mapId} {
+        allow read: if feat('store3d') && bStaff();
+        allow create, update, delete: if false;
+      }
       match /s3fix/{id} {
         allow read: if feat('store3d') && (bMgr() || (bEmp() && resource.data.get('u', '') == request.auth.uid));
         allow create, update, delete: if false;
@@ -2365,6 +2403,98 @@ service cloud.firestore {
         allow read, create, update, delete: if false;
       }
       match /s3ntf/{id} {
+        allow read, create, update, delete: if false;
+      }
+
+      // ----- קופה – pos (שלב 0, 17.11.2026). רק בתוך העסק (לא בשורש – החלטה 10). כל כתיבה – רק השרת (pos.js): write: if false לכולם,
+      // גם למנהל ולמנהל־על. התוספת כבויה = אין גישה. posAny = מנהל, או עובד עם pos (קופאי) / posMgr (אחראי משמרת); posLead = מנהל או posMgr.
+      // סניף: posBr כמו brOk (staff.br חסר = כל הסניפים). קופאי – רק מה שרשום עליו (cashier / who). poslog – רק השרת מוסיף, אף אחד לא עורך.
+      function posAny() { return feat('pos') && (bMgr() || (bEmp() && (pv('pos') == true || pv('posMgr') == true))); }
+      function posLead() { return feat('pos') && (bMgr() || (bEmp() && pv('posMgr') == true)); }
+      function posBr(br) { return bMgr() || myStaff().get('br', null) == null || br in myStaff().br; }
+      match /possale/{id} {
+        allow read: if (posLead() && posBr(resource.data.br)) || (posAny() && resource.data.cashier == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+      match /pospay/{id} {
+        allow read: if posLead();
+        allow create, update, delete: if false;
+      }
+      match /posret/{id} {
+        allow read: if posLead();
+        allow create, update, delete: if false;
+      }
+      match /posshift/{id} {
+        allow read: if (posLead() && posBr(resource.data.br)) || (posAny() && resource.data.cashier == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+      match /posz/{id} {
+        allow read: if posLead() && posBr(resource.data.br);
+        allow create, update, delete: if false;
+      }
+      // מכשירי קופה: כל מי שמוכר קורא (המכשיר מוצא את הקופה שלו). רישום, פרישה והשבתה – רק השרת (posDev)
+      match /posdev/{id} {
+        allow read: if posAny();
+        allow create, update, delete: if false;
+      }
+      // poscfg/main – ההגדרות (קופה ומסך הניהול). poscfg/ctr (מונה קודי הקופות) – אף אחד מהאפליקציה
+      match /poscfg/{d} {
+        allow get: if d == 'main' && (posAny() || (feat('pos') && bMgr()) || bSuper());
+        allow list, create, update, delete: if false;
+      }
+      match /promo/{id} {
+        allow read: if posAny();
+        allow create, update, delete: if false;
+      }
+      match /clubcfg/{d} {
+        allow read: if posAny();
+        allow create, update, delete: if false;
+      }
+      match /clublog/{id} {
+        allow read: if posLead();
+        allow create, update, delete: if false;
+      }
+      match /poslog/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // POS:M7 – קופה ש7 (17.11.2026): יומן תקלות (poserr), התנגשויות (posconf), אינדקס גיבויים (posbk). קריאה – מנהל בלבד, כתיבה – רק השרת
+      // (pos-ops.js, pos-backup.js). poserr טכני בלבד, בלי פרטי לקוחות (אפיון ד 4).
+      match /poserr/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /posconf/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /posbk/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // /POS:M7
+      match /posgift/{code} {
+        allow read: if posAny();
+        allow create, update, delete: if false;
+      }
+      match /posgiftlog/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /posclock/{id} {
+        allow read: if (feat('pos') && bMgr()) || (posAny() && resource.data.who == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+      match /posimp/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      match /pos_income_daily/{id} {
+        allow read: if feat('pos') && bMgr();
+        allow create, update, delete: if false;
+      }
+      // posreq/{dev}_{reqId}: סימון נגד כפילות – אף אחד מהאפליקציה
+      match /posreq/{id} {
         allow read, create, update, delete: if false;
       }
 

@@ -5,6 +5,7 @@
 // 3. גיבוי חדש (עם st3) – שחזור לא כותב ולא מוחק שום מסמך סריקה (אין PATCH/POST/DELETE/commit לאוספי s3*), ומוצגת שורת הסבר.
 // 4. st3 פגום – מתעלמים בלי שגיאה.  5. גיבוי יומי לענן (bk) כולל st3, וטעינה ממנו מחזירה אותו.
 // 6. תוספת כבויה / עובד – אין st3 ואין קריאה לאוספי הסריקה.  7. ADM_FT כולל מתג store3d.
+// 9. (הקמת חנות 17.11.2026) s3setup, n ו-cap בגיבוי: טקסט ונתיבים, s3setup/n אחרי המקטעים ו-cap אחרון; שורת השחזור מציינת הקמות.
 // 8. (תיקון סבב 1) תקרת גודל ותקרת זמן ל-st3; גיבוי מוצפן שחורג מ-ABK.max בגלל st3 נוצר שוב בלעדיו – התנועות נשמרות.
 // רשת מדומה (בלי אמולטור). שימוש: node ui-st3d-bk.js <www-dir>
 const H = require('./harness');
@@ -33,11 +34,14 @@ const FIX = {
   's3appeal/r1_20261101__f1-a-1_a__0': { run: 'r1_20261101', slot: 'f1-a-1_a', ik: 0, by: 'w', txt: 'אין חור', at: NOW, st: 'open' },
   's3short/r1_20261101': { st: 'draft', it: [{ t: 'קולה', n: 3 }] },
   's3perf/w/m/2026-11': { runs: 1, sc: 88, upd: NOW },
+  's3setup/s-main': { v: 1, st: 'cap', gnote: 'החנות בצורת ר', qr: 1, qs: [{ id: 'q1', t: 'מה זה?', o: ['גונדולה', 'מקרר'], a: { c: [1], x: '', at: NOW, by: 'm' } }], upd: NOW, by: 'm' },
+  's3setup/s-main/n/f1-a-1': { t: 'מקרר דלתות', upd: NOW, by: 'm', d: 'מקטע 1' },
+  's3setup/s-main/cap/b_f1-a-1': { k: 'b', ord: 3, st: 'ok', ph: [{ p: TH.replace('/run/r1_20261101/', '/cap/s-main/'), n: 1, lv: 'a', at: NOW, by: 'm' }], upd: NOW },
   // לא נכנסים לגיבוי
   's3sum/s-main': { b: { 'f1-a-1': { s: 'iss', th: TH } }, upd: NOW },
   's3use/main_2026-11': { n: 3 }, 's3qid/q1': { at: NOW }, 's3ntf/k1': { at: NOW }, 's3draft/d1': { at: NOW, by: 'm' },
 };
-const S3RE = new RegExp(`/documents/b/${BIZ}/(s3br|s3set|smap|sround|srun|s3fix|s3appeal|s3short|s3perf|s3sum|s3use|s3qid|s3ntf|s3draft)(/|$|\\?)`);
+const S3RE = new RegExp(`/documents/b/${BIZ}/(s3br|s3set|s3setup|smap|sround|srun|s3fix|s3appeal|s3short|s3perf|s3sum|s3use|s3qid|s3ntf|s3draft)(/|$|\\?)`);
 const doc = (rel) => ({ name: DOCS + rel, fields: enc(FIX[rel]).mapValue.fields, createTime: '2026-11-03T09:00:00Z', updateTime: '2026-11-03T09:00:00Z' });
 
 async function open(browser, www, who, feat, o) {
@@ -102,9 +106,11 @@ const writesS3 = (R) => R.s3.filter((x) => !/^(GET|QUERY) /.test(x));
   const b1 = await A.page.evaluate(async () => { const t = await mkBackup(); return t; });
   const o1 = JSON.parse(b1), st = o1.st3 || {};
   const paths = (st.docs || []).map((d) => d.p).sort();
-  const want = ['s3appeal/r1_20261101__f1-a-1_a__0', 's3br/main', 's3fix/r1_20261101__f1-a-1_a', 's3perf/w/m/2026-11', 's3set/main', 's3short/r1_20261101', 'smap/s-main', 'smap/s-main/bay/f1-a-1', 'smap/s-main/ver/000003', 'smap/s-main/ver/000004', 'smap/s-main/ver/000005', 'sround/rule01', 'srun/r1_20261101', 'srun/r1_20261101/ai/f1-a-1_a', 'srun/r1_20261101/ph/f1-a-1_a'];
-  check('1א גיבוי חדש: st3 קיים, v=1, כולל בדיוק את המסמכים שבחוזה (15; מהגרסאות – רק 3 האחרונות) (מפה, גרסאות, מקטעים, סבבים, תמונות-נתיבים, תוצאות AI, תיקונים, ערעורים, חוסרים, ביצועים)', st.v === 1 && JSON.stringify(paths) === JSON.stringify(want), paths);
+  const want = ['s3appeal/r1_20261101__f1-a-1_a__0', 's3br/main', 's3fix/r1_20261101__f1-a-1_a', 's3perf/w/m/2026-11', 's3set/main', 's3setup/s-main', 's3setup/s-main/cap/b_f1-a-1', 's3setup/s-main/n/f1-a-1', 's3short/r1_20261101', 'smap/s-main', 'smap/s-main/bay/f1-a-1', 'smap/s-main/ver/000003', 'smap/s-main/ver/000004', 'smap/s-main/ver/000005', 'sround/rule01', 'srun/r1_20261101', 'srun/r1_20261101/ai/f1-a-1_a', 'srun/r1_20261101/ph/f1-a-1_a'];
+  check('1א גיבוי חדש: st3 קיים, v=1, כולל בדיוק את המסמכים שבחוזה (18; מהגרסאות – רק 3 האחרונות) (מפה, גרסאות, מקטעים, סבבים, תמונות-נתיבים, תוצאות AI, תיקונים, ערעורים, חוסרים, ביצועים)', st.v === 1 && JSON.stringify(paths) === JSON.stringify(want), paths);
   check('1ב לא נכנסים: s3sum, s3use, s3qid, s3ntf, s3draft – וגם לא נקראו בזמן הגיבוי', !paths.some((p) => /^(s3sum|s3use|s3qid|s3ntf|s3draft)\//.test(p)) && !A.R.s3.some((x) => /(s3sum|s3use|s3qid|s3ntf|s3draft)/.test(x)), A.R.s3.filter((x) => /(s3sum|s3use|s3qid|s3ntf|s3draft)/.test(x)));
+  const ord = (st.docs || []).map((d) => d.p), iBay = ord.indexOf('smap/s-main/bay/f1-a-1'), iSet = ord.indexOf('s3setup/s-main'), iN = ord.indexOf('s3setup/s-main/n/f1-a-1');
+  check('9א הקמת חנות: s3setup ו-n אחרי המקטעים, cap אחרון; הערה, שאלות ותשובה נשמרו כטקסט', iBay >= 0 && iSet > iBay && iN > iSet && ord[ord.length - 1] === 's3setup/s-main/cap/b_f1-a-1' && JSON.stringify(st).includes('מקרר דלתות') && (st.n || {}).cap === 1, ord);
   const s3txt = JSON.stringify(st);
   check('1ג בלי תמונות: אין data:image / base64 ב-st3; ב-ph נשמר רק הנתיב', !/data:image|;base64,/.test(s3txt) && s3txt.includes(TH), s3txt.length);
   const run = (st.docs || []).find((d) => d.p === 'srun/r1_20261101');
@@ -141,7 +147,7 @@ const writesS3 = (R) => R.s3.filter((x) => !/^(GET|QUERY) /.test(x));
     await ACT.doRestore();
     return { n: r.st3 && r.st3.docs.length, dl: (dl.match(/הגיבוי כולל גם נתוני סריקת חנות[^\n]*/) || [''])[0], back: S.tx.length === n0, inS: 'st3' in S };
   }, b1);
-  check('3א גיבוי חדש: parseBackup מחזיר את st3; חלון השחזור מסביר שנתוני הסריקה בשרת לא משתנים', r3.n === 15 && /1 מפות, 1 סבבים/.test(r3.dl) && /לא משנה ולא מוחק/.test(r3.dl), r3);
+  check('3א גיבוי חדש: parseBackup מחזיר את st3; חלון השחזור מסביר שנתוני הסריקה בשרת לא משתנים', r3.n === 18 && /1 מפות, 1 סבבים, 1 הקמות חנות/.test(r3.dl) && /לא משנה ולא מוחק/.test(r3.dl), r3);
   check('3ב השחזור הושלם; st3 לא נכנס לנתוני הטלפון (S)', r3.back && !r3.inS, r3);
   const commits = A.log.filter((x) => /:commit$/.test(x.url) && /\/(s3br|s3set|smap|sround|srun|s3fix|s3appeal|s3short|s3perf)\//.test(x.body));
   check('3ג השחזור לא כתב ולא מחק שום מסמך סריקה (אין PATCH/POST/DELETE/commit)', writesS3(A.R).length === 0 && commits.length === 0, { w: writesS3(A.R), c: commits.length });
@@ -152,7 +158,7 @@ const writesS3 = (R) => R.s3.filter((x) => !/^(GET|QUERY) /.test(x));
 
   // ---------- 5. גיבוי יומי לענן (bk) ----------
   const r5 = await A.page.evaluate(async () => { S3BK.reset(); const ok = await bkCloud(true); const r = await bkCloudGet(); return { ok, n: r.st3 && r.st3.docs.length, tx: Array.isArray(r.d.tx) }; });
-  check('5 גיבוי לענן (bk): נשמר עם st3, וטעינה ממנו מחזירה אותו', r5.ok === true && r5.n === 15 && r5.tx, r5);
+  check('5 גיבוי לענן (bk): נשמר עם st3, וטעינה ממנו מחזירה אותו', r5.ok === true && r5.n === 18 && r5.tx, r5);
   // ---------- 8. תקרות (תיקון סבב 1): נתוני הסריקה לא מפילים את הגיבוי ----------
   const r8 = await A.page.evaluate(async () => { S3BK.reset(); const M = S3BK.L.MAX; S3BK.L.MAX = 3000; let o; try { o = JSON.parse(await mkBackup()); } finally { S3BK.L.MAX = M; S3BK.reset(); }
     go('data'); const w = document.querySelector('#main').innerText;

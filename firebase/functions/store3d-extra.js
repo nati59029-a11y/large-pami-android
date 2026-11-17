@@ -150,7 +150,7 @@ async function afterAppeal(ctx, a, bay) {
         const e0 = s.exists && s.get('b') ? s.get('b')[bay] : null;
         if (!e0 || e0.r !== a.run) return;
         const list = ais.filter((x) => x.exists).map((x) => X.effAi(x.data()));
-        const e = A.sumEntry(list.concat(list.length < 2 ? [null] : []), a.run, Number.isInteger(e0.t) ? e0.t : now, e0.th, null);
+        const e = A.sumEntry(list.concat(list.length < 2 ? [null] : []), a.run, Number.isInteger(e0.t) ? e0.t : now, e0.th, null, e0); // e0: שומר fr/frT של ההקמה (שלב 7)
         tx.update(sref, new FieldPath('b', bay), e, 'upd', now);
       });
     }

@@ -62,6 +62,7 @@ async function load(force){
  /* שלב 18: נקודות 360 פעילות לכל מפה (קריאה ישירה, כמו smap). שגיאה = אין נקודות (לא חוסם את המסך) */
  d.pano={s:[],w:[]};if(!d.err&&typeof S3UI.panoList==='function')for(const k of ['s','w'])if(d.maps[k])d.pano[k]=await S3UI.panoList(mapIdOf(k,br));
  if(!d.err&&d.maps.s){try{d.sum=await g404('/s3sum/s-'+br)}catch(e){}
+  try{d.look=await g404('/s3look/s-'+br)}catch(e){}/* תמונות לדגם (הקמת חנות); חסר/שגיאה = הדגם כמו תמיד */
   if(isMgr()){try{const r=await fsx('/sround?pageSize=100');d.rounds=((r&&r.documents)||[]).map(x=>{const o=dec(x);if(o)o.rid=String(x.name||'').split('/').pop();return o}).filter(x=>x&&x.br===br&&x.on===true&&x.del!==1)}catch(e){d.rounds=null}}}
  X.d=d;X.at=Date.now();X.busy=0;
  const v=cur().v;if((v==='home'||v==='st3'||v==='st3e'||v==='st3w'||v==='wk')&&!typing())rerender();
@@ -194,7 +195,7 @@ function after(){
  if(X.h&&X.h.el===el)return;
  unmount();const tok=++X.seq,rec={el,id,handle:null};X.h=rec;
  if(!window.Store3D||!window.S3G){el.textContent='רכיב התצוגה לא נטען';return}
- window.Store3D.open(el,m,{mode:X.mode,sum:d.sum||null,loadPh:loadPh,onPick:b=>{X.pick=b;const i=document.getElementById('s3info');if(i)i.innerHTML=pickInfo()},onError:()=>{}}).then(hd=>{
+ window.Store3D.open(el,m,{mode:X.mode,sum:d.sum||null,look:kind==='s'?d.look||null:null,loadPh:loadPh,onPick:b=>{X.pick=b;const i=document.getElementById('s3info');if(i)i.innerHTML=pickInfo()},onError:()=>{}}).then(hd=>{
   if(!hd)return;if(tok!==X.seq||X.h!==rec||!el.isConnected){try{hd.destroy()}catch(e){}return}rec.handle=hd}).catch(()=>{})
 }
 {const r0=window.render;if(typeof r0==='function')window.render=function(){/* אלמנט המיני יוצא מהדף לפני הציור (בלי להעביר צומת תוך כדי החלפת התוכן), וחוזר ב-after() */try{const n=X.mn&&X.mn.node;if(n&&n.parentNode)n.parentNode.removeChild(n)}catch(e){}const r=r0.apply(this,arguments);try{after()}catch(e){}return r}}

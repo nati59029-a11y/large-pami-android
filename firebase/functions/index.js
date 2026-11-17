@@ -327,6 +327,13 @@ Object.assign(exports, require('./recurring'));
 Object.assign(exports, require('./tasks-nudge'));
 // דיווח יומי (16.11.2026): drSubmit, drMgr, drSetCfg (מנהל), drSetCap (מנהל־על), drRemind (מתוזמנת, us-central1 בלבד). daily-rep.js + lib/dr-core.js. לא מפורסם עד מיזוג ואישור
 Object.assign(exports, require('./daily-rep'));
+// קופה (POS) שלב 0 (17.11.2026): posCfg, posCfgSet (מנהל / מנהל־על), posDev (קופות: הוספה, רישום מכשיר, פרישה, השבתה), posSale (שלד מכירה עם reqId).
+// pos.js + lib/pos-calc.js (חישוב באגורות) + lib/pos-cfg.js (הגדרות לכל עסק) + lib/pos-core.js (מזהים ומספור). לא מפורסם עד מיזוג ואישור
+Object.assign(exports, require('./pos'));
+// POS:M7 – קופה ש7: תפעול מכשירים (posOps: אישור/ניתוק מרחוק/מצב ציוד/יומן תקלות/התנגשויות/הזנה ידנית, posOpsWatch) וגיבוי (posBackup, posBackupDaily)
+Object.assign(exports, require('./pos-ops'));
+Object.assign(exports, require('./pos-backup'));
+// /POS:M7
 // כפתורים בהתראת הטלפון (16.11.2026): pushAct – "טופל" / "הזכר לי מחר" / "בעוד שעה" עם אסימון חד־פעמי (onRequest, us-central1 בלבד). push-act.js
 Object.assign(exports, require('./push-act'));
 // מכשיר אחד למשתמש (16.11.2026): devClaim – טלפון אחד + מחשב אחד, כניסה חדשה מחליפה את הקודמת (onCall, שני האזורים). one-device.js
@@ -347,6 +354,12 @@ Object.assign(exports, require('./store3d-fix'));
 // שלב 10 (14.11.2026): s3Fix (משימת תיקון ידנית / ביטול / הכרעה – מנהל), s3Clean (מתוזמנת יומית: סל מחזור אחרי 30 יום, 3 סבבים אחרונים
 // של תמונות לכל מקום, טקסטורות יתומות, ביצועי עובדים). סיום סבב (ציון, חוסרים, משימות תיקון) וערעורים – store3d-extra.js + lib/store3d-extra.js
 Object.assign(exports, require('./store3d-extra'));
+// הקמת חנות שלב 3 (17.11.2026): s3CapPut (צילום החנות לפי תוכנית הצילום – תמונה / חזית / דילוג; מנהל או s3m), s3SetupDone (סיום ההקמה). s3cap.js + lib/store3d-capplan.js
+Object.assign(exports, require('./s3cap'));
+// הקמת חנות שלב 2 (17.11.2026): s3SetupNote (הערה כללית / לפריט), mapQs (שאלות AI על הטיוטה, מחוץ למכסה), s3SetupAns (תשובות). store3d-setup.js + lib/store3d-setup.js
+Object.assign(exports, require('./store3d-setup'));
+// הקמת חנות שלב 5 (17.11.2026): s3CapCheck (בדיקה חכמה לפריט – מכסת הקמה למפה), s3CapDec ("המערכת מציעה"), s3SetupLim (תקרת מכסת ההקמה – מנהל־על). s3capai.js + lib/store3d-capai.js + lib/prompts-bayscan.js
+Object.assign(exports, require('./s3capai'));
 
 // אפליקציה עם סמל העסק – בנייה מיידית (12.11.2026): requestBizApk – מנהל־על בלבד, מפעיל את build-biz-apks ב-GitHub (biz-apk.js)
 Object.assign(exports, require('./biz-apk'));

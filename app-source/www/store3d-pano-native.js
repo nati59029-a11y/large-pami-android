@@ -2,7 +2,7 @@
    window.S3PanoNative:
      available() -> Promise<bool>   יש תוסף PanoStitch והספרייה נטענה (רק arm64-v8a; ב-APK ישן, x86 או armv7 – false). תשובה חיובית/שלילית מהתוסף נשמרת לכל ההפעלה.
      stitch(frames,{fovL,yawRef,W},onP) -> Promise<{full:Blob(jpeg), fovL, stats}>   זורק בכל כשלון – הקורא חוזר לחיבור ב-JS (store3d-pano-cap.js).
-       frames: [{blob:JPEG, q:[w,x,y,z] מצלמה→עולם, w, h, yaw, role?:'nadir' (עובר ל-addFrame רק אם מוגדר)}] – אותה מוסכמה כמו store3d-pano-cap.js; yawRef ברירת מחדל = frames[0].yaw; W ברירת מחדל 4096.
+       frames: [{blob:JPEG, q:[w,x,y,z] מצלמה→עולם, w, h, yaw, role?:'nadir', g?, ev? (שלב 21ו – קבוצת HDR ו-‎-1/0/1; כל אחד עובר ל-addFrame רק אם מוגדר)}] – אותה מוסכמה כמו store3d-pano-cap.js; yawRef ברירת מחדל = frames[0].yaw; W ברירת מחדל 4096.
        הפריימים נשלחים אחד-אחד (base64) כדי לא להחזיק את כולם פעמיים בזיכרון. onP(p) מקבל 0..1.
      cancel() – עוצר חיבור פעיל (stitch נדחה).
    ב-Node: require(...)(root) – לבדיקות עם Capacitor מדומה. */
@@ -24,7 +24,7 @@ async function stitch(frames,o,onP){
   await P.begin({n:frames.length,W:o.W||4096,fovL:+o.fovL,yawRef:o.yawRef!=null?+o.yawRef:+f0.yaw||0,w:f0.w,h:f0.h});
   try{sub=await P.addListener('progress',e=>{const p=+(e&&e.p);if(p>=0)prog(.15+.85*Math.min(1,p))})}catch(e){sub=null}
   for(let i=0;i<frames.length;i++){const fr=frames[i];if(!fr||!fr.blob||!fr.q||fr.q.length!==4)throw new Error('bad frame '+i);
-   const af={i,jpeg:await b64(fr.blob),q:fr.q.map(Number)};if(fr.role!==undefined)af.role=fr.role;await P.addFrame(af);prog(.15*(i+1)/frames.length)}
+   const af={i,jpeg:await b64(fr.blob),q:fr.q.map(Number)};if(fr.role!==undefined)af.role=fr.role;if(fr.g!==undefined&&fr.g!==null)af.g=+fr.g;if(fr.ev!==undefined&&fr.ev!==null)af.ev=+fr.ev;await P.addFrame(af);prog(.15*(i+1)/frames.length)}
   const r=await P.run();
   if(!r||typeof r.jpeg!=='string'||!r.jpeg)throw new Error('empty result');
   const full=unb64(r.jpeg);if(!full.size)throw new Error('empty result');

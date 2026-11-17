@@ -65,17 +65,28 @@ async function errOf(blob,yawRef){const b=await createImageBitmap(blob),W=b.widt
 /* הרצה (גם מ-Playwright): מחזיר סיכום, או null אם בוטל */
 window.__run=async function(o){o=o||{};let opts={};
  if(o.mode)try{localStorage.setItem('lp-s3pc-mode',o.mode)}catch(e){}
+ /* שלב 21ו: o.hdr '0' | '1' – מצב כפתור HDR בתחילת הריצה; כל ההנחיות שהוצגו נאספות ב-__hints */
+ if(o.hdr!=null)try{localStorage.setItem('lp-s3pc-hdr',String(o.hdr))}catch(e){}
+ window.__hints=[];clearInterval(window.__hintT);window.__hintT=setInterval(()=>{const h=document.querySelector('.s3pc-hint');if(h&&h.textContent&&window.__hints[window.__hints.length-1]!==h.textContent)window.__hints.push(h.textContent)},20);
  if(!o.real){const cam=mockCam(o.w||360,o.h||480,o.fovL||62);opts.mock={camera:cam,sensor:mockSensor(cam,o)};
   if(o.shake!=null)opts.mock.motion=cb=>{const id=setInterval(()=>{const c=document.querySelector('.s3pc-cnt');if(c&&/צולמו [1-9]|כוסו [1-9]/.test(c.textContent))cb({acceleration:{x:o.shake,y:0,z:0}})},16);return()=>clearInterval(id)}}
  /* תמונה אמיתית מדומה (o.photo): ok | cw | ccw (מסובבת 90°) | fail | failonce | move (הטלפון זז באמצע) | wide (יחס שונה בלי סיבוב). o.caps: full | none | failexp (applyConstraints נכשל לחשיפה) */
  if(!o.real&&o.photo){const cam=opts.mock.camera,kind=o.photo;window.__photoCalls=0;opts.mock.photo=()=>new Promise((res,rej)=>{const n=++window.__photoCalls;
    if(kind==='fail'||(kind==='failonce'&&n===1))return setTimeout(()=>rej(new Error('photo')),50);
    if(kind==='move'&&n===1)setTimeout(()=>{window.__kick=12},100);
+   /* שלב 21ו: החשיפה הנוכחית (מ-applyConstraints) משנה את הבהירות; o.blurAt – מספרי קריאות שבהן התמונה מטושטשת */
+   const ex=window.__exp||{t:166,c:0},gain=o.caps==='comp'?Math.pow(2,ex.c):ex.t/166,blur=(o.blurAt||[]).includes(n);(window.__shots=window.__shots||[]).push({n,t:ex.t,c:ex.c,blur});
    setTimeout(()=>{const sw=cam.el.width,sh=cam.el.height,rot=kind==='cw'?1:kind==='ccw'?-1:0,c=document.createElement('canvas');c.width=rot?sh*2:sw*2;c.height=rot?sw*2:sh*2;const g=c.getContext('2d');
+    g.filter=(gain!==1?'brightness('+gain+')':'')+(blur?' blur(5px)':'')||'none';
     if(rot>0){g.translate(c.width,0);g.rotate(Math.PI/2);g.drawImage(cam.el,0,0,c.height,c.width)}else if(rot<0){g.translate(0,c.height);g.rotate(-Math.PI/2);g.drawImage(cam.el,0,0,c.height,c.width)}else g.drawImage(cam.el,0,0,c.width,c.height);
    c.toBlob(b=>res(b),'image/jpeg',.9)},kind==='move'?300:120)})}
  if(!o.real&&o.caps){window.__applied=[];const cp=o.caps==='none'?{}:{exposureMode:['continuous','manual'],whiteBalanceMode:['continuous','manual'],focusMode:['continuous','manual'],exposureTime:{min:1,max:1e4},iso:{min:50,max:800}};
-  opts.mock.caps={caps:cp,settings:o.caps==='none'?{}:{exposureTime:166,colorTemperature:5200,focusDistance:0.4,iso:100},apply:c=>{window.__applied.push(c);const a=c.advanced[0];return o.caps==='failexp'&&a.exposureMode?Promise.reject(new Error('x')):Promise.resolve()}}}
+  /* שלב 21ו: comp – רק פיצוי חשיפה (בלי נעילה ידנית); failhdr – הנעילה מצליחה, כל שינוי חשיפה אחר נכשל */
+  if(o.caps==='comp'){for(const k of['exposureMode','exposureTime','iso'])delete cp[k];cp.exposureCompensation={min:-3,max:3,step:1/3}}
+  window.__exp={t:166,c:0};
+  opts.mock.caps={caps:cp,settings:o.caps==='none'?{}:o.caps==='comp'?{colorTemperature:5200,focusDistance:0.4,exposureCompensation:0}:{exposureTime:166,colorTemperature:5200,focusDistance:0.4,iso:100},apply:c=>{window.__applied.push(c);const a=c.advanced[0];
+   if(o.caps==='failexp'&&a.exposureMode)return Promise.reject(new Error('x'));if(o.caps==='failhdr'&&a.exposureTime!=null&&a.exposureTime!==166)return Promise.reject(new Error('x'));
+   if(a.exposureTime!=null)window.__exp.t=a.exposureTime;if(a.exposureCompensation!=null)window.__exp.c=a.exposureCompensation;return Promise.resolve()}}}
  /* שלב 21ה: שלב הרצפה בסוף. o.floor: skip (ברירת מחדל – לוחץ "דלג" מיד, כדי שבדיקות ישנות לא ייתקעו) | shoot (לוחץ "צלם" עד שהצילום מתקבל) | manual (לא עושה כלום, הבדיקה לוחצת בעצמה) */
  if(!o.real&&o.floor!=='manual'){const fm=o.floor||'skip';window.__floorTimer=setInterval(()=>{const b=document.querySelector('.s3pc-fb:not([hidden]) [data-k='+(fm==='shoot'?'fs':'fk')+']');if(b)b.click()},fm==='shoot'?200:30)}
  if(o.noAlign)opts.noAlign=true;if(o.width)opts.width=o.width;

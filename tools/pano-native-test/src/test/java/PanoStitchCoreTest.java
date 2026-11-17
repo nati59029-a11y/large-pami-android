@@ -739,6 +739,28 @@ public class PanoStitchCoreTest {
 
     /** 21e: a near board, camera centres moved by up to 4 cm per frame (parallax up to ~4 degrees between two frames at 1.2 m): with
      *  smart seams + mesh warp + ghost removal the board looks like ONE view of it (no doubled edges), clearly better than before */
+    /** scene 17 with a near board between horizon frames 0 and 1 (a bit towards 1), camera centres moved by 2.5-4 cm per frame */
+    static Scene boardScene(Board[] bdOut, double[][][] csOut) {
+        Scene s = scene(17, 0, 2, null);
+        Random r = new Random(99);
+        double y0 = Math.atan2(-s.Rt[0][2], -s.Rt[0][5]) / D, y1 = Math.atan2(-s.Rt[1][2], -s.Rt[1][5]) / D;
+        Board bd = new Board(y0 + wrap180(y1 - y0) * .6, 5);
+        double[][] cs = new double[s.n][];
+        for (int i = 0; i < s.n; i++) {
+            double ax = r.nextGaussian(), ay = r.nextGaussian(), az = r.nextGaussian() * .3, nn = Math.sqrt(ax * ax + ay * ay + az * az), L = .025 + .015 * r.nextDouble();
+            cs[i] = new double[]{ax / nn * L, ay / nn * L, az / nn * L};
+            Mat img = renderBoard(s.Rt[i], cs[i], bd, FW, FH);
+            Mat fl = new Mat();
+            img.convertTo(fl, CvType.CV_32FC3);
+            Core.multiply(fl, new Scalar(s.gain[i][0], s.gain[i][1], s.gain[i][2]), fl);
+            fl.convertTo(img, CvType.CV_8UC3);
+            s.jpeg[i] = jpg(img, 92);
+            img.release(); fl.release();
+        }
+        bdOut[0] = bd; csOut[0] = cs;
+        return s;
+    }
+
     @Test
     void parallaxGhostsRemoved() {
         Scene s = scene(17, 0, 2, null);
@@ -760,6 +782,7 @@ public class PanoStitchCoreTest {
         }
         PanoStitchCore.Options off = new PanoStitchCore.Options();
         off.smartSeams = false; off.meshWarp = false; off.deghost = false;
+        off.graphCut = false; // "before" = the stage 21c seams (21f: the graph cut alone already gives 0 wrong pixels here)
         long t = System.currentTimeMillis();
         PanoStitchCore.Result r0 = stitchOpt(s, 2048, off, null);
         long ms0 = System.currentTimeMillis() - t;
@@ -862,5 +885,217 @@ public class PanoStitchCoreTest {
         boolean thrown = false;
         try { new PanoStitchCore(2, null).setFrame(0, s.jpeg[0], q(s.Rs[0]), "zenith"); } catch (IllegalArgumentException e) { thrown = true; }
         assertTrue(thrown, "unknown role refused");
+    }
+
+    /* ---------------------------------------------------------------- stage 21f: graph cut, HDR, 8192 ---------------------------------------------------------------- */
+
+    /** 21f: graph-cut seams vs the DP seams on the board scene: the board is not more ghosted (wrong pixels / ZNCC), with the seams
+     *  alone (warp + ghost removal off) and with everything on; PSNR elsewhere not lower */
+    @Test
+    void graphCutSeamsNotWorseThanDp() {
+        Board[] bb = new Board[1];
+        double[][][] cc = new double[1][][];
+        Scene s = boardScene(bb, cc);
+        Board bd = bb[0];
+        double[][] cs = cc[0];
+        StringBuilder sb = new StringBuilder("graph cut vs DP seams (board): ");
+        for (int v = 0; v < 2; v++) {
+            double[][] sc = new double[2][];
+            double[] ps = new double[2];
+            long[] ms = new long[2];
+            for (int g = 0; g < 2; g++) {
+                PanoStitchCore.Options o = new PanoStitchCore.Options();
+                o.graphCut = g == 1;
+                if (v == 0) { o.meshWarp = false; o.deghost = false; }
+                PanoStitchCore.Result r = stitchOpt(s, 2048, o, null);
+                double[] G = gauge(mats(r), s.Rt, null);
+                sc[g] = boardScore(r.pano, s.yawRef, G, bd, cs, s.Rt);
+                ps[g] = psnr(r.pano, s.yawRef, G);
+                ms[g] = r.stats.msSeam;
+                if (g == 1) assertTrue(r.stats.gcPairs > 0 && r.stats.dpPairs == 0, "graph cut used: " + r.stats.gcPairs + " / " + r.stats.dpPairs);
+                Imgcodecs.imwrite(new File(OUT, "seams-" + (v == 0 ? "only" : "all") + "-" + (g == 1 ? "gc" : "dp") + "-2048.jpg").getPath(), r.pano);
+                r.pano.release();
+            }
+            sb.append(v == 0 ? "[seams only] " : "[all on] ").append("wrong pixels ").append(f2(100 * sc[0][1])).append("% -> ").append(f2(100 * sc[1][1]))
+                    .append("%, ZNCC ").append(f2(sc[0][0])).append(" -> ").append(f2(sc[1][0])).append(", PSNR ").append(f2(ps[0])).append(" -> ").append(f2(ps[1]))
+                    .append(" dB, seam stage ").append(ms[0]).append(" -> ").append(ms[1]).append(" ms; ");
+            assertTrue(sc[1][1] <= sc[0][1] + .01 && sc[1][0] >= sc[0][0] - .02, sb.toString());
+            assertTrue(ps[1] > ps[0] - .3, sb.toString());
+        }
+        bd.tex.release();
+        System.out.println(sb);
+    }
+
+    /** a bright lamp (radiance up to 3x white) at (yaw, 15 deg), radius 7 deg, with a texture: radiance (0..~765) of direction d or -1 */
+    static double lamp(double[] d, double yaw) {
+        double[] c = dirOf(yaw, 15);
+        double cosA = d[0] * c[0] + d[1] * c[1] + d[2] * c[2];
+        if (cosA < Math.cos(7 * D)) return -1;
+        double lon = Math.atan2(d[0], d[1]), lat = Math.asin(d[2]);
+        return 255 * (1.9 + 1.0 * Math.sin(lon * 90) * Math.cos(lat * 70));
+    }
+
+    /** frame with the lamp, exposure x k (radiance clipped at 255), camera m */
+    static Mat renderLamp(double[] m, double yaw, double k, double[] gain, Random rnd) {
+        Mat img = render(m, FOV_TRUE, FW, FH), fl = new Mat();
+        img.convertTo(fl, CvType.CV_32FC3);
+        img.release();
+        float[] px = new float[FW * FH * 3];
+        fl.get(0, 0, px);
+        double f = (Math.max(FW, FH) / 2.0) / Math.tan(FOV_TRUE * D / 2);
+        double[] pc = PanoStitchCore.project(m, dirOf(yaw, 15), FOV_TRUE, FW, FH);
+        boolean near = pc != null && pc[0] > -FW * .3 && pc[0] < FW * 1.3 && pc[1] > -FH * .3 && pc[1] < FH * 1.3;
+        for (int v = 0; v < FH; v++) for (int u = 0; u < FW; u++) {
+            int q = (v * FW + u) * 3;
+            double L = near ? lamp(pixDir(m, u + .5, v + .5, f, FW, FH), yaw) : -1;
+            for (int c = 0; c < 3; c++) {
+                double val = (L >= 0 ? L * (c == 0 ? .85 : 1) : px[q + c]) * k * gain[c] + rnd.nextGaussian() * 2;
+                px[q + c] = (float) Math.max(0, Math.min(255, val));
+            }
+        }
+        fl.put(0, 0, px);
+        Mat out = new Mat();
+        fl.convertTo(out, CvType.CV_8UC3);
+        fl.release();
+        return out;
+    }
+
+    /** {fraction of clipped pixels (max channel >= 250), std of the grey level} inside 5 deg of the lamp centre */
+    static double[] lampStats(Mat pano, double yawRef, double[] G, double yaw) {
+        int W = pano.cols(), H = pano.rows();
+        byte[] a = new byte[W * H * 3];
+        pano.get(0, 0, a);
+        double[] c = dirOf(yaw, 15);
+        int n = 0, cl = 0;
+        double s = 0, s2 = 0;
+        for (int y = 0; y < H / 2; y++) for (int x = 0; x < W; x++) {
+            double[] d = PanoStitchCore.eqDir(x, y, W, H, yawRef);
+            double[] g = {G[0] * d[0] + G[1] * d[1] + G[2] * d[2], G[3] * d[0] + G[4] * d[1] + G[5] * d[2], G[6] * d[0] + G[7] * d[1] + G[8] * d[2]};
+            if (g[0] * c[0] + g[1] * c[1] + g[2] * c[2] < Math.cos(5 * D)) continue;
+            int k = (y * W + x) * 3, b = a[k] & 255, gg = a[k + 1] & 255, r = a[k + 2] & 255;
+            if (Math.max(b, Math.max(gg, r)) >= 250) cl++;
+            double l = .114 * b + .587 * gg + .299 * r;
+            s += l; s2 += l * l; n++;
+        }
+        return new double[]{cl / (double) n, Math.sqrt(Math.max(0, s2 / n - (s / n) * (s / n)))};
+    }
+
+    /** 21f HDR: every target shot at ev -1 / 0 / +1 (x 1/4, 1, 4), the brackets moved by up to 0.4 deg (the hand moves); groups are
+     *  aligned + fused (Mertens): the lamp keeps its texture (much less clipping than the ev 0 frames alone), the rest stays sharp */
+    @Test
+    void hdrGroupsRecoverClippedLamp() {
+        Scene s0 = scene(31, 0, 2, null);
+        Random rnd = new Random(5);
+        double yaw = Math.atan2(-s0.Rt[0][2], -s0.Rt[0][5]) / D + 8;
+        int n0 = s0.n;
+        // the direct alignment: a darker bracket shifted by (6.4, -3.1) px and rotated by 0.3 deg is found
+        {
+            Mat a = renderLamp(s0.Rt[0], yaw, 1, new double[]{1, 1, 1}, rnd), b0 = renderLamp(s0.Rt[0], yaw, .25, new double[]{1, 1, 1}, rnd), b = new Mat();
+            double th = .3 * D, tx = 6.4, ty = -3.1;
+            Mat M = new Mat(2, 3, CvType.CV_64F);
+            M.put(0, 0, Math.cos(th), -Math.sin(th), tx, Math.sin(th), Math.cos(th), ty);
+            Imgproc.warpAffine(b0, b, M, b0.size(), Imgproc.INTER_LINEAR, Core.BORDER_REPLICATE); // b(A x) = b0(x)
+            double[] w = PanoStitchCore.alignEcc(a, b);
+            assertTrue(w != null, "aligned");
+            // error of the found mapping at the centre and the corners (pixels)
+            double eC = 0, eMax = 0;
+            for (double[] pt : new double[][]{{FW / 2.0, FH / 2.0}, {0, 0}, {FW, 0}, {0, FH}, {FW, FH}}) {
+                double ex = w[0] * pt[0] + w[1] * pt[1] + w[2] - (Math.cos(th) * pt[0] - Math.sin(th) * pt[1] + tx);
+                double ey = w[3] * pt[0] + w[4] * pt[1] + w[5] - (Math.sin(th) * pt[0] + Math.cos(th) * pt[1] + ty);
+                double e = Math.hypot(ex, ey);
+                if (eC == 0) eC = Math.max(1e-9, e);
+                eMax = Math.max(eMax, e);
+            }
+            System.out.println("hdr align: found shift " + f2(w[2]) + ", " + f2(w[5]) + " px, rotation " + f2(Math.atan2(w[3], w[0]) / D) + " deg (true " + tx + ", " + ty
+                    + ", 0.3); error centre " + f2(eC) + " px, worst corner " + f2(eMax) + " px");
+            // ECC on 800 px grey images (phone time): ~0.7 px at 1600 px, i.e. ~0.3 px of the 4096 output
+            assertTrue(eC < 1 && eMax < 2, "alignment: centre " + eC + " corners " + eMax);
+            a.release(); b0.release(); b.release(); M.release();
+        }
+        int nb = 3 * n0;
+        byte[][] jp = new byte[nb][];
+        double[][] qs = new double[nb][];
+        int[] gs = new int[nb], evs = new int[nb];
+        byte[][] j0 = new byte[n0][];
+        for (int i = 0; i < n0; i++) {
+            for (int e = -1; e <= 1; e++) {
+                int k = 3 * i + e + 1;
+                double[] m = s0.Rt[i];
+                if (e != 0) { // the camera moved a little between the shots
+                    double ang = (.15 + .25 * rnd.nextDouble()) * D, ax = rnd.nextGaussian(), ay = rnd.nextGaussian(), az = rnd.nextGaussian(), nn = Math.sqrt(ax * ax + ay * ay + az * az);
+                    m = mul(rotVec(new double[]{ax / nn * ang, ay / nn * ang, az / nn * ang}), m);
+                }
+                Mat img = renderLamp(m, yaw, Math.pow(4, e), s0.gain[i], rnd);
+                jp[k] = jpg(img, 92);
+                img.release();
+                qs[k] = q(s0.Rs[i]); // the sensor pose of the target (as the phone reports for the bracket)
+                gs[k] = i; evs[k] = e;
+                if (e == 0) j0[i] = jp[k];
+            }
+        }
+        PanoStitchCore.Options oA = new PanoStitchCore.Options();
+        oA.W = 2048; oA.fovL = FOV_GIVEN; oA.yawRef = s0.yawRef;
+        PanoStitchCore cA = new PanoStitchCore(n0, oA);
+        for (int i = 0; i < n0; i++) cA.setFrame(i, j0[i], q(s0.Rs[i]));
+        PanoStitchCore.Result rA = cA.run(null);
+        PanoStitchCore.Options oB = new PanoStitchCore.Options();
+        oB.W = 2048; oB.fovL = FOV_GIVEN; oB.yawRef = s0.yawRef;
+        PanoStitchCore cB = new PanoStitchCore(nb, oB);
+        for (int k = 0; k < nb; k++) cB.setFrame(k, jp[k], qs[k], null, gs[k], evs[k]);
+        final double[] last = {0};
+        PanoStitchCore.Result rB = cB.run(p -> { assertTrue(p >= last[0] - 1e-9, "progress goes forward"); last[0] = p; });
+        assertEquals(1.0, last[0], 1e-9);
+        double[] GA = gauge(mats(rA), s0.Rt, null), GB = gauge(mats(rB), s0.Rt, null);
+        double[] la = lampStats(rA.pano, s0.yawRef, GA, yaw), lb = lampStats(rB.pano, s0.yawRef, GB, yaw);
+        double pA = psnr(rA.pano, s0.yawRef, GA), pB = psnr(rB.pano, s0.yawRef, GB);
+        Imgcodecs.imwrite(new File(OUT, "hdr-ev0-2048.jpg").getPath(), rA.pano);
+        Imgcodecs.imwrite(new File(OUT, "hdr-fused-2048.jpg").getPath(), rB.pano);
+        PanoStitchCore.Stats st = rB.stats;
+        System.out.println("hdr: " + st.inputFrames + " brackets -> " + st.frames + " frames (" + st.hdrGroups + " groups, aligned " + st.hdrAligned + ", not aligned "
+                + st.hdrAlignFailed + ", " + st.msHdr + " ms); lamp clipped " + f2(100 * la[0]) + "% -> " + f2(100 * lb[0]) + "%, texture std " + f2(la[1]) + " -> " + f2(lb[1])
+                + "; PSNR |lat|<70 " + f2(pA) + " -> " + f2(pB) + " dB; optimised " + rB.stats.optimized + ", frameIndex[1] " + rB.frameIndex[1]);
+        rA.pano.release(); rB.pano.release();
+        assertEquals(n0, st.frames);
+        assertEquals(n0, st.hdrGroups);
+        assertEquals(4, rB.frameIndex[1]);
+        assertTrue(st.hdrAligned >= 2 * n0 * .9, "brackets aligned: " + st.hdrAligned);
+        assertTrue(rB.stats.optimized, "optimised");
+        assertTrue(la[0] > .5, "the ev 0 lamp is clipped: " + la[0]);
+        assertTrue(lb[0] < .5 * la[0], "less clipping: " + la[0] + " -> " + lb[0]);
+        assertTrue(lb[1] > la[1] * 1.5, "lamp texture recovered: std " + la[1] + " -> " + lb[1]);
+        assertTrue(pB > pA - 3, "the rest stays sharp: " + pA + " -> " + pB);
+    }
+
+    /** 21f: the strip blend == the whole-canvas blend (2048, PSNR between the two outputs), and W = 8192 completes in strips within
+     *  the memory estimate, with a sane PSNR vs the ground truth */
+    @Test
+    void stripBlendAnd8192() {
+        Scene s = scene(7, 0, 2, null);
+        PanoStitchCore.Options oW = new PanoStitchCore.Options(), oS = new PanoStitchCore.Options();
+        oW.stripBlend = -1; oS.stripBlend = 1;
+        PanoStitchCore.Result rW = stitchOpt(s, 2048, oW, null), rS = stitchOpt(s, 2048, oS, null);
+        double same = Core.PSNR(rW.pano, rS.pano);
+        System.out.println("strip blend vs whole canvas (2048): PSNR " + f2(same) + " dB, strips " + rS.stats.strips + ", memory estimate " + f2(rW.stats.memEstMB) + " -> " + f2(rS.stats.memEstMB) + " MB");
+        Imgcodecs.imwrite(new File(OUT, "strips-2048.jpg").getPath(), rS.pano);
+        assertTrue(rW.stats.strips == 0 && rS.stats.strips >= 1, "paths");
+        // the low bands come from a direct low-res warp instead of the full-res pyramid: smooth differences (mean ~1.6 grey levels at
+        // mid latitudes, more near the poles; 35.4 dB on this scene, 39.8 dB on the real capture raw2), no visible change
+        assertTrue(same > 34, "strip blend ~ whole canvas: " + same);
+        rW.pano.release(); rS.pano.release();
+        long t = System.currentTimeMillis();
+        PanoStitchCore.Result r = stitchOpt(s, 8192, new PanoStitchCore.Options(), null);
+        long ms = System.currentTimeMillis() - t;
+        double[] G = gauge(mats(r), s.Rt, null);
+        double p = psnr(r.pano, s.yawRef, G);
+        Mat small = new Mat();
+        Imgproc.resize(r.pano, small, new Size(4096, 2048), 0, 0, Imgproc.INTER_AREA);
+        Imgcodecs.imwrite(new File(OUT, "w8192-as-4096.jpg").getPath(), small);
+        System.out.println("8192: " + r.pano.cols() + "x" + r.pano.rows() + " in " + ms + " ms (blend " + r.stats.msBlend + "), strips " + r.stats.strips + ", memory estimate "
+                + f2(r.stats.memEstMB) + " MB, PSNR vs ground truth " + f2(p) + " dB, holes " + f2(r.stats.holesPct) + "%");
+        assertEquals(8192, r.pano.cols());
+        assertEquals(4096, r.pano.rows());
+        assertTrue(r.stats.strips > 1 && r.stats.memEstMB <= 600, "strips within the budget: " + r.stats.memEstMB);
+        assertTrue(p > 27, "sane PSNR at 8192: " + p);
+        small.release(); r.pano.release();
     }
 }

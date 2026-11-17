@@ -16,6 +16,8 @@ import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.util.Base64;
 import android.view.Display;
 import android.view.InputDevice;
@@ -44,6 +46,8 @@ import java.util.concurrent.Executors;
  *  - cash drawer: opened by the printer (drawer cable in the printer's DK port).
  *  - customer display: a second screen through Android's Presentation API.
  *  - status of each part + the data the screens need for "equipment check".
+ *  - P1-P9 of the POS spec (part D 6.1): USB first with reconnect by vendor/product id, cut, explicit PAPER_OUT / OFFLINE codes,
+ *    no drawer sensor needed, attach/detach events, Android 7.1 (API 25) safe, room for a Sunmi adapter, showCustomer, vibrate.
  * The barcode scanner (keyboard mode) is handled in www/pos-hw.js; this plugin only lists external keyboards.
  *
  * Not here on purpose: card payments. No card number, track or PIN passes through this plugin.
@@ -87,6 +91,14 @@ public class LpPosPlugin extends Plugin {
                     JSObject r = new JSObject();
                     r.put("attached", UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(i.getAction()));
                     r.put("deviceName", d == null ? "" : d.getDeviceName());
+                    if (d != null) {
+                        // P1: the printer is known by vendor/product id (the device name changes on every plug-in), so the screens reconnect by id
+                        r.put("vendorId", d.getVendorId());
+                        r.put("productId", d.getProductId());
+                        UsbManager um = (UsbManager) c.getSystemService(Context.USB_SERVICE);
+                        r.put("hasPermission", um != null && um.hasPermission(d));
+                        r.put("canPrint", LpPosBtUsb.pickInterface(d) != null);
+                    }
                     if (!r.getBool("attached")) io.execute(() -> { if (conn != null && "usb".equals(conn.kind())) dropConn(); });
                     notifyListeners("usb", r);
                 }
@@ -259,7 +271,7 @@ public class LpPosPlugin extends Plugin {
 
     /** Opens (or reuses) the connection for the printer settings. Runs on the io thread. */
     private LpPosTransport connect(JSObject p, boolean[] reused) throws IOException {
-        if (p == null) throw new IOException("no printer chosen");
+        if (p == null) throw new PosErr("NO_PRINTER", "no printer chosen");
         String type = p.getString("type", "");
         String key;
         switch (type) {
@@ -267,7 +279,9 @@ public class LpPosPlugin extends Plugin {
             case "bt": key = "bt:" + p.getString("address", "").toUpperCase(); break;
             case "usb": key = "usb:" + p.getInteger("vendorId", -1) + ":" + p.getInteger("productId", -1) + ":" + p.getString("deviceName", ""); break;
             case "mock": key = "mock"; break;
-            default: throw new IOException("unknown printer type: " + type);
+            // P7: "sunmi" (built-in printer of some POS terminals) has a place here but is not built yet
+            case "sunmi": throw new PosErr("ERROR", "built-in (Sunmi) printer is not supported yet");
+            default: throw new PosErr("ERROR", "unknown printer type: " + type);
         }
         if (conn != null && key.equals(connKey) && conn.isOpen()) { reused[0] = true; return conn; }
         dropConn();
@@ -317,12 +331,28 @@ public class LpPosPlugin extends Plugin {
 
     private interface Job { void run() throws Exception; }
 
+    /**
+     * P3 (spec part D 6.1): print never reports a "blind" success. Error codes for the screens:
+     * PAPER_OUT (paper ended / cover open: the sale is kept, the receipt waits for "print again"), OFFLINE (cannot reach the printer),
+     * NO_PRINTER (none chosen), ERROR (anything else).
+     */
+    static final class PosErr extends IOException {
+        final String code;
+        PosErr(String code, String msg) { super(msg); this.code = code; }
+    }
+
     private void onIo(final PluginCall call, final Job job) {
         io.execute(() -> {
             try { job.run(); }
+            catch (PosErr e) { call.reject(e.getMessage(), e.code); }
+            catch (IOException e) {
+                dropConn();
+                String m = e.getMessage();
+                call.reject(m == null ? "printer not reachable" : m, "OFFLINE");
+            }
             catch (Throwable e) {
                 String m = e.getMessage();
-                call.reject(m == null ? e.getClass().getSimpleName() : m, "IO");
+                call.reject(m == null ? e.getClass().getSimpleName() : m, "ERROR");
             }
         });
     }
@@ -348,14 +378,29 @@ public class LpPosPlugin extends Plugin {
             r.put("height", bmp.getHeight());
             r.put("bytes", data.length);
             if (p != null && !"none".equals(p.getString("type", ""))) {
+                boolean[] reused = { false };
+                LpPosTransport t0 = connect(p, reused);
+                paperCheck(t0); // before: no paper = do not even start (the receipt goes to the "waiting to print" queue)
                 LpPosTransport t = send(p, data);
+                LpPosEscPos.Status after = paperCheck(t); // after: paper ended in the middle = the receipt is not trusted
                 r.put("printed", true);
                 r.put("via", t.kind());
+                r.put("paperLow", nul(after == null ? null : after.paperLow));
             } else r.put("printed", false);
             bmp.recycle();
             r.put("ms", System.currentTimeMillis() - t0);
             call.resolve(r);
         });
+    }
+
+    /** Status check around a print job. Printers that never answer are asked once per connection, then skipped. */
+    private LpPosEscPos.Status paperCheck(LpPosTransport t) throws IOException {
+        if (t == null || Boolean.FALSE.equals(t.answers)) return null;
+        LpPosEscPos.Status s = t.queryStatus(350);
+        if (Boolean.TRUE.equals(s.paperOut)) throw new PosErr("PAPER_OUT", "paper ended");
+        if (Boolean.TRUE.equals(s.coverOpen)) throw new PosErr("PAPER_OUT", "printer cover is open");
+        if (Boolean.FALSE.equals(s.online)) throw new PosErr("OFFLINE", "printer is not ready");
+        return s;
     }
 
     /** printRaw({printer, data}) : ready ESC/POS bytes (base64), for special printers. */
@@ -475,6 +520,23 @@ public class LpPosPlugin extends Plugin {
         r.put("displays", a);
         r.put("showing", display.isShowing());
         notifyListeners("display", r);
+    }
+
+    /** P8: the customer display under the name the spec uses (same as displayShow). */
+    @PluginMethod
+    public void showCustomer(final PluginCall call) { displayShow(call); }
+
+    /** P9: vibration (navigator.vibrate does not work in every WebView). VIBRATE is a normal permission: no prompt. */
+    @PluginMethod
+    public void vibrate(final PluginCall call) {
+        final int ms = Math.max(10, Math.min(1000, call.getInt("ms", 40)));
+        try {
+            Vibrator v = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+            if (v == null || !v.hasVibrator()) { JSObject r = new JSObject(); r.put("ok", false); call.resolve(r); return; }
+            if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
+            else v.vibrate(ms);
+            JSObject r = new JSObject(); r.put("ok", true); call.resolve(r);
+        } catch (Exception e) { JSObject r = new JSObject(); r.put("ok", false); call.resolve(r); }
     }
 
     // ================================================================== helpers

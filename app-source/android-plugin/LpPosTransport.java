@@ -21,6 +21,8 @@ public abstract class LpPosTransport {
     protected int chunk = 4096;
     /** Pause after each chunk (ms). 0 for net/usb; a few ms helps some Bluetooth printers. */
     protected int chunkDelayMs = 0;
+    /** null = not asked yet; FALSE = this connection never answers status requests (cheap printers): do not wait for it again. */
+    public Boolean answers = null;
 
     public abstract String kind();
     public abstract void open() throws IOException;
@@ -52,8 +54,9 @@ public abstract class LpPosTransport {
         for (int n : new int[] { 1, 2, 4 }) {
             write(LpPosEscPos.statusRequest(n));
             r[n] = readByte(timeoutMs);
-            if (n == 1 && r[1] < 0) return LpPosEscPos.parseStatus(-1, -1, -1); // no back channel: do not wait 3 times
+            if (n == 1 && r[1] < 0) { answers = Boolean.FALSE; return LpPosEscPos.parseStatus(-1, -1, -1); } // no back channel: do not wait 3 times
         }
+        answers = Boolean.TRUE;
         return LpPosEscPos.parseStatus(r[1], r[2], r[4]);
     }
 

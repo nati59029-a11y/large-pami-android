@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>בדיקת תמונות לדגם (s3look) – דוגמה</title>
+<!-- דף בדיקה למפתחים בלבד (שלב 6 של הקמת חנות, check-look.js). לא מחובר לאפליקציה; כל התמונות נוצרות בקוד (קנבס).
+     ?look=0 – בלי s3look · ?fr=new|old – חזית הקמה חדשה/ישנה מהסבב לפני מקטע f1-a-1 · ?mode=walk -->
+<style>html,body{margin:0;background:#121216}#view{position:fixed;inset:0}</style>
+</head>
+<body>
+<div id="view"></div>
+<script src="../store3d-geo.js"></script>
+<script src="../store3d-capplan.js"></script>
+<script src="../store3d-view.js"></script>
+<script>
+(function(){
+'use strict';
+const q=new URLSearchParams(location.search),P='b/demo/store3d/main/';
+const map=S3G.sampleMap(12);map.fx[0].st='frz';map.fx[1].st='dfr';
+map.doors=[{id:'d1',x:500,y:0,w:150,a:0,k:'ent'}];
+map.syms=[{id:'y1',k:'cash',x:300,y:120,a:0,w:140,d:60}];
+const plan=S3Plan.capPlan(map),sum={b:{},upd:1};
+const model=S3G.buildModel(map);
+for(const b of model.bays)sum.b[b.id]={s:'ok',r:'demo_1',t:100,n:0,th:P+'run/demo_1/'+b.id+'_a_t.jpg'};
+if(q.get('fr')){sum.b['f1-a-1'].fr=P+'front/f1-a-1_t.jpg';sum.b['f1-a-1'].frT=q.get('fr')==='new'?200:50}
+const look={v:1,it:{},upd:1};
+for(const it of plan.items)if(it.k!=='b')look.it[it.key]={th:P+'front/'+it.key+'_t.jpg',t:1,v:1};
+window.__plan=plan;window.__look=look;window.__sum=sum;window.__loads=[];
+const hue=s=>s.split('').reduce((a,ch)=>(a*31+ch.charCodeAt(0))%360,7);
+const load=p=>{window.__loads.push(p);const c=document.createElement('canvas');c.width=320;c.height=240;const g=c.getContext('2d');
+ g.fillStyle='hsl('+hue(p)+',70%,45%)';g.fillRect(0,0,320,240);g.fillStyle='#fff';g.fillRect(20,20,60,60);return new Promise(r=>c.toBlob(r,'image/jpeg',.8))};
+const o={sample:true,sum,load,mode:q.get('mode')==='walk'?'walk':'top'};if(q.get('look')!=='0')o.look=look;
+Store3D.open(document.getElementById('view'),map,o).then(h=>{window.__h=h});
+})();
+</script>
+</body>
+</html>

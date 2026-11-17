@@ -203,10 +203,9 @@ function openPanel(){const d=root.document;if(!d)return;if(panel){panel.remove()
  offs.push(on('display',()=>check()),on('usb',()=>check()));
  available();d.body.append(box);render()}
 
-/* כניסה זמנית לבדיקה בטלפון: כפתור "בדיקת ציוד קופה" בסוף מסך ההגדרות. מסך הקופה יפתח את openPanel() ישירות. */
-try{if(typeof V!=='undefined'&&typeof V.settings==='function'&&typeof ACT!=='undefined'){const s0=V.settings;
- V.settings=function(){const r=s0.apply(this,arguments);if(r&&typeof r.h==='string')r.h+='<div class="sec"><h3>קופה</h3></div><div class="card"><button class="btn" data-a="posHw">בדיקת ציוד קופה</button><div style="opacity:.8;font-size:14px;margin-top:6px">מדפסת קבלות, מגירה, סורק ומסך לקוח</div></div>';return r};
- ACT.posHw=()=>openPanel()}}catch(e){}
-
-return{available,printer,setPrinter,cleanPrinter,pDesc,listDevices,requestUsb,requestBt,print,printTest,testReceipt,openDrawer,status,printerState,
+/* הכניסה לחלון: באזור הניהול בלבד (pos-admin-hw.js, מסך "ציוד ומכשירים"). במסך הקופה אין הגדרות (אפיון 1.3). */
+/* רטט (P9): קודם התוסף (navigator.vibrate לא עובד בכל WebView), ואם אין – navigator.vibrate */
+async function vibrate(ms){ms=Math.max(10,Math.min(1000,+ms||40));const P=plug();if(P&&typeof P.vibrate==='function'){try{const r=await P.vibrate({ms});if(r&&r.ok)return true}catch(e){}}
+ try{return!!(root.navigator&&root.navigator.vibrate&&root.navigator.vibrate(ms))}catch(e){return false}}
+return{available,plug,vibrate,printer,setPrinter,cleanPrinter,pDesc,listDevices,requestUsb,requestBt,print,printTest,testReceipt,openDrawer,status,printerState,
  onScan,ScanDetector,looksLikeCard,display,cartHtml,on,openPanel}});

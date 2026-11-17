@@ -314,18 +314,39 @@ if 'android.hardware.usb.host"' not in s:
     add.append('<uses-feature android:name="android.hardware.usb.host" android:required="false" />')
 if 'android.hardware.bluetooth"' not in s:
     add.append('<uses-feature android:name="android.hardware.bluetooth" android:required="false" />')
+if 'android.permission.VIBRATE"' not in s:
+    add.append('<uses-permission android:name="android.permission.VIBRATE" />')
 if add:
     i = s.find("<application")
     if i < 0:
         sys.exit("::error::pos hw: <application> not found")
     s = s[:i] + "\n    ".join(add) + "\n    " + s[i:]
     open(p, "w", encoding="utf-8").write(s)
-for x in ('android.permission.BLUETOOTH"', 'android.permission.BLUETOOTH_CONNECT"', 'android.hardware.usb.host"', 'android.hardware.bluetooth"'):
+# P1: a USB receipt printer (interface class 7) plugged in opens the app, and Android offers "always use for this device",
+# so the permission survives unplug/replug and the print queue reconnects by itself. One intent-filter on MainActivity.
+import re
+if "lp_usb_printer" not in s:
+    m = re.search(r'<activity\b[^>]*?android:name="(?:\.|com\.largepami\.finance\.)MainActivity"[^>]*>', s, re.S)
+    if not m or m.group(0).endswith("/>"):
+        sys.exit("::error::pos hw: MainActivity not found")
+    ins = ('\n            <intent-filter>\n                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />\n            </intent-filter>'
+           '\n            <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" android:resource="@xml/lp_usb_printer" />')
+    s = s[:m.end()] + ins + s[m.end():]
+    open(p, "w", encoding="utf-8").write(s)
+for x in ('android.permission.BLUETOOTH"', 'android.permission.BLUETOOTH_CONNECT"', 'android.hardware.usb.host"', 'android.hardware.bluetooth"', 'android.permission.VIBRATE"', 'lp_usb_printer'):
     assert s.count(x) == 1, "pos hw: " + x
 for bad in ("BLUETOOTH_SCAN", "BLUETOOTH_ADMIN", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"):
     assert bad not in s, "pos hw: unexpected permission " + bad
-print("pos hw manifest: OK (BLUETOOTH<=30, BLUETOOTH_CONNECT, usb.host/bluetooth optional)")
+print("pos hw manifest: OK (BLUETOOTH<=30, BLUETOOTH_CONNECT, VIBRATE, usb.host/bluetooth optional, USB printer intent-filter)")
 PY6
+mkdir -p android/app/src/main/res/xml
+cat > android/app/src/main/res/xml/lp_usb_printer.xml <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<!-- POS (patch-android.sh): USB receipt printers (USB printer class 7) -->
+<resources>
+    <usb-device class="7" />
+</resources>
+XML
 # Barcode / QR on the receipt: ZXing core (Apache License 2.0), pure Java, ~550 KB.
 grep -q 'lp-pos-hw' android/app/build.gradle || cat >> android/app/build.gradle <<'GRADLE'
 
