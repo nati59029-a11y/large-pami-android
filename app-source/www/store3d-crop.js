@@ -4,7 +4,8 @@
    ברירת מחדל: מה שה-AI יחזיר בשלב 5 (ph[].quad/xr מהשרת), ואם אין – כל התמונה וחלוקה שווה. העורך זמין תמיד, גם אחרי AI.
    "בנו חזית" מיישר ומחבר בטלפון (S3Warp, תמונה מפוענחת אחת בכל רגע), מסמן "חסר קטע" לפי הפיקסלים שבאמת נכנסו,
    ו"אשרו חזית" שולח אותה (s3CapPut op front, man:true, עד 2048px) – רק כשאין קטע חסר. אין כאן AI ואין העלאת צילומים (שלב 3 עושה).
-   התיקונים הידניים (פינות/טווח) נשמרים בזיכרון של המסך בלבד; שמירה בשרת – בקשה לשלב 5 (ראו הדוח). */
+   שלב 4ב: התיקונים הידניים (פינות/טווח רוחב/טווח גובה) נשמרים בשרת ב-ph[n] (s3CapPut op geo) דרך תור השליחה של הטלפון (U.geoAdd,
+   עובד גם בלי רשת): בכפתור "שמרו תיקונים", ב"בנו חזית" ובסגירה. תמונה שעוד לא נשלחה (בלי n) – נשמרת אחרי שתישלח. "הוציאו מהחזית" – בזיכרון בלבד. */
 (function(){
 'use strict';
 const U=window.S3UI,WP=window.S3Warp,K=U&&U.K3;
@@ -40,7 +41,23 @@ function photos(key){
   /* מדף גבוה: טווח גובה (yr, אלפיות מלמעלה). ברירת מחדל חצי/חצי; כדאי חפיפה כדי שהתפר יתיישר */
   if((p.lv==='t'||p.lv==='b')&&!WP.yrOk(p.yr))p.yr=p.lv==='t'?{a:0,b:500}:{a:500,b:1000}}
  return out}
-const edit=(id,o)=>{const E=C.ed[C.key]=C.ed[C.key]||{};E[id]=Object.assign(E[id]||{},o);C.res=null;C.qid=''};
+/* תיקונים שעוד לא נשמרו בשרת (רק לתמונה שיש לה n – כבר בשרת) */
+const GF=['quad','xr','yr'];
+const dirty=key=>{const E=C.ed[key]||{};return photos(key).filter(p=>Number.isInteger(p.n)&&E[p.id]&&GF.some(f=>E[p.id][f]))};
+const r1k=v=>Math.min(1000,Math.max(0,Math.round(+v||0)));
+async function saveGeo(key){
+ const L=dirty(key);if(!L.length||typeof U.geoAdd!=='function')return 0;
+ const E=C.ed[key],d=K.docs[key];let n=0;
+ for(const p of L){const e=E[p.id],rec={mapId:K.mapId,key,n:p.n};
+  if(e.quad&&WP.quadOk(e.quad))rec.quad=e.quad.map(r1k);
+  for(const f of ['xr','yr'])if(e[f]){const a=r1k(e[f].a),b=r1k(e[f].b);if(a<b)rec[f]={a,b}}
+  if(rec.quad||rec.xr||rec.yr){try{await U.geoAdd(rec)}catch(x){continue}n++;
+   /* מעדכנים גם את העותק בטלפון, כדי שהעורך ייפתח שוב עם אותם ערכים */
+   if(d&&Array.isArray(d.ph))d.ph=d.ph.map(q=>q&&q.n===p.n?Object.assign({},q,rec.quad?{quad:rec.quad}:{},rec.xr?{xr:rec.xr}:{},rec.yr?{yr:rec.yr}:{}):q)}
+  for(const f of GF)delete e[f]}
+ return n}
+const edit=(id,o)=>{const E=C.ed[C.key]=C.ed[C.key]||{};E[id]=Object.assign(E[id]||{},o);C.res=null;C.qid='';
+ const b=document.querySelector('#dlg [data-a=s3wpGeo]');if(b)b.disabled=!dirty(C.key).length};
 /* יחס רוחב/גובה אמיתי של הפריט מהמפה (ס"מ) */
 function aspectOf(it){const m=K.map||{},g=it.geo||[],len=Math.hypot((g[2]||0)-(g[0]||0),(g[3]||0)-(g[1]||0));
  const room=(m.rooms||[]).find(r=>r&&r.id===it.room)||{};
@@ -82,7 +99,7 @@ function editor(L,it){
  if(p.yr)h+=`<div class="s3wprg" dir="ltr"><label><span dir="rtl">גובה מ-<b data-wp="c">${pct(p.yr.a)}</b></span><input type="range" min="0" max="950" step="5" value="${p.yr.a}" data-i="s3wpC" aria-label="התמונה מתחילה בגובה (מלמעלה)"></label>
  <label><span dir="rtl">עד <b data-wp="d">${pct(p.yr.b)}</b></span><input type="range" min="50" max="1000" step="5" value="${p.yr.b}" data-i="s3wpD" aria-label="התמונה נגמרת בגובה (מלמעלה)"></label></div>
  <p class="note s3note">איזה חלק מהגובה התמונה מכסה – מלמעלה (0%) למטה (100%). כדאי שהעליונה והתחתונה יחפפו במדף אחד, כדי שהמערכת תיישר את התפר.</p>`;
- h+=`<div class="row s3row"><button class="btn g" data-a="s3wpReset">כל התמונה</button><button class="btn g" data-a="s3wpOff">${p.off?'החזירו לחזית':'הוציאו מהחזית'}</button></div>`;
+ h+=`<div class="row s3row"><button class="btn" data-a="s3wpGeo" ${dirty(C.key).length?'':'disabled'}>שמרו תיקונים</button><button class="btn g" data-a="s3wpReset">כל התמונה</button><button class="btn g" data-a="s3wpOff">${p.off?'החזירו לחזית':'הוציאו מהחזית'}</button></div>`;
  return h}
 function paint(){
  const it=itemOf(C.key);if(!it){closeDlg();return}
@@ -127,9 +144,12 @@ const rng=(which,el)=>{const p=photos(C.key)[C.sel];if(!p)return;const vert=whic
  const it=itemOf(C.key),cv=document.querySelectorAll('#dlg .s3wpcv');if(it&&cv.length){const tmp=document.createElement('div');tmp.innerHTML=covBar(photos(C.key),it.lv.length>1);cv.forEach((n,i)=>{if(tmp.children[i])n.replaceWith(tmp.children[i].cloneNode(true))})}};
 INP.s3wpA=el=>rng('a',el);INP.s3wpB=el=>rng('b',el);INP.s3wpC=el=>rng('c',el);INP.s3wpD=el=>rng('d',el);
 ACT.s3wpBack=()=>{if(C.res&&C.res.url)try{URL.revokeObjectURL(C.res.url)}catch(e){}C.res=null;C.msg='';paint()};
-ACT.s3wpClose=()=>{if(C.res&&C.res.url)try{URL.revokeObjectURL(C.res.url)}catch(e){}C.res=null;C.tok++;closeDlg()};
+ACT.s3wpClose=()=>{if(C.res&&C.res.url)try{URL.revokeObjectURL(C.res.url)}catch(e){}C.res=null;C.tok++;if(C.key)saveGeo(C.key).catch(()=>{});closeDlg()};
+ACT.s3wpGeo=async()=>{if(C.busy)return;C.busy=1;let n=0;try{n=await saveGeo(C.key)}catch(e){}C.busy=0;
+ C.msg=n?(navigator.onLine===false?'התיקונים נשמרו בטלפון ויישלחו כשתהיה רשת.':'התיקונים נשמרו.'):'לא הצלחנו לשמור את התיקונים. נסו שוב.';paint()};
 const yieldUI=()=>new Promise(r=>setTimeout(r,0));
 ACT.s3wpBuild=async()=>{if(C.busy)return;const it=itemOf(C.key);if(!it)return;
+ try{await saveGeo(C.key)}catch(e){}/* שלב 4ב: התיקונים נשמרים גם אם החזית לא תיבנה/תאושר */
  const L=photos(C.key).filter(p=>!p.off);if(!L.length)return;
  C.busy=1;C.msg='מחברים את התמונות…';paint();const t=C.tok,t0=Date.now();
  try{

@@ -130,6 +130,8 @@ function curCard(){
  const d=K.docs[it.key]||{},s=stOf(it),ph=(Array.isArray(d.ph)?d.ph:[]).filter(p=>p&&!p.off).length+(K.q[it.key]|0);
  const ST={ok:'הושלם',part:'צולם – עוד לא אושר',todo:'עוד לא צולם',skip:'דולג'};
  let h=`<div class="s3info"><b>${esc2(PL.label(it,K.map))}</b> <small>(${it.ord} מתוך ${K.plan.n})</small><br>${esc2(PL.guide(it))}<br><small>${ST[s]}${ph?` · ${ph} תמונות`:''}${s==='skip'&&d.why?' · '+esc2(d.why):''}${d.st==='ok'&&s==='part'?' · המקום השתנה במפה – צלמו שוב':''}</small></div>`;
+ /* שלב 4ב: הנחיית צילום למקטע של יותר מתמונה אחת (מדף גבוה, או שכבר יש תמונה) – מקטינה פרלקסה בתפרים */
+ if(it.k==='b'&&(it.lv.length>1||ph>=1))h+=`<p class="note s3note" data-tip="wp">צלמו מאותו מרחק ובזווית ישרה; כוונו שהחיבור בין תמונות ייפול על שפת מדף או על עמוד.</p>`;
  const cam=(lv,t)=>`<label class="btn">${t}<input type="file" accept="image/*" capture="environment" data-c="s3cpPick" data-lv="${lv}" hidden></label>`;
  h+=`<div class="row s3row">${it.lv.length>1?cam('t','צלמו עליון')+cam('b','צלמו תחתון'):cam('a','צלמו')}</div>`;
  h+=`<div class="row s3row">${K.last[it.key]&&s!=='ok'?`<button class="btn" data-a="s3cpFront">אשרו כחזית</button>`:''}${typeof U.wpBtn==='function'?U.wpBtn(it,s):''/* שלב 4: נקודת החיבור היחידה לעורך "חיבור וחיתוך" (store3d-crop.js) */}${s==='skip'?`<button class="btn g" data-a="s3cpUnskip">בטלו את הדילוג</button>`:`<button class="btn g" data-a="s3cpSkip">דלגו (עם סיבה)</button>`}<button class="btn g" data-a="s3cpNext">הבא</button></div>`;

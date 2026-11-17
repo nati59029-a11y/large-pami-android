@@ -117,6 +117,64 @@ describe('s3cap – הליבה מול האמולטור (Firestore + Storage)', (
     assert.equal(await err(put({ key: 'b_f2-a-1', op: 'off', n: 50 })), 'no-photo');
   });
 
+  it('geo (שלב 4ב): תיקון ידני נשמר ב-ph[n] בלבד, בלי קובץ ובלי שינוי st; קלט לא תקין / n לא קיים נדחים; qid חוזר – אותה תשובה', async () => {
+    await put({ key: 'b_f2-a-1', op: 'ph', lv: 't', img: IMG, th: TH });
+    await put({ key: 'b_f2-a-1', op: 'ph', lv: 'b', img: IMG, th: TH });
+    const [f0] = await bucket.getFiles({ prefix: `b/${A}/store3d/` });
+    const before = await get(`b/${A}/s3setup/s-main/cap/b_f2-a-1`);
+    const s0 = await get(`b/${A}/s3setup/s-main`);
+    const q = qid(), quad = [10, 20, 990, 15, 980, 970, 5, 990];
+    const r = await C.capPut(db, drw, { qid: q, mapId: 's-main', key: 'b_f2-a-1', op: 'geo', n: 2, quad, xr: { a: 0, b: 600 }, yr: { a: 450, b: 1000 } }, 1800000003000, bucket);
+    assert.deepEqual([r.ok, r.op, r.n, r.st], [true, 'geo', 2, 'part']);
+    let d = await get(`b/${A}/s3setup/s-main/cap/b_f2-a-1`);
+    assert.deepEqual(d.ph[1].quad, quad); assert.deepEqual(d.ph[1].xr, { a: 0, b: 600 }); assert.deepEqual(d.ph[1].yr, { a: 450, b: 1000 });
+    assert.deepEqual([d.ph[1].p, d.ph[1].th, d.ph[1].lv, d.ph[1].w, d.ph[1].at], [before.ph[1].p, before.ph[1].th, 'b', 1200, before.ph[1].at], 'שאר שדות התמונה לא משתנים');
+    assert.deepEqual(d.ph[0], before.ph[0], 'תמונה אחרת לא משתנה');
+    assert.equal(d.st, before.st);
+    const s1 = await get(`b/${A}/s3setup/s-main`);
+    assert.deepEqual([s1.capOk, s1.capPart, s1.capSkip], [s0.capOk, s0.capPart, s0.capSkip], 'מונים לא משתנים');
+    // רק xr – quad ו-yr נשארים
+    await put({ key: 'b_f2-a-1', op: 'geo', n: 2, xr: { a: 100, b: 700 } });
+    d = await get(`b/${A}/s3setup/s-main/cap/b_f2-a-1`);
+    assert.deepEqual([d.ph[1].xr, d.ph[1].quad, d.ph[1].yr], [{ a: 100, b: 700 }, quad, { a: 450, b: 1000 }]);
+    // qid חוזר – אותה תשובה, בלי כתיבה (הערך הקודם לא חוזר)
+    const again = await C.capPut(db, drw, { qid: q, mapId: 's-main', key: 'b_f2-a-1', op: 'geo', n: 2, quad, xr: { a: 0, b: 600 } }, 1800000009000, bucket);
+    assert.equal(again.dup, true); assert.equal(again.n, 2);
+    assert.deepEqual((await get(`b/${A}/s3setup/s-main/cap/b_f2-a-1`)).ph[1].xr, { a: 100, b: 700 });
+    // קלט לא תקין
+    const g = (o) => err(put(Object.assign({ key: 'b_f2-a-1', op: 'geo', n: 1 }, o)));
+    assert.equal(await g({ quad: [0, 0, 1000, 0, 1000, 1000, 0] }), 'bad-quad', '7 מספרים');
+    assert.equal(await g({ quad: [0, 0, 1001, 0, 1000, 1000, 0, 1000] }), 'bad-quad', 'מעל 1000');
+    assert.equal(await g({ quad: [0, 0, 999.5, 0, 1000, 1000, 0, 1000] }), 'bad-quad', 'לא שלם');
+    assert.equal(await g({ quad: [-1, 0, 1000, 0, 1000, 1000, 0, 1000] }), 'bad-quad', 'שלילי');
+    assert.equal(await g({ quad: '0,0,1000,0,1000,1000,0,1000' }), 'bad-quad');
+    assert.equal(await g({ xr: { a: 500, b: 500 } }), 'bad-xr', 'a == b');
+    assert.equal(await g({ xr: { a: 600, b: 100 } }), 'bad-xr', 'a > b');
+    assert.equal(await g({ xr: { a: 0, b: 1200 } }), 'bad-xr');
+    assert.equal(await g({ xr: [0, 500] }), 'bad-xr', 'מערך במקום {a,b}');
+    assert.equal(await g({ xr: { a: 0, b: 500, c: 1 } }), 'bad-xr', 'שדה זר');
+    assert.equal(await g({ yr: { a: 900, b: 100 } }), 'bad-yr');
+    assert.equal(await g({ yr: { a: -5, b: 100 } }), 'bad-yr');
+    assert.equal(await g({}), 'bad-input', 'בלי quad/xr/yr');
+    assert.equal(await g({ n: 0, xr: { a: 0, b: 500 } }), 'bad-n');
+    assert.equal(await g({ n: 50, xr: { a: 0, b: 500 } }), 'no-photo', 'n לא קיים');
+    assert.equal(await err(put({ key: 'b_f1-a-1', op: 'geo', n: 1, xr: { a: 0, b: 500 } })), 'no-photo', 'פריט בלי תמונות');
+    assert.equal(await get(`b/${A}/s3setup/s-main/cap/b_f1-a-1`), null, 'לא נוצר מסמך');
+    assert.equal(await err(put({ key: 'b_f9-a-1', op: 'geo', n: 1, xr: { a: 0, b: 500 } })), 'not-in-plan');
+    assert.equal(await err(C.capPut(db, { uid: DR, bizId: A, brs: ['other'] }, { qid: qid(), mapId: 's-main', key: 'b_f2-a-1', op: 'geo', n: 1, xr: { a: 0, b: 500 } }, 1, bucket)), 'other-branch');
+    const [f1] = await bucket.getFiles({ prefix: `b/${A}/store3d/` });
+    assert.equal(f1.length, f0.length, 'בלי קבצים חדשים');
+  });
+
+  it('geo על פריט ok: נשאר ok (okBy לא נמחק)', async () => {
+    await put({ key: 'b_f1-a-1', op: 'ph', img: IMG, th: TH });
+    await put({ key: 'b_f1-a-1', op: 'front', img: FR, th: TH, man: true });
+    const r = await put({ key: 'b_f1-a-1', op: 'geo', n: 1, quad: [0, 0, 1000, 0, 1000, 1000, 0, 1000] });
+    assert.equal(r.st, 'ok');
+    const d = await get(`b/${A}/s3setup/s-main/cap/b_f1-a-1`);
+    assert.deepEqual([d.st, d.okBy, d.ph[0].quad.length], ['ok', DR, 8]);
+  });
+
   it('חזית ידנית (man) = ok עם okBy; מקטע ← s3sum.b[bay].fr/frT בלי לגעת ב-th/s; דלת ← s3look; חזית שנייה – frV 2 ו-frH', async () => {
     await put({ key: 'b_f1-a-1', op: 'ph', img: IMG, th: TH });
     const r = await put({ key: 'b_f1-a-1', op: 'front', img: FR, th: TH, man: true }, 1800000005000);

@@ -3,6 +3,7 @@
 // בודק (360px): כפתור "חיבור וחיתוך" אחרי צילום; 3 תמונות חופפות ⇒ חזית אחת בלי חסר; פער ⇒ "חסר קטע" ו"אשרו" נעול; גרירת פינה;
 // שמירה ⇒ s3CapPut op front, man:true, JPEG עד 2048px ועד 1.5MB, מוקטנת עד 512; תמונה מהשרת נטענת דרך Storage; 6×1600px בלי קריסה (זמן וזיכרון);
 // בלי גלישה, כפתורים ≥44px, בלי שגיאות JS. (לא מאומת על תמונות אמיתיות.)
+// שלב 4ב: הנחיית צילום במקטע של יותר מתמונה אחת; "שמרו תיקונים" ⇒ s3CapPut op geo (quad/xr/yr) דרך התור, גם בלי רשת; טעינה מחדש מחזירה את הערכים.
 // שימוש: node ui-st3d-warp.js <www-dir> [out.json] [shot-prefix]
 const fs = require('fs'); const path = require('path'); const { execSync } = require('child_process'); const H = require('./harness');
 let fail = 0; const res = []; const check = (n, ok, info) => { if (!ok) fail++; res.push({ n, ok: !!ok, info }); console.log((ok ? 'עבר  ' : 'נכשל ') + n + (info !== undefined ? ' | ' + JSON.stringify(info).slice(0, 500) : '')); };
@@ -30,9 +31,11 @@ async function server(ctx, jpg) {
   await ctx.route((u) => /alt=media/.test(u.search), (route) => { S.st++; route.fulfill({ status: 200, contentType: 'image/jpeg', body: jpg() }); });
   const rec = (route, fn) => { let b = {}; try { b = JSON.parse(route.request().postData()).data || {}; } catch (e) { /* */ } S.calls.push({ fn, b }); return b; };
   await ctx.route('**/s3CapPut', (route) => {
+    if (S.down) return route.abort('internetdisconnected');/* בלי רשת (setOffline לא עוצר route מדומה) */
     const b = rec(route, 's3CapPut');
     const d = S.docs[b.key] || { k: b.key.split('_')[0], ord: 1, st: 'todo', ph: [], upd: 1, by: 'm' };
     if (b.op === 'ph') { const n = (d.ph || []).length + 1; d.ph = (d.ph || []).concat([{ p: 'b/biz-s/store3d/main/cap/s-main/' + b.key + '_' + n + '.jpg', th: 'b/biz-s/store3d/main/cap/s-main/' + b.key + '_' + n + '_t.jpg', n, lv: b.lv, w: 1600, h: 1200, at: 1, by: 'm' }]); if (d.st !== 'ok') d.st = 'part'; }
+    if (b.op === 'geo') { const i = (d.ph || []).findIndex((x) => x.n === b.n); if (i < 0) return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { status: 'NOT_FOUND', message: 'התמונה לא נמצאה', details: { reason: 'no-photo' } } }) }); for (const f of ['quad', 'xr', 'yr']) if (b[f]) d.ph[i][f] = b[f]; }
     if (b.op === 'front') Object.assign(d, { fr: 'f', frTh: 'f_t', frV: 1, st: b.man ? 'ok' : 'part', okBy: 'm', man: !!b.man });
     S.docs[b.key] = d;
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: { ok: true, mapId: b.mapId, key: b.key, op: b.op, st: d.st, ph: (d.ph || []).length } }) });
@@ -70,7 +73,7 @@ const jpgDims = (page, b64) => page.evaluate(async (s) => { const b = await (awa
   await page.click('[data-a=s3cpOpen]'); await sleep(1500);
   check('0 הקבצים נטענו (S3Warp, wpBtn) ושמות הפעולות החדשות ייחודיים (s3wp*)', await page.evaluate(() => !!window.S3Warp && typeof S3UI.wpBtn === 'function' && typeof ACT.s3wpOpen === 'function' && typeof ACT.s3cpFront === 'function'));
   await page.evaluate(() => { S3UI.K3.cur = 'b_f1-a-1'; S3UI.K3.open = 'r1'; rerender(); }); await sleep(300);
-  check('1 לפני צילום – אין כפתור "חיבור וחיתוך"', !(await page.$('[data-a=s3wpOpen]')));
+  check('1 לפני צילום – אין כפתור "חיבור וחיתוך" ואין הנחיית צילום (מקטע רגיל בלי תמונות)', !(await page.$('[data-a=s3wpOpen]')) && !(await page.$('[data-tip=wp]')));
 
   // ---- 2. שלוש תמונות חופפות: [0–400], [300–700], [600–1000] ----
   const XR = [[0, 400], [300, 700], [600, 1000]];
@@ -78,6 +81,8 @@ const jpgDims = (page, b64) => page.evaluate(async (s) => { const b = await (awa
   const nPh = S.calls.filter((c) => c.fn === 's3CapPut' && c.b.op === 'ph').length;
   const b2 = await page.evaluate(() => (document.querySelector('[data-a=s3wpOpen]') || {}).innerText);
   check('2 אחרי 3 צילומים: 3 נשלחו (op ph) ויש "חיבור וחיתוך (3)"', nPh === 3 && /חיבור וחיתוך \(3\)/.test(b2 || ''), { nPh, b2 });
+  const tip = await page.evaluate(() => (document.querySelector('[data-tip=wp]') || {}).innerText || '');
+  check('2-הנחיה: אחרי תמונה ראשונה – "צלמו מאותו מרחק ובזווית ישרה…"', /צלמו מאותו מרחק ובזווית ישרה; כוונו שהחיבור בין תמונות ייפול על שפת מדף או על עמוד/.test(tip), tip);
   await page.click('[data-a=s3wpOpen]'); await sleep(600);
   const d1 = await page.evaluate(() => ({ open: document.getElementById('dlg').open, th: document.querySelectorAll('#dlg .s3wpst button').length, imgs: [...document.querySelectorAll('#dlg .s3wpst img')].filter((i) => /^blob:/.test(i.src)).length, c: document.querySelectorAll('#dlg svg[data-wp=q] circle').length, rg: document.querySelectorAll('#dlg input[type=range]').length, cv: document.querySelectorAll('#dlg .s3wpcv i').length }));
   check('2א העורך נפתח: 3 תמונות (מהזיכרון, בלי הורדה), 4 פינות, 2 מחוונים לטווח, פס כיסוי', d1.open && d1.th === 3 && d1.imgs === 3 && d1.c === 4 && d1.rg === 2 && d1.cv === 3 && S.st === 0, Object.assign(d1, { st: S.st }));
@@ -170,6 +175,36 @@ const jpgDims = (page, b64) => page.evaluate(async (s) => { const b = await (awa
   await page.click('[data-a=s3wpBuild]'); await page.waitForFunction(() => /החזית מלאה|חסר קטע|לא הצלחנו/.test(document.getElementById('dlg').innerText), null, { timeout: 30000 });
   t = await dlgTx(page);
   check('9א עליון בלבד ⇒ "חסר קטע: תחתון: 0%–100%", אשרו נעול', /חסר קטע/.test(t) && /תחתון: 0%–100%/.test(t) && await page.evaluate(() => document.querySelector('[data-a=s3wpSave]').disabled), t.slice(0, 200));
+
+  // ---- 10. שלב 4ב: שמירת התיקונים בשרת (op geo), בלי רשת, וטעינה מחדש ----
+  await page.click('[data-a=s3wpBack]').catch(() => {}); await sleep(200);
+  const geo0 = S.calls.filter((c) => c.fn === 's3CapPut' && c.b.op === 'geo').length;
+  await ctx.setOffline(true); S.down = true; await sleep(200);
+  await page.evaluate(() => { const set = (i, v) => { const e = document.querySelector('#dlg [data-i=' + i + ']'); e.value = String(v); e.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('s3wpB', 800); set('s3wpA', 100); set('s3wpD', 650); set('s3wpC', 0); });
+  await sleep(150);
+  const hasBtn = await page.evaluate(() => { const b = document.querySelector('#dlg [data-a=s3wpGeo]'); return !!b && !b.disabled; });
+  await page.click('[data-a=s3wpGeo]'); await sleep(600);
+  const tOff = await dlgTx(page);
+  check('10 תיקון ⇒ כפתור "שמרו תיקונים"; בלי רשת – לא נשלח, הודעה "יישלחו כשתהיה רשת"', hasBtn && S.calls.filter((c) => c.fn === 's3CapPut' && c.b.op === 'geo').length === geo0 && /יישלחו כשתהיה רשת/.test(tOff), { hasBtn, t: tOff.slice(-120), sent: S.calls.filter((c) => c.fn === 's3CapPut' && c.b.op === 'geo').slice(geo0).map((c) => c.b) });
+  await ctx.setOffline(false); S.down = false; await page.evaluate(() => window.dispatchEvent(new Event('online'))); await sleep(1500);
+  const g10 = S.calls.filter((c) => c.fn === 's3CapPut' && c.b.op === 'geo').slice(geo0);
+  check('10א חזרה לרשת ⇒ s3CapPut op geo אחד: key, n=1, xr 100–800, yr 0–650, בלי quad (לא נערך), qid', g10.length === 1 && g10[0].b.key === 'b_f2-a-1' && g10[0].b.n === 1 && JSON.stringify(g10[0].b.xr) === '{"a":100,"b":800}' && JSON.stringify(g10[0].b.yr) === '{"a":0,"b":650}' && g10[0].b.quad === undefined && /^[A-Za-z0-9-]{16,40}$/.test(g10[0].b.qid), g10.map((c) => c.b));
+  check('10ב אחרי השמירה "שמרו תיקונים" נעול (אין תיקון חדש)', await page.evaluate(() => document.querySelector('#dlg [data-a=s3wpGeo]').disabled));
+  // שינוי פינה ⇒ נשמר ב"סגרו"
+  await page.evaluate(() => ACT.s3wpSel({ dataset: { n: '0' } })); await sleep(150);
+  const bx = await page.evaluate(() => { const r = document.querySelector('#dlg svg[data-wp=q]').getBoundingClientRect(); return { x: r.left, y: r.top }; });
+  await page.mouse.move(bx.x + 4, bx.y + 4); await page.mouse.down(); await page.mouse.move(bx.x + 30, bx.y + 24, { steps: 4 }); await page.mouse.up(); await sleep(150);
+  await page.evaluate(() => ACT.s3wpClose()); await sleep(1200);
+  const g10c = S.calls.filter((c) => c.fn === 's3CapPut' && c.b.op === 'geo').slice(geo0 + 1);
+  check('10ג גרירת פינה ואז "סגרו" ⇒ op geo עם quad שהשתנה', g10c.length === 1 && g10c[0].b.quad[0] > 0 && g10c[0].b.quad[1] > 0, g10c.map((c) => c.b));
+  // טעינה מחדש מהשרת (המסמך המדומה עודכן לפי op geo) ⇒ העורך נפתח עם אותם ערכים
+  await page.evaluate(() => ACT.s3cpReload()); await sleep(1500);
+  await page.evaluate(() => { S3UI.K3.cur = 'b_f2-a-1'; rerender(); }); await sleep(200);
+  await page.click('[data-a=s3wpOpen]'); await sleep(600);
+  const d10 = await page.evaluate(() => ({ rg: [...document.querySelectorAll('#dlg input[type=range]')].map((i) => i.dataset.i + ':' + i.value).join(), cx: +document.querySelector('#dlg svg[data-wp=q] circle').getAttribute('cx'), btn: !document.querySelector('#dlg [data-a=s3wpGeo]').disabled }));
+  check('10ד אחרי טעינה מחדש: הטווחים (100–800, 0–650) והפינה נטענו מ-ph[] של השרת, "שמרו תיקונים" נעול', d10.rg === 's3wpA:100,s3wpB:800,s3wpC:0,s3wpD:650' && d10.cx > 0 && !d10.btn && JSON.stringify(S.docs['b_f2-a-1'].ph[0].yr) === '{"a":0,"b":650}', d10);
+  await page.evaluate(() => ACT.s3wpClose());
   check('9ב אין שגיאות JavaScript', !(page.__errors || []).length, page.__errors);
   res.push({ n: 'mem', ok: true, info: MEM });
 

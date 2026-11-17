@@ -8,6 +8,8 @@
 //                   man: true = חזית שאדם בחר/חתך ואישר ← הפריט 'ok' (okBy). בלי man – 'part' עד בדיקת ה-AI (שלב 5).
 //                   מקטע ← s3sum.b[bay].fr/frT (מיזוג, בלי לגעת ב-th/s של הסבבים); שאר הפריטים ← s3look.it[key].
 //     op 'skip'   – דילוג עם סיבה (why, 1–120 תווים). op 'unskip' – ביטול הדילוג. op 'off' – n: תמונה שלא בשימוש (הפוך), לא נמחקת.
+//     op 'geo'    – (שלב 4ב) תיקון ידני מהעורך "חיבור וחיתוך" לתמונה n: quad? (8 מספרים שלמים 0–1000), xr?/yr? ({a,b} שלמים 0–1000, a<b).
+//                   לפחות אחד מהשלושה. נכתב ל-ph[n] בלבד (שדה שלא נשלח – לא משתנה). בלי תמונה; st לא משתנה מהפעולה עצמה.
 //     תמיד: הפריט חייב להיות בתוכנית של המפה השמורה; geo/geoV מהמפה הנוכחית; פריט ok שהמקום שלו זז ← 'part' (חוזה 3.3).
 //     qid חוזר = אותה תשובה (dup: true), בלי קבצים ובלי כתיבה נוספת. מונים ב-s3setup (capOk/capPart/capSkip) באותה טרנזקציה.
 //     כשגרסת המפה השתנתה מאז הכתיבה הקודמת (s3setup.mapV) – פריטים שכבר לא בתוכנית מסומנים 'orph' (לא נמחקים) והמונים מחושבים מחדש.
@@ -34,7 +36,7 @@ const LIM = {
   fr: { min: 1000, max: 1500000, longMin: 200, longMax: 2048, shortMin: 50, shortMax: 2048 },
   th: { min: 100, max: 150000, longMin: 32, longMax: 512, shortMin: 16, shortMax: 512 },
 };
-const OPS = ['ph', 'front', 'skip', 'unskip', 'off'];
+const OPS = ['ph', 'front', 'skip', 'unskip', 'off', 'geo'];
 const bad = (reason, msg, code, extra) => new HttpsError(code || 'invalid-argument', msg, Object.assign({ reason }, extra || {}));
 const isExists = (e) => e && (e.code === 6 || /ALREADY_EXISTS/.test(String(e.message)));
 const is412 = (e) => e && (e.code === 412 || e.code === '412');
@@ -46,6 +48,23 @@ const frDir = (biz, br, mapId) => `b/${biz}/store3d/${br}/front/${mapId}/`;
 const fileOf = (dir, key, n, t) => dir + key + '_' + n + (t ? '_t' : '') + '.jpg';
 const cleanWhy = (v) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim() : '');
 
+// תיקון ידני (op 'geo'): quad – בדיוק 8 מספרים שלמים 0–1000; xr/yr – { a, b } שלמים 0–1000, a < b (חוזה 3.3א + תוספת 17.11)
+const int1k = (v) => Number.isInteger(v) && v >= 0 && v <= 1000;
+function cleanGeo(input) {
+  const o = {};
+  if (input.quad !== undefined) {
+    if (!Array.isArray(input.quad) || input.quad.length !== 8 || !input.quad.every(int1k)) throw bad('bad-quad', 'הפינות לא תקינות');
+    o.quad = input.quad.slice();
+  }
+  for (const f of ['xr', 'yr']) {
+    if (input[f] === undefined) continue;
+    const r = input[f];
+    if (!isObj(r) || Object.keys(r).some((k) => k !== 'a' && k !== 'b') || !int1k(r.a) || !int1k(r.b) || r.a >= r.b) throw bad('bad-' + f, 'הטווח לא תקין');
+    o[f] = { a: r.a, b: r.b };
+  }
+  if (!Object.keys(o).length) throw bad('bad-input', 'אין מה לשמור');
+  return o;
+}
 function dec(b64, lim, label) {
   try { return A.decodeJpeg(b64, lim, label); } catch (e) {
     const code = e && e.code === 'too-big' ? 'too-big' : e && e.code === 'bad-type' ? 'bad-type' : e && e.code === 'bad-size' ? 'bad-size' : 'bad-img';
@@ -82,9 +101,10 @@ function cleanPut(input) {
   } else if (op === 'skip') {
     o.why = cleanWhy(input.why);
     if (o.why.length < 1 || o.why.length > 120) throw bad('bad-why', 'כתבו למה מדלגים (עד 120 תווים)');
-  } else if (op === 'off') {
+  } else if (op === 'off' || op === 'geo') {
     if (!Number.isInteger(input.n) || input.n < 1 || input.n > N_MAX) throw bad('bad-n', 'התמונה לא תקינה');
     o.n = input.n;
+    if (op === 'geo') o.g = cleanGeo(input);
   }
   return o;
 }
@@ -133,6 +153,10 @@ function nextDoc(old, item, mapV, x, f, uid, now) {
     if (i < 0) throw bad('no-photo', 'התמונה לא נמצאה', 'not-found');
     d.ph = phOf(d).map((p, j) => (j === i ? Object.assign({}, p, { off: p.off !== true }) : p));
     if (!d.ph[i].off) delete d.ph[i].off;
+  } else if (x.op === 'geo') {
+    const i = phOf(d).findIndex((p) => p.n === x.n);
+    if (i < 0) throw bad('no-photo', 'התמונה לא נמצאה', 'not-found');
+    d.ph = phOf(d).map((p, j) => (j === i ? Object.assign({}, p, x.g) : p));
   }
   return d;
 }
@@ -251,6 +275,7 @@ async function capPut(db, who, input, now, bucket) {
       const res = { ok: true, mapId, key, op: x.op, st: s1, ph: phOf(doc).length };
       if (x.op === 'ph') res.n = x.n;
       if (x.op === 'front') Object.assign(res, { v: x.v, fr: f.p, frTh: f.t });
+      if (x.op === 'geo') res.n = x.n;
       if (x.op === 'off') res.off = phOf(doc).some((p) => p.n === x.n && p.off === true);
       tx.set(qref, { k: 'cap', uid: who.uid, res, at: now, exp: now + QID_DAYS * D1 });
       return { res };
@@ -330,4 +355,4 @@ exports.s3SetupDone = onCall(T.scoped(async (request) => {
 }));
 
 // לבדיקות בלבד (לא נספר כפונקציה)
-Object.defineProperty(exports, '_cap', { enumerable: false, value: { capPut, setupDone, cleanPut, nextDoc, counters, phRoom, syncPlan, LIM } });
+Object.defineProperty(exports, '_cap', { enumerable: false, value: { capPut, setupDone, cleanPut, cleanGeo, nextDoc, counters, phRoom, syncPlan, LIM } });
