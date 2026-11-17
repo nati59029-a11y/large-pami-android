@@ -423,4 +423,26 @@ describe('store3d-draftin – שאלון וסקיצה לטיוטת מפה', () =
     const v = A.evalDraft(FX('mapdraft-ok'), 'STOP', Object.assign({}, ectx, { info: { rows: 3 } }));
     assert.deepEqual(v.d.map.rooms[0].p, [0, 0, 700, 0, 700, 1400, 0, 1400], 'בלי מידות – בלי מתיחה');
   });
+  it('כמה כניסות וקופות: doors/tills נבדקים, נכנסים לטיוטה כדלתות עם כיוון פתיחה וקופות עם גודל, ועוברים את בדיקת המפה', () => {
+    const DR = [{ x: 700, y: 1500, w: 180, a: 0, sw: -1, hg: 1 }, { x: 0, y: 500, w: 90, a: 90, sw: 1, hg: -1 }];
+    const TL = [{ x: 300, y: 1300, w: 150, d: 70, a: 0 }, { x: 900, y: 1300, w: 120, d: 60, a: 90 }];
+    const v = DI.draftInput({ info: INFO, sketch: Object.assign({}, SK, { doors: DR, tills: TL }) });
+    assert.deepEqual(v.sketch.doors, DR); assert.deepEqual(v.sketch.tills, TL);
+    const bad = (sk) => code(() => DI.draftInput({ info: INFO, sketch: Object.assign({}, SK, sk) }));
+    for (const sk of [{ doors: [Object.assign({}, DR[0], { sw: 0 })] }, { doors: [Object.assign({}, DR[0], { w: 50 })] }, { doors: [Object.assign({}, DR[0], { zz: 1 })] },
+      { doors: [{ x: 1, y: 1, w: 90, a: 0, sw: 1 }] }, { doors: [Object.assign({}, DR[0], { x: 1401 })] }, { doors: Array(41).fill(DR[0]) },
+      { tills: [Object.assign({}, TL[0], { d: 20 })] }, { tills: [Object.assign({}, TL[0], { a: 360 })] }, { tills: 'x' }, { tills: Array(41).fill(TL[0]) }])
+      assert.equal(bad(sk), 'bad-info', JSON.stringify(sk).slice(0, 80));
+    assert.ok(DI.draftInput({ info: { w: 1400, l: 1500 }, sketch: { doors: DR } }).sketch.doors, 'רק כניסות – השרטוט לא ריק');
+    const d = A.cleanDraft(FX('mapdraft-ok'), ectx);
+    const s = DI.shapeDraft(d.map, v.info, v.sketch);
+    const ents = s.map.doors.filter((x) => x.k === 'ent');
+    assert.deepEqual(ents.map((x) => [x.x, x.y, x.w, x.a, x.sw, x.hg]), DR.map((x) => [x.x, x.y, x.w, x.a, x.sw, x.hg]));
+    assert.equal(s.map.ent, 'd1');
+    const cs = s.map.syms.filter((y) => y.k === 'cash');
+    assert.deepEqual(cs.map((y) => [y.x, y.y, y.w, y.d, y.a]), TL.map((t) => [t.x, t.y, t.w, t.d, t.a]));
+    A.draftCheck(s.map, cc);
+    const m = M.cleanMap(s.map, { bizId: 'biz-x', mapId: 's-main' }).map;
+    assert.equal(m.doors[0].sw, -1); assert.equal(m.doors[0].hg, 1); assert.equal(m.syms.find((y) => y.k === 'cash').w, 150);
+  });
 });

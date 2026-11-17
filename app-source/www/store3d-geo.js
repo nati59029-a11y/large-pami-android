@@ -179,8 +179,8 @@ function buildModel(map){
     f.bayList=fxBays(f,numDir);fx.push(f);for(const b of f.bayList)bays.push(b)}
   const pick=(arr,keys,lbl)=>live(arr).filter(o=>{const g=ok(o,keys);if(!g)skip.push(lbl);return g});
   const cols=pick(map&&map.cols,['x','y','w'],'עמוד').map(c=>({id:c.id,x:c.x,y:c.y,w:clamp(c.w,10,300),d:clamp(c.d||c.w,10,300),rnd:!!c.rnd}));
-  const doors=pick(map&&map.doors,['x','y','w'],'דלת').map(d=>({id:d.id,x:d.x,y:d.y,w:clamp(d.w,60,500),a:d.a|0,k:['ent','in','emg','wh'].includes(d.k)?d.k:'in'}));
-  const syms=pick(map&&map.syms,['x','y'],'סמל').filter(y=>['cash','ent','exit'].includes(y.k)).map(y=>({id:y.id,k:y.k,x:y.x,y:y.y,a:y.a|0}));
+  const doors=pick(map&&map.doors,['x','y','w'],'דלת').map(d=>({id:d.id,x:d.x,y:d.y,w:clamp(d.w,60,500),a:d.a|0,k:['ent','in','emg','wh'].includes(d.k)?d.k:'in',sw:d.sw===1||d.sw===-1?d.sw:0,hg:d.hg===1||d.hg===-1?d.hg:0}));
+  const syms=pick(map&&map.syms,['x','y'],'סמל').filter(y=>['cash','ent','exit'].includes(y.k)).map(y=>({id:y.id,k:y.k,x:y.x,y:y.y,a:y.a|0,w:y.w>0?clamp(y.w,30,1000):0,d:y.d>0?clamp(y.d,30,1000):0}));
   const allP=[].concat(...rooms.map(r=>r.p));
   return{rooms,roomH,walls:roomWallSegs(map),inner:innerWallSegs(map),cols,doors,syms,fx,bays,numDir,
     bounds:allP.length?bounds(allP):[0,0,1000,1000],ent:entrance(map),segs:walkSegments(map),skip};

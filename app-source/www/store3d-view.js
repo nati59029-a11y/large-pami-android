@@ -261,13 +261,16 @@ function makeView(T,el,map0,opts){
     for(const d of model.doors){const ang=doorAngle(d),W=d.w/100,x=d.x/100,z=d.y/100;
       for(const sg of [-1,1]){boxM(fr,x+sg*W/2*Math.cos(ang),1.05,z+sg*W/2*Math.sin(ang),-ang,.08,2.1,.16);frC.push(0x6b4a2f)}
       boxM(fr,x,2.13,z,-ang,W+.16,.08,.16);frC.push(0x6b4a2f);
-      boxM(mats,x,.006,z,-ang,W*.9,.012,.9);matC.push(DC[d.k])}
+      boxM(mats,x,.006,z,-ang,W*.9,.012,.9);matC.push(DC[d.k]);
+      /* כנף הדלת פתוחה לצד שנבחר (sw), עם הציר בקצה hg – רק כשנקבע כיוון פתיחה */
+      if((d.sw===1||d.sw===-1)&&(d.hg===1||d.hg===-1)){const a=(d.a||0)*Math.PI/180,ux=Math.cos(a),uz=Math.sin(a),hx=x+d.hg*W/2*ux,hz=z+d.hg*W/2*uz,ox=-uz*d.sw,oz=ux*d.sw;
+        boxM(fr,hx+ox*W/2,1.03,hz+oz*W/2,-Math.atan2(oz,ox),W*.96,2.04,.04);frC.push(0x9a7b55)}}
     const fm=inst(BOX,M.inst,fr,frC);if(fm)wallsG.add(fm);
     const mm=inst(BOX,M.inst,mats,matC);if(mm)root.add(mm);
     /* סמלים: קופה (דלפק) ותוויות */
     const cs=[],csC=[];
     for(const y of model.syms){const x=y.x/100,z=y.y/100,ry=-(y.a||0)*Math.PI/180;
-      if(y.k==='cash'){boxM(cs,x,.45,z,ry,1.4,.9,.6);csC.push(0x3b3f46);boxM(cs,x,.93,z,ry,.35,.06,.3);csC.push(0x111111);boxM(cs,x+.3,1.1,z,ry,.3,.3,.05);csC.push(0x222831)}
+      if(y.k==='cash'){const cw=y.w>0?y.w/100:1.4,cd=y.d>0?y.d/100:.6;boxM(cs,x,.45,z,ry,cw,.9,cd);csC.push(0x3b3f46);boxM(cs,x,.93,z,ry,.35,.06,.3);csC.push(0x111111);boxM(cs,x+.3,1.1,z,ry,.3,.3,.05);csC.push(0x222831)}
       const lb=y.k==='cash'?label('קופה','#d4af37','#1a1a1a'):y.k==='ent'?label('כניסה','#2e9e4f','#fff'):label('יציאה','#c0392b','#fff');
       lb.position.set(x,y.k==='cash'?1.75:2.4,z);root.add(lb)}
     const cm=inst(BOX,M.inst,cs,csC);if(cm)root.add(cm);
