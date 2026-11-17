@@ -412,7 +412,7 @@ function pset(o,k,v){const ps=pathOf(k);let c=o;for(let i=0;i<ps.length-1;i++){i
 function pdel(o,k){const ps=pathOf(k);let c=o;for(let i=0;i<ps.length-1;i++){if(!isObj(c[ps[i]]))return;c=c[ps[i]]}delete c[ps[ps.length-1]]}
 const TIME_RE=/^([01][0-9]|2[0-3]):[0-5][0-9]$/,DATE_RE=/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/,CTRL=/[\u0000-\u001f]/;
 function jsonOk(v,depth){if(depth>6)return false;if(v===null||typeof v==='boolean'||typeof v==='string')return typeof v!=='string'||(v.length<=500&&!CTRL.test(v));
- if(typeof v==='number')return Number.isFinite(v);if(Array.isArray(v))return v.length<=200&&v.every(x=>jsonOk(x,depth+1));
+ if(typeof v==='number')return Number.isFinite(v);if(Array.isArray(v))return v.length<=200&&v.every(x=>!Array.isArray(x)&&jsonOk(x,depth+1));/* Firestore: אין מערך בתוך מערך */
  if(isObj(v)){const ks=Object.keys(v);return ks.length<=200&&ks.every(k=>k.length<=60&&!CTRL.test(k)&&jsonOk(v[k],depth+1))}return false}
 
 // בדיקת ערך מול שורה (או שדה של obj). מחזיר ערך מנורמל או זורק bad-value. null מותר רק ב-nul.

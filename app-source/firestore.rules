@@ -2482,6 +2482,20 @@ service cloud.firestore {
       match /posreq/{id} {
         allow read, create, update, delete: if false;
       }
+      // POS:M4 – קופה ש4 (17.11.2026, אפיון ה 0.3): המסמכים של ההגדרות. כל כתיבה – רק השרת (pos-cfg.js). קריאה של מסמך שלם בלבד:
+      //   poscfg/saPub ו-poscfg/br_{br} – כמו poscfg/main (מי שמוכר, מנהל, מנהל־על); poscfg/sa (נעילות ומגבלות) – מנהל / בעלים / מנהל־על,
+      //   לא קופאי. poscfglog – בעל העסק (admins/{uid}.own) ומנהל־על בלבד (לא מנהל, לא קופאי, לא רו"ח). poscfg/apprlock – אף אחד.
+      //   postpl / posbug – גלובליים, רק השרת (אין כלל = חסום).
+      function posOwn() { return feat('pos') && bIsAdmin() && bActive() && get(/databases/$(database)/documents/b/$(bizId)/admins/$(request.auth.uid)).data.get('own', false) == true; }
+      match /poscfg/{d} {
+        allow get: if (d == 'saPub' || d.matches('br_[A-Za-z0-9_-]{1,40}')) && (posAny() || (feat('pos') && bMgr()) || bSuper());
+        allow get: if d == 'sa' && ((feat('pos') && bMgr()) || bSuper());
+      }
+      match /poscfglog/{id} {
+        allow read: if bSuper() || posOwn();
+        allow create, update, delete: if false;
+      }
+      // /POS:M4
 
       // ----- דיווח יומי – dailyRep (16.11.2026). רק בתוך העסק (לא בשורש). כל כתיבה – רק השרת (daily-rep.js). התוספת כבויה = אין גישה. -----
       // dr/{uid}_{YYYYMMDD}: מנהל, או העובד בעל הדיווח. p (תמונות) – כמו האב, לפי uid של מסמך האב. x/m (טיוטת המנהל) – מנהל בלבד.

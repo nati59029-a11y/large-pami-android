@@ -114,3 +114,20 @@ describe('pos-cfg-schema – שכבות, מודולים והרשאות', () => {
     assert.deepEqual(Object.keys(S.pubOf({ on: true }, 3)).sort(), ['mods', 'on', 'st', 'type', 'ver']);
   });
 });
+
+describe('pos-cfg-tpl – תבניות', () => {
+  const TP = require('../functions/lib/pos-cfg-tpl');
+  it('כל סוג בסכמה יש לו תבנית, וכל ערך בתבנית עובר את הסכמה (בלי sa.*)', () => {
+    assert.deepEqual([...TP.TYPES].sort(), [...S.TYPES].sort());
+    for (const [t, x] of Object.entries(TP.TPL)) {
+      for (const [k, v] of Object.entries(x.vals)) { assert.ok(S.BY[k] && !S.isSa(k), t + ' ' + k); S.check(S.BY[k], v, k); }
+      for (const m of Object.keys(x.mods)) assert.ok(S.MODS.includes(m), t + ' ' + m);
+    }
+  });
+  it('תבנית העסק הנוכחי = מודולי ברירת המחדל של הסכמה', () => {
+    assert.deepEqual(TP.modsOf('bakeryDisposable', S.MODS), S.eff({}).mods);
+  });
+  it('הקובץ זהה בדפדפן ובשרת', () => {
+    assert.ok(fs.readFileSync(path.join(__dirname, '../functions/lib/pos-cfg-tpl.js')).equals(fs.readFileSync(path.join(__dirname, '../../app-source/www/pos-cfg-tpl.js'))));
+  });
+});
