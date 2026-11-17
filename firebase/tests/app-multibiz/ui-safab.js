@@ -101,7 +101,8 @@ async function seedMember(biz, email, role) {
   await page.click('[data-a=admStfMail]'); await wait(page, 300); await page.click('#dlg [data-a=yes]'); await wait(page, 3500);
   const tm = await page.evaluate(() => window.__toasts.slice(-1)[0] || '');
   const callM = log.some((r) => r.step === 'mail' && /sendInviteMail/.test(r.url));
-  check('7א מנהל־על, מסך עובדים: כפתור "מייל" ליד העובד שולח מייל (sendInviteMail, ובאמולטור – המייל הרגיל)', callM && /wk@x\.co/.test(tm), { tm, callM });
+  const lbl = await page.evaluate(() => (document.querySelector('[data-a=admStfMail]') || {}).textContent || '');
+  check('7א מנהל־על, מסך עובדים: כפתור "שלח הזמנה" ליד העובד שולח מייל (sendInviteMail, ובאמולטור – המייל הרגיל)', callM && /wk@x\.co/.test(tm) && lbl === 'שלח הזמנה', { tm, callM, lbl });
   // 17.11.2026: שינוי מייל של עובד (setStaffEmail) – ואחר כך מחזירים למייל המקורי (העובד נכנס בהמשך עם wk@x.co)
   await page.evaluate(() => { if (document.getElementById('dlg').open) closeDlg(); });
   page.__step = 'email';
@@ -147,7 +148,7 @@ async function seedMember(biz, email, role) {
   const m1 = await page.evaluate(() => ({ fab: !!document.getElementById('safab'), sa: ADM.sa, old: !!document.querySelector('[data-v="sa"]') }));
   await page.evaluate(() => go('staff')); await wait(page, 2500);
   const m2 = await page.evaluate(() => ({ rows: document.querySelectorAll('#main .li').length, mail: !!document.querySelector('[data-a=admStfMail]'), email: !!document.querySelector('[data-a=admEmail]') }));
-  check('15א מנהל רגיל: אין כפתור "מייל" ואין "שינוי מייל" במסך העובדים', m2.rows > 0 && !m2.mail && !m2.email, m2);
+  check('15א מנהל רגיל: אין כפתור "שלח הזמנה" ואין "שינוי מייל" במסך העובדים', m2.rows > 0 && !m2.mail && !m2.email, m2);
   await page.evaluate(() => { NAV = [{ v: 'home' }]; render(0); }); await wait(page, 400);
   check('15 מנהל רגיל: הכפתור הצף לא קיים ב-DOM (וגם לא הכניסה מההגדרות)', !m1.fab && !m1.sa && !m1.old, m1);
   await shot(page, '04-מנהל-רגיל');
