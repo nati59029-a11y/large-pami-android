@@ -1,0 +1,16 @@
+{
+  "name": "pos-load",
+  "version": "0.1.0",
+  "private": true,
+  "description": "נתוני דמו, בדיקת עומס ובדיקת כפילות לקופה – מול אמולטור Firestore מקומי בלבד",
+  "scripts": {
+    "gen": "node gen-demo-data.js",
+    "test": "bash run-emulator.sh",
+    "report": "python3 report.py"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": {
+    "firebase-admin": "13.6.0",
+    "firebase-tools": "15.34.1"
+  }
+}
