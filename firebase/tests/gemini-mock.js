@@ -26,6 +26,8 @@ const ANSWERS = {
   transfer: { document_type: 'bank_transfer', transfers: [{ amount: 1234.56, date: '2026-11-02', payee_name: 'ספק דמה בע"מ', payee_account: { bank: '12', branch: '345', account: '67890' }, reference: 'R-1001' }] },
   cashout: { register: '6346053', store: 'לארג\' פעמי-יהודה הנשיא', date: '2026-10-20', time: '09:02', amount: 4650 },
   // צילום רשימת הזמנה (ordlist, 14.11.2026)
+  // POS:M6 – מחירון מצילום (pos-ocr.js): 3 שורות לדוגמה, אחת בלי מחיר
+  posocr: { rows: [{ name: 'צלחות 20 יח׳ (דוגמה)', price: 12.9, bc: '7290000000101' }, { name: 'כוסות 50 יח׳ (דוגמה)', price: 9.9, bc: '' }, { name: 'מפיות (דוגמה)', price: null, bc: '' }] },
   ordlist: { lines: [{ name: 'צלחות עמוקות', qty: 5, unit: 'ct' }, { name: 'מפיות', qty: 2, unit: null }, { name: 'כוס חד פעמית', qty: null, unit: null }] },
   recipe: { title: 'עוגת שמרים', text: 'עוגת שמרים. המצרכים: שתי כוסות קמח. אופן ההכנה: לערבב ולאפות.' },
   feedback: { invoice_number: '8247460', purchase_amount: '58.86', liked: 'שירות מעולה', improve: 'עוד קופות', name: 'כהן', phone: '0541234567', address: 'הרצל 12/3', ratings: { availability: 9, service: 10, cleanliness: 8, prices: 7, bakery: null, overall: 9 }, uncertain: ['phone'] },
@@ -102,6 +104,7 @@ function kindOf(body) {
   if (typeof si === 'string' && si.startsWith('SEC-CHAT-V1')) return 'sec';
   if (typeof si === 'string' && si.startsWith('ORD-PARSE-V1')) return 'ordparse';
   if (typeof si === 'string' && si.startsWith('DR-REP-V1')) return 'dr'; // דיווח יומי (lib/prompts-dr.js)
+  if (typeof si === 'string' && si.startsWith('POS-OCR-V1')) return 'posocr'; // POS:M6 – מחירון מצילום (functions/pos-ocr.js)
   const t = (((body.contents || [])[0] || {}).parts || [])[0];
   const s = (t && t.text) || '';
   if (s.startsWith('אתה בודק פריט אחד בהקמת חנות')) return 's3bay'; // lib/prompts-bayscan.js (הקמת חנות שלב 5)

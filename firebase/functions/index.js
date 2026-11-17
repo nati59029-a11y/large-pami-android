@@ -304,8 +304,12 @@ Object.assign(exports, require('./secretary'));
 Object.assign(exports, require('./secretary-know'));
 // ייבוא קבצים ברקע (2026-11-11, שלב 3): startImport (מנהל, שני האזורים) + runImportChunk (טריגר, europe-west1 בלבד) – imports.js
 Object.assign(exports, require('./imports'));
-// קופה – אשף ייבוא מכספיט (17.11.2026, ענף feature/pos-import): מוצרים ולקוחות חדשים בלבד, יומן posimp וביטול ייבוא
+// POS:M6 – קופה ש6: ייבוא מכספיט (posImp*), קטלוג (posProdSave, posProdQuick, posBcGen, posPriceBulk, posLbl, posAlert), ספירת מלאי (posCnt), מחירון מצילום (posOcr)
 Object.assign(exports, require('./pos-import'));
+Object.assign(exports, require('./pos-catalog'));
+Object.assign(exports, require('./pos-inv'));
+Object.assign(exports, require('./pos-ocr'));
+// /POS:M6
 // המזכירה שלב 4 (2026-11-11): secNotes, secReports, secHistory (מנהל העסק), secRemind (מתוזמנת – תזכורות, דוחות, התראות), secDaily (מתוזמנת – שמירה ומחיקה 9.5). secretary-remind.js
 Object.assign(exports, require('./secretary-remind'));
 // המזכירה שלב 5 (2026-11-11): secWaHook (webhook ווצאפ, us-central1 בלבד – כתובת קבועה אצל Meta), secWaWork (טריגר תור, europe-west1),
