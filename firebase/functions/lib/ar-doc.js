@@ -66,9 +66,14 @@ const isCr = (d) => !!d && (d.t === 'rc' || d.t === 'cr' || ((d.t === 'ob' || d.
 const stOf = (t, open, gross) => (t === 'inv' ? (open <= 0 ? 'paid' : open < gross ? 'part' : 'open') : t === 'ir' ? 'paid' : 'ok');
 
 // ---------- Book: כל הקריאות קודם (init / needSeq / needCust / openDocs / needDoc), אחר כך issue / alloc, ובסוף flush (כל הכתיבות) ----------
+// קופה (POS, שלב 0 – תוספת בלבד): o.dev = קוד קופה ('K1') – מונה arcfg/seq_{t}{D|O}_{dev} ומזהה {t}{D|O}-{dev}-{no} (למשל irD-K1-1124).
+// בלי o.dev – בדיוק כמו קודם (arcfg/seq_{t}{D|O}, {t}{D|O}{no}). המקף מבדיל, ולכן מסמך קופה לא מתנגש במסמך קיים.
+const DEV_RE = /^K[1-9][0-9]{0,3}$/;
 class Book {
-  constructor(tx, db, w, now) {
+  constructor(tx, db, w, now, o) {
     this.tx = tx; this.db = db; this.w = w; this.now = now || Date.now(); this.d = ilDay(this.now);
+    this.dev = o && o.dev != null ? o.dev : '';
+    if (this.dev && !DEV_RE.test(this.dev)) throw new Error('ar-doc: bad dev ' + this.dev);
     this.seqs = {}; this.custs = {}; this.docs = {}; this.news = []; this.allocs = []; this.extra = [];
   }
   async init() {
@@ -86,7 +91,7 @@ class Book {
   async needSeq(...ts) {
     for (const t of ts) {
       if (this.seqs[t]) continue;
-      const ref = this.db.doc(`arcfg/seq_${t}${this.ser}`);
+      const ref = this.db.doc(`arcfg/seq_${t}${this.ser}${this.dev ? '_' + this.dev : ''}`);
       const s = await this.tx.get(ref);
       this.seqs[t] = { ref, n: s.exists && Number.isInteger(s.get('n')) ? s.get('n') : null, dirty: false };
     }
@@ -122,11 +127,11 @@ class Book {
     const start = this.ser === 'O' && this.off.start && Number.isInteger(this.off.start[t]) ? this.off.start[t] : 1;
     const no = AC.nextNo(sq.n, start);
     sq.n = no; sq.dirty = true;
-    const id = docId(t, this.ser, no);
+    const id = this.dev ? t + this.ser + '-' + this.dev + '-' + no : docId(t, this.ser, no);
     const g = body.gross;
     if (!Number.isInteger(g) || g < 0) throw new Error('ar-doc: bad gross');
     const d = Object.assign({ t, ser: this.ser, no, d: this.d, cust: '', ord: [], br: NB, draft: this.ser !== 'O', bt: this.bt }, body,
-      { by: this.w.uid, at: this.now, f: fileOf(id), sent: [], upd: this.now });
+      { by: this.w.uid, at: this.now, f: fileOf(id), sent: [], upd: this.now }, this.dev ? { dev: this.dev } : {});
     d.open = t === 'ir' ? 0 : g;
     d.st = stOf(t, d.open, g);
     const x = { id, ref: this.db.doc('ardoc/' + id), d, patch: null, isNew: true };
