@@ -938,6 +938,10 @@ service cloud.firestore {
     match /yemot_hook_usage/{id} {
       allow read, write: if false;
     }
+    // לקוחות משוב שכבר נשלחו לרשימת התפוצה בימות (yemot-fblist.js, משימה 2026-11-17) – רק השרת
+    match /yemot_fbsent/{id} {
+      allow read, write: if false;
+    }
     // מילון ההגייה: מסמך אחד (main). רק מנהל קורא וכותב, בשלושה שדות בלבד. השרת קורא אותו לפני כל העלאה.
     // updatedAt = זמן במילישניות (כמו במשימות), עד 2 דקות מהשעון של השרת. updatedBy = המשתמש עצמו. אין מחיקה.
     match /yemot_lexicon/{docId} {
@@ -2580,6 +2584,10 @@ service cloud.firestore {
       }
       // yemot_hook_usage: העתק של הכלל בשורש (תוספת 'yemot')
       match /yemot_hook_usage/{id} {
+        allow read, write: if false;
+      }
+      // yemot_fbsent: העתק של הכלל בשורש (תוספת 'yemot')
+      match /yemot_fbsent/{id} {
         allow read, write: if false;
       }
       // yemot_lexicon: העתק של הכלל בשורש (תוספת 'yemot')

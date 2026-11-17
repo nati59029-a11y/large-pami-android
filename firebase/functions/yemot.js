@@ -7,6 +7,7 @@
 //                        audio – מבצע מוקלט (עובד ומנהל, promoKey שמתחיל ב-rec_, תאריך הורדה חובה, תמיד בלי צינתוק). משימה 2026-11-04.
 //                        בלי צינתוק: בלי הגבלה לאף אחד.
 //                        { statusOnly: true } – רק מחזיר אם המשתמש עוד יכול לשלוח צינתוק היום (בלי שום פנייה לימות).
+//                        מנהל + צינתוק + yemot_state/fblist.tzOn: גם צינתוק בתשלום ללקוחות המשוב (fbTzintuk, משימה 2026-11-17 שלב 5). statusOnly מחזיר למנהל גם fbTz:{on,upTo,max}.
 //                        promoKey – מזהה קבוע של המבצע: קובץ אחד לכל מבצע; ניסיון חוזר לא מעלה קובץ נוסף (פירוט למטה).
 //   expirePromosOnLine – כל לילה 00:15 שעון ישראל: מוחקת מהקו מבצעים שפג תוקפם. מוחקת רק קבצים שהיא עצמה העלתה.
 //   runExpiry(opts)    – הלב של ההורדה, מיוצא לבדיקות (לא מ-index.js).
@@ -26,9 +27,11 @@ const { inputObject } = roles;
 // ריבוי עסקים (שלב 5): פונקציות הקו – רק כשהתוספת yemot מופעלת בעסק, ורק בעסק שמחובר לקו (היום: largpeami בלבד).
 // עסק אחר מקבל yemot-not-connected לפני כל פנייה לימות. הנתונים (T.tdb()) בתוך העסק; בשורש ללארג' פעמי במצב legacy.
 const requireStaff = (request) => roles.requireStaff(request, { feature: 'yemot', yemotLine: true });
-const { YemotError, apiBase, yemotCall, deleteFiles } = require('./lib/yemot-client');
+const { YemotError, apiBase, yemotCall, deleteFiles, getTemplateEntries, tzlEntries, runTzintukPhones } = require('./lib/yemot-client');
 const voice = require('./lib/voice');
 const { parseLexicon, applyLexicon } = require('./lib/lexicon');
+// מבנה השלוחות (משימה 2026-11-17): yemot_state/layout. בלי מסמך / single:false – בדיוק כמו קודם (שלוחה YEMOT_EXT, מונה yemot_state/line).
+const LY = require('./lib/yemot-layout');
 
 const TZ = 'Asia/Jerusalem';
 const YEMOT_API_KEY = defineSecret('YEMOT_API_KEY');
@@ -39,12 +42,14 @@ const YEMOT_EMPLOYEE_DAILY = defineInt('YEMOT_EMPLOYEE_DAILY', { default: 1, des
 const YEMOT_MAX_DAYS = defineInt('YEMOT_MAX_DAYS', { default: 60, description: 'כמה ימים קדימה מותר תאריך הורדה' });
 const YEMOT_TEXT_MAX = defineInt('YEMOT_TEXT_MAX', { default: 400, description: 'אורך מרבי לנוסח (תווים)' });
 const YEMOT_TIMEOUT_MS = defineInt('YEMOT_TIMEOUT_MS', { default: 15000, description: 'זמן המתנה מרבי לכל קריאה לימות' });
+const YEMOT_FB_TZ_MAX = defineInt('YEMOT_FB_TZ_MAX', { default: 300, description: 'מכסה לצינתוק ללקוחות משוב במבצע אחד (מעל זה לא שולחים להם)' });
 const YEMOT_REC_MAX_SEC = defineInt('YEMOT_REC_MAX_SEC', { default: 120, description: 'אורך מרבי להקלטה בשלוחת העדכונים (שניות, הערכה)' });
 const REC_MAX_BYTES = 2000000; // כמו ב-yemot-line.js: 120 שניות × 16,000 בתים + כותרת
 
 const PROMOS = 'yemot_promos';
 const USAGE = 'yemot_usage';
 const STATE = 'yemot_state/line';
+const FBLIST = 'yemot_state/fblist'; // לקוחות משוב (yemot-fblist.js): templateId, tzOn, sentCount, tzMonth
 const ACTIVE = ['live', 'remove-failed'];
 
 // ---------------- תאריכים (שעון ישראל) ----------------
@@ -135,6 +140,7 @@ function readCfg() {
     ext: YEMOT_EXT.value(), list: YEMOT_TZINTUK_LIST.value(), daily: YEMOT_EMPLOYEE_DAILY.value(),
     maxDays: YEMOT_MAX_DAYS.value(), textMax: YEMOT_TEXT_MAX.value(), timeoutMs: YEMOT_TIMEOUT_MS.value(),
     recMaxSec: Number.isInteger(YEMOT_REC_MAX_SEC.value()) && YEMOT_REC_MAX_SEC.value() > 0 ? YEMOT_REC_MAX_SEC.value() : 120,
+    fbTzMax: Number.isInteger(YEMOT_FB_TZ_MAX.value()) && YEMOT_FB_TZ_MAX.value() > 0 ? YEMOT_FB_TZ_MAX.value() : 300,
   };
 }
 
@@ -147,6 +153,58 @@ async function lineNumbers(ctx, ext) {
     if (m) nums.add(Number(m[1]));
   }
   return nums;
+}
+
+// ---------------- צינתוק ללקוחות משוב (משימה 2026-11-17, שלב 5) ----------------
+// רק מנהל, רק עם צינתוק, ורק כשהמתג tzOn דולק (נבדק אצל המתקשר). בתשלום – 0.1 יחידה למספר לפי התיעוד (לא מאומת).
+// הנמענים: רשימת התפוצה "לקוחות משוב" (רק לא חסומים) פחות מי שכבר ברשימת הצינתוקים החינמית (קיבל את הצינתוק הרגיל). כל מספר פעם אחת.
+// מעל המכסה (YEMOT_FB_TZ_MAX) – לא שולחים לאף אחד ('capped'). כשל לא זורק, והצינתוק הרגיל לא מושפע:
+//   'failed'    – בוודאות לא יצאה קריאת צינתוק (כשל בקריאת הרשימות, או לפני השליחה). ניסיון חוזר ישלים.
+//   'uncertain' – הקריאה יצאה וייתכן שימות שלח וגבה (פסק זמן, תשובה לא תקינה, כל YemotError עם sent), או שקבוצה כבר נשלחה.
+//                 אין שליחה חוזרת אוטומטית – המנהל בודק בימות.
+// לפני הקריאה הראשונה נרשם ברשומת המבצע fbTz:'pending' (קריסה באמצע = כמו 'uncertain', בלי שליחה חוזרת).
+// מחזיר { st: 'sent'|'empty'|'capped'|'failed'|'uncertain', count, total }. רק קבוצות שימות אישר נספרות במונה החודשי fblist.tzMonth (שעון ישראל).
+const israelMonth = () => israelDay().slice(0, 7);
+async function fbTzintuk(db, ctx, cfg, fbs, promoRef) {
+  const out = { st: 'empty', count: 0, total: 0 };
+  let called = false;
+  try {
+    const tplId = fbs.templateId;
+    if (!Number.isInteger(tplId) || tplId <= 0) return out; // הרשימה עוד לא נוצרה
+    const { normPhone } = require('./yemot-fblist')._core;
+    const all = [...new Set((await getTemplateEntries(ctx, tplId)).filter((e) => !e.blocked).map((e) => normPhone(e.phone)).filter(Boolean))];
+    if (!all.length) return out;
+    const subs = new Set((await tzlEntries(ctx, cfg.list)).map(normPhone).filter(Boolean));
+    const phones = all.filter((p) => !subs.has(p));
+    out.total = phones.length;
+    if (!phones.length) return out;
+    if (phones.length > cfg.fbTzMax) { out.st = 'capped'; return out; }
+    await promoRef.update({ fbTz: 'pending', fbTzAt: new Date().toISOString() });
+    for (let i = 0; i < phones.length; i += 500) {
+      const part = phones.slice(i, i + 500);
+      called = true;
+      await runTzintukPhones(ctx, part);
+      out.count += part.length;
+    }
+    out.st = 'sent';
+  } catch (e) {
+    // לא ודאי: קבוצה כבר נשלחה, או שהקריאה יצאה (YemotError עם sent, או חריגה לא צפויה בזמן הקריאה)
+    out.st = called && (out.count > 0 || !(e instanceof YemotError) || e.sent) ? 'uncertain' : 'failed';
+    logger.warn('yemot: fb tzintuk failed', { reason: 'fb-tz-' + out.st, code: e instanceof YemotError ? e.code : 'internal', sent: out.count });
+  }
+  if (out.count) {
+    const ref = db.doc(FBLIST);
+    const month = israelMonth();
+    try {
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(ref);
+        const t = s.exists ? s.get('tzMonth') : null;
+        const prev = t && t.month === month && Number.isInteger(t.count) ? t.count : 0;
+        tx.set(ref, { tzMonth: { month, count: prev + out.count } }, { merge: true });
+      });
+    } catch (e) { logger.error('yemot: fb tz count failed', { reason: 'fb-tz-count-failed' }); }
+  }
+  return out;
 }
 
 // ---------------- מכסה יומית לצינתוק (עובד בלבד) ----------------
@@ -167,8 +225,10 @@ async function refundUsage(db, uid, day) {
 // ---------------- בחירת מספר קובץ (בטרנזקציה, בלי התנגשות בין מקבילים) ----------------
 // n = max(nextNum, 1 + המספר הגבוה בשלוחה). מעל 999: המספר הפנוי הקטן ביותר מ-001. לעולם לא 000.
 // recent = 20 המספרים האחרונים שהוקצו, כדי ששני מקבילים לא יבחרו אותו מספר פנוי גם כשהשלוחה כמעט מלאה.
-async function allocateNumber(db, onLine, promoRef, ext, rendered) {
-  const stateRef = db.doc(STATE);
+// stateDoc (משימה 2026-11-17): מונה השלוחה (LY.counterDoc). שלוחה משותפת עם פריטי yemot-line.js – אותו מונה, ולכן מספרים שונים.
+//   מילוי חורים מדלג גם על מספרים שרשומה של האפליקציה מחזיקה (LY.heldNums), כדי לא לדרוס קובץ של סוג אחר שמצבו לא ודאי.
+async function allocateNumber(db, onLine, promoRef, ext, rendered, stateDoc) {
+  const stateRef = db.doc(stateDoc || STATE);
   return db.runTransaction(async (tx) => {
     const s = await tx.get(stateRef);
     const nextNum = (s.exists && Number(s.get('nextNum'))) || 1;
@@ -177,12 +237,15 @@ async function allocateNumber(db, onLine, promoRef, ext, rendered) {
     let n = Math.max(nextNum, maxOn + 1, 1);
     if (n > 999) {
       n = 0;
-      for (let c = 1; c <= 999; c++) if (!onLine.has(c) && !recent.includes(c)) { n = c; break; }
+      const held = await LY.heldNums(db, ext);
+      for (let c = 1; c <= 999; c++) if (!onLine.has(c) && !recent.includes(c) && !held.has(c)) { n = c; break; }
       if (!n) throw new HttpsError('resource-exhausted', 'אין מקום לעוד מבצעים בשלוחה. פנו למנהל.', { reason: 'line-full' });
     }
     const file = voice.fileName(n, rendered);
     const now = new Date().toISOString();
-    tx.set(stateRef, { nextNum: n + 1, recent: recent.concat(n).slice(-20), updatedAt: now });
+    // yemot_state/line – כמו קודם (בלי merge). מונה של שלוחה אחרת – merge (יש בו גם שדות נעילה של yemot-line.js)
+    if (stateRef.path === STATE) tx.set(stateRef, { nextNum: n + 1, recent: recent.concat(n).slice(-20), updatedAt: now });
+    else tx.set(stateRef, { nextNum: n + 1, recent: recent.concat(n).slice(-20), updatedAt: now }, { merge: true });
     tx.update(promoRef, { file, path: voice.pathOf(ext, file), updatedAt: now });
     return file;
   });
@@ -198,6 +261,10 @@ async function allocateNumber(db, onLine, promoRef, ext, rendered) {
 const LOCK_MS = 120000; // שליחה "בטיפול": שתי שליחות של אותו מבצע לא רצות במקביל
 // נעילה פעילה = שליחה אחרת של אותו מבצע רצה עכשיו. נעילה ישנה מ-LOCK_MS = השליחה נתקעה/קרסה, ואפשר להמשיך.
 function isLocked(x, nowMs) { return !!(x && x.lockAt && nowMs - Date.parse(x.lockAt) < LOCK_MS); }
+// פריט של yemot-line.js שאולי בקו (כמו holdsPath, לפי הסטטוסים של yemot_items)
+function itemHolds(x) {
+  return !!(x && x.path && (ACTIVE.includes(x.status) || x.status === 'uploading' || (x.status === 'failed' && x.uncertain)));
+}
 // האם ייתכן שהקובץ של הרשומה נמצא בקו (גם אם לא בוודאות)
 function holdsPath(x) {
   return !!(x && x.path && (ACTIVE.includes(x.status) || x.status === 'uploading' || (x.status === 'failed' && x.uncertain)));
@@ -266,7 +333,18 @@ async function sendPromo(request, key, base, pre) {
   const todayView = async () => (isEmp ? usageView(await usageRef.get(), today, cfg.daily) : { day: today, used: null, limit: null, allowed: true });
 
   // מצב בלבד: האם אפשר עוד לשלוח צינתוק היום. בלי פנייה לימות.
-  if (input.statusOnly === true && !pre) return { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
+  // למנהל גם הערכה ללקוחות המשוב (שלב 5): upTo = כמה נשלחו לרשימה עד היום (עד N; חסומים ורשומים לצינתוק החינמי לא יקבלו)
+  if (input.statusOnly === true && !pre) {
+    const r = { ok: true, statusOnly: true, role: who.role, tzintukToday: await todayView() };
+    if (who.role === 'manager') {
+      const f = (await db.doc(FBLIST).get()).data() || {};
+      r.fbTz = { on: f.tzOn === true, upTo: Number.isInteger(f.sentCount) ? f.sentCount : 0, max: cfg.fbTzMax };
+    }
+    return r;
+  }
+  // השלוחה שאליה המבצע עולה עכשיו: YEMOT_EXT, או שלוחת "כל התוכן בשלוחה אחת" (משימה 2026-11-17)
+  const layout = await LY.loadLayout(db);
+  const pext = LY.extOf('promos', layout, cfg.ext);
 
   // מבצע מוקלט: יש audio. אחרת – הנוסח (ההתנהגות הקיימת, בלי שינוי)
   const isRec = pre ? pre.kind === 'audio' : input.audio !== undefined && input.audio !== null;
@@ -298,6 +376,9 @@ async function sendPromo(request, key, base, pre) {
   const spoken = isRec ? null : pre && pre.rendered ? pre.spoken || null : applyLexicon(v.text, await loadLexicon(db));
   // ההקראה עצמה (שעולה כסף בקול המשוכפל) נוצרת רק כשבאמת מעלים – שלב 2 למטה. אותו נוסח שכבר בקו = בלי הקראה חדשה.
   let rendered = null;
+  // צינתוק ללקוחות משוב (שלב 5): מנהל + צינתוק + המתג דולק. עובד – אף פעם לא.
+  const fbs = who.role === 'manager' && v.withTzintuk ? ((await db.doc(FBLIST).get()).data() || {}) : null;
+  const fbOn = !!fbs && fbs.tzOn === true;
 
   // 1. טרנזקציה: נעילת המבצע, החלטה מה לעשות, ו(לעובד, אם יישלח צינתוק) תפיסת המכסה היומית.
   // הרשומה מתארת את מה שבאמת בקו: text/until/tzintuk משתנים רק אחרי שהפעולה בימות הצליחה.
@@ -317,16 +398,19 @@ async function sendPromo(request, key, base, pre) {
     // וגם אותו קול: קובץ שבקו בקול אחר (למשל ממוחשב, אחרי "שלח בקול הממוחשב" או מלפני הפרסום) מוקרא מחדש בקול המבוקש.
     // הקול נקבע לפי סוג הקובץ שבקו (עובד גם לרשומות ישנות בלי שדה engine).
     const sameText = !isRec && onLine && ACTIVE.includes(x.status) && x.text === v.text && (x.spoken == null ? x.text : x.spoken) === spoken
-      && voice.extOf(x.path) === voice.extFor(engine);
+      && voice.extOf(x.path) === voice.extFor(engine) && LY.dirOf(x.path) === pext; // מבצע שבקו בשלוחה אחרת (אחרי שינוי המבנה) – עולה מחדש לשלוחה הנוכחית
     const upload = !sameText;
     const doTz = v.withTzintuk && !(sameText && x.tzintuk === 'sent');
+    // ניסיון חוזר: הצינתוק הרגיל כבר נשלח, וחלק המשוב נכשל בוודאות ('failed') – משלימים רק אותו.
+    // לא כשחסר (מבצע ישן / המתג היה כבוי – הארכת תאריך לא שולחת צינתוק בתשלום), ולא על 'pending'/'uncertain' (ייתכן שכבר נשלח ונגבה).
+    const fbRetry = fbOn && !upload && !doTz && x.tzintuk === 'sent' && x.fbTz === 'failed';
     const now = new Date(nowMs).toISOString();
     const who2 = { withTzintuk: v.withTzintuk, byUid: who.uid, byRole: who.role, day: today, updatedAt: now };
     if (v.source) who2.source = v.source;
     if (manual) who2.manual = true;
     if (isRec) Object.assign(who2, { kind: 'audio', title: v.title, durationSec: v.durationSec, engine: pre ? pre.engine : 'recording' });
     if (pre) Object.assign(who2, { restoredFrom: pre.restoredFrom }, pre.title ? { title: pre.title } : {});
-    if (!upload && !doTz) {
+    if (!upload && !doTz && !fbRetry) {
       tx.update(promoRef, Object.assign(who2, { until: v.until, lastRequestId: v.requestId, lastResult: 'done' },
         x.status === 'remove-failed' && v.until >= today ? { status: 'live', error: null } : {}));
       return { kind: 'none', x, untilChanged: x.until !== v.until };
@@ -350,7 +434,7 @@ async function sendPromo(request, key, base, pre) {
       if (!x) Object.assign(rec, { createdAt: now, createdBy: who.uid });
     }
     tx.set(promoRef, rec, { merge: true });
-    return { kind: 'work', x, onLine, upload, doTz, usage, replacing: upload && onLine && ACTIVE.includes(x.status) };
+    return { kind: 'work', x, onLine, upload, doTz, fbRetry, usage, replacing: upload && onLine && ACTIVE.includes(x.status) };
   });
 
   if (plan.kind === 'duplicate' || plan.kind === 'none') {
@@ -402,16 +486,19 @@ async function sendPromo(request, key, base, pre) {
         throw voice.toHttps(e, !isEmp);
       }
       try {
-        if (path && voice.extOf(path) !== rendered.ext) { stale = path; path = null; file = null; }
+        // סיומת אחרת, או נתיב בשלוחה אחרת (אחרי שינוי מבנה השלוחות) – הקובץ הקודם יימחק אחרי שהחדש עלה
+        if (path && (voice.extOf(path) !== rendered.ext || LY.dirOf(path) !== pext)) { stale = path; path = null; file = null; }
         if (path) {
-          // הגנה: אם רשומה אחרת "מחזיקה" את אותו נתיב (למשל מספר שהוקצה מחדש) – לא דורסים, מקצים מספר חדש
+          // הגנה: אם רשומה אחרת "מחזיקה" את אותו נתיב (למשל מספר שהוקצה מחדש) – לא דורסים, מקצים מספר חדש.
+          // גם פריט של yemot-line.js (שלוחה משותפת, משימה 2026-11-17)
           const other = await db.collection(PROMOS).where('path', '==', path).get();
-          if (other.docs.some((d) => d.id !== v.promoKey && holdsPath(d.data(), Date.now()))) { path = null; file = null; action = 'uploaded'; }
+          const otherItem = (await db.collection('yemot_items').where('path', '==', path).get()).docs.some((d) => itemHolds(d.data()));
+          if (otherItem || other.docs.some((d) => d.id !== v.promoKey && holdsPath(d.data(), Date.now()))) { path = null; file = null; action = 'uploaded'; }
         }
         if (!path) {
-          const nums = await lineNumbers(ctx, cfg.ext);
-          file = await allocateNumber(db, nums, promoRef, cfg.ext, rendered);
-          path = voice.pathOf(cfg.ext, file);
+          const nums = await lineNumbers(ctx, pext);
+          file = await allocateNumber(db, nums, promoRef, pext, rendered, LY.counterDoc(pext, cfg.ext));
+          path = voice.pathOf(pext, file);
         }
       } catch (e) {
         if (e instanceof HttpsError) {
@@ -422,7 +509,7 @@ async function sendPromo(request, key, base, pre) {
         throw await failUpload(e instanceof YemotError ? 'dir-' + e.code : 'internal', false);
       }
       try {
-        await voice.upload(ctx, cfg.ext, file.split('.')[0], rendered);
+        await voice.upload(ctx, pext, file.split('.')[0], rendered);
       } catch (e) {
         throw await failUpload(e instanceof YemotError ? 'upload-' + e.code : 'internal', e instanceof YemotError && e.sent && e.code === 'timeout');
       }
@@ -431,7 +518,8 @@ async function sendPromo(request, key, base, pre) {
       // הצינתוק הקודם שייך לנוסח הקודם
       // שדות השמע מתאפסים בכל העלאה חדשה (עותק ישן לא יתאר תוכן אחר ממה שבקו), ואחר כך – עותק חדש אם יש
       await promoRef.update({ status: 'live', text: v.text, spoken, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp(),
-        kind: isRec ? 'audio' : null, audioPath: null, audioMime: null, audioBytes: null, audioSavedAt: null, audioError: null });
+        kind: isRec ? 'audio' : null, audioPath: null, audioMime: null, audioBytes: null, audioSavedAt: null, audioError: null },
+        plan.x && plan.x.fbTz != null ? { fbTz: null, fbTzCount: null } : {}); // גם הצינתוק ללקוחות משוב שייך לנוסח הקודם
       // עותק של השמע שעלה (הקלטה / קול משוכפל) ב-line_audio/promos/<promoKey>. כשל = אזהרה בלבד (משימה 2026-11-04).
       const a = voice.savedAudioOf(rendered);
       if (a) {
@@ -443,7 +531,8 @@ async function sendPromo(request, key, base, pre) {
       }
       // הגנה כפולה: מוחקים רק קובץ ממוספר 001-999 בשלוחת המבצעים (כמו runExpiry).
       // התבנית נבנית מ-YEMOT_EXT, כך שגם שלוחה מקוננת (למשל '2/1') נתמכת, כמו ב-runExpiry. שלוחה אחרת – לא נמחק.
-      const staleM = stale ? staleRe(cfg.ext).exec(stale) : null;
+      // (משימה 2026-11-17) הקובץ הקודם יכול להיות גם בשלוחה הקודמת של המבצעים – רק שלוחות המבצעים (LY.promoExts)
+      const staleM = stale ? LY.promoExts(layout, cfg.ext).map((e) => staleRe(e).exec(stale)).find(Boolean) : null;
       const staleOk = !!staleM && Number(staleM[1]) >= 1;
       if (staleOk && stale !== path) {
         try { await deleteFiles(ctx, [stale]); } catch (e) { logger.warn('yemot: old file left', { reason: 'stale-file', code: e instanceof YemotError ? e.code : 'internal', requestId: v.requestId }); }
@@ -462,19 +551,31 @@ async function sendPromo(request, key, base, pre) {
         logger.warn('yemot: tzintuk failed', { reason: 'tzintuk-failed', code: e instanceof YemotError ? e.code : 'internal', requestId: v.requestId });
       }
     }
-    await finish(tz === 'failed' ? 'partial' : 'done', Object.assign({ tzintuk: tz }, tz === 'sent' ? { tzintukAt: stamp() } : {}));
+    // 3א. לקוחות משוב: רק אחרי צינתוק רגיל שנשלח עכשיו, או השלמה (fbRetry). כשל כאן לא משנה את tzintuk ולא זורק.
+    let fb = null;
+    if (fbOn && (tzSent || plan.fbRetry)) {
+      fb = await fbTzintuk(db, ctx, cfg, fbs, promoRef);
+      if (fb.st === 'capped') v.warnings.push('fb-tz-capped');
+    }
+    await finish(tz === 'failed' || (fb && fb.st === 'failed') ? 'partial' : 'done', Object.assign({ tzintuk: tz }, tzSent ? { tzintukAt: stamp() } : {},
+      fb ? { fbTz: fb.st, fbTzCount: fb.count, fbTzAt: stamp() } : {}));
 
     const tToday = await todayView();
     const end = `המבצע יושמע בקו עד ${heDate(v.until)}.`;
     const head = action === 'replaced' ? 'הנוסח של המבצע בקו הוחלף' : action === 'tzintuk-only' ? 'המבצע כבר היה בקו' : 'המבצע עלה לקו';
-    const tzPart = tz === 'sent' ? (action === 'tzintuk-only' ? ', ועכשיו נשלח צינתוק לנרשמים.' : ' ונשלח צינתוק לנרשמים.')
+    const tzPart = plan.fbRetry ? ', והצינתוק לנרשמים כבר נשלח.'
+      : tz === 'sent' ? (action === 'tzintuk-only' ? ', ועכשיו נשלח צינתוק לנרשמים.' : ' ונשלח צינתוק לנרשמים.')
       : tz === 'failed' ? `, אבל הצינתוק לנרשמים לא נשלח${isEmp ? ' (ולא נספר במכסה היומית)' : ''}. אפשר לנסות שוב – הקובץ לא יועלה פעמיים.`
         : (v.withTzintuk ? '.' : ' בלי צינתוק.');
-    return {
+    const fbPart = !fb ? '' : fb.st === 'sent' ? ` גם ${fb.count} לקוחות משוב קיבלו צינתוק.`
+      : fb.st === 'capped' ? ` לקוחות המשוב לא קיבלו צינתוק: ${fb.total} מספרים, יותר מהמכסה (${cfg.fbTzMax}).`
+        : fb.st === 'failed' ? ' הצינתוק ללקוחות המשוב לא נשלח. אפשר לנסות שוב – הצינתוק לנרשמים לא יישלח פעמיים.'
+          : fb.st === 'uncertain' ? ' לא ידוע אם הצינתוק ללקוחות המשוב נשלח – בדקו בימות לפני שליחה חוזרת.' : '';
+    return Object.assign({
       ok: true, id: v.promoKey, promoKey: v.promoKey, requestId: v.requestId, action, file, until: v.until, withTzintuk: v.withTzintuk, tzintuk: tz,
-      role: who.role, usage: isEmp && plan.doTz ? tToday : null, tzintukToday: tToday, duplicate: false, warnings: v.warnings, message: `${head}${tzPart} ${end}`,
+      role: who.role, usage: isEmp && plan.doTz ? tToday : null, tzintukToday: tToday, duplicate: false, warnings: v.warnings, message: `${head}${tzPart}${fbPart} ${end}`,
       engine: rendered ? rendered.engine : null, kind: isRec ? 'audio' : 'text', audioSaved,
-    };
+    }, fb ? { fbTz: fb.st, fbTzCount: fb.count } : {});
   } catch (e) {
     if (e instanceof HttpsError) throw e;
     // חריגה פנימית (לא מימות): מחזירים מכסה שלא נוצלה, משחררים נעילה, ומסמנים "לא ודאי" כדי שההורדה תנקה את הקובץ אם הוא בקו
@@ -526,15 +627,24 @@ async function runExpiry(opts) {
   const keep = new Set(snap.docs.filter((d) => holdsPath(d.data()) && !isDue(d.data())).map((d) => d.get('path')));
   out.checked = due.length;
   if (!due.length) return out;
-  let onLine;
-  try { onLine = await lineNumbers(ctx, ext); } catch (e) {
-    logger.error('yemot: expiry dir failed', { reason: 'dir-failed', code: e.code });
-    return Object.assign(out, { error: 'dir-failed' });
+  // (משימה 2026-11-17) מבצע יכול לשבת בשלוחת המבצעים או בשלוחת "כל התוכן בשלוחה אחת" – כל אחד נמחק לפי הנתיב השמור שלו.
+  // בשלוחה משותפת: נתיב שפריט של yemot-line.js מחזיק – לא מוחקים.
+  const layout = await LY.loadLayout(db);
+  const res = LY.promoExts(layout, ext).map((e) => ({ e, re: new RegExp(`^ivr2:${e.replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.[A-Za-z0-9]+$`) }));
+  const match = (p) => { for (const r of res) { const m = r.re.exec(String(p || '')); if (m) return { m, e: r.e }; } return { m: null, e: null }; };
+  for (const d of (await db.collection('yemot_items').where('status', 'in', ACTIVE.concat('failed', 'uploading')).get()).docs) if (itemHolds(d.data())) keep.add(d.get('path'));
+  const dirs = new Map();
+  for (const e of [ext].concat(due.map((d) => match(d.get('path')).e).filter(Boolean))) {
+    if (dirs.has(e)) continue;
+    try { dirs.set(e, await lineNumbers(ctx, e)); } catch (err) {
+      logger.error('yemot: expiry dir failed', { reason: 'dir-failed', code: err.code });
+      return Object.assign(out, { error: 'dir-failed' });
+    }
   }
-  const re = new RegExp(`^ivr2:${ext.replace(/[^0-9A-Za-z/]/g, '')}/(\\d{3})\\.[A-Za-z0-9]+$`);
   for (const d of due) {
     const x = d.data();
-    const m = re.exec(String(x.path || ''));
+    const { m, e } = match(x.path);
+    const onLine = e ? dirs.get(e) : null;
     const now = new Date().toISOString();
     if (!m || Number(m[1]) < 1) { out.skipped++; continue; } // לעולם לא 000 ולא נתיב שלא אנחנו יצרנו
     if (keep.has(x.path)) { await d.ref.update({ status: x.status === 'failed' || x.status === 'uploading' ? 'failed' : 'removed', uncertain: false, pending: null, removedAt: now, updatedAt: now, error: 'path-reused' }); out.skipped++; continue; }
@@ -567,6 +677,8 @@ async function nightly(opts) {
   if (!(opts && opts.skipCache)) out.voiceCache = await voice.cleanCache();
   // שמע שמור של הודעות בקו (line_audio/): מחיקה 8 ימים אחרי הירידה (משימה 2026-11-04, חוזה 5.5.8). לא נוגע בקו ולא ב-voice_cache/.
   try { out.lineAudio = await require('./yemot-board').cleanLineAudio(opts); } catch (e) { logger.error('yemot: line audio clean failed', { reason: 'internal', name: e && e.name }); out.lineAudio = { error: 'internal' }; }
+  // לקוחות משוב חדשים ← רשימת התפוצה בימות (yemot-fblist.js, משימה 2026-11-17). אחרון – כדי שפנייה איטית לימות לא תקטע את הניקויים. רק הוספה; בלי טלפונים חדשים – בלי פנייה לימות.
+  try { out.fblist = await require('./yemot-fblist').runFbSync(Object.assign({}, opts, { by: 'nightly' })); } catch (e) { logger.error('yemot: fb sync failed', { reason: 'internal', name: e && e.name }); out.fblist = { error: 'internal' }; }
   return out;
 }
 // ריבוי עסקים (שלב 5): לולאה על העסקים שהתוספת yemot מופעלת אצלם. כל עסק עטוף לבד (כשל באחד לא עוצר את האחרים).
