@@ -80,7 +80,7 @@ U.wizZones=()=>{/* אזורים לא ודאיים ואישור הטיוטה: מ�
  if(Z.length){
   h+=`<p class="s3note" style="margin-top:0"><b>${n?`${n} מתוך ${Z.length} אזורים לא ודאיים עוד לא נבדקו`:`עברתם על כל ${Z.length} האזורים הלא ודאיים`}</b><br><span class="note">האזורים מסומנים במפה במסגרת מקווקווה עם סימן שאלה. אי אפשר לשמור עד שעוברים על כולם: אישור (המפה נכונה), תיקנתי (תיקנתם במפה), או מחיקה (האזור לא רלוונטי).</span></p>`;
   h+=Z.map((z,i)=>`<div class="s3info ${z.ok?'':'s3err'}"><div class="row" style="justify-content:space-between"><b>${z.ok?'✓':'?'} אזור ${i+1}${z.txt?': '+esc2(z.txt):''}</b>${z.ok?`<span class="tag t3">${how[keyOf(z)]==='fix'?'תוקן':'אושר'}</span>`:`<span class="tag t1">לבדיקה</span>`}</div>
-   <div class="row s3row"><button class="btn s g" data-a="s3wZ" data-i="${i}">הראו במפה</button>${z.ok?`<button class="btn s g" data-a="s3wUn" data-i="${i}">החזירו לבדיקה</button>`:`<button class="btn s" data-a="s3wOk" data-i="${i}">אישור</button><button class="btn s g" data-a="s3wFix" data-i="${i}">תיקנתי</button>`}<button class="btn s g" data-a="s3wDel" data-i="${i}" aria-label="מחיקת האזור ${i+1}">מחיקה</button></div></div>`).join('');
+   <div class="row s3row"><button class="btn s g" data-a="s3wZ" data-i="${i}">הראו במפה</button>${z.ok?`<button class="btn s g" data-a="s3wUn" data-i="${i}">החזירו לבדיקה</button>`:`<button class="btn s" data-a="s3wOk" data-i="${i}">אישור</button><button class="btn s g" data-a="s3wZFix" data-i="${i}">תיקנתי</button>`}<button class="btn s g" data-a="s3wDel" data-i="${i}" aria-label="מחיקת האזור ${i+1}">מחיקה</button></div></div>`).join('');
  }else h+=`<p class="s3note" style="margin-top:0">ה-AI לא סימן אזורים לא ודאיים. עדיין חשוב לעבור על המפה לפני השמירה.</p>`;
  h+=`<label class="cb" style="display:flex;gap:8px;align-items:center;min-height:44px;margin-top:10px"><input type="checkbox" data-c="s3wAppr"${w.appr?' checked':''}> עברתי על הטיוטה ואני מאשר/ת אותה</label></div>`;
  return h};
@@ -88,7 +88,7 @@ const rr=()=>{if(U.edTouch)U.edTouch();else rerender()};
 ACT.s3wZ=el=>{const E=U.E,z=zs(E.map)[+el.dataset.i];if(!z)return;E.wiz=E.wiz||{};E.wiz.zi=+el.dataset.i;E.vw=Math.max(1200,Math.max(z.w,z.d)*3);E.vx=z.x+z.w/2-E.vw/2;E.vy=z.y+z.d/2-E.vw*.45;rerender()};
 const mark=(i,v,how)=>{const E=U.E,z=zs(E.map)[i];if(!z)return;z.ok=!!v;E.wiz=E.wiz||{};E.wiz.how=E.wiz.how||{};if(v)E.wiz.how[keyOf(z)]=how;else delete E.wiz.how[keyOf(z)];rr()};
 ACT.s3wOk=el=>mark(+el.dataset.i,true,'ok');
-ACT.s3wFix=el=>mark(+el.dataset.i,true,'fix');
+ACT.s3wZFix=el=>mark(+el.dataset.i,true,'fix');/* שם נפרד מ-s3wFix (שליחת תיקונים בכתב) – קודם התנגשו */
 ACT.s3wUn=el=>mark(+el.dataset.i,false);
 ACT.s3wDel=el=>{const E=U.E,L=zs(E.map),i=+el.dataset.i;if(!L[i])return;L.splice(i,1);if(E.wiz)E.wiz.zi=-1;toast('האזור הוסר מהרשימה (המפה לא השתנתה)');rr()};
 CHG.s3wAppr=el=>{const E=U.E;E.wiz=E.wiz||{};E.wiz.appr=!!el.checked;rr()};
