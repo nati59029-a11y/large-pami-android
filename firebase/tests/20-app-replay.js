@@ -116,6 +116,17 @@ const REPLAY = {
     const put = () => fsx(uid, '/shelf/bc', { method: 'PATCH', body: JSON.stringify({ fields: { data: sv(JSON.stringify({ '7290000000001': { n: 'מוצר', d: '', t: Date.now() } })), at: sv(Date.now()) } }) });
     return [await put(), await put()];
   } },
+  // shLnPut / shLnSync (#111): כיתוב קו העדכונים – אותו דפוס כמו M13/M14
+  M122: { run: async (uid) => {
+    const put = () => fsx(uid, '/shelf/line', { method: 'PATCH', body: JSON.stringify({ fields: { data: sv(JSON.stringify({ on: true, t: 'קו', p: '0' })), at: sv(Date.now()) } }) });
+    return [await put(), await put()];
+  } },
+  M123: { allowed: () => [200, 404], run: async (uid, env) => {
+    const missing = await fsx(uid, '/shelf/line');
+    await bypass(env, (db) => db.doc('shelf/line').set({ data: '{}', at: '1' }));
+    const present = await fsx(uid, '/shelf/line');
+    return [missing, present];
+  }, check: (role, res) => { if (res[1].status !== 403) assert.equal(res[1].status, 200); } },
   M14: { allowed: () => [200, 404], run: async (uid, env) => {
     const missing = await fsx(uid, '/shelf/bc');
     await bypass(env, (db) => db.doc('shelf/bc').set({ data: '{}', at: '1' }));
