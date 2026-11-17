@@ -384,6 +384,10 @@ ACT.s3wSkUndo=()=>{const k=W.sk;if(k.pend){k.pend=null;return rerender()}const u
 ACT.s3wSkClr=()=>ask('למחוק את כל השרטוט?',()=>{const k=W.sk;skPush();Object.assign(k,{rooms:[],cur:[],rows:[],rt:[],rk:[],ent:null,cash:null,pend:null,sel:null,gen:0});skDone()},'כן, מחקו');
 
 /* --- ציור השרטוט (canvas; צבעים מהטוקנים של הערכה) --- */
+/* השורה שהבחירה שלה פתוחה עכשיו ("שורה N – מה יש בה?") – מודגשת בשרטוט. -1 = אין */
+let hiRow=-1;
+document.addEventListener('focusin',e=>{const el=e.target;if(el&&el.dataset&&el.dataset.c==='s3wRk'){hiRow=+el.dataset.i;drawSk()}});
+document.addEventListener('focusout',e=>{const el=e.target;if(el&&el.dataset&&el.dataset.c==='s3wRk'&&hiRow>=0){hiRow=-1;drawSk()}});
 function drawSk(){const cv=document.getElementById('s3wSk');if(!cv)return;const F=frame(),k=W.sk;
  const pe=cv.parentElement,ps=pe&&getComputedStyle(pe),box=pe?Math.max(160,pe.clientWidth-parseFloat(ps.paddingLeft||0)-parseFloat(ps.paddingRight||0)-2):300;let cw=box,ch=cw*F.l/F.w;const mx=Math.max(220,Math.min(520,innerHeight*.6));if(ch>mx){ch=mx;cw=ch*F.w/F.l}
  cw=Math.floor(cw);ch=Math.floor(ch);const dpr=window.devicePixelRatio||1;cv.style.width=cw+'px';cv.style.height=ch+'px';cv.width=Math.round(cw*dpr);cv.height=Math.round(ch*dpr);
@@ -399,6 +403,11 @@ function drawSk(){const cv=document.getElementById('s3wSk');if(!cv)return;const 
   let sx=0,sy=0;for(let i=0;i<p.length;i+=2){sx+=p[i];sy+=p[i+1]}const n=p.length/2;c.fillStyle=ink;c.fillText(`${r+1}. ${RT_L[k.rt[r]]||''}`,P(sx/n),P(sy/n))});
  if(k.cur.length){poly(k.cur,0);c.setLineDash([6,4]);c.lineWidth=2;c.strokeStyle=acc;c.stroke();c.setLineDash([]);for(let i=0;i<k.cur.length;i+=2)dot(k.cur[i],k.cur[i+1],5,acc)}
  c.lineCap='round';k.rows.forEach((s,r)=>{c.beginPath();c.moveTo(P(s[0]),P(s[1]));c.lineTo(P(s[2]),P(s[3]));c.lineWidth=k.rk[r]==='gon'?7:4;c.strokeStyle=ink;c.globalAlpha=k.rk[r]==='fridge'?.55:1;c.stroke();c.globalAlpha=1});c.lineCap='butt';
+ /* מספר ליד כל שורה (כמו בשאלות למטה) + הדגשת השורה שהבחירה שלה פתוחה. תצוגה בלבד, לא נשמר */
+ if(hiRow>=0&&k.rows[hiRow]){const s=k.rows[hiRow];c.lineCap='round';c.beginPath();c.moveTo(P(s[0]),P(s[1]));c.lineTo(P(s[2]),P(s[3]));c.lineWidth=14;c.strokeStyle=acc;c.globalAlpha=.45;c.stroke();c.globalAlpha=1;c.lineWidth=k.rk[hiRow]==='gon'?7:4;c.strokeStyle=acc;c.stroke();c.lineCap='butt'}
+ c.font='700 11px system-ui,sans-serif';k.rows.forEach((s,r)=>{const x0=P(s[0]),y0=P(s[1]),x1=P(s[2]),y1=P(s[3]),L=Math.hypot(x1-x0,y1-y0)||1,o=13,bx=cl((x0+x1)/2-(y1-y0)/L*o,10,cw-10),by=cl((y0+y1)/2+(x1-x0)/L*o,10,ch-10),on=r===hiRow;
+  c.beginPath();c.arc(bx,by,9,0,7);c.fillStyle=on?acc:ink;c.fill();c.lineWidth=1.5;c.strokeStyle=col('bg');c.stroke();c.fillStyle=col('bg');c.fillText(String(r+1),bx,by+.5)});
+ c.font='600 12px system-ui,sans-serif';
  if(k.pend)dot(k.pend[0],k.pend[1],6,ink);
  const mark=(pt,t)=>{if(!pt)return;dot(pt[0],pt[1],9,acc);c.fillStyle=ink;const y=P(pt[1])>ch-20?P(pt[1])-16:P(pt[1])+16;c.fillText(t,cl(P(pt[0]),24,cw-24),y)};
  mark(k.ent,'כניסה');mark(k.cash,'קופה');
