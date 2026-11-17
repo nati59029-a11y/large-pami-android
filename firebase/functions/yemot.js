@@ -563,6 +563,8 @@ async function nightly(opts) {
   const out = {};
   try { out.promos = await runExpiry(opts); } catch (e) { logger.error('yemot: expiry failed', { reason: 'internal', name: e && e.name }); out.promos = { error: 'internal' }; }
   try { out.line = await require('./yemot-line').runLineExpiry(opts); } catch (e) { logger.error('yemot: line expiry failed', { reason: 'internal', name: e && e.name }); out.line = { error: 'internal' }; }
+  // לקוחות משוב חדשים ← רשימת התפוצה בימות (yemot-fblist.js, משימה 2026-11-17). רק הוספה; בלי טלפונים חדשים – בלי פנייה לימות.
+  try { out.fblist = await require('./yemot-fblist').runFbSync(Object.assign({}, opts, { by: 'nightly' })); } catch (e) { logger.error('yemot: fb sync failed', { reason: 'internal', name: e && e.name }); out.fblist = { error: 'internal' }; }
   // מטמון השמע של הקול המשוכפל: מחיקת קבצים ישנים (VOICE_CACHE_HOURS). לא נוגע בקו.
   if (!(opts && opts.skipCache)) out.voiceCache = await voice.cleanCache();
   // שמע שמור של הודעות בקו (line_audio/): מחיקה 8 ימים אחרי הירידה (משימה 2026-11-04, חוזה 5.5.8). לא נוגע בקו ולא ב-voice_cache/.

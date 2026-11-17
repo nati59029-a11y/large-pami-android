@@ -263,6 +263,9 @@ Object.assign(exports, require('./yemot-line'));
 // "ההודעות שבקו" (משימה 2026-11-04, שלב 5): getLineBoard, getLineAudio (עובד/מנהל), extendLineItem, restoreLineItem (מנהל)
 Object.assign(exports, require('./yemot-board'));
 
+// לקוחות משוב ← רשימת התפוצה "לקוחות משוב" בימות (משימה 2026-11-17, שלב 4): yemotFbList (מנהל)
+Object.assign(exports, require('./yemot-fblist'));
+
 // ריבוי עסקים (משימה 2026-11-05, שלב 5): פונקציות ניהול – createBusiness, inviteBusinessAdmin,
 // setBusinessStatus, setBusinessFeatures, setBusinessAdv, setYemotToken, logBusinessEntry, addStaff, setStaffActive (completeInvite הוסרה בשלב 6ג: כניסה ראשונה במייל המובנה של Firebase)
 Object.assign(exports, require('./business'));

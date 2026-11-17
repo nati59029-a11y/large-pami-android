@@ -6,11 +6,13 @@
 const http = require('node:http');
 
 // dirs: תיקייה → (שם קובץ → תוכן). state.files = שלוחה 2 (כמו קודם). '' = השורש.
-const state = { requests: [], files: new Map(), dirs: {}, modes: {} };
+// templates: רשימות תפוצה (משימה 2026-11-17): [{ templateId, description, entries: Map(טלפון → { name, blocked }) }]. tzl: רשימת צינתוקים → מערך טלפונים.
+const state = { requests: [], files: new Map(), dirs: {}, modes: {}, templates: [], tzl: {}, nextTpl: 1001 };
 const DEFAULT_DIRS = { '1': { '000.tts': 'מתכון ותיק' }, '3': { '000.tts': 'עדכון ותיק' }, '4': { '000.tts': 'שעות ותיקות' }, '': { 'M1000.wav': 'פתיחה מוקלטת', 'ext.ini': 'type=menu' } };
 function reset(files, dirs) {
   state.requests = [];
-  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok', text: 'ok' };
+  state.modes = { dir: 'ok', upload: 'ok', tzintuk: 'ok', delete: 'ok', download: 'ok', text: 'ok', templates: 'ok', create: 'ok', entries: 'ok', phonelist: 'ok', tzl: 'ok' };
+  state.templates = []; state.tzl = {}; state.nextTpl = 1001;
   state.files = new Map(Object.entries(files || { '000.tts': 'פתיח' }));
   state.dirs = { '2': state.files };
   for (const [d, f] of Object.entries(Object.assign({}, DEFAULT_DIRS, dirs || {}))) state.dirs[d] = new Map(Object.entries(f));
@@ -48,7 +50,8 @@ function start(port) {
       } else { try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch (e) { /* */ } }
       const auth = req.headers.authorization || '';
       state.requests.push({ cmd, auth, url: req.url, body, at: Date.now() });
-      const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', DownloadFile: 'download', GetTextFile: 'text' }[cmd];
+      const key = { GetIVR2Dir: 'dir', UploadTextFile: 'upload', UploadFile: 'upload', RunTzintuk: 'tzintuk', FileAction: 'delete', DownloadFile: 'download', GetTextFile: 'text',
+        GetTemplates: 'templates', CreateTemplate: 'create', GetTemplateEntries: 'entries', UploadPhoneList: 'phonelist', TzintukimListManagement: 'tzl' }[cmd];
       if (!key) return reply(res, 404, { responseStatus: 'ERROR', message: 'unknown command' });
       const mode = state.modes[key];
       if (mode === 'hang') return; // לא עונה אף פעם (לבדיקת פסק זמן)
@@ -101,6 +104,42 @@ function start(port) {
         const ok = body.action === 'delete' && w && state.dirs[w.dir].delete(w.name);
         if (mode === 'hangafter') return; // מוחק בפועל ולא עונה (פסק זמן אחרי שהפעולה בוצעה)
         return reply(res, 200, OK({ success: !!ok, action: body.action, reports: [{ what: body.what, success: !!ok }] }));
+      }
+      // ---- רשימות תפוצה (post/32033, 32037, 32039, 32043) וניהול רשימת צינתוקים (post/65034) ----
+      // mode 'hangafter' (CreateTemplate, UploadPhoneList): מבצע בפועל ולא עונה – פסק זמן אחרי שהפעולה בוצעה
+      if (cmd === 'GetTemplates') return reply(res, 200, OK({ templates: state.templates.map((t) => ({ templateId: t.templateId, description: t.description, entriesCount: t.entries.size, blockedEntriesCount: [...t.entries.values()].filter((e) => e.blocked).length, customerDefault: false })) }));
+      if (cmd === 'CreateTemplate') {
+        const t = { templateId: state.nextTpl++, description: String(body.description || ''), entries: new Map() };
+        state.templates.push(t);
+        if (mode === 'hangafter') return;
+        return reply(res, 200, OK({ templateId: t.templateId }));
+      }
+      const tplOf = () => state.templates.find((t) => t.templateId === Number(body.templateId));
+      if (cmd === 'GetTemplateEntries') {
+        const t = tplOf();
+        if (!t) return reply(res, 200, { responseStatus: 'ERROR', message: 'templateId invalid' });
+        return reply(res, 200, OK({ templateId: t.templateId, entries: [...t.entries.entries()].map(([phone, e], i) => ({ rowid: i + 1, index: i, phone, blocked: !!e.blocked, name: e.name || null, moreinfo: null })) }));
+      }
+      if (cmd === 'UploadPhoneList') {
+        const t = tplOf();
+        if (!t) return reply(res, 200, { responseStatus: 'ERROR', message: 'templateId invalid' });
+        const type = body.updateType || 'UPDATE';
+        if (type === 'NEW') t.entries.clear();
+        const rejectedRecords = []; let totalParsed = 0, totalInserted = 0, totalUpdated = 0, totalRemoved = 0;
+        String(body.data || '').split('\n').filter(Boolean).forEach((line, i) => {
+          const [phone, name] = line.split(String(body.delimiter || ','));
+          totalParsed++;
+          if (!/^0\d{8,9}$/.test(phone) || (state.invalidPhones || []).includes(phone)) { rejectedRecords.push({ phone, name, moreinfo: null, blocked: false, errorState: 'INVALID', originalRowNumber: i + 1 }); return; }
+          if (type === 'REMOVE') { if (t.entries.delete(phone)) totalRemoved++; return; }
+          if (t.entries.has(phone)) { t.entries.get(phone).name = name || null; totalUpdated++; } else { t.entries.set(phone, { name: name || null, blocked: false }); totalInserted++; }
+        });
+        if (mode === 'hangafter') return;
+        return reply(res, 200, OK({ message: 'ok', templateId: t.templateId, totalParsed, rejectedRecords, totalInserted, totalUpdated, totalRemoved }));
+      }
+      if (cmd === 'TzintukimListManagement') {
+        if (body.action !== 'getlistEnteres') return reply(res, 200, { responseStatus: 'ERROR', message: 'action not supported in mock' });
+        const list = state.tzl[String(body.TzintukimList)] || [];
+        return reply(res, 200, OK({ listName: String(body.TzintukimList), countSubscribers: list.length, enteres: list.map((phone) => ({ phone, name: '' })) }));
       }
       // RunTzintuk
       return reply(res, 200, OK({ callerId: '0000000000', callsCount: 3, bilingPerCall: 0, biling: 0, errors: {}, verifyCode: '' }));
