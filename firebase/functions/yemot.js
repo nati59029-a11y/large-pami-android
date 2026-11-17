@@ -171,7 +171,7 @@ async function lineNumbers(ctx, ext) {
 const israelMonth = () => israelDay().slice(0, 7);
 const FB_TZ_PART = 500;
 const NO_CONNECT = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
-async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already) {
+async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already, forText) {
   const { normPhone } = require('./yemot-fblist')._core;
   const sent = [...new Set((Array.isArray(already) ? already : []).map(normPhone).filter(Boolean))]; // רשומה ישנה בלי השדה – ריק
   const done = new Set(sent);
@@ -190,7 +190,7 @@ async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already) {
     if (phones.length > cfg.fbTzMax) { out.st = 'capped'; return out; }
     const todo = phones.filter((p) => !done.has(p));
     if (!todo.length) { out.st = 'sent'; return out; } // כולם כבר קיבלו במבצע הזה
-    await promoRef.update({ fbTz: 'pending', fbTzAt: new Date().toISOString() });
+    await promoRef.update({ fbTz: 'pending', fbTzAt: new Date().toISOString(), fbTzText: forText == null ? null : forText });
     for (let i = 0; i < todo.length; i += FB_TZ_PART) {
       const part = todo.slice(i, i + FB_TZ_PART);
       called = true;
@@ -200,6 +200,7 @@ async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already) {
         partOk = e instanceof YemotError && !e.sent && (e.code !== 'network' || NO_CONNECT.has(e.netCode));
         throw e;
       }
+      await testFault(db, 'fb-after-part'); // בדיקות בלבד (אמולטור): קריסה אחרי שקבוצה נשלחה ולפני שנרשמה
       out.count += part.length;
       sent.push(...part);
       try {
@@ -212,6 +213,7 @@ async function fbTzintuk(db, ctx, cfg, fbs, promoRef, already) {
     }
     if (out.st !== 'partial') out.st = 'sent';
   } catch (e) {
+    if (e && e.testCrash) throw e; // בדיקות בלבד: קריסה מדומה עוברת הלאה בלי טיפול
     // ודאי: לא יצאה קריאה (לפני השליחה, או קבוצה שבוודאות לא יצאה). אחרת – לא ודאי.
     // כשעוד לא נשלח לאף אחד במבצע – הכלל הקודם בדיוק (YemotError בלי sent). כשכבר נשלח לחלק – הכלל המחמיר (partOk).
     const certain = !called || (sent.length ? partOk : (e instanceof YemotError && !e.sent));
@@ -306,7 +308,7 @@ function effectiveUntil(x) {
 async function testFault(db, at) {
   if (process.env.FUNCTIONS_EMULATOR !== 'true') return;
   const f = await db.doc('yemot_test/fault').get();
-  if (f.exists && f.get('at') === at) throw new Error('test fault ' + at);
+  if (f.exists && f.get('at') === at) throw Object.assign(new Error('test fault ' + at), f.get('crash') === true ? { testCrash: true } : {});
 }
 
 // רשומות ראשונות במילון (seed חד-פעמי, החלטת המשתמש 02.11): שם החנות תמיד "Large פעמי" בקול המשוכפל, בשלוש צורות הגרש.
@@ -464,10 +466,14 @@ async function sendPromo(request, key, base, pre) {
     return { kind: 'work', x, onLine, upload, doTz, fbRetry, usage, replacing: upload && onLine && ACTIVE.includes(x.status) };
   });
 
+  // הצינתוק ללקוחות משוב שייך לטקסט: נשמר כל עוד הטקסט לא השתנה (גם בהעלאה מחדש – מבצע שירד, החלפת קול, מבנה שלוחות, מילון).
+  // fbTzText = הטקסט שעליו נשלח; ברשומה ישנה בלי השדה – הטקסט שברשומה. הקלטה – מפתח לבקשה אחת, תמיד אותו תוכן.
+  const keepFb = !!plan.x && (isRec || (plan.x.fbTzText != null ? plan.x.fbTzText === v.text : plan.x.text === v.text));
   if (plan.kind === 'duplicate' || plan.kind === 'none') {
     const d = plan.kind === 'none' ? Object.assign({}, plan.x, { until: v.until }) : plan.x;
     const msg = plan.kind === 'duplicate' ? 'המבצע הזה כבר נשלח.'
-      : `המבצע כבר בקו עם אותו נוסח${d.tzintuk === 'sent' && v.withTzintuk ? ', והצינתוק כבר נשלח' : ''}.${plan.untilChanged ? ` תאריך ההורדה עודכן: יושמע עד ${heDate(v.until)}.` : ''}`;
+      : `המבצע כבר בקו עם אותו נוסח${d.tzintuk === 'sent' && v.withTzintuk ? ', והצינתוק כבר נשלח' : ''}.${plan.untilChanged ? ` תאריך ההורדה עודכן: יושמע עד ${heDate(v.until)}.` : ''}`
+        + (plan.kind === 'none' && fbOn && v.withTzintuk && ['pending', 'uncertain'].includes(d.fbTz) ? ' לא ידוע אם הצינתוק ללקוחות המשוב נשלח, ולכן הוא לא נשלח שוב – בדקו בימות.' : '');
     return {
       ok: true, id: v.promoKey, promoKey: v.promoKey, requestId: v.requestId, action: 'none', file: d.file, until: d.until,
       withTzintuk: v.withTzintuk, tzintuk: plan.kind === 'none' && !v.withTzintuk ? 'skipped' : d.tzintuk,
@@ -547,7 +553,7 @@ async function sendPromo(request, key, base, pre) {
       // (תיקון) האיפוס של שדות המשוב היה ארגומנט שני ל-update (תנאי מוקדם, לא נתונים) ולכן לא נכתב – עכשיו חלק מהנתונים
       await promoRef.update(Object.assign({ status: 'live', text: v.text, spoken, until: v.until, file, path, pending: null, uncertain: false, error: null, removedAt: null, tzintuk: 'skipped', updatedAt: stamp(),
         kind: isRec ? 'audio' : null, audioPath: null, audioMime: null, audioBytes: null, audioSavedAt: null, audioError: null },
-        plan.x && (plan.x.fbTz != null || plan.x.fbTzSent != null) ? { fbTz: null, fbTzCount: null, fbTzSent: null, fbTzTotal: null } : {})); // גם הצינתוק ללקוחות משוב שייך לנוסח הקודם
+        !keepFb && plan.x && (plan.x.fbTz != null || plan.x.fbTzSent != null) ? { fbTz: null, fbTzCount: null, fbTzSent: null, fbTzTotal: null, fbTzText: null } : {})); // הצינתוק ללקוחות משוב שייך לנוסח (הטקסט) הקודם – רק אם הטקסט השתנה
       // עותק של השמע שעלה (הקלטה / קול משוכפל) ב-line_audio/promos/<promoKey>. כשל = אזהרה בלבד (משימה 2026-11-04).
       const a = voice.savedAudioOf(rendered);
       if (a) {
@@ -573,6 +579,8 @@ async function sendPromo(request, key, base, pre) {
       try {
         await yemotCall(ctx, 'RunTzintuk', { phones: 'tzl:' + cfg.list });
         tz = 'sent'; tzSent = true;
+        // נרשם מיד (לפני חלק המשוב): קריסה בהמשך לא תגרום לשליחה חוזרת של הצינתוק הרגיל
+        try { await promoRef.update({ tzintuk: 'sent', tzintukAt: stamp() }); } catch (e2) { logger.warn('yemot: tz mark failed', { reason: 'tz-mark-failed', requestId: v.requestId }); }
       } catch (e) {
         tz = 'failed';
         if (usageDay) await refundUsage(db, who.uid, usageDay);
@@ -580,14 +588,16 @@ async function sendPromo(request, key, base, pre) {
       }
     }
     // 3א. לקוחות משוב: רק אחרי צינתוק רגיל שנשלח עכשיו, או השלמה (fbRetry). כשל כאן לא משנה את tzintuk ולא זורק.
+    // מצב קודם 'pending'/'uncertain' של אותו טקסט (קריסה או כשל לא ודאי) – לא שולחים שוב ללקוחות משוב בשום מסלול; המנהל בודק בימות.
     let fb = null;
-    if (fbOn && (tzSent || plan.fbRetry)) {
-      // מי שכבר קיבל צינתוק משוב במבצע הזה (fbTzSent) לא יקבל שוב. אחרי העלאה של נוסח חדש הרשומה כבר אופסה (למעלה).
-      fb = await fbTzintuk(db, ctx, cfg, fbs, promoRef, plan.upload || !plan.x ? [] : plan.x.fbTzSent);
+    const fbUnsure = fbOn && (tzSent || plan.fbRetry) && keepFb && ['pending', 'uncertain'].includes(plan.x.fbTz);
+    if (fbOn && (tzSent || plan.fbRetry) && !fbUnsure) {
+      // מי שכבר קיבל צינתוק משוב על הטקסט הזה (fbTzSent) לא יקבל שוב – גם בהעלאה מחדש של אותו טקסט. טקסט חדש – הרשומה כבר אופסה (למעלה).
+      fb = await fbTzintuk(db, ctx, cfg, fbs, promoRef, keepFb ? plan.x.fbTzSent : [], isRec ? null : v.text);
       if (fb.st === 'capped') v.warnings.push('fb-tz-capped');
     }
     await finish(tz === 'failed' || (fb && (fb.st === 'failed' || fb.st === 'partial')) ? 'partial' : 'done', Object.assign({ tzintuk: tz }, tzSent ? { tzintukAt: stamp() } : {},
-      fb ? Object.assign({ fbTz: fb.st, fbTzCount: fb.sent.length, fbTzTotal: fb.total, fbTzAt: stamp() }, fb.sent.length ? { fbTzSent: fb.sent } : {}) : {}));
+      fb ? Object.assign({ fbTz: fb.st, fbTzCount: fb.sent.length, fbTzTotal: fb.total, fbTzAt: stamp(), fbTzText: isRec ? null : v.text }, fb.sent.length ? { fbTzSent: fb.sent } : {}) : {}));
 
     const tToday = await todayView();
     const end = `המבצע יושמע בקו עד ${heDate(v.until)}.`;
@@ -596,6 +606,7 @@ async function sendPromo(request, key, base, pre) {
       : tz === 'sent' ? (action === 'tzintuk-only' ? ', ועכשיו נשלח צינתוק לנרשמים.' : ' ונשלח צינתוק לנרשמים.')
       : tz === 'failed' ? `, אבל הצינתוק לנרשמים לא נשלח${isEmp ? ' (ולא נספר במכסה היומית)' : ''}. אפשר לנסות שוב – הקובץ לא יועלה פעמיים.`
         : (v.withTzintuk ? '.' : ' בלי צינתוק.');
+    const fbUnsurePart = fbUnsure ? ' לא ידוע אם הצינתוק הקודם ללקוחות המשוב נשלח, ולכן הוא לא נשלח שוב – בדקו בימות.' : '';
     const fbBefore = fb ? fb.sent.length - fb.count : 0; // נשלחו כבר בשליחה קודמת של המבצע
     const fbPart = !fb ? '' : fb.st === 'sent' ? (fbBefore ? (fb.count ? ` עכשיו קיבלו צינתוק עוד ${fb.count} לקוחות משוב (בסך הכול ${fb.sent.length}).` : ' כל לקוחות המשוב כבר קיבלו צינתוק במבצע הזה.') : ` גם ${fb.count} לקוחות משוב קיבלו צינתוק.`)
       : fb.st === 'capped' ? ` לקוחות המשוב לא קיבלו צינתוק: ${fb.total} מספרים, יותר מהמכסה (${cfg.fbTzMax}).`
@@ -605,11 +616,12 @@ async function sendPromo(request, key, base, pre) {
               : ' לא ידוע אם הצינתוק ללקוחות המשוב נשלח – בדקו בימות לפני שליחה חוזרת.') : '';
     return Object.assign({
       ok: true, id: v.promoKey, promoKey: v.promoKey, requestId: v.requestId, action, file, until: v.until, withTzintuk: v.withTzintuk, tzintuk: tz,
-      role: who.role, usage: isEmp && plan.doTz ? tToday : null, tzintukToday: tToday, duplicate: false, warnings: v.warnings, message: `${head}${tzPart}${fbPart} ${end}`,
+      role: who.role, usage: isEmp && plan.doTz ? tToday : null, tzintukToday: tToday, duplicate: false, warnings: v.warnings, message: `${head}${tzPart}${fbPart}${fbUnsurePart} ${end}`,
       engine: rendered ? rendered.engine : null, kind: isRec ? 'audio' : 'text', audioSaved,
     }, fb ? { fbTz: fb.st, fbTzCount: fb.sent.length, fbTzTotal: fb.total } : {});
   } catch (e) {
     if (e instanceof HttpsError) throw e;
+    if (e && e.testCrash) throw e; // בדיקות בלבד: מדמה קריסה אמיתית – בלי ניקוי ובלי שחרור נעילה
     // חריגה פנימית (לא מימות): מחזירים מכסה שלא נוצלה, משחררים נעילה, ומסמנים "לא ודאי" כדי שההורדה תנקה את הקובץ אם הוא בקו
     try {
       if (usageDay && !tzSent) await refundUsage(db, who.uid, usageDay);
