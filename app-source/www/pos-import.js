@@ -133,7 +133,7 @@ if(typeof module!=='undefined'&&module.exports)module.exports=Core;
 if(typeof ACT==='undefined'||typeof V==='undefined'||typeof document==='undefined')return;
 const fnCall=(n,d)=>{d=d&&typeof d==='object'?d:{};if(SY&&SY.sa&&SY.bizId&&!('bizId'in d))d=Object.assign({bizId:SY.bizId},d);return window.fnCall(n,d)};
 const mgr=()=>{try{return isA()||!!(SY&&SY.sa)}catch(e){return false}};
-const posOn=()=>{try{const b=SY&&SY.biz;return !!(b&&b.features&&b.features.pos===true)&&bzF('pos')}catch(e){return false}};
+const posOn=()=>{try{return bzF('pos')&&bzB()&&!SY.mg}catch(e){return false}}; // כמו pos-base.js (שלב 0): רק במבנה החדש
 const on=()=>mgr()&&posOn()&&bzF('orders')&&wp('ord');
 const err=e=>toast(e&&e.message||'הפעולה נכשלה');
 const jid=()=>{const a='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',r=new Uint8Array(20);crypto.getRandomValues(r);return[...r].map(x=>a[x%a.length]).join('')};

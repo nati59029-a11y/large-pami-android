@@ -46,6 +46,7 @@ const MAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
 async function who(request) {
   const w = await ORD.who(request);
   if (w.role !== 'manager') throw deny('manager-only', 'ייבוא מכספיט – מנהל בלבד');
+  if (!w.prefix) throw pre('legacy', 'הקופה זמינה רק אחרי מעבר העסק למבנה החדש'); // כמו pos.js (שלב 0)
   T.requireFeature(w.biz, 'pos');
   return w;
 }

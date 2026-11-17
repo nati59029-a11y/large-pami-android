@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { assertFails } = require('@firebase/rules-unit-testing');
+const { assertFails, assertSucceeds } = require('@firebase/rules-unit-testing');
 const H = require('./helpers');
 
 const A = 'biz-pos', B = 'biz-nopos';
@@ -167,9 +167,12 @@ describe('קופה – ייבוא מכספיט (pos-import.js)', () => {
     assert.equal((await adm().collection(P('prod')).where('imp', '==', job).where('on', '==', true).get()).size, 1);
   });
 
-  it('אין גישה ישירה ל-posimp מהאפליקציה (קריאה וכתיבה)', async () => {
+  it('posimp מהאפליקציה: כתיבה חסומה לכולם; קריאה – רק מנהל (כללי שלב 0); עובד – לא', async () => {
     const db = env.authenticatedContext(MGR, { email: MGR + '@x.invalid' }).firestore();
     await assertFails(db.doc(P('posimp/AAAAAAAAAAAAAAAAAAAA')).set({ kind: 'prod' }));
-    await assertFails(db.doc(P('posimp/AAAAAAAAAAAAAAAAAAAA')).get());
+    await assertSucceeds(db.doc(P('posimp/AAAAAAAAAAAAAAAAAAAA')).get());
+    await assertFails(db.doc(P('posimp/AAAAAAAAAAAAAAAAAAAA/c/0')).get());
+    const de = env.authenticatedContext(E1, { email: E1 + '@x.invalid' }).firestore();
+    await assertFails(de.doc(P('posimp/AAAAAAAAAAAAAAAAAAAA')).get());
   });
 });
