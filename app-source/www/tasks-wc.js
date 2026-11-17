@@ -108,19 +108,21 @@ W.wk=()=>on()&&!fbAdmin();
 const MI={};
 function miImg(id){if(MI[id])return MI[id].img;MI[id]={img:null};try{Promise.resolve(fsx('/tasks/'+id+'/p/m1')).then(d=>{const v=d&&gv(d,'img');if(v&&imgOk(v)){MI[id].img=v;tkRe()}}).catch(()=>{})}catch(e){}return null}
 W.wkTags=(t,lt)=>{let s='';if(lt)s+='<span class="tag t4">באיחור</span> ';if(t.pri==='h')s+=`<span class="tag t4">${icd('warn')} דחוף</span> `;
- if(tkCNew(t)||tkUnr(t))s+=`<button type="button" class="chip" data-a="tkRead" data-id="${esc(t.id)}" style="min-height:28px;padding:0 10px;font-size:.78rem">✓ סמן כנקרא</button> `;return s};
+return s};
 W.wkDet=(t,tg)=>{const np=t.np||0,sa=rvNew()&&tkNew(t)&&t.st==='open'&&t.ow===SY.uid&&!(t.sa>0)?`<button class="btn g" data-a="tkwSa" data-id="${esc(t.id)}" style="margin-top:8px">▶ התחלתי</button>`:'';
- tg=String(tg||'').replace(/<button type="button" class="chip"[^>]*data-a="tkRead"[\s\S]*?<\/button>/,'').trim();
+ tg=String(tg||'').trim();
  return `<details style="margin:8px 0 0"><summary style="cursor:pointer;color:var(--mut)">פרטים</summary><div style="margin-top:6px">${tg?`<div style="margin:0 0 6px">${tg}</div>`:''}<p class="note" style="margin:0">נכתבה: ${tkDT(t.cr)} · ${t.role==='a'?'מנהל':esc(t.by||'עובד')}${np>0?`<br>תמונות נדרשות לסגירה: ${np} (הועלו ${t.wp||0})`:''}</p>${sa}</div></details>`};
 function nowCard(t){const did=esc(t.id),me=SY.uid,np=t.np||0,wp=t.wp||0,nw=tkNew(t),lt=tkIsLate(t),dl=tkDl(t),cn=tkCNew(t),cc=TKC[t.id]&&!cn?TKC[t.id].n:null;
- const cam=(c,tx,cap)=>`<label class="btn w" style="cursor:pointer;min-height:56px;font-size:1.05rem">${tx}<input type="file" accept="image/*" ${cap?'capture="environment" ':''}data-c="${c}" data-id="${did}" hidden></label>`;
- const go=(a,tx)=>`<button class="btn w" data-a="${a}" data-id="${did}" style="min-height:56px;font-size:1.05rem">${tx}</button>`;
+ const PS='min-height:52px;font-size:1.05rem;font-weight:700;background:var(--acc);color:var(--onacc);border-color:var(--acc);opacity:1',LK='background:none;border:0;padding:6px 4px;min-height:36px;color:var(--mut);font:inherit;font-size:.9rem;cursor:pointer';
+ const lnk=(a,tx,x)=>`<button type="button" data-a="${a}" data-id="${did}" style="${LK}${x||''}">${tx}</button>`,glr=c=>`<label style="${LK}">${icd('img')} מהגלריה<input type="file" accept="image/*" data-c="${c}" data-id="${did}" hidden></label>`;
+ const cam=(c,tx,cap)=>`<label class="btn w" style="cursor:pointer;${PS}">${tx}<input type="file" accept="image/*" ${cap?'capture="environment" ':''}data-c="${c}" data-id="${did}" hidden></label>`;
+ const go=(a,tx)=>`<button class="btn w" data-a="${a}" data-id="${did}" style="${PS}">${tx}</button>`;
  let pb='',nt='',ex='';
- if(!nw){if(t.pr==='1'){pb=cam('tkimg','📷 צלם וסיים',1);nt='נדרשת תמונה אחת';ex=`<label class="chip" style="cursor:pointer">${icd('img')} מהגלריה<input type="file" accept="image/*" data-c="tkimg" data-id="${did}" hidden></label>`}else pb=go('tkDone','✓ בוצע')}
+ if(!nw){if(t.pr==='1'){pb=cam('tkimg',`${icd('cam')} צלם וסיים`,1);nt='נדרשת תמונה אחת';ex=glr('tkimg')}else pb=go('tkDone','✓ בוצע')}
  else if(!t.ow){if((t.to||[]).length>1||np>0||t.pr==='1')pb=go('tkTake','✓ אני לוקח את זה');else pb=go('tkwQDone','✓ בוצע')}
  else if(t.ow===me){
-  if(np>0){if(wp<np){pb=cam('tkwimg',`📷 צלם תמונה (${wp+1}/${np})`,1);nt=np===1?'נדרשת תמונה אחת':`נדרשות ${np} תמונות (הועלו ${wp})`;ex=`<label class="chip" style="cursor:pointer">${icd('img')} מהגלריה<input type="file" accept="image/*" data-c="tkwimg" data-id="${did}" hidden></label>`}else pb=go('tkDone',`✓ סיום (${Math.min(wp,np)}/${np})`)}
-  else if(t.pr==='1'){pb=cam('tkimg','📷 צלם וסיים',1);nt='נדרשת תמונה אחת';ex=`<label class="chip" style="cursor:pointer">${icd('img')} מהגלריה<input type="file" accept="image/*" data-c="tkimg" data-id="${did}" hidden></label>`}
+  if(np>0){if(wp<np){pb=cam('tkwimg',`${icd('cam')} צלם תמונה (${wp+1}/${np})`,1);nt=np===1?'נדרשת תמונה אחת':`נדרשות ${np} תמונות (הועלו ${wp})`;ex=glr('tkwimg')}else pb=go('tkDone','✓ בוצע')}
+  else if(t.pr==='1'){pb=cam('tkimg',`${icd('cam')} צלם וסיים`,1);nt='נדרשת תמונה אחת';ex=glr('tkimg')}
   else pb=go('tkDone','✓ בוצע')}
  else nt='בטיפול של '+esc(t.owN||'עובד אחר');
  const mi=t.mi>0?miImg(t.id):null,tg=W.wkTags(t,lt);
@@ -128,7 +130,7 @@ function nowCard(t){const did=esc(t.id),me=SY.uid,np=t.np||0,wp=t.wp||0,nw=tkNew
   ${mi?`<img src="${esc(mi)}" alt="תמונת הוראות מהמנהל" data-a="tkPics" data-id="${did}" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin:8px 0 0;display:block">`:''}${W.ckH(t)}
   <p class="note" style="margin:8px 0">יעד: ${dl<Infinity?esc(tkDT(dl)):'בלי יעד'}</p>${t.note?`<p class="note" style="color:var(--bad);margin:0 0 8px;white-space:pre-wrap">${t.rt==='1'?'המנהל החזיר את המשימה':'התמונה לא אושרה'}: ${esc(t.note)}</p>`:''}
   ${pb}${nt?`<p class="note" style="margin:6px 0 0;text-align:center">${nt}</p>`:''}
-  <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px;justify-content:center">${ex}<button class="chip" data-a="tkCm" data-id="${did}" style="${cn?'border-color:var(--acc);color:var(--acc)':''}">${icd('chat')} תגובה${cc!=null?' ('+cc+')':''}</button>${t.mi>0||wp>0?`<button class="chip" data-a="tkPics" data-id="${did}">${icd('img')} תמונות</button>`:''}${ndNew(t)?`<button class="chip" data-a="tkwNdSeen" data-id="${did}">ראיתי את התזכורת</button>`:''}</div>
+  <div style="margin-top:8px;text-align:center">${[ex,(cn||tkUnr(t))?lnk('tkRead','✓ סמן כנקרא'):'',lnk('tkCm',`${icd('chat')} תגובה${cc!=null?' ('+cc+')':''}`,cn?';color:var(--acc)':''),t.mi>0||wp>0?lnk('tkPics',`${icd('img')} תמונות`):'',ndNew(t)?lnk('tkwNdSeen','ראיתי את התזכורת'):''].filter(Boolean).join('<span style="color:var(--mut)"> · </span>')}</div>
   ${W.wkDet(t,W.tag(t))}</div>`}
 ACT.tkwQDone=async el=>{const t=tkGet(el.dataset.id);if(!t)return;
  if(tkNew(t)&&!t.ow){el.disabled=true;try{await tkPatch(t.id,{ow:SY.uid,owN:fbBy(),clt:Date.now()},t.ut)}catch(e){try{await tkLoad()}catch(e2){}const u=tkGet(t.id);el.disabled=false;if(!(u&&u.ow===SY.uid)){tkRe();return toast(u&&u.ow?'המשימה כבר בטיפול של '+(u.owN||'עובד אחר'):tkErr(e))}}}
